@@ -57,7 +57,7 @@ struct usnic_fwd_dev {
 	char				mac[ETH_ALEN];
 	unsigned int			mtu;
 	__be32				inaddr;
-	char				name[IFNAMSIZ+1];
+	char				name[IFNAMSIZ];
 };
 
 struct usnic_fwd_flow {
@@ -74,7 +74,7 @@ struct usnic_filter_action {
 struct usnic_fwd_dev *usnic_fwd_dev_alloc(struct pci_dev *pdev);
 void usnic_fwd_dev_free(struct usnic_fwd_dev *ufdev);
 
-void usnic_fwd_set_mac(struct usnic_fwd_dev *ufdev, char mac[ETH_ALEN]);
+void usnic_fwd_set_mac(struct usnic_fwd_dev *ufdev, const char mac[ETH_ALEN]);
 void usnic_fwd_add_ipaddr(struct usnic_fwd_dev *ufdev, __be32 inaddr);
 void usnic_fwd_del_ipaddr(struct usnic_fwd_dev *ufdev);
 void usnic_fwd_carrier_up(struct usnic_fwd_dev *ufdev);

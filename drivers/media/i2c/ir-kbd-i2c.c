@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  * keyboard input driver for i2c IR remote controls
@@ -32,20 +33,9 @@
  *	Mark Weaver <mark@npsl.co.uk>
  *	Jarod Wilson <jarod@redhat.com>
  *	Copyright (C) 2011 Andy Walls <awalls@md.metrocast.net>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
  */
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -248,6 +238,43 @@ static int get_key_knc1(struct IR_i2c *ir, enum rc_proto *protocol,
 	return 1;
 }
 
+static int get_key_geniatech(struct IR_i2c *ir, enum rc_proto *protocol,
+			     u32 *scancode, u8 *toggle)
+{
+	int i, rc;
+	unsigned char b;
+
+	/* poll IR chip */
+	for (i = 0; i < 4; i++) {
+		rc = i2c_master_recv(ir->c, &b, 1);
+		if (rc == 1)
+			break;
+		msleep(20);
+	}
+	if (rc != 1) {
+		dev_dbg(&ir->rc->dev, "read error\n");
+		if (rc < 0)
+			return rc;
+		return -EIO;
+	}
+
+	/* don't repeat the key */
+	if (ir->old == b)
+		return 0;
+	ir->old = b;
+
+	/* decode to RC5 */
+	b &= 0x7f;
+	b = (b - 1) / 2;
+
+	dev_dbg(&ir->rc->dev, "key %02x\n", b);
+
+	*protocol = RC_PROTO_RC5;
+	*scancode = b;
+	*toggle = ir->old >> 7;
+	return 1;
+}
+
 static int get_key_avermedia_cardbus(struct IR_i2c *ir, enum rc_proto *protocol,
 				     u32 *scancode, u8 *toggle)
 {
@@ -294,9 +321,9 @@ static int get_key_avermedia_cardbus(struct IR_i2c *ir, enum rc_proto *protocol,
 
 static int ir_key_poll(struct IR_i2c *ir)
 {
-	enum rc_proto protocol;
-	u32 scancode;
-	u8 toggle;
+	enum rc_proto protocol = 0;
+	u32 scancode = 0;
+	u8 toggle = 0;
 	int rc;
 
 	dev_dbg(&ir->rc->dev, "%s\n", __func__);
@@ -328,6 +355,7 @@ static void ir_work(struct work_struct *work)
 		mutex_unlock(&ir->lock);
 		if (rc == -ENODEV) {
 			rc_unregister_device(ir->rc);
+			rc_free_device(ir->rc);
 			ir->rc = NULL;
 			return;
 		}
@@ -688,8 +716,8 @@ static int zilog_tx(struct rc_dev *rcdev, unsigned int *txbuf,
 		goto out_unlock;
 	}
 
-	i = i2c_master_recv(ir->tx_c, buf, 1);
-	if (i != 1) {
+	ret = i2c_master_recv(ir->tx_c, buf, 1);
+	if (ret != 1) {
 		dev_err(&ir->rc->dev, "i2c_master_recv failed with %d\n", ret);
 		ret = -EIO;
 		goto out_unlock;
@@ -730,8 +758,9 @@ static int zilog_tx_duty_cycle(struct rc_dev *dev, u32 duty_cycle)
 	return 0;
 }
 
-static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int ir_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	char *ir_codes = NULL;
 	const char *name = NULL;
 	u64 rc_proto = RC_PROTO_BIT_UNKNOWN;
@@ -739,6 +768,7 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	struct rc_dev *rc = NULL;
 	struct i2c_adapter *adap = client->adapter;
 	unsigned short addr = client->addr;
+	bool probe_tx = (id->driver_data & FLAG_TX) != 0;
 	int err;
 
 	if ((id->driver_data & FLAG_HDPVR) && !enable_hdpvr) {
@@ -775,6 +805,13 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		rc_proto    = RC_PROTO_BIT_OTHER;
 		ir_codes    = RC_MAP_EMPTY;
 		break;
+	case 0x33:
+		name        = "Geniatech";
+		ir->get_key = get_key_geniatech;
+		rc_proto    = RC_PROTO_BIT_RC5;
+		ir_codes    = RC_MAP_TOTAL_MEDIA_IN_HAND_02;
+		ir->old     = 0xfc;
+		break;
 	case 0x6b:
 		name        = "FusionHDTV";
 		ir->get_key = get_key_fusionhdtv;
@@ -800,6 +837,8 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		rc_proto    = RC_PROTO_BIT_RC5 | RC_PROTO_BIT_RC6_MCE |
 							RC_PROTO_BIT_RC6_6A_32;
 		ir_codes    = RC_MAP_HAUPPAUGE;
+		ir->polling_interval = 125;
+		probe_tx = true;
 		break;
 	}
 
@@ -831,6 +870,9 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 			break;
 		case IR_KBD_GET_KEY_KNC1:
 			ir->get_key = get_key_knc1;
+			break;
+		case IR_KBD_GET_KEY_GENIATECH:
+			ir->get_key = get_key_geniatech;
 			break;
 		case IR_KBD_GET_KEY_FUSIONHDTV:
 			ir->get_key = get_key_fusionhdtv;
@@ -892,10 +934,12 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	INIT_DELAYED_WORK(&ir->work, ir_work);
 
-	if (id->driver_data & FLAG_TX) {
-		ir->tx_c = i2c_new_dummy(client->adapter, 0x70);
-		if (!ir->tx_c) {
+	if (probe_tx) {
+		ir->tx_c = i2c_new_dummy_device(client->adapter, 0x70);
+		if (IS_ERR(ir->tx_c)) {
 			dev_err(&client->dev, "failed to setup tx i2c address");
+			err = PTR_ERR(ir->tx_c);
+			goto err_out_free;
 		} else if (!zilog_init(ir)) {
 			ir->carrier = 38000;
 			ir->duty_cycle = 40;
@@ -912,7 +956,7 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	return 0;
 
  err_out_free:
-	if (ir->tx_c)
+	if (!IS_ERR(ir->tx_c))
 		i2c_unregister_device(ir->tx_c);
 
 	/* Only frees rc if it were allocated internally */
@@ -920,29 +964,24 @@ static int ir_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	return err;
 }
 
-static int ir_remove(struct i2c_client *client)
+static void ir_remove(struct i2c_client *client)
 {
 	struct IR_i2c *ir = i2c_get_clientdata(client);
 
-	/* kill outstanding polls */
 	cancel_delayed_work_sync(&ir->work);
 
-	if (ir->tx_c)
-		i2c_unregister_device(ir->tx_c);
+	i2c_unregister_device(ir->tx_c);
 
-	/* unregister device */
 	rc_unregister_device(ir->rc);
-
-	/* free memory */
-	return 0;
+	rc_free_device(ir->rc);
 }
 
 static const struct i2c_device_id ir_kbd_id[] = {
 	/* Generic entry for any IR receiver */
-	{ "ir_video", 0 },
+	{ .name = "ir_video", .driver_data = 0 },
 	/* IR device specific entries should be added here */
-	{ "ir_z8f0811_haup", FLAG_TX },
-	{ "ir_z8f0811_hdpvr", FLAG_TX | FLAG_HDPVR },
+	{ .name = "ir_z8f0811_haup", .driver_data = FLAG_TX },
+	{ .name = "ir_z8f0811_hdpvr", .driver_data = FLAG_TX | FLAG_HDPVR },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ir_kbd_id);

@@ -35,19 +35,20 @@
  * actually fairly low.
  */
 
-#include "uapi/drm/vc4_drm.h"
+#include <drm/drm_print.h>
+
 #include "vc4_drv.h"
 #include "vc4_packet.h"
 
 struct vc4_rcl_setup {
-	struct drm_gem_cma_object *color_read;
-	struct drm_gem_cma_object *color_write;
-	struct drm_gem_cma_object *zs_read;
-	struct drm_gem_cma_object *zs_write;
-	struct drm_gem_cma_object *msaa_color_write;
-	struct drm_gem_cma_object *msaa_zs_write;
+	struct drm_gem_dma_object *color_read;
+	struct drm_gem_dma_object *color_write;
+	struct drm_gem_dma_object *zs_read;
+	struct drm_gem_dma_object *zs_write;
+	struct drm_gem_dma_object *msaa_color_write;
+	struct drm_gem_dma_object *msaa_zs_write;
 
-	struct drm_gem_cma_object *rcl;
+	struct drm_gem_dma_object *rcl;
 	u32 next_offset;
 
 	u32 next_write_bo_index;
@@ -97,11 +98,11 @@ static void vc4_store_before_load(struct vc4_rcl_setup *setup)
  * coordinates packet, and instead just store to the address given.
  */
 static uint32_t vc4_full_res_offset(struct vc4_exec_info *exec,
-				    struct drm_gem_cma_object *bo,
+				    struct drm_gem_dma_object *bo,
 				    struct drm_vc4_submit_rcl_surface *surf,
 				    uint8_t x, uint8_t y)
 {
-	return bo->paddr + surf->offset + VC4_TILE_BUFFER_SIZE *
+	return bo->dma_addr + surf->offset + VC4_TILE_BUFFER_SIZE *
 		(DIV_ROUND_UP(exec->args->width, 32) * y + x);
 }
 
@@ -142,12 +143,18 @@ static void emit_tile(struct vc4_exec_info *exec,
 		} else {
 			rcl_u8(setup, VC4_PACKET_LOAD_TILE_BUFFER_GENERAL);
 			rcl_u16(setup, args->color_read.bits);
-			rcl_u32(setup, setup->color_read->paddr +
+			rcl_u32(setup, setup->color_read->dma_addr +
 				args->color_read.offset);
 		}
 	}
 
 	if (setup->zs_read) {
+		if (setup->color_read) {
+			/* Exec previous load. */
+			vc4_tile_coordinates(setup, x, y);
+			vc4_store_before_load(setup);
+		}
+
 		if (args->zs_read.flags &
 		    VC4_SUBMIT_RCL_SURFACE_READ_IS_FULL_RES) {
 			rcl_u8(setup, VC4_PACKET_LOAD_FULL_RES_TILE_BUFFER);
@@ -156,15 +163,9 @@ static void emit_tile(struct vc4_exec_info *exec,
 						    &args->zs_read, x, y) |
 				VC4_LOADSTORE_FULL_RES_DISABLE_COLOR);
 		} else {
-			if (setup->color_read) {
-				/* Exec previous load. */
-				vc4_tile_coordinates(setup, x, y);
-				vc4_store_before_load(setup);
-			}
-
 			rcl_u8(setup, VC4_PACKET_LOAD_TILE_BUFFER_GENERAL);
 			rcl_u16(setup, args->zs_read.bits);
-			rcl_u32(setup, setup->zs_read->paddr +
+			rcl_u32(setup, setup->zs_read->dma_addr +
 				args->zs_read.offset);
 		}
 	}
@@ -232,7 +233,7 @@ static void emit_tile(struct vc4_exec_info *exec,
 			(last_tile_write ?
 			 0 : VC4_STORE_TILE_BUFFER_DISABLE_COLOR_CLEAR));
 		rcl_u32(setup,
-			(setup->zs_write->paddr + args->zs_write.offset) |
+			(setup->zs_write->dma_addr + args->zs_write.offset) |
 			((last && last_tile_write) ?
 			 VC4_LOADSTORE_TILE_BUFFER_EOF : 0));
 	}
@@ -291,16 +292,15 @@ static int vc4_create_rcl_bo(struct drm_device *dev, struct vc4_exec_info *exec,
 		}
 	}
 	if (setup->zs_read) {
+		if (setup->color_read) {
+			loop_body_size += VC4_PACKET_TILE_COORDINATES_SIZE;
+			loop_body_size += VC4_PACKET_STORE_TILE_BUFFER_GENERAL_SIZE;
+		}
+
 		if (args->zs_read.flags &
 		    VC4_SUBMIT_RCL_SURFACE_READ_IS_FULL_RES) {
 			loop_body_size += VC4_PACKET_LOAD_FULL_RES_TILE_BUFFER_SIZE;
 		} else {
-			if (setup->color_read &&
-			    !(args->color_read.flags &
-			      VC4_SUBMIT_RCL_SURFACE_READ_IS_FULL_RES)) {
-				loop_body_size += VC4_PACKET_TILE_COORDINATES_SIZE;
-				loop_body_size += VC4_PACKET_STORE_TILE_BUFFER_GENERAL_SIZE;
-			}
 			loop_body_size += VC4_PACKET_LOAD_TILE_BUFFER_GENERAL_SIZE;
 		}
 	}
@@ -356,7 +356,7 @@ static int vc4_create_rcl_bo(struct drm_device *dev, struct vc4_exec_info *exec,
 
 	rcl_u8(setup, VC4_PACKET_TILE_RENDERING_MODE_CONFIG);
 	rcl_u32(setup,
-		(setup->color_write ? (setup->color_write->paddr +
+		(setup->color_write ? (setup->color_write->dma_addr +
 				       args->color_write.offset) :
 		 0));
 	rcl_u16(setup, args->width);
@@ -375,14 +375,14 @@ static int vc4_create_rcl_bo(struct drm_device *dev, struct vc4_exec_info *exec,
 	}
 
 	BUG_ON(setup->next_offset != size);
-	exec->ct1ca = setup->rcl->paddr;
-	exec->ct1ea = setup->rcl->paddr + setup->next_offset;
+	exec->ct1ca = setup->rcl->dma_addr;
+	exec->ct1ea = setup->rcl->dma_addr + setup->next_offset;
 
 	return 0;
 }
 
 static int vc4_full_res_bounds_check(struct vc4_exec_info *exec,
-				     struct drm_gem_cma_object *obj,
+				     struct drm_gem_dma_object *obj,
 				     struct drm_vc4_submit_rcl_surface *surf)
 {
 	struct drm_vc4_submit_cl *args = exec->args;
@@ -408,7 +408,7 @@ static int vc4_full_res_bounds_check(struct vc4_exec_info *exec,
 }
 
 static int vc4_rcl_msaa_surface_setup(struct vc4_exec_info *exec,
-				      struct drm_gem_cma_object **obj,
+				      struct drm_gem_dma_object **obj,
 				      struct drm_vc4_submit_rcl_surface *surf)
 {
 	if (surf->flags != 0 || surf->bits != 0) {
@@ -434,7 +434,7 @@ static int vc4_rcl_msaa_surface_setup(struct vc4_exec_info *exec,
 }
 
 static int vc4_rcl_surface_setup(struct vc4_exec_info *exec,
-				 struct drm_gem_cma_object **obj,
+				 struct drm_gem_dma_object **obj,
 				 struct drm_vc4_submit_rcl_surface *surf,
 				 bool is_write)
 {
@@ -534,7 +534,7 @@ static int vc4_rcl_surface_setup(struct vc4_exec_info *exec,
 static int
 vc4_rcl_render_config_surface_setup(struct vc4_exec_info *exec,
 				    struct vc4_rcl_setup *setup,
-				    struct drm_gem_cma_object **obj,
+				    struct drm_gem_dma_object **obj,
 				    struct drm_vc4_submit_rcl_surface *surf)
 {
 	uint8_t tiling = VC4_GET_FIELD(surf->bits,
@@ -594,10 +594,14 @@ vc4_rcl_render_config_surface_setup(struct vc4_exec_info *exec,
 
 int vc4_get_rcl(struct drm_device *dev, struct vc4_exec_info *exec)
 {
+	struct vc4_dev *vc4 = to_vc4_dev(dev);
 	struct vc4_rcl_setup setup = {0};
 	struct drm_vc4_submit_cl *args = exec->args;
 	bool has_bin = args->bin_cl_size != 0;
 	int ret;
+
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
+		return -ENODEV;
 
 	if (args->min_x_tile > args->max_x_tile ||
 	    args->min_y_tile > args->max_y_tile) {

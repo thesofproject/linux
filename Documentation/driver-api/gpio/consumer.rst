@@ -2,9 +2,7 @@
 GPIO Descriptor Consumer Interface
 ==================================
 
-This document describes the consumer interface of the GPIO framework. Note that
-it describes the new descriptor-based interface. For a description of the
-deprecated integer-based GPIO interface please refer to gpio-legacy.txt.
+This document describes the consumer interface of the GPIO framework.
 
 
 Guidelines for GPIOs consumers
@@ -12,7 +10,7 @@ Guidelines for GPIOs consumers
 
 Drivers that can't work without standard GPIO calls should have Kconfig entries
 that depend on GPIOLIB or select GPIOLIB. The functions that allow a driver to
-obtain and use GPIOs are available by including the following file:
+obtain and use GPIOs are available by including the following file::
 
 	#include <linux/gpio/consumer.h>
 
@@ -29,6 +27,10 @@ warnings. These stubs are used for two use cases:
   will use it under other compile-time configurations. In this case the
   consumer must make sure not to call into these functions, or the user will
   be met with console warnings that may be perceived as intimidating.
+  Combining truly optional GPIOLIB usage with calls to
+  ``[devm_]gpiod_get_optional()`` is a *bad idea*, and will result in weird
+  error messages. Use the ordinary getter functions with optional GPIOLIB:
+  some open coding of error handling should be expected when you do this.
 
 All the functions that work with the descriptor-based GPIO interface are
 prefixed with ``gpiod_``. The ``gpio_`` prefix is used for the legacy
@@ -57,7 +59,7 @@ device that displays digits), an additional index argument can be specified::
 					  enum gpiod_flags flags)
 
 For a more detailed description of the con_id parameter in the DeviceTree case
-see Documentation/gpio/board.txt
+see Documentation/driver-api/gpio/board.rst
 
 The flags parameter is used to optionally specify a direction and initial value
 for the GPIO. Values can be:
@@ -72,9 +74,13 @@ for the GPIO. Values can be:
 * GPIOD_OUT_HIGH_OPEN_DRAIN same as GPIOD_OUT_HIGH but also enforce the line
   to be electrically used with open drain.
 
+Note that the initial value is *logical* and the physical line level depends on
+whether the line is configured active high or active low (see
+:ref:`active_low_semantics`).
+
 The two last flags are used for use cases where open drain is mandatory, such
 as I2C: if the line is not already configured as open drain in the mappings
-(see board.txt), then open drain will be enforced anyway and a warning will be
+(see board.rst), then open drain will be enforced anyway and a warning will be
 printed that the board configuration needs to be updated to match the use case.
 
 Both functions return either a valid GPIO descriptor, or an error code checkable
@@ -109,9 +115,11 @@ For a function using multiple GPIOs all of those can be obtained with one call::
 					   enum gpiod_flags flags)
 
 This function returns a struct gpio_descs which contains an array of
-descriptors::
+descriptors.  It also contains a pointer to a gpiolib private structure which,
+if passed back to get/set array functions, may speed up I/O processing::
 
 	struct gpio_descs {
+		struct gpio_array *info;
 		unsigned int ndescs;
 		struct gpio_desc *desc[];
 	}
@@ -212,9 +220,9 @@ Use the following calls to access GPIOs from an atomic context::
 	int gpiod_get_value(const struct gpio_desc *desc);
 	void gpiod_set_value(struct gpio_desc *desc, int value);
 
-The values are boolean, zero for low, nonzero for high. When reading the value
-of an output pin, the value returned should be what's seen on the pin. That
-won't always match the specified output value, because of issues including
+The values are boolean, zero for inactive, nonzero for active. When reading the
+value of an output pin, the value returned should be what's seen on the pin.
+That won't always match the specified output value, because of issues including
 open-drain signaling and output latencies.
 
 The get/set calls do not return errors because "invalid GPIO" should have been
@@ -250,6 +258,8 @@ that can't be accessed from hardIRQ handlers, these calls act the same as the
 spinlock-safe calls.
 
 
+.. _active_low_semantics:
+
 The active low and open drain semantics
 ---------------------------------------
 As a consumer should not have to care about the physical line level, all of the
@@ -262,14 +272,14 @@ driven.
 The same is applicable for open drain or open source output lines: those do not
 actively drive their output high (open drain) or low (open source), they just
 switch their output to a high impedance value. The consumer should not need to
-care. (For details read about open drain in driver.txt.)
+care. (For details read about open drain in driver.rst.)
 
 With this, all the gpiod_set_(array)_value_xxx() functions interpret the
-parameter "value" as "asserted" ("1") or "de-asserted" ("0"). The physical line
+parameter "value" as "active" ("1") or "inactive" ("0"). The physical line
 level will be driven accordingly.
 
 As an example, if the active low property for a dedicated GPIO is set, and the
-gpiod_set_(array)_value_xxx() passes "asserted" ("1"), the physical line level
+gpiod_set_(array)_value_xxx() passes "active" ("1"), the physical line level
 will be driven low.
 
 To summarize::
@@ -281,8 +291,6 @@ To summarize::
   gpiod_set_value(desc, 1);          default (active high)  high
   gpiod_set_value(desc, 0);          active low             high
   gpiod_set_value(desc, 1);          active low             low
-  gpiod_set_value(desc, 0);          default (active high)  low
-  gpiod_set_value(desc, 1);          default (active high)  high
   gpiod_set_value(desc, 0);          open drain             low
   gpiod_set_value(desc, 1);          open drain             high impedance
   gpiod_set_value(desc, 0);          open source            high impedance
@@ -309,9 +317,11 @@ work on the raw line value::
 	void gpiod_set_raw_value_cansleep(struct gpio_desc *desc, int value)
 	int gpiod_direction_output_raw(struct gpio_desc *desc, int value)
 
-The active low state of a GPIO can also be queried using the following call::
+The active low state of a GPIO can also be queried and toggled using the
+following calls::
 
 	int gpiod_is_active_low(const struct gpio_desc *desc)
+	void gpiod_toggle_active_low(struct gpio_desc *desc)
 
 Note that these functions should only be used with great moderation; a driver
 should not have to care about the physical line level or open drain semantics.
@@ -323,29 +333,37 @@ The following functions get or set the values of an array of GPIOs::
 
 	int gpiod_get_array_value(unsigned int array_size,
 				  struct gpio_desc **desc_array,
-				  int *value_array);
+				  struct gpio_array *array_info,
+				  unsigned long *value_bitmap);
 	int gpiod_get_raw_array_value(unsigned int array_size,
 				      struct gpio_desc **desc_array,
-				      int *value_array);
+				      struct gpio_array *array_info,
+				      unsigned long *value_bitmap);
 	int gpiod_get_array_value_cansleep(unsigned int array_size,
 					   struct gpio_desc **desc_array,
-					   int *value_array);
+					   struct gpio_array *array_info,
+					   unsigned long *value_bitmap);
 	int gpiod_get_raw_array_value_cansleep(unsigned int array_size,
 					   struct gpio_desc **desc_array,
-					   int *value_array);
+					   struct gpio_array *array_info,
+					   unsigned long *value_bitmap);
 
-	void gpiod_set_array_value(unsigned int array_size,
-				   struct gpio_desc **desc_array,
-				   int *value_array)
-	void gpiod_set_raw_array_value(unsigned int array_size,
-				       struct gpio_desc **desc_array,
-				       int *value_array)
-	void gpiod_set_array_value_cansleep(unsigned int array_size,
-					    struct gpio_desc **desc_array,
-					    int *value_array)
-	void gpiod_set_raw_array_value_cansleep(unsigned int array_size,
-						struct gpio_desc **desc_array,
-						int *value_array)
+	int gpiod_set_array_value(unsigned int array_size,
+				  struct gpio_desc **desc_array,
+				  struct gpio_array *array_info,
+				  unsigned long *value_bitmap)
+	int gpiod_set_raw_array_value(unsigned int array_size,
+				      struct gpio_desc **desc_array,
+				      struct gpio_array *array_info,
+				      unsigned long *value_bitmap)
+	int gpiod_set_array_value_cansleep(unsigned int array_size,
+					   struct gpio_desc **desc_array,
+					   struct gpio_array *array_info,
+					   unsigned long *value_bitmap)
+	int gpiod_set_raw_array_value_cansleep(unsigned int array_size,
+					       struct gpio_desc **desc_array,
+					       struct gpio_array *array_info,
+					       unsigned long *value_bitmap)
 
 The array can be an arbitrary set of GPIOs. The functions will try to access
 GPIOs belonging to the same bank or chip simultaneously if supported by the
@@ -353,11 +371,13 @@ corresponding chip driver. In that case a significantly improved performance
 can be expected. If simultaneous access is not possible the GPIOs will be
 accessed sequentially.
 
-The functions take three arguments:
+The functions take four arguments:
+
 	* array_size	- the number of array elements
 	* desc_array	- an array of GPIO descriptors
-	* value_array	- an array to store the GPIOs' values (get) or
-			  an array of values to assign to the GPIOs (set)
+	* array_info	- optional information obtained from gpiod_get_array()
+	* value_bitmap	- a bitmap to store the GPIOs' values (get) or
+          a bitmap of values to assign to the GPIOs (set)
 
 The descriptor array can be obtained using the gpiod_get_array() function
 or one of its variants. If the group of descriptors returned by that function
@@ -366,15 +386,24 @@ the struct gpio_descs returned by gpiod_get_array()::
 
 	struct gpio_descs *my_gpio_descs = gpiod_get_array(...);
 	gpiod_set_array_value(my_gpio_descs->ndescs, my_gpio_descs->desc,
-			      my_gpio_values);
+			      my_gpio_descs->info, my_gpio_value_bitmap);
 
 It is also possible to access a completely arbitrary array of descriptors. The
 descriptors may be obtained using any combination of gpiod_get() and
 gpiod_get_array(). Afterwards the array of descriptors has to be setup
-manually before it can be passed to one of the above functions.
+manually before it can be passed to one of the above functions.  In that case,
+array_info should be set to NULL.
 
 Note that for optimal performance GPIOs belonging to the same chip should be
 contiguous within the array of descriptors.
+
+Still better performance may be achieved if array indexes of the descriptors
+match hardware pin numbers of a single chip.  If an array passed to a get/set
+array function matches the one obtained from gpiod_get_array() and array_info
+associated with the array is also passed, the function may take a fast bitmap
+processing path, passing the value_bitmap argument directly to the respective
+.get/set_multiple() callback of the chip.  That allows for utilization of GPIO
+banks as data I/O ports without much loss of performance.
 
 The return value of gpiod_get_array_value() and its variants is 0 on success
 or negative on error. Note the difference to gpiod_get_value(), which returns
@@ -417,23 +446,25 @@ case, it will be handled by the GPIO subsystem automatically.  However, if the
 _DSD is not present, the mappings between GpioIo()/GpioInt() resources and GPIO
 connection IDs need to be provided by device drivers.
 
-For details refer to Documentation/acpi/gpio-properties.txt
+For details refer to Documentation/firmware-guide/acpi/gpio-properties.rst
 
 
 Interacting With the Legacy GPIO Subsystem
 ==========================================
-Many kernel subsystems still handle GPIOs using the legacy integer-based
-interface. Although it is strongly encouraged to upgrade them to the safer
-descriptor-based API, the following two functions allow you to convert a GPIO
-descriptor into the GPIO integer namespace and vice-versa::
+Many kernel subsystems and drivers still handle GPIOs using the legacy
+integer-based interface. It is strongly recommended to update these to the new
+gpiod interface. For cases where both interfaces need to be used, the following
+two functions allow to convert a GPIO descriptor into the GPIO integer namespace
+and vice-versa::
 
 	int desc_to_gpio(const struct gpio_desc *desc)
 	struct gpio_desc *gpio_to_desc(unsigned gpio)
 
-The GPIO number returned by desc_to_gpio() can be safely used as long as the
-GPIO descriptor has not been freed. All the same, a GPIO number passed to
-gpio_to_desc() must have been properly acquired, and usage of the returned GPIO
-descriptor is only possible after the GPIO number has been released.
+The GPIO number returned by desc_to_gpio() can safely be used as a parameter of
+the gpio\_*() functions for as long as the GPIO descriptor `desc` is not freed.
+All the same, a GPIO number passed to gpio_to_desc() must first be properly
+acquired using e.g. gpio_request_one(), and the returned GPIO descriptor is only
+considered valid until that GPIO number is released using gpio_free().
 
 Freeing a GPIO obtained by one API with the other API is forbidden and an
 unchecked error.

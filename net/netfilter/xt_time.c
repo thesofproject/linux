@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *	xt_time
  *	Copyright © CC Computer Consultants GmbH, 2007
@@ -5,15 +6,14 @@
  *	based on ipt_time by Fabrice MARIE <fabrice@netfilter.org>
  *	This is a module which is used for time matching
  *	It is using some modified code from dietlibc (localtime() function)
- *	that you can find at http://www.fefe.de/dietlibc/
- *	This file is distributed under the terms of the GNU General Public
- *	License (GPL). Copies of the GPL can be obtained from gnu.org/gpl.
+ *	that you can find at https://www.fefe.de/dietlibc/
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/ktime.h>
 #include <linux/module.h>
+#include <linux/rtc.h>
 #include <linux/skbuff.h>
 #include <linux/types.h>
 #include <linux/netfilter/x_tables.h>
@@ -64,11 +64,6 @@ static const u_int16_t days_since_epoch[] = {
 	3287, 2922, 2557, 2191, 1826, 1461, 1096, 730, 365, 0,
 };
 
-static inline bool is_leap(unsigned int y)
-{
-	return y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-}
-
 /*
  * Each network packet has a (nano)seconds-since-the-epoch (SSTE) timestamp.
  * Since we match against days and daytime, the SSTE value needs to be
@@ -77,12 +72,12 @@ static inline bool is_leap(unsigned int y)
  * This is done in three separate functions so that the most expensive
  * calculations are done last, in case a "simple match" can be found earlier.
  */
-static inline unsigned int localtime_1(struct xtm *r, time_t time)
+static inline unsigned int localtime_1(struct xtm *r, time64_t time)
 {
 	unsigned int v, w;
 
 	/* Each day has 86400s, so finding the hour/minute is actually easy. */
-	v         = time % SECONDS_PER_DAY;
+	div_u64_rem(time, SECONDS_PER_DAY, &v);
 	r->second = v % 60;
 	w         = v / 60;
 	r->minute = w % 60;
@@ -90,13 +85,13 @@ static inline unsigned int localtime_1(struct xtm *r, time_t time)
 	return v;
 }
 
-static inline void localtime_2(struct xtm *r, time_t time)
+static inline void localtime_2(struct xtm *r, time64_t time)
 {
 	/*
 	 * Here comes the rest (weekday, monthday). First, divide the SSTE
 	 * by seconds-per-day to get the number of _days_ since the epoch.
 	 */
-	r->dse = time / 86400;
+	r->dse = div_u64(time, SECONDS_PER_DAY);
 
 	/*
 	 * 1970-01-01 (w=0) was a Thursday (4).
@@ -105,7 +100,7 @@ static inline void localtime_2(struct xtm *r, time_t time)
 	r->weekday = (4 + r->dse - 1) % 7 + 1;
 }
 
-static void localtime_3(struct xtm *r, time_t time)
+static void localtime_3(struct xtm *r, time64_t time)
 {
 	unsigned int year, i, w = r->dse;
 
@@ -138,7 +133,7 @@ static void localtime_3(struct xtm *r, time_t time)
 	 * (A different approach to use would be to subtract a monthlength
 	 * from w repeatedly while counting.)
 	 */
-	if (is_leap(year)) {
+	if (is_leap_year(year)) {
 		/* use days_since_leapyear[] in a leap year */
 		for (i = ARRAY_SIZE(days_since_leapyear) - 1;
 		    i > 0 && days_since_leapyear[i] > w; --i)
@@ -160,22 +155,27 @@ time_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	const struct xt_time_info *info = par->matchinfo;
 	unsigned int packet_time;
 	struct xtm current_time;
-	s64 stamp;
+	time64_t stamp;
 
 	/*
-	 * We cannot use get_seconds() instead of __net_timestamp() here.
+	 * We need real time here, but we can neither use skb->tstamp
+	 * nor __net_timestamp().
+	 *
+	 * skb->tstamp and skb->skb_mstamp_ns overlap, however, they
+	 * use different clock types (real vs monotonic).
+	 *
 	 * Suppose you have two rules:
-	 * 	1. match before 13:00
-	 * 	2. match after 13:00
-	 * If you match against processing time (get_seconds) it
+	 *	1. match before 13:00
+	 *	2. match after 13:00
+	 *
+	 * If you match against processing time (ktime_get_real_seconds) it
 	 * may happen that the same packet matches both rules if
-	 * it arrived at the right moment before 13:00.
+	 * it arrived at the right moment before 13:00, so it would be
+	 * better to check skb->tstamp and set it via __net_timestamp()
+	 * if needed.  This however breaks outgoing packets tx timestamp,
+	 * and causes them to get delayed forever by fq packet scheduler.
 	 */
-	if (skb->tstamp == 0)
-		__net_timestamp((struct sk_buff *)skb);
-
-	stamp = ktime_to_ns(skb->tstamp);
-	stamp = div_s64(stamp, NSEC_PER_SEC);
+	stamp = ktime_get_real_seconds();
 
 	if (info->flags & XT_TIME_LOCAL_TZ)
 		/* Adjust for local timezone */
@@ -188,6 +188,9 @@ time_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	 *   - 'now' is in the weekday mask
 	 *   - 'now' is in the daytime range time_start..time_end
 	 * (and by default, libxt_time will set these so as to match)
+	 *
+	 * note: info->date_start/stop are unsigned 32-bit values that
+	 *	 can hold values beyond y2038, but not after y2106.
 	 */
 
 	if (stamp < info->date_start || stamp > info->date_stop)
@@ -219,13 +222,13 @@ time_mt(const struct sk_buff *skb, struct xt_action_param *par)
 
 	localtime_2(&current_time, stamp);
 
-	if (!(info->weekdays_match & (1 << current_time.weekday)))
+	if (!(info->weekdays_match & (1U << current_time.weekday)))
 		return false;
 
 	/* Do not spend time computing monthday if all days match anyway */
 	if (info->monthdays_match != XT_TIME_ALL_MONTHDAYS) {
 		localtime_3(&current_time, stamp);
-		if (!(info->monthdays_match & (1 << current_time.monthday)))
+		if (!(info->monthdays_match & (1U << current_time.monthday)))
 			return false;
 	}
 

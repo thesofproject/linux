@@ -13,8 +13,8 @@
 #include <linux/init.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
-#include <linux/kallsyms.h>
 #include <linux/sort.h>
+#include <linux/sched/task_stack.h>
 
 #include <linux/uaccess.h>
 #include <asm/assembly.h>
@@ -22,15 +22,20 @@
 #include <asm/ptrace.h>
 
 #include <asm/unwind.h>
+#include <asm/switch_to.h>
+#include <asm/sections.h>
+#include <asm/ftrace.h>
 
 /* #define DEBUG 1 */
 #ifdef DEBUG
-#define dbg(x...) printk(x)
+#define dbg(x...) pr_debug(x)
 #else
-#define dbg(x...)
+#define dbg(x...) do { } while (0)
 #endif
 
 #define KERNEL_START (KERNEL_BINARY_TEXT_START)
+
+#define ALIGNMENT_OK(ptr, type) (((ptr) & (sizeof(type) - 1)) == 0)
 
 extern struct unwind_table_entry __start___unwind[];
 extern struct unwind_table_entry __stop___unwind[];
@@ -41,7 +46,7 @@ static DEFINE_SPINLOCK(unwind_lock);
  * we can call unwind_init as early in the bootup process as 
  * possible (before the slab allocator is initialized)
  */
-static struct unwind_table kernel_unwind_table __read_mostly;
+static struct unwind_table kernel_unwind_table __ro_after_init;
 static LIST_HEAD(unwind_tables);
 
 static inline const struct unwind_table_entry *
@@ -117,7 +122,8 @@ unwind_table_init(struct unwind_table *table, const char *name,
 	for (; start <= end; start++) {
 		if (start < end && 
 		    start->region_end > (start+1)->region_start) {
-			printk("WARNING: Out of order unwind entry! %p and %p\n", start, start+1);
+			pr_warn("Out of order unwind entry! %px and %px\n",
+				start, start+1);
 		}
 
 		start->region_start += base_addr;
@@ -151,7 +157,7 @@ unwind_table_add(const char *name, unsigned long base_addr,
 
 	unwind_table_sort(s, e);
 
-	table = kmalloc(sizeof(struct unwind_table), GFP_USER);
+	table = kmalloc_obj(struct unwind_table, GFP_USER);
 	if (table == NULL)
 		return NULL;
 	unwind_table_init(table, name, base_addr, gp, start, end);
@@ -176,13 +182,13 @@ void unwind_table_remove(struct unwind_table *table)
 /* Called from setup_arch to import the kernel unwind info */
 int __init unwind_init(void)
 {
-	long start, stop;
+	long start __maybe_unused, stop __maybe_unused;
 	register unsigned long gp __asm__ ("r27");
 
 	start = (long)&__start___unwind[0];
 	stop = (long)&__stop___unwind[0];
 
-	printk("unwind_init: start = 0x%lx, end = 0x%lx, entries = %lu\n", 
+	dbg("unwind_init: start = 0x%lx, end = 0x%lx, entries = %lu\n",
 	    start, stop,
 	    (stop - start) / sizeof(struct unwind_table_entry));
 
@@ -203,26 +209,70 @@ int __init unwind_init(void)
 	return 0;
 }
 
-#ifdef CONFIG_64BIT
-#define get_func_addr(fptr) fptr[2]
-#else
-#define get_func_addr(fptr) fptr[0]
-#endif
+static bool pc_is_kernel_fn(unsigned long pc, void *fn)
+{
+	return (unsigned long)dereference_kernel_function_descriptor(fn) == pc;
+}
 
 static int unwind_special(struct unwind_frame_info *info, unsigned long pc, int frame_size)
 {
-	extern void handle_interruption(int, struct pt_regs *);
-	static unsigned long *hi = (unsigned long *)&handle_interruption;
+	/*
+	 * We have to use void * instead of a function pointer, because
+	 * function pointers aren't a pointer to the function on 64-bit.
+	 * Make them const so the compiler knows they live in .text
+	 * Note: We could use dereference_kernel_function_descriptor()
+	 * instead but we want to keep it simple here.
+	 */
+	extern void * const ret_from_kernel_thread;
+	extern void * const syscall_exit;
+	extern void * const intr_return;
+	extern void * const _switch_to_ret;
+#ifdef CONFIG_IRQSTACKS
+	extern void * const _call_on_stack;
+#endif /* CONFIG_IRQSTACKS */
 
-	if (pc == get_func_addr(hi)) {
+	if (pc_is_kernel_fn(pc, handle_interruption)) {
 		struct pt_regs *regs = (struct pt_regs *)(info->sp - frame_size - PT_SZ_ALGN);
 		dbg("Unwinding through handle_interruption()\n");
 		info->prev_sp = regs->gr[30];
 		info->prev_ip = regs->iaoq[0];
-
 		return 1;
 	}
 
+	if (pc == (unsigned long)&ret_from_kernel_thread ||
+	    pc == (unsigned long)&syscall_exit) {
+		info->prev_sp = info->prev_ip = 0;
+		return 1;
+	}
+
+	if (pc == (unsigned long)&intr_return) {
+		struct pt_regs *regs;
+
+		dbg("Found intr_return()\n");
+		regs = (struct pt_regs *)(info->sp - PT_SZ_ALGN);
+		info->prev_sp = regs->gr[30];
+		info->prev_ip = regs->iaoq[0];
+		info->rp = regs->gr[2];
+		return 1;
+	}
+
+	if (pc_is_kernel_fn(pc, _switch_to) ||
+	    pc == (unsigned long)&_switch_to_ret) {
+		info->prev_sp = info->sp - CALLEE_SAVE_FRAME_SIZE;
+		if (ALIGNMENT_OK(info->prev_sp, long))
+			info->prev_ip = *(unsigned long *)(info->prev_sp - RP_OFFSET);
+		else
+			info->prev_ip = info->prev_sp = 0;
+		return 1;
+	}
+
+#ifdef CONFIG_IRQSTACKS
+	if (pc == (unsigned long)&_call_on_stack && ALIGNMENT_OK(info->sp, long)) {
+		info->prev_sp = *(unsigned long *)(info->sp - FRAME_SIZE - REG_SZ);
+		info->prev_ip = *(unsigned long *)(info->sp - FRAME_SIZE - RP_OFFSET);
+		return 1;
+	}
+#endif
 	return 0;
 }
 
@@ -238,34 +288,8 @@ static void unwind_frame_regs(struct unwind_frame_info *info)
 	if (e == NULL) {
 		unsigned long sp;
 
-		dbg("Cannot find unwind entry for 0x%lx; forced unwinding\n", info->ip);
-
-#ifdef CONFIG_KALLSYMS
-		/* Handle some frequent special cases.... */
-		{
-			char symname[KSYM_NAME_LEN];
-			char *modname;
-
-			kallsyms_lookup(info->ip, NULL, NULL, &modname,
-				symname);
-
-			dbg("info->ip = 0x%lx, name = %s\n", info->ip, symname);
-
-			if (strcmp(symname, "_switch_to_ret") == 0) {
-				info->prev_sp = info->sp - CALLEE_SAVE_FRAME_SIZE;
-				info->prev_ip = *(unsigned long *)(info->prev_sp - RP_OFFSET);
-				dbg("_switch_to_ret @ %lx - setting "
-				    "prev_sp=%lx prev_ip=%lx\n", 
-				    info->ip, info->prev_sp, 
-				    info->prev_ip);
-				return;
-			} else if (strcmp(symname, "ret_from_kernel_thread") == 0 ||
-				   strcmp(symname, "syscall_exit") == 0) {
-				info->prev_ip = info->prev_sp = 0;
-				return;
-			}
-		}
-#endif
+		dbg("Cannot find unwind entry for %pS; forced unwinding\n",
+			(void *) info->ip);
 
 		/* Since we are doing the unwinding blind, we don't know if
 		   we are adjusting the stack correctly or extracting the rp
@@ -281,17 +305,15 @@ static void unwind_frame_regs(struct unwind_frame_info *info)
 			info->prev_sp = sp - 64;
 			info->prev_ip = 0;
 
-			/* The stack is at the end inside the thread_union
-			 * struct. If we reach data, we have reached the
-			 * beginning of the stack and should stop unwinding. */
-			if (info->prev_sp >= (unsigned long) task_thread_info(info->t) &&
-			    info->prev_sp < ((unsigned long) task_thread_info(info->t)
-						+ THREAD_SZ_ALGN)) {
+			/* Check if stack is inside kernel stack area */
+			if ((info->prev_sp - (unsigned long) task_stack_page(info->t))
+					>= THREAD_SIZE) {
 				info->prev_sp = 0;
 				break;
 			}
 
-			if (get_user(tmp, (unsigned long *)(info->prev_sp - RP_OFFSET))) 
+			if (copy_from_kernel_nofault(&tmp,
+			    (void *)info->prev_sp - RP_OFFSET, sizeof(tmp)))
 				break;
 			info->prev_ip = tmp;
 			sp = info->prev_sp;
@@ -353,8 +375,10 @@ static void unwind_frame_regs(struct unwind_frame_info *info)
 			info->prev_sp = info->sp - frame_size;
 			if (e->Millicode)
 				info->rp = info->r31;
-			else if (rpoffset)
+			else if (rpoffset && ALIGNMENT_OK(info->prev_sp, long))
 				info->rp = *(unsigned long *)(info->prev_sp - rpoffset);
+			else
+				info->rp = 0;
 			info->prev_ip = info->rp;
 			info->rp = 0;
 		}
@@ -384,7 +408,7 @@ void unwind_frame_init_from_blocked_task(struct unwind_frame_info *info, struct 
 	struct pt_regs *r = &t->thread.regs;
 	struct pt_regs *r2;
 
-	r2 = kmalloc(sizeof(struct pt_regs), GFP_ATOMIC);
+	r2 = kmalloc_obj(struct pt_regs, GFP_ATOMIC);
 	if (!r2)
 		return;
 	*r2 = *r;
@@ -394,9 +418,31 @@ void unwind_frame_init_from_blocked_task(struct unwind_frame_info *info, struct 
 	kfree(r2);
 }
 
-void unwind_frame_init_running(struct unwind_frame_info *info, struct pt_regs *regs)
+#define get_parisc_stackpointer() ({ \
+	unsigned long sp; \
+	__asm__("copy %%r30, %0" : "=r"(sp)); \
+	(sp); \
+})
+
+void unwind_frame_init_task(struct unwind_frame_info *info,
+	struct task_struct *task, struct pt_regs *regs)
 {
-	unwind_frame_init(info, current, regs);
+	task = task ? task : current;
+
+	if (task == current) {
+		struct pt_regs r;
+
+		if (!regs) {
+			memset(&r, 0, sizeof(r));
+			r.iaoq[0] =  _THIS_IP_;
+			r.gr[2] = _RET_IP_;
+			r.gr[30] = get_parisc_stackpointer();
+			regs = &r;
+		}
+		unwind_frame_init(info, task, regs);
+	} else {
+		unwind_frame_init_from_blocked_task(info, task);
+	}
 }
 
 int unwind_once(struct unwind_frame_info *next_frame)
@@ -433,19 +479,12 @@ int unwind_to_user(struct unwind_frame_info *info)
 unsigned long return_address(unsigned int level)
 {
 	struct unwind_frame_info info;
-	struct pt_regs r;
-	unsigned long sp;
 
 	/* initialize unwind info */
-	asm volatile ("copy %%r30, %0" : "=r"(sp));
-	memset(&r, 0, sizeof(struct pt_regs));
-	r.iaoq[0] = (unsigned long) current_text_addr();
-	r.gr[2] = (unsigned long) __builtin_return_address(0);
-	r.gr[30] = sp;
-	unwind_frame_init(&info, current, &r);
+	unwind_frame_init_task(&info, current, NULL);
 
 	/* unwind stack */
-	++level;
+	level += 2;
 	do {
 		if (unwind_once(&info) < 0 || info.ip == 0)
 			return 0;

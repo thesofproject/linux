@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * OpenRISC module.c
  *
@@ -7,11 +8,6 @@
  *
  * Modifications for the OpenRISC architecture:
  * Copyright (C) 2010-2011 Jonas Bonn <jonas@southpole.se>
- *
- *      This program is free software; you can redistribute it and/or
- *      modify it under the terms of the GNU General Public License
- *      as published by the Free Software Foundation; either version
- *      2 of the License, or (at your option) any later version.
  */
 
 #include <linux/moduleloader.h>
@@ -43,21 +39,35 @@ int apply_relocate_add(Elf32_Shdr *sechdrs,
 		value = sym->st_value + rel[i].r_addend;
 
 		switch (ELF32_R_TYPE(rel[i].r_info)) {
-		case R_OR32_32:
+		case R_OR1K_32:
 			*location = value;
 			break;
-		case R_OR32_CONST:
+		case R_OR1K_LO_16_IN_INSN:
 			*((uint16_t *)location + 1) = value;
 			break;
-		case R_OR32_CONSTH:
+		case R_OR1K_HI_16_IN_INSN:
 			*((uint16_t *)location + 1) = value >> 16;
 			break;
-		case R_OR32_JUMPTARG:
+		case R_OR1K_INSN_REL_26:
 			value -= (uint32_t)location;
 			value >>= 2;
 			value &= 0x03ffffff;
 			value |= *location & 0xfc000000;
 			*location = value;
+			break;
+		case R_OR1K_32_PCREL:
+			value -= (uint32_t)location;
+			*location = value;
+			break;
+		case R_OR1K_AHI16:
+			/* Adjust the operand to match with a signed LO16.  */
+			value += 0x8000;
+			*((uint16_t *)location + 1) = value >> 16;
+			break;
+		case R_OR1K_SLO16:
+			/* Split value lower 16-bits.  */
+			value = ((value & 0xf800) << 10) | (value & 0x7ff);
+			*location = (*location & ~0x3e007ff) | value;
 			break;
 		default:
 			pr_err("module %s: Unknown relocation: %u\n",

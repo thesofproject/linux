@@ -1,23 +1,19 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * core.h  --  Core Driver for Wolfson WM8350 PMIC
  *
  * Copyright 2007 Wolfson Microelectronics PLC
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
  */
 
 #ifndef __LINUX_MFD_WM8350_CORE_H_
 #define __LINUX_MFD_WM8350_CORE_H_
 
-#include <linux/kernel.h>
-#include <linux/mutex.h>
-#include <linux/interrupt.h>
 #include <linux/completion.h>
+#include <linux/errno.h>
+#include <linux/interrupt.h>
+#include <linux/mutex.h>
 #include <linux/regmap.h>
+#include <linux/types.h>
 
 #include <linux/mfd/wm8350/audio.h>
 #include <linux/mfd/wm8350/gpio.h>
@@ -25,6 +21,9 @@
 #include <linux/mfd/wm8350/rtc.h>
 #include <linux/mfd/wm8350/supply.h>
 #include <linux/mfd/wm8350/wdt.h>
+
+struct device;
+struct platform_device;
 
 /*
  * Register values.
@@ -643,7 +642,6 @@ struct wm8350_platform_data {
  */
 int wm8350_device_init(struct wm8350 *wm8350, int irq,
 		       struct wm8350_platform_data *pdata);
-void wm8350_device_exit(struct wm8350 *wm8350);
 
 /*
  * WM8350 device IO
@@ -669,7 +667,7 @@ static inline int wm8350_register_irq(struct wm8350 *wm8350, int irq,
 		return -ENODEV;
 
 	return request_threaded_irq(irq + wm8350->irq_base, NULL,
-				    handler, flags, name, data);
+				    handler, flags | IRQF_ONESHOT, name, data);
 }
 
 static inline void wm8350_free_irq(struct wm8350 *wm8350, int irq, void *data)

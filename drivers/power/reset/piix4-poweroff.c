@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2016 Imagination Technologies
  * Author: Paul Burton <paul.burton@mips.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
  */
 
 #include <linux/delay.h>
@@ -110,4 +106,5 @@ static struct pci_driver piix4_poweroff_driver = {
 
 module_pci_driver(piix4_poweroff_driver);
 MODULE_AUTHOR("Paul Burton <paul.burton@mips.com>");
+MODULE_DESCRIPTION("Intel PIIX4 power-off driver");
 MODULE_LICENSE("GPL");

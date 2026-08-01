@@ -1,22 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2013 Emilio López
  * Emilio López <emilio@elopez.com.ar>
  *
  * Copyright 2015 Maxime Ripard
  * Maxime Ripard <maxime.ripard@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/slab.h>
@@ -58,11 +50,11 @@ static void __init sun4i_pll2_setup(struct device_node *node,
 	if (IS_ERR(reg))
 		return;
 
-	clk_data = kzalloc(sizeof(*clk_data), GFP_KERNEL);
+	clk_data = kzalloc_obj(*clk_data);
 	if (!clk_data)
 		goto err_unmap;
 
-	clks = kcalloc(SUN4I_PLL2_OUTPUTS, sizeof(struct clk *), GFP_KERNEL);
+	clks = kzalloc_objs(struct clk *, SUN4I_PLL2_OUTPUTS);
 	if (!clks)
 		goto err_free_data;
 
@@ -79,7 +71,7 @@ static void __init sun4i_pll2_setup(struct device_node *node,
 	}
 
 	/* Setup the gate part of the PLL2 */
-	gate = kzalloc(sizeof(struct clk_gate), GFP_KERNEL);
+	gate = kzalloc_obj(struct clk_gate);
 	if (!gate)
 		goto err_unregister_prediv;
 
@@ -88,7 +80,7 @@ static void __init sun4i_pll2_setup(struct device_node *node,
 	gate->lock = &sun4i_a10_pll2_lock;
 
 	/* Setup the multiplier part of the PLL2 */
-	mult = kzalloc(sizeof(struct clk_multiplier), GFP_KERNEL);
+	mult = kzalloc_obj(struct clk_multiplier);
 	if (!mult)
 		goto err_free_gate;
 

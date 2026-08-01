@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Kernel Debug Core
  *
@@ -22,21 +23,19 @@
  *
  * Original KGDB stub: David Grothe <dave@gcom.com>,
  * Tigran Aivazian <tigran@sco.com>
- *
- * This file is licensed under the terms of the GNU General Public License
- * version 2. This program is licensed "as is" without any warranty of any
- * kind, whether express or implied.
  */
 
 #include <linux/kernel.h>
 #include <linux/sched/signal.h>
+#include <linux/hex.h>
 #include <linux/kgdb.h>
 #include <linux/kdb.h>
 #include <linux/serial_core.h>
+#include <linux/string.h>
 #include <linux/reboot.h>
 #include <linux/uaccess.h>
 #include <asm/cacheflush.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include "debug_core.h"
 
 #define KGDB_MAX_THREAD_QUERY 17
@@ -247,7 +246,7 @@ char *kgdb_mem2hex(char *mem, char *buf, int count)
 	 */
 	tmp = buf + count;
 
-	err = probe_kernel_read(tmp, mem, count);
+	err = copy_from_kernel_nofault(tmp, mem, count);
 	if (err)
 		return NULL;
 	while (count > 0) {
@@ -283,7 +282,7 @@ int kgdb_hex2mem(char *buf, char *mem, int count)
 		*tmp_raw |= hex_to_bin(*tmp_hex--) << 4;
 	}
 
-	return probe_kernel_write(mem, tmp_raw, count);
+	return copy_to_kernel_nofault(mem, tmp_raw, count);
 }
 
 /*
@@ -321,7 +320,7 @@ int kgdb_hex2long(char **ptr, unsigned long *long_val)
 /*
  * Copy the binary array pointed to by buf into mem.  Fix $, #, and
  * 0x7d escaped with 0x7d. Return -EFAULT on failure or 0 on success.
- * The input buf is overwitten with the result to write to mem.
+ * The input buf is overwritten with the result to write to mem.
  */
 static int kgdb_ebin2mem(char *buf, char *mem, int count)
 {
@@ -335,7 +334,7 @@ static int kgdb_ebin2mem(char *buf, char *mem, int count)
 		size++;
 	}
 
-	return probe_kernel_write(mem, c, size);
+	return copy_to_kernel_nofault(mem, c, size);
 }
 
 #if DBG_MAX_REG_NUM > 0
@@ -518,7 +517,7 @@ static void gdb_get_regs_helper(struct kgdb_state *ks)
 	/*
 	 * All threads that don't have debuggerinfo should be
 	 * in schedule() sleeping, since all other CPUs
-	 * are in kgdb_wait, and thus have debuggerinfo.
+	 * are in kgdb_cpu_enter(), and thus have debuggerinfo.
 	 */
 	if (local_debuggerinfo) {
 		pt_regs_to_gdb_regs(gdb_regs, local_debuggerinfo);
@@ -550,7 +549,7 @@ static void gdb_cmd_setregs(struct kgdb_state *ks)
 		error_packet(remcom_out_buffer, -EINVAL);
 	} else {
 		gdb_regs_to_pt_regs(gdb_regs, ks->linux_regs);
-		strcpy(remcom_out_buffer, "OK");
+		strscpy(remcom_out_buffer, "OK");
 	}
 }
 
@@ -580,7 +579,7 @@ static void gdb_cmd_memwrite(struct kgdb_state *ks)
 	if (err)
 		error_packet(remcom_out_buffer, err);
 	else
-		strcpy(remcom_out_buffer, "OK");
+		strscpy(remcom_out_buffer, "OK");
 }
 
 #if DBG_MAX_REG_NUM > 0
@@ -595,7 +594,7 @@ static char *gdb_hex_reg_helper(int regnum, char *out)
 			    dbg_reg_def[i].size);
 }
 
-/* Handle the 'p' individual regster get */
+/* Handle the 'p' individual register get */
 static void gdb_cmd_reg_get(struct kgdb_state *ks)
 {
 	unsigned long regnum;
@@ -610,7 +609,7 @@ static void gdb_cmd_reg_get(struct kgdb_state *ks)
 	gdb_hex_reg_helper(regnum, remcom_out_buffer);
 }
 
-/* Handle the 'P' individual regster set */
+/* Handle the 'P' individual register set */
 static void gdb_cmd_reg_set(struct kgdb_state *ks)
 {
 	unsigned long regnum;
@@ -633,7 +632,7 @@ static void gdb_cmd_reg_set(struct kgdb_state *ks)
 	i = i / 2;
 	kgdb_hex2mem(ptr, (char *)gdb_regs, i);
 	dbg_set_reg(regnum, gdb_regs, ks->linux_regs);
-	strcpy(remcom_out_buffer, "OK");
+	strscpy(remcom_out_buffer, "OK");
 }
 #endif /* DBG_MAX_REG_NUM > 0 */
 
@@ -645,7 +644,7 @@ static void gdb_cmd_binwrite(struct kgdb_state *ks)
 	if (err)
 		error_packet(remcom_out_buffer, err);
 	else
-		strcpy(remcom_out_buffer, "OK");
+		strscpy(remcom_out_buffer, "OK");
 }
 
 /* Handle the 'D' or 'k', detach or kill packets */
@@ -659,7 +658,7 @@ static void gdb_cmd_detachkill(struct kgdb_state *ks)
 		if (error < 0) {
 			error_packet(remcom_out_buffer, error);
 		} else {
-			strcpy(remcom_out_buffer, "OK");
+			strscpy(remcom_out_buffer, "OK");
 			kgdb_connected = 0;
 		}
 		put_packet(remcom_out_buffer);
@@ -679,7 +678,7 @@ static int gdb_cmd_reboot(struct kgdb_state *ks)
 	/* For now, only honor R0 */
 	if (strcmp(remcom_in_buffer, "R0") == 0) {
 		printk(KERN_CRIT "Executing emergency reboot\n");
-		strcpy(remcom_out_buffer, "OK");
+		strscpy(remcom_out_buffer, "OK");
 		put_packet(remcom_out_buffer);
 
 		/*
@@ -725,7 +724,7 @@ static void gdb_cmd_query(struct kgdb_state *ks)
 			}
 		}
 
-		do_each_thread(g, p) {
+		for_each_process_thread(g, p) {
 			if (i >= ks->thr_query && !finished) {
 				int_to_threadref(thref, p->pid);
 				ptr = pack_threadid(ptr, thref);
@@ -735,14 +734,14 @@ static void gdb_cmd_query(struct kgdb_state *ks)
 					finished = 1;
 			}
 			i++;
-		} while_each_thread(g, p);
+		}
 
 		*(--ptr) = '\0';
 		break;
 
 	case 'C':
 		/* Current thread id */
-		strcpy(remcom_out_buffer, "QC");
+		strscpy(remcom_out_buffer, "QC");
 		ks->threadid = shadow_pid(current->pid);
 		int_to_threadref(thref, ks->threadid);
 		pack_threadid(remcom_out_buffer + 2, thref);
@@ -776,7 +775,7 @@ static void gdb_cmd_query(struct kgdb_state *ks)
 			int len = strlen(remcom_in_buffer + 6);
 
 			if ((len % 2) != 0) {
-				strcpy(remcom_out_buffer, "E01");
+				strscpy(remcom_out_buffer, "E01");
 				break;
 			}
 			kgdb_hex2mem(remcom_in_buffer + 6,
@@ -788,10 +787,23 @@ static void gdb_cmd_query(struct kgdb_state *ks)
 			kdb_parse(remcom_out_buffer);
 			kdb_common_deinit_state();
 
-			strcpy(remcom_out_buffer, "OK");
+			strscpy(remcom_out_buffer, "OK");
 		}
 		break;
 #endif
+#ifdef CONFIG_HAVE_ARCH_KGDB_QXFER_PKT
+	case 'S':
+		if (!strncmp(remcom_in_buffer, "qSupported:", 11))
+			strscpy(remcom_out_buffer, kgdb_arch_gdb_stub_feature);
+		break;
+	case 'X':
+		if (!strncmp(remcom_in_buffer, "qXfer:", 6))
+			kgdb_arch_handle_qxfer_pkt(remcom_in_buffer,
+						   remcom_out_buffer);
+		break;
+#endif
+	default:
+		break;
 	}
 }
 
@@ -812,7 +824,7 @@ static void gdb_cmd_task(struct kgdb_state *ks)
 		}
 		kgdb_usethread = thread;
 		ks->kgdb_usethreadid = ks->threadid;
-		strcpy(remcom_out_buffer, "OK");
+		strscpy(remcom_out_buffer, "OK");
 		break;
 	case 'c':
 		ptr = &remcom_in_buffer[2];
@@ -827,7 +839,7 @@ static void gdb_cmd_task(struct kgdb_state *ks)
 			}
 			kgdb_contthread = thread;
 		}
-		strcpy(remcom_out_buffer, "OK");
+		strscpy(remcom_out_buffer, "OK");
 		break;
 	}
 }
@@ -841,7 +853,7 @@ static void gdb_cmd_thread(struct kgdb_state *ks)
 	kgdb_hex2long(&ptr, &ks->threadid);
 	thread = getthread(ks->linux_regs, ks->threadid);
 	if (thread)
-		strcpy(remcom_out_buffer, "OK");
+		strscpy(remcom_out_buffer, "OK");
 	else
 		error_packet(remcom_out_buffer, -EINVAL);
 }
@@ -903,7 +915,7 @@ static void gdb_cmd_break(struct kgdb_state *ks)
 			(int) length, *bpt_type - '0');
 
 	if (error == 0)
-		strcpy(remcom_out_buffer, "OK");
+		strscpy(remcom_out_buffer, "OK");
 	else
 		error_packet(remcom_out_buffer, error);
 }
@@ -939,7 +951,7 @@ static int gdb_cmd_exception_pass(struct kgdb_state *ks)
 }
 
 /*
- * This function performs all gdbserial command procesing
+ * This function performs all gdbserial command processing
  */
 int gdb_serial_stub(struct kgdb_state *ks)
 {
@@ -1032,6 +1044,7 @@ int gdb_serial_stub(struct kgdb_state *ks)
 				gdb_cmd_detachkill(ks);
 				return DBG_PASS_EVENT;
 			}
+			fallthrough;
 #endif
 		case 'C': /* Exception passing */
 			tmp = gdb_cmd_exception_pass(ks);
@@ -1039,7 +1052,7 @@ int gdb_serial_stub(struct kgdb_state *ks)
 				goto default_handle;
 			if (tmp == 0)
 				break;
-			/* Fall through on tmp < 0 */
+			fallthrough;	/* on tmp < 0 */
 		case 'c': /* Continue packet */
 		case 's': /* Single step packet */
 			if (kgdb_contthread && kgdb_contthread != current) {
@@ -1047,8 +1060,7 @@ int gdb_serial_stub(struct kgdb_state *ks)
 				error_packet(remcom_out_buffer, -EINVAL);
 				break;
 			}
-			dbg_activate_sw_breakpoints();
-			/* Fall through to default processing */
+			fallthrough;	/* to default processing */
 		default:
 default_handle:
 			error = kgdb_arch_handle_exception(ks->ex_vector,
@@ -1094,10 +1106,10 @@ int gdbstub_state(struct kgdb_state *ks, char *cmd)
 		return error;
 	case 's':
 	case 'c':
-		strcpy(remcom_in_buffer, cmd);
+		strscpy(remcom_in_buffer, cmd, sizeof(remcom_in_buffer));
 		return 0;
 	case '$':
-		strcpy(remcom_in_buffer, cmd);
+		strscpy(remcom_in_buffer, cmd, sizeof(remcom_in_buffer));
 		gdbstub_use_prev_in_buf = strlen(remcom_in_buffer);
 		gdbstub_prev_in_buf_pos = 0;
 		return 0;

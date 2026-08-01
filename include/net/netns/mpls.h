@@ -6,6 +6,8 @@
 #ifndef __NETNS_MPLS_H__
 #define __NETNS_MPLS_H__
 
+#include <linux/types.h>
+
 struct mpls_route;
 struct ctl_table_header;
 
@@ -14,6 +16,8 @@ struct netns_mpls {
 	int default_ttl;
 	size_t platform_labels;
 	struct mpls_route __rcu * __rcu *platform_label;
+	struct mutex platform_mutex;
+	seqcount_mutex_t platform_label_seq;
 
 	struct ctl_table_header *ctl;
 };

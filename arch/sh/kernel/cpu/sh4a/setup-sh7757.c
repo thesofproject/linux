@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * SH7757 Setup
  *
  * Copyright (C) 2009, 2011  Renesas Solutions Corp.
  *
  *  based on setup-sh7785.c : Copyright (C) 2007  Paul Mundt
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/platform_device.h>
 #include <linux/init.h>
@@ -20,8 +17,12 @@
 #include <linux/sh_dma.h>
 #include <linux/sh_intc.h>
 #include <linux/usb/ohci_pdriver.h>
+
 #include <cpu/dma-register.h>
 #include <cpu/sh7757.h>
+
+#include <asm/mmzone.h>
+#include <asm/platform_early.h>
 
 static struct plat_sci_port scif2_platform_data = {
 	.scscr		= SCSCR_REIE,
@@ -770,7 +771,7 @@ static struct platform_device *sh7757_early_devices[] __initdata = {
 
 void __init plat_early_device_setup(void)
 {
-	early_platform_add_devices(sh7757_early_devices,
+	sh_early_platform_add_devices(sh7757_early_devices,
 				   ARRAY_SIZE(sh7757_early_devices));
 }
 

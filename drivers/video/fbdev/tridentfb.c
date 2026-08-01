@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Frame buffer driver for Trident TGUI, Blade and Image series
  *
@@ -15,6 +16,7 @@
  *	timing value tweaking so it looks good on every monitor in every mode
  */
 
+#include <linux/aperture.h>
 #include <linux/module.h>
 #include <linux/fb.h>
 #include <linux/init.h>
@@ -269,10 +271,9 @@ static int tridentfb_setup_ddc_bus(struct fb_info *info)
 {
 	struct tridentfb_par *par = info->par;
 
-	strlcpy(par->ddc_adapter.name, info->fix.id,
+	strscpy(par->ddc_adapter.name, info->fix.id,
 		sizeof(par->ddc_adapter.name));
 	par->ddc_adapter.owner		= THIS_MODULE;
-	par->ddc_adapter.class		= I2C_CLASS_DDC;
 	par->ddc_adapter.algo_data	= &par->ddc_algo;
 	par->ddc_adapter.dev.parent	= info->device;
 	if (is_oldclock(par->chip_id)) { /* not sure if this check is OK */
@@ -777,9 +778,6 @@ static int get_nativex(struct tridentfb_par *par)
 	case 3:
 		x = 800; y = 600;
 		break;
-	case 4:
-		x = 1400; y = 1050;
-		break;
 	case 1:
 	default:
 		x = 640;  y = 480;
@@ -998,6 +996,9 @@ static int tridentfb_check_var(struct fb_var_screeninfo *var,
 	int ramdac = 230000; /* 230MHz for most 3D chips */
 	debug("enter\n");
 
+	if (!var->pixclock)
+		return -EINVAL;
+
 	/* check color depth */
 	if (bpp == 24)
 		bpp = var->bits_per_pixel = 32;
@@ -1124,11 +1125,6 @@ static int tridentfb_pan_display(struct fb_var_screeninfo *var,
 static inline void shadowmode_on(struct tridentfb_par *par)
 {
 	write3CE(par, CyberControl, read3CE(par, CyberControl) | 0x81);
-}
-
-static inline void shadowmode_off(struct tridentfb_par *par)
-{
-	write3CE(par, CyberControl, read3CE(par, CyberControl) & 0x7E);
 }
 
 /* Set the hardware to the requested video mode */
@@ -1445,8 +1441,9 @@ static int tridentfb_blank(int blank_mode, struct fb_info *info)
 	return (blank_mode == FB_BLANK_NORMAL) ? 1 : 0;
 }
 
-static struct fb_ops tridentfb_ops = {
+static const struct fb_ops tridentfb_ops = {
 	.owner = THIS_MODULE,
+	__FB_DEFAULT_IOMEM_OPS_RDWR,
 	.fb_setcolreg = tridentfb_setcolreg,
 	.fb_pan_display = tridentfb_pan_display,
 	.fb_blank = tridentfb_blank,
@@ -1456,6 +1453,7 @@ static struct fb_ops tridentfb_ops = {
 	.fb_copyarea = tridentfb_copyarea,
 	.fb_imageblit = tridentfb_imageblit,
 	.fb_sync = tridentfb_sync,
+	__FB_DEFAULT_IOMEM_OPS_MMAP,
 };
 
 static int trident_pci_probe(struct pci_dev *dev,
@@ -1469,7 +1467,11 @@ static int trident_pci_probe(struct pci_dev *dev,
 	int chip_id;
 	bool found = false;
 
-	err = pci_enable_device(dev);
+	err = aperture_remove_conflicting_pci_devices(dev, "tridentfb");
+	if (err)
+		return err;
+
+	err = pcim_enable_device(dev);
 	if (err)
 		return err;
 
@@ -1558,7 +1560,7 @@ static int trident_pci_probe(struct pci_dev *dev,
 		return -1;
 	}
 
-	default_par->io_virt = ioremap_nocache(tridentfb_fix.mmio_start,
+	default_par->io_virt = ioremap(tridentfb_fix.mmio_start,
 					       tridentfb_fix.mmio_len);
 
 	if (!default_par->io_virt) {
@@ -1581,7 +1583,7 @@ static int trident_pci_probe(struct pci_dev *dev,
 		goto out_unmap1;
 	}
 
-	info->screen_base = ioremap_nocache(tridentfb_fix.smem_start,
+	info->screen_base = ioremap(tridentfb_fix.smem_start,
 					    tridentfb_fix.smem_len);
 
 	if (!info->screen_base) {
@@ -1599,7 +1601,7 @@ static int trident_pci_probe(struct pci_dev *dev,
 	info->fbops = &tridentfb_ops;
 	info->pseudo_palette = default_par->pseudo_pal;
 
-	info->flags = FBINFO_DEFAULT | FBINFO_HWACCEL_YPAN;
+	info->flags = FBINFO_HWACCEL_YPAN;
 	if (!noaccel && default_par->init_accel) {
 		info->flags &= ~FBINFO_HWACCEL_DISABLED;
 		info->flags |= FBINFO_HWACCEL_COPYAREA;
@@ -1629,7 +1631,7 @@ static int trident_pci_probe(struct pci_dev *dev,
 	}
 
 	if (noaccel) {
-		printk(KERN_DEBUG "disabling acceleration\n");
+		dev_dbg(&dev->dev, "disabling acceleration\n");
 		info->flags |= FBINFO_HWACCEL_DISABLED;
 		info->pixmap.scan_align = 1;
 	}
@@ -1691,7 +1693,7 @@ static int trident_pci_probe(struct pci_dev *dev,
 	info->var.activate |= FB_ACTIVATE_NOW;
 	info->device = &dev->dev;
 	if (register_framebuffer(info) < 0) {
-		printk(KERN_ERR "tridentfb: could not register framebuffer\n");
+		dev_err(&dev->dev, "could not register framebuffer\n");
 		fb_dealloc_cmap(&info->cmap);
 		err = -EINVAL;
 		goto out_unmap2;
@@ -1704,17 +1706,16 @@ static int trident_pci_probe(struct pci_dev *dev,
 	return 0;
 
 out_unmap2:
+	fb_destroy_modelist(&info->modelist);
 	if (default_par->ddc_registered)
 		i2c_del_adapter(&default_par->ddc_adapter);
 	kfree(info->pixmap.addr);
 	if (info->screen_base)
 		iounmap(info->screen_base);
-	release_mem_region(tridentfb_fix.smem_start, tridentfb_fix.smem_len);
 	disable_mmio(info->par);
 out_unmap1:
 	if (default_par->io_virt)
 		iounmap(default_par->io_virt);
-	release_mem_region(tridentfb_fix.mmio_start, tridentfb_fix.mmio_len);
 	framebuffer_release(info);
 	return err;
 }
@@ -1729,8 +1730,6 @@ static void trident_pci_remove(struct pci_dev *dev)
 		i2c_del_adapter(&par->ddc_adapter);
 	iounmap(par->io_virt);
 	iounmap(info->screen_base);
-	release_mem_region(tridentfb_fix.smem_start, tridentfb_fix.smem_len);
-	release_mem_region(tridentfb_fix.mmio_start, tridentfb_fix.mmio_len);
 	kfree(info->pixmap.addr);
 	fb_dealloc_cmap(&info->cmap);
 	framebuffer_release(info);
@@ -1738,28 +1737,28 @@ static void trident_pci_remove(struct pci_dev *dev)
 
 /* List of boards that we are trying to support */
 static const struct pci_device_id trident_devices[] = {
-	{PCI_VENDOR_ID_TRIDENT,	BLADE3D, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBERBLADEi7, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBERBLADEi7D, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBERBLADEi1, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBERBLADEi1D, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBERBLADEAi1, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBERBLADEAi1D, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBERBLADEE4, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	TGUI9440, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	TGUI9660, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	IMAGE975, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	IMAGE985, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBER9320, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBER9388, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBER9520, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBER9525DVD, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBER9397, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBER9397DVD, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBERBLADEXPAi1, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBERBLADEXPm8, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{PCI_VENDOR_ID_TRIDENT,	CYBERBLADEXPm16, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
-	{0,}
+	{ PCI_VDEVICE(TRIDENT, BLADE3D) },
+	{ PCI_VDEVICE(TRIDENT, CYBERBLADEi7) },
+	{ PCI_VDEVICE(TRIDENT, CYBERBLADEi7D) },
+	{ PCI_VDEVICE(TRIDENT, CYBERBLADEi1) },
+	{ PCI_VDEVICE(TRIDENT, CYBERBLADEi1D) },
+	{ PCI_VDEVICE(TRIDENT, CYBERBLADEAi1) },
+	{ PCI_VDEVICE(TRIDENT, CYBERBLADEAi1D) },
+	{ PCI_VDEVICE(TRIDENT, CYBERBLADEE4) },
+	{ PCI_VDEVICE(TRIDENT, TGUI9440) },
+	{ PCI_VDEVICE(TRIDENT, TGUI9660) },
+	{ PCI_VDEVICE(TRIDENT, IMAGE975) },
+	{ PCI_VDEVICE(TRIDENT, IMAGE985) },
+	{ PCI_VDEVICE(TRIDENT, CYBER9320) },
+	{ PCI_VDEVICE(TRIDENT, CYBER9388) },
+	{ PCI_VDEVICE(TRIDENT, CYBER9520) },
+	{ PCI_VDEVICE(TRIDENT, CYBER9525DVD) },
+	{ PCI_VDEVICE(TRIDENT, CYBER9397) },
+	{ PCI_VDEVICE(TRIDENT, CYBER9397DVD) },
+	{ PCI_VDEVICE(TRIDENT, CYBERBLADEXPAi1) },
+	{ PCI_VDEVICE(TRIDENT, CYBERBLADEXPm8) },
+	{ PCI_VDEVICE(TRIDENT, CYBERBLADEXPm16) },
+	{ }
 };
 
 MODULE_DEVICE_TABLE(pci, trident_devices);
@@ -1814,7 +1813,12 @@ static int __init tridentfb_init(void)
 {
 #ifndef MODULE
 	char *option = NULL;
+#endif
 
+	if (fb_modesetting_disabled("tridentfb"))
+		return -ENODEV;
+
+#ifndef MODULE
 	if (fb_get_options("tridentfb", &option))
 		return -ENODEV;
 	tridentfb_setup(option);

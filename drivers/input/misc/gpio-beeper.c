@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Generic GPIO beeper driver
  *
  * Copyright (C) 2013-2014 Alexander Shiyan <shc_work@mail.ru>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/input.h>
@@ -98,7 +94,7 @@ static int gpio_beeper_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_OF
 static const struct of_device_id gpio_beeper_of_match[] = {
-	{ .compatible = BEEPER_MODNAME, },
+	{ .compatible = "gpio-beeper", },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, gpio_beeper_of_match);

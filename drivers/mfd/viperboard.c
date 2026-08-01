@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Nano River Technologies viperboard driver
  *
@@ -9,12 +10,6 @@
  *  (C) 2012 by Lemonage GmbH
  *  Author: Lars Poeschel <poeschel@lemonage.de>
  *  All rights reserved.
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
  */
 
 #include <linux/kernel.h>
@@ -58,15 +53,13 @@ static int vprbrd_probe(struct usb_interface *interface,
 	int pipe, ret;
 
 	/* allocate memory for our device state and initialize it */
-	vb = kzalloc(sizeof(*vb), GFP_KERNEL);
-	if (vb == NULL) {
-		dev_err(&interface->dev, "Out of memory\n");
+	vb = kzalloc_obj(*vb);
+	if (!vb)
 		return -ENOMEM;
-	}
 
 	mutex_init(&vb->lock);
 
-	vb->usb_dev = usb_get_dev(interface_to_usbdev(interface));
+	vb->usb_dev = interface_to_usbdev(interface);
 
 	/* save our data pointer in this interface device */
 	usb_set_intfdata(interface, vb);
@@ -103,10 +96,8 @@ static int vprbrd_probe(struct usb_interface *interface,
 	return 0;
 
 error:
-	if (vb) {
-		usb_put_dev(vb->usb_dev);
+	if (vb)
 		kfree(vb);
-	}
 
 	return ret;
 }
@@ -117,7 +108,6 @@ static void vprbrd_disconnect(struct usb_interface *interface)
 
 	mfd_remove_devices(&interface->dev);
 	usb_set_intfdata(interface, NULL);
-	usb_put_dev(vb->usb_dev);
 	kfree(vb);
 
 	dev_dbg(&interface->dev, "disconnected\n");

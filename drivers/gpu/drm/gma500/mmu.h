@@ -1,15 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /**************************************************************************
  * Copyright (c) 2007-2011, Intel Corporation.
  * All Rights Reserved.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  **************************************************************************/
 
 #ifndef __MMU_H
@@ -78,8 +71,6 @@ extern int psb_mmu_insert_pfn_sequence(struct psb_mmu_pd *pd,
 				       uint32_t start_pfn,
 				       unsigned long address,
 				       uint32_t num_pages, int type);
-extern int psb_mmu_virtual_to_pfn(struct psb_mmu_pd *pd, uint32_t virtual,
-				  unsigned long *pfn);
 extern void psb_mmu_set_pd_context(struct psb_mmu_pd *pd, int hw_context);
 extern int psb_mmu_insert_pages(struct psb_mmu_pd *pd, struct page **pages,
 				unsigned long address, uint32_t num_pages,

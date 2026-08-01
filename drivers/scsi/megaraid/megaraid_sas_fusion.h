@@ -1,34 +1,20 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *  Linux MegaRAID driver for SAS based RAID controllers
  *
  *  Copyright (c) 2009-2013  LSI Corporation
- *  Copyright (c) 2013-2014  Avago Technologies
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2
- *  of the License, or (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *  Copyright (c) 2013-2016  Avago Technologies
+ *  Copyright (c) 2016-2018  Broadcom Inc.
  *
  *  FILE: megaraid_sas_fusion.h
  *
- *  Authors: Avago Technologies
+ *  Authors: Broadcom Inc.
  *           Manoj Jose
  *           Sumant Patro
- *           Kashyap Desai <kashyap.desai@avagotech.com>
- *           Sumit Saxena <sumit.saxena@avagotech.com>
+ *           Kashyap Desai <kashyap.desai@broadcom.com>
+ *           Sumit Saxena <sumit.saxena@broadcom.com>
  *
- *  Send feedback to: megaraidlinux.pdl@avagotech.com
- *
- *  Mail to: Avago Technologies, 350 West Trimble Road, Building 90,
- *  San Jose, California 95131
+ *  Send feedback to: megaraidlinux.pdl@broadcom.com
  */
 
 #ifndef _MEGARAID_SAS_FUSION_H_
@@ -89,7 +75,8 @@ enum MR_RAID_FLAGS_IO_SUB_TYPE {
 	MR_RAID_FLAGS_IO_SUB_TYPE_RMW_P        = 3,
 	MR_RAID_FLAGS_IO_SUB_TYPE_RMW_Q        = 4,
 	MR_RAID_FLAGS_IO_SUB_TYPE_CACHE_BYPASS = 6,
-	MR_RAID_FLAGS_IO_SUB_TYPE_LDIO_BW_LIMIT = 7
+	MR_RAID_FLAGS_IO_SUB_TYPE_LDIO_BW_LIMIT = 7,
+	MR_RAID_FLAGS_IO_SUB_TYPE_R56_DIV_OFFLOAD = 8
 };
 
 /*
@@ -102,7 +89,7 @@ enum MR_RAID_FLAGS_IO_SUB_TYPE {
 
 #define MEGASAS_FP_CMD_LEN	16
 #define MEGASAS_FUSION_IN_RESET 0
-#define THRESHOLD_REPLY_COUNT 50
+#define MEGASAS_FUSION_OCR_NOT_POSSIBLE 1
 #define RAID_1_PEER_CMDS 2
 #define JBOD_MAPS_COUNT	2
 #define MEGASAS_REDUCE_QD_COUNT 64
@@ -154,12 +141,15 @@ struct RAID_CONTEXT_G35 {
 	u16 timeout_value; /* 0x02 -0x03 */
 	u16		routing_flags;	// 0x04 -0x05 routing flags
 	u16 virtual_disk_tgt_id;   /* 0x06 -0x07 */
-	u64 reg_lock_row_lba;      /* 0x08 - 0x0F */
+	__le64 reg_lock_row_lba;      /* 0x08 - 0x0F */
 	u32 reg_lock_length;      /* 0x10 - 0x13 */
-	union {
-		u16 next_lmid; /* 0x14 - 0x15 */
-		u16	peer_smid;	/* used for the raid 1/10 fp writes */
-	} smid;
+	union {                     // flow specific
+		u16 rmw_op_index;   /* 0x14 - 0x15, R5/6 RMW: rmw operation index*/
+		u16 peer_smid;      /* 0x14 - 0x15, R1 Write: peer smid*/
+		u16 r56_arm_map;    /* 0x14 - 0x15, Unused [15], LogArm[14:10], P-Arm[9:5], Q-Arm[4:0] */
+
+	} flow_specific;
+
 	u8 ex_status;       /* 0x16 : OUT */
 	u8 status;          /* 0x17 status */
 	u8 raid_flags;		/* 0x18 resvd[7:6], ioSubType[5:4],
@@ -249,6 +239,13 @@ union RAID_CONTEXT_UNION {
 
 #define RAID_CTX_SPANARM_SPAN_SHIFT	(5)
 #define RAID_CTX_SPANARM_SPAN_MASK	(0xE0)
+
+/* LogArm[14:10], P-Arm[9:5], Q-Arm[4:0] */
+#define RAID_CTX_R56_Q_ARM_MASK		(0x1F)
+#define RAID_CTX_R56_P_ARM_SHIFT	(5)
+#define RAID_CTX_R56_P_ARM_MASK		(0x3E0)
+#define RAID_CTX_R56_LOG_ARM_SHIFT	(10)
+#define RAID_CTX_R56_LOG_ARM_MASK	(0x7C00)
 
 /* number of bits per index in U32 TrackStream */
 #define BITS_PER_INDEX_STREAM		4
@@ -529,7 +526,10 @@ struct MPI2_RAID_SCSI_IO_REQUEST {
 	__le32			Control;                        /* 0x3C */
 	union MPI2_SCSI_IO_CDB_UNION  CDB;			/* 0x40 */
 	union RAID_CONTEXT_UNION RaidContext;  /* 0x60 */
-	union MPI2_SGE_IO_UNION       SGL;			/* 0x80 */
+	union {
+		union MPI2_SGE_IO_UNION       SGL;		/* 0x80 */
+		DECLARE_FLEX_ARRAY(union MPI2_SGE_IO_UNION, SGLs);
+	};
 };
 
 /*
@@ -725,6 +725,8 @@ struct MPI2_IOC_INIT_REQUEST {
 #define MR_DCMD_CTRL_SHARED_HOST_MEM_ALLOC  0x010e8485   /* SR-IOV HB alloc*/
 #define MR_DCMD_LD_VF_MAP_GET_ALL_LDS_111   0x03200200
 #define MR_DCMD_LD_VF_MAP_GET_ALL_LDS       0x03150200
+#define MR_DCMD_CTRL_SNAPDUMP_GET_PROPERTIES	0x01200100
+#define MR_DCMD_CTRL_DEVICE_LIST_GET		0x01190600
 
 struct MR_DEV_HANDLE_INFO {
 	__le16	curDevHdl;
@@ -775,7 +777,7 @@ struct MR_SPAN_BLOCK_INFO {
 struct MR_CPU_AFFINITY_MASK {
 	union {
 		struct {
-#ifndef MFI_BIG_ENDIAN
+#ifndef __BIG_ENDIAN_BITFIELD
 		u8 hw_path:1;
 		u8 cpu0:1;
 		u8 cpu1:1;
@@ -866,9 +868,20 @@ struct MR_LD_RAID {
 	u8	regTypeReqOnRead;
 	__le16     seqNum;
 
-	struct {
-		u32 ldSyncRequired:1;
-		u32 reserved:31;
+struct {
+#ifndef __BIG_ENDIAN_BITFIELD
+	u32 ldSyncRequired:1;
+	u32 regTypeReqOnReadIsValid:1;
+	u32 isEPD:1;
+	u32 enableSLDOnAllRWIOs:1;
+	u32 reserved:28;
+#else
+	u32 reserved:28;
+	u32 enableSLDOnAllRWIOs:1;
+	u32 isEPD:1;
+	u32 regTypeReqOnReadIsValid:1;
+	u32 ldSyncRequired:1;
+#endif
 	} flags;
 
 	u8	LUN[8]; /* 0x24 8 byte LUN field used for SCSI IO's */
@@ -879,7 +892,7 @@ struct MR_LD_RAID {
 	/* 0x30 - 0x33, Logical block size for the LD */
 	u32 logical_block_length;
 	struct {
-#ifndef MFI_BIG_ENDIAN
+#ifndef __BIG_ENDIAN_BITFIELD
 	/* 0x34, P_I_EXPONENT from READ CAPACITY 16 */
 	u32 ld_pi_exp:4;
 	/* 0x34, LOGICAL BLOCKS PER PHYSICAL
@@ -932,7 +945,7 @@ struct MR_FW_RAID_MAP {
 	u8                  reserved2[7];
 	struct MR_ARRAY_INFO       arMapInfo[MAX_RAIDMAP_ARRAYS];
 	struct MR_DEV_HANDLE_INFO  devHndlInfo[MAX_RAIDMAP_PHYSICAL_DEVICES];
-	struct MR_LD_SPAN_MAP      ldSpanMap[1];
+	struct MR_LD_SPAN_MAP      ldSpanMap[];
 };
 
 struct IO_REQUEST_INFO {
@@ -952,6 +965,7 @@ struct IO_REQUEST_INFO {
 	u8  pd_after_lb;
 	u16 r1_alt_dev_handle; /* raid 1/10 only */
 	bool ra_capable;
+	u8 data_arms;
 };
 
 struct MR_LD_TARGET_SYNC {
@@ -1042,7 +1056,7 @@ struct MR_FW_RAID_MAP_DYNAMIC {
 	struct MR_RAID_MAP_DESC_TABLE
 			raid_map_desc_table[RAID_MAP_DESC_TYPE_COUNT];
 	/* Variable Size buffer containing all data */
-	u32 raid_map_desc_data[1];
+	u32 raid_map_desc_data[];
 }; /* Dynamicaly sized RAID MAp structure */
 
 #define IEEE_SGE_FLAGS_ADDR_MASK            (0x03)
@@ -1062,6 +1076,9 @@ struct MR_FW_RAID_MAP_DYNAMIC {
 #define MPI26_IEEE_SGE_FLAGS_NSF_MPI_IEEE       (0x00)
 #define MPI26_IEEE_SGE_FLAGS_NSF_NVME_PRP       (0x08)
 #define MPI26_IEEE_SGE_FLAGS_NSF_NVME_SGL       (0x10)
+
+#define MEGASAS_DEFAULT_SNAP_DUMP_WAIT_TIME 15
+#define MEGASAS_MAX_SNAP_DUMP_WAIT_TIME 60
 
 struct megasas_register_set;
 struct megasas_instance;
@@ -1133,9 +1150,13 @@ typedef struct LOG_BLOCK_SPAN_INFO {
 } LD_SPAN_INFO, *PLD_SPAN_INFO;
 
 struct MR_FW_RAID_MAP_ALL {
-	struct MR_FW_RAID_MAP raidMap;
-	struct MR_LD_SPAN_MAP ldSpanMap[MAX_LOGICAL_DRIVES - 1];
+	/* Must be last --ends in a flexible-array member. */
+	TRAILING_OVERLAP(struct MR_FW_RAID_MAP, raidMap, ldSpanMap,
+		struct MR_LD_SPAN_MAP ldSpanMap[MAX_LOGICAL_DRIVES];
+	);
 } __attribute__ ((packed));
+static_assert(offsetof(struct MR_FW_RAID_MAP_ALL, raidMap.ldSpanMap) ==
+	      offsetof(struct MR_FW_RAID_MAP_ALL, ldSpanMap));
 
 struct MR_DRV_RAID_MAP {
 	/* total size of this structure, including this field.
@@ -1168,7 +1189,7 @@ struct MR_DRV_RAID_MAP {
 		devHndlInfo[MAX_RAIDMAP_PHYSICAL_DEVICES_DYN];
 	u16 ldTgtIdToLd[MAX_LOGICAL_DRIVES_DYN];
 	struct MR_ARRAY_INFO arMapInfo[MAX_API_ARRAYS_DYN];
-	struct MR_LD_SPAN_MAP      ldSpanMap[1];
+	struct MR_LD_SPAN_MAP      ldSpanMap[];
 
 };
 
@@ -1177,10 +1198,13 @@ struct MR_DRV_RAID_MAP {
  * And it is mainly for code re-use purpose.
  */
 struct MR_DRV_RAID_MAP_ALL {
-
-	struct MR_DRV_RAID_MAP raidMap;
-	struct MR_LD_SPAN_MAP ldSpanMap[MAX_LOGICAL_DRIVES_DYN - 1];
+	/* Must be last --ends in a flexible-array member. */
+	TRAILING_OVERLAP(struct MR_DRV_RAID_MAP, raidMap, ldSpanMap,
+		struct MR_LD_SPAN_MAP ldSpanMap[MAX_LOGICAL_DRIVES_DYN];
+	);
 } __packed;
+static_assert(offsetof(struct MR_DRV_RAID_MAP_ALL, raidMap.ldSpanMap) ==
+	      offsetof(struct MR_DRV_RAID_MAP_ALL, ldSpanMap));
 
 
 
@@ -1235,7 +1259,7 @@ struct MR_PD_CFG_SEQ {
 struct MR_PD_CFG_SEQ_NUM_SYNC {
 	__le32 size;
 	__le32 count;
-	struct MR_PD_CFG_SEQ seq[1];
+	struct MR_PD_CFG_SEQ seq[];
 } __packed;
 
 /* stream detection */
@@ -1289,6 +1313,8 @@ struct fusion_context {
 	u8 *sense;
 	dma_addr_t sense_phys_addr;
 
+	atomic_t   busy_mq_poll[MAX_MSIX_QUEUES_FUSION];
+
 	dma_addr_t reply_frames_desc_phys[MAX_MSIX_QUEUES_FUSION];
 	union MPI2_REPLY_DESCRIPTORS_UNION *reply_frames_desc[MAX_MSIX_QUEUES_FUSION];
 	struct rdpq_alloc_detail rdpq_tracker[RDPQ_MAX_CHUNK_COUNT];
@@ -1333,7 +1359,8 @@ struct fusion_context {
 	dma_addr_t ioc_init_request_phys;
 	struct MPI2_IOC_INIT_REQUEST *ioc_init_request;
 	struct megasas_cmd *ioc_init_cmd;
-
+	bool pcie_bw_limitation;
+	bool r56_div_offload;
 };
 
 union desc_value {
@@ -1348,6 +1375,19 @@ enum CMD_RET_VALUES {
 	REFIRE_CMD = 1,
 	COMPLETE_CMD = 2,
 	RETURN_CMD = 3,
+};
+
+struct  MR_SNAPDUMP_PROPERTIES {
+	u8       offload_num;
+	u8       max_num_supported;
+	u8       cur_num_supported;
+	u8       trigger_min_num_sec_before_ocr;
+	u8       reserved[12];
+};
+
+struct megasas_debugfs_buffer {
+	void *buf;
+	u32 len;
 };
 
 void megasas_free_cmds_fusion(struct megasas_instance *instance);

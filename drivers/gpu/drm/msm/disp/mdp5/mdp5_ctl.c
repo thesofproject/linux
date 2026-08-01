@@ -1,16 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014-2015 The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
+#include <linux/string_choices.h>
 #include "mdp5_kms.h"
 #include "mdp5_ctl.h"
 
@@ -24,9 +17,6 @@
  * a specific data path ID - REG_MDP5_CTL_*(<id>, ...)
  *
  * Hardware capabilities determine the number of concurrent data paths
- *
- * In certain use cases (high-resolution dual pipe), one single CTL can be
- * shared across multiple CRTCs.
  */
 
 #define CTL_STAT_BUSY		0x1
@@ -53,11 +43,6 @@ struct mdp5_ctl {
 	u32 pending_ctl_trigger;
 
 	bool cursor_on;
-
-	/* True if the current CTL has FLUSH bits pending for single FLUSH. */
-	bool flush_pending;
-
-	struct mdp5_ctl *pair; /* Paired CTL to be flushed together */
 };
 
 struct mdp5_ctl_manager {
@@ -69,10 +54,6 @@ struct mdp5_ctl_manager {
 
 	/* to filter out non-present bits in the current hardware config */
 	u32 flush_hw_mask;
-
-	/* status for single FLUSH */
-	bool single_flush_supported;
-	u32 single_flush_pending_mask;
 
 	/* pool of CTLs + lock to protect resource allocation (ctls[i].busy) */
 	spinlock_t pool_lock;
@@ -224,7 +205,9 @@ static void send_start_signal(struct mdp5_ctl *ctl)
 /**
  * mdp5_ctl_set_encoder_state() - set the encoder state
  *
- * @enable: true, when encoder is ready for data streaming; false, otherwise.
+ * @ctl:      the CTL instance
+ * @pipeline: the encoder's INTF + MIXER configuration
+ * @enabled:  true, when encoder is ready for data streaming; false, otherwise.
  *
  * Note:
  * This encoder state is needed to trigger START signal (data path kickoff).
@@ -239,7 +222,7 @@ int mdp5_ctl_set_encoder_state(struct mdp5_ctl *ctl,
 		return -EINVAL;
 
 	ctl->encoder_enabled = enabled;
-	DBG("intf_%d: %s", intf->num, enabled ? "on" : "off");
+	DBG("intf_%d: %s", intf->num, str_on_off(enabled));
 
 	if (start_signal_needed(ctl, pipeline)) {
 		send_start_signal(ctl);
@@ -261,14 +244,14 @@ int mdp5_ctl_set_cursor(struct mdp5_ctl *ctl, struct mdp5_pipeline *pipeline,
 	u32 blend_cfg;
 	struct mdp5_hw_mixer *mixer = pipeline->mixer;
 
-	if (unlikely(WARN_ON(!mixer))) {
-		dev_err(ctl_mgr->dev->dev, "CTL %d cannot find LM",
+	if (WARN_ON(!mixer)) {
+		DRM_DEV_ERROR(ctl_mgr->dev->dev, "CTL %d cannot find LM",
 			ctl->id);
 		return -EINVAL;
 	}
 
 	if (pipeline->r_mixer) {
-		dev_err(ctl_mgr->dev->dev, "unsupported configuration");
+		DRM_DEV_ERROR(ctl_mgr->dev->dev, "unsupported configuration");
 		return -EINVAL;
 	}
 
@@ -490,33 +473,15 @@ static u32 fix_sw_flush(struct mdp5_ctl *ctl, struct mdp5_pipeline *pipeline,
 	return sw_mask;
 }
 
-static void fix_for_single_flush(struct mdp5_ctl *ctl, u32 *flush_mask,
-		u32 *flush_id)
-{
-	struct mdp5_ctl_manager *ctl_mgr = ctl->ctlm;
-
-	if (ctl->pair) {
-		DBG("CTL %d FLUSH pending mask %x", ctl->id, *flush_mask);
-		ctl->flush_pending = true;
-		ctl_mgr->single_flush_pending_mask |= (*flush_mask);
-		*flush_mask = 0;
-
-		if (ctl->pair->flush_pending) {
-			*flush_id = min_t(u32, ctl->id, ctl->pair->id);
-			*flush_mask = ctl_mgr->single_flush_pending_mask;
-
-			ctl->flush_pending = false;
-			ctl->pair->flush_pending = false;
-			ctl_mgr->single_flush_pending_mask = 0;
-
-			DBG("Single FLUSH mask %x,ID %d", *flush_mask,
-				*flush_id);
-		}
-	}
-}
-
 /**
  * mdp5_ctl_commit() - Register Flush
+ *
+ * @ctl:        the CTL instance
+ * @pipeline:   the encoder's INTF + MIXER configuration
+ * @flush_mask: bitmask of display controller hw blocks to flush
+ * @start:      if true, immediately update flush registers and set START
+ *              bit, otherwise accumulate flush_mask bits until we are
+ *              ready to START
  *
  * The flush register is used to indicate several registers are all
  * programmed, and are safe to update to the back copy of the double
@@ -553,8 +518,6 @@ u32 mdp5_ctl_commit(struct mdp5_ctl *ctl,
 
 	curr_ctl_flush_mask = flush_mask;
 
-	fix_for_single_flush(ctl, &flush_mask, &flush_id);
-
 	if (!start) {
 		ctl->flush_mask |= flush_mask;
 		return curr_ctl_flush_mask;
@@ -584,40 +547,6 @@ u32 mdp5_ctl_get_commit_status(struct mdp5_ctl *ctl)
 int mdp5_ctl_get_ctl_id(struct mdp5_ctl *ctl)
 {
 	return WARN_ON(!ctl) ? -EINVAL : ctl->id;
-}
-
-/*
- * mdp5_ctl_pair() - Associate 2 booked CTLs for single FLUSH
- */
-int mdp5_ctl_pair(struct mdp5_ctl *ctlx, struct mdp5_ctl *ctly, bool enable)
-{
-	struct mdp5_ctl_manager *ctl_mgr = ctlx->ctlm;
-	struct mdp5_kms *mdp5_kms = get_kms(ctl_mgr);
-
-	/* do nothing silently if hw doesn't support */
-	if (!ctl_mgr->single_flush_supported)
-		return 0;
-
-	if (!enable) {
-		ctlx->pair = NULL;
-		ctly->pair = NULL;
-		mdp5_write(mdp5_kms, REG_MDP5_SPARE_0, 0);
-		return 0;
-	} else if ((ctlx->pair != NULL) || (ctly->pair != NULL)) {
-		dev_err(ctl_mgr->dev->dev, "CTLs already paired\n");
-		return -EINVAL;
-	} else if (!(ctlx->status & ctly->status & CTL_STAT_BOOKED)) {
-		dev_err(ctl_mgr->dev->dev, "Only pair booked CTLs\n");
-		return -EINVAL;
-	}
-
-	ctlx->pair = ctly;
-	ctly->pair = ctlx;
-
-	mdp5_write(mdp5_kms, REG_MDP5_SPARE_0,
-		   MDP5_SPARE_0_SPLIT_DPL_SINGLE_FLUSH_EN);
-
-	return 0;
 }
 
 /*
@@ -652,7 +581,7 @@ struct mdp5_ctl *mdp5_ctlm_request(struct mdp5_ctl_manager *ctl_mgr,
 		if ((ctl_mgr->ctls[c].status & checkm) == match)
 			goto found;
 
-	dev_err(ctl_mgr->dev->dev, "No more CTL available!");
+	DRM_DEV_ERROR(ctl_mgr->dev->dev, "No more CTL available!");
 	goto unlock;
 
 found:
@@ -680,34 +609,25 @@ void mdp5_ctlm_hw_reset(struct mdp5_ctl_manager *ctl_mgr)
 	}
 }
 
-void mdp5_ctlm_destroy(struct mdp5_ctl_manager *ctl_mgr)
-{
-	kfree(ctl_mgr);
-}
-
 struct mdp5_ctl_manager *mdp5_ctlm_init(struct drm_device *dev,
 		void __iomem *mmio_base, struct mdp5_cfg_handler *cfg_hnd)
 {
 	struct mdp5_ctl_manager *ctl_mgr;
 	const struct mdp5_cfg_hw *hw_cfg = mdp5_cfg_get_hw_config(cfg_hnd);
-	int rev = mdp5_cfg_get_hw_rev(cfg_hnd);
-	unsigned dsi_cnt = 0;
 	const struct mdp5_ctl_block *ctl_cfg = &hw_cfg->ctl;
 	unsigned long flags;
 	int c, ret;
 
-	ctl_mgr = kzalloc(sizeof(*ctl_mgr), GFP_KERNEL);
+	ctl_mgr = devm_kzalloc(dev->dev, sizeof(*ctl_mgr), GFP_KERNEL);
 	if (!ctl_mgr) {
-		dev_err(dev->dev, "failed to allocate CTL manager\n");
-		ret = -ENOMEM;
-		goto fail;
+		DRM_DEV_ERROR(dev->dev, "failed to allocate CTL manager\n");
+		return ERR_PTR(-ENOMEM);
 	}
 
-	if (unlikely(WARN_ON(ctl_cfg->count > MAX_CTL))) {
-		dev_err(dev->dev, "Increase static pool size to at least %d\n",
+	if (WARN_ON(ctl_cfg->count > MAX_CTL)) {
+		DRM_DEV_ERROR(dev->dev, "Increase static pool size to at least %d\n",
 				ctl_cfg->count);
-		ret = -ENOSPC;
-		goto fail;
+		return ERR_PTR(-ENOSPC);
 	}
 
 	/* initialize the CTL manager: */
@@ -723,10 +643,10 @@ struct mdp5_ctl_manager *mdp5_ctlm_init(struct drm_device *dev,
 		struct mdp5_ctl *ctl = &ctl_mgr->ctls[c];
 
 		if (WARN_ON(!ctl_cfg->base[c])) {
-			dev_err(dev->dev, "CTL_%d: base is null!\n", c);
+			DRM_DEV_ERROR(dev->dev, "CTL_%d: base is null!\n", c);
 			ret = -EINVAL;
 			spin_unlock_irqrestore(&ctl_mgr->pool_lock, flags);
-			goto fail;
+			return ERR_PTR(ret);
 		}
 		ctl->ctlm = ctl_mgr;
 		ctl->id = c;
@@ -735,29 +655,8 @@ struct mdp5_ctl_manager *mdp5_ctlm_init(struct drm_device *dev,
 		spin_lock_init(&ctl->hw_lock);
 	}
 
-	/*
-	 * In Dual DSI case, CTL0 and CTL1 are always assigned to two DSI
-	 * interfaces to support single FLUSH feature (Flush CTL0 and CTL1 when
-	 * only write into CTL0's FLUSH register) to keep two DSI pipes in sync.
-	 * Single FLUSH is supported from hw rev v3.0.
-	 */
-	for (c = 0; c < ARRAY_SIZE(hw_cfg->intf.connect); c++)
-		if (hw_cfg->intf.connect[c] == INTF_DSI)
-			dsi_cnt++;
-	if ((rev >= 3) && (dsi_cnt > 1)) {
-		ctl_mgr->single_flush_supported = true;
-		/* Reserve CTL0/1 for INTF1/2 */
-		ctl_mgr->ctls[0].status |= CTL_STAT_BOOKED;
-		ctl_mgr->ctls[1].status |= CTL_STAT_BOOKED;
-	}
 	spin_unlock_irqrestore(&ctl_mgr->pool_lock, flags);
 	DBG("Pool of %d CTLs created.", ctl_mgr->nctl);
 
 	return ctl_mgr;
-
-fail:
-	if (ctl_mgr)
-		mdp5_ctlm_destroy(ctl_mgr);
-
-	return ERR_PTR(ret);
 }

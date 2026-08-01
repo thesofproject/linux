@@ -1,8 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
 config HFSPLUS_FS
 	tristate "Apple Extended HFS file system support"
 	depends on BLOCK
+	select BUFFER_HEAD
 	select NLS
 	select NLS_UTF8
+	select LEGACY_DIRECT_IO
 	help
 	  If you say Y here, you will be able to mount extended format
 	  Macintosh-formatted hard drive partitions with full read-write access.
@@ -12,17 +15,17 @@ config HFSPLUS_FS
 	  data forks and creator codes, but it also has several UNIX
 	  style features such as file ownership and permissions.
 
-config HFSPLUS_FS_POSIX_ACL
-	bool "HFS+ POSIX Access Control Lists"
-	depends on HFSPLUS_FS
-	select FS_POSIX_ACL
+config HFSPLUS_KUNIT_TEST
+	tristate "KUnit tests for HFS+ filesystem" if !KUNIT_ALL_TESTS
+	depends on HFSPLUS_FS && KUNIT
+	default KUNIT_ALL_TESTS
 	help
-	  POSIX Access Control Lists (ACLs) support permissions for users and
-	  groups beyond the owner/group/world scheme.
+	  This builds KUnit tests for the HFS+ filesystem.
 
-	  It needs to understand that POSIX ACLs are treated only under
-	  Linux. POSIX ACLs doesn't mean something under Mac OS X.
-	  Mac OS X beginning with version 10.4 ("Tiger") support NFSv4 ACLs,
-	  which are part of the NFSv4 standard.
+	  KUnit tests run during boot and output the results to the debug
+	  log in TAP format (https://testanything.org/). Only useful for
+	  kernel devs running KUnit test harness and are not for inclusion
+	  into a production build.
 
-	  If you don't know what Access Control Lists are, say N
+	  For more information on KUnit and unit tests in general please
+	  refer to the KUnit documentation in Documentation/dev-tools/kunit/.

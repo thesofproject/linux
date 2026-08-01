@@ -14,6 +14,14 @@
 #  define __NR_bpf 349
 # elif defined(__s390__)
 #  define __NR_bpf 351
+# elif defined(__mips__) && defined(_ABIO32)
+#  define __NR_bpf 4355
+# elif defined(__mips__) && defined(_ABIN32)
+#  define __NR_bpf 6319
+# elif defined(__mips__) && defined(_ABI64)
+#  define __NR_bpf 5315
+# elif defined(__loongarch__)
+#  define __NR_bpf 280
 # else
 #  error __NR_bpf not defined. libbpf does not support your arch.
 # endif
@@ -38,5 +46,5 @@ int main(void)
 	 * Test existence of __NR_bpf and BPF_PROG_LOAD.
 	 * This call should fail if we run the testcase.
 	 */
-	return syscall(__NR_bpf, BPF_PROG_LOAD, &attr, sizeof(attr));
+	return syscall(__NR_bpf, BPF_PROG_LOAD, &attr, sizeof(attr)) == 0;
 }

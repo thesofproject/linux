@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Signature verification with an asymmetric key
  *
- * See Documentation/security/asymmetric-keys.txt
+ * See Documentation/crypto/asymmetric-keys.rst
  *
  * Copyright (C) 2012 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt) "SIG: "fmt
@@ -16,7 +12,9 @@
 #include <linux/export.h>
 #include <linux/err.h>
 #include <linux/slab.h>
+#include <linux/keyctl.h>
 #include <crypto/public_key.h>
+#include <keys/user-type.h>
 #include "asymmetric_keys.h"
 
 /*
@@ -30,11 +28,42 @@ void public_key_signature_free(struct public_key_signature *sig)
 		for (i = 0; i < ARRAY_SIZE(sig->auth_ids); i++)
 			kfree(sig->auth_ids[i]);
 		kfree(sig->s);
-		kfree(sig->digest);
+		if (sig->m_free)
+			kfree(sig->m);
 		kfree(sig);
 	}
 }
 EXPORT_SYMBOL_GPL(public_key_signature_free);
+
+/**
+ * query_asymmetric_key - Get information about an asymmetric key.
+ * @params: Various parameters.
+ * @info: Where to put the information.
+ */
+int query_asymmetric_key(const struct kernel_pkey_params *params,
+			 struct kernel_pkey_query *info)
+{
+	const struct asymmetric_key_subtype *subtype;
+	struct key *key = params->key;
+	int ret;
+
+	pr_devel("==>%s()\n", __func__);
+
+	if (key->type != &key_type_asymmetric)
+		return -EINVAL;
+	subtype = asymmetric_key_subtype(key);
+	if (!subtype ||
+	    !key->payload.data[0])
+		return -EINVAL;
+	if (!subtype->query)
+		return -ENOTSUPP;
+
+	ret = subtype->query(params, info);
+
+	pr_devel("<==%s() = %d\n", __func__, ret);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(query_asymmetric_key);
 
 /**
  * verify_signature - Initiate the use of an asymmetric key to verify a signature

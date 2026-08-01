@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* CAN bus driver for Holt HI3110 CAN Controller with SPI Interface
  *
  * Copyright(C) Timesys Corporation 2016
@@ -11,29 +12,23 @@
  * - Sascha Hauer, Marc Kleine-Budde, Pengutronix
  * - Simon Kallweit, intefo AG
  * Copyright 2007
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/can/core.h>
 #include <linux/can/dev.h>
-#include <linux/can/led.h>
 #include <linux/clk.h>
 #include <linux/completion.h>
 #include <linux/delay.h>
 #include <linux/device.h>
-#include <linux/dma-mapping.h>
+#include <linux/ethtool.h>
 #include <linux/freezer.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/netdevice.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/spi/spi.h>
@@ -129,10 +124,6 @@
 
 #define DEVICE_NAME "hi3110"
 
-static int hi3110_enable_dma = 1; /* Enable SPI DMA. Default: 1 (On) */
-module_param(hi3110_enable_dma, int, 0444);
-MODULE_PARM_DESC(hi3110_enable_dma, "Enable SPI DMA. Default: 1 (On)");
-
 static const struct can_bittiming_const hi3110_bittiming_const = {
 	.name = DEVICE_NAME,
 	.tseg1_min = 2,
@@ -159,11 +150,8 @@ struct hi3110_priv {
 
 	u8 *spi_tx_buf;
 	u8 *spi_rx_buf;
-	dma_addr_t spi_tx_dma;
-	dma_addr_t spi_rx_dma;
 
 	struct sk_buff *tx_skb;
-	int tx_len;
 
 	struct workqueue_struct *wq;
 	struct work_struct tx_work;
@@ -176,6 +164,8 @@ struct hi3110_priv {
 #define HI3110_AFTER_SUSPEND_POWER 4
 #define HI3110_AFTER_SUSPEND_RESTART 8
 	int restart_tx;
+	bool tx_busy;
+
 	struct regulator *power;
 	struct regulator *transceiver;
 	struct clk *clk;
@@ -185,14 +175,13 @@ static void hi3110_clean(struct net_device *net)
 {
 	struct hi3110_priv *priv = netdev_priv(net);
 
-	if (priv->tx_skb || priv->tx_len)
+	if (priv->tx_skb || priv->tx_busy)
 		net->stats.tx_errors++;
-	if (priv->tx_skb)
-		dev_kfree_skb(priv->tx_skb);
-	if (priv->tx_len)
-		can_free_echo_skb(priv->net, 0);
+	dev_kfree_skb(priv->tx_skb);
+	if (priv->tx_busy)
+		can_free_echo_skb(priv->net, 0, NULL);
 	priv->tx_skb = NULL;
-	priv->tx_len = 0;
+	priv->tx_busy = false;
 }
 
 /* Note about handling of error return of hi3110_spi_trans: accessing
@@ -220,13 +209,6 @@ static int hi3110_spi_trans(struct spi_device *spi, int len)
 	int ret;
 
 	spi_message_init(&m);
-
-	if (hi3110_enable_dma) {
-		t.tx_dma = priv->spi_tx_dma;
-		t.rx_dma = priv->spi_rx_dma;
-		m.is_dma_mapped = 1;
-	}
-
 	spi_message_add_tail(&t, &m);
 
 	ret = spi_sync(spi, &m);
@@ -236,7 +218,7 @@ static int hi3110_spi_trans(struct spi_device *spi, int len)
 	return ret;
 }
 
-static u8 hi3110_cmd(struct spi_device *spi, u8 command)
+static int hi3110_cmd(struct spi_device *spi, u8 command)
 {
 	struct hi3110_priv *priv = spi_get_drvdata(spi);
 
@@ -295,13 +277,13 @@ static void hi3110_hw_tx(struct spi_device *spi, struct can_frame *frame)
 			((frame->can_id & CAN_EFF_MASK) << 1) |
 			((frame->can_id & CAN_RTR_FLAG) ? 1 : 0);
 
-		buf[HI3110_FIFO_EXT_DLC_OFF] = frame->can_dlc;
+		buf[HI3110_FIFO_EXT_DLC_OFF] = frame->len;
 
 		memcpy(buf + HI3110_FIFO_EXT_DATA_OFF,
-		       frame->data, frame->can_dlc);
+		       frame->data, frame->len);
 
 		hi3110_hw_tx_frame(spi, buf, HI3110_TX_EXT_BUF_LEN -
-				   (HI3110_CAN_MAX_DATA_LEN - frame->can_dlc));
+				   (HI3110_CAN_MAX_DATA_LEN - frame->len));
 	} else {
 		/* Standard frame */
 		buf[HI3110_FIFO_ID_OFF] =   (frame->can_id & CAN_SFF_MASK) >> 3;
@@ -309,13 +291,13 @@ static void hi3110_hw_tx(struct spi_device *spi, struct can_frame *frame)
 			((frame->can_id & CAN_SFF_MASK) << 5) |
 			((frame->can_id & CAN_RTR_FLAG) ? (1 << 4) : 0);
 
-		buf[HI3110_FIFO_STD_DLC_OFF] = frame->can_dlc;
+		buf[HI3110_FIFO_STD_DLC_OFF] = frame->len;
 
 		memcpy(buf + HI3110_FIFO_STD_DATA_OFF,
-		       frame->data, frame->can_dlc);
+		       frame->data, frame->len);
 
 		hi3110_hw_tx_frame(spi, buf, HI3110_TX_STD_BUF_LEN -
-				   (HI3110_CAN_MAX_DATA_LEN - frame->can_dlc));
+				   (HI3110_CAN_MAX_DATA_LEN - frame->len));
 	}
 }
 
@@ -359,20 +341,19 @@ static void hi3110_hw_rx(struct spi_device *spi)
 	}
 
 	/* Data length */
-	frame->can_dlc = get_can_dlc(buf[HI3110_FIFO_WOTIME_DLC_OFF] & 0x0F);
+	frame->len = can_cc_dlc2len(buf[HI3110_FIFO_WOTIME_DLC_OFF] & 0x0F);
 
-	if (buf[HI3110_FIFO_WOTIME_ID_OFF + 3] & HI3110_FIFO_WOTIME_ID_RTR)
+	if (buf[HI3110_FIFO_WOTIME_ID_OFF + 3] & HI3110_FIFO_WOTIME_ID_RTR) {
 		frame->can_id |= CAN_RTR_FLAG;
-	else
+	} else {
 		memcpy(frame->data, buf + HI3110_FIFO_WOTIME_DAT_OFF,
-		       frame->can_dlc);
+		       frame->len);
 
+		priv->net->stats.rx_bytes += frame->len;
+	}
 	priv->net->stats.rx_packets++;
-	priv->net->stats.rx_bytes += frame->can_dlc;
 
-	can_led_event(priv->net, CAN_LED_EVENT_RX);
-
-	netif_rx_ni(skb);
+	netif_rx(skb);
 }
 
 static void hi3110_hw_sleep(struct spi_device *spi)
@@ -386,12 +367,12 @@ static netdev_tx_t hi3110_hard_start_xmit(struct sk_buff *skb,
 	struct hi3110_priv *priv = netdev_priv(net);
 	struct spi_device *spi = priv->spi;
 
-	if (priv->tx_skb || priv->tx_len) {
+	if (priv->tx_skb || priv->tx_busy) {
 		dev_err(&spi->dev, "hard_xmit called while tx busy\n");
 		return NETDEV_TX_BUSY;
 	}
 
-	if (can_dropped_invalid_skb(net, skb))
+	if (can_dev_dropped_skb(net, skb))
 		return NETDEV_TX_OK;
 
 	netif_stop_queue(net);
@@ -563,8 +544,6 @@ static int hi3110_stop(struct net_device *net)
 
 	priv->force_quit = 1;
 	free_irq(spi->irq, priv);
-	destroy_workqueue(priv->wq);
-	priv->wq = NULL;
 
 	mutex_lock(&priv->hi3110_lock);
 
@@ -582,8 +561,6 @@ static int hi3110_stop(struct net_device *net)
 	priv->can.state = CAN_STATE_STOPPED;
 
 	mutex_unlock(&priv->hi3110_lock);
-
-	can_led_event(net, CAN_LED_EVENT_STOP);
 
 	return 0;
 }
@@ -603,8 +580,8 @@ static void hi3110_tx_work_handler(struct work_struct *ws)
 		} else {
 			frame = (struct can_frame *)priv->tx_skb->data;
 			hi3110_hw_tx(spi, frame);
-			priv->tx_len = 1 + frame->can_dlc;
-			can_put_echo_skb(priv->tx_skb, net, 0);
+			priv->tx_busy = true;
+			can_put_echo_skb(priv->tx_skb, net, 0, 0);
 			priv->tx_skb = NULL;
 		}
 	}
@@ -683,25 +660,27 @@ static irqreturn_t hi3110_can_ist(int irq, void *dev_id)
 			u8 rxerr, txerr;
 
 			skb = alloc_can_err_skb(net, &cf);
-			if (!skb)
-				break;
 
 			txerr = hi3110_read(spi, HI3110_READ_TEC);
 			rxerr = hi3110_read(spi, HI3110_READ_REC);
-			cf->data[6] = txerr;
-			cf->data[7] = rxerr;
 			tx_state = txerr >= rxerr ? new_state : 0;
 			rx_state = txerr <= rxerr ? new_state : 0;
 			can_change_state(net, cf, tx_state, rx_state);
-			netif_rx_ni(skb);
 
 			if (new_state == CAN_STATE_BUS_OFF) {
+				if (skb)
+					netif_rx(skb);
 				can_bus_off(net);
 				if (priv->can.restart_ms == 0) {
 					priv->force_quit = 1;
 					hi3110_hw_sleep(spi);
 					break;
 				}
+			} else if (skb) {
+				cf->can_id |= CAN_ERR_CNT;
+				cf->data[6] = txerr;
+				cf->data[7] = rxerr;
+				netif_rx(skb);
 			}
 		}
 
@@ -714,38 +693,45 @@ static irqreturn_t hi3110_can_ist(int irq, void *dev_id)
 			/* Check for protocol errors */
 			if (eflag & HI3110_ERR_PROTOCOL_MASK) {
 				skb = alloc_can_err_skb(net, &cf);
-				if (!skb)
-					break;
+				if (skb)
+					cf->can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
 
-				cf->can_id |= CAN_ERR_PROT | CAN_ERR_BUSERROR;
 				priv->can.can_stats.bus_error++;
-				priv->net->stats.rx_errors++;
-				if (eflag & HI3110_ERR_BITERR)
-					cf->data[2] |= CAN_ERR_PROT_BIT;
-				else if (eflag & HI3110_ERR_FRMERR)
-					cf->data[2] |= CAN_ERR_PROT_FORM;
-				else if (eflag & HI3110_ERR_STUFERR)
-					cf->data[2] |= CAN_ERR_PROT_STUFF;
-				else if (eflag & HI3110_ERR_CRCERR)
-					cf->data[3] |= CAN_ERR_PROT_LOC_CRC_SEQ;
-				else if (eflag & HI3110_ERR_ACKERR)
-					cf->data[3] |= CAN_ERR_PROT_LOC_ACK;
+				if (eflag & HI3110_ERR_BITERR) {
+					priv->net->stats.tx_errors++;
+					if (skb)
+						cf->data[2] |= CAN_ERR_PROT_BIT;
+				} else if (eflag & HI3110_ERR_FRMERR) {
+					priv->net->stats.rx_errors++;
+					if (skb)
+						cf->data[2] |= CAN_ERR_PROT_FORM;
+				} else if (eflag & HI3110_ERR_STUFERR) {
+					priv->net->stats.rx_errors++;
+					if (skb)
+						cf->data[2] |= CAN_ERR_PROT_STUFF;
+				} else if (eflag & HI3110_ERR_CRCERR) {
+					priv->net->stats.rx_errors++;
+					if (skb)
+						cf->data[3] |= CAN_ERR_PROT_LOC_CRC_SEQ;
+				} else if (eflag & HI3110_ERR_ACKERR) {
+					priv->net->stats.tx_errors++;
+					if (skb)
+						cf->data[3] |= CAN_ERR_PROT_LOC_ACK;
+				}
 
-				cf->data[6] = hi3110_read(spi, HI3110_READ_TEC);
-				cf->data[7] = hi3110_read(spi, HI3110_READ_REC);
 				netdev_dbg(priv->net, "Bus Error\n");
-				netif_rx_ni(skb);
+				if (skb) {
+					cf->data[6] = hi3110_read(spi, HI3110_READ_TEC);
+					cf->data[7] = hi3110_read(spi, HI3110_READ_REC);
+					netif_rx(skb);
+				}
 			}
 		}
 
-		if (priv->tx_len && statf & HI3110_STAT_TXMTY) {
+		if (priv->tx_busy && statf & HI3110_STAT_TXMTY) {
 			net->stats.tx_packets++;
-			net->stats.tx_bytes += priv->tx_len - 1;
-			can_led_event(net, CAN_LED_EVENT_TX);
-			if (priv->tx_len) {
-				can_get_echo_skb(net, 0);
-				priv->tx_len = 0;
-			}
+			net->stats.tx_bytes += can_get_echo_skb(net, 0, NULL);
+			priv->tx_busy = false;
 			netif_wake_queue(net);
 		}
 
@@ -760,7 +746,7 @@ static int hi3110_open(struct net_device *net)
 {
 	struct hi3110_priv *priv = netdev_priv(net);
 	struct spi_device *spi = priv->spi;
-	unsigned long flags = IRQF_ONESHOT | IRQF_TRIGGER_RISING;
+	unsigned long flags = IRQF_ONESHOT | IRQF_TRIGGER_HIGH;
 	int ret;
 
 	ret = open_candev(net);
@@ -768,11 +754,13 @@ static int hi3110_open(struct net_device *net)
 		return ret;
 
 	mutex_lock(&priv->hi3110_lock);
-	hi3110_power_enable(priv->transceiver, 1);
+	ret = hi3110_power_enable(priv->transceiver, 1);
+	if (ret)
+		goto out_close_candev;
 
 	priv->force_quit = 0;
 	priv->tx_skb = NULL;
-	priv->tx_len = 0;
+	priv->tx_busy = false;
 
 	ret = request_threaded_irq(spi->irq, NULL, hi3110_can_ist,
 				   flags, DEVICE_NAME, priv);
@@ -781,40 +769,29 @@ static int hi3110_open(struct net_device *net)
 		goto out_close;
 	}
 
-	priv->wq = alloc_workqueue("hi3110_wq", WQ_FREEZABLE | WQ_MEM_RECLAIM,
-				   0);
-	if (!priv->wq) {
-		ret = -ENOMEM;
-		goto out_free_irq;
-	}
-	INIT_WORK(&priv->tx_work, hi3110_tx_work_handler);
-	INIT_WORK(&priv->restart_work, hi3110_restart_work_handler);
-
 	ret = hi3110_hw_reset(spi);
 	if (ret)
-		goto out_free_wq;
+		goto out_free_irq;
 
 	ret = hi3110_setup(net);
 	if (ret)
-		goto out_free_wq;
+		goto out_free_irq;
 
 	ret = hi3110_set_normal_mode(spi);
 	if (ret)
-		goto out_free_wq;
+		goto out_free_irq;
 
-	can_led_event(net, CAN_LED_EVENT_OPEN);
 	netif_wake_queue(net);
 	mutex_unlock(&priv->hi3110_lock);
 
 	return 0;
 
- out_free_wq:
-	destroy_workqueue(priv->wq);
  out_free_irq:
 	free_irq(spi->irq, priv);
 	hi3110_hw_sleep(spi);
  out_close:
 	hi3110_power_enable(priv->transceiver, 0);
+ out_close_candev:
 	close_candev(net);
 	mutex_unlock(&priv->hi3110_lock);
 	return ret;
@@ -824,6 +801,10 @@ static const struct net_device_ops hi3110_netdev_ops = {
 	.ndo_open = hi3110_open,
 	.ndo_stop = hi3110_stop,
 	.ndo_start_xmit = hi3110_hard_start_xmit,
+};
+
+static const struct ethtool_ops hi3110_ethtool_ops = {
+	.get_ts_info = ethtool_op_get_ts_info,
 };
 
 static const struct of_device_id hi3110_of_match[] = {
@@ -846,19 +827,24 @@ MODULE_DEVICE_TABLE(spi, hi3110_id_table);
 
 static int hi3110_can_probe(struct spi_device *spi)
 {
-	const struct of_device_id *of_id = of_match_device(hi3110_of_match,
-							   &spi->dev);
+	struct device *dev = &spi->dev;
 	struct net_device *net;
 	struct hi3110_priv *priv;
 	struct clk *clk;
-	int freq, ret;
+	u32 freq;
+	int ret;
 
-	clk = devm_clk_get(&spi->dev, NULL);
-	if (IS_ERR(clk)) {
-		dev_err(&spi->dev, "no CAN clock source defined\n");
-		return PTR_ERR(clk);
+	clk = devm_clk_get_optional(&spi->dev, NULL);
+	if (IS_ERR(clk))
+		return dev_err_probe(dev, PTR_ERR(clk), "no CAN clock source defined\n");
+
+	if (clk) {
+		freq = clk_get_rate(clk);
+	} else {
+		ret = device_property_read_u32(dev, "clock-frequency", &freq);
+		if (ret)
+			return dev_err_probe(dev, ret, "Failed to get clock-frequency!\n");
 	}
-	freq = clk_get_rate(clk);
 
 	/* Sanity check */
 	if (freq > 40000000)
@@ -869,13 +855,12 @@ static int hi3110_can_probe(struct spi_device *spi)
 	if (!net)
 		return -ENOMEM;
 
-	if (!IS_ERR(clk)) {
-		ret = clk_prepare_enable(clk);
-		if (ret)
-			goto out_free;
-	}
+	ret = clk_prepare_enable(clk);
+	if (ret)
+		goto out_free;
 
 	net->netdev_ops = &hi3110_netdev_ops;
+	net->ethtool_ops = &hi3110_ethtool_ops;
 	net->flags |= IFF_ECHO;
 
 	priv = netdev_priv(net);
@@ -888,10 +873,7 @@ static int hi3110_can_probe(struct spi_device *spi)
 		CAN_CTRLMODE_LISTENONLY |
 		CAN_CTRLMODE_BERR_REPORTING;
 
-	if (of_id)
-		priv->model = (enum hi3110_model)of_id->data;
-	else
-		priv->model = spi_get_device_id(spi)->driver_data;
+	priv->model = (enum hi3110_model)(uintptr_t)spi_get_device_match_data(spi);
 	priv->net = net;
 	priv->clk = clk;
 
@@ -915,55 +897,38 @@ static int hi3110_can_probe(struct spi_device *spi)
 	if (ret)
 		goto out_clk;
 
+	priv->wq = alloc_workqueue("hi3110_wq",
+				   WQ_FREEZABLE | WQ_MEM_RECLAIM | WQ_PERCPU,
+				   0);
+	if (!priv->wq) {
+		ret = -ENOMEM;
+		goto out_clk;
+	}
+	INIT_WORK(&priv->tx_work, hi3110_tx_work_handler);
+	INIT_WORK(&priv->restart_work, hi3110_restart_work_handler);
+
 	priv->spi = spi;
 	mutex_init(&priv->hi3110_lock);
 
-	/* If requested, allocate DMA buffers */
-	if (hi3110_enable_dma) {
-		spi->dev.coherent_dma_mask = ~0;
-
-		/* Minimum coherent DMA allocation is PAGE_SIZE, so allocate
-		 * that much and share it between Tx and Rx DMA buffers.
-		 */
-		priv->spi_tx_buf = dmam_alloc_coherent(&spi->dev,
-						       PAGE_SIZE,
-						       &priv->spi_tx_dma,
-						       GFP_DMA);
-
-		if (priv->spi_tx_buf) {
-			priv->spi_rx_buf = (priv->spi_tx_buf + (PAGE_SIZE / 2));
-			priv->spi_rx_dma = (dma_addr_t)(priv->spi_tx_dma +
-							(PAGE_SIZE / 2));
-		} else {
-			/* Fall back to non-DMA */
-			hi3110_enable_dma = 0;
-		}
+	priv->spi_tx_buf = devm_kzalloc(&spi->dev, HI3110_RX_BUF_LEN,
+					GFP_KERNEL);
+	if (!priv->spi_tx_buf) {
+		ret = -ENOMEM;
+		goto error_probe;
 	}
+	priv->spi_rx_buf = devm_kzalloc(&spi->dev, HI3110_RX_BUF_LEN,
+					GFP_KERNEL);
 
-	/* Allocate non-DMA buffers */
-	if (!hi3110_enable_dma) {
-		priv->spi_tx_buf = devm_kzalloc(&spi->dev, HI3110_RX_BUF_LEN,
-						GFP_KERNEL);
-		if (!priv->spi_tx_buf) {
-			ret = -ENOMEM;
-			goto error_probe;
-		}
-		priv->spi_rx_buf = devm_kzalloc(&spi->dev, HI3110_RX_BUF_LEN,
-						GFP_KERNEL);
-
-		if (!priv->spi_rx_buf) {
-			ret = -ENOMEM;
-			goto error_probe;
-		}
+	if (!priv->spi_rx_buf) {
+		ret = -ENOMEM;
+		goto error_probe;
 	}
 
 	SET_NETDEV_DEV(net, &spi->dev);
 
 	ret = hi3110_hw_probe(spi);
 	if (ret) {
-		if (ret == -ENODEV)
-			dev_err(&spi->dev, "Cannot initialize %x. Wrong wiring?\n",
-				priv->model);
+		dev_err_probe(dev, ret, "Cannot initialize %x. Wrong wiring?\n", priv->model);
 		goto error_probe;
 	}
 	hi3110_hw_sleep(spi);
@@ -972,26 +937,25 @@ static int hi3110_can_probe(struct spi_device *spi)
 	if (ret)
 		goto error_probe;
 
-	devm_can_led_init(net);
 	netdev_info(net, "%x successfully initialized.\n", priv->model);
 
 	return 0;
 
  error_probe:
+	destroy_workqueue(priv->wq);
+	priv->wq = NULL;
 	hi3110_power_enable(priv->power, 0);
 
  out_clk:
-	if (!IS_ERR(clk))
-		clk_disable_unprepare(clk);
+	clk_disable_unprepare(clk);
 
  out_free:
 	free_candev(net);
 
-	dev_err(&spi->dev, "Probe failed, err=%d\n", -ret);
-	return ret;
+	return dev_err_probe(dev, ret, "Probe failed\n");
 }
 
-static int hi3110_can_remove(struct spi_device *spi)
+static void hi3110_can_remove(struct spi_device *spi)
 {
 	struct hi3110_priv *priv = spi_get_drvdata(spi);
 	struct net_device *net = priv->net;
@@ -1000,12 +964,12 @@ static int hi3110_can_remove(struct spi_device *spi)
 
 	hi3110_power_enable(priv->power, 0);
 
-	if (!IS_ERR(priv->clk))
-		clk_disable_unprepare(priv->clk);
+	destroy_workqueue(priv->wq);
+	priv->wq = NULL;
+
+	clk_disable_unprepare(priv->clk);
 
 	free_candev(net);
-
-	return 0;
 }
 
 static int __maybe_unused hi3110_can_suspend(struct device *dev)

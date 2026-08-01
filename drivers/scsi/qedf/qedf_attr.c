@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  QLogic FCoE Offload Driver
- *  Copyright (c) 2016-2017 Cavium Inc.
- *
- *  This software is available under the terms of the GNU General Public License
- *  (GPL) Version 2, available from the file COPYING in the main directory of
- *  this source tree.
+ *  Copyright (c) 2016-2018 Cavium Inc.
  */
 #include "qedf.h"
 
@@ -27,9 +24,8 @@ static struct qedf_ctx *qedf_get_base_qedf(struct qedf_ctx *qedf)
 	return lport_priv(base_lport);
 }
 
-static ssize_t
-qedf_fcoe_mac_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
+static ssize_t fcoe_mac_show(struct device *dev,
+			     struct device_attribute *attr, char *buf)
 {
 	struct fc_lport *lport = shost_priv(class_to_shost(dev));
 	u32 port_id;
@@ -45,9 +41,8 @@ qedf_fcoe_mac_show(struct device *dev,
 	return scnprintf(buf, PAGE_SIZE, "%pM\n", fcoe_mac);
 }
 
-static ssize_t
-qedf_fka_period_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
+static ssize_t fka_period_show(struct device *dev,
+			       struct device_attribute *attr, char *buf)
 {
 	struct fc_lport *lport = shost_priv(class_to_shost(dev));
 	struct qedf_ctx *qedf = lport_priv(lport);
@@ -62,13 +57,22 @@ qedf_fka_period_show(struct device *dev,
 	return scnprintf(buf, PAGE_SIZE, "%d\n", fka_period);
 }
 
-static DEVICE_ATTR(fcoe_mac, S_IRUGO, qedf_fcoe_mac_show, NULL);
-static DEVICE_ATTR(fka_period, S_IRUGO, qedf_fka_period_show, NULL);
+static DEVICE_ATTR_RO(fcoe_mac);
+static DEVICE_ATTR_RO(fka_period);
 
-struct device_attribute *qedf_host_attrs[] = {
-	&dev_attr_fcoe_mac,
-	&dev_attr_fka_period,
+static struct attribute *qedf_host_attrs[] = {
+	&dev_attr_fcoe_mac.attr,
+	&dev_attr_fka_period.attr,
 	NULL,
+};
+
+static const struct attribute_group qedf_host_attr_group = {
+	.attrs = qedf_host_attrs
+};
+
+const struct attribute_group *qedf_host_groups[] = {
+	&qedf_host_attr_group,
+	NULL
 };
 
 extern const struct qed_fcoe_ops *qed_ops;
@@ -100,7 +104,7 @@ void qedf_capture_grc_dump(struct qedf_ctx *qedf)
 
 static ssize_t
 qedf_sysfs_read_grcdump(struct file *filep, struct kobject *kobj,
-			struct bin_attribute *ba, char *buf, loff_t off,
+			const struct bin_attribute *ba, char *buf, loff_t off,
 			size_t count)
 {
 	ssize_t ret = 0;
@@ -120,14 +124,13 @@ qedf_sysfs_read_grcdump(struct file *filep, struct kobject *kobj,
 
 static ssize_t
 qedf_sysfs_write_grcdump(struct file *filep, struct kobject *kobj,
-			struct bin_attribute *ba, char *buf, loff_t off,
+			const struct bin_attribute *ba, char *buf, loff_t off,
 			size_t count)
 {
 	struct fc_lport *lport = NULL;
 	struct qedf_ctx *qedf = NULL;
 	long reading;
 	int ret = 0;
-	char msg[40];
 
 	if (off != 0)
 		return ret;
@@ -144,7 +147,6 @@ qedf_sysfs_write_grcdump(struct file *filep, struct kobject *kobj,
 		return ret;
 	}
 
-	memset(msg, 0, sizeof(msg));
 	switch (reading) {
 	case 0:
 		memset(qedf->grcdump, 0, qedf->grcdump_size);
@@ -158,7 +160,7 @@ qedf_sysfs_write_grcdump(struct file *filep, struct kobject *kobj,
 	return count;
 }
 
-static struct bin_attribute sysfs_grcdump_attr = {
+static const struct bin_attribute sysfs_grcdump_attr = {
 	.attr = {
 		.name = "grcdump",
 		.mode = S_IRUSR | S_IWUSR,

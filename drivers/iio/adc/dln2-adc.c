@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for the Diolan DLN-2 USB-ADC adapter
  *
  * Copyright (c) 2017 Jack Andersen
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation, version 2.
  */
 
 #include <linux/kernel.h>
@@ -69,8 +66,6 @@ struct dln2_adc {
 	/* Demux table */
 	unsigned int demux_count;
 	struct dln2_adc_demux_table demux[DLN2_ADC_MAX_CHANNELS];
-	/* Precomputed timestamp padding offset and length */
-	unsigned int ts_pad_offset, ts_pad_length;
 };
 
 struct dln2_adc_port_chan {
@@ -111,18 +106,14 @@ static void dln2_adc_update_demux(struct dln2_adc *dln2)
 	dln2->demux_count = 0;
 
 	/* Optimize all 8-channels case */
-	if (indio_dev->masklength &&
+	if (iio_get_masklength(indio_dev) &&
 	    (*indio_dev->active_scan_mask & 0xff) == 0xff) {
 		dln2_adc_add_demux(dln2, 0, 0, 16);
-		dln2->ts_pad_offset = 0;
-		dln2->ts_pad_length = 0;
 		return;
 	}
 
 	/* Build demux table from fixed 8-channels to active_scan_mask */
-	for_each_set_bit(out_ind,
-			 indio_dev->active_scan_mask,
-			 indio_dev->masklength) {
+	iio_for_each_active_channel(indio_dev, out_ind) {
 		/* Handle timestamp separately */
 		if (out_ind == DLN2_ADC_MAX_CHANNELS)
 			break;
@@ -131,16 +122,6 @@ static void dln2_adc_update_demux(struct dln2_adc *dln2)
 		dln2_adc_add_demux(dln2, in_loc, out_loc, 2);
 		out_loc += 2;
 		in_loc += 2;
-	}
-
-	if (indio_dev->scan_timestamp) {
-		size_t ts_offset = indio_dev->scan_bytes / sizeof(int64_t) - 1;
-
-		dln2->ts_pad_offset = out_loc;
-		dln2->ts_pad_length = ts_offset * sizeof(int64_t) - out_loc;
-	} else {
-		dln2->ts_pad_offset = 0;
-		dln2->ts_pad_length = 0;
 	}
 }
 
@@ -251,7 +232,6 @@ static int dln2_adc_set_chan_period(struct dln2_adc *dln2,
 static int dln2_adc_read(struct dln2_adc *dln2, unsigned int channel)
 {
 	int ret, i;
-	struct iio_dev *indio_dev = platform_get_drvdata(dln2->pdev);
 	u16 conflict;
 	__le16 value;
 	int olen = sizeof(value);
@@ -260,13 +240,9 @@ static int dln2_adc_read(struct dln2_adc *dln2, unsigned int channel)
 		.chan = channel,
 	};
 
-	ret = iio_device_claim_direct_mode(indio_dev);
-	if (ret < 0)
-		return ret;
-
 	ret = dln2_adc_set_chan_enabled(dln2, channel, true);
 	if (ret < 0)
-		goto release_direct;
+		return ret;
 
 	ret = dln2_adc_set_port_enabled(dln2, true, &conflict);
 	if (ret < 0) {
@@ -303,8 +279,6 @@ disable_port:
 	dln2_adc_set_port_enabled(dln2, false, NULL);
 disable_chan:
 	dln2_adc_set_chan_enabled(dln2, channel, false);
-release_direct:
-	iio_device_release_direct_mode(indio_dev);
 
 	return ret;
 }
@@ -340,9 +314,14 @@ static int dln2_adc_read_raw(struct iio_dev *indio_dev,
 
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
+
 		mutex_lock(&dln2->mutex);
 		ret = dln2_adc_read(dln2, chan->channel);
 		mutex_unlock(&dln2->mutex);
+
+		iio_device_release_direct(indio_dev);
 
 		if (ret < 0)
 			return ret;
@@ -465,16 +444,6 @@ static int dln2_update_scan_mode(struct iio_dev *indio_dev,
 	lval.scan_type.endianness = IIO_LE;				\
 }
 
-/* Assignment version of IIO_CHAN_SOFT_TIMESTAMP */
-#define IIO_CHAN_SOFT_TIMESTAMP_ASSIGN(lval, _si) {	\
-	lval.type = IIO_TIMESTAMP;			\
-	lval.channel = -1;				\
-	lval.scan_index = _si;				\
-	lval.scan_type.sign = 's';			\
-	lval.scan_type.realbits = 64;			\
-	lval.scan_type.storagebits = 64;		\
-}
-
 static const struct iio_info dln2_adc_info = {
 	.read_raw = dln2_adc_read_raw,
 	.write_raw = dln2_adc_write_raw,
@@ -487,8 +456,8 @@ static irqreturn_t dln2_adc_trigger_h(int irq, void *p)
 	struct iio_dev *indio_dev = pf->indio_dev;
 	struct {
 		__le16 values[DLN2_ADC_MAX_CHANNELS];
-		int64_t timestamp_space;
-	} data;
+		aligned_s64 timestamp_space;
+	} data = { };
 	struct dln2_adc_get_all_vals dev_data;
 	struct dln2_adc *dln2 = iio_priv(indio_dev);
 	const struct dln2_adc_demux_table *t;
@@ -507,13 +476,8 @@ static irqreturn_t dln2_adc_trigger_h(int irq, void *p)
 		       (void *)dev_data.values + t->from, t->length);
 	}
 
-	/* Zero padding space between values and timestamp */
-	if (dln2->ts_pad_length)
-		memset((void *)data.values + dln2->ts_pad_offset,
-		       0, dln2->ts_pad_length);
-
-	iio_push_to_buffers_with_timestamp(indio_dev, &data,
-					   iio_get_time_ns(indio_dev));
+	iio_push_to_buffers_with_ts(indio_dev, &data, sizeof(data),
+				    iio_get_time_ns(indio_dev));
 
 done:
 	iio_trigger_notify_done(indio_dev->trig);
@@ -545,7 +509,7 @@ static int dln2_adc_triggered_buffer_postenable(struct iio_dev *indio_dev)
 
 	/* Assign trigger channel based on first enabled channel */
 	trigger_chan = find_first_bit(indio_dev->active_scan_mask,
-				      indio_dev->masklength);
+				      iio_get_masklength(indio_dev));
 	if (trigger_chan < DLN2_ADC_MAX_CHANNELS) {
 		dln2->trigger_chan = trigger_chan;
 		ret = dln2_adc_set_chan_period(dln2, dln2->trigger_chan,
@@ -560,7 +524,7 @@ static int dln2_adc_triggered_buffer_postenable(struct iio_dev *indio_dev)
 		mutex_unlock(&dln2->mutex);
 	}
 
-	return iio_triggered_buffer_postenable(indio_dev);
+	return 0;
 }
 
 static int dln2_adc_triggered_buffer_predisable(struct iio_dev *indio_dev)
@@ -580,12 +544,10 @@ static int dln2_adc_triggered_buffer_predisable(struct iio_dev *indio_dev)
 	ret = dln2_adc_set_port_enabled(dln2, false, NULL);
 
 	mutex_unlock(&dln2->mutex);
-	if (ret < 0) {
+	if (ret < 0)
 		dev_dbg(&dln2->pdev->dev, "Problem in %s\n", __func__);
-		return ret;
-	}
 
-	return iio_triggered_buffer_predisable(indio_dev);
+	return ret;
 }
 
 static const struct iio_buffer_setup_ops dln2_adc_buffer_setup_ops = {
@@ -612,10 +574,8 @@ static int dln2_adc_probe(struct platform_device *pdev)
 	int i, ret, chans;
 
 	indio_dev = devm_iio_device_alloc(dev, sizeof(*dln2));
-	if (!indio_dev) {
-		dev_err(dev, "failed allocating iio device\n");
+	if (!indio_dev)
 		return -ENOMEM;
-	}
 
 	dln2 = iio_priv(indio_dev);
 	dln2->pdev = pdev;
@@ -644,10 +604,9 @@ static int dln2_adc_probe(struct platform_device *pdev)
 
 	for (i = 0; i < chans; ++i)
 		DLN2_ADC_CHAN(dln2->iio_channels[i], i)
-	IIO_CHAN_SOFT_TIMESTAMP_ASSIGN(dln2->iio_channels[i], i);
+	dln2->iio_channels[i] = IIO_CHAN_SOFT_TIMESTAMP(i);
 
 	indio_dev->name = DLN2_ADC_MOD_NAME;
-	indio_dev->dev.parent = dev;
 	indio_dev->info = &dln2_adc_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = dln2->iio_channels;
@@ -655,13 +614,17 @@ static int dln2_adc_probe(struct platform_device *pdev)
 	indio_dev->setup_ops = &dln2_adc_buffer_setup_ops;
 
 	dln2->trig = devm_iio_trigger_alloc(dev, "%s-dev%d",
-					    indio_dev->name, indio_dev->id);
-	if (!dln2->trig) {
-		dev_err(dev, "failed to allocate trigger\n");
+					    indio_dev->name,
+					    iio_device_id(indio_dev));
+	if (!dln2->trig)
 		return -ENOMEM;
-	}
+
 	iio_trigger_set_drvdata(dln2->trig, dln2);
-	devm_iio_trigger_register(dev, dln2->trig);
+	ret = devm_iio_trigger_register(dev, dln2->trig);
+	if (ret) {
+		dev_err(dev, "failed to register trigger: %d\n", ret);
+		return ret;
+	}
 	iio_trigger_set_immutable(indio_dev, dln2->trig);
 
 	ret = devm_iio_triggered_buffer_setup(dev, indio_dev, NULL,
@@ -693,13 +656,12 @@ unregister_event:
 	return ret;
 }
 
-static int dln2_adc_remove(struct platform_device *pdev)
+static void dln2_adc_remove(struct platform_device *pdev)
 {
 	struct iio_dev *indio_dev = platform_get_drvdata(pdev);
 
 	iio_device_unregister(indio_dev);
 	dln2_unregister_event_cb(pdev, DLN2_ADC_CONDITION_MET_EV);
-	return 0;
 }
 
 static struct platform_driver dln2_adc_driver = {

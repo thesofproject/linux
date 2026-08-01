@@ -10,8 +10,7 @@
  * Author(s): Hendrik Brueckner <brueckner@linux.vnet.ibm.com>
  *
  */
-#define KMSG_COMPONENT		"smsgiucv_app"
-#define pr_fmt(fmt)		KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "smsgiucv_app: " fmt
 
 #include <linux/ctype.h>
 #include <linux/err.h>
@@ -23,6 +22,7 @@
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
 #include <net/iucv/iucv.h>
+#include <asm/machine.h>
 #include "smsgiucv.h"
 
 /* prefix used for SMSG registration */
@@ -69,7 +69,7 @@ static struct smsg_app_event *smsg_app_event_alloc(const char *from,
 {
 	struct smsg_app_event *ev;
 
-	ev = kzalloc(sizeof(*ev), GFP_ATOMIC);
+	ev = kzalloc_obj(*ev, GFP_ATOMIC);
 	if (!ev)
 		return NULL;
 
@@ -87,9 +87,10 @@ static struct smsg_app_event *smsg_app_event_alloc(const char *from,
 	ev->envp[3] = NULL;
 
 	/* setting up environment: sender, prefix name, and message text */
-	snprintf(ev->envp[0], ENV_SENDER_LEN, ENV_SENDER_STR "%s", from);
-	snprintf(ev->envp[1], ENV_PREFIX_LEN, ENV_PREFIX_STR "%s", SMSG_PREFIX);
-	snprintf(ev->envp[2], ENV_TEXT_LEN(msg), ENV_TEXT_STR "%s", msg);
+	scnprintf(ev->envp[0], ENV_SENDER_LEN, ENV_SENDER_STR "%s", from);
+	scnprintf(ev->envp[1], ENV_PREFIX_LEN, ENV_PREFIX_STR "%s",
+		  SMSG_PREFIX);
+	scnprintf(ev->envp[2], ENV_TEXT_LEN(msg), ENV_TEXT_STR "%s", msg);
 
 	return ev;
 }
@@ -153,28 +154,17 @@ static int __init smsgiucv_app_init(void)
 	struct device_driver *smsgiucv_drv;
 	int rc;
 
-	if (!MACHINE_IS_VM)
+	if (!machine_is_vm())
 		return -ENODEV;
 
-	smsg_app_dev = kzalloc(sizeof(*smsg_app_dev), GFP_KERNEL);
+	smsgiucv_drv = driver_find(SMSGIUCV_DRV_NAME, &iucv_bus);
+	if (!smsgiucv_drv)
+		return -ENODEV;
+
+	smsg_app_dev = iucv_alloc_device(NULL, smsgiucv_drv, NULL, "smsgiucv_app");
 	if (!smsg_app_dev)
 		return -ENOMEM;
 
-	smsgiucv_drv = driver_find(SMSGIUCV_DRV_NAME, &iucv_bus);
-	if (!smsgiucv_drv) {
-		kfree(smsg_app_dev);
-		return -ENODEV;
-	}
-
-	rc = dev_set_name(smsg_app_dev, KMSG_COMPONENT);
-	if (rc) {
-		kfree(smsg_app_dev);
-		goto fail;
-	}
-	smsg_app_dev->bus = &iucv_bus;
-	smsg_app_dev->parent = iucv_root;
-	smsg_app_dev->release = (void (*)(struct device *)) kfree;
-	smsg_app_dev->driver = smsgiucv_drv;
 	rc = device_register(smsg_app_dev);
 	if (rc) {
 		put_device(smsg_app_dev);

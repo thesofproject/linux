@@ -34,43 +34,29 @@ static int bond_debug_rlb_hash_show(struct seq_file *m, void *v)
 	for (; hash_index != RLB_NULL_INDEX;
 	     hash_index = client_info->used_next) {
 		client_info = &(bond_info->rx_hashtbl[hash_index]);
-		seq_printf(m, "%-15pI4 %-15pI4 %-17pM %s\n",
-			&client_info->ip_src,
-			&client_info->ip_dst,
-			&client_info->mac_dst,
-			client_info->slave->dev->name);
+		if (client_info->slave)
+			seq_printf(m, "%-15pI4 %-15pI4 %-17pM %s\n",
+				   &client_info->ip_src,
+				   &client_info->ip_dst,
+				   &client_info->mac_dst,
+				   client_info->slave->dev->name);
+		else
+			seq_printf(m, "%-15pI4 %-15pI4 %-17pM (none)\n",
+				   &client_info->ip_src,
+				   &client_info->ip_dst,
+				   &client_info->mac_dst);
 	}
 
 	spin_unlock_bh(&bond->mode_lock);
 
 	return 0;
 }
-
-static int bond_debug_rlb_hash_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, bond_debug_rlb_hash_show, inode->i_private);
-}
-
-static const struct file_operations bond_debug_rlb_hash_fops = {
-	.owner		= THIS_MODULE,
-	.open		= bond_debug_rlb_hash_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(bond_debug_rlb_hash);
 
 void bond_debug_register(struct bonding *bond)
 {
-	if (!bonding_debug_root)
-		return;
-
 	bond->debug_dir =
 		debugfs_create_dir(bond->dev->name, bonding_debug_root);
-
-	if (!bond->debug_dir) {
-		netdev_warn(bond->dev, "failed to register to debugfs\n");
-		return;
-	}
 
 	debugfs_create_file("rlb_hash_table", 0400, bond->debug_dir,
 				bond, &bond_debug_rlb_hash_fops);
@@ -78,36 +64,24 @@ void bond_debug_register(struct bonding *bond)
 
 void bond_debug_unregister(struct bonding *bond)
 {
-	if (!bonding_debug_root)
-		return;
-
 	debugfs_remove_recursive(bond->debug_dir);
 }
 
 void bond_debug_reregister(struct bonding *bond)
 {
-	struct dentry *d;
-
-	if (!bonding_debug_root)
-		return;
-
-	d = debugfs_rename(bonding_debug_root, bond->debug_dir,
-			   bonding_debug_root, bond->dev->name);
-	if (d) {
-		bond->debug_dir = d;
-	} else {
+	int err = debugfs_change_name(bond->debug_dir, "%s", bond->dev->name);
+	if (err) {
 		netdev_warn(bond->dev, "failed to reregister, so just unregister old one\n");
 		bond_debug_unregister(bond);
 	}
 }
 
-void bond_create_debugfs(void)
+void __init bond_create_debugfs(void)
 {
 	bonding_debug_root = debugfs_create_dir("bonding", NULL);
 
-	if (!bonding_debug_root) {
+	if (IS_ERR(bonding_debug_root))
 		pr_warn("Warning: Cannot create bonding directory in debugfs\n");
-	}
 }
 
 void bond_destroy_debugfs(void)
@@ -131,7 +105,7 @@ void bond_debug_reregister(struct bonding *bond)
 {
 }
 
-void bond_create_debugfs(void)
+void __init bond_create_debugfs(void)
 {
 }
 

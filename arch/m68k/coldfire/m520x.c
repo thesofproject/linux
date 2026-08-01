@@ -12,6 +12,7 @@
 
 /***************************************************************************/
 
+#include <linux/clkdev.h>
 #include <linux/kernel.h>
 #include <linux/param.h>
 #include <linux/init.h>
@@ -48,31 +49,29 @@ DEFINE_CLK(0, "sys.0", 40, MCF_BUSCLK);
 DEFINE_CLK(0, "gpio.0", 41, MCF_BUSCLK);
 DEFINE_CLK(0, "sdram.0", 42, MCF_CLK);
 
-struct clk *mcf_clks[] = {
-	&__clk_0_2, /* flexbus */
-	&__clk_0_12, /* fec.0 */
-	&__clk_0_17, /* edma */
-	&__clk_0_18, /* intc.0 */
-	&__clk_0_21, /* iack.0 */
-	&__clk_0_22, /* imx1-i2c.0 */
-	&__clk_0_23, /* mcfqspi.0 */
-	&__clk_0_24, /* mcfuart.0 */
-	&__clk_0_25, /* mcfuart.1 */
-	&__clk_0_26, /* mcfuart.2 */
-	&__clk_0_28, /* mcftmr.0 */
-	&__clk_0_29, /* mcftmr.1 */
-	&__clk_0_30, /* mcftmr.2 */
-	&__clk_0_31, /* mcftmr.3 */
-
-	&__clk_0_32, /* mcfpit.0 */
-	&__clk_0_33, /* mcfpit.1 */
-	&__clk_0_34, /* mcfeport.0 */
-	&__clk_0_35, /* mcfwdt.0 */
-	&__clk_0_36, /* pll.0 */
-	&__clk_0_40, /* sys.0 */
-	&__clk_0_41, /* gpio.0 */
-	&__clk_0_42, /* sdram.0 */
-	NULL,
+static struct clk_lookup m520x_clk_lookup[] = {
+	CLKDEV_INIT(NULL, "flexbus", &__clk_0_2),
+	CLKDEV_INIT("fec.0", NULL, &__clk_0_12),
+	CLKDEV_INIT("edma", NULL, &__clk_0_17),
+	CLKDEV_INIT("intc.0", NULL, &__clk_0_18),
+	CLKDEV_INIT("iack.0", NULL, &__clk_0_21),
+	CLKDEV_INIT("imx1-i2c.0", NULL, &__clk_0_22),
+	CLKDEV_INIT("mcfqspi.0", NULL, &__clk_0_23),
+	CLKDEV_INIT("mcfuart.0", NULL, &__clk_0_24),
+	CLKDEV_INIT("mcfuart.1", NULL, &__clk_0_25),
+	CLKDEV_INIT("mcfuart.2", NULL, &__clk_0_26),
+	CLKDEV_INIT("mcftmr.0", NULL, &__clk_0_28),
+	CLKDEV_INIT("mcftmr.1", NULL, &__clk_0_29),
+	CLKDEV_INIT("mcftmr.2", NULL, &__clk_0_30),
+	CLKDEV_INIT("mcftmr.3", NULL, &__clk_0_31),
+	CLKDEV_INIT("mcfpit.0", NULL, &__clk_0_32),
+	CLKDEV_INIT("mcfpit.1", NULL, &__clk_0_33),
+	CLKDEV_INIT("mcfeport.0", NULL, &__clk_0_34),
+	CLKDEV_INIT("mcfwdt.0", NULL, &__clk_0_35),
+	CLKDEV_INIT(NULL, "pll.0", &__clk_0_36),
+	CLKDEV_INIT(NULL, "sys.0", &__clk_0_40),
+	CLKDEV_INIT("gpio.0", NULL, &__clk_0_41),
+	CLKDEV_INIT("sdram.0", NULL, &__clk_0_42),
 };
 
 static struct clk * const enable_clks[] __initconst = {
@@ -115,6 +114,8 @@ static void __init m520x_clk_init(void)
 	/* make sure these clocks are disabled */
 	for (i = 0; i < ARRAY_SIZE(disable_clks); ++i)
 		__clk_init_disabled(disable_clks[i]);
+
+	clkdev_add_table(m520x_clk_lookup, ARRAY_SIZE(m520x_clk_lookup));
 }
 
 /***************************************************************************/
@@ -124,11 +125,11 @@ static void __init m520x_qspi_init(void)
 #if IS_ENABLED(CONFIG_SPI_COLDFIRE_QSPI)
 	u16 par;
 	/* setup Port QS for QSPI with gpio CS control */
-	writeb(0x3f, MCF_GPIO_PAR_QSPI);
+	mcf_write8(0x3f, MCF_GPIO_PAR_QSPI);
 	/* make U1CTS and U2RTS gpio for cs_control */
-	par = readw(MCF_GPIO_PAR_UART);
+	par = mcf_read16(MCF_GPIO_PAR_UART);
 	par &= 0x00ff;
-	writew(par, MCF_GPIO_PAR_UART);
+	mcf_write16(par, MCF_GPIO_PAR_UART);
 #endif /* IS_ENABLED(CONFIG_SPI_COLDFIRE_QSPI) */
 }
 
@@ -141,9 +142,9 @@ static void __init m520x_i2c_init(void)
 
 	/* setup Port FECI2C Pin Assignment Register for I2C */
 	/*  set PAR_SCL to SCL and PAR_SDA to SDA */
-	par = readb(MCF_GPIO_PAR_FECI2C);
+	par = mcf_read8(MCF_GPIO_PAR_FECI2C);
 	par |= 0x0f;
-	writeb(par, MCF_GPIO_PAR_FECI2C);
+	mcf_write8(par, MCF_GPIO_PAR_FECI2C);
 #endif /* IS_ENABLED(CONFIG_I2C_IMX) */
 }
 
@@ -155,17 +156,17 @@ static void __init m520x_uarts_init(void)
 	u8 par2;
 
 	/* UART0 and UART1 GPIO pin setup */
-	par = readw(MCF_GPIO_PAR_UART);
+	par = mcf_read16(MCF_GPIO_PAR_UART);
 	par |= MCF_GPIO_PAR_UART_PAR_UTXD0 | MCF_GPIO_PAR_UART_PAR_URXD0;
 	par |= MCF_GPIO_PAR_UART_PAR_UTXD1 | MCF_GPIO_PAR_UART_PAR_URXD1;
-	writew(par, MCF_GPIO_PAR_UART);
+	mcf_write16(par, MCF_GPIO_PAR_UART);
 
 	/* UART1 GPIO pin setup */
-	par2 = readb(MCF_GPIO_PAR_FECI2C);
+	par2 = mcf_read8(MCF_GPIO_PAR_FECI2C);
 	par2 &= ~0x0F;
 	par2 |= MCF_GPIO_PAR_FECI2C_PAR_SCL_UTXD2 |
 		MCF_GPIO_PAR_FECI2C_PAR_SDA_URXD2;
-	writeb(par2, MCF_GPIO_PAR_FECI2C);
+	mcf_write8(par2, MCF_GPIO_PAR_FECI2C);
 }
 
 /***************************************************************************/
@@ -175,11 +176,11 @@ static void __init m520x_fec_init(void)
 	u8 v;
 
 	/* Set multi-function pins to ethernet mode */
-	v = readb(MCF_GPIO_PAR_FEC);
-	writeb(v | 0xf0, MCF_GPIO_PAR_FEC);
+	v = mcf_read8(MCF_GPIO_PAR_FEC);
+	mcf_write8(v | 0xf0, MCF_GPIO_PAR_FEC);
 
-	v = readb(MCF_GPIO_PAR_FECI2C);
-	writeb(v | 0x0f, MCF_GPIO_PAR_FECI2C);
+	v = mcf_read8(MCF_GPIO_PAR_FECI2C);
+	mcf_write8(v | 0x0f, MCF_GPIO_PAR_FECI2C);
 }
 
 /***************************************************************************/

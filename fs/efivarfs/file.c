@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Red Hat, Inc.
  * Copyright (C) 2012 Jeremy Kerr <jeremy.kerr@canonical.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/efi.h>
@@ -39,27 +36,41 @@ static ssize_t efivarfs_file_write(struct file *file,
 	if (IS_ERR(data))
 		return PTR_ERR(data);
 
+	inode_lock(inode);
+	if (var->removed) {
+		/*
+		 * file got removed; don't allow a set.  Caused by an
+		 * unsuccessful create or successful delete write
+		 * racing with us.
+		 */
+		bytes = -EIO;
+		goto out;
+	}
+
 	bytes = efivar_entry_set_get_size(var, attributes, &datasize,
 					  data, &set);
-	if (!set && bytes) {
+	if (!set) {
 		if (bytes == -ENOENT)
 			bytes = -EIO;
 		goto out;
 	}
 
 	if (bytes == -ENOENT) {
-		drop_nlink(inode);
-		d_delete(file->f_path.dentry);
-		dput(file->f_path.dentry);
+		/*
+		 * zero size signals to release that the write deleted
+		 * the variable
+		 */
+		i_size_write(inode, 0);
 	} else {
-		inode_lock(inode);
 		i_size_write(inode, datasize + sizeof(attributes));
-		inode_unlock(inode);
+		inode_set_mtime_to_ts(inode, inode_set_ctime_current(inode));
 	}
 
 	bytes = count;
 
 out:
+	inode_unlock(inode);
+
 	kfree(data);
 
 	return bytes;
@@ -75,10 +86,8 @@ static ssize_t efivarfs_file_read(struct file *file, char __user *userbuf,
 	ssize_t size = 0;
 	int err;
 
-	while (!__ratelimit(&file->f_cred->user->ratelimit)) {
-		if (!msleep_interruptible(50))
-			return -EINTR;
-	}
+	while (!__ratelimit(&file->f_cred->user->ratelimit))
+		msleep(50);
 
 	err = efivar_entry_size(var, &datasize);
 
@@ -110,78 +119,36 @@ out_free:
 	return size;
 }
 
-static int
-efivarfs_ioc_getxflags(struct file *file, void __user *arg)
+static int efivarfs_file_release(struct inode *inode, struct file *file)
 {
-	struct inode *inode = file->f_mapping->host;
-	unsigned int i_flags;
-	unsigned int flags = 0;
-
-	i_flags = inode->i_flags;
-	if (i_flags & S_IMMUTABLE)
-		flags |= FS_IMMUTABLE_FL;
-
-	if (copy_to_user(arg, &flags, sizeof(flags)))
-		return -EFAULT;
-	return 0;
-}
-
-static int
-efivarfs_ioc_setxflags(struct file *file, void __user *arg)
-{
-	struct inode *inode = file->f_mapping->host;
-	unsigned int flags;
-	unsigned int i_flags = 0;
-	int error;
-
-	if (!inode_owner_or_capable(inode))
-		return -EACCES;
-
-	if (copy_from_user(&flags, arg, sizeof(flags)))
-		return -EFAULT;
-
-	if (flags & ~FS_IMMUTABLE_FL)
-		return -EOPNOTSUPP;
-
-	if (!capable(CAP_LINUX_IMMUTABLE))
-		return -EPERM;
-
-	if (flags & FS_IMMUTABLE_FL)
-		i_flags |= S_IMMUTABLE;
-
-
-	error = mnt_want_write_file(file);
-	if (error)
-		return error;
+	struct efivar_entry *var = inode->i_private;
 
 	inode_lock(inode);
-	inode_set_flags(inode, i_flags, S_IMMUTABLE);
+	var->removed = (--var->open_count == 0 && i_size_read(inode) == 0);
 	inode_unlock(inode);
 
-	mnt_drop_write_file(file);
+	if (var->removed)
+		simple_recursive_removal(file->f_path.dentry, NULL);
 
 	return 0;
 }
 
-static long
-efivarfs_file_ioctl(struct file *file, unsigned int cmd, unsigned long p)
+static int efivarfs_file_open(struct inode *inode, struct file *file)
 {
-	void __user *arg = (void __user *)p;
+	struct efivar_entry *entry = inode->i_private;
 
-	switch (cmd) {
-	case FS_IOC_GETFLAGS:
-		return efivarfs_ioc_getxflags(file, arg);
-	case FS_IOC_SETFLAGS:
-		return efivarfs_ioc_setxflags(file, arg);
-	}
+	file->private_data = entry;
 
-	return -ENOTTY;
+	inode_lock(inode);
+	entry->open_count++;
+	inode_unlock(inode);
+
+	return 0;
 }
 
 const struct file_operations efivarfs_file_operations = {
-	.open	= simple_open,
-	.read	= efivarfs_file_read,
-	.write	= efivarfs_file_write,
-	.llseek	= no_llseek,
-	.unlocked_ioctl = efivarfs_file_ioctl,
+	.open		= efivarfs_file_open,
+	.read		= efivarfs_file_read,
+	.write		= efivarfs_file_write,
+	.release	= efivarfs_file_release,
 };

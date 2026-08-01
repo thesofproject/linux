@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (c) by Uros Bizjak <uros@kss-loka.si>
  *
@@ -5,21 +6,6 @@
  *
  *  OPL2/3 FM instrument loader:
  *   alsa-tools/seq/sbiload/
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include "opl3_voice.h"
@@ -54,13 +40,11 @@ int snd_opl3_synth_setup(struct snd_opl3 * opl3)
 	int idx;
 	struct snd_hwdep *hwdep = opl3->hwdep;
 
-	mutex_lock(&hwdep->open_mutex);
-	if (hwdep->used) {
-		mutex_unlock(&hwdep->open_mutex);
-		return -EBUSY;
+	scoped_guard(mutex, &hwdep->open_mutex) {
+		if (hwdep->used)
+			return -EBUSY;
+		hwdep->used++;
 	}
-	hwdep->used++;
-	mutex_unlock(&hwdep->open_mutex);
 
 	snd_opl3_reset(opl3);
 
@@ -82,22 +66,21 @@ int snd_opl3_synth_setup(struct snd_opl3 * opl3)
 
 void snd_opl3_synth_cleanup(struct snd_opl3 * opl3)
 {
-	unsigned long flags;
 	struct snd_hwdep *hwdep;
 
 	/* Stop system timer */
-	spin_lock_irqsave(&opl3->sys_timer_lock, flags);
-	if (opl3->sys_timer_status) {
-		del_timer(&opl3->tlist);
-		opl3->sys_timer_status = 0;
+	scoped_guard(spinlock_irq, &opl3->sys_timer_lock) {
+		if (opl3->sys_timer_status) {
+			timer_delete(&opl3->tlist);
+			opl3->sys_timer_status = 0;
+		}
 	}
-	spin_unlock_irqrestore(&opl3->sys_timer_lock, flags);
 
 	snd_opl3_reset(opl3);
 	hwdep = opl3->hwdep;
-	mutex_lock(&hwdep->open_mutex);
-	hwdep->used--;
-	mutex_unlock(&hwdep->open_mutex);
+	scoped_guard(mutex, &hwdep->open_mutex) {
+		hwdep->used--;
+	}
 	wake_up(&hwdep->open_wait);
 }
 
@@ -106,7 +89,8 @@ static int snd_opl3_synth_use(void *private_data, struct snd_seq_port_subscribe 
 	struct snd_opl3 *opl3 = private_data;
 	int err;
 
-	if ((err = snd_opl3_synth_setup(opl3)) < 0)
+	err = snd_opl3_synth_setup(opl3);
+	if (err < 0)
 		return err;
 
 	if (use_internal_drums) {
@@ -121,7 +105,8 @@ static int snd_opl3_synth_use(void *private_data, struct snd_seq_port_subscribe 
 	}
 
 	if (info->sender.client != SNDRV_SEQ_CLIENT_SYSTEM) {
-		if ((err = snd_opl3_synth_use_inc(opl3)) < 0)
+		err = snd_opl3_synth_use_inc(opl3);
+		if (err < 0)
 			return err;
 	}
 	opl3->synth_mode = SNDRV_OPL3_MODE_SEQ;
@@ -142,7 +127,7 @@ static int snd_opl3_synth_unuse(void *private_data, struct snd_seq_port_subscrib
 /*
  * MIDI emulation operators
  */
-struct snd_midi_op opl3_ops = {
+const struct snd_midi_op opl3_ops = {
 	.note_on =		snd_opl3_note_on,
 	.note_off =		snd_opl3_note_off,
 	.key_press =		snd_opl3_key_press,
@@ -216,9 +201,8 @@ static int snd_opl3_synth_create_port(struct snd_opl3 * opl3)
 
 /* ------------------------------ */
 
-static int snd_opl3_seq_probe(struct device *_dev)
+static int snd_opl3_seq_probe(struct snd_seq_device *dev)
 {
-	struct snd_seq_device *dev = to_seq_dev(_dev);
 	struct snd_opl3 *opl3;
 	int client, err;
 	char name[32];
@@ -241,7 +225,8 @@ static int snd_opl3_seq_probe(struct device *_dev)
 	if (client < 0)
 		return client;
 
-	if ((err = snd_opl3_synth_create_port(opl3)) < 0) {
+	err = snd_opl3_synth_create_port(opl3);
+	if (err < 0) {
 		snd_seq_delete_kernel_client(client);
 		opl3->seq_client = -1;
 		return err;
@@ -258,14 +243,13 @@ static int snd_opl3_seq_probe(struct device *_dev)
 	return 0;
 }
 
-static int snd_opl3_seq_remove(struct device *_dev)
+static void snd_opl3_seq_remove(struct snd_seq_device *dev)
 {
-	struct snd_seq_device *dev = to_seq_dev(_dev);
 	struct snd_opl3 *opl3;
 
 	opl3 = *(struct snd_opl3 **)SNDRV_SEQ_DEVICE_ARGPTR(dev);
 	if (opl3 == NULL)
-		return -EINVAL;
+		return;
 
 #if IS_ENABLED(CONFIG_SND_SEQUENCER_OSS)
 	snd_opl3_free_seq_oss(opl3);
@@ -274,14 +258,13 @@ static int snd_opl3_seq_remove(struct device *_dev)
 		snd_seq_delete_kernel_client(opl3->seq_client);
 		opl3->seq_client = -1;
 	}
-	return 0;
 }
 
 static struct snd_seq_driver opl3_seq_driver = {
+	.probe = snd_opl3_seq_probe,
+	.remove = snd_opl3_seq_remove,
 	.driver = {
 		.name = KBUILD_MODNAME,
-		.probe = snd_opl3_seq_probe,
-		.remove = snd_opl3_seq_remove,
 	},
 	.id = SNDRV_SEQ_DEV_ID_OPL3,
 	.argsize = sizeof(struct snd_opl3 *),

@@ -24,7 +24,6 @@
 #include <linux/slab.h>
 #include <linux/usb/ulpi.h>
 #include <linux/pm_runtime.h>
-#include <linux/gpio.h>
 #include <linux/clk.h>
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
@@ -62,11 +61,6 @@ static inline void ehci_write(void __iomem *base, u32 reg, u32 val)
 	__raw_writel(val, base + reg);
 }
 
-static inline u32 ehci_read(void __iomem *base, u32 reg)
-{
-	return __raw_readl(base + reg);
-}
-
 /* configure so an HC device and id are always provided */
 /* always called with process context; sleeping is OK */
 
@@ -78,6 +72,7 @@ static const struct ehci_driver_overrides ehci_omap_overrides __initconst = {
 
 /**
  * ehci_hcd_omap_probe - initialize TI-based HCDs
+ * @pdev: Pointer to this platform device's information
  *
  * Allocates basic resources for this USB host controller, and
  * then invokes the start() method for the HCD associated with it
@@ -115,13 +110,10 @@ static int ehci_hcd_omap_probe(struct platform_device *pdev)
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(dev, "EHCI irq failed: %d\n", irq);
+	if (irq < 0)
 		return irq;
-	}
 
-	res =  platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	regs = devm_ioremap_resource(dev, res);
+	regs = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(regs))
 		return PTR_ERR(regs);
 
@@ -157,16 +149,14 @@ static int ehci_hcd_omap_probe(struct platform_device *pdev)
 		struct usb_phy *phy;
 
 		/* get the PHY device */
-		if (dev->of_node)
-			phy = devm_usb_get_phy_by_phandle(dev, "phys", i);
-		else
-			phy = devm_usb_get_phy_dev(dev, i);
+		phy = devm_usb_get_phy_by_phandle(dev, "phys", i);
 		if (IS_ERR(phy)) {
-			/* Don't bail out if PHY is not absolutely necessary */
-			if (pdata->port_mode[i] != OMAP_EHCI_PORT_MODE_PHY)
-				continue;
-
 			ret = PTR_ERR(phy);
+			if (ret == -ENODEV) { /* no PHY */
+				phy = NULL;
+				continue;
+			}
+
 			if (ret != -EPROBE_DEFER)
 				dev_err(dev, "Can't get PHY for port %d: %d\n",
 					i, ret);
@@ -224,6 +214,7 @@ static int ehci_hcd_omap_probe(struct platform_device *pdev)
 
 err_pm_runtime:
 	pm_runtime_put_sync(dev);
+	pm_runtime_disable(dev);
 
 err_phy:
 	for (i = 0; i < omap->nports; i++) {
@@ -245,7 +236,7 @@ err_phy:
  * the HCD's stop() method.  It is always called from a thread
  * context, normally "rmmod", "apmd", or something similar.
  */
-static int ehci_hcd_omap_remove(struct platform_device *pdev)
+static void ehci_hcd_omap_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct usb_hcd *hcd = dev_get_drvdata(dev);
@@ -262,8 +253,6 @@ static int ehci_hcd_omap_remove(struct platform_device *pdev)
 	usb_put_hcd(hcd);
 	pm_runtime_put_sync(dev);
 	pm_runtime_disable(dev);
-
-	return 0;
 }
 
 static const struct of_device_id omap_ehci_dt_ids[] = {
@@ -291,8 +280,6 @@ static int __init ehci_omap_init(void)
 {
 	if (usb_disabled())
 		return -ENODEV;
-
-	pr_info("%s: " DRIVER_DESC "\n", hcd_name);
 
 	ehci_init_driver(&ehci_omap_hc_driver, &ehci_omap_overrides);
 	return platform_driver_register(&ehci_hcd_omap_driver);

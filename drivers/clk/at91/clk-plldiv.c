@@ -1,11 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (C) 2013 Boris BREZILLON <b.brezillon@overkiz.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #include <linux/clk-provider.h>
@@ -38,21 +33,33 @@ static unsigned long clk_plldiv_recalc_rate(struct clk_hw *hw,
 	return parent_rate;
 }
 
-static long clk_plldiv_round_rate(struct clk_hw *hw, unsigned long rate,
-					unsigned long *parent_rate)
+static int clk_plldiv_determine_rate(struct clk_hw *hw,
+				     struct clk_rate_request *req)
 {
 	unsigned long div;
 
-	if (rate > *parent_rate)
-		return *parent_rate;
-	div = *parent_rate / 2;
-	if (rate < div)
-		return div;
+	if (req->rate > req->best_parent_rate) {
+		req->rate = req->best_parent_rate;
 
-	if (rate - div < *parent_rate - rate)
-		return div;
+		return 0;
+	}
 
-	return *parent_rate;
+	div = req->best_parent_rate / 2;
+	if (req->rate < div) {
+		req->rate = div;
+
+		return 0;
+	}
+
+	if (req->rate - div < req->best_parent_rate - req->rate) {
+		req->rate = div;
+
+		return 0;
+	}
+
+	req->rate = req->best_parent_rate;
+
+	return 0;
 }
 
 static int clk_plldiv_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -71,11 +78,11 @@ static int clk_plldiv_set_rate(struct clk_hw *hw, unsigned long rate,
 
 static const struct clk_ops plldiv_ops = {
 	.recalc_rate = clk_plldiv_recalc_rate,
-	.round_rate = clk_plldiv_round_rate,
+	.determine_rate = clk_plldiv_determine_rate,
 	.set_rate = clk_plldiv_set_rate,
 };
 
-static struct clk_hw * __init
+struct clk_hw * __init
 at91_clk_register_plldiv(struct regmap *regmap, const char *name,
 			 const char *parent_name)
 {
@@ -84,7 +91,7 @@ at91_clk_register_plldiv(struct regmap *regmap, const char *name,
 	struct clk_init_data init;
 	int ret;
 
-	plldiv = kzalloc(sizeof(*plldiv), GFP_KERNEL);
+	plldiv = kzalloc_obj(*plldiv);
 	if (!plldiv)
 		return ERR_PTR(-ENOMEM);
 
@@ -106,28 +113,3 @@ at91_clk_register_plldiv(struct regmap *regmap, const char *name,
 
 	return hw;
 }
-
-static void __init
-of_at91sam9x5_clk_plldiv_setup(struct device_node *np)
-{
-	struct clk_hw *hw;
-	const char *parent_name;
-	const char *name = np->name;
-	struct regmap *regmap;
-
-	parent_name = of_clk_get_parent_name(np, 0);
-
-	of_property_read_string(np, "clock-output-names", &name);
-
-	regmap = syscon_node_to_regmap(of_get_parent(np));
-	if (IS_ERR(regmap))
-		return;
-
-	hw = at91_clk_register_plldiv(regmap, name, parent_name);
-	if (IS_ERR(hw))
-		return;
-
-	of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
-}
-CLK_OF_DECLARE(at91sam9x5_clk_plldiv, "atmel,at91sam9x5-clk-plldiv",
-	       of_at91sam9x5_clk_plldiv_setup);

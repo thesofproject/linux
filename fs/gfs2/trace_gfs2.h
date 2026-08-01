@@ -52,14 +52,19 @@
 	{(1UL << GLF_DEMOTE_IN_PROGRESS),	"p" },		\
 	{(1UL << GLF_DIRTY),			"y" },		\
 	{(1UL << GLF_LFLUSH),			"f" },		\
-	{(1UL << GLF_INVALIDATE_IN_PROGRESS),	"i" },		\
-	{(1UL << GLF_REPLY_PENDING),		"r" },		\
-	{(1UL << GLF_INITIAL),			"I" },		\
-	{(1UL << GLF_FROZEN),			"F" },		\
-	{(1UL << GLF_QUEUED),			"q" },		\
+	{(1UL << GLF_MAY_CANCEL),		"c" },		\
+	{(1UL << GLF_HAVE_REPLY),		"r" },		\
+	{(1UL << GLF_INITIAL),			"a" },		\
+	{(1UL << GLF_HAVE_FROZEN_REPLY),	"F" },		\
 	{(1UL << GLF_LRU),			"L" },		\
 	{(1UL << GLF_OBJECT),			"o" },		\
-	{(1UL << GLF_BLOCKING),			"b" })
+	{(1UL << GLF_BLOCKING),			"b" },		\
+	{(1UL << GLF_INSTANTIATE_NEEDED),	"n" },		\
+	{(1UL << GLF_INSTANTIATE_IN_PROG),	"N" },		\
+	{(1UL << GLF_TRY_TO_EVICT),		"e" },		\
+	{(1UL << GLF_VERIFY_DELETE),		"E" },		\
+	{(1UL << GLF_DEFER_DELETE),		"s" },		\
+	{(1UL << GLF_CANCELING),		"C" })
 
 #ifndef NUMPTY
 #define NUMPTY
@@ -106,9 +111,9 @@ TRACE_EVENT(gfs2_glock_state_change,
 	),
 
 	TP_fast_assign(
-		__entry->dev		= gl->gl_name.ln_sbd->sd_vfs->s_dev;
-		__entry->glnum		= gl->gl_name.ln_number;
-		__entry->gltype		= gl->gl_name.ln_type;
+		__entry->dev		= glock_sbd(gl)->sd_vfs->s_dev;
+		__entry->glnum		= glock_number(gl);
+		__entry->gltype		= glock_type(gl);
 		__entry->cur_state	= glock_trace_state(gl->gl_state);
 		__entry->new_state	= glock_trace_state(new_state);
 		__entry->tgt_state	= glock_trace_state(gl->gl_target);
@@ -142,9 +147,9 @@ TRACE_EVENT(gfs2_glock_put,
 	),
 
 	TP_fast_assign(
-		__entry->dev		= gl->gl_name.ln_sbd->sd_vfs->s_dev;
-		__entry->gltype		= gl->gl_name.ln_type;
-		__entry->glnum		= gl->gl_name.ln_number;
+		__entry->dev		= glock_sbd(gl)->sd_vfs->s_dev;
+		__entry->gltype		= glock_type(gl);
+		__entry->glnum		= glock_number(gl);
 		__entry->cur_state	= glock_trace_state(gl->gl_state);
 		__entry->flags		= gl->gl_flags  | (gl->gl_object ? (1UL<<GLF_OBJECT) : 0);
 	),
@@ -176,9 +181,9 @@ TRACE_EVENT(gfs2_demote_rq,
 	),
 
 	TP_fast_assign(
-		__entry->dev		= gl->gl_name.ln_sbd->sd_vfs->s_dev;
-		__entry->gltype		= gl->gl_name.ln_type;
-		__entry->glnum		= gl->gl_name.ln_number;
+		__entry->dev		= glock_sbd(gl)->sd_vfs->s_dev;
+		__entry->gltype		= glock_type(gl);
+		__entry->glnum		= glock_number(gl);
 		__entry->cur_state	= glock_trace_state(gl->gl_state);
 		__entry->dmt_state	= glock_trace_state(gl->gl_demote_state);
 		__entry->flags		= gl->gl_flags  | (gl->gl_object ? (1UL<<GLF_OBJECT) : 0);
@@ -198,30 +203,27 @@ TRACE_EVENT(gfs2_demote_rq,
 /* Promotion/grant of a glock */
 TRACE_EVENT(gfs2_promote,
 
-	TP_PROTO(const struct gfs2_holder *gh, int first),
+	TP_PROTO(const struct gfs2_holder *gh),
 
-	TP_ARGS(gh, first),
+	TP_ARGS(gh),
 
 	TP_STRUCT__entry(
 		__field(        dev_t,  dev                     )
 		__field(	u64,	glnum			)
 		__field(	u32,	gltype			)
-		__field(	int,	first			)
 		__field(	u8,	state			)
 	),
 
 	TP_fast_assign(
-		__entry->dev	= gh->gh_gl->gl_name.ln_sbd->sd_vfs->s_dev;
-		__entry->glnum	= gh->gh_gl->gl_name.ln_number;
-		__entry->gltype	= gh->gh_gl->gl_name.ln_type;
-		__entry->first	= first;
+		__entry->dev	= glock_sbd(gh->gh_gl)->sd_vfs->s_dev;
+		__entry->glnum	= glock_number(gh->gh_gl);
+		__entry->gltype	= glock_type(gh->gh_gl);
 		__entry->state	= glock_trace_state(gh->gh_state);
 	),
 
-	TP_printk("%u,%u glock %u:%llu promote %s %s",
+	TP_printk("%u,%u glock %u:%llu promote %s",
 		  MAJOR(__entry->dev), MINOR(__entry->dev), __entry->gltype,
 		  (unsigned long long)__entry->glnum,
-		  __entry->first ? "first": "other",
 		  glock_trace_name(__entry->state))
 );
 
@@ -241,9 +243,9 @@ TRACE_EVENT(gfs2_glock_queue,
 	),
 
 	TP_fast_assign(
-		__entry->dev	= gh->gh_gl->gl_name.ln_sbd->sd_vfs->s_dev;
-		__entry->glnum	= gh->gh_gl->gl_name.ln_number;
-		__entry->gltype	= gh->gh_gl->gl_name.ln_type;
+		__entry->dev	= glock_sbd(gh->gh_gl)->sd_vfs->s_dev;
+		__entry->glnum	= glock_number(gh->gh_gl);
+		__entry->gltype	= glock_type(gh->gh_gl);
 		__entry->queue	= queue;
 		__entry->state	= glock_trace_state(gh->gh_state);
 	),
@@ -280,9 +282,9 @@ TRACE_EVENT(gfs2_glock_lock_time,
 	),
 
 	TP_fast_assign(
-		__entry->dev            = gl->gl_name.ln_sbd->sd_vfs->s_dev;
-		__entry->glnum          = gl->gl_name.ln_number;
-		__entry->gltype         = gl->gl_name.ln_type;
+		__entry->dev            = glock_sbd(gl)->sd_vfs->s_dev;
+		__entry->glnum          = glock_number(gl);
+		__entry->gltype         = glock_type(gl);
 		__entry->status		= gl->gl_lksb.sb_status;
 		__entry->flags		= gl->gl_lksb.sb_flags;
 		__entry->tdiff		= tdiff;
@@ -335,11 +337,11 @@ TRACE_EVENT(gfs2_pin,
 	),
 
 	TP_fast_assign(
-		__entry->dev		= bd->bd_gl->gl_name.ln_sbd->sd_vfs->s_dev;
+		__entry->dev		= glock_sbd(bd->bd_gl)->sd_vfs->s_dev;
 		__entry->pin		= pin;
 		__entry->len		= bd->bd_bh->b_size;
 		__entry->block		= bd->bd_bh->b_blocknr;
-		__entry->ino		= bd->bd_gl->gl_name.ln_number;
+		__entry->ino		= glock_number(bd->bd_gl);
 	),
 
 	TP_printk("%u,%u log %s %llu/%lu inode %llu",
@@ -388,15 +390,17 @@ TRACE_EVENT(gfs2_log_blocks,
 	TP_STRUCT__entry(
 		__field(        dev_t,  dev                     )
 		__field(	int,	blocks			)
+		__field(	int,	blks_free		)
 	),
 
 	TP_fast_assign(
 		__entry->dev		= sdp->sd_vfs->s_dev;
 		__entry->blocks		= blocks;
+		__entry->blks_free	= atomic_read(&sdp->sd_log_blks_free);
 	),
 
-	TP_printk("%u,%u log reserve %d", MAJOR(__entry->dev),
-		  MINOR(__entry->dev), __entry->blocks)
+	TP_printk("%u,%u log reserve %d %d", MAJOR(__entry->dev),
+		  MINOR(__entry->dev), __entry->blocks, __entry->blks_free)
 );
 
 /* Writing back the AIL */
@@ -454,7 +458,7 @@ TRACE_EVENT(gfs2_bmap,
 	),
 
 	TP_fast_assign(
-		__entry->dev            = ip->i_gl->gl_name.ln_sbd->sd_vfs->s_dev;
+		__entry->dev            = glock_sbd(ip->i_gl)->sd_vfs->s_dev;
 		__entry->lblock		= lblock;
 		__entry->pblock		= buffer_mapped(bh) ?  bh->b_blocknr : 0;
 		__entry->inum		= ip->i_no_addr;
@@ -490,7 +494,7 @@ TRACE_EVENT(gfs2_iomap_start,
 	),
 
 	TP_fast_assign(
-		__entry->dev            = ip->i_gl->gl_name.ln_sbd->sd_vfs->s_dev;
+		__entry->dev            = glock_sbd(ip->i_gl)->sd_vfs->s_dev;
 		__entry->inum		= ip->i_no_addr;
 		__entry->pos		= pos;
 		__entry->length		= length;
@@ -522,7 +526,7 @@ TRACE_EVENT(gfs2_iomap_end,
 	),
 
 	TP_fast_assign(
-		__entry->dev            = ip->i_gl->gl_name.ln_sbd->sd_vfs->s_dev;
+		__entry->dev            = glock_sbd(ip->i_gl)->sd_vfs->s_dev;
 		__entry->inum		= ip->i_no_addr;
 		__entry->offset		= iomap->offset;
 		__entry->length		= iomap->length;
@@ -559,28 +563,32 @@ TRACE_EVENT(gfs2_block_alloc,
 		__field(	u8,	block_state		)
 		__field(        u64,	rd_addr			)
 		__field(        u32,	rd_free_clone		)
+		__field(	u32,	rd_requested		)
 		__field(	u32,	rd_reserved		)
 	),
 
 	TP_fast_assign(
-		__entry->dev		= rgd->rd_gl->gl_name.ln_sbd->sd_vfs->s_dev;
+		__entry->dev		= glock_sbd(rgd->rd_gl)->sd_vfs->s_dev;
 		__entry->start		= block;
 		__entry->inum		= ip->i_no_addr;
 		__entry->len		= len;
 		__entry->block_state	= block_state;
 		__entry->rd_addr	= rgd->rd_addr;
 		__entry->rd_free_clone	= rgd->rd_free_clone;
+		__entry->rd_requested	= rgd->rd_requested;
 		__entry->rd_reserved	= rgd->rd_reserved;
 	),
 
-	TP_printk("%u,%u bmap %llu alloc %llu/%lu %s rg:%llu rf:%u rr:%lu",
+	TP_printk("%u,%u bmap %llu alloc %llu/%lu %s rg:%llu rf:%u rq:%u rr:%u",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  (unsigned long long)__entry->inum,
 		  (unsigned long long)__entry->start,
 		  (unsigned long)__entry->len,
 		  block_state_name(__entry->block_state),
 		  (unsigned long long)__entry->rd_addr,
-		  __entry->rd_free_clone, (unsigned long)__entry->rd_reserved)
+		  __entry->rd_free_clone,
+		  __entry->rd_requested,
+		  __entry->rd_reserved)
 );
 
 /* Keep track of multi-block reservations as they are allocated/freed */
@@ -594,32 +602,40 @@ TRACE_EVENT(gfs2_rs,
 		__field(        dev_t,  dev                     )
 		__field(	u64,	rd_addr			)
 		__field(	u32,	rd_free_clone		)
+		__field(	u32,	rd_requested		)
 		__field(	u32,	rd_reserved		)
 		__field(	u64,	inum			)
 		__field(	u64,	start			)
-		__field(	u32,	free			)
+		__field(	u32,	requested		)
+		__field(	u32,	reserved		)
 		__field(	u8,	func			)
 	),
 
 	TP_fast_assign(
-		__entry->dev		= rs->rs_rbm.rgd->rd_sbd->sd_vfs->s_dev;
-		__entry->rd_addr	= rs->rs_rbm.rgd->rd_addr;
-		__entry->rd_free_clone	= rs->rs_rbm.rgd->rd_free_clone;
-		__entry->rd_reserved	= rs->rs_rbm.rgd->rd_reserved;
-		__entry->inum		= rs->rs_inum;
-		__entry->start		= gfs2_rbm_to_block(&rs->rs_rbm);
-		__entry->free		= rs->rs_free;
+		__entry->dev		= rs->rs_rgd->rd_sbd->sd_vfs->s_dev;
+		__entry->rd_addr	= rs->rs_rgd->rd_addr;
+		__entry->rd_free_clone	= rs->rs_rgd->rd_free_clone;
+		__entry->rd_requested	= rs->rs_rgd->rd_requested;
+		__entry->rd_reserved	= rs->rs_rgd->rd_reserved;
+		__entry->inum		= container_of(rs, struct gfs2_inode,
+						       i_res)->i_no_addr;
+		__entry->start		= rs->rs_start;
+		__entry->requested	= rs->rs_requested;
+		__entry->reserved	= rs->rs_reserved;
 		__entry->func		= func;
 	),
 
-	TP_printk("%u,%u bmap %llu resrv %llu rg:%llu rf:%lu rr:%lu %s f:%lu",
+	TP_printk("%u,%u bmap %llu resrv %llu rg:%llu rf:%u rq:%u rr:%u %s q:%u r:%u",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
 		  (unsigned long long)__entry->inum,
 		  (unsigned long long)__entry->start,
 		  (unsigned long long)__entry->rd_addr,
-		  (unsigned long)__entry->rd_free_clone,
-		  (unsigned long)__entry->rd_reserved,
-		  rs_func_name(__entry->func), (unsigned long)__entry->free)
+		  __entry->rd_free_clone,
+		  __entry->rd_requested,
+		  __entry->rd_reserved,
+		  rs_func_name(__entry->func),
+		  __entry->requested,
+		  __entry->reserved)
 );
 
 #endif /* _TRACE_GFS2_H */

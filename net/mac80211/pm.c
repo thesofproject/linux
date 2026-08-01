@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
+/*
+ * Portions
+ * Copyright (C) 2020-2021, 2023-2024 Intel Corporation
+ */
 #include <net/mac80211.h>
 #include <net/rtnetlink.h>
 
@@ -11,7 +15,7 @@ static void ieee80211_sched_scan_cancel(struct ieee80211_local *local)
 {
 	if (ieee80211_request_sched_scan_stop(local))
 		return;
-	cfg80211_sched_scan_stopped_rtnl(local->hw.wiphy, 0);
+	cfg80211_sched_scan_stopped_locked(local->hw.wiphy, 0);
 }
 
 int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
@@ -23,9 +27,12 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 	if (!local->open_count)
 		goto suspend;
 
+	local->suspending = true;
+	mb(); /* make suspending visible before any cancellation */
+
 	ieee80211_scan_cancel(local);
 
-	ieee80211_dfs_cac_cancel(local);
+	ieee80211_dfs_cac_cancel(local, NULL);
 
 	ieee80211_roc_purge(local, NULL);
 
@@ -33,13 +40,12 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 
 	if (ieee80211_hw_check(hw, AMPDU_AGGREGATION) &&
 	    !(wowlan && wowlan->any)) {
-		mutex_lock(&local->sta_mtx);
+		lockdep_assert_wiphy(local->hw.wiphy);
 		list_for_each_entry(sta, &local->sta_list, list) {
 			set_sta_flag(sta, WLAN_STA_BLOCK_BA);
 			ieee80211_sta_tear_down_BA_sessions(
 					sta, AGG_STOP_LOCAL_REQUEST);
 		}
-		mutex_unlock(&local->sta_mtx);
 	}
 
 	/* keep sched_scan only in case of 'any' trigger */
@@ -63,14 +69,14 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 	flush_workqueue(local->workqueue);
 
 	/* Don't try to run timers while suspended. */
-	del_timer_sync(&local->sta_cleanup);
+	timer_delete_sync(&local->sta_cleanup);
 
 	 /*
 	 * Note that this particular timer doesn't need to be
 	 * restarted at resume.
 	 */
-	cancel_work_sync(&local->dynamic_ps_enable_work);
-	del_timer_sync(&local->dynamic_ps_timer);
+	wiphy_work_cancel(local->hw.wiphy, &local->dynamic_ps_enable_work);
+	timer_delete_sync(&local->dynamic_ps_timer);
 
 	local->wowlan = wowlan;
 	if (local->wowlan) {
@@ -102,7 +108,7 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 			    sdata->u.mgd.powersave &&
 			     !(local->hw.conf.flags & IEEE80211_CONF_PS)) {
 				local->hw.conf.flags |= IEEE80211_CONF_PS;
-				ieee80211_hw_config(local,
+				ieee80211_hw_config(local, -1,
 						    IEEE80211_CONF_CHANGE_PS);
 			}
 		}
@@ -112,12 +118,11 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 			local->quiescing = false;
 			local->wowlan = false;
 			if (ieee80211_hw_check(hw, AMPDU_AGGREGATION)) {
-				mutex_lock(&local->sta_mtx);
+				lockdep_assert_wiphy(local->hw.wiphy);
 				list_for_each_entry(sta,
 						    &local->sta_list, list) {
 					clear_sta_flag(sta, WLAN_STA_BLOCK_BA);
 				}
-				mutex_unlock(&local->sta_mtx);
 			}
 			ieee80211_wake_queues_by_reason(hw,
 					IEEE80211_MAX_QUEUE_MAP,
@@ -150,26 +155,12 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 		case NL80211_IFTYPE_STATION:
 			ieee80211_mgd_quiesce(sdata);
 			break;
-		case NL80211_IFTYPE_WDS:
-			/* tear down aggregation sessions and remove STAs */
-			mutex_lock(&local->sta_mtx);
-			sta = sdata->u.wds.sta;
-			if (sta && sta->uploaded) {
-				enum ieee80211_sta_state state;
-
-				state = sta->sta_state;
-				for (; state > IEEE80211_STA_NOTEXIST; state--)
-					WARN_ON(drv_sta_state(local, sta->sdata,
-							      sta, state,
-							      state - 1));
-			}
-			mutex_unlock(&local->sta_mtx);
-			break;
 		default:
 			break;
 		}
 
-		flush_delayed_work(&sdata->dec_tailroom_needed_wk);
+		wiphy_delayed_work_flush(local->hw.wiphy,
+					 &sdata->dec_tailroom_needed_wk);
 		drv_remove_interface(local, sdata);
 	}
 
@@ -180,13 +171,14 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 	WARN_ON(!list_empty(&local->chanctx_list));
 
 	/* stop hardware - this must stop RX */
-	ieee80211_stop_device(local);
+	ieee80211_stop_device(local, true);
 
  suspend:
 	local->suspended = true;
 	/* need suspended to be visible before quiescing is false */
 	barrier();
 	local->quiescing = false;
+	local->suspending = false;
 
 	return 0;
 }

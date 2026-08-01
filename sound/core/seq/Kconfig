@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 config SND_SEQUENCER
 	tristate "Sequencer support"
 	select SND_TIMER
@@ -58,5 +59,18 @@ config SND_SEQ_MIDI_EMUL
 
 config SND_SEQ_VIRMIDI
 	tristate
+
+config SND_SEQ_UMP
+	bool "Support for UMP events"
+	default SND_UMP
+	help
+	  Say Y here to enable the support for handling UMP (Universal MIDI
+	  Packet) events via ALSA sequencer infrastructure, which is an
+	  essential feature for enabling MIDI 2.0 support.
+	  It includes the automatic conversion of ALSA sequencer events
+	  among legacy and UMP clients.
+
+config SND_SEQ_UMP_CLIENT
+	def_tristate SND_UMP && SND_SEQ_UMP
 
 endif # SND_SEQUENCER

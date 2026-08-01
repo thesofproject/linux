@@ -18,7 +18,7 @@
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/types.h>
@@ -39,7 +39,7 @@ static struct clk *spear1340_cpu_get_possible_parent(unsigned long newfreq)
 	 * In SPEAr1340, cpu clk's parent sys clk can take input from
 	 * following sources
 	 */
-	const char *sys_clk_src[] = {
+	static const char * const sys_clk_src[] = {
 		"sys_syn_clk",
 		"pll1_clk",
 		"pll2_clk",
@@ -153,27 +153,26 @@ static int spear_cpufreq_target(struct cpufreq_policy *policy,
 static int spear_cpufreq_init(struct cpufreq_policy *policy)
 {
 	policy->clk = spear_cpufreq.clk;
-	return cpufreq_generic_init(policy, spear_cpufreq.freq_tbl,
+	cpufreq_generic_init(policy, spear_cpufreq.freq_tbl,
 			spear_cpufreq.transition_latency);
+	return 0;
 }
 
 static struct cpufreq_driver spear_cpufreq_driver = {
 	.name		= "cpufreq-spear",
-	.flags		= CPUFREQ_STICKY | CPUFREQ_NEED_INITIAL_FREQ_CHECK,
+	.flags		= CPUFREQ_NEED_INITIAL_FREQ_CHECK,
 	.verify		= cpufreq_generic_frequency_table_verify,
 	.target_index	= spear_cpufreq_target,
 	.get		= cpufreq_generic_get,
 	.init		= spear_cpufreq_init,
-	.attr		= cpufreq_generic_attr,
 };
 
 static int spear_cpufreq_probe(struct platform_device *pdev)
 {
 	struct device_node *np;
-	const struct property *prop;
 	struct cpufreq_frequency_table *freq_tbl;
-	const __be32 *val;
-	int cnt, i, ret;
+	u32 val;
+	int cnt, ret, i = 0;
 
 	np = of_cpu_device_node_get(0);
 	if (!np) {
@@ -183,28 +182,25 @@ static int spear_cpufreq_probe(struct platform_device *pdev)
 
 	if (of_property_read_u32(np, "clock-latency",
 				&spear_cpufreq.transition_latency))
-		spear_cpufreq.transition_latency = CPUFREQ_ETERNAL;
+		spear_cpufreq.transition_latency = CPUFREQ_DEFAULT_TRANSITION_LATENCY_NS;
 
-	prop = of_find_property(np, "cpufreq_tbl", NULL);
-	if (!prop || !prop->value) {
+	cnt = of_property_count_u32_elems(np, "cpufreq_tbl");
+	if (cnt <= 0) {
 		pr_err("Invalid cpufreq_tbl\n");
 		ret = -ENODEV;
 		goto out_put_node;
 	}
 
-	cnt = prop->length / sizeof(u32);
-	val = prop->value;
-
-	freq_tbl = kzalloc(sizeof(*freq_tbl) * (cnt + 1), GFP_KERNEL);
+	freq_tbl = kzalloc_objs(*freq_tbl, cnt + 1);
 	if (!freq_tbl) {
 		ret = -ENOMEM;
 		goto out_put_node;
 	}
 
-	for (i = 0; i < cnt; i++)
-		freq_tbl[i].frequency = be32_to_cpup(val++);
+	of_property_for_each_u32(np, "cpufreq_tbl", val)
+		freq_tbl[i++].frequency = val;
 
-	freq_tbl[i].frequency = CPUFREQ_TABLE_END;
+	freq_tbl[cnt].frequency = CPUFREQ_TABLE_END;
 
 	spear_cpufreq.freq_tbl = freq_tbl;
 

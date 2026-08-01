@@ -9,7 +9,7 @@
 #include <linux/err.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
@@ -2021,17 +2021,16 @@ MODULE_DEVICE_TABLE(of, sprd_sc9860_clk_ids);
 
 static int sc9860_clk_probe(struct platform_device *pdev)
 {
-	const struct of_device_id *match;
 	const struct sprd_clk_desc *desc;
+	int ret;
 
-	match = of_match_node(sprd_sc9860_clk_ids, pdev->dev.of_node);
-	if (!match) {
-		pr_err("%s: of_match_node() failed", __func__);
+	desc = device_get_match_data(&pdev->dev);
+	if (!desc)
 		return -ENODEV;
-	}
 
-	desc = match->data;
-	sprd_clk_regmap_init(pdev, desc);
+	ret = sprd_clk_regmap_init(pdev, desc);
+	if (ret)
+		return ret;
 
 	return sprd_clk_probe(&pdev->dev, desc->hw_clks);
 }

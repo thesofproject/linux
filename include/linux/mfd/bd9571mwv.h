@@ -1,16 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * ROHM BD9571MWV-M driver
+ * ROHM BD9571MWV-M and BD9574MWF-M driver
  *
  * Copyright (C) 2017 Marek Vasut <marek.vasut+renesas@gmail.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether expressed or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License version 2 for more details.
+ * Copyright (C) 2020 Renesas Electronics Corporation
  *
  * Based on the TPS65086 driver
  */
@@ -21,11 +14,12 @@
 #include <linux/device.h>
 #include <linux/regmap.h>
 
-/* List of registers for BD9571MWV */
+/* List of registers for BD9571MWV and BD9574MWF */
 #define BD9571MWV_VENDOR_CODE			0x00
 #define BD9571MWV_VENDOR_CODE_VAL		0xdb
 #define BD9571MWV_PRODUCT_CODE			0x01
-#define BD9571MWV_PRODUCT_CODE_VAL		0x60
+#define BD9571MWV_PRODUCT_CODE_BD9571MWV	0x60
+#define BD9571MWV_PRODUCT_CODE_BD9574MWF	0x74
 #define BD9571MWV_PRODUCT_REVISION		0x02
 
 #define BD9571MWV_I2C_FUSA_MODE			0x10
@@ -33,6 +27,11 @@
 #define BD9571MWV_I2C_MD2_E1_BIT_2		0x12
 
 #define BD9571MWV_BKUP_MODE_CNT			0x20
+#define BD9571MWV_BKUP_MODE_CNT_KEEPON_MASK	GENMASK(3, 0)
+#define BD9571MWV_BKUP_MODE_CNT_KEEPON_DDR0	BIT(0)
+#define BD9571MWV_BKUP_MODE_CNT_KEEPON_DDR1	BIT(1)
+#define BD9571MWV_BKUP_MODE_CNT_KEEPON_DDR0C	BIT(2)
+#define BD9571MWV_BKUP_MODE_CNT_KEEPON_DDR1C	BIT(3)
 #define BD9571MWV_BKUP_MODE_STATUS		0x21
 #define BD9571MWV_BKUP_RECOVERY_CNT		0x22
 #define BD9571MWV_BKUP_CTRL_TIM_CNT		0x23
@@ -50,6 +49,7 @@
 #define BD9571MWV_VD33_VID			0x44
 
 #define BD9571MWV_DVFS_VINIT			0x50
+#define BD9574MWF_VD09_VINIT			0x51
 #define BD9571MWV_DVFS_SETVMAX			0x52
 #define BD9571MWV_DVFS_BOOSTVID			0x53
 #define BD9571MWV_DVFS_SETVID			0x54
@@ -63,6 +63,7 @@
 #define BD9571MWV_GPIO_INT_SET			0x64
 #define BD9571MWV_GPIO_INT			0x65
 #define BD9571MWV_GPIO_INTMASK			0x66
+#define BD9574MWF_GPIO_MUX			0x67
 
 #define BD9571MWV_REG_KEEP(n)			(0x70 + (n))
 
@@ -72,6 +73,8 @@
 #define BD9571MWV_PROT_ERROR_STATUS2		0x83
 #define BD9571MWV_PROT_ERROR_STATUS3		0x84
 #define BD9571MWV_PROT_ERROR_STATUS4		0x85
+#define BD9574MWF_PROT_ERROR_STATUS5		0x86
+#define BD9574MWF_SYSTEM_ERROR_STATUS		0x87
 
 #define BD9571MWV_INT_INTREQ			0x90
 #define BD9571MWV_INT_INTREQ_MD1_INT		BIT(0)
@@ -84,6 +87,12 @@
 #define BD9571MWV_INT_INTREQ_BKUP_TRG_INT	BIT(7)
 #define BD9571MWV_INT_INTMASK			0x91
 
+#define BD9574MWF_SSCG_CNT			0xA0
+#define BD9574MWF_POFFB_MRB			0xA1
+#define BD9574MWF_SMRB_WR_PROT			0xA2
+#define BD9574MWF_SMRB_ASSERT			0xA3
+#define BD9574MWF_SMRB_STATUS			0xA4
+
 #define BD9571MWV_ACCESS_KEY			0xff
 
 /* Define the BD9571MWV IRQ numbers */
@@ -93,23 +102,8 @@ enum bd9571mwv_irqs {
 	BD9571MWV_IRQ_MD2_E2,
 	BD9571MWV_IRQ_PROT_ERR,
 	BD9571MWV_IRQ_GP,
-	BD9571MWV_IRQ_128H_OF,
+	BD9571MWV_IRQ_128H_OF,	/* BKUP_HOLD on BD9574MWF */
 	BD9571MWV_IRQ_WDT_OF,
 	BD9571MWV_IRQ_BKUP_TRG,
 };
-
-/**
- * struct bd9571mwv - state holder for the bd9571mwv driver
- *
- * Device data may be used to access the BD9571MWV chip
- */
-struct bd9571mwv {
-	struct device *dev;
-	struct regmap *regmap;
-
-	/* IRQ Data */
-	int irq;
-	struct regmap_irq_chip_data *irq_data;
-};
-
 #endif /* __LINUX_MFD_BD9571MWV_H */

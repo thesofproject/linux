@@ -6,6 +6,8 @@
 
 #include <linux/seq_file.h>
 
+struct blk_mq_hw_ctx;
+
 struct blk_mq_debugfs_attr {
 	const char *name;
 	umode_t mode;
@@ -18,65 +20,71 @@ struct blk_mq_debugfs_attr {
 int __blk_mq_debugfs_rq_show(struct seq_file *m, struct request *rq);
 int blk_mq_debugfs_rq_show(struct seq_file *m, void *v);
 
-int blk_mq_debugfs_register(struct request_queue *q);
-void blk_mq_debugfs_unregister(struct request_queue *q);
-int blk_mq_debugfs_register_hctx(struct request_queue *q,
-				 struct blk_mq_hw_ctx *hctx);
+void blk_mq_debugfs_register(struct request_queue *q);
+void blk_mq_debugfs_register_hctx(struct request_queue *q,
+				  struct blk_mq_hw_ctx *hctx);
 void blk_mq_debugfs_unregister_hctx(struct blk_mq_hw_ctx *hctx);
-int blk_mq_debugfs_register_hctxs(struct request_queue *q);
+void blk_mq_debugfs_register_hctxs(struct request_queue *q);
 void blk_mq_debugfs_unregister_hctxs(struct request_queue *q);
 
-int blk_mq_debugfs_register_sched(struct request_queue *q);
+void blk_mq_debugfs_register_sched(struct request_queue *q);
 void blk_mq_debugfs_unregister_sched(struct request_queue *q);
-int blk_mq_debugfs_register_sched_hctx(struct request_queue *q,
+void blk_mq_debugfs_register_sched_hctx(struct request_queue *q,
 				       struct blk_mq_hw_ctx *hctx);
 void blk_mq_debugfs_unregister_sched_hctx(struct blk_mq_hw_ctx *hctx);
+
+void blk_mq_debugfs_register_rq_qos(struct request_queue *q);
 #else
-static inline int blk_mq_debugfs_register(struct request_queue *q)
-{
-	return 0;
-}
-
-static inline void blk_mq_debugfs_unregister(struct request_queue *q)
+static inline void blk_mq_debugfs_register(struct request_queue *q)
 {
 }
 
-static inline int blk_mq_debugfs_register_hctx(struct request_queue *q,
-					       struct blk_mq_hw_ctx *hctx)
+static inline void blk_mq_debugfs_register_hctx(struct request_queue *q,
+						struct blk_mq_hw_ctx *hctx)
 {
-	return 0;
 }
 
 static inline void blk_mq_debugfs_unregister_hctx(struct blk_mq_hw_ctx *hctx)
 {
 }
 
-static inline int blk_mq_debugfs_register_hctxs(struct request_queue *q)
+static inline void blk_mq_debugfs_register_hctxs(struct request_queue *q)
 {
-	return 0;
 }
 
 static inline void blk_mq_debugfs_unregister_hctxs(struct request_queue *q)
 {
 }
 
-static inline int blk_mq_debugfs_register_sched(struct request_queue *q)
+static inline void blk_mq_debugfs_register_sched(struct request_queue *q)
 {
-	return 0;
 }
 
 static inline void blk_mq_debugfs_unregister_sched(struct request_queue *q)
 {
 }
 
-static inline int blk_mq_debugfs_register_sched_hctx(struct request_queue *q,
-						     struct blk_mq_hw_ctx *hctx)
+static inline void blk_mq_debugfs_register_sched_hctx(struct request_queue *q,
+						      struct blk_mq_hw_ctx *hctx)
 {
-	return 0;
 }
 
 static inline void blk_mq_debugfs_unregister_sched_hctx(struct blk_mq_hw_ctx *hctx)
 {
+}
+
+static inline void blk_mq_debugfs_register_rq_qos(struct request_queue *q)
+{
+}
+
+#endif
+
+#if defined(CONFIG_BLK_DEV_ZONED) && defined(CONFIG_BLK_DEBUG_FS)
+int queue_zone_wplugs_show(void *data, struct seq_file *m);
+#else
+static inline int queue_zone_wplugs_show(void *data, struct seq_file *m)
+{
+	return 0;
 }
 #endif
 

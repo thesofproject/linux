@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* 8390 core for usual drivers */
 
 static const char version[] =
@@ -35,9 +36,9 @@ void ei_set_multicast_list(struct net_device *dev)
 }
 EXPORT_SYMBOL(ei_set_multicast_list);
 
-void ei_tx_timeout(struct net_device *dev)
+void ei_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
-	__ei_tx_timeout(dev);
+	__ei_tx_timeout(dev, txqueue);
 }
 EXPORT_SYMBOL(ei_tx_timeout);
 
@@ -85,18 +86,5 @@ void NS8390_init(struct net_device *dev, int startp)
 }
 EXPORT_SYMBOL(NS8390_init);
 
-#if defined(MODULE)
-
-static int __init ns8390_module_init(void)
-{
-	return 0;
-}
-
-static void __exit ns8390_module_exit(void)
-{
-}
-
-module_init(ns8390_module_init);
-module_exit(ns8390_module_exit);
-#endif /* MODULE */
+MODULE_DESCRIPTION("National Semiconductor 8390 core driver");
 MODULE_LICENSE("GPL");

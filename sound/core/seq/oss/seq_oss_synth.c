@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * OSS compatible sequencer driver
  *
  * synth device handlers
  *
  * Copyright (C) 1998,99 Takashi Iwai <tiwai@suse.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include "seq_oss_synth.h"
@@ -39,13 +26,6 @@
  * definition of synth info records
  */
 
-/* sysex buffer */
-struct seq_oss_synth_sysex {
-	int len;
-	int skip;
-	unsigned char buf[MAX_SYSEX_BUFLEN];
-};
-
 /* synth info */
 struct seq_oss_synth {
 	int seq_device;
@@ -64,6 +44,7 @@ struct seq_oss_synth {
 	snd_use_lock_t use_lock;
 };
 
+DEFINE_FREE(seq_oss_synth, struct seq_oss_synth *, if (!IS_ERR_OR_NULL(_T)) snd_use_lock_free(&(_T)->use_lock))
 
 /*
  * device table
@@ -99,13 +80,11 @@ snd_seq_oss_synth_init(void)
  * registration of the synth device
  */
 int
-snd_seq_oss_synth_probe(struct device *_dev)
+snd_seq_oss_synth_probe(struct snd_seq_device *dev)
 {
-	struct snd_seq_device *dev = to_seq_dev(_dev);
 	int i;
 	struct seq_oss_synth *rec;
 	struct snd_seq_oss_reg *reg = SNDRV_SEQ_DEVICE_ARGPTR(dev);
-	unsigned long flags;
 
 	rec = kzalloc(sizeof(*rec), GFP_KERNEL);
 	if (!rec)
@@ -120,26 +99,25 @@ snd_seq_oss_synth_probe(struct device *_dev)
 	snd_use_lock_init(&rec->use_lock);
 
 	/* copy and truncate the name of synth device */
-	strlcpy(rec->name, dev->name, sizeof(rec->name));
+	strscpy(rec->name, dev->name, sizeof(rec->name));
 
 	/* registration */
-	spin_lock_irqsave(&register_lock, flags);
-	for (i = 0; i < max_synth_devs; i++) {
-		if (synth_devs[i] == NULL)
-			break;
-	}
-	if (i >= max_synth_devs) {
-		if (max_synth_devs >= SNDRV_SEQ_OSS_MAX_SYNTH_DEVS) {
-			spin_unlock_irqrestore(&register_lock, flags);
-			pr_err("ALSA: seq_oss: no more synth slot\n");
-			kfree(rec);
-			return -ENOMEM;
+	scoped_guard(spinlock_irqsave, &register_lock) {
+		for (i = 0; i < max_synth_devs; i++) {
+			if (synth_devs[i] == NULL)
+				break;
 		}
-		max_synth_devs++;
+		if (i >= max_synth_devs) {
+			if (max_synth_devs >= SNDRV_SEQ_OSS_MAX_SYNTH_DEVS) {
+				pr_err("ALSA: seq_oss: no more synth slot\n");
+				kfree(rec);
+				return -ENOMEM;
+			}
+			max_synth_devs++;
+		}
+		rec->seq_device = i;
+		synth_devs[i] = rec;
 	}
-	rec->seq_device = i;
-	synth_devs[i] = rec;
-	spin_unlock_irqrestore(&register_lock, flags);
 	dev->driver_data = rec;
 #ifdef SNDRV_OSS_INFO_DEV_SYNTH
 	if (i < SNDRV_CARDS)
@@ -149,33 +127,30 @@ snd_seq_oss_synth_probe(struct device *_dev)
 }
 
 
-int
-snd_seq_oss_synth_remove(struct device *_dev)
+void
+snd_seq_oss_synth_remove(struct snd_seq_device *dev)
 {
-	struct snd_seq_device *dev = to_seq_dev(_dev);
 	int index;
 	struct seq_oss_synth *rec = dev->driver_data;
-	unsigned long flags;
 
-	spin_lock_irqsave(&register_lock, flags);
-	for (index = 0; index < max_synth_devs; index++) {
-		if (synth_devs[index] == rec)
-			break;
-	}
-	if (index >= max_synth_devs) {
-		spin_unlock_irqrestore(&register_lock, flags);
-		pr_err("ALSA: seq_oss: can't unregister synth\n");
-		return -EINVAL;
-	}
-	synth_devs[index] = NULL;
-	if (index == max_synth_devs - 1) {
-		for (index--; index >= 0; index--) {
-			if (synth_devs[index])
+	scoped_guard(spinlock_irqsave, &register_lock) {
+		for (index = 0; index < max_synth_devs; index++) {
+			if (synth_devs[index] == rec)
 				break;
 		}
-		max_synth_devs = index + 1;
+		if (index >= max_synth_devs) {
+			pr_err("ALSA: seq_oss: can't unregister synth\n");
+			return;
+		}
+		synth_devs[index] = NULL;
+		if (index == max_synth_devs - 1) {
+			for (index--; index >= 0; index--) {
+				if (synth_devs[index])
+					break;
+			}
+			max_synth_devs = index + 1;
+		}
 	}
-	spin_unlock_irqrestore(&register_lock, flags);
 #ifdef SNDRV_OSS_INFO_DEV_SYNTH
 	if (rec->seq_device < SNDRV_CARDS)
 		snd_oss_info_unregister(SNDRV_OSS_INFO_DEV_SYNTH, rec->seq_device);
@@ -183,8 +158,6 @@ snd_seq_oss_synth_remove(struct device *_dev)
 
 	snd_use_lock_sync(&rec->use_lock);
 	kfree(rec);
-
-	return 0;
 }
 
 
@@ -194,13 +167,11 @@ static struct seq_oss_synth *
 get_sdev(int dev)
 {
 	struct seq_oss_synth *rec;
-	unsigned long flags;
 
-	spin_lock_irqsave(&register_lock, flags);
+	guard(spinlock_irqsave)(&register_lock);
 	rec = synth_devs[dev];
 	if (rec)
 		snd_use_lock_use(&rec->use_lock);
-	spin_unlock_irqrestore(&register_lock, flags);
 	return rec;
 }
 
@@ -213,20 +184,18 @@ void
 snd_seq_oss_synth_setup(struct seq_oss_devinfo *dp)
 {
 	int i;
-	struct seq_oss_synth *rec;
 	struct seq_oss_synthinfo *info;
 
 	dp->max_synthdev = max_synth_devs;
 	dp->synth_opened = 0;
 	memset(dp->synths, 0, sizeof(dp->synths));
 	for (i = 0; i < dp->max_synthdev; i++) {
-		rec = get_sdev(i);
+		struct seq_oss_synth *rec __free(seq_oss_synth) = get_sdev(i);
+
 		if (rec == NULL)
 			continue;
-		if (rec->oper.open == NULL || rec->oper.close == NULL) {
-			snd_use_lock_free(&rec->use_lock);
+		if (rec->oper.open == NULL || rec->oper.close == NULL)
 			continue;
-		}
 		info = &dp->synths[i];
 		info->arg.app_index = dp->port;
 		info->arg.file_mode = dp->file_mode;
@@ -236,22 +205,19 @@ snd_seq_oss_synth_setup(struct seq_oss_devinfo *dp)
 		else
 			info->arg.event_passing = SNDRV_SEQ_OSS_PASS_EVENTS;
 		info->opened = 0;
-		if (!try_module_get(rec->oper.owner)) {
-			snd_use_lock_free(&rec->use_lock);
+		if (!try_module_get(rec->oper.owner))
 			continue;
-		}
 		if (rec->oper.open(&info->arg, rec->private_data) < 0) {
 			module_put(rec->oper.owner);
-			snd_use_lock_free(&rec->use_lock);
 			continue;
 		}
 		info->nr_voices = rec->nr_voices;
 		if (info->nr_voices > 0) {
-			info->ch = kcalloc(info->nr_voices, sizeof(struct seq_oss_chinfo), GFP_KERNEL);
+			info->ch = kzalloc_objs(struct seq_oss_chinfo,
+						info->nr_voices);
 			if (!info->ch) {
 				rec->oper.close(&info->arg);
 				module_put(rec->oper.owner);
-				snd_use_lock_free(&rec->use_lock);
 				continue;
 			}
 			reset_channels(info);
@@ -259,7 +225,6 @@ snd_seq_oss_synth_setup(struct seq_oss_devinfo *dp)
 		info->opened++;
 		rec->opened++;
 		dp->synth_opened++;
-		snd_use_lock_free(&rec->use_lock);
 	}
 }
 
@@ -306,7 +271,6 @@ void
 snd_seq_oss_synth_cleanup(struct seq_oss_devinfo *dp)
 {
 	int i;
-	struct seq_oss_synth *rec;
 	struct seq_oss_synthinfo *info;
 
 	if (snd_BUG_ON(dp->max_synthdev > SNDRV_SEQ_OSS_MAX_SYNTH_DEVS))
@@ -321,7 +285,9 @@ snd_seq_oss_synth_cleanup(struct seq_oss_devinfo *dp)
 				midi_synth_dev.opened--;
 			}
 		} else {
-			rec = get_sdev(i);
+			struct seq_oss_synth *rec __free(seq_oss_synth) =
+				get_sdev(i);
+
 			if (rec == NULL)
 				continue;
 			if (rec->opened > 0) {
@@ -329,10 +295,7 @@ snd_seq_oss_synth_cleanup(struct seq_oss_devinfo *dp)
 				module_put(rec->oper.owner);
 				rec->opened = 0;
 			}
-			snd_use_lock_free(&rec->use_lock);
 		}
-		kfree(info->sysex);
-		info->sysex = NULL;
 		kfree(info->ch);
 		info->ch = NULL;
 	}
@@ -402,14 +365,11 @@ reset_channels(struct seq_oss_synthinfo *info)
 void
 snd_seq_oss_synth_reset(struct seq_oss_devinfo *dp, int dev)
 {
-	struct seq_oss_synth *rec;
 	struct seq_oss_synthinfo *info;
 
 	info = get_synthinfo_nospec(dp, dev);
 	if (!info || !info->opened)
 		return;
-	if (info->sysex)
-		info->sysex->len = 0; /* reset sysex */
 	reset_channels(info);
 	if (info->is_midi) {
 		if (midi_synth_dev.opened <= 0)
@@ -421,15 +381,14 @@ snd_seq_oss_synth_reset(struct seq_oss_devinfo *dp, int dev)
 					  dp->file_mode) < 0) {
 			midi_synth_dev.opened--;
 			info->opened = 0;
-			kfree(info->sysex);
-			info->sysex = NULL;
 			kfree(info->ch);
 			info->ch = NULL;
 		}
 		return;
 	}
 
-	rec = get_sdev(dev);
+	struct seq_oss_synth *rec __free(seq_oss_synth) =
+		get_sdev(dev);
 	if (rec == NULL)
 		return;
 	if (rec->oper.reset) {
@@ -442,7 +401,6 @@ snd_seq_oss_synth_reset(struct seq_oss_devinfo *dp, int dev)
 		ev.type = SNDRV_SEQ_EVENT_RESET;
 		snd_seq_oss_dispatch(dp, &ev, 0, 0);
 	}
-	snd_use_lock_free(&rec->use_lock);
 }
 
 
@@ -454,9 +412,7 @@ int
 snd_seq_oss_synth_load_patch(struct seq_oss_devinfo *dp, int dev, int fmt,
 			    const char __user *buf, int p, int c)
 {
-	struct seq_oss_synth *rec;
 	struct seq_oss_synthinfo *info;
-	int rc;
 
 	info = get_synthinfo_nospec(dp, dev);
 	if (!info)
@@ -464,15 +420,16 @@ snd_seq_oss_synth_load_patch(struct seq_oss_devinfo *dp, int dev, int fmt,
 
 	if (info->is_midi)
 		return 0;
-	if ((rec = get_synthdev(dp, dev)) == NULL)
+
+	struct seq_oss_synth *rec __free(seq_oss_synth) =
+		get_synthdev(dp, dev);
+	if (!rec)
 		return -ENXIO;
 
 	if (rec->oper.load_patch == NULL)
-		rc = -ENXIO;
+		return -ENXIO;
 	else
-		rc = rec->oper.load_patch(&info->arg, fmt, buf, p, c);
-	snd_use_lock_free(&rec->use_lock);
-	return rc;
+		return rec->oper.load_patch(&info->arg, fmt, buf, p, c);
 }
 
 /*
@@ -481,76 +438,37 @@ snd_seq_oss_synth_load_patch(struct seq_oss_devinfo *dp, int dev, int fmt,
 struct seq_oss_synthinfo *
 snd_seq_oss_synth_info(struct seq_oss_devinfo *dp, int dev)
 {
-	struct seq_oss_synth *rec;
+	struct seq_oss_synth *rec __free(seq_oss_synth) =
+		get_synthdev(dp, dev);
 
-	rec = get_synthdev(dp, dev);
-	if (rec) {
-		snd_use_lock_free(&rec->use_lock);
+	if (rec)
 		return get_synthinfo_nospec(dp, dev);
-	}
 	return NULL;
 }
 
 
 /*
  * receive OSS 6 byte sysex packet:
- * the full sysex message will be sent if it reaches to the end of data
- * (0xff).
+ * the event is filled and prepared for sending immediately
+ * (i.e. sysex messages are fragmented)
  */
 int
 snd_seq_oss_synth_sysex(struct seq_oss_devinfo *dp, int dev, unsigned char *buf, struct snd_seq_event *ev)
 {
-	int i, send;
-	unsigned char *dest;
-	struct seq_oss_synth_sysex *sysex;
-	struct seq_oss_synthinfo *info;
+	unsigned char *p;
+	int len = 6;
 
-	info = snd_seq_oss_synth_info(dp, dev);
-	if (!info)
-		return -ENXIO;
+	p = memchr(buf, 0xff, 6);
+	if (p)
+		len = p - buf + 1;
 
-	sysex = info->sysex;
-	if (sysex == NULL) {
-		sysex = kzalloc(sizeof(*sysex), GFP_KERNEL);
-		if (sysex == NULL)
-			return -ENOMEM;
-		info->sysex = sysex;
-	}
-
-	send = 0;
-	dest = sysex->buf + sysex->len;
-	/* copy 6 byte packet to the buffer */
-	for (i = 0; i < 6; i++) {
-		if (buf[i] == 0xff) {
-			send = 1;
-			break;
-		}
-		dest[i] = buf[i];
-		sysex->len++;
-		if (sysex->len >= MAX_SYSEX_BUFLEN) {
-			sysex->len = 0;
-			sysex->skip = 1;
-			break;
-		}
-	}
-
-	if (sysex->len && send) {
-		if (sysex->skip) {
-			sysex->skip = 0;
-			sysex->len = 0;
-			return -EINVAL; /* skip */
-		}
-		/* copy the data to event record and send it */
-		ev->flags = SNDRV_SEQ_EVENT_LENGTH_VARIABLE;
-		if (snd_seq_oss_synth_addr(dp, dev, ev))
-			return -EINVAL;
-		ev->data.ext.len = sysex->len;
-		ev->data.ext.ptr = sysex->buf;
-		sysex->len = 0;
-		return 0;
-	}
-
-	return -EINVAL; /* skip */
+	/* copy the data to event record and send it */
+	if (snd_seq_oss_synth_addr(dp, dev, ev))
+		return -EINVAL;
+	ev->flags = SNDRV_SEQ_EVENT_LENGTH_VARIABLE;
+	ev->data.ext.len = len;
+	ev->data.ext.ptr = buf;
+	return 0;
 }
 
 /*
@@ -575,21 +493,20 @@ snd_seq_oss_synth_addr(struct seq_oss_devinfo *dp, int dev, struct snd_seq_event
 int
 snd_seq_oss_synth_ioctl(struct seq_oss_devinfo *dp, int dev, unsigned int cmd, unsigned long addr)
 {
-	struct seq_oss_synth *rec;
 	struct seq_oss_synthinfo *info;
-	int rc;
 
 	info = get_synthinfo_nospec(dp, dev);
 	if (!info || info->is_midi)
 		return -ENXIO;
-	if ((rec = get_synthdev(dp, dev)) == NULL)
+
+	struct seq_oss_synth *rec __free(seq_oss_synth) =
+		get_synthdev(dp, dev);
+	if (!rec)
 		return -ENXIO;
 	if (rec->oper.ioctl == NULL)
-		rc = -ENXIO;
+		return -ENXIO;
 	else
-		rc = rec->oper.ioctl(&info->arg, cmd, addr);
-	snd_use_lock_free(&rec->use_lock);
-	return rc;
+		return rec->oper.ioctl(&info->arg, cmd, addr);
 }
 
 
@@ -616,28 +533,31 @@ snd_seq_oss_synth_raw_event(struct seq_oss_devinfo *dp, int dev, unsigned char *
 int
 snd_seq_oss_synth_make_info(struct seq_oss_devinfo *dp, int dev, struct synth_info *inf)
 {
-	struct seq_oss_synth *rec;
+	struct seq_oss_synthinfo *info = get_synthinfo_nospec(dp, dev);
 
-	if (dev < 0 || dev >= dp->max_synthdev)
+	if (!info)
 		return -ENXIO;
 
-	if (dp->synths[dev].is_midi) {
+	if (info->is_midi) {
 		struct midi_info minf;
-		snd_seq_oss_midi_make_info(dp, dp->synths[dev].midi_mapped, &minf);
+		if (snd_seq_oss_midi_make_info(dp, info->midi_mapped, &minf))
+			return -ENXIO;
 		inf->synth_type = SYNTH_TYPE_MIDI;
 		inf->synth_subtype = 0;
 		inf->nr_voices = 16;
 		inf->device = dev;
-		strlcpy(inf->name, minf.name, sizeof(inf->name));
+		strscpy(inf->name, minf.name, sizeof(inf->name));
 	} else {
-		if ((rec = get_synthdev(dp, dev)) == NULL)
+		struct seq_oss_synth *rec __free(seq_oss_synth) =
+			get_synthdev(dp, dev);
+
+		if (!rec)
 			return -ENXIO;
 		inf->synth_type = rec->synth_type;
 		inf->synth_subtype = rec->synth_subtype;
 		inf->nr_voices = rec->nr_voices;
 		inf->device = dev;
-		strlcpy(inf->name, rec->name, sizeof(inf->name));
-		snd_use_lock_free(&rec->use_lock);
+		strscpy(inf->name, rec->name, sizeof(inf->name));
 	}
 	return 0;
 }
@@ -651,12 +571,12 @@ void
 snd_seq_oss_synth_info_read(struct snd_info_buffer *buf)
 {
 	int i;
-	struct seq_oss_synth *rec;
 
 	snd_iprintf(buf, "\nNumber of synth devices: %d\n", max_synth_devs);
 	for (i = 0; i < max_synth_devs; i++) {
 		snd_iprintf(buf, "\nsynth %d: ", i);
-		rec = get_sdev(i);
+		struct seq_oss_synth *rec __free(seq_oss_synth) =
+			get_sdev(i);
 		if (rec == NULL) {
 			snd_iprintf(buf, "*empty*\n");
 			continue;
@@ -666,9 +586,8 @@ snd_seq_oss_synth_info_read(struct snd_info_buffer *buf)
 			    rec->synth_type, rec->synth_subtype,
 			    rec->nr_voices);
 		snd_iprintf(buf, "  capabilities : ioctl %s / load_patch %s\n",
-			    enabled_str((long)rec->oper.ioctl),
-			    enabled_str((long)rec->oper.load_patch));
-		snd_use_lock_free(&rec->use_lock);
+			    str_enabled_disabled((long)rec->oper.ioctl),
+			    str_enabled_disabled((long)rec->oper.load_patch));
 	}
 }
 #endif /* CONFIG_SND_PROC_FS */

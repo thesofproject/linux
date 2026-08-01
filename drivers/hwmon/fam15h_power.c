@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * fam15h_power.c - AMD Family 15h processor power monitoring
  *
  * Copyright (c) 2011-2016 Advanced Micro Devices, Inc.
  * Author: Andreas Herrmann <herrmann.der.user@googlemail.com>
- *
- *
- * This driver is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This driver is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this driver; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/err.h>
@@ -29,7 +17,9 @@
 #include <linux/cpumask.h>
 #include <linux/time.h>
 #include <linux/sched.h>
+#include <linux/topology.h>
 #include <asm/processor.h>
+#include <asm/cpuid/api.h>
 #include <asm/msr.h>
 
 MODULE_DESCRIPTION("AMD Family 15h CPU processor power monitor");
@@ -52,10 +42,6 @@ MODULE_LICENSE("GPL");
 
 /* set maximum interval as 1 second */
 #define MAX_INTERVAL			1000
-
-#define MSR_F15H_CU_PWR_ACCUMULATOR	0xc001007a
-#define MSR_F15H_CU_MAX_PWR_ACCUMULATOR	0xc001007b
-#define MSR_F15H_PTSC			0xc0010280
 
 #define PCI_DEVICE_ID_AMD_15H_M70H_NB_F4 0x15b4
 
@@ -150,18 +136,16 @@ static DEVICE_ATTR_RO(power1_crit);
 static void do_read_registers_on_cu(void *_data)
 {
 	struct fam15h_power_data *data = _data;
-	int cpu, cu;
-
-	cpu = smp_processor_id();
+	int cu;
 
 	/*
 	 * With the new x86 topology modelling, cpu core id actually
 	 * is compute unit id.
 	 */
-	cu = cpu_data(cpu).cpu_core_id;
+	cu = topology_core_id(smp_processor_id());
 
-	rdmsrl_safe(MSR_F15H_CU_PWR_ACCUMULATOR, &data->cu_acc_power[cu]);
-	rdmsrl_safe(MSR_F15H_PTSC, &data->cpu_sw_pwr_ptsc[cu]);
+	rdmsrq_safe(MSR_F15H_CU_PWR_ACCUMULATOR, &data->cu_acc_power[cu]);
+	rdmsrq_safe(MSR_F15H_PTSC, &data->cpu_sw_pwr_ptsc[cu]);
 
 	data->cu_on[cu] = 1;
 }
@@ -182,7 +166,7 @@ static int read_registers(struct fam15h_power_data *data)
 
 	memset(data->cu_on, 0, sizeof(int) * MAX_CUS);
 
-	get_online_cpus();
+	cpus_read_lock();
 
 	/*
 	 * Choose the first online core of each compute unit, and then
@@ -206,7 +190,7 @@ static int read_registers(struct fam15h_power_data *data)
 
 	on_each_cpu_mask(mask, do_read_registers_on_cu, data, true);
 
-	put_online_cpus();
+	cpus_read_unlock();
 	free_cpumask_var(mask);
 
 	return 0;
@@ -226,7 +210,7 @@ static ssize_t power1_average_show(struct device *dev,
 	 * With the new x86 topology modelling, x86_max_cores is the
 	 * compute unit number.
 	 */
-	cu_num = boot_cpu_data.x86_max_cores;
+	cu_num = topology_num_cores_per_package();
 
 	ret = read_registers(data);
 	if (ret)
@@ -389,15 +373,14 @@ static void tweak_runavg_range(struct pci_dev *pdev)
 		REG_TDP_RUNNING_AVERAGE, val);
 }
 
-#ifdef CONFIG_PM
-static int fam15h_power_resume(struct pci_dev *pdev)
+static int fam15h_power_resume(struct device *dev)
 {
+	struct pci_dev *pdev = to_pci_dev(dev);
 	tweak_runavg_range(pdev);
 	return 0;
 }
-#else
-#define fam15h_power_resume NULL
-#endif
+
+static DEFINE_SIMPLE_DEV_PM_OPS(fam15h_power_ops, NULL, fam15h_power_resume);
 
 static int fam15h_power_init_data(struct pci_dev *f4,
 				  struct fam15h_power_data *data)
@@ -441,7 +424,7 @@ static int fam15h_power_init_data(struct pci_dev *f4,
 	 */
 	data->cpu_pwr_sample_ratio = cpuid_ecx(0x80000007);
 
-	if (rdmsrl_safe(MSR_F15H_CU_MAX_PWR_ACCUMULATOR, &tmp)) {
+	if (rdmsrq_safe(MSR_F15H_CU_MAX_PWR_ACCUMULATOR, &tmp)) {
 		pr_err("Failed to read max compute unit power accumulator MSR\n");
 		return -ENODEV;
 	}
@@ -510,7 +493,7 @@ static struct pci_driver fam15h_power_driver = {
 	.name = "fam15h_power",
 	.id_table = fam15h_power_id_table,
 	.probe = fam15h_power_probe,
-	.resume = fam15h_power_resume,
+	.driver.pm = &fam15h_power_ops,
 };
 
 module_pci_driver(fam15h_power_driver);

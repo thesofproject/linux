@@ -1,25 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Zynq pin controller
  *
  *  Copyright (C) 2014 Xilinx
  *
  *  Sören Brinkmann <soren.brinkmann@xilinx.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include <linux/io.h>
 #include <linux/mfd/syscon.h>
+#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
@@ -971,15 +960,12 @@ enum zynq_io_standards {
 	zynq_iostd_max
 };
 
-/**
- * enum zynq_pin_config_param - possible pin configuration parameters
- * @PIN_CONFIG_IOSTANDARD: if the pin can select an IO standard, the argument to
+/*
+ * PIN_CONFIG_IOSTANDARD: if the pin can select an IO standard, the argument to
  *	this parameter (on a custom format) tells the driver which alternative
  *	IO standard to use.
  */
-enum zynq_pin_config_param {
-	PIN_CONFIG_IOSTANDARD = PIN_CONFIG_END + 1,
-};
+#define PIN_CONFIG_IOSTANDARD		(PIN_CONFIG_END + 1)
 
 static const struct pinconf_generic_params zynq_dt_params[] = {
 	{"io-standard", PIN_CONFIG_IOSTANDARD, zynq_iostd_lvcmos18},
@@ -1031,7 +1017,7 @@ static int zynq_pinconf_cfg_get(struct pinctrl_dev *pctldev,
 	case PIN_CONFIG_SLEW_RATE:
 		arg = !!(reg & ZYNQ_PINCONF_SPEED);
 		break;
-	case PIN_CONFIG_LOW_POWER_MODE:
+	case PIN_CONFIG_MODE_LOW_POWER:
 	{
 		enum zynq_io_standards iostd = zynq_pinconf_iostd_get(reg);
 
@@ -1043,6 +1029,7 @@ static int zynq_pinconf_cfg_get(struct pinctrl_dev *pctldev,
 		break;
 	}
 	case PIN_CONFIG_IOSTANDARD:
+	case PIN_CONFIG_POWER_SOURCE:
 		arg = zynq_pinconf_iostd_get(reg);
 		break;
 	default:
@@ -1093,6 +1080,7 @@ static int zynq_pinconf_cfg_set(struct pinctrl_dev *pctldev,
 
 			break;
 		case PIN_CONFIG_IOSTANDARD:
+		case PIN_CONFIG_POWER_SOURCE:
 			if (arg <= zynq_iostd_min || arg >= zynq_iostd_max) {
 				dev_warn(pctldev->dev,
 					 "unsupported IO standard '%u'\n",
@@ -1102,7 +1090,7 @@ static int zynq_pinconf_cfg_set(struct pinctrl_dev *pctldev,
 			reg &= ~ZYNQ_PINCONF_IOTYPE_MASK;
 			reg |= arg << ZYNQ_PINCONF_IOTYPE_SHIFT;
 			break;
-		case PIN_CONFIG_LOW_POWER_MODE:
+		case PIN_CONFIG_MODE_LOW_POWER:
 			if (arg)
 				reg |= ZYNQ_PINCONF_DISABLE_RECVR;
 			else
@@ -1155,7 +1143,7 @@ static const struct pinconf_ops zynq_pinconf_ops = {
 	.pin_config_group_set = zynq_pinconf_group_set,
 };
 
-static struct pinctrl_desc zynq_desc = {
+static const struct pinctrl_desc zynq_desc = {
 	.name = "zynq_pinctrl",
 	.pins = zynq_pins,
 	.npins = ARRAY_SIZE(zynq_pins),
@@ -1214,6 +1202,7 @@ static const struct of_device_id zynq_pinctrl_of_match[] = {
 	{ .compatible = "xlnx,pinctrl-zynq" },
 	{ }
 };
+MODULE_DEVICE_TABLE(of, zynq_pinctrl_of_match);
 
 static struct platform_driver zynq_pinctrl_driver = {
 	.driver = {
@@ -1223,8 +1212,4 @@ static struct platform_driver zynq_pinctrl_driver = {
 	.probe = zynq_pinctrl_probe,
 };
 
-static int __init zynq_pinctrl_init(void)
-{
-	return platform_driver_register(&zynq_pinctrl_driver);
-}
-arch_initcall(zynq_pinctrl_init);
+module_platform_driver(zynq_pinctrl_driver);

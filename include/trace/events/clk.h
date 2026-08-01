@@ -1,14 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM clk
@@ -31,7 +23,7 @@ DECLARE_EVENT_CLASS(clk,
 	),
 
 	TP_fast_assign(
-		__assign_str(name, core->name);
+		__assign_str(name);
 	),
 
 	TP_printk("%s", __get_str(name))
@@ -105,7 +97,7 @@ DECLARE_EVENT_CLASS(clk_rate,
 	),
 
 	TP_fast_assign(
-		__assign_str(name, core->name);
+		__assign_str(name);
 		__entry->rate = rate;
 	),
 
@@ -126,6 +118,50 @@ DEFINE_EVENT(clk_rate, clk_set_rate_complete,
 	TP_ARGS(core, rate)
 );
 
+DEFINE_EVENT(clk_rate, clk_set_min_rate,
+
+	TP_PROTO(struct clk_core *core, unsigned long rate),
+
+	TP_ARGS(core, rate)
+);
+
+DEFINE_EVENT(clk_rate, clk_set_max_rate,
+
+	TP_PROTO(struct clk_core *core, unsigned long rate),
+
+	TP_ARGS(core, rate)
+);
+
+DECLARE_EVENT_CLASS(clk_rate_range,
+
+	TP_PROTO(struct clk_core *core, unsigned long min, unsigned long max),
+
+	TP_ARGS(core, min, max),
+
+	TP_STRUCT__entry(
+		__string(        name,           core->name                )
+		__field(unsigned long,           min                       )
+		__field(unsigned long,           max                       )
+	),
+
+	TP_fast_assign(
+		__assign_str(name);
+		__entry->min = min;
+		__entry->max = max;
+	),
+
+	TP_printk("%s min %lu max %lu", __get_str(name),
+		  (unsigned long)__entry->min,
+		  (unsigned long)__entry->max)
+);
+
+DEFINE_EVENT(clk_rate_range, clk_set_rate_range,
+
+	TP_PROTO(struct clk_core *core, unsigned long min, unsigned long max),
+
+	TP_ARGS(core, min, max)
+);
+
 DECLARE_EVENT_CLASS(clk_parent,
 
 	TP_PROTO(struct clk_core *core, struct clk_core *parent),
@@ -138,8 +174,8 @@ DECLARE_EVENT_CLASS(clk_parent,
 	),
 
 	TP_fast_assign(
-		__assign_str(name, core->name);
-		__assign_str(pname, parent ? parent->name : "none");
+		__assign_str(name);
+		__assign_str(pname);
 	),
 
 	TP_printk("%s %s", __get_str(name), __get_str(pname))
@@ -171,7 +207,7 @@ DECLARE_EVENT_CLASS(clk_phase,
 	),
 
 	TP_fast_assign(
-		__assign_str(name, core->name);
+		__assign_str(name);
 		__entry->phase = phase;
 	),
 
@@ -190,6 +226,85 @@ DEFINE_EVENT(clk_phase, clk_set_phase_complete,
 	TP_PROTO(struct clk_core *core, int phase),
 
 	TP_ARGS(core, phase)
+);
+
+DECLARE_EVENT_CLASS(clk_duty_cycle,
+
+	TP_PROTO(struct clk_core *core, struct clk_duty *duty),
+
+	TP_ARGS(core, duty),
+
+	TP_STRUCT__entry(
+		__string(        name,           core->name              )
+		__field( unsigned int,           num                     )
+		__field( unsigned int,           den                     )
+	),
+
+	TP_fast_assign(
+		__assign_str(name);
+		__entry->num = duty->num;
+		__entry->den = duty->den;
+	),
+
+	TP_printk("%s %u/%u", __get_str(name), (unsigned int)__entry->num,
+		  (unsigned int)__entry->den)
+);
+
+DEFINE_EVENT(clk_duty_cycle, clk_set_duty_cycle,
+
+	TP_PROTO(struct clk_core *core, struct clk_duty *duty),
+
+	TP_ARGS(core, duty)
+);
+
+DEFINE_EVENT(clk_duty_cycle, clk_set_duty_cycle_complete,
+
+	TP_PROTO(struct clk_core *core, struct clk_duty *duty),
+
+	TP_ARGS(core, duty)
+);
+
+DECLARE_EVENT_CLASS(clk_rate_request,
+
+	TP_PROTO(struct clk_rate_request *req),
+
+	TP_ARGS(req),
+
+	TP_STRUCT__entry(
+		__string(        name, req->core ? req->core->name : "none")
+		__string(       pname, req->best_parent_hw ? clk_hw_get_name(req->best_parent_hw) : "none" )
+		__field(unsigned long,           min                       )
+		__field(unsigned long,           max                       )
+		__field(unsigned long,           prate                     )
+	),
+
+	TP_fast_assign(
+		__assign_str(name);
+		__assign_str(pname);
+		__entry->min = req->min_rate;
+		__entry->max = req->max_rate;
+		__entry->prate = req->best_parent_rate;
+	),
+
+	TP_printk("%s min %lu max %lu, parent %s (%lu)", __get_str(name),
+		  (unsigned long)__entry->min,
+		  (unsigned long)__entry->max,
+		  __get_str(pname),
+		  (unsigned long)__entry->prate)
+);
+
+DEFINE_EVENT(clk_rate_request, clk_rate_request_start,
+
+	TP_PROTO(struct clk_rate_request *req),
+
+	TP_ARGS(req)
+);
+
+DEFINE_EVENT(clk_rate_request, clk_rate_request_done,
+
+	TP_PROTO(struct clk_rate_request *req),
+
+	TP_ARGS(req)
 );
 
 #endif /* _TRACE_CLK_H */

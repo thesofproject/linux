@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Yama Linux Security Module
  *
@@ -5,11 +6,6 @@
  *
  * Copyright (C) 2010 Canonical, Ltd.
  * Copyright (C) 2011 The Chromium OS Authors.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2, as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/lsm_hooks.h>
@@ -22,6 +18,7 @@
 #include <linux/task_work.h>
 #include <linux/sched.h>
 #include <linux/spinlock.h>
+#include <uapi/linux/lsm.h>
 
 #define YAMA_SCOPE_DISABLED	0
 #define YAMA_SCOPE_RELATIONAL	1
@@ -79,7 +76,6 @@ static void report_access(const char *access, struct task_struct *target,
 				struct task_struct *agent)
 {
 	struct access_report_info *info;
-	char agent_comm[sizeof(agent->comm)];
 
 	assert_spin_locked(&target->alloc_lock); /* for target->comm */
 
@@ -89,12 +85,11 @@ static void report_access(const char *access, struct task_struct *target,
 		 */
 		pr_notice_ratelimited(
 		    "ptrace %s of \"%s\"[%d] was attempted by \"%s\"[%d]\n",
-		    access, target->comm, target->pid,
-		    get_task_comm(agent_comm, agent), agent->pid);
+		    access, target->comm, target->pid, agent->comm, agent->pid);
 		return;
 	}
 
-	info = kmalloc(sizeof(*info), GFP_ATOMIC);
+	info = kmalloc_obj(*info, GFP_ATOMIC);
 	if (!info)
 		return;
 	init_task_work(&info->work, __report_access);
@@ -103,7 +98,7 @@ static void report_access(const char *access, struct task_struct *target,
 	info->access = access;
 	info->target = target;
 	info->agent = agent;
-	if (task_work_add(current, &info->work, true) == 0)
+	if (task_work_add(current, &info->work, TWA_RESUME) == 0)
 		return; /* success */
 
 	WARN(1, "report_access called from exiting task");
@@ -114,6 +109,7 @@ static void report_access(const char *access, struct task_struct *target,
 
 /**
  * yama_relation_cleanup - remove invalid entries from the relation list
+ * @work: unused
  *
  */
 static void yama_relation_cleanup(struct work_struct *work)
@@ -147,7 +143,7 @@ static int yama_ptracer_add(struct task_struct *tracer,
 {
 	struct ptrace_relation *relation, *added;
 
-	added = kmalloc(sizeof(*added), GFP_KERNEL);
+	added = kmalloc_obj(*added);
 	if (!added)
 		return -ENOMEM;
 
@@ -206,7 +202,7 @@ static void yama_ptracer_del(struct task_struct *tracer,
  * yama_task_free - check for task_pid to remove from exception list
  * @task: task being removed
  */
-void yama_task_free(struct task_struct *task)
+static void yama_task_free(struct task_struct *task)
 {
 	yama_ptracer_del(task, task);
 }
@@ -222,11 +218,11 @@ void yama_task_free(struct task_struct *task)
  * Return 0 on success, -ve on error.  -ENOSYS is returned when Yama
  * does not handle the given option.
  */
-int yama_task_prctl(int option, unsigned long arg2, unsigned long arg3,
+static int yama_task_prctl(int option, unsigned long arg2, unsigned long arg3,
 			   unsigned long arg4, unsigned long arg5)
 {
 	int rc = -ENOSYS;
-	struct task_struct *myself = current;
+	struct task_struct *myself;
 
 	switch (option) {
 	case PR_SET_PTRACER:
@@ -236,11 +232,7 @@ int yama_task_prctl(int option, unsigned long arg2, unsigned long arg3,
 		 * leader checking is handled later when walking the ancestry
 		 * at the time of PTRACE_ATTACH check.
 		 */
-		rcu_read_lock();
-		if (!thread_group_leader(myself))
-			myself = rcu_dereference(myself->group_leader);
-		get_task_struct(myself);
-		rcu_read_unlock();
+		myself = current->group_leader;
 
 		if (arg2 == 0) {
 			yama_ptracer_del(NULL, myself);
@@ -259,7 +251,6 @@ int yama_task_prctl(int option, unsigned long arg2, unsigned long arg3,
 			}
 		}
 
-		put_task_struct(myself);
 		break;
 	}
 
@@ -368,7 +359,9 @@ static int yama_ptrace_access_check(struct task_struct *child,
 			break;
 		case YAMA_SCOPE_RELATIONAL:
 			rcu_read_lock();
-			if (!task_is_descendant(current, child) &&
+			if (!pid_alive(child))
+				rc = -EPERM;
+			if (!rc && !task_is_descendant(current, child) &&
 			    !ptracer_exception_found(current, child) &&
 			    !ns_capable(__task_cred(child)->user_ns, CAP_SYS_PTRACE))
 				rc = -EPERM;
@@ -399,7 +392,7 @@ static int yama_ptrace_access_check(struct task_struct *child,
  *
  * Returns 0 if following the ptrace is allowed, -ve on error.
  */
-int yama_ptrace_traceme(struct task_struct *parent)
+static int yama_ptrace_traceme(struct task_struct *parent)
 {
 	int rc = 0;
 
@@ -423,7 +416,12 @@ int yama_ptrace_traceme(struct task_struct *parent)
 	return rc;
 }
 
-static struct security_hook_list yama_hooks[] __lsm_ro_after_init = {
+static const struct lsm_id yama_lsmid = {
+	.name = "yama",
+	.id = LSM_ID_YAMA,
+};
+
+static struct security_hook_list yama_hooks[] __ro_after_init = {
 	LSM_HOOK_INIT(ptrace_access_check, yama_ptrace_access_check),
 	LSM_HOOK_INIT(ptrace_traceme, yama_ptrace_traceme),
 	LSM_HOOK_INIT(task_prctl, yama_task_prctl),
@@ -431,8 +429,8 @@ static struct security_hook_list yama_hooks[] __lsm_ro_after_init = {
 };
 
 #ifdef CONFIG_SYSCTL
-static int yama_dointvec_minmax(struct ctl_table *table, int write,
-				void __user *buffer, size_t *lenp, loff_t *ppos)
+static int yama_dointvec_minmax(const struct ctl_table *table, int write,
+				void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table table_copy;
 
@@ -447,39 +445,37 @@ static int yama_dointvec_minmax(struct ctl_table *table, int write,
 	return proc_dointvec_minmax(&table_copy, write, buffer, lenp, ppos);
 }
 
-static int zero;
 static int max_scope = YAMA_SCOPE_NO_ATTACH;
 
-struct ctl_path yama_sysctl_path[] = {
-	{ .procname = "kernel", },
-	{ .procname = "yama", },
-	{ }
-};
-
-static struct ctl_table yama_sysctl_table[] = {
+static const struct ctl_table yama_sysctl_table[] = {
 	{
 		.procname       = "ptrace_scope",
 		.data           = &ptrace_scope,
 		.maxlen         = sizeof(int),
 		.mode           = 0644,
 		.proc_handler   = yama_dointvec_minmax,
-		.extra1         = &zero,
+		.extra1         = SYSCTL_ZERO,
 		.extra2         = &max_scope,
 	},
-	{ }
 };
 static void __init yama_init_sysctl(void)
 {
-	if (!register_sysctl_paths(yama_sysctl_path, yama_sysctl_table))
+	if (!register_sysctl("kernel/yama", yama_sysctl_table))
 		panic("Yama: sysctl registration failed.\n");
 }
 #else
 static inline void yama_init_sysctl(void) { }
 #endif /* CONFIG_SYSCTL */
 
-void __init yama_add_hooks(void)
+static int __init yama_init(void)
 {
 	pr_info("Yama: becoming mindful.\n");
-	security_add_hooks(yama_hooks, ARRAY_SIZE(yama_hooks), "yama");
+	security_add_hooks(yama_hooks, ARRAY_SIZE(yama_hooks), &yama_lsmid);
 	yama_init_sysctl();
+	return 0;
 }
+
+DEFINE_LSM(yama) = {
+	.id = &yama_lsmid,
+	.init = yama_init,
+};

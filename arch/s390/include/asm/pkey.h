@@ -2,7 +2,7 @@
 /*
  * Kernelspace interface to the pkey device driver
  *
- * Copyright IBM Corp. 2016
+ * Copyright IBM Corp. 2016, 2023
  *
  * Author: Harald Freudenberger <freude@de.ibm.com>
  *
@@ -16,97 +16,32 @@
 #include <uapi/asm/pkey.h>
 
 /*
- * Generate (AES) random secure key.
- * @param cardnr may be -1 (use default card)
- * @param domain may be -1 (use default domain)
- * @param keytype one of the PKEY_KEYTYPE values
- * @param seckey pointer to buffer receiving the secure key
+ * In-kernel API: Transform an key blob (of any type) into a protected key.
+ * @param key pointer to a buffer containing the key blob
+ * @param keylen size of the key blob in bytes
+ * @param protkey pointer to buffer receiving the protected key
+ * @param xflags additional execution flags (see PKEY_XFLAG_* definitions below)
+ *	  As of now the only supported flags are PKEY_XFLAG_NOMEMALLOC
+ *	  and PKEY_XFLAG_NOCLEARKEY.
  * @return 0 on success, negative errno value on failure
  */
-int pkey_genseckey(__u16 cardnr, __u16 domain,
-		   __u32 keytype, struct pkey_seckey *seckey);
+int pkey_key2protkey(const u8 *key, u32 keylen,
+		     u8 *protkey, u32 *protkeylen, u32 *protkeytype,
+		     u32 xflags);
 
 /*
- * Generate (AES) secure key with given key value.
- * @param cardnr may be -1 (use default card)
- * @param domain may be -1 (use default domain)
- * @param keytype one of the PKEY_KEYTYPE values
- * @param clrkey pointer to buffer with clear key data
- * @param seckey pointer to buffer receiving the secure key
- * @return 0 on success, negative errno value on failure
+ * If this flag is given in the xflags parameter, the pkey implementation
+ * is not allowed to allocate memory but instead should fall back to use
+ * preallocated memory or simple fail with -ENOMEM.
+ * This flag is for protected key derive within a cipher or similar
+ * which must not allocate memory which would cause io operations - see
+ * also the CRYPTO_ALG_ALLOCATES_MEMORY flag in crypto.h.
  */
-int pkey_clr2seckey(__u16 cardnr, __u16 domain, __u32 keytype,
-		    const struct pkey_clrkey *clrkey,
-		    struct pkey_seckey *seckey);
+#define PKEY_XFLAG_NOMEMALLOC 0x0001
 
 /*
- * Derive (AES) proteced key from the (AES) secure key blob.
- * @param cardnr may be -1 (use default card)
- * @param domain may be -1 (use default domain)
- * @param seckey pointer to buffer with the input secure key
- * @param protkey pointer to buffer receiving the protected key and
- *	  additional info (type, length)
- * @return 0 on success, negative errno value on failure
+ * Do not accept a clear key token as source for a protected key.
  */
-int pkey_sec2protkey(__u16 cardnr, __u16 domain,
-		     const struct pkey_seckey *seckey,
-		     struct pkey_protkey *protkey);
-
-/*
- * Derive (AES) protected key from a given clear key value.
- * @param keytype one of the PKEY_KEYTYPE values
- * @param clrkey pointer to buffer with clear key data
- * @param protkey pointer to buffer receiving the protected key and
- *	  additional info (type, length)
- * @return 0 on success, negative errno value on failure
- */
-int pkey_clr2protkey(__u32 keytype,
-		     const struct pkey_clrkey *clrkey,
-		     struct pkey_protkey *protkey);
-
-/*
- * Search for a matching crypto card based on the Master Key
- * Verification Pattern provided inside a secure key.
- * @param seckey pointer to buffer with the input secure key
- * @param cardnr pointer to cardnr, receives the card number on success
- * @param domain pointer to domain, receives the domain number on success
- * @param verify if set, always verify by fetching verification pattern
- *	  from card
- * @return 0 on success, negative errno value on failure. If no card could be
- *	   found, -ENODEV is returned.
- */
-int pkey_findcard(const struct pkey_seckey *seckey,
-		  __u16 *cardnr, __u16 *domain, int verify);
-
-/*
- * Find card and transform secure key to protected key.
- * @param seckey pointer to buffer with the input secure key
- * @param protkey pointer to buffer receiving the protected key and
- *	  additional info (type, length)
- * @return 0 on success, negative errno value on failure
- */
-int pkey_skey2pkey(const struct pkey_seckey *seckey,
-		   struct pkey_protkey *protkey);
-
-/*
- * Verify the given secure key for being able to be useable with
- * the pkey module. Check for correct key type and check for having at
- * least one crypto card being able to handle this key (master key
- * or old master key verification pattern matches).
- * Return some info about the key: keysize in bits, keytype (currently
- * only AES), flag if key is wrapped with an old MKVP.
- * @param seckey pointer to buffer with the input secure key
- * @param pcardnr pointer to cardnr, receives the card number on success
- * @param pdomain pointer to domain, receives the domain number on success
- * @param pkeysize pointer to keysize, receives the bitsize of the key
- * @param pattributes pointer to attributes, receives additional info
- *	  PKEY_VERIFY_ATTR_AES if the key is an AES key
- *	  PKEY_VERIFY_ATTR_OLD_MKVP if key has old mkvp stored in
- * @return 0 on success, negative errno value on failure. If no card could
- *	   be found which is able to handle this key, -ENODEV is returned.
- */
-int pkey_verifykey(const struct pkey_seckey *seckey,
-		   u16 *pcardnr, u16 *pdomain,
-		   u16 *pkeysize, u32 *pattributes);
+#define PKEY_XFLAG_NOCLEARKEY 0x0002
 
 #endif /* _KAPI_PKEY_H */

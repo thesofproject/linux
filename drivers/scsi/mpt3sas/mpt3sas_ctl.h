@@ -50,6 +50,8 @@
 #include <linux/miscdevice.h>
 #endif
 
+#include "mpt3sas_base.h"
+
 #ifndef MPT2SAS_MINOR
 #define MPT2SAS_MINOR		(MPT_MINOR + 1)
 #endif
@@ -94,6 +96,18 @@
 	struct mpt3_diag_query)
 #define MPT3DIAGREADBUFFER _IOWR(MPT3_MAGIC_NUMBER, 30, \
 	struct mpt3_diag_read_buffer)
+#define MPT3ADDNLDIAGQUERY _IOWR(MPT3_MAGIC_NUMBER, 32, \
+	struct mpt3_addnl_diag_query)
+#define MPT3ENABLEDIAGSBRRELOAD _IOWR(MPT3_MAGIC_NUMBER, 33, \
+	struct mpt3_enable_diag_sbr_reload)
+
+/* Trace Buffer default UniqueId */
+#define MPT2DIAGBUFFUNIQUEID (0x07075900)
+#define MPT3DIAGBUFFUNIQUEID (0x4252434D)
+
+/* UID not found */
+#define MPT3_DIAG_UID_NOT_FOUND (0xFF)
+
 
 /**
  * struct mpt3_ioctl_header - main header structure
@@ -146,6 +160,9 @@ struct mpt3_ioctl_pci_info {
 #define MPT3_IOCTL_INTERFACE_SAS35	(0x07)
 #define MPT2_IOCTL_VERSION_LENGTH	(32)
 
+/* Bits set for mpt3_ioctl_iocinfo.driver_cap */
+#define MPT3_IOCTL_IOCINFO_DRIVER_CAP_MCTP_PASSTHRU		0x1
+
 /**
  * struct mpt3_ioctl_iocinfo - generic controller info
  * @hdr - generic header
@@ -161,6 +178,7 @@ struct mpt3_ioctl_pci_info {
  * @driver_version - driver version - 32 ASCII characters
  * @rsvd1 - reserved
  * @scsi_id - scsi id of adapter 0
+ * @driver_capability - driver capabilities
  * @rsvd2 - reserved
  * @pci_information - pci info (2nd revision)
  */
@@ -178,13 +196,14 @@ struct mpt3_ioctl_iocinfo {
 	uint8_t driver_version[MPT2_IOCTL_VERSION_LENGTH];
 	uint8_t rsvd1;
 	uint8_t scsi_id;
-	uint16_t rsvd2;
+	uint8_t driver_capability;
+	uint8_t rsvd2;
 	struct mpt3_ioctl_pci_info pci_information;
 };
 
 
 /* number of event log entries */
-#define MPT3SAS_CTL_EVENT_LOG_SIZE (50)
+#define MPT3SAS_CTL_EVENT_LOG_SIZE (200)
 
 /**
  * struct mpt3_ioctl_eventquery - query event count and type
@@ -310,6 +329,7 @@ struct mpt3_ioctl_btdh_mapping {
 #define MPT3_APP_FLAGS_APP_OWNED	(0x0001)
 #define MPT3_APP_FLAGS_BUFFER_VALID	(0x0002)
 #define MPT3_APP_FLAGS_FW_BUFFER_ACCESS	(0x0004)
+#define MPT3_APP_FLAGS_DYNAMIC_BUFFER_ALLOC (0x0008)
 
 /* flags for mpt3_diag_read_buffer */
 #define MPT3_FLAGS_REREGISTER		(0x0001)
@@ -420,5 +440,69 @@ struct mpt3_diag_read_buffer {
 	uint32_t unique_id;
 	uint32_t diagnostic_data[1];
 };
+
+/**
+ * struct mpt3_addnl_diag_query - diagnostic buffer release reason
+ * @hdr - generic header
+ * @unique_id - unique id associated with this buffer.
+ * @rel_query - release query.
+ * @reserved2
+ */
+struct mpt3_addnl_diag_query {
+	struct mpt3_ioctl_header hdr;
+	uint32_t unique_id;
+	struct htb_rel_query rel_query;
+	uint32_t reserved2[2];
+};
+
+/**
+ * struct mpt3_enable_diag_sbr_reload - enable sbr reload
+ * @hdr - generic header
+ */
+struct mpt3_enable_diag_sbr_reload {
+	struct mpt3_ioctl_header hdr;
+};
+
+/**
+ * struct mpt3_passthru_command - generic mpt firmware passthru command
+ * @dev_index - device index
+ * @timeout - command timeout in seconds. (if zero then use driver default
+ *  value).
+ * @reply_frame_buf_ptr - MPI reply location
+ * @data_in_buf_ptr - destination for read
+ * @data_out_buf_ptr - data source for write
+ * @max_reply_bytes - maximum number of reply bytes to be sent to app.
+ * @data_in_size - number bytes for data transfer in (read)
+ * @data_out_size - number bytes for data transfer out (write)
+ * @mpi_request - request frame
+ */
+struct mpt3_passthru_command {
+	u8 dev_index;
+	uint32_t timeout;
+	void *reply_frame_buf_ptr;
+	void *data_in_buf_ptr;
+	void *data_out_buf_ptr;
+	uint32_t max_reply_bytes;
+	uint32_t data_in_size;
+	uint32_t data_out_size;
+	Mpi26MctpPassthroughRequest_t *mpi_request;
+};
+
+/*
+ * mpt3sas_get_device_count - Retrieve the count of MCTP passthrough
+ *			      capable devices managed by the driver.
+ *
+ * Returns number of devices that support MCTP passthrough.
+ */
+int mpt3sas_get_device_count(void);
+
+/*
+ * mpt3sas_send_passthru_cmd - Send an MPI MCTP passthrough command to
+ *			       firmware
+ * @command: The MPI MCTP passthrough command to send to firmware
+ *
+ * Returns 0 on success, anything else is error .
+ */
+int mpt3sas_send_mctp_passthru_req(struct mpt3_passthru_command *command);
 
 #endif /* MPT3SAS_CTL_H_INCLUDED */

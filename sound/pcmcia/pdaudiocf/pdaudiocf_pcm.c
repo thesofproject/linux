@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for Sound Core PDAudioCF soundcards
  *
  * PCM part
  *
  * Copyright (c) 2003 by Jaroslav Kysela <perex@perex.cz>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/delay.h>
@@ -58,7 +45,7 @@ static int pdacf_pcm_trigger(struct snd_pcm_substream *subs, int cmd)
 	case SNDRV_PCM_TRIGGER_START:
 		chip->pcm_hwptr = 0;
 		chip->pcm_tdone = 0;
-		/* fall thru */
+		fallthrough;
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 	case SNDRV_PCM_TRIGGER_RESUME:
 		mask = 0;
@@ -77,41 +64,22 @@ static int pdacf_pcm_trigger(struct snd_pcm_substream *subs, int cmd)
 	default:
 		return -EINVAL;
 	}
-	mutex_lock(&chip->reg_lock);
-	chip->pcm_running += inc;
-	tmp = pdacf_reg_read(chip, PDAUDIOCF_REG_SCR);
-	if (chip->pcm_running) {
-		if ((chip->ak4117->rcs0 & AK4117_UNLCK) || runtime->rate != rate) {
-			chip->pcm_running -= inc;
-			ret = -EIO;
-			goto __end;
+	scoped_guard(mutex, &chip->reg_lock) {
+		chip->pcm_running += inc;
+		tmp = pdacf_reg_read(chip, PDAUDIOCF_REG_SCR);
+		if (chip->pcm_running) {
+			if ((chip->ak4117->rcs0 & AK4117_UNLCK) || runtime->rate != rate) {
+				chip->pcm_running -= inc;
+				ret = -EIO;
+				break;
+			}
 		}
+		tmp &= ~mask;
+		tmp |= val;
+		pdacf_reg_write(chip, PDAUDIOCF_REG_SCR, tmp);
 	}
-	tmp &= ~mask;
-	tmp |= val;
-	pdacf_reg_write(chip, PDAUDIOCF_REG_SCR, tmp);
-      __end:
-	mutex_unlock(&chip->reg_lock);
 	snd_ak4117_check_rate_and_errors(chip->ak4117, AK4117_CHECK_NO_RATE);
 	return ret;
-}
-
-/*
- * pdacf_pcm_hw_params - hw_params callback for playback and capture
- */
-static int pdacf_pcm_hw_params(struct snd_pcm_substream *subs,
-				     struct snd_pcm_hw_params *hw_params)
-{
-	return snd_pcm_lib_alloc_vmalloc_32_buffer
-					(subs, params_buffer_bytes(hw_params));
-}
-
-/*
- * pdacf_pcm_hw_free - hw_free callback for playback and capture
- */
-static int pdacf_pcm_hw_free(struct snd_pcm_substream *subs)
-{
-	return snd_pcm_lib_free_vmalloc_buffer(subs);
 }
 
 /*
@@ -163,7 +131,7 @@ static int pdacf_pcm_prepare(struct snd_pcm_substream *subs)
 	case SNDRV_PCM_FORMAT_S24_3LE:
 	case SNDRV_PCM_FORMAT_S24_3BE:
 		chip->pcm_sample = 3;
-		/* fall through */
+		fallthrough;
 	default: /* 24-bit */
 		aval = AK4117_DIF_24R;
 		chip->pcm_frame = 3;
@@ -269,14 +237,9 @@ static snd_pcm_uframes_t pdacf_pcm_capture_pointer(struct snd_pcm_substream *sub
 static const struct snd_pcm_ops pdacf_pcm_capture_ops = {
 	.open =		pdacf_pcm_capture_open,
 	.close =	pdacf_pcm_capture_close,
-	.ioctl =	snd_pcm_lib_ioctl,
-	.hw_params =	pdacf_pcm_hw_params,
-	.hw_free =	pdacf_pcm_hw_free,
 	.prepare =	pdacf_pcm_prepare,
 	.trigger =	pdacf_pcm_trigger,
 	.pointer =	pdacf_pcm_capture_pointer,
-	.page =		snd_pcm_lib_get_vmalloc_page,
-	.mmap =		snd_pcm_lib_mmap_vmalloc,
 };
 
 
@@ -293,11 +256,13 @@ int snd_pdacf_pcm_new(struct snd_pdacf *chip)
 		return err;
 		
 	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_CAPTURE, &pdacf_pcm_capture_ops);
+	snd_pcm_set_managed_buffer_all(pcm, SNDRV_DMA_TYPE_VMALLOC, NULL,
+				       0, 0);
 
 	pcm->private_data = chip;
 	pcm->info_flags = 0;
 	pcm->nonatomic = true;
-	strcpy(pcm->name, chip->card->shortname);
+	strscpy(pcm->name, chip->card->shortname);
 	chip->pcm = pcm;
 	
 	err = snd_ak4117_build(chip->ak4117, pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream);

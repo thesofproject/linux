@@ -32,8 +32,7 @@
  *					Persistence support, fwmark and time-out.
  */
 
-#define KMSG_COMPONENT "IPVS"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "IPVS: " fmt
 
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -51,7 +50,7 @@
 #include <linux/kernel.h>
 #include <linux/sched/signal.h>
 
-#include <asm/unaligned.h>		/* Used for ntoh_seq and hton_seq */
+#include <linux/unaligned.h>		/* Used for ntoh_seq and hton_seq */
 
 #include <net/ip.h>
 #include <net/sock.h>
@@ -195,6 +194,7 @@ union ip_vs_sync_conn {
 #define IPVS_OPT_F_PARAM	(1 << (IPVS_OPT_PARAM-1))
 
 struct ip_vs_sync_thread_data {
+	struct task_struct *task;
 	struct netns_ipvs *ipvs;
 	struct socket *sock;
 	char *buf;
@@ -240,9 +240,6 @@ struct ip_vs_sync_thread_data {
       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
       |                    IPVS Sync Connection (1)                   |
 */
-
-#define SYNC_MESG_HEADER_LEN	4
-#define MAX_CONNS_PER_SYNCBUFF	255 /* nr_conns in ip_vs_sync_mesg is 8 bit */
 
 /* Version 0 header */
 struct ip_vs_sync_mesg_v0 {
@@ -332,7 +329,7 @@ ip_vs_sync_buff_create(struct netns_ipvs *ipvs, unsigned int len)
 {
 	struct ip_vs_sync_buff *sb;
 
-	if (!(sb=kmalloc(sizeof(struct ip_vs_sync_buff), GFP_ATOMIC)))
+	if (!(sb=kmalloc_obj(struct ip_vs_sync_buff, GFP_ATOMIC)))
 		return NULL;
 
 	len = max_t(unsigned int, len + sizeof(struct ip_vs_sync_mesg),
@@ -374,8 +371,11 @@ static inline void sb_queue_tail(struct netns_ipvs *ipvs,
 					      max(IPVS_SYNC_SEND_DELAY, 1));
 		ms->sync_queue_len++;
 		list_add_tail(&sb->list, &ms->sync_queue);
-		if ((++ms->sync_queue_delay) == IPVS_SYNC_WAKEUP_RATE)
-			wake_up_process(ms->master_thread);
+		if ((++ms->sync_queue_delay) == IPVS_SYNC_WAKEUP_RATE) {
+			int id = (int)(ms - ipvs->ms);
+
+			wake_up_process(ipvs->master_tinfo[id].task);
+		}
 	} else
 		ip_vs_sync_buff_release(sb);
 	spin_unlock(&ipvs->sync_lock);
@@ -417,7 +417,7 @@ ip_vs_sync_buff_create_v0(struct netns_ipvs *ipvs, unsigned int len)
 	struct ip_vs_sync_buff *sb;
 	struct ip_vs_sync_mesg_v0 *mesg;
 
-	if (!(sb=kmalloc(sizeof(struct ip_vs_sync_buff), GFP_ATOMIC)))
+	if (!(sb=kmalloc_obj(struct ip_vs_sync_buff, GFP_ATOMIC)))
 		return NULL;
 
 	len = max_t(unsigned int, len + sizeof(struct ip_vs_sync_mesg_v0),
@@ -602,7 +602,7 @@ static void ip_vs_sync_conn_v0(struct netns_ipvs *ipvs, struct ip_vs_conn *cp,
 	if (cp->flags & IP_VS_CONN_F_SEQ_MASK) {
 		struct ip_vs_sync_conn_options *opt =
 			(struct ip_vs_sync_conn_options *)&s[1];
-		memcpy(opt, &cp->in_seq, sizeof(*opt));
+		memcpy(opt, &cp->sync_conn_opt, sizeof(*opt));
 	}
 
 	m->nr_conns++;
@@ -614,7 +614,7 @@ static void ip_vs_sync_conn_v0(struct netns_ipvs *ipvs, struct ip_vs_conn *cp,
 	cp = cp->control;
 	if (cp) {
 		if (cp->flags & IP_VS_CONN_F_TEMPLATE)
-			pkts = atomic_add_return(1, &cp->in_pkts);
+			pkts = atomic_inc_return(&cp->in_pkts);
 		else
 			pkts = sysctl_sync_threshold(ipvs);
 		ip_vs_sync_conn(ipvs, cp, pkts);
@@ -775,7 +775,7 @@ control:
 	if (!cp)
 		return;
 	if (cp->flags & IP_VS_CONN_F_TEMPLATE)
-		pkts = atomic_add_return(1, &cp->in_pkts);
+		pkts = atomic_inc_return(&cp->in_pkts);
 	else
 		pkts = sysctl_sync_threshold(ipvs);
 	goto sloop;
@@ -1003,12 +1003,9 @@ static void ip_vs_process_message_v0(struct netns_ipvs *ipvs, const char *buffer
 				continue;
 			}
 		} else {
-			/* protocol in templates is not used for state/timeout */
-			if (state > 0) {
-				IP_VS_DBG(2, "BACKUP v0, Invalid template state %u\n",
-					state);
-				state = 0;
-			}
+			if (state >= IP_VS_CTPL_S_LAST)
+				IP_VS_DBG(7, "BACKUP v0, Invalid tpl state %u\n",
+					  state);
 		}
 
 		ip_vs_conn_fill_param(ipvs, AF_INET, s->protocol,
@@ -1166,12 +1163,9 @@ static inline int ip_vs_proc_sync_conn(struct netns_ipvs *ipvs, __u8 *p, __u8 *m
 			goto out;
 		}
 	} else {
-		/* protocol in templates is not used for state/timeout */
-		if (state > 0) {
-			IP_VS_DBG(3, "BACKUP, Invalid template state %u\n",
-				state);
-			state = 0;
-		}
+		if (state >= IP_VS_CTPL_S_LAST)
+			IP_VS_DBG(7, "BACKUP, Invalid tpl state %u\n",
+				  state);
 	}
 	if (ip_vs_conn_fill_param_sync(ipvs, af, s, &param, pe_data,
 				       pe_data_len, pe_name, pe_name_len)) {
@@ -1241,7 +1235,7 @@ static void ip_vs_process_message(struct netns_ipvs *ipvs, __u8 *buffer,
 
 			p = msg_end;
 			if (p + sizeof(s->v4) > buffer+buflen) {
-				IP_VS_ERR_RL("BACKUP, Dropping buffer, to small\n");
+				IP_VS_ERR_RL("BACKUP, Dropping buffer, too small\n");
 				return;
 			}
 			s = (union ip_vs_sync_conn *)p;
@@ -1285,12 +1279,12 @@ static void set_sock_size(struct sock *sk, int mode, int val)
 	lock_sock(sk);
 	if (mode) {
 		val = clamp_t(int, val, (SOCK_MIN_SNDBUF + 1) / 2,
-			      sysctl_wmem_max);
+			      READ_ONCE(sysctl_wmem_max));
 		sk->sk_sndbuf = val * 2;
 		sk->sk_userlocks |= SOCK_SNDBUF_LOCK;
 	} else {
 		val = clamp_t(int, val, (SOCK_MIN_RCVBUF + 1) / 2,
-			      sysctl_rmem_max);
+			      READ_ONCE(sysctl_rmem_max));
 		sk->sk_rcvbuf = val * 2;
 		sk->sk_userlocks |= SOCK_RCVBUF_LOCK;
 	}
@@ -1302,20 +1296,14 @@ static void set_sock_size(struct sock *sk, int mode, int val)
  */
 static void set_mcast_loop(struct sock *sk, u_char loop)
 {
-	struct inet_sock *inet = inet_sk(sk);
-
 	/* setsockopt(sock, SOL_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop)); */
-	lock_sock(sk);
-	inet->mc_loop = loop ? 1 : 0;
+	inet_assign_bit(MC_LOOP, sk, loop);
 #ifdef CONFIG_IP_VS_IPV6
-	if (sk->sk_family == AF_INET6) {
-		struct ipv6_pinfo *np = inet6_sk(sk);
-
+	if (READ_ONCE(sk->sk_family) == AF_INET6) {
 		/* IPV6_MULTICAST_LOOP */
-		np->mc_loop = loop ? 1 : 0;
+		inet6_assign_bit(MC6_LOOP, sk, loop);
 	}
 #endif
-	release_sock(sk);
 }
 
 /*
@@ -1327,13 +1315,13 @@ static void set_mcast_ttl(struct sock *sk, u_char ttl)
 
 	/* setsockopt(sock, SOL_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl)); */
 	lock_sock(sk);
-	inet->mc_ttl = ttl;
+	WRITE_ONCE(inet->mc_ttl, ttl);
 #ifdef CONFIG_IP_VS_IPV6
 	if (sk->sk_family == AF_INET6) {
 		struct ipv6_pinfo *np = inet6_sk(sk);
 
 		/* IPV6_MULTICAST_HOPS */
-		np->mcast_hops = ttl;
+		WRITE_ONCE(np->mcast_hops, ttl);
 	}
 #endif
 	release_sock(sk);
@@ -1346,13 +1334,13 @@ static void set_mcast_pmtudisc(struct sock *sk, int val)
 
 	/* setsockopt(sock, SOL_IP, IP_MTU_DISCOVER, &val, sizeof(val)); */
 	lock_sock(sk);
-	inet->pmtudisc = val;
+	WRITE_ONCE(inet->pmtudisc, val);
 #ifdef CONFIG_IP_VS_IPV6
 	if (sk->sk_family == AF_INET6) {
 		struct ipv6_pinfo *np = inet6_sk(sk);
 
 		/* IPV6_MTU_DISCOVER */
-		np->pmtudisc = val;
+		WRITE_ONCE(np->pmtudisc, val);
 	}
 #endif
 	release_sock(sk);
@@ -1376,7 +1364,7 @@ static int set_mcast_if(struct sock *sk, struct net_device *dev)
 		struct ipv6_pinfo *np = inet6_sk(sk);
 
 		/* IPV6_MULTICAST_IF */
-		np->mcast_oif = dev->ifindex;
+		WRITE_ONCE(np->mcast_oif, dev->ifindex);
 	}
 #endif
 	release_sock(sk);
@@ -1446,7 +1434,7 @@ static int bind_mcastif_addr(struct socket *sock, struct net_device *dev)
 	sin.sin_addr.s_addr  = addr;
 	sin.sin_port         = 0;
 
-	return sock->ops->bind(sock, (struct sockaddr*)&sin, sizeof(sin));
+	return kernel_bind(sock, (struct sockaddr_unsized *)&sin, sizeof(sin));
 }
 
 static void get_mcast_sockaddr(union ipvs_sockaddr *sa, int *salen,
@@ -1512,8 +1500,8 @@ static int make_send_sock(struct netns_ipvs *ipvs, int id,
 	}
 
 	get_mcast_sockaddr(&mcast_addr, &salen, &ipvs->mcfg, id);
-	result = sock->ops->connect(sock, (struct sockaddr *) &mcast_addr,
-				    salen, 0);
+	result = kernel_connect(sock, (struct sockaddr_unsized *)&mcast_addr,
+				salen, 0);
 	if (result < 0) {
 		pr_err("Error connecting to the multicast addr\n");
 		goto error;
@@ -1553,7 +1541,7 @@ static int make_receive_sock(struct netns_ipvs *ipvs, int id,
 
 	get_mcast_sockaddr(&mcast_addr, &salen, &ipvs->bcfg, id);
 	sock->sk->sk_bound_dev_if = dev->ifindex;
-	result = sock->ops->bind(sock, (struct sockaddr *)&mcast_addr, salen);
+	result = kernel_bind(sock, (struct sockaddr_unsized *)&mcast_addr, salen);
 	if (result < 0) {
 		pr_err("Error binding to the multicast addr\n");
 		goto error;
@@ -1587,13 +1575,11 @@ ip_vs_send_async(struct socket *sock, const char *buffer, const size_t length)
 	struct kvec	iov;
 	int		len;
 
-	EnterFunction(7);
 	iov.iov_base     = (void *)buffer;
 	iov.iov_len      = length;
 
 	len = kernel_sendmsg(sock, &msg, &iov, 1, (size_t)(length));
 
-	LeaveFunction(7);
 	return len;
 }
 
@@ -1619,15 +1605,12 @@ ip_vs_receive(struct socket *sock, char *buffer, const size_t buflen)
 	struct kvec		iov = {buffer, buflen};
 	int			len;
 
-	EnterFunction(7);
-
 	/* Receive a packet */
-	iov_iter_kvec(&msg.msg_iter, READ | ITER_KVEC, &iov, 1, buflen);
+	iov_iter_kvec(&msg.msg_iter, ITER_DEST, &iov, 1, buflen);
 	len = sock_recvmsg(sock, &msg, MSG_DONTWAIT);
 	if (len < 0)
 		return len;
 
-	LeaveFunction(7);
 	return len;
 }
 
@@ -1642,8 +1625,10 @@ static void master_wakeup_work_handler(struct work_struct *work)
 	spin_lock_bh(&ipvs->sync_lock);
 	if (ms->sync_queue_len &&
 	    ms->sync_queue_delay < IPVS_SYNC_WAKEUP_RATE) {
+		int id = (int)(ms - ipvs->ms);
+
 		ms->sync_queue_delay = IPVS_SYNC_WAKEUP_RATE;
-		wake_up_process(ms->master_thread);
+		wake_up_process(ipvs->master_tinfo[id].task);
 	}
 	spin_unlock_bh(&ipvs->sync_lock);
 }
@@ -1709,10 +1694,6 @@ done:
 	if (sb)
 		ip_vs_sync_buff_release(sb);
 
-	/* release the sending multicast socket */
-	sock_release(tinfo->sock);
-	kfree(tinfo);
-
 	return 0;
 }
 
@@ -1721,6 +1702,8 @@ static int sync_thread_backup(void *data)
 {
 	struct ip_vs_sync_thread_data *tinfo = data;
 	struct netns_ipvs *ipvs = tinfo->ipvs;
+	struct sock *sk = tinfo->sock->sk;
+	struct udp_sock *up = udp_sk(sk);
 	int len;
 
 	pr_info("sync thread started: state = BACKUP, mcast_ifn = %s, "
@@ -1728,12 +1711,14 @@ static int sync_thread_backup(void *data)
 		ipvs->bcfg.mcast_ifn, ipvs->bcfg.syncid, tinfo->id);
 
 	while (!kthread_should_stop()) {
-		wait_event_interruptible(*sk_sleep(tinfo->sock->sk),
-			 !skb_queue_empty(&tinfo->sock->sk->sk_receive_queue)
-			 || kthread_should_stop());
+		wait_event_interruptible(*sk_sleep(sk),
+					 !skb_queue_empty_lockless(&sk->sk_receive_queue) ||
+					 !skb_queue_empty_lockless(&up->reader_queue) ||
+					 kthread_should_stop());
 
 		/* do we have data now? */
-		while (!skb_queue_empty(&(tinfo->sock->sk->sk_receive_queue))) {
+		while (!skb_queue_empty_lockless(&sk->sk_receive_queue) ||
+		       !skb_queue_empty_lockless(&up->reader_queue)) {
 			len = ip_vs_receive(tinfo->sock, tinfo->buf,
 					ipvs->bcfg.sync_maxlen);
 			if (len <= 0) {
@@ -1746,11 +1731,6 @@ static int sync_thread_backup(void *data)
 		}
 	}
 
-	/* release the sending multicast socket */
-	sock_release(tinfo->sock);
-	kfree(tinfo->buf);
-	kfree(tinfo);
-
 	return 0;
 }
 
@@ -1758,8 +1738,8 @@ static int sync_thread_backup(void *data)
 int start_sync_thread(struct netns_ipvs *ipvs, struct ipvs_sync_daemon_cfg *c,
 		      int state)
 {
-	struct ip_vs_sync_thread_data *tinfo = NULL;
-	struct task_struct **array = NULL, *task;
+	struct ip_vs_sync_thread_data *ti = NULL, *tinfo;
+	struct task_struct *task;
 	struct net_device *dev;
 	char *name;
 	int (*threadfn)(void *data);
@@ -1770,6 +1750,32 @@ int start_sync_thread(struct netns_ipvs *ipvs, struct ipvs_sync_daemon_cfg *c,
 	IP_VS_DBG(7, "%s(): pid %d\n", __func__, task_pid_nr(current));
 	IP_VS_DBG(7, "Each ip_vs_sync_conn entry needs %zd bytes\n",
 		  sizeof(struct ip_vs_sync_conn_v0));
+
+	/* increase the module use count */
+	if (!ip_vs_use_count_inc())
+		return -ENOPROTOOPT;
+
+	/* Backup server can be started without services just to sync conns,
+	 * make sure conn_tab is created even if ipvs->enable is 0.
+	 */
+	if (state == IP_VS_STATE_BACKUP) {
+		mutex_lock(&ipvs->service_mutex);
+		if (!rcu_dereference_protected(ipvs->conn_tab, 1)) {
+			int lfactor = sysctl_conn_lfactor(ipvs);
+			int new_size = ip_vs_conn_desired_size(ipvs, NULL,
+							       lfactor);
+			struct ip_vs_rht *tc_new;
+
+			tc_new = ip_vs_conn_tab_alloc(ipvs, new_size, lfactor);
+			if (!tc_new) {
+				mutex_unlock(&ipvs->service_mutex);
+				result = -ENOMEM;
+				goto out_module;
+			}
+			rcu_assign_pointer(ipvs->conn_tab, tc_new);
+		}
+		mutex_unlock(&ipvs->service_mutex);
+	}
 
 	/* Do not hold one mutex and then to block on another */
 	for (;;) {
@@ -1828,7 +1834,7 @@ int start_sync_thread(struct netns_ipvs *ipvs, struct ipvs_sync_daemon_cfg *c,
 		threadfn = sync_thread_master;
 	} else if (state == IP_VS_STATE_BACKUP) {
 		result = -EEXIST;
-		if (ipvs->backup_threads)
+		if (ipvs->backup_tinfo)
 			goto out_early;
 
 		ipvs->bcfg = *c;
@@ -1843,7 +1849,7 @@ int start_sync_thread(struct netns_ipvs *ipvs, struct ipvs_sync_daemon_cfg *c,
 		struct ipvs_master_sync_state *ms;
 
 		result = -ENOMEM;
-		ipvs->ms = kcalloc(count, sizeof(ipvs->ms[0]), GFP_KERNEL);
+		ipvs->ms = kzalloc_objs(ipvs->ms[0], count);
 		if (!ipvs->ms)
 			goto out;
 		ms = ipvs->ms;
@@ -1855,28 +1861,21 @@ int start_sync_thread(struct netns_ipvs *ipvs, struct ipvs_sync_daemon_cfg *c,
 					  master_wakeup_work_handler);
 			ms->ipvs = ipvs;
 		}
-	} else {
-		array = kcalloc(count, sizeof(struct task_struct *),
-				GFP_KERNEL);
-		result = -ENOMEM;
-		if (!array)
-			goto out;
 	}
+	result = -ENOMEM;
+	ti = kzalloc_objs(struct ip_vs_sync_thread_data, count);
+	if (!ti)
+		goto out;
 
 	for (id = 0; id < count; id++) {
-		result = -ENOMEM;
-		tinfo = kmalloc(sizeof(*tinfo), GFP_KERNEL);
-		if (!tinfo)
-			goto out;
+		tinfo = &ti[id];
 		tinfo->ipvs = ipvs;
-		tinfo->sock = NULL;
 		if (state == IP_VS_STATE_BACKUP) {
+			result = -ENOMEM;
 			tinfo->buf = kmalloc(ipvs->bcfg.sync_maxlen,
 					     GFP_KERNEL);
 			if (!tinfo->buf)
 				goto out;
-		} else {
-			tinfo->buf = NULL;
 		}
 		tinfo->id = id;
 		if (state == IP_VS_STATE_MASTER)
@@ -1891,17 +1890,15 @@ int start_sync_thread(struct netns_ipvs *ipvs, struct ipvs_sync_daemon_cfg *c,
 			result = PTR_ERR(task);
 			goto out;
 		}
-		tinfo = NULL;
-		if (state == IP_VS_STATE_MASTER)
-			ipvs->ms[id].master_thread = task;
-		else
-			array[id] = task;
+		tinfo->task = task;
 	}
 
 	/* mark as active */
 
-	if (state == IP_VS_STATE_BACKUP)
-		ipvs->backup_threads = array;
+	if (state == IP_VS_STATE_MASTER)
+		ipvs->master_tinfo = ti;
+	else
+		ipvs->backup_tinfo = ti;
 	spin_lock_bh(&ipvs->sync_buff_lock);
 	ipvs->sync_state |= state;
 	spin_unlock_bh(&ipvs->sync_buff_lock);
@@ -1909,56 +1906,65 @@ int start_sync_thread(struct netns_ipvs *ipvs, struct ipvs_sync_daemon_cfg *c,
 	mutex_unlock(&ipvs->sync_mutex);
 	rtnl_unlock();
 
-	/* increase the module use count */
-	ip_vs_use_count_inc();
-
 	return 0;
 
 out:
 	/* We do not need RTNL lock anymore, release it here so that
-	 * sock_release below and in the kthreads can use rtnl_lock
-	 * to leave the mcast group.
+	 * sock_release below can use rtnl_lock to leave the mcast group.
 	 */
 	rtnl_unlock();
-	count = id;
-	while (count-- > 0) {
-		if (state == IP_VS_STATE_MASTER)
-			kthread_stop(ipvs->ms[count].master_thread);
-		else
-			kthread_stop(array[count]);
+	id = min(id, count - 1);
+	if (ti) {
+		for (tinfo = ti + id; tinfo >= ti; tinfo--) {
+			if (tinfo->task)
+				kthread_stop(tinfo->task);
+		}
 	}
 	if (!(ipvs->sync_state & IP_VS_STATE_MASTER)) {
 		kfree(ipvs->ms);
 		ipvs->ms = NULL;
 	}
 	mutex_unlock(&ipvs->sync_mutex);
-	if (tinfo) {
-		if (tinfo->sock)
-			sock_release(tinfo->sock);
-		kfree(tinfo->buf);
-		kfree(tinfo);
+
+	/* No more mutexes, release socks */
+	if (ti) {
+		for (tinfo = ti + id; tinfo >= ti; tinfo--) {
+			if (tinfo->sock)
+				sock_release(tinfo->sock);
+			kfree(tinfo->buf);
+		}
+		kfree(ti);
 	}
-	kfree(array);
+
+	/* decrease the module use count */
+	ip_vs_use_count_dec();
 	return result;
 
 out_early:
 	mutex_unlock(&ipvs->sync_mutex);
 	rtnl_unlock();
+
+out_module:
+	/* decrease the module use count */
+	ip_vs_use_count_dec();
 	return result;
 }
 
 
 int stop_sync_thread(struct netns_ipvs *ipvs, int state)
 {
-	struct task_struct **array;
+	struct ip_vs_sync_thread_data *ti, *tinfo;
 	int id;
 	int retc = -EINVAL;
 
 	IP_VS_DBG(7, "%s(): pid %d\n", __func__, task_pid_nr(current));
 
+	mutex_lock(&ipvs->sync_mutex);
 	if (state == IP_VS_STATE_MASTER) {
+		retc = -ESRCH;
 		if (!ipvs->ms)
-			return -ESRCH;
+			goto err;
+		ti = ipvs->master_tinfo;
 
 		/*
 		 * The lock synchronizes with sb_queue_tail(), so that we don't
@@ -1977,38 +1983,56 @@ int stop_sync_thread(struct netns_ipvs *ipvs, int state)
 			struct ipvs_master_sync_state *ms = &ipvs->ms[id];
 			int ret;
 
+			tinfo = &ti[id];
 			pr_info("stopping master sync thread %d ...\n",
-				task_pid_nr(ms->master_thread));
+				task_pid_nr(tinfo->task));
 			cancel_delayed_work_sync(&ms->master_wakeup_work);
-			ret = kthread_stop(ms->master_thread);
+			ret = kthread_stop(tinfo->task);
 			if (retc >= 0)
 				retc = ret;
 		}
 		kfree(ipvs->ms);
 		ipvs->ms = NULL;
+		ipvs->master_tinfo = NULL;
 	} else if (state == IP_VS_STATE_BACKUP) {
-		if (!ipvs->backup_threads)
-			return -ESRCH;
+		retc = -ESRCH;
+		if (!ipvs->backup_tinfo)
+			goto err;
+		ti = ipvs->backup_tinfo;
 
 		ipvs->sync_state &= ~IP_VS_STATE_BACKUP;
-		array = ipvs->backup_threads;
 		retc = 0;
 		for (id = ipvs->threads_mask; id >= 0; id--) {
 			int ret;
 
+			tinfo = &ti[id];
 			pr_info("stopping backup sync thread %d ...\n",
-				task_pid_nr(array[id]));
-			ret = kthread_stop(array[id]);
+				task_pid_nr(tinfo->task));
+			ret = kthread_stop(tinfo->task);
 			if (retc >= 0)
 				retc = ret;
 		}
-		kfree(array);
-		ipvs->backup_threads = NULL;
+		ipvs->backup_tinfo = NULL;
+	} else {
+		goto err;
 	}
+	id = ipvs->threads_mask;
+	mutex_unlock(&ipvs->sync_mutex);
+
+	/* No more mutexes, release socks */
+	for (tinfo = ti + id; tinfo >= ti; tinfo--) {
+		if (tinfo->sock)
+			sock_release(tinfo->sock);
+		kfree(tinfo->buf);
+	}
+	kfree(ti);
 
 	/* decrease the module use count */
 	ip_vs_use_count_dec();
+	return retc;
 
+err:
+	mutex_unlock(&ipvs->sync_mutex);
 	return retc;
 }
 
@@ -2027,7 +2051,6 @@ void ip_vs_sync_net_cleanup(struct netns_ipvs *ipvs)
 {
 	int retc;
 
-	mutex_lock(&ipvs->sync_mutex);
 	retc = stop_sync_thread(ipvs, IP_VS_STATE_MASTER);
 	if (retc && retc != -ESRCH)
 		pr_err("Failed to stop Master Daemon\n");
@@ -2035,5 +2058,4 @@ void ip_vs_sync_net_cleanup(struct netns_ipvs *ipvs)
 	retc = stop_sync_thread(ipvs, IP_VS_STATE_BACKUP);
 	if (retc && retc != -ESRCH)
 		pr_err("Failed to stop Backup Daemon\n");
-	mutex_unlock(&ipvs->sync_mutex);
 }

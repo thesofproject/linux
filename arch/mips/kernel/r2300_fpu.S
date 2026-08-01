@@ -11,10 +11,10 @@
  * Further modifications to make this work:
  * Copyright (c) 1998 Harald Koerfgen
  */
+#include <linux/export.h>
 #include <asm/asm.h>
 #include <asm/asmmacro.h>
 #include <asm/errno.h>
-#include <asm/export.h>
 #include <asm/fpregdef.h>
 #include <asm/mipsregs.h>
 #include <asm/asm-offsets.h>
@@ -23,14 +23,14 @@
 #define EX(a,b)							\
 9:	a,##b;							\
 	.section __ex_table,"a";				\
-	PTR	9b,fault;					\
+	PTR_WD	9b,fault;					\
 	.previous
 
 #define EX2(a,b)						\
 9:	a,##b;							\
 	.section __ex_table,"a";				\
-	PTR	9b,bad_stack;					\
-	PTR	9b+4,bad_stack;					\
+	PTR_WD	9b,fault;					\
+	PTR_WD	9b+4,fault;					\
 	.previous
 
 	.set	mips1
@@ -52,64 +52,6 @@ LEAF(_restore_fp)
 	jr	ra
 	END(_restore_fp)
 
-/*
- * Load the FPU with signalling NANS.  This bit pattern we're using has
- * the property that no matter whether considered as single or as double
- * precision represents signaling NANS.
- *
- * The value to initialize fcr31 to comes in $a0.
- */
-
-	.set push
-	SET_HARDFLOAT
-
-LEAF(_init_fpu)
-	mfc0	t0, CP0_STATUS
-	li	t1, ST0_CU1
-	or	t0, t1
-	mtc0	t0, CP0_STATUS
-
-	ctc1	a0, fcr31
-
-	li	t0, -1
-
-	mtc1	t0, $f0
-	mtc1	t0, $f1
-	mtc1	t0, $f2
-	mtc1	t0, $f3
-	mtc1	t0, $f4
-	mtc1	t0, $f5
-	mtc1	t0, $f6
-	mtc1	t0, $f7
-	mtc1	t0, $f8
-	mtc1	t0, $f9
-	mtc1	t0, $f10
-	mtc1	t0, $f11
-	mtc1	t0, $f12
-	mtc1	t0, $f13
-	mtc1	t0, $f14
-	mtc1	t0, $f15
-	mtc1	t0, $f16
-	mtc1	t0, $f17
-	mtc1	t0, $f18
-	mtc1	t0, $f19
-	mtc1	t0, $f20
-	mtc1	t0, $f21
-	mtc1	t0, $f22
-	mtc1	t0, $f23
-	mtc1	t0, $f24
-	mtc1	t0, $f25
-	mtc1	t0, $f26
-	mtc1	t0, $f27
-	mtc1	t0, $f28
-	mtc1	t0, $f29
-	mtc1	t0, $f30
-	mtc1	t0, $f31
-	jr	ra
-	END(_init_fpu)
-
-	.set pop
-
 	.set	noreorder
 
 /**
@@ -122,7 +64,7 @@ LEAF(_init_fpu)
  */
 LEAF(_save_fp_context)
 	.set	push
-	SET_HARDFLOAT
+	.set	hardfloat
 	li	v0, 0					# assume success
 	cfc1	t1, fcr31
 	EX2(s.d $f0, 0(a0))
@@ -156,7 +98,7 @@ LEAF(_save_fp_context)
  */
 LEAF(_restore_fp_context)
 	.set	push
-	SET_HARDFLOAT
+	.set	hardfloat
 	li	v0, 0					# assume success
 	EX(lw t0, (a1))
 	EX2(l.d $f0, 0(a0))

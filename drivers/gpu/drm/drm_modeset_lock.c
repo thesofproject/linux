@@ -21,9 +21,13 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include <drm/drmP.h>
+#include <linux/export.h>
+
+#include <drm/drm_atomic.h>
 #include <drm/drm_crtc.h>
+#include <drm/drm_device.h>
 #include <drm/drm_modeset_lock.h>
+#include <drm/drm_print.h>
 
 /**
  * DOC: kms locking
@@ -35,7 +39,7 @@
  * of extra utility/tracking out of our acquire-ctx.  This is provided
  * by &struct drm_modeset_lock and &struct drm_modeset_acquire_ctx.
  *
- * For basic principles of &ww_mutex, see: Documentation/locking/ww-mutex-design.txt
+ * For basic principles of &ww_mutex, see: Documentation/locking/ww-mutex-design.rst
  *
  * The basic usage pattern is to::
  *
@@ -56,6 +60,10 @@
  *     drm_modeset_drop_locks(ctx);
  *     drm_modeset_acquire_fini(ctx);
  *
+ * For convenience this control flow is implemented in
+ * DRM_MODESET_LOCK_ALL_BEGIN() and DRM_MODESET_LOCK_ALL_END() for the case
+ * where all modeset locks need to be taken through drm_modeset_lock_all_ctx().
+ *
  * If all that is needed is a single modeset lock, then the &struct
  * drm_modeset_acquire_ctx is not needed and the locking can be simplified
  * by passing a NULL instead of ctx in the drm_modeset_lock() call or
@@ -71,6 +79,53 @@
  */
 
 static DEFINE_WW_CLASS(crtc_ww_class);
+
+#if IS_ENABLED(CONFIG_DRM_DEBUG_MODESET_LOCK)
+static noinline depot_stack_handle_t __drm_stack_depot_save(void)
+{
+	unsigned long entries[8];
+	unsigned int n;
+
+	n = stack_trace_save(entries, ARRAY_SIZE(entries), 1);
+
+	return stack_depot_save(entries, n, GFP_NOWAIT | __GFP_NOWARN);
+}
+
+static void __drm_stack_depot_print(depot_stack_handle_t stack_depot)
+{
+	struct drm_printer p = drm_dbg_printer(NULL, DRM_UT_KMS, "drm_modeset_lock");
+	unsigned long *entries;
+	unsigned int nr_entries;
+	char *buf;
+
+	buf = kmalloc(PAGE_SIZE, GFP_NOWAIT | __GFP_NOWARN);
+	if (!buf)
+		return;
+
+	nr_entries = stack_depot_fetch(stack_depot, &entries);
+	stack_trace_snprint(buf, PAGE_SIZE, entries, nr_entries, 2);
+
+	drm_printf(&p, "attempting to lock a contended lock without backoff:\n%s", buf);
+
+	kfree(buf);
+}
+
+static void __drm_stack_depot_init(void)
+{
+	stack_depot_init();
+}
+#else /* CONFIG_DRM_DEBUG_MODESET_LOCK */
+static depot_stack_handle_t __drm_stack_depot_save(void)
+{
+	return 0;
+}
+static void __drm_stack_depot_print(depot_stack_handle_t stack_depot)
+{
+}
+static void __drm_stack_depot_init(void)
+{
+}
+#endif /* CONFIG_DRM_DEBUG_MODESET_LOCK */
 
 /**
  * drm_modeset_lock_all - take all modeset locks
@@ -93,7 +148,7 @@ void drm_modeset_lock_all(struct drm_device *dev)
 	struct drm_modeset_acquire_ctx *ctx;
 	int ret;
 
-	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL | __GFP_NOFAIL);
+	ctx = kzalloc_obj(*ctx, GFP_KERNEL | __GFP_NOFAIL);
 	if (WARN_ON(!ctx))
 		return;
 
@@ -220,7 +275,9 @@ EXPORT_SYMBOL(drm_modeset_acquire_fini);
  */
 void drm_modeset_drop_locks(struct drm_modeset_acquire_ctx *ctx)
 {
-	WARN_ON(ctx->contended);
+	if (WARN_ON(ctx->contended))
+		__drm_stack_depot_print(ctx->stack_depot);
+
 	while (!list_empty(&ctx->locked)) {
 		struct drm_modeset_lock *lock;
 
@@ -238,12 +295,13 @@ static inline int modeset_lock(struct drm_modeset_lock *lock,
 {
 	int ret;
 
-	WARN_ON(ctx->contended);
+	if (WARN_ON(ctx->contended))
+		__drm_stack_depot_print(ctx->stack_depot);
 
 	if (ctx->trylock_only) {
 		lockdep_assert_held(&ctx->ww_ctx);
 
-		if (!ww_mutex_trylock(&lock->mutex))
+		if (!ww_mutex_trylock(&lock->mutex, NULL))
 			return -EBUSY;
 		else
 			return 0;
@@ -269,6 +327,7 @@ static inline int modeset_lock(struct drm_modeset_lock *lock,
 		ret = 0;
 	} else if (ret == -EDEADLK) {
 		ctx->contended = lock;
+		ctx->stack_depot = __drm_stack_depot_save();
 	}
 
 	return ret;
@@ -291,6 +350,7 @@ int drm_modeset_backoff(struct drm_modeset_acquire_ctx *ctx)
 	struct drm_modeset_lock *contended = ctx->contended;
 
 	ctx->contended = NULL;
+	ctx->stack_depot = 0;
 
 	if (WARN_ON(!contended))
 		return 0;
@@ -309,6 +369,7 @@ void drm_modeset_lock_init(struct drm_modeset_lock *lock)
 {
 	ww_mutex_init(&lock->mutex, &crtc_ww_class);
 	INIT_LIST_HEAD(&lock->head);
+	__drm_stack_depot_init();
 }
 EXPORT_SYMBOL(drm_modeset_lock_init);
 
@@ -383,11 +444,14 @@ EXPORT_SYMBOL(drm_modeset_unlock);
  * Locks acquired with this function should be released by calling the
  * drm_modeset_drop_locks() function on @ctx.
  *
+ * See also: DRM_MODESET_LOCK_ALL_BEGIN() and DRM_MODESET_LOCK_ALL_END()
+ *
  * Returns: 0 on success or a negative error-code on failure.
  */
 int drm_modeset_lock_all_ctx(struct drm_device *dev,
 			     struct drm_modeset_acquire_ctx *ctx)
 {
+	struct drm_private_obj *privobj;
 	struct drm_crtc *crtc;
 	struct drm_plane *plane;
 	int ret;
@@ -404,6 +468,12 @@ int drm_modeset_lock_all_ctx(struct drm_device *dev,
 
 	drm_for_each_plane(plane, dev) {
 		ret = drm_modeset_lock(&plane->mutex, ctx);
+		if (ret)
+			return ret;
+	}
+
+	drm_for_each_privobj(privobj, dev) {
+		ret = drm_modeset_lock(&privobj->lock, ctx);
 		if (ret)
 			return ret;
 	}

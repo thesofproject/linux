@@ -57,6 +57,8 @@ const u8 acpi_gbl_resource_aml_sizes[] = {
 	ACPI_AML_SIZE_LARGE(struct aml_resource_pin_group),
 	ACPI_AML_SIZE_LARGE(struct aml_resource_pin_group_function),
 	ACPI_AML_SIZE_LARGE(struct aml_resource_pin_group_config),
+	ACPI_AML_SIZE_LARGE(struct aml_resource_clock_input),
+
 };
 
 const u8 acpi_gbl_resource_aml_serial_bus_sizes[] = {
@@ -64,6 +66,7 @@ const u8 acpi_gbl_resource_aml_serial_bus_sizes[] = {
 	ACPI_AML_SIZE_LARGE(struct aml_resource_i2c_serialbus),
 	ACPI_AML_SIZE_LARGE(struct aml_resource_spi_serialbus),
 	ACPI_AML_SIZE_LARGE(struct aml_resource_uart_serialbus),
+	ACPI_AML_SIZE_LARGE(struct aml_resource_csi2_serialbus),
 };
 
 /*
@@ -113,6 +116,7 @@ static const u8 acpi_gbl_resource_types[] = {
 	ACPI_VARIABLE_LENGTH,	/* 10 pin_group */
 	ACPI_VARIABLE_LENGTH,	/* 11 pin_group_function */
 	ACPI_VARIABLE_LENGTH,	/* 12 pin_group_config */
+	ACPI_VARIABLE_LENGTH,	/* 13 clock_input */
 };
 
 /*******************************************************************************
@@ -161,6 +165,28 @@ acpi_ut_walk_aml_resources(struct acpi_walk_state *walk_state,
 	/* Walk the byte list, abort on any invalid descriptor type or length */
 
 	while (aml < end_aml) {
+		/*
+		 * Validate that the remaining buffer space can hold enough
+		 * bytes to safely access fields during validation.
+		 * For large resource descriptors (bit 7 set), we need enough
+		 * bytes to access the Type field in serial_bus resources.
+		 * Small resource descriptors only need sizeof(struct aml_resource_end_tag).
+		 */
+		if ((acpi_size)(end_aml - aml) <
+		    sizeof(struct aml_resource_end_tag)) {
+			return_ACPI_STATUS(AE_AML_BUFFER_LENGTH);
+		}
+
+		/*
+		 * For large resource descriptors, ensure enough space for
+		 * the header plus serial_bus Type field access.
+		 */
+		if ((ACPI_GET8(aml) & ACPI_RESOURCE_NAME_LARGE) &&
+		    ((acpi_size)(end_aml - aml) <
+		     ACPI_OFFSET(struct aml_resource_common_serialbus,
+				 type) + 1)) {
+			return_ACPI_STATUS(AE_AML_BUFFER_LENGTH);
+		}
 
 		/* Validate the Resource Type and Resource Length */
 
@@ -177,6 +203,14 @@ acpi_ut_walk_aml_resources(struct acpi_walk_state *walk_state,
 		/* Get the length of this descriptor */
 
 		length = acpi_ut_get_descriptor_length(aml);
+
+		/*
+		 * Validate that the descriptor length doesn't exceed the
+		 * remaining buffer size to prevent reading beyond the end.
+		 */
+		if (length > (acpi_size)(end_aml - aml)) {
+			return_ACPI_STATUS(AE_AML_BUFFER_LENGTH);
+		}
 
 		/* Invoke the user function */
 

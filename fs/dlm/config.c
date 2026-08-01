@@ -1,12 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
 *******************************************************************************
 **
 **  Copyright (C) Sistina Software, Inc.  1997-2003  All rights reserved.
 **  Copyright (C) 2004-2011 Red Hat, Inc.  All rights reserved.
 **
-**  This copyrighted material is made available to anyone wishing to use,
-**  modify, copy, or redistribute it subject to the terms and conditions
-**  of the GNU General Public License v.2.
 **
 *******************************************************************************
 ******************************************************************************/
@@ -22,12 +20,14 @@
 #include <net/sock.h>
 
 #include "config.h"
+#include "midcomms.h"
 #include "lowcomms.h"
 
 /*
- * /config/dlm/<cluster>/spaces/<space>/nodes/<node>/nodeid
+ * /config/dlm/<cluster>/spaces/<space>/nodes/<node>/nodeid (refers to <node>)
  * /config/dlm/<cluster>/spaces/<space>/nodes/<node>/weight
- * /config/dlm/<cluster>/comms/<comm>/nodeid
+ * /config/dlm/<cluster>/spaces/<space>/nodes/<node>/release_recover
+ * /config/dlm/<cluster>/comms/<comm>/nodeid (refers to <comm>)
  * /config/dlm/<cluster>/comms/<comm>/local
  * /config/dlm/<cluster>/comms/<comm>/addr      (write only)
  * /config/dlm/<cluster>/comms/<comm>/addr_list (read only)
@@ -64,22 +64,18 @@ static void release_node(struct config_item *);
 static struct configfs_attribute *comm_attrs[];
 static struct configfs_attribute *node_attrs[];
 
+const struct rhashtable_params dlm_rhash_rsb_params = {
+	.nelem_hint = 3, /* start small */
+	.key_len = DLM_RESNAME_MAXLEN,
+	.key_offset = offsetof(struct dlm_rsb, res_name),
+	.head_offset = offsetof(struct dlm_rsb, res_node),
+	.automatic_shrinking = true,
+};
+
 struct dlm_cluster {
 	struct config_group group;
-	unsigned int cl_tcp_port;
-	unsigned int cl_buffer_size;
-	unsigned int cl_rsbtbl_size;
-	unsigned int cl_recover_timer;
-	unsigned int cl_toss_secs;
-	unsigned int cl_scan_secs;
-	unsigned int cl_log_debug;
-	unsigned int cl_log_info;
-	unsigned int cl_protocol;
-	unsigned int cl_timewarn_cs;
-	unsigned int cl_waitwarn_us;
-	unsigned int cl_new_rsb_count;
-	unsigned int cl_recover_callbacks;
-	char cl_cluster_name[DLM_LOCKSPACE_LEN];
+	struct dlm_spaces *sps;
+	struct dlm_comms *cms;
 };
 
 static struct dlm_cluster *config_item_to_cluster(struct config_item *i)
@@ -98,8 +94,7 @@ enum {
 	CLUSTER_ATTR_LOG_DEBUG,
 	CLUSTER_ATTR_LOG_INFO,
 	CLUSTER_ATTR_PROTOCOL,
-	CLUSTER_ATTR_TIMEWARN_CS,
-	CLUSTER_ATTR_WAITWARN_US,
+	CLUSTER_ATTR_MARK,
 	CLUSTER_ATTR_NEW_RSB_COUNT,
 	CLUSTER_ATTR_RECOVER_CALLBACKS,
 	CLUSTER_ATTR_CLUSTER_NAME,
@@ -107,25 +102,60 @@ enum {
 
 static ssize_t cluster_cluster_name_show(struct config_item *item, char *buf)
 {
-	struct dlm_cluster *cl = config_item_to_cluster(item);
-	return sprintf(buf, "%s\n", cl->cl_cluster_name);
+	return sprintf(buf, "%s\n", dlm_config.ci_cluster_name);
 }
 
 static ssize_t cluster_cluster_name_store(struct config_item *item,
 					  const char *buf, size_t len)
 {
-	struct dlm_cluster *cl = config_item_to_cluster(item);
-
-	strlcpy(dlm_config.ci_cluster_name, buf,
-				sizeof(dlm_config.ci_cluster_name));
-	strlcpy(cl->cl_cluster_name, buf, sizeof(cl->cl_cluster_name));
+	strscpy(dlm_config.ci_cluster_name, buf,
+		sizeof(dlm_config.ci_cluster_name));
 	return len;
 }
 
 CONFIGFS_ATTR(cluster_, cluster_name);
 
-static ssize_t cluster_set(struct dlm_cluster *cl, unsigned int *cl_field,
-			   int *info_field, int check_zero,
+static ssize_t cluster_tcp_port_show(struct config_item *item, char *buf)
+{
+	return sprintf(buf, "%u\n", be16_to_cpu(dlm_config.ci_tcp_port));
+}
+
+static int dlm_check_zero_and_dlm_running(unsigned int x)
+{
+	if (!x)
+		return -EINVAL;
+
+	if (dlm_lowcomms_is_running())
+		return -EBUSY;
+
+	return 0;
+}
+
+static ssize_t cluster_tcp_port_store(struct config_item *item,
+				      const char *buf, size_t len)
+{
+	int rc;
+	u16 x;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	rc = kstrtou16(buf, 0, &x);
+	if (rc)
+		return rc;
+
+	rc = dlm_check_zero_and_dlm_running(x);
+	if (rc)
+		return rc;
+
+	dlm_config.ci_tcp_port = cpu_to_be16(x);
+	return len;
+}
+
+CONFIGFS_ATTR(cluster_, tcp_port);
+
+static ssize_t cluster_set(unsigned int *info_field,
+			   int (*check_cb)(unsigned int x),
 			   const char *buf, size_t len)
 {
 	unsigned int x;
@@ -137,43 +167,78 @@ static ssize_t cluster_set(struct dlm_cluster *cl, unsigned int *cl_field,
 	if (rc)
 		return rc;
 
-	if (check_zero && !x)
-		return -EINVAL;
+	if (check_cb) {
+		rc = check_cb(x);
+		if (rc)
+			return rc;
+	}
 
-	*cl_field = x;
 	*info_field = x;
 
 	return len;
 }
 
-#define CLUSTER_ATTR(name, check_zero)                                        \
+#define CLUSTER_ATTR(name, check_cb)                                          \
 static ssize_t cluster_##name##_store(struct config_item *item, \
 		const char *buf, size_t len) \
 {                                                                             \
-	struct dlm_cluster *cl = config_item_to_cluster(item);		      \
-	return cluster_set(cl, &cl->cl_##name, &dlm_config.ci_##name,         \
-			   check_zero, buf, len);                             \
+	return cluster_set(&dlm_config.ci_##name, check_cb, buf, len);        \
 }                                                                             \
 static ssize_t cluster_##name##_show(struct config_item *item, char *buf)     \
 {                                                                             \
-	struct dlm_cluster *cl = config_item_to_cluster(item);		      \
-	return snprintf(buf, PAGE_SIZE, "%u\n", cl->cl_##name);               \
+	return snprintf(buf, PAGE_SIZE, "%u\n", dlm_config.ci_##name);        \
 }                                                                             \
 CONFIGFS_ATTR(cluster_, name);
 
-CLUSTER_ATTR(tcp_port, 1);
-CLUSTER_ATTR(buffer_size, 1);
-CLUSTER_ATTR(rsbtbl_size, 1);
-CLUSTER_ATTR(recover_timer, 1);
-CLUSTER_ATTR(toss_secs, 1);
-CLUSTER_ATTR(scan_secs, 1);
-CLUSTER_ATTR(log_debug, 0);
-CLUSTER_ATTR(log_info, 0);
-CLUSTER_ATTR(protocol, 0);
-CLUSTER_ATTR(timewarn_cs, 1);
-CLUSTER_ATTR(waitwarn_us, 0);
-CLUSTER_ATTR(new_rsb_count, 0);
-CLUSTER_ATTR(recover_callbacks, 0);
+static int dlm_check_protocol_and_dlm_running(unsigned int x)
+{
+	switch (x) {
+	case 0:
+		/* TCP */
+		break;
+	case 1:
+		/* SCTP */
+		if (!IS_ENABLED(CONFIG_IP_SCTP))
+			return -EOPNOTSUPP;
+
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	if (dlm_lowcomms_is_running())
+		return -EBUSY;
+
+	return 0;
+}
+
+static int dlm_check_zero(unsigned int x)
+{
+	if (!x)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int dlm_check_buffer_size(unsigned int x)
+{
+	if (x < DLM_MAX_SOCKET_BUFSIZE)
+		return -EINVAL;
+
+	return 0;
+}
+
+CLUSTER_ATTR(buffer_size, dlm_check_buffer_size);
+CLUSTER_ATTR(rsbtbl_size, dlm_check_zero);
+CLUSTER_ATTR(recover_timer, dlm_check_zero);
+CLUSTER_ATTR(toss_secs, dlm_check_zero);
+CLUSTER_ATTR(scan_secs, dlm_check_zero);
+CLUSTER_ATTR(log_debug, NULL);
+CLUSTER_ATTR(log_info, NULL);
+CLUSTER_ATTR(protocol, dlm_check_protocol_and_dlm_running);
+CLUSTER_ATTR(mark, NULL);
+CLUSTER_ATTR(new_rsb_count, NULL);
+CLUSTER_ATTR(recover_callbacks, NULL);
 
 static struct configfs_attribute *cluster_attrs[] = {
 	[CLUSTER_ATTR_TCP_PORT] = &cluster_attr_tcp_port,
@@ -185,8 +250,7 @@ static struct configfs_attribute *cluster_attrs[] = {
 	[CLUSTER_ATTR_LOG_DEBUG] = &cluster_attr_log_debug,
 	[CLUSTER_ATTR_LOG_INFO] = &cluster_attr_log_info,
 	[CLUSTER_ATTR_PROTOCOL] = &cluster_attr_protocol,
-	[CLUSTER_ATTR_TIMEWARN_CS] = &cluster_attr_timewarn_cs,
-	[CLUSTER_ATTR_WAITWARN_US] = &cluster_attr_waitwarn_us,
+	[CLUSTER_ATTR_MARK] = &cluster_attr_mark,
 	[CLUSTER_ATTR_NEW_RSB_COUNT] = &cluster_attr_new_rsb_count,
 	[CLUSTER_ATTR_RECOVER_CALLBACKS] = &cluster_attr_recover_callbacks,
 	[CLUSTER_ATTR_CLUSTER_NAME] = &cluster_attr_cluster_name,
@@ -198,11 +262,13 @@ enum {
 	COMM_ATTR_LOCAL,
 	COMM_ATTR_ADDR,
 	COMM_ATTR_ADDR_LIST,
+	COMM_ATTR_MARK,
 };
 
 enum {
 	NODE_ATTR_NODEID = 0,
 	NODE_ATTR_WEIGHT,
+	NODE_ATTR_RELEASE_RECOVER,
 };
 
 struct dlm_clusters {
@@ -216,8 +282,11 @@ struct dlm_spaces {
 struct dlm_space {
 	struct config_group group;
 	struct list_head members;
+	struct list_head members_gone;
+	int members_gone_count;
 	struct mutex members_lock;
 	int members_count;
+	struct dlm_nodes *nds;
 };
 
 struct dlm_comms {
@@ -230,6 +299,7 @@ struct dlm_comm {
 	int nodeid;
 	int local;
 	int addr_count;
+	unsigned int mark;
 	struct sockaddr_storage *addr[DLM_MAX_ADDR_COUNT];
 };
 
@@ -244,41 +314,49 @@ struct dlm_node {
 	int weight;
 	int new;
 	int comm_seq; /* copy of cm->seq when nd->nodeid is set */
+	unsigned int release_recover;
 };
 
-static struct configfs_group_operations clusters_ops = {
+struct dlm_member_gone {
+	int nodeid;
+	unsigned int release_recover;
+
+	struct list_head list; /* space->members_gone */
+};
+
+static const struct configfs_group_operations clusters_ops = {
 	.make_group = make_cluster,
 	.drop_item = drop_cluster,
 };
 
-static struct configfs_item_operations cluster_ops = {
+static const struct configfs_item_operations cluster_ops = {
 	.release = release_cluster,
 };
 
-static struct configfs_group_operations spaces_ops = {
+static const struct configfs_group_operations spaces_ops = {
 	.make_group = make_space,
 	.drop_item = drop_space,
 };
 
-static struct configfs_item_operations space_ops = {
+static const struct configfs_item_operations space_ops = {
 	.release = release_space,
 };
 
-static struct configfs_group_operations comms_ops = {
+static const struct configfs_group_operations comms_ops = {
 	.make_item = make_comm,
 	.drop_item = drop_comm,
 };
 
-static struct configfs_item_operations comm_ops = {
+static const struct configfs_item_operations comm_ops = {
 	.release = release_comm,
 };
 
-static struct configfs_group_operations nodes_ops = {
+static const struct configfs_group_operations nodes_ops = {
 	.make_item = make_node,
 	.drop_item = drop_node,
 };
 
-static struct configfs_item_operations node_ops = {
+static const struct configfs_item_operations node_ops = {
 	.release = release_node,
 };
 
@@ -348,12 +426,15 @@ static struct config_group *make_cluster(struct config_group *g,
 	struct dlm_spaces *sps = NULL;
 	struct dlm_comms *cms = NULL;
 
-	cl = kzalloc(sizeof(struct dlm_cluster), GFP_NOFS);
-	sps = kzalloc(sizeof(struct dlm_spaces), GFP_NOFS);
-	cms = kzalloc(sizeof(struct dlm_comms), GFP_NOFS);
+	cl = kzalloc_obj(struct dlm_cluster, GFP_NOFS);
+	sps = kzalloc_obj(struct dlm_spaces, GFP_NOFS);
+	cms = kzalloc_obj(struct dlm_comms, GFP_NOFS);
 
 	if (!cl || !sps || !cms)
 		goto fail;
+
+	cl->sps = sps;
+	cl->cms = cms;
 
 	config_group_init_type_name(&cl->group, name, &cluster_type);
 	config_group_init_type_name(&sps->ss_group, "spaces", &spaces_type);
@@ -361,22 +442,6 @@ static struct config_group *make_cluster(struct config_group *g,
 
 	configfs_add_default_group(&sps->ss_group, &cl->group);
 	configfs_add_default_group(&cms->cs_group, &cl->group);
-
-	cl->cl_tcp_port = dlm_config.ci_tcp_port;
-	cl->cl_buffer_size = dlm_config.ci_buffer_size;
-	cl->cl_rsbtbl_size = dlm_config.ci_rsbtbl_size;
-	cl->cl_recover_timer = dlm_config.ci_recover_timer;
-	cl->cl_toss_secs = dlm_config.ci_toss_secs;
-	cl->cl_scan_secs = dlm_config.ci_scan_secs;
-	cl->cl_log_debug = dlm_config.ci_log_debug;
-	cl->cl_log_info = dlm_config.ci_log_info;
-	cl->cl_protocol = dlm_config.ci_protocol;
-	cl->cl_timewarn_cs = dlm_config.ci_timewarn_cs;
-	cl->cl_waitwarn_us = dlm_config.ci_waitwarn_us;
-	cl->cl_new_rsb_count = dlm_config.ci_new_rsb_count;
-	cl->cl_recover_callbacks = dlm_config.ci_recover_callbacks;
-	memcpy(cl->cl_cluster_name, dlm_config.ci_cluster_name,
-	       DLM_LOCKSPACE_LEN);
 
 	space_list = &sps->ss_group;
 	comm_list = &cms->cs_group;
@@ -404,6 +469,9 @@ static void drop_cluster(struct config_group *g, struct config_item *i)
 static void release_cluster(struct config_item *i)
 {
 	struct dlm_cluster *cl = config_item_to_cluster(i);
+
+	kfree(cl->sps);
+	kfree(cl->cms);
 	kfree(cl);
 }
 
@@ -412,8 +480,8 @@ static struct config_group *make_space(struct config_group *g, const char *name)
 	struct dlm_space *sp = NULL;
 	struct dlm_nodes *nds = NULL;
 
-	sp = kzalloc(sizeof(struct dlm_space), GFP_NOFS);
-	nds = kzalloc(sizeof(struct dlm_nodes), GFP_NOFS);
+	sp = kzalloc_obj(struct dlm_space, GFP_NOFS);
+	nds = kzalloc_obj(struct dlm_nodes, GFP_NOFS);
 
 	if (!sp || !nds)
 		goto fail;
@@ -424,8 +492,10 @@ static struct config_group *make_space(struct config_group *g, const char *name)
 	configfs_add_default_group(&nds->ns_group, &sp->group);
 
 	INIT_LIST_HEAD(&sp->members);
+	INIT_LIST_HEAD(&sp->members_gone);
 	mutex_init(&sp->members_lock);
 	sp->members_count = 0;
+	sp->nds = nds;
 	return &sp->group;
 
  fail:
@@ -447,14 +517,21 @@ static void drop_space(struct config_group *g, struct config_item *i)
 static void release_space(struct config_item *i)
 {
 	struct dlm_space *sp = config_item_to_space(i);
+	kfree(sp->nds);
 	kfree(sp);
 }
 
 static struct config_item *make_comm(struct config_group *g, const char *name)
 {
 	struct dlm_comm *cm;
+	unsigned int nodeid;
+	int rv;
 
-	cm = kzalloc(sizeof(struct dlm_comm), GFP_NOFS);
+	rv = kstrtouint(name, 0, &nodeid);
+	if (rv)
+		return ERR_PTR(rv);
+
+	cm = kzalloc_obj(struct dlm_comm, GFP_NOFS);
 	if (!cm)
 		return ERR_PTR(-ENOMEM);
 
@@ -464,9 +541,10 @@ static struct config_item *make_comm(struct config_group *g, const char *name)
 	if (!cm->seq)
 		cm->seq = dlm_comm_count++;
 
-	cm->nodeid = -1;
+	cm->nodeid = nodeid;
 	cm->local = 0;
 	cm->addr_count = 0;
+	cm->mark = 0;
 	return &cm->item;
 }
 
@@ -475,7 +553,7 @@ static void drop_comm(struct config_group *g, struct config_item *i)
 	struct dlm_comm *cm = config_item_to_comm(i);
 	if (local_comm == cm)
 		local_comm = NULL;
-	dlm_lowcomms_close(cm->nodeid);
+	dlm_midcomms_close(cm->nodeid);
 	while (cm->addr_count--)
 		kfree(cm->addr[cm->addr_count]);
 	config_item_put(i);
@@ -490,16 +568,25 @@ static void release_comm(struct config_item *i)
 static struct config_item *make_node(struct config_group *g, const char *name)
 {
 	struct dlm_space *sp = config_item_to_space(g->cg_item.ci_parent);
+	unsigned int nodeid;
 	struct dlm_node *nd;
+	uint32_t seq = 0;
+	int rv;
 
-	nd = kzalloc(sizeof(struct dlm_node), GFP_NOFS);
+	rv = kstrtouint(name, 0, &nodeid);
+	if (rv)
+		return ERR_PTR(rv);
+
+	nd = kzalloc_obj(struct dlm_node, GFP_NOFS);
 	if (!nd)
 		return ERR_PTR(-ENOMEM);
 
 	config_item_init_type_name(&nd->item, name, &node_type);
-	nd->nodeid = -1;
+	nd->nodeid = nodeid;
 	nd->weight = 1;  /* default weight of 1 if none is set */
 	nd->new = 1;     /* set to 0 once it's been read by dlm_nodeid_list() */
+	dlm_comm_seq(nodeid, &seq, true);
+	nd->comm_seq = seq;
 
 	mutex_lock(&sp->members_lock);
 	list_add(&nd->list, &sp->members);
@@ -513,10 +600,20 @@ static void drop_node(struct config_group *g, struct config_item *i)
 {
 	struct dlm_space *sp = config_item_to_space(g->cg_item.ci_parent);
 	struct dlm_node *nd = config_item_to_node(i);
+	struct dlm_member_gone *mb_gone;
+
+	mb_gone = kzalloc_obj(*mb_gone);
+	if (!mb_gone)
+		return;
 
 	mutex_lock(&sp->members_lock);
 	list_del(&nd->list);
 	sp->members_count--;
+
+	mb_gone->nodeid = nd->nodeid;
+	mb_gone->release_recover = nd->release_recover;
+	list_add(&mb_gone->list, &sp->members_gone);
+	sp->members_gone_count++;
 	mutex_unlock(&sp->members_lock);
 
 	config_item_put(i);
@@ -557,16 +654,19 @@ void dlm_config_exit(void)
 
 static ssize_t comm_nodeid_show(struct config_item *item, char *buf)
 {
-	return sprintf(buf, "%d\n", config_item_to_comm(item)->nodeid);
+	unsigned int nodeid;
+	int rv;
+
+	rv = kstrtouint(config_item_name(item), 0, &nodeid);
+	if (WARN_ON(rv))
+		return rv;
+
+	return sprintf(buf, "%u\n", nodeid);
 }
 
 static ssize_t comm_nodeid_store(struct config_item *item, const char *buf,
 				 size_t len)
 {
-	int rc = kstrtoint(buf, 0, &config_item_to_comm(item)->nodeid);
-
-	if (rc)
-		return rc;
 	return len;
 }
 
@@ -601,13 +701,13 @@ static ssize_t comm_addr_store(struct config_item *item, const char *buf,
 	if (cm->addr_count >= DLM_MAX_ADDR_COUNT)
 		return -ENOSPC;
 
-	addr = kzalloc(sizeof(*addr), GFP_NOFS);
+	addr = kzalloc_obj(*addr, GFP_NOFS);
 	if (!addr)
 		return -ENOMEM;
 
 	memcpy(addr, buf, len);
 
-	rv = dlm_lowcomms_addr(cm->nodeid, addr, len);
+	rv = dlm_midcomms_addr(cm->nodeid, addr);
 	if (rv) {
 		kfree(addr);
 		return rv;
@@ -662,8 +762,37 @@ static ssize_t comm_addr_list_show(struct config_item *item, char *buf)
 	return 4096 - allowance;
 }
 
+static ssize_t comm_mark_show(struct config_item *item, char *buf)
+{
+	return sprintf(buf, "%u\n", config_item_to_comm(item)->mark);
+}
+
+static ssize_t comm_mark_store(struct config_item *item, const char *buf,
+			       size_t len)
+{
+	struct dlm_comm *comm;
+	unsigned int mark;
+	int rc;
+
+	rc = kstrtouint(buf, 0, &mark);
+	if (rc)
+		return rc;
+
+	if (mark == 0)
+		mark = dlm_config.ci_mark;
+
+	comm = config_item_to_comm(item);
+	rc = dlm_lowcomms_nodes_set_mark(comm->nodeid, mark);
+	if (rc)
+		return rc;
+
+	comm->mark = mark;
+	return len;
+}
+
 CONFIGFS_ATTR(comm_, nodeid);
 CONFIGFS_ATTR(comm_, local);
+CONFIGFS_ATTR(comm_, mark);
 CONFIGFS_ATTR_WO(comm_, addr);
 CONFIGFS_ATTR_RO(comm_, addr_list);
 
@@ -672,25 +801,25 @@ static struct configfs_attribute *comm_attrs[] = {
 	[COMM_ATTR_LOCAL] = &comm_attr_local,
 	[COMM_ATTR_ADDR] = &comm_attr_addr,
 	[COMM_ATTR_ADDR_LIST] = &comm_attr_addr_list,
+	[COMM_ATTR_MARK] = &comm_attr_mark,
 	NULL,
 };
 
 static ssize_t node_nodeid_show(struct config_item *item, char *buf)
 {
-	return sprintf(buf, "%d\n", config_item_to_node(item)->nodeid);
+	unsigned int nodeid;
+	int rv;
+
+	rv = kstrtouint(config_item_name(item), 0, &nodeid);
+	if (WARN_ON(rv))
+		return rv;
+
+	return sprintf(buf, "%u\n", nodeid);
 }
 
 static ssize_t node_nodeid_store(struct config_item *item, const char *buf,
 				 size_t len)
 {
-	struct dlm_node *nd = config_item_to_node(item);
-	uint32_t seq = 0;
-	int rc = kstrtoint(buf, 0, &nd->nodeid);
-
-	if (rc)
-		return rc;
-	dlm_comm_seq(nd->nodeid, &seq);
-	nd->comm_seq = seq;
 	return len;
 }
 
@@ -709,12 +838,34 @@ static ssize_t node_weight_store(struct config_item *item, const char *buf,
 	return len;
 }
 
+static ssize_t node_release_recover_show(struct config_item *item, char *buf)
+{
+	struct dlm_node *n = config_item_to_node(item);
+
+	return sprintf(buf, "%u\n", n->release_recover);
+}
+
+static ssize_t node_release_recover_store(struct config_item *item,
+					  const char *buf, size_t len)
+{
+	struct dlm_node *n = config_item_to_node(item);
+	int rc;
+
+	rc = kstrtouint(buf, 0, &n->release_recover);
+	if (rc)
+		return rc;
+
+	return len;
+}
+
 CONFIGFS_ATTR(node_, nodeid);
 CONFIGFS_ATTR(node_, weight);
+CONFIGFS_ATTR(node_, release_recover);
 
 static struct configfs_attribute *node_attrs[] = {
 	[NODE_ATTR_NODEID] = &node_attr_nodeid,
 	[NODE_ATTR_WEIGHT] = &node_attr_weight,
+	[NODE_ATTR_RELEASE_RECOVER] = &node_attr_release_recover,
 	NULL,
 };
 
@@ -750,7 +901,7 @@ static struct dlm_comm *get_comm(int nodeid)
 	if (!comm_list)
 		return NULL;
 
-	mutex_lock(&clusters_root.subsys.su_mutex);
+	WARN_ON_ONCE(!mutex_is_locked(&clusters_root.subsys.su_mutex));
 
 	list_for_each_entry(i, &comm_list->cg_children, ci_entry) {
 		cm = config_item_to_comm(i);
@@ -761,7 +912,6 @@ static struct dlm_comm *get_comm(int nodeid)
 		config_item_get(i);
 		break;
 	}
-	mutex_unlock(&clusters_root.subsys.su_mutex);
 
 	if (!found)
 		cm = NULL;
@@ -777,9 +927,10 @@ static void put_comm(struct dlm_comm *cm)
 int dlm_config_nodes(char *lsname, struct dlm_config_node **nodes_out,
 		     int *count_out)
 {
+	struct dlm_member_gone *mb_gone, *mb_safe;
+	struct dlm_config_node *nodes, *node;
 	struct dlm_space *sp;
 	struct dlm_node *nd;
-	struct dlm_config_node *nodes, *node;
 	int rv, count;
 
 	sp = get_space(lsname);
@@ -793,9 +944,9 @@ int dlm_config_nodes(char *lsname, struct dlm_config_node **nodes_out,
 		goto out;
 	}
 
-	count = sp->members_count;
+	count = sp->members_count + sp->members_gone_count;
 
-	nodes = kcalloc(count, sizeof(struct dlm_config_node), GFP_NOFS);
+	nodes = kzalloc_objs(struct dlm_config_node, count, GFP_NOFS);
 	if (!nodes) {
 		rv = -ENOMEM;
 		goto out;
@@ -812,6 +963,20 @@ int dlm_config_nodes(char *lsname, struct dlm_config_node **nodes_out,
 		nd->new = 0;
 	}
 
+	/* we delay the remove on nodes until here as configfs does
+	 * not support addtional attributes for rmdir().
+	 */
+	list_for_each_entry_safe(mb_gone, mb_safe, &sp->members_gone, list) {
+		node->nodeid = mb_gone->nodeid;
+		node->release_recover = mb_gone->release_recover;
+		node->gone = true;
+		node++;
+
+		list_del(&mb_gone->list);
+		sp->members_gone_count--;
+		kfree(mb_gone);
+	}
+
 	*count_out = count;
 	*nodes_out = nodes;
 	rv = 0;
@@ -821,11 +986,20 @@ int dlm_config_nodes(char *lsname, struct dlm_config_node **nodes_out,
 	return rv;
 }
 
-int dlm_comm_seq(int nodeid, uint32_t *seq)
+int dlm_comm_seq(int nodeid, uint32_t *seq, bool locked)
 {
-	struct dlm_comm *cm = get_comm(nodeid);
+	struct dlm_comm *cm;
+
+	if (locked) {
+		cm = get_comm(nodeid);
+	} else {
+		mutex_lock(&clusters_root.subsys.su_mutex);
+		cm = get_comm(nodeid);
+		mutex_unlock(&clusters_root.subsys.su_mutex);
+	}
 	if (!cm)
-		return -EEXIST;
+		return -ENOENT;
+
 	*seq = cm->seq;
 	put_comm(cm);
 	return 0;
@@ -833,7 +1007,7 @@ int dlm_comm_seq(int nodeid, uint32_t *seq)
 
 int dlm_our_nodeid(void)
 {
-	return local_comm ? local_comm->nodeid : 0;
+	return local_comm->nodeid;
 }
 
 /* num 0 is first addr, num 1 is second addr */
@@ -849,23 +1023,21 @@ int dlm_our_addr(struct sockaddr_storage *addr, int num)
 
 /* Config file defaults */
 #define DEFAULT_TCP_PORT       21064
-#define DEFAULT_BUFFER_SIZE     4096
 #define DEFAULT_RSBTBL_SIZE     1024
 #define DEFAULT_RECOVER_TIMER      5
 #define DEFAULT_TOSS_SECS         10
 #define DEFAULT_SCAN_SECS          5
 #define DEFAULT_LOG_DEBUG          0
 #define DEFAULT_LOG_INFO           1
-#define DEFAULT_PROTOCOL           0
-#define DEFAULT_TIMEWARN_CS      500 /* 5 sec = 500 centiseconds */
-#define DEFAULT_WAITWARN_US	   0
+#define DEFAULT_PROTOCOL           DLM_PROTO_TCP
+#define DEFAULT_MARK               0
 #define DEFAULT_NEW_RSB_COUNT    128
 #define DEFAULT_RECOVER_CALLBACKS  0
 #define DEFAULT_CLUSTER_NAME      ""
 
 struct dlm_config_info dlm_config = {
-	.ci_tcp_port = DEFAULT_TCP_PORT,
-	.ci_buffer_size = DEFAULT_BUFFER_SIZE,
+	.ci_tcp_port = cpu_to_be16(DEFAULT_TCP_PORT),
+	.ci_buffer_size = DLM_MAX_SOCKET_BUFSIZE,
 	.ci_rsbtbl_size = DEFAULT_RSBTBL_SIZE,
 	.ci_recover_timer = DEFAULT_RECOVER_TIMER,
 	.ci_toss_secs = DEFAULT_TOSS_SECS,
@@ -873,8 +1045,7 @@ struct dlm_config_info dlm_config = {
 	.ci_log_debug = DEFAULT_LOG_DEBUG,
 	.ci_log_info = DEFAULT_LOG_INFO,
 	.ci_protocol = DEFAULT_PROTOCOL,
-	.ci_timewarn_cs = DEFAULT_TIMEWARN_CS,
-	.ci_waitwarn_us = DEFAULT_WAITWARN_US,
+	.ci_mark = DEFAULT_MARK,
 	.ci_new_rsb_count = DEFAULT_NEW_RSB_COUNT,
 	.ci_recover_callbacks = DEFAULT_RECOVER_CALLBACKS,
 	.ci_cluster_name = DEFAULT_CLUSTER_NAME

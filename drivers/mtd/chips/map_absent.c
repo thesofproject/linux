@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Common code to handle absent "placeholder" devices
  * Copyright 2001 Resilience Corporation <ebrower@resilience.com>
@@ -45,7 +46,7 @@ static struct mtd_info *map_absent_probe(struct map_info *map)
 {
 	struct mtd_info *mtd;
 
-	mtd = kzalloc(sizeof(*mtd), GFP_KERNEL);
+	mtd = kzalloc_obj(*mtd);
 	if (!mtd) {
 		return NULL;
 	}

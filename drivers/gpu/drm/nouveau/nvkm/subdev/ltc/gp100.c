@@ -23,7 +23,7 @@
  */
 #include "priv.h"
 
-static void
+void
 gp100_ltc_intr(struct nvkm_ltc *ltc)
 {
 	struct nvkm_device *device = ltc->subdev.device;
@@ -38,7 +38,7 @@ gp100_ltc_intr(struct nvkm_ltc *ltc)
 	}
 }
 
-static int
+int
 gp100_ltc_oneinit(struct nvkm_ltc *ltc)
 {
 	struct nvkm_device *device = ltc->subdev.device;
@@ -48,7 +48,7 @@ gp100_ltc_oneinit(struct nvkm_ltc *ltc)
 	return 0;
 }
 
-static void
+void
 gp100_ltc_init(struct nvkm_ltc *ltc)
 {
 	/*XXX: PMU LS call to setup tagram address */
@@ -61,7 +61,8 @@ gp100_ltc = {
 	.intr = gp100_ltc_intr,
 	.cbc_clear = gm107_ltc_cbc_clear,
 	.cbc_wait = gm107_ltc_cbc_wait,
-	.zbc = 16,
+	.zbc_color = 16,
+	.zbc_depth = 16,
 	.zbc_clear_color = gm107_ltc_zbc_clear_color,
 	.zbc_clear_depth = gm107_ltc_zbc_clear_depth,
 	.invalidate = gf100_ltc_invalidate,
@@ -69,7 +70,8 @@ gp100_ltc = {
 };
 
 int
-gp100_ltc_new(struct nvkm_device *device, int index, struct nvkm_ltc **pltc)
+gp100_ltc_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst,
+	      struct nvkm_ltc **pltc)
 {
-	return nvkm_ltc_new_(&gp100_ltc, device, index, pltc);
+	return nvkm_ltc_new_(&gp100_ltc, device, type, inst, pltc);
 }

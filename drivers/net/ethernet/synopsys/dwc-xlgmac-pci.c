@@ -34,7 +34,7 @@ static int xlgmac_probe(struct pci_dev *pcidev, const struct pci_device_id *id)
 		return ret;
 	}
 
-	for (i = 0; i <= PCI_STD_RESOURCE_END; i++) {
+	for (i = 0; i < PCI_STD_NUM_BARS; i++) {
 		if (pci_resource_len(pcidev, i) == 0)
 			continue;
 		ret = pcim_iomap_regions(pcidev, BIT(i), XLGMAC_DRV_NAME);
@@ -71,8 +71,3 @@ static struct pci_driver xlgmac_pci_driver = {
 };
 
 module_pci_driver(xlgmac_pci_driver);
-
-MODULE_DESCRIPTION(XLGMAC_DRV_DESC);
-MODULE_VERSION(XLGMAC_DRV_VERSION);
-MODULE_AUTHOR("Jie Deng <jiedeng@synopsys.com>");
-MODULE_LICENSE("Dual BSD/GPL");

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  * arch/xtensa/platform-iss/setup.c
@@ -9,60 +10,35 @@
  *
  * Copyright 2001 - 2005 Tensilica Inc.
  * Copyright 2017 Cadence Design Systems Inc.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
  */
-#include <linux/bootmem.h>
-#include <linux/stddef.h>
-#include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/errno.h>
-#include <linux/reboot.h>
-#include <linux/kdev_t.h>
-#include <linux/types.h>
-#include <linux/major.h>
-#include <linux/blkdev.h>
-#include <linux/console.h>
-#include <linux/delay.h>
-#include <linux/stringify.h>
+#include <linux/kernel.h>
 #include <linux/notifier.h>
+#include <linux/panic_notifier.h>
+#include <linux/printk.h>
+#include <linux/reboot.h>
+#include <linux/string.h>
 
 #include <asm/platform.h>
-#include <asm/bootparam.h>
 #include <asm/setup.h>
 
 #include <platform/simcall.h>
 
 
-void __init platform_init(bp_tag_t* bootparam)
-{
-}
-
-void platform_halt(void)
-{
-	pr_info(" ** Called platform_halt() **\n");
-	simc_exit(0);
-}
-
-void platform_power_off(void)
+static int iss_power_off(struct sys_off_data *unused)
 {
 	pr_info(" ** Called platform_power_off() **\n");
 	simc_exit(0);
+	return NOTIFY_DONE;
 }
-void platform_restart(void)
+
+static int iss_restart(struct sys_off_data *unused)
 {
 	/* Flush and reset the mmu, simulate a processor reset, and
 	 * jump to the reset vector. */
 	cpu_reset();
-	/* control never gets here */
-}
 
-void platform_heartbeat(void)
-{
+	return NOTIFY_DONE;
 }
 
 static int
@@ -78,24 +54,35 @@ static struct notifier_block iss_panic_block = {
 
 void __init platform_setup(char **p_cmdline)
 {
+	static void *argv[COMMAND_LINE_SIZE / sizeof(void *)] __initdata;
+	static char cmdline[COMMAND_LINE_SIZE] __initdata;
 	int argc = simc_argc();
 	int argv_size = simc_argv_size();
 
 	if (argc > 1) {
-		void **argv = alloc_bootmem(argv_size);
-		char *cmdline = alloc_bootmem(argv_size);
-		int i;
+		if (argv_size > sizeof(argv)) {
+			pr_err("%s: command line too long: argv_size = %d\n",
+			       __func__, argv_size);
+		} else {
+			int i;
 
-		cmdline[0] = 0;
-		simc_argv((void *)argv);
+			cmdline[0] = 0;
+			simc_argv((void *)argv);
 
-		for (i = 1; i < argc; ++i) {
-			if (i > 1)
-				strcat(cmdline, " ");
-			strcat(cmdline, argv[i]);
+			for (i = 1; i < argc; ++i) {
+				if (i > 1)
+					strcat(cmdline, " ");
+				strcat(cmdline, argv[i]);
+			}
+			*p_cmdline = cmdline;
 		}
-		*p_cmdline = cmdline;
 	}
 
 	atomic_notifier_chain_register(&panic_notifier_list, &iss_panic_block);
+	register_sys_off_handler(SYS_OFF_MODE_RESTART,
+				 SYS_OFF_PRIO_PLATFORM,
+				 iss_restart, NULL);
+	register_sys_off_handler(SYS_OFF_MODE_POWER_OFF,
+				 SYS_OFF_PRIO_PLATFORM,
+				 iss_power_off, NULL);
 }

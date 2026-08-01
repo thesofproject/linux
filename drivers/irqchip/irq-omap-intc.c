@@ -248,7 +248,7 @@ static int __init omap_init_irq_of(struct device_node *node)
 	if (WARN_ON(!omap_irq_base))
 		return -ENOMEM;
 
-	domain = irq_domain_add_linear(node, omap_nr_irqs,
+	domain = irq_domain_create_linear(of_fwnode_handle(node), omap_nr_irqs,
 			&irq_generic_chip_ops, NULL);
 
 	omap_irq_soft_reset();
@@ -274,7 +274,7 @@ static int __init omap_init_irq_legacy(u32 base, struct device_node *node)
 		irq_base = 0;
 	}
 
-	domain = irq_domain_add_legacy(node, omap_nr_irqs, irq_base, 0,
+	domain = irq_domain_create_legacy(of_fwnode_handle(node), omap_nr_irqs, irq_base, 0,
 			&irq_domain_simple_ops, NULL);
 
 	omap_irq_soft_reset();
@@ -325,8 +325,7 @@ static int __init omap_init_irq(u32 base, struct device_node *node)
 	return ret;
 }
 
-static asmlinkage void __exception_irq_entry
-omap_intc_handle_irq(struct pt_regs *regs)
+static void __exception_irq_entry omap_intc_handle_irq(struct pt_regs *regs)
 {
 	extern unsigned long irq_err_count;
 	u32 irqnr;
@@ -357,7 +356,7 @@ omap_intc_handle_irq(struct pt_regs *regs)
 	}
 
 	irqnr &= ACTIVEIRQ_MASK;
-	handle_domain_irq(domain, irqnr, regs);
+	generic_handle_domain_irq(domain, irqnr);
 }
 
 static int __init intc_of_init(struct device_node *node,

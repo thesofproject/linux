@@ -1,24 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TI keystone reboot driver
  *
- * Copyright (C) 2014 Texas Instruments Incorporated. http://www.ti.com/
+ * Copyright (C) 2014 Texas Instruments Incorporated. https://www.ti.com/
  *
  * Author: Ivan Khoronzhuk <ivan.khoronzhuk@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/notifier.h>
+#include <linux/platform_device.h>
 #include <linux/reboot.h>
 #include <linux/regmap.h>
 #include <linux/mfd/syscon.h>
-#include <linux/of_platform.h>
+#include <linux/of.h>
 
-#define RSTYPE_RG			0x0
 #define RSCTRL_RG			0x4
 #define RSCFG_RG			0x8
 #define RSISO_RG			0xc
@@ -30,7 +27,6 @@
 #define RSMUX_OMODE_MASK		0xe
 #define RSMUX_OMODE_RESET_ON		0xa
 #define RSMUX_OMODE_RESET_OFF		0x0
-#define RSMUX_LOCK_MASK			0x1
 #define RSMUX_LOCK_SET			0x1
 
 #define RSCFG_RSTYPE_SOFT		0x300f
@@ -52,8 +48,7 @@ static inline int rsctrl_enable_rspll_write(void)
 				  RSCTRL_KEY_MASK, RSCTRL_KEY);
 }
 
-static int rsctrl_restart_handler(struct notifier_block *this,
-				  unsigned long mode, void *cmd)
+static int rsctrl_restart_handler(struct sys_off_data *data)
 {
 	/* enable write access to RSTCTRL */
 	rsctrl_enable_rspll_write();
@@ -65,15 +60,11 @@ static int rsctrl_restart_handler(struct notifier_block *this,
 	return NOTIFY_DONE;
 }
 
-static struct notifier_block rsctrl_restart_nb = {
-	.notifier_call = rsctrl_restart_handler,
-	.priority = 128,
-};
-
 static const struct of_device_id rsctrl_of_match[] = {
 	{.compatible = "ti,keystone-reset", },
 	{},
 };
+MODULE_DEVICE_TABLE(of, rsctrl_of_match);
 
 static int rsctrl_probe(struct platform_device *pdev)
 {
@@ -90,25 +81,15 @@ static int rsctrl_probe(struct platform_device *pdev)
 		return -ENODEV;
 
 	/* get regmaps */
-	pllctrl_regs = syscon_regmap_lookup_by_phandle(np, "ti,syscon-pll");
+	pllctrl_regs = syscon_regmap_lookup_by_phandle_args(np, "ti,syscon-pll",
+							    1, &rspll_offset);
 	if (IS_ERR(pllctrl_regs))
 		return PTR_ERR(pllctrl_regs);
 
-	devctrl_regs = syscon_regmap_lookup_by_phandle(np, "ti,syscon-dev");
+	devctrl_regs = syscon_regmap_lookup_by_phandle_args(np, "ti,syscon-dev",
+							    1, &rsmux_offset);
 	if (IS_ERR(devctrl_regs))
 		return PTR_ERR(devctrl_regs);
-
-	ret = of_property_read_u32_index(np, "ti,syscon-pll", 1, &rspll_offset);
-	if (ret) {
-		dev_err(dev, "couldn't read the reset pll offset!\n");
-		return -EINVAL;
-	}
-
-	ret = of_property_read_u32_index(np, "ti,syscon-dev", 1, &rsmux_offset);
-	if (ret) {
-		dev_err(dev, "couldn't read the rsmux offset!\n");
-		return -EINVAL;
-	}
 
 	/* set soft/hard reset */
 	val = of_property_read_bool(np, "ti,soft-reset");
@@ -153,7 +134,8 @@ static int rsctrl_probe(struct platform_device *pdev)
 			return ret;
 	}
 
-	ret = register_restart_handler(&rsctrl_restart_nb);
+	ret = devm_register_sys_off_handler(dev, SYS_OFF_MODE_RESTART, 128,
+					    rsctrl_restart_handler, NULL);
 	if (ret)
 		dev_err(dev, "cannot register restart handler (err=%d)\n", ret);
 
@@ -171,5 +153,4 @@ module_platform_driver(rsctrl_driver);
 
 MODULE_AUTHOR("Ivan Khoronzhuk <ivan.khoronzhuk@ti.com>");
 MODULE_DESCRIPTION("Texas Instruments keystone reset driver");
-MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:" KBUILD_MODNAME);

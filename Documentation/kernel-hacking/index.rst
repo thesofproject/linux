@@ -1,3 +1,5 @@
+.. _kernel_hacking:
+
 =====================
 Kernel Hacking Guides
 =====================
@@ -7,3 +9,4 @@ Kernel Hacking Guides
 
    hacking
    locking
+   false-sharing

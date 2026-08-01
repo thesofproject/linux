@@ -1,17 +1,6 @@
-/*
- * Copyright (c) 2017 Intel Corporation
- *
- * Functions to access TPS68470 power management chip.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright (C) 2017 Intel Corporation */
+/* Functions to access TPS68470 power management chip. */
 
 #ifndef __LINUX_MFD_TPS68470_H
 #define __LINUX_MFD_TPS68470_H
@@ -85,6 +74,17 @@
 
 #define TPS68470_CLKCFG1_MODE_A_MASK	GENMASK(1, 0)
 #define TPS68470_CLKCFG1_MODE_B_MASK	GENMASK(3, 2)
+
+#define TPS68470_CLKCFG2_DRV_STR_2MA	0x05
+#define TPS68470_PLL_OUTPUT_ENABLE	0x02
+#define TPS68470_CLK_SRC_XTAL		BIT(0)
+#define TPS68470_PLLSWR_DEFAULT		GENMASK(1, 0)
+#define TPS68470_OSC_EXT_CAP_DEFAULT	0x05
+
+#define TPS68470_OUTPUT_A_SHIFT		0x00
+#define TPS68470_OUTPUT_B_SHIFT		0x02
+#define TPS68470_CLK_SRC_SHIFT		GENMASK(2, 0)
+#define TPS68470_OSC_EXT_CAP_SHIFT	BIT(2)
 
 #define TPS68470_GPIO_CTL_REG_A(x)	(TPS68470_REG_GPCTL0A + (x) * 2)
 #define TPS68470_GPIO_CTL_REG_B(x)	(TPS68470_REG_GPCTL0B + (x) * 2)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*******************************************************************************
  * Filename:  target_core_stat.c
  *
@@ -7,20 +8,6 @@
  * (c) Copyright 2006-2013 Datera, Inc.
  *
  * Nicholas A. Bellinger <nab@linux-iscsi.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  *
  ******************************************************************************/
 
@@ -43,9 +30,6 @@
 #ifndef INITIAL_JIFFIES
 #define INITIAL_JIFFIES ((unsigned long)(unsigned int) (-300*HZ))
 #endif
-
-#define NONE		"None"
-#define ISPRINT(a)   ((a >= ' ') && (a <= '~'))
 
 #define SCSI_LU_INDEX			1
 #define LU_COUNT			1
@@ -133,9 +117,9 @@ static ssize_t target_stat_tgt_status_show(struct config_item *item,
 		char *page)
 {
 	if (to_stat_tgt_dev(item)->export_count)
-		return snprintf(page, PAGE_SIZE, "activated");
+		return snprintf(page, PAGE_SIZE, "activated\n");
 	else
-		return snprintf(page, PAGE_SIZE, "deactivated");
+		return snprintf(page, PAGE_SIZE, "deactivated\n");
 }
 
 static ssize_t target_stat_tgt_non_access_lus_show(struct config_item *item,
@@ -246,43 +230,25 @@ static ssize_t target_stat_lu_lu_name_show(struct config_item *item, char *page)
 static ssize_t target_stat_lu_vend_show(struct config_item *item, char *page)
 {
 	struct se_device *dev = to_stat_lu_dev(item);
-	int i;
-	char str[sizeof(dev->t10_wwn.vendor)+1];
 
-	/* scsiLuVendorId */
-	for (i = 0; i < sizeof(dev->t10_wwn.vendor); i++)
-		str[i] = ISPRINT(dev->t10_wwn.vendor[i]) ?
-			dev->t10_wwn.vendor[i] : ' ';
-	str[i] = '\0';
-	return snprintf(page, PAGE_SIZE, "%s\n", str);
+	return snprintf(page, PAGE_SIZE, "%-" __stringify(INQUIRY_VENDOR_LEN)
+			"s\n", dev->t10_wwn.vendor);
 }
 
 static ssize_t target_stat_lu_prod_show(struct config_item *item, char *page)
 {
 	struct se_device *dev = to_stat_lu_dev(item);
-	int i;
-	char str[sizeof(dev->t10_wwn.model)+1];
 
-	/* scsiLuProductId */
-	for (i = 0; i < sizeof(dev->t10_wwn.model); i++)
-		str[i] = ISPRINT(dev->t10_wwn.model[i]) ?
-			dev->t10_wwn.model[i] : ' ';
-	str[i] = '\0';
-	return snprintf(page, PAGE_SIZE, "%s\n", str);
+	return snprintf(page, PAGE_SIZE, "%-" __stringify(INQUIRY_MODEL_LEN)
+			"s\n", dev->t10_wwn.model);
 }
 
 static ssize_t target_stat_lu_rev_show(struct config_item *item, char *page)
 {
 	struct se_device *dev = to_stat_lu_dev(item);
-	int i;
-	char str[sizeof(dev->t10_wwn.revision)+1];
 
-	/* scsiLuRevisionId */
-	for (i = 0; i < sizeof(dev->t10_wwn.revision); i++)
-		str[i] = ISPRINT(dev->t10_wwn.revision[i]) ?
-			dev->t10_wwn.revision[i] : ' ';
-	str[i] = '\0';
-	return snprintf(page, PAGE_SIZE, "%s\n", str);
+	return snprintf(page, PAGE_SIZE, "%-" __stringify(INQUIRY_REVISION_LEN)
+			"s\n", dev->t10_wwn.revision);
 }
 
 static ssize_t target_stat_lu_dev_type_show(struct config_item *item, char *page)
@@ -310,35 +276,39 @@ static ssize_t target_stat_lu_state_bit_show(struct config_item *item,
 	return snprintf(page, PAGE_SIZE, "exposed\n");
 }
 
-static ssize_t target_stat_lu_num_cmds_show(struct config_item *item,
-		char *page)
-{
-	struct se_device *dev = to_stat_lu_dev(item);
-
-	/* scsiLuNumCommands */
-	return snprintf(page, PAGE_SIZE, "%lu\n",
-			atomic_long_read(&dev->num_cmds));
+#define per_cpu_stat_snprintf(stats_struct, prefix, field, shift)	\
+static ssize_t								\
+per_cpu_stat_##prefix##_snprintf(struct stats_struct __percpu *per_cpu_stats, \
+				 char *page)				\
+{									\
+	struct stats_struct *stats;					\
+	unsigned int cpu;						\
+	u64 sum = 0;							\
+									\
+	for_each_possible_cpu(cpu) {					\
+		stats = per_cpu_ptr(per_cpu_stats, cpu);		\
+		sum += stats->field;					\
+	}								\
+									\
+	return snprintf(page, PAGE_SIZE, "%llu\n", sum >> shift);	\
 }
 
-static ssize_t target_stat_lu_read_mbytes_show(struct config_item *item,
-		char *page)
-{
-	struct se_device *dev = to_stat_lu_dev(item);
+#define lu_show_per_cpu_stat(prefix, field, shift)			\
+per_cpu_stat_snprintf(se_dev_io_stats, prefix, field, shift);		\
+static ssize_t								\
+target_stat_##prefix##_show(struct config_item *item, char *page)	\
+{									\
+	struct se_device *dev = to_stat_lu_dev(item);			\
+									\
+	return per_cpu_stat_##prefix##_snprintf(dev->stats, page);	\
+}									\
 
-	/* scsiLuReadMegaBytes */
-	return snprintf(page, PAGE_SIZE, "%lu\n",
-			atomic_long_read(&dev->read_bytes) >> 20);
-}
-
-static ssize_t target_stat_lu_write_mbytes_show(struct config_item *item,
-		char *page)
-{
-	struct se_device *dev = to_stat_lu_dev(item);
-
-	/* scsiLuWrittenMegaBytes */
-	return snprintf(page, PAGE_SIZE, "%lu\n",
-			atomic_long_read(&dev->write_bytes) >> 20);
-}
+/* scsiLuNumCommands */
+lu_show_per_cpu_stat(lu_num_cmds, total_cmds, 0);
+/* scsiLuReadMegaBytes */
+lu_show_per_cpu_stat(lu_read_mbytes, read_bytes, 20);
+/* scsiLuWrittenMegaBytes */
+lu_show_per_cpu_stat(lu_write_mbytes, write_bytes, 20);
 
 static ssize_t target_stat_lu_resets_show(struct config_item *item, char *page)
 {
@@ -489,7 +459,7 @@ static ssize_t target_stat_port_indx_show(struct config_item *item, char *page)
 	rcu_read_lock();
 	dev = rcu_dereference(lun->lun_se_dev);
 	if (dev)
-		ret = snprintf(page, PAGE_SIZE, "%u\n", lun->lun_rtpi);
+		ret = snprintf(page, PAGE_SIZE, "%u\n", lun->lun_tpg->tpg_rtpi);
 	rcu_read_unlock();
 	return ret;
 }
@@ -595,7 +565,7 @@ static ssize_t target_stat_tgt_port_indx_show(struct config_item *item,
 	rcu_read_lock();
 	dev = rcu_dereference(lun->lun_se_dev);
 	if (dev)
-		ret = snprintf(page, PAGE_SIZE, "%u\n", lun->lun_rtpi);
+		ret = snprintf(page, PAGE_SIZE, "%u\n", lun->lun_tpg->tpg_rtpi);
 	rcu_read_unlock();
 	return ret;
 }
@@ -612,8 +582,8 @@ static ssize_t target_stat_tgt_port_name_show(struct config_item *item,
 	dev = rcu_dereference(lun->lun_se_dev);
 	if (dev)
 		ret = snprintf(page, PAGE_SIZE, "%sPort#%u\n",
-			tpg->se_tpg_tfo->get_fabric_name(),
-			lun->lun_rtpi);
+			tpg->se_tpg_tfo->fabric_name,
+			lun->lun_tpg->tpg_rtpi);
 	rcu_read_unlock();
 	return ret;
 }
@@ -636,53 +606,30 @@ static ssize_t target_stat_tgt_port_port_index_show(struct config_item *item,
 	return ret;
 }
 
-static ssize_t target_stat_tgt_port_in_cmds_show(struct config_item *item,
-		char *page)
-{
-	struct se_lun *lun = to_stat_tgt_port(item);
-	struct se_device *dev;
-	ssize_t ret = -ENODEV;
-
-	rcu_read_lock();
-	dev = rcu_dereference(lun->lun_se_dev);
-	if (dev)
-		ret = snprintf(page, PAGE_SIZE, "%lu\n",
-			       atomic_long_read(&lun->lun_stats.cmd_pdus));
-	rcu_read_unlock();
-	return ret;
+#define tgt_port_show_per_cpu_stat(prefix, field, shift)		\
+per_cpu_stat_snprintf(scsi_port_stats, prefix, field, shift);		\
+static ssize_t								\
+target_stat_##prefix##_show(struct config_item *item, char *page)	\
+{									\
+	struct se_lun *lun = to_stat_tgt_port(item);			\
+	struct se_device *dev;						\
+	int ret;							\
+									\
+	rcu_read_lock();						\
+	dev = rcu_dereference(lun->lun_se_dev);				\
+	if (!dev) {							\
+		rcu_read_unlock();					\
+		return -ENODEV;						\
+	}								\
+									\
+	ret = per_cpu_stat_##prefix##_snprintf(lun->lun_stats, page);	\
+	rcu_read_unlock();						\
+	return ret;							\
 }
 
-static ssize_t target_stat_tgt_port_write_mbytes_show(struct config_item *item,
-		char *page)
-{
-	struct se_lun *lun = to_stat_tgt_port(item);
-	struct se_device *dev;
-	ssize_t ret = -ENODEV;
-
-	rcu_read_lock();
-	dev = rcu_dereference(lun->lun_se_dev);
-	if (dev)
-		ret = snprintf(page, PAGE_SIZE, "%u\n",
-			(u32)(atomic_long_read(&lun->lun_stats.rx_data_octets) >> 20));
-	rcu_read_unlock();
-	return ret;
-}
-
-static ssize_t target_stat_tgt_port_read_mbytes_show(struct config_item *item,
-		char *page)
-{
-	struct se_lun *lun = to_stat_tgt_port(item);
-	struct se_device *dev;
-	ssize_t ret = -ENODEV;
-
-	rcu_read_lock();
-	dev = rcu_dereference(lun->lun_se_dev);
-	if (dev)
-		ret = snprintf(page, PAGE_SIZE, "%u\n",
-				(u32)(atomic_long_read(&lun->lun_stats.tx_data_octets) >> 20));
-	rcu_read_unlock();
-	return ret;
-}
+tgt_port_show_per_cpu_stat(tgt_port_in_cmds, cmd_pdus, 0);
+tgt_port_show_per_cpu_stat(tgt_port_write_mbytes, rx_data_octets, 20);
+tgt_port_show_per_cpu_stat(tgt_port_read_mbytes, tx_data_octets, 20);
 
 static ssize_t target_stat_tgt_port_hs_in_cmds_show(struct config_item *item,
 		char *page)
@@ -767,7 +714,7 @@ static ssize_t target_stat_transport_device_show(struct config_item *item,
 	if (dev) {
 		/* scsiTransportType */
 		ret = snprintf(page, PAGE_SIZE, "scsiTransport%s\n",
-			       tpg->se_tpg_tfo->get_fabric_name());
+			       tpg->se_tpg_tfo->fabric_name);
 	}
 	rcu_read_unlock();
 	return ret;
@@ -911,7 +858,6 @@ static ssize_t target_stat_auth_dev_show(struct config_item *item,
 	struct se_lun_acl *lacl = auth_to_lacl(item);
 	struct se_node_acl *nacl = lacl->se_lun_nacl;
 	struct se_dev_entry *deve;
-	struct se_lun *lun;
 	ssize_t ret;
 
 	rcu_read_lock();
@@ -920,9 +866,9 @@ static ssize_t target_stat_auth_dev_show(struct config_item *item,
 		rcu_read_unlock();
 		return -ENODEV;
 	}
-	lun = rcu_dereference(deve->se_lun);
+
 	/* scsiDeviceIndex */
-	ret = snprintf(page, PAGE_SIZE, "%u\n", lun->lun_index);
+	ret = snprintf(page, PAGE_SIZE, "%u\n", deve->se_lun->lun_index);
 	rcu_read_unlock();
 	return ret;
 }
@@ -1049,68 +995,34 @@ static ssize_t target_stat_auth_att_count_show(struct config_item *item,
 	return ret;
 }
 
-static ssize_t target_stat_auth_num_cmds_show(struct config_item *item,
-		char *page)
-{
-	struct se_lun_acl *lacl = auth_to_lacl(item);
-	struct se_node_acl *nacl = lacl->se_lun_nacl;
-	struct se_dev_entry *deve;
-	ssize_t ret;
-
-	rcu_read_lock();
-	deve = target_nacl_find_deve(nacl, lacl->mapped_lun);
-	if (!deve) {
-		rcu_read_unlock();
-		return -ENODEV;
-	}
-	/* scsiAuthIntrOutCommands */
-	ret = snprintf(page, PAGE_SIZE, "%lu\n",
-		       atomic_long_read(&deve->total_cmds));
-	rcu_read_unlock();
-	return ret;
+#define auth_show_per_cpu_stat(prefix, field, shift)			\
+per_cpu_stat_snprintf(se_dev_entry_io_stats, prefix, field, shift);	\
+static ssize_t								\
+target_stat_##prefix##_show(struct config_item *item, char *page)	\
+{									\
+	struct se_lun_acl *lacl = auth_to_lacl(item);			\
+	struct se_node_acl *nacl = lacl->se_lun_nacl;			\
+	struct se_dev_entry *deve;					\
+	int ret;							\
+									\
+	rcu_read_lock();						\
+	deve = target_nacl_find_deve(nacl, lacl->mapped_lun);		\
+	if (!deve) {							\
+		rcu_read_unlock();					\
+		return -ENODEV;						\
+	}								\
+									\
+	ret = per_cpu_stat_##prefix##_snprintf(deve->stats, page);	\
+	rcu_read_unlock();						\
+	return ret;							\
 }
 
-static ssize_t target_stat_auth_read_mbytes_show(struct config_item *item,
-		char *page)
-{
-	struct se_lun_acl *lacl = auth_to_lacl(item);
-	struct se_node_acl *nacl = lacl->se_lun_nacl;
-	struct se_dev_entry *deve;
-	ssize_t ret;
-
-	rcu_read_lock();
-	deve = target_nacl_find_deve(nacl, lacl->mapped_lun);
-	if (!deve) {
-		rcu_read_unlock();
-		return -ENODEV;
-	}
-	/* scsiAuthIntrReadMegaBytes */
-	ret = snprintf(page, PAGE_SIZE, "%u\n",
-		      (u32)(atomic_long_read(&deve->read_bytes) >> 20));
-	rcu_read_unlock();
-	return ret;
-}
-
-static ssize_t target_stat_auth_write_mbytes_show(struct config_item *item,
-		char *page)
-{
-	struct se_lun_acl *lacl = auth_to_lacl(item);
-	struct se_node_acl *nacl = lacl->se_lun_nacl;
-	struct se_dev_entry *deve;
-	ssize_t ret;
-
-	rcu_read_lock();
-	deve = target_nacl_find_deve(nacl, lacl->mapped_lun);
-	if (!deve) {
-		rcu_read_unlock();
-		return -ENODEV;
-	}
-	/* scsiAuthIntrWrittenMegaBytes */
-	ret = snprintf(page, PAGE_SIZE, "%u\n",
-		      (u32)(atomic_long_read(&deve->write_bytes) >> 20));
-	rcu_read_unlock();
-	return ret;
-}
+/* scsiAuthIntrOutCommands */
+auth_show_per_cpu_stat(auth_num_cmds, total_cmds, 0);
+/* scsiAuthIntrReadMegaBytes */
+auth_show_per_cpu_stat(auth_read_mbytes, read_bytes, 20);
+/* scsiAuthIntrWrittenMegaBytes */
+auth_show_per_cpu_stat(auth_write_mbytes, write_bytes, 20);
 
 static ssize_t target_stat_auth_hs_num_cmds_show(struct config_item *item,
 		char *page)
@@ -1251,7 +1163,6 @@ static ssize_t target_stat_iport_dev_show(struct config_item *item,
 	struct se_lun_acl *lacl = iport_to_lacl(item);
 	struct se_node_acl *nacl = lacl->se_lun_nacl;
 	struct se_dev_entry *deve;
-	struct se_lun *lun;
 	ssize_t ret;
 
 	rcu_read_lock();
@@ -1260,9 +1171,9 @@ static ssize_t target_stat_iport_dev_show(struct config_item *item,
 		rcu_read_unlock();
 		return -ENODEV;
 	}
-	lun = rcu_dereference(deve->se_lun);
+
 	/* scsiDeviceIndex */
-	ret = snprintf(page, PAGE_SIZE, "%u\n", lun->lun_index);
+	ret = snprintf(page, PAGE_SIZE, "%u\n", deve->se_lun->lun_index);
 	rcu_read_unlock();
 	return ret;
 }

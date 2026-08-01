@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*********************************************************************
  *
  * msnd.h
@@ -9,20 +10,6 @@
  *
  * Copyright (C) 1998 Andrew Veliath
  * Copyright (C) 1993 Turtle Beach Systems, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *
  ********************************************************************/
 #ifndef __MSND_H
@@ -229,7 +216,6 @@ struct snd_msnd {
 	int			captureLimit;
 	int			capturePeriods;
 	struct snd_card		*card;
-	void			*msndmidi_mpu;
 	struct snd_rawmidi	*rmidi;
 
 	/* Hardware resources */
@@ -267,6 +253,8 @@ struct snd_msnd {
 	spinlock_t mixer_lock;
 	int nresets;
 	unsigned recsrc;
+	u8 pm_recsrc;
+	bool pm_mpu_input;
 #define LEVEL_ENTRIES 32
 	int left_levels[LEVEL_ENTRIES];
 	int right_levels[LEVEL_ENTRIES];
@@ -283,7 +271,7 @@ struct snd_msnd {
 
 };
 
-void snd_msnd_init_queue(void *base, int start, int size);
+void snd_msnd_init_queue(void __iomem *base, int start, int size);
 
 int snd_msnd_send_dsp_cmd(struct snd_msnd *chip, u8 cmd);
 int snd_msnd_send_word(struct snd_msnd *chip,
@@ -294,13 +282,11 @@ int snd_msnd_upload_host(struct snd_msnd *chip,
 			     const u8 *bin, int len);
 int snd_msnd_enable_irq(struct snd_msnd *chip);
 int snd_msnd_disable_irq(struct snd_msnd *chip);
+int snd_msnd_force_irq(struct snd_msnd *chip, bool enable);
 void snd_msnd_dsp_halt(struct snd_msnd *chip, struct file *file);
 int snd_msnd_DAPQ(struct snd_msnd *chip, int start);
 int snd_msnd_DARQ(struct snd_msnd *chip, int start);
 int snd_msnd_pcm(struct snd_card *card, int device);
-
-int snd_msndmidi_new(struct snd_card *card, int device);
-void snd_msndmidi_input_read(void *mpu);
 
 void snd_msndmix_setup(struct snd_msnd *chip);
 int snd_msndmix_new(struct snd_card *card);

@@ -33,7 +33,6 @@
 #include <linux/ioport.h>
 #include <linux/profile.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
 
 #include <asm/mc146818rtc.h>
@@ -256,6 +255,7 @@ static void mostek_write_byte(struct device *dev, u32 ofs, u8 val)
 static struct m48t59_plat_data m48t59_data = {
 	.read_byte = mostek_read_byte,
 	.write_byte = mostek_write_byte,
+	.yy_offset = 68,
 };
 
 /* resource is set at runtime */
@@ -277,7 +277,7 @@ static int clock_probe(struct platform_device *op)
 		return -ENODEV;
 
 	/* Only the primary RTC has an address property */
-	if (!of_find_property(dp, "address", NULL))
+	if (!of_property_present(dp, "address"))
 		return -ENODEV;
 
 	m48t59_rtc.resource = &op->resource[0];

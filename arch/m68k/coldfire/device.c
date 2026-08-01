@@ -14,11 +14,15 @@
 #include <linux/spi/spi.h>
 #include <linux/gpio.h>
 #include <linux/fec.h>
+#include <linux/dmaengine.h>
 #include <asm/traps.h>
 #include <asm/coldfire.h>
 #include <asm/mcfsim.h>
 #include <asm/mcfuart.h>
 #include <asm/mcfqspi.h>
+#include <linux/platform_data/edma.h>
+#include <linux/platform_data/dma-mcf-edma.h>
+#include <linux/platform_data/mmc-esdhc-mcf.h>
 
 /*
  *	All current ColdFire parts contain from 2, 3, 4 or 10 UARTS.
@@ -89,7 +93,7 @@ static struct platform_device mcf_uart = {
 	.dev.platform_data	= mcf_uart_platform_data,
 };
 
-#if IS_ENABLED(CONFIG_FEC)
+#ifdef MCFFEC_BASE0
 
 #ifdef CONFIG_M5441x
 #define FEC_NAME	"enet-fec"
@@ -141,6 +145,7 @@ static struct platform_device mcf_fec0 = {
 		.platform_data		= FEC_PDATA,
 	}
 };
+#endif /* MCFFEC_BASE0 */
 
 #ifdef MCFFEC_BASE1
 static struct resource mcf_fec1_resources[] = {
@@ -178,7 +183,6 @@ static struct platform_device mcf_fec1 = {
 	}
 };
 #endif /* MCFFEC_BASE1 */
-#endif /* CONFIG_FEC */
 
 #if IS_ENABLED(CONFIG_SPI_COLDFIRE_QSPI)
 /*
@@ -476,13 +480,155 @@ static struct platform_device mcf_i2c5 = {
 #endif /* MCFI2C_BASE5 */
 #endif /* IS_ENABLED(CONFIG_I2C_IMX) */
 
+#ifdef MCFEDMA_BASE
+
+static const struct dma_slave_map mcf_edma_map[] = {
+	{ "dreq0", "rx-tx", MCF_EDMA_FILTER_PARAM(0) },
+	{ "dreq1", "rx-tx", MCF_EDMA_FILTER_PARAM(1) },
+	{ "uart.0", "rx", MCF_EDMA_FILTER_PARAM(2) },
+	{ "uart.0", "tx", MCF_EDMA_FILTER_PARAM(3) },
+	{ "uart.1", "rx", MCF_EDMA_FILTER_PARAM(4) },
+	{ "uart.1", "tx", MCF_EDMA_FILTER_PARAM(5) },
+	{ "uart.2", "rx", MCF_EDMA_FILTER_PARAM(6) },
+	{ "uart.2", "tx", MCF_EDMA_FILTER_PARAM(7) },
+	{ "timer0", "rx-tx", MCF_EDMA_FILTER_PARAM(8) },
+	{ "timer1", "rx-tx", MCF_EDMA_FILTER_PARAM(9) },
+	{ "timer2", "rx-tx", MCF_EDMA_FILTER_PARAM(10) },
+	{ "timer3", "rx-tx", MCF_EDMA_FILTER_PARAM(11) },
+	{ "fsl-dspi.0", "rx", MCF_EDMA_FILTER_PARAM(12) },
+	{ "fsl-dspi.0", "tx", MCF_EDMA_FILTER_PARAM(13) },
+	{ "fsl-dspi.1", "rx", MCF_EDMA_FILTER_PARAM(14) },
+	{ "fsl-dspi.1", "tx", MCF_EDMA_FILTER_PARAM(15) },
+};
+
+static struct mcf_edma_platform_data mcf_edma_data = {
+	.dma_channels		= 64,
+	.slave_map		= mcf_edma_map,
+	.slavecnt		= ARRAY_SIZE(mcf_edma_map),
+};
+
+static struct resource mcf_edma_resources[] = {
+	{
+		.start		= MCFEDMA_BASE,
+		.end		= MCFEDMA_BASE + MCFEDMA_SIZE - 1,
+		.flags		= IORESOURCE_MEM,
+	},
+	{
+		.start		= MCFEDMA_IRQ_INTR0,
+		.end		= MCFEDMA_IRQ_INTR0 + 15,
+		.flags		= IORESOURCE_IRQ,
+		.name		= "edma-tx-00-15",
+	},
+	{
+		.start		= MCFEDMA_IRQ_INTR16,
+		.end		= MCFEDMA_IRQ_INTR16 + 39,
+		.flags		= IORESOURCE_IRQ,
+		.name		= "edma-tx-16-55",
+	},
+	{
+		.start		= MCFEDMA_IRQ_INTR56,
+		.end		= MCFEDMA_IRQ_INTR56,
+		.flags		= IORESOURCE_IRQ,
+		.name		= "edma-tx-56-63",
+	},
+	{
+		.start		= MCFEDMA_IRQ_ERR,
+		.end		= MCFEDMA_IRQ_ERR,
+		.flags		= IORESOURCE_IRQ,
+		.name		= "edma-err",
+	},
+};
+
+static u64 mcf_edma_dmamask = DMA_BIT_MASK(32);
+
+static struct platform_device mcf_edma = {
+	.name			= "mcf-edma",
+	.id			= 0,
+	.num_resources		= ARRAY_SIZE(mcf_edma_resources),
+	.resource		= mcf_edma_resources,
+	.dev = {
+		.dma_mask = &mcf_edma_dmamask,
+		.coherent_dma_mask = DMA_BIT_MASK(32),
+		.platform_data = &mcf_edma_data,
+	}
+};
+#endif /* MCFEDMA_BASE */
+
+#ifdef MCFSDHC_BASE
+static struct mcf_esdhc_platform_data mcf_esdhc_data = {
+	.max_bus_width = 4,
+	.cd_type = ESDHC_CD_NONE,
+};
+
+static struct resource mcf_esdhc_resources[] = {
+	{
+		.start = MCFSDHC_BASE,
+		.end = MCFSDHC_BASE + MCFSDHC_SIZE - 1,
+		.flags = IORESOURCE_MEM,
+	}, {
+		.start = MCF_IRQ_SDHC,
+		.end = MCF_IRQ_SDHC,
+		.flags = IORESOURCE_IRQ,
+	},
+};
+
+static struct platform_device mcf_esdhc = {
+	.name			= "sdhci-esdhc-mcf",
+	.id			= 0,
+	.num_resources		= ARRAY_SIZE(mcf_esdhc_resources),
+	.resource		= mcf_esdhc_resources,
+	.dev.platform_data	= &mcf_esdhc_data,
+};
+#endif /* MCFSDHC_BASE */
+
+#ifdef MCFFLEXCAN_SIZE
+
+#include <linux/can/platform/flexcan.h>
+
+static struct flexcan_platform_data mcf5441x_flexcan_info = {
+	.clk_src = 1,
+	.clock_frequency = 120000000,
+};
+
+static struct resource mcf5441x_flexcan0_resource[] = {
+	{
+		.start = MCFFLEXCAN_BASE0,
+		.end = MCFFLEXCAN_BASE0 + MCFFLEXCAN_SIZE,
+		.flags = IORESOURCE_MEM,
+	},
+	{
+		.start = MCF_IRQ_IFL0,
+		.end = MCF_IRQ_IFL0,
+		.flags = IORESOURCE_IRQ,
+	},
+	{
+		.start = MCF_IRQ_BOFF0,
+		.end = MCF_IRQ_BOFF0,
+		.flags = IORESOURCE_IRQ,
+	},
+	{
+		.start = MCF_IRQ_ERR0,
+		.end = MCF_IRQ_ERR0,
+		.flags = IORESOURCE_IRQ,
+	},
+};
+
+static struct platform_device mcf_flexcan0 = {
+	.name = "flexcan-mcf5441x",
+	.id = 0,
+	.num_resources = ARRAY_SIZE(mcf5441x_flexcan0_resource),
+	.resource = mcf5441x_flexcan0_resource,
+	.dev.platform_data = &mcf5441x_flexcan_info,
+};
+#endif /* MCFFLEXCAN_SIZE */
+
 static struct platform_device *mcf_devices[] __initdata = {
 	&mcf_uart,
-#if IS_ENABLED(CONFIG_FEC)
+#ifdef MCFFEC_BASE0
 	&mcf_fec0,
+#endif
 #ifdef MCFFEC_BASE1
 	&mcf_fec1,
-#endif
 #endif
 #if IS_ENABLED(CONFIG_SPI_COLDFIRE_QSPI)
 	&mcf_qspi,
@@ -505,6 +651,15 @@ static struct platform_device *mcf_devices[] __initdata = {
 	&mcf_i2c5,
 #endif
 #endif
+#ifdef MCFEDMA_BASE
+	&mcf_edma,
+#endif
+#ifdef MCFSDHC_BASE
+	&mcf_esdhc,
+#endif
+#ifdef MCFFLEXCAN_SIZE
+	&mcf_flexcan0,
+#endif
 };
 
 /*
@@ -514,13 +669,13 @@ static void __init mcf_uart_set_irq(void)
 {
 #ifdef MCFUART_UIVR
 	/* UART0 interrupt setup */
-	writeb(MCFSIM_ICR_LEVEL6 | MCFSIM_ICR_PRI1, MCFSIM_UART1ICR);
-	writeb(MCF_IRQ_UART0, MCFUART_BASE0 + MCFUART_UIVR);
+	mcf_write8(MCFSIM_ICR_LEVEL6 | MCFSIM_ICR_PRI1, MCFSIM_UART1ICR);
+	mcf_write8(MCF_IRQ_UART0, MCFUART_BASE0 + MCFUART_UIVR);
 	mcf_mapirq2imr(MCF_IRQ_UART0, MCFINTC_UART0);
 
 	/* UART1 interrupt setup */
-	writeb(MCFSIM_ICR_LEVEL6 | MCFSIM_ICR_PRI2, MCFSIM_UART2ICR);
-	writeb(MCF_IRQ_UART1, MCFUART_BASE1 + MCFUART_UIVR);
+	mcf_write8(MCFSIM_ICR_LEVEL6 | MCFSIM_ICR_PRI2, MCFSIM_UART2ICR);
+	mcf_write8(MCF_IRQ_UART1, MCFUART_BASE1 + MCFUART_UIVR);
 	mcf_mapirq2imr(MCF_IRQ_UART1, MCFINTC_UART1);
 #endif
 }
@@ -533,4 +688,3 @@ static int __init mcf_init_devices(void)
 }
 
 arch_initcall(mcf_init_devices);
-

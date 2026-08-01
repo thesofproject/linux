@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * net/sched/em_u32.c	U32 Ematch
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Thomas Graf <tgraf@suug.ch>
  *		Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
@@ -56,6 +52,7 @@ static void __exit exit_em_u32(void)
 	tcf_em_unregister(&em_u32_ops);
 }
 
+MODULE_DESCRIPTION("ematch skb classifier using 32 bit chunks of data");
 MODULE_LICENSE("GPL");
 
 module_init(init_em_u32);

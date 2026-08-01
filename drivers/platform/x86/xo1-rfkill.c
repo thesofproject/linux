@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Support for rfkill through the OLPC XO-1 laptop embedded controller
  *
  * Copyright (C) 2010 One Laptop per Child
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/module.h>
@@ -60,12 +56,11 @@ static int xo1_rfkill_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int xo1_rfkill_remove(struct platform_device *pdev)
+static void xo1_rfkill_remove(struct platform_device *pdev)
 {
 	struct rfkill *rfk = platform_get_drvdata(pdev);
 	rfkill_unregister(rfk);
 	rfkill_destroy(rfk);
-	return 0;
 }
 
 static struct platform_driver xo1_rfkill_driver = {
@@ -79,5 +74,6 @@ static struct platform_driver xo1_rfkill_driver = {
 module_platform_driver(xo1_rfkill_driver);
 
 MODULE_AUTHOR("Daniel Drake <dsd@laptop.org>");
+MODULE_DESCRIPTION("OLPC XO-1 software RF kill switch");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:xo1-rfkill");

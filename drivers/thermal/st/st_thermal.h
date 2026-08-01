@@ -1,13 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * ST Thermal Sensor Driver for STi series of SoCs
  * Author: Ajit Pal Singh <ajitpal.singh@st.com>
  *
  * Copyright (C) 2003-2014 STMicroelectronics (R&D) Limited
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __STI_THERMAL_SYSCFG_H
@@ -42,10 +38,10 @@ struct st_thermal_sensor;
  *
  * @power_ctrl:		Function for powering on/off a sensor. Clock to the
  *			sensor is also controlled from this function.
- * @alloc_regfields: 	Allocate regmap register fields, specific to a sensor.
- * @do_memmap_regmap: 	Memory map the thermal register space and init regmap
+ * @alloc_regfields:	Allocate regmap register fields, specific to a sensor.
+ * @do_memmap_regmap:	Memory map the thermal register space and init regmap
  *			instance or find regmap instance.
- * @register_irq: 	Register an interrupt handler for a sensor.
+ * @register_irq:	Register an interrupt handler for a sensor.
  */
 struct st_thermal_sensor_ops {
 	int (*power_ctrl)(struct st_thermal_sensor *, enum st_thermal_power_state);
@@ -60,15 +56,15 @@ struct st_thermal_sensor_ops {
  *
  * @reg_fields:		Pointer to the regfields array for a sensor.
  * @sys_compat:		Pointer to the syscon node compatible string.
- * @ops: 		Pointer to private thermal ops for a sensor.
- * @calibration_val: 	Default calibration value to be written to the DCORRECT
+ * @ops:		Pointer to private thermal ops for a sensor.
+ * @calibration_val:	Default calibration value to be written to the DCORRECT
  *			register field for a sensor.
- * @temp_adjust_val: 	Value to be added/subtracted from the data read from
+ * @temp_adjust_val:	Value to be added/subtracted from the data read from
  *			the sensor. If value needs to be added please provide a
  *			positive value and if it is to be subtracted please
- * 			provide a negative value.
- * @crit_temp: 		The temperature beyond which the SoC should be shutdown
- * 			to prevent damage.
+ *			provide a negative value.
+ * @crit_temp:		The temperature beyond which the SoC should be shutdown
+ *			to prevent damage.
  */
 struct st_thermal_compat_data {
 	char *sys_compat;
@@ -98,7 +94,7 @@ struct st_thermal_sensor {
 
 extern int st_thermal_register(struct platform_device *pdev,
 			       const struct of_device_id *st_thermal_of_match);
-extern int st_thermal_unregister(struct platform_device *pdev);
+extern void st_thermal_unregister(struct platform_device *pdev);
 extern const struct dev_pm_ops st_thermal_pm_ops;
 
 #endif /* __STI_RESET_SYSCFG_H */

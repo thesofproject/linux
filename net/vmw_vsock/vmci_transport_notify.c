@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * VMware vSockets Driver
  *
  * Copyright (C) 2009-2013 VMware, Inc. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation version 2 and no later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #include <linux/types.h>
@@ -315,7 +307,7 @@ vmci_transport_handle_wrote(struct sock *sk,
 	struct vsock_sock *vsk = vsock_sk(sk);
 	PKT_FIELD(vsk, sent_waiting_read) = false;
 #endif
-	sk->sk_data_ready(sk);
+	vsock_data_ready(sk);
 }
 
 static void vmci_transport_notify_pkt_socket_init(struct sock *sk)
@@ -348,12 +340,12 @@ vmci_transport_notify_pkt_poll_in(struct sock *sk,
 {
 	struct vsock_sock *vsk = vsock_sk(sk);
 
-	if (vsock_stream_has_data(vsk)) {
+	if (vsock_stream_has_data(vsk) >= target) {
 		*data_ready_now = true;
 	} else {
-		/* We can't read right now because there is nothing in the
-		 * queue. Ask for notifications when there is something to
-		 * read.
+		/* We can't read right now because there is not enough data
+		 * in the queue. Ask for notifications when there is something
+		 * to read.
 		 */
 		if (sk->sk_state == TCP_ESTABLISHED) {
 			if (!send_waiting_read(sk, 1))

@@ -1,43 +1,26 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *    Filename: cfag12864bfb.c
  *     Version: 0.1.0
  * Description: cfag12864b LCD framebuffer driver
- *     License: GPLv2
  *     Depends: cfag12864b
  *
- *      Author: Copyright (C) Miguel Ojeda Sandonis
+ *      Author: Copyright (C) Miguel Ojeda <ojeda@kernel.org>
  *        Date: 2006-10-31
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
  */
 
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/fb.h>
 #include <linux/mm.h>
 #include <linux/platform_device.h>
-#include <linux/string.h>
-#include <linux/uaccess.h>
 #include <linux/cfag12864b.h>
 
 #define CFAG12864BFB_NAME "cfag12864bfb"
 
-static struct fb_fix_screeninfo cfag12864bfb_fix = {
+static const struct fb_fix_screeninfo cfag12864bfb_fix = {
 	.id = "cfag12864b",
 	.type = FB_TYPE_PACKED_PIXELS,
 	.visual = FB_VISUAL_MONO10,
@@ -48,15 +31,15 @@ static struct fb_fix_screeninfo cfag12864bfb_fix = {
 	.accel = FB_ACCEL_NONE,
 };
 
-static struct fb_var_screeninfo cfag12864bfb_var = {
+static const struct fb_var_screeninfo cfag12864bfb_var = {
 	.xres = CFAG12864B_WIDTH,
 	.yres = CFAG12864B_HEIGHT,
 	.xres_virtual = CFAG12864B_WIDTH,
 	.yres_virtual = CFAG12864B_HEIGHT,
 	.bits_per_pixel = 1,
 	.red = { 0, 1, 0 },
-      	.green = { 0, 1, 0 },
-      	.blue = { 0, 1, 0 },
+	.green = { 0, 1, 0 },
+	.blue = { 0, 1, 0 },
 	.left_margin = 0,
 	.right_margin = 0,
 	.upper_margin = 0,
@@ -66,36 +49,36 @@ static struct fb_var_screeninfo cfag12864bfb_var = {
 
 static int cfag12864bfb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 {
-	return vm_insert_page(vma, vma->vm_start,
-		virt_to_page(cfag12864b_buffer));
+	struct page *pages = virt_to_page(cfag12864b_buffer);
+
+	vma->vm_page_prot = pgprot_decrypted(vma->vm_page_prot);
+
+	return vm_map_pages_zero(vma, &pages, 1);
 }
 
-static struct fb_ops cfag12864bfb_ops = {
+static const struct fb_ops cfag12864bfb_ops = {
 	.owner = THIS_MODULE,
-	.fb_read = fb_sys_read,
-	.fb_write = fb_sys_write,
-	.fb_fillrect = sys_fillrect,
-	.fb_copyarea = sys_copyarea,
-	.fb_imageblit = sys_imageblit,
+	__FB_DEFAULT_SYSMEM_OPS_RDWR,
+	__FB_DEFAULT_SYSMEM_OPS_DRAW,
 	.fb_mmap = cfag12864bfb_mmap,
 };
 
 static int cfag12864bfb_probe(struct platform_device *device)
 {
 	int ret = -EINVAL;
- 	struct fb_info *info = framebuffer_alloc(0, &device->dev);
+	struct fb_info *info = framebuffer_alloc(0, &device->dev);
 
 	if (!info)
 		goto none;
 
-	info->screen_base = (char __iomem *) cfag12864b_buffer;
+	info->flags = FBINFO_VIRTFB;
+	info->screen_buffer = cfag12864b_buffer;
 	info->screen_size = CFAG12864B_SIZE;
 	info->fbops = &cfag12864bfb_ops;
 	info->fix = cfag12864bfb_fix;
 	info->var = cfag12864bfb_var;
 	info->pseudo_palette = NULL;
 	info->par = NULL;
-	info->flags = FBINFO_FLAG_DEFAULT;
 
 	if (register_framebuffer(info) < 0)
 		goto fballoced;
@@ -113,7 +96,7 @@ none:
 	return ret;
 }
 
-static int cfag12864bfb_remove(struct platform_device *device)
+static void cfag12864bfb_remove(struct platform_device *device)
 {
 	struct fb_info *info = platform_get_drvdata(device);
 
@@ -121,8 +104,6 @@ static int cfag12864bfb_remove(struct platform_device *device)
 		unregister_framebuffer(info);
 		framebuffer_release(info);
 	}
-
-	return 0;
 }
 
 static struct platform_driver cfag12864bfb_driver = {
@@ -184,5 +165,5 @@ module_init(cfag12864bfb_init);
 module_exit(cfag12864bfb_exit);
 
 MODULE_LICENSE("GPL v2");
-MODULE_AUTHOR("Miguel Ojeda Sandonis <miguel.ojeda.sandonis@gmail.com>");
+MODULE_AUTHOR("Miguel Ojeda <ojeda@kernel.org>");
 MODULE_DESCRIPTION("cfag12864b LCD framebuffer driver");

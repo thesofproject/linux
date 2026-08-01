@@ -1,9 +1,6 @@
-/**
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
  * Copyright (C) 2008, Creative Technology Ltd. All Rights Reserved.
- *
- * This source file is released under GPL v2 license (no other versions).
- * See the COPYING file included in the main directory of this source
- * distribution for the license terms and conditions.
  *
  * @File	ctsrc.h
  *
@@ -13,7 +10,6 @@
  *
  * @Author	Liu Chun
  * @Date 	May 13 2008
- *
  */
 
 #ifndef CTSRC_H
@@ -107,10 +103,10 @@ struct srcimp_rsc_ops;
 struct srcimp {
 	struct rsc rsc;
 	unsigned char idx[8];
-	struct imapper *imappers;
 	unsigned int mapped; /* A bit-map indicating which conj rsc is mapped */
 	struct srcimp_mgr *mgr;
 	const struct srcimp_rsc_ops *ops;
+	struct imapper imappers[];
 };
 
 struct srcimp_rsc_ops {
@@ -143,10 +139,10 @@ struct srcimp_mgr {
 };
 
 /* Constructor and destructor of SRC resource manager */
-int src_mgr_create(struct hw *hw, struct src_mgr **rsrc_mgr);
-int src_mgr_destroy(struct src_mgr *src_mgr);
+int src_mgr_create(struct hw *hw, void **ptr);
+int src_mgr_destroy(void *ptr);
 /* Constructor and destructor of SRCIMP resource manager */
-int srcimp_mgr_create(struct hw *hw, struct srcimp_mgr **rsrc_mgr);
-int srcimp_mgr_destroy(struct srcimp_mgr *srcimp_mgr);
+int srcimp_mgr_create(struct hw *hw, void **ptr);
+int srcimp_mgr_destroy(void *ptr);
 
 #endif /* CTSRC_H */

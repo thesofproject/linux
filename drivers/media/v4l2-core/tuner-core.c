@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * i2c tv tuner chip device driver
  * core core, i.e. kernel interfaces, registering and so on
@@ -34,7 +35,7 @@
 #include "tda8290.h"
 #include "tea5761.h"
 #include "tea5767.h"
-#include "tuner-xc2028.h"
+#include "xc2028.h"
 #include "tuner-simple.h"
 #include "tda9887.h"
 #include "xc5000.h"
@@ -94,8 +95,55 @@ static const struct v4l2_subdev_ops tuner_ops;
 } while (0)
 
 /*
- * Internal struct used inside the driver
+ * Internal enums/struct used inside the driver
  */
+
+/**
+ * enum tuner_pad_index - tuner pad index for MEDIA_ENT_F_TUNER
+ *
+ * @TUNER_PAD_RF_INPUT:
+ *	Radiofrequency (RF) sink pad, usually linked to a RF connector entity.
+ * @TUNER_PAD_OUTPUT:
+ *	tuner video output source pad. Contains the video chrominance
+ *	and luminance or the hole bandwidth of the signal converted to
+ *	an Intermediate Frequency (IF) or to baseband (on zero-IF tuners).
+ * @TUNER_PAD_AUD_OUT:
+ *	Tuner audio output source pad. Tuners used to decode analog TV
+ *	signals have an extra pad for audio output. Old tuners use an
+ *	analog stage with a saw filter for the audio IF frequency. The
+ *	output of the pad is, in this case, the audio IF, with should be
+ *	decoded either by the bridge chipset (that's the case of cx2388x
+ *	chipsets) or may require an external IF sound processor, like
+ *	msp34xx. On modern silicon tuners, the audio IF decoder is usually
+ *	incorporated at the tuner. On such case, the output of this pad
+ *	is an audio sampled data.
+ * @TUNER_NUM_PADS:
+ *	Number of pads of the tuner.
+ */
+enum tuner_pad_index {
+	TUNER_PAD_RF_INPUT,
+	TUNER_PAD_OUTPUT,
+	TUNER_PAD_AUD_OUT,
+	TUNER_NUM_PADS
+};
+
+/**
+ * enum if_vid_dec_pad_index - video IF-PLL pad index
+ *	for MEDIA_ENT_F_IF_VID_DECODER
+ *
+ * @IF_VID_DEC_PAD_IF_INPUT:
+ *	video Intermediate Frequency (IF) sink pad
+ * @IF_VID_DEC_PAD_OUT:
+ *	IF-PLL video output source pad. Contains the video chrominance
+ *	and luminance IF signals.
+ * @IF_VID_DEC_PAD_NUM_PADS:
+ *	Number of pads of the video IF-PLL.
+ */
+enum if_vid_dec_pad_index {
+	IF_VID_DEC_PAD_IF_INPUT,
+	IF_VID_DEC_PAD_OUT,
+	IF_VID_DEC_PAD_NUM_PADS
+};
 
 struct tuner {
 	/* device */
@@ -566,7 +614,6 @@ static void tuner_lookup(struct i2c_adapter *adap,
  *tuner_probe - Probes the existing tuners on an I2C bus
  *
  * @client:	i2c_client descriptor
- * @id:		not used
  *
  * This routine probes for tuners at the expected I2C addresses. On most
  * cases, if a device answers to a given I2C address, it assumes that the
@@ -577,8 +624,7 @@ static void tuner_lookup(struct i2c_adapter *adap,
  * During client attach, set_type is called by adapter's attach_inform callback.
  * set_type must then be completed by tuner_probe.
  */
-static int tuner_probe(struct i2c_client *client,
-		       const struct i2c_device_id *id)
+static int tuner_probe(struct i2c_client *client)
 {
 	struct tuner *t;
 	struct tuner *radio;
@@ -587,7 +633,7 @@ static int tuner_probe(struct i2c_client *client,
 	int ret;
 #endif
 
-	t = kzalloc(sizeof(struct tuner), GFP_KERNEL);
+	t = kzalloc_obj(struct tuner);
 	if (NULL == t)
 		return -ENOMEM;
 	v4l2_i2c_subdev_init(&t->sd, client, &tuner_ops);
@@ -685,15 +731,20 @@ register_client:
 	 */
 	if (t->type == TUNER_TDA9887) {
 		t->pad[IF_VID_DEC_PAD_IF_INPUT].flags = MEDIA_PAD_FL_SINK;
+		t->pad[IF_VID_DEC_PAD_IF_INPUT].sig_type = PAD_SIGNAL_ANALOG;
 		t->pad[IF_VID_DEC_PAD_OUT].flags = MEDIA_PAD_FL_SOURCE;
+		t->pad[IF_VID_DEC_PAD_OUT].sig_type = PAD_SIGNAL_ANALOG;
 		ret = media_entity_pads_init(&t->sd.entity,
 					     IF_VID_DEC_PAD_NUM_PADS,
 					     &t->pad[0]);
 		t->sd.entity.function = MEDIA_ENT_F_IF_VID_DECODER;
 	} else {
 		t->pad[TUNER_PAD_RF_INPUT].flags = MEDIA_PAD_FL_SINK;
+		t->pad[TUNER_PAD_RF_INPUT].sig_type = PAD_SIGNAL_ANALOG;
 		t->pad[TUNER_PAD_OUTPUT].flags = MEDIA_PAD_FL_SOURCE;
+		t->pad[TUNER_PAD_OUTPUT].sig_type = PAD_SIGNAL_ANALOG;
 		t->pad[TUNER_PAD_AUD_OUT].flags = MEDIA_PAD_FL_SOURCE;
+		t->pad[TUNER_PAD_AUD_OUT].sig_type = PAD_SIGNAL_AUDIO;
 		ret = media_entity_pads_init(&t->sd.entity, TUNER_NUM_PADS,
 					     &t->pad[0]);
 		t->sd.entity.function = MEDIA_ENT_F_TUNER;
@@ -726,7 +777,7 @@ register_client:
  * @client:	i2c_client descriptor
  */
 
-static int tuner_remove(struct i2c_client *client)
+static void tuner_remove(struct i2c_client *client)
 {
 	struct tuner *t = to_tuner(i2c_get_clientdata(client));
 
@@ -736,7 +787,6 @@ static int tuner_remove(struct i2c_client *client)
 
 	list_del(&t->list);
 	kfree(t);
-	return 0;
 }
 
 /*
@@ -1065,7 +1115,7 @@ static void tuner_status(struct dvb_frontend *fe)
 	if (t->mode != V4L2_TUNER_RADIO)
 		return;
 	if (fe_tuner_ops->get_status) {
-		u32 tuner_status;
+		u32 tuner_status = 0;
 
 		fe_tuner_ops->get_status(&t->fe, &tuner_status);
 		if (tuner_status & TUNER_STATUS_LOCKED)
@@ -1205,7 +1255,7 @@ static int tuner_g_tuner(struct v4l2_subdev *sd, struct v4l2_tuner *vt)
 	if (vt->type == t->mode) {
 		vt->rxsubchans = V4L2_TUNER_SUB_MONO | V4L2_TUNER_SUB_STEREO;
 		if (fe_tuner_ops->get_status) {
-			u32 tuner_status;
+			u32 tuner_status = 0;
 
 			fe_tuner_ops->get_status(&t->fe, &tuner_status);
 			vt->rxsubchans =
@@ -1351,7 +1401,7 @@ static const struct dev_pm_ops tuner_pm_ops = {
 };
 
 static const struct i2c_device_id tuner_id[] = {
-	{ "tuner", }, /* autodetect */
+	{ .name = "tuner" }, /* autodetect */
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, tuner_id);

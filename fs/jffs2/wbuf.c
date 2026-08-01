@@ -2,10 +2,10 @@
  * JFFS2 -- Journalling Flash File System, Version 2.
  *
  * Copyright © 2001-2007 Red Hat, Inc.
- * Copyright © 2004 Thomas Gleixner <tglx@linutronix.de>
+ * Copyright © 2004 Thomas Gleixner <tglx@kernel.org>
  *
  * Created by David Woodhouse <dwmw2@infradead.org>
- * Modified debugged and enhanced by Thomas Gleixner <tglx@linutronix.de>
+ * Modified debugged and enhanced by Thomas Gleixner <tglx@kernel.org>
  *
  * For licensing information, see the file 'LICENCE' in this directory.
  *
@@ -92,7 +92,7 @@ static void jffs2_wbuf_dirties_inode(struct jffs2_sb_info *c, uint32_t ino)
 	if (jffs2_wbuf_pending_for_ino(c, ino))
 		return;
 
-	new = kmalloc(sizeof(*new), GFP_KERNEL);
+	new = kmalloc_obj(*new);
 	if (!new) {
 		jffs2_dbg(1, "No memory to allocate inodirty. Fallback to all considered dirty\n");
 		jffs2_clear_wbuf_ino_list(c);
@@ -584,7 +584,7 @@ static int __jffs2_flush_wbuf(struct jffs2_sb_info *c, int pad)
 	size_t retlen;
 
 	/* Nothing to do if not write-buffering the flash. In particular, we shouldn't
-	   del_timer() the timer we never initialised. */
+	   call timer_delete() on the timer we never initialised. */
 	if (!jffs2_is_writebuffered(c))
 		return 0;
 
@@ -1035,7 +1035,7 @@ int jffs2_check_oob_empty(struct jffs2_sb_info *c,
 {
 	int i, ret;
 	int cmlen = min_t(int, c->oobavail, OOB_CM_SIZE);
-	struct mtd_oob_ops ops;
+	struct mtd_oob_ops ops = { };
 
 	ops.mode = MTD_OPS_AUTO_OOB;
 	ops.ooblen = NR_OOB_SCAN_PAGES * c->oobavail;
@@ -1076,7 +1076,7 @@ int jffs2_check_oob_empty(struct jffs2_sb_info *c,
 int jffs2_check_nand_cleanmarker(struct jffs2_sb_info *c,
 				 struct jffs2_eraseblock *jeb)
 {
-	struct mtd_oob_ops ops;
+	struct mtd_oob_ops ops = { };
 	int ret, cmlen = min_t(int, c->oobavail, OOB_CM_SIZE);
 
 	ops.mode = MTD_OPS_AUTO_OOB;
@@ -1101,7 +1101,7 @@ int jffs2_write_nand_cleanmarker(struct jffs2_sb_info *c,
 				 struct jffs2_eraseblock *jeb)
 {
 	int ret;
-	struct mtd_oob_ops ops;
+	struct mtd_oob_ops ops = { };
 	int cmlen = min_t(int, c->oobavail, OOB_CM_SIZE);
 
 	ops.mode = MTD_OPS_AUTO_OOB;
@@ -1208,7 +1208,7 @@ int jffs2_nand_flash_setup(struct jffs2_sb_info *c)
 	if (!c->wbuf)
 		return -ENOMEM;
 
-	c->oobbuf = kmalloc(NR_OOB_SCAN_PAGES * c->oobavail, GFP_KERNEL);
+	c->oobbuf = kmalloc_array(NR_OOB_SCAN_PAGES, c->oobavail, GFP_KERNEL);
 	if (!c->oobbuf) {
 		kfree(c->wbuf);
 		return -ENOMEM;

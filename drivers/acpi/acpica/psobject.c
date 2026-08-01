@@ -3,7 +3,7 @@
  *
  * Module Name: psobject - Support for parse objects
  *
- * Copyright (C) 2000 - 2018, Intel Corp.
+ * Copyright (C) 2000 - 2026, Intel Corp.
  *
  *****************************************************************************/
 
@@ -12,6 +12,7 @@
 #include "acparser.h"
 #include "amlcode.h"
 #include "acconvert.h"
+#include "acnamesp.h"
 
 #define _COMPONENT          ACPI_PARSER
 ACPI_MODULE_NAME("psobject")
@@ -480,8 +481,7 @@ acpi_ps_complete_op(struct acpi_walk_state *walk_state,
 			walk_state->opcode = (*op)->common.aml_opcode;
 
 			status = walk_state->ascending_callback(walk_state);
-			status =
-			    acpi_ps_next_parse_state(walk_state, *op, status);
+			(void)acpi_ps_next_parse_state(walk_state, *op, status);
 
 			status2 = acpi_ps_complete_this_op(walk_state, *op);
 			if (ACPI_FAILURE(status2)) {
@@ -489,7 +489,6 @@ acpi_ps_complete_op(struct acpi_walk_state *walk_state,
 			}
 		}
 
-		status = AE_OK;
 		break;
 
 	case AE_CTRL_BREAK:
@@ -511,14 +510,13 @@ acpi_ps_complete_op(struct acpi_walk_state *walk_state,
 		walk_state->opcode = (*op)->common.aml_opcode;
 
 		status = walk_state->ascending_callback(walk_state);
-		status = acpi_ps_next_parse_state(walk_state, *op, status);
+		(void)acpi_ps_next_parse_state(walk_state, *op, status);
 
 		status2 = acpi_ps_complete_this_op(walk_state, *op);
 		if (ACPI_FAILURE(status2)) {
 			return_ACPI_STATUS(status2);
 		}
 
-		status = AE_OK;
 		break;
 
 	case AE_CTRL_TERMINATE:
@@ -549,6 +547,21 @@ acpi_ps_complete_op(struct acpi_walk_state *walk_state,
 
 		do {
 			if (*op) {
+				/*
+				 * These Opcodes need to be removed from the namespace because they
+				 * get created even if these opcodes cannot be created due to
+				 * errors.
+				 */
+				if (((*op)->common.aml_opcode == AML_REGION_OP)
+				    || ((*op)->common.aml_opcode ==
+					AML_DATA_REGION_OP)) {
+					acpi_ns_delete_children((*op)->common.
+								node);
+					acpi_ns_remove_node((*op)->common.node);
+					(*op)->common.node = NULL;
+					acpi_ps_delete_parse_tree(*op);
+				}
+
 				status2 =
 				    acpi_ps_complete_this_op(walk_state, *op);
 				if (ACPI_FAILURE(status2)) {
@@ -574,6 +587,19 @@ acpi_ps_complete_op(struct acpi_walk_state *walk_state,
 #endif
 		walk_state->prev_op = NULL;
 		walk_state->prev_arg_types = walk_state->arg_types;
+
+		if (walk_state->parse_flags & ACPI_PARSE_MODULE_LEVEL) {
+			/*
+			 * There was something that went wrong while executing code at the
+			 * module-level. We need to skip parsing whatever caused the
+			 * error and keep going. One runtime error during the table load
+			 * should not cause the entire table to not be loaded. This is
+			 * because there could be correct AML beyond the parts that caused
+			 * the runtime error.
+			 */
+			ACPI_INFO(("Ignoring error and continuing table load"));
+			return_ACPI_STATUS(AE_OK);
+		}
 		return_ACPI_STATUS(status);
 	}
 
@@ -610,7 +636,8 @@ acpi_status
 acpi_ps_complete_final_op(struct acpi_walk_state *walk_state,
 			  union acpi_parse_object *op, acpi_status status)
 {
-	acpi_status status2;
+	acpi_status return_status = status;
+	u8 ascending = TRUE;
 
 	ACPI_FUNCTION_TRACE_PTR(ps_complete_final_op, walk_state);
 
@@ -624,7 +651,7 @@ acpi_ps_complete_final_op(struct acpi_walk_state *walk_state,
 			  op));
 	do {
 		if (op) {
-			if (walk_state->ascending_callback != NULL) {
+			if (ascending && walk_state->ascending_callback != NULL) {
 				walk_state->op = op;
 				walk_state->op_info =
 				    acpi_ps_get_opcode_info(op->common.
@@ -646,49 +673,26 @@ acpi_ps_complete_final_op(struct acpi_walk_state *walk_state,
 				}
 
 				if (status == AE_CTRL_TERMINATE) {
-					status = AE_OK;
-
-					/* Clean up */
-					do {
-						if (op) {
-							status2 =
-							    acpi_ps_complete_this_op
-							    (walk_state, op);
-							if (ACPI_FAILURE
-							    (status2)) {
-								return_ACPI_STATUS
-								    (status2);
-							}
-						}
-
-						acpi_ps_pop_scope(&
-								  (walk_state->
-								   parser_state),
-								  &op,
-								  &walk_state->
-								  arg_types,
-								  &walk_state->
-								  arg_count);
-
-					} while (op);
-
-					return_ACPI_STATUS(status);
+					ascending = FALSE;
+					return_status = AE_CTRL_TERMINATE;
 				}
 
 				else if (ACPI_FAILURE(status)) {
 
 					/* First error is most important */
 
-					(void)
-					    acpi_ps_complete_this_op(walk_state,
-								     op);
-					return_ACPI_STATUS(status);
+					ascending = FALSE;
+					return_status = status;
 				}
 			}
 
-			status2 = acpi_ps_complete_this_op(walk_state, op);
-			if (ACPI_FAILURE(status2)) {
-				return_ACPI_STATUS(status2);
+			status = acpi_ps_complete_this_op(walk_state, op);
+			if (ACPI_FAILURE(status)) {
+				ascending = FALSE;
+				if (ACPI_SUCCESS(return_status) ||
+				    return_status == AE_CTRL_TERMINATE) {
+					return_status = status;
+				}
 			}
 		}
 
@@ -698,5 +702,5 @@ acpi_ps_complete_final_op(struct acpi_walk_state *walk_state,
 
 	} while (op);
 
-	return_ACPI_STATUS(status);
+	return_ACPI_STATUS(return_status);
 }

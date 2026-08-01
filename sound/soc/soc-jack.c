@@ -1,19 +1,13 @@
-/*
- * soc-jack.c  --  ALSA SoC jack handling
- *
- * Copyright 2008 Wolfson Microelectronics PLC.
- *
- * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// soc-jack.c  --  ALSA SoC jack handling
+//
+// Copyright 2008 Wolfson Microelectronics PLC.
+//
+// Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
 
 #include <sound/jack.h>
 #include <sound/soc.h>
-#include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/workqueue.h>
@@ -21,90 +15,6 @@
 #include <linux/export.h>
 #include <linux/suspend.h>
 #include <trace/events/asoc.h>
-
-struct jack_gpio_tbl {
-	int count;
-	struct snd_soc_jack *jack;
-	struct snd_soc_jack_gpio *gpios;
-};
-
-/**
- * snd_soc_codec_set_jack - configure codec jack.
- * @codec: CODEC
- * @jack: structure to use for the jack
- * @data: can be used if codec driver need extra data for configuring jack
- *
- * Configures and enables jack detection function.
- */
-int snd_soc_codec_set_jack(struct snd_soc_codec *codec,
-	struct snd_soc_jack *jack, void *data)
-{
-	if (codec->driver->set_jack)
-		return codec->driver->set_jack(codec, jack, data);
-	else
-		return -ENOTSUPP;
-}
-EXPORT_SYMBOL_GPL(snd_soc_codec_set_jack);
-
-/**
- * snd_soc_component_set_jack - configure component jack.
- * @component: COMPONENTs
- * @jack: structure to use for the jack
- * @data: can be used if codec driver need extra data for configuring jack
- *
- * Configures and enables jack detection function.
- */
-int snd_soc_component_set_jack(struct snd_soc_component *component,
-			       struct snd_soc_jack *jack, void *data)
-{
-	/* will be removed */
-	if (component->set_jack)
-		return component->set_jack(component, jack, data);
-
-	if (component->driver->set_jack)
-		return component->driver->set_jack(component, jack, data);
-
-	return -ENOTSUPP;
-}
-EXPORT_SYMBOL_GPL(snd_soc_component_set_jack);
-
-/**
- * snd_soc_card_jack_new - Create a new jack
- * @card:  ASoC card
- * @id:    an identifying string for this jack
- * @type:  a bitmask of enum snd_jack_type values that can be detected by
- *         this jack
- * @jack:  structure to use for the jack
- * @pins:  Array of jack pins to be added to the jack or NULL
- * @num_pins: Number of elements in the @pins array
- *
- * Creates a new jack object.
- *
- * Returns zero if successful, or a negative error code on failure.
- * On success jack will be initialised.
- */
-int snd_soc_card_jack_new(struct snd_soc_card *card, const char *id, int type,
-	struct snd_soc_jack *jack, struct snd_soc_jack_pin *pins,
-	unsigned int num_pins)
-{
-	int ret;
-
-	mutex_init(&jack->mutex);
-	jack->card = card;
-	INIT_LIST_HEAD(&jack->pins);
-	INIT_LIST_HEAD(&jack->jack_zones);
-	BLOCKING_INIT_NOTIFIER_HEAD(&jack->notifier);
-
-	ret = snd_jack_new(card->snd_card, id, type, &jack->jack, false, false);
-	if (ret)
-		return ret;
-
-	if (num_pins)
-		return snd_soc_jack_add_pins(jack, num_pins, pins);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(snd_soc_card_jack_new);
 
 /**
  * snd_soc_jack_report - Report the current status for a jack
@@ -125,14 +35,12 @@ void snd_soc_jack_report(struct snd_soc_jack *jack, int status, int mask)
 	struct snd_soc_dapm_context *dapm;
 	struct snd_soc_jack_pin *pin;
 	unsigned int sync = 0;
-	int enable;
 
+	if (!jack || !jack->jack)
+		return;
 	trace_snd_soc_jack_report(jack, mask, status);
 
-	if (!jack)
-		return;
-
-	dapm = &jack->card->dapm;
+	dapm = snd_soc_card_to_dapm(jack->card);
 
 	mutex_lock(&jack->mutex);
 
@@ -142,7 +50,7 @@ void snd_soc_jack_report(struct snd_soc_jack *jack, int status, int mask)
 	trace_snd_soc_jack_notify(jack, status);
 
 	list_for_each_entry(pin, &jack->pins, list) {
-		enable = pin->mask & jack->status;
+		int enable = pin->mask & jack->status;
 
 		if (pin->invert)
 			enable = !enable;
@@ -217,7 +125,7 @@ EXPORT_SYMBOL_GPL(snd_soc_jack_get_type);
 /**
  * snd_soc_jack_add_pins - Associate DAPM pins with an ASoC jack
  *
- * @jack:  ASoC jack
+ * @jack:  ASoC jack created with snd_soc_card_jack_new_pins()
  * @count: Number of pins
  * @pins:  Array of pins
  *
@@ -292,6 +200,12 @@ void snd_soc_jack_notifier_unregister(struct snd_soc_jack *jack,
 EXPORT_SYMBOL_GPL(snd_soc_jack_notifier_unregister);
 
 #ifdef CONFIG_GPIOLIB
+struct jack_gpio_tbl {
+	int count;
+	struct snd_soc_jack *jack;
+	struct snd_soc_jack_gpio *gpios;
+};
+
 /* gpio detect */
 static void snd_soc_jack_gpio_detect(struct snd_soc_jack_gpio *gpio)
 {
@@ -430,21 +344,9 @@ int snd_soc_jack_add_gpios(struct snd_soc_jack *jack, int count,
 				goto undo;
 			}
 		} else {
-			/* legacy GPIO number */
-			if (!gpio_is_valid(gpios[i].gpio)) {
-				dev_err(jack->card->dev,
-					"ASoC: Invalid gpio %d\n",
-					gpios[i].gpio);
-				ret = -EINVAL;
-				goto undo;
-			}
-
-			ret = gpio_request_one(gpios[i].gpio, GPIOF_IN,
-					       gpios[i].name);
-			if (ret)
-				goto undo;
-
-			gpios[i].desc = gpio_to_desc(gpios[i].gpio);
+			dev_err(jack->card->dev, "ASoC: Invalid gpio at index %d\n", i);
+		        ret = -EINVAL;
+		        goto undo;
 		}
 got_gpio:
 		INIT_DELAYED_WORK(&gpios[i].work, gpio_work);
@@ -452,12 +354,13 @@ got_gpio:
 
 		ret = request_any_context_irq(gpiod_to_irq(gpios[i].desc),
 					      gpio_handler,
+					      IRQF_SHARED |
 					      IRQF_TRIGGER_RISING |
 					      IRQF_TRIGGER_FALLING,
 					      gpios[i].name,
 					      &gpios[i]);
 		if (ret < 0)
-			goto err;
+			goto undo;
 
 		if (gpios[i].wake) {
 			ret = irq_set_irq_wake(gpiod_to_irq(gpios[i].desc), 1);
@@ -485,8 +388,6 @@ got_gpio:
 	devres_add(jack->card->dev, tbl);
 	return 0;
 
-err:
-	gpio_free(gpios[i].gpio);
 undo:
 	jack_free_gpios(jack, i, gpios);
 	devres_free(tbl);

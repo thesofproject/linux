@@ -141,25 +141,25 @@ void acpi_ut_repair_name(char *name)
 	 * Special case for the root node. This can happen if we get an
 	 * error during the execution of module-level code.
 	 */
-	if (ACPI_COMPARE_NAME(name, "\\___")) {
+	if (ACPI_COMPARE_NAMESEG(name, ACPI_ROOT_PATHNAME)) {
 		return;
 	}
 
-	ACPI_MOVE_NAME(&original_name, name);
+	ACPI_COPY_NAMESEG(&original_name, &name[0]);
 
 	/* Check each character in the name */
 
-	for (i = 0; i < ACPI_NAME_SIZE; i++) {
+	for (i = 0; i < ACPI_NAMESEG_SIZE; i++) {
 		if (acpi_ut_valid_name_char(name[i], i)) {
 			continue;
 		}
 
 		/*
 		 * Replace a bad character with something printable, yet technically
-		 * still invalid. This prevents any collisions with existing "good"
+		 * "odd". This prevents any collisions with existing "good"
 		 * names in the namespace.
 		 */
-		name[i] = '*';
+		name[i] = '_';
 		found_bad_char = TRUE;
 	}
 
@@ -169,8 +169,8 @@ void acpi_ut_repair_name(char *name)
 
 		if (!acpi_gbl_enable_interpreter_slack) {
 			ACPI_WARNING((AE_INFO,
-				      "Invalid character(s) in name (0x%.8X), repaired: [%4.4s]",
-				      original_name, name));
+				      "Invalid character(s) in name (0x%.8X) %p, repaired: [%4.4s]",
+				      original_name, name, &name[0]));
 		} else {
 			ACPI_DEBUG_PRINT((ACPI_DB_INFO,
 					  "Invalid character(s) in name (0x%.8X), repaired: [%4.4s]",

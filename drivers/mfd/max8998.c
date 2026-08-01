@@ -1,24 +1,10 @@
-/*
- * max8998.c - mfd core driver for the Maxim 8998
- *
- *  Copyright (C) 2009-2010 Samsung Electronics
- *  Kyungmin Park <kyungmin.park@samsung.com>
- *  Marek Szyprowski <m.szyprowski@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// max8998.c - mfd core driver for the Maxim 8998
+//
+//  Copyright (C) 2009-2010 Samsung Electronics
+//  Kyungmin Park <kyungmin.park@samsung.com>
+//  Marek Szyprowski <m.szyprowski@samsung.com>
 
 #include <linux/err.h>
 #include <linux/init.h>
@@ -166,20 +152,7 @@ static struct max8998_platform_data *max8998_i2c_parse_dt_pdata(
 	return pd;
 }
 
-static inline unsigned long max8998_i2c_get_driver_data(struct i2c_client *i2c,
-						const struct i2c_device_id *id)
-{
-	if (IS_ENABLED(CONFIG_OF) && i2c->dev.of_node) {
-		const struct of_device_id *match;
-		match = of_match_node(max8998_dt_match, i2c->dev.of_node);
-		return (unsigned long)match->data;
-	}
-
-	return id->driver_data;
-}
-
-static int max8998_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+static int max8998_i2c_probe(struct i2c_client *i2c)
 {
 	struct max8998_platform_data *pdata = dev_get_platdata(&i2c->dev);
 	struct max8998_dev *max8998;
@@ -200,7 +173,7 @@ static int max8998_i2c_probe(struct i2c_client *i2c,
 	max8998->dev = &i2c->dev;
 	max8998->i2c = i2c;
 	max8998->irq = i2c->irq;
-	max8998->type = max8998_i2c_get_driver_data(i2c, id);
+	max8998->type = (uintptr_t)i2c_get_match_data(i2c);
 	max8998->pdata = pdata;
 	if (pdata) {
 		max8998->ono = pdata->ono;
@@ -209,10 +182,10 @@ static int max8998_i2c_probe(struct i2c_client *i2c,
 	}
 	mutex_init(&max8998->iolock);
 
-	max8998->rtc = i2c_new_dummy(i2c->adapter, RTC_I2C_ADDR);
-	if (!max8998->rtc) {
+	max8998->rtc = i2c_new_dummy_device(i2c->adapter, RTC_I2C_ADDR);
+	if (IS_ERR(max8998->rtc)) {
 		dev_err(&i2c->dev, "Failed to allocate I2C device for RTC\n");
-		return -ENODEV;
+		return PTR_ERR(max8998->rtc);
 	}
 	i2c_set_clientdata(max8998->rtc, max8998);
 
@@ -261,7 +234,7 @@ static int max8998_suspend(struct device *dev)
 	struct max8998_dev *max8998 = i2c_get_clientdata(i2c);
 
 	if (device_may_wakeup(dev))
-		irq_set_irq_wake(max8998->irq, 1);
+		enable_irq_wake(max8998->irq);
 	return 0;
 }
 
@@ -271,7 +244,7 @@ static int max8998_resume(struct device *dev)
 	struct max8998_dev *max8998 = i2c_get_clientdata(i2c);
 
 	if (device_may_wakeup(dev))
-		irq_set_irq_wake(max8998->irq, 0);
+		disable_irq_wake(max8998->irq);
 	/*
 	 * In LP3974, if IRQ registers are not "read & clear"
 	 * when it's set during sleep, the interrupt becomes

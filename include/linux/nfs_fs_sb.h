@@ -8,6 +8,7 @@
 #include <linux/wait.h>
 #include <linux/nfs_xdr.h>
 #include <linux/sunrpc/xprt.h>
+#include <linux/nfslocalio.h>
 
 #include <linux/atomic.h>
 #include <linux/refcount.h>
@@ -45,6 +46,11 @@ struct nfs_client {
 #define NFS_CS_INFINITE_SLOTS	3		/* - don't limit TCP slots */
 #define NFS_CS_NO_RETRANS_TIMEOUT	4	/* - Disable retransmit timeouts */
 #define NFS_CS_TSM_POSSIBLE	5		/* - Maybe state migration */
+#define NFS_CS_NOPING		6		/* - don't ping on connect */
+#define NFS_CS_DS		7		/* - Server is a DS */
+#define NFS_CS_REUSEPORT	8		/* - reuse src port on reconnect */
+#define NFS_CS_PNFS		9		/* - Server used for pnfs */
+#define NFS_CS_NETUNREACH_FATAL	10		/* - ENETUNREACH errors are fatal */
 	struct sockaddr_storage	cl_addr;	/* server identifier */
 	size_t			cl_addrlen;
 	char *			cl_hostname;	/* hostname of server */
@@ -58,7 +64,10 @@ struct nfs_client {
 	struct nfs_subversion *	cl_nfs_mod;	/* pointer to nfs version module */
 
 	u32			cl_minorversion;/* NFSv4 minorversion */
-	struct rpc_cred		*cl_machine_cred;
+	unsigned int		cl_nconnect;	/* Number of connections */
+	unsigned int		cl_max_connect; /* max number of xprts allowed */
+	const char *		cl_principal;	/* used for machine cred */
+	struct xprtsec_parms	cl_xprtsec;	/* xprt security policy */
 
 #if IS_ENABLED(CONFIG_NFS_V4)
 	struct list_head	cl_ds_clients; /* auth flavor data servers */
@@ -106,21 +115,24 @@ struct nfs_client {
 #define NFS_SP4_MACH_CRED_WRITE    5	/* WRITE */
 #define NFS_SP4_MACH_CRED_COMMIT   6	/* COMMIT */
 #define NFS_SP4_MACH_CRED_PNFS_CLEANUP  7 /* LAYOUTRETURN */
-#if IS_ENABLED(CONFIG_NFS_V4_1)
 	wait_queue_head_t	cl_lock_waitq;
-#endif /* CONFIG_NFS_V4_1 */
 #endif /* CONFIG_NFS_V4 */
 
 	/* Our own IP address, as a null-terminated string.
 	 * This is used to generate the mv0 callback address.
 	 */
 	char			cl_ipaddr[48];
-
-#ifdef CONFIG_NFS_FSCACHE
-	struct fscache_cookie	*fscache;	/* client index cache cookie */
-#endif
-
 	struct net		*cl_net;
+	netns_tracker		cl_ns_tracker;
+	struct list_head	pending_cb_stateids;
+	struct rcu_head		rcu;
+
+#if IS_ENABLED(CONFIG_NFS_LOCALIO)
+	struct timespec64	cl_nfssvc_boot;
+	seqlock_t		cl_boot_lock;
+	nfs_uuid_t		cl_uuid;
+	struct work_struct	cl_local_probe_work;
+#endif /* CONFIG_NFS_LOCALIO */
 };
 
 /*
@@ -136,17 +148,47 @@ struct nfs_server {
 	struct rpc_clnt *	client_acl;	/* ACL RPC client handle */
 	struct nlm_host		*nlm_host;	/* NLM client handle */
 	struct nfs_iostats __percpu *io_stats;	/* I/O statistics */
+	wait_queue_head_t	write_congestion_wait;	/* wait until write congestion eases */
 	atomic_long_t		writeback;	/* number of writeback pages */
-	int			flags;		/* various flags */
+	unsigned int		write_congested;/* flag set when writeback gets too high */
+	unsigned int		flags;		/* various flags */
+
+/* The following are for internal use only. Also see uapi/linux/nfs_mount.h */
+#define NFS_MOUNT_LOOKUP_CACHE_NONEG	0x10000
+#define NFS_MOUNT_LOOKUP_CACHE_NONE	0x20000
+#define NFS_MOUNT_NORESVPORT		0x40000
+#define NFS_MOUNT_LEGACY_INTERFACE	0x80000
+#define NFS_MOUNT_LOCAL_FLOCK		0x100000
+#define NFS_MOUNT_LOCAL_FCNTL		0x200000
+#define NFS_MOUNT_SOFTERR		0x400000
+#define NFS_MOUNT_SOFTREVAL		0x800000
+#define NFS_MOUNT_WRITE_EAGER		0x01000000
+#define NFS_MOUNT_WRITE_WAIT		0x02000000
+#define NFS_MOUNT_TRUNK_DISCOVERY	0x04000000
+#define NFS_MOUNT_SHUTDOWN			0x08000000
+#define NFS_MOUNT_NO_ALIGNWRITE		0x10000000
+#define NFS_MOUNT_FORCE_RDIRPLUS	0x20000000
+#define NFS_MOUNT_NETUNREACH_FATAL	0x40000000
+
+	unsigned int		automount_inherit; /* Properties inherited by automount */
+#define NFS_AUTOMOUNT_INHERIT_BSIZE	0x0001
+#define NFS_AUTOMOUNT_INHERIT_RSIZE	0x0002
+#define NFS_AUTOMOUNT_INHERIT_WSIZE	0x0004
+
 	unsigned int		caps;		/* server capabilities */
+	__u64			fattr_valid;	/* Valid attributes */
 	unsigned int		rsize;		/* read size */
 	unsigned int		rpages;		/* read size (in pages) */
 	unsigned int		wsize;		/* write size */
-	unsigned int		wpages;		/* write size (in pages) */
 	unsigned int		wtmult;		/* server disk block size */
 	unsigned int		dtsize;		/* readdir size */
 	unsigned short		port;		/* "port=" setting */
 	unsigned int		bsize;		/* server block size */
+#ifdef CONFIG_NFS_V4_2
+	unsigned int		gxasize;	/* getxattr size */
+	unsigned int		sxasize;	/* setxattr size */
+	unsigned int		lxasize;	/* listxattr size */
+#endif
 	unsigned int		acregmin;	/* attr cache timeouts */
 	unsigned int		acregmax;
 	unsigned int		acdirmin;
@@ -157,19 +199,31 @@ struct nfs_server {
 #define NFS_OPTION_FSCACHE	0x00000001	/* - local caching enabled */
 #define NFS_OPTION_MIGRATION	0x00000002	/* - NFSv4 migration enabled */
 
+	enum nfs4_change_attr_type
+				change_attr_type;/* Description of change attribute */
+
 	struct nfs_fsid		fsid;
+	int			s_sysfs_id;	/* sysfs dentry index */
 	__u64			maxfilesize;	/* maximum file size */
-	struct timespec		time_delta;	/* smallest time granularity */
 	unsigned long		mount_time;	/* when this fs was mounted */
 	struct super_block	*super;		/* VFS super block */
 	dev_t			s_dev;		/* superblock dev numbers */
 	struct nfs_auth_info	auth_info;	/* parsed auth flavors */
 
 #ifdef CONFIG_NFS_FSCACHE
-	struct nfs_fscache_key	*fscache_key;	/* unique key for superblock */
-	struct fscache_cookie	*fscache;	/* superblock cookie */
+	struct fscache_volume	*fscache;	/* superblock cookie */
+	char			*fscache_uniq;	/* Uniquifier (or NULL) */
 #endif
 
+	/* The following #defines numerically match the NFSv4 equivalents */
+#define NFS_FH_NOEXPIRE_WITH_OPEN (0x1)
+#define NFS_FH_VOLATILE_ANY (0x2)
+#define NFS_FH_VOL_MIGRATION (0x4)
+#define NFS_FH_VOL_RENAME (0x8)
+#define NFS_FH_RENAME_UNSAFE (NFS_FH_VOLATILE_ANY | NFS_FH_VOL_RENAME)
+	u32			fh_expire_type;	/* V4 bitmask representing file
+						   handle volatility type for
+						   this filesystem */
 	u32			pnfs_blksize;	/* layout_blksize attr */
 #if IS_ENABLED(CONFIG_NFS_V4)
 	u32			attr_bitmask[3];/* V4 bitmask representing the set
@@ -193,22 +247,29 @@ struct nfs_server {
 	u32			acl_bitmask;	/* V4 bitmask representing the ACEs
 						   that are supported on this
 						   filesystem */
-	u32			fh_expire_type;	/* V4 bitmask representing file
-						   handle volatility type for
-						   this filesystem */
 	struct pnfs_layoutdriver_type  *pnfs_curr_ld; /* Active layout driver */
 	struct rpc_wait_queue	roc_rpcwaitq;
-	void			*pnfs_ld_data;	/* per mount point data */
 
 	/* the following fields are protected by nfs_client->cl_lock */
 	struct rb_root		state_owners;
 #endif
-	struct ida		openowner_id;
-	struct ida		lockowner_id;
+	atomic64_t		owner_ctr;
 	struct list_head	state_owners_lru;
 	struct list_head	layouts;
 	struct list_head	delegations;
+	spinlock_t		delegations_lock;
+	struct list_head	delegations_return;
+	struct list_head	delegations_lru;
+	struct list_head	delegations_delayed;
+	atomic_long_t		nr_active_delegations;
+	unsigned int		delegation_hash_mask;
+	struct hlist_head	*delegation_hash_table;
+	struct list_head	ss_copies;
+	struct list_head	ss_src_copies;
 
+	unsigned long		delegation_flags;
+#define NFS4SERV_DELEGATION_EXPIRED	(1)
+	unsigned long		delegation_gen;
 	unsigned long		mig_gen;
 	unsigned long		mig_status;
 #define NFS_MIG_IN_TRANSITION		(1)
@@ -226,6 +287,15 @@ struct nfs_server {
 	unsigned short		mountd_port;
 	unsigned short		mountd_protocol;
 	struct rpc_wait_queue	uoc_rpcwaitq;
+
+	/* XDR related information */
+	unsigned int		read_hdrsize;
+
+	/* User namespace info */
+	const struct cred	*cred;
+	bool			has_sec_mnt_opts;
+	struct kobject		kobj;
+	struct rcu_head		rcu;
 };
 
 /* Server capabilities */
@@ -234,15 +304,15 @@ struct nfs_server {
 #define NFS_CAP_SYMLINKS	(1U << 2)
 #define NFS_CAP_ACLS		(1U << 3)
 #define NFS_CAP_ATOMIC_OPEN	(1U << 4)
-/* #define NFS_CAP_CHANGE_ATTR	(1U << 5) */
-#define NFS_CAP_FILEID		(1U << 6)
-#define NFS_CAP_MODE		(1U << 7)
-#define NFS_CAP_NLINK		(1U << 8)
-#define NFS_CAP_OWNER		(1U << 9)
-#define NFS_CAP_OWNER_GROUP	(1U << 10)
-#define NFS_CAP_ATIME		(1U << 11)
-#define NFS_CAP_CTIME		(1U << 12)
-#define NFS_CAP_MTIME		(1U << 13)
+#define NFS_CAP_LGOPEN		(1U << 5)
+#define NFS_CAP_CASE_INSENSITIVE	(1U << 6)
+#define NFS_CAP_CASE_NONPRESERVING	(1U << 7)
+#define NFS_CAP_REBOOT_LAYOUTRETURN	(1U << 8)
+#define NFS_CAP_OFFLOAD_STATUS	(1U << 9)
+#define NFS_CAP_ZERO_RANGE	(1U << 10)
+#define NFS_CAP_DIR_DELEG	(1U << 11)
+#define NFS_CAP_OPEN_XOR	(1U << 12)
+#define NFS_CAP_DELEGTIME	(1U << 13)
 #define NFS_CAP_POSIX_LOCK	(1U << 14)
 #define NFS_CAP_UIDGID_NOMAP	(1U << 15)
 #define NFS_CAP_STATEID_NFSV41	(1U << 16)
@@ -254,5 +324,11 @@ struct nfs_server {
 #define NFS_CAP_LAYOUTSTATS	(1U << 22)
 #define NFS_CAP_CLONE		(1U << 23)
 #define NFS_CAP_COPY		(1U << 24)
-
+#define NFS_CAP_OFFLOAD_CANCEL	(1U << 25)
+#define NFS_CAP_LAYOUTERROR	(1U << 26)
+#define NFS_CAP_COPY_NOTIFY	(1U << 27)
+#define NFS_CAP_XATTR		(1U << 28)
+#define NFS_CAP_READ_PLUS	(1U << 29)
+#define NFS_CAP_FS_LOCATIONS	(1U << 30)
+#define NFS_CAP_MOVEABLE	(1U << 31)
 #endif

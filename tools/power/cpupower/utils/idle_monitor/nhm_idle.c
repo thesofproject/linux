@@ -1,7 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  (C) 2010,2011       Thomas Renninger <trenn@suse.de>, Novell Inc.
- *
- *  Licensed under the terms of the GNU GPL License version 2.
  *
  *  Based on Len Brown's <lenb@kernel.org> turbostat tool.
  */
@@ -92,7 +91,7 @@ static int nhm_get_count(enum intel_nhm_id id, unsigned long long *val,
 		break;
 	default:
 		return -1;
-	};
+	}
 	if (read_msr(cpu, msr, val))
 		return -1;
 
@@ -152,7 +151,7 @@ static int nhm_stop(void)
 
 	for (num = 0; num < NHM_CSTATE_COUNT; num++) {
 		for (cpu = 0; cpu < cpu_count; cpu++) {
-			is_valid[cpu] = !nhm_get_count(num, &val, cpu);
+			is_valid[cpu] |= !nhm_get_count(num, &val, cpu);
 			current_count[num][cpu] = val;
 		}
 	}
@@ -209,7 +208,7 @@ struct cpuidle_monitor intel_nhm_monitor = {
 	.stop			= nhm_stop,
 	.do_register		= intel_nhm_register,
 	.unregister		= intel_nhm_unregister,
-	.needs_root		= 1,
+	.flags.needs_root	= 1,
 	.overflow_s		= 922000000 /* 922337203 seconds TSC overflow
 					       at 20GHz */
 };

@@ -24,7 +24,7 @@
 #include <linux/device.h>
 #include <linux/firmware.h>
 #include <linux/mutex.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "usbatm.h"
 
@@ -180,7 +180,7 @@ struct cxacru_data {
 	struct mutex poll_state_serialize;
 	enum cxacru_poll_state poll_state;
 
-	/* contol handles */
+	/* control handles */
 	struct mutex cm_serialize;
 	u8 *rcv_buf;
 	u8 *snd_buf;
@@ -230,12 +230,12 @@ CXACRU__ATTR_INIT(_name)
 
 static ssize_t cxacru_sysfs_showattr_u32(u32 value, char *buf)
 {
-	return snprintf(buf, PAGE_SIZE, "%u\n", value);
+	return sprintf(buf, "%u\n", value);
 }
 
 static ssize_t cxacru_sysfs_showattr_s8(s8 value, char *buf)
 {
-	return snprintf(buf, PAGE_SIZE, "%d\n", value);
+	return sprintf(buf, "%d\n", value);
 }
 
 static ssize_t cxacru_sysfs_showattr_dB(s16 value, char *buf)
@@ -255,8 +255,8 @@ static ssize_t cxacru_sysfs_showattr_bool(u32 value, char *buf)
 	static char *str[] = { "no", "yes" };
 
 	if (unlikely(value >= ARRAY_SIZE(str)))
-		return snprintf(buf, PAGE_SIZE, "%u\n", value);
-	return snprintf(buf, PAGE_SIZE, "%s\n", str[value]);
+		return sprintf(buf, "%u\n", value);
+	return sprintf(buf, "%s\n", str[value]);
 }
 
 static ssize_t cxacru_sysfs_showattr_LINK(u32 value, char *buf)
@@ -264,8 +264,8 @@ static ssize_t cxacru_sysfs_showattr_LINK(u32 value, char *buf)
 	static char *str[] = { NULL, "not connected", "connected", "lost" };
 
 	if (unlikely(value >= ARRAY_SIZE(str) || str[value] == NULL))
-		return snprintf(buf, PAGE_SIZE, "%u\n", value);
-	return snprintf(buf, PAGE_SIZE, "%s\n", str[value]);
+		return sprintf(buf, "%u\n", value);
+	return sprintf(buf, "%s\n", str[value]);
 }
 
 static ssize_t cxacru_sysfs_showattr_LINE(u32 value, char *buf)
@@ -275,8 +275,8 @@ static ssize_t cxacru_sysfs_showattr_LINE(u32 value, char *buf)
 		"waiting", "initialising"
 	};
 	if (unlikely(value >= ARRAY_SIZE(str)))
-		return snprintf(buf, PAGE_SIZE, "%u\n", value);
-	return snprintf(buf, PAGE_SIZE, "%s\n", str[value]);
+		return sprintf(buf, "%u\n", value);
+	return sprintf(buf, "%s\n", str[value]);
 }
 
 static ssize_t cxacru_sysfs_showattr_MODU(u32 value, char *buf)
@@ -288,8 +288,8 @@ static ssize_t cxacru_sysfs_showattr_MODU(u32 value, char *buf)
 			"ITU-T G.992.2 (G.LITE)"
 	};
 	if (unlikely(value >= ARRAY_SIZE(str)))
-		return snprintf(buf, PAGE_SIZE, "%u\n", value);
-	return snprintf(buf, PAGE_SIZE, "%s\n", str[value]);
+		return sprintf(buf, "%u\n", value);
+	return sprintf(buf, "%s\n", str[value]);
 }
 
 /*
@@ -309,8 +309,7 @@ static ssize_t mac_address_show(struct device *dev,
 	if (instance == NULL || instance->usbatm->atm_dev == NULL)
 		return -ENODEV;
 
-	return snprintf(buf, PAGE_SIZE, "%pM\n",
-		instance->usbatm->atm_dev->esi);
+	return sprintf(buf, "%pM\n", instance->usbatm->atm_dev->esi);
 }
 
 static ssize_t adsl_state_show(struct device *dev,
@@ -326,8 +325,8 @@ static ssize_t adsl_state_show(struct device *dev,
 
 	value = instance->card_info[CXINF_LINE_STARTABLE];
 	if (unlikely(value >= ARRAY_SIZE(str)))
-		return snprintf(buf, PAGE_SIZE, "%u\n", value);
-	return snprintf(buf, PAGE_SIZE, "%s\n", str[value]);
+		return sprintf(buf, "%u\n", value);
+	return sprintf(buf, "%s\n", str[value]);
 }
 
 static ssize_t adsl_state_store(struct device *dev,
@@ -408,7 +407,7 @@ static ssize_t adsl_state_store(struct device *dev,
 		case CXPOLL_STOPPING:
 			/* abort stop request */
 			instance->poll_state = CXPOLL_POLLING;
-			/* fall through */
+			fallthrough;
 		case CXPOLL_POLLING:
 		case CXPOLL_SHUTDOWN:
 			/* don't start polling */
@@ -539,6 +538,37 @@ CXACRU_SET_##_action(                                        adsl_config);
 
 CXACRU_ALL_FILES(INIT);
 
+static struct attribute *cxacru_attrs[] = {
+	&dev_attr_adsl_config.attr,
+	&dev_attr_adsl_state.attr,
+	&dev_attr_adsl_controller_version.attr,
+	&dev_attr_adsl_headend_environment.attr,
+	&dev_attr_adsl_headend.attr,
+	&dev_attr_modulation.attr,
+	&dev_attr_line_startable.attr,
+	&dev_attr_downstream_hec_errors.attr,
+	&dev_attr_upstream_hec_errors.attr,
+	&dev_attr_downstream_fec_errors.attr,
+	&dev_attr_upstream_fec_errors.attr,
+	&dev_attr_downstream_crc_errors.attr,
+	&dev_attr_upstream_crc_errors.attr,
+	&dev_attr_startup_attempts.attr,
+	&dev_attr_downstream_bits_per_frame.attr,
+	&dev_attr_upstream_bits_per_frame.attr,
+	&dev_attr_transmitter_power.attr,
+	&dev_attr_downstream_attenuation.attr,
+	&dev_attr_upstream_attenuation.attr,
+	&dev_attr_downstream_snr_margin.attr,
+	&dev_attr_upstream_snr_margin.attr,
+	&dev_attr_mac_address.attr,
+	&dev_attr_line_status.attr,
+	&dev_attr_link_status.attr,
+	&dev_attr_upstream_rate.attr,
+	&dev_attr_downstream_rate.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(cxacru);
+
 /* the following three functions are stolen from drivers/usb/core/message.c */
 static void cxacru_blocking_completion(struct urb *urb)
 {
@@ -552,7 +582,7 @@ struct cxacru_timer {
 
 static void cxacru_timeout_kill(struct timer_list *t)
 {
-	struct cxacru_timer *timer = from_timer(timer, t, timer);
+	struct cxacru_timer *timer = timer_container_of(timer, t, timer);
 
 	usb_unlink_urb(timer->urb);
 }
@@ -567,8 +597,8 @@ static int cxacru_start_wait_urb(struct urb *urb, struct completion *done,
 	timer_setup_on_stack(&timer.timer, cxacru_timeout_kill, 0);
 	mod_timer(&timer.timer, jiffies + msecs_to_jiffies(CMD_TIMEOUT));
 	wait_for_completion(done);
-	del_timer_sync(&timer.timer);
-	destroy_timer_on_stack(&timer.timer);
+	timer_delete_sync(&timer.timer);
+	timer_destroy_on_stack(&timer.timer);
 
 	if (actual_length)
 		*actual_length = urb->actual_length;
@@ -736,17 +766,6 @@ static int cxacru_card_status(struct cxacru_data *instance)
 	return 0;
 }
 
-static void cxacru_remove_device_files(struct usbatm_data *usbatm_instance,
-		struct atm_dev *atm_dev)
-{
-	struct usb_interface *intf = usbatm_instance->usb_intf;
-
-	#define CXACRU_DEVICE_REMOVE_FILE(_name) \
-		device_remove_file(&intf->dev, &dev_attr_##_name);
-	CXACRU_ALL_FILES(REMOVE);
-	#undef CXACRU_DEVICE_REMOVE_FILE
-}
-
 static int cxacru_atm_start(struct usbatm_data *usbatm_instance,
 		struct atm_dev *atm_dev)
 {
@@ -765,13 +784,6 @@ static int cxacru_atm_start(struct usbatm_data *usbatm_instance,
 		return ret;
 	}
 
-	#define CXACRU_DEVICE_CREATE_FILE(_name) \
-		ret = device_create_file(&intf->dev, &dev_attr_##_name); \
-		if (unlikely(ret)) \
-			goto fail_sysfs;
-	CXACRU_ALL_FILES(CREATE);
-	#undef CXACRU_DEVICE_CREATE_FILE
-
 	/* start ADSL */
 	mutex_lock(&instance->adsl_state_serialize);
 	ret = cxacru_cm(instance, CM_REQUEST_CHIP_ADSL_LINE_START, NULL, 0, NULL, 0);
@@ -789,7 +801,7 @@ static int cxacru_atm_start(struct usbatm_data *usbatm_instance,
 	case CXPOLL_STOPPING:
 		/* abort stop request */
 		instance->poll_state = CXPOLL_POLLING;
-		/* fall through */
+		fallthrough;
 	case CXPOLL_POLLING:
 	case CXPOLL_SHUTDOWN:
 		/* don't start polling */
@@ -798,17 +810,9 @@ static int cxacru_atm_start(struct usbatm_data *usbatm_instance,
 	mutex_unlock(&instance->poll_state_serialize);
 	mutex_unlock(&instance->adsl_state_serialize);
 
-	printk(KERN_INFO "%s%d: %s %pM\n", atm_dev->type, atm_dev->number,
-			usbatm_instance->description, atm_dev->esi);
-
 	if (start_polling)
 		cxacru_poll_status(&instance->poll_work.work);
 	return 0;
-
-fail_sysfs:
-	usb_err(usbatm_instance, "cxacru_atm_start: device_create_file failed (%d)\n", ret);
-	cxacru_remove_device_files(usbatm_instance, atm_dev);
-	return ret;
 }
 
 static void cxacru_poll_status(struct work_struct *work)
@@ -845,15 +849,15 @@ static void cxacru_poll_status(struct work_struct *work)
 
 		switch (instance->adsl_status) {
 		case 0:
-			atm_printk(KERN_INFO, usbatm, "ADSL state: running\n");
+			atm_info(usbatm, "ADSL state: running\n");
 			break;
 
 		case 1:
-			atm_printk(KERN_INFO, usbatm, "ADSL state: stopped\n");
+			atm_info(usbatm, "ADSL state: stopped\n");
 			break;
 
 		default:
-			atm_printk(KERN_INFO, usbatm, "Unknown adsl status %02x\n", instance->adsl_status);
+			atm_info(usbatm, "Unknown adsl status %02x\n", instance->adsl_status);
 			break;
 		}
 	}
@@ -976,94 +980,6 @@ cleanup:
 	return ret;
 }
 
-static void cxacru_upload_firmware(struct cxacru_data *instance,
-				   const struct firmware *fw,
-				   const struct firmware *bp)
-{
-	int ret;
-	struct usbatm_data *usbatm = instance->usbatm;
-	struct usb_device *usb_dev = usbatm->usb_dev;
-	__le16 signature[] = { usb_dev->descriptor.idVendor,
-			       usb_dev->descriptor.idProduct };
-	__le32 val;
-
-	usb_dbg(usbatm, "%s\n", __func__);
-
-	/* FirmwarePllFClkValue */
-	val = cpu_to_le32(instance->modem_type->pll_f_clk);
-	ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, PLLFCLK_ADDR, (u8 *) &val, 4);
-	if (ret) {
-		usb_err(usbatm, "FirmwarePllFClkValue failed: %d\n", ret);
-		return;
-	}
-
-	/* FirmwarePllBClkValue */
-	val = cpu_to_le32(instance->modem_type->pll_b_clk);
-	ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, PLLBCLK_ADDR, (u8 *) &val, 4);
-	if (ret) {
-		usb_err(usbatm, "FirmwarePllBClkValue failed: %d\n", ret);
-		return;
-	}
-
-	/* Enable SDRAM */
-	val = cpu_to_le32(SDRAM_ENA);
-	ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, SDRAMEN_ADDR, (u8 *) &val, 4);
-	if (ret) {
-		usb_err(usbatm, "Enable SDRAM failed: %d\n", ret);
-		return;
-	}
-
-	/* Firmware */
-	usb_info(usbatm, "loading firmware\n");
-	ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, FW_ADDR, fw->data, fw->size);
-	if (ret) {
-		usb_err(usbatm, "Firmware upload failed: %d\n", ret);
-		return;
-	}
-
-	/* Boot ROM patch */
-	if (instance->modem_type->boot_rom_patch) {
-		usb_info(usbatm, "loading boot ROM patch\n");
-		ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, BR_ADDR, bp->data, bp->size);
-		if (ret) {
-			usb_err(usbatm, "Boot ROM patching failed: %d\n", ret);
-			return;
-		}
-	}
-
-	/* Signature */
-	ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, SIG_ADDR, (u8 *) signature, 4);
-	if (ret) {
-		usb_err(usbatm, "Signature storing failed: %d\n", ret);
-		return;
-	}
-
-	usb_info(usbatm, "starting device\n");
-	if (instance->modem_type->boot_rom_patch) {
-		val = cpu_to_le32(BR_ADDR);
-		ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, BR_STACK_ADDR, (u8 *) &val, 4);
-	} else {
-		ret = cxacru_fw(usb_dev, FW_GOTO_MEM, 0x0, 0x0, FW_ADDR, NULL, 0);
-	}
-	if (ret) {
-		usb_err(usbatm, "Passing control to firmware failed: %d\n", ret);
-		return;
-	}
-
-	/* Delay to allow firmware to start up. */
-	msleep_interruptible(1000);
-
-	usb_clear_halt(usb_dev, usb_sndbulkpipe(usb_dev, CXACRU_EP_CMD));
-	usb_clear_halt(usb_dev, usb_rcvbulkpipe(usb_dev, CXACRU_EP_CMD));
-	usb_clear_halt(usb_dev, usb_sndbulkpipe(usb_dev, CXACRU_EP_DATA));
-	usb_clear_halt(usb_dev, usb_rcvbulkpipe(usb_dev, CXACRU_EP_DATA));
-
-	ret = cxacru_cm(instance, CM_REQUEST_CARD_GET_STATUS, NULL, 0, NULL, 0);
-	if (ret < 0) {
-		usb_err(usbatm, "modem failed to initialize: %d\n", ret);
-		return;
-	}
-}
 
 static int cxacru_find_firmware(struct cxacru_data *instance,
 				char *phase, const struct firmware **fw_p)
@@ -1090,8 +1006,14 @@ static int cxacru_heavy_init(struct usbatm_data *usbatm_instance,
 {
 	const struct firmware *fw, *bp;
 	struct cxacru_data *instance = usbatm_instance->driver_data;
-	int ret = cxacru_find_firmware(instance, "fw", &fw);
+	struct usbatm_data *usbatm = instance->usbatm;
+	struct usb_device *usb_dev = usbatm->usb_dev;
+	__le16 signature[] = { usb_dev->descriptor.idVendor,
+			       usb_dev->descriptor.idProduct };
+	__le32 val;
+	int ret;
 
+	ret = cxacru_find_firmware(instance, "fw", &fw);
 	if (ret) {
 		usb_warn(usbatm_instance, "firmware (cxacru-fw.bin) unavailable (system misconfigured?)\n");
 		return ret;
@@ -1106,8 +1028,82 @@ static int cxacru_heavy_init(struct usbatm_data *usbatm_instance,
 		}
 	}
 
-	cxacru_upload_firmware(instance, fw, bp);
+	/* FirmwarePllFClkValue */
+	val = cpu_to_le32(instance->modem_type->pll_f_clk);
+	ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, PLLFCLK_ADDR, (u8 *) &val, 4);
+	if (ret) {
+		usb_err(usbatm, "FirmwarePllFClkValue failed: %d\n", ret);
+		goto done;
+	}
 
+	/* FirmwarePllBClkValue */
+	val = cpu_to_le32(instance->modem_type->pll_b_clk);
+	ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, PLLBCLK_ADDR, (u8 *) &val, 4);
+	if (ret) {
+		usb_err(usbatm, "FirmwarePllBClkValue failed: %d\n", ret);
+		goto done;
+	}
+
+	/* Enable SDRAM */
+	val = cpu_to_le32(SDRAM_ENA);
+	ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, SDRAMEN_ADDR, (u8 *) &val, 4);
+	if (ret) {
+		usb_err(usbatm, "Enable SDRAM failed: %d\n", ret);
+		goto done;
+	}
+
+	/* Firmware */
+	usb_info(usbatm, "loading firmware\n");
+	ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, FW_ADDR, fw->data, fw->size);
+	if (ret) {
+		usb_err(usbatm, "Firmware upload failed: %d\n", ret);
+		goto done;
+	}
+
+	/* Boot ROM patch */
+	if (instance->modem_type->boot_rom_patch) {
+		usb_info(usbatm, "loading boot ROM patch\n");
+		ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, BR_ADDR, bp->data, bp->size);
+		if (ret) {
+			usb_err(usbatm, "Boot ROM patching failed: %d\n", ret);
+			goto done;
+		}
+	}
+
+	/* Signature */
+	ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, SIG_ADDR, (u8 *) signature, 4);
+	if (ret) {
+		usb_err(usbatm, "Signature storing failed: %d\n", ret);
+		goto done;
+	}
+
+	usb_info(usbatm, "starting device\n");
+	if (instance->modem_type->boot_rom_patch) {
+		val = cpu_to_le32(BR_ADDR);
+		ret = cxacru_fw(usb_dev, FW_WRITE_MEM, 0x2, 0x0, BR_STACK_ADDR, (u8 *) &val, 4);
+	} else {
+		ret = cxacru_fw(usb_dev, FW_GOTO_MEM, 0x0, 0x0, FW_ADDR, NULL, 0);
+	}
+	if (ret) {
+		usb_err(usbatm, "Passing control to firmware failed: %d\n", ret);
+		goto done;
+	}
+
+	/* Delay to allow firmware to start up. */
+	msleep_interruptible(1000);
+
+	usb_clear_halt(usb_dev, usb_sndbulkpipe(usb_dev, CXACRU_EP_CMD));
+	usb_clear_halt(usb_dev, usb_rcvbulkpipe(usb_dev, CXACRU_EP_CMD));
+	usb_clear_halt(usb_dev, usb_sndbulkpipe(usb_dev, CXACRU_EP_DATA));
+	usb_clear_halt(usb_dev, usb_rcvbulkpipe(usb_dev, CXACRU_EP_DATA));
+
+	ret = cxacru_cm(instance, CM_REQUEST_CARD_GET_STATUS, NULL, 0, NULL, 0);
+	if (ret < 0) {
+		usb_err(usbatm, "modem failed to initialize: %d\n", ret);
+		goto done;
+	}
+
+done:
 	if (instance->modem_type->boot_rom_patch)
 		release_firmware(bp);
 	release_firmware(fw);
@@ -1127,10 +1123,14 @@ static int cxacru_bind(struct usbatm_data *usbatm_instance,
 	struct cxacru_data *instance;
 	struct usb_device *usb_dev = interface_to_usbdev(intf);
 	struct usb_host_endpoint *cmd_ep = usb_dev->ep_in[CXACRU_EP_CMD];
+	static const u8 ep_addrs[] = {
+		CXACRU_EP_CMD + USB_DIR_IN,
+		CXACRU_EP_CMD + USB_DIR_OUT,
+		0};
 	int ret;
 
 	/* instance init */
-	instance = kzalloc(sizeof(*instance), GFP_KERNEL);
+	instance = kzalloc_obj(*instance);
 	if (!instance)
 		return -ENOMEM;
 
@@ -1169,6 +1169,17 @@ static int cxacru_bind(struct usbatm_data *usbatm_instance,
 
 	if (!cmd_ep) {
 		usb_dbg(usbatm_instance, "cxacru_bind: no command endpoint\n");
+		ret = -ENODEV;
+		goto fail;
+	}
+
+	if (usb_endpoint_xfer_int(&cmd_ep->desc))
+		ret = usb_check_int_endpoints(intf, ep_addrs);
+	else
+		ret = usb_check_bulk_endpoints(intf, ep_addrs);
+
+	if (!ret) {
+		usb_err(usbatm_instance, "cxacru_bind: interface has incorrect endpoints\n");
 		ret = -ENODEV;
 		goto fail;
 	}
@@ -1332,7 +1343,6 @@ static struct usbatm_driver cxacru_driver = {
 	.heavy_init	= cxacru_heavy_init,
 	.unbind		= cxacru_unbind,
 	.atm_start	= cxacru_atm_start,
-	.atm_stop	= cxacru_remove_device_files,
 	.bulk_in	= CXACRU_EP_DATA,
 	.bulk_out	= CXACRU_EP_DATA,
 	.rx_padding	= 3,
@@ -1364,7 +1374,8 @@ static struct usb_driver cxacru_usb_driver = {
 	.name		= cxacru_driver_name,
 	.probe		= cxacru_usb_probe,
 	.disconnect	= usbatm_usb_disconnect,
-	.id_table	= cxacru_usb_ids
+	.id_table	= cxacru_usb_ids,
+	.dev_groups	= cxacru_groups,
 };
 
 module_usb_driver(cxacru_usb_driver);

@@ -140,9 +140,8 @@ static int xlgmac_init_ring(struct xlgmac_pdata *pdata,
 		return -ENOMEM;
 
 	/* Array of descriptor data */
-	ring->desc_data_head = kcalloc(dma_desc_count,
-					sizeof(struct xlgmac_desc_data),
-					GFP_KERNEL);
+	ring->desc_data_head = kzalloc_objs(struct xlgmac_desc_data,
+					    dma_desc_count);
 	if (!ring->desc_data_head)
 		return -ENOMEM;
 
@@ -234,21 +233,18 @@ static int xlgmac_alloc_channels(struct xlgmac_pdata *pdata)
 	int ret = -ENOMEM;
 	unsigned int i;
 
-	channel_head = kcalloc(pdata->channel_count,
-			       sizeof(struct xlgmac_channel), GFP_KERNEL);
+	channel_head = kzalloc_objs(struct xlgmac_channel, pdata->channel_count);
 	if (!channel_head)
 		return ret;
 
 	netif_dbg(pdata, drv, pdata->netdev,
 		  "channel_head=%p\n", channel_head);
 
-	tx_ring = kcalloc(pdata->tx_ring_count, sizeof(struct xlgmac_ring),
-			  GFP_KERNEL);
+	tx_ring = kzalloc_objs(struct xlgmac_ring, pdata->tx_ring_count);
 	if (!tx_ring)
 		goto err_tx_ring;
 
-	rx_ring = kcalloc(pdata->rx_ring_count, sizeof(struct xlgmac_ring),
-			  GFP_KERNEL);
+	rx_ring = kzalloc_objs(struct xlgmac_ring, pdata->rx_ring_count);
 	if (!rx_ring)
 		goto err_rx_ring;
 
@@ -503,7 +499,7 @@ static int xlgmac_map_tx_skb(struct xlgmac_channel *channel,
 	struct xlgmac_desc_data *desc_data;
 	unsigned int offset, datalen, len;
 	struct xlgmac_pkt_info *pkt_info;
-	struct skb_frag_struct *frag;
+	skb_frag_t *frag;
 	unsigned int tso, vlan;
 	dma_addr_t skb_dma;
 	unsigned int i;
@@ -634,7 +630,7 @@ err_out:
 
 void xlgmac_init_desc_ops(struct xlgmac_desc_ops *desc_ops)
 {
-	desc_ops->alloc_channles_and_rings = xlgmac_alloc_channels_and_rings;
+	desc_ops->alloc_channels_and_rings = xlgmac_alloc_channels_and_rings;
 	desc_ops->free_channels_and_rings = xlgmac_free_channels_and_rings;
 	desc_ops->map_tx_skb = xlgmac_map_tx_skb;
 	desc_ops->map_rx_buffer = xlgmac_map_rx_buffer;

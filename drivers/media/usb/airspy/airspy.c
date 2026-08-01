@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * AirSpy SDR driver
  *
  * Copyright (C) 2014 Antti Palosaari <crope@iki.fi>
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2 of the License, or
- *    (at your option) any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -80,7 +71,6 @@ static const struct v4l2_frequency_band bands_rf[] = {
 
 /* stream formats */
 struct airspy_format {
-	char	*name;
 	u32	pixelformat;
 	u32	buffersize;
 };
@@ -88,7 +78,6 @@ struct airspy_format {
 /* format descriptions for capture and preview */
 static struct airspy_format formats[] = {
 	{
-		.name		= "Real U12LE",
 		.pixelformat	= V4L2_SDR_FMT_RU12LE,
 		.buffersize	= BULK_BUFFER_SIZE,
 	},
@@ -134,7 +123,7 @@ struct airspy {
 
 	/* USB control message buffer */
 	#define BUF_SIZE 128
-	u8 buf[BUF_SIZE];
+	u8 *buf;
 
 	/* Current configuration */
 	unsigned int f_adc;
@@ -305,7 +294,7 @@ static void airspy_urb_complete(struct urb *urb)
 		if (unlikely(fbuf == NULL)) {
 			s->vb_full++;
 			dev_notice_ratelimited(s->dev,
-					"videobuf is full, %d packets dropped\n",
+					"video buffer is full, %d packets dropped\n",
 					s->vb_full);
 			goto skip;
 		}
@@ -426,8 +415,11 @@ static int airspy_alloc_urbs(struct airspy *s)
 		dev_dbg(s->dev, "alloc urb=%d\n", i);
 		s->urb_list[i] = usb_alloc_urb(0, GFP_ATOMIC);
 		if (!s->urb_list[i]) {
-			for (j = 0; j < i; j++)
+			for (j = 0; j < i; j++) {
 				usb_free_urb(s->urb_list[j]);
+				s->urb_list[j] = NULL;
+			}
+			s->urbs_initialized = 0;
 			return -ENOMEM;
 		}
 		usb_fill_bulk_urb(s->urb_list[i],
@@ -490,12 +482,13 @@ static int airspy_queue_setup(struct vb2_queue *vq,
 		unsigned int *nplanes, unsigned int sizes[], struct device *alloc_devs[])
 {
 	struct airspy *s = vb2_get_drv_priv(vq);
+	unsigned int q_num_bufs = vb2_get_num_buffers(vq);
 
 	dev_dbg(s->dev, "nbuffers=%d\n", *nbuffers);
 
 	/* Need at least 8 buffers */
-	if (vq->num_buffers + *nbuffers < 8)
-		*nbuffers = 8 - vq->num_buffers;
+	if (q_num_bufs + *nbuffers < 8)
+		*nbuffers = 8 - q_num_bufs;
 	*nplanes = 1;
 	sizes[0] = PAGE_ALIGN(s->buffersize);
 
@@ -529,10 +522,12 @@ static int airspy_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	dev_dbg(s->dev, "\n");
 
-	if (!s->udev)
-		return -ENODEV;
-
 	mutex_lock(&s->v4l2_lock);
+
+	if (!s->udev) {
+		ret = -ENODEV;
+		goto err_clear_bit;
+	}
 
 	s->sequence = 0;
 
@@ -610,8 +605,6 @@ static const struct vb2_ops airspy_vb2_ops = {
 	.buf_queue              = airspy_buf_queue,
 	.start_streaming        = airspy_start_streaming,
 	.stop_streaming         = airspy_stop_streaming,
-	.wait_prepare           = vb2_ops_wait_prepare,
-	.wait_finish            = vb2_ops_wait_finish,
 };
 
 static int airspy_querycap(struct file *file, void *fh,
@@ -619,13 +612,9 @@ static int airspy_querycap(struct file *file, void *fh,
 {
 	struct airspy *s = video_drvdata(file);
 
-	strlcpy(cap->driver, KBUILD_MODNAME, sizeof(cap->driver));
-	strlcpy(cap->card, s->vdev.name, sizeof(cap->card));
+	strscpy(cap->driver, KBUILD_MODNAME, sizeof(cap->driver));
+	strscpy(cap->card, s->vdev.name, sizeof(cap->card));
 	usb_make_path(s->udev, cap->bus_info, sizeof(cap->bus_info));
-	cap->device_caps = V4L2_CAP_SDR_CAPTURE | V4L2_CAP_STREAMING |
-			V4L2_CAP_READWRITE | V4L2_CAP_TUNER;
-	cap->capabilities = cap->device_caps | V4L2_CAP_DEVICE_CAPS;
-
 	return 0;
 }
 
@@ -635,7 +624,6 @@ static int airspy_enum_fmt_sdr_cap(struct file *file, void *priv,
 	if (f->index >= NUM_FORMATS)
 		return -EINVAL;
 
-	strlcpy(f->description, formats[f->index].name, sizeof(f->description));
 	f->pixelformat = formats[f->index].pixelformat;
 
 	return 0;
@@ -648,7 +636,6 @@ static int airspy_g_fmt_sdr_cap(struct file *file, void *priv,
 
 	f->fmt.sdr.pixelformat = s->pixelformat;
 	f->fmt.sdr.buffersize = s->buffersize;
-	memset(f->fmt.sdr.reserved, 0, sizeof(f->fmt.sdr.reserved));
 
 	return 0;
 }
@@ -663,7 +650,6 @@ static int airspy_s_fmt_sdr_cap(struct file *file, void *priv,
 	if (vb2_is_busy(q))
 		return -EBUSY;
 
-	memset(f->fmt.sdr.reserved, 0, sizeof(f->fmt.sdr.reserved));
 	for (i = 0; i < NUM_FORMATS; i++) {
 		if (formats[i].pixelformat == f->fmt.sdr.pixelformat) {
 			s->pixelformat = formats[i].pixelformat;
@@ -686,7 +672,6 @@ static int airspy_try_fmt_sdr_cap(struct file *file, void *priv,
 {
 	int i;
 
-	memset(f->fmt.sdr.reserved, 0, sizeof(f->fmt.sdr.reserved));
 	for (i = 0; i < NUM_FORMATS; i++) {
 		if (formats[i].pixelformat == f->fmt.sdr.pixelformat) {
 			f->fmt.sdr.buffersize = formats[i].buffersize;
@@ -720,14 +705,14 @@ static int airspy_g_tuner(struct file *file, void *priv, struct v4l2_tuner *v)
 	int ret;
 
 	if (v->index == 0) {
-		strlcpy(v->name, "AirSpy ADC", sizeof(v->name));
+		strscpy(v->name, "AirSpy ADC", sizeof(v->name));
 		v->type = V4L2_TUNER_ADC;
 		v->capability = V4L2_TUNER_CAP_1HZ | V4L2_TUNER_CAP_FREQ_BANDS;
 		v->rangelow  = bands[0].rangelow;
 		v->rangehigh = bands[0].rangehigh;
 		ret = 0;
 	} else if (v->index == 1) {
-		strlcpy(v->name, "AirSpy RF", sizeof(v->name));
+		strscpy(v->name, "AirSpy RF", sizeof(v->name));
 		v->type = V4L2_TUNER_RF;
 		v->capability = V4L2_TUNER_CAP_1HZ | V4L2_TUNER_CAP_FREQ_BANDS;
 		v->rangelow  = bands_rf[0].rangelow;
@@ -872,6 +857,7 @@ static void airspy_video_release(struct v4l2_device *v)
 
 	v4l2_ctrl_handler_free(&s->hdl);
 	v4l2_device_unregister(&s->v4l2_dev);
+	kfree(s->buf);
 	kfree(s);
 }
 
@@ -979,13 +965,23 @@ static int airspy_probe(struct usb_interface *intf,
 {
 	struct airspy *s;
 	int ret;
-	u8 u8tmp, buf[BUF_SIZE];
+	u8 u8tmp, *buf;
 
-	s = kzalloc(sizeof(struct airspy), GFP_KERNEL);
+	buf = NULL;
+	ret = -ENOMEM;
+
+	s = kzalloc_obj(struct airspy);
 	if (s == NULL) {
 		dev_err(&intf->dev, "Could not allocate memory for state\n");
 		return -ENOMEM;
 	}
+
+	s->buf = kzalloc(BUF_SIZE, GFP_KERNEL);
+	if (!s->buf)
+		goto err_free_mem;
+	buf = kzalloc(BUF_SIZE, GFP_KERNEL);
+	if (!buf)
+		goto err_free_mem;
 
 	mutex_init(&s->v4l2_lock);
 	mutex_init(&s->vb_queue_lock);
@@ -1021,6 +1017,7 @@ static int airspy_probe(struct usb_interface *intf,
 	s->vb_queue.ops = &airspy_vb2_ops;
 	s->vb_queue.mem_ops = &vb2_vmalloc_memops;
 	s->vb_queue.timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
+	s->vb_queue.lock = &s->vb_queue_lock;
 	ret = vb2_queue_init(&s->vb_queue);
 	if (ret) {
 		dev_err(s->dev, "Could not initialize vb2 queue\n");
@@ -1030,7 +1027,6 @@ static int airspy_probe(struct usb_interface *intf,
 	/* Init video_device structure */
 	s->vdev = airspy_template;
 	s->vdev.queue = &s->vb_queue;
-	s->vdev.queue->lock = &s->vb_queue_lock;
 	video_set_drvdata(&s->vdev, s);
 
 	/* Register the v4l2_device structure */
@@ -1066,6 +1062,8 @@ static int airspy_probe(struct usb_interface *intf,
 	s->v4l2_dev.ctrl_handler = &s->hdl;
 	s->vdev.v4l2_dev = &s->v4l2_dev;
 	s->vdev.lock = &s->v4l2_lock;
+	s->vdev.device_caps = V4L2_CAP_SDR_CAPTURE | V4L2_CAP_STREAMING |
+			      V4L2_CAP_READWRITE | V4L2_CAP_TUNER;
 
 	ret = video_register_device(&s->vdev, VFL_TYPE_SDR, -1);
 	if (ret) {
@@ -1073,6 +1071,10 @@ static int airspy_probe(struct usb_interface *intf,
 				ret);
 		goto err_free_controls;
 	}
+
+	/* Free buf if success*/
+	kfree(buf);
+
 	dev_info(s->dev, "Registered as %s\n",
 			video_device_node_name(&s->vdev));
 	dev_notice(s->dev, "SDR API is still slightly experimental and functionality changes may follow\n");
@@ -1082,6 +1084,8 @@ err_free_controls:
 	v4l2_ctrl_handler_free(&s->hdl);
 	v4l2_device_unregister(&s->v4l2_dev);
 err_free_mem:
+	kfree(buf);
+	kfree(s->buf);
 	kfree(s);
 	return ret;
 }

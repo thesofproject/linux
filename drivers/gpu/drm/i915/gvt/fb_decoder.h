@@ -36,6 +36,10 @@
 #ifndef _GVT_FB_DECODER_H_
 #define _GVT_FB_DECODER_H_
 
+#include <linux/types.h>
+
+struct intel_vgpu;
+
 #define _PLANE_CTL_FORMAT_SHIFT		24
 #define _PLANE_CTL_TILED_SHIFT		10
 #define _PIPE_V_SRCSZ_SHIFT		0
@@ -96,12 +100,10 @@ enum DDI_PORT {
 	DDI_PORT_E	= 4
 };
 
-struct intel_gvt;
-
 /* color space conversion and gamma correction are not included */
 struct intel_vgpu_primary_plane_format {
 	u8	enabled;	/* plane is enabled */
-	u8	tiled;		/* X-tiled */
+	u32	tiled;		/* tiling mode: linear, X-tiled, Y tiled, etc */
 	u8	bpp;		/* bits per pixel */
 	u32	hw_format;	/* format field in the PRI_CTL register */
 	u32	drm_format;	/* format in DRM definition */
@@ -148,22 +150,9 @@ struct intel_vgpu_cursor_plane_format {
 	u32	y_hot;		/* in pixels */
 };
 
-struct intel_vgpu_pipe_format {
-	struct intel_vgpu_primary_plane_format	primary;
-	struct intel_vgpu_sprite_plane_format	sprite;
-	struct intel_vgpu_cursor_plane_format	cursor;
-	enum DDI_PORT ddi_port;  /* the DDI port that pipe is connected to */
-};
-
-struct intel_vgpu_fb_format {
-	struct intel_vgpu_pipe_format	pipes[I915_MAX_PIPES];
-};
-
 int intel_vgpu_decode_primary_plane(struct intel_vgpu *vgpu,
 	struct intel_vgpu_primary_plane_format *plane);
 int intel_vgpu_decode_cursor_plane(struct intel_vgpu *vgpu,
 	struct intel_vgpu_cursor_plane_format *plane);
-int intel_vgpu_decode_sprite_plane(struct intel_vgpu *vgpu,
-	struct intel_vgpu_sprite_plane_format *plane);
 
 #endif

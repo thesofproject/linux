@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * i2c driver for hmc5843/5843/5883/5883l/5983
  *
  * Split from hmc5843.c
  * Copyright (C) Josef Gajdusek <atx@atx.name>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -55,24 +52,29 @@ static const struct regmap_config hmc5843_i2c_regmap_config = {
 	.cache_type = REGCACHE_RBTREE,
 };
 
-static int hmc5843_i2c_probe(struct i2c_client *cli,
-			     const struct i2c_device_id *id)
+static int hmc5843_i2c_probe(struct i2c_client *cli)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(cli);
+	struct regmap *regmap = devm_regmap_init_i2c(cli,
+			&hmc5843_i2c_regmap_config);
+	if (IS_ERR(regmap))
+		return PTR_ERR(regmap);
+
 	return hmc5843_common_probe(&cli->dev,
-			devm_regmap_init_i2c(cli, &hmc5843_i2c_regmap_config),
+			regmap,
 			id->driver_data, id->name);
 }
 
-static int hmc5843_i2c_remove(struct i2c_client *client)
+static void hmc5843_i2c_remove(struct i2c_client *client)
 {
-	return hmc5843_common_remove(&client->dev);
+	hmc5843_common_remove(&client->dev);
 }
 
 static const struct i2c_device_id hmc5843_id[] = {
-	{ "hmc5843", HMC5843_ID },
-	{ "hmc5883", HMC5883_ID },
-	{ "hmc5883l", HMC5883L_ID },
-	{ "hmc5983", HMC5983_ID },
+	{ .name = "hmc5843", .driver_data = HMC5843_ID },
+	{ .name = "hmc5883", .driver_data = HMC5883_ID },
+	{ .name = "hmc5883l", .driver_data = HMC5883L_ID },
+	{ .name = "hmc5983", .driver_data = HMC5983_ID },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, hmc5843_id);
@@ -82,14 +84,14 @@ static const struct of_device_id hmc5843_of_match[] = {
 	{ .compatible = "honeywell,hmc5883", .data = (void *)HMC5883_ID },
 	{ .compatible = "honeywell,hmc5883l", .data = (void *)HMC5883L_ID },
 	{ .compatible = "honeywell,hmc5983", .data = (void *)HMC5983_ID },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(of, hmc5843_of_match);
 
 static struct i2c_driver hmc5843_driver = {
 	.driver = {
 		.name	= "hmc5843",
-		.pm	= HMC5843_PM_OPS,
+		.pm	= pm_sleep_ptr(&hmc5843_pm_ops),
 		.of_match_table = hmc5843_of_match,
 	},
 	.id_table	= hmc5843_id,
@@ -101,3 +103,4 @@ module_i2c_driver(hmc5843_driver);
 MODULE_AUTHOR("Josef Gajdusek <atx@atx.name>");
 MODULE_DESCRIPTION("HMC5843/5883/5883L/5983 i2c driver");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS("IIO_HMC5843");

@@ -58,7 +58,7 @@ debug
     2 = verbose debug messages);
     This option appears only when ``CONFIG_SND_DEBUG=y``.
     This option can be dynamically changed via sysfs
-    /sys/modules/snd/parameters/debug file.
+    /sys/module/snd/parameters/debug file.
   
 Module snd-pcm-oss
 ------------------
@@ -70,7 +70,7 @@ dsp_map
     PCM device number maps assigned to the 1st OSS device;
     Default: 0
 adsp_map
-    PCM device number maps assigned to the 2st OSS device;
+    PCM device number maps assigned to the 2nd OSS device;
     Default: 1
 nonblock_open
     Don't block opening busy PCM devices;
@@ -97,8 +97,17 @@ midi_map
     MIDI device number maps assigned to the 1st OSS device;
     Default: 0
 amidi_map
-    MIDI device number maps assigned to the 2st OSS device;
+    MIDI device number maps assigned to the 2nd OSS device;
     Default: 1
+
+Module snd-soc-core
+-------------------
+
+The soc core module. It is used by all ALSA card drivers.
+It takes the following options which have global effects.
+
+prealloc_buffer_size_kbytes
+    Specify prealloc buffer size in kbytes (default: 512).
 
 Common parameters for top sound card modules
 --------------------------------------------
@@ -123,6 +132,19 @@ id
 enable
     enable card;
     Default: enabled, for PCI and ISA PnP cards
+
+These options are used for either specifying the order of instances or
+controlling enabling and disabling of each one of the devices if there
+are multiple devices bound with the same driver. For example, there are
+many machines which have two HD-audio controllers (one for HDMI/DP
+audio and another for onboard analog). In most cases, the second one is
+in primary usage, and people would like to assign it as the first
+appearing card. They can do it by specifying "index=1,0" module
+parameter, which will swap the assignment slots.
+
+Today, with the sound backend like PulseAudio and PipeWire which
+supports dynamic configuration, it's of little use, but that was a
+help for static configuration in the past.
 
 Module snd-adlib
 ----------------
@@ -309,7 +331,7 @@ pcifix
 This module supports all ADB PCM channels, ac97 mixer, SPDIF, hardware
 EQ, mpu401, gameport. A3D and wavetable support are still in development.
 Development and reverse engineering work is being coordinated at
-http://savannah.nongnu.org/projects/openvortex/
+https://savannah.nongnu.org/projects/openvortex/
 SPDIF output has a copy of the AC97 codec output, unless you use the
 ``spdif`` pcm device, which allows raw data passthru.
 The hardware EQ hardware and SPDIF is only present in the Vortex2 and 
@@ -495,7 +517,8 @@ Module for C-Media CMI8338/8738/8768/8770 PCI sound cards.
 mpu_port
     port address of MIDI interface (8338 only):
     0x300,0x310,0x320,0x330 = legacy port,
-    0 = disable (default)
+    1 = integrated PCI port (default on 8738),
+    0 = disable
 fm_port
     port address of OPL-3 FM synthesizer (8x38 only):
     0x388 = legacy port,
@@ -713,13 +736,14 @@ Module for EMU10K1/EMU10k2 based PCI sound cards.
 
 * Sound Blaster Live!
 * Sound Blaster PCI 512
-* Emu APS (partially supported)
 * Sound Blaster Audigy
-	
+* E-MU APS (partially supported)
+* E-MU DAS
+
 extin
-    bitmap of available external inputs for FX8010 (see bellow)
+    bitmap of available external inputs for FX8010 (see below)
 extout
-    bitmap of available external outputs for FX8010 (see bellow)
+    bitmap of available external outputs for FX8010 (see below)
 seq_ports
     allocated sequencer ports (4 by default)
 max_synth_voices
@@ -1001,6 +1025,8 @@ position_fix
     2 = POSBUF: use position buffer,
     3 = VIACOMBO: VIA-specific workaround for capture,
     4 = COMBO: use LPIB for playback, auto for capture stream
+    5 = SKL+: apply the delay calculation available on recent Intel chips
+    6 = FIFO: correct the position with the fixed FIFO size, for recent AMD chips
 probe_mask
     Bitmask to probe codecs (default = -1, meaning all slots);
     When the bit 8 (0x100) is set, the lower 8 bits are used
@@ -1033,6 +1059,9 @@ power_save
     Automatic power-saving timeout (in second, 0 = disable)
 power_save_controller
     Reset HD-audio controller in power-saving mode (default = on)
+pm_blacklist
+    Enable / disable power-management deny-list (default = look up PM
+    deny-list, 0 = skip PM deny-list, 1 = force to turn off runtime PM)
 align_buffer_size
     Force rounding of buffer/period sizes to multiples of 128 bytes.
     This is more efficient in terms of memory access but isn't
@@ -1056,13 +1085,19 @@ The model name ``generic`` is treated as a special case.  When this
 model is given, the driver uses the generic codec parser without
 "codec-patch".  It's sometimes good for testing and debugging.
 
+The model option can be used also for aliasing to another PCI or codec
+SSID.  When it's passed in the form of ``model=XXXX:YYYY`` where XXXX
+and YYYY are the sub-vendor and sub-device IDs in hex numbers,
+respectively, the driver will refer to that SSID as a reference to the
+quirk table.
+
 If the default configuration doesn't work and one of the above
 matches with your device, report it together with alsa-info.sh
 output (with ``--no-upload`` option) to kernel bugzilla or alsa-devel
 ML (see the section `Links and Addresses`_).
 
 ``power_save`` and ``power_save_controller`` options are for power-saving
-mode.  See powersave.txt for details.
+mode.  See Documentation/sound/designs/powersave.rst for details.
 
 Note 2: If you get click noises on output, try the module option
 ``position_fix=1`` or ``2``.  ``position_fix=1`` will use the SD_LPIB
@@ -1133,7 +1168,7 @@ line_outs_monitor
 enable_monitor
     Enable Analog Out on Channel 63/64 by default.
 
-See hdspm.txt for details.
+See Documentation/sound/cards/hdspm.rst for details.
 
 Module snd-ice1712
 ------------------
@@ -1498,7 +1533,7 @@ Module for Digigram miXart8 sound cards.
 
 This module supports multiple cards.
 Note: One miXart8 board will be represented as 4 alsa cards.
-See MIXART.txt for details.
+See Documentation/sound/cards/mixart.rst for details.
 
 When the driver is compiled as a module and the hotplug firmware
 is supported, the firmware data is loaded via hotplug automatically.
@@ -1568,11 +1603,11 @@ joystick_io
 The driver requires firmware files ``turtlebeach/msndinit.bin`` and
 ``turtlebeach/msndperm.bin`` in the proper firmware directory.
 
-See Documentation/sound/oss/MultiSound for important information
+See Documentation/sound/cards/multisound.sh for important information
 about this driver.  Note that it has been discontinued, but the 
 Voyetra Turtle Beach knowledge base entry for it is still available
 at
-http://www.turtlebeach.com
+https://www.turtlebeach.com
 
 Module snd-msnd-pinnacle
 ------------------------
@@ -2218,12 +2253,154 @@ device_setup
     Default: 0x0000 
 ignore_ctl_error
     Ignore any USB-controller regarding mixer interface (default: no)
+    ``ignore_ctl_error=1`` may help when you get an error at accessing
+    the mixer element such as URB error -22.  This happens on some
+    buggy USB device or the controller.  This workaround corresponds to
+    the ``quirk_flags`` bit 14, too.
 autoclock
     Enable auto-clock selection for UAC2 devices (default: yes)
+lowlatency
+    Enable low latency playback mode (default: yes).
+    Could disable it to switch back to the old mode if face a regression.
 quirk_alias
     Quirk alias list, pass strings like ``0123abcd:5678beef``, which
     applies the existing quirk for the device 5678:beef to a new
     device 0123:abcd.
+implicit_fb
+    Apply the generic implicit feedback sync mode.  When this is set
+    and the playback stream sync mode is ASYNC, the driver tries to
+    tie an adjacent ASYNC capture stream as the implicit feedback
+    source.  This is equivalent with quirk_flags bit 17.
+use_vmalloc
+    Use vmalloc() for allocations of the PCM buffers (default: yes).
+    For architectures with non-coherent memory like ARM or MIPS, the
+    mmap access may give inconsistent results with vmalloc'ed
+    buffers.  If mmap is used on such architectures, turn off this
+    option, so that the DMA-coherent buffers are allocated and used
+    instead.
+delayed_register
+    The option is needed for devices that have multiple streams
+    defined in multiple USB interfaces.  The driver may invoke
+    registrations multiple times (once per interface) and this may
+    lead to the insufficient device enumeration.
+    This option receives an array of strings, and you can pass
+    ID:INTERFACE like ``0123abcd:4`` for performing the delayed
+    registration to the given device.  In this example, when a USB
+    device 0123:abcd is probed, the driver waits the registration
+    until the USB interface 4 gets probed.
+    The driver prints a message like "Found post-registration device
+    assignment: 1234abcd:04" for such a device, so that user can
+    notice the need.
+skip_validation
+    Skip unit descriptor validation (default: no).
+    The option is used to ignore the validation errors with the hexdump
+    of the unit descriptor instead of a driver probe error, so that we
+    can check its details.
+quirk_flags
+    The option provides a refined and flexible control for applying quirk
+    flags.  It allows to specify the quirk flags for each device, and can
+    be modified dynamically via sysfs.
+    The old usage accepts an array of integers, each of which applies quirk
+    flags on the device in the order of probing.
+    E.g., ``quirk_flags=0x01,0x02`` applies get_sample_rate to the first
+    device, and share_media_device to the second device.
+    The new usage accepts a string in the format of
+    ``VID1:PID1:FLAGS1;VID2:PID2:FLAGS2;...``, where ``VIDx`` and ``PIDx``
+    specify the device, and ``FLAGSx`` specify the flags to be applied.
+    ``VIDx`` and ``PIDx`` are 4-digit hexadecimal numbers, and can be
+    specified as ``*`` to match any value.  ``FLAGSx`` can be a set of
+    flags given by name, separated by ``|``, or a hexadecimal number
+    representing the bit flags.  The available flag names are listed below.
+    An exclamation mark can be prefixed to a flag name to negate the flag.
+    For example, ``1234:abcd:mixer_playback_min_mute|!ignore_ctl_error;*:*:0x01;``
+    applies the ``mixer_playback_min_mute`` flag and clears the
+    ``ignore_ctl_error`` flag for the device 1234:abcd, and applies the
+    ``skip_sample_rate`` flag for all devices.
+
+        * bit 0: ``get_sample_rate``
+          Skip reading sample rate for devices
+        * bit 1: ``share_media_device``
+          Create Media Controller API entries
+        * bit 2: ``align_transfer``
+          Allow alignment on audio sub-slot at transfer
+        * bit 3: ``tx_length``
+          Add length specifier to transfers
+        * bit 4: ``playback_first``
+          Start playback stream at first in implement feedback mode
+        * bit 5: ``skip_clock_selector``
+          Skip clock selector setup
+        * bit 6: ``ignore_clock_source``
+          Ignore errors from clock source search
+        * bit 7: ``itf_usb_dsd_dac``
+          Indicates ITF-USB DSD-based DACs
+        * bit 8: ``ctl_msg_delay``
+          Add a delay of 20ms at each control message handling
+        * bit 9: ``ctl_msg_delay_1m``
+          Add a delay of 1-2ms at each control message handling
+        * bit 10: ``ctl_msg_delay_5m``
+          Add a delay of 5-6ms at each control message handling
+        * bit 11: ``iface_delay``
+          Add a delay of 50ms at each interface setup
+        * bit 12: ``validate_rates``
+          Perform sample rate validations at probe
+        * bit 13: ``disable_autosuspend``
+          Disable runtime PM autosuspend
+        * bit 14: ``ignore_ctl_error``
+          Ignore errors for mixer access
+        * bit 15: ``dsd_raw``
+          Support generic DSD raw U32_BE format
+        * bit 16: ``set_iface_first``
+          Set up the interface at first like UAC1
+        * bit 17: ``generic_implicit_fb``
+          Apply the generic implicit feedback sync mode
+        * bit 18: ``skip_implicit_fb``
+          Don't apply implicit feedback sync mode
+        * bit 19: ``iface_skip_close``
+          Don't close interface during setting sample rate
+        * bit 20: ``force_iface_reset``
+          Force an interface reset whenever stopping & restarting a stream
+        * bit 21: ``fixed_rate``
+          Do not set PCM rate (frequency) when only one rate is available
+          for the given endpoint
+        * bit 22: ``mic_res_16``
+          Set the fixed resolution 16 for Mic Capture Volume
+        * bit 23: ``mic_res_384``
+          Set the fixed resolution 384 for Mic Capture Volume
+        * bit 24: ``mixer_playback_min_mute``
+          Set minimum volume control value as mute for devices where the
+          lowest playback value represents muted state instead of minimum
+          audible volume
+        * bit 25: ``mixer_capture_min_mute``
+          Similar to bit 24 but for capture streams
+        * bit 26: ``skip_iface_setup``
+          Skip the probe-time interface setup (usb_set_interface,
+          init_pitch, init_sample_rate); redundant with
+          snd_usb_endpoint_prepare() at stream-open time
+        * bit 27: ``mixer_playback_linear_vol``
+          Set linear volume mapping for devices where the playback volume
+          control value is mapped to voltage (instead of dB) level linearly.
+          In short: ``x(raw) = (raw - raw_min) / (raw_max - raw_min)``;
+          ``V(x) = k * x``; ``dB(x) = 20 * log10(x)``. Overrides bit 24
+        * bit 28: ``mixer_capture_linear_vol``
+          Similar to bit 27 but for capture streams. Overrides bit 25
+        * bit 29: ``ifb_silence_on_empty``
+          In implicit feedback mode, when an entire capture URB returns with
+          all iso_frame_desc[i].status != 0 (bytes==0), do not silently return
+          from snd_usb_handle_sync_urb. Instead fall through and enqueue a
+          packet_info containing only size-0 packets, so the OUT ring keeps
+          moving (emits silence). Needed by Behringer Flow 8 (1397:050c).
+        * bit 30: ``mixer_get_cur_broken``
+          Some mixers are sticky, which means that setting their current volume
+          is a no-op, and reading the current volume returns a constant value.
+          The sticky check disables these mixers to prevent confusing userspace.
+          However, some devices do have a tunable volume despite the reported
+          current volume being constant. As the sticky check can't distinguish
+          between the two categories, setting this flag tells that the device
+          should fall into the second category when GET_CUR returns a constant
+          value, resulting in the sticky check being non-fatal and only
+          disabling GET_CUR instead of the whole mixer. The current volume will
+          then be provided by the internal cache that stores the last set
+          volume
 
 This module supports multiple devices, autoprobe and hotplugging.
 
@@ -2231,13 +2408,15 @@ NB: ``nrpacks`` parameter can be modified dynamically via sysfs.
 Don't put the value over 20.  Changing via sysfs has no sanity
 check.
 
-NB: ``ignore_ctl_error=1`` may help when you get an error at accessing
-the mixer element such as URB error -22.  This happens on some
-buggy USB device or the controller.
+NB: ``ignore_ctl_error=1`` just provides a quick way to work around the
+issues.  If you have a buggy device that requires these quirks, please
+report it to the upstream.
 
-NB: quirk_alias option is provided only for testing / development.
+NB: ``quirk_alias`` option is provided only for testing / development.
 If you want to have a proper support, contact to upstream for
 adding the matching quirk in the driver code statically.
+Ditto for ``quirk_flags``.  If a device is known to require specific
+workarounds, please report to the upstream.
 
 Module snd-usb-caiaq
 --------------------
@@ -2680,4 +2859,4 @@ Kernel Bugzilla
 ALSA Developers ML
     mailto:alsa-devel@alsa-project.org
 alsa-info.sh script
-    http://www.alsa-project.org/alsa-info.sh
+    https://www.alsa-project.org/alsa-info.sh

@@ -1,4 +1,4 @@
-/**
+/*
  * \file mga_ioc32.c
  *
  * 32-bit ioctl compatibility routines for the MGA DRM.
@@ -33,11 +33,12 @@
 
 #include <linux/compat.h>
 
-#include <drm/drmP.h>
+#include <drm/drm.h>
+#include <drm/drm_ioctl.h>
 
 #include "nouveau_ioctl.h"
 
-/**
+/*
  * Called whenever a 32-bit process running under a 64-bit kernel
  * performs an ioctl on /dev/dri/card<n>.
  *

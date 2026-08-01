@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Copyright (c) 2014-2016, NVIDIA CORPORATION.  All rights reserved.
  *
@@ -29,6 +30,14 @@
 #define THERMCTL_THERMTRIP_CTL			0x80
 /* BITs are defined in device file */
 
+#define THERMCTL_INTR_ENABLE			0x88
+#define THERMCTL_INTR_DISABLE			0x8c
+#define TH_INTR_UP_DN_EN			0x3
+#define THERM_IRQ_MEM_MASK			(TH_INTR_UP_DN_EN << 24)
+#define THERM_IRQ_GPU_MASK			(TH_INTR_UP_DN_EN << 16)
+#define THERM_IRQ_CPU_MASK			(TH_INTR_UP_DN_EN << 8)
+#define THERM_IRQ_TSENSE_MASK			(TH_INTR_UP_DN_EN << 0)
+
 #define SENSOR_PDIV				0x1c0
 #define SENSOR_PDIV_CPU_MASK			(0xf << 12)
 #define SENSOR_PDIV_GPU_MASK			(0xf << 8)
@@ -46,6 +55,9 @@
 #define SENSOR_TEMP2				0x1cc
 #define SENSOR_TEMP2_MEM_TEMP_MASK		(0xffff << 16)
 #define SENSOR_TEMP2_PLLX_TEMP_MASK		0xffff
+
+#define FUSE_VSENSOR_CALIB			0x08c
+#define FUSE_TSENSOR_COMMON			0x180
 
 /**
  * struct tegra_tsensor_group - SOC_THERM sensor group data
@@ -70,6 +82,7 @@ struct tegra_tsensor_group {
 	u32 thermtrip_enable_mask;
 	u32 thermtrip_any_en_mask;
 	u32 thermtrip_threshold_mask;
+	u32 thermctl_isr_mask;
 	u16 thermctl_lvl0_offset;
 	u32 thermctl_lvl0_up_thresh_mask;
 	u32 thermctl_lvl0_dn_thresh_mask;
@@ -92,11 +105,18 @@ struct tegra_tsensor {
 	const struct tegra_tsensor_group *group;
 };
 
+struct tsensor_group_thermtrips {
+	u8 id;
+	u32 temp;
+};
+
 struct tegra_soctherm_fuse {
 	u32 fuse_base_cp_mask, fuse_base_cp_shift;
+	u32 fuse_shift_cp_mask, fuse_shift_cp_shift;
 	u32 fuse_base_ft_mask, fuse_base_ft_shift;
 	u32 fuse_shift_ft_mask, fuse_shift_ft_shift;
-	u32 fuse_spare_realignment;
+	u32 fuse_common_reg, fuse_spare_realignment;
+	u32 nominal_calib_ft;
 };
 
 struct tsensor_shared_calib {
@@ -113,6 +133,7 @@ struct tegra_soctherm_soc {
 	const int thresh_grain;
 	const unsigned int bptt;
 	const bool use_ccroc;
+	struct tsensor_group_thermtrips *thermtrips;
 };
 
 int tegra_calc_shared_calib(const struct tegra_soctherm_fuse *tfuse,
@@ -120,6 +141,10 @@ int tegra_calc_shared_calib(const struct tegra_soctherm_fuse *tfuse,
 int tegra_calc_tsensor_calib(const struct tegra_tsensor *sensor,
 			     const struct tsensor_shared_calib *shared,
 			     u32 *calib);
+
+#ifdef CONFIG_ARCH_TEGRA_114_SOC
+extern const struct tegra_soctherm_soc tegra114_soctherm;
+#endif
 
 #ifdef CONFIG_ARCH_TEGRA_124_SOC
 extern const struct tegra_soctherm_soc tegra124_soctherm;

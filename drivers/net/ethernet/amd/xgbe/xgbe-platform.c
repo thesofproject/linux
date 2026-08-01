@@ -1,117 +1,8 @@
+// SPDX-License-Identifier: (GPL-2.0-or-later OR BSD-3-Clause)
 /*
- * AMD 10Gb Ethernet driver
- *
- * This file is available to you under your choice of the following two
- * licenses:
- *
- * License 1: GPLv2
- *
- * Copyright (c) 2014-2016 Advanced Micro Devices, Inc.
- *
- * This file is free software; you may copy, redistribute and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or (at
- * your option) any later version.
- *
- * This file is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- * This file incorporates work covered by the following copyright and
- * permission notice:
- *     The Synopsys DWC ETHER XGMAC Software Driver and documentation
- *     (hereinafter "Software") is an unsupported proprietary work of Synopsys,
- *     Inc. unless otherwise expressly agreed to in writing between Synopsys
- *     and you.
- *
- *     The Software IS NOT an item of Licensed Software or Licensed Product
- *     under any End User Software License Agreement or Agreement for Licensed
- *     Product with Synopsys or any supplement thereto.  Permission is hereby
- *     granted, free of charge, to any person obtaining a copy of this software
- *     annotated with this license and the Software, to deal in the Software
- *     without restriction, including without limitation the rights to use,
- *     copy, modify, merge, publish, distribute, sublicense, and/or sell copies
- *     of the Software, and to permit persons to whom the Software is furnished
- *     to do so, subject to the following conditions:
- *
- *     The above copyright notice and this permission notice shall be included
- *     in all copies or substantial portions of the Software.
- *
- *     THIS SOFTWARE IS BEING DISTRIBUTED BY SYNOPSYS SOLELY ON AN "AS IS"
- *     BASIS AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- *     TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- *     PARTICULAR PURPOSE ARE HEREBY DISCLAIMED. IN NO EVENT SHALL SYNOPSYS
- *     BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- *     CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- *     SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- *     INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- *     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- *     THE POSSIBILITY OF SUCH DAMAGE.
- *
- *
- * License 2: Modified BSD
- *
- * Copyright (c) 2014-2016 Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of Advanced Micro Devices, Inc. nor the
- *       names of its contributors may be used to endorse or promote products
- *       derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * This file incorporates work covered by the following copyright and
- * permission notice:
- *     The Synopsys DWC ETHER XGMAC Software Driver and documentation
- *     (hereinafter "Software") is an unsupported proprietary work of Synopsys,
- *     Inc. unless otherwise expressly agreed to in writing between Synopsys
- *     and you.
- *
- *     The Software IS NOT an item of Licensed Software or Licensed Product
- *     under any End User Software License Agreement or Agreement for Licensed
- *     Product with Synopsys or any supplement thereto.  Permission is hereby
- *     granted, free of charge, to any person obtaining a copy of this software
- *     annotated with this license and the Software, to deal in the Software
- *     without restriction, including without limitation the rights to use,
- *     copy, modify, merge, publish, distribute, sublicense, and/or sell copies
- *     of the Software, and to permit persons to whom the Software is furnished
- *     to do so, subject to the following conditions:
- *
- *     The above copyright notice and this permission notice shall be included
- *     in all copies or substantial portions of the Software.
- *
- *     THIS SOFTWARE IS BEING DISTRIBUTED BY SYNOPSYS SOLELY ON AN "AS IS"
- *     BASIS AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- *     TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- *     PARTICULAR PURPOSE ARE HEREBY DISCLAIMED. IN NO EVENT SHALL SYNOPSYS
- *     BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- *     CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- *     SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- *     INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- *     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- *     THE POSSIBILITY OF SUCH DAMAGE.
+ * Copyright (c) 2014-2025, Advanced Micro Devices, Inc.
+ * Copyright (c) 2014, Synopsys, Inc.
+ * All rights reserved
  */
 
 #include <linux/module.h>
@@ -123,9 +14,7 @@
 #include <linux/io.h>
 #include <linux/of.h>
 #include <linux/of_net.h>
-#include <linux/of_address.h>
 #include <linux/of_platform.h>
-#include <linux/of_device.h>
 #include <linux/clk.h>
 #include <linux/property.h>
 #include <linux/acpi.h>
@@ -135,17 +24,6 @@
 #include "xgbe-common.h"
 
 #ifdef CONFIG_ACPI
-static const struct acpi_device_id xgbe_acpi_match[];
-
-static struct xgbe_version_data *xgbe_acpi_vdata(struct xgbe_prv_data *pdata)
-{
-	const struct acpi_device_id *id;
-
-	id = acpi_match_device(xgbe_acpi_match, pdata->dev);
-
-	return id ? (struct xgbe_version_data *)id->driver_data : NULL;
-}
-
 static int xgbe_acpi_support(struct xgbe_prv_data *pdata)
 {
 	struct device *dev = pdata->dev;
@@ -173,11 +51,6 @@ static int xgbe_acpi_support(struct xgbe_prv_data *pdata)
 	return 0;
 }
 #else   /* CONFIG_ACPI */
-static struct xgbe_version_data *xgbe_acpi_vdata(struct xgbe_prv_data *pdata)
-{
-	return NULL;
-}
-
 static int xgbe_acpi_support(struct xgbe_prv_data *pdata)
 {
 	return -EINVAL;
@@ -185,17 +58,6 @@ static int xgbe_acpi_support(struct xgbe_prv_data *pdata)
 #endif  /* CONFIG_ACPI */
 
 #ifdef CONFIG_OF
-static const struct of_device_id xgbe_of_match[];
-
-static struct xgbe_version_data *xgbe_of_vdata(struct xgbe_prv_data *pdata)
-{
-	const struct of_device_id *id;
-
-	id = of_match_device(xgbe_of_match, pdata->dev);
-
-	return id ? (struct xgbe_version_data *)id->data : NULL;
-}
-
 static int xgbe_of_support(struct xgbe_prv_data *pdata)
 {
 	struct device *dev = pdata->dev;
@@ -244,11 +106,6 @@ static struct platform_device *xgbe_of_get_phy_pdev(struct xgbe_prv_data *pdata)
 	return phy_pdev;
 }
 #else   /* CONFIG_OF */
-static struct xgbe_version_data *xgbe_of_vdata(struct xgbe_prv_data *pdata)
-{
-	return NULL;
-}
-
 static int xgbe_of_support(struct xgbe_prv_data *pdata)
 {
 	return -EINVAL;
@@ -290,18 +147,11 @@ static struct platform_device *xgbe_get_phy_pdev(struct xgbe_prv_data *pdata)
 	return phy_pdev;
 }
 
-static struct xgbe_version_data *xgbe_get_vdata(struct xgbe_prv_data *pdata)
-{
-	return pdata->use_acpi ? xgbe_acpi_vdata(pdata)
-			       : xgbe_of_vdata(pdata);
-}
-
 static int xgbe_platform_probe(struct platform_device *pdev)
 {
 	struct xgbe_prv_data *pdata;
 	struct device *dev = &pdev->dev;
 	struct platform_device *phy_pdev;
-	struct resource *res;
 	const char *phy_mode;
 	unsigned int phy_memnum, phy_irqnum;
 	unsigned int dma_irqnum, dma_irqend;
@@ -322,7 +172,7 @@ static int xgbe_platform_probe(struct platform_device *pdev)
 	pdata->use_acpi = dev->of_node ? 0 : 1;
 
 	/* Get the version data */
-	pdata->vdata = xgbe_get_vdata(pdata);
+	pdata->vdata = (struct xgbe_version_data *)device_get_match_data(dev);
 
 	phy_pdev = xgbe_get_phy_pdev(pdata);
 	if (!phy_pdev) {
@@ -339,7 +189,7 @@ static int xgbe_platform_probe(struct platform_device *pdev)
 		 *   the PHY resources listed last
 		 */
 		phy_memnum = xgbe_resource_count(pdev, IORESOURCE_MEM) - 3;
-		phy_irqnum = xgbe_resource_count(pdev, IORESOURCE_IRQ) - 1;
+		phy_irqnum = platform_irq_count(pdev) - 1;
 		dma_irqnum = 1;
 		dma_irqend = phy_irqnum;
 	} else {
@@ -349,12 +199,11 @@ static int xgbe_platform_probe(struct platform_device *pdev)
 		phy_memnum = 0;
 		phy_irqnum = 0;
 		dma_irqnum = 1;
-		dma_irqend = xgbe_resource_count(pdev, IORESOURCE_IRQ);
+		dma_irqend = platform_irq_count(pdev);
 	}
 
 	/* Obtain the mmio areas for the device */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	pdata->xgmac_regs = devm_ioremap_resource(dev, res);
+	pdata->xgmac_regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(pdata->xgmac_regs)) {
 		dev_err(dev, "xgmac ioremap failed\n");
 		ret = PTR_ERR(pdata->xgmac_regs);
@@ -363,8 +212,7 @@ static int xgbe_platform_probe(struct platform_device *pdev)
 	if (netif_msg_probe(pdata))
 		dev_dbg(dev, "xgmac_regs = %p\n", pdata->xgmac_regs);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	pdata->xpcs_regs = devm_ioremap_resource(dev, res);
+	pdata->xpcs_regs = devm_platform_ioremap_resource(pdev, 1);
 	if (IS_ERR(pdata->xpcs_regs)) {
 		dev_err(dev, "xpcs ioremap failed\n");
 		ret = PTR_ERR(pdata->xpcs_regs);
@@ -373,8 +221,8 @@ static int xgbe_platform_probe(struct platform_device *pdev)
 	if (netif_msg_probe(pdata))
 		dev_dbg(dev, "xpcs_regs  = %p\n", pdata->xpcs_regs);
 
-	res = platform_get_resource(phy_pdev, IORESOURCE_MEM, phy_memnum++);
-	pdata->rxtx_regs = devm_ioremap_resource(dev, res);
+	pdata->rxtx_regs = devm_platform_ioremap_resource(phy_pdev,
+							  phy_memnum++);
 	if (IS_ERR(pdata->rxtx_regs)) {
 		dev_err(dev, "rxtx ioremap failed\n");
 		ret = PTR_ERR(pdata->rxtx_regs);
@@ -383,8 +231,8 @@ static int xgbe_platform_probe(struct platform_device *pdev)
 	if (netif_msg_probe(pdata))
 		dev_dbg(dev, "rxtx_regs  = %p\n", pdata->rxtx_regs);
 
-	res = platform_get_resource(phy_pdev, IORESOURCE_MEM, phy_memnum++);
-	pdata->sir0_regs = devm_ioremap_resource(dev, res);
+	pdata->sir0_regs = devm_platform_ioremap_resource(phy_pdev,
+							  phy_memnum++);
 	if (IS_ERR(pdata->sir0_regs)) {
 		dev_err(dev, "sir0 ioremap failed\n");
 		ret = PTR_ERR(pdata->sir0_regs);
@@ -393,8 +241,8 @@ static int xgbe_platform_probe(struct platform_device *pdev)
 	if (netif_msg_probe(pdata))
 		dev_dbg(dev, "sir0_regs  = %p\n", pdata->sir0_regs);
 
-	res = platform_get_resource(phy_pdev, IORESOURCE_MEM, phy_memnum++);
-	pdata->sir1_regs = devm_ioremap_resource(dev, res);
+	pdata->sir1_regs = devm_platform_ioremap_resource(phy_pdev,
+							  phy_memnum++);
 	if (IS_ERR(pdata->sir1_regs)) {
 		dev_err(dev, "sir1 ioremap failed\n");
 		ret = PTR_ERR(pdata->sir1_regs);
@@ -404,13 +252,9 @@ static int xgbe_platform_probe(struct platform_device *pdev)
 		dev_dbg(dev, "sir1_regs  = %p\n", pdata->sir1_regs);
 
 	/* Retrieve the MAC address */
-	ret = device_property_read_u8_array(dev, XGBE_MAC_ADDR_PROPERTY,
-					    pdata->mac_addr,
-					    sizeof(pdata->mac_addr));
-	if (ret || !is_valid_ether_addr(pdata->mac_addr)) {
-		dev_err(dev, "invalid %s property\n", XGBE_MAC_ADDR_PROPERTY);
-		if (!ret)
-			ret = -EINVAL;
+	ret = device_get_mac_address(dev, pdata->mac_addr);
+	if (ret) {
+		dev_err(dev, "invalid MAC address property\n");
 		goto err_io;
 	}
 
@@ -467,10 +311,8 @@ static int xgbe_platform_probe(struct platform_device *pdev)
 
 	/* Get the device interrupt */
 	ret = platform_get_irq(pdev, 0);
-	if (ret < 0) {
-		dev_err(dev, "platform_get_irq 0 failed\n");
+	if (ret < 0)
 		goto err_io;
-	}
 	pdata->dev_irq = ret;
 
 	/* Get the per channel DMA interrupts */
@@ -479,12 +321,8 @@ static int xgbe_platform_probe(struct platform_device *pdev)
 
 		for (i = 0; (i < max) && (dma_irqnum < dma_irqend); i++) {
 			ret = platform_get_irq(pdata->platdev, dma_irqnum++);
-			if (ret < 0) {
-				netdev_err(pdata->netdev,
-					   "platform_get_irq %u failed\n",
-					   dma_irqnum - 1);
+			if (ret < 0)
 				goto err_io;
-			}
 
 			pdata->channel_irq[i] = ret;
 		}
@@ -496,10 +334,8 @@ static int xgbe_platform_probe(struct platform_device *pdev)
 
 	/* Get the auto-negotiation interrupt */
 	ret = platform_get_irq(phy_pdev, phy_irqnum++);
-	if (ret < 0) {
-		dev_err(dev, "platform_get_irq phy 0 failed\n");
+	if (ret < 0)
 		goto err_io;
-	}
 	pdata->an_irq = ret;
 
 	/* Configure the netdev resource */
@@ -523,7 +359,7 @@ err_alloc:
 	return ret;
 }
 
-static int xgbe_platform_remove(struct platform_device *pdev)
+static void xgbe_platform_remove(struct platform_device *pdev)
 {
 	struct xgbe_prv_data *pdata = platform_get_drvdata(pdev);
 
@@ -532,8 +368,6 @@ static int xgbe_platform_remove(struct platform_device *pdev)
 	platform_device_put(pdata->phy_platdev);
 
 	xgbe_free_pdata(pdata);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -546,7 +380,7 @@ static int xgbe_platform_suspend(struct device *dev)
 	DBGPR("-->xgbe_suspend\n");
 
 	if (netif_running(netdev))
-		ret = xgbe_powerdown(netdev, XGMAC_DRIVER_CONTEXT);
+		ret = xgbe_powerdown(netdev);
 
 	pdata->lpm_ctrl = XMDIO_READ(pdata, MDIO_MMD_PCS, MDIO_CTRL1);
 	pdata->lpm_ctrl |= MDIO_CTRL1_LPOWER;
@@ -569,7 +403,7 @@ static int xgbe_platform_resume(struct device *dev)
 	XMDIO_WRITE(pdata, MDIO_MMD_PCS, MDIO_CTRL1, pdata->lpm_ctrl);
 
 	if (netif_running(netdev)) {
-		ret = xgbe_powerup(netdev, XGMAC_DRIVER_CONTEXT);
+		ret = xgbe_powerup(netdev);
 
 		/* Schedule a restart in case the link or phy state changed
 		 * while we were powered down.
@@ -591,7 +425,6 @@ static const struct xgbe_version_data xgbe_v1 = {
 	.tx_tstamp_workaround		= 1,
 };
 
-#ifdef CONFIG_ACPI
 static const struct acpi_device_id xgbe_acpi_match[] = {
 	{ .id = "AMDI8001",
 	  .driver_data = (kernel_ulong_t)&xgbe_v1 },
@@ -599,9 +432,7 @@ static const struct acpi_device_id xgbe_acpi_match[] = {
 };
 
 MODULE_DEVICE_TABLE(acpi, xgbe_acpi_match);
-#endif
 
-#ifdef CONFIG_OF
 static const struct of_device_id xgbe_of_match[] = {
 	{ .compatible = "amd,xgbe-seattle-v1a",
 	  .data = &xgbe_v1 },
@@ -609,7 +440,6 @@ static const struct of_device_id xgbe_of_match[] = {
 };
 
 MODULE_DEVICE_TABLE(of, xgbe_of_match);
-#endif
 
 static SIMPLE_DEV_PM_OPS(xgbe_platform_pm_ops,
 			 xgbe_platform_suspend, xgbe_platform_resume);
@@ -617,12 +447,8 @@ static SIMPLE_DEV_PM_OPS(xgbe_platform_pm_ops,
 static struct platform_driver xgbe_driver = {
 	.driver = {
 		.name = XGBE_DRV_NAME,
-#ifdef CONFIG_ACPI
 		.acpi_match_table = xgbe_acpi_match,
-#endif
-#ifdef CONFIG_OF
 		.of_match_table = xgbe_of_match,
-#endif
 		.pm = &xgbe_platform_pm_ops,
 	},
 	.probe = xgbe_platform_probe,

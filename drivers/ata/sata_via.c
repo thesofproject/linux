@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  sata_via.c - VIA Serial ATA controllers
  *
@@ -8,29 +9,10 @@
  *  Copyright 2003-2004 Red Hat, Inc.  All rights reserved.
  *  Copyright 2003-2004 Jeff Garzik
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2, or (at your option)
- *  any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
- *
- *
  *  libata documentation is available via 'make {ps|pdf}docs',
  *  as Documentation/driver-api/libata.rst
  *
  *  Hardware documentation available under NDA.
- *
- *
- *
  */
 
 #include <linux/kernel.h>
@@ -43,6 +25,7 @@
 #include <scsi/scsi_cmnd.h>
 #include <scsi/scsi_host.h>
 #include <linux/libata.h>
+#include <linux/string_choices.h>
 
 #define DRV_NAME	"sata_via"
 #define DRV_VERSION	"2.6"
@@ -102,15 +85,35 @@ static void vt6421_set_dma_mode(struct ata_port *ap, struct ata_device *adev);
 static void vt6421_error_handler(struct ata_port *ap);
 
 static const struct pci_device_id svia_pci_tbl[] = {
-	{ PCI_VDEVICE(VIA, 0x5337), vt6420 },
-	{ PCI_VDEVICE(VIA, 0x0591), vt6420 }, /* 2 sata chnls (Master) */
-	{ PCI_VDEVICE(VIA, 0x3149), vt6420 }, /* 2 sata chnls (Master) */
-	{ PCI_VDEVICE(VIA, 0x3249), vt6421 }, /* 2 sata chnls, 1 pata chnl */
-	{ PCI_VDEVICE(VIA, 0x5372), vt6420 },
-	{ PCI_VDEVICE(VIA, 0x7372), vt6420 },
-	{ PCI_VDEVICE(VIA, 0x5287), vt8251 }, /* 2 sata chnls (Master/Slave) */
-	{ PCI_VDEVICE(VIA, 0x9000), vt8251 },
-
+	{
+		PCI_VDEVICE(VIA, 0x5337),
+		.driver_data = vt6420,
+	}, {
+		/* 2 sata chnls (Master) */
+		PCI_VDEVICE(VIA, 0x0591),
+		.driver_data = vt6420,
+	}, {
+		/* 2 sata chnls (Master) */
+		PCI_VDEVICE(VIA, 0x3149),
+		.driver_data = vt6420,
+	}, {
+		/* 2 sata chnls, 1 pata chnl */
+		PCI_VDEVICE(VIA, 0x3249),
+		.driver_data = vt6421,
+	}, {
+		PCI_VDEVICE(VIA, 0x5372),
+		.driver_data = vt6420,
+	}, {
+		PCI_VDEVICE(VIA, 0x7372),
+		.driver_data = vt6420,
+	}, {
+		/* 2 sata chnls (Master/Slave) */
+		PCI_VDEVICE(VIA, 0x5287),
+		.driver_data = vt8251,
+	}, {
+		PCI_VDEVICE(VIA, 0x9000),
+		.driver_data = vt8251,
+	},
 	{ }	/* terminate list */
 };
 
@@ -125,7 +128,7 @@ static struct pci_driver svia_pci_driver = {
 	.remove			= ata_pci_remove_one,
 };
 
-static struct scsi_host_template svia_sht = {
+static const struct scsi_host_template svia_sht = {
 	ATA_BMDMA_SHT(DRV_NAME),
 };
 
@@ -137,7 +140,7 @@ static struct ata_port_operations svia_base_ops = {
 static struct ata_port_operations vt6420_sata_ops = {
 	.inherits		= &svia_base_ops,
 	.freeze			= svia_noop_freeze,
-	.prereset		= vt6420_prereset,
+	.reset.prereset		= vt6420_prereset,
 	.bmdma_start		= vt6420_bmdma_start,
 };
 
@@ -157,7 +160,7 @@ static struct ata_port_operations vt6421_sata_ops = {
 
 static struct ata_port_operations vt8251_ops = {
 	.inherits		= &svia_base_ops,
-	.hardreset		= sata_std_hardreset,
+	.reset.hardreset	= sata_std_hardreset,
 	.scr_read		= vt8251_scr_read,
 	.scr_write		= vt8251_scr_write,
 };
@@ -377,7 +380,7 @@ static int vt6420_prereset(struct ata_link *link, unsigned long deadline)
 
 	ata_port_info(ap,
 		      "SATA link %s 1.5 Gbps (SStatus %X SControl %X)\n",
-		      online ? "up" : "down", sstatus, scontrol);
+		      str_up_down(online), sstatus, scontrol);
 
 	/* SStatus is read one more time */
 	svia_scr_read(link, SCR_STATUS, &sstatus);
@@ -523,14 +526,7 @@ static int vt6421_prepare_host(struct pci_dev *pdev, struct ata_host **r_host)
 	for (i = 0; i < host->n_ports; i++)
 		vt6421_init_addrs(host->ports[i]);
 
-	rc = dma_set_mask(&pdev->dev, ATA_DMA_MASK);
-	if (rc)
-		return rc;
-	rc = dma_set_coherent_mask(&pdev->dev, ATA_DMA_MASK);
-	if (rc)
-		return rc;
-
-	return 0;
+	return dma_set_mask_and_coherent(&pdev->dev, ATA_DMA_MASK);
 }
 
 static int vt8251_prepare_host(struct pci_dev *pdev, struct ata_host **r_host)
@@ -597,6 +593,7 @@ static irqreturn_t vt642x_interrupt(int irq, void *dev_instance)
 }
 
 static void vt6421_error_handler(struct ata_port *ap)
+	__must_hold(&ap->host->eh_mutex)
 {
 	struct svia_priv *hpriv = ap->host->private_data;
 	struct pci_dev *pdev = to_pci_dev(ap->host->dev);

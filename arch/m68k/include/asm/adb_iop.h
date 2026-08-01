@@ -29,10 +29,11 @@
 
 #define ADB_IOP_EXPLICIT	0x80	/* nonzero if explicit command */
 #define ADB_IOP_AUTOPOLL	0x40	/* auto/SRQ polling enabled    */
+#define ADB_IOP_SET_AUTOPOLL	0x20	/* set autopoll device list    */
 #define ADB_IOP_SRQ		0x04	/* SRQ detected                */
 #define ADB_IOP_TIMEOUT		0x02	/* nonzero if timeout          */
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 struct adb_iopmsg {
 	__u8 flags;		/* ADB flags         */
@@ -42,4 +43,4 @@ struct adb_iopmsg {
 	__u8 spare[21];		/* spare             */
 };
 
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */

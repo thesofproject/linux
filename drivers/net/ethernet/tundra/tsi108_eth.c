@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*******************************************************************************
 
   Copyright(c) 2006 Tundra Semiconductor Corporation.
 
-  This program is free software; you can redistribute it and/or modify it
-  under the terms of the GNU General Public License as published by the Free
-  Software Foundation; either version 2 of the License, or (at your option)
-  any later version.
-
-  This program is distributed in the hope that it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, write to the Free Software Foundation, Inc., 59
-  Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 *******************************************************************************/
 
@@ -70,9 +58,6 @@
 
 /* Check the phy status every half a second. */
 #define CHECK_PHY_INTERVAL (HZ/2)
-
-static int tsi108_init_one(struct platform_device *pdev);
-static int tsi108_ether_remove(struct platform_device *pdev);
 
 struct tsi108_prv_data {
 	void  __iomem *regs;	/* Base of normal regs */
@@ -154,16 +139,6 @@ struct tsi108_prv_data {
 	unsigned int init_media;
 
 	struct platform_device *pdev;
-};
-
-/* Structure for a device driver */
-
-static struct platform_driver tsi_eth_driver = {
-	.probe = tsi108_init_one,
-	.remove = tsi108_ether_remove,
-	.driver	= {
-		.name = "tsi-ethernet",
-	},
 };
 
 static void tsi108_timed_checker(struct timer_list *t);
@@ -383,9 +358,10 @@ tsi108_stat_carry_one(int carry, int carry_bit, int carry_shift,
 static void tsi108_stat_carry(struct net_device *dev)
 {
 	struct tsi108_prv_data *data = netdev_priv(dev);
+	unsigned long flags;
 	u32 carry1, carry2;
 
-	spin_lock_irq(&data->misclock);
+	spin_lock_irqsave(&data->misclock, flags);
 
 	carry1 = TSI_READ(TSI108_STAT_CARRY1);
 	carry2 = TSI_READ(TSI108_STAT_CARRY2);
@@ -453,7 +429,7 @@ static void tsi108_stat_carry(struct net_device *dev)
 			      TSI108_STAT_TXPAUSEDROP_CARRY,
 			      &data->tx_pause_drop);
 
-	spin_unlock_irq(&data->misclock);
+	spin_unlock_irqrestore(&data->misclock, flags);
 }
 
 /* Read a stat counter atomically with respect to carries.
@@ -1102,20 +1078,22 @@ static int tsi108_get_mac(struct net_device *dev)
 	struct tsi108_prv_data *data = netdev_priv(dev);
 	u32 word1 = TSI_READ(TSI108_MAC_ADDR1);
 	u32 word2 = TSI_READ(TSI108_MAC_ADDR2);
+	u8 addr[ETH_ALEN];
 
 	/* Note that the octets are reversed from what the manual says,
 	 * producing an even weirder ordering...
 	 */
 	if (word2 == 0 && word1 == 0) {
-		dev->dev_addr[0] = 0x00;
-		dev->dev_addr[1] = 0x06;
-		dev->dev_addr[2] = 0xd2;
-		dev->dev_addr[3] = 0x00;
-		dev->dev_addr[4] = 0x00;
+		addr[0] = 0x00;
+		addr[1] = 0x06;
+		addr[2] = 0xd2;
+		addr[3] = 0x00;
+		addr[4] = 0x00;
 		if (0x8 == data->phy)
-			dev->dev_addr[5] = 0x01;
+			addr[5] = 0x01;
 		else
-			dev->dev_addr[5] = 0x02;
+			addr[5] = 0x02;
+		eth_hw_addr_set(dev, addr);
 
 		word2 = (dev->dev_addr[0] << 16) | (dev->dev_addr[1] << 24);
 
@@ -1125,12 +1103,13 @@ static int tsi108_get_mac(struct net_device *dev)
 		TSI_WRITE(TSI108_MAC_ADDR1, word1);
 		TSI_WRITE(TSI108_MAC_ADDR2, word2);
 	} else {
-		dev->dev_addr[0] = (word2 >> 16) & 0xff;
-		dev->dev_addr[1] = (word2 >> 24) & 0xff;
-		dev->dev_addr[2] = (word1 >> 0) & 0xff;
-		dev->dev_addr[3] = (word1 >> 8) & 0xff;
-		dev->dev_addr[4] = (word1 >> 16) & 0xff;
-		dev->dev_addr[5] = (word1 >> 24) & 0xff;
+		addr[0] = (word2 >> 16) & 0xff;
+		addr[1] = (word2 >> 24) & 0xff;
+		addr[2] = (word1 >> 0) & 0xff;
+		addr[3] = (word1 >> 8) & 0xff;
+		addr[4] = (word1 >> 16) & 0xff;
+		addr[5] = (word1 >> 24) & 0xff;
+		eth_hw_addr_set(dev, addr);
 	}
 
 	if (!is_valid_ether_addr(dev->dev_addr)) {
@@ -1147,14 +1126,12 @@ static int tsi108_set_mac(struct net_device *dev, void *addr)
 {
 	struct tsi108_prv_data *data = netdev_priv(dev);
 	u32 word1, word2;
-	int i;
 
 	if (!is_valid_ether_addr(addr))
 		return -EADDRNOTAVAIL;
 
-	for (i = 0; i < 6; i++)
-		/* +2 is for the offset of the HW addr type */
-		dev->dev_addr[i] = ((unsigned char *)addr)[i + 2];
+	/* +2 is for the offset of the HW addr type */
+	eth_hw_addr_set(dev, ((unsigned char *)addr) + 2);
 
 	word2 = (dev->dev_addr[0] << 16) | (dev->dev_addr[1] << 24);
 
@@ -1311,14 +1288,17 @@ static int tsi108_open(struct net_device *dev)
 		       data->id, dev->irq, dev->name);
 	}
 
-	data->rxring = dma_zalloc_coherent(&data->pdev->dev, rxring_size,
-			&data->rxdma, GFP_KERNEL);
-	if (!data->rxring)
+	data->rxring = dma_alloc_coherent(&data->pdev->dev, rxring_size,
+					  &data->rxdma, GFP_KERNEL);
+	if (!data->rxring) {
+		free_irq(data->irq_num, dev);
 		return -ENOMEM;
+	}
 
-	data->txring = dma_zalloc_coherent(&data->pdev->dev, txring_size,
-			&data->txdma, GFP_KERNEL);
+	data->txring = dma_alloc_coherent(&data->pdev->dev, txring_size,
+					  &data->txdma, GFP_KERNEL);
 	if (!data->txring) {
+		free_irq(data->irq_num, dev);
 		dma_free_coherent(&data->pdev->dev, rxring_size, data->rxring,
 				    data->rxdma);
 		return -ENOMEM;
@@ -1399,7 +1379,7 @@ static int tsi108_close(struct net_device *dev)
 	netif_stop_queue(dev);
 	napi_disable(&data->napi);
 
-	del_timer_sync(&data->timer);
+	timer_delete_sync(&data->timer);
 
 	tsi108_stop_ethernet(dev);
 	tsi108_kill_phy(dev);
@@ -1549,7 +1529,7 @@ static const struct net_device_ops tsi108_netdev_ops = {
 	.ndo_start_xmit		= tsi108_send_packet,
 	.ndo_set_rx_mode	= tsi108_set_rx_mode,
 	.ndo_get_stats		= tsi108_get_stats,
-	.ndo_do_ioctl		= tsi108_do_ioctl,
+	.ndo_eth_ioctl		= tsi108_do_ioctl,
 	.ndo_set_mac_address	= tsi108_set_mac,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -1608,7 +1588,7 @@ tsi108_init_one(struct platform_device *pdev)
 	data->phy_type = einfo->phy_type;
 	data->irq_num = einfo->irq_num;
 	data->id = pdev->id;
-	netif_napi_add(dev, &data->napi, tsi108_poll, 64);
+	netif_napi_add(dev, &data->napi, tsi108_poll);
 	dev->netdev_ops = &tsi108_netdev_ops;
 	dev->ethtool_ops = &tsi108_ethtool_ops;
 
@@ -1672,7 +1652,7 @@ regs_fail:
 
 static void tsi108_timed_checker(struct timer_list *t)
 {
-	struct tsi108_prv_data *data = from_timer(data, t, timer);
+	struct tsi108_prv_data *data = timer_container_of(data, t, timer);
 	struct net_device *dev = data->dev;
 
 	tsi108_check_phy(dev);
@@ -1680,7 +1660,7 @@ static void tsi108_timed_checker(struct timer_list *t)
 	mod_timer(&data->timer, jiffies + CHECK_PHY_INTERVAL);
 }
 
-static int tsi108_ether_remove(struct platform_device *pdev)
+static void tsi108_ether_remove(struct platform_device *pdev)
 {
 	struct net_device *dev = platform_get_drvdata(pdev);
 	struct tsi108_prv_data *priv = netdev_priv(dev);
@@ -1690,9 +1670,17 @@ static int tsi108_ether_remove(struct platform_device *pdev)
 	iounmap(priv->regs);
 	iounmap(priv->phyregs);
 	free_netdev(dev);
-
-	return 0;
 }
+
+/* Structure for a device driver */
+
+static struct platform_driver tsi_eth_driver = {
+	.probe = tsi108_init_one,
+	.remove = tsi108_ether_remove,
+	.driver	= {
+		.name = "tsi-ethernet",
+	},
+};
 module_platform_driver(tsi_eth_driver);
 
 MODULE_AUTHOR("Tundra Semiconductor Corporation");

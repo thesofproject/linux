@@ -1,20 +1,10 @@
-/* -*- mode: c; c-basic-offset: 8; -*-
- * vim: noexpandtab sw=8 ts=8 sts=0:
- *
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
  * reservations.h
  *
  * Allocation reservations function prototypes and structures.
  *
  * Copyright (C) 2010 Novell.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
 #ifndef	OCFS2_RESERVATIONS_H
@@ -41,7 +31,7 @@ struct ocfs2_alloc_reservation {
 
 #define	OCFS2_RESV_FLAG_INUSE	0x01	/* Set when r_node is part of a btree */
 #define	OCFS2_RESV_FLAG_TMP	0x02	/* Temporary reservation, will be
-					 * destroyed immedately after use */
+					 * destroyed immediately after use */
 #define	OCFS2_RESV_FLAG_DIR	0x04	/* Reservation is for an unindexed
 					 * directory btree */
 
@@ -83,15 +73,10 @@ void ocfs2_resv_discard(struct ocfs2_reservation_map *resmap,
 
 /**
  * ocfs2_resmap_init() - Initialize fields of a reservations bitmap
+ * @osb: struct ocfs2_super to be saved in resmap
  * @resmap: struct ocfs2_reservation_map to initialize
- * @obj: unused for now
- * @ops: unused for now
- * @max_bitmap_bytes: Maximum size of the bitmap (typically blocksize)
- *
- * Only possible return value other than '0' is -ENOMEM for failure to
- * allocation mirror bitmap.
  */
-int ocfs2_resmap_init(struct ocfs2_super *osb,
+void ocfs2_resmap_init(struct ocfs2_super *osb,
 		      struct ocfs2_reservation_map *resmap);
 
 /**
@@ -140,7 +125,7 @@ int ocfs2_resmap_resv_bits(struct ocfs2_reservation_map *resmap,
 /**
  * ocfs2_resmap_claimed_bits() - Tell the reservation code that bits were used.
  * @resmap: reservations bitmap
- * @resv: optional reservation to recalulate based on new bitmap
+ * @resv: optional reservation to recalculate based on new bitmap
  * @cstart: start of allocation in clusters
  * @clen: end of allocation in clusters.
  *

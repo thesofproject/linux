@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012, Intel Corporation
  * Copyright (c) 2015, Red Hat, Inc.
  * Copyright (c) 2015, 2016 Linaro Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #define pr_fmt(fmt) "ACPI: SPCR: " fmt
@@ -28,7 +24,7 @@ EXPORT_SYMBOL(qdf2400_e44_present);
 
 /*
  * Some Qualcomm Datacenter Technologies SoCs have a defective UART BUSY bit.
- * Detect them by examining the OEM fields in the SPCR header, similiar to PCI
+ * Detect them by examining the OEM fields in the SPCR header, similar to PCI
  * quirk detection in pci_mcfg.c.
  */
 static bool qdf2400_erratum_44_present(struct acpi_table_header *h)
@@ -75,7 +71,6 @@ static bool xgene_8250_erratum_present(struct acpi_table_spcr *tb)
 
 /**
  * acpi_parse_spcr() - parse ACPI SPCR table and add preferred console
- *
  * @enable_earlycon: set up earlycon for the console specified by the table
  * @enable_console: setup the console specified by the table.
  *
@@ -86,7 +81,6 @@ static bool xgene_8250_erratum_present(struct acpi_table_spcr *tb)
  *
  * When CONFIG_ACPI_SPCR_TABLE is defined, this function should be called
  * from arch initialization code as soon as the DT/ACPI decision is made.
- *
  */
 int __init acpi_parse_spcr(bool enable_earlycon, bool enable_console)
 {
@@ -101,9 +95,7 @@ int __init acpi_parse_spcr(bool enable_earlycon, bool enable_console)
 	if (acpi_disabled)
 		return -ENODEV;
 
-	status = acpi_get_table(ACPI_SIG_SPCR, 0,
-				(struct acpi_table_header **)&table);
-
+	status = acpi_get_table(ACPI_SIG_SPCR, 0, (struct acpi_table_header **)&table);
 	if (ACPI_FAILURE(status))
 		return -ENOENT;
 
@@ -111,11 +103,16 @@ int __init acpi_parse_spcr(bool enable_earlycon, bool enable_console)
 		pr_info("SPCR table version %d\n", table->header.revision);
 
 	if (table->serial_port.space_id == ACPI_ADR_SPACE_SYSTEM_MEMORY) {
-		switch (ACPI_ACCESS_BIT_WIDTH((
-			table->serial_port.access_width))) {
+		u32 bit_width = table->serial_port.access_width;
+
+		if (bit_width > ACPI_ACCESS_BIT_MAX) {
+			pr_err(FW_BUG "Unacceptable wide SPCR Access Width. Defaulting to byte size\n");
+			bit_width = ACPI_ACCESS_BIT_DEFAULT;
+		}
+		switch (ACPI_ACCESS_BIT_WIDTH((bit_width))) {
 		default:
-			pr_err("Unexpected SPCR Access Width.  Defaulting to byte size\n");
-			/* fall through */
+			pr_err(FW_BUG "Unexpected SPCR Access Width. Defaulting to byte size\n");
+			fallthrough;
 		case 8:
 			iotype = "mmio";
 			break;
@@ -132,7 +129,7 @@ int __init acpi_parse_spcr(bool enable_earlycon, bool enable_console)
 	switch (table->interface_type) {
 	case ACPI_DBG2_ARM_SBSA_32BIT:
 		iotype = "mmio32";
-		/* fall through */
+		fallthrough;
 	case ACPI_DBG2_ARM_PL011:
 	case ACPI_DBG2_ARM_SBSA_GENERIC:
 	case ACPI_DBG2_BCM2835:
@@ -140,14 +137,34 @@ int __init acpi_parse_spcr(bool enable_earlycon, bool enable_console)
 		break;
 	case ACPI_DBG2_16550_COMPATIBLE:
 	case ACPI_DBG2_16550_SUBSET:
+	case ACPI_DBG2_16550_WITH_GAS:
+	case ACPI_DBG2_16550_NVIDIA:
 		uart = "uart";
+		break;
+	case ACPI_DBG2_RISCV_SBI_CON:
+		uart = "sbi";
 		break;
 	default:
 		err = -ENOENT;
 		goto done;
 	}
 
-	switch (table->baud_rate) {
+	/*
+	 * SPCR 1.09 defines Precise Baud Rate Filed contains a specific
+	 * non-zero baud rate which overrides the value of the Configured
+	 * Baud Rate field. If this field is zero or not present, Configured
+	 * Baud Rate is used.
+	 */
+	if (table->header.revision >= 4 && table->precise_baudrate)
+		baud_rate = table->precise_baudrate;
+	else switch (table->baud_rate) {
+	case 0:
+		/*
+		 * SPCR 1.04 defines 0 as a preconfigured state of UART.
+		 * Assume firmware or bootloader configures console correctly.
+		 */
+		baud_rate = 0;
+		break;
 	case 3:
 		baud_rate = 9600;
 		break;
@@ -192,10 +209,15 @@ int __init acpi_parse_spcr(bool enable_earlycon, bool enable_console)
 	if (xgene_8250_erratum_present(table)) {
 		iotype = "mmio32";
 
-		/* for xgene v1 and v2 we don't know the clock rate of the
+		/*
+		 * For xgene v1 and v2 we don't know the clock rate of the
 		 * UART so don't attempt to change to the baud rate state
 		 * in the table because driver cannot calculate the dividers
 		 */
+		baud_rate = 0;
+	}
+
+	if (!baud_rate) {
 		snprintf(opts, sizeof(opts), "%s,%s,0x%llx", uart, iotype,
 			 table->serial_port.address);
 	} else {

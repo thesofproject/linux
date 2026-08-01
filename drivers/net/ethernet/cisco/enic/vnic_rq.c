@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2008-2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright 2007 Nuova Systems, Inc.  All rights reserved.
- *
- * This program is free software; you may redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
  */
 
 #include <linux/kernel.h>
@@ -35,7 +22,7 @@ static int vnic_rq_alloc_bufs(struct vnic_rq *rq)
 	unsigned int blks = VNIC_RQ_BUF_BLKS_NEEDED(count);
 
 	for (i = 0; i < blks; i++) {
-		rq->bufs[i] = kzalloc(VNIC_RQ_BUF_BLK_SZ(count), GFP_ATOMIC);
+		rq->bufs[i] = kzalloc(VNIC_RQ_BUF_BLK_SZ(count), GFP_KERNEL);
 		if (!rq->bufs[i])
 			return -ENOMEM;
 	}
@@ -82,15 +69,16 @@ void vnic_rq_free(struct vnic_rq *rq)
 	rq->ctrl = NULL;
 }
 
-int vnic_rq_alloc(struct vnic_dev *vdev, struct vnic_rq *rq, unsigned int index,
-	unsigned int desc_count, unsigned int desc_size)
+int vnic_rq_alloc_with_type(struct vnic_dev *vdev, struct vnic_rq *rq,
+			    unsigned int index, unsigned int desc_count,
+			    unsigned int desc_size, unsigned int res_type)
 {
 	int err;
 
 	rq->index = index;
 	rq->vdev = vdev;
 
-	rq->ctrl = vnic_dev_get_res(vdev, RES_TYPE_RQ, index);
+	rq->ctrl = vnic_dev_get_res(vdev, res_type, index);
 	if (!rq->ctrl) {
 		vdev_err(vdev, "Failed to hook RQ[%d] resource\n", index);
 		return -EINVAL;
@@ -109,6 +97,13 @@ int vnic_rq_alloc(struct vnic_dev *vdev, struct vnic_rq *rq, unsigned int index,
 	}
 
 	return 0;
+}
+
+int vnic_rq_alloc(struct vnic_dev *vdev, struct vnic_rq *rq, unsigned int index,
+		  unsigned int desc_count, unsigned int desc_size)
+{
+	return vnic_rq_alloc_with_type(vdev, rq, index, desc_count, desc_size,
+				       RES_TYPE_RQ);
 }
 
 static void vnic_rq_init_start(struct vnic_rq *rq, unsigned int cq_index,
@@ -216,4 +211,3 @@ void vnic_rq_clean(struct vnic_rq *rq,
 
 	vnic_dev_clear_desc_ring(&rq->ring);
 }
-

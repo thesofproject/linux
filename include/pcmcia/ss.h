@@ -1,9 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * ss.h
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * The initial developer of the original code is David A. Hinds
  * <dahinds@users.sourceforge.net>.  Portions created by David A. Hinds
@@ -190,7 +187,7 @@ struct pcmcia_socket {
 	unsigned int			sysfs_events;
 
 	/* For the non-trivial interaction between these locks,
-	 * see Documentation/pcmcia/locking.txt */
+	 * see Documentation/pcmcia/locking.rst */
 	struct mutex			skt_mutex;
 	struct mutex			ops_mutex;
 
@@ -230,12 +227,8 @@ struct pcmcia_socket {
 
 
 /* socket drivers must define the resource operations type they use. There
- * are three options:
+ * are two options:
  * - pccard_static_ops		iomem and ioport areas are assigned statically
- * - pccard_iodyn_ops		iomem areas is assigned statically, ioport
- *				areas dynamically
- *				If this option is selected, use
- *				"select PCCARD_IODYN" in Kconfig.
  * - pccard_nonstatic_ops	iomem and ioport areas are assigned dynamically.
  *				If this option is selected, use
  *				"select PCCARD_NONSTATIC" in Kconfig.
@@ -243,13 +236,11 @@ struct pcmcia_socket {
  */
 extern struct pccard_resource_ops pccard_static_ops;
 #if defined(CONFIG_PCMCIA) || defined(CONFIG_PCMCIA_MODULE)
-extern struct pccard_resource_ops pccard_iodyn_ops;
 extern struct pccard_resource_ops pccard_nonstatic_ops;
 #else
 /* If PCMCIA is not used, but only CARDBUS, these functions are not used
  * at all. Therefore, do not use the large (240K!) rsrc_nonstatic module
  */
-#define pccard_iodyn_ops pccard_static_ops
 #define pccard_nonstatic_ops pccard_static_ops
 #endif
 

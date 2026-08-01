@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2008-2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright 2007 Nuova Systems, Inc.  All rights reserved.
- *
- * This program is free software; you may redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
  */
 
 #include <linux/kernel.h>
@@ -33,25 +20,27 @@ void vnic_cq_free(struct vnic_cq *cq)
 	cq->ctrl = NULL;
 }
 
-int vnic_cq_alloc(struct vnic_dev *vdev, struct vnic_cq *cq, unsigned int index,
-	unsigned int desc_count, unsigned int desc_size)
+int vnic_cq_alloc_with_type(struct vnic_dev *vdev, struct vnic_cq *cq,
+			    unsigned int index, unsigned int desc_count,
+			    unsigned int desc_size, unsigned int res_type)
 {
-	int err;
-
 	cq->index = index;
 	cq->vdev = vdev;
 
-	cq->ctrl = vnic_dev_get_res(vdev, RES_TYPE_CQ, index);
+	cq->ctrl = vnic_dev_get_res(vdev, res_type, index);
 	if (!cq->ctrl) {
 		vdev_err(vdev, "Failed to hook CQ[%d] resource\n", index);
 		return -EINVAL;
 	}
 
-	err = vnic_dev_alloc_desc_ring(vdev, &cq->ring, desc_count, desc_size);
-	if (err)
-		return err;
+	return vnic_dev_alloc_desc_ring(vdev, &cq->ring, desc_count, desc_size);
+}
 
-	return 0;
+int vnic_cq_alloc(struct vnic_dev *vdev, struct vnic_cq *cq, unsigned int index,
+		  unsigned int desc_count, unsigned int desc_size)
+{
+	return vnic_cq_alloc_with_type(vdev, cq, index, desc_count, desc_size,
+				       RES_TYPE_CQ);
 }
 
 void vnic_cq_init(struct vnic_cq *cq, unsigned int flow_control_enable,

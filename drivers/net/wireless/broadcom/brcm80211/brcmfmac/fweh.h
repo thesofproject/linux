@@ -1,24 +1,13 @@
+// SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2012 Broadcom Corporation
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 
 #ifndef FWEH_H_
 #define FWEH_H_
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/skbuff.h>
 #include <linux/if_ether.h>
 #include <linux/if.h>
@@ -27,6 +16,10 @@
 struct brcmf_pub;
 struct brcmf_if;
 struct brcmf_cfg80211_info;
+
+#define BRCMF_ABSTRACT_EVENT_BIT	BIT(31)
+#define BRCMF_ABSTRACT_ENUM_DEF(_id, _val) \
+	BRCMF_ENUM_DEF(_id, (BRCMF_ABSTRACT_EVENT_BIT | (_val)))
 
 /* list of firmware events */
 #define BRCMF_FWEH_EVENT_ENUM_DEFLIST \
@@ -101,7 +94,11 @@ struct brcmf_cfg80211_info;
 	BRCMF_ENUM_DEF(FIFO_CREDIT_MAP, 74) \
 	BRCMF_ENUM_DEF(ACTION_FRAME_RX, 75) \
 	BRCMF_ENUM_DEF(TDLS_PEER_EVENT, 92) \
-	BRCMF_ENUM_DEF(BCMC_CREDIT_SUPPORT, 127)
+	BRCMF_ENUM_DEF(BCMC_CREDIT_SUPPORT, 127) \
+	BRCMF_ABSTRACT_ENUM_DEF(EXT_AUTH_REQ, 0) \
+	BRCMF_ABSTRACT_ENUM_DEF(EXT_AUTH_FRAME_RX, 1) \
+	BRCMF_ABSTRACT_ENUM_DEF(MGMT_FRAME_TXSTATUS, 2) \
+	BRCMF_ABSTRACT_ENUM_DEF(MGMT_FRAME_OFFCHAN_DONE, 3)
 
 #define BRCMF_ENUM_DEF(id, val) \
 	BRCMF_E_##id = (val),
@@ -109,15 +106,8 @@ struct brcmf_cfg80211_info;
 /* firmware event codes sent by the dongle */
 enum brcmf_fweh_event_code {
 	BRCMF_FWEH_EVENT_ENUM_DEFLIST
-	/* this determines event mask length which must match
-	 * minimum length check in device firmware so it is
-	 * hard-coded here.
-	 */
-	BRCMF_E_LAST = 139
 };
 #undef BRCMF_ENUM_DEF
-
-#define BRCMF_EVENTING_MASK_LEN		DIV_ROUND_UP(BRCMF_E_LAST, 8)
 
 /* flags field values in struct brcmf_event_msg */
 #define BRCMF_EVENT_MSG_LINK		0x01
@@ -211,7 +201,7 @@ enum brcmf_fweh_event_code {
  */
 #define BRCM_OUI				"\x00\x10\x18"
 #define BCMILCP_BCM_SUBTYPE_EVENT		1
-
+#define BCMILCP_SUBTYPE_VENDOR_LONG		32769
 
 /**
  * struct brcm_ethhdr - broadcom specific ether header.
@@ -266,7 +256,7 @@ struct brcmf_event {
  * @status: status information.
  * @reason: reason code.
  * @auth_type: authentication type.
- * @datalen: lenght of event data buffer.
+ * @datalen: length of event data buffer.
  * @addr: ether address.
  * @ifname: interface name.
  * @ifidx: interface index.
@@ -299,27 +289,66 @@ typedef int (*brcmf_fweh_handler_t)(struct brcmf_if *ifp,
 				    void *data);
 
 /**
+ * struct brcmf_fweh_event_map_item - fweh event and firmware event pair.
+ *
+ * @code: fweh event code as used by higher layers.
+ * @fwevt_code: firmware event code as used by firmware.
+ *
+ * This mapping is needed when a functionally identical event has a
+ * different numerical definition between vendors. When such mapping
+ * is needed the higher layer event code should not collide with the
+ * firmware event.
+ */
+struct brcmf_fweh_event_map_item {
+	enum brcmf_fweh_event_code code;
+	u32 fwevt_code;
+};
+
+/**
+ * struct brcmf_fweh_event_map - mapping between firmware event and fweh event.
+ *
+ * @n_items: number of mapping items.
+ * @items: array of fweh event and firmware event pairs.
+ */
+struct brcmf_fweh_event_map {
+	u32 n_items;
+	const struct brcmf_fweh_event_map_item items[] __counted_by(n_items);
+};
+
+/**
  * struct brcmf_fweh_info - firmware event handling information.
  *
  * @p2pdev_setup_ongoing: P2P device creation in progress.
  * @event_work: event worker.
  * @evt_q_lock: lock for event queue protection.
  * @event_q: event queue.
- * @evt_handler: registered event handlers.
+ * @event_mask_len: length of @event_mask used to enable firmware events.
+ * @event_mask: byte array used in 'event_msgs' iovar command.
+ * @event_map: mapping between fweh event and firmware event which
+ *	may be provided by vendor-specific module for events that need
+ *	mapping.
+ * @num_event_codes: number of firmware events supported by firmware which
+ *	does a minimum length check for the @event_mask. This value is to
+ *	be provided by vendor-specific module determining @event_mask_len
+ *	and consequently the allocation size for @event_mask.
+ * @evt_handler: event handler registry indexed by firmware event code.
  */
 struct brcmf_fweh_info {
+	struct brcmf_pub *drvr;
 	bool p2pdev_setup_ongoing;
 	struct work_struct event_work;
 	spinlock_t evt_q_lock;
 	struct list_head event_q;
-	int (*evt_handler[BRCMF_E_LAST])(struct brcmf_if *ifp,
-					 const struct brcmf_event_msg *evtmsg,
-					 void *data);
+	uint event_mask_len;
+	u8 *event_mask;
+	const struct brcmf_fweh_event_map *event_map;
+	uint num_event_codes;
+	brcmf_fweh_handler_t evt_handler[] __counted_by(num_event_codes);
 };
 
 const char *brcmf_fweh_event_name(enum brcmf_fweh_event_code code);
 
-void brcmf_fweh_attach(struct brcmf_pub *drvr);
+int brcmf_fweh_attach(struct brcmf_pub *drvr);
 void brcmf_fweh_detach(struct brcmf_pub *drvr);
 int brcmf_fweh_register(struct brcmf_pub *drvr, enum brcmf_fweh_event_code code,
 			int (*handler)(struct brcmf_if *ifp,
@@ -330,14 +359,15 @@ void brcmf_fweh_unregister(struct brcmf_pub *drvr,
 int brcmf_fweh_activate_events(struct brcmf_if *ifp);
 void brcmf_fweh_process_event(struct brcmf_pub *drvr,
 			      struct brcmf_event *event_packet,
-			      u32 packet_len);
+			      u32 packet_len, gfp_t gfp);
 void brcmf_fweh_p2pdev_setup(struct brcmf_if *ifp, bool ongoing);
 
 static inline void brcmf_fweh_process_skb(struct brcmf_pub *drvr,
-					  struct sk_buff *skb)
+					  struct sk_buff *skb, u16 stype,
+					  gfp_t gfp)
 {
 	struct brcmf_event *event_packet;
-	u16 usr_stype;
+	u16 subtype, usr_stype;
 
 	/* only process events when protocol matches */
 	if (skb->protocol != cpu_to_be16(ETH_P_LINK_CTL))
@@ -346,8 +376,16 @@ static inline void brcmf_fweh_process_skb(struct brcmf_pub *drvr,
 	if ((skb->len + ETH_HLEN) < sizeof(*event_packet))
 		return;
 
-	/* check for BRCM oui match */
 	event_packet = (struct brcmf_event *)skb_mac_header(skb);
+
+	/* check subtype if needed */
+	if (unlikely(stype)) {
+		subtype = get_unaligned_be16(&event_packet->hdr.subtype);
+		if (subtype != stype)
+			return;
+	}
+
+	/* check for BRCM oui match */
 	if (memcmp(BRCM_OUI, &event_packet->hdr.oui[0],
 		   sizeof(event_packet->hdr.oui)))
 		return;
@@ -357,7 +395,7 @@ static inline void brcmf_fweh_process_skb(struct brcmf_pub *drvr,
 	if (usr_stype != BCMILCP_BCM_SUBTYPE_EVENT)
 		return;
 
-	brcmf_fweh_process_event(drvr, event_packet, skb->len + ETH_HLEN);
+	brcmf_fweh_process_event(drvr, event_packet, skb->len + ETH_HLEN, gfp);
 }
 
 #endif /* FWEH_H_ */

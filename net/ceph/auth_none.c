@@ -69,13 +69,16 @@ static int build_request(struct ceph_auth_client *ac, void *buf, void *end)
  * the generic auth code decode the global_id, and we carry no actual
  * authenticate state, so nothing happens here.
  */
-static int handle_reply(struct ceph_auth_client *ac, int result,
-			void *buf, void *end)
+static int handle_reply(struct ceph_auth_client *ac, u64 global_id,
+			void *buf, void *end, u8 *session_key,
+			int *session_key_len, u8 *con_secret,
+			int *con_secret_len)
 {
 	struct ceph_auth_none_info *xi = ac->private;
 
 	xi->starting = false;
-	return result;
+	ceph_auth_set_global_id(ac, global_id);
+	return 0;
 }
 
 static void ceph_auth_none_destroy_authorizer(struct ceph_authorizer *a)
@@ -94,7 +97,7 @@ static int ceph_auth_none_create_authorizer(
 	struct ceph_none_authorizer *au;
 	int ret;
 
-	au = kmalloc(sizeof(*au), GFP_NOFS);
+	au = kmalloc_obj(*au, GFP_NOFS);
 	if (!au)
 		return -ENOMEM;
 
@@ -109,14 +112,13 @@ static int ceph_auth_none_create_authorizer(
 	auth->authorizer = (struct ceph_authorizer *) au;
 	auth->authorizer_buf = au->buf;
 	auth->authorizer_buf_len = au->buf_len;
-	auth->authorizer_reply_buf = au->reply_buf;
-	auth->authorizer_reply_buf_len = sizeof (au->reply_buf);
+	auth->authorizer_reply_buf = NULL;
+	auth->authorizer_reply_buf_len = 0;
 
 	return 0;
 }
 
 static const struct ceph_auth_client_ops ceph_auth_none_ops = {
-	.name = "none",
 	.reset = reset,
 	.destroy = destroy,
 	.is_authenticated = is_authenticated,
@@ -131,7 +133,7 @@ int ceph_auth_none_init(struct ceph_auth_client *ac)
 	struct ceph_auth_none_info *xi;
 
 	dout("ceph_auth_none_init %p\n", ac);
-	xi = kzalloc(sizeof(*xi), GFP_NOFS);
+	xi = kzalloc_obj(*xi, GFP_NOFS);
 	if (!xi)
 		return -ENOMEM;
 
@@ -142,4 +144,3 @@ int ceph_auth_none_init(struct ceph_auth_client *ac)
 	ac->ops = &ceph_auth_none_ops;
 	return 0;
 }
-

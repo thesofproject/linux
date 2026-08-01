@@ -32,16 +32,14 @@ static void tile_bmove(struct vc_data *vc, struct fb_info *info, int sy,
 }
 
 static void tile_clear(struct vc_data *vc, struct fb_info *info, int sy,
-		       int sx, int height, int width)
+		       int sx, int height, int width, int fg, int bg)
 {
 	struct fb_tilerect rect;
-	int bgshift = (vc->vc_hi_font_mask) ? 13 : 12;
-	int fgshift = (vc->vc_hi_font_mask) ? 9 : 8;
 
 	rect.index = vc->vc_video_erase_char &
 		((vc->vc_hi_font_mask) ? 0x1ff : 0xff);
-	rect.fg = attr_fgcol_ec(fgshift, vc, info);
-	rect.bg = attr_bgcol_ec(bgshift, vc, info);
+	rect.fg = fg;
+	rect.bg = bg;
 	rect.sx = sx;
 	rect.sy = sy;
 	rect.width = width;
@@ -76,18 +74,53 @@ static void tile_putcs(struct vc_data *vc, struct fb_info *info,
 static void tile_clear_margins(struct vc_data *vc, struct fb_info *info,
 			       int color, int bottom_only)
 {
-	return;
+	unsigned int cw = vc->vc_font.width;
+	unsigned int ch = vc->vc_font.height;
+	unsigned int rw = info->var.xres - (vc->vc_cols*cw);
+	unsigned int bh = info->var.yres - (vc->vc_rows*ch);
+	unsigned int rs = info->var.xres - rw;
+	unsigned int bs = info->var.yres - bh;
+	unsigned int vwt = info->var.xres_virtual / cw;
+	unsigned int vht = info->var.yres_virtual / ch;
+	struct fb_tilerect rect;
+
+	rect.index = vc->vc_video_erase_char &
+		((vc->vc_hi_font_mask) ? 0x1ff : 0xff);
+	rect.fg = color;
+	rect.bg = color;
+
+	if ((int) rw > 0 && !bottom_only) {
+		rect.sx = (info->var.xoffset + rs + cw - 1) / cw;
+		rect.sy = 0;
+		rect.width = (rw + cw - 1) / cw;
+		rect.height = vht;
+		if (rect.width + rect.sx > vwt)
+			rect.width = vwt - rect.sx;
+		if (rect.sx < vwt)
+			info->tileops->fb_tilefill(info, &rect);
+	}
+
+	if ((int) bh > 0) {
+		rect.sx = info->var.xoffset / cw;
+		rect.sy = (info->var.yoffset + bs) / ch;
+		rect.width = rs / cw;
+		rect.height = (bh + ch - 1) / ch;
+		if (rect.height + rect.sy > vht)
+			rect.height = vht - rect.sy;
+		if (rect.sy < vht)
+			info->tileops->fb_tilefill(info, &rect);
+	}
 }
 
-static void tile_cursor(struct vc_data *vc, struct fb_info *info, int mode,
-			int softback_lines, int fg, int bg)
+static void tile_cursor(struct vc_data *vc, struct fb_info *info, bool enable,
+			int fg, int bg)
 {
 	struct fb_tilecursor cursor;
-	int use_sw = (vc->vc_cursor_type & 0x10);
+	int use_sw = vc->vc_cursor_type & CUR_SW;
 
-	cursor.sx = vc->vc_x;
-	cursor.sy = vc->vc_y;
-	cursor.mode = (mode == CM_ERASE || use_sw) ? 0 : 1;
+	cursor.sx = vc->state.x;
+	cursor.sy = vc->state.y;
+	cursor.mode = enable && !use_sw;
 	cursor.fg = fg;
 	cursor.bg = bg;
 
@@ -118,37 +151,38 @@ static void tile_cursor(struct vc_data *vc, struct fb_info *info, int mode,
 
 static int tile_update_start(struct fb_info *info)
 {
-	struct fbcon_ops *ops = info->fbcon_par;
+	struct fbcon_par *par = info->fbcon_par;
 	int err;
 
-	err = fb_pan_display(info, &ops->var);
-	ops->var.xoffset = info->var.xoffset;
-	ops->var.yoffset = info->var.yoffset;
-	ops->var.vmode = info->var.vmode;
+	err = fb_pan_display(info, &par->var);
+	par->var.xoffset = info->var.xoffset;
+	par->var.yoffset = info->var.yoffset;
+	par->var.vmode = info->var.vmode;
 	return err;
 }
+
+static const struct fbcon_bitops tile_fbcon_bitops = {
+	.bmove = tile_bmove,
+	.clear = tile_clear,
+	.putcs = tile_putcs,
+	.clear_margins = tile_clear_margins,
+	.cursor = tile_cursor,
+	.update_start = tile_update_start,
+};
 
 void fbcon_set_tileops(struct vc_data *vc, struct fb_info *info)
 {
 	struct fb_tilemap map;
-	struct fbcon_ops *ops = info->fbcon_par;
+	struct fbcon_par *par = info->fbcon_par;
 
-	ops->bmove = tile_bmove;
-	ops->clear = tile_clear;
-	ops->putcs = tile_putcs;
-	ops->clear_margins = tile_clear_margins;
-	ops->cursor = tile_cursor;
-	ops->update_start = tile_update_start;
+	par->bitops = &tile_fbcon_bitops;
 
-	if (ops->p) {
+	if (par->p) {
 		map.width = vc->vc_font.width;
 		map.height = vc->vc_font.height;
 		map.depth = 1;
-		map.length = (ops->p->userfont) ?
-			FNTCHARCNT(ops->p->fontdata) : 256;
-		map.data = ops->p->fontdata;
+		map.length = vc->vc_font.charcount;
+		map.data = par->p->fontdata;
 		info->tileops->fb_settile(info, &map);
 	}
 }
-
-EXPORT_SYMBOL(fbcon_set_tileops);

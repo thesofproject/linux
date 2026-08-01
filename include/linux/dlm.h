@@ -1,12 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /******************************************************************************
 *******************************************************************************
 **
 **  Copyright (C) Sistina Software, Inc.  1997-2003  All rights reserved.
 **  Copyright (C) 2004-2011 Red Hat, Inc.  All rights reserved.
 **
-**  This copyrighted material is made available to anyone wishing to use,
-**  modify, copy, or redistribute it subject to the terms and conditions
-**  of the GNU General Public License v.2.
 **
 *******************************************************************************
 ******************************************************************************/
@@ -37,6 +35,9 @@ struct dlm_lockspace_ops {
 			      int num_slots, int our_slot, uint32_t generation);
 };
 
+/* only relevant for kernel lockspaces, will be removed in future */
+#define DLM_LSFL_SOFTIRQ __DLM_LSFL_RESERVED0
+
 /*
  * dlm_new_lockspace
  *
@@ -55,14 +56,13 @@ struct dlm_lockspace_ops {
  *   The dlm should not use a resource directory, but statically assign
  *   resource mastery to nodes based on the name hash that is otherwise
  *   used to select the directory node.  Must be the same on all nodes.
- * DLM_LSFL_TIMEWARN
- *   The dlm should emit netlink messages if locks have been waiting
- *   for a configurable amount of time.  (Unused.)
- * DLM_LSFL_FS
- *   The lockspace user is in the kernel (i.e. filesystem).  Enables
- *   direct bast/cast callbacks.
  * DLM_LSFL_NEWEXCL
  *   dlm_new_lockspace() should return -EEXIST if the lockspace exists.
+ * DLM_LSFL_SOFTIRQ
+ *   dlm request callbacks (ast, bast) are softirq safe. Flag should be
+ *   preferred by users. Will be default in some future. If set the
+ *   strongest context for ast, bast callback is softirq as it avoids
+ *   an additional context switch.
  *
  * lvblen: length of lvb in bytes.  Must be multiple of 8.
  *   dlm_new_lockspace() returns an error if this does not match
@@ -88,12 +88,43 @@ int dlm_new_lockspace(const char *name, const char *cluster,
 		      int *ops_result, dlm_lockspace_t **lockspace);
 
 /*
+ * dlm_release_lockspace() release_option values:
+ *
+ * DLM_RELEASE_NO_LOCKS returns -EBUSY if any locks (lkb's)
+ *   exist in the local lockspace.
+ *
+ * DLM_RELEASE_UNUSED previous value that is no longer used.
+ *
+ * DLM_RELEASE_NORMAL releases the lockspace regardless of any
+ *   locks managed in the local lockspace.
+ *
+ * DLM_RELEASE_NO_EVENT release the lockspace regardless of any
+ *   locks managed in the local lockspace, and does not submit
+ *   a leave event to the cluster manager, so other nodes will
+ *   not be notified that the node should be removed from the
+ *   list of lockspace members.
+ *
+ * DLM_RELEASE_RECOVER like DLM_RELEASE_NORMAL, but the remaining
+ *   nodes will handle the removal of the node as if the node
+ *   had failed, e.g. the recover_slot() callback would be used.
+ */
+#define DLM_RELEASE_NO_LOCKS		0
+#define DLM_RELEASE_UNUSED		1
+#define DLM_RELEASE_NORMAL		2
+#define DLM_RELEASE_NO_EVENT		3
+#define DLM_RELEASE_RECOVER		4
+#define __DLM_RELEASE_MAX		DLM_RELEASE_RECOVER
+
+/*
  * dlm_release_lockspace
  *
  * Stop a lockspace.
+ *
+ * release_option: see DLM_RELEASE values above.
  */
 
-int dlm_release_lockspace(dlm_lockspace_t *lockspace, int force);
+int dlm_release_lockspace(dlm_lockspace_t *lockspace,
+			  unsigned int release_option);
 
 /*
  * dlm_lock
@@ -129,14 +160,21 @@ int dlm_release_lockspace(dlm_lockspace_t *lockspace, int force);
  * call.
  *
  * AST routines should not block (at least not for long), but may make
- * any locking calls they please.
+ * any locking calls they please. If DLM_LSFL_SOFTIRQ for kernel
+ * users of dlm_new_lockspace() is passed the ast and bast callbacks
+ * can be processed in softirq context. Also some of the callback
+ * contexts are in the same context as the DLM lock request API, users
+ * must not hold locks while calling dlm lock request API and trying
+ * to acquire this lock in the callback again, this will end in a
+ * lock recursion. For newer implementation the DLM_LSFL_SOFTIRQ
+ * should be used.
  */
 
 int dlm_lock(dlm_lockspace_t *lockspace,
 	     int mode,
 	     struct dlm_lksb *lksb,
 	     uint32_t flags,
-	     void *name,
+	     const void *name,
 	     unsigned int namelen,
 	     uint32_t parent_lkid,
 	     void (*lockast) (void *astarg),

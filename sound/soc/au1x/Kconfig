@@ -1,6 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
 ##
 ## Au1200/Au1550/Au1300 PSC + DBDMA
 ##
+menu "Au1x"
+
 config SND_SOC_AU1XPSC
 	tristate "SoC Audio for Au12xx/Au13xx/Au1550"
 	depends on MIPS_ALCHEMY
@@ -57,8 +60,10 @@ config SND_SOC_DB1200
 	select SND_SOC_AC97_CODEC
 	select SND_SOC_WM9712
 	select SND_SOC_AU1XPSC_I2S
-	select SND_SOC_WM8731
+	select SND_SOC_WM8731_I2C
 	help
 	  Select this option to enable audio (AC97 and I2S) on the
 	  Alchemy/AMD/RMI/NetLogic Db1200, Db1550 and Db1300 evaluation boards.
 	  If you need Db1300 touchscreen support, you definitely want to say Y.
+
+endmenu

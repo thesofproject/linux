@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * A driver for the Griffin Technology, Inc. "PowerMate" USB controller dial.
  *
@@ -193,22 +194,18 @@ static void powermate_sync_state(struct powermate_device *pm)
 static void powermate_config_complete(struct urb *urb)
 {
 	struct powermate_device *pm = urb->context;
-	unsigned long flags;
 
 	if (urb->status)
 		printk(KERN_ERR "powermate: config urb returned %d\n", urb->status);
 
-	spin_lock_irqsave(&pm->lock, flags);
+	guard(spinlock_irqsave)(&pm->lock);
 	powermate_sync_state(pm);
-	spin_unlock_irqrestore(&pm->lock, flags);
 }
 
 /* Set the LED up as described and begin the sync with the hardware if required */
 static void powermate_pulse_led(struct powermate_device *pm, int static_brightness, int pulse_speed,
 				int pulse_table, int pulse_asleep, int pulse_awake)
 {
-	unsigned long flags;
-
 	if (pulse_speed < 0)
 		pulse_speed = 0;
 	if (pulse_table < 0)
@@ -221,8 +218,7 @@ static void powermate_pulse_led(struct powermate_device *pm, int static_brightne
 	pulse_asleep = !!pulse_asleep;
 	pulse_awake = !!pulse_awake;
 
-
-	spin_lock_irqsave(&pm->lock, flags);
+	guard(spinlock_irqsave)(&pm->lock);
 
 	/* mark state updates which are required */
 	if (static_brightness != pm->static_brightness) {
@@ -244,8 +240,6 @@ static void powermate_pulse_led(struct powermate_device *pm, int static_brightne
 	}
 
 	powermate_sync_state(pm);
-
-	spin_unlock_irqrestore(&pm->lock, flags);
 }
 
 /* Callback from the Input layer when an event arrives from userspace to configure the LED */
@@ -277,11 +271,11 @@ static int powermate_input_event(struct input_dev *dev, unsigned int type, unsig
 static int powermate_alloc_buffers(struct usb_device *udev, struct powermate_device *pm)
 {
 	pm->data = usb_alloc_coherent(udev, POWERMATE_PAYLOAD_SIZE_MAX,
-				      GFP_ATOMIC, &pm->data_dma);
+				      GFP_KERNEL, &pm->data_dma);
 	if (!pm->data)
 		return -1;
 
-	pm->configcr = kmalloc(sizeof(*(pm->configcr)), GFP_KERNEL);
+	pm->configcr = kmalloc_obj(*(pm->configcr));
 	if (!pm->configcr)
 		return -ENOMEM;
 
@@ -319,7 +313,7 @@ static int powermate_probe(struct usb_interface *intf, const struct usb_device_i
 		0, interface->desc.bInterfaceNumber, NULL, 0,
 		USB_CTRL_SET_TIMEOUT);
 
-	pm = kzalloc(sizeof(struct powermate_device), GFP_KERNEL);
+	pm = kzalloc_obj(*pm);
 	input_dev = input_allocate_device();
 	if (!pm || !input_dev)
 		goto fail1;
@@ -373,7 +367,7 @@ static int powermate_probe(struct usb_interface *intf, const struct usb_device_i
 
 	/* get a handle to the interrupt data pipe */
 	pipe = usb_rcvintpipe(udev, endpoint->bEndpointAddress);
-	maxp = usb_maxpacket(udev, pipe, usb_pipeout(pipe));
+	maxp = usb_maxpacket(udev, pipe);
 
 	if (maxp < POWERMATE_PAYLOAD_SIZE_MIN || maxp > POWERMATE_PAYLOAD_SIZE_MAX) {
 		printk(KERN_WARNING "powermate: Expected payload of %d--%d bytes, found %d bytes!\n",
@@ -424,6 +418,7 @@ static void powermate_disconnect(struct usb_interface *intf)
 		pm->requires_update = 0;
 		usb_kill_urb(pm->irq);
 		input_unregister_device(pm->input);
+		usb_kill_urb(pm->config);
 		usb_free_urb(pm->irq);
 		usb_free_urb(pm->config);
 		powermate_free_buffers(interface_to_usbdev(intf), pm);

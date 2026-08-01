@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Loopback IEEE 802.15.4 interface
  *
  * Copyright 2007-2012 Siemens AG
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * Written by:
  * Sergey Lapin <slapin@ossfans.org>
@@ -49,7 +41,7 @@ struct fakelb_phy {
 
 static int fakelb_hw_ed(struct ieee802154_hw *hw, u8 *level)
 {
-	BUG_ON(!level);
+	WARN_ON(!level);
 	*level = 0xbe;
 
 	return 0;
@@ -229,7 +221,7 @@ err_slave:
 	return err;
 }
 
-static int fakelb_remove(struct platform_device *pdev)
+static void fakelb_remove(struct platform_device *pdev)
 {
 	struct fakelb_phy *phy, *tmp;
 
@@ -237,7 +229,6 @@ static int fakelb_remove(struct platform_device *pdev)
 	list_for_each_entry_safe(phy, tmp, &fakelb_phys, list)
 		fakelb_del(phy);
 	mutex_unlock(&fakelb_phys_lock);
-	return 0;
 }
 
 static struct platform_device *ieee802154fake_dev;
@@ -254,6 +245,9 @@ static __init int fakelb_init_module(void)
 {
 	ieee802154fake_dev = platform_device_register_simple(
 			     "ieee802154fakelb", -1, NULL, 0);
+
+	pr_warn("fakelb driver is marked as deprecated, please use mac802154_hwsim!\n");
+
 	return platform_driver_register(&ieee802154fake_driver);
 }
 
@@ -265,4 +259,5 @@ static __exit void fake_remove_module(void)
 
 module_init(fakelb_init_module);
 module_exit(fake_remove_module);
+MODULE_DESCRIPTION("IEEE 802.15.4 loopback driver");
 MODULE_LICENSE("GPL");

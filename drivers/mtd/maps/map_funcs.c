@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Out-of-line map I/O functions for simple maps when CONFIG_COMPLEX_MAPPINGS
  * is enabled.
@@ -40,4 +41,5 @@ void simple_map_init(struct map_info *map)
 }
 
 EXPORT_SYMBOL(simple_map_init);
+MODULE_DESCRIPTION("Out-of-line map I/O");
 MODULE_LICENSE("GPL");

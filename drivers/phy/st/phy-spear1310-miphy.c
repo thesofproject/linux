@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ST SPEAr1310-miphy driver
  *
  * Copyright (C) 2014 ST Microelectronics
  * Pratyush Anand <pratyush.anand@gmail.com>
  * Mohit Kumar <mohit.kumar.dhaka@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/bitops.h>
@@ -17,8 +13,9 @@
 #include <linux/kernel.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/phy/phy.h>
+#include <linux/platform_device.h>
 #include <linux/regmap.h>
 
 /* SPEAr1310 Registers */
@@ -186,7 +183,7 @@ static const struct phy_ops spear1310_miphy_ops = {
 };
 
 static struct phy *spear1310_miphy_xlate(struct device *dev,
-					 struct of_phandle_args *args)
+					 const struct of_phandle_args *args)
 {
 	struct spear1310_miphy_priv *priv = dev_get_drvdata(dev);
 
@@ -250,7 +247,7 @@ static struct platform_driver spear1310_miphy_driver = {
 	.probe		= spear1310_miphy_probe,
 	.driver = {
 		.name = "spear1310-miphy",
-		.of_match_table = of_match_ptr(spear1310_miphy_of_match),
+		.of_match_table = spear1310_miphy_of_match,
 	},
 };
 

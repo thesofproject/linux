@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 config HAVE_LIVEPATCH
 	bool
 	help
@@ -5,7 +6,7 @@ config HAVE_LIVEPATCH
 
 config LIVEPATCH
 	bool "Kernel Live Patching"
-	depends on DYNAMIC_FTRACE_WITH_REGS
+	depends on DYNAMIC_FTRACE_WITH_REGS || DYNAMIC_FTRACE_WITH_ARGS
 	depends on MODULES
 	depends on SYSFS
 	depends on KALLSYMS_ALL
@@ -17,3 +18,15 @@ config LIVEPATCH
 	  module uses the interface provided by this option to register
 	  a patch, causing calls to patched functions to be redirected
 	  to new function code contained in the patch module.
+
+config HAVE_KLP_BUILD
+	bool
+	help
+	  Arch supports klp-build
+
+config KLP_BUILD
+	def_bool y
+	depends on LIVEPATCH && HAVE_KLP_BUILD
+	select OBJTOOL
+	help
+	  Enable klp-build support

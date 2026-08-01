@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * IPVS:        Locality-Based Least-Connection scheduling module
  *
  * Authors:     Wensong Zhang <wensong@gnuchina.org>
- *
- *              This program is free software; you can redistribute it and/or
- *              modify it under the terms of the GNU General Public License
- *              as published by the Free Software Foundation; either version
- *              2 of the License, or (at your option) any later version.
  *
  * Changes:
  *     Martin Hamilton         :    fixed the terrible locking bugs
@@ -18,7 +14,6 @@
  *     Julian Anastasov        :    replaced del_timer call with del_timer_sync
  *                                   to avoid the possible race between timer
  *                                   handler and del_timer thread in SMP
- *
  */
 
 /*
@@ -39,8 +34,7 @@
  * me to write this module.
  */
 
-#define KMSG_COMPONENT "IPVS"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "IPVS: " fmt
 
 #include <linux/ip.h>
 #include <linux/slab.h>
@@ -48,6 +42,7 @@
 #include <linux/kernel.h>
 #include <linux/skbuff.h>
 #include <linux/jiffies.h>
+#include <linux/hash.h>
 
 /* for sysctl */
 #include <linux/fs.h>
@@ -127,7 +122,6 @@ static struct ctl_table vs_vars_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_jiffies,
 	},
-	{ }
 };
 #endif
 
@@ -160,7 +154,7 @@ ip_vs_lblc_hashkey(int af, const union nf_inet_addr *addr)
 		addr_fold = addr->ip6[0]^addr->ip6[1]^
 			    addr->ip6[2]^addr->ip6[3];
 #endif
-	return (ntohl(addr_fold)*2654435761UL) & IP_VS_LBLC_TAB_MASK;
+	return hash_32(ntohl(addr_fold), IP_VS_LBLC_TAB_BITS);
 }
 
 
@@ -210,7 +204,7 @@ ip_vs_lblc_new(struct ip_vs_lblc_table *tbl, const union nf_inet_addr *daddr,
 			return en;
 		ip_vs_lblc_del(en);
 	}
-	en = kmalloc(sizeof(*en), GFP_ATOMIC);
+	en = kmalloc_obj(*en, GFP_ATOMIC);
 	if (!en)
 		return NULL;
 
@@ -297,7 +291,8 @@ static inline void ip_vs_lblc_full_check(struct ip_vs_service *svc)
  */
 static void ip_vs_lblc_check_expire(struct timer_list *t)
 {
-	struct ip_vs_lblc_table *tbl = from_timer(tbl, t, periodic_timer);
+	struct ip_vs_lblc_table *tbl = timer_container_of(tbl, t,
+							  periodic_timer);
 	struct ip_vs_service *svc = tbl->svc;
 	unsigned long now = jiffies;
 	int goal;
@@ -352,7 +347,7 @@ static int ip_vs_lblc_init_svc(struct ip_vs_service *svc)
 	/*
 	 *    Allocate the ip_vs_lblc_table for this service
 	 */
-	tbl = kmalloc(sizeof(*tbl), GFP_KERNEL);
+	tbl = kmalloc_obj(*tbl);
 	if (tbl == NULL)
 		return -ENOMEM;
 
@@ -371,6 +366,7 @@ static int ip_vs_lblc_init_svc(struct ip_vs_service *svc)
 	tbl->counter = 1;
 	tbl->dead = false;
 	tbl->svc = svc;
+	atomic_set(&tbl->entries, 0);
 
 	/*
 	 *    Hook periodic timer for garbage collection
@@ -387,7 +383,7 @@ static void ip_vs_lblc_done_svc(struct ip_vs_service *svc)
 	struct ip_vs_lblc_table *tbl = svc->sched_data;
 
 	/* remove periodic timer */
-	del_timer_sync(&tbl->periodic_timer);
+	timer_shutdown_sync(&tbl->periodic_timer);
 
 	/* got to clean up table entries here */
 	ip_vs_lblc_flush(svc);
@@ -553,6 +549,7 @@ static struct ip_vs_scheduler ip_vs_lblc_scheduler = {
 static int __net_init __ip_vs_lblc_init(struct net *net)
 {
 	struct netns_ipvs *ipvs = net_ipvs(net);
+	size_t vars_table_size = ARRAY_SIZE(vs_vars_table);
 
 	if (!ipvs)
 		return -ENOENT;
@@ -566,15 +563,16 @@ static int __net_init __ip_vs_lblc_init(struct net *net)
 
 		/* Don't export sysctls to unprivileged users */
 		if (net->user_ns != &init_user_ns)
-			ipvs->lblc_ctl_table[0].procname = NULL;
+			vars_table_size = 0;
 
 	} else
 		ipvs->lblc_ctl_table = vs_vars_table;
 	ipvs->sysctl_lblc_expiration = DEFAULT_EXPIRATION;
 	ipvs->lblc_ctl_table[0].data = &ipvs->sysctl_lblc_expiration;
 
-	ipvs->lblc_ctl_header =
-		register_net_sysctl(net, "net/ipv4/vs", ipvs->lblc_ctl_table);
+	ipvs->lblc_ctl_header = register_net_sysctl_sz(net, "net/ipv4/vs",
+						       ipvs->lblc_ctl_table,
+						       vars_table_size);
 	if (!ipvs->lblc_ctl_header) {
 		if (!net_eq(net, &init_net))
 			kfree(ipvs->lblc_ctl_table);
@@ -631,3 +629,4 @@ static void __exit ip_vs_lblc_cleanup(void)
 module_init(ip_vs_lblc_init);
 module_exit(ip_vs_lblc_cleanup);
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("ipvs locality-based least-connection scheduler");

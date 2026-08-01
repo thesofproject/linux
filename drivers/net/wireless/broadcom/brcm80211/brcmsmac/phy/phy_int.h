@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2010 Broadcom Corporation
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #ifndef _BRCM_PHY_INT_H_
@@ -219,13 +208,6 @@ enum phy_cal_mode {
 
 #define BB_MULT_MASK		0x0000ffff
 #define BB_MULT_VALID_MASK	0x80000000
-
-#define CORDIC_AG	39797
-#define	CORDIC_NI	18
-#define	FIXED(X)	((s32)((X) << 16))
-
-#define	FLOAT(X) \
-	(((X) >= 0) ? ((((X) >> 15) + 1) >> 1) : -((((-(X)) >> 15) + 1) >> 1))
 
 #define PHY_CHAIN_TX_DISABLE_TEMP	115
 #define PHY_HYSTERESIS_DELTATEMP	5
@@ -926,8 +908,6 @@ void write_radio_reg(struct brcms_phy *pi, u16 addr, u16 val);
 
 void wlc_phyreg_enter(struct brcms_phy_pub *pih);
 void wlc_phyreg_exit(struct brcms_phy_pub *pih);
-void wlc_radioreg_enter(struct brcms_phy_pub *pih);
-void wlc_radioreg_exit(struct brcms_phy_pub *pih);
 
 void wlc_phy_read_table(struct brcms_phy *pi,
 			const struct phytbl_info *ptbl_info,
@@ -939,7 +919,6 @@ void wlc_phy_table_addr(struct brcms_phy *pi, uint tbl_id, uint tbl_offset,
 			u16 tblAddr, u16 tblDataHi, u16 tblDataLo);
 void wlc_phy_table_data_write(struct brcms_phy *pi, uint width, u32 val);
 
-void write_phy_channel_reg(struct brcms_phy *pi, uint val);
 void wlc_phy_txpower_update_shm(struct brcms_phy *pi);
 
 u8 wlc_phy_nbits(s32 value);
@@ -959,7 +938,7 @@ void wlc_phy_papd_decode_epsilon(u32 epsilon, s32 *eps_real, s32 *eps_imag);
 void wlc_phy_cal_perical_mphase_reset(struct brcms_phy *pi);
 void wlc_phy_cal_perical_mphase_restart(struct brcms_phy *pi);
 
-bool wlc_phy_attach_nphy(struct brcms_phy *pi);
+void wlc_phy_attach_nphy(struct brcms_phy *pi);
 bool wlc_phy_attach_lcnphy(struct brcms_phy *pi);
 
 void wlc_phy_detach_lcnphy(struct brcms_phy *pi);
@@ -1003,7 +982,6 @@ s8 wlc_lcnphy_tempsense_degree(struct brcms_phy *pi, bool mode);
 s8 wlc_lcnphy_vbatsense(struct brcms_phy *pi, bool mode);
 void wlc_phy_carrier_suppress_lcnphy(struct brcms_phy *pi);
 void wlc_lcnphy_crsuprs(struct brcms_phy *pi, int channel);
-void wlc_lcnphy_epa_switch(struct brcms_phy *pi, bool mode);
 void wlc_2064_vco_cal(struct brcms_phy *pi);
 
 void wlc_phy_txpower_recalc_target(struct brcms_phy *pi);
@@ -1049,7 +1027,6 @@ struct phy_iq_est {
 };
 
 void wlc_phy_stay_in_carriersearch_nphy(struct brcms_phy *pi, bool enable);
-void wlc_nphy_deaf_mode(struct brcms_phy *pi, bool mode);
 
 #define wlc_phy_write_table_nphy(pi, pti) \
 	wlc_phy_write_table(pi, pti, 0x72, 0x74, 0x73)
@@ -1133,10 +1110,4 @@ int wlc_phy_rssi_compute_nphy(struct brcms_phy *pi, struct d11rxhdr *rxh);
 #define NPHY_TESTPATTERN_BPHY_RFCS  1
 
 void wlc_phy_nphy_tkip_rifs_war(struct brcms_phy *pi, u8 rifs);
-
-void wlc_phy_get_pwrdet_offsets(struct brcms_phy *pi, s8 *cckoffset,
-				s8 *ofdmoffset);
-s8 wlc_phy_upd_rssi_offset(struct brcms_phy *pi, s8 rssi, u16 chanspec);
-
-bool wlc_phy_n_txpower_ipa_ison(struct brcms_phy *pih);
 #endif				/* _BRCM_PHY_INT_H_ */

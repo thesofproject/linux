@@ -1,18 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  c 2001 PPC 64 Team, IBM Corp
  *
- *      This program is free software; you can redistribute it and/or
- *      modify it under the terms of the GNU General Public License
- *      as published by the Free Software Foundation; either version
- *      2 of the License, or (at your option) any later version.
- *
  * /dev/nvram driver for PPC64
- *
- * This perhaps should live in drivers/char
- *
- * TODO: Split the /dev/nvram part (that one can use
- *       drivers/char/generic_nvram.c) from the arch & partition
- *       parsing code.
  */
 
 #include <linux/types.h>
@@ -29,9 +19,9 @@
 #include <linux/pstore.h>
 #include <linux/zlib.h>
 #include <linux/uaccess.h>
+#include <linux/of.h>
 #include <asm/nvram.h>
 #include <asm/rtas.h>
-#include <asm/prom.h>
 #include <asm/machdep.h>
 
 #undef DEBUG_NVRAM
@@ -83,7 +73,7 @@ static const char *nvram_os_partitions[] = {
 };
 
 static void oops_to_nvram(struct kmsg_dumper *dumper,
-			  enum kmsg_dump_reason reason);
+			  struct kmsg_dump_detail *detail);
 
 static struct kmsg_dumper nvram_kmsg_dumper = {
 	.dump = oops_to_nvram
@@ -550,7 +540,7 @@ static struct pstore_info nvram_pstore_info = {
 	.write = nvram_pstore_write,
 };
 
-static int nvram_pstore_init(void)
+static int __init nvram_pstore_init(void)
 {
 	int rc = 0;
 
@@ -563,8 +553,6 @@ static int nvram_pstore_init(void)
 	nvram_pstore_info.buf = oops_data;
 	nvram_pstore_info.bufsize = oops_data_sz;
 
-	spin_lock_init(&nvram_pstore_info.buf_lock);
-
 	rc = pstore_register(&nvram_pstore_info);
 	if (rc && (rc != -EPERM))
 		/* Print error only when pstore.backend == nvram */
@@ -574,7 +562,7 @@ static int nvram_pstore_init(void)
 	return rc;
 }
 #else
-static int nvram_pstore_init(void)
+static int __init nvram_pstore_init(void)
 {
 	return -1;
 }
@@ -655,10 +643,11 @@ void __init nvram_init_oops_partition(int rtas_partition_exists)
  * partition.  If that's too much, go back and capture uncompressed text.
  */
 static void oops_to_nvram(struct kmsg_dumper *dumper,
-			  enum kmsg_dump_reason reason)
+			  struct kmsg_dump_detail *detail)
 {
 	struct oops_log_info *oops_hdr = (struct oops_log_info *)oops_buf;
 	static unsigned int oops_count = 0;
+	static struct kmsg_dump_iter iter;
 	static bool panicking = false;
 	static DEFINE_SPINLOCK(lock);
 	unsigned long flags;
@@ -666,10 +655,8 @@ static void oops_to_nvram(struct kmsg_dumper *dumper,
 	unsigned int err_type = ERR_TYPE_KERNEL_PANIC_GZ;
 	int rc = -1;
 
-	switch (reason) {
-	case KMSG_DUMP_RESTART:
-	case KMSG_DUMP_HALT:
-	case KMSG_DUMP_POWEROFF:
+	switch (detail->reason) {
+	case KMSG_DUMP_SHUTDOWN:
 		/* These are almost always orderly shutdowns. */
 		return;
 	case KMSG_DUMP_OOPS:
@@ -684,7 +671,7 @@ static void oops_to_nvram(struct kmsg_dumper *dumper,
 		break;
 	default:
 		pr_err("%s: ignoring unrecognized KMSG_DUMP_* reason %d\n",
-		       __func__, (int) reason);
+		       __func__, (int) detail->reason);
 		return;
 	}
 
@@ -695,13 +682,14 @@ static void oops_to_nvram(struct kmsg_dumper *dumper,
 		return;
 
 	if (big_oops_buf) {
-		kmsg_dump_get_buffer(dumper, false,
+		kmsg_dump_rewind(&iter);
+		kmsg_dump_get_buffer(&iter, false,
 				     big_oops_buf, big_oops_buf_sz, &text_len);
 		rc = zip_oops(text_len);
 	}
 	if (rc != 0) {
-		kmsg_dump_rewind(dumper);
-		kmsg_dump_get_buffer(dumper, false,
+		kmsg_dump_rewind(&iter);
+		kmsg_dump_get_buffer(&iter, false,
 				     oops_data, oops_data_sz, &text_len);
 		err_type = ERR_TYPE_KERNEL_PANIC;
 		oops_hdr->version = cpu_to_be16(OOPS_HDR_VERSION);
@@ -715,136 +703,6 @@ static void oops_to_nvram(struct kmsg_dumper *dumper,
 
 	spin_unlock_irqrestore(&lock, flags);
 }
-
-static loff_t dev_nvram_llseek(struct file *file, loff_t offset, int origin)
-{
-	if (ppc_md.nvram_size == NULL)
-		return -ENODEV;
-	return generic_file_llseek_size(file, offset, origin, MAX_LFS_FILESIZE,
-					ppc_md.nvram_size());
-}
-
-
-static ssize_t dev_nvram_read(struct file *file, char __user *buf,
-			  size_t count, loff_t *ppos)
-{
-	ssize_t ret;
-	char *tmp = NULL;
-	ssize_t size;
-
-	if (!ppc_md.nvram_size) {
-		ret = -ENODEV;
-		goto out;
-	}
-
-	size = ppc_md.nvram_size();
-	if (size < 0) {
-		ret = size;
-		goto out;
-	}
-
-	if (*ppos >= size) {
-		ret = 0;
-		goto out;
-	}
-
-	count = min_t(size_t, count, size - *ppos);
-	count = min(count, PAGE_SIZE);
-
-	tmp = kmalloc(count, GFP_KERNEL);
-	if (!tmp) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	ret = ppc_md.nvram_read(tmp, count, ppos);
-	if (ret <= 0)
-		goto out;
-
-	if (copy_to_user(buf, tmp, ret))
-		ret = -EFAULT;
-
-out:
-	kfree(tmp);
-	return ret;
-
-}
-
-static ssize_t dev_nvram_write(struct file *file, const char __user *buf,
-			  size_t count, loff_t *ppos)
-{
-	ssize_t ret;
-	char *tmp = NULL;
-	ssize_t size;
-
-	ret = -ENODEV;
-	if (!ppc_md.nvram_size)
-		goto out;
-
-	ret = 0;
-	size = ppc_md.nvram_size();
-	if (*ppos >= size || size < 0)
-		goto out;
-
-	count = min_t(size_t, count, size - *ppos);
-	count = min(count, PAGE_SIZE);
-
-	tmp = memdup_user(buf, count);
-	if (IS_ERR(tmp)) {
-		ret = PTR_ERR(tmp);
-		goto out;
-	}
-
-	ret = ppc_md.nvram_write(tmp, count, ppos);
-
-	kfree(tmp);
-out:
-	return ret;
-}
-
-static long dev_nvram_ioctl(struct file *file, unsigned int cmd,
-			    unsigned long arg)
-{
-	switch(cmd) {
-#ifdef CONFIG_PPC_PMAC
-	case OBSOLETE_PMAC_NVRAM_GET_OFFSET:
-		printk(KERN_WARNING "nvram: Using obsolete PMAC_NVRAM_GET_OFFSET ioctl\n");
-	case IOC_NVRAM_GET_OFFSET: {
-		int part, offset;
-
-		if (!machine_is(powermac))
-			return -EINVAL;
-		if (copy_from_user(&part, (void __user*)arg, sizeof(part)) != 0)
-			return -EFAULT;
-		if (part < pmac_nvram_OF || part > pmac_nvram_NR)
-			return -EINVAL;
-		offset = pmac_get_partition(part);
-		if (offset < 0)
-			return offset;
-		if (copy_to_user((void __user*)arg, &offset, sizeof(offset)) != 0)
-			return -EFAULT;
-		return 0;
-	}
-#endif /* CONFIG_PPC_PMAC */
-	default:
-		return -EINVAL;
-	}
-}
-
-static const struct file_operations nvram_fops = {
-	.owner		= THIS_MODULE,
-	.llseek		= dev_nvram_llseek,
-	.read		= dev_nvram_read,
-	.write		= dev_nvram_write,
-	.unlocked_ioctl	= dev_nvram_ioctl,
-};
-
-static struct miscdevice nvram_dev = {
-	NVRAM_MINOR,
-	"nvram",
-	&nvram_fops
-};
-
 
 #ifdef DEBUG_NVRAM
 static void __init nvram_print_partitions(char * label)
@@ -897,7 +755,7 @@ static unsigned char __init nvram_checksum(struct nvram_header *p)
  * Per the criteria passed via nvram_remove_partition(), should this
  * partition be removed?  1=remove, 0=keep
  */
-static int nvram_can_remove_partition(struct nvram_partition *part,
+static int __init nvram_can_remove_partition(struct nvram_partition *part,
 		const char *name, int sig, const char *exceptions[])
 {
 	if (part->header.signature != sig)
@@ -993,9 +851,11 @@ loff_t __init nvram_create_partition(const char *name, int sig,
 	long size = 0;
 	int rc;
 
+	BUILD_BUG_ON(NVRAM_BLOCK_LEN != 16);
+
 	/* Convert sizes from bytes to blocks */
-	req_size = _ALIGN_UP(req_size, NVRAM_BLOCK_LEN) / NVRAM_BLOCK_LEN;
-	min_size = _ALIGN_UP(min_size, NVRAM_BLOCK_LEN) / NVRAM_BLOCK_LEN;
+	req_size = ALIGN(req_size, NVRAM_BLOCK_LEN) / NVRAM_BLOCK_LEN;
+	min_size = ALIGN(min_size, NVRAM_BLOCK_LEN) / NVRAM_BLOCK_LEN;
 
 	/* If no minimum size specified, make it the same as the
 	 * requested size
@@ -1030,7 +890,7 @@ loff_t __init nvram_create_partition(const char *name, int sig,
 		return -ENOSPC;
 	
 	/* Create our OS partition */
-	new_part = kmalloc(sizeof(*new_part), GFP_KERNEL);
+	new_part = kzalloc_obj(*new_part);
 	if (!new_part) {
 		pr_err("%s: kmalloc failed\n", __func__);
 		return -ENOMEM;
@@ -1039,7 +899,7 @@ loff_t __init nvram_create_partition(const char *name, int sig,
 	new_part->index = free_part->index;
 	new_part->header.signature = sig;
 	new_part->header.length = size;
-	strncpy(new_part->header.name, name, 12);
+	memcpy(new_part->header.name, name, strnlen(name, sizeof(new_part->header.name)));
 	new_part->header.checksum = nvram_checksum(&new_part->header);
 
 	rc = nvram_write_header(new_part);
@@ -1170,7 +1030,7 @@ int __init nvram_scan_partitions(void)
 			       "detected: 0-length partition\n");
 			goto out;
 		}
-		tmp_part = kmalloc(sizeof(*tmp_part), GFP_KERNEL);
+		tmp_part = kmalloc_obj(*tmp_part);
 		err = -ENOMEM;
 		if (!tmp_part) {
 			printk(KERN_ERR "nvram_scan_partitions: kmalloc failed\n");
@@ -1193,22 +1053,3 @@ int __init nvram_scan_partitions(void)
 	kfree(header);
 	return err;
 }
-
-static int __init nvram_init(void)
-{
-	int rc;
-	
-	BUILD_BUG_ON(NVRAM_BLOCK_LEN != 16);
-
-	if (ppc_md.nvram_size == NULL || ppc_md.nvram_size() <= 0)
-		return  -ENODEV;
-
-  	rc = misc_register(&nvram_dev);
-	if (rc != 0) {
-		printk(KERN_ERR "nvram_init: failed to register device\n");
-		return rc;
-	}
-  	
-  	return rc;
-}
-device_initcall(nvram_init);

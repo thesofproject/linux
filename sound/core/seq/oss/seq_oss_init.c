@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * OSS compatible sequencer driver
  *
  * open/close and reset interface
  *
  * Copyright (C) 1998-1999 Takashi Iwai <tiwai@suse.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include "seq_oss_device.h"
@@ -40,8 +27,8 @@ static int maxqlen = SNDRV_SEQ_OSS_MAX_QLEN;
 module_param(maxqlen, int, 0444);
 MODULE_PARM_DESC(maxqlen, "maximum queue length");
 
-static int system_client = -1; /* ALSA sequencer client number */
-static int system_port = -1;
+static int system_client __ro_after_init = -1; /* ALSA sequencer client number */
+static int system_port __ro_after_init = -1;
 
 static int num_clients;
 static struct seq_oss_devinfo *client_table[SNDRV_SEQ_OSS_MAX_CLIENTS];
@@ -76,26 +63,23 @@ int __init
 snd_seq_oss_create_client(void)
 {
 	int rc;
-	struct snd_seq_port_info *port;
 	struct snd_seq_port_callback port_callback;
+	struct snd_seq_port_info *port __free(kfree) =
+		kzalloc_obj(*port);
 
-	port = kmalloc(sizeof(*port), GFP_KERNEL);
-	if (!port) {
-		rc = -ENOMEM;
-		goto __error;
-	}
+	if (!port)
+		return -ENOMEM;
 
 	/* create ALSA client */
 	rc = snd_seq_create_kernel_client(NULL, SNDRV_SEQ_CLIENT_OSS,
 					  "OSS sequencer");
 	if (rc < 0)
-		goto __error;
+		return rc;
 
 	system_client = rc;
 
-	/* create annoucement receiver port */
-	memset(port, 0, sizeof(*port));
-	strcpy(port->name, "Receiver");
+	/* create announcement receiver port */
+	strscpy(port->name, "Receiver");
 	port->addr.client = system_client;
 	port->capability = SNDRV_SEQ_PORT_CAP_WRITE; /* receive only */
 	port->type = 0;
@@ -107,10 +91,10 @@ snd_seq_oss_create_client(void)
 	port_callback.event_input = receive_announce;
 	port->kernel = &port_callback;
 	
-	call_ctl(SNDRV_SEQ_IOCTL_CREATE_PORT, port);
-	if ((system_port = port->addr.port) >= 0) {
+	if (call_ctl(SNDRV_SEQ_IOCTL_CREATE_PORT, port) >= 0) {
 		struct snd_seq_port_subscribe subs;
 
+		system_port = port->addr.port;
 		memset(&subs, 0, sizeof(subs));
 		subs.sender.client = SNDRV_SEQ_CLIENT_SYSTEM;
 		subs.sender.port = SNDRV_SEQ_PORT_SYSTEM_ANNOUNCE;
@@ -118,19 +102,16 @@ snd_seq_oss_create_client(void)
 		subs.dest.port = system_port;
 		call_ctl(SNDRV_SEQ_IOCTL_SUBSCRIBE_PORT, &subs);
 	}
-	rc = 0;
 
 	/* look up midi devices */
 	schedule_work(&async_lookup_work);
 
- __error:
-	kfree(port);
-	return rc;
+	return 0;
 }
 
 
 /*
- * receive annoucement from system port, and check the midi device
+ * receive announcement from system port, and check the midi device
  */
 static int
 receive_announce(struct snd_seq_event *ev, int direct, void *private, int atomic, int hop)
@@ -187,7 +168,7 @@ snd_seq_oss_open(struct file *file, int level)
 	int i, rc;
 	struct seq_oss_devinfo *dp;
 
-	dp = kzalloc(sizeof(*dp), GFP_KERNEL);
+	dp = kzalloc_obj(*dp);
 	if (!dp)
 		return -ENOMEM;
 
@@ -366,8 +347,9 @@ alloc_seq_queue(struct seq_oss_devinfo *dp)
 	memset(&qinfo, 0, sizeof(qinfo));
 	qinfo.owner = system_client;
 	qinfo.locked = 1;
-	strcpy(qinfo.name, "OSS Sequencer Emulation");
-	if ((rc = call_ctl(SNDRV_SEQ_IOCTL_CREATE_QUEUE, &qinfo)) < 0)
+	strscpy(qinfo.name, "OSS Sequencer Emulation");
+	rc = call_ctl(SNDRV_SEQ_IOCTL_CREATE_QUEUE, &qinfo);
+	if (rc < 0)
 		return rc;
 	dp->queue = qinfo.queue;
 	return 0;
@@ -467,16 +449,10 @@ snd_seq_oss_reset(struct seq_oss_devinfo *dp)
 /*
  * misc. functions for proc interface
  */
-char *
-enabled_str(int bool)
-{
-	return bool ? "enabled" : "disabled";
-}
-
-static char *
+static const char *
 filemode_str(int val)
 {
-	static char *str[] = {
+	static const char * const str[] = {
 		"none", "read", "write", "read/write",
 	};
 	return str[val & SNDRV_SEQ_OSS_FILE_ACMODE];
@@ -498,7 +474,8 @@ snd_seq_oss_system_info_read(struct snd_info_buffer *buf)
 	snd_iprintf(buf, "\nNumber of applications: %d\n", num_clients);
 	for (i = 0; i < num_clients; i++) {
 		snd_iprintf(buf, "\nApplication %d: ", i);
-		if ((dp = client_table[i]) == NULL) {
+		dp = client_table[i];
+		if (!dp) {
 			snd_iprintf(buf, "*empty*\n");
 			continue;
 		}

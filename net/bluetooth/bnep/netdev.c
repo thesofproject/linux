@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
    BNEP implementation for Linux Bluetooth stack (BlueZ).
    Copyright (C) 2001-2002 Inventel Systemes
@@ -6,10 +7,6 @@
 	David Libault  <david.libault@inventel.fr>
 
    Copyright (C) 2002 Maxim Krasnyansky <maxk@qualcomm.com>
-
-   This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License version 2 as
-   published by the Free Software Foundation;
 
    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
    OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -112,7 +109,7 @@ static int bnep_net_set_mac_addr(struct net_device *dev, void *arg)
 	return 0;
 }
 
-static void bnep_net_timeout(struct net_device *dev)
+static void bnep_net_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	BT_DBG("net_timeout");
 	netif_wake_queue(dev);

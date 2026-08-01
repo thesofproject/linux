@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * DesignWare HDMI audio driver
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Written and tested against the Designware HDMI Tx found in iMX6.
  */
@@ -11,6 +8,7 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/vmalloc.h>
 #include <drm/bridge/dw_hdmi.h>
 #include <drm/drm_edid.h>
 
@@ -66,10 +64,6 @@ enum {
 	HDMI_REVISION_ID = 0x0001,
 	HDMI_IH_AHBDMAAUD_STAT0 = 0x0109,
 	HDMI_IH_MUTE_AHBDMAAUD_STAT0 = 0x0189,
-	HDMI_FC_AUDICONF2 = 0x1027,
-	HDMI_FC_AUDSCONF = 0x1063,
-	HDMI_FC_AUDSCONF_LAYOUT1 = 1 << 0,
-	HDMI_FC_AUDSCONF_LAYOUT0 = 0 << 0,
 	HDMI_AHB_DMA_CONF0 = 0x3600,
 	HDMI_AHB_DMA_START = 0x3601,
 	HDMI_AHB_DMA_STOP = 0x3602,
@@ -298,7 +292,7 @@ static irqreturn_t snd_dw_hdmi_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static struct snd_pcm_hardware dw_hdmi_hw = {
+static const struct snd_pcm_hardware dw_hdmi_hw = {
 	.info = SNDRV_PCM_INFO_INTERLEAVED |
 		SNDRV_PCM_INFO_BLOCK_TRANSFER |
 		SNDRV_PCM_INFO_MMAP |
@@ -327,13 +321,17 @@ static int dw_hdmi_open(struct snd_pcm_substream *substream)
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_dw_hdmi *dw = substream->private_data;
 	void __iomem *base = dw->data.base;
+	u8 *eld;
 	int ret;
 
 	runtime->hw = dw_hdmi_hw;
 
-	ret = snd_pcm_hw_constraint_eld(runtime, dw->data.eld);
-	if (ret < 0)
-		return ret;
+	eld = dw->data.get_eld(dw->data.hdmi);
+	if (eld) {
+		ret = snd_pcm_hw_constraint_eld(runtime, eld);
+		if (ret < 0)
+			return ret;
+	}
 
 	ret = snd_pcm_limit_hw_rates(runtime);
 	if (ret < 0)
@@ -391,22 +389,43 @@ static int dw_hdmi_close(struct snd_pcm_substream *substream)
 
 static int dw_hdmi_hw_free(struct snd_pcm_substream *substream)
 {
-	return snd_pcm_lib_free_vmalloc_buffer(substream);
+	struct snd_pcm_runtime *runtime = substream->runtime;
+
+	vfree(runtime->dma_area);
+	runtime->dma_area = NULL;
+	return 0;
 }
 
 static int dw_hdmi_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *params)
 {
+	struct snd_pcm_runtime *runtime = substream->runtime;
+	size_t size = params_buffer_bytes(params);
+
 	/* Allocate the PCM runtime buffer, which is exposed to userspace. */
-	return snd_pcm_lib_alloc_vmalloc_buffer(substream,
-						params_buffer_bytes(params));
+	if (runtime->dma_area) {
+		if (runtime->dma_bytes >= size)
+			return 0; /* already large enough */
+		vfree(runtime->dma_area);
+	}
+	runtime->dma_area = vzalloc(size);
+	if (!runtime->dma_area)
+		return -ENOMEM;
+	runtime->dma_bytes = size;
+	return 1;
+}
+
+static struct page *dw_hdmi_get_page(struct snd_pcm_substream *substream,
+				     unsigned long offset)
+{
+	return vmalloc_to_page(substream->runtime->dma_area + offset);
 }
 
 static int dw_hdmi_prepare(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_dw_hdmi *dw = substream->private_data;
-	u8 threshold, conf0, conf1, layout, ca;
+	u8 threshold, conf0, conf1, ca;
 
 	/* Setup as per 3.0.5 FSL 4.1.0 BSP */
 	switch (dw->revision) {
@@ -437,20 +456,12 @@ static int dw_hdmi_prepare(struct snd_pcm_substream *substream)
 	conf1 = default_hdmi_channel_config[runtime->channels - 2].conf1;
 	ca = default_hdmi_channel_config[runtime->channels - 2].ca;
 
-	/*
-	 * For >2 channel PCM audio, we need to select layout 1
-	 * and set an appropriate channel map.
-	 */
-	if (runtime->channels > 2)
-		layout = HDMI_FC_AUDSCONF_LAYOUT1;
-	else
-		layout = HDMI_FC_AUDSCONF_LAYOUT0;
-
 	writeb_relaxed(threshold, dw->data.base + HDMI_AHB_DMA_THRSLD);
 	writeb_relaxed(conf0, dw->data.base + HDMI_AHB_DMA_CONF0);
 	writeb_relaxed(conf1, dw->data.base + HDMI_AHB_DMA_CONF1);
-	writeb_relaxed(layout, dw->data.base + HDMI_FC_AUDSCONF);
-	writeb_relaxed(ca, dw->data.base + HDMI_FC_AUDICONF2);
+
+	dw_hdmi_set_channel_count(dw->data.hdmi, runtime->channels);
+	dw_hdmi_set_channel_allocation(dw->data.hdmi, ca);
 
 	switch (runtime->format) {
 	case SNDRV_PCM_FORMAT_IEC958_SUBFRAME_LE:
@@ -526,7 +537,7 @@ static const struct snd_pcm_ops snd_dw_hdmi_ops = {
 	.prepare = dw_hdmi_prepare,
 	.trigger = dw_hdmi_trigger,
 	.pointer = dw_hdmi_pointer,
-	.page = snd_pcm_lib_get_vmalloc_page,
+	.page = dw_hdmi_get_page,
 };
 
 static int snd_dw_hdmi_probe(struct platform_device *pdev)
@@ -553,8 +564,8 @@ static int snd_dw_hdmi_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	strlcpy(card->driver, DRIVER_NAME, sizeof(card->driver));
-	strlcpy(card->shortname, "DW-HDMI", sizeof(card->shortname));
+	strscpy(card->driver, DRIVER_NAME, sizeof(card->driver));
+	strscpy(card->shortname, "DW-HDMI", sizeof(card->shortname));
 	snprintf(card->longname, sizeof(card->longname),
 		 "%s rev 0x%02x, irq %d", card->shortname, revision,
 		 data->irq);
@@ -572,7 +583,7 @@ static int snd_dw_hdmi_probe(struct platform_device *pdev)
 
 	dw->pcm = pcm;
 	pcm->private_data = dw;
-	strlcpy(pcm->name, DRIVER_NAME, sizeof(pcm->name));
+	strscpy(pcm->name, DRIVER_NAME, sizeof(pcm->name));
 	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &snd_dw_hdmi_ops);
 
 	/*
@@ -595,13 +606,11 @@ err:
 	return ret;
 }
 
-static int snd_dw_hdmi_remove(struct platform_device *pdev)
+static void snd_dw_hdmi_remove(struct platform_device *pdev)
 {
 	struct snd_dw_hdmi *dw = platform_get_drvdata(pdev);
 
 	snd_card_free(dw->card);
-
-	return 0;
 }
 
 #if defined(CONFIG_PM_SLEEP) && defined(IS_NOT_BROKEN)
@@ -614,7 +623,6 @@ static int snd_dw_hdmi_suspend(struct device *dev)
 	struct snd_dw_hdmi *dw = dev_get_drvdata(dev);
 
 	snd_power_change_state(dw->card, SNDRV_CTL_POWER_D3cold);
-	snd_pcm_suspend_all(dw->pcm);
 
 	return 0;
 }
@@ -637,7 +645,7 @@ static SIMPLE_DEV_PM_OPS(snd_dw_hdmi_pm, snd_dw_hdmi_suspend,
 
 static struct platform_driver snd_dw_hdmi_driver = {
 	.probe	= snd_dw_hdmi_probe,
-	.remove	= snd_dw_hdmi_remove,
+	.remove = snd_dw_hdmi_remove,
 	.driver	= {
 		.name = DRIVER_NAME,
 		.pm = PM_OPS,
@@ -646,7 +654,7 @@ static struct platform_driver snd_dw_hdmi_driver = {
 
 module_platform_driver(snd_dw_hdmi_driver);
 
-MODULE_AUTHOR("Russell King <rmk+kernel@arm.linux.org.uk>");
+MODULE_AUTHOR("Russell King <rmk+kernel@armlinux.org.uk>");
 MODULE_DESCRIPTION("Synopsis Designware HDMI AHB ALSA interface");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:" DRIVER_NAME);

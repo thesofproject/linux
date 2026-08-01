@@ -11,9 +11,9 @@ Section 7, Legacy Devices.
 
 The Resource Access Control (RAC) module inside the X server [0] existed for
 the legacy VGA arbitration task (besides other bus management tasks) when more
-than one legacy device co-exists on the same machine. But the problem happens
+than one legacy device co-exist on the same machine. But the problem happens
 when these devices are trying to be accessed by different userspace clients
-(e.g. two server in parallel). Their address assignments conflict. Moreover,
+(e.g. two servers in parallel). Their address assignments conflict. Moreover,
 ideally, being a userspace application, it is not the role of the X server to
 control bus resources. Therefore an arbitration scheme outside of the X server
 is needed to control the sharing of these resources. This document introduces
@@ -100,13 +100,13 @@ In-kernel interface
 .. kernel-doc:: include/linux/vgaarb.h
    :internal:
 
-.. kernel-doc:: drivers/gpu/vga/vgaarb.c
+.. kernel-doc:: drivers/pci/vgaarb.c
    :export:
 
 libpciaccess
 ------------
 
-To use the vga arbiter char device it was implemented an API inside the
+To use the vga arbiter char device, an API was implemented inside the
 libpciaccess library. One field was added to struct pci_device (each device
 on the system)::
 
@@ -185,7 +185,7 @@ enhancing the kernel code to adapt as a kernel module and also did the
 implementation of the user space side [3]. Now (2009) Tiago Vignatti and Dave
 Airlie finally put this work in shape and queued to Jesse Barnes' PCI tree.
 
-0) http://cgit.freedesktop.org/xorg/xserver/commit/?id=4b42448a2388d40f257774fbffdccaea87bd0347
-1) http://lists.freedesktop.org/archives/xorg/2005-March/006663.html
-2) http://lists.freedesktop.org/archives/xorg/2005-March/006745.html
-3) http://lists.freedesktop.org/archives/xorg/2007-October/029507.html
+0) https://cgit.freedesktop.org/xorg/xserver/commit/?id=4b42448a2388d40f257774fbffdccaea87bd0347
+1) https://lists.freedesktop.org/archives/xorg/2005-March/006663.html
+2) https://lists.freedesktop.org/archives/xorg/2005-March/006745.html
+3) https://lists.freedesktop.org/archives/xorg/2007-October/029507.html

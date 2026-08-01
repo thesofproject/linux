@@ -45,29 +45,39 @@
  * current job can make progress.
  */
 
+#include <linux/platform_device.h>
+
+#include <drm/drm_print.h>
+
 #include "vc4_drv.h"
 #include "vc4_regs.h"
+#include "vc4_trace.h"
 
 #define V3D_DRIVER_IRQS (V3D_INT_OUTOMEM | \
 			 V3D_INT_FLDONE | \
 			 V3D_INT_FRDONE)
-
-DECLARE_WAIT_QUEUE_HEAD(render_wait);
 
 static void
 vc4_overflow_mem_work(struct work_struct *work)
 {
 	struct vc4_dev *vc4 =
 		container_of(work, struct vc4_dev, overflow_mem_work);
-	struct vc4_bo *bo = vc4->bin_bo;
+	struct vc4_bo *bo;
 	int bin_bo_slot;
 	struct vc4_exec_info *exec;
 	unsigned long irqflags;
 
+	mutex_lock(&vc4->bin_bo_lock);
+
+	if (!vc4->bin_bo)
+		goto complete;
+
+	bo = vc4->bin_bo;
+
 	bin_bo_slot = vc4_v3d_get_bin_slot(vc4);
 	if (bin_bo_slot < 0) {
-		DRM_ERROR("Couldn't allocate binner overflow mem\n");
-		return;
+		drm_err(&vc4->base, "Couldn't allocate binner overflow mem\n");
+		goto complete;
 	}
 
 	spin_lock_irqsave(&vc4->job_lock, irqflags);
@@ -93,11 +103,14 @@ vc4_overflow_mem_work(struct work_struct *work)
 	}
 	vc4->bin_alloc_overflow = BIT(bin_bo_slot);
 
-	V3D_WRITE(V3D_BPOA, bo->base.paddr + bin_bo_slot * vc4->bin_alloc_size);
-	V3D_WRITE(V3D_BPOS, bo->base.base.size);
+	V3D_WRITE(V3D_BPOA, bo->base.dma_addr + bin_bo_slot * vc4->bin_alloc_size);
+	V3D_WRITE(V3D_BPOS, vc4->bin_alloc_size);
 	V3D_WRITE(V3D_INTCTL, V3D_INT_OUTOMEM);
 	V3D_WRITE(V3D_INTENA, V3D_INT_OUTOMEM);
 	spin_unlock_irqrestore(&vc4->job_lock, irqflags);
+
+complete:
+	mutex_unlock(&vc4->bin_bo_lock);
 }
 
 static void
@@ -108,6 +121,8 @@ vc4_irq_finish_bin_job(struct drm_device *dev)
 
 	if (!exec)
 		return;
+
+	trace_vc4_bcl_end_irq(dev, exec->seqno);
 
 	vc4_move_job_to_render(dev, exec);
 	next = vc4_first_bin_job(vc4);
@@ -147,6 +162,8 @@ vc4_irq_finish_render_job(struct drm_device *dev)
 	if (!exec)
 		return;
 
+	trace_vc4_rcl_end_irq(dev, exec->seqno);
+
 	vc4->finished_seqno++;
 	list_move_tail(&exec->head, &vc4->job_done_list);
 
@@ -182,7 +199,7 @@ vc4_irq_finish_render_job(struct drm_device *dev)
 	schedule_work(&vc4->job_done_work);
 }
 
-irqreturn_t
+static irqreturn_t
 vc4_irq(int irq, void *arg)
 {
 	struct drm_device *dev = arg;
@@ -225,34 +242,32 @@ vc4_irq(int irq, void *arg)
 }
 
 void
-vc4_irq_preinstall(struct drm_device *dev)
+vc4_irq_enable(struct drm_device *dev)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 
-	init_waitqueue_head(&vc4->job_wait_queue);
-	INIT_WORK(&vc4->overflow_mem_work, vc4_overflow_mem_work);
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
+		return;
 
-	/* Clear any pending interrupts someone might have left around
-	 * for us.
+	if (!vc4->v3d)
+		return;
+
+	/* Enable the render done interrupts. The out-of-memory interrupt is
+	 * enabled as soon as we have a binner BO allocated.
 	 */
-	V3D_WRITE(V3D_INTCTL, V3D_DRIVER_IRQS);
-}
-
-int
-vc4_irq_postinstall(struct drm_device *dev)
-{
-	struct vc4_dev *vc4 = to_vc4_dev(dev);
-
-	/* Enable both the render done and out of memory interrupts. */
-	V3D_WRITE(V3D_INTENA, V3D_DRIVER_IRQS);
-
-	return 0;
+	V3D_WRITE(V3D_INTENA, V3D_INT_FLDONE | V3D_INT_FRDONE);
 }
 
 void
-vc4_irq_uninstall(struct drm_device *dev)
+vc4_irq_disable(struct drm_device *dev)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
+
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
+		return;
+
+	if (!vc4->v3d)
+		return;
 
 	/* Disable sending interrupts for our driver's IRQs. */
 	V3D_WRITE(V3D_INTDIS, V3D_DRIVER_IRQS);
@@ -261,9 +276,51 @@ vc4_irq_uninstall(struct drm_device *dev)
 	V3D_WRITE(V3D_INTCTL, V3D_DRIVER_IRQS);
 
 	/* Finish any interrupt handler still in flight. */
-	disable_irq(dev->irq);
+	synchronize_irq(vc4->irq);
 
 	cancel_work_sync(&vc4->overflow_mem_work);
+}
+
+int vc4_irq_install(struct drm_device *dev, int irq)
+{
+	struct vc4_dev *vc4 = to_vc4_dev(dev);
+	int ret;
+
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
+		return -ENODEV;
+
+	if (!vc4->v3d)
+		return -ENODEV;
+
+	if (irq == IRQ_NOTCONNECTED)
+		return -ENOTCONN;
+
+	init_waitqueue_head(&vc4->job_wait_queue);
+	INIT_WORK(&vc4->overflow_mem_work, vc4_overflow_mem_work);
+
+	/* Clear any pending interrupts someone might have left around
+	 * for us.
+	 */
+	V3D_WRITE(V3D_INTCTL, V3D_DRIVER_IRQS);
+
+	ret = devm_request_irq(dev->dev, irq, vc4_irq, 0,
+			       dev_name(dev->dev), dev);
+	if (ret)
+		return ret;
+
+	vc4_irq_enable(dev);
+
+	return 0;
+}
+
+void vc4_irq_uninstall(struct drm_device *dev)
+{
+	struct vc4_dev *vc4 = to_vc4_dev(dev);
+
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
+		return;
+
+	vc4_irq_disable(dev);
 }
 
 /** Reinitializes interrupt registers when a GPU reset is performed. */
@@ -271,6 +328,9 @@ void vc4_irq_reset(struct drm_device *dev)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 	unsigned long irqflags;
+
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
+		return;
 
 	/* Acknowledge any stale IRQs. */
 	V3D_WRITE(V3D_INTCTL, V3D_DRIVER_IRQS);

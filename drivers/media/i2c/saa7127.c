@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * saa7127 - Philips SAA7127/SAA7129 video encoder driver
  *
@@ -24,23 +25,13 @@
  * Copyright (C) 2004  Chris Kennedy <c@groovy.org>
  *
  * VBI additions & cleanup:
- * Copyright (C) 2004, 2005 Hans Verkuil <hverkuil@xs4all.nl>
+ * Copyright (C) 2004, 2005 Hans Verkuil <hverkuil@kernel.org>
  *
  * Note: the saa7126 is identical to the saa7127, and the saa7128 is
  * identical to the saa7129, except that the saa7126 and saa7128 have
  * macrovision anti-taping support. This driver will almost certainly
  * work fine for those chips, except of course for the missing anti-taping
  * support.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 
@@ -717,9 +708,9 @@ static const struct v4l2_subdev_ops saa7127_ops = {
 
 /* ----------------------------------------------------------------------- */
 
-static int saa7127_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int saa7127_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct saa7127_state *state;
 	struct v4l2_subdev *sd;
 	struct v4l2_sliced_vbi_data vbi = { 0, 0, 0, 0 };  /* set to disabled */
@@ -761,10 +752,10 @@ static int saa7127_probe(struct i2c_client *client,
 			saa7127_write(sd, SAA7129_REG_FADE_KEY_COL2,
 					read_result);
 			state->ident = SAA7129;
-			strlcpy(client->name, "saa7129", I2C_NAME_SIZE);
+			strscpy(client->name, "saa7129", I2C_NAME_SIZE);
 		} else {
 			state->ident = SAA7127;
-			strlcpy(client->name, "saa7127", I2C_NAME_SIZE);
+			strscpy(client->name, "saa7127", I2C_NAME_SIZE);
 		}
 	}
 
@@ -794,24 +785,23 @@ static int saa7127_probe(struct i2c_client *client,
 
 /* ----------------------------------------------------------------------- */
 
-static int saa7127_remove(struct i2c_client *client)
+static void saa7127_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 
 	v4l2_device_unregister_subdev(sd);
 	/* Turn off TV output */
 	saa7127_set_video_enable(sd, 0);
-	return 0;
 }
 
 /* ----------------------------------------------------------------------- */
 
 static const struct i2c_device_id saa7127_id[] = {
-	{ "saa7127_auto", 0 },	/* auto-detection */
-	{ "saa7126", SAA7127 },
-	{ "saa7127", SAA7127 },
-	{ "saa7128", SAA7129 },
-	{ "saa7129", SAA7129 },
+	{ .name = "saa7127_auto", .driver_data = 0 },	/* auto-detection */
+	{ .name = "saa7126", .driver_data = SAA7127 },
+	{ .name = "saa7127", .driver_data = SAA7127 },
+	{ .name = "saa7128", .driver_data = SAA7129 },
+	{ .name = "saa7129", .driver_data = SAA7129 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, saa7127_id);

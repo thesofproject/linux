@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * HackRF driver
  *
  * Copyright (C) 2014 Antti Palosaari <crope@iki.fi>
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2 of the License, or
- *    (at your option) any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -597,7 +588,7 @@ static int hackrf_submit_urbs(struct hackrf_dev *dev)
 
 	for (i = 0; i < dev->urbs_initialized; i++) {
 		dev_dbg(dev->dev, "submit urb=%d\n", i);
-		ret = usb_submit_urb(dev->urb_list[i], GFP_ATOMIC);
+		ret = usb_submit_urb(dev->urb_list[i], GFP_KERNEL);
 		if (ret) {
 			dev_err(dev->dev, "Could not submit URB no. %d - get them all back\n",
 					i);
@@ -636,7 +627,7 @@ static int hackrf_alloc_stream_bufs(struct hackrf_dev *dev)
 
 	for (dev->buf_num = 0; dev->buf_num < MAX_BULK_BUFS; dev->buf_num++) {
 		dev->buf_list[dev->buf_num] = usb_alloc_coherent(dev->udev,
-				BULK_BUFFER_SIZE, GFP_ATOMIC,
+				BULK_BUFFER_SIZE, GFP_KERNEL,
 				&dev->dma_addr[dev->buf_num]);
 		if (!dev->buf_list[dev->buf_num]) {
 			dev_dbg(dev->dev, "alloc buf=%d failed\n",
@@ -689,7 +680,7 @@ static int hackrf_alloc_urbs(struct hackrf_dev *dev, bool rcv)
 	/* allocate the URBs */
 	for (i = 0; i < MAX_BULK_BUFS; i++) {
 		dev_dbg(dev->dev, "alloc urb=%d\n", i);
-		dev->urb_list[i] = usb_alloc_urb(0, GFP_ATOMIC);
+		dev->urb_list[i] = usb_alloc_urb(0, GFP_KERNEL);
 		if (!dev->urb_list[i]) {
 			for (j = 0; j < i; j++)
 				usb_free_urb(dev->urb_list[j]);
@@ -762,12 +753,13 @@ static int hackrf_queue_setup(struct vb2_queue *vq,
 		unsigned int *nplanes, unsigned int sizes[], struct device *alloc_devs[])
 {
 	struct hackrf_dev *dev = vb2_get_drv_priv(vq);
+	unsigned int q_num_bufs = vb2_get_num_buffers(vq);
 
 	dev_dbg(dev->dev, "nbuffers=%d\n", *nbuffers);
 
 	/* Need at least 8 buffers */
-	if (vq->num_buffers + *nbuffers < 8)
-		*nbuffers = 8 - vq->num_buffers;
+	if (q_num_bufs + *nbuffers < 8)
+		*nbuffers = 8 - q_num_bufs;
 	*nplanes = 1;
 	sizes[0] = PAGE_ALIGN(dev->buffersize);
 
@@ -896,8 +888,6 @@ static const struct vb2_ops hackrf_vb2_ops = {
 	.buf_queue              = hackrf_buf_queue,
 	.start_streaming        = hackrf_start_streaming,
 	.stop_streaming         = hackrf_stop_streaming,
-	.wait_prepare           = vb2_ops_wait_prepare,
-	.wait_finish            = vb2_ops_wait_finish,
 };
 
 static int hackrf_querycap(struct file *file, void *fh,
@@ -905,24 +895,15 @@ static int hackrf_querycap(struct file *file, void *fh,
 {
 	struct hackrf_dev *dev = video_drvdata(file);
 	struct usb_interface *intf = dev->intf;
-	struct video_device *vdev = video_devdata(file);
 
 	dev_dbg(&intf->dev, "\n");
-
-	if (vdev->vfl_dir == VFL_DIR_RX)
-		cap->device_caps = V4L2_CAP_SDR_CAPTURE | V4L2_CAP_TUNER |
-				   V4L2_CAP_STREAMING | V4L2_CAP_READWRITE;
-
-	else
-		cap->device_caps = V4L2_CAP_SDR_OUTPUT | V4L2_CAP_MODULATOR |
-				   V4L2_CAP_STREAMING | V4L2_CAP_READWRITE;
 
 	cap->capabilities = V4L2_CAP_SDR_CAPTURE | V4L2_CAP_TUNER |
 			    V4L2_CAP_SDR_OUTPUT | V4L2_CAP_MODULATOR |
 			    V4L2_CAP_STREAMING | V4L2_CAP_READWRITE |
 			    V4L2_CAP_DEVICE_CAPS;
-	strlcpy(cap->driver, KBUILD_MODNAME, sizeof(cap->driver));
-	strlcpy(cap->card, dev->rx_vdev.name, sizeof(cap->card));
+	strscpy(cap->driver, KBUILD_MODNAME, sizeof(cap->driver));
+	strscpy(cap->card, dev->rx_vdev.name, sizeof(cap->card));
 	usb_make_path(dev->udev, cap->bus_info, sizeof(cap->bus_info));
 
 	return 0;
@@ -947,7 +928,6 @@ static int hackrf_s_fmt_sdr(struct file *file, void *priv,
 	if (vb2_is_busy(q))
 		return -EBUSY;
 
-	memset(f->fmt.sdr.reserved, 0, sizeof(f->fmt.sdr.reserved));
 	for (i = 0; i < NUM_FORMATS; i++) {
 		if (f->fmt.sdr.pixelformat == formats[i].pixelformat) {
 			dev->pixelformat = formats[i].pixelformat;
@@ -973,7 +953,6 @@ static int hackrf_g_fmt_sdr(struct file *file, void *priv,
 	dev_dbg(dev->dev, "pixelformat fourcc %4.4s\n",
 			(char *)&dev->pixelformat);
 
-	memset(f->fmt.sdr.reserved, 0, sizeof(f->fmt.sdr.reserved));
 	f->fmt.sdr.pixelformat = dev->pixelformat;
 	f->fmt.sdr.buffersize = dev->buffersize;
 
@@ -989,7 +968,6 @@ static int hackrf_try_fmt_sdr(struct file *file, void *priv,
 	dev_dbg(dev->dev, "pixelformat fourcc %4.4s\n",
 			(char *)&f->fmt.sdr.pixelformat);
 
-	memset(f->fmt.sdr.reserved, 0, sizeof(f->fmt.sdr.reserved));
 	for (i = 0; i < NUM_FORMATS; i++) {
 		if (formats[i].pixelformat == f->fmt.sdr.pixelformat) {
 			f->fmt.sdr.buffersize = formats[i].buffersize;
@@ -1044,14 +1022,14 @@ static int hackrf_g_tuner(struct file *file, void *priv, struct v4l2_tuner *v)
 	dev_dbg(dev->dev, "index=%d\n", v->index);
 
 	if (v->index == 0) {
-		strlcpy(v->name, "HackRF ADC", sizeof(v->name));
+		strscpy(v->name, "HackRF ADC", sizeof(v->name));
 		v->type = V4L2_TUNER_SDR;
 		v->capability = V4L2_TUNER_CAP_1HZ | V4L2_TUNER_CAP_FREQ_BANDS;
 		v->rangelow  = bands_adc_dac[0].rangelow;
 		v->rangehigh = bands_adc_dac[0].rangehigh;
 		ret = 0;
 	} else if (v->index == 1) {
-		strlcpy(v->name, "HackRF RF", sizeof(v->name));
+		strscpy(v->name, "HackRF RF", sizeof(v->name));
 		v->type = V4L2_TUNER_RF;
 		v->capability = V4L2_TUNER_CAP_1HZ | V4L2_TUNER_CAP_FREQ_BANDS;
 		v->rangelow  = bands_rx_tx[0].rangelow;
@@ -1083,14 +1061,14 @@ static int hackrf_g_modulator(struct file *file, void *fh,
 	dev_dbg(dev->dev, "index=%d\n", a->index);
 
 	if (a->index == 0) {
-		strlcpy(a->name, "HackRF DAC", sizeof(a->name));
+		strscpy(a->name, "HackRF DAC", sizeof(a->name));
 		a->type = V4L2_TUNER_SDR;
 		a->capability = V4L2_TUNER_CAP_1HZ | V4L2_TUNER_CAP_FREQ_BANDS;
 		a->rangelow  = bands_adc_dac[0].rangelow;
 		a->rangehigh = bands_adc_dac[0].rangehigh;
 		ret = 0;
 	} else if (a->index == 1) {
-		strlcpy(a->name, "HackRF RF", sizeof(a->name));
+		strscpy(a->name, "HackRF RF", sizeof(a->name));
 		a->type = V4L2_TUNER_RF;
 		a->capability = V4L2_TUNER_CAP_1HZ | V4L2_TUNER_CAP_FREQ_BANDS;
 		a->rangelow  = bands_rx_tx[0].rangelow;
@@ -1370,7 +1348,7 @@ static int hackrf_probe(struct usb_interface *intf,
 	int ret;
 	u8 u8tmp, buf[BUF_SIZE];
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	if (!dev) {
 		ret = -ENOMEM;
 		goto err;
@@ -1418,6 +1396,7 @@ static int hackrf_probe(struct usb_interface *intf,
 	dev->rx_vb2_queue.drv_priv = dev;
 	dev->rx_vb2_queue.buf_struct_size = sizeof(struct hackrf_buffer);
 	dev->rx_vb2_queue.timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
+	dev->rx_vb2_queue.lock = &dev->vb_queue_lock;
 	ret = vb2_queue_init(&dev->rx_vb2_queue);
 	if (ret) {
 		dev_err(dev->dev, "Could not initialize rx vb2 queue\n");
@@ -1433,6 +1412,7 @@ static int hackrf_probe(struct usb_interface *intf,
 	dev->tx_vb2_queue.drv_priv = dev;
 	dev->tx_vb2_queue.buf_struct_size = sizeof(struct hackrf_buffer);
 	dev->tx_vb2_queue.timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
+	dev->tx_vb2_queue.lock = &dev->vb_queue_lock;
 	ret = vb2_queue_init(&dev->tx_vb2_queue);
 	if (ret) {
 		dev_err(dev->dev, "Could not initialize tx vb2 queue\n");
@@ -1494,17 +1474,18 @@ static int hackrf_probe(struct usb_interface *intf,
 	/* Init video_device structure for receiver */
 	dev->rx_vdev = hackrf_template;
 	dev->rx_vdev.queue = &dev->rx_vb2_queue;
-	dev->rx_vdev.queue->lock = &dev->vb_queue_lock;
 	dev->rx_vdev.v4l2_dev = &dev->v4l2_dev;
 	dev->rx_vdev.ctrl_handler = &dev->rx_ctrl_handler;
 	dev->rx_vdev.lock = &dev->v4l2_lock;
 	dev->rx_vdev.vfl_dir = VFL_DIR_RX;
+	dev->rx_vdev.device_caps = V4L2_CAP_STREAMING | V4L2_CAP_READWRITE |
+				   V4L2_CAP_SDR_CAPTURE | V4L2_CAP_TUNER;
 	video_set_drvdata(&dev->rx_vdev, dev);
 	ret = video_register_device(&dev->rx_vdev, VFL_TYPE_SDR, -1);
 	if (ret) {
 		dev_err(dev->dev,
 			"Failed to register as video device (%d)\n", ret);
-		goto err_v4l2_device_unregister;
+		goto err_v4l2_device_put;
 	}
 	dev_info(dev->dev, "Registered as %s\n",
 		 video_device_node_name(&dev->rx_vdev));
@@ -1512,11 +1493,12 @@ static int hackrf_probe(struct usb_interface *intf,
 	/* Init video_device structure for transmitter */
 	dev->tx_vdev = hackrf_template;
 	dev->tx_vdev.queue = &dev->tx_vb2_queue;
-	dev->tx_vdev.queue->lock = &dev->vb_queue_lock;
 	dev->tx_vdev.v4l2_dev = &dev->v4l2_dev;
 	dev->tx_vdev.ctrl_handler = &dev->tx_ctrl_handler;
 	dev->tx_vdev.lock = &dev->v4l2_lock;
 	dev->tx_vdev.vfl_dir = VFL_DIR_TX;
+	dev->tx_vdev.device_caps = V4L2_CAP_STREAMING | V4L2_CAP_READWRITE |
+				   V4L2_CAP_SDR_OUTPUT | V4L2_CAP_MODULATOR;
 	video_set_drvdata(&dev->tx_vdev, dev);
 	ret = video_register_device(&dev->tx_vdev, VFL_TYPE_SDR, -1);
 	if (ret) {
@@ -1531,8 +1513,9 @@ static int hackrf_probe(struct usb_interface *intf,
 	return 0;
 err_video_unregister_device_rx:
 	video_unregister_device(&dev->rx_vdev);
-err_v4l2_device_unregister:
-	v4l2_device_unregister(&dev->v4l2_dev);
+err_v4l2_device_put:
+	v4l2_device_put(&dev->v4l2_dev);
+	return ret;
 err_v4l2_ctrl_handler_free_tx:
 	v4l2_ctrl_handler_free(&dev->tx_ctrl_handler);
 err_v4l2_ctrl_handler_free_rx:

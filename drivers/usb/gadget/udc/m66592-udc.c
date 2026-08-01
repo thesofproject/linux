@@ -359,7 +359,7 @@ static void m66592_ep_setting(struct m66592 *m66592, struct m66592_ep *ep,
 	ep->pipenum = pipenum;
 	ep->ep.maxpacket = usb_endpoint_maxp(desc);
 	m66592->pipenum2ep[pipenum] = ep;
-	m66592->epaddr2ep[desc->bEndpointAddress&USB_ENDPOINT_NUMBER_MASK] = ep;
+	m66592->epaddr2ep[usb_endpoint_num(desc)] = ep;
 	INIT_LIST_HEAD(&ep->queue);
 }
 
@@ -391,7 +391,7 @@ static int alloc_pipe_config(struct m66592_ep *ep,
 
 	BUG_ON(ep->pipenum);
 
-	switch (desc->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) {
+	switch (usb_endpoint_type(desc)) {
 	case USB_ENDPOINT_XFER_BULK:
 		if (m66592->bulk >= M66592_MAX_NUM_BULK) {
 			if (m66592->isochronous >= M66592_MAX_NUM_ISOC) {
@@ -433,7 +433,7 @@ static int alloc_pipe_config(struct m66592_ep *ep,
 	}
 	ep->type = info.type;
 
-	info.epnum = desc->bEndpointAddress & USB_ENDPOINT_NUMBER_MASK;
+	info.epnum = usb_endpoint_num(desc);
 	info.maxpacket = usb_endpoint_maxp(desc);
 	info.interval = desc->bInterval;
 	if (desc->bEndpointAddress & USB_ENDPOINT_DIR_MASK)
@@ -1261,7 +1261,7 @@ static irqreturn_t m66592_irq(int irq, void *_m66592)
 
 static void m66592_timer(struct timer_list *t)
 {
-	struct m66592 *m66592 = from_timer(m66592, t, timer);
+	struct m66592 *m66592 = timer_container_of(m66592, t, timer);
 	unsigned long flags;
 	u16 tmp;
 
@@ -1330,7 +1330,7 @@ static struct usb_request *m66592_alloc_request(struct usb_ep *_ep,
 {
 	struct m66592_request *req;
 
-	req = kzalloc(sizeof(struct m66592_request), gfp_flags);
+	req = kzalloc_obj(struct m66592_request, gfp_flags);
 	if (!req)
 		return NULL;
 
@@ -1454,7 +1454,6 @@ static int m66592_udc_start(struct usb_gadget *g,
 	struct m66592 *m66592 = to_m66592(g);
 
 	/* hook up the driver */
-	driver->driver.bus = NULL;
 	m66592->driver = driver;
 
 	m66592_bset(m66592, M66592_VBSE | M66592_URST, M66592_INTENB0);
@@ -1513,13 +1512,13 @@ static const struct usb_gadget_ops m66592_gadget_ops = {
 	.pullup			= m66592_pullup,
 };
 
-static int m66592_remove(struct platform_device *pdev)
+static void m66592_remove(struct platform_device *pdev)
 {
 	struct m66592		*m66592 = platform_get_drvdata(pdev);
 
 	usb_del_gadget_udc(&m66592->gadget);
 
-	del_timer_sync(&m66592->timer);
+	timer_shutdown_sync(&m66592->timer);
 	iounmap(m66592->reg);
 	free_irq(platform_get_irq(pdev, 0), m66592);
 	m66592_free_request(&m66592->ep[0].ep, m66592->ep0_req);
@@ -1528,7 +1527,6 @@ static int m66592_remove(struct platform_device *pdev)
 		clk_put(m66592->clk);
 	}
 	kfree(m66592);
-	return 0;
 }
 
 static void nop_completion(struct usb_ep *ep, struct usb_request *r)
@@ -1573,7 +1571,7 @@ static int m66592_probe(struct platform_device *pdev)
 	}
 
 	/* initialize ucd */
-	m66592 = kzalloc(sizeof(struct m66592), GFP_KERNEL);
+	m66592 = kzalloc_obj(struct m66592);
 	if (m66592 == NULL) {
 		ret = -ENOMEM;
 		goto clean_up;
@@ -1667,7 +1665,7 @@ static int m66592_probe(struct platform_device *pdev)
 
 err_add_udc:
 	m66592_free_request(&m66592->ep[0].ep, m66592->ep0_req);
-
+	m66592->ep0_req = NULL;
 clean_up3:
 	if (m66592->pdata->on_chip) {
 		clk_disable(m66592->clk);
@@ -1689,10 +1687,11 @@ clean_up:
 
 /*-------------------------------------------------------------------------*/
 static struct platform_driver m66592_driver = {
+	.probe =	m66592_probe,
 	.remove =	m66592_remove,
 	.driver		= {
-		.name =	(char *) udc_name,
+		.name =	udc_name,
 	},
 };
 
-module_platform_driver_probe(m66592_driver, m66592_probe);
+module_platform_driver(m66592_driver);

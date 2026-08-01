@@ -1,14 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2016 Maxime Ripard. All rights reserved.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef _CCU_RESET_H_
@@ -25,7 +17,7 @@ struct ccu_reset_map {
 
 struct ccu_reset {
 	void __iomem			*base;
-	struct ccu_reset_map		*reset_map;
+	const struct ccu_reset_map	*reset_map;
 	spinlock_t			*lock;
 
 	struct reset_controller_dev	rcdev;

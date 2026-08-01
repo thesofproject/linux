@@ -69,19 +69,15 @@ static int ssb_pcihost_probe(struct pci_dev *dev,
 {
 	struct ssb_bus *ssb;
 	int err = -ENOMEM;
-	const char *name;
 	u32 val;
 
-	ssb = kzalloc(sizeof(*ssb), GFP_KERNEL);
+	ssb = kzalloc_obj(*ssb);
 	if (!ssb)
 		goto out;
 	err = pci_enable_device(dev);
 	if (err)
 		goto err_kfree_ssb;
-	name = dev_name(&dev->dev);
-	if (dev->driver && dev->driver->name)
-		name = dev->driver->name;
-	err = pci_request_regions(dev, name);
+	err = pci_request_regions(dev, dev_driver_string(&dev->dev));
 	if (err)
 		goto err_pci_disable;
 	pci_set_master(dev);

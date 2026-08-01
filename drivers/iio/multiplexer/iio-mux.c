@@ -1,23 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * IIO multiplexer driver
  *
  * Copyright (C) 2017 Axentia Technologies AB
  *
  * Author: Peter Rosin <peda@axentia.se>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
+#include <linux/cleanup.h>
 #include <linux/err.h>
 #include <linux/iio/consumer.h>
 #include <linux/iio/iio.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/mux/consumer.h>
-#include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 
 struct mux_ext_info_cache {
 	char *data;
@@ -32,10 +30,10 @@ struct mux {
 	int cached_state;
 	struct mux_control *control;
 	struct iio_channel *parent;
-	struct iio_dev *indio_dev;
 	struct iio_chan_spec *chan;
 	struct iio_chan_spec_ext_info *ext_info;
 	struct mux_child *child;
+	u32 delay_us;
 };
 
 static int iio_mux_select(struct mux *mux, int idx)
@@ -45,7 +43,8 @@ static int iio_mux_select(struct mux *mux, int idx)
 	int ret;
 	int i;
 
-	ret = mux_control_select(mux->control, chan->channel);
+	ret = mux_control_select_delay(mux->control, chan->channel,
+				       mux->delay_us);
 	if (ret < 0) {
 		mux->cached_state = -1;
 		return ret;
@@ -238,52 +237,22 @@ static ssize_t mux_write_ext_info(struct iio_dev *indio_dev, uintptr_t private,
 	return ret;
 }
 
-static int mux_configure_channel(struct device *dev, struct mux *mux,
-				 u32 state, const char *label, int idx)
+static int mux_configure_chan_ext_info(struct device *dev, struct mux *mux,
+				       int idx, int num_ext_info)
 {
 	struct mux_child *child = &mux->child[idx];
-	struct iio_chan_spec *chan = &mux->chan[idx];
 	struct iio_chan_spec const *pchan = mux->parent->channel;
-	char *page = NULL;
-	int num_ext_info;
 	int i;
 	int ret;
 
-	chan->indexed = 1;
-	chan->output = pchan->output;
-	chan->datasheet_name = label;
-	chan->ext_info = mux->ext_info;
+	char *page __free(kfree) = kzalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!page)
+		return -ENOMEM;
 
-	ret = iio_get_channel_type(mux->parent, &chan->type);
-	if (ret < 0) {
-		dev_err(dev, "failed to get parent channel type\n");
-		return ret;
-	}
-
-	if (iio_channel_has_info(pchan, IIO_CHAN_INFO_RAW))
-		chan->info_mask_separate |= BIT(IIO_CHAN_INFO_RAW);
-	if (iio_channel_has_info(pchan, IIO_CHAN_INFO_SCALE))
-		chan->info_mask_separate |= BIT(IIO_CHAN_INFO_SCALE);
-
-	if (iio_channel_has_available(pchan, IIO_CHAN_INFO_RAW))
-		chan->info_mask_separate_available |= BIT(IIO_CHAN_INFO_RAW);
-
-	if (state >= mux_control_states(mux->control)) {
-		dev_err(dev, "too many channels\n");
-		return -EINVAL;
-	}
-
-	chan->channel = state;
-
-	num_ext_info = iio_get_channel_ext_info_count(mux->parent);
-	if (num_ext_info) {
-		page = devm_kzalloc(dev, PAGE_SIZE, GFP_KERNEL);
-		if (!page)
-			return -ENOMEM;
-	}
-	child->ext_info_cache = devm_kzalloc(dev,
-					     sizeof(*child->ext_info_cache) *
-					     num_ext_info, GFP_KERNEL);
+	child->ext_info_cache = devm_kcalloc(dev,
+					     num_ext_info,
+					     sizeof(*child->ext_info_cache),
+					     GFP_KERNEL);
 	if (!child->ext_info_cache)
 		return -ENOMEM;
 
@@ -318,49 +287,69 @@ static int mux_configure_channel(struct device *dev, struct mux *mux,
 		child->ext_info_cache[i].size = ret;
 	}
 
-	if (page)
-		devm_kfree(dev, page);
+	return 0;
+}
+
+static int mux_configure_channel(struct device *dev, struct mux *mux, u32 state,
+				 const char *label, int idx)
+{
+	struct iio_chan_spec *chan = &mux->chan[idx];
+	struct iio_chan_spec const *pchan = mux->parent->channel;
+	int num_ext_info;
+	int ret;
+
+	chan->indexed = 1;
+	chan->output = pchan->output;
+	chan->datasheet_name = label;
+	chan->ext_info = mux->ext_info;
+
+	ret = iio_get_channel_type(mux->parent, &chan->type);
+	if (ret < 0) {
+		dev_err(dev, "failed to get parent channel type\n");
+		return ret;
+	}
+
+	if (iio_channel_has_info(pchan, IIO_CHAN_INFO_RAW))
+		chan->info_mask_separate |= BIT(IIO_CHAN_INFO_RAW);
+	if (iio_channel_has_info(pchan, IIO_CHAN_INFO_SCALE))
+		chan->info_mask_separate |= BIT(IIO_CHAN_INFO_SCALE);
+
+	if (iio_channel_has_available(pchan, IIO_CHAN_INFO_RAW))
+		chan->info_mask_separate_available |= BIT(IIO_CHAN_INFO_RAW);
+
+	if (state >= mux_control_states(mux->control)) {
+		dev_err(dev, "too many channels\n");
+		return -EINVAL;
+	}
+
+	chan->channel = state;
+
+	num_ext_info = iio_get_channel_ext_info_count(mux->parent);
+	if (num_ext_info)
+		return mux_configure_chan_ext_info(dev, mux, idx, num_ext_info);
 
 	return 0;
 }
 
-/*
- * Same as of_property_for_each_string(), but also keeps track of the
- * index of each string.
- */
-#define of_property_for_each_string_index(np, propname, prop, s, i)	\
-	for (prop = of_find_property(np, propname, NULL),		\
-	     s = of_prop_next_string(prop, NULL),			\
-	     i = 0;							\
-	     s;								\
-	     s = of_prop_next_string(prop, s),				\
-	     i++)
-
 static int mux_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct device_node *np = pdev->dev.of_node;
 	struct iio_dev *indio_dev;
 	struct iio_channel *parent;
 	struct mux *mux;
-	struct property *prop;
-	const char *label;
+	const char **labels;
+	int all_children;
+	int children;
 	u32 state;
 	int sizeof_ext_info;
-	int children;
 	int sizeof_priv;
 	int i;
 	int ret;
 
-	if (!np)
-		return -ENODEV;
-
 	parent = devm_iio_channel_get(dev, "parent");
-	if (IS_ERR(parent)) {
-		if (PTR_ERR(parent) != -EPROBE_DEFER)
-			dev_err(dev, "failed to get parent channel\n");
-		return PTR_ERR(parent);
-	}
+	if (IS_ERR(parent))
+		return dev_err_probe(dev, PTR_ERR(parent),
+				     "failed to get parent channel\n");
 
 	sizeof_ext_info = iio_get_channel_ext_info_count(parent);
 	if (sizeof_ext_info) {
@@ -368,9 +357,21 @@ static int mux_probe(struct platform_device *pdev)
 		sizeof_ext_info *= sizeof(*mux->ext_info);
 	}
 
+	all_children = device_property_string_array_count(dev, "channels");
+	if (all_children < 0)
+		return all_children;
+
+	labels = devm_kmalloc_array(dev, all_children, sizeof(*labels), GFP_KERNEL);
+	if (!labels)
+		return -ENOMEM;
+
+	ret = device_property_read_string_array(dev, "channels", labels, all_children);
+	if (ret < 0)
+		return ret;
+
 	children = 0;
-	of_property_for_each_string(np, "channels", prop, label) {
-		if (*label)
+	for (state = 0; state < all_children; state++) {
+		if (*labels[state])
 			children++;
 	}
 	if (children <= 0) {
@@ -396,8 +397,10 @@ static int mux_probe(struct platform_device *pdev)
 	mux->parent = parent;
 	mux->cached_state = -1;
 
+	mux->delay_us = 0;
+	device_property_read_u32(dev, "settle-time-us", &mux->delay_us);
+
 	indio_dev->name = dev_name(dev);
-	indio_dev->dev.parent = dev;
 	indio_dev->info = &mux_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = mux->chan;
@@ -419,18 +422,16 @@ static int mux_probe(struct platform_device *pdev)
 	}
 
 	mux->control = devm_mux_control_get(dev, NULL);
-	if (IS_ERR(mux->control)) {
-		if (PTR_ERR(mux->control) != -EPROBE_DEFER)
-			dev_err(dev, "failed to get control-mux\n");
-		return PTR_ERR(mux->control);
-	}
+	if (IS_ERR(mux->control))
+		return dev_err_probe(dev, PTR_ERR(mux->control),
+				     "failed to get control-mux\n");
 
 	i = 0;
-	of_property_for_each_string_index(np, "channels", prop, label, state) {
-		if (!*label)
+	for (state = 0; state < all_children; state++) {
+		if (!*labels[state])
 			continue;
 
-		ret = mux_configure_channel(dev, mux, state, label, i++);
+		ret = mux_configure_channel(dev, mux, state, labels[state], i++);
 		if (ret < 0)
 			return ret;
 	}
@@ -446,7 +447,7 @@ static int mux_probe(struct platform_device *pdev)
 
 static const struct of_device_id mux_match[] = {
 	{ .compatible = "io-channel-mux" },
-	{ /* sentinel */ }
+	{ }
 };
 MODULE_DEVICE_TABLE(of, mux_match);
 

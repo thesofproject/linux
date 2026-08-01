@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * arch/powerpc/sysdev/ipic.c
  *
  * IPIC routines implementations.
  *
  * Copyright 2005 Freescale Semiconductor, Inc.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -22,9 +18,10 @@
 #include <linux/device.h>
 #include <linux/spinlock.h>
 #include <linux/fsl_devices.h>
+#include <linux/irqdomain.h>
+#include <linux/of_address.h>
 #include <asm/irq.h>
 #include <asm/io.h>
-#include <asm/prom.h>
 #include <asm/ipic.h>
 
 #include "ipic.h"
@@ -710,12 +707,13 @@ struct ipic * __init ipic_init(struct device_node *node, unsigned int flags)
 	if (ret)
 		return NULL;
 
-	ipic = kzalloc(sizeof(*ipic), GFP_KERNEL);
+	ipic = kzalloc_obj(*ipic);
 	if (ipic == NULL)
 		return NULL;
 
-	ipic->irqhost = irq_domain_add_linear(node, NR_IPIC_INTS,
-					      &ipic_host_ops, ipic);
+	ipic->irqhost = irq_domain_create_linear(of_fwnode_handle(node),
+						 NR_IPIC_INTS,
+						 &ipic_host_ops, ipic);
 	if (ipic->irqhost == NULL) {
 		kfree(ipic);
 		return NULL;
@@ -760,61 +758,17 @@ struct ipic * __init ipic_init(struct device_node *node, unsigned int flags)
 	ipic_write(ipic->regs, IPIC_SEMSR, temp);
 
 	primary_ipic = ipic;
-	irq_set_default_host(primary_ipic->irqhost);
+	irq_set_default_domain(primary_ipic->irqhost);
 
 	ipic_write(ipic->regs, IPIC_SIMSR_H, 0);
 	ipic_write(ipic->regs, IPIC_SIMSR_L, 0);
 
-	printk ("IPIC (%d IRQ sources) at %p\n", NR_IPIC_INTS,
-			primary_ipic->regs);
+	pr_info("IPIC (%d IRQ sources) at MMIO %pa\n", NR_IPIC_INTS, &res.start);
 
 	return ipic;
 }
 
-int ipic_set_priority(unsigned int virq, unsigned int priority)
-{
-	struct ipic *ipic = ipic_from_irq(virq);
-	unsigned int src = virq_to_hw(virq);
-	u32 temp;
-
-	if (priority > 7)
-		return -EINVAL;
-	if (src > 127)
-		return -EINVAL;
-	if (ipic_info[src].prio == 0)
-		return -EINVAL;
-
-	temp = ipic_read(ipic->regs, ipic_info[src].prio);
-
-	if (priority < 4) {
-		temp &= ~(0x7 << (20 + (3 - priority) * 3));
-		temp |= ipic_info[src].prio_mask << (20 + (3 - priority) * 3);
-	} else {
-		temp &= ~(0x7 << (4 + (7 - priority) * 3));
-		temp |= ipic_info[src].prio_mask << (4 + (7 - priority) * 3);
-	}
-
-	ipic_write(ipic->regs, ipic_info[src].prio, temp);
-
-	return 0;
-}
-
-void ipic_set_highest_priority(unsigned int virq)
-{
-	struct ipic *ipic = ipic_from_irq(virq);
-	unsigned int src = virq_to_hw(virq);
-	u32 temp;
-
-	temp = ipic_read(ipic->regs, IPIC_SICFR);
-
-	/* clear and set HPI */
-	temp &= 0x7f000000;
-	temp |= (src & 0x7f) << 24;
-
-	ipic_write(ipic->regs, IPIC_SICFR, temp);
-}
-
-void ipic_set_default_priority(void)
+void __init ipic_set_default_priority(void)
 {
 	ipic_write(primary_ipic->regs, IPIC_SIPRR_A, IPIC_PRIORITY_DEFAULT);
 	ipic_write(primary_ipic->regs, IPIC_SIPRR_B, IPIC_PRIORITY_DEFAULT);
@@ -824,29 +778,9 @@ void ipic_set_default_priority(void)
 	ipic_write(primary_ipic->regs, IPIC_SMPRR_B, IPIC_PRIORITY_DEFAULT);
 }
 
-void ipic_enable_mcp(enum ipic_mcp_irq mcp_irq)
-{
-	struct ipic *ipic = primary_ipic;
-	u32 temp;
-
-	temp = ipic_read(ipic->regs, IPIC_SERMR);
-	temp |= (1 << (31 - mcp_irq));
-	ipic_write(ipic->regs, IPIC_SERMR, temp);
-}
-
-void ipic_disable_mcp(enum ipic_mcp_irq mcp_irq)
-{
-	struct ipic *ipic = primary_ipic;
-	u32 temp;
-
-	temp = ipic_read(ipic->regs, IPIC_SERMR);
-	temp &= (1 << (31 - mcp_irq));
-	ipic_write(ipic->regs, IPIC_SERMR, temp);
-}
-
 u32 ipic_get_mcp_status(void)
 {
-	return ipic_read(primary_ipic->regs, IPIC_SERSR);
+	return primary_ipic ? ipic_read(primary_ipic->regs, IPIC_SERSR) : 0;
 }
 
 void ipic_clear_mcp_status(u32 mask)
@@ -867,7 +801,7 @@ unsigned int ipic_get_irq(void)
 	if (irq == 0)    /* 0 --> no irq is pending */
 		return 0;
 
-	return irq_linear_revmap(primary_ipic->irqhost, irq);
+	return irq_find_mapping(primary_ipic->irqhost, irq);
 }
 
 #ifdef CONFIG_SUSPEND
@@ -883,7 +817,7 @@ static struct {
 	u32 sercr;
 } ipic_saved_state;
 
-static int ipic_suspend(void)
+static int ipic_suspend(void *data)
 {
 	struct ipic *ipic = primary_ipic;
 
@@ -914,7 +848,7 @@ static int ipic_suspend(void)
 	return 0;
 }
 
-static void ipic_resume(void)
+static void ipic_resume(void *data)
 {
 	struct ipic *ipic = primary_ipic;
 
@@ -936,9 +870,13 @@ static void ipic_resume(void)
 #define ipic_resume NULL
 #endif
 
-static struct syscore_ops ipic_syscore_ops = {
+static const struct syscore_ops ipic_syscore_ops = {
 	.suspend = ipic_suspend,
 	.resume = ipic_resume,
+};
+
+static struct syscore ipic_syscore = {
+	.ops = &ipic_syscore_ops,
 };
 
 static int __init init_ipic_syscore(void)
@@ -947,7 +885,7 @@ static int __init init_ipic_syscore(void)
 		return -ENODEV;
 
 	printk(KERN_DEBUG "Registering ipic system core operations\n");
-	register_syscore_ops(&ipic_syscore_ops);
+	register_syscore(&ipic_syscore);
 
 	return 0;
 }

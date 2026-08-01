@@ -1,12 +1,18 @@
 .. raw:: latex
 
-        \renewcommand\thesection*
-        \renewcommand\thesubsection*
+	\renewcommand\thesection*
+	\renewcommand\thesubsection*
+	\kerneldocCJKon
+	\kerneldocBeginKR{
 
-Korean translations
-===================
+한국어 번역
+===========
 
 .. toctree::
    :maxdepth: 1
 
-   howto
+   process/howto
+
+.. raw:: latex
+
+       }\kerneldocEndKR

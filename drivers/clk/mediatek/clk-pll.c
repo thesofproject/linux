@@ -1,25 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014 MediaTek Inc.
  * Author: James Liao <jamesjj.liao@mediatek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
-#include <linux/of.h>
-#include <linux/of_address.h>
-#include <linux/io.h>
-#include <linux/slab.h>
-#include <linux/clkdev.h>
+#include <linux/clk-provider.h>
+#include <linux/container_of.h>
 #include <linux/delay.h>
+#include <linux/err.h>
+#include <linux/io.h>
+#include <linux/module.h>
+#include <linux/of_address.h>
+#include <linux/platform_device.h>
+#include <linux/slab.h>
 
-#include "clk-mtk.h"
+#include "clk-pll.h"
+
+#define MHZ			(1000 * 1000)
 
 #define REG_CON0		0
 #define REG_CON1		4
@@ -27,53 +24,40 @@
 #define CON0_BASE_EN		BIT(0)
 #define CON0_PWR_ON		BIT(0)
 #define CON0_ISO_EN		BIT(1)
-#define CON0_PCW_CHG		BIT(31)
+#define PCW_CHG_BIT		31
 
 #define AUDPLL_TUNER_EN		BIT(31)
 
-#define POSTDIV_MASK		0x7
+/* default 7 bits integer, can be overridden with pcwibits. */
 #define INTEGER_BITS		7
 
-/*
- * MediaTek PLLs are configured through their pcw value. The pcw value describes
- * a divider in the PLL feedback loop which consists of 7 bits for the integer
- * part and the remaining bits (if present) for the fractional part. Also they
- * have a 3 bit power-of-two post divider.
- */
-
-struct mtk_clk_pll {
-	struct clk_hw	hw;
-	void __iomem	*base_addr;
-	void __iomem	*pd_addr;
-	void __iomem	*pwr_addr;
-	void __iomem	*tuner_addr;
-	void __iomem	*tuner_en_addr;
-	void __iomem	*pcw_addr;
-	const struct mtk_pll_data *data;
-};
-
-static inline struct mtk_clk_pll *to_mtk_clk_pll(struct clk_hw *hw)
-{
-	return container_of(hw, struct mtk_clk_pll, hw);
-}
-
-static int mtk_pll_is_prepared(struct clk_hw *hw)
+int mtk_pll_is_prepared(struct clk_hw *hw)
 {
 	struct mtk_clk_pll *pll = to_mtk_clk_pll(hw);
 
-	return (readl(pll->base_addr + REG_CON0) & CON0_BASE_EN) != 0;
+	return (readl(pll->en_addr) & BIT(pll->data->pll_en_bit)) != 0;
+}
+
+static int mtk_pll_fenc_is_prepared(struct clk_hw *hw)
+{
+	struct mtk_clk_pll *pll = to_mtk_clk_pll(hw);
+
+	return !!(readl(pll->fenc_addr) & BIT(pll->data->fenc_sta_bit));
 }
 
 static unsigned long __mtk_pll_recalc_rate(struct mtk_clk_pll *pll, u32 fin,
 		u32 pcw, int postdiv)
 {
 	int pcwbits = pll->data->pcwbits;
-	int pcwfbits;
+	int pcwfbits = 0;
+	int ibits;
 	u64 vco;
 	u8 c = 0;
 
 	/* The fractional part of the PLL divider. */
-	pcwfbits = pcwbits > INTEGER_BITS ? pcwbits - INTEGER_BITS : 0;
+	ibits = pll->data->pcwibits ? pll->data->pcwibits : INTEGER_BITS;
+	if (pcwbits > ibits)
+		pcwfbits = pcwbits - ibits;
 
 	vco = (u64)fin * pcw;
 
@@ -88,13 +72,39 @@ static unsigned long __mtk_pll_recalc_rate(struct mtk_clk_pll *pll, u32 fin,
 	return ((unsigned long)vco + postdiv - 1) / postdiv;
 }
 
+static void __mtk_pll_tuner_enable(struct mtk_clk_pll *pll)
+{
+	u32 r;
+
+	if (pll->tuner_en_addr) {
+		r = readl(pll->tuner_en_addr) | BIT(pll->data->tuner_en_bit);
+		writel(r, pll->tuner_en_addr);
+	} else if (pll->tuner_addr) {
+		r = readl(pll->tuner_addr) | AUDPLL_TUNER_EN;
+		writel(r, pll->tuner_addr);
+	}
+}
+
+static void __mtk_pll_tuner_disable(struct mtk_clk_pll *pll)
+{
+	u32 r;
+
+	if (pll->tuner_en_addr) {
+		r = readl(pll->tuner_en_addr) & ~BIT(pll->data->tuner_en_bit);
+		writel(r, pll->tuner_en_addr);
+	} else if (pll->tuner_addr) {
+		r = readl(pll->tuner_addr) & ~AUDPLL_TUNER_EN;
+		writel(r, pll->tuner_addr);
+	}
+}
+
 static void mtk_pll_set_rate_regs(struct mtk_clk_pll *pll, u32 pcw,
 		int postdiv)
 {
-	u32 con1, val;
-	int pll_en;
+	u32 chg, val;
 
-	pll_en = readl(pll->base_addr + REG_CON0) & CON0_BASE_EN;
+	/* disable tuner */
+	__mtk_pll_tuner_disable(pll);
 
 	/* set postdiv */
 	val = readl(pll->pd_addr);
@@ -112,18 +122,16 @@ static void mtk_pll_set_rate_regs(struct mtk_clk_pll *pll, u32 pcw,
 			pll->data->pcw_shift);
 	val |= pcw << pll->data->pcw_shift;
 	writel(val, pll->pcw_addr);
-
-	con1 = readl(pll->base_addr + REG_CON1);
-
-	if (pll_en)
-		con1 |= CON0_PCW_CHG;
-
-	writel(con1, pll->base_addr + REG_CON1);
+	chg = readl(pll->pcw_chg_addr) |
+	      BIT(pll->data->pcw_chg_bit ? : PCW_CHG_BIT);
+	writel(chg, pll->pcw_chg_addr);
 	if (pll->tuner_addr)
-		writel(con1 + 1, pll->tuner_addr);
+		writel(val + 1, pll->tuner_addr);
 
-	if (pll_en)
-		udelay(20);
+	/* restore tuner_en */
+	__mtk_pll_tuner_enable(pll);
+
+	udelay(20);
 }
 
 /*
@@ -135,12 +143,13 @@ static void mtk_pll_set_rate_regs(struct mtk_clk_pll *pll, u32 pcw,
  * @fin:	The input frequency
  *
  */
-static void mtk_pll_calc_values(struct mtk_clk_pll *pll, u32 *pcw, u32 *postdiv,
-		u32 freq, u32 fin)
+void mtk_pll_calc_values(struct mtk_clk_pll *pll, u32 *pcw, u32 *postdiv,
+			 u32 freq, u32 fin)
 {
-	unsigned long fmin = 1000 * MHZ;
+	unsigned long fmin = pll->data->fmin ? pll->data->fmin : (1000 * MHZ);
 	const struct mtk_pll_div_table *div_table = pll->data->div_table;
 	u64 _pcw;
+	int ibits;
 	u32 val;
 
 	if (freq > pll->data->fmax)
@@ -164,14 +173,15 @@ static void mtk_pll_calc_values(struct mtk_clk_pll *pll, u32 *pcw, u32 *postdiv,
 	}
 
 	/* _pcw = freq * postdiv / fin * 2^pcwfbits */
-	_pcw = ((u64)freq << val) << (pll->data->pcwbits - INTEGER_BITS);
+	ibits = pll->data->pcwibits ? pll->data->pcwibits : INTEGER_BITS;
+	_pcw = ((u64)freq << val) << (pll->data->pcwbits - ibits);
 	do_div(_pcw, fin);
 
 	*pcw = (u32)_pcw;
 }
 
-static int mtk_pll_set_rate(struct clk_hw *hw, unsigned long rate,
-		unsigned long parent_rate)
+int mtk_pll_set_rate(struct clk_hw *hw, unsigned long rate,
+		     unsigned long parent_rate)
 {
 	struct mtk_clk_pll *pll = to_mtk_clk_pll(hw);
 	u32 pcw = 0;
@@ -183,8 +193,7 @@ static int mtk_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 	return 0;
 }
 
-static unsigned long mtk_pll_recalc_rate(struct clk_hw *hw,
-		unsigned long parent_rate)
+unsigned long mtk_pll_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
 {
 	struct mtk_clk_pll *pll = to_mtk_clk_pll(hw);
 	u32 postdiv;
@@ -199,19 +208,22 @@ static unsigned long mtk_pll_recalc_rate(struct clk_hw *hw,
 	return __mtk_pll_recalc_rate(pll, parent_rate, pcw, postdiv);
 }
 
-static long mtk_pll_round_rate(struct clk_hw *hw, unsigned long rate,
-		unsigned long *prate)
+int mtk_pll_determine_rate(struct clk_hw *hw, struct clk_rate_request *req)
 {
 	struct mtk_clk_pll *pll = to_mtk_clk_pll(hw);
 	u32 pcw = 0;
 	int postdiv;
 
-	mtk_pll_calc_values(pll, &pcw, &postdiv, rate, *prate);
+	mtk_pll_calc_values(pll, &pcw, &postdiv, req->rate,
+			    req->best_parent_rate);
 
-	return __mtk_pll_recalc_rate(pll, *prate, pcw, postdiv);
+	req->rate = __mtk_pll_recalc_rate(pll, req->best_parent_rate, pcw,
+					  postdiv);
+
+	return 0;
 }
 
-static int mtk_pll_prepare(struct clk_hw *hw)
+int mtk_pll_prepare(struct clk_hw *hw)
 {
 	struct mtk_clk_pll *pll = to_mtk_clk_pll(hw);
 	u32 r;
@@ -224,17 +236,15 @@ static int mtk_pll_prepare(struct clk_hw *hw)
 	writel(r, pll->pwr_addr);
 	udelay(1);
 
-	r = readl(pll->base_addr + REG_CON0);
-	r |= pll->data->en_mask;
-	writel(r, pll->base_addr + REG_CON0);
+	r = readl(pll->en_addr) | BIT(pll->data->pll_en_bit);
+	writel(r, pll->en_addr);
 
-	if (pll->tuner_en_addr) {
-		r = readl(pll->tuner_en_addr) | BIT(pll->data->tuner_en_bit);
-		writel(r, pll->tuner_en_addr);
-	} else if (pll->tuner_addr) {
-		r = readl(pll->tuner_addr) | AUDPLL_TUNER_EN;
-		writel(r, pll->tuner_addr);
+	if (pll->data->en_mask) {
+		r = readl(pll->base_addr + REG_CON0) | pll->data->en_mask;
+		writel(r, pll->base_addr + REG_CON0);
 	}
+
+	__mtk_pll_tuner_enable(pll);
 
 	udelay(20);
 
@@ -247,7 +257,7 @@ static int mtk_pll_prepare(struct clk_hw *hw)
 	return 0;
 }
 
-static void mtk_pll_unprepare(struct clk_hw *hw)
+void mtk_pll_unprepare(struct clk_hw *hw)
 {
 	struct mtk_clk_pll *pll = to_mtk_clk_pll(hw);
 	u32 r;
@@ -258,17 +268,15 @@ static void mtk_pll_unprepare(struct clk_hw *hw)
 		writel(r, pll->base_addr + REG_CON0);
 	}
 
-	if (pll->tuner_en_addr) {
-		r = readl(pll->tuner_en_addr) & ~BIT(pll->data->tuner_en_bit);
-		writel(r, pll->tuner_en_addr);
-	} else if (pll->tuner_addr) {
-		r = readl(pll->tuner_addr) & ~AUDPLL_TUNER_EN;
-		writel(r, pll->tuner_addr);
+	__mtk_pll_tuner_disable(pll);
+
+	if (pll->data->en_mask) {
+		r = readl(pll->base_addr + REG_CON0) & ~pll->data->en_mask;
+		writel(r, pll->base_addr + REG_CON0);
 	}
 
-	r = readl(pll->base_addr + REG_CON0);
-	r &= ~CON0_BASE_EN;
-	writel(r, pll->base_addr + REG_CON0);
+	r = readl(pll->en_addr) & ~BIT(pll->data->pll_en_bit);
+	writel(r, pll->en_addr);
 
 	r = readl(pll->pwr_addr) | CON0_ISO_EN;
 	writel(r, pll->pwr_addr);
@@ -277,79 +285,219 @@ static void mtk_pll_unprepare(struct clk_hw *hw)
 	writel(r, pll->pwr_addr);
 }
 
-static const struct clk_ops mtk_pll_ops = {
+static int mtk_pll_prepare_setclr(struct clk_hw *hw)
+{
+	struct mtk_clk_pll *pll = to_mtk_clk_pll(hw);
+
+	writel(BIT(pll->data->pll_en_bit), pll->en_set_addr);
+
+	/* Wait 20us after enable for the PLL to stabilize */
+	udelay(20);
+
+	return 0;
+}
+
+static void mtk_pll_unprepare_setclr(struct clk_hw *hw)
+{
+	struct mtk_clk_pll *pll = to_mtk_clk_pll(hw);
+
+	writel(BIT(pll->data->pll_en_bit), pll->en_clr_addr);
+}
+
+const struct clk_ops mtk_pll_ops = {
 	.is_prepared	= mtk_pll_is_prepared,
 	.prepare	= mtk_pll_prepare,
 	.unprepare	= mtk_pll_unprepare,
 	.recalc_rate	= mtk_pll_recalc_rate,
-	.round_rate	= mtk_pll_round_rate,
+	.determine_rate = mtk_pll_determine_rate,
 	.set_rate	= mtk_pll_set_rate,
 };
 
-static struct clk *mtk_clk_register_pll(const struct mtk_pll_data *data,
-		void __iomem *base)
-{
-	struct mtk_clk_pll *pll;
-	struct clk_init_data init = {};
-	struct clk *clk;
-	const char *parent_name = "clk26m";
+const struct clk_ops mtk_pll_fenc_clr_set_ops = {
+	.is_prepared	= mtk_pll_fenc_is_prepared,
+	.prepare	= mtk_pll_prepare_setclr,
+	.unprepare	= mtk_pll_unprepare_setclr,
+	.recalc_rate	= mtk_pll_recalc_rate,
+	.determine_rate	= mtk_pll_determine_rate,
+	.set_rate	= mtk_pll_set_rate,
+};
+EXPORT_SYMBOL_GPL(mtk_pll_fenc_clr_set_ops);
 
-	pll = kzalloc(sizeof(*pll), GFP_KERNEL);
-	if (!pll)
-		return ERR_PTR(-ENOMEM);
+struct clk_hw *mtk_clk_register_pll_ops(struct mtk_clk_pll *pll,
+					const struct mtk_pll_data *data,
+					void __iomem *base,
+					const struct clk_ops *pll_ops)
+{
+	struct clk_init_data init = {};
+	int ret;
+	const char *parent_name = "clk26m";
 
 	pll->base_addr = base + data->reg;
 	pll->pwr_addr = base + data->pwr_reg;
 	pll->pd_addr = base + data->pd_reg;
 	pll->pcw_addr = base + data->pcw_reg;
+	if (data->pcw_chg_reg)
+		pll->pcw_chg_addr = base + data->pcw_chg_reg;
+	else
+		pll->pcw_chg_addr = pll->base_addr + REG_CON1;
 	if (data->tuner_reg)
 		pll->tuner_addr = base + data->tuner_reg;
-	if (data->tuner_en_reg)
+	if (data->tuner_en_reg || data->tuner_en_bit)
 		pll->tuner_en_addr = base + data->tuner_en_reg;
+	if (data->en_reg)
+		pll->en_addr = base + data->en_reg;
+	else
+		pll->en_addr = pll->base_addr + REG_CON0;
+	if (data->en_set_reg)
+		pll->en_set_addr = base + data->en_set_reg;
+	if (data->en_clr_reg)
+		pll->en_clr_addr = base + data->en_clr_reg;
 	pll->hw.init = &init;
 	pll->data = data;
 
+	pll->fenc_addr = base + data->fenc_sta_ofs;
+
 	init.name = data->name;
 	init.flags = (data->flags & PLL_AO) ? CLK_IS_CRITICAL : 0;
-	init.ops = &mtk_pll_ops;
+	if (data->flags & PLL_PARENT_EN)
+		init.flags |= CLK_OPS_PARENT_ENABLE;
+
+	init.ops = pll_ops;
 	if (data->parent_name)
 		init.parent_names = &data->parent_name;
 	else
 		init.parent_names = &parent_name;
 	init.num_parents = 1;
 
-	clk = clk_register(NULL, &pll->hw);
+	ret = clk_hw_register(pll->dev, &pll->hw);
 
-	if (IS_ERR(clk))
-		kfree(pll);
+	if (ret)
+		return ERR_PTR(ret);
 
-	return clk;
+	return &pll->hw;
 }
 
-void mtk_clk_register_plls(struct device_node *node,
-		const struct mtk_pll_data *plls, int num_plls, struct clk_onecell_data *clk_data)
+struct clk_hw *mtk_clk_register_pll(struct device *dev,
+				    const struct mtk_pll_data *data,
+				    void __iomem *base)
+{
+	struct mtk_clk_pll *pll;
+	struct clk_hw *hw;
+	const struct clk_ops *pll_ops = data->ops ? data->ops : &mtk_pll_ops;
+
+	pll = kzalloc_obj(*pll);
+	if (!pll)
+		return ERR_PTR(-ENOMEM);
+
+	pll->dev = dev;
+
+	hw = mtk_clk_register_pll_ops(pll, data, base, pll_ops);
+	if (IS_ERR(hw))
+		kfree(pll);
+
+	return hw;
+}
+
+void mtk_clk_unregister_pll(struct clk_hw *hw)
+{
+	struct mtk_clk_pll *pll;
+
+	if (!hw)
+		return;
+
+	pll = to_mtk_clk_pll(hw);
+
+	clk_hw_unregister(hw);
+	kfree(pll);
+}
+
+int mtk_clk_register_plls(struct device *dev,
+			  const struct mtk_pll_data *plls, int num_plls,
+			  struct clk_hw_onecell_data *clk_data)
 {
 	void __iomem *base;
 	int i;
-	struct clk *clk;
+	struct clk_hw *hw;
 
-	base = of_iomap(node, 0);
+	base = of_iomap(dev->of_node, 0);
 	if (!base) {
 		pr_err("%s(): ioremap failed\n", __func__);
-		return;
+		return -EINVAL;
 	}
 
 	for (i = 0; i < num_plls; i++) {
 		const struct mtk_pll_data *pll = &plls[i];
 
-		clk = mtk_clk_register_pll(pll, base);
-
-		if (IS_ERR(clk)) {
-			pr_err("Failed to register clk %s: %ld\n",
-					pll->name, PTR_ERR(clk));
+		if (!IS_ERR_OR_NULL(clk_data->hws[pll->id])) {
+			pr_warn("%pOF: Trying to register duplicate clock ID: %d\n",
+				dev->of_node, pll->id);
 			continue;
 		}
 
-		clk_data->clks[pll->id] = clk;
+		hw = mtk_clk_register_pll(dev, pll, base);
+
+		if (IS_ERR(hw)) {
+			pr_err("Failed to register clk %s: %pe\n", pll->name,
+			       hw);
+			goto err;
+		}
+
+		clk_data->hws[pll->id] = hw;
 	}
+
+	return 0;
+
+err:
+	while (--i >= 0) {
+		const struct mtk_pll_data *pll = &plls[i];
+
+		mtk_clk_unregister_pll(clk_data->hws[pll->id]);
+		clk_data->hws[pll->id] = ERR_PTR(-ENOENT);
+	}
+
+	iounmap(base);
+
+	return PTR_ERR(hw);
 }
+EXPORT_SYMBOL_GPL(mtk_clk_register_plls);
+
+__iomem void *mtk_clk_pll_get_base(struct clk_hw *hw,
+				   const struct mtk_pll_data *data)
+{
+	struct mtk_clk_pll *pll = to_mtk_clk_pll(hw);
+
+	return pll->base_addr - data->reg;
+}
+
+void mtk_clk_unregister_plls(const struct mtk_pll_data *plls, int num_plls,
+			     struct clk_hw_onecell_data *clk_data)
+{
+	__iomem void *base = NULL;
+	int i;
+
+	if (!clk_data)
+		return;
+
+	for (i = num_plls; i > 0; i--) {
+		const struct mtk_pll_data *pll = &plls[i - 1];
+
+		if (IS_ERR_OR_NULL(clk_data->hws[pll->id]))
+			continue;
+
+		/*
+		 * This is quite ugly but unfortunately the clks don't have
+		 * any device tied to them, so there's no place to store the
+		 * pointer to the I/O region base address. We have to fetch
+		 * it from one of the registered clks.
+		 */
+		base = mtk_clk_pll_get_base(clk_data->hws[pll->id], pll);
+
+		mtk_clk_unregister_pll(clk_data->hws[pll->id]);
+		clk_data->hws[pll->id] = ERR_PTR(-ENOENT);
+	}
+
+	iounmap(base);
+}
+EXPORT_SYMBOL_GPL(mtk_clk_unregister_plls);
+
+MODULE_LICENSE("GPL");

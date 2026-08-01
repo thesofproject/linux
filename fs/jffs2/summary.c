@@ -27,7 +27,7 @@ int jffs2_sum_init(struct jffs2_sb_info *c)
 {
 	uint32_t sum_size = min_t(uint32_t, c->sector_size, MAX_SUMMARY_SIZE);
 
-	c->summary = kzalloc(sizeof(struct jffs2_summary), GFP_KERNEL);
+	c->summary = kzalloc_obj(struct jffs2_summary);
 
 	if (!c->summary) {
 		JFFS2_WARNING("Can't allocate memory for summary information!\n");
@@ -115,7 +115,7 @@ int jffs2_sum_add_padding_mem(struct jffs2_summary *s, uint32_t size)
 int jffs2_sum_add_inode_mem(struct jffs2_summary *s, struct jffs2_raw_inode *ri,
 				uint32_t ofs)
 {
-	struct jffs2_sum_inode_mem *temp = kmalloc(sizeof(struct jffs2_sum_inode_mem), GFP_KERNEL);
+	struct jffs2_sum_inode_mem *temp = kmalloc_obj(struct jffs2_sum_inode_mem);
 
 	if (!temp)
 		return -ENOMEM;
@@ -159,7 +159,7 @@ int jffs2_sum_add_xattr_mem(struct jffs2_summary *s, struct jffs2_raw_xattr *rx,
 {
 	struct jffs2_sum_xattr_mem *temp;
 
-	temp = kmalloc(sizeof(struct jffs2_sum_xattr_mem), GFP_KERNEL);
+	temp = kmalloc_obj(struct jffs2_sum_xattr_mem);
 	if (!temp)
 		return -ENOMEM;
 
@@ -177,7 +177,7 @@ int jffs2_sum_add_xref_mem(struct jffs2_summary *s, struct jffs2_raw_xref *rr, u
 {
 	struct jffs2_sum_xref_mem *temp;
 
-	temp = kmalloc(sizeof(struct jffs2_sum_xref_mem), GFP_KERNEL);
+	temp = kmalloc_obj(struct jffs2_sum_xref_mem);
 	if (!temp)
 		return -ENOMEM;
 
@@ -263,7 +263,7 @@ int jffs2_sum_add_kvec(struct jffs2_sb_info *c, const struct kvec *invecs,
 	switch (je16_to_cpu(node->u.nodetype)) {
 		case JFFS2_NODETYPE_INODE: {
 			struct jffs2_sum_inode_mem *temp =
-				kmalloc(sizeof(struct jffs2_sum_inode_mem), GFP_KERNEL);
+				kmalloc_obj(struct jffs2_sum_inode_mem);
 
 			if (!temp)
 				goto no_mem;
@@ -314,7 +314,7 @@ int jffs2_sum_add_kvec(struct jffs2_sb_info *c, const struct kvec *invecs,
 #ifdef CONFIG_JFFS2_FS_XATTR
 		case JFFS2_NODETYPE_XATTR: {
 			struct jffs2_sum_xattr_mem *temp;
-			temp = kmalloc(sizeof(struct jffs2_sum_xattr_mem), GFP_KERNEL);
+			temp = kmalloc_obj(struct jffs2_sum_xattr_mem);
 			if (!temp)
 				goto no_mem;
 
@@ -329,7 +329,7 @@ int jffs2_sum_add_kvec(struct jffs2_sb_info *c, const struct kvec *invecs,
 		}
 		case JFFS2_NODETYPE_XREF: {
 			struct jffs2_sum_xref_mem *temp;
-			temp = kmalloc(sizeof(struct jffs2_sum_xref_mem), GFP_KERNEL);
+			temp = kmalloc_obj(struct jffs2_sum_xref_mem);
 			if (!temp)
 				goto no_mem;
 			temp->nodetype = node->r.nodetype;
@@ -783,6 +783,8 @@ static int jffs2_sum_write_data(struct jffs2_sb_info *c, struct jffs2_eraseblock
 					dbg_summary("Writing unknown RWCOMPAT_COPY node type %x\n",
 						    je16_to_cpu(temp->u.nodetype));
 					jffs2_sum_disable_collecting(c->summary);
+					/* The above call removes the list, nothing more to do */
+					goto bail_rwcompat;
 				} else {
 					BUG();	/* unknown node in summary information */
 				}
@@ -794,6 +796,7 @@ static int jffs2_sum_write_data(struct jffs2_sb_info *c, struct jffs2_eraseblock
 
 		c->summary->sum_num--;
 	}
+ bail_rwcompat:
 
 	jffs2_sum_reset_collected(c->summary);
 
@@ -855,7 +858,10 @@ int jffs2_sum_write_sumnode(struct jffs2_sb_info *c)
 	spin_unlock(&c->erase_completion_lock);
 
 	jeb = c->nextblock;
-	jffs2_prealloc_raw_node_refs(c, jeb, 1);
+	ret = jffs2_prealloc_raw_node_refs(c, jeb, 1);
+
+	if (ret)
+		goto out;
 
 	if (!c->summary->sum_num || !c->summary->sum_list_head) {
 		JFFS2_WARNING("Empty summary info!!!\n");
@@ -869,6 +875,8 @@ int jffs2_sum_write_sumnode(struct jffs2_sb_info *c)
 	datasize += padsize;
 
 	ret = jffs2_sum_write_data(c, jeb, infosize, datasize, padsize);
+
+out:
 	spin_lock(&c->erase_completion_lock);
 	return ret;
 }

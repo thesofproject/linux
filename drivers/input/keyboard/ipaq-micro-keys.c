@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * h3600 atmel micro companion support, key subdevice
  * based on previous kernel 2.4 version
  * Author : Alessandro Gardich <gremlin@gremlin.it>
  * Author : Linus Walleij <linus.walleij@linaro.org>
- *
  */
 #include <linux/module.h>
 #include <linux/init.h>
@@ -23,12 +20,6 @@
 #include <linux/platform_device.h>
 #include <linux/mfd/ipaq-micro.h>
 
-struct ipaq_micro_keys {
-	struct ipaq_micro *micro;
-	struct input_dev *input;
-	u16 *codes;
-};
-
 static const u16 micro_keycodes[] = {
 	KEY_RECORD,		/* 1:  Record button			*/
 	KEY_CALENDAR,		/* 2:  Calendar				*/
@@ -41,10 +32,19 @@ static const u16 micro_keycodes[] = {
 	KEY_DOWN,		/* 9:  Down				*/
 };
 
+struct ipaq_micro_keys {
+	struct ipaq_micro *micro;
+	struct input_dev *input;
+	u16 codes[ARRAY_SIZE(micro_keycodes)];
+};
+
 static void micro_key_receive(void *data, int len, unsigned char *msg)
 {
 	struct ipaq_micro_keys *keys = data;
 	int key, down;
+
+	if (len < 1)
+		return;
 
 	down = 0x80 & msg[0];
 	key  = 0x7f & msg[0];
@@ -57,18 +57,18 @@ static void micro_key_receive(void *data, int len, unsigned char *msg)
 
 static void micro_key_start(struct ipaq_micro_keys *keys)
 {
-	spin_lock(&keys->micro->lock);
+	guard(spinlock_irq)(&keys->micro->lock);
+
 	keys->micro->key = micro_key_receive;
 	keys->micro->key_data = keys;
-	spin_unlock(&keys->micro->lock);
 }
 
 static void micro_key_stop(struct ipaq_micro_keys *keys)
 {
-	spin_lock(&keys->micro->lock);
+	guard(spinlock_irq)(&keys->micro->lock);
+
 	keys->micro->key = NULL;
 	keys->micro->key_data = NULL;
-	spin_unlock(&keys->micro->lock);
 }
 
 static int micro_key_open(struct input_dev *input)
@@ -105,9 +105,8 @@ static int micro_key_probe(struct platform_device *pdev)
 
 	keys->input->keycodesize = sizeof(micro_keycodes[0]);
 	keys->input->keycodemax = ARRAY_SIZE(micro_keycodes);
-	keys->codes = devm_kmemdup(&pdev->dev, micro_keycodes,
-			   keys->input->keycodesize * keys->input->keycodemax,
-			   GFP_KERNEL);
+	memcpy(keys->codes, micro_keycodes, sizeof(keys->codes));
+
 	keys->input->keycode = keys->codes;
 
 	__set_bit(EV_KEY, keys->input->evbit);
@@ -127,7 +126,7 @@ static int micro_key_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int __maybe_unused micro_key_suspend(struct device *dev)
+static int micro_key_suspend(struct device *dev)
 {
 	struct ipaq_micro_keys *keys = dev_get_drvdata(dev);
 
@@ -136,28 +135,26 @@ static int __maybe_unused micro_key_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused micro_key_resume(struct device *dev)
+static int micro_key_resume(struct device *dev)
 {
 	struct ipaq_micro_keys *keys = dev_get_drvdata(dev);
 	struct input_dev *input = keys->input;
 
-	mutex_lock(&input->mutex);
+	guard(mutex)(&input->mutex);
 
-	if (input->users)
+	if (input_device_enabled(input))
 		micro_key_start(keys);
-
-	mutex_unlock(&input->mutex);
 
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(micro_key_dev_pm_ops,
-			 micro_key_suspend, micro_key_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(micro_key_dev_pm_ops,
+				micro_key_suspend, micro_key_resume);
 
 static struct platform_driver micro_key_device_driver = {
 	.driver = {
 		.name    = "ipaq-micro-keys",
-		.pm	= &micro_key_dev_pm_ops,
+		.pm	= pm_sleep_ptr(&micro_key_dev_pm_ops),
 	},
 	.probe   = micro_key_probe,
 };

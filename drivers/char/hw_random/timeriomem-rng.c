@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/char/hw_random/timeriomem-rng.c
  *
@@ -6,10 +7,6 @@
  * Derived from drivers/char/hw_random/omap-rng.c
  *   Copyright 2005 (c) MontaVista Software, Inc.
  *   Author: Deepak Saxena <dsaxena@plexity.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Overview:
  *   This driver is useful for platforms that have an IO range that provides
@@ -72,7 +69,7 @@ static int timeriomem_rng_read(struct hwrng *hwrng, void *data,
 		 */
 		if (retval > 0)
 			usleep_range(period_us,
-					period_us + min(1, period_us / 100));
+					period_us + max(1, period_us / 100));
 
 		*(u32 *)data = readl(priv->io_base);
 		retval += sizeof(u32);
@@ -116,16 +113,6 @@ static int timeriomem_rng_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res)
-		return -ENXIO;
-
-	if (res->start % 4 != 0 || resource_size(res) != 4) {
-		dev_err(&pdev->dev,
-			"address must be four bytes wide and aligned\n");
-		return -EINVAL;
-	}
-
 	/* Allocate memory for the device structure (and zero it) */
 	priv = devm_kzalloc(&pdev->dev,
 			sizeof(struct timeriomem_rng_private), GFP_KERNEL);
@@ -133,6 +120,16 @@ static int timeriomem_rng_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	platform_set_drvdata(pdev, priv);
+
+	priv->io_base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
+	if (IS_ERR(priv->io_base))
+		return PTR_ERR(priv->io_base);
+
+	if (res->start % 4 != 0 || resource_size(res) < 4) {
+		dev_err(&pdev->dev,
+			"address must be at least four bytes wide and 32-bit aligned\n");
+		return -EINVAL;
+	}
 
 	if (pdev->dev.of_node) {
 		int i;
@@ -148,31 +145,23 @@ static int timeriomem_rng_probe(struct platform_device *pdev)
 		if (!of_property_read_u32(pdev->dev.of_node,
 						"quality", &i))
 			priv->rng_ops.quality = i;
-		else
-			priv->rng_ops.quality = 0;
 	} else {
 		period = pdata->period;
 		priv->rng_ops.quality = pdata->quality;
 	}
 
-	priv->period = ns_to_ktime(period * NSEC_PER_USEC);
+	priv->period = us_to_ktime(period);
 	init_completion(&priv->completion);
-	hrtimer_init(&priv->timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
-	priv->timer.function = timeriomem_rng_trigger;
+	hrtimer_setup(&priv->timer, timeriomem_rng_trigger, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
 
 	priv->rng_ops.name = dev_name(&pdev->dev);
 	priv->rng_ops.read = timeriomem_rng_read;
-
-	priv->io_base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(priv->io_base)) {
-		return PTR_ERR(priv->io_base);
-	}
 
 	/* Assume random data is already available. */
 	priv->present = 1;
 	complete(&priv->completion);
 
-	err = hwrng_register(&priv->rng_ops);
+	err = devm_hwrng_register(&pdev->dev, &priv->rng_ops);
 	if (err) {
 		dev_err(&pdev->dev, "problem registering\n");
 		return err;
@@ -184,14 +173,11 @@ static int timeriomem_rng_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int timeriomem_rng_remove(struct platform_device *pdev)
+static void timeriomem_rng_remove(struct platform_device *pdev)
 {
 	struct timeriomem_rng_private *priv = platform_get_drvdata(pdev);
 
-	hwrng_unregister(&priv->rng_ops);
 	hrtimer_cancel(&priv->timer);
-
-	return 0;
 }
 
 static const struct of_device_id timeriomem_rng_match[] = {

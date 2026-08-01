@@ -1,48 +1,81 @@
 # SPDX-License-Identifier: GPL-2.0
+
+obj-$(CONFIG_SUNXI_CCU)		+= sunxi-ccu.o
+
 # Common objects
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_common.o
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_mmc_timing.o
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_reset.o
+sunxi-ccu-y			+= ccu_common.o
+sunxi-ccu-y			+= ccu_mmc_timing.o
+sunxi-ccu-y			+= ccu_reset.o
 
 # Base clock types
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_div.o
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_frac.o
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_gate.o
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_mux.o
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_mult.o
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_phase.o
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_sdm.o
+sunxi-ccu-y			+= ccu_div.o
+sunxi-ccu-y			+= ccu_frac.o
+sunxi-ccu-y			+= ccu_gate.o
+sunxi-ccu-y			+= ccu_mux.o
+sunxi-ccu-y			+= ccu_mult.o
+sunxi-ccu-y			+= ccu_phase.o
+sunxi-ccu-y			+= ccu_sdm.o
 
 # Multi-factor clocks
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_nk.o
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_nkm.o
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_nkmp.o
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_nm.o
-lib-$(CONFIG_SUNXI_CCU)		+= ccu_mp.o
+sunxi-ccu-y			+= ccu_nk.o
+sunxi-ccu-y			+= ccu_nkm.o
+sunxi-ccu-y			+= ccu_nkmp.o
+sunxi-ccu-y			+= ccu_nm.o
+sunxi-ccu-y			+= ccu_mp.o
 
 # SoC support
-obj-$(CONFIG_SUN50I_A64_CCU)	+= ccu-sun50i-a64.o
-obj-$(CONFIG_SUN50I_H6_CCU)	+= ccu-sun50i-h6.o
-obj-$(CONFIG_SUN4I_A10_CCU)	+= ccu-sun4i-a10.o
-obj-$(CONFIG_SUN5I_CCU)		+= ccu-sun5i.o
-obj-$(CONFIG_SUN6I_A31_CCU)	+= ccu-sun6i-a31.o
-obj-$(CONFIG_SUN8I_A23_CCU)	+= ccu-sun8i-a23.o
-obj-$(CONFIG_SUN8I_A33_CCU)	+= ccu-sun8i-a33.o
-obj-$(CONFIG_SUN8I_A83T_CCU)	+= ccu-sun8i-a83t.o
-obj-$(CONFIG_SUN8I_H3_CCU)	+= ccu-sun8i-h3.o
-obj-$(CONFIG_SUN8I_V3S_CCU)	+= ccu-sun8i-v3s.o
-obj-$(CONFIG_SUN8I_DE2_CCU)	+= ccu-sun8i-de2.o
-obj-$(CONFIG_SUN8I_R_CCU)	+= ccu-sun8i-r.o
-obj-$(CONFIG_SUN8I_R40_CCU)	+= ccu-sun8i-r40.o
-obj-$(CONFIG_SUN9I_A80_CCU)	+= ccu-sun9i-a80.o
-obj-$(CONFIG_SUN9I_A80_CCU)	+= ccu-sun9i-a80-de.o
-obj-$(CONFIG_SUN9I_A80_CCU)	+= ccu-sun9i-a80-usb.o
+obj-$(CONFIG_SUNIV_F1C100S_CCU)	+= suniv-f1c100s-ccu.o
+obj-$(CONFIG_SUN20I_D1_CCU)	+= sun20i-d1-ccu.o
+obj-$(CONFIG_SUN20I_D1_R_CCU)	+= sun20i-d1-r-ccu.o
+obj-$(CONFIG_SUN50I_A64_CCU)	+= sun50i-a64-ccu.o
+obj-$(CONFIG_SUN50I_A100_CCU)	+= sun50i-a100-ccu.o
+obj-$(CONFIG_SUN50I_A100_R_CCU)	+= sun50i-a100-r-ccu.o
+obj-$(CONFIG_SUN50I_H6_CCU)	+= sun50i-h6-ccu.o
+obj-$(CONFIG_SUN50I_H6_R_CCU)	+= sun50i-h6-r-ccu.o
+obj-$(CONFIG_SUN50I_H616_CCU)	+= sun50i-h616-ccu.o
+obj-$(CONFIG_SUN55I_A523_CCU)	+= sun55i-a523-ccu.o
+obj-$(CONFIG_SUN55I_A523_MCU_CCU)	+= sun55i-a523-mcu-ccu.o
+obj-$(CONFIG_SUN55I_A523_R_CCU)	+= sun55i-a523-r-ccu.o
+obj-$(CONFIG_SUN4I_A10_CCU)	+= sun4i-a10-ccu.o
+obj-$(CONFIG_SUN5I_CCU)		+= sun5i-ccu.o
+obj-$(CONFIG_SUN6I_A31_CCU)	+= sun6i-a31-ccu.o
+obj-$(CONFIG_SUN6I_RTC_CCU)	+= sun6i-rtc-ccu.o
+obj-$(CONFIG_SUN8I_A23_CCU)	+= sun8i-a23-ccu.o
+obj-$(CONFIG_SUN8I_A33_CCU)	+= sun8i-a33-ccu.o
+obj-$(CONFIG_SUN8I_A83T_CCU)	+= sun8i-a83t-ccu.o
+obj-$(CONFIG_SUN8I_H3_CCU)	+= sun8i-h3-ccu.o
+obj-$(CONFIG_SUN8I_R40_CCU)	+= sun8i-r40-ccu.o
+obj-$(CONFIG_SUN8I_V3S_CCU)	+= sun8i-v3s-ccu.o
+obj-$(CONFIG_SUN8I_DE2_CCU)	+= sun8i-de2-ccu.o
+obj-$(CONFIG_SUN8I_R_CCU)	+= sun8i-r-ccu.o
+obj-$(CONFIG_SUN9I_A80_CCU)	+= sun9i-a80-ccu.o
+obj-$(CONFIG_SUN9I_A80_CCU)	+= sun9i-a80-de-ccu.o
+obj-$(CONFIG_SUN9I_A80_CCU)	+= sun9i-a80-usb-ccu.o
 
-# The lib-y file goals is supposed to work only in arch/*/lib or lib/. In our
-# case, we want to use that goal, but even though lib.a will be properly
-# generated, it will not be linked in, eventually resulting in a linker error
-# for missing symbols.
-#
-# We can work around that by explicitly adding lib.a to the obj-y goal. This is
-# an undocumented behaviour, but works well for now.
-obj-$(CONFIG_SUNXI_CCU)		+= lib.a
+suniv-f1c100s-ccu-y		+= ccu-suniv-f1c100s.o
+sun20i-d1-ccu-y			+= ccu-sun20i-d1.o
+sun20i-d1-r-ccu-y		+= ccu-sun20i-d1-r.o
+sun50i-a64-ccu-y		+= ccu-sun50i-a64.o
+sun50i-a100-ccu-y		+= ccu-sun50i-a100.o
+sun50i-a100-r-ccu-y		+= ccu-sun50i-a100-r.o
+sun50i-h6-ccu-y			+= ccu-sun50i-h6.o
+sun50i-h6-r-ccu-y		+= ccu-sun50i-h6-r.o
+sun50i-h616-ccu-y		+= ccu-sun50i-h616.o
+sun55i-a523-ccu-y		+= ccu-sun55i-a523.o
+sun55i-a523-mcu-ccu-y		+= ccu-sun55i-a523-mcu.o
+sun55i-a523-r-ccu-y		+= ccu-sun55i-a523-r.o
+sun4i-a10-ccu-y			+= ccu-sun4i-a10.o
+sun5i-ccu-y			+= ccu-sun5i.o
+sun6i-a31-ccu-y			+= ccu-sun6i-a31.o
+sun6i-rtc-ccu-y			+= ccu-sun6i-rtc.o
+sun8i-a23-ccu-y			+= ccu-sun8i-a23.o
+sun8i-a33-ccu-y			+= ccu-sun8i-a33.o
+sun8i-a83t-ccu-y		+= ccu-sun8i-a83t.o
+sun8i-h3-ccu-y			+= ccu-sun8i-h3.o
+sun8i-r40-ccu-y			+= ccu-sun8i-r40.o
+sun8i-v3s-ccu-y			+= ccu-sun8i-v3s.o
+sun8i-de2-ccu-y			+= ccu-sun8i-de2.o
+sun8i-r-ccu-y			+= ccu-sun8i-r.o
+sun9i-a80-ccu-y			+= ccu-sun9i-a80.o
+sun9i-a80-de-ccu-y		+= ccu-sun9i-a80-de.o
+sun9i-a80-usb-ccu-y		+= ccu-sun9i-a80-usb.o

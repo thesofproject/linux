@@ -1,17 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Marvell Berlin SATA PHY driver
  *
  * Copyright (C) 2014 Marvell Technology Group Ltd.
  *
  * Antoine Ténart <antoine.tenart@free-electrons.com>
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #include <linux/clk.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/phy/phy.h>
 #include <linux/io.h>
 #include <linux/platform_device.h>
@@ -35,7 +33,7 @@
 
 /* register 0x01 */
 #define REF_FREF_SEL_25		BIT(0)
-#define PHY_MODE_SATA		(0x0 << 5)
+#define PHY_BERLIN_MODE_SATA	(0x0 << 5)
 
 /* register 0x02 */
 #define USE_MAX_PLL_RATE	BIT(12)
@@ -105,7 +103,8 @@ static int phy_berlin_sata_power_on(struct phy *phy)
 
 	/* set PHY mode and ref freq to 25 MHz */
 	phy_berlin_sata_reg_setbits(ctrl_reg, priv->phy_base, 0x01,
-				    0x00ff, REF_FREF_SEL_25 | PHY_MODE_SATA);
+				    0x00ff,
+				    REF_FREF_SEL_25 | PHY_BERLIN_MODE_SATA);
 
 	/* set PHY up to 6 Gbps */
 	phy_berlin_sata_reg_setbits(ctrl_reg, priv->phy_base, 0x25,
@@ -156,7 +155,7 @@ static int phy_berlin_sata_power_off(struct phy *phy)
 }
 
 static struct phy *phy_berlin_sata_phy_xlate(struct device *dev,
-					     struct of_phandle_args *args)
+					     const struct of_phandle_args *args)
 {
 	struct phy_berlin_priv *priv = dev_get_drvdata(dev);
 	int i;
@@ -234,14 +233,14 @@ static int phy_berlin_sata_probe(struct platform_device *pdev)
 		struct phy_berlin_desc *phy_desc;
 
 		if (of_property_read_u32(child, "reg", &phy_id)) {
-			dev_err(dev, "missing reg property in node %s\n",
-				child->name);
+			dev_err(dev, "missing reg property in node %pOFn\n",
+				child);
 			ret = -EINVAL;
 			goto put_child;
 		}
 
 		if (phy_id >= ARRAY_SIZE(phy_berlin_power_down_bits)) {
-			dev_err(dev, "invalid reg in node %s\n", child->name);
+			dev_err(dev, "invalid reg in node %pOFn\n", child);
 			ret = -EINVAL;
 			goto put_child;
 		}

@@ -1,22 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Applied Micro X-Gene SoC Ethernet v2 Driver
  *
  * Copyright (c) 2017, Applied Micro Circuits Corporation
  * Author(s): Iyappan Subramanian <isubramanian@apm.com>
  *	      Keyur Chudgar <kchudgar@apm.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "main.h"
@@ -148,16 +136,12 @@ int xge_mdio_config(struct net_device *ndev)
 		goto err;
 	}
 
-	phydev->supported &= ~(SUPPORTED_10baseT_Half |
-			       SUPPORTED_10baseT_Full |
-			       SUPPORTED_100baseT_Half |
-			       SUPPORTED_100baseT_Full |
-			       SUPPORTED_1000baseT_Half |
-			       SUPPORTED_AUI |
-			       SUPPORTED_MII |
-			       SUPPORTED_FIBRE |
-			       SUPPORTED_BNC);
-	phydev->advertising = phydev->supported;
+	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_10baseT_Half_BIT);
+	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_10baseT_Full_BIT);
+	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_100baseT_Half_BIT);
+	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_100baseT_Full_BIT);
+	phy_remove_link_mode(phydev, ETHTOOL_LINK_MODE_1000baseT_Half_BIT);
+
 	pdata->phy_speed = SPEED_UNKNOWN;
 
 	return 0;

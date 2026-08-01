@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/types.h>
 #include <linux/netfilter.h>
 #include <net/tcp.h>
@@ -16,12 +17,17 @@ int nf_ct_seqadj_init(struct nf_conn *ct, enum ip_conntrack_info ctinfo,
 	if (off == 0)
 		return 0;
 
-	set_bit(IPS_SEQ_ADJUST_BIT, &ct->status);
-
+	spin_lock_bh(&ct->lock);
 	seqadj = nfct_seqadj(ct);
+	if (!seqadj) {
+		spin_unlock_bh(&ct->lock);
+		return 0;
+	}
+	set_bit(IPS_SEQ_ADJUST_BIT, &ct->status);
 	this_way = &seqadj->seq[dir];
 	this_way->offset_before	 = off;
 	this_way->offset_after	 = off;
+	spin_unlock_bh(&ct->lock);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(nf_ct_seqadj_init);
@@ -36,10 +42,8 @@ int nf_ct_seqadj_set(struct nf_conn *ct, enum ip_conntrack_info ctinfo,
 	if (off == 0)
 		return 0;
 
-	if (unlikely(!seqadj)) {
-		WARN_ONCE(1, "Missing nfct_seqadj_ext_add() setup call\n");
+	if (unlikely(!seqadj))
 		return 0;
-	}
 
 	set_bit(IPS_SEQ_ADJUST_BIT, &ct->status);
 
@@ -115,19 +119,23 @@ static void nf_ct_sack_block_adjust(struct sk_buff *skb,
 /* TCP SACK sequence number adjustment */
 static unsigned int nf_ct_sack_adjust(struct sk_buff *skb,
 				      unsigned int protoff,
-				      struct tcphdr *tcph,
 				      struct nf_conn *ct,
 				      enum ip_conntrack_info ctinfo)
 {
-	unsigned int dir, optoff, optend;
+	struct tcphdr *tcph = (void *)skb->data + protoff;
 	struct nf_conn_seqadj *seqadj = nfct_seqadj(ct);
+	unsigned int dir, optoff, optend;
+
+	if (!seqadj)
+		return 0;
 
 	optoff = protoff + sizeof(struct tcphdr);
 	optend = protoff + tcph->doff * 4;
 
-	if (!skb_make_writable(skb, optend))
+	if (skb_ensure_writable(skb, optend))
 		return 0;
 
+	tcph = (void *)skb->data + protoff;
 	dir = CTINFO2DIR(ctinfo);
 
 	while (optoff < optend) {
@@ -171,10 +179,13 @@ int nf_ct_seq_adjust(struct sk_buff *skb,
 	struct nf_ct_seqadj *this_way, *other_way;
 	int res = 1;
 
+	if (!seqadj)
+		return 0;
+
 	this_way  = &seqadj->seq[dir];
 	other_way = &seqadj->seq[!dir];
 
-	if (!skb_make_writable(skb, protoff + sizeof(*tcph)))
+	if (skb_ensure_writable(skb, protoff + sizeof(*tcph)))
 		return 0;
 
 	tcph = (void *)skb->data + protoff;
@@ -207,7 +218,7 @@ int nf_ct_seq_adjust(struct sk_buff *skb,
 		 ntohl(newack));
 	tcph->ack_seq = newack;
 
-	res = nf_ct_sack_adjust(skb, protoff, tcph, ct, ctinfo);
+	res = nf_ct_sack_adjust(skb, protoff, ct, ctinfo);
 out:
 	spin_unlock_bh(&ct->lock);
 
@@ -230,19 +241,3 @@ s32 nf_ct_seq_offset(const struct nf_conn *ct,
 		 this_way->offset_after : this_way->offset_before;
 }
 EXPORT_SYMBOL_GPL(nf_ct_seq_offset);
-
-static const struct nf_ct_ext_type nf_ct_seqadj_extend = {
-	.len	= sizeof(struct nf_conn_seqadj),
-	.align	= __alignof__(struct nf_conn_seqadj),
-	.id	= NF_CT_EXT_SEQADJ,
-};
-
-int nf_conntrack_seqadj_init(void)
-{
-	return nf_ct_extend_register(&nf_ct_seqadj_extend);
-}
-
-void nf_conntrack_seqadj_fini(void)
-{
-	nf_ct_extend_unregister(&nf_ct_seqadj_extend);
-}

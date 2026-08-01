@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (c) 2014 Redpine Signals Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
@@ -23,6 +23,7 @@
 #include "rsi_common.h"
 #include "rsi_coex.h"
 #include "rsi_hal.h"
+#include "rsi_usb.h"
 
 u32 rsi_zone_enabled = /* INFO_ZONE |
 			INIT_ZONE |
@@ -121,12 +122,8 @@ static struct sk_buff *rsi_prepare_skb(struct rsi_common *common,
 				       u32 pkt_len,
 				       u8 extended_desc)
 {
-	struct ieee80211_tx_info *info;
-	struct skb_info *rx_params;
 	struct sk_buff *skb = NULL;
 	u8 payload_offset;
-	struct ieee80211_vif *vif;
-	struct ieee80211_hdr *wh;
 
 	if (WARN(!pkt_len, "%s: Dummy pkt received", __func__))
 		return NULL;
@@ -145,13 +142,6 @@ static struct sk_buff *rsi_prepare_skb(struct rsi_common *common,
 	payload_offset = (extended_desc + FRAME_DESC_SZ);
 	skb_put(skb, pkt_len);
 	memcpy((skb->data), (buffer + payload_offset), skb->len);
-	wh = (struct ieee80211_hdr *)skb->data;
-	vif = rsi_get_vif(common->priv, wh->addr1);
-
-	info = IEEE80211_SKB_CB(skb);
-	rx_params = (struct skb_info *)info->driver_data;
-	rx_params->rssi = rsi_get_rssi(buffer);
-	rx_params->channel = rsi_get_connected_channel(vif);
 
 	return skb;
 }
@@ -159,6 +149,7 @@ static struct sk_buff *rsi_prepare_skb(struct rsi_common *common,
 /**
  * rsi_read_pkt() - This function reads frames from the card.
  * @common: Pointer to the driver private structure.
+ * @rx_pkt: Received pkt.
  * @rcv_pkt_len: Received pkt length. In case of USB it is 0.
  *
  * Return: 0 on success, -1 on failure.
@@ -178,6 +169,9 @@ int rsi_read_pkt(struct rsi_common *common, u8 *rx_pkt, s32 rcv_pkt_len)
 		frame_desc = &rx_pkt[index];
 		actual_length = *(u16 *)&frame_desc[0];
 		offset = *(u16 *)&frame_desc[2];
+		if (!rcv_pkt_len && offset >
+			RSI_MAX_RX_USB_PKT_SIZE - FRAME_DESC_SZ)
+			goto fail;
 
 		queueno = rsi_get_queueno(frame_desc, offset);
 		length = rsi_get_length(frame_desc, offset);
@@ -221,9 +215,10 @@ int rsi_read_pkt(struct rsi_common *common, u8 *rx_pkt, s32 rcv_pkt_len)
 			bt_pkt_type = frame_desc[offset + BT_RX_PKT_TYPE_OFST];
 			if (bt_pkt_type == BT_CARD_READY_IND) {
 				rsi_dbg(INFO_ZONE, "BT Card ready recvd\n");
-				if (rsi_bt_ops.attach(common, &g_proto_ops))
-					rsi_dbg(ERR_ZONE,
-						"Failed to attach BT module\n");
+				if (common->fsm_state == FSM_MAC_INIT_DONE)
+					rsi_attach_bt(common);
+				else
+					common->bt_defer_attach = true;
 			} else {
 				if (common->bt_adapter)
 					rsi_bt_ops.recv_pkt(common->bt_adapter,
@@ -269,28 +264,37 @@ static void rsi_tx_scheduler_thread(struct rsi_common *common)
 		if (common->init_done)
 			rsi_core_qos_processor(common);
 	} while (atomic_read(&common->tx_thread.thread_done) == 0);
-	complete_and_exit(&common->tx_thread.completion, 0);
+	kthread_complete_and_exit(&common->tx_thread.completion, 0);
 }
 
 #ifdef CONFIG_RSI_COEX
 enum rsi_host_intf rsi_get_host_intf(void *priv)
 {
-	struct rsi_common *common = (struct rsi_common *)priv;
+	struct rsi_common *common = priv;
 
 	return common->priv->rsi_host_intf;
 }
 
 void rsi_set_bt_context(void *priv, void *bt_context)
 {
-	struct rsi_common *common = (struct rsi_common *)priv;
+	struct rsi_common *common = priv;
 
 	common->bt_adapter = bt_context;
 }
 #endif
 
+void rsi_attach_bt(struct rsi_common *common)
+{
+#ifdef CONFIG_RSI_COEX
+	if (rsi_bt_ops.attach(common, &g_proto_ops))
+		rsi_dbg(ERR_ZONE,
+			"Failed to attach BT module\n");
+#endif
+}
+
 /**
  * rsi_91x_init() - This function initializes os interface operations.
- * @void: Void.
+ * @oper_mode: One of DEV_OPMODE_*.
  *
  * Return: Pointer to the adapter structure on success, NULL on failure .
  */
@@ -300,11 +304,11 @@ struct rsi_hw *rsi_91x_init(u16 oper_mode)
 	struct rsi_common *common = NULL;
 	u8 ii = 0;
 
-	adapter = kzalloc(sizeof(*adapter), GFP_KERNEL);
+	adapter = kzalloc_obj(*adapter);
 	if (!adapter)
 		return NULL;
 
-	adapter->priv = kzalloc(sizeof(*common), GFP_KERNEL);
+	adapter->priv = kzalloc_obj(*common);
 	if (adapter->priv == NULL) {
 		rsi_dbg(ERR_ZONE, "%s: Failed in allocation of memory\n",
 			__func__);
@@ -333,10 +337,10 @@ struct rsi_hw *rsi_91x_init(u16 oper_mode)
 	}
 
 	rsi_default_ps_params(adapter);
+	init_bgscan_params(common);
 	spin_lock_init(&adapter->ps_lock);
 	timer_setup(&common->roc_timer, rsi_roc_timeout, 0);
 	init_completion(&common->wlan_init_completion);
-	common->init_done = true;
 	adapter->device_model = RSI_DEV_9113;
 	common->oper_mode = oper_mode;
 
@@ -369,11 +373,13 @@ struct rsi_hw *rsi_91x_init(u16 oper_mode)
 	if (common->coex_mode > 1) {
 		if (rsi_coex_attach(common)) {
 			rsi_dbg(ERR_ZONE, "Failed to init coex module\n");
+			rsi_kill_thread(&common->tx_thread);
 			goto err;
 		}
 	}
 #endif
 
+	common->init_done = true;
 	return adapter;
 
 err:
@@ -419,37 +425,7 @@ void rsi_91x_deinit(struct rsi_hw *adapter)
 }
 EXPORT_SYMBOL_GPL(rsi_91x_deinit);
 
-/**
- * rsi_91x_hal_module_init() - This function is invoked when the module is
- *			       loaded into the kernel.
- *			       It registers the client driver.
- * @void: Void.
- *
- * Return: 0 on success, -1 on failure.
- */
-static int rsi_91x_hal_module_init(void)
-{
-	rsi_dbg(INIT_ZONE, "%s: Module init called\n", __func__);
-	return 0;
-}
-
-/**
- * rsi_91x_hal_module_exit() - This function is called at the time of
- *			       removing/unloading the module.
- *			       It unregisters the client driver.
- * @void: Void.
- *
- * Return: None.
- */
-static void rsi_91x_hal_module_exit(void)
-{
-	rsi_dbg(INIT_ZONE, "%s: Module exit called\n", __func__);
-}
-
-module_init(rsi_91x_hal_module_init);
-module_exit(rsi_91x_hal_module_exit);
 MODULE_AUTHOR("Redpine Signals Inc");
 MODULE_DESCRIPTION("Station driver for RSI 91x devices");
-MODULE_SUPPORTED_DEVICE("RSI-91x");
 MODULE_VERSION("0.1");
 MODULE_LICENSE("Dual BSD/GPL");

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: MIT */
 #ifndef __NVKM_FB_RAM_PRIV_H__
 #define __NVKM_FB_RAM_PRIV_H__
 #include "priv.h"
@@ -46,6 +46,8 @@ u32 gm107_ram_probe_fbp(const struct nvkm_ram_func *,
 u32 gm200_ram_probe_fbp_amount(const struct nvkm_ram_func *, u32,
 			       struct nvkm_device *, int, int *);
 
+int gp100_ram_init(struct nvkm_ram *);
+
 /* RAM type-specific MR calculation routines */
 int nvkm_sddr2_calc(struct nvkm_ram *);
 int nvkm_sddr3_calc(struct nvkm_ram *);
@@ -70,4 +72,5 @@ int gk104_ram_new(struct nvkm_fb *, struct nvkm_ram **);
 int gm107_ram_new(struct nvkm_fb *, struct nvkm_ram **);
 int gm200_ram_new(struct nvkm_fb *, struct nvkm_ram **);
 int gp100_ram_new(struct nvkm_fb *, struct nvkm_ram **);
+int gp102_ram_new(struct nvkm_fb *, struct nvkm_ram **);
 #endif

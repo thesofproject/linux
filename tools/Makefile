@@ -10,28 +10,39 @@ help:
 	@echo 'Possible targets:'
 	@echo ''
 	@echo '  acpi                   - ACPI tools'
-	@echo '  cgroup                 - cgroup tools'
+	@echo '  bpf                    - misc BPF tools'
+	@echo '  counter                - counter tools'
 	@echo '  cpupower               - a tool for all things x86 CPU power'
+	@echo '  debugging              - tools for debugging'
+	@echo '  dma                    - tools for DMA mapping'
 	@echo '  firewire               - the userspace part of nosy, an IEEE-1394 traffic sniffer'
+	@echo '  firmware               - Firmware tools'
 	@echo '  freefall               - laptop accelerometer program for disk protection'
 	@echo '  gpio                   - GPIO tools'
 	@echo '  hv                     - tools used when in Hyper-V clients'
 	@echo '  iio                    - IIO tools'
+	@echo '  intel-speed-select     - Intel Speed Select tool'
 	@echo '  kvm_stat               - top-like utility for displaying kvm statistics'
 	@echo '  leds                   - LEDs  tools'
-	@echo '  liblockdep             - user-space wrapper for kernel locking-validator'
-	@echo '  bpf                    - misc BPF tools'
+	@echo '  nolibc                 - nolibc headers testing and installation'
+	@echo '  objtool                - an ELF object analysis tool'
 	@echo '  perf                   - Linux performance measurement and analysis tool'
 	@echo '  selftests              - various kernel selftests'
+	@echo '  sched_ext              - sched_ext example schedulers'
+	@echo '  bootconfig             - boot config tool'
 	@echo '  spi                    - spi tools'
-	@echo '  objtool                - an ELF object analysis tool'
 	@echo '  tmon                   - thermal monitoring and tuning tool'
+	@echo '  thermometer            - temperature capture tool'
+	@echo '  thermal-engine         - thermal monitoring tool'
+	@echo '  thermal                - thermal library'
+	@echo '  tracing                - misc tracing tools'
 	@echo '  turbostat              - Intel CPU idle stats and freq reporting tool'
 	@echo '  usb                    - USB testing tools'
 	@echo '  virtio                 - vhost test module'
-	@echo '  vm                     - misc vm tools'
+	@echo '  mm                     - misc mm tools'
 	@echo '  wmi			- WMI interface examples'
 	@echo '  x86_energy_perf_policy - Intel energy policy tool'
+	@echo '  ynl			- ynl headers, library, and python tool'
 	@echo ''
 	@echo 'You can do:'
 	@echo ' $$ make -C tools/ <tool>_install'
@@ -59,14 +70,20 @@ acpi: FORCE
 cpupower: FORCE
 	$(call descend,power/$@)
 
-cgroup firewire hv guest spi usb virtio vm bpf iio gpio objtool leds wmi: FORCE
+counter dma firewire hv guest bootconfig spi usb virtio mm bpf iio gpio objtool leds wmi firmware debugging tracing: FORCE
 	$(call descend,$@)
 
-liblockdep: FORCE
-	$(call descend,lib/lockdep)
+bpf/%: FORCE
+	$(call descend,$@)
 
 libapi: FORCE
 	$(call descend,lib/api)
+
+nolibc: FORCE
+	$(call descend,include/nolibc)
+
+nolibc_%: FORCE
+	$(call descend,include/nolibc,$(patsubst nolibc_%,%,$@))
 
 # The perf build does not follow the descend function setup,
 # invoking it via it's own make rule.
@@ -76,13 +93,25 @@ perf: FORCE
 	$(Q)mkdir -p $(PERF_O) .
 	$(Q)$(MAKE) --no-print-directory -C perf O=$(PERF_O) subdir=
 
+sched_ext: FORCE
+	$(call descend,sched_ext)
+
 selftests: FORCE
 	$(call descend,testing/$@)
 
-turbostat x86_energy_perf_policy: FORCE
+thermal: FORCE
+	$(call descend,lib/$@)
+
+turbostat x86_energy_perf_policy intel-speed-select: FORCE
 	$(call descend,power/x86/$@)
 
 tmon: FORCE
+	$(call descend,thermal/$@)
+
+thermometer: FORCE
+	$(call descend,thermal/$@)
+
+thermal-engine: FORCE thermal
 	$(call descend,thermal/$@)
 
 freefall: FORCE
@@ -91,10 +120,14 @@ freefall: FORCE
 kvm_stat: FORCE
 	$(call descend,kvm/$@)
 
-all: acpi cgroup cpupower gpio hv firewire liblockdep \
-		perf selftests spi turbostat usb \
-		virtio vm bpf x86_energy_perf_policy \
-		tmon freefall iio objtool kvm_stat wmi
+ynl: FORCE
+	$(call descend,net/ynl)
+
+all: acpi counter cpupower dma gpio hv firewire \
+		perf selftests bootconfig spi turbostat usb \
+		virtio mm bpf x86_energy_perf_policy \
+		tmon freefall iio objtool kvm_stat wmi \
+		debugging tracing thermal thermometer thermal-engine ynl
 
 acpi_install:
 	$(call descend,power/$(@:_install=),install)
@@ -102,19 +135,25 @@ acpi_install:
 cpupower_install:
 	$(call descend,power/$(@:_install=),install)
 
-cgroup_install firewire_install gpio_install hv_install iio_install perf_install spi_install usb_install virtio_install vm_install bpf_install objtool_install wmi_install:
+counter_install dma_install firewire_install gpio_install hv_install iio_install perf_install bootconfig_install spi_install usb_install virtio_install mm_install bpf_install objtool_install wmi_install debugging_install tracing_install:
 	$(call descend,$(@:_install=),install)
-
-liblockdep_install:
-	$(call descend,lib/lockdep,install)
 
 selftests_install:
 	$(call descend,testing/$(@:_install=),install)
 
-turbostat_install x86_energy_perf_policy_install:
+thermal_install:
+	$(call descend,lib/$(@:_install=),install)
+
+turbostat_install x86_energy_perf_policy_install intel-speed-select_install:
 	$(call descend,power/x86/$(@:_install=),install)
 
 tmon_install:
+	$(call descend,thermal/$(@:_install=),install)
+
+thermometer_install:
+	$(call descend,thermal/$(@:_install=),install)
+
+thermal-engine_install:
 	$(call descend,thermal/$(@:_install=),install)
 
 freefall_install:
@@ -123,12 +162,16 @@ freefall_install:
 kvm_stat_install:
 	$(call descend,kvm/$(@:_install=),install)
 
-install: acpi_install cgroup_install cpupower_install gpio_install \
-		hv_install firewire_install iio_install liblockdep_install \
+ynl_install:
+	$(call descend,net/$(@:_install=),install)
+
+install: acpi_install counter_install cpupower_install dma_install gpio_install \
+		hv_install firewire_install iio_install \
 		perf_install selftests_install turbostat_install usb_install \
-		virtio_install vm_install bpf_install x86_energy_perf_policy_install \
+		virtio_install mm_install bpf_install x86_energy_perf_policy_install \
 		tmon_install freefall_install objtool_install kvm_stat_install \
-		wmi_install
+		wmi_install debugging_install intel-speed-select_install \
+		tracing_install thermometer_install thermal-engine_install ynl_install
 
 acpi_clean:
 	$(call descend,power/acpi,clean)
@@ -136,11 +179,8 @@ acpi_clean:
 cpupower_clean:
 	$(call descend,power/cpupower,clean)
 
-cgroup_clean hv_clean firewire_clean spi_clean usb_clean virtio_clean vm_clean wmi_clean bpf_clean iio_clean gpio_clean objtool_clean leds_clean:
+counter_clean dma_clean hv_clean firewire_clean bootconfig_clean spi_clean usb_clean virtio_clean mm_clean wmi_clean bpf_clean iio_clean gpio_clean objtool_clean leds_clean firmware_clean debugging_clean tracing_clean:
 	$(call descend,$(@:_clean=),clean)
-
-liblockdep_clean:
-	$(call descend,lib/lockdep,clean)
 
 libapi_clean:
 	$(call descend,lib/api,clean)
@@ -155,11 +195,23 @@ perf_clean:
 	$(Q)mkdir -p $(PERF_O) .
 	$(Q)$(MAKE) --no-print-directory -C perf O=$(PERF_O) subdir= clean
 
+sched_ext_clean:
+	$(call descend,sched_ext,clean)
+
 selftests_clean:
 	$(call descend,testing/$(@:_clean=),clean)
 
-turbostat_clean x86_energy_perf_policy_clean:
+thermal_clean:
+	$(call descend,lib/thermal,clean)
+
+turbostat_clean x86_energy_perf_policy_clean intel-speed-select_clean:
 	$(call descend,power/x86/$(@:_clean=),clean)
+
+thermometer_clean:
+	$(call descend,thermal/thermometer,clean)
+
+thermal-engine_clean:
+	$(call descend,thermal/thermal-engine,clean)
 
 tmon_clean:
 	$(call descend,thermal/tmon,clean)
@@ -170,10 +222,15 @@ freefall_clean:
 build_clean:
 	$(call descend,build,clean)
 
-clean: acpi_clean cgroup_clean cpupower_clean hv_clean firewire_clean \
-		perf_clean selftests_clean turbostat_clean spi_clean usb_clean virtio_clean \
-		vm_clean bpf_clean iio_clean x86_energy_perf_policy_clean tmon_clean \
-		freefall_clean build_clean libbpf_clean libsubcmd_clean liblockdep_clean \
-		gpio_clean objtool_clean leds_clean wmi_clean
+ynl_clean:
+	$(call descend,net/$(@:_clean=),clean)
+
+clean: acpi_clean counter_clean cpupower_clean dma_clean hv_clean firewire_clean \
+		perf_clean selftests_clean turbostat_clean bootconfig_clean spi_clean usb_clean virtio_clean \
+		mm_clean bpf_clean iio_clean x86_energy_perf_policy_clean tmon_clean \
+		freefall_clean build_clean libbpf_clean libsubcmd_clean \
+		gpio_clean objtool_clean leds_clean wmi_clean firmware_clean debugging_clean \
+		intel-speed-select_clean tracing_clean thermal_clean thermometer_clean thermal-engine_clean \
+		sched_ext_clean ynl_clean
 
 .PHONY: FORCE

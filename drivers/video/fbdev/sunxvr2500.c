@@ -5,11 +5,12 @@
  * Copyright (C) 2007 David S. Miller (davem@davemloft.net)
  */
 
+#include <linux/aperture.h>
 #include <linux/kernel.h>
 #include <linux/fb.h>
 #include <linux/pci.h>
 #include <linux/init.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 
 #include <asm/io.h>
 
@@ -37,8 +38,7 @@ static int s3d_get_props(struct s3d_info *sp)
 	sp->depth = of_getintprop_default(sp->of_node, "depth", 8);
 
 	if (!sp->width || !sp->height) {
-		printk(KERN_ERR "s3d: Critical properties missing for %s\n",
-		       pci_name(sp->pdev));
+		pci_err(sp->pdev, "Critical properties missing\n");
 		return -EINVAL;
 	}
 
@@ -63,12 +63,10 @@ static int s3d_setcolreg(unsigned regno,
 	return 0;
 }
 
-static struct fb_ops s3d_ops = {
+static const struct fb_ops s3d_ops = {
 	.owner			= THIS_MODULE,
+	FB_DEFAULT_IOMEM_OPS,
 	.fb_setcolreg		= s3d_setcolreg,
-	.fb_fillrect		= cfb_fillrect,
-	.fb_copyarea		= cfb_copyarea,
-	.fb_imageblit		= cfb_imageblit,
 };
 
 static int s3d_set_fbinfo(struct s3d_info *sp)
@@ -76,7 +74,6 @@ static int s3d_set_fbinfo(struct s3d_info *sp)
 	struct fb_info *info = sp->info;
 	struct fb_var_screeninfo *var = &info->var;
 
-	info->flags = FBINFO_DEFAULT;
 	info->fbops = &s3d_ops;
 	info->screen_base = sp->fb_base;
 	info->screen_size = sp->fb_size;
@@ -84,7 +81,7 @@ static int s3d_set_fbinfo(struct s3d_info *sp)
 	info->pseudo_palette = sp->pseudo_palette;
 
 	/* Fill fix common fields */
-	strlcpy(info->fix.id, "s3d", sizeof(info->fix.id));
+	strscpy(info->fix.id, "s3d", sizeof(info->fix.id));
         info->fix.smem_start = sp->fb_base_phys;
         info->fix.smem_len = sp->fb_size;
         info->fix.type = FB_TYPE_PACKED_PIXELS;
@@ -109,7 +106,7 @@ static int s3d_set_fbinfo(struct s3d_info *sp)
 	var->transp.length = 0;
 
 	if (fb_alloc_cmap(&info->cmap, 256, 0)) {
-		printk(KERN_ERR "s3d: Cannot allocate color map.\n");
+		pci_err(sp->pdev, "Cannot allocate color map\n");
 		return -ENOMEM;
 	}
 
@@ -123,16 +120,18 @@ static int s3d_pci_register(struct pci_dev *pdev,
 	struct s3d_info *sp;
 	int err;
 
+	err = aperture_remove_conflicting_pci_devices(pdev, "s3dfb");
+	if (err)
+		return err;
+
 	err = pci_enable_device(pdev);
 	if (err < 0) {
-		printk(KERN_ERR "s3d: Cannot enable PCI device %s\n",
-		       pci_name(pdev));
+		pci_err(pdev, "Cannot enable PCI device\n");
 		goto err_out;
 	}
 
 	info = framebuffer_alloc(sizeof(struct s3d_info), &pdev->dev);
 	if (!info) {
-		printk(KERN_ERR "s3d: Cannot allocate fb_info\n");
 		err = -ENOMEM;
 		goto err_disable;
 	}
@@ -142,8 +141,7 @@ static int s3d_pci_register(struct pci_dev *pdev,
 	sp->pdev = pdev;
 	sp->of_node = pci_device_to_OF_node(pdev);
 	if (!sp->of_node) {
-		printk(KERN_ERR "s3d: Cannot find OF node of %s\n",
-		       pci_name(pdev));
+		pci_err(pdev, "Cannot find OF node\n");
 		err = -ENODEV;
 		goto err_release_fb;
 	}
@@ -152,8 +150,7 @@ static int s3d_pci_register(struct pci_dev *pdev,
 
 	err = pci_request_region(pdev, 1, "s3d framebuffer");
 	if (err < 0) {
-		printk("s3d: Cannot request region 1 for %s\n",
-		       pci_name(pdev));
+		pci_err(pdev, "Cannot request region 1\n");
 		goto err_release_fb;
 	}
 
@@ -193,12 +190,11 @@ static int s3d_pci_register(struct pci_dev *pdev,
 
 	pci_set_drvdata(pdev, info);
 
-	printk("s3d: Found device at %s\n", pci_name(pdev));
+	pci_info(pdev, "Found device\n");
 
 	err = register_framebuffer(info);
 	if (err < 0) {
-		printk(KERN_ERR "s3d: Could not register framebuffer %s\n",
-		       pci_name(pdev));
+		pci_err(pdev, "Could not register framebuffer\n");
 		goto err_unmap_fb;
 	}
 
@@ -243,6 +239,9 @@ static struct pci_driver s3d_driver = {
 
 static int __init s3d_init(void)
 {
+	if (fb_modesetting_disabled("s3d"))
+		return -ENODEV;
+
 	if (fb_get_options("s3d", NULL))
 		return -ENODEV;
 

@@ -38,10 +38,10 @@
 #include <linux/kthread.h>
 #include <linux/platform_device.h>
 #include <linux/mutex.h>
+#include <linux/of.h>
 
 #include <linux/uaccess.h>
 #ifdef CONFIG_PPC
-#include <asm/prom.h>
 #include <asm/machdep.h>
 #endif
 
@@ -65,7 +65,7 @@ static struct adb_driver *adb_driver_list[] = {
 #ifdef CONFIG_ADB_IOP
 	&adb_iop_driver,
 #endif
-#if defined(CONFIG_ADB_PMU) || defined(CONFIG_ADB_PMU68K)
+#ifdef CONFIG_ADB_PMU
 	&via_pmu_driver,
 #endif
 #ifdef CONFIG_ADB_MACIO
@@ -74,13 +74,15 @@ static struct adb_driver *adb_driver_list[] = {
 	NULL
 };
 
-static struct class *adb_dev_class;
+static const struct class adb_dev_class = {
+	.name = "adb",
+};
 
 static struct adb_driver *adb_controller;
 BLOCKING_NOTIFIER_HEAD(adb_client_list);
 static int adb_got_sleep;
 static int adb_inited;
-static DEFINE_SEMAPHORE(adb_probe_mutex);
+static DEFINE_SEMAPHORE(adb_probe_mutex, 1);
 static int sleepy_trackpad;
 static int autopoll_devs;
 int __adb_probe_sync;
@@ -163,7 +165,7 @@ static int adb_scan_bus(void)
 			 * See if anybody actually moved. This is suggested
 			 * by HW TechNote 01:
 			 *
-			 * http://developer.apple.com/technotes/hw/hw_01.html
+			 * https://developer.apple.com/technotes/hw/hw_01.html
 			 */
 			adb_request(&req, NULL, ADBREQ_SYNC | ADBREQ_REPLY, 1,
 				    (highFree << 4) | 0xf);
@@ -203,15 +205,15 @@ static int adb_scan_bus(void)
 	}
 
 	/* Now fill in the handler_id field of the adb_handler entries. */
-	pr_debug("adb devices:\n");
 	for (i = 1; i < 16; i++) {
 		if (adb_handler[i].original_address == 0)
 			continue;
 		adb_request(&req, NULL, ADBREQ_SYNC | ADBREQ_REPLY, 1,
 			    (i << 4) | 0xf);
 		adb_handler[i].handler_id = req.reply[2];
-		pr_debug(" [%d]: %d %x\n", i, adb_handler[i].original_address,
-			 adb_handler[i].handler_id);
+		printk(KERN_DEBUG "adb device [%d]: %d 0x%X\n", i,
+		       adb_handler[i].original_address,
+		       adb_handler[i].handler_id);
 		devmask |= 1 << i;
 	}
 	return devmask;
@@ -478,7 +480,7 @@ adb_register(int default_id, int handler_id, struct adb_ids *ids,
 		if ((adb_handler[i].original_address == default_id) &&
 		    (!handler_id || (handler_id == adb_handler[i].handler_id) || 
 		    try_handler_change(i, handler_id))) {
-			if (adb_handler[i].handler != 0) {
+			if (adb_handler[i].handler) {
 				pr_err("Two handlers for ADB device %d\n",
 				       default_id);
 				continue;
@@ -579,6 +581,8 @@ adb_try_handler_change(int address, int new_id)
 	mutex_lock(&adb_handler_mutex);
 	ret = try_handler_change(address, new_id);
 	mutex_unlock(&adb_handler_mutex);
+	if (ret)
+		pr_debug("adb handler change: [%d] 0x%X\n", address, new_id);
 	return ret;
 }
 EXPORT_SYMBOL(adb_try_handler_change);
@@ -645,7 +649,7 @@ do_adb_query(struct adb_request *req)
 
 	switch(req->data[1]) {
 	case ADB_QUERY_GETDEVINFO:
-		if (req->nbytes < 3)
+		if (req->nbytes < 3 || req->data[2] >= 16)
 			break;
 		mutex_lock(&adb_handler_mutex);
 		req->reply[0] = adb_handler[req->data[2]].original_address;
@@ -670,8 +674,8 @@ static int adb_open(struct inode *inode, struct file *file)
 		ret = -ENXIO;
 		goto out;
 	}
-	state = kmalloc(sizeof(struct adbdev_state), GFP_KERNEL);
-	if (state == 0) {
+	state = kmalloc_obj(struct adbdev_state);
+	if (!state) {
 		ret = -ENOMEM;
 		goto out;
 	}
@@ -779,8 +783,7 @@ static ssize_t adb_write(struct file *file, const char __user *buf,
 	if (adb_controller == NULL)
 		return -ENXIO;
 
-	req = kmalloc(sizeof(struct adb_request),
-					     GFP_KERNEL);
+	req = kmalloc_obj(struct adb_request);
 	if (req == NULL)
 		return -ENOMEM;
 
@@ -838,7 +841,6 @@ out:
 
 static const struct file_operations adb_fops = {
 	.owner		= THIS_MODULE,
-	.llseek		= no_llseek,
 	.read		= adb_read,
 	.write		= adb_write,
 	.open		= adb_open,
@@ -886,10 +888,10 @@ adbdev_init(void)
 		return;
 	}
 
-	adb_dev_class = class_create(THIS_MODULE, "adb");
-	if (IS_ERR(adb_dev_class))
+	if (class_register(&adb_dev_class))
 		return;
-	device_create(adb_dev_class, NULL, MKDEV(ADB_MAJOR, 0), NULL, "adb");
+
+	device_create(&adb_dev_class, NULL, MKDEV(ADB_MAJOR, 0), NULL, "adb");
 
 	platform_device_register(&adb_pfdev);
 	platform_driver_probe(&adb_pfdrv, adb_dummy_probe);

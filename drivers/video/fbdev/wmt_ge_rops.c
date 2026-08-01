@@ -1,24 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/video/wmt_ge_rops.c
  *
  *  Accelerators for raster operations using WonderMedia Graphics Engine
  *
  *  Copyright (C) 2010 Alexey Charkov <alchark@gmail.com>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
+#include <linux/export.h>
 #include <linux/module.h>
 #include <linux/fb.h>
+#include <linux/io.h>
 #include <linux/platform_device.h>
-#include "core/fb_draw.h"
+
+#include "wmt_ge_rops.h"
 
 #define GE_COMMAND_OFF		0x00
 #define GE_DEPTH_OFF		0x04
@@ -46,6 +41,33 @@
 
 static void __iomem *regbase;
 
+/* from the spec it seems more like depth than bits per pixel */
+static inline unsigned long pixel_to_pat(u32 depth, u32 pixel, struct fb_info *p)
+{
+	switch (depth) {
+	case 1:
+		return ~0ul*pixel;
+	case 2:
+		return ~0ul/3*pixel;
+	case 4:
+		return ~0ul/15*pixel;
+	case 8:
+		return ~0ul/255*pixel;
+	case 12:
+	case 15:
+	case 16:
+		return ~0ul/0xffff*pixel;
+	case 18:
+	case 24:
+		return 0x1000001ul*pixel;
+	case 32:
+		return pixel;
+	default:
+		fb_warn_once(p, "%s: unsupported pixelformat %d\n", __func__, depth);
+		return 0;
+	}
+}
+
 void wmt_ge_fillrect(struct fb_info *p, const struct fb_fillrect *rect)
 {
 	unsigned long fg, pat;
@@ -59,7 +81,7 @@ void wmt_ge_fillrect(struct fb_info *p, const struct fb_fillrect *rect)
 	else
 		fg = rect->color;
 
-	pat = pixel_to_pat(p->var.bits_per_pixel, fg);
+	pat = pixel_to_pat(p->var.bits_per_pixel, fg, p);
 
 	if (p->fbops->fb_sync)
 		p->fbops->fb_sync(p);
@@ -126,25 +148,15 @@ EXPORT_SYMBOL_GPL(wmt_ge_sync);
 
 static int wmt_ge_rops_probe(struct platform_device *pdev)
 {
-	struct resource *res;
-
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (res == NULL) {
-		dev_err(&pdev->dev, "no I/O memory resource defined\n");
-		return -ENODEV;
-	}
-
 	/* Only one ROP engine is presently supported. */
 	if (unlikely(regbase)) {
 		WARN_ON(1);
 		return -EBUSY;
 	}
 
-	regbase = ioremap(res->start, resource_size(res));
-	if (regbase == NULL) {
-		dev_err(&pdev->dev, "failed to map I/O memory\n");
-		return -EBUSY;
-	}
+	regbase = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(regbase))
+		return PTR_ERR(regbase);
 
 	writel(1, regbase + GE_ENABLE_OFF);
 	printk(KERN_INFO "Enabled support for WMT GE raster acceleration\n");
@@ -152,10 +164,9 @@ static int wmt_ge_rops_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int wmt_ge_rops_remove(struct platform_device *pdev)
+static void wmt_ge_rops_remove(struct platform_device *pdev)
 {
-	iounmap(regbase);
-	return 0;
+	regbase = NULL;
 }
 
 static const struct of_device_id wmt_dt_ids[] = {
@@ -177,5 +188,4 @@ module_platform_driver(wmt_ge_rops_driver);
 MODULE_AUTHOR("Alexey Charkov <alchark@gmail.com>");
 MODULE_DESCRIPTION("Accelerators for raster operations using "
 		   "WonderMedia Graphics Engine");
-MODULE_LICENSE("GPL v2");
 MODULE_DEVICE_TABLE(of, wmt_dt_ids);

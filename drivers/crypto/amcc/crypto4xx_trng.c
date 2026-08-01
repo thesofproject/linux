@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Generic PowerPC 44x RNG driver
  *
  * Copyright 2011 IBM Corporation
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; version 2 of the License.
  */
 
 #include <linux/module.h>
@@ -80,15 +77,17 @@ void ppc4xx_trng_probe(struct crypto4xx_core_device *core_dev)
 
 	/* Find the TRNG device node and map it */
 	trng = of_find_matching_node(NULL, ppc4xx_trng_match);
-	if (!trng || !of_device_is_available(trng))
+	if (!trng || !of_device_is_available(trng)) {
+		of_node_put(trng);
 		return;
+	}
 
 	dev->trng_base = of_iomap(trng, 0);
 	of_node_put(trng);
 	if (!dev->trng_base)
 		goto err_out;
 
-	rng = kzalloc(sizeof(*rng), GFP_KERNEL);
+	rng = kzalloc_obj(*rng);
 	if (!rng)
 		goto err_out;
 
@@ -109,7 +108,6 @@ void ppc4xx_trng_probe(struct crypto4xx_core_device *core_dev)
 	return;
 
 err_out:
-	of_node_put(trng);
 	iounmap(dev->trng_base);
 	kfree(rng);
 	dev->trng_base = NULL;

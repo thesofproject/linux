@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Designware HDMI CEC driver
  *
  * Copyright (C) 2015-2017 Russell King.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -65,6 +62,10 @@ struct dw_hdmi_cec {
 	bool rx_done;
 	struct cec_notifier *notify;
 	int irq;
+
+	u8 regs_polarity;
+	u8 regs_mask;
+	u8 regs_mute_stat0;
 };
 
 static void dw_hdmi_write(struct dw_hdmi_cec *cec, u8 val, int offset)
@@ -144,6 +145,10 @@ static irqreturn_t dw_hdmi_cec_hardirq(int irq, void *data)
 		cec->tx_status = CEC_TX_STATUS_NACK;
 		cec->tx_done = true;
 		ret = IRQ_WAKE_THREAD;
+	} else if (stat & CEC_STAT_ARBLOST) {
+		cec->tx_status = CEC_TX_STATUS_ARB_LOST;
+		cec->tx_done = true;
+		ret = IRQ_WAKE_THREAD;
 	}
 
 	if (stat & CEC_STAT_EOM) {
@@ -208,7 +213,7 @@ static int dw_hdmi_cec_enable(struct cec_adapter *adap, bool enable)
 		cec->ops->enable(cec->hdmi);
 
 		irqs = CEC_STAT_ERROR_INIT | CEC_STAT_NACK | CEC_STAT_EOM |
-		       CEC_STAT_DONE;
+		       CEC_STAT_ARBLOST | CEC_STAT_DONE;
 		dw_hdmi_write(cec, irqs, HDMI_CEC_POLARITY);
 		dw_hdmi_write(cec, ~irqs, HDMI_CEC_MASK);
 		dw_hdmi_write(cec, ~irqs, HDMI_IH_MUTE_CEC_STAT0);
@@ -259,8 +264,8 @@ static int dw_hdmi_cec_probe(struct platform_device *pdev)
 	dw_hdmi_write(cec, 0, HDMI_CEC_POLARITY);
 
 	cec->adap = cec_allocate_adapter(&dw_hdmi_cec_ops, cec, "dw_hdmi",
-					 CEC_CAP_LOG_ADDRS | CEC_CAP_TRANSMIT |
-					 CEC_CAP_RC | CEC_CAP_PASSTHROUGH,
+					 CEC_CAP_DEFAULTS |
+					 CEC_CAP_CONNECTOR_INFO,
 					 CEC_MAX_LOG_ADDRS);
 	if (IS_ERR(cec->adap))
 		return PTR_ERR(cec->adap);
@@ -268,11 +273,9 @@ static int dw_hdmi_cec_probe(struct platform_device *pdev)
 	/* override the module pointer */
 	cec->adap->owner = THIS_MODULE;
 
-	ret = devm_add_action(&pdev->dev, dw_hdmi_cec_del, cec);
-	if (ret) {
-		cec_delete_adapter(cec->adap);
+	ret = devm_add_action_or_reset(&pdev->dev, dw_hdmi_cec_del, cec);
+	if (ret)
 		return ret;
-	}
 
 	ret = devm_request_threaded_irq(&pdev->dev, cec->irq,
 					dw_hdmi_cec_hardirq,
@@ -281,13 +284,14 @@ static int dw_hdmi_cec_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	cec->notify = cec_notifier_get(pdev->dev.parent);
+	cec->notify = cec_notifier_cec_adap_register(pdev->dev.parent,
+						     NULL, cec->adap);
 	if (!cec->notify)
 		return -ENOMEM;
 
 	ret = cec_register_adapter(cec->adap, pdev->dev.parent);
 	if (ret < 0) {
-		cec_notifier_put(cec->notify);
+		cec_notifier_cec_adap_unregister(cec->notify, cec->adap);
 		return ret;
 	}
 
@@ -297,26 +301,55 @@ static int dw_hdmi_cec_probe(struct platform_device *pdev)
 	 */
 	devm_remove_action(&pdev->dev, dw_hdmi_cec_del, cec);
 
-	cec_register_cec_notifier(cec->adap, cec->notify);
-
 	return 0;
 }
 
-static int dw_hdmi_cec_remove(struct platform_device *pdev)
+static void dw_hdmi_cec_remove(struct platform_device *pdev)
 {
 	struct dw_hdmi_cec *cec = platform_get_drvdata(pdev);
 
+	cec_notifier_cec_adap_unregister(cec->notify, cec->adap);
 	cec_unregister_adapter(cec->adap);
-	cec_notifier_put(cec->notify);
+}
+
+static int dw_hdmi_cec_resume(struct device *dev)
+{
+	struct dw_hdmi_cec *cec = dev_get_drvdata(dev);
+
+	/* Restore logical address */
+	dw_hdmi_write(cec, cec->addresses & 255, HDMI_CEC_ADDR_L);
+	dw_hdmi_write(cec, cec->addresses >> 8, HDMI_CEC_ADDR_H);
+
+	/* Restore interrupt status/mask registers */
+	dw_hdmi_write(cec, cec->regs_polarity, HDMI_CEC_POLARITY);
+	dw_hdmi_write(cec, cec->regs_mask, HDMI_CEC_MASK);
+	dw_hdmi_write(cec, cec->regs_mute_stat0, HDMI_IH_MUTE_CEC_STAT0);
 
 	return 0;
 }
 
+static int dw_hdmi_cec_suspend(struct device *dev)
+{
+	struct dw_hdmi_cec *cec = dev_get_drvdata(dev);
+
+	/* store interrupt status/mask registers */
+	 cec->regs_polarity = dw_hdmi_read(cec, HDMI_CEC_POLARITY);
+	 cec->regs_mask = dw_hdmi_read(cec, HDMI_CEC_MASK);
+	 cec->regs_mute_stat0 = dw_hdmi_read(cec, HDMI_IH_MUTE_CEC_STAT0);
+
+	return 0;
+}
+
+static const struct dev_pm_ops dw_hdmi_cec_pm = {
+	SYSTEM_SLEEP_PM_OPS(dw_hdmi_cec_suspend, dw_hdmi_cec_resume)
+};
+
 static struct platform_driver dw_hdmi_cec_driver = {
 	.probe	= dw_hdmi_cec_probe,
-	.remove	= dw_hdmi_cec_remove,
+	.remove = dw_hdmi_cec_remove,
 	.driver = {
 		.name = "dw-hdmi-cec",
+		.pm = pm_ptr(&dw_hdmi_cec_pm),
 	},
 };
 module_platform_driver(dw_hdmi_cec_driver);

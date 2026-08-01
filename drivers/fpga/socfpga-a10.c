@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * FPGA Manager Driver for Altera Arria10 SoCFPGA
  *
  * Copyright (C) 2015-2016 Altera Corporation
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-
 #include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/delay.h>
@@ -482,7 +470,7 @@ static int socfpga_a10_fpga_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct a10_fpga_priv *priv;
 	void __iomem *reg_base;
-	struct resource *res;
+	struct fpga_manager *mgr;
 	int ret;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
@@ -490,14 +478,12 @@ static int socfpga_a10_fpga_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	/* First mmio base is for register access */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	reg_base = devm_ioremap_resource(dev, res);
+	reg_base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(reg_base))
 		return PTR_ERR(reg_base);
 
 	/* Second mmio base is for writing FPGA image data */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	priv->fpga_data_addr = devm_ioremap_resource(dev, res);
+	priv->fpga_data_addr = devm_platform_ioremap_resource(pdev, 1);
 	if (IS_ERR(priv->fpga_data_addr))
 		return PTR_ERR(priv->fpga_data_addr);
 
@@ -519,25 +505,25 @@ static int socfpga_a10_fpga_probe(struct platform_device *pdev)
 		return -EBUSY;
 	}
 
-	ret = fpga_mgr_register(dev, "SoCFPGA Arria10 FPGA Manager",
-				 &socfpga_a10_fpga_mgr_ops, priv);
-	if (ret) {
+	mgr = fpga_mgr_register(dev, "SoCFPGA Arria10 FPGA Manager",
+				&socfpga_a10_fpga_mgr_ops, priv);
+	if (IS_ERR(mgr)) {
 		clk_disable_unprepare(priv->clk);
-		return ret;
+		return PTR_ERR(mgr);
 	}
+
+	platform_set_drvdata(pdev, mgr);
 
 	return 0;
 }
 
-static int socfpga_a10_fpga_remove(struct platform_device *pdev)
+static void socfpga_a10_fpga_remove(struct platform_device *pdev)
 {
 	struct fpga_manager *mgr = platform_get_drvdata(pdev);
 	struct a10_fpga_priv *priv = mgr->priv;
 
-	fpga_mgr_unregister(&pdev->dev);
+	fpga_mgr_unregister(mgr);
 	clk_disable_unprepare(priv->clk);
-
-	return 0;
 }
 
 static const struct of_device_id socfpga_a10_fpga_of_match[] = {

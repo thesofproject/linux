@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* p9100.c: P9100 frame buffer driver
  *
  * Copyright (C) 2003, 2006 David S. Miller (davem@davemloft.net)
@@ -14,7 +15,8 @@
 #include <linux/init.h>
 #include <linux/fb.h>
 #include <linux/mm.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
 
 #include <asm/io.h>
 #include <asm/fbio.h>
@@ -29,25 +31,18 @@ static int p9100_setcolreg(unsigned, unsigned, unsigned, unsigned,
 			   unsigned, struct fb_info *);
 static int p9100_blank(int, struct fb_info *);
 
-static int p9100_mmap(struct fb_info *, struct vm_area_struct *);
-static int p9100_ioctl(struct fb_info *, unsigned int, unsigned long);
+static int p9100_sbusfb_mmap(struct fb_info *info, struct vm_area_struct *vma);
+static int p9100_sbusfb_ioctl(struct fb_info *info, unsigned int cmd, unsigned long arg);
 
 /*
  *  Frame buffer operations
  */
 
-static struct fb_ops p9100_ops = {
+static const struct fb_ops p9100_ops = {
 	.owner			= THIS_MODULE,
+	FB_DEFAULT_SBUS_OPS(p9100),
 	.fb_setcolreg		= p9100_setcolreg,
 	.fb_blank		= p9100_blank,
-	.fb_fillrect		= cfb_fillrect,
-	.fb_copyarea		= cfb_copyarea,
-	.fb_imageblit		= cfb_imageblit,
-	.fb_mmap		= p9100_mmap,
-	.fb_ioctl		= p9100_ioctl,
-#ifdef CONFIG_COMPAT
-	.fb_compat_ioctl	= sbusfb_compat_ioctl,
-#endif
 };
 
 /* P9100 control registers */
@@ -64,7 +59,7 @@ static struct fb_ops p9100_ops = {
 #define P9100_FB_OFF 0x0UL
 
 /* 3 bits: 2=8bpp 3=16bpp 5=32bpp 7=24bpp */
-#define SYS_CONFIG_PIXELSIZE_SHIFT 26 
+#define SYS_CONFIG_PIXELSIZE_SHIFT 26
 
 #define SCREENPAINT_TIMECTL1_ENABLE_VIDEO 0x20 /* 0 = off, 1 = on */
 
@@ -109,7 +104,7 @@ struct p9100_regs {
 	u32 vram_xxx[25];
 
 	/* Registers for IBM RGB528 Palette */
-	u32 ramdac_cmap_wridx; 
+	u32 ramdac_cmap_wridx;
 	u32 ramdac_palette_data;
 	u32 ramdac_pixel_mask;
 	u32 ramdac_palette_rdaddr;
@@ -174,7 +169,7 @@ static int p9100_setcolreg(unsigned regno,
 
 /**
  *      p9100_blank - Optional function.  Blanks the display.
- *      @blank_mode: the blank mode we want.
+ *      @blank: the blank mode we want.
  *      @info: frame buffer structure that represents a single frame buffer
  */
 static int
@@ -211,12 +206,12 @@ p9100_blank(int blank, struct fb_info *info)
 	return 0;
 }
 
-static struct sbus_mmap_map p9100_mmap_map[] = {
+static const struct sbus_mmap_map p9100_mmap_map[] = {
 	{ CG3_MMAP_OFFSET,	0,		SBUS_MMAP_FBSIZE(1) },
 	{ 0,			0,		0		    }
 };
 
-static int p9100_mmap(struct fb_info *info, struct vm_area_struct *vma)
+static int p9100_sbusfb_mmap(struct fb_info *info, struct vm_area_struct *vma)
 {
 	struct p9100_par *par = (struct p9100_par *)info->par;
 
@@ -225,8 +220,7 @@ static int p9100_mmap(struct fb_info *info, struct vm_area_struct *vma)
 				  par->which_io, vma);
 }
 
-static int p9100_ioctl(struct fb_info *info, unsigned int cmd,
-		       unsigned long arg)
+static int p9100_sbusfb_ioctl(struct fb_info *info, unsigned int cmd, unsigned long arg)
 {
 	/* Make it look like a cg3. */
 	return sbusfb_ioctl_helper(cmd, arg, info,
@@ -239,7 +233,7 @@ static int p9100_ioctl(struct fb_info *info, unsigned int cmd,
 
 static void p9100_init_fix(struct fb_info *info, int linebytes, struct device_node *dp)
 {
-	strlcpy(info->fix.id, dp->name, sizeof(info->fix.id));
+	snprintf(info->fix.id, sizeof(info->fix.id), "%pOFn", dp);
 
 	info->fix.type = FB_TYPE_PACKED_PIXELS;
 	info->fix.visual = FB_VISUAL_PSEUDOCOLOR;
@@ -282,7 +276,6 @@ static int p9100_probe(struct platform_device *op)
 	if (!par->regs)
 		goto out_release_fb;
 
-	info->flags = FBINFO_DEFAULT;
 	info->fbops = &p9100_ops;
 	info->screen_base = of_ioremap(&op->resource[2], 0,
 				       info->fix.smem_len, "p9100 ram");
@@ -326,7 +319,7 @@ out_err:
 	return err;
 }
 
-static int p9100_remove(struct platform_device *op)
+static void p9100_remove(struct platform_device *op)
 {
 	struct fb_info *info = dev_get_drvdata(&op->dev);
 	struct p9100_par *par = info->par;
@@ -338,8 +331,6 @@ static int p9100_remove(struct platform_device *op)
 	of_iounmap(&op->resource[2], info->screen_base, info->fix.smem_len);
 
 	framebuffer_release(info);
-
-	return 0;
 }
 
 static const struct of_device_id p9100_match[] = {

@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * OLPC serio driver for multiplexed input from Marvell MMP security processor
  *
  * Copyright (C) 2011-2013 One Laptop Per Child
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -145,8 +136,15 @@ static int olpc_apsp_open(struct serio *port)
 {
 	struct olpc_apsp *priv = port->port_data;
 	unsigned int tmp;
+	unsigned long l;
 
 	if (priv->open_count++ == 0) {
+		l = readl(priv->base + COMMAND_FIFO_STATUS);
+		if (!(l & CMD_STS_MASK)) {
+			dev_err(priv->dev, "SP cannot accept commands.\n");
+			return -EIO;
+		}
+
 		/* Enable interrupt 0 by clearing its bit */
 		tmp = readl(priv->base + PJ_INTERRUPT_MASK);
 		writel(tmp & ~INT_0, priv->base + PJ_INTERRUPT_MASK);
@@ -171,18 +169,15 @@ static int olpc_apsp_probe(struct platform_device *pdev)
 {
 	struct serio *kb_serio, *pad_serio;
 	struct olpc_apsp *priv;
-	struct resource *res;
-	struct device_node *np;
-	unsigned long l;
 	int error;
 
-	priv = devm_kzalloc(&pdev->dev, sizeof(struct olpc_apsp), GFP_KERNEL);
+	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
-	np = pdev->dev.of_node;
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->base = devm_ioremap_resource(&pdev->dev, res);
+	priv->dev = &pdev->dev;
+
+	priv->base = devm_platform_get_and_ioremap_resource(pdev, 0, NULL);
 	if (IS_ERR(priv->base)) {
 		dev_err(&pdev->dev, "Failed to map WTM registers\n");
 		return PTR_ERR(priv->base);
@@ -192,14 +187,8 @@ static int olpc_apsp_probe(struct platform_device *pdev)
 	if (priv->irq < 0)
 		return priv->irq;
 
-	l = readl(priv->base + COMMAND_FIFO_STATUS);
-	if (!(l & CMD_STS_MASK)) {
-		dev_err(&pdev->dev, "SP cannot accept commands.\n");
-		return -EIO;
-	}
-
 	/* KEYBOARD */
-	kb_serio = kzalloc(sizeof(struct serio), GFP_KERNEL);
+	kb_serio = kzalloc_obj(*kb_serio);
 	if (!kb_serio)
 		return -ENOMEM;
 	kb_serio->id.type	= SERIO_8042_XL;
@@ -208,13 +197,13 @@ static int olpc_apsp_probe(struct platform_device *pdev)
 	kb_serio->close		= olpc_apsp_close;
 	kb_serio->port_data	= priv;
 	kb_serio->dev.parent	= &pdev->dev;
-	strlcpy(kb_serio->name, "sp keyboard", sizeof(kb_serio->name));
-	strlcpy(kb_serio->phys, "sp/serio0", sizeof(kb_serio->phys));
+	strscpy(kb_serio->name, "sp keyboard", sizeof(kb_serio->name));
+	strscpy(kb_serio->phys, "sp/serio0", sizeof(kb_serio->phys));
 	priv->kbio		= kb_serio;
 	serio_register_port(kb_serio);
 
 	/* TOUCHPAD */
-	pad_serio = kzalloc(sizeof(struct serio), GFP_KERNEL);
+	pad_serio = kzalloc_obj(*pad_serio);
 	if (!pad_serio) {
 		error = -ENOMEM;
 		goto err_pad;
@@ -225,8 +214,8 @@ static int olpc_apsp_probe(struct platform_device *pdev)
 	pad_serio->close	= olpc_apsp_close;
 	pad_serio->port_data	= priv;
 	pad_serio->dev.parent	= &pdev->dev;
-	strlcpy(pad_serio->name, "sp touchpad", sizeof(pad_serio->name));
-	strlcpy(pad_serio->phys, "sp/serio1", sizeof(pad_serio->phys));
+	strscpy(pad_serio->name, "sp touchpad", sizeof(pad_serio->name));
+	strscpy(pad_serio->phys, "sp/serio1", sizeof(pad_serio->phys));
 	priv->padio		= pad_serio;
 	serio_register_port(pad_serio);
 
@@ -236,7 +225,6 @@ static int olpc_apsp_probe(struct platform_device *pdev)
 		goto err_irq;
 	}
 
-	priv->dev = &pdev->dev;
 	device_init_wakeup(priv->dev, 1);
 	platform_set_drvdata(pdev, priv);
 
@@ -250,7 +238,7 @@ err_pad:
 	return error;
 }
 
-static int olpc_apsp_remove(struct platform_device *pdev)
+static void olpc_apsp_remove(struct platform_device *pdev)
 {
 	struct olpc_apsp *priv = platform_get_drvdata(pdev);
 
@@ -258,8 +246,6 @@ static int olpc_apsp_remove(struct platform_device *pdev)
 
 	serio_unregister_port(priv->kbio);
 	serio_unregister_port(priv->padio);
-
-	return 0;
 }
 
 static const struct of_device_id olpc_apsp_dt_ids[] = {

@@ -55,7 +55,6 @@
  * Status:
  *
  *	Untested with multiple scanners.
- *	Untested on SMP.
  *	Untested on a bigendian machine.
  *
  * History:
@@ -130,11 +129,15 @@
 #include <linux/spinlock.h>
 #include <linux/usb.h>
 #include <linux/proc_fs.h>
-
 #include <linux/atomic.h>
 #include <linux/blkdev.h>
-#include "../../scsi/scsi.h"
+
+#include <scsi/scsi.h>
+#include <scsi/scsi_cmnd.h>
+#include <scsi/scsi_device.h>
+#include <scsi/scsi_eh.h>
 #include <scsi/scsi_host.h>
+#include <scsi/scsi_tcq.h>
 
 #include "microtek.h"
 
@@ -166,25 +169,13 @@ static struct usb_driver mts_usb_driver = {
 #define MTS_VERSION	"0.4.3"
 #define MTS_NAME	"microtek usb (rev " MTS_VERSION "): "
 
-#define MTS_WARNING(x...) \
-	printk( KERN_WARNING MTS_NAME x )
-#define MTS_ERROR(x...) \
-	printk( KERN_ERR MTS_NAME x )
-#define MTS_INT_ERROR(x...) \
-	MTS_ERROR(x)
-#define MTS_MESSAGE(x...) \
-	printk( KERN_INFO MTS_NAME x )
-
 #if defined MTS_DO_DEBUG
 
 #define MTS_DEBUG(x...) \
 	printk( KERN_DEBUG MTS_NAME x )
 
-#define MTS_DEBUG_GOT_HERE() \
-	MTS_DEBUG("got to %s:%d (%s)\n", __FILE__, (int)__LINE__, __func__ )
 #define MTS_DEBUG_INT() \
-	do { MTS_DEBUG_GOT_HERE(); \
-	     MTS_DEBUG("transfer = 0x%x context = 0x%x\n",(int)transfer,(int)context ); \
+	do { MTS_DEBUG("transfer = 0x%x context = 0x%x\n",(int)transfer,(int)context ); \
 	     MTS_DEBUG("status = 0x%x data-length = 0x%x sent = 0x%x\n",transfer->status,(int)context->data_length, (int)transfer->actual_length ); \
              mts_debug_dump(context->instance);\
 	   } while(0)
@@ -193,7 +184,6 @@ static struct usb_driver mts_usb_driver = {
 #define MTS_NUL_STATEMENT do { } while(0)
 
 #define MTS_DEBUG(x...)	MTS_NUL_STATEMENT
-#define MTS_DEBUG_GOT_HERE() MTS_NUL_STATEMENT
 #define MTS_DEBUG_INT() MTS_NUL_STATEMENT
 
 #endif
@@ -312,29 +302,20 @@ static inline void mts_debug_dump(struct mts_desc* dummy)
 #endif
 
 static inline void mts_urb_abort(struct mts_desc* desc) {
-	MTS_DEBUG_GOT_HERE();
 	mts_debug_dump(desc);
 
 	usb_kill_urb( desc->urb );
 }
 
-static int mts_slave_alloc (struct scsi_device *s)
+static int mts_sdev_init (struct scsi_device *s)
 {
 	s->inquiry_len = 0x24;
-	return 0;
-}
-
-static int mts_slave_configure (struct scsi_device *s)
-{
-	blk_queue_dma_alignment(s->request_queue, (512 - 1));
 	return 0;
 }
 
 static int mts_scsi_abort(struct scsi_cmnd *srb)
 {
 	struct mts_desc* desc = (struct mts_desc*)(srb->device->host->hostdata[0]);
-
-	MTS_DEBUG_GOT_HERE();
 
 	mts_urb_abort(desc);
 
@@ -346,7 +327,6 @@ static int mts_scsi_host_reset(struct scsi_cmnd *srb)
 	struct mts_desc* desc = (struct mts_desc*)(srb->device->host->hostdata[0]);
 	int result;
 
-	MTS_DEBUG_GOT_HERE();
 	mts_debug_dump(desc);
 
 	result = usb_lock_device_for_reset(desc->usb_dev, desc->usb_intf);
@@ -357,8 +337,8 @@ static int mts_scsi_host_reset(struct scsi_cmnd *srb)
 	return result ? FAILED : SUCCESS;
 }
 
-static int
-mts_scsi_queuecommand(struct Scsi_Host *shost, struct scsi_cmnd *srb);
+static enum scsi_qc_status mts_scsi_queuecommand(struct Scsi_Host *shost,
+						 struct scsi_cmnd *srb);
 
 static void mts_transfer_cleanup( struct urb *transfer );
 static void mts_do_sg(struct urb * transfer);
@@ -388,8 +368,9 @@ void mts_int_submit_urb (struct urb* transfer,
 
 	res = usb_submit_urb( transfer, GFP_ATOMIC );
 	if ( unlikely(res) ) {
-		MTS_INT_ERROR( "could not submit URB! Error was %d\n",(int)res );
-		context->srb->result = DID_ERROR << 16;
+		dev_err(&context->instance->usb_dev->dev,
+			"could not submit URB! Error was %d\n",(int)res );
+		set_host_byte(context->srb, DID_ERROR);
 		mts_transfer_cleanup(transfer);
 	}
 }
@@ -438,7 +419,7 @@ static void mts_data_done( struct urb* transfer )
 		scsi_set_resid(context->srb, context->data_length -
 			       transfer->actual_length);
 	} else if ( unlikely(status) ) {
-		context->srb->result = (status == -ENOENT ? DID_ABORT : DID_ERROR)<<16;
+		set_host_byte(context->srb, (status == -ENOENT ? DID_ABORT : DID_ERROR));
 	}
 
 	mts_get_status(transfer);
@@ -454,13 +435,10 @@ static void mts_command_done( struct urb *transfer )
 	if ( unlikely(status) ) {
 	        if (status == -ENOENT) {
 		        /* We are being killed */
-			MTS_DEBUG_GOT_HERE();
-			context->srb->result = DID_ABORT<<16;
+			set_host_byte(context->srb, DID_ABORT);
                 } else {
 		        /* A genuine error has occurred */
-			MTS_DEBUG_GOT_HERE();
-
-		        context->srb->result = DID_ERROR<<16;
+		        set_host_byte(context->srb, DID_ERROR);
                 }
 		mts_transfer_cleanup(transfer);
 
@@ -488,7 +466,6 @@ static void mts_command_done( struct urb *transfer )
 
 static void mts_do_sg (struct urb* transfer)
 {
-	struct scatterlist * sg;
 	int status = transfer->status;
 	MTS_INT_INIT();
 
@@ -496,17 +473,16 @@ static void mts_do_sg (struct urb* transfer)
 	                                          scsi_sg_count(context->srb));
 
 	if (unlikely(status)) {
-                context->srb->result = (status == -ENOENT ? DID_ABORT : DID_ERROR)<<16;
+                set_host_byte(context->srb, (status == -ENOENT ? DID_ABORT : DID_ERROR));
 		mts_transfer_cleanup(transfer);
         }
 
-	sg = scsi_sglist(context->srb);
-	context->fragment++;
+	context->curr_sg = sg_next(context->curr_sg);
 	mts_int_submit_urb(transfer,
 			   context->data_pipe,
-			   sg_virt(&sg[context->fragment]),
-			   sg[context->fragment].length,
-			   context->fragment + 1 == scsi_sg_count(context->srb) ?
+			   sg_virt(context->curr_sg),
+			   context->curr_sg->length,
+			   sg_is_last(context->curr_sg) ?
 			   mts_data_done : mts_do_sg);
 }
 
@@ -526,22 +502,18 @@ static void
 mts_build_transfer_context(struct scsi_cmnd *srb, struct mts_desc* desc)
 {
 	int pipe;
-	struct scatterlist * sg;
-	
-	MTS_DEBUG_GOT_HERE();
 
 	desc->context.instance = desc;
 	desc->context.srb = srb;
-	desc->context.fragment = 0;
 
 	if (!scsi_bufflen(srb)) {
 		desc->context.data = NULL;
 		desc->context.data_length = 0;
 		return;
 	} else {
-		sg = scsi_sglist(srb);
-		desc->context.data = sg_virt(&sg[0]);
-		desc->context.data_length = sg[0].length;
+		desc->context.curr_sg = scsi_sglist(srb);
+		desc->context.data = sg_virt(desc->context.curr_sg);
+		desc->context.data_length = desc->context.curr_sg->length;
 	}
 
 
@@ -565,15 +537,12 @@ mts_build_transfer_context(struct scsi_cmnd *srb, struct mts_desc* desc)
 	desc->context.data_pipe = pipe;
 }
 
-
-static int
-mts_scsi_queuecommand_lck(struct scsi_cmnd *srb, mts_scsi_cmnd_callback callback)
+static enum scsi_qc_status mts_scsi_queuecommand_lck(struct scsi_cmnd *srb)
 {
+	mts_scsi_cmnd_callback callback = scsi_done;
 	struct mts_desc* desc = (struct mts_desc*)(srb->device->host->hostdata[0]);
-	int err = 0;
 	int res;
 
-	MTS_DEBUG_GOT_HERE();
 	mts_show_command(srb);
 	mts_debug_dump(desc);
 
@@ -583,7 +552,7 @@ mts_scsi_queuecommand_lck(struct scsi_cmnd *srb, mts_scsi_cmnd_callback callback
 
 		MTS_DEBUG("this device doesn't exist\n");
 
-		srb->result = DID_BAD_TARGET << 16;
+		set_host_byte(srb, DID_BAD_TARGET);
 
 		if(likely(callback != NULL))
 			callback(srb);
@@ -609,20 +578,20 @@ mts_scsi_queuecommand_lck(struct scsi_cmnd *srb, mts_scsi_cmnd_callback callback
 	res=usb_submit_urb(desc->urb, GFP_ATOMIC);
 
 	if(unlikely(res)){
-		MTS_ERROR("error %d submitting URB\n",(int)res);
-		srb->result = DID_ERROR << 16;
+		dev_err(&desc->usb_dev->dev, "error %d submitting URB\n",(int)res);
+		set_host_byte(srb, DID_ERROR);
 
 		if(likely(callback != NULL))
 			callback(srb);
 
 	}
 out:
-	return err;
+	return 0;
 }
 
 static DEF_SCSI_QCMD(mts_scsi_queuecommand)
 
-static struct scsi_host_template mts_scsi_host_template = {
+static const struct scsi_host_template mts_scsi_host_template = {
 	.module			= THIS_MODULE,
 	.name			= "microtekX6",
 	.proc_name		= "microtekX6",
@@ -632,10 +601,9 @@ static struct scsi_host_template mts_scsi_host_template = {
 	.sg_tablesize =		SG_ALL,
 	.can_queue =		1,
 	.this_id =		-1,
-	.use_clustering =	1,
 	.emulated =		1,
-	.slave_alloc =		mts_slave_alloc,
-	.slave_configure =	mts_slave_configure,
+	.dma_alignment =	511,
+	.sdev_init =		mts_sdev_init,
 	.max_sectors=		256, /* 128 K */
 };
 
@@ -675,60 +643,52 @@ static int mts_usb_probe(struct usb_interface *intf,
 	/* the current altsetting on the interface we're probing */
 	struct usb_host_interface *altsetting;
 
-	MTS_DEBUG_GOT_HERE();
 	MTS_DEBUG( "usb-device descriptor at %x\n", (int)dev );
 
 	MTS_DEBUG( "product id = 0x%x, vendor id = 0x%x\n",
 		   le16_to_cpu(dev->descriptor.idProduct),
 		   le16_to_cpu(dev->descriptor.idVendor) );
 
-	MTS_DEBUG_GOT_HERE();
-
 	/* the current altsetting on the interface we're probing */
 	altsetting = intf->cur_altsetting;
-
 
 	/* Check if the config is sane */
 
 	if ( altsetting->desc.bNumEndpoints != MTS_EP_TOTAL ) {
-		MTS_WARNING( "expecting %d got %d endpoints! Bailing out.\n",
+		dev_warn(&dev->dev, "expecting %d got %d endpoints! Bailing out.\n",
 			     (int)MTS_EP_TOTAL, (int)altsetting->desc.bNumEndpoints );
 		return -ENODEV;
 	}
 
 	for( i = 0; i < altsetting->desc.bNumEndpoints; i++ ) {
-		if ((altsetting->endpoint[i].desc.bmAttributes &
-		     USB_ENDPOINT_XFERTYPE_MASK) != USB_ENDPOINT_XFER_BULK) {
-
-			MTS_WARNING( "can only deal with bulk endpoints; endpoint %d is not bulk.\n",
-			     (int)altsetting->endpoint[i].desc.bEndpointAddress );
-		} else {
-			if (altsetting->endpoint[i].desc.bEndpointAddress &
-			    USB_DIR_IN)
-				*ep_in_current++
-					= altsetting->endpoint[i].desc.bEndpointAddress &
-					USB_ENDPOINT_NUMBER_MASK;
-			else {
-				if ( ep_out != -1 ) {
-					MTS_WARNING( "can only deal with one output endpoints. Bailing out." );
-					return -ENODEV;
-				}
-
-				ep_out = altsetting->endpoint[i].desc.bEndpointAddress &
-					USB_ENDPOINT_NUMBER_MASK;
+		if (usb_endpoint_is_bulk_in(&altsetting->endpoint[i].desc)) {
+			*ep_in_current++ = usb_endpoint_num(&altsetting->endpoint[i].desc);
+		} else if (usb_endpoint_is_bulk_out(&altsetting->endpoint[i].desc)) {
+			if (ep_out == -1) {
+				ep_out = usb_endpoint_num(&altsetting->endpoint[i].desc);
+			} else {
+				dev_warn(&dev->dev, "can only deal with bulk endpoints; endpoint %d is not bulk.\n",
+						usb_endpoint_num(&altsetting->endpoint[i].desc));
+				return -ENODEV;
 			}
+		} else {
+			dev_warn(&dev->dev, "can only deal with bulk endpoints; endpoint %d is not bulk.\n",
+					usb_endpoint_num(&altsetting->endpoint[i].desc));
 		}
-
 	}
 
+	if (ep_in_current != &ep_in_set[2]) {
+		dev_warn(&dev->dev, "couldn't find two input bulk endpoints. Bailing out.\n");
+		return -ENODEV;
+	}
 
 	if ( ep_out == -1 ) {
-		MTS_WARNING( "couldn't find an output bulk endpoint. Bailing out.\n" );
+		dev_warn(&dev->dev, "couldn't find an output bulk endpoint. Bailing out.\n" );
 		return -ENODEV;
 	}
 
 
-	new_desc = kzalloc(sizeof(struct mts_desc), GFP_KERNEL);
+	new_desc = kzalloc_obj(struct mts_desc);
 	if (!new_desc)
 		goto out;
 
@@ -749,15 +709,15 @@ static int mts_usb_probe(struct usb_interface *intf,
 	new_desc->ep_image = ep_in_set[1];
 
 	if ( new_desc->ep_out != MTS_EP_OUT )
-		MTS_WARNING( "will this work? Command EP is not usually %d\n",
+		dev_warn(&dev->dev, "will this work? Command EP is not usually %d\n",
 			     (int)new_desc->ep_out );
 
 	if ( new_desc->ep_response != MTS_EP_RESPONSE )
-		MTS_WARNING( "will this work? Response EP is not usually %d\n",
+		dev_warn(&dev->dev, "will this work? Response EP is not usually %d\n",
 			     (int)new_desc->ep_response );
 
 	if ( new_desc->ep_image != MTS_EP_IMAGE )
-		MTS_WARNING( "will this work? Image data EP is not usually %d\n",
+		dev_warn(&dev->dev, "will this work? Image data EP is not usually %d\n",
 			     (int)new_desc->ep_image );
 
 	new_desc->host = scsi_host_alloc(&mts_scsi_host_template,

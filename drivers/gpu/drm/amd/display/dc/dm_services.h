@@ -38,59 +38,35 @@
 
 #undef DEPRECATED
 
+struct dmub_srv;
+struct dc_dmub_srv;
+union dmub_rb_cmd;
+
 irq_handler_idx dm_register_interrupt(
 	struct dc_context *ctx,
 	struct dc_interrupt_params *int_params,
 	interrupt_handler ih,
 	void *handler_args);
 
-
 /*
  *
  * GPU registers access
  *
  */
+uint32_t dm_read_reg_func(const struct dc_context *ctx, uint32_t address,
+			  const char *func_name);
 
 /* enable for debugging new code, this adds 50k to the driver size. */
 /* #define DM_CHECK_ADDR_0 */
 
+void dm_write_reg_func(const struct dc_context *ctx, uint32_t address,
+		       uint32_t value, const char *func_name);
+
 #define dm_read_reg(ctx, address)	\
-		dm_read_reg_func(ctx, address, __func__)
-
-static inline uint32_t dm_read_reg_func(
-	const struct dc_context *ctx,
-	uint32_t address,
-	const char *func_name)
-{
-	uint32_t value;
-#ifdef DM_CHECK_ADDR_0
-	if (address == 0) {
-		DC_ERR("invalid register read; address = 0\n");
-		return 0;
-	}
-#endif
-	value = cgs_read_register(ctx->cgs_device, address);
-
-	return value;
-}
+	dm_read_reg_func(ctx, address, __func__)
 
 #define dm_write_reg(ctx, address, value)	\
 	dm_write_reg_func(ctx, address, value, __func__)
-
-static inline void dm_write_reg_func(
-	const struct dc_context *ctx,
-	uint32_t address,
-	uint32_t value,
-	const char *func_name)
-{
-#ifdef DM_CHECK_ADDR_0
-	if (address == 0) {
-		DC_ERR("invalid register write. address = 0");
-		return;
-	}
-#endif
-	cgs_write_register(ctx->cgs_device, address, value);
-}
 
 static inline uint32_t dm_read_index_reg(
 	const struct dc_context *ctx,
@@ -140,9 +116,20 @@ static inline uint32_t set_reg_field_value_ex(
 		reg_name ## __ ## reg_field ## _MASK,\
 		reg_name ## __ ## reg_field ## __SHIFT)
 
-uint32_t generic_reg_update_ex(const struct dc_context *ctx,
+uint32_t generic_reg_set_ex(const struct dc_context *ctx,
 		uint32_t addr, uint32_t reg_val, int n,
 		uint8_t shift1, uint32_t mask1, uint32_t field_value1, ...);
+
+uint32_t generic_reg_update_ex(const struct dc_context *ctx,
+		uint32_t addr, int n,
+		uint8_t shift1, uint32_t mask1, uint32_t field_value1, ...);
+
+struct dc_dmub_srv *dc_dmub_srv_create(struct dc *dc, struct dmub_srv *dmub);
+void dc_dmub_srv_destroy(struct dc_dmub_srv **dmub_srv);
+
+void reg_sequence_start_gather(const struct dc_context *ctx);
+void reg_sequence_start_execute(const struct dc_context *ctx);
+void reg_sequence_wait_done(const struct dc_context *ctx);
 
 #define FD(reg_field)	reg_field ## __SHIFT, \
 						reg_field ## _MASK
@@ -151,11 +138,12 @@ uint32_t generic_reg_update_ex(const struct dc_context *ctx,
  * return number of poll before condition is met
  * return 0 if condition is not meet after specified time out tries
  */
-unsigned int generic_reg_wait(const struct dc_context *ctx,
+void generic_reg_wait(const struct dc_context *ctx,
 	uint32_t addr, uint32_t mask, uint32_t shift, uint32_t condition_value,
 	unsigned int delay_between_poll_us, unsigned int time_out_num_tries,
 	const char *func_name, int line);
 
+unsigned int snprintf_count(char *pBuf, unsigned int bufSize, const char *fmt, ...);
 
 /* These macros need to be used with soc15 registers in order to retrieve
  * the actual offset.
@@ -168,11 +156,10 @@ unsigned int generic_reg_wait(const struct dc_context *ctx,
 
 #define generic_reg_update_soc15(ctx, inst_offset, reg_name, n, ...)\
 		generic_reg_update_ex(ctx, DCE_BASE.instance[0].segment[mm##reg_name##_BASE_IDX] +  mm##reg_name + inst_offset, \
-		dm_read_reg_func(ctx, mm##reg_name + DCE_BASE.instance[0].segment[mm##reg_name##_BASE_IDX] + inst_offset, __func__), \
 		n, __VA_ARGS__)
 
 #define generic_reg_set_soc15(ctx, inst_offset, reg_name, n, ...)\
-		generic_reg_update_ex(ctx, DCE_BASE.instance[0].segment[mm##reg_name##_BASE_IDX] + mm##reg_name + inst_offset, 0, \
+		generic_reg_set_ex(ctx, DCE_BASE.instance[0].segment[mm##reg_name##_BASE_IDX] + mm##reg_name + inst_offset, 0, \
 		n, __VA_ARGS__)
 
 #define get_reg_field_value_soc15(reg_value, block, reg_num, reg_name, reg_field)\
@@ -219,8 +206,8 @@ bool dm_pp_notify_wm_clock_changes(
 	const struct dc_context *ctx,
 	struct dm_pp_wm_sets_with_clock_ranges *wm_with_clock_ranges);
 
-void dm_pp_get_funcs_rv(struct dc_context *ctx,
-		struct pp_smu_funcs_rv *funcs);
+void dm_pp_get_funcs(struct dc_context *ctx,
+		struct pp_smu_funcs *funcs);
 
 /* DAL calls this function to notify PP about completion of Mode Set.
  * For PP it means that current DCE clocks are those which were returned
@@ -237,17 +224,9 @@ bool dm_pp_apply_display_requirements(
 	const struct dc_context *ctx,
 	const struct dm_pp_display_configuration *pp_display_cfg);
 
-bool dm_pp_apply_power_level_change_request(
-	const struct dc_context *ctx,
-	struct dm_pp_power_level_change_request *level_change_req);
-
 bool dm_pp_apply_clock_for_voltage_request(
 	const struct dc_context *ctx,
 	struct dm_pp_clock_for_voltage_req *clock_for_voltage_req);
-
-bool dm_pp_get_static_clocks(
-	const struct dc_context *ctx,
-	struct dm_pp_static_clock_info *static_clk_info);
 
 /****** end of PP interfaces ******/
 
@@ -255,75 +234,6 @@ struct persistent_data_flag {
 	bool save_per_link;
 	bool save_per_edid;
 };
-
-/* Call to write data in registry editor for persistent data storage.
- *
- * \inputs      sink - identify edid/link for registry folder creation
- *              module name - identify folders for registry
- *              key name - identify keys within folders for registry
- *              params - value to write in defined folder/key
- *              size - size of the input params
- *              flag - determine whether to save by link or edid
- *
- * \returns     true - call is successful
- *              false - call failed
- *
- * sink         module         key
- * -----------------------------------------------------------------------------
- * NULL         NULL           NULL     - failure
- * NULL         NULL           -        - create key with param value
- *                                                      under base folder
- * NULL         -              NULL     - create module folder under base folder
- * -            NULL           NULL     - failure
- * NULL         -              -        - create key under module folder
- *                                            with no edid/link identification
- * -            NULL           -        - create key with param value
- *                                                       under base folder
- * -            -              NULL     - create module folder under base folder
- * -            -              -        - create key under module folder
- *                                              with edid/link identification
- */
-bool dm_write_persistent_data(struct dc_context *ctx,
-		const struct dc_sink *sink,
-		const char *module_name,
-		const char *key_name,
-		void *params,
-		unsigned int size,
-		struct persistent_data_flag *flag);
-
-
-/* Call to read data in registry editor for persistent data storage.
- *
- * \inputs      sink - identify edid/link for registry folder creation
- *              module name - identify folders for registry
- *              key name - identify keys within folders for registry
- *              size - size of the output params
- *              flag - determine whether it was save by link or edid
- *
- * \returns     params - value read from defined folder/key
- *              true - call is successful
- *              false - call failed
- *
- * sink         module         key
- * -----------------------------------------------------------------------------
- * NULL         NULL           NULL     - failure
- * NULL         NULL           -        - read key under base folder
- * NULL         -              NULL     - failure
- * -            NULL           NULL     - failure
- * NULL         -              -        - read key under module folder
- *                                             with no edid/link identification
- * -            NULL           -        - read key under base folder
- * -            -              NULL     - failure
- * -            -              -        - read key under module folder
- *                                              with edid/link identification
- */
-bool dm_read_persistent_data(struct dc_context *ctx,
-		const struct dc_sink *sink,
-		const char *module_name,
-		const char *key_name,
-		void *params,
-		unsigned int size,
-		struct persistent_data_flag *flag);
 
 bool dm_query_extended_brightness_caps
 	(struct dc_context *ctx, enum dm_acpi_display_type display,
@@ -339,25 +249,61 @@ bool dm_dmcu_set_pipe(struct dc_context *ctx, unsigned int controller_id);
 #define dm_log_to_buffer(buffer, size, fmt, args)\
 	vsnprintf(buffer, size, fmt, args)
 
-unsigned long long dm_get_timestamp(struct dc_context *ctx);
+static inline unsigned long long dm_get_timestamp(struct dc_context *ctx)
+{
+	return ktime_get_raw_ns();
+}
+
+unsigned long long dm_get_elapse_time_in_ns(struct dc_context *ctx,
+		unsigned long long current_time_stamp,
+		unsigned long long last_time_stamp);
 
 /*
  * performance tracing
  */
-void dm_perf_trace_timestamp(const char *func_name, unsigned int line);
-#define PERF_TRACE()	dm_perf_trace_timestamp(__func__, __LINE__)
+void dm_perf_trace_timestamp(const char *func_name, unsigned int line, struct dc_context *ctx);
 
+#define PERF_TRACE()	dm_perf_trace_timestamp(__func__, __LINE__, CTX)
+#define PERF_TRACE_CTX(__CTX)	dm_perf_trace_timestamp(__func__, __LINE__, __CTX)
+
+/*
+ * SMU message tracing
+ */
+void dm_trace_smu_enter(uint32_t msg_id, uint32_t param_in, unsigned int delay, struct dc_context *ctx);
+void dm_trace_smu_exit(bool success, uint32_t response, struct dc_context *ctx);
+
+#define TRACE_SMU_MSG_DELAY(msg_id, param_in, delay, ctx)	dm_trace_smu_enter(msg_id, param_in, delay, ctx)
+#define TRACE_SMU_MSG(msg_id, param_in, ctx)	dm_trace_smu_enter(msg_id, param_in, 0, ctx)
+#define TRACE_SMU_MSG_ENTER(msg_id, param_in, ctx)	dm_trace_smu_enter(msg_id, param_in, 0, ctx)
+#define TRACE_SMU_MSG_EXIT(success, response, ctx)	dm_trace_smu_exit(success, response, ctx)
+
+/*
+ * DMUB Interfaces
+ */
+bool dm_execute_dmub_cmd(const struct dc_context *ctx, union dmub_rb_cmd *cmd, enum dm_dmub_wait_type wait_type);
+bool dm_execute_dmub_cmd_list(const struct dc_context *ctx, unsigned int count, union dmub_rb_cmd *cmd, enum dm_dmub_wait_type wait_type);
+
+/*
+ * ACPI Interfaces
+ */
+void dm_acpi_process_phy_transition_interlock(
+	const struct dc_context *ctx,
+	struct dm_process_phy_transition_init_params process_phy_transition_init_params);
 
 /*
  * Debug and verification hooks
  */
-bool dm_helpers_dc_conn_log(
-		struct dc_context *ctx,
-		struct log_entry *entry,
-		enum dc_log_type event);
 
-void dm_dtn_log_begin(struct dc_context *ctx);
-void dm_dtn_log_append_v(struct dc_context *ctx, const char *msg, ...);
-void dm_dtn_log_end(struct dc_context *ctx);
+void dm_dtn_log_begin(struct dc_context *ctx,
+	struct dc_log_buffer_ctx *log_ctx);
+void dm_dtn_log_append_v(struct dc_context *ctx,
+	struct dc_log_buffer_ctx *log_ctx,
+	const char *msg, ...);
+void dm_dtn_log_end(struct dc_context *ctx,
+	struct dc_log_buffer_ctx *log_ctx);
+
+char *dce_version_to_string(const int version);
+
+bool dc_supports_vrr(const enum dce_version v);
 
 #endif /* __DM_SERVICES_H__ */

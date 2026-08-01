@@ -2,27 +2,8 @@
 #ifndef __ASM_SH_UACCESS_H
 #define __ASM_SH_UACCESS_H
 
-#include <asm/segment.h>
 #include <asm/extable.h>
-
-#define __addr_ok(addr) \
-	((unsigned long __force)(addr) < current_thread_info()->addr_limit.seg)
-
-/*
- * __access_ok: Check if address with size is OK or not.
- *
- * Uhhuh, this needs 33-bit arithmetic. We have a carry..
- *
- * sum := addr + size;  carry? --> flag = true;
- * if (sum >= addr_limit) flag = true;
- */
-#define __access_ok(addr, size)		\
-	(__addr_ok((addr) + (size)))
-#define access_ok(type, addr, size)	\
-	(__chk_user_ptr(addr),		\
-	 __access_ok((unsigned long __force)(addr), (size)))
-
-#define user_addr_max()	(current_thread_info()->addr_limit.seg)
+#include <asm-generic/access_ok.h>
 
 /*
  * Uh, these should become the main single-value transfer routines ...
@@ -65,8 +46,8 @@ struct __large_struct { unsigned long buf[100]; };
 ({									\
 	long __gu_err = -EFAULT;					\
 	unsigned long __gu_val = 0;					\
-	const __typeof__(*(ptr)) *__gu_addr = (ptr);			\
-	if (likely(access_ok(VERIFY_READ, __gu_addr, (size))))		\
+	const __typeof__(*(ptr)) __user *__gu_addr = (ptr);			\
+	if (likely(access_ok(__gu_addr, (size))))		\
 		__get_user_size(__gu_val, __gu_addr, (size), __gu_err);	\
 	(x) = (__force __typeof__(*(ptr)))__gu_val;			\
 	__gu_err;							\
@@ -87,17 +68,13 @@ struct __large_struct { unsigned long buf[100]; };
 	long __pu_err = -EFAULT;				\
 	__typeof__(*(ptr)) __user *__pu_addr = (ptr);		\
 	__typeof__(*(ptr)) __pu_val = x;			\
-	if (likely(access_ok(VERIFY_WRITE, __pu_addr, size)))	\
+	if (likely(access_ok(__pu_addr, size)))	\
 		__put_user_size(__pu_val, __pu_addr, (size),	\
 				__pu_err);			\
 	__pu_err;						\
 })
 
-#ifdef CONFIG_SUPERH32
 # include <asm/uaccess_32.h>
-#else
-# include <asm/uaccess_64.h>
-#endif
 
 extern long strncpy_from_user(char *dest, const char __user *src, long count);
 
@@ -118,22 +95,20 @@ raw_copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	return __copy_user((__force void *)to, from, n);
 }
-#define INLINE_COPY_FROM_USER
-#define INLINE_COPY_TO_USER
+#define INLINE_COPY_USER
 
 /*
  * Clear the area and return remaining number of bytes
  * (on failure.  Usually it's 0.)
  */
-__kernel_size_t __clear_user(void *addr, __kernel_size_t size);
+__kernel_size_t __clear_user(void __user *addr, __kernel_size_t size);
 
 #define clear_user(addr,n)						\
 ({									\
 	void __user * __cl_addr = (addr);				\
 	unsigned long __cl_size = (n);					\
 									\
-	if (__cl_size && access_ok(VERIFY_WRITE,			\
-		((unsigned long)(__cl_addr)), __cl_size))		\
+	if (__cl_size && access_ok(__cl_addr, __cl_size))		\
 		__cl_size = __clear_user(__cl_addr, __cl_size);		\
 									\
 	__cl_size;							\

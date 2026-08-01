@@ -1,32 +1,14 @@
-/* -*- mode: c; c-basic-offset: 8; -*-
- * vim: noexpandtab sw=8 ts=8 sts=0:
- *
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
  * ocfs2_ioctl.h
  *
  * Defines OCFS2 ioctls.
  *
  * Copyright (C) 2010 Oracle.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License, version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
 #ifndef OCFS2_IOCTL_H
 #define OCFS2_IOCTL_H
-
-/*
- * ioctl commands
- */
-#define OCFS2_IOC_GETFLAGS	FS_IOC_GETFLAGS
-#define OCFS2_IOC_SETFLAGS	FS_IOC_SETFLAGS
-#define OCFS2_IOC32_GETFLAGS	FS_IOC32_GETFLAGS
-#define OCFS2_IOC32_SETFLAGS	FS_IOC32_SETFLAGS
 
 /*
  * Space reservation / allocation / free ioctls and argument structure
@@ -233,7 +215,7 @@ struct ocfs2_move_extents {
 							   movement less likely
 							   to fail, may make fs
 							   even more fragmented */
-#define OCFS2_MOVE_EXT_FL_COMPLETE	(0x00000004)	/* Move or defragmenation
+#define OCFS2_MOVE_EXT_FL_COMPLETE	(0x00000004)	/* Move or defragmentation
 							   completely gets done.
 							 */
 

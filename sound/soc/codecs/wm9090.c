@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ALSA SoC WM9090 driver
  *
  * Copyright 2009-12 Wolfson Microelectronics
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
  */
 
 #include <linux/module.h>
@@ -152,7 +139,7 @@ static void wait_for_dc_servo(struct snd_soc_component *component)
 	do {
 		count++;
 		msleep(1);
-		reg = snd_soc_component_read32(component, WM9090_DC_SERVO_READBACK_0);
+		reg = snd_soc_component_read(component, WM9090_DC_SERVO_READBACK_0);
 		dev_dbg(component->dev, "DC servo status: %x\n", reg);
 	} while ((reg & WM9090_DCS_CAL_COMPLETE_MASK)
 		 != WM9090_DCS_CAL_COMPLETE_MASK && count < 1000);
@@ -252,7 +239,7 @@ static int hp_ev(struct snd_soc_dapm_widget *w,
 		 struct snd_kcontrol *kcontrol, int event)
 {
 	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
-	unsigned int reg = snd_soc_component_read32(component, WM9090_ANALOGUE_HP_0);
+	unsigned int reg = snd_soc_component_read(component, WM9090_ANALOGUE_HP_0);
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
@@ -422,7 +409,7 @@ static const struct snd_soc_dapm_route audio_map_in2_diff[] = {
 static int wm9090_add_controls(struct snd_soc_component *component)
 {
 	struct wm9090_priv *wm9090 = snd_soc_component_get_drvdata(component);
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	int i;
 
 	snd_soc_dapm_new_controls(dapm, wm9090_dapm_widgets,
@@ -476,6 +463,7 @@ static int wm9090_set_bias_level(struct snd_soc_component *component,
 				 enum snd_soc_bias_level level)
 {
 	struct wm9090_priv *wm9090 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 
 	switch (level) {
 	case SND_SOC_BIAS_ON:
@@ -493,7 +481,7 @@ static int wm9090_set_bias_level(struct snd_soc_component *component,
 		break;
 
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF) {
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_OFF) {
 			/* Restore the register cache */
 			regcache_sync(wm9090->regmap);
 		}
@@ -556,8 +544,6 @@ static const struct snd_soc_component_driver soc_component_dev_wm9090 = {
 	.suspend_bias_off	= 1,
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
-	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config wm9090_regmap = {
@@ -568,14 +554,13 @@ static const struct regmap_config wm9090_regmap = {
 	.volatile_reg = wm9090_volatile,
 	.readable_reg = wm9090_readable,
 
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.reg_defaults = wm9090_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(wm9090_reg_defaults),
 };
 
 
-static int wm9090_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+static int wm9090_i2c_probe(struct i2c_client *i2c)
 {
 	struct wm9090_priv *wm9090;
 	unsigned int reg;
@@ -622,8 +607,8 @@ static int wm9090_i2c_probe(struct i2c_client *i2c,
 }
 
 static const struct i2c_device_id wm9090_id[] = {
-	{ "wm9090", 0 },
-	{ "wm9093", 0 },
+	{ .name = "wm9090" },
+	{ .name = "wm9093" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, wm9090_id);

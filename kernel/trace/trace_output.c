@@ -1,25 +1,31 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * trace_output.c
  *
  * Copyright (C) 2008 Red Hat Inc, Steven Rostedt <srostedt@redhat.com>
  *
  */
+#include "trace.h"
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/ftrace.h>
+#include <linux/kprobes.h>
 #include <linux/sched/clock.h>
 #include <linux/sched/mm.h>
+#include <linux/idr.h>
+#include <linux/btf.h>
+#include <linux/bpf.h>
+#include <linux/hashtable.h>
 
 #include "trace_output.h"
+#include "trace_btf.h"
 
-/* must be a power of 2 */
-#define EVENT_HASHSIZE	128
+/* 2^7 = 128 */
+#define EVENT_HASH_BITS 7
 
 DECLARE_RWSEM(trace_event_sem);
 
-static struct hlist_head event_hash[EVENT_HASHSIZE] __read_mostly;
-
-static int next_event_type = __TRACE_LAST_TYPE + 1;
+static DEFINE_HASHTABLE(event_hash, EVENT_HASH_BITS);
 
 enum print_line_t trace_print_bputs_msg_only(struct trace_iterator *iter)
 {
@@ -63,14 +69,15 @@ enum print_line_t trace_print_printk_msg_only(struct trace_iterator *iter)
 const char *
 trace_print_flags_seq(struct trace_seq *p, const char *delim,
 		      unsigned long flags,
-		      const struct trace_print_flags *flag_array)
+		      const struct trace_print_flags *flag_array,
+		      size_t flag_array_size)
 {
 	unsigned long mask;
 	const char *str;
 	const char *ret = trace_seq_buffer_ptr(p);
 	int i, first = 1;
 
-	for (i = 0;  flag_array[i].name && flags; i++) {
+	for (i = 0; i < flag_array_size && flags; i++) {
 
 		mask = flag_array[i].mask;
 		if ((flags & mask) != mask)
@@ -100,12 +107,13 @@ EXPORT_SYMBOL(trace_print_flags_seq);
 
 const char *
 trace_print_symbols_seq(struct trace_seq *p, unsigned long val,
-			const struct trace_print_flags *symbol_array)
+			const struct trace_print_flags *symbol_array,
+			size_t symbol_array_size)
 {
 	int i;
 	const char *ret = trace_seq_buffer_ptr(p);
 
-	for (i = 0;  symbol_array[i].name; i++) {
+	for (i = 0; i < symbol_array_size; i++) {
 
 		if (val != symbol_array[i].mask)
 			continue;
@@ -127,14 +135,15 @@ EXPORT_SYMBOL(trace_print_symbols_seq);
 const char *
 trace_print_flags_seq_u64(struct trace_seq *p, const char *delim,
 		      unsigned long long flags,
-		      const struct trace_print_flags_u64 *flag_array)
+		      const struct trace_print_flags_u64 *flag_array,
+		      size_t flag_array_size)
 {
 	unsigned long long mask;
 	const char *str;
 	const char *ret = trace_seq_buffer_ptr(p);
 	int i, first = 1;
 
-	for (i = 0;  flag_array[i].name && flags; i++) {
+	for (i = 0; i < flag_array_size && flags; i++) {
 
 		mask = flag_array[i].mask;
 		if ((flags & mask) != mask)
@@ -164,12 +173,13 @@ EXPORT_SYMBOL(trace_print_flags_seq_u64);
 
 const char *
 trace_print_symbols_seq_u64(struct trace_seq *p, unsigned long long val,
-			 const struct trace_print_flags_u64 *symbol_array)
+			    const struct trace_print_flags_u64 *symbol_array,
+			    size_t symbol_array_size)
 {
 	int i;
 	const char *ret = trace_seq_buffer_ptr(p);
 
-	for (i = 0;  symbol_array[i].name; i++) {
+	for (i = 0; i < symbol_array_size; i++) {
 
 		if (val != symbol_array[i].mask)
 			continue;
@@ -188,13 +198,37 @@ trace_print_symbols_seq_u64(struct trace_seq *p, unsigned long long val,
 EXPORT_SYMBOL(trace_print_symbols_seq_u64);
 #endif
 
+/**
+ * trace_print_bitmask_seq - print a bitmask to a sequence buffer
+ * @iter: The trace iterator for the current event instance
+ * @bitmask_ptr: The pointer to the bitmask data
+ * @bitmask_size: The size of the bitmask in bytes
+ *
+ * Prints a bitmask into a sequence buffer as either a hex string or a
+ * human-readable range list, depending on the instance's "bitmask-list"
+ * trace option. The bitmask is formatted into the iterator's temporary
+ * scratchpad rather than the primary sequence buffer. This avoids
+ * duplication and pointer-collision issues when the returned string is
+ * processed by a "%s" specifier in a TP_printk() macro.
+ *
+ * Returns a pointer to the formatted string within the temporary buffer.
+ */
 const char *
-trace_print_bitmask_seq(struct trace_seq *p, void *bitmask_ptr,
+trace_print_bitmask_seq(struct trace_iterator *iter, void *bitmask_ptr,
 			unsigned int bitmask_size)
 {
-	const char *ret = trace_seq_buffer_ptr(p);
+	struct trace_seq *p = &iter->tmp_seq;
+	const struct trace_array *tr = iter->tr;
+	const char *ret;
 
-	trace_seq_bitmask(p, bitmask_ptr, bitmask_size * 8);
+	trace_seq_init(p);
+	ret = trace_seq_buffer_ptr(p);
+
+	if (tr->trace_flags & TRACE_ITER(BITMASK_LIST))
+		trace_seq_bitmask_list(p, bitmask_ptr, bitmask_size * 8);
+	else
+		trace_seq_bitmask(p, bitmask_ptr, bitmask_size * 8);
+
 	trace_seq_putc(p, 0);
 
 	return ret;
@@ -218,10 +252,13 @@ trace_print_hex_seq(struct trace_seq *p, const unsigned char *buf, int buf_len,
 {
 	int i;
 	const char *ret = trace_seq_buffer_ptr(p);
+	const char *fmt = concatenate ? "%*phN" : "%*ph";
 
-	for (i = 0; i < buf_len; i++)
-		trace_seq_printf(p, "%s%2.2x", concatenate || i == 0 ? "" : " ",
-				 buf[i]);
+	for (i = 0; i < buf_len; i += 16) {
+		if (!concatenate && i != 0)
+			trace_seq_putc(p, ' ');
+		trace_seq_printf(p, fmt, min(buf_len - i, 16), &buf[i]);
+	}
 	trace_seq_putc(p, 0);
 
 	return ret;
@@ -273,6 +310,21 @@ trace_print_array_seq(struct trace_seq *p, const void *buf, int count,
 }
 EXPORT_SYMBOL(trace_print_array_seq);
 
+const char *
+trace_print_hex_dump_seq(struct trace_seq *p, const char *prefix_str,
+			 int prefix_type, int rowsize, int groupsize,
+			 const void *buf, size_t len, bool ascii)
+{
+	const char *ret = trace_seq_buffer_ptr(p);
+
+	trace_seq_putc(p, '\n');
+	trace_seq_hex_dump(p, prefix_str, prefix_type,
+			   rowsize, groupsize, buf, len, ascii);
+	trace_seq_putc(p, 0);
+	return ret;
+}
+EXPORT_SYMBOL(trace_print_hex_dump_seq);
+
 int trace_raw_output_prep(struct trace_iterator *iter,
 			  struct trace_event *trace_event)
 {
@@ -296,13 +348,28 @@ int trace_raw_output_prep(struct trace_iterator *iter,
 }
 EXPORT_SYMBOL(trace_raw_output_prep);
 
-static int trace_output_raw(struct trace_iterator *iter, char *name,
-			    char *fmt, va_list ap)
+void trace_event_printf(struct trace_iterator *iter, const char *fmt, ...)
+{
+	struct trace_seq *s = &iter->seq;
+	va_list ap;
+
+	if (ignore_event(iter))
+		return;
+
+	va_start(ap, fmt);
+	trace_seq_vprintf(s, trace_event_format(iter, fmt), ap);
+	va_end(ap);
+}
+EXPORT_SYMBOL(trace_event_printf);
+
+static __printf(3, 0)
+int trace_output_raw(struct trace_iterator *iter, char *name,
+		     char *fmt, va_list ap)
 {
 	struct trace_seq *s = &iter->seq;
 
 	trace_seq_printf(s, "%s: ", name);
-	trace_seq_vprintf(s, fmt, ap);
+	trace_seq_vprintf(s, trace_event_format(iter, fmt), ap);
 
 	return trace_handle_return(s);
 }
@@ -320,61 +387,32 @@ int trace_output_call(struct trace_iterator *iter, char *name, char *fmt, ...)
 }
 EXPORT_SYMBOL_GPL(trace_output_call);
 
-#ifdef CONFIG_KRETPROBES
-static inline const char *kretprobed(const char *name)
+static inline const char *kretprobed(const char *name, unsigned long addr)
 {
-	static const char tramp_name[] = "kretprobe_trampoline";
-	int size = sizeof(tramp_name);
-
-	if (strncmp(tramp_name, name, size) == 0)
+	if (is_kretprobe_trampoline(addr))
 		return "[unknown/kretprobe'd]";
 	return name;
 }
-#else
-static inline const char *kretprobed(const char *name)
-{
-	return name;
-}
-#endif /* CONFIG_KRETPROBES */
 
-static void
-seq_print_sym_short(struct trace_seq *s, const char *fmt, unsigned long address)
+void
+trace_seq_print_sym(struct trace_seq *s, unsigned long address, bool offset)
 {
-	char str[KSYM_SYMBOL_LEN];
 #ifdef CONFIG_KALLSYMS
+	char str[KSYM_SYMBOL_LEN];
 	const char *name;
 
-	kallsyms_lookup(address, NULL, NULL, NULL, str);
-
-	name = kretprobed(str);
+	if (offset)
+		sprint_symbol(str, address);
+	else
+		kallsyms_lookup(address, NULL, NULL, NULL, str);
+	name = kretprobed(str, address);
 
 	if (name && strlen(name)) {
-		trace_seq_printf(s, fmt, name);
+		trace_seq_puts(s, name);
 		return;
 	}
 #endif
-	snprintf(str, KSYM_SYMBOL_LEN, "0x%08lx", address);
-	trace_seq_printf(s, fmt, str);
-}
-
-static void
-seq_print_sym_offset(struct trace_seq *s, const char *fmt,
-		     unsigned long address)
-{
-	char str[KSYM_SYMBOL_LEN];
-#ifdef CONFIG_KALLSYMS
-	const char *name;
-
-	sprint_symbol(str, address);
-	name = kretprobed(str);
-
-	if (name && strlen(name)) {
-		trace_seq_printf(s, fmt, name);
-		return;
-	}
-#endif
-	snprintf(str, KSYM_SYMBOL_LEN, "0x%08lx", address);
-	trace_seq_printf(s, fmt, str);
+	trace_seq_printf(s, "0x%08lx", address);
 }
 
 #ifndef CONFIG_64BIT
@@ -396,21 +434,21 @@ static int seq_print_user_ip(struct trace_seq *s, struct mm_struct *mm,
 	if (mm) {
 		const struct vm_area_struct *vma;
 
-		down_read(&mm->mmap_sem);
+		mmap_read_lock(mm);
 		vma = find_vma(mm, ip);
 		if (vma) {
 			file = vma->vm_file;
 			vmstart = vma->vm_start;
 		}
 		if (file) {
-			ret = trace_seq_path(s, &file->f_path);
+			ret = trace_seq_path(s, file_user_path(file));
 			if (ret)
 				trace_seq_printf(s, "[+0x%lx]",
 						 ip - vmstart);
 		}
-		up_read(&mm->mmap_sem);
+		mmap_read_unlock(mm);
 	}
-	if (ret && ((sym_flags & TRACE_ITER_SYM_ADDR) || !file))
+	if (ret && ((sym_flags & TRACE_ITER(SYM_ADDR)) || !file))
 		trace_seq_printf(s, " <" IP_FMT ">", ip);
 	return !trace_seq_has_overflowed(s);
 }
@@ -423,12 +461,9 @@ seq_print_ip_sym(struct trace_seq *s, unsigned long ip, unsigned long sym_flags)
 		goto out;
 	}
 
-	if (sym_flags & TRACE_ITER_SYM_OFFSET)
-		seq_print_sym_offset(s, "%s", ip);
-	else
-		seq_print_sym_short(s, "%s", ip);
+	trace_seq_print_sym(s, ip, sym_flags & TRACE_ITER(SYM_OFFSET));
 
-	if (sym_flags & TRACE_ITER_SYM_ADDR)
+	if (sym_flags & TRACE_ITER(SYM_ADDR))
 		trace_seq_printf(s, " <" IP_FMT ">", ip);
 
  out:
@@ -450,27 +485,42 @@ int trace_print_lat_fmt(struct trace_seq *s, struct trace_entry *entry)
 	char irqs_off;
 	int hardirq;
 	int softirq;
+	int bh_off;
 	int nmi;
 
 	nmi = entry->flags & TRACE_FLAG_NMI;
 	hardirq = entry->flags & TRACE_FLAG_HARDIRQ;
 	softirq = entry->flags & TRACE_FLAG_SOFTIRQ;
+	bh_off = entry->flags & TRACE_FLAG_BH_OFF;
 
 	irqs_off =
+		(entry->flags & TRACE_FLAG_IRQS_OFF && bh_off) ? 'D' :
 		(entry->flags & TRACE_FLAG_IRQS_OFF) ? 'd' :
-		(entry->flags & TRACE_FLAG_IRQS_NOSUPPORT) ? 'X' :
+		bh_off ? 'b' :
 		'.';
 
-	switch (entry->flags & (TRACE_FLAG_NEED_RESCHED |
+	switch (entry->flags & (TRACE_FLAG_NEED_RESCHED | TRACE_FLAG_NEED_RESCHED_LAZY |
 				TRACE_FLAG_PREEMPT_RESCHED)) {
+	case TRACE_FLAG_NEED_RESCHED | TRACE_FLAG_NEED_RESCHED_LAZY | TRACE_FLAG_PREEMPT_RESCHED:
+		need_resched = 'B';
+		break;
 	case TRACE_FLAG_NEED_RESCHED | TRACE_FLAG_PREEMPT_RESCHED:
 		need_resched = 'N';
+		break;
+	case TRACE_FLAG_NEED_RESCHED_LAZY | TRACE_FLAG_PREEMPT_RESCHED:
+		need_resched = 'L';
+		break;
+	case TRACE_FLAG_NEED_RESCHED | TRACE_FLAG_NEED_RESCHED_LAZY:
+		need_resched = 'b';
 		break;
 	case TRACE_FLAG_NEED_RESCHED:
 		need_resched = 'n';
 		break;
 	case TRACE_FLAG_PREEMPT_RESCHED:
 		need_resched = 'p';
+		break;
+	case TRACE_FLAG_NEED_RESCHED_LAZY:
+		need_resched = 'l';
 		break;
 	default:
 		need_resched = '.';
@@ -488,8 +538,13 @@ int trace_print_lat_fmt(struct trace_seq *s, struct trace_entry *entry)
 	trace_seq_printf(s, "%c%c%c",
 			 irqs_off, need_resched, hardsoft_irq);
 
-	if (entry->preempt_count)
-		trace_seq_printf(s, "%x", entry->preempt_count);
+	if (entry->preempt_count & 0xf)
+		trace_seq_printf(s, "%x", entry->preempt_count & 0xf);
+	else
+		trace_seq_putc(s, '.');
+
+	if (entry->preempt_count & 0xf0)
+		trace_seq_printf(s, "%x", entry->preempt_count >> 4);
 	else
 		trace_seq_putc(s, '.');
 
@@ -503,7 +558,7 @@ lat_print_generic(struct trace_seq *s, struct trace_entry *entry, int cpu)
 
 	trace_find_cmdline(entry->pid, comm);
 
-	trace_seq_printf(s, "%8.8s-%-5d %3d",
+	trace_seq_printf(s, "%8.8s-%-7d %3d",
 			 comm, entry->pid, cpu);
 
 	return trace_print_lat_fmt(s, entry);
@@ -542,9 +597,9 @@ static int
 lat_print_timestamp(struct trace_iterator *iter, u64 next_ts)
 {
 	struct trace_array *tr = iter->tr;
-	unsigned long verbose = tr->trace_flags & TRACE_ITER_VERBOSE;
+	unsigned long verbose = tr->trace_flags & TRACE_ITER(VERBOSE);
 	unsigned long in_ns = iter->iter_flags & TRACE_FILE_TIME_IN_NS;
-	unsigned long long abs_ts = iter->ts - iter->trace_buffer->time_start;
+	unsigned long long abs_ts = iter->ts - iter->array_buffer->time_start;
 	unsigned long long rel_ts = next_ts - iter->ts;
 	struct trace_seq *s = &iter->seq;
 
@@ -583,60 +638,66 @@ lat_print_timestamp(struct trace_iterator *iter, u64 next_ts)
 	return !trace_seq_has_overflowed(s);
 }
 
+static void trace_print_time(struct trace_seq *s, struct trace_iterator *iter,
+			     unsigned long long ts)
+{
+	unsigned long secs, usec_rem;
+	unsigned long long t;
+
+	if (iter->iter_flags & TRACE_FILE_TIME_IN_NS) {
+		t = ns2usecs(ts);
+		usec_rem = do_div(t, USEC_PER_SEC);
+		secs = (unsigned long)t;
+		trace_seq_printf(s, " %5lu.%06lu", secs, usec_rem);
+	} else
+		trace_seq_printf(s, " %12llu", ts);
+}
+
 int trace_print_context(struct trace_iterator *iter)
 {
 	struct trace_array *tr = iter->tr;
 	struct trace_seq *s = &iter->seq;
 	struct trace_entry *entry = iter->ent;
-	unsigned long long t;
-	unsigned long secs, usec_rem;
 	char comm[TASK_COMM_LEN];
 
 	trace_find_cmdline(entry->pid, comm);
 
-	trace_seq_printf(s, "%16s-%-5d [%03d] ",
-			       comm, entry->pid, iter->cpu);
+	trace_seq_printf(s, "%16s-%-7d ", comm, entry->pid);
 
-	if (tr->trace_flags & TRACE_ITER_RECORD_TGID) {
+	if (tr->trace_flags & TRACE_ITER(RECORD_TGID)) {
 		unsigned int tgid = trace_find_tgid(entry->pid);
 
 		if (!tgid)
-			trace_seq_printf(s, "(-----) ");
+			trace_seq_printf(s, "(-------) ");
 		else
-			trace_seq_printf(s, "(%5d) ", tgid);
+			trace_seq_printf(s, "(%7d) ", tgid);
 	}
 
-	if (tr->trace_flags & TRACE_ITER_IRQ_INFO)
+	trace_seq_printf(s, "[%03d] ", iter->cpu);
+
+	if (tr->trace_flags & TRACE_ITER(IRQ_INFO))
 		trace_print_lat_fmt(s, entry);
 
-	if (iter->iter_flags & TRACE_FILE_TIME_IN_NS) {
-		t = ns2usecs(iter->ts);
-		usec_rem = do_div(t, USEC_PER_SEC);
-		secs = (unsigned long)t;
-		trace_seq_printf(s, " %5lu.%06lu: ", secs, usec_rem);
-	} else
-		trace_seq_printf(s, " %12llu: ", iter->ts);
+	trace_print_time(s, iter, iter->ts);
+	trace_seq_puts(s, ": ");
 
 	return !trace_seq_has_overflowed(s);
 }
 
 int trace_print_lat_context(struct trace_iterator *iter)
 {
+	struct trace_entry *entry, *next_entry;
 	struct trace_array *tr = iter->tr;
-	/* trace_find_next_entry will reset ent_size */
-	int ent_size = iter->ent_size;
 	struct trace_seq *s = &iter->seq;
+	unsigned long verbose = (tr->trace_flags & TRACE_ITER(VERBOSE));
 	u64 next_ts;
-	struct trace_entry *entry = iter->ent,
-			   *next_entry = trace_find_next_entry(iter, NULL,
-							       &next_ts);
-	unsigned long verbose = (tr->trace_flags & TRACE_ITER_VERBOSE);
 
-	/* Restore the original ent_size */
-	iter->ent_size = ent_size;
-
+	next_entry = trace_find_next_entry(iter, NULL, &next_ts);
 	if (!next_entry)
 		next_ts = iter->ts;
+
+	/* trace_find_next_entry() may change iter->ent */
+	entry = iter->ent;
 
 	if (verbose) {
 		char comm[TASK_COMM_LEN];
@@ -644,9 +705,9 @@ int trace_print_lat_context(struct trace_iterator *iter)
 		trace_find_cmdline(entry->pid, comm);
 
 		trace_seq_printf(
-			s, "%16s %5d %3d %d %08x %08lx ",
+			s, "%16s %7d %3d %d %08x %08lx ",
 			comm, entry->pid, iter->cpu, entry->flags,
-			entry->preempt_count, iter->idx);
+			entry->preempt_count & 0xf, iter->idx);
 	} else {
 		lat_print_generic(s, entry, iter->cpu);
 	}
@@ -655,6 +716,104 @@ int trace_print_lat_context(struct trace_iterator *iter)
 
 	return !trace_seq_has_overflowed(s);
 }
+
+#ifdef CONFIG_FUNCTION_TRACE_ARGS
+void print_function_args(struct trace_seq *s, unsigned long *args,
+			 unsigned long func)
+{
+	const struct btf_param *param;
+	const struct btf_type *t;
+	const struct btf_enum *enums;
+	const char *param_name;
+	char name[KSYM_NAME_LEN];
+	unsigned long arg;
+	struct btf *btf;
+	s32 tid, nr = 0;
+	int a, p, x, i;
+	u16 encode;
+
+	trace_seq_printf(s, "(");
+
+	if (!args)
+		goto out;
+	if (lookup_symbol_name(func, name))
+		goto out;
+
+	/* TODO: Pass module name here too */
+	t = btf_find_func_proto(name, &btf);
+	if (IS_ERR_OR_NULL(t))
+		goto out;
+
+	param = btf_get_func_param(t, &nr);
+	if (!param)
+		goto out_put;
+
+	for (a = 0, p = 0; p < nr; a++, p++) {
+		if (p)
+			trace_seq_puts(s, ", ");
+
+		/* This only prints what the arch allows (6 args by default) */
+		if (a == FTRACE_REGS_MAX_ARGS) {
+			trace_seq_puts(s, "...");
+			break;
+		}
+
+		arg = args[a];
+
+		param_name = btf_name_by_offset(btf, param[p].name_off);
+		if (param_name)
+			trace_seq_printf(s, "%s=", param_name);
+		t = btf_type_skip_modifiers(btf, param[p].type, &tid);
+
+		switch (t ? BTF_INFO_KIND(t->info) : BTF_KIND_UNKN) {
+		case BTF_KIND_UNKN:
+			trace_seq_putc(s, '?');
+			/* Still print unknown type values */
+			fallthrough;
+		case BTF_KIND_PTR:
+			trace_seq_printf(s, "0x%lx", arg);
+			break;
+		case BTF_KIND_INT:
+			encode = btf_int_encoding(t);
+			/* Print unsigned ints as hex */
+			if (encode & BTF_INT_SIGNED)
+				trace_seq_printf(s, "%ld", arg);
+			else
+				trace_seq_printf(s, "0x%lx", arg);
+			break;
+		case BTF_KIND_ENUM:
+			trace_seq_printf(s, "%ld", arg);
+			enums = btf_enum(t);
+			for (i = 0; i < btf_vlen(t); i++) {
+				if (arg == enums[i].val) {
+					trace_seq_printf(s, " [%s]",
+							 btf_name_by_offset(btf,
+							 enums[i].name_off));
+					break;
+				}
+			}
+			break;
+		default:
+			/* This does not handle complex arguments */
+			trace_seq_printf(s, "(%s)[0x%lx", btf_type_str(t), arg);
+			for (x = sizeof(long); x < t->size; x += sizeof(long)) {
+				trace_seq_putc(s, ':');
+				if (++a == FTRACE_REGS_MAX_ARGS) {
+					trace_seq_puts(s, "...]");
+					goto out_put;
+				}
+				trace_seq_printf(s, "0x%lx", args[a]);
+			}
+			trace_seq_putc(s, ']');
+			break;
+		}
+	}
+out_put:
+	btf_put(btf);
+out:
+	trace_seq_printf(s, ")");
+}
+#endif
 
 /**
  * ftrace_find_event - find a registered event
@@ -666,11 +825,8 @@ int trace_print_lat_context(struct trace_iterator *iter)
 struct trace_event *ftrace_find_event(int type)
 {
 	struct trace_event *event;
-	unsigned key;
 
-	key = type & (EVENT_HASHSIZE - 1);
-
-	hlist_for_each_entry(event, &event_hash[key], node) {
+	hash_for_each_possible(event_hash, event, node, type) {
 		if (event->type == type)
 			return event;
 	}
@@ -678,34 +834,24 @@ struct trace_event *ftrace_find_event(int type)
 	return NULL;
 }
 
-static LIST_HEAD(ftrace_event_list);
+static DEFINE_IDA(trace_event_ida);
 
-static int trace_search_list(struct list_head **list)
+static void free_trace_event_type(int type)
 {
-	struct trace_event *e;
-	int last = __TRACE_LAST_TYPE;
+	if (type >= __TRACE_LAST_TYPE)
+		ida_free(&trace_event_ida, type);
+}
 
-	if (list_empty(&ftrace_event_list)) {
-		*list = &ftrace_event_list;
-		return last + 1;
-	}
+static int alloc_trace_event_type(void)
+{
+	int next;
 
-	/*
-	 * We used up all possible max events,
-	 * lets see if somebody freed one.
-	 */
-	list_for_each_entry(e, &ftrace_event_list, list) {
-		if (e->type != last + 1)
-			break;
-		last++;
-	}
-
-	/* Did we used up all 65 thousand events??? */
-	if ((last + 1) > TRACE_EVENT_TYPE_MAX)
+	/* Skip static defined type numbers */
+	next = ida_alloc_range(&trace_event_ida, __TRACE_LAST_TYPE,
+			       TRACE_EVENT_TYPE_MAX, GFP_KERNEL);
+	if (next < 0)
 		return 0;
-
-	*list = &e->list;
-	return last + 1;
+	return next;
 }
 
 void trace_event_read_lock(void)
@@ -735,7 +881,6 @@ void trace_event_read_unlock(void)
  */
 int register_trace_event(struct trace_event *event)
 {
-	unsigned key;
 	int ret = 0;
 
 	down_write(&trace_event_sem);
@@ -746,31 +891,12 @@ int register_trace_event(struct trace_event *event)
 	if (WARN_ON(!event->funcs))
 		goto out;
 
-	INIT_LIST_HEAD(&event->list);
-
 	if (!event->type) {
-		struct list_head *list = NULL;
-
-		if (next_event_type > TRACE_EVENT_TYPE_MAX) {
-
-			event->type = trace_search_list(&list);
-			if (!event->type)
-				goto out;
-
-		} else {
-
-			event->type = next_event_type++;
-			list = &ftrace_event_list;
-		}
-
-		if (WARN_ON(ftrace_find_event(event->type)))
+		event->type = alloc_trace_event_type();
+		if (!event->type)
 			goto out;
-
-		list_add_tail(&event->list, list);
-
-	} else if (event->type > __TRACE_LAST_TYPE) {
-		printk(KERN_WARNING "Need to add type to trace.h\n");
-		WARN_ON(1);
+	} else if (WARN(event->type > __TRACE_LAST_TYPE,
+			"Need to add type to trace.h")) {
 		goto out;
 	} else {
 		/* Is this event already used */
@@ -787,9 +913,7 @@ int register_trace_event(struct trace_event *event)
 	if (event->funcs->binary == NULL)
 		event->funcs->binary = trace_nop_print;
 
-	key = event->type & (EVENT_HASHSIZE - 1);
-
-	hlist_add_head(&event->node, &event_hash[key]);
+	hash_add(event_hash, &event->node, event->type);
 
 	ret = event->type;
  out:
@@ -804,8 +928,8 @@ EXPORT_SYMBOL_GPL(register_trace_event);
  */
 int __unregister_trace_event(struct trace_event *event)
 {
-	hlist_del(&event->node);
-	list_del(&event->list);
+	hash_del(&event->node);
+	free_trace_event_type(event->type);
 	return 0;
 }
 
@@ -827,6 +951,224 @@ EXPORT_SYMBOL_GPL(unregister_trace_event);
  * Standard events
  */
 
+static void print_array(struct trace_iterator *iter, void *pos,
+			struct ftrace_event_field *field)
+{
+	int offset;
+	int len;
+	int i;
+
+	offset = *(int *)pos & 0xffff;
+	len = *(int *)pos >> 16;
+
+	if (field)
+		offset += field->offset + sizeof(int);
+
+	if (offset + len > iter->ent_size) {
+		trace_seq_puts(&iter->seq, "<OVERFLOW>");
+		return;
+	}
+
+	pos = (void *)iter->ent + offset;
+
+	for (i = 0; i < len; i++, pos++) {
+		if (i)
+			trace_seq_putc(&iter->seq, ',');
+		trace_seq_printf(&iter->seq, "%02x", *(unsigned char *)pos);
+	}
+}
+
+static void print_fields(struct trace_iterator *iter, struct trace_event_call *call,
+			 struct list_head *head)
+{
+	struct ftrace_event_field *field;
+	struct trace_array *tr = iter->tr;
+	unsigned long long laddr;
+	unsigned long addr;
+	int offset;
+	int len;
+	int ret;
+	int i;
+	void *pos;
+	char *str;
+
+	list_for_each_entry_reverse(field, head, link) {
+		trace_seq_printf(&iter->seq, " %s=", field->name);
+		if (field->offset + field->size > iter->ent_size) {
+			trace_seq_puts(&iter->seq, "<OVERFLOW>");
+			continue;
+		}
+		pos = (void *)iter->ent + field->offset;
+
+		switch (field->filter_type) {
+		case FILTER_COMM:
+		case FILTER_STATIC_STRING:
+			trace_seq_printf(&iter->seq, "%.*s", field->size, (char *)pos);
+			break;
+		case FILTER_RDYN_STRING:
+		case FILTER_DYN_STRING:
+			offset = *(int *)pos & 0xffff;
+			len = *(int *)pos >> 16;
+
+			if (field->filter_type == FILTER_RDYN_STRING)
+				offset += field->offset + sizeof(int);
+
+			if (offset + len > iter->ent_size) {
+				trace_seq_puts(&iter->seq, "<OVERFLOW>");
+				break;
+			}
+			str = (char *)iter->ent + offset;
+			/* Check if there's any non printable strings */
+			for (i = 0; i < len; i++) {
+				if (str[i] && !(isascii(str[i]) && isprint(str[i])))
+					break;
+			}
+			if (i < len) {
+				for (i = 0; i < len; i++) {
+					if (isascii(str[i]) && isprint(str[i]))
+						trace_seq_putc(&iter->seq, str[i]);
+					else
+						trace_seq_putc(&iter->seq, '.');
+				}
+				trace_seq_puts(&iter->seq, " (");
+				for (i = 0; i < len; i++) {
+					if (i)
+						trace_seq_putc(&iter->seq, ':');
+					trace_seq_printf(&iter->seq, "%02x", str[i]);
+				}
+				trace_seq_putc(&iter->seq, ')');
+			} else {
+				trace_seq_printf(&iter->seq, "%.*s", len, str);
+			}
+			break;
+		case FILTER_PTR_STRING:
+			if (!iter->fmt_size)
+				trace_iter_expand_format(iter);
+			addr = trace_adjust_address(tr, *(unsigned long *)pos);
+			ret = strncpy_from_kernel_nofault(iter->fmt, (void *)addr,
+							  iter->fmt_size);
+			if (ret < 0)
+				trace_seq_printf(&iter->seq, "(0x%px)", pos);
+			else
+				trace_seq_printf(&iter->seq, "(0x%px:%s)",
+						 pos, iter->fmt);
+			break;
+		case FILTER_TRACE_FN:
+			addr = trace_adjust_address(tr, *(unsigned long *)pos);
+			trace_seq_printf(&iter->seq, "%pS", (void *)addr);
+			break;
+		case FILTER_CPU:
+		case FILTER_OTHER:
+			switch (field->size) {
+			case 1:
+				if (isprint(*(char *)pos)) {
+					trace_seq_printf(&iter->seq, "'%c'",
+						 *(unsigned char *)pos);
+				}
+				trace_seq_printf(&iter->seq, "(%d)",
+						 *(unsigned char *)pos);
+				break;
+			case 2:
+				trace_seq_printf(&iter->seq, "0x%x (%d)",
+						 *(unsigned short *)pos,
+						 *(unsigned short *)pos);
+				break;
+			case 4:
+				/* dynamic array info is 4 bytes */
+				if (strstr(field->type, "__data_loc")) {
+					print_array(iter, pos, NULL);
+					break;
+				}
+
+				if (strstr(field->type, "__rel_loc")) {
+					print_array(iter, pos, field);
+					break;
+				}
+
+				addr = *(unsigned int *)pos;
+
+				/* Some fields reference offset from _stext. */
+				if (!strcmp(field->name, "caller_offs") ||
+				    !strcmp(field->name, "parent_offs")) {
+					unsigned long ip;
+
+					ip = addr + (unsigned long)_stext;
+					ip = trace_adjust_address(tr, ip);
+					trace_seq_printf(&iter->seq, "%pS ", (void *)ip);
+				}
+
+				if (sizeof(long) == 4) {
+					addr = trace_adjust_address(tr, addr);
+					trace_seq_printf(&iter->seq, "%pS (%d)",
+							 (void *)addr, (int)addr);
+				} else {
+					trace_seq_printf(&iter->seq, "0x%x (%d)",
+							 (unsigned int)addr, (int)addr);
+				}
+				break;
+			case 8:
+				laddr = *(unsigned long long *)pos;
+				if (sizeof(long) == 8) {
+					laddr = trace_adjust_address(tr, (unsigned long)laddr);
+					trace_seq_printf(&iter->seq, "%pS (%lld)",
+							 (void *)(long)laddr, laddr);
+				} else {
+					trace_seq_printf(&iter->seq, "0x%llx (%lld)", laddr, laddr);
+				}
+				break;
+			default:
+				trace_seq_puts(&iter->seq, "<INVALID-SIZE>");
+				break;
+			}
+			break;
+		default:
+			trace_seq_puts(&iter->seq, "<INVALID-TYPE>");
+		}
+	}
+	trace_seq_putc(&iter->seq, '\n');
+}
+
+enum print_line_t print_event_fields(struct trace_iterator *iter,
+				     struct trace_event *event)
+{
+	struct trace_event_call *call;
+	struct list_head *head;
+
+	lockdep_assert_held_read(&trace_event_sem);
+
+	/* ftrace defined events have separate call structures */
+	if (event->type <= __TRACE_LAST_TYPE) {
+		bool found = false;
+
+		list_for_each_entry(call, &ftrace_events, list) {
+			if (call->event.type == event->type) {
+				found = true;
+				break;
+			}
+			/* No need to search all events */
+			if (call->event.type > __TRACE_LAST_TYPE)
+				break;
+		}
+		if (!found) {
+			trace_seq_printf(&iter->seq, "UNKNOWN TYPE %d\n", event->type);
+			goto out;
+		}
+	} else {
+		call = container_of(event, struct trace_event_call, event);
+	}
+	head = trace_get_fields(call);
+
+	trace_seq_printf(&iter->seq, "%s:", trace_event_name(call));
+
+	if (head && !list_empty(head))
+		print_fields(iter, call, head);
+	else
+		trace_seq_puts(&iter->seq, "No fields found\n");
+
+ out:
+	return trace_handle_return(&iter->seq);
+}
+
 enum print_line_t trace_nop_print(struct trace_iterator *iter, int flags,
 				  struct trace_event *event)
 {
@@ -835,22 +1177,41 @@ enum print_line_t trace_nop_print(struct trace_iterator *iter, int flags,
 	return trace_handle_return(&iter->seq);
 }
 
+static void print_fn_trace(struct trace_seq *s, unsigned long ip,
+			   unsigned long parent_ip, unsigned long *args,
+			   struct trace_array *tr, int flags)
+{
+	ip = trace_adjust_address(tr, ip);
+	parent_ip = trace_adjust_address(tr, parent_ip);
+
+	seq_print_ip_sym(s, ip, flags);
+	if (args)
+		print_function_args(s, args, ip);
+
+	if ((flags & TRACE_ITER(PRINT_PARENT)) && parent_ip) {
+		trace_seq_puts(s, " <-");
+		seq_print_ip_sym(s, parent_ip, flags);
+	}
+}
+
 /* TRACE_FN */
 static enum print_line_t trace_fn_trace(struct trace_iterator *iter, int flags,
 					struct trace_event *event)
 {
 	struct ftrace_entry *field;
 	struct trace_seq *s = &iter->seq;
+	unsigned long *args;
+	int args_size;
 
 	trace_assign_type(field, iter->ent);
 
-	seq_print_ip_sym(s, field->ip, flags);
+	args_size = iter->ent_size - offsetof(struct ftrace_entry, args);
+	if (args_size >= FTRACE_REGS_MAX_ARGS * sizeof(long))
+		args = field->args;
+	else
+		args = NULL;
 
-	if ((flags & TRACE_ITER_PRINT_PARENT) && field->parent_ip) {
-		trace_seq_puts(s, " <-");
-		seq_print_ip_sym(s, field->parent_ip, flags);
-	}
-
+	print_fn_trace(s, field->ip, field->parent_ip, args, iter->tr, flags);
 	trace_seq_putc(s, '\n');
 
 	return trace_handle_return(s);
@@ -925,7 +1286,7 @@ static enum print_line_t trace_ctxwake_print(struct trace_iterator *iter,
 	S = task_index_to_char(field->prev_state);
 	trace_find_cmdline(field->next_pid, comm);
 	trace_seq_printf(&iter->seq,
-			 " %5d:%3d:%c %s [%03d] %5d:%3d:%c %s\n",
+			 " %7d:%3d:%c %s [%03d] %7d:%3d:%c %s\n",
 			 field->prev_pid,
 			 field->prev_prio,
 			 S, delim,
@@ -1077,13 +1438,17 @@ static enum print_line_t trace_stack_print(struct trace_iterator *iter,
 
 	trace_seq_puts(s, "<stack trace>\n");
 
-	for (p = field->caller; p && *p != ULONG_MAX && p < end; p++) {
+	for (p = field->caller; p && p < end && *p != ULONG_MAX; p++) {
 
 		if (trace_seq_has_overflowed(s))
 			break;
 
 		trace_seq_puts(s, " => ");
-		seq_print_ip_sym(s, *p, flags);
+		if ((*p) == FTRACE_TRAMPOLINE_MARKER) {
+			trace_seq_puts(s, "[FTRACE TRAMPOLINE]\n");
+			continue;
+		}
+		seq_print_ip_sym(s, trace_adjust_address(iter->tr, *p), flags);
 		trace_seq_putc(s, '\n');
 	}
 
@@ -1113,7 +1478,7 @@ static enum print_line_t trace_user_stack_print(struct trace_iterator *iter,
 
 	trace_seq_puts(s, "<user stack trace>\n");
 
-	if (tr->trace_flags & TRACE_ITER_SYM_USEROBJ) {
+	if (tr->trace_flags & TRACE_ITER(SYM_USEROBJ)) {
 		struct task_struct *task;
 		/*
 		 * we do the lookup on the thread group leader,
@@ -1129,17 +1494,10 @@ static enum print_line_t trace_user_stack_print(struct trace_iterator *iter,
 	for (i = 0; i < FTRACE_STACK_ENTRIES; i++) {
 		unsigned long ip = field->caller[i];
 
-		if (ip == ULONG_MAX || trace_seq_has_overflowed(s))
+		if (!ip || trace_seq_has_overflowed(s))
 			break;
 
 		trace_seq_puts(s, " => ");
-
-		if (!ip) {
-			trace_seq_puts(s, "??");
-			trace_seq_putc(s, '\n');
-			continue;
-		}
-
 		seq_print_user_ip(s, mm, ip, flags);
 		trace_seq_putc(s, '\n');
 	}
@@ -1170,12 +1528,12 @@ trace_hwlat_print(struct trace_iterator *iter, int flags,
 
 	trace_assign_type(field, entry);
 
-	trace_seq_printf(s, "#%-5u inner/outer(us): %4llu/%-5llu ts:%lld.%09ld",
+	trace_seq_printf(s, "#%-5u inner/outer(us): %4llu/%-5llu ts:%ptSp count:%d",
 			 field->seqnum,
 			 field->duration,
 			 field->outer_duration,
-			 (long long)field->timestamp.tv_sec,
-			 field->timestamp.tv_nsec);
+			 &field->timestamp,
+			 field->count);
 
 	if (field->nmi_count) {
 		/*
@@ -1193,7 +1551,6 @@ trace_hwlat_print(struct trace_iterator *iter, int flags,
 
 	return trace_handle_return(s);
 }
-
 
 static enum print_line_t
 trace_hwlat_raw(struct trace_iterator *iter, int flags,
@@ -1222,6 +1579,124 @@ static struct trace_event_functions trace_hwlat_funcs = {
 static struct trace_event trace_hwlat_event = {
 	.type		= TRACE_HWLAT,
 	.funcs		= &trace_hwlat_funcs,
+};
+
+/* TRACE_OSNOISE */
+static enum print_line_t
+trace_osnoise_print(struct trace_iterator *iter, int flags,
+		    struct trace_event *event)
+{
+	struct trace_entry *entry = iter->ent;
+	struct trace_seq *s = &iter->seq;
+	struct osnoise_entry *field;
+	u64 ratio, ratio_dec;
+	u64 net_runtime;
+
+	trace_assign_type(field, entry);
+
+	/*
+	 * compute the available % of cpu time.
+	 */
+	net_runtime = field->runtime - field->noise;
+	ratio = net_runtime * 10000000;
+	do_div(ratio, field->runtime);
+	ratio_dec = do_div(ratio, 100000);
+
+	trace_seq_printf(s, "%llu %10llu %3llu.%05llu %7llu",
+			 field->runtime,
+			 field->noise,
+			 ratio, ratio_dec,
+			 field->max_sample);
+
+	trace_seq_printf(s, " %6u", field->hw_count);
+	trace_seq_printf(s, " %6u", field->nmi_count);
+	trace_seq_printf(s, " %6u", field->irq_count);
+	trace_seq_printf(s, " %6u", field->softirq_count);
+	trace_seq_printf(s, " %6u", field->thread_count);
+
+	trace_seq_putc(s, '\n');
+
+	return trace_handle_return(s);
+}
+
+static enum print_line_t
+trace_osnoise_raw(struct trace_iterator *iter, int flags,
+		  struct trace_event *event)
+{
+	struct osnoise_entry *field;
+	struct trace_seq *s = &iter->seq;
+
+	trace_assign_type(field, iter->ent);
+
+	trace_seq_printf(s, "%lld %llu %llu %u %u %u %u %u\n",
+			 field->runtime,
+			 field->noise,
+			 field->max_sample,
+			 field->hw_count,
+			 field->nmi_count,
+			 field->irq_count,
+			 field->softirq_count,
+			 field->thread_count);
+
+	return trace_handle_return(s);
+}
+
+static struct trace_event_functions trace_osnoise_funcs = {
+	.trace		= trace_osnoise_print,
+	.raw		= trace_osnoise_raw,
+};
+
+static struct trace_event trace_osnoise_event = {
+	.type		= TRACE_OSNOISE,
+	.funcs		= &trace_osnoise_funcs,
+};
+
+/* TRACE_TIMERLAT */
+
+static char *timerlat_lat_context[] = {"irq", "thread", "user-ret"};
+static enum print_line_t
+trace_timerlat_print(struct trace_iterator *iter, int flags,
+		     struct trace_event *event)
+{
+	struct trace_entry *entry = iter->ent;
+	struct trace_seq *s = &iter->seq;
+	struct timerlat_entry *field;
+
+	trace_assign_type(field, entry);
+
+	trace_seq_printf(s, "#%-5u context %6s timer_latency %9llu ns\n",
+			 field->seqnum,
+			 timerlat_lat_context[field->context],
+			 field->timer_latency);
+
+	return trace_handle_return(s);
+}
+
+static enum print_line_t
+trace_timerlat_raw(struct trace_iterator *iter, int flags,
+		   struct trace_event *event)
+{
+	struct timerlat_entry *field;
+	struct trace_seq *s = &iter->seq;
+
+	trace_assign_type(field, iter->ent);
+
+	trace_seq_printf(s, "%u %d %llu\n",
+			 field->seqnum,
+			 field->context,
+			 field->timer_latency);
+
+	return trace_handle_return(s);
+}
+
+static struct trace_event_functions trace_timerlat_funcs = {
+	.trace		= trace_timerlat_print,
+	.raw		= trace_timerlat_raw,
+};
+
+static struct trace_event trace_timerlat_event = {
+	.type		= TRACE_TIMERLAT,
+	.funcs		= &trace_timerlat_funcs,
 };
 
 /* TRACE_BPUTS */
@@ -1318,10 +1793,13 @@ static enum print_line_t trace_print_print(struct trace_iterator *iter,
 {
 	struct print_entry *field;
 	struct trace_seq *s = &iter->seq;
+	unsigned long ip;
 
 	trace_assign_type(field, iter->ent);
 
-	seq_print_ip_sym(s, field->ip, flags);
+	ip = trace_adjust_address(iter->tr, field->ip);
+
+	seq_print_ip_sym(s, ip, flags);
 	trace_seq_printf(s, ": %s", field->buf);
 
 	return trace_handle_return(s);
@@ -1378,6 +1856,51 @@ static struct trace_event trace_raw_data_event = {
 	.funcs		= &trace_raw_data_funcs,
 };
 
+static enum print_line_t
+trace_func_repeats_raw(struct trace_iterator *iter, int flags,
+			 struct trace_event *event)
+{
+	struct func_repeats_entry *field;
+	struct trace_seq *s = &iter->seq;
+
+	trace_assign_type(field, iter->ent);
+
+	trace_seq_printf(s, "%lu %lu %u %llu\n",
+			 field->ip,
+			 field->parent_ip,
+			 field->count,
+			 FUNC_REPEATS_GET_DELTA_TS(field));
+
+	return trace_handle_return(s);
+}
+
+static enum print_line_t
+trace_func_repeats_print(struct trace_iterator *iter, int flags,
+			 struct trace_event *event)
+{
+	struct func_repeats_entry *field;
+	struct trace_seq *s = &iter->seq;
+
+	trace_assign_type(field, iter->ent);
+
+	print_fn_trace(s, field->ip, field->parent_ip, NULL, iter->tr, flags);
+	trace_seq_printf(s, " (repeats: %u, last_ts:", field->count);
+	trace_print_time(s, iter,
+			 iter->ts - FUNC_REPEATS_GET_DELTA_TS(field));
+	trace_seq_puts(s, ")\n");
+
+	return trace_handle_return(s);
+}
+
+static struct trace_event_functions trace_func_repeats_funcs = {
+	.trace		= trace_func_repeats_print,
+	.raw		= trace_func_repeats_raw,
+};
+
+static struct trace_event trace_func_repeats_event = {
+	.type	 	= TRACE_FUNC_REPEATS,
+	.funcs		= &trace_func_repeats_funcs,
+};
 
 static struct trace_event *events[] __initdata = {
 	&trace_fn_event,
@@ -1389,26 +1912,23 @@ static struct trace_event *events[] __initdata = {
 	&trace_bprint_event,
 	&trace_print_event,
 	&trace_hwlat_event,
+	&trace_osnoise_event,
+	&trace_timerlat_event,
 	&trace_raw_data_event,
+	&trace_func_repeats_event,
 	NULL
 };
 
-__init static int init_events(void)
+__init int init_events(void)
 {
 	struct trace_event *event;
 	int i, ret;
 
 	for (i = 0; events[i]; i++) {
 		event = events[i];
-
 		ret = register_trace_event(event);
-		if (!ret) {
-			printk(KERN_WARNING "event %d failed to register\n",
-			       event->type);
-			WARN_ON_ONCE(1);
-		}
+		WARN_ONCE(!ret, "event %d failed to register", event->type);
 	}
 
 	return 0;
 }
-early_initcall(init_events);

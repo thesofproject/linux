@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * DVB USB Linux driver for Alcor Micro AU6610 DVB-T USB2.0.
  *
  * Copyright (C) 2006 Antti Palosaari <crope@iki.fi>
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2 of the License, or
- *    (at your option) any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
  */
 
 #include "au6610.h"
@@ -124,7 +115,7 @@ static u32 au6610_i2c_func(struct i2c_adapter *adapter)
 	return I2C_FUNC_I2C;
 }
 
-static struct i2c_algorithm au6610_i2c_algo = {
+static const struct i2c_algorithm au6610_i2c_algo = {
 	.master_xfer   = au6610_i2c_xfer,
 	.functionality = au6610_i2c_func,
 };

@@ -16,10 +16,10 @@
 #include <linux/sunrpc/addr.h>
 #include <linux/sunrpc/xprtsock.h>
 #include <linux/sunrpc/svc.h>
-#include <linux/lockd/lockd.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
+#include "lockd.h"
 #include "netns.h"
 
 #define NLMDBG_FACILITY		NLMDBG_MONITOR
@@ -82,6 +82,7 @@ static struct rpc_clnt *nsm_create(struct net *net, const char *nodename)
 		.version		= NSM_VERSION,
 		.authflavor		= RPC_AUTH_NULL,
 		.flags			= RPC_CLNT_CREATE_NOPING,
+		.cred			= current_cred(),
 	};
 
 	return rpc_create(&args);
@@ -275,6 +276,9 @@ static struct nsm_handle *nsm_create_handle(const struct sockaddr *sap,
 {
 	struct nsm_handle *new;
 
+	if (!hostname)
+		return NULL;
+
 	new = kzalloc(sizeof(*new) + hostname_len + 1, GFP_KERNEL);
 	if (unlikely(new == NULL))
 		return NULL;
@@ -373,7 +377,7 @@ retry:
  * error occurred.
  */
 struct nsm_handle *nsm_reboot_lookup(const struct net *net,
-				const struct nlm_reboot *info)
+				const struct lockd_reboot *info)
 {
 	struct nsm_handle *cached;
 	struct lockd_net *ln = net_generic(net, lockd_net_id);
@@ -416,7 +420,7 @@ void nsm_release(struct nsm_handle *nsm)
 /*
  * XDR functions for NSM.
  *
- * See http://www.opengroup.org/ for details on the Network
+ * See https://www.opengroup.org/ for details on the Network
  * Status Monitor wire protocol.
  */
 

@@ -1,7 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  (C) 2004-2009  Dominik Brodowski <linux@dominikbrodowski.de>
- *
- *  Licensed under the terms of the GNU GPL License version 2.
  */
 
 
@@ -85,43 +84,6 @@ static void proc_cpufreq_output(void)
 }
 
 static int no_rounding;
-static void print_speed(unsigned long speed)
-{
-	unsigned long tmp;
-
-	if (no_rounding) {
-		if (speed > 1000000)
-			printf("%u.%06u GHz", ((unsigned int) speed/1000000),
-				((unsigned int) speed%1000000));
-		else if (speed > 1000)
-			printf("%u.%03u MHz", ((unsigned int) speed/1000),
-				(unsigned int) (speed%1000));
-		else
-			printf("%lu kHz", speed);
-	} else {
-		if (speed > 1000000) {
-			tmp = speed%10000;
-			if (tmp >= 5000)
-				speed += 10000;
-			printf("%u.%02u GHz", ((unsigned int) speed/1000000),
-				((unsigned int) (speed%1000000)/10000));
-		} else if (speed > 100000) {
-			tmp = speed%1000;
-			if (tmp >= 500)
-				speed += 1000;
-			printf("%u MHz", ((unsigned int) speed/1000));
-		} else if (speed > 1000) {
-			tmp = speed%100;
-			if (tmp >= 50)
-				speed += 100;
-			printf("%u.%01u MHz", ((unsigned int) speed/1000),
-				((unsigned int) (speed%1000)/100));
-		}
-	}
-
-	return;
-}
-
 static void print_duration(unsigned long duration)
 {
 	unsigned long tmp;
@@ -158,22 +120,15 @@ static void print_duration(unsigned long duration)
 		} else
 			printf("%lu ns", duration);
 	}
-	return;
 }
 
-/* --boost / -b */
-
-static int get_boost_mode(unsigned int cpu)
+static int get_boost_mode_x86(unsigned int cpu)
 {
 	int support, active, b_states = 0, ret, pstate_no, i;
 	/* ToDo: Make this more global */
 	unsigned long pstates[MAX_HW_PSTATES] = {0,};
 
-	if (cpupower_cpu_info.vendor != X86_VENDOR_AMD &&
-	    cpupower_cpu_info.vendor != X86_VENDOR_INTEL)
-		return 0;
-
-	ret = cpufreq_has_boost_support(cpu, &support, &active, &b_states);
+	ret = cpufreq_has_x86_boost_support(cpu, &support, &active, &b_states);
 	if (ret) {
 		printf(_("Error while evaluating Boost Capabilities"
 				" on CPU %d -- are you root?\n"), cpu);
@@ -191,15 +146,20 @@ static int get_boost_mode(unsigned int cpu)
 	printf(_("    Active: %s\n"), active ? _("yes") : _("no"));
 
 	if (cpupower_cpu_info.vendor == X86_VENDOR_AMD &&
-	    cpupower_cpu_info.family >= 0x10) {
-		ret = decode_pstates(cpu, cpupower_cpu_info.family, b_states,
-				     pstates, &pstate_no);
+	    cpupower_cpu_info.caps & CPUPOWER_CAP_AMD_PSTATE) {
+		return 0;
+	} else if ((cpupower_cpu_info.vendor == X86_VENDOR_AMD &&
+		    cpupower_cpu_info.family >= 0x10) ||
+		   cpupower_cpu_info.vendor == X86_VENDOR_HYGON) {
+		ret = decode_pstates(cpu, b_states, pstates, &pstate_no);
 		if (ret)
 			return ret;
 
 		printf(_("    Boost States: %d\n"), b_states);
 		printf(_("    Total States: %d\n"), pstate_no);
 		for (i = 0; i < pstate_no; i++) {
+			if (!pstates[i])
+				continue;
 			if (i < b_states)
 				printf(_("    Pstate-Pb%d: %luMHz (boost state)"
 					 "\n"), i, pstates[i]);
@@ -244,6 +204,47 @@ static int get_boost_mode(unsigned int cpu)
 	return 0;
 }
 
+static int get_boost_mode_generic(unsigned int cpu)
+{
+	bool active;
+
+	if (!cpufreq_has_generic_boost_support(&active)) {
+		printf(_("  boost state support:\n"));
+		printf(_("    Active: %s\n"), active ? _("yes") : _("no"));
+	}
+
+	return 0;
+}
+
+/* --boost / -b */
+
+static int get_boost_mode(unsigned int cpu)
+{
+	struct cpufreq_available_frequencies *freqs;
+
+	if (cpupower_cpu_info.vendor == X86_VENDOR_AMD ||
+	    cpupower_cpu_info.vendor == X86_VENDOR_HYGON ||
+	    cpupower_cpu_info.vendor == X86_VENDOR_INTEL)
+		return get_boost_mode_x86(cpu);
+	else
+		get_boost_mode_generic(cpu);
+
+	freqs = cpufreq_get_boost_frequencies(cpu);
+	if (freqs) {
+		printf(_("  boost frequency steps: "));
+		while (freqs->next) {
+			print_speed(freqs->frequency, no_rounding);
+			printf(", ");
+			freqs = freqs->next;
+		}
+		print_speed(freqs->frequency, no_rounding);
+		printf("\n");
+		cpufreq_put_available_frequencies(freqs);
+	}
+
+	return 0;
+}
+
 /* --freq / -f */
 
 static int get_freq_kernel(unsigned int cpu, unsigned int human)
@@ -255,7 +256,7 @@ static int get_freq_kernel(unsigned int cpu, unsigned int human)
 		return -EINVAL;
 	}
 	if (human) {
-		print_speed(freq);
+		print_speed(freq, no_rounding);
 	} else
 		printf("%lu", freq);
 	printf(_(" (asserted by call to kernel)\n"));
@@ -267,14 +268,19 @@ static int get_freq_kernel(unsigned int cpu, unsigned int human)
 
 static int get_freq_hardware(unsigned int cpu, unsigned int human)
 {
-	unsigned long freq = cpufreq_get_freq_hardware(cpu);
+	unsigned long freq;
+
+	if (!(cpupower_cpu_info.caps & CPUPOWER_CAP_APERF))
+		return -EINVAL;
+
+	freq = cpufreq_get_freq_hardware(cpu);
 	printf(_("  current CPU frequency: "));
 	if (!freq) {
 		printf("Unable to call hardware\n");
 		return -EINVAL;
 	}
 	if (human) {
-		print_speed(freq);
+		print_speed(freq, no_rounding);
 	} else
 		printf("%lu", freq);
 	printf(_(" (asserted by call to hardware)\n"));
@@ -294,9 +300,9 @@ static int get_hardware_limits(unsigned int cpu, unsigned int human)
 
 	if (human) {
 		printf(_("  hardware limits: "));
-		print_speed(min);
+		print_speed(min, no_rounding);
 		printf(" - ");
-		print_speed(max);
+		print_speed(max, no_rounding);
 		printf("\n");
 	} else {
 		printf("%lu %lu\n", min, max);
@@ -328,9 +334,9 @@ static int get_policy(unsigned int cpu)
 		return -EINVAL;
 	}
 	printf(_("  current policy: frequency should be within "));
-	print_speed(policy->min);
+	print_speed(policy->min, no_rounding);
 	printf(_(" and "));
-	print_speed(policy->max);
+	print_speed(policy->max, no_rounding);
 
 	printf(".\n                  ");
 	printf(_("The governor \"%s\" may decide which speed to use\n"
@@ -414,7 +420,7 @@ static int get_freq_stats(unsigned int cpu, unsigned int human)
 	struct cpufreq_stats *stats = cpufreq_get_stats(cpu, &total_time);
 	while (stats) {
 		if (human) {
-			print_speed(stats->frequency);
+			print_speed(stats->frequency, no_rounding);
 			printf(":%.2f%%",
 				(100.0 * stats->time_in_state) / total_time);
 		} else
@@ -430,11 +436,31 @@ static int get_freq_stats(unsigned int cpu, unsigned int human)
 	return 0;
 }
 
+/* --epp / -z */
+
+static int get_epp(unsigned int cpu, bool interactive)
+{
+	char *epp;
+
+	epp = cpufreq_get_energy_performance_preference(cpu);
+	if (!epp)
+		return -EINVAL;
+	if (interactive)
+		printf(_("  energy performance preference: %s\n"), epp);
+
+	cpufreq_put_energy_performance_preference(epp);
+
+	return 0;
+}
+
 /* --latency / -y */
 
 static int get_latency(unsigned int cpu, unsigned int human)
 {
 	unsigned long latency = cpufreq_get_transition_latency(cpu);
+
+	if (!get_epp(cpu, false))
+		return -EINVAL;
 
 	printf(_("  maximum transition latency: "));
 	if (!latency || latency == UINT_MAX) {
@@ -450,6 +476,17 @@ static int get_latency(unsigned int cpu, unsigned int human)
 	return 0;
 }
 
+/* --performance / -c */
+
+static int get_perf_cap(unsigned int cpu)
+{
+	if (cpupower_cpu_info.vendor == X86_VENDOR_AMD &&
+	    cpupower_cpu_info.caps & CPUPOWER_CAP_AMD_PSTATE)
+		amd_pstate_show_perf_and_freq(cpu, no_rounding);
+
+	return 0;
+}
+
 static void debug_output_one(unsigned int cpu)
 {
 	struct cpufreq_available_frequencies *freqs;
@@ -458,17 +495,18 @@ static void debug_output_one(unsigned int cpu)
 	get_related_cpus(cpu);
 	get_affected_cpus(cpu);
 	get_latency(cpu, 1);
+	get_epp(cpu, true);
 	get_hardware_limits(cpu, 1);
 
 	freqs = cpufreq_get_available_frequencies(cpu);
 	if (freqs) {
 		printf(_("  available frequency steps:  "));
 		while (freqs->next) {
-			print_speed(freqs->frequency);
+			print_speed(freqs->frequency, no_rounding);
 			printf(", ");
 			freqs = freqs->next;
 		}
-		print_speed(freqs->frequency);
+		print_speed(freqs->frequency, no_rounding);
 		printf("\n");
 		cpufreq_put_available_frequencies(freqs);
 	}
@@ -478,6 +516,7 @@ static void debug_output_one(unsigned int cpu)
 	if (get_freq_hardware(cpu, 1) < 0)
 		get_freq_kernel(cpu, 1);
 	get_boost_mode(cpu);
+	get_perf_cap(cpu);
 }
 
 static struct option info_opts[] = {
@@ -496,20 +535,20 @@ static struct option info_opts[] = {
 	{"proc",	 no_argument,		 NULL,	 'o'},
 	{"human",	 no_argument,		 NULL,	 'm'},
 	{"no-rounding", no_argument,	 NULL,	 'n'},
+	{"performance", no_argument,	 NULL,	 'c'},
+	{"epp",		 no_argument,		 NULL,	 'z'},
 	{ },
 };
 
 int cmd_freq_info(int argc, char **argv)
 {
-	extern char *optarg;
-	extern int optind, opterr, optopt;
 	int ret = 0, cont = 1;
 	unsigned int cpu = 0;
 	unsigned int human = 0;
 	int output_param = 0;
 
 	do {
-		ret = getopt_long(argc, argv, "oefwldpgrasmybn", info_opts,
+		ret = getopt_long(argc, argv, "oefwldpgrasmybncz", info_opts,
 				  NULL);
 		switch (ret) {
 		case '?':
@@ -532,6 +571,8 @@ int cmd_freq_info(int argc, char **argv)
 		case 'e':
 		case 's':
 		case 'y':
+		case 'c':
+		case 'z':
 			if (output_param) {
 				output_param = -1;
 				cont = 0;
@@ -570,9 +611,9 @@ int cmd_freq_info(int argc, char **argv)
 
 	ret = 0;
 
-	/* Default is: show output of CPU 0 only */
+	/* Default is: show output of base_cpu only */
 	if (bitmask_isallclear(cpus_chosen))
-		bitmask_setbit(cpus_chosen, 0);
+		bitmask_setbit(cpus_chosen, base_cpu);
 
 	switch (output_param) {
 	case -1:
@@ -637,6 +678,12 @@ int cmd_freq_info(int argc, char **argv)
 			break;
 		case 'y':
 			ret = get_latency(cpu, human);
+			break;
+		case 'c':
+			ret = get_perf_cap(cpu);
+			break;
+		case 'z':
+			ret = get_epp(cpu, true);
 			break;
 		}
 		if (ret)

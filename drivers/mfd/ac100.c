@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MFD core driver for X-Powers' AC100 Audio Codec IC
  *
@@ -12,10 +13,6 @@
  * Copyright (2016) Chen-Yu Tsai
  *
  * Author: Chen-Yu Tsai <wens@csie.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/interrupt.h>
@@ -75,7 +72,7 @@ static const struct regmap_config ac100_regmap_config = {
 	.wr_table	= &ac100_writeable_table,
 	.volatile_table	= &ac100_volatile_table,
 	.max_register	= AC100_RTC_GP(15),
-	.cache_type	= REGCACHE_RBTREE,
+	.cache_type	= REGCACHE_MAPLE,
 };
 
 static struct mfd_cell ac100_cells[] = {

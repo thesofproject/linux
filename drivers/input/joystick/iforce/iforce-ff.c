@@ -1,28 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (c) 2000-2002 Vojtech Pavlik <vojtech@ucw.cz>
  *  Copyright (c) 2001-2002, 2007 Johann Deneux <johann.deneux@gmail.com>
  *
  *  USB/RS232 I-Force joysticks and wheels.
- */
-
-/*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
- * Should you need to contact me, the author, you can do so either by
- * e-mail - mail your message to <vojtech@ucw.cz>, or by paper mail:
- * Vojtech Pavlik, Simunkova 1594, Prague 8, 182 00 Czech Republic
  */
 
 #include "iforce.h"
@@ -40,14 +21,13 @@ static int make_magnitude_modifier(struct iforce* iforce,
 	unsigned char data[3];
 
 	if (!no_alloc) {
-		mutex_lock(&iforce->mem_mutex);
-		if (allocate_resource(&(iforce->device_memory), mod_chunk, 2,
-			iforce->device_memory.start, iforce->device_memory.end, 2L,
-			NULL, NULL)) {
-			mutex_unlock(&iforce->mem_mutex);
+		guard(mutex)(&iforce->mem_mutex);
+
+		if (allocate_resource(&iforce->device_memory, mod_chunk, 2,
+				      iforce->device_memory.start,
+				      iforce->device_memory.end,
+				      2L, NULL, NULL))
 			return -ENOSPC;
-		}
-		mutex_unlock(&iforce->mem_mutex);
 	}
 
 	data[0] = LO(mod_chunk->start);
@@ -56,7 +36,7 @@ static int make_magnitude_modifier(struct iforce* iforce,
 
 	iforce_send_packet(iforce, FF_CMD_MAGNITUDE, data);
 
-	iforce_dump_packet("magnitude: ", FF_CMD_MAGNITUDE, data);
+	iforce_dump_packet(iforce, "magnitude", FF_CMD_MAGNITUDE, data);
 	return 0;
 }
 
@@ -73,14 +53,13 @@ static int make_period_modifier(struct iforce* iforce,
 	period = TIME_SCALE(period);
 
 	if (!no_alloc) {
-		mutex_lock(&iforce->mem_mutex);
-		if (allocate_resource(&(iforce->device_memory), mod_chunk, 0x0c,
-			iforce->device_memory.start, iforce->device_memory.end, 2L,
-			NULL, NULL)) {
-			mutex_unlock(&iforce->mem_mutex);
+		guard(mutex)(&iforce->mem_mutex);
+
+		if (allocate_resource(&iforce->device_memory, mod_chunk, 0x0c,
+				      iforce->device_memory.start,
+				      iforce->device_memory.end,
+				      2L, NULL, NULL))
 			return -ENOSPC;
-		}
-		mutex_unlock(&iforce->mem_mutex);
 	}
 
 	data[0] = LO(mod_chunk->start);
@@ -113,14 +92,13 @@ static int make_envelope_modifier(struct iforce* iforce,
 	fade_duration = TIME_SCALE(fade_duration);
 
 	if (!no_alloc) {
-		mutex_lock(&iforce->mem_mutex);
+		guard(mutex)(&iforce->mem_mutex);
+
 		if (allocate_resource(&(iforce->device_memory), mod_chunk, 0x0e,
-			iforce->device_memory.start, iforce->device_memory.end, 2L,
-			NULL, NULL)) {
-			mutex_unlock(&iforce->mem_mutex);
+				      iforce->device_memory.start,
+				      iforce->device_memory.end,
+				      2L, NULL, NULL))
 			return -ENOSPC;
-		}
-		mutex_unlock(&iforce->mem_mutex);
 	}
 
 	data[0] = LO(mod_chunk->start);
@@ -150,14 +128,13 @@ static int make_condition_modifier(struct iforce* iforce,
 	unsigned char data[10];
 
 	if (!no_alloc) {
-		mutex_lock(&iforce->mem_mutex);
+		guard(mutex)(&iforce->mem_mutex);
+
 		if (allocate_resource(&(iforce->device_memory), mod_chunk, 8,
-			iforce->device_memory.start, iforce->device_memory.end, 2L,
-			NULL, NULL)) {
-			mutex_unlock(&iforce->mem_mutex);
+				      iforce->device_memory.start,
+				      iforce->device_memory.end,
+				      2L, NULL, NULL))
 			return -ENOSPC;
-		}
-		mutex_unlock(&iforce->mem_mutex);
 	}
 
 	data[0] = LO(mod_chunk->start);
@@ -178,7 +155,7 @@ static int make_condition_modifier(struct iforce* iforce,
 	data[9] = (100 * lsat) >> 16;
 
 	iforce_send_packet(iforce, FF_CMD_CONDITION, data);
-	iforce_dump_packet("condition", FF_CMD_CONDITION, data);
+	iforce_dump_packet(iforce, "condition", FF_CMD_CONDITION, data);
 
 	return 0;
 }
@@ -388,12 +365,12 @@ int iforce_upload_periodic(struct iforce *iforce, struct ff_effect *effect, stru
 	}
 
 	switch (effect->u.periodic.waveform) {
-		case FF_SQUARE:		wave_code = 0x20; break;
-		case FF_TRIANGLE:	wave_code = 0x21; break;
-		case FF_SINE:		wave_code = 0x22; break;
-		case FF_SAW_UP:		wave_code = 0x23; break;
-		case FF_SAW_DOWN:	wave_code = 0x24; break;
-		default:		wave_code = 0x20; break;
+	case FF_SQUARE:		wave_code = 0x20; break;
+	case FF_TRIANGLE:	wave_code = 0x21; break;
+	case FF_SINE:		wave_code = 0x22; break;
+	case FF_SAW_UP:		wave_code = 0x23; break;
+	case FF_SAW_DOWN:	wave_code = 0x24; break;
+	default:		wave_code = 0x20; break;
 	}
 
 	if (!old || need_core(old, effect)) {
@@ -492,9 +469,9 @@ int iforce_upload_condition(struct iforce *iforce, struct ff_effect *effect, str
 	int core_err = 0;
 
 	switch (effect->type) {
-		case FF_SPRING:	type = 0x40; break;
-		case FF_DAMPER:	type = 0x41; break;
-		default: return -1;
+	case FF_SPRING:	type = 0x40; break;
+	case FF_DAMPER:	type = 0x41; break;
+	default: return -1;
 	}
 
 	if (!old || need_condition_modifier(iforce, old, effect)) {

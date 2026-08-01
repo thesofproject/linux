@@ -1,18 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for the NXP SAA7164 PCIe bridge
  *
  *  Copyright (c) 2010-2015 Steven Toth <stoth@kernellabs.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *
- *  GNU General Public License for more details.
  */
 
 #include "saa7164.h"
@@ -87,9 +77,7 @@ static int saa7164_vbi_buffers_alloc(struct saa7164_port *port)
 	/* TODO: NTSC SPECIFIC */
 	/* Init and establish defaults */
 	params->samplesperline = 1440;
-	params->numberoflines = 12;
 	params->numberoflines = 18;
-	params->pitch = 1600;
 	params->pitch = 1440;
 	params->numpagetables = 2 +
 		((params->numberoflines * params->pitch) / PAGE_SIZE);
@@ -156,28 +144,28 @@ static int saa7164_vbi_initialize(struct saa7164_port *port)
 /* -- V4L2 --------------------------------------------------------- */
 static int vidioc_s_std(struct file *file, void *priv, v4l2_std_id id)
 {
-	struct saa7164_vbi_fh *fh = file->private_data;
+	struct saa7164_vbi_fh *fh = to_saa7164_vbi_fh(file);
 
 	return saa7164_s_std(fh->port->enc_port, id);
 }
 
 static int vidioc_g_std(struct file *file, void *priv, v4l2_std_id *id)
 {
-	struct saa7164_encoder_fh *fh = file->private_data;
+	struct saa7164_vbi_fh *fh = to_saa7164_vbi_fh(file);
 
 	return saa7164_g_std(fh->port->enc_port, id);
 }
 
 static int vidioc_g_input(struct file *file, void *priv, unsigned int *i)
 {
-	struct saa7164_vbi_fh *fh = file->private_data;
+	struct saa7164_vbi_fh *fh = to_saa7164_vbi_fh(file);
 
 	return saa7164_g_input(fh->port->enc_port, i);
 }
 
 static int vidioc_s_input(struct file *file, void *priv, unsigned int i)
 {
-	struct saa7164_vbi_fh *fh = file->private_data;
+	struct saa7164_vbi_fh *fh = to_saa7164_vbi_fh(file);
 
 	return saa7164_s_input(fh->port->enc_port, i);
 }
@@ -185,7 +173,7 @@ static int vidioc_s_input(struct file *file, void *priv, unsigned int i)
 static int vidioc_g_frequency(struct file *file, void *priv,
 	struct v4l2_frequency *f)
 {
-	struct saa7164_vbi_fh *fh = file->private_data;
+	struct saa7164_vbi_fh *fh = to_saa7164_vbi_fh(file);
 
 	return saa7164_g_frequency(fh->port->enc_port, f);
 }
@@ -193,7 +181,7 @@ static int vidioc_g_frequency(struct file *file, void *priv,
 static int vidioc_s_frequency(struct file *file, void *priv,
 	const struct v4l2_frequency *f)
 {
-	struct saa7164_vbi_fh *fh = file->private_data;
+	struct saa7164_vbi_fh *fh = to_saa7164_vbi_fh(file);
 	int ret = saa7164_s_frequency(fh->port->enc_port, f);
 
 	if (ret == 0)
@@ -204,24 +192,16 @@ static int vidioc_s_frequency(struct file *file, void *priv,
 static int vidioc_querycap(struct file *file, void  *priv,
 	struct v4l2_capability *cap)
 {
-	struct saa7164_vbi_fh *fh = file->private_data;
+	struct saa7164_vbi_fh *fh = to_saa7164_vbi_fh(file);
 	struct saa7164_port *port = fh->port;
 	struct saa7164_dev *dev = port->dev;
 
-	strcpy(cap->driver, dev->name);
-	strlcpy(cap->card, saa7164_boards[dev->board].name,
+	strscpy(cap->driver, dev->name, sizeof(cap->driver));
+	strscpy(cap->card, saa7164_boards[dev->board].name,
 		sizeof(cap->card));
-	sprintf(cap->bus_info, "PCI:%s", pci_name(dev->pci));
-
-	cap->device_caps =
-		V4L2_CAP_VBI_CAPTURE |
-		V4L2_CAP_READWRITE |
-		V4L2_CAP_TUNER;
-
-	cap->capabilities = cap->device_caps |
-		V4L2_CAP_VIDEO_CAPTURE |
-		V4L2_CAP_DEVICE_CAPS;
-
+	cap->capabilities = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE |
+			    V4L2_CAP_TUNER | V4L2_CAP_VBI_CAPTURE |
+			    V4L2_CAP_DEVICE_CAPS;
 	return 0;
 }
 
@@ -442,21 +422,20 @@ static int fops_open(struct file *file)
 	dprintk(DBGLVL_VBI, "%s()\n", __func__);
 
 	/* allocate + initialize per filehandle data */
-	fh = kzalloc(sizeof(*fh), GFP_KERNEL);
+	fh = kzalloc_obj(*fh);
 	if (NULL == fh)
 		return -ENOMEM;
 
 	fh->port = port;
 	v4l2_fh_init(&fh->fh, video_devdata(file));
-	v4l2_fh_add(&fh->fh);
-	file->private_data = fh;
+	v4l2_fh_add(&fh->fh, file);
 
 	return 0;
 }
 
 static int fops_release(struct file *file)
 {
-	struct saa7164_vbi_fh *fh = file->private_data;
+	struct saa7164_vbi_fh *fh = to_saa7164_vbi_fh(file);
 	struct saa7164_port *port = fh->port;
 	struct saa7164_dev *dev = port->dev;
 
@@ -470,7 +449,7 @@ static int fops_release(struct file *file)
 		}
 	}
 
-	v4l2_fh_del(&fh->fh);
+	v4l2_fh_del(&fh->fh, file);
 	v4l2_fh_exit(&fh->fh);
 	kfree(fh);
 
@@ -509,7 +488,7 @@ saa7164_user_buffer *saa7164_vbi_next_buf(struct saa7164_port *port)
 static ssize_t fops_read(struct file *file, char __user *buffer,
 	size_t count, loff_t *pos)
 {
-	struct saa7164_vbi_fh *fh = file->private_data;
+	struct saa7164_vbi_fh *fh = to_saa7164_vbi_fh(file);
 	struct saa7164_port *port = fh->port;
 	struct saa7164_user_buffer *ubuf = NULL;
 	struct saa7164_dev *dev = port->dev;
@@ -616,7 +595,7 @@ err:
 
 static __poll_t fops_poll(struct file *file, poll_table *wait)
 {
-	struct saa7164_vbi_fh *fh = (struct saa7164_vbi_fh *)file->private_data;
+	struct saa7164_vbi_fh *fh = to_saa7164_vbi_fh(file);
 	struct saa7164_port *port = fh->port;
 	__poll_t mask = 0;
 
@@ -629,12 +608,12 @@ static __poll_t fops_poll(struct file *file, poll_table *wait)
 		port->last_poll_msecs_diff);
 
 	if (!video_is_registered(port->v4l_device))
-		return -EIO;
+		return EPOLLERR;
 
 	if (atomic_cmpxchg(&fh->v4l_reading, 0, 1) == 0) {
 		if (atomic_inc_return(&port->v4l_reader_count) == 1) {
 			if (saa7164_vbi_initialize(port) < 0)
-				return -EINVAL;
+				return EPOLLERR;
 			saa7164_vbi_start_streaming(port);
 			msleep(200);
 		}
@@ -644,7 +623,7 @@ static __poll_t fops_poll(struct file *file, poll_table *wait)
 	if ((file->f_flags & O_NONBLOCK) == 0) {
 		if (wait_event_interruptible(port->wait_read,
 			saa7164_vbi_next_buf(port))) {
-				return -ERESTARTSYS;
+				return EPOLLERR;
 		}
 	}
 
@@ -685,6 +664,8 @@ static struct video_device saa7164_vbi_template = {
 	.ioctl_ops     = &vbi_ioctl_ops,
 	.minor         = -1,
 	.tvnorms       = SAA7164_NORMS,
+	.device_caps   = V4L2_CAP_VBI_CAPTURE | V4L2_CAP_READWRITE |
+			 V4L2_CAP_TUNER,
 };
 
 static struct video_device *saa7164_vbi_alloc(
@@ -718,8 +699,7 @@ int saa7164_vbi_register(struct saa7164_port *port)
 
 	dprintk(DBGLVL_VBI, "%s()\n", __func__);
 
-	if (port->type != SAA7164_MPEG_VBI)
-		BUG();
+	BUG_ON(port->type != SAA7164_MPEG_VBI);
 
 	/* Sanity check that the PCI configuration space is active */
 	if (port->hwcfg.BARLocation == 0) {
@@ -771,8 +751,7 @@ void saa7164_vbi_unregister(struct saa7164_port *port)
 
 	dprintk(DBGLVL_VBI, "%s(port=%d)\n", __func__, port->nr);
 
-	if (port->type != SAA7164_MPEG_VBI)
-		BUG();
+	BUG_ON(port->type != SAA7164_MPEG_VBI);
 
 	if (port->v4l_device) {
 		if (port->v4l_device->minor != -1)

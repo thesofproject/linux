@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * arch/arm/mm/proc-v7-3level.S
  *
@@ -5,19 +6,6 @@
  * Copyright (C) 2011 ARM Ltd.
  * Author: Catalin Marinas <catalin.marinas@arm.com>
  *   based on arch/arm/mm/proc-v7-2level.S
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 #include <asm/assembler.h>
 
@@ -54,7 +42,7 @@
  * Set the translation table base pointer to be pgd_phys (physical address of
  * the new TTB).
  */
-ENTRY(cpu_v7_switch_mm)
+SYM_TYPED_FUNC_START(cpu_v7_switch_mm)
 #ifdef CONFIG_MMU
 	mmid	r2, r2
 	asid	r2, r2
@@ -63,7 +51,7 @@ ENTRY(cpu_v7_switch_mm)
 	isb
 #endif
 	ret	lr
-ENDPROC(cpu_v7_switch_mm)
+SYM_FUNC_END(cpu_v7_switch_mm)
 
 #ifdef __ARMEB__
 #define rl r3
@@ -80,7 +68,7 @@ ENDPROC(cpu_v7_switch_mm)
  * - ptep - pointer to level 3 translation table entry
  * - pte - PTE value to store (64-bit in r2 and r3)
  */
-ENTRY(cpu_v7_set_pte_ext)
+SYM_TYPED_FUNC_START(cpu_v7_set_pte_ext)
 #ifdef CONFIG_MMU
 	tst	rl, #L_PTE_VALID
 	beq	1f
@@ -99,7 +87,7 @@ ENTRY(cpu_v7_set_pte_ext)
 	ALT_UP (mcr	p15, 0, r0, c7, c10, 1)		@ flush_pte
 #endif
 	ret	lr
-ENDPROC(cpu_v7_set_pte_ext)
+SYM_FUNC_END(cpu_v7_set_pte_ext)
 
 	/*
 	 * Memory region attributes for LPAE (defined in pgtable-3level.h):

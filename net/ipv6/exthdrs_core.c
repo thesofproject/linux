@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * IPv6 library code, needed by static components when full IPv6 support is
  * not configured or static.
@@ -72,6 +73,7 @@ int ipv6_skip_exthdr(const struct sk_buff *skb, int start, u8 *nexthdrp,
 		     __be16 *frag_offp)
 {
 	u8 nexthdr = *nexthdrp;
+	int exthdr_cnt = 0;
 
 	*frag_offp = 0;
 
@@ -80,6 +82,8 @@ int ipv6_skip_exthdr(const struct sk_buff *skb, int start, u8 *nexthdrp,
 		int hdrlen;
 
 		if (nexthdr == NEXTHDR_NONE)
+			return -1;
+		if (unlikely(exthdr_cnt++ >= IP6_MAX_EXT_HDRS_CNT))
 			return -1;
 		hp = skb_header_pointer(skb, start, sizeof(_hdr), &_hdr);
 		if (!hp)
@@ -142,6 +146,8 @@ int ipv6_find_tlv(const struct sk_buff *skb, int offset, int type)
 			optlen = 1;
 			break;
 		default:
+			if (len < 2)
+				goto bad;
 			optlen = nh[offset + 1] + 2;
 			if (optlen > len)
 				goto bad;
@@ -161,7 +167,7 @@ EXPORT_SYMBOL_GPL(ipv6_find_tlv);
  * if target < 0. "last header" is transport protocol header, ESP, or
  * "No next header".
  *
- * Note that *offset is used as input/output parameter. an if it is not zero,
+ * Note that *offset is used as input/output parameter, and if it is not zero,
  * then it must be a valid offset to an inner IPv6 header. This can be used
  * to explore inner IPv6 header, eg. ICMPv6 error messages.
  *
@@ -187,6 +193,7 @@ int ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
 {
 	unsigned int start = skb_network_offset(skb) + sizeof(struct ipv6hdr);
 	u8 nexthdr = ipv6_hdr(skb)->nexthdr;
+	int exthdr_cnt = 0;
 	bool found;
 
 	if (fragoff)
@@ -196,10 +203,8 @@ int ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
 		struct ipv6hdr _ip6, *ip6;
 
 		ip6 = skb_header_pointer(skb, *offset, sizeof(_ip6), &_ip6);
-		if (!ip6 || (ip6->version != 6)) {
-			printk(KERN_ERR "IPv6 header not found\n");
+		if (!ip6 || (ip6->version != 6))
 			return -EBADMSG;
-		}
 		start = *offset + sizeof(struct ipv6hdr);
 		nexthdr = ip6->nexthdr;
 	}
@@ -214,6 +219,9 @@ int ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
 				break;
 			return -ENOENT;
 		}
+
+		if (unlikely(exthdr_cnt++ >= IP6_MAX_EXT_HDRS_CNT))
+			return -EBADMSG;
 
 		hp = skb_header_pointer(skb, start, sizeof(_hdr), &_hdr);
 		if (!hp)
@@ -265,7 +273,7 @@ int ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
 		} else if (nexthdr == NEXTHDR_AUTH) {
 			if (flags && (*flags & IP6_FH_F_AUTH) && (target < 0))
 				break;
-			hdrlen = (hp->hdrlen + 2) << 2;
+			hdrlen = ipv6_authlen(hp);
 		} else
 			hdrlen = ipv6_optlen(hp);
 

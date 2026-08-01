@@ -77,13 +77,18 @@ extern int htc_use_dev_fw;
 #define HIF_USB_MAX_TXPIPES 4
 
 struct tx_buf {
-	u8 *buf;
 	u16 len;
 	u16 offset;
 	struct urb *urb;
 	struct sk_buff_head skb_queue;
 	struct hif_device_usb *hif_dev;
 	struct list_head list;
+	u8 buf[];
+};
+
+struct rx_buf {
+	struct sk_buff *skb;
+	struct hif_device_usb *hif_dev;
 };
 
 #define HIF_USB_TX_STOP  BIT(0)
@@ -121,7 +126,7 @@ struct hif_device_usb {
 	struct usb_anchor reg_in_submitted;
 	struct usb_anchor mgmt_submitted;
 	struct sk_buff *remain_skb;
-	char fw_name[32];
+	char fw_name[64];
 	int fw_minor_index;
 	int rx_remain_len;
 	int rx_pkt_len;
@@ -131,7 +136,6 @@ struct hif_device_usb {
 	u8 flags; /* HIF_USB_* */
 };
 
-int ath9k_hif_usb_init(void);
-void ath9k_hif_usb_exit(void);
+void ath9k_hif_usb_dealloc_urbs(struct hif_device_usb *hif_dev);
 
 #endif /* HTC_USB_H */

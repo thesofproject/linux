@@ -1,15 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2016 Google, Inc.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #define _GNU_SOURCE
@@ -28,7 +19,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#include "../kselftest.h"
+#include "kselftest.h"
 
 void child(int cpu)
 {
@@ -56,7 +47,7 @@ void child(int cpu)
 	_exit(0);
 }
 
-bool run_test(int cpu)
+int run_test(int cpu)
 {
 	int status;
 	pid_t pid = fork();
@@ -64,7 +55,7 @@ bool run_test(int cpu)
 
 	if (pid < 0) {
 		ksft_print_msg("fork() failed: %s\n", strerror(errno));
-		return false;
+		return KSFT_FAIL;
 	}
 	if (pid == 0)
 		child(cpu);
@@ -72,81 +63,105 @@ bool run_test(int cpu)
 	wpid = waitpid(pid, &status, __WALL);
 	if (wpid != pid) {
 		ksft_print_msg("waitpid() failed: %s\n", strerror(errno));
-		return false;
+		return KSFT_FAIL;
 	}
 	if (!WIFSTOPPED(status)) {
 		ksft_print_msg("child did not stop: %s\n", strerror(errno));
-		return false;
+		return KSFT_FAIL;
 	}
 	if (WSTOPSIG(status) != SIGSTOP) {
 		ksft_print_msg("child did not stop with SIGSTOP: %s\n",
 			strerror(errno));
-		return false;
+		return KSFT_FAIL;
 	}
 
 	if (ptrace(PTRACE_SINGLESTEP, pid, NULL, NULL) < 0) {
 		if (errno == EIO) {
-			ksft_exit_skip(
+			ksft_print_msg(
 				"ptrace(PTRACE_SINGLESTEP) not supported on this architecture: %s\n",
 				strerror(errno));
+			return KSFT_SKIP;
 		}
 		ksft_print_msg("ptrace(PTRACE_SINGLESTEP) failed: %s\n",
 			strerror(errno));
-		return false;
-	}
-
-	wpid = waitpid(pid, &status, __WALL);
-	if (wpid != pid) {
-		ksft_print_msg("waitpid() failed: $s\n", strerror(errno));
-		return false;
-	}
-	if (WIFEXITED(status)) {
-		ksft_print_msg("child did not single-step: %s\n",
-			strerror(errno));
-		return false;
-	}
-	if (!WIFSTOPPED(status)) {
-		ksft_print_msg("child did not stop: %s\n", strerror(errno));
-		return false;
-	}
-	if (WSTOPSIG(status) != SIGTRAP) {
-		ksft_print_msg("child did not stop with SIGTRAP: %s\n",
-			strerror(errno));
-		return false;
-	}
-
-	if (ptrace(PTRACE_CONT, pid, NULL, NULL) < 0) {
-		ksft_print_msg("ptrace(PTRACE_CONT) failed: %s\n",
-			strerror(errno));
-		return false;
+		return KSFT_FAIL;
 	}
 
 	wpid = waitpid(pid, &status, __WALL);
 	if (wpid != pid) {
 		ksft_print_msg("waitpid() failed: %s\n", strerror(errno));
-		return false;
+		return KSFT_FAIL;
+	}
+	if (WIFEXITED(status)) {
+		ksft_print_msg("child did not single-step: %s\n",
+			strerror(errno));
+		return KSFT_FAIL;
+	}
+	if (!WIFSTOPPED(status)) {
+		ksft_print_msg("child did not stop: %s\n", strerror(errno));
+		return KSFT_FAIL;
+	}
+	if (WSTOPSIG(status) != SIGTRAP) {
+		ksft_print_msg("child did not stop with SIGTRAP: %s\n",
+			strerror(errno));
+		return KSFT_FAIL;
+	}
+
+	if (ptrace(PTRACE_CONT, pid, NULL, NULL) < 0) {
+		ksft_print_msg("ptrace(PTRACE_CONT) failed: %s\n",
+			strerror(errno));
+		return KSFT_FAIL;
+	}
+
+	wpid = waitpid(pid, &status, __WALL);
+	if (wpid != pid) {
+		ksft_print_msg("waitpid() failed: %s\n", strerror(errno));
+		return KSFT_FAIL;
 	}
 	if (!WIFEXITED(status)) {
 		ksft_print_msg("child did not exit after PTRACE_CONT: %s\n",
 			strerror(errno));
-		return false;
+		return KSFT_FAIL;
 	}
 
-	return true;
+	return KSFT_PASS;
+}
+
+/*
+ * Reads the suspend success count from sysfs.
+ * Returns the count on success or exits on failure.
+ */
+static int get_suspend_success_count_or_fail(void)
+{
+	FILE *fp;
+	int val;
+
+	fp = fopen("/sys/power/suspend_stats/success", "r");
+	if (!fp)
+		ksft_exit_fail_msg(
+			"Failed to open suspend_stats/success: %s\n",
+			strerror(errno));
+
+	if (fscanf(fp, "%d", &val) != 1) {
+		fclose(fp);
+		ksft_exit_fail_msg(
+			"Failed to read suspend success count\n");
+	}
+
+	fclose(fp);
+	return val;
 }
 
 void suspend(void)
 {
-	int power_state_fd;
-	struct sigevent event = {};
 	int timerfd;
 	int err;
+	int count_before;
+	int count_after;
 	struct itimerspec spec = {};
 
-	power_state_fd = open("/sys/power/state", O_RDWR);
-	if (power_state_fd < 0)
-		ksft_exit_fail_msg(
-			"open(\"/sys/power/state\") failed (is this test running as root?)\n");
+	if (getuid() != 0)
+		ksft_exit_skip("Please run the test as root - Exiting.\n");
 
 	timerfd = timerfd_create(CLOCK_BOOTTIME_ALARM, 0);
 	if (timerfd < 0)
@@ -157,11 +172,15 @@ void suspend(void)
 	if (err < 0)
 		ksft_exit_fail_msg("timerfd_settime() failed\n");
 
-	if (write(power_state_fd, "mem", strlen("mem")) != strlen("mem"))
+	count_before = get_suspend_success_count_or_fail();
+
+	system("(echo mem > /sys/power/state) 2> /dev/null");
+
+	count_after = get_suspend_success_count_or_fail();
+	if (count_after <= count_before)
 		ksft_exit_fail_msg("Failed to enter Suspend state\n");
 
 	close(timerfd);
-	close(power_state_fd);
 }
 
 int main(int argc, char **argv)
@@ -169,6 +188,7 @@ int main(int argc, char **argv)
 	int opt;
 	bool do_suspend = true;
 	bool succeeded = true;
+	unsigned int tests = 0;
 	cpu_set_t available_cpus;
 	int err;
 	int cpu;
@@ -187,25 +207,38 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (do_suspend)
-		suspend();
-
 	err = sched_getaffinity(0, sizeof(available_cpus), &available_cpus);
 	if (err < 0)
 		ksft_exit_fail_msg("sched_getaffinity() failed\n");
 
 	for (cpu = 0; cpu < CPU_SETSIZE; cpu++) {
-		bool test_success;
+		if (!CPU_ISSET(cpu, &available_cpus))
+			continue;
+		tests++;
+	}
+
+	if (do_suspend)
+		suspend();
+
+	ksft_set_plan(tests);
+	for (cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+		int test_success;
 
 		if (!CPU_ISSET(cpu, &available_cpus))
 			continue;
 
 		test_success = run_test(cpu);
-		if (test_success) {
+		switch (test_success) {
+		case KSFT_PASS:
 			ksft_test_result_pass("CPU %d\n", cpu);
-		} else {
+			break;
+		case KSFT_SKIP:
+			ksft_test_result_skip("CPU %d\n", cpu);
+			break;
+		case KSFT_FAIL:
 			ksft_test_result_fail("CPU %d\n", cpu);
 			succeeded = false;
+			break;
 		}
 	}
 

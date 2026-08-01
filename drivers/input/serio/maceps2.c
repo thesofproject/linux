@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * SGI O2 MACE PS2 controller driver for linux
  *
  * Copyright (C) 2002 Vivien Chappelier
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation
  */
 #include <linux/module.h>
 #include <linux/init.h>
@@ -120,7 +117,7 @@ static struct serio *maceps2_allocate_port(int idx)
 {
 	struct serio *serio;
 
-	serio = kzalloc(sizeof(struct serio), GFP_KERNEL);
+	serio = kzalloc_obj(*serio);
 	if (serio) {
 		serio->id.type		= SERIO_8042;
 		serio->write		= maceps2_write;
@@ -151,12 +148,10 @@ static int maceps2_probe(struct platform_device *dev)
 	return 0;
 }
 
-static int maceps2_remove(struct platform_device *dev)
+static void maceps2_remove(struct platform_device *dev)
 {
 	serio_unregister_port(maceps2_port[0]);
 	serio_unregister_port(maceps2_port[1]);
-
-	return 0;
 }
 
 static struct platform_driver maceps2_driver = {

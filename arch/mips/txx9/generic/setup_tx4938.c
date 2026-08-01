@@ -17,13 +17,13 @@
 #include <linux/ptrace.h>
 #include <linux/mtd/physmap.h>
 #include <linux/platform_device.h>
+#include <linux/platform_data/txx9/ndfmc.h>
 #include <asm/reboot.h>
 #include <asm/traps.h>
 #include <asm/txx9irq.h>
 #include <asm/txx9tmr.h>
 #include <asm/txx9pio.h>
 #include <asm/txx9/generic.h>
-#include <asm/txx9/ndfmc.h>
 #include <asm/txx9/dmac.h>
 #include <asm/txx9/tx4938.h>
 
@@ -82,7 +82,7 @@ static int tx4938_be_handler(struct pt_regs *regs, int is_fixup)
 }
 static void __init tx4938_be_init(void)
 {
-	board_be_handler = tx4938_be_handler;
+	mips_set_be_handler(tx4938_be_handler);
 }
 
 static struct resource tx4938_sdram_resource[4];

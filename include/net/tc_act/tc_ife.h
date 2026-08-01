@@ -5,22 +5,21 @@
 #include <net/act_api.h>
 #include <linux/etherdevice.h>
 #include <linux/rtnetlink.h>
-#include <linux/module.h>
+
+struct module;
 
 struct tcf_ife_params {
 	u8 eth_dst[ETH_ALEN];
 	u8 eth_src[ETH_ALEN];
 	u16 eth_type;
 	u16 flags;
-
+	struct list_head metalist;
 	struct rcu_head rcu;
 };
 
 struct tcf_ife_info {
 	struct tc_action common;
 	struct tcf_ife_params __rcu *params;
-	/* list of metaids allowed */
-	struct list_head metalist;
 };
 #define to_ife(a) ((struct tcf_ife_info *)a)
 

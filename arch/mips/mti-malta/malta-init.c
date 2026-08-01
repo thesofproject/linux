@@ -90,24 +90,23 @@ static void __init console_config(void)
 static void __init mips_nmi_setup(void)
 {
 	void *base;
-	extern char except_vec_nmi;
 
 	base = cpu_has_veic ?
 		(void *)(CAC_BASE + 0xa80) :
 		(void *)(CAC_BASE + 0x380);
-	memcpy(base, &except_vec_nmi, 0x80);
+	memcpy(base, except_vec_nmi, 0x80);
 	flush_icache_range((unsigned long)base, (unsigned long)base + 0x80);
 }
 
 static void __init mips_ejtag_setup(void)
 {
 	void *base;
-	extern char except_vec_ejtag_debug;
+	extern char except_vec_ejtag_debug[];
 
 	base = cpu_has_veic ?
 		(void *)(CAC_BASE + 0xa00) :
 		(void *)(CAC_BASE + 0x300);
-	memcpy(base, &except_vec_ejtag_debug, 0x80);
+	memcpy(base, except_vec_ejtag_debug, 0x80);
 	flush_icache_range((unsigned long)base, (unsigned long)base + 0x80);
 }
 
@@ -118,8 +117,6 @@ phys_addr_t mips_cpc_default_phys_base(void)
 
 void __init prom_init(void)
 {
-	mips_display_message("LINUX");
-
 	/*
 	 * early setup of _pcictrl_bonito so that we can determine
 	 * the system controller on a CORE_EMUL board
@@ -244,16 +241,22 @@ mips_pci_controller:
 #endif
 
 		/*
-		 * Setup the Malta max (2GB) memory for PCI DMA in host bridge
-		 * in transparent addressing mode.
+		 * Set up memory mapping in host bridge for PCI DMA masters,
+		 * in transparent addressing mode.  For EVA use the Malta
+		 * maximum of 2 GiB memory in the alias space at 0x80000000
+		 * as per PHYS_OFFSET.  Otherwise use 256 MiB of memory in
+		 * the regular space, avoiding mapping the PCI MMIO window
+		 * for DMA as it seems to confuse the system controller's
+		 * logic, causing PCI MMIO to stop working.
 		 */
-		mask = PHYS_OFFSET | PCI_BASE_ADDRESS_MEM_PREFETCH;
-		MSC_WRITE(MSC01_PCI_BAR0, mask);
-		MSC_WRITE(MSC01_PCI_HEAD4, mask);
+		mask = PHYS_OFFSET ? PHYS_OFFSET : 0xf0000000;
+		MSC_WRITE(MSC01_PCI_BAR0,
+			  mask | PCI_BASE_ADDRESS_MEM_PREFETCH);
+		MSC_WRITE(MSC01_PCI_HEAD4,
+			  PHYS_OFFSET | PCI_BASE_ADDRESS_MEM_PREFETCH);
 
-		mask &= MSC01_PCI_BAR0_SIZE_MSK;
 		MSC_WRITE(MSC01_PCI_P2SCMSKL, mask);
-		MSC_WRITE(MSC01_PCI_P2SCMAPL, mask);
+		MSC_WRITE(MSC01_PCI_P2SCMAPL, PHYS_OFFSET);
 
 		/* Don't handle target retries indefinitely.  */
 		if ((data & MSC01_PCI_CFG_MAXRTRY_MSK) ==
@@ -277,7 +280,6 @@ mips_pci_controller:
 
 	default:
 		/* Unknown system controller */
-		mips_display_message("SC Error");
 		while (1);	/* We die here... */
 	}
 	board_nmi_handler_setup = mips_nmi_setup;
@@ -292,8 +294,6 @@ mips_pci_controller:
 	mips_cpc_probe();
 
 	if (!register_cps_smp_ops())
-		return;
-	if (!register_cmp_smp_ops())
 		return;
 	if (!register_vsmp_smp_ops())
 		return;

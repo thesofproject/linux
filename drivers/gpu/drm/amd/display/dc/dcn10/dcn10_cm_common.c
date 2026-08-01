@@ -24,7 +24,7 @@
  */
 #include "dc.h"
 #include "reg_helper.h"
-#include "dcn10_dpp.h"
+#include "dcn10/dcn10_dpp.h"
 
 #include "dcn10_cm_common.h"
 #include "custom_float.h"
@@ -62,6 +62,26 @@ void cm_helper_program_color_matrices(
 
 }
 
+void cm_helper_read_color_matrices(struct dc_context *ctx,
+				   uint16_t *regval,
+				   const struct color_matrices_reg *reg)
+{
+	uint32_t cur_csc_reg, regval0, regval1;
+	unsigned int i = 0;
+
+	for (cur_csc_reg = reg->csc_c11_c12;
+	     cur_csc_reg <= reg->csc_c33_c34; cur_csc_reg++) {
+		REG_GET_2(cur_csc_reg,
+				csc_c11, &regval0,
+				csc_c12, &regval1);
+
+		regval[2 * i] = (uint16_t)regval0;
+		regval[(2 * i) + 1] = (uint16_t)regval1;
+
+		i++;
+	}
+}
+
 void cm_helper_program_xfer_func(
 		struct dc_context *ctx,
 		const struct pwl_params *params,
@@ -71,39 +91,39 @@ void cm_helper_program_xfer_func(
 	unsigned int i = 0;
 
 	REG_SET_2(reg->start_cntl_b, 0,
-			exp_region_start, params->arr_points[0].custom_float_x,
+			exp_region_start, params->corner_points[0].blue.custom_float_x,
 			exp_resion_start_segment, 0);
 	REG_SET_2(reg->start_cntl_g, 0,
-			exp_region_start, params->arr_points[0].custom_float_x,
+			exp_region_start, params->corner_points[0].green.custom_float_x,
 			exp_resion_start_segment, 0);
 	REG_SET_2(reg->start_cntl_r, 0,
-			exp_region_start, params->arr_points[0].custom_float_x,
+			exp_region_start, params->corner_points[0].red.custom_float_x,
 			exp_resion_start_segment, 0);
 
 	REG_SET(reg->start_slope_cntl_b, 0,
-			field_region_linear_slope, params->arr_points[0].custom_float_slope);
+			field_region_linear_slope, params->corner_points[0].blue.custom_float_slope);
 	REG_SET(reg->start_slope_cntl_g, 0,
-			field_region_linear_slope, params->arr_points[0].custom_float_slope);
+			field_region_linear_slope, params->corner_points[0].green.custom_float_slope);
 	REG_SET(reg->start_slope_cntl_r, 0,
-			field_region_linear_slope, params->arr_points[0].custom_float_slope);
+			field_region_linear_slope, params->corner_points[0].red.custom_float_slope);
 
 	REG_SET(reg->start_end_cntl1_b, 0,
-			field_region_end, params->arr_points[1].custom_float_x);
+			field_region_end, params->corner_points[1].blue.custom_float_x);
 	REG_SET_2(reg->start_end_cntl2_b, 0,
-			field_region_end_slope, params->arr_points[1].custom_float_slope,
-			field_region_end_base, params->arr_points[1].custom_float_y);
+			field_region_end_slope, params->corner_points[1].blue.custom_float_slope,
+			field_region_end_base, params->corner_points[1].blue.custom_float_y);
 
 	REG_SET(reg->start_end_cntl1_g, 0,
-			field_region_end, params->arr_points[1].custom_float_x);
+			field_region_end, params->corner_points[1].green.custom_float_x);
 	REG_SET_2(reg->start_end_cntl2_g, 0,
-			field_region_end_slope, params->arr_points[1].custom_float_slope,
-		field_region_end_base, params->arr_points[1].custom_float_y);
+			field_region_end_slope, params->corner_points[1].green.custom_float_slope,
+		field_region_end_base, params->corner_points[1].green.custom_float_y);
 
 	REG_SET(reg->start_end_cntl1_r, 0,
-			field_region_end, params->arr_points[1].custom_float_x);
+			field_region_end, params->corner_points[1].red.custom_float_x);
 	REG_SET_2(reg->start_end_cntl2_r, 0,
-			field_region_end_slope, params->arr_points[1].custom_float_slope,
-		field_region_end_base, params->arr_points[1].custom_float_y);
+			field_region_end_slope, params->corner_points[1].red.custom_float_slope,
+		field_region_end_base, params->corner_points[1].red.custom_float_y);
 
 	for (reg_region_cur = reg->region_start;
 			reg_region_cur <= reg->region_end;
@@ -127,7 +147,7 @@ void cm_helper_program_xfer_func(
 
 bool cm_helper_convert_to_custom_float(
 		struct pwl_result_data *rgb_resulted,
-		struct curve_points *arr_points,
+		struct curve_points3 *corner_points,
 		uint32_t hw_points_num,
 		bool fixpoint)
 {
@@ -141,20 +161,53 @@ bool cm_helper_convert_to_custom_float(
 	fmt.mantissa_bits = 12;
 	fmt.sign = false;
 
-	if (!convert_to_custom_float_format(arr_points[0].x, &fmt,
-					    &arr_points[0].custom_float_x)) {
+	/* corner_points[0] - beginning base, slope offset for R,G,B
+	 * corner_points[1] - end base, slope offset for R,G,B
+	 */
+	if (!convert_to_custom_float_format(corner_points[0].red.x, &fmt,
+				&corner_points[0].red.custom_float_x)) {
+		BREAK_TO_DEBUGGER();
+		return false;
+	}
+	if (!convert_to_custom_float_format(corner_points[0].green.x, &fmt,
+				&corner_points[0].green.custom_float_x)) {
+		BREAK_TO_DEBUGGER();
+		return false;
+	}
+	if (!convert_to_custom_float_format(corner_points[0].blue.x, &fmt,
+				&corner_points[0].blue.custom_float_x)) {
 		BREAK_TO_DEBUGGER();
 		return false;
 	}
 
-	if (!convert_to_custom_float_format(arr_points[0].offset, &fmt,
-					    &arr_points[0].custom_float_offset)) {
+	if (!convert_to_custom_float_format(corner_points[0].red.offset, &fmt,
+				&corner_points[0].red.custom_float_offset)) {
+		BREAK_TO_DEBUGGER();
+		return false;
+	}
+	if (!convert_to_custom_float_format(corner_points[0].green.offset, &fmt,
+				&corner_points[0].green.custom_float_offset)) {
+		BREAK_TO_DEBUGGER();
+		return false;
+	}
+	if (!convert_to_custom_float_format(corner_points[0].blue.offset, &fmt,
+				&corner_points[0].blue.custom_float_offset)) {
 		BREAK_TO_DEBUGGER();
 		return false;
 	}
 
-	if (!convert_to_custom_float_format(arr_points[0].slope, &fmt,
-					    &arr_points[0].custom_float_slope)) {
+	if (!convert_to_custom_float_format(corner_points[0].red.slope, &fmt,
+				&corner_points[0].red.custom_float_slope)) {
+		BREAK_TO_DEBUGGER();
+		return false;
+	}
+	if (!convert_to_custom_float_format(corner_points[0].green.slope, &fmt,
+				&corner_points[0].green.custom_float_slope)) {
+		BREAK_TO_DEBUGGER();
+		return false;
+	}
+	if (!convert_to_custom_float_format(corner_points[0].blue.slope, &fmt,
+				&corner_points[0].blue.custom_float_slope)) {
 		BREAK_TO_DEBUGGER();
 		return false;
 	}
@@ -162,22 +215,59 @@ bool cm_helper_convert_to_custom_float(
 	fmt.mantissa_bits = 10;
 	fmt.sign = false;
 
-	if (!convert_to_custom_float_format(arr_points[1].x, &fmt,
-					    &arr_points[1].custom_float_x)) {
+	if (!convert_to_custom_float_format(corner_points[1].red.x, &fmt,
+				&corner_points[1].red.custom_float_x)) {
+		BREAK_TO_DEBUGGER();
+		return false;
+	}
+	if (!convert_to_custom_float_format(corner_points[1].green.x, &fmt,
+				&corner_points[1].green.custom_float_x)) {
+		BREAK_TO_DEBUGGER();
+		return false;
+	}
+	if (!convert_to_custom_float_format(corner_points[1].blue.x, &fmt,
+				&corner_points[1].blue.custom_float_x)) {
 		BREAK_TO_DEBUGGER();
 		return false;
 	}
 
-	if (fixpoint == true)
-		arr_points[1].custom_float_y = dal_fixed31_32_clamp_u0d14(arr_points[1].y);
-	else if (!convert_to_custom_float_format(arr_points[1].y, &fmt,
-		&arr_points[1].custom_float_y)) {
+	if (fixpoint == true) {
+		corner_points[1].red.custom_float_y =
+				dc_fixpt_clamp_u0d14(corner_points[1].red.y);
+		corner_points[1].green.custom_float_y =
+				dc_fixpt_clamp_u0d14(corner_points[1].green.y);
+		corner_points[1].blue.custom_float_y =
+				dc_fixpt_clamp_u0d14(corner_points[1].blue.y);
+	} else {
+		if (!convert_to_custom_float_format(corner_points[1].red.y,
+				&fmt, &corner_points[1].red.custom_float_y)) {
+			BREAK_TO_DEBUGGER();
+			return false;
+		}
+		if (!convert_to_custom_float_format(corner_points[1].green.y,
+				&fmt, &corner_points[1].green.custom_float_y)) {
+			BREAK_TO_DEBUGGER();
+			return false;
+		}
+		if (!convert_to_custom_float_format(corner_points[1].blue.y,
+				&fmt, &corner_points[1].blue.custom_float_y)) {
+			BREAK_TO_DEBUGGER();
+			return false;
+		}
+	}
+
+	if (!convert_to_custom_float_format(corner_points[1].red.slope, &fmt,
+				&corner_points[1].red.custom_float_slope)) {
 		BREAK_TO_DEBUGGER();
 		return false;
 	}
-
-	if (!convert_to_custom_float_format(arr_points[1].slope, &fmt,
-					    &arr_points[1].custom_float_slope)) {
+	if (!convert_to_custom_float_format(corner_points[1].green.slope, &fmt,
+				&corner_points[1].green.custom_float_slope)) {
+		BREAK_TO_DEBUGGER();
+		return false;
+	}
+	if (!convert_to_custom_float_format(corner_points[1].blue.slope, &fmt,
+				&corner_points[1].blue.custom_float_slope)) {
 		BREAK_TO_DEBUGGER();
 		return false;
 	}
@@ -238,37 +328,34 @@ bool cm_helper_convert_to_custom_float(
 #define NUMBER_REGIONS     32
 #define NUMBER_SW_SEGMENTS 16
 
-bool cm_helper_translate_curve_to_hw_format(
+#define DC_LOGGER \
+		ctx->logger
+
+bool cm_helper_translate_curve_to_hw_format(struct dc_context *ctx,
 				const struct dc_transfer_func *output_tf,
 				struct pwl_params *lut_params, bool fixpoint)
 {
-	struct curve_points *arr_points;
+	struct curve_points3 *corner_points;
 	struct pwl_result_data *rgb_resulted;
 	struct pwl_result_data *rgb;
 	struct pwl_result_data *rgb_plus_1;
-	struct fixed31_32 y_r;
-	struct fixed31_32 y_g;
-	struct fixed31_32 y_b;
-	struct fixed31_32 y1_min;
-	struct fixed31_32 y3_max;
+	struct pwl_result_data *rgb_minus_1;
 
 	int32_t region_start, region_end;
-	int32_t i;
-	uint32_t j, k, seg_distr[MAX_REGIONS_NUMBER], increment, start_index, hw_points;
+	int32_t k;
+	uint32_t i, j, seg_distr[MAX_REGIONS_NUMBER], increment, start_index, hw_points;
 
 	if (output_tf == NULL || lut_params == NULL || output_tf->type == TF_TYPE_BYPASS)
 		return false;
 
-	PERF_TRACE();
-
-	arr_points = lut_params->arr_points;
+	corner_points = lut_params->corner_points;
 	rgb_resulted = lut_params->rgb_resulted;
 	hw_points = 0;
 
 	memset(lut_params, 0, sizeof(struct pwl_params));
 	memset(seg_distr, 0, sizeof(seg_distr));
 
-	if (output_tf->tf == TRANSFER_FUNCTION_PQ) {
+	if (output_tf->tf == TRANSFER_FUNCTION_PQ || output_tf->tf == TRANSFER_FUNCTION_GAMMA22) {
 		/* 32 segments
 		 * segments are from 2^-25 to 2^7
 		 */
@@ -278,30 +365,26 @@ bool cm_helper_translate_curve_to_hw_format(
 		region_start = -MAX_LOW_POINT;
 		region_end   = NUMBER_REGIONS - MAX_LOW_POINT;
 	} else {
-		/* 10 segments
-		 * segment is from 2^-10 to 2^0
+		/* 13 segments
+		 * segment is from 2^-12 to 2^0
 		 * There are less than 256 points, for optimization
 		 */
-		seg_distr[0] = 3;
-		seg_distr[1] = 4;
-		seg_distr[2] = 4;
-		seg_distr[3] = 4;
-		seg_distr[4] = 4;
-		seg_distr[5] = 4;
-		seg_distr[6] = 4;
-		seg_distr[7] = 4;
-		seg_distr[8] = 4;
-		seg_distr[9] = 4;
+		const uint8_t SEG_COUNT = 12;
 
-		region_start = -10;
-		region_end = 0;
+		for (i = 0; i < SEG_COUNT; i++)
+			seg_distr[i] = 4;
+
+		seg_distr[SEG_COUNT] = 1;
+
+		region_start = -SEG_COUNT;
+		region_end = 1;
 	}
 
 	for (i = region_end - region_start; i < MAX_REGIONS_NUMBER ; i++)
-		seg_distr[i] = -1;
+		seg_distr[i] = (uint32_t)-1;
 
 	for (k = 0; k < MAX_REGIONS_NUMBER; k++) {
-		if (seg_distr[k] != -1)
+		if (seg_distr[k] != (uint32_t)-1)
 			hw_points += (1 << seg_distr[k]);
 	}
 
@@ -314,6 +397,11 @@ bool cm_helper_translate_curve_to_hw_format(
 				i += increment) {
 			if (j == hw_points - 1)
 				break;
+			if (i >= TRANSFER_FUNC_POINTS) {
+				DC_LOG_ERROR("Index out of bounds: i=%u, TRANSFER_FUNC_POINTS=%u\n",
+					     i, (uint32_t)TRANSFER_FUNC_POINTS);
+				return false;
+			}
 			rgb_resulted[j].red = output_tf->tf_pts.red[i];
 			rgb_resulted[j].green = output_tf->tf_pts.green[i];
 			rgb_resulted[j].blue = output_tf->tf_pts.blue[i];
@@ -327,55 +415,71 @@ bool cm_helper_translate_curve_to_hw_format(
 	rgb_resulted[hw_points - 1].green = output_tf->tf_pts.green[start_index];
 	rgb_resulted[hw_points - 1].blue = output_tf->tf_pts.blue[start_index];
 
-	arr_points[0].x = dal_fixed31_32_pow(dal_fixed31_32_from_int(2),
-					     dal_fixed31_32_from_int(region_start));
-	arr_points[1].x = dal_fixed31_32_pow(dal_fixed31_32_from_int(2),
-					     dal_fixed31_32_from_int(region_end));
+	rgb_resulted[hw_points].red = rgb_resulted[hw_points - 1].red;
+	rgb_resulted[hw_points].green = rgb_resulted[hw_points - 1].green;
+	rgb_resulted[hw_points].blue = rgb_resulted[hw_points - 1].blue;
 
-	y_r = rgb_resulted[0].red;
-	y_g = rgb_resulted[0].green;
-	y_b = rgb_resulted[0].blue;
+	// All 3 color channels have same x
+	corner_points[0].red.x = dc_fixpt_pow(dc_fixpt_from_int(2),
+					     dc_fixpt_from_int(region_start));
+	corner_points[0].green.x = corner_points[0].red.x;
+	corner_points[0].blue.x = corner_points[0].red.x;
 
-	y1_min = dal_fixed31_32_min(y_r, dal_fixed31_32_min(y_g, y_b));
+	corner_points[1].red.x = dc_fixpt_pow(dc_fixpt_from_int(2),
+					     dc_fixpt_from_int(region_end));
+	corner_points[1].green.x = corner_points[1].red.x;
+	corner_points[1].blue.x = corner_points[1].red.x;
 
-	arr_points[0].y = y1_min;
-	arr_points[0].slope = dal_fixed31_32_div(arr_points[0].y, arr_points[0].x);
-	y_r = rgb_resulted[hw_points - 1].red;
-	y_g = rgb_resulted[hw_points - 1].green;
-	y_b = rgb_resulted[hw_points - 1].blue;
+	corner_points[0].red.y = rgb_resulted[0].red;
+	corner_points[0].green.y = rgb_resulted[0].green;
+	corner_points[0].blue.y = rgb_resulted[0].blue;
+
+	corner_points[0].red.slope = dc_fixpt_div(corner_points[0].red.y,
+			corner_points[0].red.x);
+	corner_points[0].green.slope = dc_fixpt_div(corner_points[0].green.y,
+			corner_points[0].green.x);
+	corner_points[0].blue.slope = dc_fixpt_div(corner_points[0].blue.y,
+			corner_points[0].blue.x);
 
 	/* see comment above, m_arrPoints[1].y should be the Y value for the
 	 * region end (m_numOfHwPoints), not last HW point(m_numOfHwPoints - 1)
 	 */
-	y3_max = dal_fixed31_32_max(y_r, dal_fixed31_32_max(y_g, y_b));
-
-	arr_points[1].y = y3_max;
-
-	arr_points[1].slope = dal_fixed31_32_zero;
+	corner_points[1].red.y = rgb_resulted[hw_points - 1].red;
+	corner_points[1].green.y = rgb_resulted[hw_points - 1].green;
+	corner_points[1].blue.y = rgb_resulted[hw_points - 1].blue;
+	corner_points[1].red.slope = dc_fixpt_zero;
+	corner_points[1].green.slope = dc_fixpt_zero;
+	corner_points[1].blue.slope = dc_fixpt_zero;
 
 	if (output_tf->tf == TRANSFER_FUNCTION_PQ) {
 		/* for PQ, we want to have a straight line from last HW X point,
 		 * and the slope to be such that we hit 1.0 at 10000 nits.
 		 */
 		const struct fixed31_32 end_value =
-				dal_fixed31_32_from_int(125);
+				dc_fixpt_from_int(125);
 
-		arr_points[1].slope = dal_fixed31_32_div(
-			dal_fixed31_32_sub(dal_fixed31_32_one, arr_points[1].y),
-			dal_fixed31_32_sub(end_value, arr_points[1].x));
+		corner_points[1].red.slope = dc_fixpt_div(
+			dc_fixpt_sub(dc_fixpt_one, corner_points[1].red.y),
+			dc_fixpt_sub(end_value, corner_points[1].red.x));
+		corner_points[1].green.slope = dc_fixpt_div(
+			dc_fixpt_sub(dc_fixpt_one, corner_points[1].green.y),
+			dc_fixpt_sub(end_value, corner_points[1].green.x));
+		corner_points[1].blue.slope = dc_fixpt_div(
+			dc_fixpt_sub(dc_fixpt_one, corner_points[1].blue.y),
+			dc_fixpt_sub(end_value, corner_points[1].blue.x));
 	}
 
 	lut_params->hw_points_num = hw_points;
 
-	i = 1;
-	for (k = 0; k < MAX_REGIONS_NUMBER && i < MAX_REGIONS_NUMBER; k++) {
+	k = 0;
+	for (i = 1; i < MAX_REGIONS_NUMBER; i++) {
 		if (seg_distr[k] != -1) {
 			lut_params->arr_curve_points[k].segments_num =
 					seg_distr[k];
 			lut_params->arr_curve_points[i].offset =
 					lut_params->arr_curve_points[k].offset + (1 << seg_distr[k]);
 		}
-		i++;
+		k++;
 	}
 
 	if (seg_distr[k] != -1)
@@ -383,35 +487,48 @@ bool cm_helper_translate_curve_to_hw_format(
 
 	rgb = rgb_resulted;
 	rgb_plus_1 = rgb_resulted + 1;
+	rgb_minus_1 = rgb;
 
 	i = 1;
 	while (i != hw_points + 1) {
-		if (dal_fixed31_32_lt(rgb_plus_1->red, rgb->red))
-			rgb_plus_1->red = rgb->red;
-		if (dal_fixed31_32_lt(rgb_plus_1->green, rgb->green))
-			rgb_plus_1->green = rgb->green;
-		if (dal_fixed31_32_lt(rgb_plus_1->blue, rgb->blue))
-			rgb_plus_1->blue = rgb->blue;
 
-		rgb->delta_red   = dal_fixed31_32_sub(rgb_plus_1->red,   rgb->red);
-		rgb->delta_green = dal_fixed31_32_sub(rgb_plus_1->green, rgb->green);
-		rgb->delta_blue  = dal_fixed31_32_sub(rgb_plus_1->blue,  rgb->blue);
+		if (i >= hw_points - 1) {
+			if (dc_fixpt_lt(rgb_plus_1->red, rgb->red))
+				rgb_plus_1->red = dc_fixpt_add(rgb->red, rgb_minus_1->delta_red);
+			if (dc_fixpt_lt(rgb_plus_1->green, rgb->green))
+				rgb_plus_1->green = dc_fixpt_add(rgb->green, rgb_minus_1->delta_green);
+			if (dc_fixpt_lt(rgb_plus_1->blue, rgb->blue))
+				rgb_plus_1->blue = dc_fixpt_add(rgb->blue, rgb_minus_1->delta_blue);
+		}
+
+		rgb->delta_red   = dc_fixpt_sub(rgb_plus_1->red,   rgb->red);
+		rgb->delta_green = dc_fixpt_sub(rgb_plus_1->green, rgb->green);
+		rgb->delta_blue  = dc_fixpt_sub(rgb_plus_1->blue,  rgb->blue);
+
 
 		if (fixpoint == true) {
-			rgb->delta_red_reg   = dal_fixed31_32_clamp_u0d10(rgb->delta_red);
-			rgb->delta_green_reg = dal_fixed31_32_clamp_u0d10(rgb->delta_green);
-			rgb->delta_blue_reg  = dal_fixed31_32_clamp_u0d10(rgb->delta_blue);
-			rgb->red_reg         = dal_fixed31_32_clamp_u0d14(rgb->red);
-			rgb->green_reg       = dal_fixed31_32_clamp_u0d14(rgb->green);
-			rgb->blue_reg        = dal_fixed31_32_clamp_u0d14(rgb->blue);
+			uint32_t red_clamp = dc_fixpt_clamp_u0d14(rgb->delta_red);
+			uint32_t green_clamp = dc_fixpt_clamp_u0d14(rgb->delta_green);
+			uint32_t blue_clamp = dc_fixpt_clamp_u0d14(rgb->delta_blue);
+
+			if (red_clamp >> 10 || green_clamp >> 10 || blue_clamp >> 10)
+				DC_LOG_WARNING("Losing delta precision while programming shaper LUT.");
+
+			rgb->delta_red_reg   = red_clamp & 0x3ff;
+			rgb->delta_green_reg = green_clamp & 0x3ff;
+			rgb->delta_blue_reg  = blue_clamp & 0x3ff;
+			rgb->red_reg         = dc_fixpt_clamp_u0d14(rgb->red);
+			rgb->green_reg       = dc_fixpt_clamp_u0d14(rgb->green);
+			rgb->blue_reg        = dc_fixpt_clamp_u0d14(rgb->blue);
 		}
 
 		++rgb_plus_1;
+		rgb_minus_1 = rgb;
 		++rgb;
 		++i;
 	}
 	cm_helper_convert_to_custom_float(rgb_resulted,
-						lut_params->arr_points,
+						lut_params->corner_points,
 						hw_points, fixpoint);
 
 	return true;
@@ -424,26 +541,19 @@ bool cm_helper_translate_curve_to_degamma_hw_format(
 				const struct dc_transfer_func *output_tf,
 				struct pwl_params *lut_params)
 {
-	struct curve_points *arr_points;
+	struct curve_points3 *corner_points;
 	struct pwl_result_data *rgb_resulted;
 	struct pwl_result_data *rgb;
 	struct pwl_result_data *rgb_plus_1;
-	struct fixed31_32 y_r;
-	struct fixed31_32 y_g;
-	struct fixed31_32 y_b;
-	struct fixed31_32 y1_min;
-	struct fixed31_32 y3_max;
 
 	int32_t region_start, region_end;
-	int32_t i;
-	uint32_t j, k, seg_distr[MAX_REGIONS_NUMBER], increment, start_index, hw_points;
+	int32_t k;
+	uint32_t i, j, seg_distr[MAX_REGIONS_NUMBER], increment, start_index, hw_points;
 
 	if (output_tf == NULL || lut_params == NULL || output_tf->type == TF_TYPE_BYPASS)
 		return false;
 
-	PERF_TRACE();
-
-	arr_points = lut_params->arr_points;
+	corner_points = lut_params->corner_points;
 	rgb_resulted = lut_params->rgb_resulted;
 	hw_points = 0;
 
@@ -455,7 +565,7 @@ bool cm_helper_translate_curve_to_degamma_hw_format(
 
 
 	for (i = region_end - region_start; i < MAX_REGIONS_NUMBER ; i++)
-		seg_distr[i] = -1;
+		seg_distr[i] = (uint32_t)-1;
 	/* 12 segments
 	 * segments are from 2^-12 to 0
 	 */
@@ -463,7 +573,7 @@ bool cm_helper_translate_curve_to_degamma_hw_format(
 		seg_distr[i] = 4;
 
 	for (k = 0; k < MAX_REGIONS_NUMBER; k++) {
-		if (seg_distr[k] != -1)
+		if (seg_distr[k] != (uint32_t)-1)
 			hw_points += (1 << seg_distr[k]);
 	}
 
@@ -476,6 +586,8 @@ bool cm_helper_translate_curve_to_degamma_hw_format(
 				i += increment) {
 			if (j == hw_points - 1)
 				break;
+			if (i >= TRANSFER_FUNC_POINTS)
+				return false;
 			rgb_resulted[j].red = output_tf->tf_pts.red[i];
 			rgb_resulted[j].green = output_tf->tf_pts.green[i];
 			rgb_resulted[j].blue = output_tf->tf_pts.blue[i];
@@ -489,55 +601,62 @@ bool cm_helper_translate_curve_to_degamma_hw_format(
 	rgb_resulted[hw_points - 1].green = output_tf->tf_pts.green[start_index];
 	rgb_resulted[hw_points - 1].blue = output_tf->tf_pts.blue[start_index];
 
-	arr_points[0].x = dal_fixed31_32_pow(dal_fixed31_32_from_int(2),
-					     dal_fixed31_32_from_int(region_start));
-	arr_points[1].x = dal_fixed31_32_pow(dal_fixed31_32_from_int(2),
-					     dal_fixed31_32_from_int(region_end));
+	rgb_resulted[hw_points].red = rgb_resulted[hw_points - 1].red;
+	rgb_resulted[hw_points].green = rgb_resulted[hw_points - 1].green;
+	rgb_resulted[hw_points].blue = rgb_resulted[hw_points - 1].blue;
 
-	y_r = rgb_resulted[0].red;
-	y_g = rgb_resulted[0].green;
-	y_b = rgb_resulted[0].blue;
+	corner_points[0].red.x = dc_fixpt_pow(dc_fixpt_from_int(2),
+					     dc_fixpt_from_int(region_start));
+	corner_points[0].green.x = corner_points[0].red.x;
+	corner_points[0].blue.x = corner_points[0].red.x;
+	corner_points[1].red.x = dc_fixpt_pow(dc_fixpt_from_int(2),
+					     dc_fixpt_from_int(region_end));
+	corner_points[1].green.x = corner_points[1].red.x;
+	corner_points[1].blue.x = corner_points[1].red.x;
 
-	y1_min = dal_fixed31_32_min(y_r, dal_fixed31_32_min(y_g, y_b));
-
-	arr_points[0].y = y1_min;
-	arr_points[0].slope = dal_fixed31_32_div(arr_points[0].y, arr_points[0].x);
-	y_r = rgb_resulted[hw_points - 1].red;
-	y_g = rgb_resulted[hw_points - 1].green;
-	y_b = rgb_resulted[hw_points - 1].blue;
+	corner_points[0].red.y = rgb_resulted[0].red;
+	corner_points[0].green.y = rgb_resulted[0].green;
+	corner_points[0].blue.y = rgb_resulted[0].blue;
 
 	/* see comment above, m_arrPoints[1].y should be the Y value for the
 	 * region end (m_numOfHwPoints), not last HW point(m_numOfHwPoints - 1)
 	 */
-	y3_max = dal_fixed31_32_max(y_r, dal_fixed31_32_max(y_g, y_b));
-
-	arr_points[1].y = y3_max;
-
-	arr_points[1].slope = dal_fixed31_32_zero;
+	corner_points[1].red.y = rgb_resulted[hw_points - 1].red;
+	corner_points[1].green.y = rgb_resulted[hw_points - 1].green;
+	corner_points[1].blue.y = rgb_resulted[hw_points - 1].blue;
+	corner_points[1].red.slope = dc_fixpt_zero;
+	corner_points[1].green.slope = dc_fixpt_zero;
+	corner_points[1].blue.slope = dc_fixpt_zero;
 
 	if (output_tf->tf == TRANSFER_FUNCTION_PQ) {
 		/* for PQ, we want to have a straight line from last HW X point,
 		 * and the slope to be such that we hit 1.0 at 10000 nits.
 		 */
 		const struct fixed31_32 end_value =
-				dal_fixed31_32_from_int(125);
+				dc_fixpt_from_int(125);
 
-		arr_points[1].slope = dal_fixed31_32_div(
-			dal_fixed31_32_sub(dal_fixed31_32_one, arr_points[1].y),
-			dal_fixed31_32_sub(end_value, arr_points[1].x));
+		corner_points[1].red.slope = dc_fixpt_div(
+			dc_fixpt_sub(dc_fixpt_one, corner_points[1].red.y),
+			dc_fixpt_sub(end_value, corner_points[1].red.x));
+		corner_points[1].green.slope = dc_fixpt_div(
+			dc_fixpt_sub(dc_fixpt_one, corner_points[1].green.y),
+			dc_fixpt_sub(end_value, corner_points[1].green.x));
+		corner_points[1].blue.slope = dc_fixpt_div(
+			dc_fixpt_sub(dc_fixpt_one, corner_points[1].blue.y),
+			dc_fixpt_sub(end_value, corner_points[1].blue.x));
 	}
 
 	lut_params->hw_points_num = hw_points;
 
-	i = 1;
-	for (k = 0; k < MAX_REGIONS_NUMBER && i < MAX_REGIONS_NUMBER; k++) {
+	k = 0;
+	for (i = 1; i < MAX_REGIONS_NUMBER; i++) {
 		if (seg_distr[k] != -1) {
 			lut_params->arr_curve_points[k].segments_num =
 					seg_distr[k];
 			lut_params->arr_curve_points[i].offset =
 					lut_params->arr_curve_points[k].offset + (1 << seg_distr[k]);
 		}
-		i++;
+		k++;
 	}
 
 	if (seg_distr[k] != -1)
@@ -548,23 +667,16 @@ bool cm_helper_translate_curve_to_degamma_hw_format(
 
 	i = 1;
 	while (i != hw_points + 1) {
-		if (dal_fixed31_32_lt(rgb_plus_1->red, rgb->red))
-			rgb_plus_1->red = rgb->red;
-		if (dal_fixed31_32_lt(rgb_plus_1->green, rgb->green))
-			rgb_plus_1->green = rgb->green;
-		if (dal_fixed31_32_lt(rgb_plus_1->blue, rgb->blue))
-			rgb_plus_1->blue = rgb->blue;
-
-		rgb->delta_red   = dal_fixed31_32_sub(rgb_plus_1->red,   rgb->red);
-		rgb->delta_green = dal_fixed31_32_sub(rgb_plus_1->green, rgb->green);
-		rgb->delta_blue  = dal_fixed31_32_sub(rgb_plus_1->blue,  rgb->blue);
+		rgb->delta_red   = dc_fixpt_sub(rgb_plus_1->red,   rgb->red);
+		rgb->delta_green = dc_fixpt_sub(rgb_plus_1->green, rgb->green);
+		rgb->delta_blue  = dc_fixpt_sub(rgb_plus_1->blue,  rgb->blue);
 
 		++rgb_plus_1;
 		++rgb;
 		++i;
 	}
 	cm_helper_convert_to_custom_float(rgb_resulted,
-						lut_params->arr_points,
+						lut_params->corner_points,
 						hw_points, false);
 
 	return true;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * itg3200_core.c -- support InvenSense ITG3200
  *                   Digital 3-Axis Gyroscope driver
@@ -5,10 +6,6 @@
  * Copyright (c) 2011 Christian Strobel <christian.strobel@iis.fraunhofer.de>
  * Copyright (c) 2011 Manuel Stahl <manuel.stahl@iis.fraunhofer.de>
  * Copyright (c) 2012 Thorsten Nowak <thorsten.nowak@iis.fraunhofer.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * TODO:
  * - Support digital low pass filter
@@ -18,10 +15,10 @@
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/i2c.h>
-#include <linux/gpio.h>
 #include <linux/slab.h>
 #include <linux/stat.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/delay.h>
 
 #include <linux/iio/iio.h>
@@ -96,6 +93,8 @@ static int itg3200_read_raw(struct iio_dev *indio_dev,
 	case IIO_CHAN_INFO_RAW:
 		reg = (u8)chan->address;
 		ret = itg3200_read_reg_s16(indio_dev, reg, val);
+		if (ret)
+			return ret;
 		return IIO_VAL_INT;
 	case IIO_CHAN_INFO_SCALE:
 		*val = 0;
@@ -135,6 +134,7 @@ static int itg3200_write_raw(struct iio_dev *indio_dev,
 			     int val2,
 			     long mask)
 {
+	struct itg3200 *st = iio_priv(indio_dev);
 	int ret;
 	u8 t;
 
@@ -143,11 +143,11 @@ static int itg3200_write_raw(struct iio_dev *indio_dev,
 		if (val == 0 || val2 != 0)
 			return -EINVAL;
 
-		mutex_lock(&indio_dev->mlock);
+		mutex_lock(&st->lock);
 
 		ret = itg3200_read_reg_8(indio_dev, ITG3200_REG_DLPF, &t);
 		if (ret) {
-			mutex_unlock(&indio_dev->mlock);
+			mutex_unlock(&st->lock);
 			return ret;
 		}
 		t = ((t & ITG3200_DLPF_CFG_MASK) ? 1000u : 8000u) / val - 1;
@@ -156,8 +156,8 @@ static int itg3200_write_raw(struct iio_dev *indio_dev,
 					  ITG3200_REG_SAMPLE_RATE_DIV,
 					  t);
 
-		mutex_unlock(&indio_dev->mlock);
-	return ret;
+		mutex_unlock(&st->lock);
+		return ret;
 
 	default:
 		return -EINVAL;
@@ -242,6 +242,20 @@ err_ret:
 	return ret;
 }
 
+static const struct iio_mount_matrix *
+itg3200_get_mount_matrix(const struct iio_dev *indio_dev,
+			  const struct iio_chan_spec *chan)
+{
+	struct itg3200 *data = iio_priv(indio_dev);
+
+	return &data->orientation;
+}
+
+static const struct iio_chan_spec_ext_info itg3200_ext_info[] = {
+	IIO_MOUNT_MATRIX(IIO_SHARED_BY_DIR, itg3200_get_mount_matrix),
+	{ }
+};
+
 #define ITG3200_ST						\
 	{ .sign = 's', .realbits = 16, .storagebits = 16, .endianness = IIO_BE }
 
@@ -255,6 +269,7 @@ err_ret:
 	.address = ITG3200_REG_GYRO_ ## _mod ## OUT_H, \
 	.scan_index = ITG3200_SCAN_GYRO_ ## _mod, \
 	.scan_type = ITG3200_ST, \
+	.ext_info = itg3200_ext_info, \
 }
 
 static const struct iio_chan_spec itg3200_channels[] = {
@@ -282,8 +297,7 @@ static const struct iio_info itg3200_info = {
 
 static const unsigned long itg3200_available_scan_masks[] = { 0xffffffff, 0x0 };
 
-static int itg3200_probe(struct i2c_client *client,
-		const struct i2c_device_id *id)
+static int itg3200_probe(struct i2c_client *client)
 {
 	int ret;
 	struct itg3200 *st;
@@ -297,10 +311,13 @@ static int itg3200_probe(struct i2c_client *client,
 
 	st = iio_priv(indio_dev);
 
+	ret = iio_read_mount_matrix(&client->dev, &st->orientation);
+	if (ret)
+		return ret;
+
 	i2c_set_clientdata(client, indio_dev);
 	st->i2c = client;
 
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->name = client->dev.driver->name;
 	indio_dev->channels = itg3200_channels;
 	indio_dev->num_channels = ARRAY_SIZE(itg3200_channels);
@@ -322,6 +339,8 @@ static int itg3200_probe(struct i2c_client *client,
 	if (ret)
 		goto error_remove_trigger;
 
+	mutex_init(&st->lock);
+
 	ret = iio_device_register(indio_dev);
 	if (ret)
 		goto error_remove_trigger;
@@ -336,7 +355,7 @@ error_unconfigure_buffer:
 	return ret;
 }
 
-static int itg3200_remove(struct i2c_client *client)
+static void itg3200_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 
@@ -346,11 +365,9 @@ static int itg3200_remove(struct i2c_client *client)
 		itg3200_remove_trigger(indio_dev);
 
 	itg3200_buffer_unconfigure(indio_dev);
-
-	return 0;
 }
 
-static int __maybe_unused itg3200_suspend(struct device *dev)
+static int itg3200_suspend(struct device *dev)
 {
 	struct iio_dev *indio_dev = dev_get_drvdata(dev);
 	struct itg3200 *st = iio_priv(indio_dev);
@@ -361,17 +378,18 @@ static int __maybe_unused itg3200_suspend(struct device *dev)
 				   ITG3200_SLEEP);
 }
 
-static int __maybe_unused itg3200_resume(struct device *dev)
+static int itg3200_resume(struct device *dev)
 {
 	struct iio_dev *indio_dev = dev_get_drvdata(dev);
 
 	return itg3200_initial_setup(indio_dev);
 }
 
-static SIMPLE_DEV_PM_OPS(itg3200_pm_ops, itg3200_suspend, itg3200_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(itg3200_pm_ops, itg3200_suspend,
+				itg3200_resume);
 
 static const struct i2c_device_id itg3200_id[] = {
-	{ "itg3200", 0 },
+	{ .name = "itg3200" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, itg3200_id);
@@ -386,7 +404,7 @@ static struct i2c_driver itg3200_driver = {
 	.driver = {
 		.name	= "itg3200",
 		.of_match_table = itg3200_of_match,
-		.pm	= &itg3200_pm_ops,
+		.pm	= pm_sleep_ptr(&itg3200_pm_ops),
 	},
 	.id_table	= itg3200_id,
 	.probe		= itg3200_probe,

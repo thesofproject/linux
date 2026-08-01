@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* 
  *  include/asm-ppc/pmac_low_i2c.h
  *
  *  Copyright (C) 2003 Ben. Herrenschmidt (benh@kernel.crashing.org)
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version
- *  2 of the License, or (at your option) any later version.
- *
  */
 #ifndef __PMAC_LOW_I2C_H__
 #define __PMAC_LOW_I2C_H__
@@ -83,10 +78,6 @@ extern struct pmac_i2c_bus *pmac_i2c_adapter_to_bus(struct i2c_adapter *adapter)
 extern int pmac_i2c_match_adapter(struct device_node *dev,
 				  struct i2c_adapter *adapter);
 
-
-/* (legacy) Locking functions exposed to i2c-keywest */
-extern int pmac_low_i2c_lock(struct device_node *np);
-extern int pmac_low_i2c_unlock(struct device_node *np);
 
 /* Access functions for platform code */
 extern int pmac_i2c_open(struct pmac_i2c_bus *bus, int polled);

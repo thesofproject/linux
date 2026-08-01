@@ -1,23 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  FM801 gameport driver for Linux
  *
  *  Copyright (c) by Takashi Iwai <tiwai@suse.de>
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
- *
  */
 
 #include <asm/io.h>
@@ -83,7 +68,7 @@ static int fm801_gp_probe(struct pci_dev *pci, const struct pci_device_id *id)
 	struct gameport *port;
 	int error;
 
-	gp = kzalloc(sizeof(struct fm801_gp), GFP_KERNEL);
+	gp = kzalloc_obj(*gp);
 	port = gameport_allocate_port();
 	if (!gp || !port) {
 		printk(KERN_ERR "fm801-gp: Memory allocation failed\n");
@@ -140,8 +125,8 @@ static void fm801_gp_remove(struct pci_dev *pci)
 }
 
 static const struct pci_device_id fm801_gp_id_table[] = {
-	{ PCI_VENDOR_ID_FORTEMEDIA, PCI_DEVICE_ID_FM801_GP, PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0  },
-	{ 0 }
+	{ PCI_VDEVICE(FORTEMEDIA, PCI_DEVICE_ID_FM801_GP) },
+	{ }
 };
 MODULE_DEVICE_TABLE(pci, fm801_gp_id_table);
 

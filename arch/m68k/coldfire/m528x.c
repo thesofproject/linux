@@ -13,6 +13,7 @@
 
 /***************************************************************************/
 
+#include <linux/clkdev.h>
 #include <linux/kernel.h>
 #include <linux/param.h>
 #include <linux/init.h>
@@ -28,31 +29,20 @@
 
 DEFINE_CLK(pll, "pll.0", MCF_CLK);
 DEFINE_CLK(sys, "sys.0", MCF_BUSCLK);
-DEFINE_CLK(mcfpit0, "mcfpit.0", MCF_CLK);
-DEFINE_CLK(mcfpit1, "mcfpit.1", MCF_CLK);
-DEFINE_CLK(mcfpit2, "mcfpit.2", MCF_CLK);
-DEFINE_CLK(mcfpit3, "mcfpit.3", MCF_CLK);
-DEFINE_CLK(mcfuart0, "mcfuart.0", MCF_BUSCLK);
-DEFINE_CLK(mcfuart1, "mcfuart.1", MCF_BUSCLK);
-DEFINE_CLK(mcfuart2, "mcfuart.2", MCF_BUSCLK);
-DEFINE_CLK(mcfqspi0, "mcfqspi.0", MCF_BUSCLK);
-DEFINE_CLK(fec0, "fec.0", MCF_BUSCLK);
-DEFINE_CLK(mcfi2c0, "imx1-i2c.0", MCF_BUSCLK);
 
-struct clk *mcf_clks[] = {
-	&clk_pll,
-	&clk_sys,
-	&clk_mcfpit0,
-	&clk_mcfpit1,
-	&clk_mcfpit2,
-	&clk_mcfpit3,
-	&clk_mcfuart0,
-	&clk_mcfuart1,
-	&clk_mcfuart2,
-	&clk_mcfqspi0,
-	&clk_fec0,
-	&clk_mcfi2c0,
-	NULL
+static struct clk_lookup m528x_clk_lookup[] = {
+	CLKDEV_INIT(NULL, "pll.0", &clk_pll),
+	CLKDEV_INIT(NULL, "sys.0", &clk_sys),
+	CLKDEV_INIT("mcfpit.0", NULL, &clk_pll),
+	CLKDEV_INIT("mcfpit.1", NULL, &clk_pll),
+	CLKDEV_INIT("mcfpit.2", NULL, &clk_pll),
+	CLKDEV_INIT("mcfpit.3", NULL, &clk_pll),
+	CLKDEV_INIT("mcfuart.0", NULL, &clk_sys),
+	CLKDEV_INIT("mcfuart.1", NULL, &clk_sys),
+	CLKDEV_INIT("mcfuart.2", NULL, &clk_sys),
+	CLKDEV_INIT("mcfqspi.0", NULL, &clk_sys),
+	CLKDEV_INIT("fec.0", NULL, &clk_sys),
+	CLKDEV_INIT("imx1-i2c.0", NULL, &clk_sys),
 };
 
 /***************************************************************************/
@@ -61,7 +51,7 @@ static void __init m528x_qspi_init(void)
 {
 #if IS_ENABLED(CONFIG_SPI_COLDFIRE_QSPI)
 	/* setup Port QS for QSPI with gpio CS control */
-	__raw_writeb(0x07, MCFGPIO_PQSPAR);
+	mcf_write8(0x07, MCFGPIO_PQSPAR);
 #endif /* IS_ENABLED(CONFIG_SPI_COLDFIRE_QSPI) */
 }
 
@@ -74,9 +64,9 @@ static void __init m528x_i2c_init(void)
 
 	/* setup Port AS Pin Assignment Register for I2C */
 	/*  set PASPA0 to SCL and PASPA1 to SDA */
-	paspar = readw(MCFGPIO_PASPAR);
+	paspar = mcf_read16(MCFGPIO_PASPAR);
 	paspar |= 0xF;
-	writew(paspar, MCFGPIO_PASPAR);
+	mcf_write16(paspar, MCFGPIO_PASPAR);
 #endif /* IS_ENABLED(CONFIG_I2C_IMX) */
 }
 
@@ -87,9 +77,9 @@ static void __init m528x_uarts_init(void)
 	u8 port;
 
 	/* make sure PUAPAR is set for UART0 and UART1 */
-	port = readb(MCFGPIO_PUAPAR);
+	port = mcf_read8(MCFGPIO_PUAPAR);
 	port |= 0x03 | (0x03 << 2);
-	writeb(port, MCFGPIO_PUAPAR);
+	mcf_write8(port, MCFGPIO_PUAPAR);
 }
 
 /***************************************************************************/
@@ -99,9 +89,9 @@ static void __init m528x_fec_init(void)
 	u16 v16;
 
 	/* Set multi-function pins to ethernet mode for fec0 */
-	v16 = readw(MCFGPIO_PASPAR);
-	writew(v16 | 0xf00, MCFGPIO_PASPAR);
-	writeb(0xc0, MCFGPIO_PEHLPAR);
+	v16 = mcf_read16(MCFGPIO_PASPAR);
+	mcf_write16(v16 | 0xf00, MCFGPIO_PASPAR);
+	mcf_write8(0xc0, MCFGPIO_PEHLPAR);
 }
 
 /***************************************************************************/
@@ -109,8 +99,8 @@ static void __init m528x_fec_init(void)
 #ifdef CONFIG_WILDFIRE
 void wildfire_halt(void)
 {
-	writeb(0, 0x30000007);
-	writeb(0x2, 0x30000007);
+	mcf_write8(0, 0x30000007);
+	mcf_write8(0x2, 0x30000007);
 }
 #endif
 
@@ -120,14 +110,14 @@ void wildfiremod_halt(void)
 	printk(KERN_INFO "WildFireMod hibernating...\n");
 
 	/* Set portE.5 to Digital IO */
-	writew(readw(MCFGPIO_PEPAR) & ~(1 << (5 * 2)), MCFGPIO_PEPAR);
+	mcf_write16(mcf_read16(MCFGPIO_PEPAR) & ~(1 << (5 * 2)), MCFGPIO_PEPAR);
 
 	/* Make portE.5 an output */
-	writeb(readb(MCFGPIO_PDDR_E) | (1 << 5), MCFGPIO_PDDR_E);
+	mcf_write8(mcf_read8(MCFGPIO_PDDR_E) | (1 << 5), MCFGPIO_PDDR_E);
 
 	/* Now toggle portE.5 from low to high */
-	writeb(readb(MCFGPIO_PODR_E) & ~(1 << 5), MCFGPIO_PODR_E);
-	writeb(readb(MCFGPIO_PODR_E) | (1 << 5), MCFGPIO_PODR_E);
+	mcf_write8(mcf_read8(MCFGPIO_PODR_E) & ~(1 << 5), MCFGPIO_PODR_E);
+	mcf_write8(mcf_read8(MCFGPIO_PODR_E) | (1 << 5), MCFGPIO_PODR_E);
 
 	printk(KERN_EMERG "Failed to hibernate. Halting!\n");
 }
@@ -146,6 +136,8 @@ void __init config_BSP(char *commandp, int size)
 	m528x_fec_init();
 	m528x_qspi_init();
 	m528x_i2c_init();
+
+	clkdev_add_table(m528x_clk_lookup, ARRAY_SIZE(m528x_clk_lookup));
 }
 
 /***************************************************************************/

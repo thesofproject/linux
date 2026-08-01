@@ -1,10 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
 
 menuconfig TARGET_CORE
 	tristate "Generic Target Core Mod (TCM) and ConfigFS Infrastructure"
-	depends on SCSI && BLOCK
+	depends on BLOCK
 	select CONFIGFS_FS
 	select CRC_T10DIF
-	select BLK_SCSI_REQUEST # only for scsi_command_size_tbl..
+	select SCSI_COMMON
 	select SGL_ALLOC
 	default n
 	help
@@ -29,6 +30,7 @@ config TCM_FILEIO
 
 config TCM_PSCSI
 	tristate "TCM/pSCSI Subsystem Plugin for Linux/SCSI"
+	depends on SCSI
 	help
 	Say Y here to enable the TCM/pSCSI subsystem plugin for non-buffered
 	passthrough access to Linux/SCSI device
@@ -45,5 +47,6 @@ source "drivers/target/loopback/Kconfig"
 source "drivers/target/tcm_fc/Kconfig"
 source "drivers/target/iscsi/Kconfig"
 source "drivers/target/sbp/Kconfig"
+source "drivers/target/tcm_remote/Kconfig"
 
 endif

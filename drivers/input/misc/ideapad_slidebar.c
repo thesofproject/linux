@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Input driver for slidebars on some Lenovo IdeaPad laptops
  *
  * Copyright (C) 2013 Andrey Moiseev <o2g.org.ru@gmail.com>
  *
  * Reverse-engineered from Lenovo SlideNav software (SBarHook.dll).
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  *
  * Trademarks are the property of their respective owners.
  */
@@ -27,7 +23,7 @@
  *
  * The value is in byte range, however, I only figured out
  * how bits 0b10011001 work. Some other bits, probably,
- * are meaningfull too.
+ * are meaningful too.
  *
  * Possible states:
  *
@@ -99,45 +95,33 @@ static struct platform_device *slidebar_platform_dev;
 
 static u8 slidebar_pos_get(void)
 {
-	u8 res;
-	unsigned long flags;
+	guard(spinlock_irqsave)(&io_lock);
 
-	spin_lock_irqsave(&io_lock, flags);
 	outb(0xf4, 0xff29);
 	outb(0xbf, 0xff2a);
-	res = inb(0xff2b);
-	spin_unlock_irqrestore(&io_lock, flags);
-
-	return res;
+	return inb(0xff2b);
 }
 
 static u8 slidebar_mode_get(void)
 {
-	u8 res;
-	unsigned long flags;
+	guard(spinlock_irqsave)(&io_lock);
 
-	spin_lock_irqsave(&io_lock, flags);
 	outb(0xf7, 0xff29);
 	outb(0x8b, 0xff2a);
-	res = inb(0xff2b);
-	spin_unlock_irqrestore(&io_lock, flags);
-
-	return res;
+	return inb(0xff2b);
 }
 
 static void slidebar_mode_set(u8 mode)
 {
-	unsigned long flags;
+	guard(spinlock_irqsave)(&io_lock);
 
-	spin_lock_irqsave(&io_lock, flags);
 	outb(0xf7, 0xff29);
 	outb(0x8b, 0xff2a);
 	outb(mode, 0xff2b);
-	spin_unlock_irqrestore(&io_lock, flags);
 }
 
 static bool slidebar_i8042_filter(unsigned char data, unsigned char str,
-				  struct serio *port)
+				  struct serio *port, void *context)
 {
 	static bool extended = false;
 
@@ -235,7 +219,7 @@ static int __init ideapad_probe(struct platform_device* pdev)
 	input_set_capability(slidebar_input_dev, EV_ABS, ABS_X);
 	input_set_abs_params(slidebar_input_dev, ABS_X, 0, 0xff, 0, 0);
 
-	err = i8042_install_filter(slidebar_i8042_filter);
+	err = i8042_install_filter(slidebar_i8042_filter, NULL);
 	if (err) {
 		dev_err(&pdev->dev,
 			"Failed to install i8042 filter: %d\n", err);
@@ -260,13 +244,11 @@ err_release_ports:
 	return err;
 }
 
-static int ideapad_remove(struct platform_device *pdev)
+static void ideapad_remove(struct platform_device *pdev)
 {
 	i8042_remove_filter(slidebar_i8042_filter);
 	input_unregister_device(slidebar_input_dev);
 	release_region(IDEAPAD_BASE, 3);
-
-	return 0;
 }
 
 static struct platform_driver slidebar_drv = {

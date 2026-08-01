@@ -29,11 +29,6 @@ struct fat_cache_id {
 	int dcluster;
 };
 
-static inline int fat_max_cache(struct inode *inode)
-{
-	return FAT_MAX_CACHE;
-}
-
 static struct kmem_cache *fat_cache_cachep;
 
 static void init_once(void *foo)
@@ -47,7 +42,7 @@ int __init fat_cache_init(void)
 {
 	fat_cache_cachep = kmem_cache_create("fat_cache",
 				sizeof(struct fat_cache),
-				0, SLAB_RECLAIM_ACCOUNT|SLAB_MEM_SPREAD,
+				0, SLAB_RECLAIM_ACCOUNT,
 				init_once);
 	if (fat_cache_cachep == NULL)
 		return -ENOMEM;
@@ -59,7 +54,7 @@ void fat_cache_destroy(void)
 	kmem_cache_destroy(fat_cache_cachep);
 }
 
-static inline struct fat_cache *fat_cache_alloc(struct inode *inode)
+static inline struct fat_cache *fat_cache_alloc(void)
 {
 	return kmem_cache_alloc(fat_cache_cachep, GFP_NOFS);
 }
@@ -145,11 +140,11 @@ static void fat_cache_add(struct inode *inode, struct fat_cache_id *new)
 
 	cache = fat_cache_merge(inode, new);
 	if (cache == NULL) {
-		if (MSDOS_I(inode)->nr_caches < fat_max_cache(inode)) {
+		if (MSDOS_I(inode)->nr_caches < FAT_MAX_CACHE) {
 			MSDOS_I(inode)->nr_caches++;
 			spin_unlock(&MSDOS_I(inode)->cache_lru_lock);
 
-			tmp = fat_cache_alloc(inode);
+			tmp = fat_cache_alloc();
 			if (!tmp) {
 				spin_lock(&MSDOS_I(inode)->cache_lru_lock);
 				MSDOS_I(inode)->nr_caches--;
@@ -225,7 +220,8 @@ static inline void cache_init(struct fat_cache_id *cid, int fclus, int dclus)
 int fat_get_cluster(struct inode *inode, int cluster, int *fclus, int *dclus)
 {
 	struct super_block *sb = inode->i_sb;
-	const int limit = sb->s_maxbytes >> MSDOS_SB(sb)->cluster_bits;
+	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+	const int limit = sb->s_maxbytes >> sbi->cluster_bits;
 	struct fat_entry fatent;
 	struct fat_cache_id cid;
 	int nr;
@@ -234,6 +230,12 @@ int fat_get_cluster(struct inode *inode, int cluster, int *fclus, int *dclus)
 
 	*fclus = 0;
 	*dclus = MSDOS_I(inode)->i_start;
+	if (!fat_valid_entry(sbi, *dclus)) {
+		fat_fs_error_ratelimit(sb,
+			"%s: invalid start cluster (i_pos %lld, start %08x)",
+			__func__, MSDOS_I(inode)->i_pos, *dclus);
+		return -EIO;
+	}
 	if (cluster == 0)
 		return 0;
 
@@ -250,9 +252,8 @@ int fat_get_cluster(struct inode *inode, int cluster, int *fclus, int *dclus)
 		/* prevent the infinite loop of cluster chain */
 		if (*fclus > limit) {
 			fat_fs_error_ratelimit(sb,
-					"%s: detected the cluster chain loop"
-					" (i_pos %lld)", __func__,
-					MSDOS_I(inode)->i_pos);
+				"%s: detected the cluster chain loop (i_pos %lld)",
+				__func__, MSDOS_I(inode)->i_pos);
 			nr = -EIO;
 			goto out;
 		}
@@ -262,9 +263,8 @@ int fat_get_cluster(struct inode *inode, int cluster, int *fclus, int *dclus)
 			goto out;
 		else if (nr == FAT_ENT_FREE) {
 			fat_fs_error_ratelimit(sb,
-				       "%s: invalid cluster chain (i_pos %lld)",
-				       __func__,
-				       MSDOS_I(inode)->i_pos);
+				"%s: invalid cluster chain (i_pos %lld)",
+				__func__, MSDOS_I(inode)->i_pos);
 			nr = -EIO;
 			goto out;
 		} else if (nr == FAT_ENT_EOF) {
@@ -358,7 +358,7 @@ int fat_bmap(struct inode *inode, sector_t sector, sector_t *phys,
 
 	*phys = 0;
 	*mapped_blocks = 0;
-	if ((sbi->fat_bits != 32) && (inode->i_ino == MSDOS_ROOT_INO)) {
+	if (!is_fat32(sbi) && (inode->i_ino == MSDOS_ROOT_INO)) {
 		if (sector < (sbi->dir_entries >> sbi->dir_per_block_bits)) {
 			*phys = sector + sbi->dir_start;
 			*mapped_blocks = 1;

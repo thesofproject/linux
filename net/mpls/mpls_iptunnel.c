@@ -1,14 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * mpls tunnels	An implementation mpls tunnels using the light weight tunnel
  *		infrastructure
  *
  * Authors:	Roopa Prabhu, <roopa@cumulusnetworks.com>
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  */
 #include <linux/types.h>
 #include <linux/skbuff.h>
@@ -28,7 +23,7 @@
 #include "internal.h"
 
 static const struct nla_policy mpls_iptunnel_policy[MPLS_IPTUNNEL_MAX + 1] = {
-	[MPLS_IPTUNNEL_DST]	= { .type = NLA_U32 },
+	[MPLS_IPTUNNEL_DST]	= { .len = sizeof(u32) },
 	[MPLS_IPTUNNEL_TTL]	= { .type = NLA_U8 },
 };
 
@@ -58,9 +53,7 @@ static int mpls_xmit(struct sk_buff *skb)
 
 	/* Find the output device */
 	out_dev = dst->dev;
-	net = dev_net(out_dev);
-
-	skb_orphan(skb);
+	net = dev_net_rcu(out_dev);
 
 	if (!mpls_output_possible(out_dev) ||
 	    !dst->lwtstate || skb_warn_if_lro(skb))
@@ -88,7 +81,7 @@ static int mpls_xmit(struct sk_buff *skb)
 			ttl = net->mpls.default_ttl;
 		else
 			ttl = ip_hdr(skb)->ttl;
-		rt = (struct rtable *)dst;
+		rt = dst_rtable(dst);
 	} else if (dst->ops->family == AF_INET6) {
 		if (tun_encap_info->ttl_propagate == MPLS_TTL_PROP_DISABLED)
 			ttl = tun_encap_info->default_ttl;
@@ -97,7 +90,7 @@ static int mpls_xmit(struct sk_buff *skb)
 			ttl = net->mpls.default_ttl;
 		else
 			ttl = ipv6_hdr(skb)->hop_limit;
-		rt6 = (struct rt6_info *)dst;
+		rt6 = dst_rt6_info(dst);
 	} else {
 		goto drop;
 	}
@@ -113,7 +106,7 @@ static int mpls_xmit(struct sk_buff *skb)
 		hh_len = 0;
 
 	/* Ensure there is enough space for the headers in the skb */
-	if (skb_cow(skb, hh_len + new_header_size))
+	if (skb_cow_head(skb, hh_len + new_header_size))
 		goto drop;
 
 	skb_set_inner_protocol(skb, skb->protocol);
@@ -135,14 +128,24 @@ static int mpls_xmit(struct sk_buff *skb)
 		bos = false;
 	}
 
-	mpls_stats_inc_outucastpkts(out_dev, skb);
+	mpls_stats_inc_outucastpkts(net, out_dev, skb);
 
-	if (rt)
-		err = neigh_xmit(NEIGH_ARP_TABLE, out_dev, &rt->rt_gateway,
-				 skb);
-	else if (rt6)
-		err = neigh_xmit(NEIGH_ND_TABLE, out_dev, &rt6->rt6i_gateway,
-				 skb);
+	if (rt) {
+		if (rt->rt_gw_family == AF_INET6)
+			err = neigh_xmit(NEIGH_ND_TABLE, out_dev, &rt->rt_gw6,
+					 skb);
+		else
+			err = neigh_xmit(NEIGH_ARP_TABLE, out_dev, &rt->rt_gw4,
+					 skb);
+	} else if (rt6) {
+		if (ipv6_addr_v4mapped(&rt6->rt6i_gateway)) {
+			/* 6PE (RFC 4798) */
+			err = neigh_xmit(NEIGH_ARP_TABLE, out_dev, &rt6->rt6i_gateway.s6_addr32[3],
+					 skb);
+		} else
+			err = neigh_xmit(NEIGH_ND_TABLE, out_dev, &rt6->rt6i_gateway,
+					 skb);
+	}
 	if (err)
 		net_dbg_ratelimited("%s: packet transmission failed: %d\n",
 				    __func__, err);
@@ -150,14 +153,14 @@ static int mpls_xmit(struct sk_buff *skb)
 	return LWTUNNEL_XMIT_DONE;
 
 drop:
-	out_mdev = out_dev ? mpls_dev_get(out_dev) : NULL;
+	out_mdev = out_dev ? mpls_dev_rcu(out_dev) : NULL;
 	if (out_mdev)
 		MPLS_INC_STATS(out_mdev, tx_errors);
 	kfree_skb(skb);
 	return -EINVAL;
 }
 
-static int mpls_build_state(struct nlattr *nla,
+static int mpls_build_state(struct net *net, struct nlattr *nla,
 			    unsigned int family, const void *cfg,
 			    struct lwtunnel_state **ts,
 			    struct netlink_ext_ack *extack)
@@ -168,8 +171,8 @@ static int mpls_build_state(struct nlattr *nla,
 	u8 n_labels;
 	int ret;
 
-	ret = nla_parse_nested(tb, MPLS_IPTUNNEL_MAX, nla,
-			       mpls_iptunnel_policy, extack);
+	ret = nla_parse_nested_deprecated(tb, MPLS_IPTUNNEL_MAX, nla,
+					  mpls_iptunnel_policy, extack);
 	if (ret < 0)
 		return ret;
 
@@ -183,8 +186,8 @@ static int mpls_build_state(struct nlattr *nla,
 			   &n_labels, NULL, extack))
 		return -EINVAL;
 
-	newts = lwtunnel_state_alloc(sizeof(*tun_encap_info) +
-				     n_labels * sizeof(u32));
+	newts = lwtunnel_state_alloc(struct_size(tun_encap_info, label,
+						 n_labels));
 	if (!newts)
 		return -ENOMEM;
 
@@ -224,7 +227,7 @@ static int mpls_fill_encap_info(struct sk_buff *skb,
 				struct lwtunnel_state *lwtstate)
 {
 	struct mpls_iptunnel_encap *tun_encap_info;
-	
+
 	tun_encap_info = mpls_lwtunnel_encap(lwtstate);
 
 	if (nla_put_labels(skb, MPLS_IPTUNNEL_DST, tun_encap_info->labels,
@@ -295,5 +298,6 @@ static void __exit mpls_iptunnel_exit(void)
 module_exit(mpls_iptunnel_exit);
 
 MODULE_ALIAS_RTNL_LWT(MPLS);
+MODULE_SOFTDEP("post: mpls_gso");
 MODULE_DESCRIPTION("MultiProtocol Label Switching IP Tunnels");
 MODULE_LICENSE("GPL v2");

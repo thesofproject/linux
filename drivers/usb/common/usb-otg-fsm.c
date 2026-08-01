@@ -193,7 +193,11 @@ static void otg_start_hnp_polling(struct otg_fsm *fsm)
 	if (!fsm->host_req_flag)
 		return;
 
-	INIT_DELAYED_WORK(&fsm->hnp_polling_work, otg_hnp_polling_work);
+	if (!fsm->hnp_work_inited) {
+		INIT_DELAYED_WORK(&fsm->hnp_polling_work, otg_hnp_polling_work);
+		fsm->hnp_work_inited = true;
+	}
+
 	schedule_delayed_work(&fsm->hnp_polling_work,
 					msecs_to_jiffies(T_HOST_REQ_POLL));
 }
@@ -445,4 +449,5 @@ int otg_statemachine(struct otg_fsm *fsm)
 	return fsm->state_changed;
 }
 EXPORT_SYMBOL_GPL(otg_statemachine);
+MODULE_DESCRIPTION("OTG Finite State Machine");
 MODULE_LICENSE("GPL");

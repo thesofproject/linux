@@ -1,20 +1,17 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: MIT
 #include <linux/vgaarb.h>
 #include <linux/vga_switcheroo.h>
 
-#include <drm/drmP.h>
-#include <drm/drm_crtc_helper.h>
-#include <drm/drm_fb_helper.h>
+#include <drm/drm_client_event.h>
 
 #include "nouveau_drv.h"
 #include "nouveau_acpi.h"
-#include "nouveau_fbcon.h"
 #include "nouveau_vga.h"
 
 static unsigned int
-nouveau_vga_set_decode(void *priv, bool state)
+nouveau_vga_set_decode(struct pci_dev *pdev, bool state)
 {
-	struct nouveau_drm *drm = nouveau_drm(priv);
+	struct nouveau_drm *drm = pci_get_drvdata(pdev);
 	struct nvif_object *device = &drm->client.device.object;
 
 	if (drm->client.device.info.family == NV_DEVICE_INFO_V0_CURIE &&
@@ -37,7 +34,8 @@ static void
 nouveau_switcheroo_set_state(struct pci_dev *pdev,
 			     enum vga_switcheroo_state state)
 {
-	struct drm_device *dev = pci_get_drvdata(pdev);
+	struct nouveau_drm *drm = pci_get_drvdata(pdev);
+	struct drm_device *dev = drm->dev;
 
 	if ((nouveau_is_optimus() || nouveau_is_v1_dsm()) && state == VGA_SWITCHEROO_OFF)
 		return;
@@ -46,12 +44,10 @@ nouveau_switcheroo_set_state(struct pci_dev *pdev,
 		pr_err("VGA switcheroo: switched nouveau on\n");
 		dev->switch_power_state = DRM_SWITCH_POWER_CHANGING;
 		nouveau_pmops_resume(&pdev->dev);
-		drm_kms_helper_poll_enable(dev);
 		dev->switch_power_state = DRM_SWITCH_POWER_ON;
 	} else {
 		pr_err("VGA switcheroo: switched nouveau off\n");
 		dev->switch_power_state = DRM_SWITCH_POWER_CHANGING;
-		drm_kms_helper_poll_disable(dev);
 		nouveau_switcheroo_optimus_dsm();
 		nouveau_pmops_suspend(&pdev->dev);
 		dev->switch_power_state = DRM_SWITCH_POWER_OFF;
@@ -61,21 +57,23 @@ nouveau_switcheroo_set_state(struct pci_dev *pdev,
 static void
 nouveau_switcheroo_reprobe(struct pci_dev *pdev)
 {
-	struct drm_device *dev = pci_get_drvdata(pdev);
-	drm_fb_helper_output_poll_changed(dev);
+	struct nouveau_drm *drm = pci_get_drvdata(pdev);
+	struct drm_device *dev = drm->dev;
+
+	drm_client_dev_hotplug(dev);
 }
 
 static bool
 nouveau_switcheroo_can_switch(struct pci_dev *pdev)
 {
-	struct drm_device *dev = pci_get_drvdata(pdev);
+	struct nouveau_drm *drm = pci_get_drvdata(pdev);
 
 	/*
 	 * FIXME: open_count is protected by drm_global_mutex but that would lead to
 	 * locking inversion with the driver load path. And the access here is
 	 * completely racy anyway. So don't bother with locking for now.
 	 */
-	return dev->open_count == 0;
+	return atomic_read(&drm->dev->open_count) == 0;
 }
 
 static const struct vga_switcheroo_client_ops
@@ -90,18 +88,20 @@ nouveau_vga_init(struct nouveau_drm *drm)
 {
 	struct drm_device *dev = drm->dev;
 	bool runtime = nouveau_pmops_runtime();
+	struct pci_dev *pdev;
 
 	/* only relevant for PCI devices */
-	if (!dev->pdev)
+	if (!dev_is_pci(dev->dev))
 		return;
+	pdev = to_pci_dev(dev->dev);
 
-	vga_client_register(dev->pdev, dev, NULL, nouveau_vga_set_decode);
+	vga_client_register(pdev, nouveau_vga_set_decode);
 
 	/* don't register Thunderbolt eGPU with vga_switcheroo */
-	if (pci_is_thunderbolt_attached(dev->pdev))
+	if (pci_is_thunderbolt_attached(pdev))
 		return;
 
-	vga_switcheroo_register_client(dev->pdev, &nouveau_switcheroo_ops, runtime);
+	vga_switcheroo_register_client(pdev, &nouveau_switcheroo_ops, runtime);
 
 	if (runtime && nouveau_is_v1_dsm() && !nouveau_is_optimus())
 		vga_switcheroo_init_domain_pm_ops(drm->dev->dev, &drm->vga_pm_domain);
@@ -112,24 +112,19 @@ nouveau_vga_fini(struct nouveau_drm *drm)
 {
 	struct drm_device *dev = drm->dev;
 	bool runtime = nouveau_pmops_runtime();
+	struct pci_dev *pdev;
 
 	/* only relevant for PCI devices */
-	if (!dev->pdev)
+	if (!dev_is_pci(dev->dev))
+		return;
+	pdev = to_pci_dev(dev->dev);
+
+	vga_client_unregister(pdev);
+
+	if (pci_is_thunderbolt_attached(pdev))
 		return;
 
-	vga_client_register(dev->pdev, NULL, NULL, NULL);
-
-	if (pci_is_thunderbolt_attached(dev->pdev))
-		return;
-
-	vga_switcheroo_unregister_client(dev->pdev);
+	vga_switcheroo_unregister_client(pdev);
 	if (runtime && nouveau_is_v1_dsm() && !nouveau_is_optimus())
 		vga_switcheroo_fini_domain_pm_ops(drm->dev->dev);
-}
-
-
-void
-nouveau_vga_lastclose(struct drm_device *dev)
-{
-	vga_switcheroo_process_delayed_switch();
 }

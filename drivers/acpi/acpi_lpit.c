@@ -1,23 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-only
 
 /*
  * acpi_lpit.c - LPIT table processing functions
  *
  * Copyright (C) 2017 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/cpu.h>
 #include <linux/acpi.h>
 #include <asm/msr.h>
 #include <asm/tsc.h>
+#include "internal.h"
 
 struct lpit_residency_info {
 	struct acpi_generic_address gaddr;
@@ -46,7 +39,7 @@ static int lpit_read_residency_counter_us(u64 *counter, bool io_mem)
 		return 0;
 	}
 
-	err = rdmsrl_safe(residency_info_ffh.gaddr.address, counter);
+	err = rdmsrq_safe(residency_info_ffh.gaddr.address, counter);
 	if (!err) {
 		u64 mask = GENMASK_ULL(residency_info_ffh.gaddr.bit_offset +
 				       residency_info_ffh.gaddr. bit_width - 1,
@@ -105,33 +98,39 @@ EXPORT_SYMBOL_GPL(lpit_read_residency_count_address);
 static void lpit_update_residency(struct lpit_residency_info *info,
 				 struct acpi_lpit_native *lpit_native)
 {
+	struct device *dev_root = bus_get_dev_root(&cpu_subsys);
+
+	/* Silently fail, if cpuidle attribute group is not present */
+	if (!dev_root)
+		return;
+
 	info->frequency = lpit_native->counter_frequency ?
-				lpit_native->counter_frequency : tsc_khz * 1000;
+				lpit_native->counter_frequency : mul_u32_u32(tsc_khz, 1000U);
 	if (!info->frequency)
 		info->frequency = 1;
 
 	info->gaddr = lpit_native->residency_counter;
 	if (info->gaddr.space_id == ACPI_ADR_SPACE_SYSTEM_MEMORY) {
-		info->iomem_addr = ioremap_nocache(info->gaddr.address,
+		info->iomem_addr = ioremap(info->gaddr.address,
 						   info->gaddr.bit_width / 8);
 		if (!info->iomem_addr)
-			return;
+			goto exit;
 
-		/* Silently fail, if cpuidle attribute group is not present */
-		sysfs_add_file_to_group(&cpu_subsys.dev_root->kobj,
+		sysfs_add_file_to_group(&dev_root->kobj,
 					&dev_attr_low_power_idle_system_residency_us.attr,
 					"cpuidle");
 	} else if (info->gaddr.space_id == ACPI_ADR_SPACE_FIXED_HARDWARE) {
-		/* Silently fail, if cpuidle attribute group is not present */
-		sysfs_add_file_to_group(&cpu_subsys.dev_root->kobj,
+		sysfs_add_file_to_group(&dev_root->kobj,
 					&dev_attr_low_power_idle_cpu_residency_us.attr,
 					"cpuidle");
 	}
+exit:
+	put_device(dev_root);
 }
 
 static void lpit_process(u64 begin, u64 end)
 {
-	while (begin + sizeof(struct acpi_lpit_native) < end) {
+	while (begin + sizeof(struct acpi_lpit_native) <= end) {
 		struct acpi_lpit_native *lpit_native = (struct acpi_lpit_native *)begin;
 
 		if (!lpit_native->header.type && !lpit_native->header.flags) {
@@ -150,14 +149,14 @@ static void lpit_process(u64 begin, u64 end)
 void acpi_init_lpit(void)
 {
 	acpi_status status;
-	u64 lpit_begin;
 	struct acpi_table_lpit *lpit;
 
 	status = acpi_get_table(ACPI_SIG_LPIT, 0, (struct acpi_table_header **)&lpit);
-
 	if (ACPI_FAILURE(status))
 		return;
 
-	lpit_begin = (u64)lpit + sizeof(*lpit);
-	lpit_process(lpit_begin, lpit_begin + lpit->header.length);
+	lpit_process((u64)lpit + sizeof(*lpit),
+		     (u64)lpit + lpit->header.length);
+
+	acpi_put_table((struct acpi_table_header *)lpit);
 }

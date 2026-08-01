@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * NetLabel Kernel API
  *
@@ -6,25 +7,10 @@
  * as CIPSO and RIPSO.
  *
  * Author: Paul Moore <paul@paul-moore.com>
- *
  */
 
 /*
  * (c) Copyright Hewlett-Packard Development Company, L.P., 2006, 2008
- *
- * This program is free software;  you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY;  without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- * the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program;  if not, see <http://www.gnu.org/licenses/>.
- *
  */
 
 #include <linux/init.h>
@@ -118,7 +104,7 @@ int netlbl_cfg_unlbl_map_add(const char *domain,
 	struct netlbl_domaddr4_map *map4 = NULL;
 	struct netlbl_domaddr6_map *map6 = NULL;
 
-	entry = kzalloc(sizeof(*entry), GFP_ATOMIC);
+	entry = kzalloc_obj(*entry, GFP_ATOMIC);
 	if (entry == NULL)
 		return -ENOMEM;
 	if (domain != NULL) {
@@ -131,7 +117,7 @@ int netlbl_cfg_unlbl_map_add(const char *domain,
 	if (addr == NULL && mask == NULL)
 		entry->def.type = NETLBL_NLTYPE_UNLABELED;
 	else if (addr != NULL && mask != NULL) {
-		addrmap = kzalloc(sizeof(*addrmap), GFP_ATOMIC);
+		addrmap = kzalloc_obj(*addrmap, GFP_ATOMIC);
 		if (addrmap == NULL)
 			goto cfg_unlbl_map_add_failure;
 		INIT_LIST_HEAD(&addrmap->list4);
@@ -141,7 +127,7 @@ int netlbl_cfg_unlbl_map_add(const char *domain,
 		case AF_INET: {
 			const struct in_addr *addr4 = addr;
 			const struct in_addr *mask4 = mask;
-			map4 = kzalloc(sizeof(*map4), GFP_ATOMIC);
+			map4 = kzalloc_obj(*map4, GFP_ATOMIC);
 			if (map4 == NULL)
 				goto cfg_unlbl_map_add_failure;
 			map4->def.type = NETLBL_NLTYPE_UNLABELED;
@@ -158,7 +144,7 @@ int netlbl_cfg_unlbl_map_add(const char *domain,
 		case AF_INET6: {
 			const struct in6_addr *addr6 = addr;
 			const struct in6_addr *mask6 = mask;
-			map6 = kzalloc(sizeof(*map6), GFP_ATOMIC);
+			map6 = kzalloc_obj(*map6, GFP_ATOMIC);
 			if (map6 == NULL)
 				goto cfg_unlbl_map_add_failure;
 			map6->def.type = NETLBL_NLTYPE_UNLABELED;
@@ -350,7 +336,7 @@ int netlbl_cfg_cipsov4_map_add(u32 doi,
 	if (doi_def == NULL)
 		return -ENOENT;
 
-	entry = kzalloc(sizeof(*entry), GFP_ATOMIC);
+	entry = kzalloc_obj(*entry, GFP_ATOMIC);
 	if (entry == NULL)
 		goto out_entry;
 	entry->family = AF_INET;
@@ -364,13 +350,13 @@ int netlbl_cfg_cipsov4_map_add(u32 doi,
 		entry->def.cipso = doi_def;
 		entry->def.type = NETLBL_NLTYPE_CIPSOV4;
 	} else if (addr != NULL && mask != NULL) {
-		addrmap = kzalloc(sizeof(*addrmap), GFP_ATOMIC);
+		addrmap = kzalloc_obj(*addrmap, GFP_ATOMIC);
 		if (addrmap == NULL)
 			goto out_addrmap;
 		INIT_LIST_HEAD(&addrmap->list4);
 		INIT_LIST_HEAD(&addrmap->list6);
 
-		addrinfo = kzalloc(sizeof(*addrinfo), GFP_ATOMIC);
+		addrinfo = kzalloc_obj(*addrinfo, GFP_ATOMIC);
 		if (addrinfo == NULL)
 			goto out_addrinfo;
 		addrinfo->def.cipso = doi_def;
@@ -476,7 +462,7 @@ int netlbl_cfg_calipso_map_add(u32 doi,
 	if (doi_def == NULL)
 		return -ENOENT;
 
-	entry = kzalloc(sizeof(*entry), GFP_ATOMIC);
+	entry = kzalloc_obj(*entry, GFP_ATOMIC);
 	if (entry == NULL)
 		goto out_entry;
 	entry->family = AF_INET6;
@@ -490,13 +476,13 @@ int netlbl_cfg_calipso_map_add(u32 doi,
 		entry->def.calipso = doi_def;
 		entry->def.type = NETLBL_NLTYPE_CALIPSO;
 	} else if (addr != NULL && mask != NULL) {
-		addrmap = kzalloc(sizeof(*addrmap), GFP_ATOMIC);
+		addrmap = kzalloc_obj(*addrmap, GFP_ATOMIC);
 		if (addrmap == NULL)
 			goto out_addrmap;
 		INIT_LIST_HEAD(&addrmap->list4);
 		INIT_LIST_HEAD(&addrmap->list6);
 
-		addrinfo = kzalloc(sizeof(*addrinfo), GFP_ATOMIC);
+		addrinfo = kzalloc_obj(*addrinfo, GFP_ATOMIC);
 		if (addrinfo == NULL)
 			goto out_addrinfo;
 		addrinfo->def.calipso = doi_def;
@@ -621,10 +607,10 @@ catmap_getnode_alloc:
  */
 int netlbl_catmap_walk(struct netlbl_lsm_catmap *catmap, u32 offset)
 {
-	struct netlbl_lsm_catmap *iter = catmap;
+	struct netlbl_lsm_catmap *iter;
 	u32 idx;
 	u32 bit;
-	NETLBL_CATMAP_MAPTYPE bitmap;
+	u64 bitmap;
 
 	iter = _netlbl_catmap_getnode(&catmap, offset, _CM_F_WALK, 0);
 	if (iter == NULL)
@@ -680,8 +666,8 @@ int netlbl_catmap_walkrng(struct netlbl_lsm_catmap *catmap, u32 offset)
 	struct netlbl_lsm_catmap *prev = NULL;
 	u32 idx;
 	u32 bit;
-	NETLBL_CATMAP_MAPTYPE bitmask;
-	NETLBL_CATMAP_MAPTYPE bitmap;
+	u64 bitmask;
+	u64 bitmap;
 
 	iter = _netlbl_catmap_getnode(&catmap, offset, _CM_F_WALK, 0);
 	if (iter == NULL)
@@ -733,7 +719,7 @@ int netlbl_catmap_walkrng(struct netlbl_lsm_catmap *catmap, u32 offset)
  * it in @bitmap.  The @offset must be aligned to an unsigned long and will be
  * updated on return if different from what was requested; if the catmap is
  * empty at the requested offset and beyond, the @offset is set to (u32)-1.
- * Returns zero on sucess, negative values on failure.
+ * Returns zero on success, negative values on failure.
  *
  */
 int netlbl_catmap_getlong(struct netlbl_lsm_catmap *catmap,
@@ -747,6 +733,12 @@ int netlbl_catmap_getlong(struct netlbl_lsm_catmap *catmap,
 	/* only allow aligned offsets */
 	if ((off & (BITS_PER_LONG - 1)) != 0)
 		return -EINVAL;
+
+	/* a null catmap is equivalent to an empty one */
+	if (!catmap) {
+		*offset = (u32)-1;
+		return 0;
+	}
 
 	if (off < catmap->startbit) {
 		off = catmap->startbit;
@@ -865,7 +857,8 @@ int netlbl_catmap_setlong(struct netlbl_lsm_catmap **catmap,
 
 	offset -= iter->startbit;
 	idx = offset / NETLBL_CATMAP_MAPSIZE;
-	iter->bitmap[idx] |= bitmap << (offset % NETLBL_CATMAP_MAPSIZE);
+	iter->bitmap[idx] |= (u64)bitmap
+			     << (offset % NETLBL_CATMAP_MAPSIZE);
 
 	return 0;
 }
@@ -883,7 +876,7 @@ int netlbl_catmap_setlong(struct netlbl_lsm_catmap **catmap,
  * Description:
  * Starting at @offset, walk the bitmap from left to right until either the
  * desired bit is found or we reach the end.  Return the bit offset, -1 if
- * not found, or -2 if error.
+ * not found.
  */
 int netlbl_bitmap_walk(const unsigned char *bitmap, u32 bitmap_len,
 		       u32 offset, u8 state)
@@ -893,6 +886,8 @@ int netlbl_bitmap_walk(const unsigned char *bitmap, u32 bitmap_len,
 	unsigned char bitmask;
 	unsigned char byte;
 
+	if (offset >= bitmap_len)
+		return -1;
 	byte_offset = offset / 8;
 	byte = bitmap[byte_offset];
 	bit_spot = offset;
@@ -903,7 +898,8 @@ int netlbl_bitmap_walk(const unsigned char *bitmap, u32 bitmap_len,
 		    (state == 0 && (byte & bitmask) == 0))
 			return bit_spot;
 
-		bit_spot++;
+		if (++bit_spot >= bitmap_len)
+			return -1;
 		bitmask >>= 1;
 		if (bitmask == 0) {
 			byte = bitmap[++byte_offset];
@@ -969,6 +965,7 @@ int netlbl_enabled(void)
  * @sk: the socket to label
  * @family: protocol family
  * @secattr: the security attributes
+ * @sk_locked: true if caller holds the socket lock
  *
  * Description:
  * Attach the correct label to the given socket using the security attributes
@@ -981,7 +978,8 @@ int netlbl_enabled(void)
  */
 int netlbl_sock_setattr(struct sock *sk,
 			u16 family,
-			const struct netlbl_lsm_secattr *secattr)
+			const struct netlbl_lsm_secattr *secattr,
+			bool sk_locked)
 {
 	int ret_val;
 	struct netlbl_dom_map *dom_entry;
@@ -1001,7 +999,7 @@ int netlbl_sock_setattr(struct sock *sk,
 		case NETLBL_NLTYPE_CIPSOV4:
 			ret_val = cipso_v4_sock_setattr(sk,
 							dom_entry->def.cipso,
-							secattr);
+							secattr, sk_locked);
 			break;
 		case NETLBL_NLTYPE_UNLABELED:
 			ret_val = 0;
@@ -1095,6 +1093,28 @@ int netlbl_sock_getattr(struct sock *sk,
 }
 
 /**
+ * netlbl_sk_lock_check - Check if the socket lock has been acquired.
+ * @sk: the socket to be checked
+ *
+ * Return: true if socket @sk is locked or if lock debugging is disabled at
+ * runtime or compile-time; false otherwise
+ *
+ */
+#ifdef CONFIG_LOCKDEP
+bool netlbl_sk_lock_check(struct sock *sk)
+{
+	if (debug_locks)
+		return lockdep_sock_is_held(sk);
+	return true;
+}
+#else
+bool netlbl_sk_lock_check(struct sock *sk)
+{
+	return true;
+}
+#endif
+
+/**
  * netlbl_conn_setattr - Label a connected socket using the correct protocol
  * @sk: the socket to label
  * @addr: the destination address
@@ -1130,7 +1150,8 @@ int netlbl_conn_setattr(struct sock *sk,
 		switch (entry->type) {
 		case NETLBL_NLTYPE_CIPSOV4:
 			ret_val = cipso_v4_sock_setattr(sk,
-							entry->cipso, secattr);
+							entry->cipso, secattr,
+							netlbl_sk_lock_check(sk));
 			break;
 		case NETLBL_NLTYPE_UNLABELED:
 			/* just delete the protocols we support for right now
@@ -1144,6 +1165,11 @@ int netlbl_conn_setattr(struct sock *sk,
 		break;
 #if IS_ENABLED(CONFIG_IPV6)
 	case AF_INET6:
+		if (sk->sk_family != AF_INET6) {
+			ret_val = -EAFNOSUPPORT;
+			goto conn_setattr_return;
+		}
+
 		addr6 = (struct sockaddr_in6 *)addr;
 		entry = netlbl_domhsh_getentry_af6(secattr->domain,
 						   &addr6->sin6_addr);

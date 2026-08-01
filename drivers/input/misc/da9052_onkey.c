@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * ON pin driver for Dialog DA9052 PMICs
  *
  * Copyright(c) 2012 Dialog Semiconductor Ltd.
  *
  * Author: David Dajun Chen <dchen@diasemi.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/input.h>
@@ -84,7 +80,7 @@ static int da9052_onkey_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	onkey = kzalloc(sizeof(*onkey), GFP_KERNEL);
+	onkey = kzalloc_obj(*onkey);
 	input_dev = input_allocate_device();
 	if (!onkey || !input_dev) {
 		dev_err(&pdev->dev, "Failed to allocate memory\n");
@@ -131,7 +127,7 @@ err_free_mem:
 	return error;
 }
 
-static int da9052_onkey_remove(struct platform_device *pdev)
+static void da9052_onkey_remove(struct platform_device *pdev)
 {
 	struct da9052_onkey *onkey = platform_get_drvdata(pdev);
 
@@ -140,14 +136,12 @@ static int da9052_onkey_remove(struct platform_device *pdev)
 
 	input_unregister_device(onkey->input);
 	kfree(onkey);
-
-	return 0;
 }
 
 static struct platform_driver da9052_onkey_driver = {
 	.probe	= da9052_onkey_probe,
 	.remove	= da9052_onkey_remove,
-	.driver = {
+	.driver	= {
 		.name	= "da9052-onkey",
 	},
 };

@@ -6,8 +6,7 @@
  *    Jan Glauber <jang@linux.vnet.ibm.com>
  */
 
-#define KMSG_COMPONENT "zpci"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "zpci: " fmt
 
 #include <linux/kernel.h>
 #include <linux/seq_file.h>
@@ -48,10 +47,16 @@ static char *pci_fmt2_names[] = {
 	"Maximum work units",
 };
 
+static char *pci_fmt3_names[] = {
+	"Transmitted bytes",
+};
+
 static char *pci_sw_names[] = {
-	"Allocated pages",
 	"Mapped pages",
 	"Unmapped pages",
+	"Global RPCITs",
+	"Sync Map RPCITs",
+	"Sync RPCITs",
 };
 
 static void pci_fmb_show(struct seq_file *m, char *name[], int length,
@@ -66,12 +71,22 @@ static void pci_fmb_show(struct seq_file *m, char *name[], int length,
 static void pci_sw_counter_show(struct seq_file *m)
 {
 	struct zpci_dev *zdev = m->private;
-	atomic64_t *counter = &zdev->allocated_pages;
+	struct zpci_iommu_ctrs *ctrs;
+	atomic64_t *counter;
+	unsigned long flags;
 	int i;
 
+	spin_lock_irqsave(&zdev->dom_lock, flags);
+	ctrs = zpci_get_iommu_ctrs(m->private);
+	if (!ctrs)
+		goto unlock;
+
+	counter = &ctrs->mapped_pages;
 	for (i = 0; i < ARRAY_SIZE(pci_sw_names); i++, counter++)
-		seq_printf(m, "%26s:\t%lu\n", pci_sw_names[i],
+		seq_printf(m, "%26s:\t%llu\n", pci_sw_names[i],
 			   atomic64_read(counter));
+unlock:
+	spin_unlock_irqrestore(&zdev->dom_lock, flags);
 }
 
 static int pci_perf_show(struct seq_file *m, void *v)
@@ -81,15 +96,14 @@ static int pci_perf_show(struct seq_file *m, void *v)
 	if (!zdev)
 		return 0;
 
-	mutex_lock(&zdev->lock);
+	mutex_lock(&zdev->fmb_lock);
 	if (!zdev->fmb) {
-		mutex_unlock(&zdev->lock);
+		mutex_unlock(&zdev->fmb_lock);
 		seq_puts(m, "FMB statistics disabled\n");
 		return 0;
 	}
 
 	/* header */
-	seq_printf(m, "FMB @ %p\n", zdev->fmb);
 	seq_printf(m, "Update interval: %u ms\n", zdev->fmb_update);
 	seq_printf(m, "Samples: %u\n", zdev->fmb->samples);
 	seq_printf(m, "Last update TOD: %Lx\n", zdev->fmb->last_update);
@@ -112,12 +126,16 @@ static int pci_perf_show(struct seq_file *m, void *v)
 		pci_fmb_show(m, pci_fmt2_names, ARRAY_SIZE(pci_fmt2_names),
 			     &zdev->fmb->fmt2.consumed_work_units);
 		break;
+	case 3:
+		pci_fmb_show(m, pci_fmt3_names, ARRAY_SIZE(pci_fmt3_names),
+			     &zdev->fmb->fmt3.tx_bytes);
+		break;
 	default:
 		seq_puts(m, "Unknown format\n");
 	}
 
 	pci_sw_counter_show(m);
-	mutex_unlock(&zdev->lock);
+	mutex_unlock(&zdev->fmb_lock);
 	return 0;
 }
 
@@ -135,7 +153,7 @@ static ssize_t pci_perf_seq_write(struct file *file, const char __user *ubuf,
 	if (rc)
 		return rc;
 
-	mutex_lock(&zdev->lock);
+	mutex_lock(&zdev->fmb_lock);
 	switch (val) {
 	case 0:
 		rc = zpci_fmb_disable_device(zdev);
@@ -144,7 +162,7 @@ static ssize_t pci_perf_seq_write(struct file *file, const char __user *ubuf,
 		rc = zpci_fmb_enable_device(zdev);
 		break;
 	}
-	mutex_unlock(&zdev->lock);
+	mutex_unlock(&zdev->fmb_lock);
 	return rc ? rc : count;
 }
 
@@ -165,21 +183,14 @@ static const struct file_operations debugfs_pci_perf_fops = {
 void zpci_debug_init_device(struct zpci_dev *zdev, const char *name)
 {
 	zdev->debugfs_dev = debugfs_create_dir(name, debugfs_root);
-	if (IS_ERR(zdev->debugfs_dev))
-		zdev->debugfs_dev = NULL;
 
-	zdev->debugfs_perf = debugfs_create_file("statistics",
-				S_IFREG | S_IRUGO | S_IWUSR,
-				zdev->debugfs_dev, zdev,
-				&debugfs_pci_perf_fops);
-	if (IS_ERR(zdev->debugfs_perf))
-		zdev->debugfs_perf = NULL;
+	debugfs_create_file("statistics", S_IFREG | S_IRUGO | S_IWUSR,
+			    zdev->debugfs_dev, zdev, &debugfs_pci_perf_fops);
 }
 
 void zpci_debug_exit_device(struct zpci_dev *zdev)
 {
-	debugfs_remove(zdev->debugfs_perf);
-	debugfs_remove(zdev->debugfs_dev);
+	debugfs_remove_recursive(zdev->debugfs_dev);
 }
 
 int __init zpci_debug_init(void)
@@ -196,7 +207,7 @@ int __init zpci_debug_init(void)
 	if (!pci_debug_err_id)
 		return -EINVAL;
 	debug_register_view(pci_debug_err_id, &debug_hex_ascii_view);
-	debug_set_level(pci_debug_err_id, 6);
+	debug_set_level(pci_debug_err_id, 3);
 
 	debugfs_root = debugfs_create_dir("pci", NULL);
 	return 0;

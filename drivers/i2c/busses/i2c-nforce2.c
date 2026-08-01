@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     SMBus driver for nVidia nForce2 MCP
 
@@ -8,15 +9,6 @@
     SMBus 2.0 driver for AMD-8111 IO-Hub
     Copyright (c) 2002 Vojtech Pavlik
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
 */
 
 /*
@@ -124,20 +116,6 @@ static const struct dmi_system_id nforce2_dmi_blacklist2[] = {
 };
 
 static struct pci_driver nforce2_driver;
-
-/* For multiplexing support, we need a global reference to the 1st
-   SMBus channel */
-#if IS_ENABLED(CONFIG_I2C_NFORCE2_S4985)
-struct i2c_adapter *nforce2_smbus;
-EXPORT_SYMBOL_GPL(nforce2_smbus);
-
-static void nforce2_set_reference(struct i2c_adapter *adap)
-{
-	nforce2_smbus = adap;
-}
-#else
-static inline void nforce2_set_reference(struct i2c_adapter *adap) { }
-#endif
 
 static void nforce2_abort(struct i2c_adapter *adap)
 {
@@ -335,8 +313,8 @@ static int nforce2_probe_smb(struct pci_dev *dev, int bar, int alt_reg,
 		/* Older incarnations of the device used non-standard BARs */
 		u16 iobase;
 
-		if (pci_read_config_word(dev, alt_reg, &iobase)
-		    != PCIBIOS_SUCCESSFUL) {
+		error = pci_read_config_word(dev, alt_reg, &iobase);
+		if (error != PCIBIOS_SUCCESSFUL) {
 			dev_err(&dev->dev, "Error reading PCI config for %s\n",
 				name);
 			return -EIO;
@@ -357,7 +335,7 @@ static int nforce2_probe_smb(struct pci_dev *dev, int bar, int alt_reg,
 		return -EBUSY;
 	}
 	smbus->adapter.owner = THIS_MODULE;
-	smbus->adapter.class = I2C_CLASS_HWMON | I2C_CLASS_SPD;
+	smbus->adapter.class = I2C_CLASS_HWMON;
 	smbus->adapter.algo = &smbus_algorithm;
 	smbus->adapter.algo_data = smbus;
 	smbus->adapter.dev.parent = &dev->dev;
@@ -381,7 +359,7 @@ static int nforce2_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	int res1, res2;
 
 	/* we support 2 SMBus adapters */
-	smbuses = kzalloc(2 * sizeof(struct nforce2_smbus), GFP_KERNEL);
+	smbuses = kzalloc_objs(struct nforce2_smbus, 2);
 	if (!smbuses)
 		return -ENOMEM;
 	pci_set_drvdata(dev, smbuses);
@@ -419,7 +397,6 @@ static int nforce2_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		return -ENODEV;
 	}
 
-	nforce2_set_reference(&smbuses[0].adapter);
 	return 0;
 }
 
@@ -428,7 +405,6 @@ static void nforce2_remove(struct pci_dev *dev)
 {
 	struct nforce2_smbus *smbuses = pci_get_drvdata(dev);
 
-	nforce2_set_reference(NULL);
 	if (smbuses[0].base) {
 		i2c_del_adapter(&smbuses[0].adapter);
 		release_region(smbuses[0].base, smbuses[0].size);

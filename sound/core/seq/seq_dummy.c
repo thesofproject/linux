@@ -1,21 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * ALSA sequencer MIDI-through client
  * Copyright (c) 1999-2000 by Takashi Iwai <tiwai@suse.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/init.h>
@@ -23,6 +9,7 @@
 #include <linux/module.h>
 #include <sound/core.h>
 #include "seq_clientmgr.h"
+#include "seq_memory.h"
 #include <sound/initval.h>
 #include <sound/asoundef.h>
 
@@ -34,15 +21,15 @@
   are redirected to output port immediately.
   The routing can be done via aconnect program in alsa-utils.
 
-  Each client has a static client number 62 (= SNDRV_SEQ_CLIENT_DUMMY).
+  Each client has a static client number 14 (= SNDRV_SEQ_CLIENT_DUMMY).
   If you want to auto-load this module, you may add the following alias
   in your /etc/conf.modules file.
 
-	alias snd-seq-client-62  snd-seq-dummy
+	alias snd-seq-client-14  snd-seq-dummy
 
-  The module is loaded on demand for client 62, or /proc/asound/seq/
+  The module is loaded on demand for client 14, or /proc/asound/seq/
   is accessed.  If you don't need this module to be loaded, alias
-  snd-seq-client-62 as "off".  This will help modprobe.
+  snd-seq-client-14 as "off".  This will help modprobe.
 
   The number of ports to be created can be specified via the module
   parameter "ports".  For example, to create four ports, add the
@@ -72,6 +59,12 @@ MODULE_PARM_DESC(ports, "number of ports to be created");
 module_param(duplex, bool, 0444);
 MODULE_PARM_DESC(duplex, "create DUPLEX ports");
 
+#if IS_ENABLED(CONFIG_SND_SEQ_UMP)
+static int ump;
+module_param(ump, int, 0444);
+MODULE_PARM_DESC(ump, "UMP conversion (0: no convert, 1: MIDI 1.0, 2: MIDI 2.0)");
+#endif
+
 struct snd_seq_dummy_port {
 	int client;
 	int port;
@@ -79,7 +72,7 @@ struct snd_seq_dummy_port {
 	int connect;
 };
 
-static int my_client = -1;
+static int my_client __ro_after_init = -1;
 
 /*
  * event input callback - just redirect events to subscribers
@@ -89,19 +82,21 @@ dummy_input(struct snd_seq_event *ev, int direct, void *private_data,
 	    int atomic, int hop)
 {
 	struct snd_seq_dummy_port *p;
-	struct snd_seq_event tmpev;
+	union __snd_seq_event tmpev;
+	size_t size;
 
 	p = private_data;
 	if (ev->source.client == SNDRV_SEQ_CLIENT_SYSTEM ||
 	    ev->type == SNDRV_SEQ_EVENT_KERNEL_ERROR)
 		return 0; /* ignore system messages */
-	tmpev = *ev;
+	size = snd_seq_event_packet_size(ev);
+	memcpy(&tmpev, ev, size);
 	if (p->duplex)
-		tmpev.source.port = p->connect;
+		tmpev.legacy.source.port = p->connect;
 	else
-		tmpev.source.port = p->port;
-	tmpev.dest.client = SNDRV_SEQ_ADDRESS_SUBSCRIBERS;
-	return snd_seq_kernel_client_dispatch(p->client, &tmpev, atomic, hop);
+		tmpev.legacy.source.port = p->port;
+	tmpev.legacy.dest.client = SNDRV_SEQ_ADDRESS_SUBSCRIBERS;
+	return snd_seq_kernel_client_dispatch(p->client, &tmpev.legacy, atomic, hop);
 }
 
 /*
@@ -123,7 +118,8 @@ create_port(int idx, int type)
 	struct snd_seq_port_callback pcb;
 	struct snd_seq_dummy_port *rec;
 
-	if ((rec = kzalloc(sizeof(*rec), GFP_KERNEL)) == NULL)
+	rec = kzalloc_obj(*rec);
+	if (!rec)
 		return NULL;
 
 	rec->client = my_client;
@@ -140,6 +136,7 @@ create_port(int idx, int type)
 	pinfo.capability |= SNDRV_SEQ_PORT_CAP_WRITE | SNDRV_SEQ_PORT_CAP_SUBS_WRITE;
 	if (duplex)
 		pinfo.capability |= SNDRV_SEQ_PORT_CAP_DUPLEX;
+	pinfo.direction = SNDRV_SEQ_PORT_DIR_BIDIRECTION;
 	pinfo.type = SNDRV_SEQ_PORT_TYPE_MIDI_GENERIC
 		| SNDRV_SEQ_PORT_TYPE_SOFTWARE
 		| SNDRV_SEQ_PORT_TYPE_PORT;
@@ -164,6 +161,9 @@ static int __init
 register_client(void)
 {
 	struct snd_seq_dummy_port *rec1, *rec2;
+#if IS_ENABLED(CONFIG_SND_SEQ_UMP)
+	struct snd_seq_client *client;
+#endif
 	int i;
 
 	if (ports < 1) {
@@ -176,6 +176,25 @@ register_client(void)
 						 "Midi Through");
 	if (my_client < 0)
 		return my_client;
+
+#if IS_ENABLED(CONFIG_SND_SEQ_UMP)
+	client = snd_seq_kernel_client_get(my_client);
+	if (!client)
+		return -EINVAL;
+	switch (ump) {
+	case 1:
+		client->midi_version = SNDRV_SEQ_CLIENT_UMP_MIDI_1_0;
+		break;
+	case 2:
+		client->midi_version = SNDRV_SEQ_CLIENT_UMP_MIDI_2_0;
+		break;
+	default:
+		/* don't convert events but just pass-through */
+		client->filter = SNDRV_SEQ_FILTER_NO_CONVERT;
+		break;
+	}
+	snd_seq_kernel_client_put(client);
+#endif
 
 	/* create ports */
 	for (i = 0; i < ports; i++) {

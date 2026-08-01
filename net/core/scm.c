@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* scm.c - Socket level control messages processing.
  *
  * Author:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
  *              Alignment and value checking mods by Craig Metz
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  */
 
 #include <linux/module.h>
@@ -27,8 +23,12 @@
 #include <linux/security.h>
 #include <linux/pid_namespace.h>
 #include <linux/pid.h>
+#include <uapi/linux/pidfd.h>
+#include <linux/pidfs.h>
 #include <linux/nsproxy.h>
 #include <linux/slab.h>
+#include <linux/errqueue.h>
+#include <linux/io_uring.h>
 
 #include <linux/uaccess.h>
 
@@ -38,6 +38,7 @@
 #include <net/compat.h>
 #include <net/scm.h>
 #include <net/cls_cgroup.h>
+#include <net/af_unix.h>
 
 
 /*
@@ -82,13 +83,20 @@ static int scm_fp_copy(struct cmsghdr *cmsg, struct scm_fp_list **fplp)
 
 	if (!fpl)
 	{
-		fpl = kmalloc(sizeof(struct scm_fp_list), GFP_KERNEL);
+		fpl = kmalloc_obj(struct scm_fp_list, GFP_KERNEL_ACCOUNT);
 		if (!fpl)
 			return -ENOMEM;
 		*fplp = fpl;
 		fpl->count = 0;
+		fpl->count_unix = 0;
 		fpl->max = SCM_MAX_FD;
 		fpl->user = NULL;
+#if IS_ENABLED(CONFIG_UNIX)
+		fpl->inflight = false;
+		fpl->dead = false;
+		fpl->edges = NULL;
+		INIT_LIST_HEAD(&fpl->vertices);
+#endif
 	}
 	fpp = &fpl->fp[fpl->count];
 
@@ -106,6 +114,14 @@ static int scm_fp_copy(struct cmsghdr *cmsg, struct scm_fp_list **fplp)
 
 		if (fd < 0 || !(file = fget_raw(fd)))
 			return -EBADF;
+		/* don't allow io_uring files */
+		if (io_is_uring_fops(file)) {
+			fput(file);
+			return -EINVAL;
+		}
+		if (unix_get_socket(file))
+			fpl->count_unix++;
+
 		*fpp++ = file;
 		fpl->count++;
 	}
@@ -131,8 +147,25 @@ void __scm_destroy(struct scm_cookie *scm)
 }
 EXPORT_SYMBOL(__scm_destroy);
 
+static inline int scm_replace_pid(struct scm_cookie *scm, struct pid *pid)
+{
+	int err;
+
+	/* drop all previous references */
+	scm_destroy_cred(scm);
+
+	err = pidfs_register_pid(pid);
+	if (unlikely(err))
+		return err;
+
+	scm->pid = pid;
+	scm->creds.pid = pid_vnr(pid);
+	return 0;
+}
+
 int __scm_send(struct socket *sock, struct msghdr *msg, struct scm_cookie *p)
 {
+	const struct proto_ops *ops = READ_ONCE(sock->ops);
 	struct cmsghdr *cmsg;
 	int err;
 
@@ -156,7 +189,7 @@ int __scm_send(struct socket *sock, struct msghdr *msg, struct scm_cookie *p)
 		switch (cmsg->cmsg_type)
 		{
 		case SCM_RIGHTS:
-			if (!sock->ops || sock->ops->family != PF_UNIX)
+			if (!ops || ops->family != PF_UNIX)
 				goto error;
 			err=scm_fp_copy(cmsg, &p->fp);
 			if (err<0)
@@ -174,15 +207,21 @@ int __scm_send(struct socket *sock, struct msghdr *msg, struct scm_cookie *p)
 			if (err)
 				goto error;
 
-			p->creds.pid = creds.pid;
 			if (!p->pid || pid_vnr(p->pid) != creds.pid) {
 				struct pid *pid;
 				err = -ESRCH;
 				pid = find_get_pid(creds.pid);
 				if (!pid)
 					goto error;
-				put_pid(p->pid);
-				p->pid = pid;
+
+				/* pass a struct pid reference from
+				 * find_get_pid() to scm_replace_pid().
+				 */
+				err = scm_replace_pid(p, pid);
+				if (err) {
+					put_pid(pid);
+					goto error;
+				}
 			}
 
 			err = -EINVAL;
@@ -215,16 +254,12 @@ EXPORT_SYMBOL(__scm_send);
 
 int put_cmsg(struct msghdr * msg, int level, int type, int len, void *data)
 {
-	struct cmsghdr __user *cm
-		= (__force struct cmsghdr __user *)msg->msg_control;
-	struct cmsghdr cmhdr;
 	int cmlen = CMSG_LEN(len);
-	int err;
 
-	if (MSG_CMSG_COMPAT & msg->msg_flags)
+	if (msg->msg_flags & MSG_CMSG_COMPAT)
 		return put_cmsg_compat(msg, level, type, len, data);
 
-	if (cm==NULL || msg->msg_controllen < sizeof(*cm)) {
+	if (!msg->msg_control || msg->msg_controllen < sizeof(struct cmsghdr)) {
 		msg->msg_flags |= MSG_CTRUNC;
 		return 0; /* XXX: return error? check spec. */
 	}
@@ -232,98 +267,137 @@ int put_cmsg(struct msghdr * msg, int level, int type, int len, void *data)
 		msg->msg_flags |= MSG_CTRUNC;
 		cmlen = msg->msg_controllen;
 	}
-	cmhdr.cmsg_level = level;
-	cmhdr.cmsg_type = type;
-	cmhdr.cmsg_len = cmlen;
 
-	err = -EFAULT;
-	if (copy_to_user(cm, &cmhdr, sizeof cmhdr))
-		goto out;
-	if (copy_to_user(CMSG_DATA(cm), data, cmlen - sizeof(struct cmsghdr)))
-		goto out;
-	cmlen = CMSG_SPACE(len);
-	if (msg->msg_controllen < cmlen)
-		cmlen = msg->msg_controllen;
-	msg->msg_control += cmlen;
+	if (msg->msg_control_is_user) {
+		struct cmsghdr __user *cm = msg->msg_control_user;
+
+		check_object_size(data, cmlen - sizeof(*cm), true);
+
+		scoped_user_write_access_size(cm, cmlen, efault) {
+			unsafe_put_user(cmlen, &cm->cmsg_len, efault);
+			unsafe_put_user(level, &cm->cmsg_level, efault);
+			unsafe_put_user(type, &cm->cmsg_type, efault);
+			unsafe_copy_to_user(CMSG_USER_DATA(cm), data,
+					    cmlen - sizeof(*cm), efault);
+		}
+	} else {
+		struct cmsghdr *cm = msg->msg_control;
+
+		cm->cmsg_level = level;
+		cm->cmsg_type = type;
+		cm->cmsg_len = cmlen;
+		memcpy(CMSG_DATA(cm), data, cmlen - sizeof(*cm));
+	}
+
+	cmlen = min(CMSG_SPACE(len), msg->msg_controllen);
+	if (msg->msg_control_is_user)
+		msg->msg_control_user += cmlen;
+	else
+		msg->msg_control += cmlen;
 	msg->msg_controllen -= cmlen;
-	err = 0;
-out:
-	return err;
+	return 0;
+
+efault:
+	return -EFAULT;
 }
 EXPORT_SYMBOL(put_cmsg);
 
+int put_cmsg_notrunc(struct msghdr *msg, int level, int type, int len,
+		     void *data)
+{
+	/* Don't produce truncated CMSGs */
+	if (!msg->msg_control || msg->msg_controllen < CMSG_LEN(len))
+		return -ETOOSMALL;
+
+	return put_cmsg(msg, level, type, len, data);
+}
+
+void put_cmsg_scm_timestamping64(struct msghdr *msg, struct scm_timestamping_internal *tss_internal)
+{
+	struct scm_timestamping64 tss;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(tss.ts); i++) {
+		struct timespec64 tv = ktime_to_timespec64(tss_internal->ts[i]);
+
+		tss.ts[i].tv_sec = tv.tv_sec;
+		tss.ts[i].tv_nsec = tv.tv_nsec;
+	}
+
+	put_cmsg(msg, SOL_SOCKET, SO_TIMESTAMPING_NEW, sizeof(tss), &tss);
+}
+EXPORT_SYMBOL(put_cmsg_scm_timestamping64);
+
+void put_cmsg_scm_timestamping(struct msghdr *msg, struct scm_timestamping_internal *tss_internal)
+{
+	struct scm_timestamping tss;
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(tss.ts); i++) {
+		struct timespec64 tv = ktime_to_timespec64(tss_internal->ts[i]);
+
+		tss.ts[i].tv_sec = tv.tv_sec;
+		tss.ts[i].tv_nsec = tv.tv_nsec;
+	}
+
+	put_cmsg(msg, SOL_SOCKET, SO_TIMESTAMPING_OLD, sizeof(tss), &tss);
+}
+EXPORT_SYMBOL(put_cmsg_scm_timestamping);
+
+static int scm_max_fds(struct msghdr *msg)
+{
+	if (msg->msg_controllen <= sizeof(struct cmsghdr))
+		return 0;
+	return (msg->msg_controllen - sizeof(struct cmsghdr)) / sizeof(int);
+}
+
 void scm_detach_fds(struct msghdr *msg, struct scm_cookie *scm)
 {
-	struct cmsghdr __user *cm
-		= (__force struct cmsghdr __user*)msg->msg_control;
-
-	int fdmax = 0;
-	int fdnum = scm->fp->count;
-	struct file **fp = scm->fp->fp;
-	int __user *cmfptr;
+	struct cmsghdr __user *cm =
+		(__force struct cmsghdr __user *)msg->msg_control_user;
+	unsigned int o_flags = (msg->msg_flags & MSG_CMSG_CLOEXEC) ? O_CLOEXEC : 0;
+	int fdmax = min_t(int, scm_max_fds(msg), scm->fp->count);
+	int __user *cmsg_data = CMSG_USER_DATA(cm);
 	int err = 0, i;
 
-	if (MSG_CMSG_COMPAT & msg->msg_flags) {
+	/* no use for FD passing from kernel space callers */
+	if (WARN_ON_ONCE(!msg->msg_control_is_user))
+		return;
+
+	if (msg->msg_flags & MSG_CMSG_COMPAT) {
 		scm_detach_fds_compat(msg, scm);
 		return;
 	}
 
-	if (msg->msg_controllen > sizeof(struct cmsghdr))
-		fdmax = ((msg->msg_controllen - sizeof(struct cmsghdr))
-			 / sizeof(int));
-
-	if (fdnum < fdmax)
-		fdmax = fdnum;
-
-	for (i=0, cmfptr=(__force int __user *)CMSG_DATA(cm); i<fdmax;
-	     i++, cmfptr++)
-	{
-		struct socket *sock;
-		int new_fd;
-		err = security_file_receive(fp[i]);
-		if (err)
-			break;
-		err = get_unused_fd_flags(MSG_CMSG_CLOEXEC & msg->msg_flags
-					  ? O_CLOEXEC : 0);
+	for (i = 0; i < fdmax; i++) {
+		err = scm_recv_one_fd(scm->fp->fp[i], cmsg_data + i, o_flags);
 		if (err < 0)
 			break;
-		new_fd = err;
-		err = put_user(new_fd, cmfptr);
-		if (err) {
-			put_unused_fd(new_fd);
-			break;
-		}
-		/* Bump the usage count and install the file. */
-		sock = sock_from_file(fp[i], &err);
-		if (sock) {
-			sock_update_netprioidx(&sock->sk->sk_cgrp_data);
-			sock_update_classid(&sock->sk->sk_cgrp_data);
-		}
-		fd_install(new_fd, get_file(fp[i]));
 	}
 
-	if (i > 0)
-	{
-		int cmlen = CMSG_LEN(i*sizeof(int));
+	if (i > 0) {
+		int cmlen = CMSG_LEN(i * sizeof(int));
+
 		err = put_user(SOL_SOCKET, &cm->cmsg_level);
 		if (!err)
 			err = put_user(SCM_RIGHTS, &cm->cmsg_type);
 		if (!err)
 			err = put_user(cmlen, &cm->cmsg_len);
 		if (!err) {
-			cmlen = CMSG_SPACE(i*sizeof(int));
+			cmlen = CMSG_SPACE(i * sizeof(int));
 			if (msg->msg_controllen < cmlen)
 				cmlen = msg->msg_controllen;
-			msg->msg_control += cmlen;
+			msg->msg_control_user += cmlen;
 			msg->msg_controllen -= cmlen;
 		}
 	}
-	if (i < fdnum || (fdnum && fdmax <= 0))
+
+	if (i < scm->fp->count || (scm->fp->count && fdmax <= 0))
 		msg->msg_flags |= MSG_CTRUNC;
 
 	/*
-	 * All of the files that fit in the message have had their
-	 * usage counts incremented, so we just free the list.
+	 * All of the files that fit in the message have had their usage counts
+	 * incremented, so we just free the list.
 	 */
 	__scm_destroy(scm);
 }
@@ -338,13 +412,141 @@ struct scm_fp_list *scm_fp_dup(struct scm_fp_list *fpl)
 		return NULL;
 
 	new_fpl = kmemdup(fpl, offsetof(struct scm_fp_list, fp[fpl->count]),
-			  GFP_KERNEL);
+			  GFP_KERNEL_ACCOUNT);
 	if (new_fpl) {
 		for (i = 0; i < fpl->count; i++)
 			get_file(fpl->fp[i]);
+
 		new_fpl->max = new_fpl->count;
 		new_fpl->user = get_uid(fpl->user);
+#if IS_ENABLED(CONFIG_UNIX)
+		new_fpl->inflight = false;
+		new_fpl->edges = NULL;
+		INIT_LIST_HEAD(&new_fpl->vertices);
+#endif
 	}
 	return new_fpl;
 }
 EXPORT_SYMBOL(scm_fp_dup);
+
+#ifdef CONFIG_SECURITY_NETWORK
+static void scm_passec(struct sock *sk, struct msghdr *msg, struct scm_cookie *scm)
+{
+	struct lsm_context ctx;
+	int err;
+
+	if (sk->sk_scm_security) {
+		err = security_secid_to_secctx(scm->secid, &ctx);
+
+		if (err >= 0) {
+			put_cmsg(msg, SOL_SOCKET, SCM_SECURITY, ctx.len,
+				 ctx.context);
+
+			security_release_secctx(&ctx);
+		}
+	}
+}
+
+static bool scm_has_secdata(struct sock *sk)
+{
+	return sk->sk_scm_security;
+}
+#else
+static void scm_passec(struct sock *sk, struct msghdr *msg, struct scm_cookie *scm)
+{
+}
+
+static bool scm_has_secdata(struct sock *sk)
+{
+	return false;
+}
+#endif
+
+static void scm_pidfd_recv(struct msghdr *msg, struct scm_cookie *scm)
+{
+	struct file *pidfd_file = NULL;
+	int len, pidfd;
+
+	/* put_cmsg() doesn't return an error if CMSG is truncated,
+	 * that's why we need to opencode these checks here.
+	 */
+	if (msg->msg_flags & MSG_CMSG_COMPAT)
+		len = sizeof(struct compat_cmsghdr) + sizeof(int);
+	else
+		len = sizeof(struct cmsghdr) + sizeof(int);
+
+	if (msg->msg_controllen < len) {
+		msg->msg_flags |= MSG_CTRUNC;
+		return;
+	}
+
+	if (!scm->pid)
+		return;
+
+	pidfd = pidfd_prepare(scm->pid, PIDFD_STALE, &pidfd_file);
+
+	if (put_cmsg(msg, SOL_SOCKET, SCM_PIDFD, sizeof(int), &pidfd)) {
+		if (pidfd_file) {
+			put_unused_fd(pidfd);
+			fput(pidfd_file);
+		}
+
+		return;
+	}
+
+	if (pidfd_file)
+		fd_install(pidfd, pidfd_file);
+}
+
+static bool __scm_recv_common(struct sock *sk, struct msghdr *msg,
+			      struct scm_cookie *scm, int flags)
+{
+	if (!msg->msg_control) {
+		if (sk->sk_scm_credentials || sk->sk_scm_pidfd ||
+		    scm->fp || scm_has_secdata(sk))
+			msg->msg_flags |= MSG_CTRUNC;
+
+		scm_destroy(scm);
+		return false;
+	}
+
+	if (sk->sk_scm_credentials) {
+		struct user_namespace *current_ns = current_user_ns();
+		struct ucred ucreds = {
+			.pid = scm->creds.pid,
+			.uid = from_kuid_munged(current_ns, scm->creds.uid),
+			.gid = from_kgid_munged(current_ns, scm->creds.gid),
+		};
+
+		put_cmsg(msg, SOL_SOCKET, SCM_CREDENTIALS, sizeof(ucreds), &ucreds);
+	}
+
+	scm_passec(sk, msg, scm);
+
+	if (scm->fp)
+		scm_detach_fds(msg, scm);
+
+	return true;
+}
+
+void scm_recv(struct socket *sock, struct msghdr *msg,
+	      struct scm_cookie *scm, int flags)
+{
+	if (!__scm_recv_common(sock->sk, msg, scm, flags))
+		return;
+
+	scm_destroy_cred(scm);
+}
+EXPORT_SYMBOL(scm_recv);
+
+void scm_recv_unix(struct socket *sock, struct msghdr *msg,
+		   struct scm_cookie *scm, int flags)
+{
+	if (!__scm_recv_common(sock->sk, msg, scm, flags))
+		return;
+
+	if (sock->sk->sk_scm_pidfd)
+		scm_pidfd_recv(msg, scm);
+
+	scm_destroy_cred(scm);
+}

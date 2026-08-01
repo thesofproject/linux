@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2015 Thomas Meyer (thomas@m3y3r.de)
  * Copyright (C) 2000 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
- * Licensed under the GPL
  */
 
 #include <stdio.h>
@@ -11,19 +11,17 @@
 #include <signal.h>
 #include <string.h>
 #include <sys/resource.h>
+#include <sys/personality.h>
 #include <as-layout.h>
 #include <init.h>
 #include <kern_util.h>
 #include <os.h>
 #include <um_malloc.h>
+#include "internal.h"
 
-#define PGD_BOUND (4 * 1024 * 1024)
 #define STACKSIZE (8 * 1024 * 1024)
-#define THREAD_NAME_LEN (256)
 
-long elf_aux_hwcap;
-
-static void set_stklim(void)
+static void __init set_stklim(void)
 {
 	struct rlimit lim;
 
@@ -40,24 +38,13 @@ static void set_stklim(void)
 	}
 }
 
-static __init void do_uml_initcalls(void)
-{
-	initcall_t *call;
-
-	call = &__uml_initcall_start;
-	while (call < &__uml_initcall_end) {
-		(*call)();
-		call++;
-	}
-}
-
 static void last_ditch_exit(int sig)
 {
 	uml_cleanup();
 	exit(1);
 }
 
-static void install_fatal_handler(int sig)
+static void __init install_fatal_handler(int sig)
 {
 	struct sigaction action;
 
@@ -82,7 +69,7 @@ static void install_fatal_handler(int sig)
 
 #define UML_LIB_PATH	":" OS_LIB_PATH "/uml"
 
-static void setup_env_path(void)
+static void __init setup_env_path(void)
 {
 	char *new_path = NULL;
 	char *old_path = NULL;
@@ -113,12 +100,25 @@ static void setup_env_path(void)
 	}
 }
 
-extern void scan_elf_aux( char **envp);
-
 int __init main(int argc, char **argv, char **envp)
 {
 	char **new_argv;
 	int ret, i, err;
+
+	/* Disable randomization and re-exec if it was changed successfully */
+	ret = personality(PER_LINUX | ADDR_NO_RANDOMIZE);
+	if (ret >= 0 && (ret & (PER_LINUX | ADDR_NO_RANDOMIZE)) !=
+			 (PER_LINUX | ADDR_NO_RANDOMIZE)) {
+		char buf[4096] = {};
+		ssize_t ret;
+
+		ret = readlink("/proc/self/exe", buf, sizeof(buf));
+		if (ret < 0 || ret >= sizeof(buf)) {
+			perror("readlink failure");
+			exit(1);
+		}
+		execve(buf, argv, envp);
+	}
 
 	set_stklim();
 
@@ -147,13 +147,10 @@ int __init main(int argc, char **argv, char **envp)
 	install_fatal_handler(SIGINT);
 	install_fatal_handler(SIGTERM);
 
-#ifdef CONFIG_ARCH_REUSE_HOST_VSYSCALL_AREA
 	scan_elf_aux(envp);
-#endif
 
-	do_uml_initcalls();
 	change_sig(SIGPIPE, 0);
-	ret = linux_main(argc, argv);
+	ret = linux_main(argc, argv, envp);
 
 	/*
 	 * Disable SIGPROF - I have no idea why libc doesn't do this or turn
@@ -170,7 +167,7 @@ int __init main(int argc, char **argv, char **envp)
 	 */
 
 	/* stop timers and set timer signal to be ignored */
-	os_timer_disable();
+	os_timer_disable(0);
 
 	/* disable SIGIO for the fds and set SIGIO to be ignored */
 	err = deactivate_all_fds();
@@ -195,6 +192,12 @@ int __init main(int argc, char **argv, char **envp)
 }
 
 extern void *__real_malloc(int);
+extern void __real_free(void *);
+
+/* workaround for -Wmissing-prototypes warnings */
+void *__wrap_malloc(int size);
+void *__wrap_calloc(int n, int size);
+void __wrap_free(void *ptr);
 
 void *__wrap_malloc(int size)
 {
@@ -226,10 +229,6 @@ void *__wrap_calloc(int n, int size)
 	memset(ptr, 0, n * size);
 	return ptr;
 }
-
-extern void __real_free(void *);
-
-extern unsigned long high_physmem;
 
 void __wrap_free(void *ptr)
 {

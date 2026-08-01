@@ -31,19 +31,42 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include <linux/anon_inodes.h>
+#include <linux/dma-fence.h>
+#include <linux/export.h>
+#include <linux/file.h>
+#include <linux/module.h>
+#include <linux/pci.h>
 #include <linux/poll.h>
 #include <linux/slab.h>
-#include <linux/module.h>
+#include <linux/vga_switcheroo.h>
 
+#include <drm/drm_client_event.h>
+#include <drm/drm_drv.h>
 #include <drm/drm_file.h>
-#include <drm/drmP.h>
+#include <drm/drm_gem.h>
+#include <drm/drm_print.h>
+#include <drm/drm_debugfs.h>
 
-#include "drm_legacy.h"
-#include "drm_internal.h"
 #include "drm_crtc_internal.h"
+#include "drm_internal.h"
 
 /* from BKL pushdown */
 DEFINE_MUTEX(drm_global_mutex);
+
+bool drm_dev_needs_global_mutex(struct drm_device *dev)
+{
+	/*
+	 * The deprecated ->load callback must be called after the driver is
+	 * already registered. This means such drivers rely on the BKL to make
+	 * sure an open can't proceed until the driver is actually fully set up.
+	 * Similar hilarity holds for the unload callback.
+	 */
+	if (dev->driver->load || dev->driver->unload)
+		return true;
+
+	return false;
+}
 
 /**
  * DOC: file operations
@@ -69,10 +92,7 @@ DEFINE_MUTEX(drm_global_mutex);
  * drm_send_event() as the main starting points.
  *
  * The memory mapping implementation will vary depending on how the driver
- * manages memory. Legacy drivers will use the deprecated drm_legacy_mmap()
- * function, modern drivers should use one of the provided memory-manager
- * specific implementations. For GEM-based drivers this is drm_gem_mmap(), and
- * for drivers which use the CMA GEM helpers it's drm_gem_cma_mmap().
+ * manages memory. For GEM-based drivers this is drm_gem_mmap().
  *
  * No other file operations are supported by the DRM userspace API. Overall the
  * following is an example &file_operations structure::
@@ -85,12 +105,11 @@ DEFINE_MUTEX(drm_global_mutex);
  *             .compat_ioctl = drm_compat_ioctl, // NULL if CONFIG_COMPAT=n
  *             .poll = drm_poll,
  *             .read = drm_read,
- *             .llseek = no_llseek,
  *             .mmap = drm_gem_mmap,
  *     };
  *
  * For plain GEM based drivers there is the DEFINE_DRM_GEM_FOPS() macro, and for
- * CMA based drivers there is the DEFINE_DRM_GEM_CMA_FOPS() macro to make this
+ * DMA based drivers there is the DEFINE_DRM_GEM_DMA_FOPS() macro to make this
  * simpler.
  *
  * The driver's &file_operations must be stored in &drm_driver.fops.
@@ -99,200 +118,82 @@ DEFINE_MUTEX(drm_global_mutex);
  * :ref:`IOCTL support in the userland interfaces chapter<drm_driver_ioctl>`.
  */
 
-static int drm_open_helper(struct file *filp, struct drm_minor *minor);
-
-static int drm_setup(struct drm_device * dev)
-{
-	int ret;
-
-	if (dev->driver->firstopen &&
-	    drm_core_check_feature(dev, DRIVER_LEGACY)) {
-		ret = dev->driver->firstopen(dev);
-		if (ret != 0)
-			return ret;
-	}
-
-	ret = drm_legacy_dma_setup(dev);
-	if (ret < 0)
-		return ret;
-
-
-	DRM_DEBUG("\n");
-	return 0;
-}
-
 /**
- * drm_open - open method for DRM file
- * @inode: device inode
- * @filp: file pointer.
+ * drm_file_alloc - allocate file context
+ * @minor: minor to allocate on
  *
- * This function must be used by drivers as their &file_operations.open method.
- * It looks up the correct DRM device and instantiates all the per-file
- * resources for it. It also calls the &drm_driver.open driver callback.
+ * This allocates a new DRM file context. It is not linked into any context and
+ * can be used by the caller freely. Note that the context keeps a pointer to
+ * @minor, so it must be freed before @minor is.
  *
  * RETURNS:
- *
- * 0 on success or negative errno value on falure.
+ * Pointer to newly allocated context, ERR_PTR on failure.
  */
-int drm_open(struct inode *inode, struct file *filp)
+struct drm_file *drm_file_alloc(struct drm_minor *minor)
 {
-	struct drm_device *dev;
-	struct drm_minor *minor;
-	int retcode;
-	int need_setup = 0;
-
-	minor = drm_minor_acquire(iminor(inode));
-	if (IS_ERR(minor))
-		return PTR_ERR(minor);
-
-	dev = minor->dev;
-	if (!dev->open_count++)
-		need_setup = 1;
-
-	/* share address_space across all char-devs of a single device */
-	filp->f_mapping = dev->anon_inode->i_mapping;
-
-	retcode = drm_open_helper(filp, minor);
-	if (retcode)
-		goto err_undo;
-	if (need_setup) {
-		retcode = drm_setup(dev);
-		if (retcode)
-			goto err_undo;
-	}
-	return 0;
-
-err_undo:
-	dev->open_count--;
-	drm_minor_release(minor);
-	return retcode;
-}
-EXPORT_SYMBOL(drm_open);
-
-/*
- * Check whether DRI will run on this CPU.
- *
- * \return non-zero if the DRI will run on this CPU, or zero otherwise.
- */
-static int drm_cpu_valid(void)
-{
-#if defined(__sparc__) && !defined(__sparc_v9__)
-	return 0;		/* No cmpxchg before v9 sparc. */
-#endif
-	return 1;
-}
-
-/*
- * Called whenever a process opens /dev/drm.
- *
- * \param filp file pointer.
- * \param minor acquired minor-object.
- * \return zero on success or a negative number on failure.
- *
- * Creates and initializes a drm_file structure for the file private data in \p
- * filp and add it into the double linked list in \p dev.
- */
-static int drm_open_helper(struct file *filp, struct drm_minor *minor)
-{
+	static atomic64_t ident = ATOMIC64_INIT(0);
 	struct drm_device *dev = minor->dev;
-	struct drm_file *priv;
+	struct drm_file *file;
 	int ret;
 
-	if (filp->f_flags & O_EXCL)
-		return -EBUSY;	/* No exclusive opens */
-	if (!drm_cpu_valid())
-		return -EINVAL;
-	if (dev->switch_power_state != DRM_SWITCH_POWER_ON && dev->switch_power_state != DRM_SWITCH_POWER_DYNAMIC_OFF)
-		return -EINVAL;
+	file = kzalloc_obj(*file);
+	if (!file)
+		return ERR_PTR(-ENOMEM);
 
-	DRM_DEBUG("pid = %d, minor = %d\n", task_pid_nr(current), minor->index);
-
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
-	if (!priv)
-		return -ENOMEM;
-
-	filp->private_data = priv;
-	filp->f_mode |= FMODE_UNSIGNED_OFFSET;
-	priv->filp = filp;
-	priv->pid = get_pid(task_pid(current));
-	priv->minor = minor;
+	/* Get a unique identifier for fdinfo: */
+	file->client_id = atomic64_inc_return(&ident);
+	rcu_assign_pointer(file->pid, get_pid(task_tgid(current)));
+	file->minor = minor;
 
 	/* for compatibility root is always authenticated */
-	priv->authenticated = capable(CAP_SYS_ADMIN);
-	priv->lock_count = 0;
+	file->authenticated = capable(CAP_SYS_ADMIN);
 
-	INIT_LIST_HEAD(&priv->lhead);
-	INIT_LIST_HEAD(&priv->fbs);
-	mutex_init(&priv->fbs_lock);
-	INIT_LIST_HEAD(&priv->blobs);
-	INIT_LIST_HEAD(&priv->pending_event_list);
-	INIT_LIST_HEAD(&priv->event_list);
-	init_waitqueue_head(&priv->event_wait);
-	priv->event_space = 4096; /* set aside 4k for event buffer */
+	INIT_LIST_HEAD(&file->lhead);
+	INIT_LIST_HEAD(&file->fbs);
+	mutex_init(&file->fbs_lock);
+	INIT_LIST_HEAD(&file->blobs);
+	INIT_LIST_HEAD(&file->pending_event_list);
+	INIT_LIST_HEAD(&file->event_list);
+	init_waitqueue_head(&file->event_wait);
+	file->event_space = 4096; /* set aside 4k for event buffer */
 
-	mutex_init(&priv->event_read_lock);
+	spin_lock_init(&file->master_lookup_lock);
+	mutex_init(&file->event_read_lock);
+	mutex_init(&file->client_name_lock);
 
 	if (drm_core_check_feature(dev, DRIVER_GEM))
-		drm_gem_open(dev, priv);
+		drm_gem_open(dev, file);
 
 	if (drm_core_check_feature(dev, DRIVER_SYNCOBJ))
-		drm_syncobj_open(priv);
+		drm_syncobj_open(file);
 
-	if (drm_core_check_feature(dev, DRIVER_PRIME))
-		drm_prime_init_file_private(&priv->prime);
+	drm_prime_init_file_private(&file->prime);
+
+	if (!drm_core_check_feature(dev, DRIVER_COMPUTE_ACCEL))
+		drm_debugfs_clients_add(file);
 
 	if (dev->driver->open) {
-		ret = dev->driver->open(dev, priv);
+		ret = dev->driver->open(dev, file);
 		if (ret < 0)
 			goto out_prime_destroy;
 	}
 
-	if (drm_is_primary_client(priv)) {
-		ret = drm_master_open(priv);
-		if (ret)
-			goto out_close;
-	}
+	return file;
 
-	mutex_lock(&dev->filelist_mutex);
-	list_add(&priv->lhead, &dev->filelist);
-	mutex_unlock(&dev->filelist_mutex);
-
-#ifdef __alpha__
-	/*
-	 * Default the hose
-	 */
-	if (!dev->hose) {
-		struct pci_dev *pci_dev;
-		pci_dev = pci_get_class(PCI_CLASS_DISPLAY_VGA << 8, NULL);
-		if (pci_dev) {
-			dev->hose = pci_dev->sysdata;
-			pci_dev_put(pci_dev);
-		}
-		if (!dev->hose) {
-			struct pci_bus *b = list_entry(pci_root_buses.next,
-				struct pci_bus, node);
-			if (b)
-				dev->hose = b->sysdata;
-		}
-	}
-#endif
-
-	return 0;
-
-out_close:
-	if (dev->driver->postclose)
-		dev->driver->postclose(dev, priv);
 out_prime_destroy:
-	if (drm_core_check_feature(dev, DRIVER_PRIME))
-		drm_prime_destroy_file_private(&priv->prime);
+	drm_prime_destroy_file_private(&file->prime);
 	if (drm_core_check_feature(dev, DRIVER_SYNCOBJ))
-		drm_syncobj_release(priv);
+		drm_syncobj_release(file);
 	if (drm_core_check_feature(dev, DRIVER_GEM))
-		drm_gem_release(dev, priv);
-	put_pid(priv->pid);
-	kfree(priv);
-	filp->private_data = NULL;
-	return ret;
+		drm_gem_release(dev, file);
+
+	if (!drm_core_check_feature(dev, DRIVER_COMPUTE_ACCEL))
+		drm_debugfs_clients_remove(file);
+
+	put_pid(rcu_access_pointer(file->pid));
+	kfree(file);
+
+	return ERR_PTR(ret);
 }
 
 static void drm_events_release(struct drm_file *file_priv)
@@ -319,40 +220,195 @@ static void drm_events_release(struct drm_file *file_priv)
 	spin_unlock_irqrestore(&dev->event_lock, flags);
 }
 
-static void drm_legacy_dev_reinit(struct drm_device *dev)
+/**
+ * drm_file_free - free file context
+ * @file: context to free, or NULL
+ *
+ * This destroys and deallocates a DRM file context previously allocated via
+ * drm_file_alloc(). The caller must make sure to unlink it from any contexts
+ * before calling this.
+ *
+ * If NULL is passed, this is a no-op.
+ */
+void drm_file_free(struct drm_file *file)
 {
-	if (dev->irq_enabled)
-		drm_irq_uninstall(dev);
+	struct drm_device *dev;
 
-	mutex_lock(&dev->struct_mutex);
+	if (!file)
+		return;
 
-	drm_legacy_agp_clear(dev);
+	dev = file->minor->dev;
 
-	drm_legacy_sg_cleanup(dev);
-	drm_legacy_vma_flush(dev);
-	drm_legacy_dma_takedown(dev);
+	drm_dbg_core(dev, "comm=\"%s\", pid=%d, dev=0x%lx, open_count=%d\n",
+		     current->comm, task_pid_nr(current),
+		     (long)old_encode_dev(file->minor->kdev->devt),
+		     atomic_read(&dev->open_count));
 
-	mutex_unlock(&dev->struct_mutex);
+	if (!drm_core_check_feature(dev, DRIVER_COMPUTE_ACCEL))
+		drm_debugfs_clients_remove(file);
 
-	dev->sigdata.lock = NULL;
+	drm_events_release(file);
 
-	dev->context_flag = 0;
-	dev->last_context = 0;
-	dev->if_version = 0;
+	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
+		drm_fb_release(file);
+		drm_property_destroy_user_blobs(dev, file);
+	}
 
-	DRM_DEBUG("lastclose completed\n");
+	if (drm_core_check_feature(dev, DRIVER_SYNCOBJ))
+		drm_syncobj_release(file);
+
+	if (drm_core_check_feature(dev, DRIVER_GEM))
+		drm_gem_release(dev, file);
+
+	if (drm_is_primary_client(file))
+		drm_master_release(file);
+
+	if (dev->driver->postclose)
+		dev->driver->postclose(dev, file);
+
+	drm_prime_destroy_file_private(&file->prime);
+
+	WARN_ON(!list_empty(&file->event_list));
+
+	put_pid(rcu_access_pointer(file->pid));
+
+	mutex_destroy(&file->client_name_lock);
+	kfree(file->client_name);
+
+	kfree(file);
 }
 
-void drm_lastclose(struct drm_device * dev)
+static void drm_close_helper(struct file *filp)
 {
-	DRM_DEBUG("\n");
+	struct drm_file *file_priv = filp->private_data;
+	struct drm_device *dev = file_priv->minor->dev;
 
-	if (dev->driver->lastclose)
-		dev->driver->lastclose(dev);
-	DRM_DEBUG("driver lastclose completed\n");
+	mutex_lock(&dev->filelist_mutex);
+	list_del(&file_priv->lhead);
+	mutex_unlock(&dev->filelist_mutex);
 
-	if (drm_core_check_feature(dev, DRIVER_LEGACY))
-		drm_legacy_dev_reinit(dev);
+	drm_file_free(file_priv);
+}
+
+/*
+ * Check whether DRI will run on this CPU.
+ *
+ * \return non-zero if the DRI will run on this CPU, or zero otherwise.
+ */
+static int drm_cpu_valid(void)
+{
+#if defined(__sparc__) && !defined(__sparc_v9__)
+	return 0;		/* No cmpxchg before v9 sparc. */
+#endif
+	return 1;
+}
+
+/*
+ * Called whenever a process opens a drm node
+ *
+ * \param filp file pointer.
+ * \param minor acquired minor-object.
+ * \return zero on success or a negative number on failure.
+ *
+ * Creates and initializes a drm_file structure for the file private data in \p
+ * filp and add it into the double linked list in \p dev.
+ */
+int drm_open_helper(struct file *filp, struct drm_minor *minor)
+{
+	struct drm_device *dev = minor->dev;
+	struct drm_file *priv;
+	int ret;
+
+	if (filp->f_flags & O_EXCL)
+		return -EBUSY;	/* No exclusive opens */
+	if (!drm_cpu_valid())
+		return -EINVAL;
+	if (dev->switch_power_state != DRM_SWITCH_POWER_ON &&
+	    dev->switch_power_state != DRM_SWITCH_POWER_DYNAMIC_OFF)
+		return -EINVAL;
+	if (WARN_ON_ONCE(!(filp->f_op->fop_flags & FOP_UNSIGNED_OFFSET)))
+		return -EINVAL;
+
+	drm_dbg_core(dev, "comm=\"%s\", pid=%d, minor=%d\n",
+		     current->comm, task_pid_nr(current), minor->index);
+
+	priv = drm_file_alloc(minor);
+	if (IS_ERR(priv))
+		return PTR_ERR(priv);
+
+	if (drm_is_primary_client(priv)) {
+		ret = drm_master_open(priv);
+		if (ret) {
+			drm_file_free(priv);
+			return ret;
+		}
+	}
+
+	filp->private_data = priv;
+	priv->filp = filp;
+
+	mutex_lock(&dev->filelist_mutex);
+	list_add(&priv->lhead, &dev->filelist);
+	mutex_unlock(&dev->filelist_mutex);
+
+	return 0;
+}
+
+/**
+ * drm_open - open method for DRM file
+ * @inode: device inode
+ * @filp: file pointer.
+ *
+ * This function must be used by drivers as their &file_operations.open method.
+ * It looks up the correct DRM device and instantiates all the per-file
+ * resources for it. It also calls the &drm_driver.open driver callback.
+ *
+ * RETURNS:
+ * 0 on success or negative errno value on failure.
+ */
+int drm_open(struct inode *inode, struct file *filp)
+{
+	struct drm_device *dev;
+	struct drm_minor *minor;
+	int retcode;
+
+	minor = drm_minor_acquire(&drm_minors_xa, iminor(inode));
+	if (IS_ERR(minor))
+		return PTR_ERR(minor);
+
+	dev = minor->dev;
+	if (drm_dev_needs_global_mutex(dev))
+		mutex_lock(&drm_global_mutex);
+
+	atomic_fetch_inc(&dev->open_count);
+
+	/* share address_space across all char-devs of a single device */
+	filp->f_mapping = dev->anon_inode->i_mapping;
+
+	retcode = drm_open_helper(filp, minor);
+	if (retcode)
+		goto err_undo;
+
+	if (drm_dev_needs_global_mutex(dev))
+		mutex_unlock(&drm_global_mutex);
+
+	return 0;
+
+err_undo:
+	atomic_dec(&dev->open_count);
+	if (drm_dev_needs_global_mutex(dev))
+		mutex_unlock(&drm_global_mutex);
+	drm_minor_release(minor);
+	return retcode;
+}
+EXPORT_SYMBOL(drm_open);
+
+static void drm_lastclose(struct drm_device *dev)
+{
+	drm_client_dev_restore(dev, false);
+
+	if (dev_is_pci(dev->dev))
+		vga_switcheroo_process_delayed_switch();
 }
 
 /**
@@ -361,12 +417,11 @@ void drm_lastclose(struct drm_device * dev)
  * @filp: file pointer.
  *
  * This function must be used by drivers as their &file_operations.release
- * method. It frees any resources associated with the open file, and calls the
- * &drm_driver.postclose driver callback. If this is the last open file for the
- * DRM device also proceeds to call the &drm_driver.lastclose driver callback.
+ * method. It frees any resources associated with the open file. If this
+ * is the last open file for the DRM device, it also restores the active
+ * in-kernel DRM client.
  *
  * RETURNS:
- *
  * Always succeeds and returns 0.
  */
 int drm_release(struct inode *inode, struct file *filp)
@@ -375,78 +430,88 @@ int drm_release(struct inode *inode, struct file *filp)
 	struct drm_minor *minor = file_priv->minor;
 	struct drm_device *dev = minor->dev;
 
-	mutex_lock(&drm_global_mutex);
+	if (drm_dev_needs_global_mutex(dev))
+		mutex_lock(&drm_global_mutex);
 
-	DRM_DEBUG("open_count = %d\n", dev->open_count);
+	drm_dbg_core(dev, "open_count = %d\n", atomic_read(&dev->open_count));
 
-	mutex_lock(&dev->filelist_mutex);
-	list_del(&file_priv->lhead);
-	mutex_unlock(&dev->filelist_mutex);
+	drm_close_helper(filp);
 
-	if (drm_core_check_feature(dev, DRIVER_LEGACY) &&
-	    dev->driver->preclose)
-		dev->driver->preclose(dev, file_priv);
-
-	/* ========================================================
-	 * Begin inline drm_release
-	 */
-
-	DRM_DEBUG("pid = %d, device = 0x%lx, open_count = %d\n",
-		  task_pid_nr(current),
-		  (long)old_encode_dev(file_priv->minor->kdev->devt),
-		  dev->open_count);
-
-	if (drm_core_check_feature(dev, DRIVER_LEGACY))
-		drm_legacy_lock_release(dev, filp);
-
-	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA))
-		drm_legacy_reclaim_buffers(dev, file_priv);
-
-	drm_events_release(file_priv);
-
-	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
-		drm_fb_release(file_priv);
-		drm_property_destroy_user_blobs(dev, file_priv);
-	}
-
-	if (drm_core_check_feature(dev, DRIVER_SYNCOBJ))
-		drm_syncobj_release(file_priv);
-
-	if (drm_core_check_feature(dev, DRIVER_GEM))
-		drm_gem_release(dev, file_priv);
-
-	drm_legacy_ctxbitmap_flush(dev, file_priv);
-
-	if (drm_is_primary_client(file_priv))
-		drm_master_release(file_priv);
-
-	if (dev->driver->postclose)
-		dev->driver->postclose(dev, file_priv);
-
-	if (drm_core_check_feature(dev, DRIVER_PRIME))
-		drm_prime_destroy_file_private(&file_priv->prime);
-
-	WARN_ON(!list_empty(&file_priv->event_list));
-
-	put_pid(file_priv->pid);
-	kfree(file_priv);
-
-	/* ========================================================
-	 * End inline drm_release
-	 */
-
-	if (!--dev->open_count) {
+	if (atomic_dec_and_test(&dev->open_count))
 		drm_lastclose(dev);
-		if (drm_dev_is_unplugged(dev))
-			drm_put_dev(dev);
-	}
-	mutex_unlock(&drm_global_mutex);
+
+	if (drm_dev_needs_global_mutex(dev))
+		mutex_unlock(&drm_global_mutex);
 
 	drm_minor_release(minor);
 
 	return 0;
 }
 EXPORT_SYMBOL(drm_release);
+
+void drm_file_update_pid(struct drm_file *filp)
+{
+	struct drm_device *dev;
+	struct pid *pid, *old;
+
+	/*
+	 * Master nodes need to keep the original ownership in order for
+	 * drm_master_check_perm to keep working correctly. (See comment in
+	 * drm_auth.c.)
+	 */
+	if (filp->was_master)
+		return;
+
+	pid = task_tgid(current);
+
+	/*
+	 * Quick unlocked check since the model is a single handover followed by
+	 * exclusive repeated use.
+	 */
+	if (pid == rcu_access_pointer(filp->pid))
+		return;
+
+	dev = filp->minor->dev;
+	mutex_lock(&dev->filelist_mutex);
+	get_pid(pid);
+	old = rcu_replace_pointer(filp->pid, pid, 1);
+	mutex_unlock(&dev->filelist_mutex);
+
+	synchronize_rcu();
+	put_pid(old);
+}
+
+/**
+ * drm_release_noglobal - release method for DRM file
+ * @inode: device inode
+ * @filp: file pointer.
+ *
+ * This function may be used by drivers as their &file_operations.release
+ * method. It frees any resources associated with the open file prior to taking
+ * the drm_global_mutex. If this is the last open file for the DRM device, it
+ * then restores the active in-kernel DRM client.
+ *
+ * RETURNS:
+ * Always succeeds and returns 0.
+ */
+int drm_release_noglobal(struct inode *inode, struct file *filp)
+{
+	struct drm_file *file_priv = filp->private_data;
+	struct drm_minor *minor = file_priv->minor;
+	struct drm_device *dev = minor->dev;
+
+	drm_close_helper(filp);
+
+	if (atomic_dec_and_mutex_lock(&dev->open_count, &drm_global_mutex)) {
+		drm_lastclose(dev);
+		mutex_unlock(&drm_global_mutex);
+	}
+
+	drm_minor_release(minor);
+
+	return 0;
+}
+EXPORT_SYMBOL(drm_release_noglobal);
 
 /**
  * drm_read - read method for DRM file
@@ -456,12 +521,11 @@ EXPORT_SYMBOL(drm_release);
  * @offset: offset to read
  *
  * This function must be used by drivers as their &file_operations.read
- * method iff they use DRM events for asynchronous signalling to userspace.
+ * method if they use DRM events for asynchronous signalling to userspace.
  * Since events are used by the KMS API for vblank and page flip completion this
  * means all modern display drivers must use it.
  *
- * @offset is ignored, DRM events are read like a pipe. Therefore drivers also
- * must set the &file_operation.llseek to no_llseek(). Polling support is
+ * @offset is ignored, DRM events are read like a pipe. Polling support is
  * provided by drm_poll().
  *
  * This function will only ever read a full event. Therefore userspace must
@@ -470,7 +534,6 @@ EXPORT_SYMBOL(drm_release);
  * safety.
  *
  * RETURNS:
- *
  * Number of bytes read (always aligned to full events, and can be 0) or a
  * negative error code on failure.
  */
@@ -480,9 +543,6 @@ ssize_t drm_read(struct file *filp, char __user *buffer,
 	struct drm_file *file_priv = filp->private_data;
 	struct drm_device *dev = file_priv->minor->dev;
 	ssize_t ret;
-
-	if (!access_ok(VERIFY_WRITE, buffer, count))
-		return -EFAULT;
 
 	ret = mutex_lock_interruptible(&file_priv->event_read_lock);
 	if (ret)
@@ -525,6 +585,8 @@ put_back_event:
 				file_priv->event_space -= length;
 				list_add(&e->link, &file_priv->event_list);
 				spin_unlock_irq(&dev->event_lock);
+				wake_up_interruptible_poll(&file_priv->event_wait,
+					EPOLLIN | EPOLLRDNORM);
 				break;
 			}
 
@@ -550,14 +612,13 @@ EXPORT_SYMBOL(drm_read);
  * @wait: poll waiter table
  *
  * This function must be used by drivers as their &file_operations.read method
- * iff they use DRM events for asynchronous signalling to userspace.  Since
+ * if they use DRM events for asynchronous signalling to userspace.  Since
  * events are used by the KMS API for vblank and page flip completion this means
  * all modern display drivers must use it.
  *
  * See also drm_read().
  *
  * RETURNS:
- *
  * Mask of POLL flags indicating the current status of the file.
  */
 __poll_t drm_poll(struct file *filp, struct poll_table_struct *wait)
@@ -595,7 +656,6 @@ EXPORT_SYMBOL(drm_poll);
  * already hold &drm_device.event_lock.
  *
  * RETURNS:
- *
  * 0 on success or a negative error code on failure.
  */
 int drm_event_reserve_init_locked(struct drm_device *dev,
@@ -637,7 +697,6 @@ EXPORT_SYMBOL(drm_event_reserve_init_locked);
  * drm_event_reserve_init_locked() instead.
  *
  * RETURNS:
- *
  * 0 on success or a negative error code on failure.
  */
 int drm_event_reserve_init(struct drm_device *dev,
@@ -657,7 +716,7 @@ int drm_event_reserve_init(struct drm_device *dev,
 EXPORT_SYMBOL(drm_event_reserve_init);
 
 /**
- * drm_event_cancel_free - free a DRM event and release it's space
+ * drm_event_cancel_free - free a DRM event and release its space
  * @dev: DRM device
  * @p: tracking structure for the pending event
  *
@@ -669,6 +728,7 @@ void drm_event_cancel_free(struct drm_device *dev,
 			   struct drm_pending_event *p)
 {
 	unsigned long flags;
+
 	spin_lock_irqsave(&dev->event_lock, flags);
 	if (p->file_priv) {
 		p->file_priv->event_space += p->event->length;
@@ -682,6 +742,60 @@ void drm_event_cancel_free(struct drm_device *dev,
 	kfree(p);
 }
 EXPORT_SYMBOL(drm_event_cancel_free);
+
+static void drm_send_event_helper(struct drm_device *dev,
+			   struct drm_pending_event *e, ktime_t timestamp)
+{
+	assert_spin_locked(&dev->event_lock);
+
+	if (e->completion) {
+		complete_all(e->completion);
+		e->completion_release(e->completion);
+		e->completion = NULL;
+	}
+
+	if (e->fence) {
+		if (timestamp)
+			dma_fence_signal_timestamp(e->fence, timestamp);
+		else
+			dma_fence_signal(e->fence);
+		dma_fence_put(e->fence);
+	}
+
+	if (!e->file_priv) {
+		kfree(e);
+		return;
+	}
+
+	list_del(&e->pending_link);
+	list_add_tail(&e->link,
+		      &e->file_priv->event_list);
+	wake_up_interruptible_poll(&e->file_priv->event_wait,
+		EPOLLIN | EPOLLRDNORM);
+}
+
+/**
+ * drm_send_event_timestamp_locked - send DRM event to file descriptor
+ * @dev: DRM device
+ * @e: DRM event to deliver
+ * @timestamp: timestamp to set for the fence event in kernel's CLOCK_MONOTONIC
+ * time domain
+ *
+ * This function sends the event @e, initialized with drm_event_reserve_init(),
+ * to its associated userspace DRM file. Callers must already hold
+ * &drm_device.event_lock.
+ *
+ * Note that the core will take care of unlinking and disarming events when the
+ * corresponding DRM file is closed. Drivers need not worry about whether the
+ * DRM file for this event still exists and can call this function upon
+ * completion of the asynchronous work unconditionally.
+ */
+void drm_send_event_timestamp_locked(struct drm_device *dev,
+				     struct drm_pending_event *e, ktime_t timestamp)
+{
+	drm_send_event_helper(dev, e, timestamp);
+}
+EXPORT_SYMBOL(drm_send_event_timestamp_locked);
 
 /**
  * drm_send_event_locked - send DRM event to file descriptor
@@ -699,28 +813,7 @@ EXPORT_SYMBOL(drm_event_cancel_free);
  */
 void drm_send_event_locked(struct drm_device *dev, struct drm_pending_event *e)
 {
-	assert_spin_locked(&dev->event_lock);
-
-	if (e->completion) {
-		complete_all(e->completion);
-		e->completion_release(e->completion);
-		e->completion = NULL;
-	}
-
-	if (e->fence) {
-		dma_fence_signal(e->fence);
-		dma_fence_put(e->fence);
-	}
-
-	if (!e->file_priv) {
-		kfree(e);
-		return;
-	}
-
-	list_del(&e->pending_link);
-	list_add_tail(&e->link,
-		      &e->file_priv->event_list);
-	wake_up_interruptible(&e->file_priv->event_wait);
+	drm_send_event_helper(dev, e, 0);
 }
 EXPORT_SYMBOL(drm_send_event_locked);
 
@@ -744,7 +837,245 @@ void drm_send_event(struct drm_device *dev, struct drm_pending_event *e)
 	unsigned long irqflags;
 
 	spin_lock_irqsave(&dev->event_lock, irqflags);
-	drm_send_event_locked(dev, e);
+	drm_send_event_helper(dev, e, 0);
 	spin_unlock_irqrestore(&dev->event_lock, irqflags);
 }
 EXPORT_SYMBOL(drm_send_event);
+
+void drm_fdinfo_print_size(struct drm_printer *p,
+			   const char *prefix,
+			   const char *stat,
+			   const char *region,
+			   u64 sz)
+{
+	const char *units[] = {"", " KiB", " MiB"};
+	unsigned u;
+
+	for (u = 0; u < ARRAY_SIZE(units) - 1; u++) {
+		if (sz == 0 || !IS_ALIGNED(sz, SZ_1K))
+			break;
+		sz = div_u64(sz, SZ_1K);
+	}
+
+	drm_printf(p, "%s-%s-%s:\t%llu%s\n",
+		   prefix, stat, region, sz, units[u]);
+}
+EXPORT_SYMBOL(drm_fdinfo_print_size);
+
+int drm_memory_stats_is_zero(const struct drm_memory_stats *stats)
+{
+	return (stats->shared == 0 &&
+		stats->private == 0 &&
+		stats->resident == 0 &&
+		stats->purgeable == 0 &&
+		stats->active == 0);
+}
+EXPORT_SYMBOL(drm_memory_stats_is_zero);
+
+/**
+ * drm_print_memory_stats - A helper to print memory stats
+ * @p: The printer to print output to
+ * @stats: The collected memory stats
+ * @supported_status: Bitmask of optional stats which are available
+ * @region: The memory region
+ *
+ */
+void drm_print_memory_stats(struct drm_printer *p,
+			    const struct drm_memory_stats *stats,
+			    enum drm_gem_object_status supported_status,
+			    const char *region)
+{
+	const char *prefix = "drm";
+
+	drm_fdinfo_print_size(p, prefix, "total", region,
+			      stats->private + stats->shared);
+	drm_fdinfo_print_size(p, prefix, "shared", region, stats->shared);
+
+	if (supported_status & DRM_GEM_OBJECT_ACTIVE)
+		drm_fdinfo_print_size(p, prefix, "active", region, stats->active);
+
+	if (supported_status & DRM_GEM_OBJECT_RESIDENT)
+		drm_fdinfo_print_size(p, prefix, "resident", region,
+				      stats->resident);
+
+	if (supported_status & DRM_GEM_OBJECT_PURGEABLE)
+		drm_fdinfo_print_size(p, prefix, "purgeable", region,
+				      stats->purgeable);
+}
+EXPORT_SYMBOL(drm_print_memory_stats);
+
+/**
+ * drm_show_memory_stats - Helper to collect and show standard fdinfo memory stats
+ * @p: the printer to print output to
+ * @file: the DRM file
+ *
+ * Helper to iterate over GEM objects with a handle allocated in the specified
+ * file.
+ */
+void drm_show_memory_stats(struct drm_printer *p, struct drm_file *file)
+{
+	struct drm_gem_object *obj;
+	struct drm_memory_stats status = {};
+	enum drm_gem_object_status supported_status = 0;
+	int id;
+
+	spin_lock(&file->table_lock);
+	idr_for_each_entry (&file->object_idr, obj, id) {
+		enum drm_gem_object_status s = 0;
+		size_t add_size = (obj->funcs && obj->funcs->rss) ?
+			obj->funcs->rss(obj) : obj->size;
+
+		if (obj->funcs && obj->funcs->status) {
+			s = obj->funcs->status(obj);
+			supported_status |= s;
+		}
+
+		if (drm_gem_object_is_shared_for_memory_stats(obj))
+			status.shared += obj->size;
+		else
+			status.private += obj->size;
+
+		if (s & DRM_GEM_OBJECT_RESIDENT) {
+			status.resident += add_size;
+		} else {
+			/* If already purged or not yet backed by pages, don't
+			 * count it as purgeable:
+			 */
+			s &= ~DRM_GEM_OBJECT_PURGEABLE;
+		}
+
+		if (!dma_resv_test_signaled(obj->resv, dma_resv_usage_rw(true))) {
+			status.active += add_size;
+			supported_status |= DRM_GEM_OBJECT_ACTIVE;
+
+			/* If still active, don't count as purgeable: */
+			s &= ~DRM_GEM_OBJECT_PURGEABLE;
+		}
+
+		if (s & DRM_GEM_OBJECT_PURGEABLE)
+			status.purgeable += add_size;
+	}
+	spin_unlock(&file->table_lock);
+
+	drm_print_memory_stats(p, &status, supported_status, "memory");
+}
+EXPORT_SYMBOL(drm_show_memory_stats);
+
+/**
+ * drm_show_fdinfo - helper for drm file fops
+ * @m: output stream
+ * @f: the device file instance
+ *
+ * Helper to implement fdinfo, for userspace to query usage stats, etc, of a
+ * process using the GPU.  See also &drm_driver.show_fdinfo.
+ *
+ * For text output format description please see Documentation/gpu/drm-usage-stats.rst
+ */
+void drm_show_fdinfo(struct seq_file *m, struct file *f)
+{
+	struct drm_file *file = f->private_data;
+	struct drm_device *dev = file->minor->dev;
+	struct drm_printer p = drm_seq_file_printer(m);
+	int idx;
+
+	if (!drm_dev_enter(dev, &idx))
+		return;
+
+	drm_printf(&p, "drm-driver:\t%s\n", dev->driver->name);
+	drm_printf(&p, "drm-client-id:\t%llu\n", file->client_id);
+
+	if (dev_is_pci(dev->dev)) {
+		struct pci_dev *pdev = to_pci_dev(dev->dev);
+
+		drm_printf(&p, "drm-pdev:\t%04x:%02x:%02x.%d\n",
+			   pci_domain_nr(pdev->bus), pdev->bus->number,
+			   PCI_SLOT(pdev->devfn), PCI_FUNC(pdev->devfn));
+	}
+
+	mutex_lock(&file->client_name_lock);
+	if (file->client_name)
+		drm_printf(&p, "drm-client-name:\t%s\n", file->client_name);
+	mutex_unlock(&file->client_name_lock);
+
+	if (dev->driver->show_fdinfo)
+		dev->driver->show_fdinfo(&p, file);
+
+	drm_dev_exit(idx);
+}
+EXPORT_SYMBOL(drm_show_fdinfo);
+
+/**
+ * drm_file_err - log process name, pid and client_name associated with a drm_file
+ * @file_priv: context of interest for process name and pid
+ * @fmt: printf() like format string
+ *
+ * Helper function for clients which needs to log process details such
+ * as name and pid etc along with user logs.
+ */
+void drm_file_err(struct drm_file *file_priv, const char *fmt, ...)
+{
+	va_list args;
+	struct va_format vaf;
+	struct pid *pid;
+	struct task_struct *task;
+	struct drm_device *dev = file_priv->minor->dev;
+
+	va_start(args, fmt);
+	vaf.fmt = fmt;
+	vaf.va = &args;
+
+	mutex_lock(&file_priv->client_name_lock);
+	rcu_read_lock();
+	pid = rcu_dereference(file_priv->pid);
+	task = pid_task(pid, PIDTYPE_TGID);
+
+	drm_err(dev, "comm: %s pid: %d client-id:%llu client: %s ... %pV",
+		task ? task->comm : "Unset",
+		task ? task->pid : 0, file_priv->client_id,
+		file_priv->client_name ?: "Unset", &vaf);
+
+	va_end(args);
+	rcu_read_unlock();
+	mutex_unlock(&file_priv->client_name_lock);
+}
+EXPORT_SYMBOL(drm_file_err);
+
+/**
+ * mock_drm_getfile - Create a new struct file for the drm device
+ * @minor: drm minor to wrap (e.g. #drm_device.primary)
+ * @flags: file creation mode (O_RDWR etc)
+ *
+ * This create a new struct file that wraps a DRM file context around a
+ * DRM minor. This mimicks userspace opening e.g. /dev/dri/card0, but without
+ * invoking userspace. The struct file may be operated on using its f_op
+ * (the drm_device.driver.fops) to mimick userspace operations, or be supplied
+ * to userspace facing functions as an internal/anonymous client.
+ *
+ * RETURNS:
+ * Pointer to newly created struct file, ERR_PTR on failure.
+ */
+struct file *mock_drm_getfile(struct drm_minor *minor, unsigned int flags)
+{
+	struct drm_device *dev = minor->dev;
+	struct drm_file *priv;
+	struct file *file;
+
+	priv = drm_file_alloc(minor);
+	if (IS_ERR(priv))
+		return ERR_CAST(priv);
+
+	file = anon_inode_getfile("drm", dev->driver->fops, priv, flags);
+	if (IS_ERR(file)) {
+		drm_file_free(priv);
+		return file;
+	}
+
+	/* Everyone shares a single global address space */
+	file->f_mapping = dev->anon_inode->i_mapping;
+
+	drm_dev_get(dev);
+	priv->filp = file;
+
+	return file;
+}
+EXPORT_SYMBOL_FOR_TESTS_ONLY(mock_drm_getfile);

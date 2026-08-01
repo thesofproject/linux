@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  *    Copyright IBM Corp. 2007
- *    Author(s): Heiko Carstens <heiko.carstens@de.ibm.com>
  */
 
-#define KMSG_COMPONENT "sclp_config"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "sclp_config: " fmt
 
 #include <linux/init.h>
 #include <linux/errno.h>
@@ -50,17 +48,19 @@ static void sclp_cpu_capability_notify(struct work_struct *work)
 
 	s390_update_cpu_mhz();
 	pr_info("CPU capability may have changed\n");
-	get_online_cpus();
+	cpus_read_lock();
 	for_each_online_cpu(cpu) {
 		dev = get_cpu_device(cpu);
 		kobject_uevent(&dev->kobj, KOBJ_CHANGE);
 	}
-	put_online_cpus();
+	cpus_read_unlock();
 }
 
 static void __ref sclp_cpu_change_notify(struct work_struct *work)
 {
-	smp_rescan_cpus();
+	lock_device_hotplug();
+	smp_rescan_cpus(false);
+	unlock_device_hotplug();
 }
 
 static void sclp_conf_receiver_fn(struct evbuf_header *evbuf)
@@ -80,14 +80,11 @@ static void sclp_conf_receiver_fn(struct evbuf_header *evbuf)
 
 static struct sclp_register sclp_conf_register =
 {
-#ifdef CONFIG_SCLP_OFB
 	.send_mask    = EVTYP_CONFMGMDATA_MASK,
-#endif
 	.receive_mask = EVTYP_CONFMGMDATA_MASK,
 	.receiver_fn  = sclp_conf_receiver_fn,
 };
 
-#ifdef CONFIG_SCLP_OFB
 static int sclp_ofb_send_req(char *ev_data, size_t len)
 {
 	static DEFINE_MUTEX(send_mutex);
@@ -127,7 +124,7 @@ out:
 }
 
 static ssize_t sysfs_ofb_data_write(struct file *filp, struct kobject *kobj,
-				    struct bin_attribute *bin_attr,
+				    const struct bin_attribute *bin_attr,
 				    char *buf, loff_t off, size_t count)
 {
 	int rc;
@@ -143,11 +140,9 @@ static const struct bin_attribute ofb_bin_attr = {
 	},
 	.write = sysfs_ofb_data_write,
 };
-#endif
 
 static int __init sclp_ofb_setup(void)
 {
-#ifdef CONFIG_SCLP_OFB
 	struct kset *ofb_kset;
 	int rc;
 
@@ -159,7 +154,6 @@ static int __init sclp_ofb_setup(void)
 		kset_unregister(ofb_kset);
 		return rc;
 	}
-#endif
 	return 0;
 }
 

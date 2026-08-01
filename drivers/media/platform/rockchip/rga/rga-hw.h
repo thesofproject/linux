@@ -1,20 +1,14 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (C) Fuzhou Rockchip Electronics Co.Ltd
+ * Copyright (C) Rockchip Electronics Co., Ltd.
  * Author: Jacob Chen <jacob-chen@iotwrt.com>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #ifndef __RGA_HW_H__
 #define __RGA_HW_H__
 
-#define RGA_CMDBUF_SIZE 0x20
+#include <linux/types.h>
+
+#define RGA_CMDBUF_SIZE 0x80
 
 /* Hardware limits */
 #define MAX_WIDTH 8192
@@ -22,9 +16,7 @@
 
 #define MIN_WIDTH 34
 #define MIN_HEIGHT 34
-
-#define DEFAULT_WIDTH 100
-#define DEFAULT_HEIGHT 100
+#define MAX_SCALING_FACTOR 16
 
 #define RGA_TIMEOUT 500
 
@@ -103,6 +95,11 @@
 #define RGA_COLOR_FMT_CP_8BPP 15
 #define RGA_COLOR_FMT_MASK 15
 
+#define RGA_COLOR_FMT_IS_YUV(fmt) \
+	(((fmt) >= RGA_COLOR_FMT_YUV422SP) && ((fmt) < RGA_COLOR_FMT_CP_1BPP))
+#define RGA_COLOR_FMT_IS_RGB(fmt) \
+	((fmt) < RGA_COLOR_FMT_YUV422SP)
+
 #define RGA_COLOR_NONE_SWAP 0
 #define RGA_COLOR_RB_SWAP 1
 #define RGA_COLOR_ALPHA_SWAP 2
@@ -180,6 +177,8 @@
 
 #define RGA_ALPHA_COLOR_NORMAL 0
 #define RGA_ALPHA_COLOR_MULTIPLY_CAL 1
+
+#define RGA_INT_COMMAND_FINISHED 4
 
 /* Registers union */
 union rga_mode_ctrl {
@@ -432,6 +431,12 @@ union rga_pat_con {
 		/* [24:31] */
 		unsigned int offset_y:8;
 	} data;
+};
+
+struct rga_fmt {
+	u32 fourcc;
+	u8 color_swap;
+	u8 hw_format;
 };
 
 #endif

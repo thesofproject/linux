@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * llc_c_st.c - This module contains state transition of connection component.
  *
@@ -6,13 +7,6 @@
  *
  * Copyright (c) 1997 by Procom Technology, Inc.
  * 		 2001-2003 by Arnaldo Carvalho de Melo <acme@conectiva.com.br>
- *
- * This program can be redistributed or modified under the terms of the
- * GNU General Public License as published by the Free Software Foundation.
- * This program is distributed without any warranty or implied warranty
- * of merchantability or fitness for a particular purpose.
- *
- * See the GNU General Public License for more details.
  */
 #include <linux/types.h>
 #include <net/llc_if.h>
@@ -42,7 +36,7 @@ static const llc_conn_action_t llc_common_actions_1[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_1 = {
+static const struct llc_conn_state_trans llc_common_state_trans_1 = {
 	.ev	       = llc_conn_ev_disc_req,
 	.next_state    = LLC_CONN_STATE_D_CONN,
 	.ev_qualifiers = NONE,
@@ -59,7 +53,7 @@ static const llc_conn_action_t llc_common_actions_2[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_2 = {
+static const struct llc_conn_state_trans llc_common_state_trans_2 = {
 	.ev	       = llc_conn_ev_rst_req,
 	.next_state    = LLC_CONN_STATE_RESET,
 	.ev_qualifiers = NONE,
@@ -79,7 +73,7 @@ static const llc_conn_action_t llc_common_actions_3[] = {
 	[8] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_3 = {
+static const struct llc_conn_state_trans llc_common_state_trans_3 = {
 	.ev	       = llc_conn_ev_rx_sabme_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -95,7 +89,7 @@ static const llc_conn_action_t llc_common_actions_4[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_4 = {
+static const struct llc_conn_state_trans llc_common_state_trans_4 = {
 	.ev	       = llc_conn_ev_rx_disc_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = NONE,
@@ -114,7 +108,7 @@ static const llc_conn_action_t llc_common_actions_5[] = {
 	[7] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_5 = {
+static const struct llc_conn_state_trans llc_common_state_trans_5 = {
 	.ev	       = llc_conn_ev_rx_frmr_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_RESET,
 	.ev_qualifiers = NONE,
@@ -129,7 +123,7 @@ static const llc_conn_action_t llc_common_actions_6[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_6 = {
+static const struct llc_conn_state_trans llc_common_state_trans_6 = {
 	.ev	       = llc_conn_ev_rx_dm_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = NONE,
@@ -145,7 +139,7 @@ static const llc_conn_action_t llc_common_actions_7a[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_7a = {
+static const struct llc_conn_state_trans llc_common_state_trans_7a = {
 	.ev	       = llc_conn_ev_rx_zzz_cmd_pbit_set_x_inval_nr,
 	.next_state    = LLC_CONN_STATE_ERROR,
 	.ev_qualifiers = NONE,
@@ -161,7 +155,7 @@ static const llc_conn_action_t llc_common_actions_7b[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_7b = {
+static const struct llc_conn_state_trans llc_common_state_trans_7b = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_x_inval_ns,
 	.next_state    = LLC_CONN_STATE_ERROR,
 	.ev_qualifiers = NONE,
@@ -177,7 +171,7 @@ static const llc_conn_action_t llc_common_actions_8a[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_8a = {
+static const struct llc_conn_state_trans llc_common_state_trans_8a = {
 	.ev	       = llc_conn_ev_rx_zzz_rsp_fbit_set_x_inval_nr,
 	.next_state    = LLC_CONN_STATE_ERROR,
 	.ev_qualifiers = NONE,
@@ -193,7 +187,7 @@ static const llc_conn_action_t llc_common_actions_8b[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_8b = {
+static const struct llc_conn_state_trans llc_common_state_trans_8b = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_x_inval_ns,
 	.next_state    = LLC_CONN_STATE_ERROR,
 	.ev_qualifiers = NONE,
@@ -209,7 +203,7 @@ static const llc_conn_action_t llc_common_actions_8c[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_8c = {
+static const struct llc_conn_state_trans llc_common_state_trans_8c = {
 	.ev	       = llc_conn_ev_rx_bad_pdu,
 	.next_state    = LLC_CONN_STATE_ERROR,
 	.ev_qualifiers = NONE,
@@ -225,7 +219,7 @@ static const llc_conn_action_t llc_common_actions_9[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_9 = {
+static const struct llc_conn_state_trans llc_common_state_trans_9 = {
 	.ev	       = llc_conn_ev_rx_ua_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_ERROR,
 	.ev_qualifiers = NONE,
@@ -247,7 +241,7 @@ static const llc_conn_action_t llc_common_actions_10[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_10 = {
+static const struct llc_conn_state_trans llc_common_state_trans_10 = {
 	.ev	       = llc_conn_ev_rx_xxx_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_ERROR,
 	.ev_qualifiers = llc_common_ev_qfyrs_10,
@@ -270,7 +264,7 @@ static const llc_conn_action_t llc_common_actions_11a[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_11a = {
+static const struct llc_conn_state_trans llc_common_state_trans_11a = {
 	.ev	       = llc_conn_ev_p_tmr_exp,
 	.next_state    = LLC_CONN_STATE_RESET,
 	.ev_qualifiers = llc_common_ev_qfyrs_11a,
@@ -292,7 +286,7 @@ static const llc_conn_action_t llc_common_actions_11b[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_11b = {
+static const struct llc_conn_state_trans llc_common_state_trans_11b = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_RESET,
 	.ev_qualifiers = llc_common_ev_qfyrs_11b,
@@ -314,7 +308,7 @@ static const llc_conn_action_t llc_common_actions_11c[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_11c = {
+static const struct llc_conn_state_trans llc_common_state_trans_11c = {
 	.ev	       = llc_conn_ev_rej_tmr_exp,
 	.next_state    = LLC_CONN_STATE_RESET,
 	.ev_qualifiers = llc_common_ev_qfyrs_11c,
@@ -336,7 +330,7 @@ static const llc_conn_action_t llc_common_actions_11d[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_common_state_trans_11d = {
+static const struct llc_conn_state_trans llc_common_state_trans_11d = {
 	.ev	       = llc_conn_ev_busy_tmr_exp,
 	.next_state    = LLC_CONN_STATE_RESET,
 	.ev_qualifiers = llc_common_ev_qfyrs_11d,
@@ -347,7 +341,7 @@ static struct llc_conn_state_trans llc_common_state_trans_11d = {
  * Common dummy state transition; must be last entry for all state
  * transition groups - it'll be on .bss, so will be zeroed.
  */
-static struct llc_conn_state_trans llc_common_state_trans_end;
+static const struct llc_conn_state_trans llc_common_state_trans_end;
 
 /* LLC_CONN_STATE_ADM transitions */
 /* State transitions for LLC_CONN_EV_CONN_REQ event */
@@ -359,7 +353,7 @@ static const llc_conn_action_t llc_adm_actions_1[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_adm_state_trans_1 = {
+static const struct llc_conn_state_trans llc_adm_state_trans_1 = {
 	.ev	       = llc_conn_ev_conn_req,
 	.next_state    = LLC_CONN_STATE_SETUP,
 	.ev_qualifiers = NONE,
@@ -378,7 +372,7 @@ static const llc_conn_action_t llc_adm_actions_2[] = {
 	[7] = NULL,
 };
 
-static struct llc_conn_state_trans llc_adm_state_trans_2 = {
+static const struct llc_conn_state_trans llc_adm_state_trans_2 = {
 	.ev	       = llc_conn_ev_rx_sabme_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -392,7 +386,7 @@ static const llc_conn_action_t llc_adm_actions_3[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_adm_state_trans_3 = {
+static const struct llc_conn_state_trans llc_adm_state_trans_3 = {
 	.ev	       = llc_conn_ev_rx_disc_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = NONE,
@@ -406,7 +400,7 @@ static const llc_conn_action_t llc_adm_actions_4[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_adm_state_trans_4 = {
+static const struct llc_conn_state_trans llc_adm_state_trans_4 = {
 	.ev	       = llc_conn_ev_rx_xxx_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = NONE,
@@ -419,7 +413,7 @@ static const llc_conn_action_t llc_adm_actions_5[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_adm_state_trans_5 = {
+static const struct llc_conn_state_trans llc_adm_state_trans_5 = {
 	.ev	       = llc_conn_ev_rx_any_frame,
 	.next_state    = LLC_CONN_OUT_OF_SVC,
 	.ev_qualifiers = NONE,
@@ -430,7 +424,7 @@ static struct llc_conn_state_trans llc_adm_state_trans_5 = {
  * Array of pointers;
  * one to each transition
  */
-static struct llc_conn_state_trans *llc_adm_state_transitions[] = {
+static const struct llc_conn_state_trans *llc_adm_state_transitions[] = {
 	[0] = &llc_adm_state_trans_1,		/* Request */
 	[1] = &llc_common_state_trans_end,
 	[2] = &llc_common_state_trans_end,	/* local_busy */
@@ -453,7 +447,7 @@ static const llc_conn_action_t llc_setup_actions_1[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_setup_state_trans_1 = {
+static const struct llc_conn_state_trans llc_setup_state_trans_1 = {
 	.ev	       = llc_conn_ev_rx_sabme_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_SETUP,
 	.ev_qualifiers = NONE,
@@ -477,7 +471,7 @@ static const llc_conn_action_t llc_setup_actions_2[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_setup_state_trans_2 = {
+static const struct llc_conn_state_trans llc_setup_state_trans_2 = {
 	.ev	       = llc_conn_ev_rx_ua_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_setup_ev_qfyrs_2,
@@ -498,7 +492,7 @@ static const llc_conn_action_t llc_setup_actions_3[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_setup_state_trans_3 = {
+static const struct llc_conn_state_trans llc_setup_state_trans_3 = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_setup_ev_qfyrs_3,
@@ -519,7 +513,7 @@ static const llc_conn_action_t llc_setup_actions_4[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_setup_state_trans_4 = {
+static const struct llc_conn_state_trans llc_setup_state_trans_4 = {
 	.ev	       = llc_conn_ev_rx_disc_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_setup_ev_qfyrs_4,
@@ -539,7 +533,7 @@ static const llc_conn_action_t llc_setup_actions_5[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_setup_state_trans_5 = {
+static const struct llc_conn_state_trans llc_setup_state_trans_5 = {
 	.ev	       = llc_conn_ev_rx_dm_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_setup_ev_qfyrs_5,
@@ -560,7 +554,7 @@ static const llc_conn_action_t llc_setup_actions_7[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_setup_state_trans_7 = {
+static const struct llc_conn_state_trans llc_setup_state_trans_7 = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_SETUP,
 	.ev_qualifiers = llc_setup_ev_qfyrs_7,
@@ -581,7 +575,7 @@ static const llc_conn_action_t llc_setup_actions_8[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_setup_state_trans_8 = {
+static const struct llc_conn_state_trans llc_setup_state_trans_8 = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_setup_ev_qfyrs_8,
@@ -592,7 +586,7 @@ static struct llc_conn_state_trans llc_setup_state_trans_8 = {
  * Array of pointers;
  * one to each transition
  */
-static struct llc_conn_state_trans *llc_setup_state_transitions[] = {
+static const struct llc_conn_state_trans *llc_setup_state_transitions[] = {
 	 [0] = &llc_common_state_trans_end,	/* Request */
 	 [1] = &llc_common_state_trans_end,	/* local busy */
 	 [2] = &llc_common_state_trans_end,	/* init_pf_cycle */
@@ -622,7 +616,7 @@ static const llc_conn_action_t llc_normal_actions_1[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_1 = {
+static const struct llc_conn_state_trans llc_normal_state_trans_1 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_1,
@@ -643,7 +637,7 @@ static const llc_conn_action_t llc_normal_actions_2[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_2 = {
+static const struct llc_conn_state_trans llc_normal_state_trans_2 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_2,
@@ -660,7 +654,7 @@ static const llc_conn_ev_qfyr_t llc_normal_ev_qfyrs_2_1[] = {
 /* just one member, NULL, .bss zeroes it */
 static const llc_conn_action_t llc_normal_actions_2_1[1];
 
-static struct llc_conn_state_trans llc_normal_state_trans_2_1 = {
+static const struct llc_conn_state_trans llc_normal_state_trans_2_1 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_2_1,
@@ -680,7 +674,7 @@ static const llc_conn_action_t llc_normal_actions_3[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_3 = {
+static const struct llc_conn_state_trans llc_normal_state_trans_3 = {
 	.ev	       = llc_conn_ev_local_busy_detected,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_normal_ev_qfyrs_3,
@@ -700,7 +694,7 @@ static const llc_conn_action_t llc_normal_actions_4[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_4 = {
+static const struct llc_conn_state_trans llc_normal_state_trans_4 = {
 	.ev	       = llc_conn_ev_local_busy_detected,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_normal_ev_qfyrs_4,
@@ -723,7 +717,7 @@ static const llc_conn_action_t llc_normal_actions_5a[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_5a = {
+static const struct llc_conn_state_trans llc_normal_state_trans_5a = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_normal_ev_qfyrs_5a,
@@ -746,7 +740,7 @@ static const llc_conn_action_t llc_normal_actions_5b[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_5b = {
+static const struct llc_conn_state_trans llc_normal_state_trans_5b = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_normal_ev_qfyrs_5b,
@@ -769,7 +763,7 @@ static const llc_conn_action_t llc_normal_actions_5c[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_5c = {
+static const struct llc_conn_state_trans llc_normal_state_trans_5c = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_1_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_normal_ev_qfyrs_5c,
@@ -790,7 +784,7 @@ static const llc_conn_action_t llc_normal_actions_6a[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_6a = {
+static const struct llc_conn_state_trans llc_normal_state_trans_6a = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_normal_ev_qfyrs_6a,
@@ -811,7 +805,7 @@ static const llc_conn_action_t llc_normal_actions_6b[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_6b = {
+static const struct llc_conn_state_trans llc_normal_state_trans_6b = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_normal_ev_qfyrs_6b,
@@ -827,7 +821,7 @@ static const llc_conn_action_t llc_normal_actions_7[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_7 = {
+static const struct llc_conn_state_trans llc_normal_state_trans_7 = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_1_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -850,7 +844,7 @@ static const llc_conn_action_t llc_normal_actions_8[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_8a = {
+static const struct llc_conn_state_trans llc_normal_state_trans_8a = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_8a,
@@ -863,7 +857,7 @@ static const llc_conn_ev_qfyr_t llc_normal_ev_qfyrs_8b[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_8b = {
+static const struct llc_conn_state_trans llc_normal_state_trans_8b = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_8b,
@@ -884,7 +878,7 @@ static const llc_conn_action_t llc_normal_actions_9a[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_9a = {
+static const struct llc_conn_state_trans llc_normal_state_trans_9a = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_9a,
@@ -905,7 +899,7 @@ static const llc_conn_action_t llc_normal_actions_9b[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_9b = {
+static const struct llc_conn_state_trans llc_normal_state_trans_9b = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_9b,
@@ -922,7 +916,7 @@ static const llc_conn_action_t llc_normal_actions_10[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_10 = {
+static const struct llc_conn_state_trans llc_normal_state_trans_10 = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -937,7 +931,7 @@ static const llc_conn_action_t llc_normal_actions_11a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_11a = {
+static const struct llc_conn_state_trans llc_normal_state_trans_11a = {
 	.ev	       = llc_conn_ev_rx_rr_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -952,7 +946,7 @@ static const llc_conn_action_t llc_normal_actions_11b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_11b = {
+static const struct llc_conn_state_trans llc_normal_state_trans_11b = {
 	.ev	       = llc_conn_ev_rx_rr_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -973,7 +967,7 @@ static const llc_conn_action_t llc_normal_actions_11c[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_11c = {
+static const struct llc_conn_state_trans llc_normal_state_trans_11c = {
 	.ev	       = llc_conn_ev_rx_rr_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_11c,
@@ -990,7 +984,7 @@ static const llc_conn_action_t llc_normal_actions_12[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_12 = {
+static const struct llc_conn_state_trans llc_normal_state_trans_12 = {
 	.ev	       = llc_conn_ev_rx_rr_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -1005,7 +999,7 @@ static const llc_conn_action_t llc_normal_actions_13a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_13a = {
+static const struct llc_conn_state_trans llc_normal_state_trans_13a = {
 	.ev	       = llc_conn_ev_rx_rnr_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -1020,7 +1014,7 @@ static const llc_conn_action_t llc_normal_actions_13b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_13b = {
+static const struct llc_conn_state_trans llc_normal_state_trans_13b = {
 	.ev	       = llc_conn_ev_rx_rnr_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -1040,7 +1034,7 @@ static const llc_conn_action_t llc_normal_actions_13c[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_13c = {
+static const struct llc_conn_state_trans llc_normal_state_trans_13c = {
 	.ev	       = llc_conn_ev_rx_rnr_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_13c,
@@ -1057,7 +1051,7 @@ static const llc_conn_action_t llc_normal_actions_14[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_14 = {
+static const struct llc_conn_state_trans llc_normal_state_trans_14 = {
 	.ev	       = llc_conn_ev_rx_rnr_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -1080,7 +1074,7 @@ static const llc_conn_action_t llc_normal_actions_15a[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_15a = {
+static const struct llc_conn_state_trans llc_normal_state_trans_15a = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_15a,
@@ -1103,7 +1097,7 @@ static const llc_conn_action_t llc_normal_actions_15b[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_15b = {
+static const struct llc_conn_state_trans llc_normal_state_trans_15b = {
 	.ev	       = llc_conn_ev_rx_rej_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_15b,
@@ -1125,7 +1119,7 @@ static const llc_conn_action_t llc_normal_actions_16a[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_16a = {
+static const struct llc_conn_state_trans llc_normal_state_trans_16a = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_16a,
@@ -1147,7 +1141,7 @@ static const llc_conn_action_t llc_normal_actions_16b[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_16b = {
+static const struct llc_conn_state_trans llc_normal_state_trans_16b = {
 	.ev	       = llc_conn_ev_rx_rej_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_16b,
@@ -1164,7 +1158,7 @@ static const llc_conn_action_t llc_normal_actions_17[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_17 = {
+static const struct llc_conn_state_trans llc_normal_state_trans_17 = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -1183,7 +1177,7 @@ static const llc_conn_action_t llc_normal_actions_18[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_18 = {
+static const struct llc_conn_state_trans llc_normal_state_trans_18 = {
 	.ev	       = llc_conn_ev_init_p_f_cycle,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_18,
@@ -1205,7 +1199,7 @@ static const llc_conn_action_t llc_normal_actions_19[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_19 = {
+static const struct llc_conn_state_trans llc_normal_state_trans_19 = {
 	.ev	       = llc_conn_ev_p_tmr_exp,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = llc_normal_ev_qfyrs_19,
@@ -1228,7 +1222,7 @@ static const llc_conn_action_t llc_normal_actions_20a[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_20a = {
+static const struct llc_conn_state_trans llc_normal_state_trans_20a = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = llc_normal_ev_qfyrs_20a,
@@ -1251,7 +1245,7 @@ static const llc_conn_action_t llc_normal_actions_20b[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_20b = {
+static const struct llc_conn_state_trans llc_normal_state_trans_20b = {
 	.ev	       = llc_conn_ev_busy_tmr_exp,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = llc_normal_ev_qfyrs_20b,
@@ -1270,7 +1264,7 @@ static const llc_conn_action_t llc_normal_actions_21[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_normal_state_trans_21 = {
+static const struct llc_conn_state_trans llc_normal_state_trans_21 = {
 	.ev	       = llc_conn_ev_tx_buffer_full,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_normal_ev_qfyrs_21,
@@ -1281,7 +1275,7 @@ static struct llc_conn_state_trans llc_normal_state_trans_21 = {
  * Array of pointers;
  * one to each transition
  */
-static struct llc_conn_state_trans *llc_normal_state_transitions[] = {
+static const struct llc_conn_state_trans *llc_normal_state_transitions[] = {
 	 [0] = &llc_normal_state_trans_1,	/* Requests */
 	 [1] = &llc_normal_state_trans_2,
 	 [2] = &llc_normal_state_trans_2_1,
@@ -1354,7 +1348,7 @@ static const llc_conn_action_t llc_busy_actions_1[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_1 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_1 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_1,
@@ -1374,7 +1368,7 @@ static const llc_conn_action_t llc_busy_actions_2[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_2 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_2 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_2,
@@ -1391,7 +1385,7 @@ static const llc_conn_ev_qfyr_t llc_busy_ev_qfyrs_2_1[] = {
 /* just one member, NULL, .bss zeroes it */
 static const llc_conn_action_t llc_busy_actions_2_1[1];
 
-static struct llc_conn_state_trans llc_busy_state_trans_2_1 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_2_1 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_2_1,
@@ -1411,7 +1405,7 @@ static const llc_conn_action_t llc_busy_actions_3[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_3 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_3 = {
 	.ev	       = llc_conn_ev_local_busy_cleared,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_busy_ev_qfyrs_3,
@@ -1431,7 +1425,7 @@ static const llc_conn_action_t llc_busy_actions_4[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_4 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_4 = {
 	.ev	       = llc_conn_ev_local_busy_cleared,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_busy_ev_qfyrs_4,
@@ -1450,7 +1444,7 @@ static const llc_conn_action_t llc_busy_actions_5[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_5 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_5 = {
 	.ev	       = llc_conn_ev_local_busy_cleared,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_busy_ev_qfyrs_5,
@@ -1469,7 +1463,7 @@ static const llc_conn_action_t llc_busy_actions_6[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_6 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_6 = {
 	.ev	       = llc_conn_ev_local_busy_cleared,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_busy_ev_qfyrs_6,
@@ -1488,7 +1482,7 @@ static const llc_conn_action_t llc_busy_actions_7[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_7 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_7 = {
 	.ev	       = llc_conn_ev_local_busy_cleared,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_busy_ev_qfyrs_7,
@@ -1507,7 +1501,7 @@ static const llc_conn_action_t llc_busy_actions_8[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_8 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_8 = {
 	.ev	       = llc_conn_ev_local_busy_cleared,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_busy_ev_qfyrs_8,
@@ -1529,7 +1523,7 @@ static const llc_conn_action_t llc_busy_actions_9a[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_9a = {
+static const struct llc_conn_state_trans llc_busy_state_trans_9a = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_x_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_9a,
@@ -1551,7 +1545,7 @@ static const llc_conn_action_t llc_busy_actions_9b[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_9b = {
+static const struct llc_conn_state_trans llc_busy_state_trans_9b = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_9b,
@@ -1571,7 +1565,7 @@ static const llc_conn_action_t llc_busy_actions_10a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_10a = {
+static const struct llc_conn_state_trans llc_busy_state_trans_10a = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_10a,
@@ -1591,7 +1585,7 @@ static const llc_conn_action_t llc_busy_actions_10b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_10b = {
+static const struct llc_conn_state_trans llc_busy_state_trans_10b = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_10b,
@@ -1606,7 +1600,7 @@ static const llc_conn_action_t llc_busy_actions_11[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_11 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_11 = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_1_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -1624,7 +1618,7 @@ static const llc_conn_action_t llc_busy_actions_12[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_12 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_12 = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -1649,7 +1643,7 @@ static const llc_conn_action_t llc_busy_actions_13a[] = {
 	[8] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_13a = {
+static const struct llc_conn_state_trans llc_busy_state_trans_13a = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_13a,
@@ -1674,7 +1668,7 @@ static const llc_conn_action_t llc_busy_actions_13b[] = {
 	[8] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_13b = {
+static const struct llc_conn_state_trans llc_busy_state_trans_13b = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_13b,
@@ -1697,7 +1691,7 @@ static const llc_conn_action_t llc_busy_actions_14a[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_14a = {
+static const struct llc_conn_state_trans llc_busy_state_trans_14a = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_14a,
@@ -1720,7 +1714,7 @@ static const llc_conn_action_t llc_busy_actions_14b[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_14b = {
+static const struct llc_conn_state_trans llc_busy_state_trans_14b = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_14b,
@@ -1735,7 +1729,7 @@ static const llc_conn_action_t llc_busy_actions_15a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_15a = {
+static const struct llc_conn_state_trans llc_busy_state_trans_15a = {
 	.ev	       = llc_conn_ev_rx_rr_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -1750,7 +1744,7 @@ static const llc_conn_action_t llc_busy_actions_15b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_15b = {
+static const struct llc_conn_state_trans llc_busy_state_trans_15b = {
 	.ev	       = llc_conn_ev_rx_rr_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -1770,7 +1764,7 @@ static const llc_conn_action_t llc_busy_actions_15c[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_15c = {
+static const struct llc_conn_state_trans llc_busy_state_trans_15c = {
 	.ev	       = llc_conn_ev_rx_rr_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_15c,
@@ -1785,7 +1779,7 @@ static const llc_conn_action_t llc_busy_actions_16[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_16 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_16 = {
 	.ev	       = llc_conn_ev_rx_rr_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -1800,7 +1794,7 @@ static const llc_conn_action_t llc_busy_actions_17a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_17a = {
+static const struct llc_conn_state_trans llc_busy_state_trans_17a = {
 	.ev	       = llc_conn_ev_rx_rnr_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -1815,7 +1809,7 @@ static const llc_conn_action_t llc_busy_actions_17b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_17b = {
+static const struct llc_conn_state_trans llc_busy_state_trans_17b = {
 	.ev	       = llc_conn_ev_rx_rnr_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -1835,7 +1829,7 @@ static const llc_conn_action_t llc_busy_actions_17c[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_17c = {
+static const struct llc_conn_state_trans llc_busy_state_trans_17c = {
 	.ev	       = llc_conn_ev_rx_rnr_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_17c,
@@ -1850,7 +1844,7 @@ static const llc_conn_action_t llc_busy_actions_18[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_18 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_18 = {
 	.ev	       = llc_conn_ev_rx_rnr_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -1872,7 +1866,7 @@ static const llc_conn_action_t llc_busy_actions_19a[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_19a = {
+static const struct llc_conn_state_trans llc_busy_state_trans_19a = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_19a,
@@ -1894,7 +1888,7 @@ static const llc_conn_action_t llc_busy_actions_19b[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_19b = {
+static const struct llc_conn_state_trans llc_busy_state_trans_19b = {
 	.ev	       = llc_conn_ev_rx_rej_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_19b,
@@ -1915,7 +1909,7 @@ static const llc_conn_action_t llc_busy_actions_20a[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_20a = {
+static const struct llc_conn_state_trans llc_busy_state_trans_20a = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_20a,
@@ -1936,7 +1930,7 @@ static const llc_conn_action_t llc_busy_actions_20b[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_20b = {
+static const struct llc_conn_state_trans llc_busy_state_trans_20b = {
 	.ev	       = llc_conn_ev_rx_rej_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_20b,
@@ -1953,7 +1947,7 @@ static const llc_conn_action_t llc_busy_actions_21[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_21 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_21 = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -1972,7 +1966,7 @@ static const llc_conn_action_t llc_busy_actions_22[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_22 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_22 = {
 	.ev	       = llc_conn_ev_init_p_f_cycle,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_22,
@@ -1993,7 +1987,7 @@ static const llc_conn_action_t llc_busy_actions_23[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_23 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_23 = {
 	.ev	       = llc_conn_ev_p_tmr_exp,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_23,
@@ -2015,7 +2009,7 @@ static const llc_conn_action_t llc_busy_actions_24a[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_24a = {
+static const struct llc_conn_state_trans llc_busy_state_trans_24a = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_24a,
@@ -2037,7 +2031,7 @@ static const llc_conn_action_t llc_busy_actions_24b[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_24b = {
+static const struct llc_conn_state_trans llc_busy_state_trans_24b = {
 	.ev	       = llc_conn_ev_busy_tmr_exp,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_24b,
@@ -2060,7 +2054,7 @@ static const llc_conn_action_t llc_busy_actions_25[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_25 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_25 = {
 	.ev	       = llc_conn_ev_rej_tmr_exp,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_25,
@@ -2079,7 +2073,7 @@ static const llc_conn_action_t llc_busy_actions_26[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_busy_state_trans_26 = {
+static const struct llc_conn_state_trans llc_busy_state_trans_26 = {
 	.ev	       = llc_conn_ev_rej_tmr_exp,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_busy_ev_qfyrs_26,
@@ -2090,7 +2084,7 @@ static struct llc_conn_state_trans llc_busy_state_trans_26 = {
  * Array of pointers;
  * one to each transition
  */
-static struct llc_conn_state_trans *llc_busy_state_transitions[] = {
+static const struct llc_conn_state_trans *llc_busy_state_transitions[] = {
 	 [0] = &llc_common_state_trans_1,	/* Request */
 	 [1] = &llc_common_state_trans_2,
 	 [2] = &llc_busy_state_trans_1,
@@ -2166,7 +2160,7 @@ static const llc_conn_action_t llc_reject_actions_1[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_1 = {
+static const struct llc_conn_state_trans llc_reject_state_trans_1 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_1,
@@ -2185,7 +2179,7 @@ static const llc_conn_action_t llc_reject_actions_2[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_2 = {
+static const struct llc_conn_state_trans llc_reject_state_trans_2 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_2,
@@ -2202,7 +2196,7 @@ static const llc_conn_ev_qfyr_t llc_reject_ev_qfyrs_2_1[] = {
 /* just one member, NULL, .bss zeroes it */
 static const llc_conn_action_t llc_reject_actions_2_1[1];
 
-static struct llc_conn_state_trans llc_reject_state_trans_2_1 = {
+static const struct llc_conn_state_trans llc_reject_state_trans_2_1 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_2_1,
@@ -2222,7 +2216,7 @@ static const llc_conn_action_t llc_reject_actions_3[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_3 = {
+static const struct llc_conn_state_trans llc_reject_state_trans_3 = {
 	.ev	       = llc_conn_ev_local_busy_detected,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_reject_ev_qfyrs_3,
@@ -2241,7 +2235,7 @@ static const llc_conn_action_t llc_reject_actions_4[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_4 = {
+static const struct llc_conn_state_trans llc_reject_state_trans_4 = {
 	.ev	       = llc_conn_ev_local_busy_detected,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = llc_reject_ev_qfyrs_4,
@@ -2256,7 +2250,7 @@ static const llc_conn_action_t llc_reject_actions_5a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_5a = {
+static const struct llc_conn_state_trans llc_reject_state_trans_5a = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -2271,7 +2265,7 @@ static const llc_conn_action_t llc_reject_actions_5b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_5b = {
+static const struct llc_conn_state_trans llc_reject_state_trans_5b = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -2291,7 +2285,7 @@ static const llc_conn_action_t llc_reject_actions_5c[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_5c = {
+static const struct llc_conn_state_trans llc_reject_state_trans_5c = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_1_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_5c,
@@ -2305,7 +2299,7 @@ static const llc_conn_action_t llc_reject_actions_6[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_6 = {
+static const struct llc_conn_state_trans llc_reject_state_trans_6 = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_1_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -2330,7 +2324,7 @@ static const llc_conn_action_t llc_reject_actions_7a[] = {
 
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_7a = {
+static const struct llc_conn_state_trans llc_reject_state_trans_7a = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_reject_ev_qfyrs_7a,
@@ -2354,7 +2348,7 @@ static const llc_conn_action_t llc_reject_actions_7b[] = {
 	[7] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_7b = {
+static const struct llc_conn_state_trans llc_reject_state_trans_7b = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_reject_ev_qfyrs_7b,
@@ -2376,7 +2370,7 @@ static const llc_conn_action_t llc_reject_actions_8a[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_8a = {
+static const struct llc_conn_state_trans llc_reject_state_trans_8a = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_reject_ev_qfyrs_8a,
@@ -2398,7 +2392,7 @@ static const llc_conn_action_t llc_reject_actions_8b[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_8b = {
+static const struct llc_conn_state_trans llc_reject_state_trans_8b = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_reject_ev_qfyrs_8b,
@@ -2415,7 +2409,7 @@ static const llc_conn_action_t llc_reject_actions_9[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_9 = {
+static const struct llc_conn_state_trans llc_reject_state_trans_9 = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -2430,7 +2424,7 @@ static const llc_conn_action_t llc_reject_actions_10a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_10a = {
+static const struct llc_conn_state_trans llc_reject_state_trans_10a = {
 	.ev	       = llc_conn_ev_rx_rr_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -2445,7 +2439,7 @@ static const llc_conn_action_t llc_reject_actions_10b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_10b = {
+static const struct llc_conn_state_trans llc_reject_state_trans_10b = {
 	.ev	       = llc_conn_ev_rx_rr_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -2465,7 +2459,7 @@ static const llc_conn_action_t llc_reject_actions_10c[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_10c = {
+static const struct llc_conn_state_trans llc_reject_state_trans_10c = {
 	.ev	       = llc_conn_ev_rx_rr_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_10c,
@@ -2480,7 +2474,7 @@ static const llc_conn_action_t llc_reject_actions_11[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_11 = {
+static const struct llc_conn_state_trans llc_reject_state_trans_11 = {
 	.ev	       = llc_conn_ev_rx_rr_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -2495,7 +2489,7 @@ static const llc_conn_action_t llc_reject_actions_12a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_12a = {
+static const struct llc_conn_state_trans llc_reject_state_trans_12a = {
 	.ev	       = llc_conn_ev_rx_rnr_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -2510,7 +2504,7 @@ static const llc_conn_action_t llc_reject_actions_12b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_12b = {
+static const struct llc_conn_state_trans llc_reject_state_trans_12b = {
 	.ev	       = llc_conn_ev_rx_rnr_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -2530,7 +2524,7 @@ static const llc_conn_action_t llc_reject_actions_12c[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_12c = {
+static const struct llc_conn_state_trans llc_reject_state_trans_12c = {
 	.ev	       = llc_conn_ev_rx_rnr_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_12c,
@@ -2545,7 +2539,7 @@ static const llc_conn_action_t llc_reject_actions_13[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_13 = {
+static const struct llc_conn_state_trans llc_reject_state_trans_13 = {
 	.ev	       = llc_conn_ev_rx_rnr_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -2567,7 +2561,7 @@ static const llc_conn_action_t llc_reject_actions_14a[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_14a = {
+static const struct llc_conn_state_trans llc_reject_state_trans_14a = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_14a,
@@ -2589,7 +2583,7 @@ static const llc_conn_action_t llc_reject_actions_14b[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_14b = {
+static const struct llc_conn_state_trans llc_reject_state_trans_14b = {
 	.ev	       = llc_conn_ev_rx_rej_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_14b,
@@ -2610,7 +2604,7 @@ static const llc_conn_action_t llc_reject_actions_15a[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_15a = {
+static const struct llc_conn_state_trans llc_reject_state_trans_15a = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_15a,
@@ -2631,7 +2625,7 @@ static const llc_conn_action_t llc_reject_actions_15b[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_15b = {
+static const struct llc_conn_state_trans llc_reject_state_trans_15b = {
 	.ev	       = llc_conn_ev_rx_rej_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_15b,
@@ -2647,7 +2641,7 @@ static const llc_conn_action_t llc_reject_actions_16[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_16 = {
+static const struct llc_conn_state_trans llc_reject_state_trans_16 = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -2666,7 +2660,7 @@ static const llc_conn_action_t llc_reject_actions_17[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_17 = {
+static const struct llc_conn_state_trans llc_reject_state_trans_17 = {
 	.ev	       = llc_conn_ev_init_p_f_cycle,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_17,
@@ -2688,7 +2682,7 @@ static const llc_conn_action_t llc_reject_actions_18[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_18 = {
+static const struct llc_conn_state_trans llc_reject_state_trans_18 = {
 	.ev	       = llc_conn_ev_rej_tmr_exp,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_18,
@@ -2710,7 +2704,7 @@ static const llc_conn_action_t llc_reject_actions_19[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_19 = {
+static const struct llc_conn_state_trans llc_reject_state_trans_19 = {
 	.ev	       = llc_conn_ev_p_tmr_exp,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_19,
@@ -2733,7 +2727,7 @@ static const llc_conn_action_t llc_reject_actions_20a[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_20a = {
+static const struct llc_conn_state_trans llc_reject_state_trans_20a = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_20a,
@@ -2756,7 +2750,7 @@ static const llc_conn_action_t llc_reject_actions_20b[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_reject_state_trans_20b = {
+static const struct llc_conn_state_trans llc_reject_state_trans_20b = {
 	.ev	       = llc_conn_ev_busy_tmr_exp,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = llc_reject_ev_qfyrs_20b,
@@ -2767,7 +2761,7 @@ static struct llc_conn_state_trans llc_reject_state_trans_20b = {
  * Array of pointers;
  * one to each transition
  */
-static struct llc_conn_state_trans *llc_reject_state_transitions[] = {
+static const struct llc_conn_state_trans *llc_reject_state_transitions[] = {
 	 [0] = &llc_common_state_trans_1,	/* Request */
 	 [1] = &llc_common_state_trans_2,
 	 [2] = &llc_common_state_trans_end,
@@ -2834,7 +2828,7 @@ static const llc_conn_ev_qfyr_t llc_await_ev_qfyrs_1_0[] = {
 /* just one member, NULL, .bss zeroes it */
 static const llc_conn_action_t llc_await_actions_1_0[1];
 
-static struct llc_conn_state_trans llc_await_state_trans_1_0 = {
+static const struct llc_conn_state_trans llc_await_state_trans_1_0 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = llc_await_ev_qfyrs_1_0,
@@ -2848,7 +2842,7 @@ static const llc_conn_action_t llc_await_actions_1[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_1 = {
+static const struct llc_conn_state_trans llc_await_state_trans_1 = {
 	.ev	       = llc_conn_ev_local_busy_detected,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -2867,7 +2861,7 @@ static const llc_conn_action_t llc_await_actions_2[] = {
 	[7] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_2 = {
+static const struct llc_conn_state_trans llc_await_state_trans_2 = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_1_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -2883,7 +2877,7 @@ static const llc_conn_action_t llc_await_actions_3a[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_3a = {
+static const struct llc_conn_state_trans llc_await_state_trans_3a = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -2899,7 +2893,7 @@ static const llc_conn_action_t llc_await_actions_3b[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_3b = {
+static const struct llc_conn_state_trans llc_await_state_trans_3b = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -2916,7 +2910,7 @@ static const llc_conn_action_t llc_await_actions_4[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_4 = {
+static const struct llc_conn_state_trans llc_await_state_trans_4 = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_1_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -2935,7 +2929,7 @@ static const llc_conn_action_t llc_await_actions_5[] = {
 	[7] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_5 = {
+static const struct llc_conn_state_trans llc_await_state_trans_5 = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -2952,7 +2946,7 @@ static const llc_conn_action_t llc_await_actions_6a[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_6a = {
+static const struct llc_conn_state_trans llc_await_state_trans_6a = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -2969,7 +2963,7 @@ static const llc_conn_action_t llc_await_actions_6b[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_6b = {
+static const struct llc_conn_state_trans llc_await_state_trans_6b = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -2986,7 +2980,7 @@ static const llc_conn_action_t llc_await_actions_7[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_7 = {
+static const struct llc_conn_state_trans llc_await_state_trans_7 = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -3003,7 +2997,7 @@ static const llc_conn_action_t llc_await_actions_8a[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_8a = {
+static const struct llc_conn_state_trans llc_await_state_trans_8a = {
 	.ev	       = llc_conn_ev_rx_rr_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -3020,7 +3014,7 @@ static const llc_conn_action_t llc_await_actions_8b[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_8b = {
+static const struct llc_conn_state_trans llc_await_state_trans_8b = {
 	.ev	       = llc_conn_ev_rx_rej_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -3035,7 +3029,7 @@ static const llc_conn_action_t llc_await_actions_9a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_9a = {
+static const struct llc_conn_state_trans llc_await_state_trans_9a = {
 	.ev	       = llc_conn_ev_rx_rr_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -3050,7 +3044,7 @@ static const llc_conn_action_t llc_await_actions_9b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_9b = {
+static const struct llc_conn_state_trans llc_await_state_trans_9b = {
 	.ev	       = llc_conn_ev_rx_rr_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -3065,7 +3059,7 @@ static const llc_conn_action_t llc_await_actions_9c[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_9c = {
+static const struct llc_conn_state_trans llc_await_state_trans_9c = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -3080,7 +3074,7 @@ static const llc_conn_action_t llc_await_actions_9d[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_9d = {
+static const struct llc_conn_state_trans llc_await_state_trans_9d = {
 	.ev	       = llc_conn_ev_rx_rej_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -3096,7 +3090,7 @@ static const llc_conn_action_t llc_await_actions_10a[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_10a = {
+static const struct llc_conn_state_trans llc_await_state_trans_10a = {
 	.ev	       = llc_conn_ev_rx_rr_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -3112,7 +3106,7 @@ static const llc_conn_action_t llc_await_actions_10b[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_10b = {
+static const struct llc_conn_state_trans llc_await_state_trans_10b = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -3128,7 +3122,7 @@ static const llc_conn_action_t llc_await_actions_11[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_11 = {
+static const struct llc_conn_state_trans llc_await_state_trans_11 = {
 	.ev	       = llc_conn_ev_rx_rnr_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -3143,7 +3137,7 @@ static const llc_conn_action_t llc_await_actions_12a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_12a = {
+static const struct llc_conn_state_trans llc_await_state_trans_12a = {
 	.ev	       = llc_conn_ev_rx_rnr_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -3158,7 +3152,7 @@ static const llc_conn_action_t llc_await_actions_12b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_12b = {
+static const struct llc_conn_state_trans llc_await_state_trans_12b = {
 	.ev	       = llc_conn_ev_rx_rnr_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -3174,7 +3168,7 @@ static const llc_conn_action_t llc_await_actions_13[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_13 = {
+static const struct llc_conn_state_trans llc_await_state_trans_13 = {
 	.ev	       = llc_conn_ev_rx_rnr_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -3194,7 +3188,7 @@ static const llc_conn_action_t llc_await_actions_14[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_state_trans_14 = {
+static const struct llc_conn_state_trans llc_await_state_trans_14 = {
 	.ev	       = llc_conn_ev_p_tmr_exp,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = llc_await_ev_qfyrs_14,
@@ -3205,7 +3199,7 @@ static struct llc_conn_state_trans llc_await_state_trans_14 = {
  * Array of pointers;
  * one to each transition
  */
-static struct llc_conn_state_trans *llc_await_state_transitions[] = {
+static const struct llc_conn_state_trans *llc_await_state_transitions[] = {
 	 [0] = &llc_common_state_trans_1,	/* Request */
 	 [1] = &llc_common_state_trans_2,
 	 [2] = &llc_await_state_trans_1_0,
@@ -3263,7 +3257,7 @@ static const llc_conn_ev_qfyr_t llc_await_busy_ev_qfyrs_1_0[] = {
 /* just one member, NULL, .bss zeroes it */
 static const llc_conn_action_t llc_await_busy_actions_1_0[1];
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_1_0 = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_1_0 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = llc_await_busy_ev_qfyrs_1_0,
@@ -3282,7 +3276,7 @@ static const llc_conn_action_t llc_await_busy_actions_1[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_1 = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_1 = {
 	.ev	       = llc_conn_ev_local_busy_cleared,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = llc_await_busy_ev_qfyrs_1,
@@ -3300,7 +3294,7 @@ static const llc_conn_action_t llc_await_busy_actions_2[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_2 = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_2 = {
 	.ev	       = llc_conn_ev_local_busy_cleared,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = llc_await_busy_ev_qfyrs_2,
@@ -3318,7 +3312,7 @@ static const llc_conn_action_t llc_await_busy_actions_3[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_3 = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_3 = {
 	.ev	       = llc_conn_ev_local_busy_cleared,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = llc_await_busy_ev_qfyrs_3,
@@ -3337,7 +3331,7 @@ static const llc_conn_action_t llc_await_busy_actions_4[] = {
 	[7] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_4 = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_4 = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_1_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -3353,7 +3347,7 @@ static const llc_conn_action_t llc_await_busy_actions_5a[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_5a = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_5a = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3369,7 +3363,7 @@ static const llc_conn_action_t llc_await_busy_actions_5b[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_5b = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_5b = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3385,7 +3379,7 @@ static const llc_conn_action_t llc_await_busy_actions_6[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_6 = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_6 = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_1_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3406,7 +3400,7 @@ static const llc_conn_action_t llc_await_busy_actions_7[] = {
 	[9] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_7 = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_7 = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -3424,7 +3418,7 @@ static const llc_conn_action_t llc_await_busy_actions_8a[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_8a = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_8a = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3442,7 +3436,7 @@ static const llc_conn_action_t llc_await_busy_actions_8b[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_8b = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_8b = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3460,7 +3454,7 @@ static const llc_conn_action_t llc_await_busy_actions_9[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_9 = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_9 = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3477,7 +3471,7 @@ static const llc_conn_action_t llc_await_busy_actions_10a[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_10a = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_10a = {
 	.ev	       = llc_conn_ev_rx_rr_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -3494,7 +3488,7 @@ static const llc_conn_action_t llc_await_busy_actions_10b[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_10b = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_10b = {
 	.ev	       = llc_conn_ev_rx_rej_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -3509,7 +3503,7 @@ static const llc_conn_action_t llc_await_busy_actions_11a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_11a = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_11a = {
 	.ev	       = llc_conn_ev_rx_rr_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3524,7 +3518,7 @@ static const llc_conn_action_t llc_await_busy_actions_11b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_11b = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_11b = {
 	.ev	       = llc_conn_ev_rx_rr_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3539,7 +3533,7 @@ static const llc_conn_action_t llc_await_busy_actions_11c[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_11c = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_11c = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3554,7 +3548,7 @@ static const llc_conn_action_t llc_await_busy_actions_11d[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_11d = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_11d = {
 	.ev	       = llc_conn_ev_rx_rej_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3570,7 +3564,7 @@ static const llc_conn_action_t llc_await_busy_actions_12a[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_12a = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_12a = {
 	.ev	       = llc_conn_ev_rx_rr_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3586,7 +3580,7 @@ static const llc_conn_action_t llc_await_busy_actions_12b[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_12b = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_12b = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3602,7 +3596,7 @@ static const llc_conn_action_t llc_await_busy_actions_13[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_13 = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_13 = {
 	.ev	       = llc_conn_ev_rx_rnr_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_BUSY,
 	.ev_qualifiers = NONE,
@@ -3617,7 +3611,7 @@ static const llc_conn_action_t llc_await_busy_actions_14a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_14a = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_14a = {
 	.ev	       = llc_conn_ev_rx_rnr_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3632,7 +3626,7 @@ static const llc_conn_action_t llc_await_busy_actions_14b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_14b = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_14b = {
 	.ev	       = llc_conn_ev_rx_rnr_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3648,7 +3642,7 @@ static const llc_conn_action_t llc_await_busy_actions_15[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_15 = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_15 = {
 	.ev	       = llc_conn_ev_rx_rnr_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3668,7 +3662,7 @@ static const llc_conn_action_t llc_await_busy_actions_16[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_busy_state_trans_16 = {
+static const struct llc_conn_state_trans llc_await_busy_state_trans_16 = {
 	.ev	       = llc_conn_ev_p_tmr_exp,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = llc_await_busy_ev_qfyrs_16,
@@ -3679,7 +3673,7 @@ static struct llc_conn_state_trans llc_await_busy_state_trans_16 = {
  * Array of pointers;
  * one to each transition
  */
-static struct llc_conn_state_trans *llc_await_busy_state_transitions[] = {
+static const struct llc_conn_state_trans *llc_await_busy_state_transitions[] = {
 	 [0] = &llc_common_state_trans_1,		/* Request */
 	 [1] = &llc_common_state_trans_2,
 	 [2] = &llc_await_busy_state_trans_1_0,
@@ -3739,7 +3733,7 @@ static const llc_conn_ev_qfyr_t llc_await_reject_ev_qfyrs_1_0[] = {
 /* just one member, NULL, .bss zeroes it */
 static const llc_conn_action_t llc_await_reject_actions_1_0[1];
 
-static struct llc_conn_state_trans llc_await_reject_state_trans_1_0 = {
+static const struct llc_conn_state_trans llc_await_reject_state_trans_1_0 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = llc_await_reject_ev_qfyrs_1_0,
@@ -3753,7 +3747,7 @@ static const llc_conn_action_t llc_await_rejct_actions_1[] = {
 	[2] = NULL
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_1 = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_1 = {
 	.ev	       = llc_conn_ev_local_busy_detected,
 	.next_state    = LLC_CONN_STATE_AWAIT_BUSY,
 	.ev_qualifiers = NONE,
@@ -3767,7 +3761,7 @@ static const llc_conn_action_t llc_await_rejct_actions_2a[] = {
 	[2] = NULL
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_2a = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_2a = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -3781,7 +3775,7 @@ static const llc_conn_action_t llc_await_rejct_actions_2b[] = {
 	[2] = NULL
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_2b = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_2b = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_0_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -3796,7 +3790,7 @@ static const llc_conn_action_t llc_await_rejct_actions_3[] = {
 	[3] = NULL
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_3 = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_3 = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_1_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -3816,7 +3810,7 @@ static const llc_conn_action_t llc_await_rejct_actions_4[] = {
 	[8] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_4 = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_4 = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -3834,7 +3828,7 @@ static const llc_conn_action_t llc_await_rejct_actions_5a[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_5a = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_5a = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -3852,7 +3846,7 @@ static const llc_conn_action_t llc_await_rejct_actions_5b[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_5b = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_5b = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -3870,7 +3864,7 @@ static const llc_conn_action_t llc_await_rejct_actions_6[] = {
 	[6] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_6 = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_6 = {
 	.ev	       = llc_conn_ev_rx_i_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_AWAIT,
 	.ev_qualifiers = NONE,
@@ -3887,7 +3881,7 @@ static const llc_conn_action_t llc_await_rejct_actions_7a[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_7a = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_7a = {
 	.ev	       = llc_conn_ev_rx_rr_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -3904,7 +3898,7 @@ static const llc_conn_action_t llc_await_rejct_actions_7b[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_7b = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_7b = {
 	.ev	       = llc_conn_ev_rx_rej_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -3921,7 +3915,7 @@ static const llc_conn_action_t llc_await_rejct_actions_7c[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_7c = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_7c = {
 	.ev	       = llc_conn_ev_rx_i_rsp_fbit_set_1_unexpd_ns,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -3936,7 +3930,7 @@ static const llc_conn_action_t llc_await_rejct_actions_8a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_8a = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_8a = {
 	.ev	       = llc_conn_ev_rx_rr_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -3951,7 +3945,7 @@ static const llc_conn_action_t llc_await_rejct_actions_8b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_8b = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_8b = {
 	.ev	       = llc_conn_ev_rx_rr_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -3966,7 +3960,7 @@ static const llc_conn_action_t llc_await_rejct_actions_8c[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_8c = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_8c = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -3981,7 +3975,7 @@ static const llc_conn_action_t llc_await_rejct_actions_8d[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_8d = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_8d = {
 	.ev	       = llc_conn_ev_rx_rej_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -3997,7 +3991,7 @@ static const llc_conn_action_t llc_await_rejct_actions_9a[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_9a = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_9a = {
 	.ev	       = llc_conn_ev_rx_rr_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -4013,7 +4007,7 @@ static const llc_conn_action_t llc_await_rejct_actions_9b[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_9b = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_9b = {
 	.ev	       = llc_conn_ev_rx_rej_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -4029,7 +4023,7 @@ static const llc_conn_action_t llc_await_rejct_actions_10[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_10 = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_10 = {
 	.ev	       = llc_conn_ev_rx_rnr_rsp_fbit_set_1,
 	.next_state    = LLC_CONN_STATE_REJ,
 	.ev_qualifiers = NONE,
@@ -4044,7 +4038,7 @@ static const llc_conn_action_t llc_await_rejct_actions_11a[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_11a = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_11a = {
 	.ev	       = llc_conn_ev_rx_rnr_cmd_pbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -4059,7 +4053,7 @@ static const llc_conn_action_t llc_await_rejct_actions_11b[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_11b = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_11b = {
 	.ev	       = llc_conn_ev_rx_rnr_rsp_fbit_set_0,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -4075,7 +4069,7 @@ static const llc_conn_action_t llc_await_rejct_actions_12[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_12 = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_12 = {
 	.ev	       = llc_conn_ev_rx_rnr_cmd_pbit_set_1,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = NONE,
@@ -4095,7 +4089,7 @@ static const llc_conn_action_t llc_await_rejct_actions_13[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_await_rejct_state_trans_13 = {
+static const struct llc_conn_state_trans llc_await_rejct_state_trans_13 = {
 	.ev	       = llc_conn_ev_p_tmr_exp,
 	.next_state    = LLC_CONN_STATE_AWAIT_REJ,
 	.ev_qualifiers = llc_await_rejct_ev_qfyrs_13,
@@ -4106,7 +4100,7 @@ static struct llc_conn_state_trans llc_await_rejct_state_trans_13 = {
  * Array of pointers;
  * one to each transition
  */
-static struct llc_conn_state_trans *llc_await_rejct_state_transitions[] = {
+static const struct llc_conn_state_trans *llc_await_rejct_state_transitions[] = {
 	 [0] = &llc_await_reject_state_trans_1_0,
 	 [1] = &llc_common_state_trans_1,		/* requests */
 	 [2] = &llc_common_state_trans_2,
@@ -4171,7 +4165,7 @@ static const llc_conn_action_t llc_d_conn_actions_1[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_d_conn_state_trans_1 = {
+static const struct llc_conn_state_trans llc_d_conn_state_trans_1 = {
 	.ev	       = llc_conn_ev_rx_sabme_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_d_conn_ev_qfyrs_1,
@@ -4194,7 +4188,7 @@ static const llc_conn_action_t llc_d_conn_actions_1_1[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_d_conn_state_trans_1_1 = {
+static const struct llc_conn_state_trans llc_d_conn_state_trans_1_1 = {
 	.ev	       = llc_conn_ev_rx_sabme_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_d_conn_ev_qfyrs_1_1,
@@ -4218,7 +4212,7 @@ static const llc_conn_action_t llc_d_conn_actions_2[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_d_conn_state_trans_2 = {
+static const struct llc_conn_state_trans llc_d_conn_state_trans_2 = {
 	.ev	       = llc_conn_ev_rx_ua_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_d_conn_ev_qfyrs_2,
@@ -4241,7 +4235,7 @@ static const llc_conn_action_t llc_d_conn_actions_2_1[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_d_conn_state_trans_2_1 = {
+static const struct llc_conn_state_trans llc_d_conn_state_trans_2_1 = {
 	.ev	       = llc_conn_ev_rx_ua_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_d_conn_ev_qfyrs_2_1,
@@ -4254,7 +4248,7 @@ static const llc_conn_action_t llc_d_conn_actions_3[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_d_conn_state_trans_3 = {
+static const struct llc_conn_state_trans llc_d_conn_state_trans_3 = {
 	.ev	       = llc_conn_ev_rx_disc_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_D_CONN,
 	.ev_qualifiers = NONE,
@@ -4277,7 +4271,7 @@ static const llc_conn_action_t llc_d_conn_actions_4[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_d_conn_state_trans_4 = {
+static const struct llc_conn_state_trans llc_d_conn_state_trans_4 = {
 	.ev	       = llc_conn_ev_rx_dm_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_d_conn_ev_qfyrs_4,
@@ -4299,7 +4293,7 @@ static const llc_conn_action_t llc_d_conn_actions_4_1[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_d_conn_state_trans_4_1 = {
+static const struct llc_conn_state_trans llc_d_conn_state_trans_4_1 = {
 	.ev	       = llc_conn_ev_rx_dm_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_d_conn_ev_qfyrs_4_1,
@@ -4318,7 +4312,7 @@ static const llc_conn_ev_qfyr_t llc_d_conn_ev_qfyrs_5[] = {
 /* just one member, NULL, .bss zeroes it */
 static const llc_conn_action_t llc_d_conn_actions_5[1];
 
-static struct llc_conn_state_trans llc_d_conn_state_trans_5 = {
+static const struct llc_conn_state_trans llc_d_conn_state_trans_5 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_D_CONN,
 	.ev_qualifiers = llc_d_conn_ev_qfyrs_5,
@@ -4338,7 +4332,7 @@ static const llc_conn_action_t llc_d_conn_actions_6[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_d_conn_state_trans_6 = {
+static const struct llc_conn_state_trans llc_d_conn_state_trans_6 = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_D_CONN,
 	.ev_qualifiers = llc_d_conn_ev_qfyrs_6,
@@ -4359,7 +4353,7 @@ static const llc_conn_action_t llc_d_conn_actions_7[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_d_conn_state_trans_7 = {
+static const struct llc_conn_state_trans llc_d_conn_state_trans_7 = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_d_conn_ev_qfyrs_7,
@@ -4379,7 +4373,7 @@ static const llc_conn_action_t llc_d_conn_actions_8[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_d_conn_state_trans_8 = {
+static const struct llc_conn_state_trans llc_d_conn_state_trans_8 = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_d_conn_ev_qfyrs_8,
@@ -4390,7 +4384,7 @@ static struct llc_conn_state_trans llc_d_conn_state_trans_8 = {
  * Array of pointers;
  * one to each transition
  */
-static struct llc_conn_state_trans *llc_d_conn_state_transitions[] = {
+static const struct llc_conn_state_trans *llc_d_conn_state_transitions[] = {
 	 [0] = &llc_d_conn_state_trans_5,	/* Request */
 	 [1] = &llc_common_state_trans_end,
 	 [2] = &llc_common_state_trans_end,	/* Local busy */
@@ -4419,7 +4413,7 @@ static const llc_conn_action_t llc_rst_actions_1[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_rst_state_trans_1 = {
+static const struct llc_conn_state_trans llc_rst_state_trans_1 = {
 	.ev	       = llc_conn_ev_rx_sabme_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_RESET,
 	.ev_qualifiers = NONE,
@@ -4447,7 +4441,7 @@ static const llc_conn_action_t llc_rst_actions_2[] = {
 	[7] = NULL,
 };
 
-static struct llc_conn_state_trans llc_rst_state_trans_2 = {
+static const struct llc_conn_state_trans llc_rst_state_trans_2 = {
 	.ev	       = llc_conn_ev_rx_ua_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_rst_ev_qfyrs_2,
@@ -4475,7 +4469,7 @@ static const llc_conn_action_t llc_rst_actions_2_1[] = {
 	[7] = NULL,
 };
 
-static struct llc_conn_state_trans llc_rst_state_trans_2_1 = {
+static const struct llc_conn_state_trans llc_rst_state_trans_2_1 = {
 	.ev	       = llc_conn_ev_rx_ua_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_rst_ev_qfyrs_2_1,
@@ -4495,7 +4489,7 @@ static const llc_conn_action_t llc_rst_actions_3[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_rst_state_trans_3 = {
+static const struct llc_conn_state_trans llc_rst_state_trans_3 = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = llc_rst_ev_qfyrs_3,
@@ -4518,7 +4512,7 @@ static const llc_conn_action_t llc_rst_actions_4[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_rst_state_trans_4 = {
+static const struct llc_conn_state_trans llc_rst_state_trans_4 = {
 	.ev	       = llc_conn_ev_rx_disc_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_rst_ev_qfyrs_4,
@@ -4541,7 +4535,7 @@ static const llc_conn_action_t llc_rst_actions_4_1[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_rst_state_trans_4_1 = {
+static const struct llc_conn_state_trans llc_rst_state_trans_4_1 = {
 	.ev	       = llc_conn_ev_rx_disc_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_rst_ev_qfyrs_4_1,
@@ -4564,7 +4558,7 @@ static const llc_conn_action_t llc_rst_actions_5[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_rst_state_trans_5 = {
+static const struct llc_conn_state_trans llc_rst_state_trans_5 = {
 	.ev	       = llc_conn_ev_rx_dm_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_rst_ev_qfyrs_5,
@@ -4586,7 +4580,7 @@ static const llc_conn_action_t llc_rst_actions_5_1[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_rst_state_trans_5_1 = {
+static const struct llc_conn_state_trans llc_rst_state_trans_5_1 = {
 	.ev	       = llc_conn_ev_rx_dm_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_rst_ev_qfyrs_5_1,
@@ -4602,7 +4596,7 @@ static const llc_conn_ev_qfyr_t llc_rst_ev_qfyrs_6[] = {
 /* just one member, NULL, .bss zeroes it */
 static const llc_conn_action_t llc_rst_actions_6[1];
 
-static struct llc_conn_state_trans llc_rst_state_trans_6 = {
+static const struct llc_conn_state_trans llc_rst_state_trans_6 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_RESET,
 	.ev_qualifiers = llc_rst_ev_qfyrs_6,
@@ -4623,7 +4617,7 @@ static const llc_conn_action_t llc_rst_actions_7[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_rst_state_trans_7 = {
+static const struct llc_conn_state_trans llc_rst_state_trans_7 = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_RESET,
 	.ev_qualifiers = llc_rst_ev_qfyrs_7,
@@ -4644,7 +4638,7 @@ static const llc_conn_action_t llc_rst_actions_8[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_rst_state_trans_8 = {
+static const struct llc_conn_state_trans llc_rst_state_trans_8 = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_rst_ev_qfyrs_8,
@@ -4665,7 +4659,7 @@ static const llc_conn_action_t llc_rst_actions_8_1[] = {
 	[2] = NULL,
 };
 
-static struct llc_conn_state_trans llc_rst_state_trans_8_1 = {
+static const struct llc_conn_state_trans llc_rst_state_trans_8_1 = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = llc_rst_ev_qfyrs_8_1,
@@ -4676,7 +4670,7 @@ static struct llc_conn_state_trans llc_rst_state_trans_8_1 = {
  * Array of pointers;
  * one to each transition
  */
-static struct llc_conn_state_trans *llc_rst_state_transitions[] = {
+static const struct llc_conn_state_trans *llc_rst_state_transitions[] = {
 	 [0] = &llc_rst_state_trans_6,		/* Request */
 	 [1] = &llc_common_state_trans_end,
 	 [2] = &llc_common_state_trans_end,	/* Local busy */
@@ -4710,7 +4704,7 @@ static const llc_conn_action_t llc_error_actions_1[] = {
 	[8] = NULL,
 };
 
-static struct llc_conn_state_trans llc_error_state_trans_1 = {
+static const struct llc_conn_state_trans llc_error_state_trans_1 = {
 	.ev	       = llc_conn_ev_rx_sabme_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_NORMAL,
 	.ev_qualifiers = NONE,
@@ -4726,7 +4720,7 @@ static const llc_conn_action_t llc_error_actions_2[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_error_state_trans_2 = {
+static const struct llc_conn_state_trans llc_error_state_trans_2 = {
 	.ev	       = llc_conn_ev_rx_disc_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = NONE,
@@ -4741,7 +4735,7 @@ static const llc_conn_action_t llc_error_actions_3[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_error_state_trans_3 = {
+static const struct llc_conn_state_trans llc_error_state_trans_3 = {
 	.ev	       = llc_conn_ev_rx_dm_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = NONE,
@@ -4757,7 +4751,7 @@ static const llc_conn_action_t llc_error_actions_4[] = {
 	[4] = NULL,
 };
 
-static struct llc_conn_state_trans llc_error_state_trans_4 = {
+static const struct llc_conn_state_trans llc_error_state_trans_4 = {
 	.ev	       = llc_conn_ev_rx_frmr_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_RESET,
 	.ev_qualifiers = NONE,
@@ -4770,7 +4764,7 @@ static const llc_conn_action_t llc_error_actions_5[] = {
 	[1] = NULL,
 };
 
-static struct llc_conn_state_trans llc_error_state_trans_5 = {
+static const struct llc_conn_state_trans llc_error_state_trans_5 = {
 	.ev	       = llc_conn_ev_rx_xxx_cmd_pbit_set_x,
 	.next_state    = LLC_CONN_STATE_ERROR,
 	.ev_qualifiers = NONE,
@@ -4778,7 +4772,7 @@ static struct llc_conn_state_trans llc_error_state_trans_5 = {
 };
 
 /* State transitions for LLC_CONN_EV_RX_XXX_RSP_Fbit_SET_X event */
-static struct llc_conn_state_trans llc_error_state_trans_6 = {
+static const struct llc_conn_state_trans llc_error_state_trans_6 = {
 	.ev	       = llc_conn_ev_rx_xxx_rsp_fbit_set_x,
 	.next_state    = LLC_CONN_STATE_ERROR,
 	.ev_qualifiers = NONE,
@@ -4798,7 +4792,7 @@ static const llc_conn_action_t llc_error_actions_7[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_error_state_trans_7 = {
+static const struct llc_conn_state_trans llc_error_state_trans_7 = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_ERROR,
 	.ev_qualifiers = llc_error_ev_qfyrs_7,
@@ -4820,7 +4814,7 @@ static const llc_conn_action_t llc_error_actions_8[] = {
 	[5] = NULL,
 };
 
-static struct llc_conn_state_trans llc_error_state_trans_8 = {
+static const struct llc_conn_state_trans llc_error_state_trans_8 = {
 	.ev	       = llc_conn_ev_ack_tmr_exp,
 	.next_state    = LLC_CONN_STATE_RESET,
 	.ev_qualifiers = llc_error_ev_qfyrs_8,
@@ -4836,7 +4830,7 @@ static const llc_conn_ev_qfyr_t llc_error_ev_qfyrs_9[] = {
 /* just one member, NULL, .bss zeroes it */
 static const llc_conn_action_t llc_error_actions_9[1];
 
-static struct llc_conn_state_trans llc_error_state_trans_9 = {
+static const struct llc_conn_state_trans llc_error_state_trans_9 = {
 	.ev	       = llc_conn_ev_data_req,
 	.next_state    = LLC_CONN_STATE_ERROR,
 	.ev_qualifiers = llc_error_ev_qfyrs_9,
@@ -4847,7 +4841,7 @@ static struct llc_conn_state_trans llc_error_state_trans_9 = {
  * Array of pointers;
  * one to each transition
  */
-static struct llc_conn_state_trans *llc_error_state_transitions[] = {
+static const struct llc_conn_state_trans *llc_error_state_transitions[] = {
 	 [0] = &llc_error_state_trans_9,	/* Request */
 	 [1] = &llc_common_state_trans_end,
 	 [2] = &llc_common_state_trans_end,	/* Local busy */
@@ -4873,7 +4867,7 @@ static const llc_conn_action_t llc_temp_actions_1[] = {
 	[3] = NULL,
 };
 
-static struct llc_conn_state_trans llc_temp_state_trans_1 = {
+static const struct llc_conn_state_trans llc_temp_state_trans_1 = {
 	.ev	       = llc_conn_ev_disc_req,
 	.next_state    = LLC_CONN_STATE_ADM,
 	.ev_qualifiers = NONE,
@@ -4884,7 +4878,7 @@ static struct llc_conn_state_trans llc_temp_state_trans_1 = {
  * Array of pointers;
  * one to each transition
  */
-static struct llc_conn_state_trans *llc_temp_state_transitions[] = {
+static const struct llc_conn_state_trans *llc_temp_state_transitions[] = {
 	[0] = &llc_temp_state_trans_1,		/* requests */
 	[1] = &llc_common_state_trans_end,
 	[2] = &llc_common_state_trans_end,	/* local busy */

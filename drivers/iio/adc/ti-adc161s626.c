@@ -14,6 +14,7 @@
 #include <linux/init.h>
 #include <linux/err.h>
 #include <linux/spi/spi.h>
+#include <linux/unaligned.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/trigger.h>
 #include <linux/iio/buffer.h>
@@ -69,8 +70,7 @@ struct ti_adc_data {
 
 	u8 read_size;
 	u8 shift;
-
-	u8 buffer[16] ____cacheline_aligned;
+	u8 buf[3] __aligned(IIO_DMA_MINALIGN);
 };
 
 static int ti_adc_read_measurement(struct ti_adc_data *data,
@@ -79,26 +79,20 @@ static int ti_adc_read_measurement(struct ti_adc_data *data,
 	int ret;
 
 	switch (data->read_size) {
-	case 2: {
-		__be16 buf;
-
-		ret = spi_read(data->spi, (void *) &buf, 2);
+	case 2:
+		ret = spi_read(data->spi, data->buf, 2);
 		if (ret)
 			return ret;
 
-		*val = be16_to_cpu(buf);
+		*val = get_unaligned_be16(data->buf);
 		break;
-	}
-	case 3: {
-		__be32 buf;
-
-		ret = spi_read(data->spi, (void *) &buf, 3);
+	case 3:
+		ret = spi_read(data->spi, data->buf, 3);
 		if (ret)
 			return ret;
 
-		*val = be32_to_cpu(buf) >> 8;
+		*val = get_unaligned_be24(data->buf);
 		break;
-	}
 	default:
 		return -EINVAL;
 	}
@@ -113,15 +107,20 @@ static irqreturn_t ti_adc_trigger_handler(int irq, void *private)
 	struct iio_poll_func *pf = private;
 	struct iio_dev *indio_dev = pf->indio_dev;
 	struct ti_adc_data *data = iio_priv(indio_dev);
-	int ret;
+	struct {
+		s16 data;
+		aligned_s64 timestamp;
+	} scan = { };
+	int ret, val;
 
-	ret = ti_adc_read_measurement(data, &indio_dev->channels[0],
-				     (int *) &data->buffer);
-	if (!ret)
-		iio_push_to_buffers_with_timestamp(indio_dev,
-					data->buffer,
-					iio_get_time_ns(indio_dev));
+	ret = ti_adc_read_measurement(data, &indio_dev->channels[0], &val);
+	if (ret)
+		goto exit_notify_done;
 
+	scan.data = val;
+	iio_push_to_buffers_with_timestamp(indio_dev, &scan, iio_get_time_ns(indio_dev));
+
+ exit_notify_done:
 	iio_trigger_notify_done(indio_dev->trig);
 
 	return IRQ_HANDLED;
@@ -136,16 +135,12 @@ static int ti_adc_read_raw(struct iio_dev *indio_dev,
 
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
-		ret = iio_device_claim_direct_mode(indio_dev);
-		if (ret)
-			return ret;
-
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
 		ret = ti_adc_read_measurement(data, chan, val);
-		iio_device_release_direct_mode(indio_dev);
-
+		iio_device_release_direct(indio_dev);
 		if (ret)
 			return ret;
-
 		return IIO_VAL_INT;
 	case IIO_CHAN_INFO_SCALE:
 		ret = regulator_get_voltage(data->ref);
@@ -168,6 +163,11 @@ static const struct iio_info ti_adc_info = {
 	.read_raw = ti_adc_read_raw,
 };
 
+static void ti_adc_reg_disable(void *reg)
+{
+	regulator_disable(reg);
+}
+
 static int ti_adc_probe(struct spi_device *spi)
 {
 	struct iio_dev *indio_dev;
@@ -179,11 +179,8 @@ static int ti_adc_probe(struct spi_device *spi)
 		return -ENOMEM;
 
 	indio_dev->info = &ti_adc_info;
-	indio_dev->dev.parent = &spi->dev;
-	indio_dev->dev.of_node = spi->dev.of_node;
 	indio_dev->name = TI_ADC_DRV_NAME;
 	indio_dev->modes = INDIO_DIRECT_MODE;
-	spi_set_drvdata(spi, indio_dev);
 
 	data = iio_priv(indio_dev);
 	data->spi = spi;
@@ -204,65 +201,46 @@ static int ti_adc_probe(struct spi_device *spi)
 	}
 
 	data->ref = devm_regulator_get(&spi->dev, "vdda");
-	if (!IS_ERR(data->ref)) {
-		ret = regulator_enable(data->ref);
-		if (ret < 0)
-			return ret;
-	}
+	if (IS_ERR(data->ref))
+		return PTR_ERR(data->ref);
 
-	ret = iio_triggered_buffer_setup(indio_dev, NULL,
-					 ti_adc_trigger_handler, NULL);
+	ret = regulator_enable(data->ref);
+	if (ret < 0)
+		return ret;
+
+	ret = devm_add_action_or_reset(&spi->dev, ti_adc_reg_disable,
+				       data->ref);
 	if (ret)
-		goto error_regulator_disable;
+		return ret;
 
-	ret = iio_device_register(indio_dev);
+	ret = devm_iio_triggered_buffer_setup(&spi->dev, indio_dev, NULL,
+					      ti_adc_trigger_handler, NULL);
 	if (ret)
-		goto error_unreg_buffer;
+		return ret;
 
-	return 0;
-
-error_unreg_buffer:
-	iio_triggered_buffer_cleanup(indio_dev);
-
-error_regulator_disable:
-	regulator_disable(data->ref);
-
-	return ret;
-}
-
-static int ti_adc_remove(struct spi_device *spi)
-{
-	struct iio_dev *indio_dev = spi_get_drvdata(spi);
-	struct ti_adc_data *data = iio_priv(indio_dev);
-
-	iio_device_unregister(indio_dev);
-	iio_triggered_buffer_cleanup(indio_dev);
-	regulator_disable(data->ref);
-
-	return 0;
+	return devm_iio_device_register(&spi->dev, indio_dev);
 }
 
 static const struct of_device_id ti_adc_dt_ids[] = {
 	{ .compatible = "ti,adc141s626", },
 	{ .compatible = "ti,adc161s626", },
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(of, ti_adc_dt_ids);
 
 static const struct spi_device_id ti_adc_id[] = {
-	{"adc141s626", TI_ADC141S626},
-	{"adc161s626", TI_ADC161S626},
-	{},
+	{ "adc141s626", TI_ADC141S626 },
+	{ "adc161s626", TI_ADC161S626 },
+	{ }
 };
 MODULE_DEVICE_TABLE(spi, ti_adc_id);
 
 static struct spi_driver ti_adc_driver = {
 	.driver = {
 		.name	= TI_ADC_DRV_NAME,
-		.of_match_table = of_match_ptr(ti_adc_dt_ids),
+		.of_match_table = ti_adc_dt_ids,
 	},
 	.probe		= ti_adc_probe,
-	.remove		= ti_adc_remove,
 	.id_table	= ti_adc_id,
 };
 module_spi_driver(ti_adc_driver);

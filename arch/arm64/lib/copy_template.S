@@ -1,25 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2013 ARM Ltd.
  * Copyright (C) 2013 Linaro.
  *
  * This code is based on glibc cortex strings work originally authored by Linaro
- * and re-licensed under GPLv2 for the Linux kernel. The original code can
  * be found @
  *
  * http://bazaar.launchpad.net/~linaro-toolchain-dev/cortex-strings/trunk/
  * files/head:/src/aarch64/
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 
@@ -52,6 +40,16 @@ D_l	.req	x13
 D_h	.req	x14
 
 	mov	dst, dstin
+
+#ifdef CONFIG_AS_HAS_MOPS
+alternative_if_not ARM64_HAS_MOPS
+	b	.Lno_mops
+alternative_else_nop_endif
+	cpy1	dst, src, count
+	b	.Lexitfunc
+.Lno_mops:
+#endif
+
 	cmp	count, #16
 	/*When memory length is less than 16, the accessed are not aligned.*/
 	b.lo	.Ltiny15

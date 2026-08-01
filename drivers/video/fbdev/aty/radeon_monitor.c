@@ -488,12 +488,10 @@ void radeon_probe_screens(struct radeonfb_info *rinfo,
 #if defined(DEBUG) && defined(CONFIG_FB_RADEON_I2C)
 		{
 			u8 *EDIDs[4] = { NULL, NULL, NULL, NULL };
-			int mon_types[4] = {MT_NONE, MT_NONE, MT_NONE, MT_NONE};
 			int i;
 
 			for (i = 0; i < 4; i++)
-				mon_types[i] = radeon_probe_i2c_connector(rinfo,
-									  i+1, &EDIDs[i]);
+				radeon_probe_i2c_connector(rinfo, i + 1, &EDIDs[i]);
 		}
 #endif /* DEBUG */
 		/*
@@ -656,7 +654,7 @@ static void radeon_fixup_panel_info(struct radeonfb_info *rinfo)
 {
 #ifdef CONFIG_PPC
 	/*
-	 * LCD Flat panels should use fixed dividers, we enfore that on
+	 * LCD Flat panels should use fixed dividers, we enforce that on
 	 * PPC only for now...
 	 */
 	if (!rinfo->panel_info.use_bios_dividers && rinfo->mon1_type == MT_LCD

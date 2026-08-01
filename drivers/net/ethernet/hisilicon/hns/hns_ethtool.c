@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2014-2015 Hisilicon Limited.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/etherdevice.h>
@@ -21,7 +17,6 @@
 #define HNS_PHY_CSC_REG		16	/* Copper Specific Control Register */
 #define HNS_PHY_CSS_REG		17	/* Copper Specific Status Register */
 #define HNS_LED_FC_REG		16	/* LED Function Control Reg. */
-#define HNS_LED_PC_REG		17	/* LED Polarity Control Reg. */
 
 #define HNS_LED_FORCE_ON	9
 #define HNS_LED_FORCE_OFF	8
@@ -197,7 +192,7 @@ static int hns_nic_get_link_ksettings(struct net_device *net_dev,
 }
 
 /**
- *hns_nic_set_link_settings - implement ethtool set link ksettings
+ *hns_nic_set_link_ksettings - implement ethtool set link ksettings
  *@net_dev: net_device
  *@cmd: ethtool_link_ksettings
  *retuen 0 - success , negative --fail
@@ -243,7 +238,9 @@ static int hns_nic_set_link_ksettings(struct net_device *net_dev,
 	}
 
 	if (h->dev->ops->adjust_link) {
+		netif_carrier_off(net_dev);
 		h->dev->ops->adjust_link(h, (int)speed, cmd->base.duplex);
+		netif_carrier_on(net_dev);
 		return 0;
 	}
 
@@ -269,9 +266,9 @@ static int hns_nic_config_phy_loopback(struct phy_device *phy_dev, u8 en)
 		if (err)
 			goto out;
 
-		err = phy_loopback(phy_dev, true);
+		err = phy_loopback(phy_dev, true, 0);
 	} else {
-		err = phy_loopback(phy_dev, false);
+		err = phy_loopback(phy_dev, false, 0);
 		if (err)
 			goto out;
 
@@ -307,6 +304,7 @@ static int __lb_setup(struct net_device *ndev,
 		break;
 	case MAC_LOOP_PHY_NONE:
 		ret = hns_nic_config_phy_loopback(phy_dev, 0x0);
+		fallthrough;
 	case MAC_LOOP_NONE:
 		if (!ret && h->dev->ops->set_loopback) {
 			if (priv->ae_handle->phy_if != PHY_INTERFACE_MODE_XGMII)
@@ -336,6 +334,7 @@ static int __lb_setup(struct net_device *ndev,
 static int __lb_up(struct net_device *ndev,
 		   enum hnae_loop loop_mode)
 {
+#define NIC_LB_TEST_WAIT_PHY_LINK_TIME 300
 	struct hns_nic_priv *priv = netdev_priv(ndev);
 	struct hnae_handle *h = priv->ae_handle;
 	int speed, duplex;
@@ -361,6 +360,9 @@ static int __lb_up(struct net_device *ndev,
 	duplex = 1;
 
 	h->dev->ops->adjust_link(h, speed, duplex);
+
+	/* wait adjust link done and phy ready */
+	msleep(NIC_LB_TEST_WAIT_PHY_LINK_TIME);
 
 	return 0;
 }
@@ -412,6 +414,10 @@ static void __lb_other_process(struct hns_nic_ring_data *ring_data,
 	/* for mutl buffer*/
 	new_skb = skb_copy(skb, GFP_ATOMIC);
 	dev_kfree_skb_any(skb);
+	if (!new_skb) {
+		netdev_err(ndev, "skb alloc failed\n");
+		return;
+	}
 	skb = new_skb;
 
 	check_ok = 0;
@@ -459,9 +465,9 @@ static int __lb_clean_rings(struct hns_nic_priv *priv,
 }
 
 /**
- * nic_run_loopback_test -  run loopback test
- * @nic_dev: net device
- * @loopback_type: loopback type
+ * __lb_run_test -  run loopback test
+ * @ndev: net device
+ * @loop_mode: loopback mode
  */
 static int __lb_run_test(struct net_device *ndev,
 			 enum hnae_loop loop_mode)
@@ -473,7 +479,7 @@ static int __lb_run_test(struct net_device *ndev,
 #define NIC_LB_TEST_NO_MEM_ERR 1
 #define NIC_LB_TEST_TX_CNT_ERR 2
 #define NIC_LB_TEST_RX_CNT_ERR 3
-#define NIC_LB_TEST_RX_PKG_ERR 4
+
 	struct hns_nic_priv *priv = netdev_priv(ndev);
 	struct hnae_handle *h = priv->ae_handle;
 	int i, j, lc, good_cnt, ret_val = 0;
@@ -569,7 +575,7 @@ static int __lb_down(struct net_device *ndev, enum hnae_loop loop)
 
 /**
  * hns_nic_self_test - self test
- * @dev: net device
+ * @ndev: net device
  * @eth_test: test cmd
  * @data: test result
  */
@@ -621,7 +627,7 @@ static void hns_nic_self_test(struct net_device *ndev,
 		clear_bit(NIC_STATE_TESTING, &priv->state);
 
 		if (if_running)
-			(void)dev_open(ndev);
+			(void)dev_open(ndev, NULL);
 	}
 	/* Online tests aren't run; pass by default */
 
@@ -630,7 +636,7 @@ static void hns_nic_self_test(struct net_device *ndev,
 
 /**
  * hns_nic_get_drvinfo - get net driver info
- * @dev: net device
+ * @net_dev: net device
  * @drvinfo: driver info
  */
 static void hns_nic_get_drvinfo(struct net_device *net_dev,
@@ -638,28 +644,29 @@ static void hns_nic_get_drvinfo(struct net_device *net_dev,
 {
 	struct hns_nic_priv *priv = netdev_priv(net_dev);
 
-	strncpy(drvinfo->version, HNAE_DRIVER_VERSION,
+	strscpy(drvinfo->version, HNAE_DRIVER_VERSION,
 		sizeof(drvinfo->version));
-	drvinfo->version[sizeof(drvinfo->version) - 1] = '\0';
 
-	strncpy(drvinfo->driver, HNAE_DRIVER_NAME, sizeof(drvinfo->driver));
-	drvinfo->driver[sizeof(drvinfo->driver) - 1] = '\0';
+	strscpy(drvinfo->driver, HNAE_DRIVER_NAME, sizeof(drvinfo->driver));
 
-	strncpy(drvinfo->bus_info, priv->dev->bus->name,
+	strscpy(drvinfo->bus_info, priv->dev->bus->name,
 		sizeof(drvinfo->bus_info));
-	drvinfo->bus_info[ETHTOOL_BUSINFO_LEN - 1] = '\0';
 
-	strncpy(drvinfo->fw_version, "N/A", ETHTOOL_FWVERS_LEN);
+	strscpy(drvinfo->fw_version, "N/A", ETHTOOL_FWVERS_LEN);
 	drvinfo->eedump_len = 0;
 }
 
 /**
  * hns_get_ringparam - get ring parameter
- * @dev: net device
+ * @net_dev: net device
  * @param: ethtool parameter
+ * @kernel_param: ethtool external parameter
+ * @extack: netlink extended ACK report struct
  */
-void hns_get_ringparam(struct net_device *net_dev,
-		       struct ethtool_ringparam *param)
+static void hns_get_ringparam(struct net_device *net_dev,
+			      struct ethtool_ringparam *param,
+			      struct kernel_ethtool_ringparam *kernel_param,
+			      struct netlink_ext_ack *extack)
 {
 	struct hns_nic_priv *priv = netdev_priv(net_dev);
 	struct hnae_ae_ops *ops;
@@ -680,7 +687,7 @@ void hns_get_ringparam(struct net_device *net_dev,
 
 /**
  * hns_get_pauseparam - get pause parameter
- * @dev: net device
+ * @net_dev: net device
  * @param: pause parameter
  */
 static void hns_get_pauseparam(struct net_device *net_dev,
@@ -698,7 +705,7 @@ static void hns_get_pauseparam(struct net_device *net_dev,
 
 /**
  * hns_set_pauseparam - set pause parameter
- * @dev: net device
+ * @net_dev: net device
  * @param: pause parameter
  *
  * Return 0 on success, negative on failure
@@ -722,13 +729,17 @@ static int hns_set_pauseparam(struct net_device *net_dev,
 
 /**
  * hns_get_coalesce - get coalesce info.
- * @dev: net device
+ * @net_dev: net device
  * @ec: coalesce info.
+ * @kernel_coal: ethtool CQE mode setting structure
+ * @extack: extack for reporting error messages
  *
  * Return 0 on success, negative on failure.
  */
 static int hns_get_coalesce(struct net_device *net_dev,
-			    struct ethtool_coalesce *ec)
+			    struct ethtool_coalesce *ec,
+			    struct kernel_ethtool_coalesce *kernel_coal,
+			    struct netlink_ext_ack *extack)
 {
 	struct hns_nic_priv *priv = netdev_priv(net_dev);
 	struct hnae_ae_ops *ops;
@@ -766,13 +777,17 @@ static int hns_get_coalesce(struct net_device *net_dev,
 
 /**
  * hns_set_coalesce - set coalesce info.
- * @dev: net device
+ * @net_dev: net device
  * @ec: coalesce info.
+ * @kernel_coal: ethtool CQE mode setting structure
+ * @extack: extack for reporting error messages
  *
  * Return 0 on success, negative on failure.
  */
 static int hns_set_coalesce(struct net_device *net_dev,
-			    struct ethtool_coalesce *ec)
+			    struct ethtool_coalesce *ec,
+			    struct kernel_ethtool_coalesce *kernel_coal,
+			    struct netlink_ext_ack *extack)
 {
 	struct hns_nic_priv *priv = netdev_priv(net_dev);
 	struct hnae_ae_ops *ops;
@@ -805,10 +820,11 @@ static int hns_set_coalesce(struct net_device *net_dev,
 
 /**
  * hns_get_channels - get channel info.
- * @dev: net device
+ * @net_dev: net device
  * @ch: channel info.
  */
-void hns_get_channels(struct net_device *net_dev, struct ethtool_channels *ch)
+static void
+hns_get_channels(struct net_device *net_dev, struct ethtool_channels *ch)
 {
 	struct hns_nic_priv *priv = netdev_priv(net_dev);
 
@@ -820,13 +836,13 @@ void hns_get_channels(struct net_device *net_dev, struct ethtool_channels *ch)
 }
 
 /**
- * get_ethtool_stats - get detail statistics.
- * @dev: net device
+ * hns_get_ethtool_stats - get detail statistics.
+ * @netdev: net device
  * @stats: statistics info.
  * @data: statistics data.
  */
-void hns_get_ethtool_stats(struct net_device *netdev,
-			   struct ethtool_stats *stats, u64 *data)
+static void hns_get_ethtool_stats(struct net_device *netdev,
+				  struct ethtool_stats *stats, u64 *data)
 {
 	u64 *p = data;
 	struct hns_nic_priv *priv = netdev_priv(netdev);
@@ -868,8 +884,8 @@ void hns_get_ethtool_stats(struct net_device *netdev,
 	p[21] = net_stats->rx_compressed;
 	p[22] = net_stats->tx_compressed;
 
-	p[23] = netdev->rx_dropped.counter;
-	p[24] = netdev->tx_dropped.counter;
+	p[23] = 0; /* was netdev->rx_dropped.counter */
+	p[24] = 0; /* was netdev->tx_dropped.counter */
 
 	p[25] = priv->tx_timeout_count;
 
@@ -878,16 +894,15 @@ void hns_get_ethtool_stats(struct net_device *netdev,
 }
 
 /**
- * get_strings: Return a set of strings that describe the requested objects
- * @dev: net device
- * @stats: string set ID.
+ * hns_get_strings: Return a set of strings that describe the requested objects
+ * @netdev: net device
+ * @stringset: string set ID.
  * @data: objects data.
  */
-void hns_get_strings(struct net_device *netdev, u32 stringset, u8 *data)
+static void hns_get_strings(struct net_device *netdev, u32 stringset, u8 *data)
 {
 	struct hns_nic_priv *priv = netdev_priv(netdev);
 	struct hnae_handle *h = priv->ae_handle;
-	char *buff = (char *)data;
 
 	if (!h->dev->ops->get_strings) {
 		netdev_err(netdev, "h->dev->ops->get_strings is null!\n");
@@ -895,85 +910,55 @@ void hns_get_strings(struct net_device *netdev, u32 stringset, u8 *data)
 	}
 
 	if (stringset == ETH_SS_TEST) {
-		if (priv->ae_handle->phy_if != PHY_INTERFACE_MODE_XGMII) {
-			memcpy(buff, hns_nic_test_strs[MAC_INTERNALLOOP_MAC],
-			       ETH_GSTRING_LEN);
-			buff += ETH_GSTRING_LEN;
-		}
-		memcpy(buff, hns_nic_test_strs[MAC_INTERNALLOOP_SERDES],
-		       ETH_GSTRING_LEN);
-		buff += ETH_GSTRING_LEN;
+		if (priv->ae_handle->phy_if != PHY_INTERFACE_MODE_XGMII)
+			ethtool_puts(&data,
+				     hns_nic_test_strs[MAC_INTERNALLOOP_MAC]);
+		ethtool_puts(&data, hns_nic_test_strs[MAC_INTERNALLOOP_SERDES]);
 		if ((netdev->phydev) && (!netdev->phydev->is_c45))
-			memcpy(buff, hns_nic_test_strs[MAC_INTERNALLOOP_PHY],
-			       ETH_GSTRING_LEN);
+			ethtool_puts(&data,
+				     hns_nic_test_strs[MAC_INTERNALLOOP_PHY]);
 
 	} else {
-		snprintf(buff, ETH_GSTRING_LEN, "rx_packets");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "tx_packets");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "rx_bytes");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "tx_bytes");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "rx_errors");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "tx_errors");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "rx_dropped");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "tx_dropped");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "multicast");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "collisions");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "rx_over_errors");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "rx_crc_errors");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "rx_frame_errors");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "rx_fifo_errors");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "rx_missed_errors");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "tx_aborted_errors");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "tx_carrier_errors");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "tx_fifo_errors");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "tx_heartbeat_errors");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "rx_length_errors");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "tx_window_errors");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "rx_compressed");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "tx_compressed");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "netdev_rx_dropped");
-		buff = buff + ETH_GSTRING_LEN;
-		snprintf(buff, ETH_GSTRING_LEN, "netdev_tx_dropped");
-		buff = buff + ETH_GSTRING_LEN;
+		ethtool_puts(&data, "rx_packets");
+		ethtool_puts(&data, "tx_packets");
+		ethtool_puts(&data, "rx_bytes");
+		ethtool_puts(&data, "tx_bytes");
+		ethtool_puts(&data, "rx_errors");
+		ethtool_puts(&data, "tx_errors");
+		ethtool_puts(&data, "rx_dropped");
+		ethtool_puts(&data, "tx_dropped");
+		ethtool_puts(&data, "multicast");
+		ethtool_puts(&data, "collisions");
+		ethtool_puts(&data, "rx_over_errors");
+		ethtool_puts(&data, "rx_crc_errors");
+		ethtool_puts(&data, "rx_frame_errors");
+		ethtool_puts(&data, "rx_fifo_errors");
+		ethtool_puts(&data, "rx_missed_errors");
+		ethtool_puts(&data, "tx_aborted_errors");
+		ethtool_puts(&data, "tx_carrier_errors");
+		ethtool_puts(&data, "tx_fifo_errors");
+		ethtool_puts(&data, "tx_heartbeat_errors");
+		ethtool_puts(&data, "rx_length_errors");
+		ethtool_puts(&data, "tx_window_errors");
+		ethtool_puts(&data, "rx_compressed");
+		ethtool_puts(&data, "tx_compressed");
+		ethtool_puts(&data, "netdev_rx_dropped");
+		ethtool_puts(&data, "netdev_tx_dropped");
 
-		snprintf(buff, ETH_GSTRING_LEN, "netdev_tx_timeout");
-		buff = buff + ETH_GSTRING_LEN;
+		ethtool_puts(&data, "netdev_tx_timeout");
 
-		h->dev->ops->get_strings(h, stringset, (u8 *)buff);
+		h->dev->ops->get_strings(h, stringset, &data);
 	}
 }
 
 /**
- * nic_get_sset_count - get string set count witch returned by nic_get_strings.
- * @dev: net device
+ * hns_get_sset_count - get string set count returned by nic_get_strings
+ * @netdev: net device
  * @stringset: string set index, 0: self test string; 1: statistics string.
  *
  * Return string set count.
  */
-int hns_get_sset_count(struct net_device *netdev, int stringset)
+static int hns_get_sset_count(struct net_device *netdev, int stringset)
 {
 	struct hns_nic_priv *priv = netdev_priv(netdev);
 	struct hnae_handle *h = priv->ae_handle;
@@ -984,7 +969,7 @@ int hns_get_sset_count(struct net_device *netdev, int stringset)
 		return -EOPNOTSUPP;
 	}
 	if (stringset == ETH_SS_TEST) {
-		u32 cnt = (sizeof(hns_nic_test_strs) / ETH_GSTRING_LEN);
+		u32 cnt = ARRAY_SIZE(hns_nic_test_strs);
 
 		if (priv->ae_handle->phy_if == PHY_INTERFACE_MODE_XGMII)
 			cnt--;
@@ -1002,12 +987,12 @@ int hns_get_sset_count(struct net_device *netdev, int stringset)
 
 /**
  * hns_phy_led_set - set phy LED status.
- * @dev: net device
+ * @netdev: net device
  * @value: LED state.
  *
  * Return 0 on success, negative on failure.
  */
-int hns_phy_led_set(struct net_device *netdev, int value)
+static int hns_phy_led_set(struct net_device *netdev, int value)
 {
 	int retval;
 	struct phy_device *phy_dev = netdev->phydev;
@@ -1023,13 +1008,14 @@ int hns_phy_led_set(struct net_device *netdev, int value)
 }
 
 /**
- * nic_set_phys_id - set phy identify LED.
- * @dev: net device
+ * hns_set_phys_id - set phy identify LED.
+ * @netdev: net device
  * @state: LED state.
  *
  * Return 0 on success, negative on failure.
  */
-int hns_set_phys_id(struct net_device *netdev, enum ethtool_phys_id_state state)
+static int
+hns_set_phys_id(struct net_device *netdev, enum ethtool_phys_id_state state)
 {
 	struct hns_nic_priv *priv = netdev_priv(netdev);
 	struct hnae_handle *h = priv->ae_handle;
@@ -1099,12 +1085,12 @@ int hns_set_phys_id(struct net_device *netdev, enum ethtool_phys_id_state state)
 
 /**
  * hns_get_regs - get net device register
- * @dev: net device
+ * @net_dev: net device
  * @cmd: ethtool cmd
- * @date: register data
+ * @data: register data
  */
-void hns_get_regs(struct net_device *net_dev, struct ethtool_regs *cmd,
-		  void *data)
+static void hns_get_regs(struct net_device *net_dev, struct ethtool_regs *cmd,
+			 void *data)
 {
 	struct hns_nic_priv *priv = netdev_priv(net_dev);
 	struct hnae_ae_ops *ops;
@@ -1120,8 +1106,8 @@ void hns_get_regs(struct net_device *net_dev, struct ethtool_regs *cmd,
 }
 
 /**
- * nic_get_regs_len - get total register len.
- * @dev: net device
+ * hns_get_regs_len - get total register len.
+ * @net_dev: net device
  *
  * Return total register len.
  */
@@ -1146,22 +1132,24 @@ static int hns_get_regs_len(struct net_device *net_dev)
 
 /**
  * hns_nic_nway_reset - nway reset
- * @dev: net device
+ * @netdev: net device
  *
  * Return 0 on success, negative on failure
  */
 static int hns_nic_nway_reset(struct net_device *netdev)
 {
-	int ret = 0;
 	struct phy_device *phy = netdev->phydev;
 
-	if (netif_running(netdev)) {
-		/* if autoneg is disabled, don't restart auto-negotiation */
-		if (phy && phy->autoneg == AUTONEG_ENABLE)
-			ret = genphy_restart_aneg(phy);
-	}
+	if (!netif_running(netdev))
+		return 0;
 
-	return ret;
+	if (!phy)
+		return -EOPNOTSUPP;
+
+	if (phy->autoneg != AUTONEG_ENABLE)
+		return -EINVAL;
+
+	return genphy_restart_aneg(phy);
 }
 
 static u32
@@ -1197,7 +1185,7 @@ hns_get_rss_indir_size(struct net_device *netdev)
 }
 
 static int
-hns_get_rss(struct net_device *netdev, u32 *indir, u8 *key, u8 *hfunc)
+hns_get_rss(struct net_device *netdev, struct ethtool_rxfh_param *rxfh)
 {
 	struct hns_nic_priv *priv = netdev_priv(netdev);
 	struct hnae_ae_ops *ops;
@@ -1210,15 +1198,16 @@ hns_get_rss(struct net_device *netdev, u32 *indir, u8 *key, u8 *hfunc)
 
 	ops = priv->ae_handle->dev->ops;
 
-	if (!indir)
+	if (!rxfh->indir)
 		return 0;
 
-	return ops->get_rss(priv->ae_handle, indir, key, hfunc);
+	return ops->get_rss(priv->ae_handle,
+			    rxfh->indir, rxfh->key, &rxfh->hfunc);
 }
 
 static int
-hns_set_rss(struct net_device *netdev, const u32 *indir, const u8 *key,
-	    const u8 hfunc)
+hns_set_rss(struct net_device *netdev, struct ethtool_rxfh_param *rxfh,
+	    struct netlink_ext_ack *extack)
 {
 	struct hns_nic_priv *priv = netdev_priv(netdev);
 	struct hnae_ae_ops *ops;
@@ -1231,32 +1220,29 @@ hns_set_rss(struct net_device *netdev, const u32 *indir, const u8 *key,
 
 	ops = priv->ae_handle->dev->ops;
 
-	if (hfunc != ETH_RSS_HASH_NO_CHANGE && hfunc != ETH_RSS_HASH_TOP) {
+	if (rxfh->hfunc != ETH_RSS_HASH_NO_CHANGE &&
+	    rxfh->hfunc != ETH_RSS_HASH_TOP) {
 		netdev_err(netdev, "Invalid hfunc!\n");
 		return -EOPNOTSUPP;
 	}
 
-	return ops->set_rss(priv->ae_handle, indir, key, hfunc);
+	return ops->set_rss(priv->ae_handle,
+			    rxfh->indir, rxfh->key, rxfh->hfunc);
 }
 
-static int hns_get_rxnfc(struct net_device *netdev,
-			 struct ethtool_rxnfc *cmd,
-			 u32 *rule_locs)
+static u32 hns_get_rx_ring_count(struct net_device *netdev)
 {
 	struct hns_nic_priv *priv = netdev_priv(netdev);
 
-	switch (cmd->cmd) {
-	case ETHTOOL_GRXRINGS:
-		cmd->data = priv->ae_handle->q_num;
-		break;
-	default:
-		return -EOPNOTSUPP;
-	}
-
-	return 0;
+	return priv->ae_handle->q_num;
 }
 
 static const struct ethtool_ops hns_ethtool_ops = {
+	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
+				     ETHTOOL_COALESCE_MAX_FRAMES |
+				     ETHTOOL_COALESCE_USE_ADAPTIVE |
+				     ETHTOOL_COALESCE_USECS_LOW_HIGH |
+				     ETHTOOL_COALESCE_MAX_FRAMES_LOW_HIGH,
 	.get_drvinfo = hns_nic_get_drvinfo,
 	.get_link  = hns_nic_get_link,
 	.get_ringparam = hns_get_ringparam,
@@ -1277,7 +1263,7 @@ static const struct ethtool_ops hns_ethtool_ops = {
 	.get_rxfh_indir_size = hns_get_rss_indir_size,
 	.get_rxfh = hns_get_rss,
 	.set_rxfh = hns_set_rss,
-	.get_rxnfc = hns_get_rxnfc,
+	.get_rx_ring_count = hns_get_rx_ring_count,
 	.get_link_ksettings  = hns_nic_get_link_ksettings,
 	.set_link_ksettings  = hns_nic_set_link_ksettings,
 };

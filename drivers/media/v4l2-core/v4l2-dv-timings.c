@@ -15,6 +15,7 @@
 #include <media/v4l2-dv-timings.h>
 #include <linux/math64.h>
 #include <linux/hdmi.h>
+#include <media/cec.h>
 
 MODULE_AUTHOR("Hans Verkuil");
 MODULE_DESCRIPTION("V4L2 DV Timings Helper Functions");
@@ -144,6 +145,8 @@ bool v4l2_valid_dv_timings(const struct v4l2_dv_timings *t,
 	const struct v4l2_bt_timings *bt = &t->bt;
 	const struct v4l2_bt_timings_cap *cap = &dvcap->bt;
 	u32 caps = cap->capabilities;
+	const u32 max_vert = 10240;
+	u32 max_hor = 3 * bt->width;
 
 	if (t->type != V4L2_DV_BT_656_1120)
 		return false;
@@ -159,6 +162,26 @@ bool v4l2_valid_dv_timings(const struct v4l2_dv_timings *t,
 	     !(bt->standards & cap->standards)) ||
 	    (bt->interlaced && !(caps & V4L2_DV_BT_CAP_INTERLACED)) ||
 	    (!bt->interlaced && !(caps & V4L2_DV_BT_CAP_PROGRESSIVE)))
+		return false;
+
+	/* sanity checks for the blanking timings */
+	if (!bt->interlaced &&
+	    (bt->il_vbackporch || bt->il_vsync || bt->il_vfrontporch))
+		return false;
+	/*
+	 * Some video receivers cannot properly separate the frontporch,
+	 * backporch and sync values, and instead they only have the total
+	 * blanking. That can be assigned to any of these three fields.
+	 * So just check that none of these are way out of range.
+	 */
+	if (bt->hfrontporch > max_hor ||
+	    bt->hsync > max_hor || bt->hbackporch > max_hor)
+		return false;
+	if (bt->vfrontporch > max_vert ||
+	    bt->vsync > max_vert || bt->vbackporch > max_vert)
+		return false;
+	if (bt->interlaced && (bt->il_vfrontporch > max_vert ||
+	    bt->il_vsync > max_vert || bt->il_vbackporch > max_vert))
 		return false;
 	return fnc == NULL || fnc(t, fnc_handle);
 }
@@ -195,7 +218,7 @@ bool v4l2_find_dv_timings_cap(struct v4l2_dv_timings *t,
 	if (!v4l2_valid_dv_timings(t, cap, fnc, fnc_handle))
 		return false;
 
-	for (i = 0; i < v4l2_dv_timings_presets[i].bt.width; i++) {
+	for (i = 0; v4l2_dv_timings_presets[i].bt.width; i++) {
 		if (v4l2_valid_dv_timings(v4l2_dv_timings_presets + i, cap,
 					  fnc, fnc_handle) &&
 		    v4l2_match_dv_timings(t, v4l2_dv_timings_presets + i,
@@ -217,7 +240,7 @@ bool v4l2_find_dv_timings_cea861_vic(struct v4l2_dv_timings *t, u8 vic)
 {
 	unsigned int i;
 
-	for (i = 0; i < v4l2_dv_timings_presets[i].bt.width; i++) {
+	for (i = 0; v4l2_dv_timings_presets[i].bt.width; i++) {
 		const struct v4l2_bt_timings *bt =
 			&v4l2_dv_timings_presets[i].bt;
 
@@ -292,7 +315,7 @@ void v4l2_print_dv_timings(const char *dev_prefix, const char *prefix,
 	if (prefix == NULL)
 		prefix = "";
 
-	pr_info("%s: %s%ux%u%s%u.%u (%ux%u)\n", dev_prefix, prefix,
+	pr_info("%s: %s%ux%u%s%u.%02u (%ux%u)\n", dev_prefix, prefix,
 		bt->width, bt->height, bt->interlaced ? "i" : "p",
 		fps / 100, fps % 100, htot, vtot);
 
@@ -373,6 +396,45 @@ struct v4l2_fract v4l2_dv_timings_aspect_ratio(const struct v4l2_dv_timings *t)
 }
 EXPORT_SYMBOL_GPL(v4l2_dv_timings_aspect_ratio);
 
+/** v4l2_calc_timeperframe - helper function to calculate timeperframe based
+ *	v4l2_dv_timings fields.
+ * @t - Timings for the video mode.
+ *
+ * Calculates the expected timeperframe using the pixel clock value and
+ * horizontal/vertical measures. This means that v4l2_dv_timings structure
+ * must be correctly and fully filled.
+ */
+struct v4l2_fract v4l2_calc_timeperframe(const struct v4l2_dv_timings *t)
+{
+	const struct v4l2_bt_timings *bt = &t->bt;
+	struct v4l2_fract fps_fract = { 1, 1 };
+	unsigned long n, d;
+	u32 htot, vtot, fps;
+	u64 pclk;
+
+	if (t->type != V4L2_DV_BT_656_1120)
+		return fps_fract;
+
+	htot = V4L2_DV_BT_FRAME_WIDTH(bt);
+	vtot = V4L2_DV_BT_FRAME_HEIGHT(bt);
+	pclk = bt->pixelclock;
+
+	if ((bt->flags & V4L2_DV_FL_CAN_DETECT_REDUCED_FPS) &&
+	    (bt->flags & V4L2_DV_FL_REDUCED_FPS))
+		pclk = div_u64(pclk * 1000ULL, 1001);
+
+	fps = (htot * vtot) > 0 ? div_u64((100 * pclk), (htot * vtot)) : 0;
+	if (!fps)
+		return fps_fract;
+
+	rational_best_approximation(fps, 100, fps, 100, &n, &d);
+
+	fps_fract.numerator = d;
+	fps_fract.denominator = n;
+	return fps_fract;
+}
+EXPORT_SYMBOL_GPL(v4l2_calc_timeperframe);
+
 /*
  * CVT defines
  * Based on Coordinated Video Timings Standard
@@ -419,25 +481,28 @@ EXPORT_SYMBOL_GPL(v4l2_dv_timings_aspect_ratio);
  * @polarities - the horizontal and vertical polarities (same as struct
  *		v4l2_bt_timings polarities).
  * @interlaced - if this flag is true, it indicates interlaced format
- * @fmt - the resulting timings.
+ * @cap - the v4l2_dv_timings_cap capabilities.
+ * @timings - the resulting timings.
  *
  * This function will attempt to detect if the given values correspond to a
  * valid CVT format. If so, then it will return true, and fmt will be filled
  * in with the found CVT timings.
  */
-bool v4l2_detect_cvt(unsigned frame_height,
-		     unsigned hfreq,
-		     unsigned vsync,
-		     unsigned active_width,
+bool v4l2_detect_cvt(unsigned int frame_height,
+		     unsigned int hfreq,
+		     unsigned int vsync,
+		     unsigned int active_width,
 		     u32 polarities,
 		     bool interlaced,
-		     struct v4l2_dv_timings *fmt)
+		     const struct v4l2_dv_timings_cap *cap,
+		     struct v4l2_dv_timings *timings)
 {
-	int  v_fp, v_bp, h_fp, h_bp, hsync;
-	int  frame_width, image_height, image_width;
+	struct v4l2_dv_timings t = {};
+	int v_fp, v_bp, h_fp, h_bp, hsync;
+	int frame_width, image_height, image_width;
 	bool reduced_blanking;
 	bool rb_v2 = false;
-	unsigned pix_clk;
+	unsigned int pix_clk;
 
 	if (vsync < 4 || vsync > 8)
 		return false;
@@ -563,36 +628,39 @@ bool v4l2_detect_cvt(unsigned frame_height,
 		h_fp = h_blank - hsync - h_bp;
 	}
 
-	fmt->type = V4L2_DV_BT_656_1120;
-	fmt->bt.polarities = polarities;
-	fmt->bt.width = image_width;
-	fmt->bt.height = image_height;
-	fmt->bt.hfrontporch = h_fp;
-	fmt->bt.vfrontporch = v_fp;
-	fmt->bt.hsync = hsync;
-	fmt->bt.vsync = vsync;
-	fmt->bt.hbackporch = frame_width - image_width - h_fp - hsync;
+	t.type = V4L2_DV_BT_656_1120;
+	t.bt.polarities = polarities;
+	t.bt.width = image_width;
+	t.bt.height = image_height;
+	t.bt.hfrontporch = h_fp;
+	t.bt.vfrontporch = v_fp;
+	t.bt.hsync = hsync;
+	t.bt.vsync = vsync;
+	t.bt.hbackporch = frame_width - image_width - h_fp - hsync;
 
 	if (!interlaced) {
-		fmt->bt.vbackporch = frame_height - image_height - v_fp - vsync;
-		fmt->bt.interlaced = V4L2_DV_PROGRESSIVE;
+		t.bt.vbackporch = frame_height - image_height - v_fp - vsync;
+		t.bt.interlaced = V4L2_DV_PROGRESSIVE;
 	} else {
-		fmt->bt.vbackporch = (frame_height - image_height - 2 * v_fp -
+		t.bt.vbackporch = (frame_height - image_height - 2 * v_fp -
 				      2 * vsync) / 2;
-		fmt->bt.il_vbackporch = frame_height - image_height - 2 * v_fp -
-					2 * vsync - fmt->bt.vbackporch;
-		fmt->bt.il_vfrontporch = v_fp;
-		fmt->bt.il_vsync = vsync;
-		fmt->bt.flags |= V4L2_DV_FL_HALF_LINE;
-		fmt->bt.interlaced = V4L2_DV_INTERLACED;
+		t.bt.il_vbackporch = frame_height - image_height - 2 * v_fp -
+					2 * vsync - t.bt.vbackporch;
+		t.bt.il_vfrontporch = v_fp;
+		t.bt.il_vsync = vsync;
+		t.bt.flags |= V4L2_DV_FL_HALF_LINE;
+		t.bt.interlaced = V4L2_DV_INTERLACED;
 	}
 
-	fmt->bt.pixelclock = pix_clk;
-	fmt->bt.standards = V4L2_DV_BT_STD_CVT;
+	t.bt.pixelclock = pix_clk;
+	t.bt.standards = V4L2_DV_BT_STD_CVT;
 
 	if (reduced_blanking)
-		fmt->bt.flags |= V4L2_DV_FL_REDUCED_BLANKING;
+		t.bt.flags |= V4L2_DV_FL_REDUCED_BLANKING;
 
+	if (!v4l2_valid_dv_timings(&t, cap, NULL, NULL))
+		return false;
+	*timings = t;
 	return true;
 }
 EXPORT_SYMBOL_GPL(v4l2_detect_cvt);
@@ -637,22 +705,25 @@ EXPORT_SYMBOL_GPL(v4l2_detect_cvt);
  *		image height, so it has to be passed explicitly. Usually
  *		the native screen aspect ratio is used for this. If it
  *		is not filled in correctly, then 16:9 will be assumed.
- * @fmt - the resulting timings.
+ * @cap - the v4l2_dv_timings_cap capabilities.
+ * @timings - the resulting timings.
  *
  * This function will attempt to detect if the given values correspond to a
  * valid GTF format. If so, then it will return true, and fmt will be filled
  * in with the found GTF timings.
  */
-bool v4l2_detect_gtf(unsigned frame_height,
-		unsigned hfreq,
-		unsigned vsync,
-		u32 polarities,
-		bool interlaced,
-		struct v4l2_fract aspect,
-		struct v4l2_dv_timings *fmt)
+bool v4l2_detect_gtf(unsigned int frame_height,
+		     unsigned int hfreq,
+		     unsigned int vsync,
+		     u32 polarities,
+		     bool interlaced,
+		     struct v4l2_fract aspect,
+		     const struct v4l2_dv_timings_cap *cap,
+		     struct v4l2_dv_timings *timings)
 {
+	struct v4l2_dv_timings t = {};
 	int pix_clk;
-	int  v_fp, v_bp, h_fp, hsync;
+	int v_fp, v_bp, h_fp, hsync;
 	int frame_width, image_height, image_width;
 	bool default_gtf;
 	int h_blank;
@@ -693,7 +764,7 @@ bool v4l2_detect_gtf(unsigned frame_height,
 		u64 num;
 		u32 den;
 
-		num = ((image_width * GTF_D_C_PRIME * (u64)hfreq) -
+		num = (((u64)image_width * GTF_D_C_PRIME * hfreq) -
 		      ((u64)image_width * GTF_D_M_PRIME * 1000));
 		den = (hfreq * (100 - GTF_D_C_PRIME) + GTF_D_M_PRIME * 1000) *
 		      (2 * GTF_CELL_GRAN);
@@ -703,7 +774,7 @@ bool v4l2_detect_gtf(unsigned frame_height,
 		u64 num;
 		u32 den;
 
-		num = ((image_width * GTF_S_C_PRIME * (u64)hfreq) -
+		num = (((u64)image_width * GTF_S_C_PRIME * hfreq) -
 		      ((u64)image_width * GTF_S_M_PRIME * 1000));
 		den = (hfreq * (100 - GTF_S_C_PRIME) + GTF_S_M_PRIME * 1000) *
 		      (2 * GTF_CELL_GRAN);
@@ -717,40 +788,43 @@ bool v4l2_detect_gtf(unsigned frame_height,
 	pix_clk = pix_clk / GTF_PXL_CLK_GRAN * GTF_PXL_CLK_GRAN;
 
 	hsync = (frame_width * 8 + 50) / 100;
-	hsync = ((hsync + GTF_CELL_GRAN / 2) / GTF_CELL_GRAN) * GTF_CELL_GRAN;
+	hsync = DIV_ROUND_CLOSEST(hsync, GTF_CELL_GRAN) * GTF_CELL_GRAN;
 
 	h_fp = h_blank / 2 - hsync;
 
-	fmt->type = V4L2_DV_BT_656_1120;
-	fmt->bt.polarities = polarities;
-	fmt->bt.width = image_width;
-	fmt->bt.height = image_height;
-	fmt->bt.hfrontporch = h_fp;
-	fmt->bt.vfrontporch = v_fp;
-	fmt->bt.hsync = hsync;
-	fmt->bt.vsync = vsync;
-	fmt->bt.hbackporch = frame_width - image_width - h_fp - hsync;
+	t.type = V4L2_DV_BT_656_1120;
+	t.bt.polarities = polarities;
+	t.bt.width = image_width;
+	t.bt.height = image_height;
+	t.bt.hfrontporch = h_fp;
+	t.bt.vfrontporch = v_fp;
+	t.bt.hsync = hsync;
+	t.bt.vsync = vsync;
+	t.bt.hbackporch = frame_width - image_width - h_fp - hsync;
 
 	if (!interlaced) {
-		fmt->bt.vbackporch = frame_height - image_height - v_fp - vsync;
-		fmt->bt.interlaced = V4L2_DV_PROGRESSIVE;
+		t.bt.vbackporch = frame_height - image_height - v_fp - vsync;
+		t.bt.interlaced = V4L2_DV_PROGRESSIVE;
 	} else {
-		fmt->bt.vbackporch = (frame_height - image_height - 2 * v_fp -
+		t.bt.vbackporch = (frame_height - image_height - 2 * v_fp -
 				      2 * vsync) / 2;
-		fmt->bt.il_vbackporch = frame_height - image_height - 2 * v_fp -
-					2 * vsync - fmt->bt.vbackporch;
-		fmt->bt.il_vfrontporch = v_fp;
-		fmt->bt.il_vsync = vsync;
-		fmt->bt.flags |= V4L2_DV_FL_HALF_LINE;
-		fmt->bt.interlaced = V4L2_DV_INTERLACED;
+		t.bt.il_vbackporch = frame_height - image_height - 2 * v_fp -
+					2 * vsync - t.bt.vbackporch;
+		t.bt.il_vfrontporch = v_fp;
+		t.bt.il_vsync = vsync;
+		t.bt.flags |= V4L2_DV_FL_HALF_LINE;
+		t.bt.interlaced = V4L2_DV_INTERLACED;
 	}
 
-	fmt->bt.pixelclock = pix_clk;
-	fmt->bt.standards = V4L2_DV_BT_STD_GTF;
+	t.bt.pixelclock = pix_clk;
+	t.bt.standards = V4L2_DV_BT_STD_GTF;
 
 	if (!default_gtf)
-		fmt->bt.flags |= V4L2_DV_FL_REDUCED_BLANKING;
+		t.bt.flags |= V4L2_DV_FL_REDUCED_BLANKING;
 
+	if (!v4l2_valid_dv_timings(&t, cap, NULL, NULL))
+		return false;
+	*timings = t;
 	return true;
 }
 EXPORT_SYMBOL_GPL(v4l2_detect_gtf);
@@ -837,9 +911,9 @@ v4l2_hdmi_rx_colorimetry(const struct hdmi_avi_infoframe *avi,
 		switch (avi->colorimetry) {
 		case HDMI_COLORIMETRY_EXTENDED:
 			switch (avi->extended_colorimetry) {
-			case HDMI_EXTENDED_COLORIMETRY_ADOBE_RGB:
-				c.colorspace = V4L2_COLORSPACE_ADOBERGB;
-				c.xfer_func = V4L2_XFER_FUNC_ADOBERGB;
+			case HDMI_EXTENDED_COLORIMETRY_OPRGB:
+				c.colorspace = V4L2_COLORSPACE_OPRGB;
+				c.xfer_func = V4L2_XFER_FUNC_OPRGB;
 				break;
 			case HDMI_EXTENDED_COLORIMETRY_BT2020:
 				c.colorspace = V4L2_COLORSPACE_BT2020;
@@ -908,10 +982,10 @@ v4l2_hdmi_rx_colorimetry(const struct hdmi_avi_infoframe *avi,
 				c.ycbcr_enc = V4L2_YCBCR_ENC_601;
 				c.xfer_func = V4L2_XFER_FUNC_SRGB;
 				break;
-			case HDMI_EXTENDED_COLORIMETRY_ADOBE_YCC_601:
-				c.colorspace = V4L2_COLORSPACE_ADOBERGB;
+			case HDMI_EXTENDED_COLORIMETRY_OPYCC_601:
+				c.colorspace = V4L2_COLORSPACE_OPRGB;
 				c.ycbcr_enc = V4L2_YCBCR_ENC_601;
-				c.xfer_func = V4L2_XFER_FUNC_ADOBERGB;
+				c.xfer_func = V4L2_XFER_FUNC_OPRGB;
 				break;
 			case HDMI_EXTENDED_COLORIMETRY_BT2020:
 				c.colorspace = V4L2_COLORSPACE_BT2020;
@@ -942,3 +1016,260 @@ v4l2_hdmi_rx_colorimetry(const struct hdmi_avi_infoframe *avi,
 	return c;
 }
 EXPORT_SYMBOL_GPL(v4l2_hdmi_rx_colorimetry);
+
+/**
+ * v4l2_num_edid_blocks() - return the number of EDID blocks
+ *
+ * @edid:	pointer to the EDID data
+ * @max_blocks:	maximum number of supported EDID blocks
+ *
+ * Return: the number of EDID blocks based on the contents of the EDID.
+ *	   This supports the HDMI Forum EDID Extension Override Data Block.
+ */
+unsigned int v4l2_num_edid_blocks(const u8 *edid, unsigned int max_blocks)
+{
+	unsigned int blocks;
+
+	if (!edid || !max_blocks)
+		return 0;
+
+	// The number of extension blocks is recorded at byte 126 of the
+	// first 128-byte block in the EDID.
+	//
+	// If there is an HDMI Forum EDID Extension Override Data Block
+	// present, then it is in bytes 4-6 of the first CTA-861 extension
+	// block of the EDID.
+	blocks = edid[126] + 1;
+	// Check for HDMI Forum EDID Extension Override Data Block
+	if (blocks >= 2 &&	// The EDID must be at least 2 blocks
+	    max_blocks >= 3 &&  // The caller supports at least 3 blocks
+	    edid[128] == 2 &&	// The first extension block is type CTA-861
+	    edid[133] == 0x78 && // Identifier for the EEODB
+	    (edid[132] & 0xe0) == 0xe0 && // Tag Code == 7
+	    (edid[132] & 0x1f) >= 2 &&	// Length >= 2
+	    edid[134] > 1)	// Number of extension blocks is sane
+		blocks = edid[134] + 1;
+	return blocks > max_blocks ? max_blocks : blocks;
+}
+EXPORT_SYMBOL_GPL(v4l2_num_edid_blocks);
+
+/**
+ * v4l2_get_edid_phys_addr() - find and return the physical address
+ *
+ * @edid:	pointer to the EDID data
+ * @size:	size in bytes of the EDID data
+ * @offset:	If not %NULL then the location of the physical address
+ *		bytes in the EDID will be returned here. This is set to 0
+ *		if there is no physical address found.
+ *
+ * Return: the physical address or CEC_PHYS_ADDR_INVALID if there is none.
+ */
+u16 v4l2_get_edid_phys_addr(const u8 *edid, unsigned int size,
+			    unsigned int *offset)
+{
+	unsigned int loc = cec_get_edid_spa_location(edid, size);
+
+	if (offset)
+		*offset = loc;
+	if (loc == 0)
+		return CEC_PHYS_ADDR_INVALID;
+	return (edid[loc] << 8) | edid[loc + 1];
+}
+EXPORT_SYMBOL_GPL(v4l2_get_edid_phys_addr);
+
+/**
+ * v4l2_set_edid_phys_addr() - find and set the physical address
+ *
+ * @edid:	pointer to the EDID data
+ * @size:	size in bytes of the EDID data
+ * @phys_addr:	the new physical address
+ *
+ * This function finds the location of the physical address in the EDID
+ * and fills in the given physical address and updates the checksum
+ * at the end of the EDID block. It does nothing if the EDID doesn't
+ * contain a physical address.
+ */
+void v4l2_set_edid_phys_addr(u8 *edid, unsigned int size, u16 phys_addr)
+{
+	unsigned int loc = cec_get_edid_spa_location(edid, size);
+	u8 sum = 0;
+	unsigned int i;
+
+	if (loc == 0)
+		return;
+	edid[loc] = phys_addr >> 8;
+	edid[loc + 1] = phys_addr & 0xff;
+	loc &= ~0x7f;
+
+	/* update the checksum */
+	for (i = loc; i < loc + 127; i++)
+		sum += edid[i];
+	edid[i] = 256 - sum;
+}
+EXPORT_SYMBOL_GPL(v4l2_set_edid_phys_addr);
+
+/**
+ * v4l2_phys_addr_for_input() - calculate the PA for an input
+ *
+ * @phys_addr:	the physical address of the parent
+ * @input:	the number of the input port, must be between 1 and 15
+ *
+ * This function calculates a new physical address based on the input
+ * port number. For example:
+ *
+ * PA = 0.0.0.0 and input = 2 becomes 2.0.0.0
+ *
+ * PA = 3.0.0.0 and input = 1 becomes 3.1.0.0
+ *
+ * PA = 3.2.1.0 and input = 5 becomes 3.2.1.5
+ *
+ * PA = 3.2.1.3 and input = 5 becomes f.f.f.f since it maxed out the depth.
+ *
+ * Return: the new physical address or CEC_PHYS_ADDR_INVALID.
+ */
+u16 v4l2_phys_addr_for_input(u16 phys_addr, u8 input)
+{
+	/* Check if input is sane */
+	if (WARN_ON(input == 0 || input > 0xf))
+		return CEC_PHYS_ADDR_INVALID;
+
+	if (phys_addr == 0)
+		return input << 12;
+
+	if ((phys_addr & 0x0fff) == 0)
+		return phys_addr | (input << 8);
+
+	if ((phys_addr & 0x00ff) == 0)
+		return phys_addr | (input << 4);
+
+	if ((phys_addr & 0x000f) == 0)
+		return phys_addr | input;
+
+	/*
+	 * All nibbles are used so no valid physical addresses can be assigned
+	 * to the input.
+	 */
+	return CEC_PHYS_ADDR_INVALID;
+}
+EXPORT_SYMBOL_GPL(v4l2_phys_addr_for_input);
+
+/**
+ * v4l2_phys_addr_validate() - validate a physical address from an EDID
+ *
+ * @phys_addr:	the physical address to validate
+ * @parent:	if not %NULL, then this is filled with the parents PA.
+ * @port:	if not %NULL, then this is filled with the input port.
+ *
+ * This validates a physical address as read from an EDID. If the
+ * PA is invalid (such as 1.0.1.0 since '0' is only allowed at the end),
+ * then it will return -EINVAL.
+ *
+ * The parent PA is passed into %parent and the input port is passed into
+ * %port. For example:
+ *
+ * PA = 0.0.0.0: has parent 0.0.0.0 and input port 0.
+ *
+ * PA = 1.0.0.0: has parent 0.0.0.0 and input port 1.
+ *
+ * PA = 3.2.0.0: has parent 3.0.0.0 and input port 2.
+ *
+ * PA = f.f.f.f: has parent f.f.f.f and input port 0.
+ *
+ * Return: 0 if the PA is valid, -EINVAL if not.
+ */
+int v4l2_phys_addr_validate(u16 phys_addr, u16 *parent, u16 *port)
+{
+	int i;
+
+	if (parent)
+		*parent = phys_addr;
+	if (port)
+		*port = 0;
+	if (phys_addr == CEC_PHYS_ADDR_INVALID)
+		return 0;
+	for (i = 0; i < 16; i += 4)
+		if (phys_addr & (0xf << i))
+			break;
+	if (i == 16)
+		return 0;
+	if (parent)
+		*parent = phys_addr & (0xfff0 << i);
+	if (port)
+		*port = (phys_addr >> i) & 0xf;
+	for (i += 4; i < 16; i += 4)
+		if ((phys_addr & (0xf << i)) == 0)
+			return -EINVAL;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(v4l2_phys_addr_validate);
+
+#ifdef CONFIG_DEBUG_FS
+
+#define DEBUGFS_FOPS(type, flag)					\
+static ssize_t								\
+infoframe_read_##type(struct file *filp,				\
+		      char __user *ubuf, size_t count, loff_t *ppos)	\
+{									\
+	struct v4l2_debugfs_if *infoframes = filp->private_data;	\
+									\
+	return infoframes->if_read((flag), infoframes->priv, filp,	\
+				   ubuf, count, ppos);			\
+}									\
+									\
+static const struct file_operations infoframe_##type##_fops = {		\
+	.owner   = THIS_MODULE,						\
+	.open    = simple_open,						\
+	.read    = infoframe_read_##type,				\
+}
+
+DEBUGFS_FOPS(avi, V4L2_DEBUGFS_IF_AVI);
+DEBUGFS_FOPS(audio, V4L2_DEBUGFS_IF_AUDIO);
+DEBUGFS_FOPS(spd, V4L2_DEBUGFS_IF_SPD);
+DEBUGFS_FOPS(hdmi, V4L2_DEBUGFS_IF_HDMI);
+DEBUGFS_FOPS(drm, V4L2_DEBUGFS_IF_DRM);
+
+struct v4l2_debugfs_if *v4l2_debugfs_if_alloc(struct dentry *root, u32 if_types,
+					      void *priv,
+					      v4l2_debugfs_if_read_t if_read)
+{
+	struct v4l2_debugfs_if *infoframes;
+
+	if (IS_ERR_OR_NULL(root) || !if_types || !if_read)
+		return NULL;
+
+	infoframes = kzalloc_obj(*infoframes);
+	if (!infoframes)
+		return NULL;
+
+	infoframes->if_dir = debugfs_create_dir("infoframes", root);
+	infoframes->priv = priv;
+	infoframes->if_read = if_read;
+	if (if_types & V4L2_DEBUGFS_IF_AVI)
+		debugfs_create_file("avi", 0400, infoframes->if_dir,
+				    infoframes, &infoframe_avi_fops);
+	if (if_types & V4L2_DEBUGFS_IF_AUDIO)
+		debugfs_create_file("audio", 0400, infoframes->if_dir,
+				    infoframes, &infoframe_audio_fops);
+	if (if_types & V4L2_DEBUGFS_IF_SPD)
+		debugfs_create_file("spd", 0400, infoframes->if_dir,
+				    infoframes, &infoframe_spd_fops);
+	if (if_types & V4L2_DEBUGFS_IF_HDMI)
+		debugfs_create_file("hdmi", 0400, infoframes->if_dir,
+				    infoframes, &infoframe_hdmi_fops);
+	if (if_types & V4L2_DEBUGFS_IF_DRM)
+		debugfs_create_file("hdr_drm", 0400, infoframes->if_dir,
+				    infoframes, &infoframe_drm_fops);
+	return infoframes;
+}
+EXPORT_SYMBOL_GPL(v4l2_debugfs_if_alloc);
+
+void v4l2_debugfs_if_free(struct v4l2_debugfs_if *infoframes)
+{
+	if (infoframes) {
+		debugfs_remove_recursive(infoframes->if_dir);
+		kfree(infoframes);
+	}
+}
+EXPORT_SYMBOL_GPL(v4l2_debugfs_if_free);
+
+#endif

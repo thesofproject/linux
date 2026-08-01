@@ -1,18 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* tmp421.c
  *
  * Copyright (C) 2009 Andre Prendel <andre.prendel@gmx.de>
  * Preliminary support by:
  * Melvin Rook, Raymond Ng
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -28,8 +19,7 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-sysfs.h>
 #include <linux/err.h>
-#include <linux/mutex.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/sysfs.h>
 
 /* Addresses to scan */
@@ -38,15 +28,20 @@ static const unsigned short normal_i2c[] = { 0x2a, 0x4c, 0x4d, 0x4e, 0x4f,
 
 enum chips { tmp421, tmp422, tmp423, tmp441, tmp442 };
 
+#define MAX_CHANNELS				4
 /* The TMP421 registers */
 #define TMP421_STATUS_REG			0x08
 #define TMP421_CONFIG_REG_1			0x09
+#define TMP421_CONFIG_REG_2			0x0A
+#define TMP421_CONFIG_REG_REN(x)		(BIT(3 + (x)))
+#define TMP421_CONFIG_REG_REN_MASK		GENMASK(6, 3)
 #define TMP421_CONVERSION_RATE_REG		0x0B
+#define TMP421_N_FACTOR_REG_1			0x21
 #define TMP421_MANUFACTURER_ID_REG		0xFE
 #define TMP421_DEVICE_ID_REG			0xFF
 
-static const u8 TMP421_TEMP_MSB[4]		= { 0x00, 0x01, 0x02, 0x03 };
-static const u8 TMP421_TEMP_LSB[4]		= { 0x10, 0x11, 0x12, 0x13 };
+static const u8 TMP421_TEMP_MSB[MAX_CHANNELS]	= { 0x00, 0x01, 0x02, 0x03 };
+static const u8 TMP421_TEMP_LSB[MAX_CHANNELS]	= { 0x10, 0x11, 0x12, 0x13 };
 
 /* Flags */
 #define TMP421_CONFIG_SHUTDOWN			0x40
@@ -61,16 +56,16 @@ static const u8 TMP421_TEMP_LSB[4]		= { 0x10, 0x11, 0x12, 0x13 };
 #define TMP442_DEVICE_ID			0x42
 
 static const struct i2c_device_id tmp421_id[] = {
-	{ "tmp421", 2 },
-	{ "tmp422", 3 },
-	{ "tmp423", 4 },
-	{ "tmp441", 2 },
-	{ "tmp442", 3 },
+	{ .name = "tmp421", .driver_data = 2 },
+	{ .name = "tmp422", .driver_data = 3 },
+	{ .name = "tmp423", .driver_data = 4 },
+	{ .name = "tmp441", .driver_data = 2 },
+	{ .name = "tmp442", .driver_data = 3 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, tmp421_id);
 
-static const struct of_device_id tmp421_of_match[] = {
+static const struct of_device_id __maybe_unused tmp421_of_match[] = {
 	{
 		.compatible = "ti,tmp421",
 		.data = (void *)2
@@ -88,91 +83,132 @@ static const struct of_device_id tmp421_of_match[] = {
 		.data = (void *)2
 	},
 	{
-		.compatible = "ti,tmp422",
+		.compatible = "ti,tmp442",
 		.data = (void *)3
 	},
 	{ },
 };
 MODULE_DEVICE_TABLE(of, tmp421_of_match);
 
+struct tmp421_channel {
+	const char *label;
+	bool enabled;
+	s16 temp;
+};
+
 struct tmp421_data {
 	struct i2c_client *client;
-	struct mutex update_lock;
-	u32 temp_config[5];
+	u32 temp_config[MAX_CHANNELS + 1];
 	struct hwmon_channel_info temp_info;
 	const struct hwmon_channel_info *info[2];
 	struct hwmon_chip_info chip;
-	char valid;
+	bool valid;
 	unsigned long last_updated;
 	unsigned long channels;
 	u8 config;
-	s16 temp[4];
+	struct tmp421_channel channel[MAX_CHANNELS];
 };
 
-static int temp_from_s16(s16 reg)
+static int temp_from_raw(u16 reg, bool extended)
 {
 	/* Mask out status bits */
 	int temp = reg & ~0xf;
 
-	return (temp * 1000 + 128) / 256;
+	if (extended)
+		temp = temp - 64 * 256;
+	else
+		temp = (s16)temp;
+
+	return DIV_ROUND_CLOSEST(temp * 1000, 256);
 }
 
-static int temp_from_u16(u16 reg)
+static int tmp421_update_device(struct tmp421_data *data)
 {
-	/* Mask out status bits */
-	int temp = reg & ~0xf;
-
-	/* Add offset for extended temperature range. */
-	temp -= 64 * 256;
-
-	return (temp * 1000 + 128) / 256;
-}
-
-static struct tmp421_data *tmp421_update_device(struct device *dev)
-{
-	struct tmp421_data *data = dev_get_drvdata(dev);
 	struct i2c_client *client = data->client;
+	int ret = 0;
 	int i;
 
-	mutex_lock(&data->update_lock);
-
-	if (time_after(jiffies, data->last_updated + 2 * HZ) || !data->valid) {
-		data->config = i2c_smbus_read_byte_data(client,
-			TMP421_CONFIG_REG_1);
+	if (time_after(jiffies, data->last_updated + (HZ / 2)) ||
+	    !data->valid) {
+		data->valid = false;
+		ret = i2c_smbus_read_byte_data(client, TMP421_CONFIG_REG_1);
+		if (ret < 0)
+			return ret;
+		data->config = ret;
 
 		for (i = 0; i < data->channels; i++) {
-			data->temp[i] = i2c_smbus_read_byte_data(client,
-				TMP421_TEMP_MSB[i]) << 8;
-			data->temp[i] |= i2c_smbus_read_byte_data(client,
-				TMP421_TEMP_LSB[i]);
+			ret = i2c_smbus_read_byte_data(client, TMP421_TEMP_MSB[i]);
+			if (ret < 0)
+				return ret;
+			data->channel[i].temp = ret << 8;
+
+			ret = i2c_smbus_read_byte_data(client, TMP421_TEMP_LSB[i]);
+			if (ret < 0)
+				return ret;
+			data->channel[i].temp |= ret;
 		}
 		data->last_updated = jiffies;
-		data->valid = 1;
+		data->valid = true;
+	}
+	return 0;
+}
+
+static int tmp421_enable_channels(struct tmp421_data *data)
+{
+	int err;
+	struct i2c_client *client = data->client;
+	struct device *dev = &client->dev;
+	int old = i2c_smbus_read_byte_data(client, TMP421_CONFIG_REG_2);
+	int new, i;
+
+	if (old < 0) {
+		dev_err(dev, "error reading register, can't disable channels\n");
+		return old;
 	}
 
-	mutex_unlock(&data->update_lock);
+	new = old & ~TMP421_CONFIG_REG_REN_MASK;
+	for (i = 0; i < data->channels; i++)
+		if (data->channel[i].enabled)
+			new |= TMP421_CONFIG_REG_REN(i);
 
-	return data;
+	if (new == old)
+		return 0;
+
+	err = i2c_smbus_write_byte_data(client, TMP421_CONFIG_REG_2, new);
+	if (err < 0)
+		dev_err(dev, "error writing register, can't disable channels\n");
+
+	return err;
 }
 
 static int tmp421_read(struct device *dev, enum hwmon_sensor_types type,
 		       u32 attr, int channel, long *val)
 {
-	struct tmp421_data *tmp421 = tmp421_update_device(dev);
+	struct tmp421_data *tmp421 = dev_get_drvdata(dev);
+	int ret = 0;
+
+	ret = tmp421_update_device(tmp421);
+	if (ret)
+		return ret;
 
 	switch (attr) {
 	case hwmon_temp_input:
-		if (tmp421->config & TMP421_CONFIG_RANGE)
-			*val = temp_from_u16(tmp421->temp[channel]);
-		else
-			*val = temp_from_s16(tmp421->temp[channel]);
+		if (!tmp421->channel[channel].enabled)
+			return -ENODATA;
+		*val = temp_from_raw(tmp421->channel[channel].temp,
+				     tmp421->config & TMP421_CONFIG_RANGE);
 		return 0;
 	case hwmon_temp_fault:
+		if (!tmp421->channel[channel].enabled)
+			return -ENODATA;
 		/*
-		 * The OPEN bit signals a fault. This is bit 0 of the temperature
-		 * register (low byte).
+		 * Any of OPEN or /PVLD bits indicate a hardware mulfunction
+		 * and the conversion result may be incorrect
 		 */
-		*val = tmp421->temp[channel] & 0x01;
+		*val = !!(tmp421->channel[channel].temp & 0x03);
+		return 0;
+	case hwmon_temp_enable:
+		*val = tmp421->channel[channel].enabled;
 		return 0;
 	default:
 		return -EOPNOTSUPP;
@@ -180,24 +216,53 @@ static int tmp421_read(struct device *dev, enum hwmon_sensor_types type,
 
 }
 
+static int tmp421_read_string(struct device *dev, enum hwmon_sensor_types type,
+			     u32 attr, int channel, const char **str)
+{
+	struct tmp421_data *data = dev_get_drvdata(dev);
+
+	*str = data->channel[channel].label;
+
+	return 0;
+}
+
+static int tmp421_write(struct device *dev, enum hwmon_sensor_types type,
+			u32 attr, int channel, long val)
+{
+	struct tmp421_data *data = dev_get_drvdata(dev);
+	int ret;
+
+	switch (attr) {
+	case hwmon_temp_enable:
+		data->channel[channel].enabled = val;
+		ret = tmp421_enable_channels(data);
+		break;
+	default:
+	    ret = -EOPNOTSUPP;
+	}
+
+	return ret;
+}
+
 static umode_t tmp421_is_visible(const void *data, enum hwmon_sensor_types type,
 				 u32 attr, int channel)
 {
 	switch (attr) {
 	case hwmon_temp_fault:
-		if (channel == 0)
-			return 0;
-		return S_IRUGO;
 	case hwmon_temp_input:
-		return S_IRUGO;
+	case hwmon_temp_label:
+		return 0444;
+	case hwmon_temp_enable:
+		return 0644;
 	default:
 		return 0;
 	}
 }
 
-static int tmp421_init_client(struct i2c_client *client)
+static int tmp421_init_client(struct tmp421_data *data)
 {
 	int config, config_orig;
+	struct i2c_client *client = data->client;
 
 	/* Set the conversion rate to 2 Hz */
 	i2c_smbus_write_byte_data(client, TMP421_CONVERSION_RATE_REG, 0x05);
@@ -218,7 +283,7 @@ static int tmp421_init_client(struct i2c_client *client)
 		i2c_smbus_write_byte_data(client, TMP421_CONFIG_REG_1, config);
 	}
 
-	return 0;
+	return tmp421_enable_channels(data);
 }
 
 static int tmp421_detect(struct i2c_client *client,
@@ -226,8 +291,10 @@ static int tmp421_detect(struct i2c_client *client,
 {
 	enum chips kind;
 	struct i2c_adapter *adapter = client->adapter;
-	const char * const names[] = { "TMP421", "TMP422", "TMP423",
-				       "TMP441", "TMP442" };
+	static const char * const names[] = {
+		"TMP421", "TMP422", "TMP423",
+		"TMP441", "TMP442"
+	};
 	int addr = client->addr;
 	u8 reg;
 
@@ -273,9 +340,77 @@ static int tmp421_detect(struct i2c_client *client,
 		return -ENODEV;
 	}
 
-	strlcpy(info->type, tmp421_id[kind].name, I2C_NAME_SIZE);
+	strscpy(info->type, tmp421_id[kind].name, I2C_NAME_SIZE);
 	dev_info(&adapter->dev, "Detected TI %s chip at 0x%02x\n",
 		 names[kind], client->addr);
+
+	return 0;
+}
+
+static int tmp421_probe_child_from_dt(struct i2c_client *client,
+				      struct device_node *child,
+				      struct tmp421_data *data)
+
+{
+	struct device *dev = &client->dev;
+	u32 i;
+	s32 val;
+	int err;
+
+	err = of_property_read_u32(child, "reg", &i);
+	if (err) {
+		dev_err(dev, "missing reg property of %pOFn\n", child);
+		return err;
+	}
+
+	if (i >= data->channels) {
+		dev_err(dev, "invalid reg %d of %pOFn\n", i, child);
+		return -EINVAL;
+	}
+
+	err = of_property_read_string(child, "label", &data->channel[i].label);
+	if (err == -ENODATA || err == -EILSEQ) {
+		dev_err(dev, "invalid label property in %pOFn\n", child);
+		return err;
+	}
+	if (data->channel[i].label)
+		data->temp_config[i] |= HWMON_T_LABEL;
+
+	data->channel[i].enabled = of_device_is_available(child);
+
+	err = of_property_read_s32(child, "ti,n-factor", &val);
+	if (!err) {
+		if (i == 0) {
+			dev_err(dev, "n-factor can't be set for internal channel\n");
+			return -EINVAL;
+		}
+
+		if (val > 127 || val < -128) {
+			dev_err(dev, "n-factor for channel %d invalid (%d)\n",
+				i, val);
+			return -EINVAL;
+		}
+		i2c_smbus_write_byte_data(client, TMP421_N_FACTOR_REG_1 + i - 1,
+					  val);
+	}
+
+	return 0;
+}
+
+static int tmp421_probe_from_dt(struct i2c_client *client, struct tmp421_data *data)
+{
+	struct device *dev = &client->dev;
+	const struct device_node *np = dev->of_node;
+	int err;
+
+	for_each_child_of_node_scoped(np, child) {
+		if (strcmp(child->name, "channel"))
+			continue;
+
+		err = tmp421_probe_child_from_dt(client, child, data);
+		if (err)
+			return err;
+	}
 
 	return 0;
 }
@@ -283,10 +418,11 @@ static int tmp421_detect(struct i2c_client *client,
 static const struct hwmon_ops tmp421_ops = {
 	.is_visible = tmp421_is_visible,
 	.read = tmp421_read,
+	.read_string = tmp421_read_string,
+	.write = tmp421_write,
 };
 
-static int tmp421_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int tmp421_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct device *hwmon_dev;
@@ -297,20 +433,21 @@ static int tmp421_probe(struct i2c_client *client,
 	if (!data)
 		return -ENOMEM;
 
-	mutex_init(&data->update_lock);
-	if (client->dev.of_node)
-		data->channels = (unsigned long)
-			of_device_get_match_data(&client->dev);
-	else
-		data->channels = id->driver_data;
+	data->channels = (unsigned long)i2c_get_match_data(client);
 	data->client = client;
 
-	err = tmp421_init_client(client);
+	for (i = 0; i < data->channels; i++) {
+		data->temp_config[i] = HWMON_T_INPUT | HWMON_T_FAULT | HWMON_T_ENABLE;
+		data->channel[i].enabled = true;
+	}
+
+	err = tmp421_probe_from_dt(client, data);
 	if (err)
 		return err;
 
-	for (i = 0; i < data->channels; i++)
-		data->temp_config[i] = HWMON_T_INPUT | HWMON_T_FAULT;
+	err = tmp421_init_client(data);
+	if (err)
+		return err;
 
 	data->chip.ops = &tmp421_ops;
 	data->chip.info = data->info;

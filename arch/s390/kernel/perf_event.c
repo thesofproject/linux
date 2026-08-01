@@ -5,43 +5,23 @@
  *  Copyright IBM Corp. 2012, 2013
  *  Author(s): Hendrik Brueckner <brueckner@linux.vnet.ibm.com>
  */
-#define KMSG_COMPONENT	"perf"
-#define pr_fmt(fmt)	KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "perf: " fmt
 
 #include <linux/kernel.h>
 #include <linux/perf_event.h>
 #include <linux/kvm_host.h>
 #include <linux/percpu.h>
-#include <linux/export.h>
 #include <linux/seq_file.h>
 #include <linux/spinlock.h>
+#include <linux/uaccess.h>
 #include <linux/sysfs.h>
+#include <asm/stacktrace.h>
 #include <asm/irq.h>
 #include <asm/cpu_mf.h>
 #include <asm/lowcore.h>
 #include <asm/processor.h>
 #include <asm/sysinfo.h>
-
-const char *perf_pmu_name(void)
-{
-	if (cpum_cf_avail() || cpum_sf_avail())
-		return "CPU-Measurement Facilities (CPU-MF)";
-	return "pmu";
-}
-EXPORT_SYMBOL(perf_pmu_name);
-
-int perf_num_counters(void)
-{
-	int num = 0;
-
-	if (cpum_cf_avail())
-		num += PERF_CPUM_CF_MAX_CTR;
-	if (cpum_sf_avail())
-		num += PERF_CPUM_SF_MAX_CTR;
-
-	return num;
-}
-EXPORT_SYMBOL(perf_num_counters);
+#include <asm/unwind.h>
 
 static struct kvm_s390_sie_block *sie_block(struct pt_regs *regs)
 {
@@ -50,7 +30,7 @@ static struct kvm_s390_sie_block *sie_block(struct pt_regs *regs)
 	if (!stack)
 		return NULL;
 
-	return (struct kvm_s390_sie_block *) stack->empty1[0];
+	return (struct kvm_s390_sie_block *)stack->sie_control_block;
 }
 
 static bool is_in_guest(struct pt_regs *regs)
@@ -74,7 +54,7 @@ static unsigned long instruction_pointer_guest(struct pt_regs *regs)
 	return sie_block(regs)->gpsw.addr;
 }
 
-unsigned long perf_instruction_pointer(struct pt_regs *regs)
+unsigned long perf_arch_instruction_pointer(struct pt_regs *regs)
 {
 	return is_in_guest(regs) ? instruction_pointer_guest(regs)
 				 : instruction_pointer(regs);
@@ -101,7 +81,7 @@ static unsigned long perf_misc_flags_sf(struct pt_regs *regs)
 	return flags;
 }
 
-unsigned long perf_misc_flags(struct pt_regs *regs)
+unsigned long perf_arch_misc_flags(struct pt_regs *regs)
 {
 	/* Check if the cpum_sf PMU has created the pt_regs structure.
 	 * In this case, perf misc flags can be easily extracted.  Otherwise,
@@ -219,20 +199,23 @@ static int __init service_level_perf_register(void)
 }
 arch_initcall(service_level_perf_register);
 
-static int __perf_callchain_kernel(void *data, unsigned long address, int reliable)
-{
-	struct perf_callchain_entry_ctx *entry = data;
-
-	perf_callchain_store(entry, address);
-	return 0;
-}
-
 void perf_callchain_kernel(struct perf_callchain_entry_ctx *entry,
 			   struct pt_regs *regs)
 {
-	if (user_mode(regs))
-		return;
-	dump_trace(__perf_callchain_kernel, entry, NULL, regs->gprs[15]);
+	struct unwind_state state;
+	unsigned long addr;
+
+	unwind_for_each_frame(&state, current, regs, 0) {
+		addr = unwind_get_return_address(&state);
+		if (!addr || perf_callchain_store(entry, addr))
+			return;
+	}
+}
+
+void perf_callchain_user(struct perf_callchain_entry_ctx *entry,
+			 struct pt_regs *regs)
+{
+	arch_stack_walk_user_common(NULL, NULL, entry, regs, true);
 }
 
 /* Perf definitions for PMU event attributes in sysfs */
@@ -242,5 +225,5 @@ ssize_t cpumf_events_sysfs_show(struct device *dev,
 	struct perf_pmu_events_attr *pmu_attr;
 
 	pmu_attr = container_of(attr, struct perf_pmu_events_attr, attr);
-	return sprintf(page, "event=0x%04llx\n", pmu_attr->id);
+	return sysfs_emit(page, "event=0x%04llx\n", pmu_attr->id);
 }

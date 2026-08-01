@@ -1,24 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright 2008 Cisco Systems, Inc.  All rights reserved.
  * Copyright 2007 Nuova Systems, Inc.  All rights reserved.
- *
- * This program is free software; you may redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
 #ifndef _FNIC_IO_H_
 #define _FNIC_IO_H_
 
 #include <scsi/fc/fc_fcp.h>
+#include "fnic_fdls.h"
 
 #define FNIC_DFLT_SG_DESC_CNT  32
 #define FNIC_MAX_SG_DESC_CNT        256     /* Maximum descriptors per sgl */
@@ -53,6 +42,8 @@ enum fnic_ioreq_state {
 };
 
 struct fnic_io_req {
+	struct fnic_iport_s *iport;
+	struct fnic_tport_s *tport;
 	struct host_sg_desc *sgl_list; /* sgl list */
 	void *sgl_list_alloc; /* sgl list address used for free */
 	dma_addr_t sense_buf_pa; /* dma address for sense buffer*/
@@ -64,15 +55,7 @@ struct fnic_io_req {
 	unsigned long start_time; /* in jiffies */
 	struct completion *abts_done; /* completion for abts */
 	struct completion *dr_done; /* completion for device reset */
-};
-
-enum fnic_port_speeds {
-	DCEM_PORTSPEED_NONE = 0,
-	DCEM_PORTSPEED_1G    = 1000,
-	DCEM_PORTSPEED_10G   = 10000,
-	DCEM_PORTSPEED_40G   = 40000,
-	DCEM_PORTSPEED_4x10G = 41000,
-	DCEM_PORTSPEED_25G   = 25000,
-	DCEM_PORTSPEED_100G  = 100000,
+	unsigned int tag;
+	struct scsi_cmnd *sc; /* midlayer's cmd pointer */
 };
 #endif /* _FNIC_IO_H_ */

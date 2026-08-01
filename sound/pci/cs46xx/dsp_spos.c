@@ -1,18 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 /*
@@ -40,7 +27,7 @@
 static int cs46xx_dsp_async_init (struct snd_cs46xx *chip,
 				  struct dsp_scb_descriptor * fg_entry);
 
-static enum wide_opcode wide_opcodes[] = { 
+static const enum wide_opcode wide_opcodes[] = {
 	WIDE_FOR_BEGIN_LOOP,
 	WIDE_FOR_BEGIN_LOOP2,
 	WIDE_COND_GOTO_ADDR,
@@ -216,7 +203,7 @@ add_symbol (struct snd_cs46xx * chip, char * symbol_name, u32 address, int type)
 
 	index = find_free_symbol_index (ins);
 
-	strcpy (ins->symbol_table.symbols[index].symbol_name, symbol_name);
+	strscpy (ins->symbol_table.symbols[index].symbol_name, symbol_name);
 	ins->symbol_table.symbols[index].address = address;
 	ins->symbol_table.symbols[index].symbol_type = type;
 	ins->symbol_table.symbols[index].module = NULL;
@@ -234,16 +221,17 @@ add_symbol (struct snd_cs46xx * chip, char * symbol_name, u32 address, int type)
 
 struct dsp_spos_instance *cs46xx_dsp_spos_create (struct snd_cs46xx * chip)
 {
-	struct dsp_spos_instance * ins = kzalloc(sizeof(struct dsp_spos_instance), GFP_KERNEL);
+	struct dsp_spos_instance * ins = kzalloc_obj(struct dsp_spos_instance);
 
 	if (ins == NULL)
 		return NULL;
 
 	/* better to use vmalloc for this big table */
-	ins->symbol_table.symbols = vmalloc(sizeof(struct dsp_symbol_entry) *
-					    DSP_MAX_SYMBOLS);
+	ins->symbol_table.symbols =
+		vmalloc(array_size(DSP_MAX_SYMBOLS,
+				   sizeof(struct dsp_symbol_entry)));
 	ins->code.data = kmalloc(DSP_CODE_BYTE_SIZE, GFP_KERNEL);
-	ins->modules = kmalloc(sizeof(struct dsp_module_desc) * DSP_MAX_MODULES, GFP_KERNEL);
+	ins->modules = kmalloc_objs(struct dsp_module_desc, DSP_MAX_MODULES);
 	if (!ins->symbol_table.symbols || !ins->code.data || !ins->modules) {
 		cs46xx_dsp_spos_destroy(chip);
 		goto error;
@@ -293,7 +281,7 @@ void  cs46xx_dsp_spos_destroy (struct snd_cs46xx * chip)
 	if (snd_BUG_ON(!ins))
 		return;
 
-	mutex_lock(&chip->spos_mutex);
+	guard(mutex)(&chip->spos_mutex);
 	for (i = 0; i < ins->nscb; ++i) {
 		if (ins->scbs[i].deleted) continue;
 
@@ -307,7 +295,6 @@ void  cs46xx_dsp_spos_destroy (struct snd_cs46xx * chip)
 	vfree(ins->symbol_table.symbols);
 	kfree(ins->modules);
 	kfree(ins);
-	mutex_unlock(&chip->spos_mutex);
 }
 
 static int dsp_load_parameter(struct snd_cs46xx *chip,
@@ -535,7 +522,7 @@ static void cs46xx_dsp_proc_modules_read (struct snd_info_entry *entry,
 	struct dsp_spos_instance * ins = chip->dsp_spos_instance;
 	int i,j;
 
-	mutex_lock(&chip->spos_mutex);
+	guard(mutex)(&chip->spos_mutex);
 	snd_iprintf(buffer, "MODULES:\n");
 	for ( i = 0; i < ins->nmodules; ++i ) {
 		snd_iprintf(buffer, "\n%s:\n", ins->modules[i].module_name);
@@ -548,7 +535,6 @@ static void cs46xx_dsp_proc_modules_read (struct snd_info_entry *entry,
 				    desc->segment_type,desc->offset, desc->size);
 		}
 	}
-	mutex_unlock(&chip->spos_mutex);
 }
 
 static void cs46xx_dsp_proc_task_tree_read (struct snd_info_entry *entry,
@@ -559,7 +545,7 @@ static void cs46xx_dsp_proc_task_tree_read (struct snd_info_entry *entry,
 	int i, j, col;
 	void __iomem *dst = chip->region.idx[1].remap_addr + DSP_PARAMETER_BYTE_OFFSET;
 
-	mutex_lock(&chip->spos_mutex);
+	guard(mutex)(&chip->spos_mutex);
 	snd_iprintf(buffer, "TASK TREES:\n");
 	for ( i = 0; i < ins->ntask; ++i) {
 		snd_iprintf(buffer,"\n%04x %s:\n",ins->tasks[i].address,ins->tasks[i].task_name);
@@ -576,7 +562,6 @@ static void cs46xx_dsp_proc_task_tree_read (struct snd_info_entry *entry,
 	}
 
 	snd_iprintf(buffer,"\n");  
-	mutex_unlock(&chip->spos_mutex);
 }
 
 static void cs46xx_dsp_proc_scb_read (struct snd_info_entry *entry,
@@ -586,7 +571,7 @@ static void cs46xx_dsp_proc_scb_read (struct snd_info_entry *entry,
 	struct dsp_spos_instance * ins = chip->dsp_spos_instance;
 	int i;
 
-	mutex_lock(&chip->spos_mutex);
+	guard(mutex)(&chip->spos_mutex);
 	snd_iprintf(buffer, "SCB's:\n");
 	for ( i = 0; i < ins->nscb; ++i) {
 		if (ins->scbs[i].deleted)
@@ -609,7 +594,6 @@ static void cs46xx_dsp_proc_scb_read (struct snd_info_entry *entry,
 	}
 
 	snd_iprintf(buffer,"\n");
-	mutex_unlock(&chip->spos_mutex);
 }
 
 static void cs46xx_dsp_proc_parameter_dump_read (struct snd_info_entry *entry,
@@ -627,7 +611,8 @@ static void cs46xx_dsp_proc_parameter_dump_read (struct snd_info_entry *entry,
 			col = 0;
 		}
 
-		if ( (symbol = cs46xx_dsp_lookup_symbol_addr (chip,i / sizeof(u32), SYMBOL_PARAMETER)) != NULL) {
+		symbol = cs46xx_dsp_lookup_symbol_addr(chip, i / sizeof(u32), SYMBOL_PARAMETER);
+		if (symbol) {
 			col = 0;
 			snd_iprintf (buffer,"\n%s:\n",symbol->symbol_name);
 		}
@@ -796,101 +781,57 @@ int cs46xx_dsp_proc_init (struct snd_card *card, struct snd_cs46xx *chip)
 
 	ins->snd_card = card;
 
-	if ((entry = snd_info_create_card_entry(card, "dsp", card->proc_root)) != NULL) {
-		entry->content = SNDRV_INFO_CONTENT_TEXT;
-		entry->mode = S_IFDIR | S_IRUGO | S_IXUGO;
-      
-		if (snd_info_register(entry) < 0) {
-			snd_info_free_entry(entry);
-			entry = NULL;
-		}
-	}
-
+	entry = snd_info_create_card_entry(card, "dsp", card->proc_root);
+	if (entry)
+		entry->mode = S_IFDIR | 0555;
 	ins->proc_dsp_dir = entry;
 
 	if (!ins->proc_dsp_dir)
 		return -ENOMEM;
 
-	if ((entry = snd_info_create_card_entry(card, "spos_symbols", ins->proc_dsp_dir)) != NULL) {
-		entry->content = SNDRV_INFO_CONTENT_TEXT;
-		entry->private_data = chip;
-		entry->mode = S_IFREG | S_IRUGO | S_IWUSR;
-		entry->c.text.read = cs46xx_dsp_proc_symbol_table_read;
-		if (snd_info_register(entry) < 0) {
-			snd_info_free_entry(entry);
-			entry = NULL;
-		}
-	}
-	ins->proc_sym_info_entry = entry;
+	entry = snd_info_create_card_entry(card, "spos_symbols",
+					   ins->proc_dsp_dir);
+	if (entry)
+		snd_info_set_text_ops(entry, chip,
+				      cs46xx_dsp_proc_symbol_table_read);
     
-	if ((entry = snd_info_create_card_entry(card, "spos_modules", ins->proc_dsp_dir)) != NULL) {
-		entry->content = SNDRV_INFO_CONTENT_TEXT;
-		entry->private_data = chip;
-		entry->mode = S_IFREG | S_IRUGO | S_IWUSR;
-		entry->c.text.read = cs46xx_dsp_proc_modules_read;
-		if (snd_info_register(entry) < 0) {
-			snd_info_free_entry(entry);
-			entry = NULL;
-		}
-	}
-	ins->proc_modules_info_entry = entry;
+	entry = snd_info_create_card_entry(card, "spos_modules",
+					   ins->proc_dsp_dir);
+	if (entry)
+		snd_info_set_text_ops(entry, chip,
+				      cs46xx_dsp_proc_modules_read);
 
-	if ((entry = snd_info_create_card_entry(card, "parameter", ins->proc_dsp_dir)) != NULL) {
-		entry->content = SNDRV_INFO_CONTENT_TEXT;
-		entry->private_data = chip;
-		entry->mode = S_IFREG | S_IRUGO | S_IWUSR;
-		entry->c.text.read = cs46xx_dsp_proc_parameter_dump_read;
-		if (snd_info_register(entry) < 0) {
-			snd_info_free_entry(entry);
-			entry = NULL;
-		}
-	}
-	ins->proc_parameter_dump_info_entry = entry;
+	entry = snd_info_create_card_entry(card, "parameter",
+					   ins->proc_dsp_dir);
+	if (entry)
+		snd_info_set_text_ops(entry, chip,
+				      cs46xx_dsp_proc_parameter_dump_read);
 
-	if ((entry = snd_info_create_card_entry(card, "sample", ins->proc_dsp_dir)) != NULL) {
-		entry->content = SNDRV_INFO_CONTENT_TEXT;
-		entry->private_data = chip;
-		entry->mode = S_IFREG | S_IRUGO | S_IWUSR;
-		entry->c.text.read = cs46xx_dsp_proc_sample_dump_read;
-		if (snd_info_register(entry) < 0) {
-			snd_info_free_entry(entry);
-			entry = NULL;
-		}
-	}
-	ins->proc_sample_dump_info_entry = entry;
+	entry = snd_info_create_card_entry(card, "sample",
+					   ins->proc_dsp_dir);
+	if (entry)
+		snd_info_set_text_ops(entry, chip,
+				      cs46xx_dsp_proc_sample_dump_read);
 
-	if ((entry = snd_info_create_card_entry(card, "task_tree", ins->proc_dsp_dir)) != NULL) {
-		entry->content = SNDRV_INFO_CONTENT_TEXT;
-		entry->private_data = chip;
-		entry->mode = S_IFREG | S_IRUGO | S_IWUSR;
-		entry->c.text.read = cs46xx_dsp_proc_task_tree_read;
-		if (snd_info_register(entry) < 0) {
-			snd_info_free_entry(entry);
-			entry = NULL;
-		}
-	}
-	ins->proc_task_info_entry = entry;
+	entry = snd_info_create_card_entry(card, "task_tree",
+					   ins->proc_dsp_dir);
+	if (entry)
+		snd_info_set_text_ops(entry, chip,
+				      cs46xx_dsp_proc_task_tree_read);
 
-	if ((entry = snd_info_create_card_entry(card, "scb_info", ins->proc_dsp_dir)) != NULL) {
-		entry->content = SNDRV_INFO_CONTENT_TEXT;
-		entry->private_data = chip;
-		entry->mode = S_IFREG | S_IRUGO | S_IWUSR;
-		entry->c.text.read = cs46xx_dsp_proc_scb_read;
-		if (snd_info_register(entry) < 0) {
-			snd_info_free_entry(entry);
-			entry = NULL;
-		}
-	}
-	ins->proc_scb_info_entry = entry;
+	entry = snd_info_create_card_entry(card, "scb_info",
+					   ins->proc_dsp_dir);
+	if (entry)
+		snd_info_set_text_ops(entry, chip,
+				      cs46xx_dsp_proc_scb_read);
 
-	mutex_lock(&chip->spos_mutex);
+	guard(mutex)(&chip->spos_mutex);
 	/* register/update SCB's entries on proc */
 	for (i = 0; i < ins->nscb; ++i) {
 		if (ins->scbs[i].deleted) continue;
 
 		cs46xx_dsp_proc_register_scb_desc (chip, (ins->scbs + i));
 	}
-	mutex_unlock(&chip->spos_mutex);
 
 	return 0;
 }
@@ -900,30 +841,16 @@ int cs46xx_dsp_proc_done (struct snd_cs46xx *chip)
 	struct dsp_spos_instance * ins = chip->dsp_spos_instance;
 	int i;
 
-	snd_info_free_entry(ins->proc_sym_info_entry);
-	ins->proc_sym_info_entry = NULL;
+	if (!ins)
+		return 0;
 
-	snd_info_free_entry(ins->proc_modules_info_entry);
-	ins->proc_modules_info_entry = NULL;
-
-	snd_info_free_entry(ins->proc_parameter_dump_info_entry);
-	ins->proc_parameter_dump_info_entry = NULL;
-
-	snd_info_free_entry(ins->proc_sample_dump_info_entry);
-	ins->proc_sample_dump_info_entry = NULL;
-
-	snd_info_free_entry(ins->proc_scb_info_entry);
-	ins->proc_scb_info_entry = NULL;
-
-	snd_info_free_entry(ins->proc_task_info_entry);
-	ins->proc_task_info_entry = NULL;
-
-	mutex_lock(&chip->spos_mutex);
-	for (i = 0; i < ins->nscb; ++i) {
-		if (ins->scbs[i].deleted) continue;
-		cs46xx_dsp_proc_free_scb_desc ( (ins->scbs + i) );
+	scoped_guard(mutex, &chip->spos_mutex) {
+		for (i = 0; i < ins->nscb; ++i) {
+			if (ins->scbs[i].deleted)
+				continue;
+			cs46xx_dsp_proc_free_scb_desc((ins->scbs + i));
+		}
 	}
-	mutex_unlock(&chip->spos_mutex);
 
 	snd_info_free_entry(ins->proc_dsp_dir);
 	ins->proc_dsp_dir = NULL;
@@ -990,7 +917,7 @@ static struct dsp_scb_descriptor * _map_scb (struct snd_cs46xx *chip, char * nam
 	index = find_free_scb_index (ins);
 
 	memset(&ins->scbs[index], 0, sizeof(ins->scbs[index]));
-	strcpy(ins->scbs[index].scb_name, name);
+	strscpy(ins->scbs[index].scb_name, name);
 	ins->scbs[index].address = dest;
 	ins->scbs[index].index = index;
 	ins->scbs[index].ref_count = 1;
@@ -1020,9 +947,9 @@ _map_task_tree (struct snd_cs46xx *chip, char * name, u32 dest, u32 size)
 	}
 
 	if (name)
-		strcpy(ins->tasks[ins->ntask].task_name, name);
+		strscpy(ins->tasks[ins->ntask].task_name, name);
 	else
-		strcpy(ins->tasks[ins->ntask].task_name, "(NULL)");
+		strscpy(ins->tasks[ins->ntask].task_name, "(NULL)");
 	ins->tasks[ins->ntask].address = dest;
 	ins->tasks[ins->ntask].size = size;
 
@@ -1106,7 +1033,7 @@ int cs46xx_dsp_scb_and_task_init (struct snd_cs46xx *chip)
 	
 	int fifo_addr, fifo_span, valid_slots;
 
-	static struct dsp_spos_control_block sposcb = {
+	static const struct dsp_spos_control_block sposcb = {
 		/* 0 */ HFG_TREE_SCB,HFG_STACK,
 		/* 1 */ SPOSCB_ADDR,BG_TREE_SCB_ADDR,
 		/* 2 */ DSP_SPOS_DC,0,
@@ -1744,7 +1671,7 @@ int cs46xx_dsp_enable_spdif_in (struct snd_cs46xx *chip)
 	if (snd_BUG_ON(!ins->spdif_in_src))
 		return -EINVAL;
 
-	mutex_lock(&chip->spos_mutex);
+	guard(mutex)(&chip->spos_mutex);
 
 	if ( ! (ins->spdif_status_out & DSP_SPDIF_STATUS_INPUT_CTRL_ENABLED) ) {
 		/* time countdown enable */
@@ -1767,7 +1694,7 @@ int cs46xx_dsp_enable_spdif_in (struct snd_cs46xx *chip)
 								ins->spdif_in_src,
 								SCB_ON_PARENT_SUBLIST_SCB);
 
-	spin_lock_irq(&chip->reg_lock);
+	guard(spinlock_irq)(&chip->reg_lock);
 
 	/* reset SPDIF input sample buffer pointer */
 	/*snd_cs46xx_poke (chip, (SPDIFI_SCB_INST + 0x0c) << 2,
@@ -1780,15 +1707,12 @@ int cs46xx_dsp_enable_spdif_in (struct snd_cs46xx *chip)
 	/* unmute SRC volume */
 	cs46xx_dsp_scb_set_volume (chip,ins->spdif_in_src,0x7fff,0x7fff);
 
-	spin_unlock_irq(&chip->reg_lock);
-
 	/* set SPDIF input sample rate and unmute
 	   NOTE: only 48khz support for SPDIF input this time */
 	/* cs46xx_dsp_set_src_sample_rate(chip,ins->spdif_in_src,48000); */
 
 	/* monitor state */
 	ins->spdif_status_in = 1;
-	mutex_unlock(&chip->spos_mutex);
 
 	return 0;
 }
@@ -1802,17 +1726,16 @@ int cs46xx_dsp_disable_spdif_in (struct snd_cs46xx *chip)
 	if (snd_BUG_ON(!ins->spdif_in_src))
 		return -EINVAL;
 
-	mutex_lock(&chip->spos_mutex);
+	scoped_guard(mutex, &chip->spos_mutex) {
+		/* Remove the asynchronous receiver SCB */
+		cs46xx_dsp_remove_scb(chip, ins->asynch_rx_scb);
+		ins->asynch_rx_scb = NULL;
 
-	/* Remove the asynchronous receiver SCB */
-	cs46xx_dsp_remove_scb (chip,ins->asynch_rx_scb);
-	ins->asynch_rx_scb = NULL;
+		cs46xx_src_unlink(chip, ins->spdif_in_src);
 
-	cs46xx_src_unlink(chip,ins->spdif_in_src);
-
-	/* monitor state */
-	ins->spdif_status_in = 0;
-	mutex_unlock(&chip->spos_mutex);
+		/* monitor state */
+		ins->spdif_status_in = 0;
+	}
 
 	/* restore amplifier */
 	chip->active_ctrl(chip, -1);
@@ -1830,10 +1753,9 @@ int cs46xx_dsp_enable_pcm_capture (struct snd_cs46xx *chip)
 	if (snd_BUG_ON(!ins->ref_snoop_scb))
 		return -EINVAL;
 
-	mutex_lock(&chip->spos_mutex);
+	guard(mutex)(&chip->spos_mutex);
 	ins->pcm_input = cs46xx_add_record_source(chip,ins->ref_snoop_scb,PCMSERIALIN_PCM_SCB_ADDR,
                                                   "PCMSerialInput_Wave");
-	mutex_unlock(&chip->spos_mutex);
 
 	return 0;
 }
@@ -1845,10 +1767,9 @@ int cs46xx_dsp_disable_pcm_capture (struct snd_cs46xx *chip)
 	if (snd_BUG_ON(!ins->pcm_input))
 		return -EINVAL;
 
-	mutex_lock(&chip->spos_mutex);
+	guard(mutex)(&chip->spos_mutex);
 	cs46xx_dsp_remove_scb (chip,ins->pcm_input);
 	ins->pcm_input = NULL;
-	mutex_unlock(&chip->spos_mutex);
 
 	return 0;
 }
@@ -1862,10 +1783,9 @@ int cs46xx_dsp_enable_adc_capture (struct snd_cs46xx *chip)
 	if (snd_BUG_ON(!ins->codec_in_scb))
 		return -EINVAL;
 
-	mutex_lock(&chip->spos_mutex);
+	guard(mutex)(&chip->spos_mutex);
 	ins->adc_input = cs46xx_add_record_source(chip,ins->codec_in_scb,PCMSERIALIN_SCB_ADDR,
 						  "PCMSerialInput_ADC");
-	mutex_unlock(&chip->spos_mutex);
 
 	return 0;
 }
@@ -1877,10 +1797,9 @@ int cs46xx_dsp_disable_adc_capture (struct snd_cs46xx *chip)
 	if (snd_BUG_ON(!ins->adc_input))
 		return -EINVAL;
 
-	mutex_lock(&chip->spos_mutex);
+	guard(mutex)(&chip->spos_mutex);
 	cs46xx_dsp_remove_scb (chip,ins->adc_input);
 	ins->adc_input = NULL;
-	mutex_unlock(&chip->spos_mutex);
 
 	return 0;
 }
@@ -1928,7 +1847,7 @@ int cs46xx_dsp_set_dac_volume (struct snd_cs46xx * chip, u16 left, u16 right)
 	struct dsp_spos_instance * ins = chip->dsp_spos_instance;
 	struct dsp_scb_descriptor * scb; 
 
-	mutex_lock(&chip->spos_mutex);
+	guard(mutex)(&chip->spos_mutex);
 	
 	/* main output */
 	scb = ins->master_mix_scb->sub_list_ptr;
@@ -1947,8 +1866,6 @@ int cs46xx_dsp_set_dac_volume (struct snd_cs46xx * chip, u16 left, u16 right)
 	ins->dac_volume_left = left;
 	ins->dac_volume_right = right;
 
-	mutex_unlock(&chip->spos_mutex);
-
 	return 0;
 }
 
@@ -1956,7 +1873,7 @@ int cs46xx_dsp_set_iec958_volume (struct snd_cs46xx * chip, u16 left, u16 right)
 {
 	struct dsp_spos_instance * ins = chip->dsp_spos_instance;
 
-	mutex_lock(&chip->spos_mutex);
+	guard(mutex)(&chip->spos_mutex);
 
 	if (ins->asynch_rx_scb != NULL)
 		cs46xx_dsp_scb_set_volume (chip,ins->asynch_rx_scb,
@@ -1964,8 +1881,6 @@ int cs46xx_dsp_set_iec958_volume (struct snd_cs46xx * chip, u16 left, u16 right)
 
 	ins->spdif_input_volume_left = left;
 	ins->spdif_input_volume_right = right;
-
-	mutex_unlock(&chip->spos_mutex);
 
 	return 0;
 }

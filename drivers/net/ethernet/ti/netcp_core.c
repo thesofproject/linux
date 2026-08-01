@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Keystone NetCP Core driver
  *
@@ -8,15 +9,6 @@
  *		Santosh Shilimkar <santosh.shilimkar@ti.com>
  *		Murali Karicheri <m-karicheri2@ti.com>
  *		Wingman Kwok <w-kwok2@ti.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/io.h>
@@ -32,7 +24,6 @@
 #include "netcp.h"
 
 #define NETCP_SOP_OFFSET	(NET_IP_ALIGN + NET_SKB_PAD)
-#define NETCP_NAPI_WEIGHT	64
 #define NETCP_TX_TIMEOUT	(5 * HZ)
 #define NETCP_PACKET_SIZE	(ETH_FRAME_LEN + ETH_FCS_LEN)
 #define NETCP_MIN_PACKET_SIZE	ETH_ZLEN
@@ -225,17 +216,6 @@ static int emac_arch_get_mac_addr(char *x, void __iomem *efuse_mac, u32 swap)
 	return 0;
 }
 
-static const char *netcp_node_name(struct device_node *node)
-{
-	const char *name;
-
-	if (of_property_read_string(node, "label", &name) < 0)
-		name = node->name;
-	if (!name)
-		name = "unknown";
-	return name;
-}
-
 /* Module management routines */
 static int netcp_register_interface(struct netcp_intf *netcp)
 {
@@ -267,8 +247,13 @@ static int netcp_module_probe(struct netcp_device *netcp_device,
 	}
 
 	for_each_available_child_of_node(devices, child) {
-		const char *name = netcp_node_name(child);
+		const char *name;
+		char node_name[32];
 
+		if (of_property_read_string(child, "label", &name) < 0) {
+			snprintf(node_name, sizeof(node_name), "%pOFn", child);
+			name = node_name;
+		}
 		if (!strcasecmp(module->name, name))
 			break;
 	}
@@ -774,8 +759,8 @@ static int netcp_process_one_rx_packet(struct netcp_intf *netcp)
 	knav_pool_desc_put(netcp->rx_pool, desc);
 
 	u64_stats_update_begin(&rx_stats->syncp_rx);
-	rx_stats->rx_packets++;
-	rx_stats->rx_bytes += skb->len;
+	u64_stats_inc(&rx_stats->rx_packets);
+	u64_stats_add(&rx_stats->rx_bytes, skb->len);
 	u64_stats_update_end(&rx_stats->syncp_rx);
 
 	/* push skb up the stack */
@@ -1060,8 +1045,8 @@ static int netcp_process_tx_compl_packets(struct netcp_intf *netcp,
 		}
 
 		u64_stats_update_begin(&tx_stats->syncp_tx);
-		tx_stats->tx_packets++;
-		tx_stats->tx_bytes += skb->len;
+		u64_stats_inc(&tx_stats->tx_packets);
+		u64_stats_add(&tx_stats->tx_bytes, skb->len);
 		u64_stats_update_end(&tx_stats->syncp_tx);
 		dev_kfree_skb(skb);
 		pkts++;
@@ -1130,7 +1115,7 @@ netcp_tx_map_skb(struct sk_buff *skb, struct netcp_intf *netcp)
 	for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {
 		skb_frag_t *frag = &skb_shinfo(skb)->frags[i];
 		struct page *page = skb_frag_page(frag);
-		u32 page_offset = frag->page_offset;
+		u32 page_offset = skb_frag_off(frag);
 		u32 buf_len = skb_frag_size(frag);
 		dma_addr_t desc_dma;
 		u32 desc_dma_32;
@@ -1276,7 +1261,7 @@ out:
 }
 
 /* Submit the packet */
-static int netcp_ndo_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+static netdev_tx_t netcp_ndo_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct netcp_intf *netcp = netdev_priv(ndev);
 	struct netcp_stats *tx_stats = &netcp->stats;
@@ -1353,10 +1338,10 @@ int netcp_txpipe_open(struct netcp_tx_pipe *tx_pipe)
 
 	tx_pipe->dma_channel = knav_dma_open_channel(dev,
 				tx_pipe->dma_chan_name, &config);
-	if (IS_ERR(tx_pipe->dma_channel)) {
+	if (!tx_pipe->dma_channel) {
 		dev_err(dev, "failed opening tx chan(%s)\n",
 			tx_pipe->dma_chan_name);
-		ret = PTR_ERR(tx_pipe->dma_channel);
+		ret = -EINVAL;
 		goto err;
 	}
 
@@ -1364,8 +1349,8 @@ int netcp_txpipe_open(struct netcp_tx_pipe *tx_pipe)
 	tx_pipe->dma_queue = knav_queue_open(name, tx_pipe->dma_queue_id,
 					     KNAV_QUEUE_SHARED);
 	if (IS_ERR(tx_pipe->dma_queue)) {
-		dev_err(dev, "Could not open DMA queue for channel \"%s\": %d\n",
-			name, ret);
+		dev_err(dev, "Could not open DMA queue for channel \"%s\": %pe\n",
+			name, tx_pipe->dma_queue);
 		ret = PTR_ERR(tx_pipe->dma_queue);
 		goto err;
 	}
@@ -1374,7 +1359,7 @@ int netcp_txpipe_open(struct netcp_tx_pipe *tx_pipe)
 	return 0;
 
 err:
-	if (!IS_ERR_OR_NULL(tx_pipe->dma_channel))
+	if (tx_pipe->dma_channel)
 		knav_dma_close_channel(tx_pipe->dma_channel);
 	tx_pipe->dma_channel = NULL;
 	return ret;
@@ -1509,6 +1494,24 @@ static void netcp_addr_sweep_add(struct netcp_intf *netcp)
 	}
 }
 
+static int netcp_set_promiscuous(struct netcp_intf *netcp, bool promisc)
+{
+	struct netcp_intf_modpriv *priv;
+	struct netcp_module *module;
+	int error;
+
+	for_each_module(netcp, priv) {
+		module = priv->netcp_module;
+		if (!module->set_rx_mode)
+			continue;
+
+		error = module->set_rx_mode(priv->module_priv, promisc);
+		if (error)
+			return error;
+	}
+	return 0;
+}
+
 static void netcp_set_rx_mode(struct net_device *ndev)
 {
 	struct netcp_intf *netcp = netdev_priv(ndev);
@@ -1538,6 +1541,7 @@ static void netcp_set_rx_mode(struct net_device *ndev)
 	/* finally sweep and callout into modules */
 	netcp_addr_sweep_del(netcp);
 	netcp_addr_sweep_add(netcp);
+	netcp_set_promiscuous(netcp, promisc);
 	spin_unlock(&netcp->lock);
 }
 
@@ -1674,10 +1678,10 @@ static int netcp_setup_navigator_resources(struct net_device *ndev)
 
 	netcp->rx_channel = knav_dma_open_channel(netcp->netcp_device->device,
 					netcp->dma_chan_name, &config);
-	if (IS_ERR(netcp->rx_channel)) {
+	if (!netcp->rx_channel) {
 		dev_err(netcp->ndev_dev, "failed opening rx chan(%s\n",
 			netcp->dma_chan_name);
-		ret = PTR_ERR(netcp->rx_channel);
+		ret = -EINVAL;
 		goto fail;
 	}
 
@@ -1777,6 +1781,62 @@ static int netcp_ndo_stop(struct net_device *ndev)
 	return 0;
 }
 
+static int netcp_ndo_hwtstamp_get(struct net_device *ndev,
+				  struct kernel_hwtstamp_config *config)
+{
+	struct netcp_intf *netcp = netdev_priv(ndev);
+	struct netcp_intf_modpriv *intf_modpriv;
+	struct netcp_module *module;
+	int err = -EOPNOTSUPP;
+
+	if (!netif_running(ndev))
+		return -EINVAL;
+
+	for_each_module(netcp, intf_modpriv) {
+		module = intf_modpriv->netcp_module;
+		if (!module->hwtstamp_get)
+			continue;
+
+		err = module->hwtstamp_get(intf_modpriv->module_priv, config);
+		break;
+	}
+
+	return err;
+}
+
+static int netcp_ndo_hwtstamp_set(struct net_device *ndev,
+				  struct kernel_hwtstamp_config *config,
+				  struct netlink_ext_ack *extack)
+{
+	struct netcp_intf *netcp = netdev_priv(ndev);
+	struct netcp_intf_modpriv *intf_modpriv;
+	struct netcp_module *module;
+	int ret = -1, err = -EOPNOTSUPP;
+
+	if (!netif_running(ndev))
+		return -EINVAL;
+
+	for_each_module(netcp, intf_modpriv) {
+		module = intf_modpriv->netcp_module;
+		if (!module->hwtstamp_set)
+			continue;
+
+		err = module->hwtstamp_set(intf_modpriv->module_priv, config,
+					   extack);
+		if ((err < 0) && (err != -EOPNOTSUPP)) {
+			NL_SET_ERR_MSG_WEAK_MOD(extack,
+						"At least one module failed to setup HW timestamps");
+			ret = err;
+			goto out;
+		}
+		if (err == 0)
+			ret = err;
+	}
+
+out:
+	return (ret == 0) ? 0 : err;
+}
+
 static int netcp_ndo_ioctl(struct net_device *ndev,
 			   struct ifreq *req, int cmd)
 {
@@ -1806,7 +1866,7 @@ out:
 	return (ret == 0) ? 0 : err;
 }
 
-static void netcp_ndo_tx_timeout(struct net_device *ndev)
+static void netcp_ndo_tx_timeout(struct net_device *ndev, unsigned int txqueue)
 {
 	struct netcp_intf *netcp = netdev_priv(ndev);
 	unsigned int descs = knav_pool_count(netcp->tx_pool);
@@ -1870,13 +1930,6 @@ static int netcp_rx_kill_vid(struct net_device *ndev, __be16 proto, u16 vid)
 	return err;
 }
 
-static u16 netcp_select_queue(struct net_device *dev, struct sk_buff *skb,
-			      void *accel_priv,
-			      select_queue_fallback_t fallback)
-{
-	return 0;
-}
-
 static int netcp_setup_tc(struct net_device *dev, enum tc_setup_type type,
 			  void *type_data)
 {
@@ -1919,16 +1972,16 @@ netcp_get_stats(struct net_device *ndev, struct rtnl_link_stats64 *stats)
 	unsigned int start;
 
 	do {
-		start = u64_stats_fetch_begin_irq(&p->syncp_rx);
-		rxpackets       = p->rx_packets;
-		rxbytes         = p->rx_bytes;
-	} while (u64_stats_fetch_retry_irq(&p->syncp_rx, start));
+		start = u64_stats_fetch_begin(&p->syncp_rx);
+		rxpackets       = u64_stats_read(&p->rx_packets);
+		rxbytes         = u64_stats_read(&p->rx_bytes);
+	} while (u64_stats_fetch_retry(&p->syncp_rx, start));
 
 	do {
-		start = u64_stats_fetch_begin_irq(&p->syncp_tx);
-		txpackets       = p->tx_packets;
-		txbytes         = p->tx_bytes;
-	} while (u64_stats_fetch_retry_irq(&p->syncp_tx, start));
+		start = u64_stats_fetch_begin(&p->syncp_tx);
+		txpackets       = u64_stats_read(&p->tx_packets);
+		txbytes         = u64_stats_read(&p->tx_bytes);
+	} while (u64_stats_fetch_retry(&p->syncp_tx, start));
 
 	stats->rx_packets = rxpackets;
 	stats->rx_bytes = rxbytes;
@@ -1946,15 +1999,17 @@ static const struct net_device_ops netcp_netdev_ops = {
 	.ndo_stop		= netcp_ndo_stop,
 	.ndo_start_xmit		= netcp_ndo_start_xmit,
 	.ndo_set_rx_mode	= netcp_set_rx_mode,
-	.ndo_do_ioctl           = netcp_ndo_ioctl,
+	.ndo_eth_ioctl           = netcp_ndo_ioctl,
 	.ndo_get_stats64        = netcp_get_stats,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_vlan_rx_add_vid	= netcp_rx_add_vid,
 	.ndo_vlan_rx_kill_vid	= netcp_rx_kill_vid,
 	.ndo_tx_timeout		= netcp_ndo_tx_timeout,
-	.ndo_select_queue	= netcp_select_queue,
+	.ndo_select_queue	= dev_pick_tx_zero,
 	.ndo_setup_tc		= netcp_setup_tc,
+	.ndo_hwtstamp_get	= netcp_ndo_hwtstamp_get,
+	.ndo_hwtstamp_set	= netcp_ndo_hwtstamp_set,
 };
 
 static int netcp_create_interface(struct netcp_device *netcp_device,
@@ -1968,7 +2023,6 @@ static int netcp_create_interface(struct netcp_device *netcp_device,
 	struct resource res;
 	void __iomem *efuse = NULL;
 	u32 efuse_mac = 0;
-	const void *mac_addr;
 	u8 efuse_mac_addr[6];
 	u32 temp[2];
 	int ret = 0;
@@ -2021,7 +2075,7 @@ static int netcp_create_interface(struct netcp_device *netcp_device,
 			goto quit;
 		}
 
-		efuse = devm_ioremap_nocache(dev, res.start, size);
+		efuse = devm_ioremap(dev, res.start, size);
 		if (!efuse) {
 			dev_err(dev, "could not map resource\n");
 			devm_release_mem_region(dev, res.start, size);
@@ -2031,18 +2085,16 @@ static int netcp_create_interface(struct netcp_device *netcp_device,
 
 		emac_arch_get_mac_addr(efuse_mac_addr, efuse, efuse_mac);
 		if (is_valid_ether_addr(efuse_mac_addr))
-			ether_addr_copy(ndev->dev_addr, efuse_mac_addr);
+			eth_hw_addr_set(ndev, efuse_mac_addr);
 		else
-			random_ether_addr(ndev->dev_addr);
+			eth_hw_addr_random(ndev);
 
 		devm_iounmap(dev, efuse);
 		devm_release_mem_region(dev, res.start, size);
 	} else {
-		mac_addr = of_get_mac_address(node_interface);
-		if (mac_addr)
-			ether_addr_copy(ndev->dev_addr, mac_addr);
-		else
-			random_ether_addr(ndev->dev_addr);
+		ret = of_get_ethdev_address(node_interface, ndev);
+		if (ret)
+			eth_hw_addr_random(ndev);
 	}
 
 	ret = of_property_read_string(node_interface, "rx-channel",
@@ -2087,8 +2139,8 @@ static int netcp_create_interface(struct netcp_device *netcp_device,
 	netcp->tx_pool_region_id = temp[1];
 
 	if (netcp->tx_pool_size < MAX_SKB_FRAGS) {
-		dev_err(dev, "tx-pool size too small, must be atleast(%ld)\n",
-			MAX_SKB_FRAGS);
+		dev_err(dev, "tx-pool size too small, must be at least %u\n",
+			(unsigned int)MAX_SKB_FRAGS);
 		ret = -ENODEV;
 		goto quit;
 	}
@@ -2101,8 +2153,8 @@ static int netcp_create_interface(struct netcp_device *netcp_device,
 	}
 
 	/* NAPI register */
-	netif_napi_add(ndev, &netcp->rx_napi, netcp_rx_poll, NETCP_NAPI_WEIGHT);
-	netif_tx_napi_add(ndev, &netcp->tx_napi, netcp_tx_poll, NETCP_NAPI_WEIGHT);
+	netif_napi_add(ndev, &netcp->rx_napi, netcp_rx_poll);
+	netif_napi_add_tx(ndev, &netcp->tx_napi, netcp_tx_poll);
 
 	/* Register the network device */
 	ndev->dev_id		= 0;
@@ -2155,7 +2207,12 @@ static int netcp_probe(struct platform_device *pdev)
 	struct device_node *child, *interfaces;
 	struct netcp_device *netcp_device;
 	struct device *dev = &pdev->dev;
+	struct netcp_module *module;
 	int ret;
+
+	if (!knav_dma_device_ready() ||
+	    !knav_qmss_device_ready())
+		return -EPROBE_DEFER;
 
 	if (!node) {
 		dev_err(dev, "could not find device info\n");
@@ -2192,8 +2249,8 @@ static int netcp_probe(struct platform_device *pdev)
 	for_each_available_child_of_node(interfaces, child) {
 		ret = netcp_create_interface(netcp_device, child);
 		if (ret) {
-			dev_err(dev, "could not create interface(%s)\n",
-				child->name);
+			dev_err(dev, "could not create interface(%pOFn)\n",
+				child);
 			goto probe_quit_interface;
 		}
 	}
@@ -2203,6 +2260,14 @@ static int netcp_probe(struct platform_device *pdev)
 	/* Add the device instance to the list */
 	list_add_tail(&netcp_device->device_list, &netcp_devices);
 
+	/* Probe & attach any modules already registered */
+	mutex_lock(&netcp_modules_lock);
+	for_each_netcp_module(module) {
+		ret = netcp_module_probe(netcp_device, module);
+		if (ret < 0)
+			dev_err(dev, "module(%s) probe failed\n", module->name);
+	}
+	mutex_unlock(&netcp_modules_lock);
 	return 0;
 
 probe_quit_interface:
@@ -2221,7 +2286,7 @@ probe_quit:
 	return ret;
 }
 
-static int netcp_remove(struct platform_device *pdev)
+static void netcp_remove(struct platform_device *pdev)
 {
 	struct netcp_device *netcp_device = platform_get_drvdata(pdev);
 	struct netcp_intf *netcp_intf, *netcp_tmp;
@@ -2249,7 +2314,6 @@ static int netcp_remove(struct platform_device *pdev)
 	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 	platform_set_drvdata(pdev, NULL);
-	return 0;
 }
 
 static const struct of_device_id of_match[] = {

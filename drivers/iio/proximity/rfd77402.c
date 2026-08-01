@@ -1,33 +1,45 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * rfd77402.c - Support for RF Digital RFD77402 Time-of-Flight (distance) sensor
  *
  * Copyright 2017 Peter Meerwald-Stadler <pmeerw@pmeerw.net>
  *
- * This file is subject to the terms and conditions of version 2 of
- * the GNU General Public License.  See the file COPYING in the main
- * directory of this archive for more details.
- *
  * 7-bit I2C slave address 0x4c
  *
- * TODO: interrupt
  * https://media.digikey.com/pdf/Data%20Sheets/RF%20Digital%20PDFs/RFD77402.pdf
  */
 
-#include <linux/module.h>
-#include <linux/i2c.h>
+#include <linux/bits.h>
+#include <linux/completion.h>
 #include <linux/delay.h>
+#include <linux/dev_printk.h>
+#include <linux/errno.h>
+#include <linux/i2c.h>
+#include <linux/interrupt.h>
+#include <linux/iopoll.h>
+#include <linux/jiffies.h>
+#include <linux/module.h>
+#include <linux/types.h>
 
 #include <linux/iio/iio.h>
 
 #define RFD77402_DRV_NAME "rfd77402"
 
 #define RFD77402_ICSR		0x00 /* Interrupt Control Status Register */
+#define RFD77402_ICSR_CLR_CFG	BIT(0)
+#define RFD77402_ICSR_CLR_TYPE	BIT(1)
 #define RFD77402_ICSR_INT_MODE	BIT(2)
 #define RFD77402_ICSR_INT_POL	BIT(3)
 #define RFD77402_ICSR_RESULT	BIT(4)
 #define RFD77402_ICSR_M2H_MSG	BIT(5)
 #define RFD77402_ICSR_H2M_MSG	BIT(6)
 #define RFD77402_ICSR_RESET	BIT(7)
+
+#define RFD77402_IER		0x02
+#define RFD77402_IER_RESULT	BIT(0)
+#define RFD77402_IER_M2H_MSG	BIT(1)
+#define RFD77402_IER_H2M_MSG	BIT(2)
+#define RFD77402_IER_RESET	BIT(3)
 
 #define RFD77402_CMD_R		0x04
 #define RFD77402_CMD_SINGLE	0x01
@@ -79,10 +91,18 @@ static const struct {
 	{RFD77402_HFCFG_3,	0x45d4},
 };
 
+/**
+ * struct rfd77402_data - device-specific data for the RFD77402 sensor
+ * @client: I2C client handle
+ * @lock: mutex to serialize sensor reads
+ * @completion: completion used for interrupt-driven measurements
+ * @irq_en: indicates whether interrupt mode is enabled
+ */
 struct rfd77402_data {
 	struct i2c_client *client;
-	/* Serialize reads from the sensor */
 	struct mutex lock;
+	struct completion completion;
+	bool irq_en;
 };
 
 static const struct iio_chan_spec rfd77402_channels[] = {
@@ -93,18 +113,53 @@ static const struct iio_chan_spec rfd77402_channels[] = {
 	},
 };
 
-static int rfd77402_set_state(struct rfd77402_data *data, u8 state, u16 check)
+static irqreturn_t rfd77402_interrupt_handler(int irq, void *pdata)
+{
+	struct rfd77402_data *data = pdata;
+	int ret;
+
+	ret = i2c_smbus_read_byte_data(data->client, RFD77402_ICSR);
+	if (ret < 0)
+		return IRQ_NONE;
+
+	/* Check if the interrupt is from our device */
+	if (!(ret & RFD77402_ICSR_RESULT))
+		return IRQ_NONE;
+
+	/* Signal completion of measurement */
+	complete(&data->completion);
+	return IRQ_HANDLED;
+}
+
+static int rfd77402_wait_for_irq(struct rfd77402_data *data)
 {
 	int ret;
 
-	ret = i2c_smbus_write_byte_data(data->client, RFD77402_CMD_R,
+	/*
+	 * According to RFD77402 Datasheet v1.8,
+	 * Section 3.1.1 "Single Measure" (Figure: Single Measure Flow Chart),
+	 * the suggested timeout for single measure is 100 ms.
+	 */
+	ret = wait_for_completion_timeout(&data->completion,
+					  msecs_to_jiffies(100));
+	if (ret == 0)
+		return -ETIMEDOUT;
+
+	return 0;
+}
+
+static int rfd77402_set_state(struct i2c_client *client, u8 state, u16 check)
+{
+	int ret;
+
+	ret = i2c_smbus_write_byte_data(client, RFD77402_CMD_R,
 					state | RFD77402_CMD_VALID);
 	if (ret < 0)
 		return ret;
 
 	usleep_range(10000, 20000);
 
-	ret = i2c_smbus_read_word_data(data->client, RFD77402_STATUS_R);
+	ret = i2c_smbus_read_word_data(client, RFD77402_STATUS_R);
 	if (ret < 0)
 		return ret;
 	if ((ret & RFD77402_STATUS_PM_MASK) != check)
@@ -113,37 +168,54 @@ static int rfd77402_set_state(struct rfd77402_data *data, u8 state, u16 check)
 	return 0;
 }
 
+static int rfd77402_wait_for_result(struct rfd77402_data *data)
+{
+	struct i2c_client *client = data->client;
+	int val, ret;
+
+	if (data->irq_en)
+		return rfd77402_wait_for_irq(data);
+
+	/*
+	 * As per RFD77402 datasheet section '3.1.1 Single Measure', the
+	 * suggested timeout value for single measure is 100ms.
+	 */
+	ret = read_poll_timeout(i2c_smbus_read_byte_data, val,
+				 (val < 0) || (val & RFD77402_ICSR_RESULT),
+				 10 * USEC_PER_MSEC,
+				 10 * 10 * USEC_PER_MSEC,
+				 false,
+				 client, RFD77402_ICSR);
+	if (val < 0)
+		return val;
+
+	return ret;
+}
+
 static int rfd77402_measure(struct rfd77402_data *data)
 {
+	struct i2c_client *client = data->client;
 	int ret;
-	int tries = 10;
 
-	ret = rfd77402_set_state(data, RFD77402_CMD_MCPU_ON,
+	ret = rfd77402_set_state(client, RFD77402_CMD_MCPU_ON,
 				 RFD77402_STATUS_MCPU_ON);
 	if (ret < 0)
 		return ret;
 
-	ret = i2c_smbus_write_byte_data(data->client, RFD77402_CMD_R,
+	if (data->irq_en)
+		reinit_completion(&data->completion);
+
+	ret = i2c_smbus_write_byte_data(client, RFD77402_CMD_R,
 					RFD77402_CMD_SINGLE |
 					RFD77402_CMD_VALID);
 	if (ret < 0)
 		goto err;
 
-	while (tries-- > 0) {
-		ret = i2c_smbus_read_byte_data(data->client, RFD77402_ICSR);
-		if (ret < 0)
-			goto err;
-		if (ret & RFD77402_ICSR_RESULT)
-			break;
-		msleep(20);
-	}
-
-	if (tries < 0) {
-		ret = -ETIMEDOUT;
+	ret = rfd77402_wait_for_result(data);
+	if (ret < 0)
 		goto err;
-	}
 
-	ret = i2c_smbus_read_word_data(data->client, RFD77402_RESULT_R);
+	ret = i2c_smbus_read_word_data(client, RFD77402_RESULT_R);
 	if (ret < 0)
 		goto err;
 
@@ -156,7 +228,7 @@ static int rfd77402_measure(struct rfd77402_data *data)
 	return (ret & RFD77402_RESULT_DIST_MASK) >> 2;
 
 err:
-	rfd77402_set_state(data, RFD77402_CMD_MCPU_OFF,
+	rfd77402_set_state(client, RFD77402_CMD_MCPU_OFF,
 			   RFD77402_STATUS_MCPU_OFF);
 	return ret;
 }
@@ -191,23 +263,51 @@ static const struct iio_info rfd77402_info = {
 	.read_raw = rfd77402_read_raw,
 };
 
+static int rfd77402_config_irq(struct i2c_client *client, u8 csr, u8 ier)
+{
+	int ret;
+
+	ret = i2c_smbus_write_byte_data(client, RFD77402_ICSR, csr);
+	if (ret)
+		return ret;
+
+	return i2c_smbus_write_byte_data(client, RFD77402_IER, ier);
+}
+
 static int rfd77402_init(struct rfd77402_data *data)
 {
+	struct i2c_client *client = data->client;
 	int ret, i;
 
-	ret = rfd77402_set_state(data, RFD77402_CMD_STANDBY,
+	ret = rfd77402_set_state(client, RFD77402_CMD_STANDBY,
 				 RFD77402_STATUS_STANDBY);
 	if (ret < 0)
 		return ret;
 
-	/* configure INT pad as push-pull, active low */
-	ret = i2c_smbus_write_byte_data(data->client, RFD77402_ICSR,
-					RFD77402_ICSR_INT_MODE);
-	if (ret < 0)
+	if (data->irq_en) {
+		/*
+		 * Enable interrupt mode:
+		 * - Configure ICSR for auto-clear on read and
+		 *   push-pull output
+		 * - Enable "result ready" interrupt in IER
+		 */
+		ret = rfd77402_config_irq(client,
+					  RFD77402_ICSR_CLR_CFG |
+					  RFD77402_ICSR_INT_MODE,
+					  RFD77402_IER_RESULT);
+	} else {
+		/*
+		 * Disable all interrupts:
+		 * - Clear ICSR configuration
+		 * - Disable all interrupts in IER
+		 */
+		ret = rfd77402_config_irq(client, 0, 0);
+	}
+	if (ret)
 		return ret;
 
 	/* I2C configuration */
-	ret = i2c_smbus_write_word_data(data->client, RFD77402_I2C_INIT_CFG,
+	ret = i2c_smbus_write_word_data(client, RFD77402_I2C_INIT_CFG,
 					RFD77402_I2C_ADDR_INCR |
 					RFD77402_I2C_DATA_INCR |
 					RFD77402_I2C_HOST_DEBUG	|
@@ -216,47 +316,51 @@ static int rfd77402_init(struct rfd77402_data *data)
 		return ret;
 
 	/* set initialization */
-	ret = i2c_smbus_write_word_data(data->client, RFD77402_PMU_CFG, 0x0500);
+	ret = i2c_smbus_write_word_data(client, RFD77402_PMU_CFG, 0x0500);
 	if (ret < 0)
 		return ret;
 
-	ret = rfd77402_set_state(data, RFD77402_CMD_MCPU_OFF,
+	ret = rfd77402_set_state(client, RFD77402_CMD_MCPU_OFF,
 				 RFD77402_STATUS_MCPU_OFF);
 	if (ret < 0)
 		return ret;
 
 	/* set initialization */
-	ret = i2c_smbus_write_word_data(data->client, RFD77402_PMU_CFG, 0x0600);
+	ret = i2c_smbus_write_word_data(client, RFD77402_PMU_CFG, 0x0600);
 	if (ret < 0)
 		return ret;
 
-	ret = rfd77402_set_state(data, RFD77402_CMD_MCPU_ON,
+	ret = rfd77402_set_state(client, RFD77402_CMD_MCPU_ON,
 				 RFD77402_STATUS_MCPU_ON);
 	if (ret < 0)
 		return ret;
 
 	for (i = 0; i < ARRAY_SIZE(rf77402_tof_config); i++) {
-		ret = i2c_smbus_write_word_data(data->client,
+		ret = i2c_smbus_write_word_data(client,
 						rf77402_tof_config[i].reg,
 						rf77402_tof_config[i].val);
 		if (ret < 0)
 			return ret;
 	}
 
-	ret = rfd77402_set_state(data, RFD77402_CMD_STANDBY,
+	ret = rfd77402_set_state(client, RFD77402_CMD_STANDBY,
 				 RFD77402_STATUS_STANDBY);
 
 	return ret;
 }
 
-static int rfd77402_powerdown(struct rfd77402_data *data)
+static int rfd77402_powerdown(struct i2c_client *client)
 {
-	return rfd77402_set_state(data, RFD77402_CMD_STANDBY,
+	return rfd77402_set_state(client, RFD77402_CMD_STANDBY,
 				  RFD77402_STATUS_STANDBY);
 }
 
-static int rfd77402_probe(struct i2c_client *client,
-			  const struct i2c_device_id *id)
+static void rfd77402_disable(void *client)
+{
+	rfd77402_powerdown(client);
+}
+
+static int rfd77402_probe(struct i2c_client *client)
 {
 	struct rfd77402_data *data;
 	struct iio_dev *indio_dev;
@@ -273,11 +377,28 @@ static int rfd77402_probe(struct i2c_client *client,
 		return -ENOMEM;
 
 	data = iio_priv(indio_dev);
-	i2c_set_clientdata(client, indio_dev);
 	data->client = client;
-	mutex_init(&data->lock);
 
-	indio_dev->dev.parent = &client->dev;
+	ret = devm_mutex_init(&client->dev, &data->lock);
+	if (ret)
+		return ret;
+
+	init_completion(&data->completion);
+
+	if (client->irq > 0) {
+		ret = devm_request_threaded_irq(&client->dev, client->irq,
+						NULL, rfd77402_interrupt_handler,
+						IRQF_ONESHOT,
+						"rfd77402", data);
+		if (ret)
+			return ret;
+
+		data->irq_en = true;
+		dev_dbg(&client->dev, "Using interrupt mode\n");
+	} else {
+		dev_dbg(&client->dev, "Using polling mode\n");
+	}
+
 	indio_dev->info = &rfd77402_info;
 	indio_dev->channels = rfd77402_channels;
 	indio_dev->num_channels = ARRAY_SIZE(rfd77402_channels);
@@ -288,60 +409,48 @@ static int rfd77402_probe(struct i2c_client *client,
 	if (ret < 0)
 		return ret;
 
-	ret = iio_device_register(indio_dev);
+	ret = devm_add_action_or_reset(&client->dev, rfd77402_disable, client);
 	if (ret)
-		goto err_powerdown;
+		return ret;
 
-	return 0;
-
-err_powerdown:
-	rfd77402_powerdown(data);
-	return ret;
+	return devm_iio_device_register(&client->dev, indio_dev);
 }
 
-static int rfd77402_remove(struct i2c_client *client)
-{
-	struct iio_dev *indio_dev = i2c_get_clientdata(client);
-
-	iio_device_unregister(indio_dev);
-	rfd77402_powerdown(iio_priv(indio_dev));
-
-	return 0;
-}
-
-#ifdef CONFIG_PM_SLEEP
 static int rfd77402_suspend(struct device *dev)
 {
-	struct rfd77402_data *data = iio_priv(i2c_get_clientdata(
-				     to_i2c_client(dev)));
-
-	return rfd77402_powerdown(data);
+	return rfd77402_powerdown(to_i2c_client(dev));
 }
 
 static int rfd77402_resume(struct device *dev)
 {
-	struct rfd77402_data *data = iio_priv(i2c_get_clientdata(
-				     to_i2c_client(dev)));
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	struct rfd77402_data *data = iio_priv(indio_dev);
 
 	return rfd77402_init(data);
 }
-#endif
 
-static SIMPLE_DEV_PM_OPS(rfd77402_pm_ops, rfd77402_suspend, rfd77402_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(rfd77402_pm_ops, rfd77402_suspend,
+				rfd77402_resume);
 
 static const struct i2c_device_id rfd77402_id[] = {
-	{ "rfd77402", 0},
+	{ .name = "rfd77402" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, rfd77402_id);
 
+static const struct of_device_id rfd77402_of_match[] = {
+	{ .compatible = "rfdigital,rfd77402" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, rfd77402_of_match);
+
 static struct i2c_driver rfd77402_driver = {
 	.driver = {
 		.name   = RFD77402_DRV_NAME,
-		.pm     = &rfd77402_pm_ops,
+		.pm     = pm_sleep_ptr(&rfd77402_pm_ops),
+		.of_match_table = rfd77402_of_match,
 	},
-	.probe  = rfd77402_probe,
-	.remove = rfd77402_remove,
+	.probe = rfd77402_probe,
 	.id_table = rfd77402_id,
 };
 

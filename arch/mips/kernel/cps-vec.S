@@ -1,13 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2013 Imagination Technologies
  * Author: Paul Burton <paul.burton@mips.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
+#include <linux/init.h>
 #include <asm/addrspace.h>
 #include <asm/asm.h>
 #include <asm/asm-offsets.h>
@@ -17,10 +14,15 @@
 #include <asm/mipsregs.h>
 #include <asm/mipsmtregs.h>
 #include <asm/pm.h>
+#include <asm/smp-cps.h>
 
 #define GCR_CPC_BASE_OFS	0x0088
 #define GCR_CL_COHERENCE_OFS	0x2008
 #define GCR_CL_ID_OFS		0x2028
+#define  CM3_GCR_Cx_ID_CLUSTER_SHF	8
+#define  CM3_GCR_Cx_ID_CLUSTER_MSK	(0xff << 8)
+#define  CM3_GCR_Cx_ID_CORENUM_SHF	0
+#define  CM3_GCR_Cx_ID_CORENUM_MSK	(0xff << 0)
 
 #define CPC_CL_VC_STOP_OFS	0x2020
 #define CPC_CL_VC_RUN_OFS	0x2028
@@ -84,50 +86,16 @@
 	 nop
 	.endm
 
-	/* Calculate an uncached address for the CM GCRs */
-	.macro	cmgcrb	dest
-	.set	push
-	.set	noat
-	MFC0	$1, CP0_CMGCRBASE
-	PTR_SLL	$1, $1, 4
-	PTR_LI	\dest, UNCAC_BASE
-	PTR_ADDU \dest, \dest, $1
-	.set	pop
-	.endm
 
-.section .text.cps-vec
-.balign 0x1000
+LEAF(mips_cps_core_boot)
+	/* Save  CCA and GCR base */
+	move   s0, a0
+	move   s1, a1
 
-LEAF(mips_cps_core_entry)
-	/*
-	 * These first 4 bytes will be patched by cps_smp_setup to load the
-	 * CCA to use into register s0.
-	 */
-	.word	0
-
-	/* Check whether we're here due to an NMI */
-	mfc0	k0, CP0_STATUS
-	and	k0, k0, ST0_NMI
-	beqz	k0, not_nmi
-	 nop
-
-	/* This is an NMI */
-	PTR_LA	k0, nmi_handler
-	jr	k0
-	 nop
-
-not_nmi:
-	/* Setup Cause */
-	li	t0, CAUSEF_IV
-	mtc0	t0, CP0_CAUSE
-
-	/* Setup Status */
-	li	t0, ST0_CU1 | ST0_CU0 | ST0_BEV | STATUS_BITDEPS
-	mtc0	t0, CP0_STATUS
-
+	/* We don't know how to do coherence setup on earlier ISA */
+#if MIPS_ISA_REV > 0
 	/* Skip cache & coherence setup if we're already coherent */
-	cmgcrb	v1
-	lw	s7, GCR_CL_COHERENCE_OFS(v1)
+	lw	s7, GCR_CL_COHERENCE_OFS(s1)
 	bnez	s7, 1f
 	 nop
 
@@ -137,8 +105,9 @@ not_nmi:
 
 	/* Enter the coherent domain */
 	li	t0, 0xff
-	sw	t0, GCR_CL_COHERENCE_OFS(v1)
+	sw	t0, GCR_CL_COHERENCE_OFS(s1)
 	ehb
+#endif /* MIPS_ISA_REV > 0 */
 
 	/* Set Kseg0 CCA to that in s0 */
 1:	mfc0	t0, CP0_CONFIG
@@ -185,49 +154,45 @@ not_nmi:
 	PTR_L	sp, VPEBOOTCFG_SP(v1)
 	jr	t1
 	 nop
-	END(mips_cps_core_entry)
+	END(mips_cps_core_boot)
 
-.org 0x200
+	__INIT
 LEAF(excep_tlbfill)
 	DUMP_EXCEP("TLB Fill")
 	b	.
 	 nop
 	END(excep_tlbfill)
 
-.org 0x280
 LEAF(excep_xtlbfill)
 	DUMP_EXCEP("XTLB Fill")
 	b	.
 	 nop
 	END(excep_xtlbfill)
 
-.org 0x300
 LEAF(excep_cache)
 	DUMP_EXCEP("Cache")
 	b	.
 	 nop
 	END(excep_cache)
 
-.org 0x380
 LEAF(excep_genex)
 	DUMP_EXCEP("General")
 	b	.
 	 nop
 	END(excep_genex)
 
-.org 0x400
 LEAF(excep_intex)
 	DUMP_EXCEP("Interrupt")
 	b	.
 	 nop
 	END(excep_intex)
 
-.org 0x480
 LEAF(excep_ejtag)
 	PTR_LA	k0, ejtag_debug_handler
 	jr	k0
 	 nop
 	END(excep_ejtag)
+	__FINIT
 
 LEAF(mips_cps_core_init)
 #ifdef CONFIG_MIPS_MT_SMP
@@ -310,13 +275,21 @@ LEAF(mips_cps_core_init)
  */
 LEAF(mips_cps_get_bootcfg)
 	/* Calculate a pointer to this cores struct core_boot_config */
-	cmgcrb	t0
-	lw	t0, GCR_CL_ID_OFS(t0)
+	PTR_LA	v0, mips_cps_cluster_bootcfg
+	PTR_L	v0, 0(v0)
+	lw	t0, GCR_CL_ID_OFS(s1)
+#ifdef CONFIG_CPU_MIPSR6
+	ext	t1, t0, CM3_GCR_Cx_ID_CLUSTER_SHF, 8
+	li	t2, CLUSTERBOOTCFG_SIZE
+	mul	t1, t1, t2
+	PTR_ADDU \
+		v0, v0, t1
+#endif
+	PTR_L	v0, CLUSTERBOOTCFG_CORECONFIG(v0)
+	andi	t0, t0, CM3_GCR_Cx_ID_CORENUM_MSK
 	li	t1, COREBOOTCFG_SIZE
 	mul	t0, t0, t1
-	PTR_LA	t1, mips_cps_core_bootcfg
-	PTR_L	t1, 0(t1)
-	PTR_ADDU v0, t0, t1
+	PTR_ADDU v0, v0, t0
 
 	/* Calculate this VPEs ID. If the core doesn't support MT use 0 */
 	li	t9, 0
@@ -371,8 +344,9 @@ LEAF(mips_cps_boot_vpes)
 	has_vp	t0, 5f
 
 	/* Find base address of CPC */
-	cmgcrb	t3
-	PTR_L	t1, GCR_CPC_BASE_OFS(t3)
+	PTR_LA	t1, mips_gcr_base
+	PTR_L	t1, 0(t1)
+	PTR_L	t1, GCR_CPC_BASE_OFS(t1)
 	PTR_LI	t2, ~0x7fff
 	and	t1, t1, t2
 	PTR_LI	t2, UNCAC_BASE
@@ -399,8 +373,11 @@ LEAF(mips_cps_boot_vpes)
 	.set	pop
 
 	PTR_LA	t1, 1f
+	.set	push
+	.set	MIPS_ISA_LEVEL_RAW
 	jr.hb	t1
 	 nop
+	.set	pop
 1:	mfc0	t1, CP0_MVPCONTROL
 	ori	t1, t1, MVPCONTROL_VPC
 	mtc0	t1, CP0_MVPCONTROL
@@ -435,7 +412,7 @@ LEAF(mips_cps_boot_vpes)
 	/* Calculate a pointer to the VPEs struct vpe_boot_config */
 	li	t0, VPEBOOTCFG_SIZE
 	mul	t0, t0, ta1
-	addu	t0, t0, ta3
+	PTR_ADDU t0, t0, ta3
 
 	/* Set the TC restart PC */
 	lw	t1, VPEBOOTCFG_PC(t0)
@@ -513,8 +490,11 @@ LEAF(mips_cps_boot_vpes)
 	li	t0, TCHALT_H
 	mtc0	t0, CP0_TCHALT
 	PTR_LA	t0, 1f
+	.set	push
+	.set	MIPS_ISA_LEVEL_RAW
 1:	jr.hb	t0
 	 nop
+	.set	pop
 
 2:
 
@@ -525,6 +505,7 @@ LEAF(mips_cps_boot_vpes)
 	 nop
 	END(mips_cps_boot_vpes)
 
+#if MIPS_ISA_REV > 0
 LEAF(mips_cps_cache_init)
 	/*
 	 * Clear the bits used to index the caches. Note that the architecture
@@ -598,6 +579,7 @@ dcache_done:
 	jr	ra
 	 nop
 	END(mips_cps_cache_init)
+#endif /* MIPS_ISA_REV > 0 */
 
 #if defined(CONFIG_MIPS_CPS_PM) && defined(CONFIG_CPU_PM)
 
@@ -608,10 +590,10 @@ dcache_done:
 	lw	$1, TI_CPU(gp)
 	sll	$1, $1, LONGLOG
 	PTR_LA	\dest, __per_cpu_offset
-	addu	$1, $1, \dest
+	PTR_ADDU $1, $1, \dest
 	lw	$1, 0($1)
 	PTR_LA	\dest, cps_cpu_state
-	addu	\dest, \dest, $1
+	PTR_ADDU \dest, \dest, $1
 	.set	pop
 	.endm
 

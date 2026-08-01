@@ -22,7 +22,7 @@
 #define PT_SR	   17
 #define PT_PC	   18
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 /* this struct defines the way the registers are stored on the
    stack during a system call. */
@@ -39,7 +39,7 @@ struct pt_regs {
   long     d0;
   long     orig_d0;
   long     stkadj;
-#ifdef CONFIG_COLDFIRE
+#ifdef __mcoldfire__
   unsigned format :  4; /* frame format specifier */
   unsigned vector : 12; /* vector offset */
   unsigned short sr;
@@ -74,7 +74,12 @@ struct switch_stack {
 
 #define PTRACE_GET_THREAD_AREA    25
 
+#define PTRACE_GETFDPIC	31
+
 #define PTRACE_SINGLEBLOCK	33	/* resume execution until next branch */
 
-#endif /* __ASSEMBLY__ */
+#define PTRACE_GETFDPIC_EXEC	0
+#define PTRACE_GETFDPIC_INTERP	1
+
+#endif /* __ASSEMBLER__ */
 #endif /* _UAPI_M68K_PTRACE_H */

@@ -1,37 +1,27 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2015 Etnaviv Project
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2015-2018 Etnaviv Project
  */
 
 #ifndef __ETNAVIV_GPU_H__
 #define __ETNAVIV_GPU_H__
 
-#include <linux/clk.h>
-#include <linux/regulator/consumer.h>
-
 #include "etnaviv_cmdbuf.h"
+#include "etnaviv_gem.h"
+#include "etnaviv_mmu.h"
 #include "etnaviv_drv.h"
+#include "common.xml.h"
+#include "state.xml.h"
 
 struct etnaviv_gem_submit;
 struct etnaviv_vram_mapping;
 
 struct etnaviv_chip_identity {
-	/* Chip model. */
 	u32 model;
-
-	/* Revision value.*/
 	u32 revision;
+	u32 product_id;
+	u32 customer_id;
+	u32 eco_id;
 
 	/* Supported feature fields. */
 	u32 features;
@@ -61,6 +51,9 @@ struct etnaviv_chip_identity {
 
 	/* Number of shader cores. */
 	u32 shader_core_count;
+
+	/* Number of Neural Network cores. */
+	u32 nn_core_count;
 
 	/* Size of the vertex cache. */
 	u32 vertex_cache_size;
@@ -98,9 +91,20 @@ struct etnaviv_event {
 };
 
 struct etnaviv_cmdbuf_suballoc;
-struct etnaviv_cmdbuf;
+struct regulator;
+struct clk;
+struct reset_control;
 
 #define ETNA_NR_EVENTS 30
+
+enum etnaviv_gpu_state {
+	ETNA_GPU_STATE_UNKNOWN = 0,
+	ETNA_GPU_STATE_IDENTIFIED,
+	ETNA_GPU_STATE_RESET,
+	ETNA_GPU_STATE_INITIALIZED,
+	ETNA_GPU_STATE_RUNNING,
+	ETNA_GPU_STATE_FAULT,
+};
 
 struct etnaviv_gpu {
 	struct drm_device *drm;
@@ -109,16 +113,14 @@ struct etnaviv_gpu {
 	struct mutex lock;
 	struct etnaviv_chip_identity identity;
 	enum etnaviv_sec_mode sec_mode;
-	struct etnaviv_file_private *lastctx;
 	struct workqueue_struct *wq;
+	struct mutex sched_lock;
 	struct drm_gpu_scheduler sched;
+	enum etnaviv_gpu_state state;
 
 	/* 'ring'-buffer: */
 	struct etnaviv_cmdbuf buffer;
 	int exec_state;
-
-	/* bus base address of memory  */
-	u32 memory_base;
 
 	/* event management: */
 	DECLARE_BITMAP(event_bitmap, ETNA_NR_EVENTS);
@@ -129,10 +131,9 @@ struct etnaviv_gpu {
 	u32 idle_mask;
 
 	/* Fencing support */
-	struct mutex fence_idr_lock;
-	struct idr fence_idr;
+	struct xarray user_fences;
+	u32 next_user_fence;
 	u32 next_fence;
-	u32 active_fence;
 	u32 completed_fence;
 	wait_queue_head_t fence_event;
 	u64 fence_context;
@@ -142,36 +143,65 @@ struct etnaviv_gpu {
 	struct work_struct sync_point_work;
 	int sync_point_event;
 
+	/* hang detection */
+	u32 hangcheck_dma_addr;
+	u32 hangcheck_primid;
+	u32 hangcheck_fence;
+
 	void __iomem *mmio;
 	int irq;
 
-	struct etnaviv_iommu *mmu;
-	struct etnaviv_cmdbuf_suballoc *cmdbuf_suballoc;
+	struct etnaviv_iommu_context *mmu_context;
+	unsigned int flush_seq;
 
 	/* Power Control: */
 	struct clk *clk_bus;
 	struct clk *clk_reg;
 	struct clk *clk_core;
 	struct clk *clk_shader;
+	struct reset_control *rst;
 
 	unsigned int freq_scale;
+	unsigned int fe_waitcycles;
 	unsigned long base_rate_core;
 	unsigned long base_rate_shader;
 };
 
 static inline void gpu_write(struct etnaviv_gpu *gpu, u32 reg, u32 data)
 {
-	etnaviv_writel(data, gpu->mmio + reg);
+	writel(data, gpu->mmio + reg);
 }
 
 static inline u32 gpu_read(struct etnaviv_gpu *gpu, u32 reg)
 {
-	return etnaviv_readl(gpu->mmio + reg);
+	/* On some variants, such as the GC7000r6009, some FE registers
+	 * need two reads to be consistent. Do that extra read here and
+	 * throw away the result.
+	 */
+	if (reg >= VIVS_FE_DMA_STATUS && reg <= VIVS_FE_AUTO_FLUSH)
+		readl(gpu->mmio + reg);
+
+	return readl(gpu->mmio + reg);
 }
 
-static inline bool fence_completed(struct etnaviv_gpu *gpu, u32 fence)
+static inline u32 gpu_fix_power_address(struct etnaviv_gpu *gpu, u32 reg)
 {
-	return fence_after_eq(gpu->completed_fence, fence);
+	/* Power registers in GC300 < 2.0 are offset by 0x100 */
+	if (gpu->identity.model == chipModel_GC300 &&
+	    gpu->identity.revision < 0x2000)
+		reg += 0x100;
+
+	return reg;
+}
+
+static inline void gpu_write_power(struct etnaviv_gpu *gpu, u32 reg, u32 data)
+{
+	writel(data, gpu->mmio + gpu_fix_power_address(gpu, reg));
+}
+
+static inline u32 gpu_read_power(struct etnaviv_gpu *gpu, u32 reg)
+{
+	return readl(gpu->mmio + gpu_fix_power_address(gpu, reg));
 }
 
 int etnaviv_gpu_get_param(struct etnaviv_gpu *gpu, u32 param, u64 *value);
@@ -183,12 +213,13 @@ bool etnaviv_fill_identity_from_hwdb(struct etnaviv_gpu *gpu);
 int etnaviv_gpu_debugfs(struct etnaviv_gpu *gpu, struct seq_file *m);
 #endif
 
-void etnaviv_gpu_recover_hang(struct etnaviv_gpu *gpu);
+void etnaviv_gpu_recover_hang(struct etnaviv_gem_submit *submit);
 void etnaviv_gpu_retire(struct etnaviv_gpu *gpu);
 int etnaviv_gpu_wait_fence_interruptible(struct etnaviv_gpu *gpu,
-	u32 fence, struct timespec *timeout);
+	u32 fence, struct drm_etnaviv_timespec *timeout);
 int etnaviv_gpu_wait_obj_inactive(struct etnaviv_gpu *gpu,
-	struct etnaviv_gem_object *etnaviv_obj, struct timespec *timeout);
+	struct etnaviv_gem_object *etnaviv_obj,
+	struct drm_etnaviv_timespec *timeout);
 struct dma_fence *etnaviv_gpu_submit(struct etnaviv_gem_submit *submit);
 int etnaviv_gpu_pm_get_sync(struct etnaviv_gpu *gpu);
 void etnaviv_gpu_pm_put(struct etnaviv_gpu *gpu);

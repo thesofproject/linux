@@ -1,32 +1,25 @@
-/**
+// SPDX-License-Identifier: GPL-2.0-only
+/*
  * opt3001.c - Texas Instruments OPT3001 Light Sensor
  *
- * Copyright (C) 2014 Texas Instruments Incorporated - http://www.ti.com
+ * Copyright (C) 2014 Texas Instruments Incorporated - https://www.ti.com
  *
  * Author: Andreas Dannenberg <dannenberg@ti.com>
  * Based on previous work from: Felipe Balbi <balbi@ti.com>
- *
- * This program is free software: you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 of the License
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
-#include <linux/bitops.h>
+#include <linux/array_size.h>
+#include <linux/bits.h>
 #include <linux/delay.h>
-#include <linux/device.h>
+#include <linux/dev_printk.h>
+#include <linux/errno.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
-#include <linux/irq.h>
-#include <linux/kernel.h>
+#include <linux/jiffies.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
-#include <linux/slab.h>
 #include <linux/types.h>
+#include <linux/wait.h>
 
 #include <linux/iio/events.h>
 #include <linux/iio/iio.h>
@@ -39,17 +32,16 @@
 #define OPT3001_MANUFACTURER_ID	0x7e
 #define OPT3001_DEVICE_ID	0x7f
 
-#define OPT3001_CONFIGURATION_RN_MASK	(0xf << 12)
+#define OPT3001_CONFIGURATION_RN_MASK	GENMASK(15, 12)
 #define OPT3001_CONFIGURATION_RN_AUTO	(0xc << 12)
 
 #define OPT3001_CONFIGURATION_CT	BIT(11)
 
-#define OPT3001_CONFIGURATION_M_MASK	(3 << 9)
+#define OPT3001_CONFIGURATION_M_MASK	GENMASK(10, 9)
 #define OPT3001_CONFIGURATION_M_SHUTDOWN (0 << 9)
 #define OPT3001_CONFIGURATION_M_SINGLE	(1 << 9)
 #define OPT3001_CONFIGURATION_M_CONTINUOUS (2 << 9) /* also 3 << 9 */
 
-#define OPT3001_CONFIGURATION_OVF	BIT(8)
 #define OPT3001_CONFIGURATION_CRF	BIT(7)
 #define OPT3001_CONFIGURATION_FH	BIT(6)
 #define OPT3001_CONFIGURATION_FL	BIT(5)
@@ -57,7 +49,7 @@
 #define OPT3001_CONFIGURATION_POL	BIT(3)
 #define OPT3001_CONFIGURATION_ME	BIT(2)
 
-#define OPT3001_CONFIGURATION_FC_MASK	(3 << 0)
+#define OPT3001_CONFIGURATION_FC_MASK	GENMASK(1, 0)
 
 /* The end-of-conversion enable is located in the low-limit register */
 #define OPT3001_LOW_LIMIT_EOC_ENABLE	0xc000
@@ -77,6 +69,35 @@
 #define OPT3001_RESULT_READY_SHORT	150
 #define OPT3001_RESULT_READY_LONG	1000
 
+struct opt3001_scale {
+	int	val;
+	int	val2;
+};
+
+struct opt3001_chip_info {
+	const struct iio_chan_spec (*channels)[2];
+	enum iio_chan_type chan_type;
+	int num_channels;
+
+	const struct opt3001_scale (*scales)[12];
+	/*
+	 * Factor as specified by conversion equation in datasheet.
+	 * eg. 0.01 (scaled to integer 10) for opt3001.
+	 */
+	int factor_whole;
+	/*
+	 * Factor to compensate for potentially scaled factor_whole.
+	 */
+	int factor_integer;
+	/*
+	 * Factor used to align decimal part of processed value to six decimal
+	 * places.
+	 */
+	int factor_decimal;
+
+	bool has_id;
+};
+
 struct opt3001 {
 	struct i2c_client	*client;
 	struct device		*dev;
@@ -86,6 +107,7 @@ struct opt3001 {
 	bool			result_ready;
 	wait_queue_head_t	result_ready_queue;
 	u16			result;
+	const struct opt3001_chip_info *chip_info;
 
 	u32			int_time;
 	u32			mode;
@@ -97,11 +119,6 @@ struct opt3001 {
 	u8			low_thresh_exp;
 
 	bool			use_irq;
-};
-
-struct opt3001_scale {
-	int	val;
-	int	val2;
 };
 
 static const struct opt3001_scale opt3001_scales[] = {
@@ -146,8 +163,63 @@ static const struct opt3001_scale opt3001_scales[] = {
 		.val2 = 400000,
 	},
 	{
+		.val = 41932,
+		.val2 = 800000,
+	},
+	{
 		.val = 83865,
 		.val2 = 600000,
+	},
+};
+
+static const struct opt3001_scale opt3002_scales[] = {
+	{
+		.val = 4914,
+		.val2 = 0,
+	},
+	{
+		.val = 9828,
+		.val2 = 0,
+	},
+	{
+		.val = 19656,
+		.val2 = 0,
+	},
+	{
+		.val = 39312,
+		.val2 = 0,
+	},
+	{
+		.val = 78624,
+		.val2 = 0,
+	},
+	{
+		.val = 157248,
+		.val2 = 0,
+	},
+	{
+		.val = 314496,
+		.val2 = 0,
+	},
+	{
+		.val = 628992,
+		.val2 = 0,
+	},
+	{
+		.val = 1257984,
+		.val2 = 0,
+	},
+	{
+		.val = 2515968,
+		.val2 = 0,
+	},
+	{
+		.val = 5031936,
+		.val2 = 0,
+	},
+	{
+		.val = 10063872,
+		.val2 = 0,
 	},
 };
 
@@ -155,17 +227,13 @@ static int opt3001_find_scale(const struct opt3001 *opt, int val,
 		int val2, u8 *exponent)
 {
 	int i;
-
-	for (i = 0; i < ARRAY_SIZE(opt3001_scales); i++) {
-		const struct opt3001_scale *scale = &opt3001_scales[i];
-
+	for (i = 0; i < ARRAY_SIZE(*opt->chip_info->scales); i++) {
+		const struct opt3001_scale *scale = &(*opt->chip_info->scales)[i];
 		/*
-		 * Combine the integer and micro parts for comparison
-		 * purposes. Use milli lux precision to avoid 32-bit integer
-		 * overflows.
+		 * Compare the integer and micro parts to determine value scale.
 		 */
-		if ((val * 1000 + val2 / 1000) <=
-				(scale->val * 1000 + scale->val2 / 1000)) {
+		if (val < scale->val ||
+		    (val == scale->val && val2 <= scale->val2)) {
 			*exponent = i;
 			return 0;
 		}
@@ -177,11 +245,14 @@ static int opt3001_find_scale(const struct opt3001 *opt, int val,
 static void opt3001_to_iio_ret(struct opt3001 *opt, u8 exponent,
 		u16 mantissa, int *val, int *val2)
 {
-	int lux;
+	int ret;
+	int whole = opt->chip_info->factor_whole;
+	int integer = opt->chip_info->factor_integer;
+	int decimal = opt->chip_info->factor_decimal;
 
-	lux = 10 * (mantissa << exponent);
-	*val = lux / 1000;
-	*val2 = (lux - (*val * 1000)) * 1000;
+	ret = whole * (mantissa << exponent);
+	*val = ret / integer;
+	*val2 = (ret - (*val * integer)) * decimal;
 }
 
 static void opt3001_set_mode(struct opt3001 *opt, u16 *reg, u16 mode)
@@ -228,7 +299,18 @@ static const struct iio_chan_spec opt3001_channels[] = {
 	IIO_CHAN_SOFT_TIMESTAMP(1),
 };
 
-static int opt3001_get_lux(struct opt3001 *opt, int *val, int *val2)
+static const struct iio_chan_spec opt3002_channels[] = {
+	{
+		.type = IIO_INTENSITY,
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
+				BIT(IIO_CHAN_INFO_INT_TIME),
+		.event_spec = opt3001_event_spec,
+		.num_event_specs = ARRAY_SIZE(opt3001_event_spec),
+	},
+	IIO_CHAN_SOFT_TIMESTAMP(1),
+};
+
+static int opt3001_get_processed(struct opt3001 *opt, int *val, int *val2)
 {
 	int ret;
 	u16 mantissa;
@@ -283,6 +365,10 @@ static int opt3001_get_lux(struct opt3001 *opt, int *val, int *val2)
 		ret = wait_event_timeout(opt->result_ready_queue,
 				opt->result_ready,
 				msecs_to_jiffies(OPT3001_RESULT_READY_LONG));
+		if (ret == 0) {
+			ret = -ETIMEDOUT;
+			goto err;
+		}
 	} else {
 		/* Sleep for result ready time */
 		timeout = (opt->int_time == OPT3001_INT_TIME_SHORT) ?
@@ -319,9 +405,7 @@ err:
 		/* Disallow IRQ to access the device while lock is active */
 		opt->ok_to_ignore_lock = false;
 
-	if (ret == 0)
-		return -ETIMEDOUT;
-	else if (ret < 0)
+	if (ret < 0)
 		return ret;
 
 	if (opt->use_irq) {
@@ -400,14 +484,15 @@ static int opt3001_read_raw(struct iio_dev *iio,
 	if (opt->mode == OPT3001_CONFIGURATION_M_CONTINUOUS)
 		return -EBUSY;
 
-	if (chan->type != IIO_LIGHT)
+	if (chan->type != opt->chip_info->chan_type)
 		return -EINVAL;
 
 	mutex_lock(&opt->lock);
 
 	switch (mask) {
+	case IIO_CHAN_INFO_RAW:
 	case IIO_CHAN_INFO_PROCESSED:
-		ret = opt3001_get_lux(opt, val, val2);
+		ret = opt3001_get_processed(opt, val, val2);
 		break;
 	case IIO_CHAN_INFO_INT_TIME:
 		ret = opt3001_get_int_time(opt, val, val2);
@@ -431,7 +516,7 @@ static int opt3001_write_raw(struct iio_dev *iio,
 	if (opt->mode == OPT3001_CONFIGURATION_M_CONTINUOUS)
 		return -EBUSY;
 
-	if (chan->type != IIO_LIGHT)
+	if (chan->type != opt->chip_info->chan_type)
 		return -EINVAL;
 
 	if (mask != IIO_CHAN_INFO_INT_TIME)
@@ -482,6 +567,9 @@ static int opt3001_write_event_value(struct iio_dev *iio,
 {
 	struct opt3001 *opt = iio_priv(iio);
 	int ret;
+	int whole;
+	int integer;
+	int decimal;
 
 	u16 mantissa;
 	u16 value;
@@ -500,7 +588,12 @@ static int opt3001_write_event_value(struct iio_dev *iio,
 		goto err;
 	}
 
-	mantissa = (((val * 1000) + (val2 / 1000)) / 10) >> exponent;
+	whole = opt->chip_info->factor_whole;
+	integer = opt->chip_info->factor_integer;
+	decimal = opt->chip_info->factor_decimal;
+
+	mantissa = (((val * integer) + (val2 / decimal)) / whole) >> exponent;
+
 	value = (exponent << 12) | mantissa;
 
 	switch (dir) {
@@ -542,7 +635,7 @@ static int opt3001_read_event_config(struct iio_dev *iio,
 
 static int opt3001_write_event_config(struct iio_dev *iio,
 		const struct iio_chan_spec *chan, enum iio_event_type type,
-		enum iio_event_direction dir, int state)
+		enum iio_event_direction dir, bool state)
 {
 	struct opt3001 *opt = iio_priv(iio);
 	int ret;
@@ -613,7 +706,7 @@ static int opt3001_read_id(struct opt3001 *opt)
 	ret = i2c_smbus_read_word_swapped(opt->client, OPT3001_DEVICE_ID);
 	if (ret < 0) {
 		dev_err(opt->dev, "failed to read register %02x\n",
-				OPT3001_DEVICE_ID);
+			OPT3001_DEVICE_ID);
 		return ret;
 	}
 
@@ -694,8 +787,11 @@ static irqreturn_t opt3001_irq(int irq, void *_iio)
 	struct iio_dev *iio = _iio;
 	struct opt3001 *opt = iio_priv(iio);
 	int ret;
+	bool wake_result_ready_queue = false;
+	enum iio_chan_type chan_type = opt->chip_info->chan_type;
+	bool ok_to_ignore_lock = opt->ok_to_ignore_lock;
 
-	if (!opt->ok_to_ignore_lock)
+	if (!ok_to_ignore_lock)
 		mutex_lock(&opt->lock);
 
 	ret = i2c_smbus_read_word_swapped(opt->client, OPT3001_CONFIGURATION);
@@ -709,13 +805,13 @@ static irqreturn_t opt3001_irq(int irq, void *_iio)
 			OPT3001_CONFIGURATION_M_CONTINUOUS) {
 		if (ret & OPT3001_CONFIGURATION_FH)
 			iio_push_event(iio,
-					IIO_UNMOD_EVENT_CODE(IIO_LIGHT, 0,
+					IIO_UNMOD_EVENT_CODE(chan_type, 0,
 							IIO_EV_TYPE_THRESH,
 							IIO_EV_DIR_RISING),
 					iio_get_time_ns(iio));
 		if (ret & OPT3001_CONFIGURATION_FL)
 			iio_push_event(iio,
-					IIO_UNMOD_EVENT_CODE(IIO_LIGHT, 0,
+					IIO_UNMOD_EVENT_CODE(chan_type, 0,
 							IIO_EV_TYPE_THRESH,
 							IIO_EV_DIR_FALLING),
 					iio_get_time_ns(iio));
@@ -728,18 +824,20 @@ static irqreturn_t opt3001_irq(int irq, void *_iio)
 		}
 		opt->result = ret;
 		opt->result_ready = true;
-		wake_up(&opt->result_ready_queue);
+		wake_result_ready_queue = true;
 	}
 
 out:
-	if (!opt->ok_to_ignore_lock)
+	if (!ok_to_ignore_lock)
 		mutex_unlock(&opt->lock);
+
+	if (wake_result_ready_queue)
+		wake_up(&opt->result_ready_queue);
 
 	return IRQ_HANDLED;
 }
 
-static int opt3001_probe(struct i2c_client *client,
-		const struct i2c_device_id *id)
+static int opt3001_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 
@@ -755,23 +853,25 @@ static int opt3001_probe(struct i2c_client *client,
 	opt = iio_priv(iio);
 	opt->client = client;
 	opt->dev = dev;
+	opt->chip_info = i2c_get_match_data(client);
 
 	mutex_init(&opt->lock);
 	init_waitqueue_head(&opt->result_ready_queue);
 	i2c_set_clientdata(client, iio);
 
-	ret = opt3001_read_id(opt);
-	if (ret)
-		return ret;
+	if (opt->chip_info->has_id) {
+		ret = opt3001_read_id(opt);
+		if (ret)
+			return ret;
+	}
 
 	ret = opt3001_configure(opt);
 	if (ret)
 		return ret;
 
 	iio->name = client->name;
-	iio->channels = opt3001_channels;
-	iio->num_channels = ARRAY_SIZE(opt3001_channels);
-	iio->dev.parent = dev;
+	iio->channels = *opt->chip_info->channels;
+	iio->num_channels = opt->chip_info->num_channels;
 	iio->modes = INDIO_DIRECT_MODE;
 	iio->info = &opt3001_info;
 
@@ -798,7 +898,7 @@ static int opt3001_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int opt3001_remove(struct i2c_client *client)
+static void opt3001_remove(struct i2c_client *client)
 {
 	struct iio_dev *iio = i2c_get_clientdata(client);
 	struct opt3001 *opt = iio_priv(iio);
@@ -812,7 +912,7 @@ static int opt3001_remove(struct i2c_client *client)
 	if (ret < 0) {
 		dev_err(opt->dev, "failed to read register %02x\n",
 				OPT3001_CONFIGURATION);
-		return ret;
+		return;
 	}
 
 	reg = ret;
@@ -823,20 +923,41 @@ static int opt3001_remove(struct i2c_client *client)
 	if (ret < 0) {
 		dev_err(opt->dev, "failed to write register %02x\n",
 				OPT3001_CONFIGURATION);
-		return ret;
 	}
-
-	return 0;
 }
 
+static const struct opt3001_chip_info opt3001_chip_information = {
+	.channels = &opt3001_channels,
+	.chan_type = IIO_LIGHT,
+	.num_channels = ARRAY_SIZE(opt3001_channels),
+	.scales = &opt3001_scales,
+	.factor_whole = 10,
+	.factor_integer = 1000,
+	.factor_decimal = 1000,
+	.has_id = true,
+};
+
+static const struct opt3001_chip_info opt3002_chip_information = {
+	.channels = &opt3002_channels,
+	.chan_type = IIO_INTENSITY,
+	.num_channels = ARRAY_SIZE(opt3002_channels),
+	.scales = &opt3002_scales,
+	.factor_whole = 12,
+	.factor_integer = 10,
+	.factor_decimal = 100000,
+	.has_id = false,
+};
+
 static const struct i2c_device_id opt3001_id[] = {
-	{ "opt3001", 0 },
+	{ .name = "opt3001", .driver_data = (kernel_ulong_t)&opt3001_chip_information },
+	{ .name = "opt3002", .driver_data = (kernel_ulong_t)&opt3002_chip_information },
 	{ } /* Terminating Entry */
 };
 MODULE_DEVICE_TABLE(i2c, opt3001_id);
 
 static const struct of_device_id opt3001_of_match[] = {
-	{ .compatible = "ti,opt3001" },
+	{ .compatible = "ti,opt3001", .data = &opt3001_chip_information },
+	{ .compatible = "ti,opt3002", .data = &opt3002_chip_information },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, opt3001_of_match);
@@ -848,7 +969,7 @@ static struct i2c_driver opt3001_driver = {
 
 	.driver = {
 		.name = "opt3001",
-		.of_match_table = of_match_ptr(opt3001_of_match),
+		.of_match_table = opt3001_of_match,
 	},
 };
 

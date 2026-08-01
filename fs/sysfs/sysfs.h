@@ -27,11 +27,12 @@ void sysfs_warn_dup(struct kernfs_node *parent, const char *name);
 /*
  * file.c
  */
-int sysfs_add_file(struct kernfs_node *parent,
-		   const struct attribute *attr, bool is_bin);
 int sysfs_add_file_mode_ns(struct kernfs_node *parent,
-			   const struct attribute *attr, bool is_bin,
-			   umode_t amode, const void *ns);
+		const struct attribute *attr, umode_t amode, kuid_t uid,
+		kgid_t gid, const struct ns_common *ns);
+int sysfs_add_bin_file_mode_ns(struct kernfs_node *parent,
+		const struct bin_attribute *battr, umode_t mode, size_t size,
+		kuid_t uid, kgid_t gid, const struct ns_common *ns);
 
 /*
  * symlink.c

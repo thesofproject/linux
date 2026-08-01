@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2017 Texas Instruments Incorporated - http://www.ti.com/
  *	Keerthy <j-keerthy@ti.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether expressed or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License version 2 for more details.
  *
  * Based on the LP873X driver
  */
@@ -38,13 +30,13 @@ static int lp87565_gpio_get(struct gpio_chip *chip, unsigned int offset)
 	return !!(val & BIT(offset));
 }
 
-static void lp87565_gpio_set(struct gpio_chip *chip, unsigned int offset,
-			     int value)
+static int lp87565_gpio_set(struct gpio_chip *chip, unsigned int offset,
+			    int value)
 {
 	struct lp87565_gpio *gpio = gpiochip_get_data(chip);
 
-	regmap_update_bits(gpio->map, LP87565_REG_GPIO_OUT,
-			   BIT(offset), value ? BIT(offset) : 0);
+	return regmap_update_bits(gpio->map, LP87565_REG_GPIO_OUT,
+				  BIT(offset), value ? BIT(offset) : 0);
 }
 
 static int lp87565_gpio_get_direction(struct gpio_chip *chip,
@@ -57,7 +49,10 @@ static int lp87565_gpio_get_direction(struct gpio_chip *chip,
 	if (ret < 0)
 		return ret;
 
-	return !(val & BIT(offset));
+	if (val & BIT(offset))
+		return GPIO_LINE_DIRECTION_OUT;
+
+	return GPIO_LINE_DIRECTION_IN;
 }
 
 static int lp87565_gpio_direction_input(struct gpio_chip *chip,
@@ -74,8 +69,11 @@ static int lp87565_gpio_direction_output(struct gpio_chip *chip,
 					 unsigned int offset, int value)
 {
 	struct lp87565_gpio *gpio = gpiochip_get_data(chip);
+	int ret;
 
-	lp87565_gpio_set(chip, offset, value);
+	ret = lp87565_gpio_set(chip, offset, value);
+	if (ret)
+		return ret;
 
 	return regmap_update_bits(gpio->map,
 				  LP87565_REG_GPIO_CONFIG,
@@ -120,14 +118,14 @@ static int lp87565_gpio_set_config(struct gpio_chip *gc, unsigned int offset,
 		return regmap_update_bits(gpio->map,
 					  LP87565_REG_GPIO_CONFIG,
 					  BIT(offset +
-					      __ffs(LP87565_GOIO1_OD)),
+					      __ffs(LP87565_GPIO1_OD)),
 					  BIT(offset +
-					      __ffs(LP87565_GOIO1_OD)));
+					      __ffs(LP87565_GPIO1_OD)));
 	case PIN_CONFIG_DRIVE_PUSH_PULL:
 		return regmap_update_bits(gpio->map,
 					  LP87565_REG_GPIO_CONFIG,
 					  BIT(offset +
-					      __ffs(LP87565_GOIO1_OD)), 0);
+					      __ffs(LP87565_GPIO1_OD)), 0);
 	default:
 		return -ENOTSUPP;
 	}
@@ -173,7 +171,7 @@ static int lp87565_gpio_probe(struct platform_device *pdev)
 }
 
 static const struct platform_device_id lp87565_gpio_id_table[] = {
-	{ "lp87565-q1-gpio", },
+	{ .name = "lp87565-q1-gpio" },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(platform, lp87565_gpio_id_table);

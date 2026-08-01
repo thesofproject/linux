@@ -180,11 +180,17 @@ static int send_dreg(struct vio_driver_state *vio)
 		struct vio_dring_register pkt;
 		char all[sizeof(struct vio_dring_register) +
 			 (sizeof(struct ldc_trans_cookie) *
-			  dr->ncookies)];
+			  VIO_MAX_RING_COOKIES)];
 	} u;
+	size_t bytes = sizeof(struct vio_dring_register) +
+		       (sizeof(struct ldc_trans_cookie) *
+			dr->ncookies);
 	int i;
 
-	memset(&u, 0, sizeof(u));
+	if (WARN_ON(bytes > sizeof(u)))
+		return -EINVAL;
+
+	memset(&u, 0, bytes);
 	init_tag(&u.pkt.tag, VIO_TYPE_CTRL, VIO_SUBTYPE_INFO, VIO_DRING_REG);
 	u.pkt.dring_ident = 0;
 	u.pkt.num_descr = dr->num_entries;
@@ -206,7 +212,7 @@ static int send_dreg(struct vio_driver_state *vio)
 		       (unsigned long long) u.pkt.cookies[i].cookie_size);
 	}
 
-	return send_ctrl(vio, &u.pkt.tag, sizeof(u));
+	return send_ctrl(vio, &u.pkt.tag, bytes);
 }
 
 static int send_rdx(struct vio_driver_state *vio)
@@ -422,7 +428,7 @@ static int process_dreg_info(struct vio_driver_state *vio,
 			     struct vio_dring_register *pkt)
 {
 	struct vio_dring_state *dr;
-	int i, len;
+	int i;
 
 	viodbg(HS, "GOT DRING_REG INFO ident[%llx] "
 	       "ndesc[%u] dsz[%u] opt[0x%x] ncookies[%u]\n",
@@ -476,9 +482,7 @@ static int process_dreg_info(struct vio_driver_state *vio,
 	       pkt->num_descr, pkt->descr_size, pkt->options,
 	       pkt->num_cookies);
 
-	len = (sizeof(*pkt) +
-	       (dr->ncookies * sizeof(struct ldc_trans_cookie)));
-	if (send_ctrl(vio, &pkt->tag, len) < 0)
+	if (send_ctrl(vio, &pkt->tag, struct_size(pkt, cookies, dr->ncookies)) < 0)
 		goto send_nack;
 
 	vio->dr_state |= VIO_DR_STATE_RXREG;
@@ -800,7 +804,7 @@ EXPORT_SYMBOL(vio_port_up);
 
 static void vio_port_timer(struct timer_list *t)
 {
-	struct vio_driver_state *vio = from_timer(vio, t, timer);
+	struct vio_driver_state *vio = timer_container_of(vio, t, timer);
 
 	vio_port_up(vio);
 }

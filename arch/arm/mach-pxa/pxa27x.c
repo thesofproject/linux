@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/arch/arm/mach-pxa/pxa27x.c
  *
@@ -6,11 +7,9 @@
  *  Copyright:	MontaVista Software Inc.
  *
  * Code specific to PXA27x aka Bulverde.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
+#include <linux/dmaengine.h>
+#include <linux/dma/pxa-dma.h>
 #include <linux/gpio.h>
 #include <linux/gpio-pxa.h>
 #include <linux/module.h>
@@ -23,18 +22,22 @@
 #include <linux/io.h>
 #include <linux/irq.h>
 #include <linux/platform_data/i2c-pxa.h>
+#include <linux/platform_data/mmp_dma.h>
+#include <linux/soc/pxa/cpu.h>
+#include <linux/soc/pxa/smemc.h>
 
 #include <asm/mach/map.h>
-#include <mach/hardware.h>
 #include <asm/irq.h>
 #include <asm/suspend.h>
-#include <mach/irqs.h>
+#include "irqs.h"
 #include "pxa27x.h"
-#include <mach/reset.h>
+#include "reset.h"
+#include <linux/platform_data/pxa2xx_udc.h>
 #include <linux/platform_data/usb-ohci-pxa27x.h>
+#include <linux/platform_data/asoc-pxa.h>
 #include "pm.h"
-#include <mach/dma.h>
-#include <mach/smemc.h>
+#include "addr-map.h"
+#include "smemc.h"
 
 #include "generic.h"
 #include "devices.h"
@@ -55,8 +58,15 @@ static unsigned long ac97_reset_config[] = {
 	GPIO95_AC97_nRESET,
 };
 
-void pxa27x_configure_ac97reset(int reset_gpio, bool to_gpio)
+void pxa27x_configure_ac97reset(struct gpio_desc *gpiod, bool to_gpio)
 {
+	int reset_gpio;
+
+	if (!gpiod)
+		return;
+
+	reset_gpio = desc_to_gpio(gpiod);
+
 	/*
 	 * This helper function is used to work around a bug in the pxa27x's
 	 * ac97 controller during a warm reset.  The configuration of the
@@ -85,18 +95,6 @@ EXPORT_SYMBOL_GPL(pxa27x_configure_ac97reset);
  */
 static unsigned int pwrmode = PWRMODE_SLEEP;
 
-int pxa27x_set_pwrmode(unsigned int mode)
-{
-	switch (mode) {
-	case PWRMODE_SLEEP:
-	case PWRMODE_DEEPSLEEP:
-		pwrmode = mode;
-		return 0;
-	}
-
-	return -EINVAL;
-}
-
 /*
  * List of global PXA peripheral registers to preserve.
  * More ones like CP and general purpose register values are preserved
@@ -109,7 +107,7 @@ enum {
 	SLEEP_SAVE_COUNT
 };
 
-void pxa27x_cpu_pm_save(unsigned long *sleep_save)
+static void pxa27x_cpu_pm_save(unsigned long *sleep_save)
 {
 	sleep_save[SLEEP_SAVE_MDREFR] = __raw_readl(MDREFR);
 	SAVE(PCFR);
@@ -117,7 +115,7 @@ void pxa27x_cpu_pm_save(unsigned long *sleep_save)
 	SAVE(PSTR);
 }
 
-void pxa27x_cpu_pm_restore(unsigned long *sleep_save)
+static void pxa27x_cpu_pm_restore(unsigned long *sleep_save)
 {
 	__raw_writel(sleep_save[SLEEP_SAVE_MDREFR], MDREFR);
 	RESTORE(PCFR);
@@ -127,14 +125,18 @@ void pxa27x_cpu_pm_restore(unsigned long *sleep_save)
 	RESTORE(PSTR);
 }
 
-void pxa27x_cpu_pm_enter(suspend_state_t state)
+static void pxa27x_cpu_pm_enter(suspend_state_t state)
 {
 	extern void pxa_cpu_standby(void);
 #ifndef CONFIG_IWMMXT
 	u64 acc0;
 
+#ifndef CONFIG_AS_IS_LLVM
 	asm volatile(".arch_extension xscale\n\t"
 		     "mra %Q0, %R0, acc0" : "=r" (acc0));
+#else
+	asm volatile("mrrc p0, 0, %Q0, %R0, c0" : "=r" (acc0));
+#endif
 #endif
 
 	/* ensure voltage-change sequencer not initiated, which hangs */
@@ -153,8 +155,12 @@ void pxa27x_cpu_pm_enter(suspend_state_t state)
 	case PM_SUSPEND_MEM:
 		cpu_suspend(pwrmode, pxa27x_finish_suspend);
 #ifndef CONFIG_IWMMXT
+#ifndef CONFIG_AS_IS_LLVM
 		asm volatile(".arch_extension xscale\n\t"
 			     "mar acc0, %Q0, %R0" : "=r" (acc0));
+#else
+		asm volatile("mcrr p0, 0, %Q0, %R0, c0" :: "r" (acc0));
+#endif
 #endif
 		break;
 	}
@@ -232,6 +238,7 @@ static int pxa27x_set_wake(struct irq_data *d, unsigned int on)
 void __init pxa27x_init_irq(void)
 {
 	pxa_init_irq(34, pxa27x_set_wake);
+	set_handle_irq(pxa27x_handle_irq);
 }
 
 static int __init
@@ -276,12 +283,8 @@ void __init pxa27x_set_i2c_power_info(struct i2c_pxa_platform_data *info)
 	pxa_register_device(&pxa27x_device_i2c_power, info);
 }
 
-static struct pxa_gpio_platform_data pxa27x_gpio_info __initdata = {
-	.irq_base	= PXA_GPIO_TO_IRQ(0),
-	.gpio_set_wake	= gpio_set_wake,
-};
-
 static struct platform_device *devices[] __initdata = {
+	&pxa27x_device_gpio,
 	&pxa27x_device_udc,
 	&pxa_device_pmu,
 	&pxa_device_i2s,
@@ -297,23 +300,59 @@ static struct platform_device *devices[] __initdata = {
 	&pxa27x_device_pwm1,
 };
 
+static const struct dma_slave_map pxa27x_slave_map[] = {
+	/* PXA25x, PXA27x and PXA3xx common entries */
+	{ "pxa2xx-ac97", "pcm_pcm_mic_mono", PDMA_FILTER_PARAM(LOWEST, 8) },
+	{ "pxa2xx-ac97", "pcm_pcm_aux_mono_in", PDMA_FILTER_PARAM(LOWEST, 9) },
+	{ "pxa2xx-ac97", "pcm_pcm_aux_mono_out",
+	  PDMA_FILTER_PARAM(LOWEST, 10) },
+	{ "pxa2xx-ac97", "pcm_pcm_stereo_in", PDMA_FILTER_PARAM(LOWEST, 11) },
+	{ "pxa2xx-ac97", "pcm_pcm_stereo_out", PDMA_FILTER_PARAM(LOWEST, 12) },
+	{ "pxa-ssp-dai.0", "rx", PDMA_FILTER_PARAM(LOWEST, 13) },
+	{ "pxa-ssp-dai.0", "tx", PDMA_FILTER_PARAM(LOWEST, 14) },
+	{ "pxa-ssp-dai.1", "rx", PDMA_FILTER_PARAM(LOWEST, 15) },
+	{ "pxa-ssp-dai.1", "tx", PDMA_FILTER_PARAM(LOWEST, 16) },
+	{ "pxa2xx-ir", "rx", PDMA_FILTER_PARAM(LOWEST, 17) },
+	{ "pxa2xx-ir", "tx", PDMA_FILTER_PARAM(LOWEST, 18) },
+	{ "pxa2xx-mci.0", "rx", PDMA_FILTER_PARAM(LOWEST, 21) },
+	{ "pxa2xx-mci.0", "tx", PDMA_FILTER_PARAM(LOWEST, 22) },
+	{ "pxa-ssp-dai.2", "rx", PDMA_FILTER_PARAM(LOWEST, 66) },
+	{ "pxa-ssp-dai.2", "tx", PDMA_FILTER_PARAM(LOWEST, 67) },
+
+	/* PXA27x specific map */
+	{ "pxa2xx-i2s", "rx", PDMA_FILTER_PARAM(LOWEST, 2) },
+	{ "pxa2xx-i2s", "tx", PDMA_FILTER_PARAM(LOWEST, 3) },
+	{ "pxa27x-camera.0", "CI_Y", PDMA_FILTER_PARAM(HIGHEST, 68) },
+	{ "pxa27x-camera.0", "CI_U", PDMA_FILTER_PARAM(HIGHEST, 69) },
+	{ "pxa27x-camera.0", "CI_V", PDMA_FILTER_PARAM(HIGHEST, 70) },
+};
+
+static struct mmp_dma_platdata pxa27x_dma_pdata = {
+	.dma_channels	= 32,
+	.nb_requestors	= 75,
+	.slave_map	= pxa27x_slave_map,
+	.slave_map_cnt	= ARRAY_SIZE(pxa27x_slave_map),
+};
+
 static int __init pxa27x_init(void)
 {
 	int ret = 0;
 
 	if (cpu_is_pxa27x()) {
 
-		reset_status = RCSR;
+		pxa_register_wdt(RCSR);
 
 		pxa27x_init_pm();
 
-		register_syscore_ops(&pxa_irq_syscore_ops);
-		register_syscore_ops(&pxa2xx_mfp_syscore_ops);
+		register_syscore(&pxa_irq_syscore);
+		register_syscore(&pxa2xx_mfp_syscore);
 
 		if (!of_have_populated_dt()) {
-			pxa_register_device(&pxa27x_device_gpio,
-					    &pxa27x_gpio_info);
-			pxa2xx_set_dmac_info(32, 75);
+			software_node_register(&pxa2xx_gpiochip_node);
+			pxa27x_device_gpio.dev.fwnode = software_node_fwnode(
+								&pxa2xx_gpiochip_node);
+
+			pxa2xx_set_dmac_info(&pxa27x_dma_pdata);
 			ret = platform_add_devices(devices,
 						   ARRAY_SIZE(devices));
 		}

@@ -51,7 +51,6 @@
 #include <scsi/scsi_tcq.h>
 #include <scsi/libfc.h>
 #include <scsi/libfcoe.h>
-#include <scsi/fc_encode.h>
 #include <scsi/scsi_transport.h>
 #include <scsi/scsi_transport_fc.h>
 #include <scsi/fc/fc_fip.h>
@@ -66,7 +65,7 @@
 #include "bnx2fc_constants.h"
 
 #define BNX2FC_NAME		"bnx2fc"
-#define BNX2FC_VERSION		"2.11.8"
+#define BNX2FC_VERSION		"2.12.13"
 
 #define PFX			"bnx2fc: "
 
@@ -75,8 +74,9 @@
 #define BNX2X_DOORBELL_PCI_BAR		2
 
 #define BNX2FC_MAX_BD_LEN		0xffff
-#define BNX2FC_BD_SPLIT_SZ		0x8000
-#define BNX2FC_MAX_BDS_PER_CMD		256
+#define BNX2FC_BD_SPLIT_SZ		0xffff
+#define BNX2FC_MAX_BDS_PER_CMD		255
+#define BNX2FC_FW_MAX_BDS_PER_CMD	255
 
 #define BNX2FC_SQ_WQES_MAX	256
 
@@ -136,8 +136,6 @@
 #define BNX2FC_WAIT_CNT			1200
 #define BNX2FC_FW_TIMEOUT		(3 * HZ)
 #define PORT_MAX			2
-
-#define CMD_SCSI_STATUS(Cmnd)		((Cmnd)->SCp.Status)
 
 /* FC FCP Status */
 #define	FC_GOOD				0
@@ -360,18 +358,12 @@ struct bnx2fc_rport {
 	dma_addr_t lcq_dma;
 	u32 lcq_mem_size;
 
-	void *ofld_req[4];
-	dma_addr_t ofld_req_dma[4];
-	void *enbl_req;
-	dma_addr_t enbl_req_dma;
-
 	spinlock_t tgt_lock;
 	spinlock_t cq_lock;
 	atomic_t num_active_ios;
 	u32 flush_in_prog;
 	unsigned long timestamp;
 	unsigned long retry_delay_timestamp;
-	struct list_head free_task_list;
 	struct bnx2fc_cmd *pending_queue[BNX2FC_SQ_WQES_MAX+1];
 	struct list_head active_cmd_queue;
 	struct list_head els_queue;
@@ -386,6 +378,7 @@ struct bnx2fc_rport {
 };
 
 struct bnx2fc_mp_req {
+	u64 tm_lun;
 	u8 tm_flags;
 
 	u32 req_len;
@@ -433,8 +426,10 @@ struct bnx2fc_cmd {
 	void (*cb_func)(struct bnx2fc_els_cb_arg *cb_arg);
 	struct bnx2fc_els_cb_arg *cb_arg;
 	struct delayed_work timeout_work; /* timer for ULP timeouts */
-	struct completion tm_done;
-	int wait_for_comp;
+	struct completion abts_done;
+	struct completion cleanup_done;
+	int wait_for_abts_comp;
+	int wait_for_cleanup_comp;
 	u16 xid;
 	struct fcoe_err_report_entry err_entry;
 	struct fcoe_task_ctx_entry *task;
@@ -455,6 +450,7 @@ struct bnx2fc_cmd {
 #define BNX2FC_FLAG_ELS_TIMEOUT		0xb
 #define BNX2FC_FLAG_CMD_LOST		0xc
 #define BNX2FC_FLAG_SRR_SENT		0xd
+#define BNX2FC_FLAG_ISSUE_CLEANUP_REQ	0xe
 	u8 rec_retry;
 	u8 srr_retry;
 	u32 srr_offset;
@@ -478,7 +474,10 @@ struct io_bdt {
 struct bnx2fc_work {
 	struct list_head list;
 	struct bnx2fc_rport *tgt;
+	struct fcoe_task_ctx_entry *task;
+	unsigned char rq_data[BNX2FC_RQ_BUF_SZ];
 	u16 wqe;
+	u8 num_rq;
 };
 struct bnx2fc_unsol_els {
 	struct fc_lport *lport;
@@ -487,12 +486,20 @@ struct bnx2fc_unsol_els {
 	struct work_struct unsol_els_work;
 };
 
+struct bnx2fc_priv {
+	struct bnx2fc_cmd *io_req;
+};
 
+static inline struct bnx2fc_priv *bnx2fc_priv(struct scsi_cmnd *cmd)
+{
+	return scsi_cmd_priv(cmd);
+}
 
 struct bnx2fc_cmd *bnx2fc_cmd_alloc(struct bnx2fc_rport *tgt);
 struct bnx2fc_cmd *bnx2fc_elstm_alloc(struct bnx2fc_rport *tgt, int type);
 void bnx2fc_cmd_release(struct kref *ref);
-int bnx2fc_queuecommand(struct Scsi_Host *host, struct scsi_cmnd *sc_cmd);
+enum scsi_qc_status bnx2fc_queuecommand(struct Scsi_Host *host,
+					struct scsi_cmnd *sc_cmd);
 int bnx2fc_send_fw_fcoe_init_msg(struct bnx2fc_hba *hba);
 int bnx2fc_send_fw_fcoe_destroy_msg(struct bnx2fc_hba *hba);
 int bnx2fc_send_session_ofld_req(struct fcoe_port *port,
@@ -546,7 +553,7 @@ void bnx2fc_rport_event_handler(struct fc_lport *lport,
 				enum fc_rport_event event);
 void bnx2fc_process_scsi_cmd_compl(struct bnx2fc_cmd *io_req,
 				   struct fcoe_task_ctx_entry *task,
-				   u8 num_rq);
+				   u8 num_rq, unsigned char *rq_data);
 void bnx2fc_process_cleanup_compl(struct bnx2fc_cmd *io_req,
 			       struct fcoe_task_ctx_entry *task,
 			       u8 num_rq);
@@ -555,7 +562,7 @@ void bnx2fc_process_abts_compl(struct bnx2fc_cmd *io_req,
 			       u8 num_rq);
 void bnx2fc_process_tm_compl(struct bnx2fc_cmd *io_req,
 			     struct fcoe_task_ctx_entry *task,
-			     u8 num_rq);
+			     u8 num_rq, unsigned char *rq_data);
 void bnx2fc_process_els_compl(struct bnx2fc_cmd *els_req,
 			      struct fcoe_task_ctx_entry *task,
 			      u8 num_rq);
@@ -573,7 +580,9 @@ struct fc_seq *bnx2fc_elsct_send(struct fc_lport *lport, u32 did,
 				      void *arg, u32 timeout);
 void bnx2fc_arm_cq(struct bnx2fc_rport *tgt);
 int bnx2fc_process_new_cqes(struct bnx2fc_rport *tgt);
-void bnx2fc_process_cq_compl(struct bnx2fc_rport *tgt, u16 wqe);
+void bnx2fc_process_cq_compl(struct bnx2fc_rport *tgt, u16 wqe,
+			     unsigned char *rq_data, u8 num_rq,
+			     struct fcoe_task_ctx_entry *task);
 struct bnx2fc_rport *bnx2fc_tgt_lookup(struct fcoe_port *port,
 					     u32 port_id);
 void bnx2fc_process_l2_frame_compl(struct bnx2fc_rport *tgt,

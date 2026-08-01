@@ -3,13 +3,15 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/mm_types.h>
+#include <linux/pgtable.h>
 
 #include <asm/cputype.h>
 #include <asm/idmap.h>
+#include <asm/hwcap.h>
 #include <asm/pgalloc.h>
-#include <asm/pgtable.h>
 #include <asm/sections.h>
 #include <asm/system_info.h>
+#include <asm/uaccess.h>
 
 /*
  * Note: accesses outside of the kernel image and the identity map area
@@ -67,7 +69,8 @@ static void idmap_add_pmd(pud_t *pud, unsigned long addr, unsigned long end,
 static void idmap_add_pud(pgd_t *pgd, unsigned long addr, unsigned long end,
 	unsigned long prot)
 {
-	pud_t *pud = pud_offset(pgd, addr);
+	p4d_t *p4d = p4d_offset(pgd, addr);
+	pud_t *pud = pud_offset(p4d, addr);
 	unsigned long next;
 
 	do {
@@ -82,8 +85,15 @@ static void identity_mapping_add(pgd_t *pgd, const char *text_start,
 	unsigned long addr, end;
 	unsigned long next;
 
+#ifdef CONFIG_XIP_KERNEL
+	addr = (phys_addr_t)(text_start) - XIP_VIRT_ADDR(CONFIG_XIP_PHYS_ADDR)
+		+ CONFIG_XIP_PHYS_ADDR;
+	end = (phys_addr_t)(text_end) - XIP_VIRT_ADDR(CONFIG_XIP_PHYS_ADDR)
+		+ CONFIG_XIP_PHYS_ADDR;
+#else
 	addr = virt_to_idmap(text_start);
 	end = virt_to_idmap(text_end);
+#endif
 	pr_info("Setting up static identity map for 0x%lx - 0x%lx\n", addr, end);
 
 	prot |= PMD_TYPE_SECT | PMD_SECT_AP_WRITE | PMD_SECT_AF;
@@ -110,7 +120,8 @@ static int __init init_static_idmap(void)
 			     __idmap_text_end, 0);
 
 	/* Flush L1 for the hardware to see this page table content */
-	flush_cache_louis();
+	if (!(elf_hwcap & HWCAP_LPAE))
+		flush_cache_louis();
 
 	return 0;
 }
@@ -123,6 +134,17 @@ early_initcall(init_static_idmap);
  */
 void setup_mm_for_reboot(void)
 {
+	/*
+	 * With CONFIG_CPU_TTBR0_PAN enabled, TTBCR.EPD0 is set whenever
+	 * user-space access is disabled in order to block TTBR0 page-table
+	 * walks.  The identity mapping lives at low (user-space) virtual
+	 * addresses and can only be reached via TTBR0, so we must re-enable
+	 * those walks before switching page tables.  On non-PAN kernels this
+	 * is a no-op.
+	 */
+	if (IS_ENABLED(CONFIG_CPU_TTBR0_PAN))
+		uaccess_save_and_enable();
+
 	/* Switch to the identity mapping. */
 	cpu_switch_mm(idmap_pgd, &init_mm);
 	local_flush_bp_all();

@@ -53,6 +53,7 @@
 MODULE_DESCRIPTION("Driver for In-System Design, Inc. ISD200 ASIC");
 MODULE_AUTHOR("Björn Stenberg <bjorn@haxx.se>");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS("USB_STORAGE");
 
 static int isd200_Initialization(struct us_data *us);
 
@@ -66,7 +67,7 @@ static int isd200_Initialization(struct us_data *us);
 { USB_DEVICE_VER(id_vendor, id_product, bcdDeviceMin, bcdDeviceMax), \
   .driver_info = (flags) }
 
-static struct usb_device_id isd200_usb_ids[] = {
+static const struct usb_device_id isd200_usb_ids[] = {
 #	include "unusual_isd200.h"
 	{ }		/* Terminating entry */
 };
@@ -88,7 +89,7 @@ MODULE_DEVICE_TABLE(usb, isd200_usb_ids);
 	.initFunction = init_function,	\
 }
 
-static struct us_unusual_dev isd200_unusual_dev_list[] = {
+static const struct us_unusual_dev isd200_unusual_dev_list[] = {
 #	include "unusual_isd200.h"
 	{ }		/* Terminating entry */
 };
@@ -325,7 +326,7 @@ struct isd200_info {
 
 	/* maximum number of LUNs supported */
 	unsigned char MaxLUNs;
-	unsigned char cmnd[BLK_MAX_CDB];
+	unsigned char cmnd[MAX_COMMAND_SIZE];
 	struct scsi_cmnd srb;
 	struct scatterlist sg;
 };
@@ -484,7 +485,7 @@ static int isd200_action( struct us_data *us, int action,
 	int status;
 
 	memset(&ata, 0, sizeof(ata));
-	srb->cmnd = info->cmnd;
+	memcpy(srb->cmnd, info->cmnd, MAX_COMMAND_SIZE);
 	srb->device = &srb_dev;
 
 	ata.generic.SignatureByte0 = info->ConfigData.ATAMajorCommand;
@@ -1104,7 +1105,7 @@ static void isd200_dump_driveid(struct us_data *us, u16 *id)
 static int isd200_get_inquiry_data( struct us_data *us )
 {
 	struct isd200_info *info = (struct isd200_info *)us->extra;
-	int retStatus = ISD200_GOOD;
+	int retStatus;
 	u16 *id = info->id;
 
 	usb_stor_dbg(us, "Entering isd200_get_inquiry_data\n");
@@ -1136,6 +1137,13 @@ static int isd200_get_inquiry_data( struct us_data *us )
 				isd200_fix_driveid(id);
 				isd200_dump_driveid(us, id);
 
+				/* Prevent division by 0 in isd200_scsi_to_ata() */
+				if (id[ATA_ID_HEADS] == 0 || id[ATA_ID_SECTORS] == 0) {
+					usb_stor_dbg(us, "   Invalid ATA Identify data\n");
+					retStatus = ISD200_ERROR;
+					goto Done;
+				}
+
 				memset(&info->InquiryData, 0, sizeof(info->InquiryData));
 
 				/* Standard IDE interface only supports disks */
@@ -1153,7 +1161,7 @@ static int isd200_get_inquiry_data( struct us_data *us )
 				/* Fill in vendor identification fields */
 				src = (__be16 *)&id[ATA_ID_PROD];
 				dest = (__u16*)info->InquiryData.VendorId;
-				for (i=0;i<4;i++)
+				for (i = 0; i < 4; i++)
 					dest[i] = be16_to_cpu(src[i]);
 
 				src = (__be16 *)&id[ATA_ID_PROD + 8/2];
@@ -1201,6 +1209,7 @@ static int isd200_get_inquiry_data( struct us_data *us )
 		}
 	}
 
+ Done:
 	usb_stor_dbg(us, "Leaving isd200_get_inquiry_data %08X\n", retStatus);
 
 	return(retStatus);
@@ -1382,7 +1391,7 @@ static int isd200_scsi_to_ata(struct scsi_cmnd *srb, struct us_data *us,
 				ATA_CMD_MEDIA_LOCK : ATA_CMD_MEDIA_UNLOCK;
 			isd200_srb_set_bufflen(srb, 0);
 		} else {
-			usb_stor_dbg(us, "   Not removeable media, just report okay\n");
+			usb_stor_dbg(us, "   Not removable media, just report okay\n");
 			srb->result = SAM_STAT_GOOD;
 			sendToTransport = 0;
 		}
@@ -1448,15 +1457,15 @@ static void isd200_free_info_ptrs(void *info_)
  * Allocates (if necessary) and initializes the driver structure.
  *
  * RETURNS:
- *    ISD status code
+ *    error status code
  */
 static int isd200_init_info(struct us_data *us)
 {
 	struct isd200_info *info;
 
-	info = kzalloc(sizeof(struct isd200_info), GFP_KERNEL);
+	info = kzalloc_obj(struct isd200_info);
 	if (!info)
-		return ISD200_ERROR;
+		return -ENOMEM;
 
 	info->id = kzalloc(ATA_ID_WORDS * 2, GFP_KERNEL);
 	info->RegsBuf = kmalloc(sizeof(info->ATARegs), GFP_KERNEL);
@@ -1465,13 +1474,13 @@ static int isd200_init_info(struct us_data *us)
 	if (!info->id || !info->RegsBuf || !info->srb.sense_buffer) {
 		isd200_free_info_ptrs(info);
 		kfree(info);
-		return ISD200_ERROR;
+		return -ENOMEM;
 	}
 
 	us->extra = info;
 	us->extra_destructor = isd200_free_info_ptrs;
 
-	return ISD200_GOOD;
+	return 0;
 }
 
 /**************************************************************************
@@ -1480,22 +1489,27 @@ static int isd200_init_info(struct us_data *us)
 
 static int isd200_Initialization(struct us_data *us)
 {
+	int rc = 0;
+
 	usb_stor_dbg(us, "ISD200 Initialization...\n");
 
 	/* Initialize ISD200 info struct */
 
-	if (isd200_init_info(us) == ISD200_ERROR) {
+	if (isd200_init_info(us) < 0) {
 		usb_stor_dbg(us, "ERROR Initializing ISD200 Info struct\n");
+		rc = -ENOMEM;
 	} else {
 		/* Get device specific data */
 
-		if (isd200_get_inquiry_data(us) != ISD200_GOOD)
+		if (isd200_get_inquiry_data(us) != ISD200_GOOD) {
 			usb_stor_dbg(us, "ISD200 Initialization Failure\n");
-		else
+			rc = -EINVAL;
+		} else {
 			usb_stor_dbg(us, "ISD200 Initialization complete\n");
+		}
 	}
 
-	return 0;
+	return rc;
 }
 
 
@@ -1511,7 +1525,7 @@ static int isd200_Initialization(struct us_data *us)
 
 static void isd200_ata_command(struct scsi_cmnd *srb, struct us_data *us)
 {
-	int sendToTransport = 1, orig_bufflen;
+	int sendToTransport, orig_bufflen;
 	union ata_cdb ataCdb;
 
 	/* Make sure driver was initialized */

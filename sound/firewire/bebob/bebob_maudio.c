@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * bebob_maudio.c - a part of driver for BeBoB based devices
  *
  * Copyright (c) 2013-2014 Takashi Sakamoto
- *
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 #include "./bebob.h"
@@ -96,17 +95,13 @@ int snd_bebob_maudio_load_firmware(struct fw_unit *unit)
 	struct fw_device *device = fw_parent_device(unit);
 	int err, rcode;
 	u64 date;
-	__le32 cues[3] = {
-		cpu_to_le32(MAUDIO_BOOTLOADER_CUE1),
-		cpu_to_le32(MAUDIO_BOOTLOADER_CUE2),
-		cpu_to_le32(MAUDIO_BOOTLOADER_CUE3)
-	};
+	__le32 *cues;
 
 	/* check date of software used to build */
 	err = snd_bebob_read_block(unit, INFO_OFFSET_SW_DATE,
 				   &date, sizeof(u64));
 	if (err < 0)
-		goto end;
+		return err;
 	/*
 	 * firmware version 5058 or later has date later than "20070401", but
 	 * 'date' is not null-terminated.
@@ -114,20 +109,28 @@ int snd_bebob_maudio_load_firmware(struct fw_unit *unit)
 	if (date < 0x3230303730343031LL) {
 		dev_err(&unit->device,
 			"Use firmware version 5058 or later\n");
-		err = -ENOSYS;
-		goto end;
+		return -ENXIO;
 	}
+
+	cues = kmalloc_array(3, sizeof(*cues), GFP_KERNEL);
+	if (!cues)
+		return -ENOMEM;
+
+	cues[0] = cpu_to_le32(MAUDIO_BOOTLOADER_CUE1);
+	cues[1] = cpu_to_le32(MAUDIO_BOOTLOADER_CUE2);
+	cues[2] = cpu_to_le32(MAUDIO_BOOTLOADER_CUE3);
 
 	rcode = fw_run_transaction(device->card, TCODE_WRITE_BLOCK_REQUEST,
 				   device->node_id, device->generation,
 				   device->max_speed, BEBOB_ADDR_REG_REQ,
-				   cues, sizeof(cues));
+				   cues, 3 * sizeof(*cues));
+	kfree(cues);
 	if (rcode != RCODE_COMPLETE) {
 		dev_err(&unit->device,
 			"Failed to send a cue to load firmware\n");
 		err = -EIO;
 	}
-end:
+
 	return err;
 }
 
@@ -257,11 +260,12 @@ snd_bebob_maudio_special_discover(struct snd_bebob *bebob, bool is1814)
 	struct special_params *params;
 	int err;
 
-	params = kzalloc(sizeof(struct special_params), GFP_KERNEL);
-	if (params == NULL)
+	params = devm_kzalloc(&bebob->card->card_dev,
+			      sizeof(struct special_params), GFP_KERNEL);
+	if (!params)
 		return -ENOMEM;
 
-	mutex_lock(&bebob->mutex);
+	guard(mutex)(&bebob->mutex);
 
 	bebob->maudio_special_quirk = (void *)params;
 	params->is1814 = is1814;
@@ -273,12 +277,12 @@ snd_bebob_maudio_special_discover(struct snd_bebob *bebob, bool is1814)
 	if (err < 0) {
 		dev_err(&bebob->unit->device,
 			"fail to initialize clock params: %d\n", err);
-		goto end;
+		return err;
 	}
 
 	err = add_special_controls(bebob);
 	if (err < 0)
-		goto end;
+		return err;
 
 	special_stream_formation_set(bebob);
 
@@ -289,12 +293,6 @@ snd_bebob_maudio_special_discover(struct snd_bebob *bebob, bool is1814)
 		bebob->midi_input_ports = 2;
 		bebob->midi_output_ports = 2;
 	}
-end:
-	if (err < 0) {
-		kfree(params);
-		bebob->maudio_special_quirk = NULL;
-	}
-	mutex_unlock(&bebob->mutex);
 	return err;
 }
 
@@ -383,14 +381,12 @@ static int special_clk_ctl_put(struct snd_kcontrol *kctl,
 	if (id >= ARRAY_SIZE(special_clk_types))
 		return -EINVAL;
 
-	mutex_lock(&bebob->mutex);
+	guard(mutex)(&bebob->mutex);
 
 	err = avc_maudio_set_special_clk(bebob, id,
 					 params->dig_in_fmt,
 					 params->dig_out_fmt,
 					 params->clk_lock);
-	mutex_unlock(&bebob->mutex);
-
 	if (err >= 0)
 		err = 1;
 
@@ -456,14 +452,14 @@ static int special_dig_in_iface_ctl_get(struct snd_kcontrol *kctl,
 	unsigned int dig_in_iface;
 	int err, val;
 
-	mutex_lock(&bebob->mutex);
+	guard(mutex)(&bebob->mutex);
 
 	err = avc_audio_get_selector(bebob->unit, 0x00, 0x04,
 				     &dig_in_iface);
 	if (err < 0) {
 		dev_err(&bebob->unit->device,
 			"fail to get digital input interface: %d\n", err);
-		goto end;
+		return err;
 	}
 
 	/* encoded id for user value */
@@ -474,9 +470,7 @@ static int special_dig_in_iface_ctl_get(struct snd_kcontrol *kctl,
 		val = 2;
 
 	uval->value.enumerated.item[0] = val;
-end:
-	mutex_unlock(&bebob->mutex);
-	return err;
+	return 0;
 }
 static int special_dig_in_iface_ctl_set(struct snd_kcontrol *kctl,
 					struct snd_ctl_elem_value *uval)
@@ -494,7 +488,7 @@ static int special_dig_in_iface_ctl_set(struct snd_kcontrol *kctl,
 	dig_in_fmt = (id >> 1) & 0x01;
 	dig_in_iface = id & 0x01;
 
-	mutex_lock(&bebob->mutex);
+	guard(mutex)(&bebob->mutex);
 
 	err = avc_maudio_set_special_clk(bebob,
 					 params->clk_src,
@@ -502,24 +496,19 @@ static int special_dig_in_iface_ctl_set(struct snd_kcontrol *kctl,
 					 params->dig_out_fmt,
 					 params->clk_lock);
 	if (err < 0)
-		goto end;
+		return err;
 
 	/* For ADAT, optical interface is only available. */
-	if (params->dig_in_fmt > 0) {
-		err = 1;
-		goto end;
-	}
+	if (params->dig_in_fmt > 0)
+		return 1;
 
 	/* For S/PDIF, optical/coaxial interfaces are selectable. */
 	err = avc_audio_set_selector(bebob->unit, 0x00, 0x04, dig_in_iface);
 	if (err < 0)
 		dev_err(&bebob->unit->device,
 			"fail to set digital input interface: %d\n", err);
-	err = 1;
-end:
 	special_stream_formation_set(bebob);
-	mutex_unlock(&bebob->mutex);
-	return err;
+	return 1;
 }
 static const struct snd_kcontrol_new special_dig_in_iface_ctl = {
 	.name	= "Digital Input Interface",
@@ -546,9 +535,9 @@ static int special_dig_out_iface_ctl_get(struct snd_kcontrol *kctl,
 {
 	struct snd_bebob *bebob = snd_kcontrol_chip(kctl);
 	struct special_params *params = bebob->maudio_special_quirk;
-	mutex_lock(&bebob->mutex);
+
+	guard(mutex)(&bebob->mutex);
 	uval->value.enumerated.item[0] = params->dig_out_fmt;
-	mutex_unlock(&bebob->mutex);
 	return 0;
 }
 static int special_dig_out_iface_ctl_set(struct snd_kcontrol *kctl,
@@ -563,7 +552,7 @@ static int special_dig_out_iface_ctl_set(struct snd_kcontrol *kctl,
 	if (id >= ARRAY_SIZE(special_dig_out_iface_labels))
 		return -EINVAL;
 
-	mutex_lock(&bebob->mutex);
+	guard(mutex)(&bebob->mutex);
 
 	err = avc_maudio_set_special_clk(bebob,
 					 params->clk_src,
@@ -574,7 +563,6 @@ static int special_dig_out_iface_ctl_set(struct snd_kcontrol *kctl,
 		err = 1;
 	}
 
-	mutex_unlock(&bebob->mutex);
 	return err;
 }
 static const struct snd_kcontrol_new special_dig_out_iface_ctl = {

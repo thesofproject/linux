@@ -1,14 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *  include/linux/eventpoll.h ( Efficient event polling implementation )
  *  Copyright (C) 2001,...,2006	 Davide Libenzi
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
  *  Davide Libenzi <davidel@xmailserver.org>
- *
  */
 #ifndef _LINUX_EVENTPOLL_H
 #define _LINUX_EVENTPOLL_H
@@ -23,20 +18,16 @@ struct file;
 
 #ifdef CONFIG_EPOLL
 
-#ifdef CONFIG_CHECKPOINT_RESTORE
+#ifdef CONFIG_KCMP
 struct file *get_epoll_tfile_raw_ptr(struct file *file, int tfd, unsigned long toff);
 #endif
 
-/* Used to initialize the epoll bits inside the "struct file" */
-static inline void eventpoll_init_file(struct file *file)
-{
-	INIT_LIST_HEAD(&file->f_ep_links);
-	INIT_LIST_HEAD(&file->f_tfile_llink);
-}
-
-
 /* Used to release the epoll bits inside the "struct file" */
 void eventpoll_release_file(struct file *file);
+
+/* Copy ready events to userspace */
+int epoll_sendevents(struct file *file, struct epoll_event __user *events,
+		     int maxevents);
 
 /*
  * This is called from inside fs/file_table.c:__fput() to unlink files
@@ -48,14 +39,18 @@ static inline void eventpoll_release(struct file *file)
 {
 
 	/*
-	 * Fast check to avoid the get/release of the semaphore. Since
-	 * we're doing this outside the semaphore lock, it might return
-	 * false negatives, but we don't care. It'll help in 99.99% of cases
-	 * to avoid the semaphore lock. False positives simply cannot happen
-	 * because the file in on the way to be removed and nobody ( but
-	 * eventpoll ) has still a reference to this file.
+	 * Fast check to skip the slow path in the common case where the
+	 * file was never attached to an epoll. Safe without file->f_lock
+	 * because every f_ep writer excludes a concurrent __fput() on
+	 * @file:
+	 *   - ep_insert() requires the file alive (refcount > 0);
+	 *   - ep_remove() holds @file pinned via epi_fget() across the
+	 *     write;
+	 *   - eventpoll_release_file() runs from __fput() itself.
+	 * We are in __fput() here, so none of those can race us: a NULL
+	 * observation truly means no epoll path has work left on @file.
 	 */
-	if (likely(list_empty(&file->f_ep_links)))
+	if (likely(!READ_ONCE(file->f_ep)))
 		return;
 
 	/*
@@ -66,11 +61,48 @@ static inline void eventpoll_release(struct file *file)
 	eventpoll_release_file(file);
 }
 
+struct epoll_key {
+	struct file *file;
+	int fd;
+} __packed;
+
+int do_epoll_ctl_file(struct file *f, int op, struct epoll_key *tf,
+		      struct epoll_event *epds, bool nonblock);
+int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *epds,
+		 bool nonblock);
+bool is_file_epoll(struct file *f);
+
+/* Tells if the epoll_ctl(2) operation needs an event copy from userspace */
+static inline int ep_op_has_event(int op)
+{
+	return op != EPOLL_CTL_DEL;
+}
+
 #else
 
-static inline void eventpoll_init_file(struct file *file) {}
 static inline void eventpoll_release(struct file *file) {}
 
+#endif
+
+#if defined(CONFIG_ARM) && defined(CONFIG_OABI_COMPAT)
+/* ARM OABI has an incompatible struct layout and needs a special handler */
+extern struct epoll_event __user *
+epoll_put_uevent(__poll_t revents, __u64 data,
+		 struct epoll_event __user *uevent);
+#else
+static inline struct epoll_event __user *
+epoll_put_uevent(__poll_t revents, __u64 data,
+		 struct epoll_event __user *uevent)
+{
+	scoped_user_write_access_size(uevent, sizeof(*uevent), efault) {
+		unsafe_put_user(revents, &uevent->events, efault);
+		unsafe_put_user(data, &uevent->data, efault);
+	}
+	return uevent+1;
+
+efault:
+	return NULL;
+}
 #endif
 
 #endif /* #ifndef _LINUX_EVENTPOLL_H */

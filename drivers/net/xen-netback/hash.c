@@ -3,7 +3,7 @@
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License version 2
- * as published by the Free Softare Foundation; or, when distributed
+ * as published by the Free Software Foundation; or, when distributed
  * separately from the Linux kernel or incorporated into other
  * software packages, subject to the following license:
  *
@@ -39,7 +39,7 @@ static void xenvif_add_hash(struct xenvif *vif, const u8 *tag,
 	unsigned long flags;
 	bool found;
 
-	new = kmalloc(sizeof(*entry), GFP_ATOMIC);
+	new = kmalloc_obj(*entry, GFP_ATOMIC);
 	if (!new)
 		return;
 
@@ -51,7 +51,8 @@ static void xenvif_add_hash(struct xenvif *vif, const u8 *tag,
 
 	found = false;
 	oldest = NULL;
-	list_for_each_entry_rcu(entry, &vif->hash.cache.list, link) {
+	list_for_each_entry_rcu(entry, &vif->hash.cache.list, link,
+				lockdep_is_held(&vif->hash.cache.lock)) {
 		/* Make sure we don't add duplicate entries */
 		if (entry->len == len &&
 		    memcmp(entry->tag, tag, len) == 0)
@@ -94,7 +95,7 @@ static u32 xenvif_new_hash(struct xenvif *vif, const u8 *data,
 
 static void xenvif_flush_hash(struct xenvif *vif)
 {
-	struct xenvif_hash_cache_entry *entry;
+	struct xenvif_hash_cache_entry *entry, *n;
 	unsigned long flags;
 
 	if (xenvif_hash_cache_size == 0)
@@ -102,7 +103,7 @@ static void xenvif_flush_hash(struct xenvif *vif)
 
 	spin_lock_irqsave(&vif->hash.cache.lock, flags);
 
-	list_for_each_entry_rcu(entry, &vif->hash.cache.list, link) {
+	list_for_each_entry_safe(entry, n, &vif->hash.cache.list, link) {
 		list_del_rcu(&entry->link);
 		vif->hash.cache.count--;
 		kfree_rcu(entry, rcu);
@@ -324,7 +325,8 @@ u32 xenvif_set_hash_mapping_size(struct xenvif *vif, u32 size)
 		return XEN_NETIF_CTRL_STATUS_INVALID_PARAMETER;
 
 	vif->hash.size = size;
-	memset(vif->hash.mapping, 0, sizeof(u32) * size);
+	memset(vif->hash.mapping[vif->hash.mapping_sel], 0,
+	       sizeof(u32) * size);
 
 	return XEN_NETIF_CTRL_STATUS_SUCCESS;
 }
@@ -332,30 +334,48 @@ u32 xenvif_set_hash_mapping_size(struct xenvif *vif, u32 size)
 u32 xenvif_set_hash_mapping(struct xenvif *vif, u32 gref, u32 len,
 			    u32 off)
 {
-	u32 *mapping = &vif->hash.mapping[off];
-	struct gnttab_copy copy_op = {
+	u32 *mapping = vif->hash.mapping[!vif->hash.mapping_sel];
+	unsigned int nr = 1;
+	struct gnttab_copy copy_op[2] = {{
 		.source.u.ref = gref,
 		.source.domid = vif->domid,
-		.dest.u.gmfn = virt_to_gfn(mapping),
 		.dest.domid = DOMID_SELF,
-		.dest.offset = xen_offset_in_page(mapping),
-		.len = len * sizeof(u32),
+		.len = len * sizeof(*mapping),
 		.flags = GNTCOPY_source_gref
-	};
+	}};
 
-	if ((off + len > vif->hash.size) || copy_op.len > XEN_PAGE_SIZE)
+	if ((off + len < off) || (off + len > vif->hash.size) ||
+	    len > XEN_PAGE_SIZE / sizeof(*mapping))
 		return XEN_NETIF_CTRL_STATUS_INVALID_PARAMETER;
+
+	copy_op[0].dest.u.gmfn = virt_to_gfn(mapping + off);
+	copy_op[0].dest.offset = xen_offset_in_page(mapping + off);
+	if (copy_op[0].dest.offset + copy_op[0].len > XEN_PAGE_SIZE) {
+		copy_op[1] = copy_op[0];
+		copy_op[1].source.offset = XEN_PAGE_SIZE - copy_op[0].dest.offset;
+		copy_op[1].dest.u.gmfn = virt_to_gfn(mapping + off + len);
+		copy_op[1].dest.offset = 0;
+		copy_op[1].len = copy_op[0].len - copy_op[1].source.offset;
+		copy_op[0].len = copy_op[1].source.offset;
+		nr = 2;
+	}
+
+	memcpy(mapping, vif->hash.mapping[vif->hash.mapping_sel],
+	       vif->hash.size * sizeof(*mapping));
+
+	if (copy_op[0].len != 0) {
+		gnttab_batch_copy(copy_op, nr);
+
+		if (copy_op[0].status != GNTST_okay ||
+		    copy_op[nr - 1].status != GNTST_okay)
+			return XEN_NETIF_CTRL_STATUS_INVALID_PARAMETER;
+	}
 
 	while (len-- != 0)
 		if (mapping[off++] >= vif->num_queues)
 			return XEN_NETIF_CTRL_STATUS_INVALID_PARAMETER;
 
-	if (copy_op.len != 0) {
-		gnttab_batch_copy(&copy_op, 1);
-
-		if (copy_op.status != GNTST_okay)
-			return XEN_NETIF_CTRL_STATUS_INVALID_PARAMETER;
-	}
+	vif->hash.mapping_sel = !vif->hash.mapping_sel;
 
 	return XEN_NETIF_CTRL_STATUS_SUCCESS;
 }
@@ -372,7 +392,7 @@ void xenvif_dump_hash_info(struct xenvif *vif, struct seq_file *m)
 
 	case XEN_NETIF_CTRL_HASH_ALGORITHM_NONE:
 		seq_puts(m, "Hash Algorithm: NONE\n");
-		/* FALLTHRU */
+		fallthrough;
 	default:
 		return;
 	}
@@ -408,6 +428,8 @@ void xenvif_dump_hash_info(struct xenvif *vif, struct seq_file *m)
 	}
 
 	if (vif->hash.size != 0) {
+		const u32 *mapping = vif->hash.mapping[vif->hash.mapping_sel];
+
 		seq_puts(m, "\nHash Mapping:\n");
 
 		for (i = 0; i < vif->hash.size; ) {
@@ -420,7 +442,7 @@ void xenvif_dump_hash_info(struct xenvif *vif, struct seq_file *m)
 			seq_printf(m, "[%4u - %4u]: ", i, i + n - 1);
 
 			for (j = 0; j < n; j++, i++)
-				seq_printf(m, "%4u ", vif->hash.mapping[i]);
+				seq_printf(m, "%4u ", mapping[i]);
 
 			seq_puts(m, "\n");
 		}
@@ -432,6 +454,8 @@ void xenvif_init_hash(struct xenvif *vif)
 {
 	if (xenvif_hash_cache_size == 0)
 		return;
+
+	BUG_ON(vif->hash.cache.count);
 
 	spin_lock_init(&vif->hash.cache.lock);
 	INIT_LIST_HEAD(&vif->hash.cache.list);

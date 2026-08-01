@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0
 CC := $(CROSS_COMPILE)gcc
-CFLAGS := -I../../usr/include
+CFLAGS := -I../include/uapi/
 
-PROGS := getdelays
+PROGS := getdelays procacct delaytop
 
 all: $(PROGS)
 

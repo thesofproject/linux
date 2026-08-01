@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/sound/oss/dmasound/dmasound_core.c
  *
@@ -20,10 +21,6 @@
  *
  *  /dev/sndstat is based on code by Hannu Savolainen, the author of the
  *  VoxWare family of drivers.
- *
- *  This file is subject to the terms and conditions of the GNU General Public
- *  License.  See the file COPYING in the main directory of this archive
- *  for more details.
  *
  *  History:
  *
@@ -204,14 +201,13 @@ module_param(numWriteBufs, int, 0);
 static unsigned int writeBufSize = DEFAULT_BUFF_SIZE ;	/* in bytes */
 module_param(writeBufSize, int, 0);
 
+MODULE_DESCRIPTION("Atari/Amiga/Q40 core DMA sound driver");
 MODULE_LICENSE("GPL");
 
-#ifdef MODULE
 static int sq_unit = -1;
 static int mixer_unit = -1;
 static int state_unit = -1;
 static int irq_installed;
-#endif /* MODULE */
 
 /* control over who can modify resources shared between play/record */
 static fmode_t shared_resource_owner;
@@ -355,8 +351,8 @@ static int mixer_ioctl(struct file *file, u_int cmd, u_long arg)
 		{
 		    mixer_info info;
 		    memset(&info, 0, sizeof(info));
-		    strlcpy(info.id, dmasound.mach.name2, sizeof(info.id));
-		    strlcpy(info.name, dmasound.mach.name2, sizeof(info.name));
+		    strscpy(info.id, dmasound.mach.name2, sizeof(info.id));
+		    strscpy(info.name, dmasound.mach.name2, sizeof(info.name));
 		    info.modify_counter = mixer.modify_counter;
 		    if (copy_to_user((void __user *)arg, &info, sizeof(info)))
 			    return -EFAULT;
@@ -382,17 +378,14 @@ static long mixer_unlocked_ioctl(struct file *file, u_int cmd, u_long arg)
 static const struct file_operations mixer_fops =
 {
 	.owner		= THIS_MODULE,
-	.llseek		= no_llseek,
 	.unlocked_ioctl	= mixer_unlocked_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 	.open		= mixer_open,
 	.release	= mixer_release,
 };
 
 static void mixer_init(void)
 {
-#ifndef MODULE
-	int mixer_unit;
-#endif
 	mixer_unit = register_sound_mixer(&mixer_fops, -1);
 	if (mixer_unit < 0)
 		return;
@@ -420,7 +413,7 @@ static int sq_allocate_buffers(struct sound_queue *sq, int num, int size)
 		return 0;
 	sq->numBufs = num;
 	sq->bufSize = size;
-	sq->buffers = kmalloc (num * sizeof(char *), GFP_KERNEL);
+	sq->buffers = kmalloc_array (num, sizeof(char *), GFP_KERNEL);
 	if (!sq->buffers)
 		return -ENOMEM;
 	for (i = 0; i < num; i++) {
@@ -581,11 +574,6 @@ static ssize_t sq_write(struct file *file, const char __user *src, size_t uLeft,
 		uWritten = 0 ;
 	}
 
-/* FIXME: I think that this may be the wrong behaviour when we get strapped
-	for time and the cpu is close to being (or actually) behind in sending data.
-	- because we've lost the time that the N samples, already in the buffer,
-	would have given us to get here with the next lot from the user.
-*/
 	/* The interrupt doesn't start to play the last, incomplete frame.
 	 * Thus we can append to it without disabling the interrupts! (Note
 	 * also that write_sq.rear isn't affected by the interrupt.)
@@ -604,6 +592,11 @@ static ssize_t sq_write(struct file *file, const char __user *src, size_t uLeft,
 	spin_lock_irqsave(&dmasound.lock, flags);
 	write_sq.syncing &= ~2 ; /* take out POST status */
 	spin_unlock_irqrestore(&dmasound.lock, flags);
+
+	/* Start any already-complete fragments before we spend
+	 * more time extending the incomplete tail fragment.
+	 */
+	sq_play();
 
 	if (write_sq.count > 0 &&
 	    (bLeft = write_sq.block_size-write_sq.rear_size) > 0) {
@@ -998,11 +991,9 @@ static int sq_ioctl(struct file *file, u_int cmd, u_long arg)
 	case SNDCTL_DSP_RESET:
 		sq_reset();
 		return 0;
-		break ;
 	case SNDCTL_DSP_GETFMTS:
 		fmt = dmasound.mach.hardware_afmts ; /* this is what OSS says.. */
 		return IOCTL_OUT(arg, fmt);
-		break ;
 	case SNDCTL_DSP_GETBLKSIZE:
 		/* this should tell the caller about bytes that the app can
 		   read/write - the app doesn't care about our internal buffers.
@@ -1019,7 +1010,6 @@ static int sq_ioctl(struct file *file, u_int cmd, u_long arg)
 			size = write_sq.user_frag_size ;
 		}
 		return IOCTL_OUT(arg, size);
-		break ;
 	case SNDCTL_DSP_POST:
 		/* all we are going to do is to tell the LL that any
 		   partial frags can be queued for output.
@@ -1043,7 +1033,6 @@ static int sq_ioctl(struct file *file, u_int cmd, u_long arg)
 		if (file->f_mode & shared_resource_owner)
 			shared_resources_initialised = 0 ;
 		return result ;
-		break ;
 	case SOUND_PCM_READ_RATE:
 		return IOCTL_OUT(arg, dmasound.soft.speed);
 	case SNDCTL_DSP_SPEED:
@@ -1122,7 +1111,6 @@ static int sq_ioctl(struct file *file, u_int cmd, u_long arg)
 		   the value is 'random' and that the user _must_ check the actual
 		   frags values using SNDCTL_DSP_GETBLKSIZE or similar */
 		return IOCTL_OUT(arg, data);
-		break ;
 	case SNDCTL_DSP_GETOSPACE:
 		/*
 		*/
@@ -1163,10 +1151,10 @@ static long sq_unlocked_ioctl(struct file *file, u_int cmd, u_long arg)
 static const struct file_operations sq_fops =
 {
 	.owner		= THIS_MODULE,
-	.llseek		= no_llseek,
 	.write		= sq_write,
 	.poll		= sq_poll,
 	.unlocked_ioctl	= sq_unlocked_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 	.open		= sq_open,
 	.release	= sq_release,
 };
@@ -1174,9 +1162,6 @@ static const struct file_operations sq_fops =
 static int sq_init(void)
 {
 	const struct file_operations *fops = &sq_fops;
-#ifndef MODULE
-	int sq_unit;
-#endif
 
 	sq_unit = register_sound_dsp(fops, -1);
 	if (sq_unit < 0) {
@@ -1232,31 +1217,22 @@ static char *get_afmt_string(int afmt)
         switch(afmt) {
             case AFMT_MU_LAW:
                 return "mu-law";
-                break;
             case AFMT_A_LAW:
                 return "A-law";
-                break;
             case AFMT_U8:
                 return "unsigned 8 bit";
-                break;
             case AFMT_S8:
                 return "signed 8 bit";
-                break;
             case AFMT_S16_BE:
                 return "signed 16 bit BE";
-                break;
             case AFMT_U16_BE:
                 return "unsigned 16 bit BE";
-                break;
             case AFMT_S16_LE:
                 return "signed 16 bit LE";
-                break;
             case AFMT_U16_LE:
                 return "unsigned 16 bit LE";
-                break;
 	    case 0:
 		return "format not set" ;
-		break ;
             default:
                 break ;
         }
@@ -1370,7 +1346,6 @@ static ssize_t state_read(struct file *file, char __user *buf, size_t count,
 
 static const struct file_operations state_fops = {
 	.owner		= THIS_MODULE,
-	.llseek		= no_llseek,
 	.read		= state_read,
 	.open		= state_open,
 	.release	= state_release,
@@ -1378,9 +1353,6 @@ static const struct file_operations state_fops = {
 
 static int state_init(void)
 {
-#ifndef MODULE
-	int state_unit;
-#endif
 	state_unit = register_sound_special(&state_fops, SND_DEV_STATUS);
 	if (state_unit < 0)
 		return state_unit ;
@@ -1398,10 +1370,9 @@ static int state_init(void)
 int dmasound_init(void)
 {
 	int res ;
-#ifdef MODULE
+
 	if (irq_installed)
 		return -EBUSY;
-#endif
 
 	/* Set up sound queue, /dev/audio and /dev/dsp. */
 
@@ -1420,9 +1391,7 @@ int dmasound_init(void)
 		printk(KERN_ERR "DMA sound driver: Interrupt initialization failed\n");
 		return -ENODEV;
 	}
-#ifdef MODULE
 	irq_installed = 1;
-#endif
 
 	printk(KERN_INFO "%s DMA sound driver rev %03d installed\n",
 		dmasound.mach.name, (DMASOUND_CORE_REVISION<<4) +
@@ -1435,8 +1404,6 @@ int dmasound_init(void)
 		numWriteBufs, writeBufSize) ;
 	return 0;
 }
-
-#ifdef MODULE
 
 void dmasound_deinit(void)
 {
@@ -1456,9 +1423,7 @@ void dmasound_deinit(void)
 		unregister_sound_dsp(sq_unit);
 }
 
-#else /* !MODULE */
-
-static int dmasound_setup(char *str)
+static int __maybe_unused dmasound_setup(char *str)
 {
 	int ints[6], size;
 
@@ -1476,13 +1441,13 @@ static int dmasound_setup(char *str)
 			printk("dmasound_setup: invalid catch radius, using default = %d\n", catchRadius);
 		else
 			catchRadius = ints[3];
-		/* fall through */
+		fallthrough;
 	case 2:
 		if (ints[1] < MIN_BUFFERS)
 			printk("dmasound_setup: invalid number of buffers, using default = %d\n", numWriteBufs);
 		else
 			numWriteBufs = ints[1];
-		/* fall through */
+		fallthrough;
 	case 1:
 		if ((size = ints[2]) < 256) /* check for small buffer specs */
 			size <<= 10 ;
@@ -1500,8 +1465,6 @@ static int dmasound_setup(char *str)
 }
 
 __setup("dmasound=", dmasound_setup);
-
-#endif /* !MODULE */
 
     /*
      *  Conversion tables
@@ -1589,9 +1552,7 @@ char dmasound_alaw2dma8[] = {
 
 EXPORT_SYMBOL(dmasound);
 EXPORT_SYMBOL(dmasound_init);
-#ifdef MODULE
 EXPORT_SYMBOL(dmasound_deinit);
-#endif
 EXPORT_SYMBOL(dmasound_write_sq);
 EXPORT_SYMBOL(dmasound_catchRadius);
 #ifdef HAS_8BIT_TABLES

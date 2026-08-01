@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for the Freescale Semiconductor MC13783 touchscreen.
  *
@@ -6,10 +7,6 @@
  *
  * Initial development of this code was funded by
  * Phytec Messtechnik GmbH, http://www.phytec.de/
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 #include <linux/platform_device.h>
 #include <linux/mfd/mc13783.h>
@@ -44,8 +41,6 @@ struct mc13783_ts_priv {
 static irqreturn_t mc13783_ts_handler(int irq, void *data)
 {
 	struct mc13783_ts_priv *priv = data;
-
-	mc13xxx_irq_ack(priv->mc13xxx, irq);
 
 	/*
 	 * Kick off reading coordinates. Note that if work happens already
@@ -140,8 +135,6 @@ static int mc13783_ts_open(struct input_dev *dev)
 
 	mc13xxx_lock(priv->mc13xxx);
 
-	mc13xxx_irq_ack(priv->mc13xxx, MC13XXX_IRQ_TS);
-
 	ret = mc13xxx_irq_request(priv->mc13xxx, MC13XXX_IRQ_TS,
 		mc13783_ts_handler, MC13783_TS_NAME, priv);
 	if (ret)
@@ -175,7 +168,7 @@ static int __init mc13783_ts_probe(struct platform_device *pdev)
 	struct input_dev *idev;
 	int ret = -ENOMEM;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc_obj(*priv);
 	idev = input_allocate_device();
 	if (!priv || !idev)
 		goto err_free_mem;
@@ -220,14 +213,12 @@ err_free_mem:
 	return ret;
 }
 
-static int mc13783_ts_remove(struct platform_device *pdev)
+static void mc13783_ts_remove(struct platform_device *pdev)
 {
 	struct mc13783_ts_priv *priv = platform_get_drvdata(pdev);
 
 	input_unregister_device(priv->idev);
 	kfree(priv);
-
-	return 0;
 }
 
 static struct platform_driver mc13783_ts_driver = {

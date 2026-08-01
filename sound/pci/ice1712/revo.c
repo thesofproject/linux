@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   ALSA driver for ICEnsemble ICE1712 (Envy24)
  *
  *   Lowlevel functions for M-Audio Audiophile 192, Revolution 7.1 and 5.1
  *
  *	Copyright (c) 2003 Takashi Iwai <tiwai@suse.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */      
 
 #include <linux/delay.h>
@@ -161,7 +147,7 @@ static int revo51_i2c_init(struct snd_ice1712 *ice,
 	struct revo51_spec *spec;
 	int err;
 
-	spec = kzalloc(sizeof(*spec), GFP_KERNEL);
+	spec = kzalloc_obj(*spec);
 	if (!spec)
 		return -ENOMEM;
 	ice->spec = spec;
@@ -484,7 +470,7 @@ static int ap192_ak4114_init(struct snd_ice1712 *ice)
 	int err;
 
 	struct revo51_spec *spec;
-	spec = kzalloc(sizeof(*spec), GFP_KERNEL);
+	spec = kzalloc_obj(*spec);
 	if (!spec)
 		return -ENOMEM;
 	ice->spec = spec;
@@ -529,7 +515,7 @@ static int revo_init(struct snd_ice1712 *ice)
 	}
 
 	/* second stage of initialization, analog parts and others */
-	ak = ice->akm = kcalloc(2, sizeof(struct snd_akm4xxx), GFP_KERNEL);
+	ak = ice->akm = kzalloc_objs(struct snd_akm4xxx, 2);
 	if (! ak)
 		return -ENOMEM;
 	switch (ice->eeprom.subvendor) {

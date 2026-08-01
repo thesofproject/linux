@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  MIDI byte <-> sequencer event coder
  *
  *  Copyright (C) 1998,99 Takashi Iwai <tiwai@suse.de>,
  *                        Jaroslav Kysela <perex@perex.cz>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/slab.h>
@@ -117,7 +104,7 @@ int snd_midi_event_new(int bufsize, struct snd_midi_event **rdev)
 	struct snd_midi_event *dev;
 
 	*rdev = NULL;
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	if (dev == NULL)
 		return -ENOMEM;
 	if (bufsize > 0) {
@@ -157,31 +144,17 @@ static inline void reset_encode(struct snd_midi_event *dev)
 
 void snd_midi_event_reset_encode(struct snd_midi_event *dev)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&dev->lock, flags);
+	guard(spinlock_irqsave)(&dev->lock);
 	reset_encode(dev);
-	spin_unlock_irqrestore(&dev->lock, flags);
 }
 EXPORT_SYMBOL(snd_midi_event_reset_encode);
 
 void snd_midi_event_reset_decode(struct snd_midi_event *dev)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&dev->lock, flags);
+	guard(spinlock_irqsave)(&dev->lock);
 	dev->lastcmd = 0xff;
-	spin_unlock_irqrestore(&dev->lock, flags);
 }
 EXPORT_SYMBOL(snd_midi_event_reset_decode);
-
-#if 0
-void snd_midi_event_init(struct snd_midi_event *dev)
-{
-	snd_midi_event_reset_encode(dev);
-	snd_midi_event_reset_decode(dev);
-}
-#endif  /*  0  */
 
 void snd_midi_event_no_status(struct snd_midi_event *dev, int on)
 {
@@ -190,68 +163,14 @@ void snd_midi_event_no_status(struct snd_midi_event *dev, int on)
 EXPORT_SYMBOL(snd_midi_event_no_status);
 
 /*
- * resize buffer
- */
-#if 0
-int snd_midi_event_resize_buffer(struct snd_midi_event *dev, int bufsize)
-{
-	unsigned char *new_buf, *old_buf;
-	unsigned long flags;
-
-	if (bufsize == dev->bufsize)
-		return 0;
-	new_buf = kmalloc(bufsize, GFP_KERNEL);
-	if (new_buf == NULL)
-		return -ENOMEM;
-	spin_lock_irqsave(&dev->lock, flags);
-	old_buf = dev->buf;
-	dev->buf = new_buf;
-	dev->bufsize = bufsize;
-	reset_encode(dev);
-	spin_unlock_irqrestore(&dev->lock, flags);
-	kfree(old_buf);
-	return 0;
-}
-#endif  /*  0  */
-
-/*
- *  read bytes and encode to sequencer event if finished
- *  return the size of encoded bytes
- */
-long snd_midi_event_encode(struct snd_midi_event *dev, unsigned char *buf, long count,
-			   struct snd_seq_event *ev)
-{
-	long result = 0;
-	int rc;
-
-	ev->type = SNDRV_SEQ_EVENT_NONE;
-
-	while (count-- > 0) {
-		rc = snd_midi_event_encode_byte(dev, *buf++, ev);
-		result++;
-		if (rc < 0)
-			return rc;
-		else if (rc > 0)
-			return result;
-	}
-
-	return result;
-}
-EXPORT_SYMBOL(snd_midi_event_encode);
-
-/*
  *  read one byte and encode to sequencer event:
- *  return 1 if MIDI bytes are encoded to an event
- *         0 data is not finished
- *         negative for error
+ *  return true if MIDI bytes are encoded to an event
+ *         false data is not finished
  */
-int snd_midi_event_encode_byte(struct snd_midi_event *dev, int c,
-			       struct snd_seq_event *ev)
+bool snd_midi_event_encode_byte(struct snd_midi_event *dev, unsigned char c,
+				struct snd_seq_event *ev)
 {
-	int rc = 0;
-	unsigned long flags;
-
-	c &= 0xff;
+	bool rc = false;
 
 	if (c >= MIDI_CMD_COMMON_CLOCK) {
 		/* real-time event */
@@ -261,7 +180,7 @@ int snd_midi_event_encode_byte(struct snd_midi_event *dev, int c,
 		return ev->type != SNDRV_SEQ_EVENT_NONE;
 	}
 
-	spin_lock_irqsave(&dev->lock, flags);
+	guard(spinlock_irqsave)(&dev->lock);
 	if ((c & 0x80) &&
 	    (c != MIDI_CMD_COMMON_SYSEX_END || dev->type != ST_SYSEX)) {
 		/* new command */
@@ -293,7 +212,7 @@ int snd_midi_event_encode_byte(struct snd_midi_event *dev, int c,
 			status_event[dev->type].encode(dev, ev);
 		if (dev->type >= ST_SPECIAL)
 			dev->type = ST_INVALID;
-		rc = 1;
+		rc = true;
 	} else 	if (dev->type == ST_SYSEX) {
 		if (c == MIDI_CMD_COMMON_SYSEX_END ||
 		    dev->read >= dev->bufsize) {
@@ -306,11 +225,10 @@ int snd_midi_event_encode_byte(struct snd_midi_event *dev, int c,
 				dev->read = 0; /* continue to parse */
 			else
 				reset_encode(dev); /* all parsed */
-			rc = 1;
+			rc = true;
 		}
 	}
 
-	spin_unlock_irqrestore(&dev->lock, flags);
 	return rc;
 }
 EXPORT_SYMBOL(snd_midi_event_encode_byte);
@@ -496,12 +414,12 @@ static int extra_decode_xrpn(struct snd_midi_event *dev, unsigned char *buf,
 			     int count, struct snd_seq_event *ev)
 {
 	unsigned char cmd;
-	char *cbytes;
-	static char cbytes_nrpn[4] = { MIDI_CTL_NONREG_PARM_NUM_MSB,
+	const char *cbytes;
+	static const char cbytes_nrpn[4] = { MIDI_CTL_NONREG_PARM_NUM_MSB,
 				       MIDI_CTL_NONREG_PARM_NUM_LSB,
 				       MIDI_CTL_MSB_DATA_ENTRY,
 				       MIDI_CTL_LSB_DATA_ENTRY };
-	static char cbytes_rpn[4] =  { MIDI_CTL_REGIST_PARM_NUM_MSB,
+	static const char cbytes_rpn[4] =  { MIDI_CTL_REGIST_PARM_NUM_MSB,
 				       MIDI_CTL_REGIST_PARM_NUM_LSB,
 				       MIDI_CTL_MSB_DATA_ENTRY,
 				       MIDI_CTL_LSB_DATA_ENTRY };
@@ -531,15 +449,3 @@ static int extra_decode_xrpn(struct snd_midi_event *dev, unsigned char *buf,
 	}
 	return idx;
 }
-
-static int __init alsa_seq_midi_event_init(void)
-{
-	return 0;
-}
-
-static void __exit alsa_seq_midi_event_exit(void)
-{
-}
-
-module_init(alsa_seq_midi_event_init)
-module_exit(alsa_seq_midi_event_exit)

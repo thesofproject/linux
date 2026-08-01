@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * fireworks_command.c - a part of driver for Fireworks based devices
  *
  * Copyright (c) 2013-2014 Takashi Sakamoto
- *
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 #include "./fireworks.h"
@@ -120,14 +119,14 @@ efw_transaction(struct snd_efw *efw, unsigned int category,
 		return -ENOMEM;
 
 	/* to keep consistency of sequence number */
-	spin_lock(&efw->lock);
-	if ((efw->seqnum < KERNEL_SEQNUM_MIN) ||
-	    (efw->seqnum >= KERNEL_SEQNUM_MAX - 2))
-		efw->seqnum = KERNEL_SEQNUM_MIN;
-	else
-		efw->seqnum += 2;
-	seqnum = efw->seqnum;
-	spin_unlock(&efw->lock);
+	scoped_guard(spinlock, &efw->lock) {
+		if ((efw->seqnum < KERNEL_SEQNUM_MIN) ||
+		    (efw->seqnum >= KERNEL_SEQNUM_MAX - 2))
+			efw->seqnum = KERNEL_SEQNUM_MIN;
+		else
+			efw->seqnum += 2;
+		seqnum = efw->seqnum;
+	}
 
 	/* fill transaction header fields */
 	cmd_bytes = sizeof(struct snd_efw_transaction) + param_bytes;
@@ -152,10 +151,13 @@ efw_transaction(struct snd_efw *efw, unsigned int category,
 	    (be32_to_cpu(header->category) != category) ||
 	    (be32_to_cpu(header->command) != command) ||
 	    (be32_to_cpu(header->status) != EFR_STATUS_OK)) {
+		u32 st = be32_to_cpu(header->status);
+
 		dev_err(&efw->unit->device, "EFW command failed [%u/%u]: %s\n",
 			be32_to_cpu(header->category),
 			be32_to_cpu(header->command),
-			efr_status_names[be32_to_cpu(header->status)]);
+			st < ARRAY_SIZE(efr_status_names) ?
+				efr_status_names[st] : "unknown");
 		err = -EIO;
 		goto end;
 	}

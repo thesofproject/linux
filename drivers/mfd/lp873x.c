@@ -1,22 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2016 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2016 Texas Instruments Incorporated - https://www.ti.com/
  *
  * Author: Keerthy <j-keerthy@ti.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/interrupt.h>
 #include <linux/mfd/core.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
 #include <linux/regmap.h>
 
 #include <linux/mfd/lp873x.h>
@@ -32,8 +23,7 @@ static const struct mfd_cell lp873x_cells[] = {
 	{ .name = "lp873x-gpio", },
 };
 
-static int lp873x_probe(struct i2c_client *client,
-			const struct i2c_device_id *ids)
+static int lp873x_probe(struct i2c_client *client)
 {
 	struct lp873x *lp873;
 	int ret;
@@ -77,8 +67,8 @@ static const struct of_device_id of_lp873x_match_table[] = {
 MODULE_DEVICE_TABLE(of, of_lp873x_match_table);
 
 static const struct i2c_device_id lp873x_id_table[] = {
-	{ "lp873x", 0 },
-	{ },
+	{ "lp873x" },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, lp873x_id_table);
 

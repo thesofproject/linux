@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AFE4404 Heart Rate Monitors and Low-Cost Pulse Oximeters
  *
- * Copyright (C) 2015-2016 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2015-2016 Texas Instruments Incorporated - https://www.ti.com/
  *	Andrew F. Davis <afd@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
 #include <linux/device.h>
@@ -85,20 +77,20 @@ static const struct reg_field afe4404_reg_fields[] = {
 
 /**
  * struct afe4404_data - AFE4404 device instance data
- * @dev: Device structure
  * @regmap: Register map of the device
  * @fields: Register fields of the device
  * @regulator: Pointer to the regulator for the IC
  * @trig: IIO trigger for this device
  * @irq: ADC_RDY line interrupt number
+ * @buffer: Used to construct a scan to push to the iio buffer.
  */
 struct afe4404_data {
-	struct device *dev;
 	struct regmap *regmap;
 	struct regmap_field *fields[F_MAX_FIELDS];
 	struct regulator *regulator;
 	struct iio_trigger *trig;
 	int irq;
+	s32 buffer[10] __aligned(8);
 };
 
 enum afe4404_chan_id {
@@ -256,20 +248,20 @@ static int afe4404_read_raw(struct iio_dev *indio_dev,
 			    int *val, int *val2, long mask)
 {
 	struct afe4404_data *afe = iio_priv(indio_dev);
-	unsigned int value_reg = afe4404_channel_values[chan->address];
-	unsigned int led_field = afe4404_channel_leds[chan->address];
-	unsigned int offdac_field = afe4404_channel_offdacs[chan->address];
+	unsigned int value_reg, led_field, offdac_field;
 	int ret;
 
 	switch (chan->type) {
 	case IIO_INTENSITY:
 		switch (mask) {
 		case IIO_CHAN_INFO_RAW:
+			value_reg = afe4404_channel_values[chan->address];
 			ret = regmap_read(afe->regmap, value_reg, val);
 			if (ret)
 				return ret;
 			return IIO_VAL_INT;
 		case IIO_CHAN_INFO_OFFSET:
+			offdac_field = afe4404_channel_offdacs[chan->address];
 			ret = regmap_field_read(afe->fields[offdac_field], val);
 			if (ret)
 				return ret;
@@ -279,6 +271,7 @@ static int afe4404_read_raw(struct iio_dev *indio_dev,
 	case IIO_CURRENT:
 		switch (mask) {
 		case IIO_CHAN_INFO_RAW:
+			led_field = afe4404_channel_leds[chan->address];
 			ret = regmap_field_read(afe->fields[led_field], val);
 			if (ret)
 				return ret;
@@ -301,19 +294,20 @@ static int afe4404_write_raw(struct iio_dev *indio_dev,
 			     int val, int val2, long mask)
 {
 	struct afe4404_data *afe = iio_priv(indio_dev);
-	unsigned int led_field = afe4404_channel_leds[chan->address];
-	unsigned int offdac_field = afe4404_channel_offdacs[chan->address];
+	unsigned int led_field, offdac_field;
 
 	switch (chan->type) {
 	case IIO_INTENSITY:
 		switch (mask) {
 		case IIO_CHAN_INFO_OFFSET:
+			offdac_field = afe4404_channel_offdacs[chan->address];
 			return regmap_field_write(afe->fields[offdac_field], val);
 		}
 		break;
 	case IIO_CURRENT:
 		switch (mask) {
 		case IIO_CHAN_INFO_RAW:
+			led_field = afe4404_channel_leds[chan->address];
 			return regmap_field_write(afe->fields[led_field], val);
 		}
 		break;
@@ -336,25 +330,28 @@ static irqreturn_t afe4404_trigger_handler(int irq, void *private)
 	struct iio_dev *indio_dev = pf->indio_dev;
 	struct afe4404_data *afe = iio_priv(indio_dev);
 	int ret, bit, i = 0;
-	s32 buffer[10];
 
-	for_each_set_bit(bit, indio_dev->active_scan_mask,
-			 indio_dev->masklength) {
+	iio_for_each_active_channel(indio_dev, bit) {
 		ret = regmap_read(afe->regmap, afe4404_channel_values[bit],
-				  &buffer[i++]);
+				  &afe->buffer[i++]);
 		if (ret)
 			goto err;
 	}
 
-	iio_push_to_buffers_with_timestamp(indio_dev, buffer, pf->timestamp);
+	iio_push_to_buffers_with_timestamp(indio_dev, afe->buffer,
+					   pf->timestamp);
 err:
 	iio_trigger_notify_done(indio_dev->trig);
 
 	return IRQ_HANDLED;
 }
 
-static const struct iio_trigger_ops afe4404_trigger_ops = {
-};
+static void afe4404_regulator_disable(void *data)
+{
+	struct regulator *regulator = data;
+
+	regulator_disable(regulator);
+}
 
 /* Default timings from data-sheet */
 #define AFE4404_TIMING_PAIRS			\
@@ -414,25 +411,24 @@ static const struct regmap_config afe4404_regmap_config = {
 	.val_bits = 24,
 
 	.max_register = AFE4404_AVG_LED1_ALED1VAL,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.volatile_table = &afe4404_volatile_table,
 };
 
 static const struct of_device_id afe4404_of_match[] = {
 	{ .compatible = "ti,afe4404", },
-	{ /* sentinel */ }
+	{ }
 };
 MODULE_DEVICE_TABLE(of, afe4404_of_match);
 
-static int __maybe_unused afe4404_suspend(struct device *dev)
+static int afe4404_suspend(struct device *dev)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(to_i2c_client(dev));
 	struct afe4404_data *afe = iio_priv(indio_dev);
 	int ret;
 
-	ret = regmap_update_bits(afe->regmap, AFE440X_CONTROL2,
-				 AFE440X_CONTROL2_PDN_AFE,
-				 AFE440X_CONTROL2_PDN_AFE);
+	ret = regmap_set_bits(afe->regmap, AFE440X_CONTROL2,
+			      AFE440X_CONTROL2_PDN_AFE);
 	if (ret)
 		return ret;
 
@@ -445,7 +441,7 @@ static int __maybe_unused afe4404_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused afe4404_resume(struct device *dev)
+static int afe4404_resume(struct device *dev)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(to_i2c_client(dev));
 	struct afe4404_data *afe = iio_priv(indio_dev);
@@ -457,155 +453,121 @@ static int __maybe_unused afe4404_resume(struct device *dev)
 		return ret;
 	}
 
-	ret = regmap_update_bits(afe->regmap, AFE440X_CONTROL2,
-				 AFE440X_CONTROL2_PDN_AFE, 0);
+	ret = regmap_clear_bits(afe->regmap, AFE440X_CONTROL2,
+				AFE440X_CONTROL2_PDN_AFE);
 	if (ret)
 		return ret;
 
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(afe4404_pm_ops, afe4404_suspend, afe4404_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(afe4404_pm_ops, afe4404_suspend,
+				afe4404_resume);
 
-static int afe4404_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int afe4404_probe(struct i2c_client *client)
 {
+	struct device *dev = &client->dev;
 	struct iio_dev *indio_dev;
 	struct afe4404_data *afe;
 	int i, ret;
 
-	indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*afe));
+	indio_dev = devm_iio_device_alloc(dev, sizeof(*afe));
 	if (!indio_dev)
 		return -ENOMEM;
 
 	afe = iio_priv(indio_dev);
 	i2c_set_clientdata(client, indio_dev);
 
-	afe->dev = &client->dev;
 	afe->irq = client->irq;
 
 	afe->regmap = devm_regmap_init_i2c(client, &afe4404_regmap_config);
 	if (IS_ERR(afe->regmap)) {
-		dev_err(afe->dev, "Unable to allocate register map\n");
+		dev_err(dev, "Unable to allocate register map\n");
 		return PTR_ERR(afe->regmap);
 	}
 
 	for (i = 0; i < F_MAX_FIELDS; i++) {
-		afe->fields[i] = devm_regmap_field_alloc(afe->dev, afe->regmap,
+		afe->fields[i] = devm_regmap_field_alloc(dev, afe->regmap,
 							 afe4404_reg_fields[i]);
 		if (IS_ERR(afe->fields[i])) {
-			dev_err(afe->dev, "Unable to allocate regmap fields\n");
+			dev_err(dev, "Unable to allocate regmap fields\n");
 			return PTR_ERR(afe->fields[i]);
 		}
 	}
 
-	afe->regulator = devm_regulator_get(afe->dev, "tx_sup");
-	if (IS_ERR(afe->regulator)) {
-		dev_err(afe->dev, "Unable to get regulator\n");
-		return PTR_ERR(afe->regulator);
-	}
+	afe->regulator = devm_regulator_get(dev, "tx_sup");
+	if (IS_ERR(afe->regulator))
+		return dev_err_probe(dev, PTR_ERR(afe->regulator),
+				     "Unable to get regulator\n");
+
 	ret = regulator_enable(afe->regulator);
 	if (ret) {
-		dev_err(afe->dev, "Unable to enable regulator\n");
+		dev_err(dev, "Unable to enable regulator\n");
+		return ret;
+	}
+	ret = devm_add_action_or_reset(dev, afe4404_regulator_disable, afe->regulator);
+	if (ret) {
+		dev_err(dev, "Unable to enable regulator\n");
 		return ret;
 	}
 
 	ret = regmap_write(afe->regmap, AFE440X_CONTROL0,
 			   AFE440X_CONTROL0_SW_RESET);
 	if (ret) {
-		dev_err(afe->dev, "Unable to reset device\n");
-		goto disable_reg;
+		dev_err(dev, "Unable to reset device\n");
+		return ret;
 	}
 
 	ret = regmap_multi_reg_write(afe->regmap, afe4404_reg_sequences,
 				     ARRAY_SIZE(afe4404_reg_sequences));
 	if (ret) {
-		dev_err(afe->dev, "Unable to set register defaults\n");
-		goto disable_reg;
+		dev_err(dev, "Unable to set register defaults\n");
+		return ret;
 	}
 
 	indio_dev->modes = INDIO_DIRECT_MODE;
-	indio_dev->dev.parent = afe->dev;
 	indio_dev->channels = afe4404_channels;
 	indio_dev->num_channels = ARRAY_SIZE(afe4404_channels);
 	indio_dev->name = AFE4404_DRIVER_NAME;
 	indio_dev->info = &afe4404_iio_info;
 
 	if (afe->irq > 0) {
-		afe->trig = devm_iio_trigger_alloc(afe->dev,
+		afe->trig = devm_iio_trigger_alloc(dev,
 						   "%s-dev%d",
 						   indio_dev->name,
-						   indio_dev->id);
-		if (!afe->trig) {
-			dev_err(afe->dev, "Unable to allocate IIO trigger\n");
-			ret = -ENOMEM;
-			goto disable_reg;
-		}
+						   iio_device_id(indio_dev));
+		if (!afe->trig)
+			return -ENOMEM;
 
 		iio_trigger_set_drvdata(afe->trig, indio_dev);
 
-		afe->trig->ops = &afe4404_trigger_ops;
-		afe->trig->dev.parent = afe->dev;
-
-		ret = iio_trigger_register(afe->trig);
+		ret = devm_iio_trigger_register(dev, afe->trig);
 		if (ret) {
-			dev_err(afe->dev, "Unable to register IIO trigger\n");
-			goto disable_reg;
+			dev_err(dev, "Unable to register IIO trigger\n");
+			return ret;
 		}
 
-		ret = devm_request_threaded_irq(afe->dev, afe->irq,
-						iio_trigger_generic_data_rdy_poll,
-						NULL, IRQF_ONESHOT,
-						AFE4404_DRIVER_NAME,
-						afe->trig);
+		ret = devm_request_irq(dev, afe->irq,
+				       iio_trigger_generic_data_rdy_poll,
+				       IRQF_NO_THREAD, AFE4404_DRIVER_NAME,
+				       afe->trig);
 		if (ret) {
-			dev_err(afe->dev, "Unable to request IRQ\n");
-			goto disable_reg;
+			dev_err(dev, "Unable to request IRQ\n");
+			return ret;
 		}
 	}
 
-	ret = iio_triggered_buffer_setup(indio_dev, &iio_pollfunc_store_time,
-					 afe4404_trigger_handler, NULL);
+	ret = devm_iio_triggered_buffer_setup(dev, indio_dev,
+					      &iio_pollfunc_store_time,
+					      afe4404_trigger_handler, NULL);
 	if (ret) {
-		dev_err(afe->dev, "Unable to setup buffer\n");
-		goto unregister_trigger;
+		dev_err(dev, "Unable to setup buffer\n");
+		return ret;
 	}
 
-	ret = iio_device_register(indio_dev);
+	ret = devm_iio_device_register(dev, indio_dev);
 	if (ret) {
-		dev_err(afe->dev, "Unable to register IIO device\n");
-		goto unregister_triggered_buffer;
-	}
-
-	return 0;
-
-unregister_triggered_buffer:
-	iio_triggered_buffer_cleanup(indio_dev);
-unregister_trigger:
-	if (afe->irq > 0)
-		iio_trigger_unregister(afe->trig);
-disable_reg:
-	regulator_disable(afe->regulator);
-
-	return ret;
-}
-
-static int afe4404_remove(struct i2c_client *client)
-{
-	struct iio_dev *indio_dev = i2c_get_clientdata(client);
-	struct afe4404_data *afe = iio_priv(indio_dev);
-	int ret;
-
-	iio_device_unregister(indio_dev);
-
-	iio_triggered_buffer_cleanup(indio_dev);
-
-	if (afe->irq > 0)
-		iio_trigger_unregister(afe->trig);
-
-	ret = regulator_disable(afe->regulator);
-	if (ret) {
-		dev_err(afe->dev, "Unable to disable regulator\n");
+		dev_err(dev, "Unable to register IIO device\n");
 		return ret;
 	}
 
@@ -613,8 +575,8 @@ static int afe4404_remove(struct i2c_client *client)
 }
 
 static const struct i2c_device_id afe4404_ids[] = {
-	{ "afe4404", 0 },
-	{ /* sentinel */ }
+	{ .name = "afe4404" },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, afe4404_ids);
 
@@ -622,10 +584,9 @@ static struct i2c_driver afe4404_i2c_driver = {
 	.driver = {
 		.name = AFE4404_DRIVER_NAME,
 		.of_match_table = afe4404_of_match,
-		.pm = &afe4404_pm_ops,
+		.pm = pm_sleep_ptr(&afe4404_pm_ops),
 	},
 	.probe = afe4404_probe,
-	.remove = afe4404_remove,
 	.id_table = afe4404_ids,
 };
 module_i2c_driver(afe4404_i2c_driver);

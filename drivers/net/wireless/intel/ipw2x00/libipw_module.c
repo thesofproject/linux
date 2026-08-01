@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*******************************************************************************
 
   Copyright(c) 2004-2005 Intel Corporation. All rights reserved.
@@ -8,21 +9,6 @@
   <j@w1.fi>
   Copyright (c) 2002-2003, Jouni Malinen <j@w1.fi>
 
-  This program is free software; you can redistribute it and/or modify it
-  under the terms of version 2 of the GNU General Public License as
-  published by the Free Software Foundation.
-
-  This program is distributed in the hope that it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, write to the Free Software Foundation, Inc., 59
-  Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
-  The full GNU General Public License is included in this distribution in the
-  file called LICENSE.
 
   Contact Information:
   Intel Linux Wireless <ilw@linux.intel.com>
@@ -71,8 +57,7 @@ static int libipw_networks_allocate(struct libipw_device *ieee)
 	int i, j;
 
 	for (i = 0; i < MAX_NETWORK_COUNT; i++) {
-		ieee->networks[i] = kzalloc(sizeof(struct libipw_network),
-					    GFP_KERNEL);
+		ieee->networks[i] = kzalloc_obj(struct libipw_network);
 		if (!ieee->networks[i]) {
 			LIBIPW_ERROR("Out of memory allocating beacons\n");
 			for (j = 0; j < i; j++)
@@ -97,7 +82,7 @@ void libipw_networks_age(struct libipw_device *ieee,
 {
 	struct libipw_network *network = NULL;
 	unsigned long flags;
-	unsigned long age_jiffies = msecs_to_jiffies(age_secs * MSEC_PER_SEC);
+	unsigned long age_jiffies = secs_to_jiffies(age_secs);
 
 	spin_lock_irqsave(&ieee->lock, flags);
 	list_for_each_entry(network, &ieee->network_list, list) {
@@ -183,7 +168,7 @@ struct net_device *alloc_libipw(int sizeof_priv, int monitor)
 
 	spin_lock_init(&ieee->lock);
 
-	lib80211_crypt_info_init(&ieee->crypt_info, dev->name, &ieee->lock);
+	libipw_crypt_info_init(&ieee->crypt_info, dev->name, &ieee->lock);
 
 	ieee->wpa_enabled = 0;
 	ieee->drop_unencrypted = 0;
@@ -205,7 +190,7 @@ void free_libipw(struct net_device *dev, int monitor)
 {
 	struct libipw_device *ieee = netdev_priv(dev);
 
-	lib80211_crypt_info_free(&ieee->crypt_info);
+	libipw_crypt_info_free(&ieee->crypt_info);
 
 	libipw_networks_free(ieee);
 
@@ -254,18 +239,18 @@ static ssize_t debug_level_proc_write(struct file *file,
 	return strnlen(buf, len);
 }
 
-static const struct file_operations debug_level_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= debug_level_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.write		= debug_level_proc_write,
+static const struct proc_ops debug_level_proc_ops = {
+	.proc_open	= debug_level_proc_open,
+	.proc_read	= seq_read,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+	.proc_write	= debug_level_proc_write,
 };
 #endif				/* CONFIG_LIBIPW_DEBUG */
 
 static int __init libipw_init(void)
 {
+	int err;
 #ifdef CONFIG_LIBIPW_DEBUG
 	struct proc_dir_entry *e;
 
@@ -277,7 +262,7 @@ static int __init libipw_init(void)
 		return -EIO;
 	}
 	e = proc_create("debug_level", 0644, libipw_proc,
-			&debug_level_proc_fops);
+			&debug_level_proc_ops);
 	if (!e) {
 		remove_proc_entry(DRV_PROCNAME, init_net.proc_net);
 		libipw_proc = NULL;
@@ -288,7 +273,33 @@ static int __init libipw_init(void)
 	printk(KERN_INFO DRV_NAME ": " DRV_DESCRIPTION ", " DRV_VERSION "\n");
 	printk(KERN_INFO DRV_NAME ": " DRV_COPYRIGHT "\n");
 
+	err = libipw_crypto_init();
+	if (err)
+		goto remove_debugfs;
+	err = libipw_crypto_ccmp_init();
+	if (err)
+		goto uninit_crypto;
+	err = libipw_crypto_tkip_init();
+	if (err)
+		goto uninit_crypto_ccmp;
+	err = libipw_crypto_wep_init();
+	if (err)
+		goto uninit_crypto_tkip;
+
 	return 0;
+uninit_crypto_tkip:
+	libipw_crypto_tkip_exit();
+uninit_crypto_ccmp:
+	libipw_crypto_ccmp_exit();
+uninit_crypto:
+	libipw_crypto_exit();
+remove_debugfs:
+#ifdef CONFIG_LIBIPW_DEBUG
+	remove_proc_entry("debug_level", libipw_proc);
+	remove_proc_entry(DRV_PROCNAME, init_net.proc_net);
+	libipw_proc = NULL;
+#endif
+	return err;
 }
 
 static void __exit libipw_exit(void)
@@ -300,6 +311,11 @@ static void __exit libipw_exit(void)
 		libipw_proc = NULL;
 	}
 #endif				/* CONFIG_LIBIPW_DEBUG */
+
+	libipw_crypto_ccmp_exit();
+	libipw_crypto_tkip_exit();
+	libipw_crypto_wep_exit();
+	libipw_crypto_exit();
 }
 
 #ifdef CONFIG_LIBIPW_DEBUG

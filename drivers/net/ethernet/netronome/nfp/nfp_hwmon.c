@@ -1,35 +1,5 @@
-/*
- * Copyright (C) 2017 Netronome Systems, Inc.
- *
- * This software is dual licensed under the GNU General License Version 2,
- * June 1991 as shown in the file COPYING in the top-level directory of this
- * source tree or the BSD 2-Clause License provided below.  You have the
- * option to license this software under the complete terms of either license.
- *
- * The BSD 2-Clause License:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      1. Redistributions of source code must retain the above
- *         copyright notice, this list of conditions and the following
- *         disclaimer.
- *
- *      2. Redistributions in binary form must reproduce the above
- *         copyright notice, this list of conditions and the following
- *         disclaimer in the documentation and/or other materials
- *         provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/* Copyright (C) 2017 Netronome Systems, Inc. */
 
 #include <linux/kernel.h>
 #include <linux/bitops.h>
@@ -113,42 +83,12 @@ nfp_hwmon_is_visible(const void *data, enum hwmon_sensor_types type, u32 attr,
 	return 0;
 }
 
-static u32 nfp_chip_config[] = {
-	HWMON_C_REGISTER_TZ,
-	0
-};
-
-static const struct hwmon_channel_info nfp_chip = {
-	.type = hwmon_chip,
-	.config = nfp_chip_config,
-};
-
-static u32 nfp_temp_config[] = {
-	HWMON_T_INPUT | HWMON_T_MAX | HWMON_T_CRIT,
-	0
-};
-
-static const struct hwmon_channel_info nfp_temp = {
-	.type = hwmon_temp,
-	.config = nfp_temp_config,
-};
-
-static u32 nfp_power_config[] = {
-	HWMON_P_INPUT | HWMON_P_MAX,
-	HWMON_P_INPUT,
-	HWMON_P_INPUT,
-	0
-};
-
-static const struct hwmon_channel_info nfp_power = {
-	.type = hwmon_power,
-	.config = nfp_power_config,
-};
-
-static const struct hwmon_channel_info *nfp_hwmon_info[] = {
-	&nfp_chip,
-	&nfp_temp,
-	&nfp_power,
+static const struct hwmon_channel_info * const nfp_hwmon_info[] = {
+	HWMON_CHANNEL_INFO(chip, HWMON_C_REGISTER_TZ),
+	HWMON_CHANNEL_INFO(temp, HWMON_T_INPUT | HWMON_T_MAX | HWMON_T_CRIT),
+	HWMON_CHANNEL_INFO(power, HWMON_P_INPUT | HWMON_P_MAX,
+			   HWMON_P_INPUT,
+			   HWMON_P_INPUT),
 	NULL
 };
 

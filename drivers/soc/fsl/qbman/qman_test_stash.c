@@ -103,19 +103,17 @@ static int on_all_cpus(int (*fn)(void))
 {
 	int cpu;
 
-	for_each_cpu(cpu, cpu_online_mask) {
+	for_each_online_cpu(cpu) {
 		struct bstrap bstrap = {
 			.fn = fn,
 			.started = ATOMIC_INIT(0)
 		};
-		struct task_struct *k = kthread_create(bstrap_fn, &bstrap,
-			"hotpotato%d", cpu);
+		struct task_struct *k = kthread_run_on_cpu(bstrap_fn, &bstrap,
+							   cpu, "hotpotato%d");
 		int ret;
 
 		if (IS_ERR(k))
 			return -ENOMEM;
-		kthread_bind(k, cpu);
-		wake_up_process(k);
 		/*
 		 * If we call kthread_stop() before the "wake up" has had an
 		 * effect, then the thread may exit with -EINTR without ever
@@ -221,7 +219,7 @@ static int allocate_frame_data(void)
 
 	pcfg = qman_get_qm_portal_config(qman_dma_portal);
 
-	__frame_ptr = kmalloc(4 * HP_NUM_WORDS, GFP_KERNEL);
+	__frame_ptr = kmalloc_array(4, HP_NUM_WORDS, GFP_KERNEL);
 	if (!__frame_ptr)
 		return -ENOMEM;
 
@@ -275,7 +273,8 @@ static inline int process_frame_data(struct hp_handler *handler,
 
 static enum qman_cb_dqrr_result normal_dqrr(struct qman_portal *portal,
 					    struct qman_fq *fq,
-					    const struct qm_dqrr_entry *dqrr)
+					    const struct qm_dqrr_entry *dqrr,
+					    bool sched_napi)
 {
 	struct hp_handler *handler = (struct hp_handler *)fq;
 
@@ -293,7 +292,8 @@ skip:
 
 static enum qman_cb_dqrr_result special_dqrr(struct qman_portal *portal,
 					     struct qman_fq *fq,
-					     const struct qm_dqrr_entry *dqrr)
+					     const struct qm_dqrr_entry *dqrr,
+					     bool sched_napi)
 {
 	struct hp_handler *handler = (struct hp_handler *)fq;
 

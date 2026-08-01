@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * SSM4567 amplifier audio driver
  *
@@ -6,8 +7,6 @@
  *
  * Based on code copyright/by:
  *   Copyright 2013 Analog Devices Inc.
- *
- * Licensed under the GPL-2.
  */
 
 #include <linux/acpi.h>
@@ -221,7 +220,7 @@ static int ssm4567_hw_params(struct snd_pcm_substream *substream,
 				SSM4567_DAC_FS_MASK, dacfs);
 }
 
-static int ssm4567_mute(struct snd_soc_dai *dai, int mute)
+static int ssm4567_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct ssm4567 *ssm4567 = snd_soc_component_get_drvdata(dai->component);
 	unsigned int val;
@@ -279,8 +278,8 @@ static int ssm4567_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	unsigned int ctrl1 = 0;
 	bool invert_fclk;
 
-	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	switch (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) {
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
 	default:
 		return -EINVAL;
@@ -370,6 +369,7 @@ static int ssm4567_set_bias_level(struct snd_soc_component *component,
 	enum snd_soc_bias_level level)
 {
 	struct ssm4567 *ssm4567 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	int ret = 0;
 
 	switch (level) {
@@ -378,7 +378,7 @@ static int ssm4567_set_bias_level(struct snd_soc_component *component,
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF)
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_OFF)
 			ret = ssm4567_set_power(ssm4567, true);
 		break;
 	case SND_SOC_BIAS_OFF:
@@ -391,9 +391,10 @@ static int ssm4567_set_bias_level(struct snd_soc_component *component,
 
 static const struct snd_soc_dai_ops ssm4567_dai_ops = {
 	.hw_params	= ssm4567_hw_params,
-	.digital_mute	= ssm4567_mute,
+	.mute_stream	= ssm4567_mute,
 	.set_fmt	= ssm4567_set_dai_fmt,
 	.set_tdm_slot	= ssm4567_set_tdm_slot,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver ssm4567_dai = {
@@ -427,7 +428,6 @@ static const struct snd_soc_component_driver ssm4567_component_driver = {
 	.num_dapm_routes	= ARRAY_SIZE(ssm4567_routes),
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config ssm4567_regmap_config = {
@@ -444,8 +444,7 @@ static const struct regmap_config ssm4567_regmap_config = {
 	.num_reg_defaults = ARRAY_SIZE(ssm4567_reg_defaults),
 };
 
-static int ssm4567_i2c_probe(struct i2c_client *i2c,
-	const struct i2c_device_id *id)
+static int ssm4567_i2c_probe(struct i2c_client *i2c)
 {
 	struct ssm4567 *ssm4567;
 	int ret;
@@ -473,7 +472,7 @@ static int ssm4567_i2c_probe(struct i2c_client *i2c,
 }
 
 static const struct i2c_device_id ssm4567_i2c_ids[] = {
-	{ "ssm4567", 0 },
+	{ .name = "ssm4567" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ssm4567_i2c_ids);

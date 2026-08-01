@@ -1,4 +1,5 @@
-/* -*- mode: asm -*-
+/* SPDX-License-Identifier: GPL-2.0-or-later
+** -*- mode: asm -*-
 **
 ** head.S -- This file contains the initial boot code for the
 **	     Linux/68k kernel.
@@ -25,11 +26,6 @@
 **            for linux-2.1.115
 ** 1999/02/11  Richard Zidlicky: added Q40 support (initial version 99/01/01)
 ** 2004/05/13 Kars de Jong: Finalised HP300 support
-**
-** This file is subject to the terms and conditions of the GNU General Public
-** License. See the file README.legal in the main directory of this archive
-** for more details.
-**
 */
 
 /*
@@ -57,7 +53,7 @@
  * Of course, readability is a subjective issue, so it will never be
  * argued that that goal was accomplished.  It was merely a goal.
  * A key way to help make code more readable is to give good
- * documentation.  So, the first thing you will find is exaustive
+ * documentation.  So, the first thing you will find is exhaustive
  * write-ups on the structure of the file, and the features of the
  * functional subroutines.
  *
@@ -255,16 +251,17 @@
 
 #include <linux/linkage.h>
 #include <linux/init.h>
+#include <linux/pgtable.h>
 #include <asm/bootinfo.h>
 #include <asm/bootinfo-amiga.h>
 #include <asm/bootinfo-atari.h>
 #include <asm/bootinfo-hp300.h>
 #include <asm/bootinfo-mac.h>
 #include <asm/bootinfo-q40.h>
+#include <asm/bootinfo-virt.h>
 #include <asm/bootinfo-vme.h>
 #include <asm/setup.h>
 #include <asm/entry.h>
-#include <asm/pgtable.h>
 #include <asm/page.h>
 #include <asm/asm-offsets.h>
 #ifdef CONFIG_MAC
@@ -534,6 +531,7 @@ func_define	putn,1
 #define is_not_apollo(lab) cmpl &MACH_APOLLO,%pc@(m68k_machtype); jne lab
 #define is_not_q40(lab) cmpl &MACH_Q40,%pc@(m68k_machtype); jne lab
 #define is_not_sun3x(lab) cmpl &MACH_SUN3X,%pc@(m68k_machtype); jne lab
+#define is_not_virt(lab) cmpl &MACH_VIRT,%pc@(m68k_machtype); jne lab
 
 #define hasnt_leds(lab) cmpl &MACH_HP300,%pc@(m68k_machtype); \
 			jeq 42f; \
@@ -647,6 +645,14 @@ ENTRY(__start)
 L(test_notmac):
 #endif /* CONFIG_MAC */
 
+#ifdef CONFIG_VIRT
+	is_not_virt(L(test_notvirt))
+
+	get_bi_record BI_VIRT_GF_TTY_BASE
+	lea	%pc@(L(virt_gf_tty_base)),%a1
+	movel	%a0@,%a1@
+L(test_notvirt):
+#endif /* CONFIG_VIRT */
 
 /*
  * There are ultimately two pieces of information we want for all kinds of
@@ -1104,7 +1110,7 @@ L(not147):
 	jbra	L(mmu_init_done)
 
 L(not16x):
-#endif	/* CONFIG_MVME162 | CONFIG_MVME167 */
+#endif	/* CONFIG_MVME16x */
 
 #ifdef CONFIG_BVME6000
 
@@ -1237,6 +1243,13 @@ L(mmu_init_not_mac):
 L(notsun3x):
 #endif
 
+#ifdef CONFIG_VIRT
+	is_not_virt(L(novirt))
+	mmu_map_tt	#1,#0xFF000000,#0x01000000,#_PAGE_NOCACHE_S
+	jbra    L(mmu_init_done)
+L(novirt):
+#endif
+
 #ifdef CONFIG_APOLLO
 	is_not_apollo(L(notapollo))
 
@@ -1304,7 +1317,7 @@ L(mmu_fixup_done):
  * mmu_engage
  *
  * This chunk of code performs the gruesome task of engaging the MMU.
- * The reason its gruesome is because when the MMU becomes engaged it
+ * The reason it's gruesome is because when the MMU becomes engaged it
  * maps logical addresses to physical addresses.  The Program Counter
  * register is then passed through the MMU before the next instruction
  * is fetched (the instruction following the engage MMU instruction).
@@ -1369,7 +1382,7 @@ L(mmu_fixup_done):
 /*
  * After this point no new memory is allocated and
  * the start of available memory is stored in availmem.
- * (The bootmem allocator requires now the physicall address.)
+ * (The bootmem allocator requires now the physical address.)
  */
 
 	movel	L(memory_start),availmem
@@ -1547,7 +1560,7 @@ func_return	get_bi_record
  *	seven bits of the logical address (LA) are used as an
  *	index into the "root table."  Each entry in the root
  *	table has a bit which specifies if it's a valid pointer to a
- *	pointer table.  Each entry defines a 32KMeg range of memory.
+ *	pointer table.  Each entry defines a 32Meg range of memory.
  *	If an entry is invalid then that logical range of 32M is
  *	invalid and references to that range of memory (when the MMU
  *	is enabled) will fault.  If the entry is valid, then it does
@@ -1584,7 +1597,7 @@ func_return	get_bi_record
  *		bits 17..12 - index into the Page Table
  *		bits 11..0  - offset into a particular 4K page
  *
- *	The algorithms which follows do one thing: they abstract
+ *	The algorithms which follow do one thing: they abstract
  *	the MMU hardware.  For example, there are three kinds of
  *	cache settings that are relevant.  Either, memory is
  *	being mapped in which case it is either Kernel Code (or
@@ -2082,7 +2095,7 @@ func_return	mmu_map_tt
  *	mmu_map
  *
  *	This routine will map a range of memory using a pointer
- *	table and allocating the pages on the fly from the kernel.
+ *	table and allocate the pages on the fly from the kernel.
  *	The pointer table does not have to be already linked into
  *	the root table, this routine will do that if necessary.
  *
@@ -2528,7 +2541,7 @@ func_start	mmu_get_root_table_entry,%d0/%a1
 
 	/* Find the start of free memory, get_bi_record does this for us,
 	 * as the bootinfo structure is located directly behind the kernel
-	 * and and we simply search for the last entry.
+	 * we simply search for the last entry.
 	 */
 	get_bi_record	BI_LAST
 	addw	#PAGESIZE-1,%a0
@@ -2654,7 +2667,7 @@ func_start	mmu_get_page_table_entry,%d0/%a1
 	jne	2f
 
 	/* If the page table entry doesn't exist, we allocate a complete new
-	 * page and use it as one continues big page table which can cover
+	 * page and use it as one continuous big page table which can cover
 	 * 4MB of memory, nearly almost all mappings have that alignment.
 	 */
 	get_new_page
@@ -3186,6 +3199,14 @@ func_start	serial_putc,%d0/%d1/%a0/%a1
 3:
 #endif
 
+#ifdef CONFIG_VIRT
+	is_not_virt(1f)
+
+	movel L(virt_gf_tty_base),%a1
+	movel %d0,%a1@(GF_PUT_CHAR)
+1:
+#endif
+
 L(serial_putc_done):
 func_return	serial_putc
 
@@ -3242,8 +3263,8 @@ func_return	putn
  *	turns around and calls the internal routines.  This routine
  *	is used by the boot console.
  *
- *	The calling parameters are:
- *		void debug_cons_nputs(const char *str, unsigned length)
+ *	The function signature is -
+ *		void debug_cons_nputs(struct console *c, const char *s, unsigned int n)
  *
  *	This routine does NOT understand variable arguments only
  *	simple strings!
@@ -3252,8 +3273,8 @@ ENTRY(debug_cons_nputs)
 	moveml	%d0/%d1/%a0,%sp@-
 	movew	%sr,%sp@-
 	ori	#0x0700,%sr
-	movel	%sp@(18),%a0		/* fetch parameter */
-	movel	%sp@(22),%d1		/* fetch parameter */
+	movel	%sp@(22),%a0		/* char *s */
+	movel	%sp@(26),%d1		/* unsigned int n */
 	jra	2f
 1:
 #ifdef CONSOLE_DEBUG
@@ -3379,6 +3400,7 @@ L(console_clear_loop):
 
 	movel	%d4,%d1				/* screen height in pixels */
 	divul	%a0@(FONT_DESC_HEIGHT),%d1	/* d1 = max num rows */
+	subql	#1,%d1				/* row range is 0 to num - 1 */
 
 	movel	%d0,%a2@(Lconsole_struct_num_columns)
 	movel	%d1,%a2@(Lconsole_struct_num_rows)
@@ -3511,61 +3533,44 @@ func_start	console_putc,%a0/%a1/%d0-%d7
 	tstl	%pc@(L(console_font))
 	jeq	L(console_exit)
 
+	lea	%pc@(L(console_globals)),%a0
+
 	/* Output character in d7 on console.
 	 */
 	movel	ARG1,%d7
 	cmpib	#'\n',%d7
-	jbne	1f
-
-	/* A little safe recursion is good for the soul */
-	console_putc	#'\r'
-1:
-	lea	%pc@(L(console_globals)),%a0
-
-	cmpib	#10,%d7
 	jne	L(console_not_lf)
+
+	clrl	%a0@(Lconsole_struct_cur_column)	/* implicit \r */
+
 	movel	%a0@(Lconsole_struct_cur_row),%d0
-	addil	#1,%d0
-	movel	%d0,%a0@(Lconsole_struct_cur_row)
 	movel	%a0@(Lconsole_struct_num_rows),%d1
 	cmpl	%d1,%d0
 	jcs	1f
-	subil	#1,%d0
-	movel	%d0,%a0@(Lconsole_struct_cur_row)
 	console_scroll
+	jra	L(console_exit)
 1:
+	addql	#1,%d0
+	movel	%d0,%a0@(Lconsole_struct_cur_row)
 	jra	L(console_exit)
 
 L(console_not_lf):
-	cmpib	#13,%d7
-	jne	L(console_not_cr)
+	cmpib	#'\r',%d7
+	jne	L(console_not_lf_not_cr)
 	clrl	%a0@(Lconsole_struct_cur_column)
 	jra	L(console_exit)
 
-L(console_not_cr):
-	cmpib	#1,%d7
-	jne	L(console_not_home)
-	clrl	%a0@(Lconsole_struct_cur_row)
-	clrl	%a0@(Lconsole_struct_cur_column)
-	jra	L(console_exit)
-
-/*
- *	At this point we know that the %d7 character is going to be
- *	rendered on the screen.  Register usage is -
- *		a0 = pointer to console globals
- *		a1 = font data
- *		d0 = cursor column
- *		d1 = cursor row to draw the character
- *		d7 = character number
- */
-L(console_not_home):
+	/*
+	 *	At this point we know that the %d7 character is going to be
+	 *	rendered on the screen.  Register usage is -
+	 *	a0 = pointer to console globals
+	 *	a1 = font data
+	 *	d0 = cursor column
+	 *	d1 = cursor row to draw the character
+	 *	d7 = character number
+	 */
+L(console_not_lf_not_cr):
 	movel	%a0@(Lconsole_struct_cur_column),%d0
-	addql	#1,%a0@(Lconsole_struct_cur_column)
-	movel	%a0@(Lconsole_struct_num_columns),%d1
-	cmpl	%d1,%d0
-	jcs	1f
-	console_putc	#'\n'	/* recursion is OK! */
-1:
 	movel	%a0@(Lconsole_struct_cur_row),%d1
 
 	/*
@@ -3611,6 +3616,23 @@ L(console_do_font_scanline):
 	subl	%a0@(FONT_DESC_WIDTH),%d0
 	addq	#1,%d1
 	dbra	%d7,L(console_read_char_scanline)
+
+	/*
+	 *	Register usage in the code below:
+	 *	a0 = pointer to console globals
+	 *	d0 = cursor column
+	 *	d1 = cursor column limit
+	 */
+
+	lea	%pc@(L(console_globals)),%a0
+
+	movel	%a0@(Lconsole_struct_cur_column),%d0
+	addql	#1,%d0
+	movel	%d0,%a0@(Lconsole_struct_cur_column)	/* Update cursor pos */
+	movel	%a0@(Lconsole_struct_num_columns),%d1
+	cmpl	%d1,%d0
+	jcs	L(console_exit)
+	console_putc	#'\n'		/* Line wrap using tail recursion */
 
 L(console_exit):
 func_return	console_putc
@@ -3865,3 +3887,9 @@ q40_mem_cptr:
 L(q40_do_debug):
 	.long	0
 #endif
+
+#if defined(CONFIG_VIRT)
+GF_PUT_CHAR = 0x00
+L(virt_gf_tty_base):
+	.long 0
+#endif /* CONFIG_VIRT */

@@ -1,12 +1,12 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: MIT */
 #if !defined(_RADEON_TRACE_H) || defined(TRACE_HEADER_MULTI_READ)
 #define _RADEON_TRACE_H_
 
 #include <linux/stringify.h>
-#include <linux/types.h>
 #include <linux/tracepoint.h>
+#include <linux/types.h>
 
-#include <drm/drmP.h>
+#include <drm/drm_file.h>
 
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM radeon
@@ -22,7 +22,7 @@ TRACE_EVENT(radeon_bo_create,
 
 	    TP_fast_assign(
 			   __entry->bo = bo;
-			   __entry->pages = bo->tbo.num_pages;
+			   __entry->pages = PFN_UP(bo->tbo.resource->size);
 			   ),
 	    TP_printk("bo=%p, pages=%u", __entry->bo, __entry->pages)
 );

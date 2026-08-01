@@ -1,20 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *   Copyright (C) International Business Machines Corp., 2000-2002
  *   Portions Copyright (C) Christoph Hellwig, 2001-2002
- *
- *   This program is free software;  you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY;  without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- *   the GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program;  if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 #ifndef	_H_JFS_METAPAGE
 #define _H_JFS_METAPAGE
@@ -37,7 +24,7 @@ struct metapage {
 	wait_queue_head_t wait;
 
 	/* implementation */
-	struct page *page;
+	struct folio *folio;
 	struct super_block *sb;
 	unsigned int logical_size;
 
@@ -103,14 +90,14 @@ static inline void discard_metapage(struct metapage *mp)
 
 static inline void metapage_nohomeok(struct metapage *mp)
 {
-	struct page *page = mp->page;
-	lock_page(page);
+	struct folio *folio = mp->folio;
+	folio_lock(folio);
 	if (!mp->nohomeok++) {
 		mark_metapage_dirty(mp);
-		get_page(page);
-		wait_on_page_writeback(page);
+		folio_get(folio);
+		folio_wait_writeback(folio);
 	}
-	unlock_page(page);
+	folio_unlock(folio);
 }
 
 /*
@@ -120,7 +107,7 @@ static inline void metapage_nohomeok(struct metapage *mp)
 static inline void metapage_wait_for_io(struct metapage *mp)
 {
 	if (test_bit(META_io, &mp->flag))
-		wait_on_page_writeback(mp->page);
+		folio_wait_writeback(mp->folio);
 }
 
 /*
@@ -129,7 +116,7 @@ static inline void metapage_wait_for_io(struct metapage *mp)
 static inline void _metapage_homeok(struct metapage *mp)
 {
 	if (!--mp->nohomeok)
-		put_page(mp->page);
+		folio_put(mp->folio);
 }
 
 static inline void metapage_homeok(struct metapage *mp)

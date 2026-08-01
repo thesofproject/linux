@@ -1,23 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Intel(R) Ethernet Switch Host Interface Driver
- * Copyright(c) 2013 - 2017 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- */
+/* Copyright(c) 2013 - 2019 Intel Corporation. */
 
 #include <linux/types.h>
 #include <linux/module.h>
@@ -29,18 +11,14 @@
 
 #include "fm10k.h"
 
-#define DRV_VERSION	"0.23.4-k"
 #define DRV_SUMMARY	"Intel(R) Ethernet Switch Host Interface Driver"
-const char fm10k_driver_version[] = DRV_VERSION;
 char fm10k_driver_name[] = "fm10k";
 static const char fm10k_driver_string[] = DRV_SUMMARY;
 static const char fm10k_copyright[] =
-	"Copyright(c) 2013 - 2018 Intel Corporation.";
+	"Copyright(c) 2013 - 2019 Intel Corporation.";
 
-MODULE_AUTHOR("Intel Corporation, <linux.nics@intel.com>");
 MODULE_DESCRIPTION(DRV_SUMMARY);
-MODULE_LICENSE("GPL");
-MODULE_VERSION(DRV_VERSION);
+MODULE_LICENSE("GPL v2");
 
 /* single workqueue for entire fm10k driver */
 struct workqueue_struct *fm10k_workqueue;
@@ -53,16 +31,26 @@ struct workqueue_struct *fm10k_workqueue;
  **/
 static int __init fm10k_init_module(void)
 {
-	pr_info("%s - version %s\n", fm10k_driver_string, fm10k_driver_version);
+	int ret;
+
+	pr_info("%s\n", fm10k_driver_string);
 	pr_info("%s\n", fm10k_copyright);
 
 	/* create driver workqueue */
-	fm10k_workqueue = alloc_workqueue("%s", WQ_MEM_RECLAIM, 0,
+	fm10k_workqueue = alloc_workqueue("%s", WQ_MEM_RECLAIM | WQ_PERCPU, 0,
 					  fm10k_driver_name);
+	if (!fm10k_workqueue)
+		return -ENOMEM;
 
 	fm10k_dbg_init();
 
-	return fm10k_register_pci_driver();
+	ret = fm10k_register_pci_driver();
+	if (ret) {
+		fm10k_dbg_exit();
+		destroy_workqueue(fm10k_workqueue);
+	}
+
+	return ret;
 }
 module_init(fm10k_init_module);
 
@@ -213,17 +201,12 @@ static void fm10k_reuse_rx_page(struct fm10k_ring *rx_ring,
 					 DMA_FROM_DEVICE);
 }
 
-static inline bool fm10k_page_is_reserved(struct page *page)
-{
-	return (page_to_nid(page) != numa_mem_id()) || page_is_pfmemalloc(page);
-}
-
 static bool fm10k_can_reuse_rx_page(struct fm10k_rx_buffer *rx_buffer,
 				    struct page *page,
 				    unsigned int __maybe_unused truesize)
 {
-	/* avoid re-using remote pages */
-	if (unlikely(fm10k_page_is_reserved(page)))
+	/* avoid re-using remote and pfmemalloc pages */
+	if (!dev_page_is_reusable(page))
 		return false;
 
 #if (PAGE_SIZE < 8192)
@@ -284,8 +267,8 @@ static bool fm10k_add_rx_frag(struct fm10k_rx_buffer *rx_buffer,
 	if (likely(size <= FM10K_RX_HDR_LEN)) {
 		memcpy(__skb_put(skb, size), va, ALIGN(size, sizeof(long)));
 
-		/* page is not reserved, we can reuse buffer as-is */
-		if (likely(!fm10k_page_is_reserved(page)))
+		/* page is reusable, we can reuse buffer as-is */
+		if (dev_page_is_reusable(page))
 			return true;
 
 		/* this page cannot be reused so discard it */
@@ -296,7 +279,7 @@ static bool fm10k_add_rx_frag(struct fm10k_rx_buffer *rx_buffer,
 	/* we need the header to contain the greater of either ETH_HLEN or
 	 * 60 bytes if the skb->len is less than 60 for skb_pad.
 	 */
-	pull_len = eth_get_headlen(va, FM10K_RX_HDR_LEN);
+	pull_len = eth_get_headlen(skb->dev, va, FM10K_RX_HDR_LEN);
 
 	/* align pull length to size of long to optimize memcpy performance */
 	memcpy(__skb_put(skb, pull_len), va, ALIGN(pull_len, sizeof(long)));
@@ -329,10 +312,7 @@ static struct sk_buff *fm10k_fetch_rx_buffer(struct fm10k_ring *rx_ring,
 				  rx_buffer->page_offset;
 
 		/* prefetch first cache line of first page */
-		prefetch(page_addr);
-#if L1_CACHE_BYTES < 128
-		prefetch(page_addr + L1_CACHE_BYTES);
-#endif
+		net_prefetch(page_addr);
 
 		/* allocate a skb to store the frags */
 		skb = napi_alloc_skb(&rx_ring->q_vector->napi,
@@ -445,15 +425,14 @@ static void fm10k_type_trans(struct fm10k_ring *rx_ring,
 			l2_accel = NULL;
 	}
 
-	skb->protocol = eth_type_trans(skb, dev);
-
 	/* Record Rx queue, or update macvlan statistics */
 	if (!l2_accel)
 		skb_record_rx_queue(skb, rx_ring->queue_index);
 	else
 		macvlan_count_rx(netdev_priv(dev), skb->len + ETH_HLEN, true,
-				 (skb->pkt_type == PACKET_BROADCAST) ||
-				 (skb->pkt_type == PACKET_MULTICAST));
+				 false);
+
+	skb->protocol = eth_type_trans(skb, dev);
 }
 
 /**
@@ -655,15 +634,8 @@ static int fm10k_clean_rx_irq(struct fm10k_q_vector *q_vector,
 static struct ethhdr *fm10k_port_is_vxlan(struct sk_buff *skb)
 {
 	struct fm10k_intfc *interface = netdev_priv(skb->dev);
-	struct fm10k_udp_port *vxlan_port;
 
-	/* we can only offload a vxlan if we recognize it as such */
-	vxlan_port = list_first_entry_or_null(&interface->vxlan_port,
-					      struct fm10k_udp_port, list);
-
-	if (!vxlan_port)
-		return NULL;
-	if (vxlan_port->port != udp_hdr(skb)->dest)
+	if (interface->vxlan_port != udp_hdr(skb)->dest)
 		return NULL;
 
 	/* return offset of udp_hdr plus 8 bytes for VXLAN header */
@@ -876,7 +848,7 @@ static void fm10k_tx_csum(struct fm10k_ring *tx_ring,
 	case IPPROTO_GRE:
 		if (skb->encapsulation)
 			break;
-		/* fall through */
+		fallthrough;
 	default:
 		if (unlikely(net_ratelimit())) {
 			dev_warn(tx_ring->dev,
@@ -963,7 +935,7 @@ static void fm10k_tx_map(struct fm10k_ring *tx_ring,
 	struct sk_buff *skb = first->skb;
 	struct fm10k_tx_buffer *tx_buffer;
 	struct fm10k_tx_desc *tx_desc;
-	struct skb_frag_struct *frag;
+	skb_frag_t *frag;
 	unsigned char *data;
 	dma_addr_t dma;
 	unsigned int data_len, size;
@@ -1054,13 +1026,8 @@ static void fm10k_tx_map(struct fm10k_ring *tx_ring,
 	fm10k_maybe_stop_tx(tx_ring, DESC_NEEDED);
 
 	/* notify HW of packet */
-	if (netif_xmit_stopped(txring_txq(tx_ring)) || !skb->xmit_more) {
+	if (netif_xmit_stopped(txring_txq(tx_ring)) || !netdev_xmit_more()) {
 		writel(i, tx_ring->tail);
-
-		/* we need this if more than one processor can write to our tail
-		 * at a time, it synchronizes IO on IA64/Altix systems
-		 */
-		mmiowb();
 	}
 
 	return;
@@ -1095,8 +1062,11 @@ netdev_tx_t fm10k_xmit_frame_ring(struct sk_buff *skb,
 	 *       + 2 desc gap to keep tail from touching head
 	 * otherwise try next time
 	 */
-	for (f = 0; f < skb_shinfo(skb)->nr_frags; f++)
-		count += TXD_USE_COUNT(skb_shinfo(skb)->frags[f].size);
+	for (f = 0; f < skb_shinfo(skb)->nr_frags; f++) {
+		skb_frag_t *frag = &skb_shinfo(skb)->frags[f];
+
+		count += TXD_USE_COUNT(skb_frag_size(frag));
+	}
 
 	if (fm10k_maybe_stop_tx(tx_ring, count + 3)) {
 		tx_ring->tx_stats.tx_busy++;
@@ -1484,11 +1454,11 @@ static int fm10k_poll(struct napi_struct *napi, int budget)
 	if (!clean_complete)
 		return budget;
 
-	/* all work done, exit the polling mode */
-	napi_complete_done(napi, work_done);
-
-	/* re-enable the q_vector */
-	fm10k_qv_enable(q_vector);
+	/* Exit the polling mode, but don't re-enable interrupts if stack might
+	 * poll us due to busy-polling
+	 */
+	if (likely(napi_complete_done(napi, work_done)))
+		fm10k_qv_enable(q_vector);
 
 	return min(work_done, budget - 1);
 }
@@ -1576,7 +1546,7 @@ static bool fm10k_set_rss_queues(struct fm10k_intfc *interface)
  * important, starting with the "most" number of features turned on at once,
  * and ending with the smallest set of features.  This way large combinations
  * can be allocated if they're turned on, and smaller combinations are the
- * fallthrough conditions.
+ * fall through conditions.
  *
  **/
 static void fm10k_set_num_queues(struct fm10k_intfc *interface)
@@ -1622,20 +1592,17 @@ static int fm10k_alloc_q_vector(struct fm10k_intfc *interface,
 {
 	struct fm10k_q_vector *q_vector;
 	struct fm10k_ring *ring;
-	int ring_count, size;
+	int ring_count;
 
 	ring_count = txr_count + rxr_count;
-	size = sizeof(struct fm10k_q_vector) +
-	       (sizeof(struct fm10k_ring) * ring_count);
 
 	/* allocate q_vector and rings */
-	q_vector = kzalloc(size, GFP_KERNEL);
+	q_vector = kzalloc_flex(*q_vector, ring, ring_count);
 	if (!q_vector)
 		return -ENOMEM;
 
 	/* initialize NAPI */
-	netif_napi_add(interface->netdev, &q_vector->napi,
-		       fm10k_poll, NAPI_POLL_WEIGHT);
+	netif_napi_add(interface->netdev, &q_vector->napi, fm10k_poll);
 
 	/* tie q_vector and interface together */
 	interface->q_vector[v_idx] = q_vector;
@@ -1813,7 +1780,7 @@ static void fm10k_free_q_vectors(struct fm10k_intfc *interface)
 }
 
 /**
- * f10k_reset_msix_capability - reset MSI-X capability
+ * fm10k_reset_msix_capability - reset MSI-X capability
  * @interface: board private structure to initialize
  *
  * Reset the MSI-X capability back to its starting state
@@ -1826,7 +1793,7 @@ static void fm10k_reset_msix_capability(struct fm10k_intfc *interface)
 }
 
 /**
- * f10k_init_msix_capability - configure MSI-X capability
+ * fm10k_init_msix_capability - configure MSI-X capability
  * @interface: board private structure to initialize
  *
  * Attempt to configure the interrupts using the best available
@@ -1847,7 +1814,7 @@ static int fm10k_init_msix_capability(struct fm10k_intfc *interface)
 	v_budget = min_t(u16, v_budget, num_online_cpus());
 
 	/* account for vectors not related to queues */
-	v_budget += NON_Q_VECTORS(hw);
+	v_budget += NON_Q_VECTORS;
 
 	/* At the same time, hardware can only support a maximum of
 	 * hw.mac->max_msix_vectors vectors.  With features
@@ -1858,8 +1825,7 @@ static int fm10k_init_msix_capability(struct fm10k_intfc *interface)
 	v_budget = min_t(int, v_budget, hw->mac.max_msix_vectors);
 
 	/* A failure in MSI-X entry allocation is fatal. */
-	interface->msix_entries = kcalloc(v_budget, sizeof(struct msix_entry),
-					  GFP_KERNEL);
+	interface->msix_entries = kzalloc_objs(struct msix_entry, v_budget);
 	if (!interface->msix_entries)
 		return -ENOMEM;
 
@@ -1879,7 +1845,7 @@ static int fm10k_init_msix_capability(struct fm10k_intfc *interface)
 	}
 
 	/* record the number of queues available for q_vectors */
-	interface->num_q_vectors = v_budget - NON_Q_VECTORS(hw);
+	interface->num_q_vectors = v_budget - NON_Q_VECTORS;
 
 	return 0;
 }
@@ -1893,7 +1859,7 @@ static int fm10k_init_msix_capability(struct fm10k_intfc *interface)
 static bool fm10k_cache_ring_qos(struct fm10k_intfc *interface)
 {
 	struct net_device *dev = interface->netdev;
-	int pc, offset, rss_i, i, q_idx;
+	int pc, offset, rss_i, i;
 	u16 pc_stride = interface->ring_feature[RING_F_QOS].mask + 1;
 	u8 num_pcs = netdev_get_num_tc(dev);
 
@@ -1903,7 +1869,8 @@ static bool fm10k_cache_ring_qos(struct fm10k_intfc *interface)
 	rss_i = interface->ring_feature[RING_F_RSS].indices;
 
 	for (pc = 0, offset = 0; pc < num_pcs; pc++, offset += rss_i) {
-		q_idx = pc;
+		int q_idx = pc;
+
 		for (i = 0; i < rss_i; i++) {
 			interface->tx_ring[offset + i]->reg_idx = q_idx;
 			interface->tx_ring[offset + i]->qos_pc = pc;

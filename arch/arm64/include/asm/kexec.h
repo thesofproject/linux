@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * kexec for arm64
  *
  * Copyright (C) Linaro.
  * Copyright (C) Huawei Futurewei Technologies.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef _ARM64_KEXEC_H
@@ -28,7 +25,7 @@
 
 #define KEXEC_ARCH KEXEC_ARCH_AARCH64
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 /**
  * crash_setup_regs() - save registers for the panic kernel
@@ -83,16 +80,56 @@ static inline void crash_setup_regs(struct pt_regs *newregs,
 	}
 }
 
-#if defined(CONFIG_KEXEC_CORE) && defined(CONFIG_HIBERNATION)
+#if defined(CONFIG_CRASH_DUMP) && defined(CONFIG_HIBERNATION)
 extern bool crash_is_nosave(unsigned long pfn);
 extern void crash_prepare_suspend(void);
 extern void crash_post_resume(void);
+
+void crash_free_reserved_phys_range(unsigned long begin, unsigned long end);
+#define crash_free_reserved_phys_range crash_free_reserved_phys_range
 #else
 static inline bool crash_is_nosave(unsigned long pfn) {return false; }
 static inline void crash_prepare_suspend(void) {}
 static inline void crash_post_resume(void) {}
 #endif
 
-#endif /* __ASSEMBLY__ */
+struct kimage;
+
+#if defined(CONFIG_KEXEC_CORE)
+void cpu_soft_restart(unsigned long el2_switch, unsigned long entry,
+		      unsigned long arg0, unsigned long arg1,
+		      unsigned long arg2);
+
+int machine_kexec_post_load(struct kimage *image);
+#define machine_kexec_post_load machine_kexec_post_load
+#endif
+
+#define ARCH_HAS_KIMAGE_ARCH
+
+struct kimage_arch {
+	void *dtb;
+	phys_addr_t dtb_mem;
+	phys_addr_t kern_reloc;
+	phys_addr_t el2_vectors;
+	phys_addr_t ttbr0;
+	phys_addr_t ttbr1;
+	phys_addr_t zero_page;
+	unsigned long phys_offset;
+	unsigned long t0sz;
+};
+
+#ifdef CONFIG_KEXEC_FILE
+extern const struct kexec_file_ops kexec_image_ops;
+
+int arch_kimage_file_post_load_cleanup(struct kimage *image);
+#define arch_kimage_file_post_load_cleanup arch_kimage_file_post_load_cleanup
+
+extern int load_other_segments(struct kimage *image,
+		unsigned long kernel_load_addr, unsigned long kernel_size,
+		char *initrd, unsigned long initrd_len,
+		char *cmdline);
+#endif
+
+#endif /* __ASSEMBLER__ */
 
 #endif

@@ -1,15 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2016, Jelle van der Waa <jelle@vdwaa.nl>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #include <linux/delay.h>
@@ -20,7 +11,7 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/regulator/consumer.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #define ZET6223_MAX_FINGERS		16
 #define ZET6223_MAX_PKT_SIZE		(3 + 4 * ZET6223_MAX_FINGERS)
@@ -34,8 +25,6 @@
 struct zet6223_ts {
 	struct i2c_client *client;
 	struct input_dev *input;
-	struct regulator *vcc;
-	struct regulator *vio;
 	struct touchscreen_properties prop;
 	struct regulator_bulk_data supplies[2];
 	u16 max_x;
@@ -176,8 +165,7 @@ static int zet6223_query_device(struct zet6223_ts *ts)
 	return 0;
 }
 
-static int zet6223_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int zet6223_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct zet6223_ts *ts;
@@ -248,7 +236,7 @@ static const struct of_device_id zet6223_of_match[] = {
 MODULE_DEVICE_TABLE(of, zet6223_of_match);
 
 static const struct i2c_device_id zet6223_id[] = {
-	{ "zet6223", 0},
+	{ .name = "zet6223" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, zet6223_id);

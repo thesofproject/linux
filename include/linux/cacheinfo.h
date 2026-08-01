@@ -3,7 +3,8 @@
 #define _LINUX_CACHEINFO_H
 
 #include <linux/bitops.h>
-#include <linux/cpumask.h>
+#include <linux/cpuhplock.h>
+#include <linux/cpumask_types.h>
 #include <linux/smp.h>
 
 struct device_node;
@@ -16,6 +17,8 @@ enum cache_type {
 	CACHE_TYPE_SEPARATE = CACHE_TYPE_INST | CACHE_TYPE_DATA,
 	CACHE_TYPE_UNIFIED = BIT(2),
 };
+
+extern unsigned int coherency_max_size;
 
 /**
  * struct cacheinfo - represent a cache leaf node
@@ -34,9 +37,8 @@ enum cache_type {
  * @shared_cpu_map: logical cpumask representing all the cpus sharing
  *	this cache node
  * @attributes: bitfield representing various cache attributes
- * @of_node: if devicetree is used, this represents either the cpu node in
- *	case there's no explicit cache node or the cache node itself in the
- *	device tree
+ * @fw_token: Unique value used to determine if different cacheinfo
+ *	structures represent a single hardware cache instance.
  * @disable_sysfs: indicates whether this node is visible to the user via
  *	sysfs or not
  * @priv: pointer to any private data structure specific to particular
@@ -65,41 +67,103 @@ struct cacheinfo {
 #define CACHE_ALLOCATE_POLICY_MASK	\
 	(CACHE_READ_ALLOCATE | CACHE_WRITE_ALLOCATE)
 #define CACHE_ID		BIT(4)
-
-	struct device_node *of_node;
+	void *fw_token;
 	bool disable_sysfs;
 	void *priv;
 };
 
 struct cpu_cacheinfo {
 	struct cacheinfo *info_list;
+	unsigned int per_cpu_data_slice_size;
 	unsigned int num_levels;
 	unsigned int num_leaves;
 	bool cpu_map_populated;
+	bool early_ci_levels;
 };
 
-/*
- * Helpers to make sure "func" is executed on the cpu whose cache
- * attributes are being detected
- */
-#define DEFINE_SMP_CALL_CACHE_FUNCTION(func)			\
-static inline void _##func(void *ret)				\
-{								\
-	int cpu = smp_processor_id();				\
-	*(int *)ret = __##func(cpu);				\
-}								\
-								\
-int func(unsigned int cpu)					\
-{								\
-	int ret;						\
-	smp_call_function_single(cpu, _##func, &ret, true);	\
-	return ret;						\
-}
-
 struct cpu_cacheinfo *get_cpu_cacheinfo(unsigned int cpu);
+int early_cache_level(unsigned int cpu);
 int init_cache_level(unsigned int cpu);
+int init_of_cache_level(unsigned int cpu);
 int populate_cache_leaves(unsigned int cpu);
+int cache_setup_acpi(unsigned int cpu);
+bool last_level_cache_is_valid(unsigned int cpu);
+bool last_level_cache_is_shared(unsigned int cpu_x, unsigned int cpu_y);
+struct cacheinfo *get_cpu_cacheinfo_llc(unsigned int cpu);
+int fetch_cache_info(unsigned int cpu);
+int detect_cache_attributes(unsigned int cpu);
+#ifndef CONFIG_ACPI_PPTT
+/*
+ * acpi_get_cache_info() is only called on ACPI enabled
+ * platforms using the PPTT for topology. This means that if
+ * the platform supports other firmware configuration methods
+ * we need to stub out the call when ACPI is disabled.
+ * ACPI enabled platforms not using PPTT won't be making calls
+ * to this function so we need not worry about them.
+ */
+static inline
+int acpi_get_cache_info(unsigned int cpu,
+			unsigned int *levels, unsigned int *split_levels)
+{
+	return -ENOENT;
+}
+#else
+int acpi_get_cache_info(unsigned int cpu,
+			unsigned int *levels, unsigned int *split_levels);
+#endif
 
 const struct attribute_group *cache_get_priv_group(struct cacheinfo *this_leaf);
+
+/*
+ * Get the cacheinfo structure for the cache associated with @cpu at
+ * level @level.
+ * cpuhp lock must be held.
+ */
+static inline struct cacheinfo *get_cpu_cacheinfo_level(int cpu, int level)
+{
+	struct cpu_cacheinfo *ci = get_cpu_cacheinfo(cpu);
+	int i;
+
+	lockdep_assert_cpus_held();
+
+	for (i = 0; i < ci->num_leaves; i++) {
+		if (ci->info_list[i].level == level) {
+			if (ci->info_list[i].attributes & CACHE_ID)
+				return &ci->info_list[i];
+			return NULL;
+		}
+	}
+
+	return NULL;
+}
+
+/*
+ * Get the id of the cache associated with @cpu at level @level.
+ * cpuhp lock must be held.
+ */
+static inline int get_cpu_cacheinfo_id(int cpu, int level)
+{
+	struct cacheinfo *ci = get_cpu_cacheinfo_level(cpu, level);
+
+	return ci ? ci->id : -1;
+}
+
+#if defined(CONFIG_ARM64) || defined(CONFIG_ARM)
+#define use_arch_cache_info()	(true)
+#else
+#define use_arch_cache_info()	(false)
+#endif
+
+#ifndef CONFIG_ARCH_HAS_CPU_CACHE_ALIASING
+#define cpu_dcache_is_aliasing()	false
+#define cpu_icache_is_aliasing()	cpu_dcache_is_aliasing()
+#else
+#include <asm/cachetype.h>
+
+#ifndef cpu_icache_is_aliasing
+#define cpu_icache_is_aliasing()	cpu_dcache_is_aliasing()
+#endif
+
+#endif
 
 #endif /* _LINUX_CACHEINFO_H */

@@ -1,22 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2011 matt mooney <mfm@muteddisk.com>
  *               2005-2007 Takahiro Hirofuchi
  * Copyright (C) 2015-2016 Samsung Electronics
  *               Igor Kotrasinski <i.kotrasinsk@samsung.com>
  *               Krzysztof Opasiak <k.opasiak@samsung.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifdef HAVE_CONFIG_H
@@ -408,7 +396,7 @@ static int listen_all_addrinfo(struct addrinfo *ai_head, int sockfdlist[],
 
 		usbip_net_set_reuseaddr(sock);
 		usbip_net_set_nodelay(sock);
-		/* We use seperate sockets for IPv4 and IPv6
+		/* We use separate sockets for IPv4 and IPv6
 		 * (see do_standalone_mode()) */
 		usbip_net_set_v6only(sock);
 
@@ -529,7 +517,7 @@ static int do_standalone_mode(int daemonize, int ipv4, int ipv6)
 
 	/*
 	 * To suppress warnings on systems with bindv6only disabled
-	 * (default), we use seperate sockets for IPv6 and IPv4 and set
+	 * (default), we use separate sockets for IPv6 and IPv4 and set
 	 * IPV6_V6ONLY on the IPv6 sockets.
 	 */
 	if (ipv4 && ipv6)

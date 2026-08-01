@@ -3,19 +3,6 @@
 // Socionext UniPhier AIO ALSA CPU DAI driver.
 //
 // Copyright (c) 2016-2018 Socionext Inc.
-//
-// This program is free software; you can redistribute it and/or
-// modify it under the terms of the GNU General Public License
-// as published by the Free Software Foundation; version 2
-// of the License.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include <linux/clk.h>
 #include <linux/errno.h>
@@ -43,6 +30,35 @@ static bool is_valid_pll(struct uniphier_aio_chip *chip, int pll_id)
 	}
 
 	return chip->plls[pll_id].enable;
+}
+
+/**
+ * find_volume - find volume supported HW port by HW port number
+ * @chip: the AIO chip pointer
+ * @oport_hw: HW port number, one of AUD_HW_XXXX
+ *
+ * Find AIO device from device list by HW port number. Volume feature is
+ * available only in Output and PCM ports, this limitation comes from HW
+ * specifications.
+ *
+ * Return: The pointer of AIO substream if successful, otherwise NULL on error.
+ */
+static struct uniphier_aio_sub *find_volume(struct uniphier_aio_chip *chip,
+					    int oport_hw)
+{
+	int i;
+
+	for (i = 0; i < chip->num_aios; i++) {
+		struct uniphier_aio_sub *sub = &chip->aios[i].sub[0];
+
+		if (!sub->swm)
+			continue;
+
+		if (sub->swm->oport.hw == oport_hw)
+			return sub;
+	}
+
+	return NULL;
 }
 
 static bool match_spec(const struct uniphier_aio_spec *spec,
@@ -112,8 +128,8 @@ static const struct uniphier_aio_spec *find_spec(struct uniphier_aio *aio,
 static int find_divider(struct uniphier_aio *aio, int pll_id, unsigned int freq)
 {
 	struct uniphier_aio_pll *pll;
-	int mul[] = { 1, 1, 1, 2, };
-	int div[] = { 2, 3, 1, 3, };
+	static const int mul[] = { 1, 1, 1, 2, };
+	static const int div[] = { 2, 3, 1, 3, };
 	int i;
 
 	if (!is_valid_pll(aio->chip, pll_id))
@@ -203,15 +219,10 @@ static int uniphier_aio_set_pll(struct snd_soc_dai *dai, int pll_id,
 				unsigned int freq_out)
 {
 	struct uniphier_aio *aio = uniphier_priv(dai);
-	struct device *dev = &aio->chip->pdev->dev;
 	int ret;
 
 	if (!is_valid_pll(aio->chip, pll_id))
 		return -EINVAL;
-	if (!aio->chip->plls[pll_id].enable) {
-		dev_err(dev, "PLL(%d) is not implemented\n", pll_id);
-		return -ENOTSUPP;
-	}
 
 	ret = aio_chip_set_pll(aio->chip, pll_id, freq_out);
 	if (ret < 0)
@@ -245,17 +256,12 @@ static int uniphier_aio_startup(struct snd_pcm_substream *substream,
 {
 	struct uniphier_aio *aio = uniphier_priv(dai);
 	struct uniphier_aio_sub *sub = &aio->sub[substream->stream];
-	int ret;
 
 	sub->substream = substream;
 	sub->pass_through = 0;
 	sub->use_mmap = true;
 
-	ret = aio_init(sub);
-	if (ret)
-		return ret;
-
-	return 0;
+	return aio_init(sub);
 }
 
 static void uniphier_aio_shutdown(struct snd_pcm_substream *substream,
@@ -300,6 +306,7 @@ static int uniphier_aio_hw_params(struct snd_pcm_substream *substream,
 	sub->setting = 1;
 
 	aio_port_reset(sub);
+	aio_port_set_volume(sub, sub->vol);
 	aio_src_reset(sub);
 
 	return 0;
@@ -348,30 +355,7 @@ static int uniphier_aio_prepare(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-const struct snd_soc_dai_ops uniphier_aio_i2s_ops = {
-	.set_sysclk  = uniphier_aio_set_sysclk,
-	.set_pll     = uniphier_aio_set_pll,
-	.set_fmt     = uniphier_aio_set_fmt,
-	.startup     = uniphier_aio_startup,
-	.shutdown    = uniphier_aio_shutdown,
-	.hw_params   = uniphier_aio_hw_params,
-	.hw_free     = uniphier_aio_hw_free,
-	.prepare     = uniphier_aio_prepare,
-};
-EXPORT_SYMBOL_GPL(uniphier_aio_i2s_ops);
-
-const struct snd_soc_dai_ops uniphier_aio_spdif_ops = {
-	.set_sysclk  = uniphier_aio_set_sysclk,
-	.set_pll     = uniphier_aio_set_pll,
-	.startup     = uniphier_aio_startup,
-	.shutdown    = uniphier_aio_shutdown,
-	.hw_params   = uniphier_aio_hw_params,
-	.hw_free     = uniphier_aio_hw_free,
-	.prepare     = uniphier_aio_prepare,
-};
-EXPORT_SYMBOL_GPL(uniphier_aio_spdif_ops);
-
-int uniphier_aio_dai_probe(struct snd_soc_dai *dai)
+static int uniphier_aio_dai_probe(struct snd_soc_dai *dai)
 {
 	struct uniphier_aio *aio = uniphier_priv(dai);
 	int i;
@@ -386,6 +370,8 @@ int uniphier_aio_dai_probe(struct snd_soc_dai *dai)
 
 		sub->swm = &spec->swm;
 		sub->spec = spec;
+
+		sub->vol = AUD_VOL_INIT;
 	}
 
 	aio_iecout_set_enable(aio->chip, true);
@@ -394,9 +380,8 @@ int uniphier_aio_dai_probe(struct snd_soc_dai *dai)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(uniphier_aio_dai_probe);
 
-int uniphier_aio_dai_remove(struct snd_soc_dai *dai)
+static int uniphier_aio_dai_remove(struct snd_soc_dai *dai)
 {
 	struct uniphier_aio *aio = uniphier_priv(dai);
 
@@ -404,34 +389,182 @@ int uniphier_aio_dai_remove(struct snd_soc_dai *dai)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(uniphier_aio_dai_remove);
 
-int uniphier_aio_dai_suspend(struct snd_soc_dai *dai)
+static int uniphier_aio_ld11_probe(struct snd_soc_dai *dai)
 {
-	struct uniphier_aio *aio = uniphier_priv(dai);
+	int ret;
 
-	reset_control_assert(aio->chip->rst);
-	clk_disable_unprepare(aio->chip->clk);
+	ret = uniphier_aio_dai_probe(dai);
+	if (ret < 0)
+		return ret;
+
+	ret = snd_soc_dai_set_pll(dai, AUD_PLL_A1, 0, 0, 36864000);
+	if (ret < 0)
+		return ret;
+	ret = snd_soc_dai_set_pll(dai, AUD_PLL_F1, 0, 0, 36864000);
+	if (ret < 0)
+		return ret;
+
+	ret = snd_soc_dai_set_pll(dai, AUD_PLL_A2, 0, 0, 33868800);
+	if (ret < 0)
+		return ret;
+	ret = snd_soc_dai_set_pll(dai, AUD_PLL_F2, 0, 0, 33868800);
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(uniphier_aio_dai_suspend);
 
-int uniphier_aio_dai_resume(struct snd_soc_dai *dai)
+static int uniphier_aio_pxs2_probe(struct snd_soc_dai *dai)
+{
+	int ret;
+
+	ret = uniphier_aio_dai_probe(dai);
+	if (ret < 0)
+		return ret;
+
+	ret = snd_soc_dai_set_pll(dai, AUD_PLL_A1, 0, 0, 36864000);
+	if (ret < 0)
+		return ret;
+	ret = snd_soc_dai_set_pll(dai, AUD_PLL_F1, 0, 0, 36864000);
+	if (ret < 0)
+		return ret;
+
+	ret = snd_soc_dai_set_pll(dai, AUD_PLL_A2, 0, 0, 33868800);
+	if (ret < 0)
+		return ret;
+	ret = snd_soc_dai_set_pll(dai, AUD_PLL_F2, 0, 0, 33868800);
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
+
+const struct snd_soc_dai_ops uniphier_aio_i2s_ld11_ops = {
+	.probe		= uniphier_aio_ld11_probe,
+	.remove		= uniphier_aio_dai_remove,
+	.set_sysclk	= uniphier_aio_set_sysclk,
+	.set_pll	= uniphier_aio_set_pll,
+	.set_fmt	= uniphier_aio_set_fmt,
+	.startup	= uniphier_aio_startup,
+	.shutdown	= uniphier_aio_shutdown,
+	.hw_params	= uniphier_aio_hw_params,
+	.hw_free	= uniphier_aio_hw_free,
+	.prepare	= uniphier_aio_prepare,
+};
+EXPORT_SYMBOL_GPL(uniphier_aio_i2s_ld11_ops);
+
+const struct snd_soc_dai_ops uniphier_aio_spdif_ld11_ops = {
+	.probe		= uniphier_aio_ld11_probe,
+	.remove		= uniphier_aio_dai_remove,
+	.set_sysclk	= uniphier_aio_set_sysclk,
+	.set_pll	= uniphier_aio_set_pll,
+	.startup	= uniphier_aio_startup,
+	.shutdown	= uniphier_aio_shutdown,
+	.hw_params	= uniphier_aio_hw_params,
+	.hw_free	= uniphier_aio_hw_free,
+	.prepare	= uniphier_aio_prepare,
+};
+EXPORT_SYMBOL_GPL(uniphier_aio_spdif_ld11_ops);
+
+const struct snd_soc_dai_ops uniphier_aio_spdif_ld11_ops2 = {
+	.probe		= uniphier_aio_ld11_probe,
+	.remove		= uniphier_aio_dai_remove,
+	.set_sysclk	= uniphier_aio_set_sysclk,
+	.set_pll	= uniphier_aio_set_pll,
+	.startup	= uniphier_aio_startup,
+	.shutdown	= uniphier_aio_shutdown,
+	.hw_params	= uniphier_aio_hw_params,
+	.hw_free	= uniphier_aio_hw_free,
+	.prepare	= uniphier_aio_prepare,
+	.compress_new	= snd_soc_new_compress,
+};
+EXPORT_SYMBOL_GPL(uniphier_aio_spdif_ld11_ops2);
+
+const struct snd_soc_dai_ops uniphier_aio_i2s_pxs2_ops = {
+	.probe		= uniphier_aio_pxs2_probe,
+	.remove		= uniphier_aio_dai_remove,
+	.set_sysclk	= uniphier_aio_set_sysclk,
+	.set_pll	= uniphier_aio_set_pll,
+	.set_fmt	= uniphier_aio_set_fmt,
+	.startup	= uniphier_aio_startup,
+	.shutdown	= uniphier_aio_shutdown,
+	.hw_params	= uniphier_aio_hw_params,
+	.hw_free	= uniphier_aio_hw_free,
+	.prepare	= uniphier_aio_prepare,
+};
+EXPORT_SYMBOL_GPL(uniphier_aio_i2s_pxs2_ops);
+
+const struct snd_soc_dai_ops uniphier_aio_spdif_pxs2_ops = {
+	.probe		= uniphier_aio_pxs2_probe,
+	.remove		= uniphier_aio_dai_remove,
+	.set_sysclk	= uniphier_aio_set_sysclk,
+	.set_pll	= uniphier_aio_set_pll,
+	.startup	= uniphier_aio_startup,
+	.shutdown	= uniphier_aio_shutdown,
+	.hw_params	= uniphier_aio_hw_params,
+	.hw_free	= uniphier_aio_hw_free,
+	.prepare	= uniphier_aio_prepare,
+};
+EXPORT_SYMBOL_GPL(uniphier_aio_spdif_pxs2_ops);
+
+const struct snd_soc_dai_ops uniphier_aio_spdif_pxs2_ops2 = {
+	.probe		= uniphier_aio_pxs2_probe,
+	.remove		= uniphier_aio_dai_remove,
+	.set_sysclk	= uniphier_aio_set_sysclk,
+	.set_pll	= uniphier_aio_set_pll,
+	.startup	= uniphier_aio_startup,
+	.shutdown	= uniphier_aio_shutdown,
+	.hw_params	= uniphier_aio_hw_params,
+	.hw_free	= uniphier_aio_hw_free,
+	.prepare	= uniphier_aio_prepare,
+	.compress_new	= snd_soc_new_compress,
+};
+EXPORT_SYMBOL_GPL(uniphier_aio_spdif_pxs2_ops2);
+
+static void uniphier_aio_dai_suspend(struct snd_soc_dai *dai)
+{
+	struct uniphier_aio *aio = uniphier_priv(dai);
+
+	if (!snd_soc_dai_active(dai))
+		return;
+
+	aio->chip->num_wup_aios--;
+	if (!aio->chip->num_wup_aios) {
+		reset_control_assert(aio->chip->rst);
+		clk_disable_unprepare(aio->chip->clk);
+	}
+}
+
+static int uniphier_aio_suspend(struct snd_soc_component *component)
+{
+	struct snd_soc_dai *dai;
+
+	for_each_component_dais(component, dai)
+		uniphier_aio_dai_suspend(dai);
+	return 0;
+}
+
+static int uniphier_aio_dai_resume(struct snd_soc_dai *dai)
 {
 	struct uniphier_aio *aio = uniphier_priv(dai);
 	int ret, i;
 
+	if (!snd_soc_dai_active(dai))
+		return 0;
+
 	if (!aio->chip->active)
 		return 0;
 
-	ret = clk_prepare_enable(aio->chip->clk);
-	if (ret)
-		return ret;
+	if (!aio->chip->num_wup_aios) {
+		ret = clk_prepare_enable(aio->chip->clk);
+		if (ret)
+			return ret;
 
-	ret = reset_control_deassert(aio->chip->rst);
-	if (ret)
-		goto err_out_clock;
+		ret = reset_control_deassert(aio->chip->rst);
+		if (ret)
+			goto err_out_clock;
+	}
 
 	aio_iecout_set_enable(aio->chip, true);
 	aio_chip_init(aio->chip);
@@ -444,7 +577,7 @@ int uniphier_aio_dai_resume(struct snd_soc_dai *dai)
 
 		ret = aio_init(sub);
 		if (ret)
-			goto err_out_clock;
+			goto err_out_reset;
 
 		if (!sub->setting)
 			continue;
@@ -452,18 +585,142 @@ int uniphier_aio_dai_resume(struct snd_soc_dai *dai)
 		aio_port_reset(sub);
 		aio_src_reset(sub);
 	}
+	aio->chip->num_wup_aios++;
 
 	return 0;
 
+err_out_reset:
+	if (!aio->chip->num_wup_aios)
+		reset_control_assert(aio->chip->rst);
 err_out_clock:
-	clk_disable_unprepare(aio->chip->clk);
+	if (!aio->chip->num_wup_aios)
+		clk_disable_unprepare(aio->chip->clk);
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(uniphier_aio_dai_resume);
+
+static int uniphier_aio_resume(struct snd_soc_component *component)
+{
+	struct snd_soc_dai *dai;
+	int ret = 0;
+
+	for_each_component_dais(component, dai)
+		ret |= uniphier_aio_dai_resume(dai);
+	return ret;
+}
+
+static int uniphier_aio_vol_info(struct snd_kcontrol *kcontrol,
+				 struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	uinfo->count = 1;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = AUD_VOL_MAX;
+
+	return 0;
+}
+
+static int uniphier_aio_vol_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *comp = snd_kcontrol_chip(kcontrol);
+	struct uniphier_aio_chip *chip = snd_soc_component_get_drvdata(comp);
+	struct uniphier_aio_sub *sub;
+	int oport_hw = kcontrol->private_value;
+
+	sub = find_volume(chip, oport_hw);
+	if (!sub)
+		return 0;
+
+	ucontrol->value.integer.value[0] = sub->vol;
+
+	return 0;
+}
+
+static int uniphier_aio_vol_put(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *comp = snd_kcontrol_chip(kcontrol);
+	struct uniphier_aio_chip *chip = snd_soc_component_get_drvdata(comp);
+	struct uniphier_aio_sub *sub;
+	int oport_hw = kcontrol->private_value;
+
+	sub = find_volume(chip, oport_hw);
+	if (!sub)
+		return 0;
+
+	if (sub->vol == ucontrol->value.integer.value[0])
+		return 0;
+	sub->vol = ucontrol->value.integer.value[0];
+
+	aio_port_set_volume(sub, sub->vol);
+
+	return 0;
+}
+
+static const struct snd_kcontrol_new uniphier_aio_controls[] = {
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.name = "HPCMOUT1 Volume",
+		.info = uniphier_aio_vol_info,
+		.get = uniphier_aio_vol_get,
+		.put = uniphier_aio_vol_put,
+		.private_value = AUD_HW_HPCMOUT1,
+	},
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.name = "PCMOUT1 Volume",
+		.info = uniphier_aio_vol_info,
+		.get = uniphier_aio_vol_get,
+		.put = uniphier_aio_vol_put,
+		.private_value = AUD_HW_PCMOUT1,
+	},
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.name = "PCMOUT2 Volume",
+		.info = uniphier_aio_vol_info,
+		.get = uniphier_aio_vol_get,
+		.put = uniphier_aio_vol_put,
+		.private_value = AUD_HW_PCMOUT2,
+	},
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.name = "PCMOUT3 Volume",
+		.info = uniphier_aio_vol_info,
+		.get = uniphier_aio_vol_get,
+		.put = uniphier_aio_vol_put,
+		.private_value = AUD_HW_PCMOUT3,
+	},
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.name = "HIECOUT1 Volume",
+		.info = uniphier_aio_vol_info,
+		.get = uniphier_aio_vol_get,
+		.put = uniphier_aio_vol_put,
+		.private_value = AUD_HW_HIECOUT1,
+	},
+	{
+		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+		.access = SNDRV_CTL_ELEM_ACCESS_READWRITE,
+		.name = "IECOUT1 Volume",
+		.info = uniphier_aio_vol_info,
+		.get = uniphier_aio_vol_get,
+		.put = uniphier_aio_vol_put,
+		.private_value = AUD_HW_IECOUT1,
+	},
+};
 
 static const struct snd_soc_component_driver uniphier_aio_component = {
 	.name = "uniphier-aio",
+	.controls = uniphier_aio_controls,
+	.num_controls = ARRAY_SIZE(uniphier_aio_controls),
+	.suspend = uniphier_aio_suspend,
+	.resume  = uniphier_aio_resume,
 };
 
 int uniphier_aio_probe(struct platform_device *pdev)
@@ -497,19 +754,18 @@ int uniphier_aio_probe(struct platform_device *pdev)
 		return PTR_ERR(chip->rst);
 
 	chip->num_aios = chip->chip_spec->num_dais;
-	chip->aios = devm_kzalloc(dev,
-				  sizeof(struct uniphier_aio) * chip->num_aios,
+	chip->num_wup_aios = chip->num_aios;
+	chip->aios = devm_kcalloc(dev,
+				  chip->num_aios, sizeof(struct uniphier_aio),
 				  GFP_KERNEL);
 	if (!chip->aios)
 		return -ENOMEM;
 
 	chip->num_plls = chip->chip_spec->num_plls;
-	chip->plls = devm_kzalloc(dev, sizeof(struct uniphier_aio_pll) *
-				  chip->num_plls, GFP_KERNEL);
+	chip->plls = devm_kmemdup_array(dev, chip->chip_spec->plls, chip->num_plls,
+					sizeof(*chip->chip_spec->plls), GFP_KERNEL);
 	if (!chip->plls)
 		return -ENOMEM;
-	memcpy(chip->plls, chip->chip_spec->plls,
-	       sizeof(struct uniphier_aio_pll) * chip->num_plls);
 
 	for (i = 0; i < chip->num_aios; i++) {
 		struct uniphier_aio *aio = &chip->aios[i];
@@ -562,14 +818,12 @@ err_out_clock:
 }
 EXPORT_SYMBOL_GPL(uniphier_aio_probe);
 
-int uniphier_aio_remove(struct platform_device *pdev)
+void uniphier_aio_remove(struct platform_device *pdev)
 {
 	struct uniphier_aio_chip *chip = platform_get_drvdata(pdev);
 
 	reset_control_assert(chip->rst);
 	clk_disable_unprepare(chip->clk);
-
-	return 0;
 }
 EXPORT_SYMBOL_GPL(uniphier_aio_remove);
 

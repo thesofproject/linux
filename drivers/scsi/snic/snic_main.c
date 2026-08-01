@@ -1,19 +1,5 @@
-/*
- * Copyright 2014 Cisco Systems, Inc.  All rights reserved.
- *
- * This program is free software; you may redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright 2014 Cisco Systems, Inc.  All rights reserved.
 
 #include <linux/module.h>
 #include <linux/mempool.h>
@@ -35,7 +21,7 @@
 #define PCI_DEVICE_ID_CISCO_SNIC	0x0046
 
 /* Supported devices by snic module */
-static struct pci_device_id snic_id_table[] = {
+static const struct pci_device_id snic_id_table[] = {
 	{PCI_DEVICE(0x1137, PCI_DEVICE_ID_CISCO_SNIC) },
 	{ 0, }	/* end of table */
 };
@@ -56,11 +42,11 @@ module_param(snic_max_qdepth, uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(snic_max_qdepth, "Queue depth to report for each LUN");
 
 /*
- * snic_slave_alloc : callback function to SCSI Mid Layer, called on
+ * snic_sdev_init : callback function to SCSI Mid Layer, called on
  * scsi device initialization.
  */
 static int
-snic_slave_alloc(struct scsi_device *sdev)
+snic_sdev_init(struct scsi_device *sdev)
 {
 	struct snic_tgt *tgt = starget_to_tgt(scsi_target(sdev));
 
@@ -71,11 +57,11 @@ snic_slave_alloc(struct scsi_device *sdev)
 }
 
 /*
- * snic_slave_configure : callback function to SCSI Mid Layer, called on
+ * snic_sdev_configure : callback function to SCSI Mid Layer, called on
  * scsi device initialization.
  */
 static int
-snic_slave_configure(struct scsi_device *sdev)
+snic_sdev_configure(struct scsi_device *sdev, struct queue_limits *lim)
 {
 	struct snic *snic = shost_priv(sdev->host);
 	u32 qdepth = 0, max_ios = 0;
@@ -114,23 +100,22 @@ snic_change_queue_depth(struct scsi_device *sdev, int qdepth)
 	return sdev->queue_depth;
 }
 
-static struct scsi_host_template snic_host_template = {
+static const struct scsi_host_template snic_host_template = {
 	.module = THIS_MODULE,
 	.name = SNIC_DRV_NAME,
 	.queuecommand = snic_queuecommand,
 	.eh_abort_handler = snic_abort_cmd,
 	.eh_device_reset_handler = snic_device_reset,
 	.eh_host_reset_handler = snic_host_reset,
-	.slave_alloc = snic_slave_alloc,
-	.slave_configure = snic_slave_configure,
+	.sdev_init = snic_sdev_init,
+	.sdev_configure = snic_sdev_configure,
 	.change_queue_depth = snic_change_queue_depth,
 	.this_id = -1,
 	.cmd_per_lun = SNIC_DFLT_QUEUE_DEPTH,
 	.can_queue = SNIC_MAX_IO_REQ,
-	.use_clustering = ENABLE_CLUSTERING,
 	.sg_tablesize = SNIC_MAX_SG_DESC_CNT,
 	.max_sectors = 0x800,
-	.shost_attrs = snic_attrs,
+	.shost_groups = snic_host_groups,
 	.track_queue_depth = 1,
 	.cmd_size = sizeof(struct snic_internal_io_state),
 	.proc_name = "snic_scsi",
@@ -315,9 +300,8 @@ snic_add_host(struct Scsi_Host *shost, struct pci_dev *pdev)
 	}
 
 	SNIC_BUG_ON(shost->work_q != NULL);
-	snprintf(shost->work_q_name, sizeof(shost->work_q_name), "scsi_wq_%d",
-		 shost->host_no);
-	shost->work_q = create_singlethread_workqueue(shost->work_q_name);
+	shost->work_q = alloc_ordered_workqueue("scsi_wq_%d", WQ_MEM_RECLAIM,
+						shost->host_no);
 	if (!shost->work_q) {
 		SNIC_HOST_ERR(shost, "Failed to Create ScsiHost wq.\n");
 
@@ -398,12 +382,7 @@ snic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		       PCI_SLOT(pdev->devfn), PCI_FUNC(pdev->devfn));
 #ifdef CONFIG_SCSI_SNIC_DEBUG_FS
 	/* Per snic debugfs init */
-	ret = snic_stats_debugfs_init(snic);
-	if (ret) {
-		SNIC_HOST_ERR(snic->shost,
-			      "Failed to initialize debugfs stats\n");
-		snic_stats_debugfs_remove(snic);
-	}
+	snic_stats_debugfs_init(snic);
 #endif
 
 	/* Setup PCI Resources */
@@ -435,36 +414,16 @@ snic_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 * limitation for the device. Try 43-bit first, and
 	 * fail to 32-bit.
 	 */
-	ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(43));
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(43));
 	if (ret) {
-		ret = pci_set_dma_mask(pdev, DMA_BIT_MASK(32));
+		ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
 		if (ret) {
 			SNIC_HOST_ERR(shost,
 				      "No Usable DMA Configuration, aborting %d\n",
 				      ret);
-
-			goto err_rel_regions;
-		}
-
-		ret = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32));
-		if (ret) {
-			SNIC_HOST_ERR(shost,
-				      "Unable to obtain 32-bit DMA for consistent allocations, aborting: %d\n",
-				      ret);
-
-			goto err_rel_regions;
-		}
-	} else {
-		ret = pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(43));
-		if (ret) {
-			SNIC_HOST_ERR(shost,
-				      "Unable to obtain 43-bit DMA for consistent allocations. aborting: %d\n",
-				      ret);
-
 			goto err_rel_regions;
 		}
 	}
-
 
 	/* Map vNIC resources from BAR0 */
 	if (!(pci_resource_flags(pdev, 0) & IORESOURCE_MEM)) {
@@ -859,7 +818,7 @@ snic_global_data_init(void)
 	struct kmem_cache *cachep;
 	ssize_t len = 0;
 
-	snic_glob = kzalloc(sizeof(*snic_glob), GFP_KERNEL);
+	snic_glob = kzalloc_obj(*snic_glob);
 
 	if (!snic_glob) {
 		SNIC_ERR("Failed to allocate Global Context.\n");
@@ -871,12 +830,7 @@ snic_global_data_init(void)
 #ifdef CONFIG_SCSI_SNIC_DEBUG_FS
 	/* Debugfs related Initialization */
 	/* Create debugfs entries for snic */
-	ret = snic_debugfs_init();
-	if (ret < 0) {
-		SNIC_ERR("Failed to create sysfs dir for tracing and stats.\n");
-		snic_debugfs_term();
-		/* continue even if it fails */
-	}
+	snic_debugfs_init();
 
 	/* Trace related Initialization */
 	/* Allocate memory for trace buffer */
@@ -918,7 +872,7 @@ snic_global_data_init(void)
 	snic_glob->req_cache[SNIC_REQ_CACHE_MAX_SGL] = cachep;
 
 	len = sizeof(struct snic_host_req);
-	cachep = kmem_cache_create("snic_req_maxsgl", len, SNIC_SG_DESC_ALIGN,
+	cachep = kmem_cache_create("snic_req_tm", len, SNIC_SG_DESC_ALIGN,
 				   SLAB_HWCACHE_ALIGN, NULL);
 	if (!cachep) {
 		SNIC_ERR("Failed to create snic tm req slab\n");
@@ -929,7 +883,8 @@ snic_global_data_init(void)
 	snic_glob->req_cache[SNIC_REQ_TM_CACHE] = cachep;
 
 	/* snic_event queue */
-	snic_glob->event_q = create_singlethread_workqueue("snic_event_wq");
+	snic_glob->event_q =
+		alloc_ordered_workqueue("%s", WQ_MEM_RECLAIM, "snic_event_wq");
 	if (!snic_glob->event_q) {
 		SNIC_ERR("snic event queue create failed\n");
 		ret = -ENOMEM;

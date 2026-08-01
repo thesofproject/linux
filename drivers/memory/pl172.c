@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Memory controller driver for ARM PrimeCell PL172
  * PrimeCell MultiPort Memory Controller (PL172)
@@ -6,10 +7,6 @@
  *
  * Based on:
  * TI AEMIF driver, Copyright (C) 2010 - 2013 Texas Instruments Inc.
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #include <linux/amba/bus.h>
@@ -24,7 +21,7 @@
 #include <linux/of_platform.h>
 #include <linux/time.h>
 
-#define MPMC_STATIC_CFG(n)		(0x200 + 0x20 * n)
+#define MPMC_STATIC_CFG(n)		(0x200 + 0x20 * (n))
 #define  MPMC_STATIC_CFG_MW_8BIT	0x0
 #define  MPMC_STATIC_CFG_MW_16BIT	0x1
 #define  MPMC_STATIC_CFG_MW_32BIT	0x2
@@ -34,17 +31,17 @@
 #define  MPMC_STATIC_CFG_EW		BIT(8)
 #define  MPMC_STATIC_CFG_B		BIT(19)
 #define  MPMC_STATIC_CFG_P		BIT(20)
-#define MPMC_STATIC_WAIT_WEN(n)		(0x204 + 0x20 * n)
+#define MPMC_STATIC_WAIT_WEN(n)		(0x204 + 0x20 * (n))
 #define  MPMC_STATIC_WAIT_WEN_MAX	0x0f
-#define MPMC_STATIC_WAIT_OEN(n)		(0x208 + 0x20 * n)
+#define MPMC_STATIC_WAIT_OEN(n)		(0x208 + 0x20 * (n))
 #define  MPMC_STATIC_WAIT_OEN_MAX	0x0f
-#define MPMC_STATIC_WAIT_RD(n)		(0x20c + 0x20 * n)
+#define MPMC_STATIC_WAIT_RD(n)		(0x20c + 0x20 * (n))
 #define  MPMC_STATIC_WAIT_RD_MAX	0x1f
-#define MPMC_STATIC_WAIT_PAGE(n)	(0x210 + 0x20 * n)
+#define MPMC_STATIC_WAIT_PAGE(n)	(0x210 + 0x20 * (n))
 #define  MPMC_STATIC_WAIT_PAGE_MAX	0x1f
-#define MPMC_STATIC_WAIT_WR(n)		(0x214 + 0x20 * n)
+#define MPMC_STATIC_WAIT_WR(n)		(0x214 + 0x20 * (n))
 #define  MPMC_STATIC_WAIT_WR_MAX	0x1f
-#define MPMC_STATIC_WAIT_TURN(n)	(0x218 + 0x20 * n)
+#define MPMC_STATIC_WAIT_TURN(n)	(0x218 + 0x20 * (n))
 #define  MPMC_STATIC_WAIT_TURN_MAX	0x0f
 
 /* Maximum number of static chip selects */
@@ -190,6 +187,13 @@ static int pl172_parse_cs_config(struct amba_device *adev,
 	return -EINVAL;
 }
 
+static void pl172_amba_release_regions(void *data)
+{
+	struct amba_device *adev = data;
+
+	amba_release_regions(adev);
+}
+
 static const char * const pl172_revisions[] = {"r1", "r2", "r2p3", "r2p4"};
 static const char * const pl175_revisions[] = {"r1"};
 static const char * const pl176_revisions[] = {"r0"};
@@ -219,38 +223,30 @@ static int pl172_probe(struct amba_device *adev, const struct amba_id *id)
 	if (!pl172)
 		return -ENOMEM;
 
-	pl172->clk = devm_clk_get(dev, "mpmcclk");
-	if (IS_ERR(pl172->clk)) {
-		dev_err(dev, "no mpmcclk provided clock\n");
-		return PTR_ERR(pl172->clk);
-	}
-
-	ret = clk_prepare_enable(pl172->clk);
-	if (ret) {
-		dev_err(dev, "unable to mpmcclk enable clock\n");
-		return ret;
-	}
+	pl172->clk = devm_clk_get_enabled(dev, "mpmcclk");
+	if (IS_ERR(pl172->clk))
+		return dev_err_probe(dev, PTR_ERR(pl172->clk),
+				     "no mpmcclk provided clock\n");
 
 	pl172->rate = clk_get_rate(pl172->clk) / MSEC_PER_SEC;
-	if (!pl172->rate) {
-		dev_err(dev, "unable to get mpmcclk clock rate\n");
-		ret = -EINVAL;
-		goto err_clk_enable;
-	}
+	if (!pl172->rate)
+		return dev_err_probe(dev, -EINVAL,
+				     "unable to get mpmcclk clock rate\n");
 
 	ret = amba_request_regions(adev, NULL);
 	if (ret) {
 		dev_err(dev, "unable to request AMBA regions\n");
-		goto err_clk_enable;
+		return ret;
 	}
+
+	ret = devm_add_action_or_reset(dev, pl172_amba_release_regions, adev);
+	if (ret)
+		return ret;
 
 	pl172->base = devm_ioremap(dev, adev->res.start,
 				   resource_size(&adev->res));
-	if (!pl172->base) {
-		dev_err(dev, "ioremap failed\n");
-		ret = -ENOMEM;
-		goto err_no_ioremap;
-	}
+	if (!pl172->base)
+		return dev_err_probe(dev, -ENOMEM, "ioremap failed\n");
 
 	amba_set_drvdata(adev, pl172);
 
@@ -266,22 +262,6 @@ static int pl172_probe(struct amba_device *adev, const struct amba_id *id)
 
 		of_platform_populate(child_np, NULL, NULL, dev);
 	}
-
-	return 0;
-
-err_no_ioremap:
-	amba_release_regions(adev);
-err_clk_enable:
-	clk_disable_unprepare(pl172->clk);
-	return ret;
-}
-
-static int pl172_remove(struct amba_device *adev)
-{
-	struct pl172_data *pl172 = amba_get_drvdata(adev);
-
-	clk_disable_unprepare(pl172->clk);
-	amba_release_regions(adev);
 
 	return 0;
 }
@@ -311,7 +291,6 @@ static struct amba_driver pl172_driver = {
 		.name	= "memory-pl172",
 	},
 	.probe		= pl172_probe,
-	.remove		= pl172_remove,
 	.id_table	= pl172_ids,
 };
 module_amba_driver(pl172_driver);

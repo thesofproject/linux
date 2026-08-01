@@ -6,12 +6,14 @@
  *
  */
 
-#include <linux/of_device.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/export.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
+
 #include <asm/io.h>
 #include <asm/leon.h>
 #include <asm/vaddrs.h>
@@ -584,7 +586,7 @@ static void grpci2_hw_init(struct grpci2_priv *priv)
 	REGSTORE(regs->io_map, REGLOAD(regs->io_map) & 0x0000ffff);
 
 	/* set 1:1 mapping between AHB -> PCI memory space, for all Masters
-	 * Each AHB master has it's own mapping registers. Max 16 AHB masters.
+	 * Each AHB master has its own mapping registers. Max 16 AHB masters.
 	 */
 	for (i = 0; i < 16; i++)
 		REGSTORE(regs->ahbmst_map[i], priv->pci_area);
@@ -719,7 +721,7 @@ static int grpci2_of_probe(struct platform_device *ofdev)
 		goto err1;
 	}
 
-	priv = grpci2priv = kzalloc(sizeof(struct grpci2_priv), GFP_KERNEL);
+	priv = grpci2priv = kzalloc_obj(struct grpci2_priv);
 	if (grpci2priv == NULL) {
 		err = -ENOMEM;
 		goto err1;
@@ -887,7 +889,7 @@ err1:
 	return err;
 }
 
-static const struct of_device_id grpci2_of_match[] __initconst = {
+static const struct of_device_id grpci2_of_match[] = {
 	{
 	 .name = "GAISLER_GRPCI2",
 	 },

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Freescale MXS Low Resolution Analog-to-Digital Converter driver
  *
@@ -7,16 +8,6 @@
  * Authors:
  *  Marek Vasut <marex@denx.de>
  *  Ksenija Stanojevic <ksenija.stanojevic@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
@@ -25,8 +16,8 @@
 #include <linux/mfd/mxs-lradc.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/slab.h>
 
 #define ADC_CELL		0
@@ -134,7 +125,6 @@ MODULE_DEVICE_TABLE(of, mxs_lradc_dt_ids);
 
 static int mxs_lradc_probe(struct platform_device *pdev)
 {
-	const struct of_device_id *of_id;
 	struct device *dev = &pdev->dev;
 	struct device_node *node = dev->of_node;
 	struct mxs_lradc *lradc;
@@ -147,11 +137,7 @@ static int mxs_lradc_probe(struct platform_device *pdev)
 	if (!lradc)
 		return -ENOMEM;
 
-	of_id = of_match_device(mxs_lradc_dt_ids, &pdev->dev);
-	if (!of_id)
-		return -EINVAL;
-
-	lradc->soc = (enum mxs_lradc_id)of_id->data;
+	lradc->soc = (kernel_ulong_t)device_get_match_data(&pdev->dev);
 
 	lradc->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(lradc->clk)) {
@@ -181,7 +167,7 @@ static int mxs_lradc_probe(struct platform_device *pdev)
 					MXS_LRADC_TOUCHSCREEN_5WIRE;
 				break;
 			}
-			/* fall through to an error message for i.MX23 */
+			fallthrough;	/* to an error message for i.MX23 */
 		default:
 			dev_err(&pdev->dev,
 				"Unsupported number of touchscreen wires (%d)\n"
@@ -244,13 +230,11 @@ err_clk:
 	return ret;
 }
 
-static int mxs_lradc_remove(struct platform_device *pdev)
+static void mxs_lradc_remove(struct platform_device *pdev)
 {
 	struct mxs_lradc *lradc = platform_get_drvdata(pdev);
 
 	clk_disable_unprepare(lradc->clk);
-
-	return 0;
 }
 
 static struct platform_driver mxs_lradc_driver = {

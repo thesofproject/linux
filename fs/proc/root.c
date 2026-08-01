@@ -6,9 +6,6 @@
  *
  *  proc root directory handling functions
  */
-
-#include <linux/uaccess.h>
-
 #include <linux/errno.h>
 #include <linux/time.h>
 #include <linux/proc_fs.h>
@@ -19,106 +16,362 @@
 #include <linux/module.h>
 #include <linux/bitops.h>
 #include <linux/user_namespace.h>
+#include <linux/fs_context.h>
 #include <linux/mount.h>
 #include <linux/pid_namespace.h>
-#include <linux/parser.h>
+#include <linux/fs_parser.h>
 #include <linux/cred.h>
+#include <linux/magic.h>
+#include <linux/slab.h>
 
 #include "internal.h"
 
-enum {
-	Opt_gid, Opt_hidepid, Opt_err,
+struct proc_fs_context {
+	struct pid_namespace	*pid_ns;
+	unsigned int		mask;
+	enum proc_hidepid	hidepid;
+	int			gid;
+	enum proc_pidonly	pidonly;
 };
 
-static const match_table_t tokens = {
-	{Opt_hidepid, "hidepid=%u"},
-	{Opt_gid, "gid=%u"},
-	{Opt_err, NULL},
+enum proc_param {
+	Opt_gid,
+	Opt_hidepid,
+	Opt_subset,
+	Opt_pidns,
 };
 
-int proc_parse_options(char *options, struct pid_namespace *pid)
+static const struct fs_parameter_spec proc_fs_parameters[] = {
+	fsparam_u32("gid",		Opt_gid),
+	fsparam_string("hidepid",	Opt_hidepid),
+	fsparam_string("subset",	Opt_subset),
+	fsparam_file_or_string("pidns",	Opt_pidns),
+	{}
+};
+
+static inline int valid_hidepid(unsigned int value)
 {
-	char *p;
-	substring_t args[MAX_OPT_ARGS];
-	int option;
-
-	if (!options)
-		return 1;
-
-	while ((p = strsep(&options, ",")) != NULL) {
-		int token;
-		if (!*p)
-			continue;
-
-		args[0].to = args[0].from = NULL;
-		token = match_token(p, tokens, args);
-		switch (token) {
-		case Opt_gid:
-			if (match_int(&args[0], &option))
-				return 0;
-			pid->pid_gid = make_kgid(current_user_ns(), option);
-			break;
-		case Opt_hidepid:
-			if (match_int(&args[0], &option))
-				return 0;
-			if (option < HIDEPID_OFF ||
-			    option > HIDEPID_INVISIBLE) {
-				pr_err("proc: hidepid value must be between 0 and 2.\n");
-				return 0;
-			}
-			pid->hide_pid = option;
-			break;
-		default:
-			pr_err("proc: unrecognized mount option \"%s\" "
-			       "or missing value\n", p);
-			return 0;
-		}
-	}
-
-	return 1;
+	return (value == HIDEPID_OFF ||
+		value == HIDEPID_NO_ACCESS ||
+		value == HIDEPID_INVISIBLE ||
+		value == HIDEPID_NOT_PTRACEABLE);
 }
 
-int proc_remount(struct super_block *sb, int *flags, char *data)
+static int proc_parse_hidepid_param(struct fs_context *fc, struct fs_parameter *param)
 {
-	struct pid_namespace *pid = sb->s_fs_info;
+	struct proc_fs_context *ctx = fc->fs_private;
+	struct fs_parameter_spec hidepid_u32_spec = fsparam_u32("hidepid", Opt_hidepid);
+	struct fs_parse_result result;
+	int base = (unsigned long)hidepid_u32_spec.data;
+
+	if (param->type != fs_value_is_string)
+		return invalf(fc, "proc: unexpected type of hidepid value\n");
+
+	if (!kstrtouint(param->string, base, &result.uint_32)) {
+		if (!valid_hidepid(result.uint_32))
+			return invalf(fc, "proc: unknown value of hidepid - %s\n", param->string);
+		ctx->hidepid = result.uint_32;
+		return 0;
+	}
+
+	if (!strcmp(param->string, "off"))
+		ctx->hidepid = HIDEPID_OFF;
+	else if (!strcmp(param->string, "noaccess"))
+		ctx->hidepid = HIDEPID_NO_ACCESS;
+	else if (!strcmp(param->string, "invisible"))
+		ctx->hidepid = HIDEPID_INVISIBLE;
+	else if (!strcmp(param->string, "ptraceable"))
+		ctx->hidepid = HIDEPID_NOT_PTRACEABLE;
+	else
+		return invalf(fc, "proc: unknown value of hidepid - %s\n", param->string);
+
+	return 0;
+}
+
+static int proc_parse_subset_param(struct fs_context *fc, char *value)
+{
+	struct proc_fs_context *ctx = fc->fs_private;
+
+	while (value) {
+		char *ptr = strchr(value, ',');
+
+		if (ptr != NULL)
+			*ptr++ = '\0';
+
+		if (*value != '\0') {
+			if (!strcmp(value, "pid")) {
+				ctx->pidonly = PROC_PIDONLY_ON;
+			} else {
+				return invalf(fc, "proc: unsupported subset option - %s\n", value);
+			}
+		}
+		value = ptr;
+	}
+
+	return 0;
+}
+
+#ifdef CONFIG_PID_NS
+static int proc_parse_pidns_param(struct fs_context *fc,
+				  struct fs_parameter *param,
+				  struct fs_parse_result *result)
+{
+	struct proc_fs_context *ctx = fc->fs_private;
+	struct pid_namespace *target, *active = task_active_pid_ns(current);
+	struct ns_common *ns;
+	struct file *ns_filp __free(fput) = NULL;
+
+	switch (param->type) {
+	case fs_value_is_file:
+		/* came through fsconfig, steal the file reference */
+		ns_filp = no_free_ptr(param->file);
+		break;
+	case fs_value_is_string:
+		ns_filp = filp_open(param->string, O_RDONLY, 0);
+		break;
+	default:
+		WARN_ON_ONCE(true);
+		break;
+	}
+	if (!ns_filp)
+		ns_filp = ERR_PTR(-EBADF);
+	if (IS_ERR(ns_filp)) {
+		errorfc(fc, "could not get file from pidns argument");
+		return PTR_ERR(ns_filp);
+	}
+
+	if (!proc_ns_file(ns_filp))
+		return invalfc(fc, "pidns argument is not an nsfs file");
+	ns = get_proc_ns(file_inode(ns_filp));
+	if (ns->ns_type != CLONE_NEWPID)
+		return invalfc(fc, "pidns argument is not a pidns file");
+	target = container_of(ns, struct pid_namespace, ns);
+
+	/*
+	 * pidns= is shorthand for joining the pidns to get a fsopen fd, so the
+	 * permission model should be the same as pidns_install().
+	 */
+	if (!ns_capable(target->user_ns, CAP_SYS_ADMIN)) {
+		errorfc(fc, "insufficient permissions to set pidns");
+		return -EPERM;
+	}
+	if (!pidns_is_ancestor(target, active))
+		return invalfc(fc, "cannot set pidns to non-descendant pidns");
+
+	put_pid_ns(ctx->pid_ns);
+	ctx->pid_ns = get_pid_ns(target);
+	put_user_ns(fc->user_ns);
+	fc->user_ns = get_user_ns(ctx->pid_ns->user_ns);
+	return 0;
+}
+#endif /* CONFIG_PID_NS */
+
+static int proc_parse_param(struct fs_context *fc, struct fs_parameter *param)
+{
+	struct proc_fs_context *ctx = fc->fs_private;
+	struct fs_parse_result result;
+	int opt, err;
+
+	opt = fs_parse(fc, proc_fs_parameters, param, &result);
+	if (opt < 0)
+		return opt;
+
+	switch (opt) {
+	case Opt_gid:
+		ctx->gid = result.uint_32;
+		break;
+
+	case Opt_hidepid:
+		err = proc_parse_hidepid_param(fc, param);
+		if (err)
+			return err;
+		break;
+
+	case Opt_subset:
+		err = proc_parse_subset_param(fc, param->string);
+		if (err)
+			return err;
+		break;
+
+	case Opt_pidns:
+#ifdef CONFIG_PID_NS
+		/*
+		 * We would have to RCU-protect every proc_pid_ns() or
+		 * proc_sb_info() access if we allowed this to be reconfigured
+		 * for an existing procfs instance. Luckily, procfs instances
+		 * are cheap to create, and mount-beneath would let you
+		 * atomically replace an instance even with overmounts.
+		 */
+		if (fc->purpose == FS_CONTEXT_FOR_RECONFIGURE) {
+			errorfc(fc, "cannot reconfigure pidns for existing procfs");
+			return -EBUSY;
+		}
+		err = proc_parse_pidns_param(fc, param, &result);
+		if (err)
+			return err;
+		break;
+#else
+		errorfc(fc, "pidns mount flag not supported on this system");
+		return -EOPNOTSUPP;
+#endif
+
+	default:
+		return -EINVAL;
+	}
+
+	ctx->mask |= 1 << opt;
+	return 0;
+}
+
+static int proc_apply_options(struct proc_fs_info *fs_info,
+			       struct fs_context *fc,
+			       struct user_namespace *user_ns)
+{
+	struct proc_fs_context *ctx = fc->fs_private;
+
+	if ((ctx->mask & (1 << Opt_subset)) &&
+	    fc->purpose == FS_CONTEXT_FOR_RECONFIGURE &&
+	    ctx->pidonly != fs_info->pidonly)
+		return invalf(fc, "proc: subset=pid cannot be changed\n");
+
+	if (ctx->mask & (1 << Opt_gid))
+		fs_info->pid_gid = make_kgid(user_ns, ctx->gid);
+	if (ctx->mask & (1 << Opt_hidepid))
+		fs_info->hide_pid = ctx->hidepid;
+	if (ctx->mask & (1 << Opt_subset))
+		fs_info->pidonly = ctx->pidonly;
+	if (ctx->mask & (1 << Opt_pidns) &&
+	    !WARN_ON_ONCE(fc->purpose == FS_CONTEXT_FOR_RECONFIGURE)) {
+		put_pid_ns(fs_info->pid_ns);
+		fs_info->pid_ns = get_pid_ns(ctx->pid_ns);
+	}
+	return 0;
+}
+
+static int proc_fill_super(struct super_block *s, struct fs_context *fc)
+{
+	struct proc_fs_context *ctx = fc->fs_private;
+	struct inode *root_inode;
+	struct proc_fs_info *fs_info;
+	int ret;
+
+	fs_info = kzalloc_obj(*fs_info);
+	if (!fs_info)
+		return -ENOMEM;
+
+	fs_info->pid_ns = get_pid_ns(ctx->pid_ns);
+	fs_info->mounter_cred = get_cred(fc->cred);
+	ret = proc_apply_options(fs_info, fc, current_user_ns());
+	if (ret)
+		return ret;
+
+	/* User space would break if executables or devices appear on proc */
+	s->s_iflags |= SB_I_NOEXEC | SB_I_NODEV;
+	s->s_flags |= SB_NODIRATIME | SB_NOSUID | SB_NOEXEC;
+	s->s_blocksize = 1024;
+	s->s_blocksize_bits = 10;
+	s->s_magic = PROC_SUPER_MAGIC;
+	s->s_op = &proc_sops;
+	s->s_time_gran = 1;
+	s->s_fs_info = fs_info;
+
+	if (fs_info->pidonly == PROC_PIDONLY_ON)
+		s->s_iflags |= SB_I_RESTRICTED_VARIANT;
+
+	/*
+	 * procfs isn't actually a stacking filesystem; however, there is
+	 * too much magic going on inside it to permit stacking things on
+	 * top of it
+	 */
+	s->s_stack_depth = FILESYSTEM_MAX_STACK_DEPTH;
+
+	/* procfs dentries and inodes don't require IO to create */
+	s->s_shrink->seeks = 0;
+
+	pde_get(&proc_root);
+	root_inode = proc_get_inode(s, &proc_root);
+	if (!root_inode) {
+		pr_err("proc_fill_super: get root inode failed\n");
+		return -ENOMEM;
+	}
+
+	s->s_root = d_make_root(root_inode);
+	if (!s->s_root) {
+		pr_err("proc_fill_super: allocate dentry failed\n");
+		return -ENOMEM;
+	}
+
+	ret = proc_setup_self(s);
+	if (ret) {
+		return ret;
+	}
+	return proc_setup_thread_self(s);
+}
+
+static int proc_reconfigure(struct fs_context *fc)
+{
+	struct super_block *sb = fc->root->d_sb;
+	struct proc_fs_info *fs_info = proc_sb_info(sb);
 
 	sync_filesystem(sb);
-	return !proc_parse_options(data, pid);
+
+	return proc_apply_options(fs_info, fc, current_user_ns());
 }
 
-static struct dentry *proc_mount(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+static int proc_get_tree(struct fs_context *fc)
 {
-	struct pid_namespace *ns;
+	return get_tree_nodev(fc, proc_fill_super);
+}
 
-	if (flags & SB_KERNMOUNT) {
-		ns = data;
-		data = NULL;
-	} else {
-		ns = task_active_pid_ns(current);
-	}
+static void proc_fs_context_free(struct fs_context *fc)
+{
+	struct proc_fs_context *ctx = fc->fs_private;
 
-	return mount_ns(fs_type, flags, data, ns, ns->user_ns, proc_fill_super);
+	put_pid_ns(ctx->pid_ns);
+	kfree(ctx);
+}
+
+static const struct fs_context_operations proc_fs_context_ops = {
+	.free		= proc_fs_context_free,
+	.parse_param	= proc_parse_param,
+	.get_tree	= proc_get_tree,
+	.reconfigure	= proc_reconfigure,
+};
+
+static int proc_init_fs_context(struct fs_context *fc)
+{
+	struct proc_fs_context *ctx;
+
+	ctx = kzalloc_obj(struct proc_fs_context);
+	if (!ctx)
+		return -ENOMEM;
+
+	ctx->pid_ns = get_pid_ns(task_active_pid_ns(current));
+	put_user_ns(fc->user_ns);
+	fc->user_ns = get_user_ns(ctx->pid_ns->user_ns);
+	fc->fs_private = ctx;
+	fc->ops = &proc_fs_context_ops;
+	return 0;
 }
 
 static void proc_kill_sb(struct super_block *sb)
 {
-	struct pid_namespace *ns;
+	struct proc_fs_info *fs_info = proc_sb_info(sb);
 
-	ns = (struct pid_namespace *)sb->s_fs_info;
-	if (ns->proc_self)
-		dput(ns->proc_self);
-	if (ns->proc_thread_self)
-		dput(ns->proc_thread_self);
 	kill_anon_super(sb);
-	put_pid_ns(ns);
+	if (fs_info) {
+		put_pid_ns(fs_info->pid_ns);
+		put_cred(fs_info->mounter_cred);
+		kfree_rcu(fs_info, rcu);
+	}
 }
 
 static struct file_system_type proc_fs_type = {
-	.name		= "proc",
-	.mount		= proc_mount,
-	.kill_sb	= proc_kill_sb,
-	.fs_flags	= FS_USERNS_MOUNT,
+	.name			= "proc",
+	.init_fs_context	= proc_init_fs_context,
+	.parameters		= proc_fs_parameters,
+	.kill_sb		= proc_kill_sb,
+	.fs_flags		= FS_USERNS_MOUNT | FS_USERNS_MOUNT_RESTRICTED | FS_DISALLOW_NOTIFY_PERM,
 };
 
 void __init proc_root_init(void)
@@ -141,22 +394,29 @@ void __init proc_root_init(void)
 	proc_mkdir("bus", NULL);
 	proc_sys_init();
 
+	/*
+	 * Last things last. It is not like userspace processes eager
+	 * to open /proc files exist at this point but register last
+	 * anyway.
+	 */
 	register_filesystem(&proc_fs_type);
 }
 
-static int proc_root_getattr(const struct path *path, struct kstat *stat,
+static int proc_root_getattr(struct mnt_idmap *idmap,
+			     const struct path *path, struct kstat *stat,
 			     u32 request_mask, unsigned int query_flags)
 {
-	generic_fillattr(d_inode(path->dentry), stat);
+	generic_fillattr(&nop_mnt_idmap, request_mask, d_inode(path->dentry),
+			 stat);
 	stat->nlink = proc_root.nlink + nr_processes();
 	return 0;
 }
 
 static struct dentry *proc_root_lookup(struct inode * dir, struct dentry * dentry, unsigned int flags)
 {
-	if (!proc_pid_lookup(dir, dentry, flags))
+	if (!proc_pid_lookup(dentry, flags))
 		return NULL;
-	
+
 	return proc_lookup(dir, dentry, flags);
 }
 
@@ -195,32 +455,14 @@ static const struct inode_operations proc_root_inode_operations = {
  * This is the root "inode" in the /proc tree..
  */
 struct proc_dir_entry proc_root = {
-	.low_ino	= PROC_ROOT_INO, 
-	.namelen	= 5, 
-	.mode		= S_IFDIR | S_IRUGO | S_IXUGO, 
-	.nlink		= 2, 
+	.low_ino	= PROCFS_ROOT_INO,
+	.namelen	= 5,
+	.mode		= S_IFDIR | S_IRUGO | S_IXUGO,
+	.nlink		= 2,
 	.refcnt		= REFCOUNT_INIT(1),
-	.proc_iops	= &proc_root_inode_operations, 
-	.proc_fops	= &proc_root_operations,
+	.proc_iops	= &proc_root_inode_operations,
+	.proc_dir_ops	= &proc_root_operations,
 	.parent		= &proc_root,
 	.subdir		= RB_ROOT,
-	.name		= proc_root.inline_name,
-	.inline_name	= "/proc",
+	.name		= "/proc",
 };
-
-int pid_ns_prepare_proc(struct pid_namespace *ns)
-{
-	struct vfsmount *mnt;
-
-	mnt = kern_mount_data(&proc_fs_type, ns);
-	if (IS_ERR(mnt))
-		return PTR_ERR(mnt);
-
-	ns->proc_mnt = mnt;
-	return 0;
-}
-
-void pid_ns_release_proc(struct pid_namespace *ns)
-{
-	kern_unmount(ns->proc_mnt);
-}

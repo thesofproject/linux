@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  linux/drivers/video/cyber2000fb.h
  *
  *  Copyright (C) 1998-2000 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Integraphics Cyber2000 frame buffer device
  */
@@ -491,7 +488,5 @@ struct cyberpro_info {
  * Note! Writing to the Cyber20x0 registers from an interrupt
  * routine is definitely a bad idea atm.
  */
-int cyber2000fb_attach(struct cyberpro_info *info, int idx);
-void cyber2000fb_detach(int idx);
 void cyber2000fb_enable_extregs(struct cfb_info *cfb);
 void cyber2000fb_disable_extregs(struct cfb_info *cfb);

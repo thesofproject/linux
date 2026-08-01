@@ -1,15 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License version 2 as published
- *  by the Free Software Foundation.
  *
  *  Copyright © 2012 John Crispin <john@phrozen.org>
  *  Copyright © 2016 Hauke Mehrtens <hauke@hauke-m.de>
  */
 
 #include <linux/mtd/rawnand.h>
-#include <linux/of_gpio.h>
-#include <linux/of_platform.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
 
 #include <lantiq_soc.h>
 
@@ -64,6 +62,7 @@
 #define NAND_CON_NANDM		1
 
 struct xway_nand_data {
+	struct nand_controller	controller;
 	struct nand_chip	chip;
 	unsigned long		csflags;
 	void __iomem		*nandaddr;
@@ -85,9 +84,8 @@ static void xway_writeb(struct mtd_info *mtd, int op, u8 value)
 	writeb(value, data->nandaddr + op);
 }
 
-static void xway_select_chip(struct mtd_info *mtd, int select)
+static void xway_select_chip(struct nand_chip *chip, int select)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
 	struct xway_nand_data *data = nand_get_controller_data(chip);
 
 	switch (select) {
@@ -106,8 +104,10 @@ static void xway_select_chip(struct mtd_info *mtd, int select)
 	}
 }
 
-static void xway_cmd_ctrl(struct mtd_info *mtd, int cmd, unsigned int ctrl)
+static void xway_cmd_ctrl(struct nand_chip *chip, int cmd, unsigned int ctrl)
 {
+	struct mtd_info *mtd = nand_to_mtd(chip);
+
 	if (cmd == NAND_CMD_NONE)
 		return;
 
@@ -120,31 +120,44 @@ static void xway_cmd_ctrl(struct mtd_info *mtd, int cmd, unsigned int ctrl)
 		;
 }
 
-static int xway_dev_ready(struct mtd_info *mtd)
+static int xway_dev_ready(struct nand_chip *chip)
 {
 	return ltq_ebu_r32(EBU_NAND_WAIT) & NAND_WAIT_RD;
 }
 
-static unsigned char xway_read_byte(struct mtd_info *mtd)
+static unsigned char xway_read_byte(struct nand_chip *chip)
 {
-	return xway_readb(mtd, NAND_READ_DATA);
+	return xway_readb(nand_to_mtd(chip), NAND_READ_DATA);
 }
 
-static void xway_read_buf(struct mtd_info *mtd, u_char *buf, int len)
-{
-	int i;
-
-	for (i = 0; i < len; i++)
-		buf[i] = xway_readb(mtd, NAND_WRITE_DATA);
-}
-
-static void xway_write_buf(struct mtd_info *mtd, const u_char *buf, int len)
+static void xway_read_buf(struct nand_chip *chip, u_char *buf, int len)
 {
 	int i;
 
 	for (i = 0; i < len; i++)
-		xway_writeb(mtd, NAND_WRITE_DATA, buf[i]);
+		buf[i] = xway_readb(nand_to_mtd(chip), NAND_WRITE_DATA);
 }
+
+static void xway_write_buf(struct nand_chip *chip, const u_char *buf, int len)
+{
+	int i;
+
+	for (i = 0; i < len; i++)
+		xway_writeb(nand_to_mtd(chip), NAND_WRITE_DATA, buf[i]);
+}
+
+static int xway_attach_chip(struct nand_chip *chip)
+{
+	if (chip->ecc.engine_type == NAND_ECC_ENGINE_TYPE_SOFT &&
+	    chip->ecc.algo == NAND_ECC_ALGO_UNKNOWN)
+		chip->ecc.algo = NAND_ECC_ALGO_HAMMING;
+
+	return 0;
+}
+
+static const struct nand_controller_ops xway_nand_ops = {
+	.attach_chip = xway_attach_chip,
+};
 
 /*
  * Probe for the NAND device.
@@ -153,7 +166,6 @@ static int xway_nand_probe(struct platform_device *pdev)
 {
 	struct xway_nand_data *data;
 	struct mtd_info *mtd;
-	struct resource *res;
 	int err;
 	u32 cs;
 	u32 cs_flag = 0;
@@ -164,8 +176,7 @@ static int xway_nand_probe(struct platform_device *pdev)
 	if (!data)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	data->nandaddr = devm_ioremap_resource(&pdev->dev, res);
+	data->nandaddr = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(data->nandaddr))
 		return PTR_ERR(data->nandaddr);
 
@@ -173,16 +184,17 @@ static int xway_nand_probe(struct platform_device *pdev)
 	mtd = nand_to_mtd(&data->chip);
 	mtd->dev.parent = &pdev->dev;
 
-	data->chip.cmd_ctrl = xway_cmd_ctrl;
-	data->chip.dev_ready = xway_dev_ready;
-	data->chip.select_chip = xway_select_chip;
-	data->chip.write_buf = xway_write_buf;
-	data->chip.read_buf = xway_read_buf;
-	data->chip.read_byte = xway_read_byte;
-	data->chip.chip_delay = 30;
+	data->chip.legacy.cmd_ctrl = xway_cmd_ctrl;
+	data->chip.legacy.dev_ready = xway_dev_ready;
+	data->chip.legacy.select_chip = xway_select_chip;
+	data->chip.legacy.write_buf = xway_write_buf;
+	data->chip.legacy.read_buf = xway_read_buf;
+	data->chip.legacy.read_byte = xway_read_byte;
+	data->chip.legacy.chip_delay = 30;
 
-	data->chip.ecc.mode = NAND_ECC_SOFT;
-	data->chip.ecc.algo = NAND_ECC_HAMMING;
+	nand_controller_init(&data->controller);
+	data->controller.ops = &xway_nand_ops;
+	data->chip.controller = &data->controller;
 
 	platform_set_drvdata(pdev, data);
 	nand_set_controller_data(&data->chip, data);
@@ -204,14 +216,21 @@ static int xway_nand_probe(struct platform_device *pdev)
 		    | NAND_CON_SE_P | NAND_CON_WP_P | NAND_CON_PRE_P
 		    | cs_flag, EBU_NAND_CON);
 
+	/*
+	 * This driver assumes that the default ECC engine should be TYPE_SOFT.
+	 * Set ->engine_type before registering the NAND devices in order to
+	 * provide a driver specific default value.
+	 */
+	data->chip.ecc.engine_type = NAND_ECC_ENGINE_TYPE_SOFT;
+
 	/* Scan to find existence of the device */
-	err = nand_scan(mtd, 1);
+	err = nand_scan(&data->chip, 1);
 	if (err)
 		return err;
 
 	err = mtd_device_register(mtd, NULL, 0);
 	if (err)
-		nand_release(mtd);
+		nand_cleanup(&data->chip);
 
 	return err;
 }
@@ -219,13 +238,15 @@ static int xway_nand_probe(struct platform_device *pdev)
 /*
  * Remove a NAND device.
  */
-static int xway_nand_remove(struct platform_device *pdev)
+static void xway_nand_remove(struct platform_device *pdev)
 {
 	struct xway_nand_data *data = platform_get_drvdata(pdev);
+	struct nand_chip *chip = &data->chip;
+	int ret;
 
-	nand_release(nand_to_mtd(&data->chip));
-
-	return 0;
+	ret = mtd_device_unregister(nand_to_mtd(chip));
+	WARN_ON(ret);
+	nand_cleanup(chip);
 }
 
 static const struct of_device_id xway_nand_match[] = {
@@ -235,7 +256,7 @@ static const struct of_device_id xway_nand_match[] = {
 
 static struct platform_driver xway_nand_driver = {
 	.probe	= xway_nand_probe,
-	.remove	= xway_nand_remove,
+	.remove = xway_nand_remove,
 	.driver	= {
 		.name		= "lantiq,nand-xway",
 		.of_match_table = xway_nand_match,

@@ -1,28 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * mst.c - NTFS multi sector transfer protection handling code. Part of the
- *	   Linux-NTFS project.
+ * NTFS multi sector transfer protection handling code.
  *
  * Copyright (c) 2001-2004 Anton Altaparmakov
- *
- * This program/include file is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as published
- * by the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program/include file is distributed in the hope that it will be
- * useful, but WITHOUT ANY WARRANTY; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program (in the main directory of the Linux-NTFS
- * distribution in the file COPYING); if not, write to the Free Software
- * Foundation,Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
+
+#include <linux/ratelimit.h>
 
 #include "ntfs.h"
 
-/**
+/*
  * post_read_mst_fixup - deprotect multi sector transfer protected data
  * @b:		pointer to the data to deprotect
  * @size:	size in bytes of @b
@@ -39,7 +26,7 @@
  * be fixed up. Thus, we return success and not failure in this case. This is
  * in contrast to pre_write_mst_fixup(), see below.
  */
-int post_read_mst_fixup(NTFS_RECORD *b, const u32 size)
+int post_read_mst_fixup(struct ntfs_record *b, const u32 size)
 {
 	u16 usa_ofs, usa_count, usn;
 	u16 *usa_pos, *data_pos;
@@ -49,13 +36,12 @@ int post_read_mst_fixup(NTFS_RECORD *b, const u32 size)
 	/* Decrement usa_count to get number of fixups. */
 	usa_count = le16_to_cpu(b->usa_count) - 1;
 	/* Size and alignment checks. */
-	if ( size & (NTFS_BLOCK_SIZE - 1)	||
-	     usa_ofs & 1			||
-	     usa_ofs + (usa_count * 2) > size	||
-	     (size >> NTFS_BLOCK_SIZE_BITS) != usa_count)
+	if (size & (NTFS_BLOCK_SIZE - 1) || usa_ofs & 1	||
+	    usa_ofs + (usa_count * 2) > size ||
+	    (size >> NTFS_BLOCK_SIZE_BITS) != usa_count)
 		return 0;
 	/* Position of usn in update sequence array. */
-	usa_pos = (u16*)b + usa_ofs/sizeof(u16);
+	usa_pos = (u16 *)b + usa_ofs/sizeof(u16);
 	/*
 	 * The update sequence number which has to be equal to each of the
 	 * u16 values before they are fixed up. Note no need to care for
@@ -67,12 +53,18 @@ int post_read_mst_fixup(NTFS_RECORD *b, const u32 size)
 	/*
 	 * Position in protected data of first u16 that needs fixing up.
 	 */
-	data_pos = (u16*)b + NTFS_BLOCK_SIZE/sizeof(u16) - 1;
+	data_pos = (u16 *)b + NTFS_BLOCK_SIZE / sizeof(u16) - 1;
 	/*
 	 * Check for incomplete multi sector transfer(s).
 	 */
 	while (usa_count--) {
 		if (*data_pos != usn) {
+			struct mft_record *m = (struct mft_record *)b;
+
+			pr_err_ratelimited("ntfs: Incomplete multi sector transfer detected! (Record magic : 0x%x, mft number : 0x%x, base mft number : 0x%lx, mft in use : %d, data : 0x%x, usn 0x%x)\n",
+					le32_to_cpu(m->magic), le32_to_cpu(m->mft_record_number),
+					MREF_LE(m->base_mft_record), m->flags & MFT_RECORD_IN_USE,
+					*data_pos, usn);
 			/*
 			 * Incomplete multi sector transfer detected! )-:
 			 * Set the magic to "BAAD" and return failure.
@@ -81,11 +73,11 @@ int post_read_mst_fixup(NTFS_RECORD *b, const u32 size)
 			b->magic = magic_BAAD;
 			return -EINVAL;
 		}
-		data_pos += NTFS_BLOCK_SIZE/sizeof(u16);
+		data_pos += NTFS_BLOCK_SIZE / sizeof(u16);
 	}
 	/* Re-setup the variables. */
 	usa_count = le16_to_cpu(b->usa_count) - 1;
-	data_pos = (u16*)b + NTFS_BLOCK_SIZE/sizeof(u16) - 1;
+	data_pos = (u16 *)b + NTFS_BLOCK_SIZE / sizeof(u16) - 1;
 	/* Fixup all sectors. */
 	while (usa_count--) {
 		/*
@@ -99,7 +91,7 @@ int post_read_mst_fixup(NTFS_RECORD *b, const u32 size)
 	return 0;
 }
 
-/**
+/*
  * pre_write_mst_fixup - apply multi sector transfer protection
  * @b:		pointer to the data to protect
  * @size:	size in bytes of @b
@@ -120,28 +112,27 @@ int post_read_mst_fixup(NTFS_RECORD *b, const u32 size)
  * otherwise a random word will be used (whatever was in the record at that
  * position at that time).
  */
-int pre_write_mst_fixup(NTFS_RECORD *b, const u32 size)
+int pre_write_mst_fixup(struct ntfs_record *b, const u32 size)
 {
-	le16 *usa_pos, *data_pos;
+	__le16 *usa_pos, *data_pos;
 	u16 usa_ofs, usa_count, usn;
-	le16 le_usn;
+	__le16 le_usn;
 
 	/* Sanity check + only fixup if it makes sense. */
 	if (!b || ntfs_is_baad_record(b->magic) ||
-			ntfs_is_hole_record(b->magic))
+	    ntfs_is_hole_record(b->magic))
 		return -EINVAL;
 	/* Setup the variables. */
 	usa_ofs = le16_to_cpu(b->usa_ofs);
 	/* Decrement usa_count to get number of fixups. */
 	usa_count = le16_to_cpu(b->usa_count) - 1;
 	/* Size and alignment checks. */
-	if ( size & (NTFS_BLOCK_SIZE - 1)	||
-	     usa_ofs & 1			||
-	     usa_ofs + (usa_count * 2) > size	||
-	     (size >> NTFS_BLOCK_SIZE_BITS) != usa_count)
+	if (size & (NTFS_BLOCK_SIZE - 1) || usa_ofs & 1	||
+	    usa_ofs + (usa_count * 2) > size ||
+	    (size >> NTFS_BLOCK_SIZE_BITS) != usa_count)
 		return -EINVAL;
 	/* Position of usn in update sequence array. */
-	usa_pos = (le16*)((u8*)b + usa_ofs);
+	usa_pos = (__le16 *)((u8 *)b + usa_ofs);
 	/*
 	 * Cyclically increment the update sequence number
 	 * (skipping 0 and -1, i.e. 0xffff).
@@ -152,7 +143,7 @@ int pre_write_mst_fixup(NTFS_RECORD *b, const u32 size)
 	le_usn = cpu_to_le16(usn);
 	*usa_pos = le_usn;
 	/* Position in data of first u16 that needs fixing up. */
-	data_pos = (le16*)b + NTFS_BLOCK_SIZE/sizeof(le16) - 1;
+	data_pos = (__le16 *)b + NTFS_BLOCK_SIZE/sizeof(__le16) - 1;
 	/* Fixup all sectors. */
 	while (usa_count--) {
 		/*
@@ -163,12 +154,12 @@ int pre_write_mst_fixup(NTFS_RECORD *b, const u32 size)
 		/* Apply fixup to data. */
 		*data_pos = le_usn;
 		/* Increment position in data as well. */
-		data_pos += NTFS_BLOCK_SIZE/sizeof(le16);
+		data_pos += NTFS_BLOCK_SIZE / sizeof(__le16);
 	}
 	return 0;
 }
 
-/**
+/*
  * post_write_mst_fixup - fast deprotect multi sector transfer protected data
  * @b:		pointer to the data to deprotect
  *
@@ -176,18 +167,18 @@ int pre_write_mst_fixup(NTFS_RECORD *b, const u32 size)
  * for any errors, because we assume we have just used pre_write_mst_fixup(),
  * thus the data will be fine or we would never have gotten here.
  */
-void post_write_mst_fixup(NTFS_RECORD *b)
+void post_write_mst_fixup(struct ntfs_record *b)
 {
-	le16 *usa_pos, *data_pos;
+	__le16 *usa_pos, *data_pos;
 
 	u16 usa_ofs = le16_to_cpu(b->usa_ofs);
 	u16 usa_count = le16_to_cpu(b->usa_count) - 1;
 
 	/* Position of usn in update sequence array. */
-	usa_pos = (le16*)b + usa_ofs/sizeof(le16);
+	usa_pos = (__le16 *)b + usa_ofs/sizeof(__le16);
 
 	/* Position in protected data of first u16 that needs fixing up. */
-	data_pos = (le16*)b + NTFS_BLOCK_SIZE/sizeof(le16) - 1;
+	data_pos = (__le16 *)b + NTFS_BLOCK_SIZE/sizeof(__le16) - 1;
 
 	/* Fixup all sectors. */
 	while (usa_count--) {
@@ -198,6 +189,6 @@ void post_write_mst_fixup(NTFS_RECORD *b)
 		*data_pos = *(++usa_pos);
 
 		/* Increment position in data as well. */
-		data_pos += NTFS_BLOCK_SIZE/sizeof(le16);
+		data_pos += NTFS_BLOCK_SIZE/sizeof(__le16);
 	}
 }

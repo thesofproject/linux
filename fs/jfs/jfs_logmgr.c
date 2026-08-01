@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   Copyright (C) International Business Machines Corp., 2000-2004
  *   Portions Copyright (C) Christoph Hellwig, 2001-2002
- *
- *   This program is free software;  you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY;  without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- *   the GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program;  if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 /*
@@ -87,12 +74,6 @@ static struct lbuf *log_redrive_list;
 static DEFINE_SPINLOCK(log_redrive_lock);
 
 
-/*
- *	log read/write serialization (per log)
- */
-#define LOG_LOCK_INIT(log)	mutex_init(&(log)->loglock)
-#define LOG_LOCK(log)		mutex_lock(&((log)->loglock))
-#define LOG_UNLOCK(log)		mutex_unlock(&((log)->loglock))
 
 
 /*
@@ -217,9 +198,13 @@ static void write_special_inodes(struct jfs_log *log,
 	struct jfs_sb_info *sbi;
 
 	list_for_each_entry(sbi, &log->sb_list, log_list) {
-		writer(sbi->ipbmap->i_mapping);
-		writer(sbi->ipimap->i_mapping);
-		writer(sbi->direct_inode->i_mapping);
+		/* These pointers can be NULL before list_del during umount */
+		if (sbi->ipbmap)
+			writer(sbi->ipbmap->i_mapping);
+		if (sbi->ipimap)
+			writer(sbi->ipimap->i_mapping);
+		if (sbi->direct_inode)
+			writer(sbi->direct_inode->i_mapping);
 	}
 }
 
@@ -401,14 +386,6 @@ lmWriteRecord(struct jfs_log * log, struct tblock * tblk, struct lrd * lrd,
 			p = (caddr_t) &JFS_IP(tlck->ip)->i_xtroot;
 		linelock = (struct linelock *) & tlck->lock;
 	}
-#ifdef	_JFS_WIP
-	else if (tlck->flag & tlckINLINELOCK) {
-
-		inlinelock = (struct inlinelock *) & tlck;
-		p = (caddr_t) & inlinelock->pxd;
-		linelock = (struct linelock *) & tlck;
-	}
-#endif				/* _JFS_WIP */
 	else {
 		jfs_err("lmWriteRecord: UFO tlck:0x%p", tlck);
 		return 0;	/* Probably should trap */
@@ -1079,7 +1056,7 @@ void jfs_syncpt(struct jfs_log *log, int hard_sync)
 int lmLogOpen(struct super_block *sb)
 {
 	int rc;
-	struct block_device *bdev;
+	struct file *bdev_file;
 	struct jfs_log *log;
 	struct jfs_sb_info *sbi = JFS_SBI(sb);
 
@@ -1091,9 +1068,8 @@ int lmLogOpen(struct super_block *sb)
 
 	mutex_lock(&jfs_log_mutex);
 	list_for_each_entry(log, &jfs_external_logs, journal_list) {
-		if (log->bdev->bd_dev == sbi->logdev) {
-			if (memcmp(log->uuid, sbi->loguuid,
-				   sizeof(log->uuid))) {
+		if (file_bdev(log->bdev_file)->bd_dev == sbi->logdev) {
+			if (!uuid_equal(&log->uuid, &sbi->loguuid)) {
 				jfs_warn("wrong uuid on JFS journal");
 				mutex_unlock(&jfs_log_mutex);
 				return -EINVAL;
@@ -1109,7 +1085,7 @@ int lmLogOpen(struct super_block *sb)
 		}
 	}
 
-	if (!(log = kzalloc(sizeof(struct jfs_log), GFP_KERNEL))) {
+	if (!(log = kzalloc_obj(struct jfs_log))) {
 		mutex_unlock(&jfs_log_mutex);
 		return -ENOMEM;
 	}
@@ -1122,15 +1098,15 @@ int lmLogOpen(struct super_block *sb)
 	 * file systems to log may have n-to-1 relationship;
 	 */
 
-	bdev = blkdev_get_by_dev(sbi->logdev, FMODE_READ|FMODE_WRITE|FMODE_EXCL,
-				 log);
-	if (IS_ERR(bdev)) {
-		rc = PTR_ERR(bdev);
+	bdev_file = bdev_file_open_by_dev(sbi->logdev,
+			BLK_OPEN_READ | BLK_OPEN_WRITE, log, NULL);
+	if (IS_ERR(bdev_file)) {
+		rc = PTR_ERR(bdev_file);
 		goto free;
 	}
 
-	log->bdev = bdev;
-	memcpy(log->uuid, sbi->loguuid, sizeof(log->uuid));
+	log->bdev_file = bdev_file;
+	uuid_copy(&log->uuid, &sbi->loguuid);
 
 	/*
 	 * initialize log:
@@ -1163,7 +1139,7 @@ journal_found:
 	lbmLogShutdown(log);
 
       close:		/* close external log device */
-	blkdev_put(bdev, FMODE_READ|FMODE_WRITE|FMODE_EXCL);
+	bdev_fput(bdev_file);
 
       free:		/* free log descriptor */
 	mutex_unlock(&jfs_log_mutex);
@@ -1178,13 +1154,13 @@ static int open_inline_log(struct super_block *sb)
 	struct jfs_log *log;
 	int rc;
 
-	if (!(log = kzalloc(sizeof(struct jfs_log), GFP_KERNEL)))
+	if (!(log = kzalloc_obj(struct jfs_log)))
 		return -ENOMEM;
 	INIT_LIST_HEAD(&log->sb_list);
 	init_waitqueue_head(&log->syncwait);
 
 	set_bit(log_INLINELOG, &log->flag);
-	log->bdev = sb->s_bdev;
+	log->bdev_file = sb->s_bdev_file;
 	log->base = addressPXD(&JFS_SBI(sb)->logpxd);
 	log->size = lengthPXD(&JFS_SBI(sb)->logpxd) >>
 	    (L2LOGPSIZE - sb->s_blocksize_bits);
@@ -1212,7 +1188,7 @@ static int open_dummy_log(struct super_block *sb)
 
 	mutex_lock(&jfs_log_mutex);
 	if (!dummy_log) {
-		dummy_log = kzalloc(sizeof(struct jfs_log), GFP_KERNEL);
+		dummy_log = kzalloc_obj(struct jfs_log);
 		if (!dummy_log) {
 			mutex_unlock(&jfs_log_mutex);
 			return -ENOMEM;
@@ -1221,7 +1197,6 @@ static int open_dummy_log(struct super_block *sb)
 		init_waitqueue_head(&dummy_log->syncwait);
 		dummy_log->no_integrity = 1;
 		/* Make up some stuff */
-		dummy_log->base = 0;
 		dummy_log->size = 1024;
 		rc = lmLogInit(dummy_log);
 		if (rc) {
@@ -1336,8 +1311,9 @@ int lmLogInit(struct jfs_log * log)
 			jfs_info("lmLogInit: inline log:0x%p base:0x%Lx size:0x%x",
 				 log, (unsigned long long)log->base, log->size);
 		} else {
-			if (memcmp(logsuper->uuid, log->uuid, 16)) {
+			if (!uuid_equal(&logsuper->uuid, &log->uuid)) {
 				jfs_warn("wrong uuid on JFS log device");
+				rc = -EINVAL;
 				goto errout20;
 			}
 			log->size = le32_to_cpu(logsuper->size);
@@ -1457,7 +1433,7 @@ int lmLogClose(struct super_block *sb)
 {
 	struct jfs_sb_info *sbi = JFS_SBI(sb);
 	struct jfs_log *log = sbi->log;
-	struct block_device *bdev;
+	struct file *bdev_file;
 	int rc = 0;
 
 	jfs_info("lmLogClose: log:0x%p", log);
@@ -1503,10 +1479,10 @@ int lmLogClose(struct super_block *sb)
 	 *	external log as separate logical volume
 	 */
 	list_del(&log->journal_list);
-	bdev = log->bdev;
+	bdev_file = log->bdev_file;
 	rc = lmLogShutdown(log);
 
-	blkdev_put(bdev, FMODE_READ|FMODE_WRITE|FMODE_EXCL);
+	bdev_fput(bdev_file);
 
 	kfree(log);
 
@@ -1621,7 +1597,7 @@ void jfs_flush_journal(struct jfs_log *log, int wait)
 					       mp, sizeof(struct metapage), 0);
 				print_hex_dump(KERN_ERR, "page: ",
 					       DUMP_PREFIX_ADDRESS, 16,
-					       sizeof(long), mp->page,
+					       sizeof(long), mp->folio,
 					       sizeof(struct page), 0);
 			} else
 				print_hex_dump(KERN_ERR, "tblock:",
@@ -1732,7 +1708,7 @@ static int lmLogFileSystem(struct jfs_log * log, struct jfs_sb_info *sbi,
 	int i;
 	struct logsuper *logsuper;
 	struct lbuf *bpsuper;
-	char *uuid = sbi->uuid;
+	uuid_t *uuid = &sbi->uuid;
 
 	/*
 	 * insert/remove file system device to log active file system list.
@@ -1743,8 +1719,8 @@ static int lmLogFileSystem(struct jfs_log * log, struct jfs_sb_info *sbi,
 	logsuper = (struct logsuper *) bpsuper->l_ldata;
 	if (activate) {
 		for (i = 0; i < MAX_ACTIVE; i++)
-			if (!memcmp(logsuper->active[i].uuid, NULL_UUID, 16)) {
-				memcpy(logsuper->active[i].uuid, uuid, 16);
+			if (uuid_is_null(&logsuper->active[i].uuid)) {
+				uuid_copy(&logsuper->active[i].uuid, uuid);
 				sbi->aggregate = i;
 				break;
 			}
@@ -1755,8 +1731,9 @@ static int lmLogFileSystem(struct jfs_log * log, struct jfs_sb_info *sbi,
 		}
 	} else {
 		for (i = 0; i < MAX_ACTIVE; i++)
-			if (!memcmp(logsuper->active[i].uuid, uuid, 16)) {
-				memcpy(logsuper->active[i].uuid, NULL_UUID, 16);
+			if (uuid_equal(&logsuper->active[i].uuid, uuid)) {
+				uuid_copy(&logsuper->active[i].uuid,
+					  &uuid_null);
 				break;
 			}
 		if (i == MAX_ACTIVE) {
@@ -1839,7 +1816,7 @@ static int lbmLogInit(struct jfs_log * log)
 			goto error;
 		buffer = page_address(page);
 		for (offset = 0; offset < PAGE_SIZE; offset += LOGPSIZE) {
-			lbuf = kmalloc(sizeof(struct lbuf), GFP_KERNEL);
+			lbuf = kmalloc_obj(struct lbuf);
 			if (lbuf == NULL) {
 				if (offset == 0)
 					__free_page(page);
@@ -1992,17 +1969,13 @@ static int lbmRead(struct jfs_log * log, int pn, struct lbuf ** bpp)
 
 	bp->l_flag |= lbmREAD;
 
-	bio = bio_alloc(GFP_NOFS, 1);
-
+	bio = bio_alloc(file_bdev(log->bdev_file), 1, REQ_OP_READ, GFP_NOFS);
 	bio->bi_iter.bi_sector = bp->l_blkno << (log->l2bsize - 9);
-	bio_set_dev(bio, log->bdev);
-
-	bio_add_page(bio, bp->l_page, LOGPSIZE, bp->l_offset);
+	__bio_add_page(bio, bp->l_page, LOGPSIZE, bp->l_offset);
 	BUG_ON(bio->bi_iter.bi_size != LOGPSIZE);
 
 	bio->bi_end_io = lbmIODone;
 	bio->bi_private = bp;
-	bio->bi_opf = REQ_OP_READ;
 	/*check if journaling to disk has been disabled*/
 	if (log->no_integrity) {
 		bio->bi_iter.bi_size = 0;
@@ -2134,19 +2107,21 @@ static void lbmStartIO(struct lbuf * bp)
 {
 	struct bio *bio;
 	struct jfs_log *log = bp->l_log;
+	struct block_device *bdev = NULL;
 
 	jfs_info("lbmStartIO");
 
-	bio = bio_alloc(GFP_NOFS, 1);
-	bio->bi_iter.bi_sector = bp->l_blkno << (log->l2bsize - 9);
-	bio_set_dev(bio, log->bdev);
+	if (!log->no_integrity)
+		bdev = file_bdev(log->bdev_file);
 
-	bio_add_page(bio, bp->l_page, LOGPSIZE, bp->l_offset);
+	bio = bio_alloc(bdev, 1, REQ_OP_WRITE | REQ_SYNC,
+			GFP_NOFS);
+	bio->bi_iter.bi_sector = bp->l_blkno << (log->l2bsize - 9);
+	__bio_add_page(bio, bp->l_page, LOGPSIZE, bp->l_offset);
 	BUG_ON(bio->bi_iter.bi_size != LOGPSIZE);
 
 	bio->bi_end_io = lbmIODone;
 	bio->bi_private = bp;
-	bio->bi_opf = REQ_OP_WRITE | REQ_SYNC;
 
 	/* check if journaling to disk has been disabled */
 	if (log->no_integrity) {
@@ -2203,8 +2178,6 @@ static void lbmIODone(struct bio *bio)
 
 	LCACHE_LOCK(flags);		/* disable+lock */
 
-	bp->l_flag |= lbmDONE;
-
 	if (bio->bi_status) {
 		bp->l_flag |= lbmERROR;
 
@@ -2219,12 +2192,10 @@ static void lbmIODone(struct bio *bio)
 	if (bp->l_flag & lbmREAD) {
 		bp->l_flag &= ~lbmREAD;
 
-		LCACHE_UNLOCK(flags);	/* unlock+enable */
-
 		/* wakeup I/O initiator */
 		LCACHE_WAKEUP(&bp->l_ioevent);
 
-		return;
+		goto out;
 	}
 
 	/*
@@ -2248,8 +2219,7 @@ static void lbmIODone(struct bio *bio)
 
 	if (bp->l_flag & lbmDIRECT) {
 		LCACHE_WAKEUP(&bp->l_ioevent);
-		LCACHE_UNLOCK(flags);
-		return;
+		goto out;
 	}
 
 	tail = log->wqueue;
@@ -2301,8 +2271,6 @@ static void lbmIODone(struct bio *bio)
 	 * leave buffer for i/o initiator to dispose
 	 */
 	if (bp->l_flag & lbmSYNC) {
-		LCACHE_UNLOCK(flags);	/* unlock+enable */
-
 		/* wakeup I/O initiator */
 		LCACHE_WAKEUP(&bp->l_ioevent);
 	}
@@ -2313,6 +2281,7 @@ static void lbmIODone(struct bio *bio)
 	else if (bp->l_flag & lbmGC) {
 		LCACHE_UNLOCK(flags);
 		lmPostGC(bp);
+		LCACHE_LOCK(flags);		/* disable+lock */
 	}
 
 	/*
@@ -2325,15 +2294,18 @@ static void lbmIODone(struct bio *bio)
 		assert(bp->l_flag & lbmRELEASE);
 		assert(bp->l_flag & lbmFREE);
 		lbmfree(bp);
-
-		LCACHE_UNLOCK(flags);	/* unlock+enable */
 	}
+
+out:
+	bp->l_flag |= lbmDONE;
+	LCACHE_UNLOCK(flags);
 }
 
 int jfsIOWait(void *arg)
 {
 	struct lbuf *bp;
 
+	set_freezable();
 	do {
 		spin_lock_irq(&log_redrive_lock);
 		while ((bp = log_redrive_list)) {
@@ -2493,7 +2465,7 @@ exit:
 }
 
 #ifdef CONFIG_JFS_STATISTICS
-static int jfs_lmstats_proc_show(struct seq_file *m, void *v)
+int jfs_lmstats_proc_show(struct seq_file *m, void *v)
 {
 	seq_printf(m,
 		       "JFS Logmgr stats\n"
@@ -2510,16 +2482,4 @@ static int jfs_lmstats_proc_show(struct seq_file *m, void *v)
 		       lmStat.partial_page);
 	return 0;
 }
-
-static int jfs_lmstats_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, jfs_lmstats_proc_show, NULL);
-}
-
-const struct file_operations jfs_lmstats_proc_fops = {
-	.open		= jfs_lmstats_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 #endif /* CONFIG_JFS_STATISTICS */

@@ -19,8 +19,6 @@
 #include <linux/time.h>
 #include <linux/uidgid.h>
 
-#define KSTAT_QUERY_FLAGS (AT_STATX_SYNC_TYPE)
-
 struct kstat {
 	u32		result_mask;	/* What fields the user got */
 	umode_t		mode;
@@ -33,19 +31,42 @@ struct kstat {
 	 STATX_ATTR_IMMUTABLE |				\
 	 STATX_ATTR_APPEND |				\
 	 STATX_ATTR_NODUMP |				\
-	 STATX_ATTR_ENCRYPTED				\
+	 STATX_ATTR_ENCRYPTED |				\
+	 STATX_ATTR_VERITY				\
 	 )/* Attrs corresponding to FS_*_FL flags */
+#define KSTAT_ATTR_VFS_FLAGS				\
+	(STATX_ATTR_IMMUTABLE |				\
+	 STATX_ATTR_APPEND				\
+	 ) /* Attrs corresponding to S_* flags that are enforced by the VFS */
 	u64		ino;
 	dev_t		dev;
 	dev_t		rdev;
 	kuid_t		uid;
 	kgid_t		gid;
 	loff_t		size;
-	struct timespec	atime;
-	struct timespec	mtime;
-	struct timespec	ctime;
-	struct timespec	btime;			/* File creation time */
+	struct timespec64 atime;
+	struct timespec64 mtime;
+	struct timespec64 ctime;
+	struct timespec64 btime;			/* File creation time */
 	u64		blocks;
+	u64		mnt_id;
+	u64		change_cookie;
+	u64		subvol;
+	u32		dio_mem_align;
+	u32		dio_offset_align;
+	u32		dio_read_offset_align;
+	u32		atomic_write_unit_min;
+	u32		atomic_write_unit_max;
+	u32		atomic_write_unit_max_opt;
+	u32		atomic_write_segments_max;
 };
+
+/* These definitions are internal to the kernel for now. Mainly used by nfsd. */
+
+/* mask values */
+#define STATX_CHANGE_COOKIE		0x40000000U	/* Want/got stx_change_attr */
+
+/* file attribute values */
+#define STATX_ATTR_CHANGE_MONOTONIC	0x8000000000000000ULL /* version monotonically increases */
 
 #endif

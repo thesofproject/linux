@@ -111,8 +111,6 @@ static void __init aic_common_ext_irq_of_init(struct irq_domain *domain)
 	struct device_node *node = irq_domain_get_of_node(domain);
 	struct irq_chip_generic *gc;
 	struct aic_chip_data *aic;
-	struct property *prop;
-	const __be32 *p;
 	u32 hwirq;
 
 	gc = irq_get_domain_generic_chip(domain, 0);
@@ -120,7 +118,7 @@ static void __init aic_common_ext_irq_of_init(struct irq_domain *domain)
 	aic = gc->private;
 	aic->ext_irqs |= 1;
 
-	of_property_for_each_u32(node, "atmel,external-irqs", prop, p, hwirq) {
+	of_property_for_each_u32(node, "atmel,external-irqs", hwirq) {
 		gc = irq_get_domain_generic_chip(domain, hwirq);
 		if (!gc) {
 			pr_warn("AIC: external irq %d >= %d skip it\n",
@@ -189,20 +187,11 @@ void __init aic_common_rtt_irq_fixup(void)
 
 static void __init aic_common_irq_fixup(const struct of_device_id *matches)
 {
-	struct device_node *root = of_find_node_by_path("/");
-	const struct of_device_id *match;
+	void (*fixup)(void);
 
-	if (!root)
-		return;
-
-	match = of_match_node(matches, root);
-
-	if (match) {
-		void (*fixup)(void) = match->data;
+	fixup = of_machine_get_match_data(matches);
+	if (fixup)
 		fixup();
-	}
-
-	of_node_put(root);
 }
 
 struct irq_domain *__init aic_common_of_init(struct device_node *node,
@@ -224,13 +213,13 @@ struct irq_domain *__init aic_common_of_init(struct device_node *node,
 	if (!reg_base)
 		return ERR_PTR(-ENOMEM);
 
-	aic = kcalloc(nchips, sizeof(*aic), GFP_KERNEL);
+	aic = kzalloc_objs(*aic, nchips);
 	if (!aic) {
 		ret = -ENOMEM;
 		goto err_iounmap;
 	}
 
-	domain = irq_domain_add_linear(node, nchips * 32, ops, aic);
+	domain = irq_domain_create_linear(of_fwnode_handle(node), nchips * 32, ops, aic);
 	if (!domain) {
 		ret = -ENOMEM;
 		goto err_free_aic;

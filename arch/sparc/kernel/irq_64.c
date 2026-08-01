@@ -22,6 +22,7 @@
 #include <linux/seq_file.h>
 #include <linux/ftrace.h>
 #include <linux/irq.h>
+#include <linux/string_choices.h>
 
 #include <asm/ptrace.h>
 #include <asm/processor.h>
@@ -42,6 +43,7 @@
 #include <asm/head.h>
 #include <asm/hypervisor.h>
 #include <asm/cacheflush.h>
+#include <asm/softirq_stack.h>
 
 #include "entry.h"
 #include "cpumap.h"
@@ -144,9 +146,7 @@ static int hv_irq_version;
  */
 static bool sun4v_cookie_only_virqs(void)
 {
-	if (hv_irq_version >= 3)
-		return true;
-	return false;
+	return hv_irq_version >= 3;
 }
 
 static void __init irq_init_hv(void)
@@ -169,7 +169,7 @@ static void __init irq_init_hv(void)
 
 	pr_info("SUN4V: Using IRQ API major %d, cookie only virqs %s\n",
 		hv_irq_version,
-		sun4v_cookie_only_virqs() ? "enabled" : "disabled");
+		str_enabled_disabled(sun4v_cookie_only_virqs()));
 }
 
 /* This function is for the timer interrupt.*/
@@ -303,10 +303,10 @@ int arch_show_interrupts(struct seq_file *p, int prec)
 {
 	int j;
 
-	seq_printf(p, "NMI: ");
+	seq_printf(p, "%*s:", prec, "NMI");
 	for_each_online_cpu(j)
-		seq_printf(p, "%10u ", cpu_data(j).__nmi_count);
-	seq_printf(p, "     Non-maskable interrupts\n");
+		seq_put_decimal_ull_width(p, " ", cpu_data(j).__nmi_count, 10);
+	seq_printf(p, " Non-maskable interrupts\n");
 	return 0;
 }
 
@@ -348,17 +348,13 @@ static unsigned int sun4u_compute_tid(unsigned long imap, unsigned long cpuid)
 #ifdef CONFIG_SMP
 static int irq_choose_cpu(unsigned int irq, const struct cpumask *affinity)
 {
-	cpumask_t mask;
 	int cpuid;
 
-	cpumask_copy(&mask, affinity);
-	if (cpumask_equal(&mask, cpu_online_mask)) {
+	if (cpumask_equal(affinity, cpu_online_mask)) {
 		cpuid = map_to_cpu(irq);
 	} else {
-		cpumask_t tmp;
-
-		cpumask_and(&tmp, cpu_online_mask, &mask);
-		cpuid = cpumask_empty(&tmp) ? map_to_cpu(irq) : cpumask_first(&tmp);
+		cpuid = cpumask_first_and(affinity, cpu_online_mask);
+		cpuid = cpuid < nr_cpu_ids ? cpuid : map_to_cpu(irq);
 	}
 
 	return cpuid;
@@ -632,7 +628,7 @@ unsigned int build_irq(int inofixup, unsigned long iclr, unsigned long imap)
 	if (unlikely(handler_data))
 		goto out;
 
-	handler_data = kzalloc(sizeof(struct irq_handler_data), GFP_ATOMIC);
+	handler_data = kzalloc_obj(struct irq_handler_data, GFP_ATOMIC);
 	if (unlikely(!handler_data)) {
 		prom_printf("IRQ: kzalloc(irq_handler_data) failed.\n");
 		prom_halt();
@@ -658,7 +654,7 @@ static unsigned int sun4v_build_common(u32 devhandle, unsigned int devino,
 	if (!irq)
 		goto out;
 
-	data = kzalloc(sizeof(struct irq_handler_data), GFP_ATOMIC);
+	data = kzalloc_obj(struct irq_handler_data, GFP_ATOMIC);
 	if (unlikely(!data)) {
 		pr_err("IRQ handler data allocation failed.\n");
 		irq_free(irq);
@@ -854,6 +850,7 @@ void __irq_entry handler_irq(int pil, struct pt_regs *regs)
 	set_irq_regs(old_regs);
 }
 
+#ifdef CONFIG_SOFTIRQ_ON_OWN_STACK
 void do_softirq_own_stack(void)
 {
 	void *orig_sp, *sp = softirq_stack[smp_processor_id()];
@@ -868,6 +865,7 @@ void do_softirq_own_stack(void)
 	__asm__ __volatile__("mov %0, %%sp"
 			     : : "r" (orig_sp));
 }
+#endif
 
 #ifdef CONFIG_HOTPLUG_CPU
 void fixup_irqs(void)
@@ -915,7 +913,7 @@ static void map_prom_timers(void)
 	dp = of_find_node_by_path("/");
 	dp = dp->child;
 	while (dp) {
-		if (!strcmp(dp->name, "counter-timer"))
+		if (of_node_name_eq(dp, "counter-timer"))
 			break;
 		dp = dp->sibling;
 	}
@@ -977,7 +975,7 @@ void notrace init_irqwork_curcpu(void)
  *
  * On SMP this gets invoked from the CPU trampoline before
  * the cpu has fully taken over the trap table from OBP,
- * and it's kernel stack + %g6 thread register state is
+ * and its kernel stack + %g6 thread register state is
  * not fully cooked yet.
  *
  * Therefore you cannot make any OBP calls, not even prom_printf,

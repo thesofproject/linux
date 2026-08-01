@@ -4,12 +4,6 @@ GPIO Mappings
 
 This document explains how GPIOs can be assigned to given devices and functions.
 
-Note that it only applies to the new descriptor-based interface. For a
-description of the deprecated integer-based GPIO interface please refer to
-gpio-legacy.txt (actually, there is no real mapping possible with the old
-interface; you just fetch an integer from somewhere and request the
-corresponding GPIO).
-
 All platforms can enable the GPIO library, but if the platform strictly
 requires GPIO functionality to be present, it needs to select GPIOLIB from its
 Kconfig. Then, how GPIOs are mapped depends on what the platform uses to
@@ -71,14 +65,14 @@ with the help of _DSD (Device Specific Data), introduced in ACPI 5.1::
 
 	Device (FOO) {
 		Name (_CRS, ResourceTemplate () {
-			GpioIo (Exclusive, ..., IoRestrictionOutputOnly,
-				"\\_SB.GPI0") {15} // red
-			GpioIo (Exclusive, ..., IoRestrictionOutputOnly,
-				"\\_SB.GPI0") {16} // green
-			GpioIo (Exclusive, ..., IoRestrictionOutputOnly,
-				"\\_SB.GPI0") {17} // blue
-			GpioIo (Exclusive, ..., IoRestrictionOutputOnly,
-				"\\_SB.GPI0") {1} // power
+			GpioIo (Exclusive, PullUp, 0, 0, IoRestrictionOutputOnly,
+				"\\_SB.GPI0", 0, ResourceConsumer) { 15 } // red
+			GpioIo (Exclusive, PullUp, 0, 0, IoRestrictionOutputOnly,
+				"\\_SB.GPI0", 0, ResourceConsumer) { 16 } // green
+			GpioIo (Exclusive, PullUp, 0, 0, IoRestrictionOutputOnly,
+				"\\_SB.GPI0", 0, ResourceConsumer) { 17 } // blue
+			GpioIo (Exclusive, PullNone, 0, 0, IoRestrictionOutputOnly,
+				"\\_SB.GPI0", 0, ResourceConsumer) { 1 } // power
 		})
 
 		Name (_DSD, Package () {
@@ -92,16 +86,91 @@ with the help of _DSD (Device Specific Data), introduced in ACPI 5.1::
 						^FOO, 2, 0, 1,
 					}
 				},
-				Package () {
-					"power-gpios",
-					Package () {^FOO, 3, 0, 0},
-				},
+				Package () { "power-gpios", Package () { ^FOO, 3, 0, 0 } },
 			}
 		})
 	}
 
 For more information about the ACPI GPIO bindings see
-Documentation/acpi/gpio-properties.txt.
+Documentation/firmware-guide/acpi/gpio-properties.rst.
+
+Software Nodes
+--------------
+
+Software nodes allow board-specific code to construct an in-memory,
+device-tree-like structure using struct software_node and struct
+property_entry. This structure can then be associated with a platform device,
+allowing drivers to use the standard device properties API to query
+configuration, just as they would on an ACPI or device tree system.
+
+Software-node-backed GPIOs are described using the ``PROPERTY_ENTRY_GPIO()``
+macro, which ties a software node representing the GPIO controller with
+consumer device. It allows consumers to use regular gpiolib APIs, such as
+gpiod_get(), gpiod_get_optional().
+
+The software node representing a GPIO controller must be attached to the
+GPIO controller device - either as the primary or the secondary firmware node.
+
+For example, here is how to describe a single GPIO-connected LED. This is an
+alternative to using platform_data on legacy systems.
+
+.. code-block:: c
+
+	#include <linux/property.h>
+	#include <linux/gpio/machine.h>
+	#include <linux/gpio/property.h>
+
+	/*
+	 * 1. Define a node for the GPIO controller.
+	 */
+	static const struct software_node gpio_controller_node = {
+		.name = "gpio-foo",
+	};
+
+	/* 2. Define the properties for the LED device. */
+	static const struct property_entry led_device_props[] = {
+		PROPERTY_ENTRY_STRING("label", "myboard:green:status"),
+		PROPERTY_ENTRY_STRING("linux,default-trigger", "heartbeat"),
+		PROPERTY_ENTRY_GPIO("gpios", &gpio_controller_node, 42, GPIO_ACTIVE_HIGH),
+		{ }
+	};
+
+	/* 3. Define the software node for the LED device. */
+	static const struct software_node led_device_swnode = {
+		.name = "status-led",
+		.properties = led_device_props,
+	};
+
+	/*
+	 * 4. Register the software nodes and the platform device.
+	 */
+	const struct software_node *swnodes[] = {
+		&gpio_controller_node,
+		&led_device_swnode,
+		NULL
+	};
+	software_node_register_node_group(swnodes);
+
+	/*
+	 * 5. Attach the GPIO controller's software node to the device and
+	 *    register it.
+	 */
+	 static void gpio_foo_register(void)
+	 {
+		struct platform_device_info pdev_info = {
+			.name = "gpio-foo",
+			.id = PLATFORM_DEVID_NONE,
+			.swnode = &gpio_controller_node
+		};
+
+		platform_device_register_full(&pdev_info);
+	 }
+
+	// Then register a platform_device for "leds-gpio" and associate
+	// it with &led_device_swnode via .fwnode.
+
+For a complete guide on converting board files to use software nodes, see
+Documentation/driver-api/gpio/legacy-boards.rst.
 
 Platform Data
 -------------
@@ -113,13 +182,15 @@ files that desire to do so need to include the following header::
 GPIOs are mapped by the means of tables of lookups, containing instances of the
 gpiod_lookup structure. Two macros are defined to help declaring such mappings::
 
-	GPIO_LOOKUP(chip_label, chip_hwnum, con_id, flags)
-	GPIO_LOOKUP_IDX(chip_label, chip_hwnum, con_id, idx, flags)
+	GPIO_LOOKUP(key, chip_hwnum, con_id, flags)
+	GPIO_LOOKUP_IDX(key, chip_hwnum, con_id, idx, flags)
 
 where
 
-  - chip_label is the label of the gpiod_chip instance providing the GPIO
-  - chip_hwnum is the hardware number of the GPIO within the chip
+  - key is either the label of the gpiod_chip instance providing the GPIO, or
+    the GPIO line name
+  - chip_hwnum is the hardware number of the GPIO within the chip, or U16_MAX
+    to indicate that key is a GPIO line name
   - con_id is the name of the GPIO function from the device point of view. It
 	can be NULL, in which case it will match any function.
   - idx is the index of the GPIO within the function.
@@ -135,7 +206,10 @@ where
 
 In the future, these flags might be extended to support more properties.
 
-Note that GPIO_LOOKUP() is just a shortcut to GPIO_LOOKUP_IDX() where idx = 0.
+Note that:
+  1. GPIO line names are not guaranteed to be globally unique, so the first
+     match found will be used.
+  2. GPIO_LOOKUP() is just a shortcut to GPIO_LOOKUP_IDX() where idx = 0.
 
 A lookup table can then be defined as follows, with an empty entry defining its
 end. The 'dev_id' field of the table is the identifier of the device that will
@@ -177,3 +251,28 @@ mapping and is thus transparent to GPIO consumers.
 
 A set of functions such as gpiod_set_value() is available to work with
 the new descriptor-oriented interface.
+
+Arrays of pins
+--------------
+In addition to requesting pins belonging to a function one by one, a device may
+also request an array of pins assigned to the function.  The way those pins are
+mapped to the device determines if the array qualifies for fast bitmap
+processing.  If yes, a bitmap is passed over get/set array functions directly
+between a caller and a respective .get/set_multiple() callback of a GPIO chip.
+
+In order to qualify for fast bitmap processing, the array must meet the
+following requirements:
+
+- pin hardware number of array member 0 must also be 0,
+- pin hardware numbers of consecutive array members which belong to the same
+  chip as member 0 does must also match their array indexes.
+
+Otherwise fast bitmap processing path is not used in order to avoid consecutive
+pins which belong to the same chip but are not in hardware order being processed
+separately.
+
+If the array applies for fast bitmap processing path, pins which belong to
+different chips than member 0 does, as well as those with indexes different from
+their hardware pin numbers, are excluded from the fast path, both input and
+output.  Moreover, open drain and open source pins are excluded from fast bitmap
+output processing.

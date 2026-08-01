@@ -376,54 +376,54 @@ static struct vortex_chip_info {
 
 
 static const struct pci_device_id vortex_pci_tbl[] = {
-	{ 0x10B7, 0x5900, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C590 },
-	{ 0x10B7, 0x5920, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C592 },
-	{ 0x10B7, 0x5970, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C597 },
-	{ 0x10B7, 0x5950, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C595_1 },
-	{ 0x10B7, 0x5951, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C595_2 },
+	{ PCI_DEVICE(0x10B7, 0x5900), .driver_data = CH_3C590 },
+	{ PCI_DEVICE(0x10B7, 0x5920), .driver_data = CH_3C592 },
+	{ PCI_DEVICE(0x10B7, 0x5970), .driver_data = CH_3C597 },
+	{ PCI_DEVICE(0x10B7, 0x5950), .driver_data = CH_3C595_1 },
+	{ PCI_DEVICE(0x10B7, 0x5951), .driver_data = CH_3C595_2 },
 
-	{ 0x10B7, 0x5952, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C595_3 },
-	{ 0x10B7, 0x9000, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C900_1 },
-	{ 0x10B7, 0x9001, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C900_2 },
-	{ 0x10B7, 0x9004, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C900_3 },
-	{ 0x10B7, 0x9005, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C900_4 },
+	{ PCI_DEVICE(0x10B7, 0x5952), .driver_data = CH_3C595_3 },
+	{ PCI_DEVICE(0x10B7, 0x9000), .driver_data = CH_3C900_1 },
+	{ PCI_DEVICE(0x10B7, 0x9001), .driver_data = CH_3C900_2 },
+	{ PCI_DEVICE(0x10B7, 0x9004), .driver_data = CH_3C900_3 },
+	{ PCI_DEVICE(0x10B7, 0x9005), .driver_data = CH_3C900_4 },
 
-	{ 0x10B7, 0x9006, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C900_5 },
-	{ 0x10B7, 0x900A, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C900B_FL },
-	{ 0x10B7, 0x9050, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C905_1 },
-	{ 0x10B7, 0x9051, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C905_2 },
-	{ 0x10B7, 0x9054, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C905B_TX },
-	{ 0x10B7, 0x9055, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C905B_1 },
+	{ PCI_DEVICE(0x10B7, 0x9006), .driver_data = CH_3C900_5 },
+	{ PCI_DEVICE(0x10B7, 0x900A), .driver_data = CH_3C900B_FL },
+	{ PCI_DEVICE(0x10B7, 0x9050), .driver_data = CH_3C905_1 },
+	{ PCI_DEVICE(0x10B7, 0x9051), .driver_data = CH_3C905_2 },
+	{ PCI_DEVICE(0x10B7, 0x9054), .driver_data = CH_3C905B_TX },
+	{ PCI_DEVICE(0x10B7, 0x9055), .driver_data = CH_3C905B_1 },
 
-	{ 0x10B7, 0x9058, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C905B_2 },
-	{ 0x10B7, 0x905A, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C905B_FX },
-	{ 0x10B7, 0x9200, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C905C },
-	{ 0x10B7, 0x9202, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C9202 },
-	{ 0x10B7, 0x9800, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C980 },
-	{ 0x10B7, 0x9805, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C9805 },
+	{ PCI_DEVICE(0x10B7, 0x9058), .driver_data = CH_3C905B_2 },
+	{ PCI_DEVICE(0x10B7, 0x905A), .driver_data = CH_3C905B_FX },
+	{ PCI_DEVICE(0x10B7, 0x9200), .driver_data = CH_3C905C },
+	{ PCI_DEVICE(0x10B7, 0x9202), .driver_data = CH_3C9202 },
+	{ PCI_DEVICE(0x10B7, 0x9800), .driver_data = CH_3C980 },
+	{ PCI_DEVICE(0x10B7, 0x9805), .driver_data = CH_3C9805 },
 
-	{ 0x10B7, 0x7646, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3CSOHO100_TX },
-	{ 0x10B7, 0x5055, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C555 },
-	{ 0x10B7, 0x6055, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C556 },
-	{ 0x10B7, 0x6056, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C556B },
-	{ 0x10B7, 0x5b57, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C575 },
+	{ PCI_DEVICE(0x10B7, 0x7646), .driver_data = CH_3CSOHO100_TX },
+	{ PCI_DEVICE(0x10B7, 0x5055), .driver_data = CH_3C555 },
+	{ PCI_DEVICE(0x10B7, 0x6055), .driver_data = CH_3C556 },
+	{ PCI_DEVICE(0x10B7, 0x6056), .driver_data = CH_3C556B },
+	{ PCI_DEVICE(0x10B7, 0x5b57), .driver_data = CH_3C575 },
 
-	{ 0x10B7, 0x5057, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C575_1 },
-	{ 0x10B7, 0x5157, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3CCFE575 },
-	{ 0x10B7, 0x5257, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3CCFE575CT },
-	{ 0x10B7, 0x6560, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3CCFE656 },
-	{ 0x10B7, 0x6562, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3CCFEM656 },
+	{ PCI_DEVICE(0x10B7, 0x5057), .driver_data = CH_3C575_1 },
+	{ PCI_DEVICE(0x10B7, 0x5157), .driver_data = CH_3CCFE575 },
+	{ PCI_DEVICE(0x10B7, 0x5257), .driver_data = CH_3CCFE575CT },
+	{ PCI_DEVICE(0x10B7, 0x6560), .driver_data = CH_3CCFE656 },
+	{ PCI_DEVICE(0x10B7, 0x6562), .driver_data = CH_3CCFEM656 },
 
-	{ 0x10B7, 0x6564, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3CCFEM656_1 },
-	{ 0x10B7, 0x4500, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C450 },
-	{ 0x10B7, 0x9201, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C920 },
-	{ 0x10B7, 0x1201, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C982A },
-	{ 0x10B7, 0x1202, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_3C982B },
+	{ PCI_DEVICE(0x10B7, 0x6564), .driver_data = CH_3CCFEM656_1 },
+	{ PCI_DEVICE(0x10B7, 0x4500), .driver_data = CH_3C450 },
+	{ PCI_DEVICE(0x10B7, 0x9201), .driver_data = CH_3C920 },
+	{ PCI_DEVICE(0x10B7, 0x1201), .driver_data = CH_3C982A },
+	{ PCI_DEVICE(0x10B7, 0x1202), .driver_data = CH_3C982B },
 
-	{ 0x10B7, 0x9056, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_905BT4 },
-	{ 0x10B7, 0x9210, PCI_ANY_ID, PCI_ANY_ID, 0, 0, CH_920B_EMB_WNM },
+	{ PCI_DEVICE(0x10B7, 0x9056), .driver_data = CH_905BT4 },
+	{ PCI_DEVICE(0x10B7, 0x9210), .driver_data = CH_920B_EMB_WNM },
 
-	{0,}						/* 0 terminated list. */
+	{ }						/* 0 terminated list. */
 };
 MODULE_DEVICE_TABLE(pci, vortex_pci_tbl);
 
@@ -765,8 +765,9 @@ static netdev_tx_t boomerang_start_xmit(struct sk_buff *skb,
 					struct net_device *dev);
 static int vortex_rx(struct net_device *dev);
 static int boomerang_rx(struct net_device *dev);
-static irqreturn_t vortex_interrupt(int irq, void *dev_id);
-static irqreturn_t boomerang_interrupt(int irq, void *dev_id);
+static irqreturn_t vortex_boomerang_interrupt(int irq, void *dev_id);
+static irqreturn_t _vortex_interrupt(int irq, struct net_device *dev);
+static irqreturn_t _boomerang_interrupt(int irq, struct net_device *dev);
 static int vortex_close(struct net_device *dev);
 static void dump_tx_ring(struct net_device *dev);
 static void update_stats(void __iomem *ioaddr, struct net_device *dev);
@@ -775,7 +776,7 @@ static void set_rx_mode(struct net_device *dev);
 #ifdef CONFIG_PCI
 static int vortex_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
 #endif
-static void vortex_tx_timeout(struct net_device *dev);
+static void vortex_tx_timeout(struct net_device *dev, unsigned int txqueue);
 static void acpi_set_WOL(struct net_device *dev);
 static const struct ethtool_ops vortex_ethtool_ops;
 static void set_8021q_mode(struct net_device *dev, int enable);
@@ -838,11 +839,7 @@ MODULE_PARM_DESC(use_mmio, "3c59x: use memory-mapped PCI I/O resource (0-1)");
 #ifdef CONFIG_NET_POLL_CONTROLLER
 static void poll_vortex(struct net_device *dev)
 {
-	struct vortex_private *vp = netdev_priv(dev);
-	unsigned long flags;
-	local_irq_save(flags);
-	(vp->full_bus_master_rx ? boomerang_interrupt:vortex_interrupt)(dev->irq,dev);
-	local_irq_restore(flags);
+	vortex_boomerang_interrupt(dev->irq, dev);
 }
 #endif
 
@@ -850,8 +847,7 @@ static void poll_vortex(struct net_device *dev)
 
 static int vortex_suspend(struct device *dev)
 {
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct net_device *ndev = pci_get_drvdata(pdev);
+	struct net_device *ndev = dev_get_drvdata(dev);
 
 	if (!ndev || !netif_running(ndev))
 		return 0;
@@ -864,8 +860,7 @@ static int vortex_suspend(struct device *dev)
 
 static int vortex_resume(struct device *dev)
 {
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct net_device *ndev = pci_get_drvdata(pdev);
+	struct net_device *ndev = dev_get_drvdata(dev);
 	int err;
 
 	if (!ndev || !netif_running(ndev))
@@ -1057,7 +1052,7 @@ static const struct net_device_ops boomrang_netdev_ops = {
 	.ndo_tx_timeout		= vortex_tx_timeout,
 	.ndo_get_stats		= vortex_get_stats,
 #ifdef CONFIG_PCI
-	.ndo_do_ioctl 		= vortex_ioctl,
+	.ndo_eth_ioctl		= vortex_ioctl,
 #endif
 	.ndo_set_rx_mode	= set_rx_mode,
 	.ndo_set_mac_address 	= eth_mac_addr,
@@ -1074,7 +1069,7 @@ static const struct net_device_ops vortex_netdev_ops = {
 	.ndo_tx_timeout		= vortex_tx_timeout,
 	.ndo_get_stats		= vortex_get_stats,
 #ifdef CONFIG_PCI
-	.ndo_do_ioctl 		= vortex_ioctl,
+	.ndo_eth_ioctl		= vortex_ioctl,
 #endif
 	.ndo_set_rx_mode	= set_rx_mode,
 	.ndo_set_mac_address 	= eth_mac_addr,
@@ -1096,6 +1091,7 @@ static int vortex_probe1(struct device *gendev, void __iomem *ioaddr, int irq,
 	struct vortex_private *vp;
 	int option;
 	unsigned int eeprom[0x40], checksum = 0;		/* EEPROM contents */
+	__be16 addr[ETH_ALEN / 2];
 	int i, step;
 	struct net_device *dev;
 	static int printed_version;
@@ -1154,7 +1150,7 @@ static int vortex_probe1(struct device *gendev, void __iomem *ioaddr, int irq,
 
 	print_info = (vortex_debug > 1);
 	if (print_info)
-		pr_info("See Documentation/networking/vortex.txt\n");
+		pr_info("See Documentation/networking/device_drivers/ethernet/3com/vortex.rst\n");
 
 	pr_info("%s: 3Com %s %s at %p.\n",
 	       print_name,
@@ -1289,7 +1285,8 @@ static int vortex_probe1(struct device *gendev, void __iomem *ioaddr, int irq,
 	if ((checksum != 0x00) && !(vci->drv_flags & IS_TORNADO))
 		pr_cont(" ***INVALID CHECKSUM %4.4x*** ", checksum);
 	for (i = 0; i < 3; i++)
-		((__be16 *)dev->dev_addr)[i] = htons(eeprom[i + 10]);
+		addr[i] = htons(eeprom[i + 10]);
+	eth_hw_addr_set(dev, (u8 *)addr);
 	if (print_info)
 		pr_cont(" %pM", dev->dev_addr);
 	/* Unfortunately an all zero eeprom passes the checksum and this
@@ -1305,7 +1302,7 @@ static int vortex_probe1(struct device *gendev, void __iomem *ioaddr, int irq,
 	if (print_info)
 		pr_cont(", IRQ %d\n", dev->irq);
 	/* Tell them about an invalid IRQ. */
-	if (dev->irq <= 0 || dev->irq >= nr_irqs)
+	if (dev->irq <= 0 || dev->irq >= irq_get_nr_irqs())
 		pr_warn(" *** Warning: IRQ %d is unlikely to work! ***\n",
 			dev->irq);
 
@@ -1469,14 +1466,14 @@ static int vortex_probe1(struct device *gendev, void __iomem *ioaddr, int irq,
 	if (pdev) {
 		vp->pm_state_valid = 1;
 		pci_save_state(pdev);
- 		acpi_set_WOL(dev);
+		acpi_set_WOL(dev);
 	}
 	retval = register_netdev(dev);
 	if (retval == 0)
 		return 0;
 
 free_ring:
-	dma_free_coherent(&pdev->dev,
+	dma_free_coherent(gendev,
 		sizeof(struct boom_rx_desc) * RX_RING_SIZE +
 		sizeof(struct boom_tx_desc) * TX_RING_SIZE,
 		vp->rx_ring, vp->rx_ring_dma);
@@ -1553,7 +1550,7 @@ vortex_up(struct net_device *dev)
 	struct vortex_private *vp = netdev_priv(dev);
 	void __iomem *ioaddr = vp->ioaddr;
 	unsigned int config;
-	int i, mii_reg1, mii_reg5, err = 0;
+	int i, mii_reg5, err = 0;
 
 	if (VORTEX_PCI(vp)) {
 		pci_set_power_state(VORTEX_PCI(vp), PCI_D0);	/* Go active */
@@ -1610,7 +1607,7 @@ vortex_up(struct net_device *dev)
 	window_write32(vp, config, 3, Wn3_Config);
 
 	if (dev->if_port == XCVR_MII || dev->if_port == XCVR_NWAY) {
-		mii_reg1 = mdio_read(dev, vp->phys[0], MII_BMSR);
+		mdio_read(dev, vp->phys[0], MII_BMSR);
 		mii_reg5 = mdio_read(dev, vp->phys[0], MII_LPA);
 		vp->partner_flow_ctrl = ((mii_reg5 & 0x0400) != 0);
 		vp->mii.full_duplex = vp->full_duplex;
@@ -1728,8 +1725,7 @@ vortex_open(struct net_device *dev)
 	dma_addr_t dma;
 
 	/* Use the now-standard shared IRQ implementation. */
-	if ((retval = request_irq(dev->irq, vp->full_bus_master_rx ?
-				boomerang_interrupt : vortex_interrupt, IRQF_SHARED, dev->name, dev))) {
+	if ((retval = request_irq(dev->irq, vortex_boomerang_interrupt, IRQF_SHARED, dev->name, dev))) {
 		pr_err("%s: Could not reserve IRQ %d\n", dev->name, dev->irq);
 		goto err;
 	}
@@ -1787,7 +1783,7 @@ out:
 static void
 vortex_timer(struct timer_list *t)
 {
-	struct vortex_private *vp = from_timer(vp, t, timer);
+	struct vortex_private *vp = timer_container_of(vp, t, timer);
 	struct net_device *dev = vp->mii.dev;
 	void __iomem *ioaddr = vp->ioaddr;
 	int next_tick = 60*HZ;
@@ -1883,7 +1879,7 @@ leave_media_alone:
 		iowrite16(FakeIntr, ioaddr + EL3_CMD);
 }
 
-static void vortex_tx_timeout(struct net_device *dev)
+static void vortex_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct vortex_private *vp = netdev_priv(dev);
 	void __iomem *ioaddr = vp->ioaddr;
@@ -1904,18 +1900,7 @@ static void vortex_tx_timeout(struct net_device *dev)
 		pr_err("%s: Interrupt posted but not delivered --"
 			   " IRQ blocked by another device?\n", dev->name);
 		/* Bad idea here.. but we might as well handle a few events. */
-		{
-			/*
-			 * Block interrupts because vortex_interrupt does a bare spin_lock()
-			 */
-			unsigned long flags;
-			local_irq_save(flags);
-			if (vp->full_bus_master_tx)
-				boomerang_interrupt(dev->irq, dev);
-			else
-				vortex_interrupt(dev->irq, dev);
-			local_irq_restore(flags);
-		}
+		vortex_boomerang_interrupt(dev->irq, dev);
 	}
 
 	if (vortex_debug > 0)
@@ -1971,7 +1956,7 @@ vortex_error(struct net_device *dev, int status)
 				   dev->name, tx_status);
 			if (tx_status == 0x82) {
 				pr_err("Probably a duplex mismatch.  See "
-						"Documentation/networking/vortex.txt\n");
+						"Documentation/networking/device_drivers/ethernet/3com/vortex.rst\n");
 			}
 			dump_tx_ring(dev);
 		}
@@ -2190,7 +2175,7 @@ boomerang_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 			dma_addr = skb_frag_dma_map(vp->gendev, frag,
 						    0,
-						    frag->size,
+						    skb_frag_size(frag),
 						    DMA_TO_DEVICE);
 			if (dma_mapping_error(vp->gendev, dma_addr)) {
 				for(i = i-1; i >= 0; i--)
@@ -2266,9 +2251,8 @@ out_dma_err:
  */
 
 static irqreturn_t
-vortex_interrupt(int irq, void *dev_id)
+_vortex_interrupt(int irq, struct net_device *dev)
 {
-	struct net_device *dev = dev_id;
 	struct vortex_private *vp = netdev_priv(dev);
 	void __iomem *ioaddr;
 	int status;
@@ -2277,7 +2261,6 @@ vortex_interrupt(int irq, void *dev_id)
 	unsigned int bytes_compl = 0, pkts_compl = 0;
 
 	ioaddr = vp->ioaddr;
-	spin_lock(&vp->lock);
 
 	status = ioread16(ioaddr + EL3_STATUS);
 
@@ -2324,7 +2307,7 @@ vortex_interrupt(int irq, void *dev_id)
 				dma_unmap_single(vp->gendev, vp->tx_skb_dma, (vp->tx_skb->len + 3) & ~3, DMA_TO_DEVICE);
 				pkts_compl++;
 				bytes_compl += vp->tx_skb->len;
-				dev_kfree_skb_irq(vp->tx_skb); /* Release the transferred buffer */
+				dev_consume_skb_irq(vp->tx_skb); /* Release the transferred buffer */
 				if (ioread16(ioaddr + TxFree) > 1536) {
 					/*
 					 * AKPM: FIXME: I don't think we need this.  If the queue was stopped due to
@@ -2375,7 +2358,6 @@ vortex_interrupt(int irq, void *dev_id)
 		pr_debug("%s: exiting interrupt, status %4.4x.\n",
 			   dev->name, status);
 handler_exit:
-	spin_unlock(&vp->lock);
 	return IRQ_RETVAL(handled);
 }
 
@@ -2385,9 +2367,8 @@ handler_exit:
  */
 
 static irqreturn_t
-boomerang_interrupt(int irq, void *dev_id)
+_boomerang_interrupt(int irq, struct net_device *dev)
 {
-	struct net_device *dev = dev_id;
 	struct vortex_private *vp = netdev_priv(dev);
 	void __iomem *ioaddr;
 	int status;
@@ -2397,12 +2378,6 @@ boomerang_interrupt(int irq, void *dev_id)
 
 	ioaddr = vp->ioaddr;
 
-
-	/*
-	 * It seems dopey to put the spinlock this early, but we could race against vortex_tx_timeout
-	 * and boomerang_start_xmit
-	 */
-	spin_lock(&vp->lock);
 	vp->handling_irq = 1;
 
 	status = ioread16(ioaddr + EL3_STATUS);
@@ -2474,7 +2449,7 @@ boomerang_interrupt(int irq, void *dev_id)
 #endif
 					pkts_compl++;
 					bytes_compl += skb->len;
-					dev_kfree_skb_irq(skb);
+					dev_consume_skb_irq(skb);
 					vp->tx_skbuff[entry] = NULL;
 				} else {
 					pr_debug("boomerang_interrupt: no skb!\n");
@@ -2521,8 +2496,27 @@ boomerang_interrupt(int irq, void *dev_id)
 			   dev->name, status);
 handler_exit:
 	vp->handling_irq = 0;
-	spin_unlock(&vp->lock);
 	return IRQ_RETVAL(handled);
+}
+
+static irqreturn_t
+vortex_boomerang_interrupt(int irq, void *dev_id)
+{
+	struct net_device *dev = dev_id;
+	struct vortex_private *vp = netdev_priv(dev);
+	unsigned long flags;
+	irqreturn_t ret;
+
+	spin_lock_irqsave(&vp->lock, flags);
+
+	if (vp->full_bus_master_rx)
+		ret = _boomerang_interrupt(dev->irq, dev);
+	else
+		ret = _vortex_interrupt(dev->irq, dev);
+
+	spin_unlock_irqrestore(&vp->lock, flags);
+
+	return ret;
 }
 
 static int vortex_rx(struct net_device *dev)
@@ -2697,7 +2691,7 @@ vortex_down(struct net_device *dev, int final_down)
 	netdev_reset_queue(dev);
 	netif_stop_queue(dev);
 
-	del_timer_sync(&vp->timer);
+	timer_delete_sync(&vp->timer);
 
 	/* Turn off statistics ASAP.  We update dev->stats below. */
 	iowrite16(StatsDisable, ioaddr + EL3_CMD);
@@ -2794,7 +2788,7 @@ static void
 dump_tx_ring(struct net_device *dev)
 {
 	if (vortex_debug > 0) {
-	struct vortex_private *vp = netdev_priv(dev);
+		struct vortex_private *vp = netdev_priv(dev);
 		void __iomem *ioaddr = vp->ioaddr;
 
 		if (vp->full_bus_master_tx) {
@@ -2965,13 +2959,13 @@ static void vortex_get_drvinfo(struct net_device *dev,
 {
 	struct vortex_private *vp = netdev_priv(dev);
 
-	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
+	strscpy(info->driver, DRV_NAME, sizeof(info->driver));
 	if (VORTEX_PCI(vp)) {
-		strlcpy(info->bus_info, pci_name(VORTEX_PCI(vp)),
+		strscpy(info->bus_info, pci_name(VORTEX_PCI(vp)),
 			sizeof(info->bus_info));
 	} else {
 		if (VORTEX_EISA(vp))
-			strlcpy(info->bus_info, dev_name(vp->gendev),
+			strscpy(info->bus_info, dev_name(vp->gendev),
 				sizeof(info->bus_info));
 		else
 			snprintf(info->bus_info, sizeof(info->bus_info),

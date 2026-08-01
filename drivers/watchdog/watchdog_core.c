@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  *	watchdog_core.c
  *
@@ -16,11 +17,6 @@
  *	  Satyam Sharma <satyam@infradead.org>
  *	  Randy Dunlap <randy.dunlap@oracle.com>
  *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	as published by the Free Software Foundation; either version
- *	2 of the License, or (at your option) any later version.
- *
  *	Neither Alan Cox, CymruNet Ltd., Wim Van Sebroeck nor Iguana vzw.
  *	admit liability nor provide warranty for any of this software.
  *	This material is provided "AS-IS" and at no charge.
@@ -37,11 +33,20 @@
 #include <linux/init.h>		/* For __init/__exit/... */
 #include <linux/idr.h>		/* For ida_* macros */
 #include <linux/err.h>		/* For IS_ERR macros */
-#include <linux/of.h>		/* For of_get_timeout_sec */
+#include <linux/of.h>		/* For of_alias_get_id */
+#include <linux/property.h>	/* For device_property_read_u32 */
+#include <linux/suspend.h>
 
 #include "watchdog_core.h"	/* For watchdog_dev_register/... */
 
+#define CREATE_TRACE_POINTS
+#include <trace/events/watchdog.h>
+
 static DEFINE_IDA(watchdog_ida);
+
+static int stop_on_reboot = -1;
+module_param(stop_on_reboot, int, 0444);
+MODULE_PARM_DESC(stop_on_reboot, "Stop watchdogs on reboot (0=keep watching, 1=stop)");
 
 /*
  * Deferred Registration infrastructure.
@@ -50,9 +55,9 @@ static DEFINE_IDA(watchdog_ida);
  * for example when it's impossible to disable it. To do so,
  * raising the initcall level of the watchdog driver is a solution.
  * But in such case, the miscdev is maybe not ready (subsys_initcall), and
- * watchdog_core need miscdev to register the watchdog as a char device.
+ * watchdog_core needs miscdev to register the watchdog as a char device.
  *
- * The deferred registration infrastructure offer a way for the watchdog
+ * The deferred registration infrastructure offers a way for the watchdog
  * subsystem to register a watchdog properly, even before miscdev is ready.
  */
 
@@ -60,11 +65,10 @@ static DEFINE_MUTEX(wtd_deferred_reg_mutex);
 static LIST_HEAD(wtd_deferred_reg_list);
 static bool wtd_deferred_reg_done;
 
-static int watchdog_deferred_registration_add(struct watchdog_device *wdd)
+static void watchdog_deferred_registration_add(struct watchdog_device *wdd)
 {
 	list_add_tail(&wdd->deferred,
 		      &wtd_deferred_reg_list);
-	return 0;
 }
 
 static void watchdog_deferred_registration_del(struct watchdog_device *wdd)
@@ -105,38 +109,72 @@ static void watchdog_check_min_max_timeout(struct watchdog_device *wdd)
  * timeout module parameter (if it is valid value) or the timeout-sec property
  * (only if it is a valid value and the timeout_parm is out of bounds).
  * If none of them are valid then we keep the old value (which should normally
- * be the default timeout value).
+ * be the default timeout value). Note that for the module parameter, '0' means
+ * 'use default' while it is an invalid value for the timeout-sec property.
+ * It should simply be dropped if you want to use the default value then.
  *
- * A zero is returned on success and -EINVAL for failure.
+ * A zero is returned on success or -EINVAL if all provided values are out of
+ * bounds.
  */
 int watchdog_init_timeout(struct watchdog_device *wdd,
-				unsigned int timeout_parm, struct device *dev)
+			  unsigned int timeout_parm,
+			  const struct device *dev)
 {
+	const char *dev_str = wdd->parent ? dev_name(wdd->parent) :
+			      (const char *)wdd->info->identity;
 	unsigned int t = 0;
 	int ret = 0;
 
 	watchdog_check_min_max_timeout(wdd);
 
-	/* try to get the timeout module parameter first */
-	if (!watchdog_timeout_invalid(wdd, timeout_parm) && timeout_parm) {
-		wdd->timeout = timeout_parm;
-		return ret;
-	}
-	if (timeout_parm)
+	/* check the driver supplied value (likely a module parameter) first */
+	if (timeout_parm) {
+		if (!watchdog_timeout_invalid(wdd, timeout_parm)) {
+			wdd->timeout = timeout_parm;
+			return 0;
+		}
+		pr_err("%s: driver supplied timeout (%u) out of range\n",
+			dev_str, timeout_parm);
 		ret = -EINVAL;
+	}
 
 	/* try to get the timeout_sec property */
-	if (dev == NULL || dev->of_node == NULL)
-		return ret;
-	of_property_read_u32(dev->of_node, "timeout-sec", &t);
-	if (!watchdog_timeout_invalid(wdd, t) && t)
-		wdd->timeout = t;
-	else
+	if (dev && device_property_read_u32(dev, "timeout-sec", &t) == 0) {
+		if (t && !watchdog_timeout_invalid(wdd, t)) {
+			wdd->timeout = t;
+			return 0;
+		}
+		pr_err("%s: DT supplied timeout (%u) out of range\n", dev_str, t);
 		ret = -EINVAL;
+	}
+
+	if (ret < 0 && wdd->timeout)
+		pr_warn("%s: falling back to default timeout (%u)\n", dev_str,
+			wdd->timeout);
 
 	return ret;
 }
 EXPORT_SYMBOL_GPL(watchdog_init_timeout);
+
+static int watchdog_reboot_notifier(struct notifier_block *nb,
+				    unsigned long code, void *data)
+{
+	struct watchdog_device *wdd;
+
+	wdd = container_of(nb, struct watchdog_device, reboot_nb);
+	if (code == SYS_DOWN || code == SYS_HALT || code == SYS_POWER_OFF) {
+		if (watchdog_hw_running(wdd)) {
+			int ret;
+
+			ret = wdd->ops->stop(wdd);
+			trace_watchdog_stop(wdd, ret);
+			if (ret)
+				return NOTIFY_BAD;
+		}
+	}
+
+	return NOTIFY_DONE;
+}
 
 static int watchdog_restart_notifier(struct notifier_block *nb,
 				     unsigned long action, void *data)
@@ -153,15 +191,42 @@ static int watchdog_restart_notifier(struct notifier_block *nb,
 	return NOTIFY_DONE;
 }
 
+static int watchdog_pm_notifier(struct notifier_block *nb, unsigned long mode,
+				void *data)
+{
+	struct watchdog_device *wdd;
+	int ret = 0;
+
+	wdd = container_of(nb, struct watchdog_device, pm_nb);
+
+	switch (mode) {
+	case PM_HIBERNATION_PREPARE:
+	case PM_RESTORE_PREPARE:
+	case PM_SUSPEND_PREPARE:
+		ret = watchdog_dev_suspend(wdd);
+		break;
+	case PM_POST_HIBERNATION:
+	case PM_POST_RESTORE:
+	case PM_POST_SUSPEND:
+		ret = watchdog_dev_resume(wdd);
+		break;
+	}
+
+	if (ret)
+		return NOTIFY_BAD;
+
+	return NOTIFY_DONE;
+}
+
 /**
  * watchdog_set_restart_priority - Change priority of restart handler
  * @wdd: watchdog device
  * @priority: priority of the restart handler, should follow these guidelines:
- *   0:   use watchdog's restart function as last resort, has limited restart
- *        capabilies
- *   128: default restart handler, use if no other handler is expected to be
+ * * 0:   use watchdog's restart function as last resort, has limited restart
+ *        capabilities
+ * * 128: default restart handler, use if no other handler is expected to be
  *        available and/or if restart is sufficient to restart the entire system
- *   255: preempt all other handlers
+ * * 255: preempt all other handlers
  *
  * If a wdd->ops->restart function is provided when watchdog_register_device is
  * called, it will be registered as a restart handler with the priority given
@@ -173,7 +238,7 @@ void watchdog_set_restart_priority(struct watchdog_device *wdd, int priority)
 }
 EXPORT_SYMBOL_GPL(watchdog_set_restart_priority);
 
-static int __watchdog_register_device(struct watchdog_device *wdd)
+static int ___watchdog_register_device(struct watchdog_device *wdd)
 {
 	int ret, id = -1;
 
@@ -196,12 +261,12 @@ static int __watchdog_register_device(struct watchdog_device *wdd)
 	if (wdd->parent) {
 		ret = of_alias_get_id(wdd->parent->of_node, "watchdog");
 		if (ret >= 0)
-			id = ida_simple_get(&watchdog_ida, ret,
-					    ret + 1, GFP_KERNEL);
+			id = ida_alloc_range(&watchdog_ida, ret, ret,
+					     GFP_KERNEL);
 	}
 
 	if (id < 0)
-		id = ida_simple_get(&watchdog_ida, 0, MAX_DOGS, GFP_KERNEL);
+		id = ida_alloc_max(&watchdog_ida, MAX_DOGS - 1, GFP_KERNEL);
 
 	if (id < 0)
 		return id;
@@ -209,20 +274,46 @@ static int __watchdog_register_device(struct watchdog_device *wdd)
 
 	ret = watchdog_dev_register(wdd);
 	if (ret) {
-		ida_simple_remove(&watchdog_ida, id);
+		ida_free(&watchdog_ida, id);
 		if (!(id == 0 && ret == -EBUSY))
 			return ret;
 
 		/* Retry in case a legacy watchdog module exists */
-		id = ida_simple_get(&watchdog_ida, 1, MAX_DOGS, GFP_KERNEL);
+		id = ida_alloc_range(&watchdog_ida, 1, MAX_DOGS - 1,
+				     GFP_KERNEL);
 		if (id < 0)
 			return id;
 		wdd->id = id;
 
 		ret = watchdog_dev_register(wdd);
 		if (ret) {
-			ida_simple_remove(&watchdog_ida, id);
+			ida_free(&watchdog_ida, id);
 			return ret;
+		}
+	}
+
+	/* Module parameter to force watchdog policy on reboot. */
+	if (stop_on_reboot != -1) {
+		if (stop_on_reboot)
+			set_bit(WDOG_STOP_ON_REBOOT, &wdd->status);
+		else
+			clear_bit(WDOG_STOP_ON_REBOOT, &wdd->status);
+	}
+
+	if (test_bit(WDOG_STOP_ON_REBOOT, &wdd->status)) {
+		if (!wdd->ops->stop)
+			pr_warn("watchdog%d: stop_on_reboot not supported\n", wdd->id);
+		else {
+			wdd->reboot_nb.notifier_call = watchdog_reboot_notifier;
+
+			ret = register_reboot_notifier(&wdd->reboot_nb);
+			if (ret) {
+				pr_err("watchdog%d: Cannot register reboot notifier (%d)\n",
+					wdd->id, ret);
+				watchdog_dev_unregister(wdd);
+				ida_free(&watchdog_ida, id);
+				return ret;
+			}
 		}
 	}
 
@@ -235,7 +326,32 @@ static int __watchdog_register_device(struct watchdog_device *wdd)
 				wdd->id, ret);
 	}
 
+	if (test_bit(WDOG_NO_PING_ON_SUSPEND, &wdd->status)) {
+		wdd->pm_nb.notifier_call = watchdog_pm_notifier;
+
+		ret = register_pm_notifier(&wdd->pm_nb);
+		if (ret)
+			pr_warn("watchdog%d: Cannot register pm handler (%d)\n",
+				wdd->id, ret);
+	}
+
 	return 0;
+}
+
+static int __watchdog_register_device(struct watchdog_device *wdd)
+{
+	const char *dev_str;
+	int ret;
+
+	ret = ___watchdog_register_device(wdd);
+	if (ret) {
+		dev_str = wdd->parent ? dev_name(wdd->parent) :
+			  (const char *)wdd->info->identity;
+		pr_err("%s: failed to register watchdog device (err = %d)\n",
+			dev_str, ret);
+	}
+
+	return ret;
 }
 
 /**
@@ -251,14 +367,15 @@ static int __watchdog_register_device(struct watchdog_device *wdd)
 
 int watchdog_register_device(struct watchdog_device *wdd)
 {
-	int ret;
+	int ret = 0;
 
 	mutex_lock(&wtd_deferred_reg_mutex);
 	if (wtd_deferred_reg_done)
 		ret = __watchdog_register_device(wdd);
 	else
-		ret = watchdog_deferred_registration_add(wdd);
+		watchdog_deferred_registration_add(wdd);
 	mutex_unlock(&wtd_deferred_reg_mutex);
+
 	return ret;
 }
 EXPORT_SYMBOL_GPL(watchdog_register_device);
@@ -271,8 +388,14 @@ static void __watchdog_unregister_device(struct watchdog_device *wdd)
 	if (wdd->ops->restart)
 		unregister_restart_handler(&wdd->restart_nb);
 
+	if (test_bit(WDOG_STOP_ON_REBOOT, &wdd->status))
+		unregister_reboot_notifier(&wdd->reboot_nb);
+
+	if (test_bit(WDOG_NO_PING_ON_SUSPEND, &wdd->status))
+		unregister_pm_notifier(&wdd->pm_nb);
+
 	watchdog_dev_unregister(wdd);
-	ida_simple_remove(&watchdog_ida, wdd->id);
+	ida_free(&watchdog_ida, wdd->id);
 }
 
 /**

@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /****************************************************************************
  * Driver for Solarflare network controllers and boards
  * Copyright 2006-2011 Solarflare Communications Inc.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation, incorporated herein by reference.
  */
 
 /*
@@ -326,7 +323,7 @@ static int txc43128_phy_probe(struct ef4_nic *efx)
 	struct txc43128_data *phy_data;
 
 	/* Allocate phy private storage */
-	phy_data = kzalloc(sizeof(*phy_data), GFP_KERNEL);
+	phy_data = kzalloc_obj(*phy_data);
 	if (!phy_data)
 		return -ENOMEM;
 	efx->phy_data = phy_data;

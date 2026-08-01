@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * lib/ts_kmp.c		Knuth-Morris-Pratt text search implementation
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Thomas Graf <tgraf@suug.ch>
  *
@@ -40,7 +36,7 @@ struct ts_kmp
 {
 	u8 *		pattern;
 	unsigned int	pattern_len;
-	unsigned int 	prefix_tbl[0];
+	unsigned int	prefix_tbl[];
 };
 
 static unsigned int kmp_find(struct ts_config *conf, struct ts_state *state)
@@ -98,8 +94,22 @@ static struct ts_config *kmp_init(const void *pattern, unsigned int len,
 	struct ts_config *conf;
 	struct ts_kmp *kmp;
 	int i;
-	unsigned int prefix_tbl_len = len * sizeof(unsigned int);
-	size_t priv_size = sizeof(*kmp) + len + prefix_tbl_len;
+	unsigned int prefix_tbl_len;
+	size_t priv_size;
+
+	/* Zero-length patterns would make kmp_find() read beyond kmp->pattern. */
+	if (unlikely(!len))
+		return ERR_PTR(-EINVAL);
+
+	/*
+	 * kmp->pattern is stored immediately after the prefix_tbl[] table.
+	 * Reject lengths that would wrap while sizing either region.
+	 */
+	if (unlikely(check_mul_overflow(len, sizeof(*kmp->prefix_tbl),
+					&prefix_tbl_len) ||
+		     check_add_overflow(sizeof(*kmp), (size_t)len, &priv_size) ||
+		     check_add_overflow(priv_size, prefix_tbl_len, &priv_size)))
+		return ERR_PTR(-EINVAL);
 
 	conf = alloc_ts_config(priv_size, gfp_mask);
 	if (IS_ERR(conf))
@@ -151,6 +161,7 @@ static void __exit exit_kmp(void)
 	textsearch_unregister(&kmp_ops);
 }
 
+MODULE_DESCRIPTION("Knuth-Morris-Pratt text search implementation");
 MODULE_LICENSE("GPL");
 
 module_init(init_kmp);

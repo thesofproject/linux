@@ -6,10 +6,8 @@ SoundWire Documentation
    :maxdepth: 1
 
    summary
-
-.. only::  subproject
-
-   Indices
-   =======
-
-   * :ref:`genindex`
+   stream
+   error_handling
+   locking
+   bra
+   bra_cadence

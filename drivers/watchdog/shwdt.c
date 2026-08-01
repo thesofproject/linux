@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/watchdog/shwdt.c
  *
  * Watchdog driver for integrated watchdog in the SuperH processors.
  *
  * Copyright (C) 2001 - 2012  Paul Mundt <lethal@linux-sh.org>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
  *
  * 14-Dec-2001 Matt Domsch <Matt_Domsch@dell.com>
  *     Added nowayout module option to override CONFIG_WATCHDOG_NOWAYOUT
@@ -133,7 +129,7 @@ static int sh_wdt_stop(struct watchdog_device *wdt_dev)
 
 	spin_lock_irqsave(&wdt->lock, flags);
 
-	del_timer(&wdt->timer);
+	timer_delete(&wdt->timer);
 
 	csr = sh_wdt_read_csr();
 	csr &= ~WTCSR_TME;
@@ -177,7 +173,7 @@ static int sh_wdt_set_heartbeat(struct watchdog_device *wdt_dev, unsigned t)
 
 static void sh_wdt_ping(struct timer_list *t)
 {
-	struct sh_wdt *wdt = from_timer(wdt, t, timer);
+	struct sh_wdt *wdt = timer_container_of(wdt, t, timer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&wdt->lock, flags);
@@ -220,7 +216,6 @@ static struct watchdog_device sh_wdt_dev = {
 static int sh_wdt_probe(struct platform_device *pdev)
 {
 	struct sh_wdt *wdt;
-	struct resource *res;
 	int rc;
 
 	/*
@@ -245,8 +240,7 @@ static int sh_wdt_probe(struct platform_device *pdev)
 		wdt->clk = NULL;
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	wdt->base = devm_ioremap_resource(wdt->dev, res);
+	wdt->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(wdt->base))
 		return PTR_ERR(wdt->base);
 
@@ -285,13 +279,11 @@ static int sh_wdt_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int sh_wdt_remove(struct platform_device *pdev)
+static void sh_wdt_remove(struct platform_device *pdev)
 {
 	watchdog_unregister_device(&sh_wdt_dev);
 
 	pm_runtime_disable(&pdev->dev);
-
-	return 0;
 }
 
 static void sh_wdt_shutdown(struct platform_device *pdev)

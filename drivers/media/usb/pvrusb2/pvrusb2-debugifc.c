@@ -1,28 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *
- *
  *  Copyright (C) 2005 Mike Isely <isely@pobox.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
  */
 
+#include <linux/hex.h>
 #include <linux/string.h>
 #include "pvrusb2-debugifc.h"
 #include "pvrusb2-hdw.h"
 #include "pvrusb2-debug.h"
-
-struct debugifc_mask_item {
-	const char *name;
-	unsigned long msk;
-};
 
 
 static unsigned int debugifc_count_whitespace(const char *buf,

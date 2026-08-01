@@ -3,7 +3,7 @@
  *
  * Module Name: evxfgpe - External Interfaces for General Purpose Events (GPEs)
  *
- * Copyright (C) 2000 - 2018, Intel Corp.
+ * Copyright (C) 2000 - 2026, Intel Corp.
  *
  *****************************************************************************/
 
@@ -78,18 +78,22 @@ ACPI_EXPORT_SYMBOL(acpi_update_all_gpes)
 
 /*******************************************************************************
  *
- * FUNCTION:    acpi_enable_gpe
+ * FUNCTION:    acpi_enable_gpe_cond
  *
  * PARAMETERS:  gpe_device          - Parent GPE Device. NULL for GPE0/GPE1
  *              gpe_number          - GPE level within the GPE block
+ *              dispatch_type       - GPE dispatch type to match
  *
  * RETURN:      Status
  *
- * DESCRIPTION: Add a reference to a GPE. On the first reference, the GPE is
- *              hardware-enabled.
+ * DESCRIPTION: Add a reference to a GPE so long as its dispatch type matches
+ *              the supplied one, or it is different from ACPI_GPE_DISPATCH_NONE
+ *              if the supplied one is ACPI_GPE_DISPATCH_MASK. On the first
+ *              reference, the GPE is hardware-enabled.
  *
  ******************************************************************************/
-acpi_status acpi_enable_gpe(acpi_handle gpe_device, u32 gpe_number)
+acpi_status acpi_enable_gpe_cond(acpi_handle gpe_device, u32 gpe_number,
+				 u8 dispatch_type)
 {
 	acpi_status status = AE_BAD_PARAMETER;
 	struct acpi_gpe_event_info *gpe_event_info;
@@ -100,15 +104,19 @@ acpi_status acpi_enable_gpe(acpi_handle gpe_device, u32 gpe_number)
 	flags = acpi_os_acquire_lock(acpi_gbl_gpe_lock);
 
 	/*
-	 * Ensure that we have a valid GPE number and that there is some way
-	 * of handling the GPE (handler or a GPE method). In other words, we
-	 * won't allow a valid GPE to be enabled if there is no way to handle it.
+	 * Ensure that we have a valid GPE number and that the dispatch type of
+	 * the GPE matches the supplied one (or it is not ACPI_GPE_DISPATCH_NONE
+	 * if the supplied one is ACPI_GPE_DISPATCH_MASK).
 	 */
 	gpe_event_info = acpi_ev_get_gpe_event_info(gpe_device, gpe_number);
 	if (gpe_event_info) {
-		if (ACPI_GPE_DISPATCH_TYPE(gpe_event_info->flags) !=
-		    ACPI_GPE_DISPATCH_NONE) {
-			status = acpi_ev_add_gpe_reference(gpe_event_info);
+		if (dispatch_type == ACPI_GPE_DISPATCH_MASK)
+			dispatch_type = ACPI_GPE_DISPATCH_TYPE(gpe_event_info->flags);
+		else if (dispatch_type != ACPI_GPE_DISPATCH_TYPE(gpe_event_info->flags))
+			dispatch_type = ACPI_GPE_DISPATCH_NONE;
+
+		if (dispatch_type != ACPI_GPE_DISPATCH_NONE) {
+			status = acpi_ev_add_gpe_reference(gpe_event_info, TRUE);
 			if (ACPI_SUCCESS(status) &&
 			    ACPI_GPE_IS_POLLING_NEEDED(gpe_event_info)) {
 
@@ -127,6 +135,30 @@ acpi_status acpi_enable_gpe(acpi_handle gpe_device, u32 gpe_number)
 
 	acpi_os_release_lock(acpi_gbl_gpe_lock, flags);
 	return_ACPI_STATUS(status);
+}
+ACPI_EXPORT_SYMBOL(acpi_enable_gpe_cond)
+
+/*******************************************************************************
+ *
+ * FUNCTION:    acpi_enable_gpe
+ *
+ * PARAMETERS:  gpe_device          - Parent GPE Device. NULL for GPE0/GPE1
+ *              gpe_number          - GPE level within the GPE block
+ *
+ * RETURN:      Status
+ *
+ * DESCRIPTION: Add a reference to a GPE. On the first reference, the GPE is
+ *              hardware-enabled.
+ *
+ ******************************************************************************/
+acpi_status acpi_enable_gpe(acpi_handle gpe_device, u32 gpe_number)
+{
+	/*
+	 * Ensure that there is some way of handling the GPE (handler or a GPE
+	 * method). In other words, we won't allow a valid GPE to be enabled if
+	 * there is no way to handle it.
+	 */
+	return acpi_enable_gpe_cond(gpe_device, gpe_number, ACPI_GPE_DISPATCH_MASK);
 }
 ACPI_EXPORT_SYMBOL(acpi_enable_gpe)
 
@@ -639,6 +671,28 @@ ACPI_EXPORT_SYMBOL(acpi_get_gpe_status)
 
 /*******************************************************************************
  *
+ * FUNCTION:    acpi_gispatch_gpe
+ *
+ * PARAMETERS:  gpe_device          - Parent GPE Device. NULL for GPE0/GPE1
+ *              gpe_number          - GPE level within the GPE block
+ *
+ * RETURN:      INTERRUPT_HANDLED or INTERRUPT_NOT_HANDLED
+ *
+ * DESCRIPTION: Detect and dispatch a General Purpose Event to either a function
+ *              (e.g. EC) or method (e.g. _Lxx/_Exx) handler.
+ *
+ ******************************************************************************/
+u32 acpi_dispatch_gpe(acpi_handle gpe_device, u32 gpe_number)
+{
+	ACPI_FUNCTION_TRACE(acpi_dispatch_gpe);
+
+	return acpi_ev_detect_gpe(gpe_device, NULL, gpe_number);
+}
+
+ACPI_EXPORT_SYMBOL(acpi_dispatch_gpe)
+
+/*******************************************************************************
+ *
  * FUNCTION:    acpi_finish_gpe
  *
  * PARAMETERS:  gpe_device          - Namespace node for the GPE Block
@@ -647,9 +701,9 @@ ACPI_EXPORT_SYMBOL(acpi_get_gpe_status)
  *
  * RETURN:      Status
  *
- * DESCRIPTION: Clear and conditionally reenable a GPE. This completes the GPE
+ * DESCRIPTION: Clear and conditionally re-enable a GPE. This completes the GPE
  *              processing. Intended for use by asynchronous host-installed
- *              GPE handlers. The GPE is only reenabled if the enable_for_run bit
+ *              GPE handlers. The GPE is only re-enabled if the enable_for_run bit
  *              is set in the GPE info.
  *
  ******************************************************************************/
@@ -772,6 +826,45 @@ acpi_status acpi_enable_all_wakeup_gpes(void)
 }
 
 ACPI_EXPORT_SYMBOL(acpi_enable_all_wakeup_gpes)
+
+/******************************************************************************
+ *
+ * FUNCTION:    acpi_any_gpe_status_set
+ *
+ * PARAMETERS:  gpe_skip_number      - Number of the GPE to skip
+ *
+ * RETURN:      Whether or not the status bit is set for any GPE
+ *
+ * DESCRIPTION: Check the status bits of all enabled GPEs, except for the one
+ *              represented by the "skip" argument, and return TRUE if any of
+ *              them is set or FALSE otherwise.
+ *
+ ******************************************************************************/
+u32 acpi_any_gpe_status_set(u32 gpe_skip_number)
+{
+	acpi_status status;
+	acpi_handle gpe_device;
+	u8 ret;
+
+	ACPI_FUNCTION_TRACE(acpi_any_gpe_status_set);
+
+	status = acpi_ut_acquire_mutex(ACPI_MTX_EVENTS);
+	if (ACPI_FAILURE(status)) {
+		return (FALSE);
+	}
+
+	status = acpi_get_gpe_device(gpe_skip_number, &gpe_device);
+	if (ACPI_FAILURE(status)) {
+		gpe_device = NULL;
+	}
+
+	ret = acpi_hw_check_all_gpes(gpe_device, gpe_skip_number);
+	(void)acpi_ut_release_mutex(ACPI_MTX_EVENTS);
+
+	return (ret);
+}
+
+ACPI_EXPORT_SYMBOL(acpi_any_gpe_status_set)
 
 /*******************************************************************************
  *

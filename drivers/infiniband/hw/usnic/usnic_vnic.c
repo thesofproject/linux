@@ -31,7 +31,6 @@
  *
  */
 #include <linux/errno.h>
-#include <linux/module.h>
 #include <linux/pci.h>
 
 #include "usnic_ib.h"
@@ -240,12 +239,12 @@ usnic_vnic_get_resources(struct usnic_vnic *vnic, enum usnic_vnic_res_type type,
 	if (usnic_vnic_res_free_cnt(vnic, type) < cnt || cnt < 0 || !owner)
 		return ERR_PTR(-EINVAL);
 
-	ret = kzalloc(sizeof(*ret), GFP_ATOMIC);
+	ret = kzalloc_obj(*ret, GFP_ATOMIC);
 	if (!ret)
 		return ERR_PTR(-ENOMEM);
 
 	if (cnt > 0) {
-		ret->res = kcalloc(cnt, sizeof(*(ret->res)), GFP_ATOMIC);
+		ret->res = kzalloc_objs(*(ret->res), cnt, GFP_ATOMIC);
 		if (!ret->res) {
 			kfree(ret);
 			return ERR_PTR(-ENOMEM);
@@ -312,12 +311,12 @@ static int usnic_vnic_alloc_res_chunk(struct usnic_vnic *vnic,
 	}
 
 	chunk->cnt = chunk->free_cnt = cnt;
-	chunk->res = kzalloc(sizeof(*(chunk->res))*cnt, GFP_KERNEL);
+	chunk->res = kzalloc_objs(*(chunk->res), cnt);
 	if (!chunk->res)
 		return -ENOMEM;
 
 	for (i = 0; i < cnt; i++) {
-		res = kzalloc(sizeof(*res), GFP_KERNEL);
+		res = kzalloc_obj(*res);
 		if (!res) {
 			err = -ENOMEM;
 			goto fail;
@@ -446,7 +445,7 @@ struct usnic_vnic *usnic_vnic_alloc(struct pci_dev *pdev)
 		return ERR_PTR(-EINVAL);
 	}
 
-	vnic = kzalloc(sizeof(*vnic), GFP_KERNEL);
+	vnic = kzalloc_obj(*vnic);
 	if (!vnic)
 		return ERR_PTR(-ENOMEM);
 

@@ -1,28 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * HiSilicon INNO USB2 PHY Driver.
  *
  * Copyright (c) 2016-2017 HiSilicon Technologies Co., Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/platform_device.h>
+#include <linux/of.h>
 #include <linux/phy/phy.h>
+#include <linux/platform_device.h>
 #include <linux/reset.h>
 
 #define INNO_PHY_PORT_NUM	2
@@ -32,12 +21,25 @@
 #define PHY_CLK_STABLE_TIME	2	/* unit:ms */
 #define UTMI_RST_COMPLETE_TIME	2	/* unit:ms */
 #define POR_RST_COMPLETE_TIME	300	/* unit:us */
+
+#define PHY_TYPE_0	0
+#define PHY_TYPE_1	1
+
 #define PHY_TEST_DATA		GENMASK(7, 0)
-#define PHY_TEST_ADDR		GENMASK(15, 8)
-#define PHY_TEST_PORT		GENMASK(18, 16)
-#define PHY_TEST_WREN		BIT(21)
-#define PHY_TEST_CLK		BIT(22)	/* rising edge active */
-#define PHY_TEST_RST		BIT(23)	/* low active */
+#define PHY_TEST_ADDR_OFFSET	8
+#define PHY0_TEST_ADDR		GENMASK(15, 8)
+#define PHY0_TEST_PORT_OFFSET	16
+#define PHY0_TEST_PORT		GENMASK(18, 16)
+#define PHY0_TEST_WREN		BIT(21)
+#define PHY0_TEST_CLK		BIT(22)	/* rising edge active */
+#define PHY0_TEST_RST		BIT(23)	/* low active */
+#define PHY1_TEST_ADDR		GENMASK(11, 8)
+#define PHY1_TEST_PORT_OFFSET	12
+#define PHY1_TEST_PORT		BIT(12)
+#define PHY1_TEST_WREN		BIT(13)
+#define PHY1_TEST_CLK		BIT(14)	/* rising edge active */
+#define PHY1_TEST_RST		BIT(15)	/* low active */
+
 #define PHY_CLK_ENABLE		BIT(2)
 
 struct hisi_inno_phy_port {
@@ -49,6 +51,7 @@ struct hisi_inno_phy_priv {
 	void __iomem *mmio;
 	struct clk *ref_clk;
 	struct reset_control *por_rst;
+	unsigned int type;
 	struct hisi_inno_phy_port ports[INNO_PHY_PORT_NUM];
 };
 
@@ -57,17 +60,27 @@ static void hisi_inno_phy_write_reg(struct hisi_inno_phy_priv *priv,
 {
 	void __iomem *reg = priv->mmio;
 	u32 val;
+	u32 value;
 
-	val = (data & PHY_TEST_DATA) |
-	      ((addr << 8) & PHY_TEST_ADDR) |
-	      ((port << 16) & PHY_TEST_PORT) |
-	      PHY_TEST_WREN | PHY_TEST_RST;
+	if (priv->type == PHY_TYPE_0)
+		val = (data & PHY_TEST_DATA) |
+		      ((addr << PHY_TEST_ADDR_OFFSET) & PHY0_TEST_ADDR) |
+		      ((port << PHY0_TEST_PORT_OFFSET) & PHY0_TEST_PORT) |
+		      PHY0_TEST_WREN | PHY0_TEST_RST;
+	else
+		val = (data & PHY_TEST_DATA) |
+		      ((addr << PHY_TEST_ADDR_OFFSET) & PHY1_TEST_ADDR) |
+		      ((port << PHY1_TEST_PORT_OFFSET) & PHY1_TEST_PORT) |
+		      PHY1_TEST_WREN | PHY1_TEST_RST;
 	writel(val, reg);
 
-	val |= PHY_TEST_CLK;
-	writel(val, reg);
+	value = val;
+	if (priv->type == PHY_TYPE_0)
+		value |= PHY0_TEST_CLK;
+	else
+		value |= PHY1_TEST_CLK;
+	writel(value, reg);
 
-	val &= ~PHY_TEST_CLK;
 	writel(val, reg);
 }
 
@@ -125,8 +138,6 @@ static int hisi_inno_phy_probe(struct platform_device *pdev)
 	struct device_node *np = dev->of_node;
 	struct hisi_inno_phy_priv *priv;
 	struct phy_provider *provider;
-	struct device_node *child;
-	struct resource *res;
 	int i = 0;
 	int ret;
 
@@ -134,8 +145,7 @@ static int hisi_inno_phy_probe(struct platform_device *pdev)
 	if (!priv)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->mmio = devm_ioremap_resource(dev, res);
+	priv->mmio = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(priv->mmio)) {
 		ret = PTR_ERR(priv->mmio);
 		return ret;
@@ -149,13 +159,16 @@ static int hisi_inno_phy_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->por_rst))
 		return PTR_ERR(priv->por_rst);
 
-	for_each_child_of_node(np, child) {
+	priv->type = (uintptr_t) of_device_get_match_data(dev);
+
+	for_each_child_of_node_scoped(np, child) {
 		struct reset_control *rst;
 		struct phy *phy;
 
 		rst = of_reset_control_get_exclusive(child, NULL);
 		if (IS_ERR(rst))
 			return PTR_ERR(rst);
+
 		priv->ports[i].utmi_rst = rst;
 		priv->ports[i].priv = priv;
 
@@ -167,7 +180,7 @@ static int hisi_inno_phy_probe(struct platform_device *pdev)
 		phy_set_drvdata(phy, &priv->ports[i]);
 		i++;
 
-		if (i > INNO_PHY_PORT_NUM) {
+		if (i >= INNO_PHY_PORT_NUM) {
 			dev_warn(dev, "Support %d ports in maximum\n", i);
 			break;
 		}
@@ -178,8 +191,12 @@ static int hisi_inno_phy_probe(struct platform_device *pdev)
 }
 
 static const struct of_device_id hisi_inno_phy_of_match[] = {
-	{ .compatible = "hisilicon,inno-usb2-phy", },
-	{ .compatible = "hisilicon,hi3798cv200-usb2-phy", },
+	{ .compatible = "hisilicon,inno-usb2-phy",
+	  .data = (void *) PHY_TYPE_0 },
+	{ .compatible = "hisilicon,hi3798cv200-usb2-phy",
+	  .data = (void *) PHY_TYPE_0 },
+	{ .compatible = "hisilicon,hi3798mv100-usb2-phy",
+	  .data = (void *) PHY_TYPE_1 },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, hisi_inno_phy_of_match);

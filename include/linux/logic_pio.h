@@ -17,7 +17,7 @@ enum {
 
 struct logic_pio_hwaddr {
 	struct list_head list;
-	struct fwnode_handle *fwnode;
+	const struct fwnode_handle *fwnode;
 	resource_size_t hw_start;
 	resource_size_t io_start;
 	resource_size_t size; /* range size populated */
@@ -39,9 +39,6 @@ struct logic_pio_host_ops {
 
 #ifdef CONFIG_INDIRECT_PIO
 u8 logic_inb(unsigned long addr);
-void logic_outb(u8 value, unsigned long addr);
-void logic_outw(u16 value, unsigned long addr);
-void logic_outl(u32 value, unsigned long addr);
 u16 logic_inw(unsigned long addr);
 u32 logic_inl(unsigned long addr);
 void logic_outb(u8 value, unsigned long addr);
@@ -108,15 +105,16 @@ void logic_outsl(unsigned long addr, const void *buffer, unsigned int count);
  * area by redefining the macro below.
  */
 #define PIO_INDIRECT_SIZE 0x4000
-#define MMIO_UPPER_LIMIT (IO_SPACE_LIMIT - PIO_INDIRECT_SIZE)
 #else
-#define MMIO_UPPER_LIMIT IO_SPACE_LIMIT
+#define PIO_INDIRECT_SIZE 0
 #endif /* CONFIG_INDIRECT_PIO */
+#define MMIO_UPPER_LIMIT (IO_SPACE_LIMIT - PIO_INDIRECT_SIZE)
 
-struct logic_pio_hwaddr *find_io_range_by_fwnode(struct fwnode_handle *fwnode);
-unsigned long logic_pio_trans_hwaddr(struct fwnode_handle *fwnode,
+struct logic_pio_hwaddr *find_io_range_by_fwnode(const struct fwnode_handle *fwnode);
+unsigned long logic_pio_trans_hwaddr(const struct fwnode_handle *fwnode,
 			resource_size_t hw_addr, resource_size_t size);
 int logic_pio_register_range(struct logic_pio_hwaddr *newrange);
+void logic_pio_unregister_range(struct logic_pio_hwaddr *range);
 resource_size_t logic_pio_to_hwaddr(unsigned long pio);
 unsigned long logic_pio_trans_cpuaddr(resource_size_t hw_addr);
 

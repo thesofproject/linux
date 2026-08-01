@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * h3600 atmel micro companion support, touchscreen subdevice
  * Author : Alessandro Gardich <gremlin@gremlin.it>
  * Author : Dmitry Artamonow <mad_soft@inbox.ru>
  * Author : Linus Walleij <linus.walleij@linaro.org>
- *
  */
 
 #include <asm/byteorder.h>
@@ -50,7 +47,7 @@ static void micro_ts_toggle_receive(struct touchscreen_data *ts, bool enable)
 {
 	struct ipaq_micro *micro = ts->micro;
 
-	spin_lock_irq(&micro->lock);
+	guard(spinlock_irq)(&micro->lock);
 
 	if (enable) {
 		micro->ts = micro_ts_receive;
@@ -59,8 +56,6 @@ static void micro_ts_toggle_receive(struct touchscreen_data *ts, bool enable)
 		micro->ts = NULL;
 		micro->ts_data = NULL;
 	}
-
-	spin_unlock_irq(&ts->micro->lock);
 }
 
 static int micro_ts_open(struct input_dev *input)
@@ -122,7 +117,7 @@ static int micro_ts_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int __maybe_unused micro_ts_suspend(struct device *dev)
+static int micro_ts_suspend(struct device *dev)
 {
 	struct touchscreen_data *ts = dev_get_drvdata(dev);
 
@@ -131,29 +126,26 @@ static int __maybe_unused micro_ts_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused micro_ts_resume(struct device *dev)
+static int micro_ts_resume(struct device *dev)
 {
 	struct touchscreen_data *ts = dev_get_drvdata(dev);
 	struct input_dev *input = ts->input;
 
-	mutex_lock(&input->mutex);
+	guard(mutex)(&input->mutex);
 
-	if (input->users)
+	if (input_device_enabled(input))
 		micro_ts_toggle_receive(ts, true);
-
-	mutex_unlock(&input->mutex);
 
 	return 0;
 }
 
-static const struct dev_pm_ops micro_ts_dev_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(micro_ts_suspend, micro_ts_resume)
-};
+static DEFINE_SIMPLE_DEV_PM_OPS(micro_ts_dev_pm_ops,
+				micro_ts_suspend, micro_ts_resume);
 
 static struct platform_driver micro_ts_device_driver = {
 	.driver	= {
 		.name	= "ipaq-micro-ts",
-		.pm	= &micro_ts_dev_pm_ops,
+		.pm	= pm_sleep_ptr(&micro_ts_dev_pm_ops),
 	},
 	.probe	= micro_ts_probe,
 };

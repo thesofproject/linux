@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -49,6 +50,7 @@ static void led_blink(struct timer_list *unused)
 	add_timer(&led_blink_timer);
 }
 
+#ifdef CONFIG_PROC_FS
 static int led_proc_show(struct seq_file *m, void *v)
 {
 	if (get_auxio() & AUXIO_LED)
@@ -76,13 +78,13 @@ static ssize_t led_proc_write(struct file *file, const char __user *buffer,
 		return PTR_ERR(buf);
 
 	/* work around \n when echo'ing into proc */
-	if (buf[count - 1] == '\n')
+	if (count > 0 && buf[count - 1] == '\n')
 		buf[count - 1] = '\0';
 
 	/* before we change anything we want to stop any running timers,
 	 * otherwise calls such as on will have no persistent effect
 	 */
-	del_timer_sync(&led_blink_timer);
+	timer_delete_sync(&led_blink_timer);
 
 	if (!strcmp(buf, "on")) {
 		auxio_set_led(AUXIO_LED_ON);
@@ -103,16 +105,14 @@ static ssize_t led_proc_write(struct file *file, const char __user *buffer,
 	return count;
 }
 
-static const struct file_operations led_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= led_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-	.write		= led_proc_write,
+static const struct proc_ops led_proc_ops = {
+	.proc_open	= led_proc_open,
+	.proc_read	= seq_read,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+	.proc_write	= led_proc_write,
 };
-
-static struct proc_dir_entry *led;
+#endif
 
 #define LED_VERSION	"0.1"
 
@@ -120,10 +120,10 @@ static int __init led_init(void)
 {
 	timer_setup(&led_blink_timer, led_blink, 0);
 
-	led = proc_create("led", 0, NULL, &led_proc_fops);
-	if (!led)
+#ifdef CONFIG_PROC_FS
+	if (!proc_create("led", 0, NULL, &led_proc_ops))
 		return -ENOMEM;
-
+#endif
 	printk(KERN_INFO
 	       "led: version %s, Lars Kotthoff <metalhead@metalhead.ws>\n",
 	       LED_VERSION);
@@ -134,7 +134,7 @@ static int __init led_init(void)
 static void __exit led_exit(void)
 {
 	remove_proc_entry("led", NULL);
-	del_timer_sync(&led_blink_timer);
+	timer_delete_sync(&led_blink_timer);
 }
 
 module_init(led_init);

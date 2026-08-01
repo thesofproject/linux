@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ROHM BU21023/24 Dual touch support resistive touch screen driver
  * Copyright (C) 2012 ROHM CO.,LTD.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #include <linux/delay.h>
 #include <linux/firmware.h>
@@ -304,7 +296,7 @@ static int rohm_i2c_burst_read(struct i2c_client *client, u8 start, void *buf,
 	msg[1].len = len;
 	msg[1].buf = buf;
 
-	i2c_lock_adapter(adap);
+	i2c_lock_bus(adap, I2C_LOCK_SEGMENT);
 
 	for (i = 0; i < 2; i++) {
 		if (__i2c_transfer(adap, &msg[i], 1) < 0) {
@@ -313,7 +305,7 @@ static int rohm_i2c_burst_read(struct i2c_client *client, u8 start, void *buf,
 		}
 	}
 
-	i2c_unlock_adapter(adap);
+	i2c_unlock_bus(adap, I2C_LOCK_SEGMENT);
 
 	return ret;
 }
@@ -396,13 +388,13 @@ static int rohm_ts_manual_calibration(struct rohm_ts_data *ts)
 			err_y = (int)READ_CALIB_BUF(PRM1_Y_H) << 2 |
 				READ_CALIB_BUF(PRM1_Y_L);
 
-			/* X axis ajust */
+			/* X axis adjust */
 			if (err_x <= 4)
 				calib_x -= AXIS_ADJUST;
 			else if (err_x >= 60)
 				calib_x += AXIS_ADJUST;
 
-			/* Y axis ajust */
+			/* Y axis adjust */
 			if (err_y <= 4)
 				calib_y -= AXIS_ADJUST;
 			else if (err_y >= 60)
@@ -651,12 +643,12 @@ static int rohm_ts_load_firmware(struct i2c_client *client,
 				 const char *firmware_name)
 {
 	struct device *dev = &client->dev;
-	const struct firmware *fw;
 	s32 status;
 	unsigned int offset, len, xfer_len;
 	unsigned int retry = 0;
 	int error, error2;
 
+	const struct firmware *fw __free(firmware) = NULL;
 	error = request_firmware(&fw, firmware_name, dev);
 	if (error) {
 		dev_err(dev, "unable to retrieve firmware %s: %d\n",
@@ -730,9 +722,30 @@ static int rohm_ts_load_firmware(struct i2c_client *client,
 out:
 	error2 = i2c_smbus_write_byte_data(client, INT_MASK, INT_ALL);
 
-	release_firmware(fw);
-
 	return error ? error : error2;
+}
+
+static int rohm_ts_update_setting(struct rohm_ts_data *ts,
+				  unsigned int setting_bit, bool on)
+{
+	int error;
+
+	scoped_cond_guard(mutex_intr, return -EINTR, &ts->input->mutex) {
+		if (on)
+			ts->setup2 |= setting_bit;
+		else
+			ts->setup2 &= ~setting_bit;
+
+		if (ts->initialized) {
+			error = i2c_smbus_write_byte_data(ts->client,
+							  COMMON_SETUP2,
+							  ts->setup2);
+			if (error)
+				return error;
+		}
+	}
+
+	return 0;
 }
 
 static ssize_t swap_xy_show(struct device *dev, struct device_attribute *attr,
@@ -741,7 +754,7 @@ static ssize_t swap_xy_show(struct device *dev, struct device_attribute *attr,
 	struct i2c_client *client = to_i2c_client(dev);
 	struct rohm_ts_data *ts = i2c_get_clientdata(client);
 
-	return sprintf(buf, "%d\n", !!(ts->setup2 & SWAP_XY));
+	return sysfs_emit(buf, "%d\n", !!(ts->setup2 & SWAP_XY));
 }
 
 static ssize_t swap_xy_store(struct device *dev, struct device_attribute *attr,
@@ -756,22 +769,8 @@ static ssize_t swap_xy_store(struct device *dev, struct device_attribute *attr,
 	if (error)
 		return error;
 
-	error = mutex_lock_interruptible(&ts->input->mutex);
-	if (error)
-		return error;
-
-	if (val)
-		ts->setup2 |= SWAP_XY;
-	else
-		ts->setup2 &= ~SWAP_XY;
-
-	if (ts->initialized)
-		error = i2c_smbus_write_byte_data(ts->client, COMMON_SETUP2,
-						  ts->setup2);
-
-	mutex_unlock(&ts->input->mutex);
-
-	return error ? error : count;
+	error = rohm_ts_update_setting(ts, SWAP_XY, val);
+	return error ?: count;
 }
 
 static ssize_t inv_x_show(struct device *dev, struct device_attribute *attr,
@@ -780,7 +779,7 @@ static ssize_t inv_x_show(struct device *dev, struct device_attribute *attr,
 	struct i2c_client *client = to_i2c_client(dev);
 	struct rohm_ts_data *ts = i2c_get_clientdata(client);
 
-	return sprintf(buf, "%d\n", !!(ts->setup2 & INV_X));
+	return sysfs_emit(buf, "%d\n", !!(ts->setup2 & INV_X));
 }
 
 static ssize_t inv_x_store(struct device *dev, struct device_attribute *attr,
@@ -795,22 +794,8 @@ static ssize_t inv_x_store(struct device *dev, struct device_attribute *attr,
 	if (error)
 		return error;
 
-	error = mutex_lock_interruptible(&ts->input->mutex);
-	if (error)
-		return error;
-
-	if (val)
-		ts->setup2 |= INV_X;
-	else
-		ts->setup2 &= ~INV_X;
-
-	if (ts->initialized)
-		error = i2c_smbus_write_byte_data(ts->client, COMMON_SETUP2,
-						  ts->setup2);
-
-	mutex_unlock(&ts->input->mutex);
-
-	return error ? error : count;
+	error = rohm_ts_update_setting(ts, INV_X, val);
+	return error ?: count;
 }
 
 static ssize_t inv_y_show(struct device *dev, struct device_attribute *attr,
@@ -819,7 +804,7 @@ static ssize_t inv_y_show(struct device *dev, struct device_attribute *attr,
 	struct i2c_client *client = to_i2c_client(dev);
 	struct rohm_ts_data *ts = i2c_get_clientdata(client);
 
-	return sprintf(buf, "%d\n", !!(ts->setup2 & INV_Y));
+	return sysfs_emit(buf, "%d\n", !!(ts->setup2 & INV_Y));
 }
 
 static ssize_t inv_y_store(struct device *dev, struct device_attribute *attr,
@@ -834,22 +819,8 @@ static ssize_t inv_y_store(struct device *dev, struct device_attribute *attr,
 	if (error)
 		return error;
 
-	error = mutex_lock_interruptible(&ts->input->mutex);
-	if (error)
-		return error;
-
-	if (val)
-		ts->setup2 |= INV_Y;
-	else
-		ts->setup2 &= ~INV_Y;
-
-	if (ts->initialized)
-		error = i2c_smbus_write_byte_data(client, COMMON_SETUP2,
-						  ts->setup2);
-
-	mutex_unlock(&ts->input->mutex);
-
-	return error ? error : count;
+	error = rohm_ts_update_setting(ts, INV_Y, val);
+	return error ?: count;
 }
 
 static DEVICE_ATTR_RW(swap_xy);
@@ -862,17 +833,14 @@ static struct attribute *rohm_ts_attrs[] = {
 	&dev_attr_inv_y.attr,
 	NULL,
 };
-
-static const struct attribute_group rohm_ts_attr_group = {
-	.attrs = rohm_ts_attrs,
-};
+ATTRIBUTE_GROUPS(rohm_ts);
 
 static int rohm_ts_device_init(struct i2c_client *client, u8 setup2)
 {
 	struct device *dev = &client->dev;
 	int error;
 
-	disable_irq(client->irq);
+	guard(disable_irq)(&client->irq);
 
 	/*
 	 * Wait 200usec for reset
@@ -1047,10 +1015,10 @@ static int rohm_ts_device_init(struct i2c_client *client, u8 setup2)
 	/* controller CPU power on */
 	error = i2c_smbus_write_byte_data(client, SYSTEM,
 					  ANALOG_POWER_ON | CPU_POWER_ON);
+	if (error)
+		return error;
 
-	enable_irq(client->irq);
-
-	return error;
+	return 0;
 }
 
 static int rohm_ts_power_off(struct i2c_client *client)
@@ -1103,8 +1071,7 @@ static void rohm_ts_close(struct input_dev *input_dev)
 	ts->initialized = false;
 }
 
-static int rohm_bu21023_i2c_probe(struct i2c_client *client,
-				  const struct i2c_device_id *id)
+static int rohm_bu21023_i2c_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct rohm_ts_data *ts;
@@ -1173,17 +1140,11 @@ static int rohm_bu21023_i2c_probe(struct i2c_client *client,
 		return error;
 	}
 
-	error = devm_device_add_group(dev, &rohm_ts_attr_group);
-	if (error) {
-		dev_err(dev, "failed to create sysfs group: %d\n", error);
-		return error;
-	}
-
 	return error;
 }
 
 static const struct i2c_device_id rohm_bu21023_i2c_id[] = {
-	{ BU21023_NAME, 0 },
+	{ .name = BU21023_NAME },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(i2c, rohm_bu21023_i2c_id);
@@ -1191,6 +1152,7 @@ MODULE_DEVICE_TABLE(i2c, rohm_bu21023_i2c_id);
 static struct i2c_driver rohm_bu21023_i2c_driver = {
 	.driver = {
 		.name = BU21023_NAME,
+		.dev_groups = rohm_ts_groups,
 	},
 	.probe = rohm_bu21023_i2c_probe,
 	.id_table = rohm_bu21023_i2c_id,

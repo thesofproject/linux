@@ -4,18 +4,24 @@
  *
  * Builtin help command
  */
-#include "perf.h"
+#include "util/cache.h"
 #include "util/config.h"
+#include "util/strbuf.h"
 #include "builtin.h"
 #include <subcmd/exec-cmd.h>
-#include "common-cmds.h"
 #include <subcmd/parse-options.h>
 #include <subcmd/run-command.h>
 #include <subcmd/help.h>
 #include "util/debug.h"
+#include "util/util.h"
 #include <linux/kernel.h>
+#include <linux/string.h>
+#include <linux/zalloc.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -189,7 +195,7 @@ static void add_man_viewer(const char *name)
 	while (*p)
 		p = &((*p)->next);
 	*p = zalloc(sizeof(**p) + len + 1);
-	strncpy((*p)->name, name, len);
+	strcpy((*p)->name, name);
 }
 
 static int supported_man_viewer(const char *name, size_t len)
@@ -294,16 +300,58 @@ static struct cmdnames main_cmds, other_cmds;
 
 void list_common_cmds_help(void)
 {
-	unsigned int i, longest = 0;
+	const struct cmdname_help {
+		const char *name;
+		const char *help;
+	} common_cmds[] = {
+		{"annotate", "Read perf.data (created by perf record) and display annotated code"},
+		{"archive",
+		 "Create archive with object files with build-ids found in perf.data file"},
+		{"bench", "General framework for benchmark suites"},
+		{"buildid-cache", "Manage build-id cache."},
+		{"buildid-list", "List the buildids in a perf.data file"},
+		{"c2c", "Shared Data C2C/HITM Analyzer."},
+		{"config", "Get and set variables in a configuration file."},
+		{"daemon", "Run record sessions on background"},
+		{"data", "Data file related processing"},
+		{"diff", "Read perf.data files and display the differential profile"},
+		{"evlist", "List the event names in a perf.data file"},
+		{"ftrace", "simple wrapper for kernel's ftrace functionality"},
+		{"inject", "Filter to augment the events stream with additional information"},
+		{"iostat", "Show I/O performance metrics"},
+		{"kallsyms", "Searches running kernel for symbols"},
+		{"kvm", "Tool to trace/measure kvm guest os"},
+		{"list", "List all symbolic event types"},
+		{"mem", "Profile memory accesses"},
+		{"record", "Run a command and record its profile into perf.data"},
+		{"report", "Read perf.data (created by perf record) and display the profile"},
+		{"script", "Read perf.data (created by perf record) and display trace output"},
+		{"stat", "Run a command and gather performance counter statistics"},
+		{"test", "Runs sanity tests."},
+		{"top", "System profiling tool."},
+		{"version", "display the version of perf binary"},
+	#ifdef HAVE_LIBELF_SUPPORT
+		{"probe", "Define new dynamic tracepoints"},
+	#endif /* HAVE_LIBELF_SUPPORT */
+	#ifdef HAVE_LIBTRACEEVENT
+		{"trace", "strace inspired tool"},
+		{"kmem", "Tool to trace/measure kernel memory properties"},
+		{"kwork", "Tool to trace/measure kernel work properties (latencies)"},
+		{"lock", "Analyze lock events"},
+		{"sched", "Tool to trace/measure scheduler properties (latencies)"},
+		{"timechart", "Tool to visualize total system behavior during a workload"},
+	#endif /* HAVE_LIBTRACEEVENT */
+	};
+	size_t longest = 0;
 
-	for (i = 0; i < ARRAY_SIZE(common_cmds); i++) {
+	for (size_t i = 0; i < ARRAY_SIZE(common_cmds); i++) {
 		if (longest < strlen(common_cmds[i].name))
 			longest = strlen(common_cmds[i].name);
 	}
 
 	puts(" The most commonly used perf commands are:");
-	for (i = 0; i < ARRAY_SIZE(common_cmds); i++) {
-		printf("   %-*s   ", longest, common_cmds[i].name);
+	for (size_t i = 0; i < ARRAY_SIZE(common_cmds); i++) {
+		printf("   %-*s   ", (int)longest, common_cmds[i].name);
 		puts(common_cmds[i].help);
 	}
 }
@@ -383,9 +431,10 @@ static int get_html_page_path(char **page_path, const char *page)
 {
 	struct stat st;
 	const char *html_path = system_path(PERF_HTML_PATH);
+	char path[PATH_MAX];
 
 	/* Check that we have a perf documentation directory. */
-	if (stat(mkpath("%s/perf.html", html_path), &st)
+	if (stat(mkpath(path, sizeof(path), "%s/perf.html", html_path), &st)
 	    || !S_ISREG(st.st_mode)) {
 		pr_err("'%s': not a documentation directory.", html_path);
 		return -1;
@@ -409,7 +458,7 @@ static void open_html(const char *path)
 static int show_html_page(const char *perf_cmd)
 {
 	const char *page = cmd_to_page(perf_cmd);
-	char *page_path; /* it leaks but we exec bellow */
+	char *page_path; /* it leaks but we exec below */
 
 	if (get_html_page_path(&page_path, page) < 0)
 		return -1;
@@ -439,9 +488,7 @@ int cmd_help(int argc, const char **argv)
 #ifdef HAVE_LIBELF_SUPPORT
 		"probe",
 #endif
-#if defined(HAVE_LIBAUDIT_SUPPORT) || defined(HAVE_SYSCALL_TABLE_SUPPORT)
 		"trace",
-#endif
 	NULL };
 	const char *builtin_help_usage[] = {
 		"perf help [--all] [--man|--web|--info] [command]",

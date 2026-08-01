@@ -7,8 +7,7 @@
  *		 Michael Ernst <mernst@de.ibm.com>
  */
 
-#define KMSG_COMPONENT "sclp_cpi"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "sclp_cpi: " fmt
 
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -82,7 +81,7 @@ static struct sclp_req *cpi_prepare_req(void)
 	struct cpi_sccb *sccb;
 	struct cpi_evbuf *evb;
 
-	req = kzalloc(sizeof(struct sclp_req), GFP_KERNEL);
+	req = kzalloc_obj(struct sclp_req);
 	if (!req)
 		return ERR_PTR(-ENOMEM);
 	sccb = (struct cpi_sccb *) get_zeroed_page(GFP_KERNEL | GFP_DMA);
@@ -223,7 +222,7 @@ static ssize_t system_name_show(struct kobject *kobj,
 	int rc;
 
 	mutex_lock(&sclp_cpi_mutex);
-	rc = snprintf(page, PAGE_SIZE, "%s\n", system_name);
+	rc = sysfs_emit(page, "%s\n", system_name);
 	mutex_unlock(&sclp_cpi_mutex);
 	return rc;
 }
@@ -255,7 +254,7 @@ static ssize_t sysplex_name_show(struct kobject *kobj,
 	int rc;
 
 	mutex_lock(&sclp_cpi_mutex);
-	rc = snprintf(page, PAGE_SIZE, "%s\n", sysplex_name);
+	rc = sysfs_emit(page, "%s\n", sysplex_name);
 	mutex_unlock(&sclp_cpi_mutex);
 	return rc;
 }
@@ -287,7 +286,7 @@ static ssize_t system_type_show(struct kobject *kobj,
 	int rc;
 
 	mutex_lock(&sclp_cpi_mutex);
-	rc = snprintf(page, PAGE_SIZE, "%s\n", system_type);
+	rc = sysfs_emit(page, "%s\n", system_type);
 	mutex_unlock(&sclp_cpi_mutex);
 	return rc;
 }
@@ -321,7 +320,7 @@ static ssize_t system_level_show(struct kobject *kobj,
 	mutex_lock(&sclp_cpi_mutex);
 	level = system_level;
 	mutex_unlock(&sclp_cpi_mutex);
-	return snprintf(page, PAGE_SIZE, "%#018llx\n", level);
+	return sysfs_emit(page, "%#018llx\n", level);
 }
 
 static ssize_t system_level_store(struct kobject *kobj,

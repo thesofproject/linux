@@ -1,24 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Realtek PCI-Express SD/MMC Card Interface driver
  *
  * Copyright(c) 2009-2013 Realtek Semiconductor Corp. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  * Author:
  *   Wei WANG <wei_wang@realsil.com.cn>
  */
 
+#include <linux/pci.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/highmem.h>
@@ -31,7 +20,8 @@
 #include <linux/mmc/sdio.h>
 #include <linux/mmc/card.h>
 #include <linux/rtsx_pci.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
+#include <linux/pm_runtime.h>
 
 struct realtek_pci_sdmmc {
 	struct platform_device	*pdev;
@@ -49,15 +39,14 @@ struct realtek_pci_sdmmc {
 	bool			double_clk;
 	bool			eject;
 	bool			initial_mode;
-	int			power_state;
-#define SDMMC_POWER_ON		1
-#define SDMMC_POWER_OFF		0
-
+	int			prev_power_state;
 	int			sg_count;
 	s32			cookie;
 	int			cookie_sg_count;
 	bool			using_cookie;
 };
+
+static int sdmmc_init_sd_express(struct mmc_host *mmc, struct mmc_ios *ios);
 
 static inline struct device *sdmmc_dev(struct realtek_pci_sdmmc *host)
 {
@@ -126,8 +115,6 @@ static int sd_response_type(struct mmc_command *cmd)
 		return SD_RSP_TYPE_R0;
 	case MMC_RSP_R1:
 		return SD_RSP_TYPE_R1;
-	case MMC_RSP_R1_NO_CRC:
-		return SD_RSP_TYPE_R1 | SD_NO_CHECK_CRC7;
 	case MMC_RSP_R1B:
 		return SD_RSP_TYPE_R1b;
 	case MMC_RSP_R2:
@@ -551,23 +538,6 @@ static int sd_write_long_data(struct realtek_pci_sdmmc *host,
 	return 0;
 }
 
-static int sd_rw_multi(struct realtek_pci_sdmmc *host, struct mmc_request *mrq)
-{
-	struct mmc_data *data = mrq->data;
-
-	if (host->sg_count < 0) {
-		data->error = host->sg_count;
-		dev_dbg(sdmmc_dev(host), "%s: sg_count = %d is invalid\n",
-			__func__, host->sg_count);
-		return data->error;
-	}
-
-	if (data->flags & MMC_DATA_READ)
-		return sd_read_long_data(host, mrq);
-
-	return sd_write_long_data(host, mrq);
-}
-
 static inline void sd_enable_initial_mode(struct realtek_pci_sdmmc *host)
 {
 	rtsx_pci_write_register(host->pcr, SD_CFG1,
@@ -578,6 +548,33 @@ static inline void sd_disable_initial_mode(struct realtek_pci_sdmmc *host)
 {
 	rtsx_pci_write_register(host->pcr, SD_CFG1,
 			SD_CLK_DIVIDE_MASK, SD_CLK_DIVIDE_0);
+}
+
+static int sd_rw_multi(struct realtek_pci_sdmmc *host, struct mmc_request *mrq)
+{
+	struct mmc_data *data = mrq->data;
+	int err;
+
+	if (host->sg_count < 0) {
+		data->error = host->sg_count;
+		dev_dbg(sdmmc_dev(host), "%s: sg_count = %d is invalid\n",
+			__func__, host->sg_count);
+		return data->error;
+	}
+
+	if (data->flags & MMC_DATA_READ) {
+		if (host->initial_mode)
+			sd_disable_initial_mode(host);
+
+		err = sd_read_long_data(host, mrq);
+
+		if (host->initial_mode)
+			sd_enable_initial_mode(host);
+
+		return err;
+	}
+
+	return sd_write_long_data(host, mrq);
 }
 
 static void sd_normal_rw(struct realtek_pci_sdmmc *host,
@@ -618,19 +615,22 @@ static int sd_change_phase(struct realtek_pci_sdmmc *host,
 		u8 sample_point, bool rx)
 {
 	struct rtsx_pcr *pcr = host->pcr;
-
+	u16 SD_VP_CTL = 0;
 	dev_dbg(sdmmc_dev(host), "%s(%s): sample_point = %d\n",
 			__func__, rx ? "RX" : "TX", sample_point);
 
 	rtsx_pci_write_register(pcr, CLK_CTL, CHANGE_CLK, CHANGE_CLK);
-	if (rx)
+	if (rx) {
+		SD_VP_CTL = SD_VPRX_CTL;
 		rtsx_pci_write_register(pcr, SD_VPRX_CTL,
 			PHASE_SELECT_MASK, sample_point);
-	else
+	} else {
+		SD_VP_CTL = SD_VPTX_CTL;
 		rtsx_pci_write_register(pcr, SD_VPTX_CTL,
 			PHASE_SELECT_MASK, sample_point);
-	rtsx_pci_write_register(pcr, SD_VPCLK0_CTL, PHASE_NOT_RESET, 0);
-	rtsx_pci_write_register(pcr, SD_VPCLK0_CTL, PHASE_NOT_RESET,
+	}
+	rtsx_pci_write_register(pcr, SD_VP_CTL, PHASE_NOT_RESET, 0);
+	rtsx_pci_write_register(pcr, SD_VP_CTL, PHASE_NOT_RESET,
 				PHASE_NOT_RESET);
 	rtsx_pci_write_register(pcr, CLK_CTL, CHANGE_CLK, 0);
 	rtsx_pci_write_register(pcr, SD_CFG1, SD_ASYNC_FIFO_NOT_RST, 0);
@@ -684,11 +684,11 @@ static u8 sd_search_final_phase(struct realtek_pci_sdmmc *host, u32 phase_map)
 
 static void sd_wait_data_idle(struct realtek_pci_sdmmc *host)
 {
-	int err, i;
+	int i;
 	u8 val = 0;
 
 	for (i = 0; i < 100; i++) {
-		err = rtsx_pci_read_register(host->pcr, SD_DATA_STATE, &val);
+		rtsx_pci_read_register(host->pcr, SD_DATA_STATE, &val);
 		if (val & SD_DATA_IDLE)
 			return;
 
@@ -901,13 +901,23 @@ static int sd_set_bus_width(struct realtek_pci_sdmmc *host,
 	return err;
 }
 
-static int sd_power_on(struct realtek_pci_sdmmc *host)
+static int sd_power_on(struct realtek_pci_sdmmc *host, unsigned char power_mode)
 {
 	struct rtsx_pcr *pcr = host->pcr;
+	struct mmc_host *mmc = host->mmc;
 	int err;
+	u32 val;
+	u8 test_mode;
 
-	if (host->power_state == SDMMC_POWER_ON)
+	if (host->prev_power_state == MMC_POWER_ON)
 		return 0;
+
+	if (host->prev_power_state == MMC_POWER_UP) {
+		rtsx_pci_write_register(pcr, SD_BUS_STAT, SD_CLK_TOGGLE_EN, 0);
+		goto finish;
+	}
+
+	msleep(100);
 
 	rtsx_pci_init_cmd(pcr);
 	rtsx_pci_add_cmd(pcr, WRITE_REG_CMD, CARD_SELECT, 0x07, SD_MOD_SEL);
@@ -927,11 +937,41 @@ static int sd_power_on(struct realtek_pci_sdmmc *host)
 	if (err < 0)
 		return err;
 
+	mdelay(1);
+
 	err = rtsx_pci_write_register(pcr, CARD_OE, SD_OUTPUT_EN, SD_OUTPUT_EN);
 	if (err < 0)
 		return err;
 
-	host->power_state = SDMMC_POWER_ON;
+	/* send at least 74 clocks */
+	rtsx_pci_write_register(pcr, SD_BUS_STAT, SD_CLK_TOGGLE_EN, SD_CLK_TOGGLE_EN);
+
+	if ((PCI_PID(pcr) == PID_5261) || (PCI_PID(pcr) == PID_5264)) {
+		/*
+		 * If test mode is set switch to SD Express mandatorily,
+		 * this is only for factory testing.
+		 */
+		rtsx_pci_read_register(pcr, RTS5261_FW_CFG_INFO0, &test_mode);
+		if (test_mode & RTS5261_FW_EXPRESS_TEST_MASK) {
+			sdmmc_init_sd_express(mmc, NULL);
+			return 0;
+		}
+		if (pcr->extra_caps & EXTRA_CAPS_SD_EXPRESS)
+			mmc->caps2 |= MMC_CAP2_SD_EXP | MMC_CAP2_SD_EXP_1_2V;
+		/*
+		 * HW read wp status when resuming from S3/S4,
+		 * and then picks SD legacy interface if it's set
+		 * in read-only mode.
+		 */
+		val = rtsx_pci_readl(pcr, RTSX_BIPR);
+		if (val & SD_WRITE_PROTECT) {
+			pcr->extra_caps &= ~EXTRA_CAPS_SD_EXPRESS;
+			mmc->caps2 &= ~(MMC_CAP2_SD_EXP | MMC_CAP2_SD_EXP_1_2V);
+		}
+	}
+
+finish:
+	host->prev_power_state = power_mode;
 	return 0;
 }
 
@@ -940,7 +980,7 @@ static int sd_power_off(struct realtek_pci_sdmmc *host)
 	struct rtsx_pcr *pcr = host->pcr;
 	int err;
 
-	host->power_state = SDMMC_POWER_OFF;
+	host->prev_power_state = MMC_POWER_OFF;
 
 	rtsx_pci_init_cmd(pcr);
 
@@ -966,7 +1006,7 @@ static int sd_set_power_mode(struct realtek_pci_sdmmc *host,
 	if (power_mode == MMC_POWER_OFF)
 		err = sd_power_off(host);
 	else
-		err = sd_power_on(host);
+		err = sd_power_on(host, power_mode);
 
 	return err;
 }
@@ -1141,79 +1181,6 @@ static int sdmmc_get_cd(struct mmc_host *mmc)
 	return cd;
 }
 
-static int sd_wait_voltage_stable_1(struct realtek_pci_sdmmc *host)
-{
-	struct rtsx_pcr *pcr = host->pcr;
-	int err;
-	u8 stat;
-
-	/* Reference to Signal Voltage Switch Sequence in SD spec.
-	 * Wait for a period of time so that the card can drive SD_CMD and
-	 * SD_DAT[3:0] to low after sending back CMD11 response.
-	 */
-	mdelay(1);
-
-	/* SD_CMD, SD_DAT[3:0] should be driven to low by card;
-	 * If either one of SD_CMD,SD_DAT[3:0] is not low,
-	 * abort the voltage switch sequence;
-	 */
-	err = rtsx_pci_read_register(pcr, SD_BUS_STAT, &stat);
-	if (err < 0)
-		return err;
-
-	if (stat & (SD_CMD_STATUS | SD_DAT3_STATUS | SD_DAT2_STATUS |
-				SD_DAT1_STATUS | SD_DAT0_STATUS))
-		return -EINVAL;
-
-	/* Stop toggle SD clock */
-	err = rtsx_pci_write_register(pcr, SD_BUS_STAT,
-			0xFF, SD_CLK_FORCE_STOP);
-	if (err < 0)
-		return err;
-
-	return 0;
-}
-
-static int sd_wait_voltage_stable_2(struct realtek_pci_sdmmc *host)
-{
-	struct rtsx_pcr *pcr = host->pcr;
-	int err;
-	u8 stat, mask, val;
-
-	/* Wait 1.8V output of voltage regulator in card stable */
-	msleep(50);
-
-	/* Toggle SD clock again */
-	err = rtsx_pci_write_register(pcr, SD_BUS_STAT, 0xFF, SD_CLK_TOGGLE_EN);
-	if (err < 0)
-		return err;
-
-	/* Wait for a period of time so that the card can drive
-	 * SD_DAT[3:0] to high at 1.8V
-	 */
-	msleep(20);
-
-	/* SD_CMD, SD_DAT[3:0] should be pulled high by host */
-	err = rtsx_pci_read_register(pcr, SD_BUS_STAT, &stat);
-	if (err < 0)
-		return err;
-
-	mask = SD_CMD_STATUS | SD_DAT3_STATUS | SD_DAT2_STATUS |
-		SD_DAT1_STATUS | SD_DAT0_STATUS;
-	val = SD_CMD_STATUS | SD_DAT3_STATUS | SD_DAT2_STATUS |
-		SD_DAT1_STATUS | SD_DAT0_STATUS;
-	if ((stat & mask) != val) {
-		dev_dbg(sdmmc_dev(host),
-			"%s: SD_BUS_STAT = 0x%x\n", __func__, stat);
-		rtsx_pci_write_register(pcr, SD_BUS_STAT,
-				SD_CLK_TOGGLE_EN | SD_CLK_FORCE_STOP, 0);
-		rtsx_pci_write_register(pcr, CARD_CLK_EN, 0xFF, 0);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
 static int sdmmc_switch_voltage(struct mmc_host *mmc, struct mmc_ios *ios)
 {
 	struct realtek_pci_sdmmc *host = mmc_priv(mmc);
@@ -1241,7 +1208,9 @@ static int sdmmc_switch_voltage(struct mmc_host *mmc, struct mmc_ios *ios)
 		voltage = OUTPUT_1V8;
 
 	if (voltage == OUTPUT_1V8) {
-		err = sd_wait_voltage_stable_1(host);
+		/* Stop toggle SD clock */
+		err = rtsx_pci_write_register(pcr, SD_BUS_STAT,
+				0xFF, SD_CLK_FORCE_STOP);
 		if (err < 0)
 			goto out;
 	}
@@ -1250,20 +1219,55 @@ static int sdmmc_switch_voltage(struct mmc_host *mmc, struct mmc_ios *ios)
 	if (err < 0)
 		goto out;
 
-	if (voltage == OUTPUT_1V8) {
-		err = sd_wait_voltage_stable_2(host);
-		if (err < 0)
-			goto out;
-	}
-
 out:
 	/* Stop toggle SD clock in idle */
-	err = rtsx_pci_write_register(pcr, SD_BUS_STAT,
-			SD_CLK_TOGGLE_EN | SD_CLK_FORCE_STOP, 0);
+	if (err < 0)
+		rtsx_pci_write_register(pcr, SD_BUS_STAT,
+				SD_CLK_TOGGLE_EN | SD_CLK_FORCE_STOP, 0);
 
 	mutex_unlock(&pcr->pcr_mutex);
 
 	return err;
+}
+
+static int sdmmc_card_busy(struct mmc_host *mmc)
+{
+	struct realtek_pci_sdmmc *host = mmc_priv(mmc);
+	struct rtsx_pcr *pcr = host->pcr;
+	int err;
+	u8 stat;
+	u8 mask = SD_DAT3_STATUS | SD_DAT2_STATUS | SD_DAT1_STATUS
+	| SD_DAT0_STATUS;
+
+	mutex_lock(&pcr->pcr_mutex);
+
+	rtsx_pci_start_run(pcr);
+
+	err = rtsx_pci_write_register(pcr, SD_BUS_STAT,
+				      SD_CLK_TOGGLE_EN | SD_CLK_FORCE_STOP,
+			       SD_CLK_TOGGLE_EN);
+	if (err)
+		goto out;
+
+	mdelay(1);
+
+	err = rtsx_pci_read_register(pcr, SD_BUS_STAT, &stat);
+	if (err)
+		goto out;
+
+	err = rtsx_pci_write_register(pcr, SD_BUS_STAT,
+				      SD_CLK_TOGGLE_EN | SD_CLK_FORCE_STOP, 0);
+out:
+	mutex_unlock(&pcr->pcr_mutex);
+
+	if (err)
+		return err;
+
+	/* check if any pin between dat[0:3] is low */
+	if ((stat & mask) != mask)
+		return 1;
+	else
+		return 0;
 }
 
 static int sdmmc_execute_tuning(struct mmc_host *mmc, u32 opcode)
@@ -1317,6 +1321,59 @@ out:
 	return err;
 }
 
+static int sdmmc_init_sd_express(struct mmc_host *mmc, struct mmc_ios *ios)
+{
+	u32 relink_time;
+	struct realtek_pci_sdmmc *host = mmc_priv(mmc);
+	struct rtsx_pcr *pcr = host->pcr;
+
+	if (PCI_PID(pcr) == PID_5264) {
+		pcie_capability_clear_and_set_word(pcr->pci, PCI_EXP_LNKCTL2,
+				PCI_EXP_LNKCTL2_TLS, PCI_EXP_LNKCTL2_TLS_2_5GT);
+		pci_write_config_byte(pcr->pci, 0x80e, 0x02);
+		pcie_capability_clear_and_set_word(pcr->pci, PCI_EXP_LNKCTL2,
+				PCI_EXP_LNKCTL2_TLS, PCI_EXP_LNKCTL2_TLS_5_0GT);
+	}
+
+	/* Set relink_time for changing to PCIe card */
+	relink_time = 0x8FFF;
+
+	rtsx_pci_write_register(pcr, 0xFF01, 0xFF, relink_time);
+	rtsx_pci_write_register(pcr, 0xFF02, 0xFF, relink_time >> 8);
+	rtsx_pci_write_register(pcr, 0xFF03, 0x01, relink_time >> 16);
+
+	rtsx_pci_write_register(pcr, PETXCFG, 0x80, 0x80);
+	rtsx_pci_write_register(pcr, LDO_VCC_CFG0,
+		RTS5261_LDO1_OCP_THD_MASK,
+		pcr->option.sd_800mA_ocp_thd);
+
+	if (pcr->ops->disable_auto_blink)
+		pcr->ops->disable_auto_blink(pcr);
+
+	if (PCI_PID(pcr) == PID_5264) {
+		rtsx_pci_write_register(pcr, RTS5264_AUTOLOAD_CFG2,
+			RTS5264_CHIP_RST_N_SEL, RTS5264_CHIP_RST_N_SEL);
+		rtsx_pci_write_register(pcr, GPIO_CTL, 0x02, 0x00);
+	}
+
+	/* For PCIe/NVMe mode can't enter delink issue */
+	pcr->hw_param.interrupt_en &= ~(SD_INT_EN);
+	rtsx_pci_writel(pcr, RTSX_BIER, pcr->hw_param.interrupt_en);
+
+	rtsx_pci_write_register(pcr, RTS5260_AUTOLOAD_CFG4,
+		RTS5261_AUX_CLK_16M_EN, RTS5261_AUX_CLK_16M_EN);
+	rtsx_pci_write_register(pcr, RTS5261_FW_CFG0,
+		RTS5261_FW_ENTER_EXPRESS, RTS5261_FW_ENTER_EXPRESS);
+	rtsx_pci_write_register(pcr, RTS5261_FW_CFG1,
+		RTS5261_MCU_CLOCK_GATING, RTS5261_MCU_CLOCK_GATING);
+	rtsx_pci_write_register(pcr, RTS5261_FW_CFG1,
+		RTS5261_MCU_BUS_SEL_MASK | RTS5261_MCU_CLOCK_SEL_MASK
+		| RTS5261_DRIVER_ENABLE_FW,
+		RTS5261_MCU_CLOCK_SEL_16M | RTS5261_DRIVER_ENABLE_FW);
+	host->eject = true;
+	return 0;
+}
+
 static const struct mmc_host_ops realtek_pci_sdmmc_ops = {
 	.pre_req = sdmmc_pre_req,
 	.post_req = sdmmc_post_req,
@@ -1325,7 +1382,9 @@ static const struct mmc_host_ops realtek_pci_sdmmc_ops = {
 	.get_ro = sdmmc_get_ro,
 	.get_cd = sdmmc_get_cd,
 	.start_signal_voltage_switch = sdmmc_switch_voltage,
+	.card_busy = sdmmc_card_busy,
 	.execute_tuning = sdmmc_execute_tuning,
+	.init_sd_express = sdmmc_init_sd_express,
 };
 
 static void init_extra_caps(struct realtek_pci_sdmmc *host)
@@ -1345,19 +1404,27 @@ static void init_extra_caps(struct realtek_pci_sdmmc *host)
 		mmc->caps |= MMC_CAP_1_8V_DDR;
 	if (pcr->extra_caps & EXTRA_CAPS_MMC_8BIT)
 		mmc->caps |= MMC_CAP_8_BIT_DATA;
+	if (pcr->extra_caps & EXTRA_CAPS_NO_MMC)
+		mmc->caps2 |= MMC_CAP2_NO_MMC;
+	if (pcr->extra_caps & EXTRA_CAPS_SD_EXPRESS)
+		mmc->caps2 |= MMC_CAP2_SD_EXP | MMC_CAP2_SD_EXP_1_2V;
 }
 
 static void realtek_init_host(struct realtek_pci_sdmmc *host)
 {
 	struct mmc_host *mmc = host->mmc;
+	struct rtsx_pcr *pcr = host->pcr;
 
 	mmc->f_min = 250000;
 	mmc->f_max = 208000000;
 	mmc->ocr_avail = MMC_VDD_32_33 | MMC_VDD_33_34 | MMC_VDD_165_195;
 	mmc->caps = MMC_CAP_4_BIT_DATA | MMC_CAP_SD_HIGHSPEED |
 		MMC_CAP_MMC_HIGHSPEED | MMC_CAP_BUS_WIDTH_TEST |
-		MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25 | MMC_CAP_ERASE;
-	mmc->caps2 = MMC_CAP2_NO_PRESCAN_POWERUP | MMC_CAP2_FULL_PWR_CYCLE;
+		MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25;
+	if (pcr->rtd3_en)
+		mmc->caps = mmc->caps | MMC_CAP_AGGRESSIVE_PM;
+	mmc->caps2 = MMC_CAP2_NO_PRESCAN_POWERUP | MMC_CAP2_FULL_PWR_CYCLE |
+		MMC_CAP2_NO_SDIO;
 	mmc->max_current_330 = 400;
 	mmc->max_current_180 = 800;
 	mmc->ops = &realtek_pci_sdmmc_ops;
@@ -1385,6 +1452,7 @@ static int rtsx_pci_sdmmc_drv_probe(struct platform_device *pdev)
 	struct realtek_pci_sdmmc *host;
 	struct rtsx_pcr *pcr;
 	struct pcr_handle *handle = pdev->dev.platform_data;
+	int ret;
 
 	if (!handle)
 		return -ENXIO;
@@ -1395,16 +1463,17 @@ static int rtsx_pci_sdmmc_drv_probe(struct platform_device *pdev)
 
 	dev_dbg(&(pdev->dev), ": Realtek PCI-E SDMMC controller found\n");
 
-	mmc = mmc_alloc_host(sizeof(*host), &pdev->dev);
+	mmc = devm_mmc_alloc_host(&pdev->dev, sizeof(*host));
 	if (!mmc)
 		return -ENOMEM;
 
 	host = mmc_priv(mmc);
 	host->pcr = pcr;
+	mmc->ios.power_delay_ms = 5;
 	host->mmc = mmc;
 	host->pdev = pdev;
 	host->cookie = -1;
-	host->power_state = SDMMC_POWER_OFF;
+	host->prev_power_state = MMC_POWER_OFF;
 	INIT_WORK(&host->work, sd_request);
 	platform_set_drvdata(pdev, host);
 	pcr->slots[RTSX_SD_CARD].p_dev = pdev;
@@ -1414,19 +1483,28 @@ static int rtsx_pci_sdmmc_drv_probe(struct platform_device *pdev)
 
 	realtek_init_host(host);
 
-	mmc_add_host(mmc);
+	pm_runtime_no_callbacks(&pdev->dev);
+	pm_runtime_set_active(&pdev->dev);
+	pm_runtime_enable(&pdev->dev);
+	pm_runtime_set_autosuspend_delay(&pdev->dev, 200);
+	pm_runtime_mark_last_busy(&pdev->dev);
+	pm_runtime_use_autosuspend(&pdev->dev);
+
+	ret = mmc_add_host(mmc);
+	if (ret) {
+		pm_runtime_dont_use_autosuspend(&pdev->dev);
+		pm_runtime_disable(&pdev->dev);
+		return ret;
+	}
 
 	return 0;
 }
 
-static int rtsx_pci_sdmmc_drv_remove(struct platform_device *pdev)
+static void rtsx_pci_sdmmc_drv_remove(struct platform_device *pdev)
 {
 	struct realtek_pci_sdmmc *host = platform_get_drvdata(pdev);
 	struct rtsx_pcr *pcr;
 	struct mmc_host *mmc;
-
-	if (!host)
-		return 0;
 
 	pcr = host->pcr;
 	pcr->slots[RTSX_SD_CARD].p_dev = NULL;
@@ -1455,12 +1533,11 @@ static int rtsx_pci_sdmmc_drv_remove(struct platform_device *pdev)
 
 	flush_work(&host->work);
 
-	mmc_free_host(mmc);
+	pm_runtime_dont_use_autosuspend(&pdev->dev);
+	pm_runtime_disable(&pdev->dev);
 
 	dev_dbg(&(pdev->dev),
 		": Realtek PCI-E SDMMC controller has been removed\n");
-
-	return 0;
 }
 
 static const struct platform_device_id rtsx_pci_sdmmc_ids[] = {
@@ -1478,6 +1555,7 @@ static struct platform_driver rtsx_pci_sdmmc_driver = {
 	.id_table       = rtsx_pci_sdmmc_ids,
 	.driver		= {
 		.name	= DRV_NAME_RTSX_PCI_SDMMC,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	},
 };
 module_platform_driver(rtsx_pci_sdmmc_driver);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *    Lance ethernet driver for the MIPS processor based
  *      DECstation family
@@ -607,7 +608,7 @@ static int lance_rx(struct net_device *dev)
 			len = (*rds_ptr(rd, mblength, lp->type) & 0xfff) - 4;
 			skb = netdev_alloc_skb(dev, len + 2);
 
-			if (skb == 0) {
+			if (!skb) {
 				dev->stats.rx_dropped++;
 				*rds_ptr(rd, mblength, lp->type) = 0;
 				*rds_ptr(rd, rmd1, lp->type) =
@@ -725,8 +726,10 @@ out:
 static irqreturn_t lance_dma_merr_int(int irq, void *dev_id)
 {
 	struct net_device *dev = dev_id;
+	u64 ldp = ioasic_read(IO_REG_LANCE_DMA_P);
 
-	printk(KERN_ERR "%s: DMA error\n", dev->name);
+	pr_err_ratelimited("%s: DMA error at %#010llx\n", dev->name,
+			   (ldp & 0x1f) << 29 | (ldp & 0xffffffe0) >> 3);
 	return IRQ_HANDLED;
 }
 
@@ -812,7 +815,7 @@ static int lance_open(struct net_device *dev)
 	if (lp->dma_irq >= 0) {
 		unsigned long flags;
 
-		if (request_irq(lp->dma_irq, lance_dma_merr_int, IRQF_ONESHOT,
+		if (request_irq(lp->dma_irq, lance_dma_merr_int, 0,
 				"lance error", dev)) {
 			free_irq(dev->irq, dev);
 			printk("%s: Can't get DMA IRQ %d\n", dev->name,
@@ -841,7 +844,7 @@ static int lance_close(struct net_device *dev)
 	volatile struct lance_regs *ll = lp->ll;
 
 	netif_stop_queue(dev);
-	del_timer_sync(&lp->multicast_timer);
+	timer_delete_sync(&lp->multicast_timer);
 
 	/* Stop the card */
 	writereg(&ll->rap, LE_CSR0);
@@ -883,7 +886,7 @@ static inline int lance_reset(struct net_device *dev)
 	return status;
 }
 
-static void lance_tx_timeout(struct net_device *dev)
+static void lance_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct lance_private *lp = netdev_priv(dev);
 	volatile struct lance_regs *ll = lp->ll;
@@ -894,7 +897,7 @@ static void lance_tx_timeout(struct net_device *dev)
 	netif_wake_queue(dev);
 }
 
-static int lance_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t lance_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct lance_private *lp = netdev_priv(dev);
 	volatile struct lance_regs *ll = lp->ll;
@@ -936,7 +939,7 @@ static int lance_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	dev_kfree_skb(skb);
 
- 	return NETDEV_TX_OK;
+	return NETDEV_TX_OK;
 }
 
 static void lance_load_multicast(struct net_device *dev)
@@ -1003,7 +1006,7 @@ static void lance_set_multicast(struct net_device *dev)
 
 static void lance_set_multicast_retry(struct timer_list *t)
 {
-	struct lance_private *lp = from_timer(lp, t, multicast_timer);
+	struct lance_private *lp = timer_container_of(lp, t, multicast_timer);
 	struct net_device *dev = lp->dev;
 
 	lance_set_multicast(dev);
@@ -1031,6 +1034,8 @@ static int dec_lance_probe(struct device *bdev, const int type)
 	int i, ret;
 	unsigned long esar_base;
 	unsigned char *esar;
+	u8 addr[ETH_ALEN];
+	const char *desc;
 
 	if (dec_lance_debug && version_printed++ == 0)
 		printk(version);
@@ -1216,19 +1221,21 @@ static int dec_lance_probe(struct device *bdev, const int type)
 	 */
 	switch (type) {
 	case ASIC_LANCE:
-		printk("%s: IOASIC onboard LANCE", name);
+		desc = "IOASIC onboard LANCE";
 		break;
 	case PMAD_LANCE:
-		printk("%s: PMAD-AA", name);
+		desc = "PMAD-AA";
 		break;
 	case PMAX_LANCE:
-		printk("%s: PMAX onboard LANCE", name);
+		desc = "PMAX onboard LANCE";
 		break;
 	}
 	for (i = 0; i < 6; i++)
-		dev->dev_addr[i] = esar[i * 4];
+		addr[i] = esar[i * 4];
+	eth_hw_addr_set(dev, addr);
 
-	printk(", addr = %pM, irq = %d\n", dev->dev_addr, dev->irq);
+	printk("%s: %s, addr = %pM, irq = %d\n",
+	       name, desc, dev->dev_addr, dev->irq);
 
 	dev->netdev_ops = &lance_netdev_ops;
 	dev->watchdog_timeo = 5*HZ;

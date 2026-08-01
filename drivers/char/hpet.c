@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel & MS High Precision Event Timer Implementation.
  *
@@ -5,10 +6,6 @@
  *	Venki Pallipadi
  * (c) Copyright 2004 Hewlett-Packard Development Company, L.P.
  *	Bob Picco <robert.picco@hp.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/interrupt.h>
@@ -19,6 +16,7 @@
 #include <linux/ioport.h>
 #include <linux/fcntl.h>
 #include <linux/init.h>
+#include <linux/io-64-nonatomic-lo-hi.h>
 #include <linux/poll.h>
 #include <linux/mm.h>
 #include <linux/proc_fs.h>
@@ -36,6 +34,7 @@
 #include <linux/io.h>
 #include <linux/acpi.h>
 #include <linux/hpet.h>
+#include <linux/platform_device.h>
 #include <asm/current.h>
 #include <asm/irq.h>
 #include <asm/div64.h>
@@ -66,25 +65,6 @@
 static DEFINE_MUTEX(hpet_mutex); /* replaces BKL */
 static u32 hpet_nhpet, hpet_max_freq = HPET_USER_FREQ;
 
-/* This clocksource driver currently only works on ia64 */
-#ifdef CONFIG_IA64
-static void __iomem *hpet_mctr;
-
-static u64 read_hpet(struct clocksource *cs)
-{
-	return (u64)read_counter((void __iomem *)hpet_mctr);
-}
-
-static struct clocksource clocksource_hpet = {
-	.name		= "hpet",
-	.rating		= 250,
-	.read		= read_hpet,
-	.mask		= CLOCKSOURCE_MASK(64),
-	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
-};
-static struct clocksource *hpet_clocksource;
-#endif
-
 /* A lock for concurrent access by app and isr hpet activity. */
 static DEFINE_SPINLOCK(hpet_lock);
 
@@ -108,12 +88,11 @@ struct hpets {
 	struct hpets *hp_next;
 	struct hpet __iomem *hp_hpet;
 	unsigned long hp_hpet_phys;
-	struct clocksource *hp_clocksource;
 	unsigned long long hp_tick_freq;
 	unsigned long hp_delta;
 	unsigned int hp_ntimer;
 	unsigned int hp_which;
-	struct hpet_dev hp_dev[1];
+	struct hpet_dev hp_dev[] __counted_by(hp_ntimer);
 };
 
 static struct hpets *hpets;
@@ -122,22 +101,6 @@ static struct hpets *hpets;
 #define	HPET_IE			0x0002	/* interrupt enabled */
 #define	HPET_PERIODIC		0x0004
 #define	HPET_SHARED_IRQ		0x0008
-
-
-#ifndef readq
-static inline unsigned long long readq(void __iomem *addr)
-{
-	return readl(addr) | (((unsigned long long)readl(addr + 4)) << 32LL);
-}
-#endif
-
-#ifndef writeq
-static inline void writeq(unsigned long long v, void __iomem *addr)
-{
-	writel(v & 0xffffffff, addr);
-	writel(v >> 32, addr + 4);
-}
-#endif
 
 static irqreturn_t hpet_interrupt(int irq, void *data)
 {
@@ -159,12 +122,12 @@ static irqreturn_t hpet_interrupt(int irq, void *data)
 	 * This has the effect of treating non-periodic like periodic.
 	 */
 	if ((devp->hd_flags & (HPET_IE | HPET_PERIODIC)) == HPET_IE) {
-		unsigned long m, t, mc, base, k;
+		unsigned long t, mc, base, k;
 		struct hpet __iomem *hpet = devp->hd_hpet;
 		struct hpets *hpetp = devp->hd_hpets;
 
 		t = devp->hd_ireqfreq;
-		m = read_counter(&devp->hd_timer->hpet_compare);
+		read_counter(&devp->hd_timer->hpet_compare);
 		mc = read_counter(&hpet->hpet_mc);
 		/* The time for the next interrupt would logically be t + m,
 		 * however, if we are very unlucky and the interrupt is delayed
@@ -200,6 +163,7 @@ static irqreturn_t hpet_interrupt(int irq, void *data)
 
 static void hpet_timer_set_irq(struct hpet_dev *devp)
 {
+	const unsigned int nr_irqs = irq_get_nr_irqs();
 	unsigned long v;
 	int irq, gsi;
 	struct hpet_timer __iomem *timer;
@@ -271,9 +235,9 @@ static int hpet_open(struct inode *inode, struct file *file)
 
 	for (devp = NULL, hpetp = hpets; hpetp && !devp; hpetp = hpetp->hp_next)
 		for (i = 0; i < hpetp->hp_ntimer; i++)
-			if (hpetp->hp_dev[i].hd_flags & HPET_OPEN)
+			if (hpetp->hp_dev[i].hd_flags & HPET_OPEN) {
 				continue;
-			else {
+			} else {
 				devp = &hpetp->hp_dev[i];
 				break;
 			}
@@ -307,8 +271,13 @@ hpet_read(struct file *file, char __user *buf, size_t count, loff_t * ppos)
 	if (!devp->hd_ireqfreq)
 		return -EIO;
 
-	if (count < sizeof(unsigned long))
-		return -EINVAL;
+	if (in_compat_syscall()) {
+		if (count < sizeof(compat_ulong_t))
+			return -EINVAL;
+	} else {
+		if (count < sizeof(unsigned long))
+			return -EINVAL;
+	}
 
 	add_wait_queue(&devp->hd_waitqueue, &wait);
 
@@ -320,9 +289,9 @@ hpet_read(struct file *file, char __user *buf, size_t count, loff_t * ppos)
 		devp->hd_irqdata = 0;
 		spin_unlock_irq(&hpet_lock);
 
-		if (data)
+		if (data) {
 			break;
-		else if (file->f_flags & O_NONBLOCK) {
+		} else if (file->f_flags & O_NONBLOCK) {
 			retval = -EAGAIN;
 			goto out;
 		} else if (signal_pending(current)) {
@@ -332,9 +301,16 @@ hpet_read(struct file *file, char __user *buf, size_t count, loff_t * ppos)
 		schedule();
 	}
 
-	retval = put_user(data, (unsigned long __user *)buf);
-	if (!retval)
-		retval = sizeof(unsigned long);
+	if (in_compat_syscall()) {
+		retval = put_user(data, (compat_ulong_t __user *)buf);
+		if (!retval)
+			retval = sizeof(compat_ulong_t);
+	} else {
+		retval = put_user(data, (unsigned long __user *)buf);
+		if (!retval)
+			retval = sizeof(unsigned long);
+	}
+
 out:
 	__set_current_state(TASK_RUNNING);
 	remove_wait_queue(&devp->hd_waitqueue, &wait);
@@ -377,10 +353,11 @@ static __init int hpet_mmap_enable(char *str)
 	pr_info("HPET mmap %s\n", hpet_mmap_enabled ? "enabled" : "disabled");
 	return 1;
 }
-__setup("hpet_mmap", hpet_mmap_enable);
+__setup("hpet_mmap=", hpet_mmap_enable);
 
-static int hpet_mmap(struct file *file, struct vm_area_struct *vma)
+static int hpet_mmap_prepare(struct vm_area_desc *desc)
 {
+	struct file *file = desc->file;
 	struct hpet_dev *devp;
 	unsigned long addr;
 
@@ -393,11 +370,12 @@ static int hpet_mmap(struct file *file, struct vm_area_struct *vma)
 	if (addr & (PAGE_SIZE - 1))
 		return -ENOSYS;
 
-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
-	return vm_iomap_memory(vma, addr, PAGE_SIZE);
+	desc->page_prot = pgprot_noncached(desc->page_prot);
+	mmap_action_simple_ioremap(desc, addr, PAGE_SIZE);
+	return 0;
 }
 #else
-static int hpet_mmap(struct file *file, struct vm_area_struct *vma)
+static int hpet_mmap_prepare(struct vm_area_desc *desc)
 {
 	return -ENOSYS;
 }
@@ -570,8 +548,7 @@ static inline unsigned long hpet_time_div(struct hpets *hpets,
 	unsigned long long m;
 
 	m = hpets->hp_tick_freq + (dis >> 1);
-	do_div(m, dis);
-	return (unsigned long)m;
+	return div64_ul(m, dis);
 }
 
 static int
@@ -579,7 +556,6 @@ hpet_ioctl_common(struct hpet_dev *devp, unsigned int cmd, unsigned long arg,
 		  struct hpet_info *info)
 {
 	struct hpet_timer __iomem *timer;
-	struct hpet __iomem *hpet;
 	struct hpets *hpetp;
 	int err;
 	unsigned long v;
@@ -591,7 +567,6 @@ hpet_ioctl_common(struct hpet_dev *devp, unsigned int cmd, unsigned long arg,
 	case HPET_DPI:
 	case HPET_IRQFREQ:
 		timer = devp->hd_timer;
-		hpet = devp->hd_hpet;
 		hpetp = devp->hd_hpets;
 		break;
 	case HPET_IE_ON:
@@ -692,11 +667,23 @@ struct compat_hpet_info {
 	unsigned short hi_timer;
 };
 
+/* 32-bit types would lead to different command codes which should be
+ * translated into 64-bit ones before passed to hpet_ioctl_common
+ */
+#define COMPAT_HPET_INFO       _IOR('h', 0x03, struct compat_hpet_info)
+#define COMPAT_HPET_IRQFREQ    _IOW('h', 0x6, compat_ulong_t)
+
 static long
 hpet_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct hpet_info info;
 	int err;
+
+	if (cmd == COMPAT_HPET_INFO)
+		cmd = HPET_INFO;
+
+	if (cmd == COMPAT_HPET_IRQFREQ)
+		cmd = HPET_IRQFREQ;
 
 	mutex_lock(&hpet_mutex);
 	err = hpet_ioctl_common(file->private_data, cmd, arg, &info);
@@ -717,7 +704,6 @@ hpet_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 static const struct file_operations hpet_fops = {
 	.owner = THIS_MODULE,
-	.llseek = no_llseek,
 	.read = hpet_read,
 	.poll = hpet_poll,
 	.unlocked_ioctl = hpet_ioctl,
@@ -727,7 +713,7 @@ static const struct file_operations hpet_fops = {
 	.open = hpet_open,
 	.release = hpet_release,
 	.fasync = hpet_fasync,
-	.mmap = hpet_mmap,
+	.mmap_prepare = hpet_mmap_prepare,
 };
 
 static int hpet_is_known(struct hpet_data *hdp)
@@ -741,7 +727,7 @@ static int hpet_is_known(struct hpet_data *hdp)
 	return 0;
 }
 
-static struct ctl_table hpet_table[] = {
+static const struct ctl_table hpet_table[] = {
 	{
 	 .procname = "max-user-freq",
 	 .data = &hpet_max_freq,
@@ -749,27 +735,6 @@ static struct ctl_table hpet_table[] = {
 	 .mode = 0644,
 	 .proc_handler = proc_dointvec,
 	 },
-	{}
-};
-
-static struct ctl_table hpet_root[] = {
-	{
-	 .procname = "hpet",
-	 .maxlen = 0,
-	 .mode = 0555,
-	 .child = hpet_table,
-	 },
-	{}
-};
-
-static struct ctl_table dev_root[] = {
-	{
-	 .procname = "dev",
-	 .maxlen = 0,
-	 .mode = 0555,
-	 .child = hpet_root,
-	 },
-	{}
 };
 
 static struct ctl_table_header *sysctl_header;
@@ -844,10 +809,9 @@ int hpet_alloc(struct hpet_data *hdp)
 	struct hpet_dev *devp;
 	u32 i, ntimer;
 	struct hpets *hpetp;
-	size_t siz;
 	struct hpet __iomem *hpet;
 	static struct hpets *last;
-	unsigned long period;
+	u32 period;
 	unsigned long long temp;
 	u32 remainder;
 
@@ -862,10 +826,7 @@ int hpet_alloc(struct hpet_data *hdp)
 		return 0;
 	}
 
-	siz = sizeof(struct hpets) + ((hdp->hd_nirqs - 1) *
-				      sizeof(struct hpet_dev));
-
-	hpetp = kzalloc(siz, GFP_KERNEL);
+	hpetp = kzalloc_flex(*hpetp, hp_dev, hdp->hd_nirqs);
 
 	if (!hpetp)
 		return -ENOMEM;
@@ -906,11 +867,11 @@ int hpet_alloc(struct hpet_data *hdp)
 	do_div(temp, period);
 	hpetp->hp_tick_freq = temp; /* ticks per second */
 
-	printk(KERN_INFO "hpet%d: at MMIO 0x%lx, IRQ%s",
+	printk(KERN_INFO "hpet%u: at MMIO 0x%lx, IRQ%s",
 		hpetp->hp_which, hdp->hd_phys_address,
-		hpetp->hp_ntimer > 1 ? "s" : "");
+		str_plural(hpetp->hp_ntimer));
 	for (i = 0; i < hpetp->hp_ntimer; i++)
-		printk(KERN_CONT "%s %d", i > 0 ? "," : "", hdp->hd_irq[i]);
+		printk(KERN_CONT "%s %u", i > 0 ? "," : "", hdp->hd_irq[i]);
 	printk(KERN_CONT "\n");
 
 	temp = hpetp->hp_tick_freq;
@@ -951,17 +912,6 @@ int hpet_alloc(struct hpet_data *hdp)
 
 	hpetp->hp_delta = hpet_calibrate(hpetp);
 
-/* This clocksource driver currently only works on ia64 */
-#ifdef CONFIG_IA64
-	if (!hpet_clocksource) {
-		hpet_mctr = (void __iomem *)&hpetp->hp_hpet->hpet_mc;
-		clocksource_hpet.archdata.fsys_mmio = hpet_mctr;
-		clocksource_register_hz(&clocksource_hpet, hpetp->hp_tick_freq);
-		hpetp->hp_clocksource = &clocksource_hpet;
-		hpet_clocksource = &clocksource_hpet;
-	}
-#endif
-
 	return 0;
 }
 
@@ -978,6 +928,8 @@ static acpi_status hpet_resources(struct acpi_resource *res, void *data)
 	if (ACPI_SUCCESS(status)) {
 		hdp->hd_phys_address = addr.address.minimum;
 		hdp->hd_address = ioremap(addr.address.minimum, addr.address.address_length);
+		if (!hdp->hd_address)
+			return AE_ERROR;
 
 		if (hpet_is_known(hdp)) {
 			iounmap(hdp->hd_address);
@@ -991,6 +943,8 @@ static acpi_status hpet_resources(struct acpi_resource *res, void *data)
 		hdp->hd_phys_address = fixmem32->address;
 		hdp->hd_address = ioremap(fixmem32->address,
 						HPET_RANGE_SIZE);
+		if (!hdp->hd_address)
+			return AE_ERROR;
 
 		if (hpet_is_known(hdp)) {
 			iounmap(hdp->hd_address);
@@ -1007,7 +961,8 @@ static acpi_status hpet_resources(struct acpi_resource *res, void *data)
 				break;
 
 			irq = acpi_register_gsi(NULL, irqp->interrupts[i],
-				      irqp->triggering, irqp->polarity);
+						irqp->triggering,
+						irqp->polarity);
 			if (irq < 0)
 				return AE_ERROR;
 
@@ -1019,10 +974,15 @@ static acpi_status hpet_resources(struct acpi_resource *res, void *data)
 	return AE_OK;
 }
 
-static int hpet_acpi_add(struct acpi_device *device)
+static int hpet_acpi_probe(struct platform_device *pdev)
 {
+	struct acpi_device *device;
 	acpi_status result;
 	struct hpet_data data;
+
+	device = ACPI_COMPANION(&pdev->dev);
+	if (!device)
+		return -ENODEV;
 
 	memset(&data, 0, sizeof(data));
 
@@ -1048,12 +1008,12 @@ static const struct acpi_device_id hpet_device_ids[] = {
 	{"", 0},
 };
 
-static struct acpi_driver hpet_acpi_driver = {
-	.name = "hpet",
-	.ids = hpet_device_ids,
-	.ops = {
-		.add = hpet_acpi_add,
-		},
+static struct platform_driver hpet_acpi_driver = {
+	.probe = hpet_acpi_probe,
+	.driver = {
+		.name = "hpet_acpi",
+		.acpi_match_table = hpet_device_ids,
+	},
 };
 
 static struct miscdevice hpet_misc = { HPET_MINOR, "hpet", &hpet_fops };
@@ -1066,12 +1026,11 @@ static int __init hpet_init(void)
 	if (result < 0)
 		return -ENODEV;
 
-	sysctl_header = register_sysctl_table(dev_root);
+	sysctl_header = register_sysctl("dev/hpet", hpet_table);
 
-	result = acpi_bus_register_driver(&hpet_acpi_driver);
+	result = platform_driver_register(&hpet_acpi_driver);
 	if (result < 0) {
-		if (sysctl_header)
-			unregister_sysctl_table(sysctl_header);
+		unregister_sysctl_table(sysctl_header);
 		misc_deregister(&hpet_misc);
 		return result;
 	}

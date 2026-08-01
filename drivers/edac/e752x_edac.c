@@ -7,7 +7,7 @@
  * Implement support for the e7520, E7525, e7320 and i3100 memory controllers.
  *
  * Datasheets:
- *	http://www.intel.in/content/www/in/en/chipsets/e7525-memory-controller-hub-datasheet.html
+ *	https://www.intel.in/content/www/in/en/chipsets/e7525-memory-controller-hub-datasheet.html
  *	ftp://download.intel.com/design/intarch/datashts/31345803.pdf
  *
  * Written by Tom Zimmerman
@@ -980,7 +980,6 @@ static void e752x_check(struct mem_ctl_info *mci)
 {
 	struct e752x_error_info info;
 
-	edac_dbg(3, "\n");
 	e752x_get_error_info(mci, &info);
 	e752x_process_error_info(mci, &info, 1);
 }
@@ -1415,20 +1414,20 @@ static void e752x_remove_one(struct pci_dev *pdev)
 
 static const struct pci_device_id e752x_pci_tbl[] = {
 	{
-	 PCI_VEND_DEV(INTEL, 7520_0), PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	 E7520},
-	{
-	 PCI_VEND_DEV(INTEL, 7525_0), PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	 E7525},
-	{
-	 PCI_VEND_DEV(INTEL, 7320_0), PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	 E7320},
-	{
-	 PCI_VEND_DEV(INTEL, 3100_0), PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	 I3100},
-	{
-	 0,
-	 }			/* 0 terminated list. */
+		PCI_VEND_DEV(INTEL, 7520_0),
+		.driver_data = E7520,
+	}, {
+		PCI_VEND_DEV(INTEL, 7525_0),
+		.driver_data = E7525,
+	}, {
+		PCI_VEND_DEV(INTEL, 7320_0),
+		.driver_data = E7320,
+	}, {
+		PCI_VEND_DEV(INTEL, 3100_0),
+		.driver_data = I3100,
+	}, {
+		/* 0 terminated list. */
+	}
 };
 
 MODULE_DEVICE_TABLE(pci, e752x_pci_tbl);
@@ -1446,8 +1445,8 @@ static int __init e752x_init(void)
 
 	edac_dbg(3, "\n");
 
-       /* Ensure that the OPSTATE is set correctly for POLL or NMI */
-       opstate_init();
+	/* Ensure that the OPSTATE is set correctly for POLL or NMI */
+	opstate_init();
 
 	pci_rc = pci_register_driver(&e752x_driver);
 	return (pci_rc < 0) ? pci_rc : 0;
@@ -1463,7 +1462,7 @@ module_init(e752x_init);
 module_exit(e752x_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Linux Networx (http://lnxi.com) Tom Zimmerman\n");
+MODULE_AUTHOR("Linux Networx (http://lnxi.com) Tom Zimmerman");
 MODULE_DESCRIPTION("MC support for Intel e752x/3100 memory controllers");
 
 module_param(force_function_unhide, int, 0444);

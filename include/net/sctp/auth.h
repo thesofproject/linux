@@ -1,23 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* SCTP kernel implementation
  * (C) Copyright 2007 Hewlett-Packard Development Company, L.P.
  *
  * This file is part of the SCTP kernel implementation
- *
- * This SCTP implementation is free software;
- * you can redistribute it and/or modify it under the terms of
- * the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * This SCTP implementation is distributed in the hope that it
- * will be useful, but WITHOUT ANY WARRANTY; without even the implied
- *                 ************************
- * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with GNU CC; see the file COPYING.  If not, see
- * <http://www.gnu.org/licenses/>.
  *
  * Please send any bug reports or fixes you make to the
  * email address(es):
@@ -37,16 +22,11 @@ struct sctp_endpoint;
 struct sctp_association;
 struct sctp_authkey;
 struct sctp_hmacalgo;
-struct crypto_shash;
 
-/*
- * Define a generic struct that will hold all the info
- * necessary for an HMAC transform
- */
+/* Defines an HMAC algorithm supported by SCTP chunk authentication */
 struct sctp_hmac {
-	__u16 hmac_id;		/* one of the above ids */
-	char *hmac_name;	/* name for loading */
-	__u16 hmac_len;		/* length of the signature */
+	__u16 hmac_id;		/* one of SCTP_AUTH_HMAC_ID_* */
+	__u16 hmac_len;		/* length of the HMAC value in bytes */
 };
 
 /* This is generic structure that containst authentication bytes used
@@ -92,10 +72,9 @@ struct sctp_shared_key *sctp_auth_get_shkey(
 int sctp_auth_asoc_copy_shkeys(const struct sctp_endpoint *ep,
 				struct sctp_association *asoc,
 				gfp_t gfp);
-int sctp_auth_init_hmacs(struct sctp_endpoint *ep, gfp_t gfp);
-void sctp_auth_destroy_hmacs(struct crypto_shash *auth_hmacs[]);
-struct sctp_hmac *sctp_auth_get_hmac(__u16 hmac_id);
-struct sctp_hmac *sctp_auth_asoc_get_hmac(const struct sctp_association *asoc);
+const struct sctp_hmac *sctp_auth_get_hmac(__u16 hmac_id);
+const struct sctp_hmac *
+sctp_auth_asoc_get_hmac(const struct sctp_association *asoc);
 void sctp_auth_asoc_set_default_hmac(struct sctp_association *asoc,
 				     struct sctp_hmac_algo_param *hmacs);
 int sctp_auth_asoc_verify_hmac_id(const struct sctp_association *asoc,
@@ -122,5 +101,7 @@ int sctp_auth_del_key_id(struct sctp_endpoint *ep,
 			 struct sctp_association *asoc, __u16 key_id);
 int sctp_auth_deact_key_id(struct sctp_endpoint *ep,
 			   struct sctp_association *asoc, __u16 key_id);
+int sctp_auth_init(struct sctp_endpoint *ep, gfp_t gfp);
+void sctp_auth_free(struct sctp_endpoint *ep);
 
 #endif

@@ -23,6 +23,7 @@
  *
  */
 #include "priv.h"
+#include "gk20a_devfreq.h"
 #include "gk20a.h"
 
 #include <core/tegra.h>
@@ -589,6 +590,10 @@ gk20a_clk_init(struct nvkm_clk *base)
 		return ret;
 	}
 
+	ret = gk20a_devfreq_init(base, &clk->devfreq);
+	if (ret)
+		return ret;
+
 	return 0;
 }
 
@@ -610,10 +615,9 @@ gk20a_clk = {
 };
 
 int
-gk20a_clk_ctor(struct nvkm_device *device, int index,
-		const struct nvkm_clk_func *func,
-		const struct gk20a_clk_pllg_params *params,
-		struct gk20a_clk *clk)
+gk20a_clk_ctor(struct nvkm_device *device, enum nvkm_subdev_type type, int inst,
+	       const struct nvkm_clk_func *func, const struct gk20a_clk_pllg_params *params,
+	       struct gk20a_clk *clk)
 {
 	struct nvkm_device_tegra *tdev = device->func->tegra(device);
 	int ret;
@@ -628,7 +632,7 @@ gk20a_clk_ctor(struct nvkm_device *device, int index,
 	clk->params = params;
 	clk->parent_rate = clk_get_rate(tdev->clk);
 
-	ret = nvkm_clk_ctor(func, device, index, true, &clk->base);
+	ret = nvkm_clk_ctor(func, device, type, inst, true, &clk->base);
 	if (ret)
 		return ret;
 
@@ -639,21 +643,20 @@ gk20a_clk_ctor(struct nvkm_device *device, int index,
 }
 
 int
-gk20a_clk_new(struct nvkm_device *device, int index, struct nvkm_clk **pclk)
+gk20a_clk_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst,
+	      struct nvkm_clk **pclk)
 {
 	struct gk20a_clk *clk;
 	int ret;
 
-	clk = kzalloc(sizeof(*clk), GFP_KERNEL);
+	clk = kzalloc_obj(*clk);
 	if (!clk)
 		return -ENOMEM;
 	*pclk = &clk->base;
 
-	ret = gk20a_clk_ctor(device, index, &gk20a_clk, &gk20a_pllg_params,
-			      clk);
+	ret = gk20a_clk_ctor(device, type, inst, &gk20a_clk, &gk20a_pllg_params, clk);
 
 	clk->pl_to_div = pl_to_div;
 	clk->div_to_pl = div_to_pl;
-
 	return ret;
 }

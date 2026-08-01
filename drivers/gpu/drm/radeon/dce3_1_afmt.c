@@ -21,7 +21,8 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 #include <linux/hdmi.h>
-#include <drm/drmP.h>
+#include <drm/drm_edid.h>
+
 #include "radeon.h"
 #include "radeon_asic.h"
 #include "radeon_audio.h"

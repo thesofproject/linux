@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  HID driver for some cypress "special" devices
  *
@@ -9,10 +10,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 #include <linux/device.h>
@@ -26,18 +23,20 @@
 #define CP_2WHEEL_MOUSE_HACK		0x02
 #define CP_2WHEEL_MOUSE_HACK_ON		0x04
 
+#define VA_INVAL_LOGICAL_BOUNDARY	0x08
+
+struct cp_device {
+	unsigned long quirks;
+};
+
 /*
  * Some USB barcode readers from cypress have usage min and usage max in
  * the wrong order
  */
-static __u8 *cp_report_fixup(struct hid_device *hdev, __u8 *rdesc,
+static __u8 *cp_rdesc_fixup(struct hid_device *hdev, __u8 *rdesc,
 		unsigned int *rsize)
 {
-	unsigned long quirks = (unsigned long)hid_get_drvdata(hdev);
 	unsigned int i;
-
-	if (!(quirks & CP_RDESC_SWAPPED_MIN_MAX))
-		return rdesc;
 
 	if (*rsize < 4)
 		return rdesc;
@@ -51,11 +50,47 @@ static __u8 *cp_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 	return rdesc;
 }
 
+static __u8 *va_logical_boundary_fixup(struct hid_device *hdev, __u8 *rdesc,
+		unsigned int *rsize)
+{
+	/*
+	 * Varmilo VA104M (with VID Cypress and device ID 07B1) incorrectly
+	 * reports Logical Minimum of its Consumer Control device as 572
+	 * (0x02 0x3c). Fix this by setting its Logical Minimum to zero.
+	 */
+	if (*rsize == 25 &&
+			rdesc[0] == 0x05 && rdesc[1] == 0x0c &&
+			rdesc[2] == 0x09 && rdesc[3] == 0x01 &&
+			rdesc[6] == 0x19 && rdesc[7] == 0x00 &&
+			rdesc[11] == 0x16 && rdesc[12] == 0x3c && rdesc[13] == 0x02) {
+		hid_info(hdev,
+			 "fixing up varmilo VA104M consumer control report descriptor\n");
+		rdesc[12] = 0x00;
+		rdesc[13] = 0x00;
+	}
+	return rdesc;
+}
+
+static const __u8 *cp_report_fixup(struct hid_device *hdev, __u8 *rdesc,
+		unsigned int *rsize)
+{
+	const struct cp_device *cp_device = hid_get_drvdata(hdev);
+	unsigned long quirks = cp_device->quirks;
+
+	if (quirks & CP_RDESC_SWAPPED_MIN_MAX)
+		rdesc = cp_rdesc_fixup(hdev, rdesc, rsize);
+	if (quirks & VA_INVAL_LOGICAL_BOUNDARY)
+		rdesc = va_logical_boundary_fixup(hdev, rdesc, rsize);
+
+	return rdesc;
+}
+
 static int cp_input_mapped(struct hid_device *hdev, struct hid_input *hi,
 		struct hid_field *field, struct hid_usage *usage,
 		unsigned long **bit, int *max)
 {
-	unsigned long quirks = (unsigned long)hid_get_drvdata(hdev);
+	const struct cp_device *cp_device = hid_get_drvdata(hdev);
+	unsigned long quirks = cp_device->quirks;
 
 	if (!(quirks & CP_2WHEEL_MOUSE_HACK))
 		return 0;
@@ -71,22 +106,21 @@ static int cp_input_mapped(struct hid_device *hdev, struct hid_input *hi,
 static int cp_event(struct hid_device *hdev, struct hid_field *field,
 		struct hid_usage *usage, __s32 value)
 {
-	unsigned long quirks = (unsigned long)hid_get_drvdata(hdev);
+	struct cp_device *cp_device = hid_get_drvdata(hdev);
 
 	if (!(hdev->claimed & HID_CLAIMED_INPUT) || !field->hidinput ||
-			!usage->type || !(quirks & CP_2WHEEL_MOUSE_HACK))
+			!usage->type || !(cp_device->quirks & CP_2WHEEL_MOUSE_HACK))
 		return 0;
 
 	if (usage->hid == 0x00090005) {
 		if (value)
-			quirks |=  CP_2WHEEL_MOUSE_HACK_ON;
+			cp_device->quirks |= CP_2WHEEL_MOUSE_HACK_ON;
 		else
-			quirks &= ~CP_2WHEEL_MOUSE_HACK_ON;
-		hid_set_drvdata(hdev, (void *)quirks);
+			cp_device->quirks &= ~CP_2WHEEL_MOUSE_HACK_ON;
 		return 1;
 	}
 
-	if (usage->code == REL_WHEEL && (quirks & CP_2WHEEL_MOUSE_HACK_ON)) {
+	if (usage->code == REL_WHEEL && (cp_device->quirks & CP_2WHEEL_MOUSE_HACK_ON)) {
 		struct input_dev *input = field->hidinput->input;
 
 		input_event(input, usage->type, REL_HWHEEL, value);
@@ -98,10 +132,17 @@ static int cp_event(struct hid_device *hdev, struct hid_field *field,
 
 static int cp_probe(struct hid_device *hdev, const struct hid_device_id *id)
 {
-	unsigned long quirks = id->driver_data;
 	int ret;
+	struct cp_device *cp_device;
 
-	hid_set_drvdata(hdev, (void *)quirks);
+	cp_device = devm_kzalloc(&hdev->dev, sizeof(*cp_device), GFP_KERNEL);
+
+	if (!cp_device)
+		return -ENOMEM;
+
+	cp_device->quirks = id->driver_data;
+
+	hid_set_drvdata(hdev, cp_device);
 
 	ret = hid_parse(hdev);
 	if (ret) {
@@ -131,6 +172,8 @@ static const struct hid_device_id cp_devices[] = {
 		.driver_data = CP_RDESC_SWAPPED_MIN_MAX },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_CYPRESS, USB_DEVICE_ID_CYPRESS_MOUSE),
 		.driver_data = CP_2WHEEL_MOUSE_HACK },
+	{ HID_USB_DEVICE(USB_VENDOR_ID_CYPRESS, USB_DEVICE_ID_CYPRESS_VARMILO_VA104M_07B1),
+		.driver_data = VA_INVAL_LOGICAL_BOUNDARY },
 	{ }
 };
 MODULE_DEVICE_TABLE(hid, cp_devices);
@@ -145,4 +188,5 @@ static struct hid_driver cp_driver = {
 };
 module_hid_driver(cp_driver);
 
+MODULE_DESCRIPTION("HID driver for some cypress \"special\" devices");
 MODULE_LICENSE("GPL");

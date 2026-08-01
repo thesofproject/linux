@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) STMicroelectronics SA 2015
  * Authors: Arnaud Pouliquen <arnaud.pouliquen@st.com>
  *          for STMicroelectronics.
- * License terms:  GNU General Public License (GPL), version 2
  */
 
 #include <linux/io.h>
@@ -51,14 +51,11 @@ static const struct reg_default stih407_sas_reg_defaults[] = {
 struct sti_dac_audio {
 	struct regmap *regmap;
 	struct regmap *virt_regmap;
-	struct regmap_field  **field;
-	struct reset_control *rst;
 	int mclk;
 };
 
 struct sti_spdif_audio {
 	struct regmap *regmap;
-	struct regmap_field  **field;
 	int mclk;
 };
 
@@ -66,10 +63,6 @@ struct sti_spdif_audio {
 struct sti_sas_dev_data {
 	const struct regmap_config *regmap;
 	const struct snd_soc_dai_ops *dac_ops;  /* DAC function callbacks */
-	const struct snd_soc_dapm_widget *dapm_widgets; /* dapms declaration */
-	const int num_dapm_widgets; /* dapms declaration */
-	const struct snd_soc_dapm_route *dapm_routes; /* route declaration */
-	const int num_dapm_routes; /* route declaration */
 };
 
 /* driver data structure */
@@ -99,11 +92,8 @@ static int sti_sas_write_reg(void *context, unsigned int reg,
 			     unsigned int value)
 {
 	struct sti_sas_data *drvdata = context;
-	int status;
 
-	status = regmap_write(drvdata->dac.regmap, reg, value);
-
-	return status;
+	return regmap_write(drvdata->dac.regmap, reg, value);
 }
 
 static int  sti_sas_init_sas_registers(struct snd_soc_component *component,
@@ -157,10 +147,10 @@ static int  sti_sas_init_sas_registers(struct snd_soc_component *component,
 static int sti_sas_dac_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
 	/* Sanity check only */
-	if ((fmt & SND_SOC_DAIFMT_MASTER_MASK) != SND_SOC_DAIFMT_CBS_CFS) {
+	if ((fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) != SND_SOC_DAIFMT_CBC_CFC) {
 		dev_err(dai->component->dev,
-			"%s: ERROR: Unsupporter master mask 0x%x\n",
-			__func__, fmt & SND_SOC_DAIFMT_MASTER_MASK);
+			"%s: ERROR: Unsupported clocking 0x%x\n",
+			__func__, fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK);
 		return -EINVAL;
 	}
 
@@ -202,10 +192,10 @@ static int stih407_sas_dac_mute(struct snd_soc_dai *dai, int mute, int stream)
 static int sti_sas_spdif_set_fmt(struct snd_soc_dai *dai,
 				 unsigned int fmt)
 {
-	if ((fmt & SND_SOC_DAIFMT_MASTER_MASK) != SND_SOC_DAIFMT_CBS_CFS) {
+	if ((fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) != SND_SOC_DAIFMT_CBC_CFC) {
 		dev_err(dai->component->dev,
-			"%s: ERROR: Unsupporter master mask 0x%x\n",
-			__func__, fmt & SND_SOC_DAIFMT_MASTER_MASK);
+			"%s: ERROR: Unsupported clocking mask 0x%x\n",
+			__func__, fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK);
 		return -EINVAL;
 	}
 
@@ -322,7 +312,7 @@ static const struct regmap_config stih407_sas_regmap = {
 	.reg_defaults = stih407_sas_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(stih407_sas_reg_defaults),
 	.volatile_reg = sti_sas_volatile_register,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.reg_read = sti_sas_read_reg,
 	.reg_write = sti_sas_write_reg,
 };
@@ -330,10 +320,6 @@ static const struct regmap_config stih407_sas_regmap = {
 static const struct sti_sas_dev_data stih407_data = {
 	.regmap = &stih407_sas_regmap,
 	.dac_ops = &stih407_dac_ops,
-	.dapm_widgets = stih407_sas_dapm_widgets,
-	.num_dapm_widgets = ARRAY_SIZE(stih407_sas_dapm_widgets),
-	.dapm_routes =	stih407_sas_route,
-	.num_dapm_routes = ARRAY_SIZE(stih407_sas_route),
 };
 
 static struct snd_soc_dai_driver sti_sas_dai[] = {
@@ -388,20 +374,20 @@ static int sti_sas_resume(struct snd_soc_component *component)
 static int sti_sas_component_probe(struct snd_soc_component *component)
 {
 	struct sti_sas_data *drvdata = dev_get_drvdata(component->dev);
-	int ret;
 
-	ret = sti_sas_init_sas_registers(component, drvdata);
-
-	return ret;
+	return sti_sas_init_sas_registers(component, drvdata);
 }
 
-static struct snd_soc_component_driver sti_sas_driver = {
+static const struct snd_soc_component_driver sti_sas_driver = {
 	.probe			= sti_sas_component_probe,
 	.resume			= sti_sas_resume,
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
+	.dapm_widgets		= stih407_sas_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(stih407_sas_dapm_widgets),
+	.dapm_routes		= stih407_sas_route,
+	.num_dapm_routes	= ARRAY_SIZE(stih407_sas_route),
 };
 
 static const struct of_device_id sti_sas_dev_match[] = {
@@ -411,6 +397,7 @@ static const struct of_device_id sti_sas_dev_match[] = {
 	},
 	{},
 };
+MODULE_DEVICE_TABLE(of, sti_sas_dev_match);
 
 static int sti_sas_driver_probe(struct platform_device *pdev)
 {
@@ -454,13 +441,6 @@ static int sti_sas_driver_probe(struct platform_device *pdev)
 	drvdata->spdif.regmap = drvdata->dac.regmap;
 
 	sti_sas_dai[STI_SAS_DAI_ANALOG_OUT].ops = drvdata->dev_data->dac_ops;
-
-	/* Set dapms*/
-	sti_sas_driver.dapm_widgets = drvdata->dev_data->dapm_widgets;
-	sti_sas_driver.num_dapm_widgets = drvdata->dev_data->num_dapm_widgets;
-
-	sti_sas_driver.dapm_routes = drvdata->dev_data->dapm_routes;
-	sti_sas_driver.num_dapm_routes = drvdata->dev_data->num_dapm_routes;
 
 	/* Store context */
 	dev_set_drvdata(&pdev->dev, drvdata);

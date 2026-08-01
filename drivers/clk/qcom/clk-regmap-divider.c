@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014, The Linux Foundation. All rights reserved.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -23,8 +15,8 @@ static inline struct clk_regmap_div *to_clk_regmap_div(struct clk_hw *hw)
 	return container_of(to_clk_regmap(hw), struct clk_regmap_div, clkr);
 }
 
-static long div_round_ro_rate(struct clk_hw *hw, unsigned long rate,
-			      unsigned long *prate)
+static int div_ro_determine_rate(struct clk_hw *hw,
+				 struct clk_rate_request *req)
 {
 	struct clk_regmap_div *divider = to_clk_regmap_div(hw);
 	struct clk_regmap *clkr = &divider->clkr;
@@ -34,17 +26,16 @@ static long div_round_ro_rate(struct clk_hw *hw, unsigned long rate,
 	val >>= divider->shift;
 	val &= BIT(divider->width) - 1;
 
-	return divider_ro_round_rate(hw, rate, prate, NULL, divider->width,
-				     CLK_DIVIDER_ROUND_CLOSEST, val);
+	return divider_ro_determine_rate(hw, req, NULL, divider->width,
+					 CLK_DIVIDER_ROUND_CLOSEST, val);
 }
 
-static long div_round_rate(struct clk_hw *hw, unsigned long rate,
-			   unsigned long *prate)
+static int div_determine_rate(struct clk_hw *hw, struct clk_rate_request *req)
 {
 	struct clk_regmap_div *divider = to_clk_regmap_div(hw);
 
-	return divider_round_rate(hw, rate, prate, NULL, divider->width,
-				  CLK_DIVIDER_ROUND_CLOSEST);
+	return divider_determine_rate(hw, req, NULL, divider->width,
+				      CLK_DIVIDER_ROUND_CLOSEST);
 }
 
 static int div_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -78,14 +69,14 @@ static unsigned long div_recalc_rate(struct clk_hw *hw,
 }
 
 const struct clk_ops clk_regmap_div_ops = {
-	.round_rate = div_round_rate,
+	.determine_rate = div_determine_rate,
 	.set_rate = div_set_rate,
 	.recalc_rate = div_recalc_rate,
 };
 EXPORT_SYMBOL_GPL(clk_regmap_div_ops);
 
 const struct clk_ops clk_regmap_div_ro_ops = {
-	.round_rate = div_round_ro_rate,
+	.determine_rate = div_ro_determine_rate,
 	.recalc_rate = div_recalc_rate,
 };
 EXPORT_SYMBOL_GPL(clk_regmap_div_ro_ops);

@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	SNAP data link layer. Derived from 802.2
  *
  *		Alan Cox <alan@lxorguk.ukuu.org.uk>,
  *		from the 802.2 layer by Greg Page.
  *		Merged in additions from Greg Page's psnap.c.
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  */
 
 #include <linux/module.h>
@@ -34,7 +30,7 @@ static struct datalink_proto *find_snap_client(const unsigned char *desc)
 {
 	struct datalink_proto *proto = NULL, *p;
 
-	list_for_each_entry_rcu(p, &snap_list, node) {
+	list_for_each_entry_rcu(p, &snap_list, node, lockdep_is_held(&snap_lock)) {
 		if (!memcmp(p->type, desc, 5)) {
 			proto = p;
 			break;
@@ -59,11 +55,11 @@ static int snap_rcv(struct sk_buff *skb, struct net_device *dev,
 		goto drop;
 
 	rcu_read_lock();
-	proto = find_snap_client(skb_transport_header(skb));
+	proto = find_snap_client(skb->data);
 	if (proto) {
 		/* Pass the frame on. */
-		skb->transport_header += 5;
 		skb_pull_rcsum(skb, 5);
+		skb_reset_transport_header(skb);
 		rc = proto->rcvfunc(skb, dev, &snap_packet_type, orig_dev);
 	}
 	rcu_read_unlock();
@@ -83,7 +79,7 @@ drop:
  *	Put a SNAP header on a frame and pass to 802.2
  */
 static int snap_request(struct datalink_proto *dl,
-			struct sk_buff *skb, u8 *dest)
+			struct sk_buff *skb, const u8 *dest)
 {
 	memcpy(skb_push(skb, 5), dl->type, 5);
 	llc_build_and_send_ui_pkt(snap_sap, skb, dest, snap_sap->laddr.lsap);
@@ -136,7 +132,7 @@ struct datalink_proto *register_snap_client(const unsigned char *desc,
 	if (find_snap_client(desc))
 		goto out;
 
-	proto = kmalloc(sizeof(*proto), GFP_ATOMIC);
+	proto = kmalloc_obj(*proto, GFP_ATOMIC);
 	if (proto) {
 		memcpy(proto->type, desc, 5);
 		proto->rcvfunc		= rcvfunc;
@@ -164,4 +160,5 @@ void unregister_snap_client(struct datalink_proto *proto)
 	kfree(proto);
 }
 
+MODULE_DESCRIPTION("SNAP data link layer. Derived from 802.2");
 MODULE_LICENSE("GPL");

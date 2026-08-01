@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	X.25 Packet Layer release 002
  *
@@ -6,12 +7,6 @@
  *	screw up. It might even work.
  *
  *	This code REQUIRES 2.1.15 or higher
- *
- *	This module:
- *		This module is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  *	History
  *	X.25 001	Jonathan Naylor	Started coding.
@@ -46,7 +41,7 @@ void x25_start_heartbeat(struct sock *sk)
 
 void x25_stop_heartbeat(struct sock *sk)
 {
-	del_timer(&sk->sk_timer);
+	timer_delete(&sk->sk_timer);
 }
 
 void x25_start_t2timer(struct sock *sk)
@@ -79,7 +74,7 @@ void x25_start_t23timer(struct sock *sk)
 
 void x25_stop_timer(struct sock *sk)
 {
-	del_timer(&x25_sk(sk)->timer);
+	timer_delete(&x25_sk(sk)->timer);
 }
 
 unsigned long x25_display_timer(struct sock *sk)
@@ -94,7 +89,7 @@ unsigned long x25_display_timer(struct sock *sk)
 
 static void x25_heartbeat_expiry(struct timer_list *t)
 {
-	struct sock *sk = from_timer(sk, t, sk_timer);
+	struct sock *sk = timer_container_of(sk, t, sk_timer);
 
 	bh_lock_sock(sk);
 	if (sock_owned_by_user(sk)) /* can currently only occur in state 3 */
@@ -161,7 +156,7 @@ static inline void x25_do_timer_expiry(struct sock * sk)
 
 static void x25_timer_expiry(struct timer_list *t)
 {
-	struct x25_sock *x25 = from_timer(x25, t, timer);
+	struct x25_sock *x25 = timer_container_of(x25, t, timer);
 	struct sock *sk = &x25->sk;
 
 	bh_lock_sock(sk);

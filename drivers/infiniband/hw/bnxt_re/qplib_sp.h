@@ -40,13 +40,13 @@
 #ifndef __BNXT_QPLIB_SP_H__
 #define __BNXT_QPLIB_SP_H__
 
+#include <rdma/bnxt_re-abi.h>
 #define BNXT_QPLIB_RESERVED_QP_WRS	128
-
-#define PCI_EXP_DEVCTL2_ATOMIC_REQ      0x0040
 
 struct bnxt_qplib_dev_attr {
 #define FW_VER_ARR_LEN			4
 	u8				fw_ver[FW_VER_ARR_LEN];
+#define BNXT_QPLIB_NUM_GIDS_SUPPORTED	256
 	u16				max_sgid;
 	u16				max_mrw;
 	u32				max_qp;
@@ -56,6 +56,7 @@ struct bnxt_qplib_dev_attr {
 	u32				max_qp_wqes;
 	u32				max_qp_sges;
 	u32				max_cq;
+#define BNXT_QPLIB_MAX_CQ_WQES          0xfffff
 	u32				max_cq_wqes;
 	u32				max_cq_sges;
 	u32				max_mr;
@@ -64,8 +65,6 @@ struct bnxt_qplib_dev_attr {
 	u32				max_mw;
 	u32				max_raw_ethy_qp;
 	u32				max_ah;
-	u32				max_fmr;
-	u32				max_map_per_fmr;
 	u32				max_srq;
 	u32				max_srq_wqes;
 	u32				max_srq_sges;
@@ -74,6 +73,11 @@ struct bnxt_qplib_dev_attr {
 	u32				l2_db_size;
 	u8				tqm_alloc_reqs[MAX_TQM_ALLOC_REQ];
 	bool				is_atomic;
+	u16                             dev_cap_flags;
+	u16                             dev_cap_flags2;
+	u32                             max_dpi;
+	u16				rate_limit_min;
+	u32				rate_limit_max;
 };
 
 struct bnxt_qplib_pd {
@@ -82,6 +86,11 @@ struct bnxt_qplib_pd {
 
 struct bnxt_qplib_gid {
 	u8				data[16];
+};
+
+struct bnxt_qplib_gid_info {
+	struct bnxt_qplib_gid gid;
+	u16 vlan_id;
 };
 
 struct bnxt_qplib_ah {
@@ -103,7 +112,8 @@ struct bnxt_qplib_ah {
 struct bnxt_qplib_mrw {
 	struct bnxt_qplib_pd		*pd;
 	int				type;
-	u32				flags;
+	u32				access_flags;
+#define BNXT_QPLIB_MR_ACCESS_MASK	0xFF
 #define BNXT_QPLIB_FR_PMR		0x80000000
 	u32				lkey;
 	u32				rkey;
@@ -111,6 +121,7 @@ struct bnxt_qplib_mrw {
 	u64				va;
 	u64				total_size;
 	u32				npages;
+	u16				flags;
 	u64				mr_handle;
 	struct bnxt_qplib_hwq		hwq;
 };
@@ -205,40 +216,134 @@ struct bnxt_qplib_roce_stats {
 	/* res_tx_pci_err is 64 b */
 	u64 res_rx_pci_err;
 	/* res_rx_pci_err is 64 b */
+	u64 res_oos_drop_count;
+	/* res_oos_drop_count */
+	u64     active_qp_count_p0;
+	/* port 0 active qps */
+	u64     active_qp_count_p1;
+	/* port 1 active qps */
+	u64     active_qp_count_p2;
+	/* port 2 active qps */
+	u64     active_qp_count_p3;
+	/* port 3 active qps */
+};
+
+struct bnxt_qplib_ext_stat {
+	u64  tx_atomic_req;
+	u64  tx_read_req;
+	u64  tx_read_res;
+	u64  tx_write_req;
+	u64  tx_send_req;
+	u64  tx_roce_pkts;
+	u64  tx_roce_bytes;
+	u64  rx_atomic_req;
+	u64  rx_read_req;
+	u64  rx_read_res;
+	u64  rx_write_req;
+	u64  rx_send_req;
+	u64  rx_roce_pkts;
+	u64  rx_roce_bytes;
+	u64  rx_roce_good_pkts;
+	u64  rx_roce_good_bytes;
+	u64  rx_out_of_buffer;
+	u64  rx_out_of_sequence;
+	u64  tx_cnp;
+	u64  rx_cnp;
+	u64  rx_ecn_marked;
+};
+
+struct bnxt_qplib_cc_param_ext {
+	u64 ext_mask;
+	u16 inact_th_hi;
+	u16 min_delta_cnp;
+	u16 init_cp;
+	u8 tr_update_mode;
+	u8 tr_update_cyls;
+	u8 fr_rtt;
+	u8 ai_rate_incr;
+	u16 rr_rtt_th;
+	u16 ar_cr_th;
+	u16 cr_min_th;
+	u8 bw_avg_weight;
+	u8 cr_factor;
+	u16 cr_th_max_cp;
+	u8 cp_bias_en;
+	u8 cp_bias;
+	u8 cnp_ecn;
+	u8 rtt_jitter_en;
+	u16 bytes_per_usec;
+	u16 cc_cr_reset_th;
+	u8 cr_width;
+	u8 min_quota;
+	u8 max_quota;
+	u8 abs_max_quota;
+	u16 tr_lb;
+	u8 cr_prob_fac;
+	u8 tr_prob_fac;
+	u16 fair_cr_th;
+	u8 red_div;
+	u8 cnp_ratio_th;
+	u16 ai_ext_rtt;
+	u8 exp_crcp_ratio;
+	u8 low_rate_en;
+	u16 cpcr_update_th;
+	u16 ai_rtt_th1;
+	u16 ai_rtt_th2;
+	u16 cf_rtt_th;
+	u16 sc_cr_th1; /* severe congestion cr threshold 1 */
+	u16 sc_cr_th2; /* severe congestion cr threshold 2 */
+	u32 l64B_per_rtt;
+	u8 cc_ack_bytes;
+	u16 reduce_cf_rtt_th;
+};
+
+struct bnxt_qplib_cc_param {
+	u8 alt_vlan_pcp;
+	u8 qp1_tos_dscp;
+	u16 alt_tos_dscp;
+	u8 cc_mode;
+	u8 enable;
+	u16 inact_th;
+	u16 init_cr;
+	u16 init_tr;
+	u16 rtt;
+	u8 g;
+	u8 nph_per_state;
+	u8 time_pph;
+	u8 pkts_pph;
+	u8 tos_ecn;
+	u8 tos_dscp;
+	u16 tcp_cp;
+	struct bnxt_qplib_cc_param_ext cc_ext;
+	u32 mask;
 };
 
 int bnxt_qplib_get_sgid(struct bnxt_qplib_res *res,
 			struct bnxt_qplib_sgid_tbl *sgid_tbl, int index,
 			struct bnxt_qplib_gid *gid);
 int bnxt_qplib_del_sgid(struct bnxt_qplib_sgid_tbl *sgid_tbl,
-			struct bnxt_qplib_gid *gid, bool update);
+			struct bnxt_qplib_gid *gid, u16 vlan_id, bool update);
 int bnxt_qplib_add_sgid(struct bnxt_qplib_sgid_tbl *sgid_tbl,
-			struct bnxt_qplib_gid *gid, u8 *mac, u16 vlan_id,
-			bool update, u32 *index);
+			struct bnxt_qplib_gid *gid, const u8 *mac, u16 vlan_id,
+			bool update, u32 *index,
+			bool is_ugid, u32 stats_ctx_id);
 int bnxt_qplib_update_sgid(struct bnxt_qplib_sgid_tbl *sgid_tbl,
-			   struct bnxt_qplib_gid *gid, u16 gid_idx, u8 *smac);
-int bnxt_qplib_get_pkey(struct bnxt_qplib_res *res,
-			struct bnxt_qplib_pkey_tbl *pkey_tbl, u16 index,
-			u16 *pkey);
-int bnxt_qplib_del_pkey(struct bnxt_qplib_res *res,
-			struct bnxt_qplib_pkey_tbl *pkey_tbl, u16 *pkey,
-			bool update);
-int bnxt_qplib_add_pkey(struct bnxt_qplib_res *res,
-			struct bnxt_qplib_pkey_tbl *pkey_tbl, u16 *pkey,
-			bool update);
-int bnxt_qplib_get_dev_attr(struct bnxt_qplib_rcfw *rcfw,
-			    struct bnxt_qplib_dev_attr *attr, bool vf);
+			   struct bnxt_qplib_gid *gid, u16 gid_idx,
+			   const u8 *smac);
+int bnxt_qplib_get_dev_attr(struct bnxt_qplib_rcfw *rcfw);
 int bnxt_qplib_set_func_resources(struct bnxt_qplib_res *res,
 				  struct bnxt_qplib_rcfw *rcfw,
 				  struct bnxt_qplib_ctx *ctx);
-int bnxt_qplib_create_ah(struct bnxt_qplib_res *res, struct bnxt_qplib_ah *ah);
-int bnxt_qplib_destroy_ah(struct bnxt_qplib_res *res, struct bnxt_qplib_ah *ah);
+int bnxt_qplib_create_ah(struct bnxt_qplib_res *res, struct bnxt_qplib_ah *ah,
+			 bool block);
+int bnxt_qplib_destroy_ah(struct bnxt_qplib_res *res, struct bnxt_qplib_ah *ah,
+			  bool block);
 int bnxt_qplib_alloc_mrw(struct bnxt_qplib_res *res,
 			 struct bnxt_qplib_mrw *mrw);
 int bnxt_qplib_dereg_mrw(struct bnxt_qplib_res *res, struct bnxt_qplib_mrw *mrw,
 			 bool block);
 int bnxt_qplib_reg_mr(struct bnxt_qplib_res *res, struct bnxt_qplib_mrw *mr,
-		      u64 *pbl_tbl, int num_pbls, bool block, u32 buf_pg_size);
+		      struct ib_umem *umem, int num_pbls, u32 buf_pg_size, bool unified_mr);
 int bnxt_qplib_free_mrw(struct bnxt_qplib_res *res, struct bnxt_qplib_mrw *mr);
 int bnxt_qplib_alloc_fast_reg_mr(struct bnxt_qplib_res *res,
 				 struct bnxt_qplib_mrw *mr, int max);
@@ -246,7 +351,26 @@ int bnxt_qplib_alloc_fast_reg_page_list(struct bnxt_qplib_res *res,
 					struct bnxt_qplib_frpl *frpl, int max);
 int bnxt_qplib_free_fast_reg_page_list(struct bnxt_qplib_res *res,
 				       struct bnxt_qplib_frpl *frpl);
-int bnxt_qplib_map_tc2cos(struct bnxt_qplib_res *res, u16 *cids);
 int bnxt_qplib_get_roce_stats(struct bnxt_qplib_rcfw *rcfw,
 			      struct bnxt_qplib_roce_stats *stats);
+int bnxt_qplib_qext_stat(struct bnxt_qplib_rcfw *rcfw, u32 fid,
+			 struct bnxt_qplib_ext_stat *estat);
+int bnxt_qplib_modify_cc(struct bnxt_qplib_res *res,
+			 struct bnxt_qplib_cc_param *cc_param);
+int bnxt_qplib_read_context(struct bnxt_qplib_rcfw *rcfw, u8 type, u32 xid,
+			    u32 resp_size, void *resp_va);
+int bnxt_qplib_query_cc_param(struct bnxt_qplib_res *res,
+			      struct bnxt_qplib_cc_param *cc_param);
+void bnxt_qplib_query_version(struct bnxt_qplib_rcfw *rcfw);
+int bnxt_qplib_create_flow(struct bnxt_qplib_res *res);
+int bnxt_qplib_destroy_flow(struct bnxt_qplib_res *res);
+
+#define BNXT_VAR_MAX_WQE       4352
+#define BNXT_VAR_MAX_SLOT_ALIGN 256
+#define BNXT_VAR_MAX_SGE        13
+#define BNXT_RE_MAX_RQ_WQES     65536
+#define BNXT_RE_MAX_SQ_SLOTS    65536
+
+#define BNXT_STATIC_MAX_SGE	6
+
 #endif /* __BNXT_QPLIB_SP_H__*/

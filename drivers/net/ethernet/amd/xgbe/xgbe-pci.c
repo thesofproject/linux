@@ -1,123 +1,15 @@
+// SPDX-License-Identifier: (GPL-2.0-or-later OR BSD-3-Clause)
 /*
- * AMD 10Gb Ethernet driver
- *
- * This file is available to you under your choice of the following two
- * licenses:
- *
- * License 1: GPLv2
- *
- * Copyright (c) 2016 Advanced Micro Devices, Inc.
- *
- * This file is free software; you may copy, redistribute and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or (at
- * your option) any later version.
- *
- * This file is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- * This file incorporates work covered by the following copyright and
- * permission notice:
- *     The Synopsys DWC ETHER XGMAC Software Driver and documentation
- *     (hereinafter "Software") is an unsupported proprietary work of Synopsys,
- *     Inc. unless otherwise expressly agreed to in writing between Synopsys
- *     and you.
- *
- *     The Software IS NOT an item of Licensed Software or Licensed Product
- *     under any End User Software License Agreement or Agreement for Licensed
- *     Product with Synopsys or any supplement thereto.  Permission is hereby
- *     granted, free of charge, to any person obtaining a copy of this software
- *     annotated with this license and the Software, to deal in the Software
- *     without restriction, including without limitation the rights to use,
- *     copy, modify, merge, publish, distribute, sublicense, and/or sell copies
- *     of the Software, and to permit persons to whom the Software is furnished
- *     to do so, subject to the following conditions:
- *
- *     The above copyright notice and this permission notice shall be included
- *     in all copies or substantial portions of the Software.
- *
- *     THIS SOFTWARE IS BEING DISTRIBUTED BY SYNOPSYS SOLELY ON AN "AS IS"
- *     BASIS AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- *     TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- *     PARTICULAR PURPOSE ARE HEREBY DISCLAIMED. IN NO EVENT SHALL SYNOPSYS
- *     BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- *     CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- *     SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- *     INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- *     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- *     THE POSSIBILITY OF SUCH DAMAGE.
- *
- *
- * License 2: Modified BSD
- *
- * Copyright (c) 2016 Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of Advanced Micro Devices, Inc. nor the
- *       names of its contributors may be used to endorse or promote products
- *       derived from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * This file incorporates work covered by the following copyright and
- * permission notice:
- *     The Synopsys DWC ETHER XGMAC Software Driver and documentation
- *     (hereinafter "Software") is an unsupported proprietary work of Synopsys,
- *     Inc. unless otherwise expressly agreed to in writing between Synopsys
- *     and you.
- *
- *     The Software IS NOT an item of Licensed Software or Licensed Product
- *     under any End User Software License Agreement or Agreement for Licensed
- *     Product with Synopsys or any supplement thereto.  Permission is hereby
- *     granted, free of charge, to any person obtaining a copy of this software
- *     annotated with this license and the Software, to deal in the Software
- *     without restriction, including without limitation the rights to use,
- *     copy, modify, merge, publish, distribute, sublicense, and/or sell copies
- *     of the Software, and to permit persons to whom the Software is furnished
- *     to do so, subject to the following conditions:
- *
- *     The above copyright notice and this permission notice shall be included
- *     in all copies or substantial portions of the Software.
- *
- *     THIS SOFTWARE IS BEING DISTRIBUTED BY SYNOPSYS SOLELY ON AN "AS IS"
- *     BASIS AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
- *     TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- *     PARTICULAR PURPOSE ARE HEREBY DISCLAIMED. IN NO EVENT SHALL SYNOPSYS
- *     BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- *     CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- *     SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- *     INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- *     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- *     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
- *     THE POSSIBILITY OF SUCH DAMAGE.
+ * Copyright (c) 2014-2025, Advanced Micro Devices, Inc.
+ * Copyright (c) 2014, Synopsys, Inc.
+ * All rights reserved
  */
 
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/pci.h>
 #include <linux/log2.h>
+#include "xgbe-smn.h"
 
 #include "xgbe.h"
 #include "xgbe-common.h"
@@ -139,7 +31,7 @@ static int xgbe_config_multi_msi(struct xgbe_prv_data *pdata)
 		return ret;
 	}
 
-	pdata->isr_as_tasklet = 1;
+	pdata->isr_as_bh_work = 1;
 	pdata->irq_count = ret;
 
 	pdata->dev_irq = pci_irq_vector(pdata->pcidev, 0);
@@ -170,13 +62,13 @@ static int xgbe_config_irqs(struct xgbe_prv_data *pdata)
 		goto out;
 
 	ret = pci_alloc_irq_vectors(pdata->pcidev, 1, 1,
-				    PCI_IRQ_LEGACY | PCI_IRQ_MSI);
+				    PCI_IRQ_INTX | PCI_IRQ_MSI);
 	if (ret < 0) {
 		dev_info(pdata->dev, "single IRQ enablement failed\n");
 		return ret;
 	}
 
-	pdata->isr_as_tasklet = pdata->pcidev->msi_enabled ? 1 : 0;
+	pdata->isr_as_bh_work = pdata->pcidev->msi_enabled ? 1 : 0;
 	pdata->irq_count = 1;
 	pdata->channel_irq_count = 1;
 
@@ -207,14 +99,14 @@ out:
 
 static int xgbe_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
-	struct xgbe_prv_data *pdata;
-	struct device *dev = &pdev->dev;
 	void __iomem * const *iomap_table;
-	struct pci_dev *rdev;
+	unsigned int port_addr_size, reg;
+	struct device *dev = &pdev->dev;
+	struct xgbe_prv_data *pdata;
 	unsigned int ma_lo, ma_hi;
-	unsigned int reg;
-	int bar_mask;
-	int ret;
+	struct pci_dev *rdev;
+	int bar_mask, ret;
+	u32 address;
 
 	pdata = xgbe_alloc_pdata(dev);
 	if (IS_ERR(pdata)) {
@@ -274,10 +166,39 @@ static int xgbe_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	/* Set the PCS indirect addressing definition registers */
 	rdev = pci_get_domain_bus_and_slot(0, 0, PCI_DEVFN(0, 0));
-	if (rdev &&
-	    (rdev->vendor == PCI_VENDOR_ID_AMD) && (rdev->device == 0x15d0)) {
-		pdata->xpcs_window_def_reg = PCS_V2_RV_WINDOW_DEF;
-		pdata->xpcs_window_sel_reg = PCS_V2_RV_WINDOW_SELECT;
+	if (rdev && rdev->vendor == PCI_VENDOR_ID_AMD) {
+		switch (rdev->device) {
+		case XGBE_P100a_PCI_DEVICE_ID:
+			pdata->xpcs_window_def_reg = PCS_P100a_WINDOW_DEF;
+			pdata->xpcs_window_sel_reg = PCS_P100a_WINDOW_SELECT;
+
+			/* P100a devices do not need rrc and cdr workaround */
+			pdata->vdata->an_cdr_workaround = 0;
+			pdata->vdata->enable_rrc = 0;
+			break;
+		case XGBE_RV_PCI_DEVICE_ID:
+			pdata->xpcs_window_def_reg = PCS_V2_RV_WINDOW_DEF;
+			pdata->xpcs_window_sel_reg = PCS_V2_RV_WINDOW_SELECT;
+			break;
+		case XGBE_YC_PCI_DEVICE_ID:
+			pdata->xpcs_window_def_reg = PCS_V2_YC_WINDOW_DEF;
+			pdata->xpcs_window_sel_reg = PCS_V2_YC_WINDOW_SELECT;
+
+			/* Yellow Carp devices do not need cdr workaround */
+			pdata->vdata->an_cdr_workaround = 0;
+
+			/* Yellow Carp devices do not need rrc */
+			pdata->vdata->enable_rrc = 0;
+			break;
+		case XGBE_RN_PCI_DEVICE_ID:
+			pdata->xpcs_window_def_reg = PCS_V3_RN_WINDOW_DEF;
+			pdata->xpcs_window_sel_reg = PCS_V3_RN_WINDOW_SELECT;
+			break;
+		default:
+			pdata->xpcs_window_def_reg = PCS_V2_WINDOW_DEF;
+			pdata->xpcs_window_sel_reg = PCS_V2_WINDOW_SELECT;
+			break;
+		}
 	} else {
 		pdata->xpcs_window_def_reg = PCS_V2_WINDOW_DEF;
 		pdata->xpcs_window_sel_reg = PCS_V2_WINDOW_SELECT;
@@ -285,7 +206,22 @@ static int xgbe_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_dev_put(rdev);
 
 	/* Configure the PCS indirect addressing support */
-	reg = XPCS32_IOREAD(pdata, pdata->xpcs_window_def_reg);
+	if (pdata->vdata->xpcs_access == XGBE_XPCS_ACCESS_V3) {
+		reg = XP_IOREAD(pdata, XP_PROP_0);
+		port_addr_size = PCS_RN_PORT_ADDR_SIZE *
+				 XP_GET_BITS(reg, XP_PROP_0, PORT_ID);
+		pdata->smn_base = PCS_RN_SMN_BASE_ADDR + port_addr_size;
+
+		address = pdata->smn_base + (pdata->xpcs_window_def_reg);
+		ret = amd_smn_read(0, address, &reg);
+		if (ret) {
+			pci_err(pdata->pcidev, "Failed to read data\n");
+			goto err_pci_enable;
+		}
+	} else {
+		reg = XPCS32_IOREAD(pdata, pdata->xpcs_window_def_reg);
+	}
+
 	pdata->xpcs_window = XPCS_GET_BITS(reg, PCS_V2_WINDOW_DEF, OFFSET);
 	pdata->xpcs_window <<= 6;
 	pdata->xpcs_window_size = XPCS_GET_BITS(reg, PCS_V2_WINDOW_DEF, SIZE);
@@ -335,16 +271,33 @@ static int xgbe_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pdata->awcr = XGBE_DMA_PCI_AWCR;
 	pdata->awarcr = XGBE_DMA_PCI_AWARCR;
 
+	/* Read the port property registers */
+	pdata->pp0 = XP_IOREAD(pdata, XP_PROP_0);
+	pdata->pp1 = XP_IOREAD(pdata, XP_PROP_1);
+	pdata->pp2 = XP_IOREAD(pdata, XP_PROP_2);
+	pdata->pp3 = XP_IOREAD(pdata, XP_PROP_3);
+	pdata->pp4 = XP_IOREAD(pdata, XP_PROP_4);
+	if (netif_msg_probe(pdata)) {
+		dev_dbg(dev, "port property 0 = %#010x\n", pdata->pp0);
+		dev_dbg(dev, "port property 1 = %#010x\n", pdata->pp1);
+		dev_dbg(dev, "port property 2 = %#010x\n", pdata->pp2);
+		dev_dbg(dev, "port property 3 = %#010x\n", pdata->pp3);
+		dev_dbg(dev, "port property 4 = %#010x\n", pdata->pp4);
+	}
+
 	/* Set the maximum channels and queues */
-	reg = XP_IOREAD(pdata, XP_PROP_1);
-	pdata->tx_max_channel_count = XP_GET_BITS(reg, XP_PROP_1, MAX_TX_DMA);
-	pdata->rx_max_channel_count = XP_GET_BITS(reg, XP_PROP_1, MAX_RX_DMA);
-	pdata->tx_max_q_count = XP_GET_BITS(reg, XP_PROP_1, MAX_TX_QUEUES);
-	pdata->rx_max_q_count = XP_GET_BITS(reg, XP_PROP_1, MAX_RX_QUEUES);
+	pdata->tx_max_channel_count = XP_GET_BITS(pdata->pp1, XP_PROP_1,
+						  MAX_TX_DMA);
+	pdata->rx_max_channel_count = XP_GET_BITS(pdata->pp1, XP_PROP_1,
+						  MAX_RX_DMA);
+	pdata->tx_max_q_count = XP_GET_BITS(pdata->pp1, XP_PROP_1,
+					    MAX_TX_QUEUES);
+	pdata->rx_max_q_count = XP_GET_BITS(pdata->pp1, XP_PROP_1,
+					    MAX_RX_QUEUES);
 	if (netif_msg_probe(pdata)) {
 		dev_dbg(dev, "max tx/rx channel count = %u/%u\n",
 			pdata->tx_max_channel_count,
-			pdata->tx_max_channel_count);
+			pdata->rx_max_channel_count);
 		dev_dbg(dev, "max tx/rx hw queue count = %u/%u\n",
 			pdata->tx_max_q_count, pdata->rx_max_q_count);
 	}
@@ -353,12 +306,13 @@ static int xgbe_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	xgbe_set_counts(pdata);
 
 	/* Set the maximum fifo amounts */
-	reg = XP_IOREAD(pdata, XP_PROP_2);
-	pdata->tx_max_fifo_size = XP_GET_BITS(reg, XP_PROP_2, TX_FIFO_SIZE);
+	pdata->tx_max_fifo_size = XP_GET_BITS(pdata->pp2, XP_PROP_2,
+					      TX_FIFO_SIZE);
 	pdata->tx_max_fifo_size *= 16384;
 	pdata->tx_max_fifo_size = min(pdata->tx_max_fifo_size,
 				      pdata->vdata->tx_max_fifo_size);
-	pdata->rx_max_fifo_size = XP_GET_BITS(reg, XP_PROP_2, RX_FIFO_SIZE);
+	pdata->rx_max_fifo_size = XP_GET_BITS(pdata->pp2, XP_PROP_2,
+					      RX_FIFO_SIZE);
 	pdata->rx_max_fifo_size *= 16384;
 	pdata->rx_max_fifo_size = min(pdata->rx_max_fifo_size,
 				      pdata->vdata->rx_max_fifo_size);
@@ -400,39 +354,108 @@ static void xgbe_pci_remove(struct pci_dev *pdev)
 
 	pci_free_irq_vectors(pdata->pcidev);
 
+	/* Disable all interrupts in the hardware */
+	XP_IOWRITE(pdata, XP_INT_EN, 0x0);
+
 	xgbe_free_pdata(pdata);
 }
 
-#ifdef CONFIG_PM
-static int xgbe_pci_suspend(struct pci_dev *pdev, pm_message_t state)
+static void xgbe_pci_synchronize_irqs(struct xgbe_prv_data *pdata)
 {
-	struct xgbe_prv_data *pdata = pci_get_drvdata(pdev);
+	unsigned int i;
+
+	/* Synchronize main device interrupt */
+	synchronize_irq(pdata->dev_irq);
+
+	/* Synchronize ECC interrupt if separate from main device interrupt */
+	if (pdata->vdata->ecc_support && pdata->dev_irq != pdata->ecc_irq)
+		synchronize_irq(pdata->ecc_irq);
+
+	/* Synchronize I2C interrupt if separate from main device interrupt */
+	if (pdata->vdata->i2c_support && pdata->dev_irq != pdata->i2c_irq)
+		synchronize_irq(pdata->i2c_irq);
+
+	/* Synchronize AN interrupt if separate from main device interrupt */
+	if (pdata->dev_irq != pdata->an_irq)
+		synchronize_irq(pdata->an_irq);
+
+	/* Synchronize per-channel DMA interrupts */
+	if (pdata->per_channel_irq) {
+		for (i = 0; i < pdata->channel_count; i++)
+			synchronize_irq(pdata->channel[i]->dma_irq);
+	}
+}
+
+static int xgbe_pci_suspend(struct device *dev)
+{
+	struct xgbe_prv_data *pdata = dev_get_drvdata(dev);
 	struct net_device *netdev = pdata->netdev;
+	struct pci_dev *pdev = to_pci_dev(dev);
 	int ret = 0;
 
 	if (netif_running(netdev))
-		ret = xgbe_powerdown(netdev, XGMAC_DRIVER_CONTEXT);
+		ret = xgbe_powerdown(netdev);
 
+	/* Disable all device interrupts to prevent spurious wakeups */
+	XP_IOWRITE(pdata, XP_INT_EN, 0x0);
+
+	/* Ensure no IRQ handlers are still executing before powering down.
+	 * This prevents race conditions where an IRQ handler could access
+	 * invalid register state after the device is disabled.
+	 */
+	xgbe_pci_synchronize_irqs(pdata);
+
+	/* Set PHY to low-power mode */
 	pdata->lpm_ctrl = XMDIO_READ(pdata, MDIO_MMD_PCS, MDIO_CTRL1);
 	pdata->lpm_ctrl |= MDIO_CTRL1_LPOWER;
 	XMDIO_WRITE(pdata, MDIO_MMD_PCS, MDIO_CTRL1, pdata->lpm_ctrl);
 
+	/* Disable bus mastering to prevent DMA activity */
+	pci_clear_master(pdev);
+
+	/* Save PCI configuration state and disable device */
+	pci_save_state(pdev);
+	pci_disable_device(pdev);
+
+	/* Disable wake from D3 - required for S0i3 deep sleep */
+	pci_wake_from_d3(pdev, false);
+	pci_set_power_state(pdev, PCI_D3hot);
+
 	return ret;
 }
 
-static int xgbe_pci_resume(struct pci_dev *pdev)
+static int xgbe_pci_resume(struct device *dev)
 {
-	struct xgbe_prv_data *pdata = pci_get_drvdata(pdev);
+	struct xgbe_prv_data *pdata = dev_get_drvdata(dev);
 	struct net_device *netdev = pdata->netdev;
+	struct pci_dev *pdev = to_pci_dev(dev);
 	int ret = 0;
 
+	/* Restore PCI power state */
+	pci_set_power_state(pdev, PCI_D0);
+
+	/* Restore PCI configuration state */
+	pci_restore_state(pdev);
+
+	/* Enable PCI device */
+	ret = pci_enable_device(pdev);
+	if (ret) {
+		dev_err(dev, "pci_enable_device failed: %d\n", ret);
+		return ret;
+	}
+
+	/* Re-enable bus mastering */
+	pci_set_master(pdev);
+
+	/* Re-enable all device interrupts */
 	XP_IOWRITE(pdata, XP_INT_EN, 0x1fffff);
 
+	/* Clear PHY low-power mode */
 	pdata->lpm_ctrl &= ~MDIO_CTRL1_LPOWER;
 	XMDIO_WRITE(pdata, MDIO_MMD_PCS, MDIO_CTRL1, pdata->lpm_ctrl);
 
 	if (netif_running(netdev)) {
-		ret = xgbe_powerup(netdev, XGMAC_DRIVER_CONTEXT);
+		ret = xgbe_powerup(netdev);
 
 		/* Schedule a restart in case the link or phy state changed
 		 * while we were powered down.
@@ -442,26 +465,10 @@ static int xgbe_pci_resume(struct pci_dev *pdev)
 
 	return ret;
 }
-#endif /* CONFIG_PM */
 
-static const struct xgbe_version_data xgbe_v2a = {
+static struct xgbe_version_data xgbe_v3 = {
 	.init_function_ptrs_phy_impl	= xgbe_init_function_ptrs_phy_v2,
-	.xpcs_access			= XGBE_XPCS_ACCESS_V2,
-	.mmc_64bit			= 1,
-	.tx_max_fifo_size		= 229376,
-	.rx_max_fifo_size		= 229376,
-	.tx_tstamp_workaround		= 1,
-	.ecc_support			= 1,
-	.i2c_support			= 1,
-	.irq_reissue_support		= 1,
-	.tx_desc_prefetch		= 5,
-	.rx_desc_prefetch		= 5,
-	.an_cdr_workaround		= 1,
-};
-
-static const struct xgbe_version_data xgbe_v2b = {
-	.init_function_ptrs_phy_impl	= xgbe_init_function_ptrs_phy_v2,
-	.xpcs_access			= XGBE_XPCS_ACCESS_V2,
+	.xpcs_access			= XGBE_XPCS_ACCESS_V3,
 	.mmc_64bit			= 1,
 	.tx_max_fifo_size		= 65536,
 	.rx_max_fifo_size		= 65536,
@@ -471,7 +478,42 @@ static const struct xgbe_version_data xgbe_v2b = {
 	.irq_reissue_support		= 1,
 	.tx_desc_prefetch		= 5,
 	.rx_desc_prefetch		= 5,
+	.an_cdr_workaround		= 0,
+	.enable_rrc			= 0,
+};
+
+static struct xgbe_version_data xgbe_v2a = {
+	.init_function_ptrs_phy_impl	= xgbe_init_function_ptrs_phy_v2,
+	.xpcs_access			= XGBE_XPCS_ACCESS_V2,
+	.mmc_64bit			= 1,
+	.tx_max_fifo_size		= 229376,
+	.rx_max_fifo_size		= 229376,
+	.tx_tstamp_workaround		= 1,
+	.tstamp_ptp_clock_freq		= 1,
+	.ecc_support			= 1,
+	.i2c_support			= 1,
+	.irq_reissue_support		= 1,
+	.tx_desc_prefetch		= 5,
+	.rx_desc_prefetch		= 5,
 	.an_cdr_workaround		= 1,
+	.enable_rrc			= 1,
+};
+
+static struct xgbe_version_data xgbe_v2b = {
+	.init_function_ptrs_phy_impl	= xgbe_init_function_ptrs_phy_v2,
+	.xpcs_access			= XGBE_XPCS_ACCESS_V2,
+	.mmc_64bit			= 1,
+	.tx_max_fifo_size		= 65536,
+	.rx_max_fifo_size		= 65536,
+	.tx_tstamp_workaround		= 1,
+	.tstamp_ptp_clock_freq		= 1,
+	.ecc_support			= 1,
+	.i2c_support			= 1,
+	.irq_reissue_support		= 1,
+	.tx_desc_prefetch		= 5,
+	.rx_desc_prefetch		= 5,
+	.an_cdr_workaround		= 1,
+	.enable_rrc			= 1,
 };
 
 static const struct pci_device_id xgbe_pci_table[] = {
@@ -479,20 +521,23 @@ static const struct pci_device_id xgbe_pci_table[] = {
 	  .driver_data = (kernel_ulong_t)&xgbe_v2a },
 	{ PCI_VDEVICE(AMD, 0x1459),
 	  .driver_data = (kernel_ulong_t)&xgbe_v2b },
+	{ PCI_VDEVICE(AMD, 0x1641),
+	  .driver_data = (kernel_ulong_t)&xgbe_v3 },
 	/* Last entry must be zero */
 	{ 0, }
 };
 MODULE_DEVICE_TABLE(pci, xgbe_pci_table);
+
+static DEFINE_SIMPLE_DEV_PM_OPS(xgbe_pci_pm_ops,
+				xgbe_pci_suspend,
+				xgbe_pci_resume);
 
 static struct pci_driver xgbe_driver = {
 	.name = XGBE_DRV_NAME,
 	.id_table = xgbe_pci_table,
 	.probe = xgbe_pci_probe,
 	.remove = xgbe_pci_remove,
-#ifdef CONFIG_PM
-	.suspend = xgbe_pci_suspend,
-	.resume = xgbe_pci_resume,
-#endif
+	.driver.pm = pm_sleep_ptr(&xgbe_pci_pm_ops),
 };
 
 int xgbe_pci_init(void)

@@ -4,7 +4,7 @@
  * Module Name: nsxfname - Public interfaces to the ACPI subsystem
  *                         ACPI Namespace oriented interfaces
  *
- * Copyright (C) 2000 - 2018, Intel Corp.
+ * Copyright (C) 2000 - 2026, Intel Corp.
  *
  *****************************************************************************/
 
@@ -44,7 +44,7 @@ static char *acpi_ns_copy_device_id(struct acpi_pnp_device_id *dest,
 
 acpi_status
 acpi_get_handle(acpi_handle parent,
-		acpi_string pathname, acpi_handle *ret_handle)
+		const char *pathname, acpi_handle *ret_handle)
 {
 	acpi_status status;
 	struct acpi_namespace_node *node = NULL;
@@ -425,8 +425,8 @@ acpi_get_object_info(acpi_handle handle,
 	}
 
 	if (cls) {
-		next_id_string = acpi_ns_copy_device_id(&info->class_code,
-							cls, next_id_string);
+		(void)acpi_ns_copy_device_id(&info->class_code,
+					     cls, next_id_string);
 	}
 
 	/* Copy the fixed-length data */
@@ -495,8 +495,8 @@ acpi_status acpi_install_method(u8 *buffer)
 
 	/* Table must be a DSDT or SSDT */
 
-	if (!ACPI_COMPARE_NAME(table->signature, ACPI_SIG_DSDT) &&
-	    !ACPI_COMPARE_NAME(table->signature, ACPI_SIG_SSDT)) {
+	if (!ACPI_COMPARE_NAMESEG(table->signature, ACPI_SIG_DSDT) &&
+	    !ACPI_COMPARE_NAMESEG(table->signature, ACPI_SIG_SSDT)) {
 		return (AE_BAD_HEADER);
 	}
 
@@ -512,11 +512,15 @@ acpi_status acpi_install_method(u8 *buffer)
 
 	parser_state.aml += acpi_ps_get_opcode_size(opcode);
 	parser_state.pkg_end = acpi_ps_get_next_package_end(&parser_state);
+	if ((parser_state.pkg_end > parser_state.aml_end) ||
+	    (parser_state.pkg_end < parser_state.aml)) {
+		return (AE_AML_PACKAGE_LIMIT);
+	}
 	path = acpi_ps_get_next_namestring(&parser_state);
 
 	method_flags = *parser_state.aml++;
 	aml_start = parser_state.aml;
-	aml_length = ACPI_PTR_DIFF(parser_state.pkg_end, aml_start);
+	aml_length = (u32)ACPI_PTR_DIFF(parser_state.pkg_end, aml_start);
 
 	/*
 	 * Allocate resources up-front. We don't want to have to delete a new
@@ -601,7 +605,7 @@ acpi_status acpi_install_method(u8 *buffer)
 error_exit:
 
 	ACPI_FREE(aml_buffer);
-	ACPI_FREE(method_obj);
+	acpi_ut_delete_object_desc(method_obj);
 	return (status);
 }
 ACPI_EXPORT_SYMBOL(acpi_install_method)

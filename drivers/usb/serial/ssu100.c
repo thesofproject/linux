@@ -9,14 +9,12 @@
 #include <linux/errno.h>
 #include <linux/slab.h>
 #include <linux/tty.h>
-#include <linux/tty_driver.h>
 #include <linux/tty_flip.h>
 #include <linux/module.h>
 #include <linux/serial.h>
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
 #include <linux/serial_reg.h>
-#include <linux/uaccess.h>
 
 #define QT_OPEN_CLOSE_CHANNEL       0xca
 #define QT_SET_GET_DEVICE           0xc2
@@ -104,7 +102,7 @@ static inline int ssu100_getregister(struct usb_device *dev,
 	ret = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0),
 			      QT_SET_GET_REGISTER, 0xc0, reg,
 			      uart, data, sizeof(*data), 300);
-	if (ret < sizeof(*data)) {
+	if (ret < (int)sizeof(*data)) {
 		if (ret >= 0)
 			ret = -EIO;
 	}
@@ -214,8 +212,8 @@ out:	kfree(data);
 
 
 static void ssu100_set_termios(struct tty_struct *tty,
-			       struct usb_serial_port *port,
-			       struct ktermios *old_termios)
+		               struct usb_serial_port *port,
+		               const struct ktermios *old_termios)
 {
 	struct usb_device *dev = port->serial->dev;
 	struct ktermios *termios = &tty->termios;
@@ -231,21 +229,7 @@ static void ssu100_set_termios(struct tty_struct *tty,
 			urb_value |= SERIAL_EVEN_PARITY;
 	}
 
-	switch (cflag & CSIZE) {
-	case CS5:
-		urb_value |= UART_LCR_WLEN5;
-		break;
-	case CS6:
-		urb_value |= UART_LCR_WLEN6;
-		break;
-	case CS7:
-		urb_value |= UART_LCR_WLEN7;
-		break;
-	default:
-	case CS8:
-		urb_value |= UART_LCR_WLEN8;
-		break;
-	}
+	urb_value |= UART_LCR_WLEN(tty_get_char_size(cflag));
 
 	baud = tty_get_baud_rate(tty);
 	if (!baud)
@@ -331,41 +315,6 @@ static int ssu100_open(struct tty_struct *tty, struct usb_serial_port *port)
 	return usb_serial_generic_open(tty, port);
 }
 
-static int get_serial_info(struct usb_serial_port *port,
-			   struct serial_struct __user *retinfo)
-{
-	struct serial_struct tmp;
-
-	memset(&tmp, 0, sizeof(tmp));
-	tmp.line		= port->minor;
-	tmp.port		= 0;
-	tmp.irq			= 0;
-	tmp.xmit_fifo_size	= port->bulk_out_size;
-	tmp.baud_base		= 9600;
-	tmp.close_delay		= 5*HZ;
-	tmp.closing_wait	= 30*HZ;
-
-	if (copy_to_user(retinfo, &tmp, sizeof(*retinfo)))
-		return -EFAULT;
-	return 0;
-}
-
-static int ssu100_ioctl(struct tty_struct *tty,
-		    unsigned int cmd, unsigned long arg)
-{
-	struct usb_serial_port *port = tty->driver_data;
-
-	switch (cmd) {
-	case TIOCGSERIAL:
-		return get_serial_info(port,
-				       (struct serial_struct __user *) arg);
-	default:
-		break;
-	}
-
-	return -ENOIOCTLCMD;
-}
-
 static int ssu100_attach(struct usb_serial *serial)
 {
 	return ssu100_initdevice(serial->dev);
@@ -375,7 +324,7 @@ static int ssu100_port_probe(struct usb_serial_port *port)
 {
 	struct ssu100_port_private *priv;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc_obj(*priv);
 	if (!priv)
 		return -ENOMEM;
 
@@ -386,14 +335,12 @@ static int ssu100_port_probe(struct usb_serial_port *port)
 	return 0;
 }
 
-static int ssu100_port_remove(struct usb_serial_port *port)
+static void ssu100_port_remove(struct usb_serial_port *port)
 {
 	struct ssu100_port_private *priv;
 
 	priv = usb_get_serial_port_data(port);
 	kfree(priv);
-
-	return 0;
 }
 
 static int ssu100_tiocmget(struct tty_struct *tty)
@@ -515,7 +462,7 @@ static void ssu100_update_lsr(struct usb_serial_port *port, u8 lsr,
 static void ssu100_process_read_urb(struct urb *urb)
 {
 	struct usb_serial_port *port = urb->context;
-	char *packet = (char *)urb->transfer_buffer;
+	char *packet = urb->transfer_buffer;
 	char flag = TTY_NORMAL;
 	u32 len = urb->actual_length;
 	int i;
@@ -537,20 +484,20 @@ static void ssu100_process_read_urb(struct urb *urb)
 	if (!len)
 		return;	/* status only */
 
-	if (port->port.console && port->sysrq) {
+	if (port->sysrq) {
 		for (i = 0; i < len; i++, ch++) {
 			if (!usb_serial_handle_sysrq_char(port, *ch))
 				tty_insert_flip_char(&port->port, *ch, flag);
 		}
-	} else
+	} else {
 		tty_insert_flip_string_fixed_flag(&port->port, ch, flag, len);
+	}
 
 	tty_flip_buffer_push(&port->port);
 }
 
 static struct usb_serial_driver ssu100_device = {
 	.driver = {
-		.owner = THIS_MODULE,
 		.name = "ssu100",
 	},
 	.description	     = DRIVER_DESC,
@@ -566,7 +513,6 @@ static struct usb_serial_driver ssu100_device = {
 	.tiocmset            = ssu100_tiocmset,
 	.tiocmiwait          = usb_serial_generic_tiocmiwait,
 	.get_icount	     = usb_serial_generic_get_icount,
-	.ioctl               = ssu100_ioctl,
 	.set_termios         = ssu100_set_termios,
 };
 

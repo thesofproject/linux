@@ -1,18 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for the NXP SAA7164 PCIe bridge
  *
  *  Copyright (c) 2010-2015 Steven Toth <stoth@kernellabs.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *
- *  GNU General Public License for more details.
  */
 
 #include <linux/wait.h>
@@ -197,7 +187,6 @@ static int saa7164_cmd_set(struct saa7164_dev *dev, struct tmComResInfo *msg,
 	mutex_lock(&dev->cmds[msg->id].lock);
 
 	size = msg->size;
-	idx = 0;
 	cmds = size / bus->m_wMaxReqSize;
 	if (size % bus->m_wMaxReqSize == 0)
 		cmds -= 1;
@@ -304,34 +293,6 @@ static int saa7164_cmd_wait(struct saa7164_dev *dev, u8 seqno)
 			__func__, seqno);
 
 	return ret;
-}
-
-void saa7164_cmd_signal(struct saa7164_dev *dev, u8 seqno)
-{
-	int i;
-	dprintk(DBGLVL_CMD, "%s()\n", __func__);
-
-	mutex_lock(&dev->lock);
-	for (i = 0; i < SAA_CMD_MAX_MSG_UNITS; i++) {
-		if (dev->cmds[i].inuse == 1) {
-			dprintk(DBGLVL_CMD,
-				"seqno %d inuse, sig = %d, t/out = %d\n",
-				dev->cmds[i].seqno,
-				dev->cmds[i].signalled,
-				dev->cmds[i].timeout);
-		}
-	}
-
-	for (i = 0; i < SAA_CMD_MAX_MSG_UNITS; i++) {
-		if ((dev->cmds[i].inuse == 1) && ((i == 0) ||
-			(dev->cmds[i].signalled) || (dev->cmds[i].timeout))) {
-			dprintk(DBGLVL_CMD, "%s(seqno=%d) calling wake_up\n",
-				__func__, i);
-			dev->cmds[i].signalled = 1;
-			wake_up(&dev->cmds[i].wait);
-		}
-	}
-	mutex_unlock(&dev->lock);
 }
 
 int saa7164_cmd_send(struct saa7164_dev *dev, u8 id, enum tmComResCmd command,
@@ -559,9 +520,6 @@ int saa7164_cmd_send(struct saa7164_dev *dev, u8 id, enum tmComResCmd command,
 		/* See of other commands are on the bus */
 		if (saa7164_cmd_dequeue(dev) != SAA_OK)
 			printk(KERN_ERR "dequeue(3) failed\n");
-
-		continue;
-
 	} /* (loop) */
 
 	/* Release the sequence number allocation */

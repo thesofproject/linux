@@ -1,15 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * arch/sh/kernel/cpu/sh2a/opcode_helper.c
  *
  * Helper for the SH-2A 32-bit opcodes.
  *
  *  Copyright (C) 2007  Paul Mundt
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/kernel.h>
+
+#include <asm/processor.h>
 
 /*
  * Instructions on SH are generally fixed at 16-bits, however, SH-2A

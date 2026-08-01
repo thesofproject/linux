@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Generic heartbeat driver for regular LED banks
  *
@@ -13,10 +14,6 @@
  * traditionally used for strobing the load average. This use case is
  * handled by this driver, rather than giving each LED bit position its
  * own struct device.
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -61,7 +58,7 @@ static inline void heartbeat_toggle_bit(struct heartbeat_data *hd,
 
 static void heartbeat_timer(struct timer_list *t)
 {
-	struct heartbeat_data *hd = from_timer(hd, t, timer);
+	struct heartbeat_data *hd = timer_container_of(hd, t, timer);
 	static unsigned bit = 0, up = 1;
 
 	heartbeat_toggle_bit(hd, bit, hd->flags & HEARTBEAT_INVERTED);
@@ -94,12 +91,12 @@ static int heartbeat_drv_probe(struct platform_device *pdev)
 	if (pdev->dev.platform_data) {
 		hd = pdev->dev.platform_data;
 	} else {
-		hd = kzalloc(sizeof(struct heartbeat_data), GFP_KERNEL);
+		hd = kzalloc_obj(struct heartbeat_data);
 		if (unlikely(!hd))
 			return -ENOMEM;
 	}
 
-	hd->base = ioremap_nocache(res->start, resource_size(res));
+	hd->base = ioremap(res->start, resource_size(res));
 	if (unlikely(!hd->base)) {
 		dev_err(&pdev->dev, "ioremap failed\n");
 

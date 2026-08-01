@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This module is used to copy security markings from packets
  * to connections, and restore security markings from connections
@@ -5,15 +6,10 @@
  * with the SECMARK target and state match.
  *
  * Based somewhat on CONNMARK:
- *   Copyright (C) 2002,2004 MARA Systems AB <http://www.marasystems.com>
+ *   Copyright (C) 2002,2004 MARA Systems AB <https://www.marasystems.com>
  *    by Henrik Nordstrom <hno@marasystems.com>
  *
  * (C) 2006,2008 Red Hat, Inc., James Morris <jmorris@redhat.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/module.h>
@@ -118,25 +114,39 @@ static void connsecmark_tg_destroy(const struct xt_tgdtor_param *par)
 	nf_ct_netns_put(par->net, par->family);
 }
 
-static struct xt_target connsecmark_tg_reg __read_mostly = {
-	.name       = "CONNSECMARK",
-	.revision   = 0,
-	.family     = NFPROTO_UNSPEC,
-	.checkentry = connsecmark_tg_check,
-	.destroy    = connsecmark_tg_destroy,
-	.target     = connsecmark_tg,
-	.targetsize = sizeof(struct xt_connsecmark_target_info),
-	.me         = THIS_MODULE,
+static struct xt_target connsecmark_tg_reg[] __read_mostly = {
+	{
+		.name       = "CONNSECMARK",
+		.revision   = 0,
+		.family     = NFPROTO_IPV4,
+		.checkentry = connsecmark_tg_check,
+		.destroy    = connsecmark_tg_destroy,
+		.target     = connsecmark_tg,
+		.targetsize = sizeof(struct xt_connsecmark_target_info),
+		.me         = THIS_MODULE,
+	},
+#if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
+	{
+		.name       = "CONNSECMARK",
+		.revision   = 0,
+		.family     = NFPROTO_IPV6,
+		.checkentry = connsecmark_tg_check,
+		.destroy    = connsecmark_tg_destroy,
+		.target     = connsecmark_tg,
+		.targetsize = sizeof(struct xt_connsecmark_target_info),
+		.me         = THIS_MODULE,
+	},
+#endif
 };
 
 static int __init connsecmark_tg_init(void)
 {
-	return xt_register_target(&connsecmark_tg_reg);
+	return xt_register_targets(connsecmark_tg_reg, ARRAY_SIZE(connsecmark_tg_reg));
 }
 
 static void __exit connsecmark_tg_exit(void)
 {
-	xt_unregister_target(&connsecmark_tg_reg);
+	xt_unregister_targets(connsecmark_tg_reg, ARRAY_SIZE(connsecmark_tg_reg));
 }
 
 module_init(connsecmark_tg_init);

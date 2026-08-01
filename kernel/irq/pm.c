@@ -13,17 +13,13 @@
 
 #include "internals.h"
 
-bool irq_pm_check_wakeup(struct irq_desc *desc)
+void irq_pm_handle_wakeup(struct irq_desc *desc)
 {
-	if (irqd_is_wakeup_armed(&desc->irq_data)) {
-		irqd_clear(&desc->irq_data, IRQD_WAKEUP_ARMED);
-		desc->istate |= IRQS_SUSPENDED | IRQS_PENDING;
-		desc->depth++;
-		irq_disable(desc);
-		pm_system_irq_wakeup(irq_desc_get_irq(desc));
-		return true;
-	}
-	return false;
+	irqd_clear(&desc->irq_data, IRQD_WAKEUP_ARMED);
+	desc->istate |= IRQS_SUSPENDED | IRQS_PENDING;
+	desc->depth++;
+	irq_disable(desc);
+	pm_system_irq_wakeup(irq_desc_get_irq(desc));
 }
 
 /*
@@ -46,8 +42,7 @@ void irq_pm_install_action(struct irq_desc *desc, struct irqaction *action)
 		desc->cond_suspend_depth++;
 
 	WARN_ON_ONCE(desc->no_suspend_depth &&
-		     (desc->no_suspend_depth +
-			desc->cond_suspend_depth) != desc->nr_actions);
+		     (desc->no_suspend_depth + desc->cond_suspend_depth) != desc->nr_actions);
 }
 
 /*
@@ -69,12 +64,26 @@ void irq_pm_remove_action(struct irq_desc *desc, struct irqaction *action)
 
 static bool suspend_device_irq(struct irq_desc *desc)
 {
+	unsigned long chipflags = irq_desc_get_chip(desc)->flags;
+	struct irq_data *irqd = &desc->irq_data;
+
 	if (!desc->action || irq_desc_is_chained(desc) ||
 	    desc->no_suspend_depth)
 		return false;
 
-	if (irqd_is_wakeup_set(&desc->irq_data)) {
-		irqd_set(&desc->irq_data, IRQD_WAKEUP_ARMED);
+	if (irqd_is_wakeup_set(irqd)) {
+		irqd_set(irqd, IRQD_WAKEUP_ARMED);
+
+		if ((chipflags & IRQCHIP_ENABLE_WAKEUP_ON_SUSPEND) &&
+		     irqd_irq_disabled(irqd)) {
+			/*
+			 * Interrupt marked for wakeup is in disabled state.
+			 * Enable interrupt here to unmask/enable in irqchip
+			 * to be able to resume with such interrupts.
+			 */
+			__enable_irq(desc);
+			irqd_set(irqd, IRQD_IRQ_ENABLED_ON_SUSPEND);
+		}
 		/*
 		 * We return true here to force the caller to issue
 		 * synchronize_irq(). We need to make sure that the
@@ -93,7 +102,7 @@ static bool suspend_device_irq(struct irq_desc *desc)
 	 * chip level. The chip implementation indicates that with
 	 * IRQCHIP_MASK_ON_SUSPEND.
 	 */
-	if (irq_desc_get_chip(desc)->flags & IRQCHIP_MASK_ON_SUSPEND)
+	if (chipflags & IRQCHIP_MASK_ON_SUSPEND)
 		mask_irq(desc);
 	return true;
 }
@@ -120,24 +129,33 @@ void suspend_device_irqs(void)
 	int irq;
 
 	for_each_irq_desc(irq, desc) {
-		unsigned long flags;
 		bool sync;
 
 		if (irq_settings_is_nested_thread(desc))
 			continue;
-		raw_spin_lock_irqsave(&desc->lock, flags);
-		sync = suspend_device_irq(desc);
-		raw_spin_unlock_irqrestore(&desc->lock, flags);
+		scoped_guard(raw_spinlock_irqsave, &desc->lock)
+			sync = suspend_device_irq(desc);
 
 		if (sync)
 			synchronize_irq(irq);
 	}
 }
-EXPORT_SYMBOL_GPL(suspend_device_irqs);
 
 static void resume_irq(struct irq_desc *desc)
 {
-	irqd_clear(&desc->irq_data, IRQD_WAKEUP_ARMED);
+	struct irq_data *irqd = &desc->irq_data;
+
+	irqd_clear(irqd, IRQD_WAKEUP_ARMED);
+
+	if (irqd_is_enabled_on_suspend(irqd)) {
+		/*
+		 * Interrupt marked for wakeup was enabled during suspend
+		 * entry. Disable such interrupts to restore them back to
+		 * original state.
+		 */
+		__disable_irq(desc);
+		irqd_clear(irqd, IRQD_IRQ_ENABLED_ON_SUSPEND);
+	}
 
 	if (desc->istate & IRQS_SUSPENDED)
 		goto resume;
@@ -161,38 +179,58 @@ static void resume_irqs(bool want_early)
 	int irq;
 
 	for_each_irq_desc(irq, desc) {
-		unsigned long flags;
-		bool is_early = desc->action &&
-			desc->action->flags & IRQF_EARLY_RESUME;
+		bool is_early = desc->action &&	desc->action->flags & IRQF_EARLY_RESUME;
 
 		if (!is_early && want_early)
 			continue;
 		if (irq_settings_is_nested_thread(desc))
 			continue;
 
-		raw_spin_lock_irqsave(&desc->lock, flags);
+		guard(raw_spinlock_irqsave)(&desc->lock);
 		resume_irq(desc);
-		raw_spin_unlock_irqrestore(&desc->lock, flags);
 	}
 }
 
 /**
- * irq_pm_syscore_ops - enable interrupt lines early
+ * rearm_wake_irq - rearm a wakeup interrupt line after signaling wakeup
+ * @irq: Interrupt to rearm
+ */
+void rearm_wake_irq(unsigned int irq)
+{
+	scoped_irqdesc_get_and_buslock(irq, IRQ_GET_DESC_CHECK_GLOBAL) {
+		struct irq_desc *desc = scoped_irqdesc;
+
+		if (!(desc->istate & IRQS_SUSPENDED) || !irqd_is_wakeup_set(&desc->irq_data))
+			return;
+
+		desc->istate &= ~IRQS_SUSPENDED;
+		irqd_set(&desc->irq_data, IRQD_WAKEUP_ARMED);
+		__enable_irq(desc);
+	}
+}
+
+/**
+ * irq_pm_syscore_resume - enable interrupt lines early
+ * @data: syscore context
  *
  * Enable all interrupt lines with %IRQF_EARLY_RESUME set.
  */
-static void irq_pm_syscore_resume(void)
+static void irq_pm_syscore_resume(void *data)
 {
 	resume_irqs(true);
 }
 
-static struct syscore_ops irq_pm_syscore_ops = {
+static const struct syscore_ops irq_pm_syscore_ops = {
 	.resume		= irq_pm_syscore_resume,
+};
+
+static struct syscore irq_pm_syscore = {
+	.ops = &irq_pm_syscore_ops,
 };
 
 static int __init irq_pm_init_ops(void)
 {
-	register_syscore_ops(&irq_pm_syscore_ops);
+	register_syscore(&irq_pm_syscore);
 	return 0;
 }
 
@@ -209,4 +247,3 @@ void resume_device_irqs(void)
 {
 	resume_irqs(false);
 }
-EXPORT_SYMBOL_GPL(resume_device_irqs);

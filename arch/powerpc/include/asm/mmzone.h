@@ -18,13 +18,7 @@
  *    flags field of the struct page
  */
 
-#ifdef CONFIG_NEED_MULTIPLE_NODES
-
-extern struct pglist_data *node_data[];
-/*
- * Return a pointer to the node data for node n.
- */
-#define NODE_DATA(nid)		(node_data[nid])
+#ifdef CONFIG_NUMA
 
 /*
  * Following are specific to this numa platform.
@@ -35,16 +29,14 @@ extern cpumask_var_t node_to_cpumask_map[];
 #ifdef CONFIG_MEMORY_HOTPLUG
 extern unsigned long max_pfn;
 u64 memory_hotplug_max(void);
+u64 hot_add_drconf_memory_max(void);
 #else
 #define memory_hotplug_max() memblock_end_of_DRAM()
 #endif
 
 #else
 #define memory_hotplug_max() memblock_end_of_DRAM()
-#endif /* CONFIG_NEED_MULTIPLE_NODES */
-#ifdef CONFIG_FA_DUMP
-#define __HAVE_ARCH_RESERVED_KERNEL_PAGES
-#endif
+#endif /* CONFIG_NUMA */
 
 #endif /* __KERNEL__ */
 #endif /* _ASM_MMZONE_H_ */

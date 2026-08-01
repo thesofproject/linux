@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Freescale MPC85xx/MPC86xx RapidIO RMU support
  *
@@ -17,18 +18,13 @@
  *
  * Copyright 2005 MontaVista Software, Inc.
  * Matt Porter <mporter@kernel.crashing.org>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/types.h>
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
+#include <linux/of_address.h>
 #include <linux/of_irq.h>
-#include <linux/of_platform.h>
 #include <linux/slab.h>
 
 #include "fsl_rio.h"
@@ -363,7 +359,7 @@ out:
 	return IRQ_HANDLED;
 }
 
-void msg_unit_error_handler(void)
+static void msg_unit_error_handler(void)
 {
 
 	/*XXX: Error recovery is not implemented, we just clear errors */
@@ -757,14 +753,13 @@ fsl_open_outb_mbox(struct rio_mport *mport, void *dev_id, int mbox, int entries)
 
 	/* Initialize outbound message descriptor ring */
 	rmu->msg_tx_ring.virt = dma_alloc_coherent(priv->dev,
-				rmu->msg_tx_ring.size * RIO_MSG_DESC_SIZE,
-				&rmu->msg_tx_ring.phys, GFP_KERNEL);
+						   rmu->msg_tx_ring.size * RIO_MSG_DESC_SIZE,
+						   &rmu->msg_tx_ring.phys,
+						   GFP_KERNEL);
 	if (!rmu->msg_tx_ring.virt) {
 		rc = -ENOMEM;
 		goto out_dma;
 	}
-	memset(rmu->msg_tx_ring.virt, 0,
-			rmu->msg_tx_ring.size * RIO_MSG_DESC_SIZE);
 	rmu->msg_tx_ring.tx_slot = 0;
 
 	/* Point dequeue/enqueue pointers at first entry in ring */
@@ -1072,9 +1067,6 @@ int fsl_rio_setup_rmu(struct rio_mport *mport, struct device_node *node)
 	struct rio_priv *priv;
 	struct fsl_rmu *rmu;
 	u64 msg_start;
-	const u32 *msg_addr;
-	int mlen;
-	int aw;
 
 	if (!mport || !mport->priv)
 		return -EINVAL;
@@ -1087,20 +1079,16 @@ int fsl_rio_setup_rmu(struct rio_mport *mport, struct device_node *node)
 		return -EINVAL;
 	}
 
-	rmu = kzalloc(sizeof(struct fsl_rmu), GFP_KERNEL);
+	rmu = kzalloc_obj(struct fsl_rmu);
 	if (!rmu)
 		return -ENOMEM;
 
-	aw = of_n_addr_cells(node);
-	msg_addr = of_get_property(node, "reg", &mlen);
-	if (!msg_addr) {
+	if (of_property_read_reg(node, 0, &msg_start, NULL)) {
 		pr_err("%pOF: unable to find 'reg' property of message-unit\n",
 			node);
 		kfree(rmu);
 		return -ENOMEM;
 	}
-	msg_start = of_read_number(msg_addr, aw);
-
 	rmu->msg_regs = (struct rio_msg_regs *)
 			(rmu_regs_win + (u32)msg_start);
 

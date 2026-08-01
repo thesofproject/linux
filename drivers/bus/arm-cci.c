@@ -371,8 +371,6 @@ asmlinkage void __naked cci_enable_port_for_self(void)
 	[sizeof_struct_cpu_port] "i" (sizeof(struct cpu_port)),
 	[sizeof_struct_ace_port] "i" (sizeof(struct cci_ace_port)),
 	[offsetof_port_phys] "i" (offsetof(struct cci_ace_port, phys)) );
-
-	unreachable();
 }
 
 /**
@@ -453,7 +451,7 @@ static int cci_probe_ports(struct device_node *np)
 
 	nb_cci_ports = cci_config->nb_ace + cci_config->nb_ace_lite;
 
-	ports = kcalloc(nb_cci_ports, sizeof(*ports), GFP_KERNEL);
+	ports = kzalloc_objs(*ports, nb_cci_ports);
 	if (!ports)
 		return -ENOMEM;
 

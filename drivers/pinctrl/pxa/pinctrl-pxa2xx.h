@@ -1,12 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Marvell PXA2xx family pin control
  *
  * Copyright (C) 2015 Robert Jarzmik
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
  */
 
 #ifndef __PINCTRL_PXA_H
@@ -56,17 +52,6 @@ struct pxa_desc_pin {
 	struct pxa_desc_function	*functions;
 };
 
-struct pxa_pinctrl_group {
-	const char	*name;
-	unsigned	pin;
-};
-
-struct pxa_pinctrl_function {
-	const char	*name;
-	const char	**groups;
-	unsigned	ngroups;
-};
-
 struct pxa_pinctrl {
 	spinlock_t			lock;
 	void __iomem			**base_gafr;
@@ -78,9 +63,9 @@ struct pxa_pinctrl {
 	unsigned			npins;
 	const struct pxa_desc_pin	*ppins;
 	unsigned			ngroups;
-	struct pxa_pinctrl_group	*groups;
+	struct pingroup			*groups;
 	unsigned			nfuncs;
-	struct pxa_pinctrl_function	*functions;
+	struct pinfunction		*functions;
 	char				*name;
 };
 

@@ -153,6 +153,10 @@ struct embedded_panel_info {
 	uint32_t drr_enabled;
 	uint32_t min_drr_refresh_rate;
 	bool realtek_eDPToLVDS;
+	uint16_t panel_width_mm;
+	uint16_t panel_height_mm;
+	uint16_t fake_edid_size;
+	const uint8_t *fake_edid;
 };
 
 struct dc_firmware_info {
@@ -169,6 +173,7 @@ struct dc_firmware_info {
 		uint32_t engine_clk_ss_percentage;
 	} feature;
 
+	uint32_t max_pixel_clock; /* in KHz */
 	uint32_t default_display_engine_pll_frequency; /* in KHz */
 	uint32_t external_clock_source_frequency_for_dp; /* in KHz */
 	uint32_t smu_gpu_pll_output_freq; /* in KHz */
@@ -178,8 +183,14 @@ struct dc_firmware_info {
 	uint32_t default_engine_clk; /* in KHz */
 	uint32_t dp_phy_ref_clk; /* in KHz - DCE12 only */
 	uint32_t i2c_engine_ref_clk; /* in KHz - DCE12 only */
+	bool oem_i2c_present;
+	uint8_t oem_i2c_obj_id;
 
+};
 
+struct dc_vram_info {
+	unsigned int num_chans;
+	unsigned int dram_channel_width_bytes;
 };
 
 struct step_and_delay_info {
@@ -262,7 +273,6 @@ struct transmitter_configuration {
 #define NUMBER_OF_UCHAR_FOR_GUID 16
 #define MAX_NUMBER_OF_EXT_DISPLAY_PATH 7
 #define NUMBER_OF_CSR_M3_ARB 10
-#define NUMBER_OF_DISP_CLK_VOLTAGE 4
 #define NUMBER_OF_AVAILABLE_SCLK 5
 
 struct i2c_reg_info {
@@ -278,17 +288,19 @@ struct ext_hdmi_settings {
 	struct i2c_reg_info      reg_settings_6g[3];
 };
 
+struct edp_info {
+	uint16_t edp_backlight_pwm_hz;
+	uint16_t edp_ss_percentage;
+	uint16_t edp_ss_rate_10hz;
+	uint8_t  edp_pwr_on_off_delay;
+	uint8_t  edp_pwr_on_vary_bl_to_blon;
+	uint8_t  edp_pwr_down_bloff_to_vary_bloff;
+	uint8_t  edp_panel_bpc;
+	uint8_t  edp_bootup_bl_level;
+};
 
 /* V6 */
 struct integrated_info {
-	struct clock_voltage_caps {
-		/* The Voltage Index indicated by FUSE, same voltage index
-		shared with SCLK DPM fuse table */
-		uint32_t voltage_index;
-		/* Maximum clock supported with specified voltage index */
-		uint32_t max_supported_clk; /* in KHz */
-	} disp_clk_voltage[NUMBER_OF_DISP_CLK_VOLTAGE];
-
 	struct display_connection_info {
 		struct external_display_path {
 			/* A bit vector to show what devices are supported */
@@ -312,6 +324,7 @@ struct integrated_info {
 
 		uint8_t gu_id[NUMBER_OF_UCHAR_FOR_GUID];
 		uint8_t checksum;
+		uint8_t fixdpvoltageswing;
 	} ext_disp_conn_info; /* exiting long long time */
 
 	struct available_s_clk_list {
@@ -395,34 +408,19 @@ struct integrated_info {
 	struct i2c_reg_info dp3_ext_hdmi_reg_settings[9];
 	unsigned char dp3_ext_hdmi_6g_reg_num;
 	struct i2c_reg_info dp3_ext_hdmi_6g_reg_settings[3];
-};
-
-/**
-* Power source ids.
-*/
-enum power_source {
-	POWER_SOURCE_AC = 0,
-	POWER_SOURCE_DC,
-	POWER_SOURCE_LIMITED_POWER,
-	POWER_SOURCE_LIMITED_POWER_2,
-	POWER_SOURCE_MAX
-};
-
-struct bios_event_info {
-	uint32_t thermal_state;
-	uint32_t backlight_level;
-	enum power_source powerSource;
-	bool has_thermal_state_changed;
-	bool has_power_source_changed;
-	bool has_forced_mode_changed;
-	bool forced_mode;
-	bool backlight_changed;
+	/* V11 */
+	uint32_t dp_ss_control;
+	/* V2.1 */
+	struct edp_info edp1_info;
+	struct edp_info edp2_info;
+	uint32_t gpuclk_ss_percentage;
+	uint32_t gpuclk_ss_type;
 };
 
 /*
  * DFS-bypass flag
  */
-/* Copy of SYS_INFO_GPUCAPS__ENABEL_DFS_BYPASS from atombios.h */
+/* Copy of SYS_INFO_GPUCAPS__ENABLE_DFS_BYPASS from atombios.h */
 enum {
 	DFS_BYPASS_ENABLE = 0x10
 };

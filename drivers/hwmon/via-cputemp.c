@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * via-cputemp.c - Driver for VIA CPU core temperature monitoring
  * Copyright (C) 2009 VIA Technologies, Inc.
@@ -5,20 +6,6 @@
  * based on existing coretemp.c, which is
  *
  * Copyright (C) 2007 Rudolf Marek <r.marek@assembler.cz>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301 USA.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -60,8 +47,8 @@ struct via_cputemp_data {
  * Sysfs stuff
  */
 
-static ssize_t show_name(struct device *dev, struct device_attribute
-			  *devattr, char *buf)
+static ssize_t name_show(struct device *dev, struct device_attribute *devattr,
+			 char *buf)
 {
 	int ret;
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
@@ -74,38 +61,37 @@ static ssize_t show_name(struct device *dev, struct device_attribute
 	return ret;
 }
 
-static ssize_t show_temp(struct device *dev,
-			 struct device_attribute *devattr, char *buf)
+static ssize_t temp_show(struct device *dev, struct device_attribute *devattr,
+			 char *buf)
 {
 	struct via_cputemp_data *data = dev_get_drvdata(dev);
-	u32 eax, edx;
+	u64 val;
 	int err;
 
-	err = rdmsr_safe_on_cpu(data->id, data->msr_temp, &eax, &edx);
+	err = rdmsrq_safe_on_cpu(data->id, data->msr_temp, &val);
 	if (err)
 		return -EAGAIN;
 
-	return sprintf(buf, "%lu\n", ((unsigned long)eax & 0xffffff) * 1000);
+	return sprintf(buf, "%lu\n", ((unsigned long)val & 0xffffff) * 1000);
 }
 
 static ssize_t cpu0_vid_show(struct device *dev,
 			     struct device_attribute *devattr, char *buf)
 {
 	struct via_cputemp_data *data = dev_get_drvdata(dev);
-	u32 eax, edx;
+	u64 val;
 	int err;
 
-	err = rdmsr_safe_on_cpu(data->id, data->msr_vid, &eax, &edx);
+	err = rdmsrq_safe_on_cpu(data->id, data->msr_vid, &val);
 	if (err)
 		return -EAGAIN;
 
-	return sprintf(buf, "%d\n", vid_from_reg(~edx & 0x7f, data->vrm));
+	return sprintf(buf, "%d\n", vid_from_reg(~(val >> 32) & 0x7f, data->vrm));
 }
 
-static SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO, show_temp, NULL,
-			  SHOW_TEMP);
-static SENSOR_DEVICE_ATTR(temp1_label, S_IRUGO, show_name, NULL, SHOW_LABEL);
-static SENSOR_DEVICE_ATTR(name, S_IRUGO, show_name, NULL, SHOW_NAME);
+static SENSOR_DEVICE_ATTR_RO(temp1_input, temp, SHOW_TEMP);
+static SENSOR_DEVICE_ATTR_RO(temp1_label, name, SHOW_LABEL);
+static SENSOR_DEVICE_ATTR_RO(name, name, SHOW_NAME);
 
 static struct attribute *via_cputemp_attributes[] = {
 	&sensor_dev_attr_name.dev_attr.attr,
@@ -126,7 +112,7 @@ static int via_cputemp_probe(struct platform_device *pdev)
 	struct via_cputemp_data *data;
 	struct cpuinfo_x86 *c = &cpu_data(pdev->id);
 	int err;
-	u32 eax, edx;
+	u64 val;
 
 	data = devm_kzalloc(&pdev->dev, sizeof(struct via_cputemp_data),
 			    GFP_KERNEL);
@@ -157,7 +143,7 @@ static int via_cputemp_probe(struct platform_device *pdev)
 	}
 
 	/* test if we can access the TEMPERATURE MSR */
-	err = rdmsr_safe_on_cpu(data->id, data->msr_temp, &eax, &edx);
+	err = rdmsrq_safe_on_cpu(data->id, data->msr_temp, &val);
 	if (err) {
 		dev_err(&pdev->dev,
 			"Unable to access TEMPERATURE MSR, giving up\n");
@@ -196,7 +182,7 @@ exit_remove:
 	return err;
 }
 
-static int via_cputemp_remove(struct platform_device *pdev)
+static void via_cputemp_remove(struct platform_device *pdev)
 {
 	struct via_cputemp_data *data = platform_get_drvdata(pdev);
 
@@ -204,7 +190,6 @@ static int via_cputemp_remove(struct platform_device *pdev)
 	if (data->vrm)
 		device_remove_file(&pdev->dev, &dev_attr_cpu0_vid);
 	sysfs_remove_group(&pdev->dev.kobj, &via_cputemp_group);
-	return 0;
 }
 
 static struct platform_driver via_cputemp_driver = {
@@ -237,7 +222,7 @@ static int via_cputemp_online(unsigned int cpu)
 		goto exit;
 	}
 
-	pdev_entry = kzalloc(sizeof(struct pdev_entry), GFP_KERNEL);
+	pdev_entry = kzalloc_obj(struct pdev_entry);
 	if (!pdev_entry) {
 		err = -ENOMEM;
 		goto exit_device_put;
@@ -284,10 +269,10 @@ static int via_cputemp_down_prep(unsigned int cpu)
 }
 
 static const struct x86_cpu_id __initconst cputemp_ids[] = {
-	{ X86_VENDOR_CENTAUR, 6, 0xa, }, /* C7 A */
-	{ X86_VENDOR_CENTAUR, 6, 0xd, }, /* C7 D */
-	{ X86_VENDOR_CENTAUR, 6, 0xf, }, /* Nano */
-	{ X86_VENDOR_CENTAUR, 7, X86_MODEL_ANY, },
+	X86_MATCH_VENDOR_FAM_MODEL(CENTAUR, 6, X86_CENTAUR_FAM6_C7_A,	NULL),
+	X86_MATCH_VENDOR_FAM_MODEL(CENTAUR, 6, X86_CENTAUR_FAM6_C7_D,	NULL),
+	X86_MATCH_VENDOR_FAM_MODEL(CENTAUR, 6, X86_CENTAUR_FAM6_NANO,	NULL),
+	X86_MATCH_VENDOR_FAM_MODEL(CENTAUR, 7, X86_MODEL_ANY,		NULL),
 	{}
 };
 MODULE_DEVICE_TABLE(x86cpu, cputemp_ids);

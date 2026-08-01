@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * This file is part of wl12xx
  *
@@ -5,21 +6,6 @@
  * Copyright (C) 2009 Nokia Corporation
  *
  * Contact: Luciano Coelho <luciano.coelho@nokia.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #ifndef __REG_H__
@@ -153,7 +139,7 @@
  Halt eCPU   - 32bit RW
  ------------------------------------------
  0 HALT_ECPU Halt Embedded CPU - This bit is the
- compliment of bit 1 (MDATA2) in the SOR_CFG register.
+ complement of bit 1 (MDATA2) in the SOR_CFG register.
  During a hardware reset, this bit holds
  the inverse of MDATA2.
  When downloading firmware from the host,
@@ -182,7 +168,7 @@
  the burst read starts at EEPROM address 0.
  Otherwise, it starts at the address
  following the address of the previous access.
- TheWlan hardware hardware clears this bit automatically.
+ TheWlan hardware clears this bit automatically.
 
  Default: 0x00000000
 *================================================*/
@@ -290,13 +276,13 @@
  loads a single byte of data into the EE_DATA
  register from the EEPROM location specified in
  the EE_ADDR register.
- The Wlan hardware hardware clears this bit automatically.
+ The Wlan hardware clears this bit automatically.
  EE_DATA is valid when this bit is cleared.
 
  0 EE_WRITE  - EEPROM Write Request  - Setting this bit
  writes a single byte of data from the EE_DATA register into the
  EEPROM location specified in the EE_ADDR register.
- The Wlan hardware hardware clears this bit automatically.
+ The Wlan hardware clears this bit automatically.
 *===============================================*/
 #define ACX_EE_CTL_REG                      EE_CTL
 #define EE_WRITE                            0x00000001ul

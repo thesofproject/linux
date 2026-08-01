@@ -1,17 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
- * bmap.h - NILFS block mapping.
+ * NILFS block mapping.
  *
  * Copyright (C) 2006-2008 Nippon Telegraph and Telephone Corporation.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * Written by Koji Sato.
  */
@@ -53,6 +44,19 @@ struct nilfs_bmap_stats {
 
 /**
  * struct nilfs_bmap_operations - bmap operation table
+ * @bop_lookup:               single block search operation
+ * @bop_lookup_contig:        consecutive block search operation
+ * @bop_insert:               block insertion operation
+ * @bop_delete:               block delete operation
+ * @bop_clear:                block mapping resource release operation
+ * @bop_propagate:            operation to propagate dirty state towards the
+ *                            mapping root
+ * @bop_lookup_dirty_buffers: operation to collect dirty block buffers
+ * @bop_assign:               disk block address assignment operation
+ * @bop_mark:                 operation to mark in-use blocks as dirty for
+ *                            relocation by GC
+ * @bop_seek_key:             find valid block key operation
+ * @bop_last_key:             find last valid block key operation
  */
 struct nilfs_bmap_operations {
 	int (*bop_lookup)(const struct nilfs_bmap *, __u64, int, __u64 *);
@@ -75,7 +79,7 @@ struct nilfs_bmap_operations {
 	int (*bop_seek_key)(const struct nilfs_bmap *, __u64, __u64 *);
 	int (*bop_last_key)(const struct nilfs_bmap *, __u64 *);
 
-	/* The following functions are internal use only. */
+	/* private: internal use only */
 	int (*bop_check_insert)(const struct nilfs_bmap *, __u64);
 	int (*bop_check_delete)(struct nilfs_bmap *, __u64);
 	int (*bop_gather_data)(struct nilfs_bmap *, __u64 *, __u64 *, int);
@@ -83,9 +87,8 @@ struct nilfs_bmap_operations {
 
 
 #define NILFS_BMAP_SIZE		(NILFS_INODE_BMAP_SIZE * sizeof(__le64))
-#define NILFS_BMAP_KEY_BIT	(sizeof(unsigned long) * 8 /* CHAR_BIT */)
-#define NILFS_BMAP_NEW_PTR_INIT	\
-	(1UL << (sizeof(unsigned long) * 8 /* CHAR_BIT */ - 1))
+#define NILFS_BMAP_KEY_BIT	BITS_PER_LONG
+#define NILFS_BMAP_NEW_PTR_INIT	(1UL << (BITS_PER_LONG - 1))
 
 static inline int nilfs_bmap_is_new_ptr(unsigned long ptr)
 {

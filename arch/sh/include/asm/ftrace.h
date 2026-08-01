@@ -7,7 +7,7 @@
 #define MCOUNT_INSN_SIZE	4 /* sizeof mcount call */
 #define FTRACE_SYSCALL_MAX	NR_syscalls
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 extern void mcount(void);
 
 #define MCOUNT_ADDR		((unsigned long)(mcount))
@@ -33,16 +33,26 @@ static inline unsigned long ftrace_call_adjust(unsigned long addr)
 	return addr;
 }
 
-#endif /* __ASSEMBLY__ */
+void prepare_ftrace_return(unsigned long *parent, unsigned long self_addr);
+
+#endif /* __ASSEMBLER__ */
 #endif /* CONFIG_FUNCTION_TRACER */
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 /* arch/sh/kernel/return_address.c */
 extern void *return_address(unsigned int);
 
 #define ftrace_return_address(n) return_address(n)
 
-#endif /* __ASSEMBLY__ */
+#ifdef CONFIG_DYNAMIC_FTRACE
+extern void arch_ftrace_nmi_enter(void);
+extern void arch_ftrace_nmi_exit(void);
+#else
+static inline void arch_ftrace_nmi_enter(void) { }
+static inline void arch_ftrace_nmi_exit(void) { }
+#endif
+
+#endif /* __ASSEMBLER__ */
 
 #endif /* __ASM_SH_FTRACE_H */

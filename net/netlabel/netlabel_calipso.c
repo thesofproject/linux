@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * NetLabel CALIPSO/IPv6 Support
  *
@@ -7,25 +8,10 @@
  *
  * Authors: Paul Moore <paul@paul-moore.com>
  *          Huw Davies <huw@codeweavers.com>
- *
  */
 
 /* (c) Copyright Hewlett-Packard Development Company, L.P., 2006
  * (c) Copyright Huw Davies <huw@codeweavers.com>, 2015
- *
- * This program is free software;  you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY;  without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- * the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program;  if not, see <http://www.gnu.org/licenses/>.
- *
  */
 
 #include <linux/types.h>
@@ -68,6 +54,28 @@ static const struct nla_policy calipso_genl_policy[NLBL_CALIPSO_A_MAX + 1] = {
 	[NLBL_CALIPSO_A_MTYPE] = { .type = NLA_U32 },
 };
 
+static const struct netlbl_calipso_ops *calipso_ops;
+
+/**
+ * netlbl_calipso_ops_register - Register the CALIPSO operations
+ * @ops: ops to register
+ *
+ * Description:
+ * Register the CALIPSO packet engine operations.
+ *
+ */
+const struct netlbl_calipso_ops *
+netlbl_calipso_ops_register(const struct netlbl_calipso_ops *ops)
+{
+	return xchg(&calipso_ops, ops);
+}
+EXPORT_SYMBOL(netlbl_calipso_ops_register);
+
+static const struct netlbl_calipso_ops *netlbl_calipso_ops_get(void)
+{
+	return READ_ONCE(calipso_ops);
+}
+
 /* NetLabel Command Handlers
  */
 /**
@@ -87,7 +95,7 @@ static int netlbl_calipso_add_pass(struct genl_info *info,
 	int ret_val;
 	struct calipso_doi *doi_def = NULL;
 
-	doi_def = kmalloc(sizeof(*doi_def), GFP_KERNEL);
+	doi_def = kmalloc_obj(*doi_def);
 	if (!doi_def)
 		return -ENOMEM;
 	doi_def->type = CALIPSO_MAP_PASS;
@@ -110,16 +118,19 @@ static int netlbl_calipso_add_pass(struct genl_info *info,
  *
  */
 static int netlbl_calipso_add(struct sk_buff *skb, struct genl_info *info)
-
 {
 	int ret_val = -EINVAL;
 	struct netlbl_audit audit_info;
+	const struct netlbl_calipso_ops *ops = netlbl_calipso_ops_get();
 
 	if (!info->attrs[NLBL_CALIPSO_A_DOI] ||
 	    !info->attrs[NLBL_CALIPSO_A_MTYPE])
 		return -EINVAL;
 
-	netlbl_netlink_auditinfo(skb, &audit_info);
+	if (!ops)
+		return -EOPNOTSUPP;
+
+	netlbl_netlink_auditinfo(&audit_info);
 	switch (nla_get_u32(info->attrs[NLBL_CALIPSO_A_MTYPE])) {
 	case CALIPSO_MAP_PASS:
 		ret_val = netlbl_calipso_add_pass(info, &audit_info);
@@ -301,7 +312,7 @@ static int netlbl_calipso_remove(struct sk_buff *skb, struct genl_info *info)
 	if (!info->attrs[NLBL_CALIPSO_A_DOI])
 		return -EINVAL;
 
-	netlbl_netlink_auditinfo(skb, &audit_info);
+	netlbl_netlink_auditinfo(&audit_info);
 	cb_arg.doi = nla_get_u32(info->attrs[NLBL_CALIPSO_A_DOI]);
 	cb_arg.audit_info = &audit_info;
 	ret_val = netlbl_domhsh_walk(&skip_bkt, &skip_chain,
@@ -318,32 +329,32 @@ static int netlbl_calipso_remove(struct sk_buff *skb, struct genl_info *info)
 /* NetLabel Generic NETLINK Command Definitions
  */
 
-static const struct genl_ops netlbl_calipso_ops[] = {
+static const struct genl_small_ops netlbl_calipso_ops[] = {
 	{
 	.cmd = NLBL_CALIPSO_C_ADD,
+	.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 	.flags = GENL_ADMIN_PERM,
-	.policy = calipso_genl_policy,
 	.doit = netlbl_calipso_add,
 	.dumpit = NULL,
 	},
 	{
 	.cmd = NLBL_CALIPSO_C_REMOVE,
+	.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 	.flags = GENL_ADMIN_PERM,
-	.policy = calipso_genl_policy,
 	.doit = netlbl_calipso_remove,
 	.dumpit = NULL,
 	},
 	{
 	.cmd = NLBL_CALIPSO_C_LIST,
+	.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 	.flags = 0,
-	.policy = calipso_genl_policy,
 	.doit = netlbl_calipso_list,
 	.dumpit = NULL,
 	},
 	{
 	.cmd = NLBL_CALIPSO_C_LISTALL,
+	.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 	.flags = 0,
-	.policy = calipso_genl_policy,
 	.doit = NULL,
 	.dumpit = netlbl_calipso_listall,
 	},
@@ -354,9 +365,11 @@ static struct genl_family netlbl_calipso_gnl_family __ro_after_init = {
 	.name = NETLBL_NLTYPE_CALIPSO_NAME,
 	.version = NETLBL_PROTO_VERSION,
 	.maxattr = NLBL_CALIPSO_A_MAX,
+	.policy = calipso_genl_policy,
 	.module = THIS_MODULE,
-	.ops = netlbl_calipso_ops,
-	.n_ops = ARRAY_SIZE(netlbl_calipso_ops),
+	.small_ops = netlbl_calipso_ops,
+	.n_small_ops = ARRAY_SIZE(netlbl_calipso_ops),
+	.resv_start_op = NLBL_CALIPSO_C_LISTALL + 1,
 };
 
 /* NetLabel Generic NETLINK Protocol Functions
@@ -373,27 +386,6 @@ static struct genl_family netlbl_calipso_gnl_family __ro_after_init = {
 int __init netlbl_calipso_genl_init(void)
 {
 	return genl_register_family(&netlbl_calipso_gnl_family);
-}
-
-static const struct netlbl_calipso_ops *calipso_ops;
-
-/**
- * netlbl_calipso_ops_register - Register the CALIPSO operations
- *
- * Description:
- * Register the CALIPSO packet engine operations.
- *
- */
-const struct netlbl_calipso_ops *
-netlbl_calipso_ops_register(const struct netlbl_calipso_ops *ops)
-{
-	return xchg(&calipso_ops, ops);
-}
-EXPORT_SYMBOL(netlbl_calipso_ops_register);
-
-static const struct netlbl_calipso_ops *netlbl_calipso_ops_get(void)
-{
-	return READ_ONCE(calipso_ops);
 }
 
 /**
@@ -439,7 +431,7 @@ void calipso_doi_free(struct calipso_doi *doi_def)
 /**
  * calipso_doi_remove - Remove an existing DOI from the CALIPSO protocol engine
  * @doi: the DOI value
- * @audit_secid: the LSM secid to use in the audit message
+ * @audit_info: NetLabel audit information
  *
  * Description:
  * Removes a DOI definition from the CALIPSO engine.  The NetLabel routines will
@@ -608,7 +600,7 @@ int calipso_req_setattr(struct request_sock *req,
 
 /**
  * calipso_req_delattr - Delete the CALIPSO option from a request socket
- * @reg: the request socket
+ * @req: the request socket
  *
  * Description:
  * Removes the CALIPSO option from a request socket, if present.

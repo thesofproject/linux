@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 
 /*
     card-als100.c - driver for Avance Logic ALS100 based soundcards.
@@ -9,19 +10,6 @@
     Generalised for soundcards based on DT-0196 and ALS-007 chips
     by Jonathan Woithe <jwoithe@just42.net>: June 2002.
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
 */
 
 #include <linux/init.h>
@@ -35,20 +23,7 @@
 #include <sound/opl3.h>
 #include <sound/sb.h>
 
-#define PFX "als100: "
-
 MODULE_DESCRIPTION("Avance Logic ALS007/ALS1X0");
-MODULE_SUPPORTED_DEVICE("{{Diamond Technologies DT-019X},"
-		"{Avance Logic ALS-007}}"
-		"{{Avance Logic,ALS100 - PRO16PNP},"
-	        "{Avance Logic,ALS110},"
-	        "{Avance Logic,ALS120},"
-	        "{Avance Logic,ALS200},"
-	        "{3D Melody,MF1000},"
-	        "{Digimate,3D Sound},"
-	        "{Avance Logic,ALS120},"
-	        "{RTL,RTL3000}}");
-
 MODULE_AUTHOR("Massimo Piccioni <dafastidio@libero.it>");
 MODULE_LICENSE("GPL");
 
@@ -135,7 +110,7 @@ static int snd_card_als100_pnp(int dev, struct snd_card_als100 *acard,
 
 	err = pnp_activate_dev(pdev);
 	if (err < 0) {
-		snd_printk(KERN_ERR PFX "AUDIO pnp configure failure\n");
+		dev_err(&pdev->dev, "AUDIO pnp configure failure\n");
 		return err;
 	}
 	port[dev] = pnp_port_start(pdev, 0);
@@ -158,7 +133,7 @@ static int snd_card_als100_pnp(int dev, struct snd_card_als100 *acard,
 	     __mpu_error:
 	     	if (pdev) {
 		     	pnp_release_card_device(pdev);
-	     		snd_printk(KERN_ERR PFX "MPU401 pnp configure failure, skipping\n");
+			dev_err(&pdev->dev, "MPU401 pnp configure failure, skipping\n");
 	     	}
 	     	acard->devmpu = NULL;
 	     	mpu_port[dev] = -1;
@@ -174,7 +149,7 @@ static int snd_card_als100_pnp(int dev, struct snd_card_als100 *acard,
 	      __fm_error:
 	     	if (pdev) {
 		     	pnp_release_card_device(pdev);
-	     		snd_printk(KERN_ERR PFX "OPL3 pnp configure failure, skipping\n");
+			dev_err(&pdev->dev, "OPL3 pnp configure failure, skipping\n");
 	     	}
 	     	acard->devopl = NULL;
 	     	fm_port[dev] = -1;
@@ -193,17 +168,16 @@ static int snd_card_als100_probe(int dev,
 	struct snd_card_als100 *acard;
 	struct snd_opl3 *opl3;
 
-	error = snd_card_new(&pcard->card->dev,
-			     index[dev], id[dev], THIS_MODULE,
-			     sizeof(struct snd_card_als100), &card);
+	error = snd_devm_card_new(&pcard->card->dev,
+				  index[dev], id[dev], THIS_MODULE,
+				  sizeof(struct snd_card_als100), &card);
 	if (error < 0)
 		return error;
 	acard = card->private_data;
 
-	if ((error = snd_card_als100_pnp(dev, acard, pcard, pid))) {
-		snd_card_free(card);
+	error = snd_card_als100_pnp(dev, acard, pcard, pid);
+	if (error)
 		return error;
-	}
 
 	if (pid->driver_data == SB_HW_DT019X)
 		dma16[dev] = -1;
@@ -213,36 +187,32 @@ static int snd_card_als100_probe(int dev,
 				  dma8[dev], dma16[dev],
 				  pid->driver_data,
 				  &chip);
-	if (error < 0) {
-		snd_card_free(card);
+	if (error < 0)
 		return error;
-	}
 	acard->chip = chip;
 
 	if (pid->driver_data == SB_HW_DT019X) {
-		strcpy(card->driver, "DT-019X");
-		strcpy(card->shortname, "Diamond Tech. DT-019X");
+		strscpy(card->driver, "DT-019X");
+		strscpy(card->shortname, "Diamond Tech. DT-019X");
 		snprintf(card->longname, sizeof(card->longname),
 			 "Diamond Tech. DT-019X, %s at 0x%lx, irq %d, dma %d",
 			 chip->name, chip->port, irq[dev], dma8[dev]);
 	} else {
-		strcpy(card->driver, "ALS100");
-		strcpy(card->shortname, "Avance Logic ALS100");
+		strscpy(card->driver, "ALS100");
+		strscpy(card->shortname, "Avance Logic ALS100");
 		snprintf(card->longname, sizeof(card->longname),
 			 "Avance Logic ALS100, %s at 0x%lx, irq %d, dma %d&%d",
 			 chip->name, chip->port, irq[dev], dma8[dev],
 			 dma16[dev]);
 	}
 
-	if ((error = snd_sb16dsp_pcm(chip, 0)) < 0) {
-		snd_card_free(card);
+	error = snd_sb16dsp_pcm(chip, 0);
+	if (error < 0)
 		return error;
-	}
 
-	if ((error = snd_sbmixer_new(chip)) < 0) {
-		snd_card_free(card);
+	error = snd_sbmixer_new(chip);
+	if (error < 0)
 		return error;
-	}
 
 	if (mpu_port[dev] > 0 && mpu_port[dev] != SNDRV_AUTO_PORT) {
 		int mpu_type = MPU401_HW_ALS100;
@@ -258,31 +228,28 @@ static int snd_card_als100_probe(int dev,
 					mpu_port[dev], 0, 
 					mpu_irq[dev],
 					NULL) < 0)
-			snd_printk(KERN_ERR PFX "no MPU-401 device at 0x%lx\n", mpu_port[dev]);
+			dev_err(card->dev, "no MPU-401 device at 0x%lx\n", mpu_port[dev]);
 	}
 
 	if (fm_port[dev] > 0 && fm_port[dev] != SNDRV_AUTO_PORT) {
 		if (snd_opl3_create(card,
 				    fm_port[dev], fm_port[dev] + 2,
 				    OPL3_HW_AUTO, 0, &opl3) < 0) {
-			snd_printk(KERN_ERR PFX "no OPL device at 0x%lx-0x%lx\n",
-				   fm_port[dev], fm_port[dev] + 2);
+			dev_err(card->dev, "no OPL device at 0x%lx-0x%lx\n",
+				fm_port[dev], fm_port[dev] + 2);
 		} else {
-			if ((error = snd_opl3_timer_new(opl3, 0, 1)) < 0) {
-				snd_card_free(card);
+			error = snd_opl3_timer_new(opl3, 0, 1);
+			if (error < 0)
 				return error;
-			}
-			if ((error = snd_opl3_hwdep_new(opl3, 0, 1, NULL)) < 0) {
-				snd_card_free(card);
+			error = snd_opl3_hwdep_new(opl3, 0, 1, NULL);
+			if (error < 0)
 				return error;
-			}
 		}
 	}
 
-	if ((error = snd_card_register(card)) < 0) {
-		snd_card_free(card);
+	error = snd_card_register(card);
+	if (error < 0)
 		return error;
-	}
 	pnp_set_card_drvdata(pcard, card);
 	return 0;
 }
@@ -308,12 +275,6 @@ static int snd_als100_pnp_detect(struct pnp_card_link *card,
 	return -ENODEV;
 }
 
-static void snd_als100_pnp_remove(struct pnp_card_link *pcard)
-{
-	snd_card_free(pnp_get_card_drvdata(pcard));
-	pnp_set_card_drvdata(pcard, NULL);
-}
-
 #ifdef CONFIG_PM
 static int snd_als100_pnp_suspend(struct pnp_card_link *pcard, pm_message_t state)
 {
@@ -322,7 +283,6 @@ static int snd_als100_pnp_suspend(struct pnp_card_link *pcard, pm_message_t stat
 	struct snd_sb *chip = acard->chip;
 
 	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
-	snd_pcm_suspend_all(chip->pcm);
 	snd_sbmixer_suspend(chip);
 	return 0;
 }
@@ -345,7 +305,6 @@ static struct pnp_card_driver als100_pnpc_driver = {
 	.name		= "als100",
         .id_table       = snd_als100_pnpids,
         .probe          = snd_als100_pnp_detect,
-	.remove		= snd_als100_pnp_remove,
 #ifdef CONFIG_PM
 	.suspend	= snd_als100_pnp_suspend,
 	.resume		= snd_als100_pnp_resume,
@@ -363,7 +322,7 @@ static int __init alsa_card_als100_init(void)
 	if (!als100_devices) {
 		pnp_unregister_card_driver(&als100_pnpc_driver);
 #ifdef MODULE
-		snd_printk(KERN_ERR "no Avance Logic based soundcards found\n");
+		pr_err("no Avance Logic based soundcards found\n");
 #endif
 		return -ENODEV;
 	}

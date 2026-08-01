@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * mac80211 glue code for mac80211 ST-Ericsson CW1200 drivers
  *
@@ -14,10 +15,6 @@
  *   Copyright 2004-2006 Jean-Baptiste Note <jbnote@gmail.com>, et al.
  * - stlc45xx driver
  *   Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies).
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -206,12 +203,17 @@ static const unsigned long cw1200_ttl[] = {
 };
 
 static const struct ieee80211_ops cw1200_ops = {
+	.add_chanctx = ieee80211_emulate_add_chanctx,
+	.remove_chanctx = ieee80211_emulate_remove_chanctx,
+	.change_chanctx = ieee80211_emulate_change_chanctx,
+	.switch_vif_chanctx = ieee80211_emulate_switch_vif_chanctx,
 	.start			= cw1200_start,
 	.stop			= cw1200_stop,
 	.add_interface		= cw1200_add_interface,
 	.remove_interface	= cw1200_remove_interface,
 	.change_interface	= cw1200_change_interface,
 	.tx			= cw1200_tx,
+	.wake_tx_queue		= ieee80211_handle_wake_tx_queue,
 	.hw_scan		= cw1200_hw_scan,
 	.set_tim		= cw1200_set_tim,
 	.sta_notify		= cw1200_sta_notify,
@@ -345,6 +347,11 @@ static struct ieee80211_hw *cw1200_init_common(const u8 *macaddr,
 	mutex_init(&priv->wsm_cmd_mux);
 	mutex_init(&priv->conf_mutex);
 	priv->workqueue = create_singlethread_workqueue("cw1200_wq");
+	if (!priv->workqueue) {
+		ieee80211_free_hw(hw);
+		return NULL;
+	}
+
 	sema_init(&priv->scan.lock, 1);
 	INIT_WORK(&priv->scan.work, cw1200_scan_work);
 	INIT_DELAYED_WORK(&priv->scan.probe_work, cw1200_probe_work);
@@ -379,6 +386,7 @@ static struct ieee80211_hw *cw1200_init_common(const u8 *macaddr,
 				    CW1200_LINK_ID_MAX,
 				    cw1200_skb_dtor,
 				    priv)) {
+		destroy_workqueue(priv->workqueue);
 		ieee80211_free_hw(hw);
 		return NULL;
 	}
@@ -390,6 +398,7 @@ static struct ieee80211_hw *cw1200_init_common(const u8 *macaddr,
 			for (; i > 0; i--)
 				cw1200_queue_deinit(&priv->tx_queue[i - 1]);
 			cw1200_queue_stats_deinit(&priv->tx_queue_stats);
+			destroy_workqueue(priv->workqueue);
 			ieee80211_free_hw(hw);
 			return NULL;
 		}
@@ -449,7 +458,7 @@ static void cw1200_unregister_common(struct ieee80211_hw *dev)
 
 	ieee80211_unregister_hw(dev);
 
-	del_timer_sync(&priv->mcast_timeout);
+	timer_delete_sync(&priv->mcast_timeout);
 	cw1200_unregister_bh(priv);
 
 	cw1200_debug_release(priv);

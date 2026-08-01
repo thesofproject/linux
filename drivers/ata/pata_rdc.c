@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  pata_rdc		-	Driver for later RDC PATA controllers
  *
@@ -5,20 +6,6 @@
  *  INCITS 370-2004 (1510D): ATA Host Adapter Standards
  *
  *  Based on ata_piix.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2, or (at your option)
- *  any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/kernel.h>
@@ -289,7 +276,7 @@ static struct ata_port_operations rdc_pata_ops = {
 	.cable_detect		= rdc_pata_cable_detect,
 	.set_piomode		= rdc_set_piomode,
 	.set_dmamode		= rdc_set_dmamode,
-	.prereset		= rdc_pata_prereset,
+	.reset.prereset		= rdc_pata_prereset,
 };
 
 static const struct ata_port_info rdc_port_info = {
@@ -301,7 +288,7 @@ static const struct ata_port_info rdc_port_info = {
 	.port_ops	= &rdc_pata_ops,
 };
 
-static struct scsi_host_template rdc_sht = {
+static const struct scsi_host_template rdc_sht = {
 	ATA_BMDMA_SHT(DRV_NAME),
 };
 
@@ -353,7 +340,7 @@ static int rdc_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		return rc;
 	host->private_data = hpriv;
 
-	pci_intx(pdev, 1);
+	pcim_intx(pdev, 1);
 
 	host->flags |= ATA_HOST_PARALLEL_SCAN;
 
@@ -372,8 +359,8 @@ static void rdc_remove_one(struct pci_dev *pdev)
 }
 
 static const struct pci_device_id rdc_pci_tbl[] = {
-	{ PCI_DEVICE(0x17F3, 0x1011), },
-	{ PCI_DEVICE(0x17F3, 0x1012), },
+	{ PCI_VDEVICE(RDC, 0x1011) },
+	{ PCI_VDEVICE(RDC, 0x1012) },
 	{ }	/* terminate list */
 };
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/err.h>
 #include <linux/i2c.h>
 #include <linux/i2c-mux.h>
@@ -18,22 +19,20 @@ static int mpu3050_i2c_bypass_select(struct i2c_mux_core *mux, u32 chan_id)
 	struct mpu3050 *mpu3050 = i2c_mux_priv(mux);
 
 	/* Just power up the device, that is all that is needed */
-	pm_runtime_get_sync(mpu3050->dev);
-	return 0;
+	return pm_runtime_resume_and_get(mpu3050->dev);
 }
 
 static int mpu3050_i2c_bypass_deselect(struct i2c_mux_core *mux, u32 chan_id)
 {
 	struct mpu3050 *mpu3050 = i2c_mux_priv(mux);
 
-	pm_runtime_mark_last_busy(mpu3050->dev);
 	pm_runtime_put_autosuspend(mpu3050->dev);
 	return 0;
 }
 
-static int mpu3050_i2c_probe(struct i2c_client *client,
-			     const struct i2c_device_id *id)
+static int mpu3050_i2c_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct regmap *regmap;
 	const char *name;
 	struct mpu3050 *mpu3050;
@@ -50,8 +49,8 @@ static int mpu3050_i2c_probe(struct i2c_client *client,
 
 	regmap = devm_regmap_init_i2c(client, &mpu3050_i2c_regmap_config);
 	if (IS_ERR(regmap)) {
-		dev_err(&client->dev, "Failed to register i2c regmap %d\n",
-			(int)PTR_ERR(regmap));
+		dev_err(&client->dev, "Failed to register i2c regmap: %pe\n",
+			regmap);
 		return PTR_ERR(regmap);
 	}
 
@@ -71,13 +70,13 @@ static int mpu3050_i2c_probe(struct i2c_client *client,
 	else {
 		mpu3050->i2cmux->priv = mpu3050;
 		/* Ignore failure, not critical */
-		i2c_mux_add_adapter(mpu3050->i2cmux, 0, 0, 0);
+		i2c_mux_add_adapter(mpu3050->i2cmux, 0, 0);
 	}
 
 	return 0;
 }
 
-static int mpu3050_i2c_remove(struct i2c_client *client)
+static void mpu3050_i2c_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = dev_get_drvdata(&client->dev);
 	struct mpu3050 *mpu3050 = iio_priv(indio_dev);
@@ -85,7 +84,7 @@ static int mpu3050_i2c_remove(struct i2c_client *client)
 	if (mpu3050->i2cmux)
 		i2c_mux_del_adapters(mpu3050->i2cmux);
 
-	return mpu3050_common_remove(&client->dev);
+	mpu3050_common_remove(&client->dev);
 }
 
 /*
@@ -93,8 +92,8 @@ static int mpu3050_i2c_remove(struct i2c_client *client)
  * supported by this driver
  */
 static const struct i2c_device_id mpu3050_i2c_id[] = {
-	{ "mpu3050" },
-	{}
+	{ .name = "mpu3050" },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, mpu3050_i2c_id);
 
@@ -102,7 +101,7 @@ static const struct of_device_id mpu3050_i2c_of_match[] = {
 	{ .compatible = "invensense,mpu3050", .data = "mpu3050" },
 	/* Deprecated vendor ID from the Input driver */
 	{ .compatible = "invn,mpu3050", .data = "mpu3050" },
-	{ },
+	{ }
 };
 MODULE_DEVICE_TABLE(of, mpu3050_i2c_of_match);
 
@@ -113,7 +112,7 @@ static struct i2c_driver mpu3050_i2c_driver = {
 	.driver = {
 		.of_match_table = mpu3050_i2c_of_match,
 		.name = "mpu3050-i2c",
-		.pm = &mpu3050_dev_pm_ops,
+		.pm = pm_ptr(&mpu3050_dev_pm_ops),
 	},
 };
 module_i2c_driver(mpu3050_i2c_driver);

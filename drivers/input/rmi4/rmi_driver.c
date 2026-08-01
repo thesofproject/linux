@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2011-2016 Synaptics Incorporated
  * Copyright (c) 2011 Unixphere
@@ -8,10 +9,6 @@
  *
  * http://www.synaptics.com/sites/default/files/
  *      511-000136-01-Rev-E-RMI4-Interfacing-Guide.pdf
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #include <linux/bitmap.h>
@@ -21,8 +18,11 @@
 #include <linux/pm.h>
 #include <linux/slab.h>
 #include <linux/of.h>
+#include <linux/irqdomain.h>
 #include <uapi/linux/input.h>
 #include <linux/rmi.h>
+#include <linux/export.h>
+#include <linux/unaligned.h>
 #include "rmi_bus.h"
 #include "rmi_driver.h"
 
@@ -127,28 +127,11 @@ static int rmi_driver_process_config_requests(struct rmi_device *rmi_dev)
 	return 0;
 }
 
-static void process_one_interrupt(struct rmi_driver_data *data,
-				  struct rmi_function *fn)
-{
-	struct rmi_function_handler *fh;
-
-	if (!fn || !fn->dev.driver)
-		return;
-
-	fh = to_rmi_function_handler(fn->dev.driver);
-	if (fh->attention) {
-		bitmap_and(data->fn_irq_bits, data->irq_status, fn->irq_mask,
-				data->irq_count);
-		if (!bitmap_empty(data->fn_irq_bits, data->irq_count))
-			fh->attention(fn, data->fn_irq_bits);
-	}
-}
-
 static int rmi_process_interrupt_requests(struct rmi_device *rmi_dev)
 {
 	struct rmi_driver_data *data = dev_get_drvdata(&rmi_dev->dev);
 	struct device *dev = &rmi_dev->dev;
-	struct rmi_function *entry;
+	int i;
 	int error;
 
 	if (!data)
@@ -165,7 +148,7 @@ static int rmi_process_interrupt_requests(struct rmi_device *rmi_dev)
 	}
 
 	mutex_lock(&data->irq_mutex);
-	bitmap_and(data->irq_status, data->irq_status, data->current_irq_mask,
+	bitmap_and(data->irq_status, data->irq_status, data->fn_irq_bits,
 	       data->irq_count);
 	/*
 	 * At this point, irq_status has all bits that are set in the
@@ -173,16 +156,8 @@ static int rmi_process_interrupt_requests(struct rmi_device *rmi_dev)
 	 */
 	mutex_unlock(&data->irq_mutex);
 
-	/*
-	 * It would be nice to be able to use irq_chip to handle these
-	 * nested IRQs.  Unfortunately, most of the current customers for
-	 * this driver are using older kernels (3.0.x) that don't support
-	 * the features required for that.  Once they've shifted to more
-	 * recent kernels (say, 3.3 and higher), this should be switched to
-	 * use irq_chip.
-	 */
-	list_for_each_entry(entry, &data->function_list, node)
-		process_one_interrupt(data, entry);
+	for_each_set_bit(i, data->irq_status, data->irq_count)
+		handle_nested_irq(irq_find_mapping(data->irqdomain, i));
 
 	if (data->input)
 		input_sync(data->input);
@@ -208,7 +183,11 @@ void rmi_set_attn_data(struct rmi_device *rmi_dev, unsigned long irq_status,
 	attn_data.size = size;
 	attn_data.data = fifo_data;
 
-	kfifo_put(&drvdata->attn_fifo, attn_data);
+	if (!kfifo_put(&drvdata->attn_fifo, attn_data)) {
+		dev_warn_ratelimited(&rmi_dev->dev,
+				     "Failed to enqueue attention data, FIFO full\n");
+		kfree(fifo_data);
+	}
 }
 EXPORT_SYMBOL_GPL(rmi_set_attn_data);
 
@@ -219,24 +198,24 @@ static irqreturn_t rmi_irq_fn(int irq, void *dev_id)
 	struct rmi4_attn_data attn_data = {0};
 	int ret, count;
 
-	count = kfifo_get(&drvdata->attn_fifo, &attn_data);
-	if (count) {
-		*(drvdata->irq_status) = attn_data.irq_status;
-		drvdata->attn_data = attn_data;
-	}
+	do {
+		count = kfifo_get(&drvdata->attn_fifo, &attn_data);
+		if (count) {
+			*drvdata->irq_status = attn_data.irq_status;
+			drvdata->attn_data = attn_data;
+		}
 
-	ret = rmi_process_interrupt_requests(rmi_dev);
-	if (ret)
-		rmi_dbg(RMI_DEBUG_CORE, &rmi_dev->dev,
-			"Failed to process interrupt request: %d\n", ret);
+		ret = rmi_process_interrupt_requests(rmi_dev);
+		if (ret)
+			rmi_dbg(RMI_DEBUG_CORE, &rmi_dev->dev,
+				"Failed to process interrupt request: %d\n",
+				ret);
 
-	if (count) {
-		kfree(attn_data.data);
-		attn_data.data = NULL;
-	}
-
-	if (!kfifo_is_empty(&drvdata->attn_fifo))
-		return rmi_irq_fn(irq, dev_id);
+		if (count) {
+			kfree(attn_data.data);
+			drvdata->attn_data.data = NULL;
+		}
+	} while (!kfifo_is_empty(&drvdata->attn_fifo));
 
 	return IRQ_HANDLED;
 }
@@ -409,8 +388,9 @@ static int rmi_driver_set_irq_bits(struct rmi_device *rmi_dev,
 							__func__);
 		goto error_unlock;
 	}
-	bitmap_copy(data->current_irq_mask, data->new_irq_mask,
-		    data->num_of_irq_regs);
+
+	bitmap_copy(data->current_irq_mask, data->new_irq_mask, data->irq_count);
+	bitmap_or(data->fn_irq_bits, data->fn_irq_bits, mask, data->irq_count);
 
 error_unlock:
 	mutex_unlock(&data->irq_mutex);
@@ -425,6 +405,8 @@ static int rmi_driver_clear_irq_bits(struct rmi_device *rmi_dev,
 	struct device *dev = &rmi_dev->dev;
 
 	mutex_lock(&data->irq_mutex);
+	bitmap_andnot(data->fn_irq_bits,
+		      data->fn_irq_bits, mask, data->irq_count);
 	bitmap_andnot(data->new_irq_mask,
 		  data->current_irq_mask, mask, data->irq_count);
 
@@ -436,8 +418,8 @@ static int rmi_driver_clear_irq_bits(struct rmi_device *rmi_dev,
 							__func__);
 		goto error_unlock;
 	}
-	bitmap_copy(data->current_irq_mask, data->new_irq_mask,
-		    data->num_of_irq_regs);
+
+	bitmap_copy(data->current_irq_mask, data->new_irq_mask, data->irq_count);
 
 error_unlock:
 	mutex_unlock(&data->irq_mutex);
@@ -580,30 +562,75 @@ int rmi_scan_pdt(struct rmi_device *rmi_dev, void *ctx,
 	return retval < 0 ? retval : 0;
 }
 
-int rmi_read_register_desc(struct rmi_device *d, u16 addr,
-				struct rmi_register_descriptor *rdesc)
+static int rmi_parse_register_desc_item(struct rmi_register_desc_item *item,
+					const u8 *buf, size_t size)
 {
-	int ret;
-	u8 size_presence_reg;
-	u8 buf[35];
-	int presense_offset = 1;
-	u8 *struct_buf;
-	int reg;
-	int offset = 0;
-	int map_offset = 0;
-	int i;
+	unsigned int offset = 0;
+	unsigned int map_offset = 0;
 	int b;
+
+	if (offset >= size)
+		return -EIO;
+
+	item->reg_size = buf[offset++];
+	if (item->reg_size == 0) {
+		if (size - offset < 2)
+			return -EIO;
+		item->reg_size = get_unaligned_le16(&buf[offset]);
+		offset += 2;
+	}
+
+	if (item->reg_size == 0) {
+		if (size - offset < 4)
+			return -EIO;
+		item->reg_size = get_unaligned_le32(&buf[offset]);
+		offset += 4;
+	}
+
+	do {
+		if (offset >= size)
+			return -EIO;
+
+		for (b = 0; b < 7; b++) {
+			if (buf[offset] & BIT(b)) {
+				if (map_offset >= RMI_REG_DESC_SUBPACKET_BITS)
+					return -EIO;
+				__set_bit(map_offset, item->subpacket_map);
+			}
+			++map_offset;
+		}
+	} while (buf[offset++] & BIT(7));
+
+	item->num_subpackets = bitmap_weight(item->subpacket_map,
+					     RMI_REG_DESC_SUBPACKET_BITS);
+
+	return offset;
+}
+
+int rmi_read_register_desc(struct rmi_device *d, u16 addr,
+			   struct rmi_register_descriptor *rdesc)
+{
+	DECLARE_BITMAP(presence_map, RMI_REG_DESC_PRESENCE_BITS);
+	u8 buf[RMI_REG_DESC_PRESENCE_REGS_MAX];
+	u8 size_presence_reg;
+	unsigned int presence_offset;
+	unsigned int map_offset;
+	unsigned int offset;
+	unsigned int num_registers;
+	unsigned int reg;
+	int b;
+	int ret;
 
 	/*
 	 * The first register of the register descriptor is the size of
-	 * the register descriptor's presense register.
+	 * the register descriptor's presence register.
 	 */
 	ret = rmi_read(d, addr, &size_presence_reg);
 	if (ret)
 		return ret;
 	++addr;
 
-	if (size_presence_reg < 0 || size_presence_reg > 35)
+	if (size_presence_reg < 1 || size_presence_reg > RMI_REG_DESC_PRESENCE_REGS_MAX)
 		return -EIO;
 
 	memset(buf, 0, sizeof(buf));
@@ -619,26 +646,35 @@ int rmi_read_register_desc(struct rmi_device *d, u16 addr,
 	++addr;
 
 	if (buf[0] == 0) {
-		presense_offset = 3;
-		rdesc->struct_size = buf[1] | (buf[2] << 8);
+		if (size_presence_reg < 3)
+			return -EIO;
+		presence_offset = 3;
+		rdesc->struct_size = get_unaligned_le16(&buf[1]);
 	} else {
+		presence_offset = 1;
 		rdesc->struct_size = buf[0];
 	}
 
-	for (i = presense_offset; i < size_presence_reg; i++) {
+	memset(presence_map, 0, sizeof(presence_map));
+	map_offset = 0;
+	for (int i = presence_offset; i < size_presence_reg; i++) {
 		for (b = 0; b < 8; b++) {
-			if (buf[i] & (0x1 << b))
-				bitmap_set(rdesc->presense_map, map_offset, 1);
+			if (buf[i] & BIT(b)) {
+				if (map_offset >= RMI_REG_DESC_PRESENCE_BITS)
+					return -EIO;
+				bitmap_set(presence_map, map_offset, 1);
+			}
 			++map_offset;
 		}
 	}
 
-	rdesc->num_registers = bitmap_weight(rdesc->presense_map,
-						RMI_REG_DESC_PRESENSE_BITS);
+	rdesc->num_registers = bitmap_weight(presence_map,
+						RMI_REG_DESC_PRESENCE_BITS);
 
-	rdesc->registers = devm_kzalloc(&d->dev, rdesc->num_registers *
-				sizeof(struct rmi_register_desc_item),
-				GFP_KERNEL);
+	rdesc->registers = devm_kcalloc(&d->dev,
+					rdesc->num_registers,
+					sizeof(struct rmi_register_desc_item),
+					GFP_KERNEL);
 	if (!rdesc->registers)
 		return -ENOMEM;
 
@@ -647,7 +683,7 @@ int rmi_read_register_desc(struct rmi_device *d, u16 addr,
 	 * I'm not using devm_kzalloc here since it will not be retained
 	 * after exiting this function
 	 */
-	struct_buf = kzalloc(rdesc->struct_size, GFP_KERNEL);
+	u8 *struct_buf __free(kfree) = kzalloc(rdesc->struct_size, GFP_KERNEL);
 	if (!struct_buf)
 		return -ENOMEM;
 
@@ -659,56 +695,45 @@ int rmi_read_register_desc(struct rmi_device *d, u16 addr,
 	 */
 	ret = rmi_read_block(d, addr, struct_buf, rdesc->struct_size);
 	if (ret)
-		goto free_struct_buff;
+		return ret;
 
-	reg = find_first_bit(rdesc->presense_map, RMI_REG_DESC_PRESENSE_BITS);
-	for (i = 0; i < rdesc->num_registers; i++) {
-		struct rmi_register_desc_item *item = &rdesc->registers[i];
-		int reg_size = struct_buf[offset];
+	offset = 0;
+	num_registers = 0;
+	for_each_set_bit(reg, presence_map, RMI_REG_DESC_PRESENCE_BITS) {
+		struct rmi_register_desc_item *item = &rdesc->registers[num_registers];
+		int item_size;
 
-		++offset;
-		if (reg_size == 0) {
-			reg_size = struct_buf[offset] |
-					(struct_buf[offset + 1] << 8);
-			offset += 2;
-		}
+		if (offset >= rdesc->struct_size)
+			break;
 
-		if (reg_size == 0) {
-			reg_size = struct_buf[offset] |
-					(struct_buf[offset + 1] << 8) |
-					(struct_buf[offset + 2] << 16) |
-					(struct_buf[offset + 3] << 24);
-			offset += 4;
+		item_size = rmi_parse_register_desc_item(item,
+							 &struct_buf[offset],
+							 rdesc->struct_size - offset);
+		if (item_size < 0) {
+			dev_warn(&d->dev,
+				 "%s: Failed to parse register %d descriptor, ignoring it\n",
+				 __func__, reg);
+			break;
 		}
 
 		item->reg = reg;
-		item->reg_size = reg_size;
+		offset += item_size;
 
-		map_offset = 0;
+		if (item->reg_size == 0) {
+			dev_warn(&d->dev,
+				 "%s: Register %d has 0 size, ignoring it\n",
+				 __func__, item->reg);
+		} else {
+			rmi_dbg(RMI_DEBUG_CORE, &d->dev,
+				"%s: reg: %d reg size: %u subpackets: %d\n", __func__,
+				item->reg, item->reg_size, item->num_subpackets);
 
-		do {
-			for (b = 0; b < 7; b++) {
-				if (struct_buf[offset] & (0x1 << b))
-					bitmap_set(item->subpacket_map,
-						map_offset, 1);
-				++map_offset;
-			}
-		} while (struct_buf[offset++] & 0x80);
-
-		item->num_subpackets = bitmap_weight(item->subpacket_map,
-						RMI_REG_DESC_SUBPACKET_BITS);
-
-		rmi_dbg(RMI_DEBUG_CORE, &d->dev,
-			"%s: reg: %d reg size: %ld subpackets: %d\n", __func__,
-			item->reg, item->reg_size, item->num_subpackets);
-
-		reg = find_next_bit(rdesc->presense_map,
-				RMI_REG_DESC_PRESENSE_BITS, reg + 1);
+			num_registers++;
+		}
 	}
+	rdesc->num_registers = num_registers;
 
-free_struct_buff:
-	kfree(struct_buf);
-	return ret;
+	return 0;
 }
 
 const struct rmi_register_desc_item *rmi_get_register_desc_item(
@@ -734,7 +759,7 @@ size_t rmi_register_desc_calc_size(struct rmi_register_descriptor *rdesc)
 
 	for (i = 0; i < rdesc->num_registers; i++) {
 		item = &rdesc->registers[i];
-		size += item->reg_size;
+		size = size_add(size, item->reg_size);
 	}
 	return size;
 }
@@ -759,7 +784,7 @@ int rmi_register_desc_calc_reg_offset(
 bool rmi_register_desc_has_subpacket(const struct rmi_register_desc_item *item,
 	u8 subpacket)
 {
-	return find_next_bit(item->subpacket_map, RMI_REG_DESC_PRESENSE_BITS,
+	return find_next_bit(item->subpacket_map, RMI_REG_DESC_SUBPACKET_BITS,
 				subpacket) == subpacket;
 }
 
@@ -860,9 +885,7 @@ static int rmi_create_function(struct rmi_device *rmi_dev,
 	rmi_dbg(RMI_DEBUG_CORE, dev, "Initializing F%02X.\n",
 			pdt->function_number);
 
-	fn = kzalloc(sizeof(struct rmi_function) +
-			BITS_TO_LONGS(data->irq_count) * sizeof(unsigned long),
-		     GFP_KERNEL);
+	fn = rmi_alloc_function(rmi_dev, pdt->function_number);
 	if (!fn) {
 		dev_err(dev, "Failed to allocate memory for F%02X\n",
 			pdt->function_number);
@@ -872,8 +895,6 @@ static int rmi_create_function(struct rmi_device *rmi_dev,
 	INIT_LIST_HEAD(&fn->node);
 	rmi_driver_copy_pdt_to_fd(pdt, &fn->fd);
 
-	fn->rmi_dev = rmi_dev;
-
 	fn->num_of_irqs = pdt->interrupt_source_count;
 	fn->irq_pos = *current_irq_count;
 	*current_irq_count += fn->num_of_irqs;
@@ -882,8 +903,10 @@ static int rmi_create_function(struct rmi_device *rmi_dev,
 		set_bit(fn->irq_pos + i, fn->irq_mask);
 
 	error = rmi_register_function(fn);
-	if (error)
-		goto err_put_fn;
+	if (error) {
+		put_device(&fn->dev);
+		return error;
+	}
 
 	if (pdt->function_number == 0x01)
 		data->f01_container = fn;
@@ -893,10 +916,6 @@ static int rmi_create_function(struct rmi_device *rmi_dev,
 	list_add_tail(&fn->node, &data->function_list);
 
 	return RMI_SCAN_CONTINUE;
-
-err_put_fn:
-	put_device(&fn->dev);
-	return error;
 }
 
 void rmi_enable_irq(struct rmi_device *rmi_dev, bool clear_wake)
@@ -1000,11 +1019,15 @@ EXPORT_SYMBOL_GPL(rmi_driver_resume);
 static int rmi_driver_remove(struct device *dev)
 {
 	struct rmi_device *rmi_dev = to_rmi_device(dev);
+	struct rmi_driver_data *data = dev_get_drvdata(&rmi_dev->dev);
 
 	rmi_disable_irq(rmi_dev, false);
 
 	rmi_f34_remove_sysfs(rmi_dev);
 	rmi_free_function_list(rmi_dev);
+
+	irq_domain_remove(data->irqdomain);
+	data->irqdomain = NULL;
 
 	return 0;
 }
@@ -1034,7 +1057,8 @@ int rmi_probe_interrupts(struct rmi_driver_data *data)
 {
 	struct rmi_device *rmi_dev = data->rmi_dev;
 	struct device *dev = &rmi_dev->dev;
-	int irq_count;
+	struct fwnode_handle *fwnode = rmi_dev->xport->dev->fwnode;
+	int irq_count = 0;
 	size_t size;
 	int retval;
 
@@ -1045,7 +1069,6 @@ int rmi_probe_interrupts(struct rmi_driver_data *data)
 	 * being accessed.
 	 */
 	rmi_dbg(RMI_DEBUG_CORE, dev, "%s: Counting IRQs.\n", __func__);
-	irq_count = 0;
 	data->bootloader_mode = false;
 
 	retval = rmi_scan_pdt(rmi_dev, &irq_count, rmi_count_irqs);
@@ -1057,11 +1080,20 @@ int rmi_probe_interrupts(struct rmi_driver_data *data)
 	if (data->bootloader_mode)
 		dev_warn(dev, "Device in bootloader mode.\n");
 
+	/* Allocate and register a linear revmap irq_domain */
+	data->irqdomain = irq_domain_create_linear(fwnode, irq_count,
+						   &irq_domain_simple_ops,
+						   data);
+	if (!data->irqdomain) {
+		dev_err(&rmi_dev->dev, "Failed to create IRQ domain\n");
+		return -ENOMEM;
+	}
+
 	data->irq_count = irq_count;
 	data->num_of_irq_regs = (data->irq_count + 7) / 8;
 
 	size = BITS_TO_LONGS(data->irq_count) * sizeof(unsigned long);
-	data->irq_memory = devm_kzalloc(dev, size * 4, GFP_KERNEL);
+	data->irq_memory = devm_kcalloc(dev, size, 4, GFP_KERNEL);
 	if (!data->irq_memory) {
 		dev_err(dev, "Failed to allocate memory for irq masks.\n");
 		return -ENOMEM;
@@ -1079,10 +1111,9 @@ int rmi_init_functions(struct rmi_driver_data *data)
 {
 	struct rmi_device *rmi_dev = data->rmi_dev;
 	struct device *dev = &rmi_dev->dev;
-	int irq_count;
+	int irq_count = 0;
 	int retval;
 
-	irq_count = 0;
 	rmi_dbg(RMI_DEBUG_CORE, dev, "%s: Creating functions.\n", __func__);
 	retval = rmi_scan_pdt(rmi_dev, &irq_count, rmi_create_function);
 	if (retval < 0) {
@@ -1146,6 +1177,7 @@ static int rmi_driver_probe(struct device *dev)
 		return -ENOMEM;
 
 	INIT_LIST_HEAD(&data->function_list);
+	INIT_KFIFO(data->attn_fifo);
 	data->rmi_dev = rmi_dev;
 	dev_set_drvdata(&rmi_dev->dev, data);
 
@@ -1210,7 +1242,11 @@ static int rmi_driver_probe(struct device *dev)
 		}
 		rmi_driver_set_input_params(rmi_dev, data->input);
 		data->input->phys = devm_kasprintf(dev, GFP_KERNEL,
-						"%s/input0", dev_name(dev));
+						   "%s/input0", dev_name(dev));
+		if (!data->input->phys) {
+			retval = -ENOMEM;
+			goto err;
+		}
 	}
 
 	retval = rmi_init_functions(data);
@@ -1224,7 +1260,8 @@ static int rmi_driver_probe(struct device *dev)
 	if (data->input) {
 		rmi_driver_set_input_name(rmi_dev, data->input);
 		if (!rmi_dev->xport->input) {
-			if (input_register_device(data->input)) {
+			retval = input_register_device(data->input);
+			if (retval) {
 				dev_err(dev, "%s: Failed to register input device.\n",
 					__func__);
 				goto err_destroy_functions;
@@ -1267,7 +1304,7 @@ static struct rmi_driver rmi_physical_driver = {
 	.set_input_params = rmi_driver_set_input_params,
 };
 
-bool rmi_is_physical_driver(struct device_driver *drv)
+bool rmi_is_physical_driver(const struct device_driver *drv)
 {
 	return drv == &rmi_physical_driver.driver;
 }

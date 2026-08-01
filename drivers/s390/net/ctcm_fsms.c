@@ -12,8 +12,7 @@
 #undef DEBUGDATA
 #undef DEBUGCCW
 
-#define KMSG_COMPONENT "ctcm"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "ctcm: " fmt
 
 #include <linux/module.h>
 #include <linux/init.h>
@@ -182,7 +181,7 @@ static void ctcmpc_chx_attnbusy(fsm_instance *, int, void *);
 static void ctcmpc_chx_resend(fsm_instance *, int, void *);
 static void ctcmpc_chx_send_sweep(fsm_instance *fsm, int event, void *arg);
 
-/**
+/*
  * Check return code of a preceding ccw_device call, halt_IO etc...
  *
  * ch	:	The channel, the error belongs to.
@@ -223,7 +222,7 @@ void ctcm_purge_skb_queue(struct sk_buff_head *q)
 	}
 }
 
-/**
+/*
  * NOP action for statemachines
  */
 static void ctcm_action_nop(fsm_instance *fi, int event, void *arg)
@@ -234,7 +233,7 @@ static void ctcm_action_nop(fsm_instance *fi, int event, void *arg)
  * Actions for channel - statemachines.
  */
 
-/**
+/*
  * Normal data has been send. Free the corresponding
  * skb (it's in io_queue), reset dev->tbusy and
  * revert to idle state.
@@ -307,8 +306,7 @@ static void chx_txdone(fsm_instance *fi, int event, void *arg)
 		ch->ccw[1].count = ch->trans_skb->len;
 		fsm_addtimer(&ch->timer, CTCM_TIME_5_SEC, CTC_EVENT_TIMER, ch);
 		ch->prof.send_stamp = jiffies;
-		rc = ccw_device_start(ch->cdev, &ch->ccw[0],
-						(unsigned long)ch, 0xff, 0);
+		rc = ccw_device_start(ch->cdev, &ch->ccw[0], 0, 0xff, 0);
 		ch->prof.doios_multi++;
 		if (rc != 0) {
 			priv->stats.tx_dropped += i;
@@ -323,7 +321,7 @@ static void chx_txdone(fsm_instance *fi, int event, void *arg)
 	ctcm_clear_busy_do(dev);
 }
 
-/**
+/*
  * Initial data is sent.
  * Notify device statemachine that we are up and
  * running.
@@ -345,7 +343,7 @@ void ctcm_chx_txidle(fsm_instance *fi, int event, void *arg)
 	fsm_event(priv->fsm, DEV_EVENT_TXUP, ch->netdev);
 }
 
-/**
+/*
  * Got normal data, check for sanity, queue it up, allocate new buffer
  * trigger bottom half, and initiate next read.
  *
@@ -371,7 +369,7 @@ static void chx_rx(fsm_instance *fi, int event, void *arg)
 					CTCM_FUNTAIL, dev->name, len);
 		priv->stats.rx_dropped++;
 		priv->stats.rx_length_errors++;
-						goto again;
+		goto again;
 	}
 	if (len > ch->max_bufsize) {
 		CTCM_DBF_TEXT_(TRACE, CTC_DBF_NOTICE,
@@ -379,7 +377,7 @@ static void chx_rx(fsm_instance *fi, int event, void *arg)
 				CTCM_FUNTAIL, dev->name, len, ch->max_bufsize);
 		priv->stats.rx_dropped++;
 		priv->stats.rx_length_errors++;
-						goto again;
+		goto again;
 	}
 
 	/*
@@ -404,7 +402,7 @@ static void chx_rx(fsm_instance *fi, int event, void *arg)
 		*((__u16 *)skb->data) = len;
 		priv->stats.rx_dropped++;
 		priv->stats.rx_length_errors++;
-						goto again;
+		goto again;
 	}
 	if (block_len > 2) {
 		*((__u16 *)skb->data) = block_len - 2;
@@ -417,13 +415,12 @@ static void chx_rx(fsm_instance *fi, int event, void *arg)
 	if (ctcm_checkalloc_buffer(ch))
 		return;
 	ch->ccw[1].count = ch->max_bufsize;
-	rc = ccw_device_start(ch->cdev, &ch->ccw[0],
-					(unsigned long)ch, 0xff, 0);
+	rc = ccw_device_start(ch->cdev, &ch->ccw[0], 0, 0xff, 0);
 	if (rc != 0)
 		ctcm_ccw_check_rc(ch, rc, "normal RX");
 }
 
-/**
+/*
  * Initialize connection by sending a __u16 of value 0.
  *
  * fi		An instance of a channel statemachine.
@@ -478,8 +475,7 @@ static void chx_firstio(fsm_instance *fi, int event, void *arg)
 
 	fsm_newstate(fi, (CHANNEL_DIRECTION(ch->flags) == CTCM_READ)
 		     ? CTC_STATE_RXINIT : CTC_STATE_TXINIT);
-	rc = ccw_device_start(ch->cdev, &ch->ccw[0],
-					(unsigned long)ch, 0xff, 0);
+	rc = ccw_device_start(ch->cdev, &ch->ccw[0], 0, 0xff, 0);
 	if (rc != 0) {
 		fsm_deltimer(&ch->timer);
 		fsm_newstate(fi, CTC_STATE_SETUPWAIT);
@@ -500,7 +496,7 @@ static void chx_firstio(fsm_instance *fi, int event, void *arg)
 	}
 }
 
-/**
+/*
  * Got initial data, check it. If OK,
  * notify device statemachine that we are up and
  * running.
@@ -527,8 +523,7 @@ static void chx_rxidle(fsm_instance *fi, int event, void *arg)
 			return;
 		ch->ccw[1].count = ch->max_bufsize;
 		fsm_newstate(fi, CTC_STATE_RXIDLE);
-		rc = ccw_device_start(ch->cdev, &ch->ccw[0],
-						(unsigned long)ch, 0xff, 0);
+		rc = ccw_device_start(ch->cdev, &ch->ccw[0], 0, 0xff, 0);
 		if (rc != 0) {
 			fsm_newstate(fi, CTC_STATE_RXINIT);
 			ctcm_ccw_check_rc(ch, rc, "initial RX");
@@ -542,7 +537,7 @@ static void chx_rxidle(fsm_instance *fi, int event, void *arg)
 	}
 }
 
-/**
+/*
  * Set channel into extended mode.
  *
  * fi		An instance of a channel statemachine.
@@ -571,8 +566,7 @@ static void ctcm_chx_setmode(fsm_instance *fi, int event, void *arg)
 			/* Such conditional locking is undeterministic in
 			 * static view. => ignore sparse warnings here. */
 
-	rc = ccw_device_start(ch->cdev, &ch->ccw[6],
-					(unsigned long)ch, 0xff, 0);
+	rc = ccw_device_start(ch->cdev, &ch->ccw[6], 0, 0xff, 0);
 	if (event == CTC_EVENT_TIMER)	/* see above comments */
 		spin_unlock_irqrestore(get_ccwdev_lock(ch->cdev), saveflags);
 	if (rc != 0) {
@@ -583,7 +577,7 @@ static void ctcm_chx_setmode(fsm_instance *fi, int event, void *arg)
 		ch->retry = 0;
 }
 
-/**
+/*
  * Setup channel.
  *
  * fi		An instance of a channel statemachine.
@@ -637,7 +631,7 @@ static void ctcm_chx_start(fsm_instance *fi, int event, void *arg)
 	fsm_newstate(fi, CTC_STATE_STARTWAIT);
 	fsm_addtimer(&ch->timer, 1000, CTC_EVENT_TIMER, ch);
 	spin_lock_irqsave(get_ccwdev_lock(ch->cdev), saveflags);
-	rc = ccw_device_halt(ch->cdev, (unsigned long)ch);
+	rc = ccw_device_halt(ch->cdev, 0);
 	spin_unlock_irqrestore(get_ccwdev_lock(ch->cdev), saveflags);
 	if (rc != 0) {
 		if (rc != -EBUSY)
@@ -646,7 +640,7 @@ static void ctcm_chx_start(fsm_instance *fi, int event, void *arg)
 	}
 }
 
-/**
+/*
  * Shutdown a channel.
  *
  * fi		An instance of a channel statemachine.
@@ -672,7 +666,7 @@ static void ctcm_chx_haltio(fsm_instance *fi, int event, void *arg)
 			 * static view. => ignore sparse warnings here. */
 	oldstate = fsm_getstate(fi);
 	fsm_newstate(fi, CTC_STATE_TERM);
-	rc = ccw_device_halt(ch->cdev, (unsigned long)ch);
+	rc = ccw_device_halt(ch->cdev, 0);
 
 	if (event == CTC_EVENT_STOP)
 		spin_unlock_irqrestore(get_ccwdev_lock(ch->cdev), saveflags);
@@ -687,7 +681,7 @@ static void ctcm_chx_haltio(fsm_instance *fi, int event, void *arg)
 	}
 }
 
-/**
+/*
  * Cleanup helper for chx_fail and chx_stopped
  * cleanup channels queue and notify interface statemachine.
  *
@@ -733,7 +727,7 @@ static void ctcm_chx_cleanup(fsm_instance *fi, int state,
 	}
 }
 
-/**
+/*
  * A channel has successfully been halted.
  * Cleanup it's queue and notify interface statemachine.
  *
@@ -746,7 +740,7 @@ static void ctcm_chx_stopped(fsm_instance *fi, int event, void *arg)
 	ctcm_chx_cleanup(fi, CTC_STATE_STOPPED, arg);
 }
 
-/**
+/*
  * A stop command from device statemachine arrived and we are in
  * not operational mode. Set state to stopped.
  *
@@ -759,7 +753,7 @@ static void ctcm_chx_stop(fsm_instance *fi, int event, void *arg)
 	fsm_newstate(fi, CTC_STATE_STOPPED);
 }
 
-/**
+/*
  * A machine check for no path, not operational status or gone device has
  * happened.
  * Cleanup queue and notify interface statemachine.
@@ -773,7 +767,7 @@ static void ctcm_chx_fail(fsm_instance *fi, int event, void *arg)
 	ctcm_chx_cleanup(fi, CTC_STATE_NOTOP, arg);
 }
 
-/**
+/*
  * Handle error during setup of channel.
  *
  * fi		An instance of a channel statemachine.
@@ -799,7 +793,7 @@ static void ctcm_chx_setuperr(fsm_instance *fi, int event, void *arg)
 		fsm_addtimer(&ch->timer, CTCM_TIME_5_SEC, CTC_EVENT_TIMER, ch);
 		if (!IS_MPC(ch) &&
 		    (CHANNEL_DIRECTION(ch->flags) == CTCM_READ)) {
-			int rc = ccw_device_halt(ch->cdev, (unsigned long)ch);
+			int rc = ccw_device_halt(ch->cdev, 0);
 			if (rc != 0)
 				ctcm_ccw_check_rc(ch, rc,
 					"HaltIO in chx_setuperr");
@@ -822,7 +816,7 @@ static void ctcm_chx_setuperr(fsm_instance *fi, int event, void *arg)
 	}
 }
 
-/**
+/*
  * Restart a channel after an error.
  *
  * fi		An instance of a channel statemachine.
@@ -851,7 +845,7 @@ static void ctcm_chx_restart(fsm_instance *fi, int event, void *arg)
 			/* Such conditional locking is a known problem for
 			 * sparse because its undeterministic in static view.
 			 * Warnings should be ignored here. */
-	rc = ccw_device_halt(ch->cdev, (unsigned long)ch);
+	rc = ccw_device_halt(ch->cdev, 0);
 	if (event == CTC_EVENT_TIMER)
 		spin_unlock_irqrestore(get_ccwdev_lock(ch->cdev), saveflags);
 	if (rc != 0) {
@@ -863,7 +857,7 @@ static void ctcm_chx_restart(fsm_instance *fi, int event, void *arg)
 	}
 }
 
-/**
+/*
  * Handle error during RX initial handshake (exchange of
  * 0-length block header)
  *
@@ -887,6 +881,13 @@ static void ctcm_chx_rxiniterr(fsm_instance *fi, int event, void *arg)
 			fsm_newstate(fi, CTC_STATE_RXERR);
 			fsm_event(priv->fsm, DEV_EVENT_RXDOWN, dev);
 		}
+	} else if (event == CTC_EVENT_UC_RCRESET) {
+		CTCM_DBF_TEXT_(TRACE, CTC_DBF_NOTICE,
+			       "%s(%s): %s in %s", CTCM_FUNTAIL, ch->id,
+			       ctc_ch_event_names[event], fsm_getstate_str(fi));
+
+		dev_info(&dev->dev,
+			 "Init handshake not received, peer not ready yet\n");
 	} else {
 		CTCM_DBF_TEXT_(ERROR, CTC_DBF_ERROR,
 			"%s(%s): %s in %s", CTCM_FUNTAIL, ch->id,
@@ -898,7 +899,7 @@ static void ctcm_chx_rxiniterr(fsm_instance *fi, int event, void *arg)
 	}
 }
 
-/**
+/*
  * Notify device statemachine if we gave up initialization
  * of RX channel.
  *
@@ -919,7 +920,7 @@ static void ctcm_chx_rxinitfail(fsm_instance *fi, int event, void *arg)
 	fsm_event(priv->fsm, DEV_EVENT_RXDOWN, dev);
 }
 
-/**
+/*
  * Handle RX Unit check remote reset (remote disconnected)
  *
  * fi		An instance of a channel statemachine.
@@ -947,11 +948,11 @@ static void ctcm_chx_rxdisc(fsm_instance *fi, int event, void *arg)
 	ch2 = priv->channel[CTCM_WRITE];
 	fsm_newstate(ch2->fsm, CTC_STATE_DTERM);
 
-	ccw_device_halt(ch->cdev, (unsigned long)ch);
-	ccw_device_halt(ch2->cdev, (unsigned long)ch2);
+	ccw_device_halt(ch->cdev, 0);
+	ccw_device_halt(ch2->cdev, 0);
 }
 
-/**
+/*
  * Handle error during TX channel initialization.
  *
  * fi		An instance of a channel statemachine.
@@ -972,6 +973,13 @@ static void ctcm_chx_txiniterr(fsm_instance *fi, int event, void *arg)
 			fsm_newstate(fi, CTC_STATE_TXERR);
 			fsm_event(priv->fsm, DEV_EVENT_TXDOWN, dev);
 		}
+	} else if (event == CTC_EVENT_UC_RCRESET) {
+		CTCM_DBF_TEXT_(TRACE, CTC_DBF_NOTICE,
+			       "%s(%s): %s in %s", CTCM_FUNTAIL, ch->id,
+			       ctc_ch_event_names[event], fsm_getstate_str(fi));
+
+		dev_info(&dev->dev,
+			 "Init handshake not sent, peer not ready yet\n");
 	} else {
 		CTCM_DBF_TEXT_(ERROR, CTC_DBF_ERROR,
 			"%s(%s): %s in %s", CTCM_FUNTAIL, ch->id,
@@ -983,7 +991,7 @@ static void ctcm_chx_txiniterr(fsm_instance *fi, int event, void *arg)
 	}
 }
 
-/**
+/*
  * Handle TX timeout by retrying operation.
  *
  * fi		An instance of a channel statemachine.
@@ -1011,7 +1019,7 @@ static void ctcm_chx_txretry(fsm_instance *fi, int event, void *arg)
 			use gptr as mpc indicator */
 		if (!(gptr && (fsm_getstate(gptr->fsm) != MPCG_STATE_READY)))
 			ctcm_chx_restart(fi, event, arg);
-				goto done;
+		goto done;
 	}
 
 	CTCM_DBF_TEXT_(TRACE, CTC_DBF_DEBUG,
@@ -1029,7 +1037,7 @@ static void ctcm_chx_txretry(fsm_instance *fi, int event, void *arg)
 						CTCM_FUNTAIL, ch->id);
 			fsm_event(priv->fsm, DEV_EVENT_TXDOWN, dev);
 			ctcm_chx_restart(fi, event, arg);
-				goto done;
+			goto done;
 		}
 		fsm_addtimer(&ch->timer, 1000, CTC_EVENT_TIMER, ch);
 		if (event == CTC_EVENT_TIMER) /* for TIMER not yet locked */
@@ -1041,8 +1049,7 @@ static void ctcm_chx_txretry(fsm_instance *fi, int event, void *arg)
 			ctcmpc_dumpit((char *)&ch->ccw[3],
 					sizeof(struct ccw1) * 3);
 
-		rc = ccw_device_start(ch->cdev, &ch->ccw[3],
-						(unsigned long)ch, 0xff, 0);
+		rc = ccw_device_start(ch->cdev, &ch->ccw[3], 0, 0xff, 0);
 		if (event == CTC_EVENT_TIMER)
 			spin_unlock_irqrestore(get_ccwdev_lock(ch->cdev),
 					saveflags);
@@ -1056,7 +1063,7 @@ done:
 	return;
 }
 
-/**
+/*
  * Handle fatal errors during an I/O command.
  *
  * fi		An instance of a channel statemachine.
@@ -1204,7 +1211,7 @@ int ch_fsm_len = ARRAY_SIZE(ch_fsm);
  * Actions for mpc channel statemachine.
  */
 
-/**
+/*
  * Normal data has been send. Free the corresponding
  * skb (it's in io_queue), reset dev->tbusy and
  * revert to idle state.
@@ -1257,12 +1264,12 @@ static void ctcmpc_chx_txdone(fsm_instance *fi, int event, void *arg)
 	if ((ch->collect_len <= 0) || (grp->in_sweep != 0)) {
 		spin_unlock(&ch->collect_lock);
 		fsm_newstate(fi, CTC_STATE_TXIDLE);
-				goto done;
+		goto done;
 	}
 
 	if (ctcm_checkalloc_buffer(ch)) {
 		spin_unlock(&ch->collect_lock);
-				goto done;
+		goto done;
 	}
 	ch->trans_skb->data = ch->trans_skb_data;
 	skb_reset_tail_pointer(ch->trans_skb);
@@ -1309,23 +1316,16 @@ static void ctcmpc_chx_txdone(fsm_instance *fi, int event, void *arg)
 	/* p_header points to the last one we handled */
 	if (p_header)
 		p_header->pdu_flag |= PDU_LAST;	/*Say it's the last one*/
-	header = kzalloc(TH_HEADER_LENGTH, gfp_type());
-	if (!header) {
-		spin_unlock(&ch->collect_lock);
-		fsm_event(priv->mpcg->fsm, MPCG_EVENT_INOP, dev);
-				goto done;
-	}
+
+	header = skb_push(ch->trans_skb, TH_HEADER_LENGTH);
+	memset(header, 0, TH_HEADER_LENGTH);
+
 	header->th_ch_flag = TH_HAS_PDU;  /* Normal data */
 	ch->th_seq_num++;
 	header->th_seq_num = ch->th_seq_num;
 
 	CTCM_PR_DBGDATA("%s: ToVTAM_th_seq= %08x\n" ,
 					__func__, ch->th_seq_num);
-
-	memcpy(skb_push(ch->trans_skb, TH_HEADER_LENGTH), header,
-		TH_HEADER_LENGTH);	/* put the TH on the packet */
-
-	kfree(header);
 
 	CTCM_PR_DBGDATA("%s: trans_skb len:%04x \n",
 		       __func__, ch->trans_skb->len);
@@ -1338,7 +1338,7 @@ static void ctcmpc_chx_txdone(fsm_instance *fi, int event, void *arg)
 	clear_normalized_cda(&ch->ccw[1]);
 
 	CTCM_PR_DBGDATA("ccwcda=0x%p data=0x%p\n",
-			(void *)(unsigned long)ch->ccw[1].cda,
+			(void *)(u64)dma32_to_u32(ch->ccw[1].cda),
 			ch->trans_skb->data);
 	ch->ccw[1].count = ch->max_bufsize;
 
@@ -1353,7 +1353,7 @@ static void ctcmpc_chx_txdone(fsm_instance *fi, int event, void *arg)
 	}
 
 	CTCM_PR_DBGDATA("ccwcda=0x%p data=0x%p\n",
-			(void *)(unsigned long)ch->ccw[1].cda,
+			(void *)(u64)dma32_to_u32(ch->ccw[1].cda),
 			ch->trans_skb->data);
 
 	ch->ccw[1].count = ch->trans_skb->len;
@@ -1361,8 +1361,7 @@ static void ctcmpc_chx_txdone(fsm_instance *fi, int event, void *arg)
 	ch->prof.send_stamp = jiffies;
 	if (do_debug_ccw)
 		ctcmpc_dumpit((char *)&ch->ccw[0], sizeof(struct ccw1) * 3);
-	rc = ccw_device_start(ch->cdev, &ch->ccw[0],
-					(unsigned long)ch, 0xff, 0);
+	rc = ccw_device_start(ch->cdev, &ch->ccw[0], 0, 0xff, 0);
 	ch->prof.doios_multi++;
 	if (rc != 0) {
 		priv->stats.tx_dropped += i;
@@ -1375,7 +1374,7 @@ done:
 	return;
 }
 
-/**
+/*
  * Got normal data, check for sanity, queue it up, allocate new buffer
  * trigger bottom half, and initiate next read.
  *
@@ -1403,12 +1402,12 @@ static void ctcmpc_chx_rx(fsm_instance *fi, int event, void *arg)
 		CTCM_DBF_TEXT_(MPC_ERROR, CTC_DBF_ERROR,
 			"%s(%s): TRANS_SKB = NULL",
 				CTCM_FUNTAIL, dev->name);
-			goto again;
+		goto again;
 	}
 
 	if (len < TH_HEADER_LENGTH) {
 		CTCM_DBF_TEXT_(MPC_ERROR, CTC_DBF_ERROR,
-				"%s(%s): packet length %d to short",
+				"%s(%s): packet length %d too short",
 					CTCM_FUNTAIL, dev->name, len);
 		priv->stats.rx_dropped++;
 		priv->stats.rx_length_errors++;
@@ -1420,10 +1419,10 @@ static void ctcmpc_chx_rx(fsm_instance *fi, int event, void *arg)
 
 		if (new_skb == NULL) {
 			CTCM_DBF_TEXT_(MPC_ERROR, CTC_DBF_ERROR,
-				"%s(%d): skb allocation failed",
+				"%s(%s): skb allocation failed",
 						CTCM_FUNTAIL, dev->name);
 			fsm_event(priv->mpcg->fsm, MPCG_EVENT_INOP, dev);
-					goto again;
+			goto again;
 		}
 		switch (fsm_getstate(grp->fsm)) {
 		case MPCG_STATE_RESET:
@@ -1455,20 +1454,20 @@ again:
 		skb_reset_tail_pointer(ch->trans_skb);
 		ch->trans_skb->len = 0;
 		ch->ccw[1].count = ch->max_bufsize;
-			if (do_debug_ccw)
+		if (do_debug_ccw)
 			ctcmpc_dumpit((char *)&ch->ccw[0],
-					sizeof(struct ccw1) * 3);
-		dolock = !in_irq();
+				      sizeof(struct ccw1) * 3);
+		dolock = !in_hardirq();
 		if (dolock)
 			spin_lock_irqsave(
 				get_ccwdev_lock(ch->cdev), saveflags);
-		rc = ccw_device_start(ch->cdev, &ch->ccw[0],
-						(unsigned long)ch, 0xff, 0);
+		rc = ccw_device_start(ch->cdev, &ch->ccw[0], 0, 0xff, 0);
 		if (dolock) /* see remark about conditional locking */
 			spin_unlock_irqrestore(
 				get_ccwdev_lock(ch->cdev), saveflags);
 		if (rc != 0)
 			ctcm_ccw_check_rc(ch, rc, "normal RX");
+		break;
 	default:
 		break;
 	}
@@ -1478,7 +1477,7 @@ again:
 
 }
 
-/**
+/*
  * Initialize connection by sending a __u16 of value 0.
  *
  * fi		An instance of a channel statemachine.
@@ -1530,7 +1529,7 @@ done:
 	return;
 }
 
-/**
+/*
  * Got initial data, check it. If OK,
  * notify device statemachine that we are up and
  * running.
@@ -1569,15 +1568,14 @@ void ctcmpc_chx_rxidle(fsm_instance *fi, int event, void *arg)
 		if (event == CTC_EVENT_START)
 			/* see remark about conditional locking */
 			spin_lock_irqsave(get_ccwdev_lock(ch->cdev), saveflags);
-		rc = ccw_device_start(ch->cdev, &ch->ccw[0],
-						(unsigned long)ch, 0xff, 0);
+		rc = ccw_device_start(ch->cdev, &ch->ccw[0], 0, 0xff, 0);
 		if (event == CTC_EVENT_START)
 			spin_unlock_irqrestore(
 					get_ccwdev_lock(ch->cdev), saveflags);
 		if (rc != 0) {
 			fsm_newstate(fi, CTC_STATE_RXINIT);
 			ctcm_ccw_check_rc(ch, rc, "initial RX");
-				goto done;
+			goto done;
 		}
 		break;
 	default:
@@ -1692,10 +1690,10 @@ static void ctcmpc_chx_attnbusy(fsm_instance *fsm, int event, void *arg)
 		if (fsm_getstate(ch->fsm) == CH_XID0_INPROGRESS) {
 			fsm_newstate(ch->fsm, CH_XID0_PENDING) ;
 			fsm_deltimer(&grp->timer);
-				goto done;
+			goto done;
 		}
 		fsm_event(grp->fsm, MPCG_EVENT_INOP, dev);
-				goto done;
+		goto done;
 	case MPCG_STATE_XID2INITX:
 		/* XID2 was received before ATTN Busy for second
 		   channel.Send yside xid for second channel.
@@ -1704,6 +1702,7 @@ static void ctcmpc_chx_attnbusy(fsm_instance *fsm, int event, void *arg)
 			grp->changed_side = 2;
 			break;
 		}
+		fallthrough;
 	case MPCG_STATE_XID0IOWAIX:
 	case MPCG_STATE_XID7INITW:
 	case MPCG_STATE_XID7INITX:
@@ -1782,7 +1781,7 @@ static void ctcmpc_chx_send_sweep(fsm_instance *fsm, int event, void *arg)
 		/* give the previous IO time to complete */
 		fsm_addtimer(&wch->sweep_timer,
 			200, CTC_EVENT_RSWEEP_TIMER, wch);
-				goto done;
+		goto done;
 	}
 
 	skb = skb_dequeue(&wch->sweep_queue);
@@ -1794,7 +1793,7 @@ static void ctcmpc_chx_send_sweep(fsm_instance *fsm, int event, void *arg)
 		ctcm_clear_busy_do(dev);
 		dev_kfree_skb_any(skb);
 		fsm_event(grp->fsm, MPCG_EVENT_INOP, dev);
-				goto done;
+		goto done;
 	} else {
 		refcount_inc(&skb->users);
 		skb_queue_tail(&wch->io_queue, skb);
@@ -1824,8 +1823,7 @@ static void ctcmpc_chx_send_sweep(fsm_instance *fsm, int event, void *arg)
 
 	spin_lock_irqsave(get_ccwdev_lock(wch->cdev), saveflags);
 	wch->prof.send_stamp = jiffies;
-	rc = ccw_device_start(wch->cdev, &wch->ccw[3],
-					(unsigned long) wch, 0xff, 0);
+	rc = ccw_device_start(wch->cdev, &wch->ccw[3], 0, 0xff, 0);
 	spin_unlock_irqrestore(get_ccwdev_lock(wch->cdev), saveflags);
 
 	if ((grp->sweep_req_pend_num == 0) &&
@@ -2058,7 +2056,7 @@ int mpc_ch_fsm_len = ARRAY_SIZE(ctcmpc_ch_fsm);
  * Actions for interface - statemachine.
  */
 
-/**
+/*
  * Startup channels by sending CTC_EVENT_START to each channel.
  *
  * fi		An instance of an interface statemachine.
@@ -2083,7 +2081,7 @@ static void dev_action_start(fsm_instance *fi, int event, void *arg)
 	}
 }
 
-/**
+/*
  * Shutdown channels by sending CTC_EVENT_STOP to each channel.
  *
  * fi		An instance of an interface statemachine.
@@ -2137,7 +2135,7 @@ static void dev_action_restart(fsm_instance *fi, int event, void *arg)
 			DEV_EVENT_START, dev);
 }
 
-/**
+/*
  * Called from channel statemachine
  * when a channel is up and running.
  *
@@ -2198,7 +2196,7 @@ static void dev_action_chup(fsm_instance *fi, int event, void *arg)
 	}
 }
 
-/**
+/*
  * Called from device statemachine
  * when a channel has been shutdown.
  *

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/arch/arm/mach-pxa/gumstix.c
  *
@@ -6,10 +7,6 @@
  *  Original Author:	Craig Hughes
  *  Created:	Feb 14, 2008
  *  Copyright:	Craig Hughes
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  *
  *  Implemented based on lubbock.c by Nicolas Pitre and code from Craig
  *  Hughes
@@ -23,17 +20,17 @@
 #include <linux/delay.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
+#include <linux/gpio/machine.h>
+#include <linux/gpio/property.h>
 #include <linux/gpio.h>
 #include <linux/err.h>
 #include <linux/clk.h>
-#include <linux/usb/gpio_vbus.h>
 
 #include <asm/setup.h>
-#include <asm/memory.h>
+#include <asm/page.h>
 #include <asm/mach-types.h>
-#include <mach/hardware.h>
 #include <asm/irq.h>
-#include <asm/sizes.h>
+#include <linux/sizes.h>
 
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
@@ -42,8 +39,8 @@
 
 #include "pxa25x.h"
 #include <linux/platform_data/mmc-pxamci.h>
-#include "udc.h"
 #include "gumstix.h"
+#include "devices.h"
 
 #include "generic.h"
 
@@ -90,14 +87,11 @@ static struct platform_device *devices[] __initdata = {
 #ifdef CONFIG_MMC_PXA
 static struct pxamci_platform_data gumstix_mci_platform_data = {
 	.ocr_mask		= MMC_VDD_32_33|MMC_VDD_33_34,
-	.gpio_card_detect 	= -1,
-	.gpio_card_ro		= -1,
-	.gpio_power		= -1,
 };
 
 static void __init gumstix_mmc_init(void)
 {
-	pxa_set_mci_info(&gumstix_mci_platform_data);
+	pxa_set_mci_info(&gumstix_mci_platform_data, NULL);
 }
 #else
 static void __init gumstix_mmc_init(void)
@@ -106,23 +100,24 @@ static void __init gumstix_mmc_init(void)
 }
 #endif
 
-#ifdef CONFIG_USB_PXA25X
-static struct gpio_vbus_mach_info gumstix_udc_info = {
-	.gpio_vbus		= GPIO_GUMSTIX_USB_GPIOn,
-	.gpio_pullup		= GPIO_GUMSTIX_USB_GPIOx,
+#if IS_ENABLED(CONFIG_USB_PXA25X)
+static const struct property_entry gumstix_vbus_props[] __initconst = {
+	PROPERTY_ENTRY_GPIO("vbus-gpios", &pxa2xx_gpiochip_node,
+			    GPIO_GUMSTIX_USB_GPIOn, GPIO_ACTIVE_HIGH),
+	PROPERTY_ENTRY_GPIO("pullup-gpios", &pxa2xx_gpiochip_node,
+			    GPIO_GUMSTIX_USB_GPIOx, GPIO_ACTIVE_HIGH),
+	{ }
 };
 
-static struct platform_device gumstix_gpio_vbus = {
-	.name	= "gpio-vbus",
-	.id	= -1,
-	.dev	= {
-		.platform_data	= &gumstix_udc_info,
-	},
+static const struct platform_device_info gumstix_gpio_vbus_info __initconst = {
+	.name		= "gpio-vbus",
+	.id		= PLATFORM_DEVID_NONE,
+	.properties	= gumstix_vbus_props,
 };
 
 static void __init gumstix_udc_init(void)
 {
-	platform_device_register(&gumstix_gpio_vbus);
+	platform_device_register_full(&gumstix_gpio_vbus_info);
 }
 #else
 static void gumstix_udc_init(void)
@@ -236,7 +231,6 @@ MACHINE_START(GUMSTIX, "Gumstix")
 	.map_io		= pxa25x_map_io,
 	.nr_irqs	= PXA_NR_IRQS,
 	.init_irq	= pxa25x_init_irq,
-	.handle_irq	= pxa25x_handle_irq,
 	.init_time	= pxa_timer_init,
 	.init_machine	= gumstix_init,
 	.restart	= pxa_restart,

@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * (C) 2007 Patrick McHardy <kaber@trash.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/module.h>
 #include <linux/skbuff.h>
@@ -33,7 +30,7 @@ static unsigned int jhash_rnd __read_mostly;
 
 static unsigned int xt_rateest_hash(const char *name)
 {
-	return jhash(name, FIELD_SIZEOF(struct xt_rateest, name), jhash_rnd) &
+	return jhash(name, sizeof_field(struct xt_rateest, name), jhash_rnd) &
 	       (RATEEST_HSIZE - 1);
 }
 
@@ -97,11 +94,11 @@ static unsigned int
 xt_rateest_tg(struct sk_buff *skb, const struct xt_action_param *par)
 {
 	const struct xt_rateest_target_info *info = par->targinfo;
-	struct gnet_stats_basic_packed *stats = &info->est->bstats;
+	struct gnet_stats_basic_sync *stats = &info->est->bstats;
 
 	spin_lock_bh(&info->est->lock);
-	stats->bytes += skb->len;
-	stats->packets++;
+	u64_stats_add(&stats->bytes, skb->len);
+	u64_stats_inc(&stats->packets);
 	spin_unlock_bh(&info->est->lock);
 
 	return XT_CONTINUE;
@@ -117,6 +114,9 @@ static int xt_rateest_tg_checkentry(const struct xt_tgchk_param *par)
 		struct gnet_estimator	est;
 	} cfg;
 	int ret;
+
+	if (strnlen(info->name, sizeof(est->name)) >= sizeof(est->name))
+		return -ENAMETOOLONG;
 
 	net_get_random_once(&jhash_rnd, sizeof(jhash_rnd));
 
@@ -139,11 +139,12 @@ static int xt_rateest_tg_checkentry(const struct xt_tgchk_param *par)
 	}
 
 	ret = -ENOMEM;
-	est = kzalloc(sizeof(*est), GFP_KERNEL);
+	est = kzalloc_obj(*est);
 	if (!est)
 		goto err1;
 
-	strlcpy(est->name, info->name, sizeof(est->name));
+	gnet_stats_basic_sync_init(&est->bstats);
+	strscpy(est->name, info->name, sizeof(est->name));
 	spin_lock_init(&est->lock);
 	est->refcnt		= 1;
 	est->params.interval	= info->interval;
@@ -178,16 +179,31 @@ static void xt_rateest_tg_destroy(const struct xt_tgdtor_param *par)
 	xt_rateest_put(par->net, info->est);
 }
 
-static struct xt_target xt_rateest_tg_reg __read_mostly = {
-	.name       = "RATEEST",
-	.revision   = 0,
-	.family     = NFPROTO_UNSPEC,
-	.target     = xt_rateest_tg,
-	.checkentry = xt_rateest_tg_checkentry,
-	.destroy    = xt_rateest_tg_destroy,
-	.targetsize = sizeof(struct xt_rateest_target_info),
-	.usersize   = offsetof(struct xt_rateest_target_info, est),
-	.me         = THIS_MODULE,
+static struct xt_target xt_rateest_tg_reg[] __read_mostly = {
+	{
+		.name       = "RATEEST",
+		.revision   = 0,
+		.family     = NFPROTO_IPV4,
+		.target     = xt_rateest_tg,
+		.checkentry = xt_rateest_tg_checkentry,
+		.destroy    = xt_rateest_tg_destroy,
+		.targetsize = sizeof(struct xt_rateest_target_info),
+		.usersize   = offsetof(struct xt_rateest_target_info, est),
+		.me         = THIS_MODULE,
+	},
+#if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
+	{
+		.name       = "RATEEST",
+		.revision   = 0,
+		.family     = NFPROTO_IPV6,
+		.target     = xt_rateest_tg,
+		.checkentry = xt_rateest_tg_checkentry,
+		.destroy    = xt_rateest_tg_destroy,
+		.targetsize = sizeof(struct xt_rateest_target_info),
+		.usersize   = offsetof(struct xt_rateest_target_info, est),
+		.me         = THIS_MODULE,
+	},
+#endif
 };
 
 static __net_init int xt_rateest_net_init(struct net *net)
@@ -201,18 +217,8 @@ static __net_init int xt_rateest_net_init(struct net *net)
 	return 0;
 }
 
-static void __net_exit xt_rateest_net_exit(struct net *net)
-{
-	struct xt_rateest_net *xn = net_generic(net, xt_rateest_id);
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(xn->hash); i++)
-		WARN_ON_ONCE(!hlist_empty(&xn->hash[i]));
-}
-
 static struct pernet_operations xt_rateest_net_ops = {
 	.init = xt_rateest_net_init,
-	.exit = xt_rateest_net_exit,
 	.id   = &xt_rateest_id,
 	.size = sizeof(struct xt_rateest_net),
 };
@@ -223,12 +229,12 @@ static int __init xt_rateest_tg_init(void)
 
 	if (err)
 		return err;
-	return xt_register_target(&xt_rateest_tg_reg);
+	return xt_register_targets(xt_rateest_tg_reg, ARRAY_SIZE(xt_rateest_tg_reg));
 }
 
 static void __exit xt_rateest_tg_fini(void)
 {
-	xt_unregister_target(&xt_rateest_tg_reg);
+	xt_unregister_targets(xt_rateest_tg_reg, ARRAY_SIZE(xt_rateest_tg_reg));
 	unregister_pernet_subsys(&xt_rateest_net_ops);
 }
 

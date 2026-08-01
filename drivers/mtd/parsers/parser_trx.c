@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Parser for TRX format partitions
  *
  * Copyright (C) 2012 - 2017 Rafał Miłecki <rafal@milecki.pl>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/module.h>
@@ -55,15 +51,21 @@ static int parser_trx_parse(struct mtd_info *mtd,
 			    const struct mtd_partition **pparts,
 			    struct mtd_part_parser_data *data)
 {
+	struct device_node *np = mtd_get_of_node(mtd);
 	struct mtd_partition *parts;
 	struct mtd_partition *part;
 	struct trx_header trx;
 	size_t bytes_read;
 	uint8_t curr_part = 0, i = 0;
+	uint32_t trx_magic = TRX_MAGIC;
 	int err;
 
-	parts = kzalloc(sizeof(struct mtd_partition) * TRX_PARSER_MAX_PARTS,
-			GFP_KERNEL);
+	/* Get different magic from device tree if specified */
+	err = of_property_read_u32(np, "brcm,trx-magic", &trx_magic);
+	if (err != 0 && err != -EINVAL)
+		pr_err("failed to parse \"brcm,trx-magic\" DT attribute, using default: %d\n", err);
+
+	parts = kzalloc_objs(struct mtd_partition, TRX_PARSER_MAX_PARTS);
 	if (!parts)
 		return -ENOMEM;
 
@@ -74,7 +76,7 @@ static int parser_trx_parse(struct mtd_info *mtd,
 		return err;
 	}
 
-	if (trx.magic != TRX_MAGIC) {
+	if (trx.magic != trx_magic) {
 		kfree(parts);
 		return -ENOENT;
 	}
@@ -116,9 +118,16 @@ static int parser_trx_parse(struct mtd_info *mtd,
 	return i;
 };
 
+static const struct of_device_id mtd_parser_trx_of_match_table[] = {
+	{ .compatible = "brcm,trx" },
+	{},
+};
+MODULE_DEVICE_TABLE(of, mtd_parser_trx_of_match_table);
+
 static struct mtd_part_parser mtd_parser_trx = {
 	.parse_fn = parser_trx_parse,
 	.name = "trx",
+	.of_match_table = mtd_parser_trx_of_match_table,
 };
 module_mtd_part_parser(mtd_parser_trx);
 

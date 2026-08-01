@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* -*- linux-c -*-
  * APM BIOS driver for Linux
  * Copyright 1994-2001 Stephen Rothwell (sfr@canb.auug.org.au)
  *
  * Initial development of this driver was funded by NEC Australia P/L
  *	and NEC Corporation
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  *
  * October 1995, Rik Faith (faith@cs.unc.edu):
  *    Minor enhancements and updates (to the patch set) for 1.3.x
@@ -103,7 +94,7 @@
  *         Remove APM dependencies in arch/i386/kernel/process.c
  *         Remove APM dependencies in drivers/char/sysrq.c
  *         Reset time across standby.
- *         Allow more inititialisation on SMP.
+ *         Allow more initialisation on SMP.
  *         Remove CONFIG_APM_POWER_OFF and make it boot time
  *         configurable (default on).
  *         Make debug only a boot time parameter (remove APM_DEBUG).
@@ -238,18 +229,13 @@
 #include <linux/uaccess.h>
 #include <asm/desc.h>
 #include <asm/olpc.h>
-#include <asm/paravirt.h>
 #include <asm/reboot.h>
+#include <asm/nospec-branch.h>
+#include <asm/ibt.h>
 
 #if defined(CONFIG_APM_DISPLAY_BLANK) && defined(CONFIG_VT)
 extern int (*console_blank_hook)(int);
 #endif
-
-/*
- * The apm_bios device is one of the misc char devices.
- * This is its minor number.
- */
-#define	APM_MINOR_DEV	134
 
 /*
  * Various options can be changed at boot time as follows:
@@ -433,7 +419,7 @@ static DEFINE_MUTEX(apm_mutex);
  * This is for buggy BIOS's that refer to (real mode) segment 0x40
  * even though they are called in protected mode.
  */
-static struct desc_struct bad_bios_desc = GDT_ENTRY_INIT(0x4092,
+static struct desc_struct bad_bios_desc = GDT_ENTRY_INIT(DESC_DATA32_BIOS,
 			(unsigned long)__va(0x400UL), PAGE_SIZE - 0x400 - 1);
 
 static const char driver_version[] = "1.16ac";	/* no spaces */
@@ -606,6 +592,7 @@ static long __apm_bios_call(void *_call)
 	struct desc_struct	save_desc_40;
 	struct desc_struct	*gdt;
 	struct apm_bios_call	*call = _call;
+	u64			ibt;
 
 	cpu = get_cpu();
 	BUG_ON(cpu != 0);
@@ -614,11 +601,15 @@ static long __apm_bios_call(void *_call)
 	gdt[0x40 / 8] = bad_bios_desc;
 
 	apm_irq_save(flags);
+	firmware_restrict_branch_speculation_start();
+	ibt = ibt_save(true);
 	APM_DO_SAVE_SEGS;
 	apm_bios_call_asm(call->func, call->ebx, call->ecx,
 			  &call->eax, &call->ebx, &call->ecx, &call->edx,
 			  &call->esi);
 	APM_DO_RESTORE_SEGS;
+	ibt_restore(ibt);
+	firmware_restrict_branch_speculation_end();
 	apm_irq_restore(flags);
 	gdt[0x40 / 8] = save_desc_40;
 	put_cpu();
@@ -682,6 +673,7 @@ static long __apm_bios_call_simple(void *_call)
 	struct desc_struct	save_desc_40;
 	struct desc_struct	*gdt;
 	struct apm_bios_call	*call = _call;
+	u64			ibt;
 
 	cpu = get_cpu();
 	BUG_ON(cpu != 0);
@@ -690,10 +682,14 @@ static long __apm_bios_call_simple(void *_call)
 	gdt[0x40 / 8] = bad_bios_desc;
 
 	apm_irq_save(flags);
+	firmware_restrict_branch_speculation_start();
+	ibt = ibt_save(true);
 	APM_DO_SAVE_SEGS;
 	error = apm_bios_call_simple_asm(call->func, call->ebx, call->ecx,
 					 &call->eax);
 	APM_DO_RESTORE_SEGS;
+	ibt_restore(ibt);
+	firmware_restrict_branch_speculation_end();
 	apm_irq_restore(flags);
 	gdt[0x40 / 8] = save_desc_40;
 	put_cpu();
@@ -770,7 +766,7 @@ static int apm_driver_version(u_short *val)
  *	not cleared until it is acknowledged.
  *
  *	Additional information is returned in the info pointer, providing
- *	that APM 1.2 is in use. If no messges are pending the value 0x80
+ *	that APM 1.2 is in use. If no messages are pending the value 0x80
  *	is returned (No power management events pending).
  */
 static int apm_get_event(apm_event_t *event, apm_eventinfo_t *info)
@@ -1029,7 +1025,7 @@ static int apm_enable_power_management(int enable)
  *	status which gives the rough battery status, and current power
  *	source. The bat value returned give an estimate as a percentage
  *	of life and a status value for the battery. The estimated life
- *	if reported is a lifetime in secodnds/minutes at current powwer
+ *	if reported is a lifetime in seconds/minutes at current power
  *	consumption.
  */
 
@@ -1057,35 +1053,6 @@ static int apm_get_power_status(u_short *status, u_short *bat, u_short *life)
 		*life = call.edx;
 	return APM_SUCCESS;
 }
-
-#if 0
-static int apm_get_battery_status(u_short which, u_short *status,
-				  u_short *bat, u_short *life, u_short *nbat)
-{
-	u32 eax;
-	u32 ebx;
-	u32 ecx;
-	u32 edx;
-	u32 esi;
-
-	if (apm_info.connection_version < 0x0102) {
-		/* pretend we only have one battery. */
-		if (which != 1)
-			return APM_BAD_DEVICE;
-		*nbat = 1;
-		return apm_get_power_status(status, bat, life);
-	}
-
-	if (apm_bios_call(APM_FUNC_GET_STATUS, (0x8000 | (which)), 0, &eax,
-			  &ebx, &ecx, &edx, &esi))
-		return (eax >> 8) & 0xff;
-	*status = ebx;
-	*bat = ecx;
-	*life = edx;
-	*nbat = esi;
-	return APM_SUCCESS;
-}
-#endif
 
 /**
  *	apm_engage_power_management	-	enable PM on a device
@@ -1609,7 +1576,7 @@ static int do_open(struct inode *inode, struct file *filp)
 {
 	struct apm_user *as;
 
-	as = kmalloc(sizeof(*as), GFP_KERNEL);
+	as = kmalloc_obj(*as);
 	if (as == NULL)
 		return -ENOMEM;
 
@@ -1635,6 +1602,7 @@ static int do_open(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+#ifdef CONFIG_PROC_FS
 static int proc_apm_show(struct seq_file *m, void *v)
 {
 	unsigned short	bx;
@@ -1714,19 +1682,7 @@ static int proc_apm_show(struct seq_file *m, void *v)
 		   units);
 	return 0;
 }
-
-static int proc_apm_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, proc_apm_show, NULL);
-}
-
-static const struct file_operations apm_file_ops = {
-	.owner		= THIS_MODULE,
-	.open		= proc_apm_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+#endif
 
 static int apm(void *unused)
 {
@@ -2360,7 +2316,7 @@ static int __init apm_init(void)
 	set_desc_base(&gdt[APM_DS >> 3],
 		 (unsigned long)__va((unsigned long)apm_info.bios.dseg << 4));
 
-	proc_create("apm", 0, NULL, &apm_file_ops);
+	proc_create_single("apm", 0, NULL, proc_apm_show);
 
 	kapmd_task = kthread_create(apm, NULL, "kapmd");
 	if (IS_ERR(kapmd_task)) {
@@ -2446,7 +2402,7 @@ MODULE_PARM_DESC(idle_threshold,
 	"System idle percentage above which to make APM BIOS idle calls");
 module_param(idle_period, int, 0444);
 MODULE_PARM_DESC(idle_period,
-	"Period (in sec/100) over which to caculate the idle percentage");
+	"Period (in sec/100) over which to calculate the idle percentage");
 module_param(smp, bool, 0444);
 MODULE_PARM_DESC(smp,
 	"Set this to enable APM use on an SMP platform. Use with caution on older systems");

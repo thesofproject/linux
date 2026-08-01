@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014, NVIDIA CORPORATION.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #include <linux/delay.h>
@@ -438,7 +430,7 @@ tegra124_usb2_lane_probe(struct tegra_xusb_pad *pad, struct device_node *np,
 	struct tegra_xusb_usb2_lane *usb2;
 	int err;
 
-	usb2 = kzalloc(sizeof(*usb2), GFP_KERNEL);
+	usb2 = kzalloc_obj(*usb2);
 	if (!usb2)
 		return ERR_PTR(-ENOMEM);
 
@@ -622,7 +614,7 @@ tegra124_usb2_pad_probe(struct tegra_xusb_padctl *padctl,
 	struct tegra_xusb_pad *pad;
 	int err;
 
-	usb2 = kzalloc(sizeof(*usb2), GFP_KERNEL);
+	usb2 = kzalloc_obj(*usb2);
 	if (!usb2)
 		return ERR_PTR(-ENOMEM);
 
@@ -687,7 +679,7 @@ tegra124_ulpi_lane_probe(struct tegra_xusb_pad *pad, struct device_node *np,
 	struct tegra_xusb_ulpi_lane *ulpi;
 	int err;
 
-	ulpi = kzalloc(sizeof(*ulpi), GFP_KERNEL);
+	ulpi = kzalloc_obj(*ulpi);
 	if (!ulpi)
 		return ERR_PTR(-ENOMEM);
 
@@ -759,7 +751,7 @@ tegra124_ulpi_pad_probe(struct tegra_xusb_padctl *padctl,
 	struct tegra_xusb_pad *pad;
 	int err;
 
-	ulpi = kzalloc(sizeof(*ulpi), GFP_KERNEL);
+	ulpi = kzalloc_obj(*ulpi);
 	if (!ulpi)
 		return ERR_PTR(-ENOMEM);
 
@@ -823,7 +815,7 @@ tegra124_hsic_lane_probe(struct tegra_xusb_pad *pad, struct device_node *np,
 	struct tegra_xusb_hsic_lane *hsic;
 	int err;
 
-	hsic = kzalloc(sizeof(*hsic), GFP_KERNEL);
+	hsic = kzalloc_obj(*hsic);
 	if (!hsic)
 		return ERR_PTR(-ENOMEM);
 
@@ -975,7 +967,7 @@ tegra124_hsic_pad_probe(struct tegra_xusb_padctl *padctl,
 	struct tegra_xusb_pad *pad;
 	int err;
 
-	hsic = kzalloc(sizeof(*hsic), GFP_KERNEL);
+	hsic = kzalloc_obj(*hsic);
 	if (!hsic)
 		return ERR_PTR(-ENOMEM);
 
@@ -1043,7 +1035,7 @@ tegra124_pcie_lane_probe(struct tegra_xusb_pad *pad, struct device_node *np,
 	struct tegra_xusb_pcie_lane *pcie;
 	int err;
 
-	pcie = kzalloc(sizeof(*pcie), GFP_KERNEL);
+	pcie = kzalloc_obj(*pcie);
 	if (!pcie)
 		return ERR_PTR(-ENOMEM);
 
@@ -1163,7 +1155,7 @@ tegra124_pcie_pad_probe(struct tegra_xusb_padctl *padctl,
 	struct tegra_xusb_pad *pad;
 	int err;
 
-	pcie = kzalloc(sizeof(*pcie), GFP_KERNEL);
+	pcie = kzalloc_obj(*pcie);
 	if (!pcie)
 		return ERR_PTR(-ENOMEM);
 
@@ -1221,7 +1213,7 @@ tegra124_sata_lane_probe(struct tegra_xusb_pad *pad, struct device_node *np,
 	struct tegra_xusb_sata_lane *sata;
 	int err;
 
-	sata = kzalloc(sizeof(*sata), GFP_KERNEL);
+	sata = kzalloc_obj(*sata);
 	if (!sata)
 		return ERR_PTR(-ENOMEM);
 
@@ -1359,7 +1351,7 @@ tegra124_sata_pad_probe(struct tegra_xusb_padctl *padctl,
 	struct tegra_xusb_pad *pad;
 	int err;
 
-	sata = kzalloc(sizeof(*sata), GFP_KERNEL);
+	sata = kzalloc_obj(*sata);
 	if (!sata)
 		return ERR_PTR(-ENOMEM);
 
@@ -1430,6 +1422,8 @@ tegra124_usb2_port_map(struct tegra_xusb_port *port)
 }
 
 static const struct tegra_xusb_port_ops tegra124_usb2_port_ops = {
+	.release = tegra_xusb_usb2_port_release,
+	.remove = tegra_xusb_usb2_port_remove,
 	.enable = tegra124_usb2_port_enable,
 	.disable = tegra124_usb2_port_disable,
 	.map = tegra124_usb2_port_map,
@@ -1451,6 +1445,7 @@ tegra124_ulpi_port_map(struct tegra_xusb_port *port)
 }
 
 static const struct tegra_xusb_port_ops tegra124_ulpi_port_ops = {
+	.release = tegra_xusb_ulpi_port_release,
 	.enable = tegra124_ulpi_port_enable,
 	.disable = tegra124_ulpi_port_disable,
 	.map = tegra124_ulpi_port_map,
@@ -1472,6 +1467,7 @@ tegra124_hsic_port_map(struct tegra_xusb_port *port)
 }
 
 static const struct tegra_xusb_port_ops tegra124_hsic_port_ops = {
+	.release = tegra_xusb_hsic_port_release,
 	.enable = tegra124_hsic_port_enable,
 	.disable = tegra124_hsic_port_disable,
 	.map = tegra124_hsic_port_map,
@@ -1655,6 +1651,7 @@ tegra124_usb3_port_map(struct tegra_xusb_port *port)
 }
 
 static const struct tegra_xusb_port_ops tegra124_usb3_port_ops = {
+	.release = tegra_xusb_usb3_port_release,
 	.enable = tegra124_usb3_port_enable,
 	.disable = tegra124_usb3_port_disable,
 	.map = tegra124_usb3_port_map,
@@ -1721,6 +1718,13 @@ static const struct tegra_xusb_padctl_ops tegra124_xusb_padctl_ops = {
 	.hsic_set_idle = tegra124_hsic_set_idle,
 };
 
+static const char * const tegra124_xusb_padctl_supply_names[] = {
+	"avdd-pll-utmip",
+	"avdd-pll-erefe",
+	"avdd-pex-pll",
+	"hvdd-pex-pll-e",
+};
+
 const struct tegra_xusb_padctl_soc tegra124_xusb_padctl_soc = {
 	.num_pads = ARRAY_SIZE(tegra124_pads),
 	.pads = tegra124_pads,
@@ -1743,6 +1747,8 @@ const struct tegra_xusb_padctl_soc tegra124_xusb_padctl_soc = {
 		},
 	},
 	.ops = &tegra124_xusb_padctl_ops,
+	.supply_names = tegra124_xusb_padctl_supply_names,
+	.num_supplies = ARRAY_SIZE(tegra124_xusb_padctl_supply_names),
 };
 EXPORT_SYMBOL_GPL(tegra124_xusb_padctl_soc);
 

@@ -26,76 +26,53 @@
 #include "dm_services.h"
 
 #include "ObjectID.h"
-#include "atomfirmware.h"
 
+#include "atomfirmware.h"
+#include "atom.h"
 #include "include/bios_parser_interface.h"
 
 #include "command_table2.h"
 #include "command_table_helper2.h"
 #include "bios_parser_helper.h"
 #include "bios_parser_types_internal2.h"
+#include "amdgpu.h"
+
+#include "dc_dmub_srv.h"
+#include "dc.h"
+
 #define DC_LOGGER \
 	bp->base.ctx->logger
 
 #define GET_INDEX_INTO_MASTER_TABLE(MasterOrData, FieldName)\
-	(((char *)(&((\
-		struct atom_master_list_of_##MasterOrData##_functions_v2_1 *)0)\
-		->FieldName)-(char *)0)/sizeof(uint16_t))
+	(offsetof(struct atom_master_list_of_##MasterOrData##_functions_v2_1, FieldName) / sizeof(uint16_t))
 
 #define EXEC_BIOS_CMD_TABLE(fname, params)\
-	(cgs_atom_exec_cmd_table(bp->base.ctx->cgs_device, \
+	(amdgpu_atom_execute_table(((struct amdgpu_device *)bp->base.ctx->driver_context)->mode_info.atom_context, \
 		GET_INDEX_INTO_MASTER_TABLE(command, fname), \
-		&params) == 0)
+		(uint32_t *)&params, sizeof(params)) == 0)
 
 #define BIOS_CMD_TABLE_REVISION(fname, frev, crev)\
-	cgs_atom_get_cmd_table_revs(bp->base.ctx->cgs_device, \
+	amdgpu_atom_parse_cmd_header(((struct amdgpu_device *)bp->base.ctx->driver_context)->mode_info.atom_context, \
 		GET_INDEX_INTO_MASTER_TABLE(command, fname), &frev, &crev)
 
 #define BIOS_CMD_TABLE_PARA_REVISION(fname)\
-	bios_cmd_table_para_revision(bp->base.ctx->cgs_device, \
+	bios_cmd_table_para_revision(bp->base.ctx->driver_context, \
 			GET_INDEX_INTO_MASTER_TABLE(command, fname))
 
-static void init_dig_encoder_control(struct bios_parser *bp);
-static void init_transmitter_control(struct bios_parser *bp);
-static void init_set_pixel_clock(struct bios_parser *bp);
 
-static void init_set_crtc_timing(struct bios_parser *bp);
 
-static void init_select_crtc_source(struct bios_parser *bp);
-static void init_enable_crtc(struct bios_parser *bp);
-
-static void init_external_encoder_control(struct bios_parser *bp);
-static void init_enable_disp_power_gating(struct bios_parser *bp);
-static void init_set_dce_clock(struct bios_parser *bp);
-static void init_get_smu_clock_info(struct bios_parser *bp);
-
-void dal_firmware_parser_init_cmd_tbl(struct bios_parser *bp)
-{
-	init_dig_encoder_control(bp);
-	init_transmitter_control(bp);
-	init_set_pixel_clock(bp);
-
-	init_set_crtc_timing(bp);
-
-	init_select_crtc_source(bp);
-	init_enable_crtc(bp);
-
-	init_external_encoder_control(bp);
-	init_enable_disp_power_gating(bp);
-	init_set_dce_clock(bp);
-	init_get_smu_clock_info(bp);
-}
-
-static uint32_t bios_cmd_table_para_revision(void *cgs_device,
+static uint32_t bios_cmd_table_para_revision(void *dev,
 					     uint32_t index)
 {
+	struct amdgpu_device *adev = dev;
 	uint8_t frev, crev;
 
-	if (cgs_atom_get_cmd_table_revs(cgs_device,
+	if (amdgpu_atom_parse_cmd_header(adev->mode_info.atom_context,
 					index,
-					&frev, &crev) != 0)
+					&frev, &crev))
+		return crev;
+	else
 		return 0;
-	return crev;
 }
 
 /******************************************************************************
@@ -110,6 +87,10 @@ static enum bp_result encoder_control_digx_v1_5(
 	struct bios_parser *bp,
 	struct bp_encoder_control *cntl);
 
+static enum bp_result encoder_control_fallback(
+	struct bios_parser *bp,
+	struct bp_encoder_control *cntl);
+
 static void init_dig_encoder_control(struct bios_parser *bp)
 {
 	uint32_t version =
@@ -120,10 +101,28 @@ static void init_dig_encoder_control(struct bios_parser *bp)
 		bp->cmd_tbl.dig_encoder_control = encoder_control_digx_v1_5;
 		break;
 	default:
-		dm_output_to_console("Don't have dig_encoder_control for v%d\n", version);
-		bp->cmd_tbl.dig_encoder_control = NULL;
+		bp->cmd_tbl.dig_encoder_control = encoder_control_fallback;
 		break;
 	}
+}
+
+static void encoder_control_dmcub(
+		struct dc_dmub_srv *dmcub,
+		struct dig_encoder_stream_setup_parameters_v1_5 *dig)
+{
+	union dmub_rb_cmd cmd;
+
+	memset(&cmd, 0, sizeof(cmd));
+
+	cmd.digx_encoder_control.header.type = DMUB_CMD__VBIOS;
+	cmd.digx_encoder_control.header.sub_type =
+		DMUB_CMD__VBIOS_DIGX_ENCODER_CONTROL;
+	cmd.digx_encoder_control.header.payload_bytes =
+		sizeof(cmd.digx_encoder_control) -
+		sizeof(cmd.digx_encoder_control.header);
+	cmd.digx_encoder_control.encoder_control.dig.stream_param = *dig;
+
+	dc_wake_and_execute_dmub_cmd(dmcub->ctx, &cmd, DM_DMUB_WAIT_TYPE_WAIT);
 }
 
 static enum bp_result encoder_control_digx_v1_5(
@@ -178,10 +177,28 @@ static enum bp_result encoder_control_digx_v1_5(
 			break;
 		}
 
+	if (bp->base.ctx->dc->ctx->dmub_srv &&
+	    bp->base.ctx->dc->debug.dmub_command_table) {
+		encoder_control_dmcub(bp->base.ctx->dmub_srv, &params);
+		return BP_RESULT_OK;
+	}
+
 	if (EXEC_BIOS_CMD_TABLE(digxencodercontrol, params))
 		result = BP_RESULT_OK;
 
 	return result;
+}
+
+static enum bp_result encoder_control_fallback(
+	struct bios_parser *bp,
+	struct bp_encoder_control *cntl)
+{
+	if (bp->base.ctx->dc->ctx->dmub_srv &&
+	    bp->base.ctx->dc->debug.dmub_command_table) {
+		return encoder_control_digx_v1_5(bp, cntl);
+	}
+
+	return BP_RESULT_FAILURE;
 }
 
 /*****************************************************************************
@@ -192,26 +209,57 @@ static enum bp_result encoder_control_digx_v1_5(
  ******************************************************************************
  *****************************************************************************/
 
+
 static enum bp_result transmitter_control_v1_6(
+	struct bios_parser *bp,
+	struct bp_transmitter_control *cntl);
+
+static enum bp_result transmitter_control_v1_7(
+	struct bios_parser *bp,
+	struct bp_transmitter_control *cntl);
+
+static enum bp_result transmitter_control_fallback(
 	struct bios_parser *bp,
 	struct bp_transmitter_control *cntl);
 
 static void init_transmitter_control(struct bios_parser *bp)
 {
 	uint8_t frev;
-	uint8_t crev;
+	uint8_t crev = 0;
 
-	if (BIOS_CMD_TABLE_REVISION(dig1transmittercontrol, frev, crev) != 0)
+	if (!BIOS_CMD_TABLE_REVISION(dig1transmittercontrol, frev, crev) && (bp->base.ctx->dc->ctx->dce_version <= DCN_VERSION_2_0))
 		BREAK_TO_DEBUGGER();
+
 	switch (crev) {
 	case 6:
 		bp->cmd_tbl.transmitter_control = transmitter_control_v1_6;
 		break;
+	case 7:
+		bp->cmd_tbl.transmitter_control = transmitter_control_v1_7;
+		break;
 	default:
-		dm_output_to_console("Don't have transmitter_control for v%d\n", crev);
-		bp->cmd_tbl.transmitter_control = NULL;
+		bp->cmd_tbl.transmitter_control = transmitter_control_fallback;
 		break;
 	}
+}
+
+static void transmitter_control_dmcub(
+		struct dc_dmub_srv *dmcub,
+		struct dig_transmitter_control_parameters_v1_6 *dig)
+{
+	union dmub_rb_cmd cmd;
+
+	memset(&cmd, 0, sizeof(cmd));
+
+	cmd.dig1_transmitter_control.header.type = DMUB_CMD__VBIOS;
+	cmd.dig1_transmitter_control.header.sub_type =
+		DMUB_CMD__VBIOS_DIG1_TRANSMITTER_CONTROL;
+	cmd.dig1_transmitter_control.header.payload_bytes =
+		sizeof(cmd.dig1_transmitter_control) -
+		sizeof(cmd.dig1_transmitter_control.header);
+	cmd.dig1_transmitter_control.transmitter_control.dig = *dig;
+
+	dc_wake_and_execute_dmub_cmd(dmcub->ctx, &cmd, DM_DMUB_WAIT_TYPE_WAIT);
 }
 
 static enum bp_result transmitter_control_v1_6(
@@ -245,11 +293,147 @@ static enum bp_result transmitter_control_v1_6(
 		__func__, ps.param.symclk_10khz);
 	}
 
+	if (bp->base.ctx->dc->ctx->dmub_srv &&
+	    bp->base.ctx->dc->debug.dmub_command_table) {
+		transmitter_control_dmcub(bp->base.ctx->dmub_srv, &ps.param);
+		return BP_RESULT_OK;
+	}
 
 /*color_depth not used any more, driver has deep color factor in the Phyclk*/
 	if (EXEC_BIOS_CMD_TABLE(dig1transmittercontrol, ps))
 		result = BP_RESULT_OK;
 	return result;
+}
+
+static void transmitter_control_dmcub_v1_7(
+		struct dc_dmub_srv *dmcub,
+		struct dmub_dig_transmitter_control_data_v1_7 *dig)
+{
+	union dmub_rb_cmd cmd;
+
+	memset(&cmd, 0, sizeof(cmd));
+
+	cmd.dig1_transmitter_control.header.type = DMUB_CMD__VBIOS;
+	cmd.dig1_transmitter_control.header.sub_type =
+		DMUB_CMD__VBIOS_DIG1_TRANSMITTER_CONTROL;
+	cmd.dig1_transmitter_control.header.payload_bytes =
+		sizeof(cmd.dig1_transmitter_control) -
+		sizeof(cmd.dig1_transmitter_control.header);
+	cmd.dig1_transmitter_control.transmitter_control.dig_v1_7 = *dig;
+
+	dc_wake_and_execute_dmub_cmd(dmcub->ctx, &cmd, DM_DMUB_WAIT_TYPE_WAIT);
+}
+
+static struct dc_link *get_link_by_phy_id(struct dc *p_dc, uint32_t phy_id)
+{
+	struct dc_link *link = NULL;
+
+	// Get Transition Bitmask from dc_link structure associated with PHY
+	for (uint8_t link_id = 0; link_id < MAX_LINKS; link_id++) {
+		if (phy_id == p_dc->links[link_id]->link_enc->transmitter) {
+			link = p_dc->links[link_id];
+			break;
+		}
+	}
+
+	return link;
+}
+
+static enum bp_result transmitter_control_v1_7(
+	struct bios_parser *bp,
+	struct bp_transmitter_control *cntl)
+{
+	enum bp_result result = BP_RESULT_FAILURE;
+	const struct command_table_helper *cmd = bp->cmd_helper;
+	struct dmub_dig_transmitter_control_data_v1_7 dig_v1_7 = {0};
+
+	uint8_t hpo_instance = (uint8_t)cntl->hpo_engine_id - ENGINE_ID_HPO_0;
+
+	if (dc_is_dp_signal(cntl->signal))
+		hpo_instance = (uint8_t)cntl->hpo_engine_id - ENGINE_ID_HPO_DP_0;
+
+	dig_v1_7.phyid = cmd->phy_id_to_atom(cntl->transmitter);
+	dig_v1_7.action = (uint8_t)cntl->action;
+
+	if (cntl->action == TRANSMITTER_CONTROL_SET_VOLTAGE_AND_PREEMPASIS)
+		dig_v1_7.mode_laneset.dplaneset = (uint8_t)cntl->lane_settings;
+	else
+		dig_v1_7.mode_laneset.digmode =
+				cmd->signal_type_to_atom_dig_mode(cntl->signal);
+
+	dig_v1_7.lanenum = (uint8_t)cntl->lanes_number;
+	dig_v1_7.hpdsel = cmd->hpd_sel_to_atom(cntl->hpd_sel);
+	dig_v1_7.digfe_sel = cmd->dig_encoder_sel_to_atom(cntl->engine_id);
+	dig_v1_7.connobj_id = (uint8_t)cntl->connector_obj_id.id;
+	dig_v1_7.HPO_instance = hpo_instance;
+	dig_v1_7.symclk_units.symclk_10khz = cntl->pixel_clock/10;
+
+	if (cntl->action == TRANSMITTER_CONTROL_ENABLE ||
+		cntl->action == TRANSMITTER_CONTROL_ACTIAVATE ||
+		cntl->action == TRANSMITTER_CONTROL_DEACTIVATE) {
+		if (dc_is_hdmi_frl_signal(cntl->signal))
+			DC_LOG_BIOS("%s:dig_v1_7.symclk_units.symclk_Hz = %d\n",
+			__func__, dig_v1_7.symclk_units.symclk_Hz);
+		else
+			DC_LOG_BIOS("%s:dig_v1_7.symclk_units.symclk_10khz = %d\n",
+			__func__, dig_v1_7.symclk_units.symclk_10khz);
+	}
+
+	if (bp->base.ctx->dc->ctx->dmub_srv &&
+		bp->base.ctx->dc->debug.dmub_command_table) {
+		struct dm_process_phy_transition_init_params process_phy_transition_init_params = {0};
+		struct dc_link *link = get_link_by_phy_id(bp->base.ctx->dc, dig_v1_7.phyid);
+		bool is_phy_transition_interlock_allowed = false;
+		uint8_t action = dig_v1_7.action;
+
+		if (link) {
+			if (link->phy_transition_bitmask &&
+				(action == TRANSMITTER_CONTROL_ENABLE || action == TRANSMITTER_CONTROL_DISABLE)) {
+				is_phy_transition_interlock_allowed = true;
+
+				// Prepare input parameters for processing ACPI retimers
+				process_phy_transition_init_params.action                   = action;
+				process_phy_transition_init_params.display_port_lanes_count = cntl->lanes_number;
+				process_phy_transition_init_params.phy_id                   = dig_v1_7.phyid;
+				process_phy_transition_init_params.signal                   = cntl->signal;
+				process_phy_transition_init_params.sym_clock_10khz          = dig_v1_7.symclk_units.symclk_10khz;
+				process_phy_transition_init_params.display_port_link_rate   = link->cur_link_settings.link_rate;
+				process_phy_transition_init_params.transition_bitmask       = link->phy_transition_bitmask;
+				process_phy_transition_init_params.hdmi_frl_num_lanes       = link->frl_link_settings.frl_num_lanes;
+				process_phy_transition_init_params.hdmi_frl_link_rate       = link->frl_link_settings.frl_link_rate;
+			}
+			dig_v1_7.skip_phy_ssc_reduction = link->wa_flags.skip_phy_ssc_reduction;
+		}
+
+		// Handle PRE_OFF_TO_ON: Process ACPI PHY Transition Interlock
+		if (is_phy_transition_interlock_allowed && action == TRANSMITTER_CONTROL_ENABLE)
+			dm_acpi_process_phy_transition_interlock(bp->base.ctx, process_phy_transition_init_params);
+
+		transmitter_control_dmcub_v1_7(bp->base.ctx->dmub_srv, &dig_v1_7);
+
+		// Handle POST_ON_TO_OFF: Process ACPI PHY Transition Interlock
+		if (is_phy_transition_interlock_allowed && action == TRANSMITTER_CONTROL_DISABLE)
+			dm_acpi_process_phy_transition_interlock(bp->base.ctx, process_phy_transition_init_params);
+
+		return BP_RESULT_OK;
+	}
+
+/*color_depth not used any more, driver has deep color factor in the Phyclk*/
+	if (EXEC_BIOS_CMD_TABLE(dig1transmittercontrol, dig_v1_7))
+		result = BP_RESULT_OK;
+	return result;
+}
+
+static enum bp_result transmitter_control_fallback(
+	struct bios_parser *bp,
+	struct bp_transmitter_control *cntl)
+{
+	if (bp->base.ctx->dc->ctx->dmub_srv &&
+	    bp->base.ctx->dc->debug.dmub_command_table) {
+		return transmitter_control_v1_7(bp, cntl);
+	}
+
+	return BP_RESULT_FAILURE;
 }
 
 /******************************************************************************
@@ -264,6 +448,10 @@ static enum bp_result set_pixel_clock_v7(
 	struct bios_parser *bp,
 	struct bp_pixel_clock_parameters *bp_params);
 
+static enum bp_result set_pixel_clock_fallback(
+	struct bios_parser *bp,
+	struct bp_pixel_clock_parameters *bp_params);
+
 static void init_set_pixel_clock(struct bios_parser *bp)
 {
 	switch (BIOS_CMD_TABLE_PARA_REVISION(setpixelclock)) {
@@ -271,14 +459,28 @@ static void init_set_pixel_clock(struct bios_parser *bp)
 		bp->cmd_tbl.set_pixel_clock = set_pixel_clock_v7;
 		break;
 	default:
-		dm_output_to_console("Don't have set_pixel_clock for v%d\n",
-			 BIOS_CMD_TABLE_PARA_REVISION(setpixelclock));
-		bp->cmd_tbl.set_pixel_clock = NULL;
+		bp->cmd_tbl.set_pixel_clock = set_pixel_clock_fallback;
 		break;
 	}
 }
 
+static void set_pixel_clock_dmcub(
+		struct dc_dmub_srv *dmcub,
+		struct set_pixel_clock_parameter_v1_7 *clk)
+{
+	union dmub_rb_cmd cmd;
 
+	memset(&cmd, 0, sizeof(cmd));
+
+	cmd.set_pixel_clock.header.type = DMUB_CMD__VBIOS;
+	cmd.set_pixel_clock.header.sub_type = DMUB_CMD__VBIOS_SET_PIXEL_CLOCK;
+	cmd.set_pixel_clock.header.payload_bytes =
+		sizeof(cmd.set_pixel_clock) -
+		sizeof(cmd.set_pixel_clock.header);
+	cmd.set_pixel_clock.pixel_clock.clk = *clk;
+
+	dc_wake_and_execute_dmub_cmd(dmcub->ctx, &cmd, DM_DMUB_WAIT_TYPE_WAIT);
+}
 
 static enum bp_result set_pixel_clock_v7(
 	struct bios_parser *bp,
@@ -324,17 +526,17 @@ static enum bp_result set_pixel_clock_v7(
 			cmd_helper->encoder_mode_bp_to_atom(
 				bp_params->signal_type, false);
 
-		/* We need to convert from KHz units into 10KHz units */
-		clk.pixclk_100hz = cpu_to_le32(bp_params->target_pixel_clock *
-				10);
+		clk.pixclk_100hz = cpu_to_le32(bp_params->target_pixel_clock_100hz);
 
 		clk.deep_color_ratio =
 			(uint8_t) bp->cmd_helper->
 				transmitter_color_depth_to_atom(
 					bp_params->color_depth);
-		DC_LOG_BIOS("%s:program display clock = %d"\
-				"colorDepth = %d\n", __func__,\
-				bp_params->target_pixel_clock, bp_params->color_depth);
+
+		DC_LOG_BIOS("%s:program display clock = %d, tg = %d, pll = %d, "\
+				"colorDepth = %d\n", __func__,
+				bp_params->target_pixel_clock_100hz, (int)controller_id,
+				pll_id, bp_params->color_depth);
 
 		if (bp_params->flags.FORCE_PROGRAMMING_OF_PLL)
 			clk.miscinfo |= PIXEL_CLOCK_V7_MISC_FORCE_PROG_PPLL;
@@ -354,10 +556,28 @@ static enum bp_result set_pixel_clock_v7(
 		if (bp_params->signal_type == SIGNAL_TYPE_DVI_DUAL_LINK)
 			clk.miscinfo |= PIXEL_CLOCK_V7_MISC_DVI_DUALLINK_EN;
 
+		if (bp->base.ctx->dc->ctx->dmub_srv &&
+		    bp->base.ctx->dc->debug.dmub_command_table) {
+			set_pixel_clock_dmcub(bp->base.ctx->dmub_srv, &clk);
+			return BP_RESULT_OK;
+		}
+
 		if (EXEC_BIOS_CMD_TABLE(setpixelclock, clk))
 			result = BP_RESULT_OK;
 	}
 	return result;
+}
+
+static enum bp_result set_pixel_clock_fallback(
+	struct bios_parser *bp,
+	struct bp_pixel_clock_parameters *bp_params)
+{
+	if (bp->base.ctx->dc->ctx->dmub_srv &&
+	    bp->base.ctx->dc->debug.dmub_command_table) {
+		return set_pixel_clock_v7(bp, bp_params);
+	}
+
+	return BP_RESULT_FAILURE;
 }
 
 /******************************************************************************
@@ -383,7 +603,6 @@ static void init_set_crtc_timing(struct bios_parser *bp)
 			set_crtc_using_dtd_timing_v3;
 		break;
 	default:
-		dm_output_to_console("Don't have set_crtc_timing for v%d\n", dtd_version);
 		bp->cmd_tbl.set_crtc_timing = NULL;
 		break;
 	}
@@ -465,10 +684,7 @@ static enum bp_result set_crtc_using_dtd_timing_v3(
 			 * but it is 4 either from Edid data (spec CEA 861)
 			 * or CEA timing table.
 			 */
-			params.v_syncoffset =
-				cpu_to_le16(le16_to_cpu(params.v_syncoffset) +
-						1);
-
+			le16_add_cpu(&params.v_syncoffset, 1);
 		}
 	}
 
@@ -478,75 +694,6 @@ static enum bp_result set_crtc_using_dtd_timing_v3(
 					0x100); /* ATOM_DOUBLE_CLOCK_MODE */
 
 	if (EXEC_BIOS_CMD_TABLE(setcrtc_usingdtdtiming, params))
-		result = BP_RESULT_OK;
-
-	return result;
-}
-
-/******************************************************************************
- ******************************************************************************
- **
- **                  SELECT CRTC SOURCE
- **
- ******************************************************************************
- *****************************************************************************/
-
-
-static enum bp_result select_crtc_source_v3(
-	struct bios_parser *bp,
-	struct bp_crtc_source_select *bp_params);
-
-static void init_select_crtc_source(struct bios_parser *bp)
-{
-	switch (BIOS_CMD_TABLE_PARA_REVISION(selectcrtc_source)) {
-	case 3:
-		bp->cmd_tbl.select_crtc_source = select_crtc_source_v3;
-		break;
-	default:
-		dm_output_to_console("Don't select_crtc_source enable_crtc for v%d\n",
-			 BIOS_CMD_TABLE_PARA_REVISION(selectcrtc_source));
-		bp->cmd_tbl.select_crtc_source = NULL;
-		break;
-	}
-}
-
-
-static enum bp_result select_crtc_source_v3(
-	struct bios_parser *bp,
-	struct bp_crtc_source_select *bp_params)
-{
-	bool result = BP_RESULT_FAILURE;
-	struct select_crtc_source_parameters_v2_3 params;
-	uint8_t atom_controller_id;
-	uint32_t atom_engine_id;
-	enum signal_type s = bp_params->signal;
-
-	memset(&params, 0, sizeof(params));
-
-	if (bp->cmd_helper->controller_id_to_atom(bp_params->controller_id,
-			&atom_controller_id))
-		params.crtc_id = atom_controller_id;
-	else
-		return result;
-
-	if (bp->cmd_helper->engine_bp_to_atom(bp_params->engine_id,
-			&atom_engine_id))
-		params.encoder_id = (uint8_t)atom_engine_id;
-	else
-		return result;
-
-	if (s == SIGNAL_TYPE_EDP ||
-		(s == SIGNAL_TYPE_DISPLAY_PORT && bp_params->sink_signal ==
-							SIGNAL_TYPE_LVDS))
-		s = SIGNAL_TYPE_LVDS;
-
-	params.encode_mode =
-			bp->cmd_helper->encoder_mode_bp_to_atom(
-					s, bp_params->enable_dp_audio);
-	/* Needed for VBIOS Random Spatial Dithering feature */
-	params.dst_bpc = (uint8_t)(bp_params->display_output_bit_depth);
-
-	if (EXEC_BIOS_CMD_TABLE(selectcrtc_source, params))
 		result = BP_RESULT_OK;
 
 	return result;
@@ -572,8 +719,6 @@ static void init_enable_crtc(struct bios_parser *bp)
 		bp->cmd_tbl.enable_crtc = enable_crtc_v1;
 		break;
 	default:
-		dm_output_to_console("Don't have enable_crtc for v%d\n",
-			 BIOS_CMD_TABLE_PARA_REVISION(enablecrtc));
 		bp->cmd_tbl.enable_crtc = NULL;
 		break;
 	}
@@ -644,6 +789,8 @@ static enum bp_result external_encoder_control_v3(
 	struct bios_parser *bp,
 	struct bp_external_encoder_control *cntl)
 {
+	(void)bp;
+	(void)cntl;
 	/* TODO */
 	return BP_RESULT_OK;
 }
@@ -661,6 +808,11 @@ static enum bp_result enable_disp_power_gating_v2_1(
 	enum controller_id crtc_id,
 	enum bp_pipe_control_action action);
 
+static enum bp_result enable_disp_power_gating_fallback(
+	struct bios_parser *bp,
+	enum controller_id crtc_id,
+	enum bp_pipe_control_action action);
+
 static void init_enable_disp_power_gating(
 	struct bios_parser *bp)
 {
@@ -672,9 +824,28 @@ static void init_enable_disp_power_gating(
 	default:
 		dm_output_to_console("Don't enable_disp_power_gating enable_crtc for v%d\n",
 			 BIOS_CMD_TABLE_PARA_REVISION(enabledisppowergating));
-		bp->cmd_tbl.enable_disp_power_gating = NULL;
+		bp->cmd_tbl.enable_disp_power_gating = enable_disp_power_gating_fallback;
 		break;
 	}
+}
+
+static void enable_disp_power_gating_dmcub(
+	struct dc_dmub_srv *dmcub,
+	struct enable_disp_power_gating_parameters_v2_1 *pwr)
+{
+	union dmub_rb_cmd cmd;
+
+	memset(&cmd, 0, sizeof(cmd));
+
+	cmd.enable_disp_power_gating.header.type = DMUB_CMD__VBIOS;
+	cmd.enable_disp_power_gating.header.sub_type =
+		DMUB_CMD__VBIOS_ENABLE_DISP_POWER_GATING;
+	cmd.enable_disp_power_gating.header.payload_bytes =
+		sizeof(cmd.enable_disp_power_gating) -
+		sizeof(cmd.enable_disp_power_gating.header);
+	cmd.enable_disp_power_gating.power_gating.pwr = *pwr;
+
+	dc_wake_and_execute_dmub_cmd(dmcub->ctx, &cmd, DM_DMUB_WAIT_TYPE_WAIT);
 }
 
 static enum bp_result enable_disp_power_gating_v2_1(
@@ -696,10 +867,30 @@ static enum bp_result enable_disp_power_gating_v2_1(
 	ps.param.enable =
 		bp->cmd_helper->disp_power_gating_action_to_atom(action);
 
+	if (bp->base.ctx->dc->ctx->dmub_srv &&
+	    bp->base.ctx->dc->debug.dmub_command_table) {
+		enable_disp_power_gating_dmcub(bp->base.ctx->dmub_srv,
+					       &ps.param);
+		return BP_RESULT_OK;
+	}
+
 	if (EXEC_BIOS_CMD_TABLE(enabledisppowergating, ps.param))
 		result = BP_RESULT_OK;
 
 	return result;
+}
+
+static enum bp_result enable_disp_power_gating_fallback(
+	struct bios_parser *bp,
+	enum controller_id crtc_id,
+	enum bp_pipe_control_action action)
+{
+	if (bp->base.ctx->dc->ctx->dmub_srv &&
+	    bp->base.ctx->dc->debug.dmub_command_table) {
+		return enable_disp_power_gating_v2_1(bp, crtc_id, action);
+	}
+
+	return BP_RESULT_FAILURE;
 }
 
 /******************************************************************************
@@ -721,8 +912,6 @@ static void init_set_dce_clock(struct bios_parser *bp)
 		bp->cmd_tbl.set_dce_clock = set_dce_clock_v2_1;
 		break;
 	default:
-		dm_output_to_console("Don't have set_dce_clock for v%d\n",
-			 BIOS_CMD_TABLE_PARA_REVISION(setdceclock));
 		bp->cmd_tbl.set_dce_clock = NULL;
 		break;
 	}
@@ -746,8 +935,8 @@ static enum bp_result set_dce_clock_v2_1(
 					&atom_clock_type))
 		return BP_RESULT_BADINPUT;
 
-	params.param.dceclksrc  = atom_pll_id;
-	params.param.dceclktype = atom_clock_type;
+	params.param.dceclksrc = (uint8_t)atom_pll_id;
+	params.param.dceclktype = (uint8_t)atom_clock_type;
 
 	if (bp_params->clock_type == DCECLOCK_TYPE_DPREFCLK) {
 		if (bp_params->flags.USE_GENLOCK_AS_SOURCE_FOR_DPREFCLK)
@@ -821,5 +1010,86 @@ static unsigned int get_smu_clock_info_v3_1(struct bios_parser *bp, uint8_t id)
 	}
 
 	return 0;
+}
+
+/******************************************************************************
+ ******************************************************************************
+ **
+ **                  LVTMA CONTROL
+ **
+ ******************************************************************************
+ *****************************************************************************/
+
+static enum bp_result enable_lvtma_control(
+	struct bios_parser *bp,
+	uint8_t uc_pwr_on,
+	uint8_t pwrseq_instance,
+	uint8_t bypass_panel_control_wait);
+
+static void init_enable_lvtma_control(struct bios_parser *bp)
+{
+	/* TODO add switch for table vrsion */
+	bp->cmd_tbl.enable_lvtma_control = enable_lvtma_control;
+
+}
+
+static void enable_lvtma_control_dmcub(
+	struct dc_dmub_srv *dmcub,
+	uint8_t uc_pwr_on,
+	uint8_t pwrseq_instance,
+	uint8_t bypass_panel_control_wait)
+{
+
+	union dmub_rb_cmd cmd;
+
+	memset(&cmd, 0, sizeof(cmd));
+
+	cmd.lvtma_control.header.type = DMUB_CMD__VBIOS;
+	cmd.lvtma_control.header.sub_type =
+			DMUB_CMD__VBIOS_LVTMA_CONTROL;
+	cmd.lvtma_control.data.uc_pwr_action =
+			uc_pwr_on;
+	cmd.lvtma_control.data.pwrseq_inst =
+			pwrseq_instance;
+	cmd.lvtma_control.data.bypass_panel_control_wait =
+			bypass_panel_control_wait;
+	dc_wake_and_execute_dmub_cmd(dmcub->ctx, &cmd, DM_DMUB_WAIT_TYPE_WAIT);
+}
+
+static enum bp_result enable_lvtma_control(
+	struct bios_parser *bp,
+	uint8_t uc_pwr_on,
+	uint8_t pwrseq_instance,
+	uint8_t bypass_panel_control_wait)
+{
+	enum bp_result result = BP_RESULT_FAILURE;
+
+	if (bp->base.ctx->dc->ctx->dmub_srv &&
+	    bp->base.ctx->dc->debug.dmub_command_table) {
+		enable_lvtma_control_dmcub(bp->base.ctx->dmub_srv,
+				uc_pwr_on,
+				pwrseq_instance,
+				bypass_panel_control_wait);
+		return BP_RESULT_OK;
+	}
+	return result;
+}
+
+void dal_firmware_parser_init_cmd_tbl(struct bios_parser *bp)
+{
+	init_dig_encoder_control(bp);
+	init_transmitter_control(bp);
+	init_set_pixel_clock(bp);
+
+	init_set_crtc_timing(bp);
+
+	init_enable_crtc(bp);
+
+	init_external_encoder_control(bp);
+	init_enable_disp_power_gating(bp);
+	init_set_dce_clock(bp);
+	init_get_smu_clock_info(bp);
+
+	init_enable_lvtma_control(bp);
 }
 

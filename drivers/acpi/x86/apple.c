@@ -1,16 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * apple.c - Apple ACPI quirks
  * Copyright (C) 2017 Lukas Wunner <lukas@wunner.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License (version 2) as
- * published by the Free Software Foundation.
  */
 
 #include <linux/acpi.h>
 #include <linux/bitmap.h>
 #include <linux/platform_data/x86/apple.h>
 #include <linux/uuid.h>
+#include "../internal.h"
 
 /* Apple _DSM device properties GUID */
 static const guid_t apple_prp_guid =
@@ -62,7 +60,7 @@ void acpi_extract_apple_properties(struct acpi_device *adev)
 	if (!numprops)
 		goto out_free;
 
-	valid = kcalloc(BITS_TO_LONGS(numprops), sizeof(long), GFP_KERNEL);
+	valid = bitmap_zalloc(numprops, GFP_KERNEL);
 	if (!valid)
 		goto out_free;
 
@@ -73,13 +71,16 @@ void acpi_extract_apple_properties(struct acpi_device *adev)
 
 		if ( key->type != ACPI_TYPE_STRING ||
 		    (val->type != ACPI_TYPE_INTEGER &&
-		     val->type != ACPI_TYPE_BUFFER))
+		     val->type != ACPI_TYPE_BUFFER &&
+		     val->type != ACPI_TYPE_STRING))
 			continue; /* skip invalid properties */
 
 		__set_bit(i, valid);
 		newsize += key->string.length + 1;
 		if ( val->type == ACPI_TYPE_BUFFER)
 			newsize += val->buffer.length;
+		else if (val->type == ACPI_TYPE_STRING)
+			newsize += val->string.length + 1;
 	}
 
 	numvalid = bitmap_weight(valid, numprops);
@@ -121,6 +122,12 @@ void acpi_extract_apple_properties(struct acpi_device *adev)
 		newprops[v].type = val->type;
 		if (val->type == ACPI_TYPE_INTEGER) {
 			newprops[v].integer.value = val->integer.value;
+		} else if (val->type == ACPI_TYPE_STRING) {
+			newprops[v].string.length = val->string.length;
+			newprops[v].string.pointer = free_space;
+			memcpy(free_space, val->string.pointer,
+			       val->string.length);
+			free_space += val->string.length + 1;
 		} else {
 			newprops[v].buffer.length = val->buffer.length;
 			newprops[v].buffer.pointer = free_space;
@@ -132,10 +139,10 @@ void acpi_extract_apple_properties(struct acpi_device *adev)
 	}
 	WARN_ON(free_space != (void *)newprops + newsize);
 
-	adev->data.properties = newprops;
 	adev->data.pointer = newprops;
+	acpi_data_add_props(&adev->data, &apple_prp_guid, newprops);
 
 out_free:
 	ACPI_FREE(props);
-	kfree(valid);
+	bitmap_free(valid);
 }

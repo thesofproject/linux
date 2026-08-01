@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef __SOUND_EMUX_SYNTH_H
 #define __SOUND_EMUX_SYNTH_H
 
@@ -5,20 +6,6 @@
  *  Defines for the Emu-series WaveTable chip
  *
  *  Copyright (C) 2000 Takashi Iwai <tiwai@suse.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <sound/seq_kernel.h>
@@ -67,6 +54,7 @@ struct snd_emux_operators {
 #if IS_ENABLED(CONFIG_SND_SEQUENCER_OSS)
 	int (*oss_ioctl)(struct snd_emux *emu, int cmd, int p1, int p2);
 #endif
+	int (*get_pitch_shift)(struct snd_emux *emu);
 };
 
 
@@ -95,7 +83,6 @@ struct snd_emux {
 	int max_voices;		/* Number of voices */
 	int mem_size;		/* memory size (in byte) */
 	int num_ports;		/* number of ports to be created */
-	int pitch_shift;	/* pitch shift value (for Emu10k1) */
 	struct snd_emux_operators ops;	/* operators */
 	void *hw;		/* hardware */
 	unsigned long flags;	/* other conditions */
@@ -116,7 +103,7 @@ struct snd_emux {
 	int ports[SNDRV_EMUX_MAX_PORTS];	/* The ports for this device */
 	struct snd_emux_port *portptrs[SNDRV_EMUX_MAX_PORTS];
 	int used;	/* use counter */
-	char *name;	/* name of the device (internal) */
+	const char *name;	/* name of the device (internal) */
 	struct snd_rawmidi **vmidi;
 	struct timer_list tlist;	/* for pending note-offs */
 	int timer_active;
@@ -138,7 +125,6 @@ struct snd_emux {
  */
 struct snd_emux_port {
 
-	struct snd_midi_channel_set chset;
 	struct snd_emux *emu;
 
 	char port_mode;			/* operation mode */
@@ -151,6 +137,7 @@ struct snd_emux_port {
 #if IS_ENABLED(CONFIG_SND_SEQUENCER_OSS)
 	struct snd_seq_oss_arg *oss_arg;
 #endif
+	struct snd_midi_channel_set chset;
 };
 
 /* port_mode */

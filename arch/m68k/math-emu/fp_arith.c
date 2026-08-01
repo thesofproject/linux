@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 
    fp_arith.c: floating-point math routines for the Linux-m68k
@@ -8,9 +9,6 @@
    Somewhat based on the AlphaLinux floating point emulator, by David
    Mosberger-Tang.
 
-   You may copy, modify, and redistribute this file under the terms of
-   the GNU General Public License, version 2, or any later version, at
-   your convenience.
  */
 
 #include "fp_emu.h"
@@ -30,8 +28,7 @@ const struct fp_ext fp_Inf =
 
 /* let's start with the easy ones */
 
-struct fp_ext *
-fp_fabs(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_fabs(struct fp_ext *dest, struct fp_ext *src)
 {
 	dprint(PINSTR, "fabs\n");
 
@@ -42,8 +39,7 @@ fp_fabs(struct fp_ext *dest, struct fp_ext *src)
 	return dest;
 }
 
-struct fp_ext *
-fp_fneg(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_fneg(struct fp_ext *dest, struct fp_ext *src)
 {
 	dprint(PINSTR, "fneg\n");
 
@@ -59,8 +55,7 @@ fp_fneg(struct fp_ext *dest, struct fp_ext *src)
 /* fp_fadd: Implements the kernel of the FADD, FSADD, FDADD, FSUB,
    FDSUB, and FCMP instructions. */
 
-struct fp_ext *
-fp_fadd(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_fadd(struct fp_ext *dest, struct fp_ext *src)
 {
 	int diff;
 
@@ -119,8 +114,7 @@ fp_fadd(struct fp_ext *dest, struct fp_ext *src)
 
    Remember that the arguments are in assembler-syntax order! */
 
-struct fp_ext *
-fp_fsub(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_fsub(struct fp_ext *dest, struct fp_ext *src)
 {
 	dprint(PINSTR, "fsub ");
 
@@ -129,8 +123,7 @@ fp_fsub(struct fp_ext *dest, struct fp_ext *src)
 }
 
 
-struct fp_ext *
-fp_fcmp(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_fcmp(struct fp_ext *dest, struct fp_ext *src)
 {
 	dprint(PINSTR, "fcmp ");
 
@@ -139,8 +132,7 @@ fp_fcmp(struct fp_ext *dest, struct fp_ext *src)
 	return fp_fadd(&FPDATA->temp[1], src);
 }
 
-struct fp_ext *
-fp_ftst(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_ftst(struct fp_ext *dest, struct fp_ext *src)
 {
 	dprint(PINSTR, "ftst\n");
 
@@ -149,8 +141,7 @@ fp_ftst(struct fp_ext *dest, struct fp_ext *src)
 	return src;
 }
 
-struct fp_ext *
-fp_fmul(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_fmul(struct fp_ext *dest, struct fp_ext *src)
 {
 	union fp_mant128 temp;
 	int exp;
@@ -227,8 +218,7 @@ fp_fmul(struct fp_ext *dest, struct fp_ext *src)
    Note that the order of the operands is counter-intuitive: instead
    of src / dest, the result is actually dest / src. */
 
-struct fp_ext *
-fp_fdiv(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_fdiv(struct fp_ext *dest, struct fp_ext *src)
 {
 	union fp_mant128 temp;
 	int exp;
@@ -245,7 +235,7 @@ fp_fdiv(struct fp_ext *dest, struct fp_ext *src)
 		/* infinity / infinity = NaN (quiet, as always) */
 		if (IS_INF(src))
 			fp_set_nan(dest);
-		/* infinity / anything else = infinity (with approprate sign) */
+		/* infinity / anything else = infinity (with appropriate sign) */
 		return dest;
 	}
 	if (IS_INF(src)) {
@@ -308,8 +298,7 @@ fp_fdiv(struct fp_ext *dest, struct fp_ext *src)
 	return dest;
 }
 
-struct fp_ext *
-fp_fsglmul(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_fsglmul(struct fp_ext *dest, struct fp_ext *src)
 {
 	int exp;
 
@@ -365,8 +354,7 @@ fp_fsglmul(struct fp_ext *dest, struct fp_ext *src)
 	return dest;
 }
 
-struct fp_ext *
-fp_fsgldiv(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_fsgldiv(struct fp_ext *dest, struct fp_ext *src)
 {
 	int exp;
 	unsigned long quot, rem;
@@ -575,8 +563,8 @@ static void fp_roundint(struct fp_ext *dest, int mode)
    (which are exactly the same, except for the rounding used on the
    intermediate value) */
 
-static struct fp_ext *
-modrem_kernel(struct fp_ext *dest, struct fp_ext *src, int mode)
+static struct fp_ext *modrem_kernel(struct fp_ext *dest, struct fp_ext *src,
+				    int mode)
 {
 	struct fp_ext tmp;
 
@@ -609,8 +597,7 @@ modrem_kernel(struct fp_ext *dest, struct fp_ext *src, int mode)
 
    fmod(src,dest) = (dest - (src * floor(dest / src))) */
 
-struct fp_ext *
-fp_fmod(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_fmod(struct fp_ext *dest, struct fp_ext *src)
 {
 	dprint(PINSTR, "fmod\n");
 	return modrem_kernel(dest, src, FPCR_ROUND_RZ);
@@ -621,15 +608,13 @@ fp_fmod(struct fp_ext *dest, struct fp_ext *src)
    frem(src,dest) = (dest - (src * round(dest / src)))
  */
 
-struct fp_ext *
-fp_frem(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_frem(struct fp_ext *dest, struct fp_ext *src)
 {
 	dprint(PINSTR, "frem\n");
 	return modrem_kernel(dest, src, FPCR_ROUND_RN);
 }
 
-struct fp_ext *
-fp_fint(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_fint(struct fp_ext *dest, struct fp_ext *src)
 {
 	dprint(PINSTR, "fint\n");
 
@@ -640,8 +625,7 @@ fp_fint(struct fp_ext *dest, struct fp_ext *src)
 	return dest;
 }
 
-struct fp_ext *
-fp_fintrz(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_fintrz(struct fp_ext *dest, struct fp_ext *src)
 {
 	dprint(PINSTR, "fintrz\n");
 
@@ -652,8 +636,7 @@ fp_fintrz(struct fp_ext *dest, struct fp_ext *src)
 	return dest;
 }
 
-struct fp_ext *
-fp_fscale(struct fp_ext *dest, struct fp_ext *src)
+struct fp_ext *fp_fscale(struct fp_ext *dest, struct fp_ext *src)
 {
 	int scale, oldround;
 

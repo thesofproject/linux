@@ -17,9 +17,9 @@
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 
-#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <linux/irqchip/irq-msi-lib.h>
 
-#include "irq-mvebu-gicp.h"
+#include <dt-bindings/interrupt-controller/arm-gic.h>
 
 #define GICP_SETSPI_NSR_OFFSET	0x0
 #define GICP_CLRSPI_NSR_OFFSET	0x8
@@ -55,34 +55,18 @@ static int gicp_idx_to_spi(struct mvebu_gicp *gicp, int idx)
 	return -EINVAL;
 }
 
-int mvebu_gicp_get_doorbells(struct device_node *dn, phys_addr_t *setspi,
-			     phys_addr_t *clrspi)
-{
-	struct platform_device *pdev;
-	struct mvebu_gicp *gicp;
-
-	pdev = of_find_device_by_node(dn);
-	if (!pdev)
-		return -ENODEV;
-
-	gicp = platform_get_drvdata(pdev);
-	if (!gicp)
-		return -ENODEV;
-
-	*setspi = gicp->res->start + GICP_SETSPI_NSR_OFFSET;
-	*clrspi = gicp->res->start + GICP_CLRSPI_NSR_OFFSET;
-
-	return 0;
-}
-
 static void gicp_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
 {
 	struct mvebu_gicp *gicp = data->chip_data;
 	phys_addr_t setspi = gicp->res->start + GICP_SETSPI_NSR_OFFSET;
+	phys_addr_t clrspi = gicp->res->start + GICP_CLRSPI_NSR_OFFSET;
 
-	msg->data = data->hwirq;
-	msg->address_lo = lower_32_bits(setspi);
-	msg->address_hi = upper_32_bits(setspi);
+	msg[0].data = data->hwirq;
+	msg[0].address_lo = lower_32_bits(setspi);
+	msg[0].address_hi = upper_32_bits(setspi);
+	msg[1].data = data->hwirq;
+	msg[1].address_lo = lower_32_bits(clrspi);
+	msg[1].address_hi = upper_32_bits(clrspi);
 }
 
 static struct irq_chip gicp_irq_chip = {
@@ -163,30 +147,37 @@ static void gicp_irq_domain_free(struct irq_domain *domain,
 }
 
 static const struct irq_domain_ops gicp_domain_ops = {
+	.select	= msi_lib_irq_domain_select,
 	.alloc	= gicp_irq_domain_alloc,
 	.free	= gicp_irq_domain_free,
 };
 
-static struct irq_chip gicp_msi_irq_chip = {
-	.name		= "GICP",
-	.irq_set_type	= irq_chip_set_type_parent,
-};
+#define GICP_MSI_FLAGS_REQUIRED  (MSI_FLAG_USE_DEF_DOM_OPS |	\
+				  MSI_FLAG_USE_DEF_CHIP_OPS)
 
-static struct msi_domain_ops gicp_msi_ops = {
-};
+#define GICP_MSI_FLAGS_SUPPORTED (MSI_GENERIC_FLAGS_MASK |	\
+				  MSI_FLAG_LEVEL_CAPABLE)
 
-static struct msi_domain_info gicp_msi_domain_info = {
-	.flags	= (MSI_FLAG_USE_DEF_DOM_OPS | MSI_FLAG_USE_DEF_CHIP_OPS),
-	.ops	= &gicp_msi_ops,
-	.chip	= &gicp_msi_irq_chip,
+static const struct msi_parent_ops gicp_msi_parent_ops = {
+	.supported_flags	= GICP_MSI_FLAGS_SUPPORTED,
+	.required_flags		= GICP_MSI_FLAGS_REQUIRED,
+	.chip_flags		= MSI_CHIP_FLAG_SET_EOI,
+	.bus_select_token       = DOMAIN_BUS_GENERIC_MSI,
+	.bus_select_mask	= MATCH_PLATFORM_MSI,
+	.prefix			= "GICP-",
+	.init_dev_msi_info	= msi_lib_init_dev_msi_info,
 };
 
 static int mvebu_gicp_probe(struct platform_device *pdev)
 {
-	struct mvebu_gicp *gicp;
-	struct irq_domain *inner_domain, *plat_domain, *parent_domain;
 	struct device_node *node = pdev->dev.of_node;
 	struct device_node *irq_parent_dn;
+	struct irq_domain_info info = {
+		.fwnode	= of_fwnode_handle(node),
+		.ops	= &gicp_domain_ops,
+	};
+	struct mvebu_gicp *gicp;
+	void __iomem *base;
 	int ret, i;
 
 	gicp = devm_kzalloc(&pdev->dev, sizeof(*gicp), GFP_KERNEL);
@@ -207,8 +198,8 @@ static int mvebu_gicp_probe(struct platform_device *pdev)
 	gicp->spi_ranges_cnt = ret / 2;
 
 	gicp->spi_ranges =
-		devm_kzalloc(&pdev->dev,
-			     gicp->spi_ranges_cnt *
+		devm_kcalloc(&pdev->dev,
+			     gicp->spi_ranges_cnt,
 			     sizeof(struct mvebu_gicp_spi_range),
 			     GFP_KERNEL);
 	if (!gicp->spi_ranges)
@@ -226,11 +217,12 @@ static int mvebu_gicp_probe(struct platform_device *pdev)
 		gicp->spi_cnt += gicp->spi_ranges[i].count;
 	}
 
-	gicp->spi_bitmap = devm_kzalloc(&pdev->dev,
-				BITS_TO_LONGS(gicp->spi_cnt) * sizeof(long),
-				GFP_KERNEL);
+	gicp->spi_bitmap = devm_bitmap_zalloc(&pdev->dev, gicp->spi_cnt, GFP_KERNEL);
 	if (!gicp->spi_bitmap)
 		return -ENOMEM;
+
+	info.size = gicp->spi_cnt;
+	info.host_data = gicp;
 
 	irq_parent_dn = of_irq_find_parent(node);
 	if (!irq_parent_dn) {
@@ -238,31 +230,23 @@ static int mvebu_gicp_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	parent_domain = irq_find_host(irq_parent_dn);
-	if (!parent_domain) {
+	info.parent = irq_find_host(irq_parent_dn);
+	of_node_put(irq_parent_dn);
+	if (!info.parent) {
 		dev_err(&pdev->dev, "failed to find parent IRQ domain\n");
 		return -ENODEV;
 	}
 
-	inner_domain = irq_domain_create_hierarchy(parent_domain, 0,
-						   gicp->spi_cnt,
-						   of_node_to_fwnode(node),
-						   &gicp_domain_ops, gicp);
-	if (!inner_domain)
-		return -ENOMEM;
-
-
-	plat_domain = platform_msi_create_irq_domain(of_node_to_fwnode(node),
-						     &gicp_msi_domain_info,
-						     inner_domain);
-	if (!plat_domain) {
-		irq_domain_remove(inner_domain);
-		return -ENOMEM;
+	base = ioremap(gicp->res->start, resource_size(gicp->res));
+	if (!base) {
+		dev_err(&pdev->dev, "ioremap() failed. Unable to clear pending interrupts.\n");
+	} else {
+		for (i = 0; i < 64; i++)
+			writel(i, base + GICP_CLRSPI_NSR_OFFSET);
+		iounmap(base);
 	}
 
-	platform_set_drvdata(pdev, gicp);
-
-	return 0;
+	return msi_create_parent_irq_domain(&info, &gicp_msi_parent_ops) ? 0 : -ENOMEM;
 }
 
 static const struct of_device_id mvebu_gicp_of_match[] = {

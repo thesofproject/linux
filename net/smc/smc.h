@@ -14,17 +14,63 @@
 #include <linux/socket.h>
 #include <linux/types.h>
 #include <linux/compiler.h> /* __aligned */
+#include <net/genetlink.h>
 #include <net/sock.h>
 
 #include "smc_ib.h"
 
+#define SMC_V1		1		/* SMC version V1 */
+#define SMC_V2		2		/* SMC version V2 */
+
+#define SMC_RELEASE_0 0
+#define SMC_RELEASE_1 1
+#define SMC_RELEASE	SMC_RELEASE_1 /* the latest release version */
+
 #define SMCPROTO_SMC		0	/* SMC protocol, IPv4 */
 #define SMCPROTO_SMC6		1	/* SMC protocol, IPv6 */
 
-#define SMC_MAX_PORTS		2	/* Max # of ports */
+#define SMC_AUTOCORKING_DEFAULT_SIZE	0x10000	/* 64K by default */
 
 extern struct proto smc_proto;
 extern struct proto smc_proto6;
+
+extern struct smc_hashinfo smc_v4_hashinfo;
+extern struct smc_hashinfo smc_v6_hashinfo;
+
+int smc_hash_sk(struct sock *sk);
+void smc_unhash_sk(struct sock *sk);
+void smc_release_cb(struct sock *sk);
+
+int smc_release(struct socket *sock);
+int smc_bind(struct socket *sock, struct sockaddr_unsized *uaddr,
+	     int addr_len);
+int smc_connect(struct socket *sock, struct sockaddr_unsized *addr,
+		int alen, int flags);
+int smc_accept(struct socket *sock, struct socket *new_sock,
+	       struct proto_accept_arg *arg);
+int smc_getname(struct socket *sock, struct sockaddr *addr,
+		int peer);
+__poll_t smc_poll(struct file *file, struct socket *sock,
+		  poll_table *wait);
+int smc_ioctl(struct socket *sock, unsigned int cmd,
+	      unsigned long arg);
+int smc_listen(struct socket *sock, int backlog);
+int smc_shutdown(struct socket *sock, int how);
+int smc_setsockopt(struct socket *sock, int level, int optname,
+		   sockptr_t optval, unsigned int optlen);
+int smc_getsockopt(struct socket *sock, int level, int optname,
+		   char __user *optval, int __user *optlen);
+int smc_sendmsg(struct socket *sock, struct msghdr *msg, size_t len);
+int smc_recvmsg(struct socket *sock, struct msghdr *msg, size_t len,
+		int flags);
+ssize_t smc_splice_read(struct socket *sock, loff_t *ppos,
+			struct pipe_inode_info *pipe, size_t len,
+			unsigned int flags);
+
+/* smc sock initialization */
+void smc_sk_init(struct net *net, struct sock *sk, int protocol);
+/* clcsock initialization */
+int smc_create_clcsk(struct net *net, struct sock *sk, int family);
 
 #ifdef ATOMIC64_INIT
 #define KERNEL_HAS_ATOMIC64
@@ -47,10 +93,30 @@ enum smc_state {		/* possible states of an SMC socket */
 	SMC_PROCESSABORT	= 27,
 };
 
+enum smc_supplemental_features {
+	SMC_SPF_EMULATED_ISM_DEV	= 0,
+};
+
+#define SMC_FEATURE_MASK \
+	(BIT(SMC_SPF_EMULATED_ISM_DEV))
+
 struct smc_link_group;
 
 struct smc_wr_rx_hdr {	/* common prefix part of LLC and CDC to demultiplex */
-	u8			type;
+	union {
+		u8 type;
+#if defined(__BIG_ENDIAN_BITFIELD)
+		struct {
+			u8 llc_version:4,
+			   llc_type:4;
+		};
+#elif defined(__LITTLE_ENDIAN_BITFIELD)
+		struct {
+			u8 llc_type:4,
+			   llc_version:4;
+		};
+#endif
+	};
 } __aligned(1);
 
 struct smc_cdc_conn_state_flags {
@@ -114,11 +180,24 @@ struct smc_host_cdc_msg {		/* Connection Data Control message */
 	u8				reserved[18];
 } __aligned(8);
 
+enum smc_urg_state {
+	SMC_URG_VALID	= 1,			/* data present */
+	SMC_URG_NOTYET	= 2,			/* data pending */
+	SMC_URG_READ	= 3,			/* data was already read */
+};
+
+struct smc_mark_woken {
+	bool woken;
+	void *key;
+	wait_queue_entry_t wait_entry;
+};
+
 struct smc_connection {
 	struct rb_node		alert_node;
 	struct smc_link_group	*lgr;		/* link group of connection */
+	struct smc_link		*lnk;		/* assigned SMC-R link */
 	u32			alert_token_local; /* unique conn. id */
-	u8			peer_conn_idx;	/* from tcp handshake */
+	u8			peer_rmbe_idx;	/* from tcp handshake */
 	int			peer_rmbe_size;	/* size of peer rx buffer */
 	atomic_t		peer_rmbe_space;/* remaining free bytes in peer
 						 * rmbe
@@ -126,10 +205,8 @@ struct smc_connection {
 	int			rtoken_idx;	/* idx to peer RMB rkey/addr */
 
 	struct smc_buf_desc	*sndbuf_desc;	/* send buffer descriptor */
-	int			sndbuf_size;	/* sndbuf size <== sock wmem */
 	struct smc_buf_desc	*rmb_desc;	/* RMBE descriptor */
-	int			rmbe_size;	/* RMBE size <== sock rmem */
-	int			rmbe_size_short;/* compressed notation */
+	int                     rmbe_size_comp; /* compressed notation */
 	int			rmbe_update_limit;
 						/* lower limit for consumer
 						 * cursor update
@@ -139,6 +216,9 @@ struct smc_connection {
 						 * buffer for CDC msg send
 						 * .prod cf. TCP snd_nxt
 						 * .cons cf. TCP sends ack
+						 */
+	union smc_host_cursor	local_tx_ctrl_fin;
+						/* prod crsr - confirmed by peer
 						 */
 	union smc_host_cursor	tx_curs_prep;	/* tx - prepared data
 						 * snd_max..wmem_alloc
@@ -151,8 +231,15 @@ struct smc_connection {
 						 */
 	atomic_t		sndbuf_space;	/* remaining space in sndbuf */
 	u16			tx_cdc_seq;	/* sequence # for CDC send */
+	u16			tx_cdc_seq_fin;	/* sequence # - tx completed */
 	spinlock_t		send_lock;	/* protect wr_sends */
+	atomic_t		cdc_pend_tx_wr; /* number of pending tx CDC wqe
+						 * - inc when post wqe,
+						 * - dec on polled tx cqe
+						 */
+	wait_queue_head_t	cdc_pend_tx_wq; /* wakeup on no cdc_pend_tx_wr*/
 	struct delayed_work	tx_work;	/* retry of smc_cdc_msg_send */
+	u32			tx_off;		/* base offset in peer rmb */
 
 	struct smc_host_cdc_msg	local_rx_ctrl;	/* filled during event_handl.
 						 * .prod cf. TCP rcv_nxt
@@ -161,40 +248,139 @@ struct smc_connection {
 	union smc_host_cursor	rx_curs_confirmed; /* confirmed to peer
 						    * source of snd_una ?
 						    */
+	union smc_host_cursor	urg_curs;	/* points at urgent byte */
+	enum smc_urg_state	urg_state;
+	bool			urg_tx_pend;	/* urgent data staged */
+	bool			urg_rx_skip_pend;
+						/* indicate urgent oob data
+						 * read, but previous regular
+						 * data still pending
+						 */
+	char			urg_rx_byte;	/* urgent byte */
+	bool			tx_in_release_sock;
+						/* flush pending tx data in
+						 * sock release_cb()
+						 */
 	atomic_t		bytes_to_rcv;	/* arrived data,
 						 * not yet received
+						 */
+	atomic_t		splice_pending;	/* number of spliced bytes
+						 * pending processing
 						 */
 #ifndef KERNEL_HAS_ATOMIC64
 	spinlock_t		acurs_lock;	/* protect cursors */
 #endif
 	struct work_struct	close_work;	/* peer sent some closing */
+	struct work_struct	abort_work;	/* abort the connection */
+	struct tasklet_struct	rx_tsklet;	/* Receiver tasklet for SMC-D */
+	u8			rx_off;		/* receive offset:
+						 * 0 for SMC-R, 32 for SMC-D
+						 */
+	u64			peer_token;	/* SMC-D token of peer */
+	u8			killed : 1;	/* abnormal termination */
+	u8			freed : 1;	/* normal termination */
+	u8			out_of_sync : 1; /* out of sync with peer */
 };
 
 struct smc_sock {				/* smc sock container */
-	struct sock		sk;
+	union {
+		struct sock		sk;
+		struct inet_sock	icsk_inet;
+	};
 	struct socket		*clcsock;	/* internal tcp socket */
+	void			(*clcsk_state_change)(struct sock *sk);
+						/* original stat_change fct. */
+	void			(*clcsk_data_ready)(struct sock *sk);
+						/* original data_ready fct. */
+	void			(*clcsk_write_space)(struct sock *sk);
+						/* original write_space fct. */
+	void			(*clcsk_error_report)(struct sock *sk);
+						/* original error_report fct. */
 	struct smc_connection	conn;		/* smc connection */
 	struct smc_sock		*listen_smc;	/* listen parent */
+	struct work_struct	connect_work;	/* handle non-blocking connect*/
 	struct work_struct	tcp_listen_work;/* handle tcp socket accepts */
 	struct work_struct	smc_listen_work;/* prepare new accept socket */
 	struct list_head	accept_q;	/* sockets to be accepted */
 	spinlock_t		accept_q_lock;	/* protects accept_q */
+	bool			limit_smc_hs;	/* put constraint on handshake */
 	bool			use_fallback;	/* fallback to tcp */
+	int			fallback_rsn;	/* reason for fallback */
+	u32			peer_diagnosis; /* decline reason from peer */
+	atomic_t                queued_smc_hs;  /* queued smc handshakes */
+	struct inet_connection_sock_af_ops		af_ops;
+	const struct inet_connection_sock_af_ops	*ori_af_ops;
+						/* original af ops */
+	int			sockopt_defer_accept;
+						/* sockopt TCP_DEFER_ACCEPT
+						 * value
+						 */
 	u8			wait_close_tx_prepared : 1;
 						/* shutdown wr or close
 						 * started, waiting for unsent
 						 * data to be sent
 						 */
+	u8			connect_nonblock : 1;
+						/* non-blocking connect in
+						 * flight
+						 */
+	struct mutex            clcsock_release_lock;
+						/* protects clcsock of a listen
+						 * socket
+						 * */
 };
 
-static inline struct smc_sock *smc_sk(const struct sock *sk)
+#define smc_sk(ptr) container_of_const(ptr, struct smc_sock, sk)
+
+static inline void smc_init_saved_callbacks(struct smc_sock *smc)
 {
-	return (struct smc_sock *)sk;
+	smc->clcsk_state_change	= NULL;
+	smc->clcsk_data_ready	= NULL;
+	smc->clcsk_write_space	= NULL;
+	smc->clcsk_error_report	= NULL;
 }
+
+static inline struct smc_sock *smc_clcsock_user_data(const struct sock *clcsk)
+{
+	return (struct smc_sock *)
+	       ((uintptr_t)clcsk->sk_user_data & ~SK_USER_DATA_NOCOPY);
+}
+
+static inline struct smc_sock *smc_clcsock_user_data_rcu(const struct sock *clcsk)
+{
+	return (struct smc_sock *)rcu_dereference_sk_user_data(clcsk);
+}
+
+/* save target_cb in saved_cb, and replace target_cb with new_cb */
+static inline void smc_clcsock_replace_cb(void (**target_cb)(struct sock *),
+					  void (*new_cb)(struct sock *),
+					  void (**saved_cb)(struct sock *))
+{
+	/* only save once */
+	if (!*saved_cb)
+		*saved_cb = *target_cb;
+	*target_cb = new_cb;
+}
+
+/* restore target_cb to saved_cb, and reset saved_cb to NULL */
+static inline void smc_clcsock_restore_cb(void (**target_cb)(struct sock *),
+					  void (**saved_cb)(struct sock *))
+{
+	if (!*saved_cb)
+		return;
+	*target_cb = *saved_cb;
+	*saved_cb = NULL;
+}
+
+extern struct workqueue_struct	*smc_hs_wq;	/* wq for handshake work */
+extern struct workqueue_struct	*smc_close_wq;	/* wq for close work */
 
 #define SMC_SYSTEMID_LEN		8
 
 extern u8	local_systemid[SMC_SYSTEMID_LEN]; /* unique system identifier */
+
+#define ntohll(x) be64_to_cpu(x)
+#define htonll(x) cpu_to_be64(x)
 
 /* convert an u32 value into network byte order, store it into a 3 byte field */
 static inline void hton24(u8 *net, u32 host)
@@ -214,41 +400,6 @@ static inline u32 ntoh24(u8 *net)
 	return be32_to_cpu(t);
 }
 
-#define SMC_BUF_MIN_SIZE 16384		/* minimum size of an RMB */
-
-#define SMC_RMBE_SIZES	16	/* number of distinct sizes for an RMBE */
-/* theoretically, the RFC states that largest size would be 512K,
- * i.e. compressed 5 and thus 6 sizes (0..5), despite
- * struct smc_clc_msg_accept_confirm.rmbe_size being a 4 bit value (0..15)
- */
-
-/* convert the RMB size into the compressed notation - minimum 16K.
- * In contrast to plain ilog2, this rounds towards the next power of 2,
- * so the socket application gets at least its desired sndbuf / rcvbuf size.
- */
-static inline u8 smc_compress_bufsize(int size)
-{
-	u8 compressed;
-
-	if (size <= SMC_BUF_MIN_SIZE)
-		return 0;
-
-	size = (size - 1) >> 14;
-	compressed = ilog2(size) + 1;
-	if (compressed >= SMC_RMBE_SIZES)
-		compressed = SMC_RMBE_SIZES - 1;
-	return compressed;
-}
-
-/* convert the RMB size from compressed notation into integer */
-static inline int smc_uncompress_bufsize(u8 compressed)
-{
-	u32 size;
-
-	size = 0x00000001 << (((int)compressed) + 14);
-	return (int)size;
-}
-
 #ifdef CONFIG_XFRM
 static inline bool using_ipsec(struct smc_sock *smc)
 {
@@ -262,13 +413,22 @@ static inline bool using_ipsec(struct smc_sock *smc)
 }
 #endif
 
-struct smc_clc_msg_local;
+struct smc_gidlist;
 
-void smc_conn_free(struct smc_connection *conn);
-int smc_conn_create(struct smc_sock *smc,
-		    struct smc_ib_device *smcibdev, u8 ibport,
-		    struct smc_clc_msg_local *lcl, int srv_first_contact);
 struct sock *smc_accept_dequeue(struct sock *parent, struct socket *new_sock);
 void smc_close_non_accepted(struct sock *sk);
+void smc_fill_gid_list(struct smc_link_group *lgr,
+		       struct smc_gidlist *gidlist,
+		       struct smc_ib_device *known_dev, u8 *known_gid);
+
+/* smc handshake limitation interface for netlink  */
+int smc_nl_dump_hs_limitation(struct sk_buff *skb, struct netlink_callback *cb);
+int smc_nl_enable_hs_limitation(struct sk_buff *skb, struct genl_info *info);
+int smc_nl_disable_hs_limitation(struct sk_buff *skb, struct genl_info *info);
+
+static inline void smc_sock_set_flag(struct sock *sk, enum sock_flags flag)
+{
+	set_bit(flag, &sk->sk_flags);
+}
 
 #endif	/* __SMC_H */

@@ -1,11 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * OF helpers for parsing display timings
  *
  * Copyright (c) 2012 Steffen Trumtrar <s.trumtrar@pengutronix.de>, Pengutronix
  *
  * based on of_videomode.c by Sascha Hauer <s.hauer@pengutronix.de>
- *
- * This file is released under the GPLv2
  */
 #include <linux/export.h>
 #include <linux/of.h>
@@ -53,6 +52,7 @@ static int parse_timing_property(const struct device_node *np, const char *name,
 /**
  * of_parse_display_timing - parse display_timing entry from device_node
  * @np: device_node with the properties
+ * @dt: display_timing that contains the result. I may be partially written in case of errors
  **/
 static int of_parse_display_timing(const struct device_node *np,
 		struct display_timing *dt)
@@ -120,17 +120,20 @@ int of_get_display_timing(const struct device_node *np, const char *name,
 		struct display_timing *dt)
 {
 	struct device_node *timing_np;
+	int ret;
 
 	if (!np)
 		return -EINVAL;
 
 	timing_np = of_get_child_by_name(np, name);
-	if (!timing_np) {
-		pr_err("%pOF: could not find node '%s'\n", np, name);
+	if (!timing_np)
 		return -ENOENT;
-	}
 
-	return of_parse_display_timing(timing_np, dt);
+	ret = of_parse_display_timing(timing_np, dt);
+
+	of_node_put(timing_np);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(of_get_display_timing);
 
@@ -154,7 +157,7 @@ struct display_timings *of_get_display_timings(const struct device_node *np)
 		return NULL;
 	}
 
-	disp = kzalloc(sizeof(*disp), GFP_KERNEL);
+	disp = kzalloc_obj(*disp);
 	if (!disp) {
 		pr_err("%pOF: could not allocate struct disp'\n", np);
 		goto dispfail;
@@ -170,7 +173,7 @@ struct display_timings *of_get_display_timings(const struct device_node *np)
 		goto entryfail;
 	}
 
-	pr_debug("%pOF: using %s as default timing\n", np, entry->name);
+	pr_debug("%pOF: using %pOFn as default timing\n", np, entry);
 
 	native_mode = entry;
 
@@ -178,31 +181,30 @@ struct display_timings *of_get_display_timings(const struct device_node *np)
 	if (disp->num_timings == 0) {
 		/* should never happen, as entry was already found above */
 		pr_err("%pOF: no timings specified\n", np);
-		goto entryfail;
+		goto timingfail;
 	}
 
-	disp->timings = kzalloc(sizeof(struct display_timing *) *
-				disp->num_timings, GFP_KERNEL);
+	disp->timings = kzalloc_objs(struct display_timing *, disp->num_timings);
 	if (!disp->timings) {
 		pr_err("%pOF: could not allocate timings array\n", np);
-		goto entryfail;
+		goto timingfail;
 	}
 
 	disp->num_timings = 0;
 	disp->native_mode = 0;
 
-	for_each_child_of_node(timings_np, entry) {
+	for_each_child_of_node_scoped(timings_np, child) {
 		struct display_timing *dt;
 		int r;
 
-		dt = kzalloc(sizeof(*dt), GFP_KERNEL);
+		dt = kmalloc_obj(*dt);
 		if (!dt) {
 			pr_err("%pOF: could not allocate display_timing struct\n",
 				np);
 			goto timingfail;
 		}
 
-		r = of_parse_display_timing(entry, dt);
+		r = of_parse_display_timing(child, dt);
 		if (r) {
 			/*
 			 * to not encourage wrong devicetrees, fail in case of
@@ -214,7 +216,7 @@ struct display_timings *of_get_display_timings(const struct device_node *np)
 			goto timingfail;
 		}
 
-		if (native_mode == entry)
+		if (native_mode == child)
 			disp->native_mode = disp->num_timings;
 
 		disp->timings[disp->num_timings] = dt;

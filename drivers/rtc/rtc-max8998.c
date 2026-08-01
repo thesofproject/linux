@@ -1,16 +1,10 @@
-/*
- * RTC driver for Maxim MAX8998
- *
- * Copyright (C) 2010 Samsung Electronics Co.Ltd
- * Author: Minkyu Kang <mk7.kang@samsung.com>
- * Author: Joonyoung Shim <jy0922.shim@samsung.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// RTC driver for Maxim MAX8998
+//
+// Copyright (C) 2010 Samsung Electronics Co.Ltd
+// Author: Minkyu Kang <mk7.kang@samsung.com>
+// Author: Joonyoung Shim <jy0922.shim@samsung.com>
 
 #include <linux/module.h>
 #include <linux/i2c.h>
@@ -305,8 +299,8 @@ no_irq:
 }
 
 static const struct platform_device_id max8998_rtc_id[] = {
-	{ "max8998-rtc", TYPE_MAX8998 },
-	{ "lp3974-rtc", TYPE_LP3974 },
+	{ .name = "max8998-rtc", .driver_data = TYPE_MAX8998 },
+	{ .name = "lp3974-rtc", .driver_data = TYPE_LP3974 },
 	{ }
 };
 MODULE_DEVICE_TABLE(platform, max8998_rtc_id);

@@ -1,47 +1,11 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
  * Device Tree Include file for Freescale Layerscape-1046A family SoC.
  *
  * Copyright 2016 Freescale Semiconductor, Inc.
+ * Copyright 2018-2019 NXP
  *
  * Shaohui Xie <Shaohui.Xie@nxp.com>
- *
- * This file is dual-licensed: you can use it either under the terms
- * of the GPLv2 or the X11 license, at your option. Note that this dual
- * licensing only applies to this file, and not this project as a
- * whole.
- *
- *  a) This library is free software; you can redistribute it and/or
- *     modify it under the terms of the GNU General Public License as
- *     published by the Free Software Foundation; either version 2 of the
- *     License, or (at your option) any later version.
- *
- *     This library is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- * Or, alternatively,
- *
- *  b) Permission is hereby granted, free of charge, to any person
- *     obtaining a copy of this software and associated documentation
- *     files (the "Software"), to deal in the Software without
- *     restriction, including without limitation the rights to use,
- *     copy, modify, merge, publish, distribute, sublicense, and/or
- *     sell copies of the Software, and to permit persons to whom the
- *     Software is furnished to do so, subject to the following
- *     conditions:
- *
- *     The above copyright notice and this permission notice shall be
- *     included in all copies or substantial portions of the Software.
- *
- *     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- *     OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- *     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
- *     HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
- *     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- *     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
- *     OTHER DEALINGS IN THE SOFTWARE.
  */
 
 /dts-v1/;
@@ -53,19 +17,46 @@
 	compatible = "fsl,ls1046a-qds", "fsl,ls1046a";
 
 	aliases {
+		emi1-slot1 = &ls1046mdio_s1;
+		emi1-slot2 = &ls1046mdio_s2;
+		emi1-slot4 = &ls1046mdio_s4;
 		gpio0 = &gpio0;
 		gpio1 = &gpio1;
 		gpio2 = &gpio2;
 		gpio3 = &gpio3;
+		qsgmii-s2-p1 = &qsgmii_phy_s2_p1;
+		qsgmii-s2-p2 = &qsgmii_phy_s2_p2;
+		qsgmii-s2-p3 = &qsgmii_phy_s2_p3;
+		qsgmii-s2-p4 = &qsgmii_phy_s2_p4;
 		serial0 = &duart0;
 		serial1 = &duart1;
 		serial2 = &duart2;
 		serial3 = &duart3;
+		sgmii-s1-p1 = &sgmii_phy_s1_p1;
+		sgmii-s1-p2 = &sgmii_phy_s1_p2;
+		sgmii-s1-p3 = &sgmii_phy_s1_p3;
+		sgmii-s1-p4 = &sgmii_phy_s1_p4;
+		sgmii-s4-p1 = &sgmii_phy_s4_p1;
 	};
 
 	chosen {
 		stdout-path = "serial0:115200n8";
 	};
+
+	sfp1: sfp-1 {
+		compatible = "sff,sfp";
+		i2c-bus = <&sfp1_i2c>;
+		maximum-power-milliwatt = <2000>;
+		mod-def0-gpios = <&stat_pres2 6 GPIO_ACTIVE_LOW>;
+	};
+
+	sfp2: sfp-2 {
+		compatible = "sff,sfp";
+		i2c-bus = <&sfp2_i2c>;
+		maximum-power-milliwatt = <2000>;
+		mod-def0-gpios = <&stat_pres2 7 GPIO_ACTIVE_LOW>;
+	};
+
 };
 
 &dspi {
@@ -93,7 +84,7 @@
 	flash@2 {
 		#address-cells = <1>;
 		#size-cells = <1>;
-		compatible = "en25s64", "jedec,spi-nor";
+		compatible = "jedec,spi-nor";
 		spi-cpol;
 		spi-cpha;
 		reg = <2>;
@@ -112,7 +103,7 @@
 &i2c0 {
 	status = "okay";
 
-	pca9547@77 {
+	i2c-mux@77 {
 		compatible = "nxp,pca9547";
 		reg = <0x77>;
 		#address-cells = <1>;
@@ -163,6 +154,31 @@
 				reg = <0x4c>;
 			};
 		};
+
+		i2c@7 {
+			reg = <0x7>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			i2c-mux@76 {
+				compatible = "nxp,pca9547";
+				reg = <0x76>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				sfp1_i2c: i2c@6 {
+					reg = <0x6>;
+					#address-cells = <1>;
+					#size-cells = <0>;
+				};
+
+				sfp2_i2c: i2c@7 {
+					reg = <0x7>;
+					#address-cells = <1>;
+					#size-cells = <0>;
+				};
+			};
+		};
 	};
 };
 
@@ -175,9 +191,10 @@
 		  0x2 0x0 0x0 0x7fb00000 0x00000100>;
 	status = "okay";
 
-	nor@0,0 {
+	flash@0,0 {
 		compatible = "cfi-flash";
 		reg = <0x0 0x0 0x8000000>;
+		big-endian;
 		bank-width = <2>;
 		device-width = <1>;
 	};
@@ -188,8 +205,21 @@
 	};
 
 	fpga: board-control@2,0 {
-		compatible = "fsl,ls1046aqds-fpga", "fsl,fpga-qixis";
+		compatible = "fsl,ls1046aqds-fpga", "fsl,fpga-qixis", "simple-mfd";
+		#address-cells = <1>;
+		#size-cells = <1>;
 		reg = <0x2 0x0 0x0000100>;
+		ranges = <0 2 0 0x100>;
+
+		stat_pres2: gpio@c {
+			compatible = "fsl,ls1046aqds-fpga-gpio-stat-pres2";
+			reg = <0xc 1>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-line-names =
+				"SLOT1", "SLOT2", "SLOT3", "SLOT4", "SLOT5", "SLOT6",
+				"SFP1_MOD_DEF", "SFP2_MOD_DEF";
+		};
 	};
 };
 
@@ -198,17 +228,155 @@
 };
 
 &qspi {
-	num-cs = <2>;
-	bus-num = <0>;
 	status = "okay";
 
-	qflash0: s25fl128s@0 {
+	qflash0: flash@0 {
 		compatible = "spansion,m25p80";
 		#address-cells = <1>;
 		#size-cells = <1>;
-		spi-max-frequency = <20000000>;
+		spi-max-frequency = <50000000>;
+		spi-rx-bus-width = <4>;
+		spi-tx-bus-width = <4>;
 		reg = <0>;
 	};
 };
 
 #include "fsl-ls1046-post.dtsi"
+
+&fman0 {
+	ethernet@e0000 {
+		phy-handle = <&qsgmii_phy_s2_p1>;
+		phy-connection-type = "sgmii";
+	};
+
+	ethernet@e2000 {
+		phy-handle = <&sgmii_phy_s4_p1>;
+		phy-connection-type = "sgmii";
+	};
+
+	ethernet@e4000 {
+		phy-handle = <&rgmii_phy1>;
+		phy-connection-type = "rgmii";
+	};
+
+	ethernet@e6000 {
+		phy-handle = <&rgmii_phy2>;
+		phy-connection-type = "rgmii";
+	};
+
+	ethernet@e8000 {
+		phy-handle = <&sgmii_phy_s1_p3>;
+		phy-connection-type = "sgmii";
+	};
+
+	ethernet@ea000 {
+		phy-handle = <&sgmii_phy_s1_p4>;
+		phy-connection-type = "sgmii";
+	};
+
+	ethernet@f0000 { /* DTSEC9/10GEC1 */
+		phy-handle = <&sgmii_phy_s1_p1>;
+		phy-connection-type = "xgmii";
+	};
+
+	ethernet@f2000 { /* DTSEC10/10GEC2 */
+		phy-handle = <&sgmii_phy_s1_p2>;
+		phy-connection-type = "xgmii";
+	};
+};
+
+&fpga {
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+	mdio-mux@54 {
+		compatible = "mdio-mux-mmioreg", "mdio-mux";
+		mdio-parent-bus = <&mdio0>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x54 1>;    /* BRDCFG4 */
+		mux-mask = <0xe0>; /* EMI1 */
+
+		/* On-board RGMII1 PHY */
+		ls1046mdio0: mdio@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			rgmii_phy1: ethernet-phy@1 { /* MAC3 */
+				reg = <0x1>;
+			};
+		};
+
+		/* On-board RGMII2 PHY */
+		ls1046mdio1: mdio@1 {
+			reg = <0x20>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			rgmii_phy2: ethernet-phy@2 { /* MAC4 */
+				reg = <0x2>;
+			};
+		};
+
+		/* Slot 1 */
+		ls1046mdio_s1: mdio@2 {
+			reg = <0x40>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+
+			sgmii_phy_s1_p1: ethernet-phy@1c {
+				reg = <0x1c>;
+			};
+
+			sgmii_phy_s1_p2: ethernet-phy@1d {
+				reg = <0x1d>;
+			};
+
+			sgmii_phy_s1_p3: ethernet-phy@1e {
+				reg = <0x1e>;
+			};
+
+			sgmii_phy_s1_p4: ethernet-phy@1f {
+				reg = <0x1f>;
+			};
+		};
+
+		/* Slot 2 */
+		ls1046mdio_s2: mdio@3 {
+			reg = <0x60>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+
+			qsgmii_phy_s2_p1: ethernet-phy@8 {
+				reg = <0x8>;
+			};
+
+			qsgmii_phy_s2_p2: ethernet-phy@9 {
+				reg = <0x9>;
+			};
+
+			qsgmii_phy_s2_p3: ethernet-phy@a {
+				reg = <0xa>;
+			};
+
+			qsgmii_phy_s2_p4: ethernet-phy@b {
+				reg = <0xb>;
+			};
+		};
+
+		/* Slot 4 */
+		ls1046mdio_s4: mdio@5 {
+			reg = <0x80>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+
+			sgmii_phy_s4_p1: ethernet-phy@1c {
+				reg = <0x1c>;
+			};
+		};
+	};
+};

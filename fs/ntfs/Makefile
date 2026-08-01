@@ -1,15 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0
-# Rules for making the NTFS driver.
 
 obj-$(CONFIG_NTFS_FS) += ntfs.o
 
-ntfs-y := aops.o attrib.o collate.o compress.o debug.o dir.o file.o \
-	  index.o inode.o mft.o mst.o namei.o runlist.o super.o sysctl.o \
-	  unistr.o upcase.o
+ntfs-y := aops.o attrib.o collate.o dir.o file.o index.o inode.o \
+	  mft.o mst.o namei.o runlist.o super.o unistr.o attrlist.o ea.o \
+	  upcase.o bitmap.o lcnalloc.o logfile.o reparse.o compress.o \
+	  iomap.o debug.o sysctl.o object_id.o bdev-io.o
 
-ntfs-$(CONFIG_NTFS_RW) += bitmap.o lcnalloc.o logfile.o quota.o usnjrnl.o
-
-ccflags-y := -DNTFS_VERSION=\"2.1.32\"
-ccflags-$(CONFIG_NTFS_DEBUG)	+= -DDEBUG
-ccflags-$(CONFIG_NTFS_RW)	+= -DNTFS_RW
-
+ccflags-$(CONFIG_NTFS_DEBUG) += -DDEBUG

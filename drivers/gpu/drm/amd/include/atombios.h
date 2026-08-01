@@ -632,6 +632,13 @@ typedef struct _COMPUTE_MEMORY_CLOCK_PARAM_PARAMETERS_V2_2
   ULONG ulReserved;
 }COMPUTE_MEMORY_CLOCK_PARAM_PARAMETERS_V2_2;
 
+typedef struct _COMPUTE_MEMORY_CLOCK_PARAM_PARAMETERS_V2_3
+{
+  COMPUTE_MEMORY_ENGINE_PLL_PARAMETERS_V4 ulClock;
+  USHORT  usMclk_fcw_frac;                  //fractional divider of fcw = usSclk_fcw_frac/65536
+  USHORT  usMclk_fcw_int;                   //integer divider of fcwc
+}COMPUTE_MEMORY_CLOCK_PARAM_PARAMETERS_V2_3;
+
 //Input parameter of DynamicMemorySettingsTable
 //when ATOM_COMPUTE_CLOCK_FREQ.ulComputeClockFlag = COMPUTE_MEMORY_PLL_PARAM
 typedef struct _DYNAMICE_MEMORY_SETTINGS_PARAMETER
@@ -1980,9 +1987,9 @@ typedef struct _PIXEL_CLOCK_PARAMETERS_V6
 #define PIXEL_CLOCK_V6_MISC_HDMI_BPP_MASK           0x0c
 #define PIXEL_CLOCK_V6_MISC_HDMI_24BPP              0x00
 #define PIXEL_CLOCK_V6_MISC_HDMI_36BPP              0x04
-#define PIXEL_CLOCK_V6_MISC_HDMI_36BPP_V6           0x08    //for V6, the correct defintion for 36bpp should be 2 for 36bpp(2:1)
+#define PIXEL_CLOCK_V6_MISC_HDMI_36BPP_V6           0x08    //for V6, the correct definition for 36bpp should be 2 for 36bpp(2:1)
 #define PIXEL_CLOCK_V6_MISC_HDMI_30BPP              0x08
-#define PIXEL_CLOCK_V6_MISC_HDMI_30BPP_V6           0x04    //for V6, the correct defintion for 30bpp should be 1 for 36bpp(5:4)
+#define PIXEL_CLOCK_V6_MISC_HDMI_30BPP_V6           0x04    //for V6, the correct definition for 30bpp should be 1 for 36bpp(5:4)
 #define PIXEL_CLOCK_V6_MISC_HDMI_48BPP              0x0c
 #define PIXEL_CLOCK_V6_MISC_REF_DIV_SRC             0x10
 #define PIXEL_CLOCK_V6_MISC_GEN_DPREFCLK            0x40
@@ -3248,8 +3255,8 @@ ucMaxNBVoltageHigh:     Voltage regulator dependent PWM value. High 8 bits of  t
 ucMinNBVoltageHigh:     Voltage regulator dependent PWM value. High 8 bits of the value for the min voltage.Set this one to 0x00 if VC without PWM or no VC at all.
 
 
-usInterNBVoltageLow:    Voltage regulator dependent PWM value. The value makes the the voltage >=Min NB voltage but <=InterNBVoltageHigh. Set this to 0x0000 if VC without PWM or no VC at all.
-usInterNBVoltageHigh:   Voltage regulator dependent PWM value. The value makes the the voltage >=InterNBVoltageLow but <=Max NB voltage.Set this to 0x0000 if VC without PWM or no VC at all.
+usInterNBVoltageLow:    Voltage regulator dependent PWM value. The value makes the voltage >=Min NB voltage but <=InterNBVoltageHigh. Set this to 0x0000 if VC without PWM or no VC at all.
+usInterNBVoltageHigh:   Voltage regulator dependent PWM value. The value makes the voltage >=InterNBVoltageLow but <=Max NB voltage.Set this to 0x0000 if VC without PWM or no VC at all.
 */
 
 
@@ -4099,8 +4106,8 @@ typedef struct  _ATOM_LCD_MODE_CONTROL_CAP
 typedef struct _ATOM_FAKE_EDID_PATCH_RECORD
 {
   UCHAR ucRecordType;
-  UCHAR ucFakeEDIDLength;       // = 128 means EDID lenght is 128 bytes, otherwise the EDID length = ucFakeEDIDLength*128
-  UCHAR ucFakeEDIDString[1];    // This actually has ucFakeEdidLength elements.
+  UCHAR ucFakeEDIDLength;       // = 128 means EDID length is 128 bytes, otherwise the EDID length = ucFakeEDIDLength*128
+  UCHAR ucFakeEDIDString[];     // This actually has ucFakeEdidLength elements.
 } ATOM_FAKE_EDID_PATCH_RECORD;
 
 typedef struct  _ATOM_PANEL_RESOLUTION_PATCH_RECORD
@@ -4301,7 +4308,7 @@ typedef struct _ATOM_DPCD_INFO
 // note2: From RV770, the memory is more than 32bit addressable, so we will change
 //        ucTableFormatRevision=1,ucTableContentRevision=4, the strcuture remains
 //        exactly same as 1.1 and 1.2 (1.3 is never in use), but ulStartAddrUsedByFirmware
-//        (in offset to start of memory address) is KB aligned instead of byte aligend.
+//        (in offset to start of memory address) is KB aligned instead of byte aligned.
 // Note3:
 /* If we change usReserved to "usFBUsedbyDrvInKB", then to VBIOS this usFBUsedbyDrvInKB is a predefined, unchanged
 constant across VGA or non VGA adapter,
@@ -4379,7 +4386,7 @@ typedef struct _ATOM_GPIO_PIN_ASSIGNMENT
 typedef struct _ATOM_GPIO_PIN_LUT
 {
   ATOM_COMMON_TABLE_HEADER  sHeader;
-  ATOM_GPIO_PIN_ASSIGNMENT   asGPIO_Pin[1];
+  ATOM_GPIO_PIN_ASSIGNMENT   asGPIO_Pin[];
 }ATOM_GPIO_PIN_LUT;
 
 /****************************************************************************/
@@ -4506,7 +4513,7 @@ typedef struct  _ATOM_DISPLAY_OBJECT_PATH
   USHORT    usSize;                                        //the size of ATOM_DISPLAY_OBJECT_PATH
   USHORT    usConnObjectId;                                //Connector Object ID
   USHORT    usGPUObjectId;                                 //GPU ID
-  USHORT    usGraphicObjIds[1];                            //1st Encoder Obj source from GPU to last Graphic Obj destinate to connector.
+  USHORT    usGraphicObjIds[];                            //1st Encoder Obj source from GPU to last Graphic Obj destinate to connector.
 }ATOM_DISPLAY_OBJECT_PATH;
 
 typedef struct  _ATOM_DISPLAY_EXTERNAL_OBJECT_PATH
@@ -4523,7 +4530,7 @@ typedef struct _ATOM_DISPLAY_OBJECT_PATH_TABLE
   UCHAR                           ucNumOfDispPath;
   UCHAR                           ucVersion;
   UCHAR                           ucPadding[2];
-  ATOM_DISPLAY_OBJECT_PATH        asDispPath[1];
+  ATOM_DISPLAY_OBJECT_PATH        asDispPath[];
 }ATOM_DISPLAY_OBJECT_PATH_TABLE;
 
 typedef struct _ATOM_OBJECT                                //each object has this structure
@@ -4538,7 +4545,7 @@ typedef struct _ATOM_OBJECT_TABLE                         //Above 4 object table
 {
   UCHAR               ucNumberOfObjects;
   UCHAR               ucPadding[3];
-  ATOM_OBJECT         asObjects[1];
+  ATOM_OBJECT         asObjects[];
 }ATOM_OBJECT_TABLE;
 
 typedef struct _ATOM_SRC_DST_TABLE_FOR_ONE_OBJECT         //usSrcDstTableOffset pointing to this structure
@@ -4658,7 +4665,7 @@ typedef  struct _ATOM_EXTERNAL_DISPLAY_CONNECTION_INFO
   UCHAR                    Reserved[3];                           // for potential expansion
 }ATOM_EXTERNAL_DISPLAY_CONNECTION_INFO;
 
-//Related definitions, all records are differnt but they have a commond header
+//Related definitions, all records are different but they have a common header
 typedef struct _ATOM_COMMON_RECORD_HEADER
 {
   UCHAR               ucRecordType;                      //An emun to indicate the record type
@@ -4726,7 +4733,7 @@ typedef struct  _ATOM_CONNECTOR_DEVICE_TAG_RECORD
   ATOM_COMMON_RECORD_HEADER   sheader;
   UCHAR                       ucNumberOfDevice;
   UCHAR                       ucReserved;
-  ATOM_CONNECTOR_DEVICE_TAG   asDeviceTag[1];         //This Id is same as "ATOM_DEVICE_XXX_SUPPORT", 1 is only for allocation
+  ATOM_CONNECTOR_DEVICE_TAG   asDeviceTag[];	       //This Id is same as "ATOM_DEVICE_XXX_SUPPORT"
 }ATOM_CONNECTOR_DEVICE_TAG_RECORD;
 
 
@@ -4786,7 +4793,7 @@ typedef struct  _ATOM_OBJECT_GPIO_CNTL_RECORD
   ATOM_COMMON_RECORD_HEADER   sheader;
   UCHAR                       ucFlags;                // Future expnadibility
   UCHAR                       ucNumberOfPins;         // Number of GPIO pins used to control the object
-  ATOM_GPIO_PIN_CONTROL_PAIR  asGpio[1];              // the real gpio pin pair determined by number of pins ucNumberOfPins
+  ATOM_GPIO_PIN_CONTROL_PAIR  asGpio[];               // the real gpio pin pair determined by number of pins ucNumberOfPins
 }ATOM_OBJECT_GPIO_CNTL_RECORD;
 
 //Definitions for GPIO pin state
@@ -4975,7 +4982,7 @@ typedef struct  _ATOM_BRACKET_LAYOUT_RECORD
   UCHAR                       ucWidth;
   UCHAR                       ucConnNum;
   UCHAR                       ucReserved;
-  ATOM_CONNECTOR_LAYOUT_INFO  asConnInfo[1];
+  ATOM_CONNECTOR_LAYOUT_INFO  asConnInfo[];
 }ATOM_BRACKET_LAYOUT_RECORD;
 
 
@@ -5139,7 +5146,7 @@ typedef struct  _ATOM_I2C_VOLTAGE_OBJECT_V3
    UCHAR  ucVoltageControlOffset;
    UCHAR  ucVoltageControlFlag;              // Bit0: 0 - One byte data; 1 - Two byte data
    UCHAR  ulReserved[3];
-   VOLTAGE_LUT_ENTRY asVolI2cLut[1];         // end with 0xff
+   VOLTAGE_LUT_ENTRY asVolI2cLut[];         // end with 0xff
 }ATOM_I2C_VOLTAGE_OBJECT_V3;
 
 // ATOM_I2C_VOLTAGE_OBJECT_V3.ucVoltageControlFlag
@@ -5154,7 +5161,7 @@ typedef struct  _ATOM_GPIO_VOLTAGE_OBJECT_V3
    UCHAR  ucPhaseDelay;                      // phase delay in unit of micro second
    UCHAR  ucReserved;
    ULONG  ulGpioMaskVal;                     // GPIO Mask value
-   VOLTAGE_LUT_ENTRY_V2 asVolGpioLut[1];
+   VOLTAGE_LUT_ENTRY_V2 asVolGpioLut[];
 }ATOM_GPIO_VOLTAGE_OBJECT_V3;
 
 typedef struct  _ATOM_LEAKAGE_VOLTAGE_OBJECT_V3
@@ -5164,18 +5171,18 @@ typedef struct  _ATOM_LEAKAGE_VOLTAGE_OBJECT_V3
    UCHAR    ucLeakageEntryNum;               // indicate the entry number of LeakageId/Voltage Lut table
    UCHAR    ucReserved[2];
    ULONG    ulMaxVoltageLevel;
-   LEAKAGE_VOLTAGE_LUT_ENTRY_V2 asLeakageIdLut[1];
+   LEAKAGE_VOLTAGE_LUT_ENTRY_V2 asLeakageIdLut[];
 }ATOM_LEAKAGE_VOLTAGE_OBJECT_V3;
 
 
 typedef struct  _ATOM_SVID2_VOLTAGE_OBJECT_V3
 {
    ATOM_VOLTAGE_OBJECT_HEADER_V3 sHeader;    // voltage mode = VOLTAGE_OBJ_SVID2
-// 14:7 � PSI0_VID
-// 6 � PSI0_EN
-// 5 � PSI1
-// 4:2 � load line slope trim.
-// 1:0 � offset trim,
+// 14:7 - PSI0_VID
+// 6 - PSI0_EN
+// 5 - PSI1
+// 4:2 - load line slope trim.
+// 1:0 - offset trim,
    USHORT   usLoadLine_PSI;
 // GPU GPIO pin Id to SVID2 regulator VRHot pin. possible value 0~31. 0 means GPIO0, 31 means GPIO31
    UCHAR    ucSVDGpioId;     //0~31 indicate GPIO0~31
@@ -5629,7 +5636,9 @@ typedef struct  _ATOM_SMU_INFO_V2_1
 {
   ATOM_COMMON_TABLE_HEADER         asHeader;
   UCHAR ucSclkEntryNum;            // for potential future extend, indicate the number of ATOM_SCLK_FCW_RANGE_ENTRY_V1
-  UCHAR ucReserved[3];
+  UCHAR ucSMUVer;
+  UCHAR ucSharePowerSource;
+  UCHAR ucReserved;
   ATOM_SCLK_FCW_RANGE_ENTRY_V1     asSclkFcwRangeEntry[8];
 }ATOM_SMU_INFO_V2_1;
 
@@ -5648,6 +5657,22 @@ typedef struct  _ATOM_GFX_INFO_V2_1
   UCHAR max_texture_channel_caches;
 }ATOM_GFX_INFO_V2_1;
 
+typedef struct  _ATOM_GFX_INFO_V2_3
+{
+  ATOM_COMMON_TABLE_HEADER asHeader;
+  UCHAR GfxIpMinVer;
+  UCHAR GfxIpMajVer;
+  UCHAR max_shader_engines;
+  UCHAR max_tile_pipes;
+  UCHAR max_cu_per_sh;
+  UCHAR max_sh_per_se;
+  UCHAR max_backends_per_se;
+  UCHAR max_texture_channel_caches;
+  USHORT usHiLoLeakageThreshold;
+  USHORT usEdcDidtLoDpm7TableOffset; //offset of DPM7 low leakage table _ATOM_EDC_DIDT_TABLE_V1
+  USHORT usEdcDidtHiDpm7TableOffset; //offset of DPM7 high leakage table _ATOM_EDC_DIDT_TABLE_V1
+  USHORT usReserverd[3];
+}ATOM_GFX_INFO_V2_3;
 
 typedef struct _ATOM_POWER_SOURCE_OBJECT
 {
@@ -5992,7 +6017,7 @@ typedef struct _ATOM_INTEGRATED_SYSTEM_INFO_V1_7
 #define SYS_INFO_GPUCAPS__TMDSHDMI_COHERENT_SINGLEPLL_MODE                0x01
 #define SYS_INFO_GPUCAPS__DP_SINGLEPLL_MODE                               0x02
 #define SYS_INFO_GPUCAPS__DISABLE_AUX_MODE_DETECT                         0x08
-#define SYS_INFO_GPUCAPS__ENABEL_DFS_BYPASS                               0x10
+#define SYS_INFO_GPUCAPS__ENABLE_DFS_BYPASS                               0x10
 //ulGPUCapInfo[16]=1 indicate SMC firmware is able to support GNB fast resume function, so that driver can call SMC to program most of GNB register during resuming, from ML
 #define SYS_INFO_GPUCAPS__GNB_FAST_RESUME_CAPABLE                         0x00010000
 
@@ -6435,7 +6460,7 @@ typedef struct _ATOM_INTEGRATED_SYSTEM_INFO_V1_9
 
 // ulGPUCapInfo
 #define SYS_INFO_V1_9_GPUCAPSINFO_DISABLE_AUX_MODE_DETECT                         0x08
-#define SYS_INFO_V1_9_GPUCAPSINFO_ENABEL_DFS_BYPASS                               0x10
+#define SYS_INFO_V1_9_GPUCAPSINFO_ENABLE_DFS_BYPASS                               0x10
 //ulGPUCapInfo[16]=1 indicate SMC firmware is able to support GNB fast resume function, so that driver can call SMC to program most of GNB register during resuming, from ML
 #define SYS_INFO_V1_9_GPUCAPSINFO_GNB_FAST_RESUME_CAPABLE                         0x00010000
 //ulGPUCapInfo[18]=1 indicate the IOMMU is not available
@@ -6574,7 +6599,7 @@ typedef struct _ATOM_FUSION_SYSTEM_INFO_V3
 typedef struct _ATOM_I2C_DATA_RECORD
 {
   UCHAR         ucNunberOfBytes;                                              //Indicates how many bytes SW needs to write to the external ASIC for one block, besides to "Start" and "Stop"
-  UCHAR         ucI2CData[1];                                                 //I2C data in bytes, should be less than 16 bytes usually
+  UCHAR         ucI2CData[];                                                  //I2C data in bytes, should be less than 16 bytes usually
 }ATOM_I2C_DATA_RECORD;
 
 
@@ -6585,14 +6610,14 @@ typedef struct _ATOM_I2C_DEVICE_SETUP_INFO
   UCHAR                              ucSSChipID;             //SS chip being used
   UCHAR                              ucSSChipSlaveAddr;      //Slave Address to set up this SS chip
   UCHAR                           ucNumOfI2CDataRecords;  //number of data block
-  ATOM_I2C_DATA_RECORD            asI2CData[1];
+  ATOM_I2C_DATA_RECORD            asI2CData[];
 }ATOM_I2C_DEVICE_SETUP_INFO;
 
 //==========================================================================================
 typedef struct  _ATOM_ASIC_MVDD_INFO
 {
   ATOM_COMMON_TABLE_HEADER         sHeader;
-  ATOM_I2C_DEVICE_SETUP_INFO      asI2CSetup[1];
+  ATOM_I2C_DEVICE_SETUP_INFO      asI2CSetup[];
 }ATOM_ASIC_MVDD_INFO;
 
 //==========================================================================================
@@ -6654,7 +6679,7 @@ typedef struct _ATOM_ASIC_INTERNAL_SS_INFO
 typedef struct _ATOM_ASIC_INTERNAL_SS_INFO_V2
 {
   ATOM_COMMON_TABLE_HEADER         sHeader;
-  ATOM_ASIC_SS_ASSIGNMENT_V2        asSpreadSpectrum[1];      //this is point only.
+  ATOM_ASIC_SS_ASSIGNMENT_V2        asSpreadSpectrum[];      //this is point only.
 }ATOM_ASIC_INTERNAL_SS_INFO_V2;
 
 typedef struct _ATOM_ASIC_SS_ASSIGNMENT_V3
@@ -6676,7 +6701,7 @@ typedef struct _ATOM_ASIC_SS_ASSIGNMENT_V3
 typedef struct _ATOM_ASIC_INTERNAL_SS_INFO_V3
 {
   ATOM_COMMON_TABLE_HEADER         sHeader;
-  ATOM_ASIC_SS_ASSIGNMENT_V3        asSpreadSpectrum[1];      //this is pointer only.
+  ATOM_ASIC_SS_ASSIGNMENT_V3        asSpreadSpectrum[];      //this is pointer only.
 }ATOM_ASIC_INTERNAL_SS_INFO_V3;
 
 
@@ -7123,7 +7148,7 @@ typedef struct _ATOM_ASIC_INTERNAL_SS_INFO_V3
 #define GET_COMMAND_TABLE_COMMANDSET_REVISION(TABLE_HEADER_OFFSET) (((static_cast<ATOM_COMMON_TABLE_HEADER*>(TABLE_HEADER_OFFSET))->ucTableFormatRevision )&0x3F)
 #define GET_COMMAND_TABLE_PARAMETER_REVISION(TABLE_HEADER_OFFSET)  (((static_cast<ATOM_COMMON_TABLE_HEADER*>(TABLE_HEADER_OFFSET))->ucTableContentRevision)&0x3F)
 #else // not __cplusplus
-#define   GetIndexIntoMasterTable(MasterOrData, FieldName) (((char*)(&((ATOM_MASTER_LIST_OF_##MasterOrData##_TABLES*)0)->FieldName)-(char*)0)/sizeof(USHORT))
+#define   GetIndexIntoMasterTable(MasterOrData, FieldName) (offsetof(ATOM_MASTER_LIST_OF_##MasterOrData##_TABLES, FieldName) / sizeof(USHORT))
 
 #define GET_COMMAND_TABLE_COMMANDSET_REVISION(TABLE_HEADER_OFFSET) ((((ATOM_COMMON_TABLE_HEADER*)TABLE_HEADER_OFFSET)->ucTableFormatRevision)&0x3F)
 #define GET_COMMAND_TABLE_PARAMETER_REVISION(TABLE_HEADER_OFFSET)  ((((ATOM_COMMON_TABLE_HEADER*)TABLE_HEADER_OFFSET)->ucTableContentRevision)&0x3F)
@@ -9267,7 +9292,7 @@ typedef struct {
 
 typedef struct {
   VFCT_IMAGE_HEADER   VbiosHeader;
-  UCHAR   VbiosContent[1];
+  UCHAR   VbiosContent[];
 }GOP_VBIOS_CONTENT;
 
 typedef struct {

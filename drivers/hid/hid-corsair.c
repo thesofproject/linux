@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * HID driver for Corsair devices
  *
@@ -13,10 +14,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 #include <linux/hid.h>
@@ -301,7 +298,7 @@ static ssize_t k90_show_macro_mode(struct device *dev,
 		goto out;
 	}
 
-	ret = snprintf(buf, PAGE_SIZE, "%s\n", macro_mode);
+	ret = sysfs_emit(buf, "%s\n", macro_mode);
 out:
 	kfree(data);
 
@@ -370,7 +367,7 @@ static ssize_t k90_show_current_profile(struct device *dev,
 		goto out;
 	}
 
-	ret = snprintf(buf, PAGE_SIZE, "%d\n", current_profile);
+	ret = sysfs_emit(buf, "%d\n", current_profile);
 out:
 	kfree(data);
 
@@ -430,7 +427,7 @@ static int k90_init_backlight(struct hid_device *dev)
 	size_t name_sz;
 	char *name;
 
-	drvdata->backlight = kzalloc(sizeof(struct k90_led), GFP_KERNEL);
+	drvdata->backlight = kzalloc_obj(struct k90_led);
 	if (!drvdata->backlight) {
 		ret = -ENOMEM;
 		goto fail_backlight_alloc;
@@ -474,7 +471,7 @@ static int k90_init_macro_functions(struct hid_device *dev)
 	size_t name_sz;
 	char *name;
 
-	k90 = kzalloc(sizeof(struct k90_drvdata), GFP_KERNEL);
+	k90 = kzalloc_obj(struct k90_drvdata);
 	if (!k90) {
 		ret = -ENOMEM;
 		goto fail_drvdata;
@@ -556,7 +553,12 @@ static int corsair_probe(struct hid_device *dev, const struct hid_device_id *id)
 	int ret;
 	unsigned long quirks = id->driver_data;
 	struct corsair_drvdata *drvdata;
-	struct usb_interface *usbif = to_usb_interface(dev->dev.parent);
+	struct usb_interface *usbif;
+
+	if (!hid_is_usb(dev))
+		return -EINVAL;
+
+	usbif = to_usb_interface(dev->dev.parent);
 
 	drvdata = devm_kzalloc(&dev->dev, sizeof(struct corsair_drvdata),
 			       GFP_KERNEL);
@@ -688,8 +690,8 @@ static int corsair_input_mapping(struct hid_device *dev,
  * - USB ID 1b1c:1b3e, sold as Scimitar RGB Pro Gaming mouse
  */
 
-static __u8 *corsair_mouse_report_fixup(struct hid_device *hdev, __u8 *rdesc,
-        unsigned int *rsize)
+static const __u8 *corsair_mouse_report_fixup(struct hid_device *hdev,
+	__u8 *rdesc, unsigned int *rsize)
 {
 	struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
 

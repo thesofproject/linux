@@ -1,21 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2011 Realtek Corporation. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
- *
  ******************************************************************************/
-#define _HAL_SDIO_C_
 
 #include <drv_types.h>
-#include <rtw_debug.h>
 #include <hal_data.h>
 
 u8 rtw_hal_sdio_max_txoqt_free_space(struct adapter *padapter)
@@ -90,7 +80,6 @@ u32 rtw_hal_get_sdio_tx_max_length(struct adapter *padapter, u8 queue_idx)
 	struct dvobj_priv *pdvobjpriv = adapter_to_dvobj(padapter);
 	struct hal_com_data	*pHalData = GET_HAL_DATA(padapter);
 	u32 deviceId, max_len;
-
 
 	deviceId = ffaddr2deviceId(pdvobjpriv, queue_idx);
 	switch (deviceId) {

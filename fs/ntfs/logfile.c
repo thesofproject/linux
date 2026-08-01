@@ -1,45 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * logfile.c - NTFS kernel journal handling. Part of the Linux-NTFS project.
+ * NTFS kernel journal handling.
  *
  * Copyright (c) 2002-2007 Anton Altaparmakov
- *
- * This program/include file is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as published
- * by the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program/include file is distributed in the hope that it will be
- * useful, but WITHOUT ANY WARRANTY; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program (in the main directory of the Linux-NTFS
- * distribution in the file COPYING); if not, write to the Free Software
- * Foundation,Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifdef NTFS_RW
-
-#include <linux/types.h>
-#include <linux/fs.h>
-#include <linux/highmem.h>
-#include <linux/buffer_head.h>
-#include <linux/bitops.h>
-#include <linux/log2.h>
-#include <linux/bio.h>
+#include <linux/blkdev.h>
 
 #include "attrib.h"
-#include "aops.h"
-#include "debug.h"
 #include "logfile.h"
-#include "malloc.h"
-#include "volume.h"
 #include "ntfs.h"
 
-/**
+/*
  * ntfs_check_restart_page_header - check the page header for consistency
- * @vi:		$LogFile inode to which the restart page header belongs
+ * @vi:		LogFile inode to which the restart page header belongs
  * @rp:		restart page header to check
  * @pos:	position in @vi at which the restart page header resides
  *
@@ -50,7 +24,7 @@
  * require the full restart page.
  */
 static bool ntfs_check_restart_page_header(struct inode *vi,
-		RESTART_PAGE_HEADER *rp, s64 pos)
+		struct restart_page_header *rp, s64 pos)
 {
 	u32 logfile_system_page_size, logfile_log_page_size;
 	u16 ra_ofs, usa_count, usa_ofs, usa_end = 0;
@@ -68,7 +42,7 @@ static bool ntfs_check_restart_page_header(struct inode *vi,
 			logfile_system_page_size &
 			(logfile_system_page_size - 1) ||
 			!is_power_of_2(logfile_log_page_size)) {
-		ntfs_error(vi->i_sb, "$LogFile uses unsupported page size.");
+		ntfs_error(vi->i_sb, "LogFile uses unsupported page size.");
 		return false;
 	}
 	/*
@@ -76,17 +50,16 @@ static bool ntfs_check_restart_page_header(struct inode *vi,
 	 * size (2nd restart page).
 	 */
 	if (pos && pos != logfile_system_page_size) {
-		ntfs_error(vi->i_sb, "Found restart area in incorrect "
-				"position in $LogFile.");
+		ntfs_error(vi->i_sb, "Found restart area in incorrect position in LogFile.");
 		return false;
 	}
 	/* We only know how to handle version 1.1. */
-	if (sle16_to_cpu(rp->major_ver) != 1 ||
-			sle16_to_cpu(rp->minor_ver) != 1) {
-		ntfs_error(vi->i_sb, "$LogFile version %i.%i is not "
-				"supported.  (This driver supports version "
-				"1.1 only.)", (int)sle16_to_cpu(rp->major_ver),
-				(int)sle16_to_cpu(rp->minor_ver));
+	if (le16_to_cpu(rp->major_ver) != 1 ||
+	    le16_to_cpu(rp->minor_ver) != 1) {
+		ntfs_error(vi->i_sb,
+			"LogFile version %i.%i is not supported.  (This driver supports version 1.1 only.)",
+			(int)le16_to_cpu(rp->major_ver),
+			(int)le16_to_cpu(rp->minor_ver));
 		return false;
 	}
 	/*
@@ -100,17 +73,17 @@ static bool ntfs_check_restart_page_header(struct inode *vi,
 	/* Verify the size of the update sequence array. */
 	usa_count = 1 + (logfile_system_page_size >> NTFS_BLOCK_SIZE_BITS);
 	if (usa_count != le16_to_cpu(rp->usa_count)) {
-		ntfs_error(vi->i_sb, "$LogFile restart page specifies "
-				"inconsistent update sequence array count.");
+		ntfs_error(vi->i_sb,
+			"LogFile restart page specifies inconsistent update sequence array count.");
 		return false;
 	}
 	/* Verify the position of the update sequence array. */
 	usa_ofs = le16_to_cpu(rp->usa_ofs);
 	usa_end = usa_ofs + usa_count * sizeof(u16);
-	if (usa_ofs < sizeof(RESTART_PAGE_HEADER) ||
+	if (usa_ofs < sizeof(struct restart_page_header) ||
 			usa_end > NTFS_BLOCK_SIZE - sizeof(u16)) {
-		ntfs_error(vi->i_sb, "$LogFile restart page specifies "
-				"inconsistent update sequence array offset.");
+		ntfs_error(vi->i_sb,
+			"LogFile restart page specifies inconsistent update sequence array offset.");
 		return false;
 	}
 skip_usa_checks:
@@ -122,28 +95,28 @@ skip_usa_checks:
 	 */
 	ra_ofs = le16_to_cpu(rp->restart_area_offset);
 	if (ra_ofs & 7 || (have_usa ? ra_ofs < usa_end :
-			ra_ofs < sizeof(RESTART_PAGE_HEADER)) ||
+			ra_ofs < sizeof(struct restart_page_header)) ||
 			ra_ofs > logfile_system_page_size) {
-		ntfs_error(vi->i_sb, "$LogFile restart page specifies "
-				"inconsistent restart area offset.");
+		ntfs_error(vi->i_sb,
+			"LogFile restart page specifies inconsistent restart area offset.");
 		return false;
 	}
 	/*
 	 * Only restart pages modified by chkdsk are allowed to have chkdsk_lsn
 	 * set.
 	 */
-	if (!ntfs_is_chkd_record(rp->magic) && sle64_to_cpu(rp->chkdsk_lsn)) {
-		ntfs_error(vi->i_sb, "$LogFile restart page is not modified "
-				"by chkdsk but a chkdsk LSN is specified.");
+	if (!ntfs_is_chkd_record(rp->magic) && le64_to_cpu(rp->chkdsk_lsn)) {
+		ntfs_error(vi->i_sb,
+			"LogFile restart page is not modified by chkdsk but a chkdsk LSN is specified.");
 		return false;
 	}
 	ntfs_debug("Done.");
 	return true;
 }
 
-/**
+/*
  * ntfs_check_restart_area - check the restart area for consistency
- * @vi:		$LogFile inode to which the restart page belongs
+ * @vi:		LogFile inode to which the restart page belongs
  * @rp:		restart page whose restart area to check
  *
  * Check the restart area of the restart page @rp for consistency and return
@@ -155,25 +128,25 @@ skip_usa_checks:
  * This function only needs NTFS_BLOCK_SIZE bytes in @rp, i.e. it does not
  * require the full restart page.
  */
-static bool ntfs_check_restart_area(struct inode *vi, RESTART_PAGE_HEADER *rp)
+static bool ntfs_check_restart_area(struct inode *vi, struct restart_page_header *rp)
 {
 	u64 file_size;
-	RESTART_AREA *ra;
-	u16 ra_ofs, ra_len, ca_ofs;
+	struct restart_area *ra;
+	u32 ra_ofs, ra_len, ca_ofs;
 	u8 fs_bits;
 
 	ntfs_debug("Entering.");
 	ra_ofs = le16_to_cpu(rp->restart_area_offset);
-	ra = (RESTART_AREA*)((u8*)rp + ra_ofs);
+	ra = (struct restart_area *)((u8 *)rp + ra_ofs);
 	/*
 	 * Everything before ra->file_size must be before the first word
 	 * protected by an update sequence number.  This ensures that it is
 	 * safe to access ra->client_array_offset.
 	 */
-	if (ra_ofs + offsetof(RESTART_AREA, file_size) >
+	if (ra_ofs + offsetof(struct restart_area, file_size) >
 			NTFS_BLOCK_SIZE - sizeof(u16)) {
-		ntfs_error(vi->i_sb, "$LogFile restart area specifies "
-				"inconsistent file offset.");
+		ntfs_error(vi->i_sb,
+			"LogFile restart area specifies inconsistent file offset.");
 		return false;
 	}
 	/*
@@ -186,8 +159,8 @@ static bool ntfs_check_restart_area(struct inode *vi, RESTART_PAGE_HEADER *rp)
 	ca_ofs = le16_to_cpu(ra->client_array_offset);
 	if (((ca_ofs + 7) & ~7) != ca_ofs ||
 			ra_ofs + ca_ofs > NTFS_BLOCK_SIZE - sizeof(u16)) {
-		ntfs_error(vi->i_sb, "$LogFile restart area specifies "
-				"inconsistent client array offset.");
+		ntfs_error(vi->i_sb,
+			"LogFile restart area specifies inconsistent client array offset.");
 		return false;
 	}
 	/*
@@ -196,15 +169,13 @@ static bool ntfs_check_restart_area(struct inode *vi, RESTART_PAGE_HEADER *rp)
 	 * Also, the calculated length must not exceed the specified length.
 	 */
 	ra_len = ca_ofs + le16_to_cpu(ra->log_clients) *
-			sizeof(LOG_CLIENT_RECORD);
+			sizeof(struct log_client_record);
 	if (ra_ofs + ra_len > le32_to_cpu(rp->system_page_size) ||
 			ra_ofs + le16_to_cpu(ra->restart_area_length) >
 			le32_to_cpu(rp->system_page_size) ||
 			ra_len > le16_to_cpu(ra->restart_area_length)) {
-		ntfs_error(vi->i_sb, "$LogFile restart area is out of bounds "
-				"of the system page size specified by the "
-				"restart page header and/or the specified "
-				"restart area length is inconsistent.");
+		ntfs_error(vi->i_sb,
+			"LogFile restart area is out of bounds of the system page size specified by the restart page header and/or the specified restart area length is inconsistent.");
 		return false;
 	}
 	/*
@@ -218,46 +189,46 @@ static bool ntfs_check_restart_area(struct inode *vi, RESTART_PAGE_HEADER *rp)
 			(ra->client_in_use_list != LOGFILE_NO_CLIENT &&
 			le16_to_cpu(ra->client_in_use_list) >=
 			le16_to_cpu(ra->log_clients))) {
-		ntfs_error(vi->i_sb, "$LogFile restart area specifies "
-				"overflowing client free and/or in use lists.");
+		ntfs_error(vi->i_sb,
+			"LogFile restart area specifies overflowing client free and/or in use lists.");
 		return false;
 	}
 	/*
 	 * Check ra->seq_number_bits against ra->file_size for consistency.
 	 * We cannot just use ffs() because the file size is not a power of 2.
 	 */
-	file_size = (u64)sle64_to_cpu(ra->file_size);
+	file_size = le64_to_cpu(ra->file_size);
 	fs_bits = 0;
 	while (file_size) {
 		file_size >>= 1;
 		fs_bits++;
 	}
 	if (le32_to_cpu(ra->seq_number_bits) != 67 - fs_bits) {
-		ntfs_error(vi->i_sb, "$LogFile restart area specifies "
-				"inconsistent sequence number bits.");
+		ntfs_error(vi->i_sb,
+			"LogFile restart area specifies inconsistent sequence number bits.");
 		return false;
 	}
 	/* The log record header length must be a multiple of 8. */
 	if (((le16_to_cpu(ra->log_record_header_length) + 7) & ~7) !=
 			le16_to_cpu(ra->log_record_header_length)) {
-		ntfs_error(vi->i_sb, "$LogFile restart area specifies "
-				"inconsistent log record header length.");
+		ntfs_error(vi->i_sb,
+			"LogFile restart area specifies inconsistent log record header length.");
 		return false;
 	}
 	/* Dito for the log page data offset. */
 	if (((le16_to_cpu(ra->log_page_data_offset) + 7) & ~7) !=
 			le16_to_cpu(ra->log_page_data_offset)) {
-		ntfs_error(vi->i_sb, "$LogFile restart area specifies "
-				"inconsistent log page data offset.");
+		ntfs_error(vi->i_sb,
+			"LogFile restart area specifies inconsistent log page data offset.");
 		return false;
 	}
 	ntfs_debug("Done.");
 	return true;
 }
 
-/**
+/*
  * ntfs_check_log_client_array - check the log client array for consistency
- * @vi:		$LogFile inode to which the restart page belongs
+ * @vi:		LogFile inode to which the restart page belongs
  * @rp:		restart page whose log client array to check
  *
  * Check the log client array of the restart page @rp for consistency and
@@ -271,16 +242,16 @@ static bool ntfs_check_restart_area(struct inode *vi, RESTART_PAGE_HEADER *rp)
  * restart page and the page must be multi sector transfer deprotected.
  */
 static bool ntfs_check_log_client_array(struct inode *vi,
-		RESTART_PAGE_HEADER *rp)
+		struct restart_page_header *rp)
 {
-	RESTART_AREA *ra;
-	LOG_CLIENT_RECORD *ca, *cr;
+	struct restart_area *ra;
+	struct log_client_record *ca, *cr;
 	u16 nr_clients, idx;
 	bool in_free_list, idx_is_first;
 
 	ntfs_debug("Entering.");
-	ra = (RESTART_AREA*)((u8*)rp + le16_to_cpu(rp->restart_area_offset));
-	ca = (LOG_CLIENT_RECORD*)((u8*)ra +
+	ra = (struct restart_area *)((u8 *)rp + le16_to_cpu(rp->restart_area_offset));
+	ca = (struct log_client_record *)((u8 *)ra +
 			le16_to_cpu(ra->client_array_offset));
 	/*
 	 * Check the ra->client_free_list first and then check the
@@ -316,13 +287,13 @@ check_list:
 	ntfs_debug("Done.");
 	return true;
 err_out:
-	ntfs_error(vi->i_sb, "$LogFile log client array is corrupt.");
+	ntfs_error(vi->i_sb, "LogFile log client array is corrupt.");
 	return false;
 }
 
-/**
+/*
  * ntfs_check_and_load_restart_page - check the restart page for consistency
- * @vi:		$LogFile inode to which the restart page belongs
+ * @vi:		LogFile inode to which the restart page belongs
  * @rp:		restart page to check
  * @pos:	position in @vi at which the restart page resides
  * @wrp:	[OUT] copy of the multi sector transfer deprotected restart page
@@ -345,14 +316,14 @@ err_out:
  * The following error codes are defined:
  *	-EINVAL	- The restart page is inconsistent.
  *	-ENOMEM	- Not enough memory to load the restart page.
- *	-EIO	- Failed to reading from $LogFile.
+ *	-EIO	- Failed to reading from LogFile.
  */
 static int ntfs_check_and_load_restart_page(struct inode *vi,
-		RESTART_PAGE_HEADER *rp, s64 pos, RESTART_PAGE_HEADER **wrp,
-		LSN *lsn)
+		struct restart_page_header *rp, s64 pos, struct restart_page_header **wrp,
+		s64 *lsn)
 {
-	RESTART_AREA *ra;
-	RESTART_PAGE_HEADER *trp;
+	struct restart_area *ra;
+	struct restart_page_header *trp;
 	int size, err;
 
 	ntfs_debug("Entering.");
@@ -366,15 +337,14 @@ static int ntfs_check_and_load_restart_page(struct inode *vi,
 		/* Error output already done inside the function. */
 		return -EINVAL;
 	}
-	ra = (RESTART_AREA*)((u8*)rp + le16_to_cpu(rp->restart_area_offset));
+	ra = (struct restart_area *)((u8 *)rp + le16_to_cpu(rp->restart_area_offset));
 	/*
 	 * Allocate a buffer to store the whole restart page so we can multi
 	 * sector transfer deprotect it.
 	 */
-	trp = ntfs_malloc_nofs(le32_to_cpu(rp->system_page_size));
+	trp = kvzalloc(le32_to_cpu(rp->system_page_size), GFP_NOFS);
 	if (!trp) {
-		ntfs_error(vi->i_sb, "Failed to allocate memory for $LogFile "
-				"restart page buffer.");
+		ntfs_error(vi->i_sb, "Failed to allocate memory for LogFile restart page buffer.");
 		return -ENOMEM;
 	}
 	/*
@@ -387,7 +357,7 @@ static int ntfs_check_and_load_restart_page(struct inode *vi,
 		memcpy(trp, rp, le32_to_cpu(rp->system_page_size));
 	} else {
 		pgoff_t idx;
-		struct page *page;
+		struct folio *folio;
 		int have_read, to_read;
 
 		/* First copy what we already have in @rp. */
@@ -396,20 +366,19 @@ static int ntfs_check_and_load_restart_page(struct inode *vi,
 		have_read = size;
 		to_read = le32_to_cpu(rp->system_page_size) - size;
 		idx = (pos + size) >> PAGE_SHIFT;
-		BUG_ON((pos + size) & ~PAGE_MASK);
 		do {
-			page = ntfs_map_page(vi->i_mapping, idx);
-			if (IS_ERR(page)) {
-				ntfs_error(vi->i_sb, "Error mapping $LogFile "
-						"page (index %lu).", idx);
-				err = PTR_ERR(page);
+			folio = read_mapping_folio(vi->i_mapping, idx, NULL);
+			if (IS_ERR(folio)) {
+				ntfs_error(vi->i_sb, "Error mapping LogFile page (index %lu).",
+						idx);
+				err = PTR_ERR(folio);
 				if (err != -EIO && err != -ENOMEM)
 					err = -EIO;
 				goto err_out;
 			}
 			size = min_t(int, to_read, PAGE_SIZE);
-			memcpy((u8*)trp + have_read, page_address(page), size);
-			ntfs_unmap_page(page);
+			memcpy((u8 *)trp + have_read, folio_address(folio), size);
+			folio_put(folio);
 			have_read += size;
 			to_read -= size;
 			idx++;
@@ -419,19 +388,18 @@ static int ntfs_check_and_load_restart_page(struct inode *vi,
 	 * Perform the multi sector transfer deprotection on the buffer if the
 	 * restart page is protected.
 	 */
-	if ((!ntfs_is_chkd_record(trp->magic) || le16_to_cpu(trp->usa_count))
-			&& post_read_mst_fixup((NTFS_RECORD*)trp,
-			le32_to_cpu(rp->system_page_size))) {
+	if ((!ntfs_is_chkd_record(trp->magic) || le16_to_cpu(trp->usa_count)) &&
+	    post_read_mst_fixup((struct ntfs_record *)trp, le32_to_cpu(rp->system_page_size))) {
 		/*
-		 * A multi sector tranfer error was detected.  We only need to
+		 * A multi sector transfer error was detected.  We only need to
 		 * abort if the restart page contents exceed the multi sector
 		 * transfer fixup of the first sector.
 		 */
 		if (le16_to_cpu(rp->restart_area_offset) +
 				le16_to_cpu(ra->restart_area_length) >
 				NTFS_BLOCK_SIZE - sizeof(u16)) {
-			ntfs_error(vi->i_sb, "Multi sector transfer error "
-					"detected in $LogFile restart page.");
+			ntfs_error(vi->i_sb,
+				"Multi sector transfer error detected in LogFile restart page.");
 			err = -EINVAL;
 			goto err_out;
 		}
@@ -451,53 +419,53 @@ static int ntfs_check_and_load_restart_page(struct inode *vi,
 	}
 	if (lsn) {
 		if (ntfs_is_rstr_record(rp->magic))
-			*lsn = sle64_to_cpu(ra->current_lsn);
+			*lsn = le64_to_cpu(ra->current_lsn);
 		else /* if (ntfs_is_chkd_record(rp->magic)) */
-			*lsn = sle64_to_cpu(rp->chkdsk_lsn);
+			*lsn = le64_to_cpu(rp->chkdsk_lsn);
 	}
 	ntfs_debug("Done.");
 	if (wrp)
 		*wrp = trp;
 	else {
 err_out:
-		ntfs_free(trp);
+		kvfree(trp);
 	}
 	return err;
 }
 
-/**
+/*
  * ntfs_check_logfile - check the journal for consistency
- * @log_vi:	struct inode of loaded journal $LogFile to check
+ * @log_vi:	struct inode of loaded journal LogFile to check
  * @rp:		[OUT] on success this is a copy of the current restart page
  *
- * Check the $LogFile journal for consistency and return 'true' if it is
+ * Check the LogFile journal for consistency and return 'true' if it is
  * consistent and 'false' if not.  On success, the current restart page is
- * returned in *@rp.  Caller must call ntfs_free(*@rp) when finished with it.
+ * returned in *@rp.  Caller must call kvfree(*@rp) when finished with it.
  *
  * At present we only check the two restart pages and ignore the log record
  * pages.
  *
- * Note that the MstProtected flag is not set on the $LogFile inode and hence
+ * Note that the MstProtected flag is not set on the LogFile inode and hence
  * when reading pages they are not deprotected.  This is because we do not know
- * if the $LogFile was created on a system with a different page size to ours
+ * if the LogFile was created on a system with a different page size to ours
  * yet and mst deprotection would fail if our page size is smaller.
  */
-bool ntfs_check_logfile(struct inode *log_vi, RESTART_PAGE_HEADER **rp)
+bool ntfs_check_logfile(struct inode *log_vi, struct restart_page_header **rp)
 {
 	s64 size, pos;
-	LSN rstr1_lsn, rstr2_lsn;
-	ntfs_volume *vol = NTFS_SB(log_vi->i_sb);
+	s64 rstr1_lsn, rstr2_lsn;
+	struct ntfs_volume *vol = NTFS_SB(log_vi->i_sb);
 	struct address_space *mapping = log_vi->i_mapping;
-	struct page *page = NULL;
+	struct folio *folio = NULL;
 	u8 *kaddr = NULL;
-	RESTART_PAGE_HEADER *rstr1_ph = NULL;
-	RESTART_PAGE_HEADER *rstr2_ph = NULL;
-	int log_page_size, log_page_mask, err;
+	struct restart_page_header *rstr1_ph = NULL;
+	struct restart_page_header *rstr2_ph = NULL;
+	int log_page_size, err;
 	bool logfile_is_empty = true;
 	u8 log_page_bits;
 
 	ntfs_debug("Entering.");
-	/* An empty $LogFile must have been clean before it got emptied. */
+	/* An empty LogFile must have been clean before it got emptied. */
 	if (NVolLogFileEmpty(vol))
 		goto is_empty;
 	size = i_size_read(log_vi);
@@ -510,12 +478,11 @@ bool ntfs_check_logfile(struct inode *log_vi, RESTART_PAGE_HEADER **rp)
 	 * log page size if the page cache size is between the default log page
 	 * size and twice that.
 	 */
-	if (PAGE_SIZE >= DefaultLogPageSize && PAGE_SIZE <=
-			DefaultLogPageSize * 2)
+	if (DefaultLogPageSize <= PAGE_SIZE &&
+	    DefaultLogPageSize * 2 <= PAGE_SIZE)
 		log_page_size = DefaultLogPageSize;
 	else
 		log_page_size = PAGE_SIZE;
-	log_page_mask = log_page_size - 1;
 	/*
 	 * Use ntfs_ffs() instead of ffs() to enable the compiler to
 	 * optimize log_page_size and log_page_bits into constants.
@@ -528,7 +495,7 @@ bool ntfs_check_logfile(struct inode *log_vi, RESTART_PAGE_HEADER **rp)
 	 */
 	if (size < log_page_size * 2 || (size - log_page_size * 2) >>
 			log_page_bits < MinLogRecordPages) {
-		ntfs_error(vol->sb, "$LogFile is too small.");
+		ntfs_error(vol->sb, "LogFile is too small.");
 		return false;
 	}
 	/*
@@ -541,23 +508,26 @@ bool ntfs_check_logfile(struct inode *log_vi, RESTART_PAGE_HEADER **rp)
 	 */
 	for (pos = 0; pos < size; pos <<= 1) {
 		pgoff_t idx = pos >> PAGE_SHIFT;
-		if (!page || page->index != idx) {
-			if (page)
-				ntfs_unmap_page(page);
-			page = ntfs_map_page(mapping, idx);
-			if (IS_ERR(page)) {
-				ntfs_error(vol->sb, "Error mapping $LogFile "
-						"page (index %lu).", idx);
+
+		if (!folio || folio->index != idx) {
+			if (folio) {
+				kunmap_local(kaddr);
+				folio_put(folio);
+			}
+			folio = read_mapping_folio(mapping, idx, NULL);
+			if (IS_ERR(folio)) {
+				ntfs_error(vol->sb, "Error mapping LogFile page (index %lu).",
+						idx);
 				goto err_out;
 			}
 		}
-		kaddr = (u8*)page_address(page) + (pos & ~PAGE_MASK);
+		kaddr = (u8 *)kmap_local_folio(folio, 0) + (pos & ~PAGE_MASK);
 		/*
 		 * A non-empty block means the logfile is not empty while an
 		 * empty block after a non-empty block has been encountered
 		 * means we are done.
 		 */
-		if (!ntfs_is_empty_recordp((le32*)kaddr))
+		if (!ntfs_is_empty_recordp((__le32 *)kaddr))
 			logfile_is_empty = false;
 		else if (!logfile_is_empty)
 			break;
@@ -565,11 +535,11 @@ bool ntfs_check_logfile(struct inode *log_vi, RESTART_PAGE_HEADER **rp)
 		 * A log record page means there cannot be a restart page after
 		 * this so no need to continue searching.
 		 */
-		if (ntfs_is_rcrd_recordp((le32*)kaddr))
+		if (ntfs_is_rcrd_recordp((__le32 *)kaddr))
 			break;
 		/* If not a (modified by chkdsk) restart page, continue. */
-		if (!ntfs_is_rstr_recordp((le32*)kaddr) &&
-				!ntfs_is_chkd_recordp((le32*)kaddr)) {
+		if (!ntfs_is_rstr_recordp((__le32 *)kaddr) &&
+				!ntfs_is_chkd_recordp((__le32 *)kaddr)) {
 			if (!pos)
 				pos = NTFS_BLOCK_SIZE >> 1;
 			continue;
@@ -580,7 +550,7 @@ bool ntfs_check_logfile(struct inode *log_vi, RESTART_PAGE_HEADER **rp)
 		 * deprotected restart page.
 		 */
 		err = ntfs_check_and_load_restart_page(log_vi,
-				(RESTART_PAGE_HEADER*)kaddr, pos,
+				(struct restart_page_header *)kaddr, pos,
 				!rstr1_ph ? &rstr1_ph : &rstr2_ph,
 				!rstr1_ph ? &rstr1_lsn : &rstr2_lsn);
 		if (!err) {
@@ -604,25 +574,27 @@ bool ntfs_check_logfile(struct inode *log_vi, RESTART_PAGE_HEADER **rp)
 		 * find a valid one further in the file.
 		 */
 		if (err != -EINVAL) {
-			ntfs_unmap_page(page);
+			kunmap_local(kaddr);
+			folio_put(folio);
 			goto err_out;
 		}
 		/* Continue looking. */
 		if (!pos)
 			pos = NTFS_BLOCK_SIZE >> 1;
 	}
-	if (page)
-		ntfs_unmap_page(page);
+	if (folio) {
+		kunmap_local(kaddr);
+		folio_put(folio);
+	}
 	if (logfile_is_empty) {
 		NVolSetLogFileEmpty(vol);
 is_empty:
-		ntfs_debug("Done.  ($LogFile is empty.)");
+		ntfs_debug("Done.  (LogFile is empty.)");
 		return true;
 	}
 	if (!rstr1_ph) {
-		BUG_ON(rstr2_ph);
-		ntfs_error(vol->sb, "Did not find any restart pages in "
-				"$LogFile and it was not empty.");
+		ntfs_error(vol->sb,
+			"Did not find any restart pages in LogFile and it was not empty.");
 		return false;
 	}
 	/* If both restart pages were found, use the more recent one. */
@@ -632,15 +604,13 @@ is_empty:
 		 * Otherwise just throw it away.
 		 */
 		if (rstr2_lsn > rstr1_lsn) {
-			ntfs_debug("Using second restart page as it is more "
-					"recent.");
-			ntfs_free(rstr1_ph);
+			ntfs_debug("Using second restart page as it is more recent.");
+			kvfree(rstr1_ph);
 			rstr1_ph = rstr2_ph;
 			/* rstr1_lsn = rstr2_lsn; */
 		} else {
-			ntfs_debug("Using first restart page as it is more "
-					"recent.");
-			ntfs_free(rstr2_ph);
+			ntfs_debug("Using first restart page as it is more recent.");
+			kvfree(rstr2_ph);
 		}
 		rstr2_ph = NULL;
 	}
@@ -648,108 +618,51 @@ is_empty:
 	if (rp)
 		*rp = rstr1_ph;
 	else
-		ntfs_free(rstr1_ph);
+		kvfree(rstr1_ph);
 	ntfs_debug("Done.");
 	return true;
 err_out:
-	if (rstr1_ph)
-		ntfs_free(rstr1_ph);
+	kvfree(rstr1_ph);
 	return false;
 }
 
-/**
- * ntfs_is_logfile_clean - check in the journal if the volume is clean
- * @log_vi:	struct inode of loaded journal $LogFile to check
- * @rp:		copy of the current restart page
+/*
+ * ntfs_empty_logfile - empty the contents of the LogFile journal
+ * @log_vi:	struct inode of loaded journal LogFile to empty
  *
- * Analyze the $LogFile journal and return 'true' if it indicates the volume was
- * shutdown cleanly and 'false' if not.
- *
- * At present we only look at the two restart pages and ignore the log record
- * pages.  This is a little bit crude in that there will be a very small number
- * of cases where we think that a volume is dirty when in fact it is clean.
- * This should only affect volumes that have not been shutdown cleanly but did
- * not have any pending, non-check-pointed i/o, i.e. they were completely idle
- * at least for the five seconds preceding the unclean shutdown.
- *
- * This function assumes that the $LogFile journal has already been consistency
- * checked by a call to ntfs_check_logfile() and in particular if the $LogFile
- * is empty this function requires that NVolLogFileEmpty() is true otherwise an
- * empty volume will be reported as dirty.
- */
-bool ntfs_is_logfile_clean(struct inode *log_vi, const RESTART_PAGE_HEADER *rp)
-{
-	ntfs_volume *vol = NTFS_SB(log_vi->i_sb);
-	RESTART_AREA *ra;
-
-	ntfs_debug("Entering.");
-	/* An empty $LogFile must have been clean before it got emptied. */
-	if (NVolLogFileEmpty(vol)) {
-		ntfs_debug("Done.  ($LogFile is empty.)");
-		return true;
-	}
-	BUG_ON(!rp);
-	if (!ntfs_is_rstr_record(rp->magic) &&
-			!ntfs_is_chkd_record(rp->magic)) {
-		ntfs_error(vol->sb, "Restart page buffer is invalid.  This is "
-				"probably a bug in that the $LogFile should "
-				"have been consistency checked before calling "
-				"this function.");
-		return false;
-	}
-	ra = (RESTART_AREA*)((u8*)rp + le16_to_cpu(rp->restart_area_offset));
-	/*
-	 * If the $LogFile has active clients, i.e. it is open, and we do not
-	 * have the RESTART_VOLUME_IS_CLEAN bit set in the restart area flags,
-	 * we assume there was an unclean shutdown.
-	 */
-	if (ra->client_in_use_list != LOGFILE_NO_CLIENT &&
-			!(ra->flags & RESTART_VOLUME_IS_CLEAN)) {
-		ntfs_debug("Done.  $LogFile indicates a dirty shutdown.");
-		return false;
-	}
-	/* $LogFile indicates a clean shutdown. */
-	ntfs_debug("Done.  $LogFile indicates a clean shutdown.");
-	return true;
-}
-
-/**
- * ntfs_empty_logfile - empty the contents of the $LogFile journal
- * @log_vi:	struct inode of loaded journal $LogFile to empty
- *
- * Empty the contents of the $LogFile journal @log_vi and return 'true' on
+ * Empty the contents of the LogFile journal @log_vi and return 'true' on
  * success and 'false' on error.
  *
- * This function assumes that the $LogFile journal has already been consistency
+ * This function assumes that the LogFile journal has already been consistency
  * checked by a call to ntfs_check_logfile() and that ntfs_is_logfile_clean()
- * has been used to ensure that the $LogFile is clean.
+ * has been used to ensure that the LogFile is clean.
  */
 bool ntfs_empty_logfile(struct inode *log_vi)
 {
-	VCN vcn, end_vcn;
-	ntfs_inode *log_ni = NTFS_I(log_vi);
-	ntfs_volume *vol = log_ni->vol;
+	s64 vcn, end_vcn;
+	struct ntfs_inode *log_ni = NTFS_I(log_vi);
+	struct ntfs_volume *vol = log_ni->vol;
 	struct super_block *sb = vol->sb;
-	runlist_element *rl;
+	struct runlist_element *rl;
 	unsigned long flags;
-	unsigned block_size, block_size_bits;
 	int err;
 	bool should_wait = true;
+	char *empty_buf = NULL;
+	struct file_ra_state *ra = NULL;
 
 	ntfs_debug("Entering.");
 	if (NVolLogFileEmpty(vol)) {
 		ntfs_debug("Done.");
 		return true;
 	}
+
 	/*
 	 * We cannot use ntfs_attr_set() because we may be still in the middle
 	 * of a mount operation.  Thus we do the emptying by hand by first
-	 * zapping the page cache pages for the $LogFile/$DATA attribute and
+	 * zapping the page cache pages for the LogFile/DATA attribute and
 	 * then emptying each of the buffers in each of the clusters specified
 	 * by the runlist by hand.
 	 */
-	block_size = sb->s_blocksize;
-	block_size_bits = sb->s_blocksize_bits;
 	vcn = 0;
 	read_lock_irqsave(&log_ni->size_lock, flags);
 	end_vcn = (log_ni->initialized_size + vol->cluster_size_mask) >>
@@ -762,19 +675,30 @@ bool ntfs_empty_logfile(struct inode *log_vi)
 map_vcn:
 		err = ntfs_map_runlist_nolock(log_ni, vcn, NULL);
 		if (err) {
-			ntfs_error(sb, "Failed to map runlist fragment (error "
-					"%d).", -err);
+			ntfs_error(sb, "Failed to map runlist fragment (error %d).", -err);
 			goto err;
 		}
 		rl = log_ni->runlist.rl;
-		BUG_ON(!rl || vcn < rl->vcn || !rl->length);
 	}
 	/* Seek to the runlist element containing @vcn. */
 	while (rl->length && vcn >= rl[1].vcn)
 		rl++;
+
+	err = -ENOMEM;
+	empty_buf = kvzalloc(vol->cluster_size, GFP_NOFS);
+	if (!empty_buf)
+		goto err;
+
+	memset(empty_buf, 0xff, vol->cluster_size);
+
+	ra = kzalloc(sizeof(*ra), GFP_NOFS);
+	if (!ra)
+		goto err;
+
+	file_ra_state_init(ra, sb->s_bdev->bd_mapping);
 	do {
-		LCN lcn;
-		sector_t block, end_block;
+		s64 lcn;
+		loff_t start, end;
 		s64 len;
 
 		/*
@@ -784,6 +708,10 @@ map_vcn:
 		lcn = rl->lcn;
 		if (unlikely(lcn == LCN_RL_NOT_MAPPED)) {
 			vcn = rl->vcn;
+			kvfree(empty_buf);
+			empty_buf = NULL;
+			kfree(ra);
+			ra = NULL;
 			goto map_vcn;
 		}
 		/* If this run is not valid abort with an error. */
@@ -792,29 +720,23 @@ map_vcn:
 		/* Skip holes. */
 		if (lcn == LCN_HOLE)
 			continue;
-		block = lcn << vol->cluster_size_bits >> block_size_bits;
+		start = NTFS_CLU_TO_B(vol, lcn);
 		len = rl->length;
 		if (rl[1].vcn > end_vcn)
 			len = end_vcn - rl->vcn;
-		end_block = (lcn + len) << vol->cluster_size_bits >>
-				block_size_bits;
-		/* Iterate over the blocks in the run and empty them. */
-		do {
-			struct buffer_head *bh;
+		end = NTFS_CLU_TO_B(vol, lcn + len);
 
-			/* Obtain the buffer, possibly not uptodate. */
-			bh = sb_getblk(sb, block);
-			BUG_ON(!bh);
-			/* Setup buffer i/o submission. */
-			lock_buffer(bh);
-			bh->b_end_io = end_buffer_write_sync;
-			get_bh(bh);
-			/* Set the entire contents of the buffer to 0xff. */
-			memset(bh->b_data, -1, block_size);
-			if (!buffer_uptodate(bh))
-				set_buffer_uptodate(bh);
-			if (buffer_dirty(bh))
-				clear_buffer_dirty(bh);
+		page_cache_sync_readahead(sb->s_bdev->bd_mapping, ra, NULL,
+			start >> PAGE_SHIFT, (end - start) >> PAGE_SHIFT);
+
+		do {
+			err = ntfs_bdev_write(sb, empty_buf, start,
+						  vol->cluster_size);
+			if (err) {
+				ntfs_error(sb, "ntfs_dev_write failed, err : %d\n", err);
+				goto io_err;
+			}
+
 			/*
 			 * Submit the buffer and wait for i/o to complete but
 			 * only for the first buffer so we do not miss really
@@ -822,25 +744,19 @@ map_vcn:
 			 * completed ignore errors afterwards as we can assume
 			 * that if one buffer worked all of them will work.
 			 */
-			submit_bh(REQ_OP_WRITE, 0, bh);
 			if (should_wait) {
 				should_wait = false;
-				wait_on_buffer(bh);
-				if (unlikely(!buffer_uptodate(bh)))
+				err = filemap_write_and_wait_range(sb->s_bdev->bd_mapping,
+						start, start + vol->cluster_size);
+				if (err)
 					goto io_err;
 			}
-			brelse(bh);
-		} while (++block < end_block);
+			start += vol->cluster_size;
+		} while (start < end);
 	} while ((++rl)->vcn < end_vcn);
 	up_write(&log_ni->runlist.lock);
-	/*
-	 * Zap the pages again just in case any got instantiated whilst we were
-	 * emptying the blocks by hand.  FIXME: We may not have completed
-	 * writing to all the buffer heads yet so this may happen too early.
-	 * We really should use a kernel thread to do the emptying
-	 * asynchronously and then we can also set the volume dirty and output
-	 * an error message if emptying should fail.
-	 */
+	kvfree(empty_buf);
+	kfree(ra);
 	truncate_inode_pages(log_vi->i_mapping, 0);
 	/* Set the flag so we do not have to do it again on remount. */
 	NVolSetLogFileEmpty(vol);
@@ -855,10 +771,10 @@ dirty_err:
 	NVolSetErrors(vol);
 	err = -EIO;
 err:
+	kvfree(empty_buf);
+	kfree(ra);
 	up_write(&log_ni->runlist.lock);
-	ntfs_error(sb, "Failed to fill $LogFile with 0xff bytes (error %d).",
+	ntfs_error(sb, "Failed to fill LogFile with 0xff bytes (error %d).",
 			-err);
 	return false;
 }
-
-#endif /* NTFS_RW */

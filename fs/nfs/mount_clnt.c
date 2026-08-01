@@ -29,9 +29,8 @@
  */
 #define encode_dirpath_sz	(1 + XDR_QUADLEN(MNTPATHLEN))
 #define MNT_status_sz		(1)
-#define MNT_fhs_status_sz	(1)
 #define MNT_fhandle_sz		XDR_QUADLEN(NFS2_FHSIZE)
-#define MNT_fhandle3_sz		(1 + XDR_QUADLEN(NFS3_FHSIZE))
+#define MNT_fhandlev3_sz	XDR_QUADLEN(NFS3_FHSIZE)
 #define MNT_authflav3_sz	(1 + NFS_MAX_SECFLAVORS)
 
 /*
@@ -39,7 +38,7 @@
  */
 #define MNT_enc_dirpath_sz	encode_dirpath_sz
 #define MNT_dec_mountres_sz	(MNT_status_sz + MNT_fhandle_sz)
-#define MNT_dec_mountres3_sz	(MNT_status_sz + MNT_fhandle_sz + \
+#define MNT_dec_mountres3_sz	(MNT_status_sz + MNT_fhandlev3_sz + \
 				 MNT_authflav3_sz)
 
 /*
@@ -129,22 +128,19 @@ struct mountres {
 	rpc_authflavor_t *auth_flavors;
 };
 
-struct mnt_fhstatus {
-	u32 status;
-	struct nfs_fh *fh;
-};
-
 /**
  * nfs_mount - Obtain an NFS file handle for the given host and path
  * @info: pointer to mount request arguments
+ * @timeo: deciseconds the mount waits for a response before it retries
+ * @retrans: number of times the mount retries a request
  *
- * Uses default timeout parameters specified by underlying transport. On
- * successful return, the auth_flavs list and auth_flav_len will be populated
- * with the list from the server or a faked-up list if the server didn't
- * provide one.
+ * Uses timeout parameters specified by caller. On successful return, the
+ * auth_flavs list and auth_flav_len will be populated with the list from the
+ * server or a faked-up list if the server didn't provide one.
  */
-int nfs_mount(struct nfs_mount_request *info)
+int nfs_mount(struct nfs_mount_request *info, int timeo, int retrans)
 {
+	struct rpc_timeout mnt_timeout;
 	struct mountres	result = {
 		.fh		= info->fh,
 		.auth_count	= info->auth_flav_len,
@@ -157,12 +153,14 @@ int nfs_mount(struct nfs_mount_request *info)
 	struct rpc_create_args args = {
 		.net		= info->net,
 		.protocol	= info->protocol,
-		.address	= info->sap,
+		.address	= (struct sockaddr *)info->sap,
 		.addrsize	= info->salen,
+		.timeout	= &mnt_timeout,
 		.servername	= info->hostname,
 		.program	= &mnt_program,
 		.version	= info->version,
 		.authflavor	= RPC_AUTH_UNIX,
+		.cred		= current_cred(),
 	};
 	struct rpc_clnt		*mnt_clnt;
 	int			status;
@@ -177,6 +175,7 @@ int nfs_mount(struct nfs_mount_request *info)
 	if (info->noresvport)
 		args.flags |= RPC_CLNT_CREATE_NONPRIVPORT;
 
+	nfs_init_timeout_values(&mnt_timeout, info->protocol, timeo, retrans);
 	mnt_clnt = rpc_create(&args);
 	if (IS_ERR(mnt_clnt))
 		goto out_clnt_err;
@@ -222,73 +221,6 @@ out_mnt_err:
 	dprintk("NFS: MNT server returned result %d\n", result.errno);
 	status = result.errno;
 	goto out;
-}
-
-/**
- * nfs_umount - Notify a server that we have unmounted this export
- * @info: pointer to umount request arguments
- *
- * MOUNTPROC_UMNT is advisory, so we set a short timeout, and always
- * use UDP.
- */
-void nfs_umount(const struct nfs_mount_request *info)
-{
-	static const struct rpc_timeout nfs_umnt_timeout = {
-		.to_initval = 1 * HZ,
-		.to_maxval = 3 * HZ,
-		.to_retries = 2,
-	};
-	struct rpc_create_args args = {
-		.net		= info->net,
-		.protocol	= IPPROTO_UDP,
-		.address	= info->sap,
-		.addrsize	= info->salen,
-		.timeout	= &nfs_umnt_timeout,
-		.servername	= info->hostname,
-		.program	= &mnt_program,
-		.version	= info->version,
-		.authflavor	= RPC_AUTH_UNIX,
-		.flags		= RPC_CLNT_CREATE_NOPING,
-	};
-	struct rpc_message msg	= {
-		.rpc_argp	= info->dirpath,
-	};
-	struct rpc_clnt *clnt;
-	int status;
-
-	if (strlen(info->dirpath) > MNTPATHLEN)
-		return;
-
-	if (info->noresvport)
-		args.flags |= RPC_CLNT_CREATE_NONPRIVPORT;
-
-	clnt = rpc_create(&args);
-	if (IS_ERR(clnt))
-		goto out_clnt_err;
-
-	dprintk("NFS: sending UMNT request for %s:%s\n",
-		(info->hostname ? info->hostname : "server"), info->dirpath);
-
-	if (info->version == NFS_MNT3_VERSION)
-		msg.rpc_proc = &clnt->cl_procinfo[MOUNTPROC3_UMNT];
-	else
-		msg.rpc_proc = &clnt->cl_procinfo[MOUNTPROC_UMNT];
-
-	status = rpc_call_sync(clnt, &msg, 0);
-	rpc_shutdown_client(clnt);
-
-	if (unlikely(status < 0))
-		goto out_call_err;
-
-	return;
-
-out_clnt_err:
-	dprintk("NFS: failed to create UMNT RPC client, status=%ld\n",
-			PTR_ERR(clnt));
-	return;
-
-out_call_err:
-	dprintk("NFS: UMNT request failed, status=%d\n", status);
 }
 
 /*

@@ -1,17 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * IOMMU sysfs class support
  *
  * Copyright (C) 2014 Red Hat, Inc.  All rights reserved.
  *     Author: Alex Williamson <alex.williamson@redhat.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/device.h>
 #include <linux/iommu.h>
-#include <linux/module.h>
+#include <linux/init.h>
 #include <linux/slab.h>
 
 /*
@@ -22,25 +19,25 @@ static struct attribute *devices_attr[] = {
 	NULL,
 };
 
-static const struct attribute_group iommu_devices_attr_group = {
+static const struct attribute_group devices_attr_group = {
 	.name = "devices",
 	.attrs = devices_attr,
 };
 
-static const struct attribute_group *iommu_dev_groups[] = {
-	&iommu_devices_attr_group,
+static const struct attribute_group *dev_groups[] = {
+	&devices_attr_group,
 	NULL,
 };
 
-static void iommu_release_device(struct device *dev)
+static void release_device(struct device *dev)
 {
 	kfree(dev);
 }
 
-static struct class iommu_class = {
+static const struct class iommu_class = {
 	.name = "iommu",
-	.dev_release = iommu_release_device,
-	.dev_groups = iommu_dev_groups,
+	.dev_release = release_device,
+	.dev_groups = dev_groups,
 };
 
 static int __init iommu_dev_init(void)
@@ -62,7 +59,7 @@ int iommu_device_sysfs_add(struct iommu_device *iommu,
 	va_list vargs;
 	int ret;
 
-	iommu->dev = kzalloc(sizeof(*iommu->dev), GFP_KERNEL);
+	iommu->dev = kzalloc_obj(*iommu->dev);
 	if (!iommu->dev)
 		return -ENOMEM;
 
@@ -90,6 +87,7 @@ error:
 	put_device(iommu->dev);
 	return ret;
 }
+EXPORT_SYMBOL_GPL(iommu_device_sysfs_add);
 
 void iommu_device_sysfs_remove(struct iommu_device *iommu)
 {
@@ -97,6 +95,8 @@ void iommu_device_sysfs_remove(struct iommu_device *iommu)
 	device_unregister(iommu->dev);
 	iommu->dev = NULL;
 }
+EXPORT_SYMBOL_GPL(iommu_device_sysfs_remove);
+
 /*
  * IOMMU drivers can indicate a device is managed by a given IOMMU using
  * this interface.  A link to the device will be created in the "devices"
@@ -106,9 +106,6 @@ void iommu_device_sysfs_remove(struct iommu_device *iommu)
 int iommu_device_link(struct iommu_device *iommu, struct device *link)
 {
 	int ret;
-
-	if (!iommu || IS_ERR(iommu))
-		return -ENODEV;
 
 	ret = sysfs_add_link_to_group(&iommu->dev->kobj, "devices",
 				      &link->kobj, dev_name(link));
@@ -125,9 +122,6 @@ int iommu_device_link(struct iommu_device *iommu, struct device *link)
 
 void iommu_device_unlink(struct iommu_device *iommu, struct device *link)
 {
-	if (!iommu || IS_ERR(iommu))
-		return;
-
 	sysfs_remove_link(&link->kobj, "iommu");
 	sysfs_remove_link_from_group(&iommu->dev->kobj, "devices", dev_name(link));
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Interface for power-management for ppc64 compliant platform
  *
@@ -6,23 +7,11 @@
  *  Feb 2007
  *
  *  Copyright (C) 2007 IBM Corporation.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/kobject.h>
 #include <linux/string.h>
+#include <linux/sysfs.h>
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <asm/machdep.h>
@@ -34,7 +23,7 @@ unsigned long rtas_poweron_auto; /* default and normal state is 0 */
 static ssize_t auto_poweron_show(struct kobject *kobj,
 				 struct kobj_attribute *attr, char *buf)
 {
-        return sprintf(buf, "%lu\n", rtas_poweron_auto);
+	return sysfs_emit(buf, "%lu\n", rtas_poweron_auto);
 }
 
 static ssize_t auto_poweron_store(struct kobject *kobj,
@@ -63,7 +52,7 @@ static struct attribute *g[] = {
         NULL,
 };
 
-static struct attribute_group attr_group = {
+static const struct attribute_group attr_group = {
         .attrs = g,
 };
 

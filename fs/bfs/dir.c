@@ -2,8 +2,8 @@
 /*
  *	fs/bfs/dir.c
  *	BFS directory operations.
- *	Copyright (C) 1999,2000  Tigran Aivazian <tigran@veritas.com>
- *      Made endianness-clean by Andrew Stribblehill <ads@wompom.org> 2005
+ *	Copyright (C) 1999-2018  Tigran Aivazian <aivazian.tigran@gmail.com>
+ *  Made endianness-clean by Andrew Stribblehill <ads@wompom.org> 2005
  */
 
 #include <linux/time.h>
@@ -21,10 +21,9 @@
 #define dprintf(x...)
 #endif
 
-static int bfs_add_entry(struct inode *dir, const unsigned char *name,
-						int namelen, int ino);
+static int bfs_add_entry(struct inode *dir, const struct qstr *child, int ino);
 static struct buffer_head *bfs_find_entry(struct inode *dir,
-				const unsigned char *name, int namelen,
+				const struct qstr *child,
 				struct bfs_dirent **res_dir);
 
 static int bfs_readdir(struct file *f, struct dir_context *ctx)
@@ -36,7 +35,7 @@ static int bfs_readdir(struct file *f, struct dir_context *ctx)
 	int block;
 
 	if (ctx->pos & (BFS_DIRENT_SIZE - 1)) {
-		printf("Bad f_pos=%08lx for %s:%08lx\n",
+		printf("Bad f_pos=%08lx for %s:%08llx\n",
 					(unsigned long)ctx->pos,
 					dir->i_sb->s_id, dir->i_ino);
 		return -EINVAL;
@@ -69,15 +68,22 @@ static int bfs_readdir(struct file *f, struct dir_context *ctx)
 	return 0;
 }
 
+static int bfs_fsync(struct file *file, loff_t start, loff_t end, int datasync)
+{
+	return mmb_fsync(file,
+			&BFS_I(file->f_mapping->host)->i_metadata_bhs,
+			start, end, datasync);
+}
+
 const struct file_operations bfs_dir_operations = {
 	.read		= generic_read_dir,
 	.iterate_shared	= bfs_readdir,
-	.fsync		= generic_file_fsync,
+	.fsync		= bfs_fsync,
 	.llseek		= generic_file_llseek,
 };
 
-static int bfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
-						bool excl)
+static int bfs_create(struct mnt_idmap *idmap, struct inode *dir,
+		      struct dentry *dentry, umode_t mode, bool excl)
 {
 	int err;
 	struct inode *inode;
@@ -97,8 +103,8 @@ static int bfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 	}
 	set_bit(ino, info->si_imap);
 	info->si_freei--;
-	inode_init_owner(inode, dir, mode);
-	inode->i_mtime = inode->i_atime = inode->i_ctime = current_time(inode);
+	inode_init_owner(&nop_mnt_idmap, inode, dir, mode);
+	simple_inode_init_ts(inode);
 	inode->i_blocks = 0;
 	inode->i_op = &bfs_file_inops;
 	inode->i_fop = &bfs_file_operations;
@@ -111,8 +117,7 @@ static int bfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
         mark_inode_dirty(inode);
 	bfs_dump_imap("create", s);
 
-	err = bfs_add_entry(dir, dentry->d_name.name, dentry->d_name.len,
-							inode->i_ino);
+	err = bfs_add_entry(dir, &dentry->d_name, inode->i_ino);
 	if (err) {
 		inode_dec_link_count(inode);
 		mutex_unlock(&info->bfs_lock);
@@ -136,19 +141,14 @@ static struct dentry *bfs_lookup(struct inode *dir, struct dentry *dentry,
 		return ERR_PTR(-ENAMETOOLONG);
 
 	mutex_lock(&info->bfs_lock);
-	bh = bfs_find_entry(dir, dentry->d_name.name, dentry->d_name.len, &de);
+	bh = bfs_find_entry(dir, &dentry->d_name, &de);
 	if (bh) {
 		unsigned long ino = (unsigned long)le16_to_cpu(de->ino);
 		brelse(bh);
 		inode = bfs_iget(dir->i_sb, ino);
-		if (IS_ERR(inode)) {
-			mutex_unlock(&info->bfs_lock);
-			return ERR_CAST(inode);
-		}
 	}
 	mutex_unlock(&info->bfs_lock);
-	d_add(dentry, inode);
-	return NULL;
+	return d_splice_alias(inode, dentry);
 }
 
 static int bfs_link(struct dentry *old, struct inode *dir,
@@ -159,14 +159,13 @@ static int bfs_link(struct dentry *old, struct inode *dir,
 	int err;
 
 	mutex_lock(&info->bfs_lock);
-	err = bfs_add_entry(dir, new->d_name.name, new->d_name.len,
-							inode->i_ino);
+	err = bfs_add_entry(dir, &new->d_name, inode->i_ino);
 	if (err) {
 		mutex_unlock(&info->bfs_lock);
 		return err;
 	}
 	inc_nlink(inode);
-	inode->i_ctime = current_time(inode);
+	inode_set_ctime_current(inode);
 	mark_inode_dirty(inode);
 	ihold(inode);
 	d_instantiate(new, inode);
@@ -183,21 +182,21 @@ static int bfs_unlink(struct inode *dir, struct dentry *dentry)
 	struct bfs_sb_info *info = BFS_SB(inode->i_sb);
 
 	mutex_lock(&info->bfs_lock);
-	bh = bfs_find_entry(dir, dentry->d_name.name, dentry->d_name.len, &de);
+	bh = bfs_find_entry(dir, &dentry->d_name, &de);
 	if (!bh || (le16_to_cpu(de->ino) != inode->i_ino))
 		goto out_brelse;
 
 	if (!inode->i_nlink) {
-		printf("unlinking non-existent file %s:%lu (nlink=%d)\n",
+		printf("unlinking non-existent file %s:%llu (nlink=%d)\n",
 					inode->i_sb->s_id, inode->i_ino,
 					inode->i_nlink);
 		set_nlink(inode, 1);
 	}
 	de->ino = 0;
-	mark_buffer_dirty_inode(bh, dir);
-	dir->i_ctime = dir->i_mtime = current_time(dir);
+	mmb_mark_buffer_dirty(bh, &BFS_I(dir)->i_metadata_bhs);
+	inode_set_mtime_to_ts(dir, inode_set_ctime_current(dir));
 	mark_inode_dirty(dir);
-	inode->i_ctime = dir->i_ctime;
+	inode_set_ctime_to_ts(inode, inode_get_ctime(dir));
 	inode_dec_link_count(inode);
 	error = 0;
 
@@ -207,9 +206,9 @@ out_brelse:
 	return error;
 }
 
-static int bfs_rename(struct inode *old_dir, struct dentry *old_dentry,
-		      struct inode *new_dir, struct dentry *new_dentry,
-		      unsigned int flags)
+static int bfs_rename(struct mnt_idmap *idmap, struct inode *old_dir,
+		      struct dentry *old_dentry, struct inode *new_dir,
+		      struct dentry *new_dentry, unsigned int flags)
 {
 	struct inode *old_inode, *new_inode;
 	struct buffer_head *old_bh, *new_bh;
@@ -228,39 +227,33 @@ static int bfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	info = BFS_SB(old_inode->i_sb);
 
 	mutex_lock(&info->bfs_lock);
-	old_bh = bfs_find_entry(old_dir, 
-				old_dentry->d_name.name, 
-				old_dentry->d_name.len, &old_de);
+	old_bh = bfs_find_entry(old_dir, &old_dentry->d_name, &old_de);
 
 	if (!old_bh || (le16_to_cpu(old_de->ino) != old_inode->i_ino))
 		goto end_rename;
 
 	error = -EPERM;
 	new_inode = d_inode(new_dentry);
-	new_bh = bfs_find_entry(new_dir, 
-				new_dentry->d_name.name, 
-				new_dentry->d_name.len, &new_de);
+	new_bh = bfs_find_entry(new_dir, &new_dentry->d_name, &new_de);
 
 	if (new_bh && !new_inode) {
 		brelse(new_bh);
 		new_bh = NULL;
 	}
 	if (!new_bh) {
-		error = bfs_add_entry(new_dir, 
-					new_dentry->d_name.name,
-					new_dentry->d_name.len,
+		error = bfs_add_entry(new_dir, &new_dentry->d_name,
 					old_inode->i_ino);
 		if (error)
 			goto end_rename;
 	}
 	old_de->ino = 0;
-	old_dir->i_ctime = old_dir->i_mtime = current_time(old_dir);
+	inode_set_mtime_to_ts(old_dir, inode_set_ctime_current(old_dir));
 	mark_inode_dirty(old_dir);
 	if (new_inode) {
-		new_inode->i_ctime = current_time(new_inode);
+		inode_set_ctime_current(new_inode);
 		inode_dec_link_count(new_inode);
 	}
-	mark_buffer_dirty_inode(old_bh, old_dir);
+	mmb_mark_buffer_dirty(old_bh, &BFS_I(old_dir)->i_metadata_bhs);
 	error = 0;
 
 end_rename:
@@ -278,20 +271,16 @@ const struct inode_operations bfs_dir_inops = {
 	.rename			= bfs_rename,
 };
 
-static int bfs_add_entry(struct inode *dir, const unsigned char *name,
-							int namelen, int ino)
+static int bfs_add_entry(struct inode *dir, const struct qstr *child, int ino)
 {
+	const unsigned char *name = child->name;
+	int namelen = child->len;
 	struct buffer_head *bh;
 	struct bfs_dirent *de;
 	int block, sblock, eblock, off, pos;
 	int i;
 
 	dprintf("name=%s, namelen=%d\n", name, namelen);
-
-	if (!namelen)
-		return -ENOENT;
-	if (namelen > BFS_NAMELEN)
-		return -ENAMETOOLONG;
 
 	sblock = BFS_I(dir)->i_sblock;
 	eblock = BFS_I(dir)->i_eblock;
@@ -305,15 +294,17 @@ static int bfs_add_entry(struct inode *dir, const unsigned char *name,
 				pos = (block - sblock) * BFS_BSIZE + off;
 				if (pos >= dir->i_size) {
 					dir->i_size += BFS_DIRENT_SIZE;
-					dir->i_ctime = current_time(dir);
+					inode_set_ctime_current(dir);
 				}
-				dir->i_mtime = current_time(dir);
+				inode_set_mtime_to_ts(dir,
+						      inode_set_ctime_current(dir));
 				mark_inode_dirty(dir);
 				de->ino = cpu_to_le16((u16)ino);
 				for (i = 0; i < BFS_NAMELEN; i++)
 					de->name[i] =
 						(i < namelen) ? name[i] : 0;
-				mark_buffer_dirty_inode(bh, dir);
+				mmb_mark_buffer_dirty(bh,
+						&BFS_I(dir)->i_metadata_bhs);
 				brelse(bh);
 				return 0;
 			}
@@ -332,12 +323,14 @@ static inline int bfs_namecmp(int len, const unsigned char *name,
 }
 
 static struct buffer_head *bfs_find_entry(struct inode *dir,
-			const unsigned char *name, int namelen,
+			const struct qstr *child,
 			struct bfs_dirent **res_dir)
 {
 	unsigned long block = 0, offset = 0;
 	struct buffer_head *bh = NULL;
 	struct bfs_dirent *de;
+	const unsigned char *name = child->name;
+	int namelen = child->len;
 
 	*res_dir = NULL;
 	if (namelen > BFS_NAMELEN)

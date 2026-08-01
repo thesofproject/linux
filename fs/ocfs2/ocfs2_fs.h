@@ -1,25 +1,10 @@
-/* -*- mode: c; c-basic-offset: 8; -*-
- * vim: noexpandtab sw=8 ts=8 sts=0:
- *
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
  * ocfs2_fs.h
  *
  * On-disk structures for OCFS2.
  *
  * Copyright (C) 2002, 2004 Oracle.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License, version 2,  as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public
- * License along with this program; if not, write to the
- * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 021110-1307, USA.
  */
 
 #ifndef _OCFS2_FS_H
@@ -147,7 +132,7 @@
  * well as the name of the cluster being joined.
  * mount.ocfs2 must pass in a matching stack name.
  *
- * If not set, the classic stack will be used.  This is compatbile with
+ * If not set, the classic stack will be used.  This is compatible with
  * all older versions.
  */
 #define OCFS2_FEATURE_INCOMPAT_USERSPACE_STACK	0x0080
@@ -158,7 +143,7 @@
 /* Support for extended attributes */
 #define OCFS2_FEATURE_INCOMPAT_XATTR		0x0200
 
-/* Support for indexed directores */
+/* Support for indexed directories */
 #define OCFS2_FEATURE_INCOMPAT_INDEXED_DIRS	0x0400
 
 /* Metadata checksum and error correction */
@@ -171,7 +156,7 @@
 #define OCFS2_FEATURE_INCOMPAT_DISCONTIG_BG	0x2000
 
 /*
- * Incompat bit to indicate useable clusterinfo with stackflags for all
+ * Incompat bit to indicate usable clusterinfo with stackflags for all
  * cluster stacks (userspace adnd o2cb). If this bit is set,
  * INCOMPAT_USERSPACE_STACK becomes superfluous and thus should not be set.
  */
@@ -303,7 +288,7 @@
 #define OCFS2_MAX_SLOTS			255
 
 /* Slot map indicator for an empty slot */
-#define OCFS2_INVALID_SLOT		-1
+#define OCFS2_INVALID_SLOT		((u16)-1)
 
 #define OCFS2_VOL_UUID_LEN		16
 #define OCFS2_MAX_VOL_LABEL_LEN		64
@@ -339,8 +324,8 @@ struct ocfs2_system_inode_info {
 enum {
 	BAD_BLOCK_SYSTEM_INODE = 0,
 	GLOBAL_INODE_ALLOC_SYSTEM_INODE,
+#define OCFS2_FIRST_ONLINE_SYSTEM_INODE GLOBAL_INODE_ALLOC_SYSTEM_INODE
 	SLOT_MAP_SYSTEM_INODE,
-#define OCFS2_FIRST_ONLINE_SYSTEM_INODE SLOT_MAP_SYSTEM_INODE
 	HEARTBEAT_SYSTEM_INODE,
 	GLOBAL_BITMAP_SYSTEM_INODE,
 	USER_QUOTA_SYSTEM_INODE,
@@ -392,21 +377,6 @@ static struct ocfs2_system_inode_info ocfs2_system_inodes[NUM_SYSTEM_INODES] = {
 #define OCFS2_HB_GLOBAL			"heartbeat=global"
 
 /*
- * OCFS2 directory file types.  Only the low 3 bits are used.  The
- * other bits are reserved for now.
- */
-#define OCFS2_FT_UNKNOWN	0
-#define OCFS2_FT_REG_FILE	1
-#define OCFS2_FT_DIR		2
-#define OCFS2_FT_CHRDEV		3
-#define OCFS2_FT_BLKDEV		4
-#define OCFS2_FT_FIFO		5
-#define OCFS2_FT_SOCK		6
-#define OCFS2_FT_SYMLINK	7
-
-#define OCFS2_FT_MAX		8
-
-/*
  * OCFS2_DIR_PAD defines the directory entries boundaries
  *
  * NOTE: It must be a multiple of 4
@@ -423,17 +393,6 @@ static struct ocfs2_system_inode_info ocfs2_system_inodes[NUM_SYSTEM_INODES] = {
 #define	OCFS2_DX_LINK_MAX	((1U << 31) - 1U)
 #define	OCFS2_LINKS_HI_SHIFT	16
 #define	OCFS2_DX_ENTRIES_MAX	(0xffffffffU)
-
-#define S_SHIFT			12
-static unsigned char ocfs2_type_by_mode[S_IFMT >> S_SHIFT] = {
-	[S_IFREG >> S_SHIFT]  = OCFS2_FT_REG_FILE,
-	[S_IFDIR >> S_SHIFT]  = OCFS2_FT_DIR,
-	[S_IFCHR >> S_SHIFT]  = OCFS2_FT_CHRDEV,
-	[S_IFBLK >> S_SHIFT]  = OCFS2_FT_BLKDEV,
-	[S_IFIFO >> S_SHIFT]  = OCFS2_FT_FIFO,
-	[S_IFSOCK >> S_SHIFT] = OCFS2_FT_SOCK,
-	[S_IFLNK >> S_SHIFT]  = OCFS2_FT_SYMLINK,
-};
 
 
 /*
@@ -509,7 +468,8 @@ struct ocfs2_extent_list {
 	__le16 l_reserved1;
 	__le64 l_reserved2;		/* Pad to
 					   sizeof(ocfs2_extent_rec) */
-/*10*/	struct ocfs2_extent_rec l_recs[0];	/* Extent records */
+					/* Extent records */
+/*10*/	struct ocfs2_extent_rec l_recs[] __counted_by_le(l_count);
 };
 
 /*
@@ -523,7 +483,8 @@ struct ocfs2_chain_list {
 	__le16 cl_count;		/* Total chains in this list */
 	__le16 cl_next_free_rec;	/* Next unused chain slot */
 	__le64 cl_reserved1;
-/*10*/	struct ocfs2_chain_rec cl_recs[0];	/* Chain records */
+					/* Chain records */
+/*10*/	struct ocfs2_chain_rec cl_recs[] __counted_by_le(cl_count);
 };
 
 /*
@@ -535,7 +496,8 @@ struct ocfs2_truncate_log {
 /*00*/	__le16 tl_count;		/* Total records in this log */
 	__le16 tl_used;			/* Number of records in use */
 	__le32 tl_reserved1;
-/*08*/	struct ocfs2_truncate_rec tl_recs[0];	/* Truncate records */
+					/* Truncate records */
+/*08*/	struct ocfs2_truncate_rec tl_recs[] __counted_by_le(tl_count);
 };
 
 /*
@@ -568,7 +530,7 @@ struct ocfs2_extent_block
  * value -1 (0xFFFF) is OCFS2_INVALID_SLOT.  This marks a slot empty.
  */
 struct ocfs2_slot_map {
-/*00*/	__le16 sm_slots[0];
+/*00*/	DECLARE_FLEX_ARRAY(__le16, sm_slots);
 /*
  * Actual on-disk size is one block.  OCFS2_MAX_SLOTS is 255,
  * 255 * sizeof(__le16) == 512B, within the 512B block minimum blocksize.
@@ -589,7 +551,7 @@ struct ocfs2_extended_slot {
  * i_size.
  */
 struct ocfs2_slot_map_extended {
-/*00*/	struct ocfs2_extended_slot se_slots[0];
+/*00*/	DECLARE_FLEX_ARRAY(struct ocfs2_extended_slot, se_slots);
 /*
  * Actual size is i_size of the slot_map system file.  It should
  * match s_max_slots * sizeof(struct ocfs2_extended_slot)
@@ -655,7 +617,7 @@ struct ocfs2_super_block {
 	__le16 s_reserved0;
 	__le32 s_dx_seed[3];		/* seed[0-2] for dx dir hash.
 					 * s_uuid_hash serves as seed[3]. */
-/*C0*/  __le64 s_reserved2[15];		/* Fill out superblock */
+/*C8*/  __le64 s_reserved2[15];		/* Fill out superblock */
 /*140*/
 
 	/*
@@ -679,7 +641,7 @@ struct ocfs2_local_alloc
 	__le16 la_size;		/* Size of included bitmap, in bytes */
 	__le16 la_reserved1;
 	__le64 la_reserved2;
-/*10*/	__u8   la_bitmap[0];
+/*10*/	__u8   la_bitmap[] __counted_by_le(la_size);
 };
 
 /*
@@ -692,7 +654,7 @@ struct ocfs2_inline_data
 				 * for data, starting at id_data */
 	__le16	id_reserved0;
 	__le32	id_reserved1;
-	__u8	id_data[0];	/* Start of user data */
+	__u8	id_data[] __counted_by_le(id_count);	/* Start of user data */
 };
 
 /*
@@ -768,7 +730,7 @@ struct ocfs2_dinode {
 		struct ocfs2_extent_list	i_list;
 		struct ocfs2_truncate_log	i_dealloc;
 		struct ocfs2_inline_data	i_data;
-		__u8               		i_symlink[0];
+		DECLARE_FLEX_ARRAY(__u8,	i_symlink);
 	} id2;
 /* Actual on-disk size is one block */
 };
@@ -807,11 +769,11 @@ struct ocfs2_dir_block_trailer {
 						 * in this block. (unused) */
 /*10*/	__u8		db_signature[8];	/* Signature for verification */
 	__le64		db_reserved2;
-	__le64		db_free_next;		/* Next block in list (unused) */
-/*20*/	__le64		db_blkno;		/* Offset on disk, in blocks */
-	__le64		db_parent_dinode;	/* dinode which owns me, in
+/*20*/	__le64		db_free_next;		/* Next block in list (unused) */
+	__le64		db_blkno;		/* Offset on disk, in blocks */
+/*30*/	__le64		db_parent_dinode;	/* dinode which owns me, in
 						   blocks */
-/*30*/	struct ocfs2_block_check db_check;	/* Error checking */
+	struct ocfs2_block_check db_check;	/* Error checking */
 /*40*/
 };
 
@@ -837,9 +799,10 @@ struct ocfs2_dx_entry_list {
 					 * possible in de_entries */
 	__le16		de_num_used;	/* Current number of
 					 * de_entries entries */
-	struct	ocfs2_dx_entry		de_entries[0];	/* Indexed dir entries
-							 * in a packed array of
-							 * length de_num_used */
+					/* Indexed dir entries in a packed
+					 * array of length de_num_used.
+					 */
+	struct	ocfs2_dx_entry		de_entries[] __counted_by_le(de_count);
 };
 
 #define OCFS2_DX_FLAG_INLINE	0x01
@@ -924,7 +887,8 @@ struct ocfs2_group_desc
 	__le16	bg_free_bits_count;     /* Free bits count */
 	__le16   bg_chain;               /* What chain I am in. */
 /*10*/	__le32   bg_generation;
-	__le32	bg_reserved1;
+	__le16   bg_contig_free_bits;   /* max contig free bits length */
+	__le16   bg_reserved1;
 	__le64   bg_next_group;          /* Next group in my list, in
 					   blocks */
 /*20*/	__le64   bg_parent_dinode;       /* dinode which owns me, in
@@ -933,7 +897,7 @@ struct ocfs2_group_desc
 /*30*/	struct ocfs2_block_check bg_check;	/* Error checking */
 	__le64   bg_reserved2;
 /*40*/	union {
-		__u8    bg_bitmap[0];
+		DECLARE_FLEX_ARRAY(__u8, bg_bitmap);
 		struct {
 			/*
 			 * Block groups may be discontiguous when
@@ -974,7 +938,8 @@ struct ocfs2_refcount_list {
 	__le16 rl_used;		/* Current number of used records */
 	__le32 rl_reserved2;
 	__le64 rl_reserved1;	/* Pad to sizeof(ocfs2_refcount_record) */
-/*10*/	struct ocfs2_refcount_rec rl_recs[0];	/* Refcount records */
+				/* Refcount records */
+/*10*/	struct ocfs2_refcount_rec rl_recs[] __counted_by_le(rl_count);
 };
 
 
@@ -1060,7 +1025,8 @@ struct ocfs2_xattr_header {
 						    buckets.  A block uses
 						    xb_check and sets
 						    this field to zero.) */
-	struct ocfs2_xattr_entry xh_entries[0]; /* xattr entry list. */
+						/* xattr entry list. */
+	struct ocfs2_xattr_entry xh_entries[] __counted_by_le(xh_count);
 };
 
 /*
@@ -1123,7 +1089,7 @@ struct ocfs2_xattr_block {
 		struct ocfs2_xattr_header xb_header; /* xattr header if this
 							block contains xattr */
 		struct ocfs2_xattr_tree_root xb_root;/* xattr tree root if this
-							block cotains xattr
+							block contains xattr
 							tree. */
 	} xb_attrs;
 };
@@ -1246,7 +1212,7 @@ struct ocfs2_local_disk_dqinfo {
 /* Header of one chunk of a quota file */
 struct ocfs2_local_disk_chunk {
 	__le32 dqc_free;	/* Number of free entries in the bitmap */
-	__u8 dqc_bitmap[0];	/* Bitmap of entries in the corresponding
+	__u8 dqc_bitmap[];	/* Bitmap of entries in the corresponding
 				 * chunk of quota file */
 };
 
@@ -1629,7 +1595,7 @@ static inline int ocfs2_sprintf_system_inode_name(char *buf, int len,
 static inline void ocfs2_set_de_type(struct ocfs2_dir_entry *de,
 				    umode_t mode)
 {
-	de->file_type = ocfs2_type_by_mode[(mode & S_IFMT)>>S_SHIFT];
+	de->file_type = fs_umode_to_ftype(mode);
 }
 
 static inline int ocfs2_gd_is_discontig(struct ocfs2_group_desc *gd)

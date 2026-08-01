@@ -5,7 +5,7 @@
  *
  * Copyright (C) 2006. Bob Jenkins (bob_jenkins@burtleburtle.net)
  *
- * http://burtleburtle.net/bob/hash/
+ * https://burtleburtle.net/bob/hash/
  *
  * These are the credits from Bob's sources:
  *
@@ -17,21 +17,21 @@
  * if SELF_TEST is defined.  You can use this free for any purpose.  It's in
  * the public domain.  It has no warranty.
  *
- * Copyright (C) 2009-2010 Jozsef Kadlecsik (kadlec@blackhole.kfki.hu)
+ * Copyright (C) 2009-2010 Jozsef Kadlecsik (kadlec@netfilter.org)
  *
  * I've modified Bob's hash to be useful in the Linux kernel, and
  * any bugs present are my fault.
  * Jozsef
  */
 #include <linux/bitops.h>
-#include <linux/unaligned/packed_struct.h>
+#include <linux/unaligned.h>
 
 /* Best hash sizes are of power of two */
 #define jhash_size(n)   ((u32)1<<(n))
 /* Mask the hash value, i.e (value & jhash_mask(n)) instead of (value % n) */
 #define jhash_mask(n)   (jhash_size(n)-1)
 
-/* __jhash_mix -- mix 3 32-bit values reversibly. */
+/* __jhash_mix - mix 3 32-bit values reversibly. */
 #define __jhash_mix(a, b, c)			\
 {						\
 	a -= c;  a ^= rol32(c, 4);  c += b;	\
@@ -60,7 +60,7 @@
 /* jhash - hash an arbitrary key
  * @k: sequence of bytes as key
  * @length: the length of the key
- * @initval: the previous hash, or an arbitray value
+ * @initval: the previous hash, or an arbitrary value
  *
  * The generic version, hashes an arbitrary sequence of bytes.
  * No alignment or length assumptions are made about the input key.
@@ -77,28 +77,29 @@ static inline u32 jhash(const void *key, u32 length, u32 initval)
 
 	/* All but the last block: affect some 32 bits of (a,b,c) */
 	while (length > 12) {
-		a += __get_unaligned_cpu32(k);
-		b += __get_unaligned_cpu32(k + 4);
-		c += __get_unaligned_cpu32(k + 8);
+		a += get_unaligned((u32 *)k);
+		b += get_unaligned((u32 *)(k + 4));
+		c += get_unaligned((u32 *)(k + 8));
 		__jhash_mix(a, b, c);
 		length -= 12;
 		k += 12;
 	}
 	/* Last block: affect all 32 bits of (c) */
 	switch (length) {
-	case 12: c += (u32)k[11]<<24;	/* fall through */
-	case 11: c += (u32)k[10]<<16;	/* fall through */
-	case 10: c += (u32)k[9]<<8;	/* fall through */
-	case 9:  c += k[8];		/* fall through */
-	case 8:  b += (u32)k[7]<<24;	/* fall through */
-	case 7:  b += (u32)k[6]<<16;	/* fall through */
-	case 6:  b += (u32)k[5]<<8;	/* fall through */
-	case 5:  b += k[4];		/* fall through */
-	case 4:  a += (u32)k[3]<<24;	/* fall through */
-	case 3:  a += (u32)k[2]<<16;	/* fall through */
-	case 2:  a += (u32)k[1]<<8;	/* fall through */
+	case 12: c += (u32)k[11]<<24;	fallthrough;
+	case 11: c += (u32)k[10]<<16;	fallthrough;
+	case 10: c += (u32)k[9]<<8;	fallthrough;
+	case 9:  c += k[8];		fallthrough;
+	case 8:  b += (u32)k[7]<<24;	fallthrough;
+	case 7:  b += (u32)k[6]<<16;	fallthrough;
+	case 6:  b += (u32)k[5]<<8;	fallthrough;
+	case 5:  b += k[4];		fallthrough;
+	case 4:  a += (u32)k[3]<<24;	fallthrough;
+	case 3:  a += (u32)k[2]<<16;	fallthrough;
+	case 2:  a += (u32)k[1]<<8;	fallthrough;
 	case 1:  a += k[0];
 		 __jhash_final(a, b, c);
+		 break;
 	case 0: /* Nothing left to add */
 		break;
 	}
@@ -109,7 +110,7 @@ static inline u32 jhash(const void *key, u32 length, u32 initval)
 /* jhash2 - hash an array of u32's
  * @k: the key which must be an array of u32's
  * @length: the number of u32's in the key
- * @initval: the previous hash, or an arbitray value
+ * @initval: the previous hash, or an arbitrary value
  *
  * Returns the hash value of the key.
  */
@@ -132,10 +133,11 @@ static inline u32 jhash2(const u32 *k, u32 length, u32 initval)
 
 	/* Handle the last 3 u32's */
 	switch (length) {
-	case 3: c += k[2];	/* fall through */
-	case 2: b += k[1];	/* fall through */
+	case 3: c += k[2];	fallthrough;
+	case 2: b += k[1];	fallthrough;
 	case 1: a += k[0];
 		__jhash_final(a, b, c);
+		break;
 	case 0:	/* Nothing left to add */
 		break;
 	}

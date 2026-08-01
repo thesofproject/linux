@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 	TDA8261 8PSK/QPSK tuner driver
 	Copyright (C) Manu Abraham (abraham.manu@gmail.com)
 
-	This program is free software; you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; either version 2 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
 
@@ -163,10 +151,9 @@ static void tda8261_release(struct dvb_frontend *fe)
 static const struct dvb_tuner_ops tda8261_ops = {
 
 	.info = {
-		.name		= "TDA8261",
-		.frequency_min	=  950000,
-		.frequency_max	= 2150000,
-		.frequency_step = 0
+		.name		   = "TDA8261",
+		.frequency_min_hz  =  950 * MHz,
+		.frequency_max_hz  = 2150 * MHz,
 	},
 
 	.set_params	= tda8261_set_params,
@@ -181,7 +168,7 @@ struct dvb_frontend *tda8261_attach(struct dvb_frontend *fe,
 {
 	struct tda8261_state *state = NULL;
 
-	if ((state = kzalloc(sizeof (struct tda8261_state), GFP_KERNEL)) == NULL)
+	if ((state = kzalloc_obj(struct tda8261_state)) == NULL)
 		goto exit;
 
 	state->config		= config;
@@ -190,7 +177,7 @@ struct dvb_frontend *tda8261_attach(struct dvb_frontend *fe,
 	fe->tuner_priv		= state;
 	fe->ops.tuner_ops	= tda8261_ops;
 
-	fe->ops.tuner_ops.info.frequency_step = div_tab[config->step_size];
+	fe->ops.tuner_ops.info.frequency_step_hz = div_tab[config->step_size] * kHz;
 
 	pr_info("%s: Attaching TDA8261 8PSK/QPSK tuner\n", __func__);
 
@@ -201,7 +188,7 @@ exit:
 	return NULL;
 }
 
-EXPORT_SYMBOL(tda8261_attach);
+EXPORT_SYMBOL_GPL(tda8261_attach);
 
 MODULE_AUTHOR("Manu Abraham");
 MODULE_DESCRIPTION("TDA8261 8PSK/QPSK Tuner");

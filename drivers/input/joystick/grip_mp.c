@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Driver for the Gravis Grip Multiport, a gamepad "hub" that
  *  connects up to four 9-pin digital gamepads/joysticks.
@@ -631,7 +632,8 @@ static int grip_connect(struct gameport *gameport, struct gameport_driver *drv)
 	struct grip_mp *grip;
 	int err;
 
-	if (!(grip = kzalloc(sizeof(struct grip_mp), GFP_KERNEL)))
+	grip = kzalloc_obj(*grip);
+	if (!grip)
 		return -ENOMEM;
 
 	grip->gameport = gameport;

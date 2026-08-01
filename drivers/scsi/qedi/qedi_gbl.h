@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * QLogic iSCSI Offload Driver
  * Copyright (c) 2016 Cavium Inc.
- *
- * This software is available under the terms of the GNU General Public License
- * (GPL) Version 2, available from the file COPYING in the main directory of
- * this source tree.
  */
 
 #ifndef _QEDI_GBL_H_
@@ -20,12 +17,12 @@ extern int qedi_do_not_recover;
 
 extern uint qedi_io_tracing;
 
-extern struct scsi_host_template qedi_host_template;
+extern const struct scsi_host_template qedi_host_template;
 extern struct iscsi_transport qedi_iscsi_transport;
 extern const struct qed_iscsi_ops *qedi_ops;
 extern const struct qedi_debugfs_ops qedi_debugfs_ops[];
 extern const struct file_operations qedi_dbg_fops[];
-extern struct device_attribute *qedi_shost_attrs[];
+extern const struct attribute_group *qedi_shost_groups[];
 
 int qedi_alloc_sq(struct qedi_ctx *qedi, struct qedi_endpoint *ep);
 void qedi_free_sq(struct qedi_ctx *qedi, struct qedi_endpoint *ep);
@@ -34,8 +31,7 @@ int qedi_send_iscsi_login(struct qedi_conn *qedi_conn,
 			  struct iscsi_task *task);
 int qedi_send_iscsi_logout(struct qedi_conn *qedi_conn,
 			   struct iscsi_task *task);
-int qedi_iscsi_abort_work(struct qedi_conn *qedi_conn,
-			  struct iscsi_task *mtask);
+int qedi_send_iscsi_tmf(struct qedi_conn *qedi_conn, struct iscsi_task *mtask);
 int qedi_send_iscsi_text(struct qedi_conn *qedi_conn,
 			 struct iscsi_task *task);
 int qedi_send_iscsi_nopout(struct qedi_conn *qedi_conn,
@@ -49,7 +45,6 @@ int qedi_iscsi_cleanup_task(struct iscsi_task *task,
 void qedi_iscsi_unmap_sg_list(struct qedi_cmd *cmd);
 void qedi_update_itt_map(struct qedi_ctx *qedi, u32 tid, u32 proto_itt,
 			 struct qedi_cmd *qedi_cmd);
-void qedi_get_proto_itt(struct qedi_ctx *qedi, u32 tid, u32 *proto_itt);
 void qedi_get_task_tid(struct qedi_ctx *qedi, u32 itt, int16_t *tid);
 void qedi_process_iscsi_error(struct qedi_endpoint *ep,
 			      struct iscsi_eqe_data *data);
@@ -71,8 +66,6 @@ void qedi_trace_io(struct qedi_ctx *qedi, struct iscsi_task *task,
 int qedi_alloc_id(struct qedi_portid_tbl *id_tbl, u16 id);
 u16 qedi_alloc_new_id(struct qedi_portid_tbl *id_tbl);
 void qedi_free_id(struct qedi_portid_tbl *id_tbl, u16 id);
-int qedi_create_sysfs_ctx_attr(struct qedi_ctx *qedi);
-void qedi_remove_sysfs_ctx_attr(struct qedi_ctx *qedi);
 void qedi_clearsq(struct qedi_ctx *qedi,
 		  struct qedi_conn *qedi_conn,
 		  struct iscsi_task *task);

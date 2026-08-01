@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Core driver for the pin config portions of the pin control subsystem
  *
@@ -5,22 +6,21 @@
  * Written on behalf of Linaro for ST-Ericsson
  *
  * Author: Linus Walleij <linus.walleij@linaro.org>
- *
- * License terms: GNU General Public License (GPL) version 2
  */
 #define pr_fmt(fmt) "pinconfig core: " fmt
 
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/device.h>
-#include <linux/slab.h>
+#include <linux/array_size.h>
 #include <linux/debugfs.h>
+#include <linux/device.h>
+#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/seq_file.h>
-#include <linux/uaccess.h>
+#include <linux/slab.h>
+
 #include <linux/pinctrl/machine.h>
-#include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinconf.h>
+#include <linux/pinctrl/pinctrl.h>
+
 #include "core.h"
 #include "pinconf.h"
 
@@ -55,7 +55,7 @@ int pinconf_validate_map(const struct pinctrl_map *map, int i)
 	return 0;
 }
 
-int pin_config_get_for_pin(struct pinctrl_dev *pctldev, unsigned pin,
+int pin_config_get_for_pin(struct pinctrl_dev *pctldev, unsigned int pin,
 			   unsigned long *config)
 {
 	const struct pinconf_ops *ops = pctldev->desc->confops;
@@ -199,7 +199,7 @@ int pinconf_apply_setting(const struct pinctrl_setting *setting)
 	return 0;
 }
 
-int pinconf_set_config(struct pinctrl_dev *pctldev, unsigned pin,
+int pinconf_set_config(struct pinctrl_dev *pctldev, unsigned int pin,
 		       unsigned long *configs, size_t nconfigs)
 {
 	const struct pinconf_ops *ops;
@@ -214,7 +214,7 @@ int pinconf_set_config(struct pinctrl_dev *pctldev, unsigned pin,
 #ifdef CONFIG_DEBUG_FS
 
 static void pinconf_show_config(struct seq_file *s, struct pinctrl_dev *pctldev,
-		      unsigned long *configs, unsigned num_configs)
+				unsigned long *configs, unsigned int num_configs)
 {
 	const struct pinconf_ops *confops;
 	int i;
@@ -275,7 +275,7 @@ void pinconf_show_setting(struct seq_file *s,
 	case PIN_MAP_TYPE_CONFIGS_GROUP:
 		seq_printf(s, "group %s (%d)",
 			   pctlops->get_group_name(pctldev,
-					setting->data.configs.group_or_pin),
+						   setting->data.configs.group_or_pin),
 			   setting->data.configs.group_or_pin);
 		break;
 	default:
@@ -304,7 +304,7 @@ static void pinconf_dump_pin(struct pinctrl_dev *pctldev,
 static int pinconf_pins_show(struct seq_file *s, void *what)
 {
 	struct pinctrl_dev *pctldev = s->private;
-	unsigned i, pin;
+	unsigned int i, pin;
 
 	seq_puts(s, "Pin config settings per pin\n");
 	seq_puts(s, "Format: pin (name): configs\n");
@@ -333,7 +333,7 @@ static int pinconf_pins_show(struct seq_file *s, void *what)
 }
 
 static void pinconf_dump_group(struct pinctrl_dev *pctldev,
-			       struct seq_file *s, unsigned selector,
+			       struct seq_file *s, unsigned int selector,
 			       const char *gname)
 {
 	const struct pinconf_ops *ops = pctldev->desc->confops;
@@ -348,8 +348,13 @@ static int pinconf_groups_show(struct seq_file *s, void *what)
 {
 	struct pinctrl_dev *pctldev = s->private;
 	const struct pinctrl_ops *pctlops = pctldev->desc->pctlops;
-	unsigned ngroups = pctlops->get_groups_count(pctldev);
-	unsigned selector = 0;
+	unsigned int selector = 0;
+	unsigned int ngroups;
+
+	if (!pctlops->get_groups_count || !pctlops->get_group_name)
+		return 0;
+
+	ngroups = pctlops->get_groups_count(pctldev);
 
 	seq_puts(s, "Pin config settings per pin group\n");
 	seq_puts(s, "Format: group (name): configs\n");
@@ -366,258 +371,16 @@ static int pinconf_groups_show(struct seq_file *s, void *what)
 	return 0;
 }
 
-static int pinconf_pins_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, pinconf_pins_show, inode->i_private);
-}
-
-static int pinconf_groups_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, pinconf_groups_show, inode->i_private);
-}
-
-static const struct file_operations pinconf_pins_ops = {
-	.open		= pinconf_pins_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static const struct file_operations pinconf_groups_ops = {
-	.open		= pinconf_groups_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-#define MAX_NAME_LEN 15
-
-struct dbg_cfg {
-	enum pinctrl_map_type map_type;
-	char dev_name[MAX_NAME_LEN + 1];
-	char state_name[MAX_NAME_LEN + 1];
-	char pin_name[MAX_NAME_LEN + 1];
-};
-
-/*
- * Goal is to keep this structure as global in order to simply read the
- * pinconf-config file after a write to check config is as expected
- */
-static struct dbg_cfg pinconf_dbg_conf;
-
-/**
- * pinconf_dbg_config_print() - display the pinctrl config from the pinctrl
- * map, of the dev/pin/state that was last written to pinconf-config file.
- * @s: string filled in  with config description
- * @d: not used
- */
-static int pinconf_dbg_config_print(struct seq_file *s, void *d)
-{
-	struct pinctrl_maps *maps_node;
-	const struct pinctrl_map *map;
-	const struct pinctrl_map *found = NULL;
-	struct pinctrl_dev *pctldev;
-	struct dbg_cfg *dbg = &pinconf_dbg_conf;
-	int i;
-
-	mutex_lock(&pinctrl_maps_mutex);
-
-	/* Parse the pinctrl map and look for the elected pin/state */
-	for_each_maps(maps_node, i, map) {
-		if (map->type != dbg->map_type)
-			continue;
-		if (strcmp(map->dev_name, dbg->dev_name))
-			continue;
-		if (strcmp(map->name, dbg->state_name))
-			continue;
-
-		if (!strcmp(map->data.configs.group_or_pin, dbg->pin_name)) {
-			/* We found the right pin */
-			found = map;
-			break;
-		}
-	}
-
-	if (!found) {
-		seq_printf(s, "No config found for dev/state/pin, expected:\n");
-		seq_printf(s, "Searched dev:%s\n", dbg->dev_name);
-		seq_printf(s, "Searched state:%s\n", dbg->state_name);
-		seq_printf(s, "Searched pin:%s\n", dbg->pin_name);
-		seq_printf(s, "Use: modify config_pin <devname> "\
-				"<state> <pinname> <value>\n");
-		goto exit;
-	}
-
-	pctldev = get_pinctrl_dev_from_devname(found->ctrl_dev_name);
-	seq_printf(s, "Dev %s has config of %s in state %s:\n",
-		   dbg->dev_name, dbg->pin_name, dbg->state_name);
-	pinconf_show_config(s, pctldev, found->data.configs.configs,
-			    found->data.configs.num_configs);
-
-exit:
-	mutex_unlock(&pinctrl_maps_mutex);
-
-	return 0;
-}
-
-/**
- * pinconf_dbg_config_write() - modify the pinctrl config in the pinctrl
- * map, of a dev/pin/state entry based on user entries to pinconf-config
- * @user_buf: contains the modification request with expected format:
- *     modify <config> <devicename> <state> <name> <newvalue>
- * modify is literal string, alternatives like add/delete not supported yet
- * <config> is the configuration to be changed. Supported configs are
- *     "config_pin" or "config_group", alternatives like config_mux are not
- *     supported yet.
- * <devicename> <state> <name> are values that should match the pinctrl-maps
- * <newvalue> reflects the new config and is driver dependent
- */
-static ssize_t pinconf_dbg_config_write(struct file *file,
-	const char __user *user_buf, size_t count, loff_t *ppos)
-{
-	struct pinctrl_maps *maps_node;
-	const struct pinctrl_map *map;
-	const struct pinctrl_map *found = NULL;
-	struct pinctrl_dev *pctldev;
-	const struct pinconf_ops *confops = NULL;
-	struct dbg_cfg *dbg = &pinconf_dbg_conf;
-	const struct pinctrl_map_configs *configs;
-	char config[MAX_NAME_LEN + 1];
-	char buf[128];
-	char *b = &buf[0];
-	int buf_size;
-	char *token;
-	int i;
-
-	/* Get userspace string and assure termination */
-	buf_size = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, user_buf, buf_size))
-		return -EFAULT;
-	buf[buf_size] = 0;
-
-	/*
-	 * need to parse entry and extract parameters:
-	 * modify configs_pin devicename state pinname newvalue
-	 */
-
-	/* Get arg: 'modify' */
-	token = strsep(&b, " ");
-	if (!token)
-		return -EINVAL;
-	if (strcmp(token, "modify"))
-		return -EINVAL;
-
-	/*
-	 * Get arg type: "config_pin" and "config_group"
-	 *                types are supported so far
-	 */
-	token = strsep(&b, " ");
-	if (!token)
-		return -EINVAL;
-	if (!strcmp(token, "config_pin"))
-		dbg->map_type = PIN_MAP_TYPE_CONFIGS_PIN;
-	else if (!strcmp(token, "config_group"))
-		dbg->map_type = PIN_MAP_TYPE_CONFIGS_GROUP;
-	else
-		return -EINVAL;
-
-	/* get arg 'device_name' */
-	token = strsep(&b, " ");
-	if (!token)
-		return -EINVAL;
-	if (strlen(token) >= MAX_NAME_LEN)
-		return -EINVAL;
-	strncpy(dbg->dev_name, token, MAX_NAME_LEN);
-
-	/* get arg 'state_name' */
-	token = strsep(&b, " ");
-	if (!token)
-		return -EINVAL;
-	if (strlen(token) >= MAX_NAME_LEN)
-		return -EINVAL;
-	strncpy(dbg->state_name, token, MAX_NAME_LEN);
-
-	/* get arg 'pin_name' */
-	token = strsep(&b, " ");
-	if (!token)
-		return -EINVAL;
-	if (strlen(token) >= MAX_NAME_LEN)
-		return -EINVAL;
-	strncpy(dbg->pin_name, token, MAX_NAME_LEN);
-
-	/* get new_value of config' */
-	token = strsep(&b, " ");
-	if (!token)
-		return -EINVAL;
-	if (strlen(token) >= MAX_NAME_LEN)
-		return -EINVAL;
-	strncpy(config, token, MAX_NAME_LEN);
-
-	mutex_lock(&pinctrl_maps_mutex);
-
-	/* Parse the pinctrl map and look for the selected dev/state/pin */
-	for_each_maps(maps_node, i, map) {
-		if (strcmp(map->dev_name, dbg->dev_name))
-			continue;
-		if (map->type != dbg->map_type)
-			continue;
-		if (strcmp(map->name, dbg->state_name))
-			continue;
-
-		/*  we found the right pin / state, so overwrite config */
-		if (!strcmp(map->data.configs.group_or_pin, dbg->pin_name)) {
-			found = map;
-			break;
-		}
-	}
-
-	if (!found) {
-		count = -EINVAL;
-		goto exit;
-	}
-
-	pctldev = get_pinctrl_dev_from_devname(found->ctrl_dev_name);
-	if (pctldev)
-		confops = pctldev->desc->confops;
-
-	if (confops && confops->pin_config_dbg_parse_modify) {
-		configs = &found->data.configs;
-		for (i = 0; i < configs->num_configs; i++) {
-			confops->pin_config_dbg_parse_modify(pctldev,
-						     config,
-						     &configs->configs[i]);
-		}
-	}
-
-exit:
-	mutex_unlock(&pinctrl_maps_mutex);
-
-	return count;
-}
-
-static int pinconf_dbg_config_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, pinconf_dbg_config_print, inode->i_private);
-}
-
-static const struct file_operations pinconf_dbg_pinconfig_fops = {
-	.open = pinconf_dbg_config_open,
-	.write = pinconf_dbg_config_write,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
-	.owner = THIS_MODULE,
-};
+DEFINE_SHOW_ATTRIBUTE(pinconf_pins);
+DEFINE_SHOW_ATTRIBUTE(pinconf_groups);
 
 void pinconf_init_device_debugfs(struct dentry *devroot,
 			 struct pinctrl_dev *pctldev)
 {
-	debugfs_create_file("pinconf-pins", S_IFREG | S_IRUGO,
-			    devroot, pctldev, &pinconf_pins_ops);
-	debugfs_create_file("pinconf-groups", S_IFREG | S_IRUGO,
-			    devroot, pctldev, &pinconf_groups_ops);
-	debugfs_create_file("pinconf-config",  (S_IRUGO | S_IWUSR | S_IWGRP),
-			    devroot, pctldev, &pinconf_dbg_pinconfig_fops);
+	debugfs_create_file("pinconf-pins", 0444,
+			    devroot, pctldev, &pinconf_pins_fops);
+	debugfs_create_file("pinconf-groups", 0444,
+			    devroot, pctldev, &pinconf_groups_fops);
 }
 
 #endif

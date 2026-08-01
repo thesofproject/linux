@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Windfarm PowerMac thermal control. SMU based controls
  *
  * (c) Copyright 2005 Benjamin Herrenschmidt, IBM Corp.
  *                    <benh@kernel.crashing.org>
- *
- * Released under the term of the GNU GPL v2.
  */
 
 #include <linux/types.h>
@@ -15,7 +14,8 @@
 #include <linux/init.h>
 #include <linux/wait.h>
 #include <linux/completion.h>
-#include <asm/prom.h>
+#include <linux/of.h>
+
 #include <asm/machdep.h>
 #include <asm/io.h>
 #include <asm/sections.h>
@@ -95,7 +95,7 @@ static int smu_set_fan(int pwm, u8 id, u16 value)
 		return rc;
 	wait_for_completion(&comp);
 
-	/* Handle fallback (see coment above) */
+	/* Handle fallback (see comment above) */
 	if (cmd.status != 0 && smu_supports_new_fans_ops) {
 		printk(KERN_WARNING "windfarm: SMU failed new fan command "
 		       "falling back to old method\n");
@@ -162,7 +162,7 @@ static struct smu_fan_control *smu_fan_create(struct device_node *node,
 	const u32 *reg;
 	const char *l;
 
-	fct = kmalloc(sizeof(struct smu_fan_control), GFP_KERNEL);
+	fct = kmalloc_obj(struct smu_fan_control);
 	if (fct == NULL)
 		return NULL;
 	fct->ctrl.ops = &smu_fan_ops;
@@ -266,18 +266,17 @@ static int __init smu_controls_init(void)
 		return -ENODEV;
 
 	/* Look for RPM fans */
-	for (fans = NULL; (fans = of_get_next_child(smu, fans)) != NULL;)
-		if (!strcmp(fans->name, "rpm-fans") ||
+	for_each_child_of_node(smu, fans)
+		if (of_node_name_eq(fans, "rpm-fans") ||
 		    of_device_is_compatible(fans, "smu-rpm-fans"))
 			break;
-	for (fan = NULL;
-	     fans && (fan = of_get_next_child(fans, fan)) != NULL;) {
+	for_each_child_of_node(fans, fan) {
 		struct smu_fan_control *fct;
 
 		fct = smu_fan_create(fan, 0);
 		if (fct == NULL) {
 			printk(KERN_WARNING "windfarm: Failed to create SMU "
-			       "RPM fan %s\n", fan->name);
+			       "RPM fan %pOFn\n", fan);
 			continue;
 		}
 		list_add(&fct->link, &smu_fans);
@@ -286,17 +285,16 @@ static int __init smu_controls_init(void)
 
 
 	/* Look for PWM fans */
-	for (fans = NULL; (fans = of_get_next_child(smu, fans)) != NULL;)
-		if (!strcmp(fans->name, "pwm-fans"))
+	for_each_child_of_node(smu, fans)
+		if (of_node_name_eq(fans, "pwm-fans"))
 			break;
-	for (fan = NULL;
-	     fans && (fan = of_get_next_child(fans, fan)) != NULL;) {
+	for_each_child_of_node(fans, fan) {
 		struct smu_fan_control *fct;
 
 		fct = smu_fan_create(fan, 1);
 		if (fct == NULL) {
 			printk(KERN_WARNING "windfarm: Failed to create SMU "
-			       "PWM fan %s\n", fan->name);
+			       "PWM fan %pOFn\n", fan);
 			continue;
 		}
 		list_add(&fct->link, &smu_fans);

@@ -1,25 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2017 NXP Semiconductors.
  * Author: Marco Franchi <marco.franchi@nxp.com>
  *
  * Based on Panel Simple driver by Thierry Reding <treding@nvidia.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
  */
 
-#include <linux/backlight.h>
+#include <linux/delay.h>
+#include <linux/gpio/consumer.h>
+#include <linux/media-bus-format.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
-
-#include <drm/drmP.h>
-#include <drm/drm_crtc.h>
-#include <drm/drm_panel.h>
 
 #include <video/display_timing.h>
 #include <video/videomode.h>
+
+#include <drm/drm_crtc.h>
+#include <drm/drm_device.h>
+#include <drm/drm_panel.h>
 
 struct seiko_panel_desc {
 	const struct drm_display_mode *modes;
@@ -44,12 +44,10 @@ struct seiko_panel_desc {
 
 struct seiko_panel {
 	struct drm_panel base;
-	bool prepared;
-	bool enabled;
 	const struct seiko_panel_desc *desc;
-	struct backlight_device *backlight;
 	struct regulator *dvdd;
 	struct regulator *avdd;
+	struct gpio_desc *enable_gpio;
 };
 
 static inline struct seiko_panel *to_seiko_panel(struct drm_panel *panel)
@@ -57,10 +55,9 @@ static inline struct seiko_panel *to_seiko_panel(struct drm_panel *panel)
 	return container_of(panel, struct seiko_panel, base);
 }
 
-static int seiko_panel_get_fixed_modes(struct seiko_panel *panel)
+static int seiko_panel_get_fixed_modes(struct seiko_panel *panel,
+				       struct drm_connector *connector)
 {
-	struct drm_connector *connector = panel->base.connector;
-	struct drm_device *drm = panel->base.drm;
 	struct drm_display_mode *mode;
 	unsigned int i, num = 0;
 
@@ -72,9 +69,9 @@ static int seiko_panel_get_fixed_modes(struct seiko_panel *panel)
 		struct videomode vm;
 
 		videomode_from_timing(dt, &vm);
-		mode = drm_mode_create(drm);
+		mode = drm_mode_create(connector->dev);
 		if (!mode) {
-			dev_err(drm->dev, "failed to add mode %ux%u\n",
+			dev_err(panel->base.dev, "failed to add mode %ux%u\n",
 				dt->hactive.typ, dt->vactive.typ);
 			continue;
 		}
@@ -93,10 +90,11 @@ static int seiko_panel_get_fixed_modes(struct seiko_panel *panel)
 	for (i = 0; i < panel->desc->num_modes; i++) {
 		const struct drm_display_mode *m = &panel->desc->modes[i];
 
-		mode = drm_mode_duplicate(drm, m);
+		mode = drm_mode_duplicate(connector->dev, m);
 		if (!mode) {
-			dev_err(drm->dev, "failed to add mode %ux%u@%u\n",
-				m->hdisplay, m->vdisplay, m->vrefresh);
+			dev_err(panel->base.dev, "failed to add mode %ux%u@%u\n",
+				m->hdisplay, m->vdisplay,
+				drm_mode_vrefresh(m));
 			continue;
 		}
 
@@ -122,30 +120,11 @@ static int seiko_panel_get_fixed_modes(struct seiko_panel *panel)
 	return num;
 }
 
-static int seiko_panel_disable(struct drm_panel *panel)
-{
-	struct seiko_panel *p = to_seiko_panel(panel);
-
-	if (!p->enabled)
-		return 0;
-
-	if (p->backlight) {
-		p->backlight->props.power = FB_BLANK_POWERDOWN;
-		p->backlight->props.state |= BL_CORE_FBBLANK;
-		backlight_update_status(p->backlight);
-	}
-
-	p->enabled = false;
-
-	return 0;
-}
-
 static int seiko_panel_unprepare(struct drm_panel *panel)
 {
 	struct seiko_panel *p = to_seiko_panel(panel);
 
-	if (!p->prepared)
-		return 0;
+	gpiod_set_value_cansleep(p->enable_gpio, 0);
 
 	regulator_disable(p->avdd);
 
@@ -154,8 +133,6 @@ static int seiko_panel_unprepare(struct drm_panel *panel)
 
 	regulator_disable(p->dvdd);
 
-	p->prepared = false;
-
 	return 0;
 }
 
@@ -163,9 +140,6 @@ static int seiko_panel_prepare(struct drm_panel *panel)
 {
 	struct seiko_panel *p = to_seiko_panel(panel);
 	int err;
-
-	if (p->prepared)
-		return 0;
 
 	err = regulator_enable(p->dvdd);
 	if (err < 0) {
@@ -182,7 +156,7 @@ static int seiko_panel_prepare(struct drm_panel *panel)
 		goto disable_dvdd;
 	}
 
-	p->prepared = true;
+	gpiod_set_value_cansleep(p->enable_gpio, 1);
 
 	return 0;
 
@@ -191,30 +165,13 @@ disable_dvdd:
 	return err;
 }
 
-static int seiko_panel_enable(struct drm_panel *panel)
-{
-	struct seiko_panel *p = to_seiko_panel(panel);
-
-	if (p->enabled)
-		return 0;
-
-	if (p->backlight) {
-		p->backlight->props.state &= ~BL_CORE_FBBLANK;
-		p->backlight->props.power = FB_BLANK_UNBLANK;
-		backlight_update_status(p->backlight);
-	}
-
-	p->enabled = true;
-
-	return 0;
-}
-
-static int seiko_panel_get_modes(struct drm_panel *panel)
+static int seiko_panel_get_modes(struct drm_panel *panel,
+				 struct drm_connector *connector)
 {
 	struct seiko_panel *p = to_seiko_panel(panel);
 
 	/* add hard-coded panel modes */
-	return seiko_panel_get_fixed_modes(p);
+	return seiko_panel_get_fixed_modes(p, connector);
 }
 
 static int seiko_panel_get_timings(struct drm_panel *panel,
@@ -235,10 +192,8 @@ static int seiko_panel_get_timings(struct drm_panel *panel,
 }
 
 static const struct drm_panel_funcs seiko_panel_funcs = {
-	.disable = seiko_panel_disable,
 	.unprepare = seiko_panel_unprepare,
 	.prepare = seiko_panel_prepare,
-	.enable = seiko_panel_enable,
 	.get_modes = seiko_panel_get_modes,
 	.get_timings = seiko_panel_get_timings,
 };
@@ -246,16 +201,15 @@ static const struct drm_panel_funcs seiko_panel_funcs = {
 static int seiko_panel_probe(struct device *dev,
 					const struct seiko_panel_desc *desc)
 {
-	struct device_node *backlight;
 	struct seiko_panel *panel;
 	int err;
 
-	panel = devm_kzalloc(dev, sizeof(*panel), GFP_KERNEL);
-	if (!panel)
-		return -ENOMEM;
+	panel = devm_drm_panel_alloc(dev, struct seiko_panel, base,
+				     &seiko_panel_funcs,
+				     DRM_MODE_CONNECTOR_DPI);
+	if (IS_ERR(panel))
+		return PTR_ERR(panel);
 
-	panel->enabled = false;
-	panel->prepared = false;
 	panel->desc = desc;
 
 	panel->dvdd = devm_regulator_get(dev, "dvdd");
@@ -266,48 +220,28 @@ static int seiko_panel_probe(struct device *dev,
 	if (IS_ERR(panel->avdd))
 		return PTR_ERR(panel->avdd);
 
-	backlight = of_parse_phandle(dev->of_node, "backlight", 0);
-	if (backlight) {
-		panel->backlight = of_find_backlight_by_node(backlight);
-		of_node_put(backlight);
+	panel->enable_gpio = devm_gpiod_get_optional(dev, "enable",
+						     GPIOD_OUT_LOW);
+	if (IS_ERR(panel->enable_gpio))
+		return dev_err_probe(dev, PTR_ERR(panel->enable_gpio),
+				     "failed to request GPIO\n");
 
-		if (!panel->backlight)
-			return -EPROBE_DEFER;
-	}
-
-	drm_panel_init(&panel->base);
-	panel->base.dev = dev;
-	panel->base.funcs = &seiko_panel_funcs;
-
-	err = drm_panel_add(&panel->base);
-	if (err < 0)
+	err = drm_panel_of_backlight(&panel->base);
+	if (err)
 		return err;
+
+	drm_panel_add(&panel->base);
 
 	dev_set_drvdata(dev, panel);
 
 	return 0;
 }
 
-static int seiko_panel_remove(struct platform_device *pdev)
+static void seiko_panel_remove(struct platform_device *pdev)
 {
-	struct seiko_panel *panel = dev_get_drvdata(&pdev->dev);
+	struct seiko_panel *panel = platform_get_drvdata(pdev);
 
-	drm_panel_detach(&panel->base);
 	drm_panel_remove(&panel->base);
-
-	seiko_panel_disable(&panel->base);
-
-	if (panel->backlight)
-		put_device(&panel->backlight->dev);
-
-	return 0;
-}
-
-static void seiko_panel_shutdown(struct platform_device *pdev)
-{
-	struct seiko_panel *panel = dev_get_drvdata(&pdev->dev);
-
-	seiko_panel_disable(&panel->base);
 }
 
 static const struct display_timing seiko_43wvf1g_timing = {
@@ -332,7 +266,7 @@ static const struct seiko_panel_desc seiko_43wvf1g = {
 		.height = 57,
 	},
 	.bus_format = MEDIA_BUS_FMT_RGB888_1X24,
-	.bus_flags = DRM_BUS_FLAG_DE_HIGH | DRM_BUS_FLAG_PIXDATA_NEGEDGE,
+	.bus_flags = DRM_BUS_FLAG_DE_HIGH | DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE,
 };
 
 static const struct of_device_id platform_of_match[] = {
@@ -363,10 +297,9 @@ static struct platform_driver seiko_panel_platform_driver = {
 	},
 	.probe = seiko_panel_platform_probe,
 	.remove = seiko_panel_remove,
-	.shutdown = seiko_panel_shutdown,
 };
 module_platform_driver(seiko_panel_platform_driver);
 
-MODULE_AUTHOR("Marco Franchi <marco.franchi@nxp.com");
+MODULE_AUTHOR("Marco Franchi <marco.franchi@nxp.com>");
 MODULE_DESCRIPTION("Seiko 43WVF1G panel driver");
 MODULE_LICENSE("GPL v2");

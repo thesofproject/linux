@@ -1,21 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (C) 2010-2013 Bluecherry, LLC <http://www.bluecherrydvr.com>
+ * Copyright (C) 2010-2013 Bluecherry, LLC <https://www.bluecherrydvr.com>
  *
  * Original author:
  * Ben Collins <bcollins@ubuntu.com>
  *
  * Additional work by:
  * John Brooks <john.brooks@bluecherry.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -153,11 +144,8 @@ static void free_solo_dev(struct solo_dev *solo_dev)
 
 		/* Now cleanup the PCI device */
 		solo_irq_off(solo_dev, ~0);
-		free_irq(pdev->irq, solo_dev);
-		pci_iounmap(pdev, solo_dev->reg_base);
 	}
 
-	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 	v4l2_device_unregister(&solo_dev->v4l2_dev);
 	pci_set_drvdata(pdev, NULL);
@@ -374,10 +362,10 @@ static ssize_t sdram_offsets_show(struct device *dev,
 }
 
 static ssize_t sdram_show(struct file *file, struct kobject *kobj,
-			  struct bin_attribute *a, char *buf,
+			  const struct bin_attribute *a, char *buf,
 			  loff_t off, size_t count)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct solo_dev *solo_dev =
 		container_of(dev, struct solo_dev, dev);
 	const int size = solo_dev->sdram_size;
@@ -429,6 +417,7 @@ static int solo_sysfs_init(struct solo_dev *solo_dev)
 		     solo_dev->nr_chans);
 
 	if (device_register(dev)) {
+		put_device(dev);
 		dev->parent = NULL;
 		return -ENOMEM;
 	}
@@ -460,7 +449,7 @@ static int solo_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	int ret;
 	u8 chip_id;
 
-	solo_dev = kzalloc(sizeof(*solo_dev), GFP_KERNEL);
+	solo_dev = kzalloc_obj(*solo_dev);
 	if (solo_dev == NULL)
 		return -ENOMEM;
 
@@ -488,15 +477,10 @@ static int solo_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_write_config_byte(pdev, 0x40, 0x00);
 	pci_write_config_byte(pdev, 0x41, 0x00);
 
-	ret = pci_request_regions(pdev, SOLO6X10_NAME);
+	solo_dev->reg_base = pcim_iomap_region(pdev, 0, SOLO6X10_NAME);
+	ret = PTR_ERR_OR_ZERO(solo_dev->reg_base);
 	if (ret)
 		goto fail_probe;
-
-	solo_dev->reg_base = pci_ioremap_bar(pdev, 0);
-	if (solo_dev->reg_base == NULL) {
-		ret = -ENOMEM;
-		goto fail_probe;
-	}
 
 	chip_id = solo_reg_read(solo_dev, SOLO_CHIP_OPTION) &
 				SOLO_CHIP_ID_MASK;
@@ -512,7 +496,7 @@ static int solo_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	default:
 		dev_warn(&pdev->dev, "Invalid chip_id 0x%02x, assuming 4 ch\n",
 			 chip_id);
-		/* fall through */
+		fallthrough;
 	case 5:
 		solo_dev->nr_chans = 4;
 		solo_dev->nr_ext = 1;
@@ -559,8 +543,8 @@ static int solo_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	/* PLL locking time of 1ms */
 	mdelay(1);
 
-	ret = request_irq(pdev->irq, solo_isr, IRQF_SHARED, SOLO6X10_NAME,
-			  solo_dev);
+	ret = devm_request_irq(&pdev->dev, pdev->irq, solo_isr, IRQF_SHARED,
+			       SOLO6X10_NAME, solo_dev);
 	if (ret)
 		goto fail_probe;
 

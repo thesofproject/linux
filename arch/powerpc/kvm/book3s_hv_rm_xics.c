@@ -1,16 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2012 Michael Ellerman, IBM Corporation.
  * Copyright 2012 Benjamin Herrenschmidt, IBM Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
 #include <linux/kvm_host.h>
 #include <linux/err.h>
 #include <linux/kernel_stat.h>
+#include <linux/pgtable.h>
 
 #include <asm/kvm_book3s.h>
 #include <asm/kvm_ppc.h>
@@ -18,7 +16,6 @@
 #include <asm/xics.h>
 #include <asm/synch.h>
 #include <asm/cputhreads.h>
-#include <asm/pgtable.h>
 #include <asm/ppc-opcode.h>
 #include <asm/pnv-pci.h>
 #include <asm/opal.h>
@@ -61,7 +58,7 @@ static inline void icp_send_hcore_msg(int hcore, struct kvm_vcpu *vcpu)
 	hcpu = hcore << threads_shift;
 	kvmppc_host_rm_ops_hv->rm_core[hcore].rm_data = vcpu;
 	smp_muxed_ipi_set_message(hcpu, PPC_MSG_RM_HOST_ACTION);
-	kvmppc_set_host_ipi(hcpu, 1);
+	kvmppc_set_host_ipi(hcpu);
 	smp_mb();
 	kvmhv_rm_send_ipi(hcpu);
 }
@@ -136,7 +133,7 @@ static void icp_rm_set_vcpu_irq(struct kvm_vcpu *vcpu,
 
 	/* Mark the target VCPU as having an interrupt pending */
 	vcpu->stat.queue_intr++;
-	set_bit(BOOK3S_IRQPRIO_EXTERNAL_LEVEL, &vcpu->arch.pending_exceptions);
+	set_bit(BOOK3S_IRQPRIO_EXTERNAL, &vcpu->arch.pending_exceptions);
 
 	/* Kick self ? Just set MER and return */
 	if (vcpu == this_vcpu) {
@@ -170,8 +167,7 @@ static void icp_rm_set_vcpu_irq(struct kvm_vcpu *vcpu,
 static void icp_rm_clr_vcpu_irq(struct kvm_vcpu *vcpu)
 {
 	/* Note: Only called on self ! */
-	clear_bit(BOOK3S_IRQPRIO_EXTERNAL_LEVEL,
-		  &vcpu->arch.pending_exceptions);
+	clear_bit(BOOK3S_IRQPRIO_EXTERNAL, &vcpu->arch.pending_exceptions);
 	mtspr(SPRN_LPCR, mfspr(SPRN_LPCR) & ~LPCR_MER);
 }
 
@@ -483,6 +479,11 @@ static void icp_rm_down_cppr(struct kvmppc_xics *xics, struct kvmppc_icp *icp,
 	}
 }
 
+unsigned long xics_rm_h_xirr_x(struct kvm_vcpu *vcpu)
+{
+	kvmppc_set_gpr(vcpu, 5, get_tb());
+	return xics_rm_h_xirr(vcpu);
+}
 
 unsigned long xics_rm_h_xirr(struct kvm_vcpu *vcpu)
 {
@@ -517,7 +518,7 @@ unsigned long xics_rm_h_xirr(struct kvm_vcpu *vcpu)
 	} while (!icp_rm_try_update(icp, old_state, new_state));
 
 	/* Return the result in GPR4 */
-	vcpu->arch.gpr[4] = xirr;
+	kvmppc_set_gpr(vcpu, 4, xirr);
 
 	return check_too_hard(xics, icp);
 }
@@ -710,6 +711,7 @@ static int ics_rm_eoi(struct kvm_vcpu *vcpu, u32 irq)
 		icp->rm_eoied_irq = irq;
 	}
 
+	/* Handle passthrough interrupts */
 	if (state->host_irq) {
 		++vcpu->stat.pthru_all;
 		if (state->intr_cpu != -1) {
@@ -761,14 +763,14 @@ int xics_rm_h_eoi(struct kvm_vcpu *vcpu, unsigned long xirr)
 	return ics_rm_eoi(vcpu, irq);
 }
 
-unsigned long eoi_rc;
+static unsigned long eoi_rc;
 
-static void icp_eoi(struct irq_chip *c, u32 hwirq, __be32 xirr, bool *again)
+static void icp_eoi(struct irq_data *d, u32 hwirq, __be32 xirr, bool *again)
 {
 	void __iomem *xics_phys;
 	int64_t rc;
 
-	rc = pnv_opal_pci_msi_eoi(c, hwirq);
+	rc = pnv_opal_pci_msi_eoi(d);
 
 	if (rc)
 		eoi_rc = rc;
@@ -808,7 +810,7 @@ static inline void this_cpu_inc_rm(unsigned int __percpu *addr)
 	raddr = per_cpu_ptr(addr, cpu);
 	l = (unsigned long)raddr;
 
-	if (REGION_ID(l) == VMALLOC_REGION_ID) {
+	if (get_region_id(l) == VMALLOC_REGION_ID) {
 		l = vmalloc_to_phys(raddr);
 		raddr = (unsigned int *)l;
 	}
@@ -835,7 +837,7 @@ static inline void this_cpu_inc_rm(unsigned int __percpu *addr)
  */
 static void kvmppc_rm_handle_irq_desc(struct irq_desc *desc)
 {
-	this_cpu_inc_rm(desc->kstat_irqs);
+	this_cpu_inc_rm(&desc->kstat_irqs->cnt);
 	__this_cpu_inc(kstat.irqs_sum);
 }
 
@@ -876,8 +878,7 @@ long kvmppc_deliver_irq_passthru(struct kvm_vcpu *vcpu,
 		icp_rm_deliver_irq(xics, icp, irq, false);
 
 	/* EOI the interrupt */
-	icp_eoi(irq_desc_get_chip(irq_map->desc), irq_map->r_hwirq, xirr,
-		again);
+	icp_eoi(irq_desc_get_irq_data(irq_map->desc), irq_map->r_hwirq, xirr, again);
 
 	if (check_too_hard(xics, icp) == H_TOO_HARD)
 		return 2;
@@ -887,7 +888,7 @@ long kvmppc_deliver_irq_passthru(struct kvm_vcpu *vcpu,
 
 /*  --- Non-real mode XICS-related built-in routines ---  */
 
-/**
+/*
  * Host Operations poked by RM KVM
  */
 static void rm_host_ipi_action(int action, void *data)

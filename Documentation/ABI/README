@@ -1,4 +1,5 @@
-This directory attempts to document the ABI between the Linux kernel and
+This part of the documentation inside Documentation/ABI directory
+attempts to document the ABI between the Linux kernel and
 userspace, and the relative stability of these interfaces.  Due to the
 everchanging nature of Linux, and the differing maturity levels, these
 interfaces should be used by userspace programs in different ways.
@@ -32,7 +33,7 @@ The different levels of stability are:
 	layout of the files below for details on how to do this.)
 
   obsolete/
-  	This directory documents interfaces that are still remaining in
+	This directory documents interfaces that are still remaining in
 	the kernel, but are marked to be removed at some later point in
 	time.  The description of the interface will document the reason
 	why it is obsolete and when it can be expected to be removed.
@@ -45,7 +46,9 @@ Every file in these directories will contain the following information:
 
 What:		Short description of the interface
 Date:		Date created
-KernelVersion:	Kernel version this feature first showed up in.
+KernelVersion:	(Optional) Kernel version this feature first showed up in.
+		Note: git history often provides more accurate version
+		info, so this field may be omitted.
 Contact:	Primary contact for this interface (may be a mailing list)
 Description:	Long description of the interface and how to use it.
 Users:		All users of this interface who wish to be notified when
@@ -57,6 +60,14 @@ Users:		All users of this interface who wish to be notified when
 		sure they are working in a proper way and do not need to
 		be changed further.
 
+
+Note:
+   The fields should be use a simple notation, compatible with ReST markup.
+   Also, the file **should not** have a top-level index, like::
+
+	===
+	foo
+	===
 
 How things move between levels:
 

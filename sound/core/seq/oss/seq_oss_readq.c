@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * OSS compatible sequencer driver
  *
  * seq_oss_readq.c - MIDI input queue
  *
  * Copyright (C) 1998,99 Takashi Iwai <tiwai@suse.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include "seq_oss_readq.h"
@@ -47,15 +34,9 @@ snd_seq_oss_readq_new(struct seq_oss_devinfo *dp, int maxlen)
 {
 	struct seq_oss_readq *q;
 
-	q = kzalloc(sizeof(*q), GFP_KERNEL);
+	q = kzalloc_flex(*q, q, maxlen);
 	if (!q)
 		return NULL;
-
-	q->q = kcalloc(maxlen, sizeof(union evrec), GFP_KERNEL);
-	if (!q->q) {
-		kfree(q);
-		return NULL;
-	}
 
 	q->maxlen = maxlen;
 	q->qlen = 0;
@@ -74,10 +55,7 @@ snd_seq_oss_readq_new(struct seq_oss_devinfo *dp, int maxlen)
 void
 snd_seq_oss_readq_delete(struct seq_oss_readq *q)
 {
-	if (q) {
-		kfree(q->q);
-		kfree(q);
-	}
+	kfree(q);
 }
 
 /*
@@ -86,13 +64,17 @@ snd_seq_oss_readq_delete(struct seq_oss_readq *q)
 void
 snd_seq_oss_readq_clear(struct seq_oss_readq *q)
 {
-	if (q->qlen) {
-		q->qlen = 0;
-		q->head = q->tail = 0;
+	scoped_guard(spinlock_irqsave, &q->lock) {
+		if (q->qlen) {
+			q->qlen = 0;
+			q->head = 0;
+			q->tail = 0;
+		}
+		q->input_time = (unsigned long)-1;
 	}
+
 	/* if someone sleeping, wake'em up */
 	wake_up(&q->midi_sleep);
-	q->input_time = (unsigned long)-1;
 }
 
 /*
@@ -149,28 +131,37 @@ int snd_seq_oss_readq_sysex(struct seq_oss_readq *q, int dev,
 /*
  * copy an event to input queue:
  * return zero if enqueued
+ * caller must hold lock
  */
-int
-snd_seq_oss_readq_put_event(struct seq_oss_readq *q, union evrec *ev)
+static int snd_seq_oss_readq_put_event_locked(struct seq_oss_readq *q,
+					      union evrec *ev)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&q->lock, flags);
-	if (q->qlen >= q->maxlen - 1) {
-		spin_unlock_irqrestore(&q->lock, flags);
+	if (q->qlen >= q->maxlen - 1)
 		return -ENOMEM;
-	}
 
 	memcpy(&q->q[q->tail], ev, sizeof(*ev));
 	q->tail = (q->tail + 1) % q->maxlen;
 	q->qlen++;
 
-	/* wake up sleeper */
-	wake_up(&q->midi_sleep);
-
-	spin_unlock_irqrestore(&q->lock, flags);
-
 	return 0;
+}
+
+/*
+ * copy an event to input queue:
+ * return zero if enqueued
+ */
+int
+snd_seq_oss_readq_put_event(struct seq_oss_readq *q, union evrec *ev)
+{
+	int rc;
+
+	scoped_guard(spinlock_irqsave, &q->lock) {
+		rc = snd_seq_oss_readq_put_event_locked(q, ev);
+		if (!rc)
+			wake_up(&q->midi_sleep);
+	}
+
+	return rc;
 }
 
 
@@ -228,23 +219,31 @@ snd_seq_oss_readq_poll(struct seq_oss_readq *q, struct file *file, poll_table *w
 int
 snd_seq_oss_readq_put_timestamp(struct seq_oss_readq *q, unsigned long curt, int seq_mode)
 {
-	if (curt != q->input_time) {
-		union evrec rec;
-		memset(&rec, 0, sizeof(rec));
-		switch (seq_mode) {
-		case SNDRV_SEQ_OSS_MODE_SYNTH:
-			rec.echo = (curt << 8) | SEQ_WAIT;
-			snd_seq_oss_readq_put_event(q, &rec);
-			break;
-		case SNDRV_SEQ_OSS_MODE_MUSIC:
-			rec.t.code = EV_TIMING;
-			rec.t.cmd = TMR_WAIT_ABS;
-			rec.t.time = curt;
-			snd_seq_oss_readq_put_event(q, &rec);
-			break;
+	int queued = 0;
+
+	scoped_guard(spinlock_irqsave, &q->lock) {
+		if (curt != q->input_time) {
+			union evrec rec;
+
+			memset(&rec, 0, sizeof(rec));
+			switch (seq_mode) {
+			case SNDRV_SEQ_OSS_MODE_SYNTH:
+				rec.echo = (curt << 8) | SEQ_WAIT;
+				queued = !snd_seq_oss_readq_put_event_locked(q, &rec);
+				break;
+			case SNDRV_SEQ_OSS_MODE_MUSIC:
+				rec.t.code = EV_TIMING;
+				rec.t.cmd = TMR_WAIT_ABS;
+				rec.t.time = curt;
+				queued = !snd_seq_oss_readq_put_event_locked(q, &rec);
+				break;
+			}
+			q->input_time = curt;
 		}
-		q->input_time = curt;
 	}
+	if (queued)
+		wake_up(&q->midi_sleep);
+
 	return 0;
 }
 

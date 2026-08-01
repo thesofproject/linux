@@ -8,11 +8,13 @@
  */
 
 #include <linux/module.h>
+#include <linux/io.h>
 #include <linux/notifier.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 
-#include <drm/drmP.h>
+#include <drm/drm_modes.h>
+#include <drm/drm_print.h>
 
 #include "sti_drv.h"
 #include "sti_vtg.h"
@@ -119,7 +121,7 @@ struct sti_vtg_sync_params {
 	u32 vsync_off_bot;
 };
 
-/**
+/*
  * STI VTG structure
  *
  * @regs: register mapping
@@ -141,12 +143,17 @@ struct sti_vtg {
 struct sti_vtg *of_vtg_find(struct device_node *np)
 {
 	struct platform_device *pdev;
+	struct sti_vtg *vtg;
 
 	pdev = of_find_device_by_node(np);
 	if (!pdev)
 		return NULL;
 
-	return (struct sti_vtg *)platform_get_drvdata(pdev);
+	vtg = platform_get_drvdata(pdev);
+
+	put_device(&pdev->dev);
+
+	return vtg;
 }
 
 static void vtg_reset(struct sti_vtg *vtg)
@@ -378,23 +385,15 @@ static int vtg_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct sti_vtg *vtg;
-	struct resource *res;
 	int ret;
 
 	vtg = devm_kzalloc(dev, sizeof(*vtg), GFP_KERNEL);
 	if (!vtg)
 		return -ENOMEM;
-
-	/* Get Memory ressources */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res) {
-		DRM_ERROR("Get memory resource failed\n");
-		return -ENOMEM;
-	}
-	vtg->regs = devm_ioremap_nocache(dev, res->start, resource_size(res));
-	if (!vtg->regs) {
+	vtg->regs = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(vtg->regs)) {
 		DRM_ERROR("failed to remap I/O memory\n");
-		return -ENOMEM;
+		return PTR_ERR(vtg->regs);
 	}
 
 	vtg->irq = platform_get_irq(pdev, 0);
@@ -429,7 +428,6 @@ MODULE_DEVICE_TABLE(of, vtg_of_match);
 struct platform_driver sti_vtg_driver = {
 	.driver = {
 		.name = "sti-vtg",
-		.owner = THIS_MODULE,
 		.of_match_table = vtg_of_match,
 	},
 	.probe	= vtg_probe,

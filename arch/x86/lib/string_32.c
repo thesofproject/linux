@@ -11,6 +11,7 @@
  * strings.
  */
 
+#define __NO_FORTIFY
 #include <linux/string.h>
 #include <linux/export.h>
 
@@ -29,32 +30,11 @@ char *strcpy(char *dest, const char *src)
 EXPORT_SYMBOL(strcpy);
 #endif
 
-#ifdef __HAVE_ARCH_STRNCPY
-char *strncpy(char *dest, const char *src, size_t count)
-{
-	int d0, d1, d2, d3;
-	asm volatile("1:\tdecl %2\n\t"
-		"js 2f\n\t"
-		"lodsb\n\t"
-		"stosb\n\t"
-		"testb %%al,%%al\n\t"
-		"jne 1b\n\t"
-		"rep\n\t"
-		"stosb\n"
-		"2:"
-		: "=&S" (d0), "=&D" (d1), "=&c" (d2), "=&a" (d3)
-		: "0" (src), "1" (dest), "2" (count) : "memory");
-	return dest;
-}
-EXPORT_SYMBOL(strncpy);
-#endif
-
 #ifdef __HAVE_ARCH_STRCAT
 char *strcat(char *dest, const char *src)
 {
 	int d0, d1, d2, d3;
-	asm volatile("repne\n\t"
-		"scasb\n\t"
+	asm volatile("repne scasb\n\t"
 		"decl %1\n"
 		"1:\tlodsb\n\t"
 		"stosb\n\t"
@@ -71,8 +51,7 @@ EXPORT_SYMBOL(strcat);
 char *strncat(char *dest, const char *src, size_t count)
 {
 	int d0, d1, d2, d3;
-	asm volatile("repne\n\t"
-		"scasb\n\t"
+	asm volatile("repne scasb\n\t"
 		"decl %1\n\t"
 		"movl %8,%3\n"
 		"1:\tdecl %3\n\t"
@@ -166,8 +145,7 @@ size_t strlen(const char *s)
 {
 	int d0;
 	size_t res;
-	asm volatile("repne\n\t"
-		"scasb"
+	asm volatile("repne scasb"
 		: "=c" (res), "=&D" (d0)
 		: "1" (s), "a" (0), "0" (0xffffffffu)
 		: "memory");
@@ -183,8 +161,7 @@ void *memchr(const void *cs, int c, size_t count)
 	void *res;
 	if (!count)
 		return NULL;
-	asm volatile("repne\n\t"
-		"scasb\n\t"
+	asm volatile("repne scasb\n\t"
 		"je 1f\n\t"
 		"movl $1,%0\n"
 		"1:\tdecl %0"
@@ -201,7 +178,7 @@ void *memscan(void *addr, int c, size_t size)
 {
 	if (!size)
 		return addr;
-	asm volatile("repnz; scasb\n\t"
+	asm volatile("repnz scasb\n\t"
 	    "jnz 1f\n\t"
 	    "dec %%edi\n"
 	    "1:"

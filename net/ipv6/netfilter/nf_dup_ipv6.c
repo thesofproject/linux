@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * (C) 2007 by Sebastian Claßen <sebastian.classen@freenet.ag>
  * (C) 2007-2010 by Jan Engelhardt <jengelh@medozas.de>
  *
  * Extracted from xt_TEE.c
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 or later, as
- * published by the Free Software Foundation.
  */
 #include <linux/module.h>
 #include <linux/percpu.h>
@@ -41,7 +38,7 @@ static bool nf_dup_ipv6_route(struct net *net, struct sk_buff *skb,
 	}
 	skb_dst_drop(skb);
 	skb_dst_set(skb, dst);
-	skb->dev      = dst->dev;
+	skb->dev      = dst_dev(dst);
 	skb->protocol = htons(ETH_P_IPV6);
 
 	return true;
@@ -50,14 +47,15 @@ static bool nf_dup_ipv6_route(struct net *net, struct sk_buff *skb,
 void nf_dup_ipv6(struct net *net, struct sk_buff *skb, unsigned int hooknum,
 		 const struct in6_addr *gw, int oif)
 {
-	if (this_cpu_read(nf_skb_duplicated))
-		return;
+	local_bh_disable();
+	if (current->in_nf_duplicate)
+		goto out;
 	skb = pskb_copy(skb, GFP_ATOMIC);
 	if (skb == NULL)
-		return;
+		goto out;
 
 #if IS_ENABLED(CONFIG_NF_CONNTRACK)
-	nf_reset(skb);
+	nf_reset_ct(skb);
 	nf_ct_set(skb, NULL, IP_CT_UNTRACKED);
 #endif
 	if (hooknum == NF_INET_PRE_ROUTING ||
@@ -66,12 +64,14 @@ void nf_dup_ipv6(struct net *net, struct sk_buff *skb, unsigned int hooknum,
 		--iph->hop_limit;
 	}
 	if (nf_dup_ipv6_route(net, skb, gw, oif)) {
-		__this_cpu_write(nf_skb_duplicated, true);
+		current->in_nf_duplicate = true;
 		ip6_local_out(net, skb->sk, skb);
-		__this_cpu_write(nf_skb_duplicated, false);
+		current->in_nf_duplicate = false;
 	} else {
 		kfree_skb(skb);
 	}
+out:
+	local_bh_enable();
 }
 EXPORT_SYMBOL_GPL(nf_dup_ipv6);
 

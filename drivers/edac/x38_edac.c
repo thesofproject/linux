@@ -238,7 +238,6 @@ static void x38_check(struct mem_ctl_info *mci)
 {
 	struct x38_error_info info;
 
-	edac_dbg(1, "MC%d\n", mci->mc_idx);
 	x38_get_and_clear_error_info(mci, &info);
 	x38_process_error_info(mci, &info);
 }
@@ -266,7 +265,7 @@ static void __iomem *x38_map_mchbar(struct pci_dev *pdev)
 		return NULL;
 	}
 
-	window = ioremap_nocache(u.mchbar, X38_MMR_WINDOW_SIZE);
+	window = ioremap(u.mchbar, X38_MMR_WINDOW_SIZE);
 	if (!window)
 		printk(KERN_ERR "x38: cannot map mmio space at 0x%llx\n",
 			(unsigned long long)u.mchbar);
@@ -342,9 +341,12 @@ static int x38_probe1(struct pci_dev *pdev, int dev_idx)
 	layers[1].type = EDAC_MC_LAYER_CHANNEL;
 	layers[1].size = x38_channel_num;
 	layers[1].is_virt_csrow = false;
+
+
+	rc = -ENOMEM;
 	mci = edac_mc_alloc(0, ARRAY_SIZE(layers), layers, 0);
 	if (!mci)
-		return -ENOMEM;
+		goto unmap;
 
 	edac_dbg(3, "MC: init mci\n");
 
@@ -404,9 +406,9 @@ static int x38_probe1(struct pci_dev *pdev, int dev_idx)
 	return 0;
 
 fail:
+	edac_mc_free(mci);
+unmap:
 	iounmap(window);
-	if (mci)
-		edac_mc_free(mci);
 
 	return rc;
 }
@@ -444,11 +446,11 @@ static void x38_remove_one(struct pci_dev *pdev)
 
 static const struct pci_device_id x38_pci_tbl[] = {
 	{
-	 PCI_VEND_DEV(INTEL, X38_HB), PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	 X38},
-	{
-	 0,
-	 }			/* 0 terminated list. */
+		PCI_VEND_DEV(INTEL, X38_HB),
+		.driver_data = X38,
+	}, {
+		/* 0 terminated list. */
+	}
 };
 
 MODULE_DEVICE_TABLE(pci, x38_pci_tbl);

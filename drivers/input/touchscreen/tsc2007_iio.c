@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016 Golden Delicious Comp. GmbH&Co. KG
  *	Nikolaus Schaller <hns@goldelico.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  */
 
 #include <linux/i2c.h>
@@ -44,7 +41,6 @@ static int tsc2007_read_raw(struct iio_dev *indio_dev,
 	struct tsc2007_iio *iio = iio_priv(indio_dev);
 	struct tsc2007 *tsc = iio->ts;
 	int adc_chan = chan->channel;
-	int ret = 0;
 
 	if (adc_chan >= ARRAY_SIZE(tsc2007_iio_channel))
 		return -EINVAL;
@@ -52,7 +48,7 @@ static int tsc2007_read_raw(struct iio_dev *indio_dev,
 	if (mask != IIO_CHAN_INFO_RAW)
 		return -EINVAL;
 
-	mutex_lock(&tsc->mlock);
+	guard(mutex)(&tsc->mlock);
 
 	switch (chan->channel) {
 	case 0:
@@ -95,11 +91,7 @@ static int tsc2007_read_raw(struct iio_dev *indio_dev,
 	/* Prepare for next touch reading - power down ADC, enable PENIRQ */
 	tsc2007_xfer(tsc, PWRDOWN);
 
-	mutex_unlock(&tsc->mlock);
-
-	ret = IIO_VAL_INT;
-
-	return ret;
+	return IIO_VAL_INT;
 }
 
 static const struct iio_info tsc2007_iio_info = {
@@ -122,7 +114,6 @@ int tsc2007_iio_configure(struct tsc2007 *ts)
 	iio->ts = ts;
 
 	indio_dev->name = "tsc2007";
-	indio_dev->dev.parent = &ts->client->dev;
 	indio_dev->info = &tsc2007_iio_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = tsc2007_iio_channel;

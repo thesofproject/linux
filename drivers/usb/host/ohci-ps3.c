@@ -46,7 +46,7 @@ static const struct hc_driver ps3_ohci_hc_driver = {
 	.product_desc		= "PS3 OHCI Host Controller",
 	.hcd_priv_size		= sizeof(struct ohci_hcd),
 	.irq			= ohci_irq,
-	.flags			= HCD_MEMORY | HCD_USB11,
+	.flags			= HCD_MEMORY | HCD_DMA | HCD_USB11,
 	.reset			= ps3_ohci_hc_reset,
 	.start			= ps3_ohci_hc_start,
 	.stop			= ohci_stop,
@@ -69,7 +69,7 @@ static int ps3_ohci_probe(struct ps3_system_bus_device *dev)
 	int result;
 	struct usb_hcd *hcd;
 	unsigned int virq;
-	static u64 dummy_mask = DMA_BIT_MASK(32);
+	static u64 dummy_mask;
 
 	if (usb_disabled()) {
 		result = -ENODEV;
@@ -115,7 +115,9 @@ static int ps3_ohci_probe(struct ps3_system_bus_device *dev)
 		goto fail_irq;
 	}
 
-	dev->core.dma_mask = &dummy_mask; /* FIXME: for improper usb code */
+	dummy_mask = DMA_BIT_MASK(32);
+	dev->core.dma_mask = &dummy_mask;
+	dma_set_coherent_mask(&dev->core, dummy_mask);
 
 	hcd = usb_create_hcd(&ps3_ohci_hc_driver, &dev->core, dev_name(&dev->core));
 
@@ -182,7 +184,7 @@ fail_start:
 	return result;
 }
 
-static int ps3_ohci_remove(struct ps3_system_bus_device *dev)
+static void ps3_ohci_remove(struct ps3_system_bus_device *dev)
 {
 	unsigned int tmp;
 	struct usb_hcd *hcd = ps3_system_bus_get_drvdata(dev);
@@ -210,8 +212,6 @@ static int ps3_ohci_remove(struct ps3_system_bus_device *dev)
 
 	ps3_dma_region_free(dev->d_region);
 	ps3_close_hv_device(dev);
-
-	return 0;
 }
 
 static int __init ps3_ohci_driver_register(struct ps3_system_bus_driver *drv)

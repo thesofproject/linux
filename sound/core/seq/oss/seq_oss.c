@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * OSS compatible sequencer driver
  *
  * registration of device and proc
  *
  * Copyright (C) 1998,99 Takashi Iwai <tiwai@suse.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/init.h>
@@ -67,10 +54,10 @@ static __poll_t odev_poll(struct file *file, poll_table * wait);
  */
 
 static struct snd_seq_driver seq_oss_synth_driver = {
+	.probe = snd_seq_oss_synth_probe,
+	.remove = snd_seq_oss_synth_remove,
 	.driver = {
 		.name = KBUILD_MODNAME,
-		.probe = snd_seq_oss_synth_probe,
-		.remove = snd_seq_oss_synth_remove,
 	},
 	.id = SNDRV_SEQ_DEV_ID_OSS,
 	.argsize = sizeof(struct snd_seq_oss_reg),
@@ -80,13 +67,16 @@ static int __init alsa_seq_oss_init(void)
 {
 	int rc;
 
-	if ((rc = register_device()) < 0)
+	rc = register_device();
+	if (rc < 0)
 		goto error;
-	if ((rc = register_proc()) < 0) {
+	rc = register_proc();
+	if (rc < 0) {
 		unregister_device();
 		goto error;
 	}
-	if ((rc = snd_seq_oss_create_client()) < 0) {
+	rc = snd_seq_oss_create_client();
+	if (rc < 0) {
 		unregister_proc();
 		unregister_device();
 		goto error;
@@ -127,18 +117,15 @@ static DEFINE_MUTEX(register_mutex);
 static int
 odev_open(struct inode *inode, struct file *file)
 {
-	int level, rc;
+	int level;
 
 	if (iminor(inode) == SNDRV_MINOR_OSS_MUSIC)
 		level = SNDRV_SEQ_OSS_MODE_MUSIC;
 	else
 		level = SNDRV_SEQ_OSS_MODE_SYNTH;
 
-	mutex_lock(&register_mutex);
-	rc = snd_seq_oss_open(file, level);
-	mutex_unlock(&register_mutex);
-
-	return rc;
+	guard(mutex)(&register_mutex);
+	return snd_seq_oss_open(file, level);
 }
 
 static int
@@ -146,13 +133,12 @@ odev_release(struct inode *inode, struct file *file)
 {
 	struct seq_oss_devinfo *dp;
 
-	if ((dp = file->private_data) == NULL)
+	dp = file->private_data;
+	if (!dp)
 		return 0;
 
-	mutex_lock(&register_mutex);
+	guard(mutex)(&register_mutex);
 	snd_seq_oss_release(dp);
-	mutex_unlock(&register_mutex);
-
 	return 0;
 }
 
@@ -181,10 +167,19 @@ static long
 odev_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	struct seq_oss_devinfo *dp;
+	long rc;
+
 	dp = file->private_data;
 	if (snd_BUG_ON(!dp))
 		return -ENXIO;
-	return snd_seq_oss_ioctl(dp, cmd, arg);
+
+	if (cmd != SNDCTL_SEQ_SYNC &&
+	    mutex_lock_interruptible(&register_mutex))
+		return -ERESTARTSYS;
+	rc = snd_seq_oss_ioctl(dp, cmd, arg);
+	if (cmd != SNDCTL_SEQ_SYNC)
+		mutex_unlock(&register_mutex);
+	return rc;
 }
 
 #ifdef CONFIG_COMPAT
@@ -203,7 +198,7 @@ odev_poll(struct file *file, poll_table * wait)
 	struct seq_oss_devinfo *dp;
 	dp = file->private_data;
 	if (snd_BUG_ON(!dp))
-		return -ENXIO;
+		return EPOLLERR;
 	return snd_seq_oss_poll(dp, file, wait);
 }
 
@@ -229,35 +224,33 @@ register_device(void)
 {
 	int rc;
 
-	mutex_lock(&register_mutex);
-	if ((rc = snd_register_oss_device(SNDRV_OSS_DEVICE_TYPE_SEQUENCER,
-					  NULL, 0,
-					  &seq_oss_f_ops, NULL)) < 0) {
+	guard(mutex)(&register_mutex);
+	rc = snd_register_oss_device(SNDRV_OSS_DEVICE_TYPE_SEQUENCER,
+				     NULL, 0,
+				     &seq_oss_f_ops, NULL);
+	if (rc < 0) {
 		pr_err("ALSA: seq_oss: can't register device seq\n");
-		mutex_unlock(&register_mutex);
 		return rc;
 	}
-	if ((rc = snd_register_oss_device(SNDRV_OSS_DEVICE_TYPE_MUSIC,
-					  NULL, 0,
-					  &seq_oss_f_ops, NULL)) < 0) {
+	rc = snd_register_oss_device(SNDRV_OSS_DEVICE_TYPE_MUSIC,
+				     NULL, 0,
+				     &seq_oss_f_ops, NULL);
+	if (rc < 0) {
 		pr_err("ALSA: seq_oss: can't register device music\n");
 		snd_unregister_oss_device(SNDRV_OSS_DEVICE_TYPE_SEQUENCER, NULL, 0);
-		mutex_unlock(&register_mutex);
 		return rc;
 	}
-	mutex_unlock(&register_mutex);
 	return 0;
 }
 
 static void
 unregister_device(void)
 {
-	mutex_lock(&register_mutex);
+	guard(mutex)(&register_mutex);
 	if (snd_unregister_oss_device(SNDRV_OSS_DEVICE_TYPE_MUSIC, NULL, 0) < 0)		
 		pr_err("ALSA: seq_oss: error unregister device music\n");
 	if (snd_unregister_oss_device(SNDRV_OSS_DEVICE_TYPE_SEQUENCER, NULL, 0) < 0)
 		pr_err("ALSA: seq_oss: error unregister device seq\n");
-	mutex_unlock(&register_mutex);
 }
 
 /*
@@ -271,12 +264,11 @@ static struct snd_info_entry *info_entry;
 static void
 info_read(struct snd_info_entry *entry, struct snd_info_buffer *buf)
 {
-	mutex_lock(&register_mutex);
+	guard(mutex)(&register_mutex);
 	snd_iprintf(buf, "OSS sequencer emulation version %s\n", SNDRV_SEQ_OSS_VERSION_STR);
 	snd_seq_oss_system_info_read(buf);
 	snd_seq_oss_synth_info_read(buf);
 	snd_seq_oss_midi_info_read(buf);
-	mutex_unlock(&register_mutex);
 }
 
 

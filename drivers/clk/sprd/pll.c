@@ -87,11 +87,12 @@ static u32 pll_get_ibias(u64 rate, const u64 *table)
 {
 	u32 i, num = table[0];
 
-	for (i = 1; i < num + 1; i++)
-		if (rate <= table[i])
+	/* table[0] indicates the number of items in this table */
+	for (i = 0; i < num; i++)
+		if (rate <= table[i + 1])
 			break;
 
-	return (i == num + 1) ? num : i;
+	return i == num ? num - 1 : i;
 }
 
 static unsigned long _sprd_pll_recalc_rate(const struct sprd_pll *pll,
@@ -105,7 +106,7 @@ static unsigned long _sprd_pll_recalc_rate(const struct sprd_pll *pll,
 
 	cfg = kcalloc(regs_num, sizeof(*cfg), GFP_KERNEL);
 	if (!cfg)
-		return -ENOMEM;
+		return parent_rate;
 
 	for (i = 0; i < regs_num; i++)
 		cfg[i] = sprd_pll_read(pll, i);
@@ -136,6 +137,7 @@ static unsigned long _sprd_pll_recalc_rate(const struct sprd_pll *pll,
 					 k2 + refin * nint * CLK_PLL_1M;
 	}
 
+	kfree(cfg);
 	return rate;
 }
 
@@ -153,7 +155,7 @@ static int _sprd_pll_set_rate(const struct sprd_pll *pll,
 	unsigned long kint, nint;
 	u64 tmp, refin, fvco = rate;
 
-	cfg = kcalloc(regs_num, sizeof(*cfg), GFP_KERNEL);
+	cfg = kzalloc_objs(*cfg, regs_num);
 	if (!cfg)
 		return -ENOMEM;
 
@@ -222,6 +224,7 @@ static int _sprd_pll_set_rate(const struct sprd_pll *pll,
 	if (!ret)
 		udelay(pll->udelay);
 
+	kfree(cfg);
 	return ret;
 }
 
@@ -251,16 +254,16 @@ static int sprd_pll_clk_prepare(struct clk_hw *hw)
 	return 0;
 }
 
-static long sprd_pll_round_rate(struct clk_hw *hw, unsigned long rate,
-				unsigned long *prate)
+static int sprd_pll_determine_rate(struct clk_hw *hw,
+				   struct clk_rate_request *req)
 {
-	return rate;
+	return 0;
 }
 
 const struct clk_ops sprd_pll_ops = {
 	.prepare = sprd_pll_clk_prepare,
 	.recalc_rate = sprd_pll_recalc_rate,
-	.round_rate = sprd_pll_round_rate,
+	.determine_rate = sprd_pll_determine_rate,
 	.set_rate = sprd_pll_set_rate,
 };
 EXPORT_SYMBOL_GPL(sprd_pll_ops);

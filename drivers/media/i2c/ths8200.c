@@ -49,7 +49,7 @@ static const struct v4l2_dv_timings_cap ths8200_timings_cap = {
 	.type = V4L2_DV_BT_656_1120,
 	/* keep this initialization for compatibility with GCC < 4.4.6 */
 	.reserved = { 0 },
-	V4L2_INIT_BT_TIMINGS(0, 1920, 0, 1080, 25000000, 148500000,
+	V4L2_INIT_BT_TIMINGS(640, 1920, 350, 1080, 25000000, 148500000,
 		V4L2_DV_BT_STD_CEA861, V4L2_DV_BT_CAP_PROGRESSIVE)
 };
 
@@ -358,12 +358,15 @@ static void ths8200_setup(struct v4l2_subdev *sd, struct v4l2_bt_timings *bt)
 		 bt->hsync, bt->vsync);
 }
 
-static int ths8200_s_dv_timings(struct v4l2_subdev *sd,
+static int ths8200_s_dv_timings(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_dv_timings *timings)
 {
 	struct ths8200_state *state = to_state(sd);
 
 	v4l2_dbg(1, debug, sd, "%s:\n", __func__);
+
+	if (pad != 0)
+		return -EINVAL;
 
 	if (!v4l2_valid_dv_timings(timings, &ths8200_timings_cap,
 				NULL, NULL))
@@ -385,12 +388,15 @@ static int ths8200_s_dv_timings(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int ths8200_g_dv_timings(struct v4l2_subdev *sd,
+static int ths8200_g_dv_timings(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_dv_timings *timings)
 {
 	struct ths8200_state *state = to_state(sd);
 
 	v4l2_dbg(1, debug, sd, "%s:\n", __func__);
+
+	if (pad != 0)
+		return -EINVAL;
 
 	*timings = state->dv_timings;
 
@@ -420,11 +426,11 @@ static int ths8200_dv_timings_cap(struct v4l2_subdev *sd,
 /* Specific video subsystem operation handlers */
 static const struct v4l2_subdev_video_ops ths8200_video_ops = {
 	.s_stream = ths8200_s_stream,
-	.s_dv_timings = ths8200_s_dv_timings,
-	.g_dv_timings = ths8200_g_dv_timings,
 };
 
 static const struct v4l2_subdev_pad_ops ths8200_pad_ops = {
+	.s_dv_timings = ths8200_s_dv_timings,
+	.g_dv_timings = ths8200_g_dv_timings,
 	.enum_dv_timings = ths8200_enum_dv_timings,
 	.dv_timings_cap = ths8200_dv_timings_cap,
 };
@@ -436,8 +442,7 @@ static const struct v4l2_subdev_ops ths8200_ops = {
 	.pad = &ths8200_pad_ops,
 };
 
-static int ths8200_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int ths8200_probe(struct i2c_client *client)
 {
 	struct ths8200_state *state;
 	struct v4l2_subdev *sd;
@@ -469,7 +474,7 @@ static int ths8200_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int ths8200_remove(struct i2c_client *client)
+static void ths8200_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct ths8200_state *decoder = to_state(sd);
@@ -479,13 +484,11 @@ static int ths8200_remove(struct i2c_client *client)
 
 	ths8200_s_power(sd, false);
 	v4l2_async_unregister_subdev(&decoder->sd);
-
-	return 0;
 }
 
 static const struct i2c_device_id ths8200_id[] = {
-	{ "ths8200", 0 },
-	{},
+	{ .name = "ths8200" },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ths8200_id);
 

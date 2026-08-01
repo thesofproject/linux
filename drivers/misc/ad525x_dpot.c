@@ -1,7 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * ad525x_dpot: Driver for the Analog Devices digital potentiometers
  * Copyright (c) 2009-2010 Analog Devices, Inc.
- * Author: Michael Hennerich <hennerich@blackfin.uclinux.org>
+ * Author: Michael Hennerich <michael.hennerich@analog.com>
  *
  * DEVID		#Wipers		#Positions	Resistor Options (kOhm)
  * AD5258		1		64		1, 10, 50, 100
@@ -57,16 +58,14 @@
  * AD5272		1		1024		20, 50, 100 (50-TP)
  * AD5274		1		256		20, 50, 100 (50-TP)
  *
- * See Documentation/misc-devices/ad525x_dpot.txt for more info.
+ * See Documentation/misc-devices/ad525x_dpot.rst for more info.
  *
  * derived from ad5258.c
  * Copyright (c) 2009 Cyber Switching, Inc.
  * Author: Chris Verges <chrisv@cyberswitching.com>
  *
  * derived from ad5252.c
- * Copyright (c) 2006-2011 Michael Hennerich <hennerich@blackfin.uclinux.org>
- *
- * Licensed under the GPL-2 or later.
+ * Copyright (c) 2006-2011 Michael Hennerich <michael.hennerich@analog.com>
  */
 
 #include <linux/module.h>
@@ -74,6 +73,7 @@
 #include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/slab.h>
+#include <linux/string_choices.h>
 
 #include "ad525x_dpot.h"
 
@@ -140,6 +140,9 @@ static s32 dpot_read_spi(struct dpot_data *dpot, u8 reg)
 			value = dpot_read_r8d8(dpot,
 				DPOT_AD5291_READ_RDAC << 2);
 
+			if (value < 0)
+				return value;
+
 			if (dpot->uid == DPOT_UID(AD5291_ID))
 				value = value >> 2;
 
@@ -202,22 +205,20 @@ static s32 dpot_read_i2c(struct dpot_data *dpot, u8 reg)
 		return dpot_read_r8d8(dpot, ctrl);
 	case DPOT_UID(AD5272_ID):
 	case DPOT_UID(AD5274_ID):
-			dpot_write_r8d8(dpot,
+		dpot_write_r8d8(dpot,
 				(DPOT_AD5270_1_2_4_READ_RDAC << 2), 0);
 
-			value = dpot_read_r8d16(dpot,
-				DPOT_AD5270_1_2_4_RDAC << 2);
+		value = dpot_read_r8d16(dpot, DPOT_AD5270_1_2_4_RDAC << 2);
+		if (value < 0)
+			return value;
+		/*
+		 * AD5272/AD5274 returns high byte first, however
+		 * underling smbus expects low byte first.
+		 */
+		value = swab16(value);
 
-			if (value < 0)
-				return value;
-			/*
-			 * AD5272/AD5274 returns high byte first, however
-			 * underling smbus expects low byte first.
-			 */
-			value = swab16(value);
-
-			if (dpot->uid == DPOT_UID(AD5274_ID))
-				value = value >> 2;
+		if (dpot->uid == DPOT_UID(AD5274_ID))
+			value = value >> 2;
 		return value;
 	default:
 		if ((reg & DPOT_REG_TOL) || (dpot->max_pos > 256))
@@ -418,10 +419,8 @@ static ssize_t sysfs_show_reg(struct device *dev,
 	s32 value;
 
 	if (reg & DPOT_ADDR_OTP_EN)
-		return sprintf(buf, "%s\n",
-			test_bit(DPOT_RDAC_MASK & reg, data->otp_en_mask) ?
-			"enabled" : "disabled");
-
+		return sprintf(buf, "%s\n", str_enabled_disabled(
+			test_bit(DPOT_RDAC_MASK & reg, data->otp_en_mask)));
 
 	mutex_lock(&data->update_lock);
 	value = dpot_read(data, reg);
@@ -687,7 +686,7 @@ int ad_dpot_probe(struct device *dev,
 	struct dpot_data *data;
 	int i, err = 0;
 
-	data = kzalloc(sizeof(struct dpot_data), GFP_KERNEL);
+	data = kzalloc_obj(struct dpot_data);
 	if (!data) {
 		err = -ENOMEM;
 		goto exit;
@@ -743,7 +742,7 @@ exit:
 }
 EXPORT_SYMBOL(ad_dpot_probe);
 
-int ad_dpot_remove(struct device *dev)
+void ad_dpot_remove(struct device *dev)
 {
 	struct dpot_data *data = dev_get_drvdata(dev);
 	int i;
@@ -753,13 +752,11 @@ int ad_dpot_remove(struct device *dev)
 			ad_dpot_remove_files(dev, data->feat, i);
 
 	kfree(data);
-
-	return 0;
 }
 EXPORT_SYMBOL(ad_dpot_remove);
 
 
 MODULE_AUTHOR("Chris Verges <chrisv@cyberswitching.com>, "
-	      "Michael Hennerich <hennerich@blackfin.uclinux.org>");
+	      "Michael Hennerich <michael.hennerich@analog.com>");
 MODULE_DESCRIPTION("Digital potentiometer driver");
 MODULE_LICENSE("GPL");

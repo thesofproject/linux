@@ -1,11 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2013 Imagination Technologies
  * Author: Paul Burton <paul.burton@mips.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #ifndef __MIPS_ASM_MIPS_CPS_H__
@@ -26,7 +22,7 @@ extern void __iomem *mips_cpc_base;
  *                              the CPC
  *
  * Returns the default physical base address of the Cluster Power Controller
- * memory mapped registers. This is platform dependant & must therefore be
+ * memory mapped registers. This is platform dependent & must therefore be
  * implemented per-platform.
  */
 extern phys_addr_t mips_cpc_default_phys_base(void);

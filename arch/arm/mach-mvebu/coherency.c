@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Coherency fabric (Aurora) support for Armada 370, 375, 38x and XP
  * platforms.
@@ -7,10 +8,6 @@
  * Yehuda Yitschak <yehuday@marvell.com>
  * Gregory Clement <gregory.clement@free-electrons.com>
  * Thomas Petazzoni <thomas.petazzoni@free-electrons.com>
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2.  This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  *
  * The Armada 370, 375, 38x and XP SOCs have a coherency fabric which is
  * responsible for ensuring hardware coherency between all CPUs and between
@@ -25,7 +22,7 @@
 #include <linux/of_address.h>
 #include <linux/io.h>
 #include <linux/smp.h>
-#include <linux/dma-mapping.h>
+#include <linux/dma-map-ops.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/mbus.h>
@@ -98,7 +95,7 @@ static int mvebu_hwcc_notifier(struct notifier_block *nb,
 
 	if (event != BUS_NOTIFY_ADD_DEVICE)
 		return NOTIFY_DONE;
-	set_dma_ops(dev, &arm_coherent_dma_ops);
+	dev_set_dma_coherent(dev);
 
 	return NOTIFY_OK;
 }
@@ -136,16 +133,11 @@ static void __init armada_370_coherency_init(struct device_node *np)
 
 	cpu_config_np = of_find_compatible_node(NULL, NULL,
 						"marvell,armada-xp-cpu-config");
-	if (!cpu_config_np)
-		goto exit;
 
 	cpu_config_base = of_iomap(cpu_config_np, 0);
-	if (!cpu_config_base) {
-		of_node_put(cpu_config_np);
-		goto exit;
-	}
-
 	of_node_put(cpu_config_np);
+	if (!cpu_config_base)
+		goto exit;
 
 	cpuhp_setup_state_nocalls(CPUHP_AP_ARM_MVEBU_COHERENCY,
 				  "arm/mvebu/coherency:starting",
@@ -193,7 +185,7 @@ static void __init armada_375_380_coherency_init(struct device_node *np)
 	for_each_compatible_node(cache_dn, NULL, "arm,pl310-cache") {
 		struct property *p;
 
-		p = kzalloc(sizeof(*p), GFP_KERNEL);
+		p = kzalloc_obj(*p);
 		p->name = kstrdup("arm,io-coherent", GFP_KERNEL);
 		of_add_property(cache_dn, p);
 	}

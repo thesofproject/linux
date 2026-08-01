@@ -1,18 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * linux/include/linux/timecounter.h
  *
  * based on code that migrated away from
  * linux/include/linux/clocksource.h
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #ifndef _LINUX_TIMECOUNTER_H
 #define _LINUX_TIMECOUNTER_H
@@ -31,20 +22,20 @@
  *
  * @read:		returns the current cycle value
  * @mask:		bitmask for two's complement
- *			subtraction of non 64 bit counters,
+ *			subtraction of non-64-bit counters,
  *			see CYCLECOUNTER_MASK() helper macro
  * @mult:		cycle to nanosecond multiplier
  * @shift:		cycle to nanosecond divisor (power of two)
  */
 struct cyclecounter {
-	u64 (*read)(const struct cyclecounter *cc);
+	u64 (*read)(struct cyclecounter *cc);
 	u64 mask;
 	u32 mult;
 	u32 shift;
 };
 
 /**
- * struct timecounter - layer above a %struct cyclecounter which counts nanoseconds
+ * struct timecounter - layer above a &struct cyclecounter which counts nanoseconds
  *	Contains the state needed by timecounter_read() to detect
  *	cycle counter wrap around. Initialize with
  *	timecounter_init(). Also used to convert cycle counts into the
@@ -62,7 +53,7 @@ struct cyclecounter {
  * @frac:		accumulated fractional nanoseconds
  */
 struct timecounter {
-	const struct cyclecounter *cc;
+	struct cyclecounter *cc;
 	u64 cycle_last;
 	u64 nsec;
 	u64 mask;
@@ -75,6 +66,8 @@ struct timecounter {
  * @cycles:	Cycles
  * @mask:	bit mask for maintaining the 'frac' field
  * @frac:	pointer to storage for the fractional nanoseconds.
+ *
+ * Returns: cycle counter cycles converted to nanoseconds
  */
 static inline u64 cyclecounter_cyc2ns(const struct cyclecounter *cc,
 				      u64 cycles, u64 mask, u64 *frac)
@@ -88,6 +81,7 @@ static inline u64 cyclecounter_cyc2ns(const struct cyclecounter *cc,
 
 /**
  * timecounter_adjtime - Shifts the time of the clock.
+ * @tc:		The &struct timecounter to adjust
  * @delta:	Desired change in nanoseconds.
  */
 static inline void timecounter_adjtime(struct timecounter *tc, s64 delta)
@@ -106,7 +100,7 @@ static inline void timecounter_adjtime(struct timecounter *tc, s64 delta)
  * the time stamp counter by the number of elapsed nanoseconds.
  */
 extern void timecounter_init(struct timecounter *tc,
-			     const struct cyclecounter *cc,
+			     struct cyclecounter *cc,
 			     u64 start_tstamp);
 
 /**
@@ -116,8 +110,19 @@ extern void timecounter_init(struct timecounter *tc,
  *
  * In other words, keeps track of time since the same epoch as
  * the function which generated the initial time stamp.
+ *
+ * Returns: nanoseconds since the initial time stamp
  */
 extern u64 timecounter_read(struct timecounter *tc);
+
+/*
+ * This is like cyclecounter_cyc2ns(), but it is used for computing a
+ * time previous to the time stored in the cycle counter.
+ */
+static inline u64 cc_cyc2ns_backwards(const struct cyclecounter *cc, u64 cycles, u64 frac)
+{
+	return ((cycles * cc->mult) - frac) >> cc->shift;
+}
 
 /**
  * timecounter_cyc2time - convert a cycle counter to same
@@ -132,8 +137,28 @@ extern u64 timecounter_read(struct timecounter *tc);
  *
  * This allows conversion of cycle counter values which were generated
  * in the past.
+ *
+ * Returns: cycle counter converted to nanoseconds since the initial time stamp
  */
-extern u64 timecounter_cyc2time(struct timecounter *tc,
-				u64 cycle_tstamp);
+static inline u64 timecounter_cyc2time(const struct timecounter *tc, u64 cycle_tstamp)
+{
+	const struct cyclecounter *cc = tc->cc;
+	u64 delta = (cycle_tstamp - tc->cycle_last) & cc->mask;
+	u64 nsec = tc->nsec, frac = tc->frac;
+
+	/*
+	 * Instead of always treating cycle_tstamp as more recent than
+	 * tc->cycle_last, detect when it is too far in the future and
+	 * treat it as old time stamp instead.
+	 */
+	if (unlikely(delta > cc->mask / 2)) {
+		delta = (tc->cycle_last - cycle_tstamp) & cc->mask;
+		nsec -= cc_cyc2ns_backwards(cc, delta, frac);
+	} else {
+		nsec += cyclecounter_cyc2ns(cc, delta, tc->mask, &frac);
+	}
+
+	return nsec;
+}
 
 #endif

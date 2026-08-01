@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This is a module which is used for setting the skb->priority field
  * of an skb for qdisc classification.
  */
 
 /* (C) 2001-2002 Patrick McHardy <kaber@trash.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -41,9 +38,9 @@ static struct xt_target classify_tg_reg[] __read_mostly = {
 	{
 		.name       = "CLASSIFY",
 		.revision   = 0,
-		.family     = NFPROTO_UNSPEC,
+		.family     = NFPROTO_IPV4,
 		.hooks      = (1 << NF_INET_LOCAL_OUT) | (1 << NF_INET_FORWARD) |
-		              (1 << NF_INET_POST_ROUTING),
+			      (1 << NF_INET_POST_ROUTING),
 		.target     = classify_tg,
 		.targetsize = sizeof(struct xt_classify_target_info),
 		.me         = THIS_MODULE,
@@ -57,6 +54,18 @@ static struct xt_target classify_tg_reg[] __read_mostly = {
 		.targetsize = sizeof(struct xt_classify_target_info),
 		.me         = THIS_MODULE,
 	},
+#if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
+	{
+		.name       = "CLASSIFY",
+		.revision   = 0,
+		.family     = NFPROTO_IPV6,
+		.hooks      = (1 << NF_INET_LOCAL_OUT) | (1 << NF_INET_FORWARD) |
+			      (1 << NF_INET_POST_ROUTING),
+		.target     = classify_tg,
+		.targetsize = sizeof(struct xt_classify_target_info),
+		.me         = THIS_MODULE,
+	},
+#endif
 };
 
 static int __init classify_tg_init(void)

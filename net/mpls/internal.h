@@ -33,7 +33,7 @@ struct mpls_dev {
 
 #define MPLS_INC_STATS_LEN(mdev, len, pkts_field, bytes_field)		\
 	do {								\
-		__typeof__(*(mdev)->stats) *ptr =			\
+		TYPEOF_UNQUAL(*(mdev)->stats) *ptr =			\
 			raw_cpu_ptr((mdev)->stats);			\
 		local_bh_disable();					\
 		u64_stats_update_begin(&ptr->syncp);			\
@@ -45,7 +45,7 @@ struct mpls_dev {
 
 #define MPLS_INC_STATS(mdev, field)					\
 	do {								\
-		__typeof__(*(mdev)->stats) *ptr =			\
+		TYPEOF_UNQUAL(*(mdev)->stats) *ptr =			\
 			raw_cpu_ptr((mdev)->stats);			\
 		local_bh_disable();					\
 		u64_stats_update_begin(&ptr->syncp);			\
@@ -87,7 +87,8 @@ enum mpls_payload_type {
 };
 
 struct mpls_nh { /* next hop label forwarding entry */
-	struct net_device __rcu *nh_dev;
+	struct net_device	*nh_dev;
+	netdevice_tracker	nh_dev_tracker;
 
 	/* nh_flags is accessed under RCU in the packet path; it is
 	 * modified handling netdev events with rtnl lock held
@@ -98,7 +99,7 @@ struct mpls_nh { /* next hop label forwarding entry */
 	u8			nh_via_table;
 	u8			nh_reserved1;
 
-	u32			nh_label[0];
+	u32			nh_label[];
 };
 
 /* offset of via from beginning of mpls_nh */
@@ -154,34 +155,22 @@ struct mpls_route { /* next hop label forwarding entry */
 	u8			rt_nh_size;
 	u8			rt_via_offset;
 	u8			rt_reserved1;
-	struct mpls_nh		rt_nh[0];
+	struct mpls_nh		rt_nh[];
 };
 
 #define for_nexthops(rt) {						\
-	int nhsel; struct mpls_nh *nh;  u8 *__nh;			\
-	for (nhsel = 0, nh = (rt)->rt_nh, __nh = (u8 *)((rt)->rt_nh);	\
+	int nhsel; const struct mpls_nh *nh;				\
+	for (nhsel = 0, nh = (rt)->rt_nh;				\
 	     nhsel < (rt)->rt_nhn;					\
-	     __nh += rt->rt_nh_size, nh = (struct mpls_nh *)__nh, nhsel++)
+	     nh = (void *)nh + (rt)->rt_nh_size, nhsel++)
 
 #define change_nexthops(rt) {						\
-	int nhsel; struct mpls_nh *nh; u8 *__nh;			\
-	for (nhsel = 0, nh = (struct mpls_nh *)((rt)->rt_nh),		\
-			__nh = (u8 *)((rt)->rt_nh);			\
+	int nhsel; struct mpls_nh *nh;					\
+	for (nhsel = 0, nh = (rt)->rt_nh;				\
 	     nhsel < (rt)->rt_nhn;					\
-	     __nh += rt->rt_nh_size, nh = (struct mpls_nh *)__nh, nhsel++)
+	     nh = (void *)nh + (rt)->rt_nh_size, nhsel++)
 
 #define endfor_nexthops(rt) }
-
-static inline struct mpls_shim_hdr mpls_entry_encode(u32 label, unsigned ttl, unsigned tc, bool bos)
-{
-	struct mpls_shim_hdr result;
-	result.label_stack_entry =
-		cpu_to_be32((label << MPLS_LS_LABEL_SHIFT) |
-			    (tc << MPLS_LS_TC_SHIFT) |
-			    (bos ? (1 << MPLS_LS_S_SHIFT) : 0) |
-			    (ttl << MPLS_LS_TTL_SHIFT));
-	return result;
-}
 
 static inline struct mpls_entry_decoded mpls_entry_decode(struct mpls_shim_hdr *hdr)
 {
@@ -196,9 +185,20 @@ static inline struct mpls_entry_decoded mpls_entry_decode(struct mpls_shim_hdr *
 	return result;
 }
 
-static inline struct mpls_dev *mpls_dev_get(const struct net_device *dev)
+#define mpls_dereference(net, p)					\
+	rcu_dereference_protected(					\
+		(p),							\
+		lockdep_is_held(&(net)->mpls.platform_mutex))
+
+static inline struct mpls_dev *mpls_dev_rcu(const struct net_device *dev)
 {
-	return rcu_dereference_rtnl(dev->mpls_ptr);
+	return rcu_dereference(dev->mpls_ptr);
+}
+
+static inline struct mpls_dev *mpls_dev_get(const struct net *net,
+					    const struct net_device *dev)
+{
+	return mpls_dereference(net, dev->mpls_ptr);
 }
 
 int nla_put_labels(struct sk_buff *skb, int attrtype,  u8 labels,
@@ -208,7 +208,8 @@ int nla_get_labels(const struct nlattr *nla, u8 max_labels, u8 *labels,
 bool mpls_output_possible(const struct net_device *dev);
 unsigned int mpls_dev_mtu(const struct net_device *dev);
 bool mpls_pkt_too_big(const struct sk_buff *skb, unsigned int mtu);
-void mpls_stats_inc_outucastpkts(struct net_device *dev,
+void mpls_stats_inc_outucastpkts(struct net *net,
+				 struct net_device *dev,
 				 const struct sk_buff *skb);
 
 #endif /* MPLS_INTERNAL_H */

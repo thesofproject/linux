@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arm/mach-orion5x/kurobox_pro-setup.c
  *
  * Maintainer: Ronen Shitrit <rshitrit@marvell.com>
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2.  This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 #include <linux/gpio.h>
 #include <linux/kernel.h>
@@ -376,7 +373,7 @@ static void __init kurobox_pro_init(void)
 	i2c_register_board_info(0, &kurobox_pro_i2c_rtc, 1);
 
 	/* register Kurobox Pro specific power-off method */
-	pm_power_off = kurobox_pro_power_off;
+	register_platform_power_off(kurobox_pro_power_off);
 }
 
 #ifdef CONFIG_MACH_KUROBOX_PRO

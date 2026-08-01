@@ -11,14 +11,14 @@
 #ifndef _ASM_IRQFLAGS_H
 #define _ASM_IRQFLAGS_H
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #include <linux/compiler.h>
 #include <linux/stringify.h>
 #include <asm/compiler.h>
 #include <asm/hazards.h>
 
-#if defined(CONFIG_CPU_MIPSR2) || defined (CONFIG_CPU_MIPSR6)
+#if defined(CONFIG_CPU_HAS_DIEI)
 
 static inline void arch_local_irq_disable(void)
 {
@@ -41,7 +41,7 @@ static inline unsigned long arch_local_irq_save(void)
 	"	.set	push						\n"
 	"	.set	reorder						\n"
 	"	.set	noat						\n"
-#if defined(CONFIG_CPU_LOONGSON3)
+#if defined(CONFIG_CPU_LOONGSON64) || defined(CONFIG_CPU_LOONGSON32)
 	"	mfc0	%[flags], $12					\n"
 	"	di							\n"
 #else
@@ -94,7 +94,7 @@ static inline void arch_local_irq_restore(unsigned long flags)
 void arch_local_irq_disable(void);
 unsigned long arch_local_irq_save(void);
 void arch_local_irq_restore(unsigned long flags);
-#endif /* CONFIG_CPU_MIPSR2 || CONFIG_CPU_MIPSR6 */
+#endif /* CONFIG_CPU_HAS_DIEI */
 
 static inline void arch_local_irq_enable(void)
 {
@@ -102,7 +102,7 @@ static inline void arch_local_irq_enable(void)
 	"	.set	push						\n"
 	"	.set	reorder						\n"
 	"	.set	noat						\n"
-#if   defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_CPU_MIPSR6)
+#if defined(CONFIG_CPU_HAS_DIEI)
 	"	ei							\n"
 #else
 	"	mfc0	$1,$12						\n"
@@ -137,7 +137,12 @@ static inline int arch_irqs_disabled_flags(unsigned long flags)
 	return !(flags & 1);
 }
 
-#endif /* #ifndef __ASSEMBLY__ */
+static inline int arch_irqs_disabled(void)
+{
+	return arch_irqs_disabled_flags(arch_local_save_flags());
+}
+
+#endif /* #ifndef __ASSEMBLER__ */
 
 /*
  * Do the CPU's IRQ-state tracing from assembly code.

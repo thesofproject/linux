@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * dts file for AppliedMicro (APM) Merlin Board
  *
  * Copyright (C) 2015, Applied Micro Circuits Corporation
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
  */
 
 /dts-v1/;
@@ -19,14 +15,14 @@
 
 	chosen { };
 
-	memory {
+	memory@100000000 {
 		device_type = "memory";
 		reg = < 0x1 0x00000000 0x0 0x80000000 >;
 	};
 
 	gpio-keys {
 		compatible = "gpio-keys";
-		button@1 {
+		button {
 			label = "POWER";
 			linux,code = <116>;
 			linux,input-type = <0x1>;
@@ -36,12 +32,13 @@
 	};
 
 	poweroff_mbox: poweroff_mbox@10548000 {
-		compatible = "syscon";
+		compatible = "apm,merlin-poweroff-mailbox", "syscon";
 		reg = <0x0 0x10548000 0x0 0x30>;
 	};
 
 	poweroff: poweroff@10548010 {
 		compatible = "syscon-poweroff";
+		reg = <0x0 0x10548010 0x0 0x4>;
 		regmap = <&poweroff_mbox>;
 		offset = <0x10>;
 		mask = <0x1>;
@@ -49,38 +46,38 @@
 };
 
 &serial0 {
-	status = "ok";
+	status = "okay";
 };
 
 &sata1 {
-	status = "ok";
+	status = "okay";
 };
 
 &sata2 {
-	status = "ok";
+	status = "okay";
 };
 
 &sata3 {
-	status = "ok";
+	status = "okay";
 };
 
 &sgenet0 {
-	status = "ok";
+	status = "okay";
 };
 
 &xgenet1 {
-	status = "ok";
+	status = "okay";
 };
 
 &mmc0 {
-	status = "ok";
+	status = "okay";
 };
 
 &i2c4 {
 	rtc68: rtc@68 {
 		compatible = "dallas,ds1337";
 		reg = <0x68>;
-		status = "ok";
+		status = "okay";
 	};
 };
 

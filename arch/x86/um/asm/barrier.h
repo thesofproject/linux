@@ -2,14 +2,8 @@
 #ifndef _ASM_UM_BARRIER_H_
 #define _ASM_UM_BARRIER_H_
 
-#include <asm/asm.h>
-#include <asm/segment.h>
 #include <asm/cpufeatures.h>
-#include <asm/cmpxchg.h>
-#include <asm/nops.h>
-
-#include <linux/kernel.h>
-#include <linux/irqflags.h>
+#include <asm/alternative.h>
 
 /*
  * Force strict CPU ordering.
@@ -18,9 +12,9 @@
  */
 #ifdef CONFIG_X86_32
 
-#define mb()	alternative("lock; addl $0,0(%%esp)", "mfence", X86_FEATURE_XMM2)
-#define rmb()	alternative("lock; addl $0,0(%%esp)", "lfence", X86_FEATURE_XMM2)
-#define wmb()	alternative("lock; addl $0,0(%%esp)", "sfence", X86_FEATURE_XMM)
+#define mb()	alternative("lock addl $0,0(%%esp)", "mfence", X86_FEATURE_XMM2)
+#define rmb()	alternative("lock addl $0,0(%%esp)", "lfence", X86_FEATURE_XMM2)
+#define wmb()	alternative("lock addl $0,0(%%esp)", "sfence", X86_FEATURE_XMM)
 
 #else /* CONFIG_X86_32 */
 
@@ -29,9 +23,6 @@
 #define wmb()	asm volatile("sfence" : : : "memory")
 
 #endif /* CONFIG_X86_32 */
-
-#define dma_rmb()	barrier()
-#define dma_wmb()	barrier()
 
 #include <asm-generic/barrier.h>
 

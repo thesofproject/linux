@@ -1,21 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * OSS compatible sequencer driver
  *
  * Copyright (C) 1998,99 Takashi Iwai <tiwai@suse.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #ifndef __SEQ_OSS_DEVICE_H
@@ -30,6 +17,7 @@
 #include <sound/rawmidi.h>
 #include <sound/seq_kernel.h>
 #include <sound/info.h>
+#include "../seq_clientmgr.h"
 
 /* max. applications */
 #define SNDRV_SEQ_OSS_MAX_CLIENTS	16
@@ -67,7 +55,6 @@ struct seq_oss_chinfo {
 struct seq_oss_synthinfo {
 	struct snd_seq_oss_arg arg;
 	struct seq_oss_chinfo *ch;
-	struct seq_oss_synth_sysex *sysex;
 	int nr_voices;
 	int opened;
 	int is_midi;
@@ -128,10 +115,6 @@ __poll_t snd_seq_oss_poll(struct seq_oss_devinfo *dp, struct file *file, poll_ta
 
 void snd_seq_oss_reset(struct seq_oss_devinfo *dp);
 
-/* */
-void snd_seq_oss_process_queue(struct seq_oss_devinfo *dp, abstime_t time);
-
-
 /* proc interface */
 void snd_seq_oss_system_info_read(struct snd_info_buffer *buf);
 void snd_seq_oss_midi_info_read(struct snd_info_buffer *buf);
@@ -150,11 +133,11 @@ snd_seq_oss_dispatch(struct seq_oss_devinfo *dp, struct snd_seq_event *ev, int a
 	return snd_seq_kernel_client_dispatch(dp->cseq, ev, atomic, hop);
 }
 
-/* ioctl */
+/* ioctl for writeq */
 static inline int
 snd_seq_oss_control(struct seq_oss_devinfo *dp, unsigned int type, void *arg)
 {
-	return snd_seq_kernel_client_ctl(dp->cseq, type, arg);
+	return snd_seq_kernel_client_ioctl(dp->cseq, type, arg);
 }
 
 /* fill the addresses in header */
@@ -167,9 +150,5 @@ snd_seq_oss_fill_addr(struct seq_oss_devinfo *dp, struct snd_seq_event *ev,
 	ev->dest.client = dest_client;
 	ev->dest.port = dest_port;
 }
-
-
-/* misc. functions for proc interface */
-char *enabled_str(int bool);
 
 #endif /* __SEQ_OSS_DEVICE_H */

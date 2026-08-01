@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  * device driver for philips saa7134 based TV cards
  * video4linux video interface
  *
  * (c) 2001,02 Gerd Knorr <kraxel@bytesex.org> [SuSE Labs]
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #include "saa7134.h"
@@ -170,8 +161,6 @@ const struct vb2_ops saa7134_vbi_qops = {
 	.buf_init	= buffer_init,
 	.buf_prepare	= buffer_prepare,
 	.buf_queue	= saa7134_vb2_buffer_queue,
-	.wait_prepare	= vb2_ops_wait_prepare,
-	.wait_finish	= vb2_ops_wait_finish,
 	.start_streaming = saa7134_vb2_start_streaming,
 	.stop_streaming = saa7134_vb2_stop_streaming,
 };
@@ -194,6 +183,7 @@ int saa7134_vbi_init1(struct saa7134_dev *dev)
 int saa7134_vbi_fini(struct saa7134_dev *dev)
 {
 	/* nothing */
+	timer_delete_sync(&dev->vbi_q.timeout);
 	return 0;
 }
 

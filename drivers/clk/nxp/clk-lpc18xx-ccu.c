@@ -1,15 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Clk driver for NXP LPC18xx/LPC43xx Clock Control Unit (CCU)
  *
  * Copyright (C) 2015 Joachim Eastwood <manabian@gmail.com>
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
@@ -29,8 +27,8 @@
 #define CCU_BRANCH_HAVE_DIV2	BIT(1)
 
 struct lpc18xx_branch_clk_data {
-	const char **name;
 	int num;
+	const char *name[] __counted_by(num);
 };
 
 struct lpc18xx_clk_branch {
@@ -142,7 +140,7 @@ static int lpc18xx_ccu_gate_endisable(struct clk_hw *hw, bool enable)
 	 * Divider field is write only, so divider stat field must
 	 * be read so divider field can be set accordingly.
 	 */
-	val = clk_readl(gate->reg);
+	val = readl(gate->reg);
 	if (val & LPC18XX_CCU_DIVSTAT)
 		val |= LPC18XX_CCU_DIV;
 
@@ -150,17 +148,17 @@ static int lpc18xx_ccu_gate_endisable(struct clk_hw *hw, bool enable)
 		val |= LPC18XX_CCU_RUN;
 	} else {
 		/*
-		 * To safely disable a branch clock a squence of two separate
+		 * To safely disable a branch clock a sequence of two separate
 		 * writes must be used. First write should set the AUTO bit
 		 * and the next write should clear the RUN bit.
 		 */
 		val |= LPC18XX_CCU_AUTO;
-		clk_writel(val, gate->reg);
+		writel(val, gate->reg);
 
 		val &= ~LPC18XX_CCU_RUN;
 	}
 
-	clk_writel(val, gate->reg);
+	writel(val, gate->reg);
 
 	return 0;
 }
@@ -210,7 +208,7 @@ static void lpc18xx_ccu_register_branch_gate_div(struct lpc18xx_clk_branch *bran
 	struct clk_hw *div_hw = NULL;
 
 	if (branch->flags & CCU_BRANCH_HAVE_DIV2) {
-		div = kzalloc(sizeof(*div), GFP_KERNEL);
+		div = kzalloc_obj(*div);
 		if (!div)
 			return;
 
@@ -268,6 +266,7 @@ static void __init lpc18xx_ccu_init(struct device_node *np)
 {
 	struct lpc18xx_branch_clk_data *clk_data;
 	void __iomem *reg_base;
+	size_t size;
 	int i, ret;
 
 	reg_base = of_iomap(np, 0);
@@ -276,19 +275,14 @@ static void __init lpc18xx_ccu_init(struct device_node *np)
 		return;
 	}
 
-	clk_data = kzalloc(sizeof(*clk_data), GFP_KERNEL);
+	size = of_property_count_strings(np, "clock-names");
+	clk_data = kzalloc_flex(*clk_data, name, size);
 	if (!clk_data) {
 		iounmap(reg_base);
 		return;
 	}
 
-	clk_data->num = of_property_count_strings(np, "clock-names");
-	clk_data->name = kcalloc(clk_data->num, sizeof(char *), GFP_KERNEL);
-	if (!clk_data->name) {
-		iounmap(reg_base);
-		kfree(clk_data);
-		return;
-	}
+	clk_data->num = size;
 
 	for (i = 0; i < clk_data->num; i++) {
 		ret = of_property_read_string_index(np, "clock-names", i,

@@ -5,7 +5,7 @@
 #include <linux/cpu.h>
 #include <linux/range.h>
 
-#include <asm/amd_nb.h>
+#include <asm/amd/nb.h>
 #include <asm/pci_x86.h>
 
 #include <asm/pci-direct.h>
@@ -51,6 +51,14 @@ static struct pci_root_info __init *find_pci_root_info(int node, int link)
 	return NULL;
 }
 
+static inline resource_size_t cap_resource(u64 val)
+{
+	if (val > RESOURCE_SIZE_MAX)
+		return RESOURCE_SIZE_MAX;
+
+	return val;
+}
+
 /**
  * early_root_info_init()
  * called before pcibios_scan_root and pci_scan_bus
@@ -93,7 +101,8 @@ static int __init early_root_info_init(void)
 		vendor = id & 0xffff;
 		device = (id>>16) & 0xffff;
 
-		if (vendor != PCI_VENDOR_ID_AMD)
+		if (vendor != PCI_VENDOR_ID_AMD &&
+		    vendor != PCI_VENDOR_ID_HYGON)
 			continue;
 
 		if (hb_probes[i].device == device) {
@@ -125,7 +134,7 @@ static int __init early_root_info_init(void)
 		node = (reg >> 4) & 0x07;
 		link = (reg >> 8) & 0x03;
 
-		info = alloc_pci_root_info(min_bus, max_bus, node, link);
+		alloc_pci_root_info(min_bus, max_bus, node, link);
 	}
 
 	/*
@@ -193,7 +202,7 @@ static int __init early_root_info_init(void)
 
 	/* need to take out [0, TOM) for RAM*/
 	address = MSR_K8_TOP_MEM1;
-	rdmsrl(address, val);
+	rdmsrq(address, val);
 	end = (val & 0xffffff800000ULL);
 	printk(KERN_INFO "TOM: %016llx aka %lldM\n", end, end>>20);
 	if (end < (1ULL<<32))
@@ -283,13 +292,13 @@ static int __init early_root_info_init(void)
 
 	/* need to take out [4G, TOM2) for RAM*/
 	/* SYS_CFG */
-	address = MSR_K8_SYSCFG;
-	rdmsrl(address, val);
+	address = MSR_AMD64_SYSCFG;
+	rdmsrq(address, val);
 	/* TOP_MEM2 is enabled? */
 	if (val & (1<<21)) {
 		/* TOP_MEM2 */
 		address = MSR_K8_TOP_MEM2;
-		rdmsrl(address, val);
+		rdmsrq(address, val);
 		end = (val & 0xffffff800000ULL);
 		printk(KERN_INFO "TOM2: %016llx aka %lldM\n", end, end>>20);
 		subtract_range(range, RANGE_NUM, 1ULL<<32, end);
@@ -332,10 +341,10 @@ static int amd_bus_cpu_online(unsigned int cpu)
 {
 	u64 reg;
 
-	rdmsrl(MSR_AMD64_NB_CFG, reg);
+	rdmsrq(MSR_AMD64_NB_CFG, reg);
 	if (!(reg & ENABLE_CF8_EXT_CFG)) {
 		reg |= ENABLE_CF8_EXT_CFG;
-		wrmsrl(MSR_AMD64_NB_CFG, reg);
+		wrmsrq(MSR_AMD64_NB_CFG, reg);
 	}
 	return 0;
 }
@@ -390,7 +399,8 @@ static int __init pci_io_ecs_init(void)
 
 static int __init amd_postcore_init(void)
 {
-	if (boot_cpu_data.x86_vendor != X86_VENDOR_AMD)
+	if (boot_cpu_data.x86_vendor != X86_VENDOR_AMD &&
+	    boot_cpu_data.x86_vendor != X86_VENDOR_HYGON)
 		return 0;
 
 	early_root_info_init();

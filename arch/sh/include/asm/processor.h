@@ -3,10 +3,9 @@
 #define __ASM_SH_PROCESSOR_H
 
 #include <asm/cpu-features.h>
-#include <asm/segment.h>
 #include <asm/cache.h>
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 /*
  *  CPU type and hardware bug flags. Kept separately for each CPU.
  *
@@ -39,9 +38,6 @@ enum cpu_type {
 	/* SH4AL-DSP types */
 	CPU_SH7343, CPU_SH7722, CPU_SH7366, CPU_SH7372,
 
-	/* SH-5 types */
-        CPU_SH5_101, CPU_SH5_103,
-
 	/* Unknown subtype */
 	CPU_SH_NONE
 };
@@ -53,7 +49,6 @@ enum cpu_family {
 	CPU_FAMILY_SH4,
 	CPU_FAMILY_SH4A,
 	CPU_FAMILY_SH4AL_DSP,
-	CPU_FAMILY_SH5,
 	CPU_FAMILY_UNKNOWN,
 };
 
@@ -167,18 +162,14 @@ int vsyscall_init(void);
  */
 #ifdef CONFIG_CPU_SH2A
 extern unsigned int instruction_size(unsigned int insn);
-#elif defined(CONFIG_SUPERH32)
+#else
 #define instruction_size(insn)	(2)
-#else
-#define instruction_size(insn)	(4)
 #endif
 
-#endif /* __ASSEMBLY__ */
+void select_idle_routine(void);
 
-#ifdef CONFIG_SUPERH32
-# include <asm/processor_32.h>
-#else
-# include <asm/processor_64.h>
-#endif
+#endif /* __ASSEMBLER__ */
+
+#include <asm/processor_32.h>
 
 #endif /* __ASM_SH_PROCESSOR_H */

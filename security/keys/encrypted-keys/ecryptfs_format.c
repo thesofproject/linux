@@ -1,21 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ecryptfs_format.c: helper functions for the encrypted key type
  *
  * Copyright (C) 2006 International Business Machines Corp.
  * Copyright (C) 2010 Politecnico di Torino, Italy
- *                    TORSEC group -- http://security.polito.it
+ *                    TORSEC group -- https://security.polito.it
  *
  * Authors:
  * Michael A. Halcrow <mahalcro@us.ibm.com>
  * Tyler Hicks <tyhicks@ou.edu>
  * Roberto Sassu <roberto.sassu@polito.it>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, version 2 of the License.
  */
 
-#include <linux/module.h>
+#include <linux/export.h>
+#include <linux/string.h>
 #include "ecryptfs_format.h"
 
 u8 *ecryptfs_get_auth_tok_key(struct ecryptfs_auth_tok *auth_tok)
@@ -56,8 +54,7 @@ int ecryptfs_fill_auth_tok(struct ecryptfs_auth_tok *auth_tok,
 	auth_tok->version = (((uint16_t)(major << 8) & 0xFF00)
 			     | ((uint16_t)minor & 0x00FF));
 	auth_tok->token_type = ECRYPTFS_PASSWORD;
-	strncpy((char *)auth_tok->token.password.signature, key_desc,
-		ECRYPTFS_PASSWORD_SIG_SIZE);
+	strscpy_pad(auth_tok->token.password.signature, key_desc);
 	auth_tok->token.password.session_key_encryption_key_bytes =
 		ECRYPTFS_MAX_KEY_BYTES;
 	/*
@@ -77,5 +74,3 @@ int ecryptfs_fill_auth_tok(struct ecryptfs_auth_tok *auth_tok,
 	return 0;
 }
 EXPORT_SYMBOL(ecryptfs_fill_auth_tok);
-
-MODULE_LICENSE("GPL");

@@ -26,8 +26,8 @@
 #define PTRACE_GET_THREAD_AREA	22
 #define PTRACE_SET_SYSCALL	23
 /* PTRACE_SYSCALL is 24 */
-#define PTRACE_GETCRUNCHREGS	25
-#define PTRACE_SETCRUNCHREGS	26
+#define PTRACE_GETCRUNCHREGS	25 /* obsolete */
+#define PTRACE_SETCRUNCHREGS	26 /* obsolete */
 #define PTRACE_GETVFPREGS	27
 #define PTRACE_SETVFPREGS	28
 #define PTRACE_GETHBPREGS	29
@@ -101,15 +101,6 @@
 #define PSR_ISET_MASK	0x01000010	/* ISA state (J, T) mask */
 #define PSR_IT_MASK	0x0600fc00	/* If-Then execution state mask */
 #define PSR_ENDIAN_MASK	0x00000200	/* Endianness state mask */
-
-/*
- * Default endianness state
- */
-#ifdef CONFIG_CPU_ENDIAN_BE8
-#define PSR_ENDSTATE	PSR_E_BIT
-#else
-#define PSR_ENDSTATE	0
-#endif
 
 /* 
  * These are 'magic' values for PTRACE_PEEKUSR that return info about where a

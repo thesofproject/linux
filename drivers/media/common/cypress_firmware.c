@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*  cypress_firmware.c is part of the DVB USB library.
  *
  * Copyright (C) 2004-6 Patrick Boettcher (patrick.boettcher@posteo.de)
@@ -74,7 +75,7 @@ int cypress_load_firmware(struct usb_device *udev,
 	struct hexline *hx;
 	int ret, pos = 0;
 
-	hx = kmalloc(sizeof(*hx), GFP_KERNEL);
+	hx = kmalloc_obj(*hx);
 	if (!hx)
 		return -ENOMEM;
 

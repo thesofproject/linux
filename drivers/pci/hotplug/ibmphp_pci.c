@@ -152,7 +152,7 @@ int ibmphp_configure_card(struct pci_func *func, u8 slotno)
 						cleanup_count = 6;
 						goto error;
 					}
-					newfunc = kzalloc(sizeof(*newfunc), GFP_KERNEL);
+					newfunc = kzalloc_obj(*newfunc);
 					if (!newfunc)
 						return -ENOMEM;
 
@@ -189,7 +189,7 @@ int ibmphp_configure_card(struct pci_func *func, u8 slotno)
 					flag = 0;
 					for (i = 0; i < 32; i++) {
 						if (func->devices[i]) {
-							newfunc = kzalloc(sizeof(*newfunc), GFP_KERNEL);
+							newfunc = kzalloc_obj(*newfunc);
 							if (!newfunc)
 								return -ENOMEM;
 
@@ -216,7 +216,7 @@ int ibmphp_configure_card(struct pci_func *func, u8 slotno)
 						}
 					}
 
-					newfunc = kzalloc(sizeof(*newfunc), GFP_KERNEL);
+					newfunc = kzalloc_obj(*newfunc);
 					if (!newfunc)
 						return -ENOMEM;
 
@@ -261,7 +261,7 @@ int ibmphp_configure_card(struct pci_func *func, u8 slotno)
 					for (i = 0; i < 32; i++) {
 						if (func->devices[i]) {
 							debug("inside for loop, device is %x\n", i);
-							newfunc = kzalloc(sizeof(*newfunc), GFP_KERNEL);
+							newfunc = kzalloc_obj(*newfunc);
 							if (!newfunc)
 								return -ENOMEM;
 
@@ -294,7 +294,6 @@ int ibmphp_configure_card(struct pci_func *func, u8 slotno)
 				default:
 					err("MAJOR PROBLEM!!!!, header type not supported? %x\n", hdr_type);
 					return -ENXIO;
-					break;
 			}	/* end of switch */
 		}	/* end of valid device */
 	}	/* end of for */
@@ -330,7 +329,7 @@ error:
 static int configure_device(struct pci_func *func)
 {
 	u32 bar[6];
-	u32 address[] = {
+	static const u32 address[] = {
 		PCI_BASE_ADDRESS_0,
 		PCI_BASE_ADDRESS_1,
 		PCI_BASE_ADDRESS_2,
@@ -385,7 +384,7 @@ static int configure_device(struct pci_func *func)
 
 			debug("len[count] in IO %x, count %d\n", len[count], count);
 
-			io[count] = kzalloc(sizeof(struct resource_node), GFP_KERNEL);
+			io[count] = kzalloc_obj(struct resource_node);
 
 			if (!io[count])
 				return -ENOMEM;
@@ -422,7 +421,7 @@ static int configure_device(struct pci_func *func)
 
 				debug("len[count] in PFMEM %x, count %d\n", len[count], count);
 
-				pfmem[count] = kzalloc(sizeof(struct resource_node), GFP_KERNEL);
+				pfmem[count] = kzalloc_obj(struct resource_node);
 				if (!pfmem[count])
 					return -ENOMEM;
 
@@ -436,7 +435,7 @@ static int configure_device(struct pci_func *func)
 					ibmphp_add_resource(pfmem[count]);
 					func->pfmem[count] = pfmem[count];
 				} else {
-					mem_tmp = kzalloc(sizeof(*mem_tmp), GFP_KERNEL);
+					mem_tmp = kzalloc_obj(*mem_tmp);
 					if (!mem_tmp) {
 						kfree(pfmem[count]);
 						return -ENOMEM;
@@ -486,7 +485,7 @@ static int configure_device(struct pci_func *func)
 
 				debug("len[count] in Mem %x, count %d\n", len[count], count);
 
-				mem[count] = kzalloc(sizeof(struct resource_node), GFP_KERNEL);
+				mem[count] = kzalloc_obj(struct resource_node);
 				if (!mem[count])
 					return -ENOMEM;
 
@@ -565,7 +564,7 @@ static int configure_bridge(struct pci_func **func_passed, u8 slotno)
 	struct resource_node *pfmem = NULL;
 	struct resource_node *bus_pfmem[2] = {NULL, NULL};
 	struct bus_node *bus;
-	u32 address[] = {
+	static const u32 address[] = {
 		PCI_BASE_ADDRESS_0,
 		PCI_BASE_ADDRESS_1,
 		0
@@ -649,7 +648,7 @@ static int configure_bridge(struct pci_func **func_passed, u8 slotno)
 
 			debug("len[count] in IO = %x\n", len[count]);
 
-			bus_io[count] = kzalloc(sizeof(struct resource_node), GFP_KERNEL);
+			bus_io[count] = kzalloc_obj(struct resource_node);
 
 			if (!bus_io[count]) {
 				retval = -ENOMEM;
@@ -681,7 +680,7 @@ static int configure_bridge(struct pci_func **func_passed, u8 slotno)
 
 				debug("len[count] in PFMEM = %x\n", len[count]);
 
-				bus_pfmem[count] = kzalloc(sizeof(struct resource_node), GFP_KERNEL);
+				bus_pfmem[count] = kzalloc_obj(struct resource_node);
 				if (!bus_pfmem[count]) {
 					retval = -ENOMEM;
 					goto error;
@@ -696,7 +695,7 @@ static int configure_bridge(struct pci_func **func_passed, u8 slotno)
 					ibmphp_add_resource(bus_pfmem[count]);
 					func->pfmem[count] = bus_pfmem[count];
 				} else {
-					mem_tmp = kzalloc(sizeof(*mem_tmp), GFP_KERNEL);
+					mem_tmp = kzalloc_obj(*mem_tmp);
 					if (!mem_tmp) {
 						retval = -ENOMEM;
 						goto error;
@@ -736,7 +735,7 @@ static int configure_bridge(struct pci_func **func_passed, u8 slotno)
 
 				debug("len[count] in Memory is %x\n", len[count]);
 
-				bus_mem[count] = kzalloc(sizeof(struct resource_node), GFP_KERNEL);
+				bus_mem[count] = kzalloc_obj(struct resource_node);
 				if (!bus_mem[count]) {
 					retval = -ENOMEM;
 					goto error;
@@ -805,7 +804,7 @@ static int configure_bridge(struct pci_func **func_passed, u8 slotno)
 		flag_io = 1;
 	} else {
 		debug("it wants %x IO behind the bridge\n", amount_needed->io);
-		io = kzalloc(sizeof(*io), GFP_KERNEL);
+		io = kzalloc_obj(*io);
 
 		if (!io) {
 			retval = -ENOMEM;
@@ -827,7 +826,7 @@ static int configure_bridge(struct pci_func **func_passed, u8 slotno)
 		flag_mem = 1;
 	} else {
 		debug("it wants %x memory behind the bridge\n", amount_needed->mem);
-		mem = kzalloc(sizeof(*mem), GFP_KERNEL);
+		mem = kzalloc_obj(*mem);
 		if (!mem) {
 			retval = -ENOMEM;
 			goto error;
@@ -848,7 +847,7 @@ static int configure_bridge(struct pci_func **func_passed, u8 slotno)
 		flag_pfmem = 1;
 	} else {
 		debug("it wants %x pfmemory behind the bridge\n", amount_needed->pfmem);
-		pfmem = kzalloc(sizeof(*pfmem), GFP_KERNEL);
+		pfmem = kzalloc_obj(*pfmem);
 		if (!pfmem) {
 			retval = -ENOMEM;
 			goto error;
@@ -862,7 +861,7 @@ static int configure_bridge(struct pci_func **func_passed, u8 slotno)
 			ibmphp_add_resource(pfmem);
 			flag_pfmem = 1;
 		} else {
-			mem_tmp = kzalloc(sizeof(*mem_tmp), GFP_KERNEL);
+			mem_tmp = kzalloc_obj(*mem_tmp);
 			if (!mem_tmp) {
 				retval = -ENOMEM;
 				goto error;
@@ -892,7 +891,7 @@ static int configure_bridge(struct pci_func **func_passed, u8 slotno)
 		 */
 		bus = ibmphp_find_res_bus(sec_number);
 		if (!bus) {
-			bus = kzalloc(sizeof(*bus), GFP_KERNEL);
+			bus = kzalloc_obj(*bus);
 			if (!bus) {
 				retval = -ENOMEM;
 				goto error;
@@ -1054,7 +1053,7 @@ static struct res_needed *scan_behind_bridge(struct pci_func *func, u8 busno)
 	int howmany = 0;	/*this is to see if there are any devices behind the bridge */
 
 	u32 bar[6], class;
-	u32 address[] = {
+	static const u32 address[] = {
 		PCI_BASE_ADDRESS_0,
 		PCI_BASE_ADDRESS_1,
 		PCI_BASE_ADDRESS_2,
@@ -1065,7 +1064,7 @@ static struct res_needed *scan_behind_bridge(struct pci_func *func, u8 busno)
 	};
 	struct res_needed *amount;
 
-	amount = kzalloc(sizeof(*amount), GFP_KERNEL);
+	amount = kzalloc_obj(*amount);
 	if (amount == NULL)
 		return NULL;
 
@@ -1088,7 +1087,7 @@ static struct res_needed *scan_behind_bridge(struct pci_func *func, u8 busno)
 				pci_bus_read_config_dword(ibmphp_pci_bus, devfn, PCI_CLASS_REVISION, &class);
 
 				debug("hdr_type behind the bridge is %x\n", hdr_type);
-				if ((hdr_type & 0x7f) == PCI_HEADER_TYPE_BRIDGE) {
+				if ((hdr_type & PCI_HEADER_TYPE_MASK) == PCI_HEADER_TYPE_BRIDGE) {
 					err("embedded bridges not supported for hot-plugging.\n");
 					amount->not_correct = 1;
 					return amount;
@@ -1183,7 +1182,7 @@ static struct res_needed *scan_behind_bridge(struct pci_func *func, u8 busno)
 static int unconfigure_boot_device(u8 busno, u8 device, u8 function)
 {
 	u32 start_address;
-	u32 address[] = {
+	static const u32 address[] = {
 		PCI_BASE_ADDRESS_0,
 		PCI_BASE_ADDRESS_1,
 		PCI_BASE_ADDRESS_2,
@@ -1311,7 +1310,7 @@ static int unconfigure_boot_bridge(u8 busno, u8 device, u8 function)
 	struct resource_node *mem = NULL;
 	struct resource_node *pfmem = NULL;
 	struct bus_node *bus;
-	u32 address[] = {
+	static const u32 address[] = {
 		PCI_BASE_ADDRESS_0,
 		PCI_BASE_ADDRESS_1,
 		0
@@ -1509,7 +1508,6 @@ static int unconfigure_boot_card(struct slot *slot_cur)
 				default:
 					err("MAJOR PROBLEM!!!! Cannot read device's header\n");
 					return -1;
-					break;
 			}	/* end of switch */
 		}	/* end of valid device */
 	}	/* end of for */
@@ -1620,7 +1618,7 @@ static int add_new_bus(struct bus_node *bus, struct resource_node *io, struct re
 		list_add(&bus->bus_list, &cur_bus->bus_list);
 	}
 	if (io) {
-		io_range = kzalloc(sizeof(*io_range), GFP_KERNEL);
+		io_range = kzalloc_obj(*io_range);
 		if (!io_range)
 			return -ENOMEM;
 
@@ -1631,7 +1629,7 @@ static int add_new_bus(struct bus_node *bus, struct resource_node *io, struct re
 		bus->rangeIO = io_range;
 	}
 	if (mem) {
-		mem_range = kzalloc(sizeof(*mem_range), GFP_KERNEL);
+		mem_range = kzalloc_obj(*mem_range);
 		if (!mem_range)
 			return -ENOMEM;
 
@@ -1642,7 +1640,7 @@ static int add_new_bus(struct bus_node *bus, struct resource_node *io, struct re
 		bus->rangeMem = mem_range;
 	}
 	if (pfmem) {
-		pfmem_range = kzalloc(sizeof(*pfmem_range), GFP_KERNEL);
+		pfmem_range = kzalloc_obj(*pfmem_range);
 		if (!pfmem_range)
 			return -ENOMEM;
 

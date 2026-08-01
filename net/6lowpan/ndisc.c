@@ -1,11 +1,5 @@
-/* This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+// SPDX-License-Identifier: GPL-2.0-only
+/*
  *
  * Authors:
  * (C) 2016 Pengutronix, Alexander Aring <aar@pengutronix.de>
@@ -17,11 +11,6 @@
 
 #include "6lowpan_i.h"
 
-static int lowpan_ndisc_is_useropt(u8 nd_opt_type)
-{
-	return nd_opt_type == ND_OPT_6CO;
-}
-
 #if IS_ENABLED(CONFIG_IEEE802154_6LOWPAN)
 #define NDISC_802154_SHORT_ADDR_LENGTH	1
 static int lowpan_ndisc_parse_802154_options(const struct net_device *dev,
@@ -31,9 +20,8 @@ static int lowpan_ndisc_parse_802154_options(const struct net_device *dev,
 	switch (nd_opt->nd_opt_len) {
 	case NDISC_802154_SHORT_ADDR_LENGTH:
 		if (ndopts->nd_802154_opt_array[nd_opt->nd_opt_type])
-			ND_PRINTK(2, warn,
-				  "%s: duplicated short addr ND6 option found: type=%d\n",
-				  __func__, nd_opt->nd_opt_type);
+			net_dbg_ratelimited("%s: duplicated short addr ND6 option found: type=%d\n",
+					    __func__, nd_opt->nd_opt_type);
 		else
 			ndopts->nd_802154_opt_array[nd_opt->nd_opt_type] = nd_opt;
 		return 1;
@@ -74,8 +62,7 @@ static void lowpan_ndisc_802154_update(struct neighbour *n, u32 flags,
 			lladdr_short = __ndisc_opt_addr_data(ndopts->nd_802154_opts_src_lladdr,
 							     IEEE802154_SHORT_ADDR_LEN, 0);
 			if (!lladdr_short) {
-				ND_PRINTK(2, warn,
-					  "NA: invalid short link-layer address length\n");
+				net_dbg_ratelimited("NA: invalid short link-layer address length\n");
 				return;
 			}
 		}
@@ -86,8 +73,7 @@ static void lowpan_ndisc_802154_update(struct neighbour *n, u32 flags,
 			lladdr_short = __ndisc_opt_addr_data(ndopts->nd_802154_opts_tgt_lladdr,
 							     IEEE802154_SHORT_ADDR_LEN, 0);
 			if (!lladdr_short) {
-				ND_PRINTK(2, warn,
-					  "NA: invalid short link-layer address length\n");
+				net_dbg_ratelimited("NA: invalid short link-layer address length\n");
 				return;
 			}
 		}
@@ -220,15 +206,13 @@ static void lowpan_ndisc_prefix_rcv_add_addr(struct net *net,
 						   sllao, tokenized, valid_lft,
 						   prefered_lft);
 		if (err)
-			ND_PRINTK(2, warn,
-				  "RA: could not add a short address based address for prefix: %pI6c\n",
-				  &pinfo->prefix);
+			net_dbg_ratelimited("RA: could not add a short address based address for prefix: %pI6c\n",
+					    &pinfo->prefix);
 	}
 }
 #endif
 
 const struct ndisc_ops lowpan_ndisc_ops = {
-	.is_useropt		= lowpan_ndisc_is_useropt,
 #if IS_ENABLED(CONFIG_IEEE802154_6LOWPAN)
 	.parse_options		= lowpan_ndisc_parse_options,
 	.update			= lowpan_ndisc_update,

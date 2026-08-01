@@ -1,15 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2015 Masahiro Yamada <yamada.masahiro@socionext.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/io.h>
@@ -185,65 +176,31 @@ static int uniphier_system_bus_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct uniphier_system_bus_priv *priv;
-	struct resource *regs;
-	const __be32 *ranges;
-	u32 cells, addr, size;
-	u64 paddr;
-	int pna, bank, rlen, rone, ret;
+	struct of_range_parser parser;
+	struct of_range range;
+	int ret;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
-	regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->membase = devm_ioremap_resource(dev, regs);
+	priv->membase = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(priv->membase))
 		return PTR_ERR(priv->membase);
 
 	priv->dev = dev;
 
-	pna = of_n_addr_cells(dev->of_node);
-
-	ret = of_property_read_u32(dev->of_node, "#address-cells", &cells);
-	if (ret) {
-		dev_err(dev, "failed to get #address-cells\n");
+	ret = of_range_parser_init(&parser, dev->of_node);
+	if (ret)
 		return ret;
-	}
-	if (cells != 2) {
-		dev_err(dev, "#address-cells must be 2\n");
-		return -EINVAL;
-	}
 
-	ret = of_property_read_u32(dev->of_node, "#size-cells", &cells);
-	if (ret) {
-		dev_err(dev, "failed to get #size-cells\n");
-		return ret;
-	}
-	if (cells != 1) {
-		dev_err(dev, "#size-cells must be 1\n");
-		return -EINVAL;
-	}
-
-	ranges = of_get_property(dev->of_node, "ranges", &rlen);
-	if (!ranges) {
-		dev_err(dev, "failed to get ranges property\n");
-		return -ENOENT;
-	}
-
-	rlen /= sizeof(*ranges);
-	rone = pna + 2;
-
-	for (; rlen >= rone; rlen -= rone) {
-		bank = be32_to_cpup(ranges++);
-		addr = be32_to_cpup(ranges++);
-		paddr = of_translate_address(dev->of_node, ranges);
-		if (paddr == OF_BAD_ADDR)
+	for_each_of_range(&parser, &range) {
+		if (range.cpu_addr == OF_BAD_ADDR)
 			return -EINVAL;
-		ranges += pna;
-		size = be32_to_cpup(ranges++);
-
-		ret = uniphier_system_bus_add_bank(priv, bank, addr,
-						   paddr, size);
+		ret = uniphier_system_bus_add_bank(priv,
+						   upper_32_bits(range.bus_addr),
+						   lower_32_bits(range.bus_addr),
+						   range.cpu_addr, range.size);
 		if (ret)
 			return ret;
 	}

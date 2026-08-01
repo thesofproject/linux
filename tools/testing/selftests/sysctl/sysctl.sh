@@ -1,18 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-or-later OR copyleft-next-0.3.1
 # Copyright (C) 2017 Luis R. Rodriguez <mcgrof@kernel.org>
-#
-# This program is free software; you can redistribute it and/or modify it
-# under the terms of the GNU General Public License as published by the Free
-# Software Foundation; either version 2 of the License, or at your option any
-# later version; or, when distributed separately from the Linux kernel or
-# when incorporated into other software packages, subject to the following
-# license:
-#
-# This program is free software; you can redistribute it and/or modify it
-# under the terms of copyleft-next (version 0.3.1 or later) as published
-# at http://copyleft-next.org/.
 
 # This performs a series tests against the proc sysctl interface.
+
+# Kselftest framework requirement - SKIP code is 4.
+ksft_skip=4
 
 TEST_NAME="sysctl"
 TEST_DRIVER="test_${TEST_NAME}"
@@ -21,29 +14,29 @@ TEST_FILE=$(mktemp)
 
 # This represents
 #
-# TEST_ID:TEST_COUNT:ENABLED
+# TEST_ID:TEST_COUNT:ENABLED:TARGET:SKIP_NO_TARGET
 #
 # TEST_ID: is the test id number
 # TEST_COUNT: number of times we should run the test
 # ENABLED: 1 if enabled, 0 otherwise
+# TARGET: test target file required on the test_sysctl module
+# SKIP_NO_TARGET: 1 skip if TARGET not there
+#                 0 run even though TARGET not there
 #
 # Once these are enabled please leave them as-is. Write your own test,
 # we have tons of space.
-ALL_TESTS="0001:1:1"
-ALL_TESTS="$ALL_TESTS 0002:1:1"
-ALL_TESTS="$ALL_TESTS 0003:1:1"
-ALL_TESTS="$ALL_TESTS 0004:1:1"
-ALL_TESTS="$ALL_TESTS 0005:3:1"
-
-test_modprobe()
-{
-       if [ ! -d $DIR ]; then
-               echo "$0: $DIR not present" >&2
-               echo "You must have the following enabled in your kernel:" >&2
-               cat $TEST_DIR/config >&2
-               exit 1
-       fi
-}
+ALL_TESTS="0001:1:1:int_0001:1"
+ALL_TESTS="$ALL_TESTS 0002:1:1:string_0001:1"
+ALL_TESTS="$ALL_TESTS 0003:1:1:int_0002:1"
+ALL_TESTS="$ALL_TESTS 0004:1:1:uint_0001:1"
+ALL_TESTS="$ALL_TESTS 0005:3:1:int_0003:1"
+ALL_TESTS="$ALL_TESTS 0006:50:1:bitmap_0001:1"
+ALL_TESTS="$ALL_TESTS 0007:1:1:boot_int:1"
+ALL_TESTS="$ALL_TESTS 0008:1:1:match_int:1"
+ALL_TESTS="$ALL_TESTS 0009:1:1:unregister_error:0"
+ALL_TESTS="$ALL_TESTS 0010:1:1:mnt/mnt_error:0"
+ALL_TESTS="$ALL_TESTS 0011:1:1:empty_add:0"
+ALL_TESTS="$ALL_TESTS 0012:1:1:u8_valid:0"
 
 function allow_user_defaults()
 {
@@ -72,7 +65,7 @@ function check_production_sysctl_writes_strict()
 	else
 		old_strict=$(cat ${WRITES_STRICT})
 		if [ "$old_strict" = "1" ]; then
-			echo "ok"
+			echo "OK"
 		else
 			echo "FAIL, strict value is 0 but force to 1 to continue" >&2
 			echo "1" > ${WRITES_STRICT}
@@ -98,30 +91,34 @@ test_reqs()
 	uid=$(id -u)
 	if [ $uid -ne 0 ]; then
 		echo $msg must be run as root >&2
-		exit 0
+		exit $ksft_skip
 	fi
 
 	if ! which perl 2> /dev/null > /dev/null; then
 		echo "$0: You need perl installed"
-		exit 1
+		exit $ksft_skip
 	fi
 	if ! which getconf 2> /dev/null > /dev/null; then
 		echo "$0: You need getconf installed"
-		exit 1
+		exit $ksft_skip
 	fi
 	if ! which diff 2> /dev/null > /dev/null; then
 		echo "$0: You need diff installed"
-		exit 1
+		exit $ksft_skip
 	fi
 }
 
 function load_req_mod()
 {
-	trap "test_modprobe" EXIT
-
-	if [ ! -d $DIR ]; then
+	if [ ! -d $SYSCTL ]; then
+		if ! modprobe -q -n $TEST_DRIVER; then
+			echo "$0: module $TEST_DRIVER not found [SKIP]"
+			echo "You must set CONFIG_TEST_SYSCTL=m in your kernel" >&2
+			exit $ksft_skip
+		fi
 		modprobe $TEST_DRIVER
 		if [ $? -ne 0 ]; then
+			echo "$0: modprobe $TEST_DRIVER failed."
 			exit
 		fi
 	fi
@@ -144,6 +141,9 @@ reset_vals()
 		string_0001)
 			VAL="(none)"
 			;;
+		bitmap_0001)
+			VAL=""
+			;;
 		*)
 			;;
 	esac
@@ -152,8 +152,10 @@ reset_vals()
 
 set_orig()
 {
-	if [ ! -z $TARGET ]; then
-		echo "${ORIG}" > "${TARGET}"
+	if [ ! -z $TARGET ] && [ ! -z $ORIG ]; then
+		if [ -f ${TARGET} ]; then
+			echo "${ORIG}" > "${TARGET}"
+		fi
 	fi
 }
 
@@ -172,9 +174,25 @@ verify()
 	return 0
 }
 
+# proc files get read a page at a time, which can confuse diff,
+# and get you incorrect results on proc files with long data. To use
+# diff against them you must first extract the output to a file, and
+# then compare against that file.
+verify_diff_proc_file()
+{
+	TMP_DUMP_FILE=$(mktemp)
+	cat $1 > $TMP_DUMP_FILE
+
+	if ! diff -w -q $TMP_DUMP_FILE $2; then
+		return 1
+	else
+		return 0
+	fi
+}
+
 verify_diff_w()
 {
-	echo "$TEST_STR" | diff -q -w -u - $1
+	echo "$TEST_STR" | diff -q -w -u - $1 > /dev/null
 	return $?
 }
 
@@ -209,7 +227,7 @@ run_numerictests()
 		echo "FAIL" >&2
 		exit 1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 
 	echo -n "Checking sysctl is not set to test value ... "
@@ -217,7 +235,7 @@ run_numerictests()
 		echo "FAIL" >&2
 		exit 1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 
 	echo -n "Writing sysctl from shell ... "
@@ -226,7 +244,7 @@ run_numerictests()
 		echo "FAIL" >&2
 		exit 1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 
 	echo -n "Resetting sysctl to original value ... "
@@ -235,7 +253,7 @@ run_numerictests()
 		echo "FAIL" >&2
 		exit 1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 
 	# Now that we've validated the sanity of "set_test" and "set_orig",
@@ -249,7 +267,7 @@ run_numerictests()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 
 	echo -n "Writing middle of sysctl after synchronized seek ... "
@@ -259,7 +277,7 @@ run_numerictests()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 
 	echo -n "Writing beyond end of sysctl ... "
@@ -269,7 +287,7 @@ run_numerictests()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 
 	echo -n "Writing sysctl with multiple long writes ... "
@@ -280,15 +298,67 @@ run_numerictests()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 	test_rc
+}
+
+check_failure()
+{
+	echo -n "Testing that $1 fails as expected ... "
+	reset_vals
+	TEST_STR="$1"
+	orig="$(cat $TARGET)"
+	echo -n "$TEST_STR" > $TARGET 2> /dev/null
+
+	# write should fail and $TARGET should retain its original value
+	if [ $? = 0 ] || [ "$(cat $TARGET)" != "$orig" ]; then
+		echo "FAIL" >&2
+		rc=1
+	else
+		echo "OK"
+	fi
+	test_rc
+}
+
+run_wideint_tests()
+{
+	# sysctl conversion functions receive a boolean sign and ulong
+	# magnitude; here we list the magnitudes we want to test (each of
+	# which will be tested in both positive and negative forms).  Since
+	# none of these values fit in 32 bits, writing them to an int- or
+	# uint-typed sysctl should fail.
+	local magnitudes=(
+		# common boundary-condition values (zero, +1, -1, INT_MIN,
+		# and INT_MAX respectively) if truncated to lower 32 bits
+		# (potential for being falsely deemed in range)
+		0x0000000100000000
+		0x0000000100000001
+		0x00000001ffffffff
+		0x0000000180000000
+		0x000000017fffffff
+
+		# these look like negatives, but without a leading '-' are
+		# actually large positives (should be rejected as above
+		# despite being zero/+1/-1/INT_MIN/INT_MAX in the lower 32)
+		0xffffffff00000000
+		0xffffffff00000001
+		0xffffffffffffffff
+		0xffffffff80000000
+		0xffffffff7fffffff
+	)
+
+	for sign in '' '-'; do
+		for mag in "${magnitudes[@]}"; do
+			check_failure "${sign}${mag}"
+		done
+	done
 }
 
 # Your test must accept digits 3 and 4 to use this
 run_limit_digit()
 {
-	echo -n "Checking ignoring spaces up to PAGE_SIZE works on write ..."
+	echo -n "Checking ignoring spaces up to PAGE_SIZE works on write ... "
 	reset_vals
 
 	LIMIT=$((MAX_DIGITS -1))
@@ -300,11 +370,11 @@ run_limit_digit()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 	test_rc
 
-	echo -n "Checking passing PAGE_SIZE of spaces fails on write ..."
+	echo -n "Checking passing PAGE_SIZE of spaces fails on write ... "
 	reset_vals
 
 	LIMIT=$((MAX_DIGITS))
@@ -316,7 +386,7 @@ run_limit_digit()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 	test_rc
 }
@@ -324,7 +394,7 @@ run_limit_digit()
 # You are using an int
 run_limit_digit_int()
 {
-	echo -n "Testing INT_MAX works ..."
+	echo -n "Testing INT_MAX works ... "
 	reset_vals
 	TEST_STR="$INT_MAX"
 	echo -n $TEST_STR > $TARGET
@@ -333,11 +403,11 @@ run_limit_digit_int()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 	test_rc
 
-	echo -n "Testing INT_MAX + 1 will fail as expected..."
+	echo -n "Testing INT_MAX + 1 will fail as expected ... "
 	reset_vals
 	let TEST_STR=$INT_MAX+1
 	echo -n $TEST_STR > $TARGET 2> /dev/null
@@ -346,11 +416,11 @@ run_limit_digit_int()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 	test_rc
 
-	echo -n "Testing negative values will work as expected..."
+	echo -n "Testing negative values will work as expected ... "
 	reset_vals
 	TEST_STR="-3"
 	echo -n $TEST_STR > $TARGET 2> /dev/null
@@ -358,7 +428,7 @@ run_limit_digit_int()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 	test_rc
 }
@@ -374,7 +444,7 @@ run_limit_digit_int_array()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 	test_rc
 
@@ -391,7 +461,7 @@ run_limit_digit_int_array()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 	test_rc
 
@@ -409,7 +479,7 @@ run_limit_digit_int_array()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 	test_rc
 
@@ -426,7 +496,7 @@ run_limit_digit_int_array()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 	test_rc
 }
@@ -434,7 +504,7 @@ run_limit_digit_int_array()
 # You are using an unsigned int
 run_limit_digit_uint()
 {
-	echo -n "Testing UINT_MAX works ..."
+	echo -n "Testing UINT_MAX works ... "
 	reset_vals
 	TEST_STR="$UINT_MAX"
 	echo -n $TEST_STR > $TARGET
@@ -443,11 +513,11 @@ run_limit_digit_uint()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 	test_rc
 
-	echo -n "Testing UINT_MAX + 1 will fail as expected..."
+	echo -n "Testing UINT_MAX + 1 will fail as expected ... "
 	reset_vals
 	TEST_STR=$(($UINT_MAX+1))
 	echo -n $TEST_STR > $TARGET 2> /dev/null
@@ -456,11 +526,11 @@ run_limit_digit_uint()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 	test_rc
 
-	echo -n "Testing negative values will not work as expected ..."
+	echo -n "Testing negative values will not work as expected ... "
 	reset_vals
 	TEST_STR="-3"
 	echo -n $TEST_STR > $TARGET 2> /dev/null
@@ -469,7 +539,7 @@ run_limit_digit_uint()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 	test_rc
 }
@@ -483,7 +553,7 @@ run_stringtests()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 
 	echo -n "Writing middle of sysctl after unsynchronized seek ... "
@@ -493,7 +563,7 @@ run_stringtests()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 
 	echo -n "Checking sysctl maxlen is at least $MAXLEN ... "
@@ -504,7 +574,7 @@ run_stringtests()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 
 	echo -n "Checking sysctl keeps original string on overflow append ... "
@@ -515,7 +585,7 @@ run_stringtests()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 
 	echo -n "Checking sysctl stays NULL terminated on write ... "
@@ -526,7 +596,7 @@ run_stringtests()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 
 	echo -n "Checking sysctl stays NULL terminated on overwrite ... "
@@ -537,26 +607,87 @@ run_stringtests()
 		echo "FAIL" >&2
 		rc=1
 	else
-		echo "ok"
+		echo "OK"
 	fi
 
 	test_rc
 }
 
+target_exists()
+{
+	TARGET="${SYSCTL}/$1"
+	TEST_ID="$2"
+
+	if [ ! -f ${TARGET} ] ; then
+		return 0
+	fi
+	return 1
+}
+
+run_bitmaptest() {
+	# Total length of bitmaps string to use, a bit under
+	# the maximum input size of the test node
+	LENGTH=$((RANDOM % 65000))
+
+	# First bit to set
+	BIT=$((RANDOM % 1024))
+
+	# String containing our list of bits to set
+	TEST_STR=$BIT
+
+	# build up the string
+	while [ "${#TEST_STR}" -le "$LENGTH" ]; do
+		# Make sure next entry is discontiguous,
+		# skip ahead at least 2
+		BIT=$((BIT + $((2 + RANDOM % 10))))
+
+		# Add new bit to the list
+		TEST_STR="${TEST_STR},${BIT}"
+
+		# Randomly make it a range
+		if [ "$((RANDOM % 2))" -eq "1" ]; then
+			RANGE_END=$((BIT + $((1 + RANDOM % 10))))
+			TEST_STR="${TEST_STR}-${RANGE_END}"
+			BIT=$RANGE_END
+		fi
+	done
+
+	echo -n "Checking bitmap handler ... "
+	TEST_FILE=$(mktemp)
+	echo -n "$TEST_STR" > $TEST_FILE
+
+	cat $TEST_FILE > $TARGET 2> /dev/null
+	if [ $? -ne 0 ]; then
+		echo "FAIL" >&2
+		rc=1
+		test_rc
+	fi
+
+	if ! verify_diff_proc_file "$TARGET" "$TEST_FILE"; then
+		echo "FAIL" >&2
+		rc=1
+	else
+		echo "OK"
+		rc=0
+	fi
+	test_rc
+}
+
 sysctl_test_0001()
 {
-	TARGET="${SYSCTL}/int_0001"
+	TARGET="${SYSCTL}/$(get_test_target 0001)"
 	reset_vals
 	ORIG=$(cat "${TARGET}")
 	TEST_STR=$(( $ORIG + 1 ))
 
 	run_numerictests
+	run_wideint_tests
 	run_limit_digit
 }
 
 sysctl_test_0002()
 {
-	TARGET="${SYSCTL}/string_0001"
+	TARGET="${SYSCTL}/$(get_test_target 0002)"
 	reset_vals
 	ORIG=$(cat "${TARGET}")
 	TEST_STR="Testing sysctl"
@@ -569,35 +700,184 @@ sysctl_test_0002()
 
 sysctl_test_0003()
 {
-	TARGET="${SYSCTL}/int_0002"
+	TARGET="${SYSCTL}/$(get_test_target 0003)"
 	reset_vals
 	ORIG=$(cat "${TARGET}")
 	TEST_STR=$(( $ORIG + 1 ))
 
 	run_numerictests
+	run_wideint_tests
 	run_limit_digit
 	run_limit_digit_int
 }
 
 sysctl_test_0004()
 {
-	TARGET="${SYSCTL}/uint_0001"
+	TARGET="${SYSCTL}/$(get_test_target 0004)"
 	reset_vals
 	ORIG=$(cat "${TARGET}")
 	TEST_STR=$(( $ORIG + 1 ))
 
 	run_numerictests
+	run_wideint_tests
 	run_limit_digit
 	run_limit_digit_uint
 }
 
 sysctl_test_0005()
 {
-	TARGET="${SYSCTL}/int_0003"
+	TARGET="${SYSCTL}/$(get_test_target 0005)"
 	reset_vals
 	ORIG=$(cat "${TARGET}")
 
 	run_limit_digit_int_array
+}
+
+sysctl_test_0006()
+{
+	TARGET="${SYSCTL}/$(get_test_target 0006)"
+	reset_vals
+	ORIG=""
+	run_bitmaptest
+}
+
+sysctl_test_0007()
+{
+	TARGET="${SYSCTL}/$(get_test_target 0007)"
+	echo -n "Testing if $TARGET is set to 1 ... "
+
+	if [ ! -f $TARGET ]; then
+		echo -e "SKIPPING\n$TARGET is not present"
+		return $ksft_skip
+	fi
+
+	if [ -d $DIR ]; then
+		echo -e "SKIPPING\nTest only possible if sysctl_test is built-in, not module:"
+		cat $TEST_DIR/config >&2
+		return $ksft_skip
+	fi
+
+	ORIG=$(cat "${TARGET}")
+
+	if [ x$ORIG = "x1" ]; then
+		echo "OK"
+		return 0
+	fi
+
+	if [ ! -f /proc/cmdline ]; then
+		echo -e "SKIPPING\nThere is no /proc/cmdline to check for parameter"
+		return $ksft_skip
+	fi
+
+	FOUND=$(grep -c "sysctl[./]debug[./]test_sysctl[./]boot_int=1" /proc/cmdline)
+	if [ $FOUND = "1" ]; then
+		echo -e "FAIL\nKernel param found but $TARGET is not 1." >&2
+		rc=1
+		test_rc
+	fi
+
+	echo -e "SKIPPING\nExpected kernel parameter missing."
+	echo "Kernel must be booted with parameter: sysctl.debug.test_sysctl.boot_int=1"
+	return $ksft_skip
+}
+
+sysctl_test_0008()
+{
+	TARGET="${SYSCTL}/$(get_test_target 0008)"
+	echo -n "Testing if $TARGET is matched in kernel ... "
+
+	if [ ! -f $TARGET ]; then
+		echo -e "SKIPPING\n$TARGET is not present"
+		return $ksft_skip
+	fi
+
+	ORIG_VALUE=$(cat "${TARGET}")
+
+	if [ $ORIG_VALUE -ne 1 ]; then
+		echo "FAIL" >&2
+		rc=1
+		test_rc
+	fi
+
+	echo "OK"
+	return 0
+}
+
+sysctl_test_0009()
+{
+	TARGET="${SYSCTL}/$(get_test_target 0009)"
+	echo -n "Testing if $TARGET unregistered correctly ... "
+	if [ -d $TARGET ]; then
+		echo "FAIL" >&2
+		rc=1
+		test_rc
+	fi
+
+	echo "OK"
+	return 0
+}
+
+sysctl_test_0010()
+{
+	TARGET="${SYSCTL}/$(get_test_target 0010)"
+	echo -n "Testing that $TARGET was not created ... "
+	if [ -d $TARGET ]; then
+		echo "FAIL" >&2
+		rc=1
+		test_rc
+	fi
+
+	echo "OK"
+	return 0
+}
+
+sysctl_test_0011()
+{
+	TARGET="${SYSCTL}/$(get_test_target 0011)"
+	echo -n "Testing empty dir handling in ${TARGET} ... "
+	if [ ! -d ${TARGET} ]; then
+		echo -e "FAIL\nCould not create ${TARGET}" >&2
+		rc=1
+		test_rc
+	fi
+
+	TARGET2="${TARGET}/empty"
+	if [ ! -d ${TARGET2} ]; then
+		echo -e "FAIL\nCould not create ${TARGET2}" >&2
+		rc=1
+		test_rc
+	fi
+
+	echo "OK"
+	return 0
+}
+
+sysctl_test_0012()
+{
+	TARGET="${SYSCTL}/$(get_test_target 0012)"
+	echo -n "Testing u8 range check in sysctl table check in ${TARGET} ... "
+	if [ ! -f ${TARGET} ]; then
+		echo -e "FAIL\nCould not create ${TARGET}" >&2
+		rc=1
+		test_rc
+	fi
+
+	local u8over_msg=$(dmesg | grep "u8_over range value" | wc -l)
+	if [ ! ${u8over_msg} -eq 1 ]; then
+		echo -e "FAIL\nu8 overflow not detected" >&2
+		rc=1
+		test_rc
+	fi
+
+	local u8under_msg=$(dmesg | grep "u8_under range value" | wc -l)
+	if [ ! ${u8under_msg} -eq 1 ]; then
+		echo -e "FAIL\nu8 underflow not detected" >&2
+		rc=1
+		test_rc
+	fi
+
+	echo "OK"
+	return 0
 }
 
 list_tests()
@@ -606,16 +886,21 @@ list_tests()
 	echo
 	echo "TEST_ID x NUM_TEST"
 	echo "TEST_ID:   Test ID"
-	echo "NUM_TESTS: Number of recommended times to run the test"
+	echo "NUM_TESTS: Recommended number of times to run the test"
 	echo
 	echo "0001 x $(get_test_count 0001) - tests proc_dointvec_minmax()"
 	echo "0002 x $(get_test_count 0002) - tests proc_dostring()"
 	echo "0003 x $(get_test_count 0003) - tests proc_dointvec()"
 	echo "0004 x $(get_test_count 0004) - tests proc_douintvec()"
 	echo "0005 x $(get_test_count 0005) - tests proc_douintvec() array"
+	echo "0006 x $(get_test_count 0006) - tests proc_do_large_bitmap()"
+	echo "0007 x $(get_test_count 0007) - tests setting sysctl from kernel boot param"
+	echo "0008 x $(get_test_count 0008) - tests sysctl macro values match"
+	echo "0009 x $(get_test_count 0009) - tests sysct unregister"
+	echo "0010 x $(get_test_count 0010) - tests sysct mount point"
+	echo "0011 x $(get_test_count 0011) - tests empty directories"
+	echo "0012 x $(get_test_count 0012) - tests range check for u8 proc_handler"
 }
-
-test_reqs
 
 usage()
 {
@@ -629,7 +914,7 @@ usage()
 	echo "Valid tests: 0001-$MAX_TEST"
 	echo ""
 	echo "    all     Runs all tests (default)"
-	echo "    -t      Run test ID the number amount of times is recommended"
+	echo "    -t      Run test ID the recommended number of times"
 	echo "    -w      Watch test ID run until it runs into an error"
 	echo "    -c      Run test ID once"
 	echo "    -s      Run test ID x test-count number of times"
@@ -643,7 +928,7 @@ usage()
 	echo Example uses:
 	echo
 	echo "$TEST_NAME.sh            -- executes all tests"
-	echo "$TEST_NAME.sh -t 0002    -- Executes test ID 0002 number of times is recomended"
+	echo "$TEST_NAME.sh -t 0002    -- Executes test ID 0002 the recommended number of times"
 	echo "$TEST_NAME.sh -w 0002    -- Watch test ID 0002 run until an error occurs"
 	echo "$TEST_NAME.sh -s 0002    -- Run test ID 0002 once"
 	echo "$TEST_NAME.sh -c 0002 3  -- Run test ID 0002 three times"
@@ -659,30 +944,67 @@ function test_num()
 		usage
 	fi
 }
+function remove_leading_zeros()
+{
+	echo $1 | sed 's/^0*//'
+}
 
 function get_test_count()
 {
 	test_num $1
-	TEST_DATA=$(echo $ALL_TESTS | awk '{print $'$1'}')
-	LAST_TWO=${TEST_DATA#*:*}
-	echo ${LAST_TWO%:*}
+	awk_field=$(remove_leading_zeros $1)
+	TEST_DATA=$(echo $ALL_TESTS | awk '{print $'$awk_field'}')
+	echo ${TEST_DATA} | awk -F":" '{print $2}'
 }
 
 function get_test_enabled()
 {
 	test_num $1
-	TEST_DATA=$(echo $ALL_TESTS | awk '{print $'$1'}')
-	echo ${TEST_DATA#*:*:}
+	awk_field=$(remove_leading_zeros $1)
+	TEST_DATA=$(echo $ALL_TESTS | awk '{print $'$awk_field'}')
+	echo ${TEST_DATA} | awk -F":" '{print $3}'
+}
+
+function get_test_target()
+{
+	test_num $1
+	awk_field=$(remove_leading_zeros $1)
+	TEST_DATA=$(echo $ALL_TESTS | awk '{print $'$awk_field'}')
+	echo ${TEST_DATA} | awk -F":" '{print $4}'
+}
+
+function get_test_skip_no_target()
+{
+	test_num $1
+	awk_field=$(remove_leading_zeros $1)
+	TEST_DATA=$(echo $ALL_TESTS | awk '{print $'$awk_field'}')
+	echo ${TEST_DATA} | awk -F":" '{print $5}'
+}
+
+function skip_test()
+{
+	TEST_ID=$1
+	TEST_TARGET=$2
+	if target_exists $TEST_TARGET $TEST_ID; then
+		TEST_SKIP=$(get_test_skip_no_target $TEST_ID)
+		if [[ $TEST_SKIP -eq "1" ]]; then
+			echo "Target $TEST_TARGET for test $TEST_ID does not exist ... SKIPPING"
+			return 0
+		fi
+	fi
+	return 1
 }
 
 function run_all_tests()
 {
 	for i in $ALL_TESTS ; do
-		TEST_ID=${i%:*:*}
+		TEST_ID=${i%:*:*:*:*}
 		ENABLED=$(get_test_enabled $TEST_ID)
 		TEST_COUNT=$(get_test_count $TEST_ID)
+		TEST_TARGET=$(get_test_target $TEST_ID)
+
 		if [[ $ENABLED -eq "1" ]]; then
-			test_case $TEST_ID $TEST_COUNT
+			test_case $TEST_ID $TEST_COUNT $TEST_TARGET
 		fi
 	done
 }
@@ -715,16 +1037,19 @@ function watch_case()
 
 function test_case()
 {
-	NUM_TESTS=$DEFAULT_NUM_TESTS
-	if [ $# -eq 2 ]; then
-		NUM_TESTS=$2
+	TEST_ID=$1
+	NUM_TESTS=$2
+	TARGET=$3
+
+	if skip_test $TEST_ID $TARGET; then
+		return
 	fi
 
 	i=0
 	while [ $i -lt $NUM_TESTS ]; do
-		test_num $1
-		watch_log $i ${TEST_NAME}_test_$1 noclear
-		RUN_TEST=${TEST_NAME}_test_$1
+		test_num $TEST_ID
+		watch_log $i ${TEST_NAME}_test_${TEST_ID} noclear
+		RUN_TEST=${TEST_NAME}_test_${TEST_ID}
 		$RUN_TEST
 		let i=$i+1
 	done
@@ -743,15 +1068,15 @@ function parse_args()
 		elif [[ "$1" = "-t" ]]; then
 			shift
 			test_num $1
-			test_case $1 $(get_test_count $1)
+			test_case $1 $(get_test_count $1) $(get_test_target $1)
 		elif [[ "$1" = "-c" ]]; then
 			shift
 			test_num $1
 			test_num $2
-			test_case $1 $2
+			test_case $1 $2 $(get_test_target $1)
 		elif [[ "$1" = "-s" ]]; then
 			shift
-			test_case $1 1
+			test_case $1 1 $(get_test_target $1)
 		elif [[ "$1" = "-l" ]]; then
 			list_tests
 		elif [[ "$1" = "-h" || "$1" = "--help" ]]; then

@@ -19,10 +19,6 @@
 #include "gcc-common.h"
 #include "randomize_layout_seed.h"
 
-#if BUILDING_GCC_MAJOR < 4 || (BUILDING_GCC_MAJOR == 4 && BUILDING_GCC_MINOR < 7)
-#error "The RANDSTRUCT plugin requires GCC 4.7 or newer."
-#endif
-
 #define ORIG_TYPE_NAME(node) \
 	(TYPE_NAME(TYPE_MAIN_VARIANT(node)) != NULL_TREE ? ((const unsigned char *)IDENTIFIER_POINTER(TYPE_NAME(TYPE_MAIN_VARIANT(node)))) : (const unsigned char *)"anonymous")
 
@@ -34,27 +30,9 @@ __visible int plugin_is_GPL_compatible;
 static int performance_mode;
 
 static struct plugin_info randomize_layout_plugin_info = {
-	.version	= "201402201816vanilla",
+	.version	= PLUGIN_VERSION,
 	.help		= "disable\t\t\tdo not activate plugin\n"
 			  "performance-mode\tenable cacheline-aware layout randomization\n"
-};
-
-struct whitelist_entry {
-	const char *pathname;
-	const char *lhs;
-	const char *rhs;
-};
-
-static const struct whitelist_entry whitelist[] = {
-	/* NIU overloads mapping with page struct */
-	{ "drivers/net/ethernet/sun/niu.c", "page", "address_space" },
-	/* unix_skb_parms via UNIXCB() buffer */
-	{ "net/unix/af_unix.c", "unix_skb_parms", "char" },
-	/* big_key payload.data struct splashing */
-	{ "security/keys/big_key.c", "path", "void *" },
-	/* walk struct security_hook_heads as an array of struct hlist_head */
-	{ "security/security.c", "hlist_head", "security_hook_heads" },
-	{ }
 };
 
 /* from old Linux dcache.h */
@@ -95,6 +73,9 @@ static tree handle_randomize_layout_attr(tree *node, tree name, tree args, int f
 
 	if (TYPE_P(*node)) {
 		type = *node;
+	} else if (TREE_CODE(*node) == FIELD_DECL) {
+		*no_add_attrs = false;
+		return NULL_TREE;
 	} else {
 		gcc_assert(TREE_CODE(*node) == TYPE_DECL);
 		type = TREE_TYPE(*node);
@@ -209,12 +190,14 @@ static void partition_struct(tree *fields, unsigned long length, struct partitio
 
 static void performance_shuffle(tree *newtree, unsigned long length, ranctx *prng_state)
 {
-	unsigned long i, x;
+	unsigned long i, x, index;
 	struct partition_group size_group[length];
 	unsigned long num_groups = 0;
 	unsigned long randnum;
 
 	partition_struct(newtree, length, (struct partition_group *)&size_group, &num_groups);
+
+	/* FIXME: this group shuffle is currently a no-op. */
 	for (i = num_groups - 1; i > 0; i--) {
 		struct partition_group tmp;
 		randnum = ranval(prng_state) % (i + 1);
@@ -224,11 +207,14 @@ static void performance_shuffle(tree *newtree, unsigned long length, ranctx *prn
 	}
 
 	for (x = 0; x < num_groups; x++) {
-		for (i = size_group[x].start + size_group[x].length - 1; i > size_group[x].start; i--) {
+		for (index = size_group[x].length - 1; index > 0; index--) {
 			tree tmp;
+
+			i = size_group[x].start + index;
 			if (DECL_BIT_FIELD_TYPE(newtree[i]))
 				continue;
-			randnum = ranval(prng_state) % (i + 1);
+			randnum = ranval(prng_state) % (index + 1);
+			randnum += size_group[x].start;
 			// we could handle this case differently if desired
 			if (DECL_BIT_FIELD_TYPE(newtree[randnum]))
 				continue;
@@ -291,8 +277,6 @@ static bool is_flexible_array(const_tree field)
 {
 	const_tree fieldtype;
 	const_tree typesize;
-	const_tree elemtype;
-	const_tree elemsize;
 
 	fieldtype = TREE_TYPE(field);
 	typesize = TYPE_SIZE(fieldtype);
@@ -300,18 +284,10 @@ static bool is_flexible_array(const_tree field)
 	if (TREE_CODE(fieldtype) != ARRAY_TYPE)
 		return false;
 
-	elemtype = TREE_TYPE(fieldtype);
-	elemsize = TYPE_SIZE(elemtype);
-
 	/* size of type is represented in bits */
 
 	if (typesize == NULL_TREE && TYPE_DOMAIN(fieldtype) != NULL_TREE &&
 	    TYPE_MAX_VALUE(TYPE_DOMAIN(fieldtype)) == NULL_TREE)
-		return true;
-
-	if (typesize != NULL_TREE &&
-	    (TREE_CONSTANT(typesize) && (!tree_to_uhwi(typesize) ||
-	     tree_to_uhwi(typesize) == tree_to_uhwi(elemsize))))
 		return true;
 
 	return false;
@@ -362,8 +338,7 @@ static int relayout_struct(tree type)
 
 	/*
 	 * enforce that we don't randomize the layout of the last
-	 * element of a struct if it's a 0 or 1-length array
-	 * or a proper flexible array
+	 * element of a struct if it's a proper flexible array
 	 */
 	if (is_flexible_array(newtree[num_fields - 1])) {
 		has_flexarray = true;
@@ -372,35 +347,18 @@ static int relayout_struct(tree type)
 
 	shuffle(type, (tree *)newtree, shuffle_length);
 
-	/*
-	 * set up a bogus anonymous struct field designed to error out on unnamed struct initializers
-	 * as gcc provides no other way to detect such code
-	 */
-	list = make_node(FIELD_DECL);
-	TREE_CHAIN(list) = newtree[0];
-	TREE_TYPE(list) = void_type_node;
-	DECL_SIZE(list) = bitsize_zero_node;
-	DECL_NONADDRESSABLE_P(list) = 1;
-	DECL_FIELD_BIT_OFFSET(list) = bitsize_zero_node;
-	DECL_SIZE_UNIT(list) = size_zero_node;
-	DECL_FIELD_OFFSET(list) = size_zero_node;
-	DECL_CONTEXT(list) = type;
-	// to satisfy the constify plugin
-	TREE_READONLY(list) = 1;
-
 	for (i = 0; i < num_fields - 1; i++)
 		TREE_CHAIN(newtree[i]) = newtree[i+1];
 	TREE_CHAIN(newtree[num_fields - 1]) = NULL_TREE;
 
+	add_type_attr(type, "randomize_performed", NULL_TREE);
+	add_type_attr(type, "designated_init", NULL_TREE);
+	if (has_flexarray)
+		add_type_attr(type, "has_flexarray", NULL_TREE);
+
 	main_variant = TYPE_MAIN_VARIANT(type);
-	for (variant = main_variant; variant; variant = TYPE_NEXT_VARIANT(variant)) {
-		TYPE_FIELDS(variant) = list;
-		TYPE_ATTRIBUTES(variant) = copy_list(TYPE_ATTRIBUTES(variant));
-		TYPE_ATTRIBUTES(variant) = tree_cons(get_identifier("randomize_performed"), NULL_TREE, TYPE_ATTRIBUTES(variant));
-		TYPE_ATTRIBUTES(variant) = tree_cons(get_identifier("designated_init"), NULL_TREE, TYPE_ATTRIBUTES(variant));
-		if (has_flexarray)
-			TYPE_ATTRIBUTES(type) = tree_cons(get_identifier("has_flexarray"), NULL_TREE, TYPE_ATTRIBUTES(type));
-	}
+	for (variant = main_variant; variant; variant = TYPE_NEXT_VARIANT(variant))
+		TYPE_FIELDS(variant) = newtree[0];
 
 	/*
 	 * force a re-layout of the main variant
@@ -443,13 +401,13 @@ static int is_pure_ops_struct(const_tree node)
 		if (node == fieldtype)
 			continue;
 
-		if (!is_fptr(fieldtype))
-			return 0;
-
-		if (code != RECORD_TYPE && code != UNION_TYPE)
+		if (code == RECORD_TYPE || code == UNION_TYPE) {
+			if (!is_pure_ops_struct(fieldtype))
+				return 0;
 			continue;
+		}
 
-		if (!is_pure_ops_struct(fieldtype))
+		if (!is_fptr(fieldtype))
 			return 0;
 	}
 
@@ -468,10 +426,8 @@ static void randomize_type(tree type)
 	if (lookup_attribute("randomize_layout", TYPE_ATTRIBUTES(TYPE_MAIN_VARIANT(type))) || is_pure_ops_struct(type))
 		relayout_struct(type);
 
-	for (variant = TYPE_MAIN_VARIANT(type); variant; variant = TYPE_NEXT_VARIANT(variant)) {
-		TYPE_ATTRIBUTES(type) = copy_list(TYPE_ATTRIBUTES(type));
-		TYPE_ATTRIBUTES(type) = tree_cons(get_identifier("randomize_considered"), NULL_TREE, TYPE_ATTRIBUTES(type));
-	}
+	add_type_attr(type, "randomize_considered", NULL_TREE);
+
 #ifdef __DEBUG_PLUGIN
 	fprintf(stderr, "Marking randomize_considered on struct %s\n", ORIG_TYPE_NAME(type));
 #ifdef __DEBUG_VERBOSE
@@ -590,16 +546,12 @@ static void register_attributes(void *event_data, void *data)
 	randomize_layout_attr.name		= "randomize_layout";
 	randomize_layout_attr.type_required	= true;
 	randomize_layout_attr.handler		= handle_randomize_layout_attr;
-#if BUILDING_GCC_VERSION >= 4007
 	randomize_layout_attr.affects_type_identity = true;
-#endif
 
 	no_randomize_layout_attr.name		= "no_randomize_layout";
 	no_randomize_layout_attr.type_required	= true;
 	no_randomize_layout_attr.handler	= handle_randomize_layout_attr;
-#if BUILDING_GCC_VERSION >= 4007
 	no_randomize_layout_attr.affects_type_identity = true;
-#endif
 
 	randomize_considered_attr.name		= "randomize_considered";
 	randomize_considered_attr.type_required	= true;
@@ -746,60 +698,6 @@ static void handle_local_var_initializers(void)
 	}
 }
 
-static bool type_name_eq(gimple stmt, const_tree type_tree, const char *wanted_name)
-{
-	const char *type_name;
-
-	if (type_tree == NULL_TREE)
-		return false;
-
-	switch (TREE_CODE(type_tree)) {
-	case RECORD_TYPE:
-		type_name = TYPE_NAME_POINTER(type_tree);
-		break;
-	case INTEGER_TYPE:
-		if (TYPE_PRECISION(type_tree) == CHAR_TYPE_SIZE)
-			type_name = "char";
-		else {
-			INFORM(gimple_location(stmt), "found non-char INTEGER_TYPE cast comparison: %qT\n", type_tree);
-			debug_tree(type_tree);
-			return false;
-		}
-		break;
-	case POINTER_TYPE:
-		if (TREE_CODE(TREE_TYPE(type_tree)) == VOID_TYPE) {
-			type_name = "void *";
-			break;
-		} else {
-			INFORM(gimple_location(stmt), "found non-void POINTER_TYPE cast comparison %qT\n", type_tree);
-			debug_tree(type_tree);
-			return false;
-		}
-	default:
-		INFORM(gimple_location(stmt), "unhandled cast comparison: %qT\n", type_tree);
-		debug_tree(type_tree);
-		return false;
-	}
-
-	return strcmp(type_name, wanted_name) == 0;
-}
-
-static bool whitelisted_cast(gimple stmt, const_tree lhs_tree, const_tree rhs_tree)
-{
-	const struct whitelist_entry *entry;
-	expanded_location xloc = expand_location(gimple_location(stmt));
-
-	for (entry = whitelist; entry->pathname; entry++) {
-		if (!strstr(xloc.file, entry->pathname))
-			continue;
-
-		if (type_name_eq(stmt, lhs_tree, entry->lhs) && type_name_eq(stmt, rhs_tree, entry->rhs))
-			return true;
-	}
-
-	return false;
-}
-
 /*
  * iterate over all statements to find "bad" casts:
  * those where the address of the start of a structure is cast
@@ -876,10 +774,7 @@ static unsigned int find_bad_casts_execute(void)
 #ifndef __DEBUG_PLUGIN
 				if (lookup_attribute("randomize_performed", TYPE_ATTRIBUTES(ptr_lhs_type)))
 #endif
-				{
-					if (!whitelisted_cast(stmt, ptr_lhs_type, ptr_rhs_type))
-						MISMATCH(gimple_location(stmt), "rhs", ptr_lhs_type, ptr_rhs_type);
-				}
+				MISMATCH(gimple_location(stmt), "rhs", ptr_lhs_type, ptr_rhs_type);
 				continue;
 			}
 
@@ -902,10 +797,7 @@ static unsigned int find_bad_casts_execute(void)
 #ifndef __DEBUG_PLUGIN
 				if (lookup_attribute("randomize_performed", TYPE_ATTRIBUTES(op0_type)))
 #endif
-				{
-					if (!whitelisted_cast(stmt, ptr_lhs_type, op0_type))
-						MISMATCH(gimple_location(stmt), "op0", ptr_lhs_type, op0_type);
-				}
+				MISMATCH(gimple_location(stmt), "op0", ptr_lhs_type, op0_type);
 			} else {
 				const_tree ssa_name_var = SSA_NAME_VAR(rhs1);
 				/* skip bogus type casts introduced by container_of */
@@ -915,10 +807,7 @@ static unsigned int find_bad_casts_execute(void)
 #ifndef __DEBUG_PLUGIN
 				if (lookup_attribute("randomize_performed", TYPE_ATTRIBUTES(ptr_rhs_type)))
 #endif
-				{
-					if (!whitelisted_cast(stmt, ptr_lhs_type, ptr_rhs_type))
-						MISMATCH(gimple_location(stmt), "ssa", ptr_lhs_type, ptr_rhs_type);
-				}
+				MISMATCH(gimple_location(stmt), "ssa", ptr_lhs_type, ptr_rhs_type);
 			}
 
 		}

@@ -1,17 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  cb710/mmc.c
  *
  *  Copyright by Michał Mirosław, 2008-2009
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/delay.h>
+#include <linux/string_choices.h>
 #include "cb710-mmc.h"
+
+#define CB710_MMC_REQ_TIMEOUT_MS	2000
 
 static const u8 cb710_clock_divider_log2[8] = {
 /*	1, 2, 4, 8, 16, 32, 128, 512 */
@@ -216,7 +216,7 @@ static void cb710_mmc_set_transfer_size(struct cb710_slot *slot,
 		((count - 1) << 16)|(blocksize - 1));
 
 	dev_vdbg(cb710_slot_dev(slot), "set up for %zu block%s of %zu bytes\n",
-		count, count == 1 ? "" : "s", blocksize);
+		count, str_plural(count), blocksize);
 }
 
 static void cb710_mmc_fifo_hack(struct cb710_slot *slot)
@@ -494,7 +494,7 @@ static void cb710_mmc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	if (!cb710_mmc_command(mmc, mrq->cmd) && mrq->stop)
 		cb710_mmc_command(mmc, mrq->stop);
 
-	tasklet_schedule(&reader->finish_req_tasklet);
+	queue_work(system_bh_wq, &reader->finish_req_bh_work);
 }
 
 static int cb710_mmc_powerup(struct cb710_slot *slot)
@@ -566,30 +566,32 @@ static void cb710_mmc_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 
 	cb710_mmc_select_clock_divider(mmc, ios->clock);
 
-	if (ios->power_mode != reader->last_power_mode)
-	switch (ios->power_mode) {
-	case MMC_POWER_ON:
-		err = cb710_mmc_powerup(slot);
-		if (err) {
-			dev_warn(cb710_slot_dev(slot),
-				"powerup failed (%d)- retrying\n", err);
-			cb710_mmc_powerdown(slot);
-			udelay(1);
+	if (ios->power_mode != reader->last_power_mode) {
+		switch (ios->power_mode) {
+		case MMC_POWER_ON:
 			err = cb710_mmc_powerup(slot);
-			if (err)
+			if (err) {
 				dev_warn(cb710_slot_dev(slot),
-					"powerup retry failed (%d) - expect errors\n",
+					"powerup failed (%d)- retrying\n", err);
+				cb710_mmc_powerdown(slot);
+				udelay(1);
+				err = cb710_mmc_powerup(slot);
+				if (err)
+					dev_warn(cb710_slot_dev(slot),
+						"powerup retry failed (%d) - expect errors\n",
 					err);
+			}
+			reader->last_power_mode = MMC_POWER_ON;
+			break;
+		case MMC_POWER_OFF:
+			cb710_mmc_powerdown(slot);
+			reader->last_power_mode = MMC_POWER_OFF;
+			break;
+		case MMC_POWER_UP:
+		default:
+			/* ignore */
+			break;
 		}
-		reader->last_power_mode = MMC_POWER_ON;
-		break;
-	case MMC_POWER_OFF:
-		cb710_mmc_powerdown(slot);
-		reader->last_power_mode = MMC_POWER_OFF;
-		break;
-	case MMC_POWER_UP:
-	default:
-		/* ignore */;
 	}
 
 	cb710_mmc_enable_4bit_data(slot, ios->bus_width != MMC_BUS_WIDTH_1);
@@ -645,14 +647,14 @@ static int cb710_mmc_irq_handler(struct cb710_slot *slot)
 	return 1;
 }
 
-static void cb710_mmc_finish_request_tasklet(unsigned long data)
+static void cb710_mmc_finish_request_bh_work(struct work_struct *t)
 {
-	struct mmc_host *mmc = (void *)data;
-	struct cb710_mmc_reader *reader = mmc_priv(mmc);
+	struct cb710_mmc_reader *reader = from_work(reader, t,
+						       finish_req_bh_work);
 	struct mmc_request *mrq = reader->mrq;
 
 	reader->mrq = NULL;
-	mmc_request_done(mmc, mrq);
+	mmc_request_done(mmc_from_priv(reader), mrq);
 }
 
 static const struct mmc_host_ops cb710_mmc_host = {
@@ -662,25 +664,25 @@ static const struct mmc_host_ops cb710_mmc_host = {
 	.get_cd = cb710_mmc_get_cd,
 };
 
-#ifdef CONFIG_PM
-
-static int cb710_mmc_suspend(struct platform_device *pdev, pm_message_t state)
+static int cb710_mmc_suspend(struct device *dev)
 {
+	struct platform_device *pdev = to_platform_device(dev);
 	struct cb710_slot *slot = cb710_pdev_to_slot(pdev);
 
 	cb710_mmc_enable_irq(slot, 0, ~0);
 	return 0;
 }
 
-static int cb710_mmc_resume(struct platform_device *pdev)
+static int cb710_mmc_resume(struct device *dev)
 {
+	struct platform_device *pdev = to_platform_device(dev);
 	struct cb710_slot *slot = cb710_pdev_to_slot(pdev);
 
 	cb710_mmc_enable_irq(slot, 0, ~0);
 	return 0;
 }
 
-#endif /* CONFIG_PM */
+static DEFINE_SIMPLE_DEV_PM_OPS(cb710_mmc_pmops, cb710_mmc_suspend, cb710_mmc_resume);
 
 static int cb710_mmc_init(struct platform_device *pdev)
 {
@@ -691,7 +693,7 @@ static int cb710_mmc_init(struct platform_device *pdev)
 	int err;
 	u32 val;
 
-	mmc = mmc_alloc_host(sizeof(*reader), cb710_slot_dev(slot));
+	mmc = devm_mmc_alloc_host(cb710_slot_dev(slot), sizeof(*reader));
 	if (!mmc)
 		return -ENOMEM;
 
@@ -708,11 +710,17 @@ static int cb710_mmc_init(struct platform_device *pdev)
 	mmc->f_min = val >> cb710_clock_divider_log2[CB710_MAX_DIVIDER_IDX];
 	mmc->ocr_avail = MMC_VDD_32_33|MMC_VDD_33_34;
 	mmc->caps = MMC_CAP_4_BIT_DATA;
+	/*
+	 * In cb710_wait_for_event() we use a fixed timeout of ~2s, hence let's
+	 * inform the core about it. A future improvement should instead make
+	 * use of the cmd->busy_timeout.
+	 */
+	mmc->max_busy_timeout = CB710_MMC_REQ_TIMEOUT_MS;
 
 	reader = mmc_priv(mmc);
 
-	tasklet_init(&reader->finish_req_tasklet,
-		cb710_mmc_finish_request_tasklet, (unsigned long)mmc);
+	INIT_WORK(&reader->finish_req_bh_work,
+			cb710_mmc_finish_request_bh_work);
 	spin_lock_init(&reader->irq_lock);
 	cb710_dump_regs(chip, CB710_DUMP_REGS_MMC);
 
@@ -734,11 +742,10 @@ err_free_mmc:
 	dev_dbg(cb710_slot_dev(slot), "mmc_add_host() failed: %d\n", err);
 
 	cb710_set_irq_handler(slot, NULL);
-	mmc_free_host(mmc);
 	return err;
 }
 
-static int cb710_mmc_exit(struct platform_device *pdev)
+static void cb710_mmc_exit(struct platform_device *pdev)
 {
 	struct cb710_slot *slot = cb710_pdev_to_slot(pdev);
 	struct mmc_host *mmc = cb710_slot_to_mmc(slot);
@@ -756,20 +763,16 @@ static int cb710_mmc_exit(struct platform_device *pdev)
 	cb710_write_port_32(slot, CB710_MMC_CONFIG_PORT, 0);
 	cb710_write_port_16(slot, CB710_MMC_CONFIGB_PORT, 0);
 
-	tasklet_kill(&reader->finish_req_tasklet);
-
-	mmc_free_host(mmc);
-	return 0;
+	cancel_work_sync(&reader->finish_req_bh_work);
 }
 
 static struct platform_driver cb710_mmc_driver = {
-	.driver.name = "cb710-mmc",
+	.driver = {
+		.name = "cb710-mmc",
+		.pm = pm_sleep_ptr(&cb710_mmc_pmops),
+	},
 	.probe = cb710_mmc_init,
 	.remove = cb710_mmc_exit,
-#ifdef CONFIG_PM
-	.suspend = cb710_mmc_suspend,
-	.resume = cb710_mmc_resume,
-#endif
 };
 
 module_platform_driver(cb710_mmc_driver);

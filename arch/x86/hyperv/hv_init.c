@@ -1,127 +1,180 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * X86 specific Hyper-V initialization code.
  *
  * Copyright (C) 2016, Microsoft, Inc.
  *
  * Author : K. Y. Srinivasan <kys@microsoft.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
- * NON INFRINGEMENT.  See the GNU General Public License for more
- * details.
- *
  */
 
+#define pr_fmt(fmt)  "Hyper-V: " fmt
+
+#include <linux/efi.h>
 #include <linux/types.h>
+#include <linux/bitfield.h>
+#include <linux/io.h>
 #include <asm/apic.h>
 #include <asm/desc.h>
+#include <asm/e820/api.h>
+#include <asm/sev.h>
 #include <asm/hypervisor.h>
-#include <asm/hyperv-tlfs.h>
+#include <hyperv/hvhdk.h>
 #include <asm/mshyperv.h>
+#include <asm/msr.h>
+#include <asm/idtentry.h>
+#include <asm/set_memory.h>
+#include <linux/kexec.h>
 #include <linux/version.h>
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
-#include <linux/clockchips.h>
-#include <linux/hyperv.h>
 #include <linux/slab.h>
+#include <linux/kernel.h>
 #include <linux/cpuhotplug.h>
-
-#ifdef CONFIG_HYPERV_TSCPAGE
-
-static struct ms_hyperv_tsc_page *tsc_pg;
-
-struct ms_hyperv_tsc_page *hv_get_tsc_page(void)
-{
-	return tsc_pg;
-}
-EXPORT_SYMBOL_GPL(hv_get_tsc_page);
-
-static u64 read_hv_clock_tsc(struct clocksource *arg)
-{
-	u64 current_tick = hv_read_tsc_page(tsc_pg);
-
-	if (current_tick == U64_MAX)
-		rdmsrl(HV_X64_MSR_TIME_REF_COUNT, current_tick);
-
-	return current_tick;
-}
-
-static struct clocksource hyperv_cs_tsc = {
-		.name		= "hyperv_clocksource_tsc_page",
-		.rating		= 400,
-		.read		= read_hv_clock_tsc,
-		.mask		= CLOCKSOURCE_MASK(64),
-		.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
-};
-#endif
-
-static u64 read_hv_clock_msr(struct clocksource *arg)
-{
-	u64 current_tick;
-	/*
-	 * Read the partition counter to get the current tick count. This count
-	 * is set to 0 when the partition is created and is incremented in
-	 * 100 nanosecond units.
-	 */
-	rdmsrl(HV_X64_MSR_TIME_REF_COUNT, current_tick);
-	return current_tick;
-}
-
-static struct clocksource hyperv_cs_msr = {
-	.name		= "hyperv_clocksource_msr",
-	.rating		= 400,
-	.read		= read_hv_clock_msr,
-	.mask		= CLOCKSOURCE_MASK(64),
-	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
-};
+#include <linux/syscore_ops.h>
+#include <clocksource/hyperv_timer.h>
+#include <linux/highmem.h>
+#include <linux/export.h>
 
 void *hv_hypercall_pg;
-EXPORT_SYMBOL_GPL(hv_hypercall_pg);
-struct clocksource *hyperv_cs;
-EXPORT_SYMBOL_GPL(hyperv_cs);
 
-u32 *hv_vp_index;
-EXPORT_SYMBOL_GPL(hv_vp_index);
+#ifdef CONFIG_X86_64
+static u64 __hv_hyperfail(u64 control, u64 param1, u64 param2)
+{
+	return U64_MAX;
+}
+
+DEFINE_STATIC_CALL(__hv_hypercall, __hv_hyperfail);
+
+u64 hv_std_hypercall(u64 control, u64 param1, u64 param2)
+{
+	u64 hv_status;
+
+	register u64 __r8 asm("r8") = param2;
+	asm volatile ("call " STATIC_CALL_TRAMP_STR(__hv_hypercall)
+		      : "=a" (hv_status), ASM_CALL_CONSTRAINT,
+		        "+c" (control), "+d" (param1), "+r" (__r8)
+		      : : "cc", "memory", "r9", "r10", "r11");
+
+	return hv_status;
+}
+
+typedef u64 (*hv_hypercall_f)(u64 control, u64 param1, u64 param2);
+
+static inline void hv_set_hypercall_pg(void *ptr)
+{
+	hv_hypercall_pg = ptr;
+
+	if (!ptr)
+		ptr = &__hv_hyperfail;
+	static_call_update(__hv_hypercall, (hv_hypercall_f)ptr);
+}
+#else
+static inline void hv_set_hypercall_pg(void *ptr)
+{
+	hv_hypercall_pg = ptr;
+}
+EXPORT_SYMBOL_GPL(hv_hypercall_pg);
+#endif
+
+union hv_ghcb * __percpu *hv_ghcb_pg;
+
+/* Storage to save the hypercall page temporarily for hibernation */
+static void *hv_hypercall_pg_saved;
 
 struct hv_vp_assist_page **hv_vp_assist_page;
 EXPORT_SYMBOL_GPL(hv_vp_assist_page);
 
-u32 hv_max_vp_index;
+static int hyperv_init_ghcb(void)
+{
+	u64 ghcb_gpa;
+	void *ghcb_va;
+	void **ghcb_base;
+
+	if (!ms_hyperv.paravisor_present || !hv_isolation_type_snp())
+		return 0;
+
+	if (!hv_ghcb_pg)
+		return -EINVAL;
+
+	/*
+	 * GHCB page is allocated by paravisor. The address
+	 * returned by MSR_AMD64_SEV_ES_GHCB is above shared
+	 * memory boundary and map it here.
+	 */
+	rdmsrq(MSR_AMD64_SEV_ES_GHCB, ghcb_gpa);
+
+	/* Mask out vTOM bit and map as decrypted */
+	ghcb_gpa &= ~ms_hyperv.shared_gpa_boundary;
+	ghcb_va = memremap(ghcb_gpa, HV_HYP_PAGE_SIZE, MEMREMAP_WB | MEMREMAP_DEC);
+	if (!ghcb_va)
+		return -ENOMEM;
+
+	ghcb_base = (void **)this_cpu_ptr(hv_ghcb_pg);
+	*ghcb_base = ghcb_va;
+
+	return 0;
+}
 
 static int hv_cpu_init(unsigned int cpu)
 {
-	u64 msr_vp_index;
-	struct hv_vp_assist_page **hvp = &hv_vp_assist_page[smp_processor_id()];
+	union hv_vp_assist_msr_contents msr = { 0 };
+	struct hv_vp_assist_page **hvp;
+	int ret;
 
-	hv_get_vp_index(msr_vp_index);
-
-	hv_vp_index[smp_processor_id()] = msr_vp_index;
-
-	if (msr_vp_index > hv_max_vp_index)
-		hv_max_vp_index = msr_vp_index;
+	ret = hv_common_cpu_init(cpu);
+	if (ret)
+		return ret;
 
 	if (!hv_vp_assist_page)
 		return 0;
 
-	if (!*hvp)
-		*hvp = __vmalloc(PAGE_SIZE, GFP_KERNEL, PAGE_KERNEL);
+	hvp = &hv_vp_assist_page[cpu];
+	if (hv_root_partition()) {
+		/*
+		 * For root partition we get the hypervisor provided VP assist
+		 * page, instead of allocating a new page.
+		 */
+		rdmsrq(HV_X64_MSR_VP_ASSIST_PAGE, msr.as_uint64);
+		*hvp = memremap(msr.pfn << HV_X64_MSR_VP_ASSIST_PAGE_ADDRESS_SHIFT,
+				PAGE_SIZE, MEMREMAP_WB);
+	} else {
+		/*
+		 * The VP assist page is an "overlay" page (see Hyper-V TLFS's
+		 * Section 5.2.1 "GPA Overlay Pages"). Here it must be zeroed
+		 * out to make sure we always write the EOI MSR in
+		 * hv_apic_eoi_write() *after* the EOI optimization is disabled
+		 * in hv_cpu_die(), otherwise a CPU may not be stopped in the
+		 * case of CPU offlining and the VM will hang.
+		 */
+		if (!*hvp) {
+			*hvp = __vmalloc(PAGE_SIZE, GFP_KERNEL | __GFP_ZERO);
 
-	if (*hvp) {
-		u64 val;
+			/*
+			 * Hyper-V should never specify a VM that is a Confidential
+			 * VM and also running in the root partition. Root partition
+			 * is blocked to run in Confidential VM. So only decrypt assist
+			 * page in non-root partition here.
+			 */
+			if (*hvp && !ms_hyperv.paravisor_present && hv_isolation_type_snp()) {
+				WARN_ON_ONCE(set_memory_decrypted((unsigned long)(*hvp), 1));
+				memset(*hvp, 0, PAGE_SIZE);
+			}
+		}
 
-		val = vmalloc_to_pfn(*hvp);
-		val = (val << HV_X64_MSR_VP_ASSIST_PAGE_ADDRESS_SHIFT) |
-			HV_X64_MSR_VP_ASSIST_PAGE_ENABLE;
+		if (*hvp)
+			msr.pfn = vmalloc_to_pfn(*hvp);
 
-		wrmsrl(HV_X64_MSR_VP_ASSIST_PAGE, val);
+	}
+	if (!WARN_ON(!(*hvp))) {
+		msr.enable = 1;
+		wrmsrq(HV_X64_MSR_VP_ASSIST_PAGE, msr.as_uint64);
 	}
 
-	return 0;
+	/* Allow Hyper-V stimer vector to be injected from Hypervisor. */
+	if (ms_hyperv.misc_features & HV_STIMER_DIRECT_MODE_AVAILABLE)
+		apic_update_vector(cpu, HYPERV_STIMER0_VECTOR, true);
+
+	return hyperv_init_ghcb();
 }
 
 static void (*hv_reenlightenment_cb)(void);
@@ -130,7 +183,7 @@ static void hv_reenlightenment_notify(struct work_struct *dummy)
 {
 	struct hv_tsc_emulation_status emu_status;
 
-	rdmsrl(HV_X64_MSR_TSC_EMULATION_STATUS, *(u64 *)&emu_status);
+	rdmsrq(HV_X64_MSR_TSC_EMULATION_STATUS, *(u64 *)&emu_status);
 
 	/* Don't issue the callback if TSC accesses are not emulated */
 	if (hv_reenlightenment_cb && emu_status.inprogress)
@@ -143,11 +196,11 @@ void hyperv_stop_tsc_emulation(void)
 	u64 freq;
 	struct hv_tsc_emulation_status emu_status;
 
-	rdmsrl(HV_X64_MSR_TSC_EMULATION_STATUS, *(u64 *)&emu_status);
+	rdmsrq(HV_X64_MSR_TSC_EMULATION_STATUS, *(u64 *)&emu_status);
 	emu_status.inprogress = 0;
-	wrmsrl(HV_X64_MSR_TSC_EMULATION_STATUS, *(u64 *)&emu_status);
+	wrmsrq(HV_X64_MSR_TSC_EMULATION_STATUS, *(u64 *)&emu_status);
 
-	rdmsrl(HV_X64_MSR_TSC_FREQUENCY, freq);
+	rdmsrq(HV_X64_MSR_TSC_FREQUENCY, freq);
 	tsc_khz = div64_u64(freq, 1000);
 }
 EXPORT_SYMBOL_GPL(hyperv_stop_tsc_emulation);
@@ -155,23 +208,19 @@ EXPORT_SYMBOL_GPL(hyperv_stop_tsc_emulation);
 static inline bool hv_reenlightenment_available(void)
 {
 	/*
-	 * Check for required features and priviliges to make TSC frequency
+	 * Check for required features and privileges to make TSC frequency
 	 * change notifications work.
 	 */
-	return ms_hyperv.features & HV_X64_ACCESS_FREQUENCY_MSRS &&
+	return ms_hyperv.features & HV_ACCESS_FREQUENCY_MSRS &&
 		ms_hyperv.misc_features & HV_FEATURE_FREQUENCY_MSRS_AVAILABLE &&
-		ms_hyperv.features & HV_X64_ACCESS_REENLIGHTENMENT;
+		ms_hyperv.features & HV_ACCESS_REENLIGHTENMENT;
 }
 
-__visible void __irq_entry hyperv_reenlightenment_intr(struct pt_regs *regs)
+DEFINE_IDTENTRY_SYSVEC(sysvec_hyperv_reenlightenment)
 {
-	entering_ack_irq();
-
-	inc_irq_stat(irq_hv_reenlightenment_count);
-
+	apic_eoi();
+	inc_irq_stat(HYPERV_REENLIGHTENMENT);
 	schedule_delayed_work(&hv_reenlightenment_work, HZ/10);
-
-	exiting_irq();
 }
 
 void set_hv_tscchange_cb(void (*cb)(void))
@@ -179,22 +228,28 @@ void set_hv_tscchange_cb(void (*cb)(void))
 	struct hv_reenlightenment_control re_ctrl = {
 		.vector = HYPERV_REENLIGHTENMENT_VECTOR,
 		.enabled = 1,
-		.target_vp = hv_vp_index[smp_processor_id()]
 	};
 	struct hv_tsc_emulation_control emu_ctrl = {.enabled = 1};
 
 	if (!hv_reenlightenment_available()) {
-		pr_warn("Hyper-V: reenlightenment support is unavailable\n");
+		pr_warn("reenlightenment support is unavailable\n");
 		return;
 	}
+
+	if (!hv_vp_index)
+		return;
 
 	hv_reenlightenment_cb = cb;
 
 	/* Make sure callback is registered before we write to MSRs */
 	wmb();
 
-	wrmsrl(HV_X64_MSR_REENLIGHTENMENT_CONTROL, *((u64 *)&re_ctrl));
-	wrmsrl(HV_X64_MSR_TSC_EMULATION_CONTROL, *((u64 *)&emu_ctrl));
+	re_ctrl.target_vp = hv_vp_index[get_cpu()];
+
+	wrmsrq(HV_X64_MSR_REENLIGHTENMENT_CONTROL, *((u64 *)&re_ctrl));
+	wrmsrq(HV_X64_MSR_TSC_EMULATION_CONTROL, *((u64 *)&emu_ctrl));
+
+	put_cpu();
 }
 EXPORT_SYMBOL_GPL(set_hv_tscchange_cb);
 
@@ -205,9 +260,9 @@ void clear_hv_tscchange_cb(void)
 	if (!hv_reenlightenment_available())
 		return;
 
-	rdmsrl(HV_X64_MSR_REENLIGHTENMENT_CONTROL, *(u64 *)&re_ctrl);
+	rdmsrq(HV_X64_MSR_REENLIGHTENMENT_CONTROL, *(u64 *)&re_ctrl);
 	re_ctrl.enabled = 0;
-	wrmsrl(HV_X64_MSR_REENLIGHTENMENT_CONTROL, *(u64 *)&re_ctrl);
+	wrmsrq(HV_X64_MSR_REENLIGHTENMENT_CONTROL, *(u64 *)&re_ctrl);
 
 	hv_reenlightenment_cb = NULL;
 }
@@ -217,23 +272,172 @@ static int hv_cpu_die(unsigned int cpu)
 {
 	struct hv_reenlightenment_control re_ctrl;
 	unsigned int new_cpu;
+	void **ghcb_va;
 
-	if (hv_vp_assist_page && hv_vp_assist_page[cpu])
-		wrmsrl(HV_X64_MSR_VP_ASSIST_PAGE, 0);
+	if (hv_ghcb_pg) {
+		ghcb_va = (void **)this_cpu_ptr(hv_ghcb_pg);
+		if (*ghcb_va)
+			memunmap(*ghcb_va);
+		*ghcb_va = NULL;
+	}
+
+	if (ms_hyperv.misc_features & HV_STIMER_DIRECT_MODE_AVAILABLE)
+		apic_update_vector(cpu, HYPERV_STIMER0_VECTOR, false);
+
+	hv_common_cpu_die(cpu);
+
+	if (hv_vp_assist_page && hv_vp_assist_page[cpu]) {
+		union hv_vp_assist_msr_contents msr = { 0 };
+		if (hv_root_partition()) {
+			/*
+			 * For root partition the VP assist page is mapped to
+			 * hypervisor provided page, and thus we unmap the
+			 * page here and nullify it, so that in future we have
+			 * correct page address mapped in hv_cpu_init.
+			 */
+			memunmap(hv_vp_assist_page[cpu]);
+			hv_vp_assist_page[cpu] = NULL;
+			rdmsrq(HV_X64_MSR_VP_ASSIST_PAGE, msr.as_uint64);
+			msr.enable = 0;
+		}
+		wrmsrq(HV_X64_MSR_VP_ASSIST_PAGE, msr.as_uint64);
+	}
 
 	if (hv_reenlightenment_cb == NULL)
 		return 0;
 
-	rdmsrl(HV_X64_MSR_REENLIGHTENMENT_CONTROL, *((u64 *)&re_ctrl));
+	rdmsrq(HV_X64_MSR_REENLIGHTENMENT_CONTROL, *((u64 *)&re_ctrl));
 	if (re_ctrl.target_vp == hv_vp_index[cpu]) {
-		/* Reassign to some other online CPU */
+		/*
+		 * Reassign reenlightenment notifications to some other online
+		 * CPU or just disable the feature if there are no online CPUs
+		 * left (happens on hibernation).
+		 */
 		new_cpu = cpumask_any_but(cpu_online_mask, cpu);
 
-		re_ctrl.target_vp = hv_vp_index[new_cpu];
-		wrmsrl(HV_X64_MSR_REENLIGHTENMENT_CONTROL, *((u64 *)&re_ctrl));
+		if (new_cpu < nr_cpu_ids)
+			re_ctrl.target_vp = hv_vp_index[new_cpu];
+		else
+			re_ctrl.enabled = 0;
+
+		wrmsrq(HV_X64_MSR_REENLIGHTENMENT_CONTROL, *((u64 *)&re_ctrl));
 	}
 
 	return 0;
+}
+
+static int __init hv_pci_init(void)
+{
+	bool gen2vm = efi_enabled(EFI_BOOT);
+
+	/*
+	 * A Generation-2 VM doesn't support legacy PCI/PCIe, so both
+	 * raw_pci_ops and raw_pci_ext_ops are NULL, and pci_subsys_init() ->
+	 * pcibios_init() doesn't call pcibios_resource_survey() ->
+	 * e820__reserve_resources_late(); as a result, any emulated persistent
+	 * memory of E820_TYPE_PRAM (12) via the kernel parameter
+	 * memmap=nn[KMG]!ss is not added into iomem_resource and hence can't be
+	 * detected by register_e820_pmem(). Fix this by directly calling
+	 * e820__reserve_resources_late() here: e820__reserve_resources_late()
+	 * depends on e820__reserve_resources(), which has been called earlier
+	 * from setup_arch(). Note: e820__reserve_resources_late() also adds
+	 * any memory of E820_TYPE_PMEM (7) into iomem_resource, and
+	 * acpi_nfit_register_region() -> acpi_nfit_insert_resource() ->
+	 * region_intersects() returns REGION_INTERSECTS, so the memory of
+	 * E820_TYPE_PMEM won't get added twice.
+	 *
+	 * We return 0 here so that pci_arch_init() won't print the warning:
+	 * "PCI: Fatal: No config space access function found"
+	 */
+	if (gen2vm) {
+		e820__reserve_resources_late();
+		return 0;
+	}
+
+	/* For Generation-1 VM, we'll proceed in pci_arch_init().  */
+	return 1;
+}
+
+static int hv_suspend(void *data)
+{
+	union hv_x64_msr_hypercall_contents hypercall_msr;
+	int ret;
+
+	if (hv_root_partition())
+		return -EPERM;
+
+	/*
+	 * Reset the hypercall page as it is going to be invalidated
+	 * across hibernation. Setting hv_hypercall_pg to NULL ensures
+	 * that any subsequent hypercall operation fails safely instead of
+	 * crashing due to an access of an invalid page. The hypercall page
+	 * pointer is restored on resume.
+	 */
+	hv_hypercall_pg_saved = hv_hypercall_pg;
+	hv_set_hypercall_pg(NULL);
+
+	/* Disable the hypercall page in the hypervisor */
+	rdmsrq(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
+	hypercall_msr.enable = 0;
+	wrmsrq(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
+
+	ret = hv_cpu_die(0);
+	return ret;
+}
+
+static void hv_resume(void *data)
+{
+	union hv_x64_msr_hypercall_contents hypercall_msr;
+	int ret;
+
+	ret = hv_cpu_init(0);
+	WARN_ON(ret);
+
+	/* Re-enable the hypercall page */
+	rdmsrq(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
+	hypercall_msr.enable = 1;
+	hypercall_msr.guest_physical_address =
+		vmalloc_to_pfn(hv_hypercall_pg_saved);
+	wrmsrq(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
+
+	hv_set_hypercall_pg(hv_hypercall_pg_saved);
+	hv_hypercall_pg_saved = NULL;
+
+	/*
+	 * Reenlightenment notifications are disabled by hv_cpu_die(0),
+	 * reenable them here if hv_reenlightenment_cb was previously set.
+	 */
+	if (hv_reenlightenment_cb)
+		set_hv_tscchange_cb(hv_reenlightenment_cb);
+}
+
+/* Note: when the ops are called, only CPU0 is online and IRQs are disabled. */
+static const struct syscore_ops hv_syscore_ops = {
+	.suspend	= hv_suspend,
+	.resume		= hv_resume,
+};
+
+static struct syscore hv_syscore = {
+	.ops = &hv_syscore_ops,
+};
+
+static void (* __initdata old_setup_percpu_clockev)(void);
+
+static void __init hv_stimer_setup_percpu_clockev(void)
+{
+	/*
+	 * Ignore any errors in setting up stimer clockevents
+	 * as we can run with the LAPIC timer as a fallback.
+	 */
+	(void)hv_stimer_alloc(false);
+
+	/*
+	 * Still register the LAPIC timer, because the direct-mode STIMER is
+	 * not supported by old versions of Hyper-V. This also allows users
+	 * to switch to LAPIC timer via /sys, if they want to.
+	 */
+	if (old_setup_percpu_clockev)
+		old_setup_percpu_clockev();
 }
 
 /*
@@ -242,108 +446,178 @@ static int hv_cpu_die(unsigned int cpu)
  *
  * 1. Setup the hypercall page.
  * 2. Register Hyper-V specific clocksource.
+ * 3. Setup Hyper-V specific APIC entry points.
  */
-void hyperv_init(void)
+void __init hyperv_init(void)
 {
-	u64 guest_id, required_msrs;
+	u64 guest_id;
 	union hv_x64_msr_hypercall_contents hypercall_msr;
 	int cpuhp;
 
 	if (x86_hyper_type != X86_HYPER_MS_HYPERV)
 		return;
 
-	/* Absolutely required MSRs */
-	required_msrs = HV_X64_MSR_HYPERCALL_AVAILABLE |
-		HV_X64_MSR_VP_INDEX_AVAILABLE;
-
-	if ((ms_hyperv.features & required_msrs) != required_msrs)
+	if (hv_common_init())
 		return;
 
-	/* Allocate percpu VP index */
-	hv_vp_index = kmalloc_array(num_possible_cpus(), sizeof(*hv_vp_index),
-				    GFP_KERNEL);
-	if (!hv_vp_index)
-		return;
-
-	hv_vp_assist_page = kcalloc(num_possible_cpus(),
-				    sizeof(*hv_vp_assist_page), GFP_KERNEL);
+	/*
+	 * The VP assist page is useless to a TDX guest: the only use we
+	 * would have for it is lazy EOI, which can not be used with TDX.
+	 */
+	if (hv_isolation_type_tdx())
+		hv_vp_assist_page = NULL;
+	else
+		hv_vp_assist_page = kzalloc_objs(*hv_vp_assist_page, nr_cpu_ids);
 	if (!hv_vp_assist_page) {
 		ms_hyperv.hints &= ~HV_X64_ENLIGHTENED_VMCS_RECOMMENDED;
-		goto free_vp_index;
+
+		if (!hv_isolation_type_tdx())
+			goto common_free;
 	}
 
-	cpuhp = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "x86/hyperv_init:online",
+	if (ms_hyperv.paravisor_present && hv_isolation_type_snp()) {
+		/* Negotiate GHCB Version. */
+		if (!hv_ghcb_negotiate_protocol())
+			hv_ghcb_terminate(SEV_TERM_SET_GEN,
+					  GHCB_SEV_ES_PROT_UNSUPPORTED);
+
+		hv_ghcb_pg = alloc_percpu(union hv_ghcb *);
+		if (!hv_ghcb_pg)
+			goto free_vp_assist_page;
+	}
+
+	cpuhp = cpuhp_setup_state(CPUHP_AP_HYPERV_ONLINE, "x86/hyperv_init:online",
 				  hv_cpu_init, hv_cpu_die);
 	if (cpuhp < 0)
-		goto free_vp_assist_page;
+		goto free_ghcb_page;
 
 	/*
 	 * Setup the hypercall page and enable hypercalls.
 	 * 1. Register the guest ID
 	 * 2. Enable the hypercall and register the hypercall page
+	 *
+	 * A TDX VM with no paravisor only uses TDX GHCI rather than hv_hypercall_pg:
+	 * when the hypercall input is a page, such a VM must pass a decrypted
+	 * page to Hyper-V, e.g. hv_post_message() uses the per-CPU page
+	 * hyperv_pcpu_input_arg, which is decrypted if no paravisor is present.
+	 *
+	 * A TDX VM with the paravisor uses hv_hypercall_pg for most hypercalls,
+	 * which are handled by the paravisor and the VM must use an encrypted
+	 * input page: in such a VM, the hyperv_pcpu_input_arg is encrypted and
+	 * used in the hypercalls, e.g. see hv_mark_gpa_visibility() and
+	 * hv_arch_irq_unmask(). Such a VM uses TDX GHCI for two hypercalls:
+	 * 1. HVCALL_SIGNAL_EVENT: see vmbus_set_event() and _hv_do_fast_hypercall8().
+	 * 2. HVCALL_POST_MESSAGE: the input page must be a decrypted page, i.e.
+	 * hv_post_message() in such a VM can't use the encrypted hyperv_pcpu_input_arg;
+	 * instead, hv_post_message() uses the post_msg_page, which is decrypted
+	 * in such a VM and is only used in such a VM.
 	 */
-	guest_id = generate_guest_id(0, LINUX_VERSION_CODE, 0);
-	wrmsrl(HV_X64_MSR_GUEST_OS_ID, guest_id);
+	guest_id = hv_generate_guest_id(LINUX_VERSION_CODE);
+	wrmsrq(HV_X64_MSR_GUEST_OS_ID, guest_id);
 
-	hv_hypercall_pg  = __vmalloc(PAGE_SIZE, GFP_KERNEL, PAGE_KERNEL_RX);
-	if (hv_hypercall_pg == NULL) {
-		wrmsrl(HV_X64_MSR_GUEST_OS_ID, 0);
-		goto remove_cpuhp_state;
-	}
+	/* With the paravisor, the VM must also write the ID via GHCB/GHCI */
+	hv_ivm_msr_write(HV_X64_MSR_GUEST_OS_ID, guest_id);
 
-	rdmsrl(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
+	/* A TDX VM with no paravisor only uses TDX GHCI rather than hv_hypercall_pg */
+	if (hv_isolation_type_tdx() && !ms_hyperv.paravisor_present)
+		goto skip_hypercall_pg_init;
+
+	hv_hypercall_pg = __vmalloc_node_range(PAGE_SIZE, 1, MODULES_VADDR,
+			MODULES_END, GFP_KERNEL, PAGE_KERNEL_ROX,
+			VM_FLUSH_RESET_PERMS, NUMA_NO_NODE,
+			__builtin_return_address(0));
+	if (hv_hypercall_pg == NULL)
+		goto clean_guest_os_id;
+
+	rdmsrq(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
 	hypercall_msr.enable = 1;
-	hypercall_msr.guest_physical_address = vmalloc_to_pfn(hv_hypercall_pg);
-	wrmsrl(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
 
-	hyper_alloc_mmu();
+	if (hv_root_partition()) {
+		struct page *pg;
+		void *src;
 
-	/*
-	 * Register Hyper-V specific clocksource.
-	 */
-#ifdef CONFIG_HYPERV_TSCPAGE
-	if (ms_hyperv.features & HV_X64_MSR_REFERENCE_TSC_AVAILABLE) {
-		union hv_x64_msr_hypercall_contents tsc_msr;
+		/*
+		 * For the root partition, the hypervisor will set up its
+		 * hypercall page. The hypervisor guarantees it will not show
+		 * up in the root's address space. The root can't change the
+		 * location of the hypercall page.
+		 *
+		 * Order is important here. We must enable the hypercall page
+		 * so it is populated with code, then copy the code to an
+		 * executable page.
+		 */
+		wrmsrq(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
 
-		tsc_pg = __vmalloc(PAGE_SIZE, GFP_KERNEL, PAGE_KERNEL);
-		if (!tsc_pg)
-			goto register_msr_cs;
+		pg = vmalloc_to_page(hv_hypercall_pg);
+		src = memremap(hypercall_msr.guest_physical_address << PAGE_SHIFT, PAGE_SIZE,
+				MEMREMAP_WB);
+		BUG_ON(!src);
+		memcpy_to_page(pg, 0, src, HV_HYP_PAGE_SIZE);
+		memunmap(src);
 
-		hyperv_cs = &hyperv_cs_tsc;
-
-		rdmsrl(HV_X64_MSR_REFERENCE_TSC, tsc_msr.as_uint64);
-
-		tsc_msr.enable = 1;
-		tsc_msr.guest_physical_address = vmalloc_to_pfn(tsc_pg);
-
-		wrmsrl(HV_X64_MSR_REFERENCE_TSC, tsc_msr.as_uint64);
-
-		hyperv_cs_tsc.archdata.vclock_mode = VCLOCK_HVCLOCK;
-
-		clocksource_register_hz(&hyperv_cs_tsc, NSEC_PER_SEC/100);
-		return;
+		hv_remap_tsc_clocksource();
+		hv_sleep_notifiers_register();
+	} else {
+		hypercall_msr.guest_physical_address = vmalloc_to_pfn(hv_hypercall_pg);
+		wrmsrq(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
 	}
-register_msr_cs:
-#endif
-	/*
-	 * For 32 bit guests just use the MSR based mechanism for reading
-	 * the partition counter.
-	 */
 
-	hyperv_cs = &hyperv_cs_msr;
-	if (ms_hyperv.features & HV_X64_MSR_TIME_REF_COUNT_AVAILABLE)
-		clocksource_register_hz(&hyperv_cs_msr, NSEC_PER_SEC/100);
+	hv_set_hypercall_pg(hv_hypercall_pg);
+
+	if (hv_root_partition())        /* after set hypercall pg */
+		hv_root_crash_init();
+
+skip_hypercall_pg_init:
+	/*
+	 * hyperv_init() is called before LAPIC is initialized: see
+	 * apic_intr_mode_init() -> x86_platform.apic_post_init() and
+	 * apic_bsp_setup() -> setup_local_APIC(). The direct-mode STIMER
+	 * depends on LAPIC, so hv_stimer_alloc() should be called from
+	 * x86_init.timers.setup_percpu_clockev.
+	 */
+	old_setup_percpu_clockev = x86_init.timers.setup_percpu_clockev;
+	x86_init.timers.setup_percpu_clockev = hv_stimer_setup_percpu_clockev;
+
+	hv_apic_init();
+
+	x86_init.pci.arch_init = hv_pci_init;
+
+	register_syscore(&hv_syscore);
+
+	if (ms_hyperv.priv_high & HV_ACCESS_PARTITION_ID)
+		hv_get_partition_id();
+
+#ifdef CONFIG_PCI_MSI
+	/*
+	 * If we're running as root, we want to create our own PCI MSI domain.
+	 * We can't set this in hv_pci_init because that would be too late.
+	 */
+	if (hv_root_partition())
+		x86_init.irqs.create_pci_msi_domain = hv_create_pci_msi_domain;
+#endif
+
+	/* Query the VMs extended capability once, so that it can be cached. */
+	hv_query_ext_cap(0);
+
+	/* Find the VTL */
+	ms_hyperv.vtl = get_vtl();
+
+	if (ms_hyperv.vtl > 0) /* non default VTL */
+		hv_vtl_early_init();
 
 	return;
 
-remove_cpuhp_state:
-	cpuhp_remove_state(cpuhp);
+clean_guest_os_id:
+	wrmsrq(HV_X64_MSR_GUEST_OS_ID, 0);
+	hv_ivm_msr_write(HV_X64_MSR_GUEST_OS_ID, 0);
+	cpuhp_remove_state(CPUHP_AP_HYPERV_ONLINE);
+free_ghcb_page:
+	free_percpu(hv_ghcb_pg);
 free_vp_assist_page:
 	kfree(hv_vp_assist_page);
 	hv_vp_assist_page = NULL;
-free_vp_index:
-	kfree(hv_vp_index);
-	hv_vp_index = NULL;
+common_free:
+	hv_common_free();
 }
 
 /*
@@ -352,24 +626,41 @@ free_vp_index:
 void hyperv_cleanup(void)
 {
 	union hv_x64_msr_hypercall_contents hypercall_msr;
+	union hv_reference_tsc_msr tsc_msr;
 
 	/* Reset our OS id */
-	wrmsrl(HV_X64_MSR_GUEST_OS_ID, 0);
+	wrmsrq(HV_X64_MSR_GUEST_OS_ID, 0);
+	hv_ivm_msr_write(HV_X64_MSR_GUEST_OS_ID, 0);
+
+	/*
+	 * Reset hv_hypercall_pg before resetting it in the hypervisor.
+	 * hv_set_hypercall_pg(NULL) is not used because at this point in the
+	 * panic path other CPUs have been stopped, causing static_call_update()
+	 * to hang. So resetting hv_hypercall_pg to cause hypercalls to fail
+	 * cleanly is only operative on 32-bit builds. But this is OK as it is
+	 * just a preventative measure to ease detecting a hypercall being made
+	 * after this point, which shouldn't be happening anyway.
+	 */
+	hv_hypercall_pg = NULL;
 
 	/* Reset the hypercall page */
-	hypercall_msr.as_uint64 = 0;
-	wrmsrl(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
+	hypercall_msr.as_uint64 = hv_get_msr(HV_X64_MSR_HYPERCALL);
+	hypercall_msr.enable = 0;
+	hv_set_msr(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
 
 	/* Reset the TSC page */
-	hypercall_msr.as_uint64 = 0;
-	wrmsrl(HV_X64_MSR_REFERENCE_TSC, hypercall_msr.as_uint64);
+	tsc_msr.as_uint64 = hv_get_msr(HV_X64_MSR_REFERENCE_TSC);
+	tsc_msr.enable = 0;
+	hv_set_msr(HV_X64_MSR_REFERENCE_TSC, tsc_msr.as_uint64);
 }
-EXPORT_SYMBOL_GPL(hyperv_cleanup);
 
-void hyperv_report_panic(struct pt_regs *regs, long err)
+void hyperv_report_panic(struct pt_regs *regs, long err, bool in_die)
 {
 	static bool panic_reported;
 	u64 guest_id;
+
+	if (in_die && !panic_on_oops)
+		return;
 
 	/*
 	 * We prefer to report panic on 'die' chain as we have proper
@@ -380,18 +671,18 @@ void hyperv_report_panic(struct pt_regs *regs, long err)
 		return;
 	panic_reported = true;
 
-	rdmsrl(HV_X64_MSR_GUEST_OS_ID, guest_id);
+	rdmsrq(HV_X64_MSR_GUEST_OS_ID, guest_id);
 
-	wrmsrl(HV_X64_MSR_CRASH_P0, err);
-	wrmsrl(HV_X64_MSR_CRASH_P1, guest_id);
-	wrmsrl(HV_X64_MSR_CRASH_P2, regs->ip);
-	wrmsrl(HV_X64_MSR_CRASH_P3, regs->ax);
-	wrmsrl(HV_X64_MSR_CRASH_P4, regs->sp);
+	wrmsrq(HV_X64_MSR_CRASH_P0, err);
+	wrmsrq(HV_X64_MSR_CRASH_P1, guest_id);
+	wrmsrq(HV_X64_MSR_CRASH_P2, regs->ip);
+	wrmsrq(HV_X64_MSR_CRASH_P3, regs->ax);
+	wrmsrq(HV_X64_MSR_CRASH_P4, regs->sp);
 
 	/*
 	 * Let Hyper-V know there is crash data available
 	 */
-	wrmsrl(HV_X64_MSR_CRASH_CTL, HV_CRASH_CTL_CRASH_NOTIFY);
+	wrmsrq(HV_X64_MSR_CRASH_CTL, HV_CRASH_CTL_CRASH_NOTIFY);
 }
 EXPORT_SYMBOL_GPL(hyperv_report_panic);
 
@@ -406,13 +697,49 @@ bool hv_is_hyperv_initialized(void)
 	if (x86_hyper_type != X86_HYPER_MS_HYPERV)
 		return false;
 
+	/* A TDX VM with no paravisor uses TDX GHCI call rather than hv_hypercall_pg */
+	if (hv_isolation_type_tdx() && !ms_hyperv.paravisor_present)
+		return true;
 	/*
 	 * Verify that earlier initialization succeeded by checking
 	 * that the hypercall page is setup
 	 */
 	hypercall_msr.as_uint64 = 0;
-	rdmsrl(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
+	rdmsrq(HV_X64_MSR_HYPERCALL, hypercall_msr.as_uint64);
 
 	return hypercall_msr.enable;
 }
 EXPORT_SYMBOL_GPL(hv_is_hyperv_initialized);
+
+int hv_apicid_to_vp_index(u32 apic_id)
+{
+	u64 control;
+	u64 status;
+	unsigned long irq_flags;
+	struct hv_get_vp_from_apic_id_in *input;
+	u32 *output, ret;
+
+	local_irq_save(irq_flags);
+
+	input = *this_cpu_ptr(hyperv_pcpu_input_arg);
+	memset(input, 0, sizeof(*input));
+	input->partition_id = HV_PARTITION_ID_SELF;
+	input->apic_ids[0] = apic_id;
+
+	output = *this_cpu_ptr(hyperv_pcpu_output_arg);
+
+	control = HV_HYPERCALL_REP_COMP_1 | HVCALL_GET_VP_INDEX_FROM_APIC_ID;
+	status = hv_do_hypercall(control, input, output);
+	ret = output[0];
+
+	local_irq_restore(irq_flags);
+
+	if (!hv_result_success(status)) {
+		pr_err("failed to get vp index from apic id %d, status %#llx\n",
+		       apic_id, status);
+		return -EINVAL;
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(hv_apicid_to_vp_index);

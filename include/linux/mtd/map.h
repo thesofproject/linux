@@ -1,20 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright © 2000-2010 David Woodhouse <dwmw2@infradead.org> et al.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
- *
  */
 
 /* Overhauled routines for dealing with different mmap regions of flash */
@@ -22,15 +8,16 @@
 #ifndef __LINUX_MTD_MAP_H__
 #define __LINUX_MTD_MAP_H__
 
-#include <linux/types.h>
-#include <linux/list.h>
-#include <linux/string.h>
 #include <linux/bug.h>
-#include <linux/kernel.h>
 #include <linux/io.h>
-
-#include <asm/unaligned.h>
+#include <linux/ioport.h>
+#include <linux/string.h>
+#include <linux/types.h>
+#include <linux/unaligned.h>
 #include <asm/barrier.h>
+
+struct device_node;
+struct module;
 
 #ifdef CONFIG_MTD_MAP_BANK_WIDTH_1
 #define map_bankwidth(map) 1
@@ -202,6 +189,7 @@ typedef union {
    of living.
 */
 
+struct mtd_chip_driver;
 struct map_info {
 	const char *name;
 	unsigned long size;

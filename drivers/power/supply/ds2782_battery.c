@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * I2C client/driver for the Maxim/Dallas DS2782 Stand-Alone Fuel Gauge IC
  *
@@ -8,13 +9,9 @@
  * DS2786 added by Yulia Vilensky <vilensky@compulab.co.il>
  *
  * UEvent sending added by Evgeny Romanov <romanov@neurosoft.ru>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
+#include <linux/devm-helpers.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/types.h>
@@ -61,14 +58,12 @@ struct ds278x_info {
 	struct power_supply_desc	battery_desc;
 	const struct ds278x_battery_ops *ops;
 	struct delayed_work	bat_work;
-	int			id;
 	int                     rsns;
 	int			capacity;
 	int			status;		/* State Of Charge */
 };
 
-static DEFINE_IDR(battery_id);
-static DEFINE_MUTEX(battery_lock);
+static DEFINE_IDA(battery_id);
 
 static inline int ds278x_read_reg(struct ds278x_info *info, int reg, u8 *val)
 {
@@ -316,23 +311,6 @@ static void ds278x_power_supply_init(struct power_supply_desc *battery)
 	battery->external_power_changed	= NULL;
 }
 
-static int ds278x_battery_remove(struct i2c_client *client)
-{
-	struct ds278x_info *info = i2c_get_clientdata(client);
-
-	power_supply_unregister(info->battery);
-	kfree(info->battery_desc.name);
-
-	mutex_lock(&battery_lock);
-	idr_remove(&battery_id, info->id);
-	mutex_unlock(&battery_lock);
-
-	cancel_delayed_work(&info->bat_work);
-
-	kfree(info);
-	return 0;
-}
-
 #ifdef CONFIG_PM_SLEEP
 
 static int ds278x_suspend(struct device *dev)
@@ -374,9 +352,16 @@ static const struct ds278x_battery_ops ds278x_ops[] = {
 	}
 };
 
-static int ds278x_battery_probe(struct i2c_client *client,
-				const struct i2c_device_id *id)
+static void ds278x_free_ida(void *data)
 {
+	int num = (uintptr_t)data;
+
+	ida_free(&battery_id, num);
+}
+
+static int ds278x_battery_probe(struct i2c_client *client)
+{
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct ds278x_platform_data *pdata = client->dev.platform_data;
 	struct power_supply_config psy_cfg = {};
 	struct ds278x_info *info;
@@ -393,32 +378,27 @@ static int ds278x_battery_probe(struct i2c_client *client,
 	}
 
 	/* Get an ID for this battery */
-	mutex_lock(&battery_lock);
-	ret = idr_alloc(&battery_id, client, 0, 0, GFP_KERNEL);
-	mutex_unlock(&battery_lock);
-	if (ret < 0)
-		goto fail_id;
-	num = ret;
+	num = ida_alloc(&battery_id, GFP_KERNEL);
+	if (num < 0)
+		return num;
+	ret = devm_add_action_or_reset(&client->dev, ds278x_free_ida, (void *)(uintptr_t)num);
+	if (ret)
+		return ret;
 
-	info = kzalloc(sizeof(*info), GFP_KERNEL);
-	if (!info) {
-		ret = -ENOMEM;
-		goto fail_info;
-	}
+	info = devm_kzalloc(&client->dev, sizeof(*info), GFP_KERNEL);
+	if (!info)
+		return -ENOMEM;
 
-	info->battery_desc.name = kasprintf(GFP_KERNEL, "%s-%d",
-					    client->name, num);
-	if (!info->battery_desc.name) {
-		ret = -ENOMEM;
-		goto fail_name;
-	}
+	info->battery_desc.name = devm_kasprintf(&client->dev, GFP_KERNEL,
+						 "%s-%d", client->name, num);
+	if (!info->battery_desc.name)
+		return -ENOMEM;
 
 	if (id->driver_data == DS2786)
 		info->rsns = pdata->rsns;
 
 	i2c_set_clientdata(client, info);
 	info->client = client;
-	info->id = num;
 	info->ops  = &ds278x_ops[id->driver_data];
 	ds278x_power_supply_init(&info->battery_desc);
 	psy_cfg.drv_data = info;
@@ -426,36 +406,26 @@ static int ds278x_battery_probe(struct i2c_client *client,
 	info->capacity = 100;
 	info->status = POWER_SUPPLY_STATUS_FULL;
 
-	INIT_DELAYED_WORK(&info->bat_work, ds278x_bat_work);
-
-	info->battery = power_supply_register(&client->dev,
-					      &info->battery_desc, &psy_cfg);
+	info->battery = devm_power_supply_register(&client->dev,
+						   &info->battery_desc,
+						   &psy_cfg);
 	if (IS_ERR(info->battery)) {
 		dev_err(&client->dev, "failed to register battery\n");
-		ret = PTR_ERR(info->battery);
-		goto fail_register;
-	} else {
-		schedule_delayed_work(&info->bat_work, DS278x_DELAY);
+		return PTR_ERR(info->battery);
 	}
 
-	return 0;
+	ret = devm_delayed_work_autocancel(&client->dev, &info->bat_work, ds278x_bat_work);
+	if (ret)
+		return ret;
+	schedule_delayed_work(&info->bat_work, DS278x_DELAY);
 
-fail_register:
-	kfree(info->battery_desc.name);
-fail_name:
-	kfree(info);
-fail_info:
-	mutex_lock(&battery_lock);
-	idr_remove(&battery_id, num);
-	mutex_unlock(&battery_lock);
-fail_id:
-	return ret;
+	return 0;
 }
 
 static const struct i2c_device_id ds278x_id[] = {
-	{"ds2782", DS2782},
-	{"ds2786", DS2786},
-	{},
+	{ .name = "ds2782", .driver_data = DS2782 },
+	{ .name = "ds2786", .driver_data = DS2786 },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ds278x_id);
 
@@ -465,11 +435,10 @@ static struct i2c_driver ds278x_battery_driver = {
 		.pm	= &ds278x_battery_pm_ops,
 	},
 	.probe		= ds278x_battery_probe,
-	.remove		= ds278x_battery_remove,
 	.id_table	= ds278x_id,
 };
 module_i2c_driver(ds278x_battery_driver);
 
 MODULE_AUTHOR("Ryan Mallon");
-MODULE_DESCRIPTION("Maxim/Dallas DS2782 Stand-Alone Fuel Gauage IC driver");
+MODULE_DESCRIPTION("Maxim/Dallas DS2782 Stand-Alone Fuel Gauge IC driver");
 MODULE_LICENSE("GPL");

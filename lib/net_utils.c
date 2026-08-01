@@ -2,14 +2,14 @@
 #include <linux/string.h>
 #include <linux/if_ether.h>
 #include <linux/ctype.h>
-#include <linux/kernel.h>
+#include <linux/export.h>
+#include <linux/hex.h>
 
 bool mac_pton(const char *s, u8 *mac)
 {
 	int i;
 
-	/* XX:XX:XX:XX:XX:XX */
-	if (strlen(s) < 3 * ETH_ALEN - 1)
+	if (strnlen(s, MAC_ADDR_STR_LEN) < MAC_ADDR_STR_LEN)
 		return false;
 
 	/* Don't dirty result unless string is valid MAC. */

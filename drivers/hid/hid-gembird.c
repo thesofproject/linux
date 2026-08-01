@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  HID driver for Gembird Joypad, "PC Game Controller"
  *
@@ -6,10 +7,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 #include <linux/device.h>
@@ -60,7 +57,7 @@ static const __u8 gembird_jpd_fixed_rdesc[] = {
 	0x81, 0x02,			/*   Input (Data,Var,Abs)	*/
 };
 
-static __u8 *gembird_report_fixup(struct hid_device *hdev, __u8 *rdesc,
+static const __u8 *gembird_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 		unsigned int *rsize)
 {
 	__u8 *new_rdesc;

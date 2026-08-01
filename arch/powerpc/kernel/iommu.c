@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2001 Mike Corrigan & Dave Engebretsen, IBM Corporation
  * 
@@ -6,29 +7,17 @@
  *               and  Ben. Herrenschmidt, IBM Corporation
  *
  * Dynamic DMA mapping support, bus-independent parts.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- * 
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 
 #include <linux/init.h>
 #include <linux/types.h>
 #include <linux/slab.h>
+#include <linux/sysfs.h>
 #include <linux/mm.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
+#include <linux/string_choices.h>
 #include <linux/dma-mapping.h>
 #include <linux/bitmap.h>
 #include <linux/iommu-helper.h>
@@ -38,8 +27,9 @@
 #include <linux/pci.h>
 #include <linux/iommu.h>
 #include <linux/sched.h>
+#include <linux/debugfs.h>
+#include <linux/vmalloc.h>
 #include <asm/io.h>
-#include <asm/prom.h>
 #include <asm/iommu.h>
 #include <asm/pci-bridge.h>
 #include <asm/machdep.h>
@@ -47,8 +37,48 @@
 #include <asm/fadump.h>
 #include <asm/vio.h>
 #include <asm/tce.h>
+#include <asm/mmu_context.h>
+#include <asm/ppc-pci.h>
 
 #define DBG(...)
+
+#ifdef CONFIG_IOMMU_DEBUGFS
+static int iommu_debugfs_weight_get(void *data, u64 *val)
+{
+	struct iommu_table *tbl = data;
+	*val = bitmap_weight(tbl->it_map, tbl->it_size);
+	return 0;
+}
+DEFINE_DEBUGFS_ATTRIBUTE(iommu_debugfs_fops_weight, iommu_debugfs_weight_get, NULL, "%llu\n");
+
+static void iommu_debugfs_add(struct iommu_table *tbl)
+{
+	char name[10];
+	struct dentry *liobn_entry;
+
+	sprintf(name, "%08lx", tbl->it_index);
+	liobn_entry = debugfs_create_dir(name, iommu_debugfs_dir);
+
+	debugfs_create_file_unsafe("weight", 0400, liobn_entry, tbl, &iommu_debugfs_fops_weight);
+	debugfs_create_ulong("it_size", 0400, liobn_entry, &tbl->it_size);
+	debugfs_create_ulong("it_page_shift", 0400, liobn_entry, &tbl->it_page_shift);
+	debugfs_create_ulong("it_reserved_start", 0400, liobn_entry, &tbl->it_reserved_start);
+	debugfs_create_ulong("it_reserved_end", 0400, liobn_entry, &tbl->it_reserved_end);
+	debugfs_create_ulong("it_indirect_levels", 0400, liobn_entry, &tbl->it_indirect_levels);
+	debugfs_create_ulong("it_level_size", 0400, liobn_entry, &tbl->it_level_size);
+}
+
+static void iommu_debugfs_del(struct iommu_table *tbl)
+{
+	char name[10];
+
+	sprintf(name, "%08lx", tbl->it_index);
+	debugfs_lookup_and_remove(name, iommu_debugfs_dir);
+}
+#else
+static void iommu_debugfs_add(struct iommu_table *tbl){}
+static void iommu_debugfs_del(struct iommu_table *tbl){}
+#endif
 
 static int novmerge;
 
@@ -112,7 +142,7 @@ late_initcall(fail_iommu_debugfs);
 static ssize_t fail_iommu_show(struct device *dev,
 			       struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", dev->archdata.fail_iommu);
+	return sysfs_emit(buf, "%d\n", dev->archdata.fail_iommu);
 }
 
 static ssize_t fail_iommu_store(struct device *dev,
@@ -145,17 +175,28 @@ static int fail_iommu_bus_notify(struct notifier_block *nb,
 	return 0;
 }
 
-static struct notifier_block fail_iommu_bus_notifier = {
+/*
+ * PCI and VIO buses need separate notifier_block structs, since they're linked
+ * list nodes.  Sharing a notifier_block would mean that any notifiers later
+ * registered for PCI buses would also get called by VIO buses and vice versa.
+ */
+static struct notifier_block fail_iommu_pci_bus_notifier = {
 	.notifier_call = fail_iommu_bus_notify
 };
+
+#ifdef CONFIG_IBMVIO
+static struct notifier_block fail_iommu_vio_bus_notifier = {
+	.notifier_call = fail_iommu_bus_notify
+};
+#endif
 
 static int __init fail_iommu_setup(void)
 {
 #ifdef CONFIG_PCI
-	bus_register_notifier(&pci_bus_type, &fail_iommu_bus_notifier);
+	bus_register_notifier(&pci_bus_type, &fail_iommu_pci_bus_notifier);
 #endif
 #ifdef CONFIG_IBMVIO
-	bus_register_notifier(&vio_bus_type, &fail_iommu_bus_notifier);
+	bus_register_notifier(&vio_bus_type, &fail_iommu_vio_bus_notifier);
 #endif
 
 	return 0;
@@ -184,7 +225,6 @@ static unsigned long iommu_range_alloc(struct device *dev,
 	int largealloc = npages > 15;
 	int pass = 0;
 	unsigned long align_mask;
-	unsigned long boundary_size;
 	unsigned long flags;
 	unsigned int pool_nr;
 	struct iommu_pool *pool;
@@ -197,11 +237,11 @@ static unsigned long iommu_range_alloc(struct device *dev,
 	if (unlikely(npages == 0)) {
 		if (printk_ratelimit())
 			WARN_ON(1);
-		return IOMMU_MAPPING_ERROR;
+		return DMA_MAPPING_ERROR;
 	}
 
 	if (should_fail_iommu(dev))
-		return IOMMU_MAPPING_ERROR;
+		return DMA_MAPPING_ERROR;
 
 	/*
 	 * We don't need to disable preemption here because any CPU can
@@ -248,15 +288,9 @@ again:
 		}
 	}
 
-	if (dev)
-		boundary_size = ALIGN(dma_get_seg_boundary(dev) + 1,
-				      1 << tbl->it_page_shift);
-	else
-		boundary_size = ALIGN(1UL << 32, 1 << tbl->it_page_shift);
-	/* 4GB boundary for iseries_hv_alloc and iseries_hv_map */
-
 	n = iommu_area_alloc(tbl->it_map, limit, start, npages, tbl->it_offset,
-			     boundary_size >> tbl->it_page_shift, align_mask);
+			dma_get_seg_boundary_nr_pages(dev, tbl->it_page_shift),
+			align_mask);
 	if (n == -1) {
 		if (likely(pass == 0)) {
 			/* First try the pool from the start */
@@ -274,10 +308,19 @@ again:
 			pass++;
 			goto again;
 
+		} else if (pass == tbl->nr_pools + 1) {
+			/* Last resort: try largepool */
+			spin_unlock(&pool->lock);
+			pool = &tbl->large_pool;
+			spin_lock(&pool->lock);
+			pool->hint = pool->start;
+			pass++;
+			goto again;
+
 		} else {
 			/* Give up */
 			spin_unlock_irqrestore(&(pool->lock), flags);
-			return IOMMU_MAPPING_ERROR;
+			return DMA_MAPPING_ERROR;
 		}
 	}
 
@@ -309,13 +352,13 @@ static dma_addr_t iommu_alloc(struct device *dev, struct iommu_table *tbl,
 			      unsigned long attrs)
 {
 	unsigned long entry;
-	dma_addr_t ret = IOMMU_MAPPING_ERROR;
+	dma_addr_t ret = DMA_MAPPING_ERROR;
 	int build_fail;
 
 	entry = iommu_range_alloc(dev, tbl, npages, NULL, mask, align_order);
 
-	if (unlikely(entry == IOMMU_MAPPING_ERROR))
-		return IOMMU_MAPPING_ERROR;
+	if (unlikely(entry == DMA_MAPPING_ERROR))
+		return DMA_MAPPING_ERROR;
 
 	entry += tbl->it_offset;	/* Offset into real TCE table */
 	ret = entry << tbl->it_page_shift;	/* Set the return dma address */
@@ -327,12 +370,12 @@ static dma_addr_t iommu_alloc(struct device *dev, struct iommu_table *tbl,
 
 	/* tbl->it_ops->set() only returns non-zero for transient errors.
 	 * Clean up the table bitmap in this case and return
-	 * IOMMU_MAPPING_ERROR. For all other errors the functionality is
+	 * DMA_MAPPING_ERROR. For all other errors the functionality is
 	 * not altered.
 	 */
 	if (unlikely(build_fail)) {
 		__iommu_free(tbl, ret, npages);
-		return IOMMU_MAPPING_ERROR;
+		return DMA_MAPPING_ERROR;
 	}
 
 	/* Flush/invalidate TLB caches if necessary */
@@ -442,7 +485,7 @@ int ppc_iommu_map_sg(struct device *dev, struct iommu_table *tbl,
 	BUG_ON(direction == DMA_NONE);
 
 	if ((nelems == 0) || !tbl)
-		return 0;
+		return -EINVAL;
 
 	outs = s = segstart = &sglist[0];
 	outcount = 1;
@@ -477,7 +520,7 @@ int ppc_iommu_map_sg(struct device *dev, struct iommu_table *tbl,
 		DBG("  - vaddr: %lx, size: %lx\n", vaddr, slen);
 
 		/* Handle failure */
-		if (unlikely(entry == IOMMU_MAPPING_ERROR)) {
+		if (unlikely(entry == DMA_MAPPING_ERROR)) {
 			if (!(attrs & DMA_ATTR_NO_WARN) &&
 			    printk_ratelimit())
 				dev_info(dev, "iommu_alloc failed, tbl %p "
@@ -489,7 +532,7 @@ int ppc_iommu_map_sg(struct device *dev, struct iommu_table *tbl,
 		/* Convert entry to a dma_addr_t */
 		entry += tbl->it_offset;
 		dma_addr = entry << tbl->it_page_shift;
-		dma_addr |= (s->offset & ~IOMMU_PAGE_MASK(tbl));
+		dma_addr |= (vaddr & ~IOMMU_PAGE_MASK(tbl));
 
 		DBG("  - %lu pages, entry: %lx, dma_addr: %lx\n",
 			    npages, entry, dma_addr);
@@ -544,7 +587,6 @@ int ppc_iommu_map_sg(struct device *dev, struct iommu_table *tbl,
 	 */
 	if (outcount < incount) {
 		outs = sg_next(outs);
-		outs->dma_address = IOMMU_MAPPING_ERROR;
 		outs->dma_length = 0;
 	}
 
@@ -562,13 +604,12 @@ int ppc_iommu_map_sg(struct device *dev, struct iommu_table *tbl,
 			npages = iommu_num_pages(s->dma_address, s->dma_length,
 						 IOMMU_PAGE_SIZE(tbl));
 			__iommu_free(tbl, vaddr, npages);
-			s->dma_address = IOMMU_MAPPING_ERROR;
 			s->dma_length = 0;
 		}
 		if (s == outs)
 			break;
 	}
-	return 0;
+	return -EIO;
 }
 
 
@@ -604,7 +645,7 @@ void ppc_iommu_unmap_sg(struct iommu_table *tbl, struct scatterlist *sglist,
 		tbl->it_ops->flush(tbl);
 }
 
-static void iommu_table_clear(struct iommu_table *tbl)
+void iommu_table_clear(struct iommu_table *tbl)
 {
 	/*
 	 * In case of firmware assisted dump system goes through clean
@@ -645,15 +686,49 @@ static void iommu_table_clear(struct iommu_table *tbl)
 #endif
 }
 
+void iommu_table_reserve_pages(struct iommu_table *tbl,
+		unsigned long res_start, unsigned long res_end)
+{
+	unsigned long i;
+
+	WARN_ON_ONCE(res_end < res_start);
+	/*
+	 * Reserve page 0 so it will not be used for any mappings.
+	 * This avoids buggy drivers that consider page 0 to be invalid
+	 * to crash the machine or even lose data.
+	 */
+	if (tbl->it_offset == 0)
+		set_bit(0, tbl->it_map);
+
+	if (res_start < tbl->it_offset)
+		res_start = tbl->it_offset;
+
+	if (res_end > (tbl->it_offset + tbl->it_size))
+		res_end = tbl->it_offset + tbl->it_size;
+
+	/* Check if res_start..res_end is a valid range in the table */
+	if (res_start >= res_end) {
+		tbl->it_reserved_start = tbl->it_offset;
+		tbl->it_reserved_end = tbl->it_offset;
+		return;
+	}
+
+	tbl->it_reserved_start = res_start;
+	tbl->it_reserved_end = res_end;
+
+	for (i = tbl->it_reserved_start; i < tbl->it_reserved_end; ++i)
+		set_bit(i - tbl->it_offset, tbl->it_map);
+}
+
 /*
  * Build a iommu_table structure.  This contains a bit map which
  * is used to manage allocation of the tce space.
  */
-struct iommu_table *iommu_init_table(struct iommu_table *tbl, int nid)
+struct iommu_table *iommu_init_table(struct iommu_table *tbl, int nid,
+		unsigned long res_start, unsigned long res_end)
 {
 	unsigned long sz;
 	static int welcomed = 0;
-	struct page *page;
 	unsigned int i;
 	struct iommu_pool *p;
 
@@ -662,19 +737,13 @@ struct iommu_table *iommu_init_table(struct iommu_table *tbl, int nid)
 	/* number of bytes needed for the bitmap */
 	sz = BITS_TO_LONGS(tbl->it_size) * sizeof(unsigned long);
 
-	page = alloc_pages_node(nid, GFP_KERNEL, get_order(sz));
-	if (!page)
-		panic("iommu_init_table: Can't allocate %ld bytes\n", sz);
-	tbl->it_map = page_address(page);
-	memset(tbl->it_map, 0, sz);
+	tbl->it_map = vzalloc_node(sz, nid);
+	if (!tbl->it_map) {
+		pr_err("%s: Can't allocate %ld bytes\n", __func__, sz);
+		return NULL;
+	}
 
-	/*
-	 * Reserve page 0 so it will not be used for any mappings.
-	 * This avoids buggy drivers that consider page 0 to be invalid
-	 * to crash the machine or even lose data.
-	 */
-	if (tbl->it_offset == 0)
-		set_bit(0, tbl->it_map);
+	iommu_table_reserve_pages(tbl, res_start, res_end);
 
 	/* We only split the IOMMU table if we have 1GB or more of space */
 	if ((tbl->it_size << tbl->it_page_shift) >= (1UL * 1024 * 1024 * 1024))
@@ -702,18 +771,39 @@ struct iommu_table *iommu_init_table(struct iommu_table *tbl, int nid)
 	iommu_table_clear(tbl);
 
 	if (!welcomed) {
-		printk(KERN_INFO "IOMMU table initialized, virtual merging %s\n",
-		       novmerge ? "disabled" : "enabled");
+		pr_info("IOMMU table initialized, virtual merging %s\n",
+			str_disabled_enabled(novmerge));
 		welcomed = 1;
 	}
+
+	iommu_debugfs_add(tbl);
 
 	return tbl;
 }
 
+bool iommu_table_in_use(struct iommu_table *tbl)
+{
+	unsigned long start = 0, end;
+
+	/* ignore reserved bit0 */
+	if (tbl->it_offset == 0)
+		start = 1;
+
+	/* Simple case with no reserved MMIO32 region */
+	if (!tbl->it_reserved_start && !tbl->it_reserved_end)
+		return find_next_bit(tbl->it_map, tbl->it_size, start) != tbl->it_size;
+
+	end = tbl->it_reserved_start - tbl->it_offset;
+	if (find_next_bit(tbl->it_map, end, start) != end)
+		return true;
+
+	start = tbl->it_reserved_end - tbl->it_offset;
+	end = tbl->it_size;
+	return find_next_bit(tbl->it_map, end, start) != end;
+}
+
 static void iommu_table_free(struct kref *kref)
 {
-	unsigned long bitmap_sz;
-	unsigned int order;
 	struct iommu_table *tbl;
 
 	tbl = container_of(kref, struct iommu_table, it_kref);
@@ -726,23 +816,14 @@ static void iommu_table_free(struct kref *kref)
 		return;
 	}
 
-	/*
-	 * In case we have reserved the first bit, we should not emit
-	 * the warning below.
-	 */
-	if (tbl->it_offset == 0)
-		clear_bit(0, tbl->it_map);
+	iommu_debugfs_del(tbl);
 
 	/* verify that table contains no entries */
-	if (!bitmap_empty(tbl->it_map, tbl->it_size))
+	if (iommu_table_in_use(tbl))
 		pr_warn("%s: Unexpected TCEs\n", __func__);
 
-	/* calculate bitmap size in bytes */
-	bitmap_sz = BITS_TO_LONGS(tbl->it_size) * sizeof(unsigned long);
-
 	/* free bitmap */
-	order = get_order(bitmap_sz);
-	free_pages((unsigned long) tbl->it_map, order);
+	vfree(tbl->it_map);
 
 	/* free table */
 	kfree(tbl);
@@ -768,26 +849,26 @@ EXPORT_SYMBOL_GPL(iommu_tce_table_put);
 
 /* Creates TCEs for a user provided buffer.  The user buffer must be
  * contiguous real kernel storage (not vmalloc).  The address passed here
- * comprises a page address and offset into that page. The dma_addr_t
- * returned will point to the same byte within the page as was passed in.
+ * is physical address into that page. The dma_addr_t returned will point
+ * to the same byte within the page as was passed in.
  */
-dma_addr_t iommu_map_page(struct device *dev, struct iommu_table *tbl,
-			  struct page *page, unsigned long offset, size_t size,
-			  unsigned long mask, enum dma_data_direction direction,
+dma_addr_t iommu_map_phys(struct device *dev, struct iommu_table *tbl,
+			  phys_addr_t phys, size_t size, unsigned long mask,
+			  enum dma_data_direction direction,
 			  unsigned long attrs)
 {
-	dma_addr_t dma_handle = IOMMU_MAPPING_ERROR;
+	dma_addr_t dma_handle = DMA_MAPPING_ERROR;
 	void *vaddr;
 	unsigned long uaddr;
 	unsigned int npages, align;
 
 	BUG_ON(direction == DMA_NONE);
 
-	vaddr = page_address(page) + offset;
+	vaddr = phys_to_virt(phys);
 	uaddr = (unsigned long)vaddr;
-	npages = iommu_num_pages(uaddr, size, IOMMU_PAGE_SIZE(tbl));
 
 	if (tbl) {
+		npages = iommu_num_pages(uaddr, size, IOMMU_PAGE_SIZE(tbl));
 		align = 0;
 		if (tbl->it_page_shift < PAGE_SHIFT && size >= PAGE_SIZE &&
 		    ((unsigned long)vaddr & ~PAGE_MASK) == 0)
@@ -796,7 +877,7 @@ dma_addr_t iommu_map_page(struct device *dev, struct iommu_table *tbl,
 		dma_handle = iommu_alloc(dev, tbl, vaddr, npages, direction,
 					 mask >> tbl->it_page_shift, align,
 					 attrs);
-		if (dma_handle == IOMMU_MAPPING_ERROR) {
+		if (dma_handle == DMA_MAPPING_ERROR) {
 			if (!(attrs & DMA_ATTR_NO_WARN) &&
 			    printk_ratelimit())  {
 				dev_info(dev, "iommu_alloc failed, tbl %p "
@@ -810,7 +891,7 @@ dma_addr_t iommu_map_page(struct device *dev, struct iommu_table *tbl,
 	return dma_handle;
 }
 
-void iommu_unmap_page(struct iommu_table *tbl, dma_addr_t dma_handle,
+void iommu_unmap_phys(struct iommu_table *tbl, dma_addr_t dma_handle,
 		      size_t size, enum dma_data_direction direction,
 		      unsigned long attrs)
 {
@@ -838,6 +919,7 @@ void *iommu_alloc_coherent(struct device *dev, struct iommu_table *tbl,
 	unsigned int order;
 	unsigned int nio_pages, io_order;
 	struct page *page;
+	int tcesize = (1 << tbl->it_page_shift);
 
 	size = PAGE_ALIGN(size);
 	order = get_order(size);
@@ -864,15 +946,17 @@ void *iommu_alloc_coherent(struct device *dev, struct iommu_table *tbl,
 	memset(ret, 0, size);
 
 	/* Set up tces to cover the allocated range */
-	nio_pages = size >> tbl->it_page_shift;
+	nio_pages = IOMMU_PAGE_ALIGN(size, tbl) >> tbl->it_page_shift;
+
 	io_order = get_iommu_order(size, tbl);
 	mapping = iommu_alloc(dev, tbl, ret, nio_pages, DMA_BIDIRECTIONAL,
 			      mask >> tbl->it_page_shift, io_order, 0);
-	if (mapping == IOMMU_MAPPING_ERROR) {
+	if (mapping == DMA_MAPPING_ERROR) {
 		free_pages((unsigned long)ret, order);
 		return NULL;
 	}
-	*dma_handle = mapping;
+
+	*dma_handle = mapping | ((u64)ret & (tcesize - 1));
 	return ret;
 }
 
@@ -883,7 +967,7 @@ void iommu_free_coherent(struct iommu_table *tbl, size_t size,
 		unsigned int nio_pages;
 
 		size = PAGE_ALIGN(size);
-		nio_pages = size >> tbl->it_page_shift;
+		nio_pages = IOMMU_PAGE_ALIGN(size, tbl) >> tbl->it_page_shift;
 		iommu_free(tbl, dma_handle, nio_pages);
 		size = PAGE_ALIGN(size);
 		free_pages((unsigned long)vaddr, get_order(size));
@@ -906,6 +990,23 @@ unsigned long iommu_direction_to_tce_perm(enum dma_data_direction dir)
 EXPORT_SYMBOL_GPL(iommu_direction_to_tce_perm);
 
 #ifdef CONFIG_IOMMU_API
+
+int dev_has_iommu_table(struct device *dev, void *data)
+{
+	struct pci_dev *pdev = to_pci_dev(dev);
+	struct pci_dev **ppdev = data;
+
+	if (!dev)
+		return 0;
+
+	if (device_iommu_mapped(dev)) {
+		*ppdev = pdev;
+		return 1;
+	}
+
+	return 0;
+}
+
 /*
  * SPAPR TCE API
  */
@@ -993,116 +1094,35 @@ int iommu_tce_check_gpa(unsigned long page_shift, unsigned long gpa)
 }
 EXPORT_SYMBOL_GPL(iommu_tce_check_gpa);
 
-long iommu_tce_xchg(struct iommu_table *tbl, unsigned long entry,
-		unsigned long *hpa, enum dma_data_direction *direction)
+long iommu_tce_xchg_no_kill(struct mm_struct *mm,
+			    struct iommu_table *tbl,
+			    unsigned long entry, unsigned long *hpa,
+			    enum dma_data_direction *direction)
 {
 	long ret;
+	unsigned long size = 0;
 
-	ret = tbl->it_ops->exchange(tbl, entry, hpa, direction);
-
+	ret = tbl->it_ops->xchg_no_kill(tbl, entry, hpa, direction);
 	if (!ret && ((*direction == DMA_FROM_DEVICE) ||
-			(*direction == DMA_BIDIRECTIONAL)))
+			(*direction == DMA_BIDIRECTIONAL)) &&
+			!mm_iommu_is_devmem(mm, *hpa, tbl->it_page_shift,
+					&size))
 		SetPageDirty(pfn_to_page(*hpa >> PAGE_SHIFT));
 
-	/* if (unlikely(ret))
-		pr_err("iommu_tce: %s failed on hwaddr=%lx ioba=%lx kva=%lx ret=%d\n",
-			__func__, hwaddr, entry << tbl->it_page_shift,
-				hwaddr, ret); */
-
 	return ret;
 }
-EXPORT_SYMBOL_GPL(iommu_tce_xchg);
+EXPORT_SYMBOL_GPL(iommu_tce_xchg_no_kill);
 
-#ifdef CONFIG_PPC_BOOK3S_64
-long iommu_tce_xchg_rm(struct iommu_table *tbl, unsigned long entry,
-		unsigned long *hpa, enum dma_data_direction *direction)
+void iommu_tce_kill(struct iommu_table *tbl,
+		unsigned long entry, unsigned long pages)
 {
-	long ret;
-
-	ret = tbl->it_ops->exchange_rm(tbl, entry, hpa, direction);
-
-	if (!ret && ((*direction == DMA_FROM_DEVICE) ||
-			(*direction == DMA_BIDIRECTIONAL))) {
-		struct page *pg = realmode_pfn_to_page(*hpa >> PAGE_SHIFT);
-
-		if (likely(pg)) {
-			SetPageDirty(pg);
-		} else {
-			tbl->it_ops->exchange_rm(tbl, entry, hpa, direction);
-			ret = -EFAULT;
-		}
-	}
-
-	return ret;
+	if (tbl->it_ops->tce_kill)
+		tbl->it_ops->tce_kill(tbl, entry, pages);
 }
-EXPORT_SYMBOL_GPL(iommu_tce_xchg_rm);
-#endif
+EXPORT_SYMBOL_GPL(iommu_tce_kill);
 
-int iommu_take_ownership(struct iommu_table *tbl)
+int iommu_add_device(struct iommu_table_group *table_group, struct device *dev)
 {
-	unsigned long flags, i, sz = (tbl->it_size + 7) >> 3;
-	int ret = 0;
-
-	/*
-	 * VFIO does not control TCE entries allocation and the guest
-	 * can write new TCEs on top of existing ones so iommu_tce_build()
-	 * must be able to release old pages. This functionality
-	 * requires exchange() callback defined so if it is not
-	 * implemented, we disallow taking ownership over the table.
-	 */
-	if (!tbl->it_ops->exchange)
-		return -EINVAL;
-
-	spin_lock_irqsave(&tbl->large_pool.lock, flags);
-	for (i = 0; i < tbl->nr_pools; i++)
-		spin_lock(&tbl->pools[i].lock);
-
-	if (tbl->it_offset == 0)
-		clear_bit(0, tbl->it_map);
-
-	if (!bitmap_empty(tbl->it_map, tbl->it_size)) {
-		pr_err("iommu_tce: it_map is not empty");
-		ret = -EBUSY;
-		/* Restore bit#0 set by iommu_init_table() */
-		if (tbl->it_offset == 0)
-			set_bit(0, tbl->it_map);
-	} else {
-		memset(tbl->it_map, 0xff, sz);
-	}
-
-	for (i = 0; i < tbl->nr_pools; i++)
-		spin_unlock(&tbl->pools[i].lock);
-	spin_unlock_irqrestore(&tbl->large_pool.lock, flags);
-
-	return ret;
-}
-EXPORT_SYMBOL_GPL(iommu_take_ownership);
-
-void iommu_release_ownership(struct iommu_table *tbl)
-{
-	unsigned long flags, i, sz = (tbl->it_size + 7) >> 3;
-
-	spin_lock_irqsave(&tbl->large_pool.lock, flags);
-	for (i = 0; i < tbl->nr_pools; i++)
-		spin_lock(&tbl->pools[i].lock);
-
-	memset(tbl->it_map, 0, sz);
-
-	/* Restore bit#0 set by iommu_init_table() */
-	if (tbl->it_offset == 0)
-		set_bit(0, tbl->it_map);
-
-	for (i = 0; i < tbl->nr_pools; i++)
-		spin_unlock(&tbl->pools[i].lock);
-	spin_unlock_irqrestore(&tbl->large_pool.lock, flags);
-}
-EXPORT_SYMBOL_GPL(iommu_release_ownership);
-
-int iommu_add_device(struct device *dev)
-{
-	struct iommu_table *tbl;
-	struct iommu_table_group_link *tgl;
-
 	/*
 	 * The sysfs entries should be populated before
 	 * binding IOMMU group. If sysfs entries isn't
@@ -1111,83 +1131,189 @@ int iommu_add_device(struct device *dev)
 	if (!device_is_registered(dev))
 		return -ENOENT;
 
-	if (dev->iommu_group) {
+	if (device_iommu_mapped(dev)) {
 		pr_debug("%s: Skipping device %s with iommu group %d\n",
 			 __func__, dev_name(dev),
 			 iommu_group_id(dev->iommu_group));
 		return -EBUSY;
 	}
 
-	tbl = get_iommu_table_base(dev);
-	if (!tbl) {
-		pr_debug("%s: Skipping device %s with no tbl\n",
-			 __func__, dev_name(dev));
-		return 0;
-	}
-
-	tgl = list_first_entry_or_null(&tbl->it_group_list,
-			struct iommu_table_group_link, next);
-	if (!tgl) {
-		pr_debug("%s: Skipping device %s with no group\n",
-			 __func__, dev_name(dev));
-		return 0;
-	}
 	pr_debug("%s: Adding %s to iommu group %d\n",
-		 __func__, dev_name(dev),
-		 iommu_group_id(tgl->table_group->group));
-
-	if (PAGE_SIZE < IOMMU_PAGE_SIZE(tbl)) {
-		pr_err("%s: Invalid IOMMU page size %lx (%lx) on %s\n",
-		       __func__, IOMMU_PAGE_SIZE(tbl),
-		       PAGE_SIZE, dev_name(dev));
-		return -EINVAL;
-	}
-
-	return iommu_group_add_device(tgl->table_group->group, dev);
+		 __func__, dev_name(dev),  iommu_group_id(table_group->group));
+	/*
+	 * This is still not adding devices via the IOMMU bus notifier because
+	 * of pcibios_init() from arch/powerpc/kernel/pci_64.c which calls
+	 * pcibios_scan_phb() first (and this guy adds devices and triggers
+	 * the notifier) and only then it calls pci_bus_add_devices() which
+	 * configures DMA for buses which also creates PEs and IOMMU groups.
+	 */
+	return iommu_probe_device(dev);
 }
 EXPORT_SYMBOL_GPL(iommu_add_device);
 
-void iommu_del_device(struct device *dev)
+#if defined(CONFIG_PPC_PSERIES) || defined(CONFIG_PPC_POWERNV)
+/*
+ * A simple iommu_ops to allow less cruft in generic VFIO code.
+ */
+static int
+spapr_tce_platform_iommu_attach_dev(struct iommu_domain *platform_domain,
+				    struct device *dev,
+				    struct iommu_domain *old)
 {
+	struct iommu_domain *domain = iommu_driver_get_domain_for_dev(dev);
+	struct iommu_table_group *table_group;
+	struct iommu_group *grp;
+
+	/* At first attach the ownership is already set */
+	if (!domain)
+		return 0;
+
+	grp = iommu_group_get(dev);
+	table_group = iommu_group_get_iommudata(grp);
 	/*
-	 * Some devices might not have IOMMU table and group
-	 * and we needn't detach them from the associated
-	 * IOMMU groups
+	 * The domain being set to PLATFORM from earlier
+	 * BLOCKED. The table_group ownership has to be released.
 	 */
-	if (!dev->iommu_group) {
-		pr_debug("iommu_tce: skipping device %s with no tbl\n",
-			 dev_name(dev));
-		return;
-	}
+	table_group->ops->release_ownership(table_group, dev);
+	iommu_group_put(grp);
 
-	iommu_group_remove_device(dev);
-}
-EXPORT_SYMBOL_GPL(iommu_del_device);
-
-static int tce_iommu_bus_notifier(struct notifier_block *nb,
-                unsigned long action, void *data)
-{
-        struct device *dev = data;
-
-        switch (action) {
-        case BUS_NOTIFY_ADD_DEVICE:
-                return iommu_add_device(dev);
-        case BUS_NOTIFY_DEL_DEVICE:
-                if (dev->iommu_group)
-                        iommu_del_device(dev);
-                return 0;
-        default:
-                return 0;
-        }
+	return 0;
 }
 
-static struct notifier_block tce_iommu_bus_nb = {
-        .notifier_call = tce_iommu_bus_notifier,
+static const struct iommu_domain_ops spapr_tce_platform_domain_ops = {
+	.attach_dev = spapr_tce_platform_iommu_attach_dev,
 };
 
-int __init tce_iommu_bus_notifier_init(void)
+static struct iommu_domain spapr_tce_platform_domain = {
+	.type = IOMMU_DOMAIN_PLATFORM,
+	.ops = &spapr_tce_platform_domain_ops,
+};
+
+static int
+spapr_tce_blocked_iommu_attach_dev(struct iommu_domain *platform_domain,
+				   struct device *dev, struct iommu_domain *old)
 {
-        bus_register_notifier(&pci_bus_type, &tce_iommu_bus_nb);
-        return 0;
+	struct iommu_group *grp = iommu_group_get(dev);
+	struct iommu_table_group *table_group;
+	int ret = -EINVAL;
+
+	/*
+	 * FIXME: SPAPR mixes blocked and platform behaviors, the blocked domain
+	 * also sets the dma_api ops
+	 */
+	table_group = iommu_group_get_iommudata(grp);
+	ret = table_group->ops->take_ownership(table_group, dev);
+	iommu_group_put(grp);
+
+	return ret;
 }
+
+static const struct iommu_domain_ops spapr_tce_blocked_domain_ops = {
+	.attach_dev = spapr_tce_blocked_iommu_attach_dev,
+};
+
+static struct iommu_domain spapr_tce_blocked_domain = {
+	.type = IOMMU_DOMAIN_BLOCKED,
+	.ops = &spapr_tce_blocked_domain_ops,
+};
+
+static bool spapr_tce_iommu_capable(struct device *dev, enum iommu_cap cap)
+{
+	switch (cap) {
+	case IOMMU_CAP_CACHE_COHERENCY:
+		return true;
+	default:
+		break;
+	}
+
+	return false;
+}
+
+static struct iommu_device *spapr_tce_iommu_probe_device(struct device *dev)
+{
+	struct pci_dev *pdev;
+	struct pci_controller *hose;
+
+	if (!dev_is_pci(dev))
+		return ERR_PTR(-ENODEV);
+
+	pdev = to_pci_dev(dev);
+	hose = pdev->bus->sysdata;
+
+	return &hose->iommu;
+}
+
+static void spapr_tce_iommu_release_device(struct device *dev)
+{
+}
+
+static struct iommu_group *spapr_tce_iommu_device_group(struct device *dev)
+{
+	struct pci_controller *hose;
+	struct pci_dev *pdev;
+
+	pdev = to_pci_dev(dev);
+	hose = pdev->bus->sysdata;
+
+	if (!hose->controller_ops.device_group)
+		return ERR_PTR(-ENOENT);
+
+	return hose->controller_ops.device_group(hose, pdev);
+}
+
+static const struct iommu_ops spapr_tce_iommu_ops = {
+	.default_domain = &spapr_tce_platform_domain,
+	.blocked_domain = &spapr_tce_blocked_domain,
+	.capable = spapr_tce_iommu_capable,
+	.probe_device = spapr_tce_iommu_probe_device,
+	.release_device = spapr_tce_iommu_release_device,
+	.device_group = spapr_tce_iommu_device_group,
+};
+
+static struct attribute *spapr_tce_iommu_attrs[] = {
+	NULL,
+};
+
+static struct attribute_group spapr_tce_iommu_group = {
+	.name = "spapr-tce-iommu",
+	.attrs = spapr_tce_iommu_attrs,
+};
+
+static const struct attribute_group *spapr_tce_iommu_groups[] = {
+	&spapr_tce_iommu_group,
+	NULL,
+};
+
+void ppc_iommu_register_device(struct pci_controller *phb)
+{
+	iommu_device_sysfs_add(&phb->iommu, phb->parent,
+				spapr_tce_iommu_groups, "iommu-phb%04x",
+				phb->global_number);
+	iommu_device_register(&phb->iommu, &spapr_tce_iommu_ops,
+				phb->parent);
+}
+
+void ppc_iommu_unregister_device(struct pci_controller *phb)
+{
+	iommu_device_unregister(&phb->iommu);
+	iommu_device_sysfs_remove(&phb->iommu);
+}
+
+/*
+ * This registers IOMMU devices of PHBs. This needs to happen
+ * after core_initcall(iommu_init) + postcore_initcall(pci_driver_init) and
+ * before subsys_initcall(iommu_subsys_init).
+ */
+static int __init spapr_tce_setup_phb_iommus_initcall(void)
+{
+	struct pci_controller *hose;
+
+	list_for_each_entry(hose, &hose_list, list_node) {
+		ppc_iommu_register_device(hose);
+	}
+	return 0;
+}
+postcore_initcall_sync(spapr_tce_setup_phb_iommus_initcall);
+#endif
+
 #endif /* CONFIG_IOMMU_API */

@@ -1,19 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * wm8904.c  --  WM8904 ALSA SoC Audio driver
  *
  * Copyright 2009-12 Wolfson Microelectronics plc
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
- *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/clk.h>
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/pm.h>
@@ -322,7 +317,7 @@ static int wm8904_configure_clocking(struct snd_soc_component *component)
 	unsigned int clock0, clock2, rate;
 
 	/* Gate the clock while we're updating to avoid misclocking */
-	clock2 = snd_soc_component_read32(component, WM8904_CLOCK_RATES_2);
+	clock2 = snd_soc_component_read(component, WM8904_CLOCK_RATES_2);
 	snd_soc_component_update_bits(component, WM8904_CLOCK_RATES_2,
 			    WM8904_SYSCLK_SRC, 0);
 
@@ -379,7 +374,7 @@ static void wm8904_set_drc(struct snd_soc_component *component)
 	int save, i;
 
 	/* Save any enables; the configuration should clear them. */
-	save = snd_soc_component_read32(component, WM8904_DRC_0);
+	save = snd_soc_component_read(component, WM8904_DRC_0);
 
 	for (i = 0; i < WM8904_DRC_REGS; i++)
 		snd_soc_component_update_bits(component, WM8904_DRC_0 + i, 0xffff,
@@ -393,7 +388,7 @@ static void wm8904_set_drc(struct snd_soc_component *component)
 static int wm8904_put_drc_enum(struct snd_kcontrol *kcontrol,
 			       struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct wm8904_priv *wm8904 = snd_soc_component_get_drvdata(component);
 	struct wm8904_pdata *pdata = wm8904->pdata;
 	int value = ucontrol->value.enumerated.item[0];
@@ -411,7 +406,7 @@ static int wm8904_put_drc_enum(struct snd_kcontrol *kcontrol,
 static int wm8904_get_drc_enum(struct snd_kcontrol *kcontrol,
 			       struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct wm8904_priv *wm8904 = snd_soc_component_get_drvdata(component);
 
 	ucontrol->value.enumerated.item[0] = wm8904->drc_cfg;
@@ -452,7 +447,7 @@ static void wm8904_set_retune_mobile(struct snd_soc_component *component)
 	/* The EQ will be disabled while reconfiguring it, remember the
 	 * current configuration. 
 	 */
-	save = snd_soc_component_read32(component, WM8904_EQ1);
+	save = snd_soc_component_read(component, WM8904_EQ1);
 
 	for (i = 0; i < WM8904_EQ_REGS; i++)
 		snd_soc_component_update_bits(component, WM8904_EQ1 + i, 0xffff,
@@ -464,7 +459,7 @@ static void wm8904_set_retune_mobile(struct snd_soc_component *component)
 static int wm8904_put_retune_mobile_enum(struct snd_kcontrol *kcontrol,
 					 struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct wm8904_priv *wm8904 = snd_soc_component_get_drvdata(component);
 	struct wm8904_pdata *pdata = wm8904->pdata;
 	int value = ucontrol->value.enumerated.item[0];
@@ -482,7 +477,7 @@ static int wm8904_put_retune_mobile_enum(struct snd_kcontrol *kcontrol,
 static int wm8904_get_retune_mobile_enum(struct snd_kcontrol *kcontrol,
 					 struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct wm8904_priv *wm8904 = snd_soc_component_get_drvdata(component);
 
 	ucontrol->value.enumerated.item[0] = wm8904->retune_mobile_cfg;
@@ -522,7 +517,7 @@ static int wm8904_set_deemph(struct snd_soc_component *component)
 static int wm8904_get_deemph(struct snd_kcontrol *kcontrol,
 			     struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct wm8904_priv *wm8904 = snd_soc_component_get_drvdata(component);
 
 	ucontrol->value.integer.value[0] = wm8904->deemph;
@@ -532,7 +527,7 @@ static int wm8904_get_deemph(struct snd_kcontrol *kcontrol,
 static int wm8904_put_deemph(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct wm8904_priv *wm8904 = snd_soc_component_get_drvdata(component);
 	unsigned int deemph = ucontrol->value.integer.value[0];
 
@@ -550,18 +545,6 @@ static const DECLARE_TLV_DB_SCALE(out_tlv, -5700, 100, 0);
 static const DECLARE_TLV_DB_SCALE(sidetone_tlv, -3600, 300, 0);
 static const DECLARE_TLV_DB_SCALE(eq_tlv, -1200, 100, 0);
 
-static const char *input_mode_text[] = {
-	"Single-Ended", "Differential Line", "Differential Mic"
-};
-
-static SOC_ENUM_SINGLE_DECL(lin_mode,
-			    WM8904_ANALOGUE_LEFT_INPUT_1, 0,
-			    input_mode_text);
-
-static SOC_ENUM_SINGLE_DECL(rin_mode,
-			    WM8904_ANALOGUE_RIGHT_INPUT_1, 0,
-			    input_mode_text);
-
 static const char *hpf_mode_text[] = {
 	"Hi-fi", "Voice 1", "Voice 2", "Voice 3"
 };
@@ -572,7 +555,7 @@ static SOC_ENUM_SINGLE_DECL(hpf_mode, WM8904_ADC_DIGITAL_0, 5,
 static int wm8904_adc_osr_put(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	unsigned int val;
 	int ret;
 
@@ -595,9 +578,6 @@ static int wm8904_adc_osr_put(struct snd_kcontrol *kcontrol,
 static const struct snd_kcontrol_new wm8904_adc_snd_controls[] = {
 SOC_DOUBLE_R_TLV("Digital Capture Volume", WM8904_ADC_DIGITAL_VOLUME_LEFT,
 		 WM8904_ADC_DIGITAL_VOLUME_RIGHT, 1, 119, 0, digital_tlv),
-
-SOC_ENUM("Left Caputure Mode", lin_mode),
-SOC_ENUM("Right Capture Mode", rin_mode),
 
 /* No TLV since it depends on mode */
 SOC_DOUBLE_R("Capture Volume", WM8904_ANALOGUE_LEFT_INPUT_0,
@@ -717,6 +697,7 @@ static int out_pga_event(struct snd_soc_dapm_widget *w,
 	int dcs_mask;
 	int dcs_l, dcs_r;
 	int dcs_l_reg, dcs_r_reg;
+	int an_out_reg;
 	int timeout;
 	int pwr_reg;
 
@@ -732,6 +713,7 @@ static int out_pga_event(struct snd_soc_dapm_widget *w,
 		dcs_mask = WM8904_DCS_ENA_CHAN_0 | WM8904_DCS_ENA_CHAN_1;
 		dcs_r_reg = WM8904_DC_SERVO_8;
 		dcs_l_reg = WM8904_DC_SERVO_9;
+		an_out_reg = WM8904_ANALOGUE_OUT1_LEFT;
 		dcs_l = 0;
 		dcs_r = 1;
 		break;
@@ -740,6 +722,7 @@ static int out_pga_event(struct snd_soc_dapm_widget *w,
 		dcs_mask = WM8904_DCS_ENA_CHAN_2 | WM8904_DCS_ENA_CHAN_3;
 		dcs_r_reg = WM8904_DC_SERVO_6;
 		dcs_l_reg = WM8904_DC_SERVO_7;
+		an_out_reg = WM8904_ANALOGUE_OUT2_LEFT;
 		dcs_l = 2;
 		dcs_r = 3;
 		break;
@@ -796,7 +779,7 @@ static int out_pga_event(struct snd_soc_dapm_widget *w,
 		/* Wait for DC servo to complete */
 		dcs_mask <<= WM8904_DCS_CAL_COMPLETE_SHIFT;
 		do {
-			val = snd_soc_component_read32(component, WM8904_DC_SERVO_READBACK_0);
+			val = snd_soc_component_read(component, WM8904_DC_SERVO_READBACK_0);
 			if ((val & dcs_mask) == dcs_mask)
 				break;
 
@@ -812,6 +795,10 @@ static int out_pga_event(struct snd_soc_dapm_widget *w,
 		snd_soc_component_update_bits(component, reg,
 				    WM8904_HPL_ENA_OUTP | WM8904_HPR_ENA_OUTP,
 				    WM8904_HPL_ENA_OUTP | WM8904_HPR_ENA_OUTP);
+
+		/* Update volume, requires PGA to be powered */
+		val = snd_soc_component_read(component, an_out_reg);
+		snd_soc_component_write(component, an_out_reg, val);
 		break;
 
 	case SND_SOC_DAPM_POST_PMU:
@@ -834,8 +821,8 @@ static int out_pga_event(struct snd_soc_dapm_widget *w,
 	case SND_SOC_DAPM_POST_PMD:
 		/* Cache the DC servo configuration; this will be
 		 * invalidated if we change the configuration. */
-		wm8904->dcs_state[dcs_l] = snd_soc_component_read32(component, dcs_l_reg);
-		wm8904->dcs_state[dcs_r] = snd_soc_component_read32(component, dcs_r_reg);
+		wm8904->dcs_state[dcs_l] = snd_soc_component_read(component, dcs_l_reg);
+		wm8904->dcs_state[dcs_r] = snd_soc_component_read(component, dcs_r_reg);
 
 		snd_soc_component_update_bits(component, WM8904_DC_SERVO_0,
 				    dcs_mask, 0);
@@ -857,6 +844,30 @@ static int out_pga_event(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+static const char * const dmic_text[] = {
+	"DMIC1", "DMIC2"
+};
+
+static SOC_ENUM_SINGLE_DECL(dmic_enum, WM8904_DIGITAL_MICROPHONE_0,
+			    WM8904_DMIC_SRC_SHIFT, dmic_text);
+
+static const struct snd_kcontrol_new dmic_mux =
+	SOC_DAPM_ENUM("DMIC Mux", dmic_enum);
+
+static const char * const cin_text[] = {
+	"ADC", "DMIC"
+};
+
+static SOC_ENUM_SINGLE_DECL(cin_enum, WM8904_DIGITAL_MICROPHONE_0,
+			    WM8904_DMIC_ENA_SHIFT, cin_text);
+
+static const struct snd_kcontrol_new cin_mux =
+	SOC_DAPM_ENUM("Capture Input", cin_enum);
+
+static const char *input_mode_text[] = {
+	"Single-Ended", "Differential Line", "Differential Mic"
+};
+
 static const char *lin_text[] = {
 	"IN1L", "IN2L", "IN3L"
 };
@@ -871,7 +882,14 @@ static SOC_ENUM_SINGLE_DECL(lin_inv_enum, WM8904_ANALOGUE_LEFT_INPUT_1, 4,
 			    lin_text);
 
 static const struct snd_kcontrol_new lin_inv_mux =
-	SOC_DAPM_ENUM("Left Capture Inveting Mux", lin_inv_enum);
+	SOC_DAPM_ENUM("Left Capture Inverting Mux", lin_inv_enum);
+
+static SOC_ENUM_SINGLE_DECL(lin_mode_enum,
+			    WM8904_ANALOGUE_LEFT_INPUT_1, 0,
+			    input_mode_text);
+
+static const struct snd_kcontrol_new lin_mode =
+	SOC_DAPM_ENUM("Left Capture Mode", lin_mode_enum);
 
 static const char *rin_text[] = {
 	"IN1R", "IN2R", "IN3R"
@@ -887,7 +905,14 @@ static SOC_ENUM_SINGLE_DECL(rin_inv_enum, WM8904_ANALOGUE_RIGHT_INPUT_1, 4,
 			    rin_text);
 
 static const struct snd_kcontrol_new rin_inv_mux =
-	SOC_DAPM_ENUM("Right Capture Inveting Mux", rin_inv_enum);
+	SOC_DAPM_ENUM("Right Capture Inverting Mux", rin_inv_enum);
+
+static SOC_ENUM_SINGLE_DECL(rin_mode_enum,
+			    WM8904_ANALOGUE_RIGHT_INPUT_1, 0,
+			    input_mode_text);
+
+static const struct snd_kcontrol_new rin_mode =
+	SOC_DAPM_ENUM("Right Capture Mode", rin_mode_enum);
 
 static const char *aif_text[] = {
 	"Left", "Right"
@@ -937,9 +962,11 @@ SND_SOC_DAPM_SUPPLY("MICBIAS", WM8904_MIC_BIAS_CONTROL_0, 0, 0, NULL, 0),
 SND_SOC_DAPM_MUX("Left Capture Mux", SND_SOC_NOPM, 0, 0, &lin_mux),
 SND_SOC_DAPM_MUX("Left Capture Inverting Mux", SND_SOC_NOPM, 0, 0,
 		 &lin_inv_mux),
+SND_SOC_DAPM_MUX("Left Capture Mode", SND_SOC_NOPM, 0, 0, &lin_mode),
 SND_SOC_DAPM_MUX("Right Capture Mux", SND_SOC_NOPM, 0, 0, &rin_mux),
 SND_SOC_DAPM_MUX("Right Capture Inverting Mux", SND_SOC_NOPM, 0, 0,
 		 &rin_inv_mux),
+SND_SOC_DAPM_MUX("Right Capture Mode", SND_SOC_NOPM, 0, 0, &rin_mode),
 
 SND_SOC_DAPM_PGA("Left Capture PGA", WM8904_POWER_MANAGEMENT_0, 1, 0,
 		 NULL, 0),
@@ -954,6 +981,15 @@ SND_SOC_DAPM_MUX("AIFOUTR Mux", SND_SOC_NOPM, 0, 0, &aifoutr_mux),
 
 SND_SOC_DAPM_AIF_OUT("AIFOUTL", "Capture", 0, SND_SOC_NOPM, 0, 0),
 SND_SOC_DAPM_AIF_OUT("AIFOUTR", "Capture", 1, SND_SOC_NOPM, 0, 0),
+};
+
+static const struct snd_soc_dapm_widget wm8904_dmic_dapm_widgets[] = {
+SND_SOC_DAPM_MUX("DMIC Mux", SND_SOC_NOPM, 0, 0, &dmic_mux),
+};
+
+static const struct snd_soc_dapm_widget wm8904_cin_dapm_widgets[] = {
+SND_SOC_DAPM_MUX("Left Capture Input", SND_SOC_NOPM, 0, 0, &cin_mux),
+SND_SOC_DAPM_MUX("Right Capture Input", SND_SOC_NOPM, 0, 0, &cin_mux),
 };
 
 static const struct snd_soc_dapm_widget wm8904_dac_dapm_widgets[] = {
@@ -1062,6 +1098,12 @@ static const struct snd_soc_dapm_route adc_intercon[] = {
 	{ "Left Capture Inverting Mux", "IN2L", "IN2L" },
 	{ "Left Capture Inverting Mux", "IN3L", "IN3L" },
 
+	{ "Left Capture Mode", "Single-Ended", "Left Capture Inverting Mux" },
+	{ "Left Capture Mode", "Differential Line", "Left Capture Mux" },
+	{ "Left Capture Mode", "Differential Line", "Left Capture Inverting Mux" },
+	{ "Left Capture Mode", "Differential Mic", "Left Capture Mux" },
+	{ "Left Capture Mode", "Differential Mic", "Left Capture Inverting Mux" },
+
 	{ "Right Capture Mux", "IN1R", "IN1R" },
 	{ "Right Capture Mux", "IN2R", "IN2R" },
 	{ "Right Capture Mux", "IN3R", "IN3R" },
@@ -1070,11 +1112,14 @@ static const struct snd_soc_dapm_route adc_intercon[] = {
 	{ "Right Capture Inverting Mux", "IN2R", "IN2R" },
 	{ "Right Capture Inverting Mux", "IN3R", "IN3R" },
 
-	{ "Left Capture PGA", NULL, "Left Capture Mux" },
-	{ "Left Capture PGA", NULL, "Left Capture Inverting Mux" },
+	{ "Right Capture Mode", "Single-Ended", "Right Capture Inverting Mux" },
+	{ "Right Capture Mode", "Differential Line", "Right Capture Mux" },
+	{ "Right Capture Mode", "Differential Line", "Right Capture Inverting Mux" },
+	{ "Right Capture Mode", "Differential Mic", "Right Capture Mux" },
+	{ "Right Capture Mode", "Differential Mic", "Right Capture Inverting Mux" },
 
-	{ "Right Capture PGA", NULL, "Right Capture Mux" },
-	{ "Right Capture PGA", NULL, "Right Capture Inverting Mux" },
+	{ "Left Capture PGA", NULL, "Left Capture Mode" },
+	{ "Right Capture PGA", NULL, "Right Capture Mode" },
 
 	{ "AIFOUTL Mux", "Left", "ADCL" },
 	{ "AIFOUTL Mux", "Right", "ADCR" },
@@ -1085,10 +1130,43 @@ static const struct snd_soc_dapm_route adc_intercon[] = {
 	{ "AIFOUTR", NULL, "AIFOUTR Mux" },
 
 	{ "ADCL", NULL, "CLK_DSP" },
-	{ "ADCL", NULL, "Left Capture PGA" },
-
 	{ "ADCR", NULL, "CLK_DSP" },
+};
+
+/* No DMICs, always connect PGAs */
+static const struct snd_soc_dapm_route cin_nodmic_con[] = {
+	{ "ADCL", NULL, "Left Capture PGA" },
 	{ "ADCR", NULL, "Right Capture PGA" },
+};
+
+/* DMIC system in use: mux between ADC and DMICDAT1, 2 or both */
+static const struct snd_soc_dapm_route cin_adc_dmic_con[] = {
+	{ "Left Capture Input", "ADC", "Left Capture PGA" },
+	{ "Right Capture Input", "ADC", "Right Capture PGA" },
+
+	{ "ADCL", NULL, "Left Capture Input" },
+	{ "ADCR", NULL, "Right Capture Input" },
+};
+
+/*  IN1L as DMICDAT1 */
+static const struct snd_soc_dapm_route cin_dmic1_con[] = {
+	{ "Left Capture Input", "DMIC", "IN1L" },
+	{ "Right Capture Input", "DMIC", "IN1L" },
+};
+
+/* IN1R as DMICDAT2 */
+static const struct snd_soc_dapm_route cin_dmic2_con[] = {
+	{ "Left Capture Input", "DMIC", "IN1R" },
+	{ "Right Capture Input", "DMIC", "IN1R" },
+};
+
+/* DMICDAT1 and DMICDAT2: mux between them, ADC still used for IN2 and IN3 */
+static const struct snd_soc_dapm_route cin_2dmics_con[] = {
+	{ "DMIC Mux", "DMIC1", "IN1L" },
+	{ "DMIC Mux", "DMIC2", "IN1R" },
+
+	{ "Left Capture Input", "DMIC", "DMIC Mux" },
+	{ "Right Capture Input", "DMIC", "DMIC Mux" },
 };
 
 static const struct snd_soc_dapm_route dac_intercon[] = {
@@ -1168,7 +1246,7 @@ static const struct snd_soc_dapm_route wm8912_intercon[] = {
 static int wm8904_add_widgets(struct snd_soc_component *component)
 {
 	struct wm8904_priv *wm8904 = snd_soc_component_get_drvdata(component);
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 
 	snd_soc_dapm_new_controls(dapm, wm8904_core_dapm_widgets,
 				  ARRAY_SIZE(wm8904_core_dapm_widgets));
@@ -1401,34 +1479,6 @@ static int wm8904_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-
-static int wm8904_set_sysclk(struct snd_soc_dai *dai, int clk_id,
-			     unsigned int freq, int dir)
-{
-	struct snd_soc_component *component = dai->component;
-	struct wm8904_priv *priv = snd_soc_component_get_drvdata(component);
-
-	switch (clk_id) {
-	case WM8904_CLK_MCLK:
-		priv->sysclk_src = clk_id;
-		priv->mclk_rate = freq;
-		break;
-
-	case WM8904_CLK_FLL:
-		priv->sysclk_src = clk_id;
-		break;
-
-	default:
-		return -EINVAL;
-	}
-
-	dev_dbg(dai->dev, "Clock source is %d at %uHz\n", clk_id, freq);
-
-	wm8904_configure_clocking(component);
-
-	return 0;
-}
-
 static int wm8904_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
 	struct snd_soc_component *component = dai->component;
@@ -1436,15 +1486,15 @@ static int wm8904_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	unsigned int aif3 = 0;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
-	case SND_SOC_DAIFMT_CBS_CFM:
+	case SND_SOC_DAIFMT_CBC_CFP:
 		aif3 |= WM8904_LRCLK_DIR;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFS:
+	case SND_SOC_DAIFMT_CBP_CFC:
 		aif1 |= WM8904_BCLK_DIR;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		aif1 |= WM8904_BCLK_DIR;
 		aif3 |= WM8904_LRCLK_DIR;
 		break;
@@ -1455,6 +1505,7 @@ static int wm8904_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	switch (fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
 	case SND_SOC_DAIFMT_DSP_B:
 		aif1 |= 0x3 | WM8904_AIF_LRCLK_INV;
+		fallthrough;
 	case SND_SOC_DAIFMT_DSP_A:
 		aif1 |= 0x3;
 		break;
@@ -1689,7 +1740,7 @@ static int wm8904_set_fll(struct snd_soc_dai *dai, int fll_id, int source,
 	    Fout == wm8904->fll_fout)
 		return 0;
 
-	clock2 = snd_soc_component_read32(component, WM8904_CLOCK_RATES_2);
+	clock2 = snd_soc_component_read(component, WM8904_CLOCK_RATES_2);
 
 	if (Fout == 0) {
 		dev_dbg(component->dev, "FLL disabled\n");
@@ -1734,7 +1785,7 @@ static int wm8904_set_fll(struct snd_soc_dai *dai, int fll_id, int source,
 
 	/* Save current state then disable the FLL and SYSCLK to avoid
 	 * misclocking */
-	fll1 = snd_soc_component_read32(component, WM8904_FLL_CONTROL_1);
+	fll1 = snd_soc_component_read(component, WM8904_FLL_CONTROL_1);
 	snd_soc_component_update_bits(component, WM8904_CLOCK_RATES_2,
 			    WM8904_CLK_SYS_ENA, 0);
 	snd_soc_component_update_bits(component, WM8904_FLL_CONTROL_1,
@@ -1814,7 +1865,57 @@ out:
 	return 0;
 }
 
-static int wm8904_digital_mute(struct snd_soc_dai *codec_dai, int mute)
+static int wm8904_set_sysclk(struct snd_soc_dai *dai, int clk_id,
+			     unsigned int freq, int dir)
+{
+	struct snd_soc_component *component = dai->component;
+	struct wm8904_priv *priv = snd_soc_component_get_drvdata(component);
+	unsigned long mclk_freq;
+	int ret;
+
+	switch (clk_id) {
+	case WM8904_CLK_AUTO:
+		/* We don't have any rate constraints, so just ignore the
+		 * request to disable constraining.
+		 */
+		if (!freq)
+			return 0;
+
+		mclk_freq = clk_get_rate(priv->mclk);
+		/* enable FLL if a different sysclk is desired */
+		if (mclk_freq != freq) {
+			priv->sysclk_src = WM8904_CLK_FLL;
+			ret = wm8904_set_fll(dai, WM8904_FLL_MCLK,
+					     WM8904_FLL_MCLK,
+					     mclk_freq, freq);
+			if (ret)
+				return ret;
+			break;
+		}
+		clk_id = WM8904_CLK_MCLK;
+		fallthrough;
+
+	case WM8904_CLK_MCLK:
+		priv->sysclk_src = clk_id;
+		priv->mclk_rate = freq;
+		break;
+
+	case WM8904_CLK_FLL:
+		priv->sysclk_src = clk_id;
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
+	dev_dbg(dai->dev, "Clock source is %d at %uHz\n", clk_id, freq);
+
+	wm8904_configure_clocking(component);
+
+	return 0;
+}
+
+static int wm8904_mute(struct snd_soc_dai *codec_dai, int mute, int direction)
 {
 	struct snd_soc_component *component = codec_dai->component;
 	int val;
@@ -1833,13 +1934,11 @@ static int wm8904_set_bias_level(struct snd_soc_component *component,
 				 enum snd_soc_bias_level level)
 {
 	struct wm8904_priv *wm8904 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	int ret;
 
 	switch (level) {
 	case SND_SOC_BIAS_ON:
-		ret = clk_prepare_enable(wm8904->mclk);
-		if (ret)
-			return ret;
 		break;
 
 	case SND_SOC_BIAS_PREPARE:
@@ -1854,13 +1953,22 @@ static int wm8904_set_bias_level(struct snd_soc_component *component,
 		break;
 
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF) {
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_OFF) {
 			ret = regulator_bulk_enable(ARRAY_SIZE(wm8904->supplies),
 						    wm8904->supplies);
 			if (ret != 0) {
 				dev_err(component->dev,
 					"Failed to enable supplies: %d\n",
 					ret);
+				return ret;
+			}
+
+			ret = clk_prepare_enable(wm8904->mclk);
+			if (ret) {
+				dev_err(component->dev,
+					"Failed to enable MCLK: %d\n", ret);
+				regulator_bulk_disable(ARRAY_SIZE(wm8904->supplies),
+						       wm8904->supplies);
 				return ret;
 			}
 
@@ -1901,6 +2009,7 @@ static int wm8904_set_bias_level(struct snd_soc_component *component,
 		snd_soc_component_update_bits(component, WM8904_BIAS_CONTROL_0,
 				    WM8904_BIAS_ENA, 0);
 
+		snd_soc_component_write(component, WM8904_SW_RESET_AND_ID, 0);
 		regcache_cache_only(wm8904->regmap, true);
 		regcache_mark_dirty(wm8904->regmap);
 
@@ -1923,7 +2032,8 @@ static const struct snd_soc_dai_ops wm8904_dai_ops = {
 	.set_tdm_slot = wm8904_set_tdm_slot,
 	.set_pll = wm8904_set_fll,
 	.hw_params = wm8904_hw_params,
-	.digital_mute = wm8904_digital_mute,
+	.mute_stream = wm8904_mute,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver wm8904_dai = {
@@ -1943,7 +2053,7 @@ static struct snd_soc_dai_driver wm8904_dai = {
 		.formats = WM8904_FORMATS,
 	},
 	.ops = &wm8904_dai_ops,
-	.symmetric_rates = 1,
+	.symmetric_rate = 1,
 };
 
 static void wm8904_handle_retune_mobile_pdata(struct snd_soc_component *component)
@@ -2003,17 +2113,69 @@ static void wm8904_handle_retune_mobile_pdata(struct snd_soc_component *componen
 			"Failed to add ReTune Mobile control: %d\n", ret);
 }
 
+static void wm8904_handle_dmic_pdata(struct snd_soc_component *component)
+{
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
+	struct wm8904_priv *wm8904 = snd_soc_component_get_drvdata(component);
+	struct wm8904_pdata *pdata = wm8904->pdata;
+	unsigned int dmic_src;
+
+	if (!pdata->in1l_as_dmicdat1 && !pdata->in1r_as_dmicdat2) {
+		snd_soc_dapm_add_routes(dapm, cin_nodmic_con,
+					ARRAY_SIZE(cin_nodmic_con));
+		snd_soc_component_update_bits(component, WM8904_DIGITAL_MICROPHONE_0,
+					      WM8904_DMIC_ENA_MASK, 0);
+		return;
+	}
+
+	/* Need a control and routing to switch between DMIC and ADC */
+	snd_soc_dapm_new_controls(dapm, wm8904_cin_dapm_widgets,
+				  ARRAY_SIZE(wm8904_cin_dapm_widgets));
+	snd_soc_dapm_add_routes(dapm, cin_adc_dmic_con,
+				ARRAY_SIZE(cin_adc_dmic_con));
+
+	if (pdata->in1l_as_dmicdat1 && pdata->in1r_as_dmicdat2) {
+		/* Need a control and routing to mux between DMICDAT1 and 2 */
+		dev_dbg(component->dev, "DMICDAT1 and DMICDAT2 in use\n");
+		snd_soc_dapm_new_controls(dapm, wm8904_dmic_dapm_widgets,
+					  ARRAY_SIZE(wm8904_dmic_dapm_widgets));
+		snd_soc_dapm_add_routes(dapm, cin_2dmics_con,
+					ARRAY_SIZE(cin_2dmics_con));
+		return;
+	}
+
+	/* Either DMICDAT1 or DMICDAT2 is in use, not both */
+	if (pdata->in1l_as_dmicdat1) {
+		dmic_src = 0;
+		snd_soc_dapm_add_routes(dapm, cin_dmic1_con,
+					ARRAY_SIZE(cin_dmic1_con));
+	} else {
+		dmic_src = 1;
+		snd_soc_dapm_add_routes(dapm, cin_dmic2_con,
+					ARRAY_SIZE(cin_dmic2_con));
+	}
+	dev_dbg(component->dev, "DMIC_SRC (0 or 1): %d\n", dmic_src);
+	snd_soc_component_update_bits(component, WM8904_DIGITAL_MICROPHONE_0,
+				      WM8904_DMIC_SRC_MASK,
+				      dmic_src << WM8904_DMIC_SRC_SHIFT);
+}
+
 static void wm8904_handle_pdata(struct snd_soc_component *component)
 {
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	struct wm8904_priv *wm8904 = snd_soc_component_get_drvdata(component);
 	struct wm8904_pdata *pdata = wm8904->pdata;
 	int ret, i;
 
 	if (!pdata) {
+		snd_soc_dapm_add_routes(dapm, cin_nodmic_con,
+					ARRAY_SIZE(cin_nodmic_con));
 		snd_soc_add_component_controls(component, wm8904_eq_controls,
-				     ARRAY_SIZE(wm8904_eq_controls));
+					       ARRAY_SIZE(wm8904_eq_controls));
 		return;
 	}
+
+	wm8904_handle_dmic_pdata(component);
 
 	dev_dbg(component->dev, "%d DRC configurations\n", pdata->num_drc_cfgs);
 
@@ -2023,8 +2185,9 @@ static void wm8904_handle_pdata(struct snd_soc_component *component)
 				     wm8904_get_drc_enum, wm8904_put_drc_enum);
 
 		/* We need an array of texts for the enum API */
-		wm8904->drc_texts = kmalloc(sizeof(char *)
-					    * pdata->num_drc_cfgs, GFP_KERNEL);
+		wm8904->drc_texts = kmalloc_array(pdata->num_drc_cfgs,
+						  sizeof(char *),
+						  GFP_KERNEL);
 		if (!wm8904->drc_texts)
 			return;
 
@@ -2069,9 +2232,10 @@ static int wm8904_probe(struct snd_soc_component *component)
 		return -EINVAL;
 	}
 
-	wm8904_handle_pdata(component);
-
 	wm8904_add_widgets(component);
+
+	/* This can add dependent widgets, so it is done after add_widgets */
+	wm8904_handle_pdata(component);
 
 	return 0;
 }
@@ -2090,7 +2254,6 @@ static const struct snd_soc_component_driver soc_component_dev_wm8904 = {
 	.set_bias_level		= wm8904_set_bias_level,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config wm8904_regmap = {
@@ -2101,22 +2264,19 @@ static const struct regmap_config wm8904_regmap = {
 	.volatile_reg = wm8904_volatile_register,
 	.readable_reg = wm8904_readable_register,
 
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.reg_defaults = wm8904_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(wm8904_reg_defaults),
 };
 
 #ifdef CONFIG_OF
-static enum wm8904_type wm8904_data = WM8904;
-static enum wm8904_type wm8912_data = WM8912;
-
 static const struct of_device_id wm8904_of_match[] = {
 	{
 		.compatible = "wlf,wm8904",
-		.data = &wm8904_data,
+		.data = (void *)WM8904,
 	}, {
 		.compatible = "wlf,wm8912",
-		.data = &wm8912_data,
+		.data = (void *)WM8912,
 	}, {
 		/* sentinel */
 	}
@@ -2124,8 +2284,187 @@ static const struct of_device_id wm8904_of_match[] = {
 MODULE_DEVICE_TABLE(of, wm8904_of_match);
 #endif
 
-static int wm8904_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+/**
+ * wm8904_read_cfg_reg_arr() - Reads a subarray from a DT u16 array
+ *
+ * @np: pointer to the device_node struct
+ * @regs_property: DT property of interest
+ * @size: size of subarrays within the array
+ * @idx: index of the subarray of interest
+ * @out: output
+ *
+ * Helper to read a subarray from a DT uint16-array,
+ *  divided into equally sized arrays of size `size`
+ *
+ * Subset starts at `idx * size` and is of size `size`
+ *
+ * Return: 0 on success, negative error code otherwise
+ */
+static int wm8904_read_cfg_reg_arr(const struct device_node *np,
+				   const char * const regs_property,
+				   int size, int idx,
+				   u16 * const out)
+{
+	int i, offset, ret;
+
+	offset = idx * size;
+
+	for (i = 0; i < size; i++) {
+		ret = of_property_read_u16_index(np, regs_property, i + offset, &out[i]);
+		if (ret)
+			return ret;
+	}
+	return 0;
+}
+
+static int wm8904_parse_retune_cfg_regs(const struct device_node *np,
+					struct wm8904_pdata *pdata, int cfg_idx)
+{
+	return wm8904_read_cfg_reg_arr(np, "wlf,retune-mobile-cfg-regs",
+				       WM8904_EQ_REGS, cfg_idx,
+				       &pdata->retune_mobile_cfgs[cfg_idx].regs[0]);
+}
+
+static int wm8904_parse_drc_cfg_regs(const struct device_node *np,
+				     struct wm8904_pdata *pdata, int cfg_idx)
+{
+	return wm8904_read_cfg_reg_arr(np, "wlf,drc-cfg-regs",
+				       WM8904_DRC_REGS, cfg_idx,
+				       &pdata->drc_cfgs[cfg_idx].regs[0]);
+}
+
+static int wm8904_parse_drc_cfg_from_of(struct i2c_client *i2c,
+					struct wm8904_pdata *pdata)
+{
+	const struct device_node *np = i2c->dev.of_node;
+	int i, n_cfgs;
+
+	n_cfgs = of_property_count_strings(np, "wlf,drc-cfg-names");
+	if (n_cfgs == -EINVAL)
+		return 0;
+
+	if (n_cfgs <= 0) {
+		dev_err(&i2c->dev, "Could not get wlf,drc-cfg-names length: %d",
+			n_cfgs);
+		return n_cfgs;
+	}
+
+	pdata->drc_cfgs = devm_kzalloc(&i2c->dev,
+				       n_cfgs * sizeof(struct wm8904_drc_cfg),
+				       GFP_KERNEL);
+	if (!pdata->drc_cfgs)
+		return -ENOMEM;
+
+	for (i = 0; i < n_cfgs; i++) {
+		if (wm8904_parse_drc_cfg_regs(np, pdata, i)) {
+			dev_err(&i2c->dev,
+				"Invalid 'wlf,drc-cfg-regs[%i,:]'\n", i);
+			return -EINVAL;
+		}
+
+		if (of_property_read_string_index(np, "wlf,drc-cfg-names", i,
+						  &pdata->drc_cfgs[i].name)) {
+			dev_err(&i2c->dev,
+				"Invalid 'wlf,drc-cfg-names[%i]'\n", i);
+			return -EINVAL;
+		}
+	}
+
+	pdata->num_drc_cfgs = n_cfgs;
+	return 0;
+}
+
+static int wm8904_parse_retune_cfg_from_of(struct i2c_client *i2c,
+					   struct wm8904_pdata *pdata)
+{
+	const struct device_node *np = i2c->dev.of_node;
+	int i, n_cfgs;
+
+	n_cfgs = of_property_count_strings(np, "wlf,retune-mobile-cfg-names");
+	if (n_cfgs == -EINVAL)
+		return 0;
+
+	if (n_cfgs <= 0) {
+		dev_err(&i2c->dev,
+			"Could not get wlf,retune-mobile-cfg-names length: %d",
+			n_cfgs);
+		return n_cfgs;
+	}
+
+	pdata->retune_mobile_cfgs = devm_kzalloc(&i2c->dev,
+						 n_cfgs * sizeof(struct wm8904_retune_mobile_cfg),
+						 GFP_KERNEL);
+	if (!pdata->retune_mobile_cfgs)
+		return -ENOMEM;
+
+	for (i = 0; i < n_cfgs; i++) {
+		if (wm8904_parse_retune_cfg_regs(np, pdata, i)) {
+			dev_err(&i2c->dev,
+				"Invalid 'wlf,retune-mobile-cfg-regs[%i,:]'\n", i);
+			return -EINVAL;
+		}
+
+		if (of_property_read_u32_index(np, "wlf,retune-mobile-cfg-hz", i,
+					       &pdata->retune_mobile_cfgs[i].rate)) {
+			dev_err(&i2c->dev,
+				"Invalid 'wlf,retune-mobile-cfg-hz[%i]'\n", i);
+			return -EINVAL;
+		}
+
+		if (of_property_read_string_index(np, "wlf,retune-mobile-cfg-names", i,
+						  &pdata->retune_mobile_cfgs[i].name)) {
+			dev_err(&i2c->dev,
+				"Invalid 'wlf,retune-mobile-cfg-names[%i]'\n", i);
+			return -EINVAL;
+		}
+	}
+
+	pdata->num_retune_mobile_cfgs = n_cfgs;
+	return 0;
+}
+
+static int wm8904_set_pdata_from_of(struct i2c_client *i2c,
+				    struct wm8904_priv *wm8904)
+{
+	const struct device_node *np = i2c->dev.of_node;
+	struct wm8904_pdata *pdata;
+	int ret, i;
+
+	pdata = devm_kzalloc(&i2c->dev, sizeof(*pdata), GFP_KERNEL);
+	if (!pdata)
+		return -ENOMEM;
+
+	pdata->in1l_as_dmicdat1 =
+		of_property_read_bool(np, "wlf,in1l-as-dmicdat1");
+
+	pdata->in1r_as_dmicdat2 =
+		of_property_read_bool(np, "wlf,in1r-as-dmicdat2");
+
+	/* If absent, default to 0xFFFF for GPIO config (i.e.: don't set) */
+	for (i = 0; i < WM8904_GPIO_REGS; i++)
+		pdata->gpio_cfg[i] = 0xFFFF;
+
+	of_property_read_u32_array(np, "wlf,gpio-cfg", pdata->gpio_cfg,
+				   ARRAY_SIZE(pdata->gpio_cfg));
+
+	of_property_read_u32_array(np, "wlf,micbias-cfg", pdata->mic_cfg,
+				   ARRAY_SIZE(pdata->mic_cfg));
+
+	ret = wm8904_parse_drc_cfg_from_of(i2c, pdata);
+	if (ret)
+		return ret;
+
+	ret = wm8904_parse_retune_cfg_from_of(i2c, pdata);
+	if (ret)
+		return ret;
+
+	wm8904->pdata = pdata;
+	return 0;
+}
+
+static const struct i2c_device_id wm8904_i2c_id[];
+
+static int wm8904_i2c_probe(struct i2c_client *i2c)
 {
 	struct wm8904_priv *wm8904;
 	unsigned int val;
@@ -2151,19 +2490,19 @@ static int wm8904_i2c_probe(struct i2c_client *i2c,
 		return ret;
 	}
 
-	if (i2c->dev.of_node) {
-		const struct of_device_id *match;
-
-		match = of_match_node(wm8904_of_match, i2c->dev.of_node);
-		if (match == NULL)
-			return -EINVAL;
-		wm8904->devtype = *((enum wm8904_type *)match->data);
-	} else {
-		wm8904->devtype = id->driver_data;
-	}
+	wm8904->devtype = (uintptr_t)i2c_get_match_data(i2c);
 
 	i2c_set_clientdata(i2c, wm8904);
-	wm8904->pdata = i2c->dev.platform_data;
+
+	if (i2c->dev.of_node) {
+		ret = wm8904_set_pdata_from_of(i2c, wm8904);
+		if (ret) {
+			dev_err(&i2c->dev, "Failed to set platform data from of: %d\n", ret);
+			return ret;
+		}
+	} else {
+		wm8904->pdata = i2c->dev.platform_data;
+	}
 
 	for (i = 0; i < ARRAY_SIZE(wm8904->supplies); i++)
 		wm8904->supplies[i].supply = wm8904_supply_names[i];
@@ -2234,7 +2573,8 @@ static int wm8904_i2c_probe(struct i2c_client *i2c,
 	/* Apply configuration from the platform data. */
 	if (wm8904->pdata) {
 		for (i = 0; i < WM8904_GPIO_REGS; i++) {
-			if (!wm8904->pdata->gpio_cfg[i])
+			/* 0xFFFF in this config means "don't touch" */
+			if (wm8904->pdata->gpio_cfg[i] == 0xffff)
 				continue;
 
 			regmap_update_bits(wm8904->regmap,
@@ -2261,6 +2601,9 @@ static int wm8904_i2c_probe(struct i2c_client *i2c,
 	regmap_update_bits(wm8904->regmap, WM8904_BIAS_CONTROL_0,
 			    WM8904_POBCTRL, 0);
 
+	/* Fill the cache for the ADC test register */
+	regmap_read(wm8904->regmap, WM8904_ADC_TEST_0, &val);
+
 	/* Can leave the device powered off until we need it */
 	regcache_cache_only(wm8904->regmap, true);
 	regulator_bulk_disable(ARRAY_SIZE(wm8904->supplies), wm8904->supplies);
@@ -2278,9 +2621,9 @@ err_enable:
 }
 
 static const struct i2c_device_id wm8904_i2c_id[] = {
-	{ "wm8904", WM8904 },
-	{ "wm8912", WM8912 },
-	{ "wm8918", WM8904 },   /* Actually a subset, updates to follow */
+	{ .name = "wm8904", .driver_data = WM8904 },
+	{ .name = "wm8912", .driver_data = WM8912 },
+	{ .name = "wm8918", .driver_data = WM8904 },   /* Actually a subset, updates to follow */
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, wm8904_i2c_id);
@@ -2290,7 +2633,7 @@ static struct i2c_driver wm8904_i2c_driver = {
 		.name = "wm8904",
 		.of_match_table = of_match_ptr(wm8904_of_match),
 	},
-	.probe =    wm8904_i2c_probe,
+	.probe = wm8904_i2c_probe,
 	.id_table = wm8904_i2c_id,
 };
 

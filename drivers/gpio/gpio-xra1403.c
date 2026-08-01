@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * GPIO driver for EXAR XRA1403 16-bit GPIO expander
  *
  * Copyright (c) 2017, General Electric Company
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/bitops.h>
@@ -21,10 +10,9 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
-#include <linux/of_device.h>
-#include <linux/of_gpio.h>
 #include <linux/seq_file.h>
 #include <linux/spi/spi.h>
+#include <linux/string_choices.h>
 #include <linux/regmap.h>
 
 /* XRA1403 registers */
@@ -39,6 +27,7 @@
 #define XRA_REIR  0x10 /* Input Rising Edge Interrupt Enable */
 #define XRA_FEIR  0x12 /* Input Falling Edge Interrupt Enable */
 #define XRA_IFR   0x14 /* Input Filter Enable/Disable */
+#define XRA_LAST  0x15 /* Bounds */
 
 struct xra1403 {
 	struct gpio_chip  chip;
@@ -50,7 +39,7 @@ static const struct regmap_config xra1403_regmap_cfg = {
 		.pad_bits = 1,
 		.val_bits = 8,
 
-		.max_register = XRA_IFR | 0x01,
+		.max_register = XRA_LAST,
 };
 
 static unsigned int to_reg(unsigned int reg, unsigned int offset)
@@ -93,7 +82,10 @@ static int xra1403_get_direction(struct gpio_chip *chip, unsigned int offset)
 	if (ret)
 		return ret;
 
-	return !!(val & BIT(offset % 8));
+	if (val & BIT(offset % 8))
+		return GPIO_LINE_DIRECTION_IN;
+
+	return GPIO_LINE_DIRECTION_OUT;
 }
 
 static int xra1403_get(struct gpio_chip *chip, unsigned int offset)
@@ -109,16 +101,13 @@ static int xra1403_get(struct gpio_chip *chip, unsigned int offset)
 	return !!(val & BIT(offset % 8));
 }
 
-static void xra1403_set(struct gpio_chip *chip, unsigned int offset, int value)
+static int xra1403_set(struct gpio_chip *chip, unsigned int offset, int value)
 {
-	int ret;
 	struct xra1403 *xra = gpiochip_get_data(chip);
 
-	ret = regmap_update_bits(xra->regmap, to_reg(XRA_OCR, offset),
-			BIT(offset % 8), value ? BIT(offset % 8) : 0);
-	if (ret)
-		dev_err(chip->parent, "Failed to set pin: %d, ret: %d\n",
-				offset, ret);
+	return regmap_update_bits(xra->regmap, to_reg(XRA_OCR, offset),
+				  BIT(offset % 8),
+				  value ? BIT(offset % 8) : 0);
 }
 
 #ifdef CONFIG_DEBUG_FS
@@ -126,21 +115,17 @@ static void xra1403_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 {
 	int reg;
 	struct xra1403 *xra = gpiochip_get_data(chip);
-	int *value;
+	int value[XRA_LAST];
 	int i;
+	const char *label;
 	unsigned int gcr;
 	unsigned int gsr;
 
-	value = kmalloc_array(xra1403_regmap_cfg.max_register, sizeof(*value),
-				GFP_KERNEL);
-	if (!value)
-		return;
-
 	seq_puts(s, "xra reg:");
-	for (reg = 0; reg <= xra1403_regmap_cfg.max_register; reg++)
+	for (reg = 0; reg <= XRA_LAST; reg++)
 		seq_printf(s, " %2.2x", reg);
 	seq_puts(s, "\n  value:");
-	for (reg = 0; reg < xra1403_regmap_cfg.max_register; reg++) {
+	for (reg = 0; reg < XRA_LAST; reg++) {
 		regmap_read(xra->regmap, reg, &value[reg]);
 		seq_printf(s, " %2.2x", value[reg]);
 	}
@@ -148,18 +133,11 @@ static void xra1403_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 
 	gcr = value[XRA_GCR + 1] << 8 | value[XRA_GCR];
 	gsr = value[XRA_GSR + 1] << 8 | value[XRA_GSR];
-	for (i = 0; i < chip->ngpio; i++) {
-		const char *label = gpiochip_is_requested(chip, i);
-
-		if (!label)
-			continue;
-
-		seq_printf(s, " gpio-%-3d (%-12s) %s %s\n",
-			   chip->base + i, label,
+	for_each_requested_gpio(chip, i, label) {
+		seq_printf(s, " gpio-%-3d (%-12s) %s %s\n", i, label,
 			   (gcr & BIT(i)) ? "in" : "out",
-			   (gsr & BIT(i)) ? "hi" : "lo");
+			   str_hi_lo(gsr & BIT(i)));
 	}
-	kfree(value);
 }
 #else
 #define xra1403_dbg_show NULL
@@ -203,15 +181,7 @@ static int xra1403_probe(struct spi_device *spi)
 		return ret;
 	}
 
-	ret = devm_gpiochip_add_data(&spi->dev, &xra->chip, xra);
-	if (ret < 0) {
-		dev_err(&spi->dev, "Unable to register gpiochip\n");
-		return ret;
-	}
-
-	spi_set_drvdata(spi, xra);
-
-	return 0;
+	return devm_gpiochip_add_data(&spi->dev, &xra->chip, xra);
 }
 
 static const struct spi_device_id xra1403_ids[] = {
@@ -231,7 +201,7 @@ static struct spi_driver xra1403_driver = {
 	.id_table = xra1403_ids,
 	.driver   = {
 		.name           = "xra1403",
-		.of_match_table = of_match_ptr(xra1403_spi_of_match),
+		.of_match_table = xra1403_spi_of_match,
 	},
 };
 

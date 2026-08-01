@@ -17,9 +17,9 @@ struct ff_idmap {
 
 __be32
 nfsd4_ff_encode_layoutget(struct xdr_stream *xdr,
-		struct nfsd4_layoutget *lgp)
+		const struct nfsd4_layoutget *lgp)
 {
-	struct pnfs_ff_layout *fl = lgp->lg_content;
+	const struct pnfs_ff_layout *fl = lgp->lg_content;
 	int len, mirror_len, ds_len, fh_len;
 	__be32 *p;
 
@@ -54,8 +54,7 @@ nfsd4_ff_encode_layoutget(struct xdr_stream *xdr,
 	*p++ = cpu_to_be32(1);			/* single mirror */
 	*p++ = cpu_to_be32(1);			/* single data server */
 
-	p = xdr_encode_opaque_fixed(p, &fl->deviceid,
-			sizeof(struct nfsd4_deviceid));
+	p = svcxdr_encode_deviceid4(p, &fl->deviceid);
 
 	*p++ = cpu_to_be32(1);			/* efficiency */
 
@@ -77,13 +76,22 @@ nfsd4_ff_encode_layoutget(struct xdr_stream *xdr,
 
 __be32
 nfsd4_ff_encode_getdeviceinfo(struct xdr_stream *xdr,
-		struct nfsd4_getdeviceinfo *gdp)
+		const struct nfsd4_getdeviceinfo *gdp)
 {
 	struct pnfs_ff_device_addr *da = gdp->gd_device;
 	int len;
 	int ver_len;
 	int addr_len;
 	__be32 *p;
+
+	/*
+	 * See paragraph 5 of RFC 8881 S18.40.3.
+	 */
+	if (!gdp->gd_maxcount) {
+		if (xdr_stream_encode_u32(xdr, 0) != XDR_UNIT)
+			return nfserr_resource;
+		return nfs_ok;
+	}
 
 	/* len + padding for two strings */
 	addr_len = 16 + da->netaddr.netid_len + da->netaddr.addr_len;

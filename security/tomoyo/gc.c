@@ -23,11 +23,10 @@ static inline void tomoyo_memory_free(void *ptr)
 	tomoyo_memory_used[TOMOYO_MEMORY_POLICY] -= ksize(ptr);
 	kfree(ptr);
 }
-
-/* The list for "struct tomoyo_io_buffer". */
-static LIST_HEAD(tomoyo_io_buffer_list);
 /* Lock for protecting tomoyo_io_buffer_list. */
 static DEFINE_SPINLOCK(tomoyo_io_buffer_list_lock);
+/* The list for "struct tomoyo_io_buffer". */
+static __guarded_by(&tomoyo_io_buffer_list_lock) LIST_HEAD(tomoyo_io_buffer_list);
 
 /**
  * tomoyo_struct_used_by_io_buffer - Check whether the list element is used by /sys/kernel/security/tomoyo/ users or not.
@@ -77,11 +76,13 @@ static bool tomoyo_name_used_by_io_buffer(const char *string)
 	spin_lock(&tomoyo_io_buffer_list_lock);
 	list_for_each_entry(head, &tomoyo_io_buffer_list, list) {
 		int i;
+
 		head->users++;
 		spin_unlock(&tomoyo_io_buffer_list_lock);
 		mutex_lock(&head->io_sem);
 		for (i = 0; i < TOMOYO_MAX_IO_READ_QUEUE; i++) {
 			const char *w = head->r.w[i];
+
 			if (w < string || w > string + size)
 				continue;
 			in_use = true;
@@ -108,6 +109,7 @@ static inline void tomoyo_del_transition_control(struct list_head *element)
 {
 	struct tomoyo_transition_control *ptr =
 		container_of(element, typeof(*ptr), head.list);
+
 	tomoyo_put_name(ptr->domainname);
 	tomoyo_put_name(ptr->program);
 }
@@ -123,6 +125,7 @@ static inline void tomoyo_del_aggregator(struct list_head *element)
 {
 	struct tomoyo_aggregator *ptr =
 		container_of(element, typeof(*ptr), head.list);
+
 	tomoyo_put_name(ptr->original_name);
 	tomoyo_put_name(ptr->aggregated_name);
 }
@@ -138,6 +141,7 @@ static inline void tomoyo_del_manager(struct list_head *element)
 {
 	struct tomoyo_manager *ptr =
 		container_of(element, typeof(*ptr), head.list);
+
 	tomoyo_put_name(ptr->manager);
 }
 
@@ -152,6 +156,7 @@ static void tomoyo_del_acl(struct list_head *element)
 {
 	struct tomoyo_acl_info *acl =
 		container_of(element, typeof(*acl), list);
+
 	tomoyo_put_condition(acl->cond);
 	switch (acl->type) {
 	case TOMOYO_TYPE_PATH_ACL:
@@ -226,6 +231,7 @@ static void tomoyo_del_acl(struct list_head *element)
 		{
 			struct tomoyo_task_acl *entry =
 				container_of(acl, typeof(*entry), head);
+
 			tomoyo_put_name(entry->domainname);
 		}
 		break;
@@ -247,6 +253,7 @@ static inline void tomoyo_del_domain(struct list_head *element)
 		container_of(element, typeof(*domain), list);
 	struct tomoyo_acl_info *acl;
 	struct tomoyo_acl_info *tmp;
+
 	/*
 	 * Since this domain is referenced from neither
 	 * "struct tomoyo_io_buffer" nor "struct cred"->security, we can delete
@@ -286,6 +293,7 @@ void tomoyo_del_condition(struct list_head *element)
 		= (const struct tomoyo_argv *) (names_p + names_count);
 	const struct tomoyo_envp *envp
 		= (const struct tomoyo_envp *) (argv + argc);
+
 	for (i = 0; i < numbers_count; i++)
 		tomoyo_put_number_union(numbers_p++);
 	for (i = 0; i < names_count; i++)
@@ -321,6 +329,7 @@ static inline void tomoyo_del_path_group(struct list_head *element)
 {
 	struct tomoyo_path_group *member =
 		container_of(element, typeof(*member), head.list);
+
 	tomoyo_put_name(member->member_name);
 }
 
@@ -335,6 +344,7 @@ static inline void tomoyo_del_group(struct list_head *element)
 {
 	struct tomoyo_group *group =
 		container_of(element, typeof(*group), head.list);
+
 	tomoyo_put_name(group->group_name);
 }
 
@@ -374,6 +384,7 @@ static inline void tomoyo_del_number_group(struct list_head *element)
  */
 static void tomoyo_try_to_gc(const enum tomoyo_policy_id type,
 			     struct list_head *element)
+	__must_hold(&tomoyo_policy_lock)
 {
 	/*
 	 * __list_del_entry() guarantees that the list element became no longer
@@ -452,7 +463,7 @@ static void tomoyo_try_to_gc(const enum tomoyo_policy_id type,
 	return;
 reinject:
 	/*
-	 * We can safely reinject this element here bacause
+	 * We can safely reinject this element here because
 	 * (1) Appending list elements and removing list elements are protected
 	 *     by tomoyo_policy_lock mutex.
 	 * (2) Only this function removes list elements and this function is
@@ -473,9 +484,11 @@ reinject:
  */
 static void tomoyo_collect_member(const enum tomoyo_policy_id id,
 				  struct list_head *member_list)
+	__must_hold(&tomoyo_policy_lock)
 {
 	struct tomoyo_acl_head *member;
 	struct tomoyo_acl_head *tmp;
+
 	list_for_each_entry_safe(member, tmp, member_list, list) {
 		if (!member->is_deleted)
 			continue;
@@ -492,9 +505,11 @@ static void tomoyo_collect_member(const enum tomoyo_policy_id id,
  * Returns nothing.
  */
 static void tomoyo_collect_acl(struct list_head *list)
+	__must_hold(&tomoyo_policy_lock)
 {
 	struct tomoyo_acl_info *acl;
 	struct tomoyo_acl_info *tmp;
+
 	list_for_each_entry_safe(acl, tmp, list, list) {
 		if (!acl->is_deleted)
 			continue;
@@ -513,10 +528,12 @@ static void tomoyo_collect_entry(void)
 	int i;
 	enum tomoyo_policy_id id;
 	struct tomoyo_policy_namespace *ns;
+
 	mutex_lock(&tomoyo_policy_lock);
 	{
 		struct tomoyo_domain_info *domain;
 		struct tomoyo_domain_info *tmp;
+
 		list_for_each_entry_safe(domain, tmp, &tomoyo_domain_list,
 					 list) {
 			tomoyo_collect_acl(&domain->acl_info_list);
@@ -534,6 +551,7 @@ static void tomoyo_collect_entry(void)
 	{
 		struct tomoyo_shared_acl_head *ptr;
 		struct tomoyo_shared_acl_head *tmp;
+
 		list_for_each_entry_safe(ptr, tmp, &tomoyo_condition_list,
 					 list) {
 			if (atomic_read(&ptr->users) > 0)
@@ -547,6 +565,7 @@ static void tomoyo_collect_entry(void)
 			struct list_head *list = &ns->group_list[i];
 			struct tomoyo_group *group;
 			struct tomoyo_group *tmp;
+
 			switch (i) {
 			case 0:
 				id = TOMOYO_ID_PATH_GROUP;
@@ -574,6 +593,7 @@ static void tomoyo_collect_entry(void)
 		struct list_head *list = &tomoyo_name_list[i];
 		struct tomoyo_shared_acl_head *ptr;
 		struct tomoyo_shared_acl_head *tmp;
+
 		list_for_each_entry_safe(ptr, tmp, list, list) {
 			if (atomic_read(&ptr->users) > 0)
 				continue;
@@ -595,6 +615,7 @@ static int tomoyo_gc_thread(void *unused)
 {
 	/* Garbage collector thread is exclusive. */
 	static DEFINE_MUTEX(tomoyo_gc_mutex);
+
 	if (!mutex_trylock(&tomoyo_gc_mutex))
 		goto out;
 	tomoyo_collect_entry();
@@ -608,8 +629,11 @@ static int tomoyo_gc_thread(void *unused)
 			if (head->users)
 				continue;
 			list_del(&head->list);
-			kfree(head->read_buf);
-			kfree(head->write_buf);
+			/* Safe destruction because no users are left. */
+			context_unsafe(
+				kfree(head->read_buf);
+				kfree(head->write_buf);
+			);
 			kfree(head);
 		}
 		spin_unlock(&tomoyo_io_buffer_list_lock);
@@ -637,11 +661,18 @@ void tomoyo_notify_gc(struct tomoyo_io_buffer *head, const bool is_register)
 		head->users = 1;
 		list_add(&head->list, &tomoyo_io_buffer_list);
 	} else {
-		is_write = head->write_buf != NULL;
+		/*
+		 * tomoyo_write_control() can concurrently update write_buf from
+		 * a non-NULL to new non-NULL pointer with io_sem held.
+		 */
+		is_write = data_race(head->write_buf != NULL);
 		if (!--head->users) {
 			list_del(&head->list);
-			kfree(head->read_buf);
-			kfree(head->write_buf);
+			/* Safe destruction because no users are left. */
+			context_unsafe(
+				kfree(head->read_buf);
+				kfree(head->write_buf);
+			);
 			kfree(head);
 		}
 	}

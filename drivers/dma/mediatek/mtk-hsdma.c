@@ -17,7 +17,6 @@
 #include <linux/list.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/of_dma.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
@@ -107,10 +106,10 @@ enum mtk_hsdma_vdesc_flag {
  * struct mtk_hsdma_pdesc - This is the struct holding info describing physical
  *			    descriptor (PD) and its placement must be kept at
  *			    4-bytes alignment in little endian order.
- * @desc[1-4]:		    The control pad used to indicate hardware how to
- *			    deal with the descriptor such as source and
- *			    destination address and data length. The maximum
- *			    data length each pdesc can handle is 0x3f80 bytes
+ * @desc1:		    | The control pad used to indicate hardware how to
+ * @desc2:		    | deal with the descriptor such as source and
+ * @desc3:		    | destination address and data length. The maximum
+ * @desc4:		    | data length each pdesc can handle is 0x3f80 bytes
  */
 struct mtk_hsdma_pdesc {
 	__le32 desc1;
@@ -138,7 +137,7 @@ struct mtk_hsdma_vdesc {
 
 /**
  * struct mtk_hsdma_cb - This is the struct holding extra info required for RX
- *			 ring to know what relevant VD the the PD is being
+ *			 ring to know what relevant VD the PD is being
  *			 mapped to.
  * @vd:			 Pointer to the relevant VD.
  * @flag:		 Flag indicating what action should be taken when VD
@@ -227,7 +226,7 @@ struct mtk_hsdma_soc {
  * @pc_refcnt:		     Track how many VCs are using the PC
  * @lock:		     Lock protect agaisting multiple VCs access PC
  * @soc:		     The pointer to area holding differences among
- *			     vaious platform
+ *			     various platform
  */
 struct mtk_hsdma_device {
 	struct dma_device ddev;
@@ -325,8 +324,8 @@ static int mtk_hsdma_alloc_pchan(struct mtk_hsdma_device *hsdma,
 	 * and [MTK_DMA_SIZE ... 2 * MTK_DMA_SIZE - 1] is for RX ring.
 	 */
 	pc->sz_ring = 2 * MTK_DMA_SIZE * sizeof(*ring->txd);
-	ring->txd = dma_zalloc_coherent(hsdma2dev(hsdma), pc->sz_ring,
-					&ring->tphys, GFP_NOWAIT);
+	ring->txd = dma_alloc_coherent(hsdma2dev(hsdma), pc->sz_ring,
+				       &ring->tphys, GFP_NOWAIT);
 	if (!ring->txd)
 		return -ENOMEM;
 
@@ -335,7 +334,7 @@ static int mtk_hsdma_alloc_pchan(struct mtk_hsdma_device *hsdma,
 	ring->cur_tptr = 0;
 	ring->cur_rptr = MTK_DMA_SIZE - 1;
 
-	ring->cb = kcalloc(MTK_DMA_SIZE, sizeof(*ring->cb), GFP_NOWAIT);
+	ring->cb = kzalloc_objs(*ring->cb, MTK_DMA_SIZE, GFP_NOWAIT);
 	if (!ring->cb) {
 		err = -ENOMEM;
 		goto err_free_dma;
@@ -601,7 +600,7 @@ static void mtk_hsdma_free_rooms_in_ring(struct mtk_hsdma_device *hsdma)
 			cb->flag = 0;
 		}
 
-		cb->vd = 0;
+		cb->vd = NULL;
 
 		/*
 		 * Recycle the RXD with the helper WRITE_ONCE that can ensure
@@ -723,7 +722,7 @@ mtk_hsdma_prep_dma_memcpy(struct dma_chan *c, dma_addr_t dest,
 {
 	struct mtk_hsdma_vdesc *hvd;
 
-	hvd = kzalloc(sizeof(*hvd), GFP_NOWAIT);
+	hvd = kzalloc_obj(*hvd, GFP_NOWAIT);
 	if (!hvd)
 		return NULL;
 
@@ -761,7 +760,7 @@ static void mtk_hsdma_free_active_desc(struct dma_chan *c)
 	/*
 	 * Once issue_synchronize is being set, which means once the hardware
 	 * consumes all descriptors for the channel in the ring, the
-	 * synchronization must be be notified immediately it is completed.
+	 * synchronization must be notified immediately it is completed.
 	 */
 	spin_lock(&hvc->vc.lock);
 	if (!list_empty(&hvc->desc_hw_processing)) {
@@ -896,7 +895,6 @@ static int mtk_hsdma_probe(struct platform_device *pdev)
 	struct mtk_hsdma_device *hsdma;
 	struct mtk_hsdma_vchan *vc;
 	struct dma_device *dd;
-	struct resource *res;
 	int i, err;
 
 	hsdma = devm_kzalloc(&pdev->dev, sizeof(*hsdma), GFP_KERNEL);
@@ -905,8 +903,7 @@ static int mtk_hsdma_probe(struct platform_device *pdev)
 
 	dd = &hsdma->ddev;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	hsdma->base = devm_ioremap_resource(&pdev->dev, res);
+	hsdma->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(hsdma->base))
 		return PTR_ERR(hsdma->base);
 
@@ -923,13 +920,10 @@ static int mtk_hsdma_probe(struct platform_device *pdev)
 		return PTR_ERR(hsdma->clk);
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
-	if (!res) {
-		dev_err(&pdev->dev, "No irq resource for %s\n",
-			dev_name(&pdev->dev));
-		return -EINVAL;
-	}
-	hsdma->irq = res->start;
+	err = platform_get_irq(pdev, 0);
+	if (err < 0)
+		return err;
+	hsdma->irq = err;
 
 	refcount_set(&hsdma->pc_refcnt, 0);
 	spin_lock_init(&hsdma->lock);
@@ -997,7 +991,7 @@ static int mtk_hsdma_probe(struct platform_device *pdev)
 	if (err) {
 		dev_err(&pdev->dev,
 			"request_irq failed with err %d\n", err);
-		goto err_unregister;
+		goto err_free;
 	}
 
 	platform_set_drvdata(pdev, hsdma);
@@ -1006,13 +1000,16 @@ static int mtk_hsdma_probe(struct platform_device *pdev)
 
 	return 0;
 
+err_free:
+	mtk_hsdma_hw_deinit(hsdma);
+	of_dma_controller_free(pdev->dev.of_node);
 err_unregister:
 	dma_async_device_unregister(dd);
 
 	return err;
 }
 
-static int mtk_hsdma_remove(struct platform_device *pdev)
+static void mtk_hsdma_remove(struct platform_device *pdev)
 {
 	struct mtk_hsdma_device *hsdma = platform_get_drvdata(pdev);
 	struct mtk_hsdma_vchan *vc;
@@ -1037,8 +1034,6 @@ static int mtk_hsdma_remove(struct platform_device *pdev)
 
 	dma_async_device_unregister(&hsdma->ddev);
 	of_dma_controller_free(pdev->dev.of_node);
-
-	return 0;
 }
 
 static struct platform_driver mtk_hsdma_driver = {

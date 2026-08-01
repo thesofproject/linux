@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef _PPP_CHANNEL_H_
 #define _PPP_CHANNEL_H_
 /*
@@ -11,11 +12,6 @@
  *
  * Copyright 1999 Paul Mackerras.
  *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version
- *  2 of the License, or (at your option) any later version.
- *
  * ==FILEVERSION 20000322==
  */
 
@@ -24,6 +20,8 @@
 #include <linux/poll.h>
 #include <net/net_namespace.h>
 
+struct net_device_path;
+struct net_device_path_ctx;
 struct ppp_channel;
 
 struct ppp_channel_ops {
@@ -32,6 +30,9 @@ struct ppp_channel_ops {
 	int	(*start_xmit)(struct ppp_channel *, struct sk_buff *);
 	/* Handle an ioctl call that has come in via /dev/ppp. */
 	int	(*ioctl)(struct ppp_channel *, unsigned int, unsigned long);
+	int	(*fill_forward_path)(struct net_device_path_ctx *,
+				     struct net_device_path *,
+				     const struct ppp_channel *);
 };
 
 struct ppp_channel {
@@ -41,8 +42,7 @@ struct ppp_channel {
 	int		hdrlen;		/* amount of headroom channel needs */
 	void		*ppp;		/* opaque to channel */
 	int		speed;		/* transfer rate (bytes/second) */
-	/* the following is not used at present */
-	int		latency;	/* overhead time in milliseconds */
+	bool		direct_xmit;	/* no qdisc, xmit directly */
 };
 
 #ifdef __KERNEL__
@@ -55,7 +55,7 @@ extern void ppp_input(struct ppp_channel *, struct sk_buff *);
 
 /* Called by the channel when an input error occurs, indicating
    that we may have missed a packet. */
-extern void ppp_input_error(struct ppp_channel *, int code);
+extern void ppp_input_error(struct ppp_channel *);
 
 /* Attach a channel to a given PPP unit in specified net. */
 extern int ppp_register_net_channel(struct net *, struct ppp_channel *);
@@ -72,7 +72,9 @@ extern int ppp_channel_index(struct ppp_channel *);
 /* Get the unit number associated with a channel, or -1 if none */
 extern int ppp_unit_number(struct ppp_channel *);
 
-/* Get the device name associated with a channel, or NULL if none */
+/* Get the device name associated with a channel, or NULL if none.
+ * Caller must hold RCU read lock.
+ */
 extern char *ppp_dev_name(struct ppp_channel *);
 
 /*

@@ -1,20 +1,26 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2002 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
- * Licensed under the GPL
  */
 
 #include <stdio.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <linux/falloc.h>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <sys/un.h>
+#include <sys/mman.h>
 #include <sys/types.h>
+#include <sys/eventfd.h>
+#include <poll.h>
 #include <os.h>
 
 static void copy_stat(struct uml_stat *dst, const struct stat64 *src)
@@ -95,21 +101,6 @@ int os_ioctl_generic(int fd, unsigned int cmd, unsigned long arg)
 int os_get_ifname(int fd, char* namebuf)
 {
 	if (ioctl(fd, SIOCGIFNAME, namebuf) < 0)
-		return -errno;
-
-	return 0;
-}
-
-int os_set_slip(int fd)
-{
-	int disc, sencap;
-
-	disc = N_SLIP;
-	if (ioctl(fd, TIOCSETD, &disc) < 0)
-		return -errno;
-
-	sencap = 0;
-	if (ioctl(fd, SIOCSIFENCAP, &sencap) < 0)
 		return -errno;
 
 	return 0;
@@ -235,15 +226,19 @@ out:
 	return err;
 }
 
+int os_dup_file(int fd)
+{
+	int new_fd = dup(fd);
+
+	if (new_fd < 0)
+		return -errno;
+
+	return new_fd;
+}
+
 void os_close_file(int fd)
 {
 	close(fd);
-}
-int os_fsync_file(int fd)
-{
-	if (fsync(fd) < 0)
-	    return -errno;
-	return 0;
 }
 
 int os_seek_file(int fd, unsigned long long offset)
@@ -285,7 +280,7 @@ int os_write_file(int fd, const void *buf, int len)
 
 int os_sync_file(int fd)
 {
-	int n = fsync(fd);
+	int n = fdatasync(fd);
 
 	if (n < 0)
 		return -errno;
@@ -340,7 +335,7 @@ int os_file_size(const char *file, unsigned long long *size_out)
 	return 0;
 }
 
-int os_file_modtime(const char *file, unsigned long *modtime)
+int os_file_modtime(const char *file, long long *modtime)
 {
 	struct uml_stat buf;
 	int err;
@@ -497,44 +492,51 @@ int os_shutdown_socket(int fd, int r, int w)
 	return 0;
 }
 
-int os_rcv_fd(int fd, int *helper_pid_out)
+/**
+ * os_rcv_fd_msg - receive message with (optional) FDs
+ * @fd: the FD to receive from
+ * @fds: the array for FDs to write to
+ * @n_fds: number of FDs to receive (@fds array size)
+ * @data: the message buffer
+ * @data_len: the size of the message to receive
+ *
+ * Receive a message with FDs.
+ *
+ * Returns: the size of the received message, or an error code
+ */
+ssize_t os_rcv_fd_msg(int fd, int *fds, unsigned int n_fds,
+		      void *data, size_t data_len)
 {
-	int new, n;
-	char buf[CMSG_SPACE(sizeof(new))];
-	struct msghdr msg;
+#define MAX_RCV_FDS	2
+	char buf[CMSG_SPACE(sizeof(*fds) * MAX_RCV_FDS)];
 	struct cmsghdr *cmsg;
-	struct iovec iov;
+	struct iovec iov = {
+		.iov_base = data,
+		.iov_len = data_len,
+	};
+	struct msghdr msg = {
+		.msg_iov = &iov,
+		.msg_iovlen = 1,
+		.msg_control = buf,
+		.msg_controllen = CMSG_SPACE(sizeof(*fds) * n_fds),
+	};
+	int n;
 
-	msg.msg_name = NULL;
-	msg.msg_namelen = 0;
-	iov = ((struct iovec) { .iov_base  = helper_pid_out,
-				.iov_len   = sizeof(*helper_pid_out) });
-	msg.msg_iov = &iov;
-	msg.msg_iovlen = 1;
-	msg.msg_control = buf;
-	msg.msg_controllen = sizeof(buf);
-	msg.msg_flags = 0;
+	if (n_fds > MAX_RCV_FDS)
+		return -EINVAL;
 
 	n = recvmsg(fd, &msg, 0);
 	if (n < 0)
 		return -errno;
-	else if (n != iov.iov_len)
-		*helper_pid_out = -1;
 
 	cmsg = CMSG_FIRSTHDR(&msg);
-	if (cmsg == NULL) {
-		printk(UM_KERN_ERR "rcv_fd didn't receive anything, "
-		       "error = %d\n", errno);
-		return -1;
-	}
-	if ((cmsg->cmsg_level != SOL_SOCKET) ||
-	    (cmsg->cmsg_type != SCM_RIGHTS)) {
-		printk(UM_KERN_ERR "rcv_fd didn't receive a descriptor\n");
-		return -1;
-	}
+	if (!cmsg ||
+	    cmsg->cmsg_level != SOL_SOCKET ||
+	    cmsg->cmsg_type != SCM_RIGHTS)
+		return n;
 
-	new = ((int *) CMSG_DATA(cmsg))[0];
-	return new;
+	memcpy(fds, CMSG_DATA(cmsg), cmsg->cmsg_len - CMSG_LEN(0));
+	return n;
 }
 
 int os_create_unix_socket(const char *file, int len, int close_on_exec)
@@ -609,4 +611,116 @@ unsigned os_minor(unsigned long long dev)
 unsigned long long os_makedev(unsigned major, unsigned minor)
 {
 	return makedev(major, minor);
+}
+
+int os_falloc_punch(int fd, unsigned long long offset, int len)
+{
+	int n = fallocate(fd, FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE, offset, len);
+
+	if (n < 0)
+		return -errno;
+	return n;
+}
+
+int os_falloc_zeroes(int fd, unsigned long long offset, int len)
+{
+	int n = fallocate(fd, FALLOC_FL_ZERO_RANGE|FALLOC_FL_KEEP_SIZE, offset, len);
+
+	if (n < 0)
+		return -errno;
+	return n;
+}
+
+int os_eventfd(unsigned int initval, int flags)
+{
+	int fd = eventfd(initval, flags);
+
+	if (fd < 0)
+		return -errno;
+	return fd;
+}
+
+int os_sendmsg_fds(int fd, const void *buf, unsigned int len, const int *fds,
+		   unsigned int fds_num)
+{
+	struct iovec iov = {
+		.iov_base = (void *) buf,
+		.iov_len = len,
+	};
+	union {
+		char control[CMSG_SPACE(sizeof(*fds) * OS_SENDMSG_MAX_FDS)];
+		struct cmsghdr align;
+	} u;
+	unsigned int fds_size = sizeof(*fds) * fds_num;
+	struct msghdr msg = {
+		.msg_iov = &iov,
+		.msg_iovlen = 1,
+		.msg_control = u.control,
+		.msg_controllen = CMSG_SPACE(fds_size),
+	};
+	struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+	int err;
+
+	if (fds_num > OS_SENDMSG_MAX_FDS)
+		return -EINVAL;
+	memset(u.control, 0, sizeof(u.control));
+	cmsg->cmsg_level = SOL_SOCKET;
+	cmsg->cmsg_type = SCM_RIGHTS;
+	cmsg->cmsg_len = CMSG_LEN(fds_size);
+	memcpy(CMSG_DATA(cmsg), fds, fds_size);
+	err = sendmsg(fd, &msg, 0);
+
+	if (err < 0)
+		return -errno;
+	return err;
+}
+
+int os_poll(unsigned int n, const int *fds)
+{
+	/* currently need 2 FDs at most so avoid dynamic allocation */
+	struct pollfd pollfds[2] = {};
+	unsigned int i;
+	int ret;
+
+	if (n > ARRAY_SIZE(pollfds))
+		return -EINVAL;
+
+	for (i = 0; i < n; i++) {
+		pollfds[i].fd = fds[i];
+		pollfds[i].events = POLLIN;
+	}
+
+	ret = poll(pollfds, n, -1);
+	if (ret < 0)
+		return -errno;
+
+	/* Return the index of the available FD */
+	for (i = 0; i < n; i++) {
+		if (pollfds[i].revents)
+			return i;
+	}
+
+	return -EIO;
+}
+
+void *os_mmap_rw_shared(int fd, size_t size)
+{
+	void *res = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+
+	if (res == MAP_FAILED)
+		return NULL;
+
+	return res;
+}
+
+void *os_mremap_rw_shared(void *old_addr, size_t old_size, size_t new_size)
+{
+	void *res;
+
+	res = mremap(old_addr, old_size, new_size, MREMAP_MAYMOVE, NULL);
+
+	if (res == MAP_FAILED)
+		return NULL;
+
+	return res;
 }

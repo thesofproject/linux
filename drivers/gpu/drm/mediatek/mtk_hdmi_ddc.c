@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014 MediaTek Inc.
  * Author: Jie Qiu <jie.qiu@mediatek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -26,6 +18,8 @@
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
+
+#include "mtk_drm_drv.h"
 
 #define SIF1_CLOK		(288)
 #define DDC_DDCMCTL0		(0x0)
@@ -284,25 +278,20 @@ static int mtk_hdmi_ddc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	ddc->clk = devm_clk_get(dev, "ddc-i2c");
-	if (IS_ERR(ddc->clk)) {
-		dev_err(dev, "get ddc_clk failed: %p ,\n", ddc->clk);
-		return PTR_ERR(ddc->clk);
-	}
+	if (IS_ERR(ddc->clk))
+		return dev_err_probe(dev, PTR_ERR(ddc->clk),
+				     "get ddc_clk failed\n");
 
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	ddc->regs = devm_ioremap_resource(&pdev->dev, mem);
+	ddc->regs = devm_platform_get_and_ioremap_resource(pdev, 0, &mem);
 	if (IS_ERR(ddc->regs))
 		return PTR_ERR(ddc->regs);
 
 	ret = clk_prepare_enable(ddc->clk);
-	if (ret) {
-		dev_err(dev, "enable ddc clk failed!\n");
-		return ret;
-	}
+	if (ret)
+		return dev_err_probe(dev, ret, "enable ddc clk failed!\n");
 
-	strlcpy(ddc->adap.name, "mediatek-hdmi-ddc", sizeof(ddc->adap.name));
+	strscpy(ddc->adap.name, "mediatek-hdmi-ddc", sizeof(ddc->adap.name));
 	ddc->adap.owner = THIS_MODULE;
-	ddc->adap.class = I2C_CLASS_DDC;
 	ddc->adap.algo = &mtk_hdmi_ddc_algorithm;
 	ddc->adap.retries = 3;
 	ddc->adap.dev.of_node = dev->of_node;
@@ -311,8 +300,8 @@ static int mtk_hdmi_ddc_probe(struct platform_device *pdev)
 
 	ret = i2c_add_adapter(&ddc->adap);
 	if (ret < 0) {
-		dev_err(dev, "failed to add bus to i2c core\n");
-		goto err_clk_disable;
+		clk_disable_unprepare(ddc->clk);
+		return dev_err_probe(dev, ret, "failed to add bus to i2c core\n");
 	}
 
 	platform_set_drvdata(pdev, ddc);
@@ -323,28 +312,23 @@ static int mtk_hdmi_ddc_probe(struct platform_device *pdev)
 		&mem->end);
 
 	return 0;
-
-err_clk_disable:
-	clk_disable_unprepare(ddc->clk);
-	return ret;
 }
 
-static int mtk_hdmi_ddc_remove(struct platform_device *pdev)
+static void mtk_hdmi_ddc_remove(struct platform_device *pdev)
 {
 	struct mtk_hdmi_ddc *ddc = platform_get_drvdata(pdev);
 
 	i2c_del_adapter(&ddc->adap);
 	clk_disable_unprepare(ddc->clk);
-
-	return 0;
 }
 
 static const struct of_device_id mtk_hdmi_ddc_match[] = {
 	{ .compatible = "mediatek,mt8173-hdmi-ddc", },
 	{},
 };
+MODULE_DEVICE_TABLE(of, mtk_hdmi_ddc_match);
 
-struct platform_driver mtk_hdmi_ddc_driver = {
+static struct platform_driver mtk_hdmi_ddc_driver = {
 	.probe = mtk_hdmi_ddc_probe,
 	.remove = mtk_hdmi_ddc_remove,
 	.driver = {
@@ -352,6 +336,7 @@ struct platform_driver mtk_hdmi_ddc_driver = {
 		.of_match_table = mtk_hdmi_ddc_match,
 	},
 };
+module_platform_driver(mtk_hdmi_ddc_driver);
 
 MODULE_AUTHOR("Jie Qiu <jie.qiu@mediatek.com>");
 MODULE_DESCRIPTION("MediaTek HDMI DDC Driver");

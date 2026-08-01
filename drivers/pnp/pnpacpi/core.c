@@ -1,29 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * pnpacpi -- PnP ACPI driver
  *
  * Copyright (c) 2004 Matthieu Castet <castet.matthieu@free.fr>
  * Copyright (c) 2004 Li Shaohua <shaohua.li@intel.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/export.h>
 #include <linux/acpi.h>
 #include <linux/pnp.h>
 #include <linux/slab.h>
-#include <linux/mod_devicetable.h>
 
 #include "../base.h"
 #include "pnpacpi.h"
@@ -263,9 +249,9 @@ static int __init pnpacpi_add_device(struct acpi_device *device)
 		dev->capabilities |= PNP_DISABLE;
 
 	if (strlen(acpi_device_name(device)))
-		strncpy(dev->name, acpi_device_name(device), sizeof(dev->name));
+		strscpy(dev->name, acpi_device_name(device), sizeof(dev->name));
 	else
-		strncpy(dev->name, acpi_device_bid(device), sizeof(dev->name));
+		strscpy(dev->name, acpi_device_bid(device), sizeof(dev->name));
 
 	if (dev->active)
 		pnpacpi_parse_allocated_resource(dev);
@@ -300,9 +286,9 @@ static acpi_status __init pnpacpi_add_device_handler(acpi_handle handle,
 						     u32 lvl, void *context,
 						     void **rv)
 {
-	struct acpi_device *device;
+	struct acpi_device *device = acpi_fetch_acpi_dev(handle);
 
-	if (acpi_bus_get_device(handle, &device))
+	if (!device)
 		return AE_CTRL_DEPTH;
 	if (acpi_is_pnp_device(device))
 		pnpacpi_add_device(device);

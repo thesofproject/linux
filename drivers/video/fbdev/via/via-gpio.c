@@ -1,16 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Support for viafb GPIO ports.
  *
  * Copyright 2009 Jonathan Corbet <corbet@lwn.net>
- * Distributable under version 2 of the GNU General Public License.
  */
 
 #include <linux/spinlock.h>
 #include <linux/gpio/driver.h>
+#include <linux/gpio/machine.h>
 #include <linux/platform_device.h>
 #include <linux/via-core.h>
-#include <linux/via-gpio.h>
-#include <linux/export.h>
+#include "via-gpio.h"
 
 /*
  * The ports we know about.  Note that the port-25 gpios are not
@@ -80,8 +80,7 @@ struct viafb_gpio_cfg {
 /*
  * GPIO access functions
  */
-static void via_gpio_set(struct gpio_chip *chip, unsigned int nr,
-			 int value)
+static int via_gpio_set(struct gpio_chip *chip, unsigned int nr, int value)
 {
 	struct viafb_gpio_cfg *cfg = gpiochip_get_data(chip);
 	u8 reg;
@@ -98,13 +97,14 @@ static void via_gpio_set(struct gpio_chip *chip, unsigned int nr,
 		reg &= ~(0x10 << gpio->vg_mask_shift);
 	via_write_reg(VIASR, gpio->vg_port_index, reg);
 	spin_unlock_irqrestore(&cfg->vdev->reg_lock, flags);
+
+	return 0;
 }
 
 static int via_gpio_dir_out(struct gpio_chip *chip, unsigned int nr,
 			    int value)
 {
-	via_gpio_set(chip, nr, value);
-	return 0;
+	return via_gpio_set(chip, nr, value);
 }
 
 /*
@@ -189,19 +189,14 @@ static struct viafb_pm_hooks viafb_gpio_pm_hooks = {
 };
 #endif /* CONFIG_PM */
 
-/*
- * Look up a specific gpio and return the number it was assigned.
- */
-int viafb_gpio_lookup(const char *name)
-{
-	int i;
-
-	for (i = 0; i < viafb_gpio_config.gpio_chip.ngpio; i++)
-		if (!strcmp(name, viafb_gpio_config.active_gpios[i]->vg_name))
-			return viafb_gpio_config.gpio_chip.base + i;
-	return -1;
-}
-EXPORT_SYMBOL_GPL(viafb_gpio_lookup);
+static struct gpiod_lookup_table viafb_gpio_table = {
+	.dev_id = "viafb-camera",
+	.table = {
+		GPIO_LOOKUP("via-gpio", 2, "VGPIO2", GPIO_ACTIVE_LOW),
+		GPIO_LOOKUP("via-gpio", 3, "VGPIO3", GPIO_ACTIVE_HIGH),
+		{ }
+	},
+};
 
 /*
  * Platform device stuff.
@@ -249,12 +244,16 @@ static int viafb_gpio_probe(struct platform_device *platdev)
 	 * Get registered.
 	 */
 	viafb_gpio_config.gpio_chip.base = -1;  /* Dynamic */
+	viafb_gpio_config.gpio_chip.label = "via-gpio";
 	ret = gpiochip_add_data(&viafb_gpio_config.gpio_chip,
 				&viafb_gpio_config);
 	if (ret) {
 		printk(KERN_ERR "viafb: failed to add gpios (%d)\n", ret);
 		viafb_gpio_config.gpio_chip.ngpio = 0;
 	}
+
+	gpiod_add_lookup_table(&viafb_gpio_table);
+
 #ifdef CONFIG_PM
 	viafb_pm_register(&viafb_gpio_pm_hooks);
 #endif
@@ -262,7 +261,7 @@ static int viafb_gpio_probe(struct platform_device *platdev)
 }
 
 
-static int viafb_gpio_remove(struct platform_device *platdev)
+static void viafb_gpio_remove(struct platform_device *platdev)
 {
 	unsigned long flags;
 	int i;
@@ -285,7 +284,6 @@ static int viafb_gpio_remove(struct platform_device *platdev)
 		viafb_gpio_disable(viafb_gpio_config.active_gpios[i]);
 	viafb_gpio_config.gpio_chip.ngpio = 0;
 	spin_unlock_irqrestore(&viafb_gpio_config.vdev->reg_lock, flags);
-	return 0;
 }
 
 static struct platform_driver via_gpio_driver = {

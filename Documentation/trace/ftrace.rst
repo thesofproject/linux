@@ -24,23 +24,23 @@ It can be used for debugging or analyzing latencies and
 performance issues that take place outside of user-space.
 
 Although ftrace is typically considered the function tracer, it
-is really a frame work of several assorted tracing utilities.
+is really a framework of several assorted tracing utilities.
 There's latency tracing to examine what occurs between interrupts
 disabled and enabled, as well as for preemption and from a time
 a task is woken to the task is actually scheduled in.
 
 One of the most common uses of ftrace is the event tracing.
-Through out the kernel is hundreds of static event points that
+Throughout the kernel are hundreds of static event points that
 can be enabled via the tracefs file system to see what is
 going on in certain parts of the kernel.
 
-See events.txt for more information.
+See events.rst for more information.
 
 
 Implementation Details
 ----------------------
 
-See :doc:`ftrace-design` for details for arch porters and such.
+See Documentation/trace/ftrace-design.rst for details for arch porters and such.
 
 
 The File System
@@ -95,7 +95,8 @@ of ftrace. Here is a list of some of the key files:
   current_tracer:
 
 	This is used to set or display the current tracer
-	that is configured.
+	that is configured. Changing the current tracer clears
+	the ring buffer content as well as the "snapshot" buffer.
 
   available_tracers:
 
@@ -124,8 +125,13 @@ of ftrace. Here is a list of some of the key files:
   trace:
 
 	This file holds the output of the trace in a human
-	readable format (described below). Note, tracing is temporarily
-	disabled while this file is being read (opened).
+	readable format (described below). Opening this file for
+	writing with the O_TRUNC flag clears the ring buffer content.
+        Note, this file is not a consumer. If tracing is off
+        (no tracer running, or tracing_on is zero), it will produce
+        the same output each time it is read. When tracing is on,
+        it may produce inconsistent results as it tries to read
+        the entire buffer without consuming it.
 
   trace_pipe:
 
@@ -139,8 +145,7 @@ of ftrace. Here is a list of some of the key files:
 	will not be read again with a sequential read. The
 	"trace" file is static, and if the tracer is not
 	adding more data, it will display the same
-	information every time it is read. This file will not
-	disable tracing while being read.
+	information every time it is read.
 
   trace_options:
 
@@ -175,6 +180,21 @@ of ftrace. Here is a list of some of the key files:
 	Only active when the file contains a number greater than 0.
 	(in microseconds)
 
+  buffer_percent:
+
+	This is the watermark for how much the ring buffer needs to be filled
+	before a waiter is woken up. That is, if an application calls a
+	blocking read syscall on one of the per_cpu trace_pipe_raw files, it
+	will block until the given amount of data specified by buffer_percent
+	is in the ring buffer before it wakes the reader up. This also
+	controls how the splice system calls are blocked on this file::
+
+	  0   - means to wake up as soon as there is any data in the ring buffer.
+	  50  - means to wake up when roughly half of the ring buffer sub-buffers
+	        are full.
+	  100 - means to block until the ring buffer is totally full and is
+	        about to start overwriting the older data.
+
   buffer_size_kb:
 
 	This sets or displays the number of kilobytes each CPU
@@ -183,7 +203,8 @@ of ftrace. Here is a list of some of the key files:
 	CPU buffer and not total size of all buffers. The
 	trace buffers are allocated in pages (blocks of memory
 	that the kernel uses for allocation, usually 4 KB in size).
-	If the last page allocated has room for more bytes
+	A few extra pages may be allocated to accommodate buffer management
+	meta-data. If the last page allocated has room for more bytes
 	than requested, the rest of the page will be used,
 	making the actual allocation bigger than requested or shown.
 	( Note, the size may not be a multiple of the page size
@@ -196,6 +217,27 @@ of ftrace. Here is a list of some of the key files:
   buffer_total_size_kb:
 
 	This displays the total combined size of all the trace buffers.
+
+  buffer_subbuf_size_kb:
+
+	This sets or displays the sub buffer size. The ring buffer is broken up
+	into several same size "sub buffers". An event can not be bigger than
+	the size of the sub buffer. Normally, the sub buffer is the size of the
+	architecture's page (4K on x86). The sub buffer also contains meta data
+	at the start which also limits the size of an event.  That means when
+	the sub buffer is a page size, no event can be larger than the page
+	size minus the sub buffer meta data.
+
+	Note, the buffer_subbuf_size_kb is a way for the user to specify the
+	minimum size of the subbuffer. The kernel may make it bigger due to the
+	implementation details, or simply fail the operation if the kernel can
+	not handle the request.
+
+	Changing the sub buffer size allows for events to be larger than the
+	page size.
+
+	Note: When changing the sub-buffer size, tracing is stopped and any
+	data in the ring buffer and the snapshot buffer will be discarded.
 
   free_buffer:
 
@@ -224,12 +266,20 @@ of ftrace. Here is a list of some of the key files:
 	has a side effect of enabling or disabling specific functions
 	to be traced. Echoing names of functions into this file
 	will limit the trace to only those functions.
+	This influences the tracers "function" and "function_graph"
+	and thus also function profiling (see "function_profile_enabled").
 
 	The functions listed in "available_filter_functions" are what
 	can be written into this file.
 
 	This interface also allows for commands to be used. See the
 	"Filter commands" section for more details.
+
+	As a speed up, since processing strings can be quite expensive
+	and requires a check of all functions registered to tracing, instead
+	an index can be written into this file. A number (starting with "1")
+	written will instead select the same corresponding at the line position
+	of the "available_filter_functions" file.
 
   set_ftrace_notrace:
 
@@ -249,6 +299,20 @@ of ftrace. Here is a list of some of the key files:
 	traced by the function tracer as well. This option will also
 	cause PIDs of tasks that exit to be removed from the file.
 
+  set_ftrace_notrace_pid:
+
+        Have the function tracer ignore threads whose PID are listed in
+        this file.
+
+        If the "function-fork" option is set, then when a task whose
+	PID is listed in this file forks, the child's PID will
+	automatically be added to this file, and the child will not be
+	traced by the function tracer as well. This option will also
+	cause PIDs of tasks that exit to be removed from the file.
+
+        If a PID is in both this file and "set_ftrace_pid", then this
+        file takes precedence, and the thread will not be traced.
+
   set_event_pid:
 
 	Have the events only trace a task with a PID listed in this file.
@@ -260,11 +324,26 @@ of ftrace. Here is a list of some of the key files:
 	cause the PIDs of tasks to be removed from this file when the task
 	exits.
 
+  set_event_notrace_pid:
+
+	Have the events not trace a task with a PID listed in this file.
+	Note, sched_switch and sched_wakeup will trace threads not listed
+	in this file, even if a thread's PID is in the file if the
+        sched_switch or sched_wakeup events also trace a thread that should
+        be traced.
+
+	To have the PIDs of children of tasks with their PID in this file
+	added on fork, enable the "event-fork" option. That option will also
+	cause the PIDs of tasks to be removed from this file when the task
+	exits.
+
   set_graph_function:
 
 	Functions listed in this file will cause the function graph
 	tracer to only trace these functions and the functions that
 	they call. (See the section "dynamic ftrace" for more details).
+	Note, set_ftrace_filter and set_ftrace_notrace still affects
+	what functions are being traced.
 
   set_graph_notrace:
 
@@ -277,8 +356,23 @@ of ftrace. Here is a list of some of the key files:
 
 	This lists the functions that ftrace has processed and can trace.
 	These are the function names that you can pass to
-	"set_ftrace_filter" or "set_ftrace_notrace".
+	"set_ftrace_filter", "set_ftrace_notrace",
+	"set_graph_function", or "set_graph_notrace".
 	(See the section "dynamic ftrace" below for more details.)
+
+  available_filter_functions_addrs:
+
+	Similar to available_filter_functions, but with address displayed
+	for each function. The displayed address is the patch-site address
+	and can differ from /proc/kallsyms address.
+
+  syscall_user_buf_size:
+
+	Some system call trace events will record the data from a user
+	space address that one of the parameters point to. The amount of
+	data per event is limited. This file holds the max number of bytes
+	that will be recorded into the ring buffer to hold this data.
+	The max value is currently 165.
 
   dyn_ftrace_total_info:
 
@@ -297,7 +391,7 @@ of ftrace. Here is a list of some of the key files:
 	not be listed in this count.
 
 	If the callback registered to be traced by a function with
-	the "save regs" attribute (thus even more overhead), a 'R'
+	the "save regs" attribute (thus even more overhead), an 'R'
 	will be displayed on the same line as the function that
 	is returning registers.
 
@@ -306,14 +400,39 @@ of ftrace. Here is a list of some of the key files:
 	an 'I' will be displayed on the same line as the function that
 	can be overridden.
 
+	If a non-ftrace trampoline is attached (BPF) a 'D' will be displayed.
+	Note, normal ftrace trampolines can also be attached, but only one
+	"direct" trampoline can be attached to a given function at a time.
+
+	Some architectures can not call direct trampolines, but instead have
+	the ftrace ops function located above the function entry point. In
+	such cases an 'O' will be displayed.
+
+	If a function had either the "ip modify" or a "direct" call attached to
+	it in the past, a 'M' will be shown. This flag is never cleared. It is
+	used to know if a function was ever modified by the ftrace infrastructure,
+	and can be used for debugging.
+
 	If the architecture supports it, it will also show what callback
 	is being directly called by the function. If the count is greater
 	than 1 it most likely will be ftrace_ops_list_func().
 
-	If the callback of the function jumps to a trampoline that is
-	specific to a the callback and not the standard trampoline,
+	If the callback of a function jumps to a trampoline that is
+	specific to the callback and which is not the standard trampoline,
 	its address will be printed as well as the function that the
 	trampoline calls.
+
+  touched_functions:
+
+	This file contains all the functions that ever had a function callback
+	to it via the ftrace infrastructure. It has the same format as
+	enabled_functions but shows all functions that have ever been
+	traced.
+
+	To see any function that has every been modified by "ip modify" or a
+	direct trampoline, one can perform the following command:
+
+	grep ' M ' /sys/kernel/tracing/touched_functions
 
   function_profile_enabled:
 
@@ -324,19 +443,19 @@ of ftrace. Here is a list of some of the key files:
 	track of the time spent in those functions. The histogram
 	content can be displayed in the files:
 
-	trace_stats/function<cpu> ( function0, function1, etc).
+	trace_stat/function<cpu> ( function0, function1, etc).
 
-  trace_stats:
+  trace_stat:
 
 	A directory that holds different tracing stats.
 
   kprobe_events:
 
-	Enable dynamic trace points. See kprobetrace.txt.
+	Enable dynamic trace points. See kprobetrace.rst.
 
   kprobe_profile:
 
-	Dynamic trace points stats. See kprobetrace.txt.
+	Dynamic trace points stats. See kprobetrace.rst.
 
   max_graph_depth:
 
@@ -369,7 +488,7 @@ of ftrace. Here is a list of some of the key files:
 
 	By default, 128 comms are saved (see "saved_cmdlines" above). To
 	increase or decrease the amount of comms that are cached, echo
-	in a the number of comms to cache, into this file.
+	the number of comms to cache into this file.
 
   saved_tgids:
 
@@ -406,7 +525,7 @@ of ftrace. Here is a list of some of the key files:
 	Whenever an event is recorded into the ring buffer, a
 	"timestamp" is added. This stamp comes from a specified
 	clock. By default, ftrace uses the "local" clock. This
-	clock is very fast and strictly per cpu, but on some
+	clock is very fast and strictly per CPU, but on some
 	systems it may not be monotonic with respect to other
 	CPUs. In other words, the local clocks may not be in sync
 	with local clocks on other CPUs.
@@ -451,13 +570,17 @@ of ftrace. Here is a list of some of the key files:
 		to correlate events across hypervisor/guest if
 		tb_offset is known.
 
+	s390-tod:
+		This uses the s390 TOD clock value. This clock is usually in
+		sync across virtual machines and STP-enabled machines.
+
 	mono:
 		This uses the fast monotonic clock (CLOCK_MONOTONIC)
 		which is monotonic and is subject to NTP rate adjustments.
 
 	mono_raw:
 		This is the raw monotonic clock (CLOCK_MONOTONIC_RAW)
-		which is montonic but is not subject to any rate adjustments
+		which is monotonic but is not subject to any rate adjustments
 		and ticks at the same rate as the hardware clocksource.
 
 	boot:
@@ -473,9 +596,24 @@ of ftrace. Here is a list of some of the key files:
 		processing should be able to handle them. See comments in the
 		ktime_get_boot_fast_ns() function for more information.
 
+	tai:
+		This is the tai clock (CLOCK_TAI) and is derived from the wall-
+		clock time. However, this clock does not experience
+		discontinuities and backwards jumps caused by NTP inserting leap
+		seconds. Since the clock access is designed for use in tracing,
+		side effects are possible. The clock access may yield wrong
+		readouts in case the internal TAI offset is updated e.g., caused
+		by setting the system time or using adjtimex() with an offset.
+		These effects are rare and post processing should be able to
+		handle them. See comments in the ktime_get_tai_fast_ns()
+		function for more information.
+
 	To set a clock, simply echo the clock name into this file::
 
 	  # echo global > trace_clock
+
+	Setting a clock clears the ring buffer content as well as the
+	"snapshot" buffer.
 
   trace_marker:
 
@@ -505,18 +643,23 @@ of ftrace. Here is a list of some of the key files:
 
 	start::
 
-		trace_fd = open("trace_marker", WR_ONLY);
+		trace_fd = open("trace_marker", O_WRONLY);
+
+	Note: Writing into the trace_marker file can also initiate triggers
+	      that are written into /sys/kernel/tracing/events/ftrace/print/trigger
+	      See "Event triggers" in Documentation/trace/events.rst and an
+              example in Documentation/trace/histogram.rst (Section 3.)
 
   trace_marker_raw:
 
-	This is similar to trace_marker above, but is meant for for binary data
+	This is similar to trace_marker above, but is meant for binary data
 	to be written to it, where a tool can be used to parse the data
 	from trace_pipe_raw.
 
   uprobe_events:
 
 	Add dynamic tracepoints in programs.
-	See uprobetracer.txt
+	See uprobetracer.rst
 
   uprobe_profile:
 
@@ -537,19 +680,35 @@ of ftrace. Here is a list of some of the key files:
 	files at various levels that can enable the tracepoints
 	when a "1" is written to them.
 
-	See events.txt for more information.
+	See events.rst for more information.
 
   set_event:
 
 	By echoing in the event into this file, will enable that event.
 
-	See events.txt for more information.
+	See events.rst for more information.
+
+  show_event_filters:
+
+	A list of events that have filters. This shows the
+	system/event pair along with the filter that is attached to
+	the event.
+
+	See events.rst for more information.
+
+  show_event_triggers:
+
+	A list of events that have triggers. This shows the
+	system/event pair along with the trigger that is attached to
+	the event.
+
+	See events.rst for more information.
 
   available_events:
 
 	A list of events that can be enabled in tracing.
 
-	See events.txt for more information.
+	See events.rst for more information.
 
   timestamp_mode:
 
@@ -679,6 +838,12 @@ Here is the list of current tracers that may be configured.
 	to draw a graph of function calls similar to C code
 	source.
 
+	Note that the function graph calculates the timings of when the
+	function starts and returns internally and for each instance. If
+	there are two instances that run function graph tracer and traces
+	the same functions, the length of the timings may be slightly off as
+	each read the timestamp separately and not at the same time.
+
   "blk"
 
 	The block tracer. The tracer used by the blktrace user
@@ -731,7 +896,7 @@ Here is the list of current tracers that may be configured.
 
   "mmiotrace"
 
-	A special tracer that is used to trace binary module.
+	A special tracer that is used to trace binary modules.
 	It will trace all the calls that a module makes to the
 	hardware. Everything it writes and reads from the I/O
 	as well.
@@ -749,6 +914,37 @@ Here is the list of current tracers that may be configured.
 	tracers from tracing simply echo "nop" into
 	current_tracer.
 
+Error conditions
+----------------
+
+  For most ftrace commands, failure modes are obvious and communicated
+  using standard return codes.
+
+  For other more involved commands, extended error information may be
+  available via the tracing/error_log file.  For the commands that
+  support it, reading the tracing/error_log file after an error will
+  display more detailed information about what went wrong, if
+  information is available.  The tracing/error_log file is a circular
+  error log displaying a small number (currently, 8) of ftrace errors
+  for the last (8) failed commands.
+
+  The extended error information and usage takes the form shown in
+  this example::
+
+    # echo xxx > /sys/kernel/tracing/events/sched/sched_wakeup/trigger
+    echo: write error: Invalid argument
+
+    # cat /sys/kernel/tracing/error_log
+    [ 5348.887237] location: error: Couldn't yyy: zzz
+      Command: xxx
+               ^
+    [ 7517.023364] location: error: Bad rrr: sss
+      Command: ppp qqq
+                   ^
+
+  To clear the error log, echo the empty string into it::
+
+    # echo > /sys/kernel/tracing/error_log
 
 Examples of using the tracer
 ----------------------------
@@ -869,14 +1065,15 @@ explains which is which.
   CPU#: The CPU which the process was running on.
 
   irqs-off: 'd' interrupts are disabled. '.' otherwise.
-	.. caution:: If the architecture does not support a way to
-		read the irq flags variable, an 'X' will always
-		be printed here.
 
   need-resched:
+	- 'B' all, TIF_NEED_RESCHED, PREEMPT_NEED_RESCHED and TIF_RESCHED_LAZY is set,
 	- 'N' both TIF_NEED_RESCHED and PREEMPT_NEED_RESCHED is set,
 	- 'n' only TIF_NEED_RESCHED is set,
 	- 'p' only PREEMPT_NEED_RESCHED is set,
+	- 'L' both PREEMPT_NEED_RESCHED and TIF_RESCHED_LAZY is set,
+	- 'b' both TIF_NEED_RESCHED and TIF_RESCHED_LAZY is set,
+	- 'l' only TIF_RESCHED_LAZY is set
 	- '.' otherwise.
 
   hardirq/softirq:
@@ -904,8 +1101,8 @@ The above is mostly meaningful for kernel developers.
 	current trace and the next trace.
 
 	  - '$' - greater than 1 second
-	  - '@' - greater than 100 milisecond
-	  - '*' - greater than 10 milisecond
+	  - '@' - greater than 100 millisecond
+	  - '*' - greater than 10 millisecond
 	  - '#' - greater than 1000 microsecond
 	  - '!' - greater than 100 microsecond
 	  - '+' - greater than 10 microsecond
@@ -932,6 +1129,7 @@ To see what is available, simply cat the file::
 	nohex
 	nobin
 	noblock
+	nofields
 	trace_printk
 	annotate
 	nouserstacktrace
@@ -1015,8 +1213,38 @@ Here are the available options:
   block
 	When set, reading trace_pipe will not block when polled.
 
+  fields
+	Print the fields as described by their types. This is a better
+	option than using hex, bin or raw, as it gives a better parsing
+	of the content of the event.
+
   trace_printk
 	Can disable trace_printk() from writing into the buffer.
+
+  trace_printk_dest
+	Set to have trace_printk() and similar internal tracing functions
+	write into this instance. Note, only one trace instance can have
+	this set. By setting this flag, it clears the trace_printk_dest flag
+	of the instance that had it set previously. By default, the top
+	level trace has this set, and will get it set again if another
+	instance has it set then clears it.
+
+	This flag cannot be cleared by the top level instance, as it is the
+	default instance. The only way the top level instance has this flag
+	cleared, is by it being set in another instance.
+
+  copy_trace_marker
+	If there are applications that hard code writing into the top level
+	trace_marker file (/sys/kernel/tracing/trace_marker or trace_marker_raw),
+	and the tooling would like it to go into an instance, this option can
+	be used. Create an instance and set this option, and then all writes
+	into the top level trace_marker file will also be redirected into this
+	instance.
+
+	Note, by default this option is set for the top level instance. If it
+	is disabled, then writes to the trace_marker or trace_marker_raw files
+	will not be written into the top level file. If no instance has this
+	option set, then a write will error with the errno of ENODEV.
 
   annotate
 	It is sometimes confusing when the CPU buffers are full
@@ -1070,6 +1298,27 @@ Here are the available options:
 	the trace displays additional information about the
 	latency, as described in "Latency trace format".
 
+  pause-on-trace
+	When set, opening the trace file for read, will pause
+	writing to the ring buffer (as if tracing_on was set to zero).
+	This simulates the original behavior of the trace file.
+	When the file is closed, tracing will be enabled again.
+
+  hash-ptr
+        When set, "%p" in the event printk format displays the
+        hashed pointer value instead of real address.
+        This will be useful if you want to find out which hashed
+        value is corresponding to the real value in trace log.
+
+  bitmask-list
+        When enabled, bitmasks are displayed as a human-readable list of
+        ranges (e.g., 0,2-5,7) using the printk "%*pbl" format specifier.
+        When disabled (the default), bitmasks are displayed in the
+        traditional hexadecimal bitmap representation. The list format is
+        particularly useful for tracing CPU masks and other large bitmasks
+        where individual bit positions are more meaningful than their
+        hexadecimal encoding.
+
   record-cmd
 	When any event or tracer is enabled, a hook is enabled
 	in the sched_switch trace point to fill comm cache
@@ -1121,6 +1370,8 @@ Here are the available options:
 	tasks fork. Also, when tasks with PIDs in set_event_pid exit,
 	their PIDs will be removed from the file.
 
+        This affects PIDs listed in set_event_notrace_pid as well.
+
   function-trace
 	The latency tracers will enable function tracing
 	if this option is enabled (default it is). When
@@ -1134,6 +1385,8 @@ Here are the available options:
 	when those tasks fork. Also, when tasks with PIDs in
 	set_ftrace_pid exit, their PIDs will be removed from the
 	file.
+
+        This affects PIDs in set_ftrace_notrace_pid as well.
 
   display-graph
 	When set, the latency tracers (irqsoff, wakeup, etc) will
@@ -1216,6 +1469,19 @@ Options for function_graph tracer:
 	that it represents. By default this is off, and
 	only a closing curly bracket "}" is displayed for
 	the return of a function.
+
+  funcgraph-retval
+	When set, the return value of each traced function
+	will be printed after an equal sign "=". By default
+	this is off.
+
+  funcgraph-retval-hex
+	When set, the return value will always be printed
+	in hexadecimal format. If the option is not set and
+	the return value is an error code, it will be printed
+	in signed decimal format; otherwise it will also be
+	printed in hexadecimal format. By default, this option
+	is off.
 
   sleep-time
 	When running function graph tracer, to include
@@ -1301,7 +1567,7 @@ an example::
    => x86_64_start_reservations
    => x86_64_start_kernel
 
-Here we see that that we had a latency of 16 microseconds (which is
+Here we see that we had a latency of 16 microseconds (which is
 very good). The _raw_spin_lock_irq in run_timer_softirq disabled
 interrupts. The difference between the 16 and the displayed
 timestamp 25us occurred because the clock was incremented
@@ -1360,9 +1626,9 @@ function-trace, we get a much larger output::
    => __blk_run_queue_uncond
    => __blk_run_queue
    => blk_queue_bio
-   => generic_make_request
+   => submit_bio_noacct
    => submit_bio
-   => submit_bh
+   => bh_submit
    => __ext3_get_inode_loc
    => ext3_iget
    => ext3_lookup
@@ -1386,6 +1652,58 @@ enabling function tracing, we incur an added overhead. This
 overhead may extend the latency times. But nevertheless, this
 trace has provided some very helpful debugging information.
 
+If we prefer function graph output instead of function, we can set
+display-graph option::
+
+ with echo 1 > options/display-graph
+
+  # tracer: irqsoff
+  #
+  # irqsoff latency trace v1.1.5 on 4.20.0-rc6+
+  # --------------------------------------------------------------------
+  # latency: 3751 us, #274/274, CPU#0 | (M:desktop VP:0, KP:0, SP:0 HP:0 #P:4)
+  #    -----------------
+  #    | task: bash-1507 (uid:0 nice:0 policy:0 rt_prio:0)
+  #    -----------------
+  #  => started at: free_debug_processing
+  #  => ended at:   return_to_handler
+  #
+  #
+  #                                       _-----=> irqs-off
+  #                                      / _----=> need-resched
+  #                                     | / _---=> hardirq/softirq
+  #                                     || / _--=> preempt-depth
+  #                                     ||| /
+  #   REL TIME      CPU  TASK/PID       ||||     DURATION                  FUNCTION CALLS
+  #      |          |     |    |        ||||      |   |                     |   |   |   |
+          0 us |   0)   bash-1507    |  d... |   0.000 us    |  _raw_spin_lock_irqsave();
+          0 us |   0)   bash-1507    |  d..1 |   0.378 us    |    do_raw_spin_trylock();
+          1 us |   0)   bash-1507    |  d..2 |               |    set_track() {
+          2 us |   0)   bash-1507    |  d..2 |               |      save_stack_trace() {
+          2 us |   0)   bash-1507    |  d..2 |               |        __save_stack_trace() {
+          3 us |   0)   bash-1507    |  d..2 |               |          __unwind_start() {
+          3 us |   0)   bash-1507    |  d..2 |               |            get_stack_info() {
+          3 us |   0)   bash-1507    |  d..2 |   0.351 us    |              in_task_stack();
+          4 us |   0)   bash-1507    |  d..2 |   1.107 us    |            }
+  [...]
+       3750 us |   0)   bash-1507    |  d..1 |   0.516 us    |      do_raw_spin_unlock();
+       3750 us |   0)   bash-1507    |  d..1 |   0.000 us    |  _raw_spin_unlock_irqrestore();
+       3764 us |   0)   bash-1507    |  d..1 |   0.000 us    |  tracer_hardirqs_on();
+      bash-1507    0d..1 3792us : <stack trace>
+   => free_debug_processing
+   => __slab_free
+   => kmem_cache_free
+   => vm_area_free
+   => remove_vma
+   => exit_mmap
+   => mmput
+   => begin_new_exec
+   => load_elf_binary
+   => search_binary_handler
+   => __do_execve_file.isra.32
+   => __x64_sys_execve
+   => do_syscall_64
+   => entry_SYSCALL_64_after_hwframe
 
 preemptoff
 ----------
@@ -1593,9 +1911,9 @@ tracers.
    => __blk_run_queue_uncond
    => __blk_run_queue
    => blk_queue_bio
-   => generic_make_request
+   => submit_bio_noacct
    => submit_bio
-   => submit_bh
+   => bh_submit
    => ext3_bread
    => ext3_dir_bread
    => htree_dirblock_to_tree
@@ -1719,7 +2037,7 @@ wakeup
 One common case that people are interested in tracing is the
 time it takes for a task that is woken to actually wake up.
 Now for non Real-Time tasks, this can be arbitrary. But tracing
-it none the less can be interesting. 
+it nonetheless can be interesting. 
 
 Without function tracing::
 
@@ -2019,6 +2337,8 @@ periodically make a CPU constantly busy with interrupts disabled.
   # cat trace
   # tracer: hwlat
   #
+  # entries-in-buffer/entries-written: 13/13   #P:8
+  #
   #                              _-----=> irqs-off
   #                             / _----=> need-resched
   #                            | / _---=> hardirq/softirq
@@ -2026,12 +2346,18 @@ periodically make a CPU constantly busy with interrupts disabled.
   #                            ||| /     delay
   #           TASK-PID   CPU#  ||||    TIMESTAMP  FUNCTION
   #              | |       |   ||||       |         |
-             <...>-3638  [001] d... 19452.055471: #1     inner/outer(us):   12/14    ts:1499801089.066141940
-             <...>-3638  [003] d... 19454.071354: #2     inner/outer(us):   11/9     ts:1499801091.082164365
-             <...>-3638  [002] dn.. 19461.126852: #3     inner/outer(us):   12/9     ts:1499801098.138150062
-             <...>-3638  [001] d... 19488.340960: #4     inner/outer(us):    8/12    ts:1499801125.354139633
-             <...>-3638  [003] d... 19494.388553: #5     inner/outer(us):    8/12    ts:1499801131.402150961
-             <...>-3638  [003] d... 19501.283419: #6     inner/outer(us):    0/12    ts:1499801138.297435289 nmi-total:4 nmi-count:1
+             <...>-1729  [001] d...   678.473449: #1     inner/outer(us):   11/12    ts:1581527483.343962693 count:6
+             <...>-1729  [004] d...   689.556542: #2     inner/outer(us):   16/9     ts:1581527494.889008092 count:1
+             <...>-1729  [005] d...   714.756290: #3     inner/outer(us):   16/16    ts:1581527519.678961629 count:5
+             <...>-1729  [001] d...   718.788247: #4     inner/outer(us):    9/17    ts:1581527523.889012713 count:1
+             <...>-1729  [002] d...   719.796341: #5     inner/outer(us):   13/9     ts:1581527524.912872606 count:1
+             <...>-1729  [006] d...   844.787091: #6     inner/outer(us):    9/12    ts:1581527649.889048502 count:2
+             <...>-1729  [003] d...   849.827033: #7     inner/outer(us):   18/9     ts:1581527654.889013793 count:1
+             <...>-1729  [007] d...   853.859002: #8     inner/outer(us):    9/12    ts:1581527658.889065736 count:1
+             <...>-1729  [001] d...   855.874978: #9     inner/outer(us):    9/11    ts:1581527660.861991877 count:1
+             <...>-1729  [001] d...   863.938932: #10    inner/outer(us):    9/11    ts:1581527668.970010500 count:1 nmi-total:7 nmi-count:1
+             <...>-1729  [007] d...   878.050780: #11    inner/outer(us):    9/12    ts:1581527683.385002600 count:1 nmi-total:5 nmi-count:1
+             <...>-1729  [007] d...   886.114702: #12    inner/outer(us):    9/12    ts:1581527691.385001600 count:1
 
 
 The above output is somewhat the same in the header. All events will have
@@ -2041,7 +2367,7 @@ interrupts disabled 'd'. Under the FUNCTION title there is:
 	This is the count of events recorded that were greater than the
 	tracing_threshold (See below).
 
- inner/outer(us):   12/14
+ inner/outer(us):   11/11
 
       This shows two numbers as "inner latency" and "outer latency". The test
       runs in a loop checking a timestamp twice. The latency detected within
@@ -2049,11 +2375,15 @@ interrupts disabled 'd'. Under the FUNCTION title there is:
       after the previous timestamp and the next timestamp in the loop is
       the "outer latency".
 
- ts:1499801089.066141940
+ ts:1581527483.343962693
 
-      The absolute timestamp that the event happened.
+      The absolute timestamp that the first latency was recorded in the window.
 
- nmi-total:4 nmi-count:1
+ count:6
+
+      The number of times a latency was detected during the window.
+
+ nmi-total:7 nmi-count:1
 
       On architectures that support it, if an NMI comes in during the
       test, the time spent in NMI is reported in "nmi-total" (in
@@ -2279,11 +2609,10 @@ Or this simple script!
   #!/bin/bash
 
   tracefs=`sed -ne 's/^tracefs \(.*\) tracefs.*/\1/p' /proc/mounts`
-  echo nop > $tracefs/tracing/current_tracer
-  echo 0 > $tracefs/tracing/tracing_on
-  echo $$ > $tracefs/tracing/set_ftrace_pid
-  echo function > $tracefs/tracing/current_tracer
-  echo 1 > $tracefs/tracing/tracing_on
+  echo 0 > $tracefs/tracing_on
+  echo $$ > $tracefs/set_ftrace_pid
+  echo function > $tracefs/current_tracer
+  echo 1 > $tracefs/tracing_on
   exec "$@"
 
 
@@ -2350,7 +2679,7 @@ want, depending on your needs.
 
 - The cpu number on which the function executed is default
   enabled.  It is sometimes better to only trace one cpu (see
-  tracing_cpu_mask file) or you might sometimes see unordered
+  tracing_cpumask file) or you might sometimes see unordered
   function calls while cpu tracing switch.
 
 	- hide: echo nofuncgraph-cpu > trace_options
@@ -2499,6 +2828,119 @@ It is default disabled.
     0)   1.757 us    |        } /* kmem_cache_free() */
     0)   2.861 us    |      } /* putname() */
 
+The return value of each traced function can be displayed after
+an equal sign "=". When encountering system call failures, it
+can be very helpful to quickly locate the function that first
+returns an error code.
+
+	- hide: echo nofuncgraph-retval > trace_options
+	- show: echo funcgraph-retval > trace_options
+
+  Example with funcgraph-retval::
+
+    1)               |    cgroup_migrate() {
+    1)   0.651 us    |      cgroup_migrate_add_task(); /* = 0xffff93fcfd346c00 */
+    1)               |      cgroup_migrate_execute() {
+    1)               |        cpu_cgroup_can_attach() {
+    1)               |          cgroup_taskset_first() {
+    1)   0.732 us    |            cgroup_taskset_next(); /* = 0xffff93fc8fb20000 */
+    1)   1.232 us    |          } /* cgroup_taskset_first = 0xffff93fc8fb20000 */
+    1)   0.380 us    |          sched_rt_can_attach(); /* = 0x0 */
+    1)   2.335 us    |        } /* cpu_cgroup_can_attach = -22 */
+    1)   4.369 us    |      } /* cgroup_migrate_execute = -22 */
+    1)   7.143 us    |    } /* cgroup_migrate = -22 */
+
+The above example shows that the function cpu_cgroup_can_attach
+returned the error code -22 firstly, then we can read the code
+of this function to get the root cause.
+
+When the option funcgraph-retval-hex is not set, the return value can
+be displayed in a smart way. Specifically, if it is an error code,
+it will be printed in signed decimal format, otherwise it will
+printed in hexadecimal format.
+
+	- smart: echo nofuncgraph-retval-hex > trace_options
+	- hexadecimal: echo funcgraph-retval-hex > trace_options
+
+  Example with funcgraph-retval-hex::
+
+    1)               |      cgroup_migrate() {
+    1)   0.651 us    |        cgroup_migrate_add_task(); /* = 0xffff93fcfd346c00 */
+    1)               |        cgroup_migrate_execute() {
+    1)               |          cpu_cgroup_can_attach() {
+    1)               |            cgroup_taskset_first() {
+    1)   0.732 us    |              cgroup_taskset_next(); /* = 0xffff93fc8fb20000 */
+    1)   1.232 us    |            } /* cgroup_taskset_first = 0xffff93fc8fb20000 */
+    1)   0.380 us    |            sched_rt_can_attach(); /* = 0x0 */
+    1)   2.335 us    |          } /* cpu_cgroup_can_attach = 0xffffffea */
+    1)   4.369 us    |        } /* cgroup_migrate_execute = 0xffffffea */
+    1)   7.143 us    |      } /* cgroup_migrate = 0xffffffea */
+
+At present, there are some limitations when using the funcgraph-retval
+option, and these limitations will be eliminated in the future:
+
+- Even if the function return type is void, a return value will still
+  be printed, and you can just ignore it.
+
+- Even if return values are stored in multiple registers, only the
+  value contained in the first register will be recorded and printed.
+  To illustrate, in the x86 architecture, eax and edx are used to store
+  a 64-bit return value, with the lower 32 bits saved in eax and the
+  upper 32 bits saved in edx. However, only the value stored in eax
+  will be recorded and printed.
+
+- In certain procedure call standards, such as arm64's AAPCS64, when a
+  type is smaller than a GPR, it is the responsibility of the consumer
+  to perform the narrowing, and the upper bits may contain UNKNOWN values.
+  Therefore, it is advisable to check the code for such cases. For instance,
+  when using a u8 in a 64-bit GPR, bits [63:8] may contain arbitrary values,
+  especially when larger types are truncated, whether explicitly or implicitly.
+  Here are some specific cases to illustrate this point:
+
+  **Case One**:
+
+  The function narrow_to_u8 is defined as follows::
+
+	u8 narrow_to_u8(u64 val)
+	{
+		// implicitly truncated
+		return val;
+	}
+
+  It may be compiled to::
+
+	narrow_to_u8:
+		< ... ftrace instrumentation ... >
+		RET
+
+  If you pass 0x123456789abcdef to this function and want to narrow it,
+  it may be recorded as 0x123456789abcdef instead of 0xef.
+
+  **Case Two**:
+
+  The function error_if_not_4g_aligned is defined as follows::
+
+	int error_if_not_4g_aligned(u64 val)
+	{
+		if (val & GENMASK(31, 0))
+			return -EINVAL;
+
+		return 0;
+	}
+
+  It could be compiled to::
+
+	error_if_not_4g_aligned:
+		CBNZ    w0, .Lnot_aligned
+		RET			// bits [31:0] are zero, bits
+					// [63:32] are UNKNOWN
+	.Lnot_aligned:
+		MOV    x0, #-EINVAL
+		RET
+
+  When passing 0x2_0000_0000 to it, the return value may be recorded as
+  0x2_0000_0000 instead of 0.
+
 You can put some comments on specific functions by using
 trace_printk() For example, if you want to put a comment inside
 the __might_sleep() function, you just have to include
@@ -2531,7 +2973,7 @@ At compile time every C file object is run through the
 recordmcount program (located in the scripts directory). This
 program will parse the ELF headers in the C object to find all
 the locations in the .text section that call mcount. Starting
-with gcc verson 4.6, the -mfentry has been added for x86, which
+with gcc version 4.6, the -mfentry has been added for x86, which
 calls "__fentry__" instead of "mcount". Which is called before
 the creation of the stack frame.
 
@@ -2599,7 +3041,7 @@ listed in:
   put_prev_task_idle
   kmem_cache_create
   pick_next_task_rt
-  get_online_cpus
+  cpus_read_lock
   pick_next_task_fair
   mutex_lock
   [...]
@@ -2685,7 +3127,7 @@ Notice that we lost the sys_nanosleep.
   # cat set_ftrace_filter
   hrtimer_run_queues
   hrtimer_run_pending
-  hrtimer_init
+  hrtimer_setup
   hrtimer_cancel
   hrtimer_try_to_cancel
   hrtimer_forward
@@ -2723,7 +3165,7 @@ Again, now we want to append.
   # cat set_ftrace_filter
   hrtimer_run_queues
   hrtimer_run_pending
-  hrtimer_init
+  hrtimer_setup
   hrtimer_cancel
   hrtimer_try_to_cancel
   hrtimer_forward
@@ -2766,7 +3208,7 @@ Produces::
               bash-1994  [000] ....  4342.324898: ima_get_action <-process_measurement
               bash-1994  [000] ....  4342.324898: ima_match_policy <-ima_get_action
               bash-1994  [000] ....  4342.324899: do_truncate <-do_last
-              bash-1994  [000] ....  4342.324899: should_remove_suid <-do_truncate
+              bash-1994  [000] ....  4342.324899: setattr_should_drop_suidgid <-do_truncate
               bash-1994  [000] ....  4342.324899: notify_change <-do_truncate
               bash-1994  [000] ....  4342.324900: current_fs_time <-notify_change
               bash-1994  [000] ....  4342.324900: current_kernel_time <-current_fs_time
@@ -2774,6 +3216,38 @@ Produces::
 
 We can see that there's no more lock or preempt tracing.
 
+Selecting function filters via index
+------------------------------------
+
+Because processing of strings is expensive (the address of the function
+needs to be looked up before comparing to the string being passed in),
+an index can be used as well to enable functions. This is useful in the
+case of setting thousands of specific functions at a time. By passing
+in a list of numbers, no string processing will occur. Instead, the function
+at the specific location in the internal array (which corresponds to the
+functions in the "available_filter_functions" file), is selected.
+
+::
+
+  # echo 1 > set_ftrace_filter
+
+Will select the first function listed in "available_filter_functions"
+
+::
+
+  # head -1 available_filter_functions
+  trace_initcall_finish_cb
+
+  # cat set_ftrace_filter
+  trace_initcall_finish_cb
+
+  # head -50 available_filter_functions | tail -1
+  x86_pmu_commit_txn
+
+  # echo 1 50 > set_ftrace_filter
+  # cat set_ftrace_filter
+  trace_initcall_finish_cb
+  x86_pmu_commit_txn
 
 Dynamic ftrace with the function graph tracer
 ---------------------------------------------
@@ -2843,7 +3317,9 @@ Note, the proc sysctl ftrace_enable is a big on/off switch for the
 function tracer. By default it is enabled (when function tracing is
 enabled in the kernel). If it is disabled, all function tracing is
 disabled. This includes not only the function tracers for ftrace, but
-also for any other uses (perf, kprobes, stack tracing, profiling, etc).
+also for any other uses (perf, kprobes, stack tracing, profiling, etc). It
+cannot be disabled if there is a callback with FTRACE_OPS_FL_PERMANENT set
+registered.
 
 Please disable this with care.
 
@@ -2968,7 +3444,7 @@ The following commands are supported:
   When the function is hit, it will dump the contents of the ftrace
   ring buffer to the console. This is useful if you need to debug
   something, and want to dump the trace when a certain function
-  is hit. Perhaps its a function that is called before a tripple
+  is hit. Perhaps it's a function that is called before a triple
   fault happens and does not allow you to get a regular dump.
 
 - cpudump:
@@ -2976,6 +3452,9 @@ The following commands are supported:
   ring buffer for the current CPU to the console. Unlike the "dump"
   command, it only prints out the contents of the ring buffer for the
   CPU that executed the function that triggered the dump.
+
+- stacktrace:
+  When the function is hit, a stack trace is recorded.
 
 trace_pipe
 ----------
@@ -3019,7 +3498,10 @@ different. The trace is live.
 
 
 Note, reading the trace_pipe file will block until more input is
-added.
+added. This is contrary to the trace file. If any process opened
+the trace file for reading, it will actually disable tracing and
+prevent new entries from being added. The trace_pipe file does
+not have this limitation.
 
 trace entries
 -------------
@@ -3168,7 +3650,7 @@ one of the latency tracers, you will get the following results.
 
 Instances
 ---------
-In the tracefs tracing directory is a directory called "instances".
+In the tracefs tracing directory, there is a directory called "instances".
 This directory can have new directories created inside of it using
 mkdir, and removing directories with rmdir. The directory created
 with mkdir in this directory will already contain files and other
@@ -3183,7 +3665,7 @@ directories after it is created.
 
 As you can see, the new directory looks similar to the tracing directory
 itself. In fact, it is very similar, except that the buffer and
-events are agnostic from the main director, or from any other
+events are agnostic from the main directory, or from any other
 instances that are created.
 
 The files in the new directory work just like the files with the
@@ -3296,7 +3778,7 @@ directories, the rmdir will fail with EBUSY.
 Stack trace
 -----------
 Since the kernel has a fixed sized stack, it is important not to
-waste it in functions. A kernel developer must be conscience of
+waste it in functions. A kernel developer must be conscious of
 what they allocate on the stack. If they add too much, the system
 can be in danger of a stack overflow, and corruption will occur,
 usually leading to a system panic.

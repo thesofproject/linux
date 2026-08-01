@@ -1,13 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Definitions used by low-level trap handlers
  *
  * Copyright (C) 2008-2009 Michal Simek <monstr@monstr.eu>
  * Copyright (C) 2007-2009 PetaLogix
  * Copyright (C) 2007 John Williams <john.williams@petalogix.com>
- *
- * This file is subject to the terms and conditions of the GNU General
- * Public License. See the file COPYING in the main directory of this
- * archive for more details.
  */
 
 #ifndef _ASM_MICROBLAZE_ENTRY_H
@@ -24,7 +21,7 @@
 
 #define PER_CPU(var) var
 
-# ifndef __ASSEMBLY__
+# ifndef __ASSEMBLER__
 DECLARE_PER_CPU(unsigned int, KSP); /* Saved kernel stack pointer */
 DECLARE_PER_CPU(unsigned int, KM); /* Kernel/user mode */
 DECLARE_PER_CPU(unsigned int, ENTRY_SP); /* Saved SP on kernel entry */
@@ -32,6 +29,6 @@ DECLARE_PER_CPU(unsigned int, R11_SAVE); /* Temp variable for entry */
 DECLARE_PER_CPU(unsigned int, CURRENT_SAVE); /* Saved current pointer */
 
 extern asmlinkage void do_notify_resume(struct pt_regs *regs, int in_syscall);
-# endif /* __ASSEMBLY__ */
+# endif /* __ASSEMBLER__ */
 
 #endif /* _ASM_MICROBLAZE_ENTRY_H */

@@ -286,7 +286,7 @@ static void cppi41_dma_callback(void *private_data,
 	 * receive a FIFO empty interrupt so the only thing we can do is
 	 * to poll for the bit. On HS it usually takes 2us, on FS around
 	 * 110us - 150us depending on the transfer size.
-	 * We spin on HS (no longer than than 25us and setup a timer on
+	 * We spin on HS (no longer than 25us and setup a timer on
 	 * FS to check for the bit and complete the transfer.
 	 */
 	if (is_host_active(musb)) {
@@ -614,7 +614,7 @@ static int cppi41_dma_channel_abort(struct dma_channel *channel)
 	}
 
 	/* DA8xx Advisory 2.3.27: wait 250 ms before to start the teardown */
-	if (musb->io.quirks & MUSB_DA8XX)
+	if (musb->ops->quirks & MUSB_DA8XX)
 		mdelay(250);
 
 	tdbit = 1 << cppi41_channel->port_num;
@@ -718,10 +718,8 @@ static int cppi41_dma_controller_start(struct cppi41_dma_controller *controller)
 
 		dc = dma_request_chan(dev->parent, str);
 		if (IS_ERR(dc)) {
-			ret = PTR_ERR(dc);
-			if (ret != -EPROBE_DEFER)
-				dev_err(dev, "Failed to request %s: %d.\n",
-					str, ret);
+			ret = dev_err_probe(dev, PTR_ERR(dc),
+					    "Failed to request %s.\n", str);
 			goto err;
 		}
 
@@ -758,12 +756,12 @@ cppi41_dma_controller_create(struct musb *musb, void __iomem *base)
 		return NULL;
 	}
 
-	controller = kzalloc(sizeof(*controller), GFP_KERNEL);
+	controller = kzalloc_obj(*controller);
 	if (!controller)
 		goto kzalloc_fail;
 
-	hrtimer_init(&controller->early_tx, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	controller->early_tx.function = cppi41_recheck_tx_req;
+	hrtimer_setup(&controller->early_tx, cppi41_recheck_tx_req, CLOCK_MONOTONIC,
+		      HRTIMER_MODE_REL);
 	INIT_LIST_HEAD(&controller->early_tx_list);
 
 	controller->controller.channel_alloc = cppi41_dma_channel_allocate;
@@ -773,7 +771,7 @@ cppi41_dma_controller_create(struct musb *musb, void __iomem *base)
 	controller->controller.is_compatible = cppi41_is_compatible;
 	controller->controller.musb = musb;
 
-	if (musb->io.quirks & MUSB_DA8XX) {
+	if (musb->ops->quirks & MUSB_DA8XX) {
 		controller->tdown_reg = DA8XX_USB_TEARDOWN;
 		controller->autoreq_reg = DA8XX_USB_AUTOREQ;
 		controller->set_dma_mode = da8xx_set_dma_mode;

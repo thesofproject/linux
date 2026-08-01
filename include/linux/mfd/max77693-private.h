@@ -1,24 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * max77693-private.h - Voltage regulator driver for the Maxim 77693
  *
- *  Copyright (C) 2012 Samsung Electrnoics
+ *  Copyright (C) 2012 Samsung Electronics
  *  SangYoung Son <hello.son@samsung.com>
  *
  * This program is not provided / owned by Maxim Integrated Products.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef __LINUX_MFD_MAX77693_PRIV_H
@@ -144,7 +131,7 @@ enum max77693_pmic_reg {
 #define FLASH_INT_FLED1_SHORT	BIT(3)
 #define FLASH_INT_OVER_CURRENT	BIT(4)
 
-/* Fast charge timer in in hours */
+/* Fast charge timer in hours */
 #define DEFAULT_FAST_CHARGE_TIMER		4
 /* microamps */
 #define DEFAULT_TOP_OFF_THRESHOLD_CURRENT	150000
@@ -230,6 +217,10 @@ enum max77693_charger_battery_state {
 #define CHG_CNFG_01_CHGRSTRT_MASK	(0x3 << CHG_CNFG_01_CHGRSTRT_SHIFT)
 #define CHG_CNFG_01_PQEN_MAKS		BIT(CHG_CNFG_01_PQEN_SHIFT)
 
+/* MAX77693_CHG_REG_CHG_CNFG_02 register */
+#define CHG_CNFG_02_CC_SHIFT		0
+#define CHG_CNFG_02_CC_MASK		0x3F
+
 /* MAX77693_CHG_REG_CHG_CNFG_03 register */
 #define CHG_CNFG_03_TOITH_SHIFT		0
 #define CHG_CNFG_03_TOTIME_SHIFT	3
@@ -257,6 +248,7 @@ enum max77693_charger_battery_state {
 #define CHG_CNFG_12_VCHGINREG_MASK	(0x3 << CHG_CNFG_12_VCHGINREG_SHIFT)
 
 /* MAX77693 CHG_CNFG_09 Register */
+#define CHG_CNFG_09_CHGIN_ILIM_SHIFT	0
 #define CHG_CNFG_09_CHGIN_ILIM_MASK	0x7F
 
 /* MAX77693 CHG_CTRL Register */
@@ -418,7 +410,7 @@ enum max77693_haptic_reg {
 	MAX77693_HAPTIC_REG_END,
 };
 
-/* max77693-pmic LSCNFG configuraton register */
+/* max77693-pmic LSCNFG configuration register */
 #define MAX77693_PMIC_LOW_SYS_MASK      0x80
 #define MAX77693_PMIC_LOW_SYS_SHIFT     7
 
@@ -426,17 +418,6 @@ enum max77693_haptic_reg {
 #define MAX77693_CONFIG2_MODE           7
 #define MAX77693_CONFIG2_MEN            6
 #define MAX77693_CONFIG2_HTYP           5
-
-enum max77693_irq_source {
-	LED_INT = 0,
-	TOPSYS_INT,
-	CHG_INT,
-	MUIC_INT1,
-	MUIC_INT2,
-	MUIC_INT3,
-
-	MAX77693_IRQ_GROUP_NR,
-};
 
 #define SRC_IRQ_CHARGER			BIT(0)
 #define SRC_IRQ_TOP			BIT(1)

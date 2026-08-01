@@ -24,11 +24,56 @@
 #ifndef AMDGPU_VIRT_H
 #define AMDGPU_VIRT_H
 
+#include "amdgv_sriovmsg.h"
+
 #define AMDGPU_SRIOV_CAPS_SRIOV_VBIOS  (1 << 0) /* vBIOS is sr-iov ready */
 #define AMDGPU_SRIOV_CAPS_ENABLE_IOV   (1 << 1) /* sr-iov is enabled on this GPU */
 #define AMDGPU_SRIOV_CAPS_IS_VF        (1 << 2) /* this GPU is a virtual function */
 #define AMDGPU_PASSTHROUGH_MODE        (1 << 3) /* thw whole GPU is pass through for VM */
 #define AMDGPU_SRIOV_CAPS_RUNTIME      (1 << 4) /* is out of full access mode */
+#define AMDGPU_VF_MMIO_ACCESS_PROTECT  (1 << 5) /* MMIO write access is not allowed in sriov runtime */
+
+/* flags for indirect register access path supported by rlcg for sriov */
+#define AMDGPU_RLCG_GC_WRITE_LEGACY    (0x8 << 28)
+#define AMDGPU_RLCG_GC_WRITE           (0x0 << 28)
+#define AMDGPU_RLCG_GC_READ            (0x1 << 28)
+#define AMDGPU_RLCG_MMHUB_WRITE        (0x2 << 28)
+
+/* error code for indirect register access path supported by rlcg for sriov */
+#define AMDGPU_RLCG_VFGATE_DISABLED		0x4000000
+#define AMDGPU_RLCG_WRONG_OPERATION_TYPE	0x2000000
+#define AMDGPU_RLCG_REG_NOT_IN_RANGE		0x1000000
+
+#define AMDGPU_RLCG_SCRATCH1_ADDRESS_MASK	0xFFFFF
+#define AMDGPU_RLCG_SCRATCH1_ERROR_MASK	0xF000000
+
+#define AMDGPU_RLCG_VFI_CMD__WR 0x0
+#define AMDGPU_RLCG_VFI_CMD__RD 0x1
+
+#define AMDGPU_RLCG_VFI_STAT__BUSY     0x0
+#define AMDGPU_RLCG_VFI_STAT__DONE     0x1
+#define AMDGPU_RLCG_VFI_STAT__INV_CMD  0x2
+#define AMDGPU_RLCG_VFI_STAT__INV_ADDR 0x3
+#define AMDGPU_RLCG_VFI_STAT__ERR      0xFF
+
+/* all asic after AI use this offset */
+#define mmRCC_IOV_FUNC_IDENTIFIER 0xDE5
+/* tonga/fiji use this offset */
+#define mmBIF_IOV_FUNC_IDENTIFIER 0x1503
+
+#define AMDGPU_VF2PF_UPDATE_MAX_RETRY_LIMIT 2
+
+/* Signature used to validate the SR-IOV dynamic critical region init data header ("INDA") */
+#define AMDGPU_SRIOV_CRIT_DATA_SIGNATURE "INDA"
+#define AMDGPU_SRIOV_CRIT_DATA_SIG_LEN   4
+
+#define IS_SRIOV_CRIT_REGN_ENTRY_VALID(hdr, id) ((hdr)->valid_tables & (1 << (id)))
+
+enum amdgpu_sriov_vf_mode {
+	SRIOV_VF_MODE_BARE_METAL = 0,
+	SRIOV_VF_MODE_ONE_VF,
+	SRIOV_VF_MODE_MULTI_VF,
+};
 
 struct amdgpu_mm_table {
 	struct amdgpu_bo	*bo;
@@ -48,26 +93,44 @@ struct amdgpu_vf_error_buffer {
 	uint64_t data[AMDGPU_VF_ERROR_ENTRY_SIZE];
 };
 
+enum idh_request;
+
 /**
  * struct amdgpu_virt_ops - amdgpu device virt operations
  */
 struct amdgpu_virt_ops {
 	int (*req_full_gpu)(struct amdgpu_device *adev, bool init);
 	int (*rel_full_gpu)(struct amdgpu_device *adev, bool init);
+	int (*req_init_data)(struct amdgpu_device *adev);
 	int (*reset_gpu)(struct amdgpu_device *adev);
+	void (*ready_to_reset)(struct amdgpu_device *adev);
 	int (*wait_reset)(struct amdgpu_device *adev);
-	void (*trans_msg)(struct amdgpu_device *adev, u32 req, u32 data1, u32 data2, u32 data3);
+	void (*trans_msg)(struct amdgpu_device *adev, enum idh_request req,
+			  u32 data1, u32 data2, u32 data3);
+	void (*ras_poison_handler)(struct amdgpu_device *adev,
+					enum amdgpu_ras_block block);
+	bool (*rcvd_ras_intr)(struct amdgpu_device *adev);
+	int (*req_ras_err_count)(struct amdgpu_device *adev);
+	int (*req_ras_cper_dump)(struct amdgpu_device *adev, u64 vf_rptr);
+	int (*req_bad_pages)(struct amdgpu_device *adev);
+	int (*req_ras_chk_criti)(struct amdgpu_device *adev, u64 addr);
+	int (*req_remote_ras_cmd)(struct amdgpu_device *adev,
+			u32 param1, u32 param2, u32 param3);
 };
 
 /*
  * Firmware Reserve Frame buffer
  */
 struct amdgpu_virt_fw_reserve {
-	struct amdgim_pf2vf_info_header *p_pf2vf;
-	struct amdgim_vf2pf_info_header *p_vf2pf;
+	struct amd_sriov_msg_pf2vf_info_header *p_pf2vf;
+	struct amd_sriov_msg_vf2pf_info_header *p_vf2pf;
+	void *ras_telemetry;
 	unsigned int checksum_key;
 };
+
 /*
+ * Legacy GIM header
+ *
  * Defination between PF and VF
  * Structures forcibly aligned to 4 to keep the same style as PF.
  */
@@ -83,17 +146,43 @@ enum AMDGIM_FEATURE_FLAG {
 	AMDGIM_FEATURE_GIM_LOAD_UCODES   = 0x2,
 	/* VRAM LOST by GIM */
 	AMDGIM_FEATURE_GIM_FLR_VRAMLOST = 0x4,
+	/* MM bandwidth */
+	AMDGIM_FEATURE_GIM_MM_BW_MGR = 0x8,
+	/* PP ONE VF MODE in GIM */
+	AMDGIM_FEATURE_PP_ONE_VF = (1 << 4),
+	/* Indirect Reg Access enabled */
+	AMDGIM_FEATURE_INDIRECT_REG_ACCESS = (1 << 5),
+	/* AV1 Support MODE*/
+	AMDGIM_FEATURE_AV1_SUPPORT = (1 << 6),
+	/* VCN RB decouple */
+	AMDGIM_FEATURE_VCN_RB_DECOUPLE = (1 << 7),
+	/* MES info */
+	AMDGIM_FEATURE_MES_INFO_ENABLE = (1 << 8),
+	AMDGIM_FEATURE_RAS_CAPS = (1 << 9),
+	AMDGIM_FEATURE_RAS_TELEMETRY = (1 << 10),
+	AMDGIM_FEATURE_RAS_CPER = (1 << 11),
+	AMDGIM_FEATURE_XGMI_TA_EXT_PEER_LINK = (1 << 12),
+	AMDGIM_FEATURE_XGMI_CONNECTED_TO_CPU = (1 << 13),
+	AMDGIM_FEATURE_PTL_SUPPORT = (1 << 14),
+	AMDGIM_FEATURE_UNITID_SUPPORT = (1 << 15),
 };
 
-struct amdgim_pf2vf_info_header {
-	/* the total structure size in byte. */
-	uint32_t size;
-	/* version of this structure, written by the GIM */
-	uint32_t version;
-} __aligned(4);
-struct  amdgim_pf2vf_info_v1 {
+enum AMDGIM_REG_ACCESS_FLAG {
+	/* Use PSP to program IH_RB_CNTL */
+	AMDGIM_FEATURE_IH_REG_PSP_EN      = (1 << 0),
+	/* Use RLC to program MMHUB regs */
+	AMDGIM_FEATURE_MMHUB_REG_RLC_EN   = (1 << 1),
+	/* Use RLC to program GC regs */
+	AMDGIM_FEATURE_GC_REG_RLC_EN      = (1 << 2),
+	/* Use PSP to program L1_TLB_CNTL */
+	AMDGIM_FEATURE_L1_TLB_CNTL_PSP_EN = (1 << 3),
+	/* Use RLCG to program SQ_CONFIG1 */
+	AMDGIM_FEATURE_REG_ACCESS_SQ_CONFIG = (1 << 4),
+};
+
+struct amdgim_pf2vf_info_v1 {
 	/* header contains size and version */
-	struct amdgim_pf2vf_info_header header;
+	struct amd_sriov_msg_pf2vf_info_header header;
 	/* max_width * max_height */
 	unsigned int uvd_enc_max_pixels_count;
 	/* 16x16 pixels/sec, codec independent */
@@ -110,47 +199,9 @@ struct  amdgim_pf2vf_info_v1 {
 	unsigned int checksum;
 } __aligned(4);
 
-struct  amdgim_pf2vf_info_v2 {
-	/* header contains size and version */
-	struct amdgim_pf2vf_info_header header;
-	/* use private key from mailbox 2 to create chueksum */
-	uint32_t checksum;
-	/* The features flags of the GIM driver supports. */
-	uint32_t feature_flags;
-	/* max_width * max_height */
-	uint32_t uvd_enc_max_pixels_count;
-	/* 16x16 pixels/sec, codec independent */
-	uint32_t uvd_enc_max_bandwidth;
-	/* max_width * max_height */
-	uint32_t vce_enc_max_pixels_count;
-	/* 16x16 pixels/sec, codec independent */
-	uint32_t vce_enc_max_bandwidth;
-	/* MEC FW position in kb from the start of VF visible frame buffer */
-	uint64_t mecfw_kboffset;
-	/* MEC FW size in KB */
-	uint32_t mecfw_ksize;
-	/* UVD FW position in kb from the start of VF visible frame buffer */
-	uint64_t uvdfw_kboffset;
-	/* UVD FW size in KB */
-	uint32_t uvdfw_ksize;
-	/* VCE FW position in kb from the start of VF visible frame buffer */
-	uint64_t vcefw_kboffset;
-	/* VCE FW size in KB */
-	uint32_t vcefw_ksize;
-	uint32_t reserved[AMDGIM_GET_STRUCTURE_RESERVED_SIZE(256, 0, 0, (9 + sizeof(struct amdgim_pf2vf_info_header)/sizeof(uint32_t)), 3)];
-} __aligned(4);
-
-
-struct amdgim_vf2pf_info_header {
-	/* the total structure size in byte. */
-	uint32_t size;
-	/*version of this structure, written by the guest */
-	uint32_t version;
-} __aligned(4);
-
 struct amdgim_vf2pf_info_v1 {
 	/* header contains size and version */
-	struct amdgim_vf2pf_info_header header;
+	struct amd_sriov_msg_vf2pf_info_header header;
 	/* driver version */
 	char driver_version[64];
 	/* driver certification, 1=WHQL, 0=None */
@@ -180,7 +231,7 @@ struct amdgim_vf2pf_info_v1 {
 
 struct amdgim_vf2pf_info_v2 {
 	/* header contains size and version */
-	struct amdgim_vf2pf_info_header header;
+	struct amd_sriov_msg_vf2pf_info_header header;
 	uint32_t checksum;
 	/* driver version */
 	uint8_t driver_version[64];
@@ -206,52 +257,102 @@ struct amdgim_vf2pf_info_v2 {
 	uint32_t uvd_enc_usage;
 	/* guest uvd engine usage percentage. 0xffff means N/A. */
 	uint32_t uvd_enc_health;
-	uint32_t reserved[AMDGIM_GET_STRUCTURE_RESERVED_SIZE(256, 64, 0, (12 + sizeof(struct amdgim_vf2pf_info_header)/sizeof(uint32_t)), 0)];
+	uint32_t reserved[AMDGIM_GET_STRUCTURE_RESERVED_SIZE(256, 64, 0, (12 + sizeof(struct amd_sriov_msg_vf2pf_info_header)/sizeof(uint32_t)), 0)];
 } __aligned(4);
 
-#define AMDGPU_FW_VRAM_VF2PF_VER 2
-typedef struct amdgim_vf2pf_info_v2 amdgim_vf2pf_info ;
+struct amdgpu_virt_ras_err_handler_data {
+	/* point to bad page records array */
+	struct eeprom_table_record *bps;
+	/* point to reserved bo array */
+	struct amdgpu_bo **bps_bo;
+	/* number of slots in bps[] / bps_bo[] (always >= count) */
+	int capacity;
+	/* the count of entries */
+	int count;
+	/* last reserved entry's index + 1 */
+	int last_reserved;
+};
 
-#define AMDGPU_FW_VRAM_VF2PF_WRITE(adev, field, val) \
-	do { \
-		((amdgim_vf2pf_info *)adev->virt.fw_reserve.p_vf2pf)->field = (val); \
-	} while (0)
+struct amdgpu_virt_ras {
+	struct ratelimit_state ras_error_cnt_rs;
+	struct ratelimit_state ras_cper_dump_rs;
+	struct ratelimit_state ras_chk_criti_rs;
+	struct mutex ras_telemetry_mutex;
+	uint64_t cper_rptr;
+};
 
-#define AMDGPU_FW_VRAM_VF2PF_READ(adev, field, val) \
-	do { \
-		(*val) = ((amdgim_vf2pf_info *)adev->virt.fw_reserve.p_vf2pf)->field; \
-	} while (0)
+#define AMDGPU_VIRT_CAPS_LIST(X) X(AMDGPU_VIRT_CAP_POWER_LIMIT)
 
-#define AMDGPU_FW_VRAM_PF2VF_READ(adev, field, val) \
-	do { \
-		if (!adev->virt.fw_reserve.p_pf2vf) \
-			*(val) = 0; \
-		else { \
-			if (adev->virt.fw_reserve.p_pf2vf->version == 1) \
-				*(val) = ((struct amdgim_pf2vf_info_v1 *)adev->virt.fw_reserve.p_pf2vf)->field; \
-			if (adev->virt.fw_reserve.p_pf2vf->version == 2) \
-				*(val) = ((struct amdgim_pf2vf_info_v2 *)adev->virt.fw_reserve.p_pf2vf)->field; \
-		} \
-	} while (0)
+DECLARE_ATTR_CAP_CLASS(amdgpu_virt, AMDGPU_VIRT_CAPS_LIST);
+
+struct amdgpu_virt_region {
+	uint32_t offset;
+	uint32_t size_kb;
+};
 
 /* GPU virtualization */
 struct amdgpu_virt {
 	uint32_t			caps;
 	struct amdgpu_bo		*csa_obj;
-	uint64_t			csa_vmid0_addr;
+	void				*csa_cpu_addr;
 	bool chained_ib_support;
 	uint32_t			reg_val_offs;
 	struct amdgpu_irq_src		ack_irq;
 	struct amdgpu_irq_src		rcv_irq;
+
 	struct work_struct		flr_work;
+	struct work_struct		req_bad_pages_work;
+	struct work_struct		handle_bad_pages_work;
+
 	struct amdgpu_mm_table		mm_table;
 	const struct amdgpu_virt_ops	*ops;
-	struct amdgpu_vf_error_buffer   vf_errors;
+	struct amdgpu_vf_error_buffer	vf_errors;
 	struct amdgpu_virt_fw_reserve	fw_reserve;
+	struct amdgpu_virt_caps virt_caps;
 	uint32_t gim_feature;
+	uint32_t reg_access_mode;
+	int req_init_data_ver;
+	bool tdr_debug;
+	struct amdgpu_virt_ras_err_handler_data *virt_eh_data;
+	bool ras_init_done;
+	uint32_t reg_access;
+
+	/* dynamic(v2) critical regions */
+	struct amdgpu_virt_region init_data_header;
+	struct amdgpu_virt_region crit_regn;
+	struct amdgpu_virt_region crit_regn_tbl[AMD_SRIOV_MSG_MAX_TABLE_ID];
+	bool is_dynamic_crit_regn_enabled;
+
+	/* vf2pf message */
+	struct delayed_work vf2pf_work;
+	uint32_t vf2pf_update_interval_ms;
+	int vf2pf_update_retry_cnt;
+
+	/* multimedia bandwidth config */
+	bool     is_mm_bw_enabled;
+	uint32_t decode_max_dimension_pixels;
+	uint32_t decode_max_frame_pixels;
+	uint32_t encode_max_dimension_pixels;
+	uint32_t encode_max_frame_pixels;
+
+	/* the ucode id to signal the autoload */
+	uint32_t autoload_ucode_id;
+
+	/* Spinlock to protect access to the RLCG register interface */
+	spinlock_t rlcg_reg_lock;
+
+	struct mutex access_req_mutex;
+
+	union amd_sriov_ras_caps ras_en_caps;
+	union amd_sriov_ras_caps ras_telemetry_en_caps;
+	struct amdgpu_virt_ras ras;
+	struct amd_sriov_ras_telemetry_error_count count_cache;
+
+	/* hibernate and resume with different VF feature for xgmi enabled system */
+	bool is_xgmi_node_migrate_enabled;
 };
 
-#define AMDGPU_CSA_SIZE		(8 * 1024)
+struct amdgpu_video_codec_info;
 
 #define amdgpu_sriov_enabled(adev) \
 ((adev)->virt.caps & AMDGPU_SRIOV_CAPS_ENABLE_IOV)
@@ -265,38 +366,144 @@ struct amdgpu_virt {
 #define amdgpu_sriov_runtime(adev) \
 ((adev)->virt.caps & AMDGPU_SRIOV_CAPS_RUNTIME)
 
+#define amdgpu_sriov_fullaccess(adev) \
+(amdgpu_sriov_vf((adev)) && !amdgpu_sriov_runtime((adev)))
+
+#define amdgpu_sriov_reg_indirect_en(adev) \
+(amdgpu_sriov_vf((adev)) && \
+	((adev)->virt.gim_feature & (AMDGIM_FEATURE_INDIRECT_REG_ACCESS)))
+
+#define amdgpu_sriov_reg_indirect_ih(adev) \
+(amdgpu_sriov_vf((adev)) && \
+	((adev)->virt.reg_access & (AMDGIM_FEATURE_IH_REG_PSP_EN)))
+
+#define amdgpu_sriov_reg_indirect_mmhub(adev) \
+(amdgpu_sriov_vf((adev)) && \
+	((adev)->virt.reg_access & (AMDGIM_FEATURE_MMHUB_REG_RLC_EN)))
+
+#define amdgpu_sriov_reg_indirect_gc(adev) \
+(amdgpu_sriov_vf((adev)) && \
+	((adev)->virt.reg_access & (AMDGIM_FEATURE_GC_REG_RLC_EN)))
+
+#define amdgpu_sriov_reg_indirect_l1_tlb_cntl(adev) \
+(amdgpu_sriov_vf((adev)) && \
+	((adev)->virt.reg_access & (AMDGIM_FEATURE_L1_TLB_CNTL_PSP_EN)))
+
+#define amdgpu_sriov_rlcg_error_report_enabled(adev) \
+        (amdgpu_sriov_reg_indirect_mmhub(adev) || amdgpu_sriov_reg_indirect_gc(adev))
+
+#define amdgpu_sriov_reg_access_sq_config(adev) \
+(amdgpu_sriov_vf((adev)) && \
+	((adev)->virt.reg_access & (AMDGIM_FEATURE_REG_ACCESS_SQ_CONFIG)))
+
 #define amdgpu_passthrough(adev) \
 ((adev)->virt.caps & AMDGPU_PASSTHROUGH_MODE)
 
+#define amdgpu_sriov_vf_mmio_access_protection(adev) \
+((adev)->virt.caps & AMDGPU_VF_MMIO_ACCESS_PROTECT)
+
+#define amdgpu_sriov_ras_caps_en(adev) \
+((adev)->virt.gim_feature & AMDGIM_FEATURE_RAS_CAPS)
+
+#define amdgpu_sriov_ras_telemetry_en(adev) \
+(((adev)->virt.gim_feature & AMDGIM_FEATURE_RAS_TELEMETRY) && (adev)->virt.fw_reserve.ras_telemetry)
+
+#define amdgpu_sriov_ras_telemetry_block_en(adev, sriov_blk) \
+(amdgpu_sriov_ras_telemetry_en((adev)) && (adev)->virt.ras_telemetry_en_caps.all & BIT(sriov_blk))
+
+#define amdgpu_sriov_ras_cper_en(adev) \
+((adev)->virt.gim_feature & AMDGIM_FEATURE_RAS_CPER)
+
+#define amdgpu_sriov_xgmi_ta_ext_peer_link_en(adev) \
+((adev)->virt.gim_feature & AMDGIM_FEATURE_XGMI_TA_EXT_PEER_LINK)
+
+#define amdgpu_sriov_xgmi_connected_to_cpu(adev) \
+((adev)->virt.gim_feature & AMDGIM_FEATURE_XGMI_CONNECTED_TO_CPU)
+
 static inline bool is_virtual_machine(void)
 {
-#ifdef CONFIG_X86
+#if defined(CONFIG_X86)
 	return boot_cpu_has(X86_FEATURE_HYPERVISOR);
+#elif defined(CONFIG_ARM64)
+	return !is_kernel_in_hyp_mode();
 #else
 	return false;
 #endif
 }
 
-struct amdgpu_vm;
+#define amdgpu_sriov_is_pp_one_vf(adev) \
+	((adev)->virt.gim_feature & AMDGIM_FEATURE_PP_ONE_VF)
+#define amdgpu_sriov_multi_vf_mode(adev) \
+	(amdgpu_sriov_vf(adev) && !amdgpu_sriov_is_pp_one_vf(adev))
+#define amdgpu_sriov_is_debug(adev) \
+	((!amdgpu_in_reset(adev)) && adev->virt.tdr_debug)
+#define amdgpu_sriov_is_normal(adev) \
+	((!amdgpu_in_reset(adev)) && (!adev->virt.tdr_debug))
+#define amdgpu_sriov_is_av1_support(adev) \
+	((adev)->virt.gim_feature & AMDGIM_FEATURE_AV1_SUPPORT)
+#define amdgpu_sriov_is_vcn_rb_decouple(adev) \
+	((adev)->virt.gim_feature & AMDGIM_FEATURE_VCN_RB_DECOUPLE)
+#define amdgpu_sriov_is_mes_info_enable(adev) \
+	((adev)->virt.gim_feature & AMDGIM_FEATURE_MES_INFO_ENABLE)
+#define amdgpu_sriov_is_unitid_support(adev) \
+	((adev)->virt.gim_feature & AMDGIM_FEATURE_UNITID_SUPPORT)
 
-uint64_t amdgpu_csa_vaddr(struct amdgpu_device *adev);
+#define amdgpu_virt_xgmi_migrate_enabled(adev) \
+	((adev)->virt.is_xgmi_node_migrate_enabled && (adev)->gmc.xgmi.node_segment_size != 0)
+
 bool amdgpu_virt_mmio_blocked(struct amdgpu_device *adev);
-int amdgpu_allocate_static_csa(struct amdgpu_device *adev);
-int amdgpu_map_static_csa(struct amdgpu_device *adev, struct amdgpu_vm *vm,
-			  struct amdgpu_bo_va **bo_va);
-void amdgpu_free_static_csa(struct amdgpu_device *adev);
 void amdgpu_virt_init_setting(struct amdgpu_device *adev);
-uint32_t amdgpu_virt_kiq_rreg(struct amdgpu_device *adev, uint32_t reg);
-void amdgpu_virt_kiq_wreg(struct amdgpu_device *adev, uint32_t reg, uint32_t v);
 int amdgpu_virt_request_full_gpu(struct amdgpu_device *adev, bool init);
 int amdgpu_virt_release_full_gpu(struct amdgpu_device *adev, bool init);
 int amdgpu_virt_reset_gpu(struct amdgpu_device *adev);
+void amdgpu_virt_request_init_data(struct amdgpu_device *adev);
+void amdgpu_virt_ready_to_reset(struct amdgpu_device *adev);
 int amdgpu_virt_wait_reset(struct amdgpu_device *adev);
 int amdgpu_virt_alloc_mm_table(struct amdgpu_device *adev);
 void amdgpu_virt_free_mm_table(struct amdgpu_device *adev);
-int amdgpu_virt_fw_reserve_get_checksum(void *obj, unsigned long obj_size,
-					unsigned int key,
-					unsigned int chksum);
+bool amdgpu_virt_rcvd_ras_interrupt(struct amdgpu_device *adev);
+void amdgpu_virt_release_ras_err_handler_data(struct amdgpu_device *adev);
 void amdgpu_virt_init_data_exchange(struct amdgpu_device *adev);
+void amdgpu_virt_exchange_data(struct amdgpu_device *adev);
+void amdgpu_virt_fini_data_exchange(struct amdgpu_device *adev);
+void amdgpu_virt_init(struct amdgpu_device *adev);
 
+int amdgpu_virt_init_critical_region(struct amdgpu_device *adev);
+int amdgpu_virt_get_dynamic_data_info(struct amdgpu_device *adev,
+	int data_id, uint8_t *binary, u32 *size);
+
+bool amdgpu_virt_can_access_debugfs(struct amdgpu_device *adev);
+int amdgpu_virt_enable_access_debugfs(struct amdgpu_device *adev);
+void amdgpu_virt_disable_access_debugfs(struct amdgpu_device *adev);
+
+enum amdgpu_sriov_vf_mode amdgpu_virt_get_sriov_vf_mode(struct amdgpu_device *adev);
+
+void amdgpu_virt_update_sriov_video_codec(struct amdgpu_device *adev,
+			struct amdgpu_video_codec_info *encode, uint32_t encode_array_size,
+			struct amdgpu_video_codec_info *decode, uint32_t decode_array_size);
+void amdgpu_sriov_wreg(struct amdgpu_device *adev,
+		       u32 offset, u32 value,
+		       u32 acc_flags, u32 hwip, u32 xcc_id);
+u32 amdgpu_sriov_rreg(struct amdgpu_device *adev,
+		      u32 offset, u32 acc_flags, u32 hwip, u32 xcc_id);
+bool amdgpu_virt_fw_load_skip_check(struct amdgpu_device *adev,
+			uint32_t ucode_id);
+void amdgpu_virt_pre_reset(struct amdgpu_device *adev);
+void amdgpu_virt_post_reset(struct amdgpu_device *adev);
+bool amdgpu_sriov_xnack_support(struct amdgpu_device *adev);
+bool amdgpu_virt_get_rlcg_reg_access_flag(struct amdgpu_device *adev,
+					  u32 acc_flags, u32 hwip,
+					  bool write, u32 *rlcg_flag);
+u32 amdgpu_virt_rlcg_reg_rw(struct amdgpu_device *adev, u32 offset, u32 v, u32 flag, u32 xcc_id);
+bool amdgpu_virt_get_ras_capability(struct amdgpu_device *adev);
+int amdgpu_virt_req_ras_err_count(struct amdgpu_device *adev, enum amdgpu_ras_block block,
+				  struct ras_err_data *err_data);
+int amdgpu_virt_req_ras_cper_dump(struct amdgpu_device *adev, bool force_update);
+int amdgpu_virt_ras_telemetry_post_reset(struct amdgpu_device *adev);
+bool amdgpu_virt_ras_telemetry_block_en(struct amdgpu_device *adev,
+					enum amdgpu_ras_block block);
+void amdgpu_virt_request_bad_pages(struct amdgpu_device *adev);
+int amdgpu_virt_check_vf_critical_region(struct amdgpu_device *adev, u64 addr, bool *hit);
+int amdgpu_virt_send_remote_ras_cmd(struct amdgpu_device *adev,
+		uint64_t buf, uint32_t buf_len);
 #endif

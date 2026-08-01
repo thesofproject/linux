@@ -1,165 +1,221 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2012 Regents of the University of California
  * Copyright (C) 2017 SiFive
- *
- *   This program is free software; you can redistribute it and/or
- *   modify it under the terms of the GNU General Public License
- *   as published by the Free Software Foundation, version 2.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
  */
 
 #include <linux/init.h>
 #include <linux/linkage.h>
 
+#include <asm/alternative-macros.h>
 #include <asm/asm.h>
 #include <asm/csr.h>
+#include <asm/scs.h>
 #include <asm/unistd.h>
+#include <asm/page.h>
 #include <asm/thread_info.h>
 #include <asm/asm-offsets.h>
+#include <asm/errata_list.h>
+#include <linux/sizes.h>
 
-	.text
-	.altmacro
+	.section .irqentry.text, "ax"
 
-/*
- * Prepares to enter a system call or exception by saving all registers to the
- * stack.
- */
-	.macro SAVE_ALL
-	LOCAL _restore_kernel_tpsp
-	LOCAL _save_context
+.macro new_valid_map_cpus_check
+	REG_S 	a0, TASK_TI_A0(tp)
+	csrr 	a0, CSR_CAUSE
+	/* Exclude IRQs */
+	blt  	a0, zero, .Lnew_valid_map_cpus_restore_context_a0
+
+	REG_S 	a1, TASK_TI_A1(tp)
+	/* Only check new_valid_map_cpus if we are in page/protection fault */
+	li   	a1, EXC_LOAD_PAGE_FAULT
+	beq  	a0, a1, .Lnew_valid_map_cpus_kernel_address
+	li   	a1, EXC_STORE_PAGE_FAULT
+	beq  	a0, a1, .Lnew_valid_map_cpus_kernel_address
+	li   	a1, EXC_INST_PAGE_FAULT
+	bne  	a0, a1, .Lnew_valid_map_cpus_restore_context_a1
+
+.Lnew_valid_map_cpus_kernel_address:
+	/* Is it a kernel address? */
+	csrr 	a0, CSR_TVAL
+	bge 	a0, zero, .Lnew_valid_map_cpus_restore_context_a1
+
+	/* Check if a new vmalloc mapping appeared that could explain the trap */
+	REG_S	a2, TASK_TI_A2(tp)
+	/*
+	 * Computes:
+	 * a0 = &new_valid_map_cpus[BIT_WORD(cpu)]
+	 * a1 = BIT_MASK(cpu)
+	 */
+	lw	a2, TASK_TI_CPU(tp)
+	/*
+	 * Compute the new_valid_map_cpus element position:
+	 * (cpu / 64) * 8 = (cpu >> 6) << 3
+	 */
+	srli	a1, a2, 6
+	slli	a1, a1, 3
+	la	a0, new_valid_map_cpus
+	add	a0, a0, a1
+	/*
+	 * Compute the bit position in the new_valid_map_cpus element:
+	 * bit_pos = cpu % 64 = cpu - (cpu / 64) * 64 = cpu - (cpu >> 6) << 6
+	 * 	   = cpu - ((cpu >> 6) << 3) << 3
+	 */
+	slli	a1, a1, 3
+	sub	a1, a2, a1
+	/* Compute the "get mask": 1 << bit_pos */
+	li	a2, 1
+	sll	a1, a2, a1
+
+	/* Check the value of new_valid_map_cpus for this cpu */
+	REG_L	a2, 0(a0)
+	and	a2, a2, a1
+	beq	a2, zero, .Lnew_valid_map_cpus_restore_context
+
+	/* Atomically reset the current cpu bit in new_valid_map_cpus */
+	amoxor.d	a0, a1, (a0)
 
 	/*
-	 * If coming from userspace, preserve the user thread pointer and load
-	 * the kernel thread pointer.  If we came from the kernel, sscratch
-	 * will contain 0, and we should continue on the current TP.
+	 * A sfence.vma is required here. Even if we had Svvptc, there's no
+	 * guarantee that after returning we wouldn't just fault again.
 	 */
-	csrrw tp, sscratch, tp
-	bnez tp, _save_context
+	sfence.vma
 
-_restore_kernel_tpsp:
-	csrr tp, sscratch
+	REG_L	a0, TASK_TI_A0(tp)
+	REG_L	a1, TASK_TI_A1(tp)
+	REG_L	a2, TASK_TI_A2(tp)
+	csrw	CSR_SCRATCH, x0
+	sret
+
+.Lnew_valid_map_cpus_restore_context:
+	REG_L 	a2, TASK_TI_A2(tp)
+.Lnew_valid_map_cpus_restore_context_a1:
+	REG_L 	a1, TASK_TI_A1(tp)
+.Lnew_valid_map_cpus_restore_context_a0:
+	REG_L	a0, TASK_TI_A0(tp)
+.endm
+
+/*
+ * If previous mode was U, capture shadow stack pointer and save it away
+ * Zero CSR_SSP at the same time for sanitization.
+ */
+.macro save_userssp tmp, status
+	ALTERNATIVE("nops(4)",
+		__stringify(				\
+		andi \tmp, \status, SR_SPP;		\
+		bnez \tmp, skip_ssp_save;		\
+		csrrw \tmp, CSR_SSP, x0;		\
+		REG_S \tmp, TASK_TI_USER_SSP(tp);	\
+		skip_ssp_save:),
+		0,
+		RISCV_ISA_EXT_ZICFISS,
+		CONFIG_RISCV_USER_CFI)
+.endm
+
+.macro restore_userssp tmp, status
+	ALTERNATIVE("nops(4)",
+		__stringify(				\
+		andi \tmp, \status, SR_SPP;		\
+		bnez \tmp, skip_ssp_restore;		\
+		REG_L \tmp, TASK_TI_USER_SSP(tp);	\
+		csrw CSR_SSP, \tmp;			\
+		skip_ssp_restore:),
+		0,
+		RISCV_ISA_EXT_ZICFISS,
+		CONFIG_RISCV_USER_CFI)
+.endm
+
+SYM_CODE_START(handle_exception)
+	/*
+	 * If coming from userspace, preserve the user thread pointer and load
+	 * the kernel thread pointer.  If we came from the kernel, the scratch
+	 * register will contain 0, and we should continue on the current TP.
+	 */
+	csrrw tp, CSR_SCRATCH, tp
+	bnez tp, .Lsave_context
+
+.Lrestore_kernel_tpsp:
+	csrr tp, CSR_SCRATCH
+
+#if defined(CONFIG_64BIT) && defined(CONFIG_MMU)
+	/*
+	 * The RISC-V kernel does not flush TLBs on all CPUS after each new
+	 * vmalloc mapping or kfence_unprotect(), which may result in
+	 * exceptions:
+	 *
+	 * - if the uarch caches invalid entries, the new mapping would not be
+	 *   observed by the page table walker and an invalidation is needed.
+	 * - if the uarch does not cache invalid entries, a reordered access
+	 *   could "miss" the new mapping and traps: in that case, we only need
+	 *   to retry the access, no sfence.vma is required.
+	 */
+	new_valid_map_cpus_check
+#endif
+
 	REG_S sp, TASK_TI_KERNEL_SP(tp)
-_save_context:
+
+#ifdef CONFIG_VMAP_STACK
+	addi sp, sp, -(PT_SIZE_ON_STACK)
+	srli sp, sp, THREAD_SHIFT
+	andi sp, sp, 0x1
+	bnez sp, handle_kernel_stack_overflow
+	REG_L sp, TASK_TI_KERNEL_SP(tp)
+#endif
+
+.Lsave_context:
 	REG_S sp, TASK_TI_USER_SP(tp)
 	REG_L sp, TASK_TI_KERNEL_SP(tp)
 	addi sp, sp, -(PT_SIZE_ON_STACK)
 	REG_S x1,  PT_RA(sp)
 	REG_S x3,  PT_GP(sp)
 	REG_S x5,  PT_T0(sp)
-	REG_S x6,  PT_T1(sp)
-	REG_S x7,  PT_T2(sp)
-	REG_S x8,  PT_S0(sp)
-	REG_S x9,  PT_S1(sp)
-	REG_S x10, PT_A0(sp)
-	REG_S x11, PT_A1(sp)
-	REG_S x12, PT_A2(sp)
-	REG_S x13, PT_A3(sp)
-	REG_S x14, PT_A4(sp)
-	REG_S x15, PT_A5(sp)
-	REG_S x16, PT_A6(sp)
-	REG_S x17, PT_A7(sp)
-	REG_S x18, PT_S2(sp)
-	REG_S x19, PT_S3(sp)
-	REG_S x20, PT_S4(sp)
-	REG_S x21, PT_S5(sp)
-	REG_S x22, PT_S6(sp)
-	REG_S x23, PT_S7(sp)
-	REG_S x24, PT_S8(sp)
-	REG_S x25, PT_S9(sp)
-	REG_S x26, PT_S10(sp)
-	REG_S x27, PT_S11(sp)
-	REG_S x28, PT_T3(sp)
-	REG_S x29, PT_T4(sp)
-	REG_S x30, PT_T5(sp)
-	REG_S x31, PT_T6(sp)
+	save_from_x6_to_x31
 
 	/*
 	 * Disable user-mode memory access as it should only be set in the
 	 * actual user copy routines.
 	 *
-	 * Disable the FPU to detect illegal usage of floating point in kernel
-	 * space.
+	 * Disable the FPU/Vector to detect illegal usage of floating point
+	 * or vector in kernel space.
 	 */
-	li t0, SR_SUM | SR_FS
+	li t0, SR_SUM | SR_FS_VS
+#ifdef CONFIG_64BIT
+	li t1, SR_ELP
+	or t0, t0, t1
+#endif
 
 	REG_L s0, TASK_TI_USER_SP(tp)
-	csrrc s1, sstatus, t0
-	csrr s2, sepc
-	csrr s3, sbadaddr
-	csrr s4, scause
-	csrr s5, sscratch
+	csrrc s1, CSR_STATUS, t0
+	save_userssp s2, s1
+	csrr s2, CSR_EPC
+	csrr s3, CSR_TVAL
+	csrr s4, CSR_CAUSE
+	csrr s5, CSR_SCRATCH
 	REG_S s0, PT_SP(sp)
-	REG_S s1, PT_SSTATUS(sp)
-	REG_S s2, PT_SEPC(sp)
-	REG_S s3, PT_SBADADDR(sp)
-	REG_S s4, PT_SCAUSE(sp)
+	REG_S s1, PT_STATUS(sp)
+	REG_S s2, PT_EPC(sp)
+	REG_S s3, PT_BADADDR(sp)
+	REG_S s4, PT_CAUSE(sp)
 	REG_S s5, PT_TP(sp)
-	.endm
-
-/*
- * Prepares to return from a system call or exception by restoring all
- * registers from the stack.
- */
-	.macro RESTORE_ALL
-	REG_L a0, PT_SSTATUS(sp)
-	REG_L a2, PT_SEPC(sp)
-	csrw sstatus, a0
-	csrw sepc, a2
-
-	REG_L x1,  PT_RA(sp)
-	REG_L x3,  PT_GP(sp)
-	REG_L x4,  PT_TP(sp)
-	REG_L x5,  PT_T0(sp)
-	REG_L x6,  PT_T1(sp)
-	REG_L x7,  PT_T2(sp)
-	REG_L x8,  PT_S0(sp)
-	REG_L x9,  PT_S1(sp)
-	REG_L x10, PT_A0(sp)
-	REG_L x11, PT_A1(sp)
-	REG_L x12, PT_A2(sp)
-	REG_L x13, PT_A3(sp)
-	REG_L x14, PT_A4(sp)
-	REG_L x15, PT_A5(sp)
-	REG_L x16, PT_A6(sp)
-	REG_L x17, PT_A7(sp)
-	REG_L x18, PT_S2(sp)
-	REG_L x19, PT_S3(sp)
-	REG_L x20, PT_S4(sp)
-	REG_L x21, PT_S5(sp)
-	REG_L x22, PT_S6(sp)
-	REG_L x23, PT_S7(sp)
-	REG_L x24, PT_S8(sp)
-	REG_L x25, PT_S9(sp)
-	REG_L x26, PT_S10(sp)
-	REG_L x27, PT_S11(sp)
-	REG_L x28, PT_T3(sp)
-	REG_L x29, PT_T4(sp)
-	REG_L x30, PT_T5(sp)
-	REG_L x31, PT_T6(sp)
-
-	REG_L x2,  PT_SP(sp)
-	.endm
-
-ENTRY(handle_exception)
-	SAVE_ALL
 
 	/*
-	 * Set sscratch register to 0, so that if a recursive exception
+	 * Set the scratch register to 0, so that if a recursive exception
 	 * occurs, the exception vector knows it came from the kernel
 	 */
-	csrw sscratch, x0
+	csrw CSR_SCRATCH, x0
 
 	/* Load the global pointer */
-.option push
-.option norelax
-	la gp, __global_pointer$
-.option pop
+	load_global_pointer
 
-	la ra, ret_from_exception
+	/* Load the kernel shadow call stack pointer if coming from userspace */
+	scs_load_current_if_task_changed s5
+
+#ifdef CONFIG_RISCV_ISA_V_PREEMPTIVE
+	move a0, sp
+	call riscv_v_context_nesting_start
+#endif
+	move a0, sp /* pt_regs */
+
 	/*
 	 * MSB of cause differentiates between
 	 * interrupts and exceptions
@@ -167,137 +223,195 @@ ENTRY(handle_exception)
 	bge s4, zero, 1f
 
 	/* Handle interrupts */
-	move a0, sp /* pt_regs */
-	REG_L a1, handle_arch_irq
-	jr a1
+	call do_irq
+	j ret_from_exception
 1:
-	/* Exceptions run with interrupts enabled */
-	csrs sstatus, SR_SIE
-
-	/* Handle syscalls */
-	li t0, EXC_SYSCALL
-	beq s4, t0, handle_syscall
-
 	/* Handle other exceptions */
 	slli t0, s4, RISCV_LGPTR
 	la t1, excp_vect_table
 	la t2, excp_vect_table_end
-	move a0, sp /* pt_regs */
 	add t0, t1, t0
 	/* Check if exception code lies within bounds */
-	bgeu t0, t2, 1f
-	REG_L t0, 0(t0)
-	jr t0
-1:
-	tail do_trap_unknown
+	bgeu t0, t2, 3f
+	REG_L t1, 0(t0)
+2:	jalr t1
+	j ret_from_exception
+3:
 
-handle_syscall:
-	 /* save the initial A0 value (needed in signal handlers) */
-	REG_S a0, PT_ORIG_A0(sp)
-	/*
-	 * Advance SEPC to avoid executing the original
-	 * scall instruction on sret
-	 */
-	addi s2, s2, 0x4
-	REG_S s2, PT_SEPC(sp)
-	/* Trace syscalls, but only if requested by the user. */
-	REG_L t0, TASK_TI_FLAGS(tp)
-	andi t0, t0, _TIF_SYSCALL_TRACE
-	bnez t0, handle_syscall_trace_enter
-check_syscall_nr:
-	/* Check to make sure we don't jump to a bogus syscall number. */
-	li t0, __NR_syscalls
-	la s0, sys_ni_syscall
-	/* Syscall number held in a7 */
-	bgeu a7, t0, 1f
-	la s0, sys_call_table
-	slli t0, a7, RISCV_LGPTR
-	add s0, s0, t0
-	REG_L s0, 0(s0)
-1:
-	jalr s0
+	la t1, do_trap_unknown
+	j 2b
+SYM_CODE_END(handle_exception)
+ASM_NOKPROBE(handle_exception)
 
-ret_from_syscall:
-	/* Set user a0 to kernel a0 */
-	REG_S a0, PT_A0(sp)
-	/* Trace syscalls, but only if requested by the user. */
-	REG_L t0, TASK_TI_FLAGS(tp)
-	andi t0, t0, _TIF_SYSCALL_TRACE
-	bnez t0, handle_syscall_trace_exit
-
-ret_from_exception:
-	REG_L s0, PT_SSTATUS(sp)
-	csrc sstatus, SR_SIE
+/*
+ * The ret_from_exception must be called with interrupt disabled. Here is the
+ * caller list:
+ *  - handle_exception
+ *  - ret_from_fork
+ */
+SYM_CODE_START_NOALIGN(ret_from_exception)
+	REG_L s0, PT_STATUS(sp)
+#ifdef CONFIG_RISCV_M_MODE
+	/* the MPP value is too large to be used as an immediate arg for addi */
+	li t0, SR_MPP
+	and s0, s0, t0
+#else
 	andi s0, s0, SR_SPP
-	bnez s0, restore_all
+#endif
+	bnez s0, 1f
 
-resume_userspace:
-	/* Interrupts must be disabled here so flags are checked atomically */
-	REG_L s0, TASK_TI_FLAGS(tp) /* current_thread_info->flags */
-	andi s1, s0, _TIF_WORK_MASK
-	bnez s1, work_pending
+#ifdef CONFIG_KSTACK_ERASE
+	call	stackleak_erase_on_task_stack
+#endif
 
 	/* Save unwound kernel stack pointer in thread_info */
 	addi s0, sp, PT_SIZE_ON_STACK
 	REG_S s0, TASK_TI_KERNEL_SP(tp)
 
+	/* Save the kernel shadow call stack pointer */
+	scs_save_current
+
 	/*
-	 * Save TP into sscratch, so we can find the kernel data structures
-	 * again.
+	 * Save TP into the scratch register , so we can find the kernel data
+	 * structures again.
 	 */
-	csrw sscratch, tp
+	csrw CSR_SCRATCH, tp
+1:
+#ifdef CONFIG_RISCV_ISA_V_PREEMPTIVE
+	move a0, sp
+	call riscv_v_context_nesting_end
+#endif
+	REG_L a0, PT_STATUS(sp)
+	restore_userssp s3, a0
+	/*
+	 * The current load reservation is effectively part of the processor's
+	 * state, in the sense that load reservations cannot be shared between
+	 * different hart contexts.  We can't actually save and restore a load
+	 * reservation, so instead here we clear any existing reservation --
+	 * it's always legal for implementations to clear load reservations at
+	 * any point (as long as the forward progress guarantee is kept, but
+	 * we'll ignore that here).
+	 *
+	 * Dangling load reservations can be the result of taking a trap in the
+	 * middle of an LR/SC sequence, but can also be the result of a taken
+	 * forward branch around an SC -- which is how we implement CAS.  As a
+	 * result we need to clear reservations between the last CAS and the
+	 * jump back to the new context.  While it is unlikely the store
+	 * completes, implementations are allowed to expand reservations to be
+	 * arbitrarily large.
+	 */
+	REG_L  a2, PT_EPC(sp)
+	REG_SC x0, a2, PT_EPC(sp)
 
-restore_all:
-	RESTORE_ALL
+	csrw CSR_STATUS, a0
+	csrw CSR_EPC, a2
+
+	REG_L x1,  PT_RA(sp)
+	REG_L x3,  PT_GP(sp)
+	REG_L x4,  PT_TP(sp)
+	REG_L x5,  PT_T0(sp)
+	restore_from_x6_to_x31
+
+	REG_L x2,  PT_SP(sp)
+
+#ifdef CONFIG_RISCV_M_MODE
+	mret
+#else
 	sret
+#endif
+SYM_INNER_LABEL(ret_from_exception_end, SYM_L_GLOBAL)
+SYM_CODE_END(ret_from_exception)
+ASM_NOKPROBE(ret_from_exception)
 
-work_pending:
-	/* Enter slow path for supplementary processing */
-	la ra, ret_from_exception
-	andi s1, s0, _TIF_NEED_RESCHED
-	bnez s1, work_resched
-work_notifysig:
-	/* Handle pending signals and notify-resume requests */
-	csrs sstatus, SR_SIE /* Enable interrupts for do_notify_resume() */
-	move a0, sp /* pt_regs */
-	move a1, s0 /* current_thread_info->flags */
-	tail do_notify_resume
-work_resched:
-	tail schedule
+#ifdef CONFIG_VMAP_STACK
+SYM_CODE_START_LOCAL(handle_kernel_stack_overflow)
+	/* we reach here from kernel context, sscratch must be 0 */
+	csrrw x31, CSR_SCRATCH, x31
+	asm_per_cpu sp, overflow_stack, x31
+	li x31, OVERFLOW_STACK_SIZE
+	add sp, sp, x31
+	/* zero out x31 again and restore x31 */
+	xor x31, x31, x31
+	csrrw x31, CSR_SCRATCH, x31
 
-/* Slow paths for ptrace. */
-handle_syscall_trace_enter:
+	addi sp, sp, -(PT_SIZE_ON_STACK)
+
+	//save context to overflow stack
+	REG_S x1,  PT_RA(sp)
+	REG_S x3,  PT_GP(sp)
+	REG_S x5,  PT_T0(sp)
+	save_from_x6_to_x31
+
+	REG_L s0, TASK_TI_KERNEL_SP(tp)
+	csrr s1, CSR_STATUS
+	csrr s2, CSR_EPC
+	csrr s3, CSR_TVAL
+	csrr s4, CSR_CAUSE
+	csrr s5, CSR_SCRATCH
+	REG_S s0, PT_SP(sp)
+	REG_S s1, PT_STATUS(sp)
+	REG_S s2, PT_EPC(sp)
+	REG_S s3, PT_BADADDR(sp)
+	REG_S s4, PT_CAUSE(sp)
+	REG_S s5, PT_TP(sp)
 	move a0, sp
-	call do_syscall_trace_enter
-	REG_L a0, PT_A0(sp)
-	REG_L a1, PT_A1(sp)
-	REG_L a2, PT_A2(sp)
-	REG_L a3, PT_A3(sp)
-	REG_L a4, PT_A4(sp)
-	REG_L a5, PT_A5(sp)
-	REG_L a6, PT_A6(sp)
-	REG_L a7, PT_A7(sp)
-	j check_syscall_nr
-handle_syscall_trace_exit:
-	move a0, sp
-	call do_syscall_trace_exit
-	j ret_from_exception
+	tail handle_bad_stack
+SYM_CODE_END(handle_kernel_stack_overflow)
+ASM_NOKPROBE(handle_kernel_stack_overflow)
+#endif
 
-END(handle_exception)
-
-ENTRY(ret_from_fork)
-	la ra, ret_from_exception
-	tail schedule_tail
-ENDPROC(ret_from_fork)
-
-ENTRY(ret_from_kernel_thread)
+SYM_CODE_START(ret_from_fork_kernel_asm)
 	call schedule_tail
-	/* Call fn(arg) */
-	la ra, ret_from_exception
-	move a0, s1
-	jr s0
-ENDPROC(ret_from_kernel_thread)
+	move a0, s1 /* fn_arg */
+	move a1, s0 /* fn */
+	move a2, sp /* pt_regs */
+	call ret_from_fork_kernel
+	j ret_from_exception
+SYM_CODE_END(ret_from_fork_kernel_asm)
 
+SYM_CODE_START(ret_from_fork_user_asm)
+	call schedule_tail
+	move a0, sp /* pt_regs */
+	call ret_from_fork_user
+	j ret_from_exception
+SYM_CODE_END(ret_from_fork_user_asm)
+
+#ifdef CONFIG_IRQ_STACKS
+/*
+ * void call_on_irq_stack(struct pt_regs *regs,
+ * 		          void (*func)(struct pt_regs *));
+ *
+ * Calls func(regs) using the per-CPU IRQ stack.
+ */
+SYM_FUNC_START(call_on_irq_stack)
+	/* Create a frame record to save ra and s0 (fp) */
+	addi	sp, sp, -STACKFRAME_SIZE_ON_STACK
+	REG_S	ra, (STACKFRAME_SIZE_ON_STACK + STACKFRAME_RA)(sp)
+	REG_S	s0, (STACKFRAME_SIZE_ON_STACK + STACKFRAME_FP)(sp)
+	addi	s0, sp, STACKFRAME_SIZE_ON_STACK
+
+	/* Switch to the per-CPU shadow call stack */
+	scs_save_current
+	scs_load_irq_stack t0
+
+	/* Switch to the per-CPU IRQ stack and call the handler */
+	load_per_cpu t0, irq_stack_ptr, t1
+	li	t1, IRQ_STACK_SIZE
+	add	sp, t0, t1
+	jalr	a1
+
+	/* Switch back to the thread shadow call stack */
+	scs_load_current
+
+	/* Switch back to the thread stack and restore ra and s0 */
+	addi	sp, s0, -STACKFRAME_SIZE_ON_STACK
+	REG_L	ra, (STACKFRAME_SIZE_ON_STACK + STACKFRAME_RA)(sp)
+	REG_L	s0, (STACKFRAME_SIZE_ON_STACK + STACKFRAME_FP)(sp)
+	addi	sp, sp, STACKFRAME_SIZE_ON_STACK
+
+	ret
+SYM_FUNC_END(call_on_irq_stack)
+#endif /* CONFIG_IRQ_STACKS */
 
 /*
  * Integer register context switch
@@ -309,7 +423,7 @@ ENDPROC(ret_from_kernel_thread)
  * The value of a0 and a1 must be preserved by this function, as that's how
  * arguments are passed to schedule_tail.
  */
-ENTRY(__switch_to)
+SYM_FUNC_START(__switch_to)
 	/* Save context into prev->thread */
 	li    a4,  TASK_THREAD_RA
 	add   a3, a0, a4
@@ -328,7 +442,18 @@ ENTRY(__switch_to)
 	REG_S s9,  TASK_THREAD_S9_RA(a3)
 	REG_S s10, TASK_THREAD_S10_RA(a3)
 	REG_S s11, TASK_THREAD_S11_RA(a3)
+
+	/* save the user space access flag */
+	csrr  s0, CSR_STATUS
+	REG_S s0, TASK_THREAD_SUM_RA(a3)
+
+	/* Save the kernel shadow call stack pointer */
+	scs_save_current
 	/* Restore context from next->thread */
+	REG_L s0,  TASK_THREAD_SUM_RA(a4)
+	li    s1,  SR_SUM
+	and   s0,  s0, s1
+	csrs  CSR_STATUS, s0
 	REG_L ra,  TASK_THREAD_RA_RA(a4)
 	REG_L sp,  TASK_THREAD_SP_RA(a4)
 	REG_L s0,  TASK_THREAD_S0_RA(a4)
@@ -343,125 +468,47 @@ ENTRY(__switch_to)
 	REG_L s9,  TASK_THREAD_S9_RA(a4)
 	REG_L s10, TASK_THREAD_S10_RA(a4)
 	REG_L s11, TASK_THREAD_S11_RA(a4)
-	/* Swap the CPU entry around. */
-	lw a3, TASK_TI_CPU(a0)
-	lw a4, TASK_TI_CPU(a1)
-	sw a3, TASK_TI_CPU(a1)
-	sw a4, TASK_TI_CPU(a0)
-#if TASK_TI != 0
-#error "TASK_TI != 0: tp will contain a 'struct thread_info', not a 'struct task_struct' so get_current() won't work."
-	addi tp, a1, TASK_TI
-#else
+	/* The offset of thread_info in task_struct is zero. */
 	move tp, a1
+	/* Switch to the next shadow call stack */
+	scs_load_current
+	ret
+SYM_FUNC_END(__switch_to)
+
+#ifndef CONFIG_MMU
+#define do_page_fault do_trap_unknown
 #endif
-	ret
-ENDPROC(__switch_to)
-
-ENTRY(__fstate_save)
-	li  a2,  TASK_THREAD_F0
-	add a0, a0, a2
-	li t1, SR_FS
-	csrs sstatus, t1
-	frcsr t0
-	fsd f0,  TASK_THREAD_F0_F0(a0)
-	fsd f1,  TASK_THREAD_F1_F0(a0)
-	fsd f2,  TASK_THREAD_F2_F0(a0)
-	fsd f3,  TASK_THREAD_F3_F0(a0)
-	fsd f4,  TASK_THREAD_F4_F0(a0)
-	fsd f5,  TASK_THREAD_F5_F0(a0)
-	fsd f6,  TASK_THREAD_F6_F0(a0)
-	fsd f7,  TASK_THREAD_F7_F0(a0)
-	fsd f8,  TASK_THREAD_F8_F0(a0)
-	fsd f9,  TASK_THREAD_F9_F0(a0)
-	fsd f10, TASK_THREAD_F10_F0(a0)
-	fsd f11, TASK_THREAD_F11_F0(a0)
-	fsd f12, TASK_THREAD_F12_F0(a0)
-	fsd f13, TASK_THREAD_F13_F0(a0)
-	fsd f14, TASK_THREAD_F14_F0(a0)
-	fsd f15, TASK_THREAD_F15_F0(a0)
-	fsd f16, TASK_THREAD_F16_F0(a0)
-	fsd f17, TASK_THREAD_F17_F0(a0)
-	fsd f18, TASK_THREAD_F18_F0(a0)
-	fsd f19, TASK_THREAD_F19_F0(a0)
-	fsd f20, TASK_THREAD_F20_F0(a0)
-	fsd f21, TASK_THREAD_F21_F0(a0)
-	fsd f22, TASK_THREAD_F22_F0(a0)
-	fsd f23, TASK_THREAD_F23_F0(a0)
-	fsd f24, TASK_THREAD_F24_F0(a0)
-	fsd f25, TASK_THREAD_F25_F0(a0)
-	fsd f26, TASK_THREAD_F26_F0(a0)
-	fsd f27, TASK_THREAD_F27_F0(a0)
-	fsd f28, TASK_THREAD_F28_F0(a0)
-	fsd f29, TASK_THREAD_F29_F0(a0)
-	fsd f30, TASK_THREAD_F30_F0(a0)
-	fsd f31, TASK_THREAD_F31_F0(a0)
-	sw t0, TASK_THREAD_FCSR_F0(a0)
-	csrc sstatus, t1
-	ret
-ENDPROC(__fstate_save)
-
-ENTRY(__fstate_restore)
-	li  a2,  TASK_THREAD_F0
-	add a0, a0, a2
-	li t1, SR_FS
-	lw t0, TASK_THREAD_FCSR_F0(a0)
-	csrs sstatus, t1
-	fld f0,  TASK_THREAD_F0_F0(a0)
-	fld f1,  TASK_THREAD_F1_F0(a0)
-	fld f2,  TASK_THREAD_F2_F0(a0)
-	fld f3,  TASK_THREAD_F3_F0(a0)
-	fld f4,  TASK_THREAD_F4_F0(a0)
-	fld f5,  TASK_THREAD_F5_F0(a0)
-	fld f6,  TASK_THREAD_F6_F0(a0)
-	fld f7,  TASK_THREAD_F7_F0(a0)
-	fld f8,  TASK_THREAD_F8_F0(a0)
-	fld f9,  TASK_THREAD_F9_F0(a0)
-	fld f10, TASK_THREAD_F10_F0(a0)
-	fld f11, TASK_THREAD_F11_F0(a0)
-	fld f12, TASK_THREAD_F12_F0(a0)
-	fld f13, TASK_THREAD_F13_F0(a0)
-	fld f14, TASK_THREAD_F14_F0(a0)
-	fld f15, TASK_THREAD_F15_F0(a0)
-	fld f16, TASK_THREAD_F16_F0(a0)
-	fld f17, TASK_THREAD_F17_F0(a0)
-	fld f18, TASK_THREAD_F18_F0(a0)
-	fld f19, TASK_THREAD_F19_F0(a0)
-	fld f20, TASK_THREAD_F20_F0(a0)
-	fld f21, TASK_THREAD_F21_F0(a0)
-	fld f22, TASK_THREAD_F22_F0(a0)
-	fld f23, TASK_THREAD_F23_F0(a0)
-	fld f24, TASK_THREAD_F24_F0(a0)
-	fld f25, TASK_THREAD_F25_F0(a0)
-	fld f26, TASK_THREAD_F26_F0(a0)
-	fld f27, TASK_THREAD_F27_F0(a0)
-	fld f28, TASK_THREAD_F28_F0(a0)
-	fld f29, TASK_THREAD_F29_F0(a0)
-	fld f30, TASK_THREAD_F30_F0(a0)
-	fld f31, TASK_THREAD_F31_F0(a0)
-	fscsr t0
-	csrc sstatus, t1
-	ret
-ENDPROC(__fstate_restore)
-
 
 	.section ".rodata"
+	.align LGREG
 	/* Exception vector table */
-ENTRY(excp_vect_table)
+SYM_DATA_START_LOCAL(excp_vect_table)
 	RISCV_PTR do_trap_insn_misaligned
-	RISCV_PTR do_trap_insn_fault
+	ALT_INSN_FAULT(RISCV_PTR do_trap_insn_fault)
 	RISCV_PTR do_trap_insn_illegal
 	RISCV_PTR do_trap_break
 	RISCV_PTR do_trap_load_misaligned
 	RISCV_PTR do_trap_load_fault
 	RISCV_PTR do_trap_store_misaligned
 	RISCV_PTR do_trap_store_fault
-	RISCV_PTR do_trap_ecall_u /* system call, gets intercepted */
+	RISCV_PTR do_trap_ecall_u /* system call */
 	RISCV_PTR do_trap_ecall_s
 	RISCV_PTR do_trap_unknown
 	RISCV_PTR do_trap_ecall_m
-	RISCV_PTR do_page_fault   /* instruction page fault */
+	/* instruction page fault */
+	ALT_PAGE_FAULT(RISCV_PTR do_page_fault)
 	RISCV_PTR do_page_fault   /* load page fault */
 	RISCV_PTR do_trap_unknown
 	RISCV_PTR do_page_fault   /* store page fault */
-excp_vect_table_end:
-END(excp_vect_table)
+	RISCV_PTR do_trap_unknown /* cause=16 */
+	RISCV_PTR do_trap_unknown /* cause=17 */
+	RISCV_PTR do_trap_software_check /* cause=18 is sw check exception */
+	RISCV_PTR do_trap_hardware_error /* hardware error (19) */
+SYM_DATA_END_LABEL(excp_vect_table, SYM_L_LOCAL, excp_vect_table_end)
+
+#ifndef CONFIG_MMU
+SYM_DATA_START(__user_rt_sigreturn)
+	li a7, __NR_rt_sigreturn
+	ecall
+SYM_DATA_END(__user_rt_sigreturn)
+#endif

@@ -13,11 +13,10 @@
 #ifndef __ASM_POWERPC_MPC52xx_H__
 #define __ASM_POWERPC_MPC52xx_H__
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 #include <asm/types.h>
-#include <asm/prom.h>
 #include <asm/mpc5xxx.h>
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 
 #include <linux/suspend.h>
 
@@ -31,7 +30,7 @@
 /* Structures mapping of some unit register set                             */
 /* ======================================================================== */
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 /* Memory Mapping Control */
 struct mpc52xx_mmap_ctl {
@@ -259,14 +258,16 @@ struct mpc52xx_intr {
 	u32 per_error;		/* INTR + 0x38 */
 };
 
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 
 
 /* ========================================================================= */
 /* Prototypes for MPC52xx sysdev                                             */
 /* ========================================================================= */
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
+
+struct device_node;
 
 /* mpc52xx_common.c */
 extern void mpc5200_setup_xlb_arbiter(void);
@@ -274,7 +275,6 @@ extern void mpc52xx_declare_of_platform_devices(void);
 extern int mpc5200_psc_ac97_gpio_reset(int psc_number);
 extern void mpc52xx_map_common_devices(void);
 extern int mpc52xx_set_psc_clkdiv(int psc_id, int clkdiv);
-extern unsigned int mpc52xx_get_xtal_freq(struct device_node *node);
 extern void __noreturn mpc52xx_restart(char *cmd);
 
 /* mpc52xx_gpt.c */
@@ -284,47 +284,6 @@ extern int mpc52xx_gpt_start_timer(struct mpc52xx_gpt_priv *gpt, u64 period,
                             int continuous);
 extern u64 mpc52xx_gpt_timer_period(struct mpc52xx_gpt_priv *gpt);
 extern int mpc52xx_gpt_stop_timer(struct mpc52xx_gpt_priv *gpt);
-
-/* mpc52xx_lpbfifo.c */
-#define MPC52XX_LPBFIFO_FLAG_READ		(0)
-#define MPC52XX_LPBFIFO_FLAG_WRITE		(1<<0)
-#define MPC52XX_LPBFIFO_FLAG_NO_INCREMENT	(1<<1)
-#define MPC52XX_LPBFIFO_FLAG_NO_DMA		(1<<2)
-#define MPC52XX_LPBFIFO_FLAG_POLL_DMA		(1<<3)
-
-struct mpc52xx_lpbfifo_request {
-	struct list_head list;
-
-	/* localplus bus address */
-	unsigned int cs;
-	size_t offset;
-
-	/* Memory address */
-	void *data;
-	phys_addr_t data_phys;
-
-	/* Details of transfer */
-	size_t size;
-	size_t pos;	/* current position of transfer */
-	int flags;
-	int defer_xfer_start;
-
-	/* What to do when finished */
-	void (*callback)(struct mpc52xx_lpbfifo_request *);
-
-	void *priv;		/* Driver private data */
-
-	/* statistics */
-	int irq_count;
-	int irq_ticks;
-	u8 last_byte;
-	int buffer_not_done_cnt;
-};
-
-extern int mpc52xx_lpbfifo_submit(struct mpc52xx_lpbfifo_request *req);
-extern void mpc52xx_lpbfifo_abort(struct mpc52xx_lpbfifo_request *req);
-extern void mpc52xx_lpbfifo_poll(void);
-extern int mpc52xx_lpbfifo_start_xfer(struct mpc52xx_lpbfifo_request *req);
 
 /* mpc52xx_pic.c */
 extern void mpc52xx_init_irq(void);
@@ -338,7 +297,7 @@ extern void __init mpc52xx_setup_pci(void);
 static inline void mpc52xx_setup_pci(void) { }
 #endif
 
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 
 #ifdef CONFIG_PM
 struct mpc52xx_suspend {
@@ -350,14 +309,14 @@ extern struct mpc52xx_suspend mpc52xx_suspend;
 extern int __init mpc52xx_pm_init(void);
 extern int mpc52xx_set_wakeup_gpio(u8 pin, u8 level);
 
-#ifdef CONFIG_PPC_LITE5200
-extern int __init lite5200_pm_init(void);
-
 /* lite5200 calls mpc5200 suspend functions, so here they are */
 extern int mpc52xx_pm_prepare(void);
 extern int mpc52xx_pm_enter(suspend_state_t);
 extern void mpc52xx_pm_finish(void);
 extern char saved_sram[0x4000]; /* reuse buffer from mpc52xx suspend */
+
+#ifdef CONFIG_PPC_LITE5200
+int __init lite5200_pm_init(void);
 #endif
 #endif /* CONFIG_PM */
 

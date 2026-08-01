@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  OLPC XO-1.5 ebook switch driver
  *  (based on generic ACPI button driver)
  *
  *  Copyright (C) 2009 Paul Fox <pgf@laptop.org>
  *  Copyright (C) 2010 One Laptop per Child
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or (at
- *  your option) any later version.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -19,6 +15,7 @@
 #include <linux/types.h>
 #include <linux/input.h>
 #include <linux/acpi.h>
+#include <linux/platform_device.h>
 
 #define MODULE_NAME "xo15-ebook"
 
@@ -29,8 +26,6 @@
 #define XO15_EBOOK_SUBCLASS		"ebook"
 #define XO15_EBOOK_HID			"XO15EBK"
 #define XO15_EBOOK_DEVICE_NAME		"EBook Switch"
-
-ACPI_MODULE_NAME(MODULE_NAME);
 
 MODULE_DESCRIPTION("OLPC XO-1.5 ebook switch driver");
 MODULE_LICENSE("GPL");
@@ -44,15 +39,16 @@ MODULE_DEVICE_TABLE(acpi, ebook_device_ids);
 struct ebook_switch {
 	struct input_dev *input;
 	char phys[32];			/* for input device */
+	bool gpe_enabled;
 };
 
-static int ebook_send_state(struct acpi_device *device)
+static int ebook_send_state(struct device *dev)
 {
-	struct ebook_switch *button = acpi_driver_data(device);
+	struct ebook_switch *button = dev_get_drvdata(dev);
 	unsigned long long state;
 	acpi_status status;
 
-	status = acpi_evaluate_integer(device->handle, "EBK", NULL, &state);
+	status = acpi_evaluate_integer(ACPI_HANDLE(dev), "EBK", NULL, &state);
 	if (ACPI_FAILURE(status))
 		return -EIO;
 
@@ -62,16 +58,15 @@ static int ebook_send_state(struct acpi_device *device)
 	return 0;
 }
 
-static void ebook_switch_notify(struct acpi_device *device, u32 event)
+static void ebook_switch_notify(acpi_handle handle, u32 event, void *data)
 {
 	switch (event) {
 	case ACPI_FIXED_HARDWARE_EVENT:
 	case XO15_EBOOK_NOTIFY_STATUS:
-		ebook_send_state(device);
+		ebook_send_state(data);
 		break;
 	default:
-		ACPI_DEBUG_PRINT((ACPI_DB_INFO,
-				  "Unsupported event [0x%x]\n", event));
+		acpi_handle_debug(handle, "Unsupported event [0x%x]\n", event);
 		break;
 	}
 }
@@ -79,94 +74,90 @@ static void ebook_switch_notify(struct acpi_device *device, u32 event)
 #ifdef CONFIG_PM_SLEEP
 static int ebook_switch_resume(struct device *dev)
 {
-	return ebook_send_state(to_acpi_device(dev));
+	return ebook_send_state(dev);
 }
 #endif
 
 static SIMPLE_DEV_PM_OPS(ebook_switch_pm, NULL, ebook_switch_resume);
 
-static int ebook_switch_add(struct acpi_device *device)
+static int ebook_switch_probe(struct platform_device *pdev)
 {
+	struct device *dev = &pdev->dev;
+	struct acpi_device *device = ACPI_COMPANION(dev);
+	const struct acpi_device_id *id;
 	struct ebook_switch *button;
 	struct input_dev *input;
-	const char *hid = acpi_device_hid(device);
-	char *name, *class;
 	int error;
 
-	button = kzalloc(sizeof(struct ebook_switch), GFP_KERNEL);
+	button = devm_kzalloc(dev, sizeof(*button), GFP_KERNEL);
 	if (!button)
 		return -ENOMEM;
 
-	device->driver_data = button;
+	platform_set_drvdata(pdev, button);
 
-	button->input = input = input_allocate_device();
-	if (!input) {
-		error = -ENOMEM;
-		goto err_free_button;
-	}
+	input = devm_input_allocate_device(dev);
+	if (!input)
+		return -ENOMEM;
 
-	name = acpi_device_name(device);
-	class = acpi_device_class(device);
+	button->input = input;
 
-	if (strcmp(hid, XO15_EBOOK_HID)) {
-		pr_err("Unsupported hid [%s]\n", hid);
-		error = -ENODEV;
-		goto err_free_input;
-	}
+	id = acpi_match_acpi_device(ebook_device_ids, device);
+	if (!id)
+		return dev_err_probe(dev, -ENODEV, "Unsupported hid\n");
 
-	strcpy(name, XO15_EBOOK_DEVICE_NAME);
-	sprintf(class, "%s/%s", XO15_EBOOK_CLASS, XO15_EBOOK_SUBCLASS);
+	strscpy(acpi_device_name(device), XO15_EBOOK_DEVICE_NAME);
+	strscpy(acpi_device_class(device), XO15_EBOOK_CLASS "/" XO15_EBOOK_SUBCLASS);
 
-	snprintf(button->phys, sizeof(button->phys), "%s/button/input0", hid);
+	snprintf(button->phys, sizeof(button->phys), "%s/button/input0", id->id);
 
-	input->name = name;
+	input->name = acpi_device_name(device);
 	input->phys = button->phys;
 	input->id.bustype = BUS_HOST;
-	input->dev.parent = &device->dev;
 
 	input->evbit[0] = BIT_MASK(EV_SW);
 	set_bit(SW_TABLET_MODE, input->swbit);
 
 	error = input_register_device(input);
 	if (error)
-		goto err_free_input;
+		return error;
 
-	ebook_send_state(device);
+	error = acpi_dev_install_notify_handler(device, ACPI_DEVICE_NOTIFY,
+						ebook_switch_notify, dev);
+	if (error)
+		return error;
+
+	ebook_send_state(dev);
 
 	if (device->wakeup.flags.valid) {
 		/* Button's GPE is run-wake GPE */
 		acpi_enable_gpe(device->wakeup.gpe_device,
 				device->wakeup.gpe_number);
-		device_set_wakeup_enable(&device->dev, true);
+		button->gpe_enabled = true;
 	}
 
 	return 0;
-
- err_free_input:
-	input_free_device(input);
- err_free_button:
-	kfree(button);
-	return error;
 }
 
-static int ebook_switch_remove(struct acpi_device *device)
+static void ebook_switch_remove(struct platform_device *pdev)
 {
-	struct ebook_switch *button = acpi_driver_data(device);
+	struct ebook_switch *button = platform_get_drvdata(pdev);
+	struct acpi_device *device = ACPI_COMPANION(&pdev->dev);
 
-	input_unregister_device(button->input);
-	kfree(button);
-	return 0;
+	if (button->gpe_enabled)
+		acpi_disable_gpe(device->wakeup.gpe_device,
+				 device->wakeup.gpe_number);
+
+	acpi_dev_remove_notify_handler(device, ACPI_DEVICE_NOTIFY,
+				       ebook_switch_notify);
 }
 
-static struct acpi_driver xo15_ebook_driver = {
-	.name = MODULE_NAME,
-	.class = XO15_EBOOK_CLASS,
-	.ids = ebook_device_ids,
-	.ops = {
-		.add = ebook_switch_add,
-		.remove = ebook_switch_remove,
-		.notify = ebook_switch_notify,
+static struct platform_driver xo15_ebook_driver = {
+	.probe = ebook_switch_probe,
+	.remove = ebook_switch_remove,
+	.driver = {
+		.name = MODULE_NAME,
+		.acpi_match_table = ebook_device_ids,
+		.pm = &ebook_switch_pm,
 	},
-	.drv.pm = &ebook_switch_pm,
 };
-module_acpi_driver(xo15_ebook_driver);
+module_platform_driver(xo15_ebook_driver);

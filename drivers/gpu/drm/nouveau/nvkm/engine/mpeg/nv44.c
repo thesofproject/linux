@@ -43,7 +43,7 @@ struct nv44_mpeg {
 struct nv44_mpeg_chan {
 	struct nvkm_object object;
 	struct nv44_mpeg *mpeg;
-	struct nvkm_fifo_chan *fifo;
+	struct nvkm_chan *fifo;
 	struct list_head head;
 	u32 inst;
 };
@@ -65,7 +65,7 @@ nv44_mpeg_chan_bind(struct nvkm_object *object, struct nvkm_gpuobj *parent,
 }
 
 static int
-nv44_mpeg_chan_fini(struct nvkm_object *object, bool suspend)
+nv44_mpeg_chan_fini(struct nvkm_object *object, enum nvkm_suspend_state suspend)
 {
 
 	struct nv44_mpeg_chan *chan = nv44_mpeg_chan(object);
@@ -100,15 +100,14 @@ nv44_mpeg_chan = {
 };
 
 static int
-nv44_mpeg_chan_new(struct nvkm_fifo_chan *fifoch,
-		   const struct nvkm_oclass *oclass,
+nv44_mpeg_chan_new(struct nvkm_chan *fifoch, const struct nvkm_oclass *oclass,
 		   struct nvkm_object **pobject)
 {
 	struct nv44_mpeg *mpeg = nv44_mpeg(oclass->engine);
 	struct nv44_mpeg_chan *chan;
 	unsigned long flags;
 
-	if (!(chan = kzalloc(sizeof(*chan), GFP_KERNEL)))
+	if (!(chan = kzalloc_obj(*chan)))
 		return -ENOMEM;
 	nvkm_object_ctor(&nv44_mpeg_chan, oclass, &chan->object);
 	chan->mpeg = mpeg;
@@ -182,8 +181,8 @@ nv44_mpeg_intr(struct nvkm_engine *engine)
 
 	if (show) {
 		nvkm_error(subdev, "ch %d [%08x %s] %08x %08x %08x %08x\n",
-			   chan ? chan->fifo->chid : -1, inst << 4,
-			   chan ? chan->object.client->name : "unknown",
+			   chan ? chan->fifo->id : -1, inst << 4,
+			   chan ? chan->fifo->name : "unknown",
 			   stat, type, mthd, data);
 	}
 
@@ -203,14 +202,15 @@ nv44_mpeg = {
 };
 
 int
-nv44_mpeg_new(struct nvkm_device *device, int index, struct nvkm_engine **pmpeg)
+nv44_mpeg_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst,
+	      struct nvkm_engine **pmpeg)
 {
 	struct nv44_mpeg *mpeg;
 
-	if (!(mpeg = kzalloc(sizeof(*mpeg), GFP_KERNEL)))
+	if (!(mpeg = kzalloc_obj(*mpeg)))
 		return -ENOMEM;
 	INIT_LIST_HEAD(&mpeg->chan);
 	*pmpeg = &mpeg->engine;
 
-	return nvkm_engine_ctor(&nv44_mpeg, device, index, true, &mpeg->engine);
+	return nvkm_engine_ctor(&nv44_mpeg, device, type, inst, true, &mpeg->engine);
 }

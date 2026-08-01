@@ -17,7 +17,7 @@ extern void scsi_report_device_reset(struct Scsi_Host *, int, int);
 extern int scsi_block_when_processing_errors(struct scsi_device *);
 extern bool scsi_command_normalize_sense(const struct scsi_cmnd *cmd,
 					 struct scsi_sense_hdr *sshdr);
-extern int scsi_check_sense(struct scsi_cmnd *);
+extern enum scsi_disposition scsi_check_sense(struct scsi_cmnd *);
 
 static inline bool scsi_sense_is_deferred(const struct scsi_sense_hdr *sshdr)
 {
@@ -32,17 +32,21 @@ extern int scsi_ioctl_reset(struct scsi_device *, int __user *);
 struct scsi_eh_save {
 	/* saved state */
 	int result;
+	unsigned int resid_len;
 	int eh_eflags;
 	enum dma_data_direction data_direction;
 	unsigned underflow;
 	unsigned char cmd_len;
 	unsigned char prot_op;
-	unsigned char *cmnd;
+	unsigned char cmnd[32];
 	struct scsi_data_buffer sdb;
-	struct request *next_rq;
-	/* new command support */
-	unsigned char eh_cmnd[BLK_MAX_CDB];
 	struct scatterlist sense_sgl;
+
+	/* struct request fields */
+#ifdef CONFIG_BLK_INLINE_ENCRYPTION
+	struct bio_crypt_ctx *rq_crypt_ctx;
+	struct blk_crypto_keyslot *rq_crypt_keyslot;
+#endif
 };
 
 extern void scsi_eh_prep_cmnd(struct scsi_cmnd *scmd,

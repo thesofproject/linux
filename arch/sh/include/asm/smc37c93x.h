@@ -67,7 +67,7 @@
 #define UART_DLL	0x0	/* Divisor Latch (LS) */
 #define UART_DLM	0x2	/* Divisor Latch (MS) */
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 typedef struct uart_reg {
 	volatile __u16 rbr;
 	volatile __u16 ier;
@@ -78,7 +78,7 @@ typedef struct uart_reg {
 	volatile __u16 msr;
 	volatile __u16 scr;
 } uart_reg;
-#endif /* ! __ASSEMBLY__ */
+#endif /* ! __ASSEMBLER__ */
 
 /* Alias for Write Only Register */
 
@@ -112,8 +112,8 @@ typedef struct uart_reg {
 #define FCR_RFRES	0x0200	/* Receiver FIFO reset */
 #define FCR_TFRES	0x0400	/* Transmitter FIFO reset */
 #define FCR_DMA		0x0800	/* DMA mode select */
-#define FCR_RTL		0x4000	/* Receiver triger (LSB) */
-#define FCR_RTM		0x8000	/* Receiver triger (MSB) */
+#define FCR_RTL		0x4000	/* Receiver trigger (LSB) */
+#define FCR_RTM		0x8000	/* Receiver trigger (MSB) */
 
 /* Line Control Register */
 

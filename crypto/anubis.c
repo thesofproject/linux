@@ -29,11 +29,11 @@
  *
  */
 
+#include <crypto/algapi.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/mm.h>
-#include <asm/byteorder.h>
-#include <linux/crypto.h>
+#include <linux/unaligned.h>
 #include <linux/types.h>
 
 #define ANUBIS_MIN_KEY_SIZE	16
@@ -463,8 +463,6 @@ static int anubis_setkey(struct crypto_tfm *tfm, const u8 *in_key,
 			 unsigned int key_len)
 {
 	struct anubis_ctx *ctx = crypto_tfm_ctx(tfm);
-	const __be32 *key = (const __be32 *)in_key;
-	u32 *flags = &tfm->crt_flags;
 	int N, R, i, r;
 	u32 kappa[ANUBIS_MAX_N];
 	u32 inter[ANUBIS_MAX_N];
@@ -474,7 +472,6 @@ static int anubis_setkey(struct crypto_tfm *tfm, const u8 *in_key,
 		case 32: case 36: case 40:
 			break;
 		default:
-			*flags |= CRYPTO_TFM_RES_BAD_KEY_LEN;
 			return -EINVAL;
 	}
 
@@ -484,7 +481,7 @@ static int anubis_setkey(struct crypto_tfm *tfm, const u8 *in_key,
 
 	/* * map cipher key to initial key state (mu): */
 	for (i = 0; i < N; i++)
-		kappa[i] = be32_to_cpu(key[i]);
+		kappa[i] = get_unaligned_be32(&in_key[4 * i]);
 
 	/*
 	 * generate R + 1 round keys:
@@ -572,10 +569,8 @@ static int anubis_setkey(struct crypto_tfm *tfm, const u8 *in_key,
 }
 
 static void anubis_crypt(u32 roundKey[ANUBIS_MAX_ROUNDS + 1][4],
-		u8 *ciphertext, const u8 *plaintext, const int R)
+			 u8 *dst, const u8 *src, const int R)
 {
-	const __be32 *src = (const __be32 *)plaintext;
-	__be32 *dst = (__be32 *)ciphertext;
 	int i, r;
 	u32 state[4];
 	u32 inter[4];
@@ -585,7 +580,7 @@ static void anubis_crypt(u32 roundKey[ANUBIS_MAX_ROUNDS + 1][4],
 	 * and add initial round key (sigma[K^0]):
 	 */
 	for (i = 0; i < 4; i++)
-		state[i] = be32_to_cpu(src[i]) ^ roundKey[0][i];
+		state[i] = get_unaligned_be32(&src[4 * i]) ^ roundKey[0][i];
 
 	/*
 	 * R - 1 full rounds:
@@ -656,7 +651,7 @@ static void anubis_crypt(u32 roundKey[ANUBIS_MAX_ROUNDS + 1][4],
 	 */
 
 	for (i = 0; i < 4; i++)
-		dst[i] = cpu_to_be32(inter[i]);
+		put_unaligned_be32(inter[i], &dst[4 * i]);
 }
 
 static void anubis_encrypt(struct crypto_tfm *tfm, u8 *dst, const u8 *src)
@@ -673,10 +668,10 @@ static void anubis_decrypt(struct crypto_tfm *tfm, u8 *dst, const u8 *src)
 
 static struct crypto_alg anubis_alg = {
 	.cra_name		=	"anubis",
+	.cra_driver_name	=	"anubis-generic",
 	.cra_flags		=	CRYPTO_ALG_TYPE_CIPHER,
 	.cra_blocksize		=	ANUBIS_BLOCK_SIZE,
 	.cra_ctxsize		=	sizeof (struct anubis_ctx),
-	.cra_alignmask		=	3,
 	.cra_module		=	THIS_MODULE,
 	.cra_u			=	{ .cipher = {
 	.cia_min_keysize	=	ANUBIS_MIN_KEY_SIZE,
@@ -688,10 +683,7 @@ static struct crypto_alg anubis_alg = {
 
 static int __init anubis_mod_init(void)
 {
-	int ret = 0;
-
-	ret = crypto_register_alg(&anubis_alg);
-	return ret;
+	return crypto_register_alg(&anubis_alg);
 }
 
 static void __exit anubis_mod_fini(void)

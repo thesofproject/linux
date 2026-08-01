@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014 Felix Fietkau <nbd@openwrt.org>
  * Copyright (C) 2015 Jakub Kicinski <kubakici@wp.pl>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include "mt7601u.h"
@@ -53,7 +45,7 @@ mt76_mac_process_tx_rate(struct ieee80211_tx_rate *txrate, u16 rate)
 		return;
 	case MT_PHY_TYPE_HT_GF:
 		txrate->flags |= IEEE80211_TX_RC_GREEN_FIELD;
-		/* fall through */
+		fallthrough;
 	case MT_PHY_TYPE_HT:
 		txrate->flags |= IEEE80211_TX_RC_MCS;
 		txrate->idx = idx;
@@ -393,7 +385,7 @@ void mt7601u_mac_set_ampdu_factor(struct mt7601u_dev *dev)
 		msta = container_of(wcid, struct mt76_sta, wcid);
 		sta = container_of(msta, struct ieee80211_sta, drv_priv);
 
-		min_factor = min(min_factor, sta->ht_cap.ampdu_factor);
+		min_factor = min(min_factor, sta->deflink.ht_cap.ampdu_factor);
 	}
 	rcu_read_unlock();
 
@@ -427,7 +419,7 @@ mt76_mac_process_rate(struct ieee80211_rx_status *status, u16 rate)
 		return;
 	case MT_PHY_TYPE_HT_GF:
 		status->enc_flags |= RX_ENC_FLAG_HT_GF;
-		/* fall through */
+		fallthrough;
 	case MT_PHY_TYPE_HT:
 		status->encoding = RX_ENC_HT;
 		status->rate_idx = idx;
@@ -453,7 +445,7 @@ mt7601u_rx_monitor_beacon(struct mt7601u_dev *dev, struct mt7601u_rxwi *rxwi,
 {
 	dev->bcn_freq_off = rxwi->freq_off;
 	dev->bcn_phy_mode = FIELD_GET(MT_RXWI_RATE_PHY, rate);
-	dev->avg_rssi = (dev->avg_rssi * 15) / 16 + (rssi << 8);
+	ewma_rssi_add(&dev->avg_rssi, -rssi);
 }
 
 static int
@@ -503,7 +495,7 @@ u32 mt76_mac_process_rx(struct mt7601u_dev *dev, struct sk_buff *skb,
 	if (mt7601u_rx_is_our_beacon(dev, data))
 		mt7601u_rx_monitor_beacon(dev, rxwi, rate, rssi);
 	else if (rxwi->rxinfo & cpu_to_le32(MT_RXINFO_U2M))
-		dev->avg_rssi = (dev->avg_rssi * 15) / 16 + (rssi << 8);
+		ewma_rssi_add(&dev->avg_rssi, -rssi);
 	spin_unlock_bh(&dev->con_mon_lock);
 
 	return len;

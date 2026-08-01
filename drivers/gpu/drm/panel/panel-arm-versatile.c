@@ -25,8 +25,6 @@
  * Epson QCIF display.
  *
  */
-#include <drm/drmP.h>
-#include <drm/drm_panel.h>
 
 #include <linux/bitops.h>
 #include <linux/init.h>
@@ -38,6 +36,9 @@
 
 #include <video/of_videomode.h>
 #include <video/videomode.h>
+
+#include <drm/drm_modes.h>
+#include <drm/drm_panel.h>
 
 /*
  * This configuration register in the Versatile and RealView
@@ -141,7 +142,6 @@ static const struct versatile_panel_type versatile_panels[] = {
 			.vsync_start = 240 + 5,
 			.vsync_end = 240 + 5 + 6,
 			.vtotal = 240 + 5 + 6 + 5,
-			.vrefresh = 116,
 			.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
 		},
 	},
@@ -165,7 +165,6 @@ static const struct versatile_panel_type versatile_panels[] = {
 			.vsync_start = 480 + 11,
 			.vsync_end = 480 + 11 + 2,
 			.vtotal = 480 + 11 + 2 + 32,
-			.vrefresh = 60,
 			.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
 		},
 	},
@@ -188,10 +187,9 @@ static const struct versatile_panel_type versatile_panels[] = {
 			.vsync_start = 220 + 0,
 			.vsync_end = 220 + 0 + 2,
 			.vtotal = 220 + 0 + 2 + 1,
-			.vrefresh = 390,
 			.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
 		},
-		.bus_flags = DRM_BUS_FLAG_PIXDATA_NEGEDGE,
+		.bus_flags = DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE,
 	},
 	/*
 	 * Sanyo ALR252RGT 240x320 portrait display found on the
@@ -212,10 +210,9 @@ static const struct versatile_panel_type versatile_panels[] = {
 			.vsync_start = 320 + 2,
 			.vsync_end = 320 + 2 + 2,
 			.vtotal = 320 + 2 + 2 + 2,
-			.vrefresh = 116,
 			.flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
 		},
-		.bus_flags = DRM_BUS_FLAG_PIXDATA_NEGEDGE,
+		.bus_flags = DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE,
 		.ib2 = true,
 	},
 };
@@ -258,19 +255,19 @@ static int versatile_panel_enable(struct drm_panel *panel)
 	return 0;
 }
 
-static int versatile_panel_get_modes(struct drm_panel *panel)
+static int versatile_panel_get_modes(struct drm_panel *panel,
+				     struct drm_connector *connector)
 {
-	struct drm_connector *connector = panel->connector;
 	struct versatile_panel *vpanel = to_versatile_panel(panel);
 	struct drm_display_mode *mode;
 
-	strncpy(connector->display_info.name, vpanel->panel_type->name,
-		DRM_DISPLAY_INFO_LEN);
 	connector->display_info.width_mm = vpanel->panel_type->width_mm;
 	connector->display_info.height_mm = vpanel->panel_type->height_mm;
 	connector->display_info.bus_flags = vpanel->panel_type->bus_flags;
 
-	mode = drm_mode_duplicate(panel->drm, &vpanel->panel_type->mode);
+	mode = drm_mode_duplicate(connector->dev, &vpanel->panel_type->mode);
+	if (!mode)
+		return -ENOMEM;
 	drm_mode_set_name(mode);
 	mode->type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
 
@@ -308,9 +305,11 @@ static int versatile_panel_probe(struct platform_device *pdev)
 		return PTR_ERR(map);
 	}
 
-	vpanel = devm_kzalloc(dev, sizeof(*vpanel), GFP_KERNEL);
-	if (!vpanel)
-		return -ENOMEM;
+	vpanel = devm_drm_panel_alloc(dev, struct versatile_panel, panel,
+				      &versatile_panel_drm_funcs,
+				      DRM_MODE_CONNECTOR_DPI);
+	if (IS_ERR(vpanel))
+		return PTR_ERR(vpanel);
 
 	ret = regmap_read(map, SYS_CLCD, &val);
 	if (ret) {
@@ -350,11 +349,9 @@ static int versatile_panel_probe(struct platform_device *pdev)
 			dev_info(dev, "panel mounted on IB2 daughterboard\n");
 	}
 
-	drm_panel_init(&vpanel->panel);
-	vpanel->panel.dev = dev;
-	vpanel->panel.funcs = &versatile_panel_drm_funcs;
+	drm_panel_add(&vpanel->panel);
 
-	return drm_panel_add(&vpanel->panel);
+	return 0;
 }
 
 static const struct of_device_id versatile_panel_match[] = {

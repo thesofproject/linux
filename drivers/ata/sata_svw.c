@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  sata_svw.c - ServerWorks / Apple K2 SATA
  *
@@ -13,27 +14,10 @@
  *  This driver probably works with non-Apple versions of the
  *  Broadcom chipset...
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2, or (at your option)
- *  any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
- *
- *
  *  libata documentation is available via 'make {ps|pdf}docs',
  *  as Documentation/driver-api/libata.rst
  *
  *  Hardware documentation available under NDA.
- *
  */
 
 #include <linux/kernel.h>
@@ -48,6 +32,7 @@
 #include <scsi/scsi.h>
 #include <linux/libata.h>
 #include <linux/of.h>
+#include <linux/of_address.h>
 
 #define DRV_NAME	"sata_svw"
 #define DRV_VERSION	"2.3"
@@ -210,24 +195,24 @@ static void k2_sata_tf_load(struct ata_port *ap, const struct ata_taskfile *tf)
 static void k2_sata_tf_read(struct ata_port *ap, struct ata_taskfile *tf)
 {
 	struct ata_ioports *ioaddr = &ap->ioaddr;
-	u16 nsect, lbal, lbam, lbah, feature;
+	u16 nsect, lbal, lbam, lbah, error;
 
-	tf->command = k2_stat_check_status(ap);
+	tf->status = k2_stat_check_status(ap);
 	tf->device = readw(ioaddr->device_addr);
-	feature = readw(ioaddr->error_addr);
+	error = readw(ioaddr->error_addr);
 	nsect = readw(ioaddr->nsect_addr);
 	lbal = readw(ioaddr->lbal_addr);
 	lbam = readw(ioaddr->lbam_addr);
 	lbah = readw(ioaddr->lbah_addr);
 
-	tf->feature = feature;
+	tf->error = error;
 	tf->nsect = nsect;
 	tf->lbal = lbal;
 	tf->lbam = lbam;
 	tf->lbah = lbah;
 
 	if (tf->flags & ATA_TFLAG_LBA48) {
-		tf->hob_feature = feature >> 8;
+		tf->hob_feature = error >> 8;
 		tf->hob_nsect = nsect >> 8;
 		tf->hob_lbal = lbal >> 8;
 		tf->hob_lbam = lbam >> 8;
@@ -335,10 +320,11 @@ static int k2_sata_show_info(struct seq_file *m, struct Scsi_Host *shost)
 	/* Match it to a port node */
 	index = (ap == ap->host->ports[0]) ? 0 : 1;
 	for (np = np->child; np != NULL; np = np->sibling) {
-		const u32 *reg = of_get_property(np, "reg", NULL);
-		if (!reg)
+		u64 reg;
+
+		if (of_property_read_reg(np, 0, &reg, NULL))
 			continue;
-		if (index == *reg) {
+		if (index == reg) {
 			seq_printf(m, "devspec: %pOF\n", np);
 			break;
 		}
@@ -346,7 +332,7 @@ static int k2_sata_show_info(struct seq_file *m, struct Scsi_Host *shost)
 	return 0;
 }
 
-static struct scsi_host_template k2_sata_sht = {
+static const struct scsi_host_template k2_sata_sht = {
 	ATA_BMDMA_SHT(DRV_NAME),
 	.show_info		= k2_sata_show_info,
 };
@@ -354,8 +340,8 @@ static struct scsi_host_template k2_sata_sht = {
 
 static struct ata_port_operations k2_sata_ops = {
 	.inherits		= &ata_bmdma_port_ops,
-	.softreset              = k2_sata_softreset,
-	.hardreset              = k2_sata_hardreset,
+	.reset.softreset	= k2_sata_softreset,
+	.reset.hardreset	= k2_sata_hardreset,
 	.sff_tf_load		= k2_sata_tf_load,
 	.sff_tf_read		= k2_sata_tf_read,
 	.sff_check_status	= k2_stat_check_status,
@@ -487,10 +473,7 @@ static int k2_sata_init_one(struct pci_dev *pdev, const struct pci_device_id *en
 		ata_port_pbar_desc(ap, 5, offset, "port");
 	}
 
-	rc = dma_set_mask(&pdev->dev, ATA_DMA_MASK);
-	if (rc)
-		return rc;
-	rc = dma_set_coherent_mask(&pdev->dev, ATA_DMA_MASK);
+	rc = dma_set_mask_and_coherent(&pdev->dev, ATA_DMA_MASK);
 	if (rc)
 		return rc;
 
@@ -517,14 +500,13 @@ static int k2_sata_init_one(struct pci_dev *pdev, const struct pci_device_id *en
  * controller
  * */
 static const struct pci_device_id k2_sata_pci_tbl[] = {
-	{ PCI_VDEVICE(SERVERWORKS, 0x0240), chip_svw4 },
-	{ PCI_VDEVICE(SERVERWORKS, 0x0241), chip_svw8 },
-	{ PCI_VDEVICE(SERVERWORKS, 0x0242), chip_svw4 },
-	{ PCI_VDEVICE(SERVERWORKS, 0x024a), chip_svw4 },
-	{ PCI_VDEVICE(SERVERWORKS, 0x024b), chip_svw4 },
-	{ PCI_VDEVICE(SERVERWORKS, 0x0410), chip_svw42 },
-	{ PCI_VDEVICE(SERVERWORKS, 0x0411), chip_svw43 },
-
+	{ PCI_VDEVICE(SERVERWORKS, 0x0240), .driver_data = chip_svw4 },
+	{ PCI_VDEVICE(SERVERWORKS, 0x0241), .driver_data = chip_svw8 },
+	{ PCI_VDEVICE(SERVERWORKS, 0x0242), .driver_data = chip_svw4 },
+	{ PCI_VDEVICE(SERVERWORKS, 0x024a), .driver_data = chip_svw4 },
+	{ PCI_VDEVICE(SERVERWORKS, 0x024b), .driver_data = chip_svw4 },
+	{ PCI_VDEVICE(SERVERWORKS, 0x0410), .driver_data = chip_svw42 },
+	{ PCI_VDEVICE(SERVERWORKS, 0x0411), .driver_data = chip_svw43 },
 	{ }
 };
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Freescale MXS LRADC ADC driver
  *
@@ -7,16 +8,6 @@
  * Authors:
  *  Marek Vasut <marex@denx.de>
  *  Ksenija Stanojevic <ksenija.stanojevic@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
  */
 
 #include <linux/completion.h>
@@ -124,7 +115,8 @@ struct mxs_lradc_adc {
 	struct device		*dev;
 
 	void __iomem		*base;
-	u32			buffer[10];
+	/* Maximum of 8 channels + 8 byte ts */
+	u32			buffer[10] __aligned(8);
 	struct iio_trigger	*trig;
 	struct completion	completion;
 	spinlock_t		lock;
@@ -149,9 +141,8 @@ static int mxs_lradc_adc_read_single(struct iio_dev *iio_dev, int chan,
 	 * the same time, yet the code becomes horribly complicated. Therefore I
 	 * applied KISS principle here.
 	 */
-	ret = iio_device_claim_direct_mode(iio_dev);
-	if (ret)
-		return ret;
+	if (!iio_device_claim_direct(iio_dev))
+		return -EBUSY;
 
 	reinit_completion(&adc->completion);
 
@@ -200,7 +191,7 @@ err:
 	writel(LRADC_CTRL1_LRADC_IRQ_EN(0),
 	       adc->base + LRADC_CTRL1 + STMP_OFFSET_REG_CLR);
 
-	iio_device_release_direct_mode(iio_dev);
+	iio_device_release_direct(iio_dev);
 
 	return ret;
 }
@@ -283,9 +274,8 @@ static int mxs_lradc_adc_write_raw(struct iio_dev *iio_dev,
 			adc->scale_avail[chan->channel];
 	int ret;
 
-	ret = iio_device_claim_direct_mode(iio_dev);
-	if (ret)
-		return ret;
+	if (!iio_device_claim_direct(iio_dev))
+		return -EBUSY;
 
 	switch (m) {
 	case IIO_CHAN_INFO_SCALE:
@@ -308,7 +298,7 @@ static int mxs_lradc_adc_write_raw(struct iio_dev *iio_dev,
 		break;
 	}
 
-	iio_device_release_direct_mode(iio_dev);
+	iio_device_release_direct(iio_dev);
 
 	return ret;
 }
@@ -435,7 +425,8 @@ static irqreturn_t mxs_lradc_adc_trigger_handler(int irq, void *p)
 		j++;
 	}
 
-	iio_push_to_buffers_with_timestamp(iio, adc->buffer, pf->timestamp);
+	iio_push_to_buffers_with_ts(iio, adc->buffer, sizeof(adc->buffer),
+				    pf->timestamp);
 
 	iio_trigger_notify_done(iio->trig);
 
@@ -464,7 +455,9 @@ static int mxs_lradc_adc_trigger_init(struct iio_dev *iio)
 	struct mxs_lradc_adc *adc = iio_priv(iio);
 
 	trig = devm_iio_trigger_alloc(&iio->dev, "%s-dev%i", iio->name,
-				      iio->id);
+				      iio_device_id(iio));
+	if (!trig)
+		return -ENOMEM;
 
 	trig->dev.parent = adc->dev;
 	iio_trigger_set_drvdata(trig, iio);
@@ -575,8 +568,6 @@ static bool mxs_lradc_adc_validate_scan_mask(struct iio_dev *iio,
 
 static const struct iio_buffer_setup_ops mxs_lradc_adc_buffer_ops = {
 	.preenable = &mxs_lradc_adc_buffer_preenable,
-	.postenable = &iio_triggered_buffer_postenable,
-	.predisable = &iio_triggered_buffer_predisable,
 	.postdisable = &mxs_lradc_adc_buffer_postdisable,
 	.validate_scan_mask = &mxs_lradc_adc_validate_scan_mask,
 };
@@ -706,10 +697,8 @@ static int mxs_lradc_adc_probe(struct platform_device *pdev)
 
 	/* Allocate the IIO device. */
 	iio = devm_iio_device_alloc(dev, sizeof(*adc));
-	if (!iio) {
-		dev_err(dev, "Failed to allocate IIO device\n");
+	if (!iio)
 		return -ENOMEM;
-	}
 
 	adc = iio_priv(iio);
 	adc->lradc = lradc;
@@ -729,11 +718,9 @@ static int mxs_lradc_adc_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, iio);
 
 	iio->name = pdev->name;
-	iio->dev.parent = dev;
 	iio->dev.of_node = dev->parent->of_node;
 	iio->info = &mxs_lradc_adc_iio_info;
 	iio->modes = INDIO_DIRECT_MODE;
-	iio->masklength = LRADC_MAX_TOTAL_CHANS;
 
 	if (lradc->soc == IMX23_LRADC) {
 		iio->channels = mx23_lradc_chan_spec;
@@ -766,13 +753,13 @@ static int mxs_lradc_adc_probe(struct platform_device *pdev)
 
 	ret = mxs_lradc_adc_trigger_init(iio);
 	if (ret)
-		goto err_trig;
+		return ret;
 
 	ret = iio_triggered_buffer_setup(iio, &iio_pollfunc_store_time,
 					 &mxs_lradc_adc_trigger_handler,
 					 &mxs_lradc_adc_buffer_ops);
 	if (ret)
-		return ret;
+		goto err_trig;
 
 	adc->vref_mv = mxs_lradc_adc_vref_mv[lradc->soc];
 
@@ -810,30 +797,28 @@ static int mxs_lradc_adc_probe(struct platform_device *pdev)
 
 err_dev:
 	mxs_lradc_adc_hw_stop(adc);
-	mxs_lradc_adc_trigger_remove(iio);
-err_trig:
 	iio_triggered_buffer_cleanup(iio);
+err_trig:
+	mxs_lradc_adc_trigger_remove(iio);
 	return ret;
 }
 
-static int mxs_lradc_adc_remove(struct platform_device *pdev)
+static void mxs_lradc_adc_remove(struct platform_device *pdev)
 {
 	struct iio_dev *iio = platform_get_drvdata(pdev);
 	struct mxs_lradc_adc *adc = iio_priv(iio);
 
 	iio_device_unregister(iio);
 	mxs_lradc_adc_hw_stop(adc);
-	mxs_lradc_adc_trigger_remove(iio);
 	iio_triggered_buffer_cleanup(iio);
-
-	return 0;
+	mxs_lradc_adc_trigger_remove(iio);
 }
 
 static struct platform_driver mxs_lradc_adc_driver = {
 	.driver = {
-		.name	= "mxs-lradc-adc",
+		.name = "mxs-lradc-adc",
 	},
-	.probe	= mxs_lradc_adc_probe,
+	.probe = mxs_lradc_adc_probe,
 	.remove = mxs_lradc_adc_remove,
 };
 module_platform_driver(mxs_lradc_adc_driver);

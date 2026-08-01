@@ -1,8 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
 config NFS_FS
 	tristate "NFS client support"
 	depends on INET && FILE_LOCKING && MULTIUSER
+	select CRC32
 	select LOCKD
 	select SUNRPC
+	select NFS_COMMON
 	select NFS_ACL_SUPPORT if NFS_V3_ACL
 	help
 	  Choose Y here if you want to access files residing on other
@@ -32,12 +35,12 @@ config NFS_FS
 config NFS_V2
 	tristate "NFS client support for NFS version 2"
 	depends on NFS_FS
-	default y
+	default n
 	help
 	  This option enables support for version 2 of the NFS protocol
 	  (RFC 1094) in the kernel's NFS client.
 
-	  If unsure, say Y.
+	  If unsure, say N.
 
 config NFS_V3
 	tristate "NFS client support for NFS version 3"
@@ -74,39 +77,39 @@ config NFS_V3_ACL
 config NFS_V4
 	tristate "NFS client support for NFS version 4"
 	depends on NFS_FS
-	select SUNRPC_GSS
 	select KEYS
+	select SUNRPC_BACKCHANNEL
 	help
-	  This option enables support for version 4 of the NFS protocol
-	  (RFC 3530) in the kernel's NFS client.
+	  This option enables support for version 4.1 of the NFS protocol
+	  (RFC 5661) in the kernel's NFS client.
 
 	  To mount NFS servers using NFSv4, you also need to install user
 	  space programs which can be found in the Linux nfs-utils package,
 	  available from http://linux-nfs.org/.
 
-	  If unsure, say Y.
+	  If unsure, say N.
 
 config NFS_SWAP
 	bool "Provide swap over NFS support"
 	default n
-	depends on NFS_FS
+	depends on NFS_FS && SWAP
 	select SUNRPC_SWAP
 	help
 	  This option enables swapon to work on files located on NFS mounts.
 
-config NFS_V4_1
-	bool "NFS client support for NFSv4.1"
+config NFS_V4_0
+	bool "NFS client support for NFSv4.0"
 	depends on NFS_V4
-	select SUNRPC_BACKCHANNEL
+	default y
 	help
-	  This option enables support for minor version 1 of the NFSv4 protocol
-	  (RFC 5661) in the kernel's NFS client.
+	  This option enables support for minor version 0 of the NFSv4 protocol
+	  (RFC 3530) in the kernel's NFS client.
 
 	  If unsure, say N.
 
 config NFS_V4_2
 	bool "NFS client support for NFSv4.2"
-	depends on NFS_V4_1
+	depends on NFS_V4
 	help
 	  This option enables support for minor version 2 of the NFSv4 protocol
 	  in the kernel's NFS client.
@@ -115,23 +118,22 @@ config NFS_V4_2
 
 config PNFS_FILE_LAYOUT
 	tristate
-	depends on NFS_V4_1
+	depends on NFS_V4
 	default NFS_V4
 
 config PNFS_BLOCK
 	tristate
-	depends on NFS_V4_1 && BLK_DEV_DM
-	depends on 64BIT || LBDAF
+	depends on NFS_V4 && BLK_DEV_DM
 	default NFS_V4
 
 config PNFS_FLEXFILE_LAYOUT
 	tristate
-	depends on NFS_V4_1 && NFS_V3
-	default m
+	depends on NFS_V4
+	default NFS_V4
 
 config NFS_V4_1_IMPLEMENTATION_ID_DOMAIN
 	string "NFSv4.1 Implementation ID Domain"
-	depends on NFS_V4_1
+	depends on NFS_V4
 	default "kernel.org"
 	help
 	  This option defines the domain portion of the implementation ID that
@@ -143,7 +145,7 @@ config NFS_V4_1_IMPLEMENTATION_ID_DOMAIN
 
 config NFS_V4_1_MIGRATION
 	bool "NFSv4.1 client support for migration"
-	depends on NFS_V4_1
+	depends on NFS_V4
 	default n
 	help
 	  This option makes the NFS client advertise to NFSv4.1 servers that
@@ -164,13 +166,15 @@ config ROOT_NFS
 	  If you want your system to mount its root file system via NFS,
 	  choose Y here.  This is common practice for managing systems
 	  without local permanent storage.  For details, read
-	  <file:Documentation/filesystems/nfs/nfsroot.txt>.
+	  <file:Documentation/admin-guide/nfs/nfsroot.rst>.
 
 	  Most people say N here.
 
 config NFS_FSCACHE
 	bool "Provide NFS client caching support"
-	depends on NFS_FS=m && FSCACHE || NFS_FS=y && FSCACHE=y
+	depends on NFS_FS
+	select NETFS_SUPPORT
+	select FSCACHE
 	help
 	  Say Y here if you want NFS data to be cached locally on disc through
 	  the general filesystem cache manager
@@ -194,5 +198,20 @@ config NFS_USE_KERNEL_DNS
 config NFS_DEBUG
 	bool
 	depends on NFS_FS && SUNRPC_DEBUG
-	select CRC32
 	default y
+
+config NFS_DISABLE_UDP_SUPPORT
+       bool "NFS: Disable NFS UDP protocol support"
+       depends on NFS_FS
+       default y
+       help
+	 Choose Y here to disable the use of NFS over UDP. NFS over UDP
+	 on modern networks (1Gb+) can lead to data corruption caused by
+	 fragmentation during high loads.
+
+config NFS_V4_2_READ_PLUS
+	bool "NFS: Enable support for the NFSv4.2 READ_PLUS operation"
+	depends on NFS_V4_2
+	default y
+	help
+	 Choose Y here to enable use of the NFS v4.2 READ_PLUS operation.

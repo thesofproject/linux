@@ -9,6 +9,8 @@ Sparse is a semantic checker for C programs; it can be used to find a
 number of potential problems with kernel code.  See
 https://lwn.net/Articles/689907/ for an overview of sparse; this document
 contains some kernel-specific sparse information.
+More information on sparse, mainly about its internals, can be found in
+its official pages at https://sparse.docs.kernel.org.
 
 
 Using sparse for typechecking
@@ -51,40 +53,16 @@ sure that bitwise types don't get mixed up (little-endian vs big-endian
 vs cpu-endian vs whatever), and there the constant "0" really _is_
 special.
 
-Using sparse for lock checking
-------------------------------
-
-The following macros are undefined for gcc and defined during a sparse
-run to use the "context" tracking feature of sparse, applied to
-locking.  These annotations tell sparse when a lock is held, with
-regard to the annotated function's entry and exit.
-
-__must_hold - The specified lock is held on function entry and exit.
-
-__acquires - The specified lock is held on function exit, but not entry.
-
-__releases - The specified lock is held on function entry, but not exit.
-
-If the function enters and exits without the lock held, acquiring and
-releasing the lock inside the function in a balanced way, no
-annotation is needed.  The three annotations above are for cases where
-sparse would otherwise report a context imbalance.
-
 Getting sparse
 --------------
 
-You can get latest released versions from the Sparse homepage at
-https://sparse.wiki.kernel.org/index.php/Main_Page
+You can get tarballs of the latest released versions from:
+https://www.kernel.org/pub/software/devel/sparse/dist/
 
 Alternatively, you can get snapshots of the latest development version
 of sparse using git to clone::
 
         git://git.kernel.org/pub/scm/devel/sparse/sparse.git
-
-DaveJ has hourly generated tarballs of the git tree available at::
-
-        http://www.codemonkey.org.uk/projects/git-snapshots/sparse/
-
 
 Once you have it, just do::
 
@@ -103,3 +81,5 @@ have already built it.
 
 The optional make variable CF can be used to pass arguments to sparse.  The
 build system passes -Wbitwise to sparse automatically.
+
+Note that sparse defines the __CHECKER__ preprocessor symbol.

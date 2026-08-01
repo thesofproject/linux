@@ -1,15 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Backlight driver for Analog Devices ADP5520/ADP5501 MFD PMICs
  *
  * Copyright 2009 Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
-#include <linux/fb.h>
 #include <linux/backlight.h>
 #include <linux/mfd/adp5520.h>
 #include <linux/slab.h>
@@ -66,15 +64,7 @@ static int adp5520_bl_set(struct backlight_device *bl, int brightness)
 
 static int adp5520_bl_update_status(struct backlight_device *bl)
 {
-	int brightness = bl->props.brightness;
-
-	if (bl->props.power != FB_BLANK_UNBLANK)
-		brightness = 0;
-
-	if (bl->props.fb_blank != FB_BLANK_UNBLANK)
-		brightness = 0;
-
-	return adp5520_bl_set(bl, brightness);
+	return adp5520_bl_set(bl, backlight_get_brightness(bl));
 }
 
 static int adp5520_bl_get_brightness(struct backlight_device *bl)
@@ -346,7 +336,7 @@ static int adp5520_bl_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int adp5520_bl_remove(struct platform_device *pdev)
+static void adp5520_bl_remove(struct platform_device *pdev)
 {
 	struct backlight_device *bl = platform_get_drvdata(pdev);
 	struct adp5520_bl *data = bl_get_data(bl);
@@ -356,8 +346,6 @@ static int adp5520_bl_remove(struct platform_device *pdev)
 	if (data->pdata->en_ambl_sens)
 		sysfs_remove_group(&bl->dev.kobj,
 				&adp5520_bl_attr_group);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -391,7 +379,7 @@ static struct platform_driver adp5520_bl_driver = {
 
 module_platform_driver(adp5520_bl_driver);
 
-MODULE_AUTHOR("Michael Hennerich <hennerich@blackfin.uclinux.org>");
+MODULE_AUTHOR("Michael Hennerich <michael.hennerich@analog.com>");
 MODULE_DESCRIPTION("ADP5520(01) Backlight Driver");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:adp5520-backlight");

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * smsc47m1.c - Part of lm_sensors, Linux kernel modules
  *		for hardware monitoring
@@ -10,20 +11,6 @@
  * Copyright (C) 2004-2007 Jean Delvare <jdelvare@suse.de>
  * Ported to Linux 2.6 by Gabriele Gorla <gorlik@yahoo.com>
  *			and Jean Delvare
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -46,7 +33,7 @@ static unsigned short force_id;
 module_param(force_id, ushort, 0);
 MODULE_PARM_DESC(force_id, "Override the detected device ID");
 
-static struct platform_device *pdev;
+static struct platform_device *smsc47m1_pdev;
 
 #define DRVNAME "smsc47m1"
 enum chips { smsc47m1, smsc47m2 };
@@ -73,16 +60,21 @@ superio_inb(int reg)
 /* logical device for fans is 0x0A */
 #define superio_select() superio_outb(0x07, 0x0A)
 
-static inline void
+static inline int
 superio_enter(void)
 {
+	if (!request_muxed_region(REG, 2, DRVNAME))
+		return -EBUSY;
+
 	outb(0x55, REG);
+	return 0;
 }
 
 static inline void
 superio_exit(void)
 {
 	outb(0xAA, REG);
+	release_region(REG, 2);
 }
 
 #define SUPERIO_REG_ACT		0x30
@@ -202,8 +194,8 @@ static struct smsc47m1_data *smsc47m1_update_device(struct device *dev,
 	return data;
 }
 
-static ssize_t get_fan(struct device *dev, struct device_attribute
-		       *devattr, char *buf)
+static ssize_t fan_show(struct device *dev, struct device_attribute *devattr,
+			char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
 	struct smsc47m1_data *data = smsc47m1_update_device(dev, 0);
@@ -221,8 +213,8 @@ static ssize_t get_fan(struct device *dev, struct device_attribute
 	return sprintf(buf, "%d\n", rpm);
 }
 
-static ssize_t get_fan_min(struct device *dev, struct device_attribute
-			   *devattr, char *buf)
+static ssize_t fan_min_show(struct device *dev,
+			    struct device_attribute *devattr, char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
 	struct smsc47m1_data *data = smsc47m1_update_device(dev, 0);
@@ -232,32 +224,32 @@ static ssize_t get_fan_min(struct device *dev, struct device_attribute
 	return sprintf(buf, "%d\n", rpm);
 }
 
-static ssize_t get_fan_div(struct device *dev, struct device_attribute
-			   *devattr, char *buf)
+static ssize_t fan_div_show(struct device *dev,
+			    struct device_attribute *devattr, char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
 	struct smsc47m1_data *data = smsc47m1_update_device(dev, 0);
 	return sprintf(buf, "%d\n", DIV_FROM_REG(data->fan_div[attr->index]));
 }
 
-static ssize_t get_fan_alarm(struct device *dev, struct device_attribute
-			     *devattr, char *buf)
+static ssize_t fan_alarm_show(struct device *dev,
+			      struct device_attribute *devattr, char *buf)
 {
 	int bitnr = to_sensor_dev_attr(devattr)->index;
 	struct smsc47m1_data *data = smsc47m1_update_device(dev, 0);
 	return sprintf(buf, "%u\n", (data->alarms >> bitnr) & 1);
 }
 
-static ssize_t get_pwm(struct device *dev, struct device_attribute
-		       *devattr, char *buf)
+static ssize_t pwm_show(struct device *dev, struct device_attribute *devattr,
+			char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
 	struct smsc47m1_data *data = smsc47m1_update_device(dev, 0);
 	return sprintf(buf, "%d\n", PWM_FROM_REG(data->pwm[attr->index]));
 }
 
-static ssize_t get_pwm_en(struct device *dev, struct device_attribute
-			  *devattr, char *buf)
+static ssize_t pwm_en_show(struct device *dev,
+			   struct device_attribute *devattr, char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
 	struct smsc47m1_data *data = smsc47m1_update_device(dev, 0);
@@ -271,8 +263,9 @@ static ssize_t alarms_show(struct device *dev,
 	return sprintf(buf, "%d\n", data->alarms);
 }
 
-static ssize_t set_fan_min(struct device *dev, struct device_attribute
-			   *devattr, const char *buf, size_t count)
+static ssize_t fan_min_store(struct device *dev,
+			     struct device_attribute *devattr,
+			     const char *buf, size_t count)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
 	struct smsc47m1_data *data = dev_get_drvdata(dev);
@@ -307,8 +300,9 @@ static ssize_t set_fan_min(struct device *dev, struct device_attribute
  * of least surprise; the user doesn't expect the fan minimum to change just
  * because the divider changed.
  */
-static ssize_t set_fan_div(struct device *dev, struct device_attribute
-			   *devattr, const char *buf, size_t count)
+static ssize_t fan_div_store(struct device *dev,
+			     struct device_attribute *devattr,
+			     const char *buf, size_t count)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
 	struct smsc47m1_data *data = dev_get_drvdata(dev);
@@ -357,6 +351,8 @@ static ssize_t set_fan_div(struct device *dev, struct device_attribute
 		tmp |= data->fan_div[2] << 4;
 		smsc47m1_write_value(data, SMSC47M2_REG_FANDIV3, tmp);
 		break;
+	default:
+		BUG();
 	}
 
 	/* Preserve fan min */
@@ -370,8 +366,8 @@ static ssize_t set_fan_div(struct device *dev, struct device_attribute
 	return count;
 }
 
-static ssize_t set_pwm(struct device *dev, struct device_attribute
-		       *devattr, const char *buf, size_t count)
+static ssize_t pwm_store(struct device *dev, struct device_attribute *devattr,
+			 const char *buf, size_t count)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
 	struct smsc47m1_data *data = dev_get_drvdata(dev);
@@ -396,8 +392,9 @@ static ssize_t set_pwm(struct device *dev, struct device_attribute
 	return count;
 }
 
-static ssize_t set_pwm_en(struct device *dev, struct device_attribute
-			  *devattr, const char *buf, size_t count)
+static ssize_t pwm_en_store(struct device *dev,
+			    struct device_attribute *devattr, const char *buf,
+			    size_t count)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
 	struct smsc47m1_data *data = dev_get_drvdata(dev);
@@ -422,23 +419,24 @@ static ssize_t set_pwm_en(struct device *dev, struct device_attribute
 	return count;
 }
 
-#define fan_present(offset)						\
-static SENSOR_DEVICE_ATTR(fan##offset##_input, S_IRUGO, get_fan,	\
-		NULL, offset - 1);					\
-static SENSOR_DEVICE_ATTR(fan##offset##_min, S_IRUGO | S_IWUSR,		\
-		get_fan_min, set_fan_min, offset - 1);			\
-static SENSOR_DEVICE_ATTR(fan##offset##_div, S_IRUGO | S_IWUSR,		\
-		get_fan_div, set_fan_div, offset - 1);			\
-static SENSOR_DEVICE_ATTR(fan##offset##_alarm, S_IRUGO, get_fan_alarm,	\
-		NULL, offset - 1);					\
-static SENSOR_DEVICE_ATTR(pwm##offset, S_IRUGO | S_IWUSR,		\
-		get_pwm, set_pwm, offset - 1);				\
-static SENSOR_DEVICE_ATTR(pwm##offset##_enable, S_IRUGO | S_IWUSR,	\
-		get_pwm_en, set_pwm_en, offset - 1)
-
-fan_present(1);
-fan_present(2);
-fan_present(3);
+static SENSOR_DEVICE_ATTR_RO(fan1_input, fan, 0);
+static SENSOR_DEVICE_ATTR_RW(fan1_min, fan_min, 0);
+static SENSOR_DEVICE_ATTR_RW(fan1_div, fan_div, 0);
+static SENSOR_DEVICE_ATTR_RO(fan1_alarm, fan_alarm, 0);
+static SENSOR_DEVICE_ATTR_RW(pwm1, pwm, 0);
+static SENSOR_DEVICE_ATTR_RW(pwm1_enable, pwm_en, 0);
+static SENSOR_DEVICE_ATTR_RO(fan2_input, fan, 1);
+static SENSOR_DEVICE_ATTR_RW(fan2_min, fan_min, 1);
+static SENSOR_DEVICE_ATTR_RW(fan2_div, fan_div, 1);
+static SENSOR_DEVICE_ATTR_RO(fan2_alarm, fan_alarm, 1);
+static SENSOR_DEVICE_ATTR_RW(pwm2, pwm, 1);
+static SENSOR_DEVICE_ATTR_RW(pwm2_enable, pwm_en, 1);
+static SENSOR_DEVICE_ATTR_RO(fan3_input, fan, 2);
+static SENSOR_DEVICE_ATTR_RW(fan3_min, fan_min, 2);
+static SENSOR_DEVICE_ATTR_RW(fan3_div, fan_div, 2);
+static SENSOR_DEVICE_ATTR_RO(fan3_alarm, fan_alarm, 2);
+static SENSOR_DEVICE_ATTR_RW(pwm3, pwm, 2);
+static SENSOR_DEVICE_ATTR_RW(pwm3_enable, pwm_en, 2);
 
 static DEVICE_ATTR_RO(alarms);
 
@@ -531,8 +529,12 @@ static int __init smsc47m1_find(struct smsc47m1_sio_data *sio_data)
 {
 	u8 val;
 	unsigned short addr;
+	int err;
 
-	superio_enter();
+	err = superio_enter();
+	if (err)
+		return err;
+
 	val = force_id ? force_id : superio_inb(SUPERIO_REG_DEVID);
 
 	/*
@@ -608,13 +610,14 @@ static int __init smsc47m1_find(struct smsc47m1_sio_data *sio_data)
 static void smsc47m1_restore(const struct smsc47m1_sio_data *sio_data)
 {
 	if ((sio_data->activate & 0x01) == 0) {
-		superio_enter();
-		superio_select();
-
-		pr_info("Disabling device\n");
-		superio_outb(SUPERIO_REG_ACT, sio_data->activate);
-
-		superio_exit();
+		if (!superio_enter()) {
+			superio_select();
+			pr_info("Disabling device\n");
+			superio_outb(SUPERIO_REG_ACT, sio_data->activate);
+			superio_exit();
+		} else {
+			pr_warn("Failed to disable device\n");
+		}
 	}
 }
 
@@ -679,7 +682,7 @@ static int __init smsc47m1_handle_resources(unsigned short address,
 			/* Request the resources */
 			if (!devm_request_region(dev, start, len, DRVNAME)) {
 				dev_err(dev,
-					"Region 0x%hx-0x%hx already in use!\n",
+					"Region 0x%x-0x%x already in use!\n",
 					start, start + len);
 				return -EBUSY;
 			}
@@ -837,17 +840,21 @@ error_remove_files:
 	return err;
 }
 
-static int __exit smsc47m1_remove(struct platform_device *pdev)
+static void __exit smsc47m1_remove(struct platform_device *pdev)
 {
 	struct smsc47m1_data *data = platform_get_drvdata(pdev);
 
 	hwmon_device_unregister(data->hwmon_dev);
 	smsc47m1_remove_files(&pdev->dev);
-
-	return 0;
 }
 
-static struct platform_driver smsc47m1_driver = {
+/*
+ * smsc47m1_remove() lives in .exit.text. For drivers registered via
+ * module_platform_driver_probe() this ok because they cannot get unbound at
+ * runtime. The driver needs to be marked with __refdata, otherwise modpost
+ * triggers a section mismatch warning.
+ */
+static struct platform_driver smsc47m1_driver __refdata = {
 	.driver = {
 		.name	= DRVNAME,
 	},
@@ -857,50 +864,33 @@ static struct platform_driver smsc47m1_driver = {
 static int __init smsc47m1_device_add(unsigned short address,
 				      const struct smsc47m1_sio_data *sio_data)
 {
-	struct resource res = {
+	const struct resource res = {
 		.start	= address,
 		.end	= address + SMSC_EXTENT - 1,
 		.name	= DRVNAME,
 		.flags	= IORESOURCE_IO,
 	};
+	const struct platform_device_info pdevinfo = {
+		.name = DRVNAME,
+		.id = address,
+		.res = &res,
+		.num_res = 1,
+		.data = sio_data,
+		.size_data = sizeof(struct smsc47m1_sio_data),
+	};
 	int err;
 
 	err = smsc47m1_handle_resources(address, sio_data->type, CHECK, NULL);
 	if (err)
-		goto exit;
+		return err;
 
-	pdev = platform_device_alloc(DRVNAME, address);
-	if (!pdev) {
-		err = -ENOMEM;
+	smsc47m1_pdev = platform_device_register_full(&pdevinfo);
+	if (IS_ERR(smsc47m1_pdev)) {
 		pr_err("Device allocation failed\n");
-		goto exit;
-	}
-
-	err = platform_device_add_resources(pdev, &res, 1);
-	if (err) {
-		pr_err("Device resource addition failed (%d)\n", err);
-		goto exit_device_put;
-	}
-
-	err = platform_device_add_data(pdev, sio_data,
-				       sizeof(struct smsc47m1_sio_data));
-	if (err) {
-		pr_err("Platform data allocation failed\n");
-		goto exit_device_put;
-	}
-
-	err = platform_device_add(pdev);
-	if (err) {
-		pr_err("Device addition failed (%d)\n", err);
-		goto exit_device_put;
+		return PTR_ERR(smsc47m1_pdev);
 	}
 
 	return 0;
-
-exit_device_put:
-	platform_device_put(pdev);
-exit:
-	return err;
 }
 
 static int __init sm_smsc47m1_init(void)
@@ -914,7 +904,7 @@ static int __init sm_smsc47m1_init(void)
 		return err;
 	address = err;
 
-	/* Sets global pdev as a side effect */
+	/* Sets global smsc47m1_pdev as a side effect */
 	err = smsc47m1_device_add(address, &sio_data);
 	if (err)
 		return err;
@@ -926,7 +916,7 @@ static int __init sm_smsc47m1_init(void)
 	return 0;
 
 exit_device:
-	platform_device_unregister(pdev);
+	platform_device_unregister(smsc47m1_pdev);
 	smsc47m1_restore(&sio_data);
 	return err;
 }
@@ -934,8 +924,8 @@ exit_device:
 static void __exit sm_smsc47m1_exit(void)
 {
 	platform_driver_unregister(&smsc47m1_driver);
-	smsc47m1_restore(dev_get_platdata(&pdev->dev));
-	platform_device_unregister(pdev);
+	smsc47m1_restore(dev_get_platdata(&smsc47m1_pdev->dev));
+	platform_device_unregister(smsc47m1_pdev);
 }
 
 MODULE_AUTHOR("Mark D. Studebaker <mdsxyz123@yahoo.com>");

@@ -1,18 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for Zarlink DVB-T ZL10353 demodulator
  *
  * Copyright (C) 2006, 2007 Christopher Pascoe <c.pascoe@itee.uq.edu.au>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -211,7 +201,7 @@ static int zl10353_set_parameters(struct dvb_frontend *fe)
 		break;
 	default:
 		c->bandwidth_hz = 8000000;
-		/* fall through */
+		fallthrough;
 	case 8000000:
 		zl10353_single_write(fe, MCLK_RATIO, 0x75);
 		zl10353_single_write(fe, 0x64, 0x36);
@@ -268,7 +258,7 @@ static int zl10353_set_parameters(struct dvb_frontend *fe)
 		if (c->hierarchy == HIERARCHY_AUTO ||
 		    c->hierarchy == HIERARCHY_NONE)
 			break;
-		/* fall through */
+		fallthrough;
 	default:
 		return -EINVAL;
 	}
@@ -608,7 +598,7 @@ struct dvb_frontend *zl10353_attach(const struct zl10353_config *config,
 	int id;
 
 	/* allocate memory for the internal state */
-	state = kzalloc(sizeof(struct zl10353_state), GFP_KERNEL);
+	state = kzalloc_obj(struct zl10353_state);
 	if (state == NULL)
 		goto error;
 
@@ -635,10 +625,9 @@ static const struct dvb_frontend_ops zl10353_ops = {
 	.delsys = { SYS_DVBT },
 	.info = {
 		.name			= "Zarlink ZL10353 DVB-T",
-		.frequency_min		= 174000000,
-		.frequency_max		= 862000000,
-		.frequency_stepsize	= 166667,
-		.frequency_tolerance	= 0,
+		.frequency_min_hz	= 174 * MHz,
+		.frequency_max_hz	= 862 * MHz,
+		.frequency_stepsize_hz	= 166667,
 		.caps = FE_CAN_FEC_1_2 | FE_CAN_FEC_2_3 |
 			FE_CAN_FEC_3_4 | FE_CAN_FEC_5_6 | FE_CAN_FEC_7_8 |
 			FE_CAN_FEC_AUTO |
@@ -676,4 +665,4 @@ MODULE_DESCRIPTION("Zarlink ZL10353 DVB-T demodulator driver");
 MODULE_AUTHOR("Chris Pascoe");
 MODULE_LICENSE("GPL");
 
-EXPORT_SYMBOL(zl10353_attach);
+EXPORT_SYMBOL_GPL(zl10353_attach);

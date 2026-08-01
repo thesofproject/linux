@@ -1,34 +1,8 @@
+// SPDX-License-Identifier: BSD-3-Clause OR GPL-2.0
 /*
- * Copyright (c) 2016 Mellanox Technologies. All rights reserved.
- * Copyright (c) 2016 Michael Shych <michaels@mellanox.com>
+ * Mellanox i2c driver
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. Neither the names of the copyright holders nor the names of its
- *    contributors may be used to endorse or promote products derived from
- *    this software without specific prior written permission.
- *
- * Alternatively, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") version 2 as published by the Free
- * Software Foundation.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Copyright (C) 2016-2020 Mellanox Technologies
  */
 
 #include <linux/delay.h>
@@ -37,7 +11,9 @@
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/platform_data/mlxreg.h>
 #include <linux/platform_device.h>
+#include <linux/regmap.h>
 
 /* General defines */
 #define MLXPLAT_CPLD_LPC_I2C_BASE_ADDR	0x2000
@@ -45,13 +21,17 @@
 #define MLXCPLD_I2C_VALID_FLAG		(I2C_M_RECV_LEN | I2C_M_RD)
 #define MLXCPLD_I2C_BUS_NUM		1
 #define MLXCPLD_I2C_DATA_REG_SZ		36
+#define MLXCPLD_I2C_DATA_SZ_BIT		BIT(5)
+#define MLXCPLD_I2C_DATA_EXT2_SZ_BIT	BIT(6)
+#define MLXCPLD_I2C_DATA_SZ_MASK	GENMASK(6, 5)
+#define MLXCPLD_I2C_SMBUS_BLK_BIT	BIT(7)
 #define MLXCPLD_I2C_MAX_ADDR_LEN	4
 #define MLXCPLD_I2C_RETR_NUM		2
 #define MLXCPLD_I2C_XFER_TO		500000 /* usec */
-#define MLXCPLD_I2C_POLL_TIME		2000   /* usec */
+#define MLXCPLD_I2C_POLL_TIME		200   /* usec */
 
 /* LPC I2C registers */
-#define MLXCPLD_LPCI2C_LPF_REG		0x0
+#define MLXCPLD_LPCI2C_CPBLTY_REG	0x0
 #define MLXCPLD_LPCI2C_CTRL_REG		0x1
 #define MLXCPLD_LPCI2C_HALF_CYC_REG	0x4
 #define MLXCPLD_LPCI2C_I2C_HOLD_REG	0x5
@@ -61,13 +41,23 @@
 #define MLXCPLD_LPCI2C_STATUS_REG	0x9
 #define MLXCPLD_LPCI2C_DATA_REG		0xa
 
-/* LPC I2C masks and parametres */
+/* LPC I2C masks and parameters */
 #define MLXCPLD_LPCI2C_RST_SEL_MASK	0x1
 #define MLXCPLD_LPCI2C_TRANS_END	0x1
 #define MLXCPLD_LPCI2C_STATUS_NACK	0x10
 #define MLXCPLD_LPCI2C_NO_IND		0
 #define MLXCPLD_LPCI2C_ACK_IND		1
 #define MLXCPLD_LPCI2C_NACK_IND		2
+
+#define MLXCPLD_I2C_FREQ_1000KHZ_SET	0x04
+#define MLXCPLD_I2C_FREQ_400KHZ_SET	0x0e
+#define MLXCPLD_I2C_FREQ_100KHZ_SET	0x42
+
+enum mlxcpld_i2c_frequency {
+	MLXCPLD_I2C_FREQ_1000KHZ = 1,
+	MLXCPLD_I2C_FREQ_400KHZ = 2,
+	MLXCPLD_I2C_FREQ_100KHZ = 3,
+};
 
 struct  mlxcpld_i2c_curr_xfer {
 	u8 cmd;
@@ -83,6 +73,8 @@ struct mlxcpld_i2c_priv {
 	struct mutex lock;
 	struct  mlxcpld_i2c_curr_xfer xfer;
 	struct device *dev;
+	bool smbus_block;
+	int polling_time;
 };
 
 static void mlxcpld_i2c_lpc_write_buf(u8 *data, u8 len, u32 addr)
@@ -205,8 +197,8 @@ static int mlxcpld_i2c_check_status(struct mlxcpld_i2c_priv *priv, int *status)
 	if (val & MLXCPLD_LPCI2C_TRANS_END) {
 		if (val & MLXCPLD_LPCI2C_STATUS_NACK)
 			/*
-			 * The slave is unable to accept the data. No such
-			 * slave, command not understood, or unable to accept
+			 * The target is unable to accept the data. No such
+			 * target, command not understood, or unable to accept
 			 * any more data.
 			 */
 			*status = MLXCPLD_LPCI2C_NACK_IND;
@@ -230,7 +222,7 @@ static void mlxcpld_i2c_set_transf_data(struct mlxcpld_i2c_priv *priv,
 	 * All upper layers currently are never use transfer with more than
 	 * 2 messages. Actually, it's also not so relevant in Mellanox systems
 	 * because of HW limitation. Max size of transfer is not more than 32
-	 * bytes in the current x86 LPCI2C bridge.
+	 * or 68 bytes in the current x86 LPCI2C bridge.
 	 */
 	priv->xfer.cmd = msgs[num - 1].flags & I2C_M_RD;
 
@@ -277,8 +269,8 @@ static int mlxcpld_i2c_wait_for_free(struct mlxcpld_i2c_priv *priv)
 	do {
 		if (!mlxcpld_i2c_check_busy(priv))
 			break;
-		usleep_range(MLXCPLD_I2C_POLL_TIME / 2, MLXCPLD_I2C_POLL_TIME);
-		timeout += MLXCPLD_I2C_POLL_TIME;
+		usleep_range(priv->polling_time / 2, priv->polling_time);
+		timeout += priv->polling_time;
 	} while (timeout <= MLXCPLD_I2C_XFER_TO);
 
 	if (timeout > MLXCPLD_I2C_XFER_TO)
@@ -288,20 +280,20 @@ static int mlxcpld_i2c_wait_for_free(struct mlxcpld_i2c_priv *priv)
 }
 
 /*
- * Wait for master transfer to complete.
+ * Wait for transfer to complete.
  * It puts current process to sleep until we get interrupt or timeout expires.
  * Returns the number of transferred or read bytes or error (<0).
  */
 static int mlxcpld_i2c_wait_for_tc(struct mlxcpld_i2c_priv *priv)
 {
 	int status, i, timeout = 0;
-	u8 datalen;
+	u8 datalen, val;
 
 	do {
-		usleep_range(MLXCPLD_I2C_POLL_TIME / 2, MLXCPLD_I2C_POLL_TIME);
+		usleep_range(priv->polling_time / 2, priv->polling_time);
 		if (!mlxcpld_i2c_check_status(priv, &status))
 			break;
-		timeout += MLXCPLD_I2C_POLL_TIME;
+		timeout += priv->polling_time;
 	} while (status == 0 && timeout < MLXCPLD_I2C_XFER_TO);
 
 	switch (status) {
@@ -323,10 +315,23 @@ static int mlxcpld_i2c_wait_for_tc(struct mlxcpld_i2c_priv *priv)
 		/*
 		 * Actual read data len will be always the same as
 		 * requested len. 0xff (line pull-up) will be returned
-		 * if slave has no data to return. Thus don't read
-		 * MLXCPLD_LPCI2C_NUM_DAT_REG reg from CPLD.
+		 * if target has no data to return. Thus don't read
+		 * MLXCPLD_LPCI2C_NUM_DAT_REG reg from CPLD.  Only in case of
+		 * SMBus block read transaction data len can be different,
+		 * check this case.
 		 */
-		datalen = priv->xfer.data_len;
+		mlxcpld_i2c_read_comm(priv, MLXCPLD_LPCI2C_NUM_ADDR_REG, &val,
+				      1);
+		if (priv->smbus_block && (val & MLXCPLD_I2C_SMBUS_BLK_BIT)) {
+			mlxcpld_i2c_read_comm(priv, MLXCPLD_LPCI2C_NUM_DAT_REG,
+					      &datalen, 1);
+			if (unlikely(datalen > I2C_SMBUS_BLOCK_MAX)) {
+				dev_err(priv->dev, "Incorrect smbus block read message len\n");
+				return -EPROTO;
+			}
+		} else {
+			datalen = priv->xfer.data_len;
+		}
 
 		mlxcpld_i2c_read_comm(priv, MLXCPLD_LPCI2C_DATA_REG,
 				      priv->xfer.msg[i].buf, datalen);
@@ -344,12 +349,20 @@ static int mlxcpld_i2c_wait_for_tc(struct mlxcpld_i2c_priv *priv)
 static void mlxcpld_i2c_xfer_msg(struct mlxcpld_i2c_priv *priv)
 {
 	int i, len = 0;
-	u8 cmd;
+	u8 cmd, val;
 
 	mlxcpld_i2c_write_comm(priv, MLXCPLD_LPCI2C_NUM_DAT_REG,
 			       &priv->xfer.data_len, 1);
-	mlxcpld_i2c_write_comm(priv, MLXCPLD_LPCI2C_NUM_ADDR_REG,
-			       &priv->xfer.addr_width, 1);
+
+	val = priv->xfer.addr_width;
+	/* Notify HW about SMBus block read transaction */
+	if (priv->smbus_block && priv->xfer.msg_num >= 2 &&
+	    priv->xfer.msg[1].len == 1 &&
+	    (priv->xfer.msg[1].flags & I2C_M_RECV_LEN) &&
+	    (priv->xfer.msg[1].flags & I2C_M_RD))
+		val |= MLXCPLD_I2C_SMBUS_BLK_BIT;
+
+	mlxcpld_i2c_write_comm(priv, MLXCPLD_LPCI2C_NUM_ADDR_REG, &val, 1);
 
 	for (i = 0; i < priv->xfer.msg_num; i++) {
 		if ((priv->xfer.msg[i].flags & I2C_M_RD) != I2C_M_RD) {
@@ -362,7 +375,7 @@ static void mlxcpld_i2c_xfer_msg(struct mlxcpld_i2c_priv *priv)
 	}
 
 	/*
-	 * Set target slave address with command for master transfer.
+	 * Set target address with command for transfer.
 	 * It should be latest executed function before CPLD transaction.
 	 */
 	cmd = (priv->xfer.msg[0].addr << 1) | priv->xfer.cmd;
@@ -425,12 +438,19 @@ static int mlxcpld_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 
 static u32 mlxcpld_i2c_func(struct i2c_adapter *adap)
 {
-	return I2C_FUNC_I2C | I2C_FUNC_SMBUS_EMUL | I2C_FUNC_SMBUS_BLOCK_DATA;
+	struct mlxcpld_i2c_priv *priv = i2c_get_adapdata(adap);
+
+	if (priv->smbus_block)
+		return I2C_FUNC_I2C | I2C_FUNC_SMBUS_EMUL |
+			I2C_FUNC_SMBUS_I2C_BLOCK | I2C_FUNC_SMBUS_BLOCK_DATA;
+	else
+		return I2C_FUNC_I2C | I2C_FUNC_SMBUS_EMUL |
+			I2C_FUNC_SMBUS_I2C_BLOCK;
 }
 
 static const struct i2c_algorithm mlxcpld_i2c_algo = {
-	.master_xfer	= mlxcpld_i2c_xfer,
-	.functionality	= mlxcpld_i2c_func
+	.xfer = mlxcpld_i2c_xfer,
+	.functionality = mlxcpld_i2c_func
 };
 
 static const struct i2c_adapter_quirks mlxcpld_i2c_quirks = {
@@ -440,20 +460,74 @@ static const struct i2c_adapter_quirks mlxcpld_i2c_quirks = {
 	.max_comb_1st_msg_len = 4,
 };
 
+static const struct i2c_adapter_quirks mlxcpld_i2c_quirks_ext = {
+	.flags = I2C_AQ_COMB_WRITE_THEN_READ,
+	.max_read_len = MLXCPLD_I2C_DATA_REG_SZ * 2 - MLXCPLD_I2C_MAX_ADDR_LEN,
+	.max_write_len = MLXCPLD_I2C_DATA_REG_SZ * 2,
+	.max_comb_1st_msg_len = 4,
+};
+
+static const struct i2c_adapter_quirks mlxcpld_i2c_quirks_ext2 = {
+	.flags = I2C_AQ_COMB_WRITE_THEN_READ,
+	.max_read_len = (MLXCPLD_I2C_DATA_REG_SZ - 4) * 4,
+	.max_write_len = (MLXCPLD_I2C_DATA_REG_SZ - 4) * 4 + MLXCPLD_I2C_MAX_ADDR_LEN,
+	.max_comb_1st_msg_len = 4,
+};
+
 static struct i2c_adapter mlxcpld_i2c_adapter = {
 	.owner          = THIS_MODULE,
 	.name           = "i2c-mlxcpld",
-	.class          = I2C_CLASS_HWMON | I2C_CLASS_SPD,
+	.class          = I2C_CLASS_HWMON,
 	.algo           = &mlxcpld_i2c_algo,
 	.quirks		= &mlxcpld_i2c_quirks,
 	.retries	= MLXCPLD_I2C_RETR_NUM,
 	.nr		= MLXCPLD_I2C_BUS_NUM,
 };
 
+static int
+mlxcpld_i2c_set_frequency(struct mlxcpld_i2c_priv *priv,
+			  struct mlxreg_core_hotplug_platform_data *pdata)
+{
+	struct mlxreg_core_item *item = pdata->items;
+	struct mlxreg_core_data *data;
+	u32 regval;
+	u8 freq;
+	int err;
+
+	if (!item)
+		return 0;
+
+	/* Read frequency setting. */
+	data = item->data;
+	err = regmap_read(pdata->regmap, data->reg, &regval);
+	if (err)
+		return err;
+
+	/* Set frequency only if it is not 100KHz, which is default. */
+	switch ((regval & data->mask) >> data->bit) {
+	case MLXCPLD_I2C_FREQ_1000KHZ:
+		freq = MLXCPLD_I2C_FREQ_1000KHZ_SET;
+		priv->polling_time /= 4;
+		break;
+	case MLXCPLD_I2C_FREQ_400KHZ:
+		freq = MLXCPLD_I2C_FREQ_400KHZ_SET;
+		priv->polling_time /= 4;
+		break;
+	default:
+		return 0;
+	}
+
+	mlxcpld_i2c_write_comm(priv, MLXCPLD_LPCI2C_HALF_CYC_REG, &freq, 1);
+
+	return 0;
+}
+
 static int mlxcpld_i2c_probe(struct platform_device *pdev)
 {
+	struct mlxreg_core_hotplug_platform_data *pdata;
 	struct mlxcpld_i2c_priv *priv;
 	int err;
+	u8 val;
 
 	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -463,29 +537,56 @@ static int mlxcpld_i2c_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, priv);
 
 	priv->dev = &pdev->dev;
+	priv->base_addr = MLXPLAT_CPLD_LPC_I2C_BASE_ADDR;
+	priv->polling_time = MLXCPLD_I2C_POLL_TIME;
+
+	/* Set I2C bus frequency if platform data provides this info. */
+	pdata = dev_get_platdata(&pdev->dev);
+	if (pdata) {
+		err = mlxcpld_i2c_set_frequency(priv, pdata);
+		if (err)
+			goto mlxcpld_i2_probe_failed;
+	}
 
 	/* Register with i2c layer */
 	mlxcpld_i2c_adapter.timeout = usecs_to_jiffies(MLXCPLD_I2C_XFER_TO);
+	/* Read capability register */
+	mlxcpld_i2c_read_comm(priv, MLXCPLD_LPCI2C_CPBLTY_REG, &val, 1);
+	/* Check support for extended transaction length */
+	if ((val & MLXCPLD_I2C_DATA_SZ_MASK) == MLXCPLD_I2C_DATA_SZ_BIT)
+		mlxcpld_i2c_adapter.quirks = &mlxcpld_i2c_quirks_ext;
+	else if ((val & MLXCPLD_I2C_DATA_SZ_MASK) == MLXCPLD_I2C_DATA_EXT2_SZ_BIT)
+		mlxcpld_i2c_adapter.quirks = &mlxcpld_i2c_quirks_ext2;
+	/* Check support for smbus block transaction */
+	if (val & MLXCPLD_I2C_SMBUS_BLK_BIT)
+		priv->smbus_block = true;
+	if (pdev->id >= -1)
+		mlxcpld_i2c_adapter.nr = pdev->id;
 	priv->adap = mlxcpld_i2c_adapter;
 	priv->adap.dev.parent = &pdev->dev;
-	priv->base_addr = MLXPLAT_CPLD_LPC_I2C_BASE_ADDR;
 	i2c_set_adapdata(&priv->adap, priv);
 
 	err = i2c_add_numbered_adapter(&priv->adap);
 	if (err)
-		mutex_destroy(&priv->lock);
+		goto mlxcpld_i2_probe_failed;
 
+	/* Notify caller when adapter is added. */
+	if (pdata && pdata->completion_notify)
+		pdata->completion_notify(pdata->handle, mlxcpld_i2c_adapter.nr);
+
+	return 0;
+
+mlxcpld_i2_probe_failed:
+	mutex_destroy(&priv->lock);
 	return err;
 }
 
-static int mlxcpld_i2c_remove(struct platform_device *pdev)
+static void mlxcpld_i2c_remove(struct platform_device *pdev)
 {
 	struct mlxcpld_i2c_priv *priv = platform_get_drvdata(pdev);
 
 	i2c_del_adapter(&priv->adap);
 	mutex_destroy(&priv->lock);
-
-	return 0;
 }
 
 static struct platform_driver mlxcpld_i2c_driver = {

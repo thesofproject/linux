@@ -29,6 +29,7 @@
 MODULE_DESCRIPTION("Driver for SanDisk SDDR-55 SmartMedia reader");
 MODULE_AUTHOR("Simon Munton");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS("USB_STORAGE");
 
 /*
  * The table of devices
@@ -39,7 +40,7 @@ MODULE_LICENSE("GPL");
 { USB_DEVICE_VER(id_vendor, id_product, bcdDeviceMin, bcdDeviceMax), \
   .driver_info = (flags) }
 
-static struct usb_device_id sddr55_usb_ids[] = {
+static const struct usb_device_id sddr55_usb_ids[] = {
 #	include "unusual_sddr55.h"
 	{ }		/* Terminating entry */
 };
@@ -61,7 +62,7 @@ MODULE_DEVICE_TABLE(usb, sddr55_usb_ids);
 	.initFunction = init_function,	\
 }
 
-static struct us_unusual_dev sddr55_unusual_dev_list[] = {
+static const struct us_unusual_dev sddr55_unusual_dev_list[] = {
 #	include "unusual_sddr55.h"
 	{ }		/* Terminating entry */
 };
@@ -195,7 +196,7 @@ static int sddr55_read_data(struct us_data *us,
 	unsigned char *buffer;
 
 	unsigned int pba;
-	unsigned long address;
+	unsigned int address;
 
 	unsigned short pages;
 	unsigned int len, offset;
@@ -205,7 +206,7 @@ static int sddr55_read_data(struct us_data *us,
 	// a bounce buffer and move the data a piece at a time between the
 	// bounce buffer and the actual transfer buffer.
 
-	len = min((unsigned int) sectors, (unsigned int) info->blocksize >>
+	len = min_t(unsigned int, sectors, info->blocksize >>
 			info->smallpageshift) * PAGESIZE;
 	buffer = kmalloc(len, GFP_NOIO);
 	if (buffer == NULL)
@@ -223,7 +224,7 @@ static int sddr55_read_data(struct us_data *us,
 
 		// Read as many sectors as possible in this block
 
-		pages = min((unsigned int) sectors << info->smallpageshift,
+		pages = min_t(unsigned int, sectors << info->smallpageshift,
 				info->blocksize - page);
 		len = pages << info->pageshift;
 
@@ -315,7 +316,7 @@ static int sddr55_write_data(struct us_data *us,
 
 	unsigned int pba;
 	unsigned int new_pba;
-	unsigned long address;
+	unsigned int address;
 
 	unsigned short pages;
 	int i;
@@ -332,7 +333,7 @@ static int sddr55_write_data(struct us_data *us,
 	// a bounce buffer and move the data a piece at a time between the
 	// bounce buffer and the actual transfer buffer.
 
-	len = min((unsigned int) sectors, (unsigned int) info->blocksize >>
+	len = min_t(unsigned int, sectors, info->blocksize >>
 			info->smallpageshift) * PAGESIZE;
 	buffer = kmalloc(len, GFP_NOIO);
 	if (buffer == NULL)
@@ -350,7 +351,7 @@ static int sddr55_write_data(struct us_data *us,
 
 		// Write as many sectors as possible in this block
 
-		pages = min((unsigned int) sectors << info->smallpageshift,
+		pages = min_t(unsigned int, sectors << info->smallpageshift,
 				info->blocksize - page);
 		len = pages << info->pageshift;
 
@@ -468,6 +469,12 @@ static int sddr55_write_data(struct us_data *us,
 		new_pba = (status[3] + (status[4] << 8) + (status[5] << 16))
 						  >> info->blockshift;
 
+		/* check if device-reported new_pba is out of range */
+		if (new_pba >= (info->capacity >> (info->blockshift + info->pageshift))) {
+			result = USB_STOR_TRANSPORT_FAILED;
+			goto leave;
+		}
+
 		/* check status for error */
 		if (status[0] == 0xff && status[1] == 0x4) {
 			info->pba_to_lba[new_pba] = BAD_BLOCK;
@@ -553,8 +560,8 @@ static int sddr55_reset(struct us_data *us)
 
 static unsigned long sddr55_get_capacity(struct us_data *us) {
 
-	unsigned char uninitialized_var(manufacturerID);
-	unsigned char uninitialized_var(deviceID);
+	unsigned char manufacturerID;
+	unsigned char deviceID;
 	int result;
 	struct sddr55_card_info *info = (struct sddr55_card_info *)us->extra;
 
@@ -591,7 +598,7 @@ static unsigned long sddr55_get_capacity(struct us_data *us) {
 	case 0x64:
 		info->pageshift = 8;
 		info->smallpageshift = 1;
-		/* fall through */
+		fallthrough;
 	case 0x5d: // 5d is a ROM card with pagesize 512.
 		return 0x00200000;
 
@@ -651,7 +658,7 @@ static int sddr55_read_map(struct us_data *us) {
 
 	numblocks = info->capacity >> (info->blockshift + info->pageshift);
 	
-	buffer = kmalloc( numblocks * 2, GFP_NOIO );
+	buffer = kmalloc_array(numblocks, 2, GFP_NOIO );
 	
 	if (!buffer)
 		return -1;
@@ -684,8 +691,8 @@ static int sddr55_read_map(struct us_data *us) {
 
 	kfree(info->lba_to_pba);
 	kfree(info->pba_to_lba);
-	info->lba_to_pba = kmalloc(numblocks*sizeof(int), GFP_NOIO);
-	info->pba_to_lba = kmalloc(numblocks*sizeof(int), GFP_NOIO);
+	info->lba_to_pba = kmalloc_objs(int, numblocks, GFP_NOIO);
+	info->pba_to_lba = kmalloc_objs(int, numblocks, GFP_NOIO);
 
 	if (info->lba_to_pba == NULL || info->pba_to_lba == NULL) {
 		kfree(info->lba_to_pba);
@@ -774,11 +781,11 @@ static void sddr55_card_info_destructor(void *extra) {
 static int sddr55_transport(struct scsi_cmnd *srb, struct us_data *us)
 {
 	int result;
-	static unsigned char inquiry_response[8] = {
+	static const unsigned char inquiry_response[8] = {
 		0x00, 0x80, 0x00, 0x02, 0x1F, 0x00, 0x00, 0x00
 	};
  	// write-protected for now, no block descriptor support
-	static unsigned char mode_page_01[20] = {
+	static const unsigned char mode_page_01[20] = {
 		0x0, 0x12, 0x00, 0x80, 0x0, 0x0, 0x0, 0x0,
 		0x01, 0x0A,
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
@@ -792,8 +799,7 @@ static int sddr55_transport(struct scsi_cmnd *srb, struct us_data *us)
 	struct sddr55_card_info *info;
 
 	if (!us->extra) {
-		us->extra = kzalloc(
-			sizeof(struct sddr55_card_info), GFP_NOIO);
+		us->extra = kzalloc_obj(struct sddr55_card_info, GFP_NOIO);
 		if (!us->extra)
 			return USB_STOR_TRANSPORT_ERROR;
 		us->extra_destructor = sddr55_card_info_destructor;

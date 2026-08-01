@@ -1,38 +1,59 @@
-/*
- *  Keyboard backlight LED driver for Chrome OS.
- *
- *  Copyright (C) 2012 Google, Inc.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0+
+// Keyboard backlight LED driver for ChromeOS
+//
+// Copyright (C) 2012 Google, Inc.
 
 #include <linux/acpi.h>
-#include <linux/leds.h>
 #include <linux/delay.h>
 #include <linux/err.h>
-#include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/leds.h>
+#include <linux/mfd/core.h>
+#include <linux/module.h>
+#include <linux/of.h>
+#include <linux/platform_data/cros_ec_commands.h>
+#include <linux/platform_data/cros_ec_proto.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/slab.h>
+
+struct keyboard_led {
+	struct led_classdev cdev;
+	struct cros_ec_device *ec;
+};
+
+/**
+ * struct keyboard_led_drvdata - keyboard LED driver data.
+ * @init:			Init function.
+ * @brightness_get:		Get LED brightness level.
+ * @brightness_set:		Set LED brightness level.  Must not sleep.
+ * @brightness_set_blocking:	Set LED brightness level.  It can block the
+ *				caller for the time required for accessing a
+ *				LED device register
+ *
+ * See struct led_classdev in include/linux/leds.h for more details.
+ */
+struct keyboard_led_drvdata {
+	int (*init)(struct platform_device *pdev, struct keyboard_led *keyboard_led);
+
+	enum led_brightness (*brightness_get)(struct led_classdev *led_cdev);
+
+	void (*brightness_set)(struct led_classdev *led_cdev,
+			       enum led_brightness brightness);
+	int (*brightness_set_blocking)(struct led_classdev *led_cdev,
+				       enum led_brightness brightness);
+};
+
+#ifdef CONFIG_ACPI
 
 /* Keyboard LED ACPI Device must be defined in firmware */
 #define ACPI_KEYBOARD_BACKLIGHT_DEVICE	"\\_SB.KBLT"
 #define ACPI_KEYBOARD_BACKLIGHT_READ	ACPI_KEYBOARD_BACKLIGHT_DEVICE ".KBQC"
 #define ACPI_KEYBOARD_BACKLIGHT_WRITE	ACPI_KEYBOARD_BACKLIGHT_DEVICE ".KBCM"
 
-#define ACPI_KEYBOARD_BACKLIGHT_MAX		100
-
-static void keyboard_led_set_brightness(struct led_classdev *cdev,
-					enum led_brightness brightness)
+static void keyboard_led_set_brightness_acpi(struct led_classdev *cdev,
+					     enum led_brightness brightness)
 {
 	union acpi_object param;
 	struct acpi_object_list input;
@@ -51,7 +72,7 @@ static void keyboard_led_set_brightness(struct led_classdev *cdev,
 }
 
 static enum led_brightness
-keyboard_led_get_brightness(struct led_classdev *cdev)
+keyboard_led_get_brightness_acpi(struct led_classdev *cdev)
 {
 	unsigned long long brightness;
 	acpi_status status;
@@ -67,12 +88,11 @@ keyboard_led_get_brightness(struct led_classdev *cdev)
 	return brightness;
 }
 
-static int keyboard_led_probe(struct platform_device *pdev)
+static int keyboard_led_init_acpi(struct platform_device *pdev,
+				  struct keyboard_led *keyboard_led)
 {
-	struct led_classdev *cdev;
 	acpi_handle handle;
 	acpi_status status;
-	int error;
 
 	/* Look for the keyboard LED ACPI Device */
 	status = acpi_get_handle(ACPI_ROOT_OBJECT,
@@ -84,39 +104,137 @@ static int keyboard_led_probe(struct platform_device *pdev)
 		return -ENXIO;
 	}
 
-	cdev = devm_kzalloc(&pdev->dev, sizeof(*cdev), GFP_KERNEL);
-	if (!cdev)
-		return -ENOMEM;
+	return 0;
+}
 
-	cdev->name = "chromeos::kbd_backlight";
-	cdev->max_brightness = ACPI_KEYBOARD_BACKLIGHT_MAX;
-	cdev->flags |= LED_CORE_SUSPENDRESUME;
-	cdev->brightness_set = keyboard_led_set_brightness;
-	cdev->brightness_get = keyboard_led_get_brightness;
+static const struct keyboard_led_drvdata keyboard_led_drvdata_acpi = {
+	.init = keyboard_led_init_acpi,
+	.brightness_set = keyboard_led_set_brightness_acpi,
+	.brightness_get = keyboard_led_get_brightness_acpi,
+};
 
-	error = devm_led_classdev_register(&pdev->dev, cdev);
-	if (error)
-		return error;
+#endif /* CONFIG_ACPI */
+
+static int keyboard_led_init_ec_pwm_mfd(struct platform_device *pdev,
+					struct keyboard_led *keyboard_led)
+{
+	struct cros_ec_dev *ec_dev = dev_get_drvdata(pdev->dev.parent);
+	struct cros_ec_device *cros_ec = ec_dev->ec_dev;
+
+	keyboard_led->ec = cros_ec;
 
 	return 0;
 }
 
-static const struct acpi_device_id keyboard_led_id[] = {
-	{ "GOOG0002", 0 },
+static int
+keyboard_led_set_brightness_ec_pwm(struct led_classdev *cdev,
+				   enum led_brightness brightness)
+{
+	DEFINE_RAW_FLEX(struct cros_ec_command, msg, data,
+			sizeof(struct ec_params_pwm_set_keyboard_backlight));
+	struct ec_params_pwm_set_keyboard_backlight *params =
+			(struct ec_params_pwm_set_keyboard_backlight *)msg->data;
+	struct keyboard_led *keyboard_led = container_of(cdev, struct keyboard_led, cdev);
+
+	msg->command = EC_CMD_PWM_SET_KEYBOARD_BACKLIGHT;
+	msg->outsize = sizeof(*params);
+
+	params->percent = brightness;
+
+	return cros_ec_cmd_xfer_status(keyboard_led->ec, msg);
+}
+
+static enum led_brightness
+keyboard_led_get_brightness_ec_pwm(struct led_classdev *cdev)
+{
+	DEFINE_RAW_FLEX(struct cros_ec_command, msg, data,
+			sizeof(struct ec_response_pwm_get_keyboard_backlight));
+	struct ec_response_pwm_get_keyboard_backlight *resp =
+			(struct ec_response_pwm_get_keyboard_backlight *)msg->data;
+	struct keyboard_led *keyboard_led = container_of(cdev, struct keyboard_led, cdev);
+	int ret;
+
+	msg->command = EC_CMD_PWM_GET_KEYBOARD_BACKLIGHT;
+	msg->insize = sizeof(*resp);
+
+	ret = cros_ec_cmd_xfer_status(keyboard_led->ec, msg);
+	if (ret < 0)
+		return ret;
+
+	return resp->percent;
+}
+
+static const struct keyboard_led_drvdata keyboard_led_drvdata_ec_pwm_mfd = {
+	.init = keyboard_led_init_ec_pwm_mfd,
+	.brightness_set_blocking = keyboard_led_set_brightness_ec_pwm,
+	.brightness_get = keyboard_led_get_brightness_ec_pwm,
+};
+
+static int keyboard_led_is_mfd_device(struct platform_device *pdev)
+{
+	return IS_ENABLED(CONFIG_MFD_CROS_EC_DEV) && mfd_get_cell(pdev);
+}
+
+static int keyboard_led_probe(struct platform_device *pdev)
+{
+	const struct keyboard_led_drvdata *drvdata;
+	struct keyboard_led *keyboard_led;
+	int err;
+
+	if (keyboard_led_is_mfd_device(pdev))
+		drvdata = &keyboard_led_drvdata_ec_pwm_mfd;
+	else
+		drvdata = device_get_match_data(&pdev->dev);
+	if (!drvdata)
+		return -EINVAL;
+
+	keyboard_led = devm_kzalloc(&pdev->dev, sizeof(*keyboard_led), GFP_KERNEL);
+	if (!keyboard_led)
+		return -ENOMEM;
+
+	if (drvdata->init) {
+		err = drvdata->init(pdev, keyboard_led);
+		if (err)
+			return err;
+	}
+
+	keyboard_led->cdev.name = "chromeos::kbd_backlight";
+	keyboard_led->cdev.flags |= LED_CORE_SUSPENDRESUME | LED_REJECT_NAME_CONFLICT;
+	keyboard_led->cdev.max_brightness = 100;
+	keyboard_led->cdev.brightness_set = drvdata->brightness_set;
+	keyboard_led->cdev.brightness_set_blocking = drvdata->brightness_set_blocking;
+	keyboard_led->cdev.brightness_get = drvdata->brightness_get;
+
+	err = devm_led_classdev_register(&pdev->dev, &keyboard_led->cdev);
+	if (err == -EEXIST) /* Already bound via other mechanism */
+		return -ENODEV;
+	return err;
+}
+
+#ifdef CONFIG_ACPI
+static const struct acpi_device_id keyboard_led_acpi_match[] = {
+	{ "GOOG0002", (kernel_ulong_t)&keyboard_led_drvdata_acpi },
 	{ }
 };
-MODULE_DEVICE_TABLE(acpi, keyboard_led_id);
+MODULE_DEVICE_TABLE(acpi, keyboard_led_acpi_match);
+#endif
+
+static const struct platform_device_id keyboard_led_id[] = {
+	{ "cros-keyboard-leds", 0 },
+	{}
+};
+MODULE_DEVICE_TABLE(platform, keyboard_led_id);
 
 static struct platform_driver keyboard_led_driver = {
 	.driver		= {
-		.name	= "chromeos-keyboard-leds",
-		.acpi_match_table = ACPI_PTR(keyboard_led_id),
+		.name	= "cros-keyboard-leds",
+		.acpi_match_table = ACPI_PTR(keyboard_led_acpi_match),
 	},
 	.probe		= keyboard_led_probe,
+	.id_table	= keyboard_led_id,
 };
 module_platform_driver(keyboard_led_driver);
 
 MODULE_AUTHOR("Simon Que <sque@chromium.org>");
 MODULE_DESCRIPTION("ChromeOS Keyboard backlight LED Driver");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("platform:chromeos-keyboard-leds");

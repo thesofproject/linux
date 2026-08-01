@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * upd64031A - NEC Electronics Ghost Reduction for NTSC in Japan
  *
  * 2003 by T.Adachi <tadachi@tadachi-net.com>
  * 2003 by Takeru KOMORIYA <komoriya@paken.org>
- * 2006 by Hans Verkuil <hverkuil@xs4all.nl>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * 2006 by Hans Verkuil <hverkuil@kernel.org>
  */
 
 
@@ -192,8 +183,7 @@ static const struct v4l2_subdev_ops upd64031a_ops = {
 
 /* i2c implementation */
 
-static int upd64031a_probe(struct i2c_client *client,
-			   const struct i2c_device_id *id)
+static int upd64031a_probe(struct i2c_client *client)
 {
 	struct upd64031a_state *state;
 	struct v4l2_subdev *sd;
@@ -219,18 +209,17 @@ static int upd64031a_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int upd64031a_remove(struct i2c_client *client)
+static void upd64031a_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 
 	v4l2_device_unregister_subdev(sd);
-	return 0;
 }
 
 /* ----------------------------------------------------------------------- */
 
 static const struct i2c_device_id upd64031a_id[] = {
-	{ "upd64031a", 0 },
+	{ .name = "upd64031a" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, upd64031a_id);

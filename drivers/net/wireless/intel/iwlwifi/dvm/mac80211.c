@@ -1,30 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
  *
  * Copyright(c) 2003 - 2014 Intel Corporation. All rights reserved.
+ * Copyright(C) 2018 - 2019, 2022 - 2025 Intel Corporation
  *
  * Portions of this file are derived from the ipw3945 project, as well
  * as portions of the ieee80211 subsystem header files.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- *  Intel Linux Wireless <linuxwifi@intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
  *****************************************************************************/
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -115,7 +96,7 @@ int iwlagn_mac_setup_register(struct iwl_priv *priv,
 	ieee80211_hw_set(hw, SUPPORT_FAST_XMIT);
 	ieee80211_hw_set(hw, WANT_MONITOR_VIF);
 
-	if (priv->trans->max_skb_frags)
+	if (priv->trans->info.max_skb_frags)
 		hw->netdev_features = NETIF_F_HIGHDMA | NETIF_F_SG;
 
 	hw->offchannel_tx_hw_queue = IWL_AUX_QUEUE;
@@ -164,8 +145,6 @@ int iwlagn_mac_setup_register(struct iwl_priv *priv,
 
 #ifdef CONFIG_PM_SLEEP
 	if (priv->fw->img[IWL_UCODE_WOWLAN].num_sec &&
-	    priv->trans->ops->d3_suspend &&
-	    priv->trans->ops->d3_resume &&
 	    device_can_wakeup(priv->trans->dev)) {
 		priv->wowlan_support.flags = WIPHY_WOWLAN_MAGIC_PKT |
 					     WIPHY_WOWLAN_DISCONNECT |
@@ -209,11 +188,12 @@ int iwlagn_mac_setup_register(struct iwl_priv *priv,
 		priv->hw->wiphy->bands[NL80211_BAND_5GHZ] =
 			&priv->nvm_data->bands[NL80211_BAND_5GHZ];
 
-	hw->wiphy->hw_version = priv->trans->hw_id;
+	hw->wiphy->hw_version = priv->trans->info.hw_id;
 
 	iwl_leds_init(priv);
 
 	wiphy_ext_feature_set(hw->wiphy, NL80211_EXT_FEATURE_CQM_RSSI_LIST);
+	wiphy_ext_feature_set(hw->wiphy, NL80211_EXT_FEATURE_EXT_KEY_ID);
 
 	ret = ieee80211_register_hw(priv->hw);
 	if (ret) {
@@ -317,10 +297,10 @@ static int iwlagn_mac_start(struct ieee80211_hw *hw)
 
 	priv->is_open = 1;
 	IWL_DEBUG_MAC80211(priv, "leave\n");
-	return 0;
+	return ret;
 }
 
-static void iwlagn_mac_stop(struct ieee80211_hw *hw)
+static void iwlagn_mac_stop(struct ieee80211_hw *hw, bool suspend)
 {
 	struct iwl_priv *priv = IWL_MAC80211_GET_DVM(hw);
 
@@ -398,7 +378,7 @@ static int iwlagn_mac_suspend(struct ieee80211_hw *hw,
 	iwl_write32(priv->trans, CSR_UCODE_DRV_GP1_SET,
 		    CSR_UCODE_DRV_GP1_BIT_D3_CFG_COMPLETE);
 
-	iwl_trans_d3_suspend(priv->trans, false, true);
+	iwl_trans_d3_suspend(priv->trans, true);
 
 	goto out;
 
@@ -442,7 +422,6 @@ static int iwlagn_mac_resume(struct ieee80211_hw *hw)
 	struct ieee80211_vif *vif;
 	u32 base;
 	int ret;
-	enum iwl_d3_status d3_status;
 	struct error_table_start {
 		/* cf. struct iwl_error_event_table */
 		u32 valid;
@@ -471,14 +450,9 @@ static int iwlagn_mac_resume(struct ieee80211_hw *hw)
 	/* we'll clear ctx->vif during iwlagn_prepare_restart() */
 	vif = ctx->vif;
 
-	ret = iwl_trans_d3_resume(priv->trans, &d3_status, false, true);
+	ret = iwl_trans_d3_resume(priv->trans, true);
 	if (ret)
 		goto out_unlock;
-
-	if (d3_status != IWL_D3_STATUS_ALIVE) {
-		IWL_INFO(priv, "Device was reset during suspend\n");
-		goto out_unlock;
-	}
 
 	/* uCode is no longer operating by itself */
 	iwl_write32(priv->trans, CSR_UCODE_DRV_GP1_CLR,
@@ -569,7 +543,7 @@ static int iwlagn_mac_resume(struct ieee80211_hw *hw)
 
 	iwlagn_prepare_restart(priv);
 
-	memset((void *)&ctx->active, 0, sizeof(ctx->active));
+	memset((void *)(uintptr_t)&ctx->active, 0, sizeof(ctx->active));
 	iwl_connection_init_rx_config(priv, ctx);
 	iwlagn_set_rxon_chain(priv, ctx);
 
@@ -632,7 +606,7 @@ static int iwlagn_mac_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
 	switch (key->cipher) {
 	case WLAN_CIPHER_SUITE_TKIP:
 		key->flags |= IEEE80211_KEY_FLAG_GENERATE_MMIC;
-		/* fall through */
+		fallthrough;
 	case WLAN_CIPHER_SUITE_CCMP:
 		key->flags |= IEEE80211_KEY_FLAG_GENERATE_IV;
 		break;
@@ -714,24 +688,6 @@ static int iwlagn_mac_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
 	return ret;
 }
 
-static inline bool iwl_enable_rx_ampdu(const struct iwl_cfg *cfg)
-{
-	if (iwlwifi_mod_params.disable_11n & IWL_DISABLE_HT_RXAGG)
-		return false;
-	return true;
-}
-
-static inline bool iwl_enable_tx_ampdu(const struct iwl_cfg *cfg)
-{
-	if (iwlwifi_mod_params.disable_11n & IWL_DISABLE_HT_TXAGG)
-		return false;
-	if (iwlwifi_mod_params.disable_11n & IWL_ENABLE_HT_TXAGG)
-		return true;
-
-	/* disabled by default */
-	return false;
-}
-
 static int iwlagn_mac_ampdu_action(struct ieee80211_hw *hw,
 				   struct ieee80211_vif *vif,
 				   struct ieee80211_ampdu_params *params)
@@ -756,7 +712,7 @@ static int iwlagn_mac_ampdu_action(struct ieee80211_hw *hw,
 
 	switch (action) {
 	case IEEE80211_AMPDU_RX_START:
-		if (!iwl_enable_rx_ampdu(priv->cfg))
+		if (!iwl_enable_rx_ampdu())
 			break;
 		IWL_DEBUG_HT(priv, "start Rx\n");
 		ret = iwl_sta_rx_agg_start(priv, sta, tid, *ssn);
@@ -766,9 +722,7 @@ static int iwlagn_mac_ampdu_action(struct ieee80211_hw *hw,
 		ret = iwl_sta_rx_agg_stop(priv, sta, tid);
 		break;
 	case IEEE80211_AMPDU_TX_START:
-		if (!priv->trans->ops->txq_enable)
-			break;
-		if (!iwl_enable_tx_ampdu(priv->cfg))
+		if (!iwl_enable_tx_ampdu())
 			break;
 		IWL_DEBUG_HT(priv, "start Tx\n");
 		ret = iwlagn_tx_agg_start(priv, vif, sta, tid, ssn);
@@ -1037,7 +991,7 @@ static void iwlagn_mac_channel_switch(struct ieee80211_hw *hw,
 	if (priv->lib->set_channel_switch(priv, ch_switch)) {
 		clear_bit(STATUS_CHANNEL_SWITCH_PENDING, &priv->status);
 		priv->switch_channel = 0;
-		ieee80211_chswitch_done(ctx->vif, false);
+		ieee80211_chswitch_done(ctx->vif, false, 0);
 	}
 
 out:
@@ -1060,7 +1014,7 @@ void iwl_chswitch_done(struct iwl_priv *priv, bool is_success)
 		return;
 
 	if (ctx->vif)
-		ieee80211_chswitch_done(ctx->vif, is_success);
+		ieee80211_chswitch_done(ctx->vif, is_success, 0);
 }
 
 static void iwlagn_configure_filter(struct ieee80211_hw *hw,
@@ -1131,7 +1085,7 @@ static void iwlagn_mac_flush(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
 		goto done;
 	}
 
-	scd_queues = BIT(priv->cfg->base_params->num_of_queues) - 1;
+	scd_queues = BIT(priv->trans->mac_cfg->base->num_of_queues) - 1;
 	scd_queues &= ~(BIT(IWL_IPAN_CMD_QUEUE_NUM) |
 			BIT(IWL_DEFAULT_CMD_QUEUE_NUM));
 
@@ -1189,7 +1143,8 @@ static int iwlagn_mac_set_tim(struct ieee80211_hw *hw,
 }
 
 static int iwlagn_mac_conf_tx(struct ieee80211_hw *hw,
-			      struct ieee80211_vif *vif, u16 queue,
+			      struct ieee80211_vif *vif,
+			      unsigned int link_id, u16 queue,
 			      const struct ieee80211_tx_queue_params *params)
 {
 	struct iwl_priv *priv = IWL_MAC80211_GET_DVM(hw);
@@ -1604,8 +1559,23 @@ static void iwlagn_mac_sta_notify(struct ieee80211_hw *hw,
 	IWL_DEBUG_MAC80211(priv, "leave\n");
 }
 
+static void
+iwlagn_mac_reconfig_complete(struct ieee80211_hw *hw,
+			     enum ieee80211_reconfig_type reconfig_type)
+{
+	struct iwl_priv *priv = IWL_MAC80211_GET_DVM(hw);
+
+	if (reconfig_type == IEEE80211_RECONFIG_TYPE_RESTART)
+		iwl_trans_finish_sw_reset(priv->trans);
+}
+
 const struct ieee80211_ops iwlagn_hw_ops = {
+	.add_chanctx = ieee80211_emulate_add_chanctx,
+	.remove_chanctx = ieee80211_emulate_remove_chanctx,
+	.change_chanctx = ieee80211_emulate_change_chanctx,
+	.switch_vif_chanctx = ieee80211_emulate_switch_vif_chanctx,
 	.tx = iwlagn_mac_tx,
+	.wake_tx_queue = ieee80211_handle_wake_tx_queue,
 	.start = iwlagn_mac_start,
 	.stop = iwlagn_mac_stop,
 #ifdef CONFIG_PM_SLEEP
@@ -1632,6 +1602,7 @@ const struct ieee80211_ops iwlagn_hw_ops = {
 	.tx_last_beacon = iwlagn_mac_tx_last_beacon,
 	.event_callback = iwlagn_mac_event_callback,
 	.set_tim = iwlagn_mac_set_tim,
+	.reconfig_complete = iwlagn_mac_reconfig_complete,
 };
 
 /* This function both allocates and initializes hw and priv. */

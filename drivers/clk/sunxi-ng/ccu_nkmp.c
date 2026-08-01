@@ -1,14 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2016 Maxime Ripard
  * Maxime Ripard <maxime.ripard@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
  */
 
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 
 #include "ccu_gate.h"
 #include "ccu_nkmp.h"
@@ -32,8 +29,8 @@ static unsigned long ccu_nkmp_calc_rate(unsigned long parent,
 	return rate;
 }
 
-static void ccu_nkmp_find_best(unsigned long parent, unsigned long rate,
-			       struct _ccu_nkmp *nkmp)
+static unsigned long ccu_nkmp_find_best(unsigned long parent, unsigned long rate,
+					struct _ccu_nkmp *nkmp)
 {
 	unsigned long best_rate = 0;
 	unsigned long best_n = 0, best_k = 0, best_m = 0, best_p = 0;
@@ -68,6 +65,8 @@ static void ccu_nkmp_find_best(unsigned long parent, unsigned long rate,
 	nkmp->k = best_k;
 	nkmp->m = best_m;
 	nkmp->p = best_p;
+
+	return best_rate;
 }
 
 static void ccu_nkmp_disable(struct clk_hw *hw)
@@ -128,14 +127,21 @@ static unsigned long ccu_nkmp_recalc_rate(struct clk_hw *hw,
 	return rate;
 }
 
-static long ccu_nkmp_round_rate(struct clk_hw *hw, unsigned long rate,
-			      unsigned long *parent_rate)
+static int ccu_nkmp_determine_rate(struct clk_hw *hw,
+				   struct clk_rate_request *req)
 {
 	struct ccu_nkmp *nkmp = hw_to_ccu_nkmp(hw);
 	struct _ccu_nkmp _nkmp;
 
 	if (nkmp->common.features & CCU_FEATURE_FIXED_POSTDIV)
-		rate *= nkmp->fixed_post_div;
+		req->rate *= nkmp->fixed_post_div;
+
+	if (nkmp->max_rate && req->rate > nkmp->max_rate) {
+		req->rate = nkmp->max_rate;
+		if (nkmp->common.features & CCU_FEATURE_FIXED_POSTDIV)
+			req->rate /= nkmp->fixed_post_div;
+		return 0;
+	}
 
 	_nkmp.min_n = nkmp->n.min ?: 1;
 	_nkmp.max_n = nkmp->n.max ?: 1 << nkmp->n.width;
@@ -146,21 +152,20 @@ static long ccu_nkmp_round_rate(struct clk_hw *hw, unsigned long rate,
 	_nkmp.min_p = 1;
 	_nkmp.max_p = nkmp->p.max ?: 1 << ((1 << nkmp->p.width) - 1);
 
-	ccu_nkmp_find_best(*parent_rate, rate, &_nkmp);
+	req->rate = ccu_nkmp_find_best(req->best_parent_rate, req->rate,
+				       &_nkmp);
 
-	rate = ccu_nkmp_calc_rate(*parent_rate, _nkmp.n, _nkmp.k,
-				  _nkmp.m, _nkmp.p);
 	if (nkmp->common.features & CCU_FEATURE_FIXED_POSTDIV)
-		rate = rate / nkmp->fixed_post_div;
+		req->rate = req->rate / nkmp->fixed_post_div;
 
-	return rate;
+	return 0;
 }
 
 static int ccu_nkmp_set_rate(struct clk_hw *hw, unsigned long rate,
 			   unsigned long parent_rate)
 {
 	struct ccu_nkmp *nkmp = hw_to_ccu_nkmp(hw);
-	u32 n_mask, k_mask, m_mask, p_mask;
+	u32 n_mask = 0, k_mask = 0, m_mask = 0, p_mask = 0;
 	struct _ccu_nkmp _nkmp;
 	unsigned long flags;
 	u32 reg;
@@ -179,10 +184,24 @@ static int ccu_nkmp_set_rate(struct clk_hw *hw, unsigned long rate,
 
 	ccu_nkmp_find_best(parent_rate, rate, &_nkmp);
 
-	n_mask = GENMASK(nkmp->n.width + nkmp->n.shift - 1, nkmp->n.shift);
-	k_mask = GENMASK(nkmp->k.width + nkmp->k.shift - 1, nkmp->k.shift);
-	m_mask = GENMASK(nkmp->m.width + nkmp->m.shift - 1, nkmp->m.shift);
-	p_mask = GENMASK(nkmp->p.width + nkmp->p.shift - 1, nkmp->p.shift);
+	/*
+	 * If width is 0, GENMASK() macro may not generate expected mask (0)
+	 * as it falls under undefined behaviour by C standard due to shifts
+	 * which are equal or greater than width of left operand. This can
+	 * be easily avoided by explicitly checking if width is 0.
+	 */
+	if (nkmp->n.width)
+		n_mask = GENMASK(nkmp->n.width + nkmp->n.shift - 1,
+				 nkmp->n.shift);
+	if (nkmp->k.width)
+		k_mask = GENMASK(nkmp->k.width + nkmp->k.shift - 1,
+				 nkmp->k.shift);
+	if (nkmp->m.width)
+		m_mask = GENMASK(nkmp->m.width + nkmp->m.shift - 1,
+				 nkmp->m.shift);
+	if (nkmp->p.width)
+		p_mask = GENMASK(nkmp->p.width + nkmp->p.shift - 1,
+				 nkmp->p.shift);
 
 	spin_lock_irqsave(nkmp->common.lock, flags);
 
@@ -209,6 +228,7 @@ const struct clk_ops ccu_nkmp_ops = {
 	.is_enabled	= ccu_nkmp_is_enabled,
 
 	.recalc_rate	= ccu_nkmp_recalc_rate,
-	.round_rate	= ccu_nkmp_round_rate,
+	.determine_rate = ccu_nkmp_determine_rate,
 	.set_rate	= ccu_nkmp_set_rate,
 };
+EXPORT_SYMBOL_NS_GPL(ccu_nkmp_ops, "SUNXI_CCU");

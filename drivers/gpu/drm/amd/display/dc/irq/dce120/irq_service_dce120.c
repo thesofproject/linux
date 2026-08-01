@@ -37,50 +37,28 @@
 
 #include "ivsrcid/ivsrcid_vislands30.h"
 
-static bool hpd_ack(
-	struct irq_service *irq_service,
-	const struct irq_source_info *info)
-{
-	uint32_t addr = info->status_reg;
-	uint32_t value = dm_read_reg(irq_service->ctx, addr);
-	uint32_t current_status =
-		get_reg_field_value(
-			value,
-			HPD0_DC_HPD_INT_STATUS,
-			DC_HPD_SENSE_DELAYED);
-
-	dal_irq_service_ack_generic(irq_service, info);
-
-	value = dm_read_reg(irq_service->ctx, info->enable_reg);
-
-	set_reg_field_value(
-		value,
-		current_status ? 0 : 1,
-		HPD0_DC_HPD_INT_CONTROL,
-		DC_HPD_INT_POLARITY);
-
-	dm_write_reg(irq_service->ctx, info->enable_reg, value);
-
-	return true;
-}
-
-static const struct irq_source_info_funcs hpd_irq_info_funcs = {
+static struct irq_source_info_funcs hpd_irq_info_funcs  = {
 	.set = NULL,
-	.ack = hpd_ack
+	.ack = hpd0_ack
 };
 
-static const struct irq_source_info_funcs hpd_rx_irq_info_funcs = {
+static struct irq_source_info_funcs hpd_rx_irq_info_funcs = {
 	.set = NULL,
 	.ack = NULL
 };
 
-static const struct irq_source_info_funcs pflip_irq_info_funcs = {
+static struct irq_source_info_funcs pflip_irq_info_funcs = {
 	.set = NULL,
 	.ack = NULL
 };
 
-static const struct irq_source_info_funcs vblank_irq_info_funcs = {
+static struct irq_source_info_funcs vblank_irq_info_funcs = {
 	.set = dce110_vblank_set,
+	.ack = NULL
+};
+
+static struct irq_source_info_funcs vupdate_irq_info_funcs = {
+	.set = NULL,
 	.ack = NULL
 };
 
@@ -101,7 +79,7 @@ static const struct irq_source_info_funcs vblank_irq_info_funcs = {
 		block ## reg_num ## _ ## reg1 ## __ ## mask1 ## _MASK,\
 	.enable_value = {\
 		block ## reg_num ## _ ## reg1 ## __ ## mask1 ## _MASK,\
-		~block ## reg_num ## _ ## reg1 ## __ ## mask1 ## _MASK \
+		(uint32_t)~block ## reg_num ## _ ## reg1 ## __ ## mask1 ## _MASK \
 	},\
 	.ack_reg = SRI(reg2, block, reg_num),\
 	.ack_mask = \
@@ -140,7 +118,7 @@ static const struct irq_source_info_funcs vblank_irq_info_funcs = {
 		IRQ_REG_ENTRY(CRTC, reg_num,\
 			CRTC_INTERRUPT_CONTROL, CRTC_V_UPDATE_INT_MSK,\
 			CRTC_V_UPDATE_INT_STATUS, CRTC_V_UPDATE_INT_CLEAR),\
-		.funcs = &vblank_irq_info_funcs\
+		.funcs = &vupdate_irq_info_funcs\
 	}
 
 #define vblank_int_entry(reg_num)\
@@ -169,7 +147,7 @@ static const struct irq_source_info_funcs vblank_irq_info_funcs = {
 #define dc_underflow_int_entry(reg_num) \
 	[DC_IRQ_SOURCE_DC ## reg_num ## UNDERFLOW] = dummy_irq_entry()
 
-static const struct irq_source_info_funcs dummy_irq_info_funcs = {
+static struct irq_source_info_funcs dummy_irq_info_funcs = {
 	.set = dal_irq_service_dummy_set,
 	.ack = dal_irq_service_dummy_ack
 };
@@ -266,7 +244,7 @@ static const struct irq_service_funcs irq_service_funcs_dce120 = {
 		.to_dal_irq_source = to_dal_irq_source_dce110
 };
 
-static void construct(
+static void dce120_irq_construct(
 	struct irq_service *irq_service,
 	struct irq_service_init_data *init_data)
 {
@@ -279,12 +257,11 @@ static void construct(
 struct irq_service *dal_irq_service_dce120_create(
 	struct irq_service_init_data *init_data)
 {
-	struct irq_service *irq_service = kzalloc(sizeof(*irq_service),
-						  GFP_KERNEL);
+	struct irq_service *irq_service = kzalloc_obj(*irq_service);
 
 	if (!irq_service)
 		return NULL;
 
-	construct(irq_service, init_data);
+	dce120_irq_construct(irq_service, init_data);
 	return irq_service;
 }

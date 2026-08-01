@@ -5,6 +5,7 @@
  *   Jesse Barnes <jesse.barnes@intel.com>
  * Copyright © 2014 Intel Corporation
  *   Daniel Vetter <daniel.vetter@ffwll.ch>
+ * Copyright (c) 2020, The Linux Foundation. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -31,6 +32,41 @@
  * and are not exported to drivers.
  */
 
+#ifndef __DRM_CRTC_INTERNAL_H__
+#define __DRM_CRTC_INTERNAL_H__
+
+#include <linux/err.h>
+#include <linux/types.h>
+
+enum drm_color_encoding;
+enum drm_color_range;
+enum drm_connector_force;
+enum drm_mode_status;
+
+struct cea_sad;
+struct drm_atomic_commit;
+struct drm_bridge;
+struct drm_connector;
+struct drm_crtc;
+struct drm_device;
+struct drm_display_mode;
+struct drm_edid;
+struct drm_file;
+struct drm_framebuffer;
+struct drm_mode_create_dumb;
+struct drm_mode_fb_cmd2;
+struct drm_mode_fb_cmd;
+struct drm_mode_object;
+struct drm_mode_set;
+struct drm_plane;
+struct drm_plane_state;
+struct drm_printer;
+struct drm_property;
+struct edid;
+struct fwnode_handle;
+struct kref;
+struct seq_file;
+struct work_struct;
 
 /* drm_crtc.c */
 int drm_mode_crtc_set_obj_prop(struct drm_mode_object *obj,
@@ -42,9 +78,13 @@ int drm_crtc_check_viewport(const struct drm_crtc *crtc,
 			    const struct drm_framebuffer *fb);
 int drm_crtc_register_all(struct drm_device *dev);
 void drm_crtc_unregister_all(struct drm_device *dev);
+int drm_crtc_force_disable(struct drm_crtc *crtc);
 
 struct dma_fence *drm_crtc_create_fence(struct drm_crtc *crtc);
 
+struct drm_property *
+drm_create_scaling_filter_prop(struct drm_device *dev,
+			       unsigned int supported_filters);
 /* IOCTLs */
 int drm_mode_getcrtc(struct drm_device *dev,
 		     void *data, struct drm_file *file_priv);
@@ -55,6 +95,10 @@ int drm_mode_setcrtc(struct drm_device *dev,
 /* drm_mode_config.c */
 int drm_modeset_register_all(struct drm_device *dev);
 void drm_modeset_unregister_all(struct drm_device *dev);
+void drm_mode_config_validate(struct drm_device *dev);
+
+/* drm_modes.c */
+const char *drm_get_mode_status_name(enum drm_mode_status status);
 
 /* IOCTLs */
 int drm_mode_getresources(struct drm_device *dev,
@@ -62,6 +106,12 @@ int drm_mode_getresources(struct drm_device *dev,
 
 
 /* drm_dumb_buffers.c */
+int drm_mode_create_dumb(struct drm_device *dev,
+			 struct drm_mode_create_dumb *args,
+			 struct drm_file *file_priv);
+int drm_mode_destroy_dumb(struct drm_device *dev, u32 handle,
+			  struct drm_file *file_priv);
+
 /* IOCTLs */
 int drm_mode_create_dumb_ioctl(struct drm_device *dev,
 			       void *data, struct drm_file *file_priv);
@@ -113,6 +163,7 @@ struct drm_mode_object *__drm_mode_object_find(struct drm_device *dev,
 void drm_mode_object_unregister(struct drm_device *dev,
 				struct drm_mode_object *object);
 int drm_mode_object_get_properties(struct drm_mode_object *obj, bool atomic,
+				   bool plane_color_pipeline,
 				   uint32_t __user *prop_ptr,
 				   uint64_t __user *prop_values,
 				   uint32_t *arg_count_props);
@@ -139,16 +190,17 @@ void drm_connector_ida_init(void);
 void drm_connector_ida_destroy(void);
 void drm_connector_unregister_all(struct drm_device *dev);
 int drm_connector_register_all(struct drm_device *dev);
-int drm_mode_connector_set_obj_prop(struct drm_mode_object *obj,
+int drm_connector_set_obj_prop(struct drm_mode_object *obj,
 				    struct drm_property *property,
 				    uint64_t value);
 int drm_connector_create_standard_properties(struct drm_device *dev);
 const char *drm_get_connector_force_name(enum drm_connector_force force);
 void drm_connector_free_work_fn(struct work_struct *work);
+struct drm_connector *drm_connector_find_by_fwnode(struct fwnode_handle *fwnode);
 
 /* IOCTL */
-int drm_mode_connector_property_set_ioctl(struct drm_device *dev,
-					  void *data, struct drm_file *file_priv);
+int drm_connector_property_set_ioctl(struct drm_device *dev,
+				     void *data, struct drm_file *file_priv);
 int drm_mode_getconnector(struct drm_device *dev,
 			  void *data, struct drm_file *file_priv);
 
@@ -163,34 +215,57 @@ int drm_framebuffer_check_src_coords(uint32_t src_x, uint32_t src_y,
 				     const struct drm_framebuffer *fb);
 void drm_fb_release(struct drm_file *file_priv);
 
-
-/* IOCTL */
-int drm_mode_addfb(struct drm_device *dev,
-		   void *data, struct drm_file *file_priv);
+int drm_mode_addfb(struct drm_device *dev, struct drm_mode_fb_cmd *or,
+		   struct drm_file *file_priv);
 int drm_mode_addfb2(struct drm_device *dev,
 		    void *data, struct drm_file *file_priv);
-int drm_mode_rmfb(struct drm_device *dev,
-		  void *data, struct drm_file *file_priv);
+int drm_mode_rmfb(struct drm_device *dev, u32 fb_id,
+		  struct drm_file *file_priv);
+
+
+/* IOCTL */
+int drm_mode_addfb_ioctl(struct drm_device *dev,
+			 void *data, struct drm_file *file_priv);
+int drm_mode_addfb2_ioctl(struct drm_device *dev,
+			  void *data, struct drm_file *file_priv);
+int drm_mode_rmfb_ioctl(struct drm_device *dev,
+			void *data, struct drm_file *file_priv);
+int drm_mode_closefb_ioctl(struct drm_device *dev,
+			   void *data, struct drm_file *file_priv);
 int drm_mode_getfb(struct drm_device *dev,
 		   void *data, struct drm_file *file_priv);
+int drm_mode_getfb2_ioctl(struct drm_device *dev,
+			  void *data, struct drm_file *file_priv);
 int drm_mode_dirtyfb_ioctl(struct drm_device *dev,
 			   void *data, struct drm_file *file_priv);
 
 /* drm_atomic.c */
 #ifdef CONFIG_DEBUG_FS
 struct drm_minor;
-int drm_atomic_debugfs_init(struct drm_minor *minor);
+void drm_atomic_debugfs_init(struct drm_device *dev);
 #endif
 
-int drm_atomic_connector_commit_dpms(struct drm_atomic_state *state,
+int __drm_atomic_helper_disable_plane(struct drm_plane *plane,
+				      struct drm_plane_state *plane_state);
+int __drm_atomic_helper_set_config(struct drm_mode_set *set,
+				   struct drm_atomic_commit *state);
+
+void drm_atomic_print_new_state(const struct drm_atomic_commit *state,
+		struct drm_printer *p);
+
+/* drm_atomic_uapi.c */
+int drm_atomic_connector_commit_dpms(struct drm_atomic_commit *state,
 				     struct drm_connector *connector,
 				     int mode);
-int drm_atomic_set_property(struct drm_atomic_state *state,
+int drm_atomic_set_property(struct drm_atomic_commit *state,
+			    struct drm_file *file_priv,
 			    struct drm_mode_object *obj,
 			    struct drm_property *prop,
-			    uint64_t prop_value);
+			    u64 prop_value, bool async_flip);
 int drm_atomic_get_property(struct drm_mode_object *obj,
 			    struct drm_property *property, uint64_t *val);
+
+/* IOCTL */
 int drm_mode_atomic_ioctl(struct drm_device *dev,
 			  void *data, struct drm_file *file_priv);
 
@@ -198,8 +273,8 @@ int drm_mode_atomic_ioctl(struct drm_device *dev,
 /* drm_plane.c */
 int drm_plane_register_all(struct drm_device *dev);
 void drm_plane_unregister_all(struct drm_device *dev);
-int drm_plane_check_pixel_format(struct drm_plane *plane,
-				 u32 format, u64 modifier);
+struct drm_mode_rect *
+__drm_plane_get_damage_clips(const struct drm_plane_state *state);
 
 /* drm_bridge.c */
 void drm_bridge_detach(struct drm_bridge *bridge);
@@ -220,3 +295,40 @@ int drm_mode_page_flip_ioctl(struct drm_device *dev,
 
 /* drm_edid.c */
 void drm_mode_fixup_1366x768(struct drm_display_mode *mode);
+int drm_edid_override_show(struct drm_connector *connector, struct seq_file *m);
+int drm_edid_override_set(struct drm_connector *connector, const void *edid, size_t size);
+int drm_edid_override_reset(struct drm_connector *connector);
+const u8 *drm_edid_find_extension(const struct drm_edid *drm_edid,
+				  int ext_id, int *ext_index);
+void drm_edid_cta_sad_get(const struct cea_sad *cta_sad, u8 *sad);
+void drm_edid_cta_sad_set(struct cea_sad *cta_sad, const u8 *sad);
+ssize_t drm_edid_connector_property_show(struct drm_connector *connector,
+					 char *buf, loff_t off, size_t count);
+
+/* drm_edid_load.c */
+#ifdef CONFIG_DRM_LOAD_EDID_FIRMWARE
+const struct drm_edid *drm_edid_load_firmware(struct drm_connector *connector);
+#else
+static inline const struct drm_edid *
+drm_edid_load_firmware(struct drm_connector *connector)
+{
+	return ERR_PTR(-ENOENT);
+}
+#endif
+
+/* drm_panic.c */
+#ifdef CONFIG_DRM_PANIC
+bool drm_panic_is_enabled(struct drm_device *dev);
+void drm_panic_register(struct drm_device *dev);
+void drm_panic_unregister(struct drm_device *dev);
+void drm_panic_init(void);
+void drm_panic_exit(void);
+#else
+static inline bool drm_panic_is_enabled(struct drm_device *dev) { return false; }
+static inline void drm_panic_register(struct drm_device *dev) {}
+static inline void drm_panic_unregister(struct drm_device *dev) {}
+static inline void drm_panic_init(void) {}
+static inline void drm_panic_exit(void) {}
+#endif
+
+#endif /* __DRM_CRTC_INTERNAL_H__ */

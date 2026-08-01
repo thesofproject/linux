@@ -19,3 +19,9 @@
 	phy-mode = "rmii";
 	phy-handle = <&internal_phy>;
 };
+
+&sd_emmc_a {
+	sdio: wifi@1 {
+		reg = <1>;
+	};
+};

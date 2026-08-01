@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * USB ZyXEL omni.net LCD PLUS driver
+ * USB ZyXEL omni.net driver
  *
  * Copyright (C) 2013,2017 Johan Hovold <johan@kernel.org>
  *
- * See Documentation/usb/usb-serial.txt for more information on using this
+ * See Documentation/usb/usb-serial.rst for more information on using this
  * driver
  *
  * Please report both successes and troubles to the author at omninet@kroah.com
@@ -14,20 +14,23 @@
 #include <linux/errno.h>
 #include <linux/slab.h>
 #include <linux/tty.h>
-#include <linux/tty_driver.h>
 #include <linux/tty_flip.h>
 #include <linux/module.h>
-#include <linux/uaccess.h>
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
 
 #define DRIVER_AUTHOR "Alessandro Zummo"
-#define DRIVER_DESC "USB ZyXEL omni.net LCD PLUS Driver"
+#define DRIVER_DESC "USB ZyXEL omni.net Driver"
 
 #define ZYXEL_VENDOR_ID		0x0586
 #define ZYXEL_OMNINET_ID	0x1000
+#define ZYXEL_OMNI_56K_PLUS_ID	0x1500
 /* This one seems to be a re-branded ZyXEL device */
 #define BT_IGNITIONPRO_ID	0x2000
+
+#define OMNINET_HEADERLEN	4
+#define OMNINET_BULKOUTSIZE	64
+#define OMNINET_PAYLOADSIZE	(OMNINET_BULKOUTSIZE - OMNINET_HEADERLEN)
 
 /* function prototypes */
 static void omninet_process_read_urb(struct urb *urb);
@@ -36,10 +39,11 @@ static int omninet_prepare_write_buffer(struct usb_serial_port *port,
 static int omninet_calc_num_ports(struct usb_serial *serial,
 				struct usb_serial_endpoints *epds);
 static int omninet_port_probe(struct usb_serial_port *port);
-static int omninet_port_remove(struct usb_serial_port *port);
+static void omninet_port_remove(struct usb_serial_port *port);
 
 static const struct usb_device_id id_table[] = {
 	{ USB_DEVICE(ZYXEL_VENDOR_ID, ZYXEL_OMNINET_ID) },
+	{ USB_DEVICE(ZYXEL_VENDOR_ID, ZYXEL_OMNI_56K_PLUS_ID) },
 	{ USB_DEVICE(ZYXEL_VENDOR_ID, BT_IGNITIONPRO_ID) },
 	{ }						/* Terminating entry */
 };
@@ -47,12 +51,12 @@ MODULE_DEVICE_TABLE(usb, id_table);
 
 static struct usb_serial_driver zyxel_omninet_device = {
 	.driver = {
-		.owner =	THIS_MODULE,
 		.name =		"omninet",
 	},
-	.description =		"ZyXEL - omni.net lcd plus usb",
+	.description =		"ZyXEL - omni.net usb",
 	.id_table =		id_table,
 	.num_bulk_out =		2,
+	.bulk_out_size =	OMNINET_BULKOUTSIZE,
 	.calc_num_ports =	omninet_calc_num_ports,
 	.port_probe =		omninet_port_probe,
 	.port_remove =		omninet_port_remove,
@@ -112,7 +116,7 @@ static int omninet_port_probe(struct usb_serial_port *port)
 {
 	struct omninet_data *od;
 
-	od = kzalloc(sizeof(*od), GFP_KERNEL);
+	od = kzalloc_obj(*od);
 	if (!od)
 		return -ENOMEM;
 
@@ -121,19 +125,13 @@ static int omninet_port_probe(struct usb_serial_port *port)
 	return 0;
 }
 
-static int omninet_port_remove(struct usb_serial_port *port)
+static void omninet_port_remove(struct usb_serial_port *port)
 {
 	struct omninet_data *od;
 
 	od = usb_get_serial_port_data(port);
 	kfree(od);
-
-	return 0;
 }
-
-#define OMNINET_HEADERLEN	4
-#define OMNINET_BULKOUTSIZE	64
-#define OMNINET_PAYLOADSIZE	(OMNINET_BULKOUTSIZE - OMNINET_HEADERLEN)
 
 static void omninet_process_read_urb(struct urb *urb)
 {

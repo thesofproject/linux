@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * cxd2841er.c
  *
@@ -9,16 +10,6 @@
  * Copyright (C) 2014 NetUP Inc.
  * Copyright (C) 2014 Sergey Kozlov <serjk@netup.ru>
  * Copyright (C) 2014 Abylay Ospan <aospan@netup.ru>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
   */
 
 #include <linux/module.h>
@@ -31,7 +22,7 @@
 #include <linux/dynamic_debug.h>
 #include <linux/kernel.h>
 
-#include <media/dvb_math.h>
+#include <linux/int_log.h>
 #include <media/dvb_frontend.h>
 #include "cxd2841er.h"
 #include "cxd2841er_priv.h"
@@ -69,6 +60,7 @@ struct cxd2841er_priv {
 	enum cxd2841er_xtal		xtal;
 	enum fe_caps caps;
 	u32				flags;
+	unsigned long			stats_time;
 };
 
 static const struct cxd2841er_cnr_data s_cn_data[] = {
@@ -319,12 +311,8 @@ static int cxd2841er_set_reg_bits(struct cxd2841er_priv *priv,
 
 static u32 cxd2841er_calc_iffreq_xtal(enum cxd2841er_xtal xtal, u32 ifhz)
 {
-	u64 tmp;
-
-	tmp = (u64) ifhz * 16777216;
-	do_div(tmp, ((xtal == SONY_XTAL_24000) ? 48000000 : 41000000));
-
-	return (u32) tmp;
+	return div_u64(ifhz * 16777216ull,
+		       (xtal == SONY_XTAL_24000) ? 48000000 : 41000000);
 }
 
 static u32 cxd2841er_calc_iffreq(u32 ifhz)
@@ -1948,7 +1936,8 @@ static void cxd2841er_read_ber(struct dvb_frontend *fe)
 {
 	struct dtv_frontend_properties *p = &fe->dtv_property_cache;
 	struct cxd2841er_priv *priv = fe->demodulator_priv;
-	u32 ret, bit_error = 0, bit_count = 0;
+	u32 bit_error = 0, bit_count = 0;
+	int ret;
 
 	dev_dbg(&priv->i2c->dev, "%s()\n", __func__);
 	switch (p->delivery_system) {
@@ -2947,7 +2936,7 @@ static int cxd2841er_sleep_tc_to_active_t(struct cxd2841er_priv *priv,
 		((priv->flags & CXD2841ER_ASCOT) ? 0x01 : 0x00), 0x01);
 	/* Set SLV-T Bank : 0x18 */
 	cxd2841er_write_reg(priv, I2C_SLVT, 0x00, 0x18);
-	/* Pre-RS BER moniter setting */
+	/* Pre-RS BER monitor setting */
 	cxd2841er_set_reg_bits(priv, I2C_SLVT, 0x36, 0x40, 0x07);
 	/* FEC Auto Recovery setting */
 	cxd2841er_set_reg_bits(priv, I2C_SLVT, 0x30, 0x01, 0x01);
@@ -3288,9 +3277,15 @@ static int cxd2841er_get_frontend(struct dvb_frontend *fe,
 		p->strength.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
 
 	if (status & FE_HAS_LOCK) {
+		if (priv->stats_time &&
+		    (!time_after(jiffies, priv->stats_time)))
+			return 0;
+
+		/* Prevent retrieving stats faster than once per second */
+		priv->stats_time = jiffies + msecs_to_jiffies(1000);
+
 		cxd2841er_read_snr(fe);
 		cxd2841er_read_ucblocks(fe);
-
 		cxd2841er_read_ber(fe);
 	} else {
 		p->cnr.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
@@ -3340,7 +3335,7 @@ static int cxd2841er_set_frontend_s(struct dvb_frontend *fe)
 		cxd2841er_tuner_set(fe);
 
 	cxd2841er_tune_done(priv);
-	timeout = ((3000000 + (symbol_rate - 1)) / symbol_rate) + 150;
+	timeout = DIV_ROUND_UP(3000000, symbol_rate) + 150;
 
 	i = 0;
 	do {
@@ -3368,6 +3363,9 @@ done:
 	p->block_error.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
 	p->post_bit_error.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
 	p->post_bit_count.stat[0].scale = FE_SCALE_NOT_AVAILABLE;
+
+	/* Reset the wait for jiffies logic */
+	priv->stats_time = 0;
 
 	return ret;
 }
@@ -3846,7 +3844,7 @@ static struct dvb_frontend *cxd2841er_attach(struct cxd2841er_config *cfg,
 	struct cxd2841er_priv *priv = NULL;
 
 	/* allocate memory for the internal state */
-	priv = kzalloc(sizeof(struct cxd2841er_priv), GFP_KERNEL);
+	priv = kzalloc_obj(struct cxd2841er_priv);
 	if (!priv)
 		return NULL;
 	priv->i2c = i2c;
@@ -3929,22 +3927,21 @@ struct dvb_frontend *cxd2841er_attach_s(struct cxd2841er_config *cfg,
 {
 	return cxd2841er_attach(cfg, i2c, SYS_DVBS);
 }
-EXPORT_SYMBOL(cxd2841er_attach_s);
+EXPORT_SYMBOL_GPL(cxd2841er_attach_s);
 
 struct dvb_frontend *cxd2841er_attach_t_c(struct cxd2841er_config *cfg,
 					struct i2c_adapter *i2c)
 {
 	return cxd2841er_attach(cfg, i2c, 0);
 }
-EXPORT_SYMBOL(cxd2841er_attach_t_c);
+EXPORT_SYMBOL_GPL(cxd2841er_attach_t_c);
 
 static const struct dvb_frontend_ops cxd2841er_dvbs_s2_ops = {
 	.delsys = { SYS_DVBS, SYS_DVBS2 },
 	.info = {
 		.name		= "Sony CXD2841ER DVB-S/S2 demodulator",
-		.frequency_min	= 500000,
-		.frequency_max	= 2500000,
-		.frequency_stepsize	= 0,
+		.frequency_min_hz	=  500 * MHz,
+		.frequency_max_hz	= 2500 * MHz,
 		.symbol_rate_min = 1000000,
 		.symbol_rate_max = 45000000,
 		.symbol_rate_tolerance = 500,
@@ -3988,8 +3985,8 @@ static struct dvb_frontend_ops cxd2841er_t_c_ops = {
 			FE_CAN_HIERARCHY_AUTO |
 			FE_CAN_MUTE_TS |
 			FE_CAN_2G_MODULATION,
-		.frequency_min = 42000000,
-		.frequency_max = 1002000000,
+		.frequency_min_hz =   42 * MHz,
+		.frequency_max_hz = 1002 * MHz,
 		.symbol_rate_min = 870000,
 		.symbol_rate_max = 11700000
 	},

@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) STMicroelectronics SA 2015
  * Authors: Arnaud Pouliquen <arnaud.pouliquen@st.com>
  *          for STMicroelectronics.
- * License terms:  GNU General Public License (GPL), version 2
  */
 
 #include <linux/clk.h>
@@ -65,13 +65,15 @@ static irqreturn_t uni_player_irq_handler(int irq, void *dev_id)
 	unsigned int status;
 	unsigned int tmp;
 
-	spin_lock(&player->irq_lock);
+	guard(spinlock)(&player->irq_lock);
 	if (!player->substream)
-		goto irq_spin_unlock;
+		return ret;
 
 	snd_pcm_stream_lock(player->substream);
-	if (player->state == UNIPERIF_STATE_STOPPED)
-		goto stream_unlock;
+	if (player->state == UNIPERIF_STATE_STOPPED) {
+		snd_pcm_stream_unlock(player->substream);
+		return ret;
+	}
 
 	/* Get interrupt status & clear them immediately */
 	status = GET_UNIPERIF_ITS(player);
@@ -116,7 +118,8 @@ static irqreturn_t uni_player_irq_handler(int irq, void *dev_id)
 			dev_err(player->dev,
 				"unexpected Underflow recovering\n");
 			ret = -EPERM;
-			goto stream_unlock;
+			snd_pcm_stream_unlock(player->substream);
+			return ret;
 		}
 		/* Read the underflow recovery duration */
 		tmp = GET_UNIPERIF_STATUS_1_UNDERFLOW_DURATION(player);
@@ -143,10 +146,7 @@ static irqreturn_t uni_player_irq_handler(int irq, void *dev_id)
 		ret = IRQ_HANDLED;
 	}
 
-stream_unlock:
 	snd_pcm_stream_unlock(player->substream);
-irq_spin_unlock:
-	spin_unlock(&player->irq_lock);
 
 	return ret;
 }
@@ -226,7 +226,6 @@ static void uni_player_set_channel_status(struct uniperif *player,
 	 * sampling frequency. If no sample rate is already specified, then
 	 * set one.
 	 */
-	mutex_lock(&player->ctrl_lock);
 	if (runtime) {
 		switch (runtime->rate) {
 		case 22050:
@@ -303,7 +302,6 @@ static void uni_player_set_channel_status(struct uniperif *player,
 		player->stream_settings.iec958.status[3 + (n * 4)] << 24;
 		SET_UNIPERIF_CHANNEL_STA_REGN(player, n, status);
 	}
-	mutex_unlock(&player->ctrl_lock);
 
 	/* Update the channel status */
 	if (player->ver < SND_ST_UNIPERIF_VERSION_UNI_PLR_TOP_1_0)
@@ -366,7 +364,9 @@ static int uni_player_prepare_iec958(struct uniperif *player,
 	SET_UNIPERIF_CTRL_ZERO_STUFF_HW(player);
 
 	/* Update the channel status */
-	uni_player_set_channel_status(player, runtime);
+	scoped_guard(mutex, &player->ctrl_lock)
+		uni_player_set_channel_status(player, runtime);
+
 
 	/* Clear the user validity user bits */
 	SET_UNIPERIF_USER_VALIDITY_VALIDITY_LR(player, 0);
@@ -546,11 +546,11 @@ static int uni_player_prepare_tdm(struct uniperif *player,
 
 	/* set unip clk rate (not done vai set_sysclk ops) */
 	freq = runtime->rate * tdm_frame_size * 8;
-	mutex_lock(&player->ctrl_lock);
-	ret = uni_player_clk_set_rate(player, freq);
-	if (!ret)
-		player->mclk = freq;
-	mutex_unlock(&player->ctrl_lock);
+	scoped_guard(mutex, &player->ctrl_lock) {
+		ret = uni_player_clk_set_rate(player, freq);
+		if (!ret)
+			player->mclk = freq;
+	}
 
 	return 0;
 }
@@ -575,12 +575,11 @@ static int uni_player_ctl_iec958_get(struct snd_kcontrol *kcontrol,
 	struct uniperif *player = priv->dai_data.uni;
 	struct snd_aes_iec958 *iec958 = &player->stream_settings.iec958;
 
-	mutex_lock(&player->ctrl_lock);
+	guard(mutex)(&player->ctrl_lock);
 	ucontrol->value.iec958.status[0] = iec958->status[0];
 	ucontrol->value.iec958.status[1] = iec958->status[1];
 	ucontrol->value.iec958.status[2] = iec958->status[2];
 	ucontrol->value.iec958.status[3] = iec958->status[3];
-	mutex_unlock(&player->ctrl_lock);
 	return 0;
 }
 
@@ -591,23 +590,21 @@ static int uni_player_ctl_iec958_put(struct snd_kcontrol *kcontrol,
 	struct sti_uniperiph_data *priv = snd_soc_dai_get_drvdata(dai);
 	struct uniperif *player = priv->dai_data.uni;
 	struct snd_aes_iec958 *iec958 =  &player->stream_settings.iec958;
-	unsigned long flags;
 
-	mutex_lock(&player->ctrl_lock);
+	guard(mutex)(&player->ctrl_lock);
 	iec958->status[0] = ucontrol->value.iec958.status[0];
 	iec958->status[1] = ucontrol->value.iec958.status[1];
 	iec958->status[2] = ucontrol->value.iec958.status[2];
 	iec958->status[3] = ucontrol->value.iec958.status[3];
-	mutex_unlock(&player->ctrl_lock);
 
-	spin_lock_irqsave(&player->irq_lock, flags);
-	if (player->substream && player->substream->runtime)
-		uni_player_set_channel_status(player,
-					      player->substream->runtime);
-	else
-		uni_player_set_channel_status(player, NULL);
+	scoped_guard(spinlock_irqsave, &player->irq_lock) {
+		if (player->substream && player->substream->runtime)
+			uni_player_set_channel_status(player,
+						      player->substream->runtime);
+		else
+			uni_player_set_channel_status(player, NULL);
+	}
 
-	spin_unlock_irqrestore(&player->irq_lock, flags);
 	return 0;
 }
 
@@ -641,9 +638,8 @@ static int snd_sti_clk_adjustment_get(struct snd_kcontrol *kcontrol,
 	struct sti_uniperiph_data *priv = snd_soc_dai_get_drvdata(dai);
 	struct uniperif *player = priv->dai_data.uni;
 
-	mutex_lock(&player->ctrl_lock);
+	guard(mutex)(&player->ctrl_lock);
 	ucontrol->value.integer.value[0] = player->clk_adj;
-	mutex_unlock(&player->ctrl_lock);
 
 	return 0;
 }
@@ -660,12 +656,11 @@ static int snd_sti_clk_adjustment_put(struct snd_kcontrol *kcontrol,
 	    (ucontrol->value.integer.value[0] > UNIPERIF_PLAYER_CLK_ADJ_MAX))
 		return -EINVAL;
 
-	mutex_lock(&player->ctrl_lock);
+	guard(mutex)(&player->ctrl_lock);
 	player->clk_adj = ucontrol->value.integer.value[0];
 
 	if (player->mclk)
 		ret = uni_player_clk_set_rate(player, player->mclk);
-	mutex_unlock(&player->ctrl_lock);
 
 	return ret;
 }
@@ -692,12 +687,10 @@ static int uni_player_startup(struct snd_pcm_substream *substream,
 {
 	struct sti_uniperiph_data *priv = snd_soc_dai_get_drvdata(dai);
 	struct uniperif *player = priv->dai_data.uni;
-	unsigned long flags;
 	int ret;
 
-	spin_lock_irqsave(&player->irq_lock, flags);
-	player->substream = substream;
-	spin_unlock_irqrestore(&player->irq_lock, flags);
+	scoped_guard(spinlock_irqsave, &player->irq_lock)
+		player->substream = substream;
 
 	player->clk_adj = 0;
 
@@ -733,11 +726,10 @@ static int uni_player_set_sysclk(struct snd_soc_dai *dai, int clk_id,
 	if (clk_id != 0)
 		return -EINVAL;
 
-	mutex_lock(&player->ctrl_lock);
+	guard(mutex)(&player->ctrl_lock);
 	ret = uni_player_clk_set_rate(player, freq);
 	if (!ret)
 		player->mclk = freq;
-	mutex_unlock(&player->ctrl_lock);
 
 	return ret;
 }
@@ -995,15 +987,13 @@ static void uni_player_shutdown(struct snd_pcm_substream *substream,
 {
 	struct sti_uniperiph_data *priv = snd_soc_dai_get_drvdata(dai);
 	struct uniperif *player = priv->dai_data.uni;
-	unsigned long flags;
 
-	spin_lock_irqsave(&player->irq_lock, flags);
+	guard(spinlock_irqsave)(&player->irq_lock);
 	if (player->state != UNIPERIF_STATE_STOPPED)
 		/* Stop the player */
 		uni_player_stop(player);
 
 	player->substream = NULL;
-	spin_unlock_irqrestore(&player->irq_lock, flags);
 }
 
 static int uni_player_parse_dt_audio_glue(struct platform_device *pdev,
@@ -1027,8 +1017,13 @@ static int uni_player_parse_dt_audio_glue(struct platform_device *pdev,
 		return PTR_ERR(regmap);
 	}
 
-	player->clk_sel = regmap_field_alloc(regmap, regfield[0]);
-	player->valid_sel = regmap_field_alloc(regmap, regfield[1]);
+	player->clk_sel = devm_regmap_field_alloc(&pdev->dev, regmap, regfield[0]);
+	if (IS_ERR(player->clk_sel))
+		return PTR_ERR(player->clk_sel);
+
+	player->valid_sel = devm_regmap_field_alloc(&pdev->dev, regmap, regfield[1]);
+	if (IS_ERR(player->valid_sel))
+		return PTR_ERR(player->valid_sel);
 
 	return 0;
 }
@@ -1037,6 +1032,7 @@ static const struct snd_soc_dai_ops uni_player_dai_ops = {
 		.startup = uni_player_startup,
 		.shutdown = uni_player_shutdown,
 		.prepare = uni_player_prepare,
+		.probe = sti_uniperiph_dai_probe,
 		.trigger = uni_player_trigger,
 		.hw_params = sti_uniperiph_dai_hw_params,
 		.set_fmt = sti_uniperiph_dai_set_fmt,

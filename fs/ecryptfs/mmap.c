@@ -1,4 +1,5 @@
-/**
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
  * eCryptfs: Linux filesystem encryption layer
  * This is where eCryptfs coordinates the symmetric encryption and
  * decryption of the file data as it passes between the lower
@@ -8,21 +9,6 @@
  * Copyright (C) 2001-2003 Stony Brook University
  * Copyright (C) 2004-2007 International Business Machines Corp.
  *   Author(s): Michael A. Halcrow <mahalcro@us.ibm.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
- * 02111-1307, USA.
  */
 
 #include <linux/pagemap.h>
@@ -33,50 +19,33 @@
 #include <linux/scatterlist.h>
 #include <linux/slab.h>
 #include <linux/xattr.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include "ecryptfs_kernel.h"
 
-/**
- * ecryptfs_get_locked_page
- *
- * Get one page from cache or lower f/s, return error otherwise.
- *
- * Returns locked and up-to-date page (if ok), with increased
- * refcnt.
- */
-struct page *ecryptfs_get_locked_page(struct inode *inode, loff_t index)
-{
-	struct page *page = read_mapping_page(inode->i_mapping, index, NULL);
-	if (!IS_ERR(page))
-		lock_page(page);
-	return page;
-}
-
-/**
- * ecryptfs_writepage
- * @page: Page that is locked before this call is made
- *
- * Returns zero on success; non-zero otherwise
- *
+/*
  * This is where we encrypt the data and pass the encrypted data to
  * the lower filesystem.  In OpenPGP-compatible mode, we operate on
  * entire underlying packets.
  */
-static int ecryptfs_writepage(struct page *page, struct writeback_control *wbc)
+static int ecryptfs_writepages(struct address_space *mapping,
+		struct writeback_control *wbc)
 {
-	int rc;
+	struct folio *folio = NULL;
+	int error;
 
-	rc = ecryptfs_encrypt_page(page);
-	if (rc) {
-		ecryptfs_printk(KERN_WARNING, "Error encrypting "
-				"page (upper index [0x%.16lx])\n", page->index);
-		ClearPageUptodate(page);
-		goto out;
+	while ((folio = writeback_iter(mapping, wbc, folio, &error))) {
+		error = ecryptfs_encrypt_page(folio);
+		if (error) {
+			ecryptfs_printk(KERN_WARNING,
+				"Error encrypting folio (index [0x%.16lx])\n",
+				folio->index);
+			folio_clear_uptodate(folio);
+			mapping_set_error(mapping, error);
+		}
+		folio_unlock(folio);
 	}
-	SetPageUptodate(page);
-out:
-	unlock_page(page);
-	return rc;
+
+	return error;
 }
 
 static void strip_xattr_flag(char *page_virt,
@@ -92,7 +61,7 @@ static void strip_xattr_flag(char *page_virt,
 	}
 }
 
-/**
+/*
  *   Header Extent:
  *     Octets 0-7:        Unencrypted file size (big-endian)
  *     Octets 8-15:       eCryptfs special marker
@@ -110,7 +79,7 @@ static void strip_xattr_flag(char *page_virt,
 
 /**
  * ecryptfs_copy_up_encrypted_with_header
- * @page: Sort of a ``virtual'' representation of the encrypted lower
+ * @folio: Sort of a ``virtual'' representation of the encrypted lower
  *        file. The actual lower file does not have the metadata in
  *        the header. This is locked.
  * @crypt_stat: The eCryptfs inode's cryptographic context
@@ -119,7 +88,7 @@ static void strip_xattr_flag(char *page_virt,
  * seeing, with the header information inserted.
  */
 static int
-ecryptfs_copy_up_encrypted_with_header(struct page *page,
+ecryptfs_copy_up_encrypted_with_header(struct folio *folio,
 				       struct ecryptfs_crypt_stat *crypt_stat)
 {
 	loff_t extent_num_in_page = 0;
@@ -128,9 +97,9 @@ ecryptfs_copy_up_encrypted_with_header(struct page *page,
 	int rc = 0;
 
 	while (extent_num_in_page < num_extents_per_page) {
-		loff_t view_extent_num = ((((loff_t)page->index)
+		loff_t view_extent_num = ((loff_t)folio->index
 					   * num_extents_per_page)
-					  + extent_num_in_page);
+					  + extent_num_in_page;
 		size_t num_header_extents_at_front =
 			(crypt_stat->metadata_size / crypt_stat->extent_size);
 
@@ -138,21 +107,21 @@ ecryptfs_copy_up_encrypted_with_header(struct page *page,
 			/* This is a header extent */
 			char *page_virt;
 
-			page_virt = kmap_atomic(page);
+			page_virt = kmap_local_folio(folio, 0);
 			memset(page_virt, 0, PAGE_SIZE);
 			/* TODO: Support more than one header extent */
 			if (view_extent_num == 0) {
 				size_t written;
 
 				rc = ecryptfs_read_xattr_region(
-					page_virt, page->mapping->host);
+					page_virt, folio->mapping->host);
 				strip_xattr_flag(page_virt + 16, crypt_stat);
 				ecryptfs_write_header_metadata(page_virt + 20,
 							       crypt_stat,
 							       &written);
 			}
-			kunmap_atomic(page_virt);
-			flush_dcache_page(page);
+			kunmap_local(page_virt);
+			flush_dcache_folio(folio);
 			if (rc) {
 				printk(KERN_ERR "%s: Error reading xattr "
 				       "region; rc = [%d]\n", __func__, rc);
@@ -165,9 +134,9 @@ ecryptfs_copy_up_encrypted_with_header(struct page *page,
 				 - crypt_stat->metadata_size);
 
 			rc = ecryptfs_read_lower_page_segment(
-				page, (lower_offset >> PAGE_SHIFT),
+				folio, (lower_offset >> PAGE_SHIFT),
 				(lower_offset & ~PAGE_MASK),
-				crypt_stat->extent_size, page->mapping->host);
+				crypt_stat->extent_size, folio->mapping->host);
 			if (rc) {
 				printk(KERN_ERR "%s: Error attempting to read "
 				       "extent at offset [%lld] in the lower "
@@ -183,133 +152,129 @@ out:
 }
 
 /**
- * ecryptfs_readpage
+ * ecryptfs_read_folio
  * @file: An eCryptfs file
- * @page: Page from eCryptfs inode mapping into which to stick the read data
+ * @folio: Folio from eCryptfs inode mapping into which to stick the read data
  *
- * Read in a page, decrypting if necessary.
+ * Read in a folio, decrypting if necessary.
  *
  * Returns zero on success; non-zero on error.
  */
-static int ecryptfs_readpage(struct file *file, struct page *page)
+static int ecryptfs_read_folio(struct file *file, struct folio *folio)
 {
+	struct inode *inode = folio->mapping->host;
 	struct ecryptfs_crypt_stat *crypt_stat =
-		&ecryptfs_inode_to_private(page->mapping->host)->crypt_stat;
-	int rc = 0;
+		&ecryptfs_inode_to_private(inode)->crypt_stat;
+	int err = 0;
 
 	if (!crypt_stat || !(crypt_stat->flags & ECRYPTFS_ENCRYPTED)) {
-		rc = ecryptfs_read_lower_page_segment(page, page->index, 0,
-						      PAGE_SIZE,
-						      page->mapping->host);
+		err = ecryptfs_read_lower_page_segment(folio, folio->index, 0,
+				folio_size(folio), inode);
 	} else if (crypt_stat->flags & ECRYPTFS_VIEW_AS_ENCRYPTED) {
 		if (crypt_stat->flags & ECRYPTFS_METADATA_IN_XATTR) {
-			rc = ecryptfs_copy_up_encrypted_with_header(page,
-								    crypt_stat);
-			if (rc) {
+			err = ecryptfs_copy_up_encrypted_with_header(folio,
+					crypt_stat);
+			if (err) {
 				printk(KERN_ERR "%s: Error attempting to copy "
 				       "the encrypted content from the lower "
 				       "file whilst inserting the metadata "
-				       "from the xattr into the header; rc = "
-				       "[%d]\n", __func__, rc);
+				       "from the xattr into the header; err = "
+				       "[%d]\n", __func__, err);
 				goto out;
 			}
 
 		} else {
-			rc = ecryptfs_read_lower_page_segment(
-				page, page->index, 0, PAGE_SIZE,
-				page->mapping->host);
-			if (rc) {
-				printk(KERN_ERR "Error reading page; rc = "
-				       "[%d]\n", rc);
+			err = ecryptfs_read_lower_page_segment(folio,
+					folio->index, 0, folio_size(folio),
+					inode);
+			if (err) {
+				printk(KERN_ERR "Error reading page; err = "
+				       "[%d]\n", err);
 				goto out;
 			}
 		}
 	} else {
-		rc = ecryptfs_decrypt_page(page);
-		if (rc) {
+		err = ecryptfs_decrypt_page(folio);
+		if (err) {
 			ecryptfs_printk(KERN_ERR, "Error decrypting page; "
-					"rc = [%d]\n", rc);
+					"err = [%d]\n", err);
 			goto out;
 		}
 	}
 out:
-	if (rc)
-		ClearPageUptodate(page);
-	else
-		SetPageUptodate(page);
-	ecryptfs_printk(KERN_DEBUG, "Unlocking page with index = [0x%.16lx]\n",
-			page->index);
-	unlock_page(page);
-	return rc;
+	ecryptfs_printk(KERN_DEBUG, "Unlocking folio with index = [0x%.16lx]\n",
+			folio->index);
+	folio_end_read(folio, err == 0);
+	return err;
 }
 
-/**
+/*
  * Called with lower inode mutex held.
  */
-static int fill_zeros_to_end_of_page(struct page *page, unsigned int to)
+static int fill_zeros_to_end_of_page(struct folio *folio, unsigned int to)
 {
-	struct inode *inode = page->mapping->host;
+	struct inode *inode = folio->mapping->host;
 	int end_byte_in_page;
 
-	if ((i_size_read(inode) / PAGE_SIZE) != page->index)
+	if ((i_size_read(inode) / PAGE_SIZE) != folio->index)
 		goto out;
 	end_byte_in_page = i_size_read(inode) % PAGE_SIZE;
 	if (to > end_byte_in_page)
 		end_byte_in_page = to;
-	zero_user_segment(page, end_byte_in_page, PAGE_SIZE);
+	folio_zero_segment(folio, end_byte_in_page, PAGE_SIZE);
 out:
 	return 0;
 }
 
 /**
  * ecryptfs_write_begin
- * @file: The eCryptfs file
+ * @iocb: I/O control block for the eCryptfs file
  * @mapping: The eCryptfs object
  * @pos: The file offset at which to start writing
  * @len: Length of the write
- * @flags: Various flags
- * @pagep: Pointer to return the page
+ * @foliop: Pointer to return the folio
  * @fsdata: Pointer to return fs data (unused)
  *
  * This function must zero any hole we create
  *
  * Returns zero on success; non-zero otherwise
  */
-static int ecryptfs_write_begin(struct file *file,
+static int ecryptfs_write_begin(const struct kiocb *iocb,
 			struct address_space *mapping,
-			loff_t pos, unsigned len, unsigned flags,
-			struct page **pagep, void **fsdata)
+			loff_t pos, unsigned len,
+			struct folio **foliop, void **fsdata)
 {
 	pgoff_t index = pos >> PAGE_SHIFT;
-	struct page *page;
+	struct folio *folio;
 	loff_t prev_page_end_size;
 	int rc = 0;
 
-	page = grab_cache_page_write_begin(mapping, index, flags);
-	if (!page)
-		return -ENOMEM;
-	*pagep = page;
+	folio = __filemap_get_folio(mapping, index, FGP_WRITEBEGIN,
+			mapping_gfp_mask(mapping));
+	if (IS_ERR(folio))
+		return PTR_ERR(folio);
+	*foliop = folio;
 
 	prev_page_end_size = ((loff_t)index << PAGE_SHIFT);
-	if (!PageUptodate(page)) {
+	if (!folio_test_uptodate(folio)) {
 		struct ecryptfs_crypt_stat *crypt_stat =
 			&ecryptfs_inode_to_private(mapping->host)->crypt_stat;
 
 		if (!(crypt_stat->flags & ECRYPTFS_ENCRYPTED)) {
 			rc = ecryptfs_read_lower_page_segment(
-				page, index, 0, PAGE_SIZE, mapping->host);
+				folio, index, 0, PAGE_SIZE, mapping->host);
 			if (rc) {
 				printk(KERN_ERR "%s: Error attempting to read "
 				       "lower page segment; rc = [%d]\n",
 				       __func__, rc);
-				ClearPageUptodate(page);
+				folio_clear_uptodate(folio);
 				goto out;
 			} else
-				SetPageUptodate(page);
+				folio_mark_uptodate(folio);
 		} else if (crypt_stat->flags & ECRYPTFS_VIEW_AS_ENCRYPTED) {
 			if (crypt_stat->flags & ECRYPTFS_METADATA_IN_XATTR) {
 				rc = ecryptfs_copy_up_encrypted_with_header(
-					page, crypt_stat);
+					folio, crypt_stat);
 				if (rc) {
 					printk(KERN_ERR "%s: Error attempting "
 					       "to copy the encrypted content "
@@ -317,47 +282,47 @@ static int ecryptfs_write_begin(struct file *file,
 					       "inserting the metadata from "
 					       "the xattr into the header; rc "
 					       "= [%d]\n", __func__, rc);
-					ClearPageUptodate(page);
+					folio_clear_uptodate(folio);
 					goto out;
 				}
-				SetPageUptodate(page);
+				folio_mark_uptodate(folio);
 			} else {
 				rc = ecryptfs_read_lower_page_segment(
-					page, index, 0, PAGE_SIZE,
+					folio, index, 0, PAGE_SIZE,
 					mapping->host);
 				if (rc) {
 					printk(KERN_ERR "%s: Error reading "
 					       "page; rc = [%d]\n",
 					       __func__, rc);
-					ClearPageUptodate(page);
+					folio_clear_uptodate(folio);
 					goto out;
 				}
-				SetPageUptodate(page);
+				folio_mark_uptodate(folio);
 			}
 		} else {
 			if (prev_page_end_size
-			    >= i_size_read(page->mapping->host)) {
-				zero_user(page, 0, PAGE_SIZE);
-				SetPageUptodate(page);
+			    >= i_size_read(mapping->host)) {
+				folio_zero_range(folio, 0, PAGE_SIZE);
+				folio_mark_uptodate(folio);
 			} else if (len < PAGE_SIZE) {
-				rc = ecryptfs_decrypt_page(page);
+				rc = ecryptfs_decrypt_page(folio);
 				if (rc) {
 					printk(KERN_ERR "%s: Error decrypting "
 					       "page at index [%ld]; "
 					       "rc = [%d]\n",
-					       __func__, page->index, rc);
-					ClearPageUptodate(page);
+					       __func__, folio->index, rc);
+					folio_clear_uptodate(folio);
 					goto out;
 				}
-				SetPageUptodate(page);
+				folio_mark_uptodate(folio);
 			}
 		}
 	}
 	/* If creating a page or more of holes, zero them out via truncate.
 	 * Note, this will increase i_size. */
 	if (index != 0) {
-		if (prev_page_end_size > i_size_read(page->mapping->host)) {
-			rc = ecryptfs_truncate(file->f_path.dentry,
+		if (prev_page_end_size > i_size_read(mapping->host)) {
+			rc = ecryptfs_truncate(iocb->ki_filp->f_path.dentry,
 					       prev_page_end_size);
 			if (rc) {
 				printk(KERN_ERR "%s: Error on attempt to "
@@ -372,17 +337,16 @@ static int ecryptfs_write_begin(struct file *file,
 	 * of page?  Zero it out. */
 	if ((i_size_read(mapping->host) == prev_page_end_size)
 	    && (pos != 0))
-		zero_user(page, 0, PAGE_SIZE);
+		folio_zero_range(folio, 0, PAGE_SIZE);
 out:
 	if (unlikely(rc)) {
-		unlock_page(page);
-		put_page(page);
-		*pagep = NULL;
+		folio_unlock(folio);
+		folio_put(folio);
 	}
 	return rc;
 }
 
-/**
+/*
  * ecryptfs_write_inode_size_to_header
  *
  * Writes the lower file size to the first 8 bytes of the header.
@@ -440,8 +404,8 @@ static int ecryptfs_write_inode_size_to_xattr(struct inode *ecryptfs_inode)
 	if (size < 0)
 		size = 8;
 	put_unaligned_be64(i_size_read(ecryptfs_inode), xattr_virt);
-	rc = __vfs_setxattr(lower_dentry, lower_inode, ECRYPTFS_XATTR_NAME,
-			    xattr_virt, size, 0);
+	rc = __vfs_setxattr(&nop_mnt_idmap, lower_dentry, lower_inode,
+			    ECRYPTFS_XATTR_NAME, xattr_virt, size, 0);
 	inode_unlock(lower_inode);
 	if (rc)
 		printk(KERN_ERR "Error whilst attempting to write inode size "
@@ -465,18 +429,18 @@ int ecryptfs_write_inode_size_to_metadata(struct inode *ecryptfs_inode)
 
 /**
  * ecryptfs_write_end
- * @file: The eCryptfs file object
+ * @iocb: I/O control block for the eCryptfs file
  * @mapping: The eCryptfs object
  * @pos: The file position
  * @len: The length of the data (unused)
  * @copied: The amount of data copied
- * @page: The eCryptfs page
+ * @folio: The eCryptfs folio
  * @fsdata: The fsdata (unused)
  */
-static int ecryptfs_write_end(struct file *file,
+static int ecryptfs_write_end(const struct kiocb *iocb,
 			struct address_space *mapping,
 			loff_t pos, unsigned len, unsigned copied,
-			struct page *page, void *fsdata)
+			struct folio *folio, void *fsdata)
 {
 	pgoff_t index = pos >> PAGE_SHIFT;
 	unsigned from = pos & (PAGE_SIZE - 1);
@@ -489,8 +453,8 @@ static int ecryptfs_write_end(struct file *file,
 	ecryptfs_printk(KERN_DEBUG, "Calling fill_zeros_to_end_of_page"
 			"(page w/ index = [0x%.16lx], to = [%d])\n", index, to);
 	if (!(crypt_stat->flags & ECRYPTFS_ENCRYPTED)) {
-		rc = ecryptfs_write_lower_page_segment(ecryptfs_inode, page, 0,
-						       to);
+		rc = ecryptfs_write_lower_page_segment(ecryptfs_inode,
+				folio, 0, to);
 		if (!rc) {
 			rc = copied;
 			fsstack_copy_inode_size(ecryptfs_inode,
@@ -498,21 +462,21 @@ static int ecryptfs_write_end(struct file *file,
 		}
 		goto out;
 	}
-	if (!PageUptodate(page)) {
+	if (!folio_test_uptodate(folio)) {
 		if (copied < PAGE_SIZE) {
 			rc = 0;
 			goto out;
 		}
-		SetPageUptodate(page);
+		folio_mark_uptodate(folio);
 	}
 	/* Fills in zeros if 'to' goes beyond inode size */
-	rc = fill_zeros_to_end_of_page(page, to);
+	rc = fill_zeros_to_end_of_page(folio, to);
 	if (rc) {
 		ecryptfs_printk(KERN_WARNING, "Error attempting to fill "
 			"zeros in page with index = [0x%.16lx]\n", index);
 		goto out;
 	}
-	rc = ecryptfs_encrypt_page(page);
+	rc = ecryptfs_encrypt_page(folio);
 	if (rc) {
 		ecryptfs_printk(KERN_WARNING, "Error encrypting page (upper "
 				"index [0x%.16lx])\n", index);
@@ -531,29 +495,40 @@ static int ecryptfs_write_end(struct file *file,
 	else
 		rc = copied;
 out:
-	unlock_page(page);
-	put_page(page);
+	folio_unlock(folio);
+	folio_put(folio);
 	return rc;
 }
 
 static sector_t ecryptfs_bmap(struct address_space *mapping, sector_t block)
 {
-	int rc = 0;
-	struct inode *inode;
-	struct inode *lower_inode;
+	struct inode *lower_inode = ecryptfs_inode_to_lower(mapping->host);
+	int ret = bmap(lower_inode, &block);
 
-	inode = (struct inode *)mapping->host;
-	lower_inode = ecryptfs_inode_to_lower(inode);
-	if (lower_inode->i_mapping->a_ops->bmap)
-		rc = lower_inode->i_mapping->a_ops->bmap(lower_inode->i_mapping,
-							 block);
-	return rc;
+	if (ret)
+		return 0;
+	return block;
 }
 
+#include <linux/buffer_head.h>
+
 const struct address_space_operations ecryptfs_aops = {
-	.writepage = ecryptfs_writepage,
-	.readpage = ecryptfs_readpage,
+	/*
+	 * XXX: This is pretty broken for multiple reasons: ecryptfs does not
+	 * actually use buffer_heads, and ecryptfs will crash without
+	 * CONFIG_BLOCK.  But it matches the behavior before the default for
+	 * address_space_operations without the ->dirty_folio method was
+	 * cleaned up, so this is the best we can do without maintainer
+	 * feedback.
+	 */
+#ifdef CONFIG_BLOCK
+	.dirty_folio	= block_dirty_folio,
+	.invalidate_folio = block_invalidate_folio,
+#endif
+	.writepages = ecryptfs_writepages,
+	.read_folio = ecryptfs_read_folio,
 	.write_begin = ecryptfs_write_begin,
 	.write_end = ecryptfs_write_end,
+	.migrate_folio = filemap_migrate_folio,
 	.bmap = ecryptfs_bmap,
 };

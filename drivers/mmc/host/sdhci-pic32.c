@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Support of SDHCI platform devices for Microchip PIC32.
  *
@@ -5,10 +6,6 @@
  * Andrei Pistirica, Paul Thacker
  *
  * Inspired by sdhci-pltfm.c
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #include <linux/clk.h>
@@ -18,6 +15,7 @@
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/of.h>
+#include <linux/platform_data/sdhci-pic32.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
 #include <linux/slab.h>
@@ -25,7 +23,6 @@
 #include <linux/io.h>
 #include "sdhci.h"
 #include "sdhci-pltfm.h"
-#include <linux/platform_data/sdhci-pic32.h>
 
 #define SDH_SHARED_BUS_CTRL		0x000000E0
 #define SDH_SHARED_BUS_NR_CLK_PINS_MASK	0x7
@@ -121,10 +118,9 @@ static void pic32_sdhci_shared_bus(struct platform_device *pdev)
 	writel(bus, host->ioaddr + SDH_SHARED_BUS_CTRL);
 }
 
-static int pic32_sdhci_probe_platform(struct platform_device *pdev,
+static void pic32_sdhci_probe_platform(struct platform_device *pdev,
 				      struct pic32_sdhci_priv *pdata)
 {
-	int ret = 0;
 	u32 caps_slot_type;
 	struct sdhci_host *host = platform_get_drvdata(pdev);
 
@@ -133,8 +129,6 @@ static int pic32_sdhci_probe_platform(struct platform_device *pdev,
 	caps_slot_type = (host->caps & SDH_CAPS_SDH_SLOT_TYPE_MASK) >> 30;
 	if (caps_slot_type == SDH_SLOT_TYPE_SHARED_BUS)
 		pic32_sdhci_shared_bus(pdev);
-
-	return ret;
 }
 
 static int pic32_sdhci_probe(struct platform_device *pdev)
@@ -160,20 +154,20 @@ static int pic32_sdhci_probe(struct platform_device *pdev)
 		ret = plat_data->setup_dma(ADMA_FIFO_RD_THSHLD,
 					   ADMA_FIFO_WR_THSHLD);
 		if (ret)
-			goto err_host;
+			goto err;
 	}
 
 	sdhci_pdata->sys_clk = devm_clk_get(&pdev->dev, "sys_clk");
 	if (IS_ERR(sdhci_pdata->sys_clk)) {
 		ret = PTR_ERR(sdhci_pdata->sys_clk);
 		dev_err(&pdev->dev, "Error getting clock\n");
-		goto err_host;
+		goto err;
 	}
 
 	ret = clk_prepare_enable(sdhci_pdata->sys_clk);
 	if (ret) {
 		dev_err(&pdev->dev, "Error enabling clock\n");
-		goto err_host;
+		goto err;
 	}
 
 	sdhci_pdata->base_clk = devm_clk_get(&pdev->dev, "base_clk");
@@ -193,17 +187,11 @@ static int pic32_sdhci_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_base_clk;
 
-	ret = pic32_sdhci_probe_platform(pdev, sdhci_pdata);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to probe platform!\n");
-		goto err_base_clk;
-	}
+	pic32_sdhci_probe_platform(pdev, sdhci_pdata);
 
 	ret = sdhci_add_host(host);
-	if (ret) {
-		dev_err(&pdev->dev, "error adding host\n");
+	if (ret)
 		goto err_base_clk;
-	}
 
 	dev_info(&pdev->dev, "Successfully added sdhci host\n");
 	return 0;
@@ -212,14 +200,12 @@ err_base_clk:
 	clk_disable_unprepare(sdhci_pdata->base_clk);
 err_sys_clk:
 	clk_disable_unprepare(sdhci_pdata->sys_clk);
-err_host:
-	sdhci_pltfm_free(pdev);
 err:
 	dev_err(&pdev->dev, "pic32-sdhci probe failed: %d\n", ret);
 	return ret;
 }
 
-static int pic32_sdhci_remove(struct platform_device *pdev)
+static void pic32_sdhci_remove(struct platform_device *pdev)
 {
 	struct sdhci_host *host = platform_get_drvdata(pdev);
 	struct pic32_sdhci_priv *sdhci_pdata = sdhci_priv(host);
@@ -229,9 +215,6 @@ static int pic32_sdhci_remove(struct platform_device *pdev)
 	sdhci_remove_host(host, scratch == (u32)~0);
 	clk_disable_unprepare(sdhci_pdata->base_clk);
 	clk_disable_unprepare(sdhci_pdata->sys_clk);
-	sdhci_pltfm_free(pdev);
-
-	return 0;
 }
 
 static const struct of_device_id pic32_sdhci_id_table[] = {
@@ -243,6 +226,7 @@ MODULE_DEVICE_TABLE(of, pic32_sdhci_id_table);
 static struct platform_driver pic32_sdhci_driver = {
 	.driver = {
 		.name	= "pic32-sdhci",
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		.of_match_table = of_match_ptr(pic32_sdhci_id_table),
 	},
 	.probe		= pic32_sdhci_probe,

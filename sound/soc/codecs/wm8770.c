@@ -1,20 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * wm8770.c  --  WM8770 ALSA SoC Audio driver
  *
  * Copyright 2010 Wolfson Microelectronics plc
  *
  * Author: Dimitris Papastamos <dp@opensource.wolfsonmicro.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
 #include <linux/delay.h>
-#include <linux/of_device.h>
 #include <linux/pm.h>
 #include <linux/spi/spi.h>
 #include <linux/regmap.h>
@@ -352,10 +348,10 @@ static int wm8770_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	component = dai->component;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		master = 0x100;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		master = 0;
 		break;
 	default:
@@ -450,7 +446,7 @@ static int wm8770_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	/* Only need to set MCLK/LRCLK ratio if we're master */
-	if (snd_soc_component_read32(component, WM8770_MSTRCTRL) & 0x100) {
+	if (snd_soc_component_read(component, WM8770_MSTRCTRL) & 0x100) {
 		for (; i < ARRAY_SIZE(mclk_ratios); ++i) {
 			ratio = wm8770->sysclk / params_rate(params);
 			if (ratio == mclk_ratios[i])
@@ -475,7 +471,7 @@ static int wm8770_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int wm8770_mute(struct snd_soc_dai *dai, int mute)
+static int wm8770_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component;
 
@@ -500,6 +496,7 @@ static int wm8770_set_bias_level(struct snd_soc_component *component,
 				 enum snd_soc_bias_level level)
 {
 	int ret;
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	struct wm8770_priv *wm8770;
 
 	wm8770 = snd_soc_component_get_drvdata(component);
@@ -510,7 +507,7 @@ static int wm8770_set_bias_level(struct snd_soc_component *component,
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF) {
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_OFF) {
 			ret = regulator_bulk_enable(ARRAY_SIZE(wm8770->supplies),
 						    wm8770->supplies);
 			if (ret) {
@@ -541,10 +538,11 @@ static int wm8770_set_bias_level(struct snd_soc_component *component,
 			SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
 
 static const struct snd_soc_dai_ops wm8770_dai_ops = {
-	.digital_mute = wm8770_mute,
+	.mute_stream = wm8770_mute,
 	.hw_params = wm8770_hw_params,
 	.set_fmt = wm8770_set_fmt,
 	.set_sysclk = wm8770_set_sysclk,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver wm8770_dai = {
@@ -564,7 +562,7 @@ static struct snd_soc_dai_driver wm8770_dai = {
 		.formats = WM8770_FORMATS
 	},
 	.ops = &wm8770_dai_ops,
-	.symmetric_rates = 1
+	.symmetric_rate = 1
 };
 
 static int wm8770_probe(struct snd_soc_component *component)
@@ -619,7 +617,6 @@ static const struct snd_soc_component_driver soc_component_dev_wm8770 = {
 	.num_dapm_routes	= ARRAY_SIZE(wm8770_intercon),
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct of_device_id wm8770_of_match[] = {
@@ -635,7 +632,7 @@ static const struct regmap_config wm8770_regmap = {
 
 	.reg_defaults = wm8770_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(wm8770_reg_defaults),
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 
 	.volatile_reg = wm8770_volatile_reg,
 };
@@ -666,8 +663,9 @@ static int wm8770_spi_probe(struct spi_device *spi)
 
 	/* This should really be moved into the regulator core */
 	for (i = 0; i < ARRAY_SIZE(wm8770->supplies); i++) {
-		ret = regulator_register_notifier(wm8770->supplies[i].consumer,
-						  &wm8770->disable_nb[i]);
+		ret = devm_regulator_register_notifier(
+						wm8770->supplies[i].consumer,
+						&wm8770->disable_nb[i]);
 		if (ret) {
 			dev_err(&spi->dev,
 				"Failed to register regulator notifier: %d\n",
@@ -687,25 +685,12 @@ static int wm8770_spi_probe(struct spi_device *spi)
 	return ret;
 }
 
-static int wm8770_spi_remove(struct spi_device *spi)
-{
-	struct wm8770_priv *wm8770 = spi_get_drvdata(spi);
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(wm8770->supplies); ++i)
-		regulator_unregister_notifier(wm8770->supplies[i].consumer,
-					      &wm8770->disable_nb[i]);
-
-	return 0;
-}
-
 static struct spi_driver wm8770_spi_driver = {
 	.driver = {
 		.name = "wm8770",
 		.of_match_table = wm8770_of_match,
 	},
 	.probe = wm8770_spi_probe,
-	.remove = wm8770_spi_remove
 };
 
 module_spi_driver(wm8770_spi_driver);

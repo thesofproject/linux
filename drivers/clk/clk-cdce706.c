@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TI CDCE706 programmable 3-PLL clock synthesizer driver
  *
  * Copyright (c) 2014 Cadence Design Systems Inc.
  *
- * Reference: http://www.ti.com/lit/ds/symlink/cdce706.pdf
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Reference: https://www.ti.com/lit/ds/symlink/cdce706.pdf
  */
 
 #include <linux/clk.h>
@@ -15,7 +12,6 @@
 #include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
-#include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/rational.h>
@@ -158,6 +154,7 @@ static u8 cdce706_clkin_get_parent(struct clk_hw *hw)
 }
 
 static const struct clk_ops cdce706_clkin_ops = {
+	.determine_rate = clk_hw_determine_rate_no_reparent,
 	.set_parent = cdce706_clkin_set_parent,
 	.get_parent = cdce706_clkin_get_parent,
 };
@@ -185,8 +182,8 @@ static unsigned long cdce706_pll_recalc_rate(struct clk_hw *hw,
 	return 0;
 }
 
-static long cdce706_pll_round_rate(struct clk_hw *hw, unsigned long rate,
-				   unsigned long *parent_rate)
+static int cdce706_pll_determine_rate(struct clk_hw *hw,
+				      struct clk_rate_request *req)
 {
 	struct cdce706_hw_data *hwd = to_hw_data(hw);
 	unsigned long mul, div;
@@ -194,9 +191,9 @@ static long cdce706_pll_round_rate(struct clk_hw *hw, unsigned long rate,
 
 	dev_dbg(&hwd->dev_data->client->dev,
 		"%s, rate: %lu, parent_rate: %lu\n",
-		__func__, rate, *parent_rate);
+		__func__, req->rate, req->best_parent_rate);
 
-	rational_best_approximation(rate, *parent_rate,
+	rational_best_approximation(req->rate, req->best_parent_rate,
 				    CDCE706_PLL_N_MAX, CDCE706_PLL_M_MAX,
 				    &mul, &div);
 	hwd->mul = mul;
@@ -206,9 +203,11 @@ static long cdce706_pll_round_rate(struct clk_hw *hw, unsigned long rate,
 		"%s, pll: %d, mul: %lu, div: %lu\n",
 		__func__, hwd->idx, mul, div);
 
-	res = (u64)*parent_rate * hwd->mul;
+	res = (u64)req->best_parent_rate * hwd->mul;
 	do_div(res, hwd->div);
-	return res;
+	req->rate = res;
+
+	return 0;
 }
 
 static int cdce706_pll_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -253,7 +252,7 @@ static int cdce706_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 
 static const struct clk_ops cdce706_pll_ops = {
 	.recalc_rate = cdce706_pll_recalc_rate,
-	.round_rate = cdce706_pll_round_rate,
+	.determine_rate = cdce706_pll_determine_rate,
 	.set_rate = cdce706_pll_set_rate,
 };
 
@@ -290,18 +289,19 @@ static unsigned long cdce706_divider_recalc_rate(struct clk_hw *hw,
 	return 0;
 }
 
-static long cdce706_divider_round_rate(struct clk_hw *hw, unsigned long rate,
-				       unsigned long *parent_rate)
+static int cdce706_divider_determine_rate(struct clk_hw *hw,
+					  struct clk_rate_request *req)
 {
 	struct cdce706_hw_data *hwd = to_hw_data(hw);
 	struct cdce706_dev_data *cdce = hwd->dev_data;
+	unsigned long rate = req->rate;
 	unsigned long mul, div;
 
 	dev_dbg(&hwd->dev_data->client->dev,
 		"%s, rate: %lu, parent_rate: %lu\n",
-		__func__, rate, *parent_rate);
+		__func__, rate, req->best_parent_rate);
 
-	rational_best_approximation(rate, *parent_rate,
+	rational_best_approximation(rate, req->best_parent_rate,
 				    1, CDCE706_DIVIDER_DIVIDER_MAX,
 				    &mul, &div);
 	if (!mul)
@@ -346,8 +346,8 @@ static long cdce706_divider_round_rate(struct clk_hw *hw, unsigned long rate,
 
 		dev_dbg(&hwd->dev_data->client->dev,
 			"%s, altering parent rate: %lu -> %lu\n",
-			__func__, *parent_rate, rate * div);
-		*parent_rate = rate * div;
+			__func__, req->best_parent_rate, rate * div);
+		req->best_parent_rate = rate * div;
 	}
 	hwd->div = div;
 
@@ -355,7 +355,8 @@ static long cdce706_divider_round_rate(struct clk_hw *hw, unsigned long rate,
 		"%s, divider: %d, div: %lu\n",
 		__func__, hwd->idx, div);
 
-	return *parent_rate / div;
+	req->rate = req->best_parent_rate / div;
+	return 0;
 }
 
 static int cdce706_divider_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -377,7 +378,7 @@ static const struct clk_ops cdce706_divider_ops = {
 	.set_parent = cdce706_divider_set_parent,
 	.get_parent = cdce706_divider_get_parent,
 	.recalc_rate = cdce706_divider_recalc_rate,
-	.round_rate = cdce706_divider_round_rate,
+	.determine_rate = cdce706_divider_determine_rate,
 	.set_rate = cdce706_divider_set_rate,
 };
 
@@ -423,11 +424,12 @@ static unsigned long cdce706_clkout_recalc_rate(struct clk_hw *hw,
 	return parent_rate;
 }
 
-static long cdce706_clkout_round_rate(struct clk_hw *hw, unsigned long rate,
-				      unsigned long *parent_rate)
+static int cdce706_clkout_determine_rate(struct clk_hw *hw,
+					 struct clk_rate_request *req)
 {
-	*parent_rate = rate;
-	return rate;
+	req->best_parent_rate = req->rate;
+
+	return 0;
 }
 
 static int cdce706_clkout_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -442,7 +444,7 @@ static const struct clk_ops cdce706_clkout_ops = {
 	.set_parent = cdce706_clkout_set_parent,
 	.get_parent = cdce706_clkout_get_parent,
 	.recalc_rate = cdce706_clkout_recalc_rate,
-	.round_rate = cdce706_clkout_round_rate,
+	.determine_rate = cdce706_clkout_determine_rate,
 	.set_rate = cdce706_clkout_set_rate,
 };
 
@@ -630,10 +632,9 @@ of_clk_cdce_get(struct of_phandle_args *clkspec, void *data)
 	return &cdce->clkout[idx].hw;
 }
 
-static int cdce706_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int cdce706_probe(struct i2c_client *client)
 {
-	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
+	struct i2c_adapter *adapter = client->adapter;
 	struct cdce706_dev_data *cdce;
 	int ret;
 
@@ -665,16 +666,9 @@ static int cdce706_probe(struct i2c_client *client,
 	ret = cdce706_register_clkouts(cdce);
 	if (ret < 0)
 		return ret;
-	return of_clk_add_hw_provider(client->dev.of_node, of_clk_cdce_get,
-				      cdce);
+	return devm_of_clk_add_hw_provider(&client->dev, of_clk_cdce_get,
+					   cdce);
 }
-
-static int cdce706_remove(struct i2c_client *client)
-{
-	of_clk_del_provider(client->dev.of_node);
-	return 0;
-}
-
 
 #ifdef CONFIG_OF
 static const struct of_device_id cdce706_dt_match[] = {
@@ -685,7 +679,7 @@ MODULE_DEVICE_TABLE(of, cdce706_dt_match);
 #endif
 
 static const struct i2c_device_id cdce706_id[] = {
-	{ "cdce706", 0 },
+	{ "cdce706" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, cdce706_id);
@@ -696,7 +690,6 @@ static struct i2c_driver cdce706_i2c_driver = {
 		.of_match_table = of_match_ptr(cdce706_dt_match),
 	},
 	.probe		= cdce706_probe,
-	.remove		= cdce706_remove,
 	.id_table	= cdce706_id,
 };
 module_i2c_driver(cdce706_i2c_driver);

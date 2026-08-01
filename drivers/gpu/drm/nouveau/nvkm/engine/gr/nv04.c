@@ -1158,7 +1158,7 @@ nv04_gr_chan_dtor(struct nvkm_object *object)
 }
 
 static int
-nv04_gr_chan_fini(struct nvkm_object *object, bool suspend)
+nv04_gr_chan_fini(struct nvkm_object *object, enum nvkm_suspend_state suspend)
 {
 	struct nv04_gr_chan *chan = nv04_gr_chan(object);
 	struct nv04_gr *gr = chan->gr;
@@ -1181,18 +1181,18 @@ nv04_gr_chan = {
 };
 
 static int
-nv04_gr_chan_new(struct nvkm_gr *base, struct nvkm_fifo_chan *fifoch,
+nv04_gr_chan_new(struct nvkm_gr *base, struct nvkm_chan *fifoch,
 		 const struct nvkm_oclass *oclass, struct nvkm_object **pobject)
 {
 	struct nv04_gr *gr = nv04_gr(base);
 	struct nv04_gr_chan *chan;
 	unsigned long flags;
 
-	if (!(chan = kzalloc(sizeof(*chan), GFP_KERNEL)))
+	if (!(chan = kzalloc_obj(*chan)))
 		return -ENOMEM;
 	nvkm_object_ctor(&nv04_gr_chan, oclass, &chan->object);
 	chan->gr = gr;
-	chan->chid = fifoch->chid;
+	chan->chid = fifoch->id;
 	*pobject = &chan->object;
 
 	*ctx_reg(chan, NV04_PGRAPH_DEBUG_3) = 0xfad4ff31;
@@ -1413,14 +1413,14 @@ nv04_gr = {
 };
 
 int
-nv04_gr_new(struct nvkm_device *device, int index, struct nvkm_gr **pgr)
+nv04_gr_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst, struct nvkm_gr **pgr)
 {
 	struct nv04_gr *gr;
 
-	if (!(gr = kzalloc(sizeof(*gr), GFP_KERNEL)))
+	if (!(gr = kzalloc_obj(*gr)))
 		return -ENOMEM;
 	spin_lock_init(&gr->lock);
 	*pgr = &gr->base;
 
-	return nvkm_gr_ctor(&nv04_gr, device, index, true, &gr->base);
+	return nvkm_gr_ctor(&nv04_gr, device, type, inst, true, &gr->base);
 }

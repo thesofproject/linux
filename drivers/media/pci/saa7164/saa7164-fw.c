@@ -1,18 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for the NXP SAA7164 PCIe bridge
  *
  *  Copyright (c) 2010-2015 Steven Toth <stoth@kernellabs.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *
- *  GNU General Public License for more details.
  */
 
 #include <linux/firmware.h>
@@ -20,8 +10,8 @@
 
 #include "saa7164.h"
 
-#define SAA7164_REV2_FIRMWARE		"NXP7164-2010-03-10.1.fw"
-#define SAA7164_REV2_FIRMWARE_SIZE	4019072
+#define SAA7164_REV2_FIRMWARE		"v4l-saa7164-1.0.2-3.fw"
+#define SAA7164_REV2_FIRMWARE_SIZE	4038864
 
 #define SAA7164_REV3_FIRMWARE		"NXP7164-2010-03-10.1.fw"
 #define SAA7164_REV3_FIRMWARE_SIZE	4019072
@@ -281,7 +271,6 @@ int saa7164_downloadfirmware(struct saa7164_dev *dev)
 			dprintk(DBGLVL_FW, "%s() Loader 1 has loaded.\n",
 				__func__);
 			first_timeout = SAA_DEVICE_TIMEOUT;
-			second_timeout = 60 * SAA_DEVICE_TIMEOUT;
 			second_timeout = 100;
 
 			err_flags = saa7164_readl(SAA_SECONDSTAGEERROR_FLAGS);
@@ -409,7 +398,7 @@ int saa7164_downloadfirmware(struct saa7164_dev *dev)
 		(version & 0x0000001f),
 		(version & 0xffff0000) >> 16);
 
-	/* Load the firmwware from the disk if required */
+	/* Load the firmware from the disk if required */
 	if (version == 0) {
 
 		printk(KERN_INFO "%s() Waiting for firmware upload (%s)\n",
@@ -426,7 +415,8 @@ int saa7164_downloadfirmware(struct saa7164_dev *dev)
 			__func__, fw->size);
 
 		if (fw->size != fwlength) {
-			printk(KERN_ERR "xc5000: firmware incorrect size\n");
+			printk(KERN_ERR "saa7164: firmware incorrect size %zu != %u\n",
+				fw->size, fwlength);
 			ret = -ENOMEM;
 			goto out;
 		}

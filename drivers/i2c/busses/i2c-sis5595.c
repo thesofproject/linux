@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     Copyright (c) 1998, 1999  Frodo Looijaard <frodol@dds.nl> and
     Philip Edelbrock <phil@netroedge.com>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
 */
 
 /* Note: we assume there can only be one SIS5595 with one SMBus interface */
@@ -183,11 +175,11 @@ static int sis5595_setup(struct pci_dev *SIS5595_dev)
 
 	if (force_addr) {
 		dev_info(&SIS5595_dev->dev, "forcing ISA address 0x%04X\n", sis5595_base);
-		if (pci_write_config_word(SIS5595_dev, ACPI_BASE, sis5595_base)
-		    != PCIBIOS_SUCCESSFUL)
+		retval = pci_write_config_word(SIS5595_dev, ACPI_BASE, sis5595_base);
+		if (retval != PCIBIOS_SUCCESSFUL)
 			goto error;
-		if (pci_read_config_word(SIS5595_dev, ACPI_BASE, &a)
-		    != PCIBIOS_SUCCESSFUL)
+		retval = pci_read_config_word(SIS5595_dev, ACPI_BASE, &a);
+		if (retval != PCIBIOS_SUCCESSFUL)
 			goto error;
 		if ((a & ~(SIS5595_EXTENT - 1)) != sis5595_base) {
 			/* doesn't work for some chips! */
@@ -196,16 +188,16 @@ static int sis5595_setup(struct pci_dev *SIS5595_dev)
 		}
 	}
 
-	if (pci_read_config_byte(SIS5595_dev, SIS5595_ENABLE_REG, &val)
-	    != PCIBIOS_SUCCESSFUL)
+	retval = pci_read_config_byte(SIS5595_dev, SIS5595_ENABLE_REG, &val);
+	if (retval != PCIBIOS_SUCCESSFUL)
 		goto error;
 	if ((val & 0x80) == 0) {
 		dev_info(&SIS5595_dev->dev, "enabling ACPI\n");
-		if (pci_write_config_byte(SIS5595_dev, SIS5595_ENABLE_REG, val | 0x80)
-		    != PCIBIOS_SUCCESSFUL)
+		retval = pci_write_config_byte(SIS5595_dev, SIS5595_ENABLE_REG, val | 0x80);
+		if (retval != PCIBIOS_SUCCESSFUL)
 			goto error;
-		if (pci_read_config_byte(SIS5595_dev, SIS5595_ENABLE_REG, &val)
-		    != PCIBIOS_SUCCESSFUL)
+		retval = pci_read_config_byte(SIS5595_dev, SIS5595_ENABLE_REG, &val);
+		if (retval != PCIBIOS_SUCCESSFUL)
 			goto error;
 		if ((val & 0x80) == 0) {
 			/* doesn't work for some chips? */
@@ -265,7 +257,7 @@ static int sis5595_transaction(struct i2c_adapter *adap)
 	if (temp & 0x20) {
 		dev_err(&adap->dev, "Bus collision! SMBus may be locked until "
 			"next hard reset (or not...)\n");
-		/* Clock stops and slave is stuck in mid-transmission */
+		/* Clock stops and target is stuck in mid-transmission */
 		result = -EIO;
 	}
 
@@ -361,7 +353,7 @@ static const struct i2c_algorithm smbus_algorithm = {
 
 static struct i2c_adapter sis5595_adapter = {
 	.owner		= THIS_MODULE,
-	.class          = I2C_CLASS_HWMON | I2C_CLASS_SPD,
+	.class          = I2C_CLASS_HWMON,
 	.algo		= &smbus_algorithm,
 };
 

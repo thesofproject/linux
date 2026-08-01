@@ -42,12 +42,12 @@ void __clk_init_disabled(struct clk *clk)
 
 static void __clk_enable0(struct clk *clk)
 {
-	__raw_writeb(clk->slot, MCFPM_PPMCR0);
+	mcf_write8(clk->slot, MCFPM_PPMCR0);
 }
 
 static void __clk_disable0(struct clk *clk)
 {
-	__raw_writeb(clk->slot, MCFPM_PPMSR0);
+	mcf_write8(clk->slot, MCFPM_PPMSR0);
 }
 
 struct clk_ops clk_ops0 = {
@@ -58,12 +58,12 @@ struct clk_ops clk_ops0 = {
 #ifdef MCFPM_PPMCR1
 static void __clk_enable1(struct clk *clk)
 {
-	__raw_writeb(clk->slot, MCFPM_PPMCR1);
+	mcf_write8(clk->slot, MCFPM_PPMCR1);
 }
 
 static void __clk_disable1(struct clk *clk)
 {
-	__raw_writeb(clk->slot, MCFPM_PPMSR1);
+	mcf_write8(clk->slot, MCFPM_PPMSR1);
 }
 
 struct clk_ops clk_ops1 = {
@@ -73,23 +73,13 @@ struct clk_ops clk_ops1 = {
 #endif /* MCFPM_PPMCR1 */
 #endif /* MCFPM_PPMCR0 */
 
-struct clk *clk_get(struct device *dev, const char *id)
-{
-	const char *clk_name = dev ? dev_name(dev) : id ? id : NULL;
-	struct clk *clk;
-	unsigned i;
-
-	for (i = 0; (clk = mcf_clks[i]) != NULL; ++i)
-		if (!strcmp(clk->name, clk_name))
-			return clk;
-	pr_warn("clk_get: didn't find clock %s\n", clk_name);
-	return ERR_PTR(-ENOENT);
-}
-EXPORT_SYMBOL(clk_get);
-
 int clk_enable(struct clk *clk)
 {
 	unsigned long flags;
+
+	if (!clk)
+		return 0;
+
 	spin_lock_irqsave(&clk_lock, flags);
 	if ((clk->enabled++ == 0) && clk->clk_ops)
 		clk->clk_ops->enable(clk);
@@ -113,13 +103,6 @@ void clk_disable(struct clk *clk)
 }
 EXPORT_SYMBOL(clk_disable);
 
-void clk_put(struct clk *clk)
-{
-	if (clk->enabled != 0)
-		pr_warn("clk_put %s still enabled\n", clk->name);
-}
-EXPORT_SYMBOL(clk_put);
-
 unsigned long clk_get_rate(struct clk *clk)
 {
 	if (!clk)
@@ -128,5 +111,34 @@ unsigned long clk_get_rate(struct clk *clk)
 	return clk->rate;
 }
 EXPORT_SYMBOL(clk_get_rate);
+
+/* dummy functions, should not be called */
+long clk_round_rate(struct clk *clk, unsigned long rate)
+{
+	WARN_ON(clk);
+	return 0;
+}
+EXPORT_SYMBOL(clk_round_rate);
+
+int clk_set_rate(struct clk *clk, unsigned long rate)
+{
+	WARN_ON(clk);
+	return 0;
+}
+EXPORT_SYMBOL(clk_set_rate);
+
+int clk_set_parent(struct clk *clk, struct clk *parent)
+{
+	WARN_ON(clk);
+	return 0;
+}
+EXPORT_SYMBOL(clk_set_parent);
+
+struct clk *clk_get_parent(struct clk *clk)
+{
+	WARN_ON(clk);
+	return NULL;
+}
+EXPORT_SYMBOL(clk_get_parent);
 
 /***************************************************************************/

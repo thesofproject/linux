@@ -1,3 +1,6 @@
+.. title:: Kernel-doc comments
+
+===========================
 Writing kernel-doc comments
 ===========================
 
@@ -10,6 +13,9 @@ when it is embedded in source files.
    gtk-doc or Doxygen, yet distinctively different, for historical
    reasons. The kernel source contains tens of thousands of kernel-doc
    comments. Please stick to the style described here.
+
+.. note:: kernel-doc does not cover Rust code: please see
+   Documentation/rust/general-information.rst instead.
 
 The kernel-doc structure is extracted from the comments, and proper
 `Sphinx C Domain`_ function and type descriptions with anchors are
@@ -48,12 +54,15 @@ Running the ``kernel-doc`` tool with increased verbosity and without actual
 output generation may be used to verify proper formatting of the
 documentation comments. For example::
 
-	scripts/kernel-doc -v -none drivers/foo/bar.c
+	tools/docs/kernel-doc -v -none drivers/foo/bar.c
 
-The documentation format is verified by the kernel build when it is
-requested to perform extra gcc checks::
+The documentation format of ``.c`` files is also verified by the kernel build
+when it is requested to perform extra gcc checks::
 
 	make W=n
+
+However, the above command does not verify header files. These should be checked
+separately using ``kernel-doc``.
 
 Function documentation
 ----------------------
@@ -77,7 +86,7 @@ The general format of a function and function-like macro kernel-doc comment is::
    * Context: Describes whether the function can sleep, what locks it takes,
    *          releases, or expects to be held. It can extend over multiple
    *          lines.
-   * Return: Describe the return value of foobar.
+   * Return: Describe the return value of function_name.
    *
    * The return value description can also have multiple paragraphs, and should
    * be placed at the end of the comment block.
@@ -137,7 +146,7 @@ Return values
 ~~~~~~~~~~~~~
 
 The return value, if any, should be described in a dedicated section
-named ``Return``.
+named ``Return`` (or ``Returns``).
 
 .. note::
 
@@ -145,9 +154,9 @@ named ``Return``.
      line breaks, so if you try to format some text nicely, as in::
 
 	* Return:
-	* 0 - OK
-	* -EINVAL - invalid argument
-	* -ENOMEM - out of memory
+	* %0 - OK
+	* %-EINVAL - invalid argument
+	* %-ENOMEM - out of memory
 
      this will all run together and produce::
 
@@ -157,8 +166,8 @@ named ``Return``.
      ReST list, e. g.::
 
       * Return:
-      * * 0		- OK to runtime suspend the device
-      * * -EBUSY	- Device should not be runtime suspended
+      * * %0		- OK to runtime suspend the device
+      * * %-EBUSY	- Device should not be runtime suspended
 
   #) If the descriptive text you provide has lines that begin with
      some phrase followed by a colon, each of those phrases will be taken
@@ -168,7 +177,8 @@ named ``Return``.
 Structure, union, and enumeration documentation
 -----------------------------------------------
 
-The general format of a struct, union, and enum kernel-doc comment is::
+The general format of a ``struct``, ``union``, and ``enum`` kernel-doc
+comment is::
 
   /**
    * struct struct_name - Brief description.
@@ -181,8 +191,8 @@ The general format of a struct, union, and enum kernel-doc comment is::
    */
 
 You can replace the ``struct`` in the above example with ``union`` or
-``enum``  to describe unions or enums. ``member`` is used to mean struct
-and union member names as well as enumerations in an enum.
+``enum``  to describe unions or enums. ``member`` is used to mean ``struct``
+and ``union`` member names as well as enumerations in an ``enum``.
 
 The brief description following the structure name may span multiple
 lines, and ends with a member description, a blank comment line, or the
@@ -195,13 +205,17 @@ Members of structs, unions and enums should be documented the same way
 as function parameters; they immediately succeed the short description
 and may be multi-line.
 
-Inside a struct or union description, you can use the ``private:`` and
+Inside a ``struct`` or ``union`` description, you can use the ``private:`` and
 ``public:`` comment tags. Structure fields that are inside a ``private:``
 area are not listed in the generated output documentation.
 
 The ``private:`` and ``public:`` tags must begin immediately following a
 ``/*`` comment marker. They may optionally include comments between the
 ``:`` and the ending ``*/`` marker.
+
+When ``private:`` is used on nested structs, it propagates only to inner
+structs/unions.
+
 
 Example::
 
@@ -246,13 +260,15 @@ It is possible to document nested structs and unions, like::
         union {
           struct {
             int memb1;
+            /* private: hides memb2 from documentation */
             int memb2;
-        }
+          };
+          /* Everything here is public again, as private scope finished */
           struct {
             void *memb3;
             int memb4;
-          }
-        }
+          };
+        };
         union {
           struct {
             int memb1;
@@ -267,11 +283,11 @@ It is possible to document nested structs and unions, like::
 
 .. note::
 
-   #) When documenting nested structs or unions, if the struct/union ``foo``
-      is named, the member ``bar`` inside it should be documented as
+   #) When documenting nested structs or unions, if the ``struct``/``union``
+      ``foo`` is named, the member ``bar`` inside it should be documented as
       ``@foo.bar:``
-   #) When the nested struct/union is anonymous, the member ``bar`` in it
-      should be documented as ``@bar:``
+   #) When the nested ``struct``/``union`` is anonymous, the member ``bar`` in
+      it should be documented as ``@bar:``
 
 In-line member documentation comments
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -313,7 +329,7 @@ on a line of their own, like all other kernel-doc comments::
 Typedef documentation
 ---------------------
 
-The general format of a typedef kernel-doc comment is::
+The general format of a ``typedef`` kernel-doc comment is::
 
   /**
    * typedef type_name - Brief description.
@@ -331,9 +347,66 @@ Typedefs with function prototypes can also be documented::
    * Description of the type.
    *
    * Context: Locking context.
-   * Return: Meaning of the return value.
+   * Returns: Meaning of the return value.
    */
    typedef void (*type_name)(struct v4l2_ctrl *arg1, void *arg2);
+
+Variables documentation
+-----------------------
+
+The general format of a kernel-doc variable comment is::
+
+  /**
+   * var var_name - Brief description.
+   *
+   * Description of the var_name variable.
+   */
+   extern int var_name;
+
+Object-like macro documentation
+-------------------------------
+
+Object-like macros are distinct from function-like macros. They are
+differentiated by whether the macro name is immediately followed by a
+left parenthesis ('(') for function-like macros or not followed by one
+for object-like macros.
+
+Function-like macros are handled like functions by ``tools/docs/kernel-doc``.
+They may have a parameter list. Object-like macros have do not have a
+parameter list.
+
+The general format of an object-like macro kernel-doc comment is::
+
+  /**
+   * define object_name - Brief description.
+   *
+   * Description of the object.
+   */
+
+Example::
+
+  /**
+   * define MAX_ERRNO - maximum errno value that is supported
+   *
+   * Kernel pointers have redundant information, so we can use a
+   * scheme where we can return either an error code or a normal
+   * pointer with the same return value.
+   */
+  #define MAX_ERRNO	4095
+
+Example::
+
+  /**
+   * define DRM_GEM_VRAM_PLANE_HELPER_FUNCS - \
+   *	Initializes struct drm_plane_helper_funcs for VRAM handling
+   *
+   * This macro initializes struct drm_plane_helper_funcs to use the
+   * respective helper functions.
+   */
+  #define DRM_GEM_VRAM_PLANE_HELPER_FUNCS \
+	.prepare_fb = drm_gem_vram_plane_helper_prepare_fb, \
+	.cleanup_fb = drm_gem_vram_plane_helper_cleanup_fb
+
 
 Highlights and cross-references
 -------------------------------
@@ -354,12 +427,16 @@ Domain`_ references.
 ``%CONST``
   Name of a constant. (No cross-referencing, just formatting.)
 
+  Examples::
+
+    %0    %NULL    %-1    %-EFAULT    %-EINVAL    %-ENOMEM
+
 ````literal````
   A literal block that should be handled as-is. The output will use a
   ``monospaced font``.
 
   Useful if you need to use special characters that would otherwise have some
-  meaning either by kernel-doc script of by reStructuredText.
+  meaning either by kernel-doc script or by reStructuredText.
 
   This is particularly useful if you need to use things like ``%ph`` inside
   a function description.
@@ -377,8 +454,8 @@ Domain`_ references.
   Typedef reference.
 
 ``&struct_name->member`` or ``&struct_name.member``
-  Structure or union member reference. The cross-reference will be to the struct
-  or union definition, not the member directly.
+  ``struct`` or ``union`` member reference. The cross-reference will be to the
+  ``struct`` or ``union`` definition, not the member directly.
 
 ``&name``
   A generic type reference. Prefer using the full reference described above
@@ -387,33 +464,38 @@ Domain`_ references.
 Cross-referencing from reStructuredText
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To cross-reference the functions and types defined in the kernel-doc comments
-from reStructuredText documents, please use the `Sphinx C Domain`_
-references. For example::
+No additional syntax is needed to cross-reference the functions and types
+defined in the kernel-doc comments from reStructuredText documents.
+Just end function names with ``()`` and write ``struct``, ``union``, ``enum``
+or ``typedef`` before types.
+For example::
 
-  See function :c:func:`foo` and struct/union/enum/typedef :c:type:`bar`.
+  See foo().
+  See struct foo.
+  See union bar.
+  See enum baz.
+  See typedef meh.
 
-While the type reference works with just the type name, without the
-struct/union/enum/typedef part in front, you may want to use::
+However, if you want custom text in the cross-reference link, that can be done
+through the following syntax::
 
-  See :c:type:`struct foo <foo>`.
-  See :c:type:`union bar <bar>`.
-  See :c:type:`enum baz <baz>`.
-  See :c:type:`typedef meh <meh>`.
-
-This will produce prettier links, and is in line with how kernel-doc does the
-cross-references.
+  See :c:func:`my custom link text for function foo <foo>`.
+  See :c:type:`my custom link text for struct bar <bar>`.
 
 For further details, please refer to the `Sphinx C Domain`_ documentation.
+
+.. note::
+   Variables aren't automatically cross referenced. For those, you need to
+   explicitly add a C domain cross-reference.
 
 Overview documentation comments
 -------------------------------
 
 To facilitate having source code and comments close together, you can include
 kernel-doc documentation blocks that are free-form comments instead of being
-kernel-doc for functions, structures, unions, enums, or typedefs. This could be
-used for something like a theory of operation for a driver or library code, for
-example.
+kernel-doc for functions, structures, unions, enums, typedefs or variables.
+This could be used for something like a theory of operation for a driver or
+library code, for example.
 
 This is done by using a ``DOC:`` section keyword with a section title.
 
@@ -435,6 +517,7 @@ The title following ``DOC:`` acts as a heading within the source file, but also
 as an identifier for extracting the documentation comment. Thus, the title must
 be unique within the file.
 
+=============================
 Including kernel-doc comments
 =============================
 
@@ -476,6 +559,32 @@ internal: *[source-pattern ...]*
     .. kernel-doc:: drivers/gpu/drm/i915/intel_audio.c
        :internal:
 
+identifiers: *[ function/type ...]*
+  Include documentation for each *function* and *type* in *source*.
+  If no *function* is specified, the documentation for all functions
+  and types in the *source* will be included.
+  *type* can be a ``struct``, ``union``, ``enum``, ``typedef`` or ``var``
+  identifier.
+
+  Examples::
+
+    .. kernel-doc:: lib/bitmap.c
+       :identifiers: bitmap_parselist bitmap_parselist_user
+
+    .. kernel-doc:: lib/idr.c
+       :identifiers:
+
+no-identifiers: *[ function/type ...]*
+  Exclude documentation for each *function* and *type* in *source*.
+
+  Example::
+
+    .. kernel-doc:: lib/bitmap.c
+       :no-identifiers: bitmap_parselist
+
+functions: *[ function/type ...]*
+  This is an alias of the 'identifiers' directive and deprecated.
+
 doc: *title*
   Include documentation for the ``DOC:`` paragraph identified by *title* in
   *source*. Spaces are allowed in *title*; do not quote the *title*. The *title*
@@ -488,28 +597,36 @@ doc: *title*
     .. kernel-doc:: drivers/gpu/drm/i915/intel_audio.c
        :doc: High Definition Audio over HDMI and Display Port
 
-functions: *function* *[...]*
-  Include documentation for each *function* in *source*.
-
-  Example::
-
-    .. kernel-doc:: lib/bitmap.c
-       :functions: bitmap_parselist bitmap_parselist_user
-
 Without options, the kernel-doc directive includes all documentation comments
 from the source file.
 
 The kernel-doc extension is included in the kernel source tree, at
 ``Documentation/sphinx/kerneldoc.py``. Internally, it uses the
-``scripts/kernel-doc`` script to extract the documentation comments from the
-source.
+``tools/docs/kernel-doc`` script to extract the documentation comments from
+the source.
 
 .. _kernel_doc:
 
 How to use kernel-doc to generate man pages
 -------------------------------------------
 
-If you just want to use kernel-doc to generate man pages you can do this
-from the kernel git tree::
+To generate man pages for all files that contain kernel-doc markups, run::
 
-  $ scripts/kernel-doc -man $(git grep -l '/\*\*' -- :^Documentation :^tools) | scripts/split-man.pl /tmp/man
+  $ make mandocs
+
+Or calling ``script-build-wrapper`` directly::
+
+  $ ./tools/docs/sphinx-build-wrapper mandocs
+
+The output will be at ``/man`` directory inside the output directory
+(by default: ``Documentation/output``).
+
+Optionally, it is possible to generate a partial set of man pages by
+using SPHINXDIRS:
+
+  $ make SPHINXDIRS=driver-api/media mandocs
+
+.. note::
+
+   When SPHINXDIRS={subdir} is used, it will only generate man pages for
+   the files explicitly inside a ``Documentation/{subdir}/.../*.rst`` file.

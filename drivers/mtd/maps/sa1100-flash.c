@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Flash memory access on SA11x0 based devices
  *
@@ -20,7 +21,7 @@
 #include <linux/mtd/concat.h>
 
 #include <mach/hardware.h>
-#include <asm/sizes.h>
+#include <linux/sizes.h>
 #include <asm/mach/flash.h>
 
 struct sa_subdev_info {
@@ -33,7 +34,7 @@ struct sa_subdev_info {
 struct sa_info {
 	struct mtd_info		*mtd;
 	int			num_subdev;
-	struct sa_subdev_info	subdev[0];
+	struct sa_subdev_info	subdev[];
 };
 
 static DEFINE_SPINLOCK(sa1100_vpp_lock);
@@ -80,7 +81,7 @@ static int sa1100_probe_subdev(struct sa_subdev_info *subdev, struct resource *r
 	default:
 		printk(KERN_WARNING "SA1100 flash: unknown base address "
 		       "0x%08lx, assuming CS0\n", phys);
-
+		fallthrough;
 	case SA1100_CS0_PHYS:
 		subdev->map.bankwidth = (MSC0 & MSC_RBW) ? 2 : 4;
 		break;
@@ -152,7 +153,7 @@ static struct sa_info *sa1100_setup_mtd(struct platform_device *pdev,
 					struct flash_platform_data *plat)
 {
 	struct sa_info *info;
-	int nr, size, i, ret = 0;
+	int nr, i, ret = 0;
 
 	/*
 	 * Count number of devices.
@@ -166,12 +167,10 @@ static struct sa_info *sa1100_setup_mtd(struct platform_device *pdev,
 		goto out;
 	}
 
-	size = sizeof(struct sa_info) + sizeof(struct sa_subdev_info) * nr;
-
 	/*
 	 * Allocate the map_info structs in one go.
 	 */
-	info = kzalloc(size, GFP_KERNEL);
+	info = kzalloc_flex(*info, subdev, nr);
 	if (!info) {
 		ret = -ENOMEM;
 		goto out;
@@ -221,7 +220,14 @@ static struct sa_info *sa1100_setup_mtd(struct platform_device *pdev,
 		info->mtd = info->subdev[0].mtd;
 		ret = 0;
 	} else if (info->num_subdev > 1) {
-		struct mtd_info *cdev[nr];
+		struct mtd_info **cdev;
+
+		cdev = kmalloc_objs(*cdev, nr);
+		if (!cdev) {
+			ret = -ENOMEM;
+			goto err;
+		}
+
 		/*
 		 * We detected multiple devices.  Concatenate them together.
 		 */
@@ -230,6 +236,7 @@ static struct sa_info *sa1100_setup_mtd(struct platform_device *pdev,
 
 		info->mtd = mtd_concat_create(cdev, info->num_subdev,
 					      plat->name);
+		kfree(cdev);
 		if (info->mtd == NULL) {
 			ret = -ENXIO;
 			goto err;
@@ -276,14 +283,12 @@ static int sa1100_mtd_probe(struct platform_device *pdev)
 	return err;
 }
 
-static int sa1100_mtd_remove(struct platform_device *pdev)
+static void sa1100_mtd_remove(struct platform_device *pdev)
 {
 	struct sa_info *info = platform_get_drvdata(pdev);
 	struct flash_platform_data *plat = dev_get_platdata(&pdev->dev);
 
 	sa1100_destroy(info, plat);
-
-	return 0;
 }
 
 static struct platform_driver sa1100_mtd_driver = {

@@ -1,12 +1,21 @@
 .. raw:: latex
 
-        \renewcommand\thesection*
-        \renewcommand\thesubsection*
+	\renewcommand\thesection*
+	\renewcommand\thesubsection*
+	\kerneldocCJKon
+	\kerneldocBeginJP{
 
-Japanese translations
+日本語訳
 =====================
 
 .. toctree::
    :maxdepth: 1
 
-   howto
+   disclaimer-ja_JP
+   process/howto
+   process/submitting-patches
+   process/submit-checklist
+
+.. raw:: latex
+
+	}\kerneldocEndJP

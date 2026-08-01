@@ -1,19 +1,9 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  * dmxdev.c - DVB demultiplexer device
  *
  * Copyright (C) 2000 Ralph Metzler & Marcus Metzler
  *		      for convergence integrated media GmbH
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public License
- * as published by the Free Software Foundation; either version 2.1
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #define pr_fmt(fmt) "dmxdev: " fmt
@@ -178,9 +168,12 @@ static int dvb_dvr_open(struct inode *inode, struct file *file)
 			mutex_unlock(&dmxdev->mutex);
 			return -ENOMEM;
 		}
-		dvb_ringbuffer_init(&dmxdev->dvr_buffer, mem, DVR_BUFFER_SIZE);
+		dmxdev->dvr_buffer.data = mem;
+		dmxdev->dvr_buffer.size = DVR_BUFFER_SIZE;
+		dvb_ringbuffer_reset(&dmxdev->dvr_buffer);
 		if (dmxdev->may_do_mmap)
 			dvb_vb2_init(&dmxdev->dvr_vb2_ctx, "dvr",
+				     &dmxdev->mutex,
 				     file->f_flags & O_NONBLOCK);
 		dvbdev->readers--;
 	}
@@ -362,7 +355,8 @@ static int dvb_dmxdev_set_buffer_size(struct dmxdev_filter *dmxdevfilter,
 
 static void dvb_dmxdev_filter_timeout(struct timer_list *t)
 {
-	struct dmxdev_filter *dmxdevfilter = from_timer(dmxdevfilter, t, timer);
+	struct dmxdev_filter *dmxdevfilter = timer_container_of(dmxdevfilter,
+								t, timer);
 
 	dmxdevfilter->buffer.error = -ETIMEDOUT;
 	spin_lock_irq(&dmxdevfilter->dev->lock);
@@ -375,7 +369,7 @@ static void dvb_dmxdev_filter_timer(struct dmxdev_filter *dmxdevfilter)
 {
 	struct dmx_sct_filter_params *para = &dmxdevfilter->params.sec;
 
-	del_timer(&dmxdevfilter->timer);
+	timer_delete(&dmxdevfilter->timer);
 	if (para->timeout) {
 		dmxdevfilter->timer.expires =
 		    jiffies + 1 + (HZ / 2 + HZ * para->timeout) / 1000;
@@ -401,16 +395,16 @@ static int dvb_dmxdev_section_callback(const u8 *buffer1, size_t buffer1_len,
 		spin_unlock(&dmxdevfilter->dev->lock);
 		return 0;
 	}
-	del_timer(&dmxdevfilter->timer);
+	timer_delete(&dmxdevfilter->timer);
 	dprintk("section callback %*ph\n", 6, buffer1);
 	if (dvb_vb2_is_streaming(&dmxdevfilter->vb2_ctx)) {
 		ret = dvb_vb2_fill_buffer(&dmxdevfilter->vb2_ctx,
 					  buffer1, buffer1_len,
-					  buffer_flags);
+					  buffer_flags, true);
 		if (ret == buffer1_len)
 			ret = dvb_vb2_fill_buffer(&dmxdevfilter->vb2_ctx,
 						  buffer2, buffer2_len,
-						  buffer_flags);
+						  buffer_flags, true);
 	} else {
 		ret = dvb_dmxdev_buffer_write(&dmxdevfilter->buffer,
 					      buffer1, buffer1_len);
@@ -461,10 +455,10 @@ static int dvb_dmxdev_ts_callback(const u8 *buffer1, size_t buffer1_len,
 
 	if (dvb_vb2_is_streaming(ctx)) {
 		ret = dvb_vb2_fill_buffer(ctx, buffer1, buffer1_len,
-					  buffer_flags);
+					  buffer_flags, false);
 		if (ret == buffer1_len)
 			ret = dvb_vb2_fill_buffer(ctx, buffer2, buffer2_len,
-						  buffer_flags);
+						  buffer_flags, false);
 	} else {
 		if (buffer->error) {
 			spin_unlock(&dmxdevfilter->dev->lock);
@@ -492,7 +486,7 @@ static int dvb_dmxdev_feed_stop(struct dmxdev_filter *dmxdevfilter)
 
 	switch (dmxdevfilter->type) {
 	case DMXDEV_TYPE_SEC:
-		del_timer(&dmxdevfilter->timer);
+		timer_delete(&dmxdevfilter->timer);
 		dmxdevfilter->feed.sec->stop_filtering(dmxdevfilter->feed.sec);
 		break;
 	case DMXDEV_TYPE_PES:
@@ -622,7 +616,7 @@ static int dvb_dmxdev_start_feed(struct dmxdev *dmxdev,
 				 struct dmxdev_filter *filter,
 				 struct dmxdev_feed *feed)
 {
-	ktime_t timeout = 0;
+	ktime_t timeout = ktime_set(0, 0);
 	struct dmx_pes_filter_params *para = &filter->params.pes;
 	enum dmx_output otype;
 	int ret;
@@ -720,7 +714,7 @@ static int dvb_dmxdev_filter_start(struct dmxdev_filter *filter)
 			ret = dmxdev->demux->allocate_section_feed(dmxdev->demux,
 								   secfeed,
 								   dvb_dmxdev_section_callback);
-			if (ret < 0) {
+			if (!*secfeed) {
 				pr_err("DVB (%s): could not alloc feed\n",
 				       __func__);
 				return ret;
@@ -741,7 +735,7 @@ static int dvb_dmxdev_filter_start(struct dmxdev_filter *filter)
 		ret = (*secfeed)->allocate_filter(*secfeed, secfilter);
 		if (ret < 0) {
 			dvb_dmxdev_feed_restart(filter);
-			filter->feed.sec->start_filtering(*secfeed);
+			*secfeed = NULL;
 			dprintk("could not get filter\n");
 			return ret;
 		}
@@ -800,6 +794,11 @@ static int dvb_demux_open(struct inode *inode, struct file *file)
 	if (mutex_lock_interruptible(&dmxdev->mutex))
 		return -ERESTARTSYS;
 
+	if (dmxdev->exit) {
+		mutex_unlock(&dmxdev->mutex);
+		return -ENODEV;
+	}
+
 	for (i = 0; i < dmxdev->filternum; i++)
 		if (dmxdev->filter[i].state == DMXDEV_STATE_FREE)
 			break;
@@ -819,9 +818,21 @@ static int dvb_demux_open(struct inode *inode, struct file *file)
 	dmxdev->may_do_mmap = 0;
 #endif
 
+	/*
+	 * The mutex passed to dvb_vb2_init is unlocked when a buffer
+	 * is in a blocking wait. However, dmxdevfilter has two mutexes:
+	 * dmxdevfilter->mutex and dmxdev->mutex. So this will not work.
+	 * The solution would be to support unlocking two mutexes in vb2,
+	 * but since this problem has been here since the beginning and
+	 * nobody ever complained, we leave it as-is rather than adding
+	 * that second mutex pointer to vb2.
+	 *
+	 * In the unlikely event that someone complains about this, then
+	 * this comment will hopefully help.
+	 */
 	dvb_ringbuffer_init(&dmxdevfilter->buffer, NULL, 8192);
 	dvb_vb2_init(&dmxdevfilter->vb2_ctx, "demux_filter",
-		     file->f_flags & O_NONBLOCK);
+		     &dmxdevfilter->mutex, file->f_flags & O_NONBLOCK);
 	dmxdevfilter->type = DMXDEV_TYPE_NONE;
 	dvb_dmxdev_filter_state_set(dmxdevfilter, DMXDEV_STATE_ALLOCATED);
 	timer_setup(&dmxdevfilter->timer, dvb_dmxdev_filter_timeout, 0);
@@ -883,7 +894,7 @@ static int dvb_dmxdev_add_pid(struct dmxdev *dmxdev,
 	    (!list_empty(&filter->feed.ts)))
 		return -EINVAL;
 
-	feed = kzalloc(sizeof(struct dmxdev_feed), GFP_KERNEL);
+	feed = kzalloc_obj(struct dmxdev_feed);
 	if (feed == NULL)
 		return -ENOMEM;
 
@@ -1195,12 +1206,12 @@ static __poll_t dvb_demux_poll(struct file *file, poll_table *wait)
 	struct dmxdev_filter *dmxdevfilter = file->private_data;
 	__poll_t mask = 0;
 
+	poll_wait(file, &dmxdevfilter->buffer.queue, wait);
+
 	if ((!dmxdevfilter) || dmxdevfilter->dev->exit)
 		return EPOLLERR;
 	if (dvb_vb2_is_streaming(&dmxdevfilter->vb2_ctx))
 		return dvb_vb2_poll(&dmxdevfilter->vb2_ctx, file, wait);
-
-	poll_wait(file, &dmxdevfilter->buffer.queue, wait);
 
 	if (dmxdevfilter->state != DMXDEV_STATE_GO &&
 	    dmxdevfilter->state != DMXDEV_STATE_DONE &&
@@ -1221,24 +1232,11 @@ static int dvb_demux_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct dmxdev_filter *dmxdevfilter = file->private_data;
 	struct dmxdev *dmxdev = dmxdevfilter->dev;
-	int ret;
 
 	if (!dmxdev->may_do_mmap)
 		return -ENOTTY;
 
-	if (mutex_lock_interruptible(&dmxdev->mutex))
-		return -ERESTARTSYS;
-
-	if (mutex_lock_interruptible(&dmxdevfilter->mutex)) {
-		mutex_unlock(&dmxdev->mutex);
-		return -ERESTARTSYS;
-	}
-	ret = dvb_vb2_mmap(&dmxdevfilter->vb2_ctx, vma);
-
-	mutex_unlock(&dmxdevfilter->mutex);
-	mutex_unlock(&dmxdev->mutex);
-
-	return ret;
+	return dvb_vb2_mmap(&dmxdevfilter->vb2_ctx, vma);
 }
 #endif
 
@@ -1265,6 +1263,7 @@ static const struct file_operations dvb_demux_fops = {
 	.owner = THIS_MODULE,
 	.read = dvb_demux_read,
 	.unlocked_ioctl = dvb_demux_ioctl,
+	.compat_ioctl = dvb_demux_ioctl,
 	.open = dvb_demux_open,
 	.release = dvb_demux_release,
 	.poll = dvb_demux_poll,
@@ -1345,12 +1344,12 @@ static __poll_t dvb_dvr_poll(struct file *file, poll_table *wait)
 
 	dprintk("%s\n", __func__);
 
+	poll_wait(file, &dmxdev->dvr_buffer.queue, wait);
+
 	if (dmxdev->exit)
 		return EPOLLERR;
 	if (dvb_vb2_is_streaming(&dmxdev->dvr_vb2_ctx))
 		return dvb_vb2_poll(&dmxdev->dvr_vb2_ctx, file, wait);
-
-	poll_wait(file, &dmxdev->dvr_buffer.queue, wait);
 
 	if (((file->f_flags & O_ACCMODE) == O_RDONLY) ||
 	    dmxdev->may_do_mmap) {
@@ -1370,7 +1369,6 @@ static int dvb_dvr_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct dvb_device *dvbdev = file->private_data;
 	struct dmxdev *dmxdev = dvbdev->priv;
-	int ret;
 
 	if (!dmxdev->may_do_mmap)
 		return -ENOTTY;
@@ -1378,12 +1376,7 @@ static int dvb_dvr_mmap(struct file *file, struct vm_area_struct *vma)
 	if (dmxdev->exit)
 		return -ENODEV;
 
-	if (mutex_lock_interruptible(&dmxdev->mutex))
-		return -ERESTARTSYS;
-
-	ret = dvb_vb2_mmap(&dmxdev->dvr_vb2_ctx, vma);
-	mutex_unlock(&dmxdev->mutex);
-	return ret;
+	return dvb_vb2_mmap(&dmxdev->dvr_vb2_ctx, vma);
 }
 #endif
 
@@ -1412,12 +1405,13 @@ static const struct dvb_device dvbdev_dvr = {
 };
 int dvb_dmxdev_init(struct dmxdev *dmxdev, struct dvb_adapter *dvb_adapter)
 {
-	int i;
+	int i, ret;
 
 	if (dmxdev->demux->open(dmxdev->demux) < 0)
 		return -EUSERS;
 
-	dmxdev->filter = vmalloc(dmxdev->filternum * sizeof(struct dmxdev_filter));
+	dmxdev->filter = vmalloc_array(dmxdev->filternum,
+				       sizeof(struct dmxdev_filter));
 	if (!dmxdev->filter)
 		return -ENOMEM;
 
@@ -1430,21 +1424,36 @@ int dvb_dmxdev_init(struct dmxdev *dmxdev, struct dvb_adapter *dvb_adapter)
 					    DMXDEV_STATE_FREE);
 	}
 
-	dvb_register_device(dvb_adapter, &dmxdev->dvbdev, &dvbdev_demux, dmxdev,
+	ret = dvb_register_device(dvb_adapter, &dmxdev->dvbdev, &dvbdev_demux, dmxdev,
 			    DVB_DEVICE_DEMUX, dmxdev->filternum);
-	dvb_register_device(dvb_adapter, &dmxdev->dvr_dvbdev, &dvbdev_dvr,
+	if (ret < 0)
+		goto err_register_dvbdev;
+
+	ret = dvb_register_device(dvb_adapter, &dmxdev->dvr_dvbdev, &dvbdev_dvr,
 			    dmxdev, DVB_DEVICE_DVR, dmxdev->filternum);
+	if (ret < 0)
+		goto err_register_dvr_dvbdev;
 
 	dvb_ringbuffer_init(&dmxdev->dvr_buffer, NULL, 8192);
 
 	return 0;
+
+err_register_dvr_dvbdev:
+	dvb_unregister_device(dmxdev->dvbdev);
+err_register_dvbdev:
+	vfree(dmxdev->filter);
+	dmxdev->filter = NULL;
+	return ret;
 }
 
 EXPORT_SYMBOL(dvb_dmxdev_init);
 
 void dvb_dmxdev_release(struct dmxdev *dmxdev)
 {
+	mutex_lock(&dmxdev->mutex);
 	dmxdev->exit = 1;
+	mutex_unlock(&dmxdev->mutex);
+
 	if (dmxdev->dvbdev->users > 1) {
 		wait_event(dmxdev->dvbdev->wait_queue,
 				dmxdev->dvbdev->users == 1);

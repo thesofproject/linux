@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  smssdio.c - Siano 1xxx SDIO interface driver
  *
@@ -5,12 +6,6 @@
  *
  * Based on code by Siano Mobile Silicon, Inc.,
  * Copyright (C) 2006-2008, Uri Shkolnik
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or (at
- * your option) any later version.
- *
  *
  * This hardware is a bit odd in that all transfers should be done
  * to/from the SMSSDIO_DATA register, yet the "increase address" bit
@@ -63,15 +58,15 @@ static const struct sdio_device_id smssdio_ids[] = {
 	 .driver_data = SMS1XXX_BOARD_SIANO_VEGA},
 	{SDIO_DEVICE(SDIO_VENDOR_ID_SIANO, SDIO_DEVICE_ID_SIANO_VENICE),
 	 .driver_data = SMS1XXX_BOARD_SIANO_VEGA},
-	{SDIO_DEVICE(SDIO_VENDOR_ID_SIANO, 0x302),
+	{SDIO_DEVICE(SDIO_VENDOR_ID_SIANO, SDIO_DEVICE_ID_SIANO_MING),
 	.driver_data = SMS1XXX_BOARD_SIANO_MING},
-	{SDIO_DEVICE(SDIO_VENDOR_ID_SIANO, 0x500),
+	{SDIO_DEVICE(SDIO_VENDOR_ID_SIANO, SDIO_DEVICE_ID_SIANO_PELE),
 	.driver_data = SMS1XXX_BOARD_SIANO_PELE},
-	{SDIO_DEVICE(SDIO_VENDOR_ID_SIANO, 0x600),
+	{SDIO_DEVICE(SDIO_VENDOR_ID_SIANO, SDIO_DEVICE_ID_SIANO_RIO),
 	.driver_data = SMS1XXX_BOARD_SIANO_RIO},
-	{SDIO_DEVICE(SDIO_VENDOR_ID_SIANO, 0x700),
+	{SDIO_DEVICE(SDIO_VENDOR_ID_SIANO, SDIO_DEVICE_ID_SIANO_DENVER_2160),
 	.driver_data = SMS1XXX_BOARD_SIANO_DENVER_2160},
-	{SDIO_DEVICE(SDIO_VENDOR_ID_SIANO, 0x800),
+	{SDIO_DEVICE(SDIO_VENDOR_ID_SIANO, SDIO_DEVICE_ID_SIANO_DENVER_1530),
 	.driver_data = SMS1XXX_BOARD_SIANO_DENVER_1530},
 	{ /* end: all zeroes */ },
 };
@@ -249,7 +244,7 @@ static int smssdio_probe(struct sdio_func *func,
 
 	board_id = id->driver_data;
 
-	smsdev = kzalloc(sizeof(struct smssdio_device), GFP_KERNEL);
+	smsdev = kzalloc_obj(struct smssdio_device);
 	if (!smsdev)
 		return -ENOMEM;
 
@@ -279,7 +274,7 @@ static int smssdio_probe(struct sdio_func *func,
 		goto free;
 	}
 
-	ret = smscore_register_device(&params, &smsdev->coredev, NULL);
+	ret = smscore_register_device(&params, &smsdev->coredev, GFP_DMA, NULL);
 	if (ret < 0)
 		goto free;
 
@@ -349,30 +344,7 @@ static struct sdio_driver smssdio_driver = {
 	.probe = smssdio_probe,
 	.remove = smssdio_remove,
 };
-
-/*******************************************************************/
-/* Module functions                                                */
-/*******************************************************************/
-
-static int __init smssdio_module_init(void)
-{
-	int ret = 0;
-
-	printk(KERN_INFO "smssdio: Siano SMS1xxx SDIO driver\n");
-	printk(KERN_INFO "smssdio: Copyright Pierre Ossman\n");
-
-	ret = sdio_register_driver(&smssdio_driver);
-
-	return ret;
-}
-
-static void __exit smssdio_module_exit(void)
-{
-	sdio_unregister_driver(&smssdio_driver);
-}
-
-module_init(smssdio_module_init);
-module_exit(smssdio_module_exit);
+module_sdio_driver(smssdio_driver);
 
 MODULE_DESCRIPTION("Siano SMS1xxx SDIO driver");
 MODULE_AUTHOR("Pierre Ossman");

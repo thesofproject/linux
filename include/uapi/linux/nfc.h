@@ -55,7 +55,7 @@
  *	(it sends %NFC_ATTR_DEVICE_INDEX)
  * @NFC_EVENT_TM_ACTIVATED: event emitted when the adapter is activated in
  *      target mode.
- * @NFC_EVENT_DEVICE_DEACTIVATED: event emitted when the adapter is deactivated
+ * @NFC_EVENT_TM_DEACTIVATED: event emitted when the adapter is deactivated
  *      from target mode.
  * @NFC_CMD_LLC_GET_PARAMS: request LTO, RW, and MIUX parameters for a device
  * @NFC_CMD_LLC_SET_PARAMS: set one or more of LTO, RW, and MIUX parameters for
@@ -156,7 +156,7 @@ enum nfc_commands {
  * @NFC_ATTR_SE_INDEX: Secure element index
  * @NFC_ATTR_SE_TYPE: Secure element type (UICC or EMBEDDED)
  * @NFC_ATTR_FIRMWARE_DOWNLOAD_STATUS: Firmware download operation status
- * @NFC_ATTR_APDU: Secure element APDU
+ * @NFC_ATTR_SE_APDU: Secure element APDU
  * @NFC_ATTR_TARGET_ISO15693_DSFID: ISO 15693 Data Storage Format Identifier
  * @NFC_ATTR_TARGET_ISO15693_UID: ISO 15693 Unique Identifier
  * @NFC_ATTR_SE_PARAMS: Parameters data from an evt_transaction
@@ -164,6 +164,7 @@ enum nfc_commands {
  * @NFC_ATTR_VENDOR_SUBCMD: Vendor specific sub command
  * @NFC_ATTR_VENDOR_DATA: Vendor specific data, to be optionally passed
  *	to a vendor specific command implementation
+ * @NFC_ATTR_TARGET_ATS: ISO 14443 type A target Answer To Select
  */
 enum nfc_attrs {
 	NFC_ATTR_UNSPEC,
@@ -198,6 +199,7 @@ enum nfc_attrs {
 	NFC_ATTR_VENDOR_ID,
 	NFC_ATTR_VENDOR_SUBCMD,
 	NFC_ATTR_VENDOR_DATA,
+	NFC_ATTR_TARGET_ATS,
 /* private: internal use only */
 	__NFC_ATTR_AFTER_LAST
 };
@@ -225,6 +227,7 @@ enum nfc_sdp_attr {
 #define NFC_GB_MAXSIZE			48
 #define NFC_FIRMWARE_NAME_MAXSIZE	32
 #define NFC_ISO15693_UID_MAXSIZE	8
+#define NFC_ATS_MAXSIZE			20
 
 /* NFC protocols */
 #define NFC_PROTO_JEWEL		1
@@ -263,7 +266,7 @@ enum nfc_sdp_attr {
 #define NFC_SE_ENABLED  0x1
 
 struct sockaddr_nfc {
-	sa_family_t sa_family;
+	__kernel_sa_family_t sa_family;
 	__u32 dev_idx;
 	__u32 target_idx;
 	__u32 nfc_protocol;
@@ -271,14 +274,14 @@ struct sockaddr_nfc {
 
 #define NFC_LLCP_MAX_SERVICE_NAME 63
 struct sockaddr_nfc_llcp {
-	sa_family_t sa_family;
+	__kernel_sa_family_t sa_family;
 	__u32 dev_idx;
 	__u32 target_idx;
 	__u32 nfc_protocol;
 	__u8 dsap; /* Destination SAP, if known */
 	__u8 ssap; /* Source SAP to be bound to */
 	char service_name[NFC_LLCP_MAX_SERVICE_NAME]; /* Service name URI */;
-	size_t service_name_len;
+	__kernel_size_t service_name_len;
 };
 
 /* NFC socket protocols */
@@ -288,7 +291,7 @@ struct sockaddr_nfc_llcp {
 
 #define NFC_HEADER_SIZE 1
 
-/**
+/*
  * Pseudo-header info for raw socket packets
  * First byte is the adapter index
  * Second byte contains flags

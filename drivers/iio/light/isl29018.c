@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * A iio driver for the light sensor ISL 29018/29023/29035.
  *
@@ -5,28 +6,19 @@
  * sensing and infrared sensing.
  *
  * Copyright (c) 2010, NVIDIA Corporation.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
-#include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/err.h>
+#include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/delay.h>
 #include <linux/regmap.h>
+#include <linux/regulator/consumer.h>
 #include <linux/slab.h>
+
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
-#include <linux/acpi.h>
 
 #define ISL29018_CONV_TIME_MS		100
 
@@ -95,6 +87,7 @@ struct isl29018_chip {
 	struct isl29018_scale	scale;
 	int			prox_scheme;
 	bool			suspended;
+	struct regulator	*vcc_reg;
 };
 
 static int isl29018_set_integration_time(struct isl29018_chip *chip,
@@ -279,9 +272,9 @@ static ssize_t in_illuminance_scale_available_show
 
 	mutex_lock(&chip->lock);
 	for (i = 0; i < ARRAY_SIZE(isl29018_scales[chip->int_time]); ++i)
-		len += sprintf(buf + len, "%d.%06d ",
-			       isl29018_scales[chip->int_time][i].scale,
-			       isl29018_scales[chip->int_time][i].uscale);
+		len += sysfs_emit_at(buf, len, "%d.%06d ",
+				     isl29018_scales[chip->int_time][i].scale,
+				     isl29018_scales[chip->int_time][i].uscale);
 	mutex_unlock(&chip->lock);
 
 	buf[len - 1] = '\n';
@@ -299,8 +292,8 @@ static ssize_t in_illuminance_integration_time_available_show
 	int len = 0;
 
 	for (i = 0; i < ARRAY_SIZE(isl29018_int_utimes[chip->type]); ++i)
-		len += sprintf(buf + len, "0.%06d ",
-			       isl29018_int_utimes[chip->type][i]);
+		len += sysfs_emit_at(buf, len, "0.%06d ",
+				     isl29018_int_utimes[chip->type][i]);
 
 	buf[len - 1] = '\n';
 
@@ -336,7 +329,7 @@ static ssize_t proximity_on_chip_ambient_infrared_suppression_show
 	 * Return the "proximity scheme" i.e. if the chip does on chip
 	 * infrared suppression (1 means perform on chip suppression)
 	 */
-	return sprintf(buf, "%d\n", chip->prox_scheme);
+	return sysfs_emit(buf, "%d\n", chip->prox_scheme);
 }
 
 static ssize_t proximity_on_chip_ambient_infrared_suppression_store
@@ -557,9 +550,9 @@ static int isl29018_chip_init(struct isl29018_chip *chip)
 			return -ENODEV;
 
 		/* Clear brownout bit */
-		status = regmap_update_bits(chip->regmap,
-					    ISL29035_REG_DEVICE_ID,
-					    ISL29035_BOUT_MASK, 0);
+		status = regmap_clear_bits(chip->regmap,
+					   ISL29035_REG_DEVICE_ID,
+					   ISL29035_BOUT_MASK);
 		if (status < 0)
 			return status;
 	}
@@ -694,28 +687,25 @@ static const struct isl29018_chip_info isl29018_chip_info_tbl[] = {
 	},
 };
 
-static const char *isl29018_match_acpi_device(struct device *dev, int *data)
+static void isl29018_disable_regulator_action(void *_data)
 {
-	const struct acpi_device_id *id;
+	struct isl29018_chip *chip = _data;
+	int err;
 
-	id = acpi_match_device(dev->driver->acpi_match_table, dev);
-
-	if (!id)
-		return NULL;
-
-	*data = (int)id->driver_data;
-
-	return dev_name(dev);
+	err = regulator_disable(chip->vcc_reg);
+	if (err)
+		pr_err("failed to disable isl29018's VCC regulator!\n");
 }
 
-static int isl29018_probe(struct i2c_client *client,
-			  const struct i2c_device_id *id)
+static int isl29018_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct isl29018_chip *chip;
 	struct iio_dev *indio_dev;
+	const void *ddata = NULL;
+	const char *name;
+	int dev_id;
 	int err;
-	const char *name = NULL;
-	int dev_id = 0;
 
 	indio_dev = devm_iio_device_alloc(&client->dev, sizeof(*chip));
 	if (!indio_dev)
@@ -728,10 +718,10 @@ static int isl29018_probe(struct i2c_client *client,
 	if (id) {
 		name = id->name;
 		dev_id = id->driver_data;
+	} else {
+		name = iio_get_acpi_device_name_and_data(&client->dev, &ddata);
+		dev_id = (intptr_t)ddata;
 	}
-
-	if (ACPI_HANDLE(&client->dev))
-		name = isl29018_match_acpi_device(&client->dev, &dev_id);
 
 	mutex_init(&chip->lock);
 
@@ -741,6 +731,24 @@ static int isl29018_probe(struct i2c_client *client,
 	chip->int_time = ISL29018_INT_TIME_16;
 	chip->scale = isl29018_scales[chip->int_time][0];
 	chip->suspended = false;
+
+	chip->vcc_reg = devm_regulator_get(&client->dev, "vcc");
+	if (IS_ERR(chip->vcc_reg))
+		return dev_err_probe(&client->dev, PTR_ERR(chip->vcc_reg),
+				     "failed to get VCC regulator!\n");
+
+	err = regulator_enable(chip->vcc_reg);
+	if (err) {
+		dev_err(&client->dev, "failed to enable VCC regulator!\n");
+		return err;
+	}
+
+	err = devm_add_action_or_reset(&client->dev, isl29018_disable_regulator_action,
+				 chip);
+	if (err) {
+		dev_err(&client->dev, "failed to setup regulator cleanup action!\n");
+		return err;
+	}
 
 	chip->regmap = devm_regmap_init_i2c(client,
 				isl29018_chip_info_tbl[dev_id].regmap_cfg);
@@ -758,16 +766,15 @@ static int isl29018_probe(struct i2c_client *client,
 	indio_dev->channels = isl29018_chip_info_tbl[dev_id].channels;
 	indio_dev->num_channels = isl29018_chip_info_tbl[dev_id].num_channels;
 	indio_dev->name = name;
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 
 	return devm_iio_device_register(&client->dev, indio_dev);
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int isl29018_suspend(struct device *dev)
 {
 	struct isl29018_chip *chip = iio_priv(dev_get_drvdata(dev));
+	int ret;
 
 	mutex_lock(&chip->lock);
 
@@ -777,10 +784,13 @@ static int isl29018_suspend(struct device *dev)
 	 * So we do not have much to do here.
 	 */
 	chip->suspended = true;
+	ret = regulator_disable(chip->vcc_reg);
+	if (ret)
+		dev_err(dev, "failed to disable VCC regulator\n");
 
 	mutex_unlock(&chip->lock);
 
-	return 0;
+	return ret;
 }
 
 static int isl29018_resume(struct device *dev)
@@ -789,6 +799,13 @@ static int isl29018_resume(struct device *dev)
 	int err;
 
 	mutex_lock(&chip->lock);
+
+	err = regulator_enable(chip->vcc_reg);
+	if (err) {
+		dev_err(dev, "failed to enable VCC regulator\n");
+		mutex_unlock(&chip->lock);
+		return err;
+	}
 
 	err = isl29018_chip_init(chip);
 	if (!err)
@@ -799,27 +816,22 @@ static int isl29018_resume(struct device *dev)
 	return err;
 }
 
-static SIMPLE_DEV_PM_OPS(isl29018_pm_ops, isl29018_suspend, isl29018_resume);
-#define ISL29018_PM_OPS (&isl29018_pm_ops)
-#else
-#define ISL29018_PM_OPS NULL
-#endif
+static DEFINE_SIMPLE_DEV_PM_OPS(isl29018_pm_ops, isl29018_suspend,
+				isl29018_resume);
 
-#ifdef CONFIG_ACPI
 static const struct acpi_device_id isl29018_acpi_match[] = {
 	{"ISL29018", isl29018},
 	{"ISL29023", isl29023},
 	{"ISL29035", isl29035},
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(acpi, isl29018_acpi_match);
-#endif
 
 static const struct i2c_device_id isl29018_id[] = {
-	{"isl29018", isl29018},
-	{"isl29023", isl29023},
-	{"isl29035", isl29035},
-	{}
+	{ .name = "isl29018", .driver_data = isl29018 },
+	{ .name = "isl29023", .driver_data = isl29023 },
+	{ .name = "isl29035", .driver_data = isl29035 },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, isl29018_id);
 
@@ -827,18 +839,18 @@ static const struct of_device_id isl29018_of_match[] = {
 	{ .compatible = "isil,isl29018", },
 	{ .compatible = "isil,isl29023", },
 	{ .compatible = "isil,isl29035", },
-	{ },
+	{ }
 };
 MODULE_DEVICE_TABLE(of, isl29018_of_match);
 
 static struct i2c_driver isl29018_driver = {
 	.driver	 = {
 			.name = "isl29018",
-			.acpi_match_table = ACPI_PTR(isl29018_acpi_match),
-			.pm = ISL29018_PM_OPS,
+			.acpi_match_table = isl29018_acpi_match,
+			.pm = pm_sleep_ptr(&isl29018_pm_ops),
 			.of_match_table = isl29018_of_match,
 		    },
-	.probe	 = isl29018_probe,
+	.probe = isl29018_probe,
 	.id_table = isl29018_id,
 };
 module_i2c_driver(isl29018_driver);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Force feedback support for PantherLord/GreenAsia based devices
  *
@@ -20,25 +21,8 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-
-/* #define DEBUG */
-
-#define debug(format, arg...) pr_debug("hid-plff: " format "\n" , ## arg)
 
 #include <linux/input.h>
 #include <linux/slab.h>
@@ -65,14 +49,14 @@ static int hid_plff_play(struct input_dev *dev, void *data,
 
 	left = effect->u.rumble.strong_magnitude;
 	right = effect->u.rumble.weak_magnitude;
-	debug("called with 0x%04x 0x%04x", left, right);
+	hid_dbg(dev, "called with 0x%04x 0x%04x", left, right);
 
 	left = left * plff->maxval / 0xffff;
 	right = right * plff->maxval / 0xffff;
 
 	*plff->strong = left;
 	*plff->weak = right;
-	debug("running with 0x%02x 0x%02x", left, right);
+	hid_dbg(dev, "running with 0x%02x 0x%02x", left, right);
 	hid_hw_request(hid, plff->report, HID_REQ_SET_REPORT);
 
 	return 0;
@@ -131,7 +115,7 @@ static int plff_init(struct hid_device *hid)
 			report->field[0]->value[1] = 0x00;
 			strong = &report->field[0]->value[2];
 			weak = &report->field[0]->value[3];
-			debug("detected single-field device");
+			hid_dbg(hid, "detected single-field device");
 		} else if (report->field[0]->maxusage == 1 &&
 			   report->field[0]->usage[0].hid ==
 				(HID_UP_LED | 0x43) &&
@@ -146,13 +130,13 @@ static int plff_init(struct hid_device *hid)
 			weak = &report->field[3]->value[0];
 			if (hid->vendor == USB_VENDOR_ID_JESS2)
 				maxval = 0xff;
-			debug("detected 4-field device");
+			hid_dbg(hid, "detected 4-field device");
 		} else {
 			hid_err(hid, "not enough fields or values\n");
 			return -ENODEV;
 		}
 
-		plff = kzalloc(sizeof(struct plff_device), GFP_KERNEL);
+		plff = kzalloc_obj(struct plff_device);
 		if (!plff)
 			return -ENOMEM;
 
@@ -206,9 +190,14 @@ static int pl_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		goto err;
 	}
 
-	plff_init(hdev);
+	ret = plff_init(hdev);
+	if (ret)
+		goto stop;
 
 	return 0;
+
+stop:
+	hid_hw_stop(hdev);
 err:
 	return ret;
 }
@@ -231,4 +220,5 @@ static struct hid_driver pl_driver = {
 };
 module_hid_driver(pl_driver);
 
+MODULE_DESCRIPTION("Force feedback support for PantherLord/GreenAsia based devices");
 MODULE_LICENSE("GPL");

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: MIT */
 #ifndef __NVKM_MEMORY_H__
 #define __NVKM_MEMORY_H__
 #include <core/os.h>
@@ -12,6 +12,7 @@ struct nvkm_tags {
 };
 
 enum nvkm_memory_target {
+	NVKM_MEM_TARGET_INST_SR_LOST, /* instance memory - not preserved across suspend */
 	NVKM_MEM_TARGET_INST, /* instance memory */
 	NVKM_MEM_TARGET_VRAM, /* video memory */
 	NVKM_MEM_TARGET_HOST, /* coherent system memory */
@@ -29,6 +30,7 @@ struct nvkm_memory_func {
 	void *(*dtor)(struct nvkm_memory *);
 	enum nvkm_memory_target (*target)(struct nvkm_memory *);
 	u8 (*page)(struct nvkm_memory *);
+	u64 (*bar2)(struct nvkm_memory *);
 	u64 (*addr)(struct nvkm_memory *);
 	u64 (*size)(struct nvkm_memory *);
 	void (*boot)(struct nvkm_memory *, struct nvkm_vmm *);
@@ -36,6 +38,7 @@ struct nvkm_memory_func {
 	void (*release)(struct nvkm_memory *);
 	int (*map)(struct nvkm_memory *, u64 offset, struct nvkm_vmm *,
 		   struct nvkm_vma *, void *argv, u32 argc);
+	int (*kmap)(struct nvkm_memory *, struct nvkm_memory **);
 };
 
 struct nvkm_memory_ptrs {
@@ -56,11 +59,13 @@ void nvkm_memory_tags_put(struct nvkm_memory *, struct nvkm_device *,
 
 #define nvkm_memory_target(p) (p)->func->target(p)
 #define nvkm_memory_page(p) (p)->func->page(p)
+#define nvkm_memory_bar2(p) (p)->func->bar2(p)
 #define nvkm_memory_addr(p) (p)->func->addr(p)
 #define nvkm_memory_size(p) (p)->func->size(p)
 #define nvkm_memory_boot(p,v) (p)->func->boot((p),(v))
 #define nvkm_memory_map(p,o,vm,va,av,ac)                                       \
 	(p)->func->map((p),(o),(vm),(va),(av),(ac))
+#define nvkm_memory_kmap(p,i) ((p)->func->kmap ? (p)->func->kmap((p), (i)) : -ENOSYS)
 
 /* accessor macros - kmap()/done() must bracket use of the other accessor
  * macros to guarantee correct behaviour across all chipsets
@@ -80,6 +85,22 @@ void nvkm_memory_tags_put(struct nvkm_memory *, struct nvkm_device *,
 	u64 __a = (a), __d = (d);                                              \
 	nvkm_wo32((o), __a + 0, lower_32_bits(__d));                           \
 	nvkm_wo32((o), __a + 4, upper_32_bits(__d));                           \
+} while(0)
+
+#define nvkm_robj(o,a,p,s) do {                                                \
+	u32 _addr = (a), _size = (s) >> 2, *_data = (void *)(p);               \
+	while (_size--) {                                                      \
+		*(_data++) = nvkm_ro32((o), _addr);                            \
+		_addr += 4;                                                    \
+	}                                                                      \
+} while(0)
+
+#define nvkm_wobj(o,a,p,s) do {                                                \
+	u32 _addr = (a), _size = (s) >> 2, *_data = (void *)(p);               \
+	while (_size--) {                                                      \
+		nvkm_wo32((o), _addr, *(_data++));                             \
+		_addr += 4;                                                    \
+	}                                                                      \
 } while(0)
 
 #define nvkm_fill(t,s,o,a,d,c) do {                                            \

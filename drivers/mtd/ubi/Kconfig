@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 menuconfig MTD_UBI
 	tristate "Enable UBI - Unsorted block images"
 	select CRC32
@@ -100,6 +101,28 @@ config MTD_UBI_BLOCK
 	   practical for read-only file systems, like squashfs.
 
 	   When selected, this feature will be built in the UBI driver.
+
+	   If in doubt, say "N".
+
+config MTD_UBI_FAULT_INJECTION
+	bool "Fault injection capability of UBI device"
+	default n
+	depends on FAULT_INJECTION_DEBUG_FS
+	help
+	   This option enables fault-injection support for UBI devices for
+	   testing purposes.
+
+	   If in doubt, say "N".
+
+config MTD_UBI_NVMEM
+	tristate "UBI virtual NVMEM"
+	default n
+	depends on NVMEM
+	help
+	   This option enabled an additional driver exposing UBI volumes as NVMEM
+	   providers, intended for platforms where UBI is part of the firmware
+	   specification and used to store also e.g. MAC addresses or board-
+	   specific Wi-Fi calibration data.
 
 	   If in doubt, say "N".
 

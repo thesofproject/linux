@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Common code for mac80211 Prism54 drivers
  *
@@ -10,10 +11,6 @@
  *   Copyright 2004-2006 Jean-Baptiste Note <jbnote@gmail.com>, et al.
  * - stlc45xx driver
  *   Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies).
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/export.h>
@@ -121,8 +118,8 @@ static int p54_assign_address(struct p54_common *priv, struct sk_buff *skb)
 	}
 	if (unlikely(!target_skb)) {
 		if (priv->rx_end - last_addr >= len) {
-			target_skb = priv->tx_queue.prev;
-			if (!skb_queue_empty(&priv->tx_queue)) {
+			target_skb = skb_peek_tail(&priv->tx_queue);
+			if (target_skb) {
 				info = IEEE80211_SKB_CB(target_skb);
 				range = (void *)info->rate_driver_data;
 				target_addr = range->end_addr;
@@ -142,7 +139,10 @@ static int p54_assign_address(struct p54_common *priv, struct sk_buff *skb)
 	    unlikely(GET_HW_QUEUE(skb) == P54_QUEUE_BEACON))
 		priv->beacon_req_id = data->req_id;
 
-	__skb_queue_after(&priv->tx_queue, target_skb, skb);
+	if (target_skb)
+		__skb_queue_after(&priv->tx_queue, target_skb, skb);
+	else
+		__skb_queue_head(&priv->tx_queue, skb);
 	spin_unlock_irqrestore(&priv->tx_queue.lock, flags);
 	return 0;
 }
@@ -317,7 +317,7 @@ static void p54_pspoll_workaround(struct p54_common *priv, struct sk_buff *skb)
 	tim_len = tim[1];
 	tim_ie = (struct ieee80211_tim_ie *) &tim[2];
 
-	new_psm = ieee80211_check_tim(tim_ie, tim_len, priv->aid);
+	new_psm = ieee80211_check_tim(tim_ie, tim_len, priv->aid, false);
 	if (new_psm != priv->powersave_override) {
 		priv->powersave_override = new_psm;
 		p54_set_ps(priv);
@@ -331,6 +331,7 @@ static int p54_rx_data(struct p54_common *priv, struct sk_buff *skb)
 	u16 freq = le16_to_cpu(hdr->freq);
 	size_t header_len = sizeof(*hdr);
 	u32 tsf32;
+	__le16 fc;
 	u8 rate = hdr->rate & 0xf;
 
 	/*
@@ -379,6 +380,11 @@ static int p54_rx_data(struct p54_common *priv, struct sk_buff *skb)
 
 	skb_pull(skb, header_len);
 	skb_trim(skb, le16_to_cpu(hdr->len));
+
+	fc = ((struct ieee80211_hdr *)skb->data)->frame_control;
+	if (ieee80211_is_probe_resp(fc) || ieee80211_is_beacon(fc))
+		rx_status->boottime_ns = ktime_get_boottime_ns();
+
 	if (unlikely(priv->hw->conf.flags & IEEE80211_CONF_PS))
 		p54_pspoll_workaround(priv, skb);
 
@@ -425,11 +431,7 @@ static void p54_rx_frame_sent(struct p54_common *priv, struct sk_buff *skb)
 	 * Clear manually, ieee80211_tx_info_clear_status would
 	 * clear the counts too and we need them.
 	 */
-	memset(&info->status.ack_signal, 0,
-	       sizeof(struct ieee80211_tx_info) -
-	       offsetof(struct ieee80211_tx_info, status.ack_signal));
-	BUILD_BUG_ON(offsetof(struct ieee80211_tx_info,
-			      status.ack_signal) != 20);
+	memset_after(&info->status, 0, rates);
 
 	if (entry_hdr->flags & cpu_to_le16(P54_HDR_FLAG_DATA_ALIGN))
 		pad = entry_data->align[0];
@@ -494,14 +496,27 @@ static void p54_rx_eeprom_readback(struct p54_common *priv,
 		return ;
 
 	if (priv->fw_var >= 0x509) {
-		memcpy(priv->eeprom, eeprom->v2.data,
-		       le16_to_cpu(eeprom->v2.len));
+		if (le16_to_cpu(eeprom->v2.len) != priv->eeprom_slice_size)
+			return;
+
+		if (eeprom->v2.data + priv->eeprom_slice_size >
+		    skb_tail_pointer(skb))
+			return;
+
+		memcpy(priv->eeprom, eeprom->v2.data, priv->eeprom_slice_size);
 	} else {
-		memcpy(priv->eeprom, eeprom->v1.data,
-		       le16_to_cpu(eeprom->v1.len));
+		if (le16_to_cpu(eeprom->v1.len) != priv->eeprom_slice_size)
+			return;
+
+		if (eeprom->v1.data + priv->eeprom_slice_size >
+		    skb_tail_pointer(skb))
+			return;
+
+		memcpy(priv->eeprom, eeprom->v1.data, priv->eeprom_slice_size);
 	}
 
 	priv->eeprom = NULL;
+	priv->eeprom_slice_size = 0;
 	tmp = p54_find_and_unlink_skb(priv, hdr->req_id);
 	dev_kfree_skb_any(tmp);
 	complete(&priv->eeprom_comp);

@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (C) 2011 Philippe Rétornaz
  *
  * Based on twl4030-pwrbutton driver by:
@@ -57,7 +57,6 @@ static irqreturn_t button_irq(int irq, void *_priv)
 	struct mc13783_pwrb *priv = _priv;
 	int val;
 
-	mc13xxx_irq_ack(priv->mc13783, irq);
 	mc13xxx_reg_read(priv->mc13783, MC13783_REG_INTERRUPT_SENSE_1, &val);
 
 	switch (irq) {
@@ -109,7 +108,7 @@ static int mc13783_pwrbutton_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc_obj(*priv);
 	if (!priv) {
 		err = -ENOMEM;
 		dev_dbg(&pdev->dev, "Can't allocate power button\n");
@@ -229,7 +228,7 @@ free_input_dev:
 	return err;
 }
 
-static int mc13783_pwrbutton_remove(struct platform_device *pdev)
+static void mc13783_pwrbutton_remove(struct platform_device *pdev)
 {
 	struct mc13783_pwrb *priv = platform_get_drvdata(pdev);
 	const struct mc13xxx_buttons_platform_data *pdata;
@@ -249,8 +248,6 @@ static int mc13783_pwrbutton_remove(struct platform_device *pdev)
 
 	input_unregister_device(priv->pwr);
 	kfree(priv);
-
-	return 0;
 }
 
 static struct platform_driver mc13783_pwrbutton_driver = {

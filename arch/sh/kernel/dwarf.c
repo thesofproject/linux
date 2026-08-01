@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2009 Matt Fleming <matt@console-pimps.org>
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  *
  * This is an implementation of a DWARF unwinder. Its main purpose is
  * for generating stacktrace information. Based on the DWARF 3
@@ -27,7 +24,7 @@
 #include <asm/dwarf.h>
 #include <asm/unwinder.h>
 #include <asm/sections.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <asm/stacktrace.h>
 
 /* Reserve enough memory for two stack frames */
@@ -347,7 +344,7 @@ out:
  *	dwarf_lookup_fde - locate the FDE that covers pc
  *	@pc: the program counter
  */
-struct dwarf_fde *dwarf_lookup_fde(unsigned long pc)
+static struct dwarf_fde *dwarf_lookup_fde(unsigned long pc)
 {
 	struct rb_node **rb_node = &fde_root.rb_node;
 	struct dwarf_fde *fde = NULL;
@@ -599,7 +596,7 @@ struct dwarf_frame *dwarf_unwind_stack(unsigned long pc,
 	 * time this function makes its first function call.
 	 */
 	if (!pc || !prev)
-		pc = (unsigned long)current_text_addr();
+		pc = _THIS_IP_;
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	/*
@@ -608,17 +605,18 @@ struct dwarf_frame *dwarf_unwind_stack(unsigned long pc,
 	 * expected to find the real return address.
 	 */
 	if (pc == (unsigned long)&return_to_handler) {
-		int index = current->curr_ret_stack;
+		struct ftrace_ret_stack *ret_stack;
 
+		ret_stack = ftrace_graph_get_ret_stack(current, 0);
+		if (ret_stack)
+			pc = ret_stack->ret;
 		/*
 		 * We currently have no way of tracking how many
 		 * return_to_handler()'s we've seen. If there is more
 		 * than one patched return address on our stack,
 		 * complain loudly.
 		 */
-		WARN_ON(index > 0);
-
-		pc = current->ret_stack[index].ret;
+		WARN_ON(ftrace_graph_get_ret_stack(current, 1));
 	}
 #endif
 
@@ -743,7 +741,7 @@ static int dwarf_parse_cie(void *entry, void *p, unsigned long len,
 	unsigned long flags;
 	int count;
 
-	cie = kzalloc(sizeof(*cie), GFP_KERNEL);
+	cie = kzalloc_obj(*cie);
 	if (!cie)
 		return -ENOMEM;
 
@@ -876,7 +874,7 @@ static int dwarf_parse_fde(void *entry, u32 entry_type,
 	int count;
 	void *p = start;
 
-	fde = kzalloc(sizeof(*fde), GFP_KERNEL);
+	fde = kzalloc_obj(*fde);
 	if (!fde)
 		return -ENOMEM;
 

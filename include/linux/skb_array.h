@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *	Definitions for the 'struct skb_array' datastructure.
  *
@@ -5,11 +6,6 @@
  *		Michael S. Tsirkin <mst@redhat.com>
  *
  *	Copyright (C) 2016 Red Hat, Inc.
- *
- *	This program is free software; you can redistribute it and/or modify it
- *	under the terms of the GNU General Public License as published by the
- *	Free Software Foundation; either version 2 of the License, or (at your
- *	option) any later version.
  *
  *	Limited-size FIFO of skbs. Can be used more or less whenever
  *	sk_buff_head can be used, except you need to know the queue size in
@@ -97,6 +93,11 @@ static inline bool skb_array_empty_any(struct skb_array *a)
 	return ptr_ring_empty_any(&a->ring);
 }
 
+static inline struct sk_buff *__skb_array_consume(struct skb_array *a)
+{
+	return __ptr_ring_consume(&a->ring);
+}
+
 static inline struct sk_buff *skb_array_consume(struct skb_array *a)
 {
 	return ptr_ring_consume(&a->ring);
@@ -176,10 +177,11 @@ static inline int skb_array_peek_len_any(struct skb_array *a)
 	return PTR_RING_PEEK_CALL_ANY(&a->ring, __skb_array_len_with_tag);
 }
 
-static inline int skb_array_init(struct skb_array *a, int size, gfp_t gfp)
+static inline int skb_array_init_noprof(struct skb_array *a, int size, gfp_t gfp)
 {
-	return ptr_ring_init(&a->ring, size, gfp);
+	return ptr_ring_init_noprof(&a->ring, size, gfp);
 }
+#define skb_array_init(...)	alloc_hooks(skb_array_init_noprof(__VA_ARGS__))
 
 static void __skb_array_destroy_skb(void *ptr)
 {
@@ -197,15 +199,18 @@ static inline int skb_array_resize(struct skb_array *a, int size, gfp_t gfp)
 	return ptr_ring_resize(&a->ring, size, gfp, __skb_array_destroy_skb);
 }
 
-static inline int skb_array_resize_multiple(struct skb_array **rings,
-					    int nrings, unsigned int size,
-					    gfp_t gfp)
+static inline int skb_array_resize_multiple_bh_noprof(struct skb_array **rings,
+						      int nrings,
+						      unsigned int size,
+						      gfp_t gfp)
 {
 	BUILD_BUG_ON(offsetof(struct skb_array, ring));
-	return ptr_ring_resize_multiple((struct ptr_ring **)rings,
-					nrings, size, gfp,
-					__skb_array_destroy_skb);
+	return ptr_ring_resize_multiple_bh_noprof((struct ptr_ring **)rings,
+					          nrings, size, gfp,
+					          __skb_array_destroy_skb);
 }
+#define skb_array_resize_multiple_bh(...)	\
+		alloc_hooks(skb_array_resize_multiple_bh_noprof(__VA_ARGS__))
 
 static inline void skb_array_cleanup(struct skb_array *a)
 {

@@ -1,32 +1,36 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
+#include <linux/device.h>
 #include <linux/dmaengine.h>
 #include <crypto/scatterwalk.h>
 
 #include "dma.h"
 
-int qce_dma_request(struct device *dev, struct qce_dma_data *dma)
+static void qce_dma_release(void *data)
+{
+	struct qce_dma_data *dma = data;
+
+	dma_release_channel(dma->txchan);
+	dma_release_channel(dma->rxchan);
+	kfree(dma->result_buf);
+}
+
+int devm_qce_dma_request(struct device *dev, struct qce_dma_data *dma)
 {
 	int ret;
 
-	dma->txchan = dma_request_slave_channel_reason(dev, "tx");
+	dma->txchan = dma_request_chan(dev, "tx");
 	if (IS_ERR(dma->txchan))
-		return PTR_ERR(dma->txchan);
+		return dev_err_probe(dev, PTR_ERR(dma->txchan),
+				     "Failed to get TX DMA channel\n");
 
-	dma->rxchan = dma_request_slave_channel_reason(dev, "rx");
+	dma->rxchan = dma_request_chan(dev, "rx");
 	if (IS_ERR(dma->rxchan)) {
-		ret = PTR_ERR(dma->rxchan);
+		ret = dev_err_probe(dev, PTR_ERR(dma->rxchan),
+				    "Failed to get RX DMA channel\n");
 		goto error_rx;
 	}
 
@@ -39,7 +43,8 @@ int qce_dma_request(struct device *dev, struct qce_dma_data *dma)
 
 	dma->ignore_buf = dma->result_buf + QCE_RESULT_BUF_SZ;
 
-	return 0;
+	return devm_add_action_or_reset(dev, qce_dma_release, dma);
+
 error_nomem:
 	dma_release_channel(dma->rxchan);
 error_rx:
@@ -47,17 +52,12 @@ error_rx:
 	return ret;
 }
 
-void qce_dma_release(struct qce_dma_data *dma)
-{
-	dma_release_channel(dma->txchan);
-	dma_release_channel(dma->rxchan);
-	kfree(dma->result_buf);
-}
-
 struct scatterlist *
-qce_sgtable_add(struct sg_table *sgt, struct scatterlist *new_sgl)
+qce_sgtable_add(struct sg_table *sgt, struct scatterlist *new_sgl,
+		unsigned int max_len)
 {
 	struct scatterlist *sg = sgt->sgl, *sg_last = NULL;
+	unsigned int new_len;
 
 	while (sg) {
 		if (!sg_page(sg))
@@ -68,12 +68,13 @@ qce_sgtable_add(struct sg_table *sgt, struct scatterlist *new_sgl)
 	if (!sg)
 		return ERR_PTR(-EINVAL);
 
-	while (new_sgl && sg) {
-		sg_set_page(sg, sg_page(new_sgl), new_sgl->length,
-			    new_sgl->offset);
+	while (new_sgl && sg && max_len) {
+		new_len = new_sgl->length > max_len ? max_len : new_sgl->length;
+		sg_set_page(sg, sg_page(new_sgl), new_len, new_sgl->offset);
 		sg_last = sg;
 		sg = sg_next(sg);
 		new_sgl = sg_next(new_sgl);
+		max_len -= new_len;
 	}
 
 	return sg_last;

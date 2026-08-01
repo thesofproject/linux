@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2013 Freescale Semiconductor, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/clk.h>
@@ -11,11 +8,14 @@
 #include <linux/cpufreq.h>
 #include <linux/err.h>
 #include <linux/module.h>
+#include <linux/nvmem-consumer.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/pm_opp.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
+#include <linux/mfd/syscon.h>
+#include <linux/regmap.h>
 
 #define PU_SOC_VOLTAGE_NORMAL	1250000
 #define PU_SOC_VOLTAGE_HIGH	1275000
@@ -50,7 +50,6 @@ static struct clk_bulk_data clks[] = {
 };
 
 static struct device *cpu_dev;
-static bool free_opp;
 static struct cpufreq_frequency_table *freq_table;
 static unsigned int max_freq;
 static unsigned int transition_latency;
@@ -157,8 +156,13 @@ static int imx6q_set_target(struct cpufreq_policy *policy, unsigned int index)
 	/* Ensure the arm clock divider is what we expect */
 	ret = clk_set_rate(clks[ARM].clk, new_freq * 1000);
 	if (ret) {
+		int ret1;
+
 		dev_err(cpu_dev, "failed to set clock rate: %d\n", ret);
-		regulator_set_voltage_tol(arm_reg, volt_old, 0);
+		ret1 = regulator_set_voltage_tol(arm_reg, volt_old, 0);
+		if (ret1)
+			dev_warn(cpu_dev,
+				 "failed to restore vddarm voltage: %d\n", ret1);
 		return ret;
 	}
 
@@ -169,22 +173,16 @@ static int imx6q_set_target(struct cpufreq_policy *policy, unsigned int index)
 	/* scaling down?  scale voltage after frequency */
 	if (new_freq < old_freq) {
 		ret = regulator_set_voltage_tol(arm_reg, volt, 0);
-		if (ret) {
+		if (ret)
 			dev_warn(cpu_dev,
 				 "failed to scale vddarm down: %d\n", ret);
-			ret = 0;
-		}
 		ret = regulator_set_voltage_tol(soc_reg, imx6_soc_volt[index], 0);
-		if (ret) {
+		if (ret)
 			dev_warn(cpu_dev, "failed to scale vddsoc down: %d\n", ret);
-			ret = 0;
-		}
 		if (!IS_ERR(pu_reg)) {
 			ret = regulator_set_voltage_tol(pu_reg, imx6_soc_volt[index], 0);
-			if (ret) {
+			if (ret)
 				dev_warn(cpu_dev, "failed to scale vddpu down: %d\n", ret);
-				ret = 0;
-			}
 		}
 	}
 
@@ -193,25 +191,32 @@ static int imx6q_set_target(struct cpufreq_policy *policy, unsigned int index)
 
 static int imx6q_cpufreq_init(struct cpufreq_policy *policy)
 {
-	int ret;
-
 	policy->clk = clks[ARM].clk;
-	ret = cpufreq_generic_init(policy, freq_table, transition_latency);
+	cpufreq_generic_init(policy, freq_table, transition_latency);
 	policy->suspend_freq = max_freq;
 
-	return ret;
+	return 0;
 }
 
 static struct cpufreq_driver imx6q_cpufreq_driver = {
-	.flags = CPUFREQ_NEED_INITIAL_FREQ_CHECK,
+	.flags = CPUFREQ_NEED_INITIAL_FREQ_CHECK |
+		 CPUFREQ_IS_COOLING_DEV,
 	.verify = cpufreq_generic_frequency_table_verify,
 	.target_index = imx6q_set_target,
 	.get = cpufreq_generic_get,
 	.init = imx6q_cpufreq_init,
+	.register_em = cpufreq_register_em_with_opp,
 	.name = "imx6q-cpufreq",
-	.attr = cpufreq_generic_attr,
 	.suspend = cpufreq_generic_suspend,
 };
+
+static void imx6x_disable_freq_in_opp(struct device *dev, unsigned long freq)
+{
+	int ret = dev_pm_opp_disable(dev, freq);
+
+	if (ret < 0 && ret != -ENODEV)
+		dev_warn(dev, "failed to disable %ldMHz OPP\n", freq / 1000000);
+}
 
 #define OCOTP_CFG3			0x440
 #define OCOTP_CFG3_SPEED_SHIFT		16
@@ -219,87 +224,101 @@ static struct cpufreq_driver imx6q_cpufreq_driver = {
 #define OCOTP_CFG3_SPEED_996MHZ		0x2
 #define OCOTP_CFG3_SPEED_852MHZ		0x1
 
-static void imx6q_opp_check_speed_grading(struct device *dev)
+static int imx6q_opp_check_speed_grading(struct device *dev)
 {
-	struct device_node *np;
-	void __iomem *base;
 	u32 val;
+	int ret;
 
-	np = of_find_compatible_node(NULL, NULL, "fsl,imx6q-ocotp");
-	if (!np)
-		return;
+	if (of_property_present(dev->of_node, "nvmem-cells")) {
+		ret = nvmem_cell_read_u32(dev, "speed_grade", &val);
+		if (ret)
+			return ret;
+	} else {
+		struct regmap *ocotp;
 
-	base = of_iomap(np, 0);
-	if (!base) {
-		dev_err(dev, "failed to map ocotp\n");
-		goto put_node;
+		ocotp = syscon_regmap_lookup_by_compatible("fsl,imx6q-ocotp");
+		if (IS_ERR(ocotp))
+			return -ENOENT;
+
+		/*
+		 * SPEED_GRADING[1:0] defines the max speed of ARM:
+		 * 2b'11: 1200000000Hz;
+		 * 2b'10: 996000000Hz;
+		 * 2b'01: 852000000Hz; -- i.MX6Q Only, exclusive with 996MHz.
+		 * 2b'00: 792000000Hz;
+		 * We need to set the max speed of ARM according to fuse map.
+		 */
+		regmap_read(ocotp, OCOTP_CFG3, &val);
 	}
 
-	/*
-	 * SPEED_GRADING[1:0] defines the max speed of ARM:
-	 * 2b'11: 1200000000Hz;
-	 * 2b'10: 996000000Hz;
-	 * 2b'01: 852000000Hz; -- i.MX6Q Only, exclusive with 996MHz.
-	 * 2b'00: 792000000Hz;
-	 * We need to set the max speed of ARM according to fuse map.
-	 */
-	val = readl_relaxed(base + OCOTP_CFG3);
 	val >>= OCOTP_CFG3_SPEED_SHIFT;
 	val &= 0x3;
 
 	if (val < OCOTP_CFG3_SPEED_996MHZ)
-		if (dev_pm_opp_disable(dev, 996000000))
-			dev_warn(dev, "failed to disable 996MHz OPP\n");
+		imx6x_disable_freq_in_opp(dev, 996000000);
 
 	if (of_machine_is_compatible("fsl,imx6q") ||
 	    of_machine_is_compatible("fsl,imx6qp")) {
 		if (val != OCOTP_CFG3_SPEED_852MHZ)
-			if (dev_pm_opp_disable(dev, 852000000))
-				dev_warn(dev, "failed to disable 852MHz OPP\n");
+			imx6x_disable_freq_in_opp(dev, 852000000);
+
 		if (val != OCOTP_CFG3_SPEED_1P2GHZ)
-			if (dev_pm_opp_disable(dev, 1200000000))
-				dev_warn(dev, "failed to disable 1.2GHz OPP\n");
+			imx6x_disable_freq_in_opp(dev, 1200000000);
 	}
-	iounmap(base);
-put_node:
-	of_node_put(np);
+
+	return 0;
 }
 
 #define OCOTP_CFG3_6UL_SPEED_696MHZ	0x2
+#define OCOTP_CFG3_6ULL_SPEED_792MHZ	0x2
+#define OCOTP_CFG3_6ULL_SPEED_900MHZ	0x3
 
-static void imx6ul_opp_check_speed_grading(struct device *dev)
+static int imx6ul_opp_check_speed_grading(struct device *dev)
 {
-	struct device_node *np;
-	void __iomem *base;
 	u32 val;
+	int ret = 0;
 
-	np = of_find_compatible_node(NULL, NULL, "fsl,imx6ul-ocotp");
-	if (!np)
-		return;
+	if (of_property_present(dev->of_node, "nvmem-cells")) {
+		ret = nvmem_cell_read_u32(dev, "speed_grade", &val);
+		if (ret)
+			return ret;
+	} else {
+		struct regmap *ocotp;
 
-	base = of_iomap(np, 0);
-	if (!base) {
-		dev_err(dev, "failed to map ocotp\n");
-		goto put_node;
+		ocotp = syscon_regmap_lookup_by_compatible("fsl,imx6ul-ocotp");
+		if (IS_ERR(ocotp))
+			ocotp = syscon_regmap_lookup_by_compatible("fsl,imx6ull-ocotp");
+
+		if (IS_ERR(ocotp))
+			return -ENOENT;
+
+		regmap_read(ocotp, OCOTP_CFG3, &val);
 	}
 
 	/*
 	 * Speed GRADING[1:0] defines the max speed of ARM:
 	 * 2b'00: Reserved;
 	 * 2b'01: 528000000Hz;
-	 * 2b'10: 696000000Hz;
-	 * 2b'11: Reserved;
+	 * 2b'10: 696000000Hz on i.MX6UL, 792000000Hz on i.MX6ULL;
+	 * 2b'11: 900000000Hz on i.MX6ULL only;
 	 * We need to set the max speed of ARM according to fuse map.
 	 */
-	val = readl_relaxed(base + OCOTP_CFG3);
 	val >>= OCOTP_CFG3_SPEED_SHIFT;
 	val &= 0x3;
-	if (val != OCOTP_CFG3_6UL_SPEED_696MHZ)
-		if (dev_pm_opp_disable(dev, 696000000))
-			dev_warn(dev, "failed to disable 696MHz OPP\n");
-	iounmap(base);
-put_node:
-	of_node_put(np);
+
+	if (of_machine_is_compatible("fsl,imx6ul"))
+		if (val != OCOTP_CFG3_6UL_SPEED_696MHZ)
+			imx6x_disable_freq_in_opp(dev, 696000000);
+
+	if (of_machine_is_compatible("fsl,imx6ull")) {
+		if (val < OCOTP_CFG3_6ULL_SPEED_792MHZ)
+			imx6x_disable_freq_in_opp(dev, 792000000);
+
+		if (val != OCOTP_CFG3_6ULL_SPEED_900MHZ)
+			imx6x_disable_freq_in_opp(dev, 900000000);
+	}
+
+	return ret;
 }
 
 static int imx6q_cpufreq_probe(struct platform_device *pdev)
@@ -356,13 +375,17 @@ static int imx6q_cpufreq_probe(struct platform_device *pdev)
 		goto put_reg;
 	}
 
-	if (of_machine_is_compatible("fsl,imx6ul"))
-		imx6ul_opp_check_speed_grading(cpu_dev);
-	else
-		imx6q_opp_check_speed_grading(cpu_dev);
+	if (of_machine_is_compatible("fsl,imx6ul") ||
+	    of_machine_is_compatible("fsl,imx6ull")) {
+		ret = imx6ul_opp_check_speed_grading(cpu_dev);
+	} else {
+		ret = imx6q_opp_check_speed_grading(cpu_dev);
+	}
+	if (ret) {
+		dev_err_probe(cpu_dev, ret, "failed to read ocotp\n");
+		goto out_free_opp;
+	}
 
-	/* Because we have added the OPPs here, we must free them */
-	free_opp = true;
 	num = dev_pm_opp_get_opp_count(cpu_dev);
 	if (num < 0) {
 		ret = num;
@@ -377,7 +400,8 @@ static int imx6q_cpufreq_probe(struct platform_device *pdev)
 	}
 
 	/* Make imx6_soc_volt array's size same as arm opp number */
-	imx6_soc_volt = devm_kzalloc(cpu_dev, sizeof(*imx6_soc_volt) * num, GFP_KERNEL);
+	imx6_soc_volt = devm_kcalloc(cpu_dev, num, sizeof(*imx6_soc_volt),
+				     GFP_KERNEL);
 	if (imx6_soc_volt == NULL) {
 		ret = -ENOMEM;
 		goto free_freq_table;
@@ -418,7 +442,7 @@ soc_opp_out:
 	}
 
 	if (of_property_read_u32(np, "clock-latency", &transition_latency))
-		transition_latency = CPUFREQ_ETERNAL;
+		transition_latency = CPUFREQ_DEFAULT_TRANSITION_LATENCY_NS;
 
 	/*
 	 * Calculate the ramp time for max voltage change in the
@@ -463,8 +487,7 @@ soc_opp_out:
 free_freq_table:
 	dev_pm_opp_free_cpufreq_table(cpu_dev, &freq_table);
 out_free_opp:
-	if (free_opp)
-		dev_pm_opp_of_remove_table(cpu_dev);
+	dev_pm_opp_of_remove_table(cpu_dev);
 put_reg:
 	if (!IS_ERR(arm_reg))
 		regulator_put(arm_reg);
@@ -480,20 +503,17 @@ put_node:
 	return ret;
 }
 
-static int imx6q_cpufreq_remove(struct platform_device *pdev)
+static void imx6q_cpufreq_remove(struct platform_device *pdev)
 {
 	cpufreq_unregister_driver(&imx6q_cpufreq_driver);
 	dev_pm_opp_free_cpufreq_table(cpu_dev, &freq_table);
-	if (free_opp)
-		dev_pm_opp_of_remove_table(cpu_dev);
+	dev_pm_opp_of_remove_table(cpu_dev);
 	regulator_put(arm_reg);
 	if (!IS_ERR(pu_reg))
 		regulator_put(pu_reg);
 	regulator_put(soc_reg);
 
 	clk_bulk_put(num_clks, clks);
-
-	return 0;
 }
 
 static struct platform_driver imx6q_cpufreq_platdrv = {

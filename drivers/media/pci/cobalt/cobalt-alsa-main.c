@@ -45,7 +45,7 @@ static int snd_cobalt_card_create(struct cobalt_stream *s,
 				       struct snd_card *sc,
 				       struct snd_cobalt_card **cobsc)
 {
-	*cobsc = kzalloc(sizeof(struct snd_cobalt_card), GFP_KERNEL);
+	*cobsc = kzalloc_obj(struct snd_cobalt_card);
 	if (*cobsc == NULL)
 		return -ENOMEM;
 
@@ -65,7 +65,7 @@ static int snd_cobalt_card_set_names(struct snd_cobalt_card *cobsc)
 	struct snd_card *sc = cobsc->sc;
 
 	/* sc->driver is used by alsa-lib's configurator: simple, unique */
-	strlcpy(sc->driver, "cobalt", sizeof(sc->driver));
+	strscpy(sc->driver, "cobalt", sizeof(sc->driver));
 
 	/* sc->shortname is a symlink in /proc/asound: COBALT-M -> cardN */
 	snprintf(sc->shortname,  sizeof(sc->shortname), "cobalt-%d-%d",

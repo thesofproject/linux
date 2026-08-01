@@ -1,15 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef LLC_IF_H
 #define LLC_IF_H
 /*
  * Copyright (c) 1997 by Procom Technology,Inc.
  * 		 2001 by Arnaldo Carvalho de Melo <acme@conectiva.com.br>
- *
- * This program can be redistributed or modified under the terms of the
- * GNU General Public License as published by the Free Software Foundation.
- * This program is distributed without any warranty or implied warranty
- * of merchantability or fitness for a particular purpose.
- *
- * See the GNU General Public License for more details.
  */
 /* Defines LLC interface to network layer */
 /* Available primitives */
@@ -62,7 +56,8 @@
 #define LLC_STATUS_CONFLICT	7 /* disconnect conn */
 #define LLC_STATUS_RESET_DONE	8 /*  */
 
-int llc_establish_connection(struct sock *sk, u8 *lmac, u8 *dmac, u8 dsap);
+int llc_establish_connection(struct sock *sk, const u8 *lmac, u8 *dmac,
+			     u8 dsap);
 int llc_build_and_send_pkt(struct sock *sk, struct sk_buff *skb);
 int llc_send_disc(struct sock *sk);
 #endif /* LLC_IF_H */

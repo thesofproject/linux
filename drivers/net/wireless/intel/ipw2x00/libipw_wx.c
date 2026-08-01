@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
 
   Copyright(c) 2004-2005 Intel Corporation. All rights reserved.
@@ -8,21 +9,6 @@
   <j@w1.fi>
   Copyright (c) 2002-2003, Jouni Malinen <j@w1.fi>
 
-  This program is free software; you can redistribute it and/or modify it
-  under the terms of version 2 of the GNU General Public License as
-  published by the Free Software Foundation.
-
-  This program is distributed in the hope that it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, write to the Free Software Foundation, Inc., 59
-  Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
-  The full GNU General Public License is included in this distribution in the
-  file called LICENSE.
 
   Contact Information:
   Intel Linux Wireless <ilw@linux.intel.com>
@@ -35,10 +21,7 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/jiffies.h>
-
-#include <net/lib80211.h>
 #include <linux/wireless.h>
-
 #include "libipw.h"
 
 static const char *libipw_modes[] = {
@@ -227,7 +210,7 @@ static char *libipw_translate_scan(struct libipw_device *ieee,
 	 * for given network. */
 	iwe.cmd = IWEVCUSTOM;
 	p = custom;
-	p += snprintf(p, MAX_CUSTOM_LEN - (p - custom),
+	p += scnprintf(p, MAX_CUSTOM_LEN - (p - custom),
 		      " Last beacon: %ums ago",
 		      elapsed_jiffies_msecs(network->last_scanned));
 	iwe.u.data.length = p - custom;
@@ -237,18 +220,18 @@ static char *libipw_translate_scan(struct libipw_device *ieee,
 	/* Add spectrum management information */
 	iwe.cmd = -1;
 	p = custom;
-	p += snprintf(p, MAX_CUSTOM_LEN - (p - custom), " Channel flags: ");
+	p += scnprintf(p, MAX_CUSTOM_LEN - (p - custom), " Channel flags: ");
 
 	if (libipw_get_channel_flags(ieee, network->channel) &
 	    LIBIPW_CH_INVALID) {
 		iwe.cmd = IWEVCUSTOM;
-		p += snprintf(p, MAX_CUSTOM_LEN - (p - custom), "INVALID ");
+		p += scnprintf(p, MAX_CUSTOM_LEN - (p - custom), "INVALID ");
 	}
 
 	if (libipw_get_channel_flags(ieee, network->channel) &
 	    LIBIPW_CH_RADAR_DETECT) {
 		iwe.cmd = IWEVCUSTOM;
-		p += snprintf(p, MAX_CUSTOM_LEN - (p - custom), "DFS ");
+		p += scnprintf(p, MAX_CUSTOM_LEN - (p - custom), "DFS ");
 	}
 
 	if (iwe.cmd == IWEVCUSTOM) {
@@ -317,7 +300,7 @@ int libipw_wx_set_encode(struct libipw_device *ieee,
 		.flags = 0
 	};
 	int i, key, key_provided, len;
-	struct lib80211_crypt_data **crypt;
+	struct libipw_crypt_data **crypt;
 	int host_crypto = ieee->host_encrypt || ieee->host_decrypt;
 
 	LIBIPW_DEBUG_WX("SET_ENCODE\n");
@@ -342,7 +325,7 @@ int libipw_wx_set_encode(struct libipw_device *ieee,
 		if (key_provided && *crypt) {
 			LIBIPW_DEBUG_WX("Disabling encryption on key %d.\n",
 					   key);
-			lib80211_crypt_delayed_deinit(&ieee->crypt_info, crypt);
+			libipw_crypt_delayed_deinit(&ieee->crypt_info, crypt);
 		} else
 			LIBIPW_DEBUG_WX("Disabling encryption.\n");
 
@@ -352,7 +335,7 @@ int libipw_wx_set_encode(struct libipw_device *ieee,
 			if (ieee->crypt_info.crypt[i] != NULL) {
 				if (key_provided)
 					break;
-				lib80211_crypt_delayed_deinit(&ieee->crypt_info,
+				libipw_crypt_delayed_deinit(&ieee->crypt_info,
 							       &ieee->crypt_info.crypt[i]);
 			}
 		}
@@ -375,21 +358,20 @@ int libipw_wx_set_encode(struct libipw_device *ieee,
 	    strcmp((*crypt)->ops->name, "WEP") != 0) {
 		/* changing to use WEP; deinit previously used algorithm
 		 * on this key */
-		lib80211_crypt_delayed_deinit(&ieee->crypt_info, crypt);
+		libipw_crypt_delayed_deinit(&ieee->crypt_info, crypt);
 	}
 
 	if (*crypt == NULL && host_crypto) {
-		struct lib80211_crypt_data *new_crypt;
+		struct libipw_crypt_data *new_crypt;
 
 		/* take WEP into use */
-		new_crypt = kzalloc(sizeof(struct lib80211_crypt_data),
-				    GFP_KERNEL);
+		new_crypt = kzalloc_obj(struct libipw_crypt_data);
 		if (new_crypt == NULL)
 			return -ENOMEM;
-		new_crypt->ops = lib80211_get_crypto_ops("WEP");
+		new_crypt->ops = libipw_get_crypto_ops("WEP");
 		if (!new_crypt->ops) {
-			request_module("lib80211_crypt_wep");
-			new_crypt->ops = lib80211_get_crypto_ops("WEP");
+			request_module("libipw_crypt_wep");
+			new_crypt->ops = libipw_get_crypto_ops("WEP");
 		}
 
 		if (new_crypt->ops && try_module_get(new_crypt->ops->owner))
@@ -400,7 +382,7 @@ int libipw_wx_set_encode(struct libipw_device *ieee,
 			new_crypt = NULL;
 
 			printk(KERN_WARNING "%s: could not initialize WEP: "
-			       "load module lib80211_crypt_wep\n", dev->name);
+			       "load module libipw_crypt_wep\n", dev->name);
 			return -EOPNOTSUPP;
 		}
 		*crypt = new_crypt;
@@ -479,7 +461,6 @@ int libipw_wx_get_encode(struct libipw_device *ieee,
 {
 	struct iw_point *erq = &(wrqu->encoding);
 	int len, key;
-	struct lib80211_crypt_data *crypt;
 	struct libipw_security *sec = &ieee->sec;
 
 	LIBIPW_DEBUG_WX("GET_ENCODE\n");
@@ -492,7 +473,6 @@ int libipw_wx_get_encode(struct libipw_device *ieee,
 	} else
 		key = ieee->crypt_info.tx_keyidx;
 
-	crypt = ieee->crypt_info.crypt[key];
 	erq->flags = key + 1;
 
 	if (!sec->enabled) {
@@ -525,8 +505,8 @@ int libipw_wx_set_encodeext(struct libipw_device *ieee,
 	int i, idx, ret = 0;
 	int group_key = 0;
 	const char *alg, *module;
-	struct lib80211_crypto_ops *ops;
-	struct lib80211_crypt_data **crypt;
+	const struct libipw_crypto_ops *ops;
+	struct libipw_crypt_data **crypt;
 
 	struct libipw_security sec = {
 		.flags = 0,
@@ -557,7 +537,7 @@ int libipw_wx_set_encodeext(struct libipw_device *ieee,
 	if ((encoding->flags & IW_ENCODE_DISABLED) ||
 	    ext->alg == IW_ENCODE_ALG_NONE) {
 		if (*crypt)
-			lib80211_crypt_delayed_deinit(&ieee->crypt_info, crypt);
+			libipw_crypt_delayed_deinit(&ieee->crypt_info, crypt);
 
 		for (i = 0; i < WEP_KEYS; i++)
 			if (ieee->crypt_info.crypt[i] != NULL)
@@ -583,15 +563,15 @@ int libipw_wx_set_encodeext(struct libipw_device *ieee,
 	switch (ext->alg) {
 	case IW_ENCODE_ALG_WEP:
 		alg = "WEP";
-		module = "lib80211_crypt_wep";
+		module = "libipw_crypt_wep";
 		break;
 	case IW_ENCODE_ALG_TKIP:
 		alg = "TKIP";
-		module = "lib80211_crypt_tkip";
+		module = "libipw_crypt_tkip";
 		break;
 	case IW_ENCODE_ALG_CCMP:
 		alg = "CCMP";
-		module = "lib80211_crypt_ccmp";
+		module = "libipw_crypt_ccmp";
 		break;
 	default:
 		LIBIPW_DEBUG_WX("%s: unknown crypto alg %d\n",
@@ -600,10 +580,10 @@ int libipw_wx_set_encodeext(struct libipw_device *ieee,
 		goto done;
 	}
 
-	ops = lib80211_get_crypto_ops(alg);
+	ops = libipw_get_crypto_ops(alg);
 	if (ops == NULL) {
 		request_module(module);
-		ops = lib80211_get_crypto_ops(alg);
+		ops = libipw_get_crypto_ops(alg);
 	}
 	if (ops == NULL) {
 		LIBIPW_DEBUG_WX("%s: unknown crypto alg %d\n",
@@ -613,11 +593,11 @@ int libipw_wx_set_encodeext(struct libipw_device *ieee,
 	}
 
 	if (*crypt == NULL || (*crypt)->ops != ops) {
-		struct lib80211_crypt_data *new_crypt;
+		struct libipw_crypt_data *new_crypt;
 
-		lib80211_crypt_delayed_deinit(&ieee->crypt_info, crypt);
+		libipw_crypt_delayed_deinit(&ieee->crypt_info, crypt);
 
-		new_crypt = kzalloc(sizeof(*new_crypt), GFP_KERNEL);
+		new_crypt = kzalloc_obj(*new_crypt);
 		if (new_crypt == NULL) {
 			ret = -ENOMEM;
 			goto done;
@@ -649,8 +629,10 @@ int libipw_wx_set_encodeext(struct libipw_device *ieee,
 	}
 
 	if (ext->alg != IW_ENCODE_ALG_NONE) {
-		memcpy(sec.keys[idx], ext->key, ext->key_len);
-		sec.key_sizes[idx] = ext->key_len;
+		int key_len = clamp_val(ext->key_len, 0, SCM_KEY_LEN);
+
+		memcpy(sec.keys[idx], ext->key, key_len);
+		sec.key_sizes[idx] = key_len;
 		sec.flags |= (1 << idx);
 		if (ext->alg == IW_ENCODE_ALG_WEP) {
 			sec.encode_alg[idx] = SEC_ALG_WEP;

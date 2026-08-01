@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Functions for accessing OPL4 devices
  * Copyright (c) 2003 by Clemens Ladisch <clemens@ladisch.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include "opl4_local.h"
@@ -60,10 +47,9 @@ EXPORT_SYMBOL(snd_opl4_read);
 
 void snd_opl4_read_memory(struct snd_opl4 *opl4, char *buf, int offset, int size)
 {
-	unsigned long flags;
 	u8 memcfg;
 
-	spin_lock_irqsave(&opl4->reg_lock, flags);
+	guard(spinlock_irqsave)(&opl4->reg_lock);
 
 	memcfg = snd_opl4_read(opl4, OPL4_REG_MEMORY_CONFIGURATION);
 	snd_opl4_write(opl4, OPL4_REG_MEMORY_CONFIGURATION, memcfg | OPL4_MODE_BIT);
@@ -78,18 +64,15 @@ void snd_opl4_read_memory(struct snd_opl4 *opl4, char *buf, int offset, int size
 	insb(opl4->pcm_port + 1, buf, size);
 
 	snd_opl4_write(opl4, OPL4_REG_MEMORY_CONFIGURATION, memcfg);
-
-	spin_unlock_irqrestore(&opl4->reg_lock, flags);
 }
 
 EXPORT_SYMBOL(snd_opl4_read_memory);
 
 void snd_opl4_write_memory(struct snd_opl4 *opl4, const char *buf, int offset, int size)
 {
-	unsigned long flags;
 	u8 memcfg;
 
-	spin_lock_irqsave(&opl4->reg_lock, flags);
+	guard(spinlock_irqsave)(&opl4->reg_lock);
 
 	memcfg = snd_opl4_read(opl4, OPL4_REG_MEMORY_CONFIGURATION);
 	snd_opl4_write(opl4, OPL4_REG_MEMORY_CONFIGURATION, memcfg | OPL4_MODE_BIT);
@@ -104,8 +87,6 @@ void snd_opl4_write_memory(struct snd_opl4 *opl4, const char *buf, int offset, i
 	outsb(opl4->pcm_port + 1, buf, size);
 
 	snd_opl4_write(opl4, OPL4_REG_MEMORY_CONFIGURATION, memcfg);
-
-	spin_unlock_irqrestore(&opl4->reg_lock, flags);
 }
 
 EXPORT_SYMBOL(snd_opl4_write_memory);
@@ -127,7 +108,7 @@ static int snd_opl4_detect(struct snd_opl4 *opl4)
 	snd_opl4_enable_opl4(opl4);
 
 	id1 = snd_opl4_read(opl4, OPL4_REG_MEMORY_CONFIGURATION);
-	snd_printdd("OPL4[02]=%02x\n", id1);
+	dev_dbg(opl4->card->dev, "OPL4[02]=%02x\n", id1);
 	switch (id1 & OPL4_DEVICE_ID_MASK) {
 	case 0x20:
 		opl4->hardware = OPL3_HW_OPL4;
@@ -143,7 +124,7 @@ static int snd_opl4_detect(struct snd_opl4 *opl4)
 	snd_opl4_write(opl4, OPL4_REG_MIX_CONTROL_PCM, 0xff);
 	id1 = snd_opl4_read(opl4, OPL4_REG_MIX_CONTROL_FM);
 	id2 = snd_opl4_read(opl4, OPL4_REG_MIX_CONTROL_PCM);
-	snd_printdd("OPL4 id1=%02x id2=%02x\n", id1, id2);
+	dev_dbg(opl4->card->dev, "OPL4 id1=%02x id2=%02x\n", id1, id2);
        	if (id1 != 0x00 || id2 != 0xff)
 		return -ENODEV;
 
@@ -165,7 +146,7 @@ static int snd_opl4_create_seq_dev(struct snd_opl4 *opl4, int seq_device)
 	opl4->seq_dev_num = seq_device;
 	if (snd_seq_device_new(opl4->card, seq_device, SNDRV_SEQ_DEV_ID_OPL4,
 			       sizeof(struct snd_opl4 *), &opl4->seq_dev) >= 0) {
-		strcpy(opl4->seq_dev->name, "OPL4 Wavetable");
+		strscpy(opl4->seq_dev->name, "OPL4 Wavetable");
 		*(struct snd_opl4 **)SNDRV_SEQ_DEVICE_ARGPTR(opl4->seq_dev) = opl4;
 		opl4->seq_dev->private_data = opl4;
 		opl4->seq_dev->private_free = snd_opl4_seq_dev_free;
@@ -197,7 +178,7 @@ int snd_opl4_create(struct snd_card *card,
 	struct snd_opl4 *opl4;
 	struct snd_opl3 *opl3;
 	int err;
-	static struct snd_device_ops ops = {
+	static const struct snd_device_ops ops = {
 		.dev_free = snd_opl4_dev_free
 	};
 
@@ -206,14 +187,14 @@ int snd_opl4_create(struct snd_card *card,
 	if (ropl4)
 		*ropl4 = NULL;
 
-	opl4 = kzalloc(sizeof(*opl4), GFP_KERNEL);
+	opl4 = kzalloc_obj(*opl4);
 	if (!opl4)
 		return -ENOMEM;
 
 	opl4->res_fm_port = request_region(fm_port, 8, "OPL4 FM");
 	opl4->res_pcm_port = request_region(pcm_port, 8, "OPL4 PCM/MIX");
 	if (!opl4->res_fm_port || !opl4->res_pcm_port) {
-		snd_printk(KERN_ERR "opl4: can't grab ports 0x%lx, 0x%lx\n", fm_port, pcm_port);
+		dev_err(card->dev, "opl4: can't grab ports 0x%lx, 0x%lx\n", fm_port, pcm_port);
 		snd_opl4_free(opl4);
 		return -EBUSY;
 	}
@@ -227,7 +208,7 @@ int snd_opl4_create(struct snd_card *card,
 	err = snd_opl4_detect(opl4);
 	if (err < 0) {
 		snd_opl4_free(opl4);
-		snd_printd("OPL4 chip not detected at %#lx/%#lx\n", fm_port, pcm_port);
+		dev_dbg(card->dev, "OPL4 chip not detected at %#lx/%#lx\n", fm_port, pcm_port);
 		return err;
 	}
 
@@ -263,15 +244,3 @@ int snd_opl4_create(struct snd_card *card,
 }
 
 EXPORT_SYMBOL(snd_opl4_create);
-
-static int __init alsa_opl4_init(void)
-{
-	return 0;
-}
-
-static void __exit alsa_opl4_exit(void)
-{
-}
-
-module_init(alsa_opl4_init)
-module_exit(alsa_opl4_exit)

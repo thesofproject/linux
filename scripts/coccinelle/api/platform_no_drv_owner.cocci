@@ -1,7 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /// Remove .owner field if calls are used which set it automatically
 ///
 // Confidence: High
-// Copyright: (C) 2014 Wolfram Sang. GPL v2.
+// Copyright: (C) 2014 Wolfram Sang.
 
 virtual patch
 virtual context
@@ -9,12 +10,21 @@ virtual org
 virtual report
 
 @match1@
+declarer name builtin_i2c_driver;
+declarer name builtin_platform_driver;
+declarer name builtin_platform_driver_probe;
 declarer name module_i2c_driver;
 declarer name module_platform_driver;
 declarer name module_platform_driver_probe;
 identifier __driver;
 @@
 (
+	builtin_i2c_driver(__driver);
+|
+	builtin_platform_driver(__driver);
+|
+	builtin_platform_driver_probe(__driver, ...);
+|
 	module_i2c_driver(__driver);
 |
 	module_platform_driver(__driver);

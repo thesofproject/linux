@@ -25,10 +25,8 @@
 #include <sys/time.h>
 #include <sys/timex.h>
 #include <time.h>
-#include "../kselftest.h"
-
-#define CLOCK_MONOTONIC_RAW		4
-#define NSEC_PER_SEC 1000000000LL
+#include <include/vdso/time64.h>
+#include "kselftest.h"
 
 #define shift_right(x, s) ({		\
 	__typeof__(x) __x = (x);	\
@@ -89,7 +87,7 @@ void get_monotonic_and_raw(struct timespec *mon, struct timespec *raw)
 	}
 }
 
-int main(int argv, char **argc)
+int main(int argc, char **argv)
 {
 	struct timespec mon, raw, start, end;
 	long long delta1, delta2, interval, eppm, ppm;
@@ -112,6 +110,7 @@ int main(int argv, char **argc)
 		printf("WARNING: ADJ_OFFSET in progress, this will cause inaccurate results\n");
 
 	printf("Estimating clock drift: ");
+	fflush(stdout);
 	sleep(120);
 
 	get_monotonic_and_raw(&mon, &raw);
@@ -128,15 +127,19 @@ int main(int argv, char **argc)
 	printf("%lld.%i(est)", eppm/1000, abs((int)(eppm%1000)));
 
 	/* Avg the two actual freq samples adjtimex gave us */
-	ppm = (tx1.freq + tx2.freq) * 1000 / 2;
-	ppm = (long long)tx1.freq * 1000;
+	ppm = (long long)(tx1.freq + tx2.freq) * 1000 / 2;
 	ppm = shift_right(ppm, 16);
 	printf(" %lld.%i(act)", ppm/1000, abs((int)(ppm%1000)));
 
 	if (llabs(eppm - ppm) > 1000) {
+		if (tx1.offset || tx2.offset ||
+		    tx1.freq != tx2.freq || tx1.tick != tx2.tick) {
+			printf("	[SKIP]\n");
+			ksft_exit_skip("The clock was adjusted externally. Shutdown NTPd or other time sync daemons\n");
+		}
 		printf("	[FAILED]\n");
-		return ksft_exit_fail();
+		ksft_exit_fail();
 	}
 	printf("	[OK]\n");
-	return  ksft_exit_pass();
+	ksft_exit_pass();
 }

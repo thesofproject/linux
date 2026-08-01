@@ -100,7 +100,7 @@ static void eq_set_ci(struct mlx4_eq *eq, int req_not)
 					       req_not << 31),
 		     eq->doorbell);
 	/* We still want ordering, just not swabbing, so add a barrier */
-	mb();
+	wmb();
 }
 
 static struct mlx4_eqe *get_eqe(struct mlx4_eq *eq, u32 entry, u8 eqe_factor,
@@ -210,7 +210,7 @@ static void slave_event(struct mlx4_dev *dev, u8 slave, struct mlx4_eqe *eqe)
 
 	memcpy(s_eqe, eqe, sizeof(struct mlx4_eqe) - 1);
 	s_eqe->slave_id = slave;
-	/* ensure all information is written before setting the ownersip bit */
+	/* ensure all information is written before setting the ownership bit */
 	dma_wmb();
 	s_eqe->owner = !!(slave_eq->prod & SLAVE_EVENT_EQ_SIZE) ? 0x0 : 0x80;
 	++slave_eq->prod;
@@ -240,12 +240,13 @@ static void mlx4_set_eq_affinity_hint(struct mlx4_priv *priv, int vec)
 	struct mlx4_dev *dev = &priv->dev;
 	struct mlx4_eq *eq = &priv->eq_table.eq[vec];
 
-	if (!eq->affinity_mask || cpumask_empty(eq->affinity_mask))
+	if (!cpumask_available(eq->affinity_mask) ||
+	    cpumask_empty(eq->affinity_mask))
 		return;
 
-	hint_err = irq_set_affinity_hint(eq->irq, eq->affinity_mask);
+	hint_err = irq_update_affinity_hint(eq->irq, eq->affinity_mask);
 	if (hint_err)
-		mlx4_warn(dev, "irq_set_affinity_hint failed, err %d\n", hint_err);
+		mlx4_warn(dev, "irq_update_affinity_hint failed, err %d\n", hint_err);
 }
 #endif
 
@@ -500,7 +501,7 @@ static int mlx4_eq_int(struct mlx4_dev *dev, struct mlx4_eq *eq)
 	int port;
 	int slave = 0;
 	int ret;
-	u32 flr_slave;
+	int flr_slave;
 	u8 update_slave_state;
 	int i;
 	enum slave_port_gen_event gen_event;
@@ -557,6 +558,7 @@ static int mlx4_eq_int(struct mlx4_dev *dev, struct mlx4_eq *eq)
 			mlx4_dbg(dev, "%s: MLX4_EVENT_TYPE_SRQ_LIMIT. srq_no=0x%x, eq 0x%x\n",
 				 __func__, be32_to_cpu(eqe->event.srq.srqn),
 				 eq->eqn);
+			fallthrough;
 		case MLX4_EVENT_TYPE_SRQ_CATAS_ERROR:
 			if (mlx4_is_master(dev)) {
 				/* forward only to slave owning the SRQ */
@@ -604,8 +606,8 @@ static int mlx4_eq_int(struct mlx4_dev *dev, struct mlx4_eq *eq)
 			port = be32_to_cpu(eqe->event.port_change.port) >> 28;
 			slaves_port = mlx4_phys_to_slaves_pport(dev, port);
 			if (eqe->subtype == MLX4_PORT_CHANGE_SUBTYPE_DOWN) {
-				mlx4_dispatch_event(dev, MLX4_DEV_EVENT_PORT_DOWN,
-						    port);
+				mlx4_dispatch_event(
+					dev, MLX4_DEV_EVENT_PORT_DOWN, &port);
 				mlx4_priv(dev)->sense.do_sense_port[port] = 1;
 				if (!mlx4_is_master(dev))
 					break;
@@ -645,7 +647,8 @@ static int mlx4_eq_int(struct mlx4_dev *dev, struct mlx4_eq *eq)
 					}
 				}
 			} else {
-				mlx4_dispatch_event(dev, MLX4_DEV_EVENT_PORT_UP, port);
+				mlx4_dispatch_event(dev, MLX4_DEV_EVENT_PORT_UP,
+						    &port);
 
 				mlx4_priv(dev)->sense.do_sense_port[port] = 0;
 
@@ -756,7 +759,7 @@ static int mlx4_eq_int(struct mlx4_dev *dev, struct mlx4_eq *eq)
 			}
 			spin_unlock_irqrestore(&priv->mfunc.master.slave_state_lock, flags);
 			mlx4_dispatch_event(dev, MLX4_DEV_EVENT_SLAVE_SHUTDOWN,
-					    flr_slave);
+					    &flr_slave);
 			queue_work(priv->mfunc.master.comm_wq,
 				   &priv->mfunc.master.slave_flr_event_work);
 			break;
@@ -785,8 +788,8 @@ static int mlx4_eq_int(struct mlx4_dev *dev, struct mlx4_eq *eq)
 			break;
 
 		case MLX4_EVENT_TYPE_PORT_MNG_CHG_EVENT:
-			mlx4_dispatch_event(dev, MLX4_DEV_EVENT_PORT_MGMT_CHANGE,
-					    (unsigned long) eqe);
+			mlx4_dispatch_event(
+				dev, MLX4_DEV_EVENT_PORT_MGMT_CHANGE, eqe);
 			break;
 
 		case MLX4_EVENT_TYPE_RECOVERABLE_ERROR_EVENT:
@@ -819,7 +822,7 @@ static int mlx4_eq_int(struct mlx4_dev *dev, struct mlx4_eq *eq)
 				  !!(eqe->owner & 0x80) ^
 				  !!(eq->cons_index & eq->nent) ? "HW" : "SW");
 			break;
-		};
+		}
 
 		++eq->cons_index;
 		eqes_found = 1;
@@ -984,8 +987,7 @@ static int mlx4_create_eq(struct mlx4_dev *dev, int nent,
 	 */
 	npages = PAGE_ALIGN(eq->nent * dev->caps.eqe_size) / PAGE_SIZE;
 
-	eq->page_list = kmalloc_array(npages, sizeof(*eq->page_list),
-				      GFP_KERNEL);
+	eq->page_list = kmalloc_objs(*eq->page_list, npages);
 	if (!eq->page_list)
 		goto err_out;
 
@@ -1011,8 +1013,6 @@ static int mlx4_create_eq(struct mlx4_dev *dev, int nent,
 
 		dma_list[i] = t;
 		eq->page_list[i].map = t;
-
-		memset(eq->page_list[i].buf, 0, PAGE_SIZE);
 	}
 
 	eq->eqn = mlx4_bitmap_alloc(&priv->eq_table.bitmap);
@@ -1057,8 +1057,7 @@ static int mlx4_create_eq(struct mlx4_dev *dev, int nent,
 	INIT_LIST_HEAD(&eq->tasklet_ctx.list);
 	INIT_LIST_HEAD(&eq->tasklet_ctx.process_list);
 	spin_lock_init(&eq->tasklet_ctx.lock);
-	tasklet_init(&eq->tasklet_ctx.task, mlx4_cq_tasklet_cb,
-		     (unsigned long)&eq->tasklet_ctx);
+	tasklet_setup(&eq->tasklet_ctx.task, mlx4_cq_tasklet_cb);
 
 	return err;
 
@@ -1124,9 +1123,7 @@ static void mlx4_free_irqs(struct mlx4_dev *dev)
 	for (i = 0; i < dev->caps.num_comp_vectors + 1; ++i)
 		if (eq_table->eq[i].have_irq) {
 			free_cpumask_var(eq_table->eq[i].affinity_mask);
-#if defined(CONFIG_SMP)
-			irq_set_affinity_hint(eq_table->eq[i].irq, NULL);
-#endif
+			irq_update_affinity_hint(eq_table->eq[i].irq, NULL);
 			free_irq(eq_table->eq[i].irq, eq_table->eq + i);
 			eq_table->eq[i].have_irq = 0;
 		}
@@ -1160,8 +1157,8 @@ int mlx4_alloc_eq_table(struct mlx4_dev *dev)
 {
 	struct mlx4_priv *priv = mlx4_priv(dev);
 
-	priv->eq_table.eq = kcalloc(dev->caps.num_eqs - dev->caps.reserved_eqs,
-				    sizeof(*priv->eq_table.eq), GFP_KERNEL);
+	priv->eq_table.eq = kzalloc_objs(*priv->eq_table.eq,
+					 dev->caps.num_eqs - dev->caps.reserved_eqs);
 	if (!priv->eq_table.eq)
 		return -ENOMEM;
 
@@ -1179,9 +1176,8 @@ int mlx4_init_eq_table(struct mlx4_dev *dev)
 	int err;
 	int i;
 
-	priv->eq_table.uar_map = kcalloc(mlx4_num_eq_uar(dev),
-					 sizeof(*priv->eq_table.uar_map),
-					 GFP_KERNEL);
+	priv->eq_table.uar_map = kzalloc_objs(*priv->eq_table.uar_map,
+					      mlx4_num_eq_uar(dev));
 	if (!priv->eq_table.uar_map) {
 		err = -ENOMEM;
 		goto err_out_free;
@@ -1211,8 +1207,9 @@ int mlx4_init_eq_table(struct mlx4_dev *dev)
 	}
 
 	priv->eq_table.irq_names =
-		kmalloc(MLX4_IRQNAME_SIZE * (dev->caps.num_comp_vectors + 1),
-			GFP_KERNEL);
+		kmalloc_array(MLX4_IRQNAME_SIZE,
+			      (dev->caps.num_comp_vectors + 1),
+			      GFP_KERNEL);
 	if (!priv->eq_table.irq_names) {
 		err = -ENOMEM;
 		goto err_out_clr_int;

@@ -1,20 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  cb710/cb710-mmc.h
  *
  *  Copyright by Michał Mirosław, 2008-2009
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #ifndef LINUX_CB710_MMC_H
 #define LINUX_CB710_MMC_H
 
 #include <linux/cb710.h>
+#include <linux/workqueue.h>
 
 /* per-MMC-reader structure */
 struct cb710_mmc_reader {
-	struct tasklet_struct finish_req_tasklet;
+	struct work_struct finish_req_bh_work;
 	struct mmc_request *mrq;
 	spinlock_t irq_lock;
 	unsigned char last_power_mode;

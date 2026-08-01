@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for MIPS Goldfish Programmable Interrupt Controller.
  *
  * Author: Miodrag Dinic <miodrag.dinic@mips.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -38,15 +34,14 @@ static void goldfish_pic_cascade(struct irq_desc *desc)
 {
 	struct goldfish_pic_data *gfpic = irq_desc_get_handler_data(desc);
 	struct irq_chip *host_chip = irq_desc_get_chip(desc);
-	u32 pending, hwirq, virq;
+	u32 pending, hwirq;
 
 	chained_irq_enter(host_chip, desc);
 
 	pending = readl(gfpic->base + GFPIC_REG_IRQ_PENDING);
 	while (pending) {
 		hwirq = __fls(pending);
-		virq = irq_linear_revmap(gfpic->irq_domain, hwirq);
-		generic_handle_irq(virq);
+		generic_handle_domain_irq(gfpic->irq_domain, hwirq);
 		pending &= ~(1 << hwirq);
 	}
 
@@ -66,7 +61,7 @@ static int __init goldfish_pic_of_init(struct device_node *of_node,
 	unsigned int parent_irq;
 	int ret = 0;
 
-	gfpic = kzalloc(sizeof(*gfpic), GFP_KERNEL);
+	gfpic = kzalloc_obj(*gfpic);
 	if (!gfpic) {
 		ret = -ENOMEM;
 		goto out_err;
@@ -106,10 +101,9 @@ static int __init goldfish_pic_of_init(struct device_node *of_node,
 	irq_setup_generic_chip(gc, IRQ_MSK(GFPIC_NR_IRQS), 0,
 			       IRQ_NOPROBE | IRQ_LEVEL, 0);
 
-	gfpic->irq_domain = irq_domain_add_legacy(of_node, GFPIC_NR_IRQS,
-						  GFPIC_IRQ_BASE, 0,
-						  &goldfish_irq_domain_ops,
-						  NULL);
+	gfpic->irq_domain = irq_domain_create_legacy(of_fwnode_handle(of_node), GFPIC_NR_IRQS,
+						     GFPIC_IRQ_BASE, 0, &goldfish_irq_domain_ops,
+						     NULL);
 	if (!gfpic->irq_domain) {
 		pr_err("Failed to add irqdomain!\n");
 		ret = -ENOMEM;

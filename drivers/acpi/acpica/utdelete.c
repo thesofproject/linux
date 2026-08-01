@@ -112,7 +112,7 @@ static void acpi_ut_delete_internal_obj(union acpi_operand_object *object)
 						       gpe_block);
 		}
 
-		/*lint -fallthrough */
+		ACPI_FALLTHROUGH;
 
 	case ACPI_TYPE_PROCESSOR:
 	case ACPI_TYPE_THERMAL:
@@ -140,7 +140,7 @@ static void acpi_ut_delete_internal_obj(union acpi_operand_object *object)
 			(void)
 			    acpi_os_delete_semaphore
 			    (acpi_gbl_global_lock_semaphore);
-			acpi_gbl_global_lock_semaphore = NULL;
+			acpi_gbl_global_lock_semaphore = ACPI_SEMAPHORE_NULL;
 
 			acpi_os_delete_mutex(object->mutex.os_mutex);
 			acpi_gbl_global_lock_mutex = NULL;
@@ -157,7 +157,7 @@ static void acpi_ut_delete_internal_obj(union acpi_operand_object *object)
 				  object, object->event.os_semaphore));
 
 		(void)acpi_os_delete_semaphore(object->event.os_semaphore);
-		object->event.os_semaphore = NULL;
+		object->event.os_semaphore = ACPI_SEMAPHORE_NULL;
 		break;
 
 	case ACPI_TYPE_METHOD:
@@ -257,6 +257,10 @@ static void acpi_ut_delete_internal_obj(union acpi_operand_object *object)
 
 			acpi_ut_delete_object_desc(second_desc);
 		}
+		if (object->field.internal_pcc_buffer) {
+			ACPI_FREE(object->field.internal_pcc_buffer);
+		}
+
 		break;
 
 	case ACPI_TYPE_BUFFER_FIELD:
@@ -279,6 +283,14 @@ static void acpi_ut_delete_internal_obj(union acpi_operand_object *object)
 		if (second_desc) {
 			acpi_ut_delete_object_desc(second_desc);
 		}
+		break;
+
+	case ACPI_TYPE_LOCAL_ADDRESS_HANDLER:
+
+		ACPI_DEBUG_PRINT((ACPI_DB_ALLOCATIONS,
+				  "***** Address handler %p\n", object));
+
+		acpi_os_delete_mutex(object->address_space.context_mutex);
 		break;
 
 	default:
@@ -355,6 +367,7 @@ acpi_ut_update_ref_count(union acpi_operand_object *object, u32 action)
 	u16 original_count;
 	u16 new_count = 0;
 	acpi_cpu_flags lock_flags;
+	char *message;
 
 	ACPI_FUNCTION_NAME(ut_update_ref_count);
 
@@ -391,6 +404,7 @@ acpi_ut_update_ref_count(union acpi_operand_object *object, u32 action)
 				  object, object->common.type,
 				  acpi_ut_get_object_type_name(object),
 				  new_count));
+		message = "Increment";
 		break;
 
 	case REF_DECREMENT:
@@ -408,6 +422,7 @@ acpi_ut_update_ref_count(union acpi_operand_object *object, u32 action)
 			ACPI_WARNING((AE_INFO,
 				      "Obj %p, Reference Count is already zero, cannot decrement\n",
 				      object));
+			return;
 		}
 
 		ACPI_DEBUG_PRINT_RAW((ACPI_DB_ALLOCATIONS,
@@ -420,6 +435,7 @@ acpi_ut_update_ref_count(union acpi_operand_object *object, u32 action)
 		if (new_count == 0) {
 			acpi_ut_delete_internal_obj(object);
 		}
+		message = "Decrement";
 		break;
 
 	default:
@@ -436,8 +452,8 @@ acpi_ut_update_ref_count(union acpi_operand_object *object, u32 action)
 	 */
 	if (new_count > ACPI_MAX_REFERENCE_COUNT) {
 		ACPI_WARNING((AE_INFO,
-			      "Large Reference Count (0x%X) in object %p, Type=0x%.2X",
-			      new_count, object, object->common.type));
+			      "Large Reference Count (0x%X) in object %p, Type=0x%.2X Operation=%s",
+			      new_count, object, object->common.type, message));
 	}
 }
 
@@ -445,13 +461,13 @@ acpi_ut_update_ref_count(union acpi_operand_object *object, u32 action)
  *
  * FUNCTION:    acpi_ut_update_object_reference
  *
- * PARAMETERS:  object              - Increment ref count for this object
- *                                    and all sub-objects
+ * PARAMETERS:  object              - Increment or decrement the ref count for
+ *                                    this object and all sub-objects
  *              action              - Either REF_INCREMENT or REF_DECREMENT
  *
  * RETURN:      Status
  *
- * DESCRIPTION: Increment the object reference count
+ * DESCRIPTION: Increment or decrement the object reference count
  *
  * Object references are incremented when:
  * 1) An object is attached to a Node (namespace object)
@@ -485,7 +501,7 @@ acpi_ut_update_object_reference(union acpi_operand_object *object, u16 action)
 		}
 
 		/*
-		 * All sub-objects must have their reference count incremented
+		 * All sub-objects must have their reference count updated
 		 * also. Different object types have different subobjects.
 		 */
 		switch (object->common.type) {
@@ -552,17 +568,13 @@ acpi_ut_update_object_reference(union acpi_operand_object *object, u16 action)
 					break;
 				}
 			}
+
 			next_object = NULL;
 			break;
 
 		case ACPI_TYPE_BUFFER_FIELD:
 
 			next_object = object->buffer_field.buffer_obj;
-			break;
-
-		case ACPI_TYPE_LOCAL_REGION_FIELD:
-
-			next_object = object->field.region_obj;
 			break;
 
 		case ACPI_TYPE_LOCAL_BANK_FIELD:
@@ -605,6 +617,7 @@ acpi_ut_update_object_reference(union acpi_operand_object *object, u16 action)
 			}
 			break;
 
+		case ACPI_TYPE_LOCAL_REGION_FIELD:
 		case ACPI_TYPE_REGION:
 		default:
 

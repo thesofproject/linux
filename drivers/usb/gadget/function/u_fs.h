@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * u_fs.h
  *
@@ -7,7 +7,7 @@
  * Copyright (c) 2013 Samsung Electronics Co., Ltd.
  *		http://www.samsung.com
  *
- * Author: Andrzej Pietrasiewicz <andrzej.p@samsung.com>
+ * Author: Andrzej Pietrasiewicz <andrzejtp2010@gmail.com>
  */
 
 #ifndef U_FFS_H
@@ -31,8 +31,6 @@
 #endif /* pr_vdebug */
 #  define ffs_dump_mem(prefix, ptr, len) do { } while (0)
 #endif /* VERBOSE_DEBUG */
-
-#define ENTER()    pr_vdebug("%s()\n", __func__)
 
 struct f_fs_opts;
 
@@ -178,7 +176,7 @@ struct ffs_data {
 	/* reference counter */
 	refcount_t			ref;
 	/* how many files are opened (EP0 and others) */
-	atomic_t			opened;
+	int				opened;
 
 	/* EP0 state */
 	enum ffs_state			state;

@@ -5,35 +5,7 @@
  * Copyright (C) 2015 Advanced Micro Devices, Inc.
  */
 
-	xgmacclk0_dma_250mhz: clk250mhz_0 {
-		compatible = "fixed-clock";
-		#clock-cells = <0>;
-		clock-frequency = <250000000>;
-		clock-output-names = "xgmacclk0_dma_250mhz";
-	};
-
-	xgmacclk0_ptp_250mhz: clk250mhz_1 {
-		compatible = "fixed-clock";
-		#clock-cells = <0>;
-		clock-frequency = <250000000>;
-		clock-output-names = "xgmacclk0_ptp_250mhz";
-	};
-
-	xgmacclk1_dma_250mhz: clk250mhz_2 {
-		compatible = "fixed-clock";
-		#clock-cells = <0>;
-		clock-frequency = <250000000>;
-		clock-output-names = "xgmacclk1_dma_250mhz";
-	};
-
-	xgmacclk1_ptp_250mhz: clk250mhz_3 {
-		compatible = "fixed-clock";
-		#clock-cells = <0>;
-		clock-frequency = <250000000>;
-		clock-output-names = "xgmacclk1_ptp_250mhz";
-	};
-
-	xgmac0: xgmac@e0700000 {
+	xgmac0: ethernet@e0700000 {
 		compatible = "amd,xgbe-seattle-v1a";
 		reg = <0 0xe0700000 0 0x80000>,
 		      <0 0xe0780000 0 0x80000>,
@@ -55,11 +27,11 @@
 		clocks = <&xgmacclk0_dma_250mhz>, <&xgmacclk0_ptp_250mhz>;
 		clock-names = "dma_clk", "ptp_clk";
 		phy-mode = "xgmii";
-		#stream-id-cells = <16>;
+		iommus = <&xgmac0_smmu 0x00 0x17>; /* 0-7, 16-23 */
 		dma-coherent;
 	};
 
-	xgmac1: xgmac@e0900000 {
+	xgmac1: ethernet@e0900000 {
 		compatible = "amd,xgbe-seattle-v1a";
 		reg = <0 0xe0900000 0 0x80000>,
 		      <0 0xe0980000 0 0x80000>,
@@ -81,11 +53,11 @@
 		clocks = <&xgmacclk1_dma_250mhz>, <&xgmacclk1_ptp_250mhz>;
 		clock-names = "dma_clk", "ptp_clk";
 		phy-mode = "xgmii";
-		#stream-id-cells = <16>;
+		iommus = <&xgmac1_smmu 0x00 0x17>; /* 0-7, 16-23 */
 		dma-coherent;
 	};
 
-	xgmac0_smmu: smmu@e0600000 {
+	xgmac0_smmu: iommu@e0600000 {
 		 compatible = "arm,mmu-401";
 		 reg = <0 0xe0600000 0 0x10000>;
 		 #global-interrupts = <1>;
@@ -94,14 +66,11 @@
 			       */
 			      <0 336 4>,
 			      <0 336 4>;
-
-		 mmu-masters = <&xgmac0
-			  0  1  2  3  4  5  6  7
-			 16 17 18 19 20 21 22 23
-		 >;
+		#iommu-cells = <2>;
+		dma-coherent;
 	 };
 
-	 xgmac1_smmu: smmu@e0800000 {
+	 xgmac1_smmu: iommu@e0800000 {
 		 compatible = "arm,mmu-401";
 		 reg = <0 0xe0800000 0 0x10000>;
 		 #global-interrupts = <1>;
@@ -110,9 +79,6 @@
 			       */
 			      <0 335 4>,
 			      <0 335 4>;
-
-		 mmu-masters = <&xgmac1
-			  0  1  2  3  4  5  6  7
-			 16 17 18 19 20 21 22 23
-		 >;
+		#iommu-cells = <2>;
+		dma-coherent;
 	 };

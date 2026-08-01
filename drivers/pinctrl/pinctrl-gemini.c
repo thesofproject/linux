@@ -10,14 +10,17 @@
 #include <linux/io.h>
 #include <linux/mfd/syscon.h>
 #include <linux/of.h>
+#include <linux/platform_device.h>
+#include <linux/regmap.h>
+#include <linux/seq_file.h>
+#include <linux/slab.h>
+#include <linux/string_choices.h>
+
 #include <linux/pinctrl/machine.h>
+#include <linux/pinctrl/pinconf-generic.h>
+#include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinmux.h>
-#include <linux/pinctrl/pinconf.h>
-#include <linux/pinctrl/pinconf-generic.h>
-#include <linux/platform_device.h>
-#include <linux/slab.h>
-#include <linux/regmap.h>
 
 #include "pinctrl-utils.h"
 
@@ -412,7 +415,7 @@ static const struct pinctrl_pin_desc gemini_3512_pins[] = {
 	PINCTRL_PIN(249, "P16 GPIO0 17"),
 	PINCTRL_PIN(250, "P17 GPIO0 18"),
 	PINCTRL_PIN(251, "P18 GPIO0 19"),
-	/* Row R (for some reason Q us skipped) */
+	/* Row R (for some reason Q is skipped) */
 	PINCTRL_PIN(252, "R1 IDE DD6"),
 	PINCTRL_PIN(253, "R2 IDE DD8"),
 	PINCTRL_PIN(254, "R3 IDE DD7"),
@@ -591,11 +594,14 @@ static const unsigned int tvc_3512_pins[] = {
 	319, /* TVC_DATA[1] */
 	301, /* TVC_DATA[2] */
 	283, /* TVC_DATA[3] */
-	265, /* TVC_CLK */
 	320, /* TVC_DATA[4] */
 	302, /* TVC_DATA[5] */
 	284, /* TVC_DATA[6] */
 	266, /* TVC_DATA[7] */
+};
+
+static const unsigned int tvc_clk_3512_pins[] = {
+	265, /* TVC_CLK */
 };
 
 /* NAND flash pins */
@@ -629,7 +635,7 @@ static const unsigned int pflash_3512_pins_extended[] = {
 /* Serial flash pins CE0, CE1, DI, DO, CK */
 static const unsigned int sflash_3512_pins[] = { 230, 231, 232, 233, 211 };
 
-/* The GPIO0A (0) pin overlap with TVC and extended parallel flash */
+/* The GPIO0A (0) pin overlap with TVC CLK and extended parallel flash */
 static const unsigned int gpio0a_3512_pins[] = { 265 };
 
 /* The GPIO0B (1-4) pins overlap with TVC and ICE */
@@ -823,7 +829,13 @@ static const struct gemini_pin_group gemini_3512_pin_groups[] = {
 		.num_pins = ARRAY_SIZE(tvc_3512_pins),
 		/* Conflict with character LCD and ICE */
 		.mask = LCD_PADS_ENABLE,
-		.value = TVC_PADS_ENABLE | TVC_CLK_PAD_ENABLE,
+		.value = TVC_PADS_ENABLE,
+	},
+	{
+		.name = "tvcclkgrp",
+		.pins = tvc_clk_3512_pins,
+		.num_pins = ARRAY_SIZE(tvc_clk_3512_pins),
+		.value = TVC_CLK_PAD_ENABLE,
 	},
 	/*
 	 * The construction is done such that it is possible to use a serial
@@ -860,8 +872,8 @@ static const struct gemini_pin_group gemini_3512_pin_groups[] = {
 		.name = "gpio0agrp",
 		.pins = gpio0a_3512_pins,
 		.num_pins = ARRAY_SIZE(gpio0a_3512_pins),
-		/* Conflict with TVC */
-		.mask = TVC_PADS_ENABLE,
+		/* Conflict with TVC CLK */
+		.mask = TVC_CLK_PAD_ENABLE,
 	},
 	{
 		.name = "gpio0bgrp",
@@ -1297,7 +1309,7 @@ static const struct pinctrl_pin_desc gemini_3516_pins[] = {
 	PINCTRL_PIN(277, "P18 PCI AD1"),
 	PINCTRL_PIN(278, "P19 PCI AD3"),
 	PINCTRL_PIN(279, "P20 PCI AD5"),
-	/* Row R (for some reason Q us skipped) */
+	/* Row R (for some reason Q is skipped) */
 	PINCTRL_PIN(280, "R1 IDE DD13"),
 	PINCTRL_PIN(281, "R2 IDE DD12"),
 	PINCTRL_PIN(282, "R3 IDE DD10"),
@@ -1531,11 +1543,14 @@ static const unsigned int tvc_3516_pins[] = {
 	311, /* TVC_DATA[1] */
 	394, /* TVC_DATA[2] */
 	374, /* TVC_DATA[3] */
-	333, /* TVC_CLK */
 	354, /* TVC_DATA[4] */
 	395, /* TVC_DATA[5] */
 	312, /* TVC_DATA[6] */
 	334, /* TVC_DATA[7] */
+};
+
+static const unsigned int tvc_clk_3516_pins[] = {
+	333, /* TVC_CLK */
 };
 
 /* NAND flash pins */
@@ -1570,7 +1585,7 @@ static const unsigned int pflash_3516_pins_extended[] = {
 static const unsigned int sflash_3516_pins[] = { 296, 338, 295, 359, 339 };
 
 /* The GPIO0A (0-4) pins overlap with TVC and extended parallel flash */
-static const unsigned int gpio0a_3516_pins[] = { 333, 354, 395, 312, 334 };
+static const unsigned int gpio0a_3516_pins[] = { 354, 395, 312, 334 };
 
 /* The GPIO0B (5-7) pins overlap with ICE */
 static const unsigned int gpio0b_3516_pins[] = { 375, 396, 376 };
@@ -1601,6 +1616,9 @@ static const unsigned int gpio0j_3516_pins[] = { 359, 339 };
 
 /* The GPIO0K (30,31) pins overlap with NAND flash */
 static const unsigned int gpio0k_3516_pins[] = { 275, 298 };
+
+/* The GPIO0L (0) pins overlap with TVC_CLK */
+static const unsigned int gpio0l_3516_pins[] = { 333 };
 
 /* The GPIO1A (0-4) pins that overlap with IDE and parallel flash */
 static const unsigned int gpio1a_3516_pins[] = { 221, 200, 222, 201, 220 };
@@ -1696,6 +1714,7 @@ static const struct gemini_pin_group gemini_3516_pin_groups[] = {
 		.name = "gmii_gmac0_grp",
 		.pins = gmii_gmac0_3516_pins,
 		.num_pins = ARRAY_SIZE(gmii_gmac0_3516_pins),
+		.mask = GEMINI_GMAC_IOSEL_MASK,
 		.driving_mask = GENMASK(17, 16),
 	},
 	{
@@ -1703,6 +1722,7 @@ static const struct gemini_pin_group gemini_3516_pin_groups[] = {
 		.pins = gmii_gmac1_3516_pins,
 		.num_pins = ARRAY_SIZE(gmii_gmac1_3516_pins),
 		/* Bring out RGMII on the GMAC1 pins */
+		.mask = GEMINI_GMAC_IOSEL_MASK,
 		.value = GEMINI_GMAC_IOSEL_GMAC0_GMAC1_RGMII,
 		.driving_mask = GENMASK(19, 18),
 	},
@@ -1759,7 +1779,13 @@ static const struct gemini_pin_group gemini_3516_pin_groups[] = {
 		.num_pins = ARRAY_SIZE(tvc_3516_pins),
 		/* Conflict with character LCD */
 		.mask = LCD_PADS_ENABLE,
-		.value = TVC_PADS_ENABLE | TVC_CLK_PAD_ENABLE,
+		.value = TVC_PADS_ENABLE,
+	},
+	{
+		.name = "tvcclkgrp",
+		.pins = tvc_clk_3516_pins,
+		.num_pins = ARRAY_SIZE(tvc_clk_3516_pins),
+		.value = TVC_CLK_PAD_ENABLE,
 	},
 	/*
 	 * The construction is done such that it is possible to use a serial
@@ -1869,6 +1895,13 @@ static const struct gemini_pin_group gemini_3516_pin_groups[] = {
 		.num_pins = ARRAY_SIZE(gpio0k_3516_pins),
 		/* Conflict with parallel and NAND flash */
 		.value = PFLASH_PADS_DISABLE | NAND_PADS_DISABLE,
+	},
+	{
+		.name = "gpio0lgrp",
+		.pins = gpio0l_3516_pins,
+		.num_pins = ARRAY_SIZE(gpio0l_3516_pins),
+		/* Conflict with TVE CLK */
+		.mask = TVC_CLK_PAD_ENABLE,
 	},
 	{
 		.name = "gpio1agrp",
@@ -2177,12 +2210,13 @@ static int gemini_pmx_set_mux(struct pinctrl_dev *pctldev,
 		return -ENODEV;
 	}
 
-	dev_info(pmx->dev,
-		 "ACTIVATE function \"%s\" with group \"%s\"\n",
-		 func->name, grp->name);
+	dev_dbg(pmx->dev,
+		"ACTIVATE function \"%s\" with group \"%s\"\n",
+		func->name, grp->name);
 
 	regmap_read(pmx->map, GLOBAL_MISC_CTRL, &before);
-	regmap_update_bits(pmx->map, GLOBAL_MISC_CTRL, grp->mask,
+	regmap_update_bits(pmx->map, GLOBAL_MISC_CTRL,
+			   grp->mask | grp->value,
 			   grp->value);
 	regmap_read(pmx->map, GLOBAL_MISC_CTRL, &after);
 
@@ -2204,15 +2238,15 @@ static int gemini_pmx_set_mux(struct pinctrl_dev *pctldev,
 				"pin group %s could not be %s: "
 				"probably a hardware limitation\n",
 				gemini_padgroups[i],
-				enabled ? "enabled" : "disabled");
+				str_enabled_disabled(enabled));
 			dev_err(pmx->dev,
 				"GLOBAL MISC CTRL before: %08x, after %08x, expected %08x\n",
 				before, after, expected);
 		} else {
-			dev_info(pmx->dev,
-				 "padgroup %s %s\n",
-				 gemini_padgroups[i],
-				 enabled ? "enabled" : "disabled");
+			dev_dbg(pmx->dev,
+				"padgroup %s %s\n",
+				gemini_padgroups[i],
+				str_enabled_disabled(enabled));
 		}
 	}
 
@@ -2226,15 +2260,15 @@ static int gemini_pmx_set_mux(struct pinctrl_dev *pctldev,
 				"pin group %s could not be %s: "
 				"probably a hardware limitation\n",
 				gemini_padgroups[i],
-				enabled ? "enabled" : "disabled");
+				str_enabled_disabled(enabled));
 			dev_err(pmx->dev,
 				"GLOBAL MISC CTRL before: %08x, after %08x, expected %08x\n",
 				before, after, expected);
 		} else {
-			dev_info(pmx->dev,
-				 "padgroup %s %s\n",
-				 gemini_padgroups[i],
-				 enabled ? "enabled" : "disabled");
+			dev_dbg(pmx->dev,
+				"padgroup %s %s\n",
+				gemini_padgroups[i],
+				str_enabled_disabled(enabled));
 		}
 	}
 
@@ -2461,9 +2495,9 @@ static int gemini_pinconf_group_set(struct pinctrl_dev *pctldev,
 			regmap_update_bits(pmx->map, GLOBAL_IODRIVE,
 					   grp->driving_mask,
 					   val);
-			dev_info(pmx->dev,
-				 "set group %s to %d mA drive strength mask %08x val %08x\n",
-				 grp->name, arg, grp->driving_mask, val);
+			dev_dbg(pmx->dev,
+				"set group %s to %d mA drive strength mask %08x val %08x\n",
+				grp->name, arg, grp->driving_mask, val);
 			break;
 		default:
 			dev_err(pmx->dev, "invalid config param %04x\n", param);
@@ -2554,8 +2588,8 @@ static int gemini_pmx_probe(struct platform_device *pdev)
 	/* Print initial state */
 	tmp = val;
 	for_each_set_bit(i, &tmp, PADS_MAXBIT) {
-		dev_info(dev, "pad group %s %s\n", gemini_padgroups[i],
-			 (val & BIT(i)) ? "enabled" : "disabled");
+		dev_dbg(dev, "pad group %s %s\n", gemini_padgroups[i],
+			str_enabled_disabled(val & BIT(i)));
 	}
 
 	/* Check if flash pin is set */

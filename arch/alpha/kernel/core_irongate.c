@@ -20,7 +20,7 @@
 #include <linux/sched.h>
 #include <linux/init.h>
 #include <linux/initrd.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 
 #include <asm/ptrace.h>
 #include <asm/cacheflush.h>
@@ -226,23 +226,20 @@ albacore_init_arch(void)
 	if (memtop > pci_mem) {
 #ifdef CONFIG_BLK_DEV_INITRD
 		extern unsigned long initrd_start, initrd_end;
-		extern void *move_initrd(unsigned long);
 
 		/* Move the initrd out of the way. */
 		if (initrd_end && __pa(initrd_end) > pci_mem) {
 			unsigned long size;
 
 			size = initrd_end - initrd_start;
-			free_bootmem_node(NODE_DATA(0), __pa(initrd_start),
-					  PAGE_ALIGN(size));
+			memblock_free((void *)initrd_start, PAGE_ALIGN(size));
 			if (!move_initrd(pci_mem))
 				printk("irongate_init_arch: initrd too big "
 				       "(%ldK)\ndisabling initrd\n",
 				       size / 1024);
 		}
 #endif
-		reserve_bootmem_node(NODE_DATA(0), pci_mem, memtop -
-				pci_mem, BOOTMEM_DEFAULT);
+		memblock_reserve(pci_mem, memtop - pci_mem);
 		printk("irongate_init_arch: temporarily reserving "
 			"region %08lx-%08lx for PCI\n", pci_mem, memtop - 1);
 	}
@@ -304,7 +301,6 @@ irongate_init_arch(void)
 #include <linux/agp_backend.h>
 #include <linux/agpgart.h>
 #include <linux/export.h>
-#include <asm/pgalloc.h>
 
 #define GET_PAGE_DIR_OFF(addr) (addr >> 22)
 #define GET_PAGE_DIR_IDX(addr) (GET_PAGE_DIR_OFF(addr))

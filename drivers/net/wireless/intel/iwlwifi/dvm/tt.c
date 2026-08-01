@@ -1,29 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2014 Intel Corporation. All rights reserved.
+ * Copyright (C) 2018, 2020 Intel Corporation
  *
  * Portions of this file are derived from the ipw3945 project, as well
  * as portions of the ieee80211 subsystem header files.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- *  Intel Linux Wireless <linuxwifi@intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
  *****************************************************************************/
 
 
@@ -142,17 +124,6 @@ enum iwl_antenna_ok iwl_tx_ant_restriction(struct iwl_priv *priv)
 	return restriction->tx_stream;
 }
 
-enum iwl_antenna_ok iwl_rx_ant_restriction(struct iwl_priv *priv)
-{
-	struct iwl_tt_mgmt *tt = &priv->thermal_throttle;
-	struct iwl_tt_restriction *restriction;
-
-	if (!priv->thermal_throttle.advanced_tt)
-		return IWL_ANT_OK_MULTI;
-	restriction = tt->restriction + tt->state;
-	return restriction->rx_stream;
-}
-
 #define CT_KILL_EXIT_DURATION (5)	/* 5 seconds duration */
 #define CT_KILL_WAITING_DURATION (300)	/* 300ms duration */
 
@@ -166,10 +137,9 @@ enum iwl_antenna_ok iwl_rx_ant_restriction(struct iwl_priv *priv)
  */
 static void iwl_tt_check_exit_ct_kill(struct timer_list *t)
 {
-	struct iwl_priv *priv = from_timer(priv, t,
-					   thermal_throttle.ct_kill_exit_tm);
+	struct iwl_priv *priv = timer_container_of(priv, t,
+						   thermal_throttle.ct_kill_exit_tm);
 	struct iwl_tt_mgmt *tt = &priv->thermal_throttle;
-	unsigned long flags;
 
 	if (test_bit(STATUS_EXIT_PENDING, &priv->status))
 		return;
@@ -185,8 +155,8 @@ static void iwl_tt_check_exit_ct_kill(struct timer_list *t)
 			priv->thermal_throttle.ct_kill_toggle = true;
 		}
 		iwl_read32(priv->trans, CSR_UCODE_DRV_GP1);
-		if (iwl_trans_grab_nic_access(priv->trans, &flags))
-			iwl_trans_release_nic_access(priv->trans, &flags);
+		if (iwl_trans_grab_nic_access(priv->trans))
+			iwl_trans_release_nic_access(priv->trans);
 
 		/* Reschedule the ct_kill timer to occur in
 		 * CT_KILL_EXIT_DURATION seconds to ensure we get a
@@ -217,8 +187,8 @@ static void iwl_perform_ct_kill_task(struct iwl_priv *priv,
 
 static void iwl_tt_ready_for_ct_kill(struct timer_list *t)
 {
-	struct iwl_priv *priv = from_timer(priv, t,
-					   thermal_throttle.ct_kill_waiting_tm);
+	struct iwl_priv *priv = timer_container_of(priv, t,
+						   thermal_throttle.ct_kill_waiting_tm);
 	struct iwl_tt_mgmt *tt = &priv->thermal_throttle;
 
 	if (test_bit(STATUS_EXIT_PENDING, &priv->status))
@@ -287,7 +257,7 @@ static void iwl_legacy_tt_handler(struct iwl_priv *priv, s32 temp, bool force)
 	tt->tt_previous_temp = temp;
 #endif
 	/* stop ct_kill_waiting_tm timer */
-	del_timer_sync(&priv->thermal_throttle.ct_kill_waiting_tm);
+	timer_delete_sync(&priv->thermal_throttle.ct_kill_waiting_tm);
 	if (tt->state != old_state) {
 		switch (tt->state) {
 		case IWL_TI_0:
@@ -329,9 +299,9 @@ static void iwl_legacy_tt_handler(struct iwl_priv *priv, s32 temp, bool force)
 					iwl_prepare_ct_kill_task(priv);
 					tt->state = old_state;
 				}
-			} else if (old_state == IWL_TI_CT_KILL &&
-				 tt->state != IWL_TI_CT_KILL)
+			} else if (old_state == IWL_TI_CT_KILL) {
 				iwl_perform_ct_kill_task(priv, false);
+			}
 			IWL_DEBUG_TEMP(priv, "Temperature state changed %u\n",
 					tt->state);
 			IWL_DEBUG_TEMP(priv, "Power Index change to %u\n",
@@ -408,7 +378,7 @@ static void iwl_advance_tt_handler(struct iwl_priv *priv, s32 temp, bool force)
 		}
 	}
 	/* stop ct_kill_waiting_tm timer */
-	del_timer_sync(&priv->thermal_throttle.ct_kill_waiting_tm);
+	timer_delete_sync(&priv->thermal_throttle.ct_kill_waiting_tm);
 	if (changed) {
 		if (tt->state >= IWL_TI_1) {
 			/* force PI = IWL_POWER_INDEX_5 in the case of TI > 0 */
@@ -536,7 +506,7 @@ static void iwl_bg_ct_exit(struct work_struct *work)
 		return;
 
 	/* stop ct_kill_exit_tm timer */
-	del_timer_sync(&priv->thermal_throttle.ct_kill_exit_tm);
+	timer_delete_sync(&priv->thermal_throttle.ct_kill_exit_tm);
 
 	if (tt->state == IWL_TI_CT_KILL) {
 		IWL_ERR(priv,
@@ -625,13 +595,10 @@ void iwl_tt_initialize(struct iwl_priv *priv)
 
 	if (priv->lib->adv_thermal_throttle) {
 		IWL_DEBUG_TEMP(priv, "Advanced Thermal Throttling\n");
-		tt->restriction = kcalloc(IWL_TI_STATE_MAX,
-					  sizeof(struct iwl_tt_restriction),
-					  GFP_KERNEL);
-		tt->transaction = kcalloc(IWL_TI_STATE_MAX *
-					  (IWL_TI_STATE_MAX - 1),
-					  sizeof(struct iwl_tt_trans),
-					  GFP_KERNEL);
+		tt->restriction = kzalloc_objs(struct iwl_tt_restriction,
+					       IWL_TI_STATE_MAX);
+		tt->transaction = kzalloc_objs(struct iwl_tt_trans,
+					       IWL_TI_STATE_MAX * (IWL_TI_STATE_MAX - 1));
 		if (!tt->restriction || !tt->transaction) {
 			IWL_ERR(priv, "Fallback to Legacy Throttling\n");
 			priv->thermal_throttle.advanced_tt = false;
@@ -670,9 +637,9 @@ void iwl_tt_exit(struct iwl_priv *priv)
 	struct iwl_tt_mgmt *tt = &priv->thermal_throttle;
 
 	/* stop ct_kill_exit_tm timer if activated */
-	del_timer_sync(&priv->thermal_throttle.ct_kill_exit_tm);
+	timer_delete_sync(&priv->thermal_throttle.ct_kill_exit_tm);
 	/* stop ct_kill_waiting_tm timer if activated */
-	del_timer_sync(&priv->thermal_throttle.ct_kill_waiting_tm);
+	timer_delete_sync(&priv->thermal_throttle.ct_kill_waiting_tm);
 	cancel_work_sync(&priv->tt_work);
 	cancel_work_sync(&priv->ct_enter);
 	cancel_work_sync(&priv->ct_exit);

@@ -1,20 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * sata_sil24.c - Driver for Silicon Image 3124/3132 SATA-2 controllers
  *
  * Copyright 2005  Tejun Heo
  *
  * Based on preview driver from Silicon Image.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
  */
 
 #include <linux/kernel.h>
@@ -336,9 +326,9 @@ static void sil24_dev_config(struct ata_device *dev);
 static int sil24_scr_read(struct ata_link *link, unsigned sc_reg, u32 *val);
 static int sil24_scr_write(struct ata_link *link, unsigned sc_reg, u32 val);
 static int sil24_qc_defer(struct ata_queued_cmd *qc);
-static void sil24_qc_prep(struct ata_queued_cmd *qc);
+static enum ata_completion_errors sil24_qc_prep(struct ata_queued_cmd *qc);
 static unsigned int sil24_qc_issue(struct ata_queued_cmd *qc);
-static bool sil24_qc_fill_rtf(struct ata_queued_cmd *qc);
+static void sil24_qc_fill_rtf(struct ata_queued_cmd *qc);
 static void sil24_pmp_attach(struct ata_port *ap);
 static void sil24_pmp_detach(struct ata_port *ap);
 static void sil24_freeze(struct ata_port *ap);
@@ -361,14 +351,13 @@ static int sil24_port_resume(struct ata_port *ap);
 #endif
 
 static const struct pci_device_id sil24_pci_tbl[] = {
-	{ PCI_VDEVICE(CMD, 0x3124), BID_SIL3124 },
-	{ PCI_VDEVICE(INTEL, 0x3124), BID_SIL3124 },
-	{ PCI_VDEVICE(CMD, 0x3132), BID_SIL3132 },
-	{ PCI_VDEVICE(CMD, 0x0242), BID_SIL3132 },
-	{ PCI_VDEVICE(CMD, 0x0244), BID_SIL3132 },
-	{ PCI_VDEVICE(CMD, 0x3131), BID_SIL3131 },
-	{ PCI_VDEVICE(CMD, 0x3531), BID_SIL3131 },
-
+	{ PCI_VDEVICE(CMD, 0x3124), .driver_data = BID_SIL3124 },
+	{ PCI_VDEVICE(INTEL, 0x3124), .driver_data = BID_SIL3124 },
+	{ PCI_VDEVICE(CMD, 0x3132), .driver_data = BID_SIL3132 },
+	{ PCI_VDEVICE(CMD, 0x0242), .driver_data = BID_SIL3132 },
+	{ PCI_VDEVICE(CMD, 0x0244), .driver_data = BID_SIL3132 },
+	{ PCI_VDEVICE(CMD, 0x3131), .driver_data = BID_SIL3131 },
+	{ PCI_VDEVICE(CMD, 0x3531), .driver_data = BID_SIL3131 },
 	{ } /* terminate list */
 };
 
@@ -383,12 +372,14 @@ static struct pci_driver sil24_pci_driver = {
 #endif
 };
 
-static struct scsi_host_template sil24_sht = {
-	ATA_NCQ_SHT(DRV_NAME),
+static const struct scsi_host_template sil24_sht = {
+	__ATA_BASE_SHT(DRV_NAME),
 	.can_queue		= SIL24_MAX_CMDS,
 	.sg_tablesize		= SIL24_MAX_SGE,
 	.dma_boundary		= ATA_DMA_BOUNDARY,
-	.tag_alloc_policy	= BLK_TAG_ALLOC_FIFO,
+	.sdev_groups		= ata_ncq_sdev_groups,
+	.change_queue_depth	= ata_scsi_change_queue_depth,
+	.sdev_configure		= ata_scsi_sdev_configure
 };
 
 static struct ata_port_operations sil24_ops = {
@@ -401,10 +392,10 @@ static struct ata_port_operations sil24_ops = {
 
 	.freeze			= sil24_freeze,
 	.thaw			= sil24_thaw,
-	.softreset		= sil24_softreset,
-	.hardreset		= sil24_hardreset,
-	.pmp_softreset		= sil24_softreset,
-	.pmp_hardreset		= sil24_pmp_hardreset,
+	.reset.softreset	= sil24_softreset,
+	.reset.hardreset	= sil24_hardreset,
+	.pmp_reset.softreset	= sil24_softreset,
+	.pmp_reset.hardreset	= sil24_pmp_hardreset,
 	.error_handler		= sil24_error_handler,
 	.post_internal_cmd	= sil24_post_internal_cmd,
 	.dev_config		= sil24_dev_config,
@@ -604,7 +595,7 @@ static int sil24_init_port(struct ata_port *ap)
 static int sil24_exec_polled_cmd(struct ata_port *ap, int pmp,
 				 const struct ata_taskfile *tf,
 				 int is_cmd, u32 ctrl,
-				 unsigned long timeout_msec)
+				 unsigned int timeout_msec)
 {
 	void __iomem *port = sil24_port_base(ap);
 	struct sil24_port_priv *pp = ap->private_data;
@@ -658,12 +649,10 @@ static int sil24_softreset(struct ata_link *link, unsigned int *class,
 {
 	struct ata_port *ap = link->ap;
 	int pmp = sata_srst_pmp(link);
-	unsigned long timeout_msec = 0;
+	unsigned int timeout_msec = 0;
 	struct ata_taskfile tf;
 	const char *reason;
 	int rc;
-
-	DPRINTK("ENTER\n");
 
 	/* put the port into known state */
 	if (sil24_init_port(ap)) {
@@ -687,9 +676,8 @@ static int sil24_softreset(struct ata_link *link, unsigned int *class,
 	}
 
 	sil24_read_tf(ap, 0, &tf);
-	*class = ata_dev_classify(&tf);
+	*class = ata_port_classify(ap, &tf);
 
-	DPRINTK("EXIT, class=%u\n", *class);
 	return 0;
 
  err:
@@ -800,6 +788,7 @@ static int sil24_qc_defer(struct ata_queued_cmd *qc)
 	struct ata_link *link = qc->dev->link;
 	struct ata_port *ap = link->ap;
 	u8 prot = qc->tf.protocol;
+	int ret;
 
 	/*
 	 * There is a bug in the chip:
@@ -837,10 +826,13 @@ static int sil24_qc_defer(struct ata_queued_cmd *qc)
 		qc->flags |= ATA_QCFLAG_CLEAR_EXCL;
 	}
 
-	return ata_std_qc_defer(qc);
+	ret = ata_std_qc_defer(qc);
+	if (ret == ATA_DEFER_LINK)
+		return ATA_DEFER_LINK_EXCL;
+	return ret;
 }
 
-static void sil24_qc_prep(struct ata_queued_cmd *qc)
+static enum ata_completion_errors sil24_qc_prep(struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
 	struct sil24_port_priv *pp = ap->private_data;
@@ -849,7 +841,7 @@ static void sil24_qc_prep(struct ata_queued_cmd *qc)
 	struct sil24_sge *sge;
 	u16 ctrl = 0;
 
-	cb = &pp->cmd_block[sil24_tag(qc->tag)];
+	cb = &pp->cmd_block[sil24_tag(qc->hw_tag)];
 
 	if (!ata_is_atapi(qc->tf.protocol)) {
 		prb = &cb->ata.prb;
@@ -884,6 +876,8 @@ static void sil24_qc_prep(struct ata_queued_cmd *qc)
 
 	if (qc->flags & ATA_QCFLAG_DMAMAP)
 		sil24_fill_sg(qc, sge);
+
+	return AC_ERR_OK;
 }
 
 static unsigned int sil24_qc_issue(struct ata_queued_cmd *qc)
@@ -891,7 +885,7 @@ static unsigned int sil24_qc_issue(struct ata_queued_cmd *qc)
 	struct ata_port *ap = qc->ap;
 	struct sil24_port_priv *pp = ap->private_data;
 	void __iomem *port = sil24_port_base(ap);
-	unsigned int tag = sil24_tag(qc->tag);
+	unsigned int tag = sil24_tag(qc->hw_tag);
 	dma_addr_t paddr;
 	void __iomem *activate;
 
@@ -909,10 +903,9 @@ static unsigned int sil24_qc_issue(struct ata_queued_cmd *qc)
 	return 0;
 }
 
-static bool sil24_qc_fill_rtf(struct ata_queued_cmd *qc)
+static void sil24_qc_fill_rtf(struct ata_queued_cmd *qc)
 {
-	sil24_read_tf(qc->ap, qc->tag, &qc->result_tf);
-	return true;
+	sil24_read_tf(qc->ap, qc->hw_tag, &qc->result_tf);
 }
 
 static void sil24_pmp_attach(struct ata_port *ap)
@@ -1177,6 +1170,7 @@ static irqreturn_t sil24_interrupt(int irq, void *dev_instance)
 }
 
 static void sil24_error_handler(struct ata_port *ap)
+	__must_hold(&ap->host->eh_mutex)
 {
 	struct sil24_port_priv *pp = ap->private_data;
 
@@ -1193,7 +1187,7 @@ static void sil24_post_internal_cmd(struct ata_queued_cmd *qc)
 	struct ata_port *ap = qc->ap;
 
 	/* make DMA engine forget about the failed command */
-	if ((qc->flags & ATA_QCFLAG_FAILED) && sil24_init_port(ap))
+	if ((qc->flags & ATA_QCFLAG_EH) && sil24_init_port(ap))
 		ata_eh_freeze_port(ap);
 }
 
@@ -1212,7 +1206,6 @@ static int sil24_port_start(struct ata_port *ap)
 	cb = dmam_alloc_coherent(dev, cb_size, &cb_dma, GFP_KERNEL);
 	if (!cb)
 		return -ENOMEM;
-	memset(cb, 0, cb_size);
 
 	pp->cmd_block = cb;
 	pp->cmd_block_dma = cb_dma;
@@ -1312,28 +1305,10 @@ static int sil24_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	host->iomap = iomap;
 
 	/* configure and activate the device */
-	if (!dma_set_mask(&pdev->dev, DMA_BIT_MASK(64))) {
-		rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(64));
-		if (rc) {
-			rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
-			if (rc) {
-				dev_err(&pdev->dev,
-					"64-bit DMA enable failed\n");
-				return rc;
-			}
-		}
-	} else {
-		rc = dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
-		if (rc) {
-			dev_err(&pdev->dev, "32-bit DMA enable failed\n");
-			return rc;
-		}
-		rc = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
-		if (rc) {
-			dev_err(&pdev->dev,
-				"32-bit consistent DMA enable failed\n");
-			return rc;
-		}
+	rc = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	if (rc) {
+		dev_err(&pdev->dev, "DMA enable failed\n");
+		return rc;
 	}
 
 	/* Set max read request size to 4096.  This slightly increases
@@ -1345,7 +1320,7 @@ static int sil24_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	if (sata_sil24_msi && !pci_enable_msi(pdev)) {
 		dev_info(&pdev->dev, "Using MSI\n");
-		pci_intx(pdev, 0);
+		pcim_intx(pdev, 0);
 	}
 
 	pci_set_master(pdev);

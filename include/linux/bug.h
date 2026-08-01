@@ -36,9 +36,13 @@ static inline int is_warning_bug(const struct bug_entry *bug)
 	return bug->flags & BUGFLAG_WARNING;
 }
 
+void bug_get_file_line(struct bug_entry *bug, const char **file,
+		       unsigned int *line);
+
 struct bug_entry *find_bug(unsigned long bugaddr);
 
 enum bug_trap_type report_bug(unsigned long bug_addr, struct pt_regs *regs);
+enum bug_trap_type report_bug_entry(struct bug_entry *bug, struct pt_regs *regs);
 
 /* These are defined by the architecture */
 int is_valid_bugaddr(unsigned long addr);
@@ -47,26 +51,53 @@ void generic_bug_clear_once(void);
 
 #else	/* !CONFIG_GENERIC_BUG */
 
+static inline void *find_bug(unsigned long bugaddr)
+{
+	return NULL;
+}
+
 static inline enum bug_trap_type report_bug(unsigned long bug_addr,
 					    struct pt_regs *regs)
 {
 	return BUG_TRAP_TYPE_BUG;
 }
 
+struct bug_entry;
+
+static inline enum bug_trap_type
+report_bug_entry(struct bug_entry *bug, struct pt_regs *regs)
+{
+	return BUG_TRAP_TYPE_BUG;
+}
+
+static inline void bug_get_file_line(struct bug_entry *bug, const char **file,
+				     unsigned int *line)
+{
+	*file = NULL;
+	*line = 0;
+}
 
 static inline void generic_bug_clear_once(void) {}
 
 #endif	/* CONFIG_GENERIC_BUG */
+
+#ifdef CONFIG_PRINTK
+void mem_dump_obj(void *object);
+#else
+static inline void mem_dump_obj(void *object) {}
+#endif
 
 /*
  * Since detected data corruption should stop operation on the affected
  * structures. Return value must be checked and sanely acted on by caller.
  */
 static inline __must_check bool check_data_corruption(bool v) { return v; }
-#define CHECK_DATA_CORRUPTION(condition, fmt, ...)			 \
+#define CHECK_DATA_CORRUPTION(condition, addr, fmt, ...)		 \
 	check_data_corruption(({					 \
 		bool corruption = unlikely(condition);			 \
 		if (corruption) {					 \
+			if (addr)					 \
+				mem_dump_obj(addr);			 \
 			if (IS_ENABLED(CONFIG_BUG_ON_DATA_CORRUPTION)) { \
 				pr_err(fmt, ##__VA_ARGS__);		 \
 				BUG();					 \

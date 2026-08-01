@@ -1,22 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /******************************************************************************
 
   Copyright(c) 2003 - 2006 Intel Corporation. All rights reserved.
 
-  This program is free software; you can redistribute it and/or modify it
-  under the terms of version 2 of the GNU General Public License as
-  published by the Free Software Foundation.
-
-  This program is distributed in the hope that it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, write to the Free Software Foundation, Inc., 59
-  Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-
-  The full GNU General Public License is included in this distribution in the
-  file called LICENSE.
 
   Contact Information:
   Intel Linux Wireless <ilw@linux.intel.com>
@@ -45,8 +31,6 @@
 #include <linux/wireless.h>
 #include <linux/jiffies.h>
 #include <asm/io.h>
-
-#include <net/lib80211.h>
 #include <net/ieee80211_radiotap.h>
 
 #define DRV_NAME	"ipw2200"
@@ -462,7 +446,7 @@ struct tfd_command {
 	u8 index;
 	u8 length;
 	__le16 reserved;
-	u8 payload[0];
+	u8 payload[];
 } __packed;
 
 struct tfd_data {
@@ -665,7 +649,7 @@ struct ipw_rx_notification {
 		struct notif_link_deterioration link_deterioration;
 		struct notif_calibration calibration;
 		struct notif_noise noise;
-		u8 raw[0];
+		DECLARE_FLEX_ARRAY(u8, raw);
 	} u;
 } __packed;
 
@@ -689,7 +673,7 @@ struct ipw_rx_frame {
 	// is identical)
 	u8 rtscts_seen;		// 0x1 RTS seen ; 0x2 CTS seen
 	__le16 length;
-	u8 data[0];
+	u8 data[];
 } __packed;
 
 struct ipw_rx_header {
@@ -1016,7 +1000,7 @@ struct ipw_cmd {	 /* XXX */
    * Incoming parameters listed 1-st, followed by outcoming params.
    * nParams=(len+3)/4+status_len
    */
-	u32 param[0];
+	u32 param[];
 } __packed;
 
 #define STATUS_HCMD_ACTIVE      (1<<0)	/**< host command in progress */
@@ -1120,9 +1104,8 @@ struct ipw_fw_error {	 /* XXX */
 	u32 config;
 	u32 elem_len;
 	u32 log_len;
-	struct ipw_error_elem *elem;
 	struct ipw_event *log;
-	u8 payload[0];
+	struct ipw_error_elem elem[];
 } __packed;
 
 #ifdef CONFIG_IPW2200_PROMISCUOUS
@@ -1158,7 +1141,7 @@ struct ipw_prom_priv {
  * structure is provided regardless of any bits unset.
  */
 struct ipw_rt_hdr {
-	struct ieee80211_radiotap_header rt_hdr;
+	struct ieee80211_radiotap_header_fixed rt_hdr;
 	u64 rt_tsf;      /* TSF */	/* XXX */
 	u8 rt_flags;	/* radiotap packet flags */
 	u8 rt_rate;	/* rate in 500kb/s */
@@ -1167,7 +1150,7 @@ struct ipw_rt_hdr {
 	s8 rt_dbmsignal;	/* signal in dbM, kluged to signed */
 	s8 rt_dbmnoise;
 	u8 rt_antenna;	/* antenna number */
-	u8 payload[0];  /* payload... */
+	u8 payload[];  /* payload... */
 } __packed;
 #endif
 
@@ -1291,8 +1274,6 @@ struct ipw_priv {
 
 	struct iw_statistics wstats;
 
-	struct iw_public_data wireless_data;
-
 	int user_requested_scan;
 	u8 direct_scan_ssid[IW_ESSID_MAX_SIZE];
 	u8 direct_scan_ssid_len;
@@ -1343,9 +1324,9 @@ struct ipw_priv {
 
 	s8 tx_power;
 
-	/* Track time in suspend */
-	unsigned long suspend_at;
-	unsigned long suspend_time;
+	/* Track time in suspend using CLOCK_BOOTTIME */
+	time64_t suspend_at;
+	time64_t suspend_time;
 
 #ifdef CONFIG_PM
 	u32 pm_state[16];
@@ -1396,14 +1377,12 @@ BIT_ARG16(x)
 
 #define IPW_DEBUG(level, fmt, args...) \
 do { if (ipw_debug_level & (level)) \
-  printk(KERN_DEBUG DRV_NAME": %c %s " fmt, \
-         in_interrupt() ? 'I' : 'U', __func__ , ## args); } while (0)
+  printk(KERN_DEBUG DRV_NAME": %s " fmt, __func__ , ## args); } while (0)
 
 #ifdef CONFIG_IPW2200_DEBUG
 #define IPW_LL_DEBUG(level, fmt, args...) \
 do { if (ipw_debug_level & (level)) \
-  printk(KERN_DEBUG DRV_NAME": %c %s " fmt, \
-         in_interrupt() ? 'I' : 'U', __func__ , ## args); } while (0)
+  printk(KERN_DEBUG DRV_NAME": %s " fmt, __func__ , ## args); } while (0)
 #else
 #define IPW_LL_DEBUG(level, fmt, args...) do {} while (0)
 #endif				/* CONFIG_IPW2200_DEBUG */
@@ -1961,7 +1940,7 @@ struct host_cmd {
 	u8 cmd;
 	u8 len;
 	u16 reserved;
-	u32 *param;
+	const u32 *param;
 } __packed;	/* XXX */
 
 struct cmdlog_host_cmd {

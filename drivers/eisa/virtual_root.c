@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Virtual EISA root driver.
  * Acts as a placeholder if we don't have a proper EISA bridge.
  *
  * (C) 2003 Marc Zyngier <maz@wild-wind.fr.eu.org>
- *
- * This code is released under the GPL version 2.
  */
 
 #include <linux/kernel.h>
@@ -14,7 +13,7 @@
 #include <linux/moduleparam.h>
 #include <linux/init.h>
 
-#if defined(CONFIG_ALPHA_JENSEN) || defined(CONFIG_EISA_VLB_PRIMING)
+#if defined(CONFIG_EISA_VLB_PRIMING)
 #define EISA_FORCE_PROBE_DEFAULT 1
 #else
 #define EISA_FORCE_PROBE_DEFAULT 0

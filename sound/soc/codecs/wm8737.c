@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * wm8737.c  --  WM8737 ALSA SoC Audio driver
  *
  * Copyright 2010 Wolfson Microelectronics plc
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -20,7 +17,6 @@
 #include <linux/regulator/consumer.h>
 #include <linux/spi/spi.h>
 #include <linux/slab.h>
-#include <linux/of_device.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -170,7 +166,7 @@ SOC_DOUBLE("Polarity Invert Switch", WM8737_ADC_CONTROL, 5, 6, 1, 0),
 SOC_SINGLE("3D Switch", WM8737_3D_ENHANCE, 0, 1, 0),
 SOC_SINGLE("3D Depth", WM8737_3D_ENHANCE, 1, 15, 0),
 SOC_ENUM("3D Low Cut-off", low_3d),
-SOC_ENUM("3D High Cut-off", low_3d),
+SOC_ENUM("3D High Cut-off", high_3d),
 SOC_SINGLE_TLV("3D ADC Volume", WM8737_3D_ENHANCE, 7, 1, 1, adc_tlv),
 
 SOC_SINGLE("Noise Gate Switch", WM8737_NOISE_GATE, 0, 1, 0),
@@ -407,10 +403,10 @@ static int wm8737_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	u16 af = 0;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		af |= WM8737_MS;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
 	default:
 		return -EINVAL;
@@ -455,6 +451,7 @@ static int wm8737_set_bias_level(struct snd_soc_component *component,
 				 enum snd_soc_bias_level level)
 {
 	struct wm8737_priv *wm8737 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	int ret;
 
 	switch (level) {
@@ -468,7 +465,7 @@ static int wm8737_set_bias_level(struct snd_soc_component *component,
 		break;
 
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF) {
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_OFF) {
 			ret = regulator_bulk_enable(ARRAY_SIZE(wm8737->supplies),
 						    wm8737->supplies);
 			if (ret != 0) {
@@ -540,6 +537,7 @@ static struct snd_soc_dai_driver wm8737_dai = {
 static int wm8737_probe(struct snd_soc_component *component)
 {
 	struct wm8737_priv *wm8737 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	int ret;
 
 	ret = regulator_bulk_enable(ARRAY_SIZE(wm8737->supplies),
@@ -560,7 +558,7 @@ static int wm8737_probe(struct snd_soc_component *component)
 	snd_soc_component_update_bits(component, WM8737_RIGHT_PGA_VOLUME, WM8737_RVU,
 			    WM8737_RVU);
 
-	snd_soc_component_force_bias_level(component, SND_SOC_BIAS_STANDBY);
+	snd_soc_dapm_force_bias_level(dapm, SND_SOC_BIAS_STANDBY);
 
 	/* Bias level configuration will have done an extra enable */
 	regulator_bulk_disable(ARRAY_SIZE(wm8737->supplies), wm8737->supplies);
@@ -586,7 +584,6 @@ static const struct snd_soc_component_driver soc_component_dev_wm8737 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct of_device_id wm8737_of_match[] = {
@@ -603,14 +600,13 @@ static const struct regmap_config wm8737_regmap = {
 
 	.reg_defaults = wm8737_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(wm8737_reg_defaults),
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 
 	.volatile_reg = wm8737_volatile,
 };
 
 #if IS_ENABLED(CONFIG_I2C)
-static int wm8737_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+static int wm8737_i2c_probe(struct i2c_client *i2c)
 {
 	struct wm8737_priv *wm8737;
 	int ret, i;
@@ -644,7 +640,7 @@ static int wm8737_i2c_probe(struct i2c_client *i2c,
 }
 
 static const struct i2c_device_id wm8737_i2c_id[] = {
-	{ "wm8737", 0 },
+	{ .name = "wm8737" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, wm8737_i2c_id);
@@ -654,7 +650,7 @@ static struct i2c_driver wm8737_i2c_driver = {
 		.name = "wm8737",
 		.of_match_table = wm8737_of_match,
 	},
-	.probe =    wm8737_i2c_probe,
+	.probe = wm8737_i2c_probe,
 	.id_table = wm8737_i2c_id,
 };
 #endif

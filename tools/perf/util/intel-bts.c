@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * intel-bts.c: Intel Processor Trace support
  * Copyright (c) 2013-2015, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
 #include <endian.h>
@@ -21,14 +12,15 @@
 #include <linux/types.h>
 #include <linux/bitops.h>
 #include <linux/log2.h>
+#include <linux/zalloc.h>
 
-#include "cpumap.h"
 #include "color.h"
 #include "evsel.h"
 #include "evlist.h"
 #include "machine.h"
+#include "symbol.h"
 #include "session.h"
-#include "util.h"
+#include "tool.h"
 #include "thread.h"
 #include "thread-stack.h"
 #include "debug.h"
@@ -36,13 +28,14 @@
 #include "auxtrace.h"
 #include "intel-pt-decoder/intel-pt-insn-decoder.h"
 #include "intel-bts.h"
+#include "util/synthetic-events.h"
 
 #define MAX_TIMESTAMP (~0ULL)
 
 #define INTEL_BTS_ERR_NOINSN  5
 #define INTEL_BTS_ERR_LOST    9
 
-#if __BYTE_ORDER == __BIG_ENDIAN
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #define le64_to_cpu bswap_64
 #else
 #define le64_to_cpu
@@ -107,7 +100,7 @@ static void intel_bts_dump(struct intel_bts *bts __maybe_unused,
 		else
 			sz = len;
 		printf(".");
-		color_fprintf(stdout, color, "  %08x: ", pos);
+		color_fprintf(stdout, color, "  %08zx: ", pos);
 		for (i = 0; i < sz; i++)
 			color_fprintf(stdout, color, " %02x", buf[i]);
 		for (; i < br_sz; i++)
@@ -142,7 +135,7 @@ static int intel_bts_lost(struct intel_bts *bts, struct perf_sample *sample)
 
 	auxtrace_synth_error(&event.auxtrace_error, PERF_AUXTRACE_ERROR_ITRACE,
 			     INTEL_BTS_ERR_LOST, sample->cpu, sample->pid,
-			     sample->tid, 0, "Lost trace data");
+			     sample->tid, 0, "Lost trace data", sample->time);
 
 	err = perf_session__deliver_synth_event(bts->session, &event, NULL);
 	if (err)
@@ -269,24 +262,28 @@ static int intel_bts_do_fix_overlap(struct auxtrace_queue *queue,
 	return 0;
 }
 
+static inline u8 intel_bts_cpumode(struct intel_bts *bts, uint64_t ip)
+{
+	return machine__kernel_ip(bts->machine, ip) ?
+	       PERF_RECORD_MISC_KERNEL :
+	       PERF_RECORD_MISC_USER;
+}
+
 static int intel_bts_synth_branch_sample(struct intel_bts_queue *btsq,
 					 struct branch *branch)
 {
 	int ret;
 	struct intel_bts *bts = btsq->bts;
 	union perf_event event;
-	struct perf_sample sample = { .ip = 0, };
+	struct perf_sample sample;
 
 	if (bts->synth_opts.initial_skip &&
 	    bts->num_events++ <= bts->synth_opts.initial_skip)
 		return 0;
 
-	event.sample.header.type = PERF_RECORD_SAMPLE;
-	event.sample.header.misc = PERF_RECORD_MISC_USER;
-	event.sample.header.size = sizeof(struct perf_event_header);
-
-	sample.cpumode = PERF_RECORD_MISC_USER;
+	perf_sample__init(&sample, /*all=*/true);
 	sample.ip = le64_to_cpu(branch->from);
+	sample.cpumode = intel_bts_cpumode(bts, sample.ip);
 	sample.pid = btsq->pid;
 	sample.tid = btsq->tid;
 	sample.addr = le64_to_cpu(branch->to);
@@ -298,11 +295,16 @@ static int intel_bts_synth_branch_sample(struct intel_bts_queue *btsq,
 	sample.insn_len = btsq->intel_pt_insn.length;
 	memcpy(sample.insn, btsq->intel_pt_insn.buf, INTEL_PT_INSN_BUF_SZ);
 
+	event.sample.header.type = PERF_RECORD_SAMPLE;
+	event.sample.header.misc = sample.cpumode;
+	event.sample.header.size = sizeof(struct perf_event_header);
+
 	if (bts->synth_opts.inject) {
 		event.sample.header.size = bts->branches_event_size;
 		ret = perf_event__synthesize_sample(&event,
 						    bts->branches_sample_type,
-						    0, &sample);
+						    /*read_format=*/0, /*branch_sample_type=*/0,
+						    &sample);
 		if (ret)
 			return ret;
 	}
@@ -312,6 +314,7 @@ static int intel_bts_synth_branch_sample(struct intel_bts_queue *btsq,
 		pr_err("Intel BTS: failed to deliver branch event, error %d\n",
 		       ret);
 
+	perf_sample__exit(&sample);
 	return ret;
 }
 
@@ -319,35 +322,18 @@ static int intel_bts_get_next_insn(struct intel_bts_queue *btsq, u64 ip)
 {
 	struct machine *machine = btsq->bts->machine;
 	struct thread *thread;
-	struct addr_location al;
 	unsigned char buf[INTEL_PT_INSN_BUF_SZ];
 	ssize_t len;
-	int x86_64;
-	uint8_t cpumode;
+	bool x86_64;
 	int err = -1;
-
-	if (machine__kernel_ip(machine, ip))
-		cpumode = PERF_RECORD_MISC_KERNEL;
-	else
-		cpumode = PERF_RECORD_MISC_USER;
 
 	thread = machine__find_thread(machine, -1, btsq->tid);
 	if (!thread)
 		return -1;
 
-	thread__find_addr_map(thread, cpumode, MAP__FUNCTION, ip, &al);
-	if (!al.map || !al.map->dso)
-		goto out_put;
-
-	len = dso__data_read_addr(al.map->dso, al.map, machine, ip, buf,
-				  INTEL_PT_INSN_BUF_SZ);
+	len = thread__memcpy(thread, machine, buf, ip, INTEL_PT_INSN_BUF_SZ, &x86_64);
 	if (len <= 0)
 		goto out_put;
-
-	/* Load maps to ensure dso->is_64_bit has been updated */
-	map__load(al.map);
-
-	x86_64 = al.map->dso->is_64_bit;
 
 	if (intel_pt_get_insn(buf, len, x86_64, &btsq->intel_pt_insn))
 		goto out_put;
@@ -366,7 +352,7 @@ static int intel_bts_synth_error(struct intel_bts *bts, int cpu, pid_t pid,
 
 	auxtrace_synth_error(&event.auxtrace_error, PERF_AUXTRACE_ERROR_ITRACE,
 			     INTEL_BTS_ERR_NOINSN, cpu, pid, tid, ip,
-			     "Failed to get instruction");
+			     "Failed to get instruction", 0);
 
 	err = perf_session__deliver_synth_event(bts->session, &event, NULL);
 	if (err)
@@ -445,11 +431,11 @@ static int intel_bts_process_buffer(struct intel_bts_queue *btsq,
 			continue;
 		intel_bts_get_branch_type(btsq, branch);
 		if (btsq->bts->synth_opts.thread_stack)
-			thread_stack__event(thread, btsq->sample_flags,
+			thread_stack__event(thread, btsq->cpu, btsq->sample_flags,
 					    le64_to_cpu(branch->from),
 					    le64_to_cpu(branch->to),
 					    btsq->intel_pt_insn.length,
-					    buffer->buffer_nr + 1);
+					    buffer->buffer_nr + 1, true, 0, 0);
 		if (filter && !(filter & btsq->sample_flags))
 			continue;
 		err = intel_bts_synth_branch_sample(btsq, branch);
@@ -473,7 +459,7 @@ static int intel_bts_process_queue(struct intel_bts_queue *btsq, u64 *timestamp)
 		thread = machine__find_thread(btsq->bts->machine, -1,
 					      btsq->tid);
 		if (thread)
-			btsq->pid = thread->pid_;
+			btsq->pid = thread__pid(thread);
 	} else {
 		thread = machine__findnew_thread(btsq->bts->machine, btsq->pid,
 						 btsq->tid);
@@ -517,7 +503,7 @@ static int intel_bts_process_queue(struct intel_bts_queue *btsq, u64 *timestamp)
 	    !btsq->bts->synth_opts.thread_stack && thread &&
 	    (!old_buffer || btsq->bts->sampling_mode ||
 	     (btsq->bts->snapshot_mode && !buffer->consecutive)))
-		thread_stack__set_trace_nr(thread, buffer->buffer_nr + 1);
+		thread_stack__set_trace_nr(thread, btsq->cpu, buffer->buffer_nr + 1);
 
 	err = intel_bts_process_buffer(btsq, buffer, thread);
 
@@ -608,7 +594,7 @@ static int intel_bts_process_queues(struct intel_bts *bts, u64 timestamp)
 static int intel_bts_process_event(struct perf_session *session,
 				   union perf_event *event,
 				   struct perf_sample *sample,
-				   struct perf_tool *tool)
+				   const struct perf_tool *tool)
 {
 	struct intel_bts *bts = container_of(session->auxtrace, struct intel_bts,
 					     auxtrace);
@@ -651,7 +637,7 @@ static int intel_bts_process_event(struct perf_session *session,
 
 static int intel_bts_process_auxtrace_event(struct perf_session *session,
 					    union perf_event *event,
-					    struct perf_tool *tool __maybe_unused)
+					    const struct perf_tool *tool __maybe_unused)
 {
 	struct intel_bts *bts = container_of(session->auxtrace, struct intel_bts,
 					     auxtrace);
@@ -692,7 +678,7 @@ static int intel_bts_process_auxtrace_event(struct perf_session *session,
 }
 
 static int intel_bts_flush(struct perf_session *session,
-			   struct perf_tool *tool __maybe_unused)
+			   const struct perf_tool *tool __maybe_unused)
 {
 	struct intel_bts *bts = container_of(session->auxtrace, struct intel_bts,
 					     auxtrace);
@@ -745,47 +731,27 @@ static void intel_bts_free(struct perf_session *session)
 	free(bts);
 }
 
-struct intel_bts_synth {
-	struct perf_tool dummy_tool;
-	struct perf_session *session;
-};
-
-static int intel_bts_event_synth(struct perf_tool *tool,
-				 union perf_event *event,
-				 struct perf_sample *sample __maybe_unused,
-				 struct machine *machine __maybe_unused)
+static bool intel_bts_evsel_is_auxtrace(struct perf_session *session,
+					struct evsel *evsel)
 {
-	struct intel_bts_synth *intel_bts_synth =
-			container_of(tool, struct intel_bts_synth, dummy_tool);
+	struct intel_bts *bts = container_of(session->auxtrace, struct intel_bts,
+					     auxtrace);
 
-	return perf_session__deliver_synth_event(intel_bts_synth->session,
-						 event, NULL);
-}
-
-static int intel_bts_synth_event(struct perf_session *session,
-				 struct perf_event_attr *attr, u64 id)
-{
-	struct intel_bts_synth intel_bts_synth;
-
-	memset(&intel_bts_synth, 0, sizeof(struct intel_bts_synth));
-	intel_bts_synth.session = session;
-
-	return perf_event__synthesize_attr(&intel_bts_synth.dummy_tool, attr, 1,
-					   &id, intel_bts_event_synth);
+	return evsel->core.attr.type == bts->pmu_type;
 }
 
 static int intel_bts_synth_events(struct intel_bts *bts,
 				  struct perf_session *session)
 {
-	struct perf_evlist *evlist = session->evlist;
-	struct perf_evsel *evsel;
+	struct evlist *evlist = session->evlist;
+	struct evsel *evsel;
 	struct perf_event_attr attr;
 	bool found = false;
 	u64 id;
 	int err;
 
 	evlist__for_each_entry(evlist, evsel) {
-		if (evsel->attr.type == bts->pmu_type && evsel->ids) {
+		if (evsel->core.attr.type == bts->pmu_type && evsel->core.ids) {
 			found = true;
 			break;
 		}
@@ -799,22 +765,20 @@ static int intel_bts_synth_events(struct intel_bts *bts,
 	memset(&attr, 0, sizeof(struct perf_event_attr));
 	attr.size = sizeof(struct perf_event_attr);
 	attr.type = PERF_TYPE_HARDWARE;
-	attr.sample_type = evsel->attr.sample_type & PERF_SAMPLE_MASK;
+	attr.sample_type = evsel->core.attr.sample_type & PERF_SAMPLE_MASK;
 	attr.sample_type |= PERF_SAMPLE_IP | PERF_SAMPLE_TID |
 			    PERF_SAMPLE_PERIOD;
 	attr.sample_type &= ~(u64)PERF_SAMPLE_TIME;
 	attr.sample_type &= ~(u64)PERF_SAMPLE_CPU;
-	attr.exclude_user = evsel->attr.exclude_user;
-	attr.exclude_kernel = evsel->attr.exclude_kernel;
-	attr.exclude_hv = evsel->attr.exclude_hv;
-	attr.exclude_host = evsel->attr.exclude_host;
-	attr.exclude_guest = evsel->attr.exclude_guest;
-	attr.sample_id_all = evsel->attr.sample_id_all;
-	attr.read_format = evsel->attr.read_format;
+	attr.exclude_user = evsel->core.attr.exclude_user;
+	attr.exclude_kernel = evsel->core.attr.exclude_kernel;
+	attr.exclude_hv = evsel->core.attr.exclude_hv;
+	attr.exclude_host = evsel->core.attr.exclude_host;
+	attr.exclude_guest = evsel->core.attr.exclude_guest;
+	attr.sample_id_all = evsel->core.attr.sample_id_all;
+	attr.read_format = evsel->core.attr.read_format;
 
-	id = evsel->id[0] + 1000000000;
-	if (!id)
-		id = 1;
+	id = auxtrace_synth_id_range_start(evsel);
 
 	if (bts->synth_opts.branches) {
 		attr.config = PERF_COUNT_HW_BRANCH_INSTRUCTIONS;
@@ -822,7 +786,7 @@ static int intel_bts_synth_events(struct intel_bts *bts,
 		attr.sample_type |= PERF_SAMPLE_ADDR;
 		pr_debug("Synthesizing 'branches' event with id %" PRIu64 " sample type %#" PRIx64 "\n",
 			 id, (u64)attr.sample_type);
-		err = intel_bts_synth_event(session, &attr, id);
+		err = perf_session__deliver_synth_attr_event(session, &attr, id);
 		if (err) {
 			pr_err("%s: failed to synthesize 'branches' event type\n",
 			       __func__);
@@ -833,10 +797,10 @@ static int intel_bts_synth_events(struct intel_bts *bts,
 		bts->branches_id = id;
 		/*
 		 * We only use sample types from PERF_SAMPLE_MASK so we can use
-		 * __perf_evsel__sample_size() here.
+		 * __evsel__sample_size() here.
 		 */
-		bts->branches_event_size = sizeof(struct sample_event) +
-				__perf_evsel__sample_size(attr.sample_type);
+		bts->branches_event_size = sizeof(struct perf_record_sample) +
+					   __evsel__sample_size(attr.sample_type);
 	}
 
 	return 0;
@@ -845,13 +809,13 @@ static int intel_bts_synth_events(struct intel_bts *bts,
 static const char * const intel_bts_info_fmts[] = {
 	[INTEL_BTS_PMU_TYPE]		= "  PMU Type           %"PRId64"\n",
 	[INTEL_BTS_TIME_SHIFT]		= "  Time Shift         %"PRIu64"\n",
-	[INTEL_BTS_TIME_MULT]		= "  Time Muliplier     %"PRIu64"\n",
+	[INTEL_BTS_TIME_MULT]		= "  Time Multiplier    %"PRIu64"\n",
 	[INTEL_BTS_TIME_ZERO]		= "  Time Zero          %"PRIu64"\n",
 	[INTEL_BTS_CAP_USER_TIME_ZERO]	= "  Cap Time Zero      %"PRId64"\n",
 	[INTEL_BTS_SNAPSHOT_MODE]	= "  Snapshot mode      %"PRId64"\n",
 };
 
-static void intel_bts_print_info(u64 *arr, int start, int finish)
+static void intel_bts_print_info(__u64 *arr, int start, int finish)
 {
 	int i;
 
@@ -865,12 +829,12 @@ static void intel_bts_print_info(u64 *arr, int start, int finish)
 int intel_bts_process_auxtrace_info(union perf_event *event,
 				    struct perf_session *session)
 {
-	struct auxtrace_info_event *auxtrace_info = &event->auxtrace_info;
+	struct perf_record_auxtrace_info *auxtrace_info = &event->auxtrace_info;
 	size_t min_sz = sizeof(u64) * INTEL_BTS_SNAPSHOT_MODE;
 	struct intel_bts *bts;
 	int err;
 
-	if (auxtrace_info->header.size < sizeof(struct auxtrace_info_event) +
+	if (auxtrace_info->header.size < sizeof(struct perf_record_auxtrace_info) +
 					min_sz)
 		return -EINVAL;
 
@@ -900,6 +864,7 @@ int intel_bts_process_auxtrace_info(union perf_event *event,
 	bts->auxtrace.flush_events = intel_bts_flush;
 	bts->auxtrace.free_events = intel_bts_free_events;
 	bts->auxtrace.free = intel_bts_free;
+	bts->auxtrace.evsel_is_auxtrace = intel_bts_evsel_is_auxtrace;
 	session->auxtrace = &bts->auxtrace;
 
 	intel_bts_print_info(&auxtrace_info->priv[0], INTEL_BTS_PMU_TYPE,
@@ -908,12 +873,12 @@ int intel_bts_process_auxtrace_info(union perf_event *event,
 	if (dump_trace)
 		return 0;
 
-	if (session->itrace_synth_opts && session->itrace_synth_opts->set) {
+	if (session->itrace_synth_opts->set) {
 		bts->synth_opts = *session->itrace_synth_opts;
 	} else {
-		itrace_synth_opts__set_default(&bts->synth_opts);
-		if (session->itrace_synth_opts)
-			bts->synth_opts.thread_stack =
+		itrace_synth_opts__set_default(&bts->synth_opts,
+				session->itrace_synth_opts->default_no_sample);
+		bts->synth_opts.thread_stack =
 				session->itrace_synth_opts->thread_stack;
 	}
 

@@ -1,19 +1,15 @@
-/*
- * Freescale imx7d pinctrl driver
- *
- * Author: Anson Huang <Anson.Huang@freescale.com>
- * Copyright (C) 2014-2015 Freescale Semiconductor, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// Freescale imx7d pinctrl driver
+//
+// Author: Anson Huang <Anson.Huang@freescale.com>
+// Copyright (C) 2014-2015 Freescale Semiconductor, Inc.
 
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
+#include <linux/platform_device.h>
 #include <linux/pinctrl/pinctrl.h>
 
 #include "pinctrl-imx.h"
@@ -390,7 +386,8 @@ static int imx7d_pinctrl_probe(struct platform_device *pdev)
 static struct platform_driver imx7d_pinctrl_driver = {
 	.driver = {
 		.name = "imx7d-pinctrl",
-		.of_match_table = of_match_ptr(imx7d_pinctrl_of_match),
+		.of_match_table = imx7d_pinctrl_of_match,
+		.suppress_bind_attrs = true,
 	},
 	.probe = imx7d_pinctrl_probe,
 };

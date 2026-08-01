@@ -24,8 +24,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#include <drm/drmP.h>
-#include <drm/drm_crtc_helper.h>
+#include <drm/drm_modeset_helper_vtables.h>
 
 #include "nouveau_drv.h"
 #include "nouveau_encoder.h"
@@ -36,7 +35,8 @@
 
 #include <subdev/bios/gpio.h>
 #include <subdev/gpio.h>
-#include <subdev/timer.h>
+
+#include <nvif/timer.h>
 
 int nv04_dac_output_offset(struct drm_encoder *encoder)
 {
@@ -237,7 +237,7 @@ uint32_t nv17_dac_sample_load(struct drm_encoder *encoder)
 	struct drm_device *dev = encoder->dev;
 	struct nouveau_drm *drm = nouveau_drm(dev);
 	struct nvif_object *device = &nouveau_drm(dev)->client.device.object;
-	struct nvkm_gpio *gpio = nvxx_gpio(&drm->client.device);
+	struct nvkm_gpio *gpio = nvxx_gpio(drm);
 	struct dcb_output *dcb = nouveau_encoder(encoder)->dcb;
 	uint32_t sample, testval, regoffset = nv04_dac_output_offset(encoder);
 	uint32_t saved_powerctrl_2 = 0, saved_powerctrl_4 = 0, saved_routput,
@@ -419,7 +419,7 @@ static void nv04_dac_commit(struct drm_encoder *encoder)
 	helper->dpms(encoder, DRM_MODE_DPMS_ON);
 
 	NV_DEBUG(drm, "Output %s is running on CRTC %d using output %c\n",
-		 nouveau_encoder_connector_get(nv_encoder)->base.name,
+		 nv04_encoder_get_connector(nv_encoder)->base.name,
 		 nv_crtc->index, '@' + ffs(nv_encoder->dcb->or));
 }
 
@@ -532,7 +532,7 @@ nv04_dac_create(struct drm_connector *connector, struct dcb_output *entry)
 	struct drm_device *dev = connector->dev;
 	struct drm_encoder *encoder;
 
-	nv_encoder = kzalloc(sizeof(*nv_encoder), GFP_KERNEL);
+	nv_encoder = kzalloc_obj(*nv_encoder);
 	if (!nv_encoder)
 		return -ENOMEM;
 
@@ -556,6 +556,6 @@ nv04_dac_create(struct drm_connector *connector, struct dcb_output *entry)
 	encoder->possible_crtcs = entry->heads;
 	encoder->possible_clones = 0;
 
-	drm_mode_connector_attach_encoder(connector, encoder);
+	drm_connector_attach_encoder(connector, encoder);
 	return 0;
 }

@@ -9,4 +9,5 @@ hfsplus-objs := super.o options.o inode.o ioctl.o extents.o catalog.o dir.o btre
 		bnode.o brec.o bfind.o tables.o unicode.o wrapper.o bitmap.o part_tbl.o \
 		attributes.o xattr.o xattr_user.o xattr_security.o xattr_trusted.o
 
-hfsplus-$(CONFIG_HFSPLUS_FS_POSIX_ACL)	+= posix_acl.o
+# KUnit tests
+obj-$(CONFIG_HFSPLUS_KUNIT_TEST) += unicode_test.o

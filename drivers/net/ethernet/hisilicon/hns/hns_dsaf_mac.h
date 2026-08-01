@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (c) 2014-2015 Hisilicon Limited.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef _HNS_DSAF_MAC_H
@@ -187,7 +183,7 @@ struct mac_statistics {
 /*mac para struct ,mac get param from nic or dsaf when initialize*/
 struct mac_params {
 	char addr[ETH_ALEN];
-	void *vaddr; /*virtual address*/
+	u8 __iomem *vaddr; /*virtual address*/
 	struct device *dev;
 	u8 mac_id;
 	/**< Ethernet operation mode (MAC-PHY interface and speed) */
@@ -352,10 +348,13 @@ struct mac_driver {
 	/*disable mac when disable nic or dsaf*/
 	void (*mac_disable)(void *mac_drv, enum mac_commom_mode mode);
 	/* config mac address*/
-	void (*set_mac_addr)(void *mac_drv,	char *mac_addr);
+	void (*set_mac_addr)(void *mac_drv,	const char *mac_addr);
 	/*adjust mac mode of port,include speed and duplex*/
 	int (*adjust_link)(void *mac_drv, enum mac_speed speed,
 			   u32 full_duplex);
+	/* need adjust link */
+	bool (*need_adjust_link)(void *mac_drv, enum mac_speed speed,
+				 int duplex);
 	/* config autoegotaite mode of port*/
 	void (*set_an_mode)(void *mac_drv, u8 enable);
 	/* config loopbank mode */
@@ -365,12 +364,8 @@ struct mac_driver {
 	void (*config_max_frame_length)(void *mac_drv, u16 newval);
 	/*config PAD and CRC enable */
 	void (*config_pad_and_crc)(void *mac_drv, u8 newval);
-	/* config duplex mode*/
-	void (*config_half_duplex)(void *mac_drv, u8 newval);
 	/*config tx pause time,if pause_time is zero,disable tx pause enable*/
 	void (*set_tx_auto_pause_frames)(void *mac_drv, u16 pause_time);
-	/*config rx pause enable*/
-	void (*set_rx_ignore_pause_frames)(void *mac_drv, u32 enable);
 	/* config rx mode for promiscuous*/
 	void (*set_promiscuous)(void *mac_drv, u8 enable);
 	void (*mac_pausefrm_cfg)(void *mac_drv, u32 rx_en, u32 tx_en);
@@ -383,7 +378,7 @@ struct mac_driver {
 	void (*get_regs)(void *mac_drv, void *data);
 	int (*get_regs_count)(void);
 	/* get strings name for ethtool statistic */
-	void (*get_strings)(u32 stringset, u8 *data);
+	void (*get_strings)(u32 stringset, u8 **data);
 	/* get the number of strings*/
 	int (*get_sset_count)(int stringset);
 
@@ -394,11 +389,12 @@ struct mac_driver {
 	void (*get_info)(void *mac_drv, struct mac_info *mac_info);
 
 	void (*update_stats)(void *mac_drv);
+	int (*wait_fifo_clean)(void *mac_drv);
 
 	enum mac_mode mac_mode;
 	u8 mac_id;
 	struct hns_mac_cb *mac_cb;
-	void __iomem *io_base;
+	u8 __iomem *io_base;
 	unsigned int mac_en_flg;/*you'd better don't enable mac twice*/
 	unsigned int virt_dev_num;
 	struct device *dev;
@@ -426,9 +422,10 @@ void *hns_xgmac_config(struct hns_mac_cb *mac_cb,
 		       struct mac_params *mac_param);
 
 int hns_mac_init(struct dsaf_device *dsaf_dev);
-void mac_adjust_link(struct net_device *net_dev);
+bool hns_mac_need_adjust_link(struct hns_mac_cb *mac_cb, int speed, int duplex);
 void hns_mac_get_link_status(struct hns_mac_cb *mac_cb,	u32 *link_status);
-int hns_mac_change_vf_addr(struct hns_mac_cb *mac_cb, u32 vmid, char *addr);
+int hns_mac_change_vf_addr(struct hns_mac_cb *mac_cb, u32 vmid,
+			   const char *addr);
 int hns_mac_set_multi(struct hns_mac_cb *mac_cb,
 		      u32 port_num, char *addr, bool enable);
 int hns_mac_vm_config_bc_en(struct hns_mac_cb *mac_cb, u32 vm, bool enable);
@@ -448,7 +445,7 @@ int hns_mac_config_mac_loopback(struct hns_mac_cb *mac_cb,
 				enum hnae_loop loop, int en);
 void hns_mac_update_stats(struct hns_mac_cb *mac_cb);
 void hns_mac_get_stats(struct hns_mac_cb *mac_cb, u64 *data);
-void hns_mac_get_strings(struct hns_mac_cb *mac_cb, int stringset, u8 *data);
+void hns_mac_get_strings(struct hns_mac_cb *mac_cb, int stringset, u8 **data);
 int hns_mac_get_sset_count(struct hns_mac_cb *mac_cb, int stringset);
 void hns_mac_get_regs(struct hns_mac_cb *mac_cb, void *data);
 int hns_mac_get_regs_count(struct hns_mac_cb *mac_cb);
@@ -463,5 +460,8 @@ int hns_mac_add_uc_addr(struct hns_mac_cb *mac_cb, u8 vf_id,
 int hns_mac_rm_uc_addr(struct hns_mac_cb *mac_cb, u8 vf_id,
 		       const unsigned char *addr);
 int hns_mac_clr_multicast(struct hns_mac_cb *mac_cb, int vfn);
+void hns_mac_enable(struct hns_mac_cb *mac_cb, enum mac_commom_mode mode);
+void hns_mac_disable(struct hns_mac_cb *mac_cb, enum mac_commom_mode mode);
+int hns_mac_wait_fifo_clean(struct hns_mac_cb *mac_cb);
 
 #endif /* _HNS_DSAF_MAC_H */

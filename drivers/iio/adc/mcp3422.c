@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * mcp3422.c - driver for the Microchip mcp3421/2/3/4/5/6/7/8 chip family
  *
@@ -5,32 +6,29 @@
  * Author: Angelo Compagnucci <angelo.compagnucci@gmail.com>
  *
  * Datasheet: http://ww1.microchip.com/downloads/en/devicedoc/22088b.pdf
- *            http://ww1.microchip.com/downloads/en/DeviceDoc/22226a.pdf
- *            http://ww1.microchip.com/downloads/en/DeviceDoc/22072b.pdf
+ *            https://ww1.microchip.com/downloads/en/DeviceDoc/22226a.pdf
+ *            https://ww1.microchip.com/downloads/en/DeviceDoc/22072b.pdf
  *
  * This driver exports the value of analog input voltage to sysfs, the
  * voltage unit is nV.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
+#include <linux/bitfield.h>
+#include <linux/bits.h>
 #include <linux/err.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/sysfs.h>
-#include <linux/of.h>
+#include <linux/unaligned.h>
 
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
 
-/* Masks */
-#define MCP3422_CHANNEL_MASK	0x60
-#define MCP3422_PGA_MASK	0x03
-#define MCP3422_SRATE_MASK	0x0C
+#define MCP3422_CHANNEL_MASK	GENMASK(6, 5)
+#define MCP3422_SRATE_MASK	GENMASK(3, 2)
+#define MCP3422_PGA_MASK	GENMASK(1, 0)
+
 #define MCP3422_SRATE_240	0x0
 #define MCP3422_SRATE_60	0x1
 #define MCP3422_SRATE_15	0x2
@@ -39,15 +37,7 @@
 #define MCP3422_PGA_2	1
 #define MCP3422_PGA_4	2
 #define MCP3422_PGA_8	3
-#define MCP3422_CONT_SAMPLING	0x10
-
-#define MCP3422_CHANNEL(config)	(((config) & MCP3422_CHANNEL_MASK) >> 5)
-#define MCP3422_PGA(config)	((config) & MCP3422_PGA_MASK)
-#define MCP3422_SAMPLE_RATE(config)	(((config) & MCP3422_SRATE_MASK) >> 2)
-
-#define MCP3422_CHANNEL_VALUE(value) (((value) << 5) & MCP3422_CHANNEL_MASK)
-#define MCP3422_PGA_VALUE(value) ((value) & MCP3422_PGA_MASK)
-#define MCP3422_SAMPLE_RATE_VALUE(value) ((value << 2) & MCP3422_SRATE_MASK)
+#define MCP3422_CONT_SAMPLING	BIT(4)
 
 #define MCP3422_CHAN(_index) \
 	{ \
@@ -99,15 +89,11 @@ static int mcp3422_update_config(struct mcp3422 *adc, u8 newconfig)
 {
 	int ret;
 
-	mutex_lock(&adc->lock);
-
 	ret = i2c_master_send(adc->i2c, &newconfig, 1);
 	if (ret > 0) {
 		adc->config = newconfig;
 		ret = 0;
 	}
-
-	mutex_unlock(&adc->lock);
 
 	return ret;
 }
@@ -115,17 +101,17 @@ static int mcp3422_update_config(struct mcp3422 *adc, u8 newconfig)
 static int mcp3422_read(struct mcp3422 *adc, int *value, u8 *config)
 {
 	int ret = 0;
-	u8 sample_rate = MCP3422_SAMPLE_RATE(adc->config);
+	u8 sample_rate = FIELD_GET(MCP3422_SRATE_MASK, adc->config);
 	u8 buf[4] = {0, 0, 0, 0};
 	u32 temp;
 
 	if (sample_rate == MCP3422_SRATE_3) {
 		ret = i2c_master_recv(adc->i2c, buf, 4);
-		temp = buf[0] << 16 | buf[1] << 8 | buf[2];
+		temp = get_unaligned_be24(&buf[0]);
 		*config = buf[3];
 	} else {
 		ret = i2c_master_recv(adc->i2c, buf, 3);
-		temp = buf[0] << 8 | buf[1];
+		temp = get_unaligned_be16(&buf[0]);
 		*config = buf[2];
 	}
 
@@ -141,19 +127,27 @@ static int mcp3422_read_channel(struct mcp3422 *adc,
 	u8 config;
 	u8 req_channel = channel->channel;
 
-	if (req_channel != MCP3422_CHANNEL(adc->config)) {
+	mutex_lock(&adc->lock);
+
+	if (req_channel != FIELD_GET(MCP3422_CHANNEL_MASK, adc->config)) {
 		config = adc->config;
-		config &= ~MCP3422_CHANNEL_MASK;
-		config |= MCP3422_CHANNEL_VALUE(req_channel);
-		config &= ~MCP3422_PGA_MASK;
-		config |= MCP3422_PGA_VALUE(adc->pga[req_channel]);
+
+		FIELD_MODIFY(MCP3422_CHANNEL_MASK, &config, req_channel);
+		FIELD_MODIFY(MCP3422_PGA_MASK, &config, adc->pga[req_channel]);
+
 		ret = mcp3422_update_config(adc, config);
-		if (ret < 0)
+		if (ret < 0) {
+			mutex_unlock(&adc->lock);
 			return ret;
-		msleep(mcp3422_read_times[MCP3422_SAMPLE_RATE(adc->config)]);
+		}
+		msleep(mcp3422_read_times[FIELD_GET(MCP3422_SRATE_MASK, adc->config)]);
 	}
 
-	return mcp3422_read(adc, value, &config);
+	ret = mcp3422_read(adc, value, &config);
+
+	mutex_unlock(&adc->lock);
+
+	return ret;
 }
 
 static int mcp3422_read_raw(struct iio_dev *iio,
@@ -162,9 +156,8 @@ static int mcp3422_read_raw(struct iio_dev *iio,
 {
 	struct mcp3422 *adc = iio_priv(iio);
 	int err;
-
-	u8 sample_rate = MCP3422_SAMPLE_RATE(adc->config);
-	u8 pga		 = MCP3422_PGA(adc->config);
+	u8 sample_rate = FIELD_GET(MCP3422_SRATE_MASK, adc->config);
+	u8 pga = FIELD_GET(MCP3422_PGA_MASK, adc->config);
 
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
@@ -180,7 +173,7 @@ static int mcp3422_read_raw(struct iio_dev *iio,
 		return IIO_VAL_INT_PLUS_NANO;
 
 	case IIO_CHAN_INFO_SAMP_FREQ:
-		*val1 = mcp3422_sample_rates[MCP3422_SAMPLE_RATE(adc->config)];
+		*val1 = mcp3422_sample_rates[FIELD_GET(MCP3422_SRATE_MASK, adc->config)];
 		return IIO_VAL_INT;
 
 	default:
@@ -198,7 +191,7 @@ static int mcp3422_write_raw(struct iio_dev *iio,
 	u8 temp;
 	u8 config = adc->config;
 	u8 req_channel = channel->channel;
-	u8 sample_rate = MCP3422_SAMPLE_RATE(config);
+	u8 sample_rate = FIELD_GET(MCP3422_SRATE_MASK, config);
 	u8 i;
 
 	switch (mask) {
@@ -210,10 +203,8 @@ static int mcp3422_write_raw(struct iio_dev *iio,
 			if (val2 == mcp3422_scales[sample_rate][i]) {
 				adc->pga[req_channel] = i;
 
-				config &= ~MCP3422_CHANNEL_MASK;
-				config |= MCP3422_CHANNEL_VALUE(req_channel);
-				config &= ~MCP3422_PGA_MASK;
-				config |= MCP3422_PGA_VALUE(adc->pga[req_channel]);
+				FIELD_MODIFY(MCP3422_CHANNEL_MASK, &config, req_channel);
+				FIELD_MODIFY(MCP3422_PGA_MASK, &config, adc->pga[req_channel]);
 
 				return mcp3422_update_config(adc, config);
 			}
@@ -240,10 +231,8 @@ static int mcp3422_write_raw(struct iio_dev *iio,
 			return -EINVAL;
 		}
 
-		config &= ~MCP3422_CHANNEL_MASK;
-		config |= MCP3422_CHANNEL_VALUE(req_channel);
-		config &= ~MCP3422_SRATE_MASK;
-		config |= MCP3422_SAMPLE_RATE_VALUE(temp);
+		FIELD_MODIFY(MCP3422_CHANNEL_MASK, &config, req_channel);
+		FIELD_MODIFY(MCP3422_SRATE_MASK, &config, temp);
 
 		return mcp3422_update_config(adc, config);
 
@@ -282,7 +271,7 @@ static ssize_t mcp3422_show_scales(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
 	struct mcp3422 *adc = iio_priv(dev_to_iio_dev(dev));
-	u8 sample_rate = MCP3422_SAMPLE_RATE(adc->config);
+	u8 sample_rate = FIELD_GET(MCP3422_SRATE_MASK, adc->config);
 
 	return sprintf(buf, "0.%09u 0.%09u 0.%09u 0.%09u\n",
 		mcp3422_scales[sample_rate][0],
@@ -329,9 +318,9 @@ static const struct iio_info mcp3422_info = {
 	.attrs = &mcp3422_attribute_group,
 };
 
-static int mcp3422_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int mcp3422_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct iio_dev *indio_dev;
 	struct mcp3422 *adc;
 	int err;
@@ -350,8 +339,6 @@ static int mcp3422_probe(struct i2c_client *client,
 
 	mutex_init(&adc->lock);
 
-	indio_dev->dev.parent = &client->dev;
-	indio_dev->dev.of_node = client->dev.of_node;
 	indio_dev->name = dev_name(&client->dev);
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->info = &mcp3422_info;
@@ -377,10 +364,10 @@ static int mcp3422_probe(struct i2c_client *client,
 	}
 
 	/* meaningful default configuration */
-	config = (MCP3422_CONT_SAMPLING
-		| MCP3422_CHANNEL_VALUE(0)
-		| MCP3422_PGA_VALUE(MCP3422_PGA_1)
-		| MCP3422_SAMPLE_RATE_VALUE(MCP3422_SRATE_240));
+	config = MCP3422_CONT_SAMPLING |
+		 FIELD_PREP(MCP3422_CHANNEL_MASK, 0) |
+		 FIELD_PREP(MCP3422_PGA_MASK, MCP3422_PGA_1) |
+		 FIELD_PREP(MCP3422_SRATE_MASK, MCP3422_SRATE_240);
 	err = mcp3422_update_config(adc, config);
 	if (err < 0)
 		return err;
@@ -395,30 +382,28 @@ static int mcp3422_probe(struct i2c_client *client,
 }
 
 static const struct i2c_device_id mcp3422_id[] = {
-	{ "mcp3421", 1 },
-	{ "mcp3422", 2 },
-	{ "mcp3423", 3 },
-	{ "mcp3424", 4 },
-	{ "mcp3425", 5 },
-	{ "mcp3426", 6 },
-	{ "mcp3427", 7 },
-	{ "mcp3428", 8 },
+	{ .name = "mcp3421", .driver_data = 1 },
+	{ .name = "mcp3422", .driver_data = 2 },
+	{ .name = "mcp3423", .driver_data = 3 },
+	{ .name = "mcp3424", .driver_data = 4 },
+	{ .name = "mcp3425", .driver_data = 5 },
+	{ .name = "mcp3426", .driver_data = 6 },
+	{ .name = "mcp3427", .driver_data = 7 },
+	{ .name = "mcp3428", .driver_data = 8 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, mcp3422_id);
 
-#ifdef CONFIG_OF
 static const struct of_device_id mcp3422_of_match[] = {
 	{ .compatible = "mcp3422" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, mcp3422_of_match);
-#endif
 
 static struct i2c_driver mcp3422_driver = {
 	.driver = {
 		.name = "mcp3422",
-		.of_match_table = of_match_ptr(mcp3422_of_match),
+		.of_match_table = mcp3422_of_match,
 	},
 	.probe = mcp3422_probe,
 	.id_table = mcp3422_id,

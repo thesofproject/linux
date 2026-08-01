@@ -1,16 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  HID driver for N-Trig touchscreens
  *
  *  Copyright (c) 2008-2010 Rafi Rubin
  *  Copyright (c) 2009-2010 Stephane Chatty
- *
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 #include <linux/device.h>
@@ -146,10 +142,13 @@ static void ntrig_report_version(struct hid_device *hdev)
 	int ret;
 	char buf[20];
 	struct usb_device *usb_dev = hid_to_usb_dev(hdev);
-	unsigned char *data = kmalloc(8, GFP_KERNEL);
+	unsigned char *data __free(kfree) = kmalloc(8, GFP_KERNEL);
+
+	if (!hid_is_usb(hdev))
+		return;
 
 	if (!data)
-		goto err_free;
+		return;
 
 	ret = usb_control_msg(usb_dev, usb_rcvctrlpipe(usb_dev, 0),
 			      USB_REQ_CLEAR_FEATURE,
@@ -164,9 +163,6 @@ static void ntrig_report_version(struct hid_device *hdev)
 		hid_info(hdev, "Firmware version: %s (%02x%02x %02x%02x)\n",
 			 buf, data[2], data[3], data[4], data[5]);
 	}
-
-err_free:
-	kfree(data);
 }
 
 static ssize_t show_phys_width(struct device *dev,
@@ -904,7 +900,7 @@ static int ntrig_probe(struct hid_device *hdev, const struct hid_device_id *id)
 		hdev->quirks |= HID_QUIRK_MULTI_INPUT
 				| HID_QUIRK_NO_INIT_REPORTS;
 
-	nd = kmalloc(sizeof(struct ntrig_data), GFP_KERNEL);
+	nd = kmalloc_obj(struct ntrig_data);
 	if (!nd) {
 		hid_err(hdev, "cannot allocate N-Trig data\n");
 		return -ENOMEM;
@@ -955,6 +951,8 @@ static int ntrig_probe(struct hid_device *hdev, const struct hid_device_id *id)
 
 	ret = sysfs_create_group(&hdev->dev.kobj,
 			&ntrig_attribute_group);
+	if (ret)
+		hid_err(hdev, "cannot create sysfs group\n");
 
 	return 0;
 err_free:
@@ -1031,4 +1029,5 @@ static struct hid_driver ntrig_driver = {
 };
 module_hid_driver(ntrig_driver);
 
+MODULE_DESCRIPTION("HID driver for N-Trig touchscreens");
 MODULE_LICENSE("GPL");

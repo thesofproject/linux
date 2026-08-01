@@ -1,19 +1,19 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * include/linux/uio_driver.h
  *
  * Copyright(C) 2005, Benedikt Spranger <b.spranger@linutronix.de>
- * Copyright(C) 2005, Thomas Gleixner <tglx@linutronix.de>
+ * Copyright(C) 2005, Linutronix GmbH, Thomas Gleixner <tglx@kernel.org>
  * Copyright(C) 2006, Hans J. Koch <hjk@hansjkoch.de>
  * Copyright(C) 2006, Greg Kroah-Hartman <greg@kroah.com>
  *
  * Userspace IO driver.
- *
- * Licensed under the GPLv2 only.
  */
 
 #ifndef _UIO_DRIVER_H_
 #define _UIO_DRIVER_H_
 
+#include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/interrupt.h>
 
@@ -24,23 +24,30 @@ struct uio_map;
  * struct uio_mem - description of a UIO memory region
  * @name:		name of the memory region for identification
  * @addr:               address of the device's memory rounded to page
- * 			size (phys_addr is used since addr can be
- * 			logical, virtual, or physical & phys_addr_t
- * 			should always be large enough to handle any of
- * 			the address types)
+ *			size (phys_addr is used since addr can be
+ *			logical, virtual, or physical & phys_addr_t
+ *			should always be large enough to handle any of
+ *			the address types)
+ * @dma_addr:		DMA handle set by dma_alloc_coherent, used with
+ *			UIO_MEM_DMA_COHERENT only (@addr should be the
+ *			void * returned from the same dma_alloc_coherent call)
  * @offs:               offset of device memory within the page
  * @size:		size of IO (multiple of page size)
  * @memtype:		type of memory addr points to
  * @internal_addr:	ioremap-ped version of addr, for driver internal use
+ * @dma_device:		device struct that was passed to dma_alloc_coherent,
+ *			used with UIO_MEM_DMA_COHERENT only
  * @map:		for use by the UIO core only.
  */
 struct uio_mem {
 	const char		*name;
 	phys_addr_t		addr;
+	dma_addr_t		dma_addr;
 	unsigned long		offs;
 	resource_size_t		size;
 	int			memtype;
 	void __iomem		*internal_addr;
+	struct device		*dma_device;
 	struct uio_map		*map;
 };
 
@@ -67,15 +74,16 @@ struct uio_port {
 #define MAX_UIO_PORT_REGIONS	5
 
 struct uio_device {
-        struct module           *owner;
-        struct device           *dev;
-        int                     minor;
-        atomic_t                event;
-        struct fasync_struct    *async_queue;
-        wait_queue_head_t       wait;
-        struct uio_info         *info;
-        struct kobject          *map_dir;
-        struct kobject          *portio_dir;
+	struct module           *owner;
+	struct device		dev;
+	int                     minor;
+	atomic_t                event;
+	struct fasync_struct    *async_queue;
+	wait_queue_head_t       wait;
+	struct uio_info         *info;
+	struct mutex		info_lock;
+	struct kobject          *map_dir;
+	struct kobject          *portio_dir;
 };
 
 /**
@@ -89,7 +97,7 @@ struct uio_device {
  * @irq_flags:		flags for request_irq()
  * @priv:		optional private data
  * @handler:		the device's irq handler
- * @mmap:		mmap operation for this uio device
+ * @mmap_prepare:	mmap_prepare operation for this uio device
  * @open:		open operation for this uio device
  * @release:		release operation for this uio device
  * @irqcontrol:		disable/enable irqs when 0/1 is written to /dev/uioX
@@ -104,7 +112,7 @@ struct uio_info {
 	unsigned long		irq_flags;
 	void			*priv;
 	irqreturn_t (*handler)(int irq, struct uio_info *dev_info);
-	int (*mmap)(struct uio_info *info, struct vm_area_struct *vma);
+	int (*mmap_prepare)(struct uio_info *info, struct vm_area_desc *desc);
 	int (*open)(struct uio_info *info, struct inode *inode);
 	int (*release)(struct uio_info *info, struct inode *inode);
 	int (*irqcontrol)(struct uio_info *info, s32 irq_on);
@@ -116,11 +124,36 @@ extern int __must_check
 			      struct uio_info *info);
 
 /* use a define to avoid include chaining to get THIS_MODULE */
+
+/**
+ * uio_register_device - register a new userspace IO device
+ * @parent:	parent device
+ * @info:	UIO device capabilities
+ *
+ * returns zero on success or a negative error code.
+ */
 #define uio_register_device(parent, info) \
 	__uio_register_device(THIS_MODULE, parent, info)
 
 extern void uio_unregister_device(struct uio_info *info);
 extern void uio_event_notify(struct uio_info *info);
+
+extern int __must_check
+	__devm_uio_register_device(struct module *owner,
+				   struct device *parent,
+				   struct uio_info *info);
+
+/* use a define to avoid include chaining to get THIS_MODULE */
+
+/**
+ * devm_uio_register_device - Resource managed uio_register_device()
+ * @parent:	parent device
+ * @info:	UIO device capabilities
+ *
+ * returns zero on success or a negative error code.
+ */
+#define devm_uio_register_device(parent, info) \
+	__devm_uio_register_device(THIS_MODULE, parent, info)
 
 /* defines for uio_info->irq */
 #define UIO_IRQ_CUSTOM	-1
@@ -131,6 +164,13 @@ extern void uio_event_notify(struct uio_info *info);
 #define UIO_MEM_PHYS	1
 #define UIO_MEM_LOGICAL	2
 #define UIO_MEM_VIRTUAL 3
+#define UIO_MEM_IOVA	4
+/*
+ * UIO_MEM_DMA_COHERENT exists for legacy drivers that had been getting by with
+ * improperly mapping DMA coherent allocations through the other modes.
+ * Do not use in new drivers.
+ */
+#define UIO_MEM_DMA_COHERENT	5
 
 /* defines for uio_port->porttype */
 #define UIO_PORT_NONE	0

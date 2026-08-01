@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * irqchip.c: Common API for in kernel interrupt controllers
  * Copyright (c) 2007, Intel Corporation.
  * Copyright 2010 Red Hat, Inc. and/or its affiliates.
  * Copyright (c) 2013, Alexander Graf <agraf@suse.de>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc., 59 Temple
- * Place - Suite 330, Boston, MA 02111-1307 USA.
  *
  * This file is derived from virt/kvm/irq_comm.c.
  *
@@ -29,7 +17,6 @@
 #include <linux/srcu.h>
 #include <linux/export.h>
 #include <trace/events/kvm.h>
-#include "irq.h"
 
 int kvm_irq_map_gsi(struct kvm *kvm,
 		    struct kvm_kernel_irq_routing_entry *entries, int gsi)
@@ -62,7 +49,7 @@ int kvm_send_userspace_msi(struct kvm *kvm, struct kvm_msi *msi)
 {
 	struct kvm_kernel_irq_routing_entry route;
 
-	if (!irqchip_in_kernel(kvm) || (msi->flags & ~KVM_MSI_VALID_DEVID))
+	if (!kvm_arch_irqchip_in_kernel(kvm) || (msi->flags & ~KVM_MSI_VALID_DEVID))
 		return -EINVAL;
 
 	route.msi.address_lo = msi->address_lo;
@@ -144,18 +131,19 @@ static int setup_routing_entry(struct kvm *kvm,
 {
 	struct kvm_kernel_irq_routing_entry *ei;
 	int r;
+	u32 gsi = array_index_nospec(ue->gsi, KVM_MAX_IRQ_ROUTES);
 
 	/*
 	 * Do not allow GSI to be mapped to the same irqchip more than once.
 	 * Allow only one to one mapping between GSI and non-irqchip routing.
 	 */
-	hlist_for_each_entry(ei, &rt->map[ue->gsi], link)
+	hlist_for_each_entry(ei, &rt->map[gsi], link)
 		if (ei->type != KVM_IRQ_ROUTING_IRQCHIP ||
 		    ue->type != KVM_IRQ_ROUTING_IRQCHIP ||
 		    ue->u.irqchip.irqchip == ei->irqchip.irqchip)
 			return -EINVAL;
 
-	e->gsi = ue->gsi;
+	e->gsi = gsi;
 	e->type = ue->type;
 	r = kvm_set_routing_entry(kvm, e, ue);
 	if (r)
@@ -195,9 +183,7 @@ int kvm_set_irq_routing(struct kvm *kvm,
 
 	nr_rt_entries += 1;
 
-	new = kzalloc(sizeof(*new) + (nr_rt_entries * sizeof(struct hlist_head)),
-		      GFP_KERNEL);
-
+	new = kzalloc_flex(*new, map, nr_rt_entries, GFP_KERNEL_ACCOUNT);
 	if (!new)
 		return -ENOMEM;
 
@@ -208,7 +194,7 @@ int kvm_set_irq_routing(struct kvm *kvm,
 
 	for (i = 0; i < nr; ++i) {
 		r = -ENOMEM;
-		e = kzalloc(sizeof(*e), GFP_KERNEL);
+		e = kzalloc_obj(*e, GFP_KERNEL_ACCOUNT);
 		if (!e)
 			goto out;
 
@@ -236,8 +222,6 @@ int kvm_set_irq_routing(struct kvm *kvm,
 	kvm_arch_irq_routing_update(kvm);
 	mutex_unlock(&kvm->irq_lock);
 
-	kvm_arch_post_irq_routing_update(kvm);
-
 	synchronize_srcu_expedited(&kvm->irq_srcu);
 
 	new = old;
@@ -250,4 +234,28 @@ out:
 	free_irq_routing_table(new);
 
 	return r;
+}
+
+/*
+ * Allocate empty IRQ routing by default so that additional setup isn't needed
+ * when userspace-driven IRQ routing is activated, and so that kvm->irq_routing
+ * is guaranteed to be non-NULL.
+ */
+int kvm_init_irq_routing(struct kvm *kvm)
+{
+	struct kvm_irq_routing_table *new;
+	int chip_size;
+
+	new = kzalloc_flex(*new, map, 1, GFP_KERNEL_ACCOUNT);
+	if (!new)
+		return -ENOMEM;
+
+	new->nr_rt_entries = 1;
+
+	chip_size = sizeof(int) * KVM_NR_IRQCHIPS * KVM_IRQCHIP_NUM_PINS;
+	memset(new->chip, -1, chip_size);
+
+	RCU_INIT_POINTER(kvm->irq_routing, new);
+
+	return 0;
 }

@@ -5,8 +5,8 @@
  */
 
 #include <linux/slab.h>
+#include "messages.h"
 #include "ulist.h"
-#include "ctree.h"
 
 /*
  * ulist is a generic data structure to hold a collection of unique u64
@@ -37,8 +37,9 @@
  * loop would be similar to the above.
  */
 
-/**
- * ulist_init - freshly initialize a ulist
+/*
+ * Freshly initialize a ulist.
+ *
  * @ulist:	the ulist to initialize
  *
  * Note: don't use this function to init an already used ulist, use
@@ -49,10 +50,12 @@ void ulist_init(struct ulist *ulist)
 	INIT_LIST_HEAD(&ulist->nodes);
 	ulist->root = RB_ROOT;
 	ulist->nnodes = 0;
+	ulist->prealloc = NULL;
 }
 
-/**
- * ulist_release - free up additionally allocated memory for the ulist
+/*
+ * Free up additionally allocated memory for the ulist.
+ *
  * @ulist:	the ulist from which to free the additional memory
  *
  * This is useful in cases where the base 'struct ulist' has been statically
@@ -66,12 +69,15 @@ void ulist_release(struct ulist *ulist)
 	list_for_each_entry_safe(node, next, &ulist->nodes, list) {
 		kfree(node);
 	}
+	kfree(ulist->prealloc);
+	ulist->prealloc = NULL;
 	ulist->root = RB_ROOT;
 	INIT_LIST_HEAD(&ulist->nodes);
 }
 
-/**
- * ulist_reinit - prepare a ulist for reuse
+/*
+ * Prepare a ulist for reuse.
+ *
  * @ulist:	ulist to be reused
  *
  * Free up all additional memory allocated for the list elements and reinit
@@ -83,15 +89,16 @@ void ulist_reinit(struct ulist *ulist)
 	ulist_init(ulist);
 }
 
-/**
- * ulist_alloc - dynamically allocate a ulist
+/*
+ * Dynamically allocate a ulist.
+ *
  * @gfp_mask:	allocation flags to for base allocation
  *
  * The allocated ulist will be returned in an initialized state.
  */
 struct ulist *ulist_alloc(gfp_t gfp_mask)
 {
-	struct ulist *ulist = kmalloc(sizeof(*ulist), gfp_mask);
+	struct ulist *ulist = kmalloc_obj(*ulist, gfp_mask);
 
 	if (!ulist)
 		return NULL;
@@ -101,8 +108,15 @@ struct ulist *ulist_alloc(gfp_t gfp_mask)
 	return ulist;
 }
 
-/**
- * ulist_free - free dynamically allocated ulist
+void ulist_prealloc(struct ulist *ulist, gfp_t gfp_mask)
+{
+	if (!ulist->prealloc)
+		ulist->prealloc = kzalloc_obj(*ulist->prealloc, gfp_mask);
+}
+
+/*
+ * Free dynamically allocated ulist.
+ *
  * @ulist:	ulist to free
  *
  * It is not necessary to call ulist_release before.
@@ -115,21 +129,25 @@ void ulist_free(struct ulist *ulist)
 	kfree(ulist);
 }
 
+static int ulist_node_val_key_cmp(const void *key, const struct rb_node *node)
+{
+	const u64 *val = key;
+	const struct ulist_node *unode = rb_entry(node, struct ulist_node, rb_node);
+
+	if (unode->val < *val)
+		return 1;
+	else if (unode->val > *val)
+		return -1;
+
+	return 0;
+}
+
 static struct ulist_node *ulist_rbtree_search(struct ulist *ulist, u64 val)
 {
-	struct rb_node *n = ulist->root.rb_node;
-	struct ulist_node *u = NULL;
+	struct rb_node *node;
 
-	while (n) {
-		u = rb_entry(n, struct ulist_node, rb_node);
-		if (u->val < val)
-			n = n->rb_right;
-		else if (u->val > val)
-			n = n->rb_left;
-		else
-			return u;
-	}
-	return NULL;
+	node = rb_find(&val, &ulist->root, ulist_node_val_key_cmp);
+	return rb_entry_safe(node, struct ulist_node, rb_node);
 }
 
 static void ulist_rbtree_erase(struct ulist *ulist, struct ulist_node *node)
@@ -141,30 +159,26 @@ static void ulist_rbtree_erase(struct ulist *ulist, struct ulist_node *node)
 	ulist->nnodes--;
 }
 
+static int ulist_node_val_cmp(struct rb_node *new, const struct rb_node *existing)
+{
+	const struct ulist_node *unode = rb_entry(new, struct ulist_node, rb_node);
+
+	return ulist_node_val_key_cmp(&unode->val, existing);
+}
+
 static int ulist_rbtree_insert(struct ulist *ulist, struct ulist_node *ins)
 {
-	struct rb_node **p = &ulist->root.rb_node;
-	struct rb_node *parent = NULL;
-	struct ulist_node *cur = NULL;
+	struct rb_node *node;
 
-	while (*p) {
-		parent = *p;
-		cur = rb_entry(parent, struct ulist_node, rb_node);
-
-		if (cur->val < ins->val)
-			p = &(*p)->rb_right;
-		else if (cur->val > ins->val)
-			p = &(*p)->rb_left;
-		else
-			return -EEXIST;
-	}
-	rb_link_node(&ins->rb_node, parent, p);
-	rb_insert_color(&ins->rb_node, &ulist->root);
+	node = rb_find_add(&ins->rb_node, &ulist->root, ulist_node_val_cmp);
+	if (node)
+		return -EEXIST;
 	return 0;
 }
 
-/**
- * ulist_add - add an element to the ulist
+/*
+ * Add an element to the ulist.
+ *
  * @ulist:	ulist to add the element to
  * @val:	value to add to ulist
  * @aux:	auxiliary value to store along with val
@@ -200,9 +214,15 @@ int ulist_add_merge(struct ulist *ulist, u64 val, u64 aux,
 			*old_aux = node->aux;
 		return 0;
 	}
-	node = kmalloc(sizeof(*node), gfp_mask);
-	if (!node)
-		return -ENOMEM;
+
+	if (ulist->prealloc) {
+		node = ulist->prealloc;
+		ulist->prealloc = NULL;
+	} else {
+		node = kmalloc_obj(*node, gfp_mask);
+		if (!node)
+			return -ENOMEM;
+	}
 
 	node->val = val;
 	node->aux = aux;
@@ -216,7 +236,8 @@ int ulist_add_merge(struct ulist *ulist, u64 val, u64 aux,
 }
 
 /*
- * ulist_del - delete one node from ulist
+ * Delete one node from ulist.
+ *
  * @ulist:	ulist to remove node from
  * @val:	value to delete
  * @aux:	aux to delete
@@ -242,8 +263,9 @@ int ulist_del(struct ulist *ulist, u64 val, u64 aux)
 	return 0;
 }
 
-/**
- * ulist_next - iterate ulist
+/*
+ * Iterate ulist.
+ *
  * @ulist:	ulist to iterate
  * @uiter:	iterator variable, initialized with ULIST_ITER_INIT(&iterator)
  *
@@ -258,7 +280,7 @@ int ulist_del(struct ulist *ulist, u64 val, u64 aux)
  * It is allowed to call ulist_add during an enumeration. Newly added items
  * are guaranteed to show up in the running enumeration.
  */
-struct ulist_node *ulist_next(struct ulist *ulist, struct ulist_iterator *uiter)
+struct ulist_node *ulist_next(const struct ulist *ulist, struct ulist_iterator *uiter)
 {
 	struct ulist_node *node;
 

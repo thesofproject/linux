@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Force feedback support for Logitech Gaming Wheels
  *
@@ -8,19 +9,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 
@@ -103,6 +91,10 @@ static const signed short lg4ff_wheel_effects[] = {
 	-1
 };
 
+static const signed short no_wheel_effects[] = {
+	-1
+};
+
 struct lg4ff_wheel {
 	const u32 product_id;
 	const signed short *ff_effects;
@@ -137,6 +129,7 @@ struct lg4ff_alternate_mode {
 };
 
 static const struct lg4ff_wheel lg4ff_devices[] = {
+	{USB_DEVICE_ID_LOGITECH_WINGMAN_FG,  no_wheel_effects,    40, 180, NULL},
 	{USB_DEVICE_ID_LOGITECH_WINGMAN_FFG, lg4ff_wheel_effects, 40, 180, NULL},
 	{USB_DEVICE_ID_LOGITECH_WHEEL,       lg4ff_wheel_effects, 40, 270, NULL},
 	{USB_DEVICE_ID_LOGITECH_MOMO_WHEEL,  lg4ff_wheel_effects, 40, 270, NULL},
@@ -346,6 +339,7 @@ int lg4ff_raw_event(struct hid_device *hdev, struct hid_report *report,
 			rd[5] = rd[3];
 			rd[6] = 0x7F;
 			return 1;
+		case USB_DEVICE_ID_LOGITECH_WINGMAN_FG:
 		case USB_DEVICE_ID_LOGITECH_WINGMAN_FFG:
 		case USB_DEVICE_ID_LOGITECH_MOMO_WHEEL:
 		case USB_DEVICE_ID_LOGITECH_MOMO_WHEEL2:
@@ -829,7 +823,7 @@ static ssize_t lg4ff_alternate_modes_show(struct device *dev, struct device_attr
 	for (i = 0; i < LG4FF_MODE_MAX_IDX; i++) {
 		if (entry->wdata.alternate_modes & BIT(i)) {
 			/* Print tag and full name */
-			count += scnprintf(buf + count, PAGE_SIZE - count, "%s: %s",
+			count += sysfs_emit_at(buf, count, "%s: %s",
 					   lg4ff_alternate_modes[i].tag,
 					   !lg4ff_alternate_modes[i].product_id ? entry->wdata.real_name : lg4ff_alternate_modes[i].name);
 			if (count >= PAGE_SIZE - 1)
@@ -838,9 +832,9 @@ static ssize_t lg4ff_alternate_modes_show(struct device *dev, struct device_attr
 			/* Mark the currently active mode with an asterisk */
 			if (lg4ff_alternate_modes[i].product_id == entry->wdata.product_id ||
 			    (lg4ff_alternate_modes[i].product_id == 0 && entry->wdata.product_id == entry->wdata.real_product_id))
-				count += scnprintf(buf + count, PAGE_SIZE - count, " *\n");
+				count += sysfs_emit_at(buf, count, " *\n");
 			else
-				count += scnprintf(buf + count, PAGE_SIZE - count, "\n");
+				count += sysfs_emit_at(buf, count, "\n");
 
 			if (count >= PAGE_SIZE - 1)
 				return count;
@@ -878,6 +872,12 @@ static ssize_t lg4ff_alternate_modes_store(struct device *dev, struct device_att
 		return -ENOMEM;
 
 	i = strlen(lbuf);
+
+	if (i == 0) {
+		kfree(lbuf);
+		return -EINVAL;
+	}
+
 	if (lbuf[i-1] == '\n') {
 		if (i == 1) {
 			kfree(lbuf);
@@ -956,7 +956,7 @@ static ssize_t lg4ff_combine_show(struct device *dev, struct device_attribute *a
 		return 0;
 	}
 
-	count = scnprintf(buf, PAGE_SIZE, "%u\n", entry->wdata.combine);
+	count = sysfs_emit(buf, "%u\n", entry->wdata.combine);
 	return count;
 }
 
@@ -1009,7 +1009,7 @@ static ssize_t lg4ff_range_show(struct device *dev, struct device_attribute *att
 		return 0;
 	}
 
-	count = scnprintf(buf, PAGE_SIZE, "%u\n", entry->wdata.range);
+	count = sysfs_emit(buf, "%u\n", entry->wdata.range);
 	return count;
 }
 
@@ -1073,7 +1073,7 @@ static ssize_t lg4ff_real_id_show(struct device *dev, struct device_attribute *a
 		return 0;
 	}
 
-	count = scnprintf(buf, PAGE_SIZE, "%s: %s\n", entry->wdata.real_tag, entry->wdata.real_name);
+	count = sysfs_emit(buf, "%s: %s\n", entry->wdata.real_tag, entry->wdata.real_name);
 	return count;
 }
 
@@ -1259,8 +1259,8 @@ static int lg4ff_handle_multimode_wheel(struct hid_device *hid, u16 *real_produc
 
 int lg4ff_init(struct hid_device *hid)
 {
-	struct hid_input *hidinput = list_entry(hid->inputs.next, struct hid_input, list);
-	struct input_dev *dev = hidinput->input;
+	struct hid_input *hidinput;
+	struct input_dev *dev;
 	struct list_head *report_list = &hid->report_enum[HID_OUTPUT_REPORT].report_list;
 	struct hid_report *report = list_entry(report_list->next, struct hid_report, list);
 	const struct usb_device_descriptor *udesc = &(hid_to_usb_dev(hid)->descriptor);
@@ -1272,6 +1272,13 @@ int lg4ff_init(struct hid_device *hid)
 	int mmode_ret, mmode_idx = -1;
 	u16 real_product_id;
 
+	if (list_empty(&hid->inputs)) {
+		hid_err(hid, "no inputs found\n");
+		return -ENODEV;
+	}
+	hidinput = list_entry(hid->inputs.next, struct hid_input, list);
+	dev = hidinput->input;
+
 	/* Check that the report looks ok */
 	if (!hid_validate_values(hid, HID_OUTPUT_REPORT, 0, 0, 7))
 		return -1;
@@ -1281,7 +1288,7 @@ int lg4ff_init(struct hid_device *hid)
 		hid_err(hid, "Cannot add device, private driver data not allocated\n");
 		return -1;
 	}
-	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
+	entry = kzalloc_obj(*entry);
 	if (!entry)
 		return -ENOMEM;
 	spin_lock_init(&entry->report_lock);
@@ -1343,7 +1350,8 @@ int lg4ff_init(struct hid_device *hid)
 
 	/* Initialize device properties */
 	if (mmode_ret == LG4FF_MMODE_IS_MULTIMODE) {
-		BUG_ON(mmode_idx == -1);
+		if (WARN_ON(mmode_idx == -1))
+			return -EINVAL;
 		mmode_wheel = &lg4ff_multimode_wheels[mmode_idx];
 	}
 	lg4ff_init_wheel_data(&entry->wdata, &lg4ff_devices[i], mmode_wheel, real_product_id);
@@ -1483,7 +1491,6 @@ int lg4ff_deinit(struct hid_device *hid)
 		}
 	}
 #endif
-	hid_hw_stop(hid);
 	drv_data->device_props = NULL;
 
 	kfree(entry);

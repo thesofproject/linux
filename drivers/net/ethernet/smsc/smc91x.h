@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*------------------------------------------------------------------------
  . smc91x.h - macros for SMSC's 91C9x/91C1xx single-chip Ethernet device.
  .
@@ -7,18 +8,6 @@
  . Copyright (C) 2003 Monta Vista Software, Inc.
  .	Unified SMC91x driver by Nicolas Pitre
  .
- . This program is free software; you can redistribute it and/or modify
- . it under the terms of the GNU General Public License as published by
- . the Free Software Foundation; either version 2 of the License, or
- . (at your option) any later version.
- .
- . This program is distributed in the hope that it will be useful,
- . but WITHOUT ANY WARRANTY; without even the implied warranty of
- . MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- . GNU General Public License for more details.
- .
- . You should have received a copy of the GNU General Public License
- . along with this program; if not, see <http://www.gnu.org/licenses/>.
  .
  . Information contained in this file was obtained from the LAN91C111
  . manual from SMC.  To get a copy, if you really want one, you can find
@@ -125,25 +114,6 @@ static inline void _SMC_outw_align4(u16 val, void __iomem *ioaddr, int reg,
 			 (lp)->cfg.pxa_u16_align4)
 
 
-#elif	defined(CONFIG_SH_SH4202_MICRODEV)
-
-#define SMC_CAN_USE_8BIT	0
-#define SMC_CAN_USE_16BIT	1
-#define SMC_CAN_USE_32BIT	0
-
-#define SMC_inb(a, r)		inb((a) + (r) - 0xa0000000)
-#define SMC_inw(a, r)		inw((a) + (r) - 0xa0000000)
-#define SMC_inl(a, r)		inl((a) + (r) - 0xa0000000)
-#define SMC_outb(v, a, r)	outb(v, (a) + (r) - 0xa0000000)
-#define SMC_outw(lp, v, a, r)	outw(v, (a) + (r) - 0xa0000000)
-#define SMC_outl(v, a, r)	outl(v, (a) + (r) - 0xa0000000)
-#define SMC_insl(a, r, p, l)	insl((a) + (r) - 0xa0000000, p, l)
-#define SMC_outsl(a, r, p, l)	outsl((a) + (r) - 0xa0000000, p, l)
-#define SMC_insw(a, r, p, l)	insw((a) + (r) - 0xa0000000, p, l)
-#define SMC_outsw(a, r, p, l)	outsw((a) + (r) - 0xa0000000, p, l)
-
-#define SMC_IRQ_FLAGS		(0)
-
 #elif defined(CONFIG_ATARI)
 
 #define SMC_CAN_USE_8BIT        1
@@ -172,37 +142,26 @@ static inline void _SMC_outw_align4(u16 val, void __iomem *ioaddr, int reg,
 #define SMC_CAN_USE_32BIT	0
 #define SMC_NOWAIT		1
 
-static inline void mcf_insw(void *a, unsigned char *p, int l)
+static inline void mcf_insw(void __iomem *a, unsigned char *p, int l)
 {
 	u16 *wp = (u16 *) p;
 	while (l-- > 0)
 		*wp++ = readw(a);
 }
 
-static inline void mcf_outsw(void *a, unsigned char *p, int l)
+static inline void mcf_outsw(void __iomem *a, unsigned char *p, int l)
 {
 	u16 *wp = (u16 *) p;
 	while (l-- > 0)
 		writew(*wp++, a);
 }
 
-#define SMC_inw(a, r)		_swapw(readw((a) + (r)))
-#define SMC_outw(lp, v, a, r)	writew(_swapw(v), (a) + (r))
+#define SMC_inw(a, r)		ioread16be((a) + (r))
+#define SMC_outw(lp, v, a, r)	iowrite16be(v, (a) + (r))
 #define SMC_insw(a, r, p, l)	mcf_insw(a + r, p, l)
 #define SMC_outsw(a, r, p, l)	mcf_outsw(a + r, p, l)
 
 #define SMC_IRQ_FLAGS		0
-
-#elif defined(CONFIG_H8300)
-#define SMC_CAN_USE_8BIT	1
-#define SMC_CAN_USE_16BIT	0
-#define SMC_CAN_USE_32BIT	0
-#define SMC_NOWAIT		0
-
-#define SMC_inb(a, r)		ioread8((a) + (r))
-#define SMC_outb(v, a, r)	iowrite8(v, (a) + (r))
-#define SMC_insb(a, r, p, l)	ioread8_rep((a) + (r), p, l)
-#define SMC_outsb(a, r, p, l)	iowrite8_rep((a) + (r), p, l)
 
 #else
 
@@ -301,7 +260,6 @@ struct smc_local {
  * as RX which can overrun memory and lose packets.
  */
 #include <linux/dma-mapping.h>
-#include <linux/dma/pxa-dma.h>
 
 #ifdef SMC_insl
 #undef SMC_insl

@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 ST Microelectronics
  * Viresh Kumar <vireshk@kernel.org>
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  *
  * VCO-PLL clock implementation
  */
@@ -113,12 +110,15 @@ static long clk_pll_round_rate_index(struct clk_hw *hw, unsigned long drate,
 	return rate;
 }
 
-static long clk_pll_round_rate(struct clk_hw *hw, unsigned long drate,
-				unsigned long *prate)
+static int clk_pll_determine_rate(struct clk_hw *hw,
+				  struct clk_rate_request *req)
 {
 	int unused;
 
-	return clk_pll_round_rate_index(hw, drate, prate, &unused);
+	req->rate = clk_pll_round_rate_index(hw, req->rate,
+					     &req->best_parent_rate, &unused);
+
+	return 0;
 }
 
 static unsigned long clk_pll_recalc_rate(struct clk_hw *hw, unsigned long
@@ -147,7 +147,7 @@ static int clk_pll_set_rate(struct clk_hw *hw, unsigned long drate,
 	struct clk_pll *pll = to_clk_pll(hw);
 	struct pll_rate_tbl *rtbl = pll->vco->rtbl;
 	unsigned long flags = 0, val;
-	int uninitialized_var(i);
+	int i = 0;
 
 	clk_pll_round_rate_index(hw, drate, NULL, &i);
 
@@ -167,7 +167,7 @@ static int clk_pll_set_rate(struct clk_hw *hw, unsigned long drate,
 
 static const struct clk_ops clk_pll_ops = {
 	.recalc_rate = clk_pll_recalc_rate,
-	.round_rate = clk_pll_round_rate,
+	.determine_rate = clk_pll_determine_rate,
 	.set_rate = clk_pll_set_rate,
 };
 
@@ -179,14 +179,16 @@ static inline unsigned long vco_calc_rate(struct clk_hw *hw,
 	return pll_calc_rate(vco->rtbl, prate, index, NULL);
 }
 
-static long clk_vco_round_rate(struct clk_hw *hw, unsigned long drate,
-		unsigned long *prate)
+static int clk_vco_determine_rate(struct clk_hw *hw,
+				  struct clk_rate_request *req)
 {
 	struct clk_vco *vco = to_clk_vco(hw);
 	int unused;
 
-	return clk_round_rate_index(hw, drate, *prate, vco_calc_rate,
-			vco->rtbl_cnt, &unused);
+	req->rate = clk_round_rate_index(hw, req->rate, req->best_parent_rate,
+					 vco_calc_rate, vco->rtbl_cnt, &unused);
+
+	return 0;
 }
 
 static unsigned long clk_vco_recalc_rate(struct clk_hw *hw,
@@ -268,7 +270,7 @@ static int clk_vco_set_rate(struct clk_hw *hw, unsigned long drate,
 
 static const struct clk_ops clk_vco_ops = {
 	.recalc_rate = clk_vco_recalc_rate,
-	.round_rate = clk_vco_round_rate,
+	.determine_rate = clk_vco_determine_rate,
 	.set_rate = clk_vco_set_rate,
 };
 
@@ -291,11 +293,11 @@ struct clk *clk_register_vco_pll(const char *vco_name, const char *pll_name,
 		return ERR_PTR(-EINVAL);
 	}
 
-	vco = kzalloc(sizeof(*vco), GFP_KERNEL);
+	vco = kzalloc_obj(*vco);
 	if (!vco)
 		return ERR_PTR(-ENOMEM);
 
-	pll = kzalloc(sizeof(*pll), GFP_KERNEL);
+	pll = kzalloc_obj(*pll);
 	if (!pll)
 		goto free_vco;
 
@@ -341,13 +343,15 @@ struct clk *clk_register_vco_pll(const char *vco_name, const char *pll_name,
 
 	tpll_clk = clk_register(NULL, &pll->hw);
 	if (IS_ERR_OR_NULL(tpll_clk))
-		goto free_pll;
+		goto unregister_clk;
 
 	if (pll_clk)
 		*pll_clk = tpll_clk;
 
 	return vco_clk;
 
+unregister_clk:
+	clk_unregister(vco_clk);
 free_pll:
 	kfree(pll);
 free_vco:

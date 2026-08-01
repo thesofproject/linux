@@ -11,6 +11,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/sysfs.h>
+#include <linux/of.h>
 #include <linux/pci.h>
 #include <linux/string.h>
 #include <linux/slab.h>
@@ -19,17 +20,10 @@
 #include "rpaphp.h"
 
 /* free up the memory used by a slot */
-static void rpaphp_release_slot(struct hotplug_slot *hotplug_slot)
-{
-	struct slot *slot = (struct slot *) hotplug_slot->private;
-	dealloc_slot_struct(slot);
-}
-
 void dealloc_slot_struct(struct slot *slot)
 {
-	kfree(slot->hotplug_slot->info);
+	of_node_put(slot->dn);
 	kfree(slot->name);
-	kfree(slot->hotplug_slot);
 	kfree(slot);
 }
 
@@ -38,32 +32,19 @@ struct slot *alloc_slot_struct(struct device_node *dn,
 {
 	struct slot *slot;
 
-	slot = kzalloc(sizeof(struct slot), GFP_KERNEL);
+	slot = kzalloc_obj(struct slot);
 	if (!slot)
 		goto error_nomem;
-	slot->hotplug_slot = kzalloc(sizeof(struct hotplug_slot), GFP_KERNEL);
-	if (!slot->hotplug_slot)
-		goto error_slot;
-	slot->hotplug_slot->info = kzalloc(sizeof(struct hotplug_slot_info),
-					   GFP_KERNEL);
-	if (!slot->hotplug_slot->info)
-		goto error_hpslot;
 	slot->name = kstrdup(drc_name, GFP_KERNEL);
 	if (!slot->name)
-		goto error_info;
-	slot->dn = dn;
+		goto error_slot;
+	slot->dn = of_node_get(dn);
 	slot->index = drc_index;
 	slot->power_domain = power_domain;
-	slot->hotplug_slot->private = slot;
-	slot->hotplug_slot->ops = &rpaphp_hotplug_slot_ops;
-	slot->hotplug_slot->release = &rpaphp_release_slot;
+	slot->hotplug_slot.ops = &rpaphp_hotplug_slot_ops;
 
 	return (slot);
 
-error_info:
-	kfree(slot->hotplug_slot->info);
-error_hpslot:
-	kfree(slot->hotplug_slot);
 error_slot:
 	kfree(slot);
 error_nomem:
@@ -84,16 +65,14 @@ static int is_registered(struct slot *slot)
 int rpaphp_deregister_slot(struct slot *slot)
 {
 	int retval = 0;
-	struct hotplug_slot *php_slot = slot->hotplug_slot;
+	struct hotplug_slot *php_slot = &slot->hotplug_slot;
 
 	 dbg("%s - Entry: deregistering slot=%s\n",
 		__func__, slot->name);
 
 	list_del(&slot->rpaphp_slot_list);
-
-	retval = pci_hp_deregister(php_slot);
-	if (retval)
-		err("Problem unregistering a slot %s\n", slot->name);
+	pci_hp_deregister(php_slot);
+	dealloc_slot_struct(slot);
 
 	dbg("%s - Exit: rc[%d]\n", __func__, retval);
 	return retval;
@@ -102,8 +81,7 @@ EXPORT_SYMBOL_GPL(rpaphp_deregister_slot);
 
 int rpaphp_register_slot(struct slot *slot)
 {
-	struct hotplug_slot *php_slot = slot->hotplug_slot;
-	struct device_node *child;
+	struct hotplug_slot *php_slot = &slot->hotplug_slot;
 	u32 my_index;
 	int retval;
 	int slotno = -1;
@@ -118,11 +96,10 @@ int rpaphp_register_slot(struct slot *slot)
 		return -EAGAIN;
 	}
 
-	for_each_child_of_node(slot->dn, child) {
+	for_each_child_of_node_scoped(slot->dn, child) {
 		retval = of_property_read_u32(child, "ibm,my-drc-index", &my_index);
 		if (my_index == slot->index) {
 			slotno = PCI_SLOT(PCI_DN(child)->devfn);
-			of_node_put(child);
 			break;
 		}
 	}

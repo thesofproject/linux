@@ -185,8 +185,7 @@ int mlx4_bitmap_init(struct mlx4_bitmap *bitmap, u32 num, u32 mask,
 	bitmap->avail = num - reserved_top - reserved_bot;
 	bitmap->effective_len = bitmap->avail;
 	spin_lock_init(&bitmap->lock);
-	bitmap->table = kzalloc(BITS_TO_LONGS(bitmap->max) *
-				sizeof(long), GFP_KERNEL);
+	bitmap->table = bitmap_zalloc(bitmap->max, GFP_KERNEL);
 	if (!bitmap->table)
 		return -ENOMEM;
 
@@ -197,7 +196,7 @@ int mlx4_bitmap_init(struct mlx4_bitmap *bitmap, u32 num, u32 mask,
 
 void mlx4_bitmap_cleanup(struct mlx4_bitmap *bitmap)
 {
-	kfree(bitmap->table);
+	bitmap_free(bitmap->table);
 }
 
 struct mlx4_zone_allocator {
@@ -224,7 +223,7 @@ struct mlx4_zone_entry {
 
 struct mlx4_zone_allocator *mlx4_zone_allocator_create(enum mlx4_zone_alloc_flags flags)
 {
-	struct mlx4_zone_allocator *zones = kmalloc(sizeof(*zones), GFP_KERNEL);
+	struct mlx4_zone_allocator *zones = kmalloc_obj(*zones);
 
 	if (NULL == zones)
 		return NULL;
@@ -248,7 +247,7 @@ int mlx4_zone_add_one(struct mlx4_zone_allocator *zone_alloc,
 {
 	u32 mask = mlx4_bitmap_masked_value(bitmap, (u32)-1);
 	struct mlx4_zone_entry *it;
-	struct mlx4_zone_entry *zone = kmalloc(sizeof(*zone), GFP_KERNEL);
+	struct mlx4_zone_entry *zone = kmalloc_obj(*zone);
 
 	if (NULL == zone)
 		return -ENOMEM;
@@ -337,7 +336,7 @@ void mlx4_zone_allocator_destroy(struct mlx4_zone_allocator *zone_alloc)
 static u32 __mlx4_alloc_from_zone(struct mlx4_zone_entry *zone, int count,
 				  int align, u32 skip_mask, u32 *puid)
 {
-	u32 uid;
+	u32 uid = 0;
 	u32 res;
 	struct mlx4_zone_allocator *zone_alloc = zone->allocator;
 	struct mlx4_zone_entry *curr_node;
@@ -527,28 +526,6 @@ out:
 	return res;
 }
 
-u32 mlx4_zone_free_entries(struct mlx4_zone_allocator *zones, u32 uid, u32 obj, u32 count)
-{
-	struct mlx4_zone_entry *zone;
-	int res = 0;
-
-	spin_lock(&zones->lock);
-
-	zone = __mlx4_find_zone_by_uid(zones, uid);
-
-	if (NULL == zone) {
-		res = -1;
-		goto out;
-	}
-
-	__mlx4_free_from_zone(zone, obj, count);
-
-out:
-	spin_unlock(&zones->lock);
-
-	return res;
-}
-
 u32 mlx4_zone_free_entries_unique(struct mlx4_zone_allocator *zones, u32 obj, u32 count)
 {
 	struct mlx4_zone_entry *zone;
@@ -584,8 +561,8 @@ static int mlx4_buf_direct_alloc(struct mlx4_dev *dev, int size,
 	buf->npages       = 1;
 	buf->page_shift   = get_order(size) + PAGE_SHIFT;
 	buf->direct.buf   =
-		dma_zalloc_coherent(&dev->persist->pdev->dev,
-				    size, &t, GFP_KERNEL);
+		dma_alloc_coherent(&dev->persist->pdev->dev, size, &t,
+				   GFP_KERNEL);
 	if (!buf->direct.buf)
 		return -ENOMEM;
 
@@ -614,18 +591,17 @@ int mlx4_buf_alloc(struct mlx4_dev *dev, int size, int max_direct,
 		int i;
 
 		buf->direct.buf = NULL;
-		buf->nbufs	= (size + PAGE_SIZE - 1) / PAGE_SIZE;
+		buf->nbufs      = DIV_ROUND_UP(size, PAGE_SIZE);
 		buf->npages	= buf->nbufs;
 		buf->page_shift  = PAGE_SHIFT;
-		buf->page_list   = kcalloc(buf->nbufs, sizeof(*buf->page_list),
-					   GFP_KERNEL);
+		buf->page_list   = kzalloc_objs(*buf->page_list, buf->nbufs);
 		if (!buf->page_list)
 			return -ENOMEM;
 
 		for (i = 0; i < buf->nbufs; ++i) {
 			buf->page_list[i].buf =
-				dma_zalloc_coherent(&dev->persist->pdev->dev,
-						    PAGE_SIZE, &t, GFP_KERNEL);
+				dma_alloc_coherent(&dev->persist->pdev->dev,
+						   PAGE_SIZE, &t, GFP_KERNEL);
 			if (!buf->page_list[i].buf)
 				goto err_free;
 
@@ -665,7 +641,7 @@ static struct mlx4_db_pgdir *mlx4_alloc_db_pgdir(struct device *dma_device)
 {
 	struct mlx4_db_pgdir *pgdir;
 
-	pgdir = kzalloc(sizeof(*pgdir), GFP_KERNEL);
+	pgdir = kzalloc_obj(*pgdir);
 	if (!pgdir)
 		return NULL;
 
@@ -683,9 +659,9 @@ static struct mlx4_db_pgdir *mlx4_alloc_db_pgdir(struct device *dma_device)
 }
 
 static int mlx4_alloc_db_from_pgdir(struct mlx4_db_pgdir *pgdir,
-				    struct mlx4_db *db, int order)
+				    struct mlx4_db *db, unsigned int order)
 {
-	int o;
+	unsigned int o;
 	int i;
 
 	for (o = order; o <= 1; ++o) {
@@ -713,7 +689,7 @@ found:
 	return 0;
 }
 
-int mlx4_db_alloc(struct mlx4_dev *dev, struct mlx4_db *db, int order)
+int mlx4_db_alloc(struct mlx4_dev *dev, struct mlx4_db *db, unsigned int order)
 {
 	struct mlx4_priv *priv = mlx4_priv(dev);
 	struct mlx4_db_pgdir *pgdir;

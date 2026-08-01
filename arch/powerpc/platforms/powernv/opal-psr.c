@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * PowerNV OPAL Power-Shift-Ratio interface
  *
  * Copyright 2017 IBM Corp.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt)     "opal-psr: " fmt
@@ -14,14 +10,15 @@
 #include <linux/of.h>
 #include <linux/kobject.h>
 #include <linux/slab.h>
+#include <linux/sysfs.h>
 
 #include <asm/opal.h>
 
-DEFINE_MUTEX(psr_mutex);
+static DEFINE_MUTEX(psr_mutex);
 
 static struct kobject *psr_kobj;
 
-struct psr_attr {
+static struct psr_attr {
 	u32 handle;
 	struct kobj_attribute attr;
 } *psr_attrs;
@@ -54,16 +51,11 @@ static ssize_t psr_show(struct kobject *kobj, struct kobj_attribute *attr,
 			goto out;
 		}
 		ret = opal_error_code(opal_get_async_rc(msg));
-		if (!ret) {
-			ret = sprintf(buf, "%u\n", be32_to_cpu(psr));
-			if (ret < 0)
-				ret = -EIO;
-		}
+		if (!ret)
+			ret = sysfs_emit(buf, "%u\n", be32_to_cpu(psr));
 		break;
 	case OPAL_SUCCESS:
-		ret = sprintf(buf, "%u\n", be32_to_cpu(psr));
-		if (ret < 0)
-			ret = -EIO;
+		ret = sysfs_emit(buf, "%u\n", be32_to_cpu(psr));
 		break;
 	default:
 		ret = opal_error_code(ret);
@@ -136,10 +128,9 @@ void __init opal_psr_init(void)
 		return;
 	}
 
-	psr_attrs = kcalloc(of_get_child_count(psr), sizeof(*psr_attrs),
-			    GFP_KERNEL);
+	psr_attrs = kzalloc_objs(*psr_attrs, of_get_child_count(psr));
 	if (!psr_attrs)
-		return;
+		goto out_put_psr;
 
 	psr_kobj = kobject_create_and_add("psr", opal_kobj);
 	if (!psr_kobj) {
@@ -166,10 +157,14 @@ void __init opal_psr_init(void)
 		}
 		i++;
 	}
+	of_node_put(psr);
 
 	return;
 out_kobj:
+	of_node_put(node);
 	kobject_put(psr_kobj);
 out:
 	kfree(psr_attrs);
+out_put_psr:
+	of_node_put(psr);
 }

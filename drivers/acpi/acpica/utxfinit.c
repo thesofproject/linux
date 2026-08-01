@@ -3,7 +3,7 @@
  *
  * Module Name: utxfinit - External interfaces for ACPICA initialization
  *
- * Copyright (C) 2000 - 2018, Intel Corp.
+ * Copyright (C) 2000 - 2026, Intel Corp.
  *
  *****************************************************************************/
 
@@ -120,6 +120,18 @@ acpi_status ACPI_INIT_FUNCTION acpi_enable_subsystem(u32 flags)
 	 */
 	acpi_gbl_early_initialization = FALSE;
 
+	/*
+	 * Obtain a permanent mapping for the FACS. This is required for the
+	 * Global Lock and the Firmware Waking Vector
+	 */
+	if (!(flags & ACPI_NO_FACS_INIT)) {
+		status = acpi_tb_initialize_facs();
+		if (ACPI_FAILURE(status)) {
+			ACPI_WARNING((AE_INFO, "Could not map the FACS table"));
+			return_ACPI_STATUS(status);
+		}
+	}
+
 #if (!ACPI_REDUCED_HARDWARE)
 
 	/* Enable ACPI mode */
@@ -133,18 +145,6 @@ acpi_status ACPI_INIT_FUNCTION acpi_enable_subsystem(u32 flags)
 		status = acpi_enable();
 		if (ACPI_FAILURE(status)) {
 			ACPI_WARNING((AE_INFO, "AcpiEnable failed"));
-			return_ACPI_STATUS(status);
-		}
-	}
-
-	/*
-	 * Obtain a permanent mapping for the FACS. This is required for the
-	 * Global Lock and the Firmware Waking Vector
-	 */
-	if (!(flags & ACPI_NO_FACS_INIT)) {
-		status = acpi_tb_initialize_facs();
-		if (ACPI_FAILURE(status)) {
-			ACPI_WARNING((AE_INFO, "Could not map the FACS table"));
 			return_ACPI_STATUS(status);
 		}
 	}
@@ -211,24 +211,17 @@ acpi_status ACPI_INIT_FUNCTION acpi_initialize_objects(u32 flags)
 
 	ACPI_FUNCTION_TRACE(acpi_initialize_objects);
 
+#ifdef ACPI_OBSOLETE_BEHAVIOR
 	/*
-	 * This case handles the legacy option that groups all module-level
-	 * code blocks together and defers execution until all of the tables
-	 * are loaded. Execute all of these blocks at this time.
-	 * Execute any module-level code that was detected during the table
-	 * load phase.
-	 *
-	 * Note: this option is deprecated and will be eliminated in the
-	 * future. Use of this option can cause problems with AML code that
-	 * depends upon in-order immediate execution of module-level code.
+	 * 05/2019: Removed, initialization now happens at both object
+	 * creation and table load time
 	 */
-	acpi_ns_exec_module_code_list();
 
 	/*
 	 * Initialize the objects that remain uninitialized. This
 	 * runs the executable AML that may be part of the
-	 * declaration of these objects:
-	 * operation_regions, buffer_fields, Buffers, and Packages.
+	 * declaration of these objects: operation_regions, buffer_fields,
+	 * bank_fields, Buffers, and Packages.
 	 */
 	if (!(flags & ACPI_NO_OBJECT_INIT)) {
 		status = acpi_ns_initialize_objects();
@@ -236,6 +229,7 @@ acpi_status ACPI_INIT_FUNCTION acpi_initialize_objects(u32 flags)
 			return_ACPI_STATUS(status);
 		}
 	}
+#endif
 
 	/*
 	 * Initialize all device/region objects in the namespace. This runs

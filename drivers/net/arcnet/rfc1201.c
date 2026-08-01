@@ -35,6 +35,7 @@
 
 #include "arcdevice.h"
 
+MODULE_DESCRIPTION("ARCNet packet format (RFC 1201) module");
 MODULE_LICENSE("GPL");
 
 static __be16 type_trans(struct sk_buff *skb, struct net_device *dev);
@@ -234,7 +235,7 @@ static void rx(struct net_device *dev, int bufnum,
 		skb->protocol = type_trans(skb, dev);
 		netif_rx(skb);
 	} else {		/* split packet */
-		/* NOTE: MSDOS ARP packet correction should only need to
+		/* NOTE: MS-DOS ARP packet correction should only need to
 		 * apply to unsplit packets, since ARP packets are so short.
 		 *
 		 * My interpretation of the RFC1201 document is that if a

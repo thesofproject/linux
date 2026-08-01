@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  HID driver for some petalynx "special" devices
  *
@@ -9,10 +10,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 #include <linux/device.h>
@@ -22,7 +19,7 @@
 #include "hid-ids.h"
 
 /* Petalynx Maxter Remote has maximum for consumer page set too low */
-static __u8 *pl_report_fixup(struct hid_device *hdev, __u8 *rdesc,
+static const __u8 *pl_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 		unsigned int *rsize)
 {
 	if (*rsize >= 62 && rdesc[39] == 0x2a && rdesc[40] == 0xf5 &&
@@ -105,4 +102,5 @@ static struct hid_driver pl_driver = {
 };
 module_hid_driver(pl_driver);
 
+MODULE_DESCRIPTION("HID driver for some petalynx \"special\" devices");
 MODULE_LICENSE("GPL");

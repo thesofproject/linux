@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/pci.h>
 #include <linux/module.h>
-#include <linux/pci-aspm.h>
+#include <linux/of.h>
+#include <linux/of_platform.h>
+#include <linux/platform_device.h>
+
 #include "pci.h"
 
 static void pci_free_resources(struct pci_dev *dev)
 {
-	int i;
+	struct resource *res;
 
-	for (i = 0; i < PCI_NUM_RESOURCES; i++) {
-		struct resource *res = dev->resource + i;
+	pci_dev_for_each_resource(dev, res) {
 		if (res->parent)
 			release_resource(res);
 	}
@@ -19,21 +21,27 @@ static void pci_stop_dev(struct pci_dev *dev)
 {
 	pci_pme_active(dev, false);
 
-	if (dev->is_added) {
-		device_release_driver(&dev->dev);
-		pci_proc_detach_device(dev);
-		pci_remove_sysfs_dev_files(dev);
-		dev->is_added = 0;
-	}
+	if (!pci_dev_test_and_clear_added(dev))
+		return;
 
-	if (dev->bus->self)
-		pcie_aspm_exit_link_state(dev);
+	device_release_driver(&dev->dev);
+	pci_proc_detach_device(dev);
+	of_pci_remove_node(dev);
 }
 
 static void pci_destroy_dev(struct pci_dev *dev)
 {
-	if (!dev->dev.kobj.parent)
+	if (pci_dev_test_and_set_removed(dev))
 		return;
+
+	pci_doe_sysfs_teardown(dev);
+	pci_npem_remove(dev);
+
+	/*
+	 * While device is in D0 drop the device from TSM link operations
+	 * including unbind and disconnect (IDE + SPDM teardown).
+	 */
+	pci_tsm_destroy(dev);
 
 	device_del(&dev->dev);
 
@@ -41,6 +49,9 @@ static void pci_destroy_dev(struct pci_dev *dev)
 	list_del(&dev->bus_list);
 	up_write(&pci_bus_sem);
 
+	pci_doe_destroy(dev);
+	pci_ide_destroy(dev);
+	pcie_aspm_exit_link_state(dev);
 	pci_bridge_d3_update(dev);
 	pci_free_resources(dev);
 	put_device(&dev->dev);
@@ -54,8 +65,6 @@ void pci_remove_bus(struct pci_bus *bus)
 	list_del(&bus->node);
 	pci_bus_release_busn_res(bus);
 	up_write(&pci_bus_sem);
-	pci_remove_legacy_files(bus);
-
 	if (bus->ops->remove_bus)
 		bus->ops->remove_bus(bus);
 
@@ -115,6 +124,7 @@ static void pci_remove_bus_device(struct pci_dev *dev)
  */
 void pci_stop_and_remove_bus_device(struct pci_dev *dev)
 {
+	lockdep_assert_held(&pci_rescan_remove_lock);
 	pci_stop_bus_device(dev);
 	pci_remove_bus_device(dev);
 }
@@ -141,6 +151,8 @@ void pci_stop_root_bus(struct pci_bus *bus)
 					 &bus->devices, bus_list)
 		pci_stop_bus_device(child);
 
+	of_pci_remove_host_bridge_node(host_bridge);
+
 	/* stop the host bridge */
 	device_release_driver(&host_bridge->dev);
 }
@@ -158,10 +170,17 @@ void pci_remove_root_bus(struct pci_bus *bus)
 	list_for_each_entry_safe(child, tmp,
 				 &bus->devices, bus_list)
 		pci_remove_bus_device(child);
+
+#ifdef CONFIG_PCI_DOMAINS_GENERIC
+	/* Release domain_nr if it was dynamically allocated */
+	if (host_bridge->domain_nr == PCI_DOMAIN_NR_NOT_SET)
+		pci_bus_release_domain_nr(host_bridge->dev.parent, bus->domain_nr);
+#endif
+
 	pci_remove_bus(bus);
 	host_bridge->bus = NULL;
 
 	/* remove the host bridge */
-	device_unregister(&host_bridge->dev);
+	device_del(&host_bridge->dev);
 }
 EXPORT_SYMBOL_GPL(pci_remove_root_bus);

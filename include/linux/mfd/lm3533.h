@@ -1,14 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * lm3533.h -- LM3533 interface
  *
  * Copyright (C) 2011-2012 Texas Instruments
  *
  * Author: Johan Hovold <jhovold@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under  the terms of the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the License, or (at your
- * option) any later version.
  */
 
 #ifndef __LINUX_MFD_LM3533_H
@@ -20,6 +16,7 @@
 	DEVICE_ATTR(_name, S_IRUGO | S_IWUSR , show_##_name, store_##_name)
 
 struct device;
+struct gpio_desc;
 struct regmap;
 
 struct lm3533 {
@@ -27,7 +24,7 @@ struct lm3533 {
 
 	struct regmap *regmap;
 
-	int gpio_hwen;
+	struct gpio_desc *hwen;
 	int irq;
 
 	unsigned have_als:1;
@@ -73,8 +70,6 @@ enum lm3533_boost_ovp {
 };
 
 struct lm3533_platform_data {
-	int gpio_hwen;
-
 	enum lm3533_boost_ovp boost_ovp;
 	enum lm3533_boost_freq boost_freq;
 

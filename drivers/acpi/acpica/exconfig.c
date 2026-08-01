@@ -3,7 +3,7 @@
  *
  * Module Name: exconfig - Namespace reconfiguration (Load/Unload opcodes)
  *
- * Copyright (C) 2000 - 2018, Intel Corp.
+ * Copyright (C) 2000 - 2026, Intel Corp.
  *
  *****************************************************************************/
 
@@ -87,17 +87,49 @@ acpi_ex_load_table_op(struct acpi_walk_state *walk_state,
 	struct acpi_namespace_node *parent_node;
 	struct acpi_namespace_node *start_node;
 	struct acpi_namespace_node *parameter_node = NULL;
+	union acpi_operand_object *return_obj;
 	union acpi_operand_object *ddb_handle;
 	u32 table_index;
+	char oem_id[ACPI_OEM_ID_SIZE + 1];
+	char oem_table_id[ACPI_OEM_TABLE_ID_SIZE + 1];
 
 	ACPI_FUNCTION_TRACE(ex_load_table_op);
+
+	/* Create the return object */
+
+	return_obj = acpi_ut_create_integer_object((u64)0);
+	if (!return_obj) {
+		return_ACPI_STATUS(AE_NO_MEMORY);
+	}
+
+	*return_desc = return_obj;
+
+	/*
+	 * Validate OEM ID and OEM Table ID string lengths.
+	 * acpi_tb_find_table expects strings that can safely read
+	 * ACPI_OEM_ID_SIZE and ACPI_OEM_TABLE_ID_SIZE bytes.
+	 */
+	if ((operand[1]->string.length > ACPI_OEM_ID_SIZE) ||
+	    (operand[2]->string.length > ACPI_OEM_TABLE_ID_SIZE)) {
+		return_ACPI_STATUS(AE_AML_STRING_LIMIT);
+	}
+
+	/*
+	 * Copy OEM strings to local buffers with guaranteed null-termination.
+	 * This prevents heap-buffer-overflow when acpi_tb_find_table reads
+	 * ACPI_OEM_ID_SIZE/ACPI_OEM_TABLE_ID_SIZE bytes.
+	 */
+	memcpy(oem_id, operand[1]->string.pointer, operand[1]->string.length);
+	oem_id[operand[1]->string.length] = 0;
+	memcpy(oem_table_id, operand[2]->string.pointer,
+	       operand[2]->string.length);
+	oem_table_id[operand[2]->string.length] = 0;
 
 	/* Find the ACPI table in the RSDT/XSDT */
 
 	acpi_ex_exit_interpreter();
 	status = acpi_tb_find_table(operand[0]->string.pointer,
-				    operand[1]->string.pointer,
-				    operand[2]->string.pointer, &table_index);
+				    oem_id, oem_table_id, &table_index);
 	acpi_ex_enter_interpreter();
 	if (ACPI_FAILURE(status)) {
 		if (status != AE_NOT_FOUND) {
@@ -106,12 +138,6 @@ acpi_ex_load_table_op(struct acpi_walk_state *walk_state,
 
 		/* Table not found, return an Integer=0 and AE_OK */
 
-		ddb_handle = acpi_ut_create_integer_object((u64) 0);
-		if (!ddb_handle) {
-			return_ACPI_STATUS(AE_NO_MEMORY);
-		}
-
-		*return_desc = ddb_handle;
 		return_ACPI_STATUS(AE_OK);
 	}
 
@@ -174,12 +200,11 @@ acpi_ex_load_table_op(struct acpi_walk_state *walk_state,
 		return_ACPI_STATUS(status);
 	}
 
-	/* Complete the initialization/resolution of package objects */
+	/* Complete the initialization/resolution of new objects */
 
-	status = acpi_ns_walk_namespace(ACPI_TYPE_PACKAGE, ACPI_ROOT_OBJECT,
-					ACPI_UINT32_MAX, 0,
-					acpi_ns_init_one_package, NULL, NULL,
-					NULL);
+	acpi_ex_exit_interpreter();
+	acpi_ns_initialize_objects();
+	acpi_ex_enter_interpreter();
 
 	/* Parameter Data (optional) */
 
@@ -199,7 +224,13 @@ acpi_ex_load_table_op(struct acpi_walk_state *walk_state,
 		}
 	}
 
-	*return_desc = ddb_handle;
+	/* Remove the reference to ddb_handle created by acpi_ex_add_table above */
+
+	acpi_ut_remove_reference(ddb_handle);
+
+	/* Return -1 (non-zero) indicates success */
+
+	return_obj->integer.value = 0xFFFFFFFFFFFFFFFF;
 	return_ACPI_STATUS(status);
 }
 
@@ -250,7 +281,7 @@ acpi_ex_region_read(union acpi_operand_object *obj_desc, u32 length, u8 *buffer)
  *
  * PARAMETERS:  obj_desc        - Region or Buffer/Field where the table will be
  *                                obtained
- *              target          - Where a handle to the table will be stored
+ *              target          - Where the status of the load will be stored
  *              walk_state      - Current state
  *
  * RETURN:      Status
@@ -278,6 +309,20 @@ acpi_ex_load_op(union acpi_operand_object *obj_desc,
 	u32 length;
 
 	ACPI_FUNCTION_TRACE(ex_load_op);
+
+	if (target->common.descriptor_type == ACPI_DESC_TYPE_NAMED) {
+		target =
+		    acpi_ns_get_attached_object(ACPI_CAST_PTR
+						(struct acpi_namespace_node,
+						 target));
+	}
+	if (target->common.type != ACPI_TYPE_INTEGER) {
+		ACPI_ERROR((AE_INFO, "Type not integer: %X",
+			    target->common.type));
+		return_ACPI_STATUS(AE_AML_OPERAND_TYPE);
+	}
+
+	target->integer.value = 0;
 
 	/* Source Object can be either an op_region or a Buffer/Field */
 
@@ -412,7 +457,7 @@ acpi_ex_load_op(union acpi_operand_object *obj_desc,
 	acpi_ex_exit_interpreter();
 	status = acpi_tb_install_and_load_table(ACPI_PTR_TO_PHYSADDR(table),
 						ACPI_TABLE_ORIGIN_INTERNAL_VIRTUAL,
-						TRUE, &table_index);
+						table, TRUE, &table_index);
 	acpi_ex_enter_interpreter();
 	if (ACPI_FAILURE(status)) {
 
@@ -431,34 +476,22 @@ acpi_ex_load_op(union acpi_operand_object *obj_desc,
 	 */
 	status = acpi_ex_add_table(table_index, &ddb_handle);
 	if (ACPI_FAILURE(status)) {
-
-		/* On error, table_ptr was deallocated above */
-
 		return_ACPI_STATUS(status);
 	}
 
-	/* Complete the initialization/resolution of package objects */
+	/* Complete the initialization/resolution of new objects */
 
-	status = acpi_ns_walk_namespace(ACPI_TYPE_PACKAGE, ACPI_ROOT_OBJECT,
-					ACPI_UINT32_MAX, 0,
-					acpi_ns_init_one_package, NULL, NULL,
-					NULL);
+	acpi_ex_exit_interpreter();
+	acpi_ns_initialize_objects();
+	acpi_ex_enter_interpreter();
 
-	/* Store the ddb_handle into the Target operand */
-
-	status = acpi_ex_store(ddb_handle, target, walk_state);
-	if (ACPI_FAILURE(status)) {
-		(void)acpi_ex_unload_table(ddb_handle);
-
-		/* table_ptr was deallocated above */
-
-		acpi_ut_remove_reference(ddb_handle);
-		return_ACPI_STATUS(status);
-	}
-
-	/* Remove the reference by added by acpi_ex_store above */
+	/* Remove the reference to ddb_handle created by acpi_ex_add_table above */
 
 	acpi_ut_remove_reference(ddb_handle);
+
+	/* Return -1 (non-zero) indicates success */
+
+	target->integer.value = 0xFFFFFFFFFFFFFFFF;
 	return_ACPI_STATUS(status);
 }
 
@@ -488,6 +521,17 @@ acpi_status acpi_ex_unload_table(union acpi_operand_object *ddb_handle)
 	 * extremely rare if not completely unused.
 	 */
 	ACPI_WARNING((AE_INFO, "Received request to unload an ACPI table"));
+
+	/*
+	 * May 2018: Unload is no longer supported for the following reasons:
+	 * 1) A correct implementation on some hosts may not be possible.
+	 * 2) Other ACPI implementations do not correctly/fully support it.
+	 * 3) It requires host device driver support which does not exist.
+	 *    (To properly support namespace unload out from underneath.)
+	 * 4) This AML operator has never been seen in the field.
+	 */
+	ACPI_EXCEPTION((AE_INFO, AE_NOT_IMPLEMENTED,
+			"AML Unload operator is not supported"));
 
 	/*
 	 * Validate the handle

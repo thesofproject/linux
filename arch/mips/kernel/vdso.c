@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2015 Imagination Technologies
  * Author: Alex Smith <alex.smith@imgtec.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/binfmts.h>
@@ -13,28 +9,23 @@
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/ioport.h>
+#include <linux/kernel.h>
 #include <linux/mm.h>
+#include <linux/mman.h>
+#include <linux/random.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
-#include <linux/timekeeper_internal.h>
+#include <linux/vdso_datastore.h>
 
 #include <asm/abi.h>
 #include <asm/mips-cps.h>
+#include <asm/page.h>
 #include <asm/vdso.h>
+#include <asm/vdso/vdso.h>
+#include <vdso/helpers.h>
+#include <vdso/vsyscall.h>
 
-/* Kernel-provided data used by the VDSO. */
-static union mips_vdso_data vdso_data __page_aligned_data;
-
-/*
- * Mapping for the VDSO data/GIC pages. The real pages are mapped manually, as
- * what we map and where within the area they are mapped is determined at
- * runtime.
- */
-static struct page *no_pages[] = { NULL };
-static struct vm_special_mapping vdso_vvar_mapping = {
-	.name = "[vvar]",
-	.pages = no_pages,
-};
+static_assert(VDSO_NR_PAGES == __VDSO_PAGES);
 
 static void __init init_vdso_image(struct mips_vdso_image *image)
 {
@@ -67,53 +58,45 @@ static int __init init_vdso(void)
 }
 subsys_initcall(init_vdso);
 
-void update_vsyscall(struct timekeeper *tk)
+static unsigned long vdso_base(void)
 {
-	vdso_data_write_begin(&vdso_data);
+	unsigned long base = STACK_TOP;
 
-	vdso_data.xtime_sec = tk->xtime_sec;
-	vdso_data.xtime_nsec = tk->tkr_mono.xtime_nsec;
-	vdso_data.wall_to_mono_sec = tk->wall_to_monotonic.tv_sec;
-	vdso_data.wall_to_mono_nsec = tk->wall_to_monotonic.tv_nsec;
-	vdso_data.cs_shift = tk->tkr_mono.shift;
-
-	vdso_data.clock_mode = tk->tkr_mono.clock->archdata.vdso_clock_mode;
-	if (vdso_data.clock_mode != VDSO_CLOCK_NONE) {
-		vdso_data.cs_mult = tk->tkr_mono.mult;
-		vdso_data.cs_cycle_last = tk->tkr_mono.cycle_last;
-		vdso_data.cs_mask = tk->tkr_mono.mask;
+	if (IS_ENABLED(CONFIG_MIPS_FP_SUPPORT)) {
+		/* Skip the delay slot emulation page */
+		base += PAGE_SIZE;
 	}
 
-	vdso_data_write_end(&vdso_data);
-}
-
-void update_vsyscall_tz(void)
-{
-	if (vdso_data.clock_mode != VDSO_CLOCK_NONE) {
-		vdso_data.tz_minuteswest = sys_tz.tz_minuteswest;
-		vdso_data.tz_dsttime = sys_tz.tz_dsttime;
+	if (current->flags & PF_RANDOMIZE) {
+		base += get_random_u32_below(VDSO_RANDOMIZE_SIZE);
+		base = PAGE_ALIGN(base);
 	}
+
+	return base;
 }
 
 int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 {
 	struct mips_vdso_image *image = current->thread.abi->vdso;
 	struct mm_struct *mm = current->mm;
-	unsigned long gic_size, vvar_size, size, base, data_addr, vdso_addr, gic_pfn;
+	unsigned long gic_size, size, base, data_addr, vdso_addr, gic_pfn, gic_base;
 	struct vm_area_struct *vma;
 	int ret;
 
-	if (down_write_killable(&mm->mmap_sem))
+	if (mmap_write_lock_killable(mm))
 		return -EINTR;
 
-	/* Map delay slot emulation page */
-	base = mmap_region(NULL, STACK_TOP, PAGE_SIZE,
-			   VM_READ|VM_WRITE|VM_EXEC|
-			   VM_MAYREAD|VM_MAYWRITE|VM_MAYEXEC,
-			   0, NULL);
-	if (IS_ERR_VALUE(base)) {
-		ret = base;
-		goto out;
+	if (IS_ENABLED(CONFIG_MIPS_FP_SUPPORT)) {
+		unsigned long unused;
+
+		/* Map delay slot emulation page */
+		base = do_mmap(NULL, STACK_TOP, PAGE_SIZE, PROT_READ | PROT_EXEC,
+			       MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, 0, 0, &unused,
+			       NULL);
+		if (IS_ERR_VALUE(base)) {
+			ret = base;
+			goto out;
+		}
 	}
 
 	/*
@@ -125,42 +108,64 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	 * the counter registers at the start.
 	 */
 	gic_size = mips_gic_present() ? PAGE_SIZE : 0;
-	vvar_size = gic_size + PAGE_SIZE;
-	size = vvar_size + image->size;
+	size = gic_size + VDSO_NR_PAGES * PAGE_SIZE + image->size;
 
-	base = get_unmapped_area(NULL, 0, size, 0, 0);
+	/*
+	 * Find a region that's large enough for us to perform the
+	 * colour-matching alignment below.
+	 */
+	if (cpu_has_dc_aliases)
+		size += shm_align_mask + 1;
+
+	base = get_unmapped_area(NULL, vdso_base(), size, 0, 0);
 	if (IS_ERR_VALUE(base)) {
 		ret = base;
 		goto out;
 	}
 
-	data_addr = base + gic_size;
-	vdso_addr = data_addr + PAGE_SIZE;
+	/*
+	 * If we suffer from dcache aliasing, ensure that the VDSO data page
+	 * mapping is coloured the same as the kernel's mapping of that memory.
+	 * This ensures that when the kernel updates the VDSO data userland
+	 * will observe it without requiring cache invalidations.
+	 */
+	if (cpu_has_dc_aliases && IS_ENABLED(CONFIG_HAVE_GENERIC_VDSO)) {
+		base = __ALIGN_MASK(base, shm_align_mask);
+		base += ((unsigned long)vdso_k_time_data - gic_size) & shm_align_mask;
+	}
 
-	vma = _install_special_mapping(mm, base, vvar_size,
-				       VM_READ | VM_MAYREAD,
-				       &vdso_vvar_mapping);
-	if (IS_ERR(vma)) {
-		ret = PTR_ERR(vma);
-		goto out;
+	data_addr = base + gic_size;
+	vdso_addr = data_addr + VDSO_NR_PAGES * PAGE_SIZE;
+
+	if (IS_ENABLED(CONFIG_HAVE_GENERIC_VDSO)) {
+		vma = vdso_install_vvar_mapping(mm, data_addr);
+		if (IS_ERR(vma)) {
+			ret = PTR_ERR(vma);
+			goto out;
+		}
 	}
 
 	/* Map GIC user page. */
 	if (gic_size) {
-		gic_pfn = virt_to_phys(mips_gic_base + MIPS_GIC_USER_OFS) >> PAGE_SHIFT;
+		gic_base = (unsigned long)mips_gic_base + MIPS_GIC_USER_OFS;
+		gic_pfn = PFN_DOWN(__pa(gic_base));
+		static const struct vm_special_mapping gic_mapping = {
+			.name	= "[gic]",
+			.pages	= (struct page **) { NULL },
+		};
+
+		vma = _install_special_mapping(mm, base, gic_size, VM_READ | VM_MAYREAD,
+					       &gic_mapping);
+		if (IS_ERR(vma)) {
+			ret = PTR_ERR(vma);
+			goto out;
+		}
 
 		ret = io_remap_pfn_range(vma, base, gic_pfn, gic_size,
-					 pgprot_noncached(PAGE_READONLY));
+					 pgprot_noncached(vma->vm_page_prot));
 		if (ret)
 			goto out;
 	}
-
-	/* Map data page. */
-	ret = remap_pfn_range(vma, data_addr,
-			      virt_to_phys(&vdso_data) >> PAGE_SHIFT,
-			      PAGE_SIZE, PAGE_READONLY);
-	if (ret)
-		goto out;
 
 	/* Map VDSO image. */
 	vma = _install_special_mapping(mm, vdso_addr, image->size,
@@ -176,6 +181,6 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	ret = 0;
 
 out:
-	up_write(&mm->mmap_sem);
+	mmap_write_unlock(mm);
 	return ret;
 }

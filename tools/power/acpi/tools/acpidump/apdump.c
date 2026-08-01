@@ -3,7 +3,7 @@
  *
  * Module Name: apdump - Dump routines for ACPI tables (acpidump)
  *
- * Copyright (C) 2000 - 2018, Intel Corp.
+ * Copyright (C) 2000 - 2026, Intel Corp.
  *
  *****************************************************************************/
 
@@ -78,15 +78,18 @@ u8 ap_is_valid_checksum(struct acpi_table_header *table)
 		rsdp = ACPI_CAST_PTR(struct acpi_table_rsdp, table);
 		status = acpi_tb_validate_rsdp(rsdp);
 	} else {
-		status = acpi_tb_verify_checksum(table, table->length);
+		/* We don't have to check for a CDAT here, since CDAT is not in the RSDT/XSDT */
+
+		status = acpi_ut_verify_checksum(table, table->length);
 	}
 
 	if (ACPI_FAILURE(status)) {
 		fprintf(stderr, "%4.4s: Warning: wrong checksum in table\n",
 			table->signature);
+		return (FALSE);
 	}
 
-	return (AE_OK);
+	return (TRUE);
 }
 
 /******************************************************************************
@@ -289,14 +292,14 @@ int ap_dump_table_by_address(char *ascii_address)
 
 int ap_dump_table_by_name(char *signature)
 {
-	char local_signature[ACPI_NAME_SIZE + 1];
+	char local_signature[ACPI_NAMESEG_SIZE + 1];
 	u32 instance;
 	struct acpi_table_header *table;
 	acpi_physical_address address;
 	acpi_status status;
 	int table_status;
 
-	if (strlen(signature) != ACPI_NAME_SIZE) {
+	if (strlen(signature) != ACPI_NAMESEG_SIZE) {
 		fprintf(stderr,
 			"Invalid table signature [%s]: must be exactly 4 characters\n",
 			signature);
@@ -310,9 +313,9 @@ int ap_dump_table_by_name(char *signature)
 
 	/* To be friendly, handle tables whose signatures do not match the name */
 
-	if (ACPI_COMPARE_NAME(local_signature, "FADT")) {
+	if (ACPI_COMPARE_NAMESEG(local_signature, "FADT")) {
 		strcpy(local_signature, ACPI_SIG_FADT);
-	} else if (ACPI_COMPARE_NAME(local_signature, "MADT")) {
+	} else if (ACPI_COMPARE_NAMESEG(local_signature, "MADT")) {
 		strcpy(local_signature, ACPI_SIG_MADT);
 	}
 

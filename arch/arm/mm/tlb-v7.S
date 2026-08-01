@@ -1,23 +1,23 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  linux/arch/arm/mm/tlb-v7.S
  *
  *  Copyright (C) 1997-2002 Russell King
  *  Modified for ARMv7 by Catalin Marinas
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  *  ARM architecture version 6 TLB handling functions.
  *  These assume a split I/D TLB.
  */
 #include <linux/init.h>
 #include <linux/linkage.h>
+#include <linux/cfi_types.h>
 #include <asm/assembler.h>
 #include <asm/asm-offsets.h>
 #include <asm/page.h>
 #include <asm/tlbflush.h>
 #include "proc-macros.S"
+
+.arch armv7-a
 
 /*
  *	v7wbi_flush_user_tlb_range(start, end, vma)
@@ -26,13 +26,13 @@
  *
  *	- start - start address (may not be aligned)
  *	- end   - end address (exclusive, may not be aligned)
- *	- vma   - vma_struct describing address range
+ *	- vma   - vm_area_struct describing address range
  *
  *	It is assumed that:
  *	- the "Invalidate single entry" instruction will invalidate
  *	  both the I and the D TLBs on Harvard-style TLBs
  */
-ENTRY(v7wbi_flush_user_tlb_range)
+SYM_TYPED_FUNC_START(v7wbi_flush_user_tlb_range)
 	vma_vm_mm r3, r2			@ get vma->vm_mm
 	mmid	r3, r3				@ get vm_mm->context.id
 	dsb	ish
@@ -58,7 +58,7 @@ ENTRY(v7wbi_flush_user_tlb_range)
 	blo	1b
 	dsb	ish
 	ret	lr
-ENDPROC(v7wbi_flush_user_tlb_range)
+SYM_FUNC_END(v7wbi_flush_user_tlb_range)
 
 /*
  *	v7wbi_flush_kern_tlb_range(start,end)
@@ -68,7 +68,7 @@ ENDPROC(v7wbi_flush_user_tlb_range)
  *	- start - start address (may not be aligned)
  *	- end   - end address (exclusive, may not be aligned)
  */
-ENTRY(v7wbi_flush_kern_tlb_range)
+SYM_TYPED_FUNC_START(v7wbi_flush_kern_tlb_range)
 	dsb	ish
 	mov	r0, r0, lsr #PAGE_SHIFT		@ align address
 	mov	r1, r1, lsr #PAGE_SHIFT
@@ -87,9 +87,4 @@ ENTRY(v7wbi_flush_kern_tlb_range)
 	dsb	ish
 	isb
 	ret	lr
-ENDPROC(v7wbi_flush_kern_tlb_range)
-
-	__INIT
-
-	/* define struct cpu_tlb_fns (see <asm/tlbflush.h> and proc-macros.S) */
-	define_tlb_functions v7wbi, v7wbi_tlb_flags_up, flags_smp=v7wbi_tlb_flags_smp
+SYM_FUNC_END(v7wbi_flush_kern_tlb_range)

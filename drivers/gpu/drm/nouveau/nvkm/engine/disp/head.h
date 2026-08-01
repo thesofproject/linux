@@ -1,6 +1,7 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: MIT */
 #ifndef __NVKM_DISP_HEAD_H__
 #define __NVKM_DISP_HEAD_H__
+#include <nvif/object.h>
 #include "priv.h"
 
 struct nvkm_head {
@@ -26,12 +27,12 @@ struct nvkm_head {
 			u8 depth;
 		} or;
 	} arm, asy;
+
+	struct nvkm_object object;
 };
 
 int nvkm_head_new_(const struct nvkm_head_func *, struct nvkm_disp *, int id);
 void nvkm_head_del(struct nvkm_head **);
-int nvkm_head_mthd_scanoutpos(struct nvkm_object *,
-			      struct nvkm_head *, void *, u32);
 struct nvkm_head *nvkm_head_find(struct nvkm_disp *, int id);
 
 struct nvkm_head_func {
@@ -42,7 +43,16 @@ struct nvkm_head_func {
 	void (*vblank_put)(struct nvkm_head *);
 };
 
+int nv50_head_cnt(struct nvkm_disp *, unsigned long *);
+int nv50_head_new(struct nvkm_disp *, int id);
 void nv50_head_rgpos(struct nvkm_head *, u16 *, u16 *);
+
+int gf119_head_cnt(struct nvkm_disp *, unsigned long *);
+int gf119_head_new(struct nvkm_disp *, int id);
+void gf119_head_rgclk(struct nvkm_head *, int);
+
+int gv100_head_cnt(struct nvkm_disp *, unsigned long *);
+int gv100_head_new(struct nvkm_disp *, int id);
 
 #define HEAD_MSG(h,l,f,a...) do {                                              \
 	struct nvkm_head *_h = (h);                                            \
@@ -50,8 +60,4 @@ void nv50_head_rgpos(struct nvkm_head *, u16 *, u16 *);
 } while(0)
 #define HEAD_WARN(h,f,a...) HEAD_MSG((h), warn, f, ##a)
 #define HEAD_DBG(h,f,a...) HEAD_MSG((h), debug, f, ##a)
-
-int nv04_head_new(struct nvkm_disp *, int id);
-int nv50_head_new(struct nvkm_disp *, int id);
-int gf119_head_new(struct nvkm_disp *, int id);
 #endif

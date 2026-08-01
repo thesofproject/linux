@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2015, Cyril Bur, IBM Corp.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  *
  * This test attempts to see if the FPU registers change across a syscall (fork).
  */
@@ -18,12 +14,11 @@
 #include <stdlib.h>
 
 #include "utils.h"
+#include "fpu.h"
 
 extern int test_fpu(double *darray, pid_t *pid);
 
-double darray[] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,
-		     1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
-		     2.1};
+double darray[32];
 
 int syscall_fpu(void)
 {
@@ -31,6 +26,9 @@ int syscall_fpu(void)
 	int i;
 	int ret;
 	int child_ret;
+
+	randomise_darray(darray, ARRAY_SIZE(darray));
+
 	for (i = 0; i < 1000; i++) {
 		/* test_fpu will fork() */
 		ret = test_fpu(darray, &fork_pid);

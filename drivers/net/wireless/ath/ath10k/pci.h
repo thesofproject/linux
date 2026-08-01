@@ -1,24 +1,15 @@
+/* SPDX-License-Identifier: ISC */
 /*
  * Copyright (c) 2005-2011 Atheros Communications Inc.
  * Copyright (c) 2011-2017 Qualcomm Atheros, Inc.
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #ifndef _PCI_H_
 #define _PCI_H_
 
 #include <linux/interrupt.h>
+#include <linux/mutex.h>
 
 #include "hw.h"
 #include "ce.h"
@@ -86,54 +77,12 @@ struct pcie_state {
 /* PCIE_CONFIG_FLAG definitions */
 #define PCIE_CONFIG_FLAG_ENABLE_L1  0x0000001
 
-/* Host software's Copy Engine configuration. */
-#define CE_ATTR_FLAGS 0
-
-/*
- * Configuration information for a Copy Engine pipe.
- * Passed from Host to Target during startup (one per CE).
- *
- * NOTE: Structure is shared between Host software and Target firmware!
- */
-struct ce_pipe_config {
-	__le32 pipenum;
-	__le32 pipedir;
-	__le32 nentries;
-	__le32 nbytes_max;
-	__le32 flags;
-	__le32 reserved;
-};
-
-/*
- * Directions for interconnect pipe configuration.
- * These definitions may be used during configuration and are shared
- * between Host and Target.
- *
- * Pipe Directions are relative to the Host, so PIPEDIR_IN means
- * "coming IN over air through Target to Host" as with a WiFi Rx operation.
- * Conversely, PIPEDIR_OUT means "going OUT from Host through Target over air"
- * as with a WiFi Tx operation. This is somewhat awkward for the "middle-man"
- * Target since things that are "PIPEDIR_OUT" are coming IN to the Target
- * over the interconnect.
- */
-#define PIPEDIR_NONE    0
-#define PIPEDIR_IN      1  /* Target-->Host, WiFi Rx direction */
-#define PIPEDIR_OUT     2  /* Host->Target, WiFi Tx direction */
-#define PIPEDIR_INOUT   3  /* bidirectional */
-
-/* Establish a mapping between a service/direction and a pipe. */
-struct service_to_pipe {
-	__le32 service_id;
-	__le32 pipedir;
-	__le32 pipenum;
-};
-
 /* Per-pipe state. */
 struct ath10k_pci_pipe {
 	/* Handle of underlying Copy Engine */
 	struct ath10k_ce_pipe *ce_hdl;
 
-	/* Our pipe number; facilitiates use of pipe_info ptrs. */
+	/* Our pipe number; facilitates use of pipe_info ptrs. */
 	u8 pipe_num;
 
 	/* Convenience back pointer to hif_ce_state. */
@@ -152,7 +101,7 @@ struct ath10k_pci_supp_chip {
 
 enum ath10k_pci_irq_mode {
 	ATH10K_PCI_IRQ_AUTO = 0,
-	ATH10K_PCI_IRQ_LEGACY = 1,
+	ATH10K_PCI_IRQ_INTX = 1,
 	ATH10K_PCI_IRQ_MSI = 2,
 };
 
@@ -170,6 +119,10 @@ struct ath10k_pci {
 
 	/* Copy Engine used for Diagnostic Accesses */
 	struct ath10k_ce_pipe *ce_diag;
+	/* For protecting ce_diag */
+	struct mutex ce_diag_mutex;
+
+	struct work_struct dump_work;
 
 	struct ath10k_ce ce;
 	struct timer_list rx_post_retry;
@@ -226,11 +179,16 @@ struct ath10k_pci {
 	 */
 	u32 (*targ_cpu_to_ce_addr)(struct ath10k *ar, u32 addr);
 
+	struct ce_attr *attr;
+	struct ce_pipe_config *pipe_config;
+	struct ce_service_to_pipe *serv_to_pipe;
+
 	/* Keep this entry in the last, memory for struct ath10k_ahb is
 	 * allocated (ahb support enabled case) in the continuation of
 	 * this struct.
 	 */
-	struct ath10k_ahb ahb[0];
+	struct ath10k_ahb ahb[];
+
 };
 
 static inline struct ath10k_pci *ath10k_pci_priv(struct ath10k *ar)
@@ -249,7 +207,8 @@ static inline struct ath10k_pci *ath10k_pci_priv(struct ath10k *ar)
 #define CDC_WAR_DATA_CE     4
 
 /* Wait up to this many Ms for a Diagnostic Access CE operation to complete */
-#define DIAG_ACCESS_CE_TIMEOUT_MS 10
+#define DIAG_ACCESS_CE_TIMEOUT_US 10000 /* 10 ms */
+#define DIAG_ACCESS_CE_WAIT_US	50
 
 void ath10k_pci_write32(struct ath10k *ar, u32 offset, u32 value);
 void ath10k_pci_soc_write32(struct ath10k *ar, u32 addr, u32 val);
@@ -277,7 +236,6 @@ u16 ath10k_pci_hif_get_free_queue_number(struct ath10k *ar, u8 pipe);
 void ath10k_pci_hif_power_down(struct ath10k *ar);
 int ath10k_pci_alloc_pipes(struct ath10k *ar);
 void ath10k_pci_free_pipes(struct ath10k *ar);
-void ath10k_pci_free_pipes(struct ath10k *ar);
 void ath10k_pci_rx_replenish_retry(struct timer_list *t);
 void ath10k_pci_ce_deinit(struct ath10k *ar);
 void ath10k_pci_init_napi(struct ath10k *ar);
@@ -285,9 +243,9 @@ int ath10k_pci_init_pipes(struct ath10k *ar);
 int ath10k_pci_init_config(struct ath10k *ar);
 void ath10k_pci_rx_post(struct ath10k *ar);
 void ath10k_pci_flush(struct ath10k *ar);
-void ath10k_pci_enable_legacy_irq(struct ath10k *ar);
+void ath10k_pci_enable_intx_irq(struct ath10k *ar);
 bool ath10k_pci_irq_pending(struct ath10k *ar);
-void ath10k_pci_disable_and_clear_legacy_irq(struct ath10k *ar);
+void ath10k_pci_disable_and_clear_intx_irq(struct ath10k *ar);
 void ath10k_pci_irq_msi_fw_mask(struct ath10k *ar);
 int ath10k_pci_wait_for_target_init(struct ath10k *ar);
 int ath10k_pci_setup_resource(struct ath10k *ar);

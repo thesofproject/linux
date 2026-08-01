@@ -19,6 +19,7 @@
 
 #include <linux/if_ether.h>
 #include <linux/delay.h>
+#include <linux/gpio/consumer.h>
 #include <linux/io.h>
 #include <linux/firmware.h>
 
@@ -173,6 +174,7 @@
 #define ATH9K_NUM_QUEUES            10
 
 #define MAX_RATE_POWER              63
+#define MAX_COMBINED_POWER          254 /* 128 dBm, chosen to fit in u8 */
 #define AH_WAIT_TIMEOUT             100000 /* (us) */
 #define AH_TSF_WRITE_TIMEOUT        100    /* (us) */
 #define AH_TIME_QUANTUM             10
@@ -281,7 +283,7 @@ enum ath9k_hw_caps {
  * an exact user defined pattern or de-authentication/disassoc pattern.
  * @ATH9K_HW_WOW_PATTERN_MATCH_DWORD: device requires the first four
  * bytes of the pattern for user defined pattern, de-authentication and
- * disassociation patterns for all types of possible frames recieved
+ * disassociation patterns for all types of possible frames received
  * of those types.
  */
 
@@ -301,7 +303,6 @@ struct ath9k_hw_capabilities {
 	u8 max_rxchains;
 	u8 num_gpio_pins;
 	u32 gpio_mask;
-	u32 gpio_requested;
 	u8 rx_hp_qdepth;
 	u8 rx_lp_qdepth;
 	u8 rx_status_len;
@@ -426,6 +427,7 @@ enum ath9k_cal_flags {
 	TXIQCAL_DONE,
 	TXCLCAL_DONE,
 	SW_PKDET_DONE,
+	LONGCAL_PENDING,
 };
 
 struct ath9k_hw_cal_data {
@@ -708,7 +710,7 @@ struct ath_spec_scan {
 /**
  * struct ath_hw_ops - callbacks used by hardware code and driver code
  *
- * This structure contains callbacks designed to to be used internally by
+ * This structure contains callbacks designed to be used internally by
  * hardware code and also by the lower level driver.
  *
  * @config_pci_powersave:
@@ -781,6 +783,7 @@ struct ath_hw {
 	struct ath9k_hw_capabilities caps;
 	struct ath9k_channel channels[ATH9K_NUM_CHANNELS];
 	struct ath9k_channel *curchan;
+	struct gpio_desc *gpiods[32];
 
 	union {
 		struct ar5416_eeprom_def def;
@@ -818,6 +821,7 @@ struct ath_hw {
 	struct ath9k_pacal_info pacal_info;
 	struct ar5416Stats stats;
 	struct ath9k_tx_queue_info txq[ATH9K_NUM_TX_QUEUES];
+	DECLARE_BITMAP(pending_del_keymap, ATH_KEYMAX);
 
 	enum ath9k_int imask;
 	u32 imrs2_reg;
@@ -832,6 +836,7 @@ struct ath_hw {
 
 	/* Calibration */
 	u32 supp_cals;
+	unsigned long cal_start_time;
 	struct ath9k_cal_list iq_caldata;
 	struct ath9k_cal_list adcgain_caldata;
 	struct ath9k_cal_list adcdc_caldata;
@@ -969,10 +974,10 @@ struct ath_hw {
 	bool is_clk_25mhz;
 	int (*get_mac_revision)(void);
 	int (*external_reset)(void);
-	bool disable_2ghz;
-	bool disable_5ghz;
 
 	const struct firmware *eeprom_blob;
+	u16 *nvmem_blob;	/* devres managed */
+	size_t nvmem_blob_len;
 
 	struct ath_dynack dynack;
 
@@ -1060,7 +1065,7 @@ u32 ath9k_hw_gettsf32(struct ath_hw *ah);
 u64 ath9k_hw_gettsf64(struct ath_hw *ah);
 void ath9k_hw_settsf64(struct ath_hw *ah, u64 tsf64);
 void ath9k_hw_reset_tsf(struct ath_hw *ah);
-u32 ath9k_hw_get_tsf_offset(struct timespec *last, struct timespec *cur);
+u32 ath9k_hw_get_tsf_offset(ktime_t last, ktime_t cur);
 void ath9k_hw_set_tsfadjust(struct ath_hw *ah, bool set);
 void ath9k_hw_init_global_settings(struct ath_hw *ah);
 u32 ar9003_get_pll_sqsum_dvc(struct ath_hw *ah);

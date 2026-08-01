@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Backlight Driver for Intel-based Apples
  *
@@ -6,10 +7,6 @@
  *  Copyright (C) 2006 Nicolas Boichat <nicolas @boichat.ch>
  *  Copyright (C) 2006 Felipe Alfaro Solana <felipe_alfaro @linuxmail.org>
  *  Copyright (C) 2007 Julien BLACHE <jb@jblache.org>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  *
  *  This driver triggers SMIs which cause the firmware to change the
  *  backlight brightness. This is icky in many ways, but it's impractical to
@@ -27,7 +24,8 @@
 #include <linux/pci.h>
 #include <linux/acpi.h>
 #include <linux/atomic.h>
-#include <linux/apple_bl.h>
+#include <linux/platform_device.h>
+#include <acpi/video.h>
 
 static struct backlight_device *apple_backlight_device;
 
@@ -137,7 +135,7 @@ static const struct hw_data nvidia_chipset_data = {
 	.set_brightness = nvidia_chipset_set_brightness,
 };
 
-static int apple_bl_add(struct acpi_device *dev)
+static int apple_bl_probe(struct platform_device *pdev)
 {
 	struct backlight_properties props;
 	struct pci_dev *host;
@@ -196,13 +194,12 @@ static int apple_bl_add(struct acpi_device *dev)
 	return 0;
 }
 
-static int apple_bl_remove(struct acpi_device *dev)
+static void apple_bl_remove(struct platform_device *pdev)
 {
 	backlight_device_unregister(apple_backlight_device);
 
 	release_region(hw_data->iostart, hw_data->iolen);
 	hw_data = NULL;
-	return 0;
 }
 
 static const struct acpi_device_id apple_bl_ids[] = {
@@ -210,41 +207,30 @@ static const struct acpi_device_id apple_bl_ids[] = {
 	{"", 0},
 };
 
-static struct acpi_driver apple_bl_driver = {
-	.name = "Apple backlight",
-	.ids = apple_bl_ids,
-	.ops = {
-		.add = apple_bl_add,
-		.remove = apple_bl_remove,
+static struct platform_driver apple_bl_driver = {
+	.probe = apple_bl_probe,
+	.remove = apple_bl_remove,
+	.driver = {
+		.name = "Apple backlight",
+		.acpi_match_table = apple_bl_ids,
 	},
 };
 
-static atomic_t apple_bl_registered = ATOMIC_INIT(0);
-
-int apple_bl_register(void)
-{
-	if (atomic_xchg(&apple_bl_registered, 1) == 0)
-		return acpi_bus_register_driver(&apple_bl_driver);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(apple_bl_register);
-
-void apple_bl_unregister(void)
-{
-	if (atomic_xchg(&apple_bl_registered, 0) == 1)
-		acpi_bus_unregister_driver(&apple_bl_driver);
-}
-EXPORT_SYMBOL_GPL(apple_bl_unregister);
-
 static int __init apple_bl_init(void)
 {
-	return apple_bl_register();
+	/*
+	 * Use ACPI video detection code to see if this driver should register
+	 * or if another driver, e.g. the apple-gmux driver should be used.
+	 */
+	if (acpi_video_get_backlight_type() != acpi_backlight_vendor)
+		return -ENODEV;
+
+	return platform_driver_register(&apple_bl_driver);
 }
 
 static void __exit apple_bl_exit(void)
 {
-	apple_bl_unregister();
+	platform_driver_unregister(&apple_bl_driver);
 }
 
 module_init(apple_bl_init);

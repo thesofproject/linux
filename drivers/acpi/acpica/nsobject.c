@@ -173,6 +173,12 @@ void acpi_ns_detach_object(struct acpi_namespace_node *node)
 
 	obj_desc = node->object;
 
+	/* Alias nodes point directly to other namespace nodes; skip teardown */
+	if (node->flags & ANOBJ_IS_ALIAS) {
+		node->object = NULL;
+		return_VOID;
+	}
+
 	if (!obj_desc || (obj_desc->common.type == ACPI_TYPE_LOCAL_DATA)) {
 		return_VOID;
 	}
@@ -184,6 +190,10 @@ void acpi_ns_detach_object(struct acpi_namespace_node *node)
 		if (obj_desc->common.type == ACPI_TYPE_METHOD) {
 			ACPI_FREE(obj_desc->method.aml_start);
 		}
+	}
+
+	if (obj_desc->common.type == ACPI_TYPE_REGION) {
+		acpi_ut_remove_address_range(obj_desc->region.space_id, node);
 	}
 
 	/* Clear the Node entry in all cases */

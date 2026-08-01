@@ -79,6 +79,7 @@ static const char *rel_type(unsigned type)
 		REL_TYPE(R_MIPS_HIGHEST),
 		REL_TYPE(R_MIPS_PC21_S2),
 		REL_TYPE(R_MIPS_PC26_S2),
+		REL_TYPE(R_MIPS_PC32),
 #undef REL_TYPE
 	};
 	const char *name = "unknown type rel type name";
@@ -245,7 +246,7 @@ static void read_ehdr(FILE *fp)
 		die("Unknown ELF version\n");
 
 	if (ehdr.e_ehsize != sizeof(Elf_Ehdr))
-		die("Bad Elf header size\n");
+		die("Bad ELF header size\n");
 
 	if (ehdr.e_phentsize != sizeof(Elf_Phdr))
 		die("Bad program header entry\n");
@@ -351,7 +352,7 @@ static void read_symtabs(FILE *fp)
 
 static void read_relocs(FILE *fp)
 {
-	static unsigned long base = 0;
+	static unsigned long base;
 	int i, j;
 
 	if (!base) {
@@ -468,6 +469,8 @@ static void walk_relocs(int (*process)(struct section *sec, Elf_Rel *rel,
 			Elf_Sym *sym, const char *symname))
 {
 	int i;
+	struct section *extab_sec = sec_lookup("__ex_table");
+	int extab_index = extab_sec ? extab_sec - secs : -1;
 
 	/* Walk through the relocations */
 	for (i = 0; i < ehdr.e_shnum; i++) {
@@ -478,6 +481,9 @@ static void walk_relocs(int (*process)(struct section *sec, Elf_Rel *rel,
 		struct section *sec = &secs[i];
 
 		if (sec->shdr.sh_type != SHT_REL_TYPE)
+			continue;
+
+		if (sec->shdr.sh_info == extab_index)
 			continue;
 
 		sec_symtab  = sec->link;
@@ -517,6 +523,7 @@ static int do_reloc(struct section *sec, Elf_Rel *rel, Elf_Sym *sym,
 	case R_MIPS_PC16:
 	case R_MIPS_PC21_S2:
 	case R_MIPS_PC26_S2:
+	case R_MIPS_PC32:
 		/*
 		 * NONE can be ignored and PC relative relocations don't
 		 * need to be adjusted.

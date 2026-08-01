@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Header File to describe the DMA descriptors and related definitions specific
  * for DesignWare databook 4.xx.
  *
  * Copyright (C) 2015  STMicroelectronics Ltd
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  *
  * Author: Alexandre Torgue <alexandre.torgue@st.com>
  */
@@ -22,17 +19,19 @@
 #define TDES2_BUFFER1_SIZE_MASK		GENMASK(13, 0)
 #define TDES2_VLAN_TAG_MASK		GENMASK(15, 14)
 #define TDES2_BUFFER2_SIZE_MASK		GENMASK(29, 16)
-#define TDES2_BUFFER2_SIZE_MASK_SHIFT	16
+#define TDES3_IVTIR_MASK		GENMASK(19, 18)
+#define TDES3_IVLTV			BIT(17)
 #define TDES2_TIMESTAMP_ENABLE		BIT(30)
+#define TDES2_IVT_MASK			GENMASK(31, 16)
 #define TDES2_INTERRUPT_ON_COMPLETION	BIT(31)
 
 /* TDES3 (read format) */
 #define TDES3_PACKET_SIZE_MASK		GENMASK(14, 0)
+#define TDES3_VLAN_TAG			GENMASK(15, 0)
+#define TDES3_VLTV			BIT(16)
 #define TDES3_CHECKSUM_INSERTION_MASK	GENMASK(17, 16)
-#define TDES3_CHECKSUM_INSERTION_SHIFT	16
 #define TDES3_TCP_PKT_PAYLOAD_MASK	GENMASK(17, 0)
 #define TDES3_TCP_SEGMENTATION_ENABLE	BIT(18)
-#define TDES3_HDR_LEN_SHIFT		19
 #define TDES3_SLOT_NUMBER_MASK		GENMASK(22, 19)
 #define TDES3_SA_INSERT_CTRL_MASK	GENMASK(25, 23)
 #define TDES3_CRC_PAD_CTRL_MASK		GENMASK(27, 26)
@@ -43,7 +42,6 @@
 #define TDES3_UNDERFLOW_ERROR		BIT(2)
 #define TDES3_EXCESSIVE_DEFERRAL	BIT(3)
 #define TDES3_COLLISION_COUNT_MASK	GENMASK(7, 4)
-#define TDES3_COLLISION_COUNT_SHIFT	4
 #define TDES3_EXCESSIVE_COLLISION	BIT(8)
 #define TDES3_LATE_COLLISION		BIT(9)
 #define TDES3_NO_CARRIER		BIT(10)
@@ -67,6 +65,13 @@
 #define TDES3_CONTEXT_TYPE		BIT(30)
 #define	TDES3_CONTEXT_TYPE_SHIFT	30
 
+/* TDES4 */
+#define TDES4_LTV			BIT(31)
+#define TDES4_LT			GENMASK(7, 0)
+
+/* TDES5 */
+#define TDES5_LT			GENMASK(31, 8)
+
 /* TDS3 use for both format (read and write back) */
 #define TDES3_OWN			BIT(31)
 #define TDES3_OWN_SHIFT			31
@@ -82,7 +87,7 @@
 #define RDES1_IPV4_HEADER		BIT(4)
 #define RDES1_IPV6_HEADER		BIT(5)
 #define RDES1_IP_CSUM_BYPASSED		BIT(6)
-#define RDES1_IP_CSUM_ERROR		BIT(7)
+#define RDES1_IP_PAYLOAD_ERROR		BIT(7)
 #define RDES1_PTP_MSG_TYPE_MASK		GENMASK(11, 8)
 #define RDES1_PTP_PACKET_TYPE		BIT(12)
 #define RDES1_PTP_VER			BIT(13)
@@ -103,6 +108,7 @@
 #define RDES2_L4_FILTER_MATCH		BIT(28)
 #define RDES2_L3_L4_FILT_NB_MATCH_MASK	GENMASK(27, 26)
 #define RDES2_L3_L4_FILT_NB_MATCH_SHIFT	26
+#define RDES2_HL			GENMASK(9, 0)
 
 /* RDES3 (write back format) */
 #define RDES3_PACKET_SIZE_MASK		GENMASK(14, 0)
@@ -129,5 +135,8 @@
 
 /* TDS3 use for both format (read and write back) */
 #define RDES3_OWN			BIT(31)
+
+extern const struct stmmac_mode_ops dwmac4_ring_mode_ops;
+extern const struct stmmac_desc_ops dwmac4_desc_ops;
 
 #endif /* __DWMAC4_DESCS_H__ */

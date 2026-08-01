@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * LED driver for WM8350 driven LEDS.
  *
  * Copyright(C) 2007, 2008 Wolfson Microelectronics PLC.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/kernel.h>
@@ -246,13 +242,12 @@ static int wm8350_led_probe(struct platform_device *pdev)
 	return led_classdev_register(&pdev->dev, &led->cdev);
 }
 
-static int wm8350_led_remove(struct platform_device *pdev)
+static void wm8350_led_remove(struct platform_device *pdev)
 {
 	struct wm8350_led *led = platform_get_drvdata(pdev);
 
 	led_classdev_unregister(&led->cdev);
 	wm8350_led_disable(led);
-	return 0;
 }
 
 static struct platform_driver wm8350_led_driver = {

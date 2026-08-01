@@ -1,28 +1,22 @@
-/*
- * soc-ac97.c  --  ALSA SoC Audio Layer AC97 support
- *
- * Copyright 2005 Wolfson Microelectronics PLC.
- * Copyright 2005 Openedhand Ltd.
- * Copyright (C) 2010 Slimlogic Ltd.
- * Copyright (C) 2010 Texas Instruments Inc.
- *
- * Author: Liam Girdwood <lrg@slimlogic.co.uk>
- *         with code, comments and ideas from :-
- *         Richard Purdie <richard@openedhand.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// soc-ac97.c  --  ALSA SoC Audio Layer AC97 support
+//
+// Copyright 2005 Wolfson Microelectronics PLC.
+// Copyright 2005 Openedhand Ltd.
+// Copyright (C) 2010 Slimlogic Ltd.
+// Copyright (C) 2010 Texas Instruments Inc.
+//
+// Author: Liam Girdwood <lrg@slimlogic.co.uk>
+//         with code, comments and ideas from :-
+//         Richard Purdie <richard@openedhand.com>
 
 #include <linux/ctype.h>
 #include <linux/delay.h>
 #include <linux/export.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/gpio/driver.h>
 #include <linux/init.h>
-#include <linux/of_gpio.h>
 #include <linux/of.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/slab.h>
@@ -34,17 +28,9 @@ struct snd_ac97_reset_cfg {
 	struct pinctrl_state *pstate_reset;
 	struct pinctrl_state *pstate_warm_reset;
 	struct pinctrl_state *pstate_run;
-	int gpio_sdata;
-	int gpio_sync;
-	int gpio_reset;
-};
-
-struct snd_ac97_gpio_priv {
-#ifdef CONFIG_GPIOLIB
-	struct gpio_chip gpio_chip;
-#endif
-	unsigned int gpios_set;
-	struct snd_soc_component *component;
+	struct gpio_desc *reset_gpio;
+	struct gpio_desc *sdata_gpio;
+	struct gpio_desc *sync_gpio;
 };
 
 static struct snd_ac97_bus soc_ac97_bus = {
@@ -57,6 +43,12 @@ static void soc_ac97_device_release(struct device *dev)
 }
 
 #ifdef CONFIG_GPIOLIB
+struct snd_ac97_gpio_priv {
+	struct gpio_chip gpio_chip;
+	unsigned int gpios_set;
+	struct snd_soc_component *component;
+};
+
 static inline struct snd_soc_component *gpio_to_component(struct gpio_chip *chip)
 {
 	struct snd_ac97_gpio_priv *gpio_priv = gpiochip_get_data(chip);
@@ -64,7 +56,7 @@ static inline struct snd_soc_component *gpio_to_component(struct gpio_chip *chip
 	return gpio_priv->component;
 }
 
-static int snd_soc_ac97_gpio_request(struct gpio_chip *chip, unsigned offset)
+static int snd_soc_ac97_gpio_request(struct gpio_chip *chip, unsigned int offset)
 {
 	if (offset >= AC97_NUM_GPIOS)
 		return -EINVAL;
@@ -73,7 +65,7 @@ static int snd_soc_ac97_gpio_request(struct gpio_chip *chip, unsigned offset)
 }
 
 static int snd_soc_ac97_gpio_direction_in(struct gpio_chip *chip,
-					  unsigned offset)
+					  unsigned int offset)
 {
 	struct snd_soc_component *component = gpio_to_component(chip);
 
@@ -82,22 +74,21 @@ static int snd_soc_ac97_gpio_direction_in(struct gpio_chip *chip,
 				   1 << offset, 1 << offset);
 }
 
-static int snd_soc_ac97_gpio_get(struct gpio_chip *chip, unsigned offset)
+static int snd_soc_ac97_gpio_get(struct gpio_chip *chip, unsigned int offset)
 {
 	struct snd_soc_component *component = gpio_to_component(chip);
 	int ret;
 
-	if (snd_soc_component_read(component, AC97_GPIO_STATUS, &ret) < 0)
-		ret = -1;
+	ret = snd_soc_component_read(component, AC97_GPIO_STATUS);
 
 	dev_dbg(component->dev, "get gpio %d : %d\n", offset,
-		ret < 0 ? ret : ret & (1 << offset));
+		ret & (1 << offset));
 
-	return ret < 0 ? ret : !!(ret & (1 << offset));
+	return !!(ret & (1 << offset));
 }
 
-static void snd_soc_ac97_gpio_set(struct gpio_chip *chip, unsigned offset,
-				  int value)
+static int snd_soc_ac97_gpio_set(struct gpio_chip *chip, unsigned int offset,
+				 int value)
 {
 	struct snd_ac97_gpio_priv *gpio_priv = gpiochip_get_data(chip);
 	struct snd_soc_component *component = gpio_to_component(chip);
@@ -107,15 +98,22 @@ static void snd_soc_ac97_gpio_set(struct gpio_chip *chip, unsigned offset,
 	snd_soc_component_write(component, AC97_GPIO_STATUS,
 				gpio_priv->gpios_set);
 	dev_dbg(component->dev, "set gpio %d to %d\n", offset, !!value);
+
+	return 0;
 }
 
 static int snd_soc_ac97_gpio_direction_out(struct gpio_chip *chip,
 				     unsigned offset, int value)
 {
 	struct snd_soc_component *component = gpio_to_component(chip);
+	int ret;
 
 	dev_dbg(component->dev, "set gpio %d to output\n", offset);
-	snd_soc_ac97_gpio_set(chip, offset, value);
+
+	ret = snd_soc_ac97_gpio_set(chip, offset, value);
+	if (ret)
+		return ret;
+
 	return snd_soc_component_update_bits(component, AC97_GPIO_CFG,
 					     1 << offset, 0);
 }
@@ -177,13 +175,13 @@ static void snd_soc_ac97_free_gpio(struct snd_ac97 *ac97)
  * it. The caller is responsible to either call device_add(&ac97->dev) to
  * register the device, or to call put_device(&ac97->dev) to free the device.
  *
- * Returns: A snd_ac97 device or a PTR_ERR in case of an error.
+ * Returns: A snd_ac97 device or an ERR_PTR in case of an error.
  */
 struct snd_ac97 *snd_soc_alloc_ac97_component(struct snd_soc_component *component)
 {
 	struct snd_ac97 *ac97;
 
-	ac97 = kzalloc(sizeof(struct snd_ac97), GFP_KERNEL);
+	ac97 = kzalloc_obj(struct snd_ac97);
 	if (ac97 == NULL)
 		return ERR_PTR(-ENOMEM);
 
@@ -216,7 +214,7 @@ EXPORT_SYMBOL(snd_soc_alloc_ac97_component);
  * the device and check if it matches the expected ID. If it doesn't match an
  * error will be returned and device will not be registered.
  *
- * Returns: A PTR_ERR() on failure or a valid snd_ac97 struct on success.
+ * Returns: An ERR_PTR on failure or a valid snd_ac97 struct on success.
  */
 struct snd_ac97 *snd_soc_new_ac97_component(struct snd_soc_component *component,
 	unsigned int id, unsigned int id_mask)
@@ -276,11 +274,11 @@ static void snd_soc_ac97_warm_reset(struct snd_ac97 *ac97)
 
 	pinctrl_select_state(pctl, snd_ac97_rst_cfg.pstate_warm_reset);
 
-	gpio_direction_output(snd_ac97_rst_cfg.gpio_sync, 1);
+	gpiod_direction_output_raw(snd_ac97_rst_cfg.sync_gpio, 1);
 
 	udelay(10);
 
-	gpio_direction_output(snd_ac97_rst_cfg.gpio_sync, 0);
+	gpiod_direction_output_raw(snd_ac97_rst_cfg.sync_gpio, 0);
 
 	pinctrl_select_state(pctl, snd_ac97_rst_cfg.pstate_run);
 	msleep(2);
@@ -292,13 +290,13 @@ static void snd_soc_ac97_reset(struct snd_ac97 *ac97)
 
 	pinctrl_select_state(pctl, snd_ac97_rst_cfg.pstate_reset);
 
-	gpio_direction_output(snd_ac97_rst_cfg.gpio_sync, 0);
-	gpio_direction_output(snd_ac97_rst_cfg.gpio_sdata, 0);
-	gpio_direction_output(snd_ac97_rst_cfg.gpio_reset, 0);
+	gpiod_direction_output_raw(snd_ac97_rst_cfg.sync_gpio, 0);
+	gpiod_direction_output_raw(snd_ac97_rst_cfg.sdata_gpio, 0);
+	gpiod_direction_output_raw(snd_ac97_rst_cfg.reset_gpio, 0);
 
 	udelay(10);
 
-	gpio_direction_output(snd_ac97_rst_cfg.gpio_reset, 1);
+	gpiod_direction_output_raw(snd_ac97_rst_cfg.reset_gpio, 1);
 
 	pinctrl_select_state(pctl, snd_ac97_rst_cfg.pstate_run);
 	msleep(2);
@@ -309,8 +307,6 @@ static int snd_soc_ac97_parse_pinctl(struct device *dev,
 {
 	struct pinctrl *p;
 	struct pinctrl_state *state;
-	int gpio;
-	int ret;
 
 	p = devm_pinctrl_get(dev);
 	if (IS_ERR(p)) {
@@ -340,41 +336,20 @@ static int snd_soc_ac97_parse_pinctl(struct device *dev,
 	}
 	cfg->pstate_run = state;
 
-	gpio = of_get_named_gpio(dev->of_node, "ac97-gpios", 0);
-	if (gpio < 0) {
-		dev_err(dev, "Can't find ac97-sync gpio\n");
-		return gpio;
-	}
-	ret = devm_gpio_request(dev, gpio, "AC97 link sync");
-	if (ret) {
-		dev_err(dev, "Failed requesting ac97-sync gpio\n");
-		return ret;
-	}
-	cfg->gpio_sync = gpio;
+	cfg->sync_gpio = devm_gpiod_get_index(dev, "ac97", 0, GPIOD_ASIS);
+	if (IS_ERR(cfg->sync_gpio))
+		return dev_err_probe(dev, PTR_ERR(cfg->sync_gpio), "Can't find ac97-sync gpio\n");
+	gpiod_set_consumer_name(cfg->sync_gpio, "AC97 link sync");
 
-	gpio = of_get_named_gpio(dev->of_node, "ac97-gpios", 1);
-	if (gpio < 0) {
-		dev_err(dev, "Can't find ac97-sdata gpio %d\n", gpio);
-		return gpio;
-	}
-	ret = devm_gpio_request(dev, gpio, "AC97 link sdata");
-	if (ret) {
-		dev_err(dev, "Failed requesting ac97-sdata gpio\n");
-		return ret;
-	}
-	cfg->gpio_sdata = gpio;
+	cfg->sdata_gpio = devm_gpiod_get_index(dev, "ac97", 1, GPIOD_ASIS);
+	if (IS_ERR(cfg->sdata_gpio))
+		return dev_err_probe(dev, PTR_ERR(cfg->sdata_gpio), "Can't find ac97-sdata gpio\n");
+	gpiod_set_consumer_name(cfg->sdata_gpio, "AC97 link sdata");
 
-	gpio = of_get_named_gpio(dev->of_node, "ac97-gpios", 2);
-	if (gpio < 0) {
-		dev_err(dev, "Can't find ac97-reset gpio\n");
-		return gpio;
-	}
-	ret = devm_gpio_request(dev, gpio, "AC97 link reset");
-	if (ret) {
-		dev_err(dev, "Failed requesting ac97-reset gpio\n");
-		return ret;
-	}
-	cfg->gpio_reset = gpio;
+	cfg->reset_gpio = devm_gpiod_get_index(dev, "ac97", 2, GPIOD_ASIS);
+	if (IS_ERR(cfg->reset_gpio))
+		return dev_err_probe(dev, PTR_ERR(cfg->reset_gpio), "Can't find ac97-reset gpio\n");
+	gpiod_set_consumer_name(cfg->reset_gpio, "AC97 link reset");
 
 	return 0;
 }
@@ -399,6 +374,8 @@ EXPORT_SYMBOL_GPL(snd_soc_set_ac97_ops);
 
 /**
  * snd_soc_set_ac97_ops_of_reset - Set ac97 ops with generic ac97 reset functions
+ * @ops: bus ops
+ * @pdev: platform device
  *
  * This function sets the reset and warm_reset properties of ops and parses
  * the device node of pdev to get pinctrl states and gpio numbers to use.

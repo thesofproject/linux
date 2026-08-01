@@ -2,6 +2,8 @@
 /******************************************************************************
  * Xen balloon functionality
  */
+#ifndef _XEN_BALLOON_H
+#define _XEN_BALLOON_H
 
 #define RETRY_UNLIMITED	0
 
@@ -24,18 +26,8 @@ extern struct balloon_stats balloon_stats;
 
 void balloon_set_new_target(unsigned long target);
 
-int alloc_xenballooned_pages(int nr_pages, struct page **pages);
-void free_xenballooned_pages(int nr_pages, struct page **pages);
-
-struct device;
-#ifdef CONFIG_XEN_SELFBALLOONING
-extern int register_xen_selfballooning(struct device *dev);
-#else
-static inline int register_xen_selfballooning(struct device *dev)
-{
-	return -ENOSYS;
-}
-#endif
+int xen_alloc_ballooned_pages(unsigned int nr_pages, struct page **pages);
+void xen_free_ballooned_pages(unsigned int nr_pages, struct page **pages);
 
 #ifdef CONFIG_XEN_BALLOON
 void xen_balloon_init(void);
@@ -45,7 +37,4 @@ static inline void xen_balloon_init(void)
 }
 #endif
 
-#ifdef CONFIG_XEN_BALLOON_MEMORY_HOTPLUG
-struct resource;
-void arch_xen_balloon_init(struct resource *hostmem_resource);
-#endif
+#endif	/* _XEN_BALLOON_H */

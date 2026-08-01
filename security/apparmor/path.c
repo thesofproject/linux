@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AppArmor security module
  *
@@ -5,11 +6,6 @@
  *
  * Copyright (C) 1998-2008 Novell/SUSE
  * Copyright 2009-2010 Canonical Ltd.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation, version 2 of the
- * License.
  */
 
 #include <linux/magic.h>
@@ -87,7 +83,7 @@ static int disconnect(const struct path *path, char *buf, char **name,
  *
  * Returns: %0 else error code if path lookup fails
  *          When no error the path name is returned in @name which points to
- *          to a position in @buf
+ *          a position in @buf
  */
 static int d_namespace_path(const struct path *path, char *buf, char **name,
 			    int flags, const char *disconnected)
@@ -134,7 +130,7 @@ static int d_namespace_path(const struct path *path, char *buf, char **name,
 	/* handle error conditions - and still allow a partial path to
 	 * be returned.
 	 */
-	if (!res || IS_ERR(res)) {
+	if (IS_ERR_OR_NULL(res)) {
 		if (PTR_ERR(res) == -ENAMETOOLONG) {
 			error = -ENAMETOOLONG;
 			*name = buf;
@@ -146,7 +142,7 @@ static int d_namespace_path(const struct path *path, char *buf, char **name,
 			error = PTR_ERR(res);
 			*name = buf;
 			goto out;
-		};
+		}
 	} else if (!our_mnt(path->mnt))
 		connected = 0;
 
@@ -168,12 +164,17 @@ static int d_namespace_path(const struct path *path, char *buf, char **name,
 	}
 
 out:
-	/*
-	 * Append "/" to the pathname.  The root directory is a special
-	 * case; it already ends in slash.
+	/* Append "/" to directory paths and reterminate string, except for
+	 * root "/" which already ends in a slash.
 	 */
-	if (!error && isdir && ((*name)[1] != '\0' || (*name)[0] != '/'))
-		strcpy(&buf[aa_g_path_max - 2], "/");
+	if (!error && isdir) {
+		bool is_root = (*name)[0] == '/' && (*name)[1] == '\0';
+
+		if (!is_root) {
+			buf[aa_g_path_max - 2] = '/';
+			buf[aa_g_path_max - 1] = '\0';
+		}
+	}
 
 	return error;
 }

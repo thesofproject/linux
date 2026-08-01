@@ -3,7 +3,7 @@
  *
  * Module Name: psparse - Parser top level AML parse routines
  *
- * Copyright (C) 2000 - 2018, Intel Corp.
+ * Copyright (C) 2000 - 2026, Intel Corp.
  *
  *****************************************************************************/
 
@@ -70,6 +70,9 @@ u16 acpi_ps_peek_opcode(struct acpi_parse_state * parser_state)
 	u16 opcode;
 
 	aml = parser_state->aml;
+	if (aml >= parser_state->aml_end) {
+		return (0xFFFF);
+	}
 	opcode = (u16) ACPI_GET8(aml);
 
 	if (opcode == AML_EXTENDED_PREFIX) {
@@ -77,6 +80,9 @@ u16 acpi_ps_peek_opcode(struct acpi_parse_state * parser_state)
 		/* Extended opcode, get the second opcode byte */
 
 		aml++;
+		if (aml >= parser_state->aml_end) {
+			return (0xFFFF);
+		}
 		opcode = (u16) ((opcode << 8) | ACPI_GET8(aml));
 	}
 
@@ -300,6 +306,7 @@ acpi_ps_next_parse_state(struct acpi_walk_state *walk_state,
 {
 	struct acpi_parse_state *parser_state = &walk_state->parser_state;
 	acpi_status status = AE_CTRL_PENDING;
+	u8 *aml;
 
 	ACPI_FUNCTION_TRACE_PTR(ps_next_parse_state, op);
 
@@ -344,7 +351,14 @@ acpi_ps_next_parse_state(struct acpi_walk_state *walk_state,
 		 * Predicate of an IF was true, and we are at the matching ELSE.
 		 * Just close out this package
 		 */
+		aml = parser_state->aml;
+
 		parser_state->aml = acpi_ps_get_next_package_end(parser_state);
+		if ((parser_state->aml > parser_state->aml_end) ||
+		    (parser_state->aml < aml)) {
+			status = AE_AML_PACKAGE_LIMIT;
+			break;
+		}
 		status = AE_CTRL_PENDING;
 		break;
 
@@ -383,7 +397,7 @@ acpi_ps_next_parse_state(struct acpi_walk_state *walk_state,
 	default:
 
 		status = callback_status;
-		if ((callback_status & AE_CODE_MASK) == AE_CODE_CONTROL) {
+		if (ACPI_CNTL_EXCEPTION(callback_status)) {
 			status = AE_OK;
 		}
 		break;
@@ -479,6 +493,21 @@ acpi_status acpi_ps_parse_aml(struct acpi_walk_state *walk_state)
 				  "Completed one call to walk loop, %s State=%p\n",
 				  acpi_format_exception(status), walk_state));
 
+		if (walk_state->method_pathname && walk_state->method_is_nested) {
+
+			/* Optional object evaluation log */
+
+			ACPI_DEBUG_PRINT_RAW((ACPI_DB_EVALUATION,
+					      "%-26s:  %*s%s\n",
+					      "   Exit nested method",
+					      (walk_state->
+					       method_nesting_depth + 1) * 3,
+					      " ",
+					      &walk_state->method_pathname[1]));
+
+			ACPI_FREE(walk_state->method_pathname);
+			walk_state->method_is_nested = FALSE;
+		}
 		if (status == AE_CTRL_TRANSFER) {
 			/*
 			 * A method call was detected.
@@ -493,8 +522,8 @@ acpi_status acpi_ps_parse_aml(struct acpi_walk_state *walk_state)
 			}
 
 			/*
-			 * If the transfer to the new method method call worked
-			 *, a new walk state was created -- get it
+			 * If the transfer to the new method method call worked,
+			 * a new walk state was created -- get it
 			 */
 			walk_state = acpi_ds_get_current_walk_state(thread);
 			continue;
@@ -508,12 +537,12 @@ acpi_status acpi_ps_parse_aml(struct acpi_walk_state *walk_state)
 			if (status == AE_ABORT_METHOD) {
 				acpi_ns_print_node_pathname(walk_state->
 							    method_node,
-							    "Method aborted:");
+							    "Aborting method");
 				acpi_os_printf("\n");
 			} else {
-				ACPI_ERROR_METHOD
-				    ("Method parse/execution failed",
-				     walk_state->method_node, NULL, status);
+				ACPI_ERROR_METHOD("Aborting method",
+						  walk_state->method_node, NULL,
+						  status);
 			}
 			acpi_ex_enter_interpreter();
 

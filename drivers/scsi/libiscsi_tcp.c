@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * iSCSI over TCP/IP Data-Path lib
  *
@@ -7,18 +8,6 @@
  * Copyright (C) 2006 Red Hat, Inc.  All rights reserved.
  * maintained by open-iscsi@googlegroups.com
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published
- * by the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * See the file COPYING included with this distribution for more details.
- *
  * Credits:
  *	Christoph Hellwig
  *	FUJITA Tomonori
@@ -26,7 +15,7 @@
  *	Zhenyu Wang
  */
 
-#include <crypto/hash.h>
+#include <linux/crc32c.h>
 #include <linux/types.h>
 #include <linux/list.h>
 #include <linux/inet.h>
@@ -43,6 +32,7 @@
 #include <scsi/scsi_host.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_transport_iscsi.h>
+#include <trace/events/iscsi.h>
 
 #include "iscsi_tcp.h"
 
@@ -65,6 +55,9 @@ MODULE_PARM_DESC(debug_libiscsi_tcp, "Turn on debugging for libiscsi_tcp "
 			iscsi_conn_printk(KERN_INFO, _conn,	\
 					     "%s " dbg_fmt,	\
 					     __func__, ##arg);	\
+		iscsi_dbg_trace(trace_iscsi_dbg_tcp,		\
+				&(_conn)->cls_conn->dev,	\
+				"%s " dbg_fmt, __func__, ##arg);\
 	} while (0);
 
 static int iscsi_tcp_hdr_recv_done(struct iscsi_tcp_conn *tcp_conn,
@@ -125,12 +118,17 @@ static void iscsi_tcp_segment_map(struct iscsi_segment *segment, int recv)
 	BUG_ON(sg->length == 0);
 
 	/*
+	 * We always map for the recv path.
+	 *
 	 * If the page count is greater than one it is ok to send
 	 * to the network layer's zero copy send path. If not we
-	 * have to go the slow sendmsg path. We always map for the
-	 * recv path.
+	 * have to go the slow sendmsg path.
+	 *
+	 * Same goes for slab pages: skb_can_coalesce() allows
+	 * coalescing neighboring slab objects into a single frag which
+	 * triggers one of hardened usercopy checks.
 	 */
-	if (page_count(sg_page(sg)) >= 1 && !recv)
+	if (!recv && sendpage_ok(sg_page(sg)))
 		return;
 
 	if (recv) {
@@ -170,7 +168,7 @@ iscsi_tcp_segment_splice_digest(struct iscsi_segment *segment, void *digest)
 	segment->size = ISCSI_DIGEST_SIZE;
 	segment->copied = 0;
 	segment->sg = NULL;
-	segment->hash = NULL;
+	segment->crcp = NULL;
 }
 
 /**
@@ -193,29 +191,27 @@ int iscsi_tcp_segment_done(struct iscsi_tcp_conn *tcp_conn,
 			   struct iscsi_segment *segment, int recv,
 			   unsigned copied)
 {
-	struct scatterlist sg;
 	unsigned int pad;
 
 	ISCSI_DBG_TCP(tcp_conn->iscsi_conn, "copied %u %u size %u %s\n",
 		      segment->copied, copied, segment->size,
 		      recv ? "recv" : "xmit");
-	if (segment->hash && copied) {
-		/*
-		 * If a segment is kmapd we must unmap it before sending
-		 * to the crypto layer since that will try to kmap it again.
-		 */
-		iscsi_tcp_segment_unmap(segment);
+	if (segment->crcp && copied) {
+		if (segment->data) {
+			*segment->crcp = crc32c(*segment->crcp,
+						segment->data + segment->copied,
+						copied);
+		} else {
+			const void *data;
 
-		if (!segment->data) {
-			sg_init_table(&sg, 1);
-			sg_set_page(&sg, sg_page(segment->sg), copied,
-				    segment->copied + segment->sg_offset +
-							segment->sg->offset);
-		} else
-			sg_init_one(&sg, segment->data + segment->copied,
-				    copied);
-		ahash_request_set_crypt(segment->hash, &sg, NULL, copied);
-		crypto_ahash_update(segment->hash);
+			data = kmap_local_page(sg_page(segment->sg));
+			*segment->crcp = crc32c(*segment->crcp,
+						data + segment->copied +
+						segment->sg_offset +
+						segment->sg->offset,
+						copied);
+			kunmap_local(data);
+		}
 	}
 
 	segment->copied += copied;
@@ -260,10 +256,8 @@ int iscsi_tcp_segment_done(struct iscsi_tcp_conn *tcp_conn,
 	 * Set us up for transferring the data digest. hdr digest
 	 * is completely handled in hdr done function.
 	 */
-	if (segment->hash) {
-		ahash_request_set_crypt(segment->hash, NULL,
-					segment->digest, 0);
-		crypto_ahash_final(segment->hash);
+	if (segment->crcp) {
+		put_unaligned_le32(~*segment->crcp, segment->digest);
 		iscsi_tcp_segment_splice_digest(segment,
 				 recv ? segment->recv_digest : segment->digest);
 		return 0;
@@ -284,8 +278,7 @@ EXPORT_SYMBOL_GPL(iscsi_tcp_segment_done);
  * given buffer, and returns the number of bytes
  * consumed, which can actually be less than @len.
  *
- * If hash digest is enabled, the function will update the
- * hash while copying.
+ * If CRC is enabled, the function will update the CRC while copying.
  * Combining these two operations doesn't buy us a lot (yet),
  * but in the future we could implement combined copy+crc,
  * just way we do for network layer checksums.
@@ -313,14 +306,10 @@ iscsi_tcp_segment_recv(struct iscsi_tcp_conn *tcp_conn,
 }
 
 inline void
-iscsi_tcp_dgst_header(struct ahash_request *hash, const void *hdr,
-		      size_t hdrlen, unsigned char digest[ISCSI_DIGEST_SIZE])
+iscsi_tcp_dgst_header(const void *hdr, size_t hdrlen,
+		      unsigned char digest[ISCSI_DIGEST_SIZE])
 {
-	struct scatterlist sg;
-
-	sg_init_one(&sg, hdr, hdrlen);
-	ahash_request_set_crypt(hash, &sg, digest, hdrlen);
-	crypto_ahash_digest(hash);
+	put_unaligned_le32(~crc32c(~0, hdr, hdrlen), digest);
 }
 EXPORT_SYMBOL_GPL(iscsi_tcp_dgst_header);
 
@@ -345,24 +334,23 @@ iscsi_tcp_dgst_verify(struct iscsi_tcp_conn *tcp_conn,
  */
 static inline void
 __iscsi_segment_init(struct iscsi_segment *segment, size_t size,
-		     iscsi_segment_done_fn_t *done, struct ahash_request *hash)
+		     iscsi_segment_done_fn_t *done, u32 *crcp)
 {
 	memset(segment, 0, sizeof(*segment));
 	segment->total_size = size;
 	segment->done = done;
 
-	if (hash) {
-		segment->hash = hash;
-		crypto_ahash_init(hash);
+	if (crcp) {
+		segment->crcp = crcp;
+		*crcp = ~0;
 	}
 }
 
 inline void
 iscsi_segment_init_linear(struct iscsi_segment *segment, void *data,
-			  size_t size, iscsi_segment_done_fn_t *done,
-			  struct ahash_request *hash)
+			  size_t size, iscsi_segment_done_fn_t *done, u32 *crcp)
 {
-	__iscsi_segment_init(segment, size, done, hash);
+	__iscsi_segment_init(segment, size, done, crcp);
 	segment->data = data;
 	segment->size = size;
 }
@@ -372,13 +360,12 @@ inline int
 iscsi_segment_seek_sg(struct iscsi_segment *segment,
 		      struct scatterlist *sg_list, unsigned int sg_count,
 		      unsigned int offset, size_t size,
-		      iscsi_segment_done_fn_t *done,
-		      struct ahash_request *hash)
+		      iscsi_segment_done_fn_t *done, u32 *crcp)
 {
 	struct scatterlist *sg;
 	unsigned int i;
 
-	__iscsi_segment_init(segment, size, done, hash);
+	__iscsi_segment_init(segment, size, done, crcp);
 	for_each_sg(sg_list, sg, sg_count, i) {
 		if (offset < sg->length) {
 			iscsi_tcp_segment_init_sg(segment, sg, offset);
@@ -395,7 +382,7 @@ EXPORT_SYMBOL_GPL(iscsi_segment_seek_sg);
  * iscsi_tcp_hdr_recv_prep - prep segment for hdr reception
  * @tcp_conn: iscsi connection to prep for
  *
- * This function always passes NULL for the hash argument, because when this
+ * This function always passes NULL for the crcp argument, because when this
  * function is called we do not yet know the final size of the header and want
  * to delay the digest processing until we know that.
  */
@@ -436,15 +423,15 @@ static void
 iscsi_tcp_data_recv_prep(struct iscsi_tcp_conn *tcp_conn)
 {
 	struct iscsi_conn *conn = tcp_conn->iscsi_conn;
-	struct ahash_request *rx_hash = NULL;
+	u32 *rx_crcp = NULL;
 
 	if (conn->datadgst_en &&
 	    !(conn->session->tt->caps & CAP_DIGEST_OFFLOAD))
-		rx_hash = tcp_conn->rx_hash;
+		rx_crcp = tcp_conn->rx_crcp;
 
 	iscsi_segment_init_linear(&tcp_conn->in.segment,
 				conn->data, tcp_conn->in.datalen,
-				iscsi_tcp_data_recv_done, rx_hash);
+				iscsi_tcp_data_recv_done, rx_crcp);
 }
 
 /**
@@ -491,7 +478,7 @@ static int iscsi_tcp_data_in(struct iscsi_conn *conn, struct iscsi_task *task)
 	struct iscsi_tcp_task *tcp_task = task->dd_data;
 	struct iscsi_data_rsp *rhdr = (struct iscsi_data_rsp *)tcp_conn->in.hdr;
 	int datasn = be32_to_cpu(rhdr->datasn);
-	unsigned total_in_length = scsi_in(task->sc)->length;
+	unsigned total_in_length = task->sc->sdb.length;
 
 	/*
 	 * lib iscsi will update this in the completion handling if there
@@ -526,48 +513,83 @@ static int iscsi_tcp_data_in(struct iscsi_conn *conn, struct iscsi_task *task)
 /**
  * iscsi_tcp_r2t_rsp - iSCSI R2T Response processing
  * @conn: iscsi connection
- * @task: scsi command task
+ * @hdr: PDU header
  */
-static int iscsi_tcp_r2t_rsp(struct iscsi_conn *conn, struct iscsi_task *task)
+static int iscsi_tcp_r2t_rsp(struct iscsi_conn *conn, struct iscsi_hdr *hdr)
 {
 	struct iscsi_session *session = conn->session;
-	struct iscsi_tcp_task *tcp_task = task->dd_data;
-	struct iscsi_tcp_conn *tcp_conn = conn->dd_data;
-	struct iscsi_r2t_rsp *rhdr = (struct iscsi_r2t_rsp *)tcp_conn->in.hdr;
+	struct iscsi_tcp_task *tcp_task;
+	struct iscsi_tcp_conn *tcp_conn;
+	struct iscsi_r2t_rsp *rhdr;
 	struct iscsi_r2t_info *r2t;
-	int r2tsn = be32_to_cpu(rhdr->r2tsn);
+	struct iscsi_task *task;
 	u32 data_length;
 	u32 data_offset;
+	int r2tsn;
 	int rc;
+
+	spin_lock(&session->back_lock);
+	task = iscsi_itt_to_ctask(conn, hdr->itt);
+	if (!task) {
+		spin_unlock(&session->back_lock);
+		return ISCSI_ERR_BAD_ITT;
+	} else if (task->sc->sc_data_direction != DMA_TO_DEVICE) {
+		spin_unlock(&session->back_lock);
+		return ISCSI_ERR_PROTO;
+	}
+	/*
+	 * A bad target might complete the cmd before we have handled R2Ts
+	 * so get a ref to the task that will be dropped in the xmit path.
+	 */
+	if (task->state != ISCSI_TASK_RUNNING) {
+		spin_unlock(&session->back_lock);
+		/* Let the path that got the early rsp complete it */
+		return 0;
+	}
+	task->last_xfer = jiffies;
+	if (!iscsi_get_task(task)) {
+		spin_unlock(&session->back_lock);
+		/* Let the path that got the early rsp complete it */
+		return 0;
+	}
+
+	tcp_conn = conn->dd_data;
+	rhdr = (struct iscsi_r2t_rsp *)tcp_conn->in.hdr;
+	/* fill-in new R2T associated with the task */
+	iscsi_update_cmdsn(session, (struct iscsi_nopin *)rhdr);
+	spin_unlock(&session->back_lock);
 
 	if (tcp_conn->in.datalen) {
 		iscsi_conn_printk(KERN_ERR, conn,
 				  "invalid R2t with datalen %d\n",
 				  tcp_conn->in.datalen);
-		return ISCSI_ERR_DATALEN;
+		rc = ISCSI_ERR_DATALEN;
+		goto put_task;
 	}
 
+	tcp_task = task->dd_data;
+	r2tsn = be32_to_cpu(rhdr->r2tsn);
 	if (tcp_task->exp_datasn != r2tsn){
 		ISCSI_DBG_TCP(conn, "task->exp_datasn(%d) != rhdr->r2tsn(%d)\n",
 			      tcp_task->exp_datasn, r2tsn);
-		return ISCSI_ERR_R2TSN;
+		rc = ISCSI_ERR_R2TSN;
+		goto put_task;
 	}
 
-	/* fill-in new R2T associated with the task */
-	iscsi_update_cmdsn(session, (struct iscsi_nopin*)rhdr);
-
-	if (!task->sc || session->state != ISCSI_STATE_LOGGED_IN) {
+	if (session->state != ISCSI_STATE_LOGGED_IN) {
 		iscsi_conn_printk(KERN_INFO, conn,
 				  "dropping R2T itt %d in recovery.\n",
 				  task->itt);
-		return 0;
+		rc = 0;
+		goto put_task;
 	}
 
 	data_length = be32_to_cpu(rhdr->data_length);
 	if (data_length == 0) {
 		iscsi_conn_printk(KERN_ERR, conn,
 				  "invalid R2T with zero data len\n");
-		return ISCSI_ERR_DATALEN;
+		rc = ISCSI_ERR_DATALEN;
+		goto put_task;
 	}
 
 	if (data_length > session->max_burst)
@@ -576,12 +598,13 @@ static int iscsi_tcp_r2t_rsp(struct iscsi_conn *conn, struct iscsi_task *task)
 			      data_length, session->max_burst);
 
 	data_offset = be32_to_cpu(rhdr->data_offset);
-	if (data_offset + data_length > scsi_out(task->sc)->length) {
+	if (data_offset + data_length > task->sc->sdb.length) {
 		iscsi_conn_printk(KERN_ERR, conn,
 				  "invalid R2T with data len %u at offset %u "
 				  "and total length %d\n", data_length,
-				  data_offset, scsi_out(task->sc)->length);
-		return ISCSI_ERR_DATALEN;
+				  data_offset, task->sc->sdb.length);
+		rc = ISCSI_ERR_DATALEN;
+		goto put_task;
 	}
 
 	spin_lock(&tcp_task->pool2queue);
@@ -591,7 +614,8 @@ static int iscsi_tcp_r2t_rsp(struct iscsi_conn *conn, struct iscsi_task *task)
 				  "Target has sent more R2Ts than it "
 				  "negotiated for or driver has leaked.\n");
 		spin_unlock(&tcp_task->pool2queue);
-		return ISCSI_ERR_PROTO;
+		rc = ISCSI_ERR_PROTO;
+		goto put_task;
 	}
 
 	r2t->exp_statsn = rhdr->statsn;
@@ -609,6 +633,10 @@ static int iscsi_tcp_r2t_rsp(struct iscsi_conn *conn, struct iscsi_task *task)
 
 	iscsi_requeue_task(task);
 	return 0;
+
+put_task:
+	iscsi_put_task(task);
+	return rc;
 }
 
 /*
@@ -691,11 +719,11 @@ iscsi_tcp_hdr_dissect(struct iscsi_conn *conn, struct iscsi_hdr *hdr)
 
 		if (tcp_conn->in.datalen) {
 			struct iscsi_tcp_task *tcp_task = task->dd_data;
-			struct ahash_request *rx_hash = NULL;
-			struct scsi_data_buffer *sdb = scsi_in(task->sc);
+			u32 *rx_crcp = NULL;
+			struct scsi_data_buffer *sdb = &task->sc->sdb;
 
 			/*
-			 * Setup copy of Data-In into the Scsi_Cmnd
+			 * Setup copy of Data-In into the struct scsi_cmnd
 			 * Scatterlist case:
 			 * We set up the iscsi_segment to point to the next
 			 * scatterlist entry to copy to. As we go along,
@@ -704,7 +732,7 @@ iscsi_tcp_hdr_dissect(struct iscsi_conn *conn, struct iscsi_hdr *hdr)
 			 */
 			if (conn->datadgst_en &&
 			    !(conn->session->tt->caps & CAP_DIGEST_OFFLOAD))
-				rx_hash = tcp_conn->rx_hash;
+				rx_crcp = tcp_conn->rx_crcp;
 
 			ISCSI_DBG_TCP(conn, "iscsi_tcp_begin_data_in( "
 				     "offset=%d, datalen=%d)\n",
@@ -717,7 +745,7 @@ iscsi_tcp_hdr_dissect(struct iscsi_conn *conn, struct iscsi_hdr *hdr)
 						   tcp_task->data_offset,
 						   tcp_conn->in.datalen,
 						   iscsi_tcp_process_data_in,
-						   rx_hash);
+						   rx_crcp);
 			spin_unlock(&conn->session->back_lock);
 			return rc;
 		}
@@ -732,20 +760,11 @@ iscsi_tcp_hdr_dissect(struct iscsi_conn *conn, struct iscsi_hdr *hdr)
 		rc = iscsi_complete_pdu(conn, hdr, NULL, 0);
 		break;
 	case ISCSI_OP_R2T:
-		spin_lock(&conn->session->back_lock);
-		task = iscsi_itt_to_ctask(conn, hdr->itt);
-		spin_unlock(&conn->session->back_lock);
-		if (!task)
-			rc = ISCSI_ERR_BAD_ITT;
-		else if (ahslen)
+		if (ahslen) {
 			rc = ISCSI_ERR_AHSLEN;
-		else if (task->sc->sc_data_direction == DMA_TO_DEVICE) {
-			task->last_xfer = jiffies;
-			spin_lock(&conn->session->frwd_lock);
-			rc = iscsi_tcp_r2t_rsp(conn, task);
-			spin_unlock(&conn->session->frwd_lock);
-		} else
-			rc = ISCSI_ERR_PROTO;
+			break;
+		}
+		rc = iscsi_tcp_r2t_rsp(conn, hdr);
 		break;
 	case ISCSI_OP_LOGIN_RSP:
 	case ISCSI_OP_TEXT_RSP:
@@ -774,7 +793,7 @@ iscsi_tcp_hdr_dissect(struct iscsi_conn *conn, struct iscsi_hdr *hdr)
 			iscsi_tcp_data_recv_prep(tcp_conn);
 			return 0;
 		}
-	/* fall through */
+		fallthrough;
 	case ISCSI_OP_LOGOUT_RSP:
 	case ISCSI_OP_NOOP_IN:
 	case ISCSI_OP_SCSI_TMFUNC_RSP:
@@ -848,7 +867,7 @@ iscsi_tcp_hdr_recv_done(struct iscsi_tcp_conn *tcp_conn,
 			return 0;
 		}
 
-		iscsi_tcp_dgst_header(tcp_conn->rx_hash, hdr,
+		iscsi_tcp_dgst_header(hdr,
 				      segment->total_copied - ISCSI_DIGEST_SIZE,
 				      segment->digest);
 
@@ -901,7 +920,7 @@ int iscsi_tcp_recv_skb(struct iscsi_conn *conn, struct sk_buff *skb,
 	 */
 	conn->last_recv = jiffies;
 
-	if (unlikely(conn->suspend_rx)) {
+	if (unlikely(test_bit(ISCSI_CONN_FLAG_SUSPEND_RX, &conn->flags))) {
 		ISCSI_DBG_TCP(conn, "Rx suspended!\n");
 		*status = ISCSI_TCP_SUSPENDED;
 		return 0;

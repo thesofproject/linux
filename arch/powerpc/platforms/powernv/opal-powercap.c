@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * PowerNV OPAL Powercap interface
  *
  * Copyright 2017 IBM Corp.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt)     "opal-powercap: " fmt
@@ -14,10 +10,11 @@
 #include <linux/of.h>
 #include <linux/kobject.h>
 #include <linux/slab.h>
+#include <linux/sysfs.h>
 
 #include <asm/opal.h>
 
-DEFINE_MUTEX(powercap_mutex);
+static DEFINE_MUTEX(powercap_mutex);
 
 static struct kobject *powercap_kobj;
 
@@ -60,16 +57,11 @@ static ssize_t powercap_show(struct kobject *kobj, struct kobj_attribute *attr,
 			goto out;
 		}
 		ret = opal_error_code(opal_get_async_rc(msg));
-		if (!ret) {
-			ret = sprintf(buf, "%u\n", be32_to_cpu(pcap));
-			if (ret < 0)
-				ret = -EIO;
-		}
+		if (!ret)
+			ret = sysfs_emit(buf, "%u\n", be32_to_cpu(pcap));
 		break;
 	case OPAL_SUCCESS:
-		ret = sprintf(buf, "%u\n", be32_to_cpu(pcap));
-		if (ret < 0)
-			ret = -EIO;
+		ret = sysfs_emit(buf, "%u\n", be32_to_cpu(pcap));
 		break;
 	default:
 		ret = opal_error_code(ret);
@@ -133,7 +125,7 @@ out_token:
 	return ret;
 }
 
-static void powercap_add_attr(int handle, const char *name,
+static void __init powercap_add_attr(int handle, const char *name,
 			      struct powercap_attr *attr)
 {
 	attr->handle = handle;
@@ -154,10 +146,9 @@ void __init opal_powercap_init(void)
 		return;
 	}
 
-	pcaps = kcalloc(of_get_child_count(powercap), sizeof(*pcaps),
-			GFP_KERNEL);
+	pcaps = kzalloc_objs(*pcaps, of_get_child_count(powercap));
 	if (!pcaps)
-		return;
+		goto out_put_powercap;
 
 	powercap_kobj = kobject_create_and_add("powercap", opal_kobj);
 	if (!powercap_kobj) {
@@ -186,20 +177,24 @@ void __init opal_powercap_init(void)
 			has_cur = true;
 		}
 
-		pcaps[i].pattrs = kcalloc(j, sizeof(struct powercap_attr),
-					  GFP_KERNEL);
+		pcaps[i].pattrs = kzalloc_objs(struct powercap_attr, j);
 		if (!pcaps[i].pattrs)
 			goto out_pcaps_pattrs;
 
-		pcaps[i].pg.attrs = kcalloc(j + 1, sizeof(struct attribute *),
-					    GFP_KERNEL);
+		pcaps[i].pg.attrs = kzalloc_objs(struct attribute *, j + 1);
 		if (!pcaps[i].pg.attrs) {
 			kfree(pcaps[i].pattrs);
 			goto out_pcaps_pattrs;
 		}
 
 		j = 0;
-		pcaps[i].pg.name = node->name;
+		pcaps[i].pg.name = kasprintf(GFP_KERNEL, "%pOFn", node);
+		if (!pcaps[i].pg.name) {
+			kfree(pcaps[i].pattrs);
+			kfree(pcaps[i].pg.attrs);
+			goto out_pcaps_pattrs;
+		}
+
 		if (has_min) {
 			powercap_add_attr(min, "powercap-min",
 					  &pcaps[i].pattrs[j]);
@@ -230,6 +225,7 @@ void __init opal_powercap_init(void)
 		}
 		i++;
 	}
+	of_node_put(powercap);
 
 	return;
 
@@ -237,8 +233,12 @@ out_pcaps_pattrs:
 	while (--i >= 0) {
 		kfree(pcaps[i].pattrs);
 		kfree(pcaps[i].pg.attrs);
+		kfree(pcaps[i].pg.name);
 	}
 	kobject_put(powercap_kobj);
+	of_node_put(node);
 out_pcaps:
 	kfree(pcaps);
+out_put_powercap:
+	of_node_put(powercap);
 }

@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * helper functions for Asus Xonar cards
  *
  * Copyright (c) Clemens Ladisch <clemens@ladisch.de>
- *
- *
- *  This driver is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License, version 2.
- *
- *  This driver is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this driver; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/delay.h>
@@ -120,7 +109,7 @@ int xonar_gpio_bit_switch_put(struct snd_kcontrol *ctl,
 	u16 old_bits, new_bits;
 	int changed;
 
-	spin_lock_irq(&chip->reg_lock);
+	guard(spinlock_irq)(&chip->reg_lock);
 	old_bits = oxygen_read16(chip, OXYGEN_GPIO_DATA);
 	if (!!value->value.integer.value[0] ^ invert)
 		new_bits = old_bits | bit;
@@ -129,6 +118,5 @@ int xonar_gpio_bit_switch_put(struct snd_kcontrol *ctl,
 	changed = new_bits != old_bits;
 	if (changed)
 		oxygen_write16(chip, OXYGEN_GPIO_DATA, new_bits);
-	spin_unlock_irq(&chip->reg_lock);
 	return changed;
 }

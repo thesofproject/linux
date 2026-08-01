@@ -6,12 +6,13 @@
  *   Jan Glauber <jang@linux.vnet.ibm.com>
  */
 
-#define KMSG_COMPONENT "zpci"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "zpci: " fmt
 
 #include <linux/kernel.h>
 #include <linux/stat.h>
 #include <linux/pci.h>
+
+#include "../../../drivers/pci/pci.h"
 
 #include <asm/sclp.h>
 
@@ -21,7 +22,7 @@ static ssize_t name##_show(struct device *dev,				\
 {									\
 	struct zpci_dev *zdev = to_zpci(to_pci_dev(dev));		\
 									\
-	return sprintf(buf, fmt, zdev->member);				\
+	return sysfs_emit(buf, fmt, zdev->member);				\
 }									\
 static DEVICE_ATTR_RO(name)
 
@@ -31,45 +32,103 @@ zpci_attr(pchid, "0x%04x\n", pchid);
 zpci_attr(pfgid, "0x%02x\n", pfgid);
 zpci_attr(vfn, "0x%04x\n", vfn);
 zpci_attr(pft, "0x%02x\n", pft);
+zpci_attr(port, "%d\n", port);
+zpci_attr(fidparm, "0x%02x\n", fidparm);
 zpci_attr(uid, "0x%x\n", uid);
 zpci_attr(segment0, "0x%02x\n", pfip[0]);
 zpci_attr(segment1, "0x%02x\n", pfip[1]);
 zpci_attr(segment2, "0x%02x\n", pfip[2]);
 zpci_attr(segment3, "0x%02x\n", pfip[3]);
 
+#define ZPCI_FW_ATTR_RO(_name)						\
+	static struct kobj_attribute _name##_attr = __ATTR_RO(_name)
+
+static ssize_t mio_enabled_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct zpci_dev *zdev = to_zpci(to_pci_dev(dev));
+
+	return sysfs_emit(buf, zpci_use_mio(zdev) ? "1\n" : "0\n");
+}
+static DEVICE_ATTR_RO(mio_enabled);
+
+static int _do_recover(struct pci_dev *pdev, struct zpci_dev *zdev)
+{
+	int ret;
+
+	pci_stop_and_remove_bus_device(pdev);
+	if (zdev_enabled(zdev)) {
+		ret = zpci_disable_device(zdev);
+		/*
+		 * Due to a z/VM vs LPAR inconsistency in the error
+		 * state the FH may indicate an enabled device but
+		 * disable says the device is already disabled don't
+		 * treat it as an error here.
+		 */
+		if (ret == -EINVAL)
+			ret = 0;
+		if (ret)
+			return ret;
+	}
+
+	ret = zpci_reenable_device(zdev);
+
+	return ret;
+}
+
 static ssize_t recover_store(struct device *dev, struct device_attribute *attr,
 			     const char *buf, size_t count)
 {
+	struct kernfs_node *kn;
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct zpci_dev *zdev = to_zpci(pdev);
-	int ret;
+	int ret = 0;
 
-	if (!device_remove_file_self(dev, attr))
-		return count;
+	/* Can't use device_remove_self() here as that would lead us to lock
+	 * the pci_rescan_remove_lock while holding the device' kernfs lock.
+	 * This would create a possible deadlock with disable_slot() which is
+	 * not directly protected by the device' kernfs lock but takes it
+	 * during the device removal which happens under
+	 * pci_rescan_remove_lock.
+	 *
+	 * This is analogous to sdev_store_delete() in
+	 * drivers/scsi/scsi_sysfs.c
+	 */
+	kn = sysfs_break_active_protection(&dev->kobj, &attr->attr);
+	WARN_ON_ONCE(!kn);
 
+	/* Device needs to be configured and state must not change */
+	mutex_lock(&zdev->state_lock);
+	if (zdev->state != ZPCI_FN_STATE_CONFIGURED)
+		goto out;
+
+	/* device_remove_file() serializes concurrent calls ignoring all but
+	 * the first
+	 */
+	device_remove_file(dev, attr);
+
+	/* A concurrent call to recover_store() may slip between
+	 * sysfs_break_active_protection() and the sysfs file removal.
+	 * Once it unblocks from pci_lock_rescan_remove() the original pdev
+	 * will already be removed.
+	 */
 	pci_lock_rescan_remove();
-	pci_stop_and_remove_bus_device(pdev);
-	ret = zpci_disable_device(zdev);
-	if (ret)
-		goto error;
-
-	ret = zpci_enable_device(zdev);
-	if (ret)
-		goto error;
-
-	pci_rescan_bus(zdev->bus);
+	if (pci_dev_is_added(pdev)) {
+		ret = _do_recover(pdev, zdev);
+	}
+	pci_rescan_bus(zdev->zbus->bus);
 	pci_unlock_rescan_remove();
 
-	return count;
-
-error:
-	pci_unlock_rescan_remove();
-	return ret;
+out:
+	mutex_unlock(&zdev->state_lock);
+	if (kn)
+		sysfs_unbreak_active_protection(kn);
+	return ret ? ret : count;
 }
 static DEVICE_ATTR_WO(recover);
 
 static ssize_t util_string_read(struct file *filp, struct kobject *kobj,
-				struct bin_attribute *attr, char *buf,
+				const struct bin_attribute *attr, char *buf,
 				loff_t off, size_t count)
 {
 	struct device *dev = kobj_to_dev(kobj);
@@ -79,10 +138,10 @@ static ssize_t util_string_read(struct file *filp, struct kobject *kobj,
 	return memory_read_from_buffer(buf, count, &off, zdev->util_str,
 				       sizeof(zdev->util_str));
 }
-static BIN_ATTR_RO(util_string, CLP_UTIL_STR_LEN);
+static const BIN_ATTR_RO(util_string, CLP_UTIL_STR_LEN);
 
 static ssize_t report_error_write(struct file *filp, struct kobject *kobj,
-				  struct bin_attribute *attr, char *buf,
+				  const struct bin_attribute *attr, char *buf,
 				  loff_t off, size_t count)
 {
 	struct zpci_report_error_header *report = (void *) buf;
@@ -98,9 +157,64 @@ static ssize_t report_error_write(struct file *filp, struct kobject *kobj,
 
 	return ret ? ret : count;
 }
-static BIN_ATTR(report_error, S_IWUSR, NULL, report_error_write, PAGE_SIZE);
+static const BIN_ATTR(report_error, S_IWUSR, NULL, report_error_write, PAGE_SIZE);
 
-static struct bin_attribute *zpci_bin_attrs[] = {
+static ssize_t uid_is_unique_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", zpci_unique_uid ? 1 : 0);
+}
+static DEVICE_ATTR_RO(uid_is_unique);
+
+static ssize_t uid_checking_show(struct kobject *kobj,
+				 struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%d\n", zpci_unique_uid ? 1 : 0);
+}
+ZPCI_FW_ATTR_RO(uid_checking);
+
+/* analogous to smbios index */
+static ssize_t index_show(struct device *dev,
+			  struct device_attribute *attr, char *buf)
+{
+	struct zpci_dev *zdev = to_zpci(to_pci_dev(dev));
+	u32 index = ~0;
+
+	if (zpci_unique_uid)
+		index = zdev->uid;
+
+	return sysfs_emit(buf, "%u\n", index);
+}
+static DEVICE_ATTR_RO(index);
+
+static ssize_t zpci_uid_slot_show(struct pci_slot *slot, char *buf)
+{
+	struct zpci_dev *zdev = container_of(slot->hotplug, struct zpci_dev,
+					     hotplug_slot);
+
+	return sysfs_emit(buf, "0x%x\n", zdev->uid);
+}
+
+static struct pci_slot_attribute zpci_slot_attr_uid =
+	__ATTR(uid, 0444, zpci_uid_slot_show, NULL);
+
+static umode_t zpci_index_is_visible(struct kobject *kobj,
+				     struct attribute *attr, int n)
+{
+	return zpci_unique_uid ? attr->mode : 0;
+}
+
+static struct attribute *zpci_ident_attrs[] = {
+	&dev_attr_index.attr,
+	NULL,
+};
+
+const struct attribute_group zpci_ident_attr_group = {
+	.attrs = zpci_ident_attrs,
+	.is_visible = zpci_index_is_visible,
+};
+
+static const struct bin_attribute *const zpci_bin_attrs[] = {
 	&bin_attr_util_string,
 	&bin_attr_report_error,
 	NULL,
@@ -112,12 +226,17 @@ static struct attribute *zpci_dev_attrs[] = {
 	&dev_attr_pchid.attr,
 	&dev_attr_pfgid.attr,
 	&dev_attr_pft.attr,
+	&dev_attr_port.attr,
+	&dev_attr_fidparm.attr,
 	&dev_attr_vfn.attr,
 	&dev_attr_uid.attr,
 	&dev_attr_recover.attr,
+	&dev_attr_mio_enabled.attr,
+	&dev_attr_uid_is_unique.attr,
 	NULL,
 };
-static struct attribute_group zpci_attr_group = {
+
+const struct attribute_group zpci_attr_group = {
 	.attrs = zpci_dev_attrs,
 	.bin_attrs = zpci_bin_attrs,
 };
@@ -129,13 +248,32 @@ static struct attribute *pfip_attrs[] = {
 	&dev_attr_segment3.attr,
 	NULL,
 };
-static struct attribute_group pfip_attr_group = {
+
+const struct attribute_group pfip_attr_group = {
 	.name = "pfip",
 	.attrs = pfip_attrs,
 };
 
-const struct attribute_group *zpci_attr_groups[] = {
-	&zpci_attr_group,
-	&pfip_attr_group,
+static struct attribute *zpci_slot_attrs[] = {
+	&zpci_slot_attr_uid.attr,
 	NULL,
 };
+
+const struct attribute_group zpci_slot_attr_group = {
+	.attrs = zpci_slot_attrs,
+};
+
+static struct attribute *clp_fw_attrs[] = {
+	&uid_checking_attr.attr,
+	NULL,
+};
+
+static struct attribute_group clp_fw_attr_group = {
+	.name = "clp",
+	.attrs = clp_fw_attrs,
+};
+
+int __init __zpci_fw_sysfs_init(void)
+{
+	return sysfs_create_group(firmware_kobj, &clp_fw_attr_group);
+}

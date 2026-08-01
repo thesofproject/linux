@@ -62,6 +62,7 @@ EXPORT_SYMBOL(agp_find_bridge);
 
 /**
  *	agp_backend_acquire  -  attempt to acquire an agp backend.
+ *	@pdev: the PCI device
  *
  */
 struct agp_bridge_data *agp_backend_acquire(struct pci_dev *pdev)
@@ -83,6 +84,7 @@ EXPORT_SYMBOL(agp_backend_acquire);
 
 /**
  *	agp_backend_release  -  release the lock on the agp backend.
+ *	@bridge: the AGP backend to release
  *
  *	The caller must insure that the graphics aperture translation table
  *	is read for use by another entity.
@@ -115,9 +117,9 @@ static int agp_find_max(void)
 	long memory, index, result;
 
 #if PAGE_SHIFT < 20
-	memory = totalram_pages >> (20 - PAGE_SHIFT);
+	memory = totalram_pages() >> (20 - PAGE_SHIFT);
 #else
-	memory = totalram_pages << (PAGE_SHIFT - 20);
+	memory = totalram_pages() << (PAGE_SHIFT - 20);
 #endif
 	index = 1;
 
@@ -236,7 +238,7 @@ struct agp_bridge_data *agp_alloc_bridge(void)
 {
 	struct agp_bridge_data *bridge;
 
-	bridge = kzalloc(sizeof(*bridge), GFP_KERNEL);
+	bridge = kzalloc_obj(*bridge);
 	if (!bridge)
 		return NULL;
 
@@ -291,13 +293,6 @@ int agp_add_bridge(struct agp_bridge_data *bridge)
 	}
 
 	if (list_empty(&agp_bridges)) {
-		error = agp_frontend_initialize();
-		if (error) {
-			dev_info(&bridge->dev->dev,
-				 "agp_frontend_initialize() failed\n");
-			goto frontend_err;
-		}
-
 		dev_info(&bridge->dev->dev, "AGP aperture is %dM @ 0x%lx\n",
 			 bridge->driver->fetch_size(), bridge->gart_bus_addr);
 
@@ -306,8 +301,6 @@ int agp_add_bridge(struct agp_bridge_data *bridge)
 	list_add(&bridge->list, &agp_bridges);
 	return 0;
 
-frontend_err:
-	agp_backend_cleanup(bridge);
 err_out:
 	module_put(bridge->driver->owner);
 err_put_bridge:
@@ -321,8 +314,6 @@ void agp_remove_bridge(struct agp_bridge_data *bridge)
 {
 	agp_backend_cleanup(bridge);
 	list_del(&bridge->list);
-	if (list_empty(&agp_bridges))
-		agp_frontend_cleanup();
 	module_put(bridge->driver->owner);
 }
 EXPORT_SYMBOL_GPL(agp_remove_bridge);
@@ -331,18 +322,6 @@ int agp_off;
 int agp_try_unsupported_boot;
 EXPORT_SYMBOL(agp_off);
 EXPORT_SYMBOL(agp_try_unsupported_boot);
-
-static int __init agp_init(void)
-{
-	if (!agp_off)
-		printk(KERN_INFO "Linux agpgart interface v%d.%d\n",
-			AGPGART_VERSION_MAJOR, AGPGART_VERSION_MINOR);
-	return 0;
-}
-
-static void __exit agp_exit(void)
-{
-}
 
 #ifndef MODULE
 static __init int agp_setup(char *s)
@@ -360,7 +339,3 @@ MODULE_AUTHOR("Dave Jones, Jeff Hartmann");
 MODULE_DESCRIPTION("AGP GART driver");
 MODULE_LICENSE("GPL and additional rights");
 MODULE_ALIAS_MISCDEV(AGPGART_MINOR);
-
-module_init(agp_init);
-module_exit(agp_exit);
-

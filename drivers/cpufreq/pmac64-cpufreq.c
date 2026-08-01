@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 2002 - 2005 Benjamin Herrenschmidt <benh@kernel.crashing.org>
  *  and                       Markus Demleitner <msdemlei@cl.uni-heidelberg.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * This driver adds basic cpufreq support for SMU & 970FX based G5 Macs,
  * that is iMac G5 and latest single CPU desktop.
@@ -24,8 +21,8 @@
 #include <linux/init.h>
 #include <linux/completion.h>
 #include <linux/mutex.h>
-#include <linux/of_device.h>
-#include <asm/prom.h>
+#include <linux/of.h>
+
 #include <asm/machdep.h>
 #include <asm/irq.h>
 #include <asm/sections.h>
@@ -324,7 +321,8 @@ static unsigned int g5_cpufreq_get_speed(unsigned int cpu)
 
 static int g5_cpufreq_cpu_init(struct cpufreq_policy *policy)
 {
-	return cpufreq_generic_init(policy, g5_cpu_freqs, transition_latency);
+	cpufreq_generic_init(policy, g5_cpu_freqs, transition_latency);
+	return 0;
 }
 
 static struct cpufreq_driver g5_cpufreq_driver = {
@@ -334,7 +332,6 @@ static struct cpufreq_driver g5_cpufreq_driver = {
 	.verify		= cpufreq_generic_frequency_table_verify,
 	.target_index	= g5_cpufreq_target,
 	.get		= g5_cpufreq_get_speed,
-	.attr 		= cpufreq_generic_attr,
 };
 
 
@@ -411,6 +408,7 @@ static int __init g5_neo2_cpufreq_init(struct device_node *cpunode)
 		pfunc_set_vdnap0 = pmf_find_function(root, "set-vdnap0");
 		pfunc_vdnap0_complete =
 			pmf_find_function(root, "slewing-done");
+		of_node_put(root);
 		if (pfunc_set_vdnap0 == NULL ||
 		    pfunc_vdnap0_complete == NULL) {
 			pr_err("Can't find required platform function\n");
@@ -506,7 +504,7 @@ static int __init g5_pm72_cpufreq_init(struct device_node *cpunode)
 			continue;
 		if (strcmp(loc, "CPU CLOCK"))
 			continue;
-		if (!of_get_property(hwclock, "platform-get-frequency", NULL))
+		if (!of_property_present(hwclock, "platform-get-frequency"))
 			continue;
 		break;
 	}
@@ -672,4 +670,5 @@ static int __init g5_cpufreq_init(void)
 module_init(g5_cpufreq_init);
 
 
+MODULE_DESCRIPTION("cpufreq driver for SMU & 970FX based G5 Macs");
 MODULE_LICENSE("GPL");

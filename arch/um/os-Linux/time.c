@@ -1,158 +1,103 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2015 Anton Ivanov (aivanov@{brocade.com,kot-begemot.co.uk})
  * Copyright (C) 2015 Thomas Meyer (thomas@m3y3r.de)
  * Copyright (C) 2012-2014 Cisco Systems
  * Copyright (C) 2000 - 2007 Jeff Dike (jdike{addtoit,linux.intel}.com)
- * Licensed under the GPL
  */
 
 #include <stddef.h>
+#include <unistd.h>
 #include <errno.h>
 #include <signal.h>
 #include <time.h>
+#include <sys/signalfd.h>
 #include <sys/time.h>
 #include <kern_util.h>
 #include <os.h>
+#include <smp.h>
 #include <string.h>
-#include <timer-internal.h>
+#include "internal.h"
 
-static timer_t event_high_res_timer = 0;
-
-static inline long long timeval_to_ns(const struct timeval *tv)
-{
-	return ((long long) tv->tv_sec * UM_NSEC_PER_SEC) +
-		tv->tv_usec * UM_NSEC_PER_USEC;
-}
+static timer_t event_high_res_timer[CONFIG_NR_CPUS] = { 0 };
 
 static inline long long timespec_to_ns(const struct timespec *ts)
 {
-	return ((long long) ts->tv_sec * UM_NSEC_PER_SEC) +
-		ts->tv_nsec;
+	return ((long long) ts->tv_sec * UM_NSEC_PER_SEC) + ts->tv_nsec;
 }
 
-long long os_persistent_clock_emulation (void) {
+long long os_persistent_clock_emulation(void)
+{
 	struct timespec realtime_tp;
 
 	clock_gettime(CLOCK_REALTIME, &realtime_tp);
 	return timespec_to_ns(&realtime_tp);
 }
 
+#ifndef sigev_notify_thread_id
+#define sigev_notify_thread_id _sigev_un._tid
+#endif
+
 /**
  * os_timer_create() - create an new posix (interval) timer
  */
-int os_timer_create(void* timer) {
+int os_timer_create(void)
+{
+	int cpu = uml_curr_cpu();
+	timer_t *t = &event_high_res_timer[cpu];
+	struct sigevent sev = {
+		.sigev_notify = SIGEV_THREAD_ID,
+		.sigev_signo = SIGALRM,
+		.sigev_value.sival_ptr = t,
+		.sigev_notify_thread_id = gettid(),
+	};
 
-	timer_t* t = timer;
-
-	if(t == NULL) {
-		t = &event_high_res_timer;
-	}
-
-	if (timer_create(
-		CLOCK_MONOTONIC,
-		NULL,
-		t) == -1) {
+	if (timer_create(CLOCK_MONOTONIC, &sev, t) == -1)
 		return -1;
-	}
-	return 0;
-}
-
-int os_timer_set_interval(void* timer, void* i)
-{
-	struct itimerspec its;
-	unsigned long long nsec;
-	timer_t* t = timer;
-	struct itimerspec* its_in = i;
-
-	if(t == NULL) {
-		t = &event_high_res_timer;
-	}
-
-	nsec = UM_NSEC_PER_SEC / UM_HZ;
-
-	if(its_in != NULL) {
-		its.it_value.tv_sec = its_in->it_value.tv_sec;
-		its.it_value.tv_nsec = its_in->it_value.tv_nsec;
-	} else {
-		its.it_value.tv_sec = 0;
-		its.it_value.tv_nsec = nsec;
-	}
-
-	its.it_interval.tv_sec = 0;
-	its.it_interval.tv_nsec = nsec;
-
-	if(timer_settime(*t, 0, &its, NULL) == -1) {
-		return -errno;
-	}
 
 	return 0;
 }
 
-/**
- * os_timer_remain() - returns the remaining nano seconds of the given interval
- *                     timer
- * Because this is the remaining time of an interval timer, which correspondends
- * to HZ, this value can never be bigger than one second. Just
- * the nanosecond part of the timer is returned.
- * The returned time is relative to the start time of the interval timer.
- * Return an negative value in an error case.
- */
-long os_timer_remain(void* timer)
+int os_timer_set_interval(int cpu, unsigned long long nsecs)
 {
 	struct itimerspec its;
-	timer_t* t = timer;
 
-	if(t == NULL) {
-		t = &event_high_res_timer;
-	}
+	its.it_value.tv_sec = nsecs / UM_NSEC_PER_SEC;
+	its.it_value.tv_nsec = nsecs % UM_NSEC_PER_SEC;
 
-	if(timer_gettime(t, &its) == -1) {
+	its.it_interval.tv_sec = nsecs / UM_NSEC_PER_SEC;
+	its.it_interval.tv_nsec = nsecs % UM_NSEC_PER_SEC;
+
+	if (timer_settime(event_high_res_timer[cpu], 0, &its, NULL) == -1)
 		return -errno;
-	}
 
-	return its.it_value.tv_nsec;
+	return 0;
 }
 
-int os_timer_one_shot(int ticks)
+int os_timer_one_shot(int cpu, unsigned long long nsecs)
 {
-	struct itimerspec its;
-	unsigned long long nsec;
-	unsigned long sec;
+	struct itimerspec its = {
+		.it_value.tv_sec = nsecs / UM_NSEC_PER_SEC,
+		.it_value.tv_nsec = nsecs % UM_NSEC_PER_SEC,
 
-    nsec = (ticks + 1);
-    sec = nsec / UM_NSEC_PER_SEC;
-	nsec = nsec % UM_NSEC_PER_SEC;
+		.it_interval.tv_sec = 0,
+		.it_interval.tv_nsec = 0, // we cheat here
+	};
 
-	its.it_value.tv_sec = nsec / UM_NSEC_PER_SEC;
-	its.it_value.tv_nsec = nsec;
-
-	its.it_interval.tv_sec = 0;
-	its.it_interval.tv_nsec = 0; // we cheat here
-
-	timer_settime(event_high_res_timer, 0, &its, NULL);
+	timer_settime(event_high_res_timer[cpu], 0, &its, NULL);
 	return 0;
 }
 
 /**
  * os_timer_disable() - disable the posix (interval) timer
- * Returns the remaining interval timer time in nanoseconds
+ * @cpu: the CPU for which the timer is to be disabled
  */
-long long os_timer_disable(void)
+void os_timer_disable(int cpu)
 {
 	struct itimerspec its;
 
 	memset(&its, 0, sizeof(struct itimerspec));
-	timer_settime(event_high_res_timer, 0, &its, &its);
-
-	return its.it_value.tv_sec * UM_NSEC_PER_SEC + its.it_value.tv_nsec;
-}
-
-long long os_vnsecs(void)
-{
-	struct timespec ts;
-
-	clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&ts);
-	return timespec_to_ns(&ts);
+	timer_settime(event_high_res_timer[cpu], 0, &its, NULL);
 }
 
 long long os_nsecs(void)
@@ -163,27 +108,50 @@ long long os_nsecs(void)
 	return timespec_to_ns(&ts);
 }
 
-/**
- * os_idle_sleep() - sleep for a given time of nsecs
- * @nsecs: nanoseconds to sleep
- */
-void os_idle_sleep(unsigned long long nsecs)
+static __thread int wake_signals;
+
+void os_idle_prepare(void)
 {
-	struct timespec ts;
+	sigset_t set;
 
-	if (nsecs <= 0) {
-		return;
-	}
-
-	ts = ((struct timespec) {
-			.tv_sec  = nsecs / UM_NSEC_PER_SEC,
-			.tv_nsec = nsecs % UM_NSEC_PER_SEC
-	});
+	sigemptyset(&set);
+	sigaddset(&set, SIGALRM);
+	sigaddset(&set, IPI_SIGNAL);
 
 	/*
-	 * Relay the signal if clock_nanosleep is interrupted.
+	 * We need to use signalfd rather than sigsuspend in idle sleep
+	 * because the IPI signal is a real-time signal that carries data,
+	 * and unlike handling SIGALRM, we cannot simply flag it in
+	 * signals_pending.
 	 */
-	if (clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, NULL)) {
-		deliver_alarm();
-	}
+	wake_signals = signalfd(-1, &set, SFD_CLOEXEC);
+	if (wake_signals < 0)
+		panic("Failed to create signal FD, errno = %d", errno);
+}
+
+/**
+ * os_idle_sleep() - sleep until interrupted
+ */
+void os_idle_sleep(void)
+{
+	sigset_t set;
+
+	/*
+	 * Block SIGALRM while performing the need_resched check.
+	 * Note that, because IRQs are disabled, the IPI signal is
+	 * already blocked.
+	 */
+	sigemptyset(&set);
+	sigaddset(&set, SIGALRM);
+	sigprocmask(SIG_BLOCK, &set, NULL);
+
+	/*
+	 * Because disabling IRQs does not block SIGALRM, it is also
+	 * necessary to check for any pending timer alarms.
+	 */
+	if (!uml_need_resched() && !timer_alarm_pending())
+		os_poll(1, &wake_signals);
+
+	/* Restore the signal mask. */
+	sigprocmask(SIG_UNBLOCK, &set, NULL);
 }

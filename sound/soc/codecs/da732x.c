@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * da732x.c --- Dialog DA732X ALSA SoC Audio Driver
  *
  * Copyright (C) 2012 Dialog Semiconductor GmbH
  *
  * Author: Michal Hajduk <Michal.Hajduk@diasemi.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -171,30 +168,25 @@ static const struct reg_default da732x_reg_cache[] = {
 static inline int da732x_get_input_div(struct snd_soc_component *component, int sysclk)
 {
 	int val;
-	int ret;
 
 	if (sysclk < DA732X_MCLK_10MHZ) {
-		val = DA732X_MCLK_RET_0_10MHZ;
-		ret = DA732X_MCLK_VAL_0_10MHZ;
+		val = DA732X_MCLK_VAL_0_10MHZ;
 	} else if ((sysclk >= DA732X_MCLK_10MHZ) &&
 	    (sysclk < DA732X_MCLK_20MHZ)) {
-		val = DA732X_MCLK_RET_10_20MHZ;
-		ret = DA732X_MCLK_VAL_10_20MHZ;
+		val = DA732X_MCLK_VAL_10_20MHZ;
 	} else if ((sysclk >= DA732X_MCLK_20MHZ) &&
 	    (sysclk < DA732X_MCLK_40MHZ)) {
-		val = DA732X_MCLK_RET_20_40MHZ;
-		ret = DA732X_MCLK_VAL_20_40MHZ;
+		val = DA732X_MCLK_VAL_20_40MHZ;
 	} else if ((sysclk >= DA732X_MCLK_40MHZ) &&
 	    (sysclk <= DA732X_MCLK_54MHZ)) {
-		val = DA732X_MCLK_RET_40_54MHZ;
-		ret = DA732X_MCLK_VAL_40_54MHZ;
+		val = DA732X_MCLK_VAL_40_54MHZ;
 	} else {
 		return -EINVAL;
 	}
 
 	snd_soc_component_write(component, DA732X_REG_PLL_CTRL, val);
 
-	return ret;
+	return val;
 }
 
 static void da732x_set_charge_pump(struct snd_soc_component *component, int state)
@@ -331,7 +323,7 @@ static SOC_ENUM_SINGLE_DECL(da732x_adc2_voice_filter_enum,
 static int da732x_hpf_set(struct snd_kcontrol *kcontrol,
 			  struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct soc_enum *enum_ctrl = (struct soc_enum *)kcontrol->private_value;
 	unsigned int reg = enum_ctrl->reg;
 	unsigned int sel = ucontrol->value.enumerated.item[0];
@@ -359,12 +351,12 @@ static int da732x_hpf_set(struct snd_kcontrol *kcontrol,
 static int da732x_hpf_get(struct snd_kcontrol *kcontrol,
 			  struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct soc_enum *enum_ctrl = (struct soc_enum *)kcontrol->private_value;
 	unsigned int reg = enum_ctrl->reg;
 	int val;
 
-	val = snd_soc_component_read32(component, reg) & DA732X_HPF_MASK;
+	val = snd_soc_component_read(component, reg) & DA732X_HPF_MASK;
 
 	switch (val) {
 	case DA732X_HPF_VOICE_EN:
@@ -1042,11 +1034,11 @@ static int da732x_set_dai_fmt(struct snd_soc_dai *dai, u32 fmt)
 	}
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		aif1 = DA732X_AIF_SLAVE;
 		aif_mclk = DA732X_AIFM_FRAME_64 | DA732X_AIFM_SRC_SEL_AIFA;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		aif1 = DA732X_AIF_CLK_FROM_SRC;
 		aif_mclk = DA732X_CLK_GENERATION_AIF_A;
 		break;
@@ -1161,7 +1153,7 @@ static int da732x_set_dai_pll(struct snd_soc_component *component, int pll_id,
 	if (indiv < 0)
 		return indiv;
 
-	fref = (da732x->sysclk / indiv);
+	fref = da732x->sysclk / BIT(indiv);
 	div_hi = freq_out / fref;
 	frac_div = (u64)(freq_out % fref) * 8192ULL;
 	do_div(frac_div, fref);
@@ -1290,9 +1282,9 @@ static void da732x_dac_offset_adjust(struct snd_soc_component *component)
 	msleep(DA732X_WAIT_FOR_STABILIZATION);
 
 	/* Check DAC offset sign */
-	sign[DA732X_HPL_DAC] = (snd_soc_component_read32(component, DA732X_REG_HPL_DAC_OFF_CNTL) &
+	sign[DA732X_HPL_DAC] = (snd_soc_component_read(component, DA732X_REG_HPL_DAC_OFF_CNTL) &
 				DA732X_HP_DAC_OFF_CNTL_COMPO);
-	sign[DA732X_HPR_DAC] = (snd_soc_component_read32(component, DA732X_REG_HPR_DAC_OFF_CNTL) &
+	sign[DA732X_HPR_DAC] = (snd_soc_component_read(component, DA732X_REG_HPR_DAC_OFF_CNTL) &
 				DA732X_HP_DAC_OFF_CNTL_COMPO);
 
 	/* Binary search DAC offset values (both channels at once) */
@@ -1309,10 +1301,10 @@ static void da732x_dac_offset_adjust(struct snd_soc_component *component)
 
 		msleep(DA732X_WAIT_FOR_STABILIZATION);
 
-		if ((snd_soc_component_read32(component, DA732X_REG_HPL_DAC_OFF_CNTL) &
+		if ((snd_soc_component_read(component, DA732X_REG_HPL_DAC_OFF_CNTL) &
 		     DA732X_HP_DAC_OFF_CNTL_COMPO) ^ sign[DA732X_HPL_DAC])
 			offset[DA732X_HPL_DAC] &= ~step;
-		if ((snd_soc_component_read32(component, DA732X_REG_HPR_DAC_OFF_CNTL) &
+		if ((snd_soc_component_read(component, DA732X_REG_HPR_DAC_OFF_CNTL) &
 		     DA732X_HP_DAC_OFF_CNTL_COMPO) ^ sign[DA732X_HPR_DAC])
 			offset[DA732X_HPR_DAC] &= ~step;
 
@@ -1353,9 +1345,9 @@ static void da732x_output_offset_adjust(struct snd_soc_component *component)
 	msleep(DA732X_WAIT_FOR_STABILIZATION);
 
 	/* Check output offset sign */
-	sign[DA732X_HPL_AMP] = snd_soc_component_read32(component, DA732X_REG_HPL) &
+	sign[DA732X_HPL_AMP] = snd_soc_component_read(component, DA732X_REG_HPL) &
 			       DA732X_HP_OUT_COMPO;
-	sign[DA732X_HPR_AMP] = snd_soc_component_read32(component, DA732X_REG_HPR) &
+	sign[DA732X_HPR_AMP] = snd_soc_component_read(component, DA732X_REG_HPR) &
 			       DA732X_HP_OUT_COMPO;
 
 	snd_soc_component_write(component, DA732X_REG_HPL, DA732X_HP_OUT_COMP |
@@ -1376,10 +1368,10 @@ static void da732x_output_offset_adjust(struct snd_soc_component *component)
 
 		msleep(DA732X_WAIT_FOR_STABILIZATION);
 
-		if ((snd_soc_component_read32(component, DA732X_REG_HPL) &
+		if ((snd_soc_component_read(component, DA732X_REG_HPL) &
 		     DA732X_HP_OUT_COMPO) ^ sign[DA732X_HPL_AMP])
 			offset[DA732X_HPL_AMP] &= ~step;
-		if ((snd_soc_component_read32(component, DA732X_REG_HPR) &
+		if ((snd_soc_component_read(component, DA732X_REG_HPR) &
 		     DA732X_HP_OUT_COMPO) ^ sign[DA732X_HPR_AMP])
 			offset[DA732X_HPR_AMP] &= ~step;
 
@@ -1416,6 +1408,7 @@ static int da732x_set_bias_level(struct snd_soc_component *component,
 				 enum snd_soc_bias_level level)
 {
 	struct da732x_priv *da732x = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 
 	switch (level) {
 	case SND_SOC_BIAS_ON:
@@ -1426,7 +1419,7 @@ static int da732x_set_bias_level(struct snd_soc_component *component,
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF) {
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_OFF) {
 			/* Init Codec */
 			snd_soc_component_write(component, DA732X_REG_REF1,
 				      DA732X_VMID_FASTCHG);
@@ -1511,11 +1504,9 @@ static const struct snd_soc_component_driver soc_component_dev_da732x = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
-static int da732x_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+static int da732x_i2c_probe(struct i2c_client *i2c)
 {
 	struct da732x_priv *da732x;
 	unsigned int reg;
@@ -1555,13 +1546,8 @@ err:
 	return ret;
 }
 
-static int da732x_i2c_remove(struct i2c_client *client)
-{
-	return 0;
-}
-
 static const struct i2c_device_id da732x_i2c_id[] = {
-	{ "da7320", 0},
+	{ .name = "da7320" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, da732x_i2c_id);
@@ -1571,7 +1557,6 @@ static struct i2c_driver da732x_i2c_driver = {
 		.name	= "da7320",
 	},
 	.probe		= da732x_i2c_probe,
-	.remove		= da732x_i2c_remove,
 	.id_table	= da732x_i2c_id,
 };
 

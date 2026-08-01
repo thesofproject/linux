@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * OPL4 mixer functions
  * Copyright (c) 2003 by Clemens Ladisch <clemens@ladisch.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include "opl4_local.h"
@@ -32,13 +19,11 @@ static int snd_opl4_ctl_info(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_
 static int snd_opl4_ctl_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_opl4 *opl4 = snd_kcontrol_chip(kcontrol);
-	unsigned long flags;
 	u8 reg = kcontrol->private_value;
 	u8 value;
 
-	spin_lock_irqsave(&opl4->reg_lock, flags);
+	guard(spinlock_irqsave)(&opl4->reg_lock);
 	value = snd_opl4_read(opl4, reg);
-	spin_unlock_irqrestore(&opl4->reg_lock, flags);
 	ucontrol->value.integer.value[0] = 7 - (value & 7);
 	ucontrol->value.integer.value[1] = 7 - ((value >> 3) & 7);
 	return 0;
@@ -47,20 +32,18 @@ static int snd_opl4_ctl_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_v
 static int snd_opl4_ctl_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_opl4 *opl4 = snd_kcontrol_chip(kcontrol);
-	unsigned long flags;
 	u8 reg = kcontrol->private_value;
 	u8 value, old_value;
 
 	value = (7 - (ucontrol->value.integer.value[0] & 7)) |
 		((7 - (ucontrol->value.integer.value[1] & 7)) << 3);
-	spin_lock_irqsave(&opl4->reg_lock, flags);
+	guard(spinlock_irqsave)(&opl4->reg_lock);
 	old_value = snd_opl4_read(opl4, reg);
 	snd_opl4_write(opl4, reg, value);
-	spin_unlock_irqrestore(&opl4->reg_lock, flags);
 	return value != old_value;
 }
 
-static struct snd_kcontrol_new snd_opl4_controls[] = {
+static const struct snd_kcontrol_new snd_opl4_controls[] = {
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "FM Playback Volume",

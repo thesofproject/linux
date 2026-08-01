@@ -1,14 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2016 Maxime Ripard
  * Maxime Ripard <maxime.ripard@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
  */
 
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 
 #include "ccu_gate.h"
 #include "ccu_mult.h"
@@ -32,11 +29,9 @@ static void ccu_mult_find_best(unsigned long parent, unsigned long rate,
 	mult->mult = _mult;
 }
 
-static unsigned long ccu_mult_round_rate(struct ccu_mux_internal *mux,
-					 struct clk_hw *parent,
-					 unsigned long *parent_rate,
-					 unsigned long rate,
-					 void *data)
+static int ccu_mult_determine_rate_helper(struct ccu_mux_internal *mux,
+					  struct clk_rate_request *req,
+					  void *data)
 {
 	struct ccu_mult *cm = data;
 	struct _ccu_mult _cm;
@@ -48,9 +43,11 @@ static unsigned long ccu_mult_round_rate(struct ccu_mux_internal *mux,
 	else
 		_cm.max = (1 << cm->mult.width) + cm->mult.offset - 1;
 
-	ccu_mult_find_best(*parent_rate, rate, &_cm);
+	ccu_mult_find_best(req->best_parent_rate, req->rate, &_cm);
 
-	return *parent_rate * _cm.mult;
+	req->rate = req->best_parent_rate * _cm.mult;
+
+	return 0;
 }
 
 static void ccu_mult_disable(struct clk_hw *hw)
@@ -100,7 +97,7 @@ static int ccu_mult_determine_rate(struct clk_hw *hw,
 	struct ccu_mult *cm = hw_to_ccu_mult(hw);
 
 	return ccu_mux_helper_determine_rate(&cm->common, &cm->mux,
-					     req, ccu_mult_round_rate, cm);
+					     req, ccu_mult_determine_rate_helper, cm);
 }
 
 static int ccu_mult_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -173,3 +170,4 @@ const struct clk_ops ccu_mult_ops = {
 	.recalc_rate	= ccu_mult_recalc_rate,
 	.set_rate	= ccu_mult_set_rate,
 };
+EXPORT_SYMBOL_NS_GPL(ccu_mult_ops, "SUNXI_CCU");

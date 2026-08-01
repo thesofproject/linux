@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 2013-2015 Chelsio Communications.  All rights reserved.
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms and conditions of the GNU General Public License,
- *  version 2, as published by the Free Software Foundation.
- *
- *  This program is distributed in the hope it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- *  more details.
- *
- *  The full GNU General Public License is included in this distribution in
- *  the file called "COPYING".
- *
  */
 
 #include <linux/firmware.h>
@@ -22,6 +10,8 @@
 #include "t4_regs.h"
 #include "t4fw_api.h"
 #include "cxgb4_cudbg.h"
+#include "cxgb4_filter.h"
+#include "cxgb4_tc_flower.h"
 
 #define EEPROM_MAGIC 0x38E2F10C
 
@@ -34,6 +24,23 @@ static void set_msglevel(struct net_device *dev, u32 val)
 {
 	netdev2adap(dev)->msg_enable = val;
 }
+
+enum cxgb4_ethtool_tests {
+	CXGB4_ETHTOOL_LB_TEST,
+	CXGB4_ETHTOOL_MAX_TEST,
+};
+
+static const char cxgb4_selftest_strings[CXGB4_ETHTOOL_MAX_TEST][ETH_GSTRING_LEN] = {
+	"Loop back test (offline)",
+};
+
+static const char * const flash_region_strings[] = {
+	"All",
+	"Firmware",
+	"PHY Firmware",
+	"Boot",
+	"Boot CFG",
+};
 
 static const char stats_strings[][ETH_GSTRING_LEN] = {
 	"tx_octets_ok           ",
@@ -103,52 +110,30 @@ static const char stats_strings[][ETH_GSTRING_LEN] = {
 	"rx_bg3_frames_trunc    ",
 
 	"tso                    ",
+	"uso                    ",
 	"tx_csum_offload        ",
 	"rx_csum_good           ",
 	"vlan_extractions       ",
 	"vlan_insertions        ",
 	"gro_packets            ",
 	"gro_merged             ",
+#if  IS_ENABLED(CONFIG_CHELSIO_TLS_DEVICE)
+	"tx_tls_encrypted_packets",
+	"tx_tls_encrypted_bytes  ",
+	"tx_tls_ctx              ",
+	"tx_tls_ooo              ",
+	"tx_tls_skip_no_sync_data",
+	"tx_tls_drop_no_sync_data",
+	"tx_tls_drop_bypass_req  ",
+#endif
 };
 
 static char adapter_stats_strings[][ETH_GSTRING_LEN] = {
 	"db_drop                ",
 	"db_full                ",
 	"db_empty               ",
-	"tcp_ipv4_out_rsts      ",
-	"tcp_ipv4_in_segs       ",
-	"tcp_ipv4_out_segs      ",
-	"tcp_ipv4_retrans_segs  ",
-	"tcp_ipv6_out_rsts      ",
-	"tcp_ipv6_in_segs       ",
-	"tcp_ipv6_out_segs      ",
-	"tcp_ipv6_retrans_segs  ",
-	"usm_ddp_frames         ",
-	"usm_ddp_octets         ",
-	"usm_ddp_drops          ",
-	"rdma_no_rqe_mod_defer  ",
-	"rdma_no_rqe_pkt_defer  ",
-	"tp_err_ofld_no_neigh   ",
-	"tp_err_ofld_cong_defer ",
 	"write_coal_success     ",
 	"write_coal_fail        ",
-};
-
-static char channel_stats_strings[][ETH_GSTRING_LEN] = {
-	"--------Channel--------- ",
-	"tp_cpl_requests        ",
-	"tp_cpl_responses       ",
-	"tp_mac_in_errs         ",
-	"tp_hdr_in_errs         ",
-	"tp_tcp_in_errs         ",
-	"tp_tcp6_in_errs        ",
-	"tp_tnl_cong_drops      ",
-	"tp_tnl_tx_drops        ",
-	"tp_ofld_vlan_drops     ",
-	"tp_ofld_chan_drops     ",
-	"fcoe_octets_ddp        ",
-	"fcoe_frames_ddp        ",
-	"fcoe_frames_drop       ",
 };
 
 static char loopback_stats_strings[][ETH_GSTRING_LEN] = {
@@ -177,14 +162,21 @@ static char loopback_stats_strings[][ETH_GSTRING_LEN] = {
 	"bg3_frames_trunc       ",
 };
 
+static const char cxgb4_priv_flags_strings[][ETH_GSTRING_LEN] = {
+	[PRIV_FLAG_PORT_TX_VM_BIT] = "port_tx_vm_wr",
+};
+
 static int get_sset_count(struct net_device *dev, int sset)
 {
 	switch (sset) {
 	case ETH_SS_STATS:
 		return ARRAY_SIZE(stats_strings) +
 		       ARRAY_SIZE(adapter_stats_strings) +
-		       ARRAY_SIZE(channel_stats_strings) +
 		       ARRAY_SIZE(loopback_stats_strings);
+	case ETH_SS_PRIV_FLAGS:
+		return ARRAY_SIZE(cxgb4_priv_flags_strings);
+	case ETH_SS_TEST:
+		return ARRAY_SIZE(cxgb4_selftest_strings);
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -207,16 +199,12 @@ static void get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 	struct adapter *adapter = netdev2adap(dev);
 	u32 exprom_vers;
 
-	strlcpy(info->driver, cxgb4_driver_name, sizeof(info->driver));
-	strlcpy(info->version, cxgb4_driver_version,
-		sizeof(info->version));
-	strlcpy(info->bus_info, pci_name(adapter->pdev),
+	strscpy(info->driver, cxgb4_driver_name, sizeof(info->driver));
+	strscpy(info->bus_info, pci_name(adapter->pdev),
 		sizeof(info->bus_info));
 	info->regdump_len = get_regs_len(dev);
 
-	if (!adapter->params.fw_vers)
-		strcpy(info->fw_version, "N/A");
-	else
+	if (adapter->params.fw_vers)
 		snprintf(info->fw_version, sizeof(info->fw_version),
 			 "%u.%u.%u.%u, TP %u.%u.%u.%u",
 			 FW_HDR_FW_VER_MAJOR_G(adapter->params.fw_vers),
@@ -235,6 +223,7 @@ static void get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 			 FW_HDR_FW_VER_MINOR_G(exprom_vers),
 			 FW_HDR_FW_VER_MICRO_G(exprom_vers),
 			 FW_HDR_FW_VER_BUILD_G(exprom_vers));
+	info->n_priv_flags = ARRAY_SIZE(cxgb4_priv_flags_strings);
 }
 
 static void get_strings(struct net_device *dev, u32 stringset, u8 *data)
@@ -245,11 +234,14 @@ static void get_strings(struct net_device *dev, u32 stringset, u8 *data)
 		memcpy(data, adapter_stats_strings,
 		       sizeof(adapter_stats_strings));
 		data += sizeof(adapter_stats_strings);
-		memcpy(data, channel_stats_strings,
-		       sizeof(channel_stats_strings));
-		data += sizeof(channel_stats_strings);
 		memcpy(data, loopback_stats_strings,
 		       sizeof(loopback_stats_strings));
+	} else if (stringset == ETH_SS_PRIV_FLAGS) {
+		memcpy(data, cxgb4_priv_flags_strings,
+		       sizeof(cxgb4_priv_flags_strings));
+	} else if (stringset == ETH_SS_TEST) {
+		memcpy(data, cxgb4_selftest_strings,
+		       sizeof(cxgb4_selftest_strings));
 	}
 }
 
@@ -258,64 +250,48 @@ static void get_strings(struct net_device *dev, u32 stringset, u8 *data)
  */
 struct queue_port_stats {
 	u64 tso;
+	u64 uso;
 	u64 tx_csum;
 	u64 rx_csum;
 	u64 vlan_ex;
 	u64 vlan_ins;
 	u64 gro_pkts;
 	u64 gro_merged;
+#if IS_ENABLED(CONFIG_CHELSIO_TLS_DEVICE)
+	u64 tx_tls_encrypted_packets;
+	u64 tx_tls_encrypted_bytes;
+	u64 tx_tls_ctx;
+	u64 tx_tls_ooo;
+	u64 tx_tls_skip_no_sync_data;
+	u64 tx_tls_drop_no_sync_data;
+	u64 tx_tls_drop_bypass_req;
+#endif
 };
 
 struct adapter_stats {
 	u64 db_drop;
 	u64 db_full;
 	u64 db_empty;
-	u64 tcp_v4_out_rsts;
-	u64 tcp_v4_in_segs;
-	u64 tcp_v4_out_segs;
-	u64 tcp_v4_retrans_segs;
-	u64 tcp_v6_out_rsts;
-	u64 tcp_v6_in_segs;
-	u64 tcp_v6_out_segs;
-	u64 tcp_v6_retrans_segs;
-	u64 frames;
-	u64 octets;
-	u64 drops;
-	u64 rqe_dfr_mod;
-	u64 rqe_dfr_pkt;
-	u64 ofld_no_neigh;
-	u64 ofld_cong_defer;
 	u64 wc_success;
 	u64 wc_fail;
-};
-
-struct channel_stats {
-	u64 cpl_req;
-	u64 cpl_rsp;
-	u64 mac_in_errs;
-	u64 hdr_in_errs;
-	u64 tcp_in_errs;
-	u64 tcp6_in_errs;
-	u64 tnl_cong_drops;
-	u64 tnl_tx_drops;
-	u64 ofld_vlan_drops;
-	u64 ofld_chan_drops;
-	u64 octets_ddp;
-	u64 frames_ddp;
-	u64 frames_drop;
 };
 
 static void collect_sge_port_stats(const struct adapter *adap,
 				   const struct port_info *p,
 				   struct queue_port_stats *s)
 {
-	int i;
 	const struct sge_eth_txq *tx = &adap->sge.ethtxq[p->first_qset];
 	const struct sge_eth_rxq *rx = &adap->sge.ethrxq[p->first_qset];
+#if IS_ENABLED(CONFIG_CHELSIO_TLS_DEVICE)
+	const struct ch_ktls_port_stats_debug *ktls_stats;
+#endif
+	struct sge_eohw_txq *eohw_tx;
+	unsigned int i;
 
 	memset(s, 0, sizeof(*s));
 	for (i = 0; i < p->nqsets; i++, rx++, tx++) {
 		s->tso += tx->tso;
+		s->uso += tx->uso;
 		s->tx_csum += tx->tx_cso;
 		s->rx_csum += rx->stats.rx_cso;
 		s->vlan_ex += rx->stats.vlan_ex;
@@ -323,48 +299,42 @@ static void collect_sge_port_stats(const struct adapter *adap,
 		s->gro_pkts += rx->stats.lro_pkts;
 		s->gro_merged += rx->stats.lro_merged;
 	}
+
+	if (adap->sge.eohw_txq) {
+		eohw_tx = &adap->sge.eohw_txq[p->first_qset];
+		for (i = 0; i < p->nqsets; i++, eohw_tx++) {
+			s->tso += eohw_tx->tso;
+			s->uso += eohw_tx->uso;
+			s->tx_csum += eohw_tx->tx_cso;
+			s->vlan_ins += eohw_tx->vlan_ins;
+		}
+	}
+#if IS_ENABLED(CONFIG_CHELSIO_TLS_DEVICE)
+	ktls_stats = &adap->ch_ktls_stats.ktls_port[p->port_id];
+	s->tx_tls_encrypted_packets =
+		atomic64_read(&ktls_stats->ktls_tx_encrypted_packets);
+	s->tx_tls_encrypted_bytes =
+		atomic64_read(&ktls_stats->ktls_tx_encrypted_bytes);
+	s->tx_tls_ctx = atomic64_read(&ktls_stats->ktls_tx_ctx);
+	s->tx_tls_ooo = atomic64_read(&ktls_stats->ktls_tx_ooo);
+	s->tx_tls_skip_no_sync_data =
+		atomic64_read(&ktls_stats->ktls_tx_skip_no_sync_data);
+	s->tx_tls_drop_no_sync_data =
+		atomic64_read(&ktls_stats->ktls_tx_drop_no_sync_data);
+	s->tx_tls_drop_bypass_req =
+		atomic64_read(&ktls_stats->ktls_tx_drop_bypass_req);
+#endif
 }
 
 static void collect_adapter_stats(struct adapter *adap, struct adapter_stats *s)
 {
-	struct tp_tcp_stats v4, v6;
-	struct tp_rdma_stats rdma_stats;
-	struct tp_err_stats err_stats;
-	struct tp_usm_stats usm_stats;
 	u64 val1, val2;
 
 	memset(s, 0, sizeof(*s));
 
-	spin_lock(&adap->stats_lock);
-	t4_tp_get_tcp_stats(adap, &v4, &v6, false);
-	t4_tp_get_rdma_stats(adap, &rdma_stats, false);
-	t4_get_usm_stats(adap, &usm_stats, false);
-	t4_tp_get_err_stats(adap, &err_stats, false);
-	spin_unlock(&adap->stats_lock);
-
 	s->db_drop = adap->db_stats.db_drop;
 	s->db_full = adap->db_stats.db_full;
 	s->db_empty = adap->db_stats.db_empty;
-
-	s->tcp_v4_out_rsts = v4.tcp_out_rsts;
-	s->tcp_v4_in_segs = v4.tcp_in_segs;
-	s->tcp_v4_out_segs = v4.tcp_out_segs;
-	s->tcp_v4_retrans_segs = v4.tcp_retrans_segs;
-	s->tcp_v6_out_rsts = v6.tcp_out_rsts;
-	s->tcp_v6_in_segs = v6.tcp_in_segs;
-	s->tcp_v6_out_segs = v6.tcp_out_segs;
-	s->tcp_v6_retrans_segs = v6.tcp_retrans_segs;
-
-	if (is_offload(adap)) {
-		s->frames = usm_stats.frames;
-		s->octets = usm_stats.octets;
-		s->drops = usm_stats.drops;
-		s->rqe_dfr_mod = rdma_stats.rqe_dfr_mod;
-		s->rqe_dfr_pkt = rdma_stats.rqe_dfr_pkt;
-	}
-
-	s->ofld_no_neigh = err_stats.ofld_no_neigh;
-	s->ofld_cong_defer = err_stats.ofld_cong_defer;
 
 	if (!is_t4(adap->params.chip)) {
 		int v;
@@ -377,36 +347,6 @@ static void collect_adapter_stats(struct adapter *adap, struct adapter_stats *s)
 			s->wc_fail = val2;
 		}
 	}
-}
-
-static void collect_channel_stats(struct adapter *adap, struct channel_stats *s,
-				  u8 i)
-{
-	struct tp_cpl_stats cpl_stats;
-	struct tp_err_stats err_stats;
-	struct tp_fcoe_stats fcoe_stats;
-
-	memset(s, 0, sizeof(*s));
-
-	spin_lock(&adap->stats_lock);
-	t4_tp_get_cpl_stats(adap, &cpl_stats, false);
-	t4_tp_get_err_stats(adap, &err_stats, false);
-	t4_get_fcoe_stats(adap, i, &fcoe_stats, false);
-	spin_unlock(&adap->stats_lock);
-
-	s->cpl_req = cpl_stats.req[i];
-	s->cpl_rsp = cpl_stats.rsp[i];
-	s->mac_in_errs = err_stats.mac_in_errs[i];
-	s->hdr_in_errs = err_stats.hdr_in_errs[i];
-	s->tcp_in_errs = err_stats.tcp_in_errs[i];
-	s->tcp6_in_errs = err_stats.tcp6_in_errs[i];
-	s->tnl_cong_drops = err_stats.tnl_cong_drops[i];
-	s->tnl_tx_drops = err_stats.tnl_tx_drops[i];
-	s->ofld_vlan_drops = err_stats.ofld_vlan_drops[i];
-	s->ofld_chan_drops = err_stats.ofld_chan_drops[i];
-	s->octets_ddp = fcoe_stats.octets_ddp;
-	s->frames_ddp = fcoe_stats.frames_ddp;
-	s->frames_drop = fcoe_stats.frames_drop;
 }
 
 static void get_stats(struct net_device *dev, struct ethtool_stats *stats,
@@ -427,11 +367,6 @@ static void get_stats(struct net_device *dev, struct ethtool_stats *stats,
 	data += sizeof(struct queue_port_stats) / sizeof(u64);
 	collect_adapter_stats(adapter, (struct adapter_stats *)data);
 	data += sizeof(struct adapter_stats) / sizeof(u64);
-
-	*data++ = (u64)pi->port_id;
-	collect_channel_stats(adapter, (struct channel_stats *)data,
-			      pi->port_id);
-	data += sizeof(struct channel_stats) / sizeof(u64);
 
 	*data++ = (u64)pi->port_id;
 	memset(&s, 0, sizeof(s));
@@ -565,12 +500,14 @@ static unsigned int speed_to_fw_caps(int speed)
  *	Link Mode Mask.
  */
 static void fw_caps_to_lmm(enum fw_port_type port_type,
-			   unsigned int fw_caps,
+			   fw_port_cap32_t fw_caps,
 			   unsigned long *link_mode_mask)
 {
 	#define SET_LMM(__lmm_name) \
-		__set_bit(ETHTOOL_LINK_MODE_ ## __lmm_name ## _BIT, \
-			  link_mode_mask)
+		do { \
+			__set_bit(ETHTOOL_LINK_MODE_ ## __lmm_name ## _BIT, \
+				  link_mode_mask); \
+		} while (0)
 
 	#define FW_CAPS_TO_LMM(__fw_name, __lmm_name) \
 		do { \
@@ -664,7 +601,7 @@ static void fw_caps_to_lmm(enum fw_port_type port_type,
 	case FW_PORT_TYPE_CR4_QSFP:
 		SET_LMM(FIBRE);
 		FW_CAPS_TO_LMM(SPEED_1G,  1000baseT_Full);
-		FW_CAPS_TO_LMM(SPEED_10G, 10000baseSR_Full);
+		FW_CAPS_TO_LMM(SPEED_10G, 10000baseKR_Full);
 		FW_CAPS_TO_LMM(SPEED_40G, 40000baseSR4_Full);
 		FW_CAPS_TO_LMM(SPEED_25G, 25000baseCR_Full);
 		FW_CAPS_TO_LMM(SPEED_50G, 50000baseCR2_Full);
@@ -673,6 +610,13 @@ static void fw_caps_to_lmm(enum fw_port_type port_type,
 
 	default:
 		break;
+	}
+
+	if (fw_caps & FW_PORT_CAP32_FEC_V(FW_PORT_CAP32_FEC_M)) {
+		FW_CAPS_TO_LMM(FEC_RS, FEC_RS);
+		FW_CAPS_TO_LMM(FEC_BASER_RS, FEC_BASER);
+	} else {
+		SET_LMM(FEC_NONE);
 	}
 
 	FW_CAPS_TO_LMM(ANEG, Autoneg);
@@ -686,7 +630,7 @@ static void fw_caps_to_lmm(enum fw_port_type port_type,
 /**
  *	lmm_to_fw_caps - translate ethtool Link Mode Mask to Firmware
  *	capabilities
- *	@et_lmm: ethtool Link Mode Mask
+ *	@link_mode_mask: ethtool Link Mode Mask
  *
  *	Translate ethtool Link Mode Mask into a Firmware Port capabilities
  *	value.
@@ -746,34 +690,18 @@ static int get_link_ksettings(struct net_device *dev,
 
 	fw_caps_to_lmm(pi->port_type, pi->link_cfg.pcaps,
 		       link_ksettings->link_modes.supported);
-	fw_caps_to_lmm(pi->port_type, pi->link_cfg.acaps,
+	fw_caps_to_lmm(pi->port_type,
+		       t4_link_acaps(pi->adapter,
+				     pi->lport,
+				     &pi->link_cfg),
 		       link_ksettings->link_modes.advertising);
 	fw_caps_to_lmm(pi->port_type, pi->link_cfg.lpacaps,
 		       link_ksettings->link_modes.lp_advertising);
 
-	if (netif_carrier_ok(dev)) {
-		base->speed = pi->link_cfg.speed;
-		base->duplex = DUPLEX_FULL;
-	} else {
-		base->speed = SPEED_UNKNOWN;
-		base->duplex = DUPLEX_UNKNOWN;
-	}
-
-	if (pi->link_cfg.fc & PAUSE_RX) {
-		if (pi->link_cfg.fc & PAUSE_TX) {
-			ethtool_link_ksettings_add_link_mode(link_ksettings,
-							     advertising,
-							     Pause);
-		} else {
-			ethtool_link_ksettings_add_link_mode(link_ksettings,
-							     advertising,
-							     Asym_Pause);
-		}
-	} else if (pi->link_cfg.fc & PAUSE_TX) {
-		ethtool_link_ksettings_add_link_mode(link_ksettings,
-						     advertising,
-						     Asym_Pause);
-	}
+	base->speed = (netif_carrier_ok(dev)
+		       ? pi->link_cfg.speed
+		       : SPEED_UNKNOWN);
+	base->duplex = DUPLEX_FULL;
 
 	base->autoneg = pi->link_cfg.autoneg;
 	if (pi->link_cfg.pcaps & FW_PORT_CAP32_ANEG)
@@ -800,27 +728,20 @@ static int set_link_ksettings(struct net_device *dev,
 	if (base->duplex != DUPLEX_FULL)
 		return -EINVAL;
 
-	if (!(lc->pcaps & FW_PORT_CAP32_ANEG)) {
-		/* PHY offers a single speed.  See if that's what's
-		 * being requested.
-		 */
-		if (base->autoneg == AUTONEG_DISABLE &&
-		    (lc->pcaps & speed_to_fw_caps(base->speed)))
-			return 0;
-		return -EINVAL;
-	}
-
 	old_lc = *lc;
-	if (base->autoneg == AUTONEG_DISABLE) {
+	if (!(lc->pcaps & FW_PORT_CAP32_ANEG) ||
+	    base->autoneg == AUTONEG_DISABLE) {
 		fw_caps = speed_to_fw_caps(base->speed);
 
+		/* Speed must be supported by Physical Port Capabilities. */
 		if (!(lc->pcaps & fw_caps))
 			return -EINVAL;
+
 		lc->speed_caps = fw_caps;
-		lc->acaps = 0;
+		lc->acaps = fw_caps;
 	} else {
 		fw_caps =
-			 lmm_to_fw_caps(link_ksettings->link_modes.advertising);
+			lmm_to_fw_caps(link_ksettings->link_modes.advertising);
 		if (!(lc->pcaps & fw_caps))
 			return -EINVAL;
 		lc->speed_caps = 0;
@@ -942,8 +863,8 @@ static void get_pauseparam(struct net_device *dev,
 	struct port_info *p = netdev_priv(dev);
 
 	epause->autoneg = (p->link_cfg.requested_fc & PAUSE_AUTONEG) != 0;
-	epause->rx_pause = (p->link_cfg.fc & PAUSE_RX) != 0;
-	epause->tx_pause = (p->link_cfg.fc & PAUSE_TX) != 0;
+	epause->rx_pause = (p->link_cfg.advertised_fc & PAUSE_RX) != 0;
+	epause->tx_pause = (p->link_cfg.advertised_fc & PAUSE_TX) != 0;
 }
 
 static int set_pauseparam(struct net_device *dev,
@@ -969,7 +890,9 @@ static int set_pauseparam(struct net_device *dev,
 	return 0;
 }
 
-static void get_sge_param(struct net_device *dev, struct ethtool_ringparam *e)
+static void get_sge_param(struct net_device *dev, struct ethtool_ringparam *e,
+			  struct kernel_ethtool_ringparam *kernel_e,
+			  struct netlink_ext_ack *extack)
 {
 	const struct port_info *pi = netdev_priv(dev);
 	const struct sge *s = &pi->adapter->sge;
@@ -985,7 +908,9 @@ static void get_sge_param(struct net_device *dev, struct ethtool_ringparam *e)
 	e->tx_pending = s->ethtxq[pi->first_qset].q.size;
 }
 
-static int set_sge_param(struct net_device *dev, struct ethtool_ringparam *e)
+static int set_sge_param(struct net_device *dev, struct ethtool_ringparam *e,
+			 struct kernel_ethtool_ringparam *kernel_e,
+			 struct netlink_ext_ack *extack)
 {
 	int i;
 	const struct port_info *pi = netdev_priv(dev);
@@ -999,7 +924,7 @@ static int set_sge_param(struct net_device *dev, struct ethtool_ringparam *e)
 	    e->rx_pending < MIN_FL_ENTRIES || e->tx_pending < MIN_TXQ_ENTRIES)
 		return -EINVAL;
 
-	if (adapter->flags & FULL_INIT_DONE)
+	if (adapter->flags & CXGB4_FULL_INIT_DONE)
 		return -EBUSY;
 
 	for (i = 0; i < pi->nqsets; ++i) {
@@ -1056,14 +981,197 @@ static int get_adaptive_rx_setting(struct net_device *dev)
 	return q->rspq.adaptive_rx;
 }
 
-static int set_coalesce(struct net_device *dev, struct ethtool_coalesce *c)
+/* Return the current global Adapter SGE Doorbell Queue Timer Tick for all
+ * Ethernet TX Queues.
+ */
+static int get_dbqtimer_tick(struct net_device *dev)
 {
-	set_adaptive_rx_setting(dev, c->use_adaptive_rx_coalesce);
-	return set_rx_intr_params(dev, c->rx_coalesce_usecs,
-				  c->rx_max_coalesced_frames);
+	struct port_info *pi = netdev_priv(dev);
+	struct adapter *adap = pi->adapter;
+
+	if (!(adap->flags & CXGB4_SGE_DBQ_TIMER))
+		return 0;
+
+	return adap->sge.dbqtimer_tick;
 }
 
-static int get_coalesce(struct net_device *dev, struct ethtool_coalesce *c)
+/* Return the SGE Doorbell Queue Timer Value for the Ethernet TX Queues
+ * associated with a Network Device.
+ */
+static int get_dbqtimer(struct net_device *dev)
+{
+	struct port_info *pi = netdev_priv(dev);
+	struct adapter *adap = pi->adapter;
+	struct sge_eth_txq *txq;
+
+	txq = &adap->sge.ethtxq[pi->first_qset];
+
+	if (!(adap->flags & CXGB4_SGE_DBQ_TIMER))
+		return 0;
+
+	/* all of the TX Queues use the same Timer Index */
+	return adap->sge.dbqtimer_val[txq->dbqtimerix];
+}
+
+/* Set the global Adapter SGE Doorbell Queue Timer Tick for all Ethernet TX
+ * Queues.  This is the fundamental "Tick" that sets the scale of values which
+ * can be used.  Individual Ethernet TX Queues index into a relatively small
+ * array of Tick Multipliers.  Changing the base Tick will thus change all of
+ * the resulting Timer Values associated with those multipliers for all
+ * Ethernet TX Queues.
+ */
+static int set_dbqtimer_tick(struct net_device *dev, int usecs)
+{
+	struct port_info *pi = netdev_priv(dev);
+	struct adapter *adap = pi->adapter;
+	struct sge *s = &adap->sge;
+	u32 param, val;
+	int ret;
+
+	if (!(adap->flags & CXGB4_SGE_DBQ_TIMER))
+		return 0;
+
+	/* return early if it's the same Timer Tick we're already using */
+	if (s->dbqtimer_tick == usecs)
+		return 0;
+
+	/* attempt to set the new Timer Tick value */
+	param = (FW_PARAMS_MNEM_V(FW_PARAMS_MNEM_DEV) |
+		 FW_PARAMS_PARAM_X_V(FW_PARAMS_PARAM_DEV_DBQ_TIMERTICK));
+	val = usecs;
+	ret = t4_set_params(adap, adap->mbox, adap->pf, 0, 1, &param, &val);
+	if (ret)
+		return ret;
+	s->dbqtimer_tick = usecs;
+
+	/* if successful, reread resulting dependent Timer values */
+	ret = t4_read_sge_dbqtimers(adap, ARRAY_SIZE(s->dbqtimer_val),
+				    s->dbqtimer_val);
+	return ret;
+}
+
+/* Set the SGE Doorbell Queue Timer Value for the Ethernet TX Queues
+ * associated with a Network Device.  There is a relatively small array of
+ * possible Timer Values so we need to pick the closest value available.
+ */
+static int set_dbqtimer(struct net_device *dev, int usecs)
+{
+	int qix, timerix, min_timerix, delta, min_delta;
+	struct port_info *pi = netdev_priv(dev);
+	struct adapter *adap = pi->adapter;
+	struct sge *s = &adap->sge;
+	struct sge_eth_txq *txq;
+	u32 param, val;
+	int ret;
+
+	if (!(adap->flags & CXGB4_SGE_DBQ_TIMER))
+		return 0;
+
+	/* Find the SGE Doorbell Timer Value that's closest to the requested
+	 * value.
+	 */
+	min_delta = INT_MAX;
+	min_timerix = 0;
+	for (timerix = 0; timerix < ARRAY_SIZE(s->dbqtimer_val); timerix++) {
+		delta = s->dbqtimer_val[timerix] - usecs;
+		if (delta < 0)
+			delta = -delta;
+		if (delta < min_delta) {
+			min_delta = delta;
+			min_timerix = timerix;
+		}
+	}
+
+	/* Return early if it's the same Timer Index we're already using.
+	 * We use the same Timer Index for all of the TX Queues for an
+	 * interface so it's only necessary to check the first one.
+	 */
+	txq = &s->ethtxq[pi->first_qset];
+	if (txq->dbqtimerix == min_timerix)
+		return 0;
+
+	for (qix = 0; qix < pi->nqsets; qix++, txq++) {
+		if (adap->flags & CXGB4_FULL_INIT_DONE) {
+			param =
+			 (FW_PARAMS_MNEM_V(FW_PARAMS_MNEM_DMAQ) |
+			  FW_PARAMS_PARAM_X_V(FW_PARAMS_PARAM_DMAQ_EQ_TIMERIX) |
+			  FW_PARAMS_PARAM_YZ_V(txq->q.cntxt_id));
+			val = min_timerix;
+			ret = t4_set_params(adap, adap->mbox, adap->pf, 0,
+					    1, &param, &val);
+			if (ret)
+				return ret;
+		}
+		txq->dbqtimerix = min_timerix;
+	}
+	return 0;
+}
+
+/* Set the global Adapter SGE Doorbell Queue Timer Tick for all Ethernet TX
+ * Queues and the Timer Value for the Ethernet TX Queues associated with a
+ * Network Device.  Since changing the global Tick changes all of the
+ * available Timer Values, we need to do this first before selecting the
+ * resulting closest Timer Value.  Moreover, since the Tick is global,
+ * changing it affects the Timer Values for all Network Devices on the
+ * adapter.  So, before changing the Tick, we grab all of the current Timer
+ * Values for other Network Devices on this Adapter and then attempt to select
+ * new Timer Values which are close to the old values ...
+ */
+static int set_dbqtimer_tickval(struct net_device *dev,
+				int tick_usecs, int timer_usecs)
+{
+	struct port_info *pi = netdev_priv(dev);
+	struct adapter *adap = pi->adapter;
+	int timer[MAX_NPORTS];
+	unsigned int port;
+	int ret;
+
+	/* Grab the other adapter Network Interface current timers and fill in
+	 * the new one for this Network Interface.
+	 */
+	for_each_port(adap, port)
+		if (port == pi->port_id)
+			timer[port] = timer_usecs;
+		else
+			timer[port] = get_dbqtimer(adap->port[port]);
+
+	/* Change the global Tick first ... */
+	ret = set_dbqtimer_tick(dev, tick_usecs);
+	if (ret)
+		return ret;
+
+	/* ... and then set all of the Network Interface Timer Values ... */
+	for_each_port(adap, port) {
+		ret = set_dbqtimer(adap->port[port], timer[port]);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int set_coalesce(struct net_device *dev,
+			struct ethtool_coalesce *coalesce,
+			struct kernel_ethtool_coalesce *kernel_coal,
+			struct netlink_ext_ack *extack)
+{
+	int ret;
+
+	set_adaptive_rx_setting(dev, coalesce->use_adaptive_rx_coalesce);
+
+	ret = set_rx_intr_params(dev, coalesce->rx_coalesce_usecs,
+				 coalesce->rx_max_coalesced_frames);
+	if (ret)
+		return ret;
+
+	return set_dbqtimer_tickval(dev,
+				    coalesce->tx_coalesce_usecs_irq,
+				    coalesce->tx_coalesce_usecs);
+}
+
+static int get_coalesce(struct net_device *dev, struct ethtool_coalesce *c,
+			struct kernel_ethtool_coalesce *kernel_coal,
+			struct netlink_ext_ack *extack)
 {
 	const struct port_info *pi = netdev_priv(dev);
 	const struct adapter *adap = pi->adapter;
@@ -1073,6 +1181,8 @@ static int get_coalesce(struct net_device *dev, struct ethtool_coalesce *c)
 	c->rx_max_coalesced_frames = (rq->intr_params & QINTR_CNT_EN_F) ?
 		adap->sge.counter_val[rq->pktcnt_idx] : 0;
 	c->use_adaptive_rx_coalesce = get_adaptive_rx_setting(dev);
+	c->tx_coalesce_usecs_irq = get_dbqtimer_tick(dev);
+	c->tx_coalesce_usecs = get_dbqtimer(dev);
 	return 0;
 }
 
@@ -1175,15 +1285,225 @@ out:
 	return err;
 }
 
-static int set_flash(struct net_device *netdev, struct ethtool_flash *ef)
+static int cxgb4_ethtool_flash_bootcfg(struct net_device *netdev,
+				       const u8 *data, u32 size)
 {
+	struct adapter *adap = netdev2adap(netdev);
 	int ret;
-	const struct firmware *fw;
+
+	ret = t4_load_bootcfg(adap, data, size);
+	if (ret)
+		dev_err(adap->pdev_dev, "Failed to load boot cfg image\n");
+
+	return ret;
+}
+
+static int cxgb4_ethtool_flash_boot(struct net_device *netdev,
+				    const u8 *bdata, u32 size)
+{
+	struct adapter *adap = netdev2adap(netdev);
+	unsigned int offset;
+	u8 *data;
+	int ret;
+
+	data = kmemdup(bdata, size, GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+
+	offset = OFFSET_G(t4_read_reg(adap, PF_REG(0, PCIE_PF_EXPROM_OFST_A)));
+
+	ret = t4_load_boot(adap, data, offset, size);
+	if (ret)
+		dev_err(adap->pdev_dev, "Failed to load boot image\n");
+
+	kfree(data);
+	return ret;
+}
+
+#define CXGB4_PHY_SIG 0x130000ea
+
+static int cxgb4_validate_phy_image(const u8 *data, u32 *size)
+{
+	struct cxgb4_fw_data *header;
+
+	header = (struct cxgb4_fw_data *)data;
+	if (be32_to_cpu(header->signature) != CXGB4_PHY_SIG)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int cxgb4_ethtool_flash_phy(struct net_device *netdev,
+				   const u8 *data, u32 size)
+{
+	struct adapter *adap = netdev2adap(netdev);
+	int ret;
+
+	ret = cxgb4_validate_phy_image(data, NULL);
+	if (ret) {
+		dev_err(adap->pdev_dev, "PHY signature mismatch\n");
+		return ret;
+	}
+
+	/* We have to RESET the chip/firmware because we need the
+	 * chip in uninitialized state for loading new PHY image.
+	 * Otherwise, the running firmware will only store the PHY
+	 * image in local RAM which will be lost after next reset.
+	 */
+	ret = t4_fw_reset(adap, adap->mbox, PIORSTMODE_F | PIORST_F);
+	if (ret < 0) {
+		dev_err(adap->pdev_dev,
+			"Set FW to RESET for flashing PHY FW failed. ret: %d\n",
+			ret);
+		return ret;
+	}
+
+	ret = t4_load_phy_fw(adap, MEMWIN_NIC, NULL, data, size);
+	if (ret < 0) {
+		dev_err(adap->pdev_dev, "Failed to load PHY FW. ret: %d\n",
+			ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int cxgb4_ethtool_flash_fw(struct net_device *netdev,
+				  const u8 *data, u32 size)
+{
 	struct adapter *adap = netdev2adap(netdev);
 	unsigned int mbox = PCIE_FW_MASTER_M + 1;
-	u32 pcie_fw;
+	int ret;
+
+	/* If the adapter has been fully initialized then we'll go ahead and
+	 * try to get the firmware's cooperation in upgrading to the new
+	 * firmware image otherwise we'll try to do the entire job from the
+	 * host ... and we always "force" the operation in this path.
+	 */
+	if (adap->flags & CXGB4_FULL_INIT_DONE)
+		mbox = adap->mbox;
+
+	ret = t4_fw_upgrade(adap, mbox, data, size, 1);
+	if (ret)
+		dev_err(adap->pdev_dev,
+			"Failed to flash firmware\n");
+
+	return ret;
+}
+
+static int cxgb4_ethtool_flash_region(struct net_device *netdev,
+				      const u8 *data, u32 size, u32 region)
+{
+	struct adapter *adap = netdev2adap(netdev);
+	int ret;
+
+	switch (region) {
+	case CXGB4_ETHTOOL_FLASH_FW:
+		ret = cxgb4_ethtool_flash_fw(netdev, data, size);
+		break;
+	case CXGB4_ETHTOOL_FLASH_PHY:
+		ret = cxgb4_ethtool_flash_phy(netdev, data, size);
+		break;
+	case CXGB4_ETHTOOL_FLASH_BOOT:
+		ret = cxgb4_ethtool_flash_boot(netdev, data, size);
+		break;
+	case CXGB4_ETHTOOL_FLASH_BOOTCFG:
+		ret = cxgb4_ethtool_flash_bootcfg(netdev, data, size);
+		break;
+	default:
+		ret = -EOPNOTSUPP;
+		break;
+	}
+
+	if (!ret)
+		dev_info(adap->pdev_dev,
+			 "loading %s successful, reload cxgb4 driver\n",
+			 flash_region_strings[region]);
+	return ret;
+}
+
+#define CXGB4_FW_SIG 0x4368656c
+#define CXGB4_FW_SIG_OFFSET 0x160
+
+static int cxgb4_validate_fw_image(const u8 *data, u32 *size)
+{
+	struct cxgb4_fw_data *header;
+
+	header = (struct cxgb4_fw_data *)&data[CXGB4_FW_SIG_OFFSET];
+	if (be32_to_cpu(header->signature) != CXGB4_FW_SIG)
+		return -EINVAL;
+
+	if (size)
+		*size = be16_to_cpu(((struct fw_hdr *)data)->len512) * 512;
+
+	return 0;
+}
+
+static int cxgb4_validate_bootcfg_image(const u8 *data, u32 *size)
+{
+	struct cxgb4_bootcfg_data *header;
+
+	header = (struct cxgb4_bootcfg_data *)data;
+	if (le16_to_cpu(header->signature) != BOOT_CFG_SIG)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int cxgb4_validate_boot_image(const u8 *data, u32 *size)
+{
+	struct cxgb4_pci_exp_rom_header *exp_header;
+	struct cxgb4_pcir_data *pcir_header;
+	struct legacy_pci_rom_hdr *header;
+	const u8 *cur_header = data;
+	u16 pcir_offset;
+
+	exp_header = (struct cxgb4_pci_exp_rom_header *)data;
+
+	if (le16_to_cpu(exp_header->signature) != BOOT_SIGNATURE)
+		return -EINVAL;
+
+	if (size) {
+		do {
+			header = (struct legacy_pci_rom_hdr *)cur_header;
+			pcir_offset = le16_to_cpu(header->pcir_offset);
+			pcir_header = (struct cxgb4_pcir_data *)(cur_header +
+				      pcir_offset);
+
+			*size += header->size512 * 512;
+			cur_header += header->size512 * 512;
+		} while (!(pcir_header->indicator & CXGB4_HDR_INDI));
+	}
+
+	return 0;
+}
+
+static int cxgb4_ethtool_get_flash_region(const u8 *data, u32 *size)
+{
+	if (!cxgb4_validate_fw_image(data, size))
+		return CXGB4_ETHTOOL_FLASH_FW;
+	if (!cxgb4_validate_boot_image(data, size))
+		return CXGB4_ETHTOOL_FLASH_BOOT;
+	if (!cxgb4_validate_phy_image(data, size))
+		return CXGB4_ETHTOOL_FLASH_PHY;
+	if (!cxgb4_validate_bootcfg_image(data, size))
+		return CXGB4_ETHTOOL_FLASH_BOOTCFG;
+
+	return -EOPNOTSUPP;
+}
+
+static int set_flash(struct net_device *netdev, struct ethtool_flash *ef)
+{
+	struct adapter *adap = netdev2adap(netdev);
+	const struct firmware *fw;
 	unsigned int master;
 	u8 master_vld = 0;
+	const u8 *fw_data;
+	size_t fw_size;
+	u32 size = 0;
+	u32 pcie_fw;
+	int region;
+	int ret;
 
 	pcie_fw = t4_read_reg(adap, PCIE_FW_A);
 	master = PCIE_FW_MASTER_G(pcie_fw);
@@ -1201,34 +1521,44 @@ static int set_flash(struct net_device *netdev, struct ethtool_flash *ef)
 	if (ret < 0)
 		return ret;
 
-	/* If the adapter has been fully initialized then we'll go ahead and
-	 * try to get the firmware's cooperation in upgrading to the new
-	 * firmware image otherwise we'll try to do the entire job from the
-	 * host ... and we always "force" the operation in this path.
-	 */
-	if (adap->flags & FULL_INIT_DONE)
-		mbox = adap->mbox;
+	fw_data = fw->data;
+	fw_size = fw->size;
+	if (ef->region == ETHTOOL_FLASH_ALL_REGIONS) {
+		while (fw_size > 0) {
+			size = 0;
+			region = cxgb4_ethtool_get_flash_region(fw_data, &size);
+			if (region < 0 || !size) {
+				ret = region;
+				goto out_free_fw;
+			}
 
-	ret = t4_fw_upgrade(adap, mbox, fw->data, fw->size, 1);
+			ret = cxgb4_ethtool_flash_region(netdev, fw_data, size,
+							 region);
+			if (ret)
+				goto out_free_fw;
+
+			fw_data += size;
+			fw_size -= size;
+		}
+	} else {
+		ret = cxgb4_ethtool_flash_region(netdev, fw_data, fw_size,
+						 ef->region);
+	}
+
+out_free_fw:
 	release_firmware(fw);
-	if (!ret)
-		dev_info(adap->pdev_dev,
-			 "loaded firmware %s, reload cxgb4 driver\n", ef->data);
 	return ret;
 }
 
-static int get_ts_info(struct net_device *dev, struct ethtool_ts_info *ts_info)
+static int get_ts_info(struct net_device *dev, struct kernel_ethtool_ts_info *ts_info)
 {
 	struct port_info *pi = netdev_priv(dev);
 	struct  adapter *adapter = pi->adapter;
 
 	ts_info->so_timestamping = SOF_TIMESTAMPING_TX_SOFTWARE |
-				   SOF_TIMESTAMPING_RX_SOFTWARE |
-				   SOF_TIMESTAMPING_SOFTWARE;
-
-	ts_info->so_timestamping |= SOF_TIMESTAMPING_RX_HARDWARE |
-				    SOF_TIMESTAMPING_TX_HARDWARE |
-				    SOF_TIMESTAMPING_RAW_HARDWARE;
+				   SOF_TIMESTAMPING_RX_HARDWARE |
+				   SOF_TIMESTAMPING_TX_HARDWARE |
+				   SOF_TIMESTAMPING_RAW_HARDWARE;
 
 	ts_info->tx_types = (1 << HWTSTAMP_TX_OFF) |
 			    (1 << HWTSTAMP_TX_ON);
@@ -1242,8 +1572,6 @@ static int get_ts_info(struct net_device *dev, struct ethtool_ts_info *ts_info)
 
 	if (adapter->ptp_clock)
 		ts_info->phc_index = ptp_clock_index(adapter->ptp_clock);
-	else
-		ts_info->phc_index = -1;
 
 	return 0;
 }
@@ -1255,22 +1583,23 @@ static u32 get_rss_table_size(struct net_device *dev)
 	return pi->rss_size;
 }
 
-static int get_rss_table(struct net_device *dev, u32 *p, u8 *key, u8 *hfunc)
+static int get_rss_table(struct net_device *dev,
+			 struct ethtool_rxfh_param *rxfh)
 {
 	const struct port_info *pi = netdev_priv(dev);
 	unsigned int n = pi->rss_size;
 
-	if (hfunc)
-		*hfunc = ETH_RSS_HASH_TOP;
-	if (!p)
+	rxfh->hfunc = ETH_RSS_HASH_TOP;
+	if (!rxfh->indir)
 		return 0;
 	while (n--)
-		p[n] = pi->rss[n];
+		rxfh->indir[n] = pi->rss[n];
 	return 0;
 }
 
-static int set_rss_table(struct net_device *dev, const u32 *p, const u8 *key,
-			 const u8 hfunc)
+static int set_rss_table(struct net_device *dev,
+			 struct ethtool_rxfh_param *rxfh,
+			 struct netlink_ext_ack *extack)
 {
 	unsigned int i;
 	struct port_info *pi = netdev_priv(dev);
@@ -1278,16 +1607,17 @@ static int set_rss_table(struct net_device *dev, const u32 *p, const u8 *key,
 	/* We require at least one supported parameter to be changed and no
 	 * change in any of the unsupported parameters
 	 */
-	if (key ||
-	    (hfunc != ETH_RSS_HASH_NO_CHANGE && hfunc != ETH_RSS_HASH_TOP))
+	if (rxfh->key ||
+	    (rxfh->hfunc != ETH_RSS_HASH_NO_CHANGE &&
+	     rxfh->hfunc != ETH_RSS_HASH_TOP))
 		return -EOPNOTSUPP;
-	if (!p)
+	if (!rxfh->indir)
 		return 0;
 
 	/* Interface must be brought up atleast once */
-	if (pi->adapter->flags & FULL_INIT_DONE) {
+	if (pi->adapter->flags & CXGB4_FULL_INIT_DONE) {
 		for (i = 0; i < pi->rss_size; i++)
-			pi->rss[i] = p[i];
+			pi->rss[i] = rxfh->indir[i];
 
 		return cxgb4_write_rss(pi, pi->rss);
 	}
@@ -1295,67 +1625,327 @@ static int set_rss_table(struct net_device *dev, const u32 *p, const u8 *key,
 	return -EPERM;
 }
 
+static struct filter_entry *cxgb4_get_filter_entry(struct adapter *adap,
+						   u32 ftid)
+{
+	struct tid_info *t = &adap->tids;
+
+	if (ftid >= t->hpftid_base && ftid < t->hpftid_base + t->nhpftids)
+		return &t->hpftid_tab[ftid - t->hpftid_base];
+
+	if (ftid >= t->ftid_base && ftid < t->ftid_base + t->nftids)
+		return &t->ftid_tab[ftid - t->ftid_base];
+
+	return lookup_tid(t, ftid);
+}
+
+static void cxgb4_fill_filter_rule(struct ethtool_rx_flow_spec *fs,
+				   struct ch_filter_specification *dfs)
+{
+	switch (dfs->val.proto) {
+	case IPPROTO_TCP:
+		if (dfs->type)
+			fs->flow_type = TCP_V6_FLOW;
+		else
+			fs->flow_type = TCP_V4_FLOW;
+		break;
+	case IPPROTO_UDP:
+		if (dfs->type)
+			fs->flow_type = UDP_V6_FLOW;
+		else
+			fs->flow_type = UDP_V4_FLOW;
+		break;
+	}
+
+	if (dfs->type) {
+		fs->h_u.tcp_ip6_spec.psrc = cpu_to_be16(dfs->val.fport);
+		fs->m_u.tcp_ip6_spec.psrc = cpu_to_be16(dfs->mask.fport);
+		fs->h_u.tcp_ip6_spec.pdst = cpu_to_be16(dfs->val.lport);
+		fs->m_u.tcp_ip6_spec.pdst = cpu_to_be16(dfs->mask.lport);
+		memcpy(&fs->h_u.tcp_ip6_spec.ip6src, &dfs->val.fip[0],
+		       sizeof(fs->h_u.tcp_ip6_spec.ip6src));
+		memcpy(&fs->m_u.tcp_ip6_spec.ip6src, &dfs->mask.fip[0],
+		       sizeof(fs->m_u.tcp_ip6_spec.ip6src));
+		memcpy(&fs->h_u.tcp_ip6_spec.ip6dst, &dfs->val.lip[0],
+		       sizeof(fs->h_u.tcp_ip6_spec.ip6dst));
+		memcpy(&fs->m_u.tcp_ip6_spec.ip6dst, &dfs->mask.lip[0],
+		       sizeof(fs->m_u.tcp_ip6_spec.ip6dst));
+		fs->h_u.tcp_ip6_spec.tclass = dfs->val.tos;
+		fs->m_u.tcp_ip6_spec.tclass = dfs->mask.tos;
+	} else {
+		fs->h_u.tcp_ip4_spec.psrc = cpu_to_be16(dfs->val.fport);
+		fs->m_u.tcp_ip4_spec.psrc = cpu_to_be16(dfs->mask.fport);
+		fs->h_u.tcp_ip4_spec.pdst = cpu_to_be16(dfs->val.lport);
+		fs->m_u.tcp_ip4_spec.pdst = cpu_to_be16(dfs->mask.lport);
+		memcpy(&fs->h_u.tcp_ip4_spec.ip4src, &dfs->val.fip[0],
+		       sizeof(fs->h_u.tcp_ip4_spec.ip4src));
+		memcpy(&fs->m_u.tcp_ip4_spec.ip4src, &dfs->mask.fip[0],
+		       sizeof(fs->m_u.tcp_ip4_spec.ip4src));
+		memcpy(&fs->h_u.tcp_ip4_spec.ip4dst, &dfs->val.lip[0],
+		       sizeof(fs->h_u.tcp_ip4_spec.ip4dst));
+		memcpy(&fs->m_u.tcp_ip4_spec.ip4dst, &dfs->mask.lip[0],
+		       sizeof(fs->m_u.tcp_ip4_spec.ip4dst));
+		fs->h_u.tcp_ip4_spec.tos = dfs->val.tos;
+		fs->m_u.tcp_ip4_spec.tos = dfs->mask.tos;
+	}
+	fs->h_ext.vlan_tci = cpu_to_be16(dfs->val.ivlan);
+	fs->m_ext.vlan_tci = cpu_to_be16(dfs->mask.ivlan);
+	fs->flow_type |= FLOW_EXT;
+
+	if (dfs->action == FILTER_DROP)
+		fs->ring_cookie = RX_CLS_FLOW_DISC;
+	else
+		fs->ring_cookie = dfs->iq;
+}
+
+static int cxgb4_ntuple_get_filter(struct net_device *dev,
+				   struct ethtool_rxnfc *cmd,
+				   unsigned int loc)
+{
+	const struct port_info *pi = netdev_priv(dev);
+	struct adapter *adap = netdev2adap(dev);
+	struct filter_entry *f;
+	int ftid;
+
+	if (!(adap->flags & CXGB4_FULL_INIT_DONE))
+		return -EAGAIN;
+
+	/* Check for maximum filter range */
+	if (!adap->ethtool_filters)
+		return -EOPNOTSUPP;
+
+	if (loc >= adap->ethtool_filters->nentries)
+		return -ERANGE;
+
+	if (!test_bit(loc, adap->ethtool_filters->port[pi->port_id].bmap))
+		return -ENOENT;
+
+	ftid = adap->ethtool_filters->port[pi->port_id].loc_array[loc];
+
+	/* Fetch filter_entry */
+	f = cxgb4_get_filter_entry(adap, ftid);
+
+	cxgb4_fill_filter_rule(&cmd->fs, &f->fs);
+
+	return 0;
+}
+
+static int cxgb4_get_rxfh_fields(struct net_device *dev,
+				 struct ethtool_rxfh_fields *info)
+{
+	const struct port_info *pi = netdev_priv(dev);
+	unsigned int v = pi->rss_mode;
+
+	info->data = 0;
+	switch (info->flow_type) {
+	case TCP_V4_FLOW:
+		if (v & FW_RSS_VI_CONFIG_CMD_IP4FOURTUPEN_F)
+			info->data = RXH_IP_SRC | RXH_IP_DST |
+				RXH_L4_B_0_1 | RXH_L4_B_2_3;
+		else if (v & FW_RSS_VI_CONFIG_CMD_IP4TWOTUPEN_F)
+			info->data = RXH_IP_SRC | RXH_IP_DST;
+		break;
+	case UDP_V4_FLOW:
+		if ((v & FW_RSS_VI_CONFIG_CMD_IP4FOURTUPEN_F) &&
+		    (v & FW_RSS_VI_CONFIG_CMD_UDPEN_F))
+			info->data = RXH_IP_SRC | RXH_IP_DST |
+				RXH_L4_B_0_1 | RXH_L4_B_2_3;
+		else if (v & FW_RSS_VI_CONFIG_CMD_IP4TWOTUPEN_F)
+			info->data = RXH_IP_SRC | RXH_IP_DST;
+		break;
+	case SCTP_V4_FLOW:
+	case AH_ESP_V4_FLOW:
+	case IPV4_FLOW:
+		if (v & FW_RSS_VI_CONFIG_CMD_IP4TWOTUPEN_F)
+			info->data = RXH_IP_SRC | RXH_IP_DST;
+		break;
+	case TCP_V6_FLOW:
+		if (v & FW_RSS_VI_CONFIG_CMD_IP6FOURTUPEN_F)
+			info->data = RXH_IP_SRC | RXH_IP_DST |
+				RXH_L4_B_0_1 | RXH_L4_B_2_3;
+		else if (v & FW_RSS_VI_CONFIG_CMD_IP6TWOTUPEN_F)
+			info->data = RXH_IP_SRC | RXH_IP_DST;
+		break;
+	case UDP_V6_FLOW:
+		if ((v & FW_RSS_VI_CONFIG_CMD_IP6FOURTUPEN_F) &&
+		    (v & FW_RSS_VI_CONFIG_CMD_UDPEN_F))
+			info->data = RXH_IP_SRC | RXH_IP_DST |
+				RXH_L4_B_0_1 | RXH_L4_B_2_3;
+		else if (v & FW_RSS_VI_CONFIG_CMD_IP6TWOTUPEN_F)
+			info->data = RXH_IP_SRC | RXH_IP_DST;
+		break;
+	case SCTP_V6_FLOW:
+	case AH_ESP_V6_FLOW:
+	case IPV6_FLOW:
+		if (v & FW_RSS_VI_CONFIG_CMD_IP6TWOTUPEN_F)
+			info->data = RXH_IP_SRC | RXH_IP_DST;
+		break;
+	}
+	return 0;
+}
+
+static u32 get_rx_ring_count(struct net_device *dev)
+{
+	const struct port_info *pi = netdev_priv(dev);
+
+	return pi->nqsets;
+}
+
 static int get_rxnfc(struct net_device *dev, struct ethtool_rxnfc *info,
 		     u32 *rules)
 {
 	const struct port_info *pi = netdev_priv(dev);
+	struct adapter *adap = netdev2adap(dev);
+	unsigned int count = 0, index = 0;
+	int ret = 0;
 
 	switch (info->cmd) {
-	case ETHTOOL_GRXFH: {
-		unsigned int v = pi->rss_mode;
-
-		info->data = 0;
-		switch (info->flow_type) {
-		case TCP_V4_FLOW:
-			if (v & FW_RSS_VI_CONFIG_CMD_IP4FOURTUPEN_F)
-				info->data = RXH_IP_SRC | RXH_IP_DST |
-					     RXH_L4_B_0_1 | RXH_L4_B_2_3;
-			else if (v & FW_RSS_VI_CONFIG_CMD_IP4TWOTUPEN_F)
-				info->data = RXH_IP_SRC | RXH_IP_DST;
-			break;
-		case UDP_V4_FLOW:
-			if ((v & FW_RSS_VI_CONFIG_CMD_IP4FOURTUPEN_F) &&
-			    (v & FW_RSS_VI_CONFIG_CMD_UDPEN_F))
-				info->data = RXH_IP_SRC | RXH_IP_DST |
-					     RXH_L4_B_0_1 | RXH_L4_B_2_3;
-			else if (v & FW_RSS_VI_CONFIG_CMD_IP4TWOTUPEN_F)
-				info->data = RXH_IP_SRC | RXH_IP_DST;
-			break;
-		case SCTP_V4_FLOW:
-		case AH_ESP_V4_FLOW:
-		case IPV4_FLOW:
-			if (v & FW_RSS_VI_CONFIG_CMD_IP4TWOTUPEN_F)
-				info->data = RXH_IP_SRC | RXH_IP_DST;
-			break;
-		case TCP_V6_FLOW:
-			if (v & FW_RSS_VI_CONFIG_CMD_IP6FOURTUPEN_F)
-				info->data = RXH_IP_SRC | RXH_IP_DST |
-					     RXH_L4_B_0_1 | RXH_L4_B_2_3;
-			else if (v & FW_RSS_VI_CONFIG_CMD_IP6TWOTUPEN_F)
-				info->data = RXH_IP_SRC | RXH_IP_DST;
-			break;
-		case UDP_V6_FLOW:
-			if ((v & FW_RSS_VI_CONFIG_CMD_IP6FOURTUPEN_F) &&
-			    (v & FW_RSS_VI_CONFIG_CMD_UDPEN_F))
-				info->data = RXH_IP_SRC | RXH_IP_DST |
-					     RXH_L4_B_0_1 | RXH_L4_B_2_3;
-			else if (v & FW_RSS_VI_CONFIG_CMD_IP6TWOTUPEN_F)
-				info->data = RXH_IP_SRC | RXH_IP_DST;
-			break;
-		case SCTP_V6_FLOW:
-		case AH_ESP_V6_FLOW:
-		case IPV6_FLOW:
-			if (v & FW_RSS_VI_CONFIG_CMD_IP6TWOTUPEN_F)
-				info->data = RXH_IP_SRC | RXH_IP_DST;
-			break;
+	case ETHTOOL_GRXCLSRLCNT:
+		info->rule_cnt =
+		       adap->ethtool_filters->port[pi->port_id].in_use;
+		return 0;
+	case ETHTOOL_GRXCLSRULE:
+		return cxgb4_ntuple_get_filter(dev, info, info->fs.location);
+	case ETHTOOL_GRXCLSRLALL:
+		info->data = adap->ethtool_filters->nentries;
+		while (count < info->rule_cnt) {
+			ret = cxgb4_ntuple_get_filter(dev, info, index);
+			if (!ret)
+				rules[count++] = index;
+			index++;
 		}
 		return 0;
 	}
-	case ETHTOOL_GRXRINGS:
-		info->data = pi->nqsets;
-		return 0;
-	}
+
 	return -EOPNOTSUPP;
+}
+
+static int cxgb4_ntuple_del_filter(struct net_device *dev,
+				   struct ethtool_rxnfc *cmd)
+{
+	struct cxgb4_ethtool_filter_info *filter_info;
+	struct adapter *adapter = netdev2adap(dev);
+	struct port_info *pi = netdev_priv(dev);
+	struct filter_entry *f;
+	u32 filter_id;
+	int ret;
+
+	if (!(adapter->flags & CXGB4_FULL_INIT_DONE))
+		return -EAGAIN;  /* can still change nfilters */
+
+	if (!adapter->ethtool_filters)
+		return -EOPNOTSUPP;
+
+	if (cmd->fs.location >= adapter->ethtool_filters->nentries) {
+		dev_err(adapter->pdev_dev,
+			"Location must be < %u",
+			adapter->ethtool_filters->nentries);
+		return -ERANGE;
+	}
+
+	filter_info = &adapter->ethtool_filters->port[pi->port_id];
+
+	if (!test_bit(cmd->fs.location, filter_info->bmap))
+		return -ENOENT;
+
+	filter_id = filter_info->loc_array[cmd->fs.location];
+	f = cxgb4_get_filter_entry(adapter, filter_id);
+
+	if (f->fs.prio)
+		filter_id -= adapter->tids.hpftid_base;
+	else if (!f->fs.hash)
+		filter_id -= (adapter->tids.ftid_base - adapter->tids.nhpftids);
+
+	ret = cxgb4_flow_rule_destroy(dev, f->fs.tc_prio, &f->fs, filter_id);
+	if (ret)
+		goto err;
+
+	clear_bit(cmd->fs.location, filter_info->bmap);
+	filter_info->in_use--;
+
+err:
+	return ret;
+}
+
+/* Add Ethtool n-tuple filters. */
+static int cxgb4_ntuple_set_filter(struct net_device *netdev,
+				   struct ethtool_rxnfc *cmd)
+{
+	struct ethtool_rx_flow_spec_input input = {};
+	struct cxgb4_ethtool_filter_info *filter_info;
+	struct adapter *adapter = netdev2adap(netdev);
+	struct port_info *pi = netdev_priv(netdev);
+	struct ch_filter_specification fs;
+	struct ethtool_rx_flow_rule *flow;
+	u32 tid;
+	int ret;
+
+	if (!(adapter->flags & CXGB4_FULL_INIT_DONE))
+		return -EAGAIN;  /* can still change nfilters */
+
+	if (!adapter->ethtool_filters)
+		return -EOPNOTSUPP;
+
+	if (cmd->fs.location >= adapter->ethtool_filters->nentries) {
+		dev_err(adapter->pdev_dev,
+			"Location must be < %u",
+			adapter->ethtool_filters->nentries);
+		return -ERANGE;
+	}
+
+	if (test_bit(cmd->fs.location,
+		     adapter->ethtool_filters->port[pi->port_id].bmap))
+		return -EEXIST;
+
+	memset(&fs, 0, sizeof(fs));
+
+	input.fs = &cmd->fs;
+	flow = ethtool_rx_flow_rule_create(&input);
+	if (IS_ERR(flow)) {
+		ret = PTR_ERR(flow);
+		goto exit;
+	}
+
+	fs.hitcnts = 1;
+
+	ret = cxgb4_flow_rule_replace(netdev, flow->rule, cmd->fs.location,
+				      NULL, &fs, &tid);
+	if (ret)
+		goto free;
+
+	filter_info = &adapter->ethtool_filters->port[pi->port_id];
+
+	if (fs.prio)
+		tid += adapter->tids.hpftid_base;
+	else if (!fs.hash)
+		tid += (adapter->tids.ftid_base - adapter->tids.nhpftids);
+
+	filter_info->loc_array[cmd->fs.location] = tid;
+	set_bit(cmd->fs.location, filter_info->bmap);
+	filter_info->in_use++;
+
+free:
+	ethtool_rx_flow_rule_destroy(flow);
+exit:
+	return ret;
+}
+
+static int set_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd)
+{
+	int ret = -EOPNOTSUPP;
+
+	switch (cmd->cmd) {
+	case ETHTOOL_SRXCLSRLINS:
+		ret = cxgb4_ntuple_set_filter(dev, cmd);
+		break;
+	case ETHTOOL_SRXCLSRLDEL:
+		ret = cxgb4_ntuple_del_filter(dev, cmd);
+		break;
+	default:
+		break;
+	}
+
+	return ret;
 }
 
 static int set_dump(struct net_device *dev, struct ethtool_dump *eth_dump)
@@ -1408,6 +1998,15 @@ static int get_dump_data(struct net_device *dev, struct ethtool_dump *eth_dump,
 	return 0;
 }
 
+static bool cxgb4_fw_mod_type_info_available(unsigned int fw_mod_type)
+{
+	/* Read port module EEPROM as long as it is plugged-in and
+	 * safe to read.
+	 */
+	return (fw_mod_type != FW_PORT_MOD_TYPE_NONE &&
+		fw_mod_type != FW_PORT_MOD_TYPE_ERROR);
+}
+
 static int cxgb4_get_module_info(struct net_device *dev,
 				 struct ethtool_modinfo *modinfo)
 {
@@ -1416,7 +2015,7 @@ static int cxgb4_get_module_info(struct net_device *dev,
 	struct adapter *adapter = pi->adapter;
 	int ret;
 
-	if (!t4_is_inserted_mod_type(pi->mod_type))
+	if (!cxgb4_fw_mod_type_info_available(pi->mod_type))
 		return -EINVAL;
 
 	switch (pi->port_type) {
@@ -1434,12 +2033,15 @@ static int cxgb4_get_module_info(struct net_device *dev,
 		if (ret)
 			return ret;
 
-		if (!sff8472_comp || (sff_diag_type & 4)) {
+		if (!sff8472_comp || (sff_diag_type & SFP_DIAG_ADDRMODE)) {
 			modinfo->type = ETH_MODULE_SFF_8079;
 			modinfo->eeprom_len = ETH_MODULE_SFF_8079_LEN;
 		} else {
 			modinfo->type = ETH_MODULE_SFF_8472;
-			modinfo->eeprom_len = ETH_MODULE_SFF_8472_LEN;
+			if (sff_diag_type & SFP_DIAG_IMPLEMENTED)
+				modinfo->eeprom_len = ETH_MODULE_SFF_8472_LEN;
+			else
+				modinfo->eeprom_len = ETH_MODULE_SFF_8472_LEN / 2;
 		}
 		break;
 
@@ -1503,7 +2105,79 @@ static int cxgb4_get_module_eeprom(struct net_device *dev,
 			 offset, len, &data[eprom->len - len]);
 }
 
+static u32 cxgb4_get_priv_flags(struct net_device *netdev)
+{
+	struct port_info *pi = netdev_priv(netdev);
+	struct adapter *adapter = pi->adapter;
+
+	return (adapter->eth_flags | pi->eth_flags);
+}
+
+/**
+ *	set_flags - set/unset specified flags if passed in new_flags
+ *	@cur_flags: pointer to current flags
+ *	@new_flags: new incoming flags
+ *	@flags: set of flags to set/unset
+ */
+static inline void set_flags(u32 *cur_flags, u32 new_flags, u32 flags)
+{
+	*cur_flags = (*cur_flags & ~flags) | (new_flags & flags);
+}
+
+static int cxgb4_set_priv_flags(struct net_device *netdev, u32 flags)
+{
+	struct port_info *pi = netdev_priv(netdev);
+	struct adapter *adapter = pi->adapter;
+
+	set_flags(&adapter->eth_flags, flags, PRIV_FLAGS_ADAP);
+	set_flags(&pi->eth_flags, flags, PRIV_FLAGS_PORT);
+
+	return 0;
+}
+
+static void cxgb4_lb_test(struct net_device *netdev, u64 *lb_status)
+{
+	int dev_state = netif_running(netdev);
+
+	if (dev_state) {
+		netif_tx_stop_all_queues(netdev);
+		netif_carrier_off(netdev);
+	}
+
+	*lb_status = cxgb4_selftest_lb_pkt(netdev);
+
+	if (dev_state) {
+		netif_tx_start_all_queues(netdev);
+		netif_carrier_on(netdev);
+	}
+}
+
+static void cxgb4_self_test(struct net_device *netdev,
+			    struct ethtool_test *eth_test, u64 *data)
+{
+	struct port_info *pi = netdev_priv(netdev);
+	struct adapter *adap = pi->adapter;
+
+	memset(data, 0, sizeof(u64) * CXGB4_ETHTOOL_MAX_TEST);
+
+	if (!(adap->flags & CXGB4_FULL_INIT_DONE) ||
+	    !(adap->flags & CXGB4_FW_OK)) {
+		eth_test->flags |= ETH_TEST_FL_FAILED;
+		return;
+	}
+
+	if (eth_test->flags & ETH_TEST_FL_OFFLINE)
+		cxgb4_lb_test(netdev, &data[CXGB4_ETHTOOL_LB_TEST]);
+
+	if (data[CXGB4_ETHTOOL_LB_TEST])
+		eth_test->flags |= ETH_TEST_FL_FAILED;
+}
+
 static const struct ethtool_ops cxgb_ethtool_ops = {
+	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
+				     ETHTOOL_COALESCE_RX_MAX_FRAMES |
+				     ETHTOOL_COALESCE_TX_USECS_IRQ |
+				     ETHTOOL_COALESCE_USE_ADAPTIVE_RX,
 	.get_link_ksettings = get_link_ksettings,
 	.set_link_ksettings = set_link_ksettings,
 	.get_fecparam      = get_fecparam,
@@ -1529,9 +2203,13 @@ static const struct ethtool_ops cxgb_ethtool_ops = {
 	.get_regs_len      = get_regs_len,
 	.get_regs          = get_regs,
 	.get_rxnfc         = get_rxnfc,
+	.set_rxnfc         = set_rxnfc,
+	.get_rx_ring_count = get_rx_ring_count,
 	.get_rxfh_indir_size = get_rss_table_size,
 	.get_rxfh	   = get_rss_table,
 	.set_rxfh	   = set_rss_table,
+	.get_rxfh_fields   = cxgb4_get_rxfh_fields,
+	.self_test	   = cxgb4_self_test,
 	.flash_device      = set_flash,
 	.get_ts_info       = get_ts_info,
 	.set_dump          = set_dump,
@@ -1539,7 +2217,87 @@ static const struct ethtool_ops cxgb_ethtool_ops = {
 	.get_dump_data     = get_dump_data,
 	.get_module_info   = cxgb4_get_module_info,
 	.get_module_eeprom = cxgb4_get_module_eeprom,
+	.get_priv_flags    = cxgb4_get_priv_flags,
+	.set_priv_flags    = cxgb4_set_priv_flags,
 };
+
+void cxgb4_cleanup_ethtool_filters(struct adapter *adap)
+{
+	struct cxgb4_ethtool_filter_info *eth_filter_info;
+	u8 i;
+
+	if (!adap->ethtool_filters)
+		return;
+
+	eth_filter_info = adap->ethtool_filters->port;
+
+	if (eth_filter_info) {
+		for (i = 0; i < adap->params.nports; i++) {
+			kvfree(eth_filter_info[i].loc_array);
+			bitmap_free(eth_filter_info[i].bmap);
+		}
+		kfree(eth_filter_info);
+	}
+
+	kfree(adap->ethtool_filters);
+}
+
+int cxgb4_init_ethtool_filters(struct adapter *adap)
+{
+	struct cxgb4_ethtool_filter_info *eth_filter_info;
+	struct cxgb4_ethtool_filter *eth_filter;
+	struct tid_info *tids = &adap->tids;
+	u32 nentries, i;
+	int ret;
+
+	eth_filter = kzalloc_obj(*eth_filter);
+	if (!eth_filter)
+		return -ENOMEM;
+
+	eth_filter_info = kzalloc_objs(*eth_filter_info, adap->params.nports);
+	if (!eth_filter_info) {
+		ret = -ENOMEM;
+		goto free_eth_filter;
+	}
+
+	eth_filter->port = eth_filter_info;
+
+	nentries = tids->nhpftids + tids->nftids;
+	if (is_hashfilter(adap))
+		nentries += tids->nhash +
+			    (adap->tids.stid_base - adap->tids.tid_base);
+	eth_filter->nentries = nentries;
+
+	for (i = 0; i < adap->params.nports; i++) {
+		eth_filter->port[i].loc_array = kvzalloc(nentries, GFP_KERNEL);
+		if (!eth_filter->port[i].loc_array) {
+			ret = -ENOMEM;
+			goto free_eth_finfo;
+		}
+
+		eth_filter->port[i].bmap = bitmap_zalloc(nentries, GFP_KERNEL);
+		if (!eth_filter->port[i].bmap) {
+			ret = -ENOMEM;
+			kvfree(eth_filter->port[i].loc_array);
+			goto free_eth_finfo;
+		}
+	}
+
+	adap->ethtool_filters = eth_filter;
+	return 0;
+
+free_eth_finfo:
+	while (i-- > 0) {
+		bitmap_free(eth_filter->port[i].bmap);
+		kvfree(eth_filter->port[i].loc_array);
+	}
+	kfree(eth_filter_info);
+
+free_eth_filter:
+	kfree(eth_filter);
+
+	return ret;
+}
 
 void cxgb4_set_ethtool_ops(struct net_device *netdev)
 {

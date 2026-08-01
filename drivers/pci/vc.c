@@ -6,12 +6,15 @@
  *     Author: Alex Williamson <alex.williamson@redhat.com>
  */
 
+#include <linux/bitfield.h>
 #include <linux/device.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/pci_regs.h>
 #include <linux/types.h>
+
+#include "pci.h"
 
 /**
  * pci_vc_save_restore_dwords - Save or restore a series of dwords
@@ -105,7 +108,7 @@ static void pci_vc_enable(struct pci_dev *dev, int pos, int res)
 	struct pci_dev *link = NULL;
 
 	/* Enable VCs from the downstream device */
-	if (!dev->has_secondary_link)
+	if (!pci_is_pcie(dev) || !pcie_downstream_port(dev))
 		return;
 
 	ctrl_pos = pos + PCI_VC_RES_CTRL + (res * PCI_CAP_VC_PER_VC_SIZEOF);
@@ -170,7 +173,6 @@ enable:
  * @dev: device
  * @pos: starting position of VC capability (VC/VC9/MFVC)
  * @save_state: buffer for save/restore
- * @name: for error message
  * @save: if provided a buffer, this indicates what to do with it
  *
  * Walking Virtual Channel config space to size, save, or restore it
@@ -200,9 +202,9 @@ static int pci_vc_do_save_buffer(struct pci_dev *dev, int pos,
 	/* Extended VC Count (not counting VC0) */
 	evcc = cap1 & PCI_VC_CAP1_EVCC;
 	/* Low Priority Extended VC Count (not counting VC0) */
-	lpevcc = (cap1 & PCI_VC_CAP1_LPEVCC) >> 4;
+	lpevcc = FIELD_GET(PCI_VC_CAP1_LPEVCC, cap1);
 	/* Port Arbitration Table Entry Size (bits) */
-	parb_size = 1 << ((cap1 & PCI_VC_CAP1_ARB_SIZE) >> 10);
+	parb_size = 1 << FIELD_GET(PCI_VC_CAP1_ARB_SIZE, cap1);
 
 	/*
 	 * Port VC Control Register contains VC Arbitration Select, which
@@ -230,7 +232,7 @@ static int pci_vc_do_save_buffer(struct pci_dev *dev, int pos,
 		int vcarb_offset;
 
 		pci_read_config_dword(dev, pos + PCI_VC_PORT_CAP2, &cap2);
-		vcarb_offset = ((cap2 & PCI_VC_CAP2_ARB_OFF) >> 24) * 16;
+		vcarb_offset = FIELD_GET(PCI_VC_CAP2_ARB_OFF, cap2) * 16;
 
 		if (vcarb_offset) {
 			int size, vcarb_phases = 0;
@@ -276,7 +278,7 @@ static int pci_vc_do_save_buffer(struct pci_dev *dev, int pos,
 
 		pci_read_config_dword(dev, pos + PCI_VC_RES_CAP +
 				      (i * PCI_CAP_VC_PER_VC_SIZEOF), &cap);
-		parb_offset = ((cap & PCI_VC_RES_CAP_ARB_OFF) >> 24) * 16;
+		parb_offset = FIELD_GET(PCI_VC_RES_CAP_ARB_OFF, cap) * 16;
 		if (parb_offset) {
 			int size, parb_phases = 0;
 
@@ -409,7 +411,6 @@ void pci_restore_vc_state(struct pci_dev *dev)
  * For each type of VC capability, VC/VC9/MFVC, find the capability, size
  * it, and allocate a buffer for save/restore.
  */
-
 void pci_allocate_vc_save_buffers(struct pci_dev *dev)
 {
 	int i;

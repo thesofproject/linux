@@ -40,6 +40,36 @@ struct nvkm_udevice {
 };
 
 static int
+nvkm_udevice_info_subdev(struct nvkm_device *device, u64 mthd, u64 *data)
+{
+	struct nvkm_subdev *subdev;
+	enum nvkm_subdev_type type;
+
+	switch (mthd & NV_DEVICE_INFO_UNIT) {
+	case NV_DEVICE_HOST(0): type = NVKM_ENGINE_FIFO; break;
+	default:
+		return -EINVAL;
+	}
+
+	subdev = nvkm_device_subdev(device, type, 0);
+	if (subdev)
+		return nvkm_subdev_info(subdev, mthd, data);
+	return -ENODEV;
+}
+
+static void
+nvkm_udevice_info_v1(struct nvkm_device *device,
+		     struct nv_device_info_v1_data *args)
+{
+	if (args->mthd & NV_DEVICE_INFO_UNIT) {
+		if (nvkm_udevice_info_subdev(device, args->mthd, &args->data))
+			args->mthd = NV_DEVICE_INFO_INVALID;
+		return;
+	}
+	args->mthd = NV_DEVICE_INFO_INVALID;
+}
+
+static int
 nvkm_udevice_info(struct nvkm_udevice *udev, void *data, u32 size)
 {
 	struct nvkm_object *object = &udev->object;
@@ -48,10 +78,21 @@ nvkm_udevice_info(struct nvkm_udevice *udev, void *data, u32 size)
 	struct nvkm_instmem *imem = device->imem;
 	union {
 		struct nv_device_info_v0 v0;
+		struct nv_device_info_v1 v1;
 	} *args = data;
-	int ret = -ENOSYS;
+	int ret = -ENOSYS, i;
 
 	nvif_ioctl(object, "device info size %d\n", size);
+	if (!(ret = nvif_unpack(ret, &data, &size, args->v1, 1, 1, true))) {
+		nvif_ioctl(object, "device info vers %d count %d\n",
+			   args->v1.version, args->v1.count);
+		if (args->v1.count * sizeof(args->v1.data[0]) == size) {
+			for (i = 0; i < args->v1.count; i++)
+				nvkm_udevice_info_v1(device, &args->v1.data[i]);
+			return 0;
+		}
+		return -EINVAL;
+	} else
 	if (!(ret = nvif_unpack(ret, &data, &size, args->v0, 0, 0, false))) {
 		nvif_ioctl(object, "device info vers %d\n", args->v0.version);
 	} else
@@ -103,6 +144,13 @@ nvkm_udevice_info(struct nvkm_udevice *udev, void *data, u32 size)
 	case NV_E0: args->v0.family = NV_DEVICE_INFO_V0_KEPLER; break;
 	case GM100: args->v0.family = NV_DEVICE_INFO_V0_MAXWELL; break;
 	case GP100: args->v0.family = NV_DEVICE_INFO_V0_PASCAL; break;
+	case GV100: args->v0.family = NV_DEVICE_INFO_V0_VOLTA; break;
+	case TU100: args->v0.family = NV_DEVICE_INFO_V0_TURING; break;
+	case GA100: args->v0.family = NV_DEVICE_INFO_V0_AMPERE; break;
+	case AD100: args->v0.family = NV_DEVICE_INFO_V0_ADA; break;
+	case GH100: args->v0.family = NV_DEVICE_INFO_V0_HOPPER; break;
+	case GB10x: args->v0.family = NV_DEVICE_INFO_V0_BLACKWELL; break;
+	case GB20x: args->v0.family = NV_DEVICE_INFO_V0_BLACKWELL; break;
 	default:
 		args->v0.family = 0;
 		break;
@@ -117,8 +165,8 @@ nvkm_udevice_info(struct nvkm_udevice *udev, void *data, u32 size)
 	if (imem && args->v0.ram_size > 0)
 		args->v0.ram_user = args->v0.ram_user - imem->reserved;
 
-	strncpy(args->v0.chip, device->chip->name, sizeof(args->v0.chip));
-	strncpy(args->v0.name, device->name, sizeof(args->v0.name));
+	snprintf(args->v0.chip, sizeof(args->v0.chip), "%s", device->chip->name);
+	snprintf(args->v0.name, sizeof(args->v0.name), "%s", device->name);
 	return 0;
 }
 
@@ -158,67 +206,19 @@ nvkm_udevice_mthd(struct nvkm_object *object, u32 mthd, void *data, u32 size)
 }
 
 static int
-nvkm_udevice_rd08(struct nvkm_object *object, u64 addr, u8 *data)
-{
-	struct nvkm_udevice *udev = nvkm_udevice(object);
-	*data = nvkm_rd08(udev->device, addr);
-	return 0;
-}
-
-static int
-nvkm_udevice_rd16(struct nvkm_object *object, u64 addr, u16 *data)
-{
-	struct nvkm_udevice *udev = nvkm_udevice(object);
-	*data = nvkm_rd16(udev->device, addr);
-	return 0;
-}
-
-static int
-nvkm_udevice_rd32(struct nvkm_object *object, u64 addr, u32 *data)
-{
-	struct nvkm_udevice *udev = nvkm_udevice(object);
-	*data = nvkm_rd32(udev->device, addr);
-	return 0;
-}
-
-static int
-nvkm_udevice_wr08(struct nvkm_object *object, u64 addr, u8 data)
-{
-	struct nvkm_udevice *udev = nvkm_udevice(object);
-	nvkm_wr08(udev->device, addr, data);
-	return 0;
-}
-
-static int
-nvkm_udevice_wr16(struct nvkm_object *object, u64 addr, u16 data)
-{
-	struct nvkm_udevice *udev = nvkm_udevice(object);
-	nvkm_wr16(udev->device, addr, data);
-	return 0;
-}
-
-static int
-nvkm_udevice_wr32(struct nvkm_object *object, u64 addr, u32 data)
-{
-	struct nvkm_udevice *udev = nvkm_udevice(object);
-	nvkm_wr32(udev->device, addr, data);
-	return 0;
-}
-
-static int
 nvkm_udevice_map(struct nvkm_object *object, void *argv, u32 argc,
 		 enum nvkm_object_map *type, u64 *addr, u64 *size)
 {
 	struct nvkm_udevice *udev = nvkm_udevice(object);
 	struct nvkm_device *device = udev->device;
 	*type = NVKM_OBJECT_MAP_IO;
-	*addr = device->func->resource_addr(device, 0);
-	*size = device->func->resource_size(device, 0);
+	*addr = device->func->resource_addr(device, NVKM_BAR0_PRI);
+	*size = device->func->resource_size(device, NVKM_BAR0_PRI);
 	return 0;
 }
 
 static int
-nvkm_udevice_fini(struct nvkm_object *object, bool suspend)
+nvkm_udevice_fini(struct nvkm_object *object, enum nvkm_suspend_state suspend)
 {
 	struct nvkm_udevice *udev = nvkm_udevice(object);
 	struct nvkm_device *device = udev->device;
@@ -277,13 +277,12 @@ nvkm_udevice_child_get(struct nvkm_object *object, int index,
 	struct nvkm_engine *engine;
 	u64 mask = (1ULL << NVKM_ENGINE_DMAOBJ) |
 		   (1ULL << NVKM_ENGINE_FIFO) |
-		   (1ULL << NVKM_ENGINE_DISP) |
-		   (1ULL << NVKM_ENGINE_PM);
+		   (1ULL << NVKM_ENGINE_DISP);
 	const struct nvkm_device_oclass *sclass = NULL;
 	int i;
 
 	for (; i = __ffs64(mask), mask && !sclass; mask &= ~(1ULL << i)) {
-		if (!(engine = nvkm_device_engine(device, i)) ||
+		if (!(engine = nvkm_device_engine(device, i, 0)) ||
 		    !(engine->func->base.sclass))
 			continue;
 		oclass->engine = engine;
@@ -292,17 +291,19 @@ nvkm_udevice_child_get(struct nvkm_object *object, int index,
 	}
 
 	if (!sclass) {
-		switch (index) {
-		case 0: sclass = &nvkm_control_oclass; break;
-		case 1:
-			if (!device->mmu)
-				return -EINVAL;
+		if (index-- == 0)
+			sclass = &nvkm_control_oclass;
+		else if (device->mmu && index-- == 0)
 			sclass = &device->mmu->user;
-			break;
-		default:
+		else if (device->fault && index-- == 0)
+			sclass = &device->fault->user;
+		else if (device->vfn && index-- == 0)
+			sclass = &device->vfn->user;
+		else
 			return -EINVAL;
-		}
+
 		oclass->base = sclass->base;
+		oclass->engine = NULL;
 	}
 
 	oclass->ctor = nvkm_udevice_child_new;
@@ -311,25 +312,11 @@ nvkm_udevice_child_get(struct nvkm_object *object, int index,
 }
 
 static const struct nvkm_object_func
-nvkm_udevice_super = {
-	.init = nvkm_udevice_init,
-	.fini = nvkm_udevice_fini,
-	.mthd = nvkm_udevice_mthd,
-	.map = nvkm_udevice_map,
-	.rd08 = nvkm_udevice_rd08,
-	.rd16 = nvkm_udevice_rd16,
-	.rd32 = nvkm_udevice_rd32,
-	.wr08 = nvkm_udevice_wr08,
-	.wr16 = nvkm_udevice_wr16,
-	.wr32 = nvkm_udevice_wr32,
-	.sclass = nvkm_udevice_child_get,
-};
-
-static const struct nvkm_object_func
 nvkm_udevice = {
 	.init = nvkm_udevice_init,
 	.fini = nvkm_udevice_fini,
 	.mthd = nvkm_udevice_mthd,
+	.map = nvkm_udevice_map,
 	.sclass = nvkm_udevice_child_get,
 };
 
@@ -337,38 +324,16 @@ static int
 nvkm_udevice_new(const struct nvkm_oclass *oclass, void *data, u32 size,
 		 struct nvkm_object **pobject)
 {
-	union {
-		struct nv_device_v0 v0;
-	} *args = data;
 	struct nvkm_client *client = oclass->client;
-	struct nvkm_object *parent = &client->object;
-	const struct nvkm_object_func *func;
 	struct nvkm_udevice *udev;
-	int ret = -ENOSYS;
 
-	nvif_ioctl(parent, "create device size %d\n", size);
-	if (!(ret = nvif_unpack(ret, &data, &size, args->v0, 0, 0, false))) {
-		nvif_ioctl(parent, "create device v%d device %016llx\n",
-			   args->v0.version, args->v0.device);
-	} else
-		return ret;
-
-	/* give priviledged clients register access */
-	if (client->super)
-		func = &nvkm_udevice_super;
-	else
-		func = &nvkm_udevice;
-
-	if (!(udev = kzalloc(sizeof(*udev), GFP_KERNEL)))
+	if (!(udev = kzalloc_obj(*udev)))
 		return -ENOMEM;
-	nvkm_object_ctor(func, oclass, &udev->object);
+	nvkm_object_ctor(&nvkm_udevice, oclass, &udev->object);
 	*pobject = &udev->object;
 
 	/* find the device that matches what the client requested */
-	if (args->v0.device != ~0)
-		udev->device = nvkm_device_find(args->v0.device);
-	else
-		udev->device = nvkm_device_find(client->device);
+	udev->device = nvkm_device_find(client->device);
 	if (!udev->device)
 		return -ENODEV;
 

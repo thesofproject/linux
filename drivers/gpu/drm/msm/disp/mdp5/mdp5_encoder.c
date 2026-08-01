@@ -1,23 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014, The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <drm/drm_crtc.h>
-#include <drm/drm_crtc_helper.h>
+#include <drm/drm_probe_helper.h>
 
 #include "mdp5_kms.h"
 
@@ -26,80 +15,6 @@ static struct mdp5_kms *get_kms(struct drm_encoder *encoder)
 	struct msm_drm_private *priv = encoder->dev->dev_private;
 	return to_mdp5_kms(to_mdp_kms(priv->kms));
 }
-
-#ifdef DOWNSTREAM_CONFIG_MSM_BUS_SCALING
-#include <mach/board.h>
-#include <mach/msm_bus.h>
-#include <mach/msm_bus_board.h>
-#define MDP_BUS_VECTOR_ENTRY(ab_val, ib_val)		\
-	{						\
-		.src = MSM_BUS_MASTER_MDP_PORT0,	\
-		.dst = MSM_BUS_SLAVE_EBI_CH0,		\
-		.ab = (ab_val),				\
-		.ib = (ib_val),				\
-	}
-
-static struct msm_bus_vectors mdp_bus_vectors[] = {
-	MDP_BUS_VECTOR_ENTRY(0, 0),
-	MDP_BUS_VECTOR_ENTRY(2000000000, 2000000000),
-};
-static struct msm_bus_paths mdp_bus_usecases[] = { {
-		.num_paths = 1,
-		.vectors = &mdp_bus_vectors[0],
-}, {
-		.num_paths = 1,
-		.vectors = &mdp_bus_vectors[1],
-} };
-static struct msm_bus_scale_pdata mdp_bus_scale_table = {
-	.usecase = mdp_bus_usecases,
-	.num_usecases = ARRAY_SIZE(mdp_bus_usecases),
-	.name = "mdss_mdp",
-};
-
-static void bs_init(struct mdp5_encoder *mdp5_encoder)
-{
-	mdp5_encoder->bsc = msm_bus_scale_register_client(
-			&mdp_bus_scale_table);
-	DBG("bus scale client: %08x", mdp5_encoder->bsc);
-}
-
-static void bs_fini(struct mdp5_encoder *mdp5_encoder)
-{
-	if (mdp5_encoder->bsc) {
-		msm_bus_scale_unregister_client(mdp5_encoder->bsc);
-		mdp5_encoder->bsc = 0;
-	}
-}
-
-static void bs_set(struct mdp5_encoder *mdp5_encoder, int idx)
-{
-	if (mdp5_encoder->bsc) {
-		DBG("set bus scaling: %d", idx);
-		/* HACK: scaling down, and then immediately back up
-		 * seems to leave things broken (underflow).. so
-		 * never disable:
-		 */
-		idx = 1;
-		msm_bus_scale_client_update_request(mdp5_encoder->bsc, idx);
-	}
-}
-#else
-static void bs_init(struct mdp5_encoder *mdp5_encoder) {}
-static void bs_fini(struct mdp5_encoder *mdp5_encoder) {}
-static void bs_set(struct mdp5_encoder *mdp5_encoder, int idx) {}
-#endif
-
-static void mdp5_encoder_destroy(struct drm_encoder *encoder)
-{
-	struct mdp5_encoder *mdp5_encoder = to_mdp5_encoder(encoder);
-	bs_fini(mdp5_encoder);
-	drm_encoder_cleanup(encoder);
-	kfree(mdp5_encoder);
-}
-
-static const struct drm_encoder_funcs mdp5_encoder_funcs = {
-	.destroy = mdp5_encoder_destroy,
-};
 
 static void mdp5_vid_encoder_mode_set(struct drm_encoder *encoder,
 				      struct drm_display_mode *mode,
@@ -118,14 +33,7 @@ static void mdp5_vid_encoder_mode_set(struct drm_encoder *encoder,
 
 	mode = adjusted_mode;
 
-	DBG("set mode: %d:\"%s\" %d %d %d %d %d %d %d %d %d %d 0x%x 0x%x",
-			mode->base.id, mode->name,
-			mode->vrefresh, mode->clock,
-			mode->hdisplay, mode->hsync_start,
-			mode->hsync_end, mode->htotal,
-			mode->vdisplay, mode->vsync_start,
-			mode->vsync_end, mode->vtotal,
-			mode->type, mode->flags);
+	DBG("set mode: " DRM_MODE_FMT, DRM_MODE_ARG(mode));
 
 	ctrl_pol = 0;
 
@@ -240,8 +148,6 @@ static void mdp5_vid_encoder_disable(struct drm_encoder *encoder)
 	 */
 	mdp_irq_wait(&mdp5_kms->base, intf2vblank(mixer, intf));
 
-	bs_set(mdp5_encoder, 0);
-
 	mdp5_encoder->enabled = false;
 }
 
@@ -258,7 +164,6 @@ static void mdp5_vid_encoder_enable(struct drm_encoder *encoder)
 	if (WARN_ON(mdp5_encoder->enabled))
 		return;
 
-	bs_set(mdp5_encoder, 1);
 	spin_lock_irqsave(&mdp5_encoder->intf_lock, flags);
 	mdp5_write(mdp5_kms, REG_MDP5_INTF_TIMING_ENGINE_EN(intfn), 1);
 	spin_unlock_irqrestore(&mdp5_encoder->intf_lock, flags);
@@ -319,7 +224,17 @@ static int mdp5_encoder_atomic_check(struct drm_encoder *encoder,
 
 	mdp5_cstate->ctl = ctl;
 	mdp5_cstate->pipeline.intf = intf;
-	mdp5_cstate->defer_start = true;
+
+	/*
+	 * This is a bit awkward, but we want to flush the CTL and hit the
+	 * START bit at most once for an atomic update.  In the non-full-
+	 * modeset case, this is done from crtc->atomic_flush(), but that
+	 * is too early in the case of full modeset, in which case we
+	 * defer to encoder->enable().  But we need to *know* whether
+	 * encoder->enable() will be called to do this:
+	 */
+	if (drm_atomic_crtc_needs_modeset(crtc_state))
+		mdp5_cstate->defer_start = true;
 
 	return 0;
 }
@@ -348,48 +263,6 @@ u32 mdp5_encoder_get_framecount(struct drm_encoder *encoder)
 	return mdp5_read(mdp5_kms, REG_MDP5_INTF_FRAME_COUNT(intf));
 }
 
-int mdp5_vid_encoder_set_split_display(struct drm_encoder *encoder,
-				       struct drm_encoder *slave_encoder)
-{
-	struct mdp5_encoder *mdp5_encoder = to_mdp5_encoder(encoder);
-	struct mdp5_encoder *mdp5_slave_enc = to_mdp5_encoder(slave_encoder);
-	struct mdp5_kms *mdp5_kms;
-	struct device *dev;
-	int intf_num;
-	u32 data = 0;
-
-	if (!encoder || !slave_encoder)
-		return -EINVAL;
-
-	mdp5_kms = get_kms(encoder);
-	intf_num = mdp5_encoder->intf->num;
-
-	/* Switch slave encoder's TimingGen Sync mode,
-	 * to use the master's enable signal for the slave encoder.
-	 */
-	if (intf_num == 1)
-		data |= MDP5_SPLIT_DPL_LOWER_INTF2_TG_SYNC;
-	else if (intf_num == 2)
-		data |= MDP5_SPLIT_DPL_LOWER_INTF1_TG_SYNC;
-	else
-		return -EINVAL;
-
-	dev = &mdp5_kms->pdev->dev;
-	/* Make sure clocks are on when connectors calling this function. */
-	pm_runtime_get_sync(dev);
-
-	/* Dumb Panel, Sync mode */
-	mdp5_write(mdp5_kms, REG_MDP5_SPLIT_DPL_UPPER, 0);
-	mdp5_write(mdp5_kms, REG_MDP5_SPLIT_DPL_LOWER, data);
-	mdp5_write(mdp5_kms, REG_MDP5_SPLIT_DPL_EN, 1);
-
-	mdp5_ctl_pair(mdp5_encoder->ctl, mdp5_slave_enc->ctl, true);
-
-	pm_runtime_put_sync(dev);
-
-	return 0;
-}
-
 void mdp5_encoder_set_intf_mode(struct drm_encoder *encoder, bool cmd_mode)
 {
 	struct mdp5_encoder *mdp5_encoder = to_mdp5_encoder(encoder);
@@ -416,13 +289,11 @@ struct drm_encoder *mdp5_encoder_init(struct drm_device *dev,
 	struct mdp5_encoder *mdp5_encoder;
 	int enc_type = (intf->type == INTF_DSI) ?
 		DRM_MODE_ENCODER_DSI : DRM_MODE_ENCODER_TMDS;
-	int ret;
 
-	mdp5_encoder = kzalloc(sizeof(*mdp5_encoder), GFP_KERNEL);
-	if (!mdp5_encoder) {
-		ret = -ENOMEM;
-		goto fail;
-	}
+	mdp5_encoder = drmm_encoder_alloc(dev, struct mdp5_encoder, base,
+					  NULL, enc_type, NULL);
+	if (IS_ERR(mdp5_encoder))
+		return ERR_CAST(mdp5_encoder);
 
 	encoder = &mdp5_encoder->base;
 	mdp5_encoder->ctl = ctl;
@@ -430,17 +301,7 @@ struct drm_encoder *mdp5_encoder_init(struct drm_device *dev,
 
 	spin_lock_init(&mdp5_encoder->intf_lock);
 
-	drm_encoder_init(dev, encoder, &mdp5_encoder_funcs, enc_type, NULL);
-
 	drm_encoder_helper_add(encoder, &mdp5_encoder_helper_funcs);
 
-	bs_init(mdp5_encoder);
-
 	return encoder;
-
-fail:
-	if (encoder)
-		mdp5_encoder_destroy(encoder);
-
-	return ERR_PTR(ret);
 }

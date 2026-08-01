@@ -2,6 +2,8 @@
 #ifndef __NET_NCSI_H
 #define __NET_NCSI_H
 
+#include <linux/types.h>
+
 /*
  * The NCSI device states seen from external. More NCSI device states are
  * only visible internally (in net/ncsi/internal.h). When the NCSI device
@@ -58,7 +60,7 @@ static inline int ncsi_start_dev(struct ncsi_dev *nd)
 	return -ENOTTY;
 }
 
-static void ncsi_stop_dev(struct ncsi_dev *nd)
+static inline void ncsi_stop_dev(struct ncsi_dev *nd)
 {
 }
 

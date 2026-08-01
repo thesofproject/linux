@@ -1,39 +1,8 @@
-/*
- * Copyright (C) 2017 Netronome Systems, Inc.
- *
- * This software is dual licensed under the GNU General License Version 2,
- * June 1991 as shown in the file COPYING in the top-level directory of this
- * source tree or the BSD 2-Clause License provided below.  You have the
- * option to license this software under the complete terms of either license.
- *
- * The BSD 2-Clause License:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      1. Redistributions of source code must retain the above
- *         copyright notice, this list of conditions and the following
- *         disclaimer.
- *
- *      2. Redistributions in binary form must reproduce the above
- *         copyright notice, this list of conditions and the following
- *         disclaimer in the documentation and/or other materials
- *         provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/* Copyright (C) 2017-2018 Netronome Systems, Inc. */
 
 #include <linux/lockdep.h>
 #include <linux/netdevice.h>
-#include <net/switchdev.h>
 
 #include "nfpcore/nfp_cpp.h"
 #include "nfpcore/nfp_nsp.h"
@@ -61,33 +30,21 @@ struct nfp_port *nfp_port_from_netdev(struct net_device *netdev)
 	return NULL;
 }
 
-static int
-nfp_port_attr_get(struct net_device *netdev, struct switchdev_attr *attr)
+int nfp_port_get_port_parent_id(struct net_device *netdev,
+				struct netdev_phys_item_id *ppid)
 {
 	struct nfp_port *port;
+	const u8 *serial;
 
 	port = nfp_port_from_netdev(netdev);
 	if (!port)
 		return -EOPNOTSUPP;
 
-	switch (attr->id) {
-	case SWITCHDEV_ATTR_ID_PORT_PARENT_ID: {
-		const u8 *serial;
-		/* N.B: attr->u.ppid.id is binary data */
-		attr->u.ppid.id_len = nfp_cpp_serial(port->app->cpp, &serial);
-		memcpy(&attr->u.ppid.id, serial, attr->u.ppid.id_len);
-		break;
-	}
-	default:
-		return -EOPNOTSUPP;
-	}
+	ppid->id_len = nfp_cpp_serial(port->app->cpp, &serial);
+	memcpy(&ppid->id, serial, ppid->id_len);
 
 	return 0;
 }
-
-const struct switchdev_ops nfp_port_switchdev_ops = {
-	.switchdev_port_attr_get	= nfp_port_attr_get,
-};
 
 int nfp_port_setup_tc(struct net_device *netdev, enum tc_setup_type type,
 		      void *type_data)
@@ -116,23 +73,6 @@ int nfp_port_set_features(struct net_device *netdev, netdev_features_t features)
 	}
 
 	return 0;
-}
-
-struct nfp_port *
-nfp_port_from_id(struct nfp_pf *pf, enum nfp_port_type type, unsigned int id)
-{
-	struct nfp_port *port;
-
-	lockdep_assert_held(&pf->lock);
-
-	if (type != NFP_PORT_PHYS_PORT)
-		return NULL;
-
-	list_for_each_entry(port, &pf->ports, port_list)
-		if (port->eth_id == id)
-			return port;
-
-	return NULL;
 }
 
 struct nfp_eth_table_port *__nfp_port_get_eth_port(struct nfp_port *port)
@@ -181,7 +121,11 @@ nfp_port_get_phys_port_name(struct net_device *netdev, char *name, size_t len)
 				     eth_port->label_subport);
 		break;
 	case NFP_PORT_PF_PORT:
-		n = snprintf(name, len, "pf%d", port->pf_id);
+		if (!port->pf_split)
+			n = snprintf(name, len, "pf%d", port->pf_id);
+		else
+			n = snprintf(name, len, "pf%ds%d", port->pf_id,
+				     port->pf_split_id);
 		break;
 	case NFP_PORT_VF_PORT:
 		n = snprintf(name, len, "pf%dvf%d", port->pf_id, port->vf_id);
@@ -218,6 +162,8 @@ int nfp_port_configure(struct net_device *netdev, bool configed)
 	eth_port = __nfp_port_get_eth_port(port);
 	if (!eth_port)
 		return 0;
+	if (port->eth_forced)
+		return 0;
 
 	err = nfp_eth_set_configured(port->app->cpp, eth_port->index, configed);
 	return err < 0 && err != -EOPNOTSUPP ? err : 0;
@@ -243,6 +189,7 @@ int nfp_port_init_phy_port(struct nfp_pf *pf, struct nfp_app *app,
 
 	port->eth_port = &pf->eth_tbl->ports[id];
 	port->eth_id = pf->eth_tbl->ports[id].index;
+	port->netdev->dev_port = id;
 	if (pf->mac_stats_mem)
 		port->eth_stats =
 			pf->mac_stats_mem + port->eth_id * NFP_MAC_STATS_SIZE;
@@ -256,7 +203,7 @@ nfp_port_alloc(struct nfp_app *app, enum nfp_port_type type,
 {
 	struct nfp_port *port;
 
-	port = kzalloc(sizeof(*port), GFP_KERNEL);
+	port = kzalloc_obj(*port);
 	if (!port)
 		return ERR_PTR(-ENOMEM);
 

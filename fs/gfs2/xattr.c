@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) Sistina Software, Inc.  1997-2003 All rights reserved.
  * Copyright (C) 2004-2006 Red Hat, Inc.  All rights reserved.
- *
- * This copyrighted material is made available to anyone wishing to use,
- * modify, copy, or redistribute it subject to the terms and conditions
- * of the GNU General Public License version 2.
  */
 
 #include <linux/slab.h>
@@ -29,12 +26,9 @@
 #include "trans.h"
 #include "util.h"
 
-/**
- * ea_calc_size - returns the acutal number of bytes the request will take up
+/*
+ * ea_calc_size - returns the actual number of bytes the request will take up
  *                (not counting any unstuffed data blocks)
- * @sdp:
- * @er:
- * @size:
  *
  * Returns: 1 if the EA should be stuffed
  */
@@ -73,6 +67,20 @@ static int ea_check_size(struct gfs2_sbd *sdp, unsigned int nsize, size_t dsize)
 	return 0;
 }
 
+static bool gfs2_eatype_valid(struct gfs2_sbd *sdp, u8 type)
+{
+	switch(sdp->sd_sb.sb_fs_format) {
+	case GFS2_FS_FORMAT_MAX:
+		return true;
+
+	case GFS2_FS_FORMAT_MIN:
+		return type <= GFS2_EATYPE_SECURITY;
+
+	default:
+		return false;
+	}
+}
+
 typedef int (*ea_call_t) (struct gfs2_inode *ip, struct buffer_head *bh,
 			  struct gfs2_ea_header *ea,
 			  struct gfs2_ea_header *prev, void *private);
@@ -80,6 +88,7 @@ typedef int (*ea_call_t) (struct gfs2_inode *ip, struct buffer_head *bh,
 static int ea_foreach_i(struct gfs2_inode *ip, struct buffer_head *bh,
 			ea_call_t ea_call, void *data)
 {
+	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
 	struct gfs2_ea_header *ea, *prev = NULL;
 	int error = 0;
 
@@ -87,31 +96,34 @@ static int ea_foreach_i(struct gfs2_inode *ip, struct buffer_head *bh,
 		return -EIO;
 
 	for (ea = GFS2_EA_BH2FIRST(bh);; prev = ea, ea = GFS2_EA2NEXT(ea)) {
-		if (!GFS2_EA_REC_LEN(ea))
-			goto fail;
+		if (!GFS2_EA_REC_LEN(ea)) {
+			gfs2_consist_inode(ip);
+			return -EIO;
+		}
 		if (!(bh->b_data <= (char *)ea && (char *)GFS2_EA2NEXT(ea) <=
-						  bh->b_data + bh->b_size))
-			goto fail;
-		if (!GFS2_EATYPE_VALID(ea->ea_type))
-			goto fail;
-
+						  bh->b_data + bh->b_size)) {
+			gfs2_consist_inode(ip);
+			return -EIO;
+		}
+		if (!gfs2_eatype_valid(sdp, ea->ea_type)) {
+			gfs2_consist_inode(ip);
+			return -EIO;
+		}
 		error = ea_call(ip, bh, ea, prev, data);
 		if (error)
 			return error;
 
 		if (GFS2_EA_IS_LAST(ea)) {
 			if ((char *)GFS2_EA2NEXT(ea) !=
-			    bh->b_data + bh->b_size)
-				goto fail;
+			    bh->b_data + bh->b_size) {
+				gfs2_consist_inode(ip);
+				return -EIO;
+			}
 			break;
 		}
 	}
 
 	return error;
-
-fail:
-	gfs2_consist_inode(ip);
-	return -EIO;
 }
 
 static int ea_foreach(struct gfs2_inode *ip, ea_call_t ea_call, void *data)
@@ -208,13 +220,8 @@ static int gfs2_ea_find(struct gfs2_inode *ip, int type, const char *name,
 	return error;
 }
 
-/**
- * ea_dealloc_unstuffed -
- * @ip:
- * @bh:
- * @ea:
- * @prev:
- * @private:
+/*
+ * ea_dealloc_unstuffed
  *
  * Take advantage of the fact that all unstuffed blocks are
  * allocated from the same RG.  But watch, this may not always
@@ -262,7 +269,8 @@ static int ea_dealloc_unstuffed(struct gfs2_inode *ip, struct buffer_head *bh,
 		return -EIO;
 	}
 
-	error = gfs2_glock_nq_init(rgd->rd_gl, LM_ST_EXCLUSIVE, 0, &rg_gh);
+	error = gfs2_glock_nq_init(rgd->rd_gl, LM_ST_EXCLUSIVE,
+				   LM_FLAG_NODE_SCOPE, &rg_gh);
 	if (error)
 		return error;
 
@@ -283,7 +291,7 @@ static int ea_dealloc_unstuffed(struct gfs2_inode *ip, struct buffer_head *bh,
 			blen++;
 		else {
 			if (bstart)
-				gfs2_free_meta(ip, bstart, blen);
+				gfs2_free_meta(ip, rgd, bstart, blen);
 			bstart = bn;
 			blen = 1;
 		}
@@ -292,7 +300,7 @@ static int ea_dealloc_unstuffed(struct gfs2_inode *ip, struct buffer_head *bh,
 		gfs2_add_inode_blocks(&ip->i_inode, -1);
 	}
 	if (bstart)
-		gfs2_free_meta(ip, bstart, blen);
+		gfs2_free_meta(ip, rgd, bstart, blen);
 
 	if (prev && !leave) {
 		u32 len;
@@ -307,7 +315,7 @@ static int ea_dealloc_unstuffed(struct gfs2_inode *ip, struct buffer_head *bh,
 		ea->ea_num_ptrs = 0;
 	}
 
-	ip->i_inode.i_ctime = current_time(&ip->i_inode);
+	inode_set_ctime_current(&ip->i_inode);
 	__mark_inode_dirty(&ip->i_inode, I_DIRTY_DATASYNC);
 
 	gfs2_trans_end(sdp);
@@ -343,60 +351,52 @@ struct ea_list {
 	unsigned int ei_size;
 };
 
-static inline unsigned int gfs2_ea_strlen(struct gfs2_ea_header *ea)
-{
-	switch (ea->ea_type) {
-	case GFS2_EATYPE_USR:
-		return 5 + ea->ea_name_len + 1;
-	case GFS2_EATYPE_SYS:
-		return 7 + ea->ea_name_len + 1;
-	case GFS2_EATYPE_SECURITY:
-		return 9 + ea->ea_name_len + 1;
-	default:
-		return 0;
-	}
-}
-
 static int ea_list_i(struct gfs2_inode *ip, struct buffer_head *bh,
 		     struct gfs2_ea_header *ea, struct gfs2_ea_header *prev,
 		     void *private)
 {
+	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
 	struct ea_list *ei = private;
 	struct gfs2_ea_request *er = ei->ei_er;
-	unsigned int ea_size = gfs2_ea_strlen(ea);
+	unsigned int ea_size;
+	char *prefix;
+	unsigned int l;
 
 	if (ea->ea_type == GFS2_EATYPE_UNUSED)
 		return 0;
 
-	if (er->er_data_len) {
-		char *prefix = NULL;
-		unsigned int l = 0;
-		char c = 0;
+	BUG_ON(ea->ea_type > GFS2_EATYPE_SECURITY &&
+	       sdp->sd_sb.sb_fs_format == GFS2_FS_FORMAT_MIN);
+	switch (ea->ea_type) {
+	case GFS2_EATYPE_USR:
+		prefix = "user.";
+		l = 5;
+		break;
+	case GFS2_EATYPE_SYS:
+		prefix = "system.";
+		l = 7;
+		break;
+	case GFS2_EATYPE_SECURITY:
+		prefix = "security.";
+		l = 9;
+		break;
+	case GFS2_EATYPE_TRUSTED:
+		prefix = "trusted.";
+		l = 8;
+		break;
+	default:
+		return 0;
+	}
 
+	ea_size = l + ea->ea_name_len + 1;
+	if (er->er_data_len) {
 		if (ei->ei_size + ea_size > er->er_data_len)
 			return -ERANGE;
-
-		switch (ea->ea_type) {
-		case GFS2_EATYPE_USR:
-			prefix = "user.";
-			l = 5;
-			break;
-		case GFS2_EATYPE_SYS:
-			prefix = "system.";
-			l = 7;
-			break;
-		case GFS2_EATYPE_SECURITY:
-			prefix = "security.";
-			l = 9;
-			break;
-		}
-
-		BUG_ON(l == 0);
 
 		memcpy(er->er_data + ei->ei_size, prefix, l);
 		memcpy(er->er_data + ei->ei_size + l, GFS2_EA2NAME(ea),
 		       ea->ea_name_len);
-		memcpy(er->er_data + ei->ei_size + ea_size - 1, &c, 1);
+		er->er_data[ei->ei_size + ea_size - 1] = 0;
 	}
 
 	ei->ei_size += ea_size;
@@ -444,8 +444,8 @@ ssize_t gfs2_listxattr(struct dentry *dentry, char *buffer, size_t size)
 }
 
 /**
- * ea_iter_unstuffed - copies the unstuffed xattr data to/from the
- *                     request buffer
+ * gfs2_iter_unstuffed - copies the unstuffed xattr data to/from the
+ *                       request buffer
  * @ip: The GFS2 inode
  * @ea: The extended attribute header structure
  * @din: The data to be copied in
@@ -467,7 +467,7 @@ static int gfs2_iter_unstuffed(struct gfs2_inode *ip, struct gfs2_ea_header *ea,
 	unsigned char *pos;
 	unsigned cp_size;
 
-	bh = kcalloc(nptrs, sizeof(struct buffer_head *), GFP_NOFS);
+	bh = kzalloc_objs(struct buffer_head *, nptrs, GFP_NOFS);
 	if (!bh)
 		return -ENOMEM;
 
@@ -569,7 +569,7 @@ out:
 }
 
 /**
- * gfs2_xattr_get - Get a GFS2 extended attribute
+ * __gfs2_xattr_get - Get a GFS2 extended attribute
  * @inode: The inode
  * @name: The name of the extended attribute
  * @buffer: The buffer to write the result into
@@ -643,10 +643,10 @@ static int ea_alloc_blk(struct gfs2_inode *ip, struct buffer_head **bhp)
 	u64 block;
 	int error;
 
-	error = gfs2_alloc_blocks(ip, &block, &n, 0, NULL);
+	error = gfs2_alloc_blocks(ip, &block, &n, 0);
 	if (error)
 		return error;
-	gfs2_trans_add_unrevoke(sdp, block, 1);
+	gfs2_trans_remove_revoke(sdp, block, 1);
 	*bhp = gfs2_meta_new(ip->i_gl, block);
 	gfs2_trans_add_meta(ip->i_gl, *bhp);
 	gfs2_metatype_set(*bhp, GFS2_METATYPE_EA, GFS2_FORMAT_EA);
@@ -705,10 +705,10 @@ static int ea_write(struct gfs2_inode *ip, struct gfs2_ea_header *ea,
 			int mh_size = sizeof(struct gfs2_meta_header);
 			unsigned int n = 1;
 
-			error = gfs2_alloc_blocks(ip, &block, &n, 0, NULL);
+			error = gfs2_alloc_blocks(ip, &block, &n, 0);
 			if (error)
 				return error;
-			gfs2_trans_add_unrevoke(sdp, block, 1);
+			gfs2_trans_remove_revoke(sdp, block, 1);
 			bh = gfs2_meta_new(ip->i_gl, block);
 			gfs2_trans_add_meta(ip->i_gl, bh);
 			gfs2_metatype_set(bh, GFS2_METATYPE_ED, GFS2_FORMAT_ED);
@@ -767,7 +767,7 @@ static int ea_alloc_skeleton(struct gfs2_inode *ip, struct gfs2_ea_request *er,
 	if (error)
 		goto out_end_trans;
 
-	ip->i_inode.i_ctime = current_time(&ip->i_inode);
+	inode_set_ctime_current(&ip->i_inode);
 	__mark_inode_dirty(&ip->i_inode, I_DIRTY_DATASYNC);
 
 out_end_trans:
@@ -797,14 +797,11 @@ static int ea_init_i(struct gfs2_inode *ip, struct gfs2_ea_request *er,
 	return error;
 }
 
-/**
+/*
  * ea_init - initializes a new eattr block
- * @ip:
- * @er:
  *
  * Returns: errno
  */
-
 static int ea_init(struct gfs2_inode *ip, int type, const char *name,
 		   const void *data, size_t size)
 {
@@ -895,7 +892,7 @@ static int ea_set_simple_noalloc(struct gfs2_inode *ip, struct buffer_head *bh,
 	if (es->es_el)
 		ea_set_remove_stuffed(ip, es->es_el);
 
-	ip->i_inode.i_ctime = current_time(&ip->i_inode);
+	inode_set_ctime_current(&ip->i_inode);
 	__mark_inode_dirty(&ip->i_inode, I_DIRTY_DATASYNC);
 
 	gfs2_trans_end(GFS2_SB(&ip->i_inode));
@@ -1009,10 +1006,10 @@ static int ea_set_block(struct gfs2_inode *ip, struct gfs2_ea_request *er,
 	} else {
 		u64 blk;
 		unsigned int n = 1;
-		error = gfs2_alloc_blocks(ip, &blk, &n, 0, NULL);
+		error = gfs2_alloc_blocks(ip, &blk, &n, 0);
 		if (error)
 			return error;
-		gfs2_trans_add_unrevoke(sdp, blk, 1);
+		gfs2_trans_remove_revoke(sdp, blk, 1);
 		indbh = gfs2_meta_new(ip->i_gl, blk);
 		gfs2_trans_add_meta(ip->i_gl, indbh);
 		gfs2_metatype_set(indbh, GFS2_METATYPE_IN, GFS2_FORMAT_IN);
@@ -1113,7 +1110,7 @@ static int ea_remove_stuffed(struct gfs2_inode *ip, struct gfs2_ea_location *el)
 		ea->ea_type = GFS2_EATYPE_UNUSED;
 	}
 
-	ip->i_inode.i_ctime = current_time(&ip->i_inode);
+	inode_set_ctime_current(&ip->i_inode);
 	__mark_inode_dirty(&ip->i_inode, I_DIRTY_DATASYNC);
 
 	gfs2_trans_end(GFS2_SB(&ip->i_inode));
@@ -1160,7 +1157,7 @@ static int gfs2_xattr_remove(struct gfs2_inode *ip, int type, const char *name)
 
 /**
  * __gfs2_xattr_set - Set (or remove) a GFS2 extended attribute
- * @ip: The inode
+ * @inode: The inode
  * @name: The name of the extended attribute
  * @value: The value of the extended attribute (NULL for remove)
  * @size: The size of the @value argument
@@ -1232,6 +1229,7 @@ int __gfs2_xattr_set(struct inode *inode, const char *name,
 }
 
 static int gfs2_xattr_set(const struct xattr_handler *handler,
+			  struct mnt_idmap *idmap,
 			  struct dentry *unused, struct inode *inode,
 			  const char *name, const void *value,
 			  size_t size, int flags)
@@ -1240,7 +1238,7 @@ static int gfs2_xattr_set(const struct xattr_handler *handler,
 	struct gfs2_holder gh;
 	int ret;
 
-	ret = gfs2_rsqa_alloc(ip);
+	ret = gfs2_qa_get(ip);
 	if (ret)
 		return ret;
 
@@ -1249,15 +1247,19 @@ static int gfs2_xattr_set(const struct xattr_handler *handler,
 	if (!gfs2_glock_is_locked_by_me(ip->i_gl)) {
 		ret = gfs2_glock_nq_init(ip->i_gl, LM_ST_EXCLUSIVE, 0, &gh);
 		if (ret)
-			return ret;
+			goto out;
 	} else {
-		if (WARN_ON_ONCE(ip->i_gl->gl_state != LM_ST_EXCLUSIVE))
-			return -EIO;
+		if (WARN_ON_ONCE(ip->i_gl->gl_state != LM_ST_EXCLUSIVE)) {
+			ret = -EIO;
+			goto out;
+		}
 		gfs2_holder_mark_uninitialized(&gh);
 	}
 	ret = __gfs2_xattr_set(inode, name, value, size, flags, handler->flags);
 	if (gfs2_holder_initialized(&gh))
 		gfs2_glock_dq_uninit(&gh);
+out:
+	gfs2_qa_put(ip);
 	return ret;
 }
 
@@ -1265,6 +1267,7 @@ static int ea_dealloc_indirect(struct gfs2_inode *ip)
 {
 	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
 	struct gfs2_rgrp_list rlist;
+	struct gfs2_rgrpd *rgd;
 	struct buffer_head *indbh, *dibh;
 	__be64 *eablk, *end;
 	unsigned int rg_blocks = 0;
@@ -1314,11 +1317,10 @@ static int ea_dealloc_indirect(struct gfs2_inode *ip)
 	else
 		goto out;
 
-	gfs2_rlist_alloc(&rlist, LM_ST_EXCLUSIVE);
+	gfs2_rlist_alloc(&rlist, LM_ST_EXCLUSIVE, LM_FLAG_NODE_SCOPE);
 
 	for (x = 0; x < rlist.rl_rgrps; x++) {
-		struct gfs2_rgrpd *rgd = gfs2_glock2rgrp(rlist.rl_ghs[x].gh_gl);
-
+		rgd = gfs2_glock2rgrp(rlist.rl_ghs[x].gh_gl);
 		rg_blocks += rgd->rd_length;
 	}
 
@@ -1335,6 +1337,7 @@ static int ea_dealloc_indirect(struct gfs2_inode *ip)
 
 	eablk = (__be64 *)(indbh->b_data + sizeof(struct gfs2_meta_header));
 	bstart = 0;
+	rgd = NULL;
 	blen = 0;
 
 	for (; eablk < end; eablk++) {
@@ -1348,8 +1351,9 @@ static int ea_dealloc_indirect(struct gfs2_inode *ip)
 			blen++;
 		else {
 			if (bstart)
-				gfs2_free_meta(ip, bstart, blen);
+				gfs2_free_meta(ip, rgd, bstart, blen);
 			bstart = bn;
+			rgd = gfs2_blk2rgrpd(sdp, bstart, true);
 			blen = 1;
 		}
 
@@ -1357,7 +1361,7 @@ static int ea_dealloc_indirect(struct gfs2_inode *ip)
 		gfs2_add_inode_blocks(&ip->i_inode, -1);
 	}
 	if (bstart)
-		gfs2_free_meta(ip, bstart, blen);
+		gfs2_free_meta(ip, rgd, bstart, blen);
 
 	ip->i_diskflags &= ~GFS2_DIF_EA_INDIRECT;
 
@@ -1379,7 +1383,7 @@ out:
 	return error;
 }
 
-static int ea_dealloc_block(struct gfs2_inode *ip)
+static int ea_dealloc_block(struct gfs2_inode *ip, bool initialized)
 {
 	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
 	struct gfs2_rgrpd *rgd;
@@ -1397,7 +1401,8 @@ static int ea_dealloc_block(struct gfs2_inode *ip)
 		return -EIO;
 	}
 
-	error = gfs2_glock_nq_init(rgd->rd_gl, LM_ST_EXCLUSIVE, 0, &gh);
+	error = gfs2_glock_nq_init(rgd->rd_gl, LM_ST_EXCLUSIVE,
+				   LM_FLAG_NODE_SCOPE, &gh);
 	if (error)
 		return error;
 
@@ -1406,16 +1411,18 @@ static int ea_dealloc_block(struct gfs2_inode *ip)
 	if (error)
 		goto out_gunlock;
 
-	gfs2_free_meta(ip, ip->i_eattr, 1);
+	gfs2_free_meta(ip, rgd, ip->i_eattr, 1);
 
 	ip->i_eattr = 0;
 	gfs2_add_inode_blocks(&ip->i_inode, -1);
 
-	error = gfs2_meta_inode_buffer(ip, &dibh);
-	if (!error) {
-		gfs2_trans_add_meta(ip->i_gl, dibh);
-		gfs2_dinode_out(ip, dibh->b_data);
-		brelse(dibh);
+	if (initialized) {
+		error = gfs2_meta_inode_buffer(ip, &dibh);
+		if (!error) {
+			gfs2_trans_add_meta(ip->i_gl, dibh);
+			gfs2_dinode_out(ip, dibh->b_data);
+			brelse(dibh);
+		}
 	}
 
 	gfs2_trans_end(sdp);
@@ -1428,11 +1435,12 @@ out_gunlock:
 /**
  * gfs2_ea_dealloc - deallocate the extended attribute fork
  * @ip: the inode
+ * @initialized: xattrs have been initialized
  *
  * Returns: errno
  */
 
-int gfs2_ea_dealloc(struct gfs2_inode *ip)
+int gfs2_ea_dealloc(struct gfs2_inode *ip, bool initialized)
 {
 	int error;
 
@@ -1444,17 +1452,19 @@ int gfs2_ea_dealloc(struct gfs2_inode *ip)
 	if (error)
 		return error;
 
-	error = ea_foreach(ip, ea_dealloc_unstuffed, NULL);
-	if (error)
-		goto out_quota;
-
-	if (ip->i_diskflags & GFS2_DIF_EA_INDIRECT) {
-		error = ea_dealloc_indirect(ip);
+	if (initialized) {
+		error = ea_foreach(ip, ea_dealloc_unstuffed, NULL);
 		if (error)
 			goto out_quota;
+
+		if (ip->i_diskflags & GFS2_DIF_EA_INDIRECT) {
+			error = ea_dealloc_indirect(ip);
+			if (error)
+				goto out_quota;
+		}
 	}
 
-	error = ea_dealloc_block(ip);
+	error = ea_dealloc_block(ip, initialized);
 
 out_quota:
 	gfs2_quota_unhold(ip);
@@ -1475,11 +1485,28 @@ static const struct xattr_handler gfs2_xattr_security_handler = {
 	.set    = gfs2_xattr_set,
 };
 
-const struct xattr_handler *gfs2_xattr_handlers[] = {
+static bool
+gfs2_xattr_trusted_list(struct dentry *dentry)
+{
+	return capable(CAP_SYS_ADMIN);
+}
+
+static const struct xattr_handler gfs2_xattr_trusted_handler = {
+	.prefix = XATTR_TRUSTED_PREFIX,
+	.flags  = GFS2_EATYPE_TRUSTED,
+	.list	= gfs2_xattr_trusted_list,
+	.get    = gfs2_xattr_get,
+	.set    = gfs2_xattr_set,
+};
+
+const struct xattr_handler * const gfs2_xattr_handlers_max[] = {
+	/* GFS2_FS_FORMAT_MAX */
+	&gfs2_xattr_trusted_handler,
+
+	/* GFS2_FS_FORMAT_MIN */
 	&gfs2_xattr_user_handler,
 	&gfs2_xattr_security_handler,
-	&posix_acl_access_xattr_handler,
-	&posix_acl_default_xattr_handler,
 	NULL,
 };
 
+const struct xattr_handler * const *gfs2_xattr_handlers_min = gfs2_xattr_handlers_max + 1;

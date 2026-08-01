@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Kontron PLD driver definitions
  *
  * Copyright (c) 2010-2012 Kontron Europe GmbH
  * Author: Michael Brunner <michael.brunner@kontron.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License 2 as published
- * by the Free Software Foundation.
  */
 
 #ifndef _LINUX_MFD_KEMPLD_H_
@@ -40,6 +37,7 @@
 #define KEMPLD_SPEC_GET_MINOR(x)	(x & 0x0f)
 #define KEMPLD_SPEC_GET_MAJOR(x)	((x >> 4) & 0x0f)
 #define KEMPLD_IRQ_GPIO			0x35
+#define KEMPLD_IRQ_GPIO_MASK		0x0f
 #define KEMPLD_IRQ_I2C			0x36
 #define KEMPLD_CFG			0x37
 #define KEMPLD_CFG_GPIO_I2C_MUX		(1 << 0)
@@ -100,10 +98,10 @@ struct kempld_device_data {
 /**
  * struct kempld_platform_data - PLD hardware configuration structure
  * @pld_clock:			PLD clock frequency
- * @gpio_base			GPIO base pin number
+ * @gpio_base:			GPIO base pin number
  * @ioresource:			IO addresses of the PLD
- * @get_mutex:			PLD specific get_mutex callback
- * @release_mutex:		PLD specific release_mutex callback
+ * @get_hardware_mutex:		PLD specific get_mutex callback
+ * @release_hardware_mutex:	PLD specific release_mutex callback
  * @get_info:			PLD specific get_info callback
  * @register_cells:		PLD specific register_cells callback
  */

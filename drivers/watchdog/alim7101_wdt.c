@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *	ALi M7101 PMU Computer Watchdog Timer driver
  *
@@ -165,7 +166,7 @@ static void wdt_startup(void)
 static void wdt_turnoff(void)
 {
 	/* Stop the timer */
-	del_timer_sync(&timer);
+	timer_delete_sync(&timer);
 	wdt_change(WDT_DISABLE);
 	pr_info("Watchdog timer is now disabled...\n");
 }
@@ -214,7 +215,7 @@ static int fop_open(struct inode *inode, struct file *file)
 		return -EBUSY;
 	/* Good, fire up the show */
 	wdt_startup();
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int fop_close(struct inode *inode, struct file *file)
@@ -222,7 +223,7 @@ static int fop_close(struct inode *inode, struct file *file)
 	if (wdt_expect_close == 42)
 		wdt_turnoff();
 	else {
-		/* wim: shouldn't there be a: del_timer(&timer); */
+		/* wim: shouldn't there be a: timer_delete(&timer); */
 		pr_crit("device file closed unexpectedly. Will not stop the WDT!\n");
 	}
 	clear_bit(0, &wdt_is_open);
@@ -277,8 +278,8 @@ static long fop_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return -EINVAL;
 		timeout = new_timeout;
 		wdt_keepalive();
-		/* Fall through */
 	}
+		fallthrough;
 	case WDIOC_GETTIMEOUT:
 		return put_user(timeout, p);
 	default:
@@ -288,11 +289,11 @@ static long fop_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 static const struct file_operations wdt_fops = {
 	.owner		=	THIS_MODULE,
-	.llseek		=	no_llseek,
 	.write		=	fop_write,
 	.open		=	fop_open,
 	.release	=	fop_close,
 	.unlocked_ioctl	=	fop_ioctl,
+	.compat_ioctl	= 	compat_ptr_ioctl,
 };
 
 static struct miscdevice wdt_miscdev = {

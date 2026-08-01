@@ -15,15 +15,13 @@ do {						\
 	 * for l0/l1.  It will use one for 'next' and the other to hold
 	 * the output value of 'last'.  'next' is not referenced again
 	 * past the invocation of switch_to in the scheduler, so we need
-	 * not preserve it's value.  Hairy, but it lets us remove 2 loads
+	 * not preserve its value.  Hairy, but it lets us remove 2 loads
 	 * and 2 stores in this critical code path.  -DaveM
 	 */
 #define switch_to(prev, next, last)					\
 do {	save_and_clear_fpu();						\
-	/* If you are tempted to conditionalize the following */	\
-	/* so that ASI is only written if it changes, think again. */	\
 	__asm__ __volatile__("wr %%g0, %0, %%asi"			\
-	: : "r" (task_thread_info(next)->current_ds));\
+	: : "r" (ASI_AIUS));						\
 	trap_block[current_thread_info()->cpu].thread =			\
 		task_thread_info(next);					\
 	__asm__ __volatile__(						\
@@ -67,6 +65,7 @@ do {	save_and_clear_fpu();						\
 } while(0)
 
 void synchronize_user_stack(void);
-void fault_in_user_windows(void);
+struct pt_regs;
+void fault_in_user_windows(struct pt_regs *);
 
 #endif /* __SPARC64_SWITCH_TO_64_H */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Native support for the Aiptek HyperPen USB Tablets
  *  (4000U/5000U/6000U/8000U/12000U)
@@ -15,37 +16,6 @@
  *
  *  Many thanks to Oliver Kuechemann for his support.
  *
- *  ChangeLog:
- *      v0.1 - Initial release
- *      v0.2 - Hack to get around fake event 28's. (Bryan W. Headley)
- *      v0.3 - Make URB dynamic (Bryan W. Headley, Jun-8-2002)
- *             Released to Linux 2.4.19 and 2.5.x
- *      v0.4 - Rewrote substantial portions of the code to deal with
- *             corrected control sequences, timing, dynamic configuration,
- *             support of 6000U - 12000U, procfs, and macro key support
- *             (Jan-1-2003 - Feb-5-2003, Bryan W. Headley)
- *      v1.0 - Added support for diagnostic messages, count of messages
- *             received from URB - Mar-8-2003, Bryan W. Headley
- *      v1.1 - added support for tablet resolution, changed DV and proximity
- *             some corrections - Jun-22-2003, martin schneebacher
- *           - Added support for the sysfs interface, deprecating the
- *             procfs interface for 2.5.x kernel. Also added support for
- *             Wheel command. Bryan W. Headley July-15-2003.
- *      v1.2 - Reworked jitter timer as a kernel thread.
- *             Bryan W. Headley November-28-2003/Jan-10-2004.
- *      v1.3 - Repaired issue of kernel thread going nuts on single-processor
- *             machines, introduced programmableDelay as a command line
- *             parameter. Feb 7 2004, Bryan W. Headley.
- *      v1.4 - Re-wire jitter so it does not require a thread. Courtesy of
- *             Rene van Paassen. Added reporting of physical pointer device
- *             (e.g., stylus, mouse in reports 2, 3, 4, 5. We don't know
- *             for reports 1, 6.)
- *             what physical device reports for reports 1, 6.) Also enabled
- *             MOUSE and LENS tool button modes. Renamed "rubber" to "eraser".
- *             Feb 20, 2004, Bryan W. Headley.
- *      v1.5 - Added previousJitterable, so we don't do jitter delay when the
- *             user is holding a button down for periods of time.
- *
  * NOTE:
  *      This kernel driver is augmented by the "Aiptek" XFree86 input
  *      driver for your X server, as well as the Gaiptek GUI Front-end
@@ -54,29 +24,16 @@
  *      so therefore it's easier to document them all as one subsystem.
  *      Please visit the project's "home page", located at,
  *      http://aiptektablet.sourceforge.net.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include <linux/hid.h>
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/usb/input.h>
 #include <linux/uaccess.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 /*
  * Aiptek status packet:
@@ -177,8 +134,6 @@
 
 #define USB_VENDOR_ID_AIPTEK				0x08ca
 #define USB_VENDOR_ID_KYE				0x0458
-#define USB_REQ_GET_REPORT				0x01
-#define USB_REQ_SET_REPORT				0x09
 
 	/* PointerMode codes
 	 */
@@ -671,6 +626,8 @@ static void aiptek_irq(struct urb *urb)
 		pck = (data[1] & aiptek->curSetting.stylusButtonUpper) != 0 ? 1 : 0;
 
 		macro = dv && p && tip && !(data[3] & 1) ? (data[3] >> 1) : -1;
+		if (macro >= ARRAY_SIZE(macroKeyEvents))
+			macro = -1;
 		z = get_unaligned_le16(data + 4);
 
 		if (dv) {
@@ -712,7 +669,9 @@ static void aiptek_irq(struct urb *urb)
 		left = (data[1]& aiptek->curSetting.mouseButtonLeft) != 0 ? 1 : 0;
 		right = (data[1] & aiptek->curSetting.mouseButtonRight) != 0 ? 1 : 0;
 		middle = (data[1] & aiptek->curSetting.mouseButtonMiddle) != 0 ? 1 : 0;
-		macro = dv && p && left && !(data[3] & 1) ? (data[3] >> 1) : 0;
+		macro = dv && p && left && !(data[3] & 1) ? (data[3] >> 1) : -1;
+		if (macro >= ARRAY_SIZE(macroKeyEvents))
+			macro = -1;
 
 		if (dv) {
 		        /* If the selected tool changed, reset the old
@@ -750,11 +709,11 @@ static void aiptek_irq(struct urb *urb)
 	 */
 	else if (data[0] == 6) {
 		macro = get_unaligned_le16(data + 1);
-		if (macro > 0) {
+		if (macro > 0 && macro - 1 < ARRAY_SIZE(macroKeyEvents)) {
 			input_report_key(inputdev, macroKeyEvents[macro - 1],
 					 0);
 		}
-		if (macro < 25) {
+		if (macro + 1 < ARRAY_SIZE(macroKeyEvents)) {
 			input_report_key(inputdev, macroKeyEvents[macro + 1],
 					 0);
 		}
@@ -773,7 +732,8 @@ static void aiptek_irq(struct urb *urb)
 				aiptek->curSetting.toolMode;
 		}
 
-		input_report_key(inputdev, macroKeyEvents[macro], 1);
+		if (macro < ARRAY_SIZE(macroKeyEvents))
+			input_report_key(inputdev, macroKeyEvents[macro], 1);
 		input_report_abs(inputdev, ABS_MISC,
 				 1 | AIPTEK_REPORT_TOOL_UNKNOWN);
 		input_sync(inputdev);
@@ -869,7 +829,7 @@ aiptek_set_report(struct aiptek *aiptek,
 
 	return usb_control_msg(udev,
 			       usb_sndctrlpipe(udev, 0),
-			       USB_REQ_SET_REPORT,
+			       HID_REQ_SET_REPORT,
 			       USB_TYPE_CLASS | USB_RECIP_INTERFACE |
 			       USB_DIR_OUT, (report_type << 8) + report_id,
 			       aiptek->ifnum, buffer, size, 5000);
@@ -884,7 +844,7 @@ aiptek_get_report(struct aiptek *aiptek,
 
 	return usb_control_msg(udev,
 			       usb_rcvctrlpipe(udev, 0),
-			       USB_REQ_GET_REPORT,
+			       HID_REQ_GET_REPORT,
 			       USB_TYPE_CLASS | USB_RECIP_INTERFACE |
 			       USB_DIR_IN, (report_type << 8) + report_id,
 			       aiptek->ifnum, buffer, size, 5000);
@@ -944,8 +904,7 @@ aiptek_query(struct aiptek *aiptek, unsigned char command, unsigned char data)
 	}
 	msleep(aiptek->curSetting.programmableDelay);
 
-	if ((ret =
-	     aiptek_get_report(aiptek, 3, 2, buf, sizeof_buf)) != sizeof_buf) {
+	if (aiptek_get_report(aiptek, 3, 2, buf, sizeof_buf) != sizeof_buf) {
 		dev_dbg(&aiptek->intf->dev,
 			"aiptek_query failed: returned 0x%02x 0x%02x 0x%02x\n",
 			buf[0], buf[1], buf[2]);
@@ -1049,9 +1008,9 @@ static ssize_t show_tabletSize(struct device *dev, struct device_attribute *attr
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%dx%d\n",
-			input_abs_get_max(aiptek->inputdev, ABS_X) + 1,
-			input_abs_get_max(aiptek->inputdev, ABS_Y) + 1);
+	return sysfs_emit(buf, "%dx%d\n",
+			  input_abs_get_max(aiptek->inputdev, ABS_X) + 1,
+			  input_abs_get_max(aiptek->inputdev, ABS_Y) + 1);
 }
 
 /* These structs define the sysfs files, param #1 is the name of the
@@ -1077,9 +1036,8 @@ static ssize_t show_tabletPointerMode(struct device *dev, struct device_attribut
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%s\n",
-			map_val_to_str(pointer_mode_map,
-					aiptek->curSetting.pointerMode));
+	return sysfs_emit(buf, "%s\n", map_val_to_str(pointer_mode_map,
+						      aiptek->curSetting.pointerMode));
 }
 
 static ssize_t
@@ -1114,9 +1072,8 @@ static ssize_t show_tabletCoordinateMode(struct device *dev, struct device_attri
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%s\n",
-			map_val_to_str(coordinate_mode_map,
-					aiptek->curSetting.coordinateMode));
+	return sysfs_emit(buf, "%s\n", map_val_to_str(coordinate_mode_map,
+						      aiptek->curSetting.coordinateMode));
 }
 
 static ssize_t
@@ -1156,9 +1113,8 @@ static ssize_t show_tabletToolMode(struct device *dev, struct device_attribute *
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%s\n",
-			map_val_to_str(tool_mode_map,
-					aiptek->curSetting.toolMode));
+	return sysfs_emit(buf, "%s\n", map_val_to_str(tool_mode_map,
+						      aiptek->curSetting.toolMode));
 }
 
 static ssize_t
@@ -1187,10 +1143,9 @@ static ssize_t show_tabletXtilt(struct device *dev, struct device_attribute *att
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
 	if (aiptek->curSetting.xTilt == AIPTEK_TILT_DISABLE) {
-		return snprintf(buf, PAGE_SIZE, "disable\n");
+		return sysfs_emit(buf, "disable\n");
 	} else {
-		return snprintf(buf, PAGE_SIZE, "%d\n",
-				aiptek->curSetting.xTilt);
+		return sysfs_emit(buf, "%d\n", aiptek->curSetting.xTilt);
 	}
 }
 
@@ -1229,10 +1184,9 @@ static ssize_t show_tabletYtilt(struct device *dev, struct device_attribute *att
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
 	if (aiptek->curSetting.yTilt == AIPTEK_TILT_DISABLE) {
-		return snprintf(buf, PAGE_SIZE, "disable\n");
+		return sysfs_emit(buf, "disable\n");
 	} else {
-		return snprintf(buf, PAGE_SIZE, "%d\n",
-				aiptek->curSetting.yTilt);
+		return sysfs_emit(buf, "%d\n", aiptek->curSetting.yTilt);
 	}
 }
 
@@ -1270,7 +1224,7 @@ static ssize_t show_tabletJitterDelay(struct device *dev, struct device_attribut
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", aiptek->curSetting.jitterDelay);
+	return sysfs_emit(buf, "%d\n", aiptek->curSetting.jitterDelay);
 }
 
 static ssize_t
@@ -1299,8 +1253,7 @@ static ssize_t show_tabletProgrammableDelay(struct device *dev, struct device_at
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n",
-			aiptek->curSetting.programmableDelay);
+	return sysfs_emit(buf, "%d\n", aiptek->curSetting.programmableDelay);
 }
 
 static ssize_t
@@ -1329,7 +1282,7 @@ static ssize_t show_tabletEventsReceived(struct device *dev, struct device_attri
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%ld\n", aiptek->eventCount);
+	return sysfs_emit(buf, "%ld\n", aiptek->eventCount);
 }
 
 static DEVICE_ATTR(event_count, S_IRUGO, show_tabletEventsReceived, NULL);
@@ -1368,7 +1321,7 @@ static ssize_t show_tabletDiagnosticMessage(struct device *dev, struct device_at
 	default:
 		return 0;
 	}
-	return snprintf(buf, PAGE_SIZE, retMsg);
+	return sysfs_emit(buf, retMsg);
 }
 
 static DEVICE_ATTR(diagnostic, S_IRUGO, show_tabletDiagnosticMessage, NULL);
@@ -1388,9 +1341,8 @@ static ssize_t show_tabletStylusUpper(struct device *dev, struct device_attribut
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%s\n",
-			map_val_to_str(stylus_button_map,
-					aiptek->curSetting.stylusButtonUpper));
+	return sysfs_emit(buf, "%s\n", map_val_to_str(stylus_button_map,
+						      aiptek->curSetting.stylusButtonUpper));
 }
 
 static ssize_t
@@ -1419,9 +1371,8 @@ static ssize_t show_tabletStylusLower(struct device *dev, struct device_attribut
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%s\n",
-			map_val_to_str(stylus_button_map,
-					aiptek->curSetting.stylusButtonLower));
+	return sysfs_emit(buf, "%s\n", map_val_to_str(stylus_button_map,
+						      aiptek->curSetting.stylusButtonLower));
 }
 
 static ssize_t
@@ -1457,9 +1408,8 @@ static ssize_t show_tabletMouseLeft(struct device *dev, struct device_attribute 
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%s\n",
-			map_val_to_str(mouse_button_map,
-					aiptek->curSetting.mouseButtonLeft));
+	return sysfs_emit(buf, "%s\n", map_val_to_str(mouse_button_map,
+						      aiptek->curSetting.mouseButtonLeft));
 }
 
 static ssize_t
@@ -1487,9 +1437,8 @@ static ssize_t show_tabletMouseMiddle(struct device *dev, struct device_attribut
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%s\n",
-			map_val_to_str(mouse_button_map,
-					aiptek->curSetting.mouseButtonMiddle));
+	return sysfs_emit(buf, "%s\n", map_val_to_str(mouse_button_map,
+						      aiptek->curSetting.mouseButtonMiddle));
 }
 
 static ssize_t
@@ -1517,9 +1466,8 @@ static ssize_t show_tabletMouseRight(struct device *dev, struct device_attribute
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%s\n",
-			map_val_to_str(mouse_button_map,
-					aiptek->curSetting.mouseButtonRight));
+	return sysfs_emit(buf, "%s\n", map_val_to_str(mouse_button_map,
+						      aiptek->curSetting.mouseButtonRight));
 }
 
 static ssize_t
@@ -1548,10 +1496,9 @@ static ssize_t show_tabletWheel(struct device *dev, struct device_attribute *att
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
 	if (aiptek->curSetting.wheel == AIPTEK_WHEEL_DISABLE) {
-		return snprintf(buf, PAGE_SIZE, "disable\n");
+		return sysfs_emit(buf, "disable\n");
 	} else {
-		return snprintf(buf, PAGE_SIZE, "%d\n",
-				aiptek->curSetting.wheel);
+		return sysfs_emit(buf, "%d\n", aiptek->curSetting.wheel);
 	}
 }
 
@@ -1581,8 +1528,7 @@ static ssize_t show_tabletExecute(struct device *dev, struct device_attribute *a
 	/* There is nothing useful to display, so a one-line manual
 	 * is in order...
 	 */
-	return snprintf(buf, PAGE_SIZE,
-			"Write anything to this file to program your tablet.\n");
+	return sysfs_emit(buf, "Write anything to this file to program your tablet.\n");
 }
 
 static ssize_t
@@ -1613,7 +1559,7 @@ static ssize_t show_tabletODMCode(struct device *dev, struct device_attribute *a
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "0x%04x\n", aiptek->features.odmCode);
+	return sysfs_emit(buf, "0x%04x\n", aiptek->features.odmCode);
 }
 
 static DEVICE_ATTR(odm_code, S_IRUGO, show_tabletODMCode, NULL);
@@ -1626,7 +1572,7 @@ static ssize_t show_tabletModelCode(struct device *dev, struct device_attribute 
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "0x%04x\n", aiptek->features.modelCode);
+	return sysfs_emit(buf, "0x%04x\n", aiptek->features.modelCode);
 }
 
 static DEVICE_ATTR(model_code, S_IRUGO, show_tabletModelCode, NULL);
@@ -1639,13 +1585,12 @@ static ssize_t show_firmwareCode(struct device *dev, struct device_attribute *at
 {
 	struct aiptek *aiptek = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%04x\n",
-			aiptek->features.firmwareCode);
+	return sysfs_emit(buf, "%04x\n", aiptek->features.firmwareCode);
 }
 
 static DEVICE_ATTR(firmware_code, S_IRUGO, show_firmwareCode, NULL);
 
-static struct attribute *aiptek_attributes[] = {
+static struct attribute *aiptek_dev_attrs[] = {
 	&dev_attr_size.attr,
 	&dev_attr_pointer_mode.attr,
 	&dev_attr_coordinate_mode.attr,
@@ -1669,9 +1614,7 @@ static struct attribute *aiptek_attributes[] = {
 	NULL
 };
 
-static const struct attribute_group aiptek_attribute_group = {
-	.attrs	= aiptek_attributes,
-};
+ATTRIBUTE_GROUPS(aiptek_dev);
 
 /***********************************************************************
  * This routine is called when a tablet has been identified. It basically
@@ -1703,7 +1646,7 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	 */
 	speeds[0] = programmableDelay;
 
-	aiptek = kzalloc(sizeof(struct aiptek), GFP_KERNEL);
+	aiptek = kzalloc_obj(*aiptek);
 	inputdev = input_allocate_device();
 	if (!aiptek || !inputdev) {
 		dev_warn(&intf->dev,
@@ -1712,7 +1655,7 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
         }
 
 	aiptek->data = usb_alloc_coherent(usbdev, AIPTEK_PACKET_LENGTH,
-					  GFP_ATOMIC, &aiptek->data_dma);
+					  GFP_KERNEL, &aiptek->data_dma);
         if (!aiptek->data) {
 		dev_warn(&intf->dev, "cannot allocate usb buffer\n");
 		goto fail1;
@@ -1726,7 +1669,7 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
 
 	aiptek->inputdev = inputdev;
 	aiptek->intf = intf;
-	aiptek->ifnum = intf->altsetting[0].desc.bInterfaceNumber;
+	aiptek->ifnum = intf->cur_altsetting->desc.bInterfaceNumber;
 	aiptek->inDelay = 0;
 	aiptek->endDelay = 0;
 	aiptek->previousJitterable = 0;
@@ -1814,15 +1757,13 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	input_set_abs_params(inputdev, ABS_TILT_Y, AIPTEK_TILT_MIN, AIPTEK_TILT_MAX, 0, 0);
 	input_set_abs_params(inputdev, ABS_WHEEL, AIPTEK_WHEEL_MIN, AIPTEK_WHEEL_MAX - 1, 0, 0);
 
-	/* Verify that a device really has an endpoint */
-	if (intf->altsetting[0].desc.bNumEndpoints < 1) {
+	err = usb_find_common_endpoints(intf->cur_altsetting,
+					NULL, NULL, &endpoint, NULL);
+	if (err) {
 		dev_err(&intf->dev,
-			"interface has %d endpoints, but must have minimum 1\n",
-			intf->altsetting[0].desc.bNumEndpoints);
-		err = -EINVAL;
+			"interface has no int in endpoints, but must have minimum 1\n");
 		goto fail3;
 	}
-	endpoint = &intf->altsetting[0].endpoint[0].desc;
 
 	/* Go set up our URB, which is called when the tablet receives
 	 * input.
@@ -1872,26 +1813,16 @@ aiptek_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	 */
 	usb_set_intfdata(intf, aiptek);
 
-	/* Set up the sysfs files
-	 */
-	err = sysfs_create_group(&intf->dev.kobj, &aiptek_attribute_group);
-	if (err) {
-		dev_warn(&intf->dev, "cannot create sysfs group err: %d\n",
-			 err);
-		goto fail3;
-        }
-
 	/* Register the tablet as an Input Device
 	 */
 	err = input_register_device(aiptek->inputdev);
 	if (err) {
 		dev_warn(&intf->dev,
 			 "input_register_device returned err: %d\n", err);
-		goto fail4;
+		goto fail3;
         }
 	return 0;
 
- fail4:	sysfs_remove_group(&intf->dev.kobj, &aiptek_attribute_group);
  fail3: usb_free_urb(aiptek->urb);
  fail2:	usb_free_coherent(usbdev, AIPTEK_PACKET_LENGTH, aiptek->data,
 			  aiptek->data_dma);
@@ -1916,7 +1847,6 @@ static void aiptek_disconnect(struct usb_interface *intf)
 		 */
 		usb_kill_urb(aiptek->urb);
 		input_unregister_device(aiptek->inputdev);
-		sysfs_remove_group(&intf->dev.kobj, &aiptek_attribute_group);
 		usb_free_urb(aiptek->urb);
 		usb_free_coherent(interface_to_usbdev(intf),
 				  AIPTEK_PACKET_LENGTH,
@@ -1930,6 +1860,7 @@ static struct usb_driver aiptek_driver = {
 	.probe = aiptek_probe,
 	.disconnect = aiptek_disconnect,
 	.id_table = aiptek_ids,
+	.dev_groups = aiptek_dev_groups,
 };
 
 module_usb_driver(aiptek_driver);

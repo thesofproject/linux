@@ -3,7 +3,7 @@
  *
  * Module Name: excreate - Named object creation
  *
- * Copyright (C) 2000 - 2018, Intel Corp.
+ * Copyright (C) 2000 - 2026, Intel Corp.
  *
  *****************************************************************************/
 
@@ -15,7 +15,6 @@
 
 #define _COMPONENT          ACPI_EXECUTER
 ACPI_MODULE_NAME("excreate")
-#ifndef ACPI_NO_METHOD_EXECUTION
 /*******************************************************************************
  *
  * FUNCTION:    acpi_ex_create_alias
@@ -280,6 +279,7 @@ acpi_ex_create_region(u8 * aml_start,
 	obj_desc->region.space_id = space_id;
 	obj_desc->region.address = 0;
 	obj_desc->region.length = 0;
+	obj_desc->region.pointer = NULL;
 	obj_desc->region.node = node;
 	obj_desc->region.handler = NULL;
 	obj_desc->common.flags &=
@@ -390,7 +390,6 @@ acpi_status acpi_ex_create_power_resource(struct acpi_walk_state *walk_state)
 	acpi_ut_remove_reference(obj_desc);
 	return_ACPI_STATUS(status);
 }
-#endif
 
 /*******************************************************************************
  *

@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2001 Jean-Fredric Clere, Nikolas Zimmermann, Georg Acher
  *		      Mark Cave-Ayland, Carlo E Prelz, Dick Streefland
  * Copyright (c) 2002, 2003 Tuukka Toivonen
  * Copyright (c) 2008 Erik Andrén
  * Copyright (c) 2008 Chia-I Wu
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * P/N 861037:      Sensor HDCS1000        ASIC STV0600
  * P/N 861050-0010: Sensor HDCS1000        ASIC STV0600
@@ -377,7 +368,7 @@ static int hdcs_probe_1x00(struct sd *sd)
 	sd->gspca_dev.cam.cam_mode = hdcs1x00_mode;
 	sd->gspca_dev.cam.nmodes = ARRAY_SIZE(hdcs1x00_mode);
 
-	hdcs = kmalloc(sizeof(struct hdcs), GFP_KERNEL);
+	hdcs = kmalloc_obj(struct hdcs);
 	if (!hdcs)
 		return -ENOMEM;
 
@@ -434,7 +425,7 @@ static int hdcs_probe_1020(struct sd *sd)
 	sd->gspca_dev.cam.cam_mode = hdcs1020_mode;
 	sd->gspca_dev.cam.nmodes = ARRAY_SIZE(hdcs1020_mode);
 
-	hdcs = kmalloc(sizeof(struct hdcs), GFP_KERNEL);
+	hdcs = kmalloc_obj(struct hdcs);
 	if (!hdcs)
 		return -ENOMEM;
 
@@ -529,12 +520,13 @@ static int hdcs_init(struct sd *sd)
 static int hdcs_dump(struct sd *sd)
 {
 	u16 reg, val;
+	int err = 0;
 
 	pr_info("Dumping sensor registers:\n");
 
-	for (reg = HDCS_IDENT; reg <= HDCS_ROWEXPH; reg++) {
-		stv06xx_read_sensor(sd, reg, &val);
+	for (reg = HDCS_IDENT; reg <= HDCS_ROWEXPH && !err; reg++) {
+		err = stv06xx_read_sensor(sd, reg, &val);
 		pr_info("reg 0x%02x = 0x%02x\n", reg, val);
 	}
-	return 0;
+	return (err < 0) ? err : 0;
 }

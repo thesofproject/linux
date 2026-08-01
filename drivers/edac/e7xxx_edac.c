@@ -333,7 +333,6 @@ static void e7xxx_check(struct mem_ctl_info *mci)
 {
 	struct e7xxx_error_info info;
 
-	edac_dbg(3, "\n");
 	e7xxx_get_error_info(mci, &info);
 	e7xxx_process_error_info(mci, &info, 1);
 }
@@ -555,20 +554,20 @@ static void e7xxx_remove_one(struct pci_dev *pdev)
 
 static const struct pci_device_id e7xxx_pci_tbl[] = {
 	{
-	 PCI_VEND_DEV(INTEL, 7205_0), PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	 E7205},
-	{
-	 PCI_VEND_DEV(INTEL, 7500_0), PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	 E7500},
-	{
-	 PCI_VEND_DEV(INTEL, 7501_0), PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	 E7501},
-	{
-	 PCI_VEND_DEV(INTEL, 7505_0), PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	 E7505},
-	{
-	 0,
-	 }			/* 0 terminated list. */
+		PCI_VEND_DEV(INTEL, 7205_0),
+		.driver_data = E7205,
+	}, {
+		PCI_VEND_DEV(INTEL, 7500_0),
+		.driver_data = E7500,
+	}, {
+		PCI_VEND_DEV(INTEL, 7501_0),
+		.driver_data = E7501,
+	}, {
+		PCI_VEND_DEV(INTEL, 7505_0),
+		.driver_data = E7505
+	}, {
+		/* 0 terminated list. */
+	}
 };
 
 MODULE_DEVICE_TABLE(pci, e7xxx_pci_tbl);
@@ -597,8 +596,7 @@ module_init(e7xxx_init);
 module_exit(e7xxx_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Linux Networx (http://lnxi.com) Thayne Harbaugh et al\n"
-		"Based on.work by Dan Hollis et al");
+MODULE_AUTHOR("Linux Networx (http://lnxi.com) Thayne Harbaugh et al");
 MODULE_DESCRIPTION("MC support for Intel e7xxx memory controllers");
 module_param(edac_op_state, int, 0444);
 MODULE_PARM_DESC(edac_op_state, "EDAC Error Reporting state: 0=Poll,1=NMI");

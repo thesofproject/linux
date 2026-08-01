@@ -1,17 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  *
  * Copyright (C) 2000, 2001 Kanoj Sarcar
  * Copyright (C) 2000, 2001 Ralf Baechle
@@ -22,6 +10,7 @@
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
+#include <linux/profile.h>
 #include <linux/smp.h>
 #include <linux/spinlock.h>
 #include <linux/threads.h>
@@ -31,6 +20,7 @@
 #include <linux/sched/mm.h>
 #include <linux/cpumask.h>
 #include <linux/cpu.h>
+#include <linux/rcupdate.h>
 #include <linux/err.h>
 #include <linux/ftrace.h>
 #include <linux/irqdomain.h>
@@ -39,6 +29,7 @@
 
 #include <linux/atomic.h>
 #include <asm/cpu.h>
+#include <asm/ginvt.h>
 #include <asm/processor.h>
 #include <asm/idle.h>
 #include <asm/r4k-timer.h>
@@ -66,11 +57,13 @@ EXPORT_SYMBOL(cpu_sibling_map);
 cpumask_t cpu_core_map[NR_CPUS] __read_mostly;
 EXPORT_SYMBOL(cpu_core_map);
 
+#ifndef CONFIG_HOTPLUG_PARALLEL
 static DECLARE_COMPLETION(cpu_starting);
 static DECLARE_COMPLETION(cpu_running);
+#endif
 
 /*
- * A logcal cpu mask containing only one VPE per core to
+ * A logical cpu mask containing only one VPE per core to
  * reduce the number of IPIs on large MT systems.
  */
 cpumask_t cpu_foreign_map[NR_CPUS] __read_mostly;
@@ -83,6 +76,26 @@ static cpumask_t cpu_sibling_setup_map;
 static cpumask_t cpu_core_setup_map;
 
 cpumask_t cpu_coherent_mask;
+
+struct cpumask __cpu_primary_thread_mask __read_mostly;
+
+unsigned int smp_max_threads __initdata = UINT_MAX;
+
+static int __init early_nosmt(char *s)
+{
+	smp_max_threads = 1;
+	return 0;
+}
+early_param("nosmt", early_nosmt);
+
+static int __init early_smt(char *s)
+{
+	get_option(&s, &smp_max_threads);
+	/* Ensure at least one thread is available */
+	smp_max_threads = clamp_val(smp_max_threads, 1U, UINT_MAX);
+	return 0;
+}
+early_param("smt", early_smt);
 
 #ifdef CONFIG_GENERIC_IRQ_IPI
 static struct irq_desc *call_desc;
@@ -218,25 +231,13 @@ static irqreturn_t ipi_call_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static struct irqaction irq_resched = {
-	.handler	= ipi_resched_interrupt,
-	.flags		= IRQF_PERCPU,
-	.name		= "IPI resched"
-};
-
-static struct irqaction irq_call = {
-	.handler	= ipi_call_interrupt,
-	.flags		= IRQF_PERCPU,
-	.name		= "IPI call"
-};
-
-static void smp_ipi_init_one(unsigned int virq,
-				    struct irqaction *action)
+static void smp_ipi_init_one(unsigned int virq, const char *name,
+			     irq_handler_t handler)
 {
 	int ret;
 
 	irq_set_handler(virq, handle_percpu_irq);
-	ret = setup_irq(virq, action);
+	ret = request_irq(virq, handler, IRQF_PERCPU, name, NULL);
 	BUG_ON(ret);
 }
 
@@ -289,12 +290,15 @@ int mips_smp_ipi_allocate(const struct cpumask *mask)
 		int cpu;
 
 		for_each_cpu(cpu, mask) {
-			smp_ipi_init_one(call_virq + cpu, &irq_call);
-			smp_ipi_init_one(sched_virq + cpu, &irq_resched);
+			smp_ipi_init_one(call_virq + cpu, "IPI call",
+					 ipi_call_interrupt);
+			smp_ipi_init_one(sched_virq + cpu, "IPI resched",
+					 ipi_resched_interrupt);
 		}
 	} else {
-		smp_ipi_init_one(call_virq, &irq_call);
-		smp_ipi_init_one(sched_virq, &irq_resched);
+		smp_ipi_init_one(call_virq, "IPI call", ipi_call_interrupt);
+		smp_ipi_init_one(sched_virq, "IPI resched",
+				 ipi_resched_interrupt);
 	}
 
 	return 0;
@@ -322,8 +326,8 @@ int mips_smp_ipi_free(const struct cpumask *mask)
 		int cpu;
 
 		for_each_cpu(cpu, mask) {
-			remove_irq(call_virq + cpu, &irq_call);
-			remove_irq(sched_virq + cpu, &irq_resched);
+			free_irq(call_virq + cpu, NULL);
+			free_irq(sched_virq + cpu, NULL);
 		}
 	}
 	irq_destroy_ipi(call_virq, mask);
@@ -353,10 +357,11 @@ early_initcall(mips_smp_ipi_init);
  */
 asmlinkage void start_secondary(void)
 {
-	unsigned int cpu;
+	unsigned int cpu = raw_smp_processor_id();
 
 	cpu_probe();
 	per_cpu_trap_init(false);
+	rcutree_report_cpu_starting(cpu);
 	mips_clockevent_init();
 	mp_ops->init_secondary();
 	cpu_report();
@@ -367,32 +372,37 @@ asmlinkage void start_secondary(void)
 	 * to an option instead of something based on .cputype
 	 */
 
+#ifdef CONFIG_HOTPLUG_PARALLEL
+	cpuhp_ap_sync_alive();
+#endif
 	calibrate_delay();
-	preempt_disable();
-	cpu = smp_processor_id();
 	cpu_data[cpu].udelay_val = loops_per_jiffy;
+
+	set_cpu_sibling_map(cpu);
+	set_cpu_core_map(cpu);
 
 	cpumask_set_cpu(cpu, &cpu_coherent_mask);
 	notify_cpu_starting(cpu);
 
+#ifndef CONFIG_HOTPLUG_PARALLEL
 	/* Notify boot CPU that we're starting & ready to sync counters */
 	complete(&cpu_starting);
+#endif
 
 	synchronise_count_slave(cpu);
 
 	/* The CPU is running and counters synchronised, now mark it online */
 	set_cpu_online(cpu, true);
 
-	set_cpu_sibling_map(cpu);
-	set_cpu_core_map(cpu);
-
 	calculate_cpu_foreign_map();
 
+#ifndef CONFIG_HOTPLUG_PARALLEL
 	/*
 	 * Notify boot CPU that we're up & online and it can safely return
 	 * from __cpu_up
 	 */
 	complete(&cpu_running);
+#endif
 
 	/*
 	 * irq will be enabled in ->smp_finish(), enabling it too early
@@ -413,6 +423,7 @@ static void stop_this_cpu(void *dummy)
 	set_cpu_online(smp_processor_id(), false);
 	calculate_cpu_foreign_map();
 	local_irq_disable();
+	rcutree_report_cpu_dead();
 	while (1);
 }
 
@@ -441,12 +452,20 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 }
 
 /* preload SMP state for boot cpu */
-void smp_prepare_boot_cpu(void)
+void __init smp_prepare_boot_cpu(void)
 {
+	if (mp_ops->prepare_boot_cpu)
+		mp_ops->prepare_boot_cpu();
 	set_cpu_possible(0, true);
 	set_cpu_online(0, true);
 }
 
+#ifdef CONFIG_HOTPLUG_PARALLEL
+int arch_cpuhp_kick_ap_alive(unsigned int cpu, struct task_struct *tidle)
+{
+	return mp_ops->boot_secondary(cpu, tidle);
+}
+#else
 int __cpu_up(unsigned int cpu, struct task_struct *tidle)
 {
 	int err;
@@ -462,18 +481,19 @@ int __cpu_up(unsigned int cpu, struct task_struct *tidle)
 		return -EIO;
 	}
 
-	synchronise_count_master(cpu);
-
 	/* Wait for CPU to finish startup & mark itself online before return */
 	wait_for_completion(&cpu_running);
 	return 0;
 }
+#endif
 
+#ifdef CONFIG_PROFILING
 /* Not really SMP stuff ... */
 int setup_profiling_timer(unsigned int multiplier)
 {
 	return 0;
 }
+#endif
 
 static void flush_tlb_all_ipi(void *info)
 {
@@ -482,12 +502,21 @@ static void flush_tlb_all_ipi(void *info)
 
 void flush_tlb_all(void)
 {
+	if (cpu_has_mmid) {
+		htw_stop();
+		ginvt_full();
+		sync_ginv();
+		instruction_hazard();
+		htw_start();
+		return;
+	}
+
 	on_each_cpu(flush_tlb_all_ipi, NULL, 1);
 }
 
 static void flush_tlb_mm_ipi(void *mm)
 {
-	local_flush_tlb_mm((struct mm_struct *)mm);
+	drop_mmu_context((struct mm_struct *)mm);
 }
 
 /*
@@ -519,8 +548,8 @@ static inline void smp_on_each_tlb(void (*func) (void *info), void *info)
  * address spaces, a new context is obtained on the current cpu, and tlb
  * context on other cpus are invalidated to force a new context allocation
  * at switch_mm time, should the mm ever be used on other cpus. For
- * multithreaded address spaces, intercpu interrupts have to be sent.
- * Another case where intercpu interrupts are required is when the target
+ * multithreaded address spaces, inter-CPU interrupts have to be sent.
+ * Another case where inter-CPU interrupts are required is when the target
  * mm might be active on another cpu (eg debuggers doing the flushes on
  * behalf of debugees, kswapd stealing pages from another process etc).
  * Kanoj 07/00.
@@ -528,19 +557,30 @@ static inline void smp_on_each_tlb(void (*func) (void *info), void *info)
 
 void flush_tlb_mm(struct mm_struct *mm)
 {
+	if (!mm)
+		return;
+
+	if (atomic_read(&mm->mm_users) == 0)
+		return;		/* happens as a result of exit_mmap() */
+
 	preempt_disable();
 
-	if ((atomic_read(&mm->mm_users) != 1) || (current->mm != mm)) {
+	if (cpu_has_mmid) {
+		/*
+		 * No need to worry about other CPUs - the ginvt in
+		 * drop_mmu_context() will be globalized.
+		 */
+	} else if ((atomic_read(&mm->mm_users) != 1) || (current->mm != mm)) {
 		smp_on_other_tlbs(flush_tlb_mm_ipi, mm);
 	} else {
 		unsigned int cpu;
 
 		for_each_online_cpu(cpu) {
 			if (cpu != smp_processor_id() && cpu_context(cpu, mm))
-				cpu_context(cpu, mm) = 0;
+				set_cpu_context(cpu, mm, 0);
 		}
 	}
-	local_flush_tlb_mm(mm);
+	drop_mmu_context(mm);
 
 	preempt_enable();
 }
@@ -561,9 +601,26 @@ static void flush_tlb_range_ipi(void *info)
 void flush_tlb_range(struct vm_area_struct *vma, unsigned long start, unsigned long end)
 {
 	struct mm_struct *mm = vma->vm_mm;
+	unsigned long addr;
+	u32 old_mmid;
 
 	preempt_disable();
-	if ((atomic_read(&mm->mm_users) != 1) || (current->mm != mm)) {
+	if (cpu_has_mmid) {
+		htw_stop();
+		old_mmid = read_c0_memorymapid();
+		write_c0_memorymapid(cpu_asid(0, mm));
+		mtc0_tlbw_hazard();
+		addr = round_down(start, PAGE_SIZE * 2);
+		end = round_up(end, PAGE_SIZE * 2);
+		do {
+			ginvt_va_mmid(addr);
+			sync_ginv();
+			addr += PAGE_SIZE * 2;
+		} while (addr < end);
+		write_c0_memorymapid(old_mmid);
+		instruction_hazard();
+		htw_start();
+	} else if ((atomic_read(&mm->mm_users) != 1) || (current->mm != mm)) {
 		struct flush_tlb_data fd = {
 			.vma = vma,
 			.addr1 = start,
@@ -571,6 +628,7 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start, unsigned l
 		};
 
 		smp_on_other_tlbs(flush_tlb_range_ipi, &fd);
+		local_flush_tlb_range(vma, start, end);
 	} else {
 		unsigned int cpu;
 		int exec = vma->vm_flags & VM_EXEC;
@@ -583,10 +641,10 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start, unsigned l
 			 * mm has been completely unused by that CPU.
 			 */
 			if (cpu != smp_processor_id() && cpu_context(cpu, mm))
-				cpu_context(cpu, mm) = !exec;
+				set_cpu_context(cpu, mm, !exec);
 		}
+		local_flush_tlb_range(vma, start, end);
 	}
-	local_flush_tlb_range(vma, start, end);
 	preempt_enable();
 }
 
@@ -616,14 +674,28 @@ static void flush_tlb_page_ipi(void *info)
 
 void flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 {
+	u32 old_mmid;
+
 	preempt_disable();
-	if ((atomic_read(&vma->vm_mm->mm_users) != 1) || (current->mm != vma->vm_mm)) {
+	if (cpu_has_mmid) {
+		htw_stop();
+		old_mmid = read_c0_memorymapid();
+		write_c0_memorymapid(cpu_asid(0, vma->vm_mm));
+		mtc0_tlbw_hazard();
+		ginvt_va_mmid(page);
+		sync_ginv();
+		write_c0_memorymapid(old_mmid);
+		instruction_hazard();
+		htw_start();
+	} else if ((atomic_read(&vma->vm_mm->mm_users) != 1) ||
+		   (current->mm != vma->vm_mm)) {
 		struct flush_tlb_data fd = {
 			.vma = vma,
 			.addr1 = page,
 		};
 
 		smp_on_other_tlbs(flush_tlb_page_ipi, &fd);
+		local_flush_tlb_page(vma, page);
 	} else {
 		unsigned int cpu;
 
@@ -635,10 +707,10 @@ void flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 			 * by that CPU.
 			 */
 			if (cpu != smp_processor_id() && cpu_context(cpu, vma->vm_mm))
-				cpu_context(cpu, vma->vm_mm) = 1;
+				set_cpu_context(cpu, vma->vm_mm, 1);
 		}
+		local_flush_tlb_page(vma, page);
 	}
-	local_flush_tlb_page(vma, page);
 	preempt_enable();
 }
 
@@ -657,45 +729,33 @@ void flush_tlb_one(unsigned long vaddr)
 EXPORT_SYMBOL(flush_tlb_page);
 EXPORT_SYMBOL(flush_tlb_one);
 
+#ifdef CONFIG_HOTPLUG_CORE_SYNC_DEAD
+void arch_cpuhp_cleanup_dead_cpu(unsigned int cpu)
+{
+	if (mp_ops->cleanup_dead_cpu)
+		mp_ops->cleanup_dead_cpu(cpu);
+}
+#endif
+
 #ifdef CONFIG_GENERIC_CLOCKEVENTS_BROADCAST
 
-static DEFINE_PER_CPU(atomic_t, tick_broadcast_count);
-static DEFINE_PER_CPU(call_single_data_t, tick_broadcast_csd);
+static void tick_broadcast_callee(void *info)
+{
+	tick_receive_broadcast();
+}
+
+static DEFINE_PER_CPU(call_single_data_t, tick_broadcast_csd) =
+	CSD_INIT(tick_broadcast_callee, NULL);
 
 void tick_broadcast(const struct cpumask *mask)
 {
-	atomic_t *count;
 	call_single_data_t *csd;
 	int cpu;
 
 	for_each_cpu(cpu, mask) {
-		count = &per_cpu(tick_broadcast_count, cpu);
 		csd = &per_cpu(tick_broadcast_csd, cpu);
-
-		if (atomic_inc_return(count) == 1)
-			smp_call_function_single_async(cpu, csd);
+		smp_call_function_single_async(cpu, csd);
 	}
 }
-
-static void tick_broadcast_callee(void *info)
-{
-	int cpu = smp_processor_id();
-	tick_receive_broadcast();
-	atomic_set(&per_cpu(tick_broadcast_count, cpu), 0);
-}
-
-static int __init tick_broadcast_init(void)
-{
-	call_single_data_t *csd;
-	int cpu;
-
-	for (cpu = 0; cpu < NR_CPUS; cpu++) {
-		csd = &per_cpu(tick_broadcast_csd, cpu);
-		csd->func = tick_broadcast_callee;
-	}
-
-	return 0;
-}
-early_initcall(tick_broadcast_init);
 
 #endif /* CONFIG_GENERIC_CLOCKEVENTS_BROADCAST */

@@ -1,13 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * lwtunnel	Infrastructure for light weight tunnels like mpls
  *
  * Authors:	Roopa Prabhu, <roopa@cumulusnetworks.com>
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  */
 
 #include <linux/capability.h>
@@ -26,7 +21,12 @@
 #include <net/lwtunnel.h>
 #include <net/rtnetlink.h>
 #include <net/ip6_fib.h>
-#include <net/nexthop.h>
+#include <net/rtnh.h>
+
+#include "dev.h"
+
+DEFINE_STATIC_KEY_FALSE(nf_hooks_lwtunnel_enabled);
+EXPORT_SYMBOL_GPL(nf_hooks_lwtunnel_enabled);
 
 #ifdef CONFIG_MODULES
 
@@ -46,6 +46,13 @@ static const char *lwtunnel_encap_str(enum lwtunnel_encap_types encap_type)
 		return "BPF";
 	case LWTUNNEL_ENCAP_SEG6_LOCAL:
 		return "SEG6LOCAL";
+	case LWTUNNEL_ENCAP_RPL:
+		return "RPL";
+	case LWTUNNEL_ENCAP_IOAM6:
+		return "IOAM6";
+	case LWTUNNEL_ENCAP_XFRM:
+		/* module autoload not supported for encap type */
+		return NULL;
 	case LWTUNNEL_ENCAP_IP6:
 	case LWTUNNEL_ENCAP_IP:
 	case LWTUNNEL_ENCAP_NONE:
@@ -103,7 +110,7 @@ int lwtunnel_encap_del_ops(const struct lwtunnel_encap_ops *ops,
 }
 EXPORT_SYMBOL_GPL(lwtunnel_encap_del_ops);
 
-int lwtunnel_build_state(u16 encap_type,
+int lwtunnel_build_state(struct net *net, u16 encap_type,
 			 struct nlattr *encap, unsigned int family,
 			 const void *cfg, struct lwtunnel_state **lws,
 			 struct netlink_ext_ack *extack)
@@ -122,18 +129,18 @@ int lwtunnel_build_state(u16 encap_type,
 	ret = -EOPNOTSUPP;
 	rcu_read_lock();
 	ops = rcu_dereference(lwtun_encaps[encap_type]);
-	if (likely(ops && ops->build_state && try_module_get(ops->owner))) {
+	if (likely(ops && ops->build_state && try_module_get(ops->owner)))
 		found = true;
-		ret = ops->build_state(encap, family, cfg, lws, extack);
-		if (ret)
-			module_put(ops->owner);
-	}
 	rcu_read_unlock();
 
-	/* don't rely on -EOPNOTSUPP to detect match as build_state
-	 * handlers could return it
-	 */
-	if (!found) {
+	if (found) {
+		ret = ops->build_state(net, encap, family, cfg, lws, extack);
+		if (ret)
+			module_put(ops->owner);
+	} else {
+		/* don't rely on -EOPNOTSUPP to detect match as build_state
+		 * handlers could return it
+		 */
 		NL_SET_ERR_MSG_ATTR(extack, encap,
 				    "LWT encapsulation type not supported");
 	}
@@ -153,21 +160,14 @@ int lwtunnel_valid_encap_type(u16 encap_type, struct netlink_ext_ack *extack)
 		return ret;
 	}
 
-	rcu_read_lock();
-	ops = rcu_dereference(lwtun_encaps[encap_type]);
-	rcu_read_unlock();
+	ops = rcu_access_pointer(lwtun_encaps[encap_type]);
 #ifdef CONFIG_MODULES
 	if (!ops) {
 		const char *encap_type_str = lwtunnel_encap_str(encap_type);
 
 		if (encap_type_str) {
-			__rtnl_unlock();
 			request_module("rtnl-lwt-%s", encap_type_str);
-			rtnl_lock();
-
-			rcu_read_lock();
-			ops = rcu_dereference(lwtun_encaps[encap_type]);
-			rcu_read_unlock();
+			ops = rcu_access_pointer(lwtun_encaps[encap_type]);
 		}
 	}
 #endif
@@ -195,10 +195,13 @@ int lwtunnel_valid_encap_type_attr(struct nlattr *attr, int remaining,
 			nla_entype = nla_find(attrs, attrlen, RTA_ENCAP_TYPE);
 
 			if (nla_entype) {
+				if (nla_len(nla_entype) < sizeof(u16)) {
+					NL_SET_ERR_MSG(extack, "Invalid RTA_ENCAP_TYPE");
+					return -EINVAL;
+				}
 				encap_type = nla_get_u16(nla_entype);
 
-				if (lwtunnel_valid_encap_type(encap_type,
-							      extack) != 0)
+				if (lwtunnel_valid_encap_type(encap_type, extack))
 					return -EOPNOTSUPP;
 			}
 		}
@@ -223,7 +226,8 @@ void lwtstate_free(struct lwtunnel_state *lws)
 }
 EXPORT_SYMBOL_GPL(lwtstate_free);
 
-int lwtunnel_fill_encap(struct sk_buff *skb, struct lwtunnel_state *lwtstate)
+int lwtunnel_fill_encap(struct sk_buff *skb, struct lwtunnel_state *lwtstate,
+			int encap_attr, int encap_type_attr)
 {
 	const struct lwtunnel_encap_ops *ops;
 	struct nlattr *nest;
@@ -236,7 +240,7 @@ int lwtunnel_fill_encap(struct sk_buff *skb, struct lwtunnel_state *lwtstate)
 	    lwtstate->type > LWTUNNEL_ENCAP_MAX)
 		return 0;
 
-	nest = nla_nest_start(skb, RTA_ENCAP);
+	nest = nla_nest_start_noflag(skb, encap_attr);
 	if (!nest)
 		return -EMSGSIZE;
 
@@ -250,7 +254,7 @@ int lwtunnel_fill_encap(struct sk_buff *skb, struct lwtunnel_state *lwtstate)
 	if (ret)
 		goto nla_put_failure;
 	nla_nest_end(skb, nest);
-	ret = nla_put_u16(skb, RTA_ENCAP_TYPE, lwtstate->type);
+	ret = nla_put_u16(skb, encap_type_attr, lwtstate->type);
 	if (ret)
 		goto nla_put_failure;
 
@@ -315,82 +319,136 @@ EXPORT_SYMBOL_GPL(lwtunnel_cmp_encap);
 
 int lwtunnel_output(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
-	struct dst_entry *dst = skb_dst(skb);
 	const struct lwtunnel_encap_ops *ops;
 	struct lwtunnel_state *lwtstate;
-	int ret = -EINVAL;
+	struct dst_entry *dst;
+	int ret;
 
-	if (!dst)
+	local_bh_disable();
+
+	if (dev_xmit_recursion()) {
+		net_crit_ratelimited("%s(): recursion limit reached on datapath\n",
+				     __func__);
+		ret = -ENETDOWN;
 		goto drop;
+	}
+
+	dst = skb_dst(skb);
+	if (!dst) {
+		ret = -EINVAL;
+		goto drop;
+	}
 	lwtstate = dst->lwtstate;
 
 	if (lwtstate->type == LWTUNNEL_ENCAP_NONE ||
-	    lwtstate->type > LWTUNNEL_ENCAP_MAX)
-		return 0;
+	    lwtstate->type > LWTUNNEL_ENCAP_MAX) {
+		ret = 0;
+		goto out;
+	}
 
 	ret = -EOPNOTSUPP;
 	rcu_read_lock();
 	ops = rcu_dereference(lwtun_encaps[lwtstate->type]);
-	if (likely(ops && ops->output))
+	if (likely(ops && ops->output)) {
+		/* Encap pushes outer headers over the metadata; drop it. */
+		skb_metadata_clear(skb);
+		dev_xmit_recursion_inc();
 		ret = ops->output(net, sk, skb);
+		dev_xmit_recursion_dec();
+	}
 	rcu_read_unlock();
 
 	if (ret == -EOPNOTSUPP)
 		goto drop;
 
-	return ret;
+	goto out;
 
 drop:
 	kfree_skb(skb);
 
+out:
+	local_bh_enable();
 	return ret;
 }
 EXPORT_SYMBOL_GPL(lwtunnel_output);
 
 int lwtunnel_xmit(struct sk_buff *skb)
 {
-	struct dst_entry *dst = skb_dst(skb);
 	const struct lwtunnel_encap_ops *ops;
 	struct lwtunnel_state *lwtstate;
-	int ret = -EINVAL;
+	struct dst_entry *dst;
+	int ret;
 
-	if (!dst)
+	local_bh_disable();
+
+	if (dev_xmit_recursion()) {
+		net_crit_ratelimited("%s(): recursion limit reached on datapath\n",
+				     __func__);
+		ret = -ENETDOWN;
 		goto drop;
+	}
+
+	dst = skb_dst(skb);
+	if (!dst) {
+		ret = -EINVAL;
+		goto drop;
+	}
 
 	lwtstate = dst->lwtstate;
 
 	if (lwtstate->type == LWTUNNEL_ENCAP_NONE ||
-	    lwtstate->type > LWTUNNEL_ENCAP_MAX)
-		return 0;
+	    lwtstate->type > LWTUNNEL_ENCAP_MAX) {
+		ret = 0;
+		goto out;
+	}
 
 	ret = -EOPNOTSUPP;
 	rcu_read_lock();
 	ops = rcu_dereference(lwtun_encaps[lwtstate->type]);
-	if (likely(ops && ops->xmit))
+	if (likely(ops && ops->xmit)) {
+		/* Encap pushes outer headers over the metadata; drop it. */
+		skb_metadata_clear(skb);
+		dev_xmit_recursion_inc();
 		ret = ops->xmit(skb);
+		dev_xmit_recursion_dec();
+	}
 	rcu_read_unlock();
 
 	if (ret == -EOPNOTSUPP)
 		goto drop;
 
-	return ret;
+	goto out;
 
 drop:
 	kfree_skb(skb);
 
+out:
+	local_bh_enable();
 	return ret;
 }
 EXPORT_SYMBOL_GPL(lwtunnel_xmit);
 
 int lwtunnel_input(struct sk_buff *skb)
 {
-	struct dst_entry *dst = skb_dst(skb);
 	const struct lwtunnel_encap_ops *ops;
 	struct lwtunnel_state *lwtstate;
-	int ret = -EINVAL;
+	struct dst_entry *dst;
+	int ret;
 
-	if (!dst)
+	DEBUG_NET_WARN_ON_ONCE(!in_softirq());
+
+	if (dev_xmit_recursion()) {
+		net_crit_ratelimited("%s(): recursion limit reached on datapath\n",
+				     __func__);
+		ret = -ENETDOWN;
 		goto drop;
+	}
+
+	dst = skb_dst(skb);
+	if (!dst) {
+		ret = -EINVAL;
+		goto drop;
+	}
 	lwtstate = dst->lwtstate;
 
 	if (lwtstate->type == LWTUNNEL_ENCAP_NONE ||
@@ -400,8 +458,13 @@ int lwtunnel_input(struct sk_buff *skb)
 	ret = -EOPNOTSUPP;
 	rcu_read_lock();
 	ops = rcu_dereference(lwtun_encaps[lwtstate->type]);
-	if (likely(ops && ops->input))
+	if (likely(ops && ops->input)) {
+		/* Encap pushes outer headers over the metadata; drop it. */
+		skb_metadata_clear(skb);
+		dev_xmit_recursion_inc();
 		ret = ops->input(skb);
+		dev_xmit_recursion_dec();
+	}
 	rcu_read_unlock();
 
 	if (ret == -EOPNOTSUPP)

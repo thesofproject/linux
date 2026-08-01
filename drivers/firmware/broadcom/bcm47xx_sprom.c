@@ -27,8 +27,10 @@
  */
 
 #include <linux/bcm47xx_nvram.h>
+#include <linux/bcm47xx_sprom.h>
 #include <linux/bcma/bcma.h>
 #include <linux/etherdevice.h>
+#include <linux/hex.h>
 #include <linux/if_ether.h>
 #include <linux/ssb/ssb.h>
 
@@ -403,7 +405,7 @@ static void bcm47xx_sprom_fill_auto(struct ssb_sprom *sprom,
 	ENTRY(0x00000700, u8, pre, "noiselvl5gua1", noiselvl5gua[1], 0, fb);
 	ENTRY(0x00000700, u8, pre, "noiselvl5gua2", noiselvl5gua[2], 0, fb);
 }
-#undef ENTRY /* It's specififc, uses local variable, don't use it (again). */
+#undef ENTRY /* It's specific, uses local variable, don't use it (again). */
 
 static void bcm47xx_fill_sprom_path_r4589(struct ssb_sprom *sprom,
 					  const char *prefix, bool fallback)

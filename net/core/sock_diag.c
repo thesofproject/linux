@@ -1,5 +1,5 @@
-/* License: GPL */
-
+// SPDX-License-Identifier: GPL-2.0
+#include <linux/filter.h>
 #include <linux/mutex.h>
 #include <linux/socket.h>
 #include <linux/skbuff.h>
@@ -10,25 +10,32 @@
 #include <linux/kernel.h>
 #include <linux/tcp.h>
 #include <linux/workqueue.h>
-
+#include <linux/nospec.h>
+#include <linux/cookie.h>
 #include <linux/inet_diag.h>
 #include <linux/sock_diag.h>
 
-static const struct sock_diag_handler *sock_diag_handlers[AF_MAX];
-static int (*inet_rcv_compat)(struct sk_buff *skb, struct nlmsghdr *nlh);
-static DEFINE_MUTEX(sock_diag_table_mutex);
+static const struct sock_diag_handler __rcu *sock_diag_handlers[AF_MAX];
+
+static const struct sock_diag_inet_compat __rcu *inet_rcv_compat;
+
 static struct workqueue_struct *broadcast_wq;
 
-u64 sock_gen_cookie(struct sock *sk)
-{
-	while (1) {
-		u64 res = atomic64_read(&sk->sk_cookie);
+DEFINE_COOKIE(sock_cookie);
 
-		if (res)
-			return res;
-		res = atomic64_inc_return(&sock_net(sk)->cookie_gen);
-		atomic64_cmpxchg(&sk->sk_cookie, 0, res);
+u64 __sock_gen_cookie(struct sock *sk)
+{
+	u64 res = atomic64_read(&sk->sk_cookie);
+
+	if (!res) {
+		u64 new = gen_cookie_next(&sock_cookie);
+
+		atomic64_cmpxchg(&sk->sk_cookie, res, new);
+
+		/* Another thread might have changed sk_cookie before us. */
+		res = atomic64_read(&sk->sk_cookie);
 	}
+	return res;
 }
 
 int sock_diag_check_cookie(struct sock *sk, const __u32 *cookie)
@@ -115,6 +122,24 @@ static size_t sock_diag_nlmsg_size(void)
 	       + nla_total_size_64bit(sizeof(struct tcp_info))); /* INET_DIAG_INFO */
 }
 
+static const struct sock_diag_handler *sock_diag_lock_handler(int family)
+{
+	const struct sock_diag_handler *handler;
+
+	rcu_read_lock();
+	handler = rcu_dereference(sock_diag_handlers[family]);
+	if (handler && !try_module_get(handler->owner))
+		handler = NULL;
+	rcu_read_unlock();
+
+	return handler;
+}
+
+static void sock_diag_unlock_handler(const struct sock_diag_handler *handler)
+{
+	module_put(handler->owner);
+}
+
 static void sock_diag_broadcast_destroy_work(struct work_struct *work)
 {
 	struct broadcast_sk *bsk =
@@ -131,12 +156,12 @@ static void sock_diag_broadcast_destroy_work(struct work_struct *work)
 	if (!skb)
 		goto out;
 
-	mutex_lock(&sock_diag_table_mutex);
-	hndl = sock_diag_handlers[sk->sk_family];
-	if (hndl && hndl->get_info)
-		err = hndl->get_info(skb, sk);
-	mutex_unlock(&sock_diag_table_mutex);
-
+	hndl = sock_diag_lock_handler(sk->sk_family);
+	if (hndl) {
+		if (hndl->get_info)
+			err = hndl->get_info(skb, sk);
+		sock_diag_unlock_handler(hndl);
+	}
 	if (!err)
 		nlmsg_multicast(sock_net(sk)->diag_nlsk, skb, 0, group,
 				GFP_KERNEL);
@@ -151,7 +176,7 @@ void sock_diag_broadcast_destroy(struct sock *sk)
 {
 	/* Note, this function is often called from an interrupt context. */
 	struct broadcast_sk *bsk =
-		kmalloc(sizeof(struct broadcast_sk), GFP_ATOMIC);
+		kmalloc_obj(struct broadcast_sk, GFP_ATOMIC);
 	if (!bsk)
 		return sk_destruct(sk);
 	bsk->sk = sk;
@@ -159,51 +184,43 @@ void sock_diag_broadcast_destroy(struct sock *sk)
 	queue_work(broadcast_wq, &bsk->work);
 }
 
-void sock_diag_register_inet_compat(int (*fn)(struct sk_buff *skb, struct nlmsghdr *nlh))
+void sock_diag_register_inet_compat(const struct sock_diag_inet_compat *ptr)
 {
-	mutex_lock(&sock_diag_table_mutex);
-	inet_rcv_compat = fn;
-	mutex_unlock(&sock_diag_table_mutex);
+	xchg(&inet_rcv_compat, RCU_INITIALIZER(ptr));
 }
 EXPORT_SYMBOL_GPL(sock_diag_register_inet_compat);
 
-void sock_diag_unregister_inet_compat(int (*fn)(struct sk_buff *skb, struct nlmsghdr *nlh))
+void sock_diag_unregister_inet_compat(const struct sock_diag_inet_compat *ptr)
 {
-	mutex_lock(&sock_diag_table_mutex);
-	inet_rcv_compat = NULL;
-	mutex_unlock(&sock_diag_table_mutex);
+	const struct sock_diag_inet_compat *old;
+
+	old = unrcu_pointer(xchg(&inet_rcv_compat, NULL));
+	WARN_ON_ONCE(old != ptr);
 }
 EXPORT_SYMBOL_GPL(sock_diag_unregister_inet_compat);
 
 int sock_diag_register(const struct sock_diag_handler *hndl)
 {
-	int err = 0;
+	int family = hndl->family;
 
-	if (hndl->family >= AF_MAX)
+	if (family >= AF_MAX)
 		return -EINVAL;
 
-	mutex_lock(&sock_diag_table_mutex);
-	if (sock_diag_handlers[hndl->family])
-		err = -EBUSY;
-	else
-		sock_diag_handlers[hndl->family] = hndl;
-	mutex_unlock(&sock_diag_table_mutex);
-
-	return err;
+	return !cmpxchg((const struct sock_diag_handler **)
+				&sock_diag_handlers[family],
+			NULL, hndl) ? 0 : -EBUSY;
 }
 EXPORT_SYMBOL_GPL(sock_diag_register);
 
-void sock_diag_unregister(const struct sock_diag_handler *hnld)
+void sock_diag_unregister(const struct sock_diag_handler *hndl)
 {
-	int family = hnld->family;
+	int family = hndl->family;
 
 	if (family >= AF_MAX)
 		return;
 
-	mutex_lock(&sock_diag_table_mutex);
-	BUG_ON(sock_diag_handlers[family] != hnld);
-	sock_diag_handlers[family] = NULL;
-	mutex_unlock(&sock_diag_table_mutex);
+	xchg((const struct sock_diag_handler **)&sock_diag_handlers[family],
+	     NULL);
 }
 EXPORT_SYMBOL_GPL(sock_diag_unregister);
 
@@ -218,21 +235,22 @@ static int __sock_diag_cmd(struct sk_buff *skb, struct nlmsghdr *nlh)
 
 	if (req->sdiag_family >= AF_MAX)
 		return -EINVAL;
+	req->sdiag_family = array_index_nospec(req->sdiag_family, AF_MAX);
 
-	if (sock_diag_handlers[req->sdiag_family] == NULL)
+	if (!rcu_access_pointer(sock_diag_handlers[req->sdiag_family]))
 		sock_load_diag_module(req->sdiag_family, 0);
 
-	mutex_lock(&sock_diag_table_mutex);
-	hndl = sock_diag_handlers[req->sdiag_family];
+	hndl = sock_diag_lock_handler(req->sdiag_family);
 	if (hndl == NULL)
-		err = -ENOENT;
-	else if (nlh->nlmsg_type == SOCK_DIAG_BY_FAMILY)
+		return -ENOENT;
+
+	if (nlh->nlmsg_type == SOCK_DIAG_BY_FAMILY)
 		err = hndl->dump(skb, nlh);
 	else if (nlh->nlmsg_type == SOCK_DESTROY && hndl->destroy)
 		err = hndl->destroy(skb, nlh);
 	else
 		err = -EOPNOTSUPP;
-	mutex_unlock(&sock_diag_table_mutex);
+	sock_diag_unlock_handler(hndl);
 
 	return err;
 }
@@ -240,20 +258,25 @@ static int __sock_diag_cmd(struct sk_buff *skb, struct nlmsghdr *nlh)
 static int sock_diag_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
 			     struct netlink_ext_ack *extack)
 {
+	const struct sock_diag_inet_compat *ptr;
 	int ret;
 
 	switch (nlh->nlmsg_type) {
 	case TCPDIAG_GETSOCK:
-	case DCCPDIAG_GETSOCK:
-		if (inet_rcv_compat == NULL)
+		if (!rcu_access_pointer(inet_rcv_compat))
 			sock_load_diag_module(AF_INET, 0);
 
-		mutex_lock(&sock_diag_table_mutex);
-		if (inet_rcv_compat != NULL)
-			ret = inet_rcv_compat(skb, nlh);
-		else
-			ret = -EOPNOTSUPP;
-		mutex_unlock(&sock_diag_table_mutex);
+		rcu_read_lock();
+		ptr = rcu_dereference(inet_rcv_compat);
+		if (ptr && !try_module_get(ptr->owner))
+			ptr = NULL;
+		rcu_read_unlock();
+
+		ret = -EOPNOTSUPP;
+		if (ptr) {
+			ret = ptr->fn(skb, nlh);
+			module_put(ptr->owner);
+		}
 
 		return ret;
 	case SOCK_DIAG_BY_FAMILY:
@@ -264,13 +287,9 @@ static int sock_diag_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh,
 	}
 }
 
-static DEFINE_MUTEX(sock_diag_mutex);
-
 static void sock_diag_rcv(struct sk_buff *skb)
 {
-	mutex_lock(&sock_diag_mutex);
 	netlink_rcv_skb(skb, &sock_diag_rcv_msg);
-	mutex_unlock(&sock_diag_mutex);
 }
 
 static int sock_diag_bind(struct net *net, int group)
@@ -278,12 +297,12 @@ static int sock_diag_bind(struct net *net, int group)
 	switch (group) {
 	case SKNLGRP_INET_TCP_DESTROY:
 	case SKNLGRP_INET_UDP_DESTROY:
-		if (!sock_diag_handlers[AF_INET])
+		if (!rcu_access_pointer(sock_diag_handlers[AF_INET]))
 			sock_load_diag_module(AF_INET, 0);
 		break;
 	case SKNLGRP_INET6_TCP_DESTROY:
 	case SKNLGRP_INET6_UDP_DESTROY:
-		if (!sock_diag_handlers[AF_INET6])
+		if (!rcu_access_pointer(sock_diag_handlers[AF_INET6]))
 			sock_load_diag_module(AF_INET6, 0);
 		break;
 	}
@@ -328,7 +347,7 @@ static struct pernet_operations diag_net_ops = {
 
 static int __init sock_diag_init(void)
 {
-	broadcast_wq = alloc_workqueue("sock_diag_events", 0, 0);
+	broadcast_wq = alloc_workqueue("sock_diag_events", WQ_PERCPU, 0);
 	BUG_ON(!broadcast_wq);
 	return register_pernet_subsys(&diag_net_ops);
 }

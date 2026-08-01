@@ -23,7 +23,7 @@
 #include <unistd.h>
 #include <numa.h>
 
-#include "../kselftest.h"
+#include "kselftest.h"
 
 static const int PORT = 8888;
 
@@ -86,7 +86,7 @@ static void attach_bpf(int fd)
 
 	memset(&attr, 0, sizeof(attr));
 	attr.prog_type = BPF_PROG_TYPE_SOCKET_FILTER;
-	attr.insn_cnt = sizeof(prog) / sizeof(prog[0]);
+	attr.insn_cnt = ARRAY_SIZE(prog);
 	attr.insns = (unsigned long) &prog;
 	attr.license = (unsigned long) &bpf_license;
 	attr.log_buf = (unsigned long) &bpf_log_buf;
@@ -211,12 +211,16 @@ static void test(int *rcv_fd, int len, int family, int proto)
 
 	/* Forward iterate */
 	for (node = 0; node < len; ++node) {
+		if (!numa_bitmask_isbitset(numa_nodes_ptr, node))
+			continue;
 		send_from_node(node, family, proto);
 		receive_on_node(rcv_fd, len, epfd, node, proto);
 	}
 
 	/* Reverse iterate */
 	for (node = len - 1; node >= 0; --node) {
+		if (!numa_bitmask_isbitset(numa_nodes_ptr, node))
+			continue;
 		send_from_node(node, family, proto);
 		receive_on_node(rcv_fd, len, epfd, node, proto);
 	}
@@ -226,9 +230,19 @@ static void test(int *rcv_fd, int len, int family, int proto)
 		close(rcv_fd[node]);
 }
 
+static void setup_netns(void)
+{
+	if (unshare(CLONE_NEWNET))
+		error(1, errno, "failed to unshare netns");
+	if (system("ip link set lo up"))
+		error(1, 0, "failed to bring up lo interface in netns");
+}
+
 int main(void)
 {
 	int *rcv_fd, nodes;
+
+	setup_netns();
 
 	if (numa_available() < 0)
 		ksft_exit_skip("no numa api support\n");

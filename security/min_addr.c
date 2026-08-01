@@ -3,6 +3,7 @@
 #include <linux/mm.h>
 #include <linux/security.h>
 #include <linux/sysctl.h>
+#include <linux/minmax.h>
 
 /* amount of vm to protect from userspace access by both DAC and the LSM*/
 unsigned long mmap_min_addr;
@@ -16,10 +17,7 @@ unsigned long dac_mmap_min_addr = CONFIG_DEFAULT_MMAP_MIN_ADDR;
 static void update_mmap_min_addr(void)
 {
 #ifdef CONFIG_LSM_MMAP_MIN_ADDR
-	if (dac_mmap_min_addr > CONFIG_LSM_MMAP_MIN_ADDR)
-		mmap_min_addr = dac_mmap_min_addr;
-	else
-		mmap_min_addr = CONFIG_LSM_MMAP_MIN_ADDR;
+	mmap_min_addr = umax(dac_mmap_min_addr, CONFIG_LSM_MMAP_MIN_ADDR);
 #else
 	mmap_min_addr = dac_mmap_min_addr;
 #endif
@@ -29,8 +27,8 @@ static void update_mmap_min_addr(void)
  * sysctl handler which just sets dac_mmap_min_addr = the new value and then
  * calls update_mmap_min_addr() so non MAP_FIXED hints get rounded properly
  */
-int mmap_min_addr_handler(struct ctl_table *table, int write,
-			  void __user *buffer, size_t *lenp, loff_t *ppos)
+int mmap_min_addr_handler(const struct ctl_table *table, int write,
+			  void *buffer, size_t *lenp, loff_t *ppos)
 {
 	int ret;
 
@@ -44,10 +42,21 @@ int mmap_min_addr_handler(struct ctl_table *table, int write,
 	return ret;
 }
 
-static int __init init_mmap_min_addr(void)
+static const struct ctl_table min_addr_sysctl_table[] = {
+	{
+		.procname	= "mmap_min_addr",
+		.data		= &dac_mmap_min_addr,
+		.maxlen		= sizeof(unsigned long),
+		.mode		= 0644,
+		.proc_handler	= mmap_min_addr_handler,
+	},
+};
+
+static int __init mmap_min_addr_init(void)
 {
+	register_sysctl_init("vm", min_addr_sysctl_table);
 	update_mmap_min_addr();
 
 	return 0;
 }
-pure_initcall(init_mmap_min_addr);
+pure_initcall(mmap_min_addr_init);

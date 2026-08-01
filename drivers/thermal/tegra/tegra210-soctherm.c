@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2014-2016, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2014-2018, NVIDIA CORPORATION.  All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -56,6 +57,7 @@ static const struct tegra_tsensor_group tegra210_tsensor_group_cpu = {
 	.thermtrip_any_en_mask = TEGRA210_THERMTRIP_ANY_EN_MASK,
 	.thermtrip_enable_mask = TEGRA210_THERMTRIP_CPU_EN_MASK,
 	.thermtrip_threshold_mask = TEGRA210_THERMTRIP_CPU_THRESH_MASK,
+	.thermctl_isr_mask = THERM_IRQ_CPU_MASK,
 	.thermctl_lvl0_offset = THERMCTL_LEVEL0_GROUP_CPU,
 	.thermctl_lvl0_up_thresh_mask = TEGRA210_THERMCTL_LVL0_UP_THRESH_MASK,
 	.thermctl_lvl0_dn_thresh_mask = TEGRA210_THERMCTL_LVL0_DN_THRESH_MASK,
@@ -74,6 +76,7 @@ static const struct tegra_tsensor_group tegra210_tsensor_group_gpu = {
 	.thermtrip_any_en_mask = TEGRA210_THERMTRIP_ANY_EN_MASK,
 	.thermtrip_enable_mask = TEGRA210_THERMTRIP_GPU_EN_MASK,
 	.thermtrip_threshold_mask = TEGRA210_THERMTRIP_GPUMEM_THRESH_MASK,
+	.thermctl_isr_mask = THERM_IRQ_GPU_MASK,
 	.thermctl_lvl0_offset = THERMCTL_LEVEL0_GROUP_GPU,
 	.thermctl_lvl0_up_thresh_mask = TEGRA210_THERMCTL_LVL0_UP_THRESH_MASK,
 	.thermctl_lvl0_dn_thresh_mask = TEGRA210_THERMCTL_LVL0_DN_THRESH_MASK,
@@ -90,6 +93,7 @@ static const struct tegra_tsensor_group tegra210_tsensor_group_pll = {
 	.thermtrip_any_en_mask = TEGRA210_THERMTRIP_ANY_EN_MASK,
 	.thermtrip_enable_mask = TEGRA210_THERMTRIP_TSENSE_EN_MASK,
 	.thermtrip_threshold_mask = TEGRA210_THERMTRIP_TSENSE_THRESH_MASK,
+	.thermctl_isr_mask = THERM_IRQ_TSENSE_MASK,
 	.thermctl_lvl0_offset = THERMCTL_LEVEL0_GROUP_TSENSE,
 	.thermctl_lvl0_up_thresh_mask = TEGRA210_THERMCTL_LVL0_UP_THRESH_MASK,
 	.thermctl_lvl0_dn_thresh_mask = TEGRA210_THERMCTL_LVL0_DN_THRESH_MASK,
@@ -108,6 +112,7 @@ static const struct tegra_tsensor_group tegra210_tsensor_group_mem = {
 	.thermtrip_any_en_mask = TEGRA210_THERMTRIP_ANY_EN_MASK,
 	.thermtrip_enable_mask = TEGRA210_THERMTRIP_MEM_EN_MASK,
 	.thermtrip_threshold_mask = TEGRA210_THERMTRIP_GPUMEM_THRESH_MASK,
+	.thermctl_isr_mask = THERM_IRQ_MEM_MASK,
 	.thermctl_lvl0_offset = THERMCTL_LEVEL0_GROUP_MEM,
 	.thermctl_lvl0_up_thresh_mask = TEGRA210_THERMCTL_LVL0_UP_THRESH_MASK,
 	.thermctl_lvl0_dn_thresh_mask = TEGRA210_THERMCTL_LVL0_DN_THRESH_MASK,
@@ -196,11 +201,22 @@ static const struct tegra_tsensor tegra210_tsensors[] = {
 static const struct tegra_soctherm_fuse tegra210_soctherm_fuse = {
 	.fuse_base_cp_mask = 0x3ff << 11,
 	.fuse_base_cp_shift = 11,
+	.fuse_shift_cp_mask = 0x3f,
+	.fuse_shift_cp_shift = 0,
 	.fuse_base_ft_mask = 0x7ff << 21,
 	.fuse_base_ft_shift = 21,
 	.fuse_shift_ft_mask = 0x1f << 6,
 	.fuse_shift_ft_shift = 6,
+	.fuse_common_reg = FUSE_TSENSOR_COMMON,
 	.fuse_spare_realignment = 0,
+	.nominal_calib_ft = 105,
+};
+
+static struct tsensor_group_thermtrips tegra210_tsensor_thermtrips[] = {
+	{.id = TEGRA124_SOCTHERM_SENSOR_NUM},
+	{.id = TEGRA124_SOCTHERM_SENSOR_NUM},
+	{.id = TEGRA124_SOCTHERM_SENSOR_NUM},
+	{.id = TEGRA124_SOCTHERM_SENSOR_NUM},
 };
 
 const struct tegra_soctherm_soc tegra210_soctherm = {
@@ -212,4 +228,5 @@ const struct tegra_soctherm_soc tegra210_soctherm = {
 	.thresh_grain = TEGRA210_THRESH_GRAIN,
 	.bptt = TEGRA210_BPTT,
 	.use_ccroc = false,
+	.thermtrips = tegra210_tsensor_thermtrips,
 };

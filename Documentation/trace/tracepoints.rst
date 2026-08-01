@@ -27,7 +27,7 @@ the tracepoint site).
 
 You can put tracepoints at important locations in the code. They are
 lightweight hooks that can pass an arbitrary number of parameters,
-which prototypes are described in a tracepoint declaration placed in a
+whose prototypes are described in a tracepoint declaration placed in a
 header file.
 
 They can be used for tracing and performance accounting.
@@ -71,7 +71,7 @@ In subsys/file.c (where the tracing statement must be added)::
 	void somefct(void)
 	{
 		...
-		trace_subsys_eventname(arg, task);
+		trace_subsys_eventname_tp(arg, task);
 		...
 	}
 
@@ -129,12 +129,12 @@ within an if statement with the following::
 		for (i = 0; i < count; i++)
 			tot += calculate_nuggets();
 
-		trace_foo_bar(tot);
+		trace_foo_bar_tp(tot);
 	}
 
-All trace_<tracepoint>() calls have a matching trace_<tracepoint>_enabled()
+All trace_<tracepoint>_tp() calls have a matching trace_<tracepoint>_enabled()
 function defined that returns true if the tracepoint is enabled and
-false otherwise. The trace_<tracepoint>() should always be within the
+false otherwise. The trace_<tracepoint>_tp() should always be within the
 block of the if (trace_<tracepoint>_enabled()) to prevent races between
 the tracepoint being enabled and the check being seen.
 
@@ -143,6 +143,38 @@ the static_key of the tracepoint to allow the if statement to be implemented
 with jump labels and avoid conditional branches.
 
 .. note:: The convenience macro TRACE_EVENT provides an alternative way to
-      define tracepoints. Check http://lwn.net/Articles/379903,
+      define tracepoints. Note, DECLARE_TRACE(foo) creates a function
+      "trace_foo_tp()" whereas TRACE_EVENT(foo) creates a function
+      "trace_foo()", and also exposes the tracepoint as a trace event in
+      /sys/kernel/tracing/events directory.  Check http://lwn.net/Articles/379903,
       http://lwn.net/Articles/381064 and http://lwn.net/Articles/383362
       for a series of articles with more details.
+
+If you require calling a tracepoint from a header file, it is not
+recommended to call one directly or to use the trace_<tracepoint>_enabled()
+function call, as tracepoints in header files can have side effects if a
+header is included from a file that has CREATE_TRACE_POINTS set, as
+well as the trace_<tracepoint>() is not that small of an inline
+and can bloat the kernel if used by other inlined functions. Instead,
+include tracepoint-defs.h and use tracepoint_enabled().
+
+In a C file::
+
+	void do_trace_foo_bar_wrapper(args)
+	{
+		trace_foo_bar_tp(args); // for tracepoints created via DECLARE_TRACE
+					//   or
+		trace_foo_bar(args);    // for tracepoints created via TRACE_EVENT
+	}
+
+In the header file::
+
+	DECLARE_TRACEPOINT(foo_bar);
+
+	static inline void some_inline_function()
+	{
+		[..]
+		if (tracepoint_enabled(foo_bar))
+			do_trace_foo_bar_wrapper(args);
+		[..]
+	}

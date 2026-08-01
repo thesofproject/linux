@@ -1,17 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2016, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
-#include <linux/of_device.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
 
 #include "hdmi.h"
 
@@ -21,28 +14,25 @@ static int msm_hdmi_phy_resource_init(struct hdmi_phy *phy)
 	struct device *dev = &phy->pdev->dev;
 	int i, ret;
 
-	phy->regs = devm_kzalloc(dev, sizeof(phy->regs[0]) * cfg->num_regs,
+	phy->regs = devm_kcalloc(dev, cfg->num_regs, sizeof(phy->regs[0]),
 				 GFP_KERNEL);
 	if (!phy->regs)
 		return -ENOMEM;
 
-	phy->clks = devm_kzalloc(dev, sizeof(phy->clks[0]) * cfg->num_clks,
+	phy->clks = devm_kcalloc(dev, cfg->num_clks, sizeof(phy->clks[0]),
 				 GFP_KERNEL);
 	if (!phy->clks)
 		return -ENOMEM;
 
-	for (i = 0; i < cfg->num_regs; i++) {
-		struct regulator *reg;
+	for (i = 0; i < cfg->num_regs; i++)
+		phy->regs[i].supply = cfg->reg_names[i];
 
-		reg = devm_regulator_get(dev, cfg->reg_names[i]);
-		if (IS_ERR(reg)) {
-			ret = PTR_ERR(reg);
-			dev_err(dev, "failed to get phy regulator: %s (%d)\n",
-				cfg->reg_names[i], ret);
-			return ret;
-		}
+	ret = devm_regulator_bulk_get(dev, cfg->num_regs, phy->regs);
+	if (ret) {
+		if (ret != -EPROBE_DEFER)
+			DRM_DEV_ERROR(dev, "failed to get phy regulators: %d\n", ret);
 
-		phy->regs[i] = reg;
+		return ret;
 	}
 
 	for (i = 0; i < cfg->num_clks; i++) {
@@ -51,7 +41,7 @@ static int msm_hdmi_phy_resource_init(struct hdmi_phy *phy)
 		clk = msm_clk_get(phy->pdev, cfg->clk_names[i]);
 		if (IS_ERR(clk)) {
 			ret = PTR_ERR(clk);
-			dev_err(dev, "failed to get phy clock: %s (%d)\n",
+			DRM_DEV_ERROR(dev, "failed to get phy clock: %s (%d)\n",
 				cfg->clk_names[i], ret);
 			return ret;
 		}
@@ -68,19 +58,22 @@ int msm_hdmi_phy_resource_enable(struct hdmi_phy *phy)
 	struct device *dev = &phy->pdev->dev;
 	int i, ret = 0;
 
-	pm_runtime_get_sync(dev);
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret) {
+		DRM_DEV_ERROR(dev, "runtime resume failed: %d\n", ret);
+		return ret;
+	}
 
-	for (i = 0; i < cfg->num_regs; i++) {
-		ret = regulator_enable(phy->regs[i]);
-		if (ret)
-			dev_err(dev, "failed to enable regulator: %s (%d)\n",
-				cfg->reg_names[i], ret);
+	ret = regulator_bulk_enable(cfg->num_regs, phy->regs);
+	if (ret) {
+		DRM_DEV_ERROR(dev, "failed to enable regulators: (%d)\n", ret);
+		return ret;
 	}
 
 	for (i = 0; i < cfg->num_clks; i++) {
 		ret = clk_prepare_enable(phy->clks[i]);
 		if (ret)
-			dev_err(dev, "failed to enable clock: %s (%d)\n",
+			DRM_DEV_ERROR(dev, "failed to enable clock: %s (%d)\n",
 				cfg->clk_names[i], ret);
 	}
 
@@ -96,13 +89,12 @@ void msm_hdmi_phy_resource_disable(struct hdmi_phy *phy)
 	for (i = cfg->num_clks - 1; i >= 0; i--)
 		clk_disable_unprepare(phy->clks[i]);
 
-	for (i = cfg->num_regs - 1; i >= 0; i--)
-		regulator_disable(phy->regs[i]);
+	regulator_bulk_disable(cfg->num_regs, phy->regs);
 
 	pm_runtime_put_sync(dev);
 }
 
-void msm_hdmi_phy_powerup(struct hdmi_phy *phy, unsigned long int pixclock)
+void msm_hdmi_phy_powerup(struct hdmi_phy *phy, unsigned long pixclock)
 {
 	if (!phy || !phy->cfg->powerup)
 		return;
@@ -129,6 +121,9 @@ static int msm_hdmi_phy_pll_init(struct platform_device *pdev,
 		break;
 	case MSM_HDMI_PHY_8996:
 		ret = msm_hdmi_pll_8996_init(pdev);
+		break;
+	case MSM_HDMI_PHY_8998:
+		ret = msm_hdmi_pll_8998_init(pdev);
 		break;
 	/*
 	 * we don't have PLL support for these, don't report an error for now
@@ -157,9 +152,9 @@ static int msm_hdmi_phy_probe(struct platform_device *pdev)
 	if (!phy->cfg)
 		return -ENODEV;
 
-	phy->mmio = msm_ioremap(pdev, "hdmi_phy", "HDMI_PHY");
+	phy->mmio = msm_ioremap(pdev, "hdmi_phy");
 	if (IS_ERR(phy->mmio)) {
-		dev_err(dev, "%s: failed to map phy base\n", __func__);
+		DRM_DEV_ERROR(dev, "%s: failed to map phy base\n", __func__);
 		return -ENOMEM;
 	}
 
@@ -177,7 +172,7 @@ static int msm_hdmi_phy_probe(struct platform_device *pdev)
 
 	ret = msm_hdmi_phy_pll_init(pdev, phy->cfg->type);
 	if (ret) {
-		dev_err(dev, "couldn't init PLL\n");
+		DRM_DEV_ERROR(dev, "couldn't init PLL\n");
 		msm_hdmi_phy_resource_disable(phy);
 		return ret;
 	}
@@ -189,11 +184,9 @@ static int msm_hdmi_phy_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int msm_hdmi_phy_remove(struct platform_device *pdev)
+static void msm_hdmi_phy_remove(struct platform_device *pdev)
 {
 	pm_runtime_disable(&pdev->dev);
-
-	return 0;
 }
 
 static const struct of_device_id msm_hdmi_phy_dt_match[] = {
@@ -207,8 +200,11 @@ static const struct of_device_id msm_hdmi_phy_dt_match[] = {
 	  .data = &msm_hdmi_phy_8x74_cfg },
 	{ .compatible = "qcom,hdmi-phy-8996",
 	  .data = &msm_hdmi_phy_8996_cfg },
+	{ .compatible = "qcom,hdmi-phy-8998",
+	  .data = &msm_hdmi_phy_8998_cfg },
 	{}
 };
+MODULE_DEVICE_TABLE(of, msm_hdmi_phy_dt_match);
 
 static struct platform_driver msm_hdmi_phy_platform_driver = {
 	.probe      = msm_hdmi_phy_probe,

@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
  /*
  * drivers/net/ethernet/ec_bhf.c
  *
  * Copyright (C) 2014 Darek Marcinkiewicz <reksio@newterm.pl>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 /* This is a driver for EtherCAT master module present on CCAT FPGA.
@@ -425,15 +416,14 @@ static int ec_bhf_open(struct net_device *net_dev)
 
 	netif_start_queue(net_dev);
 
-	hrtimer_init(&priv->hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	priv->hrtimer.function = ec_bhf_timer_fun;
+	hrtimer_setup(&priv->hrtimer, ec_bhf_timer_fun, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	hrtimer_start(&priv->hrtimer, polling_frequency, HRTIMER_MODE_REL);
 
 	return 0;
 
 error_rx_free:
 	dma_free_coherent(dev, priv->rx_buf.alloc_len, priv->rx_buf.alloc,
-			  priv->rx_buf.alloc_len);
+			  priv->rx_buf.alloc_phys);
 out:
 	return err;
 }
@@ -488,6 +478,7 @@ static int ec_bhf_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	struct net_device *net_dev;
 	struct ec_bhf_priv *priv;
 	void __iomem *dma_io;
+	u8 addr[ETH_ALEN];
 	void __iomem *io;
 	int err = 0;
 
@@ -497,15 +488,7 @@ static int ec_bhf_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
 	pci_set_master(dev);
 
-	err = pci_set_dma_mask(dev, DMA_BIT_MASK(32));
-	if (err) {
-		dev_err(&dev->dev,
-			"Required dma mask not supported, failed to initialize device\n");
-		err = -EIO;
-		goto err_disable_dev;
-	}
-
-	err = pci_set_consistent_dma_mask(dev, DMA_BIT_MASK(32));
+	err = dma_set_mask_and_coherent(&dev->dev, DMA_BIT_MASK(32));
 	if (err) {
 		dev_err(&dev->dev,
 			"Required dma mask not supported, failed to initialize device\n");
@@ -556,7 +539,8 @@ static int ec_bhf_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	if (err < 0)
 		goto err_free_net_dev;
 
-	memcpy_fromio(net_dev->dev_addr, priv->mii_io + MII_MAC_ADDR, 6);
+	memcpy_fromio(addr, priv->mii_io + MII_MAC_ADDR, ETH_ALEN);
+	eth_hw_addr_set(net_dev, addr);
 
 	err = register_netdev(net_dev);
 	if (err < 0)
@@ -573,7 +557,6 @@ err_unmap:
 err_release_regions:
 	pci_release_regions(dev);
 err_disable_dev:
-	pci_clear_master(dev);
 	pci_disable_device(dev);
 
 	return err;
@@ -585,12 +568,13 @@ static void ec_bhf_remove(struct pci_dev *dev)
 	struct ec_bhf_priv *priv = netdev_priv(net_dev);
 
 	unregister_netdev(net_dev);
-	free_netdev(net_dev);
 
 	pci_iounmap(dev, priv->dma_io);
 	pci_iounmap(dev, priv->io);
+
+	free_netdev(net_dev);
+
 	pci_release_regions(dev);
-	pci_clear_master(dev);
 	pci_disable_device(dev);
 }
 
@@ -605,5 +589,6 @@ module_pci_driver(pci_driver);
 module_param(polling_frequency, long, 0444);
 MODULE_PARM_DESC(polling_frequency, "Polling timer frequency in ns");
 
+MODULE_DESCRIPTION("Beckhoff CX5020 EtherCAT Ethernet driver");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Dariusz Marcinkiewicz <reksio@newterm.pl>");

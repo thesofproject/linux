@@ -1,8 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2010 Red Hat Inc.
  * Author : Dave Airlie <airlied@redhat.com>
- *
- * Licensed under GPLv2
  *
  * ATPX support for both Intel/ATI
  */
@@ -62,19 +61,23 @@ struct atpx_mux {
 	u16 mux;
 } __packed;
 
-bool radeon_has_atpx(void) {
+bool radeon_has_atpx(void)
+{
 	return radeon_atpx_priv.atpx_detected;
 }
 
-bool radeon_has_atpx_dgpu_power_cntl(void) {
+bool radeon_has_atpx_dgpu_power_cntl(void)
+{
 	return radeon_atpx_priv.atpx.functions.power_cntl;
 }
 
-bool radeon_is_atpx_hybrid(void) {
+bool radeon_is_atpx_hybrid(void)
+{
 	return radeon_atpx_priv.atpx.is_hybrid;
 }
 
-bool radeon_atpx_dgpu_req_power_for_displays(void) {
+bool radeon_atpx_dgpu_req_power_for_displays(void)
+{
 	return radeon_atpx_priv.atpx.dgpu_req_power_for_displays;
 }
 
@@ -116,7 +119,7 @@ static union acpi_object *radeon_atpx_call(acpi_handle handle, int function,
 
 	/* Fail only if calling the method fails and ATPX is supported */
 	if (ACPI_FAILURE(status) && status != AE_NOT_FOUND) {
-		printk("failed to evaluate ATPX got %s\n",
+		pr_err("failed to evaluate ATPX got %s\n",
 		       acpi_format_exception(status));
 		kfree(buffer.pointer);
 		return NULL;
@@ -148,7 +151,7 @@ static void radeon_atpx_parse_functions(struct radeon_atpx_functions *f, u32 mas
 }
 
 /**
- * radeon_atpx_validate_functions - validate ATPX functions
+ * radeon_atpx_validate() - validate ATPX functions
  *
  * @atpx: radeon atpx struct
  *
@@ -172,7 +175,7 @@ static int radeon_atpx_validate(struct radeon_atpx *atpx)
 
 		size = *(u16 *) info->buffer.pointer;
 		if (size < 10) {
-			printk("ATPX buffer is too small: %zu\n", size);
+			pr_err("ATPX buffer is too small: %zu\n", size);
 			kfree(info);
 			return -EINVAL;
 		}
@@ -203,7 +206,7 @@ static int radeon_atpx_validate(struct radeon_atpx *atpx)
 
 	atpx->is_hybrid = false;
 	if (valid_bits & ATPX_MS_HYBRID_GFX_SUPPORTED) {
-		printk("ATPX Hybrid Graphics\n");
+		pr_info("ATPX Hybrid Graphics\n");
 		/*
 		 * Disable legacy PM methods only when pcie port PM is usable,
 		 * otherwise the device might fail to power off or power on.
@@ -240,7 +243,7 @@ static int radeon_atpx_verify_interface(struct radeon_atpx *atpx)
 
 	size = *(u16 *) info->buffer.pointer;
 	if (size < 8) {
-		printk("ATPX buffer is too small: %zu\n", size);
+		pr_err("ATPX buffer is too small: %zu\n", size);
 		err = -EINVAL;
 		goto out;
 	}
@@ -249,8 +252,8 @@ static int radeon_atpx_verify_interface(struct radeon_atpx *atpx)
 	memcpy(&output, info->buffer.pointer, size);
 
 	/* TODO: check version? */
-	printk("ATPX version %u, functions 0x%08x\n",
-	       output.version, output.function_bits);
+	pr_info("ATPX version %u, functions 0x%08x\n",
+		output.version, output.function_bits);
 
 	radeon_atpx_parse_functions(&atpx->functions, output.function_bits);
 
@@ -526,7 +529,7 @@ static int radeon_atpx_init(void)
  * look up whether we are the integrated or discrete GPU (all asics).
  * Returns the client id.
  */
-static int radeon_atpx_get_client_id(struct pci_dev *pdev)
+static enum vga_switcheroo_client_id radeon_atpx_get_client_id(struct pci_dev *pdev)
 {
 	if (radeon_atpx_priv.dhandle == ACPI_HANDLE(&pdev->dev))
 		return VGA_SWITCHEROO_IGD;

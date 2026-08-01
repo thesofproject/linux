@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for ADC module on the Cirrus Logic EP93xx series of SoCs
  *
  * Copyright (C) 2015 Alexander Sverdlin
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * The driver uses polling to get the conversion status. According to EP93xx
  * datasheets, reading ADCResult register starts the conversion, but user is also
@@ -24,6 +21,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
+#include <linux/of.h>
 
 /*
  * This code could benefit from real HR Timers, but jiffy granularity would
@@ -159,21 +157,16 @@ static int ep93xx_adc_probe(struct platform_device *pdev)
 	struct iio_dev *iiodev;
 	struct ep93xx_adc_priv *priv;
 	struct clk *pclk;
-	struct resource *res;
 
 	iiodev = devm_iio_device_alloc(&pdev->dev, sizeof(*priv));
 	if (!iiodev)
 		return -ENOMEM;
 	priv = iio_priv(iiodev);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(priv->base)) {
-		dev_err(&pdev->dev, "Cannot map memory resource\n");
+	priv->base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(priv->base))
 		return PTR_ERR(priv->base);
-	}
 
-	iiodev->dev.parent = &pdev->dev;
 	iiodev->name = dev_name(&pdev->dev);
 	iiodev->modes = INDIO_DIRECT_MODE;
 	iiodev->info = &ep93xx_adc_info;
@@ -211,7 +204,7 @@ static int ep93xx_adc_probe(struct platform_device *pdev)
 		 */
 	}
 
-	ret = clk_enable(priv->clk);
+	ret = clk_prepare_enable(priv->clk);
 	if (ret) {
 		dev_err(&pdev->dev, "Cannot enable clock\n");
 		return ret;
@@ -219,25 +212,30 @@ static int ep93xx_adc_probe(struct platform_device *pdev)
 
 	ret = iio_device_register(iiodev);
 	if (ret)
-		clk_disable(priv->clk);
+		clk_disable_unprepare(priv->clk);
 
 	return ret;
 }
 
-static int ep93xx_adc_remove(struct platform_device *pdev)
+static void ep93xx_adc_remove(struct platform_device *pdev)
 {
 	struct iio_dev *iiodev = platform_get_drvdata(pdev);
 	struct ep93xx_adc_priv *priv = iio_priv(iiodev);
 
 	iio_device_unregister(iiodev);
-	clk_disable(priv->clk);
-
-	return 0;
+	clk_disable_unprepare(priv->clk);
 }
+
+static const struct of_device_id ep93xx_adc_of_ids[] = {
+	{ .compatible = "cirrus,ep9301-adc" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, ep93xx_adc_of_ids);
 
 static struct platform_driver ep93xx_adc_driver = {
 	.driver = {
 		.name = "ep93xx-adc",
+		.of_match_table = ep93xx_adc_of_ids,
 	},
 	.probe = ep93xx_adc_probe,
 	.remove = ep93xx_adc_remove,

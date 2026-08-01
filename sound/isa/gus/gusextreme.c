@@ -1,22 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for Gravis UltraSound Extreme soundcards
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/init.h>
@@ -42,7 +27,6 @@
 MODULE_DESCRIPTION(CRD_NAME);
 MODULE_AUTHOR("Jaroslav Kysela <perex@perex.cz>");
 MODULE_LICENSE("GPL");
-MODULE_SUPPORTED_DEVICE("{{Gravis,UltraSound Extreme}}");
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
@@ -59,6 +43,11 @@ static int joystick_dac[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 29};
 				/* 0 to 31, (0.59V-4.52V or 0.389V-2.98V) */
 static int channels[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 24};
 static int pcm_channels[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 2};
+
+struct snd_gusextreme {
+	struct snd_es1688 es1688;
+	struct snd_gus_card *gus;
+};
 
 module_param_array(index, int, NULL, 0444);
 MODULE_PARM_DESC(index, "Index value for " CRD_NAME " soundcard.");
@@ -98,9 +87,9 @@ static int snd_gusextreme_es1688_create(struct snd_card *card,
 					struct snd_es1688 *chip,
 					struct device *dev, unsigned int n)
 {
-	static long possible_ports[] = {0x220, 0x240, 0x260};
-	static int possible_irqs[] = {5, 9, 10, 7, -1};
-	static int possible_dmas[] = {1, 3, 0, -1};
+	static const long possible_ports[] = {0x220, 0x240, 0x260};
+	static const int possible_irqs[] = {5, 9, 10, 7, -1};
+	static const int possible_dmas[] = {1, 3, 0, -1};
 
 	int i, error;
 
@@ -137,8 +126,8 @@ static int snd_gusextreme_gus_card_create(struct snd_card *card,
 					  struct device *dev, unsigned int n,
 					  struct snd_gus_card **rgus)
 {
-	static int possible_irqs[] = {11, 12, 15, 9, 5, 7, 3, -1};
-	static int possible_dmas[] = {5, 6, 7, 3, 1, -1};
+	static const int possible_irqs[] = {11, 12, 15, 9, 5, 7, 3, -1};
+	static const int possible_dmas[] = {5, 6, 7, 3, 1, -1};
 
 	if (gf1_irq[n] == SNDRV_AUTO_IRQ) {
 		gf1_irq[n] = snd_legacy_find_free_irq(possible_irqs);
@@ -158,18 +147,15 @@ static int snd_gusextreme_gus_card_create(struct snd_card *card,
 			0, channels[n], pcm_channels[n], 0, rgus);
 }
 
-static int snd_gusextreme_detect(struct snd_gus_card *gus,
-				 struct snd_es1688 *es1688)
+static void snd_gusextreme_enable_gf1(struct snd_gus_card *gus,
+				      struct snd_es1688 *es1688)
 {
-	unsigned long flags;
-	unsigned char d;
-
 	/*
 	 * This is main stuff - enable access to GF1 chip...
 	 * I'm not sure, if this will work for card which have
 	 * ES1688 chip in another place than 0x220.
-         *
-         * I used reverse-engineering in DOSEMU. [--jk]
+	 *
+	 * I used reverse-engineering in DOSEMU. [--jk]
 	 *
 	 * ULTRINIT.EXE:
 	 * 0x230 = 0,2,3
@@ -178,30 +164,39 @@ static int snd_gusextreme_detect(struct snd_gus_card *gus,
 	 * 0x260 = 2,2,1
 	 */
 
-	spin_lock_irqsave(&es1688->mixer_lock, flags);
-	snd_es1688_mixer_write(es1688, 0x40, 0x0b);	/* don't change!!! */
-	spin_unlock_irqrestore(&es1688->mixer_lock, flags);
+	scoped_guard(spinlock_irqsave, &es1688->mixer_lock) {
+		snd_es1688_mixer_write(es1688, 0x40, 0x0b); /* don't change!!! */
+	}
 
-	spin_lock_irqsave(&es1688->reg_lock, flags);
-	outb(gus->gf1.port & 0x040 ? 2 : 0, ES1688P(es1688, INIT1));
-	outb(0, 0x201);
-	outb(gus->gf1.port & 0x020 ? 2 : 0, ES1688P(es1688, INIT1));
-	outb(0, 0x201);
-	outb(gus->gf1.port & 0x010 ? 3 : 1, ES1688P(es1688, INIT1));
-	spin_unlock_irqrestore(&es1688->reg_lock, flags);
+	scoped_guard(spinlock_irqsave, &es1688->reg_lock) {
+		outb(gus->gf1.port & 0x040 ? 2 : 0, ES1688P(es1688, INIT1));
+		outb(0, 0x201);
+		outb(gus->gf1.port & 0x020 ? 2 : 0, ES1688P(es1688, INIT1));
+		outb(0, 0x201);
+		outb(gus->gf1.port & 0x010 ? 3 : 1, ES1688P(es1688, INIT1));
+	}
+}
 
+static int snd_gusextreme_detect(struct snd_gus_card *gus,
+				 struct snd_es1688 *es1688)
+{
+	unsigned char d;
+
+	snd_gusextreme_enable_gf1(gus, es1688);
 	udelay(100);
 
 	snd_gf1_i_write8(gus, SNDRV_GF1_GB_RESET, 0);	/* reset GF1 */
-	if (((d = snd_gf1_i_look8(gus, SNDRV_GF1_GB_RESET)) & 0x07) != 0) {
-		snd_printdd("[0x%lx] check 1 failed - 0x%x\n", gus->gf1.port, d);
+	d = snd_gf1_i_look8(gus, SNDRV_GF1_GB_RESET);
+	if ((d & 0x07) != 0) {
+		dev_dbg(gus->card->dev, "[0x%lx] check 1 failed - 0x%x\n", gus->gf1.port, d);
 		return -EIO;
 	}
 	udelay(160);
 	snd_gf1_i_write8(gus, SNDRV_GF1_GB_RESET, 1);	/* release reset */
 	udelay(160);
-	if (((d = snd_gf1_i_look8(gus, SNDRV_GF1_GB_RESET)) & 0x07) != 1) {
-		snd_printdd("[0x%lx] check 2 failed - 0x%x\n", gus->gf1.port, d);
+	d = snd_gf1_i_look8(gus, SNDRV_GF1_GB_RESET);
+	if ((d & 0x07) != 1) {
+		dev_dbg(gus->card->dev, "[0x%lx] check 2 failed - 0x%x\n", gus->gf1.port, d);
 		return -EIO;
 	}
 
@@ -218,15 +213,15 @@ static int snd_gusextreme_mixer(struct snd_card *card)
 	id1.iface = id2.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 
 	/* reassign AUX to SYNTHESIZER */
-	strcpy(id1.name, "Aux Playback Volume");
-	strcpy(id2.name, "Synth Playback Volume");
+	strscpy(id1.name, "Aux Playback Volume");
+	strscpy(id2.name, "Synth Playback Volume");
 	error = snd_ctl_rename_id(card, &id1, &id2);
 	if (error < 0)
 		return error;
 
 	/* reassign Master Playback Switch to Synth Playback Switch */
-	strcpy(id1.name, "Master Playback Switch");
-	strcpy(id2.name, "Synth Playback Switch");
+	strscpy(id1.name, "Master Playback Switch");
+	strscpy(id2.name, "Synth Playback Switch");
 	error = snd_ctl_rename_id(card, &id1, &id2);
 	if (error < 0)
 		return error;
@@ -238,16 +233,18 @@ static int snd_gusextreme_probe(struct device *dev, unsigned int n)
 {
 	struct snd_card *card;
 	struct snd_gus_card *gus;
+	struct snd_gusextreme *gusextreme;
 	struct snd_es1688 *es1688;
 	struct snd_opl3 *opl3;
 	int error;
 
-	error = snd_card_new(dev, index[n], id[n], THIS_MODULE,
-			     sizeof(struct snd_es1688), &card);
+	error = snd_devm_card_new(dev, index[n], id[n], THIS_MODULE,
+				  sizeof(*gusextreme), &card);
 	if (error < 0)
 		return error;
 
-	es1688 = card->private_data;
+	gusextreme = card->private_data;
+	es1688 = &gusextreme->es1688;
 
 	if (mpu_port[n] == SNDRV_AUTO_PORT)
 		mpu_port[n] = 0;
@@ -257,56 +254,57 @@ static int snd_gusextreme_probe(struct device *dev, unsigned int n)
 
 	error = snd_gusextreme_es1688_create(card, es1688, dev, n);
 	if (error < 0)
-		goto out;
+		return error;
 
 	if (gf1_port[n] < 0)
 		gf1_port[n] = es1688->port + 0x20;
 
 	error = snd_gusextreme_gus_card_create(card, dev, n, &gus);
 	if (error < 0)
-		goto out;
+		return error;
+	gusextreme->gus = gus;
 
 	error = snd_gusextreme_detect(gus, es1688);
 	if (error < 0)
-		goto out;
+		return error;
 
 	gus->joystick_dac = joystick_dac[n];
 
 	error = snd_gus_initialize(gus);
 	if (error < 0)
-		goto out;
+		return error;
 
 	error = -ENODEV;
 	if (!gus->ess_flag) {
 		dev_err(dev, "GUS Extreme soundcard was not "
 			"detected at 0x%lx\n", gus->gf1.port);
-		goto out;
+		return error;
 	}
 	gus->codec_flag = 1;
 
 	error = snd_es1688_pcm(card, es1688, 0);
 	if (error < 0)
-		goto out;
+		return error;
 
 	error = snd_es1688_mixer(card, es1688);
 	if (error < 0)
-		goto out;
+		return error;
 
 	snd_component_add(card, "ES1688");
 
 	if (pcm_channels[n] > 0) {
 		error = snd_gf1_pcm_new(gus, 1, 1);
 		if (error < 0)
-			goto out;
+			return error;
 	}
 
 	error = snd_gf1_new_mixer(gus);
 	if (error < 0)
-		goto out;
+		return error;
 
 	error = snd_gusextreme_mixer(card);
 	if (error < 0)
-		goto out;
+		return error;
 
 	if (snd_opl3_create(card, es1688->port, es1688->port + 2,
 			OPL3_HW_OPL3, 0, &opl3) < 0)
@@ -314,14 +312,14 @@ static int snd_gusextreme_probe(struct device *dev, unsigned int n)
 	else {
 		error = snd_opl3_hwdep_new(opl3, 0, 2, NULL);
 		if (error < 0)
-			goto out;
+			return error;
 	}
 
 	if (es1688->mpu_port >= 0x300) {
 		error = snd_mpu401_uart_new(card, 0, MPU401_HW_ES1688,
 				es1688->mpu_port, 0, mpu_irq[n], NULL);
 		if (error < 0)
-			goto out;
+			return error;
 	}
 
 	sprintf(card->longname, "Gravis UltraSound Extreme at 0x%lx, "
@@ -330,26 +328,42 @@ static int snd_gusextreme_probe(struct device *dev, unsigned int n)
 
 	error = snd_card_register(card);
 	if (error < 0)
-		goto out;
+		return error;
 
 	dev_set_drvdata(dev, card);
 	return 0;
-
-out:	snd_card_free(card);
-	return error;
 }
 
-static int snd_gusextreme_remove(struct device *dev, unsigned int n)
+#ifdef CONFIG_PM
+static int snd_gusextreme_suspend(struct device *dev, unsigned int n,
+				  pm_message_t state)
 {
-	snd_card_free(dev_get_drvdata(dev));
-	return 0;
+	struct snd_card *card = dev_get_drvdata(dev);
+	struct snd_gusextreme *gusextreme = card->private_data;
+
+	return snd_gus_suspend(gusextreme->gus);
 }
+
+static int snd_gusextreme_resume(struct device *dev, unsigned int n)
+{
+	struct snd_card *card = dev_get_drvdata(dev);
+	struct snd_gusextreme *gusextreme = card->private_data;
+	int err;
+
+	err = snd_es1688_reset(&gusextreme->es1688);
+	if (err < 0)
+		return err;
+
+	snd_gusextreme_enable_gf1(gusextreme->gus, &gusextreme->es1688);
+	usleep_range(100, 200);
+	return snd_gus_resume(gusextreme->gus);
+}
+#endif
 
 static struct isa_driver snd_gusextreme_driver = {
 	.match		= snd_gusextreme_match,
 	.probe		= snd_gusextreme_probe,
-	.remove		= snd_gusextreme_remove,
-#if 0	/* FIXME */
+#ifdef CONFIG_PM
 	.suspend	= snd_gusextreme_suspend,
 	.resume		= snd_gusextreme_resume,
 #endif

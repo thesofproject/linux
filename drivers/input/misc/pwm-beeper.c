@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (C) 2010, Lars-Peter Clausen <lars@metafoo.de>
  *  PWM beeper driver
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under  the terms of the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the License, or (at your
- *  option) any later version.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  675 Mass Ave, Cambridge, MA 02139, USA.
- *
  */
 
 #include <linux/input.h>
@@ -48,7 +39,7 @@ static int pwm_beeper_on(struct pwm_beeper *beeper, unsigned long period)
 	state.period = period;
 	pwm_set_relative_duty_cycle(&state, 50, 100);
 
-	error = pwm_apply_state(beeper->pwm, &state);
+	error = pwm_apply_might_sleep(beeper->pwm, &state);
 	if (error)
 		return error;
 
@@ -141,18 +132,13 @@ static int pwm_beeper_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	beeper->pwm = devm_pwm_get(dev, NULL);
-	if (IS_ERR(beeper->pwm)) {
-		error = PTR_ERR(beeper->pwm);
-		if (error != -EPROBE_DEFER)
-			dev_err(dev, "Failed to request PWM device: %d\n",
-				error);
-		return error;
-	}
+	if (IS_ERR(beeper->pwm))
+		return dev_err_probe(dev, PTR_ERR(beeper->pwm), "Failed to request PWM device\n");
 
 	/* Sync up PWM state and ensure it is off. */
 	pwm_init_state(beeper->pwm, &state);
 	state.enabled = false;
-	error = pwm_apply_state(beeper->pwm, &state);
+	error = pwm_apply_might_sleep(beeper->pwm, &state);
 	if (error) {
 		dev_err(dev, "failed to apply initial PWM state: %d\n",
 			error);
@@ -160,13 +146,9 @@ static int pwm_beeper_probe(struct platform_device *pdev)
 	}
 
 	beeper->amplifier = devm_regulator_get(dev, "amp");
-	if (IS_ERR(beeper->amplifier)) {
-		error = PTR_ERR(beeper->amplifier);
-		if (error != -EPROBE_DEFER)
-			dev_err(dev, "Failed to get 'amp' regulator: %d\n",
-				error);
-		return error;
-	}
+	if (IS_ERR(beeper->amplifier))
+		return dev_err_probe(dev, PTR_ERR(beeper->amplifier),
+				     "Failed to get 'amp' regulator\n");
 
 	INIT_WORK(&beeper->work, pwm_beeper_work);
 
@@ -212,7 +194,7 @@ static int pwm_beeper_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int __maybe_unused pwm_beeper_suspend(struct device *dev)
+static int pwm_beeper_suspend(struct device *dev)
 {
 	struct pwm_beeper *beeper = dev_get_drvdata(dev);
 
@@ -221,22 +203,22 @@ static int __maybe_unused pwm_beeper_suspend(struct device *dev)
 	 * beeper->suspended, but to ensure that pwm_beeper_event
 	 * does not re-submit work once flag is set.
 	 */
-	spin_lock_irq(&beeper->input->event_lock);
-	beeper->suspended = true;
-	spin_unlock_irq(&beeper->input->event_lock);
+	scoped_guard(spinlock_irq, &beeper->input->event_lock) {
+		beeper->suspended = true;
+	}
 
 	pwm_beeper_stop(beeper);
 
 	return 0;
 }
 
-static int __maybe_unused pwm_beeper_resume(struct device *dev)
+static int pwm_beeper_resume(struct device *dev)
 {
 	struct pwm_beeper *beeper = dev_get_drvdata(dev);
 
-	spin_lock_irq(&beeper->input->event_lock);
-	beeper->suspended = false;
-	spin_unlock_irq(&beeper->input->event_lock);
+	scoped_guard(spinlock_irq, &beeper->input->event_lock) {
+		beeper->suspended = false;
+	}
 
 	/* Let worker figure out if we should resume beeping */
 	schedule_work(&beeper->work);
@@ -244,8 +226,8 @@ static int __maybe_unused pwm_beeper_resume(struct device *dev)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(pwm_beeper_pm_ops,
-			 pwm_beeper_suspend, pwm_beeper_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(pwm_beeper_pm_ops,
+				pwm_beeper_suspend, pwm_beeper_resume);
 
 #ifdef CONFIG_OF
 static const struct of_device_id pwm_beeper_match[] = {
@@ -259,7 +241,7 @@ static struct platform_driver pwm_beeper_driver = {
 	.probe	= pwm_beeper_probe,
 	.driver = {
 		.name	= "pwm-beeper",
-		.pm	= &pwm_beeper_pm_ops,
+		.pm	= pm_sleep_ptr(&pwm_beeper_pm_ops),
 		.of_match_table = of_match_ptr(pwm_beeper_match),
 	},
 };

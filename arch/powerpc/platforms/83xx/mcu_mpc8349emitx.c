@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Power Management and GPIO expander driver for MPC8349E-mITX-compatible MCU
  *
  * Copyright (c) 2008  MontaVista Software, Inc.
  *
  * Author: Anton Vorontsov <avorontsov@ru.mvista.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -17,12 +13,11 @@
 #include <linux/mutex.h>
 #include <linux/i2c.h>
 #include <linux/gpio/driver.h>
-#include <linux/of.h>
-#include <linux/of_gpio.h>
 #include <linux/slab.h>
+#include <linux/sysfs.h>
 #include <linux/kthread.h>
+#include <linux/property.h>
 #include <linux/reboot.h>
-#include <asm/prom.h>
 #include <asm/machdep.h>
 
 /*
@@ -82,7 +77,7 @@ static ssize_t show_status(struct device *d,
 		return -ENODEV;
 	mcu->reg_ctrl = ret;
 
-	return sprintf(buf, "%02x\n", ret);
+	return sysfs_emit(buf, "%02x\n", ret);
 }
 static DEVICE_ATTR(status, 0444, show_status, NULL);
 
@@ -97,10 +92,11 @@ static void mcu_power_off(void)
 	mutex_unlock(&mcu->lock);
 }
 
-static void mcu_gpio_set(struct gpio_chip *gc, unsigned int gpio, int val)
+static int mcu_gpio_set(struct gpio_chip *gc, unsigned int gpio, int val)
 {
 	struct mcu *mcu = gpiochip_get_data(gc);
 	u8 bit = 1 << (4 + gpio);
+	int ret;
 
 	mutex_lock(&mcu->lock);
 	if (val)
@@ -108,50 +104,49 @@ static void mcu_gpio_set(struct gpio_chip *gc, unsigned int gpio, int val)
 	else
 		mcu->reg_ctrl |= bit;
 
-	i2c_smbus_write_byte_data(mcu->client, MCU_REG_CTRL, mcu->reg_ctrl);
+	ret = i2c_smbus_write_byte_data(mcu->client, MCU_REG_CTRL,
+					mcu->reg_ctrl);
 	mutex_unlock(&mcu->lock);
+
+	return ret;
 }
 
 static int mcu_gpio_dir_out(struct gpio_chip *gc, unsigned int gpio, int val)
 {
-	mcu_gpio_set(gc, gpio, val);
-	return 0;
+	return mcu_gpio_set(gc, gpio, val);
 }
 
 static int mcu_gpiochip_add(struct mcu *mcu)
 {
-	struct device_node *np;
+	struct device *dev = &mcu->client->dev;
 	struct gpio_chip *gc = &mcu->gc;
 
-	np = of_find_compatible_node(NULL, NULL, "fsl,mcu-mpc8349emitx");
-	if (!np)
-		return -ENODEV;
-
 	gc->owner = THIS_MODULE;
-	gc->label = kasprintf(GFP_KERNEL, "%pOF", np);
+	gc->label = kasprintf(GFP_KERNEL, "%pfw", dev_fwnode(dev));
+	if (!gc->label)
+		return -ENOMEM;
 	gc->can_sleep = 1;
 	gc->ngpio = MCU_NUM_GPIO;
 	gc->base = -1;
 	gc->set = mcu_gpio_set;
 	gc->direction_output = mcu_gpio_dir_out;
-	gc->of_node = np;
+	gc->parent = dev;
 
 	return gpiochip_add_data(gc, mcu);
 }
 
-static int mcu_gpiochip_remove(struct mcu *mcu)
+static void mcu_gpiochip_remove(struct mcu *mcu)
 {
 	kfree(mcu->gc.label);
 	gpiochip_remove(&mcu->gc);
-	return 0;
 }
 
-static int mcu_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int mcu_probe(struct i2c_client *client)
 {
 	struct mcu *mcu;
 	int ret;
 
-	mcu = kzalloc(sizeof(*mcu), GFP_KERNEL);
+	mcu = kzalloc_obj(*mcu);
 	if (!mcu)
 		return -ENOMEM;
 
@@ -188,10 +183,9 @@ err:
 	return ret;
 }
 
-static int mcu_remove(struct i2c_client *client)
+static void mcu_remove(struct i2c_client *client)
 {
 	struct mcu *mcu = i2c_get_clientdata(client);
-	int ret;
 
 	kthread_stop(shutdown_thread);
 
@@ -202,11 +196,8 @@ static int mcu_remove(struct i2c_client *client)
 		glob_mcu = NULL;
 	}
 
-	ret = mcu_gpiochip_remove(mcu);
-	if (ret)
-		return ret;
+	mcu_gpiochip_remove(mcu);
 	kfree(mcu);
-	return 0;
 }
 
 static const struct i2c_device_id mcu_ids[] = {

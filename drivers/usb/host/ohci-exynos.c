@@ -19,9 +19,8 @@
 
 #include "ohci.h"
 
-#define DRIVER_DESC "OHCI EXYNOS driver"
+#define DRIVER_DESC "OHCI Exynos driver"
 
-static const char hcd_name[] = "ohci-exynos";
 static struct hc_driver __read_mostly exynos_ohci_hc_driver;
 
 #define to_exynos_ohci(hcd) (struct exynos_ohci_hcd *)(hcd_to_ohci(hcd)->priv)
@@ -30,48 +29,50 @@ static struct hc_driver __read_mostly exynos_ohci_hc_driver;
 
 struct exynos_ohci_hcd {
 	struct clk *clk;
+	struct device_node *of_node;
 	struct phy *phy[PHY_NUMBER];
+	bool legacy_phy;
 };
 
 static int exynos_ohci_get_phy(struct device *dev,
 				struct exynos_ohci_hcd *exynos_ohci)
 {
-	struct device_node *child;
 	struct phy *phy;
-	int phy_number;
+	int phy_number, num_phys;
 	int ret;
 
 	/* Get PHYs for the controller */
-	for_each_available_child_of_node(dev->of_node, child) {
+	num_phys = of_count_phandle_with_args(dev->of_node, "phys",
+					      "#phy-cells");
+	for (phy_number = 0; phy_number < num_phys; phy_number++) {
+		phy = devm_of_phy_get_by_index(dev, dev->of_node, phy_number);
+		if (IS_ERR(phy))
+			return PTR_ERR(phy);
+		exynos_ohci->phy[phy_number] = phy;
+	}
+	if (num_phys > 0)
+		return 0;
+
+	/* Get PHYs using legacy bindings */
+	for_each_available_child_of_node_scoped(dev->of_node, child) {
 		ret = of_property_read_u32(child, "reg", &phy_number);
 		if (ret) {
 			dev_err(dev, "Failed to parse device tree\n");
-			of_node_put(child);
 			return ret;
 		}
 
 		if (phy_number >= PHY_NUMBER) {
 			dev_err(dev, "Invalid number of PHYs\n");
-			of_node_put(child);
 			return -EINVAL;
 		}
 
-		phy = devm_of_phy_get(dev, child, NULL);
+		phy = devm_of_phy_optional_get(dev, child, NULL);
 		exynos_ohci->phy[phy_number] = phy;
-		if (IS_ERR(phy)) {
-			ret = PTR_ERR(phy);
-			if (ret == -EPROBE_DEFER) {
-				of_node_put(child);
-				return ret;
-			} else if (ret != -ENOSYS && ret != -ENODEV) {
-				dev_err(dev,
-					"Error retrieving usb2 phy: %d\n", ret);
-				of_node_put(child);
-				return ret;
-			}
-		}
+		if (IS_ERR(phy))
+			return PTR_ERR(phy);
 	}
 
+	exynos_ohci->legacy_phy = true;
 	return 0;
 }
 
@@ -83,12 +84,10 @@ static int exynos_ohci_phy_enable(struct device *dev)
 	int ret = 0;
 
 	for (i = 0; ret == 0 && i < PHY_NUMBER; i++)
-		if (!IS_ERR(exynos_ohci->phy[i]))
-			ret = phy_power_on(exynos_ohci->phy[i]);
+		ret = phy_power_on(exynos_ohci->phy[i]);
 	if (ret)
 		for (i--; i >= 0; i--)
-			if (!IS_ERR(exynos_ohci->phy[i]))
-				phy_power_off(exynos_ohci->phy[i]);
+			phy_power_off(exynos_ohci->phy[i]);
 
 	return ret;
 }
@@ -100,8 +99,7 @@ static void exynos_ohci_phy_disable(struct device *dev)
 	int i;
 
 	for (i = 0; i < PHY_NUMBER; i++)
-		if (!IS_ERR(exynos_ohci->phy[i]))
-			phy_power_off(exynos_ohci->phy[i]);
+		phy_power_off(exynos_ohci->phy[i]);
 }
 
 static int exynos_ohci_probe(struct platform_device *pdev)
@@ -130,29 +128,19 @@ static int exynos_ohci_probe(struct platform_device *pdev)
 
 	exynos_ohci = to_exynos_ohci(hcd);
 
-	if (of_device_is_compatible(pdev->dev.of_node,
-					"samsung,exynos5440-ohci"))
-		goto skip_phy;
-
 	err = exynos_ohci_get_phy(&pdev->dev, exynos_ohci);
 	if (err)
-		goto fail_clk;
+		goto fail_io;
 
-skip_phy:
-	exynos_ohci->clk = devm_clk_get(&pdev->dev, "usbhost");
+	exynos_ohci->clk = devm_clk_get_enabled(&pdev->dev, "usbhost");
 
 	if (IS_ERR(exynos_ohci->clk)) {
 		dev_err(&pdev->dev, "Failed to get usbhost clock\n");
 		err = PTR_ERR(exynos_ohci->clk);
-		goto fail_clk;
+		goto fail_io;
 	}
 
-	err = clk_prepare_enable(exynos_ohci->clk);
-	if (err)
-		goto fail_clk;
-
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	hcd->regs = devm_ioremap_resource(&pdev->dev, res);
+	hcd->regs = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(hcd->regs)) {
 		err = PTR_ERR(hcd->regs);
 		goto fail_io;
@@ -161,9 +149,8 @@ skip_phy:
 	hcd->rsrc_len = resource_size(res);
 
 	irq = platform_get_irq(pdev, 0);
-	if (!irq) {
-		dev_err(&pdev->dev, "Failed to get IRQ\n");
-		err = -ENODEV;
+	if (irq < 0) {
+		err = irq;
 		goto fail_io;
 	}
 
@@ -175,6 +162,14 @@ skip_phy:
 		goto fail_io;
 	}
 
+	/*
+	 * Workaround: reset of_node pointer to avoid conflict between legacy
+	 * Exynos OHCI port subnodes and generic USB device bindings
+	 */
+	exynos_ohci->of_node = pdev->dev.of_node;
+	if (exynos_ohci->legacy_phy)
+		pdev->dev.of_node = NULL;
+
 	err = usb_add_hcd(hcd, irq, IRQF_SHARED);
 	if (err) {
 		dev_err(&pdev->dev, "Failed to add USB HCD\n");
@@ -185,27 +180,24 @@ skip_phy:
 
 fail_add_hcd:
 	exynos_ohci_phy_disable(&pdev->dev);
+	pdev->dev.of_node = exynos_ohci->of_node;
 fail_io:
-	clk_disable_unprepare(exynos_ohci->clk);
-fail_clk:
 	usb_put_hcd(hcd);
 	return err;
 }
 
-static int exynos_ohci_remove(struct platform_device *pdev)
+static void exynos_ohci_remove(struct platform_device *pdev)
 {
 	struct usb_hcd *hcd = platform_get_drvdata(pdev);
 	struct exynos_ohci_hcd *exynos_ohci = to_exynos_ohci(hcd);
+
+	pdev->dev.of_node = exynos_ohci->of_node;
 
 	usb_remove_hcd(hcd);
 
 	exynos_ohci_phy_disable(&pdev->dev);
 
-	clk_disable_unprepare(exynos_ohci->clk);
-
 	usb_put_hcd(hcd);
-
-	return 0;
 }
 
 static void exynos_ohci_shutdown(struct platform_device *pdev)
@@ -216,7 +208,6 @@ static void exynos_ohci_shutdown(struct platform_device *pdev)
 		hcd->driver->shutdown(hcd);
 }
 
-#ifdef CONFIG_PM
 static int exynos_ohci_suspend(struct device *dev)
 {
 	struct usb_hcd *hcd = dev_get_drvdata(dev);
@@ -253,24 +244,17 @@ static int exynos_ohci_resume(struct device *dev)
 
 	return 0;
 }
-#else
-#define exynos_ohci_suspend	NULL
-#define exynos_ohci_resume	NULL
-#endif
 
 static const struct ohci_driver_overrides exynos_overrides __initconst = {
 	.extra_priv_size =	sizeof(struct exynos_ohci_hcd),
 };
 
-static const struct dev_pm_ops exynos_ohci_pm_ops = {
-	.suspend	= exynos_ohci_suspend,
-	.resume		= exynos_ohci_resume,
-};
+static DEFINE_SIMPLE_DEV_PM_OPS(exynos_ohci_pm_ops,
+				exynos_ohci_suspend, exynos_ohci_resume);
 
 #ifdef CONFIG_OF
 static const struct of_device_id exynos_ohci_match[] = {
 	{ .compatible = "samsung,exynos4210-ohci" },
-	{ .compatible = "samsung,exynos5440-ohci" },
 	{},
 };
 MODULE_DEVICE_TABLE(of, exynos_ohci_match);
@@ -282,7 +266,7 @@ static struct platform_driver exynos_ohci_driver = {
 	.shutdown	= exynos_ohci_shutdown,
 	.driver = {
 		.name	= "exynos-ohci",
-		.pm	= &exynos_ohci_pm_ops,
+		.pm	= pm_ptr(&exynos_ohci_pm_ops),
 		.of_match_table	= of_match_ptr(exynos_ohci_match),
 	}
 };
@@ -291,7 +275,6 @@ static int __init ohci_exynos_init(void)
 	if (usb_disabled())
 		return -ENODEV;
 
-	pr_info("%s: " DRIVER_DESC "\n", hcd_name);
 	ohci_init_driver(&exynos_ohci_hc_driver, &exynos_overrides);
 	return platform_driver_register(&exynos_ohci_driver);
 }
@@ -305,4 +288,5 @@ module_exit(ohci_exynos_cleanup);
 
 MODULE_ALIAS("platform:exynos-ohci");
 MODULE_AUTHOR("Jingoo Han <jg1.han@samsung.com>");
+MODULE_DESCRIPTION("OHCI support for Samsung S5P/Exynos SoC Series");
 MODULE_LICENSE("GPL v2");

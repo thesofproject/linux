@@ -2,15 +2,19 @@
 /*
  *  IBM System z Huge TLB Page Support for Kernel.
  *
- *    Copyright IBM Corp. 2007,2016
+ *    Copyright IBM Corp. 2007,2020
  *    Author(s): Gerald Schaefer <gerald.schaefer@de.ibm.com>
  */
 
-#define KMSG_COMPONENT "hugetlb"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "hugetlb: " fmt
 
+#include <linux/cpufeature.h>
 #include <linux/mm.h>
 #include <linux/hugetlb.h>
+#include <linux/mman.h>
+#include <linux/sched/mm.h>
+#include <linux/security.h>
+#include <asm/pgalloc.h>
 
 /*
  * If the bit selected by single-bit bitmask "a" is set within "x", move
@@ -20,6 +24,7 @@
 
 static inline unsigned long __pte_to_rste(pte_t pte)
 {
+	swp_entry_t arch_entry;
 	unsigned long rste;
 
 	/*
@@ -44,6 +49,7 @@ static inline unsigned long __pte_to_rste(pte_t pte)
 	 */
 	if (pte_present(pte)) {
 		rste = pte_val(pte) & PAGE_MASK;
+		rste |= _SEGMENT_ENTRY_PRESENT;
 		rste |= move_set_bit(pte_val(pte), _PAGE_READ,
 				     _SEGMENT_ENTRY_READ);
 		rste |= move_set_bit(pte_val(pte), _PAGE_WRITE,
@@ -62,6 +68,10 @@ static inline unsigned long __pte_to_rste(pte_t pte)
 #endif
 		rste |= move_set_bit(pte_val(pte), _PAGE_NOEXEC,
 				     _SEGMENT_ENTRY_NOEXEC);
+	} else if (!pte_none(pte)) {
+		/* swap pte */
+		arch_entry = __pte_to_swp_entry(pte);
+		rste = mk_swap_rste(__swp_type(arch_entry), __swp_offset(arch_entry));
 	} else
 		rste = _SEGMENT_ENTRY_EMPTY;
 	return rste;
@@ -69,13 +79,18 @@ static inline unsigned long __pte_to_rste(pte_t pte)
 
 static inline pte_t __rste_to_pte(unsigned long rste)
 {
-	int present;
+	swp_entry_t arch_entry;
+	unsigned long pteval;
+	int present, none;
 	pte_t pte;
 
-	if ((rste & _REGION_ENTRY_TYPE_MASK) == _REGION_ENTRY_TYPE_R3)
+	if ((rste & _REGION_ENTRY_TYPE_MASK) == _REGION_ENTRY_TYPE_R3) {
 		present = pud_present(__pud(rste));
-	else
+		none = pud_none(__pud(rste));
+	} else {
 		present = pmd_present(__pmd(rste));
+		none = pmd_none(__pmd(rste));
+	}
 
 	/*
 	 * Convert encoding		pmd / pud bits	    pte bits
@@ -98,68 +113,72 @@ static inline pte_t __rste_to_pte(unsigned long rste)
 	 *	    u unused, l large
 	 */
 	if (present) {
-		pte_val(pte) = rste & _SEGMENT_ENTRY_ORIGIN_LARGE;
-		pte_val(pte) |= _PAGE_LARGE | _PAGE_PRESENT;
-		pte_val(pte) |= move_set_bit(rste, _SEGMENT_ENTRY_READ,
-					     _PAGE_READ);
-		pte_val(pte) |= move_set_bit(rste, _SEGMENT_ENTRY_WRITE,
-					     _PAGE_WRITE);
-		pte_val(pte) |= move_set_bit(rste, _SEGMENT_ENTRY_INVALID,
-					     _PAGE_INVALID);
-		pte_val(pte) |= move_set_bit(rste, _SEGMENT_ENTRY_PROTECT,
-					     _PAGE_PROTECT);
-		pte_val(pte) |= move_set_bit(rste, _SEGMENT_ENTRY_DIRTY,
-					     _PAGE_DIRTY);
-		pte_val(pte) |= move_set_bit(rste, _SEGMENT_ENTRY_YOUNG,
-					     _PAGE_YOUNG);
+		pteval = rste & _SEGMENT_ENTRY_ORIGIN_LARGE;
+		pteval |= _PAGE_LARGE | _PAGE_PRESENT;
+		pteval |= move_set_bit(rste, _SEGMENT_ENTRY_READ, _PAGE_READ);
+		pteval |= move_set_bit(rste, _SEGMENT_ENTRY_WRITE, _PAGE_WRITE);
+		pteval |= move_set_bit(rste, _SEGMENT_ENTRY_INVALID, _PAGE_INVALID);
+		pteval |= move_set_bit(rste, _SEGMENT_ENTRY_PROTECT, _PAGE_PROTECT);
+		pteval |= move_set_bit(rste, _SEGMENT_ENTRY_DIRTY, _PAGE_DIRTY);
+		pteval |= move_set_bit(rste, _SEGMENT_ENTRY_YOUNG, _PAGE_YOUNG);
 #ifdef CONFIG_MEM_SOFT_DIRTY
-		pte_val(pte) |= move_set_bit(rste, _SEGMENT_ENTRY_SOFT_DIRTY,
-					     _PAGE_DIRTY);
+		pteval |= move_set_bit(rste, _SEGMENT_ENTRY_SOFT_DIRTY, _PAGE_SOFT_DIRTY);
 #endif
-		pte_val(pte) |= move_set_bit(rste, _SEGMENT_ENTRY_NOEXEC,
-					     _PAGE_NOEXEC);
+		pteval |= move_set_bit(rste, _SEGMENT_ENTRY_NOEXEC, _PAGE_NOEXEC);
+	} else if (!none) {
+		/* swap rste */
+		arch_entry = __rste_to_swp_entry(rste);
+		pte = mk_swap_pte(__swp_type_rste(arch_entry), __swp_offset_rste(arch_entry));
+		pteval = pte_val(pte);
 	} else
-		pte_val(pte) = _PAGE_INVALID;
-	return pte;
+		pteval = _PAGE_INVALID;
+	return __pte(pteval);
 }
 
-void set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
+void __set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
 		     pte_t *ptep, pte_t pte)
 {
 	unsigned long rste;
 
 	rste = __pte_to_rste(pte);
-	if (!MACHINE_HAS_NX)
-		rste &= ~_SEGMENT_ENTRY_NOEXEC;
 
 	/* Set correct table type for 2G hugepages */
-	if ((pte_val(*ptep) & _REGION_ENTRY_TYPE_MASK) == _REGION_ENTRY_TYPE_R3)
-		rste |= _REGION_ENTRY_TYPE_R3 | _REGION3_ENTRY_LARGE;
-	else
+	if ((pte_val(ptep_get(ptep)) & _REGION_ENTRY_TYPE_MASK) == _REGION_ENTRY_TYPE_R3) {
+		if (likely(pte_present(pte)))
+			rste |= _REGION3_ENTRY_LARGE;
+		rste |= _REGION_ENTRY_TYPE_R3;
+	} else if (likely(pte_present(pte)))
 		rste |= _SEGMENT_ENTRY_LARGE;
-	pte_val(*ptep) = rste;
+
+	set_pte(ptep, __pte(rste));
 }
 
-pte_t huge_ptep_get(pte_t *ptep)
+void set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
+		     pte_t *ptep, pte_t pte, unsigned long sz)
 {
-	return __rste_to_pte(pte_val(*ptep));
+	__set_huge_pte_at(mm, addr, ptep, pte);
 }
 
-pte_t huge_ptep_get_and_clear(struct mm_struct *mm,
-			      unsigned long addr, pte_t *ptep)
+pte_t huge_ptep_get(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 {
-	pte_t pte = huge_ptep_get(ptep);
+	return __rste_to_pte(pte_val(ptep_get(ptep)));
+}
+
+pte_t __huge_ptep_get_and_clear(struct mm_struct *mm,
+				unsigned long addr, pte_t *ptep)
+{
+	pte_t pte = huge_ptep_get(mm, addr, ptep);
 	pmd_t *pmdp = (pmd_t *) ptep;
 	pud_t *pudp = (pud_t *) ptep;
 
-	if ((pte_val(*ptep) & _REGION_ENTRY_TYPE_MASK) == _REGION_ENTRY_TYPE_R3)
+	if ((pte_val(ptep_get(ptep)) & _REGION_ENTRY_TYPE_MASK) == _REGION_ENTRY_TYPE_R3)
 		pudp_xchg_direct(mm, addr, pudp, __pud(_REGION3_ENTRY_EMPTY));
 	else
 		pmdp_xchg_direct(mm, addr, pmdp, __pmd(_SEGMENT_ENTRY_EMPTY));
 	return pte;
 }
 
-pte_t *huge_pte_alloc(struct mm_struct *mm,
+pte_t *huge_pte_alloc(struct mm_struct *mm, struct vm_area_struct *vma,
 			unsigned long addr, unsigned long sz)
 {
 	pgd_t *pgdp;
@@ -190,56 +209,33 @@ pte_t *huge_pte_offset(struct mm_struct *mm,
 	pmd_t *pmdp = NULL;
 
 	pgdp = pgd_offset(mm, addr);
-	if (pgd_present(*pgdp)) {
+	if (pgd_present(pgdp_get(pgdp))) {
 		p4dp = p4d_offset(pgdp, addr);
-		if (p4d_present(*p4dp)) {
+		if (p4d_present(p4dp_get(p4dp))) {
 			pudp = pud_offset(p4dp, addr);
-			if (pud_present(*pudp)) {
-				if (pud_large(*pudp))
-					return (pte_t *) pudp;
+			if (sz == PUD_SIZE)
+				return (pte_t *)pudp;
+			if (pud_present(pudp_get(pudp)))
 				pmdp = pmd_offset(pudp, addr);
-			}
 		}
 	}
 	return (pte_t *) pmdp;
 }
 
-int pmd_huge(pmd_t pmd)
+bool __init arch_hugetlb_valid_size(unsigned long size)
 {
-	return pmd_large(pmd);
+	if (cpu_has_edat1() && size == PMD_SIZE)
+		return true;
+	else if (cpu_has_edat2() && size == PUD_SIZE)
+		return true;
+	else
+		return false;
 }
 
-int pud_huge(pud_t pud)
+unsigned int __init arch_hugetlb_cma_order(void)
 {
-	return pud_large(pud);
+	if (cpu_has_edat2())
+		return PUD_SHIFT - PAGE_SHIFT;
+
+	return 0;
 }
-
-struct page *
-follow_huge_pud(struct mm_struct *mm, unsigned long address,
-		pud_t *pud, int flags)
-{
-	if (flags & FOLL_GET)
-		return NULL;
-
-	return pud_page(*pud) + ((address & ~PUD_MASK) >> PAGE_SHIFT);
-}
-
-static __init int setup_hugepagesz(char *opt)
-{
-	unsigned long size;
-	char *string = opt;
-
-	size = memparse(opt, &opt);
-	if (MACHINE_HAS_EDAT1 && size == PMD_SIZE) {
-		hugetlb_add_hstate(PMD_SHIFT - PAGE_SHIFT);
-	} else if (MACHINE_HAS_EDAT2 && size == PUD_SIZE) {
-		hugetlb_add_hstate(PUD_SHIFT - PAGE_SHIFT);
-	} else {
-		hugetlb_bad_size();
-		pr_err("hugepagesz= specifies an unsupported page size %s\n",
-			string);
-		return 0;
-	}
-	return 1;
-}
-__setup("hugepagesz=", setup_hugepagesz);

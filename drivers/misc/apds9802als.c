@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * apds9802als.c - apds9802  ALS Driver
  *
@@ -5,20 +6,7 @@
  *
  *  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
  */
 
 #include <linux/module.h>
@@ -224,13 +212,12 @@ static int als_set_default_config(struct i2c_client *client)
 	return ret_val;
 }
 
-static int apds9802als_probe(struct i2c_client *client,
-			     const struct i2c_device_id *id)
+static int apds9802als_probe(struct i2c_client *client)
 {
 	int res;
 	struct als_data *data;
 
-	data = kzalloc(sizeof(struct als_data), GFP_KERNEL);
+	data = kzalloc_obj(struct als_data);
 	if (data == NULL) {
 		dev_err(&client->dev, "Memory allocation failed\n");
 		return -ENOMEM;
@@ -254,7 +241,7 @@ als_error1:
 	return res;
 }
 
-static int apds9802als_remove(struct i2c_client *client)
+static void apds9802als_remove(struct i2c_client *client)
 {
 	struct als_data *data = i2c_get_clientdata(client);
 
@@ -268,7 +255,6 @@ static int apds9802als_remove(struct i2c_client *client)
 	pm_runtime_put_noidle(&client->dev);
 
 	kfree(data);
-	return 0;
 }
 
 #ifdef CONFIG_PM
@@ -299,7 +285,7 @@ static UNIVERSAL_DEV_PM_OPS(apds9802als_pm_ops, apds9802als_suspend,
 #endif	/* CONFIG_PM */
 
 static const struct i2c_device_id apds9802als_id[] = {
-	{ DRIVER_NAME, 0 },
+	{ DRIVER_NAME },
 	{ }
 };
 

@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel MID Power Management Unit (PWRMU) device driver
  *
  * Copyright (C) 2016, Intel Corporation
  *
  * Author: Andy Shevchenko <andriy.shevchenko@linux.intel.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
  *
  * Intel MID Power Management Unit device driver handles the South Complex PCI
  * devices such as GPDMA, SPI, I2C, PWM, and so on. By default PCI core
@@ -361,18 +358,18 @@ static int mid_pwr_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return ret;
 	}
 
-	ret = pcim_iomap_regions(pdev, 1 << 0, pci_name(pdev));
-	if (ret) {
-		dev_err(&pdev->dev, "I/O memory remapping failed\n");
-		return ret;
-	}
-
 	pwr = devm_kzalloc(dev, sizeof(*pwr), GFP_KERNEL);
 	if (!pwr)
 		return -ENOMEM;
 
+	pwr->regs = pcim_iomap_region(pdev, 0, "intel_mid_pwr");
+	ret = PTR_ERR_OR_ZERO(pwr->regs);
+	if (ret) {
+		dev_err(&pdev->dev, "Could not request / ioremap I/O-Mem: %d\n", ret);
+		return ret;
+	}
+
 	pwr->dev = dev;
-	pwr->regs = pcim_iomap_table(pdev)[0];
 	pwr->irq = pdev->irq;
 
 	mutex_init(&pwr->lock);

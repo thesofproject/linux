@@ -1,45 +1,52 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 .text
 #include <linux/linkage.h>
+#include <linux/objtool.h>
 #include <asm/segment.h>
 #include <asm/pgtable_types.h>
 #include <asm/page_types.h>
 #include <asm/msr.h>
 #include <asm/asm-offsets.h>
 #include <asm/frame.h>
+#include <asm/nospec-branch.h>
 
-# Copyright 2003 Pavel Machek <pavel@suse.cz>, distribute under GPLv2
+# Copyright 2003 Pavel Machek <pavel@suse.cz
 
 .code64
 	/*
 	 * Hooray, we are in Long 64-bit mode (but still running in low memory)
 	 */
-ENTRY(wakeup_long64)
-	movq	saved_magic, %rax
+SYM_FUNC_START(wakeup_long64)
+	ANNOTATE_NOENDBR
+	movq	saved_magic(%rip), %rax
 	movq	$0x123456789abcdef0, %rdx
 	cmpq	%rdx, %rax
-	jne	bogus_64_magic
+	je	2f
 
+	/* stop here on a saved_magic mismatch */
+	movq $0xbad6d61676963, %rcx
+1:
+	jmp 1b
+2:
 	movw	$__KERNEL_DS, %ax
 	movw	%ax, %ss	
 	movw	%ax, %ds
 	movw	%ax, %es
 	movw	%ax, %fs
 	movw	%ax, %gs
-	movq	saved_rsp, %rsp
+	movq	saved_rsp(%rip), %rsp
 
-	movq	saved_rbx, %rbx
-	movq	saved_rdi, %rdi
-	movq	saved_rsi, %rsi
-	movq	saved_rbp, %rbp
+	movq	saved_rbx(%rip), %rbx
+	movq	saved_rdi(%rip), %rdi
+	movq	saved_rsi(%rip), %rsi
+	movq	saved_rbp(%rip), %rbp
 
-	movq	saved_rip, %rax
+	movq	saved_rip(%rip), %rax
+	ANNOTATE_RETPOLINE_SAFE
 	jmp	*%rax
-ENDPROC(wakeup_long64)
+SYM_FUNC_END(wakeup_long64)
 
-bogus_64_magic:
-	jmp	bogus_64_magic
-
-ENTRY(do_suspend_lowlevel)
+SYM_FUNC_START(do_suspend_lowlevel)
 	FRAME_BEGIN
 	subq	$8, %rsp
 	xorl	%eax, %eax
@@ -66,11 +73,11 @@ ENTRY(do_suspend_lowlevel)
 
 	movq	$.Lresume_point, saved_rip(%rip)
 
-	movq	%rsp, saved_rsp
-	movq	%rbp, saved_rbp
-	movq	%rbx, saved_rbx
-	movq	%rdi, saved_rdi
-	movq	%rsi, saved_rsi
+	movq	%rsp, saved_rsp(%rip)
+	movq	%rbp, saved_rbp(%rip)
+	movq	%rbx, saved_rbx(%rip)
+	movq	%rdi, saved_rdi(%rip)
+	movq	%rsi, saved_rsi(%rip)
 
 	addq	$8, %rsp
 	movl	$3, %edi
@@ -81,6 +88,7 @@ ENTRY(do_suspend_lowlevel)
 
 	.align 4
 .Lresume_point:
+	ANNOTATE_NOENDBR
 	/* We don't restore %rax, it must be 0 anyway */
 	movq	$saved_context, %rax
 	movq	saved_context_cr4(%rax), %rbx
@@ -109,7 +117,7 @@ ENTRY(do_suspend_lowlevel)
 	movq	pt_regs_r14(%rax), %r14
 	movq	pt_regs_r15(%rax), %r15
 
-#ifdef CONFIG_KASAN
+#if defined(CONFIG_KASAN) && defined(CONFIG_KASAN_STACK)
 	/*
 	 * The suspend path may have poisoned some areas deeper in the stack,
 	 * which we now need to unpoison.
@@ -122,15 +130,16 @@ ENTRY(do_suspend_lowlevel)
 	addq	$8, %rsp
 	FRAME_END
 	jmp	restore_processor_state
-ENDPROC(do_suspend_lowlevel)
+SYM_FUNC_END(do_suspend_lowlevel)
+STACK_FRAME_NON_STANDARD do_suspend_lowlevel
 
 .data
-ENTRY(saved_rbp)	.quad	0
-ENTRY(saved_rsi)	.quad	0
-ENTRY(saved_rdi)	.quad	0
-ENTRY(saved_rbx)	.quad	0
+saved_rbp:		.quad	0
+saved_rsi:		.quad	0
+saved_rdi:		.quad	0
+saved_rbx:		.quad	0
 
-ENTRY(saved_rip)	.quad	0
-ENTRY(saved_rsp)	.quad	0
+saved_rip:		.quad	0
+saved_rsp:		.quad	0
 
-ENTRY(saved_magic)	.quad	0
+SYM_DATA(saved_magic,	.quad	0)

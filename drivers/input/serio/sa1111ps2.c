@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/input/serio/sa1111ps2.c
  *
  *  Copyright (C) 2002 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License.
  */
 #include <linux/module.h>
 #include <linux/init.h>
@@ -95,7 +92,8 @@ static irqreturn_t ps2_txint(int irq, void *dev_id)
 	struct ps2if *ps2if = dev_id;
 	unsigned int status;
 
-	spin_lock(&ps2if->lock);
+	guard(spinlock)(&ps2if->lock);
+
 	status = readl_relaxed(ps2if->base + PS2STAT);
 	if (ps2if->head == ps2if->tail) {
 		disable_irq_nosync(irq);
@@ -104,7 +102,6 @@ static irqreturn_t ps2_txint(int irq, void *dev_id)
 		writel_relaxed(ps2if->buf[ps2if->tail], ps2if->base + PS2DATA);
 		ps2if->tail = (ps2if->tail + 1) & (sizeof(ps2if->buf) - 1);
 	}
-	spin_unlock(&ps2if->lock);
 
 	return IRQ_HANDLED;
 }
@@ -116,10 +113,9 @@ static irqreturn_t ps2_txint(int irq, void *dev_id)
 static int ps2_write(struct serio *io, unsigned char val)
 {
 	struct ps2if *ps2if = io->port_data;
-	unsigned long flags;
 	unsigned int head;
 
-	spin_lock_irqsave(&ps2if->lock, flags);
+	guard(spinlock_irqsave)(&ps2if->lock);
 
 	/*
 	 * If the TX register is empty, we can go straight out.
@@ -136,7 +132,6 @@ static int ps2_write(struct serio *io, unsigned char val)
 		}
 	}
 
-	spin_unlock_irqrestore(&ps2if->lock, flags);
 	return 0;
 }
 
@@ -259,8 +254,8 @@ static int ps2_probe(struct sa1111_dev *dev)
 	struct serio *serio;
 	int ret;
 
-	ps2if = kzalloc(sizeof(struct ps2if), GFP_KERNEL);
-	serio = kzalloc(sizeof(struct serio), GFP_KERNEL);
+	ps2if = kzalloc_obj(*ps2if);
+	serio = kzalloc_obj(*serio);
 	if (!ps2if || !serio) {
 		ret = -ENOMEM;
 		goto free;
@@ -270,8 +265,8 @@ static int ps2_probe(struct sa1111_dev *dev)
 	serio->write		= ps2_write;
 	serio->open		= ps2_open;
 	serio->close		= ps2_close;
-	strlcpy(serio->name, dev_name(&dev->dev), sizeof(serio->name));
-	strlcpy(serio->phys, dev_name(&dev->dev), sizeof(serio->phys));
+	strscpy(serio->name, dev_name(&dev->dev), sizeof(serio->name));
+	strscpy(serio->phys, dev_name(&dev->dev), sizeof(serio->phys));
 	serio->port_data	= ps2if;
 	serio->dev.parent	= &dev->dev;
 	ps2if->io		= serio;
@@ -347,7 +342,7 @@ static int ps2_probe(struct sa1111_dev *dev)
 /*
  * Remove one device from this driver.
  */
-static int ps2_remove(struct sa1111_dev *dev)
+static void ps2_remove(struct sa1111_dev *dev)
 {
 	struct ps2if *ps2if = sa1111_get_drvdata(dev);
 
@@ -356,8 +351,6 @@ static int ps2_remove(struct sa1111_dev *dev)
 	sa1111_set_drvdata(dev, NULL);
 
 	kfree(ps2if);
-
-	return 0;
 }
 
 /*

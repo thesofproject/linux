@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   ALSA driver for ICEnsemble VT1724 (Envy24HT)
  *
@@ -31,27 +32,12 @@
  *		  Experimentally I found out that only a combination of
  *		  OCKS0=1, OCKS1=1 (128fs, 64fs output) and ice1724 -
  *		  VT1724_MT_I2S_MCLK_128X=0 (256fs input) yields correct
- *		  sampling rate. That means the the FPGA doubles the
+ *		  sampling rate. That means that the FPGA doubles the
  *		  MCK01 rate.
  *
  *	Copyright (c) 2003 Takashi Iwai <tiwai@suse.de>
  *      Copyright (c) 2003 Dimitromanolakis Apostolos <apostol@cs.utoronto.ca>
  *      Copyright (c) 2004 Kouichi ONO <co2b@ceres.dti.ne.jp>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */      
 
 #include <linux/delay.h>
@@ -124,21 +110,19 @@ static int stac9460_dac_mute_put(struct snd_kcontrol *kcontrol, struct snd_ctl_e
 {
 	struct snd_ice1712 *ice = snd_kcontrol_chip(kcontrol);
 	struct prodigy192_spec *spec = ice->spec;
-	int idx, change;
+	int idx;
 
 	if (kcontrol->private_value)
 		idx = STAC946X_MASTER_VOLUME;
 	else
 		idx  = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id) + STAC946X_LF_VOLUME;
 	/* due to possible conflicts with stac9460_set_rate_val, mutexing */
-	mutex_lock(&spec->mute_mutex);
+	guard(mutex)(&spec->mute_mutex);
 	/*
 	dev_dbg(ice->card->dev, "Mute put: reg 0x%02x, ctrl value: 0x%02x\n", idx,
 	       ucontrol->value.integer.value[0]);
 	*/
-	change = stac9460_dac_mute(ice, idx, ucontrol->value.integer.value[0]);
-	mutex_unlock(&spec->mute_mutex);
-	return change;
+	return stac9460_dac_mute(ice, idx, ucontrol->value.integer.value[0]);
 }
 
 /*
@@ -184,14 +168,9 @@ static int stac9460_dac_vol_put(struct snd_kcontrol *kcontrol, struct snd_ctl_el
 	tmp = stac9460_get(ice, idx);
 	ovol = 0x7f - (tmp & 0x7f);
 	change = (ovol != nvol);
-	if (change) {
-		ovol =  (0x7f - nvol) | (tmp & 0x80);
-		/*
-		dev_dbg(ice->card->dev, "DAC Volume: reg 0x%02x: 0x%02x\n",
-		       idx, ovol);
-		*/
+	if (change)
 		stac9460_put(ice, idx, (0x7f - nvol) | (tmp & 0x80));
-	}
+
 	return change;
 }
 
@@ -335,7 +314,7 @@ static void stac9460_set_rate_val(struct snd_ice1712 *ice, unsigned int rate)
 		return;
 	/* change detected, setting master clock, muting first */
 	/* due to possible conflicts with mute controls - mutexing */
-	mutex_lock(&spec->mute_mutex);
+	guard(mutex)(&spec->mute_mutex);
 	/* we have to remember current mute status for each DAC */
 	for (idx = 0; idx < 7 ; ++idx)
 		changed[idx] = stac9460_dac_mute(ice,
@@ -349,7 +328,6 @@ static void stac9460_set_rate_val(struct snd_ice1712 *ice, unsigned int rate)
 		if (changed[idx])
 			stac9460_dac_mute(ice, STAC946X_MASTER_VOLUME + idx, 1);
 	}
-	mutex_unlock(&spec->mute_mutex);
 }
 
 
@@ -360,7 +338,7 @@ static const DECLARE_TLV_DB_SCALE(db_scale_adc, 0, 150, 0);
  * mixers
  */
 
-static struct snd_kcontrol_new stac_controls[] = {
+static const struct snd_kcontrol_new stac_controls[] = {
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "Master Playback Switch",
@@ -592,7 +570,7 @@ static int ak4114_input_sw_put(struct snd_kcontrol *kcontrol,
 }
 
 
-static struct snd_kcontrol_new ak4114_controls[] = {
+static const struct snd_kcontrol_new ak4114_controls[] = {
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "MIODIO IEC958 Capture Input",
@@ -651,9 +629,8 @@ static void stac9460_proc_regs_read(struct snd_info_entry *entry,
 
 static void stac9460_proc_init(struct snd_ice1712 *ice)
 {
-	struct snd_info_entry *entry;
-	if (!snd_card_proc_new(ice->card, "stac9460_codec", &entry))
-		snd_info_set_text_ops(entry, ice, stac9460_proc_regs_read);
+	snd_card_ro_proc_new(ice->card, "stac9460_codec", ice,
+			     stac9460_proc_regs_read);
 }
 
 
@@ -736,7 +713,7 @@ static int prodigy192_init(struct snd_ice1712 *ice)
 	ice->num_total_adcs = 2;
 	ice->vt1720 = 0;  /* ice1724, e.g. 23 GPIOs */
 	
-	spec = kzalloc(sizeof(*spec), GFP_KERNEL);
+	spec = kzalloc_obj(*spec);
 	if (!spec)
 		return -ENOMEM;
 	ice->spec = spec;
@@ -768,7 +745,7 @@ static int prodigy192_init(struct snd_ice1712 *ice)
  * hence the driver needs to sets up it properly.
  */
 
-static unsigned char prodigy71_eeprom[] = {
+static const unsigned char prodigy71_eeprom[] = {
 	[ICE_EEP2_SYSCONF]     = 0x6a,	/* 49MHz crystal, mpu401,
 					 * spdif-in+ 1 stereo ADC,
 					 * 3 stereo DACs

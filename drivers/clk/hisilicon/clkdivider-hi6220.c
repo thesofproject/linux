@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Hisilicon hi6220 SoC divider clock driver
  *
  * Copyright (c) 2015 Hisilicon Limited.
  *
  * Author: Bintian Wang <bintian.wang@huawei.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/kernel.h>
@@ -30,8 +26,8 @@
  * @shift:	shift to the divider bit field
  * @width:	width of the divider bit field
  * @mask:	mask for setting divider rate
- * @table:	the div table that the divider supports
  * @lock:	register lock
+ * @table:	the div table that the divider supports
  */
 struct hi6220_clk_divider {
 	struct clk_hw	hw;
@@ -39,8 +35,8 @@ struct hi6220_clk_divider {
 	u8		shift;
 	u8		width;
 	u32		mask;
-	const struct clk_div_table *table;
 	spinlock_t	*lock;
+	struct clk_div_table table[];
 };
 
 #define to_hi6220_clk_divider(_hw)	\
@@ -59,13 +55,13 @@ static unsigned long hi6220_clkdiv_recalc_rate(struct clk_hw *hw,
 				   CLK_DIVIDER_ROUND_CLOSEST, dclk->width);
 }
 
-static long hi6220_clkdiv_round_rate(struct clk_hw *hw, unsigned long rate,
-					unsigned long *prate)
+static int hi6220_clkdiv_determine_rate(struct clk_hw *hw,
+					struct clk_rate_request *req)
 {
 	struct hi6220_clk_divider *dclk = to_hi6220_clk_divider(hw);
 
-	return divider_round_rate(hw, rate, prate, dclk->table,
-				  dclk->width, CLK_DIVIDER_ROUND_CLOSEST);
+	return divider_determine_rate(hw, req, dclk->table, dclk->width,
+				      CLK_DIVIDER_ROUND_CLOSEST);
 }
 
 static int hi6220_clkdiv_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -97,7 +93,7 @@ static int hi6220_clkdiv_set_rate(struct clk_hw *hw, unsigned long rate,
 
 static const struct clk_ops hi6220_clkdiv_ops = {
 	.recalc_rate = hi6220_clkdiv_recalc_rate,
-	.round_rate = hi6220_clkdiv_round_rate,
+	.determine_rate = hi6220_clkdiv_determine_rate,
 	.set_rate = hi6220_clkdiv_set_rate,
 };
 
@@ -112,24 +108,19 @@ struct clk *hi6220_register_clkdiv(struct device *dev, const char *name,
 	u32 max_div, min_div;
 	int i;
 
-	/* allocate the divider */
-	div = kzalloc(sizeof(*div), GFP_KERNEL);
-	if (!div)
-		return ERR_PTR(-ENOMEM);
-
 	/* Init the divider table */
 	max_div = div_mask(width) + 1;
 	min_div = 1;
 
-	table = kcalloc(max_div + 1, sizeof(*table), GFP_KERNEL);
-	if (!table) {
-		kfree(div);
+	/* allocate the divider */
+	div = kzalloc_flex(*div, table, max_div + 1);
+	if (!div)
 		return ERR_PTR(-ENOMEM);
-	}
 
 	for (i = 0; i < max_div; i++) {
-		table[i].div = min_div + i;
-		table[i].val = table[i].div - 1;
+		table = &div->table[i];
+		table->div = min_div + i;
+		table->val = table->div - 1;
 	}
 
 	init.name = name;
@@ -145,14 +136,11 @@ struct clk *hi6220_register_clkdiv(struct device *dev, const char *name,
 	div->mask = mask_bit ? BIT(mask_bit) : 0;
 	div->lock = lock;
 	div->hw.init = &init;
-	div->table = table;
 
 	/* register the clock */
 	clk = clk_register(dev, &div->hw);
-	if (IS_ERR(clk)) {
-		kfree(table);
+	if (IS_ERR(clk))
 		kfree(div);
-	}
 
 	return clk;
 }

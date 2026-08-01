@@ -1,27 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  PS3 system bus driver.
  *
  *  Copyright (C) 2006 Sony Computer Entertainment Inc.
  *  Copyright 2006 Sony Corp.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/export.h>
-#include <linux/dma-mapping.h>
+#include <linux/dma-map-ops.h>
 #include <linux/err.h>
 #include <linux/slab.h>
 
@@ -37,12 +25,12 @@ static struct device ps3_system_bus = {
 };
 
 /* FIXME: need device usage counters! */
-struct {
+static struct {
 	struct mutex mutex;
 	int sb_11; /* usb 0 */
 	int sb_12; /* usb 0 */
 	int gpu;
-} static usage_hack;
+} usage_hack;
 
 static int ps3_is_device(struct ps3_system_bus_device *dev, u64 bus_id,
 			 u64 dev_id)
@@ -76,9 +64,10 @@ static int ps3_open_hv_device_sb(struct ps3_system_bus_device *dev)
 	result = lv1_open_device(dev->bus_id, dev->dev_id, 0);
 
 	if (result) {
-		pr_debug("%s:%d: lv1_open_device failed: %s\n", __func__,
-			__LINE__, ps3_result(result));
-			result = -EPERM;
+		pr_warn("%s:%d: lv1_open_device dev=%u.%u(%s) failed: %s\n",
+			__func__, __LINE__, dev->match_id, dev->match_sub_id,
+			dev_name(&dev->core), ps3_result(result));
+		result = -EPERM;
 	}
 
 done:
@@ -132,7 +121,7 @@ static int ps3_open_hv_device_gpu(struct ps3_system_bus_device *dev)
 	result = lv1_gpu_open(0);
 
 	if (result) {
-		pr_debug("%s:%d: lv1_gpu_open failed: %s\n", __func__,
+		pr_warn("%s:%d: lv1_gpu_open failed: %s\n", __func__,
 			__LINE__, ps3_result(result));
 			result = -EPERM;
 	}
@@ -344,10 +333,10 @@ int ps3_mmio_region_init(struct ps3_system_bus_device *dev,
 EXPORT_SYMBOL_GPL(ps3_mmio_region_init);
 
 static int ps3_system_bus_match(struct device *_dev,
-	struct device_driver *_drv)
+	const struct device_driver *_drv)
 {
 	int result;
-	struct ps3_system_bus_driver *drv = ps3_drv_to_system_bus_drv(_drv);
+	const struct ps3_system_bus_driver *drv = ps3_drv_to_system_bus_drv(_drv);
 	struct ps3_system_bus_device *dev = ps3_dev_to_system_bus_dev(_dev);
 
 	if (!dev->match_sub_id)
@@ -392,9 +381,8 @@ static int ps3_system_bus_probe(struct device *_dev)
 	return result;
 }
 
-static int ps3_system_bus_remove(struct device *_dev)
+static void ps3_system_bus_remove(struct device *_dev)
 {
-	int result = 0;
 	struct ps3_system_bus_device *dev = ps3_dev_to_system_bus_dev(_dev);
 	struct ps3_system_bus_driver *drv;
 
@@ -405,13 +393,12 @@ static int ps3_system_bus_remove(struct device *_dev)
 	BUG_ON(!drv);
 
 	if (drv->remove)
-		result = drv->remove(dev);
+		drv->remove(dev);
 	else
 		dev_dbg(&dev->core, "%s:%d %s: no remove method\n",
 			__func__, __LINE__, drv->core.name);
 
 	pr_debug(" <- %s:%d: %s\n", __func__, __LINE__, dev_name(&dev->core));
-	return result;
 }
 
 static void ps3_system_bus_shutdown(struct device *_dev)
@@ -452,7 +439,7 @@ static void ps3_system_bus_shutdown(struct device *_dev)
 	dev_dbg(&dev->core, " <- %s:%d\n", __func__, __LINE__);
 }
 
-static int ps3_system_bus_uevent(struct device *_dev, struct kobj_uevent_env *env)
+static int ps3_system_bus_uevent(const struct device *_dev, struct kobj_uevent_env *env)
 {
 	struct ps3_system_bus_device *dev = ps3_dev_to_system_bus_dev(_dev);
 
@@ -466,10 +453,9 @@ static ssize_t modalias_show(struct device *_dev, struct device_attribute *a,
 	char *buf)
 {
 	struct ps3_system_bus_device *dev = ps3_dev_to_system_bus_dev(_dev);
-	int len = snprintf(buf, PAGE_SIZE, "ps3:%d:%d\n", dev->match_id,
-			   dev->match_sub_id);
 
-	return (len >= PAGE_SIZE) ? (PAGE_SIZE - 1) : len;
+	return sysfs_emit(buf, "ps3:%d:%d\n", dev->match_id,
+			  dev->match_sub_id);
 }
 static DEVICE_ATTR_RO(modalias);
 
@@ -479,7 +465,7 @@ static struct attribute *ps3_system_bus_dev_attrs[] = {
 };
 ATTRIBUTE_GROUPS(ps3_system_bus_dev);
 
-struct bus_type ps3_system_bus_type = {
+static const struct bus_type ps3_system_bus_type = {
 	.name = "ps3_system_bus",
 	.match = ps3_system_bus_match,
 	.uevent = ps3_system_bus_uevent,
@@ -565,18 +551,20 @@ static void ps3_free_coherent(struct device *_dev, size_t size, void *vaddr,
 
 /* Creates TCEs for a user provided buffer.  The user buffer must be
  * contiguous real kernel storage (not vmalloc).  The address passed here
- * comprises a page address and offset into that page. The dma_addr_t
- * returned will point to the same byte within the page as was passed in.
+ * is physical address to that hat page. The dma_addr_t returned will point
+ * to the same byte within the page as was passed in.
  */
 
-static dma_addr_t ps3_sb_map_page(struct device *_dev, struct page *page,
-	unsigned long offset, size_t size, enum dma_data_direction direction,
-	unsigned long attrs)
+static dma_addr_t ps3_sb_map_phys(struct device *_dev, phys_addr_t phys,
+	size_t size, enum dma_data_direction direction, unsigned long attrs)
 {
 	struct ps3_system_bus_device *dev = ps3_dev_to_system_bus_dev(_dev);
 	int result;
 	dma_addr_t bus_addr;
-	void *ptr = page_address(page) + offset;
+	void *ptr = phys_to_virt(phys);
+
+	if (unlikely(attrs & DMA_ATTR_MMIO))
+		return DMA_MAPPING_ERROR;
 
 	result = ps3_dma_map(dev->d_region, (unsigned long)ptr, size,
 			     &bus_addr,
@@ -591,8 +579,8 @@ static dma_addr_t ps3_sb_map_page(struct device *_dev, struct page *page,
 	return bus_addr;
 }
 
-static dma_addr_t ps3_ioc0_map_page(struct device *_dev, struct page *page,
-				    unsigned long offset, size_t size,
+static dma_addr_t ps3_ioc0_map_phys(struct device *_dev, phys_addr_t phys,
+				    size_t size,
 				    enum dma_data_direction direction,
 				    unsigned long attrs)
 {
@@ -600,7 +588,10 @@ static dma_addr_t ps3_ioc0_map_page(struct device *_dev, struct page *page,
 	int result;
 	dma_addr_t bus_addr;
 	u64 iopte_flag;
-	void *ptr = page_address(page) + offset;
+	void *ptr = phys_to_virt(phys);
+
+	if (unlikely(attrs & DMA_ATTR_MMIO))
+		return DMA_MAPPING_ERROR;
 
 	iopte_flag = CBE_IOPTE_M;
 	switch (direction) {
@@ -614,9 +605,9 @@ static dma_addr_t ps3_ioc0_map_page(struct device *_dev, struct page *page,
 		iopte_flag |= CBE_IOPTE_PP_W | CBE_IOPTE_SO_RW;
 		break;
 	default:
-		/* not happned */
+		/* not happened */
 		BUG();
-	};
+	}
 	result = ps3_dma_map(dev->d_region, (unsigned long)ptr, size,
 			     &bus_addr, iopte_flag);
 
@@ -627,7 +618,7 @@ static dma_addr_t ps3_ioc0_map_page(struct device *_dev, struct page *page,
 	return bus_addr;
 }
 
-static void ps3_unmap_page(struct device *_dev, dma_addr_t dma_addr,
+static void ps3_unmap_phys(struct device *_dev, dma_addr_t dma_addr,
 	size_t size, enum dma_data_direction direction, unsigned long attrs)
 {
 	struct ps3_system_bus_device *dev = ps3_dev_to_system_bus_dev(_dev);
@@ -675,7 +666,7 @@ static int ps3_ioc0_map_sg(struct device *_dev, struct scatterlist *sg,
 			   unsigned long attrs)
 {
 	BUG();
-	return 0;
+	return -EINVAL;
 }
 
 static void ps3_sb_unmap_sg(struct device *_dev, struct scatterlist *sg,
@@ -698,20 +689,18 @@ static int ps3_dma_supported(struct device *_dev, u64 mask)
 	return mask >= DMA_BIT_MASK(32);
 }
 
-static u64 ps3_dma_get_required_mask(struct device *_dev)
-{
-	return DMA_BIT_MASK(32);
-}
-
 static const struct dma_map_ops ps3_sb_dma_ops = {
 	.alloc = ps3_alloc_coherent,
 	.free = ps3_free_coherent,
 	.map_sg = ps3_sb_map_sg,
 	.unmap_sg = ps3_sb_unmap_sg,
 	.dma_supported = ps3_dma_supported,
-	.get_required_mask = ps3_dma_get_required_mask,
-	.map_page = ps3_sb_map_page,
-	.unmap_page = ps3_unmap_page,
+	.map_phys = ps3_sb_map_phys,
+	.unmap_phys = ps3_unmap_phys,
+	.mmap = dma_common_mmap,
+	.get_sgtable = dma_common_get_sgtable,
+	.alloc_pages_op = dma_common_alloc_pages,
+	.free_pages = dma_common_free_pages,
 };
 
 static const struct dma_map_ops ps3_ioc0_dma_ops = {
@@ -720,9 +709,12 @@ static const struct dma_map_ops ps3_ioc0_dma_ops = {
 	.map_sg = ps3_ioc0_map_sg,
 	.unmap_sg = ps3_ioc0_unmap_sg,
 	.dma_supported = ps3_dma_supported,
-	.get_required_mask = ps3_dma_get_required_mask,
-	.map_page = ps3_ioc0_map_page,
-	.unmap_page = ps3_unmap_page,
+	.map_phys = ps3_ioc0_map_phys,
+	.unmap_phys = ps3_unmap_phys,
+	.mmap = dma_common_mmap,
+	.get_sgtable = dma_common_get_sgtable,
+	.alloc_pages_op = dma_common_alloc_pages,
+	.free_pages = dma_common_free_pages,
 };
 
 /**
@@ -774,7 +766,7 @@ int ps3_system_bus_device_register(struct ps3_system_bus_device *dev)
 		break;
 	default:
 		BUG();
-	};
+	}
 
 	dev->core.of_node = NULL;
 	set_dev_node(&dev->core, 0);

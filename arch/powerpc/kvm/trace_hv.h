@@ -9,8 +9,6 @@
 
 #undef TRACE_SYSTEM
 #define TRACE_SYSTEM kvm_hv
-#define TRACE_INCLUDE_PATH .
-#define TRACE_INCLUDE_FILE trace_hv
 
 #define kvm_trace_symbol_hcall \
 	{H_REMOVE,			"H_REMOVE"}, \
@@ -91,11 +89,12 @@
 	{H_CREATE_RPT,			"H_CREATE_RPT"}, \
 	{H_REMOVE_RPT,			"H_REMOVE_RPT"}, \
 	{H_REGISTER_RPAGES,		"H_REGISTER_RPAGES"}, \
-	{H_DISABLE_AND_GETC,		"H_DISABLE_AND_GETC"}, \
+	{H_DISABLE_AND_GET,		"H_DISABLE_AND_GET"}, \
 	{H_ERROR_DATA,			"H_ERROR_DATA"}, \
 	{H_GET_HCA_INFO,		"H_GET_HCA_INFO"}, \
 	{H_GET_PERF_COUNT,		"H_GET_PERF_COUNT"}, \
 	{H_MANAGE_TRACE,		"H_MANAGE_TRACE"}, \
+	{H_GET_CPU_CHARACTERISTICS,	"H_GET_CPU_CHARACTERISTICS"}, \
 	{H_FREE_LOGICAL_LAN_BUFFER,	"H_FREE_LOGICAL_LAN_BUFFER"}, \
 	{H_QUERY_INT_STATE,		"H_QUERY_INT_STATE"}, \
 	{H_POLL_PENDING,		"H_POLL_PENDING"}, \
@@ -117,6 +116,7 @@
 	{H_VASI_STATE,			"H_VASI_STATE"}, \
 	{H_ENABLE_CRQ,			"H_ENABLE_CRQ"}, \
 	{H_GET_EM_PARMS,		"H_GET_EM_PARMS"}, \
+	{H_GET_ENERGY_SCALE_INFO,	"H_GET_ENERGY_SCALE_INFO"}, \
 	{H_SET_MPP,			"H_SET_MPP"}, \
 	{H_GET_MPP,			"H_GET_MPP"}, \
 	{H_HOME_NODE_ASSOCIATIVITY,	"H_HOME_NODE_ASSOCIATIVITY"}, \
@@ -126,7 +126,25 @@
 	{H_COP,				"H_COP"}, \
 	{H_GET_MPP_X,			"H_GET_MPP_X"}, \
 	{H_SET_MODE,			"H_SET_MODE"}, \
-	{H_RTAS,			"H_RTAS"}
+	{H_REGISTER_PROC_TBL,		"H_REGISTER_PROC_TBL"}, \
+	{H_QUERY_VAS_CAPABILITIES,	"H_QUERY_VAS_CAPABILITIES"}, \
+	{H_INT_GET_SOURCE_INFO,		"H_INT_GET_SOURCE_INFO"}, \
+	{H_INT_SET_SOURCE_CONFIG,	"H_INT_SET_SOURCE_CONFIG"}, \
+	{H_INT_GET_QUEUE_INFO,		"H_INT_GET_QUEUE_INFO"}, \
+	{H_INT_SET_QUEUE_CONFIG,	"H_INT_SET_QUEUE_CONFIG"}, \
+	{H_INT_ESB,			"H_INT_ESB"}, \
+	{H_INT_RESET,			"H_INT_RESET"}, \
+	{H_RPT_INVALIDATE,		"H_RPT_INVALIDATE"}, \
+	{H_RTAS,			"H_RTAS"}, \
+	{H_LOGICAL_MEMOP,		"H_LOGICAL_MEMOP"}, \
+	{H_CAS,				"H_CAS"}, \
+	{H_UPDATE_DT,			"H_UPDATE_DT"}, \
+	{H_GET_PERF_COUNTER_INFO,	"H_GET_PERF_COUNTER_INFO"}, \
+	{H_SET_PARTITION_TABLE,		"H_SET_PARTITION_TABLE"}, \
+	{H_ENTER_NESTED,		"H_ENTER_NESTED"}, \
+	{H_TLB_INVALIDATE,		"H_TLB_INVALIDATE"}, \
+	{H_COPY_TOFROM_GUEST,		"H_COPY_TOFROM_GUEST"}
+
 
 #define kvm_trace_symbol_kvmret \
 	{RESUME_GUEST,			"RESUME_GUEST"}, \
@@ -410,9 +428,9 @@ TRACE_EVENT(kvmppc_run_core,
 );
 
 TRACE_EVENT(kvmppc_vcore_blocked,
-	TP_PROTO(struct kvmppc_vcore *vc, int where),
+	TP_PROTO(struct kvm_vcpu *vcpu, int where),
 
-	TP_ARGS(vc, where),
+	TP_ARGS(vcpu, where),
 
 	TP_STRUCT__entry(
 		__field(int,	n_runnable)
@@ -422,8 +440,8 @@ TRACE_EVENT(kvmppc_vcore_blocked,
 	),
 
 	TP_fast_assign(
-		__entry->runner_vcpu = vc->runner->vcpu_id;
-		__entry->n_runnable  = vc->n_runnable;
+		__entry->runner_vcpu = vcpu->vcpu_id;
+		__entry->n_runnable  = vcpu->arch.vcore->n_runnable;
 		__entry->where       = where;
 		__entry->tgid	     = current->tgid;
 	),
@@ -474,9 +492,9 @@ TRACE_EVENT(kvmppc_run_vcpu_enter,
 );
 
 TRACE_EVENT(kvmppc_run_vcpu_exit,
-	TP_PROTO(struct kvm_vcpu *vcpu, struct kvm_run *run),
+	TP_PROTO(struct kvm_vcpu *vcpu),
 
-	TP_ARGS(vcpu, run),
+	TP_ARGS(vcpu),
 
 	TP_STRUCT__entry(
 		__field(int,		vcpu_id)
@@ -486,7 +504,7 @@ TRACE_EVENT(kvmppc_run_vcpu_exit,
 
 	TP_fast_assign(
 		__entry->vcpu_id  = vcpu->vcpu_id;
-		__entry->exit     = run->exit_reason;
+		__entry->exit     = vcpu->run->exit_reason;
 		__entry->ret      = vcpu->arch.ret;
 	),
 
@@ -494,7 +512,43 @@ TRACE_EVENT(kvmppc_run_vcpu_exit,
 			__entry->vcpu_id, __entry->exit, __entry->ret)
 );
 
+#ifdef CONFIG_PPC_PSERIES
+
+TRACE_EVENT_FN_COND(kvmppc_vcpu_stats,
+	TP_PROTO(struct kvm_vcpu *vcpu, u64 l1_to_l2_cs, u64 l2_to_l1_cs, u64 l2_runtime),
+
+	TP_ARGS(vcpu, l1_to_l2_cs, l2_to_l1_cs, l2_runtime),
+
+	TP_CONDITION(l1_to_l2_cs || l2_to_l1_cs || l2_runtime),
+
+	TP_STRUCT__entry(
+		__field(int,		vcpu_id)
+		__field(u64,		l1_to_l2_cs)
+		__field(u64,		l2_to_l1_cs)
+		__field(u64,		l2_runtime)
+	),
+
+	TP_fast_assign(
+		__entry->vcpu_id  = vcpu->vcpu_id;
+		__entry->l1_to_l2_cs = l1_to_l2_cs;
+		__entry->l2_to_l1_cs = l2_to_l1_cs;
+		__entry->l2_runtime = l2_runtime;
+	),
+
+	TP_printk("VCPU %d: l1_to_l2_cs_time=%llu ns l2_to_l1_cs_time=%llu ns l2_runtime=%llu ns",
+		__entry->vcpu_id,  __entry->l1_to_l2_cs,
+		__entry->l2_to_l1_cs, __entry->l2_runtime),
+	kvmhv_counters_tracepoint_regfunc, kvmhv_counters_tracepoint_unregfunc
+);
+#endif
 #endif /* _TRACE_KVM_HV_H */
 
 /* This part must be outside protection */
+
+#undef TRACE_INCLUDE_PATH
+#undef TRACE_INCLUDE_FILE
+
+#define TRACE_INCLUDE_PATH .
+#define TRACE_INCLUDE_FILE trace_hv
+
 #include <trace/define_trace.h>

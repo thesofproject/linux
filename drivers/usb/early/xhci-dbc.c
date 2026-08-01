@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/**
+/*
  * xhci-dbc.c - xHCI debug capability early driver
  *
  * Copyright (C) 2016 Intel Corporation
@@ -12,16 +12,16 @@
 #include <linux/console.h>
 #include <linux/pci_regs.h>
 #include <linux/pci_ids.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/io.h>
 #include <asm/pci-direct.h>
 #include <asm/fixmap.h>
 #include <linux/bcd.h>
 #include <linux/export.h>
-#include <linux/version.h>
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/kthread.h>
+#include <linux/usb/xhci-dbgp.h>
 
 #include "../host/xhci.h"
 #include "xhci-dbc.h"
@@ -94,7 +94,7 @@ static void * __init xdbc_get_page(dma_addr_t *dma_addr)
 {
 	void *virt;
 
-	virt = alloc_bootmem_pages_nopanic(PAGE_SIZE);
+	virt = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
 	if (!virt)
 		return NULL;
 
@@ -135,6 +135,7 @@ static int handshake(void __iomem *ptr, u32 mask, u32 done, int wait, int delay)
 {
 	u32 result;
 
+	/* Can not use readl_poll_timeout_atomic() for early boot things */
 	do {
 		result = readl(ptr);
 		result &= mask;
@@ -191,7 +192,7 @@ static void __init xdbc_free_ring(struct xdbc_ring *ring)
 	if (!seg)
 		return;
 
-	free_bootmem(seg->dma, PAGE_SIZE);
+	memblock_phys_free(seg->dma, PAGE_SIZE);
 	ring->segment = NULL;
 }
 
@@ -498,8 +499,7 @@ static int xdbc_bulk_transfer(void *data, int size, bool read)
 		addr = xdbc.in_dma;
 		xdbc.flags |= XDBC_FLAGS_IN_PROCESS;
 	} else {
-		memset(xdbc.out_buf, 0, XDBC_MAX_PACKET);
-		memcpy(xdbc.out_buf, data, size);
+		memcpy_and_pad(xdbc.out_buf, XDBC_MAX_PACKET, data, size, 0);
 		addr = xdbc.out_dma;
 		xdbc.flags |= XDBC_FLAGS_OUT_PROCESS;
 	}
@@ -532,8 +532,6 @@ static int xdbc_handle_external_reset(void)
 		goto reset_out;
 
 	xdbc_mem_init();
-
-	mmiowb();
 
 	ret = xdbc_start();
 	if (ret < 0)
@@ -587,8 +585,6 @@ static int __init xdbc_early_setup(void)
 
 	xdbc_mem_init();
 
-	mmiowb();
-
 	ret = xdbc_start();
 	if (ret < 0) {
 		writel(0, &xdbc.xdbc_reg->control);
@@ -602,23 +598,26 @@ static int __init xdbc_early_setup(void)
 	return 0;
 }
 
-int __init early_xdbc_parse_parameter(char *s)
+int __init early_xdbc_parse_parameter(char *s, int keep_early)
 {
 	unsigned long dbgp_num = 0;
 	u32 bus, dev, func, offset;
+	char *e;
 	int ret;
 
 	if (!early_pci_allowed())
 		return -EPERM;
 
-	if (strstr(s, "keep"))
-		early_console_keep = true;
+	early_console_keep = keep_early;
 
 	if (xdbc.xdbc_reg)
 		return 0;
 
-	if (*s && kstrtoul(s, 0, &dbgp_num))
-		dbgp_num = 0;
+	if (*s) {
+	       dbgp_num = simple_strtoul(s, &e, 10);
+	       if (s == e)
+		       dbgp_num = 0;
+	}
 
 	pr_notice("dbgp_num: %lu\n", dbgp_num);
 
@@ -675,13 +674,17 @@ int __init early_xdbc_setup_hardware(void)
 		xdbc_free_ring(&xdbc.in_ring);
 
 		if (xdbc.table_dma)
-			free_bootmem(xdbc.table_dma, PAGE_SIZE);
+			memblock_phys_free(xdbc.table_dma, PAGE_SIZE);
 
 		if (xdbc.out_dma)
-			free_bootmem(xdbc.out_dma, PAGE_SIZE);
+			memblock_phys_free(xdbc.out_dma, PAGE_SIZE);
 
 		xdbc.table_base = NULL;
 		xdbc.out_buf = NULL;
+
+		early_iounmap(xdbc.xhci_base, xdbc.xhci_length);
+		xdbc.xhci_base = NULL;
+		xdbc.xhci_length = 0;
 	}
 
 	return ret;
@@ -717,17 +720,14 @@ static void xdbc_handle_port_status(struct xdbc_trb *evt_trb)
 
 static void xdbc_handle_tx_event(struct xdbc_trb *evt_trb)
 {
-	size_t remain_length;
 	u32 comp_code;
 	int ep_id;
 
 	comp_code	= GET_COMP_CODE(le32_to_cpu(evt_trb->field[2]));
-	remain_length	= EVENT_TRB_LEN(le32_to_cpu(evt_trb->field[2]));
 	ep_id		= TRB_TO_EP_ID(le32_to_cpu(evt_trb->field[3]));
 
 	switch (comp_code) {
 	case COMP_SUCCESS:
-		remain_length = 0;
 	case COMP_SHORT_PACKET:
 		break;
 	case COMP_TRB_ERROR:
@@ -735,19 +735,19 @@ static void xdbc_handle_tx_event(struct xdbc_trb *evt_trb)
 	case COMP_USB_TRANSACTION_ERROR:
 	case COMP_STALL_ERROR:
 	default:
-		if (ep_id == XDBC_EPID_OUT)
+		if (ep_id == XDBC_EPID_OUT || ep_id == XDBC_EPID_OUT_INTEL)
 			xdbc.flags |= XDBC_FLAGS_OUT_STALL;
-		if (ep_id == XDBC_EPID_IN)
+		if (ep_id == XDBC_EPID_IN || ep_id == XDBC_EPID_IN_INTEL)
 			xdbc.flags |= XDBC_FLAGS_IN_STALL;
 
 		xdbc_trace("endpoint %d stalled\n", ep_id);
 		break;
 	}
 
-	if (ep_id == XDBC_EPID_IN) {
+	if (ep_id == XDBC_EPID_IN || ep_id == XDBC_EPID_IN_INTEL) {
 		xdbc.flags &= ~XDBC_FLAGS_IN_PROCESS;
 		xdbc_bulk_transfer(NULL, XDBC_MAX_PACKET, true);
-	} else if (ep_id == XDBC_EPID_OUT) {
+	} else if (ep_id == XDBC_EPID_OUT || ep_id == XDBC_EPID_OUT_INTEL) {
 		xdbc.flags &= ~XDBC_FLAGS_OUT_PROCESS;
 	} else {
 		xdbc_trace("invalid endpoint id %d\n", ep_id);
@@ -877,13 +877,14 @@ retry:
 
 static void early_xdbc_write(struct console *con, const char *str, u32 n)
 {
-	static char buf[XDBC_MAX_PACKET];
+	/* static variables are zeroed, so buf is always NULL terminated */
+	static char buf[XDBC_MAX_PACKET + 1];
 	int chunk, ret;
 	int use_cr = 0;
 
 	if (!xdbc.xdbc_reg)
 		return;
-	memset(buf, 0, XDBC_MAX_PACKET);
+
 	while (n > 0) {
 		for (chunk = 0; chunk < XDBC_MAX_PACKET && n > 0; str++, chunk++, n--) {
 
@@ -930,7 +931,7 @@ void __init early_xdbc_register_console(void)
 
 static void xdbc_unregister_console(void)
 {
-	if (early_xdbc_console.flags & CON_ENABLED)
+	if (console_is_registered(&early_xdbc_console))
 		unregister_console(&early_xdbc_console);
 }
 
@@ -978,7 +979,7 @@ static int __init xdbc_init(void)
 		goto free_and_quit;
 	}
 
-	base = ioremap_nocache(xdbc.xhci_start, xdbc.xhci_length);
+	base = ioremap(xdbc.xhci_start, xdbc.xhci_length);
 	if (!base) {
 		xdbc_trace("failed to remap the io address\n");
 		ret = -ENOMEM;
@@ -1000,8 +1001,8 @@ free_and_quit:
 	xdbc_free_ring(&xdbc.evt_ring);
 	xdbc_free_ring(&xdbc.out_ring);
 	xdbc_free_ring(&xdbc.in_ring);
-	free_bootmem(xdbc.table_dma, PAGE_SIZE);
-	free_bootmem(xdbc.out_dma, PAGE_SIZE);
+	memblock_phys_free(xdbc.table_dma, PAGE_SIZE);
+	memblock_phys_free(xdbc.out_dma, PAGE_SIZE);
 	writel(0, &xdbc.xdbc_reg->control);
 	early_iounmap(xdbc.xhci_base, xdbc.xhci_length);
 

@@ -272,7 +272,7 @@ char *prom_nextprop(phandle node, const char *oprop, char *buffer)
 		return buffer;
 	}
 	if (oprop == buffer) {
-		strcpy (buf, oprop);
+		strscpy(buf, oprop);
 		oprop = buf;
 	}
 
@@ -332,7 +332,7 @@ prom_setprop(phandle node, const char *pname, char *value, int size)
 
 	if (size == 0)
 		return 0;
-	if ((pname == 0) || (value == 0))
+	if ((pname == NULL) || (value == NULL))
 		return 0;
 	
 #ifdef CONFIG_SUN_LDOMS

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *    Architecture-specific kernel symbols
  *
@@ -8,25 +9,12 @@
  *    Copyright (C) 2002-2003 Matthew Wilcox <willy at parisc-linux.org>
  *    Copyright (C) 2002 Randolph Chung <tausq at parisc-linux.org>
  *    Copyright (C) 2002-2007 Helge Deller <deller with parisc-linux.org>
- * 
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2 of the License, or
- *    (at your option) any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
- *
- *    You should have received a copy of the GNU General Public License
- *    along with this program; if not, write to the Free Software
- *    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/syscalls.h>
+#include <linux/libgcc.h>
 
 #include <linux/string.h>
 EXPORT_SYMBOL(memset);
@@ -34,6 +22,8 @@ EXPORT_SYMBOL(memset);
 #include <linux/atomic.h>
 EXPORT_SYMBOL(__xchg8);
 EXPORT_SYMBOL(__xchg32);
+EXPORT_SYMBOL(__cmpxchg_u8);
+EXPORT_SYMBOL(__cmpxchg_u16);
 EXPORT_SYMBOL(__cmpxchg_u32);
 EXPORT_SYMBOL(__cmpxchg_u64);
 #ifdef CONFIG_SMP
@@ -45,7 +35,6 @@ EXPORT_SYMBOL(__xchg64);
 
 #include <linux/uaccess.h>
 EXPORT_SYMBOL(lclear_user);
-EXPORT_SYMBOL(lstrnlen_user);
 
 #ifndef CONFIG_64BIT
 /* Needed so insmod can set dp value */
@@ -54,9 +43,6 @@ EXPORT_SYMBOL($global$);
 #endif
 
 #include <asm/io.h>
-EXPORT_SYMBOL(memcpy_toio);
-EXPORT_SYMBOL(memcpy_fromio);
-EXPORT_SYMBOL(memset_io);
 
 extern void $$divI(void);
 extern void $$divU(void);
@@ -106,12 +92,6 @@ EXPORT_SYMBOL($$divI_12);
 EXPORT_SYMBOL($$divI_14);
 EXPORT_SYMBOL($$divI_15);
 
-extern void __ashrdi3(void);
-extern void __ashldi3(void);
-extern void __lshrdi3(void);
-extern void __muldi3(void);
-extern void __ucmpdi2(void);
-
 EXPORT_SYMBOL(__ashrdi3);
 EXPORT_SYMBOL(__ashldi3);
 EXPORT_SYMBOL(__lshrdi3);
@@ -136,12 +116,6 @@ EXPORT_SYMBOL(__moddi3);
 #ifndef CONFIG_64BIT
 extern void $$dyncall(void);
 EXPORT_SYMBOL($$dyncall);
-#endif
-
-#ifdef CONFIG_DISCONTIGMEM
-#include <asm/mmzone.h>
-EXPORT_SYMBOL(node_data);
-EXPORT_SYMBOL(pfnnid_map);
 #endif
 
 #ifdef CONFIG_FUNCTION_TRACER

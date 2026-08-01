@@ -8,7 +8,6 @@
 #include <linux/io.h>
 #include <linux/leds.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
 #include <linux/platform_data/mlxreg.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
@@ -22,15 +21,16 @@
 #define MLXREG_LED_AMBER_SOLID		0x09 /* Solid amber */
 #define MLXREG_LED_BLINK_3HZ		167 /* ~167 msec off/on - HW support */
 #define MLXREG_LED_BLINK_6HZ		83 /* ~83 msec off/on - HW support */
+#define MLXREG_LED_CAPABILITY_CLEAR	GENMASK(31, 8) /* Clear mask */
 
 /**
  * struct mlxreg_led_data - led control data:
  *
  * @data: led configuration data;
- * @led_classdev: led class data;
+ * @led_cdev: led class data;
  * @base_color: base led color (other colors have constant offset from base);
- * @led_data: led data;
  * @data_parent: pointer to private device control data of parent;
+ * @led_cdev_name: class device name
  */
 struct mlxreg_led_data {
 	struct mlxreg_core_data *data;
@@ -187,6 +187,7 @@ static int mlxreg_led_config(struct mlxreg_led_priv_data *priv)
 	struct mlxreg_led_data *led_data;
 	struct led_classdev *led_cdev;
 	enum led_brightness brightness;
+	u32 regval;
 	int i;
 	int err;
 
@@ -195,6 +196,23 @@ static int mlxreg_led_config(struct mlxreg_led_priv_data *priv)
 					GFP_KERNEL);
 		if (!led_data)
 			return -ENOMEM;
+
+		if (data->capability) {
+			err = regmap_read(led_pdata->regmap, data->capability,
+					  &regval);
+			if (err) {
+				dev_err(&priv->pdev->dev, "Failed to query capability register\n");
+				return err;
+			}
+			if (!(regval & data->bit))
+				continue;
+			/*
+			 * Field "bit" can contain one capability bit in 0 byte
+			 * and offset bit in 1-3 bytes. Clear capability bit and
+			 * keep only offset bit.
+			 */
+			data->bit &= MLXREG_LED_CAPABILITY_CLEAR;
+		}
 
 		led_cdev = &led_data->led_cdev;
 		led_data->data_parent = priv;
@@ -209,8 +227,8 @@ static int mlxreg_led_config(struct mlxreg_led_priv_data *priv)
 			brightness = LED_OFF;
 			led_data->base_color = MLXREG_LED_GREEN_SOLID;
 		}
-		sprintf(led_data->led_cdev_name, "%s:%s", "mlxreg",
-			data->label);
+		snprintf(led_data->led_cdev_name, sizeof(led_data->led_cdev_name),
+			 "mlxreg:%s", data->label);
 		led_cdev->name = led_data->led_cdev_name;
 		led_cdev->brightness = brightness;
 		led_cdev->max_brightness = LED_ON;
@@ -238,6 +256,7 @@ static int mlxreg_led_probe(struct platform_device *pdev)
 {
 	struct mlxreg_core_platform_data *led_pdata;
 	struct mlxreg_led_priv_data *priv;
+	int err;
 
 	led_pdata = dev_get_platdata(&pdev->dev);
 	if (!led_pdata) {
@@ -249,20 +268,14 @@ static int mlxreg_led_probe(struct platform_device *pdev)
 	if (!priv)
 		return -ENOMEM;
 
-	mutex_init(&priv->access_lock);
+	err = devm_mutex_init(&pdev->dev, &priv->access_lock);
+	if (err)
+		return err;
+
 	priv->pdev = pdev;
 	priv->pdata = led_pdata;
 
 	return mlxreg_led_config(priv);
-}
-
-static int mlxreg_led_remove(struct platform_device *pdev)
-{
-	struct mlxreg_led_priv_data *priv = dev_get_drvdata(&pdev->dev);
-
-	mutex_destroy(&priv->access_lock);
-
-	return 0;
 }
 
 static struct platform_driver mlxreg_led_driver = {
@@ -270,7 +283,6 @@ static struct platform_driver mlxreg_led_driver = {
 	    .name = "leds-mlxreg",
 	},
 	.probe = mlxreg_led_probe,
-	.remove = mlxreg_led_remove,
 };
 
 module_platform_driver(mlxreg_led_driver);

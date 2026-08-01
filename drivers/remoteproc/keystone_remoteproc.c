@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TI Keystone DSP remoteproc driver
  *
  * Copyright (C) 2015-2017 Texas Instruments Incorporated - http://www.ti.com/
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -22,7 +14,7 @@
 #include <linux/workqueue.h>
 #include <linux/of_address.h>
 #include <linux/of_reserved_mem.h>
-#include <linux/of_gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/regmap.h>
 #include <linux/mfd/syscon.h>
 #include <linux/remoteproc.h>
@@ -67,10 +59,10 @@ struct keystone_rproc {
 	int num_mems;
 	struct regmap *dev_ctrl;
 	struct reset_control *reset;
+	struct gpio_desc *kick_gpio;
 	u32 boot_offset;
 	int irq_ring;
 	int irq_fault;
-	int kick_gpio;
 	struct work_struct workqueue;
 };
 
@@ -181,35 +173,16 @@ static int keystone_rproc_start(struct rproc *rproc)
 
 	INIT_WORK(&ksproc->workqueue, handle_event);
 
-	ret = request_irq(ksproc->irq_ring, keystone_rproc_vring_interrupt, 0,
-			  dev_name(ksproc->dev), ksproc);
-	if (ret) {
-		dev_err(ksproc->dev, "failed to enable vring interrupt, ret = %d\n",
-			ret);
-		goto out;
-	}
-
-	ret = request_irq(ksproc->irq_fault, keystone_rproc_exception_interrupt,
-			  0, dev_name(ksproc->dev), ksproc);
-	if (ret) {
-		dev_err(ksproc->dev, "failed to enable exception interrupt, ret = %d\n",
-			ret);
-		goto free_vring_irq;
-	}
+	enable_irq(ksproc->irq_ring);
+	enable_irq(ksproc->irq_fault);
 
 	ret = keystone_rproc_dsp_boot(ksproc, rproc->bootaddr);
-	if (ret)
-		goto free_exc_irq;
+	if (ret) {
+		flush_work(&ksproc->workqueue);
+		return ret;
+	}
 
 	return 0;
-
-free_exc_irq:
-	free_irq(ksproc->irq_fault, ksproc);
-free_vring_irq:
-	free_irq(ksproc->irq_ring, ksproc);
-	flush_work(&ksproc->workqueue);
-out:
-	return ret;
 }
 
 /*
@@ -223,8 +196,8 @@ static int keystone_rproc_stop(struct rproc *rproc)
 	struct keystone_rproc *ksproc = rproc->priv;
 
 	keystone_rproc_dsp_reset(ksproc);
-	free_irq(ksproc->irq_fault, ksproc);
-	free_irq(ksproc->irq_ring, ksproc);
+	disable_irq(ksproc->irq_fault);
+	disable_irq(ksproc->irq_ring);
 	flush_work(&ksproc->workqueue);
 
 	return 0;
@@ -240,10 +213,10 @@ static void keystone_rproc_kick(struct rproc *rproc, int vqid)
 {
 	struct keystone_rproc *ksproc = rproc->priv;
 
-	if (WARN_ON(ksproc->kick_gpio < 0))
+	if (!ksproc->kick_gpio)
 		return;
 
-	gpio_set_value(ksproc->kick_gpio, 1);
+	gpiod_set_value(ksproc->kick_gpio, 1);
 }
 
 /*
@@ -254,7 +227,7 @@ static void keystone_rproc_kick(struct rproc *rproc, int vqid)
  * can be used either by the remoteproc core for loading (when using kernel
  * remoteproc loader), or by any rpmsg bus drivers.
  */
-static void *keystone_rproc_da_to_va(struct rproc *rproc, u64 da, int len)
+static void *keystone_rproc_da_to_va(struct rproc *rproc, u64 da, size_t len, bool *is_iomem)
 {
 	struct keystone_rproc *ksproc = rproc->priv;
 	void __iomem *va = NULL;
@@ -263,7 +236,7 @@ static void *keystone_rproc_da_to_va(struct rproc *rproc, u64 da, int len)
 	size_t size;
 	int i;
 
-	if (len <= 0)
+	if (len == 0)
 		return NULL;
 
 	for (i = 0; i < ksproc->num_mems; i++) {
@@ -343,27 +316,32 @@ static int keystone_rproc_of_get_dev_syscon(struct platform_device *pdev,
 {
 	struct device_node *np = pdev->dev.of_node;
 	struct device *dev = &pdev->dev;
-	int ret;
 
 	if (!of_property_read_bool(np, "ti,syscon-dev")) {
 		dev_err(dev, "ti,syscon-dev property is absent\n");
 		return -EINVAL;
 	}
 
-	ksproc->dev_ctrl =
-		syscon_regmap_lookup_by_phandle(np, "ti,syscon-dev");
-	if (IS_ERR(ksproc->dev_ctrl)) {
-		ret = PTR_ERR(ksproc->dev_ctrl);
-		return ret;
-	}
-
-	if (of_property_read_u32_index(np, "ti,syscon-dev", 1,
-				       &ksproc->boot_offset)) {
-		dev_err(dev, "couldn't read the boot register offset\n");
-		return -EINVAL;
-	}
+	ksproc->dev_ctrl = syscon_regmap_lookup_by_phandle_args(np, "ti,syscon-dev",
+								1, &ksproc->boot_offset);
+	if (IS_ERR(ksproc->dev_ctrl))
+		return PTR_ERR(ksproc->dev_ctrl);
 
 	return 0;
+}
+
+static void keystone_rproc_mem_release(void *data)
+{
+	struct device *dev = data;
+
+	of_reserved_mem_device_release(dev);
+}
+
+static void keystone_rproc_pm_runtime_put(void *data)
+{
+	struct device *dev = data;
+
+	pm_runtime_put_sync(dev);
 }
 
 static int keystone_rproc_probe(struct platform_device *pdev)
@@ -374,8 +352,6 @@ static int keystone_rproc_probe(struct platform_device *pdev)
 	struct rproc *rproc;
 	int dsp_id;
 	char *fw_name = NULL;
-	char *template = "keystone-dsp%d-fw";
-	int name_len = 0;
 	int ret = 0;
 
 	if (!np) {
@@ -390,14 +366,12 @@ static int keystone_rproc_probe(struct platform_device *pdev)
 	}
 
 	/* construct a custom default fw name - subject to change in future */
-	name_len = strlen(template); /* assuming a single digit alias */
-	fw_name = devm_kzalloc(dev, name_len, GFP_KERNEL);
+	fw_name = devm_kasprintf(dev, GFP_KERNEL, "keystone-dsp%d-fw", dsp_id);
 	if (!fw_name)
 		return -ENOMEM;
-	snprintf(fw_name, name_len, template, dsp_id);
 
-	rproc = rproc_alloc(dev, dev_name(dev), &keystone_rproc_ops, fw_name,
-			    sizeof(*ksproc));
+	rproc = devm_rproc_alloc(dev, dev_name(dev), &keystone_rproc_ops,
+				 fw_name, sizeof(*ksproc));
 	if (!rproc)
 		return -ENOMEM;
 
@@ -408,95 +382,71 @@ static int keystone_rproc_probe(struct platform_device *pdev)
 
 	ret = keystone_rproc_of_get_dev_syscon(pdev, ksproc);
 	if (ret)
-		goto free_rproc;
+		return ret;
 
 	ksproc->reset = devm_reset_control_get_exclusive(dev, NULL);
-	if (IS_ERR(ksproc->reset)) {
-		ret = PTR_ERR(ksproc->reset);
-		goto free_rproc;
-	}
+	if (IS_ERR(ksproc->reset))
+		return PTR_ERR(ksproc->reset);
 
 	/* enable clock for accessing DSP internal memories */
-	pm_runtime_enable(dev);
-	ret = pm_runtime_get_sync(dev);
-	if (ret < 0) {
-		dev_err(dev, "failed to enable clock, status = %d\n", ret);
-		pm_runtime_put_noidle(dev);
-		goto disable_rpm;
-	}
+	ret = devm_pm_runtime_enable(dev);
+	if (ret < 0)
+		return dev_err_probe(dev, ret, "Failed to enable runtime PM\n");
+
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret < 0)
+		return dev_err_probe(dev, ret, "failed to enable clock\n");
+
+	ret = devm_add_action_or_reset(dev, keystone_rproc_pm_runtime_put, dev);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to add disable pm devm action\n");
 
 	ret = keystone_rproc_of_get_memories(pdev, ksproc);
 	if (ret)
-		goto disable_clk;
+		return ret;
 
 	ksproc->irq_ring = platform_get_irq_byname(pdev, "vring");
-	if (ksproc->irq_ring < 0) {
-		ret = ksproc->irq_ring;
-		dev_err(dev, "failed to get vring interrupt, status = %d\n",
-			ret);
-		goto disable_clk;
-	}
+	if (ksproc->irq_ring < 0)
+		return ksproc->irq_ring;
+	ret = devm_request_irq(dev, ksproc->irq_ring, keystone_rproc_vring_interrupt,
+			       IRQF_NO_AUTOEN, dev_name(dev), ksproc);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to request vring interrupt\n");
 
 	ksproc->irq_fault = platform_get_irq_byname(pdev, "exception");
-	if (ksproc->irq_fault < 0) {
-		ret = ksproc->irq_fault;
-		dev_err(dev, "failed to get exception interrupt, status = %d\n",
-			ret);
-		goto disable_clk;
-	}
+	if (ksproc->irq_fault < 0)
+		return ksproc->irq_fault;
+	ret = devm_request_irq(dev, ksproc->irq_fault, keystone_rproc_exception_interrupt,
+			       IRQF_NO_AUTOEN, dev_name(dev), ksproc);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to enable exception interrupt\n");
 
-	ksproc->kick_gpio = of_get_named_gpio_flags(np, "kick-gpios", 0, NULL);
-	if (ksproc->kick_gpio < 0) {
-		ret = ksproc->kick_gpio;
-		dev_err(dev, "failed to get gpio for virtio kicks, status = %d\n",
-			ret);
-		goto disable_clk;
-	}
+	ksproc->kick_gpio = devm_gpiod_get(dev, "kick", GPIOD_ASIS);
+	ret = PTR_ERR_OR_ZERO(ksproc->kick_gpio);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to get gpio for virtio kicks\n");
 
-	if (of_reserved_mem_device_init(dev))
+	ret = of_reserved_mem_device_init(dev);
+	if (ret) {
 		dev_warn(dev, "device does not have specific CMA pool\n");
+	} else {
+		ret = devm_add_action_or_reset(dev, keystone_rproc_mem_release, dev);
+		if (ret)
+			return ret;
+	}
 
 	/* ensure the DSP is in reset before loading firmware */
 	ret = reset_control_status(ksproc->reset);
 	if (ret < 0) {
-		dev_err(dev, "failed to get reset status, status = %d\n", ret);
-		goto release_mem;
+		return dev_err_probe(dev, ret, "failed to get reset status\n");
 	} else if (ret == 0) {
 		WARN(1, "device is not in reset\n");
 		keystone_rproc_dsp_reset(ksproc);
 	}
 
-	ret = rproc_add(rproc);
-	if (ret) {
-		dev_err(dev, "failed to add register device with remoteproc core, status = %d\n",
-			ret);
-		goto release_mem;
-	}
-
-	platform_set_drvdata(pdev, ksproc);
-
-	return 0;
-
-release_mem:
-	of_reserved_mem_device_release(dev);
-disable_clk:
-	pm_runtime_put_sync(dev);
-disable_rpm:
-	pm_runtime_disable(dev);
-free_rproc:
-	rproc_free(rproc);
-	return ret;
-}
-
-static int keystone_rproc_remove(struct platform_device *pdev)
-{
-	struct keystone_rproc *ksproc = platform_get_drvdata(pdev);
-
-	rproc_del(ksproc->rproc);
-	pm_runtime_put_sync(&pdev->dev);
-	pm_runtime_disable(&pdev->dev);
-	rproc_free(ksproc->rproc);
-	of_reserved_mem_device_release(&pdev->dev);
+	ret = devm_rproc_add(dev, rproc);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to register device with remoteproc core\n");
 
 	return 0;
 }
@@ -512,7 +462,6 @@ MODULE_DEVICE_TABLE(of, keystone_rproc_of_match);
 
 static struct platform_driver keystone_rproc_driver = {
 	.probe	= keystone_rproc_probe,
-	.remove	= keystone_rproc_remove,
 	.driver	= {
 		.name = "keystone-rproc",
 		.of_match_table = keystone_rproc_of_match,

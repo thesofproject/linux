@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * tef6862.c Philips TEF6862 Car Radio Enhanced Selectivity Tuner
  * Copyright (c) 2009 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -79,7 +71,7 @@ static int tef6862_g_tuner(struct v4l2_subdev *sd, struct v4l2_tuner *v)
 		return -EINVAL;
 
 	/* only support FM for now */
-	strlcpy(v->name, "FM", sizeof(v->name));
+	strscpy(v->name, "FM", sizeof(v->name));
 	v->type = V4L2_TUNER_RADIO;
 	v->rangelow = TEF6862_LO_FREQ;
 	v->rangehigh = TEF6862_HI_FREQ;
@@ -149,8 +141,7 @@ static const struct v4l2_subdev_ops tef6862_ops = {
  * concerning the addresses: i2c wants 7 bit (without the r/w bit), so '>>1'
  */
 
-static int tef6862_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int tef6862_probe(struct i2c_client *client)
 {
 	struct tef6862_state *state;
 	struct v4l2_subdev *sd;
@@ -162,7 +153,7 @@ static int tef6862_probe(struct i2c_client *client,
 	v4l_info(client, "chip found @ 0x%02x (%s)\n",
 			client->addr << 1, client->adapter->name);
 
-	state = kzalloc(sizeof(struct tef6862_state), GFP_KERNEL);
+	state = kzalloc_obj(struct tef6862_state);
 	if (state == NULL)
 		return -ENOMEM;
 	state->freq = TEF6862_LO_FREQ;
@@ -173,18 +164,17 @@ static int tef6862_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int tef6862_remove(struct i2c_client *client)
+static void tef6862_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 
 	v4l2_device_unregister_subdev(sd);
 	kfree(to_state(sd));
-	return 0;
 }
 
 static const struct i2c_device_id tef6862_id[] = {
-	{DRIVER_NAME, 0},
-	{},
+	{ .name = DRIVER_NAME },
+	{ }
 };
 
 MODULE_DEVICE_TABLE(i2c, tef6862_id);

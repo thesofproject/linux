@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  USB HID quirks support for Network Technologies, Inc. "USB-SUN" USB
  *  adapter for pre-USB Sun keyboards
@@ -13,10 +14,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 #include <linux/device.h>
@@ -32,7 +29,7 @@ MODULE_DESCRIPTION("HID driver for Network Technologies USB-SUN keyboard adapter
 /*
  * NTI Sun keyboard adapter has wrong logical maximum in report descriptor
  */
-static __u8 *nti_usbsun_report_fixup(struct hid_device *hdev, __u8 *rdesc,
+static const __u8 *nti_usbsun_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 		unsigned int *rsize)
 {
 	if (*rsize >= 60 && rdesc[53] == 0x65 && rdesc[59] == 0x65) {

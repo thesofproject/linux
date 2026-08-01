@@ -1,18 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for the Auvitek USB bridge
  *
  *  Copyright (c) 2008 Steven Toth <stoth@linuxtv.org>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *
- *  GNU General Public License for more details.
  */
 
 #include "au0828.h"
@@ -115,6 +105,46 @@ struct au0828_board au0828_boards[] = {
 		.tuner_addr = 0x60,
 		.i2c_clk_divider = AU0828_I2C_CLK_250KHZ,
 	},
+	[AU0828_BOARD_HAUPPAUGE_IMPACTVCBE] = {
+		.name	= "Hauppauge Impact VCB-e",
+		.tuner_type = TUNER_ABSENT,
+		.i2c_clk_divider = AU0828_I2C_CLK_250KHZ,
+		.input = {
+			{
+				.type = AU0828_VMUX_COMPOSITE,
+				.vmux = AU8522_COMPOSITE_CH4,
+				.amux = AU8522_AUDIO_NONE,
+				.audio_setup = hvr950q_cs5340_audio,
+			},
+			{
+				.type = AU0828_VMUX_SVIDEO,
+				.vmux = AU8522_SVIDEO_CH13,
+				.amux = AU8522_AUDIO_NONE,
+				.audio_setup = hvr950q_cs5340_audio,
+			},
+		},
+	},
+	[AU0828_BOARD_HAUPPAUGE_HVR1265] = {
+		.name	= "Hauppauge HVR1265",
+		.tuner_type = TUNER_XC5000,
+		.tuner_addr = 0x61,
+		.has_ir_i2c = 1,
+		.has_analog = 1,
+		.i2c_clk_divider = AU0828_I2C_CLK_250KHZ,
+		.input = {
+			{
+				.type = AU0828_VMUX_TELEVISION,
+				.vmux = AU8522_COMPOSITE_CH4_SIF,
+				.amux = AU8522_AUDIO_SIF,
+			},
+			{
+				.type = AU0828_VMUX_SVIDEO,
+				.vmux = AU8522_SVIDEO_CH13,
+				.amux = AU8522_AUDIO_NONE,
+				.audio_setup = hvr950q_cs5340_audio,
+			},
+		},
+	},
 };
 
 /* Tuner callback function for au0828 boards. Currently only needed
@@ -130,6 +160,8 @@ int au0828_tuner_callback(void *priv, int component, int command, int arg)
 	case AU0828_BOARD_HAUPPAUGE_HVR850:
 	case AU0828_BOARD_HAUPPAUGE_HVR950Q:
 	case AU0828_BOARD_HAUPPAUGE_HVR950Q_MXL:
+	case AU0828_BOARD_HAUPPAUGE_HVR1265:
+	case AU0828_BOARD_HAUPPAUGE_IMPACTVCBE:
 	case AU0828_BOARD_DVICO_FUSIONHDTV7:
 		if (command == 0) {
 			/* Tuner Reset Command from xc5000 */
@@ -200,6 +232,8 @@ void au0828_card_setup(struct au0828_dev *dev)
 	case AU0828_BOARD_HAUPPAUGE_HVR850:
 	case AU0828_BOARD_HAUPPAUGE_HVR950Q:
 	case AU0828_BOARD_HAUPPAUGE_HVR950Q_MXL:
+	case AU0828_BOARD_HAUPPAUGE_HVR1265:
+	case AU0828_BOARD_HAUPPAUGE_IMPACTVCBE:
 	case AU0828_BOARD_HAUPPAUGE_WOODBURY:
 		if (dev->i2c_rc == 0)
 			hauppauge_eeprom(dev, eeprom+0xa0);
@@ -258,6 +292,8 @@ void au0828_gpio_setup(struct au0828_dev *dev)
 	case AU0828_BOARD_HAUPPAUGE_HVR950Q:
 	case AU0828_BOARD_HAUPPAUGE_HVR950Q_MXL:
 	case AU0828_BOARD_HAUPPAUGE_WOODBURY:
+	case AU0828_BOARD_HAUPPAUGE_HVR1265:
+	case AU0828_BOARD_HAUPPAUGE_IMPACTVCBE:
 		/* GPIO's
 		 * 4 - CS5340
 		 * 5 - AU8522 Demodulator
@@ -350,6 +386,10 @@ struct usb_device_id au0828_usb_id_table[] = {
 		.driver_info = AU0828_BOARD_HAUPPAUGE_HVR950Q },
 	{ USB_DEVICE(0x2040, 0x7270),
 		.driver_info = AU0828_BOARD_HAUPPAUGE_HVR950Q },
+	{ USB_DEVICE(0x2040, 0x72b0),
+		.driver_info = AU0828_BOARD_HAUPPAUGE_IMPACTVCBE },
+	{ USB_DEVICE(0x2040, 0x72a0),
+		.driver_info = AU0828_BOARD_HAUPPAUGE_HVR1265 },
 	{ },
 };
 

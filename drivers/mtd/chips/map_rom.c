@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Common code to handle map devices which are simple ROM
- * (C) 2000 Red Hat. GPL'd.
+ * (C) 2000 Red Hat.
  */
 
 #include <linux/module.h>
@@ -44,7 +45,7 @@ static struct mtd_info *map_rom_probe(struct map_info *map)
 {
 	struct mtd_info *mtd;
 
-	mtd = kzalloc(sizeof(*mtd), GFP_KERNEL);
+	mtd = kzalloc_obj(*mtd);
 	if (!mtd)
 		return NULL;
 

@@ -504,13 +504,14 @@ gk104_clk = {
 };
 
 int
-gk104_clk_new(struct nvkm_device *device, int index, struct nvkm_clk **pclk)
+gk104_clk_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst,
+	      struct nvkm_clk **pclk)
 {
 	struct gk104_clk *clk;
 
-	if (!(clk = kzalloc(sizeof(*clk), GFP_KERNEL)))
+	if (!(clk = kzalloc_obj(*clk)))
 		return -ENOMEM;
 	*pclk = &clk->base;
 
-	return nvkm_clk_ctor(&gk104_clk, device, index, true, &clk->base);
+	return nvkm_clk_ctor(&gk104_clk, device, type, inst, true, &clk->base);
 }

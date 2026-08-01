@@ -1,88 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  gov_bang_bang.c - A simple thermal throttling governor using hysteresis
  *
- *  Copyright (C) 2014 Peter Feuerer <peter@piie.net>
+ *  Copyright (C) 2014 Peter Kaestle <peter@piie.net>
  *
  *  Based on step_wise.c with following Copyrights:
  *  Copyright (C) 2012 Intel Corp
  *  Copyright (C) 2012 Durgadoss R <durgadoss.r@intel.com>
- *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, version 2.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
- * the GNU General Public License for more details.
- *
- */
-
-#include <linux/thermal.h>
-
-#include "thermal_core.h"
-
-static void thermal_zone_trip_update(struct thermal_zone_device *tz, int trip)
-{
-	int trip_temp, trip_hyst;
-	struct thermal_instance *instance;
-
-	tz->ops->get_trip_temp(tz, trip, &trip_temp);
-
-	if (!tz->ops->get_trip_hyst) {
-		pr_warn_once("Undefined get_trip_hyst for thermal zone %s - "
-				"running with default hysteresis zero\n", tz->type);
-		trip_hyst = 0;
-	} else
-		tz->ops->get_trip_hyst(tz, trip, &trip_hyst);
-
-	dev_dbg(&tz->device, "Trip%d[temp=%d]:temp=%d:hyst=%d\n",
-				trip, trip_temp, tz->temperature,
-				trip_hyst);
-
-	mutex_lock(&tz->lock);
-
-	list_for_each_entry(instance, &tz->thermal_instances, tz_node) {
-		if (instance->trip != trip)
-			continue;
-
-		/* in case fan is in initial state, switch the fan off */
-		if (instance->target == THERMAL_NO_TARGET)
-			instance->target = 0;
-
-		/* in case fan is neither on nor off set the fan to active */
-		if (instance->target != 0 && instance->target != 1) {
-			pr_warn("Thermal instance %s controlled by bang-bang has unexpected state: %ld\n",
-					instance->name, instance->target);
-			instance->target = 1;
-		}
-
-		/*
-		 * enable fan when temperature exceeds trip_temp and disable
-		 * the fan in case it falls below trip_temp minus hysteresis
-		 */
-		if (instance->target == 0 && tz->temperature >= trip_temp)
-			instance->target = 1;
-		else if (instance->target == 1 &&
-				tz->temperature <= trip_temp - trip_hyst)
-			instance->target = 0;
-
-		dev_dbg(&instance->cdev->device, "target=%d\n",
-					(int)instance->target);
-
-		mutex_lock(&instance->cdev->lock);
-		instance->cdev->updated = false; /* cdev needs update */
-		mutex_unlock(&instance->cdev->lock);
-	}
-
-	mutex_unlock(&tz->lock);
-}
-
-/**
- * bang_bang_control - controls devices associated with the given zone
- * @tz - thermal_zone_device
- * @trip - the trip point
  *
  * Regulation Logic: a two point regulation, deliver cooling state depending
  * on the previous state shown in this diagram:
@@ -104,35 +28,102 @@ static void thermal_zone_trip_update(struct thermal_zone_device *tz, int trip)
  *     gets turned on.
  *   * In case the fan is running, temperature must fall below
  *     (trip_temp - hyst) so that the fan gets turned off again.
- *
  */
-static int bang_bang_control(struct thermal_zone_device *tz, int trip)
+
+#include <linux/thermal.h>
+
+#include "thermal_core.h"
+
+static void bang_bang_set_instance_target(struct thermal_instance *instance,
+					  unsigned int target)
 {
+	if (instance->target != 0 && instance->target != 1 &&
+	    instance->target != THERMAL_NO_TARGET)
+		pr_debug("Unexpected state %ld of thermal instance %s in bang-bang\n",
+			 instance->target, instance->name);
+
+	/*
+	 * Enable the fan when the trip is crossed on the way up and disable it
+	 * when the trip is crossed on the way down.
+	 */
+	instance->target = target;
+	instance->initialized = true;
+
+	dev_dbg(&instance->cdev->device, "target=%ld\n", instance->target);
+
+	thermal_cdev_update_nocheck(instance->cdev);
+}
+
+/**
+ * bang_bang_trip_crossed - controls devices associated with the given zone
+ * @tz: thermal_zone_device
+ * @trip: the trip point
+ * @upward: whether or not the trip has been crossed on the way up
+ */
+static void bang_bang_trip_crossed(struct thermal_zone_device *tz,
+				   const struct thermal_trip *trip,
+				   bool upward)
+{
+	const struct thermal_trip_desc *td = trip_to_trip_desc(trip);
 	struct thermal_instance *instance;
 
-	thermal_zone_trip_update(tz, trip);
+	lockdep_assert_held(&tz->lock);
 
-	mutex_lock(&tz->lock);
+	dev_dbg(&tz->device, "Trip%d[temp=%d]:temp=%d:hyst=%d\n",
+		thermal_zone_trip_id(tz, trip), trip->temperature,
+		tz->temperature, trip->hysteresis);
 
-	list_for_each_entry(instance, &tz->thermal_instances, tz_node)
-		thermal_cdev_update(instance->cdev);
+	list_for_each_entry(instance, &td->thermal_instances, trip_node)
+		bang_bang_set_instance_target(instance, upward);
+}
 
-	mutex_unlock(&tz->lock);
+static void bang_bang_manage(struct thermal_zone_device *tz)
+{
+	const struct thermal_trip_desc *td;
+	struct thermal_instance *instance;
 
-	return 0;
+	/* If the code below has run already, nothing needs to be done. */
+	if (tz->governor_data)
+		return;
+
+	for_each_trip_desc(tz, td) {
+		const struct thermal_trip *trip = &td->trip;
+		bool turn_on;
+
+		if (trip->temperature == THERMAL_TEMP_INVALID ||
+		    trip->type == THERMAL_TRIP_CRITICAL ||
+		    trip->type == THERMAL_TRIP_HOT)
+			continue;
+
+		/*
+		 * Adjust the target states for uninitialized thermal instances
+		 * to the thermal zone temperature and the trip point threshold.
+		 */
+		turn_on = tz->temperature >= td->threshold;
+		list_for_each_entry(instance, &td->thermal_instances, trip_node) {
+			if (!instance->initialized)
+				bang_bang_set_instance_target(instance, turn_on);
+		}
+	}
+
+	tz->governor_data = (void *)true;
+}
+
+static void bang_bang_update_tz(struct thermal_zone_device *tz,
+				enum thermal_notify_event reason)
+{
+	/*
+	 * Let bang_bang_manage() know that it needs to walk trips after binding
+	 * a new cdev and after system resume.
+	 */
+	if (reason == THERMAL_TZ_BIND_CDEV || reason == THERMAL_TZ_RESUME)
+		tz->governor_data = NULL;
 }
 
 static struct thermal_governor thermal_gov_bang_bang = {
 	.name		= "bang_bang",
-	.throttle	= bang_bang_control,
+	.trip_crossed	= bang_bang_trip_crossed,
+	.manage		= bang_bang_manage,
+	.update_tz	= bang_bang_update_tz,
 };
-
-int thermal_gov_bang_bang_register(void)
-{
-	return thermal_register_governor(&thermal_gov_bang_bang);
-}
-
-void thermal_gov_bang_bang_unregister(void)
-{
-	thermal_unregister_governor(&thermal_gov_bang_bang);
-}
+THERMAL_GOVERNOR_DECLARE(thermal_gov_bang_bang);

@@ -1,20 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright 2008-2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright 2007 Nuova Systems, Inc.  All rights reserved.
- *
- * This program is free software; you may redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
  */
 
 #ifndef _ENIC_H_
@@ -30,22 +17,66 @@
 #include "vnic_nic.h"
 #include "vnic_rss.h"
 #include <linux/irq.h>
+#include <net/page_pool/helpers.h>
 
 #define DRV_NAME		"enic"
 #define DRV_DESCRIPTION		"Cisco VIC Ethernet NIC Driver"
-#define DRV_VERSION		"2.3.0.53"
-#define DRV_COPYRIGHT		"Copyright 2008-2013 Cisco Systems, Inc"
+
+#define PCI_SUBDEV_ID_CISCO_VIC_1225	0x085
+#define PCI_SUBDEV_ID_CISCO_VIC_1225T	0x0CE
+#define PCI_SUBDEV_ID_CISCO_VIC_1227	0x12E
+#define PCI_SUBDEV_ID_CISCO_VIC_1227T	0x139
+#define PCI_SUBDEV_ID_CISCO_VIC_1240	0x084
+#define PCI_SUBDEV_ID_CISCO_VIC_1280	0x04F
+#define PCI_SUBDEV_ID_CISCO_VIC_1285	0x0CD
+
+#define PCI_SUBDEV_ID_CISCO_VIC_1340	0x12C
+#define PCI_SUBDEV_ID_CISCO_VIC_1380	0x137
+#define PCI_SUBDEV_ID_CISCO_VIC_1385	0x14D
+#define PCI_SUBDEV_ID_CISCO_VIC_1387	0x15D
+
+#define PCI_SUBDEV_ID_CISCO_VIC_1440	0x0215
+#define PCI_SUBDEV_ID_CISCO_VIC_1455	0x0217
+#define PCI_SUBDEV_ID_CISCO_VIC_1457	0x0218
+#define PCI_SUBDEV_ID_CISCO_VIC_1467	0x02AF
+#define PCI_SUBDEV_ID_CISCO_VIC_1477	0x2B0
+#define PCI_SUBDEV_ID_CISCO_VIC_1480	0x0216
+#define PCI_SUBDEV_ID_CISCO_VIC_1485	0x0219
+#define PCI_SUBDEV_ID_CISCO_VIC_1487	0x021A
+#define PCI_SUBDEV_ID_CISCO_VIC_1495	0x024A
+#define PCI_SUBDEV_ID_CISCO_VIC_1497	0x024B
+#define PCI_SUBDEV_ID_CISCO_VIC_14425	0x02CF
+#define PCI_SUBDEV_ID_CISCO_VIC_14825	0x02D0
+
+#define PCI_SUBDEV_ID_CISCO_VIC_15230	0x02DF
+#define PCI_SUBDEV_ID_CISCO_VIC_15231	0x02DB
+#define PCI_SUBDEV_ID_CISCO_VIC_15235	0x02E4
+#define PCI_SUBDEV_ID_CISCO_VIC_15237	0x02F3
+#define PCI_SUBDEV_ID_CISCO_VIC_15238	0x02E8
+#define PCI_SUBDEV_ID_CISCO_VIC_15411	0x02DC
+#define PCI_SUBDEV_ID_CISCO_VIC_15412	0x02E2
+#define PCI_SUBDEV_ID_CISCO_VIC_15420	0x02DE
+#define PCI_SUBDEV_ID_CISCO_VIC_15422	0x02E1
+#define PCI_SUBDEV_ID_CISCO_VIC_15425	0x02F2
+#define PCI_SUBDEV_ID_CISCO_VIC_15427	0x02E0
+#define PCI_SUBDEV_ID_CISCO_VIC_15428	0x02DD
 
 #define ENIC_BARS_MAX		6
 
-#define ENIC_WQ_MAX		8
-#define ENIC_RQ_MAX		8
-#define ENIC_CQ_MAX		(ENIC_WQ_MAX + ENIC_RQ_MAX)
-#define ENIC_INTR_MAX		(ENIC_CQ_MAX + 2)
+#define ENIC_WQ_MAX		256
+#define ENIC_RQ_MAX		256
+#define ENIC_RQ_MIN_DEFAULT	8
 
 #define ENIC_WQ_NAPI_BUDGET	256
 
 #define ENIC_AIC_LARGE_PKT_DIFF	3
+
+enum ext_cq {
+	ENIC_RQ_CQ_ENTRY_SIZE_16,
+	ENIC_RQ_CQ_ENTRY_SIZE_32,
+	ENIC_RQ_CQ_ENTRY_SIZE_64,
+	ENIC_RQ_CQ_ENTRY_SIZE_MAX,
+};
 
 struct enic_msix_entry {
 	int requested;
@@ -91,6 +122,10 @@ struct enic_rx_coal {
 #define ENIC_SET_NAME			(1 << 2)
 #define ENIC_SET_INSTANCE		(1 << 3)
 #define ENIC_SET_HOST			(1 << 4)
+
+#define MAX_TSO			BIT(16)
+#define WQ_ENET_MAX_DESC_LEN	BIT(WQ_ENET_LEN_BITS)
+#define ENIC_DESC_MAX_SPLITS	(MAX_TSO / WQ_ENET_MAX_DESC_LEN + 1)
 
 struct enic_port_profile {
 	u32 set;
@@ -143,6 +178,60 @@ struct vxlan_offload {
 	u8 flags;
 };
 
+struct enic_wq_stats {
+	u64 packets;		/* pkts queued for Tx */
+	u64 stopped;		/* Tx ring almost full, queue stopped */
+	u64 wake;		/* Tx ring no longer full, queue woken up*/
+	u64 tso;		/* non-encap tso pkt */
+	u64 encap_tso;		/* encap tso pkt */
+	u64 encap_csum;		/* encap HW csum */
+	u64 csum_partial;	/* skb->ip_summed = CHECKSUM_PARTIAL */
+	u64 csum_none;		/* HW csum not required */
+	u64 bytes;		/* bytes queued for Tx */
+	u64 add_vlan;		/* HW adds vlan tag */
+	u64 cq_work;		/* Tx completions processed */
+	u64 cq_bytes;		/* Tx bytes processed */
+	u64 null_pkt;		/* skb length <= 0 */
+	u64 skb_linear_fail;	/* linearize failures */
+	u64 desc_full_awake;	/* TX ring full while queue awake */
+};
+
+struct enic_rq_stats {
+	u64 packets;			/* pkts received */
+	u64 bytes;			/* bytes received */
+	u64 l4_rss_hash;		/* hashed on l4 */
+	u64 l3_rss_hash;		/* hashed on l3 */
+	u64 csum_unnecessary;		/* HW verified csum */
+	u64 csum_unnecessary_encap;	/* HW verified csum on encap packet */
+	u64 vlan_stripped;		/* HW stripped vlan */
+	u64 napi_complete;		/* napi complete intr reenabled */
+	u64 napi_repoll;		/* napi poll again */
+	u64 bad_fcs;			/* bad pkts */
+	u64 pkt_truncated;		/* truncated pkts */
+	u64 no_skb;			/* out of skbs */
+	u64 desc_skip;			/* Rx pkt went into later buffer */
+	u64 pp_alloc_fail;		/* page pool alloc failure */
+};
+
+struct enic_wq {
+	spinlock_t lock;		/* spinlock for wq */
+	struct vnic_wq vwq;
+	struct enic_wq_stats stats;
+} ____cacheline_aligned;
+
+struct enic_rq {
+	struct vnic_rq vrq;
+	struct enic_rq_stats stats;
+	struct page_pool *pool;
+} ____cacheline_aligned;
+
+enum enic_vf_type {
+	ENIC_VF_TYPE_NONE,
+	ENIC_VF_TYPE_V1,
+	ENIC_VF_TYPE_USNIC,
+	ENIC_VF_TYPE_V2,
+};
+
 /* Per-instance private data structure */
 struct enic {
 	struct net_device *netdev;
@@ -154,8 +243,8 @@ struct enic {
 	struct work_struct reset;
 	struct work_struct tx_hang_reset;
 	struct work_struct change_mtu_work;
-	struct msix_entry msix_entry[ENIC_INTR_MAX];
-	struct enic_msix_entry msix[ENIC_INTR_MAX];
+	struct msix_entry *msix_entry;
+	struct enic_msix_entry *msix;
 	u32 msg_enable;
 	spinlock_t devcmd_lock;
 	u8 mac_addr[ETH_ALEN];
@@ -170,36 +259,43 @@ struct enic {
 #ifdef CONFIG_PCI_IOV
 	u16 num_vfs;
 #endif
+	enum enic_vf_type vf_type;
+	unsigned int enable_count;
 	spinlock_t enic_api_lock;
+	bool enic_api_busy;
 	struct enic_port_profile *pp;
 
-	/* work queue cache line section */
-	____cacheline_aligned struct vnic_wq wq[ENIC_WQ_MAX];
-	spinlock_t wq_lock[ENIC_WQ_MAX];
+	struct enic_wq *wq;
+	unsigned int wq_avail;
 	unsigned int wq_count;
 	u16 loop_enable;
 	u16 loop_tag;
 
-	/* receive queue cache line section */
-	____cacheline_aligned struct vnic_rq rq[ENIC_RQ_MAX];
+	struct enic_rq *rq;
+	unsigned int rq_avail;
 	unsigned int rq_count;
 	struct vxlan_offload vxlan;
-	u64 rq_truncated_pkts;
-	u64 rq_bad_fcs;
-	struct napi_struct napi[ENIC_RQ_MAX + ENIC_WQ_MAX];
+	struct napi_struct *napi;
 
-	/* interrupt resource cache line section */
-	____cacheline_aligned struct vnic_intr intr[ENIC_INTR_MAX];
+	struct vnic_intr *intr;
+	unsigned int intr_avail;
 	unsigned int intr_count;
 	u32 __iomem *legacy_pba;		/* memory-mapped */
 
-	/* completion queue cache line section */
-	____cacheline_aligned struct vnic_cq cq[ENIC_CQ_MAX];
+	struct vnic_cq *cq;
+	unsigned int cq_avail;
 	unsigned int cq_count;
 	struct enic_rfs_flw_tbl rfs_h;
-	u32 rx_copybreak;
 	u8 rss_key[ENIC_RSS_LEN];
 	struct vnic_gen_stats gen_stats;
+	enum ext_cq ext_cq;
+
+	/* Admin channel resources for SR-IOV MBOX */
+	bool has_admin_channel;
+	struct vnic_wq admin_wq;
+	struct vnic_rq admin_rq;
+	struct vnic_cq admin_cq[2];
+	struct vnic_intr admin_intr;
 };
 
 static inline struct net_device *vnic_get_netdev(struct vnic_dev *vdev)
@@ -217,6 +313,8 @@ static inline struct net_device *vnic_get_netdev(struct vnic_dev *vdev)
 	dev_warn(&(vdev)->pdev->dev, fmt, ##__VA_ARGS__)
 #define vdev_info(vdev, fmt, ...)					\
 	dev_info(&(vdev)->pdev->dev, fmt, ##__VA_ARGS__)
+#define vdev_dbg(vdev, fmt, ...)					\
+	dev_dbg(&(vdev)->pdev->dev, fmt, ##__VA_ARGS__)
 
 #define vdev_neterr(vdev, fmt, ...)					\
 	netdev_err(vnic_get_netdev(vdev), fmt, ##__VA_ARGS__)
@@ -240,21 +338,6 @@ static inline unsigned int enic_cq_wq(struct enic *enic, unsigned int wq)
 	return enic->rq_count + wq;
 }
 
-static inline unsigned int enic_legacy_io_intr(void)
-{
-	return 0;
-}
-
-static inline unsigned int enic_legacy_err_intr(void)
-{
-	return 1;
-}
-
-static inline unsigned int enic_legacy_notify_intr(void)
-{
-	return 2;
-}
-
 static inline unsigned int enic_msix_rq_intr(struct enic *enic,
 	unsigned int rq)
 {
@@ -267,21 +350,35 @@ static inline unsigned int enic_msix_wq_intr(struct enic *enic,
 	return enic->cq[enic_cq_wq(enic, wq)].interrupt_offset;
 }
 
+/* MSIX interrupts are organized as the error interrupt, then the notify
+ * interrupt followed by all the I/O interrupts.  The error interrupt needs
+ * to fit in 7 bits due to hardware constraints
+ */
+#define ENIC_MSIX_RESERVED_INTR 2
+#define ENIC_MSIX_ERR_INTR	0
+#define ENIC_MSIX_NOTIFY_INTR	1
+#define ENIC_MSIX_IO_INTR_BASE	ENIC_MSIX_RESERVED_INTR
+#define ENIC_MSIX_MIN_INTR	(ENIC_MSIX_RESERVED_INTR + 2)
+
+#define ENIC_LEGACY_IO_INTR	0
+#define ENIC_LEGACY_ERR_INTR	1
+#define ENIC_LEGACY_NOTIFY_INTR	2
+
 static inline unsigned int enic_msix_err_intr(struct enic *enic)
 {
-	return enic->rq_count + enic->wq_count;
+	return ENIC_MSIX_ERR_INTR;
 }
 
 static inline unsigned int enic_msix_notify_intr(struct enic *enic)
 {
-	return enic->rq_count + enic->wq_count + 1;
+	return ENIC_MSIX_NOTIFY_INTR;
 }
 
 static inline bool enic_is_err_intr(struct enic *enic, int intr)
 {
 	switch (vnic_dev_get_intr_mode(enic->vdev)) {
 	case VNIC_DEV_INTR_MODE_INTX:
-		return intr == enic_legacy_err_intr();
+		return intr == ENIC_LEGACY_ERR_INTR;
 	case VNIC_DEV_INTR_MODE_MSIX:
 		return intr == enic_msix_err_intr(enic);
 	case VNIC_DEV_INTR_MODE_MSI:
@@ -294,7 +391,7 @@ static inline bool enic_is_notify_intr(struct enic *enic, int intr)
 {
 	switch (vnic_dev_get_intr_mode(enic->vdev)) {
 	case VNIC_DEV_INTR_MODE_INTX:
-		return intr == enic_legacy_notify_intr();
+		return intr == ENIC_LEGACY_NOTIFY_INTR;
 	case VNIC_DEV_INTR_MODE_MSIX:
 		return intr == enic_msix_notify_intr(enic);
 	case VNIC_DEV_INTR_MODE_MSI:
@@ -305,7 +402,7 @@ static inline bool enic_is_notify_intr(struct enic *enic, int intr)
 
 static inline int enic_dma_map_check(struct enic *enic, dma_addr_t dma_addr)
 {
-	if (unlikely(pci_dma_mapping_error(enic->pdev, dma_addr))) {
+	if (unlikely(dma_mapping_error(&enic->pdev->dev, dma_addr))) {
 		net_warn_ratelimited("%s: PCI dma mapping failed!\n",
 				     enic->netdev->name);
 		enic->gen_stats.dma_map_error++;
@@ -322,5 +419,6 @@ int enic_is_valid_vf(struct enic *enic, int vf);
 int enic_is_dynamic(struct enic *enic);
 void enic_set_ethtool_ops(struct net_device *netdev);
 int __enic_set_rsskey(struct enic *enic);
+void enic_ext_cq(struct enic *enic);
 
 #endif /* _ENIC_H_ */

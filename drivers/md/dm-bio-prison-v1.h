@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2011-2017 Red Hat, Inc.
  *
@@ -34,6 +35,16 @@ struct dm_cell_key {
 };
 
 /*
+ * The range of a key (block_end - block_begin) must not
+ * exceed BIO_PRISON_MAX_RANGE.  Also the range must not
+ * cross a similarly sized boundary.
+ *
+ * Must be a power of 2.
+ */
+#define BIO_PRISON_MAX_RANGE 1024
+#define BIO_PRISON_MAX_RANGE_SHIFT 10
+
+/*
  * Treat this as opaque, only in header so callers can manage allocation
  * themselves.
  */
@@ -62,15 +73,9 @@ void dm_bio_prison_free_cell(struct dm_bio_prison *prison,
 			     struct dm_bio_prison_cell *cell);
 
 /*
- * Creates, or retrieves a cell that overlaps the given key.
- *
- * Returns 1 if pre-existing cell returned, zero if new cell created using
- * @cell_prealloc.
+ * Returns false if key is beyond BIO_PRISON_MAX_RANGE or spans a boundary.
  */
-int dm_get_cell(struct dm_bio_prison *prison,
-		struct dm_cell_key *key,
-		struct dm_bio_prison_cell *cell_prealloc,
-		struct dm_bio_prison_cell **cell_result);
+bool dm_cell_key_has_valid_range(struct dm_cell_key *key);
 
 /*
  * An atomic op that combines retrieving or creating a cell, and adding a
@@ -100,19 +105,6 @@ void dm_cell_error(struct dm_bio_prison *prison,
 void dm_cell_visit_release(struct dm_bio_prison *prison,
 			   void (*visit_fn)(void *, struct dm_bio_prison_cell *),
 			   void *context, struct dm_bio_prison_cell *cell);
-
-/*
- * Rather than always releasing the prisoners in a cell, the client may
- * want to promote one of them to be the new holder.  There is a race here
- * though between releasing an empty cell, and other threads adding new
- * inmates.  So this function makes the decision with its lock held.
- *
- * This function can have two outcomes:
- * i) An inmate is promoted to be the holder of the cell (return value of 0).
- * ii) The cell has no inmate for promotion and is released (return value of 1).
- */
-int dm_cell_promote_or_release(struct dm_bio_prison *prison,
-			       struct dm_bio_prison_cell *cell);
 
 /*----------------------------------------------------------------*/
 

@@ -6,30 +6,35 @@
 #define _TRACE_XEN_H
 
 #include <linux/tracepoint.h>
-#include <asm/paravirt_types.h>
+#include <asm/xen/hypervisor.h>
 #include <asm/xen/trace_types.h>
 
 struct multicall_entry;
 
 /* Multicalls */
-DECLARE_EVENT_CLASS(xen_mc__batch,
-	    TP_PROTO(enum paravirt_lazy_mode mode),
-	    TP_ARGS(mode),
+TRACE_EVENT(xen_mc_batch,
+	    TP_PROTO(unsigned long flags),
+	    TP_ARGS(flags),
 	    TP_STRUCT__entry(
-		    __field(enum paravirt_lazy_mode, mode)
+		    __field(unsigned long, flags)
 		    ),
-	    TP_fast_assign(__entry->mode = mode),
-	    TP_printk("start batch LAZY_%s",
-		      (__entry->mode == PARAVIRT_LAZY_MMU) ? "MMU" :
-		      (__entry->mode == PARAVIRT_LAZY_CPU) ? "CPU" : "NONE")
+	    TP_fast_assign(__entry->flags = flags),
+	    TP_printk("start batch lazy flags %lx", __entry->flags)
 	);
-#define DEFINE_XEN_MC_BATCH(name)			\
-	DEFINE_EVENT(xen_mc__batch, name,		\
-		TP_PROTO(enum paravirt_lazy_mode mode),	\
-		     TP_ARGS(mode))
 
-DEFINE_XEN_MC_BATCH(xen_mc_batch);
-DEFINE_XEN_MC_BATCH(xen_mc_issue);
+TRACE_EVENT(xen_mc_issue,
+	    TP_PROTO(bool flush, unsigned long flags),
+	    TP_ARGS(flush, flags),
+	    TP_STRUCT__entry(
+		    __field(unsigned long, flags)
+		    __field(bool, flush)
+		    ),
+	    TP_fast_assign(__entry->flush = flush;
+			   __entry->flags = flags;
+		    ),
+	    TP_printk("flush: %s, flags %lx",
+		      __entry->flush ? "yes" : "no", __entry->flags)
+	);
 
 TRACE_DEFINE_SIZEOF(ulong);
 
@@ -66,14 +71,18 @@ TRACE_EVENT(xen_mc_callback,
 	    TP_PROTO(xen_mc_callback_fn_t fn, void *data),
 	    TP_ARGS(fn, data),
 	    TP_STRUCT__entry(
-		    __field(xen_mc_callback_fn_t, fn)
+		    /*
+		     * Use field_struct to avoid is_signed_type()
+		     * comparison of a function pointer.
+		     */
+		    __field_struct(xen_mc_callback_fn_t, fn)
 		    __field(void *, data)
 		    ),
 	    TP_fast_assign(
 		    __entry->fn = fn;
 		    __entry->data = data;
 		    ),
-	    TP_printk("callback %pf, data %p",
+	    TP_printk("callback %ps, data %p",
 		      __entry->fn, __entry->data)
 	);
 
@@ -125,9 +134,10 @@ TRACE_EVENT(xen_mc_extend_args,
 		      __entry->res == XEN_MC_XE_NO_SPACE ? "NO_SPACE" : "???")
 	);
 
-TRACE_DEFINE_SIZEOF(pteval_t);
 /* mmu */
-DECLARE_EVENT_CLASS(xen_mmu__set_pte,
+TRACE_DEFINE_SIZEOF(pteval_t);
+
+TRACE_EVENT(xen_mmu_set_pte,
 	    TP_PROTO(pte_t *ptep, pte_t pteval),
 	    TP_ARGS(ptep, pteval),
 	    TP_STRUCT__entry(
@@ -138,33 +148,6 @@ DECLARE_EVENT_CLASS(xen_mmu__set_pte,
 			   __entry->pteval = pteval.pte),
 	    TP_printk("ptep %p pteval %0*llx (raw %0*llx)",
 		      __entry->ptep,
-		      (int)sizeof(pteval_t) * 2, (unsigned long long)pte_val(native_make_pte(__entry->pteval)),
-		      (int)sizeof(pteval_t) * 2, (unsigned long long)__entry->pteval)
-	);
-
-#define DEFINE_XEN_MMU_SET_PTE(name)				\
-	DEFINE_EVENT(xen_mmu__set_pte, name,			\
-		     TP_PROTO(pte_t *ptep, pte_t pteval),	\
-		     TP_ARGS(ptep, pteval))
-
-DEFINE_XEN_MMU_SET_PTE(xen_mmu_set_pte);
-
-TRACE_EVENT(xen_mmu_set_pte_at,
-	    TP_PROTO(struct mm_struct *mm, unsigned long addr,
-		     pte_t *ptep, pte_t pteval),
-	    TP_ARGS(mm, addr, ptep, pteval),
-	    TP_STRUCT__entry(
-		    __field(struct mm_struct *, mm)
-		    __field(unsigned long, addr)
-		    __field(pte_t *, ptep)
-		    __field(pteval_t, pteval)
-		    ),
-	    TP_fast_assign(__entry->mm = mm;
-			   __entry->addr = addr;
-			   __entry->ptep = ptep;
-			   __entry->pteval = pteval.pte),
-	    TP_printk("mm %p addr %lx ptep %p pteval %0*llx (raw %0*llx)",
-		      __entry->mm, __entry->addr, __entry->ptep,
 		      (int)sizeof(pteval_t) * 2, (unsigned long long)pte_val(native_make_pte(__entry->pteval)),
 		      (int)sizeof(pteval_t) * 2, (unsigned long long)__entry->pteval)
 	);
@@ -185,37 +168,6 @@ TRACE_EVENT(xen_mmu_set_pmd,
 		      (int)sizeof(pmdval_t) * 2, (unsigned long long)pmd_val(native_make_pmd(__entry->pmdval)),
 		      (int)sizeof(pmdval_t) * 2, (unsigned long long)__entry->pmdval)
 	);
-
-#ifdef CONFIG_X86_PAE
-DEFINE_XEN_MMU_SET_PTE(xen_mmu_set_pte_atomic);
-
-TRACE_EVENT(xen_mmu_pte_clear,
-	    TP_PROTO(struct mm_struct *mm, unsigned long addr, pte_t *ptep),
-	    TP_ARGS(mm, addr, ptep),
-	    TP_STRUCT__entry(
-		    __field(struct mm_struct *, mm)
-		    __field(unsigned long, addr)
-		    __field(pte_t *, ptep)
-		    ),
-	    TP_fast_assign(__entry->mm = mm;
-			   __entry->addr = addr;
-			   __entry->ptep = ptep),
-	    TP_printk("mm %p addr %lx ptep %p",
-		      __entry->mm, __entry->addr, __entry->ptep)
-	);
-
-TRACE_EVENT(xen_mmu_pmd_clear,
-	    TP_PROTO(pmd_t *pmdp),
-	    TP_ARGS(pmdp),
-	    TP_STRUCT__entry(
-		    __field(pmd_t *, pmdp)
-		    ),
-	    TP_fast_assign(__entry->pmdp = pmdp),
-	    TP_printk("pmdp %p", __entry->pmdp)
-	);
-#endif
-
-#if CONFIG_PGTABLE_LEVELS >= 4
 
 TRACE_DEFINE_SIZEOF(pudval_t);
 
@@ -252,24 +204,6 @@ TRACE_EVENT(xen_mmu_set_p4d,
 		      (int)sizeof(p4dval_t) * 2, (unsigned long long)pgd_val(native_make_pgd(__entry->p4dval)),
 		      (int)sizeof(p4dval_t) * 2, (unsigned long long)__entry->p4dval)
 	);
-#else
-
-TRACE_EVENT(xen_mmu_set_pud,
-	    TP_PROTO(pud_t *pudp, pud_t pudval),
-	    TP_ARGS(pudp, pudval),
-	    TP_STRUCT__entry(
-		    __field(pud_t *, pudp)
-		    __field(pudval_t, pudval)
-		    ),
-	    TP_fast_assign(__entry->pudp = pudp;
-			   __entry->pudval = native_pud_val(pudval)),
-	    TP_printk("pudp %p pudval %0*llx (raw %0*llx)",
-		      __entry->pudp,
-		      (int)sizeof(pudval_t) * 2, (unsigned long long)pgd_val(native_make_pgd(__entry->pudval)),
-		      (int)sizeof(pudval_t) * 2, (unsigned long long)__entry->pudval)
-	);
-
-#endif
 
 DECLARE_EVENT_CLASS(xen_mmu_ptep_modify_prot,
 	    TP_PROTO(struct mm_struct *mm, unsigned long addr,
@@ -362,7 +296,7 @@ TRACE_EVENT(xen_mmu_flush_tlb_one_user,
 	    TP_printk("addr %lx", __entry->addr)
 	);
 
-TRACE_EVENT(xen_mmu_flush_tlb_others,
+TRACE_EVENT(xen_mmu_flush_tlb_multi,
 	    TP_PROTO(const struct cpumask *cpus, struct mm_struct *mm,
 		     unsigned long addr, unsigned long end),
 	    TP_ARGS(cpus, mm, addr, end),
@@ -467,7 +401,6 @@ TRACE_EVENT(xen_cpu_set_ldt,
 	    TP_printk("addr %p  entries %u",
 		      __entry->addr, __entry->entries)
 	);
-
 
 #endif /*  _TRACE_XEN_H */
 

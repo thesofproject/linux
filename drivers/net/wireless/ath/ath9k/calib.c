@@ -16,32 +16,25 @@
 
 #include "hw.h"
 #include "hw-ops.h"
+#include <linux/sort.h>
 #include <linux/export.h>
 
 /* Common calibration code */
 
+static int rcmp_i16(const void *x, const void *y)
+{
+	/* Sort in reverse order. */
+	return *(int16_t *)y - *(int16_t *)x;
+}
 
 static int16_t ath9k_hw_get_nf_hist_mid(int16_t *nfCalBuffer)
 {
-	int16_t nfval;
-	int16_t sort[ATH9K_NF_CAL_HIST_MAX];
-	int i, j;
+	int16_t nfcal[ATH9K_NF_CAL_HIST_MAX];
 
-	for (i = 0; i < ATH9K_NF_CAL_HIST_MAX; i++)
-		sort[i] = nfCalBuffer[i];
+	memcpy(nfcal, nfCalBuffer, sizeof(nfcal));
+	sort(nfcal, ATH9K_NF_CAL_HIST_MAX, sizeof(int16_t), rcmp_i16, NULL);
 
-	for (i = 0; i < ATH9K_NF_CAL_HIST_MAX - 1; i++) {
-		for (j = 1; j < ATH9K_NF_CAL_HIST_MAX - i; j++) {
-			if (sort[j] > sort[j - 1]) {
-				nfval = sort[j];
-				sort[j] = sort[j - 1];
-				sort[j - 1] = nfval;
-			}
-		}
-	}
-	nfval = sort[(ATH9K_NF_CAL_HIST_MAX - 1) >> 1];
-
-	return nfval;
+	return nfcal[(ATH9K_NF_CAL_HIST_MAX - 1) >> 1];
 }
 
 static struct ath_nf_limits *ath9k_hw_get_nf_limits(struct ath_hw *ah,
@@ -176,6 +169,7 @@ void ath9k_hw_reset_calibration(struct ath_hw *ah,
 
 	ath9k_hw_setup_calibration(ah, currCal);
 
+	ah->cal_start_time = jiffies;
 	currCal->calState = CAL_RUNNING;
 
 	for (i = 0; i < AR5416_MAX_CHAINS; i++) {
@@ -209,14 +203,17 @@ bool ath9k_hw_reset_calvalid(struct ath_hw *ah)
 		return true;
 	}
 
-	if (!(ah->supp_cals & currCal->calData->calType))
-		return true;
+	currCal = ah->cal_list;
+	do {
+		ath_dbg(common, CALIBRATE, "Resetting Cal %d state for channel %u\n",
+			currCal->calData->calType,
+			ah->curchan->chan->center_freq);
 
-	ath_dbg(common, CALIBRATE, "Resetting Cal %d state for channel %u\n",
-		currCal->calData->calType, ah->curchan->chan->center_freq);
+		ah->caldata->CalValid &= ~currCal->calData->calType;
+		currCal->calState = CAL_WAITING;
 
-	ah->caldata->CalValid &= ~currCal->calData->calType;
-	currCal->calState = CAL_WAITING;
+		currCal = currCal->calNext;
+	} while (currCal != ah->cal_list);
 
 	return false;
 }
@@ -227,17 +224,17 @@ void ath9k_hw_start_nfcal(struct ath_hw *ah, bool update)
 	if (ah->caldata)
 		set_bit(NFCAL_PENDING, &ah->caldata->cal_flags);
 
-	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL,
+	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 		    AR_PHY_AGC_CONTROL_ENABLE_NF);
 
 	if (update)
-		REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL,
+		REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 		    AR_PHY_AGC_CONTROL_NO_UPDATE_NF);
 	else
-		REG_SET_BIT(ah, AR_PHY_AGC_CONTROL,
+		REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 		    AR_PHY_AGC_CONTROL_NO_UPDATE_NF);
 
-	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
+	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah), AR_PHY_AGC_CONTROL_NF);
 }
 
 int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
@@ -247,7 +244,7 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	u8 chainmask = (ah->rxchainmask << 3) | ah->rxchainmask;
 	struct ath_common *common = ath9k_hw_common(ah);
 	s16 default_nf = ath9k_hw_get_nf_limits(ah, chan)->nominal;
-	u32 bb_agc_ctl = REG_READ(ah, AR_PHY_AGC_CONTROL);
+	u32 bb_agc_ctl = REG_READ(ah, AR_PHY_AGC_CONTROL(ah));
 
 	if (ah->caldata)
 		h = ah->caldata->nfCalHist;
@@ -282,7 +279,7 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	 * (or after end rx/tx frame if ongoing)
 	 */
 	if (bb_agc_ctl & AR_PHY_AGC_CONTROL_NF) {
-		REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
+		REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL(ah), AR_PHY_AGC_CONTROL_NF);
 		REG_RMW_BUFFER_FLUSH(ah);
 		ENABLE_REG_RMW_BUFFER(ah);
 	}
@@ -291,11 +288,11 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	 * Load software filtered NF value into baseband internal minCCApwr
 	 * variable.
 	 */
-	REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL,
+	REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 		    AR_PHY_AGC_CONTROL_ENABLE_NF);
-	REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL,
+	REG_CLR_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 		    AR_PHY_AGC_CONTROL_NO_UPDATE_NF);
-	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
+	REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah), AR_PHY_AGC_CONTROL_NF);
 	REG_RMW_BUFFER_FLUSH(ah);
 
 	/*
@@ -305,7 +302,7 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	 * (11n max length 22.1 msec)
 	 */
 	for (j = 0; j < 22200; j++) {
-		if ((REG_READ(ah, AR_PHY_AGC_CONTROL) &
+		if ((REG_READ(ah, AR_PHY_AGC_CONTROL(ah)) &
 			      AR_PHY_AGC_CONTROL_NF) == 0)
 			break;
 		udelay(10);
@@ -317,12 +314,12 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	if (bb_agc_ctl & AR_PHY_AGC_CONTROL_NF) {
 		ENABLE_REG_RMW_BUFFER(ah);
 		if (bb_agc_ctl & AR_PHY_AGC_CONTROL_ENABLE_NF)
-			REG_SET_BIT(ah, AR_PHY_AGC_CONTROL,
+			REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 				    AR_PHY_AGC_CONTROL_ENABLE_NF);
 		if (bb_agc_ctl & AR_PHY_AGC_CONTROL_NO_UPDATE_NF)
-			REG_SET_BIT(ah, AR_PHY_AGC_CONTROL,
+			REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah),
 				    AR_PHY_AGC_CONTROL_NO_UPDATE_NF);
-		REG_SET_BIT(ah, AR_PHY_AGC_CONTROL, AR_PHY_AGC_CONTROL_NF);
+		REG_SET_BIT(ah, AR_PHY_AGC_CONTROL(ah), AR_PHY_AGC_CONTROL_NF);
 		REG_RMW_BUFFER_FLUSH(ah);
 	}
 
@@ -338,7 +335,7 @@ int ath9k_hw_loadnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	if (j == 22200) {
 		ath_dbg(common, ANY,
 			"Timeout while waiting for nf to load: AR_PHY_AGC_CONTROL=0x%x\n",
-			REG_READ(ah, AR_PHY_AGC_CONTROL));
+			REG_READ(ah, AR_PHY_AGC_CONTROL(ah)));
 		return -ETIMEDOUT;
 	}
 
@@ -406,7 +403,7 @@ bool ath9k_hw_getnf(struct ath_hw *ah, struct ath9k_channel *chan)
 	struct ieee80211_channel *c = chan->chan;
 	struct ath9k_hw_cal_data *caldata = ah->caldata;
 
-	if (REG_READ(ah, AR_PHY_AGC_CONTROL) & AR_PHY_AGC_CONTROL_NF) {
+	if (REG_READ(ah, AR_PHY_AGC_CONTROL(ah)) & AR_PHY_AGC_CONTROL_NF) {
 		ath_dbg(common, CALIBRATE,
 			"NF did not complete in calibration window\n");
 		return false;
@@ -474,7 +471,7 @@ void ath9k_hw_bstuck_nfcal(struct ath_hw *ah)
 	 */
 	if (!test_bit(NFCAL_PENDING, &caldata->cal_flags))
 		ath9k_hw_start_nfcal(ah, true);
-	else if (!(REG_READ(ah, AR_PHY_AGC_CONTROL) & AR_PHY_AGC_CONTROL_NF))
+	else if (!(REG_READ(ah, AR_PHY_AGC_CONTROL(ah)) & AR_PHY_AGC_CONTROL_NF))
 		ath9k_hw_getnf(ah, ah->curchan);
 
 	set_bit(NFCAL_INTF, &caldata->cal_flags);

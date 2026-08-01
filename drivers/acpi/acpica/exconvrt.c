@@ -3,7 +3,7 @@
  *
  * Module Name: exconvrt - Object conversion routines
  *
- * Copyright (C) 2000 - 2018, Intel Corp.
+ * Copyright (C) 2000 - 2026, Intel Corp.
  *
  *****************************************************************************/
 
@@ -17,7 +17,8 @@ ACPI_MODULE_NAME("exconvrt")
 
 /* Local prototypes */
 static u32
-acpi_ex_convert_to_ascii(u64 integer, u16 base, u8 *string, u8 max_length);
+acpi_ex_convert_to_ascii(u64 integer,
+			 u16 base, u8 *string, u8 max_length, u8 leading_zeros);
 
 /*******************************************************************************
  *
@@ -225,8 +226,8 @@ acpi_ex_convert_to_buffer(union acpi_operand_object *obj_desc,
 		/* Copy the string to the buffer */
 
 		new_buf = return_desc->buffer.pointer;
-		strncpy((char *)new_buf, (char *)obj_desc->string.pointer,
-			obj_desc->string.length);
+		memcpy((char *)new_buf, (char *)obj_desc->string.pointer,
+		       obj_desc->string.length);
 		break;
 
 	default:
@@ -249,6 +250,7 @@ acpi_ex_convert_to_buffer(union acpi_operand_object *obj_desc,
  *              base            - ACPI_STRING_DECIMAL or ACPI_STRING_HEX
  *              string          - Where the string is returned
  *              data_width      - Size of data item to be converted, in bytes
+ *              leading_zeros   - Allow leading zeros
  *
  * RETURN:      Actual string length
  *
@@ -257,7 +259,8 @@ acpi_ex_convert_to_buffer(union acpi_operand_object *obj_desc,
  ******************************************************************************/
 
 static u32
-acpi_ex_convert_to_ascii(u64 integer, u16 base, u8 *string, u8 data_width)
+acpi_ex_convert_to_ascii(u64 integer,
+			 u16 base, u8 *string, u8 data_width, u8 leading_zeros)
 {
 	u64 digit;
 	u32 i;
@@ -266,7 +269,8 @@ acpi_ex_convert_to_ascii(u64 integer, u16 base, u8 *string, u8 data_width)
 	u32 hex_length;
 	u32 decimal_length;
 	u32 remainder;
-	u8 supress_zeros;
+	u8 supress_zeros = !leading_zeros;
+	u8 hex_char;
 
 	ACPI_FUNCTION_ENTRY();
 
@@ -293,7 +297,6 @@ acpi_ex_convert_to_ascii(u64 integer, u16 base, u8 *string, u8 data_width)
 			break;
 		}
 
-		supress_zeros = TRUE;	/* No leading zeros */
 		remainder = 0;
 
 		for (i = decimal_length; i > 0; i--) {
@@ -323,13 +326,22 @@ acpi_ex_convert_to_ascii(u64 integer, u16 base, u8 *string, u8 data_width)
 
 		/* hex_length: 2 ascii hex chars per data byte */
 
-		hex_length = ACPI_MUL_2(data_width);
+		hex_length = (data_width * 2);
 		for (i = 0, j = (hex_length - 1); i < hex_length; i++, j--) {
 
 			/* Get one hex digit, most significant digits first */
 
-			string[k] = (u8)
+			hex_char = (u8)
 			    acpi_ut_hex_to_ascii_char(integer, ACPI_MUL_4(j));
+
+			/* Supress leading zeros until the first non-zero character */
+
+			if (hex_char == ACPI_ASCII_ZERO && supress_zeros) {
+				continue;
+			}
+
+			supress_zeros = FALSE;
+			string[k] = hex_char;
 			k++;
 		}
 		break;
@@ -364,7 +376,8 @@ acpi_ex_convert_to_ascii(u64 integer, u16 base, u8 *string, u8 data_width)
  *
  * RETURN:      Status
  *
- * DESCRIPTION: Convert an ACPI Object to a string
+ * DESCRIPTION: Convert an ACPI Object to a string. Supports both implicit
+ *              and explicit conversions and related rules.
  *
  ******************************************************************************/
 
@@ -378,6 +391,7 @@ acpi_ex_convert_to_string(union acpi_operand_object * obj_desc,
 	u32 string_length = 0;
 	u16 base = 16;
 	u8 separator = ',';
+	u8 leading_zeros;
 
 	ACPI_FUNCTION_TRACE_PTR(ex_convert_to_string, obj_desc);
 
@@ -393,18 +407,32 @@ acpi_ex_convert_to_string(union acpi_operand_object * obj_desc,
 
 		switch (type) {
 		case ACPI_EXPLICIT_CONVERT_DECIMAL:
-
-			/* Make room for maximum decimal number */
-
+			/*
+			 * From to_decimal_string, integer source.
+			 *
+			 * Make room for the maximum decimal number size
+			 */
 			string_length = ACPI_MAX_DECIMAL_DIGITS;
+			leading_zeros = FALSE;
 			base = 10;
 			break;
 
+		case ACPI_EXPLICIT_CONVERT_HEX:
+			/*
+			 * From to_hex_string.
+			 *
+			 * Supress leading zeros and append "0x"
+			 */
+			string_length =
+			    ACPI_MUL_2(acpi_gbl_integer_byte_width) + 2;
+			leading_zeros = FALSE;
+			break;
 		default:
 
 			/* Two hex string characters for each integer byte */
 
 			string_length = ACPI_MUL_2(acpi_gbl_integer_byte_width);
+			leading_zeros = TRUE;
 			break;
 		}
 
@@ -419,17 +447,32 @@ acpi_ex_convert_to_string(union acpi_operand_object * obj_desc,
 		}
 
 		new_buf = return_desc->buffer.pointer;
+		if (type == ACPI_EXPLICIT_CONVERT_HEX) {
+
+			/* Append "0x" prefix for explicit hex conversion */
+
+			*new_buf++ = '0';
+			*new_buf++ = 'x';
+		}
 
 		/* Convert integer to string */
 
 		string_length =
 		    acpi_ex_convert_to_ascii(obj_desc->integer.value, base,
 					     new_buf,
-					     acpi_gbl_integer_byte_width);
+					     acpi_gbl_integer_byte_width,
+					     leading_zeros);
 
 		/* Null terminate at the correct place */
 
 		return_desc->string.length = string_length;
+		if (type == ACPI_EXPLICIT_CONVERT_HEX) {
+
+			/* Take "0x" prefix into account */
+
+			return_desc->string.length += 2;
+		}
+
 		new_buf[string_length] = 0;
 		break;
 
@@ -440,9 +483,12 @@ acpi_ex_convert_to_string(union acpi_operand_object * obj_desc,
 		switch (type) {
 		case ACPI_EXPLICIT_CONVERT_DECIMAL:	/* Used by to_decimal_string */
 			/*
-			 * From ACPI: "If Data is a buffer, it is converted to a string of
-			 * decimal values separated by commas."
+			 * Explicit conversion from the to_decimal_string ASL operator.
+			 *
+			 * From ACPI: "If the input is a buffer, it is converted to a
+			 * a string of decimal values separated by commas."
 			 */
+			leading_zeros = FALSE;
 			base = 10;
 
 			/*
@@ -462,20 +508,31 @@ acpi_ex_convert_to_string(union acpi_operand_object * obj_desc,
 
 		case ACPI_IMPLICIT_CONVERT_HEX:
 			/*
+			 * Implicit buffer-to-string conversion
+			 *
 			 * From the ACPI spec:
-			 *"The entire contents of the buffer are converted to a string of
+			 * "The entire contents of the buffer are converted to a string of
 			 * two-character hexadecimal numbers, each separated by a space."
+			 *
+			 * Each hex number is prefixed with 0x (11/2018)
 			 */
+			leading_zeros = TRUE;
 			separator = ' ';
-			string_length = (obj_desc->buffer.length * 3);
+			string_length = (obj_desc->buffer.length * 5);
 			break;
 
-		case ACPI_EXPLICIT_CONVERT_HEX:	/* Used by to_hex_string */
+		case ACPI_EXPLICIT_CONVERT_HEX:
 			/*
+			 * Explicit conversion from the to_hex_string ASL operator.
+			 *
 			 * From ACPI: "If Data is a buffer, it is converted to a string of
 			 * hexadecimal values separated by commas."
+			 *
+			 * Each hex number is prefixed with 0x (11/2018)
 			 */
-			string_length = (obj_desc->buffer.length * 3);
+			leading_zeros = TRUE;
+			separator = ',';
+			string_length = (obj_desc->buffer.length * 5);
 			break;
 
 		default:
@@ -504,10 +561,22 @@ acpi_ex_convert_to_string(union acpi_operand_object * obj_desc,
 		 * (separated by commas or spaces)
 		 */
 		for (i = 0; i < obj_desc->buffer.length; i++) {
+			if (base == 16) {
+
+				/* Emit 0x prefix for explicit/implicit hex conversion */
+
+				*new_buf++ = '0';
+				*new_buf++ = 'x';
+			}
+
 			new_buf += acpi_ex_convert_to_ascii((u64) obj_desc->
 							    buffer.pointer[i],
-							    base, new_buf, 1);
-			*new_buf++ = separator;	/* each separated by a comma or space */
+							    base, new_buf, 1,
+							    leading_zeros);
+
+			/* Each digit is separated by either a comma or space */
+
+			*new_buf++ = separator;
 		}
 
 		/*

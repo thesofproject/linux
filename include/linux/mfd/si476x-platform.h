@@ -1,25 +1,16 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * include/media/si476x-platform.h -- Platform data specific definitions
  *
  * Copyright (C) 2013 Andrey Smirnov
  *
  * Author: Andrey Smirnov <andrew.smirnov@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
  */
 
 #ifndef __SI476X_PLATFORM_H__
 #define __SI476X_PLATFORM_H__
 
-/* It is possible to select one of the four adresses using pins A0
+/* It is possible to select one of the four addresses using pins A0
  * and A1 on SI476x */
 #define SI476X_I2C_ADDR_1	0x60
 #define SI476X_I2C_ADDR_2	0x61

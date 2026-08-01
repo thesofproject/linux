@@ -23,8 +23,6 @@
  *  675 Mass Ave, Cambridge, MA 02139, USA.
  *
  *  Notes :
- *	This file must ONLY be built when CONFIG_GPIOLIB=y and
- *	 CONFIG_ALCHEMY_GPIO_INDIRECT=n, otherwise compilation will fail!
  *	au1000 SoC have only one GPIO block : GPIO1
  *	Au1100, Au15x0, Au12x0 have a second one : GPIO2
  *	Au1300 is totally different: 1 block with up to 128 GPIOs
@@ -32,8 +30,9 @@
 
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/property.h>
 #include <linux/types.h>
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <asm/mach-au1x00/gpio-au1000.h>
 #include <asm/mach-au1x00/gpio-au1300.h>
 
@@ -42,9 +41,11 @@ static int gpio2_get(struct gpio_chip *chip, unsigned offset)
 	return !!alchemy_gpio2_get_value(offset + ALCHEMY_GPIO2_BASE);
 }
 
-static void gpio2_set(struct gpio_chip *chip, unsigned offset, int value)
+static int gpio2_set(struct gpio_chip *chip, unsigned offset, int value)
 {
 	alchemy_gpio2_set_value(offset + ALCHEMY_GPIO2_BASE, value);
+
+	return 0;
 }
 
 static int gpio2_direction_input(struct gpio_chip *chip, unsigned offset)
@@ -70,10 +71,12 @@ static int gpio1_get(struct gpio_chip *chip, unsigned offset)
 	return !!alchemy_gpio1_get_value(offset + ALCHEMY_GPIO1_BASE);
 }
 
-static void gpio1_set(struct gpio_chip *chip,
+static int gpio1_set(struct gpio_chip *chip,
 				unsigned offset, int value)
 {
 	alchemy_gpio1_set_value(offset + ALCHEMY_GPIO1_BASE, value);
+
+	return 0;
 }
 
 static int gpio1_direction_input(struct gpio_chip *chip, unsigned offset)
@@ -93,7 +96,26 @@ static int gpio1_to_irq(struct gpio_chip *chip, unsigned offset)
 	return alchemy_gpio1_to_irq(offset + ALCHEMY_GPIO1_BASE);
 }
 
-struct gpio_chip alchemy_gpio_chip[] = {
+const struct software_node alchemy_gpio1_node = {
+	.name = "alchemy-gpio1",
+};
+
+const struct software_node alchemy_gpio2_node = {
+	.name = "alchemy-gpio2",
+};
+
+const struct software_node alchemy_gpic_node = {
+	.name = "alchemy-gpic",
+};
+
+static const struct software_node *alchemy_gpio_node_group[] = {
+	&alchemy_gpio1_node,
+	&alchemy_gpio2_node,
+	&alchemy_gpic_node,
+	NULL
+};
+
+static struct gpio_chip alchemy_gpio_chip[] = {
 	[0] = {
 		.label			= "alchemy-gpio1",
 		.direction_input	= gpio1_direction_input,
@@ -121,9 +143,11 @@ static int alchemy_gpic_get(struct gpio_chip *chip, unsigned int off)
 	return !!au1300_gpio_get_value(off + AU1300_GPIO_BASE);
 }
 
-static void alchemy_gpic_set(struct gpio_chip *chip, unsigned int off, int v)
+static int alchemy_gpic_set(struct gpio_chip *chip, unsigned int off, int v)
 {
 	au1300_gpio_set_value(off + AU1300_GPIO_BASE, v);
+
+	return 0;
 }
 
 static int alchemy_gpic_dir_input(struct gpio_chip *chip, unsigned int off)
@@ -152,6 +176,29 @@ static struct gpio_chip au1300_gpiochip = {
 	.base			= AU1300_GPIO_BASE,
 	.ngpio			= AU1300_GPIO_NUM,
 };
+
+/*
+ * Software nodes must be registered before board-specific code (that runs
+ * at arch_initcall level) attempts to use them as GPIO targets or as fwnodes
+ * for registered devices. We can not do registration in alchemy_gpiochip_init
+ * because it also runs as arch_initcall and runs after board-specific code
+ * because of the link order, and so we do it at postcore_initcall level.
+ */
+static int __init alchemy_gpio_nodes_init(void)
+{
+	int ret;
+
+	ret = software_node_register_node_group(alchemy_gpio_node_group);
+	if (ret)
+		return ret;
+
+	alchemy_gpio_chip[0].fwnode = software_node_fwnode(&alchemy_gpio1_node);
+	alchemy_gpio_chip[1].fwnode = software_node_fwnode(&alchemy_gpio2_node);
+	au1300_gpiochip.fwnode = software_node_fwnode(&alchemy_gpic_node);
+
+	return 0;
+}
+postcore_initcall(alchemy_gpio_nodes_init);
 
 static int __init alchemy_gpiochip_init(void)
 {

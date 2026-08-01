@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* DVB USB compliant Linux driver for the AZUREWAVE DVB-S/S2 USB2.0 (AZ6027)
  * receiver.
  *
  * Copyright (C) 2009 Adams.Xu <adams.xu@azwave.com.cn>
  *
- *	This program is free software; you can redistribute it and/or modify it
- *	under the terms of the GNU General Public License as published by the Free
- *	Software Foundation, version 2.
- *
- * see Documentation/dvb/README.dvb-usb for more information
+ * see Documentation/driver-api/media/drivers/dvb-usb.rst for more information
  */
 #include "az6027.h"
 
@@ -394,6 +391,7 @@ static struct rc_map_table rc_map_az6027_table[] = {
 /* remote control stuff (does not work with my box) */
 static int az6027_rc_query(struct dvb_usb_device *d, u32 *event, int *state)
 {
+	*state = REMOTE_NO_KEY_PRESSED;
 	return 0;
 }
 
@@ -409,8 +407,8 @@ static int az6027_ci_read_attribute_mem(struct dvb_ca_en50221 *ca,
 					int slot,
 					int address)
 {
-	struct dvb_usb_device *d = (struct dvb_usb_device *)ca->data;
-	struct az6027_device_state *state = (struct az6027_device_state *)d->priv;
+	struct dvb_usb_device *d = ca->data;
+	struct az6027_device_state *state = d->priv;
 
 	int ret;
 	u8 req;
@@ -451,8 +449,8 @@ static int az6027_ci_write_attribute_mem(struct dvb_ca_en50221 *ca,
 					 int address,
 					 u8 value)
 {
-	struct dvb_usb_device *d = (struct dvb_usb_device *)ca->data;
-	struct az6027_device_state *state = (struct az6027_device_state *)d->priv;
+	struct dvb_usb_device *d = ca->data;
+	struct az6027_device_state *state = d->priv;
 
 	int ret;
 	u8 req;
@@ -482,8 +480,8 @@ static int az6027_ci_read_cam_control(struct dvb_ca_en50221 *ca,
 				      int slot,
 				      u8 address)
 {
-	struct dvb_usb_device *d = (struct dvb_usb_device *)ca->data;
-	struct az6027_device_state *state = (struct az6027_device_state *)d->priv;
+	struct dvb_usb_device *d = ca->data;
+	struct az6027_device_state *state = d->priv;
 
 	int ret;
 	u8 req;
@@ -528,8 +526,8 @@ static int az6027_ci_write_cam_control(struct dvb_ca_en50221 *ca,
 				       u8 address,
 				       u8 value)
 {
-	struct dvb_usb_device *d = (struct dvb_usb_device *)ca->data;
-	struct az6027_device_state *state = (struct az6027_device_state *)d->priv;
+	struct dvb_usb_device *d = ca->data;
+	struct az6027_device_state *state = d->priv;
 
 	int ret;
 	u8 req;
@@ -559,7 +557,7 @@ failed:
 
 static int CI_CamReady(struct dvb_ca_en50221 *ca, int slot)
 {
-	struct dvb_usb_device *d = (struct dvb_usb_device *)ca->data;
+	struct dvb_usb_device *d = ca->data;
 
 	int ret;
 	u8 req;
@@ -590,8 +588,8 @@ static int CI_CamReady(struct dvb_ca_en50221 *ca, int slot)
 
 static int az6027_ci_slot_reset(struct dvb_ca_en50221 *ca, int slot)
 {
-	struct dvb_usb_device *d = (struct dvb_usb_device *)ca->data;
-	struct az6027_device_state *state = (struct az6027_device_state *)d->priv;
+	struct dvb_usb_device *d = ca->data;
+	struct az6027_device_state *state = d->priv;
 
 	int ret, i;
 	u8 req;
@@ -646,8 +644,8 @@ static int az6027_ci_slot_shutdown(struct dvb_ca_en50221 *ca, int slot)
 
 static int az6027_ci_slot_ts_enable(struct dvb_ca_en50221 *ca, int slot)
 {
-	struct dvb_usb_device *d = (struct dvb_usb_device *)ca->data;
-	struct az6027_device_state *state = (struct az6027_device_state *)d->priv;
+	struct dvb_usb_device *d = ca->data;
+	struct az6027_device_state *state = d->priv;
 
 	int ret;
 	u8 req;
@@ -675,8 +673,8 @@ failed:
 
 static int az6027_ci_poll_slot_status(struct dvb_ca_en50221 *ca, int slot, int open)
 {
-	struct dvb_usb_device *d = (struct dvb_usb_device *)ca->data;
-	struct az6027_device_state *state = (struct az6027_device_state *)d->priv;
+	struct dvb_usb_device *d = ca->data;
+	struct az6027_device_state *state = d->priv;
 	int ret;
 	u8 req;
 	u16 value;
@@ -721,7 +719,7 @@ static void az6027_ci_uninit(struct dvb_usb_device *d)
 	if (NULL == d)
 		return;
 
-	state = (struct az6027_device_state *)d->priv;
+	state = d->priv;
 	if (NULL == state)
 		return;
 
@@ -737,7 +735,7 @@ static void az6027_ci_uninit(struct dvb_usb_device *d)
 static int az6027_ci_init(struct dvb_usb_adapter *a)
 {
 	struct dvb_usb_device *d = a->dev;
-	struct az6027_device_state *state = (struct az6027_device_state *)d->priv;
+	struct az6027_device_state *state = d->priv;
 	int ret;
 
 	deb_info("%s", __func__);
@@ -977,6 +975,10 @@ static int az6027_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msg[], int n
 		if (msg[i].addr == 0x99) {
 			req = 0xBE;
 			index = 0;
+			if (msg[i].len < 1) {
+				i = -EOPNOTSUPP;
+				break;
+			}
 			value = msg[i].buf[0] & 0x00ff;
 			length = 1;
 			az6027_usb_out_op(d, req, value, index, data, length);
@@ -986,6 +988,10 @@ static int az6027_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msg[], int n
 			/* write/read request */
 			if (i + 1 < num && (msg[i + 1].flags & I2C_M_RD)) {
 				req = 0xB9;
+				if (msg[i].len < 1) {
+					i = -EOPNOTSUPP;
+					break;
+				}
 				index = (((msg[i].buf[0] << 8) & 0xff00) | (msg[i].buf[1] & 0x00ff));
 				value = msg[i].addr + (msg[i].len << 8);
 				length = msg[i + 1].len + 6;
@@ -999,6 +1005,10 @@ static int az6027_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msg[], int n
 
 				/* demod 16bit addr */
 				req = 0xBD;
+				if (msg[i].len < 1) {
+					i = -EOPNOTSUPP;
+					break;
+				}
 				index = (((msg[i].buf[0] << 8) & 0xff00) | (msg[i].buf[1] & 0x00ff));
 				value = msg[i].addr + (2 << 8);
 				length = msg[i].len - 2;
@@ -1024,6 +1034,10 @@ static int az6027_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg msg[], int n
 			} else {
 
 				req = 0xBD;
+				if (msg[i].len < 1) {
+					i = -EOPNOTSUPP;
+					break;
+				}
 				index = msg[i].buf[0] & 0x00FF;
 				value = msg[i].addr + (1 << 8);
 				length = msg[i].len - 1;
@@ -1048,14 +1062,14 @@ static u32 az6027_i2c_func(struct i2c_adapter *adapter)
 	return I2C_FUNC_I2C;
 }
 
-static struct i2c_algorithm az6027_i2c_algo = {
+static const struct i2c_algorithm az6027_i2c_algo = {
 	.master_xfer   = az6027_i2c_xfer,
 	.functionality = az6027_i2c_func,
 };
 
 static int az6027_identify_state(struct usb_device *udev,
-				 struct dvb_usb_device_properties *props,
-				 struct dvb_usb_device_description **desc,
+				 const struct dvb_usb_device_properties *props,
+				 const struct dvb_usb_device_description **desc,
 				 int *cold)
 {
 	u8 *b;
@@ -1082,16 +1096,27 @@ static int az6027_identify_state(struct usb_device *udev,
 }
 
 
-static struct usb_device_id az6027_usb_table[] = {
-	{ USB_DEVICE(USB_VID_AZUREWAVE, USB_PID_AZUREWAVE_AZ6027) },
-	{ USB_DEVICE(USB_VID_TERRATEC,  USB_PID_TERRATEC_DVBS2CI_V1) },
-	{ USB_DEVICE(USB_VID_TERRATEC,  USB_PID_TERRATEC_DVBS2CI_V2) },
-	{ USB_DEVICE(USB_VID_TECHNISAT, USB_PID_TECHNISAT_USB2_HDCI_V1) },
-	{ USB_DEVICE(USB_VID_TECHNISAT, USB_PID_TECHNISAT_USB2_HDCI_V2) },
-	{ USB_DEVICE(USB_VID_ELGATO, USB_PID_ELGATO_EYETV_SAT) },
-	{ USB_DEVICE(USB_VID_ELGATO, USB_PID_ELGATO_EYETV_SAT_V2) },
-	{ USB_DEVICE(USB_VID_ELGATO, USB_PID_ELGATO_EYETV_SAT_V3) },
-	{ },
+enum {
+	AZUREWAVE_AZ6027,
+	TERRATEC_DVBS2CI_V1,
+	TERRATEC_DVBS2CI_V2,
+	TECHNISAT_USB2_HDCI_V1,
+	TECHNISAT_USB2_HDCI_V2,
+	ELGATO_EYETV_SAT,
+	ELGATO_EYETV_SAT_V2,
+	ELGATO_EYETV_SAT_V3,
+};
+
+static const struct usb_device_id az6027_usb_table[] = {
+	DVB_USB_DEV(AZUREWAVE, AZUREWAVE_AZ6027),
+	DVB_USB_DEV(TERRATEC, TERRATEC_DVBS2CI_V1),
+	DVB_USB_DEV(TERRATEC, TERRATEC_DVBS2CI_V2),
+	DVB_USB_DEV(TECHNISAT, TECHNISAT_USB2_HDCI_V1),
+	DVB_USB_DEV(TECHNISAT, TECHNISAT_USB2_HDCI_V2),
+	DVB_USB_DEV(ELGATO, ELGATO_EYETV_SAT),
+	DVB_USB_DEV(ELGATO, ELGATO_EYETV_SAT_V2),
+	DVB_USB_DEV(ELGATO, ELGATO_EYETV_SAT_V3),
+	{ }
 };
 
 MODULE_DEVICE_TABLE(usb, az6027_usb_table);
@@ -1143,35 +1168,35 @@ static struct dvb_usb_device_properties az6027_properties = {
 	.devices = {
 		{
 			.name = "AZUREWAVE DVB-S/S2 USB2.0 (AZ6027)",
-			.cold_ids = { &az6027_usb_table[0], NULL },
+			.cold_ids = { &az6027_usb_table[AZUREWAVE_AZ6027], NULL },
 			.warm_ids = { NULL },
 		}, {
 			.name = "TERRATEC S7",
-			.cold_ids = { &az6027_usb_table[1], NULL },
+			.cold_ids = { &az6027_usb_table[TERRATEC_DVBS2CI_V1], NULL },
 			.warm_ids = { NULL },
 		}, {
 			.name = "TERRATEC S7 MKII",
-			.cold_ids = { &az6027_usb_table[2], NULL },
+			.cold_ids = { &az6027_usb_table[TERRATEC_DVBS2CI_V2], NULL },
 			.warm_ids = { NULL },
 		}, {
 			.name = "Technisat SkyStar USB 2 HD CI",
-			.cold_ids = { &az6027_usb_table[3], NULL },
+			.cold_ids = { &az6027_usb_table[TECHNISAT_USB2_HDCI_V1], NULL },
 			.warm_ids = { NULL },
 		}, {
 			.name = "Technisat SkyStar USB 2 HD CI",
-			.cold_ids = { &az6027_usb_table[4], NULL },
+			.cold_ids = { &az6027_usb_table[TECHNISAT_USB2_HDCI_V2], NULL },
 			.warm_ids = { NULL },
 		}, {
 			.name = "Elgato EyeTV Sat",
-			.cold_ids = { &az6027_usb_table[5], NULL },
+			.cold_ids = { &az6027_usb_table[ELGATO_EYETV_SAT], NULL },
 			.warm_ids = { NULL },
 		}, {
 			.name = "Elgato EyeTV Sat",
-			.cold_ids = { &az6027_usb_table[6], NULL },
+			.cold_ids = { &az6027_usb_table[ELGATO_EYETV_SAT_V2], NULL },
 			.warm_ids = { NULL },
 		}, {
 			.name = "Elgato EyeTV Sat",
-			.cold_ids = { &az6027_usb_table[7], NULL },
+			.cold_ids = { &az6027_usb_table[ELGATO_EYETV_SAT_V3], NULL },
 			.warm_ids = { NULL },
 		},
 		{ NULL },

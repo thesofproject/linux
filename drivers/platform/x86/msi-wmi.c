@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * MSI WMI hotkeys
  *
  * Copyright (C) 2009 Novell <trenn@suse.de>
  *
  * Most stuff taken over from hp-wmi
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -109,6 +96,8 @@ static int msi_wmi_query_block(int instance, int *ret)
 	struct acpi_buffer output = { ACPI_ALLOCATE_BUFFER, NULL };
 
 	status = wmi_query_block(MSIWMI_BIOS_GUID, instance, &output);
+	if (ACPI_FAILURE(status))
+		return -EIO;
 
 	obj = output.pointer;
 
@@ -181,20 +170,9 @@ static const struct backlight_ops msi_backlight_ops = {
 	.update_status	= bl_set_status,
 };
 
-static void msi_wmi_notify(u32 value, void *context)
+static void msi_wmi_notify(union acpi_object *obj, void *context)
 {
-	struct acpi_buffer response = { ACPI_ALLOCATE_BUFFER, NULL };
 	struct key_entry *key;
-	union acpi_object *obj;
-	acpi_status status;
-
-	status = wmi_get_event_data(value, &response);
-	if (status != AE_OK) {
-		pr_info("bad event status 0x%x\n", status);
-		return;
-	}
-
-	obj = (union acpi_object *)response.pointer;
 
 	if (obj && obj->type == ACPI_TYPE_INTEGER) {
 		int eventcode = obj->integer.value;
@@ -203,7 +181,7 @@ static void msi_wmi_notify(u32 value, void *context)
 				eventcode);
 		if (!key) {
 			pr_info("Unknown key pressed - %x\n", eventcode);
-			goto msi_wmi_notify_exit;
+			return;
 		}
 
 		if (event_wmi->quirk_last_pressed) {
@@ -215,7 +193,7 @@ static void msi_wmi_notify(u32 value, void *context)
 				pr_debug("Suppressed key event 0x%X - "
 					 "Last press was %lld us ago\n",
 					 key->code, ktime_to_us(diff));
-				goto msi_wmi_notify_exit;
+				return;
 			}
 			last_pressed = cur;
 		}
@@ -232,9 +210,6 @@ static void msi_wmi_notify(u32 value, void *context)
 		}
 	} else
 		pr_info("Unknown event received\n");
-
-msi_wmi_notify_exit:
-	kfree(response.pointer);
 }
 
 static int __init msi_wmi_backlight_setup(void)

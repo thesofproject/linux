@@ -16,8 +16,9 @@
 
 #include <linux/node.h>
 #include <linux/compiler.h>
-#include <linux/cpumask.h>
 #include <linux/cpuhotplug.h>
+#include <linux/cpuhplock.h>
+#include <linux/cpu_smt.h>
 
 struct device;
 struct device_node;
@@ -30,7 +31,7 @@ struct cpu {
 };
 
 extern void boot_cpu_init(void);
-extern void boot_cpu_state_init(void);
+extern void boot_cpu_hotplug_init(void);
 extern void cpu_init(void);
 extern void trap_init(void);
 
@@ -55,15 +56,50 @@ extern ssize_t cpu_show_spectre_v2(struct device *dev,
 				   struct device_attribute *attr, char *buf);
 extern ssize_t cpu_show_spec_store_bypass(struct device *dev,
 					  struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_l1tf(struct device *dev,
+			     struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_mds(struct device *dev,
+			    struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_tsx_async_abort(struct device *dev,
+					struct device_attribute *attr,
+					char *buf);
+extern ssize_t cpu_show_itlb_multihit(struct device *dev,
+				      struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_srbds(struct device *dev, struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_mmio_stale_data(struct device *dev,
+					struct device_attribute *attr,
+					char *buf);
+extern ssize_t cpu_show_retbleed(struct device *dev,
+				 struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_spec_rstack_overflow(struct device *dev,
+					     struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_gds(struct device *dev,
+			    struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_reg_file_data_sampling(struct device *dev,
+					       struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_ghostwrite(struct device *dev, struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_old_microcode(struct device *dev,
+				      struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_indirect_target_selection(struct device *dev,
+						  struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_tsa(struct device *dev, struct device_attribute *attr, char *buf);
+extern ssize_t cpu_show_vmscape(struct device *dev, struct device_attribute *attr, char *buf);
 
 extern __printf(4, 5)
 struct device *cpu_device_create(struct device *parent, void *drvdata,
 				 const struct attribute_group **groups,
 				 const char *fmt, ...);
+extern bool arch_cpu_is_hotpluggable(int cpu);
+extern int arch_register_cpu(int cpu);
+extern void arch_unregister_cpu(int cpu);
 #ifdef CONFIG_HOTPLUG_CPU
 extern void unregister_cpu(struct cpu *cpu);
 extern ssize_t arch_cpu_probe(const char *, size_t);
 extern ssize_t arch_cpu_release(const char *, size_t);
+#endif
+
+#ifdef CONFIG_GENERIC_CPU_DEVICES
+DECLARE_PER_CPU(struct cpu, cpu_devices);
 #endif
 
 /*
@@ -79,10 +115,14 @@ extern ssize_t arch_cpu_release(const char *, size_t);
 
 #ifdef CONFIG_SMP
 extern bool cpuhp_tasks_frozen;
-int cpu_up(unsigned int cpu);
+int add_cpu(unsigned int cpu);
+int cpu_device_up(struct device *dev);
 void notify_cpu_starting(unsigned int cpu);
 extern void cpu_maps_update_begin(void);
 extern void cpu_maps_update_done(void);
+int bringup_hibernate_cpu(unsigned int sleep_cpu);
+void bringup_nonboot_cpus(unsigned int max_cpus);
+int arch_cpu_rescan_dead_smt_siblings(void);
 
 #else	/* CONFIG_SMP */
 #define cpuhp_tasks_frozen	0
@@ -95,55 +135,40 @@ static inline void cpu_maps_update_done(void)
 {
 }
 
+static inline int add_cpu(unsigned int cpu) { return 0;}
+
+static inline int arch_cpu_rescan_dead_smt_siblings(void) { return 0; }
+
 #endif /* CONFIG_SMP */
-extern struct bus_type cpu_subsys;
-
-#ifdef CONFIG_HOTPLUG_CPU
-extern void cpus_write_lock(void);
-extern void cpus_write_unlock(void);
-extern void cpus_read_lock(void);
-extern void cpus_read_unlock(void);
-extern void lockdep_assert_cpus_held(void);
-extern void cpu_hotplug_disable(void);
-extern void cpu_hotplug_enable(void);
-void clear_tasks_mm_cpumask(int cpu);
-int cpu_down(unsigned int cpu);
-
-#else /* CONFIG_HOTPLUG_CPU */
-
-static inline void cpus_write_lock(void) { }
-static inline void cpus_write_unlock(void) { }
-static inline void cpus_read_lock(void) { }
-static inline void cpus_read_unlock(void) { }
-static inline void lockdep_assert_cpus_held(void) { }
-static inline void cpu_hotplug_disable(void) { }
-static inline void cpu_hotplug_enable(void) { }
-#endif	/* !CONFIG_HOTPLUG_CPU */
-
-/* Wrappers which go away once all code is converted */
-static inline void cpu_hotplug_begin(void) { cpus_write_lock(); }
-static inline void cpu_hotplug_done(void) { cpus_write_unlock(); }
-static inline void get_online_cpus(void) { cpus_read_lock(); }
-static inline void put_online_cpus(void) { cpus_read_unlock(); }
+extern const struct bus_type cpu_subsys;
 
 #ifdef CONFIG_PM_SLEEP_SMP
 extern int freeze_secondary_cpus(int primary);
-static inline int disable_nonboot_cpus(void)
+extern void thaw_secondary_cpus(void);
+
+static inline int suspend_disable_secondary_cpus(void)
 {
-	return freeze_secondary_cpus(0);
+	int cpu = 0;
+
+	if (IS_ENABLED(CONFIG_PM_SLEEP_SMP_NONZERO_CPU))
+		cpu = -1;
+
+	return freeze_secondary_cpus(cpu);
 }
-extern void enable_nonboot_cpus(void);
+static inline void suspend_enable_secondary_cpus(void)
+{
+	thaw_secondary_cpus();
+}
+
 #else /* !CONFIG_PM_SLEEP_SMP */
-static inline int disable_nonboot_cpus(void) { return 0; }
-static inline void enable_nonboot_cpus(void) {}
+static inline void thaw_secondary_cpus(void) {}
+static inline int suspend_disable_secondary_cpus(void) { return 0; }
+static inline void suspend_enable_secondary_cpus(void) { }
 #endif /* !CONFIG_PM_SLEEP_SMP */
 
-void cpu_startup_entry(enum cpuhp_state state);
+void __noreturn cpu_startup_entry(enum cpuhp_state state);
 
 void cpu_idle_poll_ctrl(bool enable);
-
-/* Attach to any functions which should be considered cpuidle. */
-#define __cpuidle	__attribute__((__section__(".cpuidle.text")))
 
 bool cpu_in_idle(unsigned long pc);
 
@@ -151,19 +176,61 @@ void arch_cpu_idle(void);
 void arch_cpu_idle_prepare(void);
 void arch_cpu_idle_enter(void);
 void arch_cpu_idle_exit(void);
-void arch_cpu_idle_dead(void);
+void arch_tick_broadcast_enter(void);
+void arch_tick_broadcast_exit(void);
+void __noreturn arch_cpu_idle_dead(void);
 
-int cpu_report_state(int cpu);
-int cpu_check_up_prepare(int cpu);
-void cpu_set_state_online(int cpu);
-void play_idle(unsigned long duration_ms);
+#ifdef CONFIG_ARCH_HAS_CPU_FINALIZE_INIT
+void arch_cpu_finalize_init(void);
+#else
+static inline void arch_cpu_finalize_init(void) { }
+#endif
+
+void play_idle_precise(u64 duration_ns, u64 latency_ns);
 
 #ifdef CONFIG_HOTPLUG_CPU
-bool cpu_wait_death(unsigned int cpu, int seconds);
-bool cpu_report_death(void);
 void cpuhp_report_idle_dead(void);
 #else
 static inline void cpuhp_report_idle_dead(void) { }
 #endif /* #ifdef CONFIG_HOTPLUG_CPU */
+
+enum cpu_attack_vectors {
+	CPU_MITIGATE_USER_KERNEL,
+	CPU_MITIGATE_USER_USER,
+	CPU_MITIGATE_GUEST_HOST,
+	CPU_MITIGATE_GUEST_GUEST,
+	NR_CPU_ATTACK_VECTORS,
+};
+
+enum smt_mitigations {
+	SMT_MITIGATIONS_OFF,
+	SMT_MITIGATIONS_AUTO,
+	SMT_MITIGATIONS_ON,
+};
+
+#ifdef CONFIG_CPU_MITIGATIONS
+extern bool cpu_mitigations_off(void);
+extern bool cpu_mitigations_auto_nosmt(void);
+extern bool cpu_attack_vector_mitigated(enum cpu_attack_vectors v);
+extern enum smt_mitigations smt_mitigations;
+#else
+static inline bool cpu_mitigations_off(void)
+{
+	return true;
+}
+static inline bool cpu_mitigations_auto_nosmt(void)
+{
+	return false;
+}
+static inline bool cpu_attack_vector_mitigated(enum cpu_attack_vectors v)
+{
+	return false;
+}
+#define smt_mitigations SMT_MITIGATIONS_OFF
+#endif
+
+int arch_prctl_get_branch_landing_pad_state(struct task_struct *t, unsigned long __user *state);
+int arch_prctl_set_branch_landing_pad_state(struct task_struct *t, unsigned long state);
+int arch_prctl_lock_branch_landing_pad_state(struct task_struct *t);
 
 #endif /* _LINUX_CPU_H_ */

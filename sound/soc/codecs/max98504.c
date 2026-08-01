@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MAX98504 ALSA SoC Audio driver
  *
  * Copyright 2013 - 2014 Maxim Integrated Products
  * Copyright 2016 Samsung Electronics Co., Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/delay.h>
@@ -38,7 +35,7 @@ struct max98504_priv {
 	unsigned int brownout_release_rate;
 };
 
-static struct reg_default max98504_reg_defaults[] = {
+static const struct reg_default max98504_reg_defaults[] = {
 	{ 0x01,	0},
 	{ 0x02,	0},
 	{ 0x03,	0},
@@ -223,8 +220,10 @@ static int max98504_set_tdm_slot(struct snd_soc_dai *dai,
 	return 0;
 }
 static int max98504_set_channel_map(struct snd_soc_dai *dai,
-		unsigned int tx_num, unsigned int *tx_slot,
-		unsigned int rx_num, unsigned int *rx_slot)
+				    unsigned int tx_num,
+				    const unsigned int *tx_slot,
+				    unsigned int rx_num,
+				    const unsigned int *rx_slot)
 {
 	struct max98504_priv *max98504 = snd_soc_dai_get_drvdata(dai);
 	struct regmap *map = max98504->regmap;
@@ -294,6 +293,7 @@ static const struct snd_soc_component_driver max98504_component_driver = {
 	.num_dapm_widgets	= ARRAY_SIZE(max98504_dapm_widgets),
 	.dapm_routes		= max98504_dapm_routes,
 	.num_dapm_routes	= ARRAY_SIZE(max98504_dapm_routes),
+	.endianness		= 1,
 };
 
 static const struct regmap_config max98504_regmap = {
@@ -307,8 +307,7 @@ static const struct regmap_config max98504_regmap = {
 	.cache_type		= REGCACHE_RBTREE,
 };
 
-static int max98504_i2c_probe(struct i2c_client *client,
-			      const struct i2c_device_id *id)
+static int max98504_i2c_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct device_node *node = dev->of_node;
@@ -364,7 +363,7 @@ MODULE_DEVICE_TABLE(of, max98504_of_match);
 #endif
 
 static const struct i2c_device_id max98504_i2c_id[] = {
-	{ "max98504" },
+	{ .name = "max98504" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, max98504_i2c_id);

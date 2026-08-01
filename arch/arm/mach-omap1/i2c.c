@@ -1,28 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Helper module for board specific I2C bus registration
  *
  * Copyright (C) 2009 Nokia Corporation.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #include <linux/i2c.h>
-#include <linux/i2c-omap.h>
-#include <mach/mux.h>
+#include <linux/platform_data/i2c-omap.h>
+
+#include "mux.h"
 #include "soc.h"
+#include "i2c.h"
 
 #define OMAP_I2C_SIZE		0x3f
 #define OMAP1_I2C_BASE		0xfffb3800
@@ -37,13 +25,8 @@ static struct platform_device omap_i2c_devices[1] = {
 
 static void __init omap1_i2c_mux_pins(int bus_id)
 {
-	if (cpu_is_omap7xx()) {
-		omap_cfg_reg(I2C_7XX_SDA);
-		omap_cfg_reg(I2C_7XX_SCL);
-	} else {
-		omap_cfg_reg(I2C_SDA);
-		omap_cfg_reg(I2C_SCL);
-	}
+	omap_cfg_reg(I2C_SDA);
+	omap_cfg_reg(I2C_SCL);
 }
 
 int __init omap_i2c_add_bus(struct omap_i2c_bus_platform_data *pdata,
@@ -80,10 +63,7 @@ int __init omap_i2c_add_bus(struct omap_i2c_bus_platform_data *pdata,
 
 	/* how the cpu bus is wired up differs for 7xx only */
 
-	if (cpu_is_omap7xx())
-		pdata->flags |= OMAP_I2C_FLAG_BUS_SHIFT_1;
-	else
-		pdata->flags |= OMAP_I2C_FLAG_BUS_SHIFT_2;
+	pdata->flags |= OMAP_I2C_FLAG_BUS_SHIFT_2;
 
 	pdev->dev.platform_data = pdata;
 

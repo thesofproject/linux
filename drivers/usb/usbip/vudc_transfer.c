@@ -301,7 +301,7 @@ top:
 
 static void v_timer(struct timer_list *t)
 {
-	struct vudc *udc = from_timer(udc, t, tr_timer.timer);
+	struct vudc *udc = timer_container_of(udc, t, tr_timer.timer);
 	struct transfer_timer *timer = &udc->tr_timer;
 	struct urbp *urb_p, *tmp;
 	unsigned long flags;
@@ -404,7 +404,7 @@ restart:
 			 * for now, give unlimited bandwidth
 			 */
 			limit += urb->transfer_buffer_length;
-			/* fallthrough */
+			fallthrough;
 		default:
 treat_control_like_bulk:
 			total -= transfer(udc, urb, ep, limit);
@@ -479,7 +479,7 @@ void v_kick_timer(struct vudc *udc, unsigned long time)
 		return;
 	case VUDC_TR_IDLE:
 		t->state = VUDC_TR_RUNNING;
-		/* fallthrough */
+		fallthrough;
 	case VUDC_TR_STOPPED:
 		/* we may want to kick timer to unqueue urbs */
 		mod_timer(&t->timer, time);
@@ -490,7 +490,8 @@ void v_stop_timer(struct vudc *udc)
 {
 	struct transfer_timer *t = &udc->tr_timer;
 
-	/* timer itself will take care of stopping */
+	/* Delete the timer synchronously before teardown frees udc. */
 	dev_dbg(&udc->pdev->dev, "timer stop");
+	timer_delete_sync(&t->timer);
 	t->state = VUDC_TR_STOPPED;
 }

@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/irqchip/irq-zevio.c
  *
  *  Copyright (C) 2013 Daniel Tang <tangrs@tangrs.id.au>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2, as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/io.h>
@@ -54,8 +50,8 @@ static void __exception_irq_entry zevio_handle_irq(struct pt_regs *regs)
 
 	while (readl(zevio_irq_io + IO_STATUS)) {
 		irqnr = readl(zevio_irq_io + IO_CURRENT);
-		handle_domain_irq(zevio_irq_domain, irqnr, regs);
-	};
+		generic_handle_domain_irq(zevio_irq_domain, irqnr);
+	}
 }
 
 static void __init zevio_init_irq_base(void __iomem *base)
@@ -96,8 +92,8 @@ static int __init zevio_of_init(struct device_node *node,
 	zevio_init_irq_base(zevio_irq_io + IO_IRQ_BASE);
 	zevio_init_irq_base(zevio_irq_io + IO_FIQ_BASE);
 
-	zevio_irq_domain = irq_domain_add_linear(node, MAX_INTRS,
-						 &irq_generic_chip_ops, NULL);
+	zevio_irq_domain = irq_domain_create_linear(of_fwnode_handle(node), MAX_INTRS,
+						    &irq_generic_chip_ops, NULL);
 	BUG_ON(!zevio_irq_domain);
 
 	ret = irq_alloc_domain_generic_chips(zevio_irq_domain, MAX_INTRS, 1,

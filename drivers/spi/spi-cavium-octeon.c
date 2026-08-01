@@ -18,24 +18,20 @@
 
 static int octeon_spi_probe(struct platform_device *pdev)
 {
-	struct resource *res_mem;
 	void __iomem *reg_base;
-	struct spi_master *master;
+	struct spi_controller *host;
 	struct octeon_spi *p;
 	int err = -ENOENT;
 
-	master = spi_alloc_master(&pdev->dev, sizeof(struct octeon_spi));
-	if (!master)
+	host = devm_spi_alloc_host(&pdev->dev, sizeof(struct octeon_spi));
+	if (!host)
 		return -ENOMEM;
-	p = spi_master_get_devdata(master);
-	platform_set_drvdata(pdev, master);
+	p = spi_controller_get_devdata(host);
+	platform_set_drvdata(pdev, host);
 
-	res_mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	reg_base = devm_ioremap_resource(&pdev->dev, res_mem);
-	if (IS_ERR(reg_base)) {
-		err = PTR_ERR(reg_base);
-		goto fail;
-	}
+	reg_base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(reg_base))
+		return PTR_ERR(reg_base);
 
 	p->register_base = reg_base;
 	p->sys_freq = octeon_get_io_clock_rate();
@@ -45,41 +41,37 @@ static int octeon_spi_probe(struct platform_device *pdev)
 	p->regs.tx = 0x10;
 	p->regs.data = 0x80;
 
-	master->num_chipselect = 4;
-	master->mode_bits = SPI_CPHA |
+	host->num_chipselect = 4;
+	host->mode_bits = SPI_CPHA |
 			    SPI_CPOL |
 			    SPI_CS_HIGH |
 			    SPI_LSB_FIRST |
 			    SPI_3WIRE;
 
-	master->transfer_one_message = octeon_spi_transfer_one_message;
-	master->bits_per_word_mask = SPI_BPW_MASK(8);
-	master->max_speed_hz = OCTEON_SPI_MAX_CLOCK_HZ;
+	host->transfer_one_message = octeon_spi_transfer_one_message;
+	host->bits_per_word_mask = SPI_BPW_MASK(8);
+	host->max_speed_hz = OCTEON_SPI_MAX_CLOCK_HZ;
 
-	master->dev.of_node = pdev->dev.of_node;
-	err = devm_spi_register_master(&pdev->dev, master);
+	err = spi_register_controller(host);
 	if (err) {
-		dev_err(&pdev->dev, "register master failed: %d\n", err);
-		goto fail;
+		dev_err(&pdev->dev, "register host failed: %d\n", err);
+		return err;
 	}
 
 	dev_info(&pdev->dev, "OCTEON SPI bus driver\n");
 
 	return 0;
-fail:
-	spi_master_put(master);
-	return err;
 }
 
-static int octeon_spi_remove(struct platform_device *pdev)
+static void octeon_spi_remove(struct platform_device *pdev)
 {
-	struct spi_master *master = platform_get_drvdata(pdev);
-	struct octeon_spi *p = spi_master_get_devdata(master);
+	struct spi_controller *host = platform_get_drvdata(pdev);
+	struct octeon_spi *p = spi_controller_get_devdata(host);
+
+	spi_unregister_controller(host);
 
 	/* Clear the CSENA* and put everything in a known state. */
 	writeq(0, p->register_base + OCTEON_SPI_CFG(p));
-
-	return 0;
 }
 
 static const struct of_device_id octeon_spi_match[] = {

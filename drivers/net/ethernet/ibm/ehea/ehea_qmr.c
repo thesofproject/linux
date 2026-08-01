@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  linux/drivers/net/ethernet/ibm/ehea/ehea_qmr.c
  *
@@ -9,21 +10,6 @@
  *       Christoph Raisch <raisch@de.ibm.com>
  *       Jan-Bernd Themann <themann@de.ibm.com>
  *       Thomas Klein <tklein@de.ibm.com>
- *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -123,13 +109,12 @@ struct ehea_cq *ehea_create_cq(struct ehea_adapter *adapter,
 			       int nr_of_cqe, u64 eq_handle, u32 cq_token)
 {
 	struct ehea_cq *cq;
-	struct h_epa epa;
-	u64 *cq_handle_ref, hret, rpage;
-	u32 act_nr_of_entries, act_pages, counter;
+	u64 hret, rpage;
+	u32 counter;
 	int ret;
 	void *vpage;
 
-	cq = kzalloc(sizeof(*cq), GFP_KERNEL);
+	cq = kzalloc_obj(*cq);
 	if (!cq)
 		goto out_nomem;
 
@@ -138,10 +123,6 @@ struct ehea_cq *ehea_create_cq(struct ehea_adapter *adapter,
 	cq->attr.eq_handle = eq_handle;
 
 	cq->adapter = adapter;
-
-	cq_handle_ref = &cq->fw_handle;
-	act_nr_of_entries = 0;
-	act_pages = 0;
 
 	hret = ehea_h_alloc_resource_cq(adapter->handle, &cq->attr,
 					&cq->fw_handle, &cq->epas);
@@ -190,7 +171,6 @@ struct ehea_cq *ehea_create_cq(struct ehea_adapter *adapter,
 	}
 
 	hw_qeit_reset(&cq->hw_queue);
-	epa = cq->epas.kernel;
 	ehea_reset_cq_ep(cq);
 	ehea_reset_cq_n1(cq);
 
@@ -255,7 +235,7 @@ struct ehea_eq *ehea_create_eq(struct ehea_adapter *adapter,
 	void *vpage;
 	struct ehea_eq *eq;
 
-	eq = kzalloc(sizeof(*eq), GFP_KERNEL);
+	eq = kzalloc_obj(*eq);
 	if (!eq)
 		return NULL;
 
@@ -424,7 +404,7 @@ struct ehea_qp *ehea_create_qp(struct ehea_adapter *adapter,
 	u32 wqe_size_in_bytes_rq2, wqe_size_in_bytes_rq3;
 
 
-	qp = kzalloc(sizeof(*qp), GFP_KERNEL);
+	qp = kzalloc_obj(*qp);
 	if (!qp)
 		return NULL;
 
@@ -562,7 +542,7 @@ static inline int ehea_init_top_bmap(struct ehea_top_bmap *ehea_top_bmap,
 {
 	if (!ehea_top_bmap->dir[dir]) {
 		ehea_top_bmap->dir[dir] =
-			kzalloc(sizeof(struct ehea_dir_bmap), GFP_KERNEL);
+			kzalloc_obj(struct ehea_dir_bmap);
 		if (!ehea_top_bmap->dir[dir])
 			return -ENOMEM;
 	}
@@ -573,7 +553,7 @@ static inline int ehea_init_bmap(struct ehea_bmap *ehea_bmap, int top, int dir)
 {
 	if (!ehea_bmap->top[top]) {
 		ehea_bmap->top[top] =
-			kzalloc(sizeof(struct ehea_top_bmap), GFP_KERNEL);
+			kzalloc_obj(struct ehea_top_bmap);
 		if (!ehea_bmap->top[top])
 			return -ENOMEM;
 	}
@@ -633,7 +613,7 @@ static int ehea_update_busmap(unsigned long pfn, unsigned long nr_pages, int add
 		return 0;
 
 	if (!ehea_bmap) {
-		ehea_bmap = kzalloc(sizeof(struct ehea_bmap), GFP_KERNEL);
+		ehea_bmap = kzalloc_obj(struct ehea_bmap);
 		if (!ehea_bmap)
 			return -ENOMEM;
 	}
@@ -690,13 +670,10 @@ int ehea_rem_sect_bmap(unsigned long pfn, unsigned long nr_pages)
 
 static int ehea_is_hugepage(unsigned long pfn)
 {
-	int page_order;
-
 	if (pfn & EHEA_HUGEPAGE_PFN_MASK)
 		return 0;
 
-	page_order = compound_order(pfn_to_page(pfn));
-	if (page_order + PAGE_SHIFT != EHEA_HUGEPAGESHIFT)
+	if (page_shift(pfn_to_page(pfn)) != EHEA_HUGEPAGESHIFT)
 		return 0;
 
 	return 1;

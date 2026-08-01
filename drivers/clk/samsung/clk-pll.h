@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2013 Samsung Electronics Co., Ltd.
  * Copyright (c) 2013 Linaro Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Common Clock Framework support for all PLL's in Samsung platforms
 */
@@ -28,17 +25,34 @@ enum samsung_pll_type {
 	pll_6552,
 	pll_6552_s3c2416,
 	pll_6553,
-	pll_s3c2410_mpll,
-	pll_s3c2410_upll,
-	pll_s3c2440_mpll,
 	pll_2550x,
 	pll_2550xx,
 	pll_2650x,
 	pll_2650xx,
+	pll_1417x,
+	pll_1418x,
 	pll_1450x,
 	pll_1451x,
 	pll_1452x,
 	pll_1460x,
+	pll_0818x,
+	pll_0822x,
+	pll_0831x,
+	pll_142xx,
+	pll_0516x,
+	pll_0517x,
+	pll_0518x,
+	pll_531x,
+	pll_1051x,
+	pll_1052x,
+	pll_0717x,
+	pll_0718x,
+	pll_0732x,
+	pll_4311,
+	pll_1017x,
+	pll_1031x,
+	pll_a9fracm,
+	pll_a9fraco,
 };
 
 #define PLL_RATE(_fin, _m, _p, _s, _k, _ks) \
@@ -46,28 +60,15 @@ enum samsung_pll_type {
 #define PLL_VALID_RATE(_fin, _fout, _m, _p, _s, _k, _ks) ((_fout) + \
 	BUILD_BUG_ON_ZERO(PLL_RATE(_fin, _m, _p, _s, _k, _ks) != (_fout)))
 
+#define PLL_FRACO_RATE(_fin, _m, _p, _s, _k, _ks) \
+	((u64)(_fin) * (BIT(_ks) * (_m) + (_k)) / BIT(_ks) / ((_p) * ((_s) + 1)))
+#define PLL_FRACO_VALID_RATE(_fin, _fout, _m, _p, _s, _k, _ks) ((_fout) + \
+	BUILD_BUG_ON_ZERO(PLL_FRACO_RATE(_fin, _m, _p, _s, _k, _ks) != (_fout)))
+
 #define PLL_35XX_RATE(_fin, _rate, _m, _p, _s)			\
 	{							\
 		.rate	=	PLL_VALID_RATE(_fin, _rate,	\
 				_m, _p, _s, 0, 16),		\
-		.mdiv	=	(_m),				\
-		.pdiv	=	(_p),				\
-		.sdiv	=	(_s),				\
-	}
-
-#define PLL_S3C2410_MPLL_RATE(_fin, _rate, _m, _p, _s)		\
-	{							\
-		.rate	=	PLL_VALID_RATE(_fin, _rate,	\
-				_m + 8, _p + 2, _s, 0, 16),	\
-		.mdiv	=	(_m),				\
-		.pdiv	=	(_p),				\
-		.sdiv	=	(_s),				\
-	}
-
-#define PLL_S3C2440_MPLL_RATE(_fin, _rate, _m, _p, _s)		\
-	{							\
-		.rate	=	PLL_VALID_RATE(_fin, _rate,	\
-				2 * (_m + 8), _p + 2, _s, 0, 16), \
 		.mdiv	=	(_m),				\
 		.pdiv	=	(_p),				\
 		.sdiv	=	(_s),				\
@@ -115,6 +116,16 @@ enum samsung_pll_type {
 		.mfr	=	(_mfr),				\
 		.mrr	=	(_mrr),				\
 		.vsel	=	(_vsel),			\
+	}
+
+#define PLL_A9FRACO_RATE(_fin, _rate, _m, _p, _s, _k)		\
+	{							\
+		.rate	=	PLL_FRACO_VALID_RATE(_fin, _rate, \
+				_m, _p, _s, _k, 24),		\
+		.mdiv	=	(_m),				\
+		.pdiv	=	(_p),				\
+		.sdiv	=	(_s),				\
+		.kdiv	=	(_k),				\
 	}
 
 /* NOTE: Rate table should be kept sorted in descending order. */

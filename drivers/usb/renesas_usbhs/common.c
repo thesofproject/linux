@@ -3,15 +3,17 @@
  * Renesas USB driver
  *
  * Copyright (C) 2011 Renesas Solutions Corp.
+ * Copyright (C) 2019 Renesas Electronics Corporation
  * Kuninori Morimoto <kuninori.morimoto.gx@renesas.com>
  */
+#include <linux/clk.h>
 #include <linux/err.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
-#include <linux/of_gpio.h>
+#include <linux/of.h>
 #include <linux/pm_runtime.h>
+#include <linux/reset.h>
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 #include "common.h"
@@ -41,15 +43,6 @@
  *			| ....  |	+-----------+
  */
 
-
-#define USBHSF_RUNTIME_PWCTRL	(1 << 0)
-
-/* status */
-#define usbhsc_flags_init(p)   do {(p)->flags = 0; } while (0)
-#define usbhsc_flags_set(p, b) ((p)->flags |=  (b))
-#define usbhsc_flags_clr(p, b) ((p)->flags &= ~(b))
-#define usbhsc_flags_has(p, b) ((p)->flags &   (b))
-
 /*
  * platform call back
  *
@@ -59,8 +52,8 @@
  */
 #define usbhs_platform_call(priv, func, args...)\
 	(!(priv) ? -ENODEV :			\
-	 !((priv)->pfunc.func) ? 0 :		\
-	 (priv)->pfunc.func(args))
+	 !((priv)->pfunc->func) ? 0 :		\
+	 (priv)->pfunc->func(args))
 
 /*
  *		common functions
@@ -90,6 +83,11 @@ struct usbhs_priv *usbhs_pdev_to_priv(struct platform_device *pdev)
 	return dev_get_drvdata(&pdev->dev);
 }
 
+int usbhs_get_id_as_gadget(struct platform_device *pdev)
+{
+	return USBHS_GADGET;
+}
+
 /*
  *		syscfg functions
  */
@@ -102,10 +100,6 @@ void usbhs_sys_host_ctrl(struct usbhs_priv *priv, int enable)
 {
 	u16 mask = DCFM | DRPD | DPRPU | HSE | USBE;
 	u16 val  = DCFM | DRPD | HSE | USBE;
-	int has_otg = usbhs_get_dparam(priv, has_otg);
-
-	if (has_otg)
-		usbhs_bset(priv, DVSTCTR, (EXTLP | PWEN), (EXTLP | PWEN));
 
 	/*
 	 * if enable
@@ -120,6 +114,12 @@ void usbhs_sys_function_ctrl(struct usbhs_priv *priv, int enable)
 {
 	u16 mask = DCFM | DRPD | DPRPU | HSE | USBE;
 	u16 val  = HSE | USBE;
+
+	/* CNEN bit is required for function operation */
+	if (usbhs_get_dparam(priv, has_cnen)) {
+		mask |= CNEN;
+		val  |= CNEN;
+	}
 
 	/*
 	 * if enable
@@ -161,17 +161,17 @@ void usbhs_usbreq_get_val(struct usbhs_priv *priv, struct usb_ctrlrequest *req)
 	req->bRequest		= (val >> 8) & 0xFF;
 	req->bRequestType	= (val >> 0) & 0xFF;
 
-	req->wValue	= usbhs_read(priv, USBVAL);
-	req->wIndex	= usbhs_read(priv, USBINDX);
-	req->wLength	= usbhs_read(priv, USBLENG);
+	req->wValue	= cpu_to_le16(usbhs_read(priv, USBVAL));
+	req->wIndex	= cpu_to_le16(usbhs_read(priv, USBINDX));
+	req->wLength	= cpu_to_le16(usbhs_read(priv, USBLENG));
 }
 
 void usbhs_usbreq_set_val(struct usbhs_priv *priv, struct usb_ctrlrequest *req)
 {
 	usbhs_write(priv, USBREQ,  (req->bRequest << 8) | req->bRequestType);
-	usbhs_write(priv, USBVAL,  req->wValue);
-	usbhs_write(priv, USBINDX, req->wIndex);
-	usbhs_write(priv, USBLENG, req->wLength);
+	usbhs_write(priv, USBVAL,  le16_to_cpu(req->wValue));
+	usbhs_write(priv, USBINDX, le16_to_cpu(req->wIndex));
+	usbhs_write(priv, USBLENG, le16_to_cpu(req->wLength));
 
 	usbhs_bset(priv, DCPCTR, SUREQ, SUREQ);
 }
@@ -290,18 +290,89 @@ static void usbhsc_set_buswait(struct usbhs_priv *priv)
 		usbhs_bset(priv, BUSWAIT, 0x000F, wait);
 }
 
+static bool usbhsc_is_multi_clks(struct usbhs_priv *priv)
+{
+	return priv->dparam.multi_clks;
+}
+
+static int usbhsc_clk_get(struct device *dev, struct usbhs_priv *priv)
+{
+	if (!usbhsc_is_multi_clks(priv))
+		return 0;
+
+	/* The first clock should exist */
+	priv->clks[0] = of_clk_get(dev_of_node(dev), 0);
+	if (IS_ERR(priv->clks[0]))
+		return PTR_ERR(priv->clks[0]);
+
+	/*
+	 * To backward compatibility with old DT, this driver checks the return
+	 * value if it's -ENOENT or not.
+	 */
+	priv->clks[1] = of_clk_get(dev_of_node(dev), 1);
+	if (PTR_ERR(priv->clks[1]) == -ENOENT)
+		priv->clks[1] = NULL;
+	else if (IS_ERR(priv->clks[1])) {
+		clk_put(priv->clks[0]);
+		return PTR_ERR(priv->clks[1]);
+	}
+
+	return 0;
+}
+
+static void usbhsc_clk_put(struct usbhs_priv *priv)
+{
+	int i;
+
+	if (!usbhsc_is_multi_clks(priv))
+		return;
+
+	for (i = 0; i < ARRAY_SIZE(priv->clks); i++)
+		clk_put(priv->clks[i]);
+}
+
+static int usbhsc_clk_prepare_enable(struct usbhs_priv *priv)
+{
+	int i, ret;
+
+	if (!usbhsc_is_multi_clks(priv))
+		return 0;
+
+	for (i = 0; i < ARRAY_SIZE(priv->clks); i++) {
+		ret = clk_prepare_enable(priv->clks[i]);
+		if (ret) {
+			while (--i >= 0)
+				clk_disable_unprepare(priv->clks[i]);
+			return ret;
+		}
+	}
+
+	return ret;
+}
+
+static void usbhsc_clk_disable_unprepare(struct usbhs_priv *priv)
+{
+	int i;
+
+	if (!usbhsc_is_multi_clks(priv))
+		return;
+
+	for (i = 0; i < ARRAY_SIZE(priv->clks); i++)
+		clk_disable_unprepare(priv->clks[i]);
+}
+
 /*
  *		platform default param
  */
 
-/* commonly used on old SH-Mobile SoCs */
+/* commonly used on old SH-Mobile and RZ/G2L family SoCs */
 static struct renesas_usbhs_driver_pipe_config usbhsc_default_pipe[] = {
 	RENESAS_USBHS_PIPE(USB_ENDPOINT_XFER_CONTROL, 64, 0x00, false),
-	RENESAS_USBHS_PIPE(USB_ENDPOINT_XFER_ISOC, 1024, 0x08, false),
-	RENESAS_USBHS_PIPE(USB_ENDPOINT_XFER_ISOC, 1024, 0x18, false),
-	RENESAS_USBHS_PIPE(USB_ENDPOINT_XFER_BULK, 512, 0x28, true),
-	RENESAS_USBHS_PIPE(USB_ENDPOINT_XFER_BULK, 512, 0x38, true),
+	RENESAS_USBHS_PIPE(USB_ENDPOINT_XFER_ISOC, 1024, 0x08, true),
+	RENESAS_USBHS_PIPE(USB_ENDPOINT_XFER_ISOC, 1024, 0x28, true),
 	RENESAS_USBHS_PIPE(USB_ENDPOINT_XFER_BULK, 512, 0x48, true),
+	RENESAS_USBHS_PIPE(USB_ENDPOINT_XFER_BULK, 512, 0x58, true),
+	RENESAS_USBHS_PIPE(USB_ENDPOINT_XFER_BULK, 512, 0x68, true),
 	RENESAS_USBHS_PIPE(USB_ENDPOINT_XFER_INT, 64, 0x04, false),
 	RENESAS_USBHS_PIPE(USB_ENDPOINT_XFER_INT, 64, 0x05, false),
 	RENESAS_USBHS_PIPE(USB_ENDPOINT_XFER_INT, 64, 0x06, false),
@@ -340,6 +411,10 @@ static void usbhsc_power_ctrl(struct usbhs_priv *priv, int enable)
 		/* enable PM */
 		pm_runtime_get_sync(dev);
 
+		/* enable clks */
+		if (usbhsc_clk_prepare_enable(priv))
+			return;
+
 		/* enable platform power */
 		usbhs_platform_call(priv, power_ctrl, pdev, priv->base, enable);
 
@@ -351,6 +426,9 @@ static void usbhsc_power_ctrl(struct usbhs_priv *priv, int enable)
 
 		/* disable platform power */
 		usbhs_platform_call(priv, power_ctrl, pdev, priv->base, enable);
+
+		/* disable clks */
+		usbhsc_clk_disable_unprepare(priv);
 
 		/* disable PM */
 		pm_runtime_put_sync(dev);
@@ -372,7 +450,7 @@ static void usbhsc_hotplug(struct usbhs_priv *priv)
 	/*
 	 * get vbus status from platform
 	 */
-	enable = usbhs_platform_call(priv, get_vbus, pdev);
+	enable = usbhs_mod_info_call(priv, get_vbus, pdev);
 
 	/*
 	 * get id from platform
@@ -397,7 +475,7 @@ static void usbhsc_hotplug(struct usbhs_priv *priv)
 		dev_dbg(&pdev->dev, "%s enable\n", __func__);
 
 		/* power on */
-		if (usbhsc_flags_has(priv, USBHSF_RUNTIME_PWCTRL))
+		if (usbhs_get_dparam(priv, runtime_pwctrl))
 			usbhsc_power_ctrl(priv, enable);
 
 		/* bus init */
@@ -417,7 +495,7 @@ static void usbhsc_hotplug(struct usbhs_priv *priv)
 		usbhsc_bus_init(priv);
 
 		/* power off */
-		if (usbhsc_flags_has(priv, USBHSF_RUNTIME_PWCTRL))
+		if (usbhs_get_dparam(priv, runtime_pwctrl))
 			usbhsc_power_ctrl(priv, enable);
 
 		usbhs_mod_change(priv, -1);
@@ -438,7 +516,7 @@ static void usbhsc_notify_hotplug(struct work_struct *work)
 	usbhsc_hotplug(priv);
 }
 
-static int usbhsc_drvcllbck_notify_hotplug(struct platform_device *pdev)
+int usbhsc_schedule_notify_hotplug(struct platform_device *pdev)
 {
 	struct usbhs_priv *priv = usbhs_pdev_to_priv(pdev);
 	int delay = usbhs_get_dparam(priv, detection_delay);
@@ -458,194 +536,182 @@ static int usbhsc_drvcllbck_notify_hotplug(struct platform_device *pdev)
  */
 static const struct of_device_id usbhs_of_match[] = {
 	{
+		.compatible = "renesas,usbhs-r8a774c0",
+		.data = &usbhs_rcar_gen3_with_pll_plat_info,
+	},
+	{
 		.compatible = "renesas,usbhs-r8a7790",
-		.data = (void *)USBHS_TYPE_RCAR_GEN2,
+		.data = &usbhs_rcar_gen2_plat_info,
 	},
 	{
 		.compatible = "renesas,usbhs-r8a7791",
-		.data = (void *)USBHS_TYPE_RCAR_GEN2,
+		.data = &usbhs_rcar_gen2_plat_info,
 	},
 	{
 		.compatible = "renesas,usbhs-r8a7794",
-		.data = (void *)USBHS_TYPE_RCAR_GEN2,
+		.data = &usbhs_rcar_gen2_plat_info,
 	},
 	{
 		.compatible = "renesas,usbhs-r8a7795",
-		.data = (void *)USBHS_TYPE_RCAR_GEN3,
+		.data = &usbhs_rcar_gen3_plat_info,
 	},
 	{
 		.compatible = "renesas,usbhs-r8a7796",
-		.data = (void *)USBHS_TYPE_RCAR_GEN3,
+		.data = &usbhs_rcar_gen3_plat_info,
+	},
+	{
+		.compatible = "renesas,usbhs-r8a77990",
+		.data = &usbhs_rcar_gen3_with_pll_plat_info,
 	},
 	{
 		.compatible = "renesas,usbhs-r8a77995",
-		.data = (void *)USBHS_TYPE_RCAR_GEN3_WITH_PLL,
+		.data = &usbhs_rcar_gen3_with_pll_plat_info,
+	},
+	{
+		.compatible = "renesas,usbhs-r9a07g043",
+		.data = &usbhs_rzg2l_plat_info,
+	},
+	{
+		.compatible = "renesas,usbhs-r9a07g044",
+		.data = &usbhs_rzg2l_plat_info,
+	},
+	{
+		.compatible = "renesas,usbhs-r9a07g054",
+		.data = &usbhs_rzg2l_plat_info,
+	},
+	{
+		.compatible = "renesas,usbhs-r9a09g077",
+		.data = &usbhs_rzg2l_plat_info,
 	},
 	{
 		.compatible = "renesas,rcar-gen2-usbhs",
-		.data = (void *)USBHS_TYPE_RCAR_GEN2,
+		.data = &usbhs_rcar_gen2_plat_info,
 	},
 	{
 		.compatible = "renesas,rcar-gen3-usbhs",
-		.data = (void *)USBHS_TYPE_RCAR_GEN3,
+		.data = &usbhs_rcar_gen3_plat_info,
 	},
 	{
 		.compatible = "renesas,rza1-usbhs",
-		.data = (void *)USBHS_TYPE_RZA1,
+		.data = &usbhs_rza1_plat_info,
 	},
-	{ },
+	{
+		.compatible = "renesas,rza2-usbhs",
+		.data = &usbhs_rza2_plat_info,
+	},
+	{
+		.compatible = "renesas,rzg2l-usbhs",
+		.data = &usbhs_rzg2l_plat_info,
+	},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, usbhs_of_match);
 
-static struct renesas_usbhs_platform_info *usbhs_parse_dt(struct device *dev)
-{
-	struct renesas_usbhs_platform_info *info;
-	struct renesas_usbhs_driver_param *dparam;
-	u32 tmp;
-	int gpio;
-
-	info = devm_kzalloc(dev, sizeof(*info), GFP_KERNEL);
-	if (!info)
-		return NULL;
-
-	dparam = &info->driver_param;
-	dparam->type = (uintptr_t)of_device_get_match_data(dev);
-	if (!of_property_read_u32(dev->of_node, "renesas,buswait", &tmp))
-		dparam->buswait_bwait = tmp;
-	gpio = of_get_named_gpio_flags(dev->of_node, "renesas,enable-gpio", 0,
-				       NULL);
-	if (gpio > 0)
-		dparam->enable_gpio = gpio;
-
-	if (dparam->type == USBHS_TYPE_RCAR_GEN2 ||
-	    dparam->type == USBHS_TYPE_RCAR_GEN3 ||
-	    dparam->type == USBHS_TYPE_RCAR_GEN3_WITH_PLL) {
-		dparam->has_usb_dmac = 1;
-		dparam->pipe_configs = usbhsc_new_pipe;
-		dparam->pipe_size = ARRAY_SIZE(usbhsc_new_pipe);
-	}
-
-	if (dparam->type == USBHS_TYPE_RZA1) {
-		dparam->pipe_configs = usbhsc_new_pipe;
-		dparam->pipe_size = ARRAY_SIZE(usbhsc_new_pipe);
-	}
-
-	return info;
-}
-
 static int usbhs_probe(struct platform_device *pdev)
 {
-	struct renesas_usbhs_platform_info *info = renesas_usbhs_get_info(pdev);
-	struct renesas_usbhs_driver_callback *dfunc;
+	const struct renesas_usbhs_platform_info *info;
 	struct usbhs_priv *priv;
-	struct resource *res, *irq_res;
+	struct device *dev = &pdev->dev;
+	struct gpio_desc *gpiod;
 	int ret;
+	u32 tmp;
+	int irq;
 
-	/* check device node */
-	if (pdev->dev.of_node)
-		info = pdev->dev.platform_data = usbhs_parse_dt(&pdev->dev);
-
-	/* check platform information */
+	info = of_device_get_match_data(dev);
 	if (!info) {
-		dev_err(&pdev->dev, "no platform information\n");
-		return -EINVAL;
+		info = dev_get_platdata(dev);
+		if (!info)
+			return dev_err_probe(dev, -EINVAL, "no platform info\n");
 	}
 
 	/* platform data */
-	irq_res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
-	if (!irq_res) {
-		dev_err(&pdev->dev, "Not enough Renesas USB platform resources.\n");
-		return -ENODEV;
-	}
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0)
+		return irq;
 
 	/* usb private data */
-	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
+	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->base = devm_ioremap_resource(&pdev->dev, res);
+	priv->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(priv->base))
 		return PTR_ERR(priv->base);
 
-	if (of_property_read_bool(pdev->dev.of_node, "extcon")) {
-		priv->edev = extcon_get_edev_by_phandle(&pdev->dev, 0);
+	if (of_property_present(dev_of_node(dev), "extcon")) {
+		priv->edev = extcon_get_edev_by_phandle(dev, 0);
 		if (IS_ERR(priv->edev))
 			return PTR_ERR(priv->edev);
 	}
+
+	priv->rsts = devm_reset_control_array_get_optional_shared(dev);
+	if (IS_ERR(priv->rsts))
+		return PTR_ERR(priv->rsts);
 
 	/*
 	 * care platform info
 	 */
 
-	memcpy(&priv->dparam,
-	       &info->driver_param,
-	       sizeof(struct renesas_usbhs_driver_param));
+	priv->dparam = info->driver_param;
 
-	switch (priv->dparam.type) {
-	case USBHS_TYPE_RCAR_GEN2:
-		priv->pfunc = usbhs_rcar2_ops;
-		break;
-	case USBHS_TYPE_RCAR_GEN3:
-		priv->pfunc = usbhs_rcar3_ops;
-		break;
-	case USBHS_TYPE_RCAR_GEN3_WITH_PLL:
-		priv->pfunc = usbhs_rcar3_with_pll_ops;
-		if (!IS_ERR_OR_NULL(priv->edev)) {
-			priv->nb.notifier_call = priv->pfunc.notifier;
-			ret = devm_extcon_register_notifier(&pdev->dev,
-							    priv->edev,
-							    EXTCON_USB_HOST,
-							    &priv->nb);
-			if (ret < 0)
-				dev_err(&pdev->dev, "no notifier registered\n");
-		}
-		break;
-	case USBHS_TYPE_RZA1:
-		priv->pfunc = usbhs_rza1_ops;
-		break;
-	default:
-		if (!info->platform_callback.get_id) {
-			dev_err(&pdev->dev, "no platform callbacks");
-			return -EINVAL;
-		}
-		memcpy(&priv->pfunc,
-		       &info->platform_callback,
-		       sizeof(struct renesas_usbhs_platform_callback));
-		break;
+	if (!info->platform_callback.get_id) {
+		dev_err(dev, "no platform callbacks\n");
+		return -EINVAL;
 	}
-
-	/* set driver callback functions for platform */
-	dfunc			= &info->driver_callback;
-	dfunc->notify_hotplug	= usbhsc_drvcllbck_notify_hotplug;
+	priv->pfunc = &info->platform_callback;
 
 	/* set default param if platform doesn't have */
-	if (!priv->dparam.pipe_configs) {
+	if (usbhs_get_dparam(priv, has_new_pipe_configs)) {
+		priv->dparam.pipe_configs = usbhsc_new_pipe;
+		priv->dparam.pipe_size = ARRAY_SIZE(usbhsc_new_pipe);
+	} else if (!priv->dparam.pipe_configs) {
 		priv->dparam.pipe_configs = usbhsc_default_pipe;
 		priv->dparam.pipe_size = ARRAY_SIZE(usbhsc_default_pipe);
 	}
 	if (!priv->dparam.pio_dma_border)
 		priv->dparam.pio_dma_border = 64; /* 64byte */
+	if (!of_property_read_u32(dev_of_node(dev), "renesas,buswait", &tmp))
+		priv->dparam.buswait_bwait = tmp;
+	gpiod = devm_gpiod_get_optional(dev, "renesas,enable", GPIOD_IN);
+	if (IS_ERR(gpiod))
+		return PTR_ERR(gpiod);
 
 	/* FIXME */
 	/* runtime power control ? */
-	if (priv->pfunc.get_vbus)
-		usbhsc_flags_set(priv, USBHSF_RUNTIME_PWCTRL);
+	if (priv->pfunc->get_vbus)
+		usbhs_get_dparam(priv, runtime_pwctrl) = 1;
 
 	/*
 	 * priv settings
 	 */
-	priv->irq	= irq_res->start;
-	if (irq_res->flags & IORESOURCE_IRQ_SHAREABLE)
-		priv->irqflags = IRQF_SHARED;
+	priv->irq = irq;
 	priv->pdev	= pdev;
 	INIT_DELAYED_WORK(&priv->notify_hotplug_work, usbhsc_notify_hotplug);
 	spin_lock_init(usbhs_priv_to_lock(priv));
 
+	/*
+	 * Acquire clocks and enable power management (PM) early in the
+	 * probe process, as the driver accesses registers during
+	 * initialization. Ensure the device is active before proceeding.
+	 */
+	pm_runtime_enable(dev);
+
+	ret = usbhsc_clk_get(dev, priv);
+	if (ret)
+		goto probe_pm_disable;
+
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret)
+		goto probe_clk_put;
+
+	ret = usbhsc_clk_prepare_enable(priv);
+	if (ret)
+		goto probe_pm_put;
+
 	/* call pipe and module init */
 	ret = usbhs_pipe_probe(priv);
 	if (ret < 0)
-		return ret;
+		goto probe_clk_dis_unprepare;
 
 	ret = usbhs_fifo_probe(priv);
 	if (ret < 0)
@@ -655,26 +721,26 @@ static int usbhs_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto probe_end_fifo_exit;
 
-	/* dev_set_drvdata should be called after usbhs_mod_init */
+	/* platform_set_drvdata() should be called after usbhs_mod_probe() */
 	platform_set_drvdata(pdev, priv);
 
+	ret = reset_control_deassert(priv->rsts);
+	if (ret)
+		goto probe_fail_rst;
+
 	/*
-	 * deviece reset here because
+	 * device reset here because
 	 * USB device might be used in boot loader.
 	 */
 	usbhs_sys_clock_ctrl(priv, 0);
 
 	/* check GPIO determining if USB function should be enabled */
-	if (priv->dparam.enable_gpio) {
-		gpio_request_one(priv->dparam.enable_gpio, GPIOF_IN, NULL);
-		ret = !gpio_get_value(priv->dparam.enable_gpio);
-		gpio_free(priv->dparam.enable_gpio);
+	if (gpiod) {
+		ret = !gpiod_get_value(gpiod);
 		if (ret) {
-			dev_warn(&pdev->dev,
-				 "USB function not selected (GPIO %d)\n",
-				 priv->dparam.enable_gpio);
+			dev_warn(dev, "USB function not selected (GPIO)\n");
 			ret = -ENOTSUPP;
-			goto probe_end_mod_exit;
+			goto probe_assert_rest;
 		}
 	}
 
@@ -687,122 +753,146 @@ static int usbhs_probe(struct platform_device *pdev)
 	 */
 	ret = usbhs_platform_call(priv, hardware_init, pdev);
 	if (ret < 0) {
-		dev_err(&pdev->dev, "platform init failed.\n");
-		goto probe_end_mod_exit;
+		dev_err(dev, "platform init failed.\n");
+		goto probe_assert_rest;
 	}
 
 	/* reset phy for connection */
 	usbhs_platform_call(priv, phy_reset, pdev);
 
-	/* power control */
-	pm_runtime_enable(&pdev->dev);
-	if (!usbhsc_flags_has(priv, USBHSF_RUNTIME_PWCTRL)) {
+	/*
+	 * Disable the clocks that were enabled earlier in the probe path,
+	 * and let the driver handle the clocks beyond this point.
+	 */
+	usbhsc_clk_disable_unprepare(priv);
+	pm_runtime_put(dev);
+
+	if (!usbhs_get_dparam(priv, runtime_pwctrl)) {
 		usbhsc_power_ctrl(priv, 1);
 		usbhs_mod_autonomy_mode(priv);
+	} else {
+		usbhs_mod_non_autonomy_mode(priv);
 	}
 
 	/*
 	 * manual call notify_hotplug for cold plug
 	 */
-	usbhsc_drvcllbck_notify_hotplug(pdev);
+	usbhsc_schedule_notify_hotplug(pdev);
 
-	dev_info(&pdev->dev, "probed\n");
+	dev_info(dev, "probed\n");
 
 	return ret;
 
-probe_end_mod_exit:
+probe_assert_rest:
+	reset_control_assert(priv->rsts);
+probe_fail_rst:
 	usbhs_mod_remove(priv);
 probe_end_fifo_exit:
 	usbhs_fifo_remove(priv);
 probe_end_pipe_exit:
 	usbhs_pipe_remove(priv);
+probe_clk_dis_unprepare:
+	usbhsc_clk_disable_unprepare(priv);
+probe_pm_put:
+	pm_runtime_put(dev);
+probe_clk_put:
+	usbhsc_clk_put(priv);
+probe_pm_disable:
+	pm_runtime_disable(dev);
 
-	dev_info(&pdev->dev, "probe failed (%d)\n", ret);
+	dev_info(dev, "probe failed (%d)\n", ret);
 
 	return ret;
 }
 
-static int usbhs_remove(struct platform_device *pdev)
+static void usbhs_remove(struct platform_device *pdev)
 {
 	struct usbhs_priv *priv = usbhs_pdev_to_priv(pdev);
-	struct renesas_usbhs_platform_info *info = renesas_usbhs_get_info(pdev);
-	struct renesas_usbhs_driver_callback *dfunc = &info->driver_callback;
 
 	dev_dbg(&pdev->dev, "usb remove\n");
 
-	dfunc->notify_hotplug = NULL;
-
-	/* power off */
-	if (!usbhsc_flags_has(priv, USBHSF_RUNTIME_PWCTRL))
-		usbhsc_power_ctrl(priv, 0);
-
-	pm_runtime_disable(&pdev->dev);
+	flush_delayed_work(&priv->notify_hotplug_work);
 
 	usbhs_platform_call(priv, hardware_exit, pdev);
+	reset_control_assert(priv->rsts);
+
+	/*
+	 * Explicitly free the IRQ to ensure the interrupt handler is
+	 * disabled and synchronized before freeing resources.
+	 * devm_free_irq() calls free_irq() which waits for any running
+	 * ISR to complete, preventing UAF.
+	 */
+	devm_free_irq(&pdev->dev, priv->irq, priv);
+
 	usbhs_mod_remove(priv);
 	usbhs_fifo_remove(priv);
 	usbhs_pipe_remove(priv);
 
-	return 0;
+	/* power off */
+	if (!usbhs_get_dparam(priv, runtime_pwctrl))
+		usbhsc_power_ctrl(priv, 0);
+
+	usbhsc_clk_put(priv);
+	pm_runtime_disable(&pdev->dev);
+}
+
+static void usbhsc_restore(struct device *dev)
+{
+	struct usbhs_priv *priv = dev_get_drvdata(dev);
+	struct platform_device *pdev = usbhs_priv_to_pdev(priv);
+
+	if (!usbhs_get_dparam(priv, runtime_pwctrl)) {
+		usbhsc_power_ctrl(priv, 1);
+		usbhs_mod_autonomy_mode(priv);
+	}
+
+	usbhs_platform_call(priv, phy_reset, pdev);
+
+	usbhsc_schedule_notify_hotplug(pdev);
 }
 
 static int usbhsc_suspend(struct device *dev)
 {
 	struct usbhs_priv *priv = dev_get_drvdata(dev);
 	struct usbhs_mod *mod = usbhs_mod_get_current(priv);
+	int ret;
 
 	if (mod) {
 		usbhs_mod_call(priv, stop, priv);
 		usbhs_mod_change(priv, -1);
 	}
 
-	if (mod || !usbhsc_flags_has(priv, USBHSF_RUNTIME_PWCTRL))
+	if (mod || !usbhs_get_dparam(priv, runtime_pwctrl))
 		usbhsc_power_ctrl(priv, 0);
 
-	return 0;
+	ret = reset_control_assert(priv->rsts);
+	if (ret)
+		usbhsc_restore(dev);
+
+	return ret;
 }
 
 static int usbhsc_resume(struct device *dev)
 {
 	struct usbhs_priv *priv = dev_get_drvdata(dev);
-	struct platform_device *pdev = usbhs_priv_to_pdev(priv);
+	int ret;
 
-	if (!usbhsc_flags_has(priv, USBHSF_RUNTIME_PWCTRL)) {
-		usbhsc_power_ctrl(priv, 1);
-		usbhs_mod_autonomy_mode(priv);
-	}
+	ret = reset_control_deassert(priv->rsts);
+	if (ret)
+		return ret;
 
-	usbhs_platform_call(priv, phy_reset, pdev);
-
-	usbhsc_drvcllbck_notify_hotplug(pdev);
+	usbhsc_restore(dev);
 
 	return 0;
 }
 
-static int usbhsc_runtime_nop(struct device *dev)
-{
-	/* Runtime PM callback shared between ->runtime_suspend()
-	 * and ->runtime_resume(). Simply returns success.
-	 *
-	 * This driver re-initializes all registers after
-	 * pm_runtime_get_sync() anyway so there is no need
-	 * to save and restore registers here.
-	 */
-	return 0;
-}
-
-static const struct dev_pm_ops usbhsc_pm_ops = {
-	.suspend		= usbhsc_suspend,
-	.resume			= usbhsc_resume,
-	.runtime_suspend	= usbhsc_runtime_nop,
-	.runtime_resume		= usbhsc_runtime_nop,
-};
+static DEFINE_SIMPLE_DEV_PM_OPS(usbhsc_pm_ops, usbhsc_suspend, usbhsc_resume);
 
 static struct platform_driver renesas_usbhs_driver = {
 	.driver		= {
 		.name	= "renesas_usbhs",
-		.pm	= &usbhsc_pm_ops,
-		.of_match_table = of_match_ptr(usbhs_of_match),
+		.pm	= pm_sleep_ptr(&usbhsc_pm_ops),
+		.of_match_table = usbhs_of_match,
 	},
 	.probe		= usbhs_probe,
 	.remove		= usbhs_remove,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * IOAPIC/IOxAPIC/IOSAPIC driver
  *
@@ -5,10 +6,6 @@
  * (c) Copyright 2009 Hewlett-Packard Development Company, L.P.
  *
  * Copyright (C) 2014 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Based on original drivers/pci/ioapic.c
  *	Yinghai Lu <yinghai@kernel.org>
@@ -27,6 +24,7 @@
 #include <linux/acpi.h>
 #include <linux/pci.h>
 #include <acpi/acpi.h>
+#include "internal.h"
 
 struct acpi_pci_ioapic {
 	acpi_handle	root_handle;
@@ -122,7 +120,7 @@ static acpi_status handle_ioapic_add(acpi_handle handle, u32 lvl,
 		goto exit;
 	}
 
-	ioapic = kzalloc(sizeof(*ioapic), GFP_KERNEL);
+	ioapic = kzalloc_obj(*ioapic);
 	if (!ioapic) {
 		pr_err("cannot allocate memory for new IOAPIC\n");
 		goto exit;

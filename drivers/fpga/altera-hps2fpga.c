@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * FPGA to/from HPS Bridge Driver for Altera SoCFPGA Devices
  *
@@ -6,18 +7,6 @@
  * Includes this patch from the mailing list:
  *   fpga: altera-hps2fpga: fix HPS2FPGA bridge visibility to L3 masters
  *   Signed-off-by: Anatolij Gustschin <agust@denx.de>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 /*
@@ -35,7 +24,8 @@
 #include <linux/kernel.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
-#include <linux/of_platform.h>
+#include <linux/of.h>
+#include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/reset.h>
 #include <linux/spinlock.h>
@@ -138,17 +128,11 @@ static int alt_fpga_bridge_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct altera_hps2fpga_data *priv;
-	const struct of_device_id *of_id;
+	struct fpga_bridge *br;
 	u32 enable;
 	int ret;
 
-	of_id = of_match_device(altera_fpga_of_match, dev);
-	if (!of_id) {
-		dev_err(dev, "failed to match device\n");
-		return -ENODEV;
-	}
-
-	priv = (struct altera_hps2fpga_data *)of_id->data;
+	priv = (struct altera_hps2fpga_data *)device_get_match_data(dev);
 
 	priv->bridge_reset = of_reset_control_get_exclusive_by_index(dev->of_node,
 								     0);
@@ -190,25 +174,31 @@ static int alt_fpga_bridge_probe(struct platform_device *pdev)
 		}
 	}
 
-	ret = fpga_bridge_register(dev, priv->name, &altera_hps2fpga_br_ops,
-				   priv);
+	br = fpga_bridge_register(dev, priv->name,
+				  &altera_hps2fpga_br_ops, priv);
+	if (IS_ERR(br)) {
+		ret = PTR_ERR(br);
+		goto err;
+	}
+
+	platform_set_drvdata(pdev, br);
+
+	return 0;
+
 err:
-	if (ret)
-		clk_disable_unprepare(priv->clk);
+	clk_disable_unprepare(priv->clk);
 
 	return ret;
 }
 
-static int alt_fpga_bridge_remove(struct platform_device *pdev)
+static void alt_fpga_bridge_remove(struct platform_device *pdev)
 {
 	struct fpga_bridge *bridge = platform_get_drvdata(pdev);
 	struct altera_hps2fpga_data *priv = bridge->priv;
 
-	fpga_bridge_unregister(&pdev->dev);
+	fpga_bridge_unregister(bridge);
 
 	clk_disable_unprepare(priv->clk);
-
-	return 0;
 }
 
 MODULE_DEVICE_TABLE(of, altera_fpga_of_match);

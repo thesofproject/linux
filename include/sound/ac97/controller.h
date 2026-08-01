@@ -1,10 +1,8 @@
-/*
- *  Copyright (C) 2016 Robert Jarzmik <robert.jarzmik@free.fr>
+/* SPDX-License-Identifier: GPL-2.0
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Copyright (C) 2016 Robert Jarzmik <robert.jarzmik@free.fr>
  */
+
 #ifndef AC97_CONTROLLER_H
 #define AC97_CONTROLLER_H
 
@@ -64,14 +62,13 @@ struct ac97_controller_ops {
 #if IS_ENABLED(CONFIG_AC97_BUS_NEW)
 struct ac97_controller *snd_ac97_controller_register(
 	const struct ac97_controller_ops *ops, struct device *dev,
-	unsigned short slots_available, void **codecs_pdata);
+	unsigned short slots_available);
 void snd_ac97_controller_unregister(struct ac97_controller *ac97_ctrl);
 #else
 static inline struct ac97_controller *
 snd_ac97_controller_register(const struct ac97_controller_ops *ops,
 			     struct device *dev,
-			     unsigned short slots_available,
-			     void **codecs_pdata)
+			     unsigned short slots_available)
 {
 	return ERR_PTR(-ENODEV);
 }

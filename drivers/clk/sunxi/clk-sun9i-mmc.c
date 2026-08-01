@@ -1,25 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2015 Chen-Yu Tsai
  *
  * Chen-Yu Tsai	<wens@csie.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/delay.h>
 #include <linux/init.h>
+#include <linux/io.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/reset.h>
 #include <linux/platform_device.h>
 #include <linux/reset-controller.h>
@@ -116,12 +107,12 @@ static int sun9i_a80_mmc_config_clk_probe(struct platform_device *pdev)
 
 	spin_lock_init(&data->lock);
 
-	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	/* one clock/reset pair per word */
-	count = DIV_ROUND_UP((resource_size(r)), SUN9I_MMC_WIDTH);
-	data->membase = devm_ioremap_resource(&pdev->dev, r);
+	data->membase = devm_platform_get_and_ioremap_resource(pdev, 0, &r);
 	if (IS_ERR(data->membase))
 		return PTR_ERR(data->membase);
+
+	/* one clock/reset pair per word */
+	count = DIV_ROUND_UP((resource_size(r)), SUN9I_MMC_WIDTH);
 
 	clk_data = &data->clk_data;
 	clk_data->clk_num = count;

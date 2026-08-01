@@ -1,51 +1,43 @@
-/*
- * TSE-850 audio - ASoC driver for the Axentia TSE-850 with a PCM5142 codec
- *
- * Copyright (C) 2016 Axentia Technologies AB
- *
- * Author: Peter Rosin <peda@axentia.se>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- */
-
-/*
- *               loop1 relays
- *   IN1 +---o  +------------+  o---+ OUT1
- *            \                /
- *             +              +
- *             |   /          |
- *             +--o  +--.     |
- *             |  add   |     |
- *             |        V     |
- *             |      .---.   |
- *   DAC +----------->|Sum|---+
- *             |      '---'   |
- *             |              |
- *             +              +
- *
- *   IN2 +---o--+------------+--o---+ OUT2
- *               loop2 relays
- *
- * The 'loop1' gpio pin controlls two relays, which are either in loop
- * position, meaning that input and output are directly connected, or
- * they are in mixer position, meaning that the signal is passed through
- * the 'Sum' mixer. Similarly for 'loop2'.
- *
- * In the above, the 'loop1' relays are inactive, thus feeding IN1 to the
- * mixer (if 'add' is active) and feeding the mixer output to OUT1. The
- * 'loop2' relays are active, short-cutting the TSE-850 from channel 2.
- * IN1, IN2, OUT1 and OUT2 are TSE-850 connectors and DAC is the PCB name
- * of the (filtered) output from the PCM5142 codec.
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// TSE-850 audio - ASoC driver for the Axentia TSE-850 with a PCM5142 codec
+//
+// Copyright (C) 2016 Axentia Technologies AB
+//
+// Author: Peter Rosin <peda@axentia.se>
+//
+//               loop1 relays
+//   IN1 +---o  +------------+  o---+ OUT1
+//            \                /
+//             +              +
+//             |   /          |
+//             +--o  +--.     |
+//             |  add   |     |
+//             |        V     |
+//             |      .---.   |
+//   DAC +----------->|Sum|---+
+//             |      '---'   |
+//             |              |
+//             +              +
+//
+//   IN2 +---o--+------------+--o---+ OUT2
+//               loop2 relays
+//
+// The 'loop1' gpio pin controls two relays, which are either in loop
+// position, meaning that input and output are directly connected, or
+// they are in mixer position, meaning that the signal is passed through
+// the 'Sum' mixer. Similarly for 'loop2'.
+//
+// In the above, the 'loop1' relays are inactive, thus feeding IN1 to the
+// mixer (if 'add' is active) and feeding the mixer output to OUT1. The
+// 'loop2' relays are active, short-cutting the TSE-850 from channel 2.
+// IN1, IN2, OUT1 and OUT2 are TSE-850 connectors and DAC is the PCB name
+// of the (filtered) output from the PCM5142 codec.
 
 #include <linux/clk.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
-#include <linux/of_gpio.h>
 #include <linux/regulator/consumer.h>
 
 #include <sound/soc.h>
@@ -66,8 +58,8 @@ struct tse850_priv {
 static int tse850_get_mux1(struct snd_kcontrol *kctrl,
 			   struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_dapm(kctrl);
-	struct snd_soc_card *card = dapm->card;
+	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kctrl);
+	struct snd_soc_card *card = snd_soc_dapm_to_card(dapm);
 	struct tse850_priv *tse850 = snd_soc_card_get_drvdata(card);
 
 	ucontrol->value.enumerated.item[0] = tse850->loop1_cache;
@@ -78,8 +70,8 @@ static int tse850_get_mux1(struct snd_kcontrol *kctrl,
 static int tse850_put_mux1(struct snd_kcontrol *kctrl,
 			   struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_dapm(kctrl);
-	struct snd_soc_card *card = dapm->card;
+	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kctrl);
+	struct snd_soc_card *card = snd_soc_dapm_to_card(dapm);
 	struct tse850_priv *tse850 = snd_soc_card_get_drvdata(card);
 	struct soc_enum *e = (struct soc_enum *)kctrl->private_value;
 	unsigned int val = ucontrol->value.enumerated.item[0];
@@ -96,8 +88,8 @@ static int tse850_put_mux1(struct snd_kcontrol *kctrl,
 static int tse850_get_mux2(struct snd_kcontrol *kctrl,
 			   struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_dapm(kctrl);
-	struct snd_soc_card *card = dapm->card;
+	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kctrl);
+	struct snd_soc_card *card = snd_soc_dapm_to_card(dapm);
 	struct tse850_priv *tse850 = snd_soc_card_get_drvdata(card);
 
 	ucontrol->value.enumerated.item[0] = tse850->loop2_cache;
@@ -108,8 +100,8 @@ static int tse850_get_mux2(struct snd_kcontrol *kctrl,
 static int tse850_put_mux2(struct snd_kcontrol *kctrl,
 			   struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_dapm(kctrl);
-	struct snd_soc_card *card = dapm->card;
+	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kctrl);
+	struct snd_soc_card *card = snd_soc_dapm_to_card(dapm);
 	struct tse850_priv *tse850 = snd_soc_card_get_drvdata(card);
 	struct soc_enum *e = (struct soc_enum *)kctrl->private_value;
 	unsigned int val = ucontrol->value.enumerated.item[0];
@@ -123,11 +115,11 @@ static int tse850_put_mux2(struct snd_kcontrol *kctrl,
 	return snd_soc_dapm_put_enum_double(kctrl, ucontrol);
 }
 
-int tse850_get_mix(struct snd_kcontrol *kctrl,
-		   struct snd_ctl_elem_value *ucontrol)
+static int tse850_get_mix(struct snd_kcontrol *kctrl,
+			  struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_dapm(kctrl);
-	struct snd_soc_card *card = dapm->card;
+	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kctrl);
+	struct snd_soc_card *card = snd_soc_dapm_to_card(dapm);
 	struct tse850_priv *tse850 = snd_soc_card_get_drvdata(card);
 
 	ucontrol->value.enumerated.item[0] = tse850->add_cache;
@@ -135,11 +127,11 @@ int tse850_get_mix(struct snd_kcontrol *kctrl,
 	return 0;
 }
 
-int tse850_put_mix(struct snd_kcontrol *kctrl,
-		   struct snd_ctl_elem_value *ucontrol)
+static int tse850_put_mix(struct snd_kcontrol *kctrl,
+			  struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_dapm(kctrl);
-	struct snd_soc_card *card = dapm->card;
+	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kctrl);
+	struct snd_soc_card *card = snd_soc_dapm_to_card(dapm);
 	struct tse850_priv *tse850 = snd_soc_card_get_drvdata(card);
 	int connect = !!ucontrol->value.integer.value[0];
 
@@ -157,11 +149,11 @@ int tse850_put_mix(struct snd_kcontrol *kctrl,
 	return 1;
 }
 
-int tse850_get_ana(struct snd_kcontrol *kctrl,
-		   struct snd_ctl_elem_value *ucontrol)
+static int tse850_get_ana(struct snd_kcontrol *kctrl,
+			  struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_dapm(kctrl);
-	struct snd_soc_card *card = dapm->card;
+	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kctrl);
+	struct snd_soc_card *card = snd_soc_dapm_to_card(dapm);
 	struct tse850_priv *tse850 = snd_soc_card_get_drvdata(card);
 	int ret;
 
@@ -190,11 +182,11 @@ int tse850_get_ana(struct snd_kcontrol *kctrl,
 	return 0;
 }
 
-int tse850_put_ana(struct snd_kcontrol *kctrl,
-		   struct snd_ctl_elem_value *ucontrol)
+static int tse850_put_ana(struct snd_kcontrol *kctrl,
+			  struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_dapm(kctrl);
-	struct snd_soc_card *card = dapm->card;
+	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kctrl);
+	struct snd_soc_card *card = snd_soc_dapm_to_card(dapm);
 	struct tse850_priv *tse850 = snd_soc_card_get_drvdata(card);
 	struct soc_enum *e = (struct soc_enum *)kctrl->private_value;
 	unsigned int uV = ucontrol->value.enumerated.item[0];
@@ -235,16 +227,9 @@ static const struct snd_kcontrol_new mux1 =
 static const struct snd_kcontrol_new mux2 =
 	SOC_DAPM_ENUM_EXT("MUX2", mux_enum, tse850_get_mux2, tse850_put_mux2);
 
-#define TSE850_DAPM_SINGLE_EXT(xname, reg, shift, max, invert, xget, xput) \
-{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname, \
-	.info = snd_soc_info_volsw, \
-	.get = xget, \
-	.put = xput, \
-	.private_value = SOC_SINGLE_VALUE(reg, shift, max, invert, 0) }
-
 static const struct snd_kcontrol_new mix[] = {
-	TSE850_DAPM_SINGLE_EXT("IN Switch", SND_SOC_NOPM, 0, 1, 0,
-			       tse850_get_mix, tse850_put_mix),
+	SOC_SINGLE_EXT("IN Switch", SND_SOC_NOPM, 0, 1, 0,
+		       tse850_get_mix, tse850_put_mix),
 };
 
 static const char * const ana_text[] = {
@@ -300,13 +285,18 @@ static const struct snd_soc_dapm_route tse850_intercon[] = {
 	{ "DAC", NULL, "OUTL" },
 };
 
+SND_SOC_DAILINK_DEFS(pcm,
+	DAILINK_COMP_ARRAY(COMP_EMPTY()),
+	DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "pcm512x-hifi")),
+	DAILINK_COMP_ARRAY(COMP_EMPTY()));
+
 static struct snd_soc_dai_link tse850_dailink = {
 	.name = "TSE-850",
 	.stream_name = "TSE-850-PCM",
-	.codec_dai_name = "pcm512x-hifi",
 	.dai_fmt = SND_SOC_DAIFMT_I2S
 		 | SND_SOC_DAIFMT_NB_NF
-		 | SND_SOC_DAIFMT_CBM_CFS,
+		 | SND_SOC_DAIFMT_CBP_CFC,
+	SND_SOC_DAILINK_REG(pcm),
 };
 
 static struct snd_soc_card tse850_card = {
@@ -337,8 +327,8 @@ static int tse850_dt_init(struct platform_device *pdev)
 		dev_err(&pdev->dev, "failed to get cpu dai\n");
 		return -EINVAL;
 	}
-	dailink->cpu_of_node = cpu_np;
-	dailink->platform_of_node = cpu_np;
+	dailink->cpus->of_node = cpu_np;
+	dailink->platforms->of_node = cpu_np;
 	of_node_put(cpu_np);
 
 	codec_np = of_parse_phandle(np, "axentia,audio-codec", 0);
@@ -346,7 +336,7 @@ static int tse850_dt_init(struct platform_device *pdev)
 		dev_err(&pdev->dev, "failed to get codec info\n");
 		return -EINVAL;
 	}
-	dailink->codec_of_node = codec_np;
+	dailink->codecs->of_node = codec_np;
 	of_node_put(codec_np);
 
 	return 0;
@@ -372,35 +362,27 @@ static int tse850_probe(struct platform_device *pdev)
 	}
 
 	tse850->add = devm_gpiod_get(dev, "axentia,add", GPIOD_OUT_HIGH);
-	if (IS_ERR(tse850->add)) {
-		if (PTR_ERR(tse850->add) != -EPROBE_DEFER)
-			dev_err(dev, "failed to get 'add' gpio\n");
-		return PTR_ERR(tse850->add);
-	}
+	if (IS_ERR(tse850->add))
+		return dev_err_probe(dev, PTR_ERR(tse850->add),
+				     "failed to get 'add' gpio\n");
 	tse850->add_cache = 1;
 
 	tse850->loop1 = devm_gpiod_get(dev, "axentia,loop1", GPIOD_OUT_HIGH);
-	if (IS_ERR(tse850->loop1)) {
-		if (PTR_ERR(tse850->loop1) != -EPROBE_DEFER)
-			dev_err(dev, "failed to get 'loop1' gpio\n");
-		return PTR_ERR(tse850->loop1);
-	}
+	if (IS_ERR(tse850->loop1))
+		return dev_err_probe(dev, PTR_ERR(tse850->loop1),
+				     "failed to get 'loop1' gpio\n");
 	tse850->loop1_cache = 1;
 
 	tse850->loop2 = devm_gpiod_get(dev, "axentia,loop2", GPIOD_OUT_HIGH);
-	if (IS_ERR(tse850->loop2)) {
-		if (PTR_ERR(tse850->loop2) != -EPROBE_DEFER)
-			dev_err(dev, "failed to get 'loop2' gpio\n");
-		return PTR_ERR(tse850->loop2);
-	}
+	if (IS_ERR(tse850->loop2))
+		return dev_err_probe(dev, PTR_ERR(tse850->loop2),
+				     "failed to get 'loop2' gpio\n");
 	tse850->loop2_cache = 1;
 
 	tse850->ana = devm_regulator_get(dev, "axentia,ana");
-	if (IS_ERR(tse850->ana)) {
-		if (PTR_ERR(tse850->ana) != -EPROBE_DEFER)
-			dev_err(dev, "failed to get 'ana' regulator\n");
-		return PTR_ERR(tse850->ana);
-	}
+	if (IS_ERR(tse850->ana))
+		return dev_err_probe(dev, PTR_ERR(tse850->ana),
+				     "failed to get 'ana' regulator\n");
 
 	ret = regulator_enable(tse850->ana);
 	if (ret < 0) {
@@ -421,15 +403,13 @@ err_disable_ana:
 	return ret;
 }
 
-static int tse850_remove(struct platform_device *pdev)
+static void tse850_remove(struct platform_device *pdev)
 {
 	struct snd_soc_card *card = platform_get_drvdata(pdev);
 	struct tse850_priv *tse850 = snd_soc_card_get_drvdata(card);
 
 	snd_soc_unregister_card(card);
 	regulator_disable(tse850->ana);
-
-	return 0;
 }
 
 static const struct of_device_id tse850_dt_ids[] = {
@@ -441,7 +421,7 @@ MODULE_DEVICE_TABLE(of, tse850_dt_ids);
 static struct platform_driver tse850_driver = {
 	.driver = {
 		.name = "axentia-tse850-pcm5142",
-		.of_match_table = of_match_ptr(tse850_dt_ids),
+		.of_match_table = tse850_dt_ids,
 	},
 	.probe = tse850_probe,
 	.remove = tse850_remove,
@@ -452,4 +432,4 @@ module_platform_driver(tse850_driver);
 /* Module information */
 MODULE_AUTHOR("Peter Rosin <peda@axentia.se>");
 MODULE_DESCRIPTION("ALSA SoC driver for TSE-850 with PCM5142 codec");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");

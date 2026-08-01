@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* Header of ADC MFD core driver for sunxi platforms
  *
  * Copyright (c) 2016 Quentin Schulz <quentin.schulz@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 as published by the
- * Free Software Foundation.
  */
 
 #ifndef __SUN4I_GPADC__H__
@@ -84,8 +81,8 @@
 #define SUN4I_GPADC_TEMP_DATA				0x20
 #define SUN4I_GPADC_DATA				0x24
 
-#define SUN4I_GPADC_IRQ_FIFO_DATA			0
-#define SUN4I_GPADC_IRQ_TEMP_DATA			1
+#define SUN4I_GPADC_IRQ_FIFO_DATA			1
+#define SUN4I_GPADC_IRQ_TEMP_DATA			2
 
 /* 10s delay before suspending the IP */
 #define SUN4I_GPADC_AUTOSUSPEND_DELAY			10000

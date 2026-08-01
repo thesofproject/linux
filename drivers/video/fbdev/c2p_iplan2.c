@@ -8,10 +8,11 @@
  *  for more details.
  */
 
+#include <linux/export.h>
 #include <linux/module.h>
 #include <linux/string.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "c2p.h"
 #include "c2p_core.h"

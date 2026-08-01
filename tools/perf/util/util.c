@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
-#include "../perf.h"
+#include "perf.h"
 #include "util.h"
 #include "debug.h"
+#include "event.h"
 #include <api/fs/fs.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <dirent.h>
@@ -15,15 +15,21 @@
 #include <string.h>
 #include <errno.h>
 #include <limits.h>
+#include <linux/capability.h>
 #include <linux/kernel.h>
 #include <linux/log2.h>
 #include <linux/time64.h>
+#include <linux/overflow.h>
 #include <unistd.h>
+#include "cap.h"
 #include "strlist.h"
+#include "string2.h"
 
 /*
  * XXX We need to find a better place for these things...
  */
+
+const char *input_name;
 
 bool perf_singlethreaded = true;
 
@@ -37,25 +43,57 @@ void perf_set_multithreaded(void)
 	perf_singlethreaded = false;
 }
 
-unsigned int page_size;
-int cacheline_size;
-
 int sysctl_perf_event_max_stack = PERF_MAX_STACK_DEPTH;
 int sysctl_perf_event_max_contexts_per_stack = PERF_MAX_CONTEXTS_PER_STACK;
 
-bool test_attr__enabled;
+int sysctl__max_stack(void)
+{
+	int value;
+
+	if (sysctl__read_int("kernel/perf_event_max_stack", &value) == 0)
+		sysctl_perf_event_max_stack = value;
+
+	if (sysctl__read_int("kernel/perf_event_max_contexts_per_stack", &value) == 0)
+		sysctl_perf_event_max_contexts_per_stack = value;
+
+	return sysctl_perf_event_max_stack;
+}
+
+bool sysctl__nmi_watchdog_enabled(void)
+{
+	static bool cached;
+	static bool nmi_watchdog;
+	int value;
+
+	if (cached)
+		return nmi_watchdog;
+
+	if (sysctl__read_int("kernel/nmi_watchdog", &value) < 0)
+		return false;
+
+	nmi_watchdog = (value > 0) ? true : false;
+	cached = true;
+
+	return nmi_watchdog;
+}
+
+bool exclude_GH_default;
 
 bool perf_host  = true;
 bool perf_guest = false;
 
 void event_attr_init(struct perf_event_attr *attr)
 {
+	/* to capture ABI version */
+	attr->size = sizeof(*attr);
+
+	if (!exclude_GH_default)
+		return;
+
 	if (!perf_host)
 		attr->exclude_host  = 1;
 	if (!perf_guest)
 		attr->exclude_guest = 1;
-	/* to capture ABI version */
-	attr->size = sizeof(*attr);
 }
 
 int mkdir_p(char *path, mode_t mode)
@@ -84,22 +122,68 @@ int mkdir_p(char *path, mode_t mode)
 	return (stat(path, &st) && mkdir(path, mode)) ? -1 : 0;
 }
 
-int rm_rf(const char *path)
+static bool match_pat(char *file, const char **pat)
+{
+	int i = 0;
+
+	if (!pat)
+		return true;
+
+	while (pat[i]) {
+		if (strglobmatch(file, pat[i]))
+			return true;
+
+		i++;
+	}
+
+	return false;
+}
+
+/*
+ * The depth specify how deep the removal will go.
+ * 0       - will remove only files under the 'path' directory
+ * 1 .. x  - will dive in x-level deep under the 'path' directory
+ *
+ * If specified the pat is array of string patterns ended with NULL,
+ * which are checked upon every file/directory found. Only matching
+ * ones are removed.
+ *
+ * The function returns:
+ *    0 on success
+ *   -1 on removal failure with errno set
+ *   -2 on pattern failure
+ */
+static int rm_rf_depth_pat(const char *path, int depth, const char **pat)
 {
 	DIR *dir;
-	int ret = 0;
+	int ret;
 	struct dirent *d;
 	char namebuf[PATH_MAX];
+	struct stat statbuf;
 
-	dir = opendir(path);
-	if (dir == NULL)
+	/* Do not fail if there's no file. */
+	ret = lstat(path, &statbuf);
+	if (ret)
 		return 0;
 
+	/* Try to remove any file we get. */
+	if (!(statbuf.st_mode & S_IFDIR))
+		return unlink(path);
+
+	/* We have directory in path. */
+	dir = opendir(path);
+	if (dir == NULL)
+		return -1;
+
 	while ((d = readdir(dir)) != NULL && !ret) {
-		struct stat statbuf;
 
 		if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, ".."))
 			continue;
+
+		if (!match_pat(d->d_name, pat)) {
+			ret =  -2;
+			break;
+		}
 
 		scnprintf(namebuf, sizeof(namebuf), "%s/%s",
 			  path, d->d_name);
@@ -112,7 +196,7 @@ int rm_rf(const char *path)
 		}
 
 		if (S_ISDIR(statbuf.st_mode))
-			ret = rm_rf(namebuf);
+			ret = depth ? rm_rf_depth_pat(namebuf, depth - 1, pat) : 0;
 		else
 			ret = unlink(namebuf);
 	}
@@ -122,6 +206,120 @@ int rm_rf(const char *path)
 		return ret;
 
 	return rmdir(path);
+}
+
+static int rm_rf_a_kcore_dir(const char *path, const char *name)
+{
+	char kcore_dir_path[PATH_MAX];
+	const char *pat[] = {
+		"kcore",
+		"kallsyms",
+		"modules",
+		NULL,
+	};
+
+	snprintf(kcore_dir_path, sizeof(kcore_dir_path), "%s/%s", path, name);
+
+	return rm_rf_depth_pat(kcore_dir_path, 0, pat);
+}
+
+static bool kcore_dir_filter(const char *name __maybe_unused, struct dirent *d)
+{
+	const char *pat[] = {
+		"kcore_dir",
+		"kcore_dir__[1-9]*",
+		NULL,
+	};
+
+	return match_pat(d->d_name, pat);
+}
+
+static int rm_rf_kcore_dir(const char *path)
+{
+	struct strlist *kcore_dirs;
+	struct str_node *nd;
+	int ret;
+
+	kcore_dirs = lsdir(path, kcore_dir_filter);
+
+	if (!kcore_dirs)
+		return 0;
+
+	strlist__for_each_entry(nd, kcore_dirs) {
+		ret = rm_rf_a_kcore_dir(path, nd->s);
+		if (ret)
+			return ret;
+	}
+
+	strlist__delete(kcore_dirs);
+
+	return 0;
+}
+
+void cpumask_to_cpulist(char *cpumask, char *cpulist)
+{
+	int i, j, bm_size, nbits;
+	int len = strlen(cpumask);
+	unsigned long *bm;
+	char cpus[MAX_NR_CPUS];
+
+	for (i = 0; i < len; i++) {
+		if (cpumask[i] == ',') {
+			for (j = i; j < len; j++)
+				cpumask[j] = cpumask[j + 1];
+		}
+	}
+
+	len = strlen(cpumask);
+	bm_size = (len + 15) / 16;
+	nbits = bm_size * 64;
+	if (nbits <= 0)
+		return;
+
+	bm = calloc(bm_size, sizeof(unsigned long));
+	if (!bm)
+		goto free_bm;
+
+	for (i = 0; i < bm_size; i++) {
+		char blk[17];
+		int blklen = len > 16 ? 16 : len;
+
+		strncpy(blk, cpumask + len - blklen, blklen);
+		blk[blklen] = '\0';
+		bm[i] = strtoul(blk, NULL, 16);
+		cpumask[len - blklen] = '\0';
+		len = strlen(cpumask);
+	}
+
+	bitmap_scnprintf(bm, nbits, cpus, sizeof(cpus));
+	strcpy(cpulist, cpus);
+
+free_bm:
+	free(bm);
+}
+
+void print_separator2(int pre_dash_cnt, const char *s, int post_dash_cnt)
+{
+	printf("%.*s%s%.*s\n", pre_dash_cnt, graph_dotted_line, s, post_dash_cnt,
+	       graph_dotted_line);
+}
+
+int rm_rf_perf_data(const char *path)
+{
+	const char *pat[] = {
+		"data",
+		"data.*",
+		NULL,
+	};
+
+	rm_rf_kcore_dir(path);
+
+	return rm_rf_depth_pat(path, 0, pat);
+}
+
+int rm_rf(const char *path)
+{
+	return rm_rf_depth_pat(path, INT_MAX, NULL);
 }
 
 /* A filter which removes dot files */
@@ -158,178 +356,6 @@ out:
 	return list;
 }
 
-static int slow_copyfile(const char *from, const char *to, struct nsinfo *nsi)
-{
-	int err = -1;
-	char *line = NULL;
-	size_t n;
-	FILE *from_fp, *to_fp;
-	struct nscookie nsc;
-
-	nsinfo__mountns_enter(nsi, &nsc);
-	from_fp = fopen(from, "r");
-	nsinfo__mountns_exit(&nsc);
-	if (from_fp == NULL)
-		goto out;
-
-	to_fp = fopen(to, "w");
-	if (to_fp == NULL)
-		goto out_fclose_from;
-
-	while (getline(&line, &n, from_fp) > 0)
-		if (fputs(line, to_fp) == EOF)
-			goto out_fclose_to;
-	err = 0;
-out_fclose_to:
-	fclose(to_fp);
-	free(line);
-out_fclose_from:
-	fclose(from_fp);
-out:
-	return err;
-}
-
-static int copyfile_offset(int ifd, loff_t off_in, int ofd, loff_t off_out, u64 size)
-{
-	void *ptr;
-	loff_t pgoff;
-
-	pgoff = off_in & ~(page_size - 1);
-	off_in -= pgoff;
-
-	ptr = mmap(NULL, off_in + size, PROT_READ, MAP_PRIVATE, ifd, pgoff);
-	if (ptr == MAP_FAILED)
-		return -1;
-
-	while (size) {
-		ssize_t ret = pwrite(ofd, ptr + off_in, size, off_out);
-		if (ret < 0 && errno == EINTR)
-			continue;
-		if (ret <= 0)
-			break;
-
-		size -= ret;
-		off_in += ret;
-		off_out += ret;
-	}
-	munmap(ptr, off_in + size);
-
-	return size ? -1 : 0;
-}
-
-static int copyfile_mode_ns(const char *from, const char *to, mode_t mode,
-			    struct nsinfo *nsi)
-{
-	int fromfd, tofd;
-	struct stat st;
-	int err;
-	char *tmp = NULL, *ptr = NULL;
-	struct nscookie nsc;
-
-	nsinfo__mountns_enter(nsi, &nsc);
-	err = stat(from, &st);
-	nsinfo__mountns_exit(&nsc);
-	if (err)
-		goto out;
-	err = -1;
-
-	/* extra 'x' at the end is to reserve space for '.' */
-	if (asprintf(&tmp, "%s.XXXXXXx", to) < 0) {
-		tmp = NULL;
-		goto out;
-	}
-	ptr = strrchr(tmp, '/');
-	if (!ptr)
-		goto out;
-	ptr = memmove(ptr + 1, ptr, strlen(ptr) - 1);
-	*ptr = '.';
-
-	tofd = mkstemp(tmp);
-	if (tofd < 0)
-		goto out;
-
-	if (fchmod(tofd, mode))
-		goto out_close_to;
-
-	if (st.st_size == 0) { /* /proc? do it slowly... */
-		err = slow_copyfile(from, tmp, nsi);
-		goto out_close_to;
-	}
-
-	nsinfo__mountns_enter(nsi, &nsc);
-	fromfd = open(from, O_RDONLY);
-	nsinfo__mountns_exit(&nsc);
-	if (fromfd < 0)
-		goto out_close_to;
-
-	err = copyfile_offset(fromfd, 0, tofd, 0, st.st_size);
-
-	close(fromfd);
-out_close_to:
-	close(tofd);
-	if (!err)
-		err = link(tmp, to);
-	unlink(tmp);
-out:
-	free(tmp);
-	return err;
-}
-
-int copyfile_ns(const char *from, const char *to, struct nsinfo *nsi)
-{
-	return copyfile_mode_ns(from, to, 0755, nsi);
-}
-
-int copyfile_mode(const char *from, const char *to, mode_t mode)
-{
-	return copyfile_mode_ns(from, to, mode, NULL);
-}
-
-int copyfile(const char *from, const char *to)
-{
-	return copyfile_mode(from, to, 0755);
-}
-
-static ssize_t ion(bool is_read, int fd, void *buf, size_t n)
-{
-	void *buf_start = buf;
-	size_t left = n;
-
-	while (left) {
-		/* buf must be treated as const if !is_read. */
-		ssize_t ret = is_read ? read(fd, buf, left) :
-					write(fd, buf, left);
-
-		if (ret < 0 && errno == EINTR)
-			continue;
-		if (ret <= 0)
-			return ret;
-
-		left -= ret;
-		buf  += ret;
-	}
-
-	BUG_ON((size_t)(buf - buf_start) != n);
-	return n;
-}
-
-/*
- * Read exactly 'n' bytes or return an error.
- */
-ssize_t readn(int fd, void *buf, size_t n)
-{
-	return ion(true, fd, buf, n);
-}
-
-/*
- * Write exactly 'n' bytes or return an error.
- */
-ssize_t writen(int fd, const void *buf, size_t n)
-{
-	/* ion does not modify buf. */
-	return ion(false, fd, (void *)buf, n);
-}
-
 size_t hex_width(u64 v)
 {
 	size_t n = 1;
@@ -338,19 +364,6 @@ size_t hex_width(u64 v)
 		++n;
 
 	return n;
-}
-
-/*
- * While we find nice hex chars, build a long_val.
- * Return number of chars processed.
- */
-int hex2u64(const char *ptr, u64 *long_val)
-{
-	char *p;
-
-	*long_val = strtoull(ptr, &p, 16);
-
-	return p - ptr;
 }
 
 int perf_event_paranoid(void)
@@ -362,115 +375,191 @@ int perf_event_paranoid(void)
 
 	return value;
 }
-static int
-fetch_ubuntu_kernel_version(unsigned int *puint)
+
+bool perf_event_paranoid_check(int max_level)
 {
-	ssize_t len;
-	size_t line_len = 0;
-	char *ptr, *line = NULL;
-	int version, patchlevel, sublevel, err;
-	FILE *vsig;
+	bool used_root;
 
-	if (!puint)
-		return 0;
+	if (perf_cap__capable(CAP_SYS_ADMIN, &used_root))
+		return true;
 
-	vsig = fopen("/proc/version_signature", "r");
-	if (!vsig) {
-		pr_debug("Open /proc/version_signature failed: %s\n",
-			 strerror(errno));
-		return -1;
-	}
+	if (!used_root && perf_cap__capable(CAP_PERFMON, &used_root))
+		return true;
 
-	len = getline(&line, &line_len, vsig);
-	fclose(vsig);
-	err = -1;
-	if (len <= 0) {
-		pr_debug("Reading from /proc/version_signature failed: %s\n",
-			 strerror(errno));
-		goto errout;
-	}
-
-	ptr = strrchr(line, ' ');
-	if (!ptr) {
-		pr_debug("Parsing /proc/version_signature failed: %s\n", line);
-		goto errout;
-	}
-
-	err = sscanf(ptr + 1, "%d.%d.%d",
-		     &version, &patchlevel, &sublevel);
-	if (err != 3) {
-		pr_debug("Unable to get kernel version from /proc/version_signature '%s'\n",
-			 line);
-		goto errout;
-	}
-
-	*puint = (version << 16) + (patchlevel << 8) + sublevel;
-	err = 0;
-errout:
-	free(line);
-	return err;
+	return perf_event_paranoid() <= max_level;
 }
 
-int
-fetch_kernel_version(unsigned int *puint, char *str,
-		     size_t str_size)
-{
-	struct utsname utsname;
-	int version, patchlevel, sublevel, err;
-	bool int_ver_ready = false;
-
-	if (access("/proc/version_signature", R_OK) == 0)
-		if (!fetch_ubuntu_kernel_version(puint))
-			int_ver_ready = true;
-
-	if (uname(&utsname))
-		return -1;
-
-	if (str && str_size) {
-		strncpy(str, utsname.release, str_size);
-		str[str_size - 1] = '\0';
-	}
-
-	if (!puint || int_ver_ready)
-		return 0;
-
-	err = sscanf(utsname.release, "%d.%d.%d",
-		     &version, &patchlevel, &sublevel);
-
-	if (err != 3) {
-		pr_debug("Unable to get kernel version from uname '%s'\n",
-			 utsname.release);
-		return -1;
-	}
-
-	*puint = (version << 16) + (patchlevel << 8) + sublevel;
-	return 0;
-}
-
-const char *perf_tip(const char *dirpath)
+int perf_tip(char **strp, const char *dirpath)
 {
 	struct strlist *tips;
 	struct str_node *node;
-	char *tip = NULL;
 	struct strlist_config conf = {
 		.dirname = dirpath,
 		.file_only = true,
 	};
+	int ret = 0;
 
+	*strp = NULL;
 	tips = strlist__new("tips.txt", &conf);
 	if (tips == NULL)
-		return errno == ENOENT ? NULL :
-			"Tip: check path of tips.txt or get more memory! ;-p";
+		return -errno;
 
 	if (strlist__nr_entries(tips) == 0)
 		goto out;
 
 	node = strlist__entry(tips, random() % strlist__nr_entries(tips));
-	if (asprintf(&tip, "Tip: %s", node->s) < 0)
-		tip = (char *)"Tip: get more memory! ;-)";
+	if (asprintf(strp, "Tip: %s", node->s) < 0)
+		ret = -ENOMEM;
 
 out:
 	strlist__delete(tips);
 
-	return tip;
+	return ret;
+}
+
+char *perf_exe(char *buf, int len)
+{
+	int n;
+
+	if (len <= 0)
+		return buf;
+
+	n = readlink("/proc/self/exe", buf, len - 1);
+	if (n > 0) {
+		buf[n] = 0;
+		return buf;
+	}
+	if (len < (int)sizeof("perf")) {
+		buf[0] = '\0';
+		return buf;
+	}
+
+	return strcpy(buf, "perf");
+}
+
+void perf_debuginfod_setup(struct perf_debuginfod *di)
+{
+	/*
+	 * By default '!di->set' we clear DEBUGINFOD_URLS, so debuginfod
+	 * processing is not triggered, otherwise we set it to 'di->urls'
+	 * value. If 'di->urls' is "system" we keep DEBUGINFOD_URLS value.
+	 */
+	if (!di->set)
+		setenv("DEBUGINFOD_URLS", "", 1);
+	else if (di->urls && strcmp(di->urls, "system"))
+		setenv("DEBUGINFOD_URLS", di->urls, 1);
+
+	pr_debug("DEBUGINFOD_URLS=%s\n", getenv("DEBUGINFOD_URLS"));
+
+#ifndef HAVE_DEBUGINFOD_SUPPORT
+	if (di->set)
+		pr_warning("WARNING: debuginfod support requested, but perf is not built with it\n");
+#endif
+}
+
+/*
+ * Return a new filename prepended with task's root directory if it's in
+ * a chroot.  Callers should free the returned string.
+ */
+char *filename_with_chroot(int pid, const char *filename)
+{
+	char buf[PATH_MAX];
+	char proc_root[32];
+	char *new_name = NULL;
+	int ret;
+
+	scnprintf(proc_root, sizeof(proc_root), "/proc/%d/root", pid);
+	ret = readlink(proc_root, buf, sizeof(buf) - 1);
+	if (ret <= 0)
+		return NULL;
+
+	/* readlink(2) does not append a null byte to buf */
+	buf[ret] = '\0';
+
+	if (!strcmp(buf, "/"))
+		return NULL;
+
+	if (strstr(buf, "(deleted)"))
+		return NULL;
+
+	if (asprintf(&new_name, "%s/%s", buf, filename) < 0)
+		return NULL;
+
+	return new_name;
+}
+
+/*
+ * Reallocate an array *arr of size *arr_sz so that it is big enough to contain
+ * x elements of size msz, initializing new entries to *init_val or zero if
+ * init_val is NULL
+ */
+int do_realloc_array_as_needed(void **arr, size_t *arr_sz, size_t x, size_t msz, const void *init_val)
+{
+	size_t new_sz = *arr_sz;
+	void *new_arr;
+	size_t i;
+
+	if (!new_sz)
+		new_sz = msz >= 64 ? 1 : roundup(64, msz); /* Start with at least 64 bytes */
+	while (x >= new_sz) {
+		if (check_mul_overflow(new_sz, (size_t)2, &new_sz))
+			return -ENOMEM;
+	}
+	if (new_sz == *arr_sz)
+		return 0;
+	new_arr = calloc(new_sz, msz);
+	if (!new_arr)
+		return -ENOMEM;
+	if (*arr_sz)
+		memcpy(new_arr, *arr, *arr_sz * msz);
+	if (init_val) {
+		for (i = *arr_sz; i < new_sz; i++)
+			memcpy(new_arr + (i * msz), init_val, msz);
+	}
+	*arr = new_arr;
+	*arr_sz = new_sz;
+	return 0;
+}
+
+#ifndef HAVE_SCHED_GETCPU_SUPPORT
+int sched_getcpu(void)
+{
+#ifdef __NR_getcpu
+	unsigned int cpu;
+	int err = syscall(__NR_getcpu, &cpu, NULL, NULL);
+
+	if (!err)
+		return cpu;
+#else
+	errno = ENOSYS;
+#endif
+	return -1;
+}
+#endif
+
+#ifndef HAVE_SCANDIRAT_SUPPORT
+int scandirat(int dirfd, const char *dirp,
+	      struct dirent ***namelist,
+	      int (*filter)(const struct dirent *),
+	      int (*compar)(const struct dirent **, const struct dirent **))
+{
+	char path[PATH_MAX];
+	int err, fd = openat(dirfd, dirp, O_PATH);
+
+	if (fd < 0)
+		return fd;
+
+	snprintf(path, sizeof(path), "/proc/%d/fd/%d", getpid(), fd);
+	err = scandir(path, namelist, filter, compar);
+	close(fd);
+	return err;
+}
+#endif
+
+/* basename version that takes a const input string */
+const char *perf_basename(const char *path)
+{
+	const char *base = strrchr(path, '/');
+
+	return base ? base + 1 : path;
 }

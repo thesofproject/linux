@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * nosy-dump - Interface to snoop mode driver for TI PCILynx 1394 controllers
  * Copyright (C) 2002-2006 Kristian Høgsberg
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 
 #include <byteswap.h>
@@ -784,7 +771,7 @@ print_packet(uint32_t *data, size_t length)
 				if (pp->phy_config.set_root)
 					printf(" set_root_id=%02x", pp->phy_config.root_id);
 				if (pp->phy_config.set_gap_count)
-					printf(" set_gap_count=%d", pp->phy_config.gap_count);
+					printf(" set_gap_count=%u", pp->phy_config.gap_count);
 			}
 			break;
 
@@ -794,13 +781,13 @@ print_packet(uint32_t *data, size_t length)
 
 		case PHY_PACKET_SELF_ID:
 			if (pp->self_id.extended) {
-				printf("extended self id: phy_id=%02x, seq=%d",
+				printf("extended self id: phy_id=%02x, seq=%u",
 				       pp->ext_self_id.phy_id, pp->ext_self_id.sequence);
 			} else {
 				static const char * const speed_names[] = {
 					"S100", "S200", "S400", "BETA"
 				};
-				printf("self id: phy_id=%02x, link %s, gap_count=%d, speed=%s%s%s",
+				printf("self id: phy_id=%02x, link %s, gap_count=%u speed=%s%s%s",
 				       pp->self_id.phy_id,
 				       (pp->self_id.link_active ? "active" : "not active"),
 				       pp->self_id.gap_count,

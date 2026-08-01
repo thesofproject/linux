@@ -1,15 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * llc_pdu.c - access to PDU internals
  *
  * Copyright (c) 1997 by Procom Technology, Inc.
  *		 2001-2003 by Arnaldo Carvalho de Melo <acme@conectiva.com.br>
- *
- * This program can be redistributed or modified under the terms of the
- * GNU General Public License as published by the Free Software Foundation.
- * This program is distributed without any warranty or implied warranty
- * of merchantability or fitness for a particular purpose.
- *
- * See the GNU General Public License for more details.
  */
 
 #include <linux/netdevice.h>
@@ -24,8 +18,8 @@ void llc_pdu_set_cmd_rsp(struct sk_buff *skb, u8 pdu_type)
 }
 
 /**
- *	pdu_set_pf_bit - sets poll/final bit in LLC header
- *	@pdu_frame: input frame that p/f bit must be set into it.
+ *	llc_pdu_set_pf_bit - sets poll/final bit in LLC header
+ *	@skb: Frame to set bit in
  *	@bit_value: poll/final bit (0 or 1).
  *
  *	This function sets poll/final bit in LLC header (based on type of PDU).

@@ -1,9 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Synaptics TouchPad PS/2 mouse driver
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #ifndef _SYNAPTICS_H
@@ -24,7 +21,7 @@
 #define SYN_QUE_EXT_MIN_COORDS		0x0f
 #define SYN_QUE_MEXT_CAPAB_10		0x10
 
-/* synatics modes */
+/* synaptics modes */
 #define SYN_BIT_ABSOLUTE_MODE		BIT(7)
 #define SYN_BIT_HIGH_RATE		BIT(6)
 #define SYN_BIT_SLEEP_MODE		BIT(3)
@@ -191,6 +188,7 @@ struct synaptics_data {
 	bool disable_gesture;			/* disable gestures */
 
 	struct serio *pt_port;			/* Pass-through serio port */
+	bool pt_port_open;
 
 	/*
 	 * Last received Advanced Gesture Mode (AGM) packet. An AGM packet

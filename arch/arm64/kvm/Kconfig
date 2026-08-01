@@ -4,11 +4,10 @@
 #
 
 source "virt/kvm/Kconfig"
-source "virt/lib/Kconfig"
 
 menuconfig VIRTUALIZATION
 	bool "Virtualization"
-	---help---
+	help
 	  Say Y here to get to see options for using your Linux host to run
 	  other operating systems inside virtual machines (guests).
 	  This option alone does not add any kernel code.
@@ -18,48 +17,91 @@ menuconfig VIRTUALIZATION
 
 if VIRTUALIZATION
 
-config KVM
+menuconfig KVM
 	bool "Kernel-based Virtual Machine (KVM) support"
-	depends on OF
-	select MMU_NOTIFIER
-	select PREEMPT_NOTIFIERS
-	select ANON_INODES
+	select KVM_COMMON
+	select KVM_GENERIC_HARDWARE_ENABLING
 	select HAVE_KVM_CPU_RELAX_INTERCEPT
-	select HAVE_KVM_ARCH_TLB_FLUSH_ALL
 	select KVM_MMIO
-	select KVM_ARM_HOST
 	select KVM_GENERIC_DIRTYLOG_READ_PROTECT
-	select SRCU
+	select VIRT_XFER_TO_GUEST_WORK
 	select KVM_VFIO
-	select HAVE_KVM_EVENTFD
-	select HAVE_KVM_IRQFD
-	select KVM_ARM_PMU if HW_PERF_EVENTS
+	select HAVE_KVM_DIRTY_RING_ACQ_REL
+	select NEED_KVM_DIRTY_RING_WITH_BITMAP
 	select HAVE_KVM_MSI
 	select HAVE_KVM_IRQCHIP
 	select HAVE_KVM_IRQ_ROUTING
-	select IRQ_BYPASS_MANAGER
 	select HAVE_KVM_IRQ_BYPASS
-	---help---
+	select HAVE_KVM_READONLY_MEM
+	select HAVE_KVM_VCPU_RUN_PID_CHANGE
+	select SCHED_INFO
+	select GUEST_PERF_EVENTS if PERF_EVENTS
+	select KVM_GUEST_MEMFD
+	help
 	  Support hosting virtualized guest machines.
-	  We don't support KVM with 16K page tables yet, due to the multiple
-	  levels of fake page tables.
 
 	  If unsure, say N.
 
-config KVM_ARM_HOST
+if KVM
+
+config PTDUMP_STAGE2_DEBUGFS
+	bool "Present the stage-2 pagetables to debugfs"
+	depends on DEBUG_KERNEL
+	depends on DEBUG_FS
+	depends on ARCH_HAS_PTDUMP
+	select PTDUMP
+	default n
+	help
+	  Say Y here if you want to show the stage-2 kernel pagetables
+	  layout in a debugfs file. This information is only useful for kernel developers
+	  who are working in architecture specific areas of the kernel.
+	  It is probably not a good idea to enable this feature in a production
+	  kernel.
+
+	  If in doubt, say N.
+
+config NVHE_EL2_DEBUG
+	bool "Debug mode for non-VHE EL2 object"
+	default n
+	help
+	  Say Y here to enable the debug mode for the non-VHE KVM EL2 object.
+	  Failure reports will BUG() in the hypervisor. This is intended for
+	  local EL2 hypervisor development.
+
+	  If unsure, say N.
+
+if NVHE_EL2_DEBUG
+
+config NVHE_EL2_TRACING
 	bool
-	---help---
-	  Provides host support for ARM processors.
+	depends on TRACING && FTRACE
+	select TRACE_REMOTE
+	default y
 
-config KVM_ARM_PMU
-	bool
-	---help---
-	  Adds support for a virtual Performance Monitoring Unit (PMU) in
-	  virtual machines.
+config PKVM_DISABLE_STAGE2_ON_PANIC
+	bool "Disable the host stage-2 on panic"
+	default n
+	help
+	  Relax the host stage-2 on hypervisor panic to allow the kernel to
+	  unwind and symbolize the hypervisor stacktrace. This however tampers
+	  the system security. This is intended for local EL2 hypervisor
+	  development.
 
-config KVM_INDIRECT_VECTORS
-       def_bool KVM && (HARDEN_BRANCH_PREDICTOR || HARDEN_EL2_VECTORS)
+	  If unsure, say N.
 
-source drivers/vhost/Kconfig
+config PKVM_STACKTRACE
+	bool "Protected KVM hypervisor stacktraces"
+	depends on PKVM_DISABLE_STAGE2_ON_PANIC
+	default y
+	help
+	  Say Y here to enable pKVM hypervisor stacktraces on hyp_panic()
 
+	  If using protected nVHE mode, but cannot afford the associated
+	  memory cost (less than 0.75 page per CPU) of pKVM stacktraces,
+	  say N.
+
+	  If unsure, or not using protected nVHE (pKVM), say N.
+
+endif # NVHE_EL2_DEBUG
+endif # KVM
 endif # VIRTUALIZATION

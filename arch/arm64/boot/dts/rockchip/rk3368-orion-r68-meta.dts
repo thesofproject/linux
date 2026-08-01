@@ -1,43 +1,6 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
  * Copyright (c) 2016 Matthias Brugger <mbrugger@suse.com>
- *
- * This file is dual-licensed: you can use it either under the terms
- * of the GPL or the X11 license, at your option. Note that this dual
- * licensing only applies to this file, and not this project as a
- * whole.
- *
- *  a) This file is free software; you can redistribute it and/or
- *     modify it under the terms of the GNU General Public License as
- *     published by the Free Software Foundation; either version 2 of the
- *     License, or (at your option) any later version.
- *
- *     This file is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- * Or, alternatively,
- *
- *  b) Permission is hereby granted, free of charge, to any person
- *     obtaining a copy of this software and associated documentation
- *     files (the "Software"), to deal in the Software without
- *     restriction, including without limitation the rights to use,
- *     copy, modify, merge, publish, distribute, sublicense, and/or
- *     sell copies of the Software, and to permit persons to whom the
- *     Software is furnished to do so, subject to the following
- *     conditions:
- *
- *     The above copyright notice and this permission notice shall be
- *     included in all copies or substantial portions of the Software.
- *
- *     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- *     OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- *     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
- *     HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
- *     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- *     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
- *     OTHER DEALINGS IN THE SOFTWARE.
  */
 
 /dts-v1/;
@@ -48,11 +11,17 @@
 	model = "Rockchip Orion R68";
 	compatible = "tronsmart,orion-r68-meta", "rockchip,rk3368";
 
+	aliases {
+		ethernet0 = &gmac;
+		mmc0 = &sdmmc;
+		mmc1 = &emmc;
+	};
+
 	chosen {
 		stdout-path = "serial2:115200n8";
 	};
 
-	memory {
+	memory@0 {
 		device_type = "memory";
 		reg = <0x0 0x0 0x0 0x80000000>;
 	};
@@ -76,7 +45,7 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&pwr_key>;
 
-		power {
+		key-power {
 			wakeup-source;
 			gpios = <&gpio0 RK_PA5 GPIO_ACTIVE_HIGH>;
 			label = "GPIO Power";
@@ -87,7 +56,7 @@
 	leds: gpio-leds {
 		compatible = "gpio-leds";
 
-		red {
+		red_led: led-0 {
 			gpios = <&gpio3 RK_PD5 GPIO_ACTIVE_HIGH>;
 			label = "orion:red:led";
 			pinctrl-names = "default";
@@ -95,7 +64,7 @@
 			default-state = "on";
 		};
 
-		blue {
+		blue_led: led-1 {
 			gpios = <&gpio0 RK_PB4 GPIO_ACTIVE_HIGH>;
 			label = "orion:blue:led";
 			pinctrl-names = "default";
@@ -104,7 +73,7 @@
 		};
 	};
 
-	vcc_18: vcc18-regulator {
+	vcc_18: regulator-vcc18 {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc_18";
 		regulator-min-microvolt = <1800000>;
@@ -115,7 +84,7 @@
 	};
 
 	/* supplies both host and otg */
-	vcc_host: vcc-host-regulator {
+	vcc_host: regulator-vcc-host {
 		compatible = "regulator-fixed";
 		gpio = <&gpio0 RK_PA4 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default";
@@ -126,7 +95,7 @@
 		vin-supply = <&vcc_sys>;
 	};
 
-	vcc_io: vcc-io-regulator {
+	vcc_io: regulator-vcc-io {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc_io";
 		regulator-min-microvolt = <3300000>;
@@ -136,7 +105,7 @@
 		vin-supply = <&vcc_sys>;
 	};
 
-	vcc_lan: vcc-lan-regulator {
+	vcc_lan: regulator-vcc-lan {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc_lan";
 		regulator-min-microvolt = <3300000>;
@@ -146,7 +115,7 @@
 		vin-supply = <&vcc_io>;
 	};
 
-	vcc_sd: vcc-sd-regulator {
+	vcc_sd: regulator-vcc-sd {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc_sd";
 		gpio = <&gpio3 RK_PB3 GPIO_ACTIVE_LOW>;
@@ -155,7 +124,7 @@
 		vin-supply = <&vcc_io>;
 	};
 
-	vcc_sys: vcc-sys-regulator {
+	vcc_sys: regulator-vcc-sys {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc_sys";
 		regulator-min-microvolt = <5000000>;
@@ -164,9 +133,9 @@
 		regulator-boot-on;
 	};
 
-	vccio_sd: vcc-io-sd-regulator {
+	vccio_sd: regulator-vcc-io-sd {
 		compatible = "regulator-fixed";
-		regulator-name= "vccio_sd";
+		regulator-name = "vccio_sd";
 		regulator-min-microvolt = <1800000>;
 		regulator-max-microvolt = <3300000>;
 		regulator-always-on;
@@ -174,7 +143,7 @@
 		vin-supply = <&vcc_io>;
 	};
 
-	vccio_wl: vccio-wl-regulator {
+	vccio_wl: regulator-vccio-wl {
 		compatible = "regulator-fixed";
 		regulator-name = "vccio_wl";
 		regulator-min-microvolt = <3300000>;
@@ -184,7 +153,7 @@
 		vin-supply = <&vcc_io>;
 	};
 
-	vdd_10: vdd-10-regulator {
+	vdd_10: regulator-vdd-10 {
 		compatible = "regulator-fixed";
 		regulator-name = "vdd_10";
 		regulator-min-microvolt = <1000000>;
@@ -198,7 +167,6 @@
 &emmc {
 	bus-width = <8>;
 	cap-mmc-highspeed;
-	disable-wp;
 	mmc-pwrseq = <&emmc_pwrseq>;
 	mmc-hs200-1_2v;
 	mmc-hs200-1_8v;
@@ -221,7 +189,7 @@
 	snps,reset-delays-us = <0 10000 1000000>;
 	tx_delay = <0x30>;
 	rx_delay = <0x10>;
-	status = "ok";
+	status = "okay";
 };
 
 &i2c0 {
@@ -241,11 +209,10 @@
 		vin-supply = <&vcc_sys>;
 	};
 
-	hym8563: hym8563@51 {
+	hym8563: rtc@51 {
 		compatible = "haoyu,hym8563";
 		reg = <0x51>;
 		#clock-cells = <0>;
-		clock-frequency = <32768>;
 		clock-output-names = "xin32k";
 		/* rtc_int is not connected */
 	};
@@ -264,73 +231,73 @@
 
 	emmc {
 		emmc_bus8: emmc-bus8 {
-			rockchip,pins = <1 18 RK_FUNC_2 &pcfg_pull_up_drv_8ma>,
-					<1 19 RK_FUNC_2 &pcfg_pull_up_drv_8ma>,
-					<1 20 RK_FUNC_2 &pcfg_pull_up_drv_8ma>,
-					<1 21 RK_FUNC_2 &pcfg_pull_up_drv_8ma>,
-					<1 22 RK_FUNC_2 &pcfg_pull_up_drv_8ma>,
-					<1 23 RK_FUNC_2 &pcfg_pull_up_drv_8ma>,
-					<1 24 RK_FUNC_2 &pcfg_pull_up_drv_8ma>,
-					<1 25 RK_FUNC_2 &pcfg_pull_up_drv_8ma>;
+			rockchip,pins = <1 RK_PC2 2 &pcfg_pull_up_drv_8ma>,
+					<1 RK_PC3 2 &pcfg_pull_up_drv_8ma>,
+					<1 RK_PC4 2 &pcfg_pull_up_drv_8ma>,
+					<1 RK_PC5 2 &pcfg_pull_up_drv_8ma>,
+					<1 RK_PC6 2 &pcfg_pull_up_drv_8ma>,
+					<1 RK_PC7 2 &pcfg_pull_up_drv_8ma>,
+					<1 RK_PD0 2 &pcfg_pull_up_drv_8ma>,
+					<1 RK_PD1 2 &pcfg_pull_up_drv_8ma>;
 		};
 
 		emmc-clk {
-			rockchip,pins = <2 4 RK_FUNC_2 &pcfg_pull_none_drv_8ma>;
+			rockchip,pins = <2 RK_PA4 2 &pcfg_pull_none_drv_8ma>;
 		};
 
 		emmc-cmd {
-			rockchip,pins = <1 26 RK_FUNC_2 &pcfg_pull_up_drv_8ma>;
+			rockchip,pins = <1 RK_PD2 2 &pcfg_pull_up_drv_8ma>;
 		};
 
 		emmc_reset: emmc-reset {
-			rockchip,pins = <2 3 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <2 RK_PA3 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 
 	keys {
 		pwr_key: pwr-key {
-			rockchip,pins = <0 5 RK_FUNC_GPIO &pcfg_pull_down>;
+			rockchip,pins = <0 RK_PA5 RK_FUNC_GPIO &pcfg_pull_down>;
 		};
 	};
 
 	leds {
 		stby_pwren: stby-pwren {
-			rockchip,pins = <0 12 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <0 RK_PB4 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 
 		led_ctl: led-ctl {
-			rockchip,pins = <3 29 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <3 RK_PD5 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 
 	sdmmc {
 		sdmmc_clk: sdmmc-clk {
-			rockchip,pins = <2 9 RK_FUNC_1 &pcfg_pull_none_drv_8ma>;
+			rockchip,pins = <2 RK_PB1 1 &pcfg_pull_none_drv_8ma>;
 		};
 
 		sdmmc_cmd: sdmmc-cmd {
-			rockchip,pins = <2 10 RK_FUNC_1 &pcfg_pull_up_drv_8ma>;
+			rockchip,pins = <2 RK_PB2 1 &pcfg_pull_up_drv_8ma>;
 		};
 
 		sdmmc_cd: sdmmc-cd {
-			rockchip,pins = <2 11 RK_FUNC_1 &pcfg_pull_up_drv_8ma>;
+			rockchip,pins = <2 RK_PB3 1 &pcfg_pull_up_drv_8ma>;
 		};
 
 		sdmmc_bus1: sdmmc-bus1 {
-			rockchip,pins = <2 5 RK_FUNC_1 &pcfg_pull_up_drv_8ma>;
+			rockchip,pins = <2 RK_PA5 1 &pcfg_pull_up_drv_8ma>;
 		};
 
 		sdmmc_bus4: sdmmc-bus4 {
-			rockchip,pins = <2 5 RK_FUNC_1 &pcfg_pull_up_drv_8ma>,
-					<2 6 RK_FUNC_1 &pcfg_pull_up_drv_8ma>,
-					<2 7 RK_FUNC_1 &pcfg_pull_up_drv_8ma>,
-					<2 8 RK_FUNC_1 &pcfg_pull_up_drv_8ma>;
+			rockchip,pins = <2 RK_PA5 1 &pcfg_pull_up_drv_8ma>,
+					<2 RK_PA6 1 &pcfg_pull_up_drv_8ma>,
+					<2 RK_PA7 1 &pcfg_pull_up_drv_8ma>,
+					<2 RK_PB0 1 &pcfg_pull_up_drv_8ma>;
 		};
 	};
 
 	usb {
 		host_vbus_drv: host-vbus-drv {
-			rockchip,pins = <0 4 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 };

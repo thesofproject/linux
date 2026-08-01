@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (c) 1999-2001 Vojtech Pavlik
  *
@@ -7,26 +8,6 @@
 
 /*
  * Atari, Amstrad, Commodore, Amiga, Sega, etc. joystick driver for Linux
- */
-
-/*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
- * Should you need to contact me, the author, you can do so either by
- * e-mail - mail your message to <vojtech@ucw.cz>, or by paper mail:
- * Vojtech Pavlik, Simunkova 1594, Prague 8, 182 00 Czech Republic
  */
 
 #include <linux/kernel.h>
@@ -263,6 +244,7 @@ static unsigned char db9_saturn_read_packet(struct parport *port, unsigned char 
 			db9_saturn_write_sub(port, type, 3, powered, 0);
 			return data[0] = 0xe3;
 		}
+		fallthrough;
 	default:
 		return data[0];
 	}
@@ -282,11 +264,14 @@ static int db9_saturn_report(unsigned char id, unsigned char data[60], struct in
 		switch (data[j]) {
 		case 0x16: /* multi controller (analog 4 axis) */
 			input_report_abs(dev, db9_abs[5], data[j + 6]);
+			fallthrough;
 		case 0x15: /* mission stick (analog 3 axis) */
 			input_report_abs(dev, db9_abs[3], data[j + 4]);
 			input_report_abs(dev, db9_abs[4], data[j + 5]);
+			fallthrough;
 		case 0x13: /* racing controller (analog 1 axis) */
 			input_report_abs(dev, db9_abs[2], data[j + 3]);
+			fallthrough;
 		case 0x34: /* saturn keyboard (udlr ZXC ASD QE Esc) */
 		case 0x02: /* digital pad (digital 2 axis + buttons) */
 			input_report_abs(dev, db9_abs[0], !(data[j + 1] & 128) - !(data[j + 1] & 64));
@@ -366,7 +351,7 @@ static int db9_saturn(int mode, struct parport *port, struct input_dev *devs[])
 
 static void db9_timer(struct timer_list *t)
 {
-	struct db9 *db9 = from_timer(db9, t, timer);
+	struct db9 *db9 = timer_container_of(db9, t, timer);
 	struct parport *port = db9->pd->port;
 	struct input_dev *dev = db9->dev[0];
 	struct input_dev *dev2 = db9->dev[1];
@@ -380,6 +365,7 @@ static void db9_timer(struct timer_list *t)
 			input_report_abs(dev2, ABS_X, (data & DB9_RIGHT ? 0 : 1) - (data & DB9_LEFT ? 0 : 1));
 			input_report_abs(dev2, ABS_Y, (data & DB9_DOWN  ? 0 : 1) - (data & DB9_UP   ? 0 : 1));
 			input_report_key(dev2, BTN_TRIGGER, ~data & DB9_FIRE1);
+			fallthrough;
 
 		case DB9_MULTI_0802:
 
@@ -519,24 +505,22 @@ static int db9_open(struct input_dev *dev)
 {
 	struct db9 *db9 = input_get_drvdata(dev);
 	struct parport *port = db9->pd->port;
-	int err;
 
-	err = mutex_lock_interruptible(&db9->mutex);
-	if (err)
-		return err;
-
-	if (!db9->used++) {
-		parport_claim(db9->pd);
-		parport_write_data(port, 0xff);
-		if (db9_modes[db9->mode].reverse) {
-			parport_data_reverse(port);
-			parport_write_control(port, DB9_NORMAL);
+	scoped_guard(mutex_intr, &db9->mutex) {
+		if (!db9->used++) {
+			parport_claim(db9->pd);
+			parport_write_data(port, 0xff);
+			if (db9_modes[db9->mode].reverse) {
+				parport_data_reverse(port);
+				parport_write_control(port, DB9_NORMAL);
+			}
+			mod_timer(&db9->timer, jiffies + DB9_REFRESH_TIME);
 		}
-		mod_timer(&db9->timer, jiffies + DB9_REFRESH_TIME);
+
+		return 0;
 	}
 
-	mutex_unlock(&db9->mutex);
-	return 0;
+	return -EINTR;
 }
 
 static void db9_close(struct input_dev *dev)
@@ -544,14 +528,14 @@ static void db9_close(struct input_dev *dev)
 	struct db9 *db9 = input_get_drvdata(dev);
 	struct parport *port = db9->pd->port;
 
-	mutex_lock(&db9->mutex);
+	guard(mutex)(&db9->mutex);
+
 	if (!--db9->used) {
-		del_timer_sync(&db9->timer);
+		timer_delete_sync(&db9->timer);
 		parport_write_control(port, 0x00);
 		parport_data_forward(port);
 		parport_release(db9->pd);
 	}
-	mutex_unlock(&db9->mutex);
 }
 
 static void db9_attach(struct parport *pp)
@@ -601,7 +585,7 @@ static void db9_attach(struct parport *pp)
 		return;
 	}
 
-	db9 = kzalloc(sizeof(struct db9), GFP_KERNEL);
+	db9 = kzalloc_obj(*db9);
 	if (!db9)
 		goto err_unreg_pardev;
 
@@ -687,7 +671,6 @@ static struct parport_driver db9_parport_driver = {
 	.name = "db9",
 	.match_port = db9_attach,
 	.detach = db9_detach,
-	.devmodel = true,
 };
 
 static int __init db9_init(void)

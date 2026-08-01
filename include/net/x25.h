@@ -62,7 +62,8 @@ enum {
 	X25_STATE_1,		/* Awaiting Call Accepted */
 	X25_STATE_2,		/* Awaiting Clear Confirmation */
 	X25_STATE_3,		/* Data Transfer */
-	X25_STATE_4		/* Awaiting Reset Confirmation */
+	X25_STATE_4,		/* Awaiting Reset Confirmation */
+	X25_STATE_5		/* Call Accepted / Call Connected pending */
 };
 
 enum {
@@ -80,7 +81,7 @@ enum {
 
 #define	X25_DEFAULT_WINDOW_SIZE	2			/* Default Window Size	*/
 #define	X25_DEFAULT_PACKET_SIZE	X25_PS128		/* Default Packet Size */
-#define	X25_DEFAULT_THROUGHPUT	0x0A			/* Deafult Throughput */
+#define	X25_DEFAULT_THROUGHPUT	0x0A			/* Default Throughput */
 #define	X25_DEFAULT_REVERSE	0x00			/* Default Reverse Charging */
 
 #define X25_SMODULUS 		8
@@ -176,10 +177,7 @@ struct x25_forward {
 	atomic_t		refcnt;
 };
 
-static inline struct x25_sock *x25_sk(const struct sock *sk)
-{
-	return (struct x25_sock *)sk;
-}
+#define x25_sk(ptr) container_of_const(ptr, struct x25_sock, sk)
 
 /* af_x25.c */
 extern int  sysctl_x25_restart_request_timeout;
@@ -205,7 +203,6 @@ void x25_send_frame(struct sk_buff *, struct x25_neigh *);
 int x25_lapb_receive_frame(struct sk_buff *, struct net_device *,
 			   struct packet_type *, struct net_device *);
 void x25_establish_link(struct x25_neigh *);
-void x25_terminate_link(struct x25_neigh *);
 
 /* x25_facilities.c */
 int x25_parse_facilities(struct sk_buff *, struct x25_facilities *,

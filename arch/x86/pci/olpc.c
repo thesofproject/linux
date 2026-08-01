@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Low-level PCI config space access for OLPC systems who lack the VSA
  * PCI virtualization software.
  *
  * Copyright © 2006  Advanced Micro Devices, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  *
  * The AMD Geode chipset (ie: GX2 processor, cs5536 I/O companion device)
  * has some I/O functions (display, southbridge, sound, USB HCIs, etc)
@@ -158,9 +154,6 @@ static const uint32_t ehci_hdr[] = {  /* dev f function 4 - devfn = 7d */
 	0x0,	0x40,	0x0,	0x40a,			/* CapPtr INT-D, IRQA */
 	0xc8020001, 0x0, 0x0,	0x0,	/* Capabilities - 40 is R/O, 44 is
 					   mask 8103 (power control) */
-#if 0
-	0x1,	0x40080000, 0x0, 0x0,	/* EECP - see EHCI spec section 2.1.7 */
-#endif
 	0x01000001, 0x0, 0x0,	0x0,	/* EECP - see EHCI spec section 2.1.7 */
 	0x2020,	0x0,	0x0,	0x0,	/* (EHCI page 8) 60 SBRN (R/O),
 					   61 FLADJ (R/W), PORTWAKECAP  */

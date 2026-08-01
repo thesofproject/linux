@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2016 Broadcom
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 #include <linux/netdevice.h>
 #include <linux/gcd.h>
@@ -68,6 +57,10 @@ static int brcmf_pno_remove_request(struct brcmf_pno_info *pi, u64 reqid)
 
 	mutex_lock(&pi->req_lock);
 
+	/* Nothing to do if we have no requests */
+	if (pi->n_reqs == 0)
+		goto done;
+
 	/* find request */
 	for (i = 0; i < pi->n_reqs; i++) {
 		if (pi->reqs[i]->reqid == reqid)
@@ -109,6 +102,7 @@ static int brcmf_pno_channel_config(struct brcmf_if *ifp,
 static int brcmf_pno_config(struct brcmf_if *ifp, u32 scan_freq,
 			    u32 mscan, u32 bestn)
 {
+	struct brcmf_pub *drvr = ifp->drvr;
 	struct brcmf_pno_param_le pfn_param;
 	u16 flags;
 	u32 pfnmem;
@@ -132,13 +126,13 @@ static int brcmf_pno_config(struct brcmf_if *ifp, u32 scan_freq,
 		/* set bestn in firmware */
 		err = brcmf_fil_iovar_int_set(ifp, "pfnmem", pfnmem);
 		if (err < 0) {
-			brcmf_err("failed to set pfnmem\n");
+			bphy_err(drvr, "failed to set pfnmem\n");
 			goto exit;
 		}
 		/* get max mscan which the firmware supports */
 		err = brcmf_fil_iovar_int_get(ifp, "pfnmem", &pfnmem);
 		if (err < 0) {
-			brcmf_err("failed to get pfnmem\n");
+			bphy_err(drvr, "failed to get pfnmem\n");
 			goto exit;
 		}
 		mscan = min_t(u32, mscan, pfnmem);
@@ -152,7 +146,7 @@ static int brcmf_pno_config(struct brcmf_if *ifp, u32 scan_freq,
 	err = brcmf_fil_iovar_data_set(ifp, "pfn_set", &pfn_param,
 				       sizeof(pfn_param));
 	if (err)
-		brcmf_err("pfn_set failed, err=%d\n", err);
+		bphy_err(drvr, "pfn_set failed, err=%d\n", err);
 
 exit:
 	return err;
@@ -160,15 +154,16 @@ exit:
 
 static int brcmf_pno_set_random(struct brcmf_if *ifp, struct brcmf_pno_info *pi)
 {
+	struct brcmf_pub *drvr = ifp->drvr;
 	struct brcmf_pno_macaddr_le pfn_mac;
 	u8 *mac_addr = NULL;
 	u8 *mac_mask = NULL;
-	int err, i;
+	int err, i, ri;
 
-	for (i = 0; i < pi->n_reqs; i++)
-		if (pi->reqs[i]->flags & NL80211_SCAN_FLAG_RANDOM_ADDR) {
-			mac_addr = pi->reqs[i]->mac_addr;
-			mac_mask = pi->reqs[i]->mac_addr_mask;
+	for (ri = 0; ri < pi->n_reqs; ri++)
+		if (pi->reqs[ri]->flags & NL80211_SCAN_FLAG_RANDOM_ADDR) {
+			mac_addr = pi->reqs[ri]->mac_addr;
+			mac_mask = pi->reqs[ri]->mac_addr_mask;
 			break;
 		}
 
@@ -182,7 +177,7 @@ static int brcmf_pno_set_random(struct brcmf_if *ifp, struct brcmf_pno_info *pi)
 	memcpy(pfn_mac.mac, mac_addr, ETH_ALEN);
 	for (i = 0; i < ETH_ALEN; i++) {
 		pfn_mac.mac[i] &= mac_mask[i];
-		pfn_mac.mac[i] |= get_random_int() & ~(mac_mask[i]);
+		pfn_mac.mac[i] |= get_random_u8() & ~(mac_mask[i]);
 	}
 	/* Clear multi bit */
 	pfn_mac.mac[0] &= 0xFE;
@@ -190,11 +185,11 @@ static int brcmf_pno_set_random(struct brcmf_if *ifp, struct brcmf_pno_info *pi)
 	pfn_mac.mac[0] |= 0x02;
 
 	brcmf_dbg(SCAN, "enabling random mac: reqid=%llu mac=%pM\n",
-		  pi->reqs[i]->reqid, pfn_mac.mac);
+		  pi->reqs[ri]->reqid, pfn_mac.mac);
 	err = brcmf_fil_iovar_data_set(ifp, "pfn_macaddr", &pfn_mac,
 				       sizeof(pfn_mac));
 	if (err)
-		brcmf_err("pfn_macaddr failed, err=%d\n", err);
+		bphy_err(drvr, "pfn_macaddr failed, err=%d\n", err);
 
 	return err;
 }
@@ -202,6 +197,7 @@ static int brcmf_pno_set_random(struct brcmf_if *ifp, struct brcmf_pno_info *pi)
 static int brcmf_pno_add_ssid(struct brcmf_if *ifp, struct cfg80211_ssid *ssid,
 			      bool active)
 {
+	struct brcmf_pub *drvr = ifp->drvr;
 	struct brcmf_pno_net_param_le pfn;
 	int err;
 
@@ -218,12 +214,13 @@ static int brcmf_pno_add_ssid(struct brcmf_if *ifp, struct cfg80211_ssid *ssid,
 	brcmf_dbg(SCAN, "adding ssid=%.32s (active=%d)\n", ssid->ssid, active);
 	err = brcmf_fil_iovar_data_set(ifp, "pfn_add", &pfn, sizeof(pfn));
 	if (err < 0)
-		brcmf_err("adding failed: err=%d\n", err);
+		bphy_err(drvr, "adding failed: err=%d\n", err);
 	return err;
 }
 
 static int brcmf_pno_add_bssid(struct brcmf_if *ifp, const u8 *bssid)
 {
+	struct brcmf_pub *drvr = ifp->drvr;
 	struct brcmf_pno_bssid_le bssid_cfg;
 	int err;
 
@@ -234,7 +231,7 @@ static int brcmf_pno_add_bssid(struct brcmf_if *ifp, const u8 *bssid)
 	err = brcmf_fil_iovar_data_set(ifp, "pfn_add_bssid", &bssid_cfg,
 				       sizeof(bssid_cfg));
 	if (err < 0)
-		brcmf_err("adding failed: err=%d\n", err);
+		bphy_err(drvr, "adding failed: err=%d\n", err);
 	return err;
 }
 
@@ -258,6 +255,7 @@ static bool brcmf_is_ssid_active(struct cfg80211_ssid *ssid,
 
 static int brcmf_pno_clean(struct brcmf_if *ifp)
 {
+	struct brcmf_pub *drvr = ifp->drvr;
 	int ret;
 
 	/* Disable pfn */
@@ -267,7 +265,7 @@ static int brcmf_pno_clean(struct brcmf_if *ifp)
 		ret = brcmf_fil_iovar_data_set(ifp, "pfnclear", NULL, 0);
 	}
 	if (ret < 0)
-		brcmf_err("failed code %d\n", ret);
+		bphy_err(drvr, "failed code %d\n", ret);
 
 	return ret;
 }
@@ -323,7 +321,7 @@ static int brcmf_pno_prep_fwconfig(struct brcmf_pno_info *pi,
 	}
 
 	*buckets = NULL;
-	fw_buckets = kcalloc(pi->n_reqs, sizeof(*fw_buckets), GFP_KERNEL);
+	fw_buckets = kzalloc_objs(*fw_buckets, pi->n_reqs);
 	if (!fw_buckets)
 		return -ENOMEM;
 
@@ -392,6 +390,7 @@ static int brcmf_pno_config_networks(struct brcmf_if *ifp,
 
 static int brcmf_pno_config_sched_scans(struct brcmf_if *ifp)
 {
+	struct brcmf_pub *drvr = ifp->drvr;
 	struct brcmf_pno_info *pi;
 	struct brcmf_gscan_config *gscan_cfg;
 	struct brcmf_gscan_bucket_config *buckets;
@@ -406,7 +405,7 @@ static int brcmf_pno_config_sched_scans(struct brcmf_if *ifp)
 	if (n_buckets < 0)
 		return n_buckets;
 
-	gsz = sizeof(*gscan_cfg) + (n_buckets - 1) * sizeof(*buckets);
+	gsz = struct_size(gscan_cfg, bucket, n_buckets);
 	gscan_cfg = kzalloc(gsz, GFP_KERNEL);
 	if (!gscan_cfg) {
 		err = -ENOMEM;
@@ -416,7 +415,7 @@ static int brcmf_pno_config_sched_scans(struct brcmf_if *ifp)
 	/* clean up everything */
 	err = brcmf_pno_clean(ifp);
 	if  (err < 0) {
-		brcmf_err("failed error=%d\n", err);
+		bphy_err(drvr, "failed error=%d\n", err);
 		goto free_gscan;
 	}
 
@@ -435,8 +434,8 @@ static int brcmf_pno_config_sched_scans(struct brcmf_if *ifp)
 	gscan_cfg->flags = BRCMF_GSCAN_CFG_ALL_BUCKETS_IN_1ST_SCAN;
 
 	gscan_cfg->count_of_channel_buckets = n_buckets;
-	memcpy(&gscan_cfg->bucket[0], buckets,
-	       n_buckets * sizeof(*buckets));
+	memcpy(gscan_cfg->bucket, buckets,
+	       array_size(n_buckets, sizeof(*buckets)));
 
 	err = brcmf_fil_iovar_data_set(ifp, "pfn_gscan_cfg", gscan_cfg, gsz);
 
@@ -496,6 +495,11 @@ int brcmf_pno_stop_sched_scan(struct brcmf_if *ifp, u64 reqid)
 	brcmf_dbg(TRACE, "reqid=%llu\n", reqid);
 
 	pi = ifp_to_pno(ifp);
+
+	/* No PNO request */
+	if (!pi->n_reqs)
+		return 0;
+
 	err = brcmf_pno_remove_request(pi, reqid);
 	if (err)
 		return err;
@@ -513,7 +517,7 @@ int brcmf_pno_attach(struct brcmf_cfg80211_info *cfg)
 	struct brcmf_pno_info *pi;
 
 	brcmf_dbg(TRACE, "enter\n");
-	pi = kzalloc(sizeof(*pi), GFP_KERNEL);
+	pi = kzalloc_obj(*pi);
 	if (!pi)
 		return -ENOMEM;
 

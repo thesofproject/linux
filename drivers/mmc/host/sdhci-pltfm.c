@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * sdhci-pltfm.c Support for SDHCI platform devices
  * Copyright (c) 2009 Intel Corporation
@@ -7,19 +8,6 @@
  *
  * Authors: Xiaobo Xie <X.Xie@freescale.com>
  *	    Anton Vorontsov <avorontsov@ru.mvista.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 /* Supports:
@@ -30,7 +18,7 @@
 
 #include <linux/err.h>
 #include <linux/module.h>
-#include <linux/of.h>
+#include <linux/property.h>
 #ifdef CONFIG_PPC
 #include <asm/machdep.h>
 #endif
@@ -51,11 +39,10 @@ static const struct sdhci_ops sdhci_pltfm_ops = {
 	.set_uhs_signaling = sdhci_set_uhs_signaling,
 };
 
-#ifdef CONFIG_OF
-static bool sdhci_of_wp_inverted(struct device_node *np)
+static bool sdhci_wp_inverted(struct device *dev)
 {
-	if (of_get_property(np, "sdhci,wp-inverted", NULL) ||
-	    of_get_property(np, "wp-inverted", NULL))
+	if (device_property_present(dev, "sdhci,wp-inverted") ||
+	    device_property_present(dev, "wp-inverted"))
 		return true;
 
 	/* Old device trees don't have the wp-inverted property. */
@@ -66,82 +53,72 @@ static bool sdhci_of_wp_inverted(struct device_node *np)
 #endif /* CONFIG_PPC */
 }
 
-void sdhci_get_of_property(struct platform_device *pdev)
+static void sdhci_get_compatibility(struct platform_device *pdev)
 {
-	struct device_node *np = pdev->dev.of_node;
+	struct device *dev = &pdev->dev;
+	struct sdhci_host *host = platform_get_drvdata(pdev);
+
+	if (device_is_compatible(dev, "fsl,p2020-rev1-esdhc"))
+		host->quirks |= SDHCI_QUIRK_BROKEN_DMA;
+
+	if (device_is_compatible(dev, "fsl,p2020-esdhc") ||
+	    device_is_compatible(dev, "fsl,p1010-esdhc") ||
+	    device_is_compatible(dev, "fsl,t4240-esdhc") ||
+	    device_is_compatible(dev, "fsl,mpc8536-esdhc"))
+		host->quirks |= SDHCI_QUIRK_BROKEN_TIMEOUT_VAL;
+}
+
+void sdhci_get_property(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
 	struct sdhci_host *host = platform_get_drvdata(pdev);
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	u32 bus_width;
 
-	if (of_get_property(np, "sdhci,auto-cmd12", NULL))
+	if (device_property_present(dev, "sdhci,auto-cmd12"))
 		host->quirks |= SDHCI_QUIRK_MULTIBLOCK_READ_ACMD12;
 
-	if (of_get_property(np, "sdhci,1-bit-only", NULL) ||
-	    (of_property_read_u32(np, "bus-width", &bus_width) == 0 &&
+	if (device_property_present(dev, "sdhci,1-bit-only") ||
+	    (device_property_read_u32(dev, "bus-width", &bus_width) == 0 &&
 	    bus_width == 1))
 		host->quirks |= SDHCI_QUIRK_FORCE_1_BIT_DATA;
 
-	if (sdhci_of_wp_inverted(np))
+	if (sdhci_wp_inverted(dev))
 		host->quirks |= SDHCI_QUIRK_INVERTED_WRITE_PROTECT;
 
-	if (of_get_property(np, "broken-cd", NULL))
+	if (device_property_present(dev, "broken-cd"))
 		host->quirks |= SDHCI_QUIRK_BROKEN_CARD_DETECTION;
 
-	if (of_get_property(np, "no-1-8-v", NULL))
+	if (device_property_present(dev, "no-1-8-v"))
 		host->quirks2 |= SDHCI_QUIRK2_NO_1_8_V;
 
-	if (of_device_is_compatible(np, "fsl,p2020-rev1-esdhc"))
-		host->quirks |= SDHCI_QUIRK_BROKEN_DMA;
+	sdhci_get_compatibility(pdev);
 
-	if (of_device_is_compatible(np, "fsl,p2020-esdhc") ||
-	    of_device_is_compatible(np, "fsl,p1010-esdhc") ||
-	    of_device_is_compatible(np, "fsl,t4240-esdhc") ||
-	    of_device_is_compatible(np, "fsl,mpc8536-esdhc"))
-		host->quirks |= SDHCI_QUIRK_BROKEN_TIMEOUT_VAL;
-
-	of_property_read_u32(np, "clock-frequency", &pltfm_host->clock);
-
-	if (of_find_property(np, "keep-power-in-suspend", NULL))
-		host->mmc->pm_caps |= MMC_PM_KEEP_POWER;
-
-	if (of_property_read_bool(np, "wakeup-source") ||
-	    of_property_read_bool(np, "enable-sdio-wakeup")) /* legacy */
-		host->mmc->pm_caps |= MMC_PM_WAKE_SDIO_IRQ;
+	device_property_read_u32(dev, "clock-frequency", &pltfm_host->clock);
 }
-#else
-void sdhci_get_of_property(struct platform_device *pdev) {}
-#endif /* CONFIG_OF */
-EXPORT_SYMBOL_GPL(sdhci_get_of_property);
+EXPORT_SYMBOL_GPL(sdhci_get_property);
 
 struct sdhci_host *sdhci_pltfm_init(struct platform_device *pdev,
 				    const struct sdhci_pltfm_data *pdata,
 				    size_t priv_size)
 {
 	struct sdhci_host *host;
-	struct resource *iomem;
 	void __iomem *ioaddr;
-	int irq, ret;
+	int irq;
 
-	iomem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	ioaddr = devm_ioremap_resource(&pdev->dev, iomem);
-	if (IS_ERR(ioaddr)) {
-		ret = PTR_ERR(ioaddr);
-		goto err;
-	}
+	ioaddr = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(ioaddr))
+		return ERR_CAST(ioaddr);
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "failed to get IRQ number\n");
-		ret = irq;
-		goto err;
-	}
+	if (irq < 0)
+		return ERR_PTR(irq);
 
 	host = sdhci_alloc_host(&pdev->dev,
 		sizeof(struct sdhci_pltfm_host) + priv_size);
-
 	if (IS_ERR(host)) {
-		ret = PTR_ERR(host);
-		goto err;
+		dev_err(&pdev->dev, "%s failed %pe\n", __func__, host);
+		return ERR_CAST(host);
 	}
 
 	host->ioaddr = ioaddr;
@@ -159,54 +136,33 @@ struct sdhci_host *sdhci_pltfm_init(struct platform_device *pdev,
 	platform_set_drvdata(pdev, host);
 
 	return host;
-err:
-	dev_err(&pdev->dev, "%s failed %d\n", __func__, ret);
-	return ERR_PTR(ret);
 }
 EXPORT_SYMBOL_GPL(sdhci_pltfm_init);
 
-void sdhci_pltfm_free(struct platform_device *pdev)
-{
-	struct sdhci_host *host = platform_get_drvdata(pdev);
-
-	sdhci_free_host(host);
-}
-EXPORT_SYMBOL_GPL(sdhci_pltfm_free);
-
-int sdhci_pltfm_register(struct platform_device *pdev,
-			const struct sdhci_pltfm_data *pdata,
-			size_t priv_size)
+int sdhci_pltfm_init_and_add_host(struct platform_device *pdev,
+				  const struct sdhci_pltfm_data *pdata,
+				  size_t priv_size)
 {
 	struct sdhci_host *host;
-	int ret = 0;
 
 	host = sdhci_pltfm_init(pdev, pdata, priv_size);
 	if (IS_ERR(host))
 		return PTR_ERR(host);
 
-	sdhci_get_of_property(pdev);
+	sdhci_get_property(pdev);
 
-	ret = sdhci_add_host(host);
-	if (ret)
-		sdhci_pltfm_free(pdev);
-
-	return ret;
+	return sdhci_add_host(host);
 }
-EXPORT_SYMBOL_GPL(sdhci_pltfm_register);
+EXPORT_SYMBOL_GPL(sdhci_pltfm_init_and_add_host);
 
-int sdhci_pltfm_unregister(struct platform_device *pdev)
+void sdhci_pltfm_remove(struct platform_device *pdev)
 {
 	struct sdhci_host *host = platform_get_drvdata(pdev);
-	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
 	int dead = (readl(host->ioaddr + SDHCI_INT_STATUS) == 0xffffffff);
 
 	sdhci_remove_host(host, dead);
-	clk_disable_unprepare(pltfm_host->clk);
-	sdhci_pltfm_free(pdev);
-
-	return 0;
 }
-EXPORT_SYMBOL_GPL(sdhci_pltfm_unregister);
+EXPORT_SYMBOL_GPL(sdhci_pltfm_remove);
 
 #ifdef CONFIG_PM_SLEEP
 int sdhci_pltfm_suspend(struct device *dev)
@@ -251,19 +207,6 @@ const struct dev_pm_ops sdhci_pltfm_pmops = {
 	SET_SYSTEM_SLEEP_PM_OPS(sdhci_pltfm_suspend, sdhci_pltfm_resume)
 };
 EXPORT_SYMBOL_GPL(sdhci_pltfm_pmops);
-
-static int __init sdhci_pltfm_drv_init(void)
-{
-	pr_info("sdhci-pltfm: SDHCI platform and OF driver helper\n");
-
-	return 0;
-}
-module_init(sdhci_pltfm_drv_init);
-
-static void __exit sdhci_pltfm_drv_exit(void)
-{
-}
-module_exit(sdhci_pltfm_drv_exit);
 
 MODULE_DESCRIPTION("SDHCI platform and OF driver helper");
 MODULE_AUTHOR("Intel Corporation");

@@ -1,10 +1,6 @@
-/*
+/* SPDX-License-Identifier: GPL-2.0
+ *
  * Copyright (C) 2009 Matt Fleming <matt@console-pimps.org>
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
- *
  */
 #ifndef __ASM_SH_DWARF_H
 #define __ASM_SH_DWARF_H
@@ -193,7 +189,7 @@
  */
 #define DWARF_ARCH_RA_REG	17
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #include <linux/compiler.h>
 #include <linux/bug.h>
@@ -383,7 +379,7 @@ extern int module_dwarf_finalize(const Elf_Ehdr *, const Elf_Shdr *,
 				 struct module *);
 extern void module_dwarf_cleanup(struct module *);
 
-#endif /* !__ASSEMBLY__ */
+#endif /* !__ASSEMBLER__ */
 
 #define CFI_STARTPROC	.cfi_startproc
 #define CFI_ENDPROC	.cfi_endproc
@@ -406,7 +402,7 @@ extern void module_dwarf_cleanup(struct module *);
 #define CFI_REL_OFFSET	CFI_IGNORE
 #define CFI_UNDEFINED	CFI_IGNORE
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 static inline void dwarf_unwinder_init(void)
 {
 }

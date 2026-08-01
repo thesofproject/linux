@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ppp_deflate.c - interface the zlib procedures for Deflate compression
  * and decompression (as used by gzip) to the PPP code.
  *
  * Copyright 1994-1998 Paul Mackerras.
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  version 2 as published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -19,7 +16,7 @@
 #include <linux/ppp-comp.h>
 
 #include <linux/zlib.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 /*
  * State for a Deflate (de)compressor.
@@ -100,8 +97,7 @@ static void *z_comp_alloc(unsigned char *options, int opt_len)
 	if (w_size < DEFLATE_MIN_SIZE || w_size > DEFLATE_MAX_SIZE)
 		return NULL;
 
-	state = kzalloc(sizeof(*state),
-						     GFP_KERNEL);
+	state = kzalloc_obj(*state);
 	if (state == NULL)
 		return NULL;
 
@@ -282,7 +278,6 @@ static void z_decomp_free(void *arg)
 	struct ppp_deflate_state *state = (struct ppp_deflate_state *) arg;
 
 	if (state) {
-		zlib_inflateEnd(&state->strm);
 		vfree(state->strm.workspace);
 		kfree(state);
 	}
@@ -317,7 +312,7 @@ static void *z_decomp_alloc(unsigned char *options, int opt_len)
 	if (w_size < DEFLATE_MIN_SIZE || w_size > DEFLATE_MAX_SIZE)
 		return NULL;
 
-	state = kzalloc(sizeof(*state), GFP_KERNEL);
+	state = kzalloc_obj(*state);
 	if (state == NULL)
 		return NULL;
 
@@ -610,12 +605,20 @@ static struct compressor ppp_deflate_draft = {
 
 static int __init deflate_init(void)
 {
-        int answer = ppp_register_compressor(&ppp_deflate);
-        if (answer == 0)
-                printk(KERN_INFO
-		       "PPP Deflate Compression module registered\n");
-	ppp_register_compressor(&ppp_deflate_draft);
-        return answer;
+	int rc;
+
+	rc = ppp_register_compressor(&ppp_deflate);
+	if (rc)
+		return rc;
+
+	rc = ppp_register_compressor(&ppp_deflate_draft);
+	if (rc) {
+		ppp_unregister_compressor(&ppp_deflate);
+		return rc;
+	}
+
+	pr_info("PPP Deflate Compression module registered\n");
+	return 0;
 }
 
 static void __exit deflate_cleanup(void)
@@ -626,6 +629,7 @@ static void __exit deflate_cleanup(void)
 
 module_init(deflate_init);
 module_exit(deflate_cleanup);
+MODULE_DESCRIPTION("PPP Deflate compression module");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_ALIAS("ppp-compress-" __stringify(CI_DEFLATE));
 MODULE_ALIAS("ppp-compress-" __stringify(CI_DEFLATE_DRAFT));

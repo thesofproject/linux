@@ -1,19 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) International Business Machines Corp., 2006
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See
- * the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  *
  * Author: Artem Bityutskiy (Битюцкий Артём)
  */
@@ -92,6 +79,7 @@ void ubi_do_get_volume_info(struct ubi_device *ubi, struct ubi_volume *vol,
 	vi->name_len = vol->name_len;
 	vi->name = vol->name;
 	vi->cdev = vol->cdev.dev;
+	vi->dev = &vol->dev;
 }
 
 /**
@@ -152,7 +140,7 @@ struct ubi_volume_desc *ubi_open_volume(int ubi_num, int vol_id, int mode)
 		goto out_put_ubi;
 	}
 
-	desc = kmalloc(sizeof(struct ubi_volume_desc), GFP_KERNEL);
+	desc = kmalloc_obj(struct ubi_volume_desc);
 	if (!desc) {
 		err = -ENOMEM;
 		goto out_put_ubi;
@@ -164,7 +152,7 @@ struct ubi_volume_desc *ubi_open_volume(int ubi_num, int vol_id, int mode)
 
 	spin_lock(&ubi->volumes_lock);
 	vol = ubi->volumes[vol_id];
-	if (!vol)
+	if (!vol || vol->is_dead)
 		goto out_unlock;
 
 	err = -EBUSY;
@@ -202,7 +190,7 @@ struct ubi_volume_desc *ubi_open_volume(int ubi_num, int vol_id, int mode)
 	desc->mode = mode;
 
 	mutex_lock(&ubi->ckvol_mutex);
-	if (!vol->checked) {
+	if (!vol->checked && !vol->skip_check) {
 		/* This is the first open - check the volume */
 		err = ubi_check_volume(ubi, vol_id);
 		if (err < 0) {
@@ -227,9 +215,9 @@ out_unlock:
 out_free:
 	kfree(desc);
 out_put_ubi:
-	ubi_put_device(ubi);
 	ubi_err(ubi, "cannot open device %d, volume %d, error %d",
 		ubi_num, vol_id, err);
+	ubi_put_device(ubi);
 	return ERR_PTR(err);
 }
 EXPORT_SYMBOL_GPL(ubi_open_volume);
@@ -292,6 +280,41 @@ struct ubi_volume_desc *ubi_open_volume_nm(int ubi_num, const char *name,
 EXPORT_SYMBOL_GPL(ubi_open_volume_nm);
 
 /**
+ * ubi_get_num_by_path - get UBI device and volume number from device path
+ * @pathname: volume character device node path
+ * @ubi_num: pointer to UBI device number to be set
+ * @vol_id: pointer to UBI volume ID to be set
+ *
+ * Returns 0 on success and sets ubi_num and vol_id, returns error otherwise.
+ */
+int ubi_get_num_by_path(const char *pathname, int *ubi_num, int *vol_id)
+{
+	int error;
+	struct path path;
+	struct kstat stat;
+
+	error = kern_path(pathname, LOOKUP_FOLLOW, &path);
+	if (error)
+		return error;
+
+	error = vfs_getattr(&path, &stat, STATX_TYPE, AT_STATX_SYNC_AS_STAT);
+	path_put(&path);
+	if (error)
+		return error;
+
+	if (!S_ISCHR(stat.mode))
+		return -EINVAL;
+
+	*ubi_num = ubi_major2num(MAJOR(stat.rdev));
+	*vol_id = MINOR(stat.rdev) - 1;
+
+	if (*vol_id < 0 || *ubi_num < 0)
+		return -ENODEV;
+
+	return 0;
+}
+
+/**
  * ubi_open_volume_path - open UBI volume by its character device node path.
  * @pathname: volume character device node path
  * @mode: open mode
@@ -302,32 +325,17 @@ EXPORT_SYMBOL_GPL(ubi_open_volume_nm);
 struct ubi_volume_desc *ubi_open_volume_path(const char *pathname, int mode)
 {
 	int error, ubi_num, vol_id;
-	struct path path;
-	struct kstat stat;
 
 	dbg_gen("open volume %s, mode %d", pathname, mode);
 
 	if (!pathname || !*pathname)
 		return ERR_PTR(-EINVAL);
 
-	error = kern_path(pathname, LOOKUP_FOLLOW, &path);
+	error = ubi_get_num_by_path(pathname, &ubi_num, &vol_id);
 	if (error)
 		return ERR_PTR(error);
 
-	error = vfs_getattr(&path, &stat, STATX_TYPE, AT_STATX_SYNC_AS_STAT);
-	path_put(&path);
-	if (error)
-		return ERR_PTR(error);
-
-	if (!S_ISCHR(stat.mode))
-		return ERR_PTR(-EINVAL);
-
-	ubi_num = ubi_major2num(MAJOR(stat.rdev));
-	vol_id = MINOR(stat.rdev) - 1;
-
-	if (vol_id >= 0 && ubi_num >= 0)
-		return ubi_open_volume(ubi_num, vol_id, mode);
-	return ERR_PTR(-ENODEV);
+	return ubi_open_volume(ubi_num, vol_id, mode);
 }
 EXPORT_SYMBOL_GPL(ubi_open_volume_path);
 
@@ -463,7 +471,7 @@ EXPORT_SYMBOL_GPL(ubi_leb_read);
  * ubi_leb_read_sg - read data into a scatter gather list.
  * @desc: volume descriptor
  * @lnum: logical eraseblock number to read from
- * @buf: buffer where to store the read data
+ * @sgl: UBI scatter gather list to store the read data
  * @offset: offset within the logical eraseblock to read from
  * @len: how many bytes to read
  * @check: whether UBI has to check the read data's CRC or not.
@@ -782,33 +790,6 @@ int ubi_sync(int ubi_num)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(ubi_sync);
-
-/**
- * ubi_flush - flush UBI work queue.
- * @ubi_num: UBI device to flush work queue
- * @vol_id: volume id to flush for
- * @lnum: logical eraseblock number to flush for
- *
- * This function executes all pending works for a particular volume id / logical
- * eraseblock number pair. If either value is set to %UBI_ALL, then it acts as
- * a wildcard for all of the corresponding volume numbers or logical
- * eraseblock numbers. It returns zero in case of success and a negative error
- * code in case of failure.
- */
-int ubi_flush(int ubi_num, int vol_id, int lnum)
-{
-	struct ubi_device *ubi;
-	int err = 0;
-
-	ubi = ubi_get_device(ubi_num);
-	if (!ubi)
-		return -ENODEV;
-
-	err = ubi_wl_flush(ubi, vol_id, lnum);
-	ubi_put_device(ubi);
-	return err;
-}
-EXPORT_SYMBOL_GPL(ubi_flush);
 
 BLOCKING_NOTIFIER_HEAD(ubi_notifiers);
 

@@ -9,13 +9,12 @@
 #include <linux/mm.h>
 #include <linux/device.h>
 
-#include <linux/uaccess.h>
+#include <asm/extable.h>
 #include <asm/page.h>
-#include <asm/pgtable.h>
 
+#include <xen/xen.h>
 #include <xen/interface/xen.h>
 #include <xen/interface/grant_table.h>
-#include <xen/features.h>
 
 /* Xen machine address */
 typedef struct xmaddr {
@@ -93,12 +92,31 @@ clear_foreign_p2m_mapping(struct gnttab_unmap_grant_ref *unmap_ops,
  */
 static inline int xen_safe_write_ulong(unsigned long *addr, unsigned long val)
 {
-	return __put_user(val, (unsigned long __user *)addr);
+	int ret = 0;
+
+	asm volatile("1: mov %[val], %[ptr]\n"
+		     "2:\n"
+		     _ASM_EXTABLE_TYPE_REG(1b, 2b, EX_TYPE_EFAULT_REG, %[ret])
+		     : [ret] "+r" (ret), [ptr] "=m" (*addr)
+		     : [val] "r" (val));
+
+	return ret;
 }
 
-static inline int xen_safe_read_ulong(unsigned long *addr, unsigned long *val)
+static inline int xen_safe_read_ulong(const unsigned long *addr,
+				      unsigned long *val)
 {
-	return __get_user(*val, (unsigned long __user *)addr);
+	unsigned long rval = ~0ul;
+	int ret = 0;
+
+	asm volatile("1: mov %[ptr], %[rval]\n"
+		     "2:\n"
+		     _ASM_EXTABLE_TYPE_REG(1b, 2b, EX_TYPE_EFAULT_REG, %[ret])
+		     : [ret] "+r" (ret), [rval] "+r" (rval)
+		     : [ptr] "m" (*addr));
+	*val = rval;
+
+	return ret;
 }
 
 #ifdef CONFIG_XEN_PV
@@ -144,7 +162,7 @@ static inline unsigned long pfn_to_mfn(unsigned long pfn)
 	 * pfn_to_mfn. This will have to be removed when we figured
 	 * out which call.
 	 */
-	if (xen_feature(XENFEAT_auto_translated_physmap))
+	if (!xen_pv_domain())
 		return pfn;
 
 	mfn = __pfn_to_mfn(pfn);
@@ -157,7 +175,7 @@ static inline unsigned long pfn_to_mfn(unsigned long pfn)
 
 static inline int phys_to_machine_mapping_valid(unsigned long pfn)
 {
-	if (xen_feature(XENFEAT_auto_translated_physmap))
+	if (!xen_pv_domain())
 		return 1;
 
 	return __pfn_to_mfn(pfn) != INVALID_P2M_ENTRY;
@@ -192,7 +210,7 @@ static inline unsigned long mfn_to_pfn(unsigned long mfn)
 	 * gfn_to_pfn. This will have to be removed when we figure
 	 * out which call.
 	 */
-	if (xen_feature(XENFEAT_auto_translated_physmap))
+	if (!xen_pv_domain())
 		return mfn;
 
 	pfn = mfn_to_pfn_no_overrides(mfn);
@@ -224,7 +242,7 @@ static inline xpaddr_t machine_to_phys(xmaddr_t machine)
 /* Pseudo-physical <-> Guest conversion */
 static inline unsigned long pfn_to_gfn(unsigned long pfn)
 {
-	if (xen_feature(XENFEAT_auto_translated_physmap))
+	if (!xen_pv_domain())
 		return pfn;
 	else
 		return pfn_to_mfn(pfn);
@@ -232,7 +250,7 @@ static inline unsigned long pfn_to_gfn(unsigned long pfn)
 
 static inline unsigned long gfn_to_pfn(unsigned long gfn)
 {
-	if (xen_feature(XENFEAT_auto_translated_physmap))
+	if (!xen_pv_domain())
 		return gfn;
 	else
 		return mfn_to_pfn(gfn);
@@ -266,7 +284,7 @@ static inline unsigned long bfn_to_local_pfn(unsigned long mfn)
 {
 	unsigned long pfn;
 
-	if (xen_feature(XENFEAT_auto_translated_physmap))
+	if (!xen_pv_domain())
 		return mfn;
 
 	pfn = mfn_to_pfn(mfn);
@@ -277,7 +295,10 @@ static inline unsigned long bfn_to_local_pfn(unsigned long mfn)
 
 /* VIRT <-> MACHINE conversion */
 #define virt_to_machine(v)	(phys_to_machine(XPADDR(__pa(v))))
-#define virt_to_pfn(v)          (PFN_DOWN(__pa(v)))
+static inline unsigned long virt_to_pfn(const void *v)
+{
+	return PFN_DOWN(__pa(v));
+}
 #define virt_to_mfn(v)		(pfn_to_mfn(virt_to_pfn(v)))
 #define mfn_to_virt(m)		(__va(mfn_to_pfn(m) << PAGE_SHIFT))
 
@@ -329,19 +350,11 @@ unsigned long arbitrary_virt_to_mfn(void *vaddr);
 void make_lowmem_page_readonly(void *vaddr);
 void make_lowmem_page_readwrite(void *vaddr);
 
-#define xen_remap(cookie, size) ioremap((cookie), (size));
-#define xen_unmap(cookie) iounmap((cookie))
-
 static inline bool xen_arch_need_swiotlb(struct device *dev,
 					 phys_addr_t phys,
 					 dma_addr_t dev_addr)
 {
 	return false;
-}
-
-static inline unsigned long xen_get_swiotlb_free_pages(unsigned int order)
-{
-	return __get_free_pages(__GFP_NOWARN, order);
 }
 
 #endif /* _ASM_X86_XEN_PAGE_H */

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Internal interface between the core pin control system and the
  * pin config portions
@@ -7,9 +8,17 @@
  * Based on bits of regulator core, gpio core and clk core
  *
  * Author: Linus Walleij <linus.walleij@linaro.org>
- *
- * License terms: GNU General Public License (GPL) version 2
  */
+
+#include <linux/errno.h>
+
+struct dentry;
+struct device_node;
+struct seq_file;
+
+struct pinctrl_dev;
+struct pinctrl_map;
+struct pinctrl_setting;
 
 #ifdef CONFIG_PINCONF
 
@@ -20,14 +29,14 @@ int pinconf_map_to_setting(const struct pinctrl_map *map,
 void pinconf_free_setting(const struct pinctrl_setting *setting);
 int pinconf_apply_setting(const struct pinctrl_setting *setting);
 
-int pinconf_set_config(struct pinctrl_dev *pctldev, unsigned pin,
+int pinconf_set_config(struct pinctrl_dev *pctldev, unsigned int pin,
 		       unsigned long *configs, size_t nconfigs);
 
 /*
  * You will only be interested in these if you're using PINCONF
  * so don't supply any stubs for these.
  */
-int pin_config_get_for_pin(struct pinctrl_dev *pctldev, unsigned pin,
+int pin_config_get_for_pin(struct pinctrl_dev *pctldev, unsigned int pin,
 			   unsigned long *config);
 int pin_config_group_get(const char *dev_name, const char *pin_group,
 			 unsigned long *config);
@@ -59,8 +68,14 @@ static inline int pinconf_apply_setting(const struct pinctrl_setting *setting)
 	return 0;
 }
 
-static inline int pinconf_set_config(struct pinctrl_dev *pctldev, unsigned pin,
+static inline int pinconf_set_config(struct pinctrl_dev *pctldev, unsigned int pin,
 				     unsigned long *configs, size_t nconfigs)
+{
+	return -ENOTSUPP;
+}
+
+static inline int pin_config_get_for_pin(struct pinctrl_dev *pctldev, unsigned int pin,
+			   unsigned long *config)
 {
 	return -ENOTSUPP;
 }
@@ -103,7 +118,7 @@ static inline void pinconf_init_device_debugfs(struct dentry *devroot,
 
 void pinconf_generic_dump_pins(struct pinctrl_dev *pctldev,
 			       struct seq_file *s, const char *gname,
-			       unsigned pin);
+			       unsigned int pin);
 
 void pinconf_generic_dump_config(struct pinctrl_dev *pctldev,
 				 struct seq_file *s, unsigned long config);
@@ -111,7 +126,7 @@ void pinconf_generic_dump_config(struct pinctrl_dev *pctldev,
 
 static inline void pinconf_generic_dump_pins(struct pinctrl_dev *pctldev,
 					     struct seq_file *s,
-					     const char *gname, unsigned pin)
+					     const char *gname, unsigned int pin)
 {
 	return;
 }
@@ -129,4 +144,71 @@ int pinconf_generic_parse_dt_config(struct device_node *np,
 				    struct pinctrl_dev *pctldev,
 				    unsigned long **configs,
 				    unsigned int *nconfigs);
+
+int pinconf_generic_parse_dt_pinmux(struct device_node *np, struct device *dev,
+				    unsigned int **pid, unsigned int **pmux,
+				    unsigned int *npins);
+#else
+static inline int
+pinconf_generic_parse_dt_config(struct device_node *np,
+				struct pinctrl_dev *pctldev,
+				unsigned long **configs,
+				unsigned int *nconfigs)
+{
+	return -ENOTSUPP;
+}
+
+static inline int
+pinconf_generic_parse_dt_pinmux(struct device_node *np, struct device *dev,
+				unsigned int **pid, unsigned int **pmux,
+				unsigned int *npins)
+{
+	return -ENOTSUPP;
+}
+#endif
+
+#if defined(CONFIG_GENERIC_PINCTRL)
+int pinctrl_generic_pins_function_dt_node_to_map(struct pinctrl_dev *pctldev,
+						 struct device_node *np,
+						 struct pinctrl_map **maps,
+						 unsigned int *num_maps);
+
+int pinctrl_generic_pinmux_dt_node_to_map(struct pinctrl_dev *pctldev,
+					  struct device_node *np,
+					  struct pinctrl_map **maps,
+					  unsigned int *num_maps);
+
+int pinctrl_generic_to_map(struct pinctrl_dev *pctldev, struct device_node *parent,
+			   struct device_node *np, struct pinctrl_map **maps,
+			   unsigned int *num_maps, unsigned int *num_reserved_maps,
+			   const char **group_name, unsigned int ngroups,
+			   void *data, unsigned int *pins, unsigned int npins);
+#else
+static inline int
+pinctrl_generic_pins_function_dt_node_to_map(struct pinctrl_dev *pctldev,
+					     struct device_node *np,
+					     struct pinctrl_map **maps,
+					     unsigned int *num_maps)
+{
+	return -ENOTSUPP;
+}
+
+static inline int
+pinctrl_generic_pinmux_dt_node_to_map(struct pinctrl_dev *pctldev,
+				      struct device_node *np,
+				      struct pinctrl_map **maps,
+				      unsigned int *num_maps)
+{
+	return -ENOTSUPP;
+}
+
+static inline int
+pinctrl_generic_to_map(struct pinctrl_dev *pctldev, struct device_node *parent,
+		       struct device_node *np, struct pinctrl_map **maps,
+		       unsigned int *num_maps, unsigned int *num_reserved_maps,
+		       const char **group_name, unsigned int ngroups,
+		       void *data, unsigned int *pins, unsigned int npins)
+{
+	return -ENOTSUPP;
+}
 #endif

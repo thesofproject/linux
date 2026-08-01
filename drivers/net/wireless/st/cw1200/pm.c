@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Mac80211 power management API for ST-Ericsson CW1200 drivers
  *
  * Copyright (c) 2011, ST-Ericsson
  * Author: Dmitry Tarnyagin <dmitry.tarnyagin@lockless.no>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -108,7 +105,7 @@ int cw1200_pm_init(struct cw1200_pm_state *pm,
 
 void cw1200_pm_deinit(struct cw1200_pm_state *pm)
 {
-	del_timer_sync(&pm->stay_awake);
+	timer_delete_sync(&pm->stay_awake);
 }
 
 void cw1200_pm_stay_awake(struct cw1200_pm_state *pm,
@@ -210,7 +207,7 @@ int cw1200_wow_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 	wsm_set_ether_type_filter(priv, &cw1200_ether_type_filter_on.hdr);
 
 	/* Allocate state */
-	state = kzalloc(sizeof(struct cw1200_suspend_state), GFP_KERNEL);
+	state = kzalloc_obj(struct cw1200_suspend_state);
 	if (!state)
 		goto revert3;
 

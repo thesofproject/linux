@@ -1,30 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * upcase.c - Generate the full NTFS Unicode upcase table in little endian.
- *	      Part of the Linux-NTFS project.
+ * Generate the full NTFS Unicode upcase table in little endian.
  *
  * Copyright (c) 2001 Richard Russon <ntfs@flatcap.org>
  * Copyright (c) 2001-2006 Anton Altaparmakov
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program (in the main directory of the Linux-NTFS source
- * in the file COPYING); if not, write to the Free Software Foundation,
- * Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include "malloc.h"
 #include "ntfs.h"
 
-ntfschar *generate_default_upcase(void)
+__le16 *generate_default_upcase(void)
 {
 	static const int uc_run_table[][3] = { /* Start, End, Add */
 	{0x0061, 0x007B,  -32}, {0x0451, 0x045D, -80}, {0x1F70, 0x1F72,  74},
@@ -66,12 +50,11 @@ ntfschar *generate_default_upcase(void)
 	};
 
 	int i, r;
-	ntfschar *uc;
+	__le16 *uc;
 
-	uc = ntfs_malloc_nofs(default_upcase_len * sizeof(ntfschar));
+	uc = kvcalloc(default_upcase_len, sizeof(__le16), GFP_NOFS);
 	if (!uc)
 		return uc;
-	memset(uc, 0, default_upcase_len * sizeof(ntfschar));
 	/* Generate the little endian Unicode upcase table used by ntfs. */
 	for (i = 0; i < default_upcase_len; i++)
 		uc[i] = cpu_to_le16(i);

@@ -35,6 +35,7 @@
 #include <linux/string.h>
 #include <linux/mm.h>
 #include <linux/buffer_head.h>
+#include <linux/mpage.h>
 #include <linux/writeback.h>
 #include <linux/iversion.h>
 
@@ -219,7 +220,7 @@ changed:
  */
 static bool
 ufs_extend_tail(struct inode *inode, u64 writes_to,
-		  int *err, struct page *locked_page)
+		  int *err, struct folio *locked_folio)
 {
 	struct ufs_inode_info *ufsi = UFS_I(inode);
 	struct super_block *sb = inode->i_sb;
@@ -238,7 +239,7 @@ ufs_extend_tail(struct inode *inode, u64 writes_to,
 	p = ufs_get_direct_data_ptr(uspi, ufsi, block);
 	tmp = ufs_new_fragments(inode, p, lastfrag, ufs_data_ptr_to_cpu(sb, p),
 				new_size - (lastfrag & uspi->s_fpbmask), err,
-				locked_page);
+				locked_folio);
 	return tmp != 0;
 }
 
@@ -249,12 +250,11 @@ ufs_extend_tail(struct inode *inode, u64 writes_to,
  * @new_fragment: number of new allocated fragment(s)
  * @err: we set it if something wrong
  * @new: we set it if we allocate new block
- * @locked_page: for ufs_new_fragments()
+ * @locked_folio: for ufs_new_fragments()
  */
-static u64
-ufs_inode_getfrag(struct inode *inode, unsigned index,
+static u64 ufs_inode_getfrag(struct inode *inode, unsigned index,
 		  sector_t new_fragment, int *err,
-		  int *new, struct page *locked_page)
+		  int *new, struct folio *locked_folio)
 {
 	struct ufs_inode_info *ufsi = UFS_I(inode);
 	struct super_block *sb = inode->i_sb;
@@ -262,11 +262,6 @@ ufs_inode_getfrag(struct inode *inode, unsigned index,
 	u64 tmp, goal, lastfrag;
 	unsigned nfrags = uspi->s_fpb;
 	void *p;
-
-        /* TODO : to be done for write support
-        if ( (flags & UFS_TYPE_MASK) == UFS_TYPE_UFS2)
-             goto ufs2;
-         */
 
 	p = ufs_get_direct_data_ptr(uspi, ufsi, index);
 	tmp = ufs_data_ptr_to_cpu(sb, p);
@@ -287,7 +282,7 @@ ufs_inode_getfrag(struct inode *inode, unsigned index,
 			goal += uspi->s_fpb;
 	}
 	tmp = ufs_new_fragments(inode, p, ufs_blknum(new_fragment),
-				goal, nfrags, err, locked_page);
+				goal, nfrags, err, locked_folio);
 
 	if (!tmp) {
 		*err = -ENOSPC;
@@ -296,27 +291,12 @@ ufs_inode_getfrag(struct inode *inode, unsigned index,
 
 	if (new)
 		*new = 1;
-	inode->i_ctime = current_time(inode);
+	inode_set_ctime_current(inode);
 	if (IS_SYNC(inode))
 		ufs_sync_inode (inode);
 	mark_inode_dirty(inode);
 out:
 	return tmp + uspi->s_sbbase;
-
-     /* This part : To be implemented ....
-        Required only for writing, not required for READ-ONLY.
-ufs2:
-
-	u2_block = ufs_fragstoblks(fragment);
-	u2_blockoff = ufs_fragnum(fragment);
-	p = ufsi->i_u1.u2_i_data + block;
-	goal = 0;
-
-repeat2:
-	tmp = fs32_to_cpu(sb, *p);
-	lastfrag = ufsi->i_lastfrag;
-
-     */
 }
 
 /**
@@ -328,12 +308,11 @@ repeat2:
  *  (block will hold this fragment and also uspi->s_fpb-1)
  * @err: see ufs_inode_getfrag()
  * @new: see ufs_inode_getfrag()
- * @locked_page: see ufs_inode_getfrag()
+ * @locked_folio: see ufs_inode_getfrag()
  */
-static u64
-ufs_inode_getblock(struct inode *inode, u64 ind_block,
-		  unsigned index, sector_t new_fragment, int *err,
-		  int *new, struct page *locked_page)
+static u64 ufs_inode_getblock(struct inode *inode, u64 ind_block,
+		unsigned index, sector_t new_fragment, int *err,
+		int *new, struct folio *locked_folio)
 {
 	struct super_block *sb = inode->i_sb;
 	struct ufs_sb_private_info *uspi = UFS_SB(sb)->s_uspi;
@@ -368,7 +347,7 @@ ufs_inode_getblock(struct inode *inode, u64 ind_block,
 	else
 		goal = bh->b_blocknr + uspi->s_fpb;
 	tmp = ufs_new_fragments(inode, p, ufs_blknum(new_fragment), goal,
-				uspi->s_fpb, err, locked_page);
+				uspi->s_fpb, err, locked_folio);
 	if (!tmp)
 		goto out;
 
@@ -378,7 +357,7 @@ ufs_inode_getblock(struct inode *inode, u64 ind_block,
 	mark_buffer_dirty(bh);
 	if (IS_SYNC(inode))
 		sync_dirty_buffer(bh);
-	inode->i_ctime = current_time(inode);
+	inode_set_ctime_current(inode);
 	mark_inode_dirty(inode);
 out:
 	brelse (bh);
@@ -390,7 +369,7 @@ out:
 
 /**
  * ufs_getfrag_block() - `get_block_t' function, interface between UFS and
- * readpage, writepage and so on
+ * read_folio, writepages and so on
  */
 
 static int ufs_getfrag_block(struct inode *inode, sector_t fragment, struct buffer_head *bh_result, int create)
@@ -421,7 +400,7 @@ static int ufs_getfrag_block(struct inode *inode, sector_t fragment, struct buff
 
 	mutex_lock(&UFS_I(inode)->truncate_mutex);
 
-	UFSD("ENTER, ino %lu, fragment %llu\n", inode->i_ino, (unsigned long long)fragment);
+	UFSD("ENTER, ino %llu, fragment %llu\n", inode->i_ino, (unsigned long long)fragment);
 	if (unlikely(!depth)) {
 		ufs_warning(sb, "ufs_get_block", "block > big");
 		err = -EIO;
@@ -433,14 +412,14 @@ static int ufs_getfrag_block(struct inode *inode, sector_t fragment, struct buff
 		unsigned tailfrags = lastfrag & uspi->s_fpbmask;
 		if (tailfrags && fragment >= lastfrag) {
 			if (!ufs_extend_tail(inode, fragment,
-					     &err, bh_result->b_page))
+					     &err, bh_result->b_folio))
 				goto out;
 		}
 	}
 
 	if (depth == 1) {
 		phys64 = ufs_inode_getfrag(inode, offsets[0], fragment,
-					   &err, &new, bh_result->b_page);
+					   &err, &new, bh_result->b_folio);
 	} else {
 		int i;
 		phys64 = ufs_inode_getfrag(inode, offsets[0], fragment,
@@ -449,7 +428,7 @@ static int ufs_getfrag_block(struct inode *inode, sector_t fragment, struct buff
 			phys64 = ufs_inode_getblock(inode, phys64, offsets[i],
 						fragment, &err, NULL, NULL);
 		phys64 = ufs_inode_getblock(inode, phys64, offsets[depth - 1],
-					fragment, &err, &new, bh_result->b_page);
+				fragment, &err, &new, bh_result->b_folio);
 	}
 out:
 	if (phys64) {
@@ -467,19 +446,20 @@ done:
 	return 0;
 }
 
-static int ufs_writepage(struct page *page, struct writeback_control *wbc)
+static int ufs_writepages(struct address_space *mapping,
+		struct writeback_control *wbc)
 {
-	return block_write_full_page(page,ufs_getfrag_block,wbc);
+	return mpage_writepages(mapping, wbc, ufs_getfrag_block);
 }
 
-static int ufs_readpage(struct file *file, struct page *page)
+static int ufs_read_folio(struct file *file, struct folio *folio)
 {
-	return block_read_full_page(page,ufs_getfrag_block);
+	return block_read_full_folio(folio, ufs_getfrag_block);
 }
 
-int ufs_prepare_chunk(struct page *page, loff_t pos, unsigned len)
+int ufs_prepare_chunk(struct folio *folio, loff_t pos, unsigned len)
 {
-	return __block_write_begin(page, pos, len, ufs_getfrag_block);
+	return __block_write_begin(folio, pos, len, ufs_getfrag_block);
 }
 
 static void ufs_truncate_blocks(struct inode *);
@@ -494,27 +474,28 @@ static void ufs_write_failed(struct address_space *mapping, loff_t to)
 	}
 }
 
-static int ufs_write_begin(struct file *file, struct address_space *mapping,
-			loff_t pos, unsigned len, unsigned flags,
-			struct page **pagep, void **fsdata)
+static int ufs_write_begin(const struct kiocb *iocb,
+			   struct address_space *mapping,
+			   loff_t pos, unsigned len,
+			   struct folio **foliop, void **fsdata)
 {
 	int ret;
 
-	ret = block_write_begin(mapping, pos, len, flags, pagep,
-				ufs_getfrag_block);
+	ret = block_write_begin(mapping, pos, len, foliop, ufs_getfrag_block);
 	if (unlikely(ret))
 		ufs_write_failed(mapping, pos + len);
 
 	return ret;
 }
 
-static int ufs_write_end(struct file *file, struct address_space *mapping,
-			loff_t pos, unsigned len, unsigned copied,
-			struct page *page, void *fsdata)
+static int ufs_write_end(const struct kiocb *iocb,
+			 struct address_space *mapping,
+			 loff_t pos, unsigned len, unsigned copied,
+			 struct folio *folio, void *fsdata)
 {
 	int ret;
 
-	ret = generic_write_end(file, mapping, pos, len, copied, page, fsdata);
+	ret = generic_write_end(iocb, mapping, pos, len, copied, folio, fsdata);
 	if (ret < len)
 		ufs_write_failed(mapping, pos + len);
 	return ret;
@@ -526,10 +507,13 @@ static sector_t ufs_bmap(struct address_space *mapping, sector_t block)
 }
 
 const struct address_space_operations ufs_aops = {
-	.readpage = ufs_readpage,
-	.writepage = ufs_writepage,
+	.dirty_folio = block_dirty_folio,
+	.invalidate_folio = block_invalidate_folio,
+	.read_folio = ufs_read_folio,
+	.writepages = ufs_writepages,
 	.write_begin = ufs_write_begin,
 	.write_end = ufs_write_end,
+	.migrate_folio = buffer_migrate_folio,
 	.bmap = ufs_bmap
 };
 
@@ -578,12 +562,15 @@ static int ufs1_read_inode(struct inode *inode, struct ufs_inode *ufs_inode)
 	i_gid_write(inode, ufs_get_inode_gid(sb, ufs_inode));
 
 	inode->i_size = fs64_to_cpu(sb, ufs_inode->ui_size);
-	inode->i_atime.tv_sec = (signed)fs32_to_cpu(sb, ufs_inode->ui_atime.tv_sec);
-	inode->i_ctime.tv_sec = (signed)fs32_to_cpu(sb, ufs_inode->ui_ctime.tv_sec);
-	inode->i_mtime.tv_sec = (signed)fs32_to_cpu(sb, ufs_inode->ui_mtime.tv_sec);
-	inode->i_mtime.tv_nsec = 0;
-	inode->i_atime.tv_nsec = 0;
-	inode->i_ctime.tv_nsec = 0;
+	inode_set_atime(inode,
+			(signed)fs32_to_cpu(sb, ufs_inode->ui_atime.tv_sec),
+			0);
+	inode_set_ctime(inode,
+			(signed)fs32_to_cpu(sb, ufs_inode->ui_ctime.tv_sec),
+			0);
+	inode_set_mtime(inode,
+			(signed)fs32_to_cpu(sb, ufs_inode->ui_mtime.tv_sec),
+			0);
 	inode->i_blocks = fs32_to_cpu(sb, ufs_inode->ui_blocks);
 	inode->i_generation = fs32_to_cpu(sb, ufs_inode->ui_gen);
 	ufsi->i_flags = fs32_to_cpu(sb, ufs_inode->ui_flags);
@@ -608,7 +595,7 @@ static int ufs2_read_inode(struct inode *inode, struct ufs2_inode *ufs2_inode)
 	struct super_block *sb = inode->i_sb;
 	umode_t mode;
 
-	UFSD("Reading ufs2 inode, ino %lu\n", inode->i_ino);
+	UFSD("Reading ufs2 inode, ino %llu\n", inode->i_ino);
 	/*
 	 * Copy data to the in-core inode.
 	 */
@@ -624,12 +611,12 @@ static int ufs2_read_inode(struct inode *inode, struct ufs2_inode *ufs2_inode)
 	i_gid_write(inode, fs32_to_cpu(sb, ufs2_inode->ui_gid));
 
 	inode->i_size = fs64_to_cpu(sb, ufs2_inode->ui_size);
-	inode->i_atime.tv_sec = fs64_to_cpu(sb, ufs2_inode->ui_atime);
-	inode->i_ctime.tv_sec = fs64_to_cpu(sb, ufs2_inode->ui_ctime);
-	inode->i_mtime.tv_sec = fs64_to_cpu(sb, ufs2_inode->ui_mtime);
-	inode->i_atime.tv_nsec = fs32_to_cpu(sb, ufs2_inode->ui_atimensec);
-	inode->i_ctime.tv_nsec = fs32_to_cpu(sb, ufs2_inode->ui_ctimensec);
-	inode->i_mtime.tv_nsec = fs32_to_cpu(sb, ufs2_inode->ui_mtimensec);
+	inode_set_atime(inode, fs64_to_cpu(sb, ufs2_inode->ui_atime),
+			fs32_to_cpu(sb, ufs2_inode->ui_atimensec));
+	inode_set_ctime(inode, fs64_to_cpu(sb, ufs2_inode->ui_ctime),
+			fs32_to_cpu(sb, ufs2_inode->ui_ctimensec));
+	inode_set_mtime(inode, fs64_to_cpu(sb, ufs2_inode->ui_mtime),
+			fs32_to_cpu(sb, ufs2_inode->ui_mtimensec));
 	inode->i_blocks = fs64_to_cpu(sb, ufs2_inode->ui_blocks);
 	inode->i_generation = fs32_to_cpu(sb, ufs2_inode->ui_gen);
 	ufsi->i_flags = fs32_to_cpu(sb, ufs2_inode->ui_flags);
@@ -668,14 +655,14 @@ struct inode *ufs_iget(struct super_block *sb, unsigned long ino)
 	inode = iget_locked(sb, ino);
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
-	if (!(inode->i_state & I_NEW))
+	if (!(inode_state_read_once(inode) & I_NEW))
 		return inode;
 
 	ufsi = UFS_I(inode);
 
 	bh = sb_bread(sb, uspi->s_sbbase + ufs_inotofsba(inode->i_ino));
 	if (!bh) {
-		ufs_warning(sb, "ufs_read_inode", "unable to read inode %lu\n",
+		ufs_warning(sb, "ufs_read_inode", "unable to read inode %llu\n",
 			    inode->i_ino);
 		goto bad_inode;
 	}
@@ -723,11 +710,14 @@ static void ufs1_update_inode(struct inode *inode, struct ufs_inode *ufs_inode)
 	ufs_set_inode_gid(sb, ufs_inode, i_gid_read(inode));
 
 	ufs_inode->ui_size = cpu_to_fs64(sb, inode->i_size);
-	ufs_inode->ui_atime.tv_sec = cpu_to_fs32(sb, inode->i_atime.tv_sec);
+	ufs_inode->ui_atime.tv_sec = cpu_to_fs32(sb,
+						 inode_get_atime_sec(inode));
 	ufs_inode->ui_atime.tv_usec = 0;
-	ufs_inode->ui_ctime.tv_sec = cpu_to_fs32(sb, inode->i_ctime.tv_sec);
+	ufs_inode->ui_ctime.tv_sec = cpu_to_fs32(sb,
+						 inode_get_ctime_sec(inode));
 	ufs_inode->ui_ctime.tv_usec = 0;
-	ufs_inode->ui_mtime.tv_sec = cpu_to_fs32(sb, inode->i_mtime.tv_sec);
+	ufs_inode->ui_mtime.tv_sec = cpu_to_fs32(sb,
+						 inode_get_mtime_sec(inode));
 	ufs_inode->ui_mtime.tv_usec = 0;
 	ufs_inode->ui_blocks = cpu_to_fs32(sb, inode->i_blocks);
 	ufs_inode->ui_flags = cpu_to_fs32(sb, ufsi->i_flags);
@@ -767,12 +757,15 @@ static void ufs2_update_inode(struct inode *inode, struct ufs2_inode *ufs_inode)
 	ufs_inode->ui_gid = cpu_to_fs32(sb, i_gid_read(inode));
 
 	ufs_inode->ui_size = cpu_to_fs64(sb, inode->i_size);
-	ufs_inode->ui_atime = cpu_to_fs64(sb, inode->i_atime.tv_sec);
-	ufs_inode->ui_atimensec = cpu_to_fs32(sb, inode->i_atime.tv_nsec);
-	ufs_inode->ui_ctime = cpu_to_fs64(sb, inode->i_ctime.tv_sec);
-	ufs_inode->ui_ctimensec = cpu_to_fs32(sb, inode->i_ctime.tv_nsec);
-	ufs_inode->ui_mtime = cpu_to_fs64(sb, inode->i_mtime.tv_sec);
-	ufs_inode->ui_mtimensec = cpu_to_fs32(sb, inode->i_mtime.tv_nsec);
+	ufs_inode->ui_atime = cpu_to_fs64(sb, inode_get_atime_sec(inode));
+	ufs_inode->ui_atimensec = cpu_to_fs32(sb,
+					      inode_get_atime_nsec(inode));
+	ufs_inode->ui_ctime = cpu_to_fs64(sb, inode_get_ctime_sec(inode));
+	ufs_inode->ui_ctimensec = cpu_to_fs32(sb,
+					      inode_get_ctime_nsec(inode));
+	ufs_inode->ui_mtime = cpu_to_fs64(sb, inode_get_mtime_sec(inode));
+	ufs_inode->ui_mtimensec = cpu_to_fs32(sb,
+					      inode_get_mtime_nsec(inode));
 
 	ufs_inode->ui_blocks = cpu_to_fs64(sb, inode->i_blocks);
 	ufs_inode->ui_flags = cpu_to_fs32(sb, ufsi->i_flags);
@@ -800,17 +793,17 @@ static int ufs_update_inode(struct inode * inode, int do_sync)
 	struct ufs_sb_private_info *uspi = UFS_SB(sb)->s_uspi;
 	struct buffer_head * bh;
 
-	UFSD("ENTER, ino %lu\n", inode->i_ino);
+	UFSD("ENTER, ino %llu\n", inode->i_ino);
 
 	if (inode->i_ino < UFS_ROOTINO ||
 	    inode->i_ino > (uspi->s_ncg * uspi->s_ipg)) {
-		ufs_warning (sb, "ufs_read_inode", "bad inode number (%lu)\n", inode->i_ino);
+		ufs_warning (sb, "ufs_read_inode", "bad inode number (%llu)\n", inode->i_ino);
 		return -1;
 	}
 
 	bh = sb_bread(sb, ufs_inotofsba(inode->i_ino));
 	if (!bh) {
-		ufs_warning (sb, "ufs_read_inode", "unable to read inode %lu\n", inode->i_ino);
+		ufs_warning (sb, "ufs_read_inode", "unable to read inode %llu\n", inode->i_ino);
 		return -1;
 	}
 	if (uspi->fs_magic == UFS2_MAGIC) {
@@ -860,7 +853,6 @@ void ufs_evict_inode(struct inode * inode)
 		ufs_update_inode(inode, inode_needs_sync(inode));
 	}
 
-	invalidate_inode_buffers(inode);
 	clear_inode(inode);
 
 	if (want_delete)
@@ -885,92 +877,85 @@ static inline void free_data(struct to_free *ctx, u64 from, unsigned count)
 
 #define DIRECT_FRAGMENT ((inode->i_size + uspi->s_fsize - 1) >> uspi->s_fshift)
 
+/*
+ * used only for truncation down to direct blocks.
+ */
 static void ufs_trunc_direct(struct inode *inode)
 {
 	struct ufs_inode_info *ufsi = UFS_I(inode);
-	struct super_block * sb;
-	struct ufs_sb_private_info * uspi;
-	void *p;
-	u64 frag1, frag2, frag3, frag4, block1, block2;
+	struct super_block *sb = inode->i_sb;
+	struct ufs_sb_private_info *uspi = UFS_SB(sb)->s_uspi;
+	unsigned int new_frags, old_frags;
+	unsigned int old_slot, new_slot;
+	unsigned int old_tail, new_tail;
 	struct to_free ctx = {.inode = inode};
-	unsigned i, tmp;
 
-	UFSD("ENTER: ino %lu\n", inode->i_ino);
+	UFSD("ENTER: ino %llu\n", inode->i_ino);
 
-	sb = inode->i_sb;
-	uspi = UFS_SB(sb)->s_uspi;
+	new_frags = DIRECT_FRAGMENT;
+	// new_frags = first fragment past the new EOF
+	old_frags = min_t(u64, UFS_NDIR_FRAGMENT, ufsi->i_lastfrag);
+	// old_frags = first fragment past the old EOF or covered by indirects
 
-	frag1 = DIRECT_FRAGMENT;
-	frag4 = min_t(u64, UFS_NDIR_FRAGMENT, ufsi->i_lastfrag);
-	frag2 = ((frag1 & uspi->s_fpbmask) ? ((frag1 | uspi->s_fpbmask) + 1) : frag1);
-	frag3 = frag4 & ~uspi->s_fpbmask;
-	block1 = block2 = 0;
-	if (frag2 > frag3) {
-		frag2 = frag4;
-		frag3 = frag4 = 0;
-	} else if (frag2 < frag3) {
-		block1 = ufs_fragstoblks (frag2);
-		block2 = ufs_fragstoblks (frag3);
-	}
+	if (new_frags >= old_frags)	 // expanding - nothing to free
+		goto done;
 
-	UFSD("ino %lu, frag1 %llu, frag2 %llu, block1 %llu, block2 %llu,"
-	     " frag3 %llu, frag4 %llu\n", inode->i_ino,
-	     (unsigned long long)frag1, (unsigned long long)frag2,
-	     (unsigned long long)block1, (unsigned long long)block2,
-	     (unsigned long long)frag3, (unsigned long long)frag4);
+	old_tail = ufs_fragnum(old_frags);
+	old_slot = ufs_fragstoblks(old_frags);
+	new_tail = ufs_fragnum(new_frags);
+	new_slot = ufs_fragstoblks(new_frags);
 
-	if (frag1 >= frag2)
-		goto next1;
-
-	/*
-	 * Free first free fragments
-	 */
-	p = ufs_get_direct_data_ptr(uspi, ufsi, ufs_fragstoblks(frag1));
-	tmp = ufs_data_ptr_to_cpu(sb, p);
-	if (!tmp )
-		ufs_panic (sb, "ufs_trunc_direct", "internal error");
-	frag2 -= frag1;
-	frag1 = ufs_fragnum (frag1);
-
-	ufs_free_fragments(inode, tmp + frag1, frag2);
-
-next1:
-	/*
-	 * Free whole blocks
-	 */
-	for (i = block1 ; i < block2; i++) {
-		p = ufs_get_direct_data_ptr(uspi, ufsi, i);
-		tmp = ufs_data_ptr_to_cpu(sb, p);
+	if (old_slot == new_slot) { // old_tail > 0
+		void *p = ufs_get_direct_data_ptr(uspi, ufsi, old_slot);
+		u64 tmp = ufs_data_ptr_to_cpu(sb, p);
 		if (!tmp)
-			continue;
-		write_seqlock(&ufsi->meta_lock);
-		ufs_data_ptr_clear(uspi, p);
-		write_sequnlock(&ufsi->meta_lock);
+			ufs_panic(sb, __func__, "internal error");
+		if (!new_tail) {
+			write_seqlock(&ufsi->meta_lock);
+			ufs_data_ptr_clear(uspi, p);
+			write_sequnlock(&ufsi->meta_lock);
+		}
+		ufs_free_fragments(inode, tmp + new_tail, old_tail - new_tail);
+	} else {
+		unsigned int slot = new_slot;
 
-		free_data(&ctx, tmp, uspi->s_fpb);
+		if (new_tail) {
+			void *p = ufs_get_direct_data_ptr(uspi, ufsi, slot++);
+			u64 tmp = ufs_data_ptr_to_cpu(sb, p);
+			if (!tmp)
+				ufs_panic(sb, __func__, "internal error");
+
+			ufs_free_fragments(inode, tmp + new_tail,
+						uspi->s_fpb - new_tail);
+		}
+		while (slot < old_slot) {
+			void *p = ufs_get_direct_data_ptr(uspi, ufsi, slot++);
+			u64 tmp = ufs_data_ptr_to_cpu(sb, p);
+			if (!tmp)
+				continue;
+			write_seqlock(&ufsi->meta_lock);
+			ufs_data_ptr_clear(uspi, p);
+			write_sequnlock(&ufsi->meta_lock);
+
+			free_data(&ctx, tmp, uspi->s_fpb);
+		}
+
+		free_data(&ctx, 0, 0);
+
+		if (old_tail) {
+			void *p = ufs_get_direct_data_ptr(uspi, ufsi, slot);
+			u64 tmp = ufs_data_ptr_to_cpu(sb, p);
+			if (!tmp)
+				ufs_panic(sb, __func__, "internal error");
+			write_seqlock(&ufsi->meta_lock);
+			ufs_data_ptr_clear(uspi, p);
+			write_sequnlock(&ufsi->meta_lock);
+
+			ufs_free_fragments(inode, tmp, old_tail);
+		}
 	}
-
-	free_data(&ctx, 0, 0);
-
-	if (frag3 >= frag4)
-		goto next3;
-
-	/*
-	 * Free last free fragments
-	 */
-	p = ufs_get_direct_data_ptr(uspi, ufsi, ufs_fragstoblks(frag3));
-	tmp = ufs_data_ptr_to_cpu(sb, p);
-	if (!tmp )
-		ufs_panic(sb, "ufs_truncate_direct", "internal error");
-	frag4 = ufs_fragnum (frag4);
-	write_seqlock(&ufsi->meta_lock);
-	ufs_data_ptr_clear(uspi, p);
-	write_sequnlock(&ufsi->meta_lock);
-
-	ufs_free_fragments (inode, tmp, frag4);
- next3:
-
-	UFSD("EXIT: ino %lu\n", inode->i_ino);
+done:
+	UFSD("EXIT: ino %llu\n", inode->i_ino);
 }
 
 static void free_full_branch(struct inode *inode, u64 ind_block, int depth)
@@ -1053,7 +1038,7 @@ static int ufs_alloc_lastblock(struct inode *inode, loff_t size)
 	struct ufs_sb_private_info *uspi = UFS_SB(sb)->s_uspi;
 	unsigned i, end;
 	sector_t lastfrag;
-	struct page *lastpage;
+	struct folio *folio;
 	struct buffer_head *bh;
 	u64 phys64;
 
@@ -1064,18 +1049,17 @@ static int ufs_alloc_lastblock(struct inode *inode, loff_t size)
 
 	lastfrag--;
 
-	lastpage = ufs_get_locked_page(mapping, lastfrag >>
+	folio = ufs_get_locked_folio(mapping, lastfrag >>
 				       (PAGE_SHIFT - inode->i_blkbits));
-       if (IS_ERR(lastpage)) {
-               err = -EIO;
-               goto out;
-       }
+	if (IS_ERR(folio)) {
+		err = -EIO;
+		goto out;
+	}
 
-       end = lastfrag & ((1 << (PAGE_SHIFT - inode->i_blkbits)) - 1);
-       bh = page_buffers(lastpage);
-       for (i = 0; i < end; ++i)
-               bh = bh->b_this_page;
-
+	end = lastfrag & ((1 << (PAGE_SHIFT - inode->i_blkbits)) - 1);
+	bh = folio_buffers(folio);
+	for (i = 0; i < end; ++i)
+		bh = bh->b_this_page;
 
        err = ufs_getfrag_block(inode, lastfrag, bh, 1);
 
@@ -1091,7 +1075,7 @@ static int ufs_alloc_lastblock(struct inode *inode, loff_t size)
 		*/
 	       set_buffer_uptodate(bh);
 	       mark_buffer_dirty(bh);
-	       set_page_dirty(lastpage);
+		folio_mark_dirty(folio);
        }
 
        if (lastfrag >= UFS_IND_FRAGMENT) {
@@ -1109,7 +1093,7 @@ static int ufs_alloc_lastblock(struct inode *inode, loff_t size)
 	       }
        }
 out_unlock:
-       ufs_put_locked_page(lastpage);
+       ufs_put_locked_folio(folio);
 out:
        return err;
 }
@@ -1184,7 +1168,7 @@ static int ufs_truncate(struct inode *inode, loff_t size)
 {
 	int err = 0;
 
-	UFSD("ENTER: ino %lu, i_size: %llu, old_i_size: %llu\n",
+	UFSD("ENTER: ino %llu, i_size: %llu, old_i_size: %llu\n",
 	     inode->i_ino, (unsigned long long)size,
 	     (unsigned long long)i_size_read(inode));
 
@@ -1204,20 +1188,21 @@ static int ufs_truncate(struct inode *inode, loff_t size)
 	truncate_setsize(inode, size);
 
 	ufs_truncate_blocks(inode);
-	inode->i_mtime = inode->i_ctime = current_time(inode);
+	inode_set_mtime_to_ts(inode, inode_set_ctime_current(inode));
 	mark_inode_dirty(inode);
 out:
 	UFSD("EXIT: err %d\n", err);
 	return err;
 }
 
-int ufs_setattr(struct dentry *dentry, struct iattr *attr)
+int ufs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
+		struct iattr *attr)
 {
 	struct inode *inode = d_inode(dentry);
 	unsigned int ia_valid = attr->ia_valid;
 	int error;
 
-	error = setattr_prepare(dentry, attr);
+	error = setattr_prepare(&nop_mnt_idmap, dentry, attr);
 	if (error)
 		return error;
 
@@ -1227,7 +1212,7 @@ int ufs_setattr(struct dentry *dentry, struct iattr *attr)
 			return error;
 	}
 
-	setattr_copy(inode, attr);
+	setattr_copy(&nop_mnt_idmap, inode, attr);
 	mark_inode_dirty(inode);
 	return 0;
 }

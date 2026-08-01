@@ -3,20 +3,21 @@
 
 #include <linux/list.h>
 #include <linux/kref.h>
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+#include <linux/mount.h>
+#endif
 #include <linux/mutex.h>
 #include <linux/idr.h>
+#include <linux/sched.h>
 
-#include <drm/drm_hashtab.h>
 #include <drm/drm_mode_config.h>
 
 struct drm_driver;
 struct drm_minor;
 struct drm_master;
-struct drm_device_dma;
 struct drm_vblank_crtc;
-struct drm_sg_mem;
-struct drm_local_map;
 struct drm_vma_offset_manager;
+struct drm_vram_mm;
 struct drm_fb_helper;
 
 struct inode;
@@ -24,87 +25,241 @@ struct inode;
 struct pci_dev;
 struct pci_controller;
 
+/*
+ * Recovery methods for wedged device in order of less to more side-effects.
+ * To be used with drm_dev_wedged_event() as recovery @method. Callers can
+ * use any one, multiple (or'd) or none depending on their needs.
+ *
+ * Refer to "Device Wedging" chapter in Documentation/gpu/drm-uapi.rst for more
+ * details.
+ */
+#define DRM_WEDGE_RECOVERY_NONE		BIT(0)	/* optional telemetry collection */
+#define DRM_WEDGE_RECOVERY_REBIND	BIT(1)	/* unbind + bind driver */
+#define DRM_WEDGE_RECOVERY_BUS_RESET	BIT(2)	/* unbind + reset bus device + bind */
+#define DRM_WEDGE_RECOVERY_VENDOR	BIT(3)	/* vendor specific recovery method */
+
 /**
- * DRM device structure. This structure represent a complete card that
+ * struct drm_wedge_task_info - information about the guilty task of a wedge dev
+ */
+struct drm_wedge_task_info {
+	/** @pid: pid of the task */
+	pid_t pid;
+	/** @comm: command name of the task */
+	char comm[TASK_COMM_LEN];
+};
+
+/**
+ * enum switch_power_state - power state of drm device
+ */
+
+enum switch_power_state {
+	/** @DRM_SWITCH_POWER_ON: Power state is ON */
+	DRM_SWITCH_POWER_ON = 0,
+
+	/** @DRM_SWITCH_POWER_OFF: Power state is OFF */
+	DRM_SWITCH_POWER_OFF = 1,
+
+	/** @DRM_SWITCH_POWER_CHANGING: Power state is changing */
+	DRM_SWITCH_POWER_CHANGING = 2,
+
+	/** @DRM_SWITCH_POWER_DYNAMIC_OFF: Suspended */
+	DRM_SWITCH_POWER_DYNAMIC_OFF = 3,
+};
+
+/**
+ * struct drm_device - DRM device structure
+ *
+ * This structure represent a complete card that
  * may contain multiple heads.
  */
 struct drm_device {
-	struct list_head legacy_dev_list;/**< list of devices per driver for stealth attach cleanup */
-	int if_version;			/**< Highest interface version set */
+	/** @if_version: Highest interface version set */
+	int if_version;
 
-	/** \name Lifetime Management */
-	/*@{ */
-	struct kref ref;		/**< Object ref-count */
-	struct device *dev;		/**< Device structure of bus-device */
-	struct drm_driver *driver;	/**< DRM driver managing the device */
-	void *dev_private;		/**< DRM driver private data */
-	struct drm_minor *control;		/**< Control node */
-	struct drm_minor *primary;		/**< Primary node */
-	struct drm_minor *render;		/**< Render node */
-	bool registered;
+	/** @ref: Object ref-count */
+	struct kref ref;
 
-	/* currently active master for this device. Protected by master_mutex */
-	struct drm_master *master;
-
-	atomic_t unplugged;			/**< Flag whether dev is dead */
-	struct inode *anon_inode;		/**< inode for private address-space */
-	char *unique;				/**< unique name of the device */
-	/*@} */
-
-	/** \name Locks */
-	/*@{ */
-	struct mutex struct_mutex;	/**< For others */
-	struct mutex master_mutex;      /**< For drm_minor::master and drm_file::is_master */
-	/*@} */
-
-	/** \name Usage Counters */
-	/*@{ */
-	int open_count;			/**< Outstanding files open, protected by drm_global_mutex. */
-	spinlock_t buf_lock;		/**< For drm_device::buf_use and a few other things. */
-	int buf_use;			/**< Buffers in use -- cannot alloc */
-	atomic_t buf_alloc;		/**< Buffer allocation in progress */
-	/*@} */
-
-	struct mutex filelist_mutex;
-	struct list_head filelist;
-
-	/** \name Memory management */
-	/*@{ */
-	struct list_head maplist;	/**< Linked list of regions */
-	struct drm_open_hash map_hash;	/**< User token hash table for maps */
-
-	/** \name Context handle management */
-	/*@{ */
-	struct list_head ctxlist;	/**< Linked list of context handles */
-	struct mutex ctxlist_mutex;	/**< For ctxlist */
-
-	struct idr ctx_idr;
-
-	struct list_head vmalist;	/**< List of vmas (for debugging) */
-
-	/*@} */
-
-	/** \name DMA support */
-	/*@{ */
-	struct drm_device_dma *dma;		/**< Optional pointer for DMA support */
-	/*@} */
-
-	/** \name Context support */
-	/*@{ */
-
-	__volatile__ long context_flag;	/**< Context swapping flag */
-	int last_context;		/**< Last current context */
-	/*@} */
+	/** @dev: Device structure of bus-device */
+	struct device *dev;
 
 	/**
-	 * @irq_enabled:
+	 * @dma_dev:
 	 *
-	 * Indicates that interrupt handling is enabled, specifically vblank
-	 * handling. Drivers which don't use drm_irq_install() need to set this
-	 * to true manually.
+	 * Device for DMA operations. Only required if the device @dev
+	 * cannot perform DMA by itself. Should be NULL otherwise. Call
+	 * drm_dev_dma_dev() to get the DMA device instead of using this
+	 * field directly. Call drm_dev_set_dma_dev() to set this field.
+	 *
+	 * DRM devices are sometimes bound to virtual devices that cannot
+	 * perform DMA by themselves. Drivers should set this field to the
+	 * respective DMA controller.
+	 *
+	 * Devices on USB and other peripheral busses also cannot perform
+	 * DMA by themselves. The @dma_dev field should point the bus
+	 * controller that does DMA on behalve of such a device. Required
+	 * for importing buffers via dma-buf.
+	 *
+	 * If set, the DRM core automatically releases the reference on the
+	 * device.
 	 */
-	bool irq_enabled;
-	int irq;
+	struct device *dma_dev;
+
+	/**
+	 * @managed:
+	 *
+	 * Managed resources linked to the lifetime of this &drm_device as
+	 * tracked by @ref.
+	 */
+	struct {
+		/** @managed.resources: managed resources list */
+		struct list_head resources;
+		/** @managed.final_kfree: pointer for final kfree() call */
+		void *final_kfree;
+		/** @managed.lock: protects @managed.resources */
+		spinlock_t lock;
+	} managed;
+
+	/** @driver: DRM driver managing the device */
+	const struct drm_driver *driver;
+
+	/**
+	 * @dev_private:
+	 *
+	 * DRM driver private data. This is deprecated and should be left set to
+	 * NULL.
+	 *
+	 * Instead of using this pointer it is recommended that drivers use
+	 * devm_drm_dev_alloc() and embed struct &drm_device in their larger
+	 * per-device structure.
+	 */
+	void *dev_private;
+
+	/**
+	 * @primary:
+	 *
+	 * Primary node. Drivers should not interact with this
+	 * directly. debugfs interfaces can be registered with
+	 * drm_debugfs_add_file(), and sysfs should be directly added on the
+	 * hardware (and not character device node) struct device @dev.
+	 */
+	struct drm_minor *primary;
+
+	/**
+	 * @render:
+	 *
+	 * Render node. Drivers should not interact with this directly ever.
+	 * Drivers should not expose any additional interfaces in debugfs or
+	 * sysfs on this node.
+	 */
+	struct drm_minor *render;
+
+	/** @accel: Compute Acceleration node */
+	struct drm_minor *accel;
+
+	/**
+	 * @registered:
+	 *
+	 * Internally used by drm_dev_register() and drm_connector_register().
+	 */
+	bool registered;
+
+	/**
+	 * @master:
+	 *
+	 * Currently active master for this device.
+	 * Protected by &master_mutex
+	 */
+	struct drm_master *master;
+
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+	/**
+	 * @huge_mnt:
+	 *
+	 * Huge tmpfs mountpoint used at GEM object initialization
+	 * drm_gem_object_init(). Drivers can call drm_gem_huge_mnt_create() to
+	 * create, mount and use it. The default tmpfs mountpoint (`shm_mnt`) is
+	 * used if NULL.
+	 */
+	struct vfsmount *huge_mnt;
+#endif
+
+	/**
+	 * @driver_features: per-device driver features
+	 *
+	 * Drivers can clear specific flags here to disallow
+	 * certain features on a per-device basis while still
+	 * sharing a single &struct drm_driver instance across
+	 * all devices.
+	 */
+	u32 driver_features;
+
+	/**
+	 * @unplugged:
+	 *
+	 * Flag to tell if the device has been unplugged.
+	 * See drm_dev_enter() and drm_dev_is_unplugged().
+	 */
+	bool unplugged;
+
+	/** @anon_inode: inode for private address-space */
+	struct inode *anon_inode;
+
+	/** @unique: Unique name of the device */
+	char *unique;
+
+	/**
+	 * @master_mutex:
+	 *
+	 * Lock for &drm_minor.master and &drm_file.is_master
+	 */
+	struct mutex master_mutex;
+
+	/**
+	 * @open_count:
+	 *
+	 * Usage counter for outstanding files open,
+	 * protected by drm_global_mutex
+	 */
+	atomic_t open_count;
+
+	/** @filelist_mutex: Protects @filelist. */
+	struct mutex filelist_mutex;
+	/**
+	 * @filelist:
+	 *
+	 * List of userspace clients, linked through &drm_file.lhead.
+	 */
+	struct list_head filelist;
+
+	/**
+	 * @filelist_internal:
+	 *
+	 * List of open DRM files for in-kernel clients.
+	 * Protected by &filelist_mutex.
+	 */
+	struct list_head filelist_internal;
+
+	/**
+	 * @clientlist_mutex:
+	 *
+	 * Protects &clientlist access.
+	 */
+	struct mutex clientlist_mutex;
+
+	/**
+	 * @clientlist:
+	 *
+	 * List of in-kernel clients. Protected by &clientlist_mutex.
+	 */
+	struct list_head clientlist;
+
+	/**
+	 * @client_sysrq_list:
+	 *
+	 * Entry into list of devices registered for sysrq. Allows in-kernel
+	 * clients on this device to handle sysrq keys.
+	 */
+	struct list_head client_sysrq_list;
 
 	/**
 	 * @vblank_disable_immediate:
@@ -116,8 +271,9 @@ struct drm_device {
 	 * This can be set to true it the hardware has a working vblank counter
 	 * with high-precision timestamping (otherwise there are races) and the
 	 * driver uses drm_crtc_vblank_on() and drm_crtc_vblank_off()
-	 * appropriately. See also @max_vblank_count and
-	 * &drm_crtc_funcs.get_vblank_counter.
+	 * appropriately. Also, see @max_vblank_count,
+	 * &drm_crtc_funcs.get_vblank_counter and
+	 * &drm_vblank_crtc_config.disable_immediate.
 	 */
 	bool vblank_disable_immediate;
 
@@ -131,7 +287,16 @@ struct drm_device {
 	 */
 	struct drm_vblank_crtc *vblank;
 
-	spinlock_t vblank_time_lock;    /**< Protects vblank count and time updates during vblank enable/disable */
+	/**
+	 * @vblank_time_lock:
+	 *
+	 *  Protects vblank count and time updates during vblank enable/disable
+	 */
+	spinlock_t vblank_time_lock;
+	/**
+	 * @vbl_lock: Top-level vblank references lock, wraps the low-level
+	 * @vblank_time_lock.
+	 */
 	spinlock_t vbl_lock;
 
 	/**
@@ -147,45 +312,54 @@ struct drm_device {
 	 * races and imprecision over longer time periods, hence exposing a
 	 * hardware vblank counter is always recommended.
 	 *
-	 * If non-zeor, &drm_crtc_funcs.get_vblank_counter must be set.
+	 * This is the statically configured device wide maximum. The driver
+	 * can instead choose to use a runtime configurable per-crtc value
+	 * &drm_vblank_crtc.max_vblank_count, in which case @max_vblank_count
+	 * must be left at zero. See drm_crtc_set_max_vblank_count() on how
+	 * to use the per-crtc value.
+	 *
+	 * If non-zero, &drm_crtc_funcs.get_vblank_counter must be set.
 	 */
-	u32 max_vblank_count;           /**< size of vblank counter register */
+	u32 max_vblank_count;
+
+	/** @vblank_event_list: List of vblank events */
+	struct list_head vblank_event_list;
 
 	/**
-	 * List of events
+	 * @event_lock:
+	 *
+	 * Protects @vblank_event_list and event delivery in
+	 * general. See drm_send_event() and drm_send_event_locked().
 	 */
-	struct list_head vblank_event_list;
 	spinlock_t event_lock;
 
-	/*@} */
+	/** @num_crtcs: Number of CRTCs on this device */
+	unsigned int num_crtcs;
 
-	struct drm_agp_head *agp;	/**< AGP data */
+	/** @mode_config: Current mode config */
+	struct drm_mode_config mode_config;
 
-	struct pci_dev *pdev;		/**< PCI device structure */
-#ifdef __alpha__
-	struct pci_controller *hose;
-#endif
-
-	struct drm_sg_mem *sg;	/**< Scatter gather memory */
-	unsigned int num_crtcs;                  /**< Number of CRTCs on this device */
-
-	struct {
-		int context;
-		struct drm_hw_lock *lock;
-	} sigdata;
-
-	struct drm_local_map *agp_buffer_map;
-	unsigned int agp_buffer_token;
-
-	struct drm_mode_config mode_config;	/**< Current mode config */
-
-	/** \name GEM information */
-	/*@{ */
+	/** @object_name_lock: GEM information */
 	struct mutex object_name_lock;
+
+	/** @object_name_idr: GEM information */
 	struct idr object_name_idr;
+
+	/** @vma_offset_manager: GEM information */
 	struct drm_vma_offset_manager *vma_offset_manager;
-	/*@} */
-	int switch_power_state;
+
+	/** @vram_mm: VRAM MM memory manager */
+	struct drm_vram_mm *vram_mm;
+
+	/**
+	 * @switch_power_state:
+	 *
+	 * Power state of the client.
+	 * Used by drivers supporting the switcheroo driver.
+	 * The state is maintained in the
+	 * &vga_switcheroo_client_ops.set_gpu_state callback
+	 */
+	enum switch_power_state switch_power_state;
 
 	/**
 	 * @fb_helper:
@@ -194,6 +368,39 @@ struct drm_device {
 	 * Set by drm_fb_helper_init() and cleared by drm_fb_helper_fini().
 	 */
 	struct drm_fb_helper *fb_helper;
+
+	/**
+	 * @debugfs_root:
+	 *
+	 * Root directory for debugfs files.
+	 */
+	struct dentry *debugfs_root;
+
+	/**
+	 * @gem_lru_mutex:
+	 *
+	 * Lock protecting movement of GEM objects between LRUs.
+	 */
+	struct mutex gem_lru_mutex;
 };
+
+void drm_dev_set_dma_dev(struct drm_device *dev, struct device *dma_dev);
+
+/**
+ * drm_dev_dma_dev - returns the DMA device for a DRM device
+ * @dev: DRM device
+ *
+ * Returns the DMA device of the given DRM device. By default, this
+ * the DRM device's parent. See drm_dev_set_dma_dev().
+ *
+ * Returns:
+ * A DMA-capable device for the DRM device.
+ */
+static inline struct device *drm_dev_dma_dev(struct drm_device *dev)
+{
+	if (dev->dma_dev)
+		return dev->dma_dev;
+	return dev->dev;
+}
 
 #endif

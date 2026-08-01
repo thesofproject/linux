@@ -1,24 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) 2011 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2011 Texas Instruments Incorporated - https://www.ti.com/
  * Author: Rob Clark <rob@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <drm/drm_crtc.h>
+#include <linux/fb.h>
+
+#include <drm/clients/drm_client_setup.h>
+#include <drm/drm_drv.h>
+#include <drm/drm_crtc_helper.h>
 #include <drm/drm_fb_helper.h>
+#include <drm/drm_file.h>
+#include <drm/drm_fourcc.h>
+#include <drm/drm_framebuffer.h>
+#include <drm/drm_gem_framebuffer_helper.h>
+#include <drm/drm_managed.h>
+#include <drm/drm_print.h>
+#include <drm/drm_util.h>
 
 #include "omap_drv.h"
+#include "omap_fbdev.h"
 
 MODULE_PARM_DESC(ywrap, "Enable ywrap scrolling (omap44xx and later, default 'y')");
 static bool ywrap_enabled = true;
@@ -28,12 +29,8 @@ module_param_named(ywrap, ywrap_enabled, bool, 0644);
  * fbdev funcs, to implement legacy fbdev interface on top of drm driver
  */
 
-#define to_omap_fbdev(x) container_of(x, struct omap_fbdev, base)
-
 struct omap_fbdev {
-	struct drm_fb_helper base;
-	struct drm_framebuffer *fb;
-	struct drm_gem_object *bo;
+	struct drm_device *dev;
 	bool ywrap_enabled;
 
 	/* for deferred dmm roll when getting called in atomic ctx */
@@ -45,32 +42,39 @@ static struct drm_fb_helper *get_fb(struct fb_info *fbi);
 static void pan_worker(struct work_struct *work)
 {
 	struct omap_fbdev *fbdev = container_of(work, struct omap_fbdev, work);
-	struct fb_info *fbi = fbdev->base.fbdev;
+	struct drm_fb_helper *helper = fbdev->dev->fb_helper;
+	struct fb_info *fbi = helper->info;
+	struct drm_gem_object *bo = drm_gem_fb_get_obj(helper->fb, 0);
 	int npages;
 
 	/* DMM roll shifts in 4K pages: */
 	npages = fbi->fix.line_length >> PAGE_SHIFT;
-	omap_gem_roll(fbdev->bo, fbi->var.yoffset * npages);
+	omap_gem_roll(bo, fbi->var.yoffset * npages);
 }
 
-static int omap_fbdev_pan_display(struct fb_var_screeninfo *var,
-		struct fb_info *fbi)
+FB_GEN_DEFAULT_DEFERRED_DMAMEM_OPS(omap_fbdev,
+				   drm_fb_helper_damage_range,
+				   drm_fb_helper_damage_area)
+
+static int omap_fbdev_pan_display(struct fb_var_screeninfo *var, struct fb_info *fbi)
 {
 	struct drm_fb_helper *helper = get_fb(fbi);
-	struct omap_fbdev *fbdev = to_omap_fbdev(helper);
+	struct omap_drm_private *priv;
+	struct omap_fbdev *fbdev;
 
 	if (!helper)
 		goto fallback;
 
+	priv = helper->dev->dev_private;
+	fbdev = priv->fbdev;
+
 	if (!fbdev->ywrap_enabled)
 		goto fallback;
 
-	if (drm_can_sleep()) {
+	if (drm_can_sleep())
 		pan_worker(&fbdev->work);
-	} else {
-		struct omap_drm_private *priv = helper->dev->dev_private;
+	else
 		queue_work(priv->wq, &fbdev->work);
-	}
 
 	return 0;
 
@@ -78,35 +82,83 @@ fallback:
 	return drm_fb_helper_pan_display(var, fbi);
 }
 
-static struct fb_ops omap_fb_ops = {
-	.owner = THIS_MODULE,
+static int omap_fbdev_fb_mmap(struct fb_info *info, struct vm_area_struct *vma)
+{
+	vma->vm_page_prot = pgprot_writecombine(vm_get_page_prot(vma->vm_flags));
 
+	return fb_deferred_io_mmap(info, vma);
+}
+
+static void omap_fbdev_fb_destroy(struct fb_info *info)
+{
+	struct drm_fb_helper *helper = info->par;
+	struct drm_framebuffer *fb = helper->fb;
+	struct drm_gem_object *bo = drm_gem_fb_get_obj(fb, 0);
+
+	DBG();
+
+	fb_deferred_io_cleanup(info);
+	drm_fb_helper_fini(helper);
+
+	omap_gem_unpin(bo);
+	drm_framebuffer_remove(fb);
+
+	drm_client_release(&helper->client);
+}
+
+/*
+ * For now, we cannot use FB_DEFAULT_DEFERRED_OPS and fb_deferred_io_mmap()
+ * because we use write-combine.
+ */
+static const struct fb_ops omap_fb_ops = {
+	.owner = THIS_MODULE,
+	__FB_DEFAULT_DEFERRED_OPS_RDWR(omap_fbdev),
 	.fb_check_var	= drm_fb_helper_check_var,
 	.fb_set_par	= drm_fb_helper_set_par,
 	.fb_setcmap	= drm_fb_helper_setcmap,
 	.fb_blank	= drm_fb_helper_blank,
 	.fb_pan_display = omap_fbdev_pan_display,
-	.fb_debug_enter = drm_fb_helper_debug_enter,
-	.fb_debug_leave = drm_fb_helper_debug_leave,
+	__FB_DEFAULT_DEFERRED_OPS_DRAW(omap_fbdev),
 	.fb_ioctl	= drm_fb_helper_ioctl,
-
-	.fb_read = drm_fb_helper_sys_read,
-	.fb_write = drm_fb_helper_sys_write,
-	.fb_fillrect = drm_fb_helper_sys_fillrect,
-	.fb_copyarea = drm_fb_helper_sys_copyarea,
-	.fb_imageblit = drm_fb_helper_sys_imageblit,
+	.fb_mmap	= omap_fbdev_fb_mmap,
+	.fb_destroy	= omap_fbdev_fb_destroy,
 };
 
-static int omap_fbdev_create(struct drm_fb_helper *helper,
-		struct drm_fb_helper_surface_size *sizes)
+static int omap_fbdev_dirty(struct drm_fb_helper *helper, struct drm_clip_rect *clip)
 {
-	struct omap_fbdev *fbdev = to_omap_fbdev(helper);
+	if (!(clip->x1 < clip->x2 && clip->y1 < clip->y2))
+		return 0;
+
+	if (helper->fb->funcs->dirty)
+		return helper->fb->funcs->dirty(helper->fb, NULL, 0, 0, clip, 1);
+
+	return 0;
+}
+
+static const struct drm_fb_helper_funcs omap_fbdev_helper_funcs = {
+	.fb_dirty = omap_fbdev_dirty,
+};
+
+static struct drm_fb_helper *get_fb(struct fb_info *fbi)
+{
+	if (!fbi || strcmp(fbi->fix.id, MODULE_NAME)) {
+		/* these are not the fb's you're looking for */
+		return NULL;
+	}
+	return fbi->par;
+}
+
+int omap_fbdev_driver_fbdev_probe(struct drm_fb_helper *helper,
+				  struct drm_fb_helper_surface_size *sizes)
+{
 	struct drm_device *dev = helper->dev;
 	struct omap_drm_private *priv = dev->dev_private;
+	struct omap_fbdev *fbdev = priv->fbdev;
+	struct fb_info *fbi = helper->info;
 	struct drm_framebuffer *fb = NULL;
 	union omap_gem_size gsize;
-	struct fb_info *fbi = NULL;
 	struct drm_mode_fb_cmd2 mode_cmd = {0};
+	struct drm_gem_object *bo;
 	dma_addr_t dma_addr;
 	int ret;
 
@@ -137,20 +189,23 @@ static int omap_fbdev_create(struct drm_fb_helper *helper,
 		.bytes = PAGE_ALIGN(mode_cmd.pitches[0] * mode_cmd.height),
 	};
 	DBG("allocating %d bytes for fb %d", gsize.bytes, dev->primary->index);
-	fbdev->bo = omap_gem_new(dev, gsize, OMAP_BO_SCANOUT | OMAP_BO_WC);
-	if (!fbdev->bo) {
+	bo = omap_gem_new(dev, gsize, OMAP_BO_SCANOUT | OMAP_BO_WC);
+	if (!bo) {
 		dev_err(dev->dev, "failed to allocate buffer object\n");
 		ret = -ENOMEM;
 		goto fail;
 	}
 
-	fb = omap_framebuffer_init(dev, &mode_cmd, &fbdev->bo);
+	fb = omap_framebuffer_init(dev,
+				   drm_get_format_info(dev, mode_cmd.pixel_format,
+						       mode_cmd.modifier[0]),
+				   &mode_cmd, &bo);
 	if (IS_ERR(fb)) {
 		dev_err(dev->dev, "failed to allocate fb\n");
 		/* note: if fb creation failed, we can't rely on fb destroy
 		 * to unref the bo:
 		 */
-		drm_gem_object_unreference_unlocked(fbdev->bo);
+		drm_gem_object_put(bo);
 		ret = PTR_ERR(fb);
 		goto fail;
 	}
@@ -163,41 +218,36 @@ static int omap_fbdev_create(struct drm_fb_helper *helper,
 	 * to it).  Then we just need to be sure that we are able to re-
 	 * pin it in case of an opps.
 	 */
-	ret = omap_gem_pin(fbdev->bo, &dma_addr);
+	ret = omap_gem_pin(bo, &dma_addr);
 	if (ret) {
 		dev_err(dev->dev, "could not pin framebuffer\n");
 		ret = -ENOMEM;
 		goto fail;
 	}
 
-	mutex_lock(&dev->struct_mutex);
-
-	fbi = drm_fb_helper_alloc_fbi(helper);
-	if (IS_ERR(fbi)) {
-		dev_err(dev->dev, "failed to allocate fb info\n");
-		ret = PTR_ERR(fbi);
-		goto fail_unlock;
-	}
-
 	DBG("fbi=%p, dev=%p", fbi, dev);
 
-	fbdev->fb = fb;
+	helper->funcs = &omap_fbdev_helper_funcs;
 	helper->fb = fb;
 
-	fbi->par = helper;
 	fbi->fbops = &omap_fb_ops;
 
-	strcpy(fbi->fix.id, MODULE_NAME);
+	drm_fb_helper_fill_info(fbi, helper, sizes);
 
-	drm_fb_helper_fill_fix(fbi, fb->pitches[0], fb->format->depth);
-	drm_fb_helper_fill_var(fbi, helper, sizes->fb_width, sizes->fb_height);
-
-	dev->mode_config.fb_base = dma_addr;
-
-	fbi->screen_buffer = omap_gem_vaddr(fbdev->bo);
-	fbi->screen_size = fbdev->bo->size;
+	fbi->flags |= FBINFO_VIRTFB;
+	fbi->screen_buffer = omap_gem_vaddr(bo);
+	fbi->screen_size = bo->size;
 	fbi->fix.smem_start = dma_addr;
-	fbi->fix.smem_len = fbdev->bo->size;
+	fbi->fix.smem_len = bo->size;
+
+	/* deferred I/O */
+	helper->fbdefio.delay = HZ / 20;
+	helper->fbdefio.deferred_io = drm_fb_helper_deferred_io;
+
+	fbi->fbdefio = &helper->fbdefio;
+	ret = fb_deferred_io_init(fbi);
+	if (ret)
+		goto fail;
 
 	/* if we have DMM, then we can use it for scrolling by just
 	 * shuffling pages around in DMM rather than doing sw blit.
@@ -210,14 +260,10 @@ static int omap_fbdev_create(struct drm_fb_helper *helper,
 
 
 	DBG("par=%p, %dx%d", fbi->par, fbi->var.xres, fbi->var.yres);
-	DBG("allocated %dx%d fb", fbdev->fb->width, fbdev->fb->height);
-
-	mutex_unlock(&dev->struct_mutex);
+	DBG("allocated %dx%d fb", fb->width, fb->height);
 
 	return 0;
 
-fail_unlock:
-	mutex_unlock(&dev->struct_mutex);
 fail:
 
 	if (ret) {
@@ -228,90 +274,21 @@ fail:
 	return ret;
 }
 
-static const struct drm_fb_helper_funcs omap_fb_helper_funcs = {
-	.fb_probe = omap_fbdev_create,
-};
-
-static struct drm_fb_helper *get_fb(struct fb_info *fbi)
-{
-	if (!fbi || strcmp(fbi->fix.id, MODULE_NAME)) {
-		/* these are not the fb's you're looking for */
-		return NULL;
-	}
-	return fbi->par;
-}
-
-/* initialize fbdev helper */
-void omap_fbdev_init(struct drm_device *dev)
+void omap_fbdev_setup(struct drm_device *dev)
 {
 	struct omap_drm_private *priv = dev->dev_private;
-	struct omap_fbdev *fbdev = NULL;
-	struct drm_fb_helper *helper;
-	int ret = 0;
-
-	if (!priv->num_crtcs || !priv->num_connectors)
-		return;
-
-	fbdev = kzalloc(sizeof(*fbdev), GFP_KERNEL);
-	if (!fbdev)
-		goto fail;
-
-	INIT_WORK(&fbdev->work, pan_worker);
-
-	helper = &fbdev->base;
-
-	drm_fb_helper_prepare(dev, helper, &omap_fb_helper_funcs);
-
-	ret = drm_fb_helper_init(dev, helper, priv->num_connectors);
-	if (ret)
-		goto fail;
-
-	ret = drm_fb_helper_single_add_all_connectors(helper);
-	if (ret)
-		goto fini;
-
-	ret = drm_fb_helper_initial_config(helper, 32);
-	if (ret)
-		goto fini;
-
-	priv->fbdev = helper;
-
-	return;
-
-fini:
-	drm_fb_helper_fini(helper);
-fail:
-	kfree(fbdev);
-
-	dev_warn(dev->dev, "omap_fbdev_init failed\n");
-}
-
-void omap_fbdev_fini(struct drm_device *dev)
-{
-	struct omap_drm_private *priv = dev->dev_private;
-	struct drm_fb_helper *helper = priv->fbdev;
 	struct omap_fbdev *fbdev;
 
-	DBG();
+	drm_WARN(dev, !dev->registered, "Device has not been registered.\n");
+	drm_WARN(dev, dev->fb_helper, "fb_helper is already set!\n");
 
-	if (!helper)
+	fbdev = drmm_kzalloc(dev, sizeof(*fbdev), GFP_KERNEL);
+	if (!fbdev)
 		return;
+	fbdev->dev = dev;
+	INIT_WORK(&fbdev->work, pan_worker);
 
-	drm_fb_helper_unregister_fbi(helper);
+	priv->fbdev = fbdev;
 
-	drm_fb_helper_fini(helper);
-
-	fbdev = to_omap_fbdev(helper);
-
-	/* unpin the GEM object pinned in omap_fbdev_create() */
-	if (fbdev->bo)
-		omap_gem_unpin(fbdev->bo);
-
-	/* this will free the backing object */
-	if (fbdev->fb)
-		drm_framebuffer_remove(fbdev->fb);
-
-	kfree(fbdev);
-
-	priv->fbdev = NULL;
+	drm_client_setup(dev, NULL);
 }

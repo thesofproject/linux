@@ -11,6 +11,7 @@
 
 #include <linux/seq_file.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/kernel_stat.h>
 #include <linux/notifier.h>
 #include <linux/cpu.h>
@@ -21,18 +22,16 @@
 
 #include <asm/apic.h>
 #include <asm/nospec-branch.h>
+#include <asm/softirq_stack.h>
 
 #ifdef CONFIG_DEBUG_STACKOVERFLOW
 
 int sysctl_panic_on_stackoverflow __read_mostly;
 
 /* Debugging check for stack overflow: is there less than 1KB free? */
-static int check_stack_overflow(void)
+static bool check_stack_overflow(void)
 {
-	long sp;
-
-	__asm__ __volatile__("andl %%esp,%0" :
-			     "=r" (sp) : "0" (THREAD_SIZE - 1));
+	unsigned long sp = current_stack_pointer & (THREAD_SIZE - 1);
 
 	return sp < (sizeof(struct thread_info) + STACK_WARN);
 }
@@ -46,21 +45,19 @@ static void print_stack_overflow(void)
 }
 
 #else
-static inline int check_stack_overflow(void) { return 0; }
+static inline bool check_stack_overflow(void) { return false; }
 static inline void print_stack_overflow(void) { }
 #endif
 
-DEFINE_PER_CPU(struct irq_stack *, hardirq_stack);
-DEFINE_PER_CPU(struct irq_stack *, softirq_stack);
+DEFINE_PER_CPU_CACHE_HOT(struct irq_stack *, softirq_stack_ptr);
 
 static void call_on_stack(void *func, void *stack)
 {
-	asm volatile("xchgl	%%ebx,%%esp	\n"
+	asm volatile("xchgl %[sp], %%esp\n"
 		     CALL_NOSPEC
-		     "movl	%%ebx,%%esp	\n"
-		     : "=b" (stack)
-		     : "0" (stack),
-		       [thunk_target] "D"(func)
+		     "movl %[sp], %%esp"
+		     : [sp] "+b" (stack)
+		     : [thunk_target] "D" (func)
 		     : "memory", "cc", "edx", "ecx", "eax");
 }
 
@@ -69,13 +66,13 @@ static inline void *current_stack(void)
 	return (void *)(current_stack_pointer & ~(THREAD_SIZE - 1));
 }
 
-static inline int execute_on_irq_stack(int overflow, struct irq_desc *desc)
+static inline bool execute_on_irq_stack(bool overflow, struct irq_desc *desc)
 {
 	struct irq_stack *curstk, *irqstk;
-	u32 *isp, *prev_esp, arg1;
+	u32 *isp, *prev_esp;
 
 	curstk = (struct irq_stack *) current_stack();
-	irqstk = __this_cpu_read(hardirq_stack);
+	irqstk = __this_cpu_read(hardirq_stack_ptr);
 
 	/*
 	 * this is where we switch to the IRQ stack. However, if we are
@@ -84,7 +81,7 @@ static inline int execute_on_irq_stack(int overflow, struct irq_desc *desc)
 	 * current stack (which is the irq stack already after all)
 	 */
 	if (unlikely(curstk == irqstk))
-		return 0;
+		return false;
 
 	isp = (u32 *) ((char *)irqstk + sizeof(*irqstk));
 
@@ -95,46 +92,47 @@ static inline int execute_on_irq_stack(int overflow, struct irq_desc *desc)
 	if (unlikely(overflow))
 		call_on_stack(print_stack_overflow, isp);
 
-	asm volatile("xchgl	%%ebx,%%esp	\n"
+	asm volatile("xchgl %[sp], %%esp\n"
 		     CALL_NOSPEC
-		     "movl	%%ebx,%%esp	\n"
-		     : "=a" (arg1), "=b" (isp)
-		     :  "0" (desc),   "1" (isp),
-			[thunk_target] "D" (desc->handle_irq)
-		     : "memory", "cc", "ecx");
-	return 1;
+		     "movl %[sp], %%esp"
+		     : "+a" (desc), [sp] "+b" (isp)
+		     : [thunk_target] "D" (desc->handle_irq)
+		     : "memory", "cc", "edx", "ecx");
+	return true;
 }
 
 /*
- * allocate per-cpu stacks for hardirq and for softirq processing
+ * Allocate per-cpu stacks for hardirq and softirq processing
  */
-void irq_ctx_init(int cpu)
+int irq_init_percpu_irqstack(unsigned int cpu)
 {
-	struct irq_stack *irqstk;
+	int node = cpu_to_node(cpu);
+	struct page *ph, *ps;
 
-	if (per_cpu(hardirq_stack, cpu))
-		return;
+	if (per_cpu(hardirq_stack_ptr, cpu))
+		return 0;
 
-	irqstk = page_address(alloc_pages_node(cpu_to_node(cpu),
-					       THREADINFO_GFP,
-					       THREAD_SIZE_ORDER));
-	per_cpu(hardirq_stack, cpu) = irqstk;
+	ph = alloc_pages_node(node, THREADINFO_GFP, THREAD_SIZE_ORDER);
+	if (!ph)
+		return -ENOMEM;
+	ps = alloc_pages_node(node, THREADINFO_GFP, THREAD_SIZE_ORDER);
+	if (!ps) {
+		__free_pages(ph, THREAD_SIZE_ORDER);
+		return -ENOMEM;
+	}
 
-	irqstk = page_address(alloc_pages_node(cpu_to_node(cpu),
-					       THREADINFO_GFP,
-					       THREAD_SIZE_ORDER));
-	per_cpu(softirq_stack, cpu) = irqstk;
-
-	printk(KERN_DEBUG "CPU %u irqstacks, hard=%p soft=%p\n",
-	       cpu, per_cpu(hardirq_stack, cpu),  per_cpu(softirq_stack, cpu));
+	per_cpu(hardirq_stack_ptr, cpu) = page_address(ph);
+	per_cpu(softirq_stack_ptr, cpu) = page_address(ps);
+	return 0;
 }
 
+#ifdef CONFIG_SOFTIRQ_ON_OWN_STACK
 void do_softirq_own_stack(void)
 {
 	struct irq_stack *irqstk;
 	u32 *isp, *prev_esp;
 
-	irqstk = __this_cpu_read(softirq_stack);
+	irqstk = __this_cpu_read(softirq_stack_ptr);
 
 	/* build the stack frame on the softirq stack */
 	isp = (u32 *) ((char *)irqstk + sizeof(*irqstk));
@@ -145,19 +143,15 @@ void do_softirq_own_stack(void)
 
 	call_on_stack(__do_softirq, isp);
 }
+#endif
 
-bool handle_irq(struct irq_desc *desc, struct pt_regs *regs)
+void __handle_irq(struct irq_desc *desc, struct pt_regs *regs)
 {
-	int overflow = check_stack_overflow();
-
-	if (IS_ERR_OR_NULL(desc))
-		return false;
+	bool overflow = check_stack_overflow();
 
 	if (user_mode(regs) || !execute_on_irq_stack(overflow, desc)) {
 		if (unlikely(overflow))
 			print_stack_overflow();
 		generic_handle_irq_desc(desc);
 	}
-
-	return true;
 }

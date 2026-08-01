@@ -10,11 +10,14 @@
  * MXC GPIO support. (c) 2008 Daniel Mack <daniel@caiaq.de>
  * Copyright 2008 Juergen Beisert, kernel@pengutronix.de
  */
-#include <linux/gpio/driver.h>
-#include <linux/io.h>
-#include <linux/interrupt.h>
-#include <linux/platform_device.h>
+
 #include <linux/bitops.h>
+#include <linux/clk.h>
+#include <linux/gpio/driver.h>
+#include <linux/gpio/generic.h>
+#include <linux/interrupt.h>
+#include <linux/io.h>
+#include <linux/platform_device.h>
 
 /* GPIO registers definition */
 #define GPIO_DATA_OUT		0x00
@@ -39,12 +42,15 @@
 /**
  * struct ftgpio_gpio - Gemini GPIO state container
  * @dev: containing device for this instance
- * @gc: gpiochip for this instance
+ * @chip: generic GPIO chip for this instance
+ * @base: remapped I/O-memory base
+ * @clk: silicon clock
  */
 struct ftgpio_gpio {
 	struct device *dev;
-	struct gpio_chip gc;
+	struct gpio_generic_chip chip;
 	void __iomem *base;
+	struct clk *clk;
 };
 
 static void ftgpio_gpio_ack_irq(struct irq_data *d)
@@ -64,6 +70,7 @@ static void ftgpio_gpio_mask_irq(struct irq_data *d)
 	val = readl(g->base + GPIO_INT_EN);
 	val &= ~BIT(irqd_to_hwirq(d));
 	writel(val, g->base + GPIO_INT_EN);
+	gpiochip_disable_irq(gc, irqd_to_hwirq(d));
 }
 
 static void ftgpio_gpio_unmask_irq(struct irq_data *d)
@@ -72,6 +79,7 @@ static void ftgpio_gpio_unmask_irq(struct irq_data *d)
 	struct ftgpio_gpio *g = gpiochip_get_data(gc);
 	u32 val;
 
+	gpiochip_enable_irq(gc, irqd_to_hwirq(d));
 	val = readl(g->base + GPIO_INT_EN);
 	val |= BIT(irqd_to_hwirq(d));
 	writel(val, g->base + GPIO_INT_EN);
@@ -130,14 +138,6 @@ static int ftgpio_gpio_set_irq_type(struct irq_data *d, unsigned int type)
 	return 0;
 }
 
-static struct irq_chip ftgpio_gpio_irqchip = {
-	.name = "FTGPIO010",
-	.irq_ack = ftgpio_gpio_ack_irq,
-	.irq_mask = ftgpio_gpio_mask_irq,
-	.irq_unmask = ftgpio_gpio_unmask_irq,
-	.irq_set_type = ftgpio_gpio_set_irq_type,
-};
-
 static void ftgpio_gpio_irq_handler(struct irq_desc *desc)
 {
 	struct gpio_chip *gc = irq_desc_get_handler_data(desc);
@@ -151,17 +151,94 @@ static void ftgpio_gpio_irq_handler(struct irq_desc *desc)
 	stat = readl(g->base + GPIO_INT_STAT_RAW);
 	if (stat)
 		for_each_set_bit(offset, &stat, gc->ngpio)
-			generic_handle_irq(irq_find_mapping(gc->irq.domain,
-							    offset));
+			generic_handle_domain_irq(gc->irq.domain, offset);
 
 	chained_irq_exit(irqchip, desc);
 }
 
+static int ftgpio_gpio_set_config(struct gpio_chip *gc, unsigned int offset,
+				  unsigned long config)
+{
+	enum pin_config_param param = pinconf_to_config_param(config);
+	u32 arg = pinconf_to_config_argument(config);
+	struct ftgpio_gpio *g = gpiochip_get_data(gc);
+	unsigned long pclk_freq;
+	u32 deb_div;
+	u32 val;
+
+	if (param != PIN_CONFIG_INPUT_DEBOUNCE)
+		return -ENOTSUPP;
+
+	/*
+	 * Debounce only works if interrupts are enabled. The manual
+	 * states that if PCLK is 66 MHz, and this is set to 0x7D0, then
+	 * PCLK is divided down to 33 kHz for the debounce timer. 0x7D0 is
+	 * 2000 decimal, so what they mean is simply that the PCLK is
+	 * divided by this value.
+	 *
+	 * As we get a debounce setting in microseconds, we calculate the
+	 * desired period time and see if we can get a suitable debounce
+	 * time.
+	 */
+	pclk_freq = clk_get_rate(g->clk);
+	deb_div = DIV_ROUND_CLOSEST(pclk_freq, arg);
+
+	/* This register is only 24 bits wide */
+	if (deb_div > (1 << 24))
+		return -ENOTSUPP;
+
+	dev_dbg(g->dev, "prescale divisor: %08x, resulting frequency %lu Hz\n",
+		deb_div, (pclk_freq/deb_div));
+
+	val = readl(g->base + GPIO_DEBOUNCE_PRESCALE);
+	if (val == deb_div) {
+		/*
+		 * The debounce timer happens to already be set to the
+		 * desirable value, what a coincidence! We can just enable
+		 * debounce on this GPIO line and return. This happens more
+		 * often than you think, for example when all GPIO keys
+		 * on a system are requesting the same debounce interval.
+		 */
+		val = readl(g->base + GPIO_DEBOUNCE_EN);
+		val |= BIT(offset);
+		writel(val, g->base + GPIO_DEBOUNCE_EN);
+		return 0;
+	}
+
+	val = readl(g->base + GPIO_DEBOUNCE_EN);
+	if (val) {
+		/*
+		 * Oh no! Someone is already using the debounce with
+		 * another setting than what we need. Bummer.
+		 */
+		return -ENOTSUPP;
+	}
+
+	/* First come, first serve */
+	writel(deb_div, g->base + GPIO_DEBOUNCE_PRESCALE);
+	/* Enable debounce */
+	val |= BIT(offset);
+	writel(val, g->base + GPIO_DEBOUNCE_EN);
+
+	return 0;
+}
+
+static const struct irq_chip ftgpio_irq_chip = {
+	.name = "FTGPIO010",
+	.irq_ack = ftgpio_gpio_ack_irq,
+	.irq_mask = ftgpio_gpio_mask_irq,
+	.irq_unmask = ftgpio_gpio_unmask_irq,
+	.irq_set_type = ftgpio_gpio_set_irq_type,
+	.flags = IRQCHIP_IMMUTABLE,
+	 GPIOCHIP_IRQ_RESOURCE_HELPERS,
+};
+
 static int ftgpio_gpio_probe(struct platform_device *pdev)
 {
+	struct gpio_generic_chip_config config;
 	struct device *dev = &pdev->dev;
-	struct resource *res;
 	struct ftgpio_gpio *g;
+	struct gpio_irq_chip *girq;
 	int irq;
 	int ret;
 
@@ -171,54 +248,67 @@ static int ftgpio_gpio_probe(struct platform_device *pdev)
 
 	g->dev = dev;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	g->base = devm_ioremap_resource(dev, res);
+	g->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(g->base))
 		return PTR_ERR(g->base);
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq <= 0)
-		return irq ? irq : -EINVAL;
+	if (irq < 0)
+		return irq;
 
-	ret = bgpio_init(&g->gc, dev, 4,
-			 g->base + GPIO_DATA_IN,
-			 g->base + GPIO_DATA_SET,
-			 g->base + GPIO_DATA_CLR,
-			 g->base + GPIO_DIR,
-			 NULL,
-			 0);
-	if (ret) {
-		dev_err(dev, "unable to init generic GPIO\n");
-		return ret;
-	}
-	g->gc.label = "FTGPIO010";
-	g->gc.base = -1;
-	g->gc.parent = dev;
-	g->gc.owner = THIS_MODULE;
-	/* ngpio is set by bgpio_init() */
+	g->clk = devm_clk_get_enabled(dev, NULL);
+	if (IS_ERR(g->clk) && PTR_ERR(g->clk) == -EPROBE_DEFER)
+		/*
+		 * Percolate deferrals, for anything else,
+		 * just live without the clocking.
+		 */
+		return PTR_ERR(g->clk);
 
-	ret = devm_gpiochip_add_data(dev, &g->gc, g);
+	config = (struct gpio_generic_chip_config) {
+		.dev = dev,
+		.sz = 4,
+		.dat = g->base + GPIO_DATA_IN,
+		.set = g->base + GPIO_DATA_SET,
+		.clr = g->base + GPIO_DATA_CLR,
+		.dirout = g->base + GPIO_DIR,
+	};
+
+	ret = gpio_generic_chip_init(&g->chip, &config);
 	if (ret)
-		return ret;
+		return dev_err_probe(dev, ret, "unable to init generic GPIO\n");
+
+	g->chip.gc.label = dev_name(dev);
+	g->chip.gc.base = -1;
+	g->chip.gc.parent = dev;
+	g->chip.gc.owner = THIS_MODULE;
+	/* ngpio is set by gpio_generic_chip_init() */
+
+	/* We need a silicon clock to do debounce */
+	if (!IS_ERR(g->clk))
+		g->chip.gc.set_config = ftgpio_gpio_set_config;
+
+	girq = &g->chip.gc.irq;
+	gpio_irq_chip_set_chip(girq, &ftgpio_irq_chip);
+	girq->parent_handler = ftgpio_gpio_irq_handler;
+	girq->num_parents = 1;
+	girq->parents = devm_kcalloc(dev, 1, sizeof(*girq->parents),
+				     GFP_KERNEL);
+	if (!girq->parents)
+		return -ENOMEM;
+
+	girq->default_type = IRQ_TYPE_NONE;
+	girq->handler = handle_bad_irq;
+	girq->parents[0] = irq;
 
 	/* Disable, unmask and clear all interrupts */
 	writel(0x0, g->base + GPIO_INT_EN);
 	writel(0x0, g->base + GPIO_INT_MASK);
 	writel(~0x0, g->base + GPIO_INT_CLR);
 
-	ret = gpiochip_irqchip_add(&g->gc, &ftgpio_gpio_irqchip,
-				   0, handle_bad_irq,
-				   IRQ_TYPE_NONE);
-	if (ret) {
-		dev_info(dev, "could not add irqchip\n");
-		return ret;
-	}
-	gpiochip_set_chained_irqchip(&g->gc, &ftgpio_gpio_irqchip,
-				     irq, ftgpio_gpio_irq_handler);
+	/* Clear any use of debounce */
+	writel(0x0, g->base + GPIO_DEBOUNCE_EN);
 
-	dev_info(dev, "FTGPIO010 @%p registered\n", g->base);
-
-	return 0;
+	return devm_gpiochip_add_data(dev, &g->chip.gc, g);
 }
 
 static const struct of_device_id ftgpio_gpio_of_match[] = {
@@ -237,8 +327,8 @@ static const struct of_device_id ftgpio_gpio_of_match[] = {
 static struct platform_driver ftgpio_gpio_driver = {
 	.driver = {
 		.name		= "ftgpio010-gpio",
-		.of_match_table = of_match_ptr(ftgpio_gpio_of_match),
+		.of_match_table = ftgpio_gpio_of_match,
 	},
-	.probe	= ftgpio_gpio_probe,
+	.probe = ftgpio_gpio_probe,
 };
 builtin_platform_driver(ftgpio_gpio_driver);

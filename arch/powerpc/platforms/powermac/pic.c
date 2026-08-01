@@ -1,18 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Support for the interrupt controllers found on Power Macintosh,
  *  currently Apple's "Grand Central" interrupt controller in all
- *  it's incarnations. OpenPIC support used on newer machines is
+ *  its incarnations. OpenPIC support used on newer machines is
  *  in a separate file
  *
  *  Copyright (C) 1997 Paul Mackerras (paulus@samba.org)
  *  Copyright (C) 2005 Benjamin Herrenschmidt (benh@kernel.crashing.org)
  *                     IBM, Corp.
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version
- *  2 of the License, or (at your option) any later version.
- *
  */
 
 #include <linux/stddef.h>
@@ -23,12 +18,15 @@
 #include <linux/interrupt.h>
 #include <linux/syscore_ops.h>
 #include <linux/adb.h>
+#include <linux/minmax.h>
 #include <linux/pmu.h>
+#include <linux/irqdomain.h>
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
 
 #include <asm/sections.h>
 #include <asm/io.h>
 #include <asm/smp.h>
-#include <asm/prom.h>
 #include <asm/pci-bridge.h>
 #include <asm/time.h>
 #include <asm/pmac_feature.h>
@@ -252,22 +250,8 @@ static unsigned int pmac_pic_get_irq(void)
 	raw_spin_unlock_irqrestore(&pmac_pic_lock, flags);
 	if (unlikely(irq < 0))
 		return 0;
-	return irq_linear_revmap(pmac_pic_host, irq);
+	return irq_find_mapping(pmac_pic_host, irq);
 }
-
-#ifdef CONFIG_XMON
-static struct irqaction xmon_action = {
-	.handler	= xmon_irq,
-	.flags		= IRQF_NO_THREAD,
-	.name		= "NMI - XMON"
-};
-#endif
-
-static struct irqaction gatwick_cascade_action = {
-	.handler	= gatwick_action,
-	.flags		= IRQF_NO_THREAD,
-	.name		= "cascade",
-};
 
 static int pmac_pic_host_match(struct irq_domain *h, struct device_node *node,
 			       enum irq_domain_bus_token bus_token)
@@ -330,11 +314,8 @@ static void __init pmac_pic_probe_oldstyle(void)
 
 		/* Check ordering of master & slave */
 		if (of_device_is_compatible(master, "gatwick")) {
-			struct device_node *tmp;
 			BUG_ON(slave == NULL);
-			tmp = master;
-			master = slave;
-			slave = tmp;
+			swap(master, slave);
 		}
 
 		/* We found a slave */
@@ -346,10 +327,11 @@ static void __init pmac_pic_probe_oldstyle(void)
 	/*
 	 * Allocate an irq host
 	 */
-	pmac_pic_host = irq_domain_add_linear(master, max_irqs,
-					      &pmac_pic_host_ops, NULL);
+	pmac_pic_host = irq_domain_create_linear(of_fwnode_handle(master),
+						 max_irqs,
+						 &pmac_pic_host_ops, NULL);
 	BUG_ON(pmac_pic_host == NULL);
-	irq_set_default_host(pmac_pic_host);
+	irq_set_default_domain(pmac_pic_host);
 
 	/* Get addresses of first controller if we have a node for it */
 	BUG_ON(of_address_to_resource(master, 0, &r));
@@ -389,16 +371,21 @@ static void __init pmac_pic_probe_oldstyle(void)
 		out_le32(&pmac_irq_hw[i]->enable, 0);
 
 	/* Hookup cascade irq */
-	if (slave && pmac_irq_cascade)
-		setup_irq(pmac_irq_cascade, &gatwick_cascade_action);
+	if (slave && pmac_irq_cascade) {
+		if (request_irq(pmac_irq_cascade, gatwick_action,
+				IRQF_NO_THREAD, "cascade", NULL))
+			pr_err("Failed to register cascade interrupt\n");
+	}
 
 	printk(KERN_INFO "irq: System has %d possible interrupts\n", max_irqs);
 #ifdef CONFIG_XMON
-	setup_irq(irq_create_mapping(NULL, 20), &xmon_action);
+	i = irq_create_mapping(NULL, 20);
+	if (request_irq(i, xmon_irq, IRQF_NO_THREAD, "NMI - XMON", NULL))
+		pr_err("Failed to register NMI-XMON interrupt\n");
 #endif
 }
 
-int of_irq_parse_oldworld(struct device_node *device, int index,
+int of_irq_parse_oldworld(const struct device_node *device, int index,
 			struct of_phandle_args *out_irq)
 {
 	const u32 *ints = NULL;
@@ -417,7 +404,7 @@ int of_irq_parse_oldworld(struct device_node *device, int index,
 		if (ints != NULL)
 			break;
 		device = device->parent;
-		if (device && strcmp(device->type, "pci") != 0)
+		if (!of_node_is_type(device, "pci"))
 			break;
 	}
 	if (ints == NULL)
@@ -446,7 +433,9 @@ static void __init pmac_pic_setup_mpic_nmi(struct mpic *mpic)
 		nmi_irq = irq_of_parse_and_map(pswitch, 0);
 		if (nmi_irq) {
 			mpic_irq_set_priority(nmi_irq, 9);
-			setup_irq(nmi_irq, &xmon_action);
+			if (request_irq(nmi_irq, xmon_irq, IRQF_NO_THREAD,
+					"NMI - XMON", NULL))
+				pr_err("Failed to register NMI-XMON interrupt\n");
 		}
 		of_node_put(pswitch);
 	}
@@ -462,7 +451,7 @@ static struct mpic * __init pmac_setup_one_mpic(struct device_node *np,
 
 	pmac_call_feature(PMAC_FTR_ENABLE_MPIC, np, 0, 0);
 
-	if (of_get_property(np, "big-endian", NULL))
+	if (of_property_read_bool(np, "big-endian"))
 		flags |= MPIC_BIG_ENDIAN;
 
 	/* Primary Big Endian means HT interrupts. This is quite dodgy
@@ -487,8 +476,7 @@ static int __init pmac_pic_probe_mpic(void)
 
 	/* We can have up to 2 MPICs cascaded */
 	for_each_node_by_type(np, "open-pic") {
-		if (master == NULL &&
-		    of_get_property(np, "interrupts", NULL) == NULL)
+		if (master == NULL && !of_property_present(np, "interrupts"))
 			master = of_node_get(np);
 		else if (slave == NULL)
 			slave = of_node_get(np);
@@ -540,7 +528,7 @@ void __init pmac_pic_init(void)
 #ifdef CONFIG_PPC32
 	if (!pmac_newworld)
 		of_irq_workarounds |= OF_IMAP_OLDWORLD_MAC;
-	if (of_get_property(of_chosen, "linux,bootx", NULL) != NULL)
+	if (of_property_read_bool(of_chosen, "linux,bootx"))
 		of_irq_workarounds |= OF_IMAP_NO_PHANDLE;
 
 	/* If we don't have phandles on a newworld, then try to locate a
@@ -553,13 +541,13 @@ void __init pmac_pic_init(void)
 
 		for_each_node_with_property(np, "interrupt-controller") {
 			/* Skip /chosen/interrupt-controller */
-			if (strcmp(np->name, "chosen") == 0)
+			if (of_node_name_eq(np, "chosen"))
 				continue;
 			/* It seems like at least one person wants
 			 * to use BootX on a machine with an AppleKiwi
 			 * controller which happens to pretend to be an
 			 * interrupt controller too. */
-			if (strcmp(np->name, "AppleKiwi") == 0)
+			if (of_node_name_eq(np, "AppleKiwi"))
 				continue;
 			/* I think we found one ! */
 			of_irq_dflt_pic = np;
@@ -612,7 +600,7 @@ not_found:
 	return viaint;
 }
 
-static int pmacpic_suspend(void)
+static int pmacpic_suspend(void *data)
 {
 	int viaint = pmacpic_find_viaint();
 
@@ -633,7 +621,7 @@ static int pmacpic_suspend(void)
         return 0;
 }
 
-static void pmacpic_resume(void)
+static void pmacpic_resume(void *data)
 {
 	int i;
 
@@ -646,15 +634,19 @@ static void pmacpic_resume(void)
 			pmac_unmask_irq(irq_get_irq_data(i));
 }
 
-static struct syscore_ops pmacpic_syscore_ops = {
+static const struct syscore_ops pmacpic_syscore_ops = {
 	.suspend	= pmacpic_suspend,
 	.resume		= pmacpic_resume,
+};
+
+static struct syscore pmacpic_syscore = {
+	.ops = &pmacpic_syscore_ops,
 };
 
 static int __init init_pmacpic_syscore(void)
 {
 	if (pmac_irq_hw[0])
-		register_syscore_ops(&pmacpic_syscore_ops);
+		register_syscore(&pmacpic_syscore);
 	return 0;
 }
 

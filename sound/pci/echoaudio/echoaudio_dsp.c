@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /****************************************************************************
 
    Copyright Echo Digital Audio Corporation (c) 1998 - 2004
@@ -5,22 +6,6 @@
    www.echoaudio.com
 
    This file is part of Echo Digital Audio's generic driver library.
-
-   Echo Digital Audio's generic driver library is free software;
-   you can redistribute it and/or modify it under the terms of
-   the GNU General Public License as published by the Free Software
-   Foundation.
-
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
-
-   You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place - Suite 330, Boston,
-   MA  02111-1307, USA.
-
    *************************************************************************
 
  Translation from C++ and adaptation for use in ALSA-Driver
@@ -32,7 +17,7 @@
 #error PAGE_SIZE is < 4k
 #endif
 
-static int restore_dsp_rettings(struct echoaudio *chip);
+static int restore_dsp_settings(struct echoaudio *chip);
 
 
 /* Some vector commands involve the DSP reading or writing data to and from the
@@ -349,7 +334,8 @@ static int load_dsp(struct echoaudio *chip, u16 *code)
 
 	/* If this board requires a resident loader, install it. */
 #ifdef DSP_56361
-	if ((i = install_resident_loader(chip)) < 0)
+	i = install_resident_loader(chip);
+	if (i < 0)
 		return i;
 #endif
 
@@ -495,7 +481,8 @@ static int load_firmware(struct echoaudio *chip)
 
 	/* See if the ASIC is present and working - only if the DSP is already loaded */
 	if (chip->dsp_code) {
-		if ((box_type = check_asic_status(chip)) >= 0)
+		box_type = check_asic_status(chip);
+		if (box_type >= 0)
 			return box_type;
 		/* ASIC check failed; force the DSP to reload */
 		chip->dsp_code = NULL;
@@ -509,7 +496,8 @@ static int load_firmware(struct echoaudio *chip)
 	if (err < 0)
 		return err;
 
-	if ((box_type = load_asic(chip)) < 0)
+	box_type = load_asic(chip);
+	if (box_type < 0)
 		return box_type;	/* error */
 
 	return box_type;
@@ -635,51 +623,46 @@ This function assumes there are no more than 16 in/out busses or pipes
 Meters is an array [3][16][2] of long. */
 static void get_audio_meters(struct echoaudio *chip, long *meters)
 {
-	int i, m, n;
+	unsigned int i, m, n;
 
-	m = 0;
-	n = 0;
-	for (i = 0; i < num_busses_out(chip); i++, m++) {
+	for (i = 0 ; i < 96; i++)
+		meters[i] = 0;
+
+	for (m = 0, n = 0, i = 0; i < num_busses_out(chip); i++, m++) {
 		meters[n++] = chip->comm_page->vu_meter[m];
 		meters[n++] = chip->comm_page->peak_meter[m];
 	}
-	for (; n < 32; n++)
-		meters[n] = 0;
 
 #ifdef ECHOCARD_ECHO3G
 	m = E3G_MAX_OUTPUTS;	/* Skip unused meters */
 #endif
 
-	for (i = 0; i < num_busses_in(chip); i++, m++) {
+	for (n = 32, i = 0; i < num_busses_in(chip); i++, m++) {
 		meters[n++] = chip->comm_page->vu_meter[m];
 		meters[n++] = chip->comm_page->peak_meter[m];
 	}
-	for (; n < 64; n++)
-		meters[n] = 0;
-
 #ifdef ECHOCARD_HAS_VMIXER
-	for (i = 0; i < num_pipes_out(chip); i++, m++) {
+	for (n = 64, i = 0; i < num_pipes_out(chip); i++, m++) {
 		meters[n++] = chip->comm_page->vu_meter[m];
 		meters[n++] = chip->comm_page->peak_meter[m];
 	}
 #endif
-	for (; n < 96; n++)
-		meters[n] = 0;
 }
 
 
 
-static int restore_dsp_rettings(struct echoaudio *chip)
+static int restore_dsp_settings(struct echoaudio *chip)
 {
 	int i, o, err;
 
-	if ((err = check_asic_status(chip)) < 0)
+	err = check_asic_status(chip);
+	if (err < 0)
 		return err;
 
 	/* Gina20/Darla20 only. Should be harmless for other cards. */
 	chip->comm_page->gd_clock_state = GD_CLOCK_UNDEF;
 	chip->comm_page->gd_spdif_status = GD_SPDIF_STATUS_UNDEF;
-	chip->comm_page->handshake = 0xffffffff;
+	chip->comm_page->handshake = cpu_to_le32(0xffffffff);
 
 	/* Restore output busses */
 	for (i = 0; i < num_busses_out(chip); i++) {
@@ -904,7 +887,7 @@ static int pause_transport(struct echoaudio *chip, u32 channel_mask)
 		return 0;
 	}
 
-	dev_warn(chip->card->dev, "pause_transport: No pipes to stop!\n");
+	dev_dbg(chip->card->dev, "pause_transport: No pipes to stop!\n");
 	return 0;
 }
 
@@ -930,7 +913,7 @@ static int stop_transport(struct echoaudio *chip, u32 channel_mask)
 		return 0;
 	}
 
-	dev_warn(chip->card->dev, "stop_transport: No pipes to stop!\n");
+	dev_dbg(chip->card->dev, "stop_transport: No pipes to stop!\n");
 	return 0;
 }
 
@@ -989,7 +972,7 @@ static int init_dsp_comm_page(struct echoaudio *chip)
 	/* Init the comm page */
 	chip->comm_page->comm_size =
 		cpu_to_le32(sizeof(struct comm_page));
-	chip->comm_page->handshake = 0xffffffff;
+	chip->comm_page->handshake = cpu_to_le32(0xffffffff);
 	chip->comm_page->midi_out_free_count =
 		cpu_to_le32(DSP_MIDI_OUT_FIFO_SIZE);
 	chip->comm_page->sample_rate = cpu_to_le32(44100);
@@ -1016,7 +999,7 @@ static int init_line_levels(struct echoaudio *chip)
 	chip->input_clock = ECHO_CLOCK_INTERNAL;
 	chip->output_clock = ECHO_CLOCK_WORD;
 	chip->sample_rate = 44100;
-	return restore_dsp_rettings(chip);
+	return restore_dsp_settings(chip);
 }
 
 
@@ -1058,15 +1041,12 @@ static int allocate_pipes(struct echoaudio *chip, struct audiopipe *pipe,
 {
 	int i;
 	u32 channel_mask;
-	char is_cyclic;
 
 	dev_dbg(chip->card->dev,
 		"allocate_pipes: ch=%d int=%d\n", pipe_index, interleave);
 
 	if (chip->bad_board)
 		return -EIO;
-
-	is_cyclic = 1;	/* This driver uses cyclic buffers only */
 
 	for (channel_mask = i = 0; i < interleave; i++)
 		channel_mask |= 1 << (pipe_index + i);
@@ -1078,8 +1058,8 @@ static int allocate_pipes(struct echoaudio *chip, struct audiopipe *pipe,
 
 	chip->comm_page->position[pipe_index] = 0;
 	chip->pipe_alloc_mask |= channel_mask;
-	if (is_cyclic)
-		chip->pipe_cyclic_mask |= channel_mask;
+	/* This driver uses cyclic buffers only */
+	chip->pipe_cyclic_mask |= channel_mask;
 	pipe->index = pipe_index;
 	pipe->interleave = interleave;
 	pipe->state = PIPE_STATE_STOPPED;
@@ -1087,7 +1067,7 @@ static int allocate_pipes(struct echoaudio *chip, struct audiopipe *pipe,
 	/* The counter register is where the DSP writes the 32 bit DMA
 	position for a pipe.  The DSP is constantly updating this value as
 	it moves data. The DMA counter is in units of bytes, not samples. */
-	pipe->dma_counter = &chip->comm_page->position[pipe_index];
+	pipe->dma_counter = (__le32 *)&chip->comm_page->position[pipe_index];
 	*pipe->dma_counter = 0;
 	return pipe_index;
 }

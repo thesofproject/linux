@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * inode.c
  *
@@ -13,16 +14,18 @@
 #include "efs.h"
 #include <linux/efs_fs_sb.h>
 
-static int efs_readpage(struct file *file, struct page *page)
+static int efs_read_folio(struct file *file, struct folio *folio)
 {
-	return block_read_full_page(page,efs_get_block);
+	return block_read_full_folio(folio, efs_get_block);
 }
+
 static sector_t _efs_bmap(struct address_space *mapping, sector_t block)
 {
 	return generic_block_bmap(mapping,block,efs_get_block);
 }
+
 static const struct address_space_operations efs_aops = {
-	.readpage = efs_readpage,
+	.read_folio = efs_read_folio,
 	.bmap = _efs_bmap
 };
 
@@ -59,7 +62,7 @@ struct inode *efs_iget(struct super_block *super, unsigned long ino)
 	inode = iget_locked(super, ino);
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
-	if (!(inode->i_state & I_NEW))
+	if (!(inode_state_read_once(inode) & I_NEW))
 		return inode;
 
 	in = INODE_INFO(inode);
@@ -100,10 +103,9 @@ struct inode *efs_iget(struct super_block *super, unsigned long ino)
 	i_uid_write(inode, (uid_t)be16_to_cpu(efs_inode->di_uid));
 	i_gid_write(inode, (gid_t)be16_to_cpu(efs_inode->di_gid));
 	inode->i_size  = be32_to_cpu(efs_inode->di_size);
-	inode->i_atime.tv_sec = be32_to_cpu(efs_inode->di_atime);
-	inode->i_mtime.tv_sec = be32_to_cpu(efs_inode->di_mtime);
-	inode->i_ctime.tv_sec = be32_to_cpu(efs_inode->di_ctime);
-	inode->i_atime.tv_nsec = inode->i_mtime.tv_nsec = inode->i_ctime.tv_nsec = 0;
+	inode_set_atime(inode, be32_to_cpu(efs_inode->di_atime), 0);
+	inode_set_mtime(inode, be32_to_cpu(efs_inode->di_mtime), 0);
+	inode_set_ctime(inode, be32_to_cpu(efs_inode->di_ctime), 0);
 
 	/* this is the number of blocks in the file */
 	if (inode->i_size == 0) {
@@ -130,7 +132,7 @@ struct inode *efs_iget(struct super_block *super, unsigned long ino)
 	for(i = 0; i < EFS_DIRECTEXTENTS; i++) {
 		extent_copy(&(efs_inode->di_u.di_extents[i]), &(in->extents[i]));
 		if (i < in->numextents && in->extents[i].cooked.ex_magic != 0) {
-			pr_warn("extent %d has bad magic number in inode %lu\n",
+			pr_warn("extent %d has bad magic number in inode %llu\n",
 				i, inode->i_ino);
 			brelse(bh);
 			goto read_inode_error;
@@ -138,7 +140,7 @@ struct inode *efs_iget(struct super_block *super, unsigned long ino)
 	}
 
 	brelse(bh);
-	pr_debug("efs_iget(): inode %lu, extents %d, mode %o\n",
+	pr_debug("efs_iget(): inode %llu, extents %d, mode %o\n",
 		 inode->i_ino, in->numextents, inode->i_mode);
 	switch (inode->i_mode & S_IFMT) {
 		case S_IFDIR: 
@@ -169,7 +171,7 @@ struct inode *efs_iget(struct super_block *super, unsigned long ino)
 	return inode;
         
 read_inode_error:
-	pr_warn("failed to read inode %lu\n", inode->i_ino);
+	pr_warn("failed to read inode %llu\n", inode->i_ino);
 	iget_failed(inode);
 	return ERR_PTR(-EIO);
 }
@@ -309,4 +311,5 @@ efs_block_t efs_map_block(struct inode *inode, efs_block_t block) {
 	return 0;
 }  
 
+MODULE_DESCRIPTION("Extent File System (efs)");
 MODULE_LICENSE("GPL");

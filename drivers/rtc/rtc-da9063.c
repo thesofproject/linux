@@ -1,15 +1,7 @@
-/* rtc-da9063.c - Real time clock device driver for DA9063
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * Real time clock device driver for DA9063
  * Copyright (C) 2013-2015  Dialog Semiconductor Ltd.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/delay.h>
@@ -19,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/pm_wakeirq.h>
 #include <linux/regmap.h>
 #include <linux/rtc.h>
 #include <linux/slab.h>
@@ -201,26 +194,17 @@ static void da9063_tm_to_data(struct rtc_time *tm, u8 *data,
 				config->rtc_count_year_mask;
 }
 
-static int da9063_rtc_stop_alarm(struct device *dev)
+static int da9063_rtc_alarm_irq_enable(struct device *dev,
+				       unsigned int enabled)
 {
 	struct da9063_compatible_rtc *rtc = dev_get_drvdata(dev);
 	const struct da9063_compatible_rtc_regmap *config = rtc->config;
+	u8 set_bit = enabled ? config->rtc_alarm_on_mask : 0;
 
 	return regmap_update_bits(rtc->regmap,
 				  config->rtc_alarm_year_reg,
 				  config->rtc_alarm_on_mask,
-				  0);
-}
-
-static int da9063_rtc_start_alarm(struct device *dev)
-{
-	struct da9063_compatible_rtc *rtc = dev_get_drvdata(dev);
-	const struct da9063_compatible_rtc_regmap *config = rtc->config;
-
-	return regmap_update_bits(rtc->regmap,
-				  config->rtc_alarm_year_reg,
-				  config->rtc_alarm_on_mask,
-				  config->rtc_alarm_on_mask);
+				  set_bit);
 }
 
 static int da9063_rtc_read_time(struct device *dev, struct rtc_time *tm)
@@ -247,11 +231,11 @@ static int da9063_rtc_read_time(struct device *dev, struct rtc_time *tm)
 
 	da9063_data_to_tm(data, tm, rtc);
 
-	rtc_tm_to_time(tm, &tm_secs);
-	rtc_tm_to_time(&rtc->alarm_time, &al_secs);
+	tm_secs = rtc_tm_to_time64(tm);
+	al_secs = rtc_tm_to_time64(&rtc->alarm_time);
 
 	/* handle the rtc synchronisation delay */
-	if (rtc->rtc_sync == true && al_secs - tm_secs == 1)
+	if (rtc->rtc_sync && al_secs - tm_secs == 1)
 		memcpy(tm, &rtc->alarm_time, sizeof(struct rtc_time));
 	else
 		rtc->rtc_sync = false;
@@ -319,7 +303,7 @@ static int da9063_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 
 	da9063_tm_to_data(&alrm->time, data, rtc);
 
-	ret = da9063_rtc_stop_alarm(dev);
+	ret = da9063_rtc_alarm_irq_enable(dev, 0);
 	if (ret < 0) {
 		dev_err(dev, "Failed to stop alarm: %d\n", ret);
 		return ret;
@@ -337,7 +321,7 @@ static int da9063_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 	da9063_data_to_tm(data, &rtc->alarm_time, rtc);
 
 	if (alrm->enabled) {
-		ret = da9063_rtc_start_alarm(dev);
+		ret = da9063_rtc_alarm_irq_enable(dev, 1);
 		if (ret < 0) {
 			dev_err(dev, "Failed to start alarm: %d\n", ret);
 			return ret;
@@ -345,15 +329,6 @@ static int da9063_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 	}
 
 	return ret;
-}
-
-static int da9063_rtc_alarm_irq_enable(struct device *dev,
-				       unsigned int enabled)
-{
-	if (enabled)
-		return da9063_rtc_start_alarm(dev);
-	else
-		return da9063_rtc_stop_alarm(dev);
 }
 
 static irqreturn_t da9063_alarm_event(int irq, void *data)
@@ -384,7 +359,6 @@ static int da9063_rtc_probe(struct platform_device *pdev)
 {
 	struct da9063_compatible_rtc *rtc;
 	const struct da9063_compatible_rtc_regmap *config;
-	const struct of_device_id *match;
 	int irq_alarm;
 	u8 data[RTC_DATA_LEN];
 	int ret;
@@ -392,14 +366,11 @@ static int da9063_rtc_probe(struct platform_device *pdev)
 	if (!pdev->dev.of_node)
 		return -ENXIO;
 
-	match = of_match_node(da9063_compatible_reg_id_table,
-			      pdev->dev.of_node);
-
 	rtc = devm_kzalloc(&pdev->dev, sizeof(*rtc), GFP_KERNEL);
 	if (!rtc)
 		return -ENOMEM;
 
-	rtc->config = match->data;
+	rtc->config = device_get_match_data(&pdev->dev);
 	if (of_device_is_compatible(pdev->dev.of_node, "dlg,da9063-rtc")) {
 		struct da9063 *chip = dev_get_drvdata(pdev->dev.parent);
 
@@ -418,78 +389,97 @@ static int da9063_rtc_probe(struct platform_device *pdev)
 				 config->rtc_enable_reg,
 				 config->rtc_enable_mask,
 				 config->rtc_enable_mask);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to enable RTC\n");
-		return ret;
-	}
+	if (ret < 0)
+		return dev_err_probe(&pdev->dev, ret, "Failed to enable RTC\n");
 
 	ret = regmap_update_bits(rtc->regmap,
 				 config->rtc_enable_32k_crystal_reg,
 				 config->rtc_crystal_mask,
 				 config->rtc_crystal_mask);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to run 32kHz oscillator\n");
-		return ret;
-	}
+	if (ret < 0)
+		return dev_err_probe(&pdev->dev, ret,
+				     "Failed to run 32kHz oscillator\n");
 
 	ret = regmap_update_bits(rtc->regmap,
 				 config->rtc_alarm_secs_reg,
 				 config->rtc_alarm_status_mask,
 				 0);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to access RTC alarm register\n");
-		return ret;
-	}
+	if (ret < 0)
+		return dev_err_probe(&pdev->dev, ret,
+				     "Failed to access RTC alarm register\n");
 
 	ret = regmap_update_bits(rtc->regmap,
 				 config->rtc_alarm_secs_reg,
 				 DA9063_ALARM_STATUS_ALARM,
 				 DA9063_ALARM_STATUS_ALARM);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to access RTC alarm register\n");
-		return ret;
-	}
+	if (ret < 0)
+		return dev_err_probe(&pdev->dev, ret,
+				     "Failed to access RTC alarm register\n");
 
 	ret = regmap_update_bits(rtc->regmap,
 				 config->rtc_alarm_year_reg,
 				 config->rtc_tick_on_mask,
 				 0);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to disable TICKs\n");
-		return ret;
-	}
+	if (ret < 0)
+		return dev_err_probe(&pdev->dev, ret,
+				     "Failed to disable TICKs\n");
 
 	data[RTC_SEC] = 0;
 	ret = regmap_bulk_read(rtc->regmap,
 			       config->rtc_alarm_secs_reg,
 			       &data[config->rtc_data_start],
 			       config->rtc_alarm_len);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to read initial alarm data: %d\n",
-			ret);
-		return ret;
-	}
+	if (ret < 0)
+		return dev_err_probe(&pdev->dev, ret,
+				     "Failed to read initial alarm data\n");
 
 	platform_set_drvdata(pdev, rtc);
 
-	rtc->rtc_dev = devm_rtc_device_register(&pdev->dev, DA9063_DRVNAME_RTC,
-					   &da9063_rtc_ops, THIS_MODULE);
+	rtc->rtc_dev = devm_rtc_allocate_device(&pdev->dev);
 	if (IS_ERR(rtc->rtc_dev))
 		return PTR_ERR(rtc->rtc_dev);
+
+	rtc->rtc_dev->ops = &da9063_rtc_ops;
+	rtc->rtc_dev->range_min = RTC_TIMESTAMP_BEGIN_2000;
+	rtc->rtc_dev->range_max = RTC_TIMESTAMP_END_2063;
 
 	da9063_data_to_tm(data, &rtc->alarm_time, rtc);
 	rtc->rtc_sync = false;
 
-	irq_alarm = platform_get_irq_byname(pdev, "ALARM");
-	ret = devm_request_threaded_irq(&pdev->dev, irq_alarm, NULL,
-					da9063_alarm_event,
-					IRQF_TRIGGER_LOW | IRQF_ONESHOT,
-					"ALARM", rtc);
-	if (ret)
-		dev_err(&pdev->dev, "Failed to request ALARM IRQ %d: %d\n",
-			irq_alarm, ret);
+	if (config->rtc_data_start != RTC_SEC) {
+		set_bit(RTC_FEATURE_ALARM_RES_MINUTE, rtc->rtc_dev->features);
+		/*
+		 * TODO: some models have alarms on a minute boundary but still
+		 * support real hardware interrupts.
+		 */
+		clear_bit(RTC_FEATURE_UPDATE_INTERRUPT, rtc->rtc_dev->features);
+	}
 
-	return ret;
+	irq_alarm = platform_get_irq_byname_optional(pdev, "ALARM");
+	if (irq_alarm >= 0) {
+		ret = devm_request_threaded_irq(&pdev->dev, irq_alarm, NULL,
+						da9063_alarm_event,
+						IRQF_TRIGGER_LOW | IRQF_ONESHOT,
+						"ALARM", rtc);
+		if (ret)
+			dev_err(&pdev->dev,
+				"Failed to request ALARM IRQ %d: %d\n",
+				irq_alarm, ret);
+
+		ret = dev_pm_set_wake_irq(&pdev->dev, irq_alarm);
+		if (ret)
+			dev_warn(&pdev->dev,
+				 "Failed to set IRQ %d as a wake IRQ: %d\n",
+				 irq_alarm, ret);
+
+		device_init_wakeup(&pdev->dev, true);
+	}  else if (irq_alarm != -ENXIO) {
+		return irq_alarm;
+	} else {
+		clear_bit(RTC_FEATURE_ALARM, rtc->rtc_dev->features);
+	}
+
+	return devm_rtc_register_device(rtc->rtc_dev);
 }
 
 static struct platform_driver da9063_rtc_driver = {
@@ -505,4 +495,3 @@ module_platform_driver(da9063_rtc_driver);
 MODULE_AUTHOR("S Twiss <stwiss.opensource@diasemi.com>");
 MODULE_DESCRIPTION("Real time clock device driver for Dialog DA9063");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("platform:" DA9063_DRVNAME_RTC);

@@ -1,22 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
    cx231xx.h - driver for Conexant Cx23100/101/102 USB video capture devices
 
    Copyright (C) 2008 <srinivasa.deevi at conexant dot com>
 	Based on em28xx driver
 
-   This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 2 of the License, or
-   (at your option) any later version.
-
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
-
-   You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software
-   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #ifndef _CX231XX_H
@@ -32,13 +20,12 @@
 
 #include <media/drv-intf/cx2341x.h>
 
-#include <media/videobuf-vmalloc.h>
+#include <media/videobuf2-vmalloc.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fh.h>
 #include <media/rc-core.h>
 #include <media/i2c/ir-kbd-i2c.h>
-#include <media/videobuf-dvb.h>
 
 #include "cx231xx-reg.h"
 #include "cx231xx-pcb-cfg.h"
@@ -133,8 +120,10 @@
 #define CX23417_OSC_EN   8
 #define CX23417_RESET    9
 
+#define EP5_BUF_SIZE     4096
+#define EP5_TIMEOUT_MS   2000
+
 struct cx23417_fmt {
-	char  *name;
 	u32   fourcc;          /* v4l2 format id */
 	int   depth;
 	int   flags;
@@ -237,8 +226,8 @@ struct cx231xx_fmt {
 /* buffer for one video frame */
 struct cx231xx_buffer {
 	/* common v4l buffer stuff -- must be first */
-	struct videobuf_buffer vb;
-
+	struct vb2_v4l2_buffer vb;
+	struct list_head list;
 	struct list_head frame;
 	int top_field;
 	int receiving;
@@ -251,7 +240,6 @@ enum ps_package_head {
 
 struct cx231xx_dmaqueue {
 	struct list_head active;
-	struct list_head queued;
 
 	wait_queue_head_t wq;
 
@@ -265,6 +253,7 @@ struct cx231xx_dmaqueue {
 	u32 lines_completed;
 	u8 field1_done;
 	u32 lines_per_field;
+	u32 sequence;
 
 	/*Mpeg2 control buffer*/
 	u8 *p_left_data;
@@ -439,25 +428,6 @@ struct cx231xx_audio {
 	u16 end_point_addr;
 };
 
-struct cx231xx;
-
-struct cx231xx_fh {
-	struct v4l2_fh fh;
-	struct cx231xx *dev;
-	unsigned int stream_on:1;	/* Locks streams */
-	enum v4l2_buf_type type;
-
-	struct videobuf_queue vb_vidq;
-
-	/* vbi capture */
-	struct videobuf_queue      vidq;
-	struct videobuf_queue      vbiq;
-
-	/* MPEG Encoder specifics ONLY */
-
-	atomic_t                   v4l_reading;
-};
-
 /*****************************************************************/
 /* set/get i2c */
 /* 00--1Mb/s, 01-400kb/s, 10--100kb/s, 11--5Mb/s */
@@ -545,8 +515,6 @@ struct cx231xx_tsport {
 
 	int                        nr;
 	int                        sram_chno;
-
-	struct videobuf_dvb_frontends frontends;
 
 	/* dma queues */
 
@@ -649,7 +617,8 @@ struct cx231xx {
 	/* frame properties */
 	int width;		/* current frame width */
 	int height;		/* current frame height */
-	int interlaced;		/* 1=interlace fileds, 0=just top fileds */
+	int interlaced;		/* 1=interlace fields, 0=just top fields */
+	unsigned int size;
 
 	struct cx231xx_audio adev;
 
@@ -672,6 +641,9 @@ struct cx231xx {
 	struct media_entity input_ent[MAX_CX231XX_INPUT];
 	struct media_pad input_pad[MAX_CX231XX_INPUT];
 #endif
+
+	struct vb2_queue vidq;
+	struct vb2_queue vbiq;
 
 	unsigned char eedata[256];
 
@@ -733,6 +705,7 @@ struct cx231xx {
 	u8 USE_ISO;
 	struct cx231xx_tvnorm      encodernorm;
 	struct cx231xx_tsport      ts1, ts2;
+	struct vb2_queue	   mpegq;
 	struct video_device        v4l_device;
 	atomic_t                   v4l_reader_count;
 	u32                        freq;
@@ -817,7 +790,6 @@ void cx231xx_set_DIF_bandpass(struct cx231xx *dev, u32 if_freq,
 					 u8 spectral_invert, u32 mode);
 void cx231xx_Setup_AFE_for_LowIF(struct cx231xx *dev);
 void reset_s5h1432_demod(struct cx231xx *dev);
-void cx231xx_dump_HH_reg(struct cx231xx *dev);
 void update_HH_register_after_set_DIF(struct cx231xx *dev);
 
 
@@ -932,7 +904,6 @@ int cx231xx_initialize_stream_xfer(struct cx231xx *dev, u32 media_type);
 
 /* Power control functions */
 int cx231xx_set_power_mode(struct cx231xx *dev, enum AV_MODE mode);
-int cx231xx_power_suspend(struct cx231xx *dev);
 
 /* chip specific control functions */
 int cx231xx_init_ctrl_pin_status(struct cx231xx *dev);
@@ -943,7 +914,7 @@ int cx231xx_enable_i2c_port_3(struct cx231xx *dev, bool is_port_3);
 /* video audio decoder related functions */
 void video_mux(struct cx231xx *dev, int index);
 int cx231xx_set_video_input_mux(struct cx231xx *dev, u8 input);
-int cx231xx_set_decoder_video_input(struct cx231xx *dev, u8 pin_type, u8 input);
+int cx231xx_set_decoder_video_input(struct cx231xx *dev, u8 pin_type, u32 input);
 int cx231xx_do_mode_ctrl_overrides(struct cx231xx *dev);
 int cx231xx_set_audio_input(struct cx231xx *dev, u8 input);
 
@@ -976,7 +947,6 @@ extern void cx231xx_pre_card_setup(struct cx231xx *dev);
 extern void cx231xx_card_setup(struct cx231xx *dev);
 extern struct cx231xx_board cx231xx_boards[];
 extern struct usb_device_id cx231xx_id_table[];
-extern const unsigned int cx231xx_bcount;
 int cx231xx_tuner_callback(void *ptr, int component, int command, int arg);
 
 /* cx23885-417.c                                               */

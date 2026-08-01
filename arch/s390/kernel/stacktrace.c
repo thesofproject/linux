@@ -3,73 +3,146 @@
  * Stack trace management functions
  *
  *  Copyright IBM Corp. 2006
- *  Author(s): Heiko Carstens <heiko.carstens@de.ibm.com>
  */
 
-#include <linux/sched.h>
-#include <linux/sched/debug.h>
+#include <linux/perf_event.h>
 #include <linux/stacktrace.h>
-#include <linux/kallsyms.h>
-#include <linux/export.h>
+#include <linux/uaccess.h>
+#include <asm/asm-offsets.h>
+#include <asm/stacktrace.h>
+#include <asm/unwind.h>
+#include <asm/kprobes.h>
+#include <asm/ptrace.h>
 
-static int __save_address(void *data, unsigned long address, int nosched)
+void arch_stack_walk(stack_trace_consume_fn consume_entry, void *cookie,
+		     struct task_struct *task, struct pt_regs *regs)
 {
-	struct stack_trace *trace = data;
+	struct unwind_state state;
+	unsigned long addr;
 
-	if (nosched && in_sched_functions(address))
-		return 0;
-	if (trace->skip > 0) {
-		trace->skip--;
-		return 0;
+	unwind_for_each_frame(&state, task, regs, 0) {
+		addr = unwind_get_return_address(&state);
+		if (!addr || !consume_entry(cookie, addr))
+			break;
 	}
-	if (trace->nr_entries < trace->max_entries) {
-		trace->entries[trace->nr_entries++] = address;
-		return 0;
+}
+
+int arch_stack_walk_reliable(stack_trace_consume_fn consume_entry,
+			     void *cookie, struct task_struct *task)
+{
+	struct unwind_state state;
+	unsigned long addr;
+
+	unwind_for_each_frame(&state, task, NULL, 0) {
+		if (state.stack_info.type != STACK_TYPE_TASK)
+			return -EINVAL;
+
+		if (state.regs)
+			return -EINVAL;
+
+		addr = unwind_get_return_address(&state);
+		if (!addr)
+			return -EINVAL;
+
+#ifdef CONFIG_RETHOOK
+		/*
+		 * Mark stacktraces with krethook functions on them
+		 * as unreliable.
+		 */
+		if (state.ip == (unsigned long)arch_rethook_trampoline)
+			return -EINVAL;
+#endif
+
+		if (!consume_entry(cookie, addr))
+			return -EINVAL;
 	}
-	return 1;
+
+	/* Check for stack corruption */
+	if (unwind_error(&state))
+		return -EINVAL;
+	return 0;
 }
 
-static int save_address(void *data, unsigned long address, int reliable)
+static inline bool store_ip(stack_trace_consume_fn consume_entry, void *cookie,
+			    struct perf_callchain_entry_ctx *entry, bool perf,
+			    unsigned long ip)
 {
-	return __save_address(data, address, 0);
+#ifdef CONFIG_PERF_EVENTS
+	if (perf) {
+		if (perf_callchain_store(entry, ip))
+			return false;
+		return true;
+	}
+#endif
+	return consume_entry(cookie, ip);
 }
 
-static int save_address_nosched(void *data, unsigned long address, int reliable)
+static inline bool ip_invalid(unsigned long ip)
 {
-	return __save_address(data, address, 1);
+	/*
+	 * Perform some basic checks if an instruction address taken
+	 * from unreliable source is invalid.
+	 */
+	if (ip & 1)
+		return true;
+	if (ip < mmap_min_addr)
+		return true;
+	if (ip >= current->mm->context.asce_limit)
+		return true;
+	return false;
 }
 
-void save_stack_trace(struct stack_trace *trace)
+static inline bool ip_within_vdso(unsigned long ip)
 {
-	unsigned long sp;
-
-	sp = current_stack_pointer();
-	dump_trace(save_address, trace, NULL, sp);
-	if (trace->nr_entries < trace->max_entries)
-		trace->entries[trace->nr_entries++] = ULONG_MAX;
+	return in_range(ip, current->mm->context.vdso_base, vdso_text_size());
 }
-EXPORT_SYMBOL_GPL(save_stack_trace);
 
-void save_stack_trace_tsk(struct task_struct *tsk, struct stack_trace *trace)
+void arch_stack_walk_user_common(stack_trace_consume_fn consume_entry, void *cookie,
+				 struct perf_callchain_entry_ctx *entry,
+				 const struct pt_regs *regs, bool perf)
 {
-	unsigned long sp;
+	struct stack_frame_vdso_wrapper __user *sf_vdso;
+	struct stack_frame_user __user *sf;
+	unsigned long ip, sp;
 
-	sp = tsk->thread.ksp;
-	if (tsk == current)
-		sp = current_stack_pointer();
-	dump_trace(save_address_nosched, trace, tsk, sp);
-	if (trace->nr_entries < trace->max_entries)
-		trace->entries[trace->nr_entries++] = ULONG_MAX;
+	if (!current->mm)
+		return;
+	ip = instruction_pointer(regs);
+	if (!store_ip(consume_entry, cookie, entry, perf, ip))
+		return;
+	sf = (void __user *)user_stack_pointer(regs);
+	pagefault_disable();
+	while (1) {
+		if (__get_user(sp, &sf->back_chain))
+			break;
+		/*
+		 * VDSO entry code has a non-standard stack frame layout.
+		 * See VDSO user wrapper code for details.
+		 */
+		if (!sp && ip_within_vdso(ip)) {
+			sf_vdso = (void __user *)sf;
+			if (__get_user(ip, &sf_vdso->return_address))
+				break;
+			sp = (unsigned long)sf + STACK_FRAME_VDSO_OVERHEAD;
+			sf = (void __user *)sp;
+			if (__get_user(sp, &sf->back_chain))
+				break;
+		} else {
+			sf = (void __user *)sp;
+			if (__get_user(ip, &sf->gprs[8]))
+				break;
+		}
+		/* Validate SP and RA (ABI requires SP to be 8 byte aligned). */
+		if (sp & 0x7 || ip_invalid(ip))
+			break;
+		if (!store_ip(consume_entry, cookie, entry, perf, ip))
+			break;
+	}
+	pagefault_enable();
 }
-EXPORT_SYMBOL_GPL(save_stack_trace_tsk);
 
-void save_stack_trace_regs(struct pt_regs *regs, struct stack_trace *trace)
+void arch_stack_walk_user(stack_trace_consume_fn consume_entry, void *cookie,
+			  const struct pt_regs *regs)
 {
-	unsigned long sp;
-
-	sp = kernel_stack_pointer(regs);
-	dump_trace(save_address, trace, NULL, sp);
-	if (trace->nr_entries < trace->max_entries)
-		trace->entries[trace->nr_entries++] = ULONG_MAX;
+	arch_stack_walk_user_common(consume_entry, cookie, NULL, regs, false);
 }
-EXPORT_SYMBOL_GPL(save_stack_trace_regs);

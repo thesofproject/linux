@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/arm/mach-sa1100/generic.c
  *
  * Author: Nicolas Pitre
  *
  * Code common to all SA11x0 machines.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/gpio.h>
 #include <linux/gpio/machine.h>
@@ -41,9 +38,6 @@
 
 #include "generic.h"
 #include <clocksource/pxa.h>
-
-unsigned int reset_status;
-EXPORT_SYMBOL(reset_status);
 
 #define NR_FREQS	16
 
@@ -235,18 +229,11 @@ void sa11x0_register_lcd(struct sa1100fb_mach_info *inf)
 	sa11x0_register_device(&sa11x0fb_device, inf);
 }
 
-static bool sa11x0pcmcia_legacy = true;
-static struct platform_device sa11x0pcmcia_device = {
-	.name		= "sa11x0-pcmcia",
-	.id		= -1,
-};
-
 void sa11x0_register_pcmcia(int socket, struct gpiod_lookup_table *table)
 {
 	if (table)
 		gpiod_add_lookup_table(table);
 	platform_device_register_simple("sa11x0-pcmcia", socket, NULL, 0);
-	sa11x0pcmcia_legacy = false;
 }
 
 static struct platform_device sa11x0mtd_device = {
@@ -261,25 +248,6 @@ void sa11x0_register_mtd(struct flash_platform_data *flash,
 	sa11x0mtd_device.resource = res;
 	sa11x0mtd_device.num_resources = nr;
 	sa11x0_register_device(&sa11x0mtd_device, flash);
-}
-
-static struct resource sa11x0ir_resources[] = {
-	DEFINE_RES_MEM(__PREG(Ser2UTCR0), 0x24),
-	DEFINE_RES_MEM(__PREG(Ser2HSCR0), 0x1c),
-	DEFINE_RES_MEM(__PREG(Ser2HSCR2), 0x04),
-	DEFINE_RES_IRQ(IRQ_Ser2ICP),
-};
-
-static struct platform_device sa11x0ir_device = {
-	.name		= "sa11x0-ir",
-	.id		= -1,
-	.num_resources	= ARRAY_SIZE(sa11x0ir_resources),
-	.resource	= sa11x0ir_resources,
-};
-
-void sa11x0_register_irda(struct irda_platform_data *irda)
-{
-	sa11x0_register_device(&sa11x0ir_device, irda);
 }
 
 static struct resource sa1100_rtc_resources[] = {
@@ -329,12 +297,12 @@ static struct platform_device *sa11x0_devices[] __initdata = {
 
 static int __init sa1100_init(void)
 {
-	pm_power_off = sa1100_power_off;
-
-	if (sa11x0pcmcia_legacy)
-		platform_device_register(&sa11x0pcmcia_device);
+	struct resource wdt_res = DEFINE_RES_MEM(0x90000000, 0x20);
+	register_platform_power_off(sa1100_power_off);
 
 	regulator_has_full_constraints();
+
+	platform_device_register_simple("sa1100_wdt", -1, &wdt_res, 1);
 
 	return platform_add_devices(sa11x0_devices, ARRAY_SIZE(sa11x0_devices));
 }
@@ -348,15 +316,16 @@ void __init sa11x0_init_late(void)
 
 int __init sa11x0_register_fixed_regulator(int n,
 	struct fixed_voltage_config *cfg,
-	struct regulator_consumer_supply *supplies, unsigned num_supplies)
+	struct regulator_consumer_supply *supplies, unsigned num_supplies,
+	bool uses_gpio)
 {
 	struct regulator_init_data *id;
 
-	cfg->init_data = id = kzalloc(sizeof(*cfg->init_data), GFP_KERNEL);
+	cfg->init_data = id = kzalloc_obj(*cfg->init_data);
 	if (!cfg->init_data)
 		return -ENOMEM;
 
-	if (cfg->gpio < 0)
+	if (!uses_gpio)
 		id->constraints.always_on = 1;
 	id->constraints.name = cfg->supply_name;
 	id->constraints.min_uV = cfg->microvolts;

@@ -2,7 +2,7 @@
 #ifndef _ASM_X86_SIGNAL_H
 #define _ASM_X86_SIGNAL_H
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 #include <linux/linkage.h>
 
 /* Most things should be clean enough to redefine this at will, if care
@@ -28,17 +28,13 @@ typedef struct {
 #define SA_IA32_ABI	0x02000000u
 #define SA_X32_ABI	0x01000000u
 
-#ifndef CONFIG_COMPAT
-typedef sigset_t compat_sigset_t;
-#endif
-
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 #include <uapi/asm/signal.h>
-#ifndef __ASSEMBLY__
-extern void do_signal(struct pt_regs *regs);
+#ifndef __ASSEMBLER__
 
 #define __ARCH_HAS_SA_RESTORER
 
+#include <asm/asm.h>
 #include <uapi/asm/sigcontext.h>
 
 #ifdef __i386__
@@ -86,9 +82,8 @@ static inline int __const_sigismember(sigset_t *set, int _sig)
 
 static inline int __gen_sigismember(sigset_t *set, int _sig)
 {
-	unsigned char ret;
-	asm("btl %2,%1\n\tsetc %0"
-	    : "=qm"(ret) : "m"(*set), "Ir"(_sig-1) : "cc");
+	bool ret;
+	asm("btl %2,%1" : "=@ccc"(ret) : "m"(*set), "Ir"(_sig-1));
 	return ret;
 }
 
@@ -105,5 +100,5 @@ struct pt_regs;
 
 #endif /* !__i386__ */
 
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 #endif /* _ASM_X86_SIGNAL_H */

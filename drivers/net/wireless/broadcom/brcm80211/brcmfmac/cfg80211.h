@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2010 Broadcom Corporation
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #ifndef BRCMFMAC_CFG80211_H
@@ -24,6 +13,8 @@
 #include "fwil_types.h"
 #include "p2p.h"
 
+#define	DOT11_MGMT_HDR_LEN		24	/* d11 management header len */
+
 #define BRCMF_SCAN_IE_LEN_MAX		2048
 
 #define WL_NUM_SCAN_MAX			10
@@ -33,6 +24,23 @@
 #define WL_EXTRA_BUF_MAX		2048
 #define WL_ROAM_TRIGGER_LEVEL		-75
 #define WL_ROAM_DELTA			20
+
+/* WME Access Category Indices (ACIs) */
+#define AC_BE			0	/* Best Effort */
+#define AC_BK			1	/* Background */
+#define AC_VI			2	/* Video */
+#define AC_VO			3	/* Voice */
+#define EDCF_AC_COUNT		4
+#define MAX_8021D_PRIO		8
+
+#define EDCF_ACI_MASK			0x60
+#define EDCF_ACI_SHIFT			5
+#define EDCF_ACM_MASK                  0x10
+#define EDCF_ECWMIN_MASK		0x0f
+#define EDCF_ECWMAX_SHIFT		4
+#define EDCF_AIFSN_MASK			0x0f
+#define EDCF_AIFSN_MAX			15
+#define EDCF_ECWMAX_MASK		0xf0
 
 /* Keep BRCMF_ESCAN_BUF_SIZE below 64K (65536). Allocing over 64K can be
  * problematic on some systems and should be avoided.
@@ -118,7 +126,36 @@ struct brcmf_cfg80211_security {
 enum brcmf_profile_fwsup {
 	BRCMF_PROFILE_FWSUP_NONE,
 	BRCMF_PROFILE_FWSUP_PSK,
-	BRCMF_PROFILE_FWSUP_1X
+	BRCMF_PROFILE_FWSUP_1X,
+	BRCMF_PROFILE_FWSUP_SAE
+};
+
+/**
+ * enum brcmf_profile_fwauth - firmware authenticator profile
+ *
+ * @BRCMF_PROFILE_FWAUTH_NONE: no firmware authenticator
+ * @BRCMF_PROFILE_FWAUTH_PSK: authenticator for WPA/WPA2-PSK
+ * @BRCMF_PROFILE_FWAUTH_SAE: authenticator for SAE
+ */
+enum brcmf_profile_fwauth {
+	BRCMF_PROFILE_FWAUTH_NONE,
+	BRCMF_PROFILE_FWAUTH_PSK,
+	BRCMF_PROFILE_FWAUTH_SAE
+};
+
+/**
+ * enum brcmf_mgmt_tx_status - mgmt frame tx status
+ *
+ * @BRCMF_MGMT_TX_ACK: mgmt frame acked
+ * @BRCMF_MGMT_TX_NOACK: mgmt frame not acked
+ * @BRCMF_MGMT_TX_OFF_CHAN_COMPLETED: off-channel complete
+ * @BRCMF_MGMT_TX_SEND_FRAME: mgmt frame tx is in progres
+ */
+enum brcmf_mgmt_tx_status {
+	BRCMF_MGMT_TX_ACK,
+	BRCMF_MGMT_TX_NOACK,
+	BRCMF_MGMT_TX_OFF_CHAN_COMPLETED,
+	BRCMF_MGMT_TX_SEND_FRAME
 };
 
 /**
@@ -133,6 +170,8 @@ struct brcmf_cfg80211_profile {
 	struct brcmf_cfg80211_security sec;
 	struct brcmf_wsec_key key[BRCMF_MAX_DEFAULT_KEYS];
 	enum brcmf_profile_fwsup use_fwsup;
+	u16 use_fwauth;
+	bool is_ft;
 };
 
 /**
@@ -143,7 +182,7 @@ struct brcmf_cfg80211_profile {
  * @BRCMF_VIF_STATUS_CONNECTED: connected/joined successfully.
  * @BRCMF_VIF_STATUS_DISCONNECTING: disconnect/disable in progress.
  * @BRCMF_VIF_STATUS_AP_CREATED: AP operation started.
- * @BRCMF_VIF_STATUS_EAP_SUCCUSS: EAPOL handshake successful.
+ * @BRCMF_VIF_STATUS_EAP_SUCCESS: EAPOL handshake successful.
  * @BRCMF_VIF_STATUS_ASSOC_SUCCESS: successful SET_SSID received.
  */
 enum brcmf_vif_status {
@@ -162,19 +201,25 @@ enum brcmf_vif_status {
  * @probe_req_ie: IE info for probe request.
  * @probe_res_ie: IE info for probe response.
  * @beacon_ie: IE info for beacon frame.
+ * @assoc_req_ie: IE info for association request frame.
+ * @assoc_res_ie: IE info for association response frame.
  * @probe_req_ie_len: IE info length for probe request.
  * @probe_res_ie_len: IE info length for probe response.
  * @beacon_ie_len: IE info length for beacon frame.
+ * @assoc_req_ie_len: IE info length for association request frame.
+ * @assoc_res_ie_len: IE info length for association response frame.
  */
 struct vif_saved_ie {
 	u8  probe_req_ie[IE_MAX_LEN];
 	u8  probe_res_ie[IE_MAX_LEN];
 	u8  beacon_ie[IE_MAX_LEN];
 	u8  assoc_req_ie[IE_MAX_LEN];
+	u8  assoc_res_ie[IE_MAX_LEN];
 	u32 probe_req_ie_len;
 	u32 probe_res_ie_len;
 	u32 beacon_ie_len;
 	u32 assoc_req_ie_len;
+	u32 assoc_res_ie_len;
 };
 
 /**
@@ -184,9 +229,17 @@ struct vif_saved_ie {
  * @wdev: wireless device.
  * @profile: profile information.
  * @sme_state: SME state using enum brcmf_vif_status bits.
+ * @saved_ie: saved IE info for a vif.
  * @list: linked list.
+ * @mgmt_tx: completion for management frame transmit.
+ * @mgmt_tx_status: status of last management frame sent to firmware.
+ * @mgmt_tx_id:
  * @mgmt_rx_reg: registered rx mgmt frame types.
  * @mbss: Multiple BSS type, set if not first AP (not relevant for P2P).
+ * @is_11d: beacon contains country IE, enable regulatory 802.11d support
+ * @cqm_rssi_low: Lower RSSI limit for CQM monitoring
+ * @cqm_rssi_high: Upper RSSI limit for CQM monitoring
+ * @cqm_rssi_last: Last RSSI reading for CQM monitoring
  */
 struct brcmf_cfg80211_vif {
 	struct brcmf_if *ifp;
@@ -195,9 +248,15 @@ struct brcmf_cfg80211_vif {
 	unsigned long sme_state;
 	struct vif_saved_ie saved_ie;
 	struct list_head list;
+	struct completion mgmt_tx;
+	unsigned long mgmt_tx_status;
+	u32 mgmt_tx_id;
 	u16 mgmt_rx_reg;
 	bool mbss;
 	int is_11d;
+	s32 cqm_rssi_low;
+	s32 cqm_rssi_high;
+	s32 cqm_rssi_last;
 };
 
 /* association inform */
@@ -212,6 +271,12 @@ struct brcmf_cfg80211_connect_info {
 struct brcmf_cfg80211_assoc_ielen_le {
 	__le32 req_len;
 	__le32 resp_len;
+};
+
+struct brcmf_cfg80211_edcf_acparam {
+	u8 ACI;
+	u8 ECW;
+	u16 TXOP;        /* stored in network order (ls octet first) */
 };
 
 /* dongle escan state */
@@ -303,7 +368,6 @@ struct brcmf_cfg80211_wowl {
  */
 struct brcmf_cfg80211_info {
 	struct wiphy *wiphy;
-	struct cfg80211_ops *ops;
 	struct brcmf_cfg80211_conf *conf;
 	struct brcmf_p2p_info p2p;
 	struct brcmf_btcoex_info *btcoex;
@@ -333,6 +397,7 @@ struct brcmf_cfg80211_info {
 	struct brcmf_assoclist_le assoclist;
 	struct brcmf_cfg80211_wowl wowl;
 	struct brcmf_pno_info *pno;
+	u8 ac_priority[MAX_8021D_PRIO];
 };
 
 /**
@@ -345,7 +410,7 @@ struct brcmf_cfg80211_info {
 struct brcmf_tlv {
 	u8 id;
 	u8 len;
-	u8 data[1];
+	u8 data[];
 };
 
 static inline struct wiphy *cfg_to_wiphy(struct brcmf_cfg80211_info *cfg)
@@ -404,8 +469,7 @@ struct brcmf_cfg80211_info *brcmf_cfg80211_attach(struct brcmf_pub *drvr,
 void brcmf_cfg80211_detach(struct brcmf_cfg80211_info *cfg);
 s32 brcmf_cfg80211_up(struct net_device *ndev);
 s32 brcmf_cfg80211_down(struct net_device *ndev);
-struct cfg80211_ops *brcmf_cfg80211_get_ops(void);
-enum nl80211_iftype brcmf_cfg80211_get_iftype(struct brcmf_if *ifp);
+struct cfg80211_ops *brcmf_cfg80211_get_ops(struct brcmf_mp_device *settings);
 
 struct brcmf_cfg80211_vif *brcmf_alloc_vif(struct brcmf_cfg80211_info *cfg,
 					   enum nl80211_iftype type);
@@ -427,7 +491,12 @@ s32 brcmf_notify_escan_complete(struct brcmf_cfg80211_info *cfg,
 				struct brcmf_if *ifp, bool aborted,
 				bool fw_abort);
 void brcmf_set_mpc(struct brcmf_if *ndev, int mpc);
+bool brcmf_is_apmode_operating(struct wiphy *wiphy);
 void brcmf_abort_scanning(struct brcmf_cfg80211_info *cfg);
-void brcmf_cfg80211_free_netdev(struct net_device *ndev);
+void brcmf_cfg80211_free_vif(struct net_device *ndev);
+
+int brcmf_set_wsec(struct brcmf_if *ifp, const u8 *key, u16 key_len, u16 flags);
+int brcmf_cfg80211_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
+			   struct cfg80211_mgmt_tx_params *params, u64 *cookie);
 
 #endif /* BRCMFMAC_CFG80211_H */

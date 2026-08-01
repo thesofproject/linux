@@ -1,9 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * include/linux/idr.h
  * 
  * 2002-10-18  written by Jim Houston jim.houston@ccur.com
  *	Copyright (C) 2002 by Concurrent Computer Corporation
- *	Distributed under the GNU GPL license version 2.
  *
  * Small id to pointer translation service avoiding fixed sized
  * tables.
@@ -15,6 +15,7 @@
 #include <linux/radix-tree.h>
 #include <linux/gfp.h>
 #include <linux/percpu.h>
+#include <linux/cleanup.h>
 
 struct idr {
 	struct radix_tree_root	idr_rt;
@@ -98,6 +99,17 @@ static inline void idr_set_cursor(struct idr *idr, unsigned int val)
  * period).
  */
 
+#define idr_lock(idr)		xa_lock(&(idr)->idr_rt)
+#define idr_unlock(idr)		xa_unlock(&(idr)->idr_rt)
+#define idr_lock_bh(idr)	xa_lock_bh(&(idr)->idr_rt)
+#define idr_unlock_bh(idr)	xa_unlock_bh(&(idr)->idr_rt)
+#define idr_lock_irq(idr)	xa_lock_irq(&(idr)->idr_rt)
+#define idr_unlock_irq(idr)	xa_unlock_irq(&(idr)->idr_rt)
+#define idr_lock_irqsave(idr, flags) \
+				xa_lock_irqsave(&(idr)->idr_rt, flags)
+#define idr_unlock_irqrestore(idr, flags) \
+				xa_unlock_irqrestore(&(idr)->idr_rt, flags)
+
 void idr_preload(gfp_t gfp_mask);
 
 int idr_alloc(struct idr *, void *ptr, int start, int end, gfp_t);
@@ -112,6 +124,22 @@ void *idr_get_next(struct idr *, int *nextid);
 void *idr_get_next_ul(struct idr *, unsigned long *nextid);
 void *idr_replace(struct idr *, void *, unsigned long id);
 void idr_destroy(struct idr *);
+
+struct __class_idr {
+	struct idr *idr;
+	int id;
+};
+
+#define idr_null ((struct __class_idr){ NULL, -1 })
+#define take_idr_id(id) __get_and_null(id, idr_null)
+
+DEFINE_CLASS(idr_alloc, struct __class_idr,
+	     if (_T.id >= 0) idr_remove(_T.idr, _T.id),
+	     ((struct __class_idr){
+	     	.idr = idr,
+		.id = idr_alloc(idr, ptr, start, end, gfp),
+	     }),
+	     struct idr *idr, void *ptr, int start, int end, gfp_t gfp);
 
 /**
  * idr_init_base() - Initialise an IDR.
@@ -160,7 +188,7 @@ static inline bool idr_is_empty(const struct idr *idr)
  */
 static inline void idr_preload_end(void)
 {
-	preempt_enable();
+	local_unlock(&radix_tree_preloads.lock);
 }
 
 /**
@@ -174,20 +202,23 @@ static inline void idr_preload_end(void)
  * is convenient for a "not found" value.
  */
 #define idr_for_each_entry(idr, entry, id)			\
-	for (id = 0; ((entry) = idr_get_next(idr, &(id))) != NULL; ++id)
+	for (id = 0; ((entry) = idr_get_next(idr, &(id))) != NULL; id += 1U)
 
 /**
  * idr_for_each_entry_ul() - Iterate over an IDR's elements of a given type.
  * @idr: IDR handle.
  * @entry: The type * to use as cursor.
+ * @tmp: A temporary placeholder for ID.
  * @id: Entry ID.
  *
  * @entry and @id do not need to be initialized before the loop, and
  * after normal termination @entry is left with the value NULL.  This
  * is convenient for a "not found" value.
  */
-#define idr_for_each_entry_ul(idr, entry, id)			\
-	for (id = 0; ((entry) = idr_get_next_ul(idr, &(id))) != NULL; ++id)
+#define idr_for_each_entry_ul(idr, entry, tmp, id)			\
+	for (tmp = 0, id = 0;						\
+	     ((entry) = tmp <= id ? idr_get_next_ul(idr, &(id)) : NULL) != NULL; \
+	     tmp = id, ++id)
 
 /**
  * idr_for_each_entry_continue() - Continue iteration over an IDR's elements of a given type
@@ -202,9 +233,24 @@ static inline void idr_preload_end(void)
 	     entry;							\
 	     ++id, (entry) = idr_get_next((idr), &(id)))
 
+/**
+ * idr_for_each_entry_continue_ul() - Continue iteration over an IDR's elements of a given type
+ * @idr: IDR handle.
+ * @entry: The type * to use as a cursor.
+ * @tmp: A temporary placeholder for ID.
+ * @id: Entry ID.
+ *
+ * Continue to iterate over entries, continuing after the current position.
+ * After normal termination @entry is left with the value NULL.  This
+ * is convenient for a "not found" value.
+ */
+#define idr_for_each_entry_continue_ul(idr, entry, tmp, id)		\
+	for (tmp = id;							\
+	     ((entry) = tmp <= id ? idr_get_next_ul(idr, &(id)) : NULL) != NULL; \
+	     tmp = id, ++id)
+
 /*
- * IDA - IDR based id allocator, use when translation from id to
- * pointer isn't necessary.
+ * IDA - ID Allocator, use when translation from id to pointer isn't necessary.
  */
 #define IDA_CHUNK_SIZE		128	/* 128 bytes per chunk */
 #define IDA_BITMAP_LONGS	(IDA_CHUNK_SIZE / sizeof(long))
@@ -214,45 +260,92 @@ struct ida_bitmap {
 	unsigned long		bitmap[IDA_BITMAP_LONGS];
 };
 
-DECLARE_PER_CPU(struct ida_bitmap *, ida_bitmap);
-
 struct ida {
-	struct radix_tree_root	ida_rt;
+	struct xarray xa;
 };
 
+#define IDA_INIT_FLAGS	(XA_FLAGS_LOCK_IRQ | XA_FLAGS_ALLOC)
+
 #define IDA_INIT(name)	{						\
-	.ida_rt = RADIX_TREE_INIT(name, IDR_RT_MARKER | GFP_NOWAIT),	\
+	.xa = XARRAY_INIT(name, IDA_INIT_FLAGS)				\
 }
 #define DEFINE_IDA(name)	struct ida name = IDA_INIT(name)
 
-int ida_pre_get(struct ida *ida, gfp_t gfp_mask);
-int ida_get_new_above(struct ida *ida, int starting_id, int *p_id);
-void ida_remove(struct ida *ida, int id);
+int ida_alloc_range(struct ida *, unsigned int min, unsigned int max, gfp_t);
+void ida_free(struct ida *, unsigned int id);
 void ida_destroy(struct ida *ida);
+int ida_find_first_range(struct ida *ida, unsigned int min, unsigned int max);
 
-int ida_simple_get(struct ida *ida, unsigned int start, unsigned int end,
-		   gfp_t gfp_mask);
-void ida_simple_remove(struct ida *ida, unsigned int id);
-
-static inline void ida_init(struct ida *ida)
+/**
+ * ida_alloc() - Allocate an unused ID.
+ * @ida: IDA handle.
+ * @gfp: Memory allocation flags.
+ *
+ * Allocate an ID between 0 and %INT_MAX, inclusive.
+ *
+ * Context: Any context. It is safe to call this function without
+ * locking in your code.
+ * Return: The allocated ID, or %-ENOMEM if memory could not be allocated,
+ * or %-ENOSPC if there are no free IDs.
+ */
+static inline int ida_alloc(struct ida *ida, gfp_t gfp)
 {
-	INIT_RADIX_TREE(&ida->ida_rt, IDR_RT_MARKER | GFP_NOWAIT);
+	return ida_alloc_range(ida, 0, ~0, gfp);
 }
 
 /**
- * ida_get_new - allocate new ID
- * @ida:	idr handle
- * @p_id:	pointer to the allocated handle
+ * ida_alloc_min() - Allocate an unused ID.
+ * @ida: IDA handle.
+ * @min: Lowest ID to allocate.
+ * @gfp: Memory allocation flags.
  *
- * Simple wrapper around ida_get_new_above() w/ @starting_id of zero.
+ * Allocate an ID between @min and %INT_MAX, inclusive.
+ *
+ * Context: Any context. It is safe to call this function without
+ * locking in your code.
+ * Return: The allocated ID, or %-ENOMEM if memory could not be allocated,
+ * or %-ENOSPC if there are no free IDs.
  */
-static inline int ida_get_new(struct ida *ida, int *p_id)
+static inline int ida_alloc_min(struct ida *ida, unsigned int min, gfp_t gfp)
 {
-	return ida_get_new_above(ida, 0, p_id);
+	return ida_alloc_range(ida, min, ~0, gfp);
+}
+
+/**
+ * ida_alloc_max() - Allocate an unused ID.
+ * @ida: IDA handle.
+ * @max: Highest ID to allocate.
+ * @gfp: Memory allocation flags.
+ *
+ * Allocate an ID between 0 and @max, inclusive.
+ *
+ * Context: Any context. It is safe to call this function without
+ * locking in your code.
+ * Return: The allocated ID, or %-ENOMEM if memory could not be allocated,
+ * or %-ENOSPC if there are no free IDs.
+ */
+static inline int ida_alloc_max(struct ida *ida, unsigned int max, gfp_t gfp)
+{
+	return ida_alloc_range(ida, 0, max, gfp);
+}
+
+static inline void ida_init(struct ida *ida)
+{
+	xa_init_flags(&ida->xa, IDA_INIT_FLAGS);
 }
 
 static inline bool ida_is_empty(const struct ida *ida)
 {
-	return radix_tree_empty(&ida->ida_rt);
+	return xa_empty(&ida->xa);
+}
+
+static inline bool ida_exists(struct ida *ida, unsigned int id)
+{
+	return ida_find_first_range(ida, id, id) == id;
+}
+
+static inline int ida_find_first(struct ida *ida)
+{
+	return ida_find_first_range(ida, 0, ~0);
 }
 #endif /* __IDR_H__ */

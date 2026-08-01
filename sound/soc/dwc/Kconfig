@@ -1,6 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "DesignWare"
+
 config SND_DESIGNWARE_I2S
 	tristate "Synopsys I2S Device Driver"
-	depends on CLKDEV_LOOKUP
+	depends on HAVE_CLK
 	select SND_SOC_GENERIC_DMAENGINE_PCM
 	help
 	 Say Y or M if you want to add support for I2S driver for
@@ -17,3 +20,4 @@ config SND_DESIGNWARE_PCM
 	 This functionality is specially suited for I2S devices that don't have
 	 DMA support.
 
+endmenu

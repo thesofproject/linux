@@ -64,11 +64,15 @@ pramin_init(struct nvkm_bios *bios, const char *name)
 		return NULL;
 
 	/* we can't get the bios image pointer without PDISP */
+	if (device->card_type >= GA100)
+		addr = nvkm_rd32(device, 0x820c04);
+	else
 	if (device->card_type >= GM100)
 		addr = nvkm_rd32(device, 0x021c04);
 	else
 	if (device->card_type >= NV_C0)
 		addr = nvkm_rd32(device, 0x022500);
+
 	if (addr & 0x00000001) {
 		nvkm_debug(subdev, "... display disabled\n");
 		return ERR_PTR(-ENODEV);
@@ -78,7 +82,10 @@ pramin_init(struct nvkm_bios *bios, const char *name)
 	 * important as we don't want to be touching vram on an
 	 * uninitialised board
 	 */
-	addr = nvkm_rd32(device, 0x619f04);
+	if (device->card_type >= GV100)
+		addr = nvkm_rd32(device, 0x625f04);
+	else
+		addr = nvkm_rd32(device, 0x619f04);
 	if (!(addr & 0x00000008)) {
 		nvkm_debug(subdev, "... not enabled\n");
 		return ERR_PTR(-ENODEV);
@@ -96,7 +103,7 @@ pramin_init(struct nvkm_bios *bios, const char *name)
 	}
 
 	/* modify bar0 PRAMIN window to cover the bios image */
-	if (!(priv = kmalloc(sizeof(*priv), GFP_KERNEL))) {
+	if (!(priv = kmalloc_obj(*priv))) {
 		nvkm_error(subdev, "... out of memory\n");
 		return ERR_PTR(-ENOMEM);
 	}

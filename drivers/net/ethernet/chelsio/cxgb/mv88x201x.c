@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*****************************************************************************
  *                                                                           *
  * File: mv88x201x.c                                                         *
@@ -7,16 +8,6 @@
  *  Marvell PHY (mv88x201x) functionality.                                   *
  *  part of the Chelsio 10Gb Ethernet Driver.                                *
  *                                                                           *
- * This program is free software; you can redistribute it and/or modify      *
- * it under the terms of the GNU General Public License, version 2, as       *
- * published by the Free Software Foundation.                                *
- *                                                                           *
- * You should have received a copy of the GNU General Public License along   *
- * with this program; if not, see <http://www.gnu.org/licenses/>.            *
- *                                                                           *
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR IMPLIED    *
- * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF      *
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.                     *
  *                                                                           *
  * http://www.chelsio.com                                                    *
  *                                                                           *
@@ -212,7 +203,7 @@ static struct cphy *mv88x201x_phy_create(struct net_device *dev, int phy_addr,
 					 const struct mdio_ops *mdio_ops)
 {
 	u32 val;
-	struct cphy *cphy = kzalloc(sizeof(*cphy), GFP_KERNEL);
+	struct cphy *cphy = kzalloc_obj(*cphy);
 
 	if (!cphy)
 		return NULL;

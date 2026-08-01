@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0
-#include "perf.h"
 #include "util/debug.h"
+#include "util/map.h"
 #include "util/symbol.h"
 #include "util/sort.h"
 #include "util/evsel.h"
 #include "util/event.h"
 #include "util/evlist.h"
 #include "util/machine.h"
-#include "util/thread.h"
 #include "util/parse-events.h"
+#include "util/thread.h"
 #include "tests/tests.h"
 #include "tests/hists_common.h"
 #include <linux/kernel.h>
@@ -46,14 +46,15 @@ static struct sample fake_samples[] = {
 	{ .pid = FAKE_PID_BASH,  .ip = FAKE_IP_KERNEL_PAGE_FAULT, .socket = 3 },
 };
 
-static int add_hist_entries(struct perf_evlist *evlist,
+static int add_hist_entries(struct evlist *evlist,
 			    struct machine *machine)
 {
-	struct perf_evsel *evsel;
+	struct evsel *evsel;
 	struct addr_location al;
 	struct perf_sample sample = { .period = 100, };
 	size_t i;
 
+	addr_location__init(&al);
 	/*
 	 * each evsel will have 10 samples but the 4th sample
 	 * (perf [perf] main) will be collapsed to an existing entry
@@ -62,13 +63,13 @@ static int add_hist_entries(struct perf_evlist *evlist,
 	evlist__for_each_entry(evlist, evsel) {
 		for (i = 0; i < ARRAY_SIZE(fake_samples); i++) {
 			struct hist_entry_iter iter = {
-				.evsel = evsel,
 				.sample = &sample,
 				.ops = &hist_iter_normal,
 				.hide_unresolved = false,
 			};
 			struct hists *hists = evsel__hists(evsel);
 
+			sample.evsel = evsel;
 			/* make sure it has no filter at first */
 			hists->thread_filter = NULL;
 			hists->dso_filter = NULL;
@@ -85,46 +86,53 @@ static int add_hist_entries(struct perf_evlist *evlist,
 			al.socket = fake_samples[i].socket;
 			if (hist_entry_iter__add(&iter, &al,
 						 sysctl_perf_event_max_stack, NULL) < 0) {
-				addr_location__put(&al);
 				goto out;
 			}
 
-			fake_samples[i].thread = al.thread;
-			fake_samples[i].map = al.map;
+			thread__put(fake_samples[i].thread);
+			fake_samples[i].thread = thread__get(al.thread);
+			map__put(fake_samples[i].map);
+			fake_samples[i].map = map__get(al.map);
 			fake_samples[i].sym = al.sym;
 		}
 	}
-
+	addr_location__exit(&al);
 	return 0;
 
 out:
 	pr_debug("Not enough memory for adding a hist entry\n");
+	addr_location__exit(&al);
 	return TEST_FAIL;
 }
 
-int test__hists_filter(struct test *test __maybe_unused, int subtest __maybe_unused)
+static void put_fake_samples(void)
+{
+	size_t i;
+
+	for (i = 0; i < ARRAY_SIZE(fake_samples); i++)
+		map__put(fake_samples[i].map);
+}
+
+static int test__hists_filter(struct test_suite *test __maybe_unused, int subtest __maybe_unused)
 {
 	int err = TEST_FAIL;
-	struct machines machines;
+	struct machines machines = { 0 };
 	struct machine *machine;
-	struct perf_evsel *evsel;
-	struct perf_evlist *evlist = perf_evlist__new();
+	struct evsel *evsel;
+	struct evlist *evlist = evlist__new();
 
 	TEST_ASSERT_VAL("No memory", evlist);
 
-	err = parse_events(evlist, "cpu-clock", NULL);
+	err = parse_event(evlist, "cpu-clock");
 	if (err)
 		goto out;
-	err = parse_events(evlist, "task-clock", NULL);
+	err = parse_event(evlist, "task-clock");
 	if (err)
 		goto out;
 	err = TEST_FAIL;
 
-	/* default sort order (comm,dso,sym) will be used */
-	if (setup_sorting(NULL) < 0)
+	if (machines__init(&machines))
 		goto out;
-
-	machines__init(&machines);
 
 	/* setup threads/dso/map/symbols also */
 	machine = setup_fake_machine(&machines);
@@ -133,6 +141,10 @@ int test__hists_filter(struct test *test __maybe_unused, int subtest __maybe_unu
 
 	if (verbose > 1)
 		machine__fprintf(machine, stderr);
+
+	/* default sort order (comm,dso,sym) will be used */
+	if (setup_sorting(evlist, machine->env) < 0)
+		goto out;
 
 	/* process sample events */
 	err = add_hist_entries(evlist, machine);
@@ -143,7 +155,7 @@ int test__hists_filter(struct test *test __maybe_unused, int subtest __maybe_unu
 		struct hists *hists = evsel__hists(evsel);
 
 		hists__collapse_resort(hists, NULL);
-		perf_evsel__output_resort(evsel, NULL);
+		evsel__output_resort(evsel, NULL);
 
 		if (verbose > 2) {
 			pr_info("Normal histogram\n");
@@ -151,13 +163,13 @@ int test__hists_filter(struct test *test __maybe_unused, int subtest __maybe_unu
 		}
 
 		TEST_ASSERT_VAL("Invalid nr samples",
-				hists->stats.nr_events[PERF_RECORD_SAMPLE] == 10);
+				hists->stats.nr_samples == 10);
 		TEST_ASSERT_VAL("Invalid nr hist entries",
 				hists->nr_entries == 9);
 		TEST_ASSERT_VAL("Invalid total period",
 				hists->stats.total_period == 1000);
 		TEST_ASSERT_VAL("Unmatched nr samples",
-				hists->stats.nr_events[PERF_RECORD_SAMPLE] ==
+				hists->stats.nr_samples ==
 				hists->stats.nr_non_filtered_samples);
 		TEST_ASSERT_VAL("Unmatched nr hist entries",
 				hists->nr_entries == hists->nr_non_filtered_entries);
@@ -176,7 +188,7 @@ int test__hists_filter(struct test *test __maybe_unused, int subtest __maybe_unu
 
 		/* normal stats should be invariant */
 		TEST_ASSERT_VAL("Invalid nr samples",
-				hists->stats.nr_events[PERF_RECORD_SAMPLE] == 10);
+				hists->stats.nr_samples == 10);
 		TEST_ASSERT_VAL("Invalid nr hist entries",
 				hists->nr_entries == 9);
 		TEST_ASSERT_VAL("Invalid total period",
@@ -195,7 +207,7 @@ int test__hists_filter(struct test *test __maybe_unused, int subtest __maybe_unu
 		hists__filter_by_thread(hists);
 
 		/* now applying dso filter for 'kernel' */
-		hists->dso_filter = fake_samples[0].map->dso;
+		hists->dso_filter = map__dso(fake_samples[0].map);
 		hists__filter_by_dso(hists);
 
 		if (verbose > 2) {
@@ -205,7 +217,7 @@ int test__hists_filter(struct test *test __maybe_unused, int subtest __maybe_unu
 
 		/* normal stats should be invariant */
 		TEST_ASSERT_VAL("Invalid nr samples",
-				hists->stats.nr_events[PERF_RECORD_SAMPLE] == 10);
+				hists->stats.nr_samples == 10);
 		TEST_ASSERT_VAL("Invalid nr hist entries",
 				hists->nr_entries == 9);
 		TEST_ASSERT_VAL("Invalid total period",
@@ -240,7 +252,7 @@ int test__hists_filter(struct test *test __maybe_unused, int subtest __maybe_unu
 
 		/* normal stats should be invariant */
 		TEST_ASSERT_VAL("Invalid nr samples",
-				hists->stats.nr_events[PERF_RECORD_SAMPLE] == 10);
+				hists->stats.nr_samples == 10);
 		TEST_ASSERT_VAL("Invalid nr hist entries",
 				hists->nr_entries == 9);
 		TEST_ASSERT_VAL("Invalid total period",
@@ -269,7 +281,7 @@ int test__hists_filter(struct test *test __maybe_unused, int subtest __maybe_unu
 
 		/* normal stats should be invariant */
 		TEST_ASSERT_VAL("Invalid nr samples",
-				hists->stats.nr_events[PERF_RECORD_SAMPLE] == 10);
+				hists->stats.nr_samples == 10);
 		TEST_ASSERT_VAL("Invalid nr hist entries",
 				hists->nr_entries == 9);
 		TEST_ASSERT_VAL("Invalid total period",
@@ -289,7 +301,7 @@ int test__hists_filter(struct test *test __maybe_unused, int subtest __maybe_unu
 
 		/* now applying all filters at once. */
 		hists->thread_filter = fake_samples[1].thread;
-		hists->dso_filter = fake_samples[1].map->dso;
+		hists->dso_filter = map__dso(fake_samples[1].map);
 		hists__filter_by_thread(hists);
 		hists__filter_by_dso(hists);
 
@@ -300,7 +312,7 @@ int test__hists_filter(struct test *test __maybe_unused, int subtest __maybe_unu
 
 		/* normal stats should be invariant */
 		TEST_ASSERT_VAL("Invalid nr samples",
-				hists->stats.nr_events[PERF_RECORD_SAMPLE] == 10);
+				hists->stats.nr_samples == 10);
 		TEST_ASSERT_VAL("Invalid nr hist entries",
 				hists->nr_entries == 9);
 		TEST_ASSERT_VAL("Invalid total period",
@@ -320,9 +332,12 @@ int test__hists_filter(struct test *test __maybe_unused, int subtest __maybe_unu
 
 out:
 	/* tear down everything */
-	perf_evlist__delete(evlist);
+	evlist__delete(evlist);
 	reset_output_field();
 	machines__exit(&machines);
+	put_fake_samples();
 
 	return err;
 }
+
+DEFINE_SUITE("Filter hist entries", hists_filter);

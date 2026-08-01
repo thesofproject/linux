@@ -1,10 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2015 Robert Jarzmik <robert.jarzmik@free.fr>
  *
  * Scatterlist splitting helpers.
- *
- * This source code is licensed under the GNU General Public License,
- * Version 2. See the file COPYING for more details.
  */
 
 #include <linux/scatterlist.h>
@@ -90,8 +88,6 @@ static void sg_split_phys(struct sg_splitter *splitters, const int nb_splits)
 			if (!j) {
 				out_sg->offset += split->skip_sg0;
 				out_sg->length -= split->skip_sg0;
-			} else {
-				out_sg->offset = 0;
 			}
 			sg_dma_address(out_sg) = 0;
 			sg_dma_len(out_sg) = 0;
@@ -156,7 +152,7 @@ int sg_split(struct scatterlist *in, const int in_mapped_nents,
 	int i, ret;
 	struct sg_splitter *splitters;
 
-	splitters = kcalloc(nb_splits, sizeof(*splitters), gfp_mask);
+	splitters = kzalloc_objs(*splitters, nb_splits, gfp_mask);
 	if (!splitters)
 		return -ENOMEM;
 
@@ -167,9 +163,8 @@ int sg_split(struct scatterlist *in, const int in_mapped_nents,
 
 	ret = -ENOMEM;
 	for (i = 0; i < nb_splits; i++) {
-		splitters[i].out_sg = kmalloc_array(splitters[i].nents,
-						    sizeof(struct scatterlist),
-						    gfp_mask);
+		splitters[i].out_sg = kmalloc_objs(struct scatterlist,
+						   splitters[i].nents, gfp_mask);
 		if (!splitters[i].out_sg)
 			goto err;
 	}
@@ -178,11 +173,13 @@ int sg_split(struct scatterlist *in, const int in_mapped_nents,
 	 * The order of these 3 calls is important and should be kept.
 	 */
 	sg_split_phys(splitters, nb_splits);
-	ret = sg_calculate_split(in, in_mapped_nents, nb_splits, skip,
-				 split_sizes, splitters, true);
-	if (ret < 0)
-		goto err;
-	sg_split_mapped(splitters, nb_splits);
+	if (in_mapped_nents) {
+		ret = sg_calculate_split(in, in_mapped_nents, nb_splits, skip,
+					 split_sizes, splitters, true);
+		if (ret < 0)
+			goto err;
+		sg_split_mapped(splitters, nb_splits);
+	}
 
 	for (i = 0; i < nb_splits; i++) {
 		out[i] = splitters[i].out_sg;

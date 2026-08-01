@@ -8,9 +8,7 @@
 #include <linux/errno.h>
 #include <linux/mutex.h>
 #include <linux/of.h>
-#include <linux/of_platform.h>
 #include <linux/interrupt.h>
-#include <linux/of_device.h>
 #include <linux/clocksource.h>
 #include <linux/clockchips.h>
 
@@ -108,13 +106,12 @@ unsigned long leon_get_irqmask(unsigned int irq)
 #ifdef CONFIG_SMP
 static int irq_choose_cpu(const struct cpumask *affinity)
 {
-	cpumask_t mask;
+	unsigned int cpu = cpumask_first_and(affinity, cpu_online_mask);
 
-	cpumask_and(&mask, cpu_online_mask, affinity);
-	if (cpumask_equal(&mask, cpu_online_mask) || cpumask_empty(&mask))
+	if (cpumask_subset(cpu_online_mask, affinity) || cpu >= nr_cpu_ids)
 		return boot_cpu_id;
 	else
-		return cpumask_first(&mask);
+		return cpu;
 }
 #else
 #define irq_choose_cpu(affinity) boot_cpu_id
@@ -482,20 +479,6 @@ static void leon_clear_clock_irq(void)
 
 static void leon_load_profile_irq(int cpu, unsigned int limit)
 {
-}
-
-void __init leon_trans_init(struct device_node *dp)
-{
-	if (strcmp(dp->type, "cpu") == 0 && strcmp(dp->name, "<NULL>") == 0) {
-		struct property *p;
-		p = of_find_property(dp, "mid", (void *)0);
-		if (p) {
-			int mid;
-			dp->name = prom_early_alloc(5 + 1);
-			memcpy(&mid, p->value, p->length);
-			sprintf((char *)dp->name, "cpu%.2d", mid);
-		}
-	}
 }
 
 #ifdef CONFIG_SMP

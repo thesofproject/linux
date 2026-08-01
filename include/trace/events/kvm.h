@@ -17,7 +17,7 @@
 	ERSN(NMI), ERSN(INTERNAL_ERROR), ERSN(OSI), ERSN(PAPR_HCALL),	\
 	ERSN(S390_UCONTROL), ERSN(WATCHDOG), ERSN(S390_TSCH), ERSN(EPR),\
 	ERSN(SYSTEM_EVENT), ERSN(S390_STSI), ERSN(IOAPIC_EOI),          \
-	ERSN(HYPERV)
+	ERSN(HYPERV), ERSN(ARM_NISV), ERSN(X86_RDMSR), ERSN(X86_WRMSR)
 
 TRACE_EVENT(kvm_userspace_exit,
 	    TP_PROTO(__u32 reason, int errno),
@@ -62,7 +62,7 @@ TRACE_EVENT(kvm_vcpu_wakeup,
 		  __entry->valid ? "valid" : "invalid")
 );
 
-#if defined(CONFIG_HAVE_KVM_IRQFD)
+#if defined(CONFIG_HAVE_KVM_IRQCHIP)
 TRACE_EVENT(kvm_set_irq,
 	TP_PROTO(unsigned int gsi, int level, int irq_source_id),
 	TP_ARGS(gsi, level, irq_source_id),
@@ -82,95 +82,15 @@ TRACE_EVENT(kvm_set_irq,
 	TP_printk("gsi %u level %d source %d",
 		  __entry->gsi, __entry->level, __entry->irq_source_id)
 );
-#endif /* defined(CONFIG_HAVE_KVM_IRQFD) */
 
-#if defined(__KVM_HAVE_IOAPIC)
-#define kvm_deliver_mode		\
-	{0x0, "Fixed"},			\
-	{0x1, "LowPrio"},		\
-	{0x2, "SMI"},			\
-	{0x3, "Res3"},			\
-	{0x4, "NMI"},			\
-	{0x5, "INIT"},			\
-	{0x6, "SIPI"},			\
-	{0x7, "ExtINT"}
-
-TRACE_EVENT(kvm_ioapic_set_irq,
-	    TP_PROTO(__u64 e, int pin, bool coalesced),
-	    TP_ARGS(e, pin, coalesced),
-
-	TP_STRUCT__entry(
-		__field(	__u64,		e		)
-		__field(	int,		pin		)
-		__field(	bool,		coalesced	)
-	),
-
-	TP_fast_assign(
-		__entry->e		= e;
-		__entry->pin		= pin;
-		__entry->coalesced	= coalesced;
-	),
-
-	TP_printk("pin %u dst %x vec %u (%s|%s|%s%s)%s",
-		  __entry->pin, (u8)(__entry->e >> 56), (u8)__entry->e,
-		  __print_symbolic((__entry->e >> 8 & 0x7), kvm_deliver_mode),
-		  (__entry->e & (1<<11)) ? "logical" : "physical",
-		  (__entry->e & (1<<15)) ? "level" : "edge",
-		  (__entry->e & (1<<16)) ? "|masked" : "",
-		  __entry->coalesced ? " (coalesced)" : "")
-);
-
-TRACE_EVENT(kvm_ioapic_delayed_eoi_inj,
-	    TP_PROTO(__u64 e),
-	    TP_ARGS(e),
-
-	TP_STRUCT__entry(
-		__field(	__u64,		e		)
-	),
-
-	TP_fast_assign(
-		__entry->e		= e;
-	),
-
-	TP_printk("dst %x vec %u (%s|%s|%s%s)",
-		  (u8)(__entry->e >> 56), (u8)__entry->e,
-		  __print_symbolic((__entry->e >> 8 & 0x7), kvm_deliver_mode),
-		  (__entry->e & (1<<11)) ? "logical" : "physical",
-		  (__entry->e & (1<<15)) ? "level" : "edge",
-		  (__entry->e & (1<<16)) ? "|masked" : "")
-);
-
-TRACE_EVENT(kvm_msi_set_irq,
-	    TP_PROTO(__u64 address, __u64 data),
-	    TP_ARGS(address, data),
-
-	TP_STRUCT__entry(
-		__field(	__u64,		address		)
-		__field(	__u64,		data		)
-	),
-
-	TP_fast_assign(
-		__entry->address	= address;
-		__entry->data		= data;
-	),
-
-	TP_printk("dst %llx vec %u (%s|%s|%s%s)",
-		  (u8)(__entry->address >> 12) | ((__entry->address >> 32) & 0xffffff00),
-		  (u8)__entry->data,
-		  __print_symbolic((__entry->data >> 8 & 0x7), kvm_deliver_mode),
-		  (__entry->address & (1<<2)) ? "logical" : "physical",
-		  (__entry->data & (1<<15)) ? "level" : "edge",
-		  (__entry->address & (1<<3)) ? "|rh" : "")
-);
+#ifdef CONFIG_KVM_IOAPIC
 
 #define kvm_irqchips						\
 	{KVM_IRQCHIP_PIC_MASTER,	"PIC master"},		\
 	{KVM_IRQCHIP_PIC_SLAVE,		"PIC slave"},		\
 	{KVM_IRQCHIP_IOAPIC,		"IOAPIC"}
 
-#endif /* defined(__KVM_HAVE_IOAPIC) */
-
-#if defined(CONFIG_HAVE_KVM_IRQFD)
+#endif /* CONFIG_KVM_IOAPIC */
 
 #ifdef kvm_irqchips
 #define kvm_ack_irq_string "irqchip %s pin %u"
@@ -197,7 +117,7 @@ TRACE_EVENT(kvm_ack_irq,
 	TP_printk(kvm_ack_irq_string, kvm_ack_irq_parm)
 );
 
-#endif /* defined(CONFIG_HAVE_KVM_IRQFD) */
+#endif /* defined(CONFIG_HAVE_KVM_IRQCHIP) */
 
 
 
@@ -255,30 +175,6 @@ TRACE_EVENT(kvm_fpu,
 	TP_printk("%s", __print_symbolic(__entry->load, kvm_fpu_load_symbol))
 );
 
-TRACE_EVENT(kvm_age_page,
-	TP_PROTO(ulong gfn, int level, struct kvm_memory_slot *slot, int ref),
-	TP_ARGS(gfn, level, slot, ref),
-
-	TP_STRUCT__entry(
-		__field(	u64,	hva		)
-		__field(	u64,	gfn		)
-		__field(	u8,	level		)
-		__field(	u8,	referenced	)
-	),
-
-	TP_fast_assign(
-		__entry->gfn		= gfn;
-		__entry->level		= level;
-		__entry->hva		= ((gfn - slot->base_gfn) <<
-					    PAGE_SHIFT) + slot->userspace_addr;
-		__entry->referenced	= ref;
-	),
-
-	TP_printk("hva %llx gfn %llx level %u %s",
-		  __entry->hva, __entry->gfn, __entry->level,
-		  __entry->referenced ? "YOUNG" : "OLD")
-);
-
 #ifdef CONFIG_KVM_ASYNC_PF
 DECLARE_EVENT_CLASS(kvm_async_get_page_class,
 
@@ -306,7 +202,7 @@ DEFINE_EVENT(kvm_async_get_page_class, kvm_try_async_get_page,
 	TP_ARGS(gva, gfn)
 );
 
-DEFINE_EVENT(kvm_async_get_page_class, kvm_async_pf_doublefault,
+DEFINE_EVENT(kvm_async_get_page_class, kvm_async_pf_repeated_fault,
 
 	TP_PROTO(u64 gva, u64 gfn),
 
@@ -398,6 +294,147 @@ TRACE_EVENT(kvm_halt_poll_ns,
 	trace_kvm_halt_poll_ns(true, vcpu_id, new, old)
 #define trace_kvm_halt_poll_ns_shrink(vcpu_id, new, old) \
 	trace_kvm_halt_poll_ns(false, vcpu_id, new, old)
+
+TRACE_EVENT(kvm_dirty_ring_push,
+	TP_PROTO(struct kvm_dirty_ring *ring, u32 slot, u64 offset),
+	TP_ARGS(ring, slot, offset),
+
+	TP_STRUCT__entry(
+		__field(int, index)
+		__field(u32, dirty_index)
+		__field(u32, reset_index)
+		__field(u32, slot)
+		__field(u64, offset)
+	),
+
+	TP_fast_assign(
+		__entry->index          = ring->index;
+		__entry->dirty_index    = ring->dirty_index;
+		__entry->reset_index    = ring->reset_index;
+		__entry->slot           = slot;
+		__entry->offset         = offset;
+	),
+
+	TP_printk("ring %d: dirty 0x%x reset 0x%x "
+		  "slot %u offset 0x%llx (used %u)",
+		  __entry->index, __entry->dirty_index,
+		  __entry->reset_index,  __entry->slot, __entry->offset,
+		  __entry->dirty_index - __entry->reset_index)
+);
+
+TRACE_EVENT(kvm_dirty_ring_reset,
+	TP_PROTO(struct kvm_dirty_ring *ring),
+	TP_ARGS(ring),
+
+	TP_STRUCT__entry(
+		__field(int, index)
+		__field(u32, dirty_index)
+		__field(u32, reset_index)
+	),
+
+	TP_fast_assign(
+		__entry->index          = ring->index;
+		__entry->dirty_index    = ring->dirty_index;
+		__entry->reset_index    = ring->reset_index;
+	),
+
+	TP_printk("ring %d: dirty 0x%x reset 0x%x (used %u)",
+		  __entry->index, __entry->dirty_index, __entry->reset_index,
+		  __entry->dirty_index - __entry->reset_index)
+);
+
+TRACE_EVENT(kvm_dirty_ring_exit,
+	TP_PROTO(struct kvm_vcpu *vcpu),
+	TP_ARGS(vcpu),
+
+	TP_STRUCT__entry(
+	    __field(int, vcpu_id)
+	),
+
+	TP_fast_assign(
+	    __entry->vcpu_id = vcpu->vcpu_id;
+	),
+
+	TP_printk("vcpu %d", __entry->vcpu_id)
+);
+
+#ifdef CONFIG_KVM_GENERIC_MEMORY_ATTRIBUTES
+/*
+ * @start:	Starting address of guest memory range
+ * @end:	End address of guest memory range
+ * @attr:	The value of the attribute being set.
+ */
+TRACE_EVENT(kvm_vm_set_mem_attributes,
+	TP_PROTO(gfn_t start, gfn_t end, unsigned long attr),
+	TP_ARGS(start, end, attr),
+
+	TP_STRUCT__entry(
+		__field(gfn_t,		start)
+		__field(gfn_t,		end)
+		__field(unsigned long,	attr)
+	),
+
+	TP_fast_assign(
+		__entry->start		= start;
+		__entry->end		= end;
+		__entry->attr		= attr;
+	),
+
+	TP_printk("%#016llx -- %#016llx [0x%lx]",
+		  __entry->start, __entry->end, __entry->attr)
+);
+#endif /* CONFIG_KVM_GENERIC_MEMORY_ATTRIBUTES */
+
+TRACE_EVENT(kvm_unmap_hva_range,
+	TP_PROTO(unsigned long start, unsigned long end),
+	TP_ARGS(start, end),
+
+	TP_STRUCT__entry(
+		__field(	unsigned long,	start		)
+		__field(	unsigned long,	end		)
+	),
+
+	TP_fast_assign(
+		__entry->start		= start;
+		__entry->end		= end;
+	),
+
+	TP_printk("mmu notifier unmap range: %#016lx -- %#016lx",
+		  __entry->start, __entry->end)
+);
+
+TRACE_EVENT(kvm_age_hva,
+	TP_PROTO(unsigned long start, unsigned long end),
+	TP_ARGS(start, end),
+
+	TP_STRUCT__entry(
+		__field(	unsigned long,	start		)
+		__field(	unsigned long,	end		)
+	),
+
+	TP_fast_assign(
+		__entry->start		= start;
+		__entry->end		= end;
+	),
+
+	TP_printk("mmu notifier age hva: %#016lx -- %#016lx",
+		  __entry->start, __entry->end)
+);
+
+TRACE_EVENT(kvm_test_age_hva,
+	TP_PROTO(unsigned long hva),
+	TP_ARGS(hva),
+
+	TP_STRUCT__entry(
+		__field(	unsigned long,	hva		)
+	),
+
+	TP_fast_assign(
+		__entry->hva		= hva;
+	),
+
+	TP_printk("mmu notifier test age hva: %#016lx", __entry->hva)
+);
 
 #endif /* _TRACE_KVM_MAIN_H */
 

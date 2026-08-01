@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Serial Attached SCSI (SAS) Expander discovery and configuration
  *
  * Copyright (C) 2007 James E.J. Bottomley
  *		<James.Bottomley@HansenPartnership.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; version 2 only.
  */
 #include <linux/scatterlist.h>
 #include <linux/blkdev.h>
@@ -17,7 +14,7 @@
 
 #include <scsi/scsi_transport.h>
 #include <scsi/scsi_transport_sas.h>
-#include "../scsi_sas_internal.h"
+#include "scsi_sas_internal.h"
 
 static void sas_host_smp_discover(struct sas_ha_struct *sas_ha, u8 *resp_data,
 				  u8 phy_id)
@@ -117,7 +114,7 @@ static int sas_host_smp_write_gpio(struct sas_ha_struct *sas_ha, u8 *resp_data,
 				   u8 reg_type, u8 reg_index, u8 reg_count,
 				   u8 *req_data)
 {
-	struct sas_internal *i = to_sas_internal(sas_ha->core.shost->transportt);
+	struct sas_internal *i = to_sas_internal(sas_ha->shost->transportt);
 	int written;
 
 	if (i->dft->lldd_write_gpio == NULL) {
@@ -185,7 +182,7 @@ static void sas_phy_control(struct sas_ha_struct *sas_ha, u8 phy_id,
 			    enum sas_linkrate max, u8 *resp_data)
 {
 	struct sas_internal *i =
-		to_sas_internal(sas_ha->core.shost->transportt);
+		to_sas_internal(sas_ha->shost->transportt);
 	struct sas_phy_linkrates rates;
 	struct asd_sas_phy *asd_phy;
 

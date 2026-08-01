@@ -1,22 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   Copyright (C) International Business Machines Corp., 2000-2005
  *   Portions Copyright (C) Christoph Hellwig, 2001-2002
- *
- *   This program is free software;  you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY;  without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- *   the GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program;  if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include <linux/blkdev.h>
 #include <linux/fs.h>
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -26,6 +14,8 @@
 #include <linux/buffer_head.h>
 #include <linux/mempool.h>
 #include <linux/seq_file.h>
+#include <linux/writeback.h>
+#include <linux/migrate.h>
 #include "jfs_incore.h"
 #include "jfs_superblock.h"
 #include "jfs_filsys.h"
@@ -58,9 +48,9 @@ static inline void __lock_metapage(struct metapage *mp)
 	do {
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		if (metapage_locked(mp)) {
-			unlock_page(mp->page);
+			folio_unlock(mp->folio);
 			io_schedule();
-			lock_page(mp->page);
+			folio_lock(mp->folio);
 		}
 	} while (trylock_metapage(mp));
 	__set_current_state(TASK_RUNNING);
@@ -68,7 +58,7 @@ static inline void __lock_metapage(struct metapage *mp)
 }
 
 /*
- * Must have mp->page locked
+ * Must have mp->folio locked
  */
 static inline void lock_metapage(struct metapage *mp)
 {
@@ -87,36 +77,36 @@ static mempool_t *metapage_mempool;
 struct meta_anchor {
 	int mp_count;
 	atomic_t io_count;
+	blk_status_t status;
 	struct metapage *mp[MPS_PER_PAGE];
 };
-#define mp_anchor(page) ((struct meta_anchor *)page_private(page))
 
-static inline struct metapage *page_to_mp(struct page *page, int offset)
+static inline struct metapage *folio_to_mp(struct folio *folio, int offset)
 {
-	if (!PagePrivate(page))
+	struct meta_anchor *anchor = folio->private;
+
+	if (!anchor)
 		return NULL;
-	return mp_anchor(page)->mp[offset >> L2PSIZE];
+	return anchor->mp[offset >> L2PSIZE];
 }
 
-static inline int insert_metapage(struct page *page, struct metapage *mp)
+static inline int insert_metapage(struct folio *folio, struct metapage *mp)
 {
 	struct meta_anchor *a;
 	int index;
 	int l2mp_blocks;	/* log2 blocks per metapage */
 
-	if (PagePrivate(page))
-		a = mp_anchor(page);
-	else {
-		a = kzalloc(sizeof(struct meta_anchor), GFP_NOFS);
+	a = folio->private;
+	if (!a) {
+		a = kzalloc_obj(struct meta_anchor, GFP_NOFS);
 		if (!a)
 			return -ENOMEM;
-		set_page_private(page, (unsigned long)a);
-		SetPagePrivate(page);
-		kmap(page);
+		folio_attach_private(folio, a);
+		kmap(&folio->page);
 	}
 
 	if (mp) {
-		l2mp_blocks = L2PSIZE - page->mapping->host->i_blkbits;
+		l2mp_blocks = L2PSIZE - folio->mapping->host->i_blkbits;
 		index = (mp->index >> l2mp_blocks) & (MPS_PER_PAGE - 1);
 		a->mp_count++;
 		a->mp[index] = mp;
@@ -125,10 +115,10 @@ static inline int insert_metapage(struct page *page, struct metapage *mp)
 	return 0;
 }
 
-static inline void remove_metapage(struct page *page, struct metapage *mp)
+static inline void remove_metapage(struct folio *folio, struct metapage *mp)
 {
-	struct meta_anchor *a = mp_anchor(page);
-	int l2mp_blocks = L2PSIZE - page->mapping->host->i_blkbits;
+	struct meta_anchor *a = folio->private;
+	int l2mp_blocks = L2PSIZE - folio->mapping->host->i_blkbits;
 	int index;
 
 	index = (mp->index >> l2mp_blocks) & (MPS_PER_PAGE - 1);
@@ -138,48 +128,134 @@ static inline void remove_metapage(struct page *page, struct metapage *mp)
 	a->mp[index] = NULL;
 	if (--a->mp_count == 0) {
 		kfree(a);
-		set_page_private(page, 0);
-		ClearPagePrivate(page);
-		kunmap(page);
+		folio_detach_private(folio);
+		kunmap(&folio->page);
 	}
 }
 
-static inline void inc_io(struct page *page)
+static inline void inc_io(struct folio *folio)
 {
-	atomic_inc(&mp_anchor(page)->io_count);
+	struct meta_anchor *anchor = folio->private;
+
+	atomic_inc(&anchor->io_count);
 }
 
-static inline void dec_io(struct page *page, void (*handler) (struct page *))
+static inline void dec_io(struct folio *folio, blk_status_t status,
+		void (*handler)(struct folio *, blk_status_t))
 {
-	if (atomic_dec_and_test(&mp_anchor(page)->io_count))
-		handler(page);
+	struct meta_anchor *anchor = folio->private;
+
+	if (anchor->status == BLK_STS_OK)
+		anchor->status = status;
+
+	if (atomic_dec_and_test(&anchor->io_count))
+		handler(folio, anchor->status);
 }
+
+#ifdef CONFIG_MIGRATION
+static int __metapage_migrate_folio(struct address_space *mapping,
+				    struct folio *dst, struct folio *src,
+				    enum migrate_mode mode)
+{
+	struct meta_anchor *src_anchor = src->private;
+	struct metapage *mps[MPS_PER_PAGE] = {0};
+	struct metapage *mp;
+	int i, rc;
+
+	for (i = 0; i < MPS_PER_PAGE; i++) {
+		mp = src_anchor->mp[i];
+		if (mp && metapage_locked(mp))
+			return -EAGAIN;
+	}
+
+	rc = filemap_migrate_folio(mapping, dst, src, mode);
+	if (rc)
+		return rc;
+
+	for (i = 0; i < MPS_PER_PAGE; i++) {
+		mp = src_anchor->mp[i];
+		if (!mp)
+			continue;
+		if (unlikely(insert_metapage(dst, mp))) {
+			/* If error, roll-back previosly inserted pages */
+			for (int j = 0 ; j < i; j++) {
+				if (mps[j])
+					remove_metapage(dst, mps[j]);
+			}
+			return -EAGAIN;
+		}
+		mps[i] = mp;
+	}
+
+	/* Update the metapage and remove it from src */
+	for (i = 0; i < MPS_PER_PAGE; i++) {
+		mp = mps[i];
+		if (mp) {
+			int page_offset = mp->data - folio_address(src);
+
+			mp->data = folio_address(dst) + page_offset;
+			mp->folio = dst;
+			remove_metapage(src, mp);
+		}
+	}
+
+	return 0;
+}
+#endif	/* CONFIG_MIGRATION */
 
 #else
-static inline struct metapage *page_to_mp(struct page *page, int offset)
+
+static inline struct metapage *folio_to_mp(struct folio *folio, int offset)
 {
-	return PagePrivate(page) ? (struct metapage *)page_private(page) : NULL;
+	return folio->private;
 }
 
-static inline int insert_metapage(struct page *page, struct metapage *mp)
+static inline int insert_metapage(struct folio *folio, struct metapage *mp)
 {
 	if (mp) {
-		set_page_private(page, (unsigned long)mp);
-		SetPagePrivate(page);
-		kmap(page);
+		folio_attach_private(folio, mp);
+		kmap(&folio->page);
 	}
 	return 0;
 }
 
-static inline void remove_metapage(struct page *page, struct metapage *mp)
+static inline void remove_metapage(struct folio *folio, struct metapage *mp)
 {
-	set_page_private(page, 0);
-	ClearPagePrivate(page);
-	kunmap(page);
+	folio_detach_private(folio);
+	kunmap(&folio->page);
 }
 
-#define inc_io(page) do {} while(0)
-#define dec_io(page, handler) handler(page)
+#define inc_io(folio) do {} while(0)
+#define dec_io(folio, status, handler) handler(folio, status)
+
+#ifdef CONFIG_MIGRATION
+static int __metapage_migrate_folio(struct address_space *mapping,
+				    struct folio *dst, struct folio *src,
+				    enum migrate_mode mode)
+{
+	struct metapage *mp;
+	int page_offset;
+	int rc;
+
+	mp = folio_to_mp(src, 0);
+	if (metapage_locked(mp))
+		return -EAGAIN;
+
+	rc = filemap_migrate_folio(mapping, dst, src, mode);
+	if (rc)
+		return rc;
+
+	if (unlikely(insert_metapage(dst, mp)))
+		return -EAGAIN;
+
+	page_offset = mp->data - folio_address(src);
+	mp->data = folio_address(dst) + page_offset;
+	mp->folio = dst;
+	remove_metapage(src, mp);
+
+	return 0;
+}
+#endif	/* CONFIG_MIGRATION */
 
 #endif
 
@@ -194,6 +270,7 @@ static inline struct metapage *alloc_metapage(gfp_t gfp_mask)
 		mp->clsn = 0;
 		mp->log = NULL;
 		init_waitqueue_head(&mp->wait);
+		INIT_LIST_HEAD(&mp->synclist);
 	}
 	return mp;
 }
@@ -230,12 +307,12 @@ void metapage_exit(void)
 	kmem_cache_destroy(metapage_cache);
 }
 
-static inline void drop_metapage(struct page *page, struct metapage *mp)
+static inline void drop_metapage(struct folio *folio, struct metapage *mp)
 {
 	if (mp->count || mp->nohomeok || test_bit(META_dirty, &mp->flag) ||
 	    test_bit(META_io, &mp->flag))
 		return;
-	remove_metapage(page, mp);
+	remove_metapage(folio, mp);
 	INCREMENT(mpStat.pagefree);
 	free_metapage(mp);
 }
@@ -269,23 +346,20 @@ static sector_t metapage_get_blocks(struct inode *inode, sector_t lblock,
 	return lblock;
 }
 
-static void last_read_complete(struct page *page)
+static void last_read_complete(struct folio *folio, blk_status_t status)
 {
-	if (!PageError(page))
-		SetPageUptodate(page);
-	unlock_page(page);
+	if (status)
+		printk(KERN_ERR "Read error %d at %#llx\n", status,
+				folio_pos(folio));
+
+	folio_end_read(folio, status == 0);
 }
 
 static void metapage_read_end_io(struct bio *bio)
 {
-	struct page *page = bio->bi_private;
+	struct folio *folio = bio->bi_private;
 
-	if (bio->bi_status) {
-		printk(KERN_ERR "metapage_read_end_io: I/O error\n");
-		SetPageError(page);
-	}
-
-	dec_io(page, last_read_complete);
+	dec_io(folio, bio->bi_status, last_read_complete);
 	bio_put(bio);
 }
 
@@ -306,18 +380,24 @@ static void remove_from_logsync(struct metapage *mp)
 		mp->lsn = 0;
 		mp->clsn = 0;
 		log->count--;
-		list_del(&mp->synclist);
+		list_del_init(&mp->synclist);
 	}
 	LOGSYNC_UNLOCK(log, flags);
 }
 
-static void last_write_complete(struct page *page)
+static void last_write_complete(struct folio *folio, blk_status_t status)
 {
 	struct metapage *mp;
 	unsigned int offset;
 
+	if (status) {
+		int err = blk_status_to_errno(status);
+		printk(KERN_ERR "metapage_write_end_io: I/O error\n");
+		mapping_set_error(folio->mapping, err);
+	}
+
 	for (offset = 0; offset < PAGE_SIZE; offset += PSIZE) {
-		mp = page_to_mp(page, offset);
+		mp = folio_to_mp(folio, offset);
 		if (mp && test_bit(META_io, &mp->flag)) {
 			if (mp->lsn)
 				remove_from_logsync(mp);
@@ -328,28 +408,25 @@ static void last_write_complete(struct page *page)
 		 * safe unless I have the page locked
 		 */
 	}
-	end_page_writeback(page);
+	folio_end_writeback(folio);
 }
 
 static void metapage_write_end_io(struct bio *bio)
 {
-	struct page *page = bio->bi_private;
+	struct folio *folio = bio->bi_private;
 
-	BUG_ON(!PagePrivate(page));
+	BUG_ON(!folio->private);
 
-	if (bio->bi_status) {
-		printk(KERN_ERR "metapage_write_end_io: I/O error\n");
-		SetPageError(page);
-	}
-	dec_io(page, last_write_complete);
+	dec_io(folio, bio->bi_status, last_write_complete);
 	bio_put(bio);
 }
 
-static int metapage_writepage(struct page *page, struct writeback_control *wbc)
+static int metapage_write_folio(struct folio *folio,
+		struct writeback_control *wbc)
 {
 	struct bio *bio = NULL;
 	int block_offset;	/* block offset of mp within page */
-	struct inode *inode = page->mapping->host;
+	struct inode *inode = folio->mapping->host;
 	int blocks_per_mp = JFS_SBI(inode->i_sb)->nbperpage;
 	int len;
 	int xlen;
@@ -365,14 +442,13 @@ static int metapage_writepage(struct page *page, struct writeback_control *wbc)
 	int offset;
 	int bad_blocks = 0;
 
-	page_start = (sector_t)page->index <<
-		     (PAGE_SHIFT - inode->i_blkbits);
-	BUG_ON(!PageLocked(page));
-	BUG_ON(PageWriteback(page));
-	set_page_writeback(page);
+	page_start = folio_pos(folio) >> inode->i_blkbits;
+	BUG_ON(!folio_test_locked(folio));
+	BUG_ON(folio_test_writeback(folio));
+	folio_start_writeback(folio);
 
 	for (offset = 0; offset < PAGE_SIZE; offset += PSIZE) {
-		mp = page_to_mp(page, offset);
+		mp = folio_to_mp(folio, offset);
 
 		if (!mp || !test_bit(META_dirty, &mp->flag))
 			continue;
@@ -401,22 +477,20 @@ static int metapage_writepage(struct page *page, struct writeback_control *wbc)
 				continue;
 			}
 			/* Not contiguous */
-			if (bio_add_page(bio, page, bio_bytes, bio_offset) <
-			    bio_bytes)
-				goto add_failed;
+			bio_add_folio_nofail(bio, folio, bio_bytes, bio_offset);
 			/*
 			 * Increment counter before submitting i/o to keep
 			 * count from hitting zero before we're through
 			 */
-			inc_io(page);
+			inc_io(folio);
 			if (!bio->bi_iter.bi_size)
 				goto dump_bio;
 			submit_bio(bio);
 			nr_underway++;
 			bio = NULL;
 		} else
-			inc_io(page);
-		xlen = (PAGE_SIZE - offset) >> inode->i_blkbits;
+			inc_io(folio);
+		xlen = (folio_size(folio) - offset) >> inode->i_blkbits;
 		pblock = metapage_get_blocks(inode, lblock, &xlen);
 		if (!pblock) {
 			printk(KERN_ERR "JFS: metapage_get_blocks failed\n");
@@ -429,12 +503,10 @@ static int metapage_writepage(struct page *page, struct writeback_control *wbc)
 		}
 		len = min(xlen, (int)JFS_SBI(inode->i_sb)->nbperpage);
 
-		bio = bio_alloc(GFP_NOFS, 1);
-		bio_set_dev(bio, inode->i_sb->s_bdev);
+		bio = bio_alloc(inode->i_sb->s_bdev, 1, REQ_OP_WRITE, GFP_NOFS);
 		bio->bi_iter.bi_sector = pblock << (inode->i_blkbits - 9);
 		bio->bi_end_io = metapage_write_end_io;
-		bio->bi_private = page;
-		bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
+		bio->bi_private = folio;
 
 		/* Don't call bio_add_page yet, we may add to this vec */
 		bio_offset = offset;
@@ -444,8 +516,7 @@ static int metapage_writepage(struct page *page, struct writeback_control *wbc)
 		next_block = lblock + len;
 	}
 	if (bio) {
-		if (bio_add_page(bio, page, bio_bytes, bio_offset) < bio_bytes)
-				goto add_failed;
+		bio_add_folio_nofail(bio, folio, bio_bytes, bio_offset);
 		if (!bio->bi_iter.bi_size)
 			goto dump_bio;
 
@@ -453,49 +524,58 @@ static int metapage_writepage(struct page *page, struct writeback_control *wbc)
 		nr_underway++;
 	}
 	if (redirty)
-		redirty_page_for_writepage(wbc, page);
+		folio_redirty_for_writepage(wbc, folio);
 
-	unlock_page(page);
+	folio_unlock(folio);
 
 	if (bad_blocks)
 		goto err_out;
 
 	if (nr_underway == 0)
-		end_page_writeback(page);
+		folio_end_writeback(folio);
 
 	return 0;
-add_failed:
-	/* We should never reach here, since we're only adding one vec */
-	printk(KERN_ERR "JFS: bio_add_page failed unexpectedly\n");
-	goto skip;
 dump_bio:
 	print_hex_dump(KERN_ERR, "JFS: dump of bio: ", DUMP_PREFIX_ADDRESS, 16,
 		       4, bio, sizeof(*bio), 0);
-skip:
 	bio_put(bio);
-	unlock_page(page);
-	dec_io(page, last_write_complete);
+	folio_unlock(folio);
+	dec_io(folio, BLK_STS_OK, last_write_complete);
 err_out:
 	while (bad_blocks--)
-		dec_io(page, last_write_complete);
+		dec_io(folio, BLK_STS_OK, last_write_complete);
 	return -EIO;
 }
 
-static int metapage_readpage(struct file *fp, struct page *page)
+static int metapage_writepages(struct address_space *mapping,
+		struct writeback_control *wbc)
 {
-	struct inode *inode = page->mapping->host;
+	struct blk_plug plug;
+	struct folio *folio = NULL;
+	int err;
+
+	blk_start_plug(&plug);
+	while ((folio = writeback_iter(mapping, wbc, folio, &err)))
+		err = metapage_write_folio(folio, wbc);
+	blk_finish_plug(&plug);
+
+	return err;
+}
+
+static int metapage_read_folio(struct file *fp, struct folio *folio)
+{
+	struct inode *inode = folio->mapping->host;
 	struct bio *bio = NULL;
 	int block_offset;
-	int blocks_per_page = PAGE_SIZE >> inode->i_blkbits;
+	int blocks_per_page = i_blocks_per_folio(inode, folio);
 	sector_t page_start;	/* address of page in fs blocks */
 	sector_t pblock;
 	int xlen;
 	unsigned int len;
 	int offset;
 
-	BUG_ON(!PageLocked(page));
-	page_start = (sector_t)page->index <<
-		     (PAGE_SHIFT - inode->i_blkbits);
+	BUG_ON(!folio_test_locked(folio));
+	page_start = folio_pos(folio) >> inode->i_blkbits;
 
 	block_offset = 0;
 	while (block_offset < blocks_per_page) {
@@ -503,23 +583,21 @@ static int metapage_readpage(struct file *fp, struct page *page)
 		pblock = metapage_get_blocks(inode, page_start + block_offset,
 					     &xlen);
 		if (pblock) {
-			if (!PagePrivate(page))
-				insert_metapage(page, NULL);
-			inc_io(page);
+			if (!folio->private)
+				insert_metapage(folio, NULL);
+			inc_io(folio);
 			if (bio)
 				submit_bio(bio);
 
-			bio = bio_alloc(GFP_NOFS, 1);
-			bio_set_dev(bio, inode->i_sb->s_bdev);
+			bio = bio_alloc(inode->i_sb->s_bdev, 1, REQ_OP_READ,
+					GFP_NOFS);
 			bio->bi_iter.bi_sector =
 				pblock << (inode->i_blkbits - 9);
 			bio->bi_end_io = metapage_read_end_io;
-			bio->bi_private = page;
-			bio_set_op_attrs(bio, REQ_OP_READ, 0);
+			bio->bi_private = folio;
 			len = xlen << inode->i_blkbits;
 			offset = block_offset << inode->i_blkbits;
-			if (bio_add_page(bio, page, len, offset) < len)
-				goto add_failed;
+			bio_add_folio_nofail(bio, folio, len, offset);
 			block_offset += xlen;
 		} else
 			block_offset++;
@@ -527,62 +605,80 @@ static int metapage_readpage(struct file *fp, struct page *page)
 	if (bio)
 		submit_bio(bio);
 	else
-		unlock_page(page);
+		folio_unlock(folio);
 
 	return 0;
-
-add_failed:
-	printk(KERN_ERR "JFS: bio_add_page failed unexpectedly\n");
-	bio_put(bio);
-	dec_io(page, last_read_complete);
-	return -EIO;
 }
 
-static int metapage_releasepage(struct page *page, gfp_t gfp_mask)
+static bool metapage_release_folio(struct folio *folio, gfp_t gfp_mask)
 {
 	struct metapage *mp;
-	int ret = 1;
+	bool ret = true;
 	int offset;
 
 	for (offset = 0; offset < PAGE_SIZE; offset += PSIZE) {
-		mp = page_to_mp(page, offset);
+		mp = folio_to_mp(folio, offset);
 
 		if (!mp)
 			continue;
 
-		jfs_info("metapage_releasepage: mp = 0x%p", mp);
+		jfs_info("metapage_release_folio: mp = 0x%p", mp);
 		if (mp->count || mp->nohomeok ||
 		    test_bit(META_dirty, &mp->flag)) {
 			jfs_info("count = %ld, nohomeok = %d", mp->count,
 				 mp->nohomeok);
-			ret = 0;
+			ret = false;
 			continue;
 		}
 		if (mp->lsn)
 			remove_from_logsync(mp);
-		remove_metapage(page, mp);
+		remove_metapage(folio, mp);
 		INCREMENT(mpStat.pagefree);
 		free_metapage(mp);
 	}
 	return ret;
 }
 
-static void metapage_invalidatepage(struct page *page, unsigned int offset,
-				    unsigned int length)
+#ifdef CONFIG_MIGRATION
+/*
+ * metapage_migrate_folio - Migration function for JFS metapages
+ */
+static int metapage_migrate_folio(struct address_space *mapping,
+				  struct folio *dst, struct folio *src,
+				  enum migrate_mode mode)
 {
-	BUG_ON(offset || length < PAGE_SIZE);
+	int expected_count;
 
-	BUG_ON(PageWriteback(page));
+	if (!src->private)
+		return filemap_migrate_folio(mapping, dst, src, mode);
 
-	metapage_releasepage(page, 0);
+	/* Check whether page does not have extra refs before we do more work */
+	expected_count = folio_expected_ref_count(src) + 1;
+	if (folio_ref_count(src) != expected_count)
+		return -EAGAIN;
+	return __metapage_migrate_folio(mapping, dst, src, mode);
+}
+#else
+#define metapage_migrate_folio NULL
+#endif	/* CONFIG_MIGRATION */
+
+static void metapage_invalidate_folio(struct folio *folio, size_t offset,
+				    size_t length)
+{
+	BUG_ON(offset || length < folio_size(folio));
+
+	BUG_ON(folio_test_writeback(folio));
+
+	metapage_release_folio(folio, 0);
 }
 
 const struct address_space_operations jfs_metapage_aops = {
-	.readpage	= metapage_readpage,
-	.writepage	= metapage_writepage,
-	.releasepage	= metapage_releasepage,
-	.invalidatepage	= metapage_invalidatepage,
-	.set_page_dirty	= __set_page_dirty_nobuffers,
+	.read_folio	= metapage_read_folio,
+	.writepages	= metapage_writepages,
+	.release_folio	= metapage_release_folio,
+	.invalidate_folio = metapage_invalidate_folio,
+	.dirty_folio	= filemap_dirty_folio,
+	.migrate_folio	= metapage_migrate_folio,
 };
 
 struct metapage *__get_metapage(struct inode *inode, unsigned long lblock,
@@ -593,11 +689,11 @@ struct metapage *__get_metapage(struct inode *inode, unsigned long lblock,
 	int l2bsize;
 	struct address_space *mapping;
 	struct metapage *mp = NULL;
-	struct page *page;
+	struct folio *folio;
 	unsigned long page_index;
 	unsigned long page_offset;
 
-	jfs_info("__get_metapage: ino = %ld, lblock = 0x%lx, abs=%d",
+	jfs_info("__get_metapage: ino = %llu, lblock = 0x%lx, abs=%d",
 		 inode->i_ino, lblock, absolute);
 
 	l2bsize = inode->i_blkbits;
@@ -624,22 +720,22 @@ struct metapage *__get_metapage(struct inode *inode, unsigned long lblock,
 	}
 
 	if (new && (PSIZE == PAGE_SIZE)) {
-		page = grab_cache_page(mapping, page_index);
-		if (!page) {
-			jfs_err("grab_cache_page failed!");
+		folio = filemap_grab_folio(mapping, page_index);
+		if (IS_ERR(folio)) {
+			jfs_err("filemap_grab_folio failed!");
 			return NULL;
 		}
-		SetPageUptodate(page);
+		folio_mark_uptodate(folio);
 	} else {
-		page = read_mapping_page(mapping, page_index, NULL);
-		if (IS_ERR(page) || !PageUptodate(page)) {
+		folio = read_mapping_folio(mapping, page_index, NULL);
+		if (IS_ERR(folio)) {
 			jfs_err("read_mapping_page failed!");
 			return NULL;
 		}
-		lock_page(page);
+		folio_lock(folio);
 	}
 
-	mp = page_to_mp(page, page_offset);
+	mp = folio_to_mp(folio, page_offset);
 	if (mp) {
 		if (mp->logical_size != size) {
 			jfs_error(inode->i_sb,
@@ -665,16 +761,16 @@ struct metapage *__get_metapage(struct inode *inode, unsigned long lblock,
 		mp = alloc_metapage(GFP_NOFS);
 		if (!mp)
 			goto unlock;
-		mp->page = page;
+		mp->folio = folio;
 		mp->sb = inode->i_sb;
 		mp->flag = 0;
 		mp->xflag = COMMIT_PAGE;
 		mp->count = 1;
 		mp->nohomeok = 0;
 		mp->logical_size = size;
-		mp->data = page_address(page) + page_offset;
+		mp->data = folio_address(folio) + page_offset;
 		mp->index = lblock;
-		if (unlikely(insert_metapage(page, mp))) {
+		if (unlikely(insert_metapage(folio, mp))) {
 			free_metapage(mp);
 			goto unlock;
 		}
@@ -686,92 +782,118 @@ struct metapage *__get_metapage(struct inode *inode, unsigned long lblock,
 		memset(mp->data, 0, PSIZE);
 	}
 
-	unlock_page(page);
+	folio_unlock(folio);
 	jfs_info("__get_metapage: returning = 0x%p data = 0x%p", mp, mp->data);
 	return mp;
 
 unlock:
-	unlock_page(page);
+	folio_unlock(folio);
 	return NULL;
 }
 
 void grab_metapage(struct metapage * mp)
 {
 	jfs_info("grab_metapage: mp = 0x%p", mp);
-	get_page(mp->page);
-	lock_page(mp->page);
+	folio_get(mp->folio);
+	folio_lock(mp->folio);
 	mp->count++;
 	lock_metapage(mp);
-	unlock_page(mp->page);
+	folio_unlock(mp->folio);
+}
+
+static int metapage_write_one(struct folio *folio)
+{
+	struct address_space *mapping = folio->mapping;
+	struct writeback_control wbc = {
+		.sync_mode = WB_SYNC_ALL,
+		.nr_to_write = folio_nr_pages(folio),
+	};
+	int ret = 0;
+
+	BUG_ON(!folio_test_locked(folio));
+
+	folio_wait_writeback(folio);
+
+	if (folio_clear_dirty_for_io(folio)) {
+		folio_get(folio);
+		ret = metapage_write_folio(folio, &wbc);
+		if (ret == 0)
+			folio_wait_writeback(folio);
+		folio_put(folio);
+	} else {
+		folio_unlock(folio);
+	}
+
+	if (!ret)
+		ret = filemap_check_errors(mapping);
+	return ret;
 }
 
 void force_metapage(struct metapage *mp)
 {
-	struct page *page = mp->page;
+	struct folio *folio = mp->folio;
 	jfs_info("force_metapage: mp = 0x%p", mp);
 	set_bit(META_forcewrite, &mp->flag);
 	clear_bit(META_sync, &mp->flag);
-	get_page(page);
-	lock_page(page);
-	set_page_dirty(page);
-	if (write_one_page(page))
-		jfs_error(mp->sb, "write_one_page() failed\n");
+	folio_get(folio);
+	folio_lock(folio);
+	folio_mark_dirty(folio);
+	if (metapage_write_one(folio))
+		jfs_error(mp->sb, "metapage_write_one() failed\n");
 	clear_bit(META_forcewrite, &mp->flag);
-	put_page(page);
+	folio_put(folio);
 }
 
 void hold_metapage(struct metapage *mp)
 {
-	lock_page(mp->page);
+	folio_lock(mp->folio);
 }
 
 void put_metapage(struct metapage *mp)
 {
 	if (mp->count || mp->nohomeok) {
 		/* Someone else will release this */
-		unlock_page(mp->page);
+		folio_unlock(mp->folio);
 		return;
 	}
-	get_page(mp->page);
+	folio_get(mp->folio);
 	mp->count++;
 	lock_metapage(mp);
-	unlock_page(mp->page);
+	folio_unlock(mp->folio);
 	release_metapage(mp);
 }
 
 void release_metapage(struct metapage * mp)
 {
-	struct page *page = mp->page;
+	struct folio *folio = mp->folio;
 	jfs_info("release_metapage: mp = 0x%p, flag = 0x%lx", mp, mp->flag);
 
-	BUG_ON(!page);
-
-	lock_page(page);
+	folio_lock(folio);
 	unlock_metapage(mp);
 
 	assert(mp->count);
 	if (--mp->count || mp->nohomeok) {
-		unlock_page(page);
-		put_page(page);
+		folio_unlock(folio);
+		folio_put(folio);
 		return;
 	}
 
 	if (test_bit(META_dirty, &mp->flag)) {
-		set_page_dirty(page);
+		folio_mark_dirty(folio);
 		if (test_bit(META_sync, &mp->flag)) {
 			clear_bit(META_sync, &mp->flag);
-			if (write_one_page(page))
-				jfs_error(mp->sb, "write_one_page() failed\n");
-			lock_page(page); /* write_one_page unlocks the page */
+			if (metapage_write_one(folio))
+				jfs_error(mp->sb, "metapage_write_one() failed\n");
+			folio_lock(folio);
 		}
 	} else if (mp->lsn)	/* discard_metapage doesn't remove it */
 		remove_from_logsync(mp);
 
 	/* Try to keep metapages from using up too much memory */
-	drop_metapage(page, mp);
+	drop_metapage(folio, mp);
 
-	unlock_page(page);
-	put_page(page);
+	folio_unlock(folio);
+	folio_put(folio);
 }
 
 void __invalidate_metapages(struct inode *ip, s64 addr, int len)
@@ -783,7 +905,6 @@ void __invalidate_metapages(struct inode *ip, s64 addr, int len)
 	struct address_space *mapping =
 		JFS_SBI(ip->i_sb)->direct_inode->i_mapping;
 	struct metapage *mp;
-	struct page *page;
 	unsigned int offset;
 
 	/*
@@ -792,11 +913,12 @@ void __invalidate_metapages(struct inode *ip, s64 addr, int len)
 	 */
 	for (lblock = addr & ~(BlocksPerPage - 1); lblock < addr + len;
 	     lblock += BlocksPerPage) {
-		page = find_lock_page(mapping, lblock >> l2BlocksPerPage);
-		if (!page)
+		struct folio *folio = filemap_lock_folio(mapping,
+				lblock >> l2BlocksPerPage);
+		if (IS_ERR(folio))
 			continue;
 		for (offset = 0; offset < PAGE_SIZE; offset += PSIZE) {
-			mp = page_to_mp(page, offset);
+			mp = folio_to_mp(folio, offset);
 			if (!mp)
 				continue;
 			if (mp->index < addr)
@@ -809,13 +931,13 @@ void __invalidate_metapages(struct inode *ip, s64 addr, int len)
 			if (mp->lsn)
 				remove_from_logsync(mp);
 		}
-		unlock_page(page);
-		put_page(page);
+		folio_unlock(folio);
+		folio_put(folio);
 	}
 }
 
 #ifdef CONFIG_JFS_STATISTICS
-static int jfs_mpstat_proc_show(struct seq_file *m, void *v)
+int jfs_mpstat_proc_show(struct seq_file *m, void *v)
 {
 	seq_printf(m,
 		       "JFS Metapage statistics\n"
@@ -828,16 +950,4 @@ static int jfs_mpstat_proc_show(struct seq_file *m, void *v)
 		       mpStat.lockwait);
 	return 0;
 }
-
-static int jfs_mpstat_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, jfs_mpstat_proc_show, NULL);
-}
-
-const struct file_operations jfs_mpstat_proc_fops = {
-	.open		= jfs_mpstat_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 #endif

@@ -42,7 +42,7 @@ What:		/sys/bus/coresight/devices/<memory_map>.stm/status
 Date:		April 2016
 KernelVersion:	4.7
 Contact:	Mathieu Poirier <mathieu.poirier@linaro.org>
-Description:	(R) List various control and status registers.  The specific
+Description:	(Read) List various control and status registers.  The specific
 		layout and content is driver specific.
 
 What:		/sys/bus/coresight/devices/<memory_map>.stm/traceid
@@ -51,3 +51,9 @@ KernelVersion:	4.7
 Contact:	Mathieu Poirier <mathieu.poirier@linaro.org>
 Description:	(RW) Holds the trace ID that will appear in the trace stream
 		coming from this trace entity.
+
+What:           /sys/bus/coresight/devices/<memory_map>.stm/label
+Date:           Aug 2025
+KernelVersion   6.18
+Contact:        Mao Jinlong <quic_jinlmao@quicinc.com>
+Description:    (Read) Show hardware context information of device.

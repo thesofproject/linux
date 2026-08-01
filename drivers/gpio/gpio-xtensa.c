@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2013 TangoTec Ltd.
  * Author: Baruch Siach <baruch@tkos.co.il>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Driver for the Xtensa LX4 GPIO32 Option
  *
@@ -30,7 +27,7 @@
 
 #include <linux/err.h>
 #include <linux/module.h>
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <linux/bitops.h>
 #include <linux/platform_device.h>
 
@@ -47,15 +44,14 @@ static inline unsigned long enable_cp(unsigned long *cpenable)
 	unsigned long flags;
 
 	local_irq_save(flags);
-	RSR_CPENABLE(*cpenable);
-	WSR_CPENABLE(*cpenable | BIT(XCHAL_CP_ID_XTIOP));
-
+	*cpenable = xtensa_get_sr(cpenable);
+	xtensa_set_sr(*cpenable | BIT(XCHAL_CP_ID_XTIOP), cpenable);
 	return flags;
 }
 
 static inline void disable_cp(unsigned long flags, unsigned long cpenable)
 {
-	WSR_CPENABLE(cpenable);
+	xtensa_set_sr(cpenable, cpenable);
 	local_irq_restore(flags);
 }
 
@@ -75,7 +71,7 @@ static inline void disable_cp(unsigned long flags, unsigned long cpenable)
 
 static int xtensa_impwire_get_direction(struct gpio_chip *gc, unsigned offset)
 {
-	return 1; /* input only */
+	return GPIO_LINE_DIRECTION_IN; /* input only */
 }
 
 static int xtensa_impwire_get_value(struct gpio_chip *gc, unsigned offset)
@@ -90,15 +86,9 @@ static int xtensa_impwire_get_value(struct gpio_chip *gc, unsigned offset)
 	return !!(impwire & BIT(offset));
 }
 
-static void xtensa_impwire_set_value(struct gpio_chip *gc, unsigned offset,
-				    int value)
-{
-	BUG(); /* output only; should never be called */
-}
-
 static int xtensa_expstate_get_direction(struct gpio_chip *gc, unsigned offset)
 {
-	return 0; /* output only */
+	return GPIO_LINE_DIRECTION_OUT; /* output only */
 }
 
 static int xtensa_expstate_get_value(struct gpio_chip *gc, unsigned offset)
@@ -113,7 +103,7 @@ static int xtensa_expstate_get_value(struct gpio_chip *gc, unsigned offset)
 	return !!(expstate & BIT(offset));
 }
 
-static void xtensa_expstate_set_value(struct gpio_chip *gc, unsigned offset,
+static int xtensa_expstate_set_value(struct gpio_chip *gc, unsigned int offset,
 				     int value)
 {
 	unsigned long flags, saved_cpenable;
@@ -124,6 +114,8 @@ static void xtensa_expstate_set_value(struct gpio_chip *gc, unsigned offset,
 	__asm__ __volatile__("wrmsk_expstate %0, %1"
 			     :: "a" (val), "a" (mask));
 	disable_cp(flags, saved_cpenable);
+
+	return 0;
 }
 
 static struct gpio_chip impwire_chip = {
@@ -132,7 +124,6 @@ static struct gpio_chip impwire_chip = {
 	.ngpio		= 32,
 	.get_direction	= xtensa_impwire_get_direction,
 	.get		= xtensa_impwire_get_value,
-	.set		= xtensa_impwire_set_value,
 };
 
 static struct gpio_chip expstate_chip = {

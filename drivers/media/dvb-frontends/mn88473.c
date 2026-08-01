@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Panasonic MN88473 DVB-T/T2/C demodulator driver
  *
  * Copyright (C) 2014 Antti Palosaari <crope@iki.fi>
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2 of the License, or
- *    (at your option) any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
  */
 
 #include "mn88473_priv.h"
@@ -615,8 +606,7 @@ static const struct dvb_frontend_ops mn88473_ops = {
 	.read_status = mn88473_read_status,
 };
 
-static int mn88473_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int mn88473_probe(struct i2c_client *client)
 {
 	struct mn88473_config *config = client->dev.platform_data;
 	struct mn88473_dev *dev;
@@ -636,7 +626,7 @@ static int mn88473_probe(struct i2c_client *client,
 		goto err;
 	}
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	if (dev == NULL) {
 		ret = -ENOMEM;
 		goto err;
@@ -666,12 +656,11 @@ static int mn88473_probe(struct i2c_client *client,
 	 * Also, register bank 2 do not support sequential I/O. Only single
 	 * register write or read is allowed to that bank.
 	 */
-	dev->client[1] = i2c_new_dummy(client->adapter, 0x1a);
-	if (dev->client[1] == NULL) {
-		ret = -ENODEV;
+	dev->client[1] = i2c_new_dummy_device(client->adapter, 0x1a);
+	if (IS_ERR(dev->client[1])) {
+		ret = PTR_ERR(dev->client[1]);
 		dev_err(&client->dev, "I2C registration failed\n");
-		if (ret)
-			goto err_regmap_0_regmap_exit;
+		goto err_regmap_0_regmap_exit;
 	}
 	dev->regmap[1] = regmap_init_i2c(dev->client[1], &regmap_config);
 	if (IS_ERR(dev->regmap[1])) {
@@ -680,12 +669,11 @@ static int mn88473_probe(struct i2c_client *client,
 	}
 	i2c_set_clientdata(dev->client[1], dev);
 
-	dev->client[2] = i2c_new_dummy(client->adapter, 0x1c);
-	if (dev->client[2] == NULL) {
-		ret = -ENODEV;
+	dev->client[2] = i2c_new_dummy_device(client->adapter, 0x1c);
+	if (IS_ERR(dev->client[2])) {
+		ret = PTR_ERR(dev->client[2]);
 		dev_err(&client->dev, "2nd I2C registration failed\n");
-		if (ret)
-			goto err_regmap_1_regmap_exit;
+		goto err_regmap_1_regmap_exit;
 	}
 	dev->regmap[2] = regmap_init_i2c(dev->client[2], &regmap_config);
 	if (IS_ERR(dev->regmap[2])) {
@@ -737,7 +725,7 @@ err:
 	return ret;
 }
 
-static int mn88473_remove(struct i2c_client *client)
+static void mn88473_remove(struct i2c_client *client)
 {
 	struct mn88473_dev *dev = i2c_get_clientdata(client);
 
@@ -752,13 +740,11 @@ static int mn88473_remove(struct i2c_client *client)
 	regmap_exit(dev->regmap[0]);
 
 	kfree(dev);
-
-	return 0;
 }
 
 static const struct i2c_device_id mn88473_id_table[] = {
-	{"mn88473", 0},
-	{}
+	{ .name = "mn88473" },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, mn88473_id_table);
 

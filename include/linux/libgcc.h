@@ -1,19 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * include/lib/libgcc.h
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see the file COPYING, or write
- * to the Free Software Foundation, Inc.
  */
 
 #ifndef __LIB_LIBGCC_H
@@ -39,5 +26,16 @@ typedef union {
 	struct DWstruct s;
 	long long ll;
 } DWunion;
+
+long long notrace __ashldi3(long long u, word_type b);
+long long notrace __ashrdi3(long long u, word_type b);
+word_type notrace __cmpdi2(long long a, long long b);
+long long notrace __lshrdi3(long long u, word_type b);
+long long notrace __muldi3(long long u, long long v);
+word_type notrace __ucmpdi2(unsigned long long a, unsigned long long b);
+
+#ifdef CONFIG_HAVE_ARCH_LIBGCC_H
+#include <asm/libgcc.h>
+#endif
 
 #endif /* __ASM_LIBGCC_H */

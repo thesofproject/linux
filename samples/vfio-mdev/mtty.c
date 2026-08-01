@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Mediated virtual PCI serial host device driver
  *
@@ -5,18 +6,12 @@
  *     Author: Neo Jia <cjia@nvidia.com>
  *             Kirti Wankhede <kwankhede@nvidia.com>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  * Sample driver that creates mdev device that simulates serial port over PCI
  * card.
- *
  */
 
 #include <linux/init.h>
 #include <linux/module.h>
-#include <linux/device.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/poll.h>
@@ -24,7 +19,6 @@
 #include <linux/cdev.h>
 #include <linux/sched.h>
 #include <linux/wait.h>
-#include <linux/uuid.h>
 #include <linux/vfio.h>
 #include <linux/iommu.h>
 #include <linux/sysfs.h>
@@ -35,6 +29,8 @@
 #include <linux/serial.h>
 #include <uapi/linux/serial_reg.h>
 #include <linux/eventfd.h>
+#include <linux/anon_inodes.h>
+
 /*
  * #defines
  */
@@ -72,12 +68,16 @@
  * Global Structures
  */
 
-struct mtty_dev {
+static const struct class mtty_class = {
+	.name	= MTTY_CLASS_NAME
+};
+
+static struct mtty_dev {
 	dev_t		vd_devt;
-	struct class	*vd_class;
 	struct cdev	vd_cdev;
 	struct idr	vd_idr;
 	struct device	dev;
+	struct mdev_parent parent;
 } mtty_dev;
 
 struct mdev_region_info {
@@ -88,7 +88,7 @@ struct mdev_region_info {
 };
 
 #if defined(DEBUG_REGS)
-const char *wr_reg[] = {
+static const char *wr_reg[] = {
 	"TX",
 	"IER",
 	"FCR",
@@ -99,7 +99,7 @@ const char *wr_reg[] = {
 	"SCR"
 };
 
-const char *rd_reg[] = {
+static const char *rd_reg[] = {
 	"RX",
 	"IER",
 	"IIR",
@@ -129,9 +129,32 @@ struct serial_port {
 	u8 intr_trigger_level;  /* interrupt trigger level */
 };
 
+struct mtty_data {
+	u64 magic;
+#define MTTY_MAGIC 0x7e9d09898c3e2c4e /* Nothing clever, just random */
+	u32 major_ver;
+#define MTTY_MAJOR_VER 1
+	u32 minor_ver;
+#define MTTY_MINOR_VER 0
+	u32 nr_ports;
+	u32 flags;
+	struct serial_port ports[2];
+};
+
+struct mdev_state;
+
+struct mtty_migration_file {
+	struct file *filp;
+	struct mutex lock;
+	struct mdev_state *mdev_state;
+	struct mtty_data data;
+	ssize_t filled_size;
+	u8 disabled:1;
+};
+
 /* State of each mdev device */
 struct mdev_state {
-	int irq_fd;
+	struct vfio_device vdev;
 	struct eventfd_ctx *intx_evtfd;
 	struct eventfd_ctx *msi_evtfd;
 	int irq_index;
@@ -145,33 +168,41 @@ struct mdev_state {
 	struct mutex rxtx_lock;
 	struct vfio_device_info dev_info;
 	int nr_ports;
+	enum vfio_device_mig_state state;
+	struct mutex state_mutex;
+	struct mutex reset_mutex;
+	struct mtty_migration_file *saving_migf;
+	struct mtty_migration_file *resuming_migf;
+	u8 deferred_reset:1;
+	u8 intx_mask:1;
 };
 
-struct mutex mdev_list_lock;
-struct list_head mdev_devices_list;
+static struct mtty_type {
+	struct mdev_type type;
+	int nr_ports;
+} mtty_types[2] = {
+	{ .nr_ports = 1, .type.sysfs_name = "1",
+	  .type.pretty_name = "Single port serial" },
+	{ .nr_ports = 2, .type.sysfs_name = "2",
+	  .type.pretty_name = "Dual port serial" },
+};
+
+static struct mdev_type *mtty_mdev_types[] = {
+	&mtty_types[0].type,
+	&mtty_types[1].type,
+};
+
+static atomic_t mdev_avail_ports = ATOMIC_INIT(MAX_MTTYS);
 
 static const struct file_operations vd_fops = {
 	.owner          = THIS_MODULE,
 };
 
-/* function prototypes */
-
-static int mtty_trigger_interrupt(uuid_le uuid);
+static const struct vfio_device_ops mtty_dev_ops;
 
 /* Helper functions */
-static struct mdev_state *find_mdev_state_by_uuid(uuid_le uuid)
-{
-	struct mdev_state *mds;
 
-	list_for_each_entry(mds, &mdev_devices_list, next) {
-		if (uuid_le_cmp(mdev_uuid(mds->mdev), uuid) == 0)
-			return mds;
-	}
-
-	return NULL;
-}
-
-void dump_buffer(char *buf, uint32_t count)
+static void dump_buffer(u8 *buf, uint32_t count)
 {
 #if defined(DEBUG)
 	int i;
@@ -183,6 +214,36 @@ void dump_buffer(char *buf, uint32_t count)
 			pr_info("\n");
 	}
 #endif
+}
+
+static bool is_intx(struct mdev_state *mdev_state)
+{
+	return mdev_state->irq_index == VFIO_PCI_INTX_IRQ_INDEX;
+}
+
+static bool is_msi(struct mdev_state *mdev_state)
+{
+	return mdev_state->irq_index == VFIO_PCI_MSI_IRQ_INDEX;
+}
+
+static bool is_noirq(struct mdev_state *mdev_state)
+{
+	return !is_intx(mdev_state) && !is_msi(mdev_state);
+}
+
+static void mtty_trigger_interrupt(struct mdev_state *mdev_state)
+{
+	lockdep_assert_held(&mdev_state->ops_lock);
+
+	if (is_msi(mdev_state)) {
+		if (mdev_state->msi_evtfd)
+			eventfd_signal(mdev_state->msi_evtfd);
+	} else if (is_intx(mdev_state)) {
+		if (mdev_state->intx_evtfd && !mdev_state->intx_mask) {
+			eventfd_signal(mdev_state->intx_evtfd);
+			mdev_state->intx_mask = true;
+		}
+	}
 }
 
 static void mtty_create_config_space(struct mdev_state *mdev_state)
@@ -250,7 +311,7 @@ static void mtty_create_config_space(struct mdev_state *mdev_state)
 }
 
 static void handle_pci_cfg_write(struct mdev_state *mdev_state, u16 offset,
-				 char *buf, u32 count)
+				 u8 *buf, u32 count)
 {
 	u32 cfg_addr, bar_mask, bar_index = 0;
 
@@ -304,7 +365,7 @@ static void handle_pci_cfg_write(struct mdev_state *mdev_state, u16 offset,
 }
 
 static void handle_bar_write(unsigned int index, struct mdev_state *mdev_state,
-				u16 offset, char *buf, u32 count)
+				u16 offset, u8 *buf, u32 count)
 {
 	u8 data = *buf;
 
@@ -341,8 +402,7 @@ static void handle_bar_write(unsigned int index, struct mdev_state *mdev_state,
 				pr_err("Serial port %d: Fifo level trigger\n",
 					index);
 #endif
-				mtty_trigger_interrupt(
-						mdev_uuid(mdev_state->mdev));
+				mtty_trigger_interrupt(mdev_state);
 			}
 		} else {
 #if defined(DEBUG_INTR)
@@ -356,8 +416,7 @@ static void handle_bar_write(unsigned int index, struct mdev_state *mdev_state,
 			 */
 			if (mdev_state->s[index].uart_reg[UART_IER] &
 								UART_IER_RLSI)
-				mtty_trigger_interrupt(
-						mdev_uuid(mdev_state->mdev));
+				mtty_trigger_interrupt(mdev_state);
 		}
 		mutex_unlock(&mdev_state->rxtx_lock);
 		break;
@@ -376,8 +435,7 @@ static void handle_bar_write(unsigned int index, struct mdev_state *mdev_state,
 				pr_err("Serial port %d: IER_THRI write\n",
 					index);
 #endif
-				mtty_trigger_interrupt(
-						mdev_uuid(mdev_state->mdev));
+				mtty_trigger_interrupt(mdev_state);
 			}
 
 			mutex_unlock(&mdev_state->rxtx_lock);
@@ -448,7 +506,7 @@ static void handle_bar_write(unsigned int index, struct mdev_state *mdev_state,
 #if defined(DEBUG_INTR)
 			pr_err("Serial port %d: MCR_OUT2 write\n", index);
 #endif
-			mtty_trigger_interrupt(mdev_uuid(mdev_state->mdev));
+			mtty_trigger_interrupt(mdev_state);
 		}
 
 		if ((mdev_state->s[index].uart_reg[UART_IER] & UART_IER_MSI) &&
@@ -456,7 +514,7 @@ static void handle_bar_write(unsigned int index, struct mdev_state *mdev_state,
 #if defined(DEBUG_INTR)
 			pr_err("Serial port %d: MCR RTS/DTR write\n", index);
 #endif
-			mtty_trigger_interrupt(mdev_uuid(mdev_state->mdev));
+			mtty_trigger_interrupt(mdev_state);
 		}
 		break;
 
@@ -475,7 +533,7 @@ static void handle_bar_write(unsigned int index, struct mdev_state *mdev_state,
 }
 
 static void handle_bar_read(unsigned int index, struct mdev_state *mdev_state,
-			    u16 offset, char *buf, u32 count)
+			    u16 offset, u8 *buf, u32 count)
 {
 	/* Handle read requests by guest */
 	switch (offset) {
@@ -507,8 +565,7 @@ static void handle_bar_read(unsigned int index, struct mdev_state *mdev_state,
 #endif
 			if (mdev_state->s[index].uart_reg[UART_IER] &
 							 UART_IER_THRI)
-				mtty_trigger_interrupt(
-					mdev_uuid(mdev_state->mdev));
+				mtty_trigger_interrupt(mdev_state);
 		}
 		mutex_unlock(&mdev_state->rxtx_lock);
 
@@ -570,7 +627,7 @@ static void handle_bar_read(unsigned int index, struct mdev_state *mdev_state,
 		u8 lsr = 0;
 
 		mutex_lock(&mdev_state->rxtx_lock);
-		/* atleast one char in FIFO */
+		/* at least one char in FIFO */
 		if (mdev_state->s[index].rxtx.head !=
 				 mdev_state->s[index].rxtx.tail)
 			lsr |= UART_LSR_DR;
@@ -650,22 +707,15 @@ static void mdev_read_base(struct mdev_state *mdev_state)
 	}
 }
 
-static ssize_t mdev_access(struct mdev_device *mdev, char *buf, size_t count,
+static ssize_t mdev_access(struct mdev_state *mdev_state, u8 *buf, size_t count,
 			   loff_t pos, bool is_write)
 {
-	struct mdev_state *mdev_state;
 	unsigned int index;
 	loff_t offset;
 	int ret = 0;
 
-	if (!mdev || !buf)
+	if (!buf)
 		return -EINVAL;
-
-	mdev_state = mdev_get_drvdata(mdev);
-	if (!mdev_state) {
-		pr_err("%s mdev_state not found\n", __func__);
-		return -EINVAL;
-	}
 
 	mutex_lock(&mdev_state->ops_lock);
 
@@ -698,7 +748,7 @@ static ssize_t mdev_access(struct mdev_device *mdev, char *buf, size_t count,
 #if defined(DEBUG_REGS)
 			pr_info("%s: BAR%d  WR @0x%llx %s val:0x%02x dlab:%d\n",
 				__func__, index, offset, wr_reg[offset],
-				(u8)*buf, mdev_state->s[index].dlab);
+				*buf, mdev_state->s[index].dlab);
 #endif
 			handle_bar_write(index, mdev_state, offset, buf, count);
 		} else {
@@ -708,7 +758,7 @@ static ssize_t mdev_access(struct mdev_device *mdev, char *buf, size_t count,
 #if defined(DEBUG_REGS)
 			pr_info("%s: BAR%d  RD @0x%llx %s val:0x%02x dlab:%d\n",
 				__func__, index, offset, rd_reg[offset],
-				(u8)*buf, mdev_state->s[index].dlab);
+				*buf, mdev_state->s[index].dlab);
 #endif
 		}
 		break;
@@ -727,97 +777,645 @@ accessfailed:
 	return ret;
 }
 
-int mtty_create(struct kobject *kobj, struct mdev_device *mdev)
+static size_t mtty_data_size(struct mdev_state *mdev_state)
 {
-	struct mdev_state *mdev_state;
-	char name[MTTY_STRING_LEN];
-	int nr_ports = 0, i;
+	return offsetof(struct mtty_data, ports) +
+		(mdev_state->nr_ports * sizeof(struct serial_port));
+}
 
-	if (!mdev)
-		return -EINVAL;
+static void mtty_disable_file(struct mtty_migration_file *migf)
+{
+	mutex_lock(&migf->lock);
+	migf->disabled = true;
+	migf->filled_size = 0;
+	migf->filp->f_pos = 0;
+	mutex_unlock(&migf->lock);
+}
 
-	for (i = 0; i < 2; i++) {
-		snprintf(name, MTTY_STRING_LEN, "%s-%d",
-			dev_driver_string(mdev_parent_dev(mdev)), i + 1);
-		if (!strcmp(kobj->name, name)) {
-			nr_ports = i + 1;
-			break;
-		}
+static void mtty_disable_files(struct mdev_state *mdev_state)
+{
+	if (mdev_state->saving_migf) {
+		mtty_disable_file(mdev_state->saving_migf);
+		fput(mdev_state->saving_migf->filp);
+		mdev_state->saving_migf = NULL;
 	}
 
-	if (!nr_ports)
-		return -EINVAL;
-
-	mdev_state = kzalloc(sizeof(struct mdev_state), GFP_KERNEL);
-	if (mdev_state == NULL)
-		return -ENOMEM;
-
-	mdev_state->nr_ports = nr_ports;
-	mdev_state->irq_index = -1;
-	mdev_state->s[0].max_fifo_size = MAX_FIFO_SIZE;
-	mdev_state->s[1].max_fifo_size = MAX_FIFO_SIZE;
-	mutex_init(&mdev_state->rxtx_lock);
-	mdev_state->vconfig = kzalloc(MTTY_CONFIG_SPACE_SIZE, GFP_KERNEL);
-
-	if (mdev_state->vconfig == NULL) {
-		kfree(mdev_state);
-		return -ENOMEM;
+	if (mdev_state->resuming_migf) {
+		mtty_disable_file(mdev_state->resuming_migf);
+		fput(mdev_state->resuming_migf->filp);
+		mdev_state->resuming_migf = NULL;
 	}
+}
 
-	mutex_init(&mdev_state->ops_lock);
-	mdev_state->mdev = mdev;
-	mdev_set_drvdata(mdev, mdev_state);
+static void mtty_state_mutex_unlock(struct mdev_state *mdev_state)
+{
+again:
+	mutex_lock(&mdev_state->reset_mutex);
+	if (mdev_state->deferred_reset) {
+		mdev_state->deferred_reset = false;
+		mutex_unlock(&mdev_state->reset_mutex);
+		mdev_state->state = VFIO_DEVICE_STATE_RUNNING;
+		mtty_disable_files(mdev_state);
+		goto again;
+	}
+	mutex_unlock(&mdev_state->state_mutex);
+	mutex_unlock(&mdev_state->reset_mutex);
+}
 
-	mtty_create_config_space(mdev_state);
+static int mtty_release_migf(struct inode *inode, struct file *filp)
+{
+	struct mtty_migration_file *migf = filp->private_data;
 
-	mutex_lock(&mdev_list_lock);
-	list_add(&mdev_state->next, &mdev_devices_list);
-	mutex_unlock(&mdev_list_lock);
+	mtty_disable_file(migf);
+	mutex_destroy(&migf->lock);
+	kfree(migf);
 
 	return 0;
 }
 
-int mtty_remove(struct mdev_device *mdev)
+static long mtty_precopy_ioctl(struct file *filp, unsigned int cmd,
+			       unsigned long arg)
 {
-	struct mdev_state *mds, *tmp_mds;
-	struct mdev_state *mdev_state = mdev_get_drvdata(mdev);
-	int ret = -EINVAL;
+	struct mtty_migration_file *migf = filp->private_data;
+	struct mdev_state *mdev_state = migf->mdev_state;
+	loff_t *pos = &filp->f_pos;
+	struct vfio_precopy_info info = {};
+	int ret;
 
-	mutex_lock(&mdev_list_lock);
-	list_for_each_entry_safe(mds, tmp_mds, &mdev_devices_list, next) {
-		if (mdev_state == mds) {
-			list_del(&mdev_state->next);
-			mdev_set_drvdata(mdev, NULL);
-			kfree(mdev_state->vconfig);
-			kfree(mdev_state);
-			ret = 0;
-			break;
-		}
+	ret = vfio_check_precopy_ioctl(&mdev_state->vdev, cmd, arg, &info);
+	if (ret)
+		return ret;
+
+	mutex_lock(&mdev_state->state_mutex);
+	if (mdev_state->state != VFIO_DEVICE_STATE_PRE_COPY &&
+	    mdev_state->state != VFIO_DEVICE_STATE_PRE_COPY_P2P) {
+		ret = -EINVAL;
+		goto unlock;
 	}
-	mutex_unlock(&mdev_list_lock);
+
+	mutex_lock(&migf->lock);
+
+	if (migf->disabled) {
+		mutex_unlock(&migf->lock);
+		ret = -ENODEV;
+		goto unlock;
+	}
+
+	if (*pos > migf->filled_size) {
+		mutex_unlock(&migf->lock);
+		ret = -EINVAL;
+		goto unlock;
+	}
+
+	info.dirty_bytes = 0;
+	info.initial_bytes = migf->filled_size - *pos;
+	mutex_unlock(&migf->lock);
+
+	ret = copy_to_user((void __user *)arg, &info,
+		offsetofend(struct vfio_precopy_info, dirty_bytes)) ? -EFAULT : 0;
+unlock:
+	mtty_state_mutex_unlock(mdev_state);
+	return ret;
+}
+
+static ssize_t mtty_save_read(struct file *filp, char __user *buf,
+			      size_t len, loff_t *pos)
+{
+	struct mtty_migration_file *migf = filp->private_data;
+	ssize_t ret = 0;
+
+	if (pos)
+		return -ESPIPE;
+
+	pos = &filp->f_pos;
+
+	mutex_lock(&migf->lock);
+
+	dev_dbg(migf->mdev_state->vdev.dev, "%s ask %zu\n", __func__, len);
+
+	if (migf->disabled) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
+	if (*pos > migf->filled_size) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	len = min_t(size_t, migf->filled_size - *pos, len);
+	if (len) {
+		if (copy_to_user(buf, (void *)&migf->data + *pos, len)) {
+			ret = -EFAULT;
+			goto out_unlock;
+		}
+		*pos += len;
+		ret = len;
+	}
+out_unlock:
+	dev_dbg(migf->mdev_state->vdev.dev, "%s read %zu\n", __func__, ret);
+	mutex_unlock(&migf->lock);
+	return ret;
+}
+
+static const struct file_operations mtty_save_fops = {
+	.owner = THIS_MODULE,
+	.read = mtty_save_read,
+	.unlocked_ioctl = mtty_precopy_ioctl,
+	.compat_ioctl = compat_ptr_ioctl,
+	.release = mtty_release_migf,
+};
+
+static void mtty_save_state(struct mdev_state *mdev_state)
+{
+	struct mtty_migration_file *migf = mdev_state->saving_migf;
+	int i;
+
+	mutex_lock(&migf->lock);
+	for (i = 0; i < mdev_state->nr_ports; i++) {
+		memcpy(&migf->data.ports[i],
+			&mdev_state->s[i], sizeof(struct serial_port));
+		migf->filled_size += sizeof(struct serial_port);
+	}
+	dev_dbg(mdev_state->vdev.dev,
+		"%s filled to %zu\n", __func__, migf->filled_size);
+	mutex_unlock(&migf->lock);
+}
+
+static int mtty_load_state(struct mdev_state *mdev_state)
+{
+	struct mtty_migration_file *migf = mdev_state->resuming_migf;
+	int i;
+
+	mutex_lock(&migf->lock);
+	/* magic and version already tested by resume write fn */
+	if (migf->filled_size < mtty_data_size(mdev_state)) {
+		dev_dbg(mdev_state->vdev.dev, "%s expected %zu, got %zu\n",
+			__func__, mtty_data_size(mdev_state),
+			migf->filled_size);
+		mutex_unlock(&migf->lock);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < mdev_state->nr_ports; i++)
+		memcpy(&mdev_state->s[i],
+		       &migf->data.ports[i], sizeof(struct serial_port));
+
+	mutex_unlock(&migf->lock);
+	return 0;
+}
+
+static struct mtty_migration_file *
+mtty_save_device_data(struct mdev_state *mdev_state,
+		      enum vfio_device_mig_state state)
+{
+	struct mtty_migration_file *migf = mdev_state->saving_migf;
+	struct mtty_migration_file *ret = NULL;
+
+	if (migf) {
+		if (state == VFIO_DEVICE_STATE_STOP_COPY)
+			goto fill_data;
+		return ret;
+	}
+
+	migf = kzalloc(sizeof(*migf), GFP_KERNEL_ACCOUNT);
+	if (!migf)
+		return ERR_PTR(-ENOMEM);
+
+	migf->filp = anon_inode_getfile("mtty_mig", &mtty_save_fops,
+					migf, O_RDONLY);
+	if (IS_ERR(migf->filp)) {
+		int rc = PTR_ERR(migf->filp);
+
+		kfree(migf);
+		return ERR_PTR(rc);
+	}
+
+	stream_open(migf->filp->f_inode, migf->filp);
+	mutex_init(&migf->lock);
+	migf->mdev_state = mdev_state;
+
+	migf->data.magic = MTTY_MAGIC;
+	migf->data.major_ver = MTTY_MAJOR_VER;
+	migf->data.minor_ver = MTTY_MINOR_VER;
+	migf->data.nr_ports = mdev_state->nr_ports;
+
+	migf->filled_size = offsetof(struct mtty_data, ports);
+
+	dev_dbg(mdev_state->vdev.dev, "%s filled header to %zu\n",
+		__func__, migf->filled_size);
+
+	ret = mdev_state->saving_migf = migf;
+
+fill_data:
+	if (state == VFIO_DEVICE_STATE_STOP_COPY)
+		mtty_save_state(mdev_state);
 
 	return ret;
 }
 
-int mtty_reset(struct mdev_device *mdev)
+static ssize_t mtty_resume_write(struct file *filp, const char __user *buf,
+				 size_t len, loff_t *pos)
+{
+	struct mtty_migration_file *migf = filp->private_data;
+	struct mdev_state *mdev_state = migf->mdev_state;
+	loff_t requested_length;
+	ssize_t ret = 0;
+
+	if (pos)
+		return -ESPIPE;
+
+	pos = &filp->f_pos;
+
+	if (*pos < 0 ||
+	    check_add_overflow((loff_t)len, *pos, &requested_length))
+		return -EINVAL;
+
+	if (requested_length > mtty_data_size(mdev_state))
+		return -ENOMEM;
+
+	mutex_lock(&migf->lock);
+
+	if (migf->disabled) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
+	if (copy_from_user((void *)&migf->data + *pos, buf, len)) {
+		ret = -EFAULT;
+		goto out_unlock;
+	}
+
+	*pos += len;
+	ret = len;
+
+	dev_dbg(migf->mdev_state->vdev.dev, "%s received %zu, total %zu\n",
+		__func__, len, migf->filled_size + len);
+
+	if (migf->filled_size < offsetof(struct mtty_data, ports) &&
+	    migf->filled_size + len >= offsetof(struct mtty_data, ports)) {
+		if (migf->data.magic != MTTY_MAGIC || migf->data.flags ||
+		    migf->data.major_ver != MTTY_MAJOR_VER ||
+		    migf->data.minor_ver != MTTY_MINOR_VER ||
+		    migf->data.nr_ports != mdev_state->nr_ports) {
+			dev_dbg(migf->mdev_state->vdev.dev,
+				"%s failed validation\n", __func__);
+			ret = -EFAULT;
+		} else {
+			dev_dbg(migf->mdev_state->vdev.dev,
+				"%s header validated\n", __func__);
+		}
+	}
+
+	migf->filled_size += len;
+
+out_unlock:
+	mutex_unlock(&migf->lock);
+	return ret;
+}
+
+static const struct file_operations mtty_resume_fops = {
+	.owner = THIS_MODULE,
+	.write = mtty_resume_write,
+	.release = mtty_release_migf,
+};
+
+static struct mtty_migration_file *
+mtty_resume_device_data(struct mdev_state *mdev_state)
+{
+	struct mtty_migration_file *migf;
+	int ret;
+
+	migf = kzalloc(sizeof(*migf), GFP_KERNEL_ACCOUNT);
+	if (!migf)
+		return ERR_PTR(-ENOMEM);
+
+	migf->filp = anon_inode_getfile("mtty_mig", &mtty_resume_fops,
+					migf, O_WRONLY);
+	if (IS_ERR(migf->filp)) {
+		ret = PTR_ERR(migf->filp);
+		kfree(migf);
+		return ERR_PTR(ret);
+	}
+
+	stream_open(migf->filp->f_inode, migf->filp);
+	mutex_init(&migf->lock);
+	migf->mdev_state = mdev_state;
+
+	mdev_state->resuming_migf = migf;
+
+	return migf;
+}
+
+static struct file *mtty_step_state(struct mdev_state *mdev_state,
+				     enum vfio_device_mig_state new)
+{
+	enum vfio_device_mig_state cur = mdev_state->state;
+
+	dev_dbg(mdev_state->vdev.dev, "%s: %d -> %d\n", __func__, cur, new);
+
+	/*
+	 * The following state transitions are no-op considering
+	 * mtty does not do DMA nor require any explicit start/stop.
+	 *
+	 *         RUNNING -> RUNNING_P2P
+	 *         RUNNING_P2P -> RUNNING
+	 *         RUNNING_P2P -> STOP
+	 *         PRE_COPY -> PRE_COPY_P2P
+	 *         PRE_COPY_P2P -> PRE_COPY
+	 *         STOP -> RUNNING_P2P
+	 */
+	if ((cur == VFIO_DEVICE_STATE_RUNNING &&
+	     new == VFIO_DEVICE_STATE_RUNNING_P2P) ||
+	    (cur == VFIO_DEVICE_STATE_RUNNING_P2P &&
+	     (new == VFIO_DEVICE_STATE_RUNNING ||
+	      new == VFIO_DEVICE_STATE_STOP)) ||
+	    (cur == VFIO_DEVICE_STATE_PRE_COPY &&
+	     new == VFIO_DEVICE_STATE_PRE_COPY_P2P) ||
+	    (cur == VFIO_DEVICE_STATE_PRE_COPY_P2P &&
+	     new == VFIO_DEVICE_STATE_PRE_COPY) ||
+	    (cur == VFIO_DEVICE_STATE_STOP &&
+	     new == VFIO_DEVICE_STATE_RUNNING_P2P))
+		return NULL;
+
+	/*
+	 * The following state transitions simply close migration files,
+	 * with the exception of RESUMING -> STOP, which needs to load
+	 * the state first.
+	 *
+	 *         RESUMING -> STOP
+	 *         PRE_COPY -> RUNNING
+	 *         PRE_COPY_P2P -> RUNNING_P2P
+	 *         STOP_COPY -> STOP
+	 */
+	if (cur == VFIO_DEVICE_STATE_RESUMING &&
+	    new == VFIO_DEVICE_STATE_STOP) {
+		int ret;
+
+		ret = mtty_load_state(mdev_state);
+		if (ret)
+			return ERR_PTR(ret);
+		mtty_disable_files(mdev_state);
+		return NULL;
+	}
+
+	if ((cur == VFIO_DEVICE_STATE_PRE_COPY &&
+	     new == VFIO_DEVICE_STATE_RUNNING) ||
+	    (cur == VFIO_DEVICE_STATE_PRE_COPY_P2P &&
+	     new == VFIO_DEVICE_STATE_RUNNING_P2P) ||
+	    (cur == VFIO_DEVICE_STATE_STOP_COPY &&
+	     new == VFIO_DEVICE_STATE_STOP)) {
+		mtty_disable_files(mdev_state);
+		return NULL;
+	}
+
+	/*
+	 * The following state transitions return migration files.
+	 *
+	 *         RUNNING -> PRE_COPY
+	 *         RUNNING_P2P -> PRE_COPY_P2P
+	 *         STOP -> STOP_COPY
+	 *         STOP -> RESUMING
+	 *         PRE_COPY_P2P -> STOP_COPY
+	 */
+	if ((cur == VFIO_DEVICE_STATE_RUNNING &&
+	     new == VFIO_DEVICE_STATE_PRE_COPY) ||
+	    (cur == VFIO_DEVICE_STATE_RUNNING_P2P &&
+	     new == VFIO_DEVICE_STATE_PRE_COPY_P2P) ||
+	    (cur == VFIO_DEVICE_STATE_STOP &&
+	     new == VFIO_DEVICE_STATE_STOP_COPY) ||
+	    (cur == VFIO_DEVICE_STATE_PRE_COPY_P2P &&
+	     new == VFIO_DEVICE_STATE_STOP_COPY)) {
+		struct mtty_migration_file *migf;
+
+		migf = mtty_save_device_data(mdev_state, new);
+		if (IS_ERR(migf))
+			return ERR_CAST(migf);
+
+		if (migf) {
+			get_file(migf->filp);
+
+			return migf->filp;
+		}
+		return NULL;
+	}
+
+	if (cur == VFIO_DEVICE_STATE_STOP &&
+	    new == VFIO_DEVICE_STATE_RESUMING) {
+		struct mtty_migration_file *migf;
+
+		migf = mtty_resume_device_data(mdev_state);
+		if (IS_ERR(migf))
+			return ERR_CAST(migf);
+
+		get_file(migf->filp);
+
+		return migf->filp;
+	}
+
+	/* vfio_mig_get_next_state() does not use arcs other than the above */
+	WARN_ON(true);
+	return ERR_PTR(-EINVAL);
+}
+
+static struct file *mtty_set_state(struct vfio_device *vdev,
+				   enum vfio_device_mig_state new_state)
+{
+	struct mdev_state *mdev_state =
+		container_of(vdev, struct mdev_state, vdev);
+	struct file *ret = NULL;
+
+	dev_dbg(vdev->dev, "%s -> %d\n", __func__, new_state);
+
+	mutex_lock(&mdev_state->state_mutex);
+	while (mdev_state->state != new_state) {
+		enum vfio_device_mig_state next_state;
+		int rc = vfio_mig_get_next_state(vdev, mdev_state->state,
+						 new_state, &next_state);
+		if (rc) {
+			ret = ERR_PTR(rc);
+			break;
+		}
+
+		ret = mtty_step_state(mdev_state, next_state);
+		if (IS_ERR(ret))
+			break;
+
+		mdev_state->state = next_state;
+
+		if (WARN_ON(ret && new_state != next_state)) {
+			fput(ret);
+			ret = ERR_PTR(-EINVAL);
+			break;
+		}
+	}
+	mtty_state_mutex_unlock(mdev_state);
+	return ret;
+}
+
+static int mtty_get_state(struct vfio_device *vdev,
+			  enum vfio_device_mig_state *current_state)
+{
+	struct mdev_state *mdev_state =
+		container_of(vdev, struct mdev_state, vdev);
+
+	mutex_lock(&mdev_state->state_mutex);
+	*current_state = mdev_state->state;
+	mtty_state_mutex_unlock(mdev_state);
+	return 0;
+}
+
+static int mtty_get_data_size(struct vfio_device *vdev,
+			      unsigned long *stop_copy_length)
+{
+	struct mdev_state *mdev_state =
+		container_of(vdev, struct mdev_state, vdev);
+
+	*stop_copy_length = mtty_data_size(mdev_state);
+	return 0;
+}
+
+static const struct vfio_migration_ops mtty_migration_ops = {
+	.migration_set_state = mtty_set_state,
+	.migration_get_state = mtty_get_state,
+	.migration_get_data_size = mtty_get_data_size,
+};
+
+static int mtty_log_start(struct vfio_device *vdev,
+			  struct rb_root_cached *ranges,
+			  u32 nnodes, u64 *page_size)
+{
+	return 0;
+}
+
+static int mtty_log_stop(struct vfio_device *vdev)
+{
+	return 0;
+}
+
+static int mtty_log_read_and_clear(struct vfio_device *vdev,
+				   unsigned long iova, unsigned long length,
+				   struct iova_bitmap *dirty)
+{
+	return 0;
+}
+
+static const struct vfio_log_ops mtty_log_ops = {
+	.log_start = mtty_log_start,
+	.log_stop = mtty_log_stop,
+	.log_read_and_clear = mtty_log_read_and_clear,
+};
+
+static int mtty_init_dev(struct vfio_device *vdev)
+{
+	struct mdev_state *mdev_state =
+		container_of(vdev, struct mdev_state, vdev);
+	struct mdev_device *mdev = to_mdev_device(vdev->dev);
+	struct mtty_type *type =
+		container_of(mdev->type, struct mtty_type, type);
+	int avail_ports = atomic_read(&mdev_avail_ports);
+	int ret;
+
+	do {
+		if (avail_ports < type->nr_ports)
+			return -ENOSPC;
+	} while (!atomic_try_cmpxchg(&mdev_avail_ports,
+				     &avail_ports,
+				     avail_ports - type->nr_ports));
+
+	mdev_state->nr_ports = type->nr_ports;
+	mdev_state->irq_index = -1;
+	mdev_state->s[0].max_fifo_size = MAX_FIFO_SIZE;
+	mdev_state->s[1].max_fifo_size = MAX_FIFO_SIZE;
+	mutex_init(&mdev_state->rxtx_lock);
+
+	mdev_state->vconfig = kzalloc(MTTY_CONFIG_SPACE_SIZE, GFP_KERNEL);
+	if (!mdev_state->vconfig) {
+		ret = -ENOMEM;
+		goto err_nr_ports;
+	}
+
+	mutex_init(&mdev_state->ops_lock);
+	mdev_state->mdev = mdev;
+	mtty_create_config_space(mdev_state);
+
+	mutex_init(&mdev_state->state_mutex);
+	mutex_init(&mdev_state->reset_mutex);
+	vdev->migration_flags = VFIO_MIGRATION_STOP_COPY |
+				VFIO_MIGRATION_P2P |
+				VFIO_MIGRATION_PRE_COPY;
+	vdev->mig_ops = &mtty_migration_ops;
+	vdev->log_ops = &mtty_log_ops;
+	mdev_state->state = VFIO_DEVICE_STATE_RUNNING;
+
+	return 0;
+
+err_nr_ports:
+	atomic_add(type->nr_ports, &mdev_avail_ports);
+	return ret;
+}
+
+static int mtty_probe(struct mdev_device *mdev)
 {
 	struct mdev_state *mdev_state;
+	int ret;
 
-	if (!mdev)
-		return -EINVAL;
+	mdev_state = vfio_alloc_device(mdev_state, vdev, &mdev->dev,
+				       &mtty_dev_ops);
+	if (IS_ERR(mdev_state))
+		return PTR_ERR(mdev_state);
 
-	mdev_state = mdev_get_drvdata(mdev);
-	if (!mdev_state)
-		return -EINVAL;
+	ret = vfio_register_emulated_iommu_dev(&mdev_state->vdev);
+	if (ret)
+		goto err_put_vdev;
+	dev_set_drvdata(&mdev->dev, mdev_state);
+	return 0;
 
+err_put_vdev:
+	vfio_put_device(&mdev_state->vdev);
+	return ret;
+}
+
+static void mtty_release_dev(struct vfio_device *vdev)
+{
+	struct mdev_state *mdev_state =
+		container_of(vdev, struct mdev_state, vdev);
+
+	mutex_destroy(&mdev_state->reset_mutex);
+	mutex_destroy(&mdev_state->state_mutex);
+	atomic_add(mdev_state->nr_ports, &mdev_avail_ports);
+	kfree(mdev_state->vconfig);
+}
+
+static void mtty_remove(struct mdev_device *mdev)
+{
+	struct mdev_state *mdev_state = dev_get_drvdata(&mdev->dev);
+
+	vfio_unregister_group_dev(&mdev_state->vdev);
+	vfio_put_device(&mdev_state->vdev);
+}
+
+static int mtty_reset(struct mdev_state *mdev_state)
+{
 	pr_info("%s: called\n", __func__);
+
+	mutex_lock(&mdev_state->reset_mutex);
+	mdev_state->deferred_reset = true;
+	if (!mutex_trylock(&mdev_state->state_mutex)) {
+		mutex_unlock(&mdev_state->reset_mutex);
+		return 0;
+	}
+	mutex_unlock(&mdev_state->reset_mutex);
+	mtty_state_mutex_unlock(mdev_state);
 
 	return 0;
 }
 
-ssize_t mtty_read(struct mdev_device *mdev, char __user *buf, size_t count,
-		  loff_t *ppos)
+static ssize_t mtty_read(struct vfio_device *vdev, char __user *buf,
+			 size_t count, loff_t *ppos)
 {
+	struct mdev_state *mdev_state =
+		container_of(vdev, struct mdev_state, vdev);
 	unsigned int done = 0;
 	int ret;
 
@@ -827,7 +1425,7 @@ ssize_t mtty_read(struct mdev_device *mdev, char __user *buf, size_t count,
 		if (count >= 4 && !(*ppos % 4)) {
 			u32 val;
 
-			ret =  mdev_access(mdev, (char *)&val, sizeof(val),
+			ret =  mdev_access(mdev_state, (u8 *)&val, sizeof(val),
 					   *ppos, false);
 			if (ret <= 0)
 				goto read_err;
@@ -839,7 +1437,7 @@ ssize_t mtty_read(struct mdev_device *mdev, char __user *buf, size_t count,
 		} else if (count >= 2 && !(*ppos % 2)) {
 			u16 val;
 
-			ret = mdev_access(mdev, (char *)&val, sizeof(val),
+			ret = mdev_access(mdev_state, (u8 *)&val, sizeof(val),
 					  *ppos, false);
 			if (ret <= 0)
 				goto read_err;
@@ -851,7 +1449,7 @@ ssize_t mtty_read(struct mdev_device *mdev, char __user *buf, size_t count,
 		} else {
 			u8 val;
 
-			ret = mdev_access(mdev, (char *)&val, sizeof(val),
+			ret = mdev_access(mdev_state, (u8 *)&val, sizeof(val),
 					  *ppos, false);
 			if (ret <= 0)
 				goto read_err;
@@ -874,9 +1472,11 @@ read_err:
 	return -EFAULT;
 }
 
-ssize_t mtty_write(struct mdev_device *mdev, const char __user *buf,
+static ssize_t mtty_write(struct vfio_device *vdev, const char __user *buf,
 		   size_t count, loff_t *ppos)
 {
+	struct mdev_state *mdev_state =
+		container_of(vdev, struct mdev_state, vdev);
 	unsigned int done = 0;
 	int ret;
 
@@ -889,7 +1489,7 @@ ssize_t mtty_write(struct mdev_device *mdev, const char __user *buf,
 			if (copy_from_user(&val, buf, sizeof(val)))
 				goto write_err;
 
-			ret = mdev_access(mdev, (char *)&val, sizeof(val),
+			ret = mdev_access(mdev_state, (u8 *)&val, sizeof(val),
 					  *ppos, true);
 			if (ret <= 0)
 				goto write_err;
@@ -901,7 +1501,7 @@ ssize_t mtty_write(struct mdev_device *mdev, const char __user *buf,
 			if (copy_from_user(&val, buf, sizeof(val)))
 				goto write_err;
 
-			ret = mdev_access(mdev, (char *)&val, sizeof(val),
+			ret = mdev_access(mdev_state, (u8 *)&val, sizeof(val),
 					  *ppos, true);
 			if (ret <= 0)
 				goto write_err;
@@ -913,7 +1513,7 @@ ssize_t mtty_write(struct mdev_device *mdev, const char __user *buf,
 			if (copy_from_user(&val, buf, sizeof(val)))
 				goto write_err;
 
-			ret = mdev_access(mdev, (char *)&val, sizeof(val),
+			ret = mdev_access(mdev_state, (u8 *)&val, sizeof(val),
 					  *ppos, true);
 			if (ret <= 0)
 				goto write_err;
@@ -931,78 +1531,143 @@ write_err:
 	return -EFAULT;
 }
 
-static int mtty_set_irqs(struct mdev_device *mdev, uint32_t flags,
+static void mtty_disable_intx(struct mdev_state *mdev_state)
+{
+	if (mdev_state->intx_evtfd) {
+		eventfd_ctx_put(mdev_state->intx_evtfd);
+		mdev_state->intx_evtfd = NULL;
+		mdev_state->intx_mask = false;
+		mdev_state->irq_index = -1;
+	}
+}
+
+static void mtty_disable_msi(struct mdev_state *mdev_state)
+{
+	if (mdev_state->msi_evtfd) {
+		eventfd_ctx_put(mdev_state->msi_evtfd);
+		mdev_state->msi_evtfd = NULL;
+		mdev_state->irq_index = -1;
+	}
+}
+
+static int mtty_set_irqs(struct mdev_state *mdev_state, uint32_t flags,
 			 unsigned int index, unsigned int start,
 			 unsigned int count, void *data)
 {
 	int ret = 0;
-	struct mdev_state *mdev_state;
-
-	if (!mdev)
-		return -EINVAL;
-
-	mdev_state = mdev_get_drvdata(mdev);
-	if (!mdev_state)
-		return -EINVAL;
 
 	mutex_lock(&mdev_state->ops_lock);
 	switch (index) {
 	case VFIO_PCI_INTX_IRQ_INDEX:
 		switch (flags & VFIO_IRQ_SET_ACTION_TYPE_MASK) {
 		case VFIO_IRQ_SET_ACTION_MASK:
+			if (!is_intx(mdev_state) || start != 0 || count != 1) {
+				ret = -EINVAL;
+				break;
+			}
+
+			if (flags & VFIO_IRQ_SET_DATA_NONE) {
+				mdev_state->intx_mask = true;
+			} else if (flags & VFIO_IRQ_SET_DATA_BOOL) {
+				uint8_t mask = *(uint8_t *)data;
+
+				if (mask)
+					mdev_state->intx_mask = true;
+			} else if (flags &  VFIO_IRQ_SET_DATA_EVENTFD) {
+				ret = -ENOTTY; /* No support for mask fd */
+			}
+			break;
 		case VFIO_IRQ_SET_ACTION_UNMASK:
+			if (!is_intx(mdev_state) || start != 0 || count != 1) {
+				ret = -EINVAL;
+				break;
+			}
+
+			if (flags & VFIO_IRQ_SET_DATA_NONE) {
+				mdev_state->intx_mask = false;
+			} else if (flags & VFIO_IRQ_SET_DATA_BOOL) {
+				uint8_t mask = *(uint8_t *)data;
+
+				if (mask)
+					mdev_state->intx_mask = false;
+			} else if (flags &  VFIO_IRQ_SET_DATA_EVENTFD) {
+				ret = -ENOTTY; /* No support for unmask fd */
+			}
 			break;
 		case VFIO_IRQ_SET_ACTION_TRIGGER:
-		{
-			if (flags & VFIO_IRQ_SET_DATA_NONE) {
-				pr_info("%s: disable INTx\n", __func__);
-				if (mdev_state->intx_evtfd)
-					eventfd_ctx_put(mdev_state->intx_evtfd);
+			if (is_intx(mdev_state) && !count &&
+			    (flags & VFIO_IRQ_SET_DATA_NONE)) {
+				mtty_disable_intx(mdev_state);
+				break;
+			}
+
+			if (!(is_intx(mdev_state) || is_noirq(mdev_state)) ||
+			    start != 0 || count != 1) {
+				ret = -EINVAL;
 				break;
 			}
 
 			if (flags & VFIO_IRQ_SET_DATA_EVENTFD) {
 				int fd = *(int *)data;
+				struct eventfd_ctx *evt;
 
-				if (fd > 0) {
-					struct eventfd_ctx *evt;
+				mtty_disable_intx(mdev_state);
 
-					evt = eventfd_ctx_fdget(fd);
-					if (IS_ERR(evt)) {
-						ret = PTR_ERR(evt);
-						break;
-					}
-					mdev_state->intx_evtfd = evt;
-					mdev_state->irq_fd = fd;
-					mdev_state->irq_index = index;
+				if (fd < 0)
+					break;
+
+				evt = eventfd_ctx_fdget(fd);
+				if (IS_ERR(evt)) {
+					ret = PTR_ERR(evt);
 					break;
 				}
+				mdev_state->intx_evtfd = evt;
+				mdev_state->irq_index = index;
+				break;
+			}
+
+			if (!is_intx(mdev_state)) {
+				ret = -EINVAL;
+				break;
+			}
+
+			if (flags & VFIO_IRQ_SET_DATA_NONE) {
+				mtty_trigger_interrupt(mdev_state);
+			} else if (flags & VFIO_IRQ_SET_DATA_BOOL) {
+				uint8_t trigger = *(uint8_t *)data;
+
+				if (trigger)
+					mtty_trigger_interrupt(mdev_state);
 			}
 			break;
-		}
 		}
 		break;
 	case VFIO_PCI_MSI_IRQ_INDEX:
 		switch (flags & VFIO_IRQ_SET_ACTION_TYPE_MASK) {
 		case VFIO_IRQ_SET_ACTION_MASK:
 		case VFIO_IRQ_SET_ACTION_UNMASK:
+			ret = -ENOTTY;
 			break;
 		case VFIO_IRQ_SET_ACTION_TRIGGER:
-			if (flags & VFIO_IRQ_SET_DATA_NONE) {
-				if (mdev_state->msi_evtfd)
-					eventfd_ctx_put(mdev_state->msi_evtfd);
-				pr_info("%s: disable MSI\n", __func__);
-				mdev_state->irq_index = VFIO_PCI_INTX_IRQ_INDEX;
+			if (is_msi(mdev_state) && !count &&
+			    (flags & VFIO_IRQ_SET_DATA_NONE)) {
+				mtty_disable_msi(mdev_state);
 				break;
 			}
+
+			if (!(is_msi(mdev_state) || is_noirq(mdev_state)) ||
+			    start != 0 || count != 1) {
+				ret = -EINVAL;
+				break;
+			}
+
 			if (flags & VFIO_IRQ_SET_DATA_EVENTFD) {
 				int fd = *(int *)data;
 				struct eventfd_ctx *evt;
 
-				if (fd <= 0)
-					break;
+				mtty_disable_msi(mdev_state);
 
-				if (mdev_state->msi_evtfd)
+				if (fd < 0)
 					break;
 
 				evt = eventfd_ctx_fdget(fd);
@@ -1011,20 +1676,37 @@ static int mtty_set_irqs(struct mdev_device *mdev, uint32_t flags,
 					break;
 				}
 				mdev_state->msi_evtfd = evt;
-				mdev_state->irq_fd = fd;
 				mdev_state->irq_index = index;
+				break;
+			}
+
+			if (!is_msi(mdev_state)) {
+				ret = -EINVAL;
+				break;
+			}
+
+			if (flags & VFIO_IRQ_SET_DATA_NONE) {
+				mtty_trigger_interrupt(mdev_state);
+			} else if (flags & VFIO_IRQ_SET_DATA_BOOL) {
+				uint8_t trigger = *(uint8_t *)data;
+
+				if (trigger)
+					mtty_trigger_interrupt(mdev_state);
 			}
 			break;
-	}
-	break;
+		}
+		break;
 	case VFIO_PCI_MSIX_IRQ_INDEX:
-		pr_info("%s: MSIX_IRQ\n", __func__);
+		dev_dbg(mdev_state->vdev.dev, "%s: MSIX_IRQ\n", __func__);
+		ret = -ENOTTY;
 		break;
 	case VFIO_PCI_ERR_IRQ_INDEX:
-		pr_info("%s: ERR_IRQ\n", __func__);
+		dev_dbg(mdev_state->vdev.dev, "%s: ERR_IRQ\n", __func__);
+		ret = -ENOTTY;
 		break;
 	case VFIO_PCI_REQ_IRQ_INDEX:
-		pr_info("%s: REQ_IRQ\n", __func__);
+		dev_dbg(mdev_state->vdev.dev, "%s: REQ_IRQ\n", __func__);
+		ret = -ENOTTY;
 		break;
 	}
 
@@ -1032,55 +1714,14 @@ static int mtty_set_irqs(struct mdev_device *mdev, uint32_t flags,
 	return ret;
 }
 
-static int mtty_trigger_interrupt(uuid_le uuid)
+static int mtty_ioctl_get_region_info(struct vfio_device *vdev,
+				      struct vfio_region_info *region_info,
+				      struct vfio_info_cap *caps)
 {
-	int ret = -1;
-	struct mdev_state *mdev_state;
-
-	mdev_state = find_mdev_state_by_uuid(uuid);
-
-	if (!mdev_state) {
-		pr_info("%s: mdev not found\n", __func__);
-		return -EINVAL;
-	}
-
-	if ((mdev_state->irq_index == VFIO_PCI_MSI_IRQ_INDEX) &&
-	    (!mdev_state->msi_evtfd))
-		return -EINVAL;
-	else if ((mdev_state->irq_index == VFIO_PCI_INTX_IRQ_INDEX) &&
-		 (!mdev_state->intx_evtfd)) {
-		pr_info("%s: Intr eventfd not found\n", __func__);
-		return -EINVAL;
-	}
-
-	if (mdev_state->irq_index == VFIO_PCI_MSI_IRQ_INDEX)
-		ret = eventfd_signal(mdev_state->msi_evtfd, 1);
-	else
-		ret = eventfd_signal(mdev_state->intx_evtfd, 1);
-
-#if defined(DEBUG_INTR)
-	pr_info("Intx triggered\n");
-#endif
-	if (ret != 1)
-		pr_err("%s: eventfd signal failed (%d)\n", __func__, ret);
-
-	return ret;
-}
-
-int mtty_get_region_info(struct mdev_device *mdev,
-			 struct vfio_region_info *region_info,
-			 u16 *cap_type_id, void **cap_type)
-{
+	struct mdev_state *mdev_state =
+		container_of(vdev, struct mdev_state, vdev);
 	unsigned int size = 0;
-	struct mdev_state *mdev_state;
 	u32 bar_index;
-
-	if (!mdev)
-		return -EINVAL;
-
-	mdev_state = mdev_get_drvdata(mdev);
-	if (!mdev_state)
-		return -EINVAL;
 
 	bar_index = region_info->index;
 	if (bar_index >= VFIO_PCI_NUM_REGIONS)
@@ -1116,32 +1757,25 @@ int mtty_get_region_info(struct mdev_device *mdev,
 	return 0;
 }
 
-int mtty_get_irq_info(struct mdev_device *mdev, struct vfio_irq_info *irq_info)
+static int mtty_get_irq_info(struct vfio_irq_info *irq_info)
 {
-	switch (irq_info->index) {
-	case VFIO_PCI_INTX_IRQ_INDEX:
-	case VFIO_PCI_MSI_IRQ_INDEX:
-	case VFIO_PCI_REQ_IRQ_INDEX:
-		break;
-
-	default:
+	if (irq_info->index != VFIO_PCI_INTX_IRQ_INDEX &&
+	    irq_info->index != VFIO_PCI_MSI_IRQ_INDEX)
 		return -EINVAL;
-	}
 
 	irq_info->flags = VFIO_IRQ_INFO_EVENTFD;
 	irq_info->count = 1;
 
 	if (irq_info->index == VFIO_PCI_INTX_IRQ_INDEX)
-		irq_info->flags |= (VFIO_IRQ_INFO_MASKABLE |
-				VFIO_IRQ_INFO_AUTOMASKED);
+		irq_info->flags |= VFIO_IRQ_INFO_MASKABLE |
+				   VFIO_IRQ_INFO_AUTOMASKED;
 	else
 		irq_info->flags |= VFIO_IRQ_INFO_NORESIZE;
 
 	return 0;
 }
 
-int mtty_get_device_info(struct mdev_device *mdev,
-			 struct vfio_device_info *dev_info)
+static int mtty_get_device_info(struct vfio_device_info *dev_info)
 {
 	dev_info->flags = VFIO_DEVICE_FLAGS_PCI;
 	dev_info->num_regions = VFIO_PCI_NUM_REGIONS;
@@ -1150,19 +1784,13 @@ int mtty_get_device_info(struct mdev_device *mdev,
 	return 0;
 }
 
-static long mtty_ioctl(struct mdev_device *mdev, unsigned int cmd,
+static long mtty_ioctl(struct vfio_device *vdev, unsigned int cmd,
 			unsigned long arg)
 {
+	struct mdev_state *mdev_state =
+		container_of(vdev, struct mdev_state, vdev);
 	int ret = 0;
 	unsigned long minsz;
-	struct mdev_state *mdev_state;
-
-	if (!mdev)
-		return -EINVAL;
-
-	mdev_state = mdev_get_drvdata(mdev);
-	if (!mdev_state)
-		return -ENODEV;
 
 	switch (cmd) {
 	case VFIO_DEVICE_GET_INFO:
@@ -1177,35 +1805,11 @@ static long mtty_ioctl(struct mdev_device *mdev, unsigned int cmd,
 		if (info.argsz < minsz)
 			return -EINVAL;
 
-		ret = mtty_get_device_info(mdev, &info);
+		ret = mtty_get_device_info(&info);
 		if (ret)
 			return ret;
 
 		memcpy(&mdev_state->dev_info, &info, sizeof(info));
-
-		if (copy_to_user((void __user *)arg, &info, minsz))
-			return -EFAULT;
-
-		return 0;
-	}
-	case VFIO_DEVICE_GET_REGION_INFO:
-	{
-		struct vfio_region_info info;
-		u16 cap_type_id = 0;
-		void *cap_type = NULL;
-
-		minsz = offsetofend(struct vfio_region_info, offset);
-
-		if (copy_from_user(&info, (void __user *)arg, minsz))
-			return -EFAULT;
-
-		if (info.argsz < minsz)
-			return -EINVAL;
-
-		ret = mtty_get_region_info(mdev, &info, &cap_type_id,
-					   &cap_type);
-		if (ret)
-			return ret;
 
 		if (copy_to_user((void __user *)arg, &info, minsz))
 			return -EFAULT;
@@ -1226,7 +1830,7 @@ static long mtty_ioctl(struct mdev_device *mdev, unsigned int cmd,
 		    (info.index >= mdev_state->dev_info.num_irqs))
 			return -EINVAL;
 
-		ret = mtty_get_irq_info(mdev, &info);
+		ret = mtty_get_irq_info(&info);
 		if (ret)
 			return ret;
 
@@ -1260,61 +1864,23 @@ static long mtty_ioctl(struct mdev_device *mdev, unsigned int cmd,
 				return PTR_ERR(data);
 		}
 
-		ret = mtty_set_irqs(mdev, hdr.flags, hdr.index, hdr.start,
+		ret = mtty_set_irqs(mdev_state, hdr.flags, hdr.index, hdr.start,
 				    hdr.count, data);
 
 		kfree(ptr);
 		return ret;
 	}
 	case VFIO_DEVICE_RESET:
-		return mtty_reset(mdev);
+		return mtty_reset(mdev_state);
 	}
 	return -ENOTTY;
 }
-
-int mtty_open(struct mdev_device *mdev)
-{
-	pr_info("%s\n", __func__);
-	return 0;
-}
-
-void mtty_close(struct mdev_device *mdev)
-{
-	pr_info("%s\n", __func__);
-}
-
-static ssize_t
-sample_mtty_dev_show(struct device *dev, struct device_attribute *attr,
-		     char *buf)
-{
-	return sprintf(buf, "This is phy device\n");
-}
-
-static DEVICE_ATTR_RO(sample_mtty_dev);
-
-static struct attribute *mtty_dev_attrs[] = {
-	&dev_attr_sample_mtty_dev.attr,
-	NULL,
-};
-
-static const struct attribute_group mtty_dev_group = {
-	.name  = "mtty_dev",
-	.attrs = mtty_dev_attrs,
-};
-
-const struct attribute_group *mtty_dev_groups[] = {
-	&mtty_dev_group,
-	NULL,
-};
 
 static ssize_t
 sample_mdev_dev_show(struct device *dev, struct device_attribute *attr,
 		     char *buf)
 {
-	if (mdev_from_dev(dev))
-		return sprintf(buf, "This is MDEV %s\n", dev_name(dev));
-
-	return sprintf(buf, "\n");
+	return sprintf(buf, "This is MDEV %s\n", dev_name(dev));
 }
 
 static DEVICE_ATTR_RO(sample_mdev_dev);
@@ -1329,102 +1895,54 @@ static const struct attribute_group mdev_dev_group = {
 	.attrs = mdev_dev_attrs,
 };
 
-const struct attribute_group *mdev_dev_groups[] = {
+static const struct attribute_group *mdev_dev_groups[] = {
 	&mdev_dev_group,
 	NULL,
 };
 
-static ssize_t
-name_show(struct kobject *kobj, struct device *dev, char *buf)
+static unsigned int mtty_get_available(struct mdev_type *mtype)
 {
-	char name[MTTY_STRING_LEN];
-	int i;
-	const char *name_str[2] = {"Single port serial", "Dual port serial"};
+	struct mtty_type *type = container_of(mtype, struct mtty_type, type);
 
-	for (i = 0; i < 2; i++) {
-		snprintf(name, MTTY_STRING_LEN, "%s-%d",
-			 dev_driver_string(dev), i + 1);
-		if (!strcmp(kobj->name, name))
-			return sprintf(buf, "%s\n", name_str[i]);
-	}
-
-	return -EINVAL;
+	return atomic_read(&mdev_avail_ports) / type->nr_ports;
 }
 
-MDEV_TYPE_ATTR_RO(name);
-
-static ssize_t
-available_instances_show(struct kobject *kobj, struct device *dev, char *buf)
+static void mtty_close(struct vfio_device *vdev)
 {
-	char name[MTTY_STRING_LEN];
-	int i;
-	struct mdev_state *mds;
-	int ports = 0, used = 0;
+	struct mdev_state *mdev_state =
+				container_of(vdev, struct mdev_state, vdev);
 
-	for (i = 0; i < 2; i++) {
-		snprintf(name, MTTY_STRING_LEN, "%s-%d",
-			 dev_driver_string(dev), i + 1);
-		if (!strcmp(kobj->name, name)) {
-			ports = i + 1;
-			break;
-		}
-	}
-
-	if (!ports)
-		return -EINVAL;
-
-	list_for_each_entry(mds, &mdev_devices_list, next)
-		used += mds->nr_ports;
-
-	return sprintf(buf, "%d\n", (MAX_MTTYS - used)/ports);
+	mtty_disable_files(mdev_state);
+	mtty_disable_intx(mdev_state);
+	mtty_disable_msi(mdev_state);
 }
 
-MDEV_TYPE_ATTR_RO(available_instances);
-
-
-static ssize_t device_api_show(struct kobject *kobj, struct device *dev,
-			       char *buf)
-{
-	return sprintf(buf, "%s\n", VFIO_DEVICE_API_PCI_STRING);
-}
-
-MDEV_TYPE_ATTR_RO(device_api);
-
-static struct attribute *mdev_types_attrs[] = {
-	&mdev_type_attr_name.attr,
-	&mdev_type_attr_device_api.attr,
-	&mdev_type_attr_available_instances.attr,
-	NULL,
+static const struct vfio_device_ops mtty_dev_ops = {
+	.name = "vfio-mtty",
+	.init = mtty_init_dev,
+	.release = mtty_release_dev,
+	.read = mtty_read,
+	.write = mtty_write,
+	.ioctl = mtty_ioctl,
+	.get_region_info_caps = mtty_ioctl_get_region_info,
+	.bind_iommufd	= vfio_iommufd_emulated_bind,
+	.unbind_iommufd	= vfio_iommufd_emulated_unbind,
+	.attach_ioas	= vfio_iommufd_emulated_attach_ioas,
+	.detach_ioas	= vfio_iommufd_emulated_detach_ioas,
+	.close_device	= mtty_close,
 };
 
-static struct attribute_group mdev_type_group1 = {
-	.name  = "1",
-	.attrs = mdev_types_attrs,
-};
-
-static struct attribute_group mdev_type_group2 = {
-	.name  = "2",
-	.attrs = mdev_types_attrs,
-};
-
-struct attribute_group *mdev_type_groups[] = {
-	&mdev_type_group1,
-	&mdev_type_group2,
-	NULL,
-};
-
-static const struct mdev_parent_ops mdev_fops = {
-	.owner                  = THIS_MODULE,
-	.dev_attr_groups        = mtty_dev_groups,
-	.mdev_attr_groups       = mdev_dev_groups,
-	.supported_type_groups  = mdev_type_groups,
-	.create                 = mtty_create,
-	.remove			= mtty_remove,
-	.open                   = mtty_open,
-	.release                = mtty_close,
-	.read                   = mtty_read,
-	.write                  = mtty_write,
-	.ioctl		        = mtty_ioctl,
+static struct mdev_driver mtty_driver = {
+	.device_api = VFIO_DEVICE_API_PCI_STRING,
+	.driver = {
+		.name = "mtty",
+		.owner = THIS_MODULE,
+		.mod_name = KBUILD_MODNAME,
+		.dev_groups = mdev_dev_groups,
+	},
+	.probe = mtty_probe,
+	.remove	= mtty_remove,
+	.get_available = mtty_get_available,
 };
 
 static void mtty_device_release(struct device *dev)
@@ -1442,7 +1960,8 @@ static int __init mtty_dev_init(void)
 
 	idr_init(&mtty_dev.vd_idr);
 
-	ret = alloc_chrdev_region(&mtty_dev.vd_devt, 0, MINORMASK, MTTY_NAME);
+	ret = alloc_chrdev_region(&mtty_dev.vd_devt, 0, MINORMASK + 1,
+				  MTTY_NAME);
 
 	if (ret < 0) {
 		pr_err("Error: failed to register mtty_dev, err:%d\n", ret);
@@ -1450,60 +1969,60 @@ static int __init mtty_dev_init(void)
 	}
 
 	cdev_init(&mtty_dev.vd_cdev, &vd_fops);
-	cdev_add(&mtty_dev.vd_cdev, mtty_dev.vd_devt, MINORMASK);
+	cdev_add(&mtty_dev.vd_cdev, mtty_dev.vd_devt, MINORMASK + 1);
 
 	pr_info("major_number:%d\n", MAJOR(mtty_dev.vd_devt));
 
-	mtty_dev.vd_class = class_create(THIS_MODULE, MTTY_CLASS_NAME);
+	ret = mdev_register_driver(&mtty_driver);
+	if (ret)
+		goto err_cdev;
 
-	if (IS_ERR(mtty_dev.vd_class)) {
+	ret = class_register(&mtty_class);
+
+	if (ret) {
 		pr_err("Error: failed to register mtty_dev class\n");
-		ret = PTR_ERR(mtty_dev.vd_class);
-		goto failed1;
+		goto err_driver;
 	}
 
-	mtty_dev.dev.class = mtty_dev.vd_class;
+	mtty_dev.dev.class = &mtty_class;
 	mtty_dev.dev.release = mtty_device_release;
 	dev_set_name(&mtty_dev.dev, "%s", MTTY_NAME);
 
 	ret = device_register(&mtty_dev.dev);
 	if (ret)
-		goto failed2;
+		goto err_put;
 
-	ret = mdev_register_device(&mtty_dev.dev, &mdev_fops);
+	ret = mdev_register_parent(&mtty_dev.parent, &mtty_dev.dev,
+				   &mtty_driver, mtty_mdev_types,
+				   ARRAY_SIZE(mtty_mdev_types));
 	if (ret)
-		goto failed3;
+		goto err_device;
+	return 0;
 
-	mutex_init(&mdev_list_lock);
-	INIT_LIST_HEAD(&mdev_devices_list);
-
-	goto all_done;
-
-failed3:
-
-	device_unregister(&mtty_dev.dev);
-failed2:
-	class_destroy(mtty_dev.vd_class);
-
-failed1:
+err_device:
+	device_del(&mtty_dev.dev);
+err_put:
+	put_device(&mtty_dev.dev);
+	class_unregister(&mtty_class);
+err_driver:
+	mdev_unregister_driver(&mtty_driver);
+err_cdev:
 	cdev_del(&mtty_dev.vd_cdev);
-	unregister_chrdev_region(mtty_dev.vd_devt, MINORMASK);
-
-all_done:
+	unregister_chrdev_region(mtty_dev.vd_devt, MINORMASK + 1);
 	return ret;
 }
 
 static void __exit mtty_dev_exit(void)
 {
 	mtty_dev.dev.bus = NULL;
-	mdev_unregister_device(&mtty_dev.dev);
+	mdev_unregister_parent(&mtty_dev.parent);
 
 	device_unregister(&mtty_dev.dev);
 	idr_destroy(&mtty_dev.vd_idr);
+	mdev_unregister_driver(&mtty_driver);
 	cdev_del(&mtty_dev.vd_cdev);
-	unregister_chrdev_region(mtty_dev.vd_devt, MINORMASK);
-	class_destroy(mtty_dev.vd_class);
-	mtty_dev.vd_class = NULL;
+	unregister_chrdev_region(mtty_dev.vd_devt, MINORMASK + 1);
+	class_unregister(&mtty_class);
 	pr_info("mtty_dev: Unloaded!\n");
 }
 
@@ -1511,6 +2030,6 @@ module_init(mtty_dev_init)
 module_exit(mtty_dev_exit)
 
 MODULE_LICENSE("GPL v2");
-MODULE_INFO(supported, "Test driver that simulate serial port over PCI");
+MODULE_DESCRIPTION("Test driver that simulate serial port over PCI");
 MODULE_VERSION(VERSION_STRING);
 MODULE_AUTHOR(DRIVER_AUTHOR);

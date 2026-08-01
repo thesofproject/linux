@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Force feedback support for DragonRise Inc. game controllers
  *
@@ -12,19 +13,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/input.h>
@@ -87,12 +75,18 @@ static int drff_init(struct hid_device *hid)
 {
 	struct drff_device *drff;
 	struct hid_report *report;
-	struct hid_input *hidinput = list_first_entry(&hid->inputs,
-						struct hid_input, list);
+	struct hid_input *hidinput;
 	struct list_head *report_list =
 			&hid->report_enum[HID_OUTPUT_REPORT].report_list;
-	struct input_dev *dev = hidinput->input;
+	struct input_dev *dev;
 	int error;
+
+	if (list_empty(&hid->inputs)) {
+		hid_err(hid, "no inputs found\n");
+		return -ENODEV;
+	}
+	hidinput = list_first_entry(&hid->inputs, struct hid_input, list);
+	dev = hidinput->input;
 
 	if (list_empty(report_list)) {
 		hid_err(hid, "no output reports found\n");
@@ -110,7 +104,7 @@ static int drff_init(struct hid_device *hid)
 		return -ENODEV;
 	}
 
-	drff = kzalloc(sizeof(struct drff_device), GFP_KERNEL);
+	drff = kzalloc_obj(struct drff_device);
 	if (!drff)
 		return -ENOMEM;
 
@@ -205,7 +199,7 @@ static inline int drff_init(struct hid_device *hid)
 #define PID0011_RDESC_ORIG_SIZE	101
 
 /* Fixed report descriptor for PID 0x011 joystick */
-static __u8 pid0011_rdesc_fixed[] = {
+static const __u8 pid0011_rdesc_fixed[] = {
 	0x05, 0x01,         /*  Usage Page (Desktop),           */
 	0x09, 0x04,         /*  Usage (Joystick),               */
 	0xA1, 0x01,         /*  Collection (Application),       */
@@ -234,14 +228,14 @@ static __u8 pid0011_rdesc_fixed[] = {
 	0xC0                /*  End Collection                  */
 };
 
-static __u8 *dr_report_fixup(struct hid_device *hdev, __u8 *rdesc,
-				unsigned int *rsize)
+static const __u8 *dr_report_fixup(struct hid_device *hdev, __u8 *rdesc,
+				   unsigned int *rsize)
 {
 	switch (hdev->product) {
 	case 0x0011:
 		if (*rsize == PID0011_RDESC_ORIG_SIZE) {
-			rdesc = pid0011_rdesc_fixed;
 			*rsize = sizeof(pid0011_rdesc_fixed);
+			return pid0011_rdesc_fixed;
 		}
 		break;
 	}
@@ -322,4 +316,5 @@ static struct hid_driver dr_driver = {
 };
 module_hid_driver(dr_driver);
 
+MODULE_DESCRIPTION("Force feedback support for DragonRise Inc. game controllers");
 MODULE_LICENSE("GPL");

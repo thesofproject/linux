@@ -16,6 +16,8 @@
 
 #include <asm/amigahw.h>
 
+#include "amiga.h"
+
 static unsigned short *snd_data;
 static const signed char sine_data[] = {
 	0,  39,  75,  103,  121,  127,  121,  103,  75,  39,
@@ -76,7 +78,7 @@ void amiga_mksound( unsigned int hz, unsigned int ticks )
 		return;
 
 	local_irq_save(flags);
-	del_timer( &sound_timer );
+	timer_delete(&sound_timer);
 
 	if (hz > 20 && hz < 32767) {
 		unsigned long period = (clock_constant / hz);

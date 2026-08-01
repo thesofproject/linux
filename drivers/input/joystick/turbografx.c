@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (c) 1998-2001 Vojtech Pavlik
  *
@@ -7,26 +8,6 @@
 
 /*
  * TurboGraFX parallel port interface driver for Linux.
- */
-
-/*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
- * Should you need to contact me, the author, you can do so either by
- * e-mail - mail your message to <vojtech@ucw.cz>, or by paper mail:
- * Vojtech Pavlik, Simunkova 1594, Prague 8, 182 00 Czech Republic
  */
 
 #include <linux/kernel.h>
@@ -91,7 +72,7 @@ static struct tgfx {
 
 static void tgfx_timer(struct timer_list *t)
 {
-	struct tgfx *tgfx = from_timer(tgfx, t, timer);
+	struct tgfx *tgfx = timer_container_of(tgfx, t, timer);
 	struct input_dev *dev;
 	int data1, data2, i;
 
@@ -122,33 +103,31 @@ static void tgfx_timer(struct timer_list *t)
 static int tgfx_open(struct input_dev *dev)
 {
 	struct tgfx *tgfx = input_get_drvdata(dev);
-	int err;
 
-	err = mutex_lock_interruptible(&tgfx->sem);
-	if (err)
-		return err;
+	scoped_guard(mutex_intr, &tgfx->sem) {
+		if (!tgfx->used++) {
+			parport_claim(tgfx->pd);
+			parport_write_control(tgfx->pd->port, 0x04);
+			mod_timer(&tgfx->timer, jiffies + TGFX_REFRESH_TIME);
+		}
 
-	if (!tgfx->used++) {
-		parport_claim(tgfx->pd);
-		parport_write_control(tgfx->pd->port, 0x04);
-		mod_timer(&tgfx->timer, jiffies + TGFX_REFRESH_TIME);
+		return 0;
 	}
 
-	mutex_unlock(&tgfx->sem);
-	return 0;
+	return -EINTR;
 }
 
 static void tgfx_close(struct input_dev *dev)
 {
 	struct tgfx *tgfx = input_get_drvdata(dev);
 
-	mutex_lock(&tgfx->sem);
+	guard(mutex)(&tgfx->sem);
+
 	if (!--tgfx->used) {
-		del_timer_sync(&tgfx->timer);
+		timer_delete_sync(&tgfx->timer);
 		parport_write_control(tgfx->pd->port, 0x00);
 		parport_release(tgfx->pd);
 	}
-	mutex_unlock(&tgfx->sem);
 }
 
 
@@ -191,7 +170,7 @@ static void tgfx_attach(struct parport *pp)
 		return;
 	}
 
-	tgfx = kzalloc(sizeof(struct tgfx), GFP_KERNEL);
+	tgfx = kzalloc_obj(*tgfx);
 	if (!tgfx) {
 		printk(KERN_ERR "turbografx.c: Not enough memory\n");
 		goto err_unreg_pardev;
@@ -293,7 +272,6 @@ static struct parport_driver tgfx_parport_driver = {
 	.name = "turbografx",
 	.match_port = tgfx_attach,
 	.detach = tgfx_detach,
-	.devmodel = true,
 };
 
 static int __init tgfx_init(void)

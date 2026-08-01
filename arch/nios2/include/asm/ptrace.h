@@ -18,7 +18,7 @@
 /* This struct defines the way the registers are stored on the
    stack during a system call.  */
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 struct pt_regs {
 	unsigned long  r8;	/* r8-r15 Caller-saved GP registers */
 	unsigned long  r9;
@@ -74,7 +74,9 @@ extern void show_regs(struct pt_regs *);
 	((struct pt_regs *)((unsigned long)current_thread_info() + THREAD_SIZE)\
 		- 1)
 
+#define force_successful_syscall_return() (current_pt_regs()->orig_r2 = -1)
+
 int do_syscall_trace_enter(void);
 void do_syscall_trace_exit(void);
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 #endif /* _ASM_NIOS2_PTRACE_H */

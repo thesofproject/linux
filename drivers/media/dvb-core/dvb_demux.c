@@ -1,20 +1,10 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  * dvb_demux.c - DVB kernel demux API
  *
  * Copyright (C) 2000-2001 Ralph  Metzler <ralph@convergence.de>
  *		       & Marcus Metzler <marcus@convergence.de>
  *			 for convergence integrated media GmbH
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public License
- * as published by the Free Software Foundation; either version 2.1
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #define pr_fmt(fmt) "dvb_demux: " fmt
@@ -125,12 +115,12 @@ static inline int dvb_dmx_swfilter_payload(struct dvb_demux_feed *feed,
 
 	cc = buf[3] & 0x0f;
 	ccok = ((feed->cc + 1) & 0x0f) == cc;
-	feed->cc = cc;
 	if (!ccok) {
 		set_buf_flags(feed, DMX_BUFFER_FLAG_DISCONTINUITY_DETECTED);
 		dprintk_sect_loss("missed packet: %d instead of %d!\n",
 				  cc, (feed->cc + 1) & 0x0f);
 	}
+	feed->cc = cc;
 
 	if (buf[1] & 0x40)	// PUSI ?
 		feed->peslen = 0xfffa;
@@ -243,7 +233,7 @@ static int dvb_dmx_swfilter_section_copy_dump(struct dvb_demux_feed *feed,
 {
 	struct dvb_demux *demux = feed->demux;
 	struct dmx_section_feed *sec = &feed->feed.sec;
-	u16 limit, seclen, n;
+	u16 limit, seclen;
 
 	if (sec->tsfeedp >= DMX_MAX_SECFEED_SIZE)
 		return 0;
@@ -272,7 +262,7 @@ static int dvb_dmx_swfilter_section_copy_dump(struct dvb_demux_feed *feed,
 	/* to be sure always set secbuf */
 	sec->secbuf = sec->secbuf_base + sec->secbufp;
 
-	for (n = 0; sec->secbufp + 2 < limit; n++) {
+	while (sec->secbufp + 2 < limit) {
 		seclen = section_length(sec->secbuf);
 		if (seclen <= 0 || seclen > DMX_MAX_SECTION_SIZE
 		    || seclen + sec->secbufp > limit)
@@ -310,7 +300,6 @@ static int dvb_dmx_swfilter_section_packet(struct dvb_demux_feed *feed,
 
 	cc = buf[3] & 0x0f;
 	ccok = ((feed->cc + 1) & 0x0f) == cc;
-	feed->cc = cc;
 
 	if (buf[3] & 0x20) {
 		/* adaption field present, check for discontinuity_indicator */
@@ -346,6 +335,7 @@ static int dvb_dmx_swfilter_section_packet(struct dvb_demux_feed *feed,
 		feed->pusi_seen = false;
 		dvb_dmx_swfilter_section_new(feed);
 	}
+	feed->cc = cc;
 
 	if (buf[1] & 0x40) {
 		/* PUSI=1 (is set), section boundary is here */
@@ -754,7 +744,8 @@ static int dmx_ts_feed_start_filtering(struct dmx_ts_feed *ts_feed)
 		return -ENODEV;
 	}
 
-	if ((ret = demux->start_feed(feed)) < 0) {
+	ret = demux->start_feed(feed);
+	if (ret < 0) {
 		mutex_unlock(&demux->mutex);
 		return ret;
 	}
@@ -807,7 +798,8 @@ static int dvbdmx_allocate_ts_feed(struct dmx_demux *dmx,
 	if (mutex_lock_interruptible(&demux->mutex))
 		return -ERESTARTSYS;
 
-	if (!(feed = dvb_dmx_feed_alloc(demux))) {
+	feed = dvb_dmx_feed_alloc(demux);
+	if (!feed) {
 		mutex_unlock(&demux->mutex);
 		return -EBUSY;
 	}
@@ -827,7 +819,8 @@ static int dvbdmx_allocate_ts_feed(struct dmx_demux *dmx,
 	(*ts_feed)->stop_filtering = dmx_ts_feed_stop_filtering;
 	(*ts_feed)->set = dmx_ts_feed_set;
 
-	if (!(feed->filter = dvb_dmx_filter_alloc(demux))) {
+	feed->filter = dvb_dmx_filter_alloc(demux);
+	if (!feed->filter) {
 		feed->state = DMX_STATE_FREE;
 		mutex_unlock(&demux->mutex);
 		return -EBUSY;
@@ -933,7 +926,8 @@ static void prepare_secfilters(struct dvb_demux_feed *dvbdmxfeed)
 	struct dmx_section_filter *sf;
 	u8 mask, mode, doneq;
 
-	if (!(f = dvbdmxfeed->filter))
+	f =  dvbdmxfeed->filter;
+	if (!f)
 		return;
 	do {
 		sf = &f->filter;
@@ -971,6 +965,7 @@ static int dmx_section_feed_start_filtering(struct dmx_section_feed *feed)
 	dvbdmxfeed->feed.sec.secbuf = dvbdmxfeed->feed.sec.secbuf_base;
 	dvbdmxfeed->feed.sec.secbufp = 0;
 	dvbdmxfeed->feed.sec.seclen = 0;
+	dvbdmxfeed->pusi_seen = false;
 
 	if (!dvbdmx->start_feed) {
 		mutex_unlock(&dvbdmx->mutex);
@@ -979,7 +974,8 @@ static int dmx_section_feed_start_filtering(struct dmx_section_feed *feed)
 
 	prepare_secfilters(dvbdmxfeed);
 
-	if ((ret = dvbdmx->start_feed(dvbdmxfeed)) < 0) {
+	ret = dvbdmx->start_feed(dvbdmxfeed);
+	if (ret < 0) {
 		mutex_unlock(&dvbdmx->mutex);
 		return ret;
 	}
@@ -1066,7 +1062,8 @@ static int dvbdmx_allocate_section_feed(struct dmx_demux *demux,
 	if (mutex_lock_interruptible(&dvbdmx->mutex))
 		return -ERESTARTSYS;
 
-	if (!(dvbdmxfeed = dvb_dmx_feed_alloc(dvbdmx))) {
+	dvbdmxfeed = dvb_dmx_feed_alloc(dvbdmx);
+	if (!dvbdmxfeed) {
 		mutex_unlock(&dvbdmx->mutex);
 		return -EBUSY;
 	}
@@ -1232,7 +1229,7 @@ static int dvbdmx_disconnect_frontend(struct dmx_demux *demux)
 	return 0;
 }
 
-static int dvbdmx_get_pes_pids(struct dmx_demux *demux, u16 * pids)
+static int dvbdmx_get_pes_pids(struct dmx_demux *demux, u16 *pids)
 {
 	struct dvb_demux *dvbdemux = (struct dvb_demux *)demux;
 
@@ -1247,12 +1244,14 @@ int dvb_dmx_init(struct dvb_demux *dvbdemux)
 
 	dvbdemux->cnt_storage = NULL;
 	dvbdemux->users = 0;
-	dvbdemux->filter = vmalloc(dvbdemux->filternum * sizeof(struct dvb_demux_filter));
+	dvbdemux->filter = vmalloc_array(dvbdemux->filternum,
+					 sizeof(struct dvb_demux_filter));
 
 	if (!dvbdemux->filter)
 		return -ENOMEM;
 
-	dvbdemux->feed = vmalloc(dvbdemux->feednum * sizeof(struct dvb_demux_feed));
+	dvbdemux->feed = vmalloc_array(dvbdemux->feednum,
+				       sizeof(struct dvb_demux_feed));
 	if (!dvbdemux->feed) {
 		vfree(dvbdemux->filter);
 		dvbdemux->filter = NULL;

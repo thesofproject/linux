@@ -1,19 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Mediated device Core Driver
  *
  * Copyright (c) 2016, NVIDIA CORPORATION. All rights reserved.
  *     Author: Neo Jia <cjia@nvidia.com>
  *             Kirti Wankhede <kwankhede@nvidia.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
-#include <linux/device.h>
 #include <linux/slab.h>
-#include <linux/uuid.h>
 #include <linux/sysfs.h>
 #include <linux/mdev.h>
 
@@ -23,421 +18,258 @@
 #define DRIVER_AUTHOR		"NVIDIA Corporation"
 #define DRIVER_DESC		"Mediated device Core Driver"
 
-static LIST_HEAD(parent_list);
-static DEFINE_MUTEX(parent_list_lock);
 static struct class_compat *mdev_bus_compat_class;
 
 static LIST_HEAD(mdev_list);
 static DEFINE_MUTEX(mdev_list_lock);
 
-struct device *mdev_parent_dev(struct mdev_device *mdev)
+/* Caller must hold parent unreg_sem read or write lock */
+static void mdev_device_remove_common(struct mdev_device *mdev)
 {
-	return mdev->parent->dev;
-}
-EXPORT_SYMBOL(mdev_parent_dev);
+	struct mdev_parent *parent = mdev->type->parent;
 
-void *mdev_get_drvdata(struct mdev_device *mdev)
-{
-	return mdev->driver_data;
-}
-EXPORT_SYMBOL(mdev_get_drvdata);
-
-void mdev_set_drvdata(struct mdev_device *mdev, void *data)
-{
-	mdev->driver_data = data;
-}
-EXPORT_SYMBOL(mdev_set_drvdata);
-
-struct device *mdev_dev(struct mdev_device *mdev)
-{
-	return &mdev->dev;
-}
-EXPORT_SYMBOL(mdev_dev);
-
-struct mdev_device *mdev_from_dev(struct device *dev)
-{
-	return dev_is_mdev(dev) ? to_mdev_device(dev) : NULL;
-}
-EXPORT_SYMBOL(mdev_from_dev);
-
-uuid_le mdev_uuid(struct mdev_device *mdev)
-{
-	return mdev->uuid;
-}
-EXPORT_SYMBOL(mdev_uuid);
-
-static int _find_mdev_device(struct device *dev, void *data)
-{
-	struct mdev_device *mdev;
-
-	if (!dev_is_mdev(dev))
-		return 0;
-
-	mdev = to_mdev_device(dev);
-
-	if (uuid_le_cmp(mdev->uuid, *(uuid_le *)data) == 0)
-		return 1;
-
-	return 0;
-}
-
-static bool mdev_device_exist(struct mdev_parent *parent, uuid_le uuid)
-{
-	struct device *dev;
-
-	dev = device_find_child(parent->dev, &uuid, _find_mdev_device);
-	if (dev) {
-		put_device(dev);
-		return true;
-	}
-
-	return false;
-}
-
-/* Should be called holding parent_list_lock */
-static struct mdev_parent *__find_parent_device(struct device *dev)
-{
-	struct mdev_parent *parent;
-
-	list_for_each_entry(parent, &parent_list, next) {
-		if (parent->dev == dev)
-			return parent;
-	}
-	return NULL;
-}
-
-static void mdev_release_parent(struct kref *kref)
-{
-	struct mdev_parent *parent = container_of(kref, struct mdev_parent,
-						  ref);
-	struct device *dev = parent->dev;
-
-	kfree(parent);
-	put_device(dev);
-}
-
-static
-inline struct mdev_parent *mdev_get_parent(struct mdev_parent *parent)
-{
-	if (parent)
-		kref_get(&parent->ref);
-
-	return parent;
-}
-
-static inline void mdev_put_parent(struct mdev_parent *parent)
-{
-	if (parent)
-		kref_put(&parent->ref, mdev_release_parent);
-}
-
-static int mdev_device_create_ops(struct kobject *kobj,
-				  struct mdev_device *mdev)
-{
-	struct mdev_parent *parent = mdev->parent;
-	int ret;
-
-	ret = parent->ops->create(kobj, mdev);
-	if (ret)
-		return ret;
-
-	ret = sysfs_create_groups(&mdev->dev.kobj,
-				  parent->ops->mdev_attr_groups);
-	if (ret)
-		parent->ops->remove(mdev);
-
-	return ret;
-}
-
-/*
- * mdev_device_remove_ops gets called from sysfs's 'remove' and when parent
- * device is being unregistered from mdev device framework.
- * - 'force_remove' is set to 'false' when called from sysfs's 'remove' which
- *   indicates that if the mdev device is active, used by VMM or userspace
- *   application, vendor driver could return error then don't remove the device.
- * - 'force_remove' is set to 'true' when called from mdev_unregister_device()
- *   which indicate that parent device is being removed from mdev device
- *   framework so remove mdev device forcefully.
- */
-static int mdev_device_remove_ops(struct mdev_device *mdev, bool force_remove)
-{
-	struct mdev_parent *parent = mdev->parent;
-	int ret;
-
-	/*
-	 * Vendor driver can return error if VMM or userspace application is
-	 * using this mdev device.
-	 */
-	ret = parent->ops->remove(mdev);
-	if (ret && !force_remove)
-		return -EBUSY;
-
-	sysfs_remove_groups(&mdev->dev.kobj, parent->ops->mdev_attr_groups);
-	return 0;
+	mdev_remove_sysfs_files(mdev);
+	device_del(&mdev->dev);
+	lockdep_assert_held(&parent->unreg_sem);
+	/* Balances with device_initialize() */
+	put_device(&mdev->dev);
 }
 
 static int mdev_device_remove_cb(struct device *dev, void *data)
 {
-	if (!dev_is_mdev(dev))
-		return 0;
-
-	return mdev_device_remove(dev, data ? *(bool *)data : true);
+	if (dev->bus == &mdev_bus_type)
+		mdev_device_remove_common(to_mdev_device(dev));
+	return 0;
 }
 
 /*
- * mdev_register_device : Register a device
+ * mdev_register_parent: Register a device as parent for mdevs
+ * @parent: parent structure registered
  * @dev: device structure representing parent device.
- * @ops: Parent device operation structure to be registered.
+ * @mdev_driver: Device driver to bind to the newly created mdev
+ * @types: Array of supported mdev types
+ * @nr_types: Number of entries in @types
  *
- * Add device to list of registered parent devices.
+ * Registers the @parent stucture as a parent for mdev types and thus mdev
+ * devices.  The caller needs to hold a reference on @dev that must not be
+ * released until after the call to mdev_unregister_parent().
+ *
  * Returns a negative value on error, otherwise 0.
  */
-int mdev_register_device(struct device *dev, const struct mdev_parent_ops *ops)
+int mdev_register_parent(struct mdev_parent *parent, struct device *dev,
+		struct mdev_driver *mdev_driver, struct mdev_type **types,
+		unsigned int nr_types)
 {
+	char *env_string = "MDEV_STATE=registered";
+	char *envp[] = { env_string, NULL };
 	int ret;
-	struct mdev_parent *parent;
 
-	/* check for mandatory ops */
-	if (!ops || !ops->create || !ops->remove || !ops->supported_type_groups)
-		return -EINVAL;
-
-	dev = get_device(dev);
-	if (!dev)
-		return -EINVAL;
-
-	mutex_lock(&parent_list_lock);
-
-	/* Check for duplicate */
-	parent = __find_parent_device(dev);
-	if (parent) {
-		ret = -EEXIST;
-		goto add_dev_err;
-	}
-
-	parent = kzalloc(sizeof(*parent), GFP_KERNEL);
-	if (!parent) {
-		ret = -ENOMEM;
-		goto add_dev_err;
-	}
-
-	kref_init(&parent->ref);
-	mutex_init(&parent->lock);
-
+	memset(parent, 0, sizeof(*parent));
+	init_rwsem(&parent->unreg_sem);
 	parent->dev = dev;
-	parent->ops = ops;
-
-	if (!mdev_bus_compat_class) {
-		mdev_bus_compat_class = class_compat_register("mdev_bus");
-		if (!mdev_bus_compat_class) {
-			ret = -ENOMEM;
-			goto add_dev_err;
-		}
-	}
+	parent->mdev_driver = mdev_driver;
+	parent->types = types;
+	parent->nr_types = nr_types;
+	atomic_set(&parent->available_instances, mdev_driver->max_instances);
 
 	ret = parent_create_sysfs_files(parent);
 	if (ret)
-		goto add_dev_err;
+		return ret;
 
-	ret = class_compat_create_link(mdev_bus_compat_class, dev, NULL);
+	ret = class_compat_create_link(mdev_bus_compat_class, dev);
 	if (ret)
 		dev_warn(dev, "Failed to create compatibility class link\n");
 
-	list_add(&parent->next, &parent_list);
-	mutex_unlock(&parent_list_lock);
-
 	dev_info(dev, "MDEV: Registered\n");
+	kobject_uevent_env(&dev->kobj, KOBJ_CHANGE, envp);
 	return 0;
-
-add_dev_err:
-	mutex_unlock(&parent_list_lock);
-	if (parent)
-		mdev_put_parent(parent);
-	else
-		put_device(dev);
-	return ret;
 }
-EXPORT_SYMBOL(mdev_register_device);
+EXPORT_SYMBOL(mdev_register_parent);
 
 /*
- * mdev_unregister_device : Unregister a parent device
- * @dev: device structure representing parent device.
- *
- * Remove device from list of registered parent devices. Give a chance to free
- * existing mediated devices for given device.
+ * mdev_unregister_parent : Unregister a parent device
+ * @parent: parent structure to unregister
  */
-
-void mdev_unregister_device(struct device *dev)
+void mdev_unregister_parent(struct mdev_parent *parent)
 {
-	struct mdev_parent *parent;
-	bool force_remove = true;
+	char *env_string = "MDEV_STATE=unregistered";
+	char *envp[] = { env_string, NULL };
 
-	mutex_lock(&parent_list_lock);
-	parent = __find_parent_device(dev);
+	dev_info(parent->dev, "MDEV: Unregistering\n");
 
-	if (!parent) {
-		mutex_unlock(&parent_list_lock);
-		return;
-	}
-	dev_info(dev, "MDEV: Unregistering\n");
-
-	list_del(&parent->next);
-	class_compat_remove_link(mdev_bus_compat_class, dev, NULL);
-
-	device_for_each_child(dev, (void *)&force_remove,
-			      mdev_device_remove_cb);
-
+	down_write(&parent->unreg_sem);
+	class_compat_remove_link(mdev_bus_compat_class, parent->dev);
+	device_for_each_child(parent->dev, NULL, mdev_device_remove_cb);
 	parent_remove_sysfs_files(parent);
+	up_write(&parent->unreg_sem);
 
-	mutex_unlock(&parent_list_lock);
-	mdev_put_parent(parent);
+	kobject_uevent_env(&parent->dev->kobj, KOBJ_CHANGE, envp);
 }
-EXPORT_SYMBOL(mdev_unregister_device);
+EXPORT_SYMBOL(mdev_unregister_parent);
 
 static void mdev_device_release(struct device *dev)
 {
 	struct mdev_device *mdev = to_mdev_device(dev);
+	struct mdev_parent *parent = mdev->type->parent;
+
+	mutex_lock(&mdev_list_lock);
+	list_del(&mdev->next);
+	if (!parent->mdev_driver->get_available)
+		atomic_inc(&parent->available_instances);
+	mutex_unlock(&mdev_list_lock);
+
+	/* Pairs with the get in mdev_device_create() */
+	kobject_put(&mdev->type->kobj);
 
 	dev_dbg(&mdev->dev, "MDEV: destroying\n");
 	kfree(mdev);
 }
 
-int mdev_device_create(struct kobject *kobj, struct device *dev, uuid_le uuid)
+int mdev_device_create(struct mdev_type *type, const guid_t *uuid)
 {
 	int ret;
-	struct mdev_device *mdev;
-	struct mdev_parent *parent;
-	struct mdev_type *type = to_mdev_type(kobj);
+	struct mdev_device *mdev, *tmp;
+	struct mdev_parent *parent = type->parent;
+	struct mdev_driver *drv = parent->mdev_driver;
 
-	parent = mdev_get_parent(type->parent);
-	if (!parent)
-		return -EINVAL;
-
-	mutex_lock(&parent->lock);
+	mutex_lock(&mdev_list_lock);
 
 	/* Check for duplicate */
-	if (mdev_device_exist(parent, uuid)) {
-		ret = -EEXIST;
-		goto create_err;
-	}
-
-	mdev = kzalloc(sizeof(*mdev), GFP_KERNEL);
-	if (!mdev) {
-		ret = -ENOMEM;
-		goto create_err;
-	}
-
-	memcpy(&mdev->uuid, &uuid, sizeof(uuid_le));
-	mdev->parent = parent;
-	kref_init(&mdev->ref);
-
-	mdev->dev.parent  = dev;
-	mdev->dev.bus     = &mdev_bus_type;
-	mdev->dev.release = mdev_device_release;
-	dev_set_name(&mdev->dev, "%pUl", uuid.b);
-
-	ret = device_register(&mdev->dev);
-	if (ret) {
-		put_device(&mdev->dev);
-		goto create_err;
-	}
-
-	ret = mdev_device_create_ops(kobj, mdev);
-	if (ret)
-		goto create_failed;
-
-	ret = mdev_create_sysfs_files(&mdev->dev, type);
-	if (ret) {
-		mdev_device_remove_ops(mdev, true);
-		goto create_failed;
-	}
-
-	mdev->type_kobj = kobj;
-	dev_dbg(&mdev->dev, "MDEV: created\n");
-
-	mutex_unlock(&parent->lock);
-
-	mutex_lock(&mdev_list_lock);
-	list_add(&mdev->next, &mdev_list);
-	mutex_unlock(&mdev_list_lock);
-
-	return ret;
-
-create_failed:
-	device_unregister(&mdev->dev);
-
-create_err:
-	mutex_unlock(&parent->lock);
-	mdev_put_parent(parent);
-	return ret;
-}
-
-int mdev_device_remove(struct device *dev, bool force_remove)
-{
-	struct mdev_device *mdev, *tmp;
-	struct mdev_parent *parent;
-	struct mdev_type *type;
-	int ret;
-	bool found = false;
-
-	mdev = to_mdev_device(dev);
-
-	mutex_lock(&mdev_list_lock);
 	list_for_each_entry(tmp, &mdev_list, next) {
-		if (tmp == mdev) {
-			found = true;
-			break;
+		if (guid_equal(&tmp->uuid, uuid)) {
+			mutex_unlock(&mdev_list_lock);
+			return -EEXIST;
 		}
 	}
 
-	if (found)
-		list_del(&mdev->next);
-
-	mutex_unlock(&mdev_list_lock);
-
-	if (!found)
-		return -ENODEV;
-
-	type = to_mdev_type(mdev->type_kobj);
-	parent = mdev->parent;
-	mutex_lock(&parent->lock);
-
-	ret = mdev_device_remove_ops(mdev, force_remove);
-	if (ret) {
-		mutex_unlock(&parent->lock);
-
-		mutex_lock(&mdev_list_lock);
-		list_add(&mdev->next, &mdev_list);
-		mutex_unlock(&mdev_list_lock);
-
-		return ret;
+	if (!drv->get_available) {
+		/*
+		 * Note: that non-atomic read and dec is fine here because
+		 * all modifications are under mdev_list_lock.
+		 */
+		if (!atomic_read(&parent->available_instances)) {
+			mutex_unlock(&mdev_list_lock);
+			return -EUSERS;
+		}
+		atomic_dec(&parent->available_instances);
 	}
 
-	mdev_remove_sysfs_files(dev, type);
-	device_unregister(dev);
-	mutex_unlock(&parent->lock);
-	mdev_put_parent(parent);
+	mdev = kzalloc_obj(*mdev);
+	if (!mdev) {
+		mutex_unlock(&mdev_list_lock);
+		return -ENOMEM;
+	}
 
+	device_initialize(&mdev->dev);
+	mdev->dev.parent  = parent->dev;
+	mdev->dev.bus = &mdev_bus_type;
+	mdev->dev.release = mdev_device_release;
+	mdev->dev.groups = mdev_device_groups;
+	mdev->type = type;
+	/* Pairs with the put in mdev_device_release() */
+	kobject_get(&type->kobj);
+
+	guid_copy(&mdev->uuid, uuid);
+	list_add(&mdev->next, &mdev_list);
+	mutex_unlock(&mdev_list_lock);
+
+	ret = dev_set_name(&mdev->dev, "%pUl", uuid);
+	if (ret)
+		goto out_put_device;
+
+	/* Check if parent unregistration has started */
+	if (!down_read_trylock(&parent->unreg_sem)) {
+		ret = -ENODEV;
+		goto out_put_device;
+	}
+
+	ret = device_add(&mdev->dev);
+	if (ret)
+		goto out_unlock;
+
+	ret = device_driver_attach(&drv->driver, &mdev->dev);
+	if (ret)
+		goto out_del;
+
+	ret = mdev_create_sysfs_files(mdev);
+	if (ret)
+		goto out_del;
+
+	mdev->active = true;
+	dev_dbg(&mdev->dev, "MDEV: created\n");
+	up_read(&parent->unreg_sem);
+
+	return 0;
+
+out_del:
+	device_del(&mdev->dev);
+out_unlock:
+	up_read(&parent->unreg_sem);
+out_put_device:
+	put_device(&mdev->dev);
+	return ret;
+}
+
+int mdev_device_remove(struct mdev_device *mdev)
+{
+	struct mdev_device *tmp;
+	struct mdev_parent *parent = mdev->type->parent;
+
+	mutex_lock(&mdev_list_lock);
+	list_for_each_entry(tmp, &mdev_list, next) {
+		if (tmp == mdev)
+			break;
+	}
+
+	if (tmp != mdev) {
+		mutex_unlock(&mdev_list_lock);
+		return -ENODEV;
+	}
+
+	if (!mdev->active) {
+		mutex_unlock(&mdev_list_lock);
+		return -EAGAIN;
+	}
+
+	mdev->active = false;
+	mutex_unlock(&mdev_list_lock);
+
+	/* Check if parent unregistration has started */
+	if (!down_read_trylock(&parent->unreg_sem))
+		return -ENODEV;
+
+	mdev_device_remove_common(mdev);
+	up_read(&parent->unreg_sem);
 	return 0;
 }
 
 static int __init mdev_init(void)
 {
-	return mdev_bus_register();
+	int ret;
+
+	ret = bus_register(&mdev_bus_type);
+	if (ret)
+		return ret;
+
+	mdev_bus_compat_class = class_compat_register("mdev_bus");
+	if (!mdev_bus_compat_class) {
+		bus_unregister(&mdev_bus_type);
+		return -ENOMEM;
+	}
+
+	return 0;
 }
 
 static void __exit mdev_exit(void)
 {
-	if (mdev_bus_compat_class)
-		class_compat_unregister(mdev_bus_compat_class);
-
-	mdev_bus_unregister();
+	class_compat_unregister(mdev_bus_compat_class);
+	bus_unregister(&mdev_bus_type);
 }
 
-module_init(mdev_init)
+subsys_initcall(mdev_init)
 module_exit(mdev_exit)
 
 MODULE_VERSION(DRIVER_VERSION);
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
-MODULE_SOFTDEP("post: vfio_mdev");

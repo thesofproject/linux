@@ -1,20 +1,9 @@
-/**
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
 
     AudioScience HPI driver
     Copyright (C) 1997-2014  AudioScience Inc. <support@audioscience.com>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of version 2 of the GNU General Public License as
-    published by the Free Software Foundation;
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 */
 
@@ -48,10 +37,10 @@ struct hpi_control_cache {
 	u16 adap_idx;
 	u32 control_count;
 	u32 cache_size_in_bytes;
-	/** pointer to allocated memory of lookup pointers. */
-	struct hpi_control_cache_info **p_info;
 	/** pointer to DSP's control cache. */
 	u8 *p_cache;
+	/** pointer to allocated memory of lookup pointers. */
+	struct hpi_control_cache_info *p_info[] __counted_by(control_count);
 };
 
 struct hpi_adapter_obj *hpi_find_adapter(u16 adapter_index);

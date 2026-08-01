@@ -6,15 +6,22 @@
 #ifndef BTRFS_XATTR_H
 #define BTRFS_XATTR_H
 
-#include <linux/xattr.h>
+#include <linux/types.h>
 
-extern const struct xattr_handler *btrfs_xattr_handlers[];
+struct dentry;
+struct inode;
+struct qstr;
+struct xattr_handler;
+struct btrfs_trans_handle;
 
-int btrfs_getxattr(struct inode *inode, const char *name,
+extern const struct xattr_handler * const btrfs_xattr_handlers[];
+
+int btrfs_getxattr(const struct inode *inode, const char *name,
 		void *buffer, size_t size);
-int btrfs_setxattr(struct btrfs_trans_handle *trans,
-			    struct inode *inode, const char *name,
-			    const void *value, size_t size, int flags);
+int btrfs_setxattr(struct btrfs_trans_handle *trans, struct inode *inode,
+		   const char *name, const void *value, size_t size, int flags);
+int btrfs_setxattr_trans(struct inode *inode, const char *name,
+			 const void *value, size_t size, int flags);
 ssize_t btrfs_listxattr(struct dentry *dentry, char *buffer, size_t size);
 
 int btrfs_xattr_security_init(struct btrfs_trans_handle *trans,

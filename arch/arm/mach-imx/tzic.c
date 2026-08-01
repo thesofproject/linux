@@ -1,12 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C)2004-2010 Freescale Semiconductor, Inc. All Rights Reserved.
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
  */
 
 #include <linux/init.h>
@@ -140,7 +134,7 @@ static void __exception_irq_entry tzic_handle_irq(struct pt_regs *regs)
 			while (stat) {
 				handled = 1;
 				irqofs = fls(stat) - 1;
-				handle_domain_irq(domain, irqofs + i * 32, regs);
+				generic_handle_domain_irq(domain, irqofs + i * 32);
 				stat &= ~(1 << irqofs);
 			}
 		}
@@ -181,8 +175,8 @@ static int __init tzic_init_dt(struct device_node *np, struct device_node *p)
 	irq_base = irq_alloc_descs(-1, 0, TZIC_NUM_IRQS, numa_node_id());
 	WARN_ON(irq_base < 0);
 
-	domain = irq_domain_add_legacy(np, TZIC_NUM_IRQS, irq_base, 0,
-				       &irq_domain_simple_ops, NULL);
+	domain = irq_domain_create_legacy(of_fwnode_handle(np), TZIC_NUM_IRQS, irq_base, 0,
+					  &irq_domain_simple_ops, NULL);
 	WARN_ON(!domain);
 
 	for (i = 0; i < 4; i++, irq_base += 32)

@@ -13,7 +13,7 @@ structure, with the host as the root (the system's master), hubs as
 interior nodes, and peripherals as leaves (and slaves). Modern PCs
 support several such trees of USB devices, usually
 a few USB 3.0 (5 GBit/s) or USB 3.1 (10 GBit/s) and some legacy
-USB 2.0 (480 MBit/s) busses just in case.
+USB 2.0 (480 MBit/s) buses just in case.
 
 That master/slave asymmetry was designed-in for a number of reasons, one
 being ease of use. It is not physically possible to mistake upstream and
@@ -42,7 +42,7 @@ two. One is intended for *general-purpose* drivers (exposed through
 driver frameworks), and the other is for drivers that are *part of the
 core*. Such core drivers include the *hub* driver (which manages trees
 of USB devices) and several different kinds of *host controller
-drivers*, which control individual busses.
+drivers*, which control individual buses.
 
 The device model seen by USB drivers is relatively complex.
 
@@ -109,13 +109,19 @@ well as to make sure they aren't relying on some HCD-specific behavior.
 USB-Standard Types
 ==================
 
-In ``<linux/usb/ch9.h>`` you will find the USB data types defined in
-chapter 9 of the USB specification. These data types are used throughout
+In ``include/uapi/linux/usb/ch9.h`` you will find the USB data types defined
+in chapter 9 of the USB specification. These data types are used throughout
 USB, and in APIs including this host side API, gadget APIs, usb character
-devices and debugfs interfaces.
+devices and debugfs interfaces. That file is itself included by
+``include/linux/usb/ch9.h``, which also contains declarations of a few
+utility routines for manipulating these data types; the implementations
+are in ``drivers/usb/common/common.c``.
 
-.. kernel-doc:: include/linux/usb/ch9.h
-   :internal:
+.. kernel-doc:: drivers/usb/common/common.c
+   :export:
+
+In addition, some functions useful for creating debugging output are
+defined in ``drivers/usb/common/debug.c``.
 
 .. _usb_header:
 
@@ -155,6 +161,7 @@ rely on 64bit DMA to eliminate another kind of bounce buffer.
 .. kernel-doc:: drivers/usb/core/urb.c
    :export:
 
+.. c:namespace:: usb_core
 .. kernel-doc:: drivers/usb/core/message.c
    :export:
 
@@ -413,6 +420,12 @@ USBDEVFS_CONNECTINFO
     speed (480 MBit/sec) or just full speed (12 MBit/sec).* You should
     know the devnum value already, it's the DDD value of the device file
     name.
+
+USBDEVFS_GET_SPEED
+    Returns the speed of the device. The speed is returned as a
+    numerical value in accordance with enum usb_device_speed
+
+    File modification time is not updated by this request.
 
 USBDEVFS_GETDRIVER
     Returns the name of the kernel driver bound to a given interface (a
@@ -765,8 +778,7 @@ Speed may be:
 	======= ======================================================
 	1.5	Mbit/s for low speed USB
 	12	Mbit/s for full speed USB
-	480	Mbit/s for high speed USB (added for USB 2.0);
-		also used for Wireless USB, which has no fixed speed
+	480	Mbit/s for high speed USB (added for USB 2.0)
 	5000	Mbit/s for SuperSpeed USB (added for USB 3.0)
 	======= ======================================================
 

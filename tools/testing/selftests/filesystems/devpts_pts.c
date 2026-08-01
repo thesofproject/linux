@@ -8,9 +8,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/ioctl.h>
+#include <asm/ioctls.h>
 #include <sys/mount.h>
 #include <sys/wait.h>
+#include "kselftest.h"
 
 static bool terminal_dup2(int duplicate, int original)
 {
@@ -118,17 +119,17 @@ static int do_tiocgptpeer(char *ptmx, char *expected_procfd_contents)
 		goto do_cleanup;
 	}
 
-#ifdef TIOCGPTPEER
 	slave = ioctl(master, TIOCGPTPEER, O_RDWR | O_NOCTTY | O_CLOEXEC);
-#endif
 	if (slave < 0) {
 		if (errno == EINVAL) {
 			fprintf(stderr, "TIOCGPTPEER is not supported. "
 					"Skipping test.\n");
-			fret = EXIT_SUCCESS;
+			fret = KSFT_SKIP;
+		} else {
+			fprintf(stderr,
+				"Failed to perform TIOCGPTPEER ioctl\n");
+			fret = EXIT_FAILURE;
 		}
-
-		fprintf(stderr, "Failed to perform TIOCGPTPEER ioctl\n");
 		goto do_cleanup;
 	}
 
@@ -279,9 +280,9 @@ int main(int argc, char *argv[])
 	int ret;
 
 	if (!isatty(STDIN_FILENO)) {
-		fprintf(stderr, "Standard input file desciptor is not attached "
+		fprintf(stderr, "Standard input file descriptor is not attached "
 				"to a terminal. Skipping test\n");
-		exit(EXIT_FAILURE);
+		exit(KSFT_SKIP);
 	}
 
 	ret = unshare(CLONE_NEWNS);

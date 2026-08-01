@@ -21,29 +21,20 @@
  * assembly implementation with completely non standard calling convention
  * for arguments and results (beware).
  */
-
-#ifdef __ARMEB__
-#define __xh "r0"
-#define __xl "r1"
-#else
-#define __xl "r0"
-#define __xh "r1"
-#endif
-
 static inline uint32_t __div64_32(uint64_t *n, uint32_t base)
 {
 	register unsigned int __base      asm("r4") = base;
 	register unsigned long long __n   asm("r0") = *n;
 	register unsigned long long __res asm("r2");
-	register unsigned int __rem       asm(__xh);
-	asm(	__asmeq("%0", __xh)
+	unsigned int __rem;
+	asm(	__asmeq("%0", "r0")
 		__asmeq("%1", "r2")
-		__asmeq("%2", "r0")
-		__asmeq("%3", "r4")
+		__asmeq("%2", "r4")
 		"bl	__do_div64"
-		: "=r" (__rem), "=r" (__res)
-		: "r" (__n), "r" (__base)
+		: "+r" (__n), "=r" (__res)
+		: "r" (__base)
 		: "ip", "lr", "cc");
+	__rem = __n >> 32;
 	*n = __res;
 	return __rem;
 }
@@ -61,21 +52,17 @@ static inline uint32_t __div64_32(uint64_t *n, uint32_t base)
 
 #else
 
-/*
- * gcc versions earlier than 4.0 are simply too problematic for the
- * __div64_const32() code in asm-generic/div64.h. First there is
- * gcc PR 15089 that tend to trig on more complex constructs, spurious
- * .global __udivsi3 are inserted even if none of those symbols are
- * referenced in the generated code, and those gcc versions are not able
- * to do constant propagation on long long values anyway.
- */
-
-#define __div64_const32_is_OK (__GNUC__ >= 4)
-
-static inline uint64_t __arch_xprod_64(uint64_t m, uint64_t n, bool bias)
+#ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
+static __always_inline
+#else
+static inline
+#endif
+uint64_t __arch_xprod_64(uint64_t m, uint64_t n, bool bias)
 {
 	unsigned long long res;
 	register unsigned int tmp asm("ip") = 0;
+	bool no_ovf = __builtin_constant_p(m) &&
+		      ((m >> 32) + (m & 0xffffffff) < 0x100000000);
 
 	if (!bias) {
 		asm (	"umull	%Q0, %R0, %Q1, %Q2\n\t"
@@ -83,7 +70,7 @@ static inline uint64_t __arch_xprod_64(uint64_t m, uint64_t n, bool bias)
 			: "=&r" (res)
 			: "r" (m), "r" (n)
 			: "cc");
-	} else if (!(m & ((1ULL << 63) | (1ULL << 31)))) {
+	} else if (no_ovf) {
 		res = m;
 		asm (	"umlal	%Q0, %R0, %Q1, %Q2\n\t"
 			"mov	%Q0, #0"
@@ -100,7 +87,7 @@ static inline uint64_t __arch_xprod_64(uint64_t m, uint64_t n, bool bias)
 			: "cc");
 	}
 
-	if (!(m & ((1ULL << 63) | (1ULL << 31)))) {
+	if (no_ovf) {
 		asm (	"umlal	%R0, %Q0, %R1, %Q2\n\t"
 			"umlal	%R0, %Q0, %Q1, %R2\n\t"
 			"mov	%R0, #0\n\t"

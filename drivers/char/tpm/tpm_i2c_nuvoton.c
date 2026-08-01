@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
  /******************************************************************************
  * Nuvoton TPM I2C Device Driver Interface for WPCT301/NPCT501/NPCT6XX,
  * based on the TCG TPM Interface Spec version 1.2.
@@ -7,19 +8,6 @@
  *  Dan Morav <dan.morav@nuvoton.com>
  * Copyright (C) 2013, Obsidian Research Corp.
  *  Jason Gunthorpe <jgunthorpe@obsidianresearch.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see http://www.gnu.org/licenses/>.
  *
  * Nuvoton contact information: APC.Support@nuvoton.com
  *****************************************************************************/
@@ -31,18 +19,17 @@
 #include <linux/interrupt.h>
 #include <linux/wait.h>
 #include <linux/i2c.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
+#include <linux/property.h>
 #include "tpm.h"
 
 /* I2C interface offsets */
-#define TPM_STS                0x00
-#define TPM_BURST_COUNT        0x01
-#define TPM_DATA_FIFO_W        0x20
-#define TPM_DATA_FIFO_R        0x40
-#define TPM_VID_DID_RID        0x60
-/* TPM command header size */
-#define TPM_HEADER_SIZE        10
-#define TPM_RETRY      5
+#define TPM_STS			0x00
+#define TPM_BURST_COUNT		0x01
+#define TPM_DATA_FIFO_W		0x20
+#define TPM_DATA_FIFO_R		0x40
+#define TPM_VID_DID_RID		0x60
+#define TPM_I2C_RETRIES		5
 /*
  * I2C bus device maximum buffer size w/o counting I2C address or command
  * i.e. max size required for I2C write is 34 = addr, command, 32 bytes data
@@ -292,7 +279,7 @@ static int i2c_nuvoton_recv(struct tpm_chip *chip, u8 *buf, size_t count)
 		dev_err(dev, "%s() count < header size\n", __func__);
 		return -EIO;
 	}
-	for (retries = 0; retries < TPM_RETRY; retries++) {
+	for (retries = 0; retries < TPM_I2C_RETRIES; retries++) {
 		if (retries > 0) {
 			/* if this is not the first trial, set responseRetry */
 			i2c_nuvoton_write_status(client,
@@ -363,12 +350,14 @@ static int i2c_nuvoton_recv(struct tpm_chip *chip, u8 *buf, size_t count)
  * tpm.c can skip polling for the data to be available as the interrupt is
  * waited for here
  */
-static int i2c_nuvoton_send(struct tpm_chip *chip, u8 *buf, size_t len)
+static int i2c_nuvoton_send(struct tpm_chip *chip, u8 *buf, size_t bufsiz,
+			    size_t len)
 {
 	struct priv_data *priv = dev_get_drvdata(&chip->dev);
 	struct device *dev = chip->dev.parent;
 	struct i2c_client *client = to_i2c_client(dev);
 	u32 ordinal;
+	unsigned long duration;
 	size_t count = 0;
 	int burst_count, bytes2write, retries, rc = -EIO;
 
@@ -455,18 +444,18 @@ static int i2c_nuvoton_send(struct tpm_chip *chip, u8 *buf, size_t len)
 		return rc;
 	}
 	ordinal = be32_to_cpu(*((__be32 *) (buf + 6)));
-	rc = i2c_nuvoton_wait_for_data_avail(chip,
-					     tpm_calc_ordinal_duration(chip,
-								       ordinal),
-					     &priv->read_queue);
+	duration = tpm_calc_ordinal_duration(chip, ordinal);
+
+	rc = i2c_nuvoton_wait_for_data_avail(chip, duration, &priv->read_queue);
 	if (rc) {
-		dev_err(dev, "%s() timeout command duration\n", __func__);
+		dev_err(dev, "%s() timeout command duration %ld\n",
+			__func__, duration);
 		i2c_nuvoton_ready(chip);
 		return rc;
 	}
 
 	dev_dbg(dev, "%s() -> %zd\n", __func__, len);
-	return len;
+	return 0;
 }
 
 static bool i2c_nuvoton_req_canceled(struct tpm_chip *chip, u8 status)
@@ -535,8 +524,7 @@ static int get_vid(struct i2c_client *client, u32 *res)
 	return 0;
 }
 
-static int i2c_nuvoton_probe(struct i2c_client *client,
-			     const struct i2c_device_id *id)
+static int i2c_nuvoton_probe(struct i2c_client *client)
 {
 	int rc;
 	struct tpm_chip *chip;
@@ -559,15 +547,8 @@ static int i2c_nuvoton_probe(struct i2c_client *client,
 	if (!priv)
 		return -ENOMEM;
 
-	if (dev->of_node) {
-		const struct of_device_id *of_id;
-
-		of_id = of_match_device(dev->driver->of_match_table, dev);
-		if (of_id && of_id->data == OF_IS_TPM2)
-			chip->flags |= TPM_CHIP_FLAG_TPM2;
-	} else
-		if (id->driver_data == I2C_IS_TPM2)
-			chip->flags |= TPM_CHIP_FLAG_TPM2;
+	if (i2c_get_match_data(client))
+		chip->flags |= TPM_CHIP_FLAG_TPM2;
 
 	init_waitqueue_head(&priv->read_queue);
 
@@ -635,12 +616,11 @@ static int i2c_nuvoton_probe(struct i2c_client *client,
 	return tpm_chip_register(chip);
 }
 
-static int i2c_nuvoton_remove(struct i2c_client *client)
+static void i2c_nuvoton_remove(struct i2c_client *client)
 {
 	struct tpm_chip *chip = i2c_get_clientdata(client);
 
 	tpm_chip_unregister(chip);
-	return 0;
 }
 
 static const struct i2c_device_id i2c_nuvoton_id[] = {
@@ -675,6 +655,6 @@ static struct i2c_driver i2c_nuvoton_driver = {
 
 module_i2c_driver(i2c_nuvoton_driver);
 
-MODULE_AUTHOR("Dan Morav (dan.morav@nuvoton.com)");
+MODULE_AUTHOR("Dan Morav <dan.morav@nuvoton.com>");
 MODULE_DESCRIPTION("Nuvoton TPM I2C Driver");
 MODULE_LICENSE("GPL");

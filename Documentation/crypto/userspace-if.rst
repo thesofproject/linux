@@ -4,26 +4,88 @@ User Space Interface
 Introduction
 ------------
 
-The concepts of the kernel crypto API visible to kernel space is fully
-applicable to the user space interface as well. Therefore, the kernel
-crypto API high level discussion for the in-kernel use cases applies
-here as well.
+AF_ALG provides unprivileged userspace programs access to arbitrary hash,
+symmetric cipher, AEAD, and RNG algorithms that are implemented in kernel-mode
+code.
 
-The major difference, however, is that user space can only act as a
-consumer and never as a provider of a transformation or cipher
-algorithm.
+AF_ALG is insecure and is deprecated. Originally added to the kernel in 2010,
+most kernel developers now consider it to be a mistake. Support for hardware
+accelerators, which was the original purpose of AF_ALG, has been removed.
 
-The following covers the user space interface exported by the kernel
-crypto API. A working example of this description is libkcapi that can
-be obtained from [1]. That library can be used by user space
-applications that require cryptographic services from the kernel.
+AF_ALG continues to be supported only for backwards compatibility. On systems
+where no programs using AF_ALG remain, the support for it should be disabled by
+disabling ``CONFIG_CRYPTO_USER_API_*``.
 
-Some details of the in-kernel kernel crypto API aspects do not apply to
-user space, however. This includes the difference between synchronous
-and asynchronous invocations. The user space API call is fully
-synchronous.
+Deprecation
+-----------
 
-[1] http://www.chronox.de/libkcapi.html
+AF_ALG was originally intended to provide userspace programs access to crypto
+accelerators that they wouldn't otherwise have access to.
+
+However, that capability turned out to not be useful on very many systems. More
+significantly, the actual implementation exposes a vastly greater amount of
+functionality than that. It actually provides access to all software algorithms.
+
+This includes arbitrary compositions of different algorithms created via a
+complex template system, as well as algorithms that only make sense as internal
+implementation details of other algorithms. In the past, it also included full
+zero-copy support, which was difficult for the kernel to implement securely.
+
+Ultimately, these algorithms are just math computations. They use the same
+instructions that userspace programs already have access to, just accessed in a
+much more convoluted and less efficient way.
+
+Indeed, userspace code is nearly always what is being used anyway. These same
+algorithms are widely implemented in userspace crypto libraries.
+
+Even when zero-copy and off-CPU accelerators were supported, AF_ALG was usually
+much slower than optimized software cryptography in userspace. This was
+especially true for the small message sizes usually seen in performance-critical
+workloads. While it was possible to demonstrate performance wins for hashing
+large files on embedded devices, it is hard to imagine a situation where this
+would be performance-critical.
+
+Nowadays, AF_ALG no longer supports zero-copy or off-CPU accelerators.
+Therefore, it is *always* slower than an optimized userspace implementation,
+even for large messages. The only possible advantage left is that it avoids
+duplicating code between kernel and userspace. However, userspace
+implementations, especially hardware-accelerated ones, do not need to be large.
+Just because OpenSSL is huge does not mean that all userspace cryptography
+libraries are.
+
+Meanwhile, AF_ALG hasn't been withstanding modern vulnerability discovery tools
+such as syzbot and large language models. It receives a steady stream of CVEs.
+Some of the examples include:
+
+- CVE-2026-31677
+- CVE-2026-31431 (https://copy.fail)
+- CVE-2025-38079
+- CVE-2025-37808
+- CVE-2024-26824
+- CVE-2022-48781
+- CVE-2019-8912
+- CVE-2018-14619
+- CVE-2017-18075
+- CVE-2017-17806
+- CVE-2017-17805
+- CVE-2016-10147
+- CVE-2015-8970
+- CVE-2015-3331
+- CVE-2014-9644
+- CVE-2013-7421
+- CVE-2011-4081
+
+Hardware accelerator drivers are frequently buggy. To reduce attack surface,
+AF_ALG now only provides access to algorithms implemented in software. This
+means that AF_ALG no longer fulfills its original purpose.
+
+It is recommended that, whenever possible, userspace programs be migrated to
+userspace crypto code (which again, is what is normally used anyway) and
+``CONFIG_CRYPTO_USER_API_*`` be disabled.  On systems that use SELinux, SELinux
+can also be used to restrict the use of AF_ALG to trusted programs.
+
+The remainder of this documentation provides the historical documentation for
+the deprecated AF_ALG interface.
 
 User Space API General Remarks
 ------------------------------
@@ -131,9 +193,9 @@ from the kernel crypto API. If the buffer is too small for the message
 digest, the flag MSG_TRUNC is set by the kernel.
 
 In order to set a message digest key, the calling application must use
-the setsockopt() option of ALG_SET_KEY. If the key is not set the HMAC
-operation is performed without the initial HMAC state change caused by
-the key.
+the setsockopt() option of ALG_SET_KEY or ALG_SET_KEY_BY_KEY_SERIAL. If the
+key is not set the HMAC operation is performed without the initial HMAC state
+change caused by the key.
 
 Symmetric Cipher API
 --------------------
@@ -296,15 +358,15 @@ follows:
 
     struct sockaddr_alg sa = {
         .salg_family = AF_ALG,
-        .salg_type = "rng", /* this selects the symmetric cipher */
-        .salg_name = "drbg_nopr_sha256" /* this is the cipher name */
+        .salg_type = "rng", /* this selects the random number generator */
+        .salg_name = "stdrng" /* this is the RNG name */
     };
 
 
 Depending on the RNG type, the RNG must be seeded. The seed is provided
-using the setsockopt interface to set the key. For example, the
-ansi_cprng requires a seed. The DRBGs do not require a seed, but may be
-seeded.
+using the setsockopt interface to set the key. The SP800-90A DRBGs do
+not require a seed, but may be seeded. The seed is also known as a
+*Personalization String* in NIST SP 800-90A standard.
 
 Using the read()/recvmsg() system calls, random numbers can be obtained.
 The kernel generates at most 128 bytes in one call. If user space
@@ -314,36 +376,23 @@ WARNING: The user space caller may invoke the initially mentioned accept
 system call multiple times. In this case, the returned file descriptors
 have the same state.
 
+Following CAVP testing interfaces are enabled when kernel is built with
+CRYPTO_USER_API_RNG_CAVP option:
+
+-  the concatenation of *Entropy* and *Nonce* can be provided to the RNG via
+   ALG_SET_DRBG_ENTROPY setsockopt interface. Setting the entropy requires
+   CAP_SYS_ADMIN permission.
+
+-  *Additional Data* can be provided using the send()/sendmsg() system calls,
+   but only after the entropy has been set.
+
 Zero-Copy Interface
 -------------------
 
-In addition to the send/write/read/recv system call family, the AF_ALG
-interface can be accessed with the zero-copy interface of
-splice/vmsplice. As the name indicates, the kernel tries to avoid a copy
-operation into kernel space.
-
-The zero-copy operation requires data to be aligned at the page
-boundary. Non-aligned data can be used as well, but may require more
-operations of the kernel which would defeat the speed gains obtained
-from the zero-copy interface.
-
-The system-inherent limit for the size of one zero-copy operation is 16
-pages. If more data is to be sent to AF_ALG, user space must slice the
-input into segments with a maximum size of 16 pages.
-
-Zero-copy can be used with the following code example (a complete
-working example is provided with libkcapi):
-
-::
-
-    int pipes[2];
-
-    pipe(pipes);
-    /* input data in iov */
-    vmsplice(pipes[1], iov, iovlen, SPLICE_F_GIFT);
-    /* opfd is the file descriptor returned from accept() system call */
-    splice(pipes[0], NULL, opfd, NULL, ret, 0);
-    read(opfd, out, outlen);
+AF_ALG used to have zero-copy support, but it was removed due to it being a
+frequent source of vulnerabilities.  For backwards compatibility the splice()
+and sendfile() system calls are still supported, but the kernel will make an
+internal copy of the data before passing it to the crypto code.
 
 
 Setsockopt Interface
@@ -371,11 +420,23 @@ mentioned optname:
 
    -  the RNG cipher type to provide the seed
 
+- ALG_SET_KEY_BY_KEY_SERIAL -- Setting the key via keyring key_serial_t.
+   This operation behaves the same as ALG_SET_KEY. The decrypted
+   data is copied from a keyring key, and uses that data as the
+   key for symmetric encryption.
+
+   The passed in key_serial_t must have the KEY_(POS|USR|GRP|OTH)_SEARCH
+   permission set, otherwise -EPERM is returned. Supports key types: user,
+   logon, encrypted, and trusted.
+
 -  ALG_SET_AEAD_AUTHSIZE -- Setting the authentication tag size for
    AEAD ciphers. For a encryption operation, the authentication tag of
    the given size will be generated. For a decryption operation, the
    provided ciphertext is assumed to contain an authentication tag of
    the given size (see section about AEAD memory layout below).
+
+-  ALG_SET_DRBG_ENTROPY -- Setting the entropy of the random number generator.
+   This option is applicable to RNG cipher type only.
 
 User space API example
 ----------------------
@@ -384,4 +445,4 @@ Please see [1] for libkcapi which provides an easy-to-use wrapper around
 the aforementioned Netlink kernel interface. [1] also contains a test
 application that invokes all libkcapi API calls.
 
-[1] http://www.chronox.de/libkcapi.html
+[1] https://www.chronox.de/libkcapi/index.html

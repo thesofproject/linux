@@ -294,7 +294,8 @@ static struct Scsi_Host *nsp_detect     (struct scsi_host_template *sht);
 static const  char      *nsp_info       (struct Scsi_Host *shpnt);
 static        int        nsp_show_info  (struct seq_file *m,
 	                                 struct Scsi_Host *host);
-static int nsp_queuecommand(struct Scsi_Host *h, struct scsi_cmnd *SCpnt);
+static enum scsi_qc_status nsp_queuecommand(struct Scsi_Host *h,
+					    struct scsi_cmnd *SCpnt);
 
 /* Error handler */
 /*static int nsp_eh_abort       (struct scsi_cmnd *SCpnt);*/
@@ -304,8 +305,8 @@ static int nsp_eh_host_reset   (struct scsi_cmnd *SCpnt);
 static int nsp_bus_reset       (nsp_hw_data *data);
 
 /* */
-static int  nsphw_init           (nsp_hw_data *data);
-static int  nsphw_start_selection(struct scsi_cmnd *SCpnt);
+static void nsphw_init           (nsp_hw_data *data);
+static bool nsphw_start_selection(struct scsi_cmnd *SCpnt);
 static void nsp_start_timer      (struct scsi_cmnd *SCpnt, int time);
 static int  nsp_fifo_count       (struct scsi_cmnd *SCpnt);
 static void nsp_pio_read         (struct scsi_cmnd *SCpnt);
@@ -320,15 +321,11 @@ static int  nsp_expect_signal    (struct scsi_cmnd *SCpnt,
 				  unsigned char  mask);
 static int  nsp_xfer             (struct scsi_cmnd *SCpnt, int phase);
 static int  nsp_dataphase_bypass (struct scsi_cmnd *SCpnt);
-static int  nsp_reselected       (struct scsi_cmnd *SCpnt);
+static void nsp_reselected       (struct scsi_cmnd *SCpnt);
 static struct Scsi_Host *nsp_detect(struct scsi_host_template *sht);
 
 /* Interrupt handler */
 //static irqreturn_t nspintr(int irq, void *dev_id);
-
-/* Module entry point*/
-static int  __init nsp_cs_init(void);
-static void __exit nsp_cs_exit(void);
 
 /* Debug */
 #ifdef NSP_DEBUG
@@ -374,19 +371,8 @@ enum _burst_mode {
 	BURST_MEM32 = 2,
 };
 
-/**************************************************************************
- * SCSI messaage
- */
-#define MSG_COMMAND_COMPLETE 0x00
-#define MSG_EXTENDED         0x01
-#define MSG_ABORT            0x06
-#define MSG_NO_OPERATION     0x08
-#define MSG_BUS_DEVICE_RESET 0x0c
-
-#define MSG_EXT_SDTR         0x01
-
 /* scatter-gather table */
-#  define BUFFER_ADDR ((char *)((sg_virt(SCpnt->SCp.buffer))))
+#define BUFFER_ADDR(SCpnt) ((char *)(sg_virt(nsp_priv(SCpnt)->buffer)))
 
 #endif  /*__nsp_cs__*/
 /* end */

@@ -91,7 +91,7 @@ int ath6kl_core_init(struct ath6kl *ar, enum ath6kl_htc_type htc_type)
 
 	/*
 	 * Turn on power to get hardware (target) version and leave power
-	 * on delibrately as we will boot the hardware anyway within few
+	 * on deliberately as we will boot the hardware anyway within few
 	 * seconds.
 	 */
 	ret = ath6kl_hif_power_on(ar);
@@ -212,11 +212,13 @@ int ath6kl_core_init(struct ath6kl *ar, enum ath6kl_htc_type htc_type)
 		ar->avail_idx_map |= BIT(i);
 
 	rtnl_lock();
+	wiphy_lock(ar->wiphy);
 
 	/* Add an initial station interface */
 	wdev = ath6kl_interface_add(ar, "wlan%d", NET_NAME_ENUM,
 				    NL80211_IFTYPE_STATION, 0, INFRA_NETWORK);
 
+	wiphy_unlock(ar->wiphy);
 	rtnl_unlock();
 
 	if (!wdev) {
@@ -309,7 +311,7 @@ struct ath6kl *ath6kl_core_create(struct device *dev)
 		ar->sta_list[ctr].mgmt_psq_len = 0;
 		INIT_LIST_HEAD(&ar->sta_list[ctr].mgmt_psq);
 		ar->sta_list[ctr].aggr_conn =
-			kzalloc(sizeof(struct aggr_info_conn), GFP_KERNEL);
+			kzalloc_obj(struct aggr_info_conn);
 		if (!ar->sta_list[ctr].aggr_conn) {
 			ath6kl_err("Failed to allocate memory for sta aggregation information\n");
 			ath6kl_core_destroy(ar);

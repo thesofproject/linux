@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/i2c/chips/lm8323.c
  *
@@ -7,19 +8,6 @@
  *            Timo O. Karjalainen <timo.o.karjalainen@nokia.com>
  *
  * Updated by Felipe Balbi <felipe.balbi@nokia.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation (version 2 of the License only).
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/module.h>
@@ -33,6 +21,7 @@
 #include <linux/platform_data/lm8323.h>
 #include <linux/pm.h>
 #include <linux/slab.h>
+#include <linux/string_choices.h>
 
 /* Commands to send to the chip. */
 #define LM8323_CMD_READ_ID		0x80 /* Read chip ID. */
@@ -270,7 +259,7 @@ static void process_keys(struct lm8323_chip *lm)
 	ret = lm8323_read(lm, LM8323_CMD_READ_FIFO, key_fifo, LM8323_FIFO_LEN);
 
 	if (ret < 0) {
-		dev_err(&lm->client->dev, "Failed reading fifo \n");
+		dev_err(&lm->client->dev, "Failed reading fifo\n");
 		return;
 	}
 	key_fifo[ret] = 0;
@@ -281,7 +270,7 @@ static void process_keys(struct lm8323_chip *lm)
 		unsigned short keycode = lm->keymap[key];
 
 		dev_vdbg(&lm->client->dev, "key 0x%02x %s\n",
-			 key, isdown ? "down" : "up");
+			 key, str_down_up(isdown));
 
 		if (lm->kp_enabled) {
 			input_event(lm->idev, EV_MSC, MSC_SCAN, key);
@@ -362,11 +351,11 @@ static int lm8323_configure(struct lm8323_chip *lm)
 
 static void pwm_done(struct lm8323_pwm *pwm)
 {
-	mutex_lock(&pwm->lock);
+	guard(mutex)(&pwm->lock);
+
 	pwm->running = false;
 	if (pwm->desired_brightness != pwm->brightness)
 		schedule_work(&pwm->work);
-	mutex_unlock(&pwm->lock);
 }
 
 /*
@@ -379,7 +368,7 @@ static irqreturn_t lm8323_irq(int irq, void *_lm)
 	u8 ints;
 	int i;
 
-	mutex_lock(&lm->lock);
+	guard(mutex)(&lm->lock);
 
 	while ((lm8323_read(lm, LM8323_CMD_READ_INT, &ints, 1) == 1) && ints) {
 		if (likely(ints & INT_KEYPAD))
@@ -405,8 +394,6 @@ static irqreturn_t lm8323_irq(int irq, void *_lm)
 			}
 		}
 	}
-
-	mutex_unlock(&lm->lock);
 
 	return IRQ_HANDLED;
 }
@@ -457,7 +444,7 @@ static void lm8323_pwm_work(struct work_struct *work)
 	u16 pwm_cmds[3];
 	int num_cmds = 0;
 
-	mutex_lock(&pwm->lock);
+	guard(mutex)(&pwm->lock);
 
 	/*
 	 * Do nothing if we're already at the requested level,
@@ -466,7 +453,7 @@ static void lm8323_pwm_work(struct work_struct *work)
 	 * finishes.
 	 */
 	if (pwm->running || pwm->desired_brightness == pwm->brightness)
-		goto out;
+		return;
 
 	kill = (pwm->desired_brightness == 0);
 	up = (pwm->desired_brightness > pwm->brightness);
@@ -501,9 +488,6 @@ static void lm8323_pwm_work(struct work_struct *work)
 
 	lm8323_write_pwm(pwm, kill, num_cmds, pwm_cmds);
 	pwm->brightness = pwm->desired_brightness;
-
- out:
-	mutex_unlock(&pwm->lock);
 }
 
 static void lm8323_pwm_set_brightness(struct led_classdev *led_cdev,
@@ -512,9 +496,9 @@ static void lm8323_pwm_set_brightness(struct led_classdev *led_cdev,
 	struct lm8323_pwm *pwm = cdev_to_pwm(led_cdev);
 	struct lm8323_chip *lm = pwm->chip;
 
-	mutex_lock(&pwm->lock);
-	pwm->desired_brightness = brightness;
-	mutex_unlock(&pwm->lock);
+	scoped_guard(mutex, &pwm->lock) {
+		pwm->desired_brightness = brightness;
+	}
 
 	if (in_interrupt()) {
 		schedule_work(&pwm->work);
@@ -522,12 +506,12 @@ static void lm8323_pwm_set_brightness(struct led_classdev *led_cdev,
 		/*
 		 * Schedule PWM work as usual unless we are going into suspend
 		 */
-		mutex_lock(&lm->lock);
-		if (likely(!lm->pm_suspend))
-			schedule_work(&pwm->work);
-		else
-			lm8323_pwm_work(&pwm->work);
-		mutex_unlock(&lm->lock);
+		scoped_guard(mutex, &lm->lock) {
+			if (likely(!lm->pm_suspend))
+				schedule_work(&pwm->work);
+			else
+				lm8323_pwm_work(&pwm->work);
+		}
 	}
 }
 
@@ -568,6 +552,7 @@ static int init_pwm(struct lm8323_chip *lm, int id, struct device *dev,
 		    const char *name)
 {
 	struct lm8323_pwm *pwm;
+	int err;
 
 	BUG_ON(id > 3);
 
@@ -587,17 +572,17 @@ static int init_pwm(struct lm8323_chip *lm, int id, struct device *dev,
 		pwm->cdev.name = name;
 		pwm->cdev.brightness_set = lm8323_pwm_set_brightness;
 		pwm->cdev.groups = lm8323_pwm_groups;
-		if (led_classdev_register(dev, &pwm->cdev) < 0) {
-			dev_err(dev, "couldn't register PWM %d\n", id);
-			return -1;
+
+		err = devm_led_classdev_register(dev, &pwm->cdev);
+		if (err) {
+			dev_err(dev, "couldn't register PWM %d: %d\n", id, err);
+			return err;
 		}
 		pwm->enabled = true;
 	}
 
 	return 0;
 }
-
-static struct i2c_driver lm8323_i2c_driver;
 
 static ssize_t lm8323_show_disable(struct device *dev,
 				   struct device_attribute *attr, char *buf)
@@ -619,16 +604,21 @@ static ssize_t lm8323_set_disable(struct device *dev,
 	if (ret)
 		return ret;
 
-	mutex_lock(&lm->lock);
+	guard(mutex)(&lm->lock);
+
 	lm->kp_enabled = !i;
-	mutex_unlock(&lm->lock);
 
 	return count;
 }
 static DEVICE_ATTR(disable_kp, 0644, lm8323_show_disable, lm8323_set_disable);
 
-static int lm8323_probe(struct i2c_client *client,
-				  const struct i2c_device_id *id)
+static struct attribute *lm8323_attrs[] = {
+	&dev_attr_disable_kp.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(lm8323);
+
+static int lm8323_probe(struct i2c_client *client)
 {
 	struct lm8323_platform_data *pdata = dev_get_platdata(&client->dev);
 	struct input_dev *idev;
@@ -655,12 +645,13 @@ static int lm8323_probe(struct i2c_client *client,
 		return -EINVAL;
 	}
 
-	lm = kzalloc(sizeof *lm, GFP_KERNEL);
-	idev = input_allocate_device();
-	if (!lm || !idev) {
-		err = -ENOMEM;
-		goto fail1;
-	}
+	lm = devm_kzalloc(&client->dev, sizeof(*lm), GFP_KERNEL);
+	if (!lm)
+		return -ENOMEM;
+
+	idev = devm_input_allocate_device(&client->dev);
+	if (!idev)
+		return -ENOMEM;
 
 	lm->client = client;
 	lm->idev = idev;
@@ -676,8 +667,10 @@ static int lm8323_probe(struct i2c_client *client,
 
 	lm8323_reset(lm);
 
-	/* Nothing's set up to service the IRQ yet, so just spin for max.
-	 * 100ms until we can configure. */
+	/*
+	 * Nothing's set up to service the IRQ yet, so just spin for max.
+	 * 100ms until we can configure.
+	 */
 	tmo = jiffies + msecs_to_jiffies(100);
 	while (lm8323_read(lm, LM8323_CMD_READ_INT, data, 1) == 1) {
 		if (data[0] & INT_NOINIT)
@@ -697,21 +690,17 @@ static int lm8323_probe(struct i2c_client *client,
 	/* If a true probe check the device */
 	if (lm8323_read_id(lm, data) != 0) {
 		dev_err(&client->dev, "device not found\n");
-		err = -ENODEV;
-		goto fail1;
+		return -ENODEV;
 	}
 
 	for (pwm = 0; pwm < LM8323_NUM_PWMS; pwm++) {
 		err = init_pwm(lm, pwm + 1, &client->dev,
 			       pdata->pwm_names[pwm]);
-		if (err < 0)
-			goto fail2;
+		if (err)
+			return err;
 	}
 
 	lm->kp_enabled = true;
-	err = device_create_file(&client->dev, &dev_attr_disable_kp);
-	if (err < 0)
-		goto fail2;
 
 	idev->name = pdata->name ? : "LM8323 keypad";
 	snprintf(lm->phys, sizeof(lm->phys),
@@ -732,14 +721,16 @@ static int lm8323_probe(struct i2c_client *client,
 	err = input_register_device(idev);
 	if (err) {
 		dev_dbg(&client->dev, "error registering input device\n");
-		goto fail3;
+		return err;
 	}
 
-	err = request_threaded_irq(client->irq, NULL, lm8323_irq,
-			  IRQF_TRIGGER_LOW|IRQF_ONESHOT, "lm8323", lm);
+	err = devm_request_threaded_irq(&client->dev, client->irq,
+					NULL, lm8323_irq,
+					IRQF_TRIGGER_LOW | IRQF_ONESHOT,
+					"lm8323", lm);
 	if (err) {
 		dev_err(&client->dev, "could not get IRQ %d\n", client->irq);
-		goto fail4;
+		return err;
 	}
 
 	i2c_set_clientdata(client, lm);
@@ -748,44 +739,8 @@ static int lm8323_probe(struct i2c_client *client,
 	enable_irq_wake(client->irq);
 
 	return 0;
-
-fail4:
-	input_unregister_device(idev);
-	idev = NULL;
-fail3:
-	device_remove_file(&client->dev, &dev_attr_disable_kp);
-fail2:
-	while (--pwm >= 0)
-		if (lm->pwm[pwm].enabled)
-			led_classdev_unregister(&lm->pwm[pwm].cdev);
-fail1:
-	input_free_device(idev);
-	kfree(lm);
-	return err;
 }
 
-static int lm8323_remove(struct i2c_client *client)
-{
-	struct lm8323_chip *lm = i2c_get_clientdata(client);
-	int i;
-
-	disable_irq_wake(client->irq);
-	free_irq(client->irq, lm);
-
-	input_unregister_device(lm->idev);
-
-	device_remove_file(&lm->client->dev, &dev_attr_disable_kp);
-
-	for (i = 0; i < 3; i++)
-		if (lm->pwm[i].enabled)
-			led_classdev_unregister(&lm->pwm[i].cdev);
-
-	kfree(lm);
-
-	return 0;
-}
-
-#ifdef CONFIG_PM_SLEEP
 /*
  * We don't need to explicitly suspend the chip, as it already switches off
  * when there's no activity.
@@ -799,9 +754,9 @@ static int lm8323_suspend(struct device *dev)
 	irq_set_irq_wake(client->irq, 0);
 	disable_irq(client->irq);
 
-	mutex_lock(&lm->lock);
-	lm->pm_suspend = true;
-	mutex_unlock(&lm->lock);
+	scoped_guard(mutex, &lm->lock) {
+		lm->pm_suspend = true;
+	}
 
 	for (i = 0; i < 3; i++)
 		if (lm->pwm[i].enabled)
@@ -816,9 +771,9 @@ static int lm8323_resume(struct device *dev)
 	struct lm8323_chip *lm = i2c_get_clientdata(client);
 	int i;
 
-	mutex_lock(&lm->lock);
-	lm->pm_suspend = false;
-	mutex_unlock(&lm->lock);
+	scoped_guard(mutex, &lm->lock) {
+		lm->pm_suspend = false;
+	}
 
 	for (i = 0; i < 3; i++)
 		if (lm->pwm[i].enabled)
@@ -829,22 +784,21 @@ static int lm8323_resume(struct device *dev)
 
 	return 0;
 }
-#endif
 
-static SIMPLE_DEV_PM_OPS(lm8323_pm_ops, lm8323_suspend, lm8323_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(lm8323_pm_ops, lm8323_suspend, lm8323_resume);
 
 static const struct i2c_device_id lm8323_id[] = {
-	{ "lm8323", 0 },
+	{ .name = "lm8323" },
 	{ }
 };
 
 static struct i2c_driver lm8323_i2c_driver = {
 	.driver = {
-		.name	= "lm8323",
-		.pm	= &lm8323_pm_ops,
+		.name		= "lm8323",
+		.pm		= pm_sleep_ptr(&lm8323_pm_ops),
+		.dev_groups	= lm8323_groups,
 	},
 	.probe		= lm8323_probe,
-	.remove		= lm8323_remove,
 	.id_table	= lm8323_id,
 };
 MODULE_DEVICE_TABLE(i2c, lm8323_id);

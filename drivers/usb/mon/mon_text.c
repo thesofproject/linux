@@ -330,7 +330,7 @@ static int mon_text_open(struct inode *inode, struct file *file)
 	mutex_lock(&mon_lock);
 	mbus = inode->i_private;
 
-	rp = kzalloc(sizeof(struct mon_reader_text), GFP_KERNEL);
+	rp = kzalloc_obj(struct mon_reader_text);
 	if (rp == NULL) {
 		rc = -ENOMEM;
 		goto err_alloc;
@@ -352,7 +352,7 @@ static int mon_text_open(struct inode *inode, struct file *file)
 	rp->r.rnf_error = mon_text_error;
 	rp->r.rnf_complete = mon_text_complete;
 
-	snprintf(rp->slab_name, SLAB_NAME_SZ, "mon_text_%p", rp);
+	scnprintf(rp->slab_name, SLAB_NAME_SZ, "mon_text_%p", rp);
 	rp->e_slab = kmem_cache_create(rp->slab_name,
 	    sizeof(struct mon_event_text), sizeof(long), 0,
 	    mon_text_ctor);
@@ -414,7 +414,7 @@ static ssize_t mon_text_read_t(struct file *file, char __user *buf,
 
 		mon_text_read_head_t(rp, &ptr, ep);
 		mon_text_read_statset(rp, &ptr, ep);
-		ptr.cnt += snprintf(ptr.pbuf + ptr.cnt, ptr.limit - ptr.cnt,
+		ptr.cnt += scnprintf(ptr.pbuf + ptr.cnt, ptr.limit - ptr.cnt,
 		    " %d", ep->length);
 		mon_text_read_data(rp, &ptr, ep);
 
@@ -462,7 +462,7 @@ static ssize_t mon_text_read_u(struct file *file, char __user *buf,
 		} else {
 			mon_text_read_statset(rp, &ptr, ep);
 		}
-		ptr.cnt += snprintf(ptr.pbuf + ptr.cnt, ptr.limit - ptr.cnt,
+		ptr.cnt += scnprintf(ptr.pbuf + ptr.cnt, ptr.limit - ptr.cnt,
 		    " %d", ep->length);
 		mon_text_read_data(rp, &ptr, ep);
 
@@ -520,7 +520,7 @@ static void mon_text_read_head_t(struct mon_reader_text *rp,
 	case USB_ENDPOINT_XFER_CONTROL:	utype = 'C'; break;
 	default: /* PIPE_BULK */  utype = 'B';
 	}
-	p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt,
+	p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt,
 	    "%lx %u %c %c%c:%03u:%02u",
 	    ep->id, ep->tstamp, ep->type,
 	    utype, udir, ep->devnum, ep->epnum);
@@ -538,7 +538,7 @@ static void mon_text_read_head_u(struct mon_reader_text *rp,
 	case USB_ENDPOINT_XFER_CONTROL:	utype = 'C'; break;
 	default: /* PIPE_BULK */  utype = 'B';
 	}
-	p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt,
+	p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt,
 	    "%lx %u %c %c%c:%d:%03u:%u",
 	    ep->id, ep->tstamp, ep->type,
 	    utype, udir, ep->busnum, ep->devnum, ep->epnum);
@@ -549,7 +549,7 @@ static void mon_text_read_statset(struct mon_reader_text *rp,
 {
 
 	if (ep->setup_flag == 0) {   /* Setup packet is present and captured */
-		p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt,
+		p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt,
 		    " s %02x %02x %04x %04x %04x",
 		    ep->setup[0],
 		    ep->setup[1],
@@ -557,10 +557,10 @@ static void mon_text_read_statset(struct mon_reader_text *rp,
 		    (ep->setup[5] << 8) | ep->setup[4],
 		    (ep->setup[7] << 8) | ep->setup[6]);
 	} else if (ep->setup_flag != '-') { /* Unable to capture setup packet */
-		p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt,
+		p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt,
 		    " %c __ __ ____ ____ ____", ep->setup_flag);
 	} else {                     /* No setup for this kind of URB */
-		p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt,
+		p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt,
 		    " %d", ep->status);
 	}
 }
@@ -568,7 +568,7 @@ static void mon_text_read_statset(struct mon_reader_text *rp,
 static void mon_text_read_intstat(struct mon_reader_text *rp,
 	struct mon_text_ptr *p, const struct mon_event_text *ep)
 {
-	p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt,
+	p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt,
 	    " %d:%d", ep->status, ep->interval);
 }
 
@@ -576,10 +576,10 @@ static void mon_text_read_isostat(struct mon_reader_text *rp,
 	struct mon_text_ptr *p, const struct mon_event_text *ep)
 {
 	if (ep->type == 'S') {
-		p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt,
+		p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt,
 		    " %d:%d:%d", ep->status, ep->interval, ep->start_frame);
 	} else {
-		p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt,
+		p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt,
 		    " %d:%d:%d:%d",
 		    ep->status, ep->interval, ep->start_frame, ep->error_count);
 	}
@@ -592,7 +592,7 @@ static void mon_text_read_isodesc(struct mon_reader_text *rp,
 	int i;
 	const struct mon_iso_desc *dp;
 
-	p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt,
+	p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt,
 	    " %d", ep->numdesc);
 	ndesc = ep->numdesc;
 	if (ndesc > ISODESC_MAX)
@@ -601,7 +601,7 @@ static void mon_text_read_isodesc(struct mon_reader_text *rp,
 		ndesc = 0;
 	dp = ep->isodesc;
 	for (i = 0; i < ndesc; i++) {
-		p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt,
+		p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt,
 		    " %d:%u:%u", dp->status, dp->offset, dp->length);
 		dp++;
 	}
@@ -614,28 +614,28 @@ static void mon_text_read_data(struct mon_reader_text *rp,
 
 	if ((data_len = ep->length) > 0) {
 		if (ep->data_flag == 0) {
-			p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt,
+			p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt,
 			    " =");
 			if (data_len >= DATA_MAX)
 				data_len = DATA_MAX;
 			for (i = 0; i < data_len; i++) {
 				if (i % 4 == 0) {
-					p->cnt += snprintf(p->pbuf + p->cnt,
+					p->cnt += scnprintf(p->pbuf + p->cnt,
 					    p->limit - p->cnt,
 					    " ");
 				}
-				p->cnt += snprintf(p->pbuf + p->cnt,
+				p->cnt += scnprintf(p->pbuf + p->cnt,
 				    p->limit - p->cnt,
 				    "%02x", ep->data[i]);
 			}
-			p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt,
+			p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt,
 			    "\n");
 		} else {
-			p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt,
+			p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt,
 			    " %c\n", ep->data_flag);
 		}
 	} else {
-		p->cnt += snprintf(p->pbuf + p->cnt, p->limit - p->cnt, "\n");
+		p->cnt += scnprintf(p->pbuf + p->cnt, p->limit - p->cnt, "\n");
 	}
 }
 
@@ -685,7 +685,6 @@ static int mon_text_release(struct inode *inode, struct file *file)
 static const struct file_operations mon_fops_text_t = {
 	.owner =	THIS_MODULE,
 	.open =		mon_text_open,
-	.llseek =	no_llseek,
 	.read =		mon_text_read_t,
 	.release =	mon_text_release,
 };
@@ -693,71 +692,40 @@ static const struct file_operations mon_fops_text_t = {
 static const struct file_operations mon_fops_text_u = {
 	.owner =	THIS_MODULE,
 	.open =		mon_text_open,
-	.llseek =	no_llseek,
 	.read =		mon_text_read_u,
 	.release =	mon_text_release,
 };
 
 int mon_text_add(struct mon_bus *mbus, const struct usb_bus *ubus)
 {
-	struct dentry *d;
-	enum { NAMESZ = 10 };
+	enum { NAMESZ = 12 };
 	char name[NAMESZ];
 	int busnum = ubus? ubus->busnum: 0;
-	int rc;
 
 	if (mon_dir == NULL)
 		return 0;
 
 	if (ubus != NULL) {
-		rc = snprintf(name, NAMESZ, "%dt", busnum);
-		if (rc <= 0 || rc >= NAMESZ)
-			goto err_print_t;
-		d = debugfs_create_file(name, 0600, mon_dir, mbus,
+		scnprintf(name, NAMESZ, "%dt", busnum);
+		mbus->dent_t = debugfs_create_file(name, 0600, mon_dir, mbus,
 							     &mon_fops_text_t);
-		if (d == NULL)
-			goto err_create_t;
-		mbus->dent_t = d;
 	}
 
-	rc = snprintf(name, NAMESZ, "%du", busnum);
-	if (rc <= 0 || rc >= NAMESZ)
-		goto err_print_u;
-	d = debugfs_create_file(name, 0600, mon_dir, mbus, &mon_fops_text_u);
-	if (d == NULL)
-		goto err_create_u;
-	mbus->dent_u = d;
+	scnprintf(name, NAMESZ, "%du", busnum);
+	mbus->dent_u = debugfs_create_file(name, 0600, mon_dir, mbus,
+					   &mon_fops_text_u);
 
-	rc = snprintf(name, NAMESZ, "%ds", busnum);
-	if (rc <= 0 || rc >= NAMESZ)
-		goto err_print_s;
-	d = debugfs_create_file(name, 0600, mon_dir, mbus, &mon_fops_stat);
-	if (d == NULL)
-		goto err_create_s;
-	mbus->dent_s = d;
+	scnprintf(name, NAMESZ, "%ds", busnum);
+	mbus->dent_s = debugfs_create_file(name, 0600, mon_dir, mbus,
+					   &mon_fops_stat);
 
 	return 1;
-
-err_create_s:
-err_print_s:
-	debugfs_remove(mbus->dent_u);
-	mbus->dent_u = NULL;
-err_create_u:
-err_print_u:
-	if (ubus != NULL) {
-		debugfs_remove(mbus->dent_t);
-		mbus->dent_t = NULL;
-	}
-err_create_t:
-err_print_t:
-	return 0;
 }
 
 void mon_text_del(struct mon_bus *mbus)
 {
 	debugfs_remove(mbus->dent_u);
-	if (mbus->dent_t != NULL)
-		debugfs_remove(mbus->dent_t);
+	debugfs_remove(mbus->dent_t);
 	debugfs_remove(mbus->dent_s);
 }
 
@@ -775,18 +743,7 @@ static void mon_text_ctor(void *mem)
 
 int __init mon_text_init(void)
 {
-	struct dentry *mondir;
-
-	mondir = debugfs_create_dir("usbmon", usb_debug_root);
-	if (IS_ERR(mondir)) {
-		/* debugfs not available, but we can use usbmon without it */
-		return 0;
-	}
-	if (mondir == NULL) {
-		printk(KERN_NOTICE TAG ": unable to create usbmon directory\n");
-		return -ENOMEM;
-	}
-	mon_dir = mondir;
+	mon_dir = debugfs_create_dir("usbmon", usb_debug_root);
 	return 0;
 }
 

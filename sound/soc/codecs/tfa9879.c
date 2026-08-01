@@ -1,15 +1,9 @@
-/*
- * tfa9879.c  --  driver for NXP Semiconductors TFA9879
- *
- * Copyright (C) 2014 Axentia Technologies AB
- * Author: Peter Rosin <peda@axentia.se>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// tfa9879.c  --  driver for NXP Semiconductors TFA9879
+//
+// Copyright (C) 2014 Axentia Technologies AB
+// Author: Peter Rosin <peda@axentia.se>
 
 #include <linux/module.h>
 #include <linux/init.h>
@@ -88,23 +82,24 @@ static int tfa9879_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	if (tfa9879->lsb_justified)
-		snd_soc_component_update_bits(component, TFA9879_SERIAL_INTERFACE_1,
-				    TFA9879_I2S_SET_MASK,
-				    i2s_set << TFA9879_I2S_SET_SHIFT);
+		snd_soc_component_update_bits(component,
+					      TFA9879_SERIAL_INTERFACE_1,
+					      TFA9879_I2S_SET_MASK,
+					      i2s_set << TFA9879_I2S_SET_SHIFT);
 
 	snd_soc_component_update_bits(component, TFA9879_SERIAL_INTERFACE_1,
-			    TFA9879_I2S_FS_MASK,
-			    fs << TFA9879_I2S_FS_SHIFT);
+				      TFA9879_I2S_FS_MASK,
+				      fs << TFA9879_I2S_FS_SHIFT);
 	return 0;
 }
 
-static int tfa9879_digital_mute(struct snd_soc_dai *dai, int mute)
+static int tfa9879_mute_stream(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
 
 	snd_soc_component_update_bits(component, TFA9879_MISC_CONTROL,
-			    TFA9879_S_MUTE_MASK,
-			    !!mute << TFA9879_S_MUTE_SHIFT);
+				      TFA9879_S_MUTE_MASK,
+				      !!mute << TFA9879_S_MUTE_SHIFT);
 
 	return 0;
 }
@@ -116,8 +111,8 @@ static int tfa9879_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	int i2s_set;
 	int sck_pol;
 
-	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	switch (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) {
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
 	default:
 		return -EINVAL;
@@ -152,11 +147,11 @@ static int tfa9879_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	}
 
 	snd_soc_component_update_bits(component, TFA9879_SERIAL_INTERFACE_1,
-			    TFA9879_SCK_POL_MASK,
-			    sck_pol << TFA9879_SCK_POL_SHIFT);
+				      TFA9879_SCK_POL_MASK,
+				      sck_pol << TFA9879_SCK_POL_SHIFT);
 	snd_soc_component_update_bits(component, TFA9879_SERIAL_INTERFACE_1,
-			    TFA9879_I2S_SET_MASK,
-			    i2s_set << TFA9879_I2S_SET_SHIFT);
+				      TFA9879_I2S_SET_MASK,
+				      i2s_set << TFA9879_I2S_SET_SHIFT);
 	return 0;
 }
 
@@ -240,7 +235,6 @@ static const struct snd_soc_component_driver tfa9879_component = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config tfa9879_regmap = {
@@ -256,8 +250,9 @@ static const struct regmap_config tfa9879_regmap = {
 
 static const struct snd_soc_dai_ops tfa9879_dai_ops = {
 	.hw_params = tfa9879_hw_params,
-	.digital_mute = tfa9879_digital_mute,
+	.mute_stream = tfa9879_mute_stream,
 	.set_fmt = tfa9879_set_fmt,
+	.no_capture_mute = 1,
 };
 
 #define TFA9879_RATES SNDRV_PCM_RATE_8000_96000
@@ -276,8 +271,7 @@ static struct snd_soc_dai_driver tfa9879_dai = {
 	.ops = &tfa9879_dai_ops,
 };
 
-static int tfa9879_i2c_probe(struct i2c_client *i2c,
-			     const struct i2c_device_id *id)
+static int tfa9879_i2c_probe(struct i2c_client *i2c)
 {
 	struct tfa9879_priv *tfa9879;
 	int i;
@@ -298,11 +292,11 @@ static int tfa9879_i2c_probe(struct i2c_client *i2c,
 			     tfa9879_regs[i].reg, tfa9879_regs[i].def);
 
 	return devm_snd_soc_register_component(&i2c->dev, &tfa9879_component,
-				      &tfa9879_dai, 1);
+					       &tfa9879_dai, 1);
 }
 
 static const struct i2c_device_id tfa9879_i2c_id[] = {
-	{ "tfa9879", 0 },
+	{ .name = "tfa9879" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, tfa9879_i2c_id);

@@ -19,7 +19,7 @@
 
 struct ipmi_smi_powernv {
 	u64			interface_id;
-	ipmi_smi_t		intf;
+	struct ipmi_smi		*intf;
 	unsigned int		irq;
 
 	/**
@@ -33,7 +33,7 @@ struct ipmi_smi_powernv {
 	struct opal_ipmi_msg	*opal_msg;
 };
 
-static int ipmi_powernv_start_processing(void *send_info, ipmi_smi_t intf)
+static int ipmi_powernv_start_processing(void *send_info, struct ipmi_smi *intf)
 {
 	struct ipmi_smi_powernv *smi = send_info;
 
@@ -51,7 +51,7 @@ static void send_error_reply(struct ipmi_smi_powernv *smi,
 	ipmi_smi_msg_received(smi->intf, msg);
 }
 
-static void ipmi_powernv_send(void *send_info, struct ipmi_smi_msg *msg)
+static int ipmi_powernv_send(void *send_info, struct ipmi_smi_msg *msg)
 {
 	struct ipmi_smi_powernv *smi = send_info;
 	struct opal_ipmi_msg *opal_msg;
@@ -93,18 +93,19 @@ static void ipmi_powernv_send(void *send_info, struct ipmi_smi_msg *msg)
 			smi->interface_id, opal_msg, size);
 	rc = opal_ipmi_send(smi->interface_id, opal_msg, size);
 	pr_devel("%s:  -> %d\n", __func__, rc);
-
-	if (!rc) {
-		smi->cur_msg = msg;
-		spin_unlock_irqrestore(&smi->msg_lock, flags);
-		return;
+	if (rc) {
+		comp = IPMI_ERR_UNSPECIFIED;
+		goto err_unlock;
 	}
 
-	comp = IPMI_ERR_UNSPECIFIED;
+	smi->cur_msg = msg;
+	spin_unlock_irqrestore(&smi->msg_lock, flags);
+	return IPMI_CC_NO_ERROR;
+
 err_unlock:
 	spin_unlock_irqrestore(&smi->msg_lock, flags);
 err:
-	send_error_reply(smi, msg, comp);
+	return comp;
 }
 
 static int ipmi_powernv_recv(struct ipmi_smi_powernv *smi)
@@ -281,15 +282,13 @@ err_free:
 	return rc;
 }
 
-static int ipmi_powernv_remove(struct platform_device *pdev)
+static void ipmi_powernv_remove(struct platform_device *pdev)
 {
 	struct ipmi_smi_powernv *smi = dev_get_drvdata(&pdev->dev);
 
 	ipmi_unregister_smi(smi->intf);
 	free_irq(smi->irq, smi);
 	irq_dispose_mapping(smi->irq);
-
-	return 0;
 }
 
 static const struct of_device_id ipmi_powernv_match[] = {
@@ -304,7 +303,7 @@ static struct platform_driver powernv_ipmi_driver = {
 		.of_match_table	= ipmi_powernv_match,
 	},
 	.probe	= ipmi_powernv_probe,
-	.remove	= ipmi_powernv_remove,
+	.remove = ipmi_powernv_remove,
 };
 
 

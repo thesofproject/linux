@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Behringer BCD2000 driver
  *
  *   Copyright (C) 2014 Mario Kicherer (dev@kicherer.org)
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -34,9 +25,9 @@ static const struct usb_device_id id_table[] = {
 	{ },
 };
 
-static unsigned char device_cmd_prefix[] = {0x03, 0x00};
+static const unsigned char device_cmd_prefix[] = {0x03, 0x00};
 
-static unsigned char bcd2000_init_sequence[] = {
+static const unsigned char bcd2000_init_sequence[] = {
 	0x07, 0x00, 0x00, 0x00, 0x78, 0x48, 0x1c, 0x81,
 	0xc4, 0x00, 0x00, 0x00, 0x5e, 0x53, 0x4a, 0xf7,
 	0x18, 0xfa, 0x11, 0xff, 0x6c, 0xf3, 0x90, 0xff,
@@ -309,7 +300,7 @@ static int bcd2000_init_midi(struct bcd2000 *bcd2k)
 	if (ret < 0)
 		return ret;
 
-	strlcpy(rmidi->name, bcd2k->card->shortname, sizeof(rmidi->name));
+	strscpy(rmidi->name, bcd2k->card->shortname, sizeof(rmidi->name));
 
 	rmidi->info_flags = SNDRV_RAWMIDI_INFO_DUPLEX;
 	rmidi->private_data = bcd2k;
@@ -357,7 +348,8 @@ static int bcd2000_init_midi(struct bcd2000 *bcd2k)
 static void bcd2000_free_usb_related_resources(struct bcd2000 *bcd2k,
 						struct usb_interface *interface)
 {
-	/* usb_kill_urb not necessary, urb is aborted automatically */
+	usb_kill_urb(bcd2k->midi_out_urb);
+	usb_kill_urb(bcd2k->midi_in_urb);
 
 	usb_free_urb(bcd2k->midi_out_urb);
 	usb_free_urb(bcd2k->midi_in_urb);
@@ -377,23 +369,19 @@ static int bcd2000_probe(struct usb_interface *interface,
 	char usb_path[32];
 	int err;
 
-	mutex_lock(&devices_mutex);
+	guard(mutex)(&devices_mutex);
 
 	for (card_index = 0; card_index < SNDRV_CARDS; ++card_index)
 		if (!test_bit(card_index, devices_used))
 			break;
 
-	if (card_index >= SNDRV_CARDS) {
-		mutex_unlock(&devices_mutex);
+	if (card_index >= SNDRV_CARDS)
 		return -ENOENT;
-	}
 
 	err = snd_card_new(&interface->dev, index[card_index], id[card_index],
 			THIS_MODULE, sizeof(*bcd2k), &card);
-	if (err < 0) {
-		mutex_unlock(&devices_mutex);
+	if (err < 0)
 		return err;
-	}
 
 	bcd2k = card->private_data;
 	bcd2k->dev = interface_to_usbdev(interface);
@@ -403,8 +391,8 @@ static int bcd2000_probe(struct usb_interface *interface,
 
 	snd_card_set_dev(card, &interface->dev);
 
-	strncpy(card->driver, "snd-bcd2000", sizeof(card->driver));
-	strncpy(card->shortname, "BCD2000", sizeof(card->shortname));
+	strscpy(card->driver, "snd-bcd2000", sizeof(card->driver));
+	strscpy(card->shortname, "BCD2000", sizeof(card->shortname));
 	usb_make_path(bcd2k->dev, usb_path, sizeof(usb_path));
 	snprintf(bcd2k->card->longname, sizeof(bcd2k->card->longname),
 		    "Behringer BCD2000 at %s",
@@ -421,14 +409,12 @@ static int bcd2000_probe(struct usb_interface *interface,
 	usb_set_intfdata(interface, bcd2k);
 	set_bit(card_index, devices_used);
 
-	mutex_unlock(&devices_mutex);
 	return 0;
 
 probe_error:
 	dev_info(&bcd2k->dev->dev, PREFIX "error during probing");
 	bcd2000_free_usb_related_resources(bcd2k, interface);
 	snd_card_free(card);
-	mutex_unlock(&devices_mutex);
 	return err;
 }
 
@@ -439,7 +425,7 @@ static void bcd2000_disconnect(struct usb_interface *interface)
 	if (!bcd2k)
 		return;
 
-	mutex_lock(&devices_mutex);
+	guard(mutex)(&devices_mutex);
 
 	/* make sure that userspace cannot create new requests */
 	snd_card_disconnect(bcd2k->card);
@@ -449,8 +435,6 @@ static void bcd2000_disconnect(struct usb_interface *interface)
 	clear_bit(bcd2k->card_index, devices_used);
 
 	snd_card_free_when_closed(bcd2k->card);
-
-	mutex_unlock(&devices_mutex);
 }
 
 static struct usb_driver bcd2000_driver = {

@@ -1,29 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014-2015 The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <drm/drm_atomic.h>
+#include <drm/drm_blend.h>
+#include <drm/drm_damage_helper.h>
+#include <drm/drm_fourcc.h>
+#include <drm/drm_framebuffer.h>
+#include <drm/drm_gem_atomic_helper.h>
 #include <drm/drm_print.h>
+
 #include "mdp5_kms.h"
 
 struct mdp5_plane {
 	struct drm_plane base;
-
-	uint32_t nformats;
-	uint32_t formats[32];
 };
 #define to_mdp5_plane(x) container_of(x, struct mdp5_plane, base)
 
@@ -42,123 +35,29 @@ static bool plane_enabled(struct drm_plane_state *state)
 	return state->visible;
 }
 
-static void mdp5_plane_destroy(struct drm_plane *plane)
+/* helper to install properties which are common to planes and crtcs */
+static void mdp5_plane_install_properties(struct drm_plane *plane,
+		struct drm_mode_object *obj)
 {
-	struct mdp5_plane *mdp5_plane = to_mdp5_plane(plane);
+	unsigned int zpos;
 
-	drm_plane_helper_disable(plane);
-	drm_plane_cleanup(plane);
-
-	kfree(mdp5_plane);
-}
-
-static void mdp5_plane_install_rotation_property(struct drm_device *dev,
-		struct drm_plane *plane)
-{
 	drm_plane_create_rotation_property(plane,
 					   DRM_MODE_ROTATE_0,
 					   DRM_MODE_ROTATE_0 |
 					   DRM_MODE_ROTATE_180 |
 					   DRM_MODE_REFLECT_X |
 					   DRM_MODE_REFLECT_Y);
-}
+	drm_plane_create_alpha_property(plane);
+	drm_plane_create_blend_mode_property(plane,
+			BIT(DRM_MODE_BLEND_PIXEL_NONE) |
+			BIT(DRM_MODE_BLEND_PREMULTI) |
+			BIT(DRM_MODE_BLEND_COVERAGE));
 
-/* helper to install properties which are common to planes and crtcs */
-static void mdp5_plane_install_properties(struct drm_plane *plane,
-		struct drm_mode_object *obj)
-{
-	struct drm_device *dev = plane->dev;
-	struct msm_drm_private *dev_priv = dev->dev_private;
-	struct drm_property *prop;
-
-#define INSTALL_PROPERTY(name, NAME, init_val, fnc, ...) do { \
-		prop = dev_priv->plane_property[PLANE_PROP_##NAME]; \
-		if (!prop) { \
-			prop = drm_property_##fnc(dev, 0, #name, \
-				##__VA_ARGS__); \
-			if (!prop) { \
-				dev_warn(dev->dev, \
-					"Create property %s failed\n", \
-					#name); \
-				return; \
-			} \
-			dev_priv->plane_property[PLANE_PROP_##NAME] = prop; \
-		} \
-		drm_object_attach_property(&plane->base, prop, init_val); \
-	} while (0)
-
-#define INSTALL_RANGE_PROPERTY(name, NAME, min, max, init_val) \
-		INSTALL_PROPERTY(name, NAME, init_val, \
-				create_range, min, max)
-
-#define INSTALL_ENUM_PROPERTY(name, NAME, init_val) \
-		INSTALL_PROPERTY(name, NAME, init_val, \
-				create_enum, name##_prop_enum_list, \
-				ARRAY_SIZE(name##_prop_enum_list))
-
-	INSTALL_RANGE_PROPERTY(zpos, ZPOS, 1, 255, 1);
-
-	mdp5_plane_install_rotation_property(dev, plane);
-
-#undef INSTALL_RANGE_PROPERTY
-#undef INSTALL_ENUM_PROPERTY
-#undef INSTALL_PROPERTY
-}
-
-static int mdp5_plane_atomic_set_property(struct drm_plane *plane,
-		struct drm_plane_state *state, struct drm_property *property,
-		uint64_t val)
-{
-	struct drm_device *dev = plane->dev;
-	struct mdp5_plane_state *pstate;
-	struct msm_drm_private *dev_priv = dev->dev_private;
-	int ret = 0;
-
-	pstate = to_mdp5_plane_state(state);
-
-#define SET_PROPERTY(name, NAME, type) do { \
-		if (dev_priv->plane_property[PLANE_PROP_##NAME] == property) { \
-			pstate->name = (type)val; \
-			DBG("Set property %s %d", #name, (type)val); \
-			goto done; \
-		} \
-	} while (0)
-
-	SET_PROPERTY(zpos, ZPOS, uint8_t);
-
-	dev_err(dev->dev, "Invalid property\n");
-	ret = -EINVAL;
-done:
-	return ret;
-#undef SET_PROPERTY
-}
-
-static int mdp5_plane_atomic_get_property(struct drm_plane *plane,
-		const struct drm_plane_state *state,
-		struct drm_property *property, uint64_t *val)
-{
-	struct drm_device *dev = plane->dev;
-	struct mdp5_plane_state *pstate;
-	struct msm_drm_private *dev_priv = dev->dev_private;
-	int ret = 0;
-
-	pstate = to_mdp5_plane_state(state);
-
-#define GET_PROPERTY(name, NAME, type) do { \
-		if (dev_priv->plane_property[PLANE_PROP_##NAME] == property) { \
-			*val = pstate->name; \
-			DBG("Get property %s %lld", #name, *val); \
-			goto done; \
-		} \
-	} while (0)
-
-	GET_PROPERTY(zpos, ZPOS, uint8_t);
-
-	dev_err(dev->dev, "Invalid property\n");
-	ret = -EINVAL;
-done:
-	return ret;
-#undef SET_PROPERTY
+	if (plane->type == DRM_PLANE_TYPE_PRIMARY)
+		zpos = STAGE_BASE;
+	else
+		zpos = STAGE0 + drm_plane_index(plane);
+	drm_plane_create_zpos_property(plane, zpos, 1, 255);
 }
 
 static void
@@ -174,9 +73,10 @@ mdp5_plane_atomic_print_state(struct drm_printer *p,
 		drm_printf(p, "\tright-hwpipe=%s\n",
 			   pstate->r_hwpipe ? pstate->r_hwpipe->name :
 					      "(null)");
-	drm_printf(p, "\tpremultiplied=%u\n", pstate->premultiplied);
-	drm_printf(p, "\tzpos=%u\n", pstate->zpos);
-	drm_printf(p, "\talpha=%u\n", pstate->alpha);
+	drm_printf(p, "\tblend_mode=%u\n", pstate->base.pixel_blend_mode);
+	drm_printf(p, "\tzpos=%u\n", pstate->base.zpos);
+	drm_printf(p, "\tnormalized_zpos=%u\n", pstate->base.normalized_zpos);
+	drm_printf(p, "\talpha=%u\n", pstate->base.alpha);
 	drm_printf(p, "\tstage=%s\n", stage2name(pstate->stage));
 }
 
@@ -184,24 +84,15 @@ static void mdp5_plane_reset(struct drm_plane *plane)
 {
 	struct mdp5_plane_state *mdp5_state;
 
-	if (plane->state && plane->state->fb)
-		drm_framebuffer_unreference(plane->state->fb);
+	if (plane->state)
+		__drm_atomic_helper_plane_destroy_state(plane->state);
 
 	kfree(to_mdp5_plane_state(plane->state));
-	mdp5_state = kzalloc(sizeof(*mdp5_state), GFP_KERNEL);
-
-	/* assign default blend parameters */
-	mdp5_state->alpha = 255;
-	mdp5_state->premultiplied = 0;
-
-	if (plane->type == DRM_PLANE_TYPE_PRIMARY)
-		mdp5_state->zpos = STAGE_BASE;
-	else
-		mdp5_state->zpos = STAGE0 + drm_plane_index(plane);
-
-	mdp5_state->base.plane = plane;
-
-	plane->state = &mdp5_state->base;
+	plane->state = NULL;
+	mdp5_state = kzalloc_obj(*mdp5_state);
+	if (!mdp5_state)
+		return;
+	__drm_atomic_helper_plane_reset(plane, &mdp5_state->base);
 }
 
 static struct drm_plane_state *
@@ -227,8 +118,7 @@ static void mdp5_plane_destroy_state(struct drm_plane *plane,
 {
 	struct mdp5_plane_state *pstate = to_mdp5_plane_state(state);
 
-	if (state->fb)
-		drm_framebuffer_unreference(state->fb);
+	__drm_atomic_helper_plane_destroy_state(state);
 
 	kfree(pstate);
 }
@@ -236,9 +126,6 @@ static void mdp5_plane_destroy_state(struct drm_plane *plane,
 static const struct drm_plane_funcs mdp5_plane_funcs = {
 		.update_plane = drm_atomic_helper_update_plane,
 		.disable_plane = drm_atomic_helper_disable_plane,
-		.destroy = mdp5_plane_destroy,
-		.atomic_set_property = mdp5_plane_atomic_set_property,
-		.atomic_get_property = mdp5_plane_atomic_get_property,
 		.reset = mdp5_plane_reset,
 		.atomic_duplicate_state = mdp5_plane_duplicate_state,
 		.atomic_destroy_state = mdp5_plane_destroy_state,
@@ -248,32 +135,29 @@ static const struct drm_plane_funcs mdp5_plane_funcs = {
 static int mdp5_plane_prepare_fb(struct drm_plane *plane,
 				 struct drm_plane_state *new_state)
 {
-	struct mdp5_kms *mdp5_kms = get_kms(plane);
-	struct msm_kms *kms = &mdp5_kms->base.base;
-	struct drm_framebuffer *fb = new_state->fb;
+	bool needs_dirtyfb = to_mdp5_plane_state(new_state)->needs_dirtyfb;
 
 	if (!new_state->fb)
 		return 0;
 
-	DBG("%s: prepare: FB[%u]", plane->name, fb->base.id);
-	return msm_framebuffer_prepare(fb, kms->aspace);
+	drm_gem_plane_helper_prepare_fb(plane, new_state);
+
+	return msm_framebuffer_prepare(new_state->fb, needs_dirtyfb);
 }
 
 static void mdp5_plane_cleanup_fb(struct drm_plane *plane,
 				  struct drm_plane_state *old_state)
 {
-	struct mdp5_kms *mdp5_kms = get_kms(plane);
-	struct msm_kms *kms = &mdp5_kms->base.base;
 	struct drm_framebuffer *fb = old_state->fb;
+	bool needed_dirtyfb = to_mdp5_plane_state(old_state)->needs_dirtyfb;
 
 	if (!fb)
 		return;
 
 	DBG("%s: cleanup: FB[%u]", plane->name, fb->base.id);
-	msm_framebuffer_cleanup(fb, kms->aspace);
+	msm_framebuffer_cleanup(fb, needed_dirtyfb);
 }
 
-#define FRAC_16_16(mult, div)    (((mult) << 16) / (div))
 static int mdp5_plane_atomic_check_with_state(struct drm_crtc_state *crtc_state,
 					      struct drm_plane_state *state)
 {
@@ -330,12 +214,12 @@ static int mdp5_plane_atomic_check_with_state(struct drm_crtc_state *crtc_state,
 
 	if (plane_enabled(state)) {
 		unsigned int rotation;
-		const struct mdp_format *format;
+		const struct msm_format *format;
 		struct mdp5_kms *mdp5_kms = get_kms(plane);
 		uint32_t blkcfg = 0;
 
-		format = to_mdp_format(msm_framebuffer_format(state->fb));
-		if (MDP_FORMAT_IS_YUV(format))
+		format = msm_framebuffer_format(state->fb);
+		if (MSM_FORMAT_IS_YUV(format))
 			caps |= MDP_PIPE_CAP_SCALE | MDP_PIPE_CAP_CSC;
 
 		if (((state->src_w >> 16) != state->crtc_w) ||
@@ -370,8 +254,8 @@ static int mdp5_plane_atomic_check_with_state(struct drm_crtc_state *crtc_state,
 			new_hwpipe = true;
 
 		if (mdp5_kms->smp) {
-			const struct mdp_format *format =
-				to_mdp_format(msm_framebuffer_format(state->fb));
+			const struct msm_format *format =
+				msm_framebuffer_format(state->fb);
 
 			blkcfg = mdp5_smp_calculate(mdp5_kms->smp, format,
 					state->src_w >> 16, false);
@@ -414,12 +298,24 @@ static int mdp5_plane_atomic_check_with_state(struct drm_crtc_state *crtc_state,
 				mdp5_state->r_hwpipe = NULL;
 
 
-			mdp5_pipe_release(state->state, old_hwpipe);
-			mdp5_pipe_release(state->state, old_right_hwpipe);
+			ret = mdp5_pipe_release(state->state, old_hwpipe);
+			if (ret)
+				return ret;
+
+			ret = mdp5_pipe_release(state->state, old_right_hwpipe);
+			if (ret)
+				return ret;
+
 		}
 	} else {
-		mdp5_pipe_release(state->state, mdp5_state->hwpipe);
-		mdp5_pipe_release(state->state, mdp5_state->r_hwpipe);
+		ret = mdp5_pipe_release(state->state, mdp5_state->hwpipe);
+		if (ret)
+			return ret;
+
+		ret = mdp5_pipe_release(state->state, mdp5_state->r_hwpipe);
+		if (ret)
+			return ret;
+
 		mdp5_state->hwpipe = mdp5_state->r_hwpipe = NULL;
 	}
 
@@ -427,76 +323,81 @@ static int mdp5_plane_atomic_check_with_state(struct drm_crtc_state *crtc_state,
 }
 
 static int mdp5_plane_atomic_check(struct drm_plane *plane,
-				   struct drm_plane_state *state)
+				   struct drm_atomic_commit *state)
 {
+	struct drm_plane_state *old_plane_state = drm_atomic_get_old_plane_state(state,
+										 plane);
+	struct drm_plane_state *new_plane_state = drm_atomic_get_new_plane_state(state,
+										 plane);
 	struct drm_crtc *crtc;
 	struct drm_crtc_state *crtc_state;
 
-	crtc = state->crtc ? state->crtc : plane->state->crtc;
+	crtc = new_plane_state->crtc ? new_plane_state->crtc : old_plane_state->crtc;
 	if (!crtc)
 		return 0;
 
-	crtc_state = drm_atomic_get_existing_crtc_state(state->state, crtc);
+	crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
 	if (WARN_ON(!crtc_state))
 		return -EINVAL;
 
-	return mdp5_plane_atomic_check_with_state(crtc_state, state);
+	return mdp5_plane_atomic_check_with_state(crtc_state, new_plane_state);
 }
 
 static void mdp5_plane_atomic_update(struct drm_plane *plane,
-				     struct drm_plane_state *old_state)
+				     struct drm_atomic_commit *state)
 {
-	struct drm_plane_state *state = plane->state;
+	struct drm_plane_state *new_state = drm_atomic_get_new_plane_state(state,
+									   plane);
 
 	DBG("%s: update", plane->name);
 
-	if (plane_enabled(state)) {
+	if (plane_enabled(new_state)) {
 		int ret;
 
 		ret = mdp5_plane_mode_set(plane,
-				state->crtc, state->fb,
-				&state->src, &state->dst);
+				new_state->crtc, new_state->fb,
+				&new_state->src, &new_state->dst);
 		/* atomic_check should have ensured that this doesn't fail */
 		WARN_ON(ret < 0);
 	}
 }
 
 static int mdp5_plane_atomic_async_check(struct drm_plane *plane,
-					 struct drm_plane_state *state)
+					 struct drm_atomic_commit *state, bool flip)
 {
-	struct mdp5_plane_state *mdp5_state = to_mdp5_plane_state(state);
+	struct drm_plane_state *new_plane_state = drm_atomic_get_new_plane_state(state,
+										 plane);
+	struct mdp5_plane_state *mdp5_state = to_mdp5_plane_state(new_plane_state);
 	struct drm_crtc_state *crtc_state;
 	int min_scale, max_scale;
 	int ret;
 
-	crtc_state = drm_atomic_get_existing_crtc_state(state->state,
-							state->crtc);
+	crtc_state = drm_atomic_get_new_crtc_state(state,
+						   new_plane_state->crtc);
 	if (WARN_ON(!crtc_state))
 		return -EINVAL;
 
 	if (!crtc_state->active)
 		return -EINVAL;
 
-	mdp5_state = to_mdp5_plane_state(state);
-
 	/* don't use fast path if we don't have a hwpipe allocated yet */
 	if (!mdp5_state->hwpipe)
 		return -EINVAL;
 
 	/* only allow changing of position(crtc x/y or src x/y) in fast path */
-	if (plane->state->crtc != state->crtc ||
-	    plane->state->src_w != state->src_w ||
-	    plane->state->src_h != state->src_h ||
-	    plane->state->crtc_w != state->crtc_w ||
-	    plane->state->crtc_h != state->crtc_h ||
+	if (plane->state->crtc != new_plane_state->crtc ||
+	    plane->state->src_w != new_plane_state->src_w ||
+	    plane->state->src_h != new_plane_state->src_h ||
+	    plane->state->crtc_w != new_plane_state->crtc_w ||
+	    plane->state->crtc_h != new_plane_state->crtc_h ||
 	    !plane->state->fb ||
-	    plane->state->fb != state->fb)
+	    plane->state->fb != new_plane_state->fb)
 		return -EINVAL;
 
 	min_scale = FRAC_16_16(1, 8);
 	max_scale = FRAC_16_16(8, 1);
 
-	ret = drm_atomic_helper_check_plane_state(state, crtc_state,
+	ret = drm_atomic_helper_check_plane_state(new_plane_state, crtc_state,
 						  min_scale, max_scale,
 						  true, true);
 	if (ret)
@@ -509,15 +410,19 @@ static int mdp5_plane_atomic_async_check(struct drm_plane *plane,
 	 * also assign/unassign the hwpipe(s) tied to the plane. We avoid
 	 * taking the fast path for both these reasons.
 	 */
-	if (state->visible != plane->state->visible)
+	if (new_plane_state->visible != plane->state->visible)
 		return -EINVAL;
 
 	return 0;
 }
 
 static void mdp5_plane_atomic_async_update(struct drm_plane *plane,
-					   struct drm_plane_state *new_state)
+					   struct drm_atomic_commit *state)
 {
+	struct drm_plane_state *new_state = drm_atomic_get_new_plane_state(state,
+									   plane);
+	struct drm_framebuffer *old_fb = plane->state->fb;
+
 	plane->state->src_x = new_state->src_x;
 	plane->state->src_y = new_state->src_y;
 	plane->state->crtc_x = new_state->crtc_x;
@@ -526,7 +431,7 @@ static void mdp5_plane_atomic_async_update(struct drm_plane *plane,
 	if (plane_enabled(new_state)) {
 		struct mdp5_ctl *ctl;
 		struct mdp5_pipeline *pipeline =
-					mdp5_crtc_get_pipeline(plane->crtc);
+					mdp5_crtc_get_pipeline(new_state->crtc);
 		int ret;
 
 		ret = mdp5_plane_mode_set(plane, new_state->crtc, new_state->fb,
@@ -540,6 +445,8 @@ static void mdp5_plane_atomic_async_update(struct drm_plane *plane,
 
 	*to_mdp5_plane_state(plane->state) =
 		*to_mdp5_plane_state(new_state);
+
+	new_state->fb = old_fb;
 }
 
 static const struct drm_plane_helper_funcs mdp5_plane_helper_funcs = {
@@ -555,8 +462,6 @@ static void set_scanout_locked(struct mdp5_kms *mdp5_kms,
 			       enum mdp5_pipe pipe,
 			       struct drm_framebuffer *fb)
 {
-	struct msm_kms *kms = &mdp5_kms->base.base;
-
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC_STRIDE_A(pipe),
 			MDP5_PIPE_SRC_STRIDE_A_P0(fb->pitches[0]) |
 			MDP5_PIPE_SRC_STRIDE_A_P1(fb->pitches[1]));
@@ -566,13 +471,13 @@ static void set_scanout_locked(struct mdp5_kms *mdp5_kms,
 			MDP5_PIPE_SRC_STRIDE_B_P3(fb->pitches[3]));
 
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC0_ADDR(pipe),
-			msm_framebuffer_iova(fb, kms->aspace, 0));
+			msm_framebuffer_iova(fb, 0));
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC1_ADDR(pipe),
-			msm_framebuffer_iova(fb, kms->aspace, 1));
+			msm_framebuffer_iova(fb, 1));
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC2_ADDR(pipe),
-			msm_framebuffer_iova(fb, kms->aspace, 2));
+			msm_framebuffer_iova(fb, 2));
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC3_ADDR(pipe),
-			msm_framebuffer_iova(fb, kms->aspace, 3));
+			msm_framebuffer_iova(fb, 3));
 }
 
 /* Note: mdp5_plane->pipe_lock must be locked */
@@ -666,23 +571,21 @@ static int calc_scalex_steps(struct drm_plane *plane,
 		uint32_t pixel_format, uint32_t src, uint32_t dest,
 		uint32_t phasex_steps[COMP_MAX])
 {
+	const struct drm_format_info *info = drm_format_info(pixel_format);
 	struct mdp5_kms *mdp5_kms = get_kms(plane);
 	struct device *dev = mdp5_kms->dev->dev;
 	uint32_t phasex_step;
-	unsigned int hsub;
 	int ret;
 
 	ret = calc_phase_step(src, dest, &phasex_step);
 	if (ret) {
-		dev_err(dev, "X scaling (%d->%d) failed: %d\n", src, dest, ret);
+		DRM_DEV_ERROR(dev, "X scaling (%d->%d) failed: %d\n", src, dest, ret);
 		return ret;
 	}
 
-	hsub = drm_format_horz_chroma_subsampling(pixel_format);
-
 	phasex_steps[COMP_0]   = phasex_step;
 	phasex_steps[COMP_3]   = phasex_step;
-	phasex_steps[COMP_1_2] = phasex_step / hsub;
+	phasex_steps[COMP_1_2] = phasex_step / info->hsub;
 
 	return 0;
 }
@@ -691,41 +594,39 @@ static int calc_scaley_steps(struct drm_plane *plane,
 		uint32_t pixel_format, uint32_t src, uint32_t dest,
 		uint32_t phasey_steps[COMP_MAX])
 {
+	const struct drm_format_info *info = drm_format_info(pixel_format);
 	struct mdp5_kms *mdp5_kms = get_kms(plane);
 	struct device *dev = mdp5_kms->dev->dev;
 	uint32_t phasey_step;
-	unsigned int vsub;
 	int ret;
 
 	ret = calc_phase_step(src, dest, &phasey_step);
 	if (ret) {
-		dev_err(dev, "Y scaling (%d->%d) failed: %d\n", src, dest, ret);
+		DRM_DEV_ERROR(dev, "Y scaling (%d->%d) failed: %d\n", src, dest, ret);
 		return ret;
 	}
 
-	vsub = drm_format_vert_chroma_subsampling(pixel_format);
-
 	phasey_steps[COMP_0]   = phasey_step;
 	phasey_steps[COMP_3]   = phasey_step;
-	phasey_steps[COMP_1_2] = phasey_step / vsub;
+	phasey_steps[COMP_1_2] = phasey_step / info->vsub;
 
 	return 0;
 }
 
-static uint32_t get_scale_config(const struct mdp_format *format,
+static uint32_t get_scale_config(const struct msm_format *format,
 		uint32_t src, uint32_t dst, bool horz)
 {
-	bool scaling = format->is_yuv ? true : (src != dst);
-	uint32_t sub, pix_fmt = format->base.pixel_format;
+	const struct drm_format_info *info = drm_format_info(format->pixel_format);
+	bool yuv = MSM_FORMAT_IS_YUV(format);
+	bool scaling = yuv ? true : (src != dst);
+	uint32_t sub;
 	uint32_t ya_filter, uv_filter;
-	bool yuv = format->is_yuv;
 
 	if (!scaling)
 		return 0;
 
 	if (yuv) {
-		sub = horz ? drm_format_horz_chroma_subsampling(pix_fmt) :
-			     drm_format_vert_chroma_subsampling(pix_fmt);
+		sub = horz ? info->hsub : info->vsub;
 		uv_filter = ((src / sub) <= dst) ?
 				   SCALE_FILTER_BIL : SCALE_FILTER_PCMN;
 	}
@@ -743,12 +644,12 @@ static uint32_t get_scale_config(const struct mdp_format *format,
 			COND(yuv, MDP5_PIPE_SCALE_CONFIG_SCALEY_FILTER_COMP_1_2(uv_filter));
 }
 
-static void calc_pixel_ext(const struct mdp_format *format,
+static void calc_pixel_ext(const struct msm_format *format,
 		uint32_t src, uint32_t dst, uint32_t phase_step[2],
 		int pix_ext_edge1[COMP_MAX], int pix_ext_edge2[COMP_MAX],
 		bool horz)
 {
-	bool scaling = format->is_yuv ? true : (src != dst);
+	bool scaling = MSM_FORMAT_IS_YUV(format) ? true : (src != dst);
 	int i;
 
 	/*
@@ -766,11 +667,11 @@ static void calc_pixel_ext(const struct mdp_format *format,
 }
 
 static void mdp5_write_pixel_ext(struct mdp5_kms *mdp5_kms, enum mdp5_pipe pipe,
-	const struct mdp_format *format,
+	const struct msm_format *format,
 	uint32_t src_w, int pe_left[COMP_MAX], int pe_right[COMP_MAX],
 	uint32_t src_h, int pe_top[COMP_MAX], int pe_bottom[COMP_MAX])
 {
-	uint32_t pix_fmt = format->base.pixel_format;
+	const struct drm_format_info *info = drm_format_info(format->pixel_format);
 	uint32_t lr, tb, req;
 	int i;
 
@@ -778,9 +679,9 @@ static void mdp5_write_pixel_ext(struct mdp5_kms *mdp5_kms, enum mdp5_pipe pipe,
 		uint32_t roi_w = src_w;
 		uint32_t roi_h = src_h;
 
-		if (format->is_yuv && i == COMP_1_2) {
-			roi_w /= drm_format_horz_chroma_subsampling(pix_fmt);
-			roi_h /= drm_format_vert_chroma_subsampling(pix_fmt);
+		if (MSM_FORMAT_IS_YUV(format) && i == COMP_1_2) {
+			roi_w /= info->hsub;
+			roi_h /= info->vsub;
 		}
 
 		lr  = (pe_left[i] >= 0) ?
@@ -852,8 +753,8 @@ static void mdp5_hwpipe_mode_set(struct mdp5_kms *mdp5_kms,
 {
 	enum mdp5_pipe pipe = hwpipe->pipe;
 	bool has_pe = hwpipe->caps & MDP_PIPE_CAP_SW_PIX_EXT;
-	const struct mdp_format *format =
-			to_mdp_format(msm_framebuffer_format(fb));
+	const struct msm_format *format =
+			msm_framebuffer_format(fb);
 
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC_IMG_SIZE(pipe),
 			MDP5_PIPE_SRC_IMG_SIZE_WIDTH(src_img_w) |
@@ -877,21 +778,22 @@ static void mdp5_hwpipe_mode_set(struct mdp5_kms *mdp5_kms,
 
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC_FORMAT(pipe),
 			MDP5_PIPE_SRC_FORMAT_A_BPC(format->bpc_a) |
-			MDP5_PIPE_SRC_FORMAT_R_BPC(format->bpc_r) |
-			MDP5_PIPE_SRC_FORMAT_G_BPC(format->bpc_g) |
-			MDP5_PIPE_SRC_FORMAT_B_BPC(format->bpc_b) |
+			MDP5_PIPE_SRC_FORMAT_R_BPC(format->bpc_r_cr) |
+			MDP5_PIPE_SRC_FORMAT_G_BPC(format->bpc_g_y) |
+			MDP5_PIPE_SRC_FORMAT_B_BPC(format->bpc_b_cb) |
 			COND(format->alpha_enable, MDP5_PIPE_SRC_FORMAT_ALPHA_ENABLE) |
-			MDP5_PIPE_SRC_FORMAT_CPP(format->cpp - 1) |
+			MDP5_PIPE_SRC_FORMAT_CPP(format->bpp - 1) |
 			MDP5_PIPE_SRC_FORMAT_UNPACK_COUNT(format->unpack_count - 1) |
-			COND(format->unpack_tight, MDP5_PIPE_SRC_FORMAT_UNPACK_TIGHT) |
+			COND(format->flags & MSM_FORMAT_FLAG_UNPACK_TIGHT,
+			     MDP5_PIPE_SRC_FORMAT_UNPACK_TIGHT) |
 			MDP5_PIPE_SRC_FORMAT_FETCH_TYPE(format->fetch_type) |
 			MDP5_PIPE_SRC_FORMAT_CHROMA_SAMP(format->chroma_sample));
 
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC_UNPACK(pipe),
-			MDP5_PIPE_SRC_UNPACK_ELEM0(format->unpack[0]) |
-			MDP5_PIPE_SRC_UNPACK_ELEM1(format->unpack[1]) |
-			MDP5_PIPE_SRC_UNPACK_ELEM2(format->unpack[2]) |
-			MDP5_PIPE_SRC_UNPACK_ELEM3(format->unpack[3]));
+			MDP5_PIPE_SRC_UNPACK_ELEM0(format->element[0]) |
+			MDP5_PIPE_SRC_UNPACK_ELEM1(format->element[1]) |
+			MDP5_PIPE_SRC_UNPACK_ELEM2(format->element[2]) |
+			MDP5_PIPE_SRC_UNPACK_ELEM3(format->element[3]));
 
 	mdp5_write(mdp5_kms, REG_MDP5_PIPE_SRC_OP_MODE(pipe),
 			(hflip ? MDP5_PIPE_SRC_OP_MODE_FLIP_LR : 0) |
@@ -924,7 +826,7 @@ static void mdp5_hwpipe_mode_set(struct mdp5_kms *mdp5_kms,
 	}
 
 	if (hwpipe->caps & MDP_PIPE_CAP_CSC) {
-		if (MDP_FORMAT_IS_YUV(format))
+		if (MSM_FORMAT_IS_YUV(format))
 			csc_enable(mdp5_kms, pipe,
 					mdp_get_default_csc_cfg(CSC_YUV2RGB));
 		else
@@ -943,7 +845,7 @@ static int mdp5_plane_mode_set(struct drm_plane *plane,
 	struct mdp5_kms *mdp5_kms = get_kms(plane);
 	enum mdp5_pipe pipe = hwpipe->pipe;
 	struct mdp5_hw_pipe *right_hwpipe;
-	const struct mdp_format *format;
+	const struct msm_format *format;
 	uint32_t nplanes, config = 0;
 	struct phase_step step = { { 0 } };
 	struct pixel_ext pe = { { 0 } };
@@ -964,8 +866,8 @@ static int mdp5_plane_mode_set(struct drm_plane *plane,
 	if (WARN_ON(nplanes > pipe2nclients(pipe)))
 		return -EINVAL;
 
-	format = to_mdp_format(msm_framebuffer_format(fb));
-	pix_format = format->base.pixel_format;
+	format = msm_framebuffer_format(fb);
+	pix_format = format->pixel_format;
 
 	src_x = src->x1;
 	src_y = src->y1;
@@ -1043,8 +945,6 @@ static int mdp5_plane_mode_set(struct drm_plane *plane,
 				     src_img_w, src_img_h,
 				     src_x + src_w, src_y, src_w, src_h);
 
-	plane->fb = fb;
-
 	return ret;
 }
 
@@ -1088,40 +988,53 @@ uint32_t mdp5_plane_get_flush(struct drm_plane *plane)
 	return mask;
 }
 
+static const uint32_t mdp5_plane_formats[] = {
+	DRM_FORMAT_ARGB8888,
+	DRM_FORMAT_ABGR8888,
+	DRM_FORMAT_RGBA8888,
+	DRM_FORMAT_BGRA8888,
+	DRM_FORMAT_XRGB8888,
+	DRM_FORMAT_XBGR8888,
+	DRM_FORMAT_RGBX8888,
+	DRM_FORMAT_BGRX8888,
+	DRM_FORMAT_RGB888,
+	DRM_FORMAT_BGR888,
+	DRM_FORMAT_RGB565,
+	DRM_FORMAT_BGR565,
+
+	DRM_FORMAT_NV12,
+	DRM_FORMAT_NV21,
+	DRM_FORMAT_NV16,
+	DRM_FORMAT_NV61,
+	DRM_FORMAT_VYUY,
+	DRM_FORMAT_UYVY,
+	DRM_FORMAT_YUYV,
+	DRM_FORMAT_YVYU,
+	DRM_FORMAT_YUV420,
+	DRM_FORMAT_YVU420,
+};
+
 /* initialize plane */
 struct drm_plane *mdp5_plane_init(struct drm_device *dev,
 				  enum drm_plane_type type)
 {
 	struct drm_plane *plane = NULL;
 	struct mdp5_plane *mdp5_plane;
-	int ret;
 
-	mdp5_plane = kzalloc(sizeof(*mdp5_plane), GFP_KERNEL);
-	if (!mdp5_plane) {
-		ret = -ENOMEM;
-		goto fail;
-	}
+	mdp5_plane = drmm_universal_plane_alloc(dev, struct mdp5_plane, base,
+						0xff, &mdp5_plane_funcs,
+						mdp5_plane_formats, ARRAY_SIZE(mdp5_plane_formats),
+						NULL, type, NULL);
+	if (IS_ERR(mdp5_plane))
+		return ERR_CAST(mdp5_plane);
 
 	plane = &mdp5_plane->base;
-
-	mdp5_plane->nformats = mdp_get_formats(mdp5_plane->formats,
-		ARRAY_SIZE(mdp5_plane->formats), false);
-
-	ret = drm_universal_plane_init(dev, plane, 0xff, &mdp5_plane_funcs,
-			mdp5_plane->formats, mdp5_plane->nformats,
-			NULL, type, NULL);
-	if (ret)
-		goto fail;
 
 	drm_plane_helper_add(plane, &mdp5_plane_helper_funcs);
 
 	mdp5_plane_install_properties(plane, &plane->base);
 
+	drm_plane_enable_fb_damage_clips(plane);
+
 	return plane;
-
-fail:
-	if (plane)
-		mdp5_plane_destroy(plane);
-
-	return ERR_PTR(ret);
 }

@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/drivers/input/serio/pcips2.c
  *
  *  Copyright (C) 2003 Russell King, All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License.
  *
  *  I'm not sure if this is a generic PS/2 PCI interface or specific to
  *  the Mobility Electronics docking station.
@@ -140,8 +137,8 @@ static int pcips2_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	if (ret)
 		goto disable;
 
-	ps2if = kzalloc(sizeof(struct pcips2_data), GFP_KERNEL);
-	serio = kzalloc(sizeof(struct serio), GFP_KERNEL);
+	ps2if = kzalloc_obj(*ps2if);
+	serio = kzalloc_obj(*serio);
 	if (!ps2if || !serio) {
 		ret = -ENOMEM;
 		goto release;
@@ -152,8 +149,8 @@ static int pcips2_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	serio->write		= pcips2_write;
 	serio->open		= pcips2_open;
 	serio->close		= pcips2_close;
-	strlcpy(serio->name, pci_name(dev), sizeof(serio->name));
-	strlcpy(serio->phys, dev_name(&dev->dev), sizeof(serio->phys));
+	strscpy(serio->name, pci_name(dev), sizeof(serio->name));
+	strscpy(serio->phys, dev_name(&dev->dev), sizeof(serio->phys));
 	serio->port_data	= ps2if;
 	serio->dev.parent	= &dev->dev;
 	ps2if->io		= serio;

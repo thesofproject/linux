@@ -12,7 +12,7 @@
 #include "acx.h"
 
 /**
- * send command to firmware
+ * wl1251_cmd_send - Send command to firmware
  *
  * @wl: wl struct
  * @id: command id
@@ -59,48 +59,7 @@ out:
 }
 
 /**
- * send test command to firmware
- *
- * @wl: wl struct
- * @buf: buffer containing the command, with all headers, must work with dma
- * @len: length of the buffer
- * @answer: is answer needed
- */
-int wl1251_cmd_test(struct wl1251 *wl, void *buf, size_t buf_len, u8 answer)
-{
-	int ret;
-
-	wl1251_debug(DEBUG_CMD, "cmd test");
-
-	ret = wl1251_cmd_send(wl, CMD_TEST, buf, buf_len);
-
-	if (ret < 0) {
-		wl1251_warning("TEST command failed");
-		return ret;
-	}
-
-	if (answer) {
-		struct wl1251_command *cmd_answer;
-
-		/*
-		 * The test command got in, we can read the answer.
-		 * The answer would be a wl1251_command, where the
-		 * parameter array contains the actual answer.
-		 */
-		wl1251_mem_read(wl, wl->cmd_box_addr, buf, buf_len);
-
-		cmd_answer = buf;
-
-		if (cmd_answer->header.status != CMD_STATUS_SUCCESS)
-			wl1251_error("TEST command answer error: %d",
-				     cmd_answer->header.status);
-	}
-
-	return 0;
-}
-
-/**
- * read acx from firmware
+ * wl1251_cmd_interrogate - Read acx from firmware
  *
  * @wl: wl struct
  * @id: acx id
@@ -138,7 +97,7 @@ out:
 }
 
 /**
- * write acx value to firmware
+ * wl1251_cmd_configure - Write acx value to firmware
  *
  * @wl: wl struct
  * @id: acx id
@@ -174,11 +133,9 @@ int wl1251_cmd_vbm(struct wl1251 *wl, u8 identity,
 
 	wl1251_debug(DEBUG_CMD, "cmd vbm");
 
-	vbm = kzalloc(sizeof(*vbm), GFP_KERNEL);
-	if (!vbm) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	vbm = kzalloc_obj(*vbm);
+	if (!vbm)
+		return -ENOMEM;
 
 	/* Count and period will be filled by the target */
 	vbm->tim.bitmap_ctrl = bitmap_control;
@@ -212,11 +169,9 @@ int wl1251_cmd_data_path_rx(struct wl1251 *wl, u8 channel, bool enable)
 
 	wl1251_debug(DEBUG_CMD, "cmd data path");
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
-	if (!cmd) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	cmd = kzalloc_obj(*cmd);
+	if (!cmd)
+		return -ENOMEM;
 
 	cmd->channel = channel;
 
@@ -248,7 +203,7 @@ int wl1251_cmd_data_path_tx(struct wl1251 *wl, u8 channel, bool enable)
 
 	wl1251_debug(DEBUG_CMD, "cmd data path");
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+	cmd = kzalloc_obj(*cmd);
 	if (!cmd)
 		return -ENOMEM;
 
@@ -278,11 +233,9 @@ int wl1251_cmd_join(struct wl1251 *wl, u8 bss_type, u8 channel,
 	int ret, i;
 	u8 *bssid;
 
-	join = kzalloc(sizeof(*join), GFP_KERNEL);
-	if (!join) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	join = kzalloc_obj(*join);
+	if (!join)
+		return -ENOMEM;
 
 	wl1251_debug(DEBUG_CMD, "cmd join%s ch %d %d/%d",
 		     bss_type == BSS_TYPE_IBSS ? " ibss" : "",
@@ -323,11 +276,9 @@ int wl1251_cmd_ps_mode(struct wl1251 *wl, u8 ps_mode)
 
 	wl1251_debug(DEBUG_CMD, "cmd set ps mode");
 
-	ps_params = kzalloc(sizeof(*ps_params), GFP_KERNEL);
-	if (!ps_params) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	ps_params = kzalloc_obj(*ps_params);
+	if (!ps_params)
+		return -ENOMEM;
 
 	ps_params->ps_mode = ps_mode;
 	ps_params->send_null_data = 1;
@@ -347,46 +298,6 @@ out:
 	return ret;
 }
 
-int wl1251_cmd_read_memory(struct wl1251 *wl, u32 addr, void *answer,
-			   size_t len)
-{
-	struct cmd_read_write_memory *cmd;
-	int ret = 0;
-
-	wl1251_debug(DEBUG_CMD, "cmd read memory");
-
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
-	if (!cmd) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	WARN_ON(len > MAX_READ_SIZE);
-	len = min_t(size_t, len, MAX_READ_SIZE);
-
-	cmd->addr = addr;
-	cmd->size = len;
-
-	ret = wl1251_cmd_send(wl, CMD_READ_MEMORY, cmd, sizeof(*cmd));
-	if (ret < 0) {
-		wl1251_error("read memory command failed: %d", ret);
-		goto out;
-	}
-
-	/* the read command got in, we can now read the answer */
-	wl1251_mem_read(wl, wl->cmd_box_addr, cmd, sizeof(*cmd));
-
-	if (cmd->header.status != CMD_STATUS_SUCCESS)
-		wl1251_error("error in read command result: %d",
-			     cmd->header.status);
-
-	memcpy(answer, cmd->value, len);
-
-out:
-	kfree(cmd);
-	return ret;
-}
-
 int wl1251_cmd_template_set(struct wl1251 *wl, u16 cmd_id,
 			    void *buf, size_t buf_len)
 {
@@ -401,10 +312,8 @@ int wl1251_cmd_template_set(struct wl1251 *wl, u16 cmd_id,
 	cmd_len = ALIGN(sizeof(*cmd) + buf_len, 4);
 
 	cmd = kzalloc(cmd_len, GFP_KERNEL);
-	if (!cmd) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	if (!cmd)
+		return -ENOMEM;
 
 	cmd->size = cpu_to_le16(buf_len);
 
@@ -433,7 +342,7 @@ int wl1251_cmd_scan(struct wl1251 *wl, u8 *ssid, size_t ssid_len,
 
 	WARN_ON(n_channels > SCAN_MAX_NUM_OF_CHANNELS);
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+	cmd = kzalloc_obj(*cmd);
 	if (!cmd)
 		return -ENOMEM;
 
@@ -466,9 +375,12 @@ int wl1251_cmd_scan(struct wl1251 *wl, u8 *ssid, size_t ssid_len,
 		cmd->channels[i].channel = channels[i]->hw_value;
 	}
 
-	cmd->params.ssid_len = ssid_len;
-	if (ssid)
-		memcpy(cmd->params.ssid, ssid, ssid_len);
+	if (ssid) {
+		int len = clamp_val(ssid_len, 0, IEEE80211_MAX_SSID_LEN);
+
+		cmd->params.ssid_len = len;
+		memcpy(cmd->params.ssid, ssid, len);
+	}
 
 	ret = wl1251_cmd_send(wl, CMD_SCAN, cmd, sizeof(*cmd));
 	if (ret < 0) {
@@ -497,7 +409,7 @@ int wl1251_cmd_trigger_scan_to(struct wl1251 *wl, u32 timeout)
 
 	wl1251_debug(DEBUG_CMD, "cmd trigger scan to");
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+	cmd = kzalloc_obj(*cmd);
 	if (!cmd)
 		return -ENOMEM;
 

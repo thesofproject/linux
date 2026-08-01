@@ -1,23 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright(c) 1999 - 2004 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc., 59
- * Temple Place - Suite 330, Boston, MA  02111-1307, USA.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
  */
 
 #ifndef _NET_BOND_3AD_H
@@ -32,8 +15,6 @@
 #define PKT_TYPE_LACPDU         cpu_to_be16(ETH_P_SLOW)
 #define AD_TIMER_INTERVAL       100 /*msec*/
 
-#define MULTICAST_LACPDU_ADDR    {0x01, 0x80, 0xC2, 0x00, 0x00, 0x02}
-
 #define AD_LACP_SLOW 0
 #define AD_LACP_FAST 1
 
@@ -45,6 +26,7 @@ enum {
 	BOND_AD_STABLE = 0,
 	BOND_AD_BANDWIDTH = 1,
 	BOND_AD_COUNT = 2,
+	BOND_AD_PRIO = 3,
 };
 
 /* rx machine states(43.4.11 in the 802.3ad standard) */
@@ -73,6 +55,8 @@ typedef enum {
 	AD_MUX_DETACHED,	/* mux machine */
 	AD_MUX_WAITING,		/* mux machine */
 	AD_MUX_ATTACHED,	/* mux machine */
+	AD_MUX_COLLECTING,	/* mux machine */
+	AD_MUX_DISTRIBUTING,	/* mux machine */
 	AD_MUX_COLLECTING_DISTRIBUTING	/* mux machine */
 } mux_states_t;
 
@@ -180,6 +164,19 @@ struct port;
 #pragma pack(8)
 #endif
 
+struct bond_3ad_stats {
+	atomic64_t lacpdu_rx;
+	atomic64_t lacpdu_tx;
+	atomic64_t lacpdu_unknown_rx;
+	atomic64_t lacpdu_illegal_rx;
+
+	atomic64_t marker_rx;
+	atomic64_t marker_tx;
+	atomic64_t marker_resp_rx;
+	atomic64_t marker_resp_tx;
+	atomic64_t marker_unknown_rx;
+};
+
 /* aggregator structure(43.4.5 in the 802.3ad standard) */
 typedef struct aggregator {
 	struct mac_addr aggregator_mac_address;
@@ -235,7 +232,10 @@ typedef struct port {
 	mux_states_t sm_mux_state;	/* state machine mux state */
 	u16 sm_mux_timer_counter;	/* state machine mux timer counter */
 	tx_states_t sm_tx_state;	/* state machine tx state */
-	u16 sm_tx_timer_counter;	/* state machine tx timer counter(allways on - enter to transmit state 3 time per second) */
+	u16 sm_tx_timer_counter;	/* state machine tx timer counter
+					 * (always on - enter to transmit
+					 *  state 3 time per second)
+					 */
 	u16 sm_churn_actor_timer_counter;
 	u16 sm_churn_partner_timer_counter;
 	u32 churn_actor_count;
@@ -243,7 +243,7 @@ typedef struct port {
 	churn_state_t sm_churn_actor_state;
 	churn_state_t sm_churn_partner_state;
 	struct slave *slave;		/* pointer to the bond slave that this port belongs to */
-	struct aggregator *aggregator;	/* pointer to an aggregator that this port related to */
+	struct aggregator __rcu *aggregator;	/* pointer to an aggregator that this port related to */
 	struct port *next_port_in_aggregator;	/* Next port on the linked list of the parent aggregator */
 	u32 transaction_id;		/* continuous number for identification of Marker PDU's; */
 	struct lacpdu lacpdu;		/* the lacpdu that will be sent for this port */
@@ -265,14 +265,17 @@ struct ad_system {
 
 struct ad_bond_info {
 	struct ad_system system;	/* 802.3ad system structure */
-	u32 agg_select_timer;		/* Timer to select aggregator after all adapter's hand shakes */
+	struct bond_3ad_stats stats;
+	atomic_t agg_select_timer;		/* Timer to select aggregator after all adapter's hand shakes */
 	u16 aggregator_identifier;
 };
 
 struct ad_slave_info {
 	struct aggregator aggregator;	/* 802.3ad aggregator structure */
 	struct port port;		/* 802.3ad port structure */
+	struct bond_3ad_stats stats;
 	u16 id;
+	u16 port_priority;
 };
 
 static inline const char *bond_3ad_churn_desc(churn_state_t state)
@@ -283,7 +286,7 @@ static inline const char *bond_3ad_churn_desc(churn_state_t state)
 		"none",
 		"unknown"
 	};
-	int max_size = sizeof(churn_description) / sizeof(churn_description[0]);
+	int max_size = ARRAY_SIZE(churn_description);
 
 	if (state >= max_size)
 		state = max_size - 1;
@@ -292,7 +295,7 @@ static inline const char *bond_3ad_churn_desc(churn_state_t state)
 }
 
 /* ========== AD Exported functions to the main bonding code ========== */
-void bond_3ad_initialize(struct bonding *bond, u16 tick_resolution);
+void bond_3ad_initialize(struct bonding *bond);
 void bond_3ad_bind_slave(struct slave *slave);
 void bond_3ad_unbind_slave(struct slave *slave);
 void bond_3ad_state_machine_handler(struct work_struct *);
@@ -306,6 +309,9 @@ int bond_3ad_lacpdu_recv(const struct sk_buff *skb, struct bonding *bond,
 			 struct slave *slave);
 int bond_3ad_set_carrier(struct bonding *bond);
 void bond_3ad_update_lacp_rate(struct bonding *bond);
+void bond_3ad_update_lacp_active(struct bonding *bond);
 void bond_3ad_update_ad_actor_settings(struct bonding *bond);
+int bond_3ad_stats_fill(struct sk_buff *skb, struct bond_3ad_stats *stats);
+size_t bond_3ad_stats_size(void);
 #endif /* _NET_BOND_3AD_H */
 

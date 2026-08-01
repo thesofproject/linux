@@ -16,7 +16,7 @@
 struct socket;
 
 /**
- * qmi_header - wireformat header of QMI messages
+ * struct qmi_header - wireformat header of QMI messages
  * @type:	type of message
  * @txn_id:	transaction id
  * @msg_id:	message id
@@ -24,9 +24,9 @@ struct socket;
  */
 struct qmi_header {
 	u8 type;
-	u16 txn_id;
-	u16 msg_id;
-	u16 msg_len;
+	__le16 txn_id;
+	__le16 msg_id;
+	__le16 msg_len;
 } __packed;
 
 #define QMI_REQUEST	0
@@ -75,7 +75,7 @@ struct qmi_elem_info {
 	enum qmi_array_type array_type;
 	u8 tlv_type;
 	u32 offset;
-	struct qmi_elem_info *ei_array;
+	const struct qmi_elem_info *ei_array;
 };
 
 #define QMI_RESULT_SUCCESS_V01			0
@@ -88,11 +88,24 @@ struct qmi_elem_info {
 #define QMI_ERR_CLIENT_IDS_EXHAUSTED_V01	5
 #define QMI_ERR_INVALID_ID_V01			41
 #define QMI_ERR_ENCODING_V01			58
+#define QMI_ERR_DISABLED_V01                    69
 #define QMI_ERR_INCOMPATIBLE_STATE_V01		90
 #define QMI_ERR_NOT_SUPPORTED_V01		94
 
+/*
+ * Enumerate the IDs of the QMI services
+ */
+#define QMI_SERVICE_ID_TEST		0x0f	/*   15 */
+#define QMI_SERVICE_ID_SSCTL		0x2b	/*   43 */
+#define QMI_SERVICE_ID_IPA		0x31	/*   49 */
+#define QMI_SERVICE_ID_SERVREG_LOC	0x40	/*   64 */
+#define QMI_SERVICE_ID_SERVREG_NOTIF	0x42	/*   66 */
+#define QMI_SERVICE_ID_WLFW		0x45	/*   69 */
+#define QMI_SERVICE_ID_SLIMBUS		0x301	/*  769 */
+#define QMI_SERVICE_ID_USB_AUDIO_STREAM 0x41d	/* 1053 */
+
 /**
- * qmi_response_type_v01 - common response header (decoded)
+ * struct qmi_response_type_v01 - common response header (decoded)
  * @result:	result of the transaction
  * @error:	error value, when @result is QMI_RESULT_FAILURE_V01
  */
@@ -101,7 +114,7 @@ struct qmi_response_type_v01 {
 	u16 error;
 };
 
-extern struct qmi_elem_info qmi_response_type_v01_ei[];
+extern const struct qmi_elem_info qmi_response_type_v01_ei[];
 
 /**
  * struct qmi_service - context to track lookup-results
@@ -166,13 +179,13 @@ struct qmi_ops {
 struct qmi_txn {
 	struct qmi_handle *qmi;
 
-	int id;
+	u16 id;
 
 	struct mutex lock;
 	struct completion completion;
 	int result;
 
-	struct qmi_elem_info *ei;
+	const struct qmi_elem_info *ei;
 	void *dest;
 };
 
@@ -188,7 +201,7 @@ struct qmi_msg_handler {
 	unsigned int type;
 	unsigned int msg_id;
 
-	struct qmi_elem_info *ei;
+	const struct qmi_elem_info *ei;
 
 	size_t decoded_size;
 	void (*fn)(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
@@ -248,23 +261,23 @@ void qmi_handle_release(struct qmi_handle *qmi);
 
 ssize_t qmi_send_request(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
 			 struct qmi_txn *txn, int msg_id, size_t len,
-			 struct qmi_elem_info *ei, const void *c_struct);
+			 const struct qmi_elem_info *ei, const void *c_struct);
 ssize_t qmi_send_response(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
 			  struct qmi_txn *txn, int msg_id, size_t len,
-			  struct qmi_elem_info *ei, const void *c_struct);
+			  const struct qmi_elem_info *ei, const void *c_struct);
 ssize_t qmi_send_indication(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
-			    int msg_id, size_t len, struct qmi_elem_info *ei,
+			    int msg_id, size_t len, const struct qmi_elem_info *ei,
 			    const void *c_struct);
 
 void *qmi_encode_message(int type, unsigned int msg_id, size_t *len,
-			 unsigned int txn_id, struct qmi_elem_info *ei,
+			 unsigned int txn_id, const struct qmi_elem_info *ei,
 			 const void *c_struct);
 
 int qmi_decode_message(const void *buf, size_t len,
-		       struct qmi_elem_info *ei, void *c_struct);
+		       const struct qmi_elem_info *ei, void *c_struct);
 
 int qmi_txn_init(struct qmi_handle *qmi, struct qmi_txn *txn,
-		 struct qmi_elem_info *ei, void *c_struct);
+		 const struct qmi_elem_info *ei, void *c_struct);
 int qmi_txn_wait(struct qmi_txn *txn, unsigned long timeout);
 void qmi_txn_cancel(struct qmi_txn *txn);
 

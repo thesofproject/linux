@@ -1,33 +1,23 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2001 Mike Corrigan & Dave Engebretsen IBM Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/init.h>
+#include <linux/memblock.h>
 #include <linux/mm.h>
 #include <linux/proc_fs.h>
 #include <linux/kernel.h>
+#include <linux/of.h>
+#include <linux/string.h>
 
 #include <asm/machdep.h>
 #include <asm/vdso_datapage.h>
 #include <asm/rtas.h>
+#include <asm/systemcfg.h>
 #include <linux/uaccess.h>
-#include <asm/prom.h>
 
-#ifdef CONFIG_PPC64
+#ifdef CONFIG_PPC64_PROC_SYSTEMCFG
 
 static loff_t page_map_seek(struct file *file, loff_t off, int whence)
 {
@@ -38,7 +28,7 @@ static ssize_t page_map_read( struct file *file, char __user *buf, size_t nbytes
 			      loff_t *ppos)
 {
 	return simple_read_from_buffer(buf, nbytes, ppos,
-			PDE_DATA(file_inode(file)), PAGE_SIZE);
+			pde_data(file_inode(file)), PAGE_SIZE);
 }
 
 static int page_map_mmap( struct file *file, struct vm_area_struct *vma )
@@ -46,25 +36,46 @@ static int page_map_mmap( struct file *file, struct vm_area_struct *vma )
 	if ((vma->vm_end - vma->vm_start) > PAGE_SIZE)
 		return -EINVAL;
 
-	remap_pfn_range(vma, vma->vm_start,
-			__pa(PDE_DATA(file_inode(file))) >> PAGE_SHIFT,
-			PAGE_SIZE, vma->vm_page_prot);
-	return 0;
+	return remap_pfn_range(vma, vma->vm_start,
+			       __pa(pde_data(file_inode(file))) >> PAGE_SHIFT,
+			       PAGE_SIZE, vma->vm_page_prot);
 }
 
-static const struct file_operations page_map_fops = {
-	.llseek	= page_map_seek,
-	.read	= page_map_read,
-	.mmap	= page_map_mmap
+static const struct proc_ops page_map_proc_ops = {
+	.proc_lseek	= page_map_seek,
+	.proc_read	= page_map_read,
+	.proc_mmap	= page_map_mmap,
 };
 
+static union {
+	struct systemcfg	data;
+	u8			page[PAGE_SIZE];
+} systemcfg_data_store __page_aligned_data;
+struct systemcfg *systemcfg = &systemcfg_data_store.data;
 
 static int __init proc_ppc64_init(void)
 {
 	struct proc_dir_entry *pde;
 
+	strscpy(systemcfg->eye_catcher, "SYSTEMCFG:PPC64");
+	systemcfg->version.major = SYSTEMCFG_MAJOR;
+	systemcfg->version.minor = SYSTEMCFG_MINOR;
+	systemcfg->processor = mfspr(SPRN_PVR);
+	/*
+	 * Fake the old platform number for pSeries and add
+	 * in LPAR bit if necessary
+	 */
+	systemcfg->platform = 0x100;
+	if (firmware_has_feature(FW_FEATURE_LPAR))
+		systemcfg->platform |= 1;
+	systemcfg->physicalMemorySize = memblock_phys_mem_size();
+	systemcfg->dcache_size = ppc64_caches.l1d.size;
+	systemcfg->dcache_line_size = ppc64_caches.l1d.line_size;
+	systemcfg->icache_size = ppc64_caches.l1i.size;
+	systemcfg->icache_line_size = ppc64_caches.l1i.line_size;
+
 	pde = proc_create_data("powerpc/systemcfg", S_IFREG | 0444, NULL,
-			       &page_map_fops, vdso_data);
+			       &page_map_proc_ops, systemcfg);
 	if (!pde)
 		return 1;
 	proc_set_size(pde, PAGE_SIZE);
@@ -73,7 +84,7 @@ static int __init proc_ppc64_init(void)
 }
 __initcall(proc_ppc64_init);
 
-#endif /* CONFIG_PPC64 */
+#endif /* CONFIG_PPC64_PROC_SYSTEMCFG */
 
 /*
  * Create the ppc64 and ppc64/rtas directories early. This allows us to

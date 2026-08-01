@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * x_tables core - Backend for {ip,ip6,arp}_tables
  *
@@ -7,11 +8,6 @@
  * Based on existing ip_tables code which is
  *   Copyright (C) 1999 Paul `Rusty' Russell & Michael J. Neuling
  *   Copyright (C) 2000-2005 Netfilter Core Team <coreteam@netfilter.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/kernel.h>
@@ -28,6 +24,7 @@
 #include <linux/audit.h>
 #include <linux/user_namespace.h>
 #include <net/net_namespace.h>
+#include <net/netns/generic.h>
 
 #include <linux/netfilter/x_tables.h>
 #include <linux/netfilter_arp.h>
@@ -42,6 +39,27 @@ MODULE_DESCRIPTION("{ip,ip6,arp,eb}_tables backend module");
 #define XT_PCPU_BLOCK_SIZE 4096
 #define XT_MAX_TABLE_SIZE	(512 * 1024 * 1024)
 
+struct xt_template {
+	struct list_head list;
+
+	/* called when table is needed in the given netns */
+	int (*table_init)(struct net *net);
+
+	struct module *me;
+
+	/* A unique name... */
+	char name[XT_TABLE_MAXNAMELEN];
+};
+
+static struct list_head xt_templates[NFPROTO_NUMPROTO];
+
+struct xt_pernet {
+	struct list_head tables[NFPROTO_NUMPROTO];
+
+	/* stash area used during netns exit */
+	struct list_head dead_tables[NFPROTO_NUMPROTO];
+};
+
 struct compat_delta {
 	unsigned int offset; /* offset in kernel */
 	int delta; /* delta in 32bit user land */
@@ -51,7 +69,7 @@ struct xt_af {
 	struct mutex mutex;
 	struct list_head match;
 	struct list_head target;
-#ifdef CONFIG_COMPAT
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
 	struct mutex compat_mutex;
 	struct compat_delta *compat_tab;
 	unsigned int number; /* number of slots in compat_tab[] */
@@ -59,7 +77,8 @@ struct xt_af {
 #endif
 };
 
-static struct xt_af *xt;
+static unsigned int xt_pernet_id __read_mostly;
+static struct xt_af *xt __read_mostly;
 
 static const char *const xt_prefix[NFPROTO_NUMPROTO] = {
 	[NFPROTO_UNSPEC] = "x",
@@ -227,7 +246,7 @@ xt_request_find_match(uint8_t nfproto, const char *name, uint8_t revision)
 EXPORT_SYMBOL_GPL(xt_request_find_match);
 
 /* Find target, grabs ref.  Returns ERR_PTR() on error. */
-struct xt_target *xt_find_target(u8 af, const char *name, u8 revision)
+static struct xt_target *xt_find_target(u8 af, const char *name, u8 revision)
 {
 	struct xt_target *t;
 	int err = -ENOENT;
@@ -255,7 +274,6 @@ struct xt_target *xt_find_target(u8 af, const char *name, u8 revision)
 
 	return ERR_PTR(err);
 }
-EXPORT_SYMBOL(xt_find_target);
 
 struct xt_target *xt_request_find_target(u8 af, const char *name, u8 revision)
 {
@@ -335,6 +353,7 @@ static int match_revfn(u8 af, const char *name, u8 revision, int *bestp)
 	const struct xt_match *m;
 	int have_rev = 0;
 
+	mutex_lock(&xt[af].mutex);
 	list_for_each_entry(m, &xt[af].match, list) {
 		if (strcmp(m->name, name) == 0) {
 			if (m->revision > *bestp)
@@ -343,6 +362,7 @@ static int match_revfn(u8 af, const char *name, u8 revision, int *bestp)
 				have_rev = 1;
 		}
 	}
+	mutex_unlock(&xt[af].mutex);
 
 	if (af != NFPROTO_UNSPEC && !have_rev)
 		return match_revfn(NFPROTO_UNSPEC, name, revision, bestp);
@@ -355,6 +375,7 @@ static int target_revfn(u8 af, const char *name, u8 revision, int *bestp)
 	const struct xt_target *t;
 	int have_rev = 0;
 
+	mutex_lock(&xt[af].mutex);
 	list_for_each_entry(t, &xt[af].target, list) {
 		if (strcmp(t->name, name) == 0) {
 			if (t->revision > *bestp)
@@ -363,6 +384,7 @@ static int target_revfn(u8 af, const char *name, u8 revision, int *bestp)
 				have_rev = 1;
 		}
 	}
+	mutex_unlock(&xt[af].mutex);
 
 	if (af != NFPROTO_UNSPEC && !have_rev)
 		return target_revfn(NFPROTO_UNSPEC, name, revision, bestp);
@@ -376,12 +398,10 @@ int xt_find_revision(u8 af, const char *name, u8 revision, int target,
 {
 	int have_rev, best = -1;
 
-	mutex_lock(&xt[af].mutex);
 	if (target == 1)
 		have_rev = target_revfn(af, name, revision, &best);
 	else
 		have_rev = match_revfn(af, name, revision, &best);
-	mutex_unlock(&xt[af].mutex);
 
 	/* Nothing at all?  Return 0 to try loading module. */
 	if (best == -1) {
@@ -460,11 +480,9 @@ int xt_check_proc_name(const char *name, unsigned int size)
 }
 EXPORT_SYMBOL(xt_check_proc_name);
 
-int xt_check_match(struct xt_mtchk_param *par,
-		   unsigned int size, u_int8_t proto, bool inv_proto)
+static int xt_check_match_common(struct xt_mtchk_param *par,
+				 unsigned int size, u16 proto, bool inv_proto)
 {
-	int ret;
-
 	if (XT_ALIGN(par->match->matchsize) != size &&
 	    par->match->matchsize != -1) {
 		/*
@@ -482,6 +500,17 @@ int xt_check_match(struct xt_mtchk_param *par,
 		pr_info_ratelimited("%s_tables: %s match: only valid in %s table, not %s\n",
 				    xt_prefix[par->family], par->match->name,
 				    par->match->table, par->table);
+		return -EINVAL;
+	}
+
+	/* NFPROTO_UNSPEC implies NF_INET_* hooks which do not overlap with
+	 * NF_ARP_IN,OUT,FORWARD, allow explicit extensions with NFPROTO_ARP
+	 * support.
+	 */
+	if (par->family == NFPROTO_ARP &&
+	    par->match->family != NFPROTO_ARP) {
+		pr_info_ratelimited("%s_tables: %s match: not valid for this family\n",
+				    xt_prefix[par->family], par->match->name);
 		return -EINVAL;
 	}
 	if (par->match->hooks && (par->hook_mask & ~par->match->hooks) != 0) {
@@ -502,6 +531,14 @@ int xt_check_match(struct xt_mtchk_param *par,
 				    par->match->proto);
 		return -EINVAL;
 	}
+
+	return 0;
+}
+
+static int xt_checkentry_match(struct xt_mtchk_param *par)
+{
+	int ret;
+
 	if (par->match->checkentry != NULL) {
 		ret = par->match->checkentry(par);
 		if (ret < 0)
@@ -510,7 +547,33 @@ int xt_check_match(struct xt_mtchk_param *par,
 			/* Flag up potential errors. */
 			return -EIO;
 	}
+
 	return 0;
+}
+
+int xt_check_hooks_match(struct xt_mtchk_param *par)
+{
+	if (par->match->check_hooks != NULL)
+		return par->match->check_hooks(par);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(xt_check_hooks_match);
+
+int xt_check_match(struct xt_mtchk_param *par,
+		   unsigned int size, u16 proto, bool inv_proto)
+{
+	int ret;
+
+	ret = xt_check_match_common(par, size, proto, inv_proto);
+	if (ret < 0)
+		return ret;
+
+	ret = xt_check_hooks_match(par);
+	if (ret < 0)
+		return ret;
+
+	return xt_checkentry_match(par);
 }
 EXPORT_SYMBOL_GPL(xt_check_match);
 
@@ -644,7 +707,7 @@ static bool error_tg_ok(unsigned int usersize, unsigned int kernsize,
 	return usersize == kernsize && strnlen(msg, msglen) < msglen;
 }
 
-#ifdef CONFIG_COMPAT
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
 int xt_compat_add_offset(u_int8_t af, unsigned int offset, int delta)
 {
 	struct xt_af *xp = &xt[af];
@@ -736,7 +799,7 @@ void xt_compat_match_from_user(struct xt_entry_match *m, void **dstptr,
 {
 	const struct xt_match *match = m->u.kernel.match;
 	struct compat_xt_entry_match *cm = (struct compat_xt_entry_match *)m;
-	int pad, off = xt_compat_match_offset(match);
+	int off = xt_compat_match_offset(match);
 	u_int16_t msize = cm->u.user.match_size;
 	char name[sizeof(m->u.user.name)];
 
@@ -746,15 +809,12 @@ void xt_compat_match_from_user(struct xt_entry_match *m, void **dstptr,
 		match->compat_from_user(m->data, cm->data);
 	else
 		memcpy(m->data, cm->data, msize - sizeof(*cm));
-	pad = XT_ALIGN(match->matchsize) - match->matchsize;
-	if (pad > 0)
-		memset(m->data + match->matchsize, 0, pad);
 
 	msize += off;
 	m->u.user.match_size = msize;
-	strlcpy(name, match->name, sizeof(name));
+	strscpy(name, match->name, sizeof(name));
 	module_put(match->me);
-	strncpy(m->u.user.name, name, sizeof(m->u.user.name));
+	strscpy_pad(m->u.user.name, name, sizeof(m->u.user.name));
 
 	*size += off;
 	*dstptr += msize;
@@ -794,13 +854,17 @@ EXPORT_SYMBOL_GPL(xt_compat_match_to_user);
 
 /* non-compat version may have padding after verdict */
 struct compat_xt_standard_target {
-	struct compat_xt_entry_target t;
-	compat_uint_t verdict;
+	/* Must be last as it ends in a flexible-array member. */
+	TRAILING_OVERLAP(struct compat_xt_entry_target, t, data,
+		compat_uint_t verdict;
+	);
 };
 
 struct compat_xt_error_target {
-	struct compat_xt_entry_target t;
-	char errorname[XT_FUNCTION_MAXNAMELEN];
+	/* Must be last as it ends in a flexible-array member. */
+	TRAILING_OVERLAP(struct compat_xt_entry_target, t, data,
+		char errorname[XT_FUNCTION_MAXNAMELEN];
+	);
 };
 
 int xt_compat_check_entry_offsets(const void *base, const char *elems,
@@ -850,7 +914,7 @@ int xt_compat_check_entry_offsets(const void *base, const char *elems,
 				    __alignof__(struct compat_xt_entry_match));
 }
 EXPORT_SYMBOL(xt_compat_check_entry_offsets);
-#endif /* CONFIG_COMPAT */
+#endif /* CONFIG_NETFILTER_XTABLES_COMPAT */
 
 /**
  * xt_check_entry_offsets - validate arp/ip/ip6t_entry
@@ -868,7 +932,7 @@ EXPORT_SYMBOL(xt_compat_check_entry_offsets);
  * match structures are aligned, and that the last structure ends where
  * the target structure begins.
  *
- * Also see xt_compat_check_entry_offsets for CONFIG_COMPAT version.
+ * Also see xt_compat_check_entry_offsets for CONFIG_NETFILTER_XTABLES_COMPAT version.
  *
  * The arp/ip/ip6t_entry structure @base must have passed following tests:
  * - it must point to a valid memory location
@@ -944,14 +1008,14 @@ EXPORT_SYMBOL(xt_check_entry_offsets);
  *
  * @size: number of entries
  *
- * Return: NULL or kmalloc'd or vmalloc'd array
+ * Return: NULL or zeroed kmalloc'd or vmalloc'd array
  */
 unsigned int *xt_alloc_entry_offsets(unsigned int size)
 {
 	if (size > XT_MAX_TABLE_SIZE / sizeof(unsigned int))
 		return NULL;
 
-	return kvmalloc_array(size, sizeof(unsigned int), GFP_KERNEL | __GFP_ZERO);
+	return kvcalloc(size, sizeof(unsigned int), GFP_KERNEL);
 
 }
 EXPORT_SYMBOL(xt_alloc_entry_offsets);
@@ -983,11 +1047,9 @@ bool xt_find_jump_offset(const unsigned int *offsets,
 }
 EXPORT_SYMBOL(xt_find_jump_offset);
 
-int xt_check_target(struct xt_tgchk_param *par,
-		    unsigned int size, u_int8_t proto, bool inv_proto)
+static int xt_check_target_common(struct xt_tgchk_param *par,
+				  unsigned int size, u16 proto, bool inv_proto)
 {
-	int ret;
-
 	if (XT_ALIGN(par->target->targetsize) != size) {
 		pr_err_ratelimited("%s_tables: %s.%u target: invalid size %u (kernel) != (user) %u\n",
 				   xt_prefix[par->family], par->target->name,
@@ -1002,6 +1064,18 @@ int xt_check_target(struct xt_tgchk_param *par,
 				    par->target->table, par->table);
 		return -EINVAL;
 	}
+
+	/* NFPROTO_UNSPEC implies NF_INET_* hooks which do not overlap with
+	 * NF_ARP_IN,OUT,FORWARD, allow explicit extensions with NFPROTO_ARP
+	 * support.
+	 */
+	if (par->family == NFPROTO_ARP &&
+	    par->target->family != NFPROTO_ARP) {
+		pr_info_ratelimited("%s_tables: %s target: not valid for this family\n",
+				    xt_prefix[par->family], par->target->name);
+		return -EINVAL;
+	}
+
 	if (par->target->hooks && (par->hook_mask & ~par->target->hooks) != 0) {
 		char used[64], allow[64];
 
@@ -1020,6 +1094,23 @@ int xt_check_target(struct xt_tgchk_param *par,
 				    par->target->proto);
 		return -EINVAL;
 	}
+
+	return 0;
+}
+
+int xt_check_hooks_target(struct xt_tgchk_param *par)
+{
+	if (par->target->check_hooks != NULL)
+		return par->target->check_hooks(par);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(xt_check_hooks_target);
+
+static int xt_checkentry_target(struct xt_tgchk_param *par)
+{
+	int ret;
+
 	if (par->target->checkentry != NULL) {
 		ret = par->target->checkentry(par);
 		if (ret < 0)
@@ -1030,37 +1121,53 @@ int xt_check_target(struct xt_tgchk_param *par,
 	}
 	return 0;
 }
+
+int xt_check_target(struct xt_tgchk_param *par,
+		    unsigned int size, u16 proto, bool inv_proto)
+{
+	int ret;
+
+	ret = xt_check_target_common(par, size, proto, inv_proto);
+	if (ret < 0)
+		return ret;
+
+	ret = xt_check_hooks_target(par);
+	if (ret < 0)
+		return ret;
+
+	return xt_checkentry_target(par);
+}
 EXPORT_SYMBOL_GPL(xt_check_target);
 
 /**
- * xt_copy_counters_from_user - copy counters and metadata from userspace
+ * xt_copy_counters - copy counters and metadata from a sockptr_t
  *
- * @user: src pointer to userspace memory
+ * @arg: src sockptr
  * @len: alleged size of userspace memory
  * @info: where to store the xt_counters_info metadata
- * @compat: true if we setsockopt call is done by 32bit task on 64bit kernel
  *
  * Copies counter meta data from @user and stores it in @info.
  *
  * vmallocs memory to hold the counters, then copies the counter data
  * from @user to the new memory and returns a pointer to it.
  *
- * If @compat is true, @info gets converted automatically to the 64bit
- * representation.
+ * If called from a compat syscall, @info gets converted automatically to the
+ * 64bit representation.
  *
  * The metadata associated with the counters is stored in @info.
  *
  * Return: returns pointer that caller has to test via IS_ERR().
  * If IS_ERR is false, caller has to vfree the pointer.
  */
-void *xt_copy_counters_from_user(const void __user *user, unsigned int len,
-				 struct xt_counters_info *info, bool compat)
+void *xt_copy_counters(sockptr_t arg, unsigned int len,
+		       struct xt_counters_info *info)
 {
+	size_t offset;
 	void *mem;
 	u64 size;
 
-#ifdef CONFIG_COMPAT
-	if (compat) {
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
+	if (in_compat_syscall()) {
 		/* structures only differ in size due to alignment */
 		struct compat_xt_counters_info compat_tmp;
 
@@ -1068,12 +1175,12 @@ void *xt_copy_counters_from_user(const void __user *user, unsigned int len,
 			return ERR_PTR(-EINVAL);
 
 		len -= sizeof(compat_tmp);
-		if (copy_from_user(&compat_tmp, user, sizeof(compat_tmp)) != 0)
+		if (copy_from_sockptr(&compat_tmp, arg, sizeof(compat_tmp)) != 0)
 			return ERR_PTR(-EFAULT);
 
 		memcpy(info->name, compat_tmp.name, sizeof(info->name) - 1);
 		info->num_counters = compat_tmp.num_counters;
-		user += sizeof(compat_tmp);
+		offset = sizeof(compat_tmp);
 	} else
 #endif
 	{
@@ -1081,10 +1188,10 @@ void *xt_copy_counters_from_user(const void __user *user, unsigned int len,
 			return ERR_PTR(-EINVAL);
 
 		len -= sizeof(*info);
-		if (copy_from_user(info, user, sizeof(*info)) != 0)
+		if (copy_from_sockptr(info, arg, sizeof(*info)) != 0)
 			return ERR_PTR(-EFAULT);
 
-		user += sizeof(*info);
+		offset = sizeof(*info);
 	}
 	info->name[sizeof(info->name) - 1] = '\0';
 
@@ -1098,15 +1205,15 @@ void *xt_copy_counters_from_user(const void __user *user, unsigned int len,
 	if (!mem)
 		return ERR_PTR(-ENOMEM);
 
-	if (copy_from_user(mem, user, len) == 0)
+	if (copy_from_sockptr_offset(mem, arg, offset, len) == 0)
 		return mem;
 
 	vfree(mem);
 	return ERR_PTR(-EFAULT);
 }
-EXPORT_SYMBOL_GPL(xt_copy_counters_from_user);
+EXPORT_SYMBOL_GPL(xt_copy_counters);
 
-#ifdef CONFIG_COMPAT
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
 int xt_compat_target_offset(const struct xt_target *target)
 {
 	u_int16_t csize = target->compatsize ? : target->targetsize;
@@ -1119,7 +1226,7 @@ void xt_compat_target_from_user(struct xt_entry_target *t, void **dstptr,
 {
 	const struct xt_target *target = t->u.kernel.target;
 	struct compat_xt_entry_target *ct = (struct compat_xt_entry_target *)t;
-	int pad, off = xt_compat_target_offset(target);
+	int off = xt_compat_target_offset(target);
 	u_int16_t tsize = ct->u.user.target_size;
 	char name[sizeof(t->u.user.name)];
 
@@ -1128,16 +1235,14 @@ void xt_compat_target_from_user(struct xt_entry_target *t, void **dstptr,
 	if (target->compat_from_user)
 		target->compat_from_user(t->data, ct->data);
 	else
-		memcpy(t->data, ct->data, tsize - sizeof(*ct));
-	pad = XT_ALIGN(target->targetsize) - target->targetsize;
-	if (pad > 0)
-		memset(t->data + target->targetsize, 0, pad);
+		unsafe_memcpy(t->data, ct->data, tsize - sizeof(*ct),
+			      /* UAPI 0-sized destination */);
 
 	tsize += off;
 	t->u.user.target_size = tsize;
-	strlcpy(name, target->name, sizeof(name));
+	strscpy(name, target->name, sizeof(name));
 	module_put(target->me);
-	strncpy(t->u.user.name, name, sizeof(t->u.user.name));
+	strscpy_pad(t->u.user.name, name, sizeof(t->u.user.name));
 
 	*size += off;
 	*dstptr += tsize;
@@ -1178,12 +1283,7 @@ struct xt_table_info *xt_alloc_table_info(unsigned int size)
 	if (sz < sizeof(*info) || sz >= XT_MAX_TABLE_SIZE)
 		return NULL;
 
-	/* __GFP_NORETRY is not fully supported by kvmalloc but it should
-	 * work reasonably well if sz is too large and bail out rather
-	 * than shoot all processes down before realizing there is nothing
-	 * more to reclaim.
-	 */
-	info = kvmalloc(sz, GFP_KERNEL | __GFP_NORETRY);
+	info = kvmalloc(sz, GFP_KERNEL_ACCOUNT);
 	if (!info)
 		return NULL;
 
@@ -1207,50 +1307,65 @@ void xt_free_table_info(struct xt_table_info *info)
 }
 EXPORT_SYMBOL(xt_free_table_info);
 
+struct xt_table *xt_find_table(struct net *net, u8 af, const char *name)
+{
+	struct xt_pernet *xt_net = net_generic(net, xt_pernet_id);
+	struct xt_table *t;
+
+	mutex_lock(&xt[af].mutex);
+	list_for_each_entry(t, &xt_net->tables[af], list) {
+		if (strcmp(t->name, name) == 0) {
+			mutex_unlock(&xt[af].mutex);
+			return t;
+		}
+	}
+	mutex_unlock(&xt[af].mutex);
+	return NULL;
+}
+EXPORT_SYMBOL(xt_find_table);
+
 /* Find table by name, grabs mutex & ref.  Returns ERR_PTR on error. */
 struct xt_table *xt_find_table_lock(struct net *net, u_int8_t af,
 				    const char *name)
 {
-	struct xt_table *t, *found = NULL;
+	struct xt_pernet *xt_net = net_generic(net, xt_pernet_id);
+	struct module *owner = NULL;
+	struct xt_template *tmpl;
+	struct xt_table *t;
 
 	mutex_lock(&xt[af].mutex);
-	list_for_each_entry(t, &net->xt.tables[af], list)
+	list_for_each_entry(t, &xt_net->tables[af], list)
 		if (strcmp(t->name, name) == 0 && try_module_get(t->me))
 			return t;
 
-	if (net == &init_net)
-		goto out;
-
-	/* Table doesn't exist in this netns, re-try init */
-	list_for_each_entry(t, &init_net.xt.tables[af], list) {
+	/* Table doesn't exist in this netns, check larval list */
+	list_for_each_entry(tmpl, &xt_templates[af], list) {
 		int err;
 
-		if (strcmp(t->name, name))
+		if (strcmp(tmpl->name, name))
 			continue;
-		if (!try_module_get(t->me))
+		if (!try_module_get(tmpl->me))
 			goto out;
+
+		owner = tmpl->me;
+
 		mutex_unlock(&xt[af].mutex);
-		err = t->table_init(net);
+		err = tmpl->table_init(net);
 		if (err < 0) {
-			module_put(t->me);
+			module_put(owner);
 			return ERR_PTR(err);
 		}
-
-		found = t;
 
 		mutex_lock(&xt[af].mutex);
 		break;
 	}
 
-	if (!found)
-		goto out;
-
 	/* and once again: */
-	list_for_each_entry(t, &net->xt.tables[af], list)
-		if (strcmp(t->name, name) == 0)
+	list_for_each_entry(t, &xt_net->tables[af], list)
+		if (strcmp(t->name, name) == 0 && owner == t->me)
 			return t;
 
-	module_put(found->me);
+	module_put(owner);
  out:
 	mutex_unlock(&xt[af].mutex);
 	return ERR_PTR(-ENOENT);
@@ -1281,7 +1396,7 @@ void xt_table_unlock(struct xt_table *table)
 }
 EXPORT_SYMBOL_GPL(xt_table_unlock);
 
-#ifdef CONFIG_COMPAT
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
 void xt_compat_lock(u_int8_t af)
 {
 	mutex_lock(&xt[af].compat_mutex);
@@ -1295,11 +1410,12 @@ void xt_compat_unlock(u_int8_t af)
 EXPORT_SYMBOL_GPL(xt_compat_unlock);
 #endif
 
-DEFINE_PER_CPU(seqcount_t, xt_recseq);
-EXPORT_PER_CPU_SYMBOL_GPL(xt_recseq);
-
 struct static_key xt_tee_enabled __read_mostly;
 EXPORT_SYMBOL_GPL(xt_tee_enabled);
+
+#ifdef CONFIG_NETFILTER_XTABLES_LEGACY
+DEFINE_PER_CPU(seqcount_t, xt_recseq);
+EXPORT_PER_CPU_SYMBOL_GPL(xt_recseq);
 
 static int xt_jumpstack_alloc(struct xt_table_info *i)
 {
@@ -1359,11 +1475,9 @@ struct xt_counters *xt_counters_alloc(unsigned int counters)
 }
 EXPORT_SYMBOL(xt_counters_alloc);
 
-struct xt_table_info *
-xt_replace_table(struct xt_table *table,
-	      unsigned int num_counters,
-	      struct xt_table_info *newinfo,
-	      int *error)
+static struct xt_table_info *
+do_replace_table(struct xt_table *table, unsigned int num_counters,
+		 struct xt_table_info *newinfo, int *error)
 {
 	struct xt_table_info *private;
 	unsigned int cpu;
@@ -1397,7 +1511,7 @@ xt_replace_table(struct xt_table *table,
 	table->private = newinfo;
 
 	/* make sure all cpus see new ->private value */
-	smp_wmb();
+	smp_mb();
 
 	/*
 	 * Even though table entries have now been swapped, other CPU's
@@ -1418,14 +1532,21 @@ xt_replace_table(struct xt_table *table,
 		}
 	}
 
-#ifdef CONFIG_AUDIT
-	if (audit_enabled) {
-		audit_log(current->audit_context, GFP_KERNEL,
-			  AUDIT_NETFILTER_CFG,
-			  "table=%s family=%u entries=%u",
-			  table->name, table->af, private->number);
-	}
-#endif
+	return private;
+}
+
+struct xt_table_info *
+xt_replace_table(struct xt_table *table, unsigned int num_counters,
+		 struct xt_table_info *newinfo,
+		 int *error)
+{
+	struct xt_table_info *private;
+
+	private = do_replace_table(table, num_counters, newinfo, error);
+	if (private)
+		audit_log_nfcfg(table->name, table->af, private->number,
+				AUDIT_XT_OP_REPLACE,
+				GFP_KERNEL);
 
 	return private;
 }
@@ -1433,23 +1554,36 @@ EXPORT_SYMBOL_GPL(xt_replace_table);
 
 struct xt_table *xt_register_table(struct net *net,
 				   const struct xt_table *input_table,
+				   const struct nf_hook_ops *template_ops,
 				   struct xt_table_info *bootstrap,
 				   struct xt_table_info *newinfo)
 {
-	int ret;
+	struct xt_pernet *xt_net = net_generic(net, xt_pernet_id);
+	struct xt_table *t, *table = NULL;
+	struct nf_hook_ops *ops = NULL;
 	struct xt_table_info *private;
-	struct xt_table *t, *table;
+	unsigned int num_ops;
+	int ret = -EINVAL;
+
+	num_ops = hweight32(input_table->valid_hooks);
+	if (num_ops == 0)
+		goto out;
+
+	ret = -ENOMEM;
+	if (template_ops) {
+		ops = kmemdup_array(template_ops, num_ops, sizeof(*ops), GFP_KERNEL);
+		if (!ops)
+			goto out;
+	}
 
 	/* Don't add one object to multiple lists. */
 	table = kmemdup(input_table, sizeof(struct xt_table), GFP_KERNEL);
-	if (!table) {
-		ret = -ENOMEM;
+	if (!table)
 		goto out;
-	}
 
 	mutex_lock(&xt[table->af].mutex);
 	/* Don't autoload: we'd eat our tail... */
-	list_for_each_entry(t, &net->xt.tables[table->af], list) {
+	list_for_each_entry(t, &xt_net->tables[table->af], list) {
 		if (strcmp(t->name, table->name) == 0) {
 			ret = -EEXIST;
 			goto unlock;
@@ -1459,7 +1593,7 @@ struct xt_table *xt_register_table(struct net *net,
 	/* Simplifies replace_table code. */
 	table->private = bootstrap;
 
-	if (!xt_replace_table(table, 0, newinfo, &ret))
+	if (!do_replace_table(table, 0, newinfo, &ret))
 		goto unlock;
 
 	private = table->private;
@@ -1468,60 +1602,151 @@ struct xt_table *xt_register_table(struct net *net,
 	/* save number of initial entries */
 	private->initial_entries = private->number;
 
-	list_add(&table->list, &net->xt.tables[table->af]);
+	if (ops) {
+		int i;
+
+		for (i = 0; i < num_ops; i++)
+			ops[i].priv = table;
+
+		ret = nf_register_net_hooks(net, ops, num_ops);
+		if (ret != 0) {
+			mutex_unlock(&xt[table->af].mutex);
+			/* nf_register_net_hooks() might have published a
+			 * base chain before internal error unwind.
+			 */
+			synchronize_rcu();
+			goto out;
+		}
+
+		table->ops = ops;
+	}
+
+	audit_log_nfcfg(table->name, table->af, private->number,
+			AUDIT_XT_OP_REGISTER, GFP_KERNEL);
+
+	list_add(&table->list, &xt_net->tables[table->af]);
 	mutex_unlock(&xt[table->af].mutex);
 	return table;
 
 unlock:
 	mutex_unlock(&xt[table->af].mutex);
-	kfree(table);
 out:
+	kfree(table);
+	kfree(ops);
 	return ERR_PTR(ret);
 }
 EXPORT_SYMBOL_GPL(xt_register_table);
 
-void *xt_unregister_table(struct xt_table *table)
+/**
+ * xt_unregister_table_pre_exit - pre-shutdown unregister of a table
+ * @net: network namespace
+ * @af: address family (e.g., NFPROTO_IPV4, NFPROTO_IPV6)
+ * @name: name of the table to unregister
+ *
+ * Unregisters the specified netfilter table from the given network namespace
+ * and also unregisters the hooks from netfilter core: no new packets will be
+ * processed.
+ *
+ * This must be called prior to xt_unregister_table_exit() from the pernet
+ * .pre_exit callback.  After this call, the table is no longer visible to
+ * the get/setsockopt path.  In case of rmmod, module exit path must have
+ * called xt_unregister_template() prior to unregistering pernet ops to
+ * prevent re-instantiation of the table.
+ *
+ * See also: xt_unregister_table_exit()
+ */
+void xt_unregister_table_pre_exit(struct net *net, u8 af, const char *name)
 {
-	struct xt_table_info *private;
-
-	mutex_lock(&xt[table->af].mutex);
-	private = table->private;
-	list_del(&table->list);
-	mutex_unlock(&xt[table->af].mutex);
-	kfree(table);
-
-	return private;
-}
-EXPORT_SYMBOL_GPL(xt_unregister_table);
-
-#ifdef CONFIG_PROC_FS
-struct xt_names_priv {
-	struct seq_net_private p;
-	u_int8_t af;
-};
-static void *xt_table_seq_start(struct seq_file *seq, loff_t *pos)
-{
-	struct xt_names_priv *priv = seq->private;
-	struct net *net = seq_file_net(seq);
-	u_int8_t af = priv->af;
+	struct xt_pernet *xt_net = net_generic(net, xt_pernet_id);
+	struct xt_table *t;
 
 	mutex_lock(&xt[af].mutex);
-	return seq_list_start(&net->xt.tables[af], *pos);
+	list_for_each_entry(t, &xt_net->tables[af], list) {
+		if (strcmp(t->name, name) == 0) {
+			list_move(&t->list, &xt_net->dead_tables[af]);
+			mutex_unlock(&xt[af].mutex);
+
+			if (t->ops) /* nat table registers with nat core, t->ops is NULL. */
+				nf_unregister_net_hooks(net, t->ops, hweight32(t->valid_hooks));
+			return;
+		}
+	}
+	mutex_unlock(&xt[af].mutex);
+}
+EXPORT_SYMBOL(xt_unregister_table_pre_exit);
+
+/**
+ * xt_unregister_table_exit - remove a table during namespace teardown
+ * @net: the network namespace from which to unregister the table
+ * @af: address family (e.g., NFPROTO_IPV4, NFPROTO_IPV6)
+ * @name: name of the table to unregister
+ *
+ * Completes the unregister process for a table. This must be called from
+ * the pernet ops .exit callback. This is the second stage after
+ * xt_unregister_table_pre_exit().
+ *
+ * pair with xt_unregister_table_pre_exit() during namespace shutdown.
+ *
+ * Return: the unregistered table or NULL if the table was never
+ *         instantiated. The caller needs to kfree() the table after it
+ *         has removed the family specific matches/targets.
+ */
+struct xt_table *xt_unregister_table_exit(struct net *net, u8 af, const char *name)
+{
+	struct xt_pernet *xt_net = net_generic(net, xt_pernet_id);
+	struct xt_table *table;
+
+	mutex_lock(&xt[af].mutex);
+	list_for_each_entry(table, &xt_net->dead_tables[af], list) {
+		struct nf_hook_ops *ops = NULL;
+
+		if (strcmp(table->name, name) != 0)
+			continue;
+
+		list_del(&table->list);
+
+		audit_log_nfcfg(table->name, table->af, table->private->number,
+				AUDIT_XT_OP_UNREGISTER, GFP_KERNEL);
+		swap(table->ops, ops);
+		mutex_unlock(&xt[af].mutex);
+
+		kfree(ops);
+		return table;
+	}
+	mutex_unlock(&xt[af].mutex);
+
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(xt_unregister_table_exit);
+#endif
+
+#ifdef CONFIG_PROC_FS
+static void *xt_table_seq_start(struct seq_file *seq, loff_t *pos)
+{
+	u8 af = (unsigned long)pde_data(file_inode(seq->file));
+	struct net *net = seq_file_net(seq);
+	struct xt_pernet *xt_net;
+
+	xt_net = net_generic(net, xt_pernet_id);
+
+	mutex_lock(&xt[af].mutex);
+	return seq_list_start(&xt_net->tables[af], *pos);
 }
 
 static void *xt_table_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 {
-	struct xt_names_priv *priv = seq->private;
+	u8 af = (unsigned long)pde_data(file_inode(seq->file));
 	struct net *net = seq_file_net(seq);
-	u_int8_t af = priv->af;
+	struct xt_pernet *xt_net;
 
-	return seq_list_next(v, &net->xt.tables[af], pos);
+	xt_net = net_generic(net, xt_pernet_id);
+
+	return seq_list_next(v, &xt_net->tables[af], pos);
 }
 
 static void xt_table_seq_stop(struct seq_file *seq, void *v)
 {
-	struct xt_names_priv *priv = seq->private;
-	u_int8_t af = priv->af;
+	u_int8_t af = (unsigned long)pde_data(file_inode(seq->file));
 
 	mutex_unlock(&xt[af].mutex);
 }
@@ -1542,34 +1767,13 @@ static const struct seq_operations xt_table_seq_ops = {
 	.show	= xt_table_seq_show,
 };
 
-static int xt_table_open(struct inode *inode, struct file *file)
-{
-	int ret;
-	struct xt_names_priv *priv;
-
-	ret = seq_open_net(inode, file, &xt_table_seq_ops,
-			   sizeof(struct xt_names_priv));
-	if (!ret) {
-		priv = ((struct seq_file *)file->private_data)->private;
-		priv->af = (unsigned long)PDE_DATA(inode);
-	}
-	return ret;
-}
-
-static const struct file_operations xt_table_ops = {
-	.open	 = xt_table_open,
-	.read	 = seq_read,
-	.llseek	 = seq_lseek,
-	.release = seq_release_net,
-};
-
 /*
  * Traverse state for ip{,6}_{tables,matches} for helping crossing
  * the multi-AF mutexes.
  */
 struct nf_mttg_trav {
 	struct list_head *head, *curr;
-	uint8_t class, nfproto;
+	uint8_t class;
 };
 
 enum {
@@ -1586,7 +1790,11 @@ static void *xt_mttg_seq_next(struct seq_file *seq, void *v, loff_t *ppos,
 		[MTTG_TRAV_NFP_UNSPEC] = MTTG_TRAV_NFP_SPEC,
 		[MTTG_TRAV_NFP_SPEC]   = MTTG_TRAV_DONE,
 	};
+	uint8_t nfproto = (unsigned long)pde_data(file_inode(seq->file));
 	struct nf_mttg_trav *trav = seq->private;
+
+	if (ppos != NULL)
+		++(*ppos);
 
 	switch (trav->class) {
 	case MTTG_TRAV_INIT:
@@ -1600,22 +1808,19 @@ static void *xt_mttg_seq_next(struct seq_file *seq, void *v, loff_t *ppos,
 		if (trav->curr != trav->head)
 			break;
 		mutex_unlock(&xt[NFPROTO_UNSPEC].mutex);
-		mutex_lock(&xt[trav->nfproto].mutex);
+		mutex_lock(&xt[nfproto].mutex);
 		trav->head = trav->curr = is_target ?
-			&xt[trav->nfproto].target : &xt[trav->nfproto].match;
+			&xt[nfproto].target : &xt[nfproto].match;
 		trav->class = next_class[trav->class];
 		break;
 	case MTTG_TRAV_NFP_SPEC:
 		trav->curr = trav->curr->next;
 		if (trav->curr != trav->head)
 			break;
-		/* fall through */
+		fallthrough;
 	default:
 		return NULL;
 	}
-
-	if (ppos != NULL)
-		++*ppos;
 	return trav;
 }
 
@@ -1634,6 +1839,7 @@ static void *xt_mttg_seq_start(struct seq_file *seq, loff_t *pos,
 
 static void xt_mttg_seq_stop(struct seq_file *seq, void *v)
 {
+	uint8_t nfproto = (unsigned long)pde_data(file_inode(seq->file));
 	struct nf_mttg_trav *trav = seq->private;
 
 	switch (trav->class) {
@@ -1641,7 +1847,7 @@ static void xt_mttg_seq_stop(struct seq_file *seq, void *v)
 		mutex_unlock(&xt[NFPROTO_UNSPEC].mutex);
 		break;
 	case MTTG_TRAV_NFP_SPEC:
-		mutex_unlock(&xt[trav->nfproto].mutex);
+		mutex_unlock(&xt[nfproto].mutex);
 		break;
 	}
 }
@@ -1680,24 +1886,6 @@ static const struct seq_operations xt_match_seq_ops = {
 	.show	= xt_match_seq_show,
 };
 
-static int xt_match_open(struct inode *inode, struct file *file)
-{
-	struct nf_mttg_trav *trav;
-	trav = __seq_open_private(file, &xt_match_seq_ops, sizeof(*trav));
-	if (!trav)
-		return -ENOMEM;
-
-	trav->nfproto = (unsigned long)PDE_DATA(inode);
-	return 0;
-}
-
-static const struct file_operations xt_match_ops = {
-	.open	 = xt_match_open,
-	.read	 = seq_read,
-	.llseek	 = seq_lseek,
-	.release = seq_release_private,
-};
-
 static void *xt_target_seq_start(struct seq_file *seq, loff_t *pos)
 {
 	return xt_mttg_seq_start(seq, pos, true);
@@ -1732,24 +1920,6 @@ static const struct seq_operations xt_target_seq_ops = {
 	.show	= xt_target_seq_show,
 };
 
-static int xt_target_open(struct inode *inode, struct file *file)
-{
-	struct nf_mttg_trav *trav;
-	trav = __seq_open_private(file, &xt_target_seq_ops, sizeof(*trav));
-	if (!trav)
-		return -ENOMEM;
-
-	trav->nfproto = (unsigned long)PDE_DATA(inode);
-	return 0;
-}
-
-static const struct file_operations xt_target_ops = {
-	.open	 = xt_target_open,
-	.read	 = seq_read,
-	.llseek	 = seq_lseek,
-	.release = seq_release_private,
-};
-
 #define FORMAT_TABLES	"_tables_names"
 #define	FORMAT_MATCHES	"_tables_matches"
 #define FORMAT_TARGETS 	"_tables_targets"
@@ -1775,7 +1945,7 @@ xt_hook_ops_alloc(const struct xt_table *table, nf_hookfn *fn)
 	if (!num_hooks)
 		return ERR_PTR(-EINVAL);
 
-	ops = kcalloc(num_hooks, sizeof(*ops), GFP_KERNEL);
+	ops = kzalloc_objs(*ops, num_hooks);
 	if (ops == NULL)
 		return ERR_PTR(-ENOMEM);
 
@@ -1794,6 +1964,58 @@ xt_hook_ops_alloc(const struct xt_table *table, nf_hookfn *fn)
 }
 EXPORT_SYMBOL_GPL(xt_hook_ops_alloc);
 
+int xt_register_template(const struct xt_table *table,
+			 int (*table_init)(struct net *net))
+{
+	int ret = -EBUSY, af = table->af;
+	struct xt_template *t;
+
+	mutex_lock(&xt[af].mutex);
+
+	list_for_each_entry(t, &xt_templates[af], list) {
+		if (WARN_ON_ONCE(strcmp(table->name, t->name) == 0))
+			goto out_unlock;
+	}
+
+	ret = -ENOMEM;
+	t = kzalloc_obj(*t);
+	if (!t)
+		goto out_unlock;
+
+	BUILD_BUG_ON(sizeof(t->name) != sizeof(table->name));
+
+	strscpy(t->name, table->name, sizeof(t->name));
+	t->table_init = table_init;
+	t->me = table->me;
+	list_add(&t->list, &xt_templates[af]);
+	ret = 0;
+out_unlock:
+	mutex_unlock(&xt[af].mutex);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(xt_register_template);
+
+void xt_unregister_template(const struct xt_table *table)
+{
+	struct xt_template *t;
+	int af = table->af;
+
+	mutex_lock(&xt[af].mutex);
+	list_for_each_entry(t, &xt_templates[af], list) {
+		if (strcmp(table->name, t->name))
+			continue;
+
+		list_del(&t->list);
+		mutex_unlock(&xt[af].mutex);
+		kfree(t);
+		return;
+	}
+
+	mutex_unlock(&xt[af].mutex);
+	WARN_ON_ONCE(1);
+}
+EXPORT_SYMBOL_GPL(xt_unregister_template);
+
 int xt_proto_init(struct net *net, u_int8_t af)
 {
 #ifdef CONFIG_PROC_FS
@@ -1811,28 +2033,31 @@ int xt_proto_init(struct net *net, u_int8_t af)
 	root_uid = make_kuid(net->user_ns, 0);
 	root_gid = make_kgid(net->user_ns, 0);
 
-	strlcpy(buf, xt_prefix[af], sizeof(buf));
+	strscpy(buf, xt_prefix[af], sizeof(buf));
 	strlcat(buf, FORMAT_TABLES, sizeof(buf));
-	proc = proc_create_data(buf, 0440, net->proc_net, &xt_table_ops,
-				(void *)(unsigned long)af);
+	proc = proc_create_net_data(buf, 0440, net->proc_net, &xt_table_seq_ops,
+			sizeof(struct seq_net_private),
+			(void *)(unsigned long)af);
 	if (!proc)
 		goto out;
 	if (uid_valid(root_uid) && gid_valid(root_gid))
 		proc_set_user(proc, root_uid, root_gid);
 
-	strlcpy(buf, xt_prefix[af], sizeof(buf));
+	strscpy(buf, xt_prefix[af], sizeof(buf));
 	strlcat(buf, FORMAT_MATCHES, sizeof(buf));
-	proc = proc_create_data(buf, 0440, net->proc_net, &xt_match_ops,
-				(void *)(unsigned long)af);
+	proc = proc_create_seq_private(buf, 0440, net->proc_net,
+			&xt_match_seq_ops, sizeof(struct nf_mttg_trav),
+			(void *)(unsigned long)af);
 	if (!proc)
 		goto out_remove_tables;
 	if (uid_valid(root_uid) && gid_valid(root_gid))
 		proc_set_user(proc, root_uid, root_gid);
 
-	strlcpy(buf, xt_prefix[af], sizeof(buf));
+	strscpy(buf, xt_prefix[af], sizeof(buf));
 	strlcat(buf, FORMAT_TARGETS, sizeof(buf));
-	proc = proc_create_data(buf, 0440, net->proc_net, &xt_target_ops,
-				(void *)(unsigned long)af);
+	proc = proc_create_seq_private(buf, 0440, net->proc_net,
+			 &xt_target_seq_ops, sizeof(struct nf_mttg_trav),
+			 (void *)(unsigned long)af);
 	if (!proc)
 		goto out_remove_matches;
 	if (uid_valid(root_uid) && gid_valid(root_gid))
@@ -1843,12 +2068,12 @@ int xt_proto_init(struct net *net, u_int8_t af)
 
 #ifdef CONFIG_PROC_FS
 out_remove_matches:
-	strlcpy(buf, xt_prefix[af], sizeof(buf));
+	strscpy(buf, xt_prefix[af], sizeof(buf));
 	strlcat(buf, FORMAT_MATCHES, sizeof(buf));
 	remove_proc_entry(buf, net->proc_net);
 
 out_remove_tables:
-	strlcpy(buf, xt_prefix[af], sizeof(buf));
+	strscpy(buf, xt_prefix[af], sizeof(buf));
 	strlcat(buf, FORMAT_TABLES, sizeof(buf));
 	remove_proc_entry(buf, net->proc_net);
 out:
@@ -1862,21 +2087,22 @@ void xt_proto_fini(struct net *net, u_int8_t af)
 #ifdef CONFIG_PROC_FS
 	char buf[XT_FUNCTION_MAXNAMELEN];
 
-	strlcpy(buf, xt_prefix[af], sizeof(buf));
+	strscpy(buf, xt_prefix[af], sizeof(buf));
 	strlcat(buf, FORMAT_TABLES, sizeof(buf));
 	remove_proc_entry(buf, net->proc_net);
 
-	strlcpy(buf, xt_prefix[af], sizeof(buf));
+	strscpy(buf, xt_prefix[af], sizeof(buf));
 	strlcat(buf, FORMAT_TARGETS, sizeof(buf));
 	remove_proc_entry(buf, net->proc_net);
 
-	strlcpy(buf, xt_prefix[af], sizeof(buf));
+	strscpy(buf, xt_prefix[af], sizeof(buf));
 	strlcat(buf, FORMAT_MATCHES, sizeof(buf));
 	remove_proc_entry(buf, net->proc_net);
 #endif /*CONFIG_PROC_FS*/
 }
 EXPORT_SYMBOL_GPL(xt_proto_fini);
 
+#ifdef CONFIG_NETFILTER_XTABLES_LEGACY
 /**
  * xt_percpu_counter_alloc - allocate x_tables rule counter
  *
@@ -1931,27 +2157,36 @@ void xt_percpu_counter_free(struct xt_counters *counters)
 		free_percpu((void __percpu *)pcnt);
 }
 EXPORT_SYMBOL_GPL(xt_percpu_counter_free);
+#endif
 
 static int __net_init xt_net_init(struct net *net)
 {
+	struct xt_pernet *xt_net = net_generic(net, xt_pernet_id);
 	int i;
 
-	for (i = 0; i < NFPROTO_NUMPROTO; i++)
-		INIT_LIST_HEAD(&net->xt.tables[i]);
+	for (i = 0; i < NFPROTO_NUMPROTO; i++) {
+		INIT_LIST_HEAD(&xt_net->tables[i]);
+		INIT_LIST_HEAD(&xt_net->dead_tables[i]);
+	}
 	return 0;
 }
 
 static void __net_exit xt_net_exit(struct net *net)
 {
+	struct xt_pernet *xt_net = net_generic(net, xt_pernet_id);
 	int i;
 
-	for (i = 0; i < NFPROTO_NUMPROTO; i++)
-		WARN_ON_ONCE(!list_empty(&net->xt.tables[i]));
+	for (i = 0; i < NFPROTO_NUMPROTO; i++) {
+		WARN_ON_ONCE(!list_empty(&xt_net->tables[i]));
+		WARN_ON_ONCE(!list_empty(&xt_net->dead_tables[i]));
+	}
 }
 
 static struct pernet_operations xt_net_ops = {
 	.init = xt_net_init,
 	.exit = xt_net_exit,
+	.id   = &xt_pernet_id,
+	.size = sizeof(struct xt_pernet),
 };
 
 static int __init xt_init(void)
@@ -1959,22 +2194,25 @@ static int __init xt_init(void)
 	unsigned int i;
 	int rv;
 
-	for_each_possible_cpu(i) {
-		seqcount_init(&per_cpu(xt_recseq, i));
+	if (IS_ENABLED(CONFIG_NETFILTER_XTABLES_LEGACY)) {
+		for_each_possible_cpu(i) {
+			seqcount_init(&per_cpu(xt_recseq, i));
+		}
 	}
 
-	xt = kmalloc(sizeof(struct xt_af) * NFPROTO_NUMPROTO, GFP_KERNEL);
+	xt = kzalloc_objs(struct xt_af, NFPROTO_NUMPROTO);
 	if (!xt)
 		return -ENOMEM;
 
 	for (i = 0; i < NFPROTO_NUMPROTO; i++) {
 		mutex_init(&xt[i].mutex);
-#ifdef CONFIG_COMPAT
+#ifdef CONFIG_NETFILTER_XTABLES_COMPAT
 		mutex_init(&xt[i].compat_mutex);
 		xt[i].compat_tab = NULL;
 #endif
 		INIT_LIST_HEAD(&xt[i].target);
 		INIT_LIST_HEAD(&xt[i].match);
+		INIT_LIST_HEAD(&xt_templates[i]);
 	}
 	rv = register_pernet_subsys(&xt_net_ops);
 	if (rv < 0)
@@ -1990,4 +2228,3 @@ static void __exit xt_fini(void)
 
 module_init(xt_init);
 module_exit(xt_fini);
-

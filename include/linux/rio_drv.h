@@ -1,13 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * RapidIO driver services
  *
  * Copyright 2005 MontaVista Software, Inc.
  * Matt Porter <mporter@kernel.crashing.org>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #ifndef LINUX_RIO_DRV_H
@@ -395,13 +391,8 @@ struct rio_dev *rio_dev_get(struct rio_dev *);
 void rio_dev_put(struct rio_dev *);
 
 #ifdef CONFIG_RAPIDIO_DMA_ENGINE
-extern struct dma_chan *rio_request_dma(struct rio_dev *rdev);
 extern struct dma_chan *rio_request_mport_dma(struct rio_mport *mport);
 extern void rio_release_dma(struct dma_chan *dchan);
-extern struct dma_async_tx_descriptor *rio_dma_prep_slave_sg(
-		struct rio_dev *rdev, struct dma_chan *dchan,
-		struct rio_dma_data *data,
-		enum dma_transfer_direction direction, unsigned long flags);
 extern struct dma_async_tx_descriptor *rio_dma_prep_xfer(
 		struct dma_chan *dchan,	u16 destid,
 		struct rio_dma_data *data,
@@ -448,9 +439,6 @@ static inline void rio_set_drvdata(struct rio_dev *rdev, void *data)
 /* Misc driver helpers */
 extern u16 rio_local_get_device_id(struct rio_mport *port);
 extern void rio_local_set_device_id(struct rio_mport *port, u16 did);
-extern struct rio_dev *rio_get_device(u16 vid, u16 did, struct rio_dev *from);
-extern struct rio_dev *rio_get_asm(u16 vid, u16 did, u16 asm_vid, u16 asm_did,
-				   struct rio_dev *from);
 extern int rio_init_mports(void);
 
 #endif				/* LINUX_RIO_DRV_H */

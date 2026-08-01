@@ -1,8 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* The industrial I/O callback buffer
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -16,6 +13,7 @@
 
 struct iio_cb_buffer {
 	struct iio_buffer buffer;
+	/* Must be safe to call from any context (e.g. must not sleep). */
 	int (*cb)(const void *data, void *private);
 	void *private;
 	struct iio_channel *channels;
@@ -36,7 +34,8 @@ static int iio_buffer_cb_store_to(struct iio_buffer *buffer, const void *data)
 static void iio_buffer_cb_release(struct iio_buffer *buffer)
 {
 	struct iio_cb_buffer *cb_buff = buffer_to_cb_buffer(buffer);
-	kfree(cb_buff->buffer.scan_mask);
+
+	bitmap_free(cb_buff->buffer.scan_mask);
 	kfree(cb_buff);
 }
 
@@ -56,7 +55,12 @@ struct iio_cb_buffer *iio_channel_get_all_cb(struct device *dev,
 	struct iio_cb_buffer *cb_buff;
 	struct iio_channel *chan;
 
-	cb_buff = kzalloc(sizeof(*cb_buff), GFP_KERNEL);
+	if (!cb) {
+		dev_err(dev, "Invalid arguments: A callback must be provided!\n");
+		return ERR_PTR(-EINVAL);
+	}
+
+	cb_buff = kzalloc_obj(*cb_buff);
 	if (cb_buff == NULL)
 		return ERR_PTR(-ENOMEM);
 
@@ -65,7 +69,6 @@ struct iio_cb_buffer *iio_channel_get_all_cb(struct device *dev,
 	cb_buff->private = private;
 	cb_buff->cb = cb;
 	cb_buff->buffer.access = &iio_cb_access;
-	INIT_LIST_HEAD(&cb_buff->buffer.demux_list);
 
 	cb_buff->channels = iio_channel_get_all(dev);
 	if (IS_ERR(cb_buff->channels)) {
@@ -74,9 +77,8 @@ struct iio_cb_buffer *iio_channel_get_all_cb(struct device *dev,
 	}
 
 	cb_buff->indio_dev = cb_buff->channels[0].indio_dev;
-	cb_buff->buffer.scan_mask
-		= kcalloc(BITS_TO_LONGS(cb_buff->indio_dev->masklength),
-			  sizeof(long), GFP_KERNEL);
+	cb_buff->buffer.scan_mask = bitmap_zalloc(iio_get_masklength(cb_buff->indio_dev),
+						  GFP_KERNEL);
 	if (cb_buff->buffer.scan_mask == NULL) {
 		ret = -ENOMEM;
 		goto error_release_channels;
@@ -95,7 +97,7 @@ struct iio_cb_buffer *iio_channel_get_all_cb(struct device *dev,
 	return cb_buff;
 
 error_free_scan_mask:
-	kfree(cb_buff->buffer.scan_mask);
+	bitmap_free(cb_buff->buffer.scan_mask);
 error_release_channels:
 	iio_channel_release_all(cb_buff->channels);
 error_free_cb_buff:

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * MUSB OTG driver debug defines
  *
@@ -20,12 +20,11 @@
 void musb_dbg(struct musb *musb, const char *fmt, ...);
 
 #ifdef CONFIG_DEBUG_FS
-int musb_init_debugfs(struct musb *musb);
+void musb_init_debugfs(struct musb *musb);
 void musb_exit_debugfs(struct musb *musb);
 #else
-static inline int musb_init_debugfs(struct musb *musb)
+static inline void musb_init_debugfs(struct musb *musb)
 {
-	return 0;
 }
 static inline void musb_exit_debugfs(struct musb *musb)
 {

@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for Digigram pcxhr compatible soundcards
  *
  * low level interface with interrupt and message handling implementation
  *
  * Copyright (c) 2004 by Digigram <alsa@digigram.com>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/delay.h>
@@ -65,7 +52,7 @@
 #define PCXHR_DSP 2
 
 #if (PCXHR_DSP_OFFSET_MAX > PCXHR_PLX_OFFSET_MIN)
-#undef  PCXHR_REG_TO_PORT(x)
+#error  PCXHR_REG_TO_PORT(x)
 #else
 #define PCXHR_REG_TO_PORT(x)	((x)>PCXHR_DSP_OFFSET_MAX ? PCXHR_PLX : PCXHR_DSP)
 #endif
@@ -479,7 +466,7 @@ enum {
 /*
  * Array of DSP commands
  */
-static struct pcxhr_cmd_info pcxhr_dsp_cmds[] = {
+static const struct pcxhr_cmd_info pcxhr_dsp_cmds[] = {
 [CMD_VERSION] =				{ 0x010000, 1, RMH_SSIZE_FIXED },
 [CMD_SUPPORTED] =			{ 0x020000, 4, RMH_SSIZE_FIXED },
 [CMD_TEST_IT] =				{ 0x040000, 1, RMH_SSIZE_FIXED },
@@ -510,7 +497,7 @@ static struct pcxhr_cmd_info pcxhr_dsp_cmds[] = {
 };
 
 #ifdef CONFIG_SND_DEBUG_VERBOSE
-static char* cmd_names[] = {
+static const char * const cmd_names[] = {
 [CMD_VERSION] =				"CMD_VERSION",
 [CMD_SUPPORTED] =			"CMD_SUPPORTED",
 [CMD_TEST_IT] =				"CMD_TEST_IT",
@@ -767,12 +754,8 @@ void pcxhr_set_pipe_cmd_params(struct pcxhr_rmh *rmh, int capture,
  */
 int pcxhr_send_msg(struct pcxhr_mgr *mgr, struct pcxhr_rmh *rmh)
 {
-	int err;
-
-	mutex_lock(&mgr->msg_lock);
-	err = pcxhr_send_msg_nolock(mgr, rmh);
-	mutex_unlock(&mgr->msg_lock);
-	return err;
+	guard(mutex)(&mgr->msg_lock);
+	return pcxhr_send_msg_nolock(mgr, rmh);
 }
 
 static inline int pcxhr_pipes_running(struct pcxhr_mgr *mgr)
@@ -975,14 +958,13 @@ int pcxhr_write_io_num_reg_cont(struct pcxhr_mgr *mgr, unsigned int mask,
 	struct pcxhr_rmh rmh;
 	int err;
 
-	mutex_lock(&mgr->msg_lock);
+	guard(mutex)(&mgr->msg_lock);
 	if ((mgr->io_num_reg_cont & mask) == value) {
 		dev_dbg(&mgr->pci->dev,
 			"IO_NUM_REG_CONT mask %x already is set to %x\n",
 			    mask, value);
 		if (changed)
 			*changed = 0;
-		mutex_unlock(&mgr->msg_lock);
 		return 0;	/* already programmed */
 	}
 	pcxhr_init_rmh(&rmh, CMD_ACCESS_IO_WRITE);
@@ -997,7 +979,6 @@ int pcxhr_write_io_num_reg_cont(struct pcxhr_mgr *mgr, unsigned int mask,
 		if (changed)
 			*changed = 1;
 	}
-	mutex_unlock(&mgr->msg_lock);
 	return err;
 }
 
@@ -1019,7 +1000,7 @@ static int pcxhr_handle_async_err(struct pcxhr_mgr *mgr, u32 err,
 				  enum pcxhr_async_err_src err_src, int pipe,
 				  int is_capture)
 {
-	static char* err_src_name[] = {
+	static const char * const err_src_name[] = {
 		[PCXHR_ERR_PIPE]	= "Pipe",
 		[PCXHR_ERR_STREAM]	= "Stream",
 		[PCXHR_ERR_AUDIO]	= "Audio"
@@ -1282,7 +1263,7 @@ irqreturn_t pcxhr_threaded_irq(int irq, void *dev_id)
 	int i, j;
 	struct snd_pcxhr *chip;
 
-	mutex_lock(&mgr->lock);
+	guard(mutex)(&mgr->lock);
 	if (mgr->src_it_dsp & PCXHR_IRQ_TIMER) {
 		/* is a 24 bit counter */
 		int dsp_time_new =
@@ -1341,6 +1322,5 @@ irqreturn_t pcxhr_threaded_irq(int irq, void *dev_id)
 	}
 
 	pcxhr_msg_thread(mgr);
-	mutex_unlock(&mgr->lock);
 	return IRQ_HANDLED;
 }

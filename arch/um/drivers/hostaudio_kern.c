@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2002 Steve Schmidtke
- * Licensed under the GPL
  */
 
 #include <linux/fs.h>
@@ -48,6 +48,7 @@ MODULE_PARM_DESC(mixer, MIXER_HELP);
 #ifndef MODULE
 static int set_dsp(char *name, int *add)
 {
+	*add = 0;
 	dsp = name;
 	return 0;
 }
@@ -56,6 +57,7 @@ __uml_setup("dsp=", set_dsp, "dsp=<dsp device>\n" DSP_HELP);
 
 static int set_mixer(char *name, int *add)
 {
+	*add = 0;
 	mixer = name;
 	return 0;
 }
@@ -122,13 +124,11 @@ static ssize_t hostaudio_write(struct file *file, const char __user *buffer,
 static __poll_t hostaudio_poll(struct file *file,
 				struct poll_table_struct *wait)
 {
-	__poll_t mask = 0;
-
 #ifdef DEBUG
 	printk(KERN_DEBUG "hostaudio: poll called (unimplemented)\n");
 #endif
 
-	return mask;
+	return 0;
 }
 
 static long hostaudio_ioctl(struct file *file,
@@ -186,7 +186,7 @@ static int hostaudio_open(struct inode *inode, struct file *file)
 	kernel_param_unlock(THIS_MODULE);
 #endif
 
-	state = kmalloc(sizeof(struct hostaudio_state), GFP_KERNEL);
+	state = kmalloc_obj(struct hostaudio_state);
 	if (state == NULL)
 		return -ENOMEM;
 
@@ -247,7 +247,7 @@ static int hostmixer_open_mixdev(struct inode *inode, struct file *file)
 	printk(KERN_DEBUG "hostmixer: open called (host: %s)\n", mixer);
 #endif
 
-	state = kmalloc(sizeof(struct hostmixer_state), GFP_KERNEL);
+	state = kmalloc_obj(struct hostmixer_state);
 	if (state == NULL)
 		return -ENOMEM;
 
@@ -293,11 +293,11 @@ static int hostmixer_release(struct inode *inode, struct file *file)
 
 static const struct file_operations hostaudio_fops = {
 	.owner          = THIS_MODULE,
-	.llseek         = no_llseek,
 	.read           = hostaudio_read,
 	.write          = hostaudio_write,
 	.poll           = hostaudio_poll,
 	.unlocked_ioctl	= hostaudio_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 	.mmap           = NULL,
 	.open           = hostaudio_open,
 	.release        = hostaudio_release,
@@ -305,13 +305,12 @@ static const struct file_operations hostaudio_fops = {
 
 static const struct file_operations hostmixer_fops = {
 	.owner          = THIS_MODULE,
-	.llseek         = no_llseek,
 	.unlocked_ioctl	= hostmixer_ioctl_mixdev,
 	.open           = hostmixer_open_mixdev,
 	.release        = hostmixer_release,
 };
 
-struct {
+static struct {
 	int dev_audio;
 	int dev_mixer;
 } module_data;

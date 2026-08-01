@@ -16838,6 +16838,10 @@
 
 
 // addressBlock: nbio_nbif_rcc_strap_BIFDEC1[13440..14975]
+//RCC_BIF_STRAP0
+#define RCC_BIF_STRAP0__STRAP_PX_CAPABLE__SHIFT                                                               0x7
+#define RCC_BIF_STRAP0__STRAP_PX_CAPABLE_MASK                                                                 0x00000080L
+
 //RCC_DEV0_EPF0_STRAP0
 #define RCC_DEV0_EPF0_STRAP0__STRAP_DEVICE_ID_DEV0_F0__SHIFT                                                  0x0
 #define RCC_DEV0_EPF0_STRAP0__STRAP_MAJOR_REV_ID_DEV0_F0__SHIFT                                               0x10

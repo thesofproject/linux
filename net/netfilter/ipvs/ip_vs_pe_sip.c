@@ -1,5 +1,5 @@
-#define KMSG_COMPONENT "IPVS"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+// SPDX-License-Identifier: GPL-2.0-only
+#define pr_fmt(fmt) "IPVS: " fmt
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -132,9 +132,9 @@ static bool ip_vs_sip_ct_match(const struct ip_vs_conn_param *p,
 }
 
 static u32 ip_vs_sip_hashkey_raw(const struct ip_vs_conn_param *p,
-				 u32 initval, bool inverse)
+				 struct ip_vs_rht *t, bool inverse)
 {
-	return jhash(p->pe_data, p->pe_data_len, initval);
+	return jhash(p->pe_data, p->pe_data_len, (u32)t->hash_key.key[0]);
 }
 
 static int ip_vs_sip_show_pe_data(const struct ip_vs_conn *cp, char *buf)
@@ -184,3 +184,4 @@ static void __exit ip_vs_sip_cleanup(void)
 module_init(ip_vs_sip_init);
 module_exit(ip_vs_sip_cleanup);
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("ipvs sip helper");

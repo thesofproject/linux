@@ -67,8 +67,6 @@
 #define OC_SKH_DEVICE_VF 0x728
 #define OCRDMA_MAX_AH 512
 
-#define OCRDMA_UVERBS(CMD_NAME) (1ull << IB_USER_VERBS_CMD_##CMD_NAME)
-
 #define convert_to_64bit(lo, hi) ((u64)hi << 32 | (u64)lo)
 #define EQ_INTR_PER_SEC_THRSH_HI 150000
 #define EQ_INTR_PER_SEC_THRSH_LOW 100000
@@ -98,7 +96,6 @@ struct ocrdma_dev_attr {
 	u64 max_mr_size;
 	u32 max_num_mr_pbl;
 	int max_mw;
-	int max_fmr;
 	int max_map_per_fmr;
 	int max_pages_per_frmr;
 	u16 max_ord_per_qp;
@@ -186,7 +183,6 @@ struct ocrdma_hw_mr {
 	u32 num_pbes;
 	u32 pbl_size;
 	u32 pbe_size;
-	u64 fbo;
 	u64 va;
 };
 
@@ -194,8 +190,8 @@ struct ocrdma_mr {
 	struct ib_mr ibmr;
 	struct ib_umem *umem;
 	struct ocrdma_hw_mr hwmr;
-	u64 *pages;
 	u32 npages;
+	u64 pages[];
 };
 
 struct ocrdma_stats {

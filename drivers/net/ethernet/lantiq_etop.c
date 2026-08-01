@@ -1,15 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- *   This program is free software; you can redistribute it and/or modify it
- *   under the terms of the GNU General Public License version 2 as published
- *   by the Free Software Foundation.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  *   Copyright (C) 2011 John Crispin <blogic@openwrt.org>
  */
@@ -35,6 +25,7 @@
 #include <linux/io.h>
 #include <linux/dma-mapping.h>
 #include <linux/module.h>
+#include <linux/property.h>
 
 #include <asm/checksum.h>
 
@@ -74,8 +65,8 @@
 /* use 2 static channels for TX/RX */
 #define LTQ_ETOP_TX_CHANNEL	1
 #define LTQ_ETOP_RX_CHANNEL	6
-#define IS_TX(x)		(x == LTQ_ETOP_TX_CHANNEL)
-#define IS_RX(x)		(x == LTQ_ETOP_RX_CHANNEL)
+#define IS_TX(x)		((x) == LTQ_ETOP_TX_CHANNEL)
+#define IS_RX(x)		((x) == LTQ_ETOP_RX_CHANNEL)
 
 #define ltq_etop_r32(x)		ltq_r32(ltq_etop_membase + (x))
 #define ltq_etop_w32(x, y)	ltq_w32(x, ltq_etop_membase + (y))
@@ -99,12 +90,13 @@ struct ltq_etop_priv {
 	struct net_device *netdev;
 	struct platform_device *pdev;
 	struct ltq_eth_data *pldata;
-	struct resource *res;
 
 	struct mii_bus *mii_bus;
 
 	struct ltq_etop_chan ch[MAX_DMA_CHAN];
-	int tx_free[MAX_DMA_CHAN >> 1];
+
+	int tx_burst_len;
+	int rx_burst_len;
 
 	spinlock_t lock;
 };
@@ -112,12 +104,14 @@ struct ltq_etop_priv {
 static int
 ltq_etop_alloc_skb(struct ltq_etop_chan *ch)
 {
+	struct ltq_etop_priv *priv = netdev_priv(ch->netdev);
+
 	ch->skb[ch->dma.desc] = netdev_alloc_skb(ch->netdev, MAX_DMA_DATA_LEN);
 	if (!ch->skb[ch->dma.desc])
 		return -ENOMEM;
-	ch->dma.desc_base[ch->dma.desc].addr = dma_map_single(NULL,
-		ch->skb[ch->dma.desc]->data, MAX_DMA_DATA_LEN,
-		DMA_FROM_DEVICE);
+	ch->dma.desc_base[ch->dma.desc].addr =
+		dma_map_single(&priv->pdev->dev, ch->skb[ch->dma.desc]->data,
+			       MAX_DMA_DATA_LEN, DMA_FROM_DEVICE);
 	ch->dma.desc_base[ch->dma.desc].addr =
 		CPHYSADDR(ch->skb[ch->dma.desc]->data);
 	ch->dma.desc_base[ch->dma.desc].ctl =
@@ -139,7 +133,7 @@ ltq_etop_hw_receive(struct ltq_etop_chan *ch)
 	spin_lock_irqsave(&priv->lock, flags);
 	if (ltq_etop_alloc_skb(ch)) {
 		netdev_err(ch->netdev,
-			"failed to allocate new rx buffer, stopping DMA\n");
+			   "failed to allocate new rx buffer, stopping DMA\n");
 		ltq_dma_close(&ch->dma);
 	}
 	ch->dma.desc++;
@@ -189,7 +183,7 @@ ltq_etop_poll_tx(struct napi_struct *napi, int budget)
 		dev_kfree_skb_any(ch->skb[ch->tx_free]);
 		ch->skb[ch->tx_free] = NULL;
 		memset(&ch->dma.desc_base[ch->tx_free], 0,
-			sizeof(struct ltq_dma_desc));
+		       sizeof(struct ltq_dma_desc));
 		ch->tx_free++;
 		ch->tx_free %= LTQ_DESC_NUM;
 	}
@@ -221,8 +215,9 @@ ltq_etop_free_channel(struct net_device *dev, struct ltq_etop_chan *ch)
 	if (ch->dma.irq)
 		free_irq(ch->dma.irq, priv);
 	if (IS_RX(ch->idx)) {
-		int desc;
-		for (desc = 0; desc < LTQ_DESC_NUM; desc++)
+		struct ltq_dma_channel *dma = &ch->dma;
+
+		for (dma->desc = 0; dma->desc < LTQ_DESC_NUM; dma->desc++)
 			dev_kfree_skb_any(ch->skb[ch->dma.desc]);
 	}
 }
@@ -244,40 +239,49 @@ ltq_etop_hw_init(struct net_device *dev)
 {
 	struct ltq_etop_priv *priv = netdev_priv(dev);
 	int i;
+	int err;
 
 	ltq_pmu_enable(PMU_PPE);
 
 	switch (priv->pldata->mii_mode) {
 	case PHY_INTERFACE_MODE_RMII:
-		ltq_etop_w32_mask(ETOP_MII_MASK,
-			ETOP_MII_REVERSE, LTQ_ETOP_CFG);
+		ltq_etop_w32_mask(ETOP_MII_MASK, ETOP_MII_REVERSE,
+				  LTQ_ETOP_CFG);
 		break;
 
 	case PHY_INTERFACE_MODE_MII:
-		ltq_etop_w32_mask(ETOP_MII_MASK,
-			ETOP_MII_NORMAL, LTQ_ETOP_CFG);
+		ltq_etop_w32_mask(ETOP_MII_MASK, ETOP_MII_NORMAL,
+				  LTQ_ETOP_CFG);
 		break;
 
 	default:
 		netdev_err(dev, "unknown mii mode %d\n",
-			priv->pldata->mii_mode);
+			   priv->pldata->mii_mode);
 		return -ENOTSUPP;
 	}
 
 	/* enable crc generation */
 	ltq_etop_w32(PPE32_CGEN, LQ_PPE32_ENET_MAC_CFG);
 
-	ltq_dma_init_port(DMA_PORT_ETOP);
+	ltq_dma_init_port(DMA_PORT_ETOP, priv->tx_burst_len, priv->rx_burst_len);
 
 	for (i = 0; i < MAX_DMA_CHAN; i++) {
 		int irq = LTQ_DMA_CH0_INT + i;
 		struct ltq_etop_chan *ch = &priv->ch[i];
 
-		ch->idx = ch->dma.nr = i;
+		ch->dma.nr = i;
+		ch->idx = ch->dma.nr;
+		ch->dma.dev = &priv->pdev->dev;
 
 		if (IS_TX(i)) {
 			ltq_dma_alloc_tx(&ch->dma);
-			request_irq(irq, ltq_etop_dma_irq, 0, "etop_tx", priv);
+			err = request_irq(irq, ltq_etop_dma_irq, 0, "etop_tx", priv);
+			if (err) {
+				netdev_err(dev,
+					   "Unable to get Tx DMA IRQ %d\n",
+					   irq);
+				return err;
+			}
 		} else if (IS_RX(i)) {
 			ltq_dma_alloc_rx(&ch->dma);
 			for (ch->dma.desc = 0; ch->dma.desc < LTQ_DESC_NUM;
@@ -285,7 +289,13 @@ ltq_etop_hw_init(struct net_device *dev)
 				if (ltq_etop_alloc_skb(ch))
 					return -ENOMEM;
 			ch->dma.desc = 0;
-			request_irq(irq, ltq_etop_dma_irq, 0, "etop_rx", priv);
+			err = request_irq(irq, ltq_etop_dma_irq, 0, "etop_rx", priv);
+			if (err) {
+				netdev_err(dev,
+					   "Unable to get Rx DMA IRQ %d\n",
+					   irq);
+				return err;
+			}
 		}
 		ch->dma.irq = irq;
 	}
@@ -295,9 +305,9 @@ ltq_etop_hw_init(struct net_device *dev)
 static void
 ltq_etop_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 {
-	strlcpy(info->driver, "Lantiq ETOP", sizeof(info->driver));
-	strlcpy(info->bus_info, "internal", sizeof(info->bus_info));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
+	strscpy(info->driver, "Lantiq ETOP", sizeof(info->driver));
+	strscpy(info->bus_info, "internal", sizeof(info->bus_info));
+	strscpy(info->version, DRV_VERSION, sizeof(info->version));
 }
 
 static const struct ethtool_ops ltq_etop_ethtool_ops = {
@@ -364,15 +374,8 @@ ltq_etop_mdio_probe(struct net_device *dev)
 		return PTR_ERR(phydev);
 	}
 
-	phydev->supported &= (SUPPORTED_10baseT_Half
-			      | SUPPORTED_10baseT_Full
-			      | SUPPORTED_100baseT_Half
-			      | SUPPORTED_100baseT_Full
-			      | SUPPORTED_Autoneg
-			      | SUPPORTED_MII
-			      | SUPPORTED_TP);
+	phy_set_max_speed(phydev, SPEED_100);
 
-	phydev->advertising = phydev->supported;
 	phy_attached_info(phydev);
 
 	return 0;
@@ -396,7 +399,7 @@ ltq_etop_mdio_init(struct net_device *dev)
 	priv->mii_bus->write = ltq_etop_mdio_wr;
 	priv->mii_bus->name = "ltq_mii";
 	snprintf(priv->mii_bus->id, MII_BUS_ID_SIZE, "%s-%x",
-		priv->pdev->name, priv->pdev->id);
+		 priv->pdev->name, priv->pdev->id);
 	if (mdiobus_register(priv->mii_bus)) {
 		err = -ENXIO;
 		goto err_out_free_mdiobus;
@@ -438,6 +441,7 @@ ltq_etop_open(struct net_device *dev)
 		if (!IS_TX(i) && (!IS_RX(i)))
 			continue;
 		ltq_dma_open(&ch->dma);
+		ltq_dma_enable_irq(&ch->dma);
 		napi_enable(&ch->napi);
 	}
 	phy_start(dev->phydev);
@@ -464,7 +468,7 @@ ltq_etop_stop(struct net_device *dev)
 	return 0;
 }
 
-static int
+static netdev_tx_t
 ltq_etop_tx(struct sk_buff *skb, struct net_device *dev)
 {
 	int queue = skb_get_queue_mapping(skb);
@@ -476,24 +480,26 @@ ltq_etop_tx(struct sk_buff *skb, struct net_device *dev)
 	unsigned long flags;
 	u32 byte_offset;
 
-	len = skb->len < ETH_ZLEN ? ETH_ZLEN : skb->len;
+	if (skb_put_padto(skb, ETH_ZLEN))
+		return NETDEV_TX_OK;
+	len = skb->len;
 
 	if ((desc->ctl & (LTQ_DMA_OWN | LTQ_DMA_C)) || ch->skb[ch->dma.desc]) {
-		dev_kfree_skb_any(skb);
 		netdev_err(dev, "tx ring full\n");
 		netif_tx_stop_queue(txq);
 		return NETDEV_TX_BUSY;
 	}
 
-	/* dma needs to start on a 16 byte aligned address */
-	byte_offset = CPHYSADDR(skb->data) % 16;
+	/* dma needs to start on a burst length value aligned address */
+	byte_offset = CPHYSADDR(skb->data) % (priv->tx_burst_len * 4);
 	ch->skb[ch->dma.desc] = skb;
 
 	netif_trans_update(dev);
 
 	spin_lock_irqsave(&priv->lock, flags);
-	desc->addr = ((unsigned int) dma_map_single(NULL, skb->data, len,
+	desc->addr = ((unsigned int)dma_map_single(&priv->pdev->dev, skb->data, len,
 						DMA_TO_DEVICE)) - byte_offset;
+	/* Make sure the address is written before we give it to HW */
 	wmb();
 	desc->ctl = LTQ_DMA_OWN | LTQ_DMA_SOP | LTQ_DMA_EOP |
 		LTQ_DMA_TX_OFFSET(byte_offset) | (len & LTQ_DMA_SIZE_MASK);
@@ -513,20 +519,13 @@ ltq_etop_change_mtu(struct net_device *dev, int new_mtu)
 	struct ltq_etop_priv *priv = netdev_priv(dev);
 	unsigned long flags;
 
-	dev->mtu = new_mtu;
+	WRITE_ONCE(dev->mtu, new_mtu);
 
 	spin_lock_irqsave(&priv->lock, flags);
 	ltq_etop_w32((ETOP_PLEN_UNDER << 16) | new_mtu, LTQ_ETOP_IGPLEN);
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return 0;
-}
-
-static int
-ltq_etop_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
-{
-	/* TODO: mii-toll reports "No MII transceiver present!." ?!*/
-	return phy_mii_ioctl(dev->phydev, rq, cmd);
 }
 
 static int
@@ -542,7 +541,7 @@ ltq_etop_set_mac_address(struct net_device *dev, void *p)
 		spin_lock_irqsave(&priv->lock, flags);
 		ltq_etop_w32(*((u32 *)dev->dev_addr), LTQ_ETOP_MAC_DA0);
 		ltq_etop_w32(*((u16 *)&dev->dev_addr[4]) << 16,
-			LTQ_ETOP_MAC_DA1);
+			     LTQ_ETOP_MAC_DA1);
 		spin_unlock_irqrestore(&priv->lock, flags);
 	}
 	return ret;
@@ -561,14 +560,6 @@ ltq_etop_set_multicast_list(struct net_device *dev)
 	else
 		ltq_etop_w32_mask(0, ETOP_FTCU, LTQ_ETOP_ENETS0);
 	spin_unlock_irqrestore(&priv->lock, flags);
-}
-
-static u16
-ltq_etop_select_queue(struct net_device *dev, struct sk_buff *skb,
-		      void *accel_priv, select_queue_fallback_t fallback)
-{
-	/* we are currently only using the first queue */
-	return 0;
 }
 
 static int
@@ -615,7 +606,7 @@ err_hw:
 }
 
 static void
-ltq_etop_tx_timeout(struct net_device *dev)
+ltq_etop_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	int err;
 
@@ -637,11 +628,11 @@ static const struct net_device_ops ltq_eth_netdev_ops = {
 	.ndo_stop = ltq_etop_stop,
 	.ndo_start_xmit = ltq_etop_tx,
 	.ndo_change_mtu = ltq_etop_change_mtu,
-	.ndo_do_ioctl = ltq_etop_ioctl,
+	.ndo_eth_ioctl = phy_do_ioctl,
 	.ndo_set_mac_address = ltq_etop_set_mac_address,
 	.ndo_validate_addr = eth_validate_addr,
 	.ndo_set_rx_mode = ltq_etop_set_multicast_list,
-	.ndo_select_queue = ltq_etop_select_queue,
+	.ndo_select_queue = dev_pick_tx_zero,
 	.ndo_init = ltq_etop_init,
 	.ndo_tx_timeout = ltq_etop_tx_timeout,
 };
@@ -651,31 +642,14 @@ ltq_etop_probe(struct platform_device *pdev)
 {
 	struct net_device *dev;
 	struct ltq_etop_priv *priv;
-	struct resource *res;
 	int err;
 	int i;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res) {
-		dev_err(&pdev->dev, "failed to get etop resource\n");
-		err = -ENOENT;
-		goto err_out;
-	}
-
-	res = devm_request_mem_region(&pdev->dev, res->start,
-		resource_size(res), dev_name(&pdev->dev));
-	if (!res) {
-		dev_err(&pdev->dev, "failed to request etop resource\n");
-		err = -EBUSY;
-		goto err_out;
-	}
-
-	ltq_etop_membase = devm_ioremap_nocache(&pdev->dev,
-		res->start, resource_size(res));
-	if (!ltq_etop_membase) {
+	ltq_etop_membase = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(ltq_etop_membase)) {
 		dev_err(&pdev->dev, "failed to remap etop engine %d\n",
 			pdev->id);
-		err = -ENOMEM;
+		err = PTR_ERR(ltq_etop_membase);
 		goto err_out;
 	}
 
@@ -684,24 +658,34 @@ ltq_etop_probe(struct platform_device *pdev)
 		err = -ENOMEM;
 		goto err_out;
 	}
-	strcpy(dev->name, "eth%d");
 	dev->netdev_ops = &ltq_eth_netdev_ops;
 	dev->ethtool_ops = &ltq_etop_ethtool_ops;
 	priv = netdev_priv(dev);
-	priv->res = res;
 	priv->pdev = pdev;
 	priv->pldata = dev_get_platdata(&pdev->dev);
 	priv->netdev = dev;
 	spin_lock_init(&priv->lock);
 	SET_NETDEV_DEV(dev, &pdev->dev);
 
+	err = device_property_read_u32(&pdev->dev, "lantiq,tx-burst-length", &priv->tx_burst_len);
+	if (err < 0) {
+		dev_err(&pdev->dev, "unable to read tx-burst-length property\n");
+		goto err_free;
+	}
+
+	err = device_property_read_u32(&pdev->dev, "lantiq,rx-burst-length", &priv->rx_burst_len);
+	if (err < 0) {
+		dev_err(&pdev->dev, "unable to read rx-burst-length property\n");
+		goto err_free;
+	}
+
 	for (i = 0; i < MAX_DMA_CHAN; i++) {
 		if (IS_TX(i))
-			netif_napi_add(dev, &priv->ch[i].napi,
-				ltq_etop_poll_tx, 8);
+			netif_napi_add_weight(dev, &priv->ch[i].napi,
+					      ltq_etop_poll_tx, 8);
 		else if (IS_RX(i))
-			netif_napi_add(dev, &priv->ch[i].napi,
-				ltq_etop_poll_rx, 32);
+			netif_napi_add_weight(dev, &priv->ch[i].napi,
+					      ltq_etop_poll_rx, 32);
 		priv->ch[i].netdev = dev;
 	}
 
@@ -718,8 +702,7 @@ err_out:
 	return err;
 }
 
-static int
-ltq_etop_remove(struct platform_device *pdev)
+static void ltq_etop_remove(struct platform_device *pdev)
 {
 	struct net_device *dev = platform_get_drvdata(pdev);
 
@@ -729,7 +712,6 @@ ltq_etop_remove(struct platform_device *pdev)
 		ltq_etop_mdio_cleanup(dev);
 		unregister_netdev(dev);
 	}
-	return 0;
 }
 
 static struct platform_driver ltq_mii_driver = {
@@ -739,7 +721,7 @@ static struct platform_driver ltq_mii_driver = {
 	},
 };
 
-int __init
+static int __init
 init_ltq_etop(void)
 {
 	int ret = platform_driver_probe(&ltq_mii_driver, ltq_etop_probe);

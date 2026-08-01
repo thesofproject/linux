@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * D-Link DIR-685 router I2C-based Touchkeys input driver
  * Copyright (C) 2017 Linus Walleij <linus.walleij@linaro.org>
@@ -13,6 +14,7 @@
 #include <linux/delay.h>
 #include <linux/input.h>
 #include <linux/slab.h>
+#include <linux/string_choices.h>
 #include <linux/bitops.h>
 
 struct dir685_touchkeys {
@@ -47,7 +49,7 @@ static irqreturn_t dir685_tk_irq_thread(int irq, void *data)
 	changed = tk->cur_key ^ key;
 	for_each_set_bit(i, &changed, num_bits) {
 		dev_dbg(tk->dev, "key %d is %s\n", i,
-			test_bit(i, &key) ? "down" : "up");
+			str_down_up(test_bit(i, &key)));
 		input_report_key(tk->input, tk->codes[i], test_bit(i, &key));
 	}
 
@@ -58,12 +60,11 @@ static irqreturn_t dir685_tk_irq_thread(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static int dir685_tk_probe(struct i2c_client *client,
-			   const struct i2c_device_id *id)
+static int dir685_tk_probe(struct i2c_client *client)
 {
-	struct dir685_touchkeys *tk;
+	static const u8 bl_data[] = { 0xa7, 0x40 };
 	struct device *dev = &client->dev;
-	u8 bl_data[] = { 0xa7, 0x40 };
+	struct dir685_touchkeys *tk;
 	int err;
 	int i;
 
@@ -127,7 +128,7 @@ static int dir685_tk_probe(struct i2c_client *client,
 }
 
 static const struct i2c_device_id dir685_tk_id[] = {
-	{ "dir685tk", 0 },
+	{ .name = "dir685tk" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, dir685_tk_id);
@@ -142,7 +143,7 @@ MODULE_DEVICE_TABLE(of, dir685_tk_of_match);
 
 static struct i2c_driver dir685_tk_i2c_driver = {
 	.driver = {
-		.name	= "dlin-dir685-touchkeys",
+		.name	= "dlink-dir685-touchkeys",
 		.of_match_table = of_match_ptr(dir685_tk_of_match),
 	},
 	.probe		= dir685_tk_probe,

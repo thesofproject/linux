@@ -1,15 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (C) Fuzhou Rockchip Electronics Co.Ltd
+ * Copyright (C) Rockchip Electronics Co., Ltd.
  * Author: Chris Zhong <zyw@rock-chips.com>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
@@ -18,6 +10,8 @@
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/reset.h>
+
+#include <drm/drm_print.h>
 
 #include "cdn-dp-core.h"
 #include "cdn-dp-reg.h"
@@ -113,7 +107,7 @@ static int cdp_dp_mailbox_write(struct cdn_dp_device *dp, u8 val)
 
 static int cdn_dp_mailbox_validate_receive(struct cdn_dp_device *dp,
 					   u8 module_id, u8 opcode,
-					   u8 req_size)
+					   u16 req_size)
 {
 	u32 mbox_size, i;
 	u8 header[4];
@@ -147,7 +141,7 @@ static int cdn_dp_mailbox_validate_receive(struct cdn_dp_device *dp,
 }
 
 static int cdn_dp_mailbox_read_receive(struct cdn_dp_device *dp,
-				       u8 *buff, u8 buff_size)
+				       u8 *buff, u16 buff_size)
 {
 	u32 i;
 	int ret;
@@ -543,8 +537,8 @@ static int cdn_dp_get_training_status(struct cdn_dp_device *dp)
 	if (ret)
 		goto err_get_training_status;
 
-	dp->link.rate = status[0];
-	dp->link.num_lanes = status[1];
+	dp->max_rate = drm_dp_bw_code_to_link_rate(status[0]);
+	dp->max_lanes = status[1];
 
 err_get_training_status:
 	if (ret)
@@ -568,8 +562,8 @@ int cdn_dp_train_link(struct cdn_dp_device *dp)
 		return ret;
 	}
 
-	DRM_DEV_DEBUG_KMS(dp->dev, "rate:0x%x, lanes:%d\n", dp->link.rate,
-			  dp->link.num_lanes);
+	DRM_DEV_DEBUG_KMS(dp->dev, "rate:0x%x, lanes:%d\n", dp->max_rate,
+			  dp->max_lanes);
 	return ret;
 }
 
@@ -609,7 +603,7 @@ static int cdn_dp_get_msa_misc(struct video_info *video,
 	case YCBCR_4_2_0:
 		val[0] = 5;
 		break;
-	};
+	}
 
 	switch (video->color_depth) {
 	case 6:
@@ -627,7 +621,7 @@ static int cdn_dp_get_msa_misc(struct video_info *video,
 	case 16:
 		val[1] = 4;
 		break;
-	};
+	}
 
 	msa_misc = 2 * val[0] + 32 * val[1] +
 		   ((video->color_fmt == Y_ONLY) ? (1 << 14) : 0);
@@ -647,7 +641,7 @@ int cdn_dp_config_video(struct cdn_dp_device *dp)
 	bit_per_pix = (video->color_fmt == YCBCR_4_2_2) ?
 		      (video->color_depth * 2) : (video->color_depth * 3);
 
-	link_rate = drm_dp_bw_code_to_link_rate(dp->link.rate) / 1000;
+	link_rate = dp->max_rate / 1000;
 
 	ret = cdn_dp_reg_write(dp, BND_HSYNC2VSYNC, VIF_BYPASS_INTERLACE);
 	if (ret)
@@ -666,15 +660,14 @@ int cdn_dp_config_video(struct cdn_dp_device *dp)
 	 */
 	do {
 		tu_size_reg += 2;
-		symbol = tu_size_reg * mode->clock * bit_per_pix;
-		do_div(symbol, dp->link.num_lanes * link_rate * 8);
+		symbol = (u64)tu_size_reg * mode->clock * bit_per_pix;
+		do_div(symbol, dp->max_lanes * link_rate * 8);
 		rem = do_div(symbol, 1000);
 		if (tu_size_reg > 64) {
 			ret = -EINVAL;
 			DRM_DEV_ERROR(dp->dev,
 				      "tu error, clk:%d, lanes:%d, rate:%d\n",
-				      mode->clock, dp->link.num_lanes,
-				      link_rate);
+				      mode->clock, dp->max_lanes, link_rate);
 			goto err_config_video;
 		}
 	} while ((symbol <= 1) || (tu_size_reg - symbol < 4) ||
@@ -688,10 +681,12 @@ int cdn_dp_config_video(struct cdn_dp_device *dp)
 
 	/* set the FIFO Buffer size */
 	val = div_u64(mode->clock * (symbol + 1), 1000) + link_rate;
-	val /= (dp->link.num_lanes * link_rate);
+	val /= (dp->max_lanes * link_rate);
 	val = div_u64(8 * (symbol + 1), bit_per_pix) - val;
 	val += 2;
 	ret = cdn_dp_reg_write(dp, DP_VC_TABLE(15), val);
+	if (ret)
+		goto err_config_video;
 
 	switch (video->color_depth) {
 	case 6:
@@ -709,7 +704,7 @@ int cdn_dp_config_video(struct cdn_dp_device *dp)
 	case 16:
 		val = BCS_16;
 		break;
-	};
+	}
 
 	val += video->color_fmt << 8;
 	ret = cdn_dp_reg_write(dp, DP_FRAMER_PXL_REPR, val);
@@ -792,7 +787,6 @@ err_config_video:
 
 int cdn_dp_audio_stop(struct cdn_dp_device *dp, struct audio_info *audio)
 {
-	u32 val;
 	int ret;
 
 	ret = cdn_dp_reg_write(dp, AUDIO_PACK_CONTROL, 0);
@@ -801,11 +795,7 @@ int cdn_dp_audio_stop(struct cdn_dp_device *dp, struct audio_info *audio)
 		return ret;
 	}
 
-	val = SPDIF_AVG_SEL | SPDIF_JITTER_BYPASS;
-	val |= SPDIF_FIFO_MID_RANGE(0xe0);
-	val |= SPDIF_JITTER_THRSH(0xe0);
-	val |= SPDIF_JITTER_AVG_WIN(7);
-	writel(val, dp->regs + SPDIF_CTRL_ADDR);
+	writel(0, dp->regs + SPDIF_CTRL_ADDR);
 
 	/* clearn the audio config and reset */
 	writel(0, dp->regs + AUDIO_SRC_CNTL);
@@ -846,7 +836,7 @@ static void cdn_dp_audio_config_i2s(struct cdn_dp_device *dp,
 	u32 val;
 
 	if (audio->channels == 2) {
-		if (dp->link.num_lanes == 1)
+		if (dp->max_lanes == 1)
 			sub_pckt_num = 2;
 		else
 			sub_pckt_num = 4;
@@ -929,12 +919,6 @@ static void cdn_dp_audio_config_spdif(struct cdn_dp_device *dp)
 {
 	u32 val;
 
-	val = SPDIF_AVG_SEL | SPDIF_JITTER_BYPASS;
-	val |= SPDIF_FIFO_MID_RANGE(0xe0);
-	val |= SPDIF_JITTER_THRSH(0xe0);
-	val |= SPDIF_JITTER_AVG_WIN(7);
-	writel(val, dp->regs + SPDIF_CTRL_ADDR);
-
 	writel(SYNC_WR_TO_CH_ZERO, dp->regs + FIFO_CNTL);
 
 	val = MAX_NUM_CH(2) | AUDIO_TYPE_LPCM | CFG_SUB_PCKT_NUM(4);
@@ -942,9 +926,6 @@ static void cdn_dp_audio_config_spdif(struct cdn_dp_device *dp)
 	writel(SMPL2PKT_EN, dp->regs + SMPL2PKT_CNTL);
 
 	val = SPDIF_ENABLE | SPDIF_AVG_SEL | SPDIF_JITTER_BYPASS;
-	val |= SPDIF_FIFO_MID_RANGE(0xe0);
-	val |= SPDIF_JITTER_THRSH(0xe0);
-	val |= SPDIF_JITTER_AVG_WIN(7);
 	writel(val, dp->regs + SPDIF_CTRL_ADDR);
 
 	clk_prepare_enable(dp->spdif_clk);

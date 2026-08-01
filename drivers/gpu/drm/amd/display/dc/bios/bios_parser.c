@@ -23,6 +23,8 @@
  *
  */
 
+#include <linux/slab.h>
+
 #include "dm_services.h"
 
 #include "atom.h"
@@ -31,7 +33,6 @@
 #include "include/gpio_service_interface.h"
 #include "include/grph_object_ctrl_defs.h"
 #include "include/bios_parser_interface.h"
-#include "include/i2caux_interface.h"
 #include "include/logger_interface.h"
 
 #include "command_table.h"
@@ -42,8 +43,6 @@
 #include "bios_parser_interface.h"
 
 #include "bios_parser_common.h"
-/* TODO remove - only needed for default i2c speed */
-#include "dc.h"
 
 #define THREE_PERCENT_OF_10000 300
 
@@ -52,24 +51,13 @@
 #define DC_LOGGER \
 	bp->base.ctx->logger
 
-/* GUID to validate external display connection info table (aka OPM module) */
-static const uint8_t ext_display_connection_guid[NUMBER_OF_UCHAR_FOR_GUID] = {
-	0x91, 0x6E, 0x57, 0x09,
-	0x3F, 0x6D, 0xD2, 0x11,
-	0x39, 0x8E, 0x00, 0xA0,
-	0xC9, 0x69, 0x72, 0x3B};
-
 #define DATA_TABLES(table) (bp->master_data_tbl->ListOfDataTables.table)
 
 static void get_atom_data_table_revision(
 	ATOM_COMMON_TABLE_HEADER *atom_data_tbl,
 	struct atom_data_revision *tbl_revision);
-static uint32_t get_dst_number_from_object(struct bios_parser *bp,
-	ATOM_OBJECT *object);
 static uint32_t get_src_obj_list(struct bios_parser *bp, ATOM_OBJECT *object,
 	uint16_t **id_list);
-static uint32_t get_dest_obj_list(struct bios_parser *bp,
-	ATOM_OBJECT *object, uint16_t **id_list);
 static ATOM_OBJECT *get_bios_object(struct bios_parser *bp,
 	struct graphics_object_id id);
 static enum bp_result get_gpio_i2c_info(struct bios_parser *bp,
@@ -79,7 +67,9 @@ static ATOM_HPD_INT_RECORD *get_hpd_record(struct bios_parser *bp,
 	ATOM_OBJECT *object);
 static struct device_id device_type_from_device_id(uint16_t device_id);
 static uint32_t signal_to_ss_id(enum as_signal_type signal);
-static uint32_t get_support_mask_for_device_id(struct device_id device_id);
+static uint32_t get_support_mask_for_device_id(
+	enum dal_device_type device_type,
+	uint32_t enum_id);
 static ATOM_ENCODER_CAP_RECORD_V2 *get_encoder_cap_record(
 	struct bios_parser *bp,
 	ATOM_OBJECT *object);
@@ -106,9 +96,9 @@ struct dc_bios *bios_parser_create(
 	struct bp_init_data *init,
 	enum dce_version dce_version)
 {
-	struct bios_parser *bp = NULL;
+	struct bios_parser *bp;
 
-	bp = kzalloc(sizeof(struct bios_parser), GFP_KERNEL);
+	bp = kzalloc_obj(struct bios_parser);
 	if (!bp)
 		return NULL;
 
@@ -120,7 +110,7 @@ struct dc_bios *bios_parser_create(
 	return NULL;
 }
 
-static void destruct(struct bios_parser *bp)
+static void bios_parser_destruct(struct bios_parser *bp)
 {
 	kfree(bp->base.bios_local_image);
 	kfree(bp->base.integrated_info);
@@ -135,7 +125,7 @@ static void bios_parser_destroy(struct dc_bios **dcb)
 		return;
 	}
 
-	destruct(bp);
+	bios_parser_destruct(bp);
 
 	kfree(bp);
 	*dcb = NULL;
@@ -147,7 +137,9 @@ static uint8_t get_number_of_objects(struct bios_parser *bp, uint32_t offset)
 
 	uint32_t object_table_offset = bp->object_info_tbl_offset + offset;
 
-	table = GET_IMAGE(ATOM_OBJECT_TABLE, object_table_offset);
+	table = ((ATOM_OBJECT_TABLE *) bios_get_image(&bp->base,
+				object_table_offset,
+				struct_size(table, asObjects, 1)));
 
 	if (!table)
 		return 0;
@@ -163,29 +155,6 @@ static uint8_t bios_parser_get_connectors_number(struct dc_bios *dcb)
 		le16_to_cpu(bp->object_info_tbl.v1_1->usConnectorObjectTableOffset));
 }
 
-static struct graphics_object_id bios_parser_get_encoder_id(
-	struct dc_bios *dcb,
-	uint32_t i)
-{
-	struct bios_parser *bp = BP_FROM_DCB(dcb);
-	struct graphics_object_id object_id = dal_graphics_object_id_init(
-		0, ENUM_ID_UNKNOWN, OBJECT_TYPE_UNKNOWN);
-
-	uint32_t encoder_table_offset = bp->object_info_tbl_offset
-		+ le16_to_cpu(bp->object_info_tbl.v1_1->usEncoderObjectTableOffset);
-
-	ATOM_OBJECT_TABLE *tbl =
-		GET_IMAGE(ATOM_OBJECT_TABLE, encoder_table_offset);
-
-	if (tbl && tbl->ucNumberOfObjects > i) {
-		const uint16_t id = le16_to_cpu(tbl->asObjects[i].usObjectID);
-
-		object_id = object_id_from_bios_object_id(id);
-	}
-
-	return object_id;
-}
-
 static struct graphics_object_id bios_parser_get_connector_id(
 	struct dc_bios *dcb,
 	uint8_t i)
@@ -198,32 +167,21 @@ static struct graphics_object_id bios_parser_get_connector_id(
 	uint32_t connector_table_offset = bp->object_info_tbl_offset
 		+ le16_to_cpu(bp->object_info_tbl.v1_1->usConnectorObjectTableOffset);
 
-	ATOM_OBJECT_TABLE *tbl =
-		GET_IMAGE(ATOM_OBJECT_TABLE, connector_table_offset);
+	ATOM_OBJECT_TABLE *tbl = ((ATOM_OBJECT_TABLE *) bios_get_image(&bp->base,
+				connector_table_offset,
+				struct_size(tbl, asObjects, 1)));
 
 	if (!tbl) {
 		dm_error("Can't get connector table from atom bios.\n");
 		return object_id;
 	}
 
-	if (tbl->ucNumberOfObjects <= i) {
-		dm_error("Can't find connector id %d in connector table of size %d.\n",
-			 i, tbl->ucNumberOfObjects);
+	if (tbl->ucNumberOfObjects <= i)
 		return object_id;
-	}
 
 	id = le16_to_cpu(tbl->asObjects[i].usObjectID);
 	object_id = object_id_from_bios_object_id(id);
 	return object_id;
-}
-
-static uint32_t bios_parser_get_dst_number(struct dc_bios *dcb,
-	struct graphics_object_id id)
-{
-	struct bios_parser *bp = BP_FROM_DCB(dcb);
-	ATOM_OBJECT *object = get_bios_object(bp, id);
-
-	return get_dst_number_from_object(bp, object);
 }
 
 static enum bp_result bios_parser_get_src_obj(struct dc_bios *dcb,
@@ -255,30 +213,6 @@ static enum bp_result bios_parser_get_src_obj(struct dc_bios *dcb,
 	return BP_RESULT_OK;
 }
 
-static enum bp_result bios_parser_get_dst_obj(struct dc_bios *dcb,
-	struct graphics_object_id object_id, uint32_t index,
-	struct graphics_object_id *dest_object_id)
-{
-	uint32_t number;
-	uint16_t *id = NULL;
-	ATOM_OBJECT *object;
-	struct bios_parser *bp = BP_FROM_DCB(dcb);
-
-	if (!dest_object_id)
-		return BP_RESULT_BADINPUT;
-
-	object = get_bios_object(bp, object_id);
-
-	number = get_dest_obj_list(bp, object, &id);
-
-	if (number <= index || !id)
-		return BP_RESULT_BADINPUT;
-
-	*dest_object_id = object_id_from_bios_object_id(id[index]);
-
-	return BP_RESULT_OK;
-}
-
 static enum bp_result bios_parser_get_i2c_info(struct dc_bios *dcb,
 	struct graphics_object_id id,
 	struct graphics_object_i2c_info *info)
@@ -288,6 +222,7 @@ static enum bp_result bios_parser_get_i2c_info(struct dc_bios *dcb,
 	ATOM_COMMON_RECORD_HEADER *header;
 	ATOM_I2C_RECORD *record;
 	struct bios_parser *bp = BP_FROM_DCB(dcb);
+	int i;
 
 	if (!info)
 		return BP_RESULT_BADINPUT;
@@ -300,7 +235,7 @@ static enum bp_result bios_parser_get_i2c_info(struct dc_bios *dcb,
 	offset = le16_to_cpu(object->usRecordOffset)
 			+ bp->object_info_tbl_offset;
 
-	for (;;) {
+	for (i = 0; i < BIOS_MAX_NUM_RECORD; i++) {
 		header = GET_IMAGE(ATOM_COMMON_RECORD_HEADER, offset);
 
 		if (!header)
@@ -324,196 +259,6 @@ static enum bp_result bios_parser_get_i2c_info(struct dc_bios *dcb,
 
 	return BP_RESULT_NORECORD;
 }
-
-static enum bp_result get_voltage_ddc_info_v1(uint8_t *i2c_line,
-	ATOM_COMMON_TABLE_HEADER *header,
-	uint8_t *address)
-{
-	enum bp_result result = BP_RESULT_NORECORD;
-	ATOM_VOLTAGE_OBJECT_INFO *info =
-		(ATOM_VOLTAGE_OBJECT_INFO *) address;
-
-	uint8_t *voltage_current_object = (uint8_t *) &info->asVoltageObj[0];
-
-	while ((address + le16_to_cpu(header->usStructureSize)) > voltage_current_object) {
-		ATOM_VOLTAGE_OBJECT *object =
-			(ATOM_VOLTAGE_OBJECT *) voltage_current_object;
-
-		if ((object->ucVoltageType == SET_VOLTAGE_INIT_MODE) &&
-			(object->ucVoltageType &
-				VOLTAGE_CONTROLLED_BY_I2C_MASK)) {
-
-			*i2c_line = object->asControl.ucVoltageControlI2cLine
-					^ 0x90;
-			result = BP_RESULT_OK;
-			break;
-		}
-
-		voltage_current_object += object->ucSize;
-	}
-	return result;
-}
-
-static enum bp_result get_voltage_ddc_info_v3(uint8_t *i2c_line,
-	uint32_t index,
-	ATOM_COMMON_TABLE_HEADER *header,
-	uint8_t *address)
-{
-	enum bp_result result = BP_RESULT_NORECORD;
-	ATOM_VOLTAGE_OBJECT_INFO_V3_1 *info =
-		(ATOM_VOLTAGE_OBJECT_INFO_V3_1 *) address;
-
-	uint8_t *voltage_current_object =
-		(uint8_t *) (&(info->asVoltageObj[0]));
-
-	while ((address + le16_to_cpu(header->usStructureSize)) > voltage_current_object) {
-		ATOM_I2C_VOLTAGE_OBJECT_V3 *object =
-			(ATOM_I2C_VOLTAGE_OBJECT_V3 *) voltage_current_object;
-
-		if (object->sHeader.ucVoltageMode ==
-			ATOM_INIT_VOLTAGE_REGULATOR) {
-			if (object->sHeader.ucVoltageType == index) {
-				*i2c_line = object->ucVoltageControlI2cLine
-						^ 0x90;
-				result = BP_RESULT_OK;
-				break;
-			}
-		}
-
-		voltage_current_object += le16_to_cpu(object->sHeader.usSize);
-	}
-	return result;
-}
-
-static enum bp_result bios_parser_get_thermal_ddc_info(
-	struct dc_bios *dcb,
-	uint32_t i2c_channel_id,
-	struct graphics_object_i2c_info *info)
-{
-	struct bios_parser *bp = BP_FROM_DCB(dcb);
-	ATOM_I2C_ID_CONFIG_ACCESS *config;
-	ATOM_I2C_RECORD record;
-
-	if (!info)
-		return BP_RESULT_BADINPUT;
-
-	config = (ATOM_I2C_ID_CONFIG_ACCESS *) &i2c_channel_id;
-
-	record.sucI2cId.bfHW_Capable = config->sbfAccess.bfHW_Capable;
-	record.sucI2cId.bfI2C_LineMux = config->sbfAccess.bfI2C_LineMux;
-	record.sucI2cId.bfHW_EngineID = config->sbfAccess.bfHW_EngineID;
-
-	return get_gpio_i2c_info(bp, &record, info);
-}
-
-static enum bp_result bios_parser_get_voltage_ddc_info(struct dc_bios *dcb,
-	uint32_t index,
-	struct graphics_object_i2c_info *info)
-{
-	uint8_t i2c_line = 0;
-	enum bp_result result = BP_RESULT_NORECORD;
-	uint8_t *voltage_info_address;
-	ATOM_COMMON_TABLE_HEADER *header;
-	struct atom_data_revision revision = {0};
-	struct bios_parser *bp = BP_FROM_DCB(dcb);
-
-	if (!DATA_TABLES(VoltageObjectInfo))
-		return result;
-
-	voltage_info_address = bios_get_image(&bp->base, DATA_TABLES(VoltageObjectInfo), sizeof(ATOM_COMMON_TABLE_HEADER));
-
-	header = (ATOM_COMMON_TABLE_HEADER *) voltage_info_address;
-
-	get_atom_data_table_revision(header, &revision);
-
-	switch (revision.major) {
-	case 1:
-	case 2:
-		result = get_voltage_ddc_info_v1(&i2c_line, header,
-			voltage_info_address);
-		break;
-	case 3:
-		if (revision.minor != 1)
-			break;
-		result = get_voltage_ddc_info_v3(&i2c_line, index, header,
-			voltage_info_address);
-		break;
-	}
-
-	if (result == BP_RESULT_OK)
-		result = bios_parser_get_thermal_ddc_info(dcb,
-			i2c_line, info);
-
-	return result;
-}
-
-/* TODO: temporary commented out to suppress 'defined but not used' warning */
-#if 0
-static enum bp_result bios_parser_get_ddc_info_for_i2c_line(
-	struct bios_parser *bp,
-	uint8_t i2c_line, struct graphics_object_i2c_info *info)
-{
-	uint32_t offset;
-	ATOM_OBJECT *object;
-	ATOM_OBJECT_TABLE *table;
-	uint32_t i;
-
-	if (!info)
-		return BP_RESULT_BADINPUT;
-
-	offset = le16_to_cpu(bp->object_info_tbl.v1_1->usConnectorObjectTableOffset);
-
-	offset += bp->object_info_tbl_offset;
-
-	table = GET_IMAGE(ATOM_OBJECT_TABLE, offset);
-
-	if (!table)
-		return BP_RESULT_BADBIOSTABLE;
-
-	for (i = 0; i < table->ucNumberOfObjects; i++) {
-		object = &table->asObjects[i];
-
-		if (!object) {
-			BREAK_TO_DEBUGGER(); /* Invalid object id */
-			return BP_RESULT_BADINPUT;
-		}
-
-		offset = le16_to_cpu(object->usRecordOffset)
-				+ bp->object_info_tbl_offset;
-
-		for (;;) {
-			ATOM_COMMON_RECORD_HEADER *header =
-				GET_IMAGE(ATOM_COMMON_RECORD_HEADER, offset);
-
-			if (!header)
-				return BP_RESULT_BADBIOSTABLE;
-
-			offset += header->ucRecordSize;
-
-			if (LAST_RECORD_TYPE == header->ucRecordType ||
-				!header->ucRecordSize)
-				break;
-
-			if (ATOM_I2C_RECORD_TYPE == header->ucRecordType
-				&& sizeof(ATOM_I2C_RECORD) <=
-				header->ucRecordSize) {
-				ATOM_I2C_RECORD *record =
-					(ATOM_I2C_RECORD *) header;
-
-				if (i2c_line != record->sucI2cId.bfI2C_LineMux)
-					continue;
-
-				/* get the I2C info */
-				if (get_gpio_i2c_info(bp, record, info) ==
-					BP_RESULT_OK)
-					return BP_RESULT_OK;
-			}
-		}
-	}
-
-	return BP_RESULT_NORECORD;
-}
-#endif
 
 static enum bp_result bios_parser_get_hpd_info(struct dc_bios *dcb,
 	struct graphics_object_id id,
@@ -549,11 +294,12 @@ static enum bp_result bios_parser_get_device_tag_record(
 {
 	ATOM_COMMON_RECORD_HEADER *header;
 	uint32_t offset;
+	int i;
 
 	offset = le16_to_cpu(object->usRecordOffset)
 			+ bp->object_info_tbl_offset;
 
-	for (;;) {
+	for (i = 0; i < BIOS_MAX_NUM_RECORD; i++) {
 		header = GET_IMAGE(ATOM_COMMON_RECORD_HEADER, offset);
 
 		if (!header)
@@ -699,6 +445,7 @@ static enum bp_result get_firmware_info_v1_4(
 		le32_to_cpu(firmware_info->ulMinPixelClockPLL_Output) * 10;
 	info->pll_info.max_output_pxl_clk_pll_frequency =
 		le32_to_cpu(firmware_info->ulMaxPixelClockPLL_Output) * 10;
+	info->max_pixel_clock = le16_to_cpu(firmware_info->usMaxPixelClock) * 10;
 
 	if (firmware_info->usFirmwareCapability.sbfAccess.MemoryClockSS_Support)
 		/* Since there is no information on the SS, report conservative
@@ -755,6 +502,7 @@ static enum bp_result get_firmware_info_v2_1(
 	info->external_clock_source_frequency_for_dp =
 		le16_to_cpu(firmwareInfo->usUniphyDPModeExtClkFreq) * 10;
 	info->min_allowed_bl_level = firmwareInfo->ucMinAllowedBL_Level;
+	info->max_pixel_clock = le16_to_cpu(firmwareInfo->usMaxPixelClock) * 10;
 
 	/* There should be only one entry in the SS info table for Memory Clock
 	 */
@@ -917,8 +665,12 @@ static enum bp_result get_ss_info_v3_1(
 	if (!DATA_TABLES(ASIC_InternalSS_Info))
 		return BP_RESULT_UNSUPPORTED;
 
-	ss_table_header_include = GET_IMAGE(ATOM_ASIC_INTERNAL_SS_INFO_V3,
-		DATA_TABLES(ASIC_InternalSS_Info));
+	ss_table_header_include = ((ATOM_ASIC_INTERNAL_SS_INFO_V3 *) bios_get_image(&bp->base,
+				DATA_TABLES(ASIC_InternalSS_Info),
+				struct_size(ss_table_header_include, asSpreadSpectrum, 1)));
+	if (!ss_table_header_include)
+		return BP_RESULT_UNSUPPORTED;
+
 	table_size =
 		(le16_to_cpu(ss_table_header_include->sHeader.usStructureSize)
 				- sizeof(ATOM_COMMON_TABLE_HEADER))
@@ -990,16 +742,110 @@ static enum bp_result bios_parser_transmitter_control(
 	return bp->cmd_tbl.transmitter_control(bp, cntl);
 }
 
+static enum bp_result bios_parser_select_crtc_source(
+	struct dc_bios *dcb,
+	struct bp_crtc_source_select *bp_params)
+{
+	struct bios_parser *bp = BP_FROM_DCB(dcb);
+
+	if (!bp->cmd_tbl.select_crtc_source)
+		return BP_RESULT_FAILURE;
+
+	return bp->cmd_tbl.select_crtc_source(bp, bp_params);
+}
+
 static enum bp_result bios_parser_encoder_control(
 	struct dc_bios *dcb,
 	struct bp_encoder_control *cntl)
 {
 	struct bios_parser *bp = BP_FROM_DCB(dcb);
 
+	if (cntl->engine_id == ENGINE_ID_DACA) {
+		if (!bp->cmd_tbl.dac1_encoder_control)
+			return BP_RESULT_FAILURE;
+
+		return bp->cmd_tbl.dac1_encoder_control(
+			bp, cntl->action,
+			cntl->pixel_clock, ATOM_DAC1_PS2);
+	} else if (cntl->engine_id == ENGINE_ID_DACB) {
+		if (!bp->cmd_tbl.dac2_encoder_control)
+			return BP_RESULT_FAILURE;
+
+		return bp->cmd_tbl.dac2_encoder_control(
+			bp, cntl->action,
+			cntl->pixel_clock, ATOM_DAC1_PS2);
+	}
+
 	if (!bp->cmd_tbl.dig_encoder_control)
 		return BP_RESULT_FAILURE;
 
 	return bp->cmd_tbl.dig_encoder_control(bp, cntl);
+}
+
+static enum bp_result bios_parser_external_encoder_control(
+	struct dc_bios *dcb,
+	struct bp_external_encoder_control *cntl)
+{
+	struct bios_parser *bp = BP_FROM_DCB(dcb);
+
+	if (!bp->cmd_tbl.external_encoder_control)
+		return BP_RESULT_UNSUPPORTED;
+
+	return bp->cmd_tbl.external_encoder_control(bp, cntl);
+}
+
+static enum bp_result bios_parser_dac_load_detection(
+	struct dc_bios *dcb,
+	enum engine_id engine_id,
+	struct graphics_object_id ext_enc_id)
+{
+	struct bios_parser *bp = BP_FROM_DCB(dcb);
+	struct dc_context *ctx = dcb->ctx;
+	struct bp_load_detection_parameters bp_params = {0};
+	struct bp_external_encoder_control ext_cntl = {0};
+	enum bp_result bp_result = BP_RESULT_UNSUPPORTED;
+	uint32_t bios_0_scratch;
+	uint32_t device_id_mask = 0;
+
+	bp_params.device_id = (uint16_t)get_support_mask_for_device_id(
+			DEVICE_TYPE_CRT, engine_id == ENGINE_ID_DACB ? 2 : 1);
+
+	if (bp_params.device_id == ATOM_DEVICE_CRT1_SUPPORT)
+		device_id_mask = ATOM_S0_CRT1_MASK;
+	else if (bp_params.device_id == ATOM_DEVICE_CRT2_SUPPORT)
+		device_id_mask = ATOM_S0_CRT2_MASK;
+	else
+		return BP_RESULT_UNSUPPORTED;
+
+	/* BIOS will write the detected devices to BIOS_SCRATCH_0, clear corresponding bit */
+	bios_0_scratch = dm_read_reg(ctx, bp->base.regs->BIOS_SCRATCH_0);
+	bios_0_scratch &= ~device_id_mask;
+	dm_write_reg(ctx, bp->base.regs->BIOS_SCRATCH_0, bios_0_scratch);
+
+	if (engine_id == ENGINE_ID_DACA || engine_id == ENGINE_ID_DACB) {
+		if (!bp->cmd_tbl.dac_load_detection)
+			return BP_RESULT_UNSUPPORTED;
+
+		bp_params.engine_id = engine_id;
+		bp_result = bp->cmd_tbl.dac_load_detection(bp, &bp_params);
+	} else if (ext_enc_id.id) {
+		if (!bp->cmd_tbl.external_encoder_control)
+			return BP_RESULT_UNSUPPORTED;
+
+		ext_cntl.action = EXTERNAL_ENCODER_CONTROL_DAC_LOAD_DETECT;
+		ext_cntl.encoder_id = ext_enc_id;
+		bp_result = bp->cmd_tbl.external_encoder_control(bp, &ext_cntl);
+	}
+
+	if (bp_result != BP_RESULT_OK)
+		return bp_result;
+
+	bios_0_scratch = dm_read_reg(ctx, bp->base.regs->BIOS_SCRATCH_0);
+
+	if (bios_0_scratch & device_id_mask)
+		return BP_RESULT_OK;
+
+	return BP_RESULT_FAILURE;
 }
 
 static enum bp_result bios_parser_adjust_pixel_clock(
@@ -1092,18 +938,6 @@ static enum bp_result bios_parser_enable_crtc(
 	return bp->cmd_tbl.enable_crtc(bp, id, enable);
 }
 
-static enum bp_result bios_parser_crtc_source_select(
-	struct dc_bios *dcb,
-	struct bp_crtc_source_select *bp_params)
-{
-	struct bios_parser *bp = BP_FROM_DCB(dcb);
-
-	if (!bp->cmd_tbl.select_crtc_source)
-		return BP_RESULT_FAILURE;
-
-	return bp->cmd_tbl.select_crtc_source(bp, bp_params);
-}
-
 static enum bp_result bios_parser_enable_disp_power_gating(
 	struct dc_bios *dcb,
 	enum controller_id controller_id,
@@ -1124,65 +958,9 @@ static bool bios_parser_is_device_id_supported(
 {
 	struct bios_parser *bp = BP_FROM_DCB(dcb);
 
-	uint32_t mask = get_support_mask_for_device_id(id);
+	uint32_t mask = get_support_mask_for_device_id(id.device_type, id.enum_id);
 
 	return (le16_to_cpu(bp->object_info_tbl.v1_1->usDeviceSupport) & mask) != 0;
-}
-
-static enum bp_result bios_parser_crt_control(
-	struct dc_bios *dcb,
-	enum engine_id engine_id,
-	bool enable,
-	uint32_t pixel_clock)
-{
-	struct bios_parser *bp = BP_FROM_DCB(dcb);
-	uint8_t standard;
-
-	if (!bp->cmd_tbl.dac1_encoder_control &&
-		engine_id == ENGINE_ID_DACA)
-		return BP_RESULT_FAILURE;
-	if (!bp->cmd_tbl.dac2_encoder_control &&
-		engine_id == ENGINE_ID_DACB)
-		return BP_RESULT_FAILURE;
-	/* validate params */
-	switch (engine_id) {
-	case ENGINE_ID_DACA:
-	case ENGINE_ID_DACB:
-		break;
-	default:
-		/* unsupported engine */
-		return BP_RESULT_FAILURE;
-	}
-
-	standard = ATOM_DAC1_PS2; /* == ATOM_DAC2_PS2 */
-
-	if (enable) {
-		if (engine_id == ENGINE_ID_DACA) {
-			bp->cmd_tbl.dac1_encoder_control(bp, enable,
-				pixel_clock, standard);
-			if (bp->cmd_tbl.dac1_output_control != NULL)
-				bp->cmd_tbl.dac1_output_control(bp, enable);
-		} else {
-			bp->cmd_tbl.dac2_encoder_control(bp, enable,
-				pixel_clock, standard);
-			if (bp->cmd_tbl.dac2_output_control != NULL)
-				bp->cmd_tbl.dac2_output_control(bp, enable);
-		}
-	} else {
-		if (engine_id == ENGINE_ID_DACA) {
-			if (bp->cmd_tbl.dac1_output_control != NULL)
-				bp->cmd_tbl.dac1_output_control(bp, enable);
-			bp->cmd_tbl.dac1_encoder_control(bp, enable,
-				pixel_clock, standard);
-		} else {
-			if (bp->cmd_tbl.dac2_output_control != NULL)
-				bp->cmd_tbl.dac2_output_control(bp, enable);
-			bp->cmd_tbl.dac2_encoder_control(bp, enable,
-				pixel_clock, standard);
-		}
-	}
-
-	return BP_RESULT_OK;
 }
 
 static ATOM_HPD_INT_RECORD *get_hpd_record(struct bios_parser *bp,
@@ -1190,6 +968,7 @@ static ATOM_HPD_INT_RECORD *get_hpd_record(struct bios_parser *bp,
 {
 	ATOM_COMMON_RECORD_HEADER *header;
 	uint32_t offset;
+	int i;
 
 	if (!object) {
 		BREAK_TO_DEBUGGER(); /* Invalid object */
@@ -1199,7 +978,7 @@ static ATOM_HPD_INT_RECORD *get_hpd_record(struct bios_parser *bp,
 	offset = le16_to_cpu(object->usRecordOffset)
 			+ bp->object_info_tbl_offset;
 
-	for (;;) {
+	for (i = 0; i < BIOS_MAX_NUM_RECORD; i++) {
 		header = GET_IMAGE(ATOM_COMMON_RECORD_HEADER, offset);
 
 		if (!header)
@@ -1214,49 +993,6 @@ static ATOM_HPD_INT_RECORD *get_hpd_record(struct bios_parser *bp,
 			return (ATOM_HPD_INT_RECORD *) header;
 
 		offset += header->ucRecordSize;
-	}
-
-	return NULL;
-}
-
-/**
- * Get I2C information of input object id
- *
- * search all records to find the ATOM_I2C_RECORD_TYPE record IR
- */
-static ATOM_I2C_RECORD *get_i2c_record(
-	struct bios_parser *bp,
-	ATOM_OBJECT *object)
-{
-	uint32_t offset;
-	ATOM_COMMON_RECORD_HEADER *record_header;
-
-	if (!object) {
-		BREAK_TO_DEBUGGER();
-		/* Invalid object */
-		return NULL;
-	}
-
-	offset = le16_to_cpu(object->usRecordOffset)
-			+ bp->object_info_tbl_offset;
-
-	for (;;) {
-		record_header = GET_IMAGE(ATOM_COMMON_RECORD_HEADER, offset);
-
-		if (!record_header)
-			return NULL;
-
-		if (LAST_RECORD_TYPE == record_header->ucRecordType ||
-			0 == record_header->ucRecordSize)
-			break;
-
-		if (ATOM_I2C_RECORD_TYPE == record_header->ucRecordType &&
-			sizeof(ATOM_I2C_RECORD) <=
-			record_header->ucRecordSize) {
-			return (ATOM_I2C_RECORD *)record_header;
-		}
-
-		offset += record_header->ucRecordSize;
 	}
 
 	return NULL;
@@ -1277,11 +1013,11 @@ static enum bp_result get_ss_info_from_tbl(
  * ver 2.1 can co-exist with SS_Info table. Expect ASIC_InternalSS_Info ver 3.1,
  * there is only one entry for each signal /ss id.  However, there is
  * no planning of supporting multiple spread Sprectum entry for EverGreen
- * @param [in] this
- * @param [in] signal, ASSignalType to be converted to info index
- * @param [in] index, number of entries that match the converted info index
- * @param [out] ss_info, sprectrum information structure,
- * @return Bios parser result code
+ * @dcb:     pointer to the DC BIOS
+ * @signal:  ASSignalType to be converted to info index
+ * @index:   number of entries that match the converted info index
+ * @ss_info: sprectrum information structure,
+ * return:   Bios parser result code
  */
 static enum bp_result bios_parser_get_spread_spectrum_info(
 	struct dc_bios *dcb,
@@ -1345,16 +1081,16 @@ static enum bp_result get_ss_info_from_internal_ss_info_tbl_V2_1(
 	struct spread_spectrum_info *info);
 
 /**
- * get_ss_info_from_table
+ * get_ss_info_from_tbl
  * Get spread sprectrum information from the ASIC_InternalSS_Info Ver 2.1 or
  * SS_Info table from the VBIOS
  * There can not be more than 1 entry for  ASIC_InternalSS_Info Ver 2.1 or
  * SS_Info.
  *
- * @param this
- * @param id, spread sprectrum info index
- * @param pSSinfo, sprectrum information structure,
- * @return Bios parser result code
+ * @bp:      pointer to the BIOS parser
+ * @id:      spread sprectrum info index
+ * @ss_info: sprectrum information structure,
+ * return:   BIOS parser result code
  */
 static enum bp_result get_ss_info_from_tbl(
 	struct bios_parser *bp,
@@ -1377,9 +1113,10 @@ static enum bp_result get_ss_info_from_tbl(
  * from the VBIOS
  * There will not be multiple entry for Ver 2.1
  *
- * @param id, spread sprectrum info index
- * @param pSSinfo, sprectrum information structure,
- * @return Bios parser result code
+ * @bp:    pointer to the Bios parser
+ * @id:    spread sprectrum info index
+ * @info:  sprectrum information structure,
+ * return: Bios parser result code
  */
 static enum bp_result get_ss_info_from_internal_ss_info_tbl_V2_1(
 	struct bios_parser *bp,
@@ -1394,8 +1131,12 @@ static enum bp_result get_ss_info_from_internal_ss_info_tbl_V2_1(
 	if (!DATA_TABLES(ASIC_InternalSS_Info))
 		return result;
 
-	header = GET_IMAGE(ATOM_ASIC_INTERNAL_SS_INFO_V2,
-		DATA_TABLES(ASIC_InternalSS_Info));
+	header = ((ATOM_ASIC_INTERNAL_SS_INFO_V2 *) bios_get_image(
+				&bp->base,
+				DATA_TABLES(ASIC_InternalSS_Info),
+				struct_size(header, asSpreadSpectrum, 1)));
+	if (!header)
+		return result;
 
 	memset(info, 0, sizeof(struct spread_spectrum_info));
 
@@ -1442,9 +1183,10 @@ static enum bp_result get_ss_info_from_internal_ss_info_tbl_V2_1(
  * of entries that matches the id
  * for, the SS_Info table, there should not be more than 1 entry match.
  *
- * @param [in] id, spread sprectrum id
- * @param [out] pSSinfo, sprectrum information structure,
- * @return Bios parser result code
+ * @bp:      pointer to the Bios parser
+ * @id:      spread sprectrum id
+ * @ss_info: sprectrum information structure,
+ * return:   Bios parser result code
  */
 static enum bp_result get_ss_info_from_ss_info_table(
 	struct bios_parser *bp,
@@ -1468,6 +1210,8 @@ static enum bp_result get_ss_info_from_ss_info_table(
 	get_atom_data_table_revision(header, &revision);
 
 	tbl = GET_IMAGE(ATOM_SPREAD_SPECTRUM_INFO, DATA_TABLES(SS_Info));
+	if (!tbl)
+		return result;
 
 	if (1 != revision.major || 2 > revision.minor)
 		return result;
@@ -1564,11 +1308,66 @@ static enum bp_result bios_parser_get_embedded_panel_info(
 		default:
 			break;
 		}
+		break;
 	default:
 		break;
 	}
 
 	return BP_RESULT_FAILURE;
+}
+
+static enum bp_result get_embedded_panel_extra_info(
+	struct bios_parser *bp,
+	struct embedded_panel_info *info,
+	const uint32_t table_offset)
+{
+	uint8_t *record = bios_get_image(&bp->base, table_offset, 1);
+	ATOM_PANEL_RESOLUTION_PATCH_RECORD *panel_res_record;
+	ATOM_FAKE_EDID_PATCH_RECORD *fake_edid_record;
+
+	while (*record != ATOM_RECORD_END_TYPE) {
+		switch (*record) {
+		case LCD_MODE_PATCH_RECORD_MODE_TYPE:
+			record += sizeof(ATOM_PATCH_RECORD_MODE);
+			break;
+		case LCD_RTS_RECORD_TYPE:
+			record += sizeof(ATOM_LCD_RTS_RECORD);
+			break;
+		case LCD_CAP_RECORD_TYPE:
+			record += sizeof(ATOM_LCD_MODE_CONTROL_CAP);
+			break;
+		case LCD_FAKE_EDID_PATCH_RECORD_TYPE:
+			fake_edid_record = (ATOM_FAKE_EDID_PATCH_RECORD *)record;
+			if (fake_edid_record->ucFakeEDIDLength) {
+				if (fake_edid_record->ucFakeEDIDLength == 128)
+					info->fake_edid_size =
+						fake_edid_record->ucFakeEDIDLength;
+				else
+					info->fake_edid_size =
+						fake_edid_record->ucFakeEDIDLength * 128;
+
+				info->fake_edid = fake_edid_record->ucFakeEDIDString;
+
+				record += struct_size(fake_edid_record,
+						      ucFakeEDIDString,
+						      info->fake_edid_size);
+			} else {
+				/* empty fake edid record must be 3 bytes long */
+				record += sizeof(ATOM_FAKE_EDID_PATCH_RECORD) + 1;
+			}
+			break;
+		case LCD_PANEL_RESOLUTION_RECORD_TYPE:
+			panel_res_record = (ATOM_PANEL_RESOLUTION_PATCH_RECORD *)record;
+			info->panel_width_mm = panel_res_record->usHSize;
+			info->panel_height_mm = panel_res_record->usVSize;
+			record += sizeof(ATOM_PANEL_RESOLUTION_PATCH_RECORD);
+			break;
+		default:
+			return BP_RESULT_BADBIOSTABLE;
+		}
+	}
+
+	return BP_RESULT_OK;
 }
 
 static enum bp_result get_embedded_panel_info_v1_2(
@@ -1649,7 +1448,7 @@ static enum bp_result get_embedded_panel_info_v1_2(
 	info->ss_id = lvds->ucSS_Id;
 
 	{
-		uint8_t rr = le16_to_cpu(lvds->usSupportedRefreshRate);
+		uint16_t rr = le16_to_cpu(lvds->usSupportedRefreshRate);
 		/* Get minimum supported refresh rate*/
 		if (SUPPORTED_LCD_REFRESHRATE_30Hz & rr)
 			info->supported_rr.REFRESH_RATE_30HZ = 1;
@@ -1686,6 +1485,10 @@ static enum bp_result get_embedded_panel_info_v1_2(
 
 	if (ATOM_PANEL_MISC_API_ENABLED & lvds->ucLVDS_Misc)
 		info->lcd_timing.misc_info.API_ENABLED = true;
+
+	if (lvds->usExtInfoTableOffset)
+		return get_embedded_panel_extra_info(bp, info,
+			le16_to_cpu(lvds->usExtInfoTableOffset) + DATA_TABLES(LCD_Info));
 
 	return BP_RESULT_OK;
 }
@@ -1812,20 +1615,22 @@ static enum bp_result get_embedded_panel_info_v1_3(
 			(uint32_t) (ATOM_PANEL_MISC_V13_GREY_LEVEL &
 				lvds->ucLCD_Misc) >> ATOM_PANEL_MISC_V13_GREY_LEVEL_SHIFT;
 
+	if (lvds->usExtInfoTableOffset)
+		return get_embedded_panel_extra_info(bp, info,
+			le16_to_cpu(lvds->usExtInfoTableOffset) + DATA_TABLES(LCD_Info));
+
 	return BP_RESULT_OK;
 }
 
 /**
- * bios_parser_get_encoder_cap_info
+ * bios_parser_get_encoder_cap_info - get encoder capability
+ *                                    information of input object id
  *
- * @brief
- *  Get encoder capability information of input object id
+ * @dcb:       pointer to the DC BIOS
+ * @object_id: object id
+ * @info:      encoder cap information structure
  *
- * @param object_id, Object id
- * @param object_id, encoder cap information structure
- *
- * @return Bios parser result code
- *
+ * return: Bios parser result code
  */
 static enum bp_result bios_parser_get_encoder_cap_info(
 	struct dc_bios *dcb,
@@ -1855,17 +1660,12 @@ static enum bp_result bios_parser_get_encoder_cap_info(
 }
 
 /**
- * get_encoder_cap_record
+ * get_encoder_cap_record - Get encoder cap record for the object
  *
- * @brief
- *  Get encoder cap record for the object
- *
- * @param object, ATOM object
- *
- * @return atom encoder cap record
- *
- * @note
- *  search all records to find the ATOM_ENCODER_CAP_RECORD_V2 record
+ * @bp:      pointer to the BIOS parser
+ * @object:  ATOM object
+ * return:   atom encoder cap record
+ * note:     search all records to find the ATOM_ENCODER_CAP_RECORD_V2 record
  */
 static ATOM_ENCODER_CAP_RECORD_V2 *get_encoder_cap_record(
 	struct bios_parser *bp,
@@ -1873,6 +1673,7 @@ static ATOM_ENCODER_CAP_RECORD_V2 *get_encoder_cap_record(
 {
 	ATOM_COMMON_RECORD_HEADER *header;
 	uint32_t offset;
+	int i;
 
 	if (!object) {
 		BREAK_TO_DEBUGGER(); /* Invalid object */
@@ -1882,7 +1683,7 @@ static ATOM_ENCODER_CAP_RECORD_V2 *get_encoder_cap_record(
 	offset = le16_to_cpu(object->usRecordOffset)
 					+ bp->object_info_tbl_offset;
 
-	for (;;) {
+	for (i = 0; i < BIOS_MAX_NUM_RECORD; i++) {
 		header = GET_IMAGE(ATOM_COMMON_RECORD_HEADER, offset);
 
 		if (!header)
@@ -1918,12 +1719,13 @@ static uint32_t get_ss_entry_number_from_ss_info_tbl(
 	uint32_t id);
 
 /**
- * BiosParserObject::GetNumberofSpreadSpectrumEntry
+ * bios_parser_get_ss_entry_number
  * Get Number of SpreadSpectrum Entry from the ASIC_InternalSS_Info table from
  * the VBIOS that match the SSid (to be converted from signal)
  *
- * @param[in] signal, ASSignalType to be converted to SSid
- * @return number of SS Entry that match the signal
+ * @dcb:    pointer to the DC BIOS
+ * @signal: ASSignalType to be converted to SSid
+ * return: number of SS Entry that match the signal
  */
 static uint32_t bios_parser_get_ss_entry_number(
 	struct dc_bios *dcb,
@@ -1973,10 +1775,10 @@ static uint32_t bios_parser_get_ss_entry_number(
  * get_ss_entry_number_from_ss_info_tbl
  * Get Number of spread spectrum entry from the SS_Info table from the VBIOS.
  *
- * @note There can only be one entry for each id for SS_Info Table
- *
- * @param [in] id, spread spectrum id
- * @return number of SS Entry that match the id
+ * @bp:  pointer to the BIOS parser
+ * @id:  spread spectrum id
+ * return: number of SS Entry that match the id
+ * note: There can only be one entry for each id for SS_Info Table
  */
 static uint32_t get_ss_entry_number_from_ss_info_tbl(
 	struct bios_parser *bp,
@@ -2000,6 +1802,8 @@ static uint32_t get_ss_entry_number_from_ss_info_tbl(
 
 	tbl = GET_IMAGE(ATOM_SPREAD_SPECTRUM_INFO,
 			DATA_TABLES(SS_Info));
+	if (!tbl)
+		return number;
 
 	if (1 != revision.major || 2 > revision.minor)
 		return number;
@@ -2044,8 +1848,9 @@ static uint32_t get_ss_entry_number_from_ss_info_tbl(
  * There can not be more than 1 entry for  ASIC_InternalSS_Info Ver 2.1 or
  * SS_Info.
  *
- * @param id, spread sprectrum info index
- * @return Bios parser result code
+ * @bp:    pointer to the BIOS parser
+ * @id:    spread sprectrum info index
+ * return: Bios parser result code
  */
 static uint32_t get_ss_entry_number(struct bios_parser *bp, uint32_t id)
 {
@@ -2061,8 +1866,9 @@ static uint32_t get_ss_entry_number(struct bios_parser *bp, uint32_t id)
  * Ver 2.1 from the VBIOS
  * There will not be multiple entry for Ver 2.1
  *
- * @param id, spread sprectrum info index
- * @return number of SS Entry that match the id
+ * @bp:    pointer to the BIOS parser
+ * @id:    spread sprectrum info index
+ * return: number of SS Entry that match the id
  */
 static uint32_t get_ss_entry_number_from_internal_ss_info_tbl_v2_1(
 	struct bios_parser *bp,
@@ -2076,8 +1882,12 @@ static uint32_t get_ss_entry_number_from_internal_ss_info_tbl_v2_1(
 	if (!DATA_TABLES(ASIC_InternalSS_Info))
 		return 0;
 
-	header_include = GET_IMAGE(ATOM_ASIC_INTERNAL_SS_INFO_V2,
-			DATA_TABLES(ASIC_InternalSS_Info));
+	header_include = ((ATOM_ASIC_INTERNAL_SS_INFO_V2 *) bios_get_image(
+				&bp->base,
+				DATA_TABLES(ASIC_InternalSS_Info),
+				struct_size(header_include, asSpreadSpectrum, 1)));
+	if (!header_include)
+		return 0;
 
 	size = (le16_to_cpu(header_include->sHeader.usStructureSize)
 			- sizeof(ATOM_COMMON_TABLE_HEADER))
@@ -2091,13 +1901,15 @@ static uint32_t get_ss_entry_number_from_internal_ss_info_tbl_v2_1(
 
 	return 0;
 }
+
 /**
- * get_ss_entry_number_from_internal_ss_info_table_V3_1
+ * get_ss_entry_number_from_internal_ss_info_tbl_V3_1
  * Get Number of SpreadSpectrum Entry from the ASIC_InternalSS_Info table of
  * the VBIOS that matches id
  *
- * @param[in]  id, spread sprectrum id
- * @return number of SS Entry that match the id
+ * @bp:    pointer to the BIOS parser
+ * @id:    spread sprectrum id
+ * return: number of SS Entry that match the id
  */
 static uint32_t get_ss_entry_number_from_internal_ss_info_tbl_V3_1(
 	struct bios_parser *bp,
@@ -2112,8 +1924,12 @@ static uint32_t get_ss_entry_number_from_internal_ss_info_tbl_V3_1(
 	if (!DATA_TABLES(ASIC_InternalSS_Info))
 		return number;
 
-	header_include = GET_IMAGE(ATOM_ASIC_INTERNAL_SS_INFO_V3,
-			DATA_TABLES(ASIC_InternalSS_Info));
+	header_include = ((ATOM_ASIC_INTERNAL_SS_INFO_V3 *) bios_get_image(&bp->base,
+				DATA_TABLES(ASIC_InternalSS_Info),
+				struct_size(header_include, asSpreadSpectrum, 1)));
+	if (!header_include)
+		return number;
+
 	size = (le16_to_cpu(header_include->sHeader.usStructureSize) -
 			sizeof(ATOM_COMMON_TABLE_HEADER)) /
 					sizeof(ATOM_ASIC_SS_ASSIGNMENT_V3);
@@ -2132,10 +1948,11 @@ static uint32_t get_ss_entry_number_from_internal_ss_info_tbl_V3_1(
  * bios_parser_get_gpio_pin_info
  * Get GpioPin information of input gpio id
  *
- * @param gpio_id, GPIO ID
- * @param info, GpioPin information structure
- * @return Bios parser result code
- * @note
+ * @dcb:     pointer to the DC BIOS
+ * @gpio_id: GPIO ID
+ * @info:    GpioPin information structure
+ * return:   Bios parser result code
+ * note:
  *  to get the GPIO PIN INFO, we need:
  *  1. get the GPIO_ID from other object table, see GetHPDInfo()
  *  2. in DATA_TABLE.GPIO_Pin_LUT, search all records, to get the registerA
@@ -2154,11 +1971,13 @@ static enum bp_result bios_parser_get_gpio_pin_info(
 	if (!DATA_TABLES(GPIO_Pin_LUT))
 		return BP_RESULT_BADBIOSTABLE;
 
-	header = GET_IMAGE(ATOM_GPIO_PIN_LUT, DATA_TABLES(GPIO_Pin_LUT));
+	header = ((ATOM_GPIO_PIN_LUT *) bios_get_image(&bp->base,
+				DATA_TABLES(GPIO_Pin_LUT),
+				struct_size(header, asGPIO_Pin, 1)));
 	if (!header)
 		return BP_RESULT_BADBIOSTABLE;
 
-	if (sizeof(ATOM_COMMON_TABLE_HEADER) + sizeof(ATOM_GPIO_PIN_LUT)
+	if (sizeof(ATOM_COMMON_TABLE_HEADER) + struct_size(header, asGPIO_Pin, 1)
 			> le16_to_cpu(header->sHeader.usStructureSize))
 		return BP_RESULT_BADBIOSTABLE;
 
@@ -2219,7 +2038,7 @@ static enum bp_result get_gpio_i2c_info(struct bios_parser *bp,
 	count = (le16_to_cpu(header->sHeader.usStructureSize)
 			- sizeof(ATOM_COMMON_TABLE_HEADER))
 				/ sizeof(ATOM_GPIO_I2C_ASSIGMENT);
-	if (count < record->sucI2cId.bfI2C_LineMux)
+	if (count <= record->sucI2cId.bfI2C_LineMux)
 		return BP_RESULT_BADBIOSTABLE;
 
 	/* get the GPIO_I2C_INFO */
@@ -2343,7 +2162,8 @@ static ATOM_OBJECT *get_bios_object(struct bios_parser *bp,
 
 	offset += bp->object_info_tbl_offset;
 
-	tbl = GET_IMAGE(ATOM_OBJECT_TABLE, offset);
+	tbl = ((ATOM_OBJECT_TABLE *) bios_get_image(&bp->base, offset,
+				struct_size(tbl, asObjects, 1)));
 	if (!tbl)
 		return NULL;
 
@@ -2354,40 +2174,6 @@ static ATOM_OBJECT *get_bios_object(struct bios_parser *bp,
 			return &tbl->asObjects[i];
 
 	return NULL;
-}
-
-static uint32_t get_dest_obj_list(struct bios_parser *bp,
-	ATOM_OBJECT *object, uint16_t **id_list)
-{
-	uint32_t offset;
-	uint8_t *number;
-
-	if (!object) {
-		BREAK_TO_DEBUGGER(); /* Invalid object id */
-		return 0;
-	}
-
-	offset = le16_to_cpu(object->usSrcDstTableOffset)
-						+ bp->object_info_tbl_offset;
-
-	number = GET_IMAGE(uint8_t, offset);
-	if (!number)
-		return 0;
-
-	offset += sizeof(uint8_t);
-	offset += sizeof(uint16_t) * (*number);
-
-	number = GET_IMAGE(uint8_t, offset);
-	if ((!number) || (!*number))
-		return 0;
-
-	offset += sizeof(uint8_t);
-	*id_list = (uint16_t *)bios_get_image(&bp->base, offset, *number * sizeof(uint16_t));
-
-	if (!*id_list)
-		return 0;
-
-	return *number;
 }
 
 static uint32_t get_src_obj_list(struct bios_parser *bp, ATOM_OBJECT *object,
@@ -2417,39 +2203,10 @@ static uint32_t get_src_obj_list(struct bios_parser *bp, ATOM_OBJECT *object,
 	return *number;
 }
 
-static uint32_t get_dst_number_from_object(struct bios_parser *bp,
-	ATOM_OBJECT *object)
-{
-	uint32_t offset;
-	uint8_t *number;
-
-	if (!object) {
-		BREAK_TO_DEBUGGER(); /* Invalid encoder object id*/
-		return 0;
-	}
-
-	offset = le16_to_cpu(object->usSrcDstTableOffset)
-					+ bp->object_info_tbl_offset;
-
-	number = GET_IMAGE(uint8_t, offset);
-	if (!number)
-		return 0;
-
-	offset += sizeof(uint8_t);
-	offset += sizeof(uint16_t) * (*number);
-
-	number = GET_IMAGE(uint8_t, offset);
-
-	if (!number)
-		return 0;
-
-	return *number;
-}
-
 static struct device_id device_type_from_device_id(uint16_t device_id)
 {
 
-	struct device_id result_device_id;
+	struct device_id result_device_id = {0};
 
 	switch (device_id) {
 	case ATOM_DEVICE_LCD1_SUPPORT:
@@ -2556,11 +2313,10 @@ static uint32_t signal_to_ss_id(enum as_signal_type signal)
 	return clk_id_ss;
 }
 
-static uint32_t get_support_mask_for_device_id(struct device_id device_id)
+static uint32_t get_support_mask_for_device_id(
+	enum dal_device_type device_type,
+	uint32_t enum_id)
 {
-	enum dal_device_type device_type = device_id.device_type;
-	uint32_t enum_id = device_id.enum_id;
-
 	switch (device_type) {
 	case DEVICE_TYPE_LCD:
 		switch (enum_id) {
@@ -2618,766 +2374,17 @@ static uint32_t get_support_mask_for_device_id(struct device_id device_id)
 		break;
 	default:
 		break;
-	};
+	}
 
 	/* Unidentified device ID, return empty support mask. */
 	return 0;
 }
 
 /**
- *  HwContext interface for writing MM registers
- */
-
-static bool i2c_read(
-	struct bios_parser *bp,
-	struct graphics_object_i2c_info *i2c_info,
-	uint8_t *buffer,
-	uint32_t length)
-{
-	struct ddc *ddc;
-	uint8_t offset[2] = { 0, 0 };
-	bool result = false;
-	struct i2c_command cmd;
-	struct gpio_ddc_hw_info hw_info = {
-		i2c_info->i2c_hw_assist,
-		i2c_info->i2c_line };
-
-	ddc = dal_gpio_create_ddc(bp->base.ctx->gpio_service,
-		i2c_info->gpio_info.clk_a_register_index,
-		(1 << i2c_info->gpio_info.clk_a_shift), &hw_info);
-
-	if (!ddc)
-		return result;
-
-	/*Using SW engine */
-	cmd.engine = I2C_COMMAND_ENGINE_SW;
-	cmd.speed = ddc->ctx->dc->caps.i2c_speed_in_khz;
-
-	{
-		struct i2c_payload payloads[] = {
-				{
-						.address = i2c_info->i2c_slave_address >> 1,
-						.data = offset,
-						.length = sizeof(offset),
-						.write = true
-				},
-				{
-						.address = i2c_info->i2c_slave_address >> 1,
-						.data = buffer,
-						.length = length,
-						.write = false
-				}
-		};
-
-		cmd.payloads = payloads;
-		cmd.number_of_payloads = ARRAY_SIZE(payloads);
-
-		/* TODO route this through drm i2c_adapter */
-		result = dal_i2caux_submit_i2c_command(
-				ddc->ctx->i2caux,
-				ddc,
-				&cmd);
-	}
-
-	dal_gpio_destroy_ddc(&ddc);
-
-	return result;
-}
-
-/**
- * Read external display connection info table through i2c.
- * validate the GUID and checksum.
- *
- * @return enum bp_result whether all data was sucessfully read
- */
-static enum bp_result get_ext_display_connection_info(
-	struct bios_parser *bp,
-	ATOM_OBJECT *opm_object,
-	ATOM_EXTERNAL_DISPLAY_CONNECTION_INFO *ext_display_connection_info_tbl)
-{
-	bool config_tbl_present = false;
-	ATOM_I2C_RECORD *i2c_record = NULL;
-	uint32_t i = 0;
-
-	if (opm_object == NULL)
-		return BP_RESULT_BADINPUT;
-
-	i2c_record = get_i2c_record(bp, opm_object);
-
-	if (i2c_record != NULL) {
-		ATOM_GPIO_I2C_INFO *gpio_i2c_header;
-		struct graphics_object_i2c_info i2c_info;
-
-		gpio_i2c_header = GET_IMAGE(ATOM_GPIO_I2C_INFO,
-				bp->master_data_tbl->ListOfDataTables.GPIO_I2C_Info);
-
-		if (NULL == gpio_i2c_header)
-			return BP_RESULT_BADBIOSTABLE;
-
-		if (get_gpio_i2c_info(bp, i2c_record, &i2c_info) !=
-				BP_RESULT_OK)
-			return BP_RESULT_BADBIOSTABLE;
-
-		if (i2c_read(bp,
-			     &i2c_info,
-			     (uint8_t *)ext_display_connection_info_tbl,
-			     sizeof(ATOM_EXTERNAL_DISPLAY_CONNECTION_INFO))) {
-			config_tbl_present = true;
-		}
-	}
-
-	/* Validate GUID */
-	if (config_tbl_present)
-		for (i = 0; i < NUMBER_OF_UCHAR_FOR_GUID; i++) {
-			if (ext_display_connection_info_tbl->ucGuid[i]
-			    != ext_display_connection_guid[i]) {
-				config_tbl_present = false;
-				break;
-			}
-		}
-
-	/* Validate checksum */
-	if (config_tbl_present) {
-		uint8_t check_sum = 0;
-		uint8_t *buf =
-				(uint8_t *)ext_display_connection_info_tbl;
-
-		for (i = 0; i < sizeof(ATOM_EXTERNAL_DISPLAY_CONNECTION_INFO);
-				i++) {
-			check_sum += buf[i];
-		}
-
-		if (check_sum != 0)
-			config_tbl_present = false;
-	}
-
-	if (config_tbl_present)
-		return BP_RESULT_OK;
-	else
-		return BP_RESULT_FAILURE;
-}
-
-/*
- * Gets the first device ID in the same group as the given ID for enumerating.
- * For instance, if any DFP device ID is passed, returns the device ID for DFP1.
- *
- * The first device ID in the same group as the passed device ID, or 0 if no
- * matching device group found.
- */
-static uint32_t enum_first_device_id(uint32_t dev_id)
-{
-	/* Return the first in the group that this ID belongs to. */
-	if (dev_id & ATOM_DEVICE_CRT_SUPPORT)
-		return ATOM_DEVICE_CRT1_SUPPORT;
-	else if (dev_id & ATOM_DEVICE_DFP_SUPPORT)
-		return ATOM_DEVICE_DFP1_SUPPORT;
-	else if (dev_id & ATOM_DEVICE_LCD_SUPPORT)
-		return ATOM_DEVICE_LCD1_SUPPORT;
-	else if (dev_id & ATOM_DEVICE_TV_SUPPORT)
-		return ATOM_DEVICE_TV1_SUPPORT;
-	else if (dev_id & ATOM_DEVICE_CV_SUPPORT)
-		return ATOM_DEVICE_CV_SUPPORT;
-
-	/* No group found for this device ID. */
-
-	dm_error("%s: incorrect input %d\n", __func__, dev_id);
-	/* No matching support flag for given device ID */
-	return 0;
-}
-
-/*
- * Gets the next device ID in the group for a given device ID.
- *
- * The current device ID being enumerated on.
- *
- * The next device ID in the group, or 0 if no device exists.
- */
-static uint32_t enum_next_dev_id(uint32_t dev_id)
-{
-	/* Get next device ID in the group. */
-	switch (dev_id) {
-	case ATOM_DEVICE_CRT1_SUPPORT:
-		return ATOM_DEVICE_CRT2_SUPPORT;
-	case ATOM_DEVICE_LCD1_SUPPORT:
-		return ATOM_DEVICE_LCD2_SUPPORT;
-	case ATOM_DEVICE_DFP1_SUPPORT:
-		return ATOM_DEVICE_DFP2_SUPPORT;
-	case ATOM_DEVICE_DFP2_SUPPORT:
-		return ATOM_DEVICE_DFP3_SUPPORT;
-	case ATOM_DEVICE_DFP3_SUPPORT:
-		return ATOM_DEVICE_DFP4_SUPPORT;
-	case ATOM_DEVICE_DFP4_SUPPORT:
-		return ATOM_DEVICE_DFP5_SUPPORT;
-	case ATOM_DEVICE_DFP5_SUPPORT:
-		return ATOM_DEVICE_DFP6_SUPPORT;
-	}
-
-	/* Done enumerating through devices. */
-	return 0;
-}
-
-/*
- * Returns the new device tag record for patched BIOS object.
- *
- * [IN] pExtDisplayPath - External display path to copy device tag from.
- * [IN] deviceSupport - Bit vector for device ID support flags.
- * [OUT] pDeviceTag - Device tag structure to fill with patched data.
- *
- * True if a compatible device ID was found, false otherwise.
- */
-static bool get_patched_device_tag(
-	struct bios_parser *bp,
-	EXT_DISPLAY_PATH *ext_display_path,
-	uint32_t device_support,
-	ATOM_CONNECTOR_DEVICE_TAG *device_tag)
-{
-	uint32_t dev_id;
-	/* Use fallback behaviour if not supported. */
-	if (!bp->remap_device_tags) {
-		device_tag->ulACPIDeviceEnum =
-				cpu_to_le32((uint32_t) le16_to_cpu(ext_display_path->usDeviceACPIEnum));
-		device_tag->usDeviceID =
-				cpu_to_le16(le16_to_cpu(ext_display_path->usDeviceTag));
-		return true;
-	}
-
-	/* Find the first unused in the same group. */
-	dev_id = enum_first_device_id(le16_to_cpu(ext_display_path->usDeviceTag));
-	while (dev_id != 0) {
-		/* Assign this device ID if supported. */
-		if ((device_support & dev_id) != 0) {
-			device_tag->ulACPIDeviceEnum =
-					cpu_to_le32((uint32_t) le16_to_cpu(ext_display_path->usDeviceACPIEnum));
-			device_tag->usDeviceID = cpu_to_le16((USHORT) dev_id);
-			return true;
-		}
-
-		dev_id = enum_next_dev_id(dev_id);
-	}
-
-	/* No compatible device ID found. */
-	return false;
-}
-
-/*
- * Adds a device tag to a BIOS object's device tag record if there is
- * matching device ID supported.
- *
- * pObject - Pointer to the BIOS object to add the device tag to.
- * pExtDisplayPath - Display path to retrieve base device ID from.
- * pDeviceSupport - Pointer to bit vector for supported device IDs.
- */
-static void add_device_tag_from_ext_display_path(
-	struct bios_parser *bp,
-	ATOM_OBJECT *object,
-	EXT_DISPLAY_PATH *ext_display_path,
-	uint32_t *device_support)
-{
-	/* Get device tag record for object. */
-	ATOM_CONNECTOR_DEVICE_TAG *device_tag = NULL;
-	ATOM_CONNECTOR_DEVICE_TAG_RECORD *device_tag_record = NULL;
-	enum bp_result result =
-			bios_parser_get_device_tag_record(
-					bp, object, &device_tag_record);
-
-	if ((le16_to_cpu(ext_display_path->usDeviceTag) != CONNECTOR_OBJECT_ID_NONE)
-			&& (result == BP_RESULT_OK)) {
-		uint8_t index;
-
-		if ((device_tag_record->ucNumberOfDevice == 1) &&
-				(le16_to_cpu(device_tag_record->asDeviceTag[0].usDeviceID) == 0)) {
-			/*Workaround bug in current VBIOS releases where
-			 * ucNumberOfDevice = 1 but there is no actual device
-			 * tag data. This w/a is temporary until the updated
-			 * VBIOS is distributed. */
-			device_tag_record->ucNumberOfDevice =
-					device_tag_record->ucNumberOfDevice - 1;
-		}
-
-		/* Attempt to find a matching device ID. */
-		index = device_tag_record->ucNumberOfDevice;
-		device_tag = &device_tag_record->asDeviceTag[index];
-		if (get_patched_device_tag(
-				bp,
-				ext_display_path,
-				*device_support,
-				device_tag)) {
-			/* Update cached device support to remove assigned ID.
-			 */
-			*device_support &= ~le16_to_cpu(device_tag->usDeviceID);
-			device_tag_record->ucNumberOfDevice++;
-		}
-	}
-}
-
-/*
- * Read out a single EXT_DISPLAY_PATH from the external display connection info
- * table. The specific entry in the table is determined by the enum_id passed
- * in.
- *
- * EXT_DISPLAY_PATH describing a single Configuration table entry
- */
-
-#define INVALID_CONNECTOR 0xffff
-
-static EXT_DISPLAY_PATH *get_ext_display_path_entry(
-	ATOM_EXTERNAL_DISPLAY_CONNECTION_INFO *config_table,
-	uint32_t bios_object_id)
-{
-	EXT_DISPLAY_PATH *ext_display_path;
-	uint32_t ext_display_path_index =
-			((bios_object_id & ENUM_ID_MASK) >> ENUM_ID_SHIFT) - 1;
-
-	if (ext_display_path_index >= MAX_NUMBER_OF_EXT_DISPLAY_PATH)
-		return NULL;
-
-	ext_display_path = &config_table->sPath[ext_display_path_index];
-
-	if (le16_to_cpu(ext_display_path->usDeviceConnector) == INVALID_CONNECTOR)
-		ext_display_path->usDeviceConnector = cpu_to_le16(0);
-
-	return ext_display_path;
-}
-
-/*
- * Get AUX/DDC information of input object id
- *
- * search all records to find the ATOM_CONNECTOR_AUXDDC_LUT_RECORD_TYPE record
- * IR
- */
-static ATOM_CONNECTOR_AUXDDC_LUT_RECORD *get_ext_connector_aux_ddc_lut_record(
-	struct bios_parser *bp,
-	ATOM_OBJECT *object)
-{
-	uint32_t offset;
-	ATOM_COMMON_RECORD_HEADER *header;
-
-	if (!object) {
-		BREAK_TO_DEBUGGER();
-		/* Invalid object */
-		return NULL;
-	}
-
-	offset = le16_to_cpu(object->usRecordOffset)
-					+ bp->object_info_tbl_offset;
-
-	for (;;) {
-		header = GET_IMAGE(ATOM_COMMON_RECORD_HEADER, offset);
-
-		if (!header)
-			return NULL;
-
-		if (LAST_RECORD_TYPE == header->ucRecordType ||
-				0 == header->ucRecordSize)
-			break;
-
-		if (ATOM_CONNECTOR_AUXDDC_LUT_RECORD_TYPE ==
-				header->ucRecordType &&
-				sizeof(ATOM_CONNECTOR_AUXDDC_LUT_RECORD) <=
-				header->ucRecordSize)
-			return (ATOM_CONNECTOR_AUXDDC_LUT_RECORD *)(header);
-
-		offset += header->ucRecordSize;
-	}
-
-	return NULL;
-}
-
-/*
- * Get AUX/DDC information of input object id
- *
- * search all records to find the ATOM_CONNECTOR_AUXDDC_LUT_RECORD_TYPE record
- * IR
- */
-static ATOM_CONNECTOR_HPDPIN_LUT_RECORD *get_ext_connector_hpd_pin_lut_record(
-	struct bios_parser *bp,
-	ATOM_OBJECT *object)
-{
-	uint32_t offset;
-	ATOM_COMMON_RECORD_HEADER *header;
-
-	if (!object) {
-		BREAK_TO_DEBUGGER();
-		/* Invalid object */
-		return NULL;
-	}
-
-	offset = le16_to_cpu(object->usRecordOffset)
-					+ bp->object_info_tbl_offset;
-
-	for (;;) {
-		header = GET_IMAGE(ATOM_COMMON_RECORD_HEADER, offset);
-
-		if (!header)
-			return NULL;
-
-		if (LAST_RECORD_TYPE == header->ucRecordType ||
-				0 == header->ucRecordSize)
-			break;
-
-		if (ATOM_CONNECTOR_HPDPIN_LUT_RECORD_TYPE ==
-				header->ucRecordType &&
-				sizeof(ATOM_CONNECTOR_HPDPIN_LUT_RECORD) <=
-				header->ucRecordSize)
-			return (ATOM_CONNECTOR_HPDPIN_LUT_RECORD *)header;
-
-		offset += header->ucRecordSize;
-	}
-
-	return NULL;
-}
-
-/*
- * Check whether we need to patch the VBIOS connector info table with
- * data from an external display connection info table.  This is
- * necessary to support MXM boards with an OPM (output personality
- * module).  With these designs, the VBIOS connector info table
- * specifies an MXM_CONNECTOR with a unique ID.  The driver retrieves
- * the external connection info table through i2c and then looks up the
- * connector ID to find the real connector type (e.g. DFP1).
- *
- */
-static enum bp_result patch_bios_image_from_ext_display_connection_info(
-	struct bios_parser *bp)
-{
-	ATOM_OBJECT_TABLE *connector_tbl;
-	uint32_t connector_tbl_offset;
-	struct graphics_object_id object_id;
-	ATOM_OBJECT *object;
-	ATOM_EXTERNAL_DISPLAY_CONNECTION_INFO ext_display_connection_info_tbl;
-	EXT_DISPLAY_PATH *ext_display_path;
-	ATOM_CONNECTOR_AUXDDC_LUT_RECORD *aux_ddc_lut_record = NULL;
-	ATOM_I2C_RECORD *i2c_record = NULL;
-	ATOM_CONNECTOR_HPDPIN_LUT_RECORD *hpd_pin_lut_record = NULL;
-	ATOM_HPD_INT_RECORD *hpd_record = NULL;
-	ATOM_OBJECT_TABLE *encoder_table;
-	uint32_t encoder_table_offset;
-	ATOM_OBJECT *opm_object = NULL;
-	uint32_t i = 0;
-	struct graphics_object_id opm_object_id =
-			dal_graphics_object_id_init(
-					GENERIC_ID_MXM_OPM,
-					ENUM_ID_1,
-					OBJECT_TYPE_GENERIC);
-	ATOM_CONNECTOR_DEVICE_TAG_RECORD *dev_tag_record;
-	uint32_t cached_device_support =
-			le16_to_cpu(bp->object_info_tbl.v1_1->usDeviceSupport);
-
-	uint32_t dst_number;
-	uint16_t *dst_object_id_list;
-
-	opm_object = get_bios_object(bp, opm_object_id);
-	if (!opm_object)
-		return BP_RESULT_UNSUPPORTED;
-
-	memset(&ext_display_connection_info_tbl, 0,
-			sizeof(ATOM_EXTERNAL_DISPLAY_CONNECTION_INFO));
-
-	connector_tbl_offset = bp->object_info_tbl_offset
-			+ le16_to_cpu(bp->object_info_tbl.v1_1->usConnectorObjectTableOffset);
-	connector_tbl = GET_IMAGE(ATOM_OBJECT_TABLE, connector_tbl_offset);
-
-	/* Read Connector info table from EEPROM through i2c */
-	if (get_ext_display_connection_info(bp,
-					    opm_object,
-					    &ext_display_connection_info_tbl) != BP_RESULT_OK) {
-
-		DC_LOG_WARNING("%s: Failed to read Connection Info Table", __func__);
-		return BP_RESULT_UNSUPPORTED;
-	}
-
-	/* Get pointer to AUX/DDC and HPD LUTs */
-	aux_ddc_lut_record =
-			get_ext_connector_aux_ddc_lut_record(bp, opm_object);
-	hpd_pin_lut_record =
-			get_ext_connector_hpd_pin_lut_record(bp, opm_object);
-
-	if ((aux_ddc_lut_record == NULL) || (hpd_pin_lut_record == NULL))
-		return BP_RESULT_UNSUPPORTED;
-
-	/* Cache support bits for currently unmapped device types. */
-	if (bp->remap_device_tags) {
-		for (i = 0; i < connector_tbl->ucNumberOfObjects; ++i) {
-			uint32_t j;
-			/* Remove support for all non-MXM connectors. */
-			object = &connector_tbl->asObjects[i];
-			object_id = object_id_from_bios_object_id(
-					le16_to_cpu(object->usObjectID));
-			if ((OBJECT_TYPE_CONNECTOR != object_id.type) ||
-					(CONNECTOR_ID_MXM == object_id.id))
-				continue;
-
-			/* Remove support for all device tags. */
-			if (bios_parser_get_device_tag_record(
-					bp, object, &dev_tag_record) != BP_RESULT_OK)
-				continue;
-
-			for (j = 0; j < dev_tag_record->ucNumberOfDevice; ++j) {
-				ATOM_CONNECTOR_DEVICE_TAG *device_tag =
-						&dev_tag_record->asDeviceTag[j];
-				cached_device_support &=
-						~le16_to_cpu(device_tag->usDeviceID);
-			}
-		}
-	}
-
-	/* Find all MXM connector objects and patch them with connector info
-	 * from the external display connection info table. */
-	for (i = 0; i < connector_tbl->ucNumberOfObjects; i++) {
-		uint32_t j;
-
-		object = &connector_tbl->asObjects[i];
-		object_id = object_id_from_bios_object_id(le16_to_cpu(object->usObjectID));
-		if ((OBJECT_TYPE_CONNECTOR != object_id.type) ||
-				(CONNECTOR_ID_MXM != object_id.id))
-			continue;
-
-		/* Get the correct connection info table entry based on the enum
-		 * id. */
-		ext_display_path = get_ext_display_path_entry(
-				&ext_display_connection_info_tbl,
-				le16_to_cpu(object->usObjectID));
-		if (!ext_display_path)
-			return BP_RESULT_FAILURE;
-
-		/* Patch device connector ID */
-		object->usObjectID =
-				cpu_to_le16(le16_to_cpu(ext_display_path->usDeviceConnector));
-
-		/* Patch device tag, ulACPIDeviceEnum. */
-		add_device_tag_from_ext_display_path(
-				bp,
-				object,
-				ext_display_path,
-				&cached_device_support);
-
-		/* Patch HPD info */
-		if (ext_display_path->ucExtHPDPINLutIndex <
-				MAX_NUMBER_OF_EXT_HPDPIN_LUT_ENTRIES) {
-			hpd_record = get_hpd_record(bp, object);
-			if (hpd_record) {
-				uint8_t index =
-						ext_display_path->ucExtHPDPINLutIndex;
-				hpd_record->ucHPDIntGPIOID =
-						hpd_pin_lut_record->ucHPDPINMap[index];
-			} else {
-				BREAK_TO_DEBUGGER();
-				/* Invalid hpd record */
-				return BP_RESULT_FAILURE;
-			}
-		}
-
-		/* Patch I2C/AUX info */
-		if (ext_display_path->ucExtHPDPINLutIndex <
-				MAX_NUMBER_OF_EXT_AUXDDC_LUT_ENTRIES) {
-			i2c_record = get_i2c_record(bp, object);
-			if (i2c_record) {
-				uint8_t index =
-						ext_display_path->ucExtAUXDDCLutIndex;
-				i2c_record->sucI2cId =
-						aux_ddc_lut_record->ucAUXDDCMap[index];
-			} else {
-				BREAK_TO_DEBUGGER();
-				/* Invalid I2C record */
-				return BP_RESULT_FAILURE;
-			}
-		}
-
-		/* Merge with other MXM connectors that map to the same physical
-		 * connector. */
-		for (j = i + 1;
-				j < connector_tbl->ucNumberOfObjects; j++) {
-			ATOM_OBJECT *next_object;
-			struct graphics_object_id next_object_id;
-			EXT_DISPLAY_PATH *next_ext_display_path;
-
-			next_object = &connector_tbl->asObjects[j];
-			next_object_id = object_id_from_bios_object_id(
-					le16_to_cpu(next_object->usObjectID));
-
-			if ((OBJECT_TYPE_CONNECTOR != next_object_id.type) &&
-					(CONNECTOR_ID_MXM == next_object_id.id))
-				continue;
-
-			next_ext_display_path = get_ext_display_path_entry(
-					&ext_display_connection_info_tbl,
-					le16_to_cpu(next_object->usObjectID));
-
-			if (next_ext_display_path == NULL)
-				return BP_RESULT_FAILURE;
-
-			/* Merge if using same connector. */
-			if ((le16_to_cpu(next_ext_display_path->usDeviceConnector) ==
-					le16_to_cpu(ext_display_path->usDeviceConnector)) &&
-					(le16_to_cpu(ext_display_path->usDeviceConnector) != 0)) {
-				/* Clear duplicate connector from table. */
-				next_object->usObjectID = cpu_to_le16(0);
-				add_device_tag_from_ext_display_path(
-						bp,
-						object,
-						ext_display_path,
-						&cached_device_support);
-			}
-		}
-	}
-
-	/* Find all encoders which have an MXM object as their destination.
-	 *  Replace the MXM object with the real connector Id from the external
-	 *  display connection info table */
-
-	encoder_table_offset = bp->object_info_tbl_offset
-			+ le16_to_cpu(bp->object_info_tbl.v1_1->usEncoderObjectTableOffset);
-	encoder_table = GET_IMAGE(ATOM_OBJECT_TABLE, encoder_table_offset);
-
-	for (i = 0; i < encoder_table->ucNumberOfObjects; i++) {
-		uint32_t j;
-
-		object = &encoder_table->asObjects[i];
-
-		dst_number = get_dest_obj_list(bp, object, &dst_object_id_list);
-
-		for (j = 0; j < dst_number; j++) {
-			object_id = object_id_from_bios_object_id(
-					dst_object_id_list[j]);
-
-			if ((OBJECT_TYPE_CONNECTOR != object_id.type) ||
-					(CONNECTOR_ID_MXM != object_id.id))
-				continue;
-
-			/* Get the correct connection info table entry based on
-			 * the enum id. */
-			ext_display_path =
-					get_ext_display_path_entry(
-							&ext_display_connection_info_tbl,
-							dst_object_id_list[j]);
-
-			if (ext_display_path == NULL)
-				return BP_RESULT_FAILURE;
-
-			dst_object_id_list[j] =
-					le16_to_cpu(ext_display_path->usDeviceConnector);
-		}
-	}
-
-	return BP_RESULT_OK;
-}
-
-/*
- * Check whether we need to patch the VBIOS connector info table with
- * data from an external display connection info table.  This is
- * necessary to support MXM boards with an OPM (output personality
- * module).  With these designs, the VBIOS connector info table
- * specifies an MXM_CONNECTOR with a unique ID.  The driver retrieves
- * the external connection info table through i2c and then looks up the
- * connector ID to find the real connector type (e.g. DFP1).
- *
- */
-
-static void process_ext_display_connection_info(struct bios_parser *bp)
-{
-	ATOM_OBJECT_TABLE *connector_tbl;
-	uint32_t connector_tbl_offset;
-	struct graphics_object_id object_id;
-	ATOM_OBJECT *object;
-	bool mxm_connector_found = false;
-	bool null_entry_found = false;
-	uint32_t i = 0;
-
-	connector_tbl_offset = bp->object_info_tbl_offset +
-			le16_to_cpu(bp->object_info_tbl.v1_1->usConnectorObjectTableOffset);
-	connector_tbl = GET_IMAGE(ATOM_OBJECT_TABLE, connector_tbl_offset);
-
-	/* Look for MXM connectors to determine whether we need patch the VBIOS
-	 * connector info table. Look for null entries to determine whether we
-	 * need to compact connector table. */
-	for (i = 0; i < connector_tbl->ucNumberOfObjects; i++) {
-		object = &connector_tbl->asObjects[i];
-		object_id = object_id_from_bios_object_id(le16_to_cpu(object->usObjectID));
-
-		if ((OBJECT_TYPE_CONNECTOR == object_id.type) &&
-				(CONNECTOR_ID_MXM == object_id.id)) {
-			/* Once we found MXM connector - we can break */
-			mxm_connector_found = true;
-			break;
-		} else if (OBJECT_TYPE_CONNECTOR != object_id.type) {
-			/* We need to continue looping - to check if MXM
-			 * connector present */
-			null_entry_found = true;
-		}
-	}
-
-	/* Patch BIOS image */
-	if (mxm_connector_found || null_entry_found) {
-		uint32_t connectors_num = 0;
-		uint8_t *original_bios;
-		/* Step 1: Replace bios image with the new copy which will be
-		 * patched */
-		bp->base.bios_local_image = kzalloc(bp->base.bios_size,
-						    GFP_KERNEL);
-		if (bp->base.bios_local_image == NULL) {
-			BREAK_TO_DEBUGGER();
-			/* Failed to alloc bp->base.bios_local_image */
-			return;
-		}
-
-		memmove(bp->base.bios_local_image, bp->base.bios, bp->base.bios_size);
-		original_bios = bp->base.bios;
-		bp->base.bios = bp->base.bios_local_image;
-		connector_tbl =
-				GET_IMAGE(ATOM_OBJECT_TABLE, connector_tbl_offset);
-
-		/* Step 2: (only if MXM connector found) Patch BIOS image with
-		 * info from external module */
-		if (mxm_connector_found &&
-		    patch_bios_image_from_ext_display_connection_info(bp) !=
-						BP_RESULT_OK) {
-			/* Patching the bios image has failed. We will copy
-			 * again original image provided and afterwards
-			 * only remove null entries */
-			memmove(
-					bp->base.bios_local_image,
-					original_bios,
-					bp->base.bios_size);
-		}
-
-		/* Step 3: Compact connector table (remove null entries, valid
-		 * entries moved to beginning) */
-		for (i = 0; i < connector_tbl->ucNumberOfObjects; i++) {
-			object = &connector_tbl->asObjects[i];
-			object_id = object_id_from_bios_object_id(
-					le16_to_cpu(object->usObjectID));
-
-			if (OBJECT_TYPE_CONNECTOR != object_id.type)
-				continue;
-
-			if (i != connectors_num) {
-				memmove(
-						&connector_tbl->
-						asObjects[connectors_num],
-						object,
-						sizeof(ATOM_OBJECT));
-			}
-			++connectors_num;
-		}
-		connector_tbl->ucNumberOfObjects = (uint8_t)connectors_num;
-	}
-}
-
-static void bios_parser_post_init(struct dc_bios *dcb)
-{
-	struct bios_parser *bp = BP_FROM_DCB(dcb);
-
-	process_ext_display_connection_info(bp);
-}
-
-/**
- * bios_parser_set_scratch_critical_state
- *
- * @brief
- *  update critical state bit in VBIOS scratch register
- *
- * @param
- *  bool - to set or reset state
+ * bios_parser_set_scratch_critical_state - update critical state
+ *                                          bit in VBIOS scratch register
+ * @dcb:    pointer to the DC BIOS
+ * @state:  set or reset state
  */
 static void bios_parser_set_scratch_critical_state(
 	struct dc_bios *dcb,
@@ -3396,7 +2403,7 @@ static void bios_parser_set_scratch_critical_state(
  * bios_parser *bp - [in]BIOS parser handler to get master data table
  * integrated_info *info - [out] store and output integrated info
  *
- * @return
+ * return:
  * enum bp_result - BP_RESULT_OK if information is available,
  *                  BP_RESULT_BADBIOSTABLE otherwise.
  */
@@ -3415,15 +2422,6 @@ static enum bp_result get_integrated_info_v8(
 	info->boot_up_engine_clock = le32_to_cpu(info_v8->ulBootUpEngineClock) * 10;
 	info->dentist_vco_freq = le32_to_cpu(info_v8->ulDentistVCOFreq) * 10;
 	info->boot_up_uma_clock = le32_to_cpu(info_v8->ulBootUpUMAClock) * 10;
-
-	for (i = 0; i < NUMBER_OF_DISP_CLK_VOLTAGE; ++i) {
-		/* Convert [10KHz] into [KHz] */
-		info->disp_clk_voltage[i].max_supported_clk =
-			le32_to_cpu(info_v8->sDISPCLK_Voltage[i].
-				    ulMaximumSupportedCLK) * 10;
-		info->disp_clk_voltage[i].voltage_index =
-			le32_to_cpu(info_v8->sDISPCLK_Voltage[i].ulVoltageIndex);
-	}
 
 	info->boot_up_req_display_vector =
 		le32_to_cpu(info_v8->ulBootUpReqDisplayVector);
@@ -3537,16 +2535,16 @@ static enum bp_result get_integrated_info_v8(
 }
 
 /*
- * get_integrated_info_v8
+ * get_integrated_info_v9
  *
  * @brief
- * Get V8 integrated BIOS information
+ * Get V9 integrated BIOS information
  *
  * @param
  * bios_parser *bp - [in]BIOS parser handler to get master data table
  * integrated_info *info - [out] store and output integrated info
  *
- * @return
+ * return:
  * enum bp_result - BP_RESULT_OK if information is available,
  *                  BP_RESULT_BADBIOSTABLE otherwise.
  */
@@ -3566,14 +2564,6 @@ static enum bp_result get_integrated_info_v9(
 	info->boot_up_engine_clock = le32_to_cpu(info_v9->ulBootUpEngineClock) * 10;
 	info->dentist_vco_freq = le32_to_cpu(info_v9->ulDentistVCOFreq) * 10;
 	info->boot_up_uma_clock = le32_to_cpu(info_v9->ulBootUpUMAClock) * 10;
-
-	for (i = 0; i < NUMBER_OF_DISP_CLK_VOLTAGE; ++i) {
-		/* Convert [10KHz] into [KHz] */
-		info->disp_clk_voltage[i].max_supported_clk =
-			le32_to_cpu(info_v9->sDISPCLK_Voltage[i].ulMaximumSupportedCLK) * 10;
-		info->disp_clk_voltage[i].voltage_index =
-			le32_to_cpu(info_v9->sDISPCLK_Voltage[i].ulVoltageIndex);
-	}
 
 	info->boot_up_req_display_vector =
 		le32_to_cpu(info_v9->ulBootUpReqDisplayVector);
@@ -3683,7 +2673,7 @@ static enum bp_result get_integrated_info_v9(
  * bios_parser *bp - [in]BIOS parser handler to get master data table
  * integrated_info *info - [out] store and output integrated info
  *
- * @return
+ * return:
  * enum bp_result - BP_RESULT_OK if information is available,
  *                  BP_RESULT_BADBIOSTABLE otherwise.
  */
@@ -3716,28 +2706,6 @@ static enum bp_result construct_integrated_info(
 		}
 	}
 
-	/* Sort voltage table from low to high*/
-	if (result == BP_RESULT_OK) {
-		struct clock_voltage_caps temp = {0, 0};
-		uint32_t i;
-		uint32_t j;
-
-		for (i = 1; i < NUMBER_OF_DISP_CLK_VOLTAGE; ++i) {
-			for (j = i; j > 0; --j) {
-				if (
-						info->disp_clk_voltage[j].max_supported_clk <
-						info->disp_clk_voltage[j-1].max_supported_clk) {
-					/* swap j and j - 1*/
-					temp = info->disp_clk_voltage[j-1];
-					info->disp_clk_voltage[j-1] =
-							info->disp_clk_voltage[j];
-					info->disp_clk_voltage[j] = temp;
-				}
-			}
-		}
-
-	}
-
 	return result;
 }
 
@@ -3745,9 +2713,9 @@ static struct integrated_info *bios_parser_create_integrated_info(
 	struct dc_bios *dcb)
 {
 	struct bios_parser *bp = BP_FROM_DCB(dcb);
-	struct integrated_info *info = NULL;
+	struct integrated_info *info;
 
-	info = kzalloc(sizeof(struct integrated_info), GFP_KERNEL);
+	info = kzalloc_obj(struct integrated_info);
 
 	if (info == NULL) {
 		ASSERT_CRITICAL(0);
@@ -3762,32 +2730,215 @@ static struct integrated_info *bios_parser_create_integrated_info(
 	return NULL;
 }
 
+static enum bp_result update_slot_layout_info(struct dc_bios *dcb,
+					      unsigned int i,
+					      struct slot_layout_info *slot_layout_info,
+					      unsigned int record_offset)
+{
+	(void)i;
+	unsigned int j;
+	unsigned int n;
+	struct bios_parser *bp;
+	ATOM_BRACKET_LAYOUT_RECORD *record;
+	ATOM_COMMON_RECORD_HEADER *record_header;
+	enum bp_result result = BP_RESULT_NORECORD;
+
+	bp = BP_FROM_DCB(dcb);
+	record = NULL;
+	record_header = NULL;
+
+	for (n = 0; n < BIOS_MAX_NUM_RECORD; n++) {
+
+		record_header = GET_IMAGE(ATOM_COMMON_RECORD_HEADER, record_offset);
+		if (record_header == NULL) {
+			result = BP_RESULT_BADBIOSTABLE;
+			break;
+		}
+
+		/* the end of the list */
+		if (record_header->ucRecordType == 0xff ||
+			record_header->ucRecordSize == 0)	{
+			break;
+		}
+
+		if (record_header->ucRecordType ==
+			ATOM_BRACKET_LAYOUT_RECORD_TYPE &&
+			struct_size(record, asConnInfo, 1)
+			<= record_header->ucRecordSize) {
+			record = (ATOM_BRACKET_LAYOUT_RECORD *)
+				(record_header);
+			result = BP_RESULT_OK;
+			break;
+		}
+
+		record_offset += record_header->ucRecordSize;
+	}
+
+	/* return if the record not found */
+	if (result != BP_RESULT_OK)
+		return result;
+
+	/* get slot sizes */
+	slot_layout_info->length = record->ucLength;
+	slot_layout_info->width = record->ucWidth;
+
+	/* get info for each connector in the slot */
+	slot_layout_info->num_of_connectors = record->ucConnNum;
+	for (j = 0; j < slot_layout_info->num_of_connectors; ++j) {
+		slot_layout_info->connectors[j].connector_type =
+			(enum connector_layout_type)
+			(record->asConnInfo[j].ucConnectorType);
+		switch (record->asConnInfo[j].ucConnectorType) {
+		case CONNECTOR_TYPE_DVI_D:
+			slot_layout_info->connectors[j].connector_type =
+				CONNECTOR_LAYOUT_TYPE_DVI_D;
+			slot_layout_info->connectors[j].length =
+				CONNECTOR_SIZE_DVI;
+			break;
+
+		case CONNECTOR_TYPE_HDMI:
+			slot_layout_info->connectors[j].connector_type =
+				CONNECTOR_LAYOUT_TYPE_HDMI;
+			slot_layout_info->connectors[j].length =
+				CONNECTOR_SIZE_HDMI;
+			break;
+
+		case CONNECTOR_TYPE_DISPLAY_PORT:
+			slot_layout_info->connectors[j].connector_type =
+				CONNECTOR_LAYOUT_TYPE_DP;
+			slot_layout_info->connectors[j].length =
+				CONNECTOR_SIZE_DP;
+			break;
+
+		case CONNECTOR_TYPE_MINI_DISPLAY_PORT:
+			slot_layout_info->connectors[j].connector_type =
+				CONNECTOR_LAYOUT_TYPE_MINI_DP;
+			slot_layout_info->connectors[j].length =
+				CONNECTOR_SIZE_MINI_DP;
+			break;
+
+		default:
+			slot_layout_info->connectors[j].connector_type =
+				CONNECTOR_LAYOUT_TYPE_UNKNOWN;
+			slot_layout_info->connectors[j].length =
+				CONNECTOR_SIZE_UNKNOWN;
+		}
+
+		slot_layout_info->connectors[j].position =
+			record->asConnInfo[j].ucPosition;
+		slot_layout_info->connectors[j].connector_id =
+			object_id_from_bios_object_id(
+				record->asConnInfo[j].usConnectorObjectId);
+	}
+	return result;
+}
+
+
+static enum bp_result get_bracket_layout_record(struct dc_bios *dcb,
+						unsigned int bracket_layout_id,
+						struct slot_layout_info *slot_layout_info)
+{
+	unsigned int i;
+	unsigned int record_offset;
+	struct bios_parser *bp;
+	enum bp_result result;
+	ATOM_OBJECT *object;
+	ATOM_OBJECT_TABLE *object_table;
+	unsigned int genericTableOffset;
+
+	bp = BP_FROM_DCB(dcb);
+	object = NULL;
+	if (slot_layout_info == NULL) {
+		DC_LOG_DETECTION_EDID_PARSER("Invalid slot_layout_info\n");
+		return BP_RESULT_BADINPUT;
+	}
+
+
+	genericTableOffset = bp->object_info_tbl_offset +
+		bp->object_info_tbl.v1_3->usMiscObjectTableOffset;
+	object_table = ((ATOM_OBJECT_TABLE *) bios_get_image(&bp->base,
+				genericTableOffset,
+				struct_size(object_table, asObjects, 1)));
+	if (!object_table)
+		return BP_RESULT_FAILURE;
+
+	result = BP_RESULT_NORECORD;
+	for (i = 0; i < object_table->ucNumberOfObjects; ++i) {
+
+		if (bracket_layout_id ==
+			object_table->asObjects[i].usObjectID) {
+
+			object = &object_table->asObjects[i];
+			record_offset = object->usRecordOffset +
+				bp->object_info_tbl_offset;
+
+			result = update_slot_layout_info(dcb, i,
+				slot_layout_info, record_offset);
+			break;
+		}
+	}
+	return result;
+}
+
+static enum bp_result bios_get_board_layout_info(
+	struct dc_bios *dcb,
+	struct board_layout_info *board_layout_info)
+{
+	unsigned int i;
+	struct bios_parser *bp;
+	enum bp_result record_result;
+
+	const unsigned int slot_index_to_vbios_id[MAX_BOARD_SLOTS] = {
+		GENERICOBJECT_BRACKET_LAYOUT_ENUM_ID1,
+		GENERICOBJECT_BRACKET_LAYOUT_ENUM_ID2,
+		0, 0
+	};
+
+	bp = BP_FROM_DCB(dcb);
+
+	if (board_layout_info == NULL) {
+		DC_LOG_DETECTION_EDID_PARSER("Invalid board_layout_info\n");
+		return BP_RESULT_BADINPUT;
+	}
+
+	board_layout_info->num_of_slots = 0;
+
+	for (i = 0; i < MAX_BOARD_SLOTS; ++i) {
+		record_result = get_bracket_layout_record(dcb,
+			slot_index_to_vbios_id[i],
+			&board_layout_info->slots[i]);
+
+		if (record_result == BP_RESULT_NORECORD && i > 0)
+			break; /* no more slots present in bios */
+		else if (record_result != BP_RESULT_OK)
+			return record_result;  /* fail */
+
+		++board_layout_info->num_of_slots;
+	}
+
+	/* all data is valid */
+	board_layout_info->is_number_of_slots_valid = 1;
+	board_layout_info->is_slots_size_valid = 1;
+	board_layout_info->is_connector_offsets_valid = 1;
+	board_layout_info->is_connector_lengths_valid = 1;
+
+	return BP_RESULT_OK;
+}
+
 /******************************************************************************/
 
 static const struct dc_vbios_funcs vbios_funcs = {
 	.get_connectors_number = bios_parser_get_connectors_number,
 
-	.get_encoder_id = bios_parser_get_encoder_id,
-
 	.get_connector_id = bios_parser_get_connector_id,
-
-	.get_dst_number = bios_parser_get_dst_number,
 
 	.get_src_obj = bios_parser_get_src_obj,
 
-	.get_dst_obj = bios_parser_get_dst_obj,
-
 	.get_i2c_info = bios_parser_get_i2c_info,
-
-	.get_voltage_ddc_info = bios_parser_get_voltage_ddc_info,
-
-	.get_thermal_ddc_info = bios_parser_get_thermal_ddc_info,
 
 	.get_hpd_info = bios_parser_get_hpd_info,
 
 	.get_device_tag = bios_parser_get_device_tag,
-
-	.get_firmware_info = bios_parser_get_firmware_info,
 
 	.get_spread_spectrum_info = bios_parser_get_spread_spectrum_info,
 
@@ -3801,18 +2952,21 @@ static const struct dc_vbios_funcs vbios_funcs = {
 
 	/* bios scratch register communication */
 	.is_accelerated_mode = bios_is_accelerated_mode,
-	.get_vga_enabled_displays = bios_get_vga_enabled_displays,
 
 	.set_scratch_critical_state = bios_parser_set_scratch_critical_state,
 
 	.is_device_id_supported = bios_parser_is_device_id_supported,
 
 	/* COMMANDS */
+	.select_crtc_source = bios_parser_select_crtc_source,
+
 	.encoder_control = bios_parser_encoder_control,
 
-	.transmitter_control = bios_parser_transmitter_control,
+	.external_encoder_control = bios_parser_external_encoder_control,
 
-	.crt_control = bios_parser_crt_control,  /* not used in DAL3.  keep for now in case we need to support VGA on Bonaire */
+	.dac_load_detection = bios_parser_dac_load_detection,
+
+	.transmitter_control = bios_parser_transmitter_control,
 
 	.enable_crtc = bios_parser_enable_crtc,
 
@@ -3826,16 +2980,17 @@ static const struct dc_vbios_funcs vbios_funcs = {
 
 	.program_crtc_timing = bios_parser_program_crtc_timing, /* still use.  should probably retire and program directly */
 
-	.crtc_source_select = bios_parser_crtc_source_select,  /* still use.  should probably retire and program directly */
-
 	.program_display_engine_pll = bios_parser_program_display_engine_pll,
 
 	.enable_disp_power_gating = bios_parser_enable_disp_power_gating,
 
 	/* SW init and patch */
-	.post_init = bios_parser_post_init,  /* patch vbios table for mxm module by reading i2c */
 
 	.bios_parser_destroy = bios_parser_destroy,
+
+	.get_board_layout_info = bios_get_board_layout_info,
+
+	.get_atom_dc_golden_table = NULL
 };
 
 static bool bios_parser_construct(
@@ -3917,6 +3072,7 @@ static bool bios_parser_construct(
 	dal_bios_parser_init_cmd_tbl_helper(&bp->cmd_helper, dce_version);
 
 	bp->base.integrated_info = bios_parser_create_integrated_info(&bp->base);
+	bp->base.fw_info_valid = bios_parser_get_firmware_info(&bp->base, &bp->base.fw_info) == BP_RESULT_OK;
 
 	return true;
 }

@@ -32,9 +32,9 @@
 #include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/errno.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 
-#include <asm/pat.h>
+#include <asm/memtype.h>
 #include <asm/e820/api.h>
 #include <asm/pci_x86.h>
 #include <asm/io_apic.h>
@@ -59,7 +59,7 @@ static struct pcibios_fwaddrmap *pcibios_fwaddrmap_lookup(struct pci_dev *dev)
 {
 	struct pcibios_fwaddrmap *map;
 
-	WARN_ON_SMP(!spin_is_locked(&pcibios_fwaddrmap_lock));
+	lockdep_assert_held(&pcibios_fwaddrmap_lock);
 
 	list_for_each_entry(map, &pcibios_fwaddrmappings, list)
 		if (map->dev == dev)
@@ -81,7 +81,7 @@ pcibios_save_fw_addr(struct pci_dev *dev, int idx, resource_size_t fw_addr)
 	map = pcibios_fwaddrmap_lookup(dev);
 	if (!map) {
 		spin_unlock_irqrestore(&pcibios_fwaddrmap_lock, flags);
-		map = kzalloc(sizeof(*map), GFP_KERNEL);
+		map = kzalloc_obj(*map);
 		if (!map)
 			return;
 
@@ -153,7 +153,8 @@ skip_isa_ioresource_align(struct pci_dev *dev) {
  */
 resource_size_t
 pcibios_align_resource(void *data, const struct resource *res,
-			resource_size_t size, resource_size_t align)
+		       const struct resource *empty_res,
+		       resource_size_t size, resource_size_t align)
 {
 	struct pci_dev *dev = data;
 	resource_size_t start = res->start;
@@ -164,6 +165,8 @@ pcibios_align_resource(void *data, const struct resource *res,
 		if (start & 0x300)
 			start = (start + 0x3ff) & ~0x3ff;
 	} else if (res->flags & IORESOURCE_MEM) {
+		start = pci_align_resource(dev, res, empty_res, size, align);
+
 		/* The low 1MB range is reserved for ISA cards */
 		if (start < BIOS_END)
 			start = BIOS_END;
@@ -366,9 +369,9 @@ static int __init pcibios_assign_resources(void)
 	return 0;
 }
 
-/**
- * called in fs_initcall (one below subsys_initcall),
- * give a chance for motherboard reserve resources
+/*
+ * This is an fs_initcall (one below subsys_initcall) in order to reserve
+ * resources properly.
  */
 fs_initcall(pcibios_assign_resources);
 

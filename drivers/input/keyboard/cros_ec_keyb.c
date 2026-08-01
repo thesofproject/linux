@@ -1,30 +1,22 @@
-/*
- * ChromeOS EC keyboard driver
- *
- * Copyright (C) 2012 Google, Inc
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * This driver uses the Chrome OS EC byte-level message-based protocol for
- * communicating the keyboard state (which keys are pressed) from a keyboard EC
- * to the AP over some bus (such as i2c, lpc, spi).  The EC does debouncing,
- * but everything else (including deghosting) is done here.  The main
- * motivation for this is to keep the EC firmware as simple as possible, since
- * it cannot be easily upgraded and EC flash/IRAM space is relatively
- * expensive.
- */
+// SPDX-License-Identifier: GPL-2.0
+// ChromeOS EC keyboard driver
+//
+// Copyright (C) 2012 Google, Inc.
+//
+// This driver uses the ChromeOS EC byte-level message-based protocol for
+// communicating the keyboard state (which keys are pressed) from a keyboard EC
+// to the AP over some bus (such as i2c, lpc, spi).  The EC does debouncing,
+// but everything else (including deghosting) is done here.  The main
+// motivation for this is to keep the EC firmware as simple as possible, since
+// it cannot be easily upgraded and EC flash/IRAM space is relatively
+// expensive.
 
 #include <linux/module.h>
+#include <linux/acpi.h>
 #include <linux/bitops.h>
 #include <linux/i2c.h>
 #include <linux/input.h>
+#include <linux/input/vivaldi-fmap.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/notifier.h>
@@ -32,16 +24,23 @@
 #include <linux/slab.h>
 #include <linux/sysrq.h>
 #include <linux/input/matrix_keypad.h>
-#include <linux/mfd/cros_ec.h>
-#include <linux/mfd/cros_ec_commands.h>
+#include <linux/platform_data/cros_ec_commands.h>
+#include <linux/platform_data/cros_ec_proto.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 /*
+ * Maximum size of the normal key matrix, this is limited by the host command
+ * key_matrix field defined in ec_response_get_next_data_v3
+ */
+#define CROS_EC_KEYBOARD_COLS_MAX 18
+
+/**
+ * struct cros_ec_keyb - Structure representing EC keyboard device
+ *
  * @rows: Number of rows in the keypad
  * @cols: Number of columns in the keypad
  * @row_shift: log2 or number of rows, rounded up
- * @keymap_data: Matrix keymap data used to convert to keyscan values
  * @ghost_filter: true to enable the matrix key-ghosting filter
  * @valid_keys: bitmap of existing keys for each matrix column
  * @old_kb_state: bitmap of keys pressed last scan
@@ -50,15 +49,18 @@
  * @idev: The input device for the matrix keys.
  * @bs_idev: The input device for non-matrix buttons and switches (or NULL).
  * @notifier: interrupt event notifier for transport devices
+ * @vdata: vivaldi function row data
+ * @has_fn_map: whether the driver uses an fn function-map layer
+ * @fn_active: tracks whether the function key is currently pressed
+ * @fn_combo_active: tracks whether another key was pressed while fn is active
  */
 struct cros_ec_keyb {
 	unsigned int rows;
 	unsigned int cols;
 	int row_shift;
-	const struct matrix_keymap_data *keymap_data;
 	bool ghost_filter;
-	uint8_t *valid_keys;
-	uint8_t *old_kb_state;
+	u8 valid_keys[CROS_EC_KEYBOARD_COLS_MAX];
+	u8 old_kb_state[CROS_EC_KEYBOARD_COLS_MAX];
 
 	struct device *dev;
 	struct cros_ec_device *ec;
@@ -66,12 +68,17 @@ struct cros_ec_keyb {
 	struct input_dev *idev;
 	struct input_dev *bs_idev;
 	struct notifier_block notifier;
+
+	struct vivaldi_data vdata;
+
+	bool has_fn_map;
+	bool fn_active;
+	bool fn_combo_active;
 };
 
-
 /**
- * cros_ec_bs_map - Struct mapping Linux keycodes to EC button/switch bitmap
- * #defines
+ * struct cros_ec_bs_map - Mapping between Linux keycodes and EC button/switch
+ *	bitmap #defines
  *
  * @ev_type: The type of the input event to generate (e.g., EV_KEY).
  * @code: A linux keycode
@@ -104,6 +111,21 @@ static const struct cros_ec_bs_map cros_ec_keyb_bs[] = {
 		.code		= KEY_VOLUMEDOWN,
 		.bit		= EC_MKBP_VOL_DOWN,
 	},
+	{
+		.ev_type        = EV_KEY,
+		.code           = KEY_BRIGHTNESSUP,
+		.bit            = EC_MKBP_BRI_UP,
+	},
+	{
+		.ev_type        = EV_KEY,
+		.code           = KEY_BRIGHTNESSDOWN,
+		.bit            = EC_MKBP_BRI_DOWN,
+	},
+	{
+		.ev_type        = EV_KEY,
+		.code           = KEY_SCREENLOCK,
+		.bit            = EC_MKBP_SCREEN_LOCK,
+	},
 
 	/* Switches */
 	{
@@ -123,11 +145,11 @@ static const struct cros_ec_bs_map cros_ec_keyb_bs[] = {
  * Returns true when there is at least one combination of pressed keys that
  * results in ghosting.
  */
-static bool cros_ec_keyb_has_ghosting(struct cros_ec_keyb *ckdev, uint8_t *buf)
+static bool cros_ec_keyb_has_ghosting(struct cros_ec_keyb *ckdev, u8 *buf)
 {
 	int col1, col2, buf1, buf2;
 	struct device *dev = ckdev->dev;
-	uint8_t *valid_keys = ckdev->valid_keys;
+	u8 *valid_keys = ckdev->valid_keys;
 
 	/*
 	 * Ghosting happens if for any pressed key X there are other keys
@@ -157,23 +179,108 @@ static bool cros_ec_keyb_has_ghosting(struct cros_ec_keyb *ckdev, uint8_t *buf)
 	return false;
 }
 
+static void cros_ec_emit_fn_key(struct input_dev *input, unsigned int pos)
+{
+	input_event(input, EV_MSC, MSC_SCAN, pos);
+	input_report_key(input, KEY_FN, true);
+	input_sync(input);
+
+	input_event(input, EV_MSC, MSC_SCAN, pos);
+	input_report_key(input, KEY_FN, false);
+}
+
+static void cros_ec_keyb_process_key_plain(struct cros_ec_keyb *ckdev,
+					   int row, int col, bool state)
+{
+	struct input_dev *idev = ckdev->idev;
+	const unsigned short *keycodes = idev->keycode;
+	int pos = MATRIX_SCAN_CODE(row, col, ckdev->row_shift);
+
+	input_event(idev, EV_MSC, MSC_SCAN, pos);
+	input_report_key(idev, keycodes[pos], state);
+}
+
+static void cros_ec_keyb_process_key_fn_map(struct cros_ec_keyb *ckdev,
+					    int row, int col, bool state)
+{
+	struct input_dev *idev = ckdev->idev;
+	const unsigned short *keycodes = idev->keycode;
+	unsigned int pos, fn_pos;
+	unsigned int code, fn_code;
+
+	pos = MATRIX_SCAN_CODE(row, col, ckdev->row_shift);
+	code = keycodes[pos];
+
+	if (code == KEY_FN) {
+		ckdev->fn_active = state;
+		if (state) {
+			ckdev->fn_combo_active = false;
+		} else if (!ckdev->fn_combo_active) {
+			/*
+			 * Send both Fn press and release events if nothing
+			 * else has been pressed together with Fn.
+			 */
+			cros_ec_emit_fn_key(idev, pos);
+		}
+		return;
+	}
+
+	fn_pos = MATRIX_SCAN_CODE(row + ckdev->rows, col, ckdev->row_shift);
+	fn_code = keycodes[fn_pos];
+
+	if (state) {
+		if (ckdev->fn_active) {
+			ckdev->fn_combo_active = true;
+			if (!fn_code)
+				return; /* Discard if no Fn mapping exists */
+
+			pos = fn_pos;
+			code = fn_code;
+		}
+	} else {
+		/*
+		 * If the Fn-remapped code is currently pressed, release it.
+		 * Otherwise, release the standard code (if it was pressed).
+		 */
+		if (fn_code && test_bit(fn_code, idev->key)) {
+			pos = fn_pos;
+			code = fn_code;
+		} else if (!test_bit(code, idev->key)) {
+			return; /* Discard, key press code was not sent */
+		}
+	}
+
+	input_event(idev, EV_MSC, MSC_SCAN, pos);
+	input_report_key(idev, code, state);
+}
+
+static void cros_ec_keyb_process_col(struct cros_ec_keyb *ckdev, int col,
+				     u8 col_state, u8 changed)
+{
+	for (int row = 0; row < ckdev->rows; row++) {
+		if (changed & BIT(row)) {
+			u8 key_state = col_state & BIT(row);
+
+			dev_dbg(ckdev->dev, "changed: [r%d c%d]: byte %02x\n",
+				row, col, key_state);
+
+			if (ckdev->has_fn_map)
+				cros_ec_keyb_process_key_fn_map(ckdev, row, col,
+								key_state);
+			else
+				cros_ec_keyb_process_key_plain(ckdev, row, col,
+							       key_state);
+		}
+	}
+}
 
 /*
  * Compares the new keyboard state to the old one and produces key
- * press/release events accordingly.  The keyboard state is 13 bytes (one byte
- * per column)
+ * press/release events accordingly.  The keyboard state is one byte
+ * per column.
  */
-static void cros_ec_keyb_process(struct cros_ec_keyb *ckdev,
-			 uint8_t *kb_state, int len)
+static void cros_ec_keyb_process(struct cros_ec_keyb *ckdev, u8 *kb_state, int len)
 {
-	struct input_dev *idev = ckdev->idev;
-	int col, row;
-	int new_state;
-	int old_state;
-	int num_cols;
-
-	num_cols = len;
-
 	if (ckdev->ghost_filter && cros_ec_keyb_has_ghosting(ckdev, kb_state)) {
 		/*
 		 * Simple-minded solution: ignore this state. The obvious
@@ -184,24 +291,15 @@ static void cros_ec_keyb_process(struct cros_ec_keyb *ckdev,
 		return;
 	}
 
-	for (col = 0; col < ckdev->cols; col++) {
-		for (row = 0; row < ckdev->rows; row++) {
-			int pos = MATRIX_SCAN_CODE(row, col, ckdev->row_shift);
-			const unsigned short *keycodes = idev->keycode;
+	for (int col = 0; col < ckdev->cols; col++) {
+		u8 changed = kb_state[col] ^ ckdev->old_kb_state[col];
 
-			new_state = kb_state[col] & (1 << row);
-			old_state = ckdev->old_kb_state[col] & (1 << row);
-			if (new_state != old_state) {
-				dev_dbg(ckdev->dev,
-					"changed: [r%d c%d]: byte %02x\n",
-					row, col, new_state);
-
-				input_report_key(idev, keycodes[pos],
-						 new_state);
-			}
-		}
-		ckdev->old_kb_state[col] = kb_state[col];
+		if (changed)
+			cros_ec_keyb_process_col(ckdev, col, kb_state[col],
+						 changed);
 	}
+
+	memcpy(ckdev->old_kb_state, kb_state, sizeof(ckdev->old_kb_state));
 	input_sync(ckdev->idev);
 }
 
@@ -239,51 +337,58 @@ static int cros_ec_keyb_work(struct notifier_block *nb,
 {
 	struct cros_ec_keyb *ckdev = container_of(nb, struct cros_ec_keyb,
 						  notifier);
-	u32 val;
+	struct ec_response_get_next_event_v3 *event_data;
+	unsigned int event_size;
 	unsigned int ev_type;
+	u32 val;
 
-	switch (ckdev->ec->event_data.event_type) {
+	/*
+	 * If not wake enabled, discard key state changes during
+	 * suspend. Switches will be re-checked in
+	 * cros_ec_keyb_resume() to be sure nothing is lost.
+	 */
+	if (queued_during_suspend && !device_may_wakeup(ckdev->dev))
+		return NOTIFY_OK;
+
+	event_data = &ckdev->ec->event_data;
+	event_size = ckdev->ec->event_size;
+
+	switch (event_data->event_type) {
 	case EC_MKBP_EVENT_KEY_MATRIX:
-		/*
-		 * If EC is not the wake source, discard key state changes
-		 * during suspend.
-		 */
-		if (queued_during_suspend)
-			return NOTIFY_OK;
+		pm_wakeup_event(ckdev->dev, 0);
 
-		if (ckdev->ec->event_size != ckdev->cols) {
-			dev_err(ckdev->dev,
-				"Discarded incomplete key matrix event.\n");
+		if (!ckdev->idev) {
+			dev_warn_once(ckdev->dev, "Unexpected key matrix event\n");
 			return NOTIFY_OK;
 		}
-		cros_ec_keyb_process(ckdev,
-				     ckdev->ec->event_data.data.key_matrix,
-				     ckdev->ec->event_size);
+
+		if (event_size != ckdev->cols) {
+			dev_err(ckdev->dev,
+				"Discarded key matrix event, unexpected length: %d != %d\n",
+				ckdev->ec->event_size, ckdev->cols);
+			return NOTIFY_OK;
+		}
+
+		cros_ec_keyb_process(ckdev, event_data->data.key_matrix, event_size);
 		break;
 
 	case EC_MKBP_EVENT_SYSRQ:
-		val = get_unaligned_le32(&ckdev->ec->event_data.data.sysrq);
+		pm_wakeup_event(ckdev->dev, 0);
+
+		val = get_unaligned_le32(&event_data->data.sysrq);
 		dev_dbg(ckdev->dev, "sysrq code from EC: %#x\n", val);
 		handle_sysrq(val);
 		break;
 
 	case EC_MKBP_EVENT_BUTTON:
 	case EC_MKBP_EVENT_SWITCH:
-		/*
-		 * If EC is not the wake source, discard key state
-		 * changes during suspend. Switches will be re-checked in
-		 * cros_ec_keyb_resume() to be sure nothing is lost.
-		 */
-		if (queued_during_suspend)
-			return NOTIFY_OK;
+		pm_wakeup_event(ckdev->dev, 0);
 
-		if (ckdev->ec->event_data.event_type == EC_MKBP_EVENT_BUTTON) {
-			val = get_unaligned_le32(
-					&ckdev->ec->event_data.data.buttons);
+		if (event_data->event_type == EC_MKBP_EVENT_BUTTON) {
+			val = get_unaligned_le32(&event_data->data.buttons);
 			ev_type = EV_KEY;
 		} else {
-			val = get_unaligned_le32(
-					&ckdev->ec->event_data.data.switches);
+			val = get_unaligned_le32(&event_data->data.switches);
 			ev_type = EV_SW;
 		}
 		cros_ec_keyb_report_bs(ckdev, ev_type, val);
@@ -312,8 +417,8 @@ static void cros_ec_keyb_compute_valid_keys(struct cros_ec_keyb *ckdev)
 	for (col = 0; col < ckdev->cols; col++) {
 		for (row = 0; row < ckdev->rows; row++) {
 			code = keymap[MATRIX_SCAN_CODE(row, col, row_shift)];
-			if (code && (code != KEY_BATTERY))
-				ckdev->valid_keys[col] |= 1 << row;
+			if (code != KEY_RESERVED && code != KEY_BATTERY)
+				ckdev->valid_keys[col] |= BIT(row);
 		}
 		dev_dbg(ckdev->dev, "valid_keys[%02d] = 0x%02x\n",
 			col, ckdev->valid_keys[col]);
@@ -360,18 +465,14 @@ static int cros_ec_keyb_info(struct cros_ec_device *ec_dev,
 	params->info_type = info_type;
 	params->event_type = event_type;
 
-	ret = cros_ec_cmd_xfer(ec_dev, msg);
-	if (ret < 0) {
-		dev_warn(ec_dev->dev, "Transfer error %d/%d: %d\n",
-			 (int)info_type, (int)event_type, ret);
-	} else if (msg->result == EC_RES_INVALID_VERSION) {
+	ret = cros_ec_cmd_xfer_status(ec_dev, msg);
+	if (ret == -ENOPROTOOPT) {
 		/* With older ECs we just return 0 for everything */
 		memset(result, 0, result_size);
 		ret = 0;
-	} else if (msg->result != EC_RES_SUCCESS) {
-		dev_warn(ec_dev->dev, "Error getting info %d/%d: %d\n",
-			 (int)info_type, (int)event_type, msg->result);
-		ret = -EPROTO;
+	} else if (ret < 0) {
+		dev_warn(ec_dev->dev, "Transfer error %d/%d: %d\n",
+			 (int)info_type, (int)event_type, ret);
 	} else if (ret != result_size) {
 		dev_warn(ec_dev->dev, "Wrong size %d/%d: %d != %zu\n",
 			 (int)info_type, (int)event_type,
@@ -425,7 +526,7 @@ static int cros_ec_keyb_query_switches(struct cros_ec_keyb *ckdev)
  *
  * Returns 0 if no error or -error upon error.
  */
-static __maybe_unused int cros_ec_keyb_resume(struct device *dev)
+static int cros_ec_keyb_resume(struct device *dev)
 {
 	struct cros_ec_keyb *ckdev = dev_get_drvdata(dev);
 
@@ -446,10 +547,13 @@ static __maybe_unused int cros_ec_keyb_resume(struct device *dev)
  * but the ckdev->bs_idev will remain NULL when this function exits.
  *
  * @ckdev: The keyboard device
+ * @expect_buttons_switches: Indicates that EC must report button and/or
+ *   switch events
  *
  * Returns 0 if no error or -error upon error.
  */
-static int cros_ec_keyb_register_bs(struct cros_ec_keyb *ckdev)
+static int cros_ec_keyb_register_bs(struct cros_ec_keyb *ckdev,
+				    bool expect_buttons_switches)
 {
 	struct cros_ec_device *ec_dev = ckdev->ec;
 	struct device *dev = ckdev->dev;
@@ -476,7 +580,7 @@ static int cros_ec_keyb_register_bs(struct cros_ec_keyb *ckdev)
 	switches = get_unaligned_le32(&event_data.switches);
 
 	if (!buttons && !switches)
-		return 0;
+		return expect_buttons_switches ? -EINVAL : 0;
 
 	/*
 	 * We call the non-matrix buttons/switches 'input1', if present.
@@ -506,7 +610,8 @@ static int cros_ec_keyb_register_bs(struct cros_ec_keyb *ckdev)
 	for (i = 0; i < ARRAY_SIZE(cros_ec_keyb_bs); i++) {
 		const struct cros_ec_bs_map *map = &cros_ec_keyb_bs[i];
 
-		if (buttons & BIT(map->bit))
+		if ((map->ev_type == EV_KEY && (buttons & BIT(map->bit))) ||
+		    (map->ev_type == EV_SW && (switches & BIT(map->bit))))
 			input_set_capability(idev, map->ev_type, map->code);
 	}
 
@@ -525,8 +630,108 @@ static int cros_ec_keyb_register_bs(struct cros_ec_keyb *ckdev)
 	return 0;
 }
 
+static void cros_ec_keyb_parse_vivaldi_physmap(struct cros_ec_keyb *ckdev)
+{
+	u32 *physmap = ckdev->vdata.function_row_physmap;
+	unsigned int row, col, scancode;
+	int n_physmap;
+	int error;
+	int i;
+
+	n_physmap = device_property_count_u32(ckdev->dev,
+					      "function-row-physmap");
+	if (n_physmap <= 0)
+		return;
+
+	if (n_physmap >= VIVALDI_MAX_FUNCTION_ROW_KEYS) {
+		dev_warn(ckdev->dev,
+			 "only up to %d top row keys is supported (%d specified)\n",
+			 VIVALDI_MAX_FUNCTION_ROW_KEYS, n_physmap);
+		n_physmap = VIVALDI_MAX_FUNCTION_ROW_KEYS;
+	}
+
+	error = device_property_read_u32_array(ckdev->dev,
+					       "function-row-physmap",
+					       physmap, n_physmap);
+	if (error) {
+		dev_warn(ckdev->dev,
+			 "failed to parse function-row-physmap property: %d\n",
+			 error);
+		return;
+	}
+
+	/*
+	 * Convert (in place) from row/column encoding to matrix "scancode"
+	 * used by the driver.
+	 */
+	for (i = 0; i < n_physmap; i++) {
+		row = KEY_ROW(physmap[i]);
+		col = KEY_COL(physmap[i]);
+		scancode = MATRIX_SCAN_CODE(row, col, ckdev->row_shift);
+		physmap[i] = scancode;
+	}
+
+	ckdev->vdata.num_function_row_keys = n_physmap;
+}
+
+/* Returns true if there is a KEY_FN code defined in the normal keymap */
+static bool cros_ec_keyb_has_fn_key(struct cros_ec_keyb *ckdev)
+{
+	const unsigned short *keycodes = ckdev->idev->keycode;
+	int i;
+
+	for (i = 0; i < MATRIX_SCAN_CODE(ckdev->rows, 0, ckdev->row_shift); i++) {
+		if (keycodes[i] == KEY_FN)
+			return true;
+	}
+
+	return false;
+}
+
+/*
+ * Returns true if there is a KEY_FN defined and at least one key in the fn
+ * layer keymap
+ */
+static bool cros_ec_keyb_has_fn_map(struct cros_ec_keyb *ckdev)
+{
+	struct input_dev *idev = ckdev->idev;
+	const unsigned short *keycodes = ckdev->idev->keycode;
+	int i;
+
+	if (!cros_ec_keyb_has_fn_key(ckdev))
+		return false;
+
+	for (i = MATRIX_SCAN_CODE(ckdev->rows, 0, ckdev->row_shift);
+	     i < idev->keycodemax; i++) {
+		if (keycodes[i] != KEY_RESERVED)
+			return true;
+	}
+
+	return false;
+}
+
+/*
+ * Custom handler for the set keycode ioctl, calls the default handler and
+ * recomputes has_fn_map.
+ */
+static int cros_ec_keyb_setkeycode(struct input_dev *idev,
+				   const struct input_keymap_entry *ke,
+				   unsigned int *old_keycode)
+{
+	struct cros_ec_keyb *ckdev = input_get_drvdata(idev);
+	int ret;
+
+	ret = input_default_setkeycode(idev, ke, old_keycode);
+	if (ret)
+		return ret;
+
+	ckdev->has_fn_map = cros_ec_keyb_has_fn_map(ckdev);
+
+	return 0;
+}
+
 /**
- * cros_ec_keyb_register_bs - Register matrix keys
+ * cros_ec_keyb_register_matrix - Register matrix keys
  *
  * Handles all the bits of the keyboard driver related to matrix keys.
  *
@@ -546,13 +751,11 @@ static int cros_ec_keyb_register_matrix(struct cros_ec_keyb *ckdev)
 	if (err)
 		return err;
 
-	ckdev->valid_keys = devm_kzalloc(dev, ckdev->cols, GFP_KERNEL);
-	if (!ckdev->valid_keys)
-		return -ENOMEM;
-
-	ckdev->old_kb_state = devm_kzalloc(dev, ckdev->cols, GFP_KERNEL);
-	if (!ckdev->old_kb_state)
-		return -ENOMEM;
+	if (ckdev->cols > CROS_EC_KEYBOARD_COLS_MAX) {
+		dev_err(dev, "keypad,num-columns too large: %d (max: %d)\n",
+			ckdev->cols, CROS_EC_KEYBOARD_COLS_MAX);
+		return -EINVAL;
+	}
 
 	/*
 	 * We call the keyboard matrix 'input0'. Allocate phys before input
@@ -574,11 +777,11 @@ static int cros_ec_keyb_register_matrix(struct cros_ec_keyb *ckdev)
 	idev->id.version = 1;
 	idev->id.product = 0;
 	idev->dev.parent = dev;
+	idev->setkeycode = cros_ec_keyb_setkeycode;
 
-	ckdev->ghost_filter = of_property_read_bool(dev->of_node,
-					"google,needs-ghost-filter");
+	ckdev->ghost_filter = device_property_read_bool(dev, "google,needs-ghost-filter");
 
-	err = matrix_keypad_build_keymap(NULL, NULL, ckdev->rows, ckdev->cols,
+	err = matrix_keypad_build_keymap(NULL, NULL, ckdev->rows * 2, ckdev->cols,
 					 NULL, idev);
 	if (err) {
 		dev_err(dev, "cannot build key matrix\n");
@@ -591,6 +794,9 @@ static int cros_ec_keyb_register_matrix(struct cros_ec_keyb *ckdev)
 	input_set_drvdata(idev, ckdev);
 	ckdev->idev = idev;
 	cros_ec_keyb_compute_valid_keys(ckdev);
+	cros_ec_keyb_parse_vivaldi_physmap(ckdev);
+
+	ckdev->has_fn_map = cros_ec_keyb_has_fn_map(ckdev);
 
 	err = input_register_device(ckdev->idev);
 	if (err) {
@@ -601,15 +807,64 @@ static int cros_ec_keyb_register_matrix(struct cros_ec_keyb *ckdev)
 	return 0;
 }
 
+static ssize_t function_row_physmap_show(struct device *dev,
+					 struct device_attribute *attr,
+					 char *buf)
+{
+	const struct cros_ec_keyb *ckdev = dev_get_drvdata(dev);
+	const struct vivaldi_data *data = &ckdev->vdata;
+
+	return vivaldi_function_row_physmap_show(data, buf);
+}
+
+static DEVICE_ATTR_RO(function_row_physmap);
+
+static struct attribute *cros_ec_keyb_attrs[] = {
+	&dev_attr_function_row_physmap.attr,
+	NULL,
+};
+
+static umode_t cros_ec_keyb_attr_is_visible(struct kobject *kobj,
+					    struct attribute *attr,
+					    int n)
+{
+	struct device *dev = kobj_to_dev(kobj);
+	struct cros_ec_keyb *ckdev = dev_get_drvdata(dev);
+
+	if (attr == &dev_attr_function_row_physmap.attr &&
+	    !ckdev->vdata.num_function_row_keys)
+		return 0;
+
+	return attr->mode;
+}
+
+static const struct attribute_group cros_ec_keyb_group = {
+	.is_visible = cros_ec_keyb_attr_is_visible,
+	.attrs = cros_ec_keyb_attrs,
+};
+__ATTRIBUTE_GROUPS(cros_ec_keyb);
+
 static int cros_ec_keyb_probe(struct platform_device *pdev)
 {
-	struct cros_ec_device *ec = dev_get_drvdata(pdev->dev.parent);
+	struct cros_ec_device *ec;
 	struct device *dev = &pdev->dev;
 	struct cros_ec_keyb *ckdev;
+	bool buttons_switches_only = device_get_match_data(dev);
 	int err;
 
-	if (!dev->of_node)
-		return -ENODEV;
+	/*
+	 * If the parent ec device has not been probed yet, defer the probe of
+	 * this keyboard/button driver until later.
+	 */
+	ec = dev_get_drvdata(pdev->dev.parent);
+	if (!ec)
+		return -EPROBE_DEFER;
+	/*
+	 * Even if the cros_ec_device pointer is available, still need to check
+	 * if the device is fully registered before using it.
+	 */
+	if (!cros_ec_device_registered(ec))
+		return -EPROBE_DEFER;
 
 	ckdev = devm_kzalloc(dev, sizeof(*ckdev), GFP_KERNEL);
 	if (!ckdev)
@@ -619,13 +874,16 @@ static int cros_ec_keyb_probe(struct platform_device *pdev)
 	ckdev->dev = dev;
 	dev_set_drvdata(dev, ckdev);
 
-	err = cros_ec_keyb_register_matrix(ckdev);
-	if (err) {
-		dev_err(dev, "cannot register matrix inputs: %d\n", err);
-		return err;
+	if (!buttons_switches_only) {
+		err = cros_ec_keyb_register_matrix(ckdev);
+		if (err) {
+			dev_err(dev, "cannot register matrix inputs: %d\n",
+				err);
+			return err;
+		}
 	}
 
-	err = cros_ec_keyb_register_bs(ckdev);
+	err = cros_ec_keyb_register_bs(ckdev, buttons_switches_only);
 	if (err) {
 		dev_err(dev, "cannot register non-matrix inputs: %d\n", err);
 		return err;
@@ -639,41 +897,51 @@ static int cros_ec_keyb_probe(struct platform_device *pdev)
 		return err;
 	}
 
+	device_init_wakeup(ckdev->dev, true);
 	return 0;
 }
 
-static int cros_ec_keyb_remove(struct platform_device *pdev)
+static void cros_ec_keyb_remove(struct platform_device *pdev)
 {
 	struct cros_ec_keyb *ckdev = dev_get_drvdata(&pdev->dev);
 
 	blocking_notifier_chain_unregister(&ckdev->ec->event_notifier,
 					   &ckdev->notifier);
-
-	return 0;
 }
+
+#ifdef CONFIG_ACPI
+static const struct acpi_device_id cros_ec_keyb_acpi_match[] = {
+	{ "GOOG0007", true },
+	{ }
+};
+MODULE_DEVICE_TABLE(acpi, cros_ec_keyb_acpi_match);
+#endif
 
 #ifdef CONFIG_OF
 static const struct of_device_id cros_ec_keyb_of_match[] = {
 	{ .compatible = "google,cros-ec-keyb" },
-	{},
+	{ .compatible = "google,cros-ec-keyb-switches", .data = (void *)true },
+	{}
 };
 MODULE_DEVICE_TABLE(of, cros_ec_keyb_of_match);
 #endif
 
-static SIMPLE_DEV_PM_OPS(cros_ec_keyb_pm_ops, NULL, cros_ec_keyb_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(cros_ec_keyb_pm_ops, NULL, cros_ec_keyb_resume);
 
 static struct platform_driver cros_ec_keyb_driver = {
 	.probe = cros_ec_keyb_probe,
 	.remove = cros_ec_keyb_remove,
 	.driver = {
 		.name = "cros-ec-keyb",
+		.dev_groups = cros_ec_keyb_groups,
 		.of_match_table = of_match_ptr(cros_ec_keyb_of_match),
-		.pm = &cros_ec_keyb_pm_ops,
+		.acpi_match_table = ACPI_PTR(cros_ec_keyb_acpi_match),
+		.pm = pm_sleep_ptr(&cros_ec_keyb_pm_ops),
 	},
 };
 
 module_platform_driver(cros_ec_keyb_driver);
 
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
 MODULE_DESCRIPTION("ChromeOS EC keyboard driver");
 MODULE_ALIAS("platform:cros-ec-keyb");

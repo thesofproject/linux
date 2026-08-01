@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	Spanning tree protocol; timer-related code
  *	Linux ethernet bridge
  *
  *	Authors:
  *	Lennert Buytenhek		<buytenh@gnu.org>
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	as published by the Free Software Foundation; either version
- *	2 of the License, or (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -33,7 +29,7 @@ static int br_is_designated_for_some_port(const struct net_bridge *br)
 
 static void br_hello_timer_expired(struct timer_list *t)
 {
-	struct net_bridge *br = from_timer(br, t, hello_timer);
+	struct net_bridge *br = timer_container_of(br, t, hello_timer);
 
 	br_debug(br, "hello timer expired\n");
 	spin_lock(&br->lock);
@@ -49,7 +45,8 @@ static void br_hello_timer_expired(struct timer_list *t)
 
 static void br_message_age_timer_expired(struct timer_list *t)
 {
-	struct net_bridge_port *p = from_timer(p, t, message_age_timer);
+	struct net_bridge_port *p = timer_container_of(p, t,
+						       message_age_timer);
 	struct net_bridge *br = p->br;
 	const bridge_id *id = &p->designated_bridge;
 	int was_root;
@@ -82,7 +79,8 @@ static void br_message_age_timer_expired(struct timer_list *t)
 
 static void br_forward_delay_timer_expired(struct timer_list *t)
 {
-	struct net_bridge_port *p = from_timer(p, t, forward_delay_timer);
+	struct net_bridge_port *p = timer_container_of(p, t,
+						       forward_delay_timer);
 	struct net_bridge *br = p->br;
 
 	br_debug(br, "port %u(%s) forward delay timer\n",
@@ -106,7 +104,7 @@ static void br_forward_delay_timer_expired(struct timer_list *t)
 
 static void br_tcn_timer_expired(struct timer_list *t)
 {
-	struct net_bridge *br = from_timer(br, t, tcn_timer);
+	struct net_bridge *br = timer_container_of(br, t, tcn_timer);
 
 	br_debug(br, "tcn timer expired\n");
 	spin_lock(&br->lock);
@@ -120,7 +118,8 @@ static void br_tcn_timer_expired(struct timer_list *t)
 
 static void br_topology_change_timer_expired(struct timer_list *t)
 {
-	struct net_bridge *br = from_timer(br, t, topology_change_timer);
+	struct net_bridge *br = timer_container_of(br, t,
+						   topology_change_timer);
 
 	br_debug(br, "topo change timer expired\n");
 	spin_lock(&br->lock);
@@ -131,7 +130,7 @@ static void br_topology_change_timer_expired(struct timer_list *t)
 
 static void br_hold_timer_expired(struct timer_list *t)
 {
-	struct net_bridge_port *p = from_timer(p, t, hold_timer);
+	struct net_bridge_port *p = timer_container_of(p, t, hold_timer);
 
 	br_debug(p->br, "port %u(%s) hold timer expired\n",
 		 (unsigned int) p->port_no, p->dev->name);
@@ -161,5 +160,5 @@ void br_stp_port_timer_init(struct net_bridge_port *p)
 unsigned long br_timer_value(const struct timer_list *timer)
 {
 	return timer_pending(timer)
-		? jiffies_delta_to_clock_t(timer->expires - jiffies) : 0;
+		? jiffies_delta_to_clock_t(READ_ONCE(timer->expires) - jiffies) : 0;
 }

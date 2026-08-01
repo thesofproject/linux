@@ -1,22 +1,14 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2011 Realtek Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
  *
  ******************************************************************************/
 
 #ifndef __ODMDIG_H__
 #define __ODMDIG_H__
 
-typedef struct _Dynamic_Initial_Gain_Threshold_ {
+struct dig_t { /* _Dynamic_Initial_Gain_Threshold_ */
 	bool bStopDIG;
 	bool bPSDInProgress;
 
@@ -65,9 +57,9 @@ typedef struct _Dynamic_Initial_Gain_Threshold_ {
 	u32 RSSI_max;
 
 	u8 *pbP2pLinkInProgress;
-} DIG_T, *pDIG_T;
+};
 
-typedef struct false_ALARM_STATISTICS {
+struct  false_ALARM_STATISTICS {
 	u32 Cnt_Parity_Fail;
 	u32 Cnt_Rate_Illegal;
 	u32 Cnt_Crc8_fail;
@@ -83,28 +75,12 @@ typedef struct false_ALARM_STATISTICS {
 	u32 Cnt_CCA_all;
 	u32 Cnt_BW_USC; /* Gary */
 	u32 Cnt_BW_LSC; /* Gary */
-} false_ALARM_STATISTICS, *Pfalse_ALARM_STATISTICS;
+};
 
-typedef enum tag_Dynamic_Init_Gain_Operation_Type_Definition {
-	DIG_TYPE_THRESH_HIGH = 0,
-	DIG_TYPE_THRESH_LOW = 1,
-	DIG_TYPE_BACKOFF = 2,
-	DIG_TYPE_RX_GAIN_MIN = 3,
-	DIG_TYPE_RX_GAIN_MAX = 4,
-	DIG_TYPE_ENABLE = 5,
-	DIG_TYPE_DISABLE = 6,
-	DIG_OP_TYPE_MAX
-} DM_DIG_OP_E;
-
-typedef enum tag_ODM_PauseDIG_Type {
-	ODM_PAUSE_DIG = BIT0,
-	ODM_RESUME_DIG = BIT1
-} ODM_Pause_DIG_TYPE;
-
-typedef enum tag_ODM_PauseCCKPD_Type {
-	ODM_PAUSE_CCKPD = BIT0,
-	ODM_RESUME_CCKPD = BIT1
-} ODM_Pause_CCKPD_TYPE;
+enum ODM_Pause_DIG_TYPE {
+	ODM_PAUSE_DIG = BIT(0),
+	ODM_RESUME_DIG = BIT(1)
+};
 
 #define		DM_DIG_THRESH_HIGH			40
 #define		DM_DIG_THRESH_LOW			35
@@ -164,8 +140,6 @@ void odm_AdaptivityInit(void *pDM_VOID);
 void odm_Adaptivity(void *pDM_VOID, u8 IGI);
 
 void ODM_Write_DIG(void *pDM_VOID, u8 CurrentIGI);
-
-void odm_PauseDIG(void *pDM_VOID, ODM_Pause_DIG_TYPE PauseType, u8 IGIValue);
 
 void odm_DIGInit(void *pDM_VOID);
 

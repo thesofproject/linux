@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Device access for Dialog DA9052 PMICs.
  *
  * Copyright(c) 2011 Dialog Semiconductor Ltd.
  *
  * Author: David Dajun Chen <dchen@diasemi.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
  */
 
 #include <linux/device.h>
@@ -537,7 +533,7 @@ const struct regmap_config da9052_regmap_config = {
 	.reg_bits = 8,
 	.val_bits = 8,
 
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 
 	.max_register = DA9052_PAGE1_CON_REG,
 	.readable_reg = da9052_reg_readable,
@@ -589,6 +585,7 @@ static int da9052_clear_fault_log(struct da9052 *da9052)
 				"Cannot reset FAULT_LOG values %d\n", ret);
 	}
 
+	da9052->fault_log = fault_log;
 	return ret;
 }
 
@@ -657,4 +654,3 @@ void da9052_device_exit(struct da9052 *da9052)
 
 MODULE_AUTHOR("David Dajun Chen <dchen@diasemi.com>");
 MODULE_DESCRIPTION("DA9052 MFD Core");
-MODULE_LICENSE("GPL");

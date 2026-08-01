@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ACPI Hardware Error Device (PNP0C33) Driver
  *
@@ -6,21 +7,13 @@
  *
  * ACPI Hardware Error Device is used to report some hardware errors
  * notified via SCI, mainly the corrected errors.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation;
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/acpi.h>
+#include <linux/platform_device.h>
 #include <acpi/hed.h>
 
 static const struct acpi_device_id acpi_hed_ids[] = {
@@ -29,7 +22,7 @@ static const struct acpi_device_id acpi_hed_ids[] = {
 };
 MODULE_DEVICE_TABLE(acpi, acpi_hed_ids);
 
-static acpi_handle hed_handle;
+static bool hed_present;
 
 static BLOCKING_NOTIFIER_HEAD(acpi_hed_notify_list);
 
@@ -50,39 +43,48 @@ EXPORT_SYMBOL_GPL(unregister_acpi_hed_notifier);
  * it is used by HEST Generic Hardware Error Source with notify type
  * SCI.
  */
-static void acpi_hed_notify(struct acpi_device *device, u32 event)
+static void acpi_hed_notify(acpi_handle handle, u32 event, void *data)
 {
 	blocking_notifier_call_chain(&acpi_hed_notify_list, 0, NULL);
 }
 
-static int acpi_hed_add(struct acpi_device *device)
+static int acpi_hed_probe(struct platform_device *pdev)
 {
+	int err;
+
 	/* Only one hardware error device */
-	if (hed_handle)
+	if (hed_present)
 		return -EINVAL;
-	hed_handle = device->handle;
+
+	err = devm_acpi_install_notify_handler(&pdev->dev, ACPI_DEVICE_NOTIFY,
+					       acpi_hed_notify, NULL);
+	if (err)
+		return err;
+
+	hed_present = true;
 	return 0;
 }
 
-static int acpi_hed_remove(struct acpi_device *device)
+static void acpi_hed_remove(struct platform_device *pdev)
 {
-	hed_handle = NULL;
-	return 0;
+	hed_present = false;
 }
 
-static struct acpi_driver acpi_hed_driver = {
-	.name = "hardware_error_device",
-	.class = "hardware_error",
-	.ids = acpi_hed_ids,
-	.ops = {
-		.add = acpi_hed_add,
-		.remove = acpi_hed_remove,
-		.notify = acpi_hed_notify,
+static struct platform_driver acpi_hed_driver = {
+	.probe = acpi_hed_probe,
+	.remove = acpi_hed_remove,
+	.driver = {
+		.name = "acpi-hardware-error-device",
+		.acpi_match_table = acpi_hed_ids,
 	},
 };
-module_acpi_driver(acpi_hed_driver);
 
-ACPI_MODULE_NAME("hed");
+static int __init acpi_hed_driver_init(void)
+{
+	return platform_driver_register(&acpi_hed_driver);
+}
+subsys_initcall(acpi_hed_driver_init);
+
 MODULE_AUTHOR("Huang Ying");
 MODULE_DESCRIPTION("ACPI Hardware Error Device Driver");
 MODULE_LICENSE("GPL");

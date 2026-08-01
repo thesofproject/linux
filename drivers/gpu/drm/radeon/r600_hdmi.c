@@ -25,11 +25,12 @@
  */
 #include <linux/hdmi.h>
 #include <linux/gcd.h>
-#include <drm/drmP.h>
+
 #include <drm/radeon_drm.h>
 #include "radeon.h"
 #include "radeon_asic.h"
 #include "radeon_audio.h"
+#include "r600.h"
 #include "r600d.h"
 #include "atom.h"
 
@@ -115,7 +116,7 @@ void r600_audio_update_hdmi(struct work_struct *work)
 {
 	struct radeon_device *rdev = container_of(work, struct radeon_device,
 						  audio_work);
-	struct drm_device *dev = rdev->ddev;
+	struct drm_device *dev = rdev_to_drm(rdev);
 	struct r600_audio_pin audio_status = r600_audio_status(rdev);
 	struct drm_encoder *encoder;
 	bool changed = false;
@@ -287,28 +288,6 @@ int r600_hdmi_buffer_status_changed(struct drm_encoder *encoder)
 	dig->afmt->last_buffer_filled_status = status;
 
 	return result;
-}
-
-/*
- * write the audio workaround status to the hardware
- */
-void r600_hdmi_audio_workaround(struct drm_encoder *encoder)
-{
-	struct drm_device *dev = encoder->dev;
-	struct radeon_device *rdev = dev->dev_private;
-	struct radeon_encoder *radeon_encoder = to_radeon_encoder(encoder);
-	struct radeon_encoder_atom_dig *dig = radeon_encoder->enc_priv;
-	uint32_t offset = dig->afmt->offset;
-	bool hdmi_audio_workaround = false; /* FIXME */
-	u32 value;
-
-	if (!hdmi_audio_workaround ||
-	    r600_hdmi_is_audio_buffer_filled(encoder))
-		value = 0; /* disable workaround */
-	else
-		value = HDMI0_AUDIO_TEST_EN; /* enable workaround */
-	WREG32_P(HDMI0_AUDIO_PACKET_CONTROL + offset,
-		 value, ~HDMI0_AUDIO_TEST_EN);
 }
 
 void r600_hdmi_audio_set_dto(struct radeon_device *rdev,

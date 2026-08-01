@@ -84,35 +84,47 @@ static const struct dce110_timing_generator_offsets reg_offsets[] = {
 #define DCP_REG(reg) (reg + tg110->offsets.dcp)
 #define DMIF_REG(reg) (reg + tg110->offsets.dmif)
 
-static void program_pix_dur(struct timing_generator *tg, uint32_t pix_clk_khz)
+static void program_pix_dur(struct timing_generator *tg, uint32_t pix_clk_100hz)
 {
 	uint64_t pix_dur;
 	uint32_t addr = mmDMIF_PG0_DPG_PIPE_ARBITRATION_CONTROL1
 					+ DCE110TG_FROM_TG(tg)->offsets.dmif;
 	uint32_t value = dm_read_reg(tg->ctx, addr);
 
-	if (pix_clk_khz == 0)
+	if (pix_clk_100hz == 0)
 		return;
 
-	pix_dur = 1000000000 / pix_clk_khz;
+	pix_dur = div_u64(10000000000ull, pix_clk_100hz);
 
 	set_reg_field_value(
 		value,
-		pix_dur,
+		(uint32_t)pix_dur,
 		DPG_PIPE_ARBITRATION_CONTROL1,
 		PIXEL_DURATION);
 
 	dm_write_reg(tg->ctx, addr, value);
 }
 
-static void program_timing(struct timing_generator *tg,
+static void dce80_timing_generator_program_timing(struct timing_generator *tg,
 	const struct dc_crtc_timing *timing,
+	int vready_offset,
+	int vstartup_start,
+	int vupdate_offset,
+	int vupdate_width,
+	int pstate_keepout,
+	const enum signal_type signal,
 	bool use_vbios)
 {
+	(void)vready_offset;
+	(void)vstartup_start;
+	(void)vupdate_offset;
+	(void)vupdate_width;
+	(void)pstate_keepout;
+	(void)signal;
 	if (!use_vbios)
-		program_pix_dur(tg, timing->pix_clk_khz);
+		program_pix_dur(tg, timing->pix_clk_100hz);
 
-	dce110_tg_program_timing(tg, timing, use_vbios);
+	dce110_tg_program_timing(tg, timing, 0, 0, 0, 0, 0, 0, use_vbios);
 }
 
 static void dce80_timing_generator_enable_advanced_request(
@@ -179,7 +191,7 @@ static void dce80_timing_generator_enable_advanced_request(
 
 static const struct timing_generator_funcs dce80_tg_funcs = {
 		.validate_timing = dce110_tg_validate_timing,
-		.program_timing = program_timing,
+		.program_timing = dce80_timing_generator_program_timing,
 		.enable_crtc = dce110_timing_generator_enable_crtc,
 		.disable_crtc = dce110_timing_generator_disable_crtc,
 		.is_counter_moving = dce110_timing_generator_is_counter_moving,
@@ -204,6 +216,7 @@ static const struct timing_generator_funcs dce80_tg_funcs = {
 		.tear_down_global_swap_lock =
 				dce110_timing_generator_tear_down_global_swap_lock,
 		.set_drr = dce110_timing_generator_set_drr,
+		.get_last_used_drr_vtotal = NULL,
 		.set_static_screen_control =
 			dce110_timing_generator_set_static_screen_control,
 		.set_test_pattern = dce110_timing_generator_set_test_pattern,
@@ -214,6 +227,7 @@ static const struct timing_generator_funcs dce80_tg_funcs = {
 				dce80_timing_generator_enable_advanced_request,
 		.configure_crc = dce110_configure_crc,
 		.get_crc = dce110_get_crc,
+		.is_two_pixels_per_container = dce110_is_two_pixels_per_container,
 };
 
 void dce80_timing_generator_construct(

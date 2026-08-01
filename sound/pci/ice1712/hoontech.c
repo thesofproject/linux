@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   ALSA driver for ICEnsemble ICE1712 (Envy24)
  *
  *   Lowlevel functions for Hoontech STDSP24
  *
  *	Copyright (c) 2000 Jaroslav Kysela <perex@perex.cz>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */      
 
 #include <linux/delay.h>
@@ -55,35 +41,35 @@ static void snd_ice1712_stdsp24_gpio_write(struct snd_ice1712 *ice, unsigned cha
 static void snd_ice1712_stdsp24_darear(struct snd_ice1712 *ice, int activate)
 {
 	struct hoontech_spec *spec = ice->spec;
-	mutex_lock(&ice->gpio_mutex);
+
+	guard(mutex)(&ice->gpio_mutex);
 	ICE1712_STDSP24_0_DAREAR(spec->boxbits, activate);
 	snd_ice1712_stdsp24_gpio_write(ice, spec->boxbits[0]);
-	mutex_unlock(&ice->gpio_mutex);
 }
 
 static void snd_ice1712_stdsp24_mute(struct snd_ice1712 *ice, int activate)
 {
 	struct hoontech_spec *spec = ice->spec;
-	mutex_lock(&ice->gpio_mutex);
+
+	guard(mutex)(&ice->gpio_mutex);
 	ICE1712_STDSP24_3_MUTE(spec->boxbits, activate);
 	snd_ice1712_stdsp24_gpio_write(ice, spec->boxbits[3]);
-	mutex_unlock(&ice->gpio_mutex);
 }
 
 static void snd_ice1712_stdsp24_insel(struct snd_ice1712 *ice, int activate)
 {
 	struct hoontech_spec *spec = ice->spec;
-	mutex_lock(&ice->gpio_mutex);
+
+	guard(mutex)(&ice->gpio_mutex);
 	ICE1712_STDSP24_3_INSEL(spec->boxbits, activate);
 	snd_ice1712_stdsp24_gpio_write(ice, spec->boxbits[3]);
-	mutex_unlock(&ice->gpio_mutex);
 }
 
 static void snd_ice1712_stdsp24_box_channel(struct snd_ice1712 *ice, int box, int chn, int activate)
 {
 	struct hoontech_spec *spec = ice->spec;
 
-	mutex_lock(&ice->gpio_mutex);
+	guard(mutex)(&ice->gpio_mutex);
 
 	/* select box */
 	ICE1712_STDSP24_0_BOX(spec->boxbits, box);
@@ -125,15 +111,13 @@ static void snd_ice1712_stdsp24_box_channel(struct snd_ice1712 *ice, int box, in
 
 	ICE1712_STDSP24_2_MIDI1(spec->boxbits, 0);
 	snd_ice1712_stdsp24_gpio_write(ice, spec->boxbits[2]);
-
-	mutex_unlock(&ice->gpio_mutex);
 }
 
 static void snd_ice1712_stdsp24_box_midi(struct snd_ice1712 *ice, int box, int master)
 {
 	struct hoontech_spec *spec = ice->spec;
 
-	mutex_lock(&ice->gpio_mutex);
+	guard(mutex)(&ice->gpio_mutex);
 
 	/* select box */
 	ICE1712_STDSP24_0_BOX(spec->boxbits, box);
@@ -153,17 +137,15 @@ static void snd_ice1712_stdsp24_box_midi(struct snd_ice1712 *ice, int box, int m
 	
 	ICE1712_STDSP24_2_MIDIIN(spec->boxbits, 1);
 	snd_ice1712_stdsp24_gpio_write(ice, spec->boxbits[2]);
-
-	mutex_unlock(&ice->gpio_mutex);
 }
 
 static void snd_ice1712_stdsp24_midi2(struct snd_ice1712 *ice, int activate)
 {
 	struct hoontech_spec *spec = ice->spec;
-	mutex_lock(&ice->gpio_mutex);
+
+	guard(mutex)(&ice->gpio_mutex);
 	ICE1712_STDSP24_3_MIDI2(spec->boxbits, activate);
 	snd_ice1712_stdsp24_gpio_write(ice, spec->boxbits[3]);
-	mutex_unlock(&ice->gpio_mutex);
 }
 
 static int hoontech_init(struct snd_ice1712 *ice, bool staudio)
@@ -174,7 +156,7 @@ static int hoontech_init(struct snd_ice1712 *ice, bool staudio)
 	ice->num_total_dacs = 8;
 	ice->num_total_adcs = 8;
 
-	spec = kzalloc(sizeof(*spec), GFP_KERNEL);
+	spec = kzalloc_obj(*spec);
 	if (!spec)
 		return -ENOMEM;
 	ice->spec = spec;
@@ -319,7 +301,7 @@ static int snd_ice1712_value_init(struct snd_ice1712 *ice)
 	ice->num_total_adcs = 2;
 	
 	/* analog section */
-	ak = ice->akm = kmalloc(sizeof(struct snd_akm4xxx), GFP_KERNEL);
+	ak = ice->akm = kmalloc_obj(struct snd_akm4xxx);
 	if (! ak)
 		return -ENOMEM;
 	ice->akm_codecs = 1;

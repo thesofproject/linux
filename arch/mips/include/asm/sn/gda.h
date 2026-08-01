@@ -16,8 +16,6 @@
 
 #include <asm/sn/addrs.h>
 
-#define GDA_MAGIC	0x58464552
-
 /*
  * GDA Version History
  *
@@ -41,7 +39,7 @@
 #define G_PARTIDOFF	40
 #define G_TABLEOFF	128
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 typedef struct gda {
 	u32	g_magic;	/* GDA magic number */
@@ -60,14 +58,12 @@ typedef struct gda {
 				/* Pointer to a mask of nodes with copies
 				 * of the kernel. */
 	char	g_padding[56];	/* pad out to 128 bytes */
-	nasid_t g_nasidtable[MAX_COMPACT_NODES]; /* NASID of each node,
-						  * indexed by cnodeid.
-						  */
+	nasid_t g_nasidtable[MAX_NUMNODES]; /* NASID of each node */
 } gda_t;
 
 #define GDA ((gda_t*) GDA_ADDR(get_nasid()))
 
-#endif /* !__ASSEMBLY__ */
+#endif /* !__ASSEMBLER__ */
 /*
  * Define:	PART_GDA_VERSION
  * Purpose:	Define the minimum version of the GDA required, lower

@@ -1,30 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2016 BayLibre, SAS
  * Author: Neil Armstrong <narmstrong@baylibre.com>
  * Copyright (C) 2015 Amlogic, Inc. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <drm/drmP.h>
+#include <linux/bitfield.h>
+#include <linux/export.h>
+#include <linux/iopoll.h>
+
+#include <drm/drm_modes.h>
+
 #include "meson_drv.h"
+#include "meson_registers.h"
 #include "meson_venc.h"
 #include "meson_vpp.h"
-#include "meson_vclk.h"
-#include "meson_registers.h"
 
 /**
  * DOC: Video Encoder
@@ -57,7 +47,7 @@
  * The ENCI is designed for PAl or NTSC encoding and can go through the VDAC
  * directly for CVBS encoding or through the ENCI_DVI encoder for HDMI.
  * The ENCP is designed for Progressive encoding but can also generate
- * 1080i interlaced pixels, and was initialy desined to encode pixels for
+ * 1080i interlaced pixels, and was initially designed to encode pixels for
  * VDAC to output RGB ou YUV analog outputs.
  * It's output is only used through the ENCP_DVI encoder for HDMI.
  * The ENCL LVDS encoder is not implemented.
@@ -71,8 +61,11 @@
  */
 
 /* HHI Registers */
+#define HHI_GCLK_MPEG2		0x148 /* 0x52 offset in data sheet */
 #define HHI_VDAC_CNTL0		0x2F4 /* 0xbd offset in data sheet */
+#define HHI_VDAC_CNTL0_G12A	0x2EC /* 0xbb offset in data sheet */
 #define HHI_VDAC_CNTL1		0x2F8 /* 0xbe offset in data sheet */
+#define HHI_VDAC_CNTL1_G12A	0x2F0 /* 0xbc offset in data sheet */
 #define HHI_HDMI_PHY_CNTL0	0x3a0 /* 0xe8 offset in data sheet */
 
 struct meson_cvbs_enci_mode meson_cvbs_enci_pal = {
@@ -195,13 +188,13 @@ union meson_hdmi_venc_mode {
 	} encp;
 };
 
-union meson_hdmi_venc_mode meson_hdmi_enci_mode_480i = {
+static union meson_hdmi_venc_mode meson_hdmi_enci_mode_480i = {
 	.enci = {
 		.hso_begin = 5,
 		.hso_end = 129,
 		.vso_even = 3,
 		.vso_odd = 260,
-		.macv_max_amp = 0x810b,
+		.macv_max_amp = 0xb,
 		.video_prog_mode = 0xf0,
 		.video_mode = 0x8,
 		.sch_adjust = 0x20,
@@ -215,13 +208,13 @@ union meson_hdmi_venc_mode meson_hdmi_enci_mode_480i = {
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_enci_mode_576i = {
+static union meson_hdmi_venc_mode meson_hdmi_enci_mode_576i = {
 	.enci = {
 		.hso_begin = 3,
 		.hso_end = 129,
 		.vso_even = 3,
 		.vso_odd = 260,
-		.macv_max_amp = 8107,
+		.macv_max_amp = 0x7,
 		.video_prog_mode = 0xff,
 		.video_mode = 0x13,
 		.sch_adjust = 0x28,
@@ -235,7 +228,7 @@ union meson_hdmi_venc_mode meson_hdmi_enci_mode_576i = {
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_480p = {
+static union meson_hdmi_venc_mode meson_hdmi_encp_mode_480p = {
 	.encp = {
 		.dvi_settings = 0x21,
 		.video_mode = 0x4000,
@@ -281,7 +274,7 @@ union meson_hdmi_venc_mode meson_hdmi_encp_mode_480p = {
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_576p = {
+static union meson_hdmi_venc_mode meson_hdmi_encp_mode_576p = {
 	.encp = {
 		.dvi_settings = 0x21,
 		.video_mode = 0x4000,
@@ -327,7 +320,7 @@ union meson_hdmi_venc_mode meson_hdmi_encp_mode_576p = {
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_720p60 = {
+static union meson_hdmi_venc_mode meson_hdmi_encp_mode_720p60 = {
 	.encp = {
 		.dvi_settings = 0x2029,
 		.video_mode = 0x4040,
@@ -369,7 +362,7 @@ union meson_hdmi_venc_mode meson_hdmi_encp_mode_720p60 = {
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_720p50 = {
+static union meson_hdmi_venc_mode meson_hdmi_encp_mode_720p50 = {
 	.encp = {
 		.dvi_settings = 0x202d,
 		.video_mode = 0x4040,
@@ -414,7 +407,7 @@ union meson_hdmi_venc_mode meson_hdmi_encp_mode_720p50 = {
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080i60 = {
+static union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080i60 = {
 	.encp = {
 		.dvi_settings = 0x2029,
 		.video_mode = 0x5ffc,
@@ -463,7 +456,7 @@ union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080i60 = {
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080i50 = {
+static union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080i50 = {
 	.encp = {
 		.dvi_settings = 0x202d,
 		.video_mode = 0x5ffc,
@@ -512,7 +505,7 @@ union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080i50 = {
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080p24 = {
+static union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080p24 = {
 	.encp = {
 		.dvi_settings = 0xd,
 		.video_mode = 0x4040,
@@ -561,7 +554,7 @@ union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080p24 = {
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080p30 = {
+static union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080p30 = {
 	.encp = {
 		.dvi_settings = 0x1,
 		.video_mode = 0x4040,
@@ -605,7 +598,7 @@ union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080p30 = {
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080p50 = {
+static union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080p50 = {
 	.encp = {
 		.dvi_settings = 0xd,
 		.video_mode = 0x4040,
@@ -653,7 +646,7 @@ union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080p50 = {
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080p60 = {
+static union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080p60 = {
 	.encp = {
 		.dvi_settings = 0x1,
 		.video_mode = 0x4040,
@@ -697,315 +690,133 @@ union meson_hdmi_venc_mode meson_hdmi_encp_mode_1080p60 = {
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_640x480_60 = {
+static union meson_hdmi_venc_mode meson_hdmi_encp_mode_2160p24 = {
 	.encp = {
-		.dvi_settings = 0x21,
+		.dvi_settings = 0x1,
 		.video_mode = 0x4040,
-		.video_mode_adv = 0x18,
-		/* video_prog_mode */
+		.video_mode_adv = 0x8,
 		/* video_sync_mode */
 		/* video_yc_dly */
 		/* video_rgb_ctrl */
-		/* video_filt_ctrl */
+		.video_filt_ctrl = 0x1000,
+		.video_filt_ctrl_present = true,
 		/* video_ofld_voav_ofst */
-		/* yfp1_htime */
-		/* yfp2_htime */
-		.max_pxcnt = 0x31f,
-		/* hspuls_begin */
-		/* hspuls_end */
-		/* hspuls_switch */
-		/* vspuls_begin */
-		/* vspuls_end */
-		/* vspuls_bline */
-		/* vspuls_eline */
-		.havon_begin = 0x90,
-		.havon_end = 0x30f,
-		.vavon_bline = 0x23,
-		.vavon_eline = 0x202,
+		.yfp1_htime = 140,
+		.yfp2_htime = 140+3840,
+		.max_pxcnt = 3840+1660-1,
+		.hspuls_begin = 2156+1920,
+		.hspuls_end = 44,
+		.hspuls_switch = 44,
+		.vspuls_begin = 140,
+		.vspuls_end = 2059+1920,
+		.vspuls_bline = 0,
+		.vspuls_eline = 4,
+		.havon_begin = 148,
+		.havon_end = 3987,
+		.vavon_bline = 89,
+		.vavon_eline = 2248,
 		/* eqpuls_begin */
 		/* eqpuls_end */
 		/* eqpuls_bline */
 		/* eqpuls_eline */
-		.hso_begin = 0,
-		.hso_end = 0x60,
-		.vso_begin = 0x1e,
-		.vso_end = 0x32,
-		.vso_bline = 0,
-		.vso_eline = 2,
+		.hso_begin = 44,
+		.hso_end = 2156+1920,
+		.vso_begin = 2100+1920,
+		.vso_end = 2164+1920,
+		.vso_bline = 51,
+		.vso_eline = 53,
 		.vso_eline_present = true,
 		/* sy_val */
 		/* sy2_val */
-		.max_lncnt = 0x20c,
+		.max_lncnt = 2249,
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_800x600_60 = {
+static union meson_hdmi_venc_mode meson_hdmi_encp_mode_2160p25 = {
 	.encp = {
-		.dvi_settings = 0x21,
+		.dvi_settings = 0x1,
 		.video_mode = 0x4040,
-		.video_mode_adv = 0x18,
-		/* video_prog_mode */
+		.video_mode_adv = 0x8,
 		/* video_sync_mode */
 		/* video_yc_dly */
 		/* video_rgb_ctrl */
-		/* video_filt_ctrl */
+		.video_filt_ctrl = 0x1000,
+		.video_filt_ctrl_present = true,
 		/* video_ofld_voav_ofst */
-		/* yfp1_htime */
-		/* yfp2_htime */
-		.max_pxcnt = 0x41f,
-		/* hspuls_begin */
-		/* hspuls_end */
-		/* hspuls_switch */
-		/* vspuls_begin */
-		/* vspuls_end */
-		/* vspuls_bline */
-		/* vspuls_eline */
-		.havon_begin = 0xD8,
-		.havon_end = 0x3f7,
-		.vavon_bline = 0x1b,
-		.vavon_eline = 0x272,
+		.yfp1_htime = 140,
+		.yfp2_htime = 140+3840,
+		.max_pxcnt = 3840+1440-1,
+		.hspuls_begin = 2156+1920,
+		.hspuls_end = 44,
+		.hspuls_switch = 44,
+		.vspuls_begin = 140,
+		.vspuls_end = 2059+1920,
+		.vspuls_bline = 0,
+		.vspuls_eline = 4,
+		.havon_begin = 148,
+		.havon_end = 3987,
+		.vavon_bline = 89,
+		.vavon_eline = 2248,
 		/* eqpuls_begin */
 		/* eqpuls_end */
 		/* eqpuls_bline */
 		/* eqpuls_eline */
-		.hso_begin = 0,
-		.hso_end = 0x80,
-		.vso_begin = 0x1e,
-		.vso_end = 0x32,
-		.vso_bline = 0,
-		.vso_eline = 4,
+		.hso_begin = 44,
+		.hso_end = 2156+1920,
+		.vso_begin = 2100+1920,
+		.vso_end = 2164+1920,
+		.vso_bline = 51,
+		.vso_eline = 53,
 		.vso_eline_present = true,
 		/* sy_val */
 		/* sy2_val */
-		.max_lncnt = 0x273,
+		.max_lncnt = 2249,
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_1024x768_60 = {
+static union meson_hdmi_venc_mode meson_hdmi_encp_mode_2160p30 = {
 	.encp = {
-		.dvi_settings = 0x21,
+		.dvi_settings = 0x1,
 		.video_mode = 0x4040,
-		.video_mode_adv = 0x18,
-		/* video_prog_mode */
+		.video_mode_adv = 0x8,
 		/* video_sync_mode */
 		/* video_yc_dly */
 		/* video_rgb_ctrl */
-		/* video_filt_ctrl */
+		.video_filt_ctrl = 0x1000,
+		.video_filt_ctrl_present = true,
 		/* video_ofld_voav_ofst */
-		/* yfp1_htime */
-		/* yfp2_htime */
-		.max_pxcnt = 1343,
-		/* hspuls_begin */
-		/* hspuls_end */
-		/* hspuls_switch */
-		/* vspuls_begin */
-		/* vspuls_end */
-		/* vspuls_bline */
-		/* vspuls_eline */
-		.havon_begin = 296,
-		.havon_end = 1319,
-		.vavon_bline = 35,
-		.vavon_eline = 802,
+		.yfp1_htime = 140,
+		.yfp2_htime = 140+3840,
+		.max_pxcnt = 3840+560-1,
+		.hspuls_begin = 2156+1920,
+		.hspuls_end = 44,
+		.hspuls_switch = 44,
+		.vspuls_begin = 140,
+		.vspuls_end = 2059+1920,
+		.vspuls_bline = 0,
+		.vspuls_eline = 4,
+		.havon_begin = 148,
+		.havon_end = 3987,
+		.vavon_bline = 89,
+		.vavon_eline = 2248,
 		/* eqpuls_begin */
 		/* eqpuls_end */
 		/* eqpuls_bline */
 		/* eqpuls_eline */
-		.hso_begin = 0,
-		.hso_end = 136,
-		.vso_begin = 30,
-		.vso_end = 50,
-		.vso_bline = 0,
-		.vso_eline = 6,
+		.hso_begin = 44,
+		.hso_end = 2156+1920,
+		.vso_begin = 2100+1920,
+		.vso_end = 2164+1920,
+		.vso_bline = 51,
+		.vso_eline = 53,
 		.vso_eline_present = true,
 		/* sy_val */
 		/* sy2_val */
-		.max_lncnt = 805,
+		.max_lncnt = 2249,
 	},
 };
 
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_1152x864_75 = {
-	.encp = {
-		.dvi_settings = 0x21,
-		.video_mode = 0x4040,
-		.video_mode_adv = 0x18,
-		/* video_prog_mode */
-		/* video_sync_mode */
-		/* video_yc_dly */
-		/* video_rgb_ctrl */
-		/* video_filt_ctrl */
-		/* video_ofld_voav_ofst */
-		/* yfp1_htime */
-		/* yfp2_htime */
-		.max_pxcnt = 0x63f,
-		/* hspuls_begin */
-		/* hspuls_end */
-		/* hspuls_switch */
-		/* vspuls_begin */
-		/* vspuls_end */
-		/* vspuls_bline */
-		/* vspuls_eline */
-		.havon_begin = 0x180,
-		.havon_end = 0x5ff,
-		.vavon_bline = 0x23,
-		.vavon_eline = 0x382,
-		/* eqpuls_begin */
-		/* eqpuls_end */
-		/* eqpuls_bline */
-		/* eqpuls_eline */
-		.hso_begin = 0,
-		.hso_end = 0x80,
-		.vso_begin = 0x1e,
-		.vso_end = 0x32,
-		.vso_bline = 0,
-		.vso_eline = 3,
-		.vso_eline_present = true,
-		/* sy_val */
-		/* sy2_val */
-		.max_lncnt = 0x383,
-	},
-};
-
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_1280x1024_60 = {
-	.encp = {
-		.dvi_settings = 0x21,
-		.video_mode = 0x4040,
-		.video_mode_adv = 0x18,
-		/* video_prog_mode */
-		/* video_sync_mode */
-		/* video_yc_dly */
-		/* video_rgb_ctrl */
-		/* video_filt_ctrl */
-		/* video_ofld_voav_ofst */
-		/* yfp1_htime */
-		/* yfp2_htime */
-		.max_pxcnt = 0x697,
-		/* hspuls_begin */
-		/* hspuls_end */
-		/* hspuls_switch */
-		/* vspuls_begin */
-		/* vspuls_end */
-		/* vspuls_bline */
-		/* vspuls_eline */
-		.havon_begin = 0x168,
-		.havon_end = 0x667,
-		.vavon_bline = 0x29,
-		.vavon_eline = 0x428,
-		/* eqpuls_begin */
-		/* eqpuls_end */
-		/* eqpuls_bline */
-		/* eqpuls_eline */
-		.hso_begin = 0,
-		.hso_end = 0x70,
-		.vso_begin = 0x1e,
-		.vso_end = 0x32,
-		.vso_bline = 0,
-		.vso_eline = 3,
-		.vso_eline_present = true,
-		/* sy_val */
-		/* sy2_val */
-		.max_lncnt = 0x429,
-	},
-};
-
-union meson_hdmi_venc_mode meson_hdmi_encp_mode_1600x1200_60 = {
-	.encp = {
-		.dvi_settings = 0x21,
-		.video_mode = 0x4040,
-		.video_mode_adv = 0x18,
-		/* video_prog_mode */
-		/* video_sync_mode */
-		/* video_yc_dly */
-		/* video_rgb_ctrl */
-		/* video_filt_ctrl */
-		/* video_ofld_voav_ofst */
-		/* yfp1_htime */
-		/* yfp2_htime */
-		.max_pxcnt = 0x86f,
-		/* hspuls_begin */
-		/* hspuls_end */
-		/* hspuls_switch */
-		/* vspuls_begin */
-		/* vspuls_end */
-		/* vspuls_bline */
-		/* vspuls_eline */
-		.havon_begin = 0x1f0,
-		.havon_end = 0x82f,
-		.vavon_bline = 0x31,
-		.vavon_eline = 0x4e0,
-		/* eqpuls_begin */
-		/* eqpuls_end */
-		/* eqpuls_bline */
-		/* eqpuls_eline */
-		.hso_begin = 0,
-		.hso_end = 0xc0,
-		.vso_begin = 0x1e,
-		.vso_end = 0x32,
-		.vso_bline = 0,
-		.vso_eline = 3,
-		.vso_eline_present = true,
-		/* sy_val */
-		/* sy2_val */
-		.max_lncnt = 0x4e1,
-	},
-};
-
-struct meson_hdmi_venc_dmt_mode {
-	struct drm_display_mode drm_mode;
-	union meson_hdmi_venc_mode *mode;
-} meson_hdmi_venc_dmt_modes[] = {
-	/* 640x480@60Hz */
-	{
-		{ DRM_MODE("640x480", DRM_MODE_TYPE_DRIVER, 25175, 640, 656,
-		  752, 800, 0, 480, 490, 492, 525, 0,
-		  DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC) },
-		&meson_hdmi_encp_mode_640x480_60,
-	},
-	/* 800x600@60Hz */
-	{
-		{ DRM_MODE("800x600", DRM_MODE_TYPE_DRIVER, 40000, 800, 840,
-		  968, 1056, 0, 600, 601, 605, 628, 0,
-		  DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC) },
-		&meson_hdmi_encp_mode_800x600_60,
-	},
-	/* 1024x768@60Hz */
-	{
-		{ DRM_MODE("1024x768", DRM_MODE_TYPE_DRIVER, 65000, 1024,
-		  1048, 1184, 1344, 0, 768, 771, 777, 806, 0,
-		  DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC) },
-		&meson_hdmi_encp_mode_1024x768_60,
-	},
-	/* 1152x864@75Hz */
-	{
-		{ DRM_MODE("1152x864", DRM_MODE_TYPE_DRIVER, 108000, 1152,
-		  1216, 1344, 1600, 0, 864, 865, 868, 900, 0,
-		  DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC) },
-		&meson_hdmi_encp_mode_1152x864_75,
-	},
-	/* 1280x1024@60Hz */
-	{
-		{ DRM_MODE("1280x1024", DRM_MODE_TYPE_DRIVER, 108000, 1280,
-		  1328, 1440, 1688, 0, 1024, 1025, 1028, 1066, 0,
-		  DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC) },
-		&meson_hdmi_encp_mode_1280x1024_60,
-	},
-	/* 1600x1200@60Hz */
-	{
-		{ DRM_MODE("1600x1200", DRM_MODE_TYPE_DRIVER, 162000, 1600,
-		  1664, 1856, 2160, 0, 1200, 1201, 1204, 1250, 0,
-		  DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC) },
-		&meson_hdmi_encp_mode_1600x1200_60,
-	},
-	/* 1920x1080@60Hz */
-	{
-		{ DRM_MODE("1920x1080", DRM_MODE_TYPE_DRIVER, 148500, 1920,
-		  2008, 2052, 2200, 0, 1080, 1084, 1089, 1125, 0,
-		  DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC) },
-		&meson_hdmi_encp_mode_1080p60
-	},
-	{ }, /* sentinel */
-};
-
-struct meson_hdmi_venc_vic_mode {
+static struct meson_hdmi_venc_vic_mode {
 	unsigned int vic;
 	union meson_hdmi_venc_mode *mode;
 } meson_hdmi_venc_vic_modes[] = {
@@ -1022,9 +833,15 @@ struct meson_hdmi_venc_vic_mode {
 	{ 5, &meson_hdmi_encp_mode_1080i60 },
 	{ 20, &meson_hdmi_encp_mode_1080i50 },
 	{ 32, &meson_hdmi_encp_mode_1080p24 },
+	{ 33, &meson_hdmi_encp_mode_1080p50 },
 	{ 34, &meson_hdmi_encp_mode_1080p30 },
 	{ 31, &meson_hdmi_encp_mode_1080p50 },
 	{ 16, &meson_hdmi_encp_mode_1080p60 },
+	{ 93, &meson_hdmi_encp_mode_2160p24 },
+	{ 94, &meson_hdmi_encp_mode_2160p25 },
+	{ 95, &meson_hdmi_encp_mode_2160p30 },
+	{ 96, &meson_hdmi_encp_mode_2160p25 },
+	{ 97, &meson_hdmi_encp_mode_2160p30 },
 	{ 0, NULL}, /* sentinel */
 };
 
@@ -1044,17 +861,20 @@ static unsigned long modulo(unsigned long a, unsigned long b)
 		return a;
 }
 
-bool meson_venc_hdmi_supported_mode(const struct drm_display_mode *mode)
+enum drm_mode_status
+meson_venc_hdmi_supported_mode(const struct drm_display_mode *mode)
 {
-	struct meson_hdmi_venc_dmt_mode *vmode = meson_hdmi_venc_dmt_modes;
+	if (mode->flags & ~(DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_NHSYNC |
+			    DRM_MODE_FLAG_PVSYNC | DRM_MODE_FLAG_NVSYNC))
+		return MODE_BAD;
 
-	while (vmode->mode) {
-		if (drm_mode_equal(&vmode->drm_mode, mode))
-			return true;
-		vmode++;
-	}
+	if (mode->hdisplay < 400 || mode->hdisplay > 3840)
+		return MODE_BAD_HVALUE;
 
-	return false;
+	if (mode->vdisplay < 480 || mode->vdisplay > 2160)
+		return MODE_BAD_VVALUE;
+
+	return MODE_OK;
 }
 EXPORT_SYMBOL_GPL(meson_venc_hdmi_supported_mode);
 
@@ -1072,18 +892,29 @@ bool meson_venc_hdmi_supported_vic(int vic)
 }
 EXPORT_SYMBOL_GPL(meson_venc_hdmi_supported_vic);
 
-static union meson_hdmi_venc_mode
-*meson_venc_hdmi_get_dmt_vmode(const struct drm_display_mode *mode)
+static void meson_venc_hdmi_get_dmt_vmode(const struct drm_display_mode *mode,
+					  union meson_hdmi_venc_mode *dmt_mode)
 {
-	struct meson_hdmi_venc_dmt_mode *vmode = meson_hdmi_venc_dmt_modes;
+	memset(dmt_mode, 0, sizeof(*dmt_mode));
 
-	while (vmode->mode) {
-		if (drm_mode_equal(&vmode->drm_mode, mode))
-			return vmode->mode;
-		vmode++;
-	}
-
-	return NULL;
+	dmt_mode->encp.dvi_settings = 0x21;
+	dmt_mode->encp.video_mode = 0x4040;
+	dmt_mode->encp.video_mode_adv = 0x18;
+	dmt_mode->encp.max_pxcnt = mode->htotal - 1;
+	dmt_mode->encp.havon_begin = mode->htotal - mode->hsync_start;
+	dmt_mode->encp.havon_end = dmt_mode->encp.havon_begin +
+				   mode->hdisplay - 1;
+	dmt_mode->encp.vavon_bline = mode->vtotal - mode->vsync_start;
+	dmt_mode->encp.vavon_eline = dmt_mode->encp.vavon_bline +
+				     mode->vdisplay - 1;
+	dmt_mode->encp.hso_begin = 0;
+	dmt_mode->encp.hso_end = mode->hsync_end - mode->hsync_start;
+	dmt_mode->encp.vso_begin = 30;
+	dmt_mode->encp.vso_end = 50;
+	dmt_mode->encp.vso_bline = 0;
+	dmt_mode->encp.vso_eline = mode->vsync_end - mode->vsync_start;
+	dmt_mode->encp.vso_eline_present = true;
+	dmt_mode->encp.max_lncnt = mode->vtotal - 1;
 }
 
 static union meson_hdmi_venc_mode *meson_venc_hdmi_get_vic_vmode(int vic)
@@ -1117,9 +948,12 @@ bool meson_venc_hdmi_venc_repeat(int vic)
 EXPORT_SYMBOL_GPL(meson_venc_hdmi_venc_repeat);
 
 void meson_venc_hdmi_mode_set(struct meson_drm *priv, int vic,
-			      struct drm_display_mode *mode)
+			      unsigned int ycrcb_map,
+			      bool yuv420_mode,
+			      const struct drm_display_mode *mode)
 {
 	union meson_hdmi_venc_mode *vmode = NULL;
+	union meson_hdmi_venc_mode vmode_dmt;
 	bool use_enci = false;
 	bool venc_repeat = false;
 	bool hdmi_repeat = false;
@@ -1146,22 +980,27 @@ void meson_venc_hdmi_mode_set(struct meson_drm *priv, int vic,
 	unsigned int eof_lines;
 	unsigned int sof_lines;
 	unsigned int vsync_lines;
-
-	if (meson_venc_hdmi_supported_vic(vic))
-		vmode = meson_venc_hdmi_get_vic_vmode(vic);
-	else
-		vmode = meson_venc_hdmi_get_dmt_vmode(mode);
-	if (!vmode) {
-		dev_err(priv->dev, "%s: Fatal Error, unsupported mode "
-			DRM_MODE_FMT "\n", __func__, DRM_MODE_ARG(mode));
-		return;
-	}
+	u32 reg;
 
 	/* Use VENCI for 480i and 576i and double HDMI pixels */
 	if (mode->flags & DRM_MODE_FLAG_DBLCLK) {
 		hdmi_repeat = true;
 		use_enci = true;
 		venc_hdmi_latency = 1;
+	}
+
+	if (meson_venc_hdmi_supported_vic(vic)) {
+		vmode = meson_venc_hdmi_get_vic_vmode(vic);
+		if (!vmode) {
+			dev_err(priv->dev, "%s: Fatal Error, unsupported mode "
+				DRM_MODE_FMT "\n", __func__,
+				DRM_MODE_ARG(mode));
+			return;
+		}
+	} else {
+		meson_venc_hdmi_get_dmt_vmode(mode, &vmode_dmt);
+		vmode = &vmode_dmt;
+		use_enci = false;
 	}
 
 	/* Repeat VENC pixels for 480/576i/p, 720p50/60 and 1080p50/60 */
@@ -1214,8 +1053,11 @@ void meson_venc_hdmi_mode_set(struct meson_drm *priv, int vic,
 		unsigned int lines_f1;
 
 		/* CVBS Filter settings */
-		writel_relaxed(0x12, priv->io_base + _REG(ENCI_CFILT_CTRL));
-		writel_relaxed(0x12, priv->io_base + _REG(ENCI_CFILT_CTRL2));
+		writel_relaxed(ENCI_CFILT_CMPT_SEL_HIGH | 0x10,
+			       priv->io_base + _REG(ENCI_CFILT_CTRL));
+		writel_relaxed(ENCI_CFILT_CMPT_CR_DLY(2) |
+			       ENCI_CFILT_CMPT_CB_DLY(1),
+			       priv->io_base + _REG(ENCI_CFILT_CTRL2));
 
 		/* Digital Video Select : Interlace, clk27 clk, external */
 		writel_relaxed(0, priv->io_base + _REG(VENC_DVI_SETTING));
@@ -1237,8 +1079,9 @@ void meson_venc_hdmi_mode_set(struct meson_drm *priv, int vic,
 				priv->io_base + _REG(ENCI_SYNC_VSO_ODDLN));
 
 		/* Macrovision max amplitude change */
-		writel_relaxed(vmode->enci.macv_max_amp,
-				priv->io_base + _REG(ENCI_MACV_MAX_AMP));
+		writel_relaxed(ENCI_MACV_MAX_AMP_ENABLE_CHANGE |
+			       ENCI_MACV_MAX_AMP_VAL(vmode->enci.macv_max_amp),
+			       priv->io_base + _REG(ENCI_MACV_MAX_AMP));
 
 		/* Video mode */
 		writel_relaxed(vmode->enci.video_prog_mode,
@@ -1246,7 +1089,8 @@ void meson_venc_hdmi_mode_set(struct meson_drm *priv, int vic,
 		writel_relaxed(vmode->enci.video_mode,
 				priv->io_base + _REG(ENCI_VIDEO_MODE));
 
-		/* Advanced Video Mode :
+		/*
+		 * Advanced Video Mode :
 		 * Demux shifting 0x2
 		 * Blank line end at line17/22
 		 * High bandwidth Luma Filter
@@ -1254,7 +1098,10 @@ void meson_venc_hdmi_mode_set(struct meson_drm *priv, int vic,
 		 * Bypass luma low pass filter
 		 * No macrovision on CSYNC
 		 */
-		writel_relaxed(0x26, priv->io_base + _REG(ENCI_VIDEO_MODE_ADV));
+		writel_relaxed(ENCI_VIDEO_MODE_ADV_DMXMD(2) |
+			       ENCI_VIDEO_MODE_ADV_VBICTL_LINE_17_22 |
+			       ENCI_VIDEO_MODE_ADV_YBW_HIGH,
+			       priv->io_base + _REG(ENCI_VIDEO_MODE_ADV));
 
 		writel(vmode->enci.sch_adjust,
 				priv->io_base + _REG(ENCI_VIDEO_SCH));
@@ -1270,8 +1117,17 @@ void meson_venc_hdmi_mode_set(struct meson_drm *priv, int vic,
 		/* UNreset Interlaced TV Encoder */
 		writel_relaxed(0, priv->io_base + _REG(ENCI_DBG_PX_RST));
 
-		/* Enable Vfifo2vd, Y_Cb_Y_Cr select */
-		writel_relaxed(0x4e01, priv->io_base + _REG(ENCI_VFIFO2VD_CTL));
+		/*
+		 * Enable Vfifo2vd and set Y_Cb_Y_Cr:
+		 * Corresponding value:
+		 * Y  => 00 or 10
+		 * Cb => 01
+		 * Cr => 11
+		 * Ex: 0x4e => 01001110 would mean Cb/Y/Cr/Y
+		 */
+		writel_relaxed(ENCI_VFIFO2VD_CTL_ENABLE |
+			       ENCI_VFIFO2VD_CTL_VD_SEL(0x4e),
+			       priv->io_base + _REG(ENCI_VFIFO2VD_CTL));
 
 		/* Timings */
 		writel_relaxed(vmode->enci.pixel_start,
@@ -1293,7 +1149,8 @@ void meson_venc_hdmi_mode_set(struct meson_drm *priv, int vic,
 		meson_vpp_setup_mux(priv, MESON_VIU_VPP_MUX_ENCI);
 
 		/* Interlace video enable */
-		writel_relaxed(1, priv->io_base + _REG(ENCI_VIDEO_EN));
+		writel_relaxed(ENCI_VIDEO_EN_ENABLE,
+			       priv->io_base + _REG(ENCI_VIDEO_EN));
 
 		lines_f0 = mode->vtotal >> 1;
 		lines_f1 = lines_f0 + 1;
@@ -1540,7 +1397,8 @@ void meson_venc_hdmi_mode_set(struct meson_drm *priv, int vic,
 		writel_relaxed(1, priv->io_base + _REG(ENCP_VIDEO_EN));
 
 		/* Set DE signal’s polarity is active high */
-		writel_bits_relaxed(BIT(14), BIT(14),
+		writel_bits_relaxed(ENCP_VIDEO_MODE_DE_V_HIGH,
+				    ENCP_VIDEO_MODE_DE_V_HIGH,
 				    priv->io_base + _REG(ENCP_VIDEO_MODE));
 
 		/* Program DE timing */
@@ -1659,13 +1517,39 @@ void meson_venc_hdmi_mode_set(struct meson_drm *priv, int vic,
 		meson_vpp_setup_mux(priv, MESON_VIU_VPP_MUX_ENCP);
 	}
 
-	writel_relaxed((use_enci ? 1 : 2) |
-		       (mode->flags & DRM_MODE_FLAG_PHSYNC ? 1 << 2 : 0) |
-		       (mode->flags & DRM_MODE_FLAG_PVSYNC ? 1 << 3 : 0) |
-		       4 << 5 |
-		       (venc_repeat ? 1 << 8 : 0) |
-		       (hdmi_repeat ? 1 << 12 : 0),
-		       priv->io_base + _REG(VPU_HDMI_SETTING));
+	/* Set VPU HDMI setting */
+	/* Select ENCP or ENCI data to HDMI */
+	if (use_enci)
+		reg = VPU_HDMI_ENCI_DATA_TO_HDMI;
+	else
+		reg = VPU_HDMI_ENCP_DATA_TO_HDMI;
+
+	/* Invert polarity of HSYNC from VENC */
+	if (mode->flags & DRM_MODE_FLAG_PHSYNC)
+		reg |= VPU_HDMI_INV_HSYNC;
+
+	/* Invert polarity of VSYNC from VENC */
+	if (mode->flags & DRM_MODE_FLAG_PVSYNC)
+		reg |= VPU_HDMI_INV_VSYNC;
+
+	/* Output data format */
+	reg |= ycrcb_map;
+
+	/*
+	 * Write rate to the async FIFO between VENC and HDMI.
+	 * One write every 2 wr_clk.
+	 */
+	if (venc_repeat || yuv420_mode)
+		reg |= VPU_HDMI_WR_RATE(2);
+
+	/*
+	 * Read rate to the async FIFO between VENC and HDMI.
+	 * One read every 2 wr_clk.
+	 */
+	if (hdmi_repeat)
+		reg |= VPU_HDMI_RD_RATE(2);
+
+	writel_relaxed(reg, priv->io_base + _REG(VPU_HDMI_SETTING));
 
 	priv->venc.hdmi_repeat = hdmi_repeat;
 	priv->venc.venc_repeat = venc_repeat;
@@ -1675,15 +1559,219 @@ void meson_venc_hdmi_mode_set(struct meson_drm *priv, int vic,
 }
 EXPORT_SYMBOL_GPL(meson_venc_hdmi_mode_set);
 
+static unsigned short meson_encl_gamma_table[256] = {
+	0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60,
+	64, 68, 72, 76, 80, 84, 88, 92, 96, 100, 104, 108, 112, 116, 120, 124,
+	128, 132, 136, 140, 144, 148, 152, 156, 160, 164, 168, 172, 176, 180, 184, 188,
+	192, 196, 200, 204, 208, 212, 216, 220, 224, 228, 232, 236, 240, 244, 248, 252,
+	256, 260, 264, 268, 272, 276, 280, 284, 288, 292, 296, 300, 304, 308, 312, 316,
+	320, 324, 328, 332, 336, 340, 344, 348, 352, 356, 360, 364, 368, 372, 376, 380,
+	384, 388, 392, 396, 400, 404, 408, 412, 416, 420, 424, 428, 432, 436, 440, 444,
+	448, 452, 456, 460, 464, 468, 472, 476, 480, 484, 488, 492, 496, 500, 504, 508,
+	512, 516, 520, 524, 528, 532, 536, 540, 544, 548, 552, 556, 560, 564, 568, 572,
+	576, 580, 584, 588, 592, 596, 600, 604, 608, 612, 616, 620, 624, 628, 632, 636,
+	640, 644, 648, 652, 656, 660, 664, 668, 672, 676, 680, 684, 688, 692, 696, 700,
+	704, 708, 712, 716, 720, 724, 728, 732, 736, 740, 744, 748, 752, 756, 760, 764,
+	768, 772, 776, 780, 784, 788, 792, 796, 800, 804, 808, 812, 816, 820, 824, 828,
+	832, 836, 840, 844, 848, 852, 856, 860, 864, 868, 872, 876, 880, 884, 888, 892,
+	896, 900, 904, 908, 912, 916, 920, 924, 928, 932, 936, 940, 944, 948, 952, 956,
+	960, 964, 968, 972, 976, 980, 984, 988, 992, 996, 1000, 1004, 1008, 1012, 1016, 1020,
+};
+
+static void meson_encl_set_gamma_table(struct meson_drm *priv, u16 *data,
+				       u32 rgb_mask)
+{
+	int i, ret;
+	u32 reg;
+
+	writel_bits_relaxed(L_GAMMA_CNTL_PORT_EN, 0,
+			    priv->io_base + _REG(L_GAMMA_CNTL_PORT));
+
+	ret = readl_relaxed_poll_timeout(priv->io_base + _REG(L_GAMMA_CNTL_PORT),
+					 reg, reg & L_GAMMA_CNTL_PORT_ADR_RDY, 10, 10000);
+	if (ret)
+		pr_warn("%s: GAMMA ADR_RDY timeout\n", __func__);
+
+	writel_relaxed(L_GAMMA_ADDR_PORT_AUTO_INC | rgb_mask |
+		       FIELD_PREP(L_GAMMA_ADDR_PORT_ADDR, 0),
+		       priv->io_base + _REG(L_GAMMA_ADDR_PORT));
+
+	for (i = 0; i < 256; i++) {
+		ret = readl_relaxed_poll_timeout(priv->io_base + _REG(L_GAMMA_CNTL_PORT),
+						 reg, reg & L_GAMMA_CNTL_PORT_WR_RDY,
+						 10, 10000);
+		if (ret)
+			pr_warn_once("%s: GAMMA WR_RDY timeout\n", __func__);
+
+		writel_relaxed(data[i], priv->io_base + _REG(L_GAMMA_DATA_PORT));
+	}
+
+	ret = readl_relaxed_poll_timeout(priv->io_base + _REG(L_GAMMA_CNTL_PORT),
+					 reg, reg & L_GAMMA_CNTL_PORT_ADR_RDY, 10, 10000);
+	if (ret)
+		pr_warn("%s: GAMMA ADR_RDY timeout\n", __func__);
+
+	writel_relaxed(L_GAMMA_ADDR_PORT_AUTO_INC | rgb_mask |
+		       FIELD_PREP(L_GAMMA_ADDR_PORT_ADDR, 0x23),
+		       priv->io_base + _REG(L_GAMMA_ADDR_PORT));
+}
+
+void meson_encl_load_gamma(struct meson_drm *priv)
+{
+	meson_encl_set_gamma_table(priv, meson_encl_gamma_table, L_GAMMA_ADDR_PORT_SEL_R);
+	meson_encl_set_gamma_table(priv, meson_encl_gamma_table, L_GAMMA_ADDR_PORT_SEL_G);
+	meson_encl_set_gamma_table(priv, meson_encl_gamma_table, L_GAMMA_ADDR_PORT_SEL_B);
+
+	writel_bits_relaxed(L_GAMMA_CNTL_PORT_EN, L_GAMMA_CNTL_PORT_EN,
+			    priv->io_base + _REG(L_GAMMA_CNTL_PORT));
+}
+
+void meson_venc_mipi_dsi_mode_set(struct meson_drm *priv,
+				  const struct drm_display_mode *mode)
+{
+	unsigned int max_pxcnt;
+	unsigned int max_lncnt;
+	unsigned int havon_begin;
+	unsigned int havon_end;
+	unsigned int vavon_bline;
+	unsigned int vavon_eline;
+	unsigned int hso_begin;
+	unsigned int hso_end;
+	unsigned int vso_begin;
+	unsigned int vso_end;
+	unsigned int vso_bline;
+	unsigned int vso_eline;
+
+	max_pxcnt = mode->htotal - 1;
+	max_lncnt = mode->vtotal - 1;
+	havon_begin = mode->htotal - mode->hsync_start;
+	havon_end = havon_begin + mode->hdisplay - 1;
+	vavon_bline = mode->vtotal - mode->vsync_start;
+	vavon_eline = vavon_bline + mode->vdisplay - 1;
+	hso_begin = 0;
+	hso_end = mode->hsync_end - mode->hsync_start;
+	vso_begin = 0;
+	vso_end = 0;
+	vso_bline = 0;
+	vso_eline = mode->vsync_end - mode->vsync_start;
+
+	meson_vpp_setup_mux(priv, MESON_VIU_VPP_MUX_ENCL);
+
+	writel_relaxed(0, priv->io_base + _REG(ENCL_VIDEO_EN));
+
+	writel_relaxed(ENCL_PX_LN_CNT_SHADOW_EN, priv->io_base + _REG(ENCL_VIDEO_MODE));
+	writel_relaxed(ENCL_VIDEO_MODE_ADV_VFIFO_EN |
+		       ENCL_VIDEO_MODE_ADV_GAIN_HDTV |
+		       ENCL_SEL_GAMMA_RGB_IN, priv->io_base + _REG(ENCL_VIDEO_MODE_ADV));
+
+	writel_relaxed(ENCL_VIDEO_FILT_CTRL_BYPASS_FILTER,
+		       priv->io_base + _REG(ENCL_VIDEO_FILT_CTRL));
+	writel_relaxed(max_pxcnt, priv->io_base + _REG(ENCL_VIDEO_MAX_PXCNT));
+	writel_relaxed(max_lncnt, priv->io_base + _REG(ENCL_VIDEO_MAX_LNCNT));
+	writel_relaxed(havon_begin, priv->io_base + _REG(ENCL_VIDEO_HAVON_BEGIN));
+	writel_relaxed(havon_end, priv->io_base + _REG(ENCL_VIDEO_HAVON_END));
+	writel_relaxed(vavon_bline, priv->io_base + _REG(ENCL_VIDEO_VAVON_BLINE));
+	writel_relaxed(vavon_eline, priv->io_base + _REG(ENCL_VIDEO_VAVON_ELINE));
+
+	writel_relaxed(hso_begin, priv->io_base + _REG(ENCL_VIDEO_HSO_BEGIN));
+	writel_relaxed(hso_end, priv->io_base + _REG(ENCL_VIDEO_HSO_END));
+	writel_relaxed(vso_begin, priv->io_base + _REG(ENCL_VIDEO_VSO_BEGIN));
+	writel_relaxed(vso_end, priv->io_base + _REG(ENCL_VIDEO_VSO_END));
+	writel_relaxed(vso_bline, priv->io_base + _REG(ENCL_VIDEO_VSO_BLINE));
+	writel_relaxed(vso_eline, priv->io_base + _REG(ENCL_VIDEO_VSO_ELINE));
+	writel_relaxed(ENCL_VIDEO_RGBIN_RGB | ENCL_VIDEO_RGBIN_ZBLK,
+		       priv->io_base + _REG(ENCL_VIDEO_RGBIN_CTRL));
+
+	/* default black pattern */
+	writel_relaxed(0, priv->io_base + _REG(ENCL_TST_MDSEL));
+	writel_relaxed(0, priv->io_base + _REG(ENCL_TST_Y));
+	writel_relaxed(0, priv->io_base + _REG(ENCL_TST_CB));
+	writel_relaxed(0, priv->io_base + _REG(ENCL_TST_CR));
+	writel_relaxed(1, priv->io_base + _REG(ENCL_TST_EN));
+	writel_bits_relaxed(ENCL_VIDEO_MODE_ADV_VFIFO_EN, 0,
+			    priv->io_base + _REG(ENCL_VIDEO_MODE_ADV));
+
+	writel_relaxed(1, priv->io_base + _REG(ENCL_VIDEO_EN));
+
+	writel_relaxed(0, priv->io_base + _REG(L_RGB_BASE_ADDR));
+	writel_relaxed(0x400, priv->io_base + _REG(L_RGB_COEFF_ADDR)); /* Magic value */
+
+	writel_relaxed(L_DITH_CNTL_DITH10_EN, priv->io_base + _REG(L_DITH_CNTL_ADDR));
+
+	/* DE signal for TTL */
+	writel_relaxed(havon_begin, priv->io_base + _REG(L_OEH_HS_ADDR));
+	writel_relaxed(havon_end + 1, priv->io_base + _REG(L_OEH_HE_ADDR));
+	writel_relaxed(vavon_bline, priv->io_base + _REG(L_OEH_VS_ADDR));
+	writel_relaxed(vavon_eline, priv->io_base + _REG(L_OEH_VE_ADDR));
+
+	/* DE signal for TTL */
+	writel_relaxed(havon_begin, priv->io_base + _REG(L_OEV1_HS_ADDR));
+	writel_relaxed(havon_end + 1, priv->io_base + _REG(L_OEV1_HE_ADDR));
+	writel_relaxed(vavon_bline, priv->io_base + _REG(L_OEV1_VS_ADDR));
+	writel_relaxed(vavon_eline, priv->io_base + _REG(L_OEV1_VE_ADDR));
+
+	/* Hsync signal for TTL */
+	if (mode->flags & DRM_MODE_FLAG_PHSYNC) {
+		writel_relaxed(hso_begin, priv->io_base + _REG(L_STH1_HS_ADDR));
+		writel_relaxed(hso_end, priv->io_base + _REG(L_STH1_HE_ADDR));
+	} else {
+		writel_relaxed(hso_end, priv->io_base + _REG(L_STH1_HS_ADDR));
+		writel_relaxed(hso_begin, priv->io_base + _REG(L_STH1_HE_ADDR));
+	}
+	writel_relaxed(0, priv->io_base + _REG(L_STH1_VS_ADDR));
+	writel_relaxed(max_lncnt, priv->io_base + _REG(L_STH1_VE_ADDR));
+
+	/* Vsync signal for TTL */
+	writel_relaxed(vso_begin, priv->io_base + _REG(L_STV1_HS_ADDR));
+	writel_relaxed(vso_end, priv->io_base + _REG(L_STV1_HE_ADDR));
+	if (mode->flags & DRM_MODE_FLAG_PVSYNC) {
+		writel_relaxed(vso_bline, priv->io_base + _REG(L_STV1_VS_ADDR));
+		writel_relaxed(vso_eline, priv->io_base + _REG(L_STV1_VE_ADDR));
+	} else {
+		writel_relaxed(vso_eline, priv->io_base + _REG(L_STV1_VS_ADDR));
+		writel_relaxed(vso_bline, priv->io_base + _REG(L_STV1_VE_ADDR));
+	}
+
+	/* DE signal */
+	writel_relaxed(havon_begin, priv->io_base + _REG(L_DE_HS_ADDR));
+	writel_relaxed(havon_end + 1, priv->io_base + _REG(L_DE_HE_ADDR));
+	writel_relaxed(vavon_bline, priv->io_base + _REG(L_DE_VS_ADDR));
+	writel_relaxed(vavon_eline, priv->io_base + _REG(L_DE_VE_ADDR));
+
+	/* Hsync signal */
+	writel_relaxed(hso_begin, priv->io_base + _REG(L_HSYNC_HS_ADDR));
+	writel_relaxed(hso_end, priv->io_base + _REG(L_HSYNC_HE_ADDR));
+	writel_relaxed(0, priv->io_base + _REG(L_HSYNC_VS_ADDR));
+	writel_relaxed(max_lncnt, priv->io_base + _REG(L_HSYNC_VE_ADDR));
+
+	/* Vsync signal */
+	writel_relaxed(vso_begin, priv->io_base + _REG(L_VSYNC_HS_ADDR));
+	writel_relaxed(vso_end, priv->io_base + _REG(L_VSYNC_HE_ADDR));
+	writel_relaxed(vso_bline, priv->io_base + _REG(L_VSYNC_VS_ADDR));
+	writel_relaxed(vso_eline, priv->io_base + _REG(L_VSYNC_VE_ADDR));
+
+	writel_relaxed(0, priv->io_base + _REG(L_INV_CNT_ADDR));
+	writel_relaxed(L_TCON_MISC_SEL_STV1 | L_TCON_MISC_SEL_STV2,
+		       priv->io_base + _REG(L_TCON_MISC_SEL_ADDR));
+
+	priv->venc.current_mode = MESON_VENC_MODE_MIPI_DSI;
+}
+EXPORT_SYMBOL_GPL(meson_venc_mipi_dsi_mode_set);
+
 void meson_venci_cvbs_mode_set(struct meson_drm *priv,
 			       struct meson_cvbs_enci_mode *mode)
 {
+	u32 reg;
+
 	if (mode->mode_tag == priv->venc.current_mode)
 		return;
 
 	/* CVBS Filter settings */
-	writel_relaxed(0x12, priv->io_base + _REG(ENCI_CFILT_CTRL));
-	writel_relaxed(0x12, priv->io_base + _REG(ENCI_CFILT_CTRL2));
+	writel_relaxed(ENCI_CFILT_CMPT_SEL_HIGH | 0x10,
+		       priv->io_base + _REG(ENCI_CFILT_CTRL));
+	writel_relaxed(ENCI_CFILT_CMPT_CR_DLY(2) |
+		       ENCI_CFILT_CMPT_CB_DLY(1),
+		       priv->io_base + _REG(ENCI_CFILT_CTRL2));
 
 	/* Digital Video Select : Interlace, clk27 clk, external */
 	writel_relaxed(0, priv->io_base + _REG(VENC_DVI_SETTING));
@@ -1705,8 +1793,9 @@ void meson_venci_cvbs_mode_set(struct meson_drm *priv,
 			priv->io_base + _REG(ENCI_SYNC_VSO_ODDLN));
 
 	/* Macrovision max amplitude change */
-	writel_relaxed(0x8100 + mode->macv_max_amp,
-			priv->io_base + _REG(ENCI_MACV_MAX_AMP));
+	writel_relaxed(ENCI_MACV_MAX_AMP_ENABLE_CHANGE |
+		       ENCI_MACV_MAX_AMP_VAL(mode->macv_max_amp),
+		       priv->io_base + _REG(ENCI_MACV_MAX_AMP));
 
 	/* Video mode */
 	writel_relaxed(mode->video_prog_mode,
@@ -1714,7 +1803,8 @@ void meson_venci_cvbs_mode_set(struct meson_drm *priv,
 	writel_relaxed(mode->video_mode,
 			priv->io_base + _REG(ENCI_VIDEO_MODE));
 
-	/* Advanced Video Mode :
+	/*
+	 * Advanced Video Mode :
 	 * Demux shifting 0x2
 	 * Blank line end at line17/22
 	 * High bandwidth Luma Filter
@@ -1722,7 +1812,10 @@ void meson_venci_cvbs_mode_set(struct meson_drm *priv,
 	 * Bypass luma low pass filter
 	 * No macrovision on CSYNC
 	 */
-	writel_relaxed(0x26, priv->io_base + _REG(ENCI_VIDEO_MODE_ADV));
+	writel_relaxed(ENCI_VIDEO_MODE_ADV_DMXMD(2) |
+		       ENCI_VIDEO_MODE_ADV_VBICTL_LINE_17_22 |
+		       ENCI_VIDEO_MODE_ADV_YBW_HIGH,
+		       priv->io_base + _REG(ENCI_VIDEO_MODE_ADV));
 
 	writel(mode->sch_adjust, priv->io_base + _REG(ENCI_VIDEO_SCH));
 
@@ -1754,16 +1847,50 @@ void meson_venci_cvbs_mode_set(struct meson_drm *priv,
 	/* UNreset Interlaced TV Encoder */
 	writel_relaxed(0, priv->io_base + _REG(ENCI_DBG_PX_RST));
 
-	/* Enable Vfifo2vd, Y_Cb_Y_Cr select */
-	writel_relaxed(0x4e01, priv->io_base + _REG(ENCI_VFIFO2VD_CTL));
+	/*
+	 * Enable Vfifo2vd and set Y_Cb_Y_Cr:
+	 * Corresponding value:
+	 * Y  => 00 or 10
+	 * Cb => 01
+	 * Cr => 11
+	 * Ex: 0x4e => 01001110 would mean Cb/Y/Cr/Y
+	 */
+	writel_relaxed(ENCI_VFIFO2VD_CTL_ENABLE |
+		       ENCI_VFIFO2VD_CTL_VD_SEL(0x4e),
+		       priv->io_base + _REG(ENCI_VFIFO2VD_CTL));
 
 	/* Power UP Dacs */
 	writel_relaxed(0, priv->io_base + _REG(VENC_VDAC_SETTING));
 
 	/* Video Upsampling */
-	writel_relaxed(0x0061, priv->io_base + _REG(VENC_UPSAMPLE_CTRL0));
-	writel_relaxed(0x4061, priv->io_base + _REG(VENC_UPSAMPLE_CTRL1));
-	writel_relaxed(0x5061, priv->io_base + _REG(VENC_UPSAMPLE_CTRL2));
+	/*
+	 * CTRL0, CTRL1 and CTRL2:
+	 * Filter0: input data sample every 2 cloks
+	 * Filter1: filtering and upsample enable
+	 */
+	reg = VENC_UPSAMPLE_CTRL_F0_2_CLK_RATIO | VENC_UPSAMPLE_CTRL_F1_EN |
+		VENC_UPSAMPLE_CTRL_F1_UPSAMPLE_EN;
+
+	/*
+	 * Upsample CTRL0:
+	 * Interlace High Bandwidth Luma
+	 */
+	writel_relaxed(VENC_UPSAMPLE_CTRL_INTERLACE_HIGH_LUMA | reg,
+		       priv->io_base + _REG(VENC_UPSAMPLE_CTRL0));
+
+	/*
+	 * Upsample CTRL1:
+	 * Interlace Pb
+	 */
+	writel_relaxed(VENC_UPSAMPLE_CTRL_INTERLACE_PB | reg,
+		       priv->io_base + _REG(VENC_UPSAMPLE_CTRL1));
+
+	/*
+	 * Upsample CTRL2:
+	 * Interlace R
+	 */
+	writel_relaxed(VENC_UPSAMPLE_CTRL_INTERLACE_PR | reg,
+		       priv->io_base + _REG(VENC_UPSAMPLE_CTRL2));
 
 	/* Select Interlace Y DACs */
 	writel_relaxed(0, priv->io_base + _REG(VENC_VDAC_DACSEL0));
@@ -1777,14 +1904,16 @@ void meson_venci_cvbs_mode_set(struct meson_drm *priv,
 	meson_vpp_setup_mux(priv, MESON_VIU_VPP_MUX_ENCI);
 
 	/* Enable ENCI FIFO */
-	writel_relaxed(0x2000, priv->io_base + _REG(VENC_VDAC_FIFO_CTRL));
+	writel_relaxed(VENC_VDAC_FIFO_EN_ENCI_ENABLE,
+		       priv->io_base + _REG(VENC_VDAC_FIFO_CTRL));
 
 	/* Select ENCI DACs 0, 1, 4, and 5 */
 	writel_relaxed(0x11, priv->io_base + _REG(ENCI_DACSEL_0));
 	writel_relaxed(0x11, priv->io_base + _REG(ENCI_DACSEL_1));
 
 	/* Interlace video enable */
-	writel_relaxed(1, priv->io_base + _REG(ENCI_VIDEO_EN));
+	writel_relaxed(ENCI_VIDEO_EN_ENABLE,
+		       priv->io_base + _REG(ENCI_VIDEO_EN));
 
 	/* Configure Video Saturation / Contrast / Brightness / Hue */
 	writel_relaxed(mode->video_saturation,
@@ -1797,7 +1926,8 @@ void meson_venci_cvbs_mode_set(struct meson_drm *priv,
 			priv->io_base + _REG(ENCI_VIDEO_HUE));
 
 	/* Enable DAC0 Filter */
-	writel_relaxed(0x1, priv->io_base + _REG(VENC_VDAC_DAC0_FILT_CTRL0));
+	writel_relaxed(VENC_VDAC_DAC0_FILT_CTRL0_EN,
+		       priv->io_base + _REG(VENC_VDAC_DAC0_FILT_CTRL0));
 	writel_relaxed(0xfc48, priv->io_base + _REG(VENC_VDAC_DAC0_FILT_CTRL1));
 
 	/* 0 in Macrovision register 0 */
@@ -1818,19 +1948,34 @@ unsigned int meson_venci_get_field(struct meson_drm *priv)
 
 void meson_venc_enable_vsync(struct meson_drm *priv)
 {
-	writel_relaxed(2, priv->io_base + _REG(VENC_INTCTRL));
+	switch (priv->venc.current_mode) {
+	case MESON_VENC_MODE_MIPI_DSI:
+		writel_relaxed(VENC_INTCTRL_ENCP_LNRST_INT_EN,
+			       priv->io_base + _REG(VENC_INTCTRL));
+		break;
+	default:
+		writel_relaxed(VENC_INTCTRL_ENCI_LNRST_INT_EN,
+			       priv->io_base + _REG(VENC_INTCTRL));
+	}
+	regmap_update_bits(priv->hhi, HHI_GCLK_MPEG2, BIT(25), BIT(25));
 }
 
 void meson_venc_disable_vsync(struct meson_drm *priv)
 {
+	regmap_update_bits(priv->hhi, HHI_GCLK_MPEG2, BIT(25), 0);
 	writel_relaxed(0, priv->io_base + _REG(VENC_INTCTRL));
 }
 
 void meson_venc_init(struct meson_drm *priv)
 {
 	/* Disable CVBS VDAC */
-	regmap_write(priv->hhi, HHI_VDAC_CNTL0, 0);
-	regmap_write(priv->hhi, HHI_VDAC_CNTL1, 8);
+	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A)) {
+		regmap_write(priv->hhi, HHI_VDAC_CNTL0_G12A, 0);
+		regmap_write(priv->hhi, HHI_VDAC_CNTL1_G12A, 8);
+	} else {
+		regmap_write(priv->hhi, HHI_VDAC_CNTL0, 0);
+		regmap_write(priv->hhi, HHI_VDAC_CNTL1, 8);
+	}
 
 	/* Power Down Dacs */
 	writel_relaxed(0xff, priv->io_base + _REG(VENC_VDAC_SETTING));
@@ -1839,7 +1984,8 @@ void meson_venc_init(struct meson_drm *priv)
 	regmap_write(priv->hhi, HHI_HDMI_PHY_CNTL0, 0);
 
 	/* Disable HDMI */
-	writel_bits_relaxed(0x3, 0,
+	writel_bits_relaxed(VPU_HDMI_ENCI_DATA_TO_HDMI |
+			    VPU_HDMI_ENCP_DATA_TO_HDMI, 0,
 			    priv->io_base + _REG(VPU_HDMI_SETTING));
 
 	/* Disable all encoders */

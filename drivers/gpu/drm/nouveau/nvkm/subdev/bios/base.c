@@ -33,17 +33,25 @@ nvbios_addr(struct nvkm_bios *bios, u32 *addr, u8 size)
 {
 	u32 p = *addr;
 
-	if (*addr > bios->image0_size && bios->imaged_addr) {
+	if (*addr >= bios->image0_size && bios->imaged_addr) {
 		*addr -= bios->image0_size;
 		*addr += bios->imaged_addr;
 	}
 
-	if (unlikely(*addr + size >= bios->size)) {
+	if (unlikely(*addr + size > bios->size)) {
 		nvkm_error(&bios->subdev, "OOB %d %08x %08x\n", size, p, *addr);
 		return false;
 	}
 
 	return true;
+}
+
+void *
+nvbios_pointer(struct nvkm_bios *bios, u32 addr)
+{
+	if (likely(nvbios_addr(bios, &addr, 0)))
+		return &bios->data[addr];
+	return NULL;
 }
 
 u8
@@ -140,16 +148,17 @@ nvkm_bios = {
 };
 
 int
-nvkm_bios_new(struct nvkm_device *device, int index, struct nvkm_bios **pbios)
+nvkm_bios_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst,
+	      struct nvkm_bios **pbios)
 {
 	struct nvkm_bios *bios;
 	struct nvbios_image image;
 	struct bit_entry bit_i;
 	int ret, idx = 0;
 
-	if (!(bios = *pbios = kzalloc(sizeof(*bios), GFP_KERNEL)))
+	if (!(bios = *pbios = kzalloc_obj(*bios)))
 		return -ENOMEM;
-	nvkm_subdev_ctor(&nvkm_bios, device, index, &bios->subdev);
+	nvkm_subdev_ctor(&nvkm_bios, device, type, inst, &bios->subdev);
 
 	ret = nvbios_shadow(bios);
 	if (ret)

@@ -22,7 +22,6 @@
 #include <linux/msg.h>
 #include <linux/shm.h>
 #include <linux/uio.h>
-#include <linux/nfs_fs.h>
 #include <linux/quota.h>
 #include <linux/poll.h>
 #include <linux/personality.h>
@@ -59,7 +58,7 @@ COMPAT_SYSCALL_DEFINE3(truncate64, const char __user *, path, u32, high, u32, lo
 
 COMPAT_SYSCALL_DEFINE3(ftruncate64, unsigned int, fd, u32, high, u32, low)
 {
-	return ksys_ftruncate(fd, ((u64)high << 32) | low);
+	return ksys_ftruncate(fd, ((u64)high << 32) | low, FTRUNCATE_LFS);
 }
 
 static int cp_compat_stat64(struct kstat *stat,

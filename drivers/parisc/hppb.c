@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 ** hppb.c:
 **      HP-PB bus driver for the NOVA and K-Class systems.
@@ -5,10 +6,6 @@
 **      (c) Copyright 2002 Ryan Bradetich
 **      (c) Copyright 2002 Hewlett-Packard Company
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
 **
 */
 
@@ -22,6 +19,8 @@
 #include <asm/io.h>
 #include <asm/hardware.h>
 #include <asm/parisc-device.h>
+
+#include "iommu.h"
 
 struct hppb_card {
 	unsigned long hpa;
@@ -55,15 +54,13 @@ static int __init hppb_probe(struct parisc_device *dev)
 	}
 
 	if(card->hpa) {
-		card->next = kzalloc(sizeof(struct hppb_card), GFP_KERNEL);
+		card->next = kzalloc_obj(struct hppb_card);
 		if(!card->next) {
 			printk(KERN_ERR "HP-PB: Unable to allocate memory.\n");
 			return 1;
 		}
 		card = card->next;
 	}
-	printk(KERN_INFO "Found GeckoBoa at 0x%llx\n",
-			(unsigned long long) dev->hpa.start);
 
 	card->hpa = dev->hpa.start;
 	card->mmio_region.name = "HP-PB Bus";
@@ -73,10 +70,11 @@ static int __init hppb_probe(struct parisc_device *dev)
 	card->mmio_region.end = gsc_readl(dev->hpa.start + IO_IO_HIGH) - 1;
 
 	status = ccio_request_resource(dev, &card->mmio_region);
-	if(status < 0) {
-		printk(KERN_ERR "%s: failed to claim HP-PB bus space (%pR)\n",
-			__FILE__, &card->mmio_region);
-	}
+
+	pr_info("Found GeckoBoa at %pap, bus space %pR,%s claimed.\n",
+			&dev->hpa.start,
+			&card->mmio_region,
+			(status < 0) ? " not":"" );
 
         return 0;
 }
@@ -98,9 +96,10 @@ static struct parisc_driver hppb_driver __refdata = {
 /**
  * hppb_init - HP-PB bus initialization procedure.
  *
- * Register this driver.   
+ * Register this driver.
  */
-void __init hppb_init(void)
+static int __init hppb_init(void)
 {
-        register_parisc_driver(&hppb_driver);
+        return register_parisc_driver(&hppb_driver);
 }
+arch_initcall(hppb_init);

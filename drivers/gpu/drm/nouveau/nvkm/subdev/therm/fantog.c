@@ -99,11 +99,11 @@ nvkm_fantog_create(struct nvkm_therm *therm, struct dcb_gpio_func *func)
 			return ret;
 	}
 
-	fan = kzalloc(sizeof(*fan), GFP_KERNEL);
-	therm->fan = &fan->base;
+	fan = kzalloc_obj(*fan);
 	if (!fan)
 		return -ENOMEM;
 
+	therm->fan = &fan->base;
 	fan->base.type = "toggle";
 	fan->base.get = nvkm_fantog_get;
 	fan->base.set = nvkm_fantog_set;

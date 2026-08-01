@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * ImgTec IR Hardware Decoder found in PowerDown Controller.
  *
  * Copyright 2010-2014 Imagination Technologies Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
  *
  * This ties into the input subsystem using the RC-core. Protocol support is
  * provided in separate modules which provide the parameters and scancode
@@ -560,8 +556,8 @@ static void img_ir_set_decoder(struct img_ir_priv *priv,
 	 * acquires the lock and we don't want to deadlock waiting for it.
 	 */
 	spin_unlock_irq(&priv->lock);
-	del_timer_sync(&hw->end_timer);
-	del_timer_sync(&hw->suspend_timer);
+	timer_delete_sync(&hw->end_timer);
+	timer_delete_sync(&hw->suspend_timer);
 	spin_lock_irq(&priv->lock);
 
 	hw->stopping = false;
@@ -621,7 +617,7 @@ unlock:
 }
 
 /**
- * img_ir_decoder_compatable() - Find whether a decoder will work with a device.
+ * img_ir_decoder_compatible() - Find whether a decoder will work with a device.
  * @priv:	IR private data.
  * @dec:	Decoder to check.
  *
@@ -869,7 +865,7 @@ static void img_ir_handle_data(struct img_ir_priv *priv, u32 len, u64 raw)
 /* timer function to end waiting for repeat. */
 static void img_ir_end_timer(struct timer_list *t)
 {
-	struct img_ir_priv *priv = from_timer(priv, t, hw.end_timer);
+	struct img_ir_priv *priv = timer_container_of(priv, t, hw.end_timer);
 
 	spin_lock_irq(&priv->lock);
 	img_ir_end_repeat(priv);
@@ -883,7 +879,8 @@ static void img_ir_end_timer(struct timer_list *t)
  */
 static void img_ir_suspend_timer(struct timer_list *t)
 {
-	struct img_ir_priv *priv = from_timer(priv, t, hw.suspend_timer);
+	struct img_ir_priv *priv = timer_container_of(priv, t,
+						      hw.suspend_timer);
 
 	spin_lock_irq(&priv->lock);
 	/*
@@ -1121,9 +1118,10 @@ void img_ir_remove_hw(struct img_ir_priv *priv)
 	struct rc_dev *rdev = hw->rdev;
 	if (!rdev)
 		return;
+	rc_unregister_device(rdev);
 	img_ir_set_decoder(priv, NULL, 0);
 	hw->rdev = NULL;
-	rc_unregister_device(rdev);
+	rc_free_device(rdev);
 #ifdef CONFIG_COMMON_CLK
 	if (!IS_ERR(priv->clk))
 		clk_notifier_unregister(priv->clk, &hw->clk_nb);

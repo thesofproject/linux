@@ -67,7 +67,9 @@ enum {
 	RDMA_USER_CM_CMD_QUERY,
 	RDMA_USER_CM_CMD_BIND,
 	RDMA_USER_CM_CMD_RESOLVE_ADDR,
-	RDMA_USER_CM_CMD_JOIN_MCAST
+	RDMA_USER_CM_CMD_JOIN_MCAST,
+	RDMA_USER_CM_CMD_RESOLVE_IB_SERVICE,
+	RDMA_USER_CM_CMD_WRITE_CM_EVENT,
 };
 
 /* See IBTA Annex A11, servies ID bytes 4 & 5 */
@@ -147,7 +149,8 @@ struct rdma_ucm_resolve_route {
 enum {
 	RDMA_USER_CM_QUERY_ADDR,
 	RDMA_USER_CM_QUERY_PATH,
-	RDMA_USER_CM_QUERY_GID
+	RDMA_USER_CM_QUERY_GID,
+	RDMA_USER_CM_QUERY_IB_SERVICE
 };
 
 struct rdma_ucm_query {
@@ -164,6 +167,8 @@ struct rdma_ucm_query_route_resp {
 	__u32 num_paths;
 	__u8 port_num;
 	__u8 reserved[3];
+	__u32 ibdev_index;
+	__u32 reserved1;
 };
 
 struct rdma_ucm_query_addr_resp {
@@ -175,12 +180,20 @@ struct rdma_ucm_query_addr_resp {
 	__u16 dst_size;
 	struct __kernel_sockaddr_storage src_addr;
 	struct __kernel_sockaddr_storage dst_addr;
+	__u32 ibdev_index;
+	__u32 reserved1;
 };
 
 struct rdma_ucm_query_path_resp {
 	__u32 num_paths;
 	__u32 reserved;
-	struct ib_path_rec_data path_data[0];
+	struct ib_path_rec_data path_data[];
+};
+
+struct rdma_ucm_query_ib_service_resp {
+	__u32 num_service_recs;
+	__u32 reserved;
+	struct ib_user_service_rec recs[];
 };
 
 struct rdma_ucm_conn_param {
@@ -206,10 +219,16 @@ struct rdma_ucm_ud_param {
 	__u8  reserved[7];
 };
 
+struct rdma_ucm_ece {
+	__u32 vendor_id;
+	__u32 attr_mod;
+};
+
 struct rdma_ucm_connect {
 	struct rdma_ucm_conn_param conn_param;
 	__u32 id;
 	__u32 reserved;
+	struct rdma_ucm_ece ece;
 };
 
 struct rdma_ucm_listen {
@@ -222,12 +241,14 @@ struct rdma_ucm_accept {
 	struct rdma_ucm_conn_param conn_param;
 	__u32 id;
 	__u32 reserved;
+	struct rdma_ucm_ece ece;
 };
 
 struct rdma_ucm_reject {
 	__u32 id;
 	__u8  private_data_len;
-	__u8  reserved[3];
+	__u8  reason;
+	__u8  reserved[2];
 	__u8  private_data[RDMA_MAX_PRIVATE_DATA];
 };
 
@@ -285,8 +306,10 @@ struct rdma_ucm_event_resp {
 	union {
 		struct rdma_ucm_conn_param conn;
 		struct rdma_ucm_ud_param   ud;
+		__u32 arg32[2];
 	} param;
 	__u32 reserved;
+	struct rdma_ucm_ece ece;
 };
 
 /* Option levels */
@@ -300,6 +323,10 @@ enum {
 	RDMA_OPTION_ID_TOS	 = 0,
 	RDMA_OPTION_ID_REUSEADDR = 1,
 	RDMA_OPTION_ID_AFONLY	 = 2,
+	RDMA_OPTION_ID_ACK_TIMEOUT = 3
+};
+
+enum {
 	RDMA_OPTION_IB_PATH	 = 1
 };
 
@@ -321,4 +348,34 @@ struct rdma_ucm_migrate_resp {
 	__u32 events_reported;
 };
 
+enum {
+	RDMA_USER_CM_IB_SERVICE_FLAG_ID = 1 << 0,
+	RDMA_USER_CM_IB_SERVICE_FLAG_NAME = 1 << 1,
+};
+
+#define RDMA_USER_CM_IB_SERVICE_NAME_SIZE 64
+struct rdma_ucm_ib_service {
+	__aligned_u64 service_id;
+	__u8  service_name[RDMA_USER_CM_IB_SERVICE_NAME_SIZE];
+	__u32 flags;
+	__u32 reserved;
+};
+
+struct rdma_ucm_resolve_ib_service {
+	__u32 id;
+	__u32 reserved;
+	struct rdma_ucm_ib_service ibs;
+};
+
+struct rdma_ucm_write_cm_event {
+	__u32 id;
+	__u32 reserved;
+	__u32 event;
+	__u32 status;
+	union {
+		struct rdma_ucm_conn_param conn;
+		struct rdma_ucm_ud_param ud;
+		__u64 arg;
+	} param;
+};
 #endif /* RDMA_USER_CM_H */

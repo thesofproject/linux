@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     Copyright (c) 1999-2002 Merlin Hughes <merlin@merlin.org>
 
@@ -6,15 +7,6 @@
     Copyright (c) 1998, 1999  Frodo Looijaard <frodol@dds.nl> and
     Philip Edelbrock <phil@netroedge.com>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
 */
 
 /*
@@ -219,7 +211,7 @@ static s32 amd756_access(struct i2c_adapter * adap, u16 addr,
 		       SMB_HOST_ADDRESS);
 		outb_p(command, SMB_HOST_COMMAND);
 		if (read_write == I2C_SMBUS_WRITE)
-			outw_p(data->word, SMB_HOST_DATA);	/* TODO: endian???? */
+			outw_p(data->word, SMB_HOST_DATA);
 		size = AMD756_WORD_DATA;
 		break;
 	case I2C_SMBUS_BLOCK_DATA:
@@ -264,7 +256,7 @@ static s32 amd756_access(struct i2c_adapter * adap, u16 addr,
 		data->byte = inw_p(SMB_HOST_DATA);
 		break;
 	case AMD756_WORD_DATA:
-		data->word = inw_p(SMB_HOST_DATA);	/* TODO: endian???? */
+		data->word = inw_p(SMB_HOST_DATA);
 		break;
 	case AMD756_BLOCK_DATA:
 		data->block[0] = inw_p(SMB_HOST_DATA) & 0x3f;
@@ -291,9 +283,9 @@ static const struct i2c_algorithm smbus_algorithm = {
 	.functionality	= amd756_func,
 };
 
-struct i2c_adapter amd756_smbus = {
+static struct i2c_adapter amd756_smbus = {
 	.owner		= THIS_MODULE,
-	.class          = I2C_CLASS_HWMON | I2C_CLASS_SPD,
+	.class          = I2C_CLASS_HWMON,
 	.algo		= &smbus_algorithm,
 };
 
@@ -406,5 +398,3 @@ module_pci_driver(amd756_driver);
 MODULE_AUTHOR("Merlin Hughes <merlin@merlin.org>");
 MODULE_DESCRIPTION("AMD756/766/768/8111 and nVidia nForce SMBus driver");
 MODULE_LICENSE("GPL");
-
-EXPORT_SYMBOL(amd756_smbus);

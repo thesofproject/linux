@@ -20,35 +20,71 @@ config ARM_CCI400_PORT_CTRL
 	  Low level power management driver for CCI400 cache coherent
 	  interconnect for ARM platforms.
 
+config ARM_INTEGRATOR_LM
+	bool "ARM Integrator Logic Module bus"
+	depends on HAS_IOMEM
+	depends on ARCH_INTEGRATOR || COMPILE_TEST
+	default ARCH_INTEGRATOR
+	help
+	  Say y here to enable support for the ARM Logic Module bus
+	  found on the ARM Integrator AP (Application Platform)
+
 config BRCMSTB_GISB_ARB
-	bool "Broadcom STB GISB bus arbiter"
-	depends on ARM || ARM64 || MIPS
+	tristate "Broadcom STB GISB bus arbiter"
+	depends on ARCH_BRCMSTB || BMIPS_GENERIC
 	default ARCH_BRCMSTB || BMIPS_GENERIC
 	help
 	  Driver for the Broadcom Set Top Box System-on-a-chip internal bus
 	  arbiter. This driver provides timeout and target abort error handling
 	  and internal bus master decoding.
 
+config MOXTET
+	tristate "CZ.NIC Turris Mox module configuration bus"
+	depends on SPI_MASTER && OF
+	help
+	  Say yes here to add support for the module configuration bus found
+	  on CZ.NIC's Turris Mox. This is needed for the ability to discover
+	  the order in which the modules are connected and to get/set some of
+	  their settings. For example the GPIOs on Mox SFP module are
+	  configured through this bus.
+
 config HISILICON_LPC
 	bool "Support for ISA I/O space on HiSilicon Hip06/7"
-	depends on ARM64 && (ARCH_HISI || COMPILE_TEST)
-	select INDIRECT_PIO
-	select MFD_CORE if ACPI
+	depends on (ARM64 && ARCH_HISI) || (COMPILE_TEST && !ALPHA && !HEXAGON && !PARISC)
+	depends on HAS_IOPORT
+	select INDIRECT_PIO if ARM64
 	help
 	  Driver to enable I/O access to devices attached to the Low Pin
 	  Count bus on the HiSilicon Hip06/7 SoC.
 
+config IMX_AIPSTZ
+	tristate "Support for IMX Secure AHB to IP Slave bus (AIPSTZ) bridge"
+	depends on ARCH_MXC
+	help
+	  Enable support for IMX AIPSTZ bridge.
+
 config IMX_WEIM
 	bool "Freescale EIM DRIVER"
-	depends on ARCH_MXC
+	depends on ARCH_MXC || COMPILE_TEST
 	help
 	  Driver for i.MX WEIM controller.
 	  The WEIM(Wireless External Interface Module) works like a bus.
 	  You can attach many different devices on it, such as NOR, onenand.
 
+config INTEL_IXP4XX_EB
+	bool "Intel IXP4xx expansion bus interface driver"
+	depends on HAS_IOMEM
+	depends on ARCH_IXP4XX || COMPILE_TEST
+	default ARCH_IXP4XX
+	select MFD_SYSCON
+	help
+	  Driver for the Intel IXP4xx expansion bus interface. The driver is
+	  needed to set up various chip select configuration parameters before
+	  devices on the expansion bus can be discovered.
+
 config MIPS_CDMM
 	bool "MIPS Common Device Memory Map (CDMM) Driver"
-	depends on CPU_MIPSR2
+	depends on CPU_MIPSR2 || CPU_MIPSR5
 	help
 	  Driver needed for the MIPS Common Device Memory Map bus in MIPS
 	  cores. This bus is for per-CPU tightly coupled devices such as the
@@ -75,7 +111,7 @@ config OMAP_INTERCONNECT
 
 config OMAP_OCP2SCP
 	tristate "OMAP OCP2SCP DRIVER"
-	depends on ARCH_OMAP2PLUS
+	depends on ARCH_OMAP2PLUS || COMPILE_TEST
 	help
 	  Driver to enable ocp2scp module which transforms ocp interface
 	  protocol to scp protocol. In OMAP4, USB PHY is connected via
@@ -92,17 +128,46 @@ config QCOM_EBI2
 	  Interface 2, which can be used to connect things like NAND Flash,
 	  SRAM, ethernet adapters, FPGAs and LCD displays.
 
-config SIMPLE_PM_BUS
-	tristate "Simple Power-Managed Bus Driver"
-	depends on OF && PM
+config QCOM_SSC_BLOCK_BUS
+	bool "Qualcomm SSC Block Bus Init Driver"
+	  depends on ARCH_QCOM
+	  help
+	  Say y here to enable support for initializing the bus that connects
+	  the SSC block's internal bus to the cNoC (configurantion NoC) on
+	  (some) qcom SoCs.
+	  The SSC (Snapdragon Sensor Core) block contains a gpio controller,
+	  i2c/spi/uart controllers, a hexagon core, and a clock controller
+	  which provides clocks for the above.
+
+config STM32_DBG_BUS
+	tristate "OP-TEE based debug access bus"
+	depends on OPTEE && STM32_FIREWALL
+	depends on ARCH_STM32 || COMPILE_TEST
 	help
-	  Driver for transparent busses that don't need a real driver, but
-	  where the bus controller is part of a PM domain, or under the control
-	  of a functional clock, and thus relies on runtime PM for managing
-	  this PM domain and/or clock.
-	  An example of such a bus controller is the Renesas Bus State
-	  Controller (BSC, sometimes called "LBSC within Bus Bridge", or
-	  "External Bus Interface") as found on several Renesas ARM SoCs.
+	  Select this to get the support for the OP-TEE based STM32 debug bus
+	  driver that is used to handle debug-related peripherals on STM32
+	  platforms when the debug configuration is not accessible by the
+	  normal world.
+
+config STM32_FIREWALL
+	bool "STM32 Firewall framework"
+	depends on (ARCH_STM32 || COMPILE_TEST) && OF
+	select OF_DYNAMIC
+	help
+	  Say y to enable STM32 firewall framework and its services. Firewall
+	  controllers will be able to register to the framework. Access for
+	  hardware resources linked to a firewall controller can be requested
+	  through this STM32 framework.
+
+config SUN50I_DE2_BUS
+	bool "Allwinner A64 DE2 Bus Driver"
+	  default ARM64
+	  depends on ARCH_SUNXI
+	  select SUNXI_SRAM
+	  help
+	  Say y here to enable support for Allwinner A64 DE2 bus driver. It's
+	  mostly transparent, but a SRAM region needs to be claimed in the SRAM
+	  controller to make the all blocks in the DE2 part accessible.
 
 config SUNXI_RSB
 	tristate "Allwinner sunXi Reduced Serial Bus Driver"
@@ -117,12 +182,12 @@ config SUNXI_RSB
 
 config TEGRA_ACONNECT
 	tristate "Tegra ACONNECT Bus Driver"
-	depends on ARCH_TEGRA_210_SOC
+	depends on ARCH_TEGRA
 	depends on OF && PM
-	select PM_CLK
 	help
 	  Driver for the Tegra ACONNECT bus which is used to interface with
-	  the devices inside the Audio Processing Engine (APE) for Tegra210.
+	  the devices inside the Audio Processing Engine (APE) for
+	  Tegra210 and later.
 
 config TEGRA_GMI
 	tristate "Tegra Generic Memory Interface bus driver"
@@ -131,9 +196,19 @@ config TEGRA_GMI
 	  Driver for the Tegra Generic Memory Interface bus which can be used
 	  to attach devices such as NOR, UART, FPGA and more.
 
+config  TI_PWMSS
+	bool
+	default y if (ARCH_OMAP2PLUS) && (PWM_TIECAP || PWM_TIEHRPWM || TI_EQEP)
+	help
+	  PWM Subsystem driver support for AM33xx SOC.
+
+	  PWM submodules require PWM config space access from submodule
+	  drivers and require common parent driver support.
+
 config TI_SYSC
 	bool "TI sysc interconnect target module driver"
-	depends on ARCH_OMAP2PLUS
+	depends on ARCH_OMAP2PLUS || ARCH_K3
+	default y
 	help
 	  Generic driver for Texas Instruments interconnect target module
 	  found on many TI SoCs.
@@ -141,7 +216,7 @@ config TI_SYSC
 config TS_NBUS
 	tristate "Technologic Systems NBUS Driver"
 	depends on SOC_IMX28
-	depends on OF_GPIO && PWM
+	depends on PWM
 	help
 	  Driver for the Technologic Systems NBUS which is used to interface
 	  with the peripherals in the FPGA of the TS-4600 SoM.
@@ -155,7 +230,7 @@ config UNIPHIER_SYSTEM_BUS
 	  needed to use on-board devices connected to UniPhier SoCs.
 
 config VEXPRESS_CONFIG
-	bool "Versatile Express configuration bus"
+	tristate "Versatile Express configuration bus"
 	default y if ARCH_VEXPRESS
 	depends on ARM || ARM64
 	depends on OF
@@ -173,5 +248,6 @@ config DA8XX_MSTPRI
 	  peripherals.
 
 source "drivers/bus/fsl-mc/Kconfig"
+source "drivers/bus/mhi/Kconfig"
 
 endmenu

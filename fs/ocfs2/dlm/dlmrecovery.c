@@ -1,27 +1,10 @@
-/* -*- mode: c; c-basic-offset: 8; -*-
- * vim: noexpandtab sw=8 ts=8 sts=0:
- *
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
  * dlmrecovery.c
  *
  * recovery stuff
  *
  * Copyright (C) 2004 Oracle.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public
- * License along with this program; if not, write to the
- * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 021110-1307, USA.
- *
  */
 
 
@@ -39,18 +22,18 @@
 #include <linux/timer.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
+#include <linux/string_choices.h>
 
-
-#include "cluster/heartbeat.h"
-#include "cluster/nodemanager.h"
-#include "cluster/tcp.h"
+#include "../cluster/heartbeat.h"
+#include "../cluster/nodemanager.h"
+#include "../cluster/tcp.h"
 
 #include "dlmapi.h"
 #include "dlmcommon.h"
 #include "dlmdomain.h"
 
 #define MLOG_MASK_PREFIX (ML_DLM|ML_DLM_RECOVERY)
-#include "cluster/masklog.h"
+#include "../cluster/masklog.h"
 
 static void dlm_do_local_recovery_cleanup(struct dlm_ctxt *dlm, u8 dead_node);
 
@@ -141,13 +124,6 @@ static inline void __dlm_reset_recovery(struct dlm_ctxt *dlm)
 	dlm_set_reco_master(dlm, O2NM_INVALID_NODE_NUM);
 }
 
-static inline void dlm_reset_recovery(struct dlm_ctxt *dlm)
-{
-	spin_lock(&dlm->spinlock);
-	__dlm_reset_recovery(dlm);
-	spin_unlock(&dlm->spinlock);
-}
-
 /* Worker function used during recovery. */
 void dlm_dispatch_work(struct work_struct *work)
 {
@@ -231,7 +207,7 @@ void dlm_complete_recovery_thread(struct dlm_ctxt *dlm)
  * 1) all recovery threads cluster wide will work on recovering
  *    ONE node at a time
  * 2) negotiate who will take over all the locks for the dead node.
- *    thats right... ALL the locks.
+ *    that's right... ALL the locks.
  * 3) once a new master is chosen, everyone scans all locks
  *    and moves aside those mastered by the dead guy
  * 4) each of these locks should be locked until recovery is done
@@ -475,7 +451,7 @@ static int dlm_do_recovery(struct dlm_ctxt *dlm)
 	if (dlm->reco.dead_node == O2NM_INVALID_NODE_NUM) {
 		int bit;
 
-		bit = find_next_bit (dlm->recovery_map, O2NM_MAX_NODES, 0);
+		bit = find_first_bit(dlm->recovery_map, O2NM_MAX_NODES);
 		if (bit >= O2NM_MAX_NODES || bit < 0)
 			dlm_set_reco_dead_node(dlm, O2NM_INVALID_NODE_NUM);
 		else
@@ -488,7 +464,6 @@ static int dlm_do_recovery(struct dlm_ctxt *dlm)
 	}
 
 	if (dlm->reco.dead_node == O2NM_INVALID_NODE_NUM) {
-		// mlog(0, "nothing to recover!  sleeping now!\n");
 		spin_unlock(&dlm->spinlock);
 		/* return to main thread loop and sleep. */
 		return 0;
@@ -605,8 +580,7 @@ static int dlm_remaster_locks(struct dlm_ctxt *dlm, u8 dead_node)
 							   msecs_to_jiffies(1000));
 					mlog(0, "waited 1 sec for %u, "
 					     "dead? %s\n", ndata->node_num,
-					     dlm_is_node_dead(dlm, ndata->node_num) ?
-					     "yes" : "no");
+					     str_yes_no(dlm_is_node_dead(dlm, ndata->node_num)));
 				} else {
 					/* -ENOMEM on the other node */
 					mlog(0, "%s: node %u returned "
@@ -701,7 +675,7 @@ static int dlm_remaster_locks(struct dlm_ctxt *dlm, u8 dead_node)
 		spin_unlock(&dlm_reco_state_lock);
 
 		mlog(0, "pass #%d, all_nodes_done?: %s\n", ++pass,
-		     all_nodes_done?"yes":"no");
+		     str_yes_no(all_nodes_done));
 		if (all_nodes_done) {
 			int ret;
 
@@ -757,7 +731,7 @@ static int dlm_init_recovery_area(struct dlm_ctxt *dlm, u8 dead_node)
 	struct dlm_reco_node_data *ndata;
 
 	spin_lock(&dlm->spinlock);
-	memcpy(dlm->reco.node_map, dlm->domain_map, sizeof(dlm->domain_map));
+	bitmap_copy(dlm->reco.node_map, dlm->domain_map, O2NM_MAX_NODES);
 	/* nodes can only be removed (by dying) after dropping
 	 * this lock, and death will be trapped later, so this should do */
 	spin_unlock(&dlm->spinlock);
@@ -769,7 +743,7 @@ static int dlm_init_recovery_area(struct dlm_ctxt *dlm, u8 dead_node)
 		}
 		BUG_ON(num == dead_node);
 
-		ndata = kzalloc(sizeof(*ndata), GFP_NOFS);
+		ndata = kzalloc_obj(*ndata, GFP_NOFS);
 		if (!ndata) {
 			dlm_destroy_recovery_area(dlm);
 			return -ENOMEM;
@@ -856,14 +830,14 @@ int dlm_request_all_locks_handler(struct o2net_msg *msg, u32 len, void *data,
 	}
 	BUG_ON(lr->dead_node != dlm->reco.dead_node);
 
-	item = kzalloc(sizeof(*item), GFP_NOFS);
+	item = kzalloc_obj(*item, GFP_NOFS);
 	if (!item) {
 		dlm_put(dlm);
 		return -ENOMEM;
 	}
 
 	/* this will get freed by dlm_request_all_locks_worker */
-	buf = (char *) __get_free_page(GFP_NOFS);
+	buf = kmalloc(PAGE_SIZE, GFP_NOFS);
 	if (!buf) {
 		kfree(item);
 		dlm_put(dlm);
@@ -959,7 +933,7 @@ static void dlm_request_all_locks_worker(struct dlm_work_item *item, void *data)
 		}
 	}
 leave:
-	free_page((unsigned long)data);
+	kfree(data);
 }
 
 
@@ -1124,16 +1098,13 @@ static int dlm_send_mig_lockres_msg(struct dlm_ctxt *dlm,
 {
 	u64 mig_cookie = be64_to_cpu(mres->mig_cookie);
 	int mres_total_locks = be32_to_cpu(mres->total_locks);
-	int sz, ret = 0, status = 0;
+	int ret = 0, status = 0;
 	u8 orig_flags = mres->flags,
 	   orig_master = mres->master;
 
 	BUG_ON(mres->num_locks > DLM_MAX_MIGRATABLE_LOCKS);
 	if (!mres->num_locks)
 		return 0;
-
-	sz = sizeof(struct dlm_migratable_lockres) +
-		(mres->num_locks * sizeof(struct dlm_migratable_lock));
 
 	/* add an all-done flag if we reached the last lock */
 	orig_flags = mres->flags;
@@ -1148,7 +1119,8 @@ static int dlm_send_mig_lockres_msg(struct dlm_ctxt *dlm,
 
 	/* send it */
 	ret = o2net_send_message(DLM_MIG_LOCKRES_MSG, dlm->key, mres,
-				 sz, send_to, &status);
+				 struct_size(mres, ml, mres->num_locks),
+				 send_to, &status);
 	if (ret < 0) {
 		/* XXX: negative status is not handled.
 		 * this will end up killing this node. */
@@ -1410,7 +1382,7 @@ int dlm_mig_lockres_handler(struct o2net_msg *msg, u32 len, void *data,
 
 	ret = -ENOMEM;
 	buf = kmalloc(be16_to_cpu(msg->data_len), GFP_NOFS);
-	item = kzalloc(sizeof(*item), GFP_NOFS);
+	item = kzalloc_obj(*item, GFP_NOFS);
 	if (!buf || !item)
 		goto leave;
 
@@ -1495,7 +1467,7 @@ int dlm_mig_lockres_handler(struct o2net_msg *msg, u32 len, void *data,
 		 * The first one is handled at the end of this function. The
 		 * other two are handled in the worker thread after locks have
 		 * been attached. Yes, we don't wait for purge time to match
-		 * kref_init. The lockres will still have atleast one ref
+		 * kref_init. The lockres will still have at least one ref
 		 * added because it is in the hash __dlm_insert_lockres() */
 		extra_refs++;
 
@@ -1685,7 +1657,7 @@ static int dlm_lockres_master_requery(struct dlm_ctxt *dlm,
 int dlm_do_master_requery(struct dlm_ctxt *dlm, struct dlm_lock_resource *res,
 			  u8 nodenum, u8 *real_master)
 {
-	int ret = -EINVAL;
+	int ret;
 	struct dlm_master_requery req;
 	int status = DLM_LOCK_RES_OWNER_UNKNOWN;
 
@@ -1761,7 +1733,7 @@ int dlm_master_requery_handler(struct o2net_msg *msg, u32 len, void *data,
 				spin_unlock(&res->spinlock);
 			}
 		} else {
-			/* put.. incase we are not the master */
+			/* put.. in case we are not the master */
 			spin_unlock(&res->spinlock);
 			dlm_lockres_put(res);
 		}
@@ -2659,7 +2631,7 @@ again:
 					 dlm_reco_master_ready(dlm),
 					 msecs_to_jiffies(1000));
 		if (!dlm_reco_master_ready(dlm)) {
-			mlog(0, "%s: reco master taking awhile\n",
+			mlog(0, "%s: reco master taking a while\n",
 			     dlm->name);
 			goto again;
 		}
@@ -2724,7 +2696,6 @@ static int dlm_send_begin_reco_message(struct dlm_ctxt *dlm, u8 dead_node)
 			continue;
 		}
 retry:
-		ret = -EINVAL;
 		mlog(0, "attempting to send begin reco msg to %d\n",
 			  nodenum);
 		ret = o2net_send_message(DLM_BEGIN_RECO_MSG, dlm->key,

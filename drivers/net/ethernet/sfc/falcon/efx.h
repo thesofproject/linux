@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /****************************************************************************
  * Driver for Solarflare network controllers and boards
  * Copyright 2005-2006 Fen Systems Ltd.
  * Copyright 2006-2013 Solarflare Communications Inc.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation, incorporated herein by reference.
  */
 
 #ifndef EF4_EFX_H
@@ -201,7 +198,6 @@ int ef4_try_recovery(struct ef4_nic *efx);
 /* Global */
 void ef4_schedule_reset(struct ef4_nic *efx, enum reset_type type);
 unsigned int ef4_usecs_to_ticks(struct ef4_nic *efx, unsigned int usecs);
-unsigned int ef4_ticks_to_usecs(struct ef4_nic *efx, unsigned int ticks);
 int ef4_init_irq_moderation(struct ef4_nic *efx, unsigned int tx_usecs,
 			    unsigned int rx_usecs, bool rx_adaptive,
 			    bool rx_may_override_tx);

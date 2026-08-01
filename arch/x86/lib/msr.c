@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/export.h>
+#include <linux/kvm_types.h>
 #include <linux/percpu.h>
 #include <linux/preempt.h>
 #include <asm/msr.h>
 #define CREATE_TRACE_POINTS
 #include <asm/msr-trace.h>
 
-struct msr *msrs_alloc(void)
+struct msr __percpu *msrs_alloc(void)
 {
-	struct msr *msrs = NULL;
+	struct msr __percpu *msrs = NULL;
 
 	msrs = alloc_percpu(struct msr);
 	if (!msrs) {
@@ -20,28 +21,28 @@ struct msr *msrs_alloc(void)
 }
 EXPORT_SYMBOL(msrs_alloc);
 
-void msrs_free(struct msr *msrs)
+void msrs_free(struct msr __percpu *msrs)
 {
 	free_percpu(msrs);
 }
 EXPORT_SYMBOL(msrs_free);
 
 /**
- * Read an MSR with error handling
- *
+ * msr_read - Read an MSR with error handling
  * @msr: MSR to read
  * @m: value to read into
  *
  * It returns read data only on success, otherwise it doesn't change the output
  * argument @m.
  *
+ * Return: %0 for success, otherwise an error code
  */
-int msr_read(u32 msr, struct msr *m)
+static int msr_read(u32 msr, struct msr *m)
 {
 	int err;
 	u64 val;
 
-	err = rdmsrl_safe(msr, &val);
+	err = rdmsrq_safe(msr, &val);
 	if (!err)
 		m->q = val;
 
@@ -49,14 +50,16 @@ int msr_read(u32 msr, struct msr *m)
 }
 
 /**
- * Write an MSR with error handling
+ * msr_write - Write an MSR with error handling
  *
  * @msr: MSR to write
  * @m: value to write
+ *
+ * Return: %0 for success, otherwise an error code
  */
-int msr_write(u32 msr, struct msr *m)
+static int msr_write(u32 msr, struct msr *m)
 {
-	return wrmsrl_safe(msr, m->q);
+	return wrmsrq_safe(msr, m->q);
 }
 
 static inline int __flip_bit(u32 msr, u8 bit, bool set)
@@ -88,49 +91,55 @@ static inline int __flip_bit(u32 msr, u8 bit, bool set)
 }
 
 /**
- * Set @bit in a MSR @msr.
+ * msr_set_bit - Set @bit in a MSR @msr.
+ * @msr: MSR to write
+ * @bit: bit number to set
  *
- * Retval:
- * < 0: An error was encountered.
- * = 0: Bit was already set.
- * > 0: Hardware accepted the MSR write.
+ * Return:
+ * * < 0: An error was encountered.
+ * * = 0: Bit was already set.
+ * * > 0: Hardware accepted the MSR write.
  */
 int msr_set_bit(u32 msr, u8 bit)
 {
 	return __flip_bit(msr, bit, true);
 }
+EXPORT_SYMBOL_FOR_KVM(msr_set_bit);
 
 /**
- * Clear @bit in a MSR @msr.
+ * msr_clear_bit - Clear @bit in a MSR @msr.
+ * @msr: MSR to write
+ * @bit: bit number to clear
  *
- * Retval:
- * < 0: An error was encountered.
- * = 0: Bit was already cleared.
- * > 0: Hardware accepted the MSR write.
+ * Return:
+ * * < 0: An error was encountered.
+ * * = 0: Bit was already cleared.
+ * * > 0: Hardware accepted the MSR write.
  */
 int msr_clear_bit(u32 msr, u8 bit)
 {
 	return __flip_bit(msr, bit, false);
 }
+EXPORT_SYMBOL_FOR_KVM(msr_clear_bit);
 
 #ifdef CONFIG_TRACEPOINTS
-void do_trace_write_msr(unsigned int msr, u64 val, int failed)
+void do_trace_write_msr(u32 msr, u64 val, int failed)
 {
 	trace_write_msr(msr, val, failed);
 }
 EXPORT_SYMBOL(do_trace_write_msr);
 EXPORT_TRACEPOINT_SYMBOL(write_msr);
 
-void do_trace_read_msr(unsigned int msr, u64 val, int failed)
+void do_trace_read_msr(u32 msr, u64 val, int failed)
 {
 	trace_read_msr(msr, val, failed);
 }
 EXPORT_SYMBOL(do_trace_read_msr);
 EXPORT_TRACEPOINT_SYMBOL(read_msr);
 
-void do_trace_rdpmc(unsigned counter, u64 val, int failed)
+void do_trace_rdpmc(u32 msr, u64 val, int failed)
 {
-	trace_rdpmc(counter, val, failed);
+	trace_rdpmc(msr, val, failed);
 }
 EXPORT_SYMBOL(do_trace_rdpmc);
 EXPORT_TRACEPOINT_SYMBOL(rdpmc);

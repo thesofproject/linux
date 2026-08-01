@@ -6,7 +6,6 @@
  */
 
 #include <linux/clk-provider.h>
-#include <linux/reset-controller.h>
 #include <linux/clk.h>
 #include <linux/clkdev.h>
 #include <linux/init.h>
@@ -16,8 +15,7 @@
 
 #include "psc.h"
 
-LPSC_CLKDEV2(emifa_clkdev,	NULL,		"ti-aemif",
-				"aemif",	"davinci_nand.0");
+LPSC_CLKDEV1(emifa_clkdev,	NULL,		"ti-aemif");
 LPSC_CLKDEV1(spi0_clkdev,	NULL,		"spi_davinci.0");
 LPSC_CLKDEV1(mmcsd0_clkdev,	NULL,		"da830-mmc.0");
 LPSC_CLKDEV1(uart0_clkdev,	NULL,		"serial8250.0");
@@ -67,14 +65,8 @@ LPSC_CLKDEV3(ecap_clkdev,	"fck",	"ecap.0",
 				"fck",	"ecap.1",
 				"fck",	"ecap.2");
 
-static struct reset_control_lookup da850_psc0_reset_lookup_table[] = {
-	RESET_LOOKUP("da850-psc0", 15, "davinci-rproc.0", NULL),
-};
-
 static int da850_psc0_init(struct device *dev, void __iomem *base)
 {
-	reset_controller_add_lookup(da850_psc0_reset_lookup_table,
-				    ARRAY_SIZE(da850_psc0_reset_lookup_table));
 	return davinci_psc_register_clocks(dev, da850_psc0_info, 16, base);
 }
 

@@ -1,21 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2009 Nokia Corporation
- * Author: Tomi Valkeinen <tomi.valkeinen@nokia.com>
+ * Author: Tomi Valkeinen <tomi.valkeinen@ti.com>
  *
  * Some code and ideas taken from drivers/video/omap/ driver
  * by Imre Deak.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef __OMAP2_DSS_H
@@ -180,6 +169,9 @@ struct dss_pll_hw {
 
 	/* DRA7 errata i886: use high N & M to avoid jitter */
 	bool errata_i886;
+
+	/* DRA7 errata i932: retry pll lock on failure */
+	bool errata_i932;
 };
 
 struct dss_pll {
@@ -235,6 +227,8 @@ struct dss_device {
 	struct regmap	*syscon_pll_ctrl;
 	u32		syscon_pll_ctrl_offset;
 
+	struct platform_device *drm_pdev;
+
 	struct clk	*parent_clk;
 	struct clk	*dss_clk;
 	unsigned long	dss_clk_rate;
@@ -263,7 +257,7 @@ struct dss_device {
 	struct dss_pll	*video2_pll;
 
 	struct dispc_device *dispc;
-	const struct dispc_ops *dispc_ops;
+	struct omap_drm_private *mgr_ops_priv;
 };
 
 /* core */
@@ -310,8 +304,6 @@ void dss_runtime_put(struct dss_device *dss);
 
 unsigned long dss_get_dispc_clk_rate(struct dss_device *dss);
 unsigned long dss_get_max_fck_rate(struct dss_device *dss);
-enum omap_dss_output_id dss_get_supported_outputs(struct dss_device *dss,
-						  enum omap_channel channel);
 int dss_dpi_select_source(struct dss_device *dss, int port,
 			  enum omap_channel channel);
 void dss_select_hdmi_venc_clk_source(struct dss_device *dss,
@@ -371,8 +363,6 @@ static inline void sdi_uninit_port(struct device_node *port)
 
 #ifdef CONFIG_OMAP2_DSS_DSI
 
-void dsi_dump_clocks(struct seq_file *s);
-
 void dsi_irq_handler(void);
 
 #endif
@@ -401,12 +391,77 @@ void dispc_dump_clocks(struct dispc_device *dispc, struct seq_file *s);
 int dispc_runtime_get(struct dispc_device *dispc);
 void dispc_runtime_put(struct dispc_device *dispc);
 
+int dispc_get_num_ovls(struct dispc_device *dispc);
+int dispc_get_num_mgrs(struct dispc_device *dispc);
+
+const u32 *dispc_ovl_get_color_modes(struct dispc_device *dispc,
+					    enum omap_plane_id plane);
+
+void dispc_ovl_get_max_size(struct dispc_device *dispc, u16 *width, u16 *height);
+bool dispc_ovl_color_mode_supported(struct dispc_device *dispc,
+				    enum omap_plane_id plane, u32 fourcc);
+enum omap_overlay_caps dispc_ovl_get_caps(struct dispc_device *dispc, enum omap_plane_id plane);
+
+u32 dispc_read_irqstatus(struct dispc_device *dispc);
+void dispc_clear_irqstatus(struct dispc_device *dispc, u32 mask);
+void dispc_write_irqenable(struct dispc_device *dispc, u32 mask);
+
+int dispc_request_irq(struct dispc_device *dispc, irq_handler_t handler,
+			     void *dev_id);
+void dispc_free_irq(struct dispc_device *dispc, void *dev_id);
+
+u32 dispc_mgr_get_vsync_irq(struct dispc_device *dispc,
+				   enum omap_channel channel);
+u32 dispc_mgr_get_framedone_irq(struct dispc_device *dispc,
+				       enum omap_channel channel);
+u32 dispc_mgr_get_sync_lost_irq(struct dispc_device *dispc,
+				       enum omap_channel channel);
+
+u32 dispc_get_memory_bandwidth_limit(struct dispc_device *dispc);
+
+void dispc_mgr_enable(struct dispc_device *dispc,
+			     enum omap_channel channel, bool enable);
+
+bool dispc_mgr_go_busy(struct dispc_device *dispc,
+			      enum omap_channel channel);
+
+void dispc_mgr_go(struct dispc_device *dispc, enum omap_channel channel);
+
+void dispc_mgr_set_lcd_config(struct dispc_device *dispc,
+				     enum omap_channel channel,
+				     const struct dss_lcd_mgr_config *config);
+void dispc_mgr_set_timings(struct dispc_device *dispc,
+				  enum omap_channel channel,
+				  const struct videomode *vm);
+void dispc_mgr_setup(struct dispc_device *dispc,
+			    enum omap_channel channel,
+			    const struct omap_overlay_manager_info *info);
+
+int dispc_mgr_check_timings(struct dispc_device *dispc,
+				   enum omap_channel channel,
+				   const struct videomode *vm);
+
+u32 dispc_mgr_gamma_size(struct dispc_device *dispc,
+				enum omap_channel channel);
+void dispc_mgr_set_gamma(struct dispc_device *dispc,
+				enum omap_channel channel,
+				const struct drm_color_lut *lut,
+				unsigned int length);
+
+int dispc_ovl_setup(struct dispc_device *dispc,
+			   enum omap_plane_id plane,
+			   const struct omap_overlay_info *oi,
+			   const struct videomode *vm, bool mem_to_mem,
+			   enum omap_channel channel);
+
+int dispc_ovl_enable(struct dispc_device *dispc,
+			    enum omap_plane_id plane, bool enable);
+
 void dispc_enable_sidle(struct dispc_device *dispc);
 void dispc_disable_sidle(struct dispc_device *dispc);
 
 void dispc_lcd_enable_signal(struct dispc_device *dispc, bool enable);
 void dispc_pck_free_enable(struct dispc_device *dispc, bool enable);
-void dispc_enable_fifomerge(struct dispc_device *dispc, bool enable);
 
 typedef bool (*dispc_div_calc_func)(int lckd, int pckd, unsigned long lck,
 		unsigned long pck, void *data);
@@ -414,9 +469,6 @@ bool dispc_div_calc(struct dispc_device *dispc, unsigned long dispc_freq,
 		    unsigned long pck_min, unsigned long pck_max,
 		    dispc_div_calc_func func, void *data);
 
-bool dispc_mgr_timings_ok(struct dispc_device *dispc,
-			  enum omap_channel channel,
-			  const struct videomode *vm);
 int dispc_calc_clock_rates(struct dispc_device *dispc,
 			   unsigned long dispc_fclk_rate,
 			   struct dispc_clock_info *cinfo);
@@ -432,9 +484,6 @@ void dispc_ovl_compute_fifo_thresholds(struct dispc_device *dispc,
 void dispc_mgr_set_clock_div(struct dispc_device *dispc,
 			     enum omap_channel channel,
 			     const struct dispc_clock_info *cinfo);
-int dispc_mgr_get_clock_div(struct dispc_device *dispc,
-			    enum omap_channel channel,
-			    struct dispc_clock_info *cinfo);
 void dispc_set_tv_pclk(struct dispc_device *dispc, unsigned long pclk);
 
 #ifdef CONFIG_OMAP2_DSS_COLLECT_IRQ_STATS

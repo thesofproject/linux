@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * twl4030_keypad.c - driver for 8x8 keypad controller in twl4030 chips
  *
@@ -9,20 +10,6 @@
  *
  * Initial Code:
  * Manjunatha G K <manjugk@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/kernel.h>
@@ -41,10 +28,6 @@
  * an internal state machine that decodes pressed keys, including
  * multi-key combinations.
  *
- * This driver lets boards define what keycodes they wish to report for
- * which scancodes, as part of the "struct twl4030_keypad_data" used in
- * the probe() routine.
- *
  * See the TPS65950 documentation; that's the general availability
  * version of the TWL5030 second generation part.
  */
@@ -60,10 +43,9 @@
 struct twl4030_keypad {
 	unsigned short	keymap[TWL4030_KEYMAP_SIZE];
 	u16		kp_state[TWL4030_MAX_ROWS];
-	bool		autorepeat;
 	unsigned int	n_rows;
 	unsigned int	n_cols;
-	unsigned int	irq;
+	int		irq;
 
 	struct device *dbg_dev;
 	struct input_dev *input;
@@ -335,8 +317,6 @@ static int twl4030_kp_program(struct twl4030_keypad *kp)
  */
 static int twl4030_kp_probe(struct platform_device *pdev)
 {
-	struct twl4030_keypad_data *pdata = dev_get_platdata(&pdev->dev);
-	const struct matrix_keymap_data *keymap_data = NULL;
 	struct twl4030_keypad *kp;
 	struct input_dev *input;
 	u8 reg;
@@ -363,24 +343,10 @@ static int twl4030_kp_probe(struct platform_device *pdev)
 	input->id.product	= 0x0001;
 	input->id.version	= 0x0003;
 
-	if (pdata) {
-		if (!pdata->rows || !pdata->cols || !pdata->keymap_data) {
-			dev_err(&pdev->dev, "Missing platform_data\n");
-			return -EINVAL;
-		}
-
-		kp->n_rows = pdata->rows;
-		kp->n_cols = pdata->cols;
-		kp->autorepeat = pdata->rep;
-		keymap_data = pdata->keymap_data;
-	} else {
-		error = matrix_keypad_parse_properties(&pdev->dev, &kp->n_rows,
-						       &kp->n_cols);
-		if (error)
-			return error;
-
-		kp->autorepeat = true;
-	}
+	error = matrix_keypad_parse_properties(&pdev->dev,
+					       &kp->n_rows, &kp->n_cols);
+	if (error)
+		return error;
 
 	if (kp->n_rows > TWL4030_MAX_ROWS || kp->n_cols > TWL4030_MAX_COLS) {
 		dev_err(&pdev->dev,
@@ -389,12 +355,10 @@ static int twl4030_kp_probe(struct platform_device *pdev)
 	}
 
 	kp->irq = platform_get_irq(pdev, 0);
-	if (!kp->irq) {
-		dev_err(&pdev->dev, "no keyboard irq assigned\n");
-		return -EINVAL;
-	}
+	if (kp->irq < 0)
+		return kp->irq;
 
-	error = matrix_keypad_build_keymap(keymap_data, NULL,
+	error = matrix_keypad_build_keymap(NULL, NULL,
 					   TWL4030_MAX_ROWS,
 					   1 << TWL4030_ROW_SHIFT,
 					   kp->keymap, input);
@@ -404,9 +368,7 @@ static int twl4030_kp_probe(struct platform_device *pdev)
 	}
 
 	input_set_capability(input, EV_MSC, MSC_SCAN);
-	/* Enable auto repeat feature of Linux input subsystem */
-	if (kp->autorepeat)
-		__set_bit(EV_REP, input->evbit);
+	__set_bit(EV_REP, input->evbit);
 
 	error = input_register_device(input);
 	if (error) {

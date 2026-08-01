@@ -1,18 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * OMAP gate clock support
  *
  * Copyright (C) 2013 Texas Instruments, Inc.
  *
  * Tero Kristo <t-kristo@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk-provider.h>
@@ -33,6 +25,7 @@ static const struct clk_ops omap_gate_clkdm_clk_ops = {
 	.init		= &omap2_init_clk_clkdm,
 	.enable		= &omap2_clkops_enable_clkdm,
 	.disable	= &omap2_clkops_disable_clkdm,
+	.restore_context = clk_gate_restore_context,
 };
 
 const struct clk_ops omap_gate_clk_ops = {
@@ -40,6 +33,7 @@ const struct clk_ops omap_gate_clk_ops = {
 	.enable		= &omap2_dflt_clk_enable,
 	.disable	= &omap2_dflt_clk_disable,
 	.is_enabled	= &omap2_dflt_clk_is_enabled,
+	.restore_context = clk_gate_restore_context,
 };
 
 static const struct clk_ops omap_gate_clk_hsdiv_restore_ops = {
@@ -47,12 +41,13 @@ static const struct clk_ops omap_gate_clk_hsdiv_restore_ops = {
 	.enable		= &omap36xx_gate_clk_enable_with_hsdiv_restore,
 	.disable	= &omap2_dflt_clk_disable,
 	.is_enabled	= &omap2_dflt_clk_is_enabled,
+	.restore_context = clk_gate_restore_context,
 };
 
 /**
  * omap36xx_gate_clk_enable_with_hsdiv_restore - enable clocks suffering
  *         from HSDivider PWRDN problem Implements Errata ID: i556.
- * @clk: DPLL output struct clk
+ * @hw: DPLL output struct clk_hw
  *
  * 3630 only: dpll3_m3_ck, dpll4_m2_ck, dpll4_m3_ck, dpll4_m4_ck,
  * dpll4_m5_ck & dpll4_m6_ck dividers gets loaded with reset
@@ -90,7 +85,7 @@ static int omap36xx_gate_clk_enable_with_hsdiv_restore(struct clk_hw *hw)
 	return ret;
 }
 
-static struct clk *_register_gate(struct device *dev, const char *name,
+static struct clk *_register_gate(struct device_node *node, const char *name,
 				  const char *parent_name, unsigned long flags,
 				  struct clk_omap_reg *reg, u8 bit_idx,
 				  u8 clk_gate_flags, const struct clk_ops *ops,
@@ -100,7 +95,7 @@ static struct clk *_register_gate(struct device *dev, const char *name,
 	struct clk_hw_omap *clk_hw;
 	struct clk *clk;
 
-	clk_hw = kzalloc(sizeof(*clk_hw), GFP_KERNEL);
+	clk_hw = kzalloc_obj(*clk_hw);
 	if (!clk_hw)
 		return ERR_PTR(-ENOMEM);
 
@@ -120,42 +115,12 @@ static struct clk *_register_gate(struct device *dev, const char *name,
 
 	init.flags = flags;
 
-	clk = ti_clk_register(NULL, &clk_hw->hw, name);
+	clk = of_ti_clk_register_omap_hw(node, &clk_hw->hw, name);
 
 	if (IS_ERR(clk))
 		kfree(clk_hw);
 
 	return clk;
-}
-
-struct clk_hw *ti_clk_build_component_gate(struct ti_clk_gate *setup)
-{
-	struct clk_hw_omap *gate;
-	struct clk_omap_reg *reg;
-	const struct clk_hw_omap_ops *ops = &clkhwops_wait;
-
-	if (!setup)
-		return NULL;
-
-	gate = kzalloc(sizeof(*gate), GFP_KERNEL);
-	if (!gate)
-		return ERR_PTR(-ENOMEM);
-
-	reg = (struct clk_omap_reg *)&gate->enable_reg;
-	reg->index = setup->module;
-	reg->offset = setup->reg;
-
-	gate->enable_bit = setup->bit_shift;
-
-	if (setup->flags & CLKF_NO_WAIT)
-		ops = NULL;
-
-	if (setup->flags & CLKF_INTERFACE)
-		ops = &clkhwops_iclk_wait;
-
-	gate->ops = ops;
-
-	return &gate->hw;
 }
 
 static void __init _of_ti_gate_clk_setup(struct device_node *node,
@@ -165,8 +130,8 @@ static void __init _of_ti_gate_clk_setup(struct device_node *node,
 	struct clk *clk;
 	const char *parent_name;
 	struct clk_omap_reg reg;
+	const char *name;
 	u8 enable_bit = 0;
-	u32 val;
 	u32 flags = 0;
 	u8 clk_gate_flags = 0;
 
@@ -174,12 +139,11 @@ static void __init _of_ti_gate_clk_setup(struct device_node *node,
 		if (ti_clk_get_reg_addr(node, 0, &reg))
 			return;
 
-		if (!of_property_read_u32(node, "ti,bit-shift", &val))
-			enable_bit = val;
+		enable_bit = reg.bit;
 	}
 
 	if (of_clk_get_parent_count(node) != 1) {
-		pr_err("%s must have 1 parent\n", node->name);
+		pr_err("%pOFn must have 1 parent\n", node);
 		return;
 	}
 
@@ -191,7 +155,8 @@ static void __init _of_ti_gate_clk_setup(struct device_node *node,
 	if (of_property_read_bool(node, "ti,set-bit-to-disable"))
 		clk_gate_flags |= INVERT_ENABLE;
 
-	clk = _register_gate(NULL, node->name, parent_name, flags, &reg,
+	name = ti_dt_clk_name(node);
+	clk = _register_gate(node, name, parent_name, flags, &reg,
 			     enable_bit, clk_gate_flags, ops, hw_ops);
 
 	if (!IS_ERR(clk))
@@ -203,18 +168,15 @@ _of_ti_composite_gate_clk_setup(struct device_node *node,
 				const struct clk_hw_omap_ops *hw_ops)
 {
 	struct clk_hw_omap *gate;
-	u32 val = 0;
 
-	gate = kzalloc(sizeof(*gate), GFP_KERNEL);
+	gate = kzalloc_obj(*gate);
 	if (!gate)
 		return;
 
 	if (ti_clk_get_reg_addr(node, 0, &gate->enable_reg))
 		goto cleanup;
 
-	of_property_read_u32(node, "ti,bit-shift", &val);
-
-	gate->enable_bit = val;
+	gate->enable_bit = gate->enable_reg.bit;
 	gate->ops = hw_ops;
 
 	if (!ti_clk_add_component(node, &gate->hw, CLK_COMPONENT_TYPE_GATE))

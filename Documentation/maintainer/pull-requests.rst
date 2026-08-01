@@ -1,5 +1,3 @@
-.. _pullrequests:
-
 Creating Pull Requests
 ======================
 
@@ -15,7 +13,7 @@ please direct abuse to Tobin C. Harding <me@tobin.cc>.
 
 Original email thread::
 
-	http://lkml.kernel.org/r/20171114110500.GA21175@kroah.com
+	https://lore.kernel.org/r/20171114110500.GA21175@kroah.com
 
 
 Create Branch
@@ -29,7 +27,7 @@ request to.
 In order to create the pull request you must first tag the branch that you
 have just created. It is recommended that you choose a meaningful tag name,
 in a way that you and others can understand, even after some time.  A good
-practice is to include in the name an indicator of the sybsystem of origin
+practice is to include in the name an indicator of the subsystem of origin
 and the target kernel version.
 
 Greg offers the following. A pull request with miscellaneous stuff for
@@ -41,7 +39,7 @@ named ``char-misc-next``, you would be using the following command::
 
 that will create a signed tag called ``char-misc-4.15-rc1`` based on the
 last commit in the ``char-misc-next`` branch, and sign it with your gpg key
-(see :ref:`Documentation/maintainer/configure_git.rst <configuregit>`).
+(see Documentation/maintainer/configure-git.rst).
 
 Linus will only accept pull requests based on a signed tag. Other
 maintainers may differ.
@@ -52,7 +50,7 @@ so outline what is contained here, why it should be merged, and what, if
 any, testing has been done.  All of this information will end up in the tag
 itself, and then in the merge commit that the maintainer makes if/when they
 merge the pull request. So write it up well, as it will be in the kernel
-tree for forever.
+tree forever.
 
 As said by Linus::
 

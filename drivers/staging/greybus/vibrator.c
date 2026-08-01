@@ -13,8 +13,7 @@
 #include <linux/kdev_t.h>
 #include <linux/idr.h>
 #include <linux/pm_runtime.h>
-
-#include "greybus.h"
+#include <linux/greybus.h>
 
 struct gb_vibrator_device {
 	struct gb_connection	*connection;
@@ -108,7 +107,6 @@ ATTRIBUTE_GROUPS(vibrator);
 
 static struct class vibrator_class = {
 	.name		= "vibrator",
-	.owner		= THIS_MODULE,
 	.dev_groups	= vibrator_groups,
 };
 
@@ -130,7 +128,7 @@ static int gb_vibrator_probe(struct gb_bundle *bundle,
 	if (cport_desc->protocol_id != GREYBUS_PROTOCOL_VIBRATOR)
 		return -ENODEV;
 
-	vib = kzalloc(sizeof(*vib), GFP_KERNEL);
+	vib = kzalloc_obj(*vib);
 	if (!vib)
 		return -ENOMEM;
 
@@ -155,7 +153,7 @@ static int gb_vibrator_probe(struct gb_bundle *bundle,
 	 * there is a "real" device somewhere in the kernel for this, but I
 	 * can't find it at the moment...
 	 */
-	vib->minor = ida_simple_get(&minors, 0, 0, GFP_KERNEL);
+	vib->minor = ida_alloc(&minors, GFP_KERNEL);
 	if (vib->minor < 0) {
 		retval = vib->minor;
 		goto err_connection_disable;
@@ -175,7 +173,7 @@ static int gb_vibrator_probe(struct gb_bundle *bundle,
 	return 0;
 
 err_ida_remove:
-	ida_simple_remove(&minors, vib->minor);
+	ida_free(&minors, vib->minor);
 err_connection_disable:
 	gb_connection_disable(connection);
 err_connection_destroy:
@@ -199,7 +197,7 @@ static void gb_vibrator_disconnect(struct gb_bundle *bundle)
 		turn_off(vib);
 
 	device_unregister(vib->dev);
-	ida_simple_remove(&minors, vib->minor);
+	ida_free(&minors, vib->minor);
 	gb_connection_disable(vib->connection);
 	gb_connection_destroy(vib->connection);
 	kfree(vib);
@@ -247,4 +245,5 @@ static __exit void gb_vibrator_exit(void)
 }
 module_exit(gb_vibrator_exit);
 
+MODULE_DESCRIPTION("Greybus Vibrator protocol driver");
 MODULE_LICENSE("GPL v2");

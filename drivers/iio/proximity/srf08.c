@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * srf08.c - Support for Devantech SRFxx ultrasonic ranger
  *           with i2c interface
@@ -5,14 +6,10 @@
  *
  * Copyright (c) 2016, 2017 Andreas Klinger <ak@it-klinger.de>
  *
- * This file is subject to the terms and conditions of version 2 of
- * the GNU General Public License. See the file COPYING in the main
- * directory of this archive for more details.
- *
  * For details about the device see:
- * http://www.robot-electronics.co.uk/htm/srf08tech.html
- * http://www.robot-electronics.co.uk/htm/srf10tech.htm
- * http://www.robot-electronics.co.uk/htm/srf02tech.htm
+ * https://www.robot-electronics.co.uk/htm/srf08tech.html
+ * https://www.robot-electronics.co.uk/htm/srf10tech.htm
+ * https://www.robot-electronics.co.uk/htm/srf02tech.htm
  */
 
 #include <linux/err.h>
@@ -65,12 +62,6 @@ struct srf08_data {
 	/* max. Range in mm */
 	int			range_mm;
 	struct mutex		lock;
-
-	/*
-	 * triggered buffer
-	 * 1x16-bit channel + 3x16 padding + 4x16 timestamp
-	 */
-	s16			buffer[8];
 
 	/* Sensor-Type */
 	enum srf08_sensor_type	sensor_type;
@@ -185,17 +176,19 @@ static irqreturn_t srf08_trigger_handler(int irq, void *p)
 	struct iio_poll_func *pf = p;
 	struct iio_dev *indio_dev = pf->indio_dev;
 	struct srf08_data *data = iio_priv(indio_dev);
-	s16 sensor_data;
+	struct {
+		s16 chan;
+		aligned_s64 timestamp;
+	} scan = { };
 
-	sensor_data = srf08_read_ranging(data);
-	if (sensor_data < 0)
+	scan.chan = srf08_read_ranging(data);
+	if (scan.chan < 0)
 		goto err;
 
 	mutex_lock(&data->lock);
 
-	data->buffer[0] = sensor_data;
-	iio_push_to_buffers_with_timestamp(indio_dev,
-						data->buffer, pf->timestamp);
+	iio_push_to_buffers_with_ts(indio_dev, &scan, sizeof(scan),
+				    pf->timestamp);
 
 	mutex_unlock(&data->lock);
 err:
@@ -233,7 +226,7 @@ static int srf08_read_raw(struct iio_dev *indio_dev,
 static ssize_t srf08_show_range_mm_available(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "[0.043 0.043 11.008]\n");
+	return sysfs_emit(buf, "[0.043 0.043 11.008]\n");
 }
 
 static IIO_DEVICE_ATTR(sensor_max_range_available, S_IRUGO,
@@ -245,8 +238,8 @@ static ssize_t srf08_show_range_mm(struct device *dev,
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct srf08_data *data = iio_priv(indio_dev);
 
-	return sprintf(buf, "%d.%03d\n", data->range_mm / 1000,
-						data->range_mm % 1000);
+	return sysfs_emit(buf, "%d.%03d\n",
+			  data->range_mm / 1000, data->range_mm % 1000);
 }
 
 /*
@@ -323,10 +316,10 @@ static ssize_t srf08_show_sensitivity_available(struct device *dev,
 
 	for (i = 0; i < data->chip_info->num_sensitivity_avail; i++)
 		if (data->chip_info->sensitivity_avail[i])
-			len += sprintf(buf + len, "%d ",
-				data->chip_info->sensitivity_avail[i]);
+			len += sysfs_emit_at(buf, len, "%d ",
+					     data->chip_info->sensitivity_avail[i]);
 
-	len += sprintf(buf + len, "\n");
+	len += sysfs_emit_at(buf, len, "\n");
 
 	return len;
 }
@@ -339,11 +332,8 @@ static ssize_t srf08_show_sensitivity(struct device *dev,
 {
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct srf08_data *data = iio_priv(indio_dev);
-	int len;
 
-	len = sprintf(buf, "%d\n", data->sensitivity);
-
-	return len;
+	return sysfs_emit(buf, "%d\n", data->sensitivity);
 }
 
 static ssize_t srf08_write_sensitivity(struct srf08_data *data,
@@ -357,7 +347,7 @@ static ssize_t srf08_write_sensitivity(struct srf08_data *data,
 		return -EINVAL;
 
 	for (i = 0; i < data->chip_info->num_sensitivity_avail; i++)
-		if (val && (val == data->chip_info->sensitivity_avail[i])) {
+		if (val == data->chip_info->sensitivity_avail[i]) {
 			regval = i;
 			break;
 		}
@@ -446,9 +436,9 @@ static const struct iio_info srf02_info = {
 	.read_raw = srf08_read_raw,
 };
 
-static int srf08_probe(struct i2c_client *client,
-					 const struct i2c_device_id *id)
+static int srf08_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct iio_dev *indio_dev;
 	struct srf08_data *data;
 	int ret;
@@ -486,7 +476,6 @@ static int srf08_probe(struct i2c_client *client,
 	}
 
 	indio_dev->name = id->name;
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = srf08_channels;
 	indio_dev->num_channels = ARRAY_SIZE(srf08_channels);
@@ -532,18 +521,18 @@ static int srf08_probe(struct i2c_client *client,
 }
 
 static const struct of_device_id of_srf08_match[] = {
-	{ .compatible = "devantech,srf02", (void *)SRF02},
-	{ .compatible = "devantech,srf08", (void *)SRF08},
-	{ .compatible = "devantech,srf10", (void *)SRF10},
-	{},
+	{ .compatible = "devantech,srf02", (void *)SRF02 },
+	{ .compatible = "devantech,srf08", (void *)SRF08 },
+	{ .compatible = "devantech,srf10", (void *)SRF10 },
+	{ }
 };
 
 MODULE_DEVICE_TABLE(of, of_srf08_match);
 
 static const struct i2c_device_id srf08_id[] = {
-	{ "srf02", SRF02 },
-	{ "srf08", SRF08 },
-	{ "srf10", SRF10 },
+	{ .name = "srf02", .driver_data = SRF02 },
+	{ .name = "srf08", .driver_data = SRF08 },
+	{ .name = "srf10", .driver_data = SRF10 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, srf08_id);

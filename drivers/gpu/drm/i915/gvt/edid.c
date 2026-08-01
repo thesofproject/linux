@@ -32,15 +32,23 @@
  *
  */
 
-#include "i915_drv.h"
+#include <drm/display/drm_dp.h>
+#include <drm/drm_print.h>
+
+#include "display/intel_dp_aux_regs.h"
+#include "display/intel_gmbus.h"
+#include "display/intel_gmbus_regs.h"
+
 #include "gvt.h"
+#include "i915_drv.h"
+#include "i915_reg.h"
 
 #define GMBUS1_TOTAL_BYTES_SHIFT 16
 #define GMBUS1_TOTAL_BYTES_MASK 0x1ff
 #define gmbus1_total_byte_count(v) (((v) >> \
 	GMBUS1_TOTAL_BYTES_SHIFT) & GMBUS1_TOTAL_BYTES_MASK)
-#define gmbus1_slave_addr(v) (((v) & 0xff) >> 1)
-#define gmbus1_slave_index(v) (((v) >> 8) & 0xff)
+#define gmbus1_target_addr(v) (((v) & 0xff) >> 1)
+#define gmbus1_target_index(v) (((v) >> 8) & 0xff)
 #define gmbus1_bus_cycle(v) (((v) >> 25) & 0x7)
 
 /* GMBUS0 bits definitions */
@@ -51,7 +59,7 @@ static unsigned char edid_get_byte(struct intel_vgpu *vgpu)
 	struct intel_vgpu_i2c_edid *edid = &vgpu->display.i2c_edid;
 	unsigned char chr = 0;
 
-	if (edid->state == I2C_NOT_SPECIFIED || !edid->slave_selected) {
+	if (edid->state == I2C_NOT_SPECIFIED || !edid->target_selected) {
 		gvt_vgpu_err("Driver tries to read EDID without proper sequence!\n");
 		return 0;
 	}
@@ -77,18 +85,48 @@ static unsigned char edid_get_byte(struct intel_vgpu *vgpu)
 	return chr;
 }
 
+static inline int cnp_get_port_from_gmbus0(u32 gmbus0)
+{
+	int port_select = gmbus0 & _GMBUS_PIN_SEL_MASK;
+	int port = -EINVAL;
+
+	if (port_select == GMBUS_PIN_1_BXT)
+		port = PORT_B;
+	else if (port_select == GMBUS_PIN_2_BXT)
+		port = PORT_C;
+	else if (port_select == GMBUS_PIN_3_BXT)
+		port = PORT_D;
+	else if (port_select == GMBUS_PIN_4_CNP)
+		port = PORT_E;
+	return port;
+}
+
+static inline int bxt_get_port_from_gmbus0(u32 gmbus0)
+{
+	int port_select = gmbus0 & _GMBUS_PIN_SEL_MASK;
+	int port = -EINVAL;
+
+	if (port_select == GMBUS_PIN_1_BXT)
+		port = PORT_B;
+	else if (port_select == GMBUS_PIN_2_BXT)
+		port = PORT_C;
+	else if (port_select == GMBUS_PIN_3_BXT)
+		port = PORT_D;
+	return port;
+}
+
 static inline int get_port_from_gmbus0(u32 gmbus0)
 {
 	int port_select = gmbus0 & _GMBUS_PIN_SEL_MASK;
 	int port = -EINVAL;
 
-	if (port_select == 2)
+	if (port_select == GMBUS_PIN_VGADDC)
 		port = PORT_E;
-	else if (port_select == 4)
+	else if (port_select == GMBUS_PIN_DPC)
 		port = PORT_C;
-	else if (port_select == 5)
+	else if (port_select == GMBUS_PIN_DPB)
 		port = PORT_B;
-	else if (port_select == 6)
+	else if (port_select == GMBUS_PIN_DPD)
 		port = PORT_D;
 	return port;
 }
@@ -105,6 +143,7 @@ static void reset_gmbus_controller(struct intel_vgpu *vgpu)
 static int gmbus0_mmio_write(struct intel_vgpu *vgpu,
 			unsigned int offset, void *p_data, unsigned int bytes)
 {
+	struct drm_i915_private *i915 = vgpu->gvt->gt->i915;
 	int port, pin_select;
 
 	memcpy(&vgpu_vreg(vgpu, offset), p_data, bytes);
@@ -116,8 +155,13 @@ static int gmbus0_mmio_write(struct intel_vgpu *vgpu,
 	if (pin_select == 0)
 		return 0;
 
-	port = get_port_from_gmbus0(pin_select);
-	if (WARN_ON(port < 0))
+	if (IS_BROXTON(i915))
+		port = bxt_get_port_from_gmbus0(pin_select);
+	else if (IS_COFFEELAKE(i915) || IS_COMETLAKE(i915))
+		port = cnp_get_port_from_gmbus0(pin_select);
+	else
+		port = get_port_from_gmbus0(pin_select);
+	if (drm_WARN_ON(&i915->drm, port < 0))
 		return 0;
 
 	vgpu->display.i2c_edid.state = I2C_GMBUS;
@@ -140,7 +184,7 @@ static int gmbus1_mmio_write(struct intel_vgpu *vgpu, unsigned int offset,
 		void *p_data, unsigned int bytes)
 {
 	struct intel_vgpu_i2c_edid *i2c_edid = &vgpu->display.i2c_edid;
-	u32 slave_addr;
+	u32 target_addr;
 	u32 wvalue = *(u32 *)p_data;
 
 	if (vgpu_vreg(vgpu, offset) & GMBUS_SW_CLR_INT) {
@@ -171,21 +215,21 @@ static int gmbus1_mmio_write(struct intel_vgpu *vgpu, unsigned int offset,
 
 		i2c_edid->gmbus.total_byte_count =
 			gmbus1_total_byte_count(wvalue);
-		slave_addr = gmbus1_slave_addr(wvalue);
+		target_addr = gmbus1_target_addr(wvalue);
 
 		/* vgpu gmbus only support EDID */
-		if (slave_addr == EDID_ADDR) {
-			i2c_edid->slave_selected = true;
-		} else if (slave_addr != 0) {
+		if (target_addr == EDID_ADDR) {
+			i2c_edid->target_selected = true;
+		} else if (target_addr != 0) {
 			gvt_dbg_dpy(
-				"vgpu%d: unsupported gmbus slave addr(0x%x)\n"
+				"vgpu%d: unsupported gmbus target addr(0x%x)\n"
 				"	gmbus operations will be ignored.\n",
-					vgpu->id, slave_addr);
+					vgpu->id, target_addr);
 		}
 
 		if (wvalue & GMBUS_CYCLE_INDEX)
 			i2c_edid->current_edid_read =
-				gmbus1_slave_index(wvalue);
+				gmbus1_target_index(wvalue);
 
 		i2c_edid->gmbus.cycle_type = gmbus1_bus_cycle(wvalue);
 		switch (gmbus1_bus_cycle(wvalue)) {
@@ -240,7 +284,9 @@ static int gmbus1_mmio_write(struct intel_vgpu *vgpu, unsigned int offset,
 static int gmbus3_mmio_write(struct intel_vgpu *vgpu, unsigned int offset,
 	void *p_data, unsigned int bytes)
 {
-	WARN_ON(1);
+	struct drm_i915_private *i915 = vgpu->gvt->gt->i915;
+
+	drm_WARN_ON(&i915->drm, 1);
 	return 0;
 }
 
@@ -255,7 +301,7 @@ static int gmbus3_mmio_read(struct intel_vgpu *vgpu, unsigned int offset,
 	int byte_count = byte_left;
 	u32 reg_data = 0;
 
-	/* Data can only be recevied if previous settings correct */
+	/* Data can only be received if previous settings correct */
 	if (vgpu_vreg_t(vgpu, PCH_GMBUS1) & GMBUS_SLAVE_READ) {
 		if (byte_left <= 0) {
 			memcpy(p_data, &vgpu_vreg(vgpu, offset), bytes);
@@ -322,6 +368,9 @@ static int gmbus2_mmio_write(struct intel_vgpu *vgpu, unsigned int offset,
 /**
  * intel_gvt_i2c_handle_gmbus_read - emulate gmbus register mmio read
  * @vgpu: a vGPU
+ * @offset: reg offset
+ * @p_data: data return buffer
+ * @bytes: access data length
  *
  * This function is used to emulate gmbus register mmio read
  *
@@ -332,7 +381,9 @@ static int gmbus2_mmio_write(struct intel_vgpu *vgpu, unsigned int offset,
 int intel_gvt_i2c_handle_gmbus_read(struct intel_vgpu *vgpu,
 	unsigned int offset, void *p_data, unsigned int bytes)
 {
-	if (WARN_ON(bytes > 8 && (offset & (bytes - 1))))
+	struct drm_i915_private *i915 = vgpu->gvt->gt->i915;
+
+	if (drm_WARN_ON(&i915->drm, bytes > 8 && (offset & (bytes - 1))))
 		return -EINVAL;
 
 	if (offset == i915_mmio_reg_offset(PCH_GMBUS2))
@@ -347,6 +398,9 @@ int intel_gvt_i2c_handle_gmbus_read(struct intel_vgpu *vgpu,
 /**
  * intel_gvt_i2c_handle_gmbus_write - emulate gmbus register mmio write
  * @vgpu: a vGPU
+ * @offset: reg offset
+ * @p_data: data return buffer
+ * @bytes: access data length
  *
  * This function is used to emulate gmbus register mmio write
  *
@@ -357,7 +411,9 @@ int intel_gvt_i2c_handle_gmbus_read(struct intel_vgpu *vgpu,
 int intel_gvt_i2c_handle_gmbus_write(struct intel_vgpu *vgpu,
 		unsigned int offset, void *p_data, unsigned int bytes)
 {
-	if (WARN_ON(bytes > 8 && (offset & (bytes - 1))))
+	struct drm_i915_private *i915 = vgpu->gvt->gt->i915;
+
+	if (drm_WARN_ON(&i915->drm, bytes > 8 && (offset & (bytes - 1))))
 		return -EINVAL;
 
 	if (offset == i915_mmio_reg_offset(PCH_GMBUS0))
@@ -412,13 +468,12 @@ static inline int get_aux_ch_reg(unsigned int offset)
 	return reg;
 }
 
-#define AUX_CTL_MSG_LENGTH(reg) \
-	((reg & DP_AUX_CH_CTL_MESSAGE_SIZE_MASK) >> \
-		DP_AUX_CH_CTL_MESSAGE_SIZE_SHIFT)
-
 /**
  * intel_gvt_i2c_handle_aux_ch_write - emulate AUX channel register write
  * @vgpu: a vGPU
+ * @port_idx: port index
+ * @offset: reg offset
+ * @p_data: write ptr
  *
  * This function is used to emulate AUX channel register write
  *
@@ -428,6 +483,7 @@ void intel_gvt_i2c_handle_aux_ch_write(struct intel_vgpu *vgpu,
 				unsigned int offset,
 				void *p_data)
 {
+	struct drm_i915_private *i915 = vgpu->gvt->gt->i915;
 	struct intel_vgpu_i2c_edid *i2c_edid = &vgpu->display.i2c_edid;
 	int msg_length, ret_msg_size;
 	int msg, addr, ctrl, op;
@@ -440,7 +496,8 @@ void intel_gvt_i2c_handle_aux_ch_write(struct intel_vgpu *vgpu,
 		return;
 	}
 
-	msg_length = AUX_CTL_MSG_LENGTH(value);
+	msg_length = REG_FIELD_GET(DP_AUX_CH_CTL_MESSAGE_SIZE_MASK, value);
+
 	// check the msg in DATA register.
 	msg = vgpu_vreg(vgpu, offset + 4);
 	addr = (msg >> 8) & 0xffff;
@@ -452,14 +509,13 @@ void intel_gvt_i2c_handle_aux_ch_write(struct intel_vgpu *vgpu,
 	}
 
 	/* Always set the wanted value for vms. */
-	ret_msg_size = (((op & 0x1) == GVT_AUX_I2C_READ) ? 2 : 1);
+	ret_msg_size = (((op & 0x1) == DP_AUX_I2C_READ) ? 2 : 1);
 	vgpu_vreg(vgpu, offset) =
 		DP_AUX_CH_CTL_DONE |
-		((ret_msg_size << DP_AUX_CH_CTL_MESSAGE_SIZE_SHIFT) &
-		DP_AUX_CH_CTL_MESSAGE_SIZE_MASK);
+		DP_AUX_CH_CTL_MESSAGE_SIZE(ret_msg_size);
 
 	if (msg_length == 3) {
-		if (!(op & GVT_AUX_I2C_MOT)) {
+		if (!(op & DP_AUX_I2C_MOT)) {
 			/* stop */
 			intel_vgpu_init_i2c_edid(vgpu);
 		} else {
@@ -472,37 +528,35 @@ void intel_gvt_i2c_handle_aux_ch_write(struct intel_vgpu *vgpu,
 			} else if (addr == EDID_ADDR) {
 				i2c_edid->state = I2C_AUX_CH;
 				i2c_edid->port = port_idx;
-				i2c_edid->slave_selected = true;
+				i2c_edid->target_selected = true;
 				if (intel_vgpu_has_monitor_on_port(vgpu,
 					port_idx) &&
 					intel_vgpu_port_is_dp(vgpu, port_idx))
 					i2c_edid->edid_available = true;
 			}
 		}
-	} else if ((op & 0x1) == GVT_AUX_I2C_WRITE) {
+	} else if ((op & 0x1) == DP_AUX_I2C_READ) {
+		if (drm_WARN_ON(&i915->drm, msg_length != 4))
+			return;
+		if (i2c_edid->edid_available && i2c_edid->target_selected) {
+			unsigned char val = edid_get_byte(vgpu);
+
+			aux_data_for_write = (val << 16);
+		} else
+			aux_data_for_write = (0xff << 16);
+	} else {
 		/* TODO
 		 * We only support EDID reading from I2C_over_AUX. And
 		 * we do not expect the index mode to be used. Right now
 		 * the WRITE operation is ignored. It is good enough to
 		 * support the gfx driver to do EDID access.
 		 */
-	} else {
-		if (WARN_ON((op & 0x1) != GVT_AUX_I2C_READ))
-			return;
-		if (WARN_ON(msg_length != 4))
-			return;
-		if (i2c_edid->edid_available && i2c_edid->slave_selected) {
-			unsigned char val = edid_get_byte(vgpu);
-
-			aux_data_for_write = (val << 16);
-		} else
-			aux_data_for_write = (0xff << 16);
 	}
 	/* write the return value in AUX_CH_DATA reg which includes:
 	 * ACK of I2C_WRITE
 	 * returned byte if it is READ
 	 */
-	aux_data_for_write |= GVT_AUX_I2C_REPLY_ACK << 24;
+	aux_data_for_write |= DP_AUX_I2C_REPLY_ACK << 24;
 	vgpu_vreg(vgpu, offset + 4) = aux_data_for_write;
 }
 
@@ -520,7 +574,7 @@ void intel_vgpu_init_i2c_edid(struct intel_vgpu *vgpu)
 	edid->state = I2C_NOT_SPECIFIED;
 
 	edid->port = -1;
-	edid->slave_selected = false;
+	edid->target_selected = false;
 	edid->edid_available = false;
 	edid->current_edid_read = 0;
 

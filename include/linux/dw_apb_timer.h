@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * (C) Copyright 2009 Intel Corporation
  * Author: Jacob Pan (jacob.jun.pan@intel.com)
  *
  * Shared with ARM platforms, Jamie Iles, Picochip 2011
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Support for the Synopsys DesignWare APB Timers.
  */
@@ -28,7 +25,6 @@ struct dw_apb_timer {
 struct dw_apb_clock_event_device {
 	struct clock_event_device		ced;
 	struct dw_apb_timer			timer;
-	struct irqaction			irqaction;
 	void					(*eoi)(struct dw_apb_timer *);
 };
 
@@ -38,9 +34,6 @@ struct dw_apb_clocksource {
 };
 
 void dw_apb_clockevent_register(struct dw_apb_clock_event_device *dw_ced);
-void dw_apb_clockevent_pause(struct dw_apb_clock_event_device *dw_ced);
-void dw_apb_clockevent_resume(struct dw_apb_clock_event_device *dw_ced);
-void dw_apb_clockevent_stop(struct dw_apb_clock_event_device *dw_ced);
 
 struct dw_apb_clock_event_device *
 dw_apb_clockevent_init(int cpu, const char *name, unsigned rating,

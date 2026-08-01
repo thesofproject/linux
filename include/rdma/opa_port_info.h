@@ -1,37 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB */
 /*
- * Copyright (c) 2014-2017 Intel Corporation.  All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * OpenIB.org BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright (c) 2014-2020 Intel Corporation.  All rights reserved.
  */
 
-#if !defined(OPA_PORT_INFO_H)
+#ifndef OPA_PORT_INFO_H
 #define OPA_PORT_INFO_H
+
+#include <rdma/opa_smi.h>
 
 #define OPA_PORT_LINK_MODE_NOP	0		/* No change */
 #define OPA_PORT_LINK_MODE_OPA	4		/* Port mode is OPA */
@@ -118,9 +93,11 @@
 #define OPA_LINKINIT_QUARANTINED                (9 << 4)
 #define OPA_LINKINIT_INSUFIC_CAPABILITY         (10 << 4)
 
-#define OPA_LINK_SPEED_NOP              0x0000  /*  Reserved (1-5 Gbps) */
-#define OPA_LINK_SPEED_12_5G            0x0001  /*  12.5 Gbps */
-#define OPA_LINK_SPEED_25G              0x0002  /*  25.78125?  Gbps (EDR) */
+#define OPA_LINK_SPEED_NOP           0x0000  /* no change */
+#define OPA_LINK_SPEED_12_5G         0x0001  /* 12.5 Gbps */
+#define OPA_LINK_SPEED_25G           0x0002  /* 25.78125 Gbps */
+#define OPA_LINK_SPEED_50G           0x0004  /* 53.125 Gbps */
+#define OPA_LINK_SPEED_100G          0x0008  /* 106.25 Gbps */
 
 #define OPA_LINK_WIDTH_1X            0x0001
 #define OPA_LINK_WIDTH_2X            0x0002
@@ -136,14 +113,6 @@
 /* reserved (1 << 2) */
 #define OPA_CAP_MASK3_IsVLMarkerSupported         (1 << 1)
 #define OPA_CAP_MASK3_IsVLrSupported              (1 << 0)
-
-/**
- * new MTU values
- */
-enum {
-	OPA_MTU_8192  = 6,
-	OPA_MTU_10240 = 7,
-};
 
 enum {
 	OPA_PORT_PHYS_CONF_DISCONNECTED = 0,
@@ -413,6 +382,6 @@ struct opa_port_info {
 	u8     local_port_num;
 	u8     reserved12;
 	u8     reserved13;                       /* was guid_cap */
-} __attribute__ ((packed));
+} __packed;
 
 #endif /* OPA_PORT_INFO_H */

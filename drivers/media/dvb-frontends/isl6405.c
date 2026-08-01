@@ -1,23 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * isl6405.c - driver for dual lnb supply and control ic ISL6405
  *
  * Copyright (C) 2008 Hartmut Hackmann
  * Copyright (C) 2006 Oliver Endriss
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * To obtain the license, point your browser to
- * http://www.gnu.org/copyleft/gpl.html
- *
  *
  * the project's page is at https://linuxtv.org
  */
@@ -120,7 +106,7 @@ static void isl6405_release(struct dvb_frontend *fe)
 struct dvb_frontend *isl6405_attach(struct dvb_frontend *fe, struct i2c_adapter *i2c,
 				    u8 i2c_addr, u8 override_set, u8 override_clear)
 {
-	struct isl6405 *isl6405 = kmalloc(sizeof(struct isl6405), GFP_KERNEL);
+	struct isl6405 *isl6405 = kmalloc_obj(struct isl6405);
 	if (!isl6405)
 		return NULL;
 
@@ -155,7 +141,7 @@ struct dvb_frontend *isl6405_attach(struct dvb_frontend *fe, struct i2c_adapter 
 
 	return fe;
 }
-EXPORT_SYMBOL(isl6405_attach);
+EXPORT_SYMBOL_GPL(isl6405_attach);
 
 MODULE_DESCRIPTION("Driver for lnb supply and control ic isl6405");
 MODULE_AUTHOR("Hartmut Hackmann & Oliver Endriss");

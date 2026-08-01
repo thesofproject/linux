@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  HID driver for Speedlink Vicious and Divine Cezanne (USB mouse).
  *  Fixes "jumpy" cursor and removes nonexistent keyboard LEDS from
@@ -7,10 +8,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 #include <linux/device.h>
@@ -78,4 +75,5 @@ static struct hid_driver speedlink_driver = {
 };
 module_hid_driver(speedlink_driver);
 
+MODULE_DESCRIPTION("HID driver for Speedlink Vicious and Divine Cezanne (USB mouse)");
 MODULE_LICENSE("GPL");

@@ -85,15 +85,15 @@ struct usnic_fwd_dev *usnic_fwd_dev_alloc(struct pci_dev *pdev)
 {
 	struct usnic_fwd_dev *ufdev;
 
-	ufdev = kzalloc(sizeof(*ufdev), GFP_KERNEL);
+	ufdev = kzalloc_obj(*ufdev);
 	if (!ufdev)
 		return NULL;
 
 	ufdev->pdev = pdev;
 	ufdev->netdev = pci_get_drvdata(pdev);
 	spin_lock_init(&ufdev->lock);
-	strncpy(ufdev->name, netdev_name(ufdev->netdev),
-			sizeof(ufdev->name) - 1);
+	BUILD_BUG_ON(sizeof(ufdev->name) != sizeof(ufdev->netdev->name));
+	strscpy(ufdev->name, ufdev->netdev->name);
 
 	return ufdev;
 }
@@ -103,7 +103,7 @@ void usnic_fwd_dev_free(struct usnic_fwd_dev *ufdev)
 	kfree(ufdev);
 }
 
-void usnic_fwd_set_mac(struct usnic_fwd_dev *ufdev, char mac[ETH_ALEN])
+void usnic_fwd_set_mac(struct usnic_fwd_dev *ufdev, const char mac[ETH_ALEN])
 {
 	spin_lock(&ufdev->lock);
 	memcpy(&ufdev->mac, mac, sizeof(ufdev->mac));
@@ -210,11 +210,11 @@ usnic_fwd_alloc_flow(struct usnic_fwd_dev *ufdev, struct filter *filter,
 	tlv_size = (2*sizeof(struct filter_tlv) + sizeof(struct filter) +
 			sizeof(struct filter_action));
 
-	flow = kzalloc(sizeof(*flow), GFP_ATOMIC);
+	flow = kzalloc_obj(*flow, GFP_ATOMIC);
 	if (!flow)
 		return ERR_PTR(-ENOMEM);
 
-	tlv = pci_alloc_consistent(pdev, tlv_size, &tlv_pa);
+	tlv = dma_alloc_coherent(&pdev->dev, tlv_size, &tlv_pa, GFP_ATOMIC);
 	if (!tlv) {
 		usnic_err("Failed to allocate memory\n");
 		status = -ENOMEM;
@@ -258,7 +258,7 @@ usnic_fwd_alloc_flow(struct usnic_fwd_dev *ufdev, struct filter *filter,
 
 out_free_tlv:
 	spin_unlock(&ufdev->lock);
-	pci_free_consistent(pdev, tlv_size, tlv, tlv_pa);
+	dma_free_coherent(&pdev->dev, tlv_size, tlv, tlv_pa);
 	if (!status)
 		return flow;
 out_free_flow:

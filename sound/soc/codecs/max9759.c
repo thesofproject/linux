@@ -1,4 +1,4 @@
-// SPDX-Licence-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0
 /*
  * MAX9759 Amplifier Driver
  *
@@ -42,7 +42,7 @@ static const DECLARE_TLV_DB_SCALE(speaker_gain_tlv, 600, 600, 0);
 static int speaker_gain_control_get(struct snd_kcontrol *kcontrol,
 				    struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *c = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *c = snd_kcontrol_chip(kcontrol);
 	struct max9759 *priv = snd_soc_component_get_drvdata(c);
 
 	ucontrol->value.integer.value[0] = priv->gain;
@@ -61,10 +61,11 @@ static const bool speaker_gain_table[4][2] = {
 static int speaker_gain_control_put(struct snd_kcontrol *kcontrol,
 				    struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *c = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *c = snd_kcontrol_chip(kcontrol);
 	struct max9759 *priv = snd_soc_component_get_drvdata(c);
 
-	if (ucontrol->value.integer.value[0] > 3)
+	if (ucontrol->value.integer.value[0] < 0 ||
+	    ucontrol->value.integer.value[0] > 3)
 		return -EINVAL;
 
 	priv->gain = ucontrol->value.integer.value[0];
@@ -82,7 +83,7 @@ static int speaker_gain_control_put(struct snd_kcontrol *kcontrol,
 static int speaker_mute_get(struct snd_kcontrol *kcontrol,
 			    struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *c = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *c = snd_kcontrol_chip(kcontrol);
 	struct max9759 *priv = snd_soc_component_get_drvdata(c);
 
 	ucontrol->value.integer.value[0] = !priv->is_mute;
@@ -93,7 +94,7 @@ static int speaker_mute_get(struct snd_kcontrol *kcontrol,
 static int speaker_mute_put(struct snd_kcontrol *kcontrol,
 			    struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *c = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *c = snd_kcontrol_chip(kcontrol);
 	struct max9759 *priv = snd_soc_component_get_drvdata(c);
 
 	priv->is_mute = !ucontrol->value.integer.value[0];
@@ -140,7 +141,6 @@ static int max9759_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct max9759 *priv;
-	int err;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -149,29 +149,20 @@ static int max9759_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, priv);
 
 	priv->gpiod_shutdown = devm_gpiod_get(dev, "shutdown", GPIOD_OUT_HIGH);
-	if (IS_ERR(priv->gpiod_shutdown)) {
-		err = PTR_ERR(priv->gpiod_shutdown);
-		if (err != -EPROBE_DEFER)
-			dev_err(dev, "Failed to get 'shutdown' gpio: %d", err);
-		return err;
-	}
+	if (IS_ERR(priv->gpiod_shutdown))
+		return dev_err_probe(dev, PTR_ERR(priv->gpiod_shutdown),
+				     "Failed to get 'shutdown' gpio");
 
 	priv->gpiod_mute = devm_gpiod_get(dev, "mute", GPIOD_OUT_HIGH);
-	if (IS_ERR(priv->gpiod_mute)) {
-		err = PTR_ERR(priv->gpiod_mute);
-		if (err != -EPROBE_DEFER)
-			dev_err(dev, "Failed to get 'mute' gpio: %d", err);
-		return err;
-	}
+	if (IS_ERR(priv->gpiod_mute))
+		return dev_err_probe(dev, PTR_ERR(priv->gpiod_mute),
+				     "Failed to get 'mute' gpio");
 	priv->is_mute = true;
 
 	priv->gpiod_gain = devm_gpiod_get_array(dev, "gain", GPIOD_OUT_HIGH);
-	if (IS_ERR(priv->gpiod_gain)) {
-		err = PTR_ERR(priv->gpiod_gain);
-		if (err != -EPROBE_DEFER)
-			dev_err(dev, "Failed to get 'gain' gpios: %d", err);
-		return err;
-	}
+	if (IS_ERR(priv->gpiod_gain))
+		return dev_err_probe(dev, PTR_ERR(priv->gpiod_gain),
+				     "Failed to get 'gain' gpios");
 	priv->gain = 0;
 
 	if (priv->gpiod_gain->ndescs != 2) {

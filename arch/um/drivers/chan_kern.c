@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2000 - 2007 Jeff Dike (jdike@{linux.intel,addtoit}.com)
- * Licensed under the GPL
  */
 
 #include <linux/slab.h>
@@ -33,14 +33,14 @@ static void not_configged_close(int fd, void *data)
 	       "UML\n");
 }
 
-static int not_configged_read(int fd, char *c_out, void *data)
+static int not_configged_read(int fd, u8 *c_out, void *data)
 {
 	printk(KERN_ERR "Using a channel type which is configured out of "
 	       "UML\n");
 	return -EIO;
 }
 
-static int not_configged_write(int fd, const char *buf, int len, void *data)
+static int not_configged_write(int fd, const u8 *buf, size_t len, void *data)
 {
 	printk(KERN_ERR "Using a channel type which is configured out of "
 	       "UML\n");
@@ -81,6 +81,12 @@ static const struct chan_ops not_configged_ops = {
 };
 #endif /* CONFIG_NOCONFIG_CHAN */
 
+static inline bool need_output_blocking(void)
+{
+	return time_travel_mode == TT_MODE_INFCPU ||
+	       time_travel_mode == TT_MODE_EXTERNAL;
+}
+
 static int open_one_chan(struct chan *chan)
 {
 	int fd, err;
@@ -96,15 +102,43 @@ static int open_one_chan(struct chan *chan)
 		return fd;
 
 	err = os_set_fd_block(fd, 0);
-	if (err) {
-		(*chan->ops->close)(fd, chan->data);
-		return err;
-	}
+	if (err)
+		goto out_close;
 
-	chan->fd = fd;
+	chan->fd_in = fd;
+	chan->fd_out = fd;
+
+	/*
+	 * In time-travel modes infinite-CPU and external we need to guarantee
+	 * that any writes to the output succeed immdiately from the point of
+	 * the VM. The best way to do this is to put the FD in blocking mode
+	 * and simply wait/retry until everything is written.
+	 * As every write is guaranteed to complete, we also do not need to
+	 * request an IRQ for the output.
+	 *
+	 * Note that input cannot happen in a time synchronized way. We permit
+	 * it, but time passes very quickly if anything waits for a read.
+	 */
+	if (chan->output && need_output_blocking()) {
+		err = os_dup_file(chan->fd_out);
+		if (err < 0)
+			goto out_close;
+
+		chan->fd_out = err;
+
+		err = os_set_fd_block(chan->fd_out, 1);
+		if (err) {
+			os_close_file(chan->fd_out);
+			goto out_close;
+		}
+	}
 
 	chan->opened = 1;
 	return 0;
+
+out_close:
+	(*chan->ops->close)(fd, chan->data);
+	return err;
 }
 
 static int open_chan(struct list_head *chans)
@@ -125,7 +159,7 @@ static int open_chan(struct list_head *chans)
 void chan_enable_winch(struct chan *chan, struct tty_port *port)
 {
 	if (chan && chan->primary && chan->ops->winch)
-		register_winch(chan->fd, port);
+		register_winch(chan->fd_in, port);
 }
 
 static void line_timer_cb(struct work_struct *work)
@@ -133,7 +167,7 @@ static void line_timer_cb(struct work_struct *work)
 	struct line *line = container_of(work, struct line, task.work);
 
 	if (!line->throttled)
-		chan_interrupt(line, line->driver->read_irq);
+		chan_interrupt(line, line->read_irq);
 }
 
 int enable_chan(struct line *line)
@@ -156,8 +190,9 @@ int enable_chan(struct line *line)
 
 		if (chan->enabled)
 			continue;
-		err = line_setup_irq(chan->fd, chan->input, chan->output, line,
-				     chan);
+		err = line_setup_irq(chan->fd_in, chan->input,
+				     chan->output && !need_output_blocking(),
+				     line, chan);
 		if (err)
 			goto out_close;
 
@@ -171,24 +206,65 @@ int enable_chan(struct line *line)
 	return err;
 }
 
+/* Items are added in IRQ context, when free_irq can't be called, and
+ * removed in process context, when it can.
+ * This handles interrupt sources which disappear, and which need to
+ * be permanently disabled.  This is discovered in IRQ context, but
+ * the freeing of the IRQ must be done later.
+ */
+static DEFINE_RAW_SPINLOCK(irqs_to_free_lock);
+static LIST_HEAD(irqs_to_free);
+
+void free_irqs(void)
+{
+	struct chan *chan;
+	LIST_HEAD(list);
+	struct list_head *ele;
+	unsigned long flags;
+
+	raw_spin_lock_irqsave(&irqs_to_free_lock, flags);
+	list_splice_init(&irqs_to_free, &list);
+	raw_spin_unlock_irqrestore(&irqs_to_free_lock, flags);
+
+	list_for_each(ele, &list) {
+		chan = list_entry(ele, struct chan, free_list);
+
+		if (chan->input && chan->enabled)
+			um_free_irq(chan->line->read_irq, chan);
+		if (chan->output && chan->enabled &&
+		    !need_output_blocking())
+			um_free_irq(chan->line->write_irq, chan);
+		chan->enabled = 0;
+	}
+}
+
 static void close_one_chan(struct chan *chan, int delay_free_irq)
 {
+	unsigned long flags;
+
 	if (!chan->opened)
 		return;
 
-    /* we can safely call free now - it will be marked
-     *  as free and freed once the IRQ stopped processing
-     */
-	if (chan->input && chan->enabled)
-		um_free_irq(chan->line->driver->read_irq, chan);
-	if (chan->output && chan->enabled)
-		um_free_irq(chan->line->driver->write_irq, chan);
-	chan->enabled = 0;
+	if (delay_free_irq) {
+		raw_spin_lock_irqsave(&irqs_to_free_lock, flags);
+		list_add(&chan->free_list, &irqs_to_free);
+		raw_spin_unlock_irqrestore(&irqs_to_free_lock, flags);
+	} else {
+		if (chan->input && chan->enabled)
+			um_free_irq(chan->line->read_irq, chan);
+		if (chan->output && chan->enabled &&
+		    !need_output_blocking())
+			um_free_irq(chan->line->write_irq, chan);
+		chan->enabled = 0;
+	}
+	if (chan->fd_out != chan->fd_in)
+		os_close_file(chan->fd_out);
 	if (chan->ops->close != NULL)
-		(*chan->ops->close)(chan->fd, chan->data);
+		(*chan->ops->close)(chan->fd_in, chan->data);
 
 	chan->opened = 0;
-	chan->fd = -1;
+	chan->fd_in = -1;
+	chan->fd_out = -1;
 }
 
 void close_chan(struct line *line)
@@ -208,28 +284,19 @@ void close_chan(struct line *line)
 void deactivate_chan(struct chan *chan, int irq)
 {
 	if (chan && chan->enabled)
-		deactivate_fd(chan->fd, irq);
+		deactivate_fd(chan->fd_in, irq);
 }
 
-void reactivate_chan(struct chan *chan, int irq)
-{
-	if (chan && chan->enabled)
-		reactivate_fd(chan->fd, irq);
-}
-
-int write_chan(struct chan *chan, const char *buf, int len,
-	       int write_irq)
+int write_chan(struct chan *chan, const u8 *buf, size_t len, int write_irq)
 {
 	int n, ret = 0;
 
 	if (len == 0 || !chan || !chan->ops->write)
 		return 0;
 
-	n = chan->ops->write(chan->fd, buf, len, chan->data);
+	n = chan->ops->write(chan->fd_out, buf, len, chan->data);
 	if (chan->primary) {
 		ret = n;
-		if ((ret == -EAGAIN) || ((ret >= 0) && (ret < len)))
-			reactivate_fd(chan->fd, write_irq);
 	}
 	return ret;
 }
@@ -241,7 +308,7 @@ int console_write_chan(struct chan *chan, const char *buf, int len)
 	if (!chan || !chan->ops->console_write)
 		return 0;
 
-	n = chan->ops->console_write(chan->fd, buf, len);
+	n = chan->ops->console_write(chan->fd_out, buf, len);
 	if (chan->primary)
 		ret = n;
 	return ret;
@@ -269,14 +336,14 @@ int chan_window_size(struct line *line, unsigned short *rows_out,
 	if (chan && chan->primary) {
 		if (chan->ops->window_size == NULL)
 			return 0;
-		return chan->ops->window_size(chan->fd, chan->data,
+		return chan->ops->window_size(chan->fd_in, chan->data,
 					      rows_out, cols_out);
 	}
 	chan = line->chan_out;
 	if (chan && chan->primary) {
 		if (chan->ops->window_size == NULL)
 			return 0;
-		return chan->ops->window_size(chan->fd, chan->data,
+		return chan->ops->window_size(chan->fd_in, chan->data,
 					      rows_out, cols_out);
 	}
 	return 0;
@@ -292,7 +359,7 @@ static void free_one_chan(struct chan *chan)
 		(*chan->ops->free)(chan->data);
 
 	if (chan->primary && chan->output)
-		ignore_sigio_fd(chan->fd);
+		ignore_sigio_fd(chan->fd_in);
 	kfree(chan);
 }
 
@@ -437,7 +504,7 @@ static struct chan *parse_chan(struct line *line, char *str, int device,
 		return NULL;
 	}
 
-	chan = kmalloc(sizeof(*chan), GFP_ATOMIC);
+	chan = kmalloc_obj(*chan, GFP_ATOMIC);
 	if (chan == NULL) {
 		*error_out = "Memory allocation failed";
 		return NULL;
@@ -451,7 +518,8 @@ static struct chan *parse_chan(struct line *line, char *str, int device,
 				 .output 	= 0,
 				 .opened  	= 0,
 				 .enabled  	= 0,
-				 .fd 		= -1,
+				 .fd_in		= -1,
+				 .fd_out	= -1,
 				 .ops 		= ops,
 				 .data 		= data });
 	return chan;
@@ -512,7 +580,7 @@ void chan_interrupt(struct line *line, int irq)
 	struct tty_port *port = &line->port;
 	struct chan *chan = line->chan_in;
 	int err;
-	char c;
+	u8 c;
 
 	if (!chan || !chan->ops->read)
 		goto out;
@@ -522,13 +590,11 @@ void chan_interrupt(struct line *line, int irq)
 			schedule_delayed_work(&line->task, 1);
 			goto out;
 		}
-		err = chan->ops->read(chan->fd, &c, chan->data);
+		err = chan->ops->read(chan->fd_in, &c, chan->data);
 		if (err > 0)
 			tty_insert_flip_char(port, c, TTY_NORMAL);
 	} while (err > 0);
 
-	if (err == 0)
-		reactivate_fd(chan->fd, irq);
 	if (err == -EIO) {
 		if (chan->primary) {
 			tty_port_tty_hangup(&line->port, false);

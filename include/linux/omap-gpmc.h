@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *  OMAP GPMC (General Purpose Memory Controller) defines
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
  */
 
 #include <linux/platform_data/gpmc-omap.h>
@@ -70,10 +66,6 @@ extern int gpmc_calc_timings(struct gpmc_timings *gpmc_t,
 
 struct device_node;
 
-extern int gpmc_get_client_irq(unsigned irq_config);
-
-extern unsigned int gpmc_ticks_to_ns(unsigned int ticks);
-
 extern void gpmc_cs_write_reg(int cs, int idx, u32 val);
 extern int gpmc_calc_divider(unsigned int sync_clk);
 extern int gpmc_cs_set_timings(int cs, const struct gpmc_timings *t,
@@ -85,19 +77,6 @@ extern int gpmc_configure(int cmd, int wval);
 extern void gpmc_read_settings_dt(struct device_node *np,
 				  struct gpmc_settings *p);
 
-extern void omap3_gpmc_save_context(void);
-extern void omap3_gpmc_restore_context(void);
-
 struct gpmc_timings;
 struct omap_nand_platform_data;
 struct omap_onenand_platform_data;
-
-#if IS_ENABLED(CONFIG_MTD_ONENAND_OMAP2)
-extern int gpmc_onenand_init(struct omap_onenand_platform_data *d);
-#else
-#define board_onenand_data	NULL
-static inline int gpmc_onenand_init(struct omap_onenand_platform_data *d)
-{
-	return 0;
-}
-#endif

@@ -117,8 +117,8 @@ static struct ehci_tt *find_tt(struct usb_device *udev)
 	if (utt->multi) {
 		tt_index = utt->hcpriv;
 		if (!tt_index) {		/* Create the index array */
-			tt_index = kzalloc(utt->hub->maxchild *
-					sizeof(*tt_index), GFP_ATOMIC);
+			tt_index = kzalloc_objs(*tt_index, utt->hub->maxchild,
+						GFP_ATOMIC);
 			if (!tt_index)
 				return ERR_PTR(-ENOMEM);
 			utt->hcpriv = tt_index;
@@ -136,7 +136,7 @@ static struct ehci_tt *find_tt(struct usb_device *udev)
 		struct ehci_hcd		*ehci =
 				hcd_to_ehci(bus_to_hcd(udev->bus));
 
-		tt = kzalloc(sizeof(*tt), GFP_ATOMIC);
+		tt = kzalloc_obj(*tt, GFP_ATOMIC);
 		if (!tt) {
 			if (allocated_index) {
 				utt->hcpriv = NULL;
@@ -243,6 +243,12 @@ static void reserve_release_intr_bandwidth(struct ehci_hcd *ehci,
 
 	/* FS/LS bus bandwidth */
 	if (tt_usecs) {
+		/*
+		 * find_tt() will not return any error here as we have
+		 * already called find_tt() before calling this function
+		 * and checked for any error return. The previous call
+		 * would have created the data structure.
+		 */
 		tt = find_tt(qh->ps.udev);
 		if (sign > 0)
 			list_add_tail(&qh->ps.ps_list, &tt->ps_list);
@@ -305,26 +311,6 @@ static int __maybe_unused same_tt(struct usb_device *dev1,
 }
 
 #ifdef CONFIG_USB_EHCI_TT_NEWSCHED
-
-/* Which uframe does the low/fullspeed transfer start in?
- *
- * The parameter is the mask of ssplits in "H-frame" terms
- * and this returns the transfer start uframe in "B-frame" terms,
- * which allows both to match, e.g. a ssplit in "H-frame" uframe 0
- * will cause a transfer in "B-frame" uframe 0.  "B-frames" lag
- * "H-frames" by 1 uframe.  See the EHCI spec sec 4.5 and figure 4.7.
- */
-static inline unsigned char tt_start_uframe(struct ehci_hcd *ehci, __hc32 mask)
-{
-	unsigned char smask = hc32_to_cpu(ehci, mask) & QH_SMASK;
-
-	if (!smask) {
-		ehci_err(ehci, "invalid empty smask!\n");
-		/* uframe 7 can't have bw so this will indicate failure */
-		return 7;
-	}
-	return ffs(smask) - 1;
-}
 
 static const unsigned char
 max_tt_usecs[] = { 125, 125, 125, 125, 125, 125, 30, 0 };
@@ -503,13 +489,14 @@ static int tt_no_collision(
 static void enable_periodic(struct ehci_hcd *ehci)
 {
 	if (ehci->periodic_count++)
-		return;
+		goto out;
 
 	/* Stop waiting to turn off the periodic schedule */
 	ehci->enabled_hrtimer_events &= ~BIT(EHCI_HRTIMER_DISABLE_PERIODIC);
 
 	/* Don't start the schedule until PSS is 0 */
 	ehci_poll_PSS(ehci);
+out:
 	turn_on_io_watchdog(ehci);
 }
 
@@ -1015,7 +1002,7 @@ iso_stream_alloc(gfp_t mem_flags)
 {
 	struct ehci_iso_stream *stream;
 
-	stream = kzalloc(sizeof(*stream), mem_flags);
+	stream = kzalloc_obj(*stream, mem_flags);
 	if (likely(stream != NULL)) {
 		INIT_LIST_HEAD(&stream->td_list);
 		INIT_LIST_HEAD(&stream->free_list);
@@ -1178,10 +1165,8 @@ static struct ehci_iso_sched *
 iso_sched_alloc(unsigned packets, gfp_t mem_flags)
 {
 	struct ehci_iso_sched	*iso_sched;
-	int			size = sizeof(*iso_sched);
 
-	size += packets * sizeof(struct ehci_iso_packet);
-	iso_sched = kzalloc(size, mem_flags);
+	iso_sched = kzalloc_flex(*iso_sched, packet, packets, mem_flags);
 	if (likely(iso_sched != NULL))
 		INIT_LIST_HEAD(&iso_sched->td_list);
 
@@ -1356,6 +1341,12 @@ static void reserve_release_iso_bandwidth(struct ehci_hcd *ehci,
 			}
 		}
 
+		/*
+		 * find_tt() will not return any error here as we have
+		 * already called find_tt() before calling this function
+		 * and checked for any error return. The previous call
+		 * would have created the data structure.
+		 */
 		tt = find_tt(stream->ps.udev);
 		if (sign > 0)
 			list_add_tail(&stream->ps.ps_list, &tt->ps_list);
@@ -1632,6 +1623,7 @@ iso_stream_schedule(
 			status = 1;	/* and give it back immediately */
 			iso_sched_free(stream, sched);
 			sched = NULL;
+			urb->hcpriv = NULL;
 		}
 	}
 	urb->error_count = skip / period;
@@ -1662,8 +1654,6 @@ iso_stream_schedule(
 	return status;
 
  fail:
-	iso_sched_free(stream, sched);
-	urb->hcpriv = NULL;
 	return status;
 }
 
@@ -1834,7 +1824,6 @@ static bool itd_complete(struct ehci_hcd *ehci, struct ehci_itd *itd)
 	unsigned				uframe;
 	int					urb_index = -1;
 	struct ehci_iso_stream			*stream = itd->stream;
-	struct usb_device			*dev;
 	bool					retval = false;
 
 	/* for each uframe with a packet */
@@ -1885,7 +1874,6 @@ static bool itd_complete(struct ehci_hcd *ehci, struct ehci_itd *itd)
 	 */
 
 	/* give urb back to the driver; completion often (re)submits */
-	dev = urb->dev;
 	ehci_urb_done(ehci, urb, 0);
 	retval = true;
 	urb = NULL;
@@ -1977,6 +1965,10 @@ static int itd_submit(struct ehci_hcd *ehci, struct urb *urb,
 		usb_hcd_unlink_urb_from_ep(ehci_to_hcd(ehci), urb);
 	}
  done_not_linked:
+	if (status < 0) {
+		iso_sched_free(stream, urb->hcpriv);
+		urb->hcpriv = NULL;
+	}
 	spin_unlock_irqrestore(&ehci->lock, flags);
  done:
 	return status;
@@ -2229,7 +2221,6 @@ static bool sitd_complete(struct ehci_hcd *ehci, struct ehci_sitd *sitd)
 	u32					t;
 	int					urb_index;
 	struct ehci_iso_stream			*stream = sitd->stream;
-	struct usb_device			*dev;
 	bool					retval = false;
 
 	urb_index = sitd->index;
@@ -2267,7 +2258,6 @@ static bool sitd_complete(struct ehci_hcd *ehci, struct ehci_sitd *sitd)
 	 */
 
 	/* give urb back to the driver; completion often (re)submits */
-	dev = urb->dev;
 	ehci_urb_done(ehci, urb, 0);
 	retval = true;
 	urb = NULL;
@@ -2356,6 +2346,10 @@ static int sitd_submit(struct ehci_hcd *ehci, struct urb *urb,
 		usb_hcd_unlink_urb_from_ep(ehci_to_hcd(ehci), urb);
 	}
  done_not_linked:
+	if (status < 0) {
+		iso_sched_free(stream, urb->hcpriv);
+		urb->hcpriv = NULL;
+	}
 	spin_unlock_irqrestore(&ehci->lock, flags);
  done:
 	return status;
@@ -2478,7 +2472,7 @@ restart:
 			ehci_dbg(ehci, "corrupt type %d frame %d shadow %p\n",
 					type, frame, q.ptr);
 			/* BUG(); */
-			/* FALL THROUGH */
+			fallthrough;
 		case Q_TYPE_QH:
 		case Q_TYPE_FSTN:
 			/* End of the iTDs and siTDs */

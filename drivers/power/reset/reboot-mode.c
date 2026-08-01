@@ -1,19 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2016, Fuzhou Rockchip Electronics Co., Ltd
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/device.h>
+#include <linux/err.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/list.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/reboot.h>
 #include <linux/reboot-mode.h>
+#include <linux/slab.h>
+#include <linux/string.h>
 
 #define PREFIX "mode-"
 
@@ -23,24 +23,81 @@ struct mode_info {
 	struct list_head list;
 };
 
+struct reboot_mode_sysfs_data {
+	struct device *reboot_mode_device;
+	struct list_head head;
+};
+
+static inline void reboot_mode_release_list(struct reboot_mode_sysfs_data *priv)
+{
+	struct mode_info *info;
+	struct mode_info *next;
+
+	list_for_each_entry_safe(info, next, &priv->head, list) {
+		list_del(&info->list);
+		kfree_const(info->mode);
+		kfree(info);
+	}
+}
+
+static ssize_t reboot_modes_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct reboot_mode_sysfs_data *priv;
+	struct mode_info *sysfs_info;
+	ssize_t size = 0;
+
+	priv = dev_get_drvdata(dev);
+	if (!priv)
+		return -ENODATA;
+
+	list_for_each_entry(sysfs_info, &priv->head, list)
+		size += sysfs_emit_at(buf, size, "%s ", sysfs_info->mode);
+
+	if (!size)
+		return -ENODATA;
+
+	return size + sysfs_emit_at(buf, size - 1, "\n");
+}
+static DEVICE_ATTR_RO(reboot_modes);
+
+static struct attribute *reboot_mode_attrs[] = {
+	&dev_attr_reboot_modes.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(reboot_mode);
+
+static const struct class reboot_mode_class = {
+	.name = "reboot-mode",
+	.dev_groups = reboot_mode_groups,
+};
+
 static unsigned int get_reboot_mode_magic(struct reboot_mode_driver *reboot,
 					  const char *cmd)
 {
 	const char *normal = "normal";
-	int magic = 0;
 	struct mode_info *info;
+	char cmd_[110];
 
 	if (!cmd)
 		cmd = normal;
 
-	list_for_each_entry(info, &reboot->head, list) {
-		if (!strcmp(info->mode, cmd)) {
-			magic = info->magic;
-			break;
-		}
-	}
+	list_for_each_entry(info, &reboot->head, list)
+		if (!strcmp(info->mode, cmd))
+			return info->magic;
 
-	return magic;
+	/* try to match again, replacing characters impossible in DT */
+	if (strscpy(cmd_, cmd, sizeof(cmd_)) == -E2BIG)
+		return 0;
+
+	strreplace(cmd_, ' ', '-');
+	strreplace(cmd_, ',', '-');
+	strreplace(cmd_, '/', '-');
+
+	list_for_each_entry(info, &reboot->head, list)
+		if (!strcmp(info->mode, cmd_))
+			return info->magic;
+
+	return 0;
 }
 
 static int reboot_mode_notify(struct notifier_block *this,
@@ -55,6 +112,52 @@ static int reboot_mode_notify(struct notifier_block *this,
 		reboot->write(reboot, magic);
 
 	return NOTIFY_DONE;
+}
+
+static int reboot_mode_create_device(struct reboot_mode_driver *reboot)
+{
+	struct reboot_mode_sysfs_data *priv;
+	struct mode_info *sysfs_info;
+	struct mode_info *info;
+	int ret;
+
+	priv = kzalloc_obj(*priv, GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
+
+	INIT_LIST_HEAD(&priv->head);
+
+	list_for_each_entry(info, &reboot->head, list) {
+		sysfs_info = kzalloc_obj(*sysfs_info, GFP_KERNEL);
+		if (!sysfs_info) {
+			ret = -ENOMEM;
+			goto error;
+		}
+
+		sysfs_info->mode = kstrdup_const(info->mode, GFP_KERNEL);
+		if (!sysfs_info->mode) {
+			kfree(sysfs_info);
+			ret = -ENOMEM;
+			goto error;
+		}
+
+		list_add_tail(&sysfs_info->list, &priv->head);
+	}
+
+	priv->reboot_mode_device = device_create(&reboot_mode_class, NULL, 0,
+						 (void *)priv, "%s",
+						 reboot->dev->driver->name);
+	if (IS_ERR(priv->reboot_mode_device)) {
+		ret = PTR_ERR(priv->reboot_mode_device);
+		goto error;
+	}
+
+	return 0;
+
+error:
+	reboot_mode_release_list(priv);
+	kfree(priv);
+	return ret;
 }
 
 /**
@@ -108,15 +211,48 @@ int reboot_mode_register(struct reboot_mode_driver *reboot)
 	reboot->reboot_notifier.notifier_call = reboot_mode_notify;
 	register_reboot_notifier(&reboot->reboot_notifier);
 
+	ret = reboot_mode_create_device(reboot);
+	if (ret)
+		goto error;
+
 	return 0;
 
 error:
-	list_for_each_entry(info, &reboot->head, list)
-		kfree_const(info->mode);
-
+	reboot_mode_unregister(reboot);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(reboot_mode_register);
+
+static int reboot_mode_match_by_name(struct device *dev, const void *data)
+{
+	const char *name = data;
+
+	if (!dev || !data)
+		return 0;
+
+	return dev_name(dev) && strcmp(dev_name(dev), name) == 0;
+}
+
+static inline void reboot_mode_unregister_device(struct reboot_mode_driver *reboot)
+{
+	struct reboot_mode_sysfs_data *priv;
+	struct device *reboot_mode_device;
+
+	reboot_mode_device = class_find_device(&reboot_mode_class, NULL, reboot->dev->driver->name,
+					       reboot_mode_match_by_name);
+
+	if (!reboot_mode_device)
+		return;
+
+	priv = dev_get_drvdata(reboot_mode_device);
+	device_unregister(reboot_mode_device);
+
+	if (!priv)
+		return;
+
+	reboot_mode_release_list(priv);
+	kfree(priv);
+}
 
 /**
  * reboot_mode_unregister - unregister a reboot mode driver
@@ -127,6 +263,7 @@ int reboot_mode_unregister(struct reboot_mode_driver *reboot)
 	struct mode_info *info;
 
 	unregister_reboot_notifier(&reboot->reboot_notifier);
+	reboot_mode_unregister_device(reboot);
 
 	list_for_each_entry(info, &reboot->head, list)
 		kfree_const(info->mode);
@@ -194,6 +331,19 @@ void devm_reboot_mode_unregister(struct device *dev,
 }
 EXPORT_SYMBOL_GPL(devm_reboot_mode_unregister);
 
-MODULE_AUTHOR("Andy Yan <andy.yan@rock-chips.com");
+static int __init reboot_mode_init(void)
+{
+	return class_register(&reboot_mode_class);
+}
+
+static void __exit reboot_mode_exit(void)
+{
+	class_unregister(&reboot_mode_class);
+}
+
+subsys_initcall(reboot_mode_init);
+module_exit(reboot_mode_exit);
+
+MODULE_AUTHOR("Andy Yan <andy.yan@rock-chips.com>");
 MODULE_DESCRIPTION("System reboot mode core library");
 MODULE_LICENSE("GPL v2");

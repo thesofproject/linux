@@ -1,52 +1,7 @@
+// SPDX-License-Identifier: (GPL-2.0-or-later OR BSD-2-Clause)
 /*
  * libfdt - Flat Device Tree manipulation
  * Copyright (C) 2006 David Gibson, IBM Corporation.
- *
- * libfdt is dual licensed: you can use it either under the terms of
- * the GPL, or the BSD license, at your option.
- *
- *  a) This library is free software; you can redistribute it and/or
- *     modify it under the terms of the GNU General Public License as
- *     published by the Free Software Foundation; either version 2 of the
- *     License, or (at your option) any later version.
- *
- *     This library is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public
- *     License along with this library; if not, write to the Free
- *     Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
- *     MA 02110-1301 USA
- *
- * Alternatively,
- *
- *  b) Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *     1. Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *     2. Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- *     THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
- *     CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
- *     INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
- *     MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- *     DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- *     CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- *     SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- *     NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- *     LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- *     HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- *     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- *     OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
- *     EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include "libfdt_env.h"
 
@@ -67,29 +22,36 @@ static int fdt_blocks_misordered_(const void *fdt,
 		    (fdt_off_dt_strings(fdt) + fdt_size_dt_strings(fdt)));
 }
 
-static int fdt_rw_check_header_(void *fdt)
+static void fdt_downgrade_version(void *fdt)
 {
-	FDT_CHECK_HEADER(fdt);
+	if (!can_assume(LATEST) && fdt_version(fdt) > FDT_LAST_SUPPORTED_VERSION)
+		fdt_set_version(fdt, FDT_LAST_SUPPORTED_VERSION);
+}
 
-	if (fdt_version(fdt) < 17)
+static int fdt_rw_probe_(void *fdt)
+{
+	if (can_assume(VALID_DTB))
+		return 0;
+	FDT_RO_PROBE(fdt);
+
+	if (!can_assume(LATEST) && fdt_version(fdt) < 17)
 		return -FDT_ERR_BADVERSION;
 	if (fdt_blocks_misordered_(fdt, sizeof(struct fdt_reserve_entry),
 				   fdt_size_dt_struct(fdt)))
 		return -FDT_ERR_BADLAYOUT;
-	if (fdt_version(fdt) > 17)
-		fdt_set_version(fdt, 17);
 
+	fdt_downgrade_version(fdt);
 	return 0;
 }
 
-#define FDT_RW_CHECK_HEADER(fdt) \
+#define FDT_RW_PROBE(fdt) \
 	{ \
 		int err_; \
-		if ((err_ = fdt_rw_check_header_(fdt)) != 0) \
+		if ((err_ = fdt_rw_probe_(fdt)) != 0) \
 			return err_; \
 	}
 
-static inline int fdt_data_size_(void *fdt)
+static inline unsigned int fdt_data_size_(void *fdt)
 {
 	return fdt_off_dt_strings(fdt) + fdt_size_dt_strings(fdt);
 }
@@ -97,15 +59,16 @@ static inline int fdt_data_size_(void *fdt)
 static int fdt_splice_(void *fdt, void *splicepoint, int oldlen, int newlen)
 {
 	char *p = splicepoint;
-	char *end = (char *)fdt + fdt_data_size_(fdt);
+	unsigned int dsize = fdt_data_size_(fdt);
+	size_t soff = p - (char *)fdt;
 
-	if (((p + oldlen) < p) || ((p + oldlen) > end))
+	if ((oldlen < 0) || (soff + oldlen < soff) || (soff + oldlen > dsize))
 		return -FDT_ERR_BADOFFSET;
-	if ((p < (char *)fdt) || ((end - oldlen + newlen) < (char *)fdt))
+	if ((p < (char *)fdt) || (dsize + newlen < (unsigned)oldlen))
 		return -FDT_ERR_BADOFFSET;
-	if ((end - oldlen + newlen) > ((char *)fdt + fdt_totalsize(fdt)))
+	if (dsize - oldlen + newlen > fdt_totalsize(fdt))
 		return -FDT_ERR_NOSPACE;
-	memmove(p + newlen, p + oldlen, end - p - oldlen);
+	memmove(p + newlen, p + oldlen, ((char *)fdt + dsize) - (p + oldlen));
 	return 0;
 }
 
@@ -136,6 +99,14 @@ static int fdt_splice_struct_(void *fdt, void *p,
 	return 0;
 }
 
+/* Must only be used to roll back in case of error */
+static void fdt_del_last_string_(void *fdt, const char *s)
+{
+	int newlen = strlen(s) + 1;
+
+	fdt_set_size_dt_strings(fdt, fdt_size_dt_strings(fdt) - newlen);
+}
+
 static int fdt_splice_string_(void *fdt, int newlen)
 {
 	void *p = (char *)fdt
@@ -149,25 +120,42 @@ static int fdt_splice_string_(void *fdt, int newlen)
 	return 0;
 }
 
-static int fdt_find_add_string_(void *fdt, const char *s)
+/**
+ * fdt_find_add_string_() - Find or allocate a string
+ *
+ * @fdt: pointer to the device tree to check/adjust
+ * @s: string to find/add
+ * @allocated: Set to 0 if the string was found, 1 if not found and so
+ *	allocated. Ignored if can_assume(NO_ROLLBACK)
+ * @return offset of string in the string table (whether found or added)
+ */
+static int fdt_find_add_string_(void *fdt, const char *s, int slen,
+				int *allocated)
 {
 	char *strtab = (char *)fdt + fdt_off_dt_strings(fdt);
 	const char *p;
 	char *new;
-	int len = strlen(s) + 1;
 	int err;
 
-	p = fdt_find_string_(strtab, fdt_size_dt_strings(fdt), s);
+	if (!can_assume(NO_ROLLBACK))
+		*allocated = 0;
+
+	p = fdt_find_string_len_(strtab, fdt_size_dt_strings(fdt), s, slen);
 	if (p)
 		/* found it */
 		return (p - strtab);
 
 	new = strtab + fdt_size_dt_strings(fdt);
-	err = fdt_splice_string_(fdt, len);
+	err = fdt_splice_string_(fdt, slen + 1);
 	if (err)
 		return err;
 
-	memcpy(new, s, len);
+	if (!can_assume(NO_ROLLBACK))
+		*allocated = 1;
+
+	memcpy(new, s, slen);
+	new[slen] = '\0';
+
 	return (new - strtab);
 }
 
@@ -176,7 +164,7 @@ int fdt_add_mem_rsv(void *fdt, uint64_t address, uint64_t size)
 	struct fdt_reserve_entry *re;
 	int err;
 
-	FDT_RW_CHECK_HEADER(fdt);
+	FDT_RW_PROBE(fdt);
 
 	re = fdt_mem_rsv_w_(fdt, fdt_num_mem_rsv(fdt));
 	err = fdt_splice_mem_rsv_(fdt, re, 0, 1);
@@ -192,7 +180,7 @@ int fdt_del_mem_rsv(void *fdt, int n)
 {
 	struct fdt_reserve_entry *re = fdt_mem_rsv_w_(fdt, n);
 
-	FDT_RW_CHECK_HEADER(fdt);
+	FDT_RW_PROBE(fdt);
 
 	if (n >= fdt_num_mem_rsv(fdt))
 		return -FDT_ERR_NOTFOUND;
@@ -200,13 +188,15 @@ int fdt_del_mem_rsv(void *fdt, int n)
 	return fdt_splice_mem_rsv_(fdt, re, 1, 0);
 }
 
-static int fdt_resize_property_(void *fdt, int nodeoffset, const char *name,
+static int fdt_resize_property_(void *fdt, int nodeoffset,
+				const char *name, int namelen,
 				int len, struct fdt_property **prop)
 {
 	int oldlen;
 	int err;
 
-	*prop = fdt_get_property_w(fdt, nodeoffset, name, &oldlen);
+	*prop = fdt_get_property_namelen_w(fdt, nodeoffset, name, namelen,
+					   &oldlen);
 	if (!*prop)
 		return oldlen;
 
@@ -219,17 +209,18 @@ static int fdt_resize_property_(void *fdt, int nodeoffset, const char *name,
 }
 
 static int fdt_add_property_(void *fdt, int nodeoffset, const char *name,
-			     int len, struct fdt_property **prop)
+			     int namelen, int len, struct fdt_property **prop)
 {
 	int proplen;
 	int nextoffset;
 	int namestroff;
 	int err;
+	int allocated;
 
 	if ((nextoffset = fdt_check_node_offset_(fdt, nodeoffset)) < 0)
 		return nextoffset;
 
-	namestroff = fdt_find_add_string_(fdt, name);
+	namestroff = fdt_find_add_string_(fdt, name, namelen, &allocated);
 	if (namestroff < 0)
 		return namestroff;
 
@@ -237,8 +228,12 @@ static int fdt_add_property_(void *fdt, int nodeoffset, const char *name,
 	proplen = sizeof(**prop) + FDT_TAGALIGN(len);
 
 	err = fdt_splice_struct_(fdt, *prop, 0, proplen);
-	if (err)
+	if (err) {
+		/* Delete the string if we failed to add it */
+		if (!can_assume(NO_ROLLBACK) && allocated)
+			fdt_del_last_string_(fdt, name);
 		return err;
+	}
 
 	(*prop)->tag = cpu_to_fdt32(FDT_PROP);
 	(*prop)->nameoff = cpu_to_fdt32(namestroff);
@@ -252,7 +247,7 @@ int fdt_set_name(void *fdt, int nodeoffset, const char *name)
 	int oldlen, newlen;
 	int err;
 
-	FDT_RW_CHECK_HEADER(fdt);
+	FDT_RW_PROBE(fdt);
 
 	namep = (char *)(uintptr_t)fdt_get_name(fdt, nodeoffset, &oldlen);
 	if (!namep)
@@ -269,17 +264,18 @@ int fdt_set_name(void *fdt, int nodeoffset, const char *name)
 	return 0;
 }
 
-int fdt_setprop_placeholder(void *fdt, int nodeoffset, const char *name,
-			    int len, void **prop_data)
+int fdt_setprop_placeholder_namelen(void *fdt, int nodeoffset, const char *name,
+				    int namelen, int len, void **prop_data)
 {
 	struct fdt_property *prop;
 	int err;
 
-	FDT_RW_CHECK_HEADER(fdt);
+	FDT_RW_PROBE(fdt);
 
-	err = fdt_resize_property_(fdt, nodeoffset, name, len, &prop);
+	err = fdt_resize_property_(fdt, nodeoffset, name, namelen, len, &prop);
 	if (err == -FDT_ERR_NOTFOUND)
-		err = fdt_add_property_(fdt, nodeoffset, name, len, &prop);
+		err = fdt_add_property_(fdt, nodeoffset, name, namelen, len,
+					&prop);
 	if (err)
 		return err;
 
@@ -287,13 +283,14 @@ int fdt_setprop_placeholder(void *fdt, int nodeoffset, const char *name,
 	return 0;
 }
 
-int fdt_setprop(void *fdt, int nodeoffset, const char *name,
-		const void *val, int len)
+int fdt_setprop_namelen(void *fdt, int nodeoffset, const char *name,
+			int namelen, const void *val, int len)
 {
 	void *prop_data;
 	int err;
 
-	err = fdt_setprop_placeholder(fdt, nodeoffset, name, len, &prop_data);
+	err = fdt_setprop_placeholder_namelen(fdt, nodeoffset, name, namelen,
+					      len, &prop_data);
 	if (err)
 		return err;
 
@@ -308,7 +305,7 @@ int fdt_appendprop(void *fdt, int nodeoffset, const char *name,
 	struct fdt_property *prop;
 	int err, oldlen, newlen;
 
-	FDT_RW_CHECK_HEADER(fdt);
+	FDT_RW_PROBE(fdt);
 
 	prop = fdt_get_property_w(fdt, nodeoffset, name, &oldlen);
 	if (prop) {
@@ -321,7 +318,8 @@ int fdt_appendprop(void *fdt, int nodeoffset, const char *name,
 		prop->len = cpu_to_fdt32(newlen);
 		memcpy(prop->data + oldlen, val, len);
 	} else {
-		err = fdt_add_property_(fdt, nodeoffset, name, len, &prop);
+		err = fdt_add_property_(fdt, nodeoffset, name, strlen(name),
+					len, &prop);
 		if (err)
 			return err;
 		memcpy(prop->data, val, len);
@@ -334,7 +332,7 @@ int fdt_delprop(void *fdt, int nodeoffset, const char *name)
 	struct fdt_property *prop;
 	int len, proplen;
 
-	FDT_RW_CHECK_HEADER(fdt);
+	FDT_RW_PROBE(fdt);
 
 	prop = fdt_get_property_w(fdt, nodeoffset, name, &len);
 	if (!prop)
@@ -354,7 +352,7 @@ int fdt_add_subnode_namelen(void *fdt, int parentoffset,
 	uint32_t tag;
 	fdt32_t *endtag;
 
-	FDT_RW_CHECK_HEADER(fdt);
+	FDT_RW_PROBE(fdt);
 
 	offset = fdt_subnode_offset_namelen(fdt, parentoffset, name, namelen);
 	if (offset >= 0)
@@ -363,7 +361,10 @@ int fdt_add_subnode_namelen(void *fdt, int parentoffset,
 		return offset;
 
 	/* Try to place the new node after the parent's properties */
-	fdt_next_tag(fdt, parentoffset, &nextoffset); /* skip the BEGIN_NODE */
+	tag = fdt_next_tag(fdt, parentoffset, &nextoffset);
+	/* the fdt_subnode_offset_namelen() should ensure this never hits */
+	if (!can_assume(LIBFDT_FLAWLESS) && (tag != FDT_BEGIN_NODE))
+		return -FDT_ERR_INTERNAL;
 	do {
 		offset = nextoffset;
 		tag = fdt_next_tag(fdt, offset, &nextoffset);
@@ -394,7 +395,7 @@ int fdt_del_node(void *fdt, int nodeoffset)
 {
 	int endoffset;
 
-	FDT_RW_CHECK_HEADER(fdt);
+	FDT_RW_PROBE(fdt);
 
 	endoffset = fdt_node_end_offset_(fdt, nodeoffset);
 	if (endoffset < 0)
@@ -405,7 +406,9 @@ int fdt_del_node(void *fdt, int nodeoffset)
 }
 
 static void fdt_packblocks_(const char *old, char *new,
-			    int mem_rsv_size, int struct_size)
+			    int mem_rsv_size,
+			    int struct_size,
+			    int strings_size)
 {
 	int mem_rsv_off, struct_off, strings_off;
 
@@ -420,8 +423,7 @@ static void fdt_packblocks_(const char *old, char *new,
 	fdt_set_off_dt_struct(new, struct_off);
 	fdt_set_size_dt_struct(new, struct_size);
 
-	memmove(new + strings_off, old + fdt_off_dt_strings(old),
-		fdt_size_dt_strings(old));
+	memmove(new + strings_off, old + fdt_off_dt_strings(old), strings_size);
 	fdt_set_off_dt_strings(new, strings_off);
 	fdt_set_size_dt_strings(new, fdt_size_dt_strings(old));
 }
@@ -435,22 +437,25 @@ int fdt_open_into(const void *fdt, void *buf, int bufsize)
 	const char *fdtend = fdtstart + fdt_totalsize(fdt);
 	char *tmp;
 
-	FDT_CHECK_HEADER(fdt);
+	FDT_RO_PROBE(fdt);
 
 	mem_rsv_size = (fdt_num_mem_rsv(fdt)+1)
 		* sizeof(struct fdt_reserve_entry);
 
-	if (fdt_version(fdt) >= 17) {
+	if (can_assume(LATEST) || fdt_version(fdt) >= 17) {
 		struct_size = fdt_size_dt_struct(fdt);
-	} else {
+	} else if (fdt_version(fdt) == 16) {
 		struct_size = 0;
 		while (fdt_next_tag(fdt, struct_size, &struct_size) != FDT_END)
 			;
 		if (struct_size < 0)
 			return struct_size;
+	} else {
+		return -FDT_ERR_BADVERSION;
 	}
 
-	if (!fdt_blocks_misordered_(fdt, mem_rsv_size, struct_size)) {
+	if (can_assume(LIBFDT_ORDER) ||
+	    !fdt_blocks_misordered_(fdt, mem_rsv_size, struct_size)) {
 		/* no further work necessary */
 		err = fdt_move(fdt, buf, bufsize);
 		if (err)
@@ -478,7 +483,8 @@ int fdt_open_into(const void *fdt, void *buf, int bufsize)
 			return -FDT_ERR_NOSPACE;
 	}
 
-	fdt_packblocks_(fdt, tmp, mem_rsv_size, struct_size);
+	fdt_packblocks_(fdt, tmp, mem_rsv_size, struct_size,
+			fdt_size_dt_strings(fdt));
 	memmove(buf, tmp, newsize);
 
 	fdt_set_magic(buf, FDT_MAGIC);
@@ -494,11 +500,12 @@ int fdt_pack(void *fdt)
 {
 	int mem_rsv_size;
 
-	FDT_RW_CHECK_HEADER(fdt);
+	FDT_RW_PROBE(fdt);
 
 	mem_rsv_size = (fdt_num_mem_rsv(fdt)+1)
 		* sizeof(struct fdt_reserve_entry);
-	fdt_packblocks_(fdt, fdt, mem_rsv_size, fdt_size_dt_struct(fdt));
+	fdt_packblocks_(fdt, fdt, mem_rsv_size, fdt_size_dt_struct(fdt),
+			fdt_size_dt_strings(fdt));
 	fdt_set_totalsize(fdt, fdt_data_size_(fdt));
 
 	return 0;

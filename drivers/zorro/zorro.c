@@ -18,6 +18,7 @@
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/slab.h>
+#include <linux/string_choices.h>
 
 #include <asm/byteorder.h>
 #include <asm/setup.h>
@@ -41,7 +42,7 @@ struct zorro_dev *zorro_autocon;
 
 struct zorro_bus {
 	struct device dev;
-	struct zorro_dev devices[0];
+	struct zorro_dev devices[];
 };
 
 
@@ -101,6 +102,7 @@ static void __init mark_region(unsigned long start, unsigned long end,
 	end = end > Z2RAM_END ? Z2RAM_SIZE : end-Z2RAM_START;
 	while (start < end) {
 		u32 chunk = start>>Z2RAM_CHUNKSHIFT;
+
 		if (flag)
 			set_bit(chunk, zorro_unused_z2ram);
 		else
@@ -116,15 +118,12 @@ static struct resource __init *zorro_find_parent_resource(
 	int i;
 
 	for (i = 0; i < bridge->num_resources; i++) {
-		struct resource *r = &bridge->resource[i];
-		if (zorro_resource_start(z) >= r->start &&
-		    zorro_resource_end(z) <= r->end)
-			return r;
+		if (resource_contains(&bridge->resource[i], &z->resource))
+			return &bridge->resource[i];
 	}
+
 	return &iomem_resource;
 }
-
-
 
 static int __init amiga_zorro_probe(struct platform_device *pdev)
 {
@@ -136,9 +135,7 @@ static int __init amiga_zorro_probe(struct platform_device *pdev)
 	int error;
 
 	/* Initialize the Zorro bus */
-	bus = kzalloc(sizeof(*bus) +
-		      zorro_num_autocon * sizeof(bus->devices[0]),
-		      GFP_KERNEL);
+	bus = kzalloc_flex(*bus, devices, zorro_num_autocon);
 	if (!bus)
 		return -ENOMEM;
 
@@ -155,7 +152,7 @@ static int __init amiga_zorro_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, bus);
 
 	pr_info("Zorro: Probing AutoConfig expansion devices: %u device%s\n",
-		 zorro_num_autocon, zorro_num_autocon == 1 ? "" : "s");
+		 zorro_num_autocon, str_plural(zorro_num_autocon));
 
 	/* First identify all devices ... */
 	for (i = 0; i < zorro_num_autocon; i++) {
@@ -168,18 +165,17 @@ static int __init amiga_zorro_probe(struct platform_device *pdev)
 		if (z->id == ZORRO_PROD_GVP_EPC_BASE) {
 			/* GVP quirk */
 			unsigned long magic = zi->boardaddr + 0x8000;
+
 			z->id |= *(u16 *)ZTWO_VADDR(magic) & GVP_PRODMASK;
 		}
 		z->slotaddr = zi->slotaddr;
 		z->slotsize = zi->slotsize;
 		sprintf(z->name, "Zorro device %08x", z->id);
 		zorro_name_device(z);
-		z->resource.start = zi->boardaddr;
-		z->resource.end = zi->boardaddr + zi->boardsize - 1;
-		z->resource.name = z->name;
+		z->resource = DEFINE_RES_MEM_NAMED(zi->boardaddr, zi->boardsize, z->name);
 		r = zorro_find_parent_resource(pdev, z);
 		error = request_resource(r, &z->resource);
-		if (error)
+		if (error && !(z->rom.er_Type & ERTF_MEMLIST))
 			dev_err(&bus->dev,
 				"Address space collision on device %s %pR\n",
 				z->name, &z->resource);

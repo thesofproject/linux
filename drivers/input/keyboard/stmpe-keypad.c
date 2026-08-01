@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) ST-Ericsson SA 2010
  *
- * License Terms: GNU General Public License, version 2
  * Author: Rabin Vincent <rabin.vincent@stericsson.com> for ST-Ericsson
  */
 
@@ -9,6 +9,7 @@
 #include <linux/slab.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/input/matrix_keypad.h>
 #include <linux/mfd/stmpe.h>
@@ -403,18 +404,15 @@ static int stmpe_keypad_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int stmpe_keypad_remove(struct platform_device *pdev)
+static void stmpe_keypad_remove(struct platform_device *pdev)
 {
 	struct stmpe_keypad *keypad = platform_get_drvdata(pdev);
 
 	stmpe_disable(keypad->stmpe, STMPE_BLOCK_KEYPAD);
-
-	return 0;
 }
 
 static struct platform_driver stmpe_keypad_driver = {
 	.driver.name	= "stmpe-keypad",
-	.driver.owner	= THIS_MODULE,
 	.probe		= stmpe_keypad_probe,
 	.remove		= stmpe_keypad_remove,
 };

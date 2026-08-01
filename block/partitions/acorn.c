@@ -1,11 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- *  linux/fs/partitions/acorn.c
- *
  *  Copyright (c) 1996-2000 Russell King.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  *  Scan ADFS partitions on hard disk drives.  Unfortunately, there
  *  isn't a standard for partitioning drives on Acorn machines, so
@@ -14,9 +9,9 @@
  */
 #include <linux/buffer_head.h>
 #include <linux/adfs_fs.h>
+#include <linux/minmax.h>
 
 #include "check.h"
-#include "acorn.h"
 
 /*
  * Partition types. (Oh for reusability)
@@ -46,9 +41,7 @@ adfs_partition(struct parsed_partitions *state, char *name, char *data,
 		   (le32_to_cpu(dr->disc_size) >> 9);
 
 	if (name) {
-		strlcat(state->pp_buf, " [", PAGE_SIZE);
-		strlcat(state->pp_buf, name, PAGE_SIZE);
-		strlcat(state->pp_buf, "]", PAGE_SIZE);
+		seq_buf_printf(&state->pp_buf, " [%s]", name);
 	}
 	put_partition(state, slot, first_sector, nr_sects);
 	return dr;
@@ -84,14 +77,14 @@ static int riscix_partition(struct parsed_partitions *state,
 	if (!rr)
 		return -1;
 
-	strlcat(state->pp_buf, " [RISCiX]", PAGE_SIZE);
+	seq_buf_puts(&state->pp_buf, " [RISCiX]");
 
 
 	if (rr->magic == RISCIX_MAGIC) {
-		unsigned long size = nr_sects > 2 ? 2 : nr_sects;
+		unsigned long size = min(nr_sects, 2);
 		int part;
 
-		strlcat(state->pp_buf, " <", PAGE_SIZE);
+		seq_buf_puts(&state->pp_buf, " <");
 
 		put_partition(state, slot++, first_sect, size);
 		for (part = 0; part < 8; part++) {
@@ -100,13 +93,11 @@ static int riscix_partition(struct parsed_partitions *state,
 				put_partition(state, slot++,
 					le32_to_cpu(rr->part[part].start),
 					le32_to_cpu(rr->part[part].length));
-				strlcat(state->pp_buf, "(", PAGE_SIZE);
-				strlcat(state->pp_buf, rr->part[part].name, PAGE_SIZE);
-				strlcat(state->pp_buf, ")", PAGE_SIZE);
+				seq_buf_printf(&state->pp_buf, "(%s)", rr->part[part].name);
 			}
 		}
 
-		strlcat(state->pp_buf, " >\n", PAGE_SIZE);
+		seq_buf_puts(&state->pp_buf, " >\n");
 	} else {
 		put_partition(state, slot++, first_sect, nr_sects);
 	}
@@ -134,9 +125,9 @@ static int linux_partition(struct parsed_partitions *state,
 {
 	Sector sect;
 	struct linux_part *linuxp;
-	unsigned long size = nr_sects > 2 ? 2 : nr_sects;
+	unsigned long size = min(nr_sects, 2);
 
-	strlcat(state->pp_buf, " [Linux]", PAGE_SIZE);
+	seq_buf_puts(&state->pp_buf, " [Linux]");
 
 	put_partition(state, slot++, first_sect, size);
 
@@ -144,7 +135,7 @@ static int linux_partition(struct parsed_partitions *state,
 	if (!linuxp)
 		return -1;
 
-	strlcat(state->pp_buf, " <", PAGE_SIZE);
+	seq_buf_puts(&state->pp_buf, " <");
 	while (linuxp->magic == cpu_to_le32(LINUX_NATIVE_MAGIC) ||
 	       linuxp->magic == cpu_to_le32(LINUX_SWAP_MAGIC)) {
 		if (slot == state->limit)
@@ -154,7 +145,7 @@ static int linux_partition(struct parsed_partitions *state,
 				 le32_to_cpu(linuxp->nr_sects));
 		linuxp ++;
 	}
-	strlcat(state->pp_buf, " >", PAGE_SIZE);
+	seq_buf_puts(&state->pp_buf, " >");
 
 	put_dev_sector(sect);
 	return slot;
@@ -281,25 +272,25 @@ int adfspart_check_ADFS(struct parsed_partitions *state)
 	/*
 	 * Work out start of non-adfs partition.
 	 */
-	nr_sects = (state->bdev->bd_inode->i_size >> 9) - start_sect;
+	nr_sects = get_capacity(state->disk) - start_sect;
 
 	if (start_sect) {
 		switch (id) {
 #ifdef CONFIG_ACORN_PARTITION_RISCIX
 		case PARTITION_RISCIX_SCSI:
 		case PARTITION_RISCIX_MFM:
-			slot = riscix_partition(state, start_sect, slot,
+			riscix_partition(state, start_sect, slot,
 						nr_sects);
 			break;
 #endif
 
 		case PARTITION_LINUX:
-			slot = linux_partition(state, start_sect, slot,
+			linux_partition(state, start_sect, slot,
 					       nr_sects);
 			break;
 		}
 	}
-	strlcat(state->pp_buf, "\n", PAGE_SIZE);
+	seq_buf_puts(&state->pp_buf, "\n");
 	return 1;
 }
 #endif
@@ -372,7 +363,7 @@ int adfspart_check_ICS(struct parsed_partitions *state)
 		return 0;
 	}
 
-	strlcat(state->pp_buf, " [ICS]", PAGE_SIZE);
+	seq_buf_puts(&state->pp_buf, " [ICS]");
 
 	for (slot = 1, p = (const struct ics_part *)data; p->size; p++) {
 		u32 start = le32_to_cpu(p->start);
@@ -406,7 +397,7 @@ int adfspart_check_ICS(struct parsed_partitions *state)
 	}
 
 	put_dev_sector(sect);
-	strlcat(state->pp_buf, "\n", PAGE_SIZE);
+	seq_buf_puts(&state->pp_buf, "\n");
 	return 1;
 }
 #endif
@@ -466,7 +457,7 @@ int adfspart_check_POWERTEC(struct parsed_partitions *state)
 		return 0;
 	}
 
-	strlcat(state->pp_buf, " [POWERTEC]", PAGE_SIZE);
+	seq_buf_puts(&state->pp_buf, " [POWERTEC]");
 
 	for (i = 0, p = (const struct ptec_part *)data; i < 12; i++, p++) {
 		u32 start = le32_to_cpu(p->start);
@@ -477,7 +468,7 @@ int adfspart_check_POWERTEC(struct parsed_partitions *state)
 	}
 
 	put_dev_sector(sect);
-	strlcat(state->pp_buf, "\n", PAGE_SIZE);
+	seq_buf_puts(&state->pp_buf, "\n");
 	return 1;
 }
 #endif
@@ -546,9 +537,9 @@ int adfspart_check_EESOX(struct parsed_partitions *state)
 	if (i != 0) {
 		sector_t size;
 
-		size = get_capacity(state->bdev->bd_disk);
+		size = get_capacity(state->disk);
 		put_partition(state, slot++, start, size - start);
-		strlcat(state->pp_buf, "\n", PAGE_SIZE);
+		seq_buf_puts(&state->pp_buf, "\n");
 	}
 
 	return i ? 1 : 0;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-// Copyright (c) 2017-2018 Hisilicon Limited.
+// Copyright (c) 2017-2018 HiSilicon Limited.
 // Copyright (c) 2017-2018 Linaro Limited.
 
 #include <linux/bitops.h>
@@ -11,10 +11,9 @@
 #include <linux/iopoll.h>
 #include <linux/mailbox_controller.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
-
-#include "mailbox.h"
 
 #define MBOX_CHAN_MAX			32
 
@@ -38,19 +37,19 @@
 #define MBOX_AUTOMATIC_ACK		1
 
 #define MBOX_STATE_IDLE			BIT(4)
+#define MBOX_STATE_READY		BIT(5)
 #define MBOX_STATE_ACK			BIT(7)
 
 #define MBOX_MSG_LEN			8
 
 /**
- * Hi3660 mailbox channel information
+ * struct hi3660_chan_info - Hi3660 mailbox channel information
+ * @dst_irq:	Interrupt vector for remote processor
+ * @ack_irq:	Interrupt vector for local processor
  *
  * A channel can be used for TX or RX, it can trigger remote
  * processor interrupt to notify remote processor and can receive
- * interrupt if has incoming message.
- *
- * @dst_irq:	Interrupt vector for remote processor
- * @ack_irq:	Interrupt vector for local processor
+ * interrupt if it has an incoming message.
  */
 struct hi3660_chan_info {
 	unsigned int dst_irq;
@@ -58,16 +57,15 @@ struct hi3660_chan_info {
 };
 
 /**
- * Hi3660 mailbox controller data
- *
- * Mailbox controller includes 32 channels and can allocate
- * channel for message transferring.
- *
+ * struct hi3660_mbox - Hi3660 mailbox controller data
  * @dev:	Device to which it is attached
  * @base:	Base address of the register mapping region
  * @chan:	Representation of channels in mailbox controller
  * @mchan:	Representation of channel info
  * @controller:	Representation of a communication channel controller
+ *
+ * Mailbox controller includes 32 channels and can allocate
+ * channel for message transferring.
  */
 struct hi3660_mbox {
 	struct device *dev;
@@ -91,8 +89,8 @@ static int hi3660_mbox_check_state(struct mbox_chan *chan)
 	unsigned long val;
 	unsigned int ret;
 
-	/* Mailbox is idle so directly bail out */
-	if (readl(base + MBOX_MODE_REG) & MBOX_STATE_IDLE)
+	/* Mailbox is ready to use */
+	if (readl(base + MBOX_MODE_REG) & MBOX_STATE_READY)
 		return 0;
 
 	/* Wait for acknowledge from remote */
@@ -103,9 +101,9 @@ static int hi3660_mbox_check_state(struct mbox_chan *chan)
 		return ret;
 	}
 
-	/* Ensure channel is released */
-	writel(0xffffffff, base + MBOX_IMASK_REG);
-	writel(BIT(mchan->ack_irq), base + MBOX_SRC_REG);
+	/* clear ack state, mailbox will get back to ready state */
+	writel(BIT(mchan->ack_irq), base + MBOX_ICLR_REG);
+
 	return 0;
 }
 
@@ -160,10 +158,6 @@ static int hi3660_mbox_startup(struct mbox_chan *chan)
 {
 	int ret;
 
-	ret = hi3660_mbox_check_state(chan);
-	if (ret)
-		return ret;
-
 	ret = hi3660_mbox_unlock(chan);
 	if (ret)
 		return ret;
@@ -183,10 +177,11 @@ static int hi3660_mbox_send_data(struct mbox_chan *chan, void *msg)
 	void __iomem *base = MBOX_BASE(mbox, ch);
 	u32 *buf = msg;
 	unsigned int i;
+	int ret;
 
-	/* Ensure channel is released */
-	writel_relaxed(0xffffffff, base + MBOX_IMASK_REG);
-	writel_relaxed(BIT(mchan->ack_irq), base + MBOX_SRC_REG);
+	ret = hi3660_mbox_check_state(chan);
+	if (ret)
+		return ret;
 
 	/* Clear mask for destination interrupt */
 	writel_relaxed(~BIT(mchan->dst_irq), base + MBOX_IMASK_REG);
@@ -206,7 +201,7 @@ static int hi3660_mbox_send_data(struct mbox_chan *chan, void *msg)
 	return 0;
 }
 
-static struct mbox_chan_ops hi3660_mbox_ops = {
+static const struct mbox_chan_ops hi3660_mbox_ops = {
 	.startup	= hi3660_mbox_startup,
 	.send_data	= hi3660_mbox_send_data,
 };
@@ -242,7 +237,6 @@ static int hi3660_mbox_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct hi3660_mbox *mbox;
 	struct mbox_chan *chan;
-	struct resource *res;
 	unsigned long ch;
 	int err;
 
@@ -250,8 +244,7 @@ static int hi3660_mbox_probe(struct platform_device *pdev)
 	if (!mbox)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	mbox->base = devm_ioremap_resource(dev, res);
+	mbox->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(mbox->base))
 		return PTR_ERR(mbox->base);
 
@@ -267,7 +260,7 @@ static int hi3660_mbox_probe(struct platform_device *pdev)
 	for (ch = 0; ch < MBOX_CHAN_MAX; ch++)
 		chan[ch].con_priv = (void *)ch;
 
-	err = mbox_controller_register(&mbox->controller);
+	err = devm_mbox_controller_register(dev, &mbox->controller);
 	if (err) {
 		dev_err(dev, "Failed to register mailbox %d\n", err);
 		return err;
@@ -278,17 +271,8 @@ static int hi3660_mbox_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int hi3660_mbox_remove(struct platform_device *pdev)
-{
-	struct hi3660_mbox *mbox = platform_get_drvdata(pdev);
-
-	mbox_controller_unregister(&mbox->controller);
-	return 0;
-}
-
 static struct platform_driver hi3660_mbox_driver = {
 	.probe  = hi3660_mbox_probe,
-	.remove = hi3660_mbox_remove,
 	.driver = {
 		.name = "hi3660-mbox",
 		.of_match_table = hi3660_mbox_of_match,

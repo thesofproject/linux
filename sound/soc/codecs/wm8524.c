@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * wm8524.c  --  WM8524 ALSA SoC Audio driver
  *
@@ -5,10 +6,6 @@
  * Copyright 2017 NXP
  *
  * Based on WM8523 ALSA SoC Audio driver written by Mark Brown
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -17,14 +14,13 @@
 #include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/gpio/consumer.h>
-#include <linux/of_device.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/initval.h>
 
-#define WM8524_NUM_RATES 7
+#define WM8524_NUM_RATES 12
 
 /* codec private data */
 struct wm8524_priv {
@@ -49,7 +45,7 @@ static const struct snd_soc_dapm_route wm8524_dapm_routes[] = {
 static const struct {
 	int value;
 	int ratio;
-} lrclk_ratios[WM8524_NUM_RATES] = {
+} lrclk_ratios[] = {
 	{ 1, 128 },
 	{ 2, 192 },
 	{ 3, 256 },
@@ -66,17 +62,12 @@ static int wm8524_startup(struct snd_pcm_substream *substream,
 	struct wm8524_priv *wm8524 = snd_soc_component_get_drvdata(component);
 
 	/* The set of sample rates that can be supported depends on the
-	 * MCLK supplied to the CODEC - enforce this.
+	 * MCLK supplied to the CODEC.
 	 */
-	if (!wm8524->sysclk) {
-		dev_err(component->dev,
-			"No MCLK configured, call set_sysclk() on init\n");
-		return -EINVAL;
-	}
-
-	snd_pcm_hw_constraint_list(substream->runtime, 0,
-				   SNDRV_PCM_HW_PARAM_RATE,
-				   &wm8524->rate_constraint);
+	if (wm8524->sysclk)
+		snd_pcm_hw_constraint_list(substream->runtime, 0,
+					   SNDRV_PCM_HW_PARAM_RATE,
+					   &wm8524->rate_constraint);
 
 	gpiod_set_value_cansleep(wm8524->mute, 1);
 
@@ -100,9 +91,11 @@ static int wm8524_set_dai_sysclk(struct snd_soc_dai *codec_dai,
 	unsigned int val;
 	int i, j = 0;
 
-	wm8524->sysclk = freq;
-
 	wm8524->rate_constraint.count = 0;
+	wm8524->sysclk = freq;
+	if (!wm8524->sysclk)
+		return 0;
+
 	for (i = 0; i < ARRAY_SIZE(lrclk_ratios); i++) {
 		val = freq / lrclk_ratios[i].ratio;
 		/* Check that it's a standard rate since core can't
@@ -111,9 +104,13 @@ static int wm8524_set_dai_sysclk(struct snd_soc_dai *codec_dai,
 		 */
 		switch (val) {
 		case 8000:
+		case 11025:
+		case 16000:
+		case 22050:
 		case 32000:
 		case 44100:
 		case 48000:
+		case 64000:
 		case 88200:
 		case 96000:
 		case 176400:
@@ -142,7 +139,7 @@ static int wm8524_set_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 		SND_SOC_DAIFMT_MASTER_MASK);
 
 	if (fmt != (SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-		    SND_SOC_DAIFMT_CBS_CFS)) {
+		    SND_SOC_DAIFMT_CBC_CFC)) {
 		dev_err(codec_dai->dev, "Invalid DAI format\n");
 		return -EINVAL;
 	}
@@ -160,9 +157,38 @@ static int wm8524_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
 	return 0;
 }
 
+static int wm8524_hw_params(struct snd_pcm_substream *substream,
+			    struct snd_pcm_hw_params *params,
+			    struct snd_soc_dai *dai)
+{
+	struct snd_soc_component *component = dai->component;
+	struct wm8524_priv *wm8524 = snd_soc_component_get_drvdata(component);
+	int i;
+
+	/* If sysclk is not configured, no need to check the rate */
+	if (!wm8524->sysclk)
+		return 0;
+
+	/* Find a supported LRCLK rate */
+	for (i = 0; i < wm8524->rate_constraint.count; i++) {
+		if (wm8524->rate_constraint.list[i] == params_rate(params))
+			break;
+	}
+
+	if (i == wm8524->rate_constraint.count) {
+		dev_err(component->dev, "LRCLK %d unsupported with MCLK %d\n",
+			params_rate(params), wm8524->sysclk);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 #define WM8524_RATES SNDRV_PCM_RATE_8000_192000
 
-#define WM8524_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE)
+#define WM8524_FORMATS (SNDRV_PCM_FMTBIT_S16_LE |\
+			SNDRV_PCM_FMTBIT_S24_LE |\
+			SNDRV_PCM_FMTBIT_S32_LE)
 
 static const struct snd_soc_dai_ops wm8524_dai_ops = {
 	.startup	= wm8524_startup,
@@ -170,6 +196,7 @@ static const struct snd_soc_dai_ops wm8524_dai_ops = {
 	.set_sysclk	= wm8524_set_dai_sysclk,
 	.set_fmt	= wm8524_set_fmt,
 	.mute_stream	= wm8524_mute_stream,
+	.hw_params	= wm8524_hw_params,
 };
 
 static struct snd_soc_dai_driver wm8524_dai = {
@@ -204,7 +231,6 @@ static const struct snd_soc_component_driver soc_component_dev_wm8524 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct of_device_id wm8524_of_match[] = {
@@ -228,7 +254,7 @@ static int wm8524_codec_probe(struct platform_device *pdev)
 	wm8524->mute = devm_gpiod_get(&pdev->dev, "wlf,mute", GPIOD_OUT_LOW);
 	if (IS_ERR(wm8524->mute)) {
 		ret = PTR_ERR(wm8524->mute);
-		dev_err(&pdev->dev, "Failed to get mute line: %d\n", ret);
+		dev_err_probe(&pdev->dev, ret, "Failed to get mute line\n");
 		return ret;
 	}
 

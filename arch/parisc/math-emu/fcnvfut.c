@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Linux/PA-RISC Project (http://www.parisc-linux.org/)
  *
  * Floating-point emulation code
  *  Copyright (C) 2001 Hewlett-Packard (Paul Bame) <bame@debian.org>
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2, or (at your option)
- *    any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
- *
- *    You should have received a copy of the GNU General Public License
- *    along with this program; if not, write to the Free Software
- *    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 /*
  * BEGIN_DESC
@@ -28,10 +15,10 @@
  *	Floating-point to Unsigned Fixed-point Converts with Truncation
  *
  *  External Interfaces:
- *	dbl_to_dbl_fcnvfut(srcptr,nullptr,dstptr,status)
- *	dbl_to_sgl_fcnvfut(srcptr,nullptr,dstptr,status)
- *	sgl_to_dbl_fcnvfut(srcptr,nullptr,dstptr,status)
- *	sgl_to_sgl_fcnvfut(srcptr,nullptr,dstptr,status)
+ *	dbl_to_dbl_fcnvfut(srcptr,_nullptr,dstptr,status)
+ *	dbl_to_sgl_fcnvfut(srcptr,_nullptr,dstptr,status)
+ *	sgl_to_dbl_fcnvfut(srcptr,_nullptr,dstptr,status)
+ *	sgl_to_sgl_fcnvfut(srcptr,_nullptr,dstptr,status)
  *
  *  Internal Interfaces:
  *
@@ -57,7 +44,7 @@
  */
 /*ARGSUSED*/
 int
-sgl_to_sgl_fcnvfut (sgl_floating_point * srcptr, unsigned int *nullptr,
+sgl_to_sgl_fcnvfut (sgl_floating_point * srcptr, unsigned int *_nullptr,
 		    unsigned int *dstptr, unsigned int *status)
 {
 	register unsigned int src, result;
@@ -126,7 +113,7 @@ sgl_to_sgl_fcnvfut (sgl_floating_point * srcptr, unsigned int *nullptr,
  */
 /*ARGSUSED*/
 int
-sgl_to_dbl_fcnvfut (sgl_floating_point * srcptr, unsigned int *nullptr,
+sgl_to_dbl_fcnvfut (sgl_floating_point * srcptr, unsigned int *_nullptr,
 		    dbl_unsigned * dstptr, unsigned int *status)
 {
 	register int src_exponent;
@@ -196,7 +183,7 @@ sgl_to_dbl_fcnvfut (sgl_floating_point * srcptr, unsigned int *nullptr,
  */
 /*ARGSUSED*/
 int
-dbl_to_sgl_fcnvfut (dbl_floating_point * srcptr, unsigned int *nullptr,
+dbl_to_sgl_fcnvfut (dbl_floating_point * srcptr, unsigned int *_nullptr,
 		    unsigned int *dstptr, unsigned int *status)
 {
 	register unsigned int srcp1, srcp2, result;
@@ -265,7 +252,7 @@ dbl_to_sgl_fcnvfut (dbl_floating_point * srcptr, unsigned int *nullptr,
  */
 /*ARGSUSED*/
 int
-dbl_to_dbl_fcnvfut (dbl_floating_point * srcptr, unsigned int *nullptr,
+dbl_to_dbl_fcnvfut (dbl_floating_point * srcptr, unsigned int *_nullptr,
 		    dbl_unsigned * dstptr, unsigned int *status)
 {
 	register int src_exponent;

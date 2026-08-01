@@ -15,14 +15,15 @@
 #include <linux/user.h>
 #include <linux/security.h>
 #include <linux/signal.h>
-#include <linux/tracehook.h>
 #include <linux/audit.h>
+#include <linux/seccomp.h>
+#include <asm/syscall.h>
 
 #include <linux/uaccess.h>
-#include <asm/pgtable.h>
 #include <asm/fpu.h>
 
 #include "proto.h"
+#include <linux/uio.h>
 
 #define DEBUG	DBG_MEM
 #undef DEBUG
@@ -80,6 +81,8 @@ enum {
  (PAGE_SIZE*2 - sizeof(struct pt_regs) - sizeof(struct switch_stack) \
   + offsetof(struct switch_stack, reg))
 
+#define FP_REG(reg) (offsetof(struct thread_info, reg))
+
 static int regoff[] = {
 	PT_REG(	   r0), PT_REG(	   r1), PT_REG(	   r2), PT_REG(	  r3),
 	PT_REG(	   r4), PT_REG(	   r5), PT_REG(	   r6), PT_REG(	  r7),
@@ -89,14 +92,14 @@ static int regoff[] = {
 	PT_REG(	  r20), PT_REG(	  r21), PT_REG(	  r22), PT_REG(	 r23),
 	PT_REG(	  r24), PT_REG(	  r25), PT_REG(	  r26), PT_REG(	 r27),
 	PT_REG(	  r28), PT_REG(	   gp),		   -1,		   -1,
-	SW_REG(fp[ 0]), SW_REG(fp[ 1]), SW_REG(fp[ 2]), SW_REG(fp[ 3]),
-	SW_REG(fp[ 4]), SW_REG(fp[ 5]), SW_REG(fp[ 6]), SW_REG(fp[ 7]),
-	SW_REG(fp[ 8]), SW_REG(fp[ 9]), SW_REG(fp[10]), SW_REG(fp[11]),
-	SW_REG(fp[12]), SW_REG(fp[13]), SW_REG(fp[14]), SW_REG(fp[15]),
-	SW_REG(fp[16]), SW_REG(fp[17]), SW_REG(fp[18]), SW_REG(fp[19]),
-	SW_REG(fp[20]), SW_REG(fp[21]), SW_REG(fp[22]), SW_REG(fp[23]),
-	SW_REG(fp[24]), SW_REG(fp[25]), SW_REG(fp[26]), SW_REG(fp[27]),
-	SW_REG(fp[28]), SW_REG(fp[29]), SW_REG(fp[30]), SW_REG(fp[31]),
+	FP_REG(fp[ 0]), FP_REG(fp[ 1]), FP_REG(fp[ 2]), FP_REG(fp[ 3]),
+	FP_REG(fp[ 4]), FP_REG(fp[ 5]), FP_REG(fp[ 6]), FP_REG(fp[ 7]),
+	FP_REG(fp[ 8]), FP_REG(fp[ 9]), FP_REG(fp[10]), FP_REG(fp[11]),
+	FP_REG(fp[12]), FP_REG(fp[13]), FP_REG(fp[14]), FP_REG(fp[15]),
+	FP_REG(fp[16]), FP_REG(fp[17]), FP_REG(fp[18]), FP_REG(fp[19]),
+	FP_REG(fp[20]), FP_REG(fp[21]), FP_REG(fp[22]), FP_REG(fp[23]),
+	FP_REG(fp[24]), FP_REG(fp[25]), FP_REG(fp[26]), FP_REG(fp[27]),
+	FP_REG(fp[28]), FP_REG(fp[29]), FP_REG(fp[30]), FP_REG(fp[31]),
 	PT_REG(	   pc)
 };
 
@@ -312,6 +315,54 @@ long arch_ptrace(struct task_struct *child, long request,
 		DBG(DBG_MEM, ("poke $%lu<-%#lx\n", addr, data));
 		ret = put_reg(child, addr, data);
 		break;
+	case PTRACE_GETREGSET:
+	case PTRACE_SETREGSET: {
+		struct iovec __user *uiov = (struct iovec __user *)data;
+		struct iovec iov;
+		struct pt_regs *regs;
+		size_t len;
+
+		/* Only support NT_PRSTATUS (general registers) for now. */
+		if (addr != NT_PRSTATUS) {
+			ret = -EIO;
+			break;
+		}
+
+		if (copy_from_user(&iov, uiov, sizeof(iov))) {
+			ret = -EFAULT;
+			break;
+		}
+
+		regs = task_pt_regs(child);
+		len = min_t(size_t, iov.iov_len, sizeof(*regs));
+
+		if (request == PTRACE_GETREGSET) {
+			if (copy_to_user(iov.iov_base, regs, len)) {
+				ret = -EFAULT;
+				break;
+			}
+		} else {
+		/*
+		 * Allow writing back regs. This is needed by the TRACE_syscall
+		 * tests (they change PC/syscall nr/retval).
+		 */
+			if (copy_from_user(regs, iov.iov_base, len)) {
+				ret = -EFAULT;
+				break;
+			}
+		}
+
+		/* Per API, update iov_len with amount transferred. */
+		iov.iov_len = len;
+		if (copy_to_user(uiov, &iov, sizeof(iov))) {
+			ret = -EFAULT;
+			break;
+		}
+
+		ret = 0;
+		break;
+	}
+
 	default:
 		ret = ptrace_request(child, request, addr, data);
 		break;
@@ -321,19 +372,41 @@ long arch_ptrace(struct task_struct *child, long request,
 
 asmlinkage unsigned long syscall_trace_enter(void)
 {
-	unsigned long ret = 0;
 	struct pt_regs *regs = current_pt_regs();
+
 	if (test_thread_flag(TIF_SYSCALL_TRACE) &&
-	    tracehook_report_syscall_entry(current_pt_regs()))
-		ret = -1UL;
-	audit_syscall_entry(regs->r0, regs->r16, regs->r17, regs->r18, regs->r19);
-	return ret ?: current_pt_regs()->r0;
+		ptrace_report_syscall_entry(regs)) {
+		syscall_set_nr(current, regs, -1);
+		if (regs->r19 == 0 && regs->r0 == (unsigned long)-1)
+			syscall_set_return_value(current, regs, -ENOSYS, 0);
+		return -1UL;
+	}
+
+	/*
+	 * Do the secure computing after ptrace; failures should be fast.
+	 * If this fails, seccomp may already have set up the return value
+	 * (e.g. SECCOMP_RET_ERRNO / TRACE).
+	 */
+	if (secure_computing() == -1) {
+		if (regs->r19 == 0 && regs->r0 == (unsigned long)-1)
+			syscall_set_return_value(current, regs, -ENOSYS, 0);
+		syscall_set_nr(current, regs, -1);
+		return -1UL;
+	}
+
+#ifdef CONFIG_AUDITSYSCALL
+	audit_syscall_entry(syscall_get_nr(current, regs),
+		regs->r16, regs->r17, regs->r18, regs->r19);
+#endif
+	return syscall_get_nr(current, regs);
 }
+
+
 
 asmlinkage void
 syscall_trace_leave(void)
 {
 	audit_syscall_exit(current_pt_regs());
 	if (test_thread_flag(TIF_SYSCALL_TRACE))
-		tracehook_report_syscall_exit(current_pt_regs(), 0);
+		ptrace_report_syscall_exit(current_pt_regs(), 0);
 }

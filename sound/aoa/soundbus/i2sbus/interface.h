@@ -1,9 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * i2sbus driver -- interface register definitions
  *
  * Copyright 2006 Johannes Berg <johannes@sipsolutions.net>
- *
- * GPL v2, can be found in COPYING.
  */
 #ifndef __I2SBUS_INTERFACE_H
 #define __I2SBUS_INTERFACE_H
@@ -35,7 +34,7 @@ struct i2s_interface_regs {
 	__le32 peak_level_in1;	/* 0x90 */
 	PAD(12);
 	/* total size: 0x100 bytes */
-}  __attribute__((__packed__));
+} __packed;
 
 /* interrupt register is just a bitfield with
  * interrupt enable and pending bits */

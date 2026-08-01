@@ -1,20 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * atxp1.c - kernel module for setting CPU VID and general purpose
  *	     I/Os using the Attansic ATXP1 chip.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  * The ATXP1 can reside on I2C addresses 0x37 or 0x4e. The chip is
  * not auto-detected by the driver and must be instantiated explicitly.
- * See Documentation/i2c/instantiating-devices for more information.
+ * See Documentation/i2c/instantiating-devices.rst for more information.
  */
 
 #include <linux/kernel.h>
@@ -25,6 +16,7 @@
 #include <linux/hwmon.h>
 #include <linux/hwmon-vid.h>
 #include <linux/err.h>
+#include <linux/kstrtox.h>
 #include <linux/mutex.h>
 #include <linux/sysfs.h>
 #include <linux/slab.h>
@@ -46,7 +38,7 @@ struct atxp1_data {
 	struct i2c_client *client;
 	struct mutex update_lock;
 	unsigned long last_updated;
-	u8 valid;
+	bool valid;
 	struct {
 		u8 vid;		/* VID output register */
 		u8 cpu_vid; /* VID input from CPU */
@@ -72,7 +64,7 @@ static struct atxp1_data *atxp1_update_device(struct device *dev)
 		data->reg.gpio1 = i2c_smbus_read_byte_data(client, ATXP1_GPIO1);
 		data->reg.gpio2 = i2c_smbus_read_byte_data(client, ATXP1_GPIO2);
 
-		data->valid = 1;
+		data->valid = true;
 	}
 
 	mutex_unlock(&data->update_lock);
@@ -145,7 +137,7 @@ static ssize_t cpu0_vid_store(struct device *dev,
 						ATXP1_VID, cvid | ATXP1_VIDENA);
 	}
 
-	data->valid = 0;
+	data->valid = false;
 
 	return count;
 }
@@ -189,7 +181,7 @@ static ssize_t gpio1_store(struct device *dev, struct device_attribute *attr,
 
 		i2c_smbus_write_byte_data(client, ATXP1_GPIO1, value);
 
-		data->valid = 0;
+		data->valid = false;
 	}
 
 	return count;
@@ -233,7 +225,7 @@ static ssize_t gpio2_store(struct device *dev, struct device_attribute *attr,
 
 		i2c_smbus_write_byte_data(client, ATXP1_GPIO2, value);
 
-		data->valid = 0;
+		data->valid = false;
 	}
 
 	return count;
@@ -253,8 +245,7 @@ static struct attribute *atxp1_attrs[] = {
 };
 ATTRIBUTE_GROUPS(atxp1);
 
-static int atxp1_probe(struct i2c_client *client,
-		       const struct i2c_device_id *id)
+static int atxp1_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct atxp1_data *data;
@@ -287,7 +278,7 @@ static int atxp1_probe(struct i2c_client *client,
 };
 
 static const struct i2c_device_id atxp1_id[] = {
-	{ "atxp1", 0 },
+	{ .name = "atxp1" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, atxp1_id);

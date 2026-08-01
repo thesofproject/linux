@@ -19,14 +19,14 @@
 /**
  * struct ath_rx_stats - RX Statistics
  * @rx_pkts_all:  No. of total frames received, including ones that
-	may have had errors.
+ *	may have had errors.
  * @rx_bytes_all:  No. of total bytes received, including ones that
-	may have had errors.
+ *	may have had errors.
  * @crc_err: No. of frames with incorrect CRC value
  * @decrypt_crc_err: No. of frames whose CRC check failed after
-	decryption process completed
+ *	decryption process completed
  * @phy_err: No. of frames whose reception failed because the PHY
-	encountered an error
+ *	encountered an error
  * @mic_err: No. of frames with incorrect TKIP MIC verification failure
  * @pre_delim_crc_err: Pre-Frame delimiter CRC error detections
  * @post_delim_crc_err: Post-Frame delimiter CRC error detections
@@ -39,6 +39,8 @@
  * @rx_beacons:  No. of beacons received.
  * @rx_frags:  No. of rx-fragements received.
  * @rx_spectral: No of spectral packets received.
+ * @rx_spectral_sample_good: No. of good spectral samples
+ * @rx_spectral_sample_err: No. of good spectral samples
  */
 struct ath_rx_stats {
 	u32 rx_pkts_all;
@@ -58,6 +60,8 @@ struct ath_rx_stats {
 	u32 rx_beacons;
 	u32 rx_frags;
 	u32 rx_spectral;
+	u32 rx_spectral_sample_good;
+	u32 rx_spectral_sample_err;
 };
 
 #ifdef CONFIG_ATH9K_COMMON_DEBUG

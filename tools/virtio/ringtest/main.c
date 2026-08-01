@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2016 Red Hat, Inc.
  * Author: Michael S. Tsirkin <mst@redhat.com>
- * This work is licensed under the terms of the GNU GPL, version 2.
  *
  * Command line processing and common functions for ring benchmarking.
  */
@@ -276,7 +276,7 @@ static void help(void)
 	fprintf(stderr, "Usage: <test> [--help]"
 		" [--host-affinity H]"
 		" [--guest-affinity G]"
-		" [--ring-size R (default: %d)]"
+		" [--ring-size R (default: %u)]"
 		" [--run-cycles C (default: %d)]"
 		" [--batch b]"
 		" [--outstanding o]"

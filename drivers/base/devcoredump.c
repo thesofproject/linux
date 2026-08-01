@@ -3,10 +3,6 @@
  * Copyright(c) 2014 Intel Mobile Communications GmbH
  * Copyright(c) 2015 Intel Deutschland GmbH
  *
- * Contact Information:
- *  Intel Linux Wireless <ilw@linux.intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
  * Author: Johannes Berg <johannes@sipsolutions.net>
  */
 #include <linux/module.h>
@@ -22,17 +18,51 @@ static struct class devcd_class;
 /* global disable flag, for security purposes */
 static bool devcd_disabled;
 
-/* if data isn't read by userspace after 5 minutes then delete it */
-#define DEVCD_TIMEOUT	(HZ * 60 * 5)
-
 struct devcd_entry {
 	struct device devcd_dev;
 	void *data;
 	size_t datalen;
+	/*
+	 * There are 2 races for which mutex is required.
+	 *
+	 * The first race is between device creation and userspace writing to
+	 * schedule immediately destruction.
+	 *
+	 * This race is handled by arming the timer before device creation, but
+	 * when device creation fails the timer still exists.
+	 *
+	 * To solve this, hold the mutex during device_add(), and set
+	 * init_completed on success before releasing the mutex.
+	 *
+	 * That way the timer will never fire until device_add() is called,
+	 * it will do nothing if init_completed is not set. The timer is also
+	 * cancelled in that case.
+	 *
+	 * The second race involves multiple parallel invocations of devcd_free(),
+	 * add a deleted flag so only 1 can call the destructor.
+	 */
+	struct mutex mutex;
+	bool init_completed, deleted;
 	struct module *owner;
 	ssize_t (*read)(char *buffer, loff_t offset, size_t count,
 			void *data, size_t datalen);
 	void (*free)(void *data);
+	/*
+	 * If nothing interferes and device_add() was returns success,
+	 * del_wk will destroy the device after the timer fires.
+	 *
+	 * Multiple userspace processes can interfere in the working of the timer:
+	 * - Writing to the coredump will reschedule the timer to run immediately,
+	 *   if still armed.
+	 *
+	 *   This is handled by using "if (cancel_delayed_work()) {
+	 *   schedule_delayed_work() }", to prevent re-arming after having
+	 *   been previously fired.
+	 * - Writing to /sys/class/devcoredump/disabled will destroy the
+	 *   coredump synchronously.
+	 *   This is handled by using disable_delayed_work_sync(), and then
+	 *   checking if deleted flag is set with &devcd->mutex held.
+	 */
 	struct delayed_work del_wk;
 	struct device *failing_dev;
 };
@@ -61,18 +91,31 @@ static void devcd_dev_release(struct device *dev)
 	kfree(devcd);
 }
 
-static void devcd_del(struct work_struct *wk)
+static void __devcd_del(struct devcd_entry *devcd)
 {
-	struct devcd_entry *devcd;
-
-	devcd = container_of(wk, struct devcd_entry, del_wk.work);
-
+	devcd->deleted = true;
 	device_del(&devcd->devcd_dev);
 	put_device(&devcd->devcd_dev);
 }
 
+static void devcd_del(struct work_struct *wk)
+{
+	struct devcd_entry *devcd;
+	bool init_completed;
+
+	devcd = container_of(wk, struct devcd_entry, del_wk.work);
+
+	/* devcd->mutex serializes against dev_coredumpm_timeout */
+	mutex_lock(&devcd->mutex);
+	init_completed = devcd->init_completed;
+	mutex_unlock(&devcd->mutex);
+
+	if (init_completed)
+		__devcd_del(devcd);
+}
+
 static ssize_t devcd_data_read(struct file *filp, struct kobject *kobj,
-			       struct bin_attribute *bin_attr,
+			       const struct bin_attribute *bin_attr,
 			       char *buffer, loff_t offset, size_t count)
 {
 	struct device *dev = kobj_to_dev(kobj);
@@ -82,25 +125,26 @@ static ssize_t devcd_data_read(struct file *filp, struct kobject *kobj,
 }
 
 static ssize_t devcd_data_write(struct file *filp, struct kobject *kobj,
-				struct bin_attribute *bin_attr,
+				const struct bin_attribute *bin_attr,
 				char *buffer, loff_t offset, size_t count)
 {
 	struct device *dev = kobj_to_dev(kobj);
 	struct devcd_entry *devcd = dev_to_devcd(dev);
 
-	mod_delayed_work(system_wq, &devcd->del_wk, 0);
+	/*
+	 * Although it's tempting to use mod_delayed work here,
+	 * that will cause a reschedule if the timer already fired.
+	 */
+	if (cancel_delayed_work(&devcd->del_wk))
+		schedule_delayed_work(&devcd->del_wk, 0);
 
 	return count;
 }
 
-static struct bin_attribute devcd_attr_data = {
-	.attr = { .name = "data", .mode = S_IRUSR | S_IWUSR, },
-	.size = 0,
-	.read = devcd_data_read,
-	.write = devcd_data_write,
-};
+static const struct bin_attribute devcd_attr_data =
+	__BIN_ATTR(data, 0600, devcd_data_read, devcd_data_write, 0);
 
-static struct bin_attribute *devcd_dev_bin_attrs[] = {
+static const struct bin_attribute *const devcd_dev_bin_attrs[] = {
 	&devcd_attr_data, NULL,
 };
 
@@ -116,17 +160,54 @@ static int devcd_free(struct device *dev, void *data)
 {
 	struct devcd_entry *devcd = dev_to_devcd(dev);
 
-	flush_delayed_work(&devcd->del_wk);
+	/*
+	 * To prevent a race with devcd_data_write(), disable work and
+	 * complete manually instead.
+	 *
+	 * We cannot rely on the return value of
+	 * disable_delayed_work_sync() here, because it might be in the
+	 * middle of a cancel_delayed_work + schedule_delayed_work pair.
+	 *
+	 * devcd->mutex here guards against multiple parallel invocations
+	 * of devcd_free().
+	 */
+	disable_delayed_work_sync(&devcd->del_wk);
+	mutex_lock(&devcd->mutex);
+	if (!devcd->deleted)
+		__devcd_del(devcd);
+	mutex_unlock(&devcd->mutex);
 	return 0;
 }
 
-static ssize_t disabled_show(struct class *class, struct class_attribute *attr,
+static ssize_t disabled_show(const struct class *class, const struct class_attribute *attr,
 			     char *buf)
 {
-	return sprintf(buf, "%d\n", devcd_disabled);
+	return sysfs_emit(buf, "%d\n", devcd_disabled);
 }
 
-static ssize_t disabled_store(struct class *class, struct class_attribute *attr,
+/*
+ *
+ *	disabled_store()                                	worker()
+ *	 class_for_each_device(&devcd_class,
+ *		NULL, NULL, devcd_free)
+ *         ...
+ *         ...
+ *	   while ((dev = class_dev_iter_next(&iter))
+ *                                                             devcd_del()
+ *                                                               device_del()
+ *                                                                 put_device() <- last reference
+ *             error = fn(dev, data)                           devcd_dev_release()
+ *             devcd_free(dev, data)                           kfree(devcd)
+ *
+ *
+ * In the above diagram, it looks like disabled_store() would be racing with parallelly
+ * running devcd_del() and result in memory abort after dropping its last reference with
+ * put_device(). However, this will not happens as fn(dev, data) runs
+ * with its own reference to device via klist_node so it is not its last reference.
+ * so, above situation would not occur.
+ */
+
+static ssize_t disabled_store(const struct class *class, const struct class_attribute *attr,
 			      const char *buf, size_t count)
 {
 	long tmp = simple_strtol(buf, NULL, 10);
@@ -155,7 +236,6 @@ ATTRIBUTE_GROUPS(devcd_class);
 
 static struct class devcd_class = {
 	.name		= "devcoredump",
-	.owner		= THIS_MODULE,
 	.dev_release	= devcd_dev_release,
 	.dev_groups	= devcd_dev_groups,
 	.class_groups	= devcd_class_groups,
@@ -164,16 +244,7 @@ static struct class devcd_class = {
 static ssize_t devcd_readv(char *buffer, loff_t offset, size_t count,
 			   void *data, size_t datalen)
 {
-	if (offset > datalen)
-		return -EINVAL;
-
-	if (offset + count > datalen)
-		count = datalen - offset;
-
-	if (count)
-		memcpy(buffer, ((u8 *)data) + offset, count);
-
-	return count;
+	return memory_read_from_buffer(buffer, count, &offset, data, datalen);
 }
 
 static void devcd_freev(void *data)
@@ -211,7 +282,7 @@ static int devcd_match_failing(struct device *dev, const void *failing)
  * NOTE: if two tables allocated with devcd_alloc_sgtable and then chained
  * using the sg_chain function then that function should be called only once
  * on the chained table
- * @table: pointer to sg_table to free
+ * @data: pointer to sg_table to free
  */
 static void devcd_free_sgtable(void *data)
 {
@@ -219,7 +290,7 @@ static void devcd_free_sgtable(void *data)
 }
 
 /**
- * devcd_read_from_table - copy data from sg_table to a given buffer
+ * devcd_read_from_sgtable - copy data from sg_table to a given buffer
  * and return the number of bytes read
  * @buffer: the buffer to copy the data to it
  * @buf_len: the length of the buffer
@@ -227,6 +298,8 @@ static void devcd_free_sgtable(void *data)
  * @offset: start copy from @offset@ bytes from the head of the data
  *	in the given scatterlist
  * @data_len: the length of the data in the sg_table
+ *
+ * Returns: the number of bytes copied
  */
 static ssize_t devcd_read_from_sgtable(char *buffer, loff_t offset,
 				       size_t buf_len, void *data,
@@ -244,7 +317,31 @@ static ssize_t devcd_read_from_sgtable(char *buffer, loff_t offset,
 }
 
 /**
- * dev_coredumpm - create device coredump with read/free methods
+ * dev_coredump_put - remove device coredump
+ * @dev: the struct device for the crashed device
+ *
+ * dev_coredump_put() removes coredump, if exists, for a given device from
+ * the file system and free its associated data otherwise, does nothing.
+ *
+ * It is useful for modules that do not want to keep coredump
+ * available after its unload.
+ */
+void dev_coredump_put(struct device *dev)
+{
+	struct device *existing;
+
+	existing = class_find_device(&devcd_class, NULL, dev,
+				     devcd_match_failing);
+	if (existing) {
+		devcd_free(existing, NULL);
+		put_device(existing);
+	}
+}
+EXPORT_SYMBOL_GPL(dev_coredump_put);
+
+/**
+ * dev_coredumpm_timeout - create device coredump with read/free methods with a
+ * custom timeout.
  * @dev: the struct device for the crashed device
  * @owner: the module that contains the read/free functions, use %THIS_MODULE
  * @data: data cookie for the @read/@free functions
@@ -252,17 +349,20 @@ static ssize_t devcd_read_from_sgtable(char *buffer, loff_t offset,
  * @gfp: allocation flags
  * @read: function to read from the given buffer
  * @free: function to free the given buffer
+ * @timeout: time in jiffies to remove coredump
  *
  * Creates a new device coredump for the given device. If a previous one hasn't
  * been read yet, the new coredump is discarded. The data lifetime is determined
  * by the device coredump framework and when it is no longer needed the @free
  * function will be called to free the data.
  */
-void dev_coredumpm(struct device *dev, struct module *owner,
-		   void *data, size_t datalen, gfp_t gfp,
-		   ssize_t (*read)(char *buffer, loff_t offset, size_t count,
-				   void *data, size_t datalen),
-		   void (*free)(void *data))
+void dev_coredumpm_timeout(struct device *dev, struct module *owner,
+			   void *data, size_t datalen, gfp_t gfp,
+			   ssize_t (*read)(char *buffer, loff_t offset,
+					   size_t count, void *data,
+					   size_t datalen),
+			   void (*free)(void *data),
+			   unsigned long timeout)
 {
 	static atomic_t devcd_count = ATOMIC_INIT(0);
 	struct devcd_entry *devcd;
@@ -281,7 +381,7 @@ void dev_coredumpm(struct device *dev, struct module *owner,
 	if (!try_module_get(owner))
 		goto free;
 
-	devcd = kzalloc(sizeof(*devcd), gfp);
+	devcd = kzalloc_obj(*devcd, gfp);
 	if (!devcd)
 		goto put_module;
 
@@ -291,39 +391,62 @@ void dev_coredumpm(struct device *dev, struct module *owner,
 	devcd->read = read;
 	devcd->free = free;
 	devcd->failing_dev = get_device(dev);
+	devcd->deleted = false;
 
+	mutex_init(&devcd->mutex);
 	device_initialize(&devcd->devcd_dev);
 
 	dev_set_name(&devcd->devcd_dev, "devcd%d",
 		     atomic_inc_return(&devcd_count));
 	devcd->devcd_dev.class = &devcd_class;
 
+	dev_set_uevent_suppress(&devcd->devcd_dev, true);
+
+	/* devcd->mutex prevents devcd_del() completing until init finishes */
+	mutex_lock(&devcd->mutex);
+	devcd->init_completed = false;
+	INIT_DELAYED_WORK(&devcd->del_wk, devcd_del);
+	schedule_delayed_work(&devcd->del_wk, timeout);
+
 	if (device_add(&devcd->devcd_dev))
 		goto put_device;
 
+	/*
+	 * These should normally not fail, but there is no problem
+	 * continuing without the links, so just warn instead of
+	 * failing.
+	 */
 	if (sysfs_create_link(&devcd->devcd_dev.kobj, &dev->kobj,
-			      "failing_device"))
-		/* nothing - symlink will be missing */;
+			      "failing_device") ||
+	    sysfs_create_link(&dev->kobj, &devcd->devcd_dev.kobj,
+		              "devcoredump"))
+		dev_warn(dev, "devcoredump create_link failed\n");
 
-	if (sysfs_create_link(&dev->kobj, &devcd->devcd_dev.kobj,
-			      "devcoredump"))
-		/* nothing - symlink will be missing */;
+	dev_set_uevent_suppress(&devcd->devcd_dev, false);
+	kobject_uevent(&devcd->devcd_dev.kobj, KOBJ_ADD);
 
-	INIT_DELAYED_WORK(&devcd->del_wk, devcd_del);
-	schedule_delayed_work(&devcd->del_wk, DEVCD_TIMEOUT);
-
+	/*
+	 * Safe to run devcd_del() now that we are done with devcd_dev.
+	 * Alternatively we could have taken a ref on devcd_dev before
+	 * dropping the lock.
+	 */
+	devcd->init_completed = true;
+	mutex_unlock(&devcd->mutex);
 	return;
  put_device:
+	mutex_unlock(&devcd->mutex);
+	cancel_delayed_work_sync(&devcd->del_wk);
 	put_device(&devcd->devcd_dev);
+
  put_module:
 	module_put(owner);
  free:
 	free(data);
 }
-EXPORT_SYMBOL_GPL(dev_coredumpm);
+EXPORT_SYMBOL_GPL(dev_coredumpm_timeout);
 
 /**
- * dev_coredumpmsg - create device coredump that uses scatterlist as data
+ * dev_coredumpsg - create device coredump that uses scatterlist as data
  * parameter
  * @dev: the struct device for the crashed device
  * @table: the dump data
@@ -348,10 +471,3 @@ static int __init devcoredump_init(void)
 	return class_register(&devcd_class);
 }
 __initcall(devcoredump_init);
-
-static void __exit devcoredump_exit(void)
-{
-	class_for_each_device(&devcd_class, NULL, NULL, devcd_free);
-	class_unregister(&devcd_class);
-}
-__exitcall(devcoredump_exit);

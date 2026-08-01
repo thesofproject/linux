@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * UniNorth AGPGART routines.
  */
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/pci.h>
 #include <linux/slab.h>
 #include <linux/init.h>
@@ -402,7 +404,7 @@ static int uninorth_create_gatt_table(struct agp_bridge_data *bridge)
 	if (table == NULL)
 		return -ENOMEM;
 
-	uninorth_priv.pages_arr = kmalloc((1 << page_order) * sizeof(struct page*), GFP_KERNEL);
+	uninorth_priv.pages_arr = kmalloc_objs(struct page *, 1 << page_order);
 	if (uninorth_priv.pages_arr == NULL)
 		goto enomem;
 
@@ -722,4 +724,5 @@ MODULE_PARM_DESC(aperture,
 		 "\t\tDefault: " DEFAULT_APERTURE_STRING "M");
 
 MODULE_AUTHOR("Ben Herrenschmidt & Paul Mackerras");
+MODULE_DESCRIPTION("Apple UniNorth & U3 AGP support");
 MODULE_LICENSE("GPL");

@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright © 2015 Broadcom Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
  */
 
 #include <linux/device.h>
@@ -111,7 +103,6 @@ static int iproc_nand_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct iproc_nand_soc *priv;
 	struct brcmnand_soc *soc;
-	struct resource *res;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -120,13 +111,11 @@ static int iproc_nand_probe(struct platform_device *pdev)
 
 	spin_lock_init(&priv->idm_lock);
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "iproc-idm");
-	priv->idm_base = devm_ioremap_resource(dev, res);
+	priv->idm_base = devm_platform_ioremap_resource_byname(pdev, "iproc-idm");
 	if (IS_ERR(priv->idm_base))
 		return PTR_ERR(priv->idm_base);
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "iproc-ext");
-	priv->ext_base = devm_ioremap_resource(dev, res);
+	priv->ext_base = devm_platform_ioremap_resource_byname(pdev, "iproc-ext");
 	if (IS_ERR(priv->ext_base))
 		return PTR_ERR(priv->ext_base);
 

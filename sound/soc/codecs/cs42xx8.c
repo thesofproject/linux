@@ -1,19 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Cirrus Logic CS42448/CS42888 Audio CODEC Digital Audio Interface (DAI) driver
  *
  * Copyright (C) 2014 Freescale Semiconductor, Inc.
  *
  * Author: Nicolin Chen <Guangyu.Chen@freescale.com>
- *
- * This file is licensed under the terms of the GNU General Public License
- * version 2. This program is licensed "as is" without any warranty of any
- * kind, whether express or implied.
  */
 
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/gpio/consumer.h>
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
 #include <sound/pcm_params.h>
@@ -43,8 +40,11 @@ struct cs42xx8_priv {
 	struct clk *clk;
 
 	bool slave_mode;
+	bool is_tdm_mode;
 	unsigned long sysclk;
 	u32 tx_channels;
+	struct gpio_desc *gpiod_reset;
+	u32 rate[2];
 };
 
 /* -127.5dB to 0dB with step of 0.5dB */
@@ -174,21 +174,27 @@ static const struct snd_soc_dapm_route cs42xx8_adc3_dapm_routes[] = {
 };
 
 struct cs42xx8_ratios {
-	unsigned int ratio;
-	unsigned char speed;
-	unsigned char mclk;
+	unsigned int mfreq;
+	unsigned int min_mclk;
+	unsigned int max_mclk;
+	unsigned int ratio[3];
 };
 
+/*
+ * According to reference mannual, define the cs42xx8_ratio struct
+ * MFreq2 | MFreq1 | MFreq0 |     Description     | SSM | DSM | QSM |
+ * 0      | 0      | 0      |1.029MHz to 12.8MHz  | 256 | 128 |  64 |
+ * 0      | 0      | 1      |1.536MHz to 19.2MHz  | 384 | 192 |  96 |
+ * 0      | 1      | 0      |2.048MHz to 25.6MHz  | 512 | 256 | 128 |
+ * 0      | 1      | 1      |3.072MHz to 38.4MHz  | 768 | 384 | 192 |
+ * 1      | x      | x      |4.096MHz to 51.2MHz  |1024 | 512 | 256 |
+ */
 static const struct cs42xx8_ratios cs42xx8_ratios[] = {
-	{ 64, CS42XX8_FM_QUAD, CS42XX8_FUNCMOD_MFREQ_256(4) },
-	{ 96, CS42XX8_FM_QUAD, CS42XX8_FUNCMOD_MFREQ_384(4) },
-	{ 128, CS42XX8_FM_QUAD, CS42XX8_FUNCMOD_MFREQ_512(4) },
-	{ 192, CS42XX8_FM_QUAD, CS42XX8_FUNCMOD_MFREQ_768(4) },
-	{ 256, CS42XX8_FM_SINGLE, CS42XX8_FUNCMOD_MFREQ_256(1) },
-	{ 384, CS42XX8_FM_SINGLE, CS42XX8_FUNCMOD_MFREQ_384(1) },
-	{ 512, CS42XX8_FM_SINGLE, CS42XX8_FUNCMOD_MFREQ_512(1) },
-	{ 768, CS42XX8_FM_SINGLE, CS42XX8_FUNCMOD_MFREQ_768(1) },
-	{ 1024, CS42XX8_FM_SINGLE, CS42XX8_FUNCMOD_MFREQ_1024(1) }
+	{ 0, 1029000, 12800000, {256, 128, 64} },
+	{ 2, 1536000, 19200000, {384, 192, 96} },
+	{ 4, 2048000, 25600000, {512, 256, 128} },
+	{ 6, 3072000, 38400000, {768, 384, 192} },
+	{ 8, 4096000, 51200000, {1024, 512, 256} },
 };
 
 static int cs42xx8_set_dai_sysclk(struct snd_soc_dai *codec_dai,
@@ -209,6 +215,8 @@ static int cs42xx8_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	struct cs42xx8_priv *cs42xx8 = snd_soc_component_get_drvdata(component);
 	u32 val;
 
+	cs42xx8->is_tdm_mode = false;
+
 	/* Set DAI format */
 	switch (format & SND_SOC_DAIFMT_FORMAT_MASK) {
 	case SND_SOC_DAIFMT_LEFT_J:
@@ -222,6 +230,7 @@ static int cs42xx8_set_dai_fmt(struct snd_soc_dai *codec_dai,
 		break;
 	case SND_SOC_DAIFMT_DSP_A:
 		val = CS42XX8_INTF_DAC_DIF_TDM | CS42XX8_INTF_ADC_DIF_TDM;
+		cs42xx8->is_tdm_mode = true;
 		break;
 	default:
 		dev_err(component->dev, "unsupported dai format\n");
@@ -234,14 +243,19 @@ static int cs42xx8_set_dai_fmt(struct snd_soc_dai *codec_dai,
 
 	/* Set master/slave audio interface */
 	switch (format & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		cs42xx8->slave_mode = true;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		cs42xx8->slave_mode = false;
 		break;
 	default:
 		dev_err(component->dev, "unsupported master/slave mode\n");
+		return -EINVAL;
+	}
+
+	if (cs42xx8->is_tdm_mode && !cs42xx8->slave_mode) {
+		dev_err(component->dev, "TDM mode is supported only in slave mode\n");
 		return -EINVAL;
 	}
 
@@ -255,14 +269,68 @@ static int cs42xx8_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_component *component = dai->component;
 	struct cs42xx8_priv *cs42xx8 = snd_soc_component_get_drvdata(component);
 	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
-	u32 ratio = cs42xx8->sysclk / params_rate(params);
-	u32 i, fm, val, mask;
+	u32 ratio[2];
+	u32 rate[2];
+	u32 fm[2];
+	u32 i, val, mask;
+	bool condition1, condition2;
 
 	if (tx)
 		cs42xx8->tx_channels = params_channels(params);
 
+	rate[tx]  = params_rate(params);
+	rate[!tx] = cs42xx8->rate[!tx];
+
+	ratio[tx] = rate[tx] > 0 ? cs42xx8->sysclk / rate[tx] : 0;
+	ratio[!tx] = rate[!tx] > 0 ? cs42xx8->sysclk / rate[!tx] : 0;
+
+	/* Get functional mode for tx and rx according to rate */
+	for (i = 0; i < 2; i++) {
+		if (cs42xx8->slave_mode) {
+			fm[i] = CS42XX8_FM_AUTO;
+		} else {
+			if (rate[i] < 50000) {
+				fm[i] = CS42XX8_FM_SINGLE;
+			} else if (rate[i] > 50000 && rate[i] < 100000) {
+				fm[i] = CS42XX8_FM_DOUBLE;
+			} else if (rate[i] > 100000 && rate[i] < 200000) {
+				fm[i] = CS42XX8_FM_QUAD;
+			} else {
+				dev_err(component->dev,
+					"unsupported sample rate\n");
+				return -EINVAL;
+			}
+		}
+	}
+
 	for (i = 0; i < ARRAY_SIZE(cs42xx8_ratios); i++) {
-		if (cs42xx8_ratios[i].ratio == ratio)
+		/* Is the ratio[tx] valid ? */
+		condition1 = ((fm[tx] == CS42XX8_FM_AUTO) ?
+			(cs42xx8_ratios[i].ratio[0] == ratio[tx] ||
+			cs42xx8_ratios[i].ratio[1] == ratio[tx] ||
+			cs42xx8_ratios[i].ratio[2] == ratio[tx]) :
+			(cs42xx8_ratios[i].ratio[fm[tx]] == ratio[tx])) &&
+			cs42xx8->sysclk >= cs42xx8_ratios[i].min_mclk &&
+			cs42xx8->sysclk <= cs42xx8_ratios[i].max_mclk;
+
+		if (!ratio[tx])
+			condition1 = true;
+
+		/* Is the ratio[!tx] valid ? */
+		condition2 = ((fm[!tx] == CS42XX8_FM_AUTO) ?
+			(cs42xx8_ratios[i].ratio[0] == ratio[!tx] ||
+			cs42xx8_ratios[i].ratio[1] == ratio[!tx] ||
+			cs42xx8_ratios[i].ratio[2] == ratio[!tx]) :
+			(cs42xx8_ratios[i].ratio[fm[!tx]] == ratio[!tx]));
+
+		if (!ratio[!tx])
+			condition2 = true;
+
+		/*
+		 * Both ratio[tx] and ratio[!tx] is valid, then we get
+		 * a proper MFreq.
+		 */
+		if (condition1 && condition2)
 			break;
 	}
 
@@ -271,19 +339,48 @@ static int cs42xx8_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
-	mask = CS42XX8_FUNCMOD_MFREQ_MASK;
-	val = cs42xx8_ratios[i].mclk;
+	cs42xx8->rate[tx] = params_rate(params);
 
-	fm = cs42xx8->slave_mode ? CS42XX8_FM_AUTO : cs42xx8_ratios[i].speed;
+	if (cs42xx8->is_tdm_mode) {
+		if (cs42xx8->sysclk < 256 * cs42xx8->rate[tx]) {
+			dev_err(component->dev, "Unsupported sysclk in TDM mode\n");
+			return -EINVAL;
+		}
+
+		if (!tx && cs42xx8->rate[tx] > 100000) {
+			dev_err(component->dev,
+				"ADC does not support Quad-Speed Mode in TDM mode\n");
+			return -EINVAL;
+		}
+	}
+
+	mask = CS42XX8_FUNCMOD_MFREQ_MASK;
+	val = cs42xx8_ratios[i].mfreq;
 
 	regmap_update_bits(cs42xx8->regmap, CS42XX8_FUNCMOD,
 			   CS42XX8_FUNCMOD_xC_FM_MASK(tx) | mask,
-			   CS42XX8_FUNCMOD_xC_FM(tx, fm) | val);
+			   CS42XX8_FUNCMOD_xC_FM(tx, fm[tx]) | val);
 
 	return 0;
 }
 
-static int cs42xx8_digital_mute(struct snd_soc_dai *dai, int mute)
+static int cs42xx8_hw_free(struct snd_pcm_substream *substream,
+			   struct snd_soc_dai *dai)
+{
+	struct snd_soc_component *component = dai->component;
+	struct cs42xx8_priv *cs42xx8 = snd_soc_component_get_drvdata(component);
+	bool tx = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
+
+	/* Clear stored rate */
+	cs42xx8->rate[tx] = 0;
+
+	regmap_update_bits(cs42xx8->regmap, CS42XX8_FUNCMOD,
+			   CS42XX8_FUNCMOD_xC_FM_MASK(tx),
+			   CS42XX8_FUNCMOD_xC_FM(tx, CS42XX8_FM_AUTO));
+	return 0;
+}
+
+static int cs42xx8_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
 	struct cs42xx8_priv *cs42xx8 = snd_soc_component_get_drvdata(component);
@@ -300,7 +397,9 @@ static const struct snd_soc_dai_ops cs42xx8_dai_ops = {
 	.set_fmt	= cs42xx8_set_dai_fmt,
 	.set_sysclk	= cs42xx8_set_dai_sysclk,
 	.hw_params	= cs42xx8_hw_params,
-	.digital_mute	= cs42xx8_digital_mute,
+	.hw_free	= cs42xx8_hw_free,
+	.mute_stream	= cs42xx8_mute,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver cs42xx8_dai = {
@@ -378,14 +477,17 @@ const struct regmap_config cs42xx8_regmap_config = {
 	.num_reg_defaults = ARRAY_SIZE(cs42xx8_reg),
 	.volatile_reg = cs42xx8_volatile_register,
 	.writeable_reg = cs42xx8_writeable_register,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
+	.reg_format_endian  = REGMAP_ENDIAN_BIG,
+	.use_single_read = true,
+	.use_single_write = true,
 };
 EXPORT_SYMBOL_GPL(cs42xx8_regmap_config);
 
 static int cs42xx8_component_probe(struct snd_soc_component *component)
 {
 	struct cs42xx8_priv *cs42xx8 = snd_soc_component_get_drvdata(component);
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 
 	switch (cs42xx8->drvdata->num_adcs) {
 	case 3:
@@ -416,7 +518,6 @@ static const struct snd_soc_component_driver cs42xx8_driver = {
 	.num_dapm_routes	= ARRAY_SIZE(cs42xx8_dapm_routes),
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 const struct cs42xx8_driver_data cs42448_data = {
@@ -431,17 +532,8 @@ const struct cs42xx8_driver_data cs42888_data = {
 };
 EXPORT_SYMBOL_GPL(cs42888_data);
 
-const struct of_device_id cs42xx8_of_match[] = {
-	{ .compatible = "cirrus,cs42448", .data = &cs42448_data, },
-	{ .compatible = "cirrus,cs42888", .data = &cs42888_data, },
-	{ /* sentinel */ }
-};
-MODULE_DEVICE_TABLE(of, cs42xx8_of_match);
-EXPORT_SYMBOL_GPL(cs42xx8_of_match);
-
-int cs42xx8_probe(struct device *dev, struct regmap *regmap)
+int cs42xx8_probe(struct device *dev, struct regmap *regmap, struct cs42xx8_driver_data *drvdata)
 {
-	const struct of_device_id *of_id;
 	struct cs42xx8_priv *cs42xx8;
 	int ret, val, i;
 
@@ -455,17 +547,18 @@ int cs42xx8_probe(struct device *dev, struct regmap *regmap)
 	if (cs42xx8 == NULL)
 		return -ENOMEM;
 
-	cs42xx8->regmap = regmap;
 	dev_set_drvdata(dev, cs42xx8);
 
-	of_id = of_match_device(cs42xx8_of_match, dev);
-	if (of_id)
-		cs42xx8->drvdata = of_id->data;
+	cs42xx8->regmap = regmap;
 
-	if (!cs42xx8->drvdata) {
-		dev_err(dev, "failed to find driver data\n");
-		return -EINVAL;
-	}
+	cs42xx8->drvdata = drvdata;
+
+	cs42xx8->gpiod_reset = devm_gpiod_get_optional(dev, "reset",
+							GPIOD_OUT_HIGH);
+	if (IS_ERR(cs42xx8->gpiod_reset))
+		return PTR_ERR(cs42xx8->gpiod_reset);
+
+	gpiod_set_value_cansleep(cs42xx8->gpiod_reset, 0);
 
 	cs42xx8->clk = devm_clk_get(dev, "mclk");
 	if (IS_ERR(cs42xx8->clk)) {
@@ -535,7 +628,6 @@ err_enable:
 }
 EXPORT_SYMBOL_GPL(cs42xx8_probe);
 
-#ifdef CONFIG_PM
 static int cs42xx8_runtime_resume(struct device *dev)
 {
 	struct cs42xx8_priv *cs42xx8 = dev_get_drvdata(dev);
@@ -546,6 +638,8 @@ static int cs42xx8_runtime_resume(struct device *dev)
 		dev_err(dev, "failed to enable mclk: %d\n", ret);
 		return ret;
 	}
+
+	gpiod_set_value_cansleep(cs42xx8->gpiod_reset, 0);
 
 	ret = regulator_bulk_enable(ARRAY_SIZE(cs42xx8->supplies),
 				    cs42xx8->supplies);
@@ -558,6 +652,7 @@ static int cs42xx8_runtime_resume(struct device *dev)
 	msleep(5);
 
 	regcache_cache_only(cs42xx8->regmap, false);
+	regcache_mark_dirty(cs42xx8->regmap);
 
 	ret = regcache_sync(cs42xx8->regmap);
 	if (ret) {
@@ -585,16 +680,17 @@ static int cs42xx8_runtime_suspend(struct device *dev)
 	regulator_bulk_disable(ARRAY_SIZE(cs42xx8->supplies),
 			       cs42xx8->supplies);
 
+	gpiod_set_value_cansleep(cs42xx8->gpiod_reset, 1);
+
 	clk_disable_unprepare(cs42xx8->clk);
 
 	return 0;
 }
-#endif
 
-const struct dev_pm_ops cs42xx8_pm = {
-	SET_RUNTIME_PM_OPS(cs42xx8_runtime_suspend, cs42xx8_runtime_resume, NULL)
+EXPORT_GPL_DEV_PM_OPS(cs42xx8_pm) = {
+	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
+	RUNTIME_PM_OPS(cs42xx8_runtime_suspend, cs42xx8_runtime_resume, NULL)
 };
-EXPORT_SYMBOL_GPL(cs42xx8_pm);
 
 MODULE_DESCRIPTION("Cirrus Logic CS42448/CS42888 ALSA SoC Codec Driver");
 MODULE_AUTHOR("Freescale Semiconductor, Inc.");

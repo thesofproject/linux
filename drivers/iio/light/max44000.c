@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MAX44000 Ambient and Infrared Proximity Sensor
  *
  * Copyright (c) 2016, Intel Corporation.
- *
- * This file is subject to the terms and conditions of version 2 of
- * the GNU General Public License.  See the file COPYING in the main
- * directory of this archive for more details.
  *
  * Data sheet: https://datasheets.maximintegrated.com/en/ds/MAX44000.pdf
  *
@@ -22,7 +19,6 @@
 #include <linux/iio/buffer.h>
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/triggered_buffer.h>
-#include <linux/acpi.h>
 
 #define MAX44000_DRV_NAME		"max44000"
 
@@ -99,7 +95,6 @@ static const int max44000_alspga_shift[] = {0, 2, 4, 7};
  * Handling this internally is also required for buffer support because the
  * channel's scan_type can't be modified dynamically.
  */
-static const int max44000_alstim_shift[] = {0, 2, 4, 6};
 #define MAX44000_ALSTIM_SHIFT(alstim) (2 * (alstim))
 
 /* Available integration times with pretty manual alignment: */
@@ -473,17 +468,18 @@ static bool max44000_precious_reg(struct device *dev, unsigned int reg)
 }
 
 static const struct regmap_config max44000_regmap_config = {
-	.reg_bits	= 8,
-	.val_bits	= 8,
+	.reg_bits		= 8,
+	.val_bits		= 8,
 
-	.max_register	= MAX44000_REG_PRX_DATA,
-	.readable_reg	= max44000_readable_reg,
-	.writeable_reg	= max44000_writeable_reg,
-	.volatile_reg	= max44000_volatile_reg,
-	.precious_reg	= max44000_precious_reg,
+	.max_register		= MAX44000_REG_PRX_DATA,
+	.readable_reg		= max44000_readable_reg,
+	.writeable_reg		= max44000_writeable_reg,
+	.volatile_reg		= max44000_volatile_reg,
+	.precious_reg		= max44000_precious_reg,
 
-	.use_single_rw	= 1,
-	.cache_type	= REGCACHE_RBTREE,
+	.use_single_read	= true,
+	.use_single_write	= true,
+	.cache_type		= REGCACHE_RBTREE,
 };
 
 static irqreturn_t max44000_trigger_handler(int irq, void *p)
@@ -491,28 +487,32 @@ static irqreturn_t max44000_trigger_handler(int irq, void *p)
 	struct iio_poll_func *pf = p;
 	struct iio_dev *indio_dev = pf->indio_dev;
 	struct max44000_data *data = iio_priv(indio_dev);
-	u16 buf[8]; /* 2x u16 + padding + 8 bytes timestamp */
 	int index = 0;
 	unsigned int regval;
 	int ret;
+	struct {
+		u16 channels[2];
+		aligned_s64 ts;
+	} scan = { };
+
 
 	mutex_lock(&data->lock);
 	if (test_bit(MAX44000_SCAN_INDEX_ALS, indio_dev->active_scan_mask)) {
 		ret = max44000_read_alsval(data);
 		if (ret < 0)
 			goto out_unlock;
-		buf[index++] = ret;
+		scan.channels[index++] = ret;
 	}
 	if (test_bit(MAX44000_SCAN_INDEX_PRX, indio_dev->active_scan_mask)) {
 		ret = regmap_read(data->regmap, MAX44000_REG_PRX_DATA, &regval);
 		if (ret < 0)
 			goto out_unlock;
-		buf[index] = regval;
+		scan.channels[index] = regval;
 	}
 	mutex_unlock(&data->lock);
 
-	iio_push_to_buffers_with_timestamp(indio_dev, buf,
-					   iio_get_time_ns(indio_dev));
+	iio_push_to_buffers_with_ts(indio_dev, &scan, sizeof(scan),
+				    iio_get_time_ns(indio_dev));
 	iio_trigger_notify_done(indio_dev->trig);
 	return IRQ_HANDLED;
 
@@ -522,8 +522,7 @@ out_unlock:
 	return IRQ_HANDLED;
 }
 
-static int max44000_probe(struct i2c_client *client,
-			  const struct i2c_device_id *id)
+static int max44000_probe(struct i2c_client *client)
 {
 	struct max44000_data *data;
 	struct iio_dev *indio_dev;
@@ -539,9 +538,7 @@ static int max44000_probe(struct i2c_client *client,
 		return PTR_ERR(data->regmap);
 	}
 
-	i2c_set_clientdata(client, indio_dev);
 	mutex_init(&data->lock);
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->info = &max44000_info;
 	indio_dev->name = MAX44000_DRV_NAME;
 	indio_dev->channels = max44000_channels;
@@ -589,46 +586,34 @@ static int max44000_probe(struct i2c_client *client,
 		return ret;
 	}
 
-	ret = iio_triggered_buffer_setup(indio_dev, NULL, max44000_trigger_handler, NULL);
+	ret = devm_iio_triggered_buffer_setup(&client->dev, indio_dev, NULL,
+					      max44000_trigger_handler, NULL);
 	if (ret < 0) {
 		dev_err(&client->dev, "iio triggered buffer setup failed\n");
 		return ret;
 	}
 
-	return iio_device_register(indio_dev);
-}
-
-static int max44000_remove(struct i2c_client *client)
-{
-	struct iio_dev *indio_dev = i2c_get_clientdata(client);
-
-	iio_device_unregister(indio_dev);
-	iio_triggered_buffer_cleanup(indio_dev);
-
-	return 0;
+	return devm_iio_device_register(&client->dev, indio_dev);
 }
 
 static const struct i2c_device_id max44000_id[] = {
-	{"max44000", 0},
+	{ .name = "max44000" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, max44000_id);
 
-#ifdef CONFIG_ACPI
 static const struct acpi_device_id max44000_acpi_match[] = {
 	{"MAX44000", 0},
 	{ }
 };
 MODULE_DEVICE_TABLE(acpi, max44000_acpi_match);
-#endif
 
 static struct i2c_driver max44000_driver = {
 	.driver = {
 		.name	= MAX44000_DRV_NAME,
-		.acpi_match_table = ACPI_PTR(max44000_acpi_match),
+		.acpi_match_table = max44000_acpi_match,
 	},
 	.probe		= max44000_probe,
-	.remove		= max44000_remove,
 	.id_table	= max44000_id,
 };
 

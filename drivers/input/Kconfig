@@ -1,9 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Input device configuration
 #
 
 menu "Input device support"
-	depends on !UML
 
 config INPUT
 	tristate "Generic input layer (needed for keyboard, mouse, ...)" if EXPERT
@@ -16,7 +16,7 @@ config INPUT
 
 	  Say N here if you have a headless (no monitor, no keyboard) system.
 
-	  More information is available: <file:Documentation/input/input.txt>
+	  More information is available: <file:Documentation/input/input.rst>
 
 	  If unsure, say Y.
 
@@ -51,19 +51,6 @@ config INPUT_FF_MEMLESS
 	  To compile this driver as a module, choose M here: the
 	  module will be called ff-memless.
 
-config INPUT_POLLDEV
-	tristate "Polled input device skeleton"
-	help
-	  Say Y here if you are using a driver for an input
-	  device that periodically polls hardware state. This
-	  option is only useful for out-of-tree drivers since
-	  in-tree drivers select it automatically.
-
-	  If unsure, say N.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called input-polldev.
-
 config INPUT_SPARSEKMAP
 	tristate "Sparse keymap support library"
 	help
@@ -89,6 +76,13 @@ config INPUT_MATRIXKMAP
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called matrix-keymap.
+
+config INPUT_VIVALDIFMAP
+	tristate
+	help
+	  ChromeOS Vivaldi keymap support library. This is a hidden
+	  option so that drivers can use common code to parse and
+	  expose the vivaldi function row keymap.
 
 comment "Userland interfaces"
 
@@ -144,7 +138,7 @@ config INPUT_JOYDEV
 
 	  If unsure, say Y.
 
-	  More information is available: <file:Documentation/input/joystick.txt>
+	  More information is available: <file:Documentation/input/joydev/joystick.rst>
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called joydev.
@@ -158,19 +152,15 @@ config INPUT_EVDEV
 	  To compile this driver as a module, choose M here: the
 	  module will be called evdev.
 
-config INPUT_EVBUG
-	tristate "Event debugging"
+config INPUT_KUNIT_TEST
+	tristate "KUnit tests for Input" if !KUNIT_ALL_TESTS
+	depends on INPUT && KUNIT
+	default KUNIT_ALL_TESTS
 	help
-	  Say Y here if you have a problem with the input subsystem and
-	  want all events (keypresses, mouse movements), to be output to
-	  the system log. While this is useful for debugging, it's also
-	  a security threat - your keypresses include your passwords, of
-	  course.
+	  Say Y here if you want to build the KUnit tests for the input
+	  subsystem.
 
-	  If unsure, say N.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called evbug.
+	  If in doubt, say "N".
 
 config INPUT_APMPOWER
 	tristate "Input Power Event -> APM Bridge" if EXPERT

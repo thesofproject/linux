@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     TDA10023  - DVB-C decoder
     (as used in Philips CU1216-3 NIM and the Reelbox DVB-C tuner card)
@@ -10,19 +11,6 @@
     Copyright (C) 2004 Markus Schulz <msc@antzsystem.de>
 		   Support for TDA10021
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
 #include <linux/delay.h>
@@ -523,7 +511,7 @@ struct dvb_frontend *tda10023_attach(const struct tda10023_config *config,
 	struct tda10023_state* state = NULL;
 
 	/* allocate memory for the internal state */
-	state = kzalloc(sizeof(struct tda10023_state), GFP_KERNEL);
+	state = kzalloc_obj(struct tda10023_state);
 	if (state == NULL) goto error;
 
 	/* setup the state */
@@ -575,9 +563,9 @@ static const struct dvb_frontend_ops tda10023_ops = {
 	.delsys = { SYS_DVBC_ANNEX_A, SYS_DVBC_ANNEX_C },
 	.info = {
 		.name = "Philips TDA10023 DVB-C",
-		.frequency_stepsize = 62500,
-		.frequency_min =  47000000,
-		.frequency_max = 862000000,
+		.frequency_min_hz =  47 * MHz,
+		.frequency_max_hz = 862 * MHz,
+		.frequency_stepsize_hz = 62500,
 		.symbol_rate_min = 0,  /* set in tda10023_attach */
 		.symbol_rate_max = 0,  /* set in tda10023_attach */
 		.caps = 0x400 | //FE_CAN_QAM_4
@@ -606,4 +594,4 @@ MODULE_DESCRIPTION("Philips TDA10023 DVB-C demodulator driver");
 MODULE_AUTHOR("Georg Acher, Hartmut Birr");
 MODULE_LICENSE("GPL");
 
-EXPORT_SYMBOL(tda10023_attach);
+EXPORT_SYMBOL_GPL(tda10023_attach);

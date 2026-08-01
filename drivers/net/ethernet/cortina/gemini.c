@@ -40,11 +40,16 @@
 #include <linux/in.h>
 #include <linux/ip.h>
 #include <linux/ipv6.h>
+#include <net/gro.h>
 
 #include "gemini.h"
 
 #define DRV_NAME		"gmac-gemini"
-#define DRV_VERSION		"1.0"
+
+#define DEFAULT_MSG_ENABLE (NETIF_MSG_DRV | NETIF_MSG_PROBE | NETIF_MSG_LINK)
+static int debug = -1;
+module_param(debug, int, 0);
+MODULE_PARM_DESC(debug, "Debug level (0=none,...,16=all)");
 
 #define HSIZE_8			0x00
 #define HSIZE_16		0x01
@@ -64,7 +69,6 @@
 #define DEFAULT_GMAC_RXQ_ORDER		9
 #define DEFAULT_GMAC_TXQ_ORDER		8
 #define DEFAULT_RX_BUF_ORDER		11
-#define DEFAULT_NAPI_WEIGHT		64
 #define TX_MAX_FRAGS			16
 #define TX_QUEUE_NUM			1	/* max: 6 */
 #define RX_MAX_ALLOC_ORDER		2
@@ -76,11 +80,13 @@
 #define GMAC0_IRQ4_8 (GMAC0_MIB_INT_BIT | GMAC0_RX_OVERRUN_INT_BIT)
 
 #define GMAC_OFFLOAD_FEATURES (NETIF_F_SG | NETIF_F_IP_CSUM | \
-		NETIF_F_IPV6_CSUM | NETIF_F_RXCSUM | \
-		NETIF_F_TSO | NETIF_F_TSO_ECN | NETIF_F_TSO6)
+			       NETIF_F_IPV6_CSUM | NETIF_F_RXCSUM | \
+			       NETIF_F_TSO | NETIF_F_TSO_ECN | NETIF_F_TSO6)
 
 /**
  * struct gmac_queue_page - page buffer per-page info
+ * @page: the page struct
+ * @mapping: the dma address handle
  */
 struct gmac_queue_page {
 	struct page *page;
@@ -116,6 +122,9 @@ struct gemini_ethernet_port {
 	struct napi_struct	napi;
 	struct hrtimer		rx_coalesce_timer;
 	unsigned int		rx_coalesce_nsecs;
+	struct sk_buff		*rx_skb;
+	unsigned int		rx_frag_nr;
+
 	unsigned int		freeq_refill;
 	struct gmac_txq		txq[TX_QUEUE_NUM];
 	unsigned int		txq_order;
@@ -146,6 +155,7 @@ struct gemini_ethernet {
 	void __iomem *base;
 	struct gemini_ethernet_port *port0;
 	struct gemini_ethernet_port *port1;
+	bool initialized;
 
 	spinlock_t	irq_lock; /* Locks IRQ-related registers */
 	unsigned int	freeq_order;
@@ -282,13 +292,13 @@ static void gmac_set_flow_control(struct net_device *netdev, bool tx, bool rx)
 	spin_unlock_irqrestore(&port->config_lock, flags);
 }
 
-static void gmac_speed_set(struct net_device *netdev)
+static void gmac_adjust_link(struct net_device *netdev)
 {
 	struct gemini_ethernet_port *port = netdev_priv(netdev);
 	struct phy_device *phydev = netdev->phydev;
 	union gmac_status status, old_status;
-	int pause_tx = 0;
-	int pause_rx = 0;
+	bool pause_tx = false;
+	bool pause_rx = false;
 
 	status.bits32 = readl(port->gmac_base + GMAC_STATUS);
 	old_status.bits32 = status.bits32;
@@ -298,36 +308,34 @@ static void gmac_speed_set(struct net_device *netdev)
 	switch (phydev->speed) {
 	case 1000:
 		status.bits.speed = GMAC_SPEED_1000;
-		if (phydev->interface == PHY_INTERFACE_MODE_RGMII)
+		if (phy_interface_mode_is_rgmii(phydev->interface))
 			status.bits.mii_rmii = GMAC_PHY_RGMII_1000;
-		netdev_info(netdev, "connect to RGMII @ 1Gbit\n");
+		netdev_dbg(netdev, "connect %s to RGMII @ 1Gbit\n",
+			   phydev_name(phydev));
 		break;
 	case 100:
 		status.bits.speed = GMAC_SPEED_100;
-		if (phydev->interface == PHY_INTERFACE_MODE_RGMII)
+		if (phy_interface_mode_is_rgmii(phydev->interface))
 			status.bits.mii_rmii = GMAC_PHY_RGMII_100_10;
-		netdev_info(netdev, "connect to RGMII @ 100 Mbit\n");
+		netdev_dbg(netdev, "connect %s to RGMII @ 100 Mbit\n",
+			   phydev_name(phydev));
 		break;
 	case 10:
 		status.bits.speed = GMAC_SPEED_10;
-		if (phydev->interface == PHY_INTERFACE_MODE_RGMII)
+		if (phy_interface_mode_is_rgmii(phydev->interface))
 			status.bits.mii_rmii = GMAC_PHY_RGMII_100_10;
-		netdev_info(netdev, "connect to RGMII @ 10 Mbit\n");
+		netdev_dbg(netdev, "connect %s to RGMII @ 10 Mbit\n",
+			   phydev_name(phydev));
 		break;
 	default:
-		netdev_warn(netdev, "Not supported PHY speed (%d)\n",
-			    phydev->speed);
+		netdev_warn(netdev, "Unsupported PHY speed (%d) on %s\n",
+			    phydev->speed, phydev_name(phydev));
 	}
 
 	if (phydev->duplex == DUPLEX_FULL) {
-		u16 lcladv = phy_read(phydev, MII_ADVERTISE);
-		u16 rmtadv = phy_read(phydev, MII_LPA);
-		u8 cap = mii_resolve_flowctrl_fdx(lcladv, rmtadv);
-
-		if (cap & FLOW_CTRL_RX)
-			pause_rx = 1;
-		if (cap & FLOW_CTRL_TX)
-			pause_tx = 1;
+		phy_get_pause(phydev, &pause_tx, &pause_rx);
+		netdev_dbg(netdev, "set negotiated pause params pause TX = %s, pause RX = %s\n",
+			   pause_tx ? "ON" : "OFF", pause_rx ? "ON" : "OFF");
 	}
 
 	gmac_set_flow_control(netdev, pause_tx, pause_rx);
@@ -358,37 +366,33 @@ static int gmac_setup_phy(struct net_device *netdev)
 
 	phy = of_phy_get_and_connect(netdev,
 				     dev->of_node,
-				     gmac_speed_set);
+				     gmac_adjust_link);
 	if (!phy)
 		return -ENODEV;
 	netdev->phydev = phy;
 
-	netdev_info(netdev, "connected to PHY \"%s\"\n",
-		    phydev_name(phy));
-	phy_attached_print(phy, "phy_id=0x%.8lx, phy_mode=%s\n",
-			   (unsigned long)phy->phy_id,
-			   phy_modes(phy->interface));
-
-	phy->supported &= PHY_GBIT_FEATURES;
-	phy->supported |= SUPPORTED_Asym_Pause | SUPPORTED_Pause;
-	phy->advertising = phy->supported;
+	phy_set_max_speed(phy, SPEED_1000);
+	phy_support_asym_pause(phy);
 
 	/* set PHY interface type */
 	switch (phy->interface) {
 	case PHY_INTERFACE_MODE_MII:
-		netdev_info(netdev, "set GMAC0 to GMII mode, GMAC1 disabled\n");
+		netdev_dbg(netdev,
+			   "MII: set GMAC0 to GMII mode, GMAC1 disabled\n");
 		status.bits.mii_rmii = GMAC_PHY_MII;
-		netdev_info(netdev, "connect to MII\n");
 		break;
 	case PHY_INTERFACE_MODE_GMII:
-		netdev_info(netdev, "set GMAC0 to GMII mode, GMAC1 disabled\n");
+		netdev_dbg(netdev,
+			   "GMII: set GMAC0 to GMII mode, GMAC1 disabled\n");
 		status.bits.mii_rmii = GMAC_PHY_GMII;
-		netdev_info(netdev, "connect to GMII\n");
 		break;
 	case PHY_INTERFACE_MODE_RGMII:
-		dev_info(dev, "set GMAC0 and GMAC1 to MII/RGMII mode\n");
+	case PHY_INTERFACE_MODE_RGMII_ID:
+	case PHY_INTERFACE_MODE_RGMII_TXID:
+	case PHY_INTERFACE_MODE_RGMII_RXID:
+		netdev_dbg(netdev,
+			   "RGMII: set GMAC0 and GMAC1 to MII/RGMII mode\n");
 		status.bits.mii_rmii = GMAC_PHY_RGMII_100_10;
-		netdev_info(netdev, "connect to RGMII\n");
 		break;
 	default:
 		netdev_err(netdev, "Unsupported MII interface\n");
@@ -398,29 +402,63 @@ static int gmac_setup_phy(struct net_device *netdev)
 	}
 	writel(status.bits32, port->gmac_base + GMAC_STATUS);
 
+	if (netif_msg_link(port))
+		phy_attached_info(phy);
+
 	return 0;
 }
 
-static int gmac_pick_rx_max_len(int max_l3_len)
+/* The maximum frame length is not logically enumerated in the
+ * hardware, so we do a table lookup to find the applicable max
+ * frame length.
+ */
+struct gmac_max_framelen {
+	unsigned int max_l3_len;
+	u8 val;
+};
+
+static const struct gmac_max_framelen gmac_maxlens[] = {
+	{
+		.max_l3_len = 1518,
+		.val = CONFIG0_MAXLEN_1518,
+	},
+	{
+		.max_l3_len = 1522,
+		.val = CONFIG0_MAXLEN_1522,
+	},
+	{
+		.max_l3_len = 1536,
+		.val = CONFIG0_MAXLEN_1536,
+	},
+	{
+		.max_l3_len = 1548,
+		.val = CONFIG0_MAXLEN_1548,
+	},
+	{
+		.max_l3_len = 9212,
+		.val = CONFIG0_MAXLEN_9k,
+	},
+	{
+		.max_l3_len = 10236,
+		.val = CONFIG0_MAXLEN_10k,
+	},
+};
+
+static int gmac_pick_rx_max_len(unsigned int max_l3_len)
 {
-	/* index = CONFIG_MAXLEN_XXX values */
-	static const int max_len[8] = {
-		1536, 1518, 1522, 1542,
-		9212, 10236, 1518, 1518
-	};
-	int i, n = 5;
+	const struct gmac_max_framelen *maxlen;
+	int maxtot;
+	int i;
 
-	max_l3_len += ETH_HLEN + VLAN_HLEN;
+	maxtot = max_l3_len + ETH_HLEN + VLAN_HLEN;
 
-	if (max_l3_len > max_len[n])
-		return -1;
-
-	for (i = 0; i < 5; i++) {
-		if (max_len[i] >= max_l3_len && max_len[i] < max_len[n])
-			n = i;
+	for (i = 0; i < ARRAY_SIZE(gmac_maxlens); i++) {
+		maxlen = &gmac_maxlens[i];
+		if (maxtot <= maxlen->max_l3_len)
+			return maxlen->val;
 	}
 
-	return n;
+	return -1;
 }
 
 static int gmac_init(struct net_device *netdev)
@@ -474,7 +512,6 @@ static int gmac_init(struct net_device *netdev)
 		.rel_threshold = 0,
 	} };
 	union gmac_config0 tmp;
-	u32 val;
 
 	config0.bits.max_len = gmac_pick_rx_max_len(netdev->mtu);
 	tmp.bits32 = readl(port->gmac_base + GMAC_CONFIG0);
@@ -484,7 +521,7 @@ static int gmac_init(struct net_device *netdev)
 	writel(config2.bits32, port->gmac_base + GMAC_CONFIG2);
 	writel(config3.bits32, port->gmac_base + GMAC_CONFIG3);
 
-	val = readl(port->dma_base + GMAC_AHB_WEIGHT_REG);
+	readl(port->dma_base + GMAC_AHB_WEIGHT_REG);
 	writel(ahb_weight.bits32, port->dma_base + GMAC_AHB_WEIGHT_REG);
 
 	writel(hw_weigh.bits32,
@@ -504,12 +541,6 @@ static int gmac_init(struct net_device *netdev)
 	return 0;
 }
 
-static void gmac_uninit(struct net_device *netdev)
-{
-	if (netdev->phydev)
-		phy_disconnect(netdev->phydev);
-}
-
 static int gmac_setup_txqs(struct net_device *netdev)
 {
 	struct gemini_ethernet_port *port = netdev_priv(netdev);
@@ -526,7 +557,7 @@ static int gmac_setup_txqs(struct net_device *netdev)
 
 	rwptr_reg = port->dma_base + GMAC_SW_TX_QUEUE0_PTR_REG;
 
-	skb_tab = kcalloc(len, sizeof(*skb_tab), GFP_KERNEL);
+	skb_tab = kzalloc_objs(*skb_tab, len);
 	if (!skb_tab)
 		return -ENOMEM;
 
@@ -539,7 +570,9 @@ static int gmac_setup_txqs(struct net_device *netdev)
 	}
 
 	if (port->txq_dma_base & ~DMA_Q_BASE_MASK) {
-		dev_warn(geth->dev, "TX queue base it not aligned\n");
+		dev_warn(geth->dev, "TX queue base is not aligned\n");
+		dma_free_coherent(geth->dev, len * sizeof(*desc_ring),
+				  desc_ring, port->txq_dma_base);
 		kfree(skb_tab);
 		return -ENOMEM;
 	}
@@ -624,7 +657,7 @@ static void gmac_clean_txq(struct net_device *netdev, struct gmac_txq *txq,
 
 			u64_stats_update_begin(&port->tx_stats_syncp);
 			port->tx_frag_stats[nfrags]++;
-			u64_stats_update_end(&port->ir_stats_syncp);
+			u64_stats_update_end(&port->tx_stats_syncp);
 		}
 	}
 
@@ -680,7 +713,7 @@ static int gmac_setup_rxq(struct net_device *netdev)
 	if (!port->rxq_ring)
 		return -ENOMEM;
 	if (port->rxq_dma_base & ~NONTOE_QHDR0_BASE_MASK) {
-		dev_warn(geth->dev, "RX queue base it not aligned\n");
+		dev_warn(geth->dev, "RX queue base is not aligned\n");
 		return -ENOMEM;
 	}
 
@@ -905,13 +938,12 @@ static int geth_setup_freeq(struct gemini_ethernet *geth)
 	if (!geth->freeq_ring)
 		return -ENOMEM;
 	if (geth->freeq_dma_base & ~DMA_Q_BASE_MASK) {
-		dev_warn(geth->dev, "queue ring base it not aligned\n");
+		dev_warn(geth->dev, "queue ring base is not aligned\n");
 		goto err_freeq;
 	}
 
 	/* Allocate a mapping to page look-up index */
-	geth->freeq_pages = kzalloc(pages * sizeof(*geth->freeq_pages),
-				   GFP_KERNEL);
+	geth->freeq_pages = kzalloc_objs(*geth->freeq_pages, pages);
 	if (!geth->freeq_pages)
 		goto err_freeq;
 	geth->num_freeq_pages = pages;
@@ -1074,9 +1106,12 @@ static void gmac_tx_irq_enable(struct net_device *netdev,
 {
 	struct gemini_ethernet_port *port = netdev_priv(netdev);
 	struct gemini_ethernet *geth = port->geth;
+	unsigned long flags;
 	u32 val, mask;
 
 	netdev_dbg(netdev, "%s device %d\n", __func__, netdev->dev_id);
+
+	spin_lock_irqsave(&geth->irq_lock, flags);
 
 	mask = GMAC0_IRQ0_TXQ0_INTS << (6 * netdev->dev_id + txq);
 
@@ -1086,6 +1121,8 @@ static void gmac_tx_irq_enable(struct net_device *netdev,
 	val = readl(geth->base + GLOBAL_INTERRUPT_ENABLE_0_REG);
 	val = en ? val | mask : val & ~mask;
 	writel(val, geth->base + GLOBAL_INTERRUPT_ENABLE_0_REG);
+
+	spin_unlock_irqrestore(&geth->irq_lock, flags);
 }
 
 static void gmac_tx_irq(struct net_device *netdev, unsigned int txq_num)
@@ -1109,32 +1146,79 @@ static int gmac_map_tx_bufs(struct net_device *netdev, struct sk_buff *skb,
 	struct gmac_txdesc *txd;
 	skb_frag_t *skb_frag;
 	dma_addr_t mapping;
-	unsigned short mtu;
+	bool tcp = false;
 	void *buffer;
-
-	mtu  = ETH_HLEN;
-	mtu += netdev->mtu;
-	if (skb->protocol == htons(ETH_P_8021Q))
-		mtu += VLAN_HLEN;
+	u16 mss;
+	int ret;
 
 	word1 = skb->len;
 	word3 = SOF_BIT;
 
-	if (word1 > mtu) {
+	/* Determine if we are doing TCP */
+	if (skb->protocol == htons(ETH_P_IP))
+		tcp = (ip_hdr(skb)->protocol == IPPROTO_TCP);
+	else
+		/* IPv6 */
+		tcp = (ipv6_hdr(skb)->nexthdr == IPPROTO_TCP);
+
+	mss = skb_shinfo(skb)->gso_size;
+	if (mss) {
+		/* This means we are dealing with TCP and skb->len is the
+		 * sum total of all the segments. The TSO will deal with
+		 * chopping this up for us.
+		 */
+		/* The accelerator needs the full frame size here */
+		mss += skb_tcp_all_headers(skb);
+		netdev_dbg(netdev, "segment offloading mss = %04x len=%04x\n",
+			   mss, skb->len);
 		word1 |= TSS_MTU_ENABLE_BIT;
-		word3 |= mtu;
+		word3 |= mss;
+	} else if (tcp) {
+		/* Even if we are not using TSO, use the hardware offloader
+		 * for transferring the TCP frame: this hardware has partial
+		 * TCP awareness (called TOE - TCP Offload Engine) and will
+		 * according to the datasheet put packets belonging to the
+		 * same TCP connection in the same queue for the TOE/TSO
+		 * engine to process. The engine will deal with chopping
+		 * up frames that exceed ETH_DATA_LEN which the
+		 * checksumming engine cannot handle (see below) into
+		 * manageable chunks. It flawlessly deals with quite big
+		 * frames and frames containing custom DSA EtherTypes.
+		 */
+		mss = netdev->mtu + skb_tcp_all_headers(skb);
+		mss = min(mss, skb->len);
+		netdev_dbg(netdev, "TOE/TSO len %04x mtu %04x mss %04x\n",
+			   skb->len, netdev->mtu, mss);
+		word1 |= TSS_MTU_ENABLE_BIT;
+		word3 |= mss;
+	} else if (skb->len >= ETH_FRAME_LEN) {
+		/* Hardware offloaded checksumming isn't working on non-TCP frames
+		 * bigger than 1514 bytes. A hypothesis about this is that the
+		 * checksum buffer is only 1518 bytes, so when the frames get
+		 * bigger they get truncated, or the last few bytes get
+		 * overwritten by the FCS.
+		 *
+		 * Just use software checksumming and bypass on bigger frames.
+		 */
+		if (skb->ip_summed == CHECKSUM_PARTIAL) {
+			ret = skb_checksum_help(skb);
+			if (ret)
+				return ret;
+		}
+		word1 |= TSS_BYPASS_BIT;
 	}
 
-	if (skb->ip_summed != CHECKSUM_NONE) {
-		int tcp = 0;
-
-		if (skb->protocol == htons(ETH_P_IP)) {
+	if (skb->ip_summed == CHECKSUM_PARTIAL) {
+		/* We do not switch off the checksumming on non TCP/UDP
+		 * frames: as is shown from tests, the checksumming engine
+		 * is smart enough to see that a frame is not actually TCP
+		 * or UDP and then just pass it through without any changes
+		 * to the frame.
+		 */
+		if (skb->protocol == htons(ETH_P_IP))
 			word1 |= TSS_IP_CHKSUM_BIT;
-			tcp = ip_hdr(skb)->protocol == IPPROTO_TCP;
-		} else { /* IPv6 */
+		else
 			word1 |= TSS_IPV6_ENABLE_BIT;
-			tcp = ipv6_hdr(skb)->nexthdr == IPPROTO_TCP;
-		}
 
 		word1 |= tcp ? TSS_TCP_CHKSUM_BIT : TSS_UDP_CHKSUM_BIT;
 	}
@@ -1146,9 +1230,8 @@ static int gmac_map_tx_bufs(struct net_device *netdev, struct sk_buff *skb,
 			buflen = skb_headlen(skb);
 		} else {
 			skb_frag = skb_si->frags + frag;
-			buffer = page_address(skb_frag_page(skb_frag)) +
-				 skb_frag->page_offset;
-			buflen = skb_frag->size;
+			buffer = skb_frag_address(skb_frag);
+			buflen = skb_frag_size(skb_frag);
 		}
 
 		if (frag == last_frag) {
@@ -1188,7 +1271,8 @@ map_error:
 	return -ENOMEM;
 }
 
-static int gmac_start_xmit(struct sk_buff *skb, struct net_device *netdev)
+static netdev_tx_t gmac_start_xmit(struct sk_buff *skb,
+				   struct net_device *netdev)
 {
 	struct gemini_ethernet_port *port = netdev_priv(netdev);
 	unsigned short m = (1 << port->txq_order) - 1;
@@ -1198,8 +1282,6 @@ static int gmac_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 	struct gmac_txq *txq;
 	int txq_num, nfrags;
 	union dma_rwptr rw;
-
-	SKB_FRAG_ASSERT(skb);
 
 	if (skb->len >= 0x10000)
 		goto out_drop_free;
@@ -1263,7 +1345,7 @@ out_drop:
 	return NETDEV_TX_OK;
 }
 
-static void gmac_tx_timeout(struct net_device *netdev)
+static void gmac_tx_timeout(struct net_device *netdev, unsigned int txqueue)
 {
 	netdev_err(netdev, "Tx timeout\n");
 	gmac_dump_dma_state(netdev);
@@ -1276,8 +1358,8 @@ static void gmac_enable_irq(struct net_device *netdev, int enable)
 	unsigned long flags;
 	u32 val, mask;
 
-	netdev_info(netdev, "%s device %d %s\n", __func__,
-		    netdev->dev_id, enable ? "enable" : "disable");
+	netdev_dbg(netdev, "%s device %d %s\n", __func__,
+		   netdev->dev_id, enable ? "enable" : "disable");
 	spin_lock_irqsave(&geth->irq_lock, flags);
 
 	mask = GMAC0_IRQ0_2 << (netdev->dev_id * 2);
@@ -1363,24 +1445,28 @@ static unsigned int gmac_rx(struct net_device *netdev, unsigned int budget)
 	unsigned short m = (1 << port->rxq_order) - 1;
 	struct gemini_ethernet *geth = port->geth;
 	void __iomem *ptr_reg = port->rxq_rwptr;
+	unsigned int frag_nr = port->rx_frag_nr;
+	struct sk_buff *skb = port->rx_skb;
 	unsigned int frame_len, frag_len;
 	struct gmac_rxdesc *rx = NULL;
 	struct gmac_queue_page *gpage;
-	static struct sk_buff *skb;
 	union gmac_rxdesc_0 word0;
 	union gmac_rxdesc_1 word1;
 	union gmac_rxdesc_3 word3;
 	struct page *page = NULL;
 	unsigned int page_offs;
+	unsigned long flags;
 	unsigned short r, w;
 	union dma_rwptr rw;
 	dma_addr_t mapping;
-	int frag_nr = 0;
 
+	spin_lock_irqsave(&geth->irq_lock, flags);
 	rw.bits32 = readl(ptr_reg);
 	/* Reset interrupt as all packages until here are taken into account */
 	writel(DEFAULT_Q0_INT_BIT << netdev->dev_id,
 	       geth->base + GLOBAL_INTERRUPT_STATUS_1_REG);
+	spin_unlock_irqrestore(&geth->irq_lock, flags);
+
 	r = rw.bits.rptr;
 	w = rw.bits.wptr;
 
@@ -1408,6 +1494,12 @@ static unsigned int gmac_rx(struct net_device *netdev, unsigned int budget)
 		gpage = gmac_get_queue_page(geth, port, mapping + PAGE_SIZE);
 		if (!gpage) {
 			dev_err(geth->dev, "could not find mapping\n");
+			port->stats.rx_dropped++;
+			if (skb) {
+				napi_free_frags(&port->napi);
+				skb = NULL;
+				frag_nr = 0;
+			}
 			continue;
 		}
 		page = gpage->page;
@@ -1416,6 +1508,8 @@ static unsigned int gmac_rx(struct net_device *netdev, unsigned int budget)
 			if (skb) {
 				napi_free_frags(&port->napi);
 				port->stats.rx_dropped++;
+				skb = NULL;
+				frag_nr = 0;
 			}
 
 			skb = gmac_skb_if_good_frame(port, word0, frame_len);
@@ -1450,6 +1544,7 @@ static unsigned int gmac_rx(struct net_device *netdev, unsigned int budget)
 		if (word3.bits32 & EOF_BIT) {
 			napi_gro_frags(&port->napi);
 			skb = NULL;
+			frag_nr = 0;
 			--budget;
 		}
 		continue;
@@ -1458,6 +1553,7 @@ err_drop:
 		if (skb) {
 			napi_free_frags(&port->napi);
 			skb = NULL;
+			frag_nr = 0;
 		}
 
 		if (mapping)
@@ -1466,6 +1562,8 @@ err_drop:
 		port->stats.rx_dropped++;
 	}
 
+	port->rx_skb = skb;
+	port->rx_frag_nr = frag_nr;
 	writew(r, ptr_reg);
 	return budget;
 }
@@ -1683,10 +1781,9 @@ static irqreturn_t gmac_irq(int irq, void *data)
 		gmac_update_hw_stats(netdev);
 
 	if (val & (GMAC0_RX_OVERRUN_INT_BIT << (netdev->dev_id * 8))) {
+		spin_lock(&geth->irq_lock);
 		writel(GMAC0_RXDERR_INT_BIT << (netdev->dev_id * 8),
 		       geth->base + GLOBAL_INTERRUPT_STATUS_4_REG);
-
-		spin_lock(&geth->irq_lock);
 		u64_stats_update_begin(&port->ir_stats_syncp);
 		++port->stats.rx_fifo_errors;
 		u64_stats_update_end(&port->ir_stats_syncp);
@@ -1733,15 +1830,6 @@ static int gmac_open(struct net_device *netdev)
 	struct gemini_ethernet_port *port = netdev_priv(netdev);
 	int err;
 
-	if (!netdev->phydev) {
-		err = gmac_setup_phy(netdev);
-		if (err) {
-			netif_err(port, ifup, netdev,
-				  "PHY init failed: %d\n", err);
-			return err;
-		}
-	}
-
 	err = request_irq(netdev->irq, gmac_irq,
 			  IRQF_SHARED, netdev->name, netdev);
 	if (err) {
@@ -1753,7 +1841,10 @@ static int gmac_open(struct net_device *netdev)
 	phy_start(netdev->phydev);
 
 	err = geth_resize_freeq(port);
-	if (err) {
+	/* It's fine if it's just busy, the other port has set up
+	 * the freeq in that case.
+	 */
+	if (err && (err != -EBUSY)) {
 		netdev_err(netdev, "could not resize freeq\n");
 		goto err_stop_phy;
 	}
@@ -1778,11 +1869,10 @@ static int gmac_open(struct net_device *netdev)
 	gmac_enable_tx_rx(netdev);
 	netif_tx_start_all_queues(netdev);
 
-	hrtimer_init(&port->rx_coalesce_timer, CLOCK_MONOTONIC,
-		     HRTIMER_MODE_REL);
-	port->rx_coalesce_timer.function = &gmac_coalesce_delay_expired;
+	hrtimer_setup(&port->rx_coalesce_timer, &gmac_coalesce_delay_expired, CLOCK_MONOTONIC,
+		      HRTIMER_MODE_REL);
 
-	netdev_info(netdev, "opened\n");
+	netdev_dbg(netdev, "opened\n");
 
 	return 0;
 
@@ -1801,6 +1891,8 @@ static int gmac_stop(struct net_device *netdev)
 	gmac_disable_tx_rx(netdev);
 	gmac_stop_dma(port);
 	napi_disable(&port->napi);
+	port->rx_skb = NULL;
+	port->rx_frag_nr = 0;
 
 	gmac_enable_irq(netdev, 0);
 	gmac_cleanup_rxq(netdev);
@@ -1865,7 +1957,7 @@ static int gmac_set_mac_address(struct net_device *netdev, void *addr)
 {
 	struct sockaddr *sa = addr;
 
-	memcpy(netdev->dev_addr, sa->sa_data, ETH_ALEN);
+	eth_hw_addr_set(netdev, sa->sa_data);
 	gmac_write_mac_address(netdev);
 
 	return 0;
@@ -1941,7 +2033,7 @@ static int gmac_change_mtu(struct net_device *netdev, int new_mtu)
 
 	gmac_disable_tx_rx(netdev);
 
-	netdev->mtu = new_mtu;
+	WRITE_ONCE(netdev->mtu, new_mtu);
 	gmac_update_config0_reg(netdev, max_len << CONFIG0_MAXLEN_SHIFT,
 				CONFIG0_MAXLEN_MASK);
 
@@ -1950,15 +2042,6 @@ static int gmac_change_mtu(struct net_device *netdev, int new_mtu)
 	gmac_enable_tx_rx(netdev);
 
 	return 0;
-}
-
-static netdev_features_t gmac_fix_features(struct net_device *netdev,
-					   netdev_features_t features)
-{
-	if (netdev->mtu + ETH_HLEN + VLAN_HLEN > MTU_SIZE_BIT_MASK)
-		features &= ~GMAC_OFFLOAD_FEATURES;
-
-	return features;
 }
 
 static int gmac_set_features(struct net_device *netdev,
@@ -2080,13 +2163,27 @@ static void gmac_get_pauseparam(struct net_device *netdev,
 	pparam->autoneg = true;
 }
 
+static int gmac_set_pauseparam(struct net_device *netdev,
+			       struct ethtool_pauseparam *pparam)
+{
+	struct phy_device *phydev = netdev->phydev;
+
+	if (!pparam->autoneg)
+		return -EOPNOTSUPP;
+
+	phy_set_asym_pause(phydev, pparam->rx_pause, pparam->tx_pause);
+
+	return 0;
+}
+
 static void gmac_get_ringparam(struct net_device *netdev,
-			       struct ethtool_ringparam *rp)
+			       struct ethtool_ringparam *rp,
+			       struct kernel_ethtool_ringparam *kernel_rp,
+			       struct netlink_ext_ack *extack)
 {
 	struct gemini_ethernet_port *port = netdev_priv(netdev);
-	union gmac_config0 config0;
 
-	config0.bits32 = readl(port->gmac_base + GMAC_CONFIG0);
+	readl(port->gmac_base + GMAC_CONFIG0);
 
 	rp->rx_max_pending = 1 << 15;
 	rp->rx_mini_max_pending = 0;
@@ -2100,7 +2197,9 @@ static void gmac_get_ringparam(struct net_device *netdev,
 }
 
 static int gmac_set_ringparam(struct net_device *netdev,
-			      struct ethtool_ringparam *rp)
+			      struct ethtool_ringparam *rp,
+			      struct kernel_ethtool_ringparam *kernel_rp,
+			      struct netlink_ext_ack *extack)
 {
 	struct gemini_ethernet_port *port = netdev_priv(netdev);
 	int err = 0;
@@ -2121,7 +2220,9 @@ static int gmac_set_ringparam(struct net_device *netdev,
 }
 
 static int gmac_get_coalesce(struct net_device *netdev,
-			     struct ethtool_coalesce *ecmd)
+			     struct ethtool_coalesce *ecmd,
+			     struct kernel_ethtool_coalesce *kernel_coal,
+			     struct netlink_ext_ack *extack)
 {
 	struct gemini_ethernet_port *port = netdev_priv(netdev);
 
@@ -2133,7 +2234,9 @@ static int gmac_get_coalesce(struct net_device *netdev,
 }
 
 static int gmac_set_coalesce(struct net_device *netdev,
-			     struct ethtool_coalesce *ecmd)
+			     struct ethtool_coalesce *ecmd,
+			     struct kernel_ethtool_coalesce *kernel_coal,
+			     struct netlink_ext_ack *extack)
 {
 	struct gemini_ethernet_port *port = netdev_priv(netdev);
 
@@ -2166,13 +2269,11 @@ static void gmac_get_drvinfo(struct net_device *netdev,
 			     struct ethtool_drvinfo *info)
 {
 	strcpy(info->driver,  DRV_NAME);
-	strcpy(info->version, DRV_VERSION);
 	strcpy(info->bus_info, netdev->dev_id ? "1" : "0");
 }
 
 static const struct net_device_ops gmac_351x_ops = {
 	.ndo_init		= gmac_init,
-	.ndo_uninit		= gmac_uninit,
 	.ndo_open		= gmac_open,
 	.ndo_stop		= gmac_stop,
 	.ndo_start_xmit		= gmac_start_xmit,
@@ -2181,11 +2282,12 @@ static const struct net_device_ops gmac_351x_ops = {
 	.ndo_set_mac_address	= gmac_set_mac_address,
 	.ndo_get_stats64	= gmac_get_stats64,
 	.ndo_change_mtu		= gmac_change_mtu,
-	.ndo_fix_features	= gmac_fix_features,
 	.ndo_set_features	= gmac_set_features,
 };
 
 static const struct ethtool_ops gmac_351x_ethtool_ops = {
+	.supported_coalesce_params = ETHTOOL_COALESCE_RX_USECS |
+				     ETHTOOL_COALESCE_MAX_FRAMES,
 	.get_sset_count	= gmac_get_sset_count,
 	.get_strings	= gmac_get_strings,
 	.get_ethtool_stats = gmac_get_ethtool_stats,
@@ -2194,6 +2296,7 @@ static const struct ethtool_ops gmac_351x_ethtool_ops = {
 	.set_link_ksettings = gmac_set_ksettings,
 	.nway_reset	= gmac_nway_reset,
 	.get_pauseparam	= gmac_get_pauseparam,
+	.set_pauseparam = gmac_set_pauseparam,
 	.get_ringparam	= gmac_get_ringparam,
 	.set_ringparam	= gmac_set_ringparam,
 	.get_coalesce	= gmac_get_coalesce,
@@ -2256,14 +2359,24 @@ static irqreturn_t gemini_port_irq(int irq, void *data)
 
 static void gemini_port_remove(struct gemini_ethernet_port *port)
 {
-	if (port->netdev)
+	if (port->netdev) {
+		phy_disconnect(port->netdev->phydev);
 		unregister_netdev(port->netdev);
+	}
 	clk_disable_unprepare(port->pclk);
 	geth_cleanup_freeq(port->geth);
 }
 
 static void gemini_ethernet_init(struct gemini_ethernet *geth)
 {
+	/* Only do this once both ports are online */
+	if (geth->initialized)
+		return;
+	if (geth->port0 && geth->port1)
+		geth->initialized = true;
+	else
+		return;
+
 	writel(0, geth->base + GLOBAL_INTERRUPT_ENABLE_0_REG);
 	writel(0, geth->base + GLOBAL_INTERRUPT_ENABLE_1_REG);
 	writel(0, geth->base + GLOBAL_INTERRUPT_ENABLE_2_REG);
@@ -2319,13 +2432,13 @@ static void gemini_port_save_mac_addr(struct gemini_ethernet_port *port)
 static int gemini_ethernet_port_probe(struct platform_device *pdev)
 {
 	char *port_names[2] = { "ethernet0", "ethernet1" };
+	struct device_node *np = pdev->dev.of_node;
 	struct gemini_ethernet_port *port;
 	struct device *dev = &pdev->dev;
 	struct gemini_ethernet *geth;
 	struct net_device *netdev;
-	struct resource *gmacres;
-	struct resource *dmares;
 	struct device *parent;
+	u8 mac[ETH_ALEN];
 	unsigned int id;
 	int irq;
 	int ret;
@@ -2342,7 +2455,7 @@ static int gemini_ethernet_port_probe(struct platform_device *pdev)
 
 	dev_info(dev, "probe %s ID %d\n", dev_name(dev), id);
 
-	netdev = alloc_etherdev_mq(sizeof(*port), TX_QUEUE_NUM);
+	netdev = devm_alloc_etherdev_mqs(dev, sizeof(*port), TX_QUEUE_NUM, TX_QUEUE_NUM);
 	if (!netdev) {
 		dev_err(dev, "Can't allocate ethernet device #%d\n", id);
 		return -ENOMEM;
@@ -2354,33 +2467,26 @@ static int gemini_ethernet_port_probe(struct platform_device *pdev)
 	port->id = id;
 	port->geth = geth;
 	port->dev = dev;
+	port->msg_enable = netif_msg_init(debug, DEFAULT_MSG_ENABLE);
 
 	/* DMA memory */
-	dmares = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!dmares) {
-		dev_err(dev, "no DMA resource\n");
-		return -ENODEV;
-	}
-	port->dma_base = devm_ioremap_resource(dev, dmares);
-	if (IS_ERR(port->dma_base))
+	port->dma_base = devm_platform_get_and_ioremap_resource(pdev, 0, NULL);
+	if (IS_ERR(port->dma_base)) {
+		dev_err(dev, "get DMA address failed\n");
 		return PTR_ERR(port->dma_base);
+	}
 
 	/* GMAC config memory */
-	gmacres = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	if (!gmacres) {
-		dev_err(dev, "no GMAC resource\n");
-		return -ENODEV;
-	}
-	port->gmac_base = devm_ioremap_resource(dev, gmacres);
-	if (IS_ERR(port->gmac_base))
+	port->gmac_base = devm_platform_get_and_ioremap_resource(pdev, 1, NULL);
+	if (IS_ERR(port->gmac_base)) {
+		dev_err(dev, "get GMAC address failed\n");
 		return PTR_ERR(port->gmac_base);
+	}
 
 	/* Interrupt */
 	irq = platform_get_irq(pdev, 0);
-	if (irq <= 0) {
-		dev_err(dev, "no IRQ\n");
-		return irq ? irq : -ENODEV;
-	}
+	if (irq < 0)
+		return irq;
 	port->irq = irq;
 
 	/* Clock the port */
@@ -2400,7 +2506,8 @@ static int gemini_ethernet_port_probe(struct platform_device *pdev)
 	port->reset = devm_reset_control_get_exclusive(dev, NULL);
 	if (IS_ERR(port->reset)) {
 		dev_err(dev, "no reset\n");
-		return PTR_ERR(port->reset);
+		ret = PTR_ERR(port->reset);
+		goto unprepare;
 	}
 	reset_control_reset(port->reset);
 	usleep_range(100, 500);
@@ -2410,6 +2517,10 @@ static int gemini_ethernet_port_probe(struct platform_device *pdev)
 		geth->port0 = port;
 	else
 		geth->port1 = port;
+
+	/* This will just be done once both ports are up and reset */
+	gemini_ethernet_init(geth);
+
 	platform_set_drvdata(pdev, port);
 
 	/* Set up and register the netdev */
@@ -2423,19 +2534,30 @@ static int gemini_ethernet_port_probe(struct platform_device *pdev)
 
 	netdev->hw_features = GMAC_OFFLOAD_FEATURES;
 	netdev->features |= GMAC_OFFLOAD_FEATURES | NETIF_F_GRO;
+	/* We can receive jumbo frames up to 10236 bytes but only
+	 * transmit 2047 bytes so, let's accept payloads of 2047
+	 * bytes minus VLAN and ethernet header
+	 */
+	netdev->min_mtu = ETH_MIN_MTU;
+	netdev->max_mtu = MTU_SIZE_BIT_MASK - VLAN_ETH_HLEN;
 
 	port->freeq_refill = 0;
-	netif_napi_add(netdev, &port->napi, gmac_napi_poll,
-		       DEFAULT_NAPI_WEIGHT);
+	netif_napi_add(netdev, &port->napi, gmac_napi_poll);
+
+	ret = of_get_mac_address(np, mac);
+	if (!ret) {
+		dev_info(dev, "Setting macaddr from DT %pM\n", mac);
+		memcpy(port->mac_addr, mac, ETH_ALEN);
+	}
 
 	if (is_valid_ether_addr((void *)port->mac_addr)) {
-		memcpy(netdev->dev_addr, port->mac_addr, ETH_ALEN);
+		eth_hw_addr_set(netdev, (u8 *)port->mac_addr);
 	} else {
 		dev_dbg(dev, "ethernet address 0x%08x%08x%08x invalid\n",
 			port->mac_addr[0], port->mac_addr[1],
 			port->mac_addr[2]);
 		dev_info(dev, "using a random ethernet address\n");
-		random_ether_addr(netdev->dev_addr);
+		eth_hw_addr_random(netdev);
 	}
 	gmac_write_mac_address(netdev);
 
@@ -2447,32 +2569,31 @@ static int gemini_ethernet_port_probe(struct platform_device *pdev)
 					port_names[port->id],
 					port);
 	if (ret)
-		return ret;
+		goto unprepare;
 
-	ret = register_netdev(netdev);
-	if (!ret) {
-		netdev_info(netdev,
-			    "irq %d, DMA @ 0x%pap, GMAC @ 0x%pap\n",
-			    port->irq, &dmares->start,
-			    &gmacres->start);
-		ret = gmac_setup_phy(netdev);
-		if (ret)
-			netdev_info(netdev,
-				    "PHY init failed, deferring to ifup time\n");
-		return 0;
+	ret = gmac_setup_phy(netdev);
+	if (ret) {
+		netdev_err(netdev,
+			   "PHY init failed\n");
+		goto unprepare;
 	}
 
-	port->netdev = NULL;
-	free_netdev(netdev);
+	ret = register_netdev(netdev);
+	if (ret)
+		goto unprepare;
+
+	return 0;
+
+unprepare:
+	clk_disable_unprepare(port->pclk);
 	return ret;
 }
 
-static int gemini_ethernet_port_remove(struct platform_device *pdev)
+static void gemini_ethernet_port_remove(struct platform_device *pdev)
 {
 	struct gemini_ethernet_port *port = platform_get_drvdata(pdev);
 
 	gemini_port_remove(port);
-	return 0;
 }
 
 static const struct of_device_id gemini_ethernet_port_of_match[] = {
@@ -2486,7 +2607,7 @@ MODULE_DEVICE_TABLE(of, gemini_ethernet_port_of_match);
 static struct platform_driver gemini_ethernet_port_driver = {
 	.driver = {
 		.name = "gemini-ethernet-port",
-		.of_match_table = of_match_ptr(gemini_ethernet_port_of_match),
+		.of_match_table = gemini_ethernet_port_of_match,
 	},
 	.probe = gemini_ethernet_port_probe,
 	.remove = gemini_ethernet_port_remove,
@@ -2497,17 +2618,13 @@ static int gemini_ethernet_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct gemini_ethernet *geth;
 	unsigned int retry = 5;
-	struct resource *res;
 	u32 val;
 
 	/* Global registers */
 	geth = devm_kzalloc(dev, sizeof(*geth), GFP_KERNEL);
 	if (!geth)
 		return -ENOMEM;
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res)
-		return -ENODEV;
-	geth->base = devm_ioremap_resource(dev, res);
+	geth->base = devm_platform_get_and_ioremap_resource(pdev, 0, NULL);
 	if (IS_ERR(geth->base))
 		return PTR_ERR(geth->base);
 	geth->dev = dev;
@@ -2527,7 +2644,6 @@ static int gemini_ethernet_probe(struct platform_device *pdev)
 
 	spin_lock_init(&geth->irq_lock);
 	spin_lock_init(&geth->freeq_lock);
-	gemini_ethernet_init(geth);
 
 	/* The children will use this */
 	platform_set_drvdata(pdev, geth);
@@ -2536,14 +2652,12 @@ static int gemini_ethernet_probe(struct platform_device *pdev)
 	return devm_of_platform_populate(dev);
 }
 
-static int gemini_ethernet_remove(struct platform_device *pdev)
+static void gemini_ethernet_remove(struct platform_device *pdev)
 {
 	struct gemini_ethernet *geth = platform_get_drvdata(pdev);
 
-	gemini_ethernet_init(geth);
 	geth_cleanup_freeq(geth);
-
-	return 0;
+	geth->initialized = false;
 }
 
 static const struct of_device_id gemini_ethernet_of_match[] = {
@@ -2557,7 +2671,7 @@ MODULE_DEVICE_TABLE(of, gemini_ethernet_of_match);
 static struct platform_driver gemini_ethernet_driver = {
 	.driver = {
 		.name = DRV_NAME,
-		.of_match_table = of_match_ptr(gemini_ethernet_of_match),
+		.of_match_table = gemini_ethernet_of_match,
 	},
 	.probe = gemini_ethernet_probe,
 	.remove = gemini_ethernet_remove,

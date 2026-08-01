@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * iptables module for DCCP protocol header matching
  *
  * (C) 2005 by Harald Welte <laforge@netfilter.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -65,10 +62,10 @@ dccp_find_option(u_int8_t option,
 			return true;
 		}
 
-		if (op[i] < 2)
+		if (op[i] < 2 || i == optlen - 1)
 			i++;
 		else
-			i += op[i+1]?:1;
+			i += op[i + 1] ? : 1;
 	}
 
 	spin_unlock_bh(&dccp_buflock);
@@ -161,6 +158,9 @@ static struct xt_match dccp_mt_reg[] __read_mostly = {
 static int __init dccp_mt_init(void)
 {
 	int ret;
+
+	pr_warn_once("The DCCP match is deprecated and scheduled to be removed in 2027.\n"
+		     "Please contact the netfilter-devel mailing list or update your iptables rules\n");
 
 	/* doff is 8 bits, so the maximum option size is (4*256).  Don't put
 	 * this in BSS since DaveM is worried about locked TLB's for kernel

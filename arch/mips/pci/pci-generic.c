@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2016 Imagination Technologies
  * Author: Paul Burton <paul.burton@mips.com>
  *
  * pcibios_align_resource taken from arch/arm/kernel/bios32.c.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/pci.h>
@@ -26,7 +22,8 @@
  * which might have be mirrored at 0x0100-0x03ff..
  */
 resource_size_t pcibios_align_resource(void *data, const struct resource *res,
-				resource_size_t size, resource_size_t align)
+				       const struct resource *empty_res,
+				       resource_size_t size, resource_size_t align)
 {
 	struct pci_dev *dev = data;
 	resource_size_t start = res->start;
@@ -35,13 +32,14 @@ resource_size_t pcibios_align_resource(void *data, const struct resource *res,
 	if (res->flags & IORESOURCE_IO && start & 0x300)
 		start = (start + 0x3ff) & ~0x3ff;
 
-	start = (start + align - 1) & ~(align - 1);
-
 	host_bridge = pci_find_host_bridge(dev->bus);
 
 	if (host_bridge->align_resource)
 		return host_bridge->align_resource(dev, res,
 				start, size, align);
+
+	if (res->flags & IORESOURCE_MEM)
+		return pci_align_resource(dev, res, empty_res, size, align);
 
 	return start;
 }
@@ -50,3 +48,19 @@ void pcibios_fixup_bus(struct pci_bus *bus)
 {
 	pci_read_bridge_bases(bus);
 }
+
+#ifdef pci_remap_iospace
+int pci_remap_iospace(const struct resource *res, phys_addr_t phys_addr)
+{
+	unsigned long vaddr;
+
+	if (res->start != 0) {
+		WARN_ONCE(1, "resource start address is not zero\n");
+		return -ENODEV;
+	}
+
+	vaddr = (unsigned long)ioremap(phys_addr, resource_size(res));
+	set_io_port_base(vaddr);
+	return 0;
+}
+#endif

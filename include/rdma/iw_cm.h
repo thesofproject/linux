@@ -1,35 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB */
 /*
  * Copyright (c) 2005 Network Appliance, Inc. All rights reserved.
  * Copyright (c) 2005 Open Grid Computing, Inc. All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * OpenIB.org BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
+
 #ifndef IW_CM_H
 #define IW_CM_H
 
@@ -59,8 +33,8 @@ struct iw_cm_event {
 };
 
 /**
- * iw_cm_handler - Function to be called by the IW CM when delivering events
- * to the client.
+ * typedef iw_cm_handler - Function to be called by the IW CM when delivering
+ * events to the client.
  *
  * @cm_id: The IW CM identifier associated with the event.
  * @event: Pointer to the event structure.
@@ -69,9 +43,9 @@ typedef int (*iw_cm_handler)(struct iw_cm_id *cm_id,
 			     struct iw_cm_event *event);
 
 /**
- * iw_event_handler - Function called by the provider when delivering provider
- * events to the IW CM.  Returns either 0 indicating the event was processed
- * or -errno if the event could not be processed.
+ * typedef iw_event_handler - Function called by the provider when delivering
+ * provider events to the IW CM.  Returns either 0 indicating the event was
+ * processed or -errno if the event could not be processed.
  *
  * @cm_id: The IW CM identifier associated with the event.
  * @event: Pointer to the event structure.
@@ -94,7 +68,9 @@ struct iw_cm_id {
 	void (*add_ref)(struct iw_cm_id *);
 	void (*rem_ref)(struct iw_cm_id *);
 	u8  tos;
-	bool mapped;
+	bool tos_set:1;
+	bool mapped:1;
+	bool afonly:1;
 };
 
 struct iw_cm_conn_param {
@@ -105,35 +81,23 @@ struct iw_cm_conn_param {
 	u32 qpn;
 };
 
-struct iw_cm_verbs {
-	void		(*add_ref)(struct ib_qp *qp);
+enum iw_flags {
 
-	void		(*rem_ref)(struct ib_qp *qp);
-
-	struct ib_qp *	(*get_qp)(struct ib_device *device,
-				  int qpn);
-
-	int		(*connect)(struct iw_cm_id *cm_id,
-				   struct iw_cm_conn_param *conn_param);
-
-	int		(*accept)(struct iw_cm_id *cm_id,
-				  struct iw_cm_conn_param *conn_param);
-
-	int		(*reject)(struct iw_cm_id *cm_id,
-				  const void *pdata, u8 pdata_len);
-
-	int		(*create_listen)(struct iw_cm_id *cm_id,
-					 int backlog);
-
-	int		(*destroy_listen)(struct iw_cm_id *cm_id);
-	char		ifname[IFNAMSIZ];
+	/*
+	 * This flag allows the iwcm and iwpmd to still advertise
+	 * mappings but the real and mapped port numbers are the
+	 * same.  Further, iwpmd will not bind any user socket to
+	 * reserve the port.  This is required for soft iwarp
+	 * to play in the port mapped iwarp space.
+	 */
+	IW_F_NO_PORT_MAP = (1 << 0),
 };
 
 /**
  * iw_create_cm_id - Create an IW CM identifier.
  *
  * @device: The IB device on which to create the IW CM identier.
- * @event_handler: User callback invoked to report events associated with the
+ * @cm_handler: User callback invoked to report events associated with the
  *   returned IW CM identifier.
  * @context: User specified context associated with the id.
  */
@@ -149,27 +113,6 @@ struct iw_cm_id *iw_create_cm_id(struct ib_device *device,
  * this function returns.
  */
 void iw_destroy_cm_id(struct iw_cm_id *cm_id);
-
-/**
- * iw_cm_bind_qp - Unbind the specified IW CM identifier and QP
- *
- * @cm_id: The IW CM idenfier to unbind from the QP.
- * @qp: The QP
- *
- * This is called by the provider when destroying the QP to ensure
- * that any references held by the IWCM are released. It may also
- * be called by the IWCM when destroying a CM_ID to that any
- * references held by the provider are released.
- */
-void iw_cm_unbind_qp(struct iw_cm_id *cm_id, struct ib_qp *qp);
-
-/**
- * iw_cm_get_qp - Return the ib_qp associated with a QPN
- *
- * @ib_device: The IB device
- * @qpn: The queue pair number
- */
-struct ib_qp *iw_cm_get_qp(struct ib_device *device, int qpn);
 
 /**
  * iw_cm_listen - Listen for incoming connection requests on the
@@ -204,7 +147,7 @@ int iw_cm_accept(struct iw_cm_id *cm_id, struct iw_cm_conn_param *iw_param);
  * iw_cm_reject - Reject an incoming connection request.
  *
  * @cm_id: Connection identifier associated with the request.
- * @private_daa: Pointer to data to deliver to the remote peer as part of the
+ * @private_data: Pointer to data to deliver to the remote peer as part of the
  *   reject message.
  * @private_data_len: The number of bytes in the private_data parameter.
  *

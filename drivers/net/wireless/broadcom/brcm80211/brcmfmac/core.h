@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2010 Broadcom Corporation
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 /****************
@@ -23,6 +12,12 @@
 
 #include <net/cfg80211.h>
 #include "fweh.h"
+
+#if IS_MODULE(CONFIG_BRCMFMAC)
+#define BRCMF_EXPORT_SYMBOL_GPL(__sym)	EXPORT_SYMBOL_NS_GPL(__sym, "BRCMFMAC")
+#else
+#define BRCMF_EXPORT_SYMBOL_GPL(__sym)
+#endif
 
 #define TOE_TX_CSUM_OL		0x00000001
 #define TOE_RX_CSUM_OL		0x00000002
@@ -36,7 +31,7 @@
 #define BRCMF_DCMD_MEDLEN	1536
 #define BRCMF_DCMD_MAXLEN	8192
 
-/* IOCTL from host to device are limited in lenght. A device can only handle
+/* IOCTL from host to device are limited in length. A device can only handle
  * ethernet frame size. This limitation is to be applied by protocol layer.
  */
 #define BRCMF_TX_IOCTL_MAX_MSG_SIZE	(ETH_FRAME_LEN+ETH_FCS_LEN)
@@ -53,26 +48,26 @@
 /**
  * struct brcmf_ampdu_rx_reorder - AMPDU receive reorder info
  *
- * @pktslots: dynamic allocated array for ordering AMPDU packets.
  * @flow_id: AMPDU flow identifier.
  * @cur_idx: last AMPDU index from firmware.
  * @exp_idx: expected next AMPDU index.
  * @max_idx: maximum amount of packets per AMPDU.
  * @pend_pkts: number of packets currently in @pktslots.
+ * @pktslots: array for ordering AMPDU packets.
  */
 struct brcmf_ampdu_rx_reorder {
-	struct sk_buff **pktslots;
 	u8 flow_id;
 	u8 cur_idx;
 	u8 exp_idx;
 	u8 max_idx;
 	u8 pend_pkts;
+	struct sk_buff *pktslots[];
 };
 
 /* Forward decls for struct brcmf_pub (see below) */
 struct brcmf_proto;	/* device communication protocol info */
 struct brcmf_fws_info;	/* firmware signalling info */
-struct brcmf_mp_device;	/* module paramateres, device specific */
+struct brcmf_mp_device;	/* module parameters, device specific */
 
 /*
  * struct brcmf_rev_info
@@ -108,6 +103,7 @@ struct brcmf_pub {
 	struct brcmf_bus *bus_if;
 	struct brcmf_proto *proto;
 	struct wiphy *wiphy;
+	struct cfg80211_ops *ops;
 	struct brcmf_cfg80211_info *config;
 
 	/* Internal brcmf items */
@@ -121,11 +117,12 @@ struct brcmf_pub {
 
 	struct brcmf_if *iflist[BRCMF_MAX_IFS];
 	s32 if2bss[BRCMF_MAX_IFS];
+	struct brcmf_if *mon_if;
 
 	struct mutex proto_block;
 	unsigned char proto_buf[BRCMF_DCMD_MAXLEN];
 
-	struct brcmf_fweh_info fweh;
+	struct brcmf_fweh_info *fweh;
 
 	struct brcmf_ampdu_rx_reorder
 		*reorder_flows[BRCMF_AMPDU_RX_REORDER_MAXFLOWS];
@@ -142,7 +139,12 @@ struct brcmf_pub {
 	struct notifier_block inet6addr_notifier;
 	struct brcmf_mp_device *settings;
 
+	struct work_struct bus_reset;
+
 	u8 clmver[BRCMF_DCMD_SMLEN];
+	u8 sta_mac_idx;
+	const struct brcmf_fwvid_ops *vops;
+	void *vdata;
 };
 
 /* forward declarations */
@@ -208,14 +210,17 @@ int brcmf_netdev_wait_pend8021x(struct brcmf_if *ifp);
 char *brcmf_ifname(struct brcmf_if *ifp);
 struct brcmf_if *brcmf_get_ifp(struct brcmf_pub *drvr, int ifidx);
 void brcmf_configure_arp_nd_offload(struct brcmf_if *ifp, bool enable);
-int brcmf_net_attach(struct brcmf_if *ifp, bool rtnl_locked);
+int brcmf_net_attach(struct brcmf_if *ifp, bool locked);
 struct brcmf_if *brcmf_add_if(struct brcmf_pub *drvr, s32 bsscfgidx, s32 ifidx,
 			      bool is_p2pdev, const char *name, u8 *mac_addr);
-void brcmf_remove_interface(struct brcmf_if *ifp, bool rtnl_locked);
+void brcmf_remove_interface(struct brcmf_if *ifp, bool locked);
 void brcmf_txflowblock_if(struct brcmf_if *ifp,
 			  enum brcmf_netif_stop_reason reason, bool state);
 void brcmf_txfinalize(struct brcmf_if *ifp, struct sk_buff *txp, bool success);
 void brcmf_netif_rx(struct brcmf_if *ifp, struct sk_buff *skb);
+void brcmf_netif_mon_rx(struct brcmf_if *ifp, struct sk_buff *skb);
+void brcmf_net_detach(struct net_device *ndev, bool locked);
+int brcmf_net_mon_attach(struct brcmf_if *ifp);
 void brcmf_net_setcarrier(struct brcmf_if *ifp, bool on);
 int __init brcmf_core_init(void);
 void __exit brcmf_core_exit(void);

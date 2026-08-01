@@ -14,12 +14,14 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/irq.h>
+#include <linux/irqdomain.h>
 #include <linux/interrupt.h>
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
 #include <linux/spinlock.h>
 
 #include <asm/byteorder.h>
 #include <asm/io.h>
-#include <asm/prom.h>
 #include <asm/irq.h>
 
 #include "ge_pic.h"
@@ -150,7 +152,7 @@ static struct irq_chip gef_pic_chip = {
 };
 
 
-/* When an interrupt is being configured, this call allows some flexibilty
+/* When an interrupt is being configured, this call allows some flexibility
  * in deciding which irq_chip structure is used
  */
 static int gef_pic_host_map(struct irq_domain *h, unsigned int virq,
@@ -212,8 +214,9 @@ void __init gef_pic_init(struct device_node *np)
 	}
 
 	/* Setup an irq_domain structure */
-	gef_pic_irq_host = irq_domain_add_linear(np, GEF_PIC_NUM_IRQS,
-					  &gef_pic_host_ops, NULL);
+	gef_pic_irq_host = irq_domain_create_linear(of_fwnode_handle(np),
+						    GEF_PIC_NUM_IRQS,
+						    &gef_pic_host_ops, NULL);
 	if (gef_pic_irq_host == NULL)
 		return;
 
@@ -242,7 +245,7 @@ unsigned int gef_pic_get_irq(void)
 			if (active & (0x1 << hwirq))
 				break;
 		}
-		virq = irq_linear_revmap(gef_pic_irq_host,
+		virq = irq_find_mapping(gef_pic_irq_host,
 			(irq_hw_number_t)hwirq);
 	}
 

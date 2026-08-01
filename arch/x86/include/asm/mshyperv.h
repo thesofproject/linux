@@ -3,148 +3,83 @@
 #define _ASM_X86_MSHYPER_H
 
 #include <linux/types.h>
-#include <linux/atomic.h>
 #include <linux/nmi.h>
-#include <asm/io.h>
-#include <asm/hyperv-tlfs.h>
+#include <linux/msi.h>
+#include <linux/io.h>
+#include <linux/static_call.h>
 #include <asm/nospec-branch.h>
-
-struct ms_hyperv_info {
-	u32 features;
-	u32 misc_features;
-	u32 hints;
-	u32 nested_features;
-	u32 max_vp_index;
-	u32 max_lp_index;
-};
-
-extern struct ms_hyperv_info ms_hyperv;
-
+#include <asm/msr.h>
+#include <hyperv/hvhdk.h>
+#include <asm/fpu/types.h>
 
 /*
- * Generate the guest ID.
+ * Hyper-V always provides a single IO-APIC at this MMIO address.
+ * Ideally, the value should be looked up in ACPI tables, but it
+ * is needed for mapping the IO-APIC early in boot on Confidential
+ * VMs, before ACPI functions can be used.
  */
+#define HV_IOAPIC_BASE_ADDRESS 0xfec00000
 
-static inline  __u64 generate_guest_id(__u64 d_info1, __u64 kernel_version,
-				       __u64 d_info2)
-{
-	__u64 guest_id = 0;
+#define HV_VTL_NORMAL 0x0
+#define HV_VTL_SECURE 0x1
+#define HV_VTL_MGMT   0x2
 
-	guest_id = (((__u64)HV_LINUX_VENDOR_ID) << 48);
-	guest_id |= (d_info1 << 48);
-	guest_id |= (kernel_version << 16);
-	guest_id |= d_info2;
+union hv_ghcb;
 
-	return guest_id;
-}
+DECLARE_STATIC_KEY_FALSE(isolation_type_snp);
+DECLARE_STATIC_KEY_FALSE(isolation_type_tdx);
 
+typedef int (*hyperv_fill_flush_list_func)(
+		struct hv_guest_mapping_flush_list *flush,
+		void *data);
 
-/* Free the message slot and signal end-of-message if required */
-static inline void vmbus_signal_eom(struct hv_message *msg, u32 old_msg_type)
-{
-	/*
-	 * On crash we're reading some other CPU's message page and we need
-	 * to be careful: this other CPU may already had cleared the header
-	 * and the host may already had delivered some other message there.
-	 * In case we blindly write msg->header.message_type we're going
-	 * to lose it. We can still lose a message of the same type but
-	 * we count on the fact that there can only be one
-	 * CHANNELMSG_UNLOAD_RESPONSE and we don't care about other messages
-	 * on crash.
-	 */
-	if (cmpxchg(&msg->header.message_type, old_msg_type,
-		    HVMSG_NONE) != old_msg_type)
-		return;
-
-	/*
-	 * Make sure the write to MessageType (ie set to
-	 * HVMSG_NONE) happens before we read the
-	 * MessagePending and EOMing. Otherwise, the EOMing
-	 * will not deliver any more messages since there is
-	 * no empty slot
-	 */
-	mb();
-
-	if (msg->header.message_flags.msg_pending) {
-		/*
-		 * This will cause message queue rescan to
-		 * possibly deliver another msg from the
-		 * hypervisor
-		 */
-		wrmsrl(HV_X64_MSR_EOM, 0);
-	}
-}
-
-#define hv_init_timer(timer, tick) wrmsrl(timer, tick)
-#define hv_init_timer_config(config, val) wrmsrl(config, val)
-
-#define hv_get_simp(val) rdmsrl(HV_X64_MSR_SIMP, val)
-#define hv_set_simp(val) wrmsrl(HV_X64_MSR_SIMP, val)
-
-#define hv_get_siefp(val) rdmsrl(HV_X64_MSR_SIEFP, val)
-#define hv_set_siefp(val) wrmsrl(HV_X64_MSR_SIEFP, val)
-
-#define hv_get_synic_state(val) rdmsrl(HV_X64_MSR_SCONTROL, val)
-#define hv_set_synic_state(val) wrmsrl(HV_X64_MSR_SCONTROL, val)
-
-#define hv_get_vp_index(index) rdmsrl(HV_X64_MSR_VP_INDEX, index)
-
-#define hv_get_synint_state(int_num, val) rdmsrl(int_num, val)
-#define hv_set_synint_state(int_num, val) wrmsrl(int_num, val)
-
-void hyperv_callback_vector(void);
-void hyperv_reenlightenment_vector(void);
-#ifdef CONFIG_TRACING
-#define trace_hyperv_callback_vector hyperv_callback_vector
-#endif
 void hyperv_vector_handler(struct pt_regs *regs);
-void hv_setup_vmbus_irq(void (*handler)(void));
-void hv_remove_vmbus_irq(void);
 
-void hv_setup_kexec_handler(void (*handler)(void));
-void hv_remove_kexec_handler(void);
-void hv_setup_crash_handler(void (*handler)(struct pt_regs *regs));
-void hv_remove_crash_handler(void);
+static inline unsigned char hv_get_nmi_reason(void)
+{
+	return 0;
+}
 
-/*
- * Routines for stimer0 Direct Mode handling.
- * On x86/x64, there are no percpu actions to take.
- */
-void hv_stimer0_vector_handler(struct pt_regs *regs);
-void hv_stimer0_callback_vector(void);
-int hv_setup_stimer0_irq(int *irq, int *vector, void (*handler)(void));
-void hv_remove_stimer0_irq(int irq);
-
-static inline void hv_enable_stimer0_percpu_irq(int irq) {}
-static inline void hv_disable_stimer0_percpu_irq(int irq) {}
-
+extern u64 hv_tdx_hypercall(u64 control, u64 param1, u64 param2);
+extern u64 hv_snp_hypercall(u64 control, u64 param1, u64 param2);
+extern u64 hv_std_hypercall(u64 control, u64 param1, u64 param2);
 
 #if IS_ENABLED(CONFIG_HYPERV)
-extern struct clocksource *hyperv_cs;
 extern void *hv_hypercall_pg;
 
+extern union hv_ghcb * __percpu *hv_ghcb_pg;
+
+bool hv_isolation_type_snp(void);
+bool hv_isolation_type_tdx(void);
+
+#ifdef CONFIG_X86_64
+DECLARE_STATIC_CALL(hv_hypercall, hv_std_hypercall);
+#endif
+
+/*
+ * DEFAULT INIT GPAT and SEGMENT LIMIT value in struct VMSA
+ * to start AP in enlightened SEV guest.
+ */
+#define HV_AP_INIT_GPAT_DEFAULT		0x0007040600070406ULL
+#define HV_AP_SEGMENT_LIMIT		0xffffffff
+
+/*
+ * If the hypercall involves no input or output parameters, the hypervisor
+ * ignores the corresponding GPA pointer.
+ */
 static inline u64 hv_do_hypercall(u64 control, void *input, void *output)
 {
 	u64 input_address = input ? virt_to_phys(input) : 0;
 	u64 output_address = output ? virt_to_phys(output) : 0;
-	u64 hv_status;
 
 #ifdef CONFIG_X86_64
-	if (!hv_hypercall_pg)
-		return U64_MAX;
-
-	__asm__ __volatile__("mov %4, %%r8\n"
-			     CALL_NOSPEC
-			     : "=a" (hv_status), ASM_CALL_CONSTRAINT,
-			       "+c" (control), "+d" (input_address)
-			     :  "r" (output_address),
-				THUNK_TARGET(hv_hypercall_pg)
-			     : "cc", "memory", "r8", "r9", "r10", "r11");
+	return static_call_mod(hv_hypercall)(control, input_address, output_address);
 #else
 	u32 input_address_hi = upper_32_bits(input_address);
 	u32 input_address_lo = lower_32_bits(input_address);
 	u32 output_address_hi = upper_32_bits(output_address);
 	u32 output_address_lo = lower_32_bits(output_address);
+	u64 hv_status;
 
 	if (!hv_hypercall_pg)
 		return U64_MAX;
@@ -157,81 +92,69 @@ static inline u64 hv_do_hypercall(u64 control, void *input, void *output)
 			       "D"(output_address_hi), "S"(output_address_lo),
 			       THUNK_TARGET(hv_hypercall_pg)
 			     : "cc", "memory");
-#endif /* !x86_64 */
 	return hv_status;
+#endif /* !x86_64 */
 }
 
 /* Fast hypercall with 8 bytes of input and no output */
+static inline u64 _hv_do_fast_hypercall8(u64 control, u64 input1)
+{
+#ifdef CONFIG_X86_64
+	return static_call_mod(hv_hypercall)(control, input1, 0);
+#else
+	u32 input1_hi = upper_32_bits(input1);
+	u32 input1_lo = lower_32_bits(input1);
+	u64 hv_status;
+
+	__asm__ __volatile__ (CALL_NOSPEC
+			      : "=A"(hv_status),
+			      "+c"(input1_lo),
+			      ASM_CALL_CONSTRAINT
+			      :	"A" (control),
+			      "b" (input1_hi),
+			      THUNK_TARGET(hv_hypercall_pg)
+			      : "cc", "edi", "esi");
+	return hv_status;
+#endif
+}
+
 static inline u64 hv_do_fast_hypercall8(u16 code, u64 input1)
 {
-	u64 hv_status, control = (u64)code | HV_HYPERCALL_FAST_BIT;
+	u64 control = (u64)code | HV_HYPERCALL_FAST_BIT;
 
-#ifdef CONFIG_X86_64
-	{
-		__asm__ __volatile__(CALL_NOSPEC
-				     : "=a" (hv_status), ASM_CALL_CONSTRAINT,
-				       "+c" (control), "+d" (input1)
-				     : THUNK_TARGET(hv_hypercall_pg)
-				     : "cc", "r8", "r9", "r10", "r11");
-	}
-#else
-	{
-		u32 input1_hi = upper_32_bits(input1);
-		u32 input1_lo = lower_32_bits(input1);
-
-		__asm__ __volatile__ (CALL_NOSPEC
-				      : "=A"(hv_status),
-					"+c"(input1_lo),
-					ASM_CALL_CONSTRAINT
-				      :	"A" (control),
-					"b" (input1_hi),
-					THUNK_TARGET(hv_hypercall_pg)
-				      : "cc", "edi", "esi");
-	}
-#endif
-		return hv_status;
+	return _hv_do_fast_hypercall8(control, input1);
 }
 
-/*
- * Rep hypercalls. Callers of this functions are supposed to ensure that
- * rep_count and varhead_size comply with Hyper-V hypercall definition.
- */
-static inline u64 hv_do_rep_hypercall(u16 code, u16 rep_count, u16 varhead_size,
-				      void *input, void *output)
+/* Fast hypercall with 16 bytes of input */
+static inline u64 _hv_do_fast_hypercall16(u64 control, u64 input1, u64 input2)
 {
-	u64 control = code;
-	u64 status;
-	u16 rep_comp;
+#ifdef CONFIG_X86_64
+	return static_call_mod(hv_hypercall)(control, input1, input2);
+#else
+	u32 input1_hi = upper_32_bits(input1);
+	u32 input1_lo = lower_32_bits(input1);
+	u32 input2_hi = upper_32_bits(input2);
+	u32 input2_lo = lower_32_bits(input2);
+	u64 hv_status;
 
-	control |= (u64)varhead_size << HV_HYPERCALL_VARHEAD_OFFSET;
-	control |= (u64)rep_count << HV_HYPERCALL_REP_COMP_OFFSET;
-
-	do {
-		status = hv_do_hypercall(control, input, output);
-		if ((status & HV_HYPERCALL_RESULT_MASK) != HV_STATUS_SUCCESS)
-			return status;
-
-		/* Bits 32-43 of status have 'Reps completed' data. */
-		rep_comp = (status & HV_HYPERCALL_REP_COMP_MASK) >>
-			HV_HYPERCALL_REP_COMP_OFFSET;
-
-		control &= ~HV_HYPERCALL_REP_START_MASK;
-		control |= (u64)rep_comp << HV_HYPERCALL_REP_START_OFFSET;
-
-		touch_nmi_watchdog();
-	} while (rep_comp < rep_count);
-
-	return status;
+	__asm__ __volatile__ (CALL_NOSPEC
+			      : "=A"(hv_status),
+			      "+c"(input1_lo), ASM_CALL_CONSTRAINT
+			      :	"A" (control), "b" (input1_hi),
+			      "D"(input2_hi), "S"(input2_lo),
+			      THUNK_TARGET(hv_hypercall_pg)
+			      : "cc");
+	return hv_status;
+#endif
 }
 
-/*
- * Hypervisor's notion of virtual processor ID is different from
- * Linux' notion of CPU ID. This information can only be retrieved
- * in the context of the calling CPU. Setup a map for easy access
- * to this information.
- */
-extern u32 *hv_vp_index;
-extern u32 hv_max_vp_index;
+static inline u64 hv_do_fast_hypercall16(u16 code, u64 input1, u64 input2)
+{
+	u64 control = (u64)code | HV_HYPERCALL_FAST_BIT;
+
+	return _hv_do_fast_hypercall16(control, input1, input2);
+}
+
 extern struct hv_vp_assist_page **hv_vp_assist_page;
 
 static inline struct hv_vp_assist_page *hv_get_vp_assist_page(unsigned int cpu)
@@ -242,37 +165,91 @@ static inline struct hv_vp_assist_page *hv_get_vp_assist_page(unsigned int cpu)
 	return hv_vp_assist_page[cpu];
 }
 
-/**
- * hv_cpu_number_to_vp_number() - Map CPU to VP.
- * @cpu_number: CPU number in Linux terms
- *
- * This function returns the mapping between the Linux processor
- * number and the hypervisor's virtual processor number, useful
- * in making hypercalls and such that talk about specific
- * processors.
- *
- * Return: Virtual processor number in Hyper-V terms
- */
-static inline int hv_cpu_number_to_vp_number(int cpu_number)
-{
-	return hv_vp_index[cpu_number];
-}
-
-void hyperv_init(void);
+void __init hyperv_init(void);
 void hyperv_setup_mmu_ops(void);
-void hyper_alloc_mmu(void);
-void hyperv_report_panic(struct pt_regs *regs, long err);
-bool hv_is_hyperv_initialized(void);
-void hyperv_cleanup(void);
-
-void hyperv_reenlightenment_intr(struct pt_regs *regs);
 void set_hv_tscchange_cb(void (*cb)(void));
 void clear_hv_tscchange_cb(void);
 void hyperv_stop_tsc_emulation(void);
+int hyperv_flush_guest_mapping(u64 as);
+int hyperv_flush_guest_mapping_range(u64 as,
+		hyperv_fill_flush_list_func fill_func, void *data);
+int hyperv_fill_flush_guest_mapping_list(
+		struct hv_guest_mapping_flush_list *flush,
+		u64 start_gfn, u64 end_gfn);
+void hv_sleep_notifiers_register(void);
+void hv_machine_power_off(void);
+
+#ifdef CONFIG_X86_64
+void hv_apic_init(void);
+void __init hv_init_spinlocks(void);
+bool hv_vcpu_is_preempted(int vcpu);
+#else
+static inline void hv_apic_init(void) {}
+#endif
+
+struct irq_domain *hv_create_pci_msi_domain(void);
+
+int hv_map_msi_interrupt(struct irq_data *data,
+			 struct hv_interrupt_entry *out_entry);
+int hv_map_ioapic_interrupt(int ioapic_id, bool level, int vcpu, int vector,
+		struct hv_interrupt_entry *entry);
+int hv_unmap_ioapic_interrupt(int ioapic_id, struct hv_interrupt_entry *entry);
+
+#ifdef CONFIG_AMD_MEM_ENCRYPT
+bool hv_ghcb_negotiate_protocol(void);
+void __noreturn hv_ghcb_terminate(unsigned int set, unsigned int reason);
+int hv_snp_boot_ap(u32 apic_id, unsigned long start_ip, unsigned int cpu);
+#else
+static inline bool hv_ghcb_negotiate_protocol(void) { return false; }
+static inline void hv_ghcb_terminate(unsigned int set, unsigned int reason) {}
+static inline int hv_snp_boot_ap(u32 apic_id, unsigned long start_ip,
+		unsigned int cpu) { return 0; }
+#endif
+
+#if defined(CONFIG_AMD_MEM_ENCRYPT) || defined(CONFIG_INTEL_TDX_GUEST)
+void hv_vtom_init(void);
+void hv_ivm_msr_write(u64 msr, u64 value);
+void hv_ivm_msr_read(u64 msr, u64 *value);
+#else
+static inline void hv_vtom_init(void) {}
+static inline void hv_ivm_msr_write(u64 msr, u64 value) {}
+static inline void hv_ivm_msr_read(u64 msr, u64 *value) {}
+#endif
+
+static inline bool hv_is_synic_msr(unsigned int reg)
+{
+	return (reg >= HV_X64_MSR_SCONTROL) &&
+	       (reg <= HV_X64_MSR_SINT15);
+}
+
+static inline bool hv_is_sint_msr(unsigned int reg)
+{
+	return (reg >= HV_X64_MSR_SINT0) &&
+	       (reg <= HV_X64_MSR_SINT15);
+}
+
+u64 hv_get_msr(unsigned int reg);
+void hv_set_msr(unsigned int reg, u64 value);
+u64 hv_get_non_nested_msr(unsigned int reg);
+void hv_set_non_nested_msr(unsigned int reg, u64 value);
+
+static __always_inline u64 hv_raw_get_msr(unsigned int reg)
+{
+	return native_rdmsrq(reg);
+}
+int hv_apicid_to_vp_index(u32 apic_id);
+
+#if IS_ENABLED(CONFIG_MSHV_ROOT) && IS_ENABLED(CONFIG_CRASH_DUMP)
+void hv_root_crash_init(void);
+void hv_crash_asm32(void);
+void hv_crash_asm64(void);
+void hv_crash_asm_end(void);
+#else   /* CONFIG_MSHV_ROOT && CONFIG_CRASH_DUMP */
+static inline void hv_root_crash_init(void) {}
+#endif  /* CONFIG_MSHV_ROOT && CONFIG_CRASH_DUMP */
+
 #else /* CONFIG_HYPERV */
 static inline void hyperv_init(void) {}
-static inline bool hv_is_hyperv_initialized(void) { return false; }
-static inline void hyperv_cleanup(void) {}
 static inline void hyperv_setup_mmu_ops(void) {}
 static inline void set_hv_tscchange_cb(void (*cb)(void)) {}
 static inline void clear_hv_tscchange_cb(void) {}
@@ -281,75 +258,61 @@ static inline struct hv_vp_assist_page *hv_get_vp_assist_page(unsigned int cpu)
 {
 	return NULL;
 }
+static inline int hyperv_flush_guest_mapping(u64 as) { return -1; }
+static inline int hyperv_flush_guest_mapping_range(u64 as,
+		hyperv_fill_flush_list_func fill_func, void *data)
+{
+	return -1;
+}
+static inline void hv_set_msr(unsigned int reg, u64 value) { }
+static inline u64 hv_get_msr(unsigned int reg) { return 0; }
+static inline void hv_set_non_nested_msr(unsigned int reg, u64 value) { }
+static inline u64 hv_get_non_nested_msr(unsigned int reg) { return 0; }
+static inline int hv_apicid_to_vp_index(u32 apic_id) { return -EINVAL; }
 #endif /* CONFIG_HYPERV */
 
-#ifdef CONFIG_HYPERV_TSCPAGE
-struct ms_hyperv_tsc_page *hv_get_tsc_page(void);
-static inline u64 hv_read_tsc_page_tsc(const struct ms_hyperv_tsc_page *tsc_pg,
-				       u64 *cur_tsc)
-{
-	u64 scale, offset;
-	u32 sequence;
+struct mshv_vtl_cpu_context {
+	union {
+		struct {
+			u64 rax;
+			u64 rcx;
+			u64 rdx;
+			u64 rbx;
+			u64 cr2;
+			u64 rbp;
+			u64 rsi;
+			u64 rdi;
+			u64 r8;
+			u64 r9;
+			u64 r10;
+			u64 r11;
+			u64 r12;
+			u64 r13;
+			u64 r14;
+			u64 r15;
+		};
+		u64 gp_regs[16];
+	};
 
-	/*
-	 * The protocol for reading Hyper-V TSC page is specified in Hypervisor
-	 * Top-Level Functional Specification ver. 3.0 and above. To get the
-	 * reference time we must do the following:
-	 * - READ ReferenceTscSequence
-	 *   A special '0' value indicates the time source is unreliable and we
-	 *   need to use something else. The currently published specification
-	 *   versions (up to 4.0b) contain a mistake and wrongly claim '-1'
-	 *   instead of '0' as the special value, see commit c35b82ef0294.
-	 * - ReferenceTime =
-	 *        ((RDTSC() * ReferenceTscScale) >> 64) + ReferenceTscOffset
-	 * - READ ReferenceTscSequence again. In case its value has changed
-	 *   since our first reading we need to discard ReferenceTime and repeat
-	 *   the whole sequence as the hypervisor was updating the page in
-	 *   between.
-	 */
-	do {
-		sequence = READ_ONCE(tsc_pg->tsc_sequence);
-		if (!sequence)
-			return U64_MAX;
-		/*
-		 * Make sure we read sequence before we read other values from
-		 * TSC page.
-		 */
-		smp_rmb();
+	struct fxregs_state fx_state;
+};
 
-		scale = READ_ONCE(tsc_pg->tsc_scale);
-		offset = READ_ONCE(tsc_pg->tsc_offset);
-		*cur_tsc = rdtsc_ordered();
-
-		/*
-		 * Make sure we read sequence after we read all other values
-		 * from TSC page.
-		 */
-		smp_rmb();
-
-	} while (READ_ONCE(tsc_pg->tsc_sequence) != sequence);
-
-	return mul_u64_u64_shr(*cur_tsc, scale, 64) + offset;
-}
-
-static inline u64 hv_read_tsc_page(const struct ms_hyperv_tsc_page *tsc_pg)
-{
-	u64 cur_tsc;
-
-	return hv_read_tsc_page_tsc(tsc_pg, &cur_tsc);
-}
-
+#ifdef CONFIG_HYPERV_VTL_MODE
+void __init hv_vtl_init_platform(void);
+int __init hv_vtl_early_init(void);
+void mshv_vtl_return_call(struct mshv_vtl_cpu_context *vtl0);
+void mshv_vtl_return_call_init(u64 vtl_return_offset);
+void mshv_vtl_return_hypercall(void);
+void __mshv_vtl_return_call(struct mshv_vtl_cpu_context *vtl0);
 #else
-static inline struct ms_hyperv_tsc_page *hv_get_tsc_page(void)
-{
-	return NULL;
-}
-
-static inline u64 hv_read_tsc_page_tsc(const struct ms_hyperv_tsc_page *tsc_pg,
-				       u64 *cur_tsc)
-{
-	BUG();
-	return U64_MAX;
-}
+static inline void __init hv_vtl_init_platform(void) {}
+static inline int __init hv_vtl_early_init(void) { return 0; }
+static inline void mshv_vtl_return_call(struct mshv_vtl_cpu_context *vtl0) {}
+static inline void mshv_vtl_return_call_init(u64 vtl_return_offset) {}
+static inline void mshv_vtl_return_hypercall(void) {}
+static inline void __mshv_vtl_return_call(struct mshv_vtl_cpu_context *vtl0) {}
 #endif
+
+#include <asm-generic/mshyperv.h>
+
 #endif

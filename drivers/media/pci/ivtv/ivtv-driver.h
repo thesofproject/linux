@@ -1,22 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
     ivtv driver internal defines and structures
     Copyright (C) 2003-2004  Kevin Thayer <nufan_wfk at yahoo.com>
     Copyright (C) 2004  Chris Kennedy <c@groovy.org>
-    Copyright (C) 2005-2007  Hans Verkuil <hverkuil@xs4all.nl>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+    Copyright (C) 2005-2007  Hans Verkuil <hverkuil@kernel.org>
  */
 
 #ifndef IVTV_DRIVER_H
@@ -28,7 +15,6 @@
  * Driver for the cx23415/6 chip.
  * Author: Kevin Thayer (nufan_wfk at yahoo.com)
  * License: GPL
- * http://www.ivtvdriver.org
  *
  * -----
  * MPG600/MPG160 support by  T.Adachi <tadachi@tadachi-net.com>
@@ -58,8 +44,6 @@
 #include <linux/uaccess.h>
 #include <asm/byteorder.h>
 
-#include <linux/dvb/video.h>
-#include <linux/dvb/audio.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-ctrls.h>
@@ -325,6 +309,7 @@ struct ivtv_queue {
 };
 
 struct ivtv;				/* forward reference */
+struct ivtv_open_id;
 
 struct ivtv_stream {
 	/* These first four fields are always set, even if the stream
@@ -333,9 +318,8 @@ struct ivtv_stream {
 	struct ivtv *itv;		/* for ease of use */
 	const char *name;		/* name of the stream */
 	int type;			/* stream type */
-	u32 caps;			/* V4L2 capabilities */
 
-	struct v4l2_fh *fh;		/* pointer to the streaming filehandle */
+	struct ivtv_open_id *id;	/* pointer to the streaming ivtv_open_id */
 	spinlock_t qlock;		/* locks access to the queues */
 	unsigned long s_flags;		/* status flags, see above */
 	int dma;			/* can be PCI_DMA_TODEVICE, PCI_DMA_FROMDEVICE or PCI_DMA_NONE */
@@ -387,9 +371,9 @@ struct ivtv_open_id {
 	struct ivtv *itv;
 };
 
-static inline struct ivtv_open_id *fh2id(struct v4l2_fh *fh)
+static inline struct ivtv_open_id *file2id(struct file *filp)
 {
-	return container_of(fh, struct ivtv_open_id, fh);
+	return container_of(file_to_v4l2_fh(filp), struct ivtv_open_id, fh);
 }
 
 struct yuv_frame_info
@@ -623,6 +607,7 @@ struct ivtv {
 	u32 hw_flags;			/* hardware description of the board */
 	v4l2_std_id tuner_std;		/* the norm of the card's tuner (fixed) */
 	struct v4l2_subdev *sd_video;	/* controlling video decoder subdev */
+	bool sd_video_is_streaming;	/* is video already streaming? */
 	struct v4l2_subdev *sd_audio;	/* controlling audio subdev */
 	struct v4l2_subdev *sd_muxer;	/* controlling audio muxer subdev */
 	resource_size_t base_addr;      /* PCI resource base address */

@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * LED Driver for Dialog DA9052 PMICs.
  *
  * Copyright(c) 2012 Dialog Semiconductor Ltd.
  *
  * Author: David Dajun Chen <dchen@diasemi.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
  */
 
 #include <linux/module.h>
@@ -113,8 +108,8 @@ static int da9052_led_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	led = devm_kzalloc(&pdev->dev,
-			   sizeof(struct da9052_led) * pled->num_leds,
+	led = devm_kcalloc(&pdev->dev,
+			   pled->num_leds, sizeof(struct da9052_led),
 			   GFP_KERNEL);
 	if (!led) {
 		error = -ENOMEM;
@@ -161,7 +156,7 @@ err:
 	return error;
 }
 
-static int da9052_led_remove(struct platform_device *pdev)
+static void da9052_led_remove(struct platform_device *pdev)
 {
 	struct da9052_led *led = platform_get_drvdata(pdev);
 	struct da9052_pdata *pdata;
@@ -177,8 +172,6 @@ static int da9052_led_remove(struct platform_device *pdev)
 		da9052_set_led_brightness(&led[i], LED_OFF);
 		led_classdev_unregister(&led[i].cdev);
 	}
-
-	return 0;
 }
 
 static struct platform_driver da9052_led_driver = {

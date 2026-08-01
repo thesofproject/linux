@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for NAND MLC Controller in LPC32xx
  *
@@ -5,17 +6,6 @@
  *
  * Copyright © 2011 WORK Microwave GmbH
  * Copyright © 2011, 2012 Roland Stigge
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  *
  * NAND Flash Controller Operation:
  * - Read: Auto Decode
@@ -35,13 +25,12 @@
 #include <linux/completion.h>
 #include <linux/interrupt.h>
 #include <linux/of.h>
-#include <linux/of_gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/mtd/lpc32xx_mlc.h>
 #include <linux/io.h>
 #include <linux/mm.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmaengine.h>
-#include <linux/mtd/nand_ecc.h>
 
 #define DRV_NAME "lpc32xx_mlc"
 
@@ -133,7 +122,6 @@ struct lpc32xx_nand_cfg_mlc {
 	uint32_t rd_low;
 	uint32_t wr_high;
 	uint32_t wr_low;
-	int wp_gpio;
 	struct mtd_partition *parts;
 	unsigned num_parts;
 };
@@ -184,9 +172,11 @@ static struct nand_bbt_descr lpc32xx_nand_bbt_mirror = {
 };
 
 struct lpc32xx_nand_host {
+	struct platform_device	*pdev;
 	struct nand_chip	nand_chip;
 	struct lpc32xx_mlc_platform_data *pdata;
 	struct clk		*clk;
+	struct gpio_desc	*wp_gpio;
 	void __iomem		*io_base;
 	int			irq;
 	struct lpc32xx_nand_cfg_mlc	*ncfg;
@@ -285,10 +275,9 @@ static void lpc32xx_nand_setup(struct lpc32xx_nand_host *host)
 /*
  * Hardware specific access to control lines
  */
-static void lpc32xx_nand_cmd_ctrl(struct mtd_info *mtd, int cmd,
+static void lpc32xx_nand_cmd_ctrl(struct nand_chip *nand_chip, int cmd,
 				  unsigned int ctrl)
 {
-	struct nand_chip *nand_chip = mtd_to_nand(mtd);
 	struct lpc32xx_nand_host *host = nand_get_controller_data(nand_chip);
 
 	if (cmd != NAND_CMD_NONE) {
@@ -302,9 +291,8 @@ static void lpc32xx_nand_cmd_ctrl(struct mtd_info *mtd, int cmd,
 /*
  * Read Device Ready (NAND device _and_ controller ready)
  */
-static int lpc32xx_nand_device_ready(struct mtd_info *mtd)
+static int lpc32xx_nand_device_ready(struct nand_chip *nand_chip)
 {
-	struct nand_chip *nand_chip = mtd_to_nand(mtd);
 	struct lpc32xx_nand_host *host = nand_get_controller_data(nand_chip);
 
 	if ((readb(MLC_ISR(host->io_base)) &
@@ -315,8 +303,9 @@ static int lpc32xx_nand_device_ready(struct mtd_info *mtd)
 	return 0;
 }
 
-static irqreturn_t lpc3xxx_nand_irq(int irq, struct lpc32xx_nand_host *host)
+static irqreturn_t lpc3xxx_nand_irq(int irq, void *data)
 {
+	struct lpc32xx_nand_host *host = data;
 	uint8_t sr;
 
 	/* Clear interrupt flag by reading status */
@@ -329,8 +318,9 @@ static irqreturn_t lpc3xxx_nand_irq(int irq, struct lpc32xx_nand_host *host)
 	return IRQ_HANDLED;
 }
 
-static int lpc32xx_waitfunc_nand(struct mtd_info *mtd, struct nand_chip *chip)
+static int lpc32xx_waitfunc_nand(struct nand_chip *chip)
 {
+	struct mtd_info *mtd = nand_to_mtd(chip);
 	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
 
 	if (readb(MLC_ISR(host->io_base)) & MLCISR_NAND_READY)
@@ -348,9 +338,9 @@ exit:
 	return NAND_STATUS_READY;
 }
 
-static int lpc32xx_waitfunc_controller(struct mtd_info *mtd,
-				       struct nand_chip *chip)
+static int lpc32xx_waitfunc_controller(struct nand_chip *chip)
 {
+	struct mtd_info *mtd = nand_to_mtd(chip);
 	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
 
 	if (readb(MLC_ISR(host->io_base)) & MLCISR_CONTROLLER_READY)
@@ -368,10 +358,10 @@ exit:
 	return NAND_STATUS_READY;
 }
 
-static int lpc32xx_waitfunc(struct mtd_info *mtd, struct nand_chip *chip)
+static int lpc32xx_waitfunc(struct nand_chip *chip)
 {
-	lpc32xx_waitfunc_nand(mtd, chip);
-	lpc32xx_waitfunc_controller(mtd, chip);
+	lpc32xx_waitfunc_nand(chip);
+	lpc32xx_waitfunc_controller(chip);
 
 	return NAND_STATUS_READY;
 }
@@ -381,8 +371,8 @@ static int lpc32xx_waitfunc(struct mtd_info *mtd, struct nand_chip *chip)
  */
 static void lpc32xx_wp_enable(struct lpc32xx_nand_host *host)
 {
-	if (gpio_is_valid(host->ncfg->wp_gpio))
-		gpio_set_value(host->ncfg->wp_gpio, 0);
+	if (host->wp_gpio)
+		gpiod_set_value_cansleep(host->wp_gpio, 1);
 }
 
 /*
@@ -390,8 +380,8 @@ static void lpc32xx_wp_enable(struct lpc32xx_nand_host *host)
  */
 static void lpc32xx_wp_disable(struct lpc32xx_nand_host *host)
 {
-	if (gpio_is_valid(host->ncfg->wp_gpio))
-		gpio_set_value(host->ncfg->wp_gpio, 1);
+	if (host->wp_gpio)
+		gpiod_set_value_cansleep(host->wp_gpio, 0);
 }
 
 static void lpc32xx_dma_complete_func(void *completion)
@@ -406,6 +396,7 @@ static int lpc32xx_xmit_dma(struct mtd_info *mtd, void *mem, int len,
 	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
 	struct dma_async_tx_descriptor *desc;
 	int flags = DMA_CTRL_ACK | DMA_PREP_INTERRUPT;
+	unsigned long time_left;
 	int res;
 
 	sg_init_one(&host->sgl, mem, len);
@@ -420,6 +411,7 @@ static int lpc32xx_xmit_dma(struct mtd_info *mtd, void *mem, int len,
 				       flags);
 	if (!desc) {
 		dev_err(mtd->dev.parent, "Failed to prepare slave sg\n");
+		res = -ENXIO;
 		goto out1;
 	}
 
@@ -430,7 +422,13 @@ static int lpc32xx_xmit_dma(struct mtd_info *mtd, void *mem, int len,
 	dmaengine_submit(desc);
 	dma_async_issue_pending(host->dma_chan);
 
-	wait_for_completion_timeout(&host->comp_dma, msecs_to_jiffies(1000));
+	time_left = wait_for_completion_timeout(&host->comp_dma,
+						msecs_to_jiffies(1000));
+	if (!time_left) {
+		dmaengine_terminate_sync(host->dma_chan);
+		res = -ETIMEDOUT;
+		goto out1;
+	}
 
 	dma_unmap_sg(host->dma_chan->device->dev, &host->sgl, 1,
 		     DMA_BIDIRECTIONAL);
@@ -438,12 +436,13 @@ static int lpc32xx_xmit_dma(struct mtd_info *mtd, void *mem, int len,
 out1:
 	dma_unmap_sg(host->dma_chan->device->dev, &host->sgl, 1,
 		     DMA_BIDIRECTIONAL);
-	return -ENXIO;
+	return res;
 }
 
-static int lpc32xx_read_page(struct mtd_info *mtd, struct nand_chip *chip,
-			     uint8_t *buf, int oob_required, int page)
+static int lpc32xx_read_page(struct nand_chip *chip, uint8_t *buf,
+			     int oob_required, int page)
 {
+	struct mtd_info *mtd = nand_to_mtd(chip);
 	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
 	int i, j;
 	uint8_t *oobbuf = chip->oob_poi;
@@ -469,7 +468,7 @@ static int lpc32xx_read_page(struct mtd_info *mtd, struct nand_chip *chip,
 		writeb(0x00, MLC_ECC_AUTO_DEC_REG(host->io_base));
 
 		/* Wait for Controller Ready */
-		lpc32xx_waitfunc_controller(mtd, chip);
+		lpc32xx_waitfunc_controller(chip);
 
 		/* Check ECC Error status */
 		mlc_isr = readl(MLC_ISR(host->io_base));
@@ -506,11 +505,11 @@ static int lpc32xx_read_page(struct mtd_info *mtd, struct nand_chip *chip,
 	return 0;
 }
 
-static int lpc32xx_write_page_lowlevel(struct mtd_info *mtd,
-				       struct nand_chip *chip,
+static int lpc32xx_write_page_lowlevel(struct nand_chip *chip,
 				       const uint8_t *buf, int oob_required,
 				       int page)
 {
+	struct mtd_info *mtd = nand_to_mtd(chip);
 	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
 	const uint8_t *oobbuf = chip->oob_poi;
 	uint8_t *dma_buf = (uint8_t *)buf;
@@ -550,32 +549,30 @@ static int lpc32xx_write_page_lowlevel(struct mtd_info *mtd,
 		writeb(0x00, MLC_ECC_AUTO_ENC_REG(host->io_base));
 
 		/* Wait for Controller Ready */
-		lpc32xx_waitfunc_controller(mtd, chip);
+		lpc32xx_waitfunc_controller(chip);
 	}
 
 	return nand_prog_page_end_op(chip);
 }
 
-static int lpc32xx_read_oob(struct mtd_info *mtd, struct nand_chip *chip,
-			    int page)
+static int lpc32xx_read_oob(struct nand_chip *chip, int page)
 {
 	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
 
 	/* Read whole page - necessary with MLC controller! */
-	lpc32xx_read_page(mtd, chip, host->dummy_buf, 1, page);
+	lpc32xx_read_page(chip, host->dummy_buf, 1, page);
 
 	return 0;
 }
 
-static int lpc32xx_write_oob(struct mtd_info *mtd, struct nand_chip *chip,
-			      int page)
+static int lpc32xx_write_oob(struct nand_chip *chip, int page)
 {
 	/* None, write_oob conflicts with the automatic LPC MLC ECC decoder! */
 	return 0;
 }
 
 /* Prepares MLC for transfers with H/W ECC enabled: always enabled anyway */
-static void lpc32xx_ecc_enable(struct mtd_info *mtd, int mode)
+static void lpc32xx_ecc_enable(struct nand_chip *chip, int mode)
 {
 	/* Always enabled! */
 }
@@ -585,18 +582,22 @@ static int lpc32xx_dma_setup(struct lpc32xx_nand_host *host)
 	struct mtd_info *mtd = nand_to_mtd(&host->nand_chip);
 	dma_cap_mask_t mask;
 
-	if (!host->pdata || !host->pdata->dma_filter) {
-		dev_err(mtd->dev.parent, "no DMA platform data\n");
-		return -ENOENT;
-	}
+	host->dma_chan = dma_request_chan(mtd->dev.parent, "rx-tx");
+	if (IS_ERR(host->dma_chan)) {
+		/* fallback to request using platform data */
+		if (!host->pdata || !host->pdata->dma_filter) {
+			dev_err(mtd->dev.parent, "no DMA platform data\n");
+			return -ENOENT;
+		}
 
-	dma_cap_zero(mask);
-	dma_cap_set(DMA_SLAVE, mask);
-	host->dma_chan = dma_request_channel(mask, host->pdata->dma_filter,
-					     "nand-mlc");
-	if (!host->dma_chan) {
-		dev_err(mtd->dev.parent, "Failed to request DMA channel\n");
-		return -EBUSY;
+		dma_cap_zero(mask);
+		dma_cap_set(DMA_SLAVE, mask);
+		host->dma_chan = dma_request_channel(mask, host->pdata->dma_filter, "nand-mlc");
+
+		if (!host->dma_chan) {
+			dev_err(mtd->dev.parent, "Failed to request DMA channel\n");
+			return -EBUSY;
+		}
 	}
 
 	/*
@@ -648,10 +649,46 @@ static struct lpc32xx_nand_cfg_mlc *lpc32xx_parse_dt(struct device *dev)
 		return NULL;
 	}
 
-	ncfg->wp_gpio = of_get_named_gpio(np, "gpios", 0);
-
 	return ncfg;
 }
+
+static int lpc32xx_nand_attach_chip(struct nand_chip *chip)
+{
+	struct mtd_info *mtd = nand_to_mtd(chip);
+	struct lpc32xx_nand_host *host = nand_get_controller_data(chip);
+	struct device *dev = &host->pdev->dev;
+
+	if (chip->ecc.engine_type != NAND_ECC_ENGINE_TYPE_ON_HOST)
+		return 0;
+
+	host->dma_buf = devm_kzalloc(dev, mtd->writesize, GFP_KERNEL);
+	if (!host->dma_buf)
+		return -ENOMEM;
+
+	host->dummy_buf = devm_kzalloc(dev, mtd->writesize, GFP_KERNEL);
+	if (!host->dummy_buf)
+		return -ENOMEM;
+
+	chip->ecc.size = 512;
+	chip->ecc.hwctl = lpc32xx_ecc_enable;
+	chip->ecc.read_page_raw = lpc32xx_read_page;
+	chip->ecc.read_page = lpc32xx_read_page;
+	chip->ecc.write_page_raw = lpc32xx_write_page_lowlevel;
+	chip->ecc.write_page = lpc32xx_write_page_lowlevel;
+	chip->ecc.write_oob = lpc32xx_write_oob;
+	chip->ecc.read_oob = lpc32xx_read_oob;
+	chip->ecc.strength = 4;
+	chip->ecc.bytes = 10;
+
+	mtd_set_ooblayout(mtd, &lpc32xx_ooblayout_ops);
+	host->mlcsubpages = mtd->writesize / 512;
+
+	return 0;
+}
+
+static const struct nand_controller_ops lpc32xx_nand_controller_ops = {
+	.attach_chip = lpc32xx_nand_attach_chip,
+};
 
 /*
  * Probe for NAND controller
@@ -669,11 +706,12 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	if (!host)
 		return -ENOMEM;
 
-	rc = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	host->io_base = devm_ioremap_resource(&pdev->dev, rc);
+	host->pdev = pdev;
+
+	host->io_base = devm_platform_get_and_ioremap_resource(pdev, 0, &rc);
 	if (IS_ERR(host->io_base))
 		return PTR_ERR(host->io_base);
-	
+
 	host->io_base_phy = rc->start;
 
 	nand_chip = &host->nand_chip;
@@ -685,14 +723,18 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 			"Missing or bad NAND config from device tree\n");
 		return -ENOENT;
 	}
-	if (host->ncfg->wp_gpio == -EPROBE_DEFER)
-		return -EPROBE_DEFER;
-	if (gpio_is_valid(host->ncfg->wp_gpio) &&
-			gpio_request(host->ncfg->wp_gpio, "NAND WP")) {
-		dev_err(&pdev->dev, "GPIO not available\n");
-		return -EBUSY;
+
+	/* Start with WP disabled, if available */
+	host->wp_gpio = gpiod_get_optional(&pdev->dev, NULL, GPIOD_OUT_LOW);
+	res = PTR_ERR_OR_ZERO(host->wp_gpio);
+	if (res) {
+		if (res != -EPROBE_DEFER)
+			dev_err(&pdev->dev, "WP GPIO is not available: %d\n",
+				res);
+		return res;
 	}
-	lpc32xx_wp_disable(host);
+
+	gpiod_set_consumer_name(host->wp_gpio, "NAND WP");
 
 	host->pdata = dev_get_platdata(&pdev->dev);
 
@@ -706,17 +748,17 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	if (IS_ERR(host->clk)) {
 		dev_err(&pdev->dev, "Clock initialization failure\n");
 		res = -ENOENT;
-		goto err_exit1;
+		goto free_gpio;
 	}
 	res = clk_prepare_enable(host->clk);
 	if (res)
-		goto err_put_clk;
+		goto put_clk;
 
-	nand_chip->cmd_ctrl = lpc32xx_nand_cmd_ctrl;
-	nand_chip->dev_ready = lpc32xx_nand_device_ready;
-	nand_chip->chip_delay = 25; /* us */
-	nand_chip->IO_ADDR_R = MLC_DATA(host->io_base);
-	nand_chip->IO_ADDR_W = MLC_DATA(host->io_base);
+	nand_chip->legacy.cmd_ctrl = lpc32xx_nand_cmd_ctrl;
+	nand_chip->legacy.dev_ready = lpc32xx_nand_device_ready;
+	nand_chip->legacy.chip_delay = 25; /* us */
+	nand_chip->legacy.IO_ADDR_R = MLC_DATA(host->io_base);
+	nand_chip->legacy.IO_ADDR_W = MLC_DATA(host->io_base);
 
 	/* Init NAND controller */
 	lpc32xx_nand_setup(host);
@@ -724,16 +766,7 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, host);
 
 	/* Initialize function pointers */
-	nand_chip->ecc.hwctl = lpc32xx_ecc_enable;
-	nand_chip->ecc.read_page_raw = lpc32xx_read_page;
-	nand_chip->ecc.read_page = lpc32xx_read_page;
-	nand_chip->ecc.write_page_raw = lpc32xx_write_page_lowlevel;
-	nand_chip->ecc.write_page = lpc32xx_write_page_lowlevel;
-	nand_chip->ecc.write_oob = lpc32xx_write_oob;
-	nand_chip->ecc.read_oob = lpc32xx_read_oob;
-	nand_chip->ecc.strength = 4;
-	nand_chip->ecc.bytes = 10;
-	nand_chip->waitfunc = lpc32xx_waitfunc;
+	nand_chip->legacy.waitfunc = lpc32xx_waitfunc;
 
 	nand_chip->options = NAND_NO_SUBPAGE_WRITE;
 	nand_chip->bbt_options = NAND_BBT_USE_FLASH | NAND_BBT_NO_OOB;
@@ -744,34 +777,9 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 		res = lpc32xx_dma_setup(host);
 		if (res) {
 			res = -EIO;
-			goto err_exit2;
+			goto unprepare_clk;
 		}
 	}
-
-	/*
-	 * Scan to find existance of the device and
-	 * Get the type of NAND device SMALL block or LARGE block
-	 */
-	res = nand_scan_ident(mtd, 1, NULL);
-	if (res)
-		goto err_exit3;
-
-	host->dma_buf = devm_kzalloc(&pdev->dev, mtd->writesize, GFP_KERNEL);
-	if (!host->dma_buf) {
-		res = -ENOMEM;
-		goto err_exit3;
-	}
-
-	host->dummy_buf = devm_kzalloc(&pdev->dev, mtd->writesize, GFP_KERNEL);
-	if (!host->dummy_buf) {
-		res = -ENOMEM;
-		goto err_exit3;
-	}
-
-	nand_chip->ecc.mode = NAND_ECC_HW;
-	nand_chip->ecc.size = 512;
-	mtd_set_ooblayout(mtd, &lpc32xx_ooblayout_ops);
-	host->mlcsubpages = mtd->writesize / 512;
 
 	/* initially clear interrupt status */
 	readb(MLC_IRQ_SR(host->io_base));
@@ -781,47 +789,49 @@ static int lpc32xx_nand_probe(struct platform_device *pdev)
 
 	host->irq = platform_get_irq(pdev, 0);
 	if (host->irq < 0) {
-		dev_err(&pdev->dev, "failed to get platform irq\n");
 		res = -EINVAL;
-		goto err_exit3;
+		goto release_dma_chan;
 	}
 
-	if (request_irq(host->irq, (irq_handler_t)&lpc3xxx_nand_irq,
+	if (request_irq(host->irq, &lpc3xxx_nand_irq,
 			IRQF_TRIGGER_HIGH, DRV_NAME, host)) {
 		dev_err(&pdev->dev, "Error requesting NAND IRQ\n");
 		res = -ENXIO;
-		goto err_exit3;
+		goto release_dma_chan;
 	}
 
 	/*
-	 * Fills out all the uninitialized function pointers with the defaults
-	 * And scans for a bad block table if appropriate.
+	 * Scan to find existence of the device and get the type of NAND device:
+	 * SMALL block or LARGE block.
 	 */
-	res = nand_scan_tail(mtd);
+	nand_chip->legacy.dummy_controller.ops = &lpc32xx_nand_controller_ops;
+	res = nand_scan(nand_chip, 1);
 	if (res)
-		goto err_exit4;
+		goto free_irq;
 
 	mtd->name = DRV_NAME;
 
 	res = mtd_device_register(mtd, host->ncfg->parts,
 				  host->ncfg->num_parts);
-	if (!res)
-		return res;
+	if (res)
+		goto cleanup_nand;
 
-	nand_release(mtd);
+	return 0;
 
-err_exit4:
+cleanup_nand:
+	nand_cleanup(nand_chip);
+free_irq:
 	free_irq(host->irq, host);
-err_exit3:
+release_dma_chan:
 	if (use_dma)
 		dma_release_channel(host->dma_chan);
-err_exit2:
+unprepare_clk:
 	clk_disable_unprepare(host->clk);
-err_put_clk:
+put_clk:
 	clk_put(host->clk);
-err_exit1:
+free_gpio:
 	lpc32xx_wp_enable(host);
-	gpio_free(host->ncfg->wp_gpio);
+	gpiod_put(host->wp_gpio);
 
 	return res;
 }
@@ -829,12 +839,16 @@ err_exit1:
 /*
  * Remove NAND device
  */
-static int lpc32xx_nand_remove(struct platform_device *pdev)
+static void lpc32xx_nand_remove(struct platform_device *pdev)
 {
 	struct lpc32xx_nand_host *host = platform_get_drvdata(pdev);
-	struct mtd_info *mtd = nand_to_mtd(&host->nand_chip);
+	struct nand_chip *chip = &host->nand_chip;
+	int ret;
 
-	nand_release(mtd);
+	ret = mtd_device_unregister(nand_to_mtd(chip));
+	WARN_ON(ret);
+	nand_cleanup(chip);
+
 	free_irq(host->irq, host);
 	if (use_dma)
 		dma_release_channel(host->dma_chan);
@@ -843,12 +857,9 @@ static int lpc32xx_nand_remove(struct platform_device *pdev)
 	clk_put(host->clk);
 
 	lpc32xx_wp_enable(host);
-	gpio_free(host->ncfg->wp_gpio);
-
-	return 0;
+	gpiod_put(host->wp_gpio);
 }
 
-#ifdef CONFIG_PM
 static int lpc32xx_nand_resume(struct platform_device *pdev)
 {
 	struct lpc32xx_nand_host *host = platform_get_drvdata(pdev);
@@ -880,11 +891,6 @@ static int lpc32xx_nand_suspend(struct platform_device *pdev, pm_message_t pm)
 	return 0;
 }
 
-#else
-#define lpc32xx_nand_resume NULL
-#define lpc32xx_nand_suspend NULL
-#endif
-
 static const struct of_device_id lpc32xx_nand_match[] = {
 	{ .compatible = "nxp,lpc3220-mlc" },
 	{ /* sentinel */ },
@@ -894,8 +900,8 @@ MODULE_DEVICE_TABLE(of, lpc32xx_nand_match);
 static struct platform_driver lpc32xx_nand_driver = {
 	.probe		= lpc32xx_nand_probe,
 	.remove		= lpc32xx_nand_remove,
-	.resume		= lpc32xx_nand_resume,
-	.suspend	= lpc32xx_nand_suspend,
+	.resume		= pm_ptr(lpc32xx_nand_resume),
+	.suspend	= pm_ptr(lpc32xx_nand_suspend),
 	.driver		= {
 		.name	= DRV_NAME,
 		.of_match_table = lpc32xx_nand_match,

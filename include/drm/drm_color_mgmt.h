@@ -24,11 +24,49 @@
 #define __DRM_COLOR_MGMT_H__
 
 #include <linux/ctype.h>
+#include <linux/math64.h>
+#include <drm/drm_property.h>
 
 struct drm_crtc;
 struct drm_plane;
 
-uint32_t drm_color_lut_extract(uint32_t user_input, uint32_t bit_precision);
+/**
+ * drm_color_lut_extract - clamp and round LUT entries
+ * @user_input: input value
+ * @bit_precision: number of bits the hw LUT supports
+ *
+ * Extract a degamma/gamma LUT value provided by user (in the form of
+ * &drm_color_lut entries) and round it to the precision supported by the
+ * hardware, following OpenGL int<->float conversion rules
+ * (see eg. OpenGL 4.6 specification - 2.3.5 Fixed-Point Data Conversions).
+ */
+static inline u32 drm_color_lut_extract(u32 user_input, int bit_precision)
+{
+	if (bit_precision > 16)
+		return DIV_ROUND_CLOSEST_ULL(mul_u32_u32(user_input, (1 << bit_precision) - 1),
+					     (1 << 16) - 1);
+	else
+		return DIV_ROUND_CLOSEST(user_input * ((1 << bit_precision) - 1),
+					 (1 << 16) - 1);
+}
+
+/**
+ * drm_color_lut32_extract - clamp and round LUT entries
+ * @user_input: input value
+ * @bit_precision: number of bits the hw LUT supports
+ *
+ * Extract U0.bit_precision from a U0.32 LUT value.
+ *
+ */
+static inline u32 drm_color_lut32_extract(u32 user_input, int bit_precision)
+{
+	u64 max = (bit_precision >= 64) ? ~0ULL : (1ULL << bit_precision) - 1;
+
+	return DIV_ROUND_CLOSEST_ULL((u64)user_input * max,
+				     (1ULL << 32) - 1);
+}
+
+u64 drm_color_ctm_s31_32_to_qm_n(u64 user_input, u32 m, u32 n);
 
 void drm_crtc_enable_color_mgmt(struct drm_crtc *crtc,
 				uint degamma_lut_size,
@@ -50,6 +88,18 @@ static inline int drm_color_lut_size(const struct drm_property_blob *blob)
 	return blob->length / sizeof(struct drm_color_lut);
 }
 
+/**
+ * drm_color_lut32_size - calculate the number of entries in the extended LUT
+ * @blob: blob containing the LUT
+ *
+ * Returns:
+ * The number of entries in the color LUT stored in @blob.
+ */
+static inline int drm_color_lut32_size(const struct drm_property_blob *blob)
+{
+	return blob->length / sizeof(struct drm_color_lut32);
+}
+
 enum drm_color_encoding {
 	DRM_COLOR_YCBCR_BT601,
 	DRM_COLOR_YCBCR_BT709,
@@ -68,4 +118,61 @@ int drm_plane_create_color_properties(struct drm_plane *plane,
 				      u32 supported_ranges,
 				      enum drm_color_encoding default_encoding,
 				      enum drm_color_range default_range);
+
+/**
+ * enum drm_color_lut_tests - hw-specific LUT tests to perform
+ *
+ * The drm_color_lut_check() function takes a bitmask of the values here to
+ * determine which tests to apply to a userspace-provided LUT.
+ */
+enum drm_color_lut_tests {
+	/**
+	 * @DRM_COLOR_LUT_EQUAL_CHANNELS:
+	 *
+	 * Checks whether the entries of a LUT all have equal values for the
+	 * red, green, and blue channels.  Intended for hardware that only
+	 * accepts a single value per LUT entry and assumes that value applies
+	 * to all three color components.
+	 */
+	DRM_COLOR_LUT_EQUAL_CHANNELS = BIT(0),
+
+	/**
+	 * @DRM_COLOR_LUT_NON_DECREASING:
+	 *
+	 * Checks whether the entries of a LUT are always flat or increasing
+	 * (never decreasing).
+	 */
+	DRM_COLOR_LUT_NON_DECREASING = BIT(1),
+};
+
+int drm_color_lut_check(const struct drm_property_blob *lut, u32 tests);
+
+/*
+ * Gamma-LUT programming
+ */
+
+typedef void (*drm_crtc_set_lut_func)(struct drm_crtc *, unsigned int, u16, u16, u16);
+
+void drm_crtc_load_gamma_888(struct drm_crtc *crtc, const struct drm_color_lut *lut,
+			     drm_crtc_set_lut_func set_gamma);
+void drm_crtc_load_gamma_565_from_888(struct drm_crtc *crtc, const struct drm_color_lut *lut,
+				      drm_crtc_set_lut_func set_gamma);
+void drm_crtc_load_gamma_555_from_888(struct drm_crtc *crtc, const struct drm_color_lut *lut,
+				      drm_crtc_set_lut_func set_gamma);
+
+void drm_crtc_fill_gamma_888(struct drm_crtc *crtc, drm_crtc_set_lut_func set_gamma);
+void drm_crtc_fill_gamma_565(struct drm_crtc *crtc, drm_crtc_set_lut_func set_gamma);
+void drm_crtc_fill_gamma_555(struct drm_crtc *crtc, drm_crtc_set_lut_func set_gamma);
+
+/*
+ * Color-LUT programming
+ */
+
+void drm_crtc_load_palette_8(struct drm_crtc *crtc, const struct drm_color_lut *lut,
+			     drm_crtc_set_lut_func set_palette);
+
+void drm_crtc_fill_palette_332(struct drm_crtc *crtc, drm_crtc_set_lut_func set_palette);
+void drm_crtc_fill_palette_8(struct drm_crtc *crtc, drm_crtc_set_lut_func set_palette);
+
+int drm_color_lut32_check(const struct drm_property_blob *lut, u32 tests);
 #endif

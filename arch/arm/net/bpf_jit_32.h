@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Just-In-Time compiler for BPF filters on 32bit ARM
  *
  * Copyright (c) 2011 Mircea Gherzan <mgherzan@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; version 2 of the License.
  */
 
 #ifndef PFILTER_OPCODES_ARM_H
@@ -62,6 +59,7 @@
 #define ARM_INST_ADDS_I		0x02900000
 
 #define ARM_INST_AND_R		0x00000000
+#define ARM_INST_ANDS_R		0x00100000
 #define ARM_INST_AND_I		0x02000000
 
 #define ARM_INST_BIC_R		0x01c00000
@@ -77,11 +75,16 @@
 #define ARM_INST_EOR_R		0x00200000
 #define ARM_INST_EOR_I		0x02200000
 
-#define ARM_INST_LDRB_I		0x05d00000
+#define ARM_INST_LDST__U	0x00800000
+#define ARM_INST_LDST__IMM12	0x00000fff
+#define ARM_INST_LDRB_I		0x05500000
 #define ARM_INST_LDRB_R		0x07d00000
-#define ARM_INST_LDRH_I		0x01d000b0
+#define ARM_INST_LDRSB_I	0x015000d0
+#define ARM_INST_LDRD_I		0x014000d0
+#define ARM_INST_LDRH_I		0x015000b0
 #define ARM_INST_LDRH_R		0x019000b0
-#define ARM_INST_LDR_I		0x05900000
+#define ARM_INST_LDRSH_I	0x015000f0
+#define ARM_INST_LDR_I		0x05100000
 #define ARM_INST_LDR_R		0x07900000
 
 #define ARM_INST_LDM		0x08900000
@@ -92,6 +95,9 @@
 
 #define ARM_INST_LSR_I		0x01a00020
 #define ARM_INST_LSR_R		0x01a00030
+
+#define ARM_INST_ASR_I		0x01a00040
+#define ARM_INST_ASR_R		0x01a00050
 
 #define ARM_INST_MOV_R		0x01a00000
 #define ARM_INST_MOVS_R		0x01b00000
@@ -124,14 +130,16 @@
 #define ARM_INST_SBC_R		0x00c00000
 #define ARM_INST_SBCS_R		0x00d00000
 
-#define ARM_INST_STR_I		0x05800000
-#define ARM_INST_STRB_I		0x05c00000
-#define ARM_INST_STRH_I		0x01c000b0
+#define ARM_INST_STR_I		0x05000000
+#define ARM_INST_STRB_I		0x05400000
+#define ARM_INST_STRD_I		0x014000f0
+#define ARM_INST_STRH_I		0x014000b0
 
 #define ARM_INST_TST_R		0x01100000
 #define ARM_INST_TST_I		0x03100000
 
 #define ARM_INST_UDIV		0x0730f010
+#define ARM_INST_SDIV		0x0710f010
 
 #define ARM_INST_UMULL		0x00800090
 
@@ -168,6 +176,7 @@
 #define ARM_ADC_I(rd, rn, imm)	_AL3_I(ARM_INST_ADC, rd, rn, imm)
 
 #define ARM_AND_R(rd, rn, rm)	_AL3_R(ARM_INST_AND, rd, rn, rm)
+#define ARM_ANDS_R(rd, rn, rm)	_AL3_R(ARM_INST_ANDS, rd, rn, rm)
 #define ARM_AND_I(rd, rn, imm)	_AL3_I(ARM_INST_AND, rd, rn, imm)
 
 #define ARM_BIC_R(rd, rn, rm)	_AL3_R(ARM_INST_BIC, rd, rn, rm)
@@ -183,17 +192,18 @@
 #define ARM_EOR_R(rd, rn, rm)	_AL3_R(ARM_INST_EOR, rd, rn, rm)
 #define ARM_EOR_I(rd, rn, imm)	_AL3_I(ARM_INST_EOR, rd, rn, imm)
 
-#define ARM_LDR_I(rt, rn, off)	(ARM_INST_LDR_I | (rt) << 12 | (rn) << 16 \
-				 | ((off) & 0xfff))
-#define ARM_LDR_R(rt, rn, rm)	(ARM_INST_LDR_R | (rt) << 12 | (rn) << 16 \
+#define ARM_LDR_R(rt, rn, rm)	(ARM_INST_LDR_R | ARM_INST_LDST__U \
+				 | (rt) << 12 | (rn) << 16 \
 				 | (rm))
-#define ARM_LDRB_I(rt, rn, off)	(ARM_INST_LDRB_I | (rt) << 12 | (rn) << 16 \
-				 | (off))
-#define ARM_LDRB_R(rt, rn, rm)	(ARM_INST_LDRB_R | (rt) << 12 | (rn) << 16 \
+#define ARM_LDR_R_SI(rt, rn, rm, type, imm) \
+				(ARM_INST_LDR_R | ARM_INST_LDST__U \
+				 | (rt) << 12 | (rn) << 16 \
+				 | (imm) << 7 | (type) << 5 | (rm))
+#define ARM_LDRB_R(rt, rn, rm)	(ARM_INST_LDRB_R | ARM_INST_LDST__U \
+				 | (rt) << 12 | (rn) << 16 \
 				 | (rm))
-#define ARM_LDRH_I(rt, rn, off)	(ARM_INST_LDRH_I | (rt) << 12 | (rn) << 16 \
-				 | (((off) & 0xf0) << 4) | ((off) & 0xf))
-#define ARM_LDRH_R(rt, rn, rm)	(ARM_INST_LDRH_R | (rt) << 12 | (rn) << 16 \
+#define ARM_LDRH_R(rt, rn, rm)	(ARM_INST_LDRH_R | ARM_INST_LDST__U \
+				 | (rt) << 12 | (rn) << 16 \
 				 | (rm))
 
 #define ARM_LDM(rn, regs)	(ARM_INST_LDM | (rn) << 16 | (regs))
@@ -254,17 +264,11 @@
 #define ARM_SUBS_I(rd, rn, imm)	_AL3_I(ARM_INST_SUBS, rd, rn, imm)
 #define ARM_SBC_I(rd, rn, imm)	_AL3_I(ARM_INST_SBC, rd, rn, imm)
 
-#define ARM_STR_I(rt, rn, off)	(ARM_INST_STR_I | (rt) << 12 | (rn) << 16 \
-				 | ((off) & 0xfff))
-#define ARM_STRH_I(rt, rn, off)	(ARM_INST_STRH_I | (rt) << 12 | (rn) << 16 \
-				 | (((off) & 0xf0) << 4) | ((off) & 0xf))
-#define ARM_STRB_I(rt, rn, off)	(ARM_INST_STRB_I | (rt) << 12 | (rn) << 16 \
-				 | (((off) & 0xf0) << 4) | ((off) & 0xf))
-
 #define ARM_TST_R(rn, rm)	_AL3_R(ARM_INST_TST, 0, rn, rm)
 #define ARM_TST_I(rn, imm)	_AL3_I(ARM_INST_TST, 0, rn, imm)
 
 #define ARM_UDIV(rd, rn, rm)	(ARM_INST_UDIV | (rd) << 16 | (rn) | (rm) << 8)
+#define ARM_SDIV(rd, rn, rm)	(ARM_INST_SDIV | (rd) << 16 | (rn) | (rm) << 8)
 
 #define ARM_UMULL(rd_lo, rd_hi, rn, rm)	(ARM_INST_UMULL | (rd_hi) << 16 \
 					 | (rd_lo) << 12 | (rm) << 8 | rn)

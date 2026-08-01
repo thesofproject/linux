@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     i2c Support for Via Technologies 82C586B South Bridge
 
     Copyright (c) 1998, 1999 Kyösti Mälkki <kmalkki@cc.hut.fi>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
 */
 
 #include <linux/kernel.h>
@@ -78,7 +70,7 @@ static struct i2c_algo_bit_data bit_data = {
 
 static struct i2c_adapter vt586b_adapter = {
 	.owner		= THIS_MODULE,
-	.class          = I2C_CLASS_HWMON | I2C_CLASS_SPD,
+	.class          = I2C_CLASS_HWMON,
 	.name		= "VIA i2c",
 	.algo_data	= &bit_data,
 };
@@ -97,10 +89,9 @@ static int vt586b_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	u8 rev;
 	int res;
 
-	if (pm_io_base) {
-		dev_err(&dev->dev, "i2c-via: Will only support one host\n");
-		return -ENODEV;
-	}
+	if (pm_io_base)
+		return dev_err_probe(&dev->dev, -ENODEV,
+				     "Will only support one host\n");
 
 	pci_read_config_byte(dev, PM_CFG_REVID, &rev);
 
@@ -121,10 +112,10 @@ static int vt586b_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	pci_read_config_word(dev, base, &pm_io_base);
 	pm_io_base &= (0xff << 8);
 
-	if (!request_region(I2C_DIR, IOSPACE, vt586b_driver.name)) {
-		dev_err(&dev->dev, "IO 0x%x-0x%x already in use\n", I2C_DIR, I2C_DIR + IOSPACE);
-		return -ENODEV;
-	}
+	if (!request_region(I2C_DIR, IOSPACE, vt586b_driver.name))
+		return dev_err_probe(&dev->dev, -ENODEV,
+				     "IO 0x%x-0x%x already in use\n",
+				     I2C_DIR, I2C_DIR + IOSPACE);
 
 	outb(inb(I2C_DIR) & ~(I2C_SDA | I2C_SCL), I2C_DIR);
 	outb(inb(I2C_OUT) & ~(I2C_SDA | I2C_SCL), I2C_OUT);

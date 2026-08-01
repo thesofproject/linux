@@ -7,13 +7,13 @@
  * Copyright (c) 2014 Samsung Electronics Co., Ltd.
  *		http://www.samsung.com
  *
- * Author: Andrzej Pietrasiewicz <andrzej.p@samsung.com>
+ * Author: Andrzej Pietrasiewicz <andrzejtp2010@gmail.com>
  */
 
 #ifndef __U_OS_DESC_H__
 #define __U_OS_DESC_H__
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/nls.h>
 
 #define USB_EXT_PROP_DW_SIZE			0

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * llc_c_ac.c - actions performed during connection state transition.
  *
@@ -9,13 +10,6 @@
  *
  * Copyright (c) 1997 by Procom Technology, Inc.
  * 		 2001-2003 by Arnaldo Carvalho de Melo <acme@conectiva.com.br>
- *
- * This program can be redistributed or modified under the terms of the
- * GNU General Public License as published by the Free Software Foundation.
- * This program is distributed without any warranty or implied warranty
- * of merchantability or fitness for a particular purpose.
- *
- * See the GNU General Public License for more details.
  */
 #include <linux/netdevice.h>
 #include <linux/slab.h>
@@ -51,7 +45,7 @@ int llc_conn_ac_clear_remote_busy(struct sock *sk, struct sk_buff *skb)
 		struct llc_pdu_sn *pdu = llc_pdu_sn_hdr(skb);
 
 		llc->remote_busy_flag = 0;
-		del_timer(&llc->busy_state_timer.timer);
+		timer_delete(&llc->busy_state_timer.timer);
 		nr = LLC_I_GET_NR(pdu);
 		llc_conn_resend_i_pdu_as_cmd(sk, nr, 0);
 	}
@@ -191,7 +185,7 @@ int llc_conn_ac_stop_rej_tmr_if_data_flag_eq_2(struct sock *sk,
 	struct llc_sock *llc = llc_sk(sk);
 
 	if (llc->data_flag == 2)
-		del_timer(&llc->rej_sent_timer.timer);
+		timer_delete(&llc->rej_sent_timer.timer);
 	return 0;
 }
 
@@ -372,6 +366,7 @@ int llc_conn_ac_send_i_cmd_p_set_1(struct sock *sk, struct sk_buff *skb)
 	llc_pdu_init_as_i_cmd(skb, 1, llc->vS, llc->vR);
 	rc = llc_mac_hdr_init(skb, llc->dev->dev_addr, llc->daddr.mac);
 	if (likely(!rc)) {
+		skb_get(skb);
 		llc_conn_send_pdu(sk, skb);
 		llc_conn_ac_inc_vs_by_1(sk, skb);
 	}
@@ -389,7 +384,8 @@ static int llc_conn_ac_send_i_cmd_p_set_0(struct sock *sk, struct sk_buff *skb)
 	llc_pdu_init_as_i_cmd(skb, 0, llc->vS, llc->vR);
 	rc = llc_mac_hdr_init(skb, llc->dev->dev_addr, llc->daddr.mac);
 	if (likely(!rc)) {
-		rc = llc_conn_send_pdu(sk, skb);
+		skb_get(skb);
+		llc_conn_send_pdu(sk, skb);
 		llc_conn_ac_inc_vs_by_1(sk, skb);
 	}
 	return rc;
@@ -406,6 +402,7 @@ int llc_conn_ac_send_i_xxx_x_set_0(struct sock *sk, struct sk_buff *skb)
 	llc_pdu_init_as_i_cmd(skb, 0, llc->vS, llc->vR);
 	rc = llc_mac_hdr_init(skb, llc->dev->dev_addr, llc->daddr.mac);
 	if (likely(!rc)) {
+		skb_get(skb);
 		llc_conn_send_pdu(sk, skb);
 		llc_conn_ac_inc_vs_by_1(sk, skb);
 	}
@@ -778,7 +775,7 @@ int llc_conn_ac_send_sabme_cmd_p_set_x(struct sock *sk, struct sk_buff *skb)
 
 	if (nskb) {
 		struct llc_sap *sap = llc->sap;
-		u8 *dmac = llc->daddr.mac;
+		const u8 *dmac = llc->daddr.mac;
 
 		if (llc->dev->flags & IFF_LOOPBACK)
 			dmac = llc->dev->dev_addr;
@@ -916,7 +913,8 @@ static int llc_conn_ac_send_i_rsp_f_set_ackpf(struct sock *sk,
 	llc_pdu_init_as_i_cmd(skb, llc->ack_pf, llc->vS, llc->vR);
 	rc = llc_mac_hdr_init(skb, llc->dev->dev_addr, llc->daddr.mac);
 	if (likely(!rc)) {
-		rc = llc_conn_send_pdu(sk, skb);
+		skb_get(skb);
+		llc_conn_send_pdu(sk, skb);
 		llc_conn_ac_inc_vs_by_1(sk, skb);
 	}
 	return rc;
@@ -1001,8 +999,8 @@ static int llc_conn_ac_inc_npta_value(struct sock *sk, struct sk_buff *skb)
 		llc->dec_step = 0;
 		llc->dec_cntr = llc->inc_cntr = 2;
 		++llc->npta;
-		if (llc->npta > (u8) ~LLC_2_SEQ_NBR_MODULO)
-			llc->npta = (u8) ~LLC_2_SEQ_NBR_MODULO;
+		if (llc->npta > LLC_2_SEQ_NBR_MODULO - 1)
+			llc->npta = LLC_2_SEQ_NBR_MODULO - 1;
 	} else
 		--llc->inc_cntr;
 	return 0;
@@ -1092,8 +1090,8 @@ int llc_conn_ac_inc_tx_win_size(struct sock *sk, struct sk_buff *skb)
 	struct llc_sock *llc = llc_sk(sk);
 
 	llc->k += 1;
-	if (llc->k > (u8) ~LLC_2_SEQ_NBR_MODULO)
-		llc->k = (u8) ~LLC_2_SEQ_NBR_MODULO;
+	if (llc->k > LLC_2_SEQ_NBR_MODULO - 1)
+		llc->k = LLC_2_SEQ_NBR_MODULO - 1;
 	return 0;
 }
 
@@ -1107,9 +1105,9 @@ int llc_conn_ac_stop_other_timers(struct sock *sk, struct sk_buff *skb)
 {
 	struct llc_sock *llc = llc_sk(sk);
 
-	del_timer(&llc->rej_sent_timer.timer);
-	del_timer(&llc->pf_cycle_timer.timer);
-	del_timer(&llc->busy_state_timer.timer);
+	timer_delete(&llc->rej_sent_timer.timer);
+	timer_delete(&llc->pf_cycle_timer.timer);
+	timer_delete(&llc->busy_state_timer.timer);
 	llc->ack_must_be_send = 0;
 	llc->ack_pf = 0;
 	return 0;
@@ -1145,7 +1143,7 @@ int llc_conn_ac_start_ack_tmr_if_not_running(struct sock *sk,
 
 int llc_conn_ac_stop_ack_timer(struct sock *sk, struct sk_buff *skb)
 {
-	del_timer(&llc_sk(sk)->ack_timer.timer);
+	timer_delete(&llc_sk(sk)->ack_timer.timer);
 	return 0;
 }
 
@@ -1153,14 +1151,14 @@ int llc_conn_ac_stop_p_timer(struct sock *sk, struct sk_buff *skb)
 {
 	struct llc_sock *llc = llc_sk(sk);
 
-	del_timer(&llc->pf_cycle_timer.timer);
+	timer_delete(&llc->pf_cycle_timer.timer);
 	llc_conn_set_p_flag(sk, 0);
 	return 0;
 }
 
 int llc_conn_ac_stop_rej_timer(struct sock *sk, struct sk_buff *skb)
 {
-	del_timer(&llc_sk(sk)->rej_sent_timer.timer);
+	timer_delete(&llc_sk(sk)->rej_sent_timer.timer);
 	return 0;
 }
 
@@ -1176,7 +1174,7 @@ int llc_conn_ac_upd_nr_received(struct sock *sk, struct sk_buff *skb)
 	/* On loopback we don't queue I frames in unack_pdu_q queue. */
 	if (acked > 0 || (llc->dev->flags & IFF_LOOPBACK)) {
 		llc->retry_count = 0;
-		del_timer(&llc->ack_timer.timer);
+		timer_delete(&llc->ack_timer.timer);
 		if (llc->failed_data_req) {
 			/* already, we did not accept data from upper layer
 			 * (tx_window full or unacceptable state). Now, we
@@ -1331,28 +1329,31 @@ static void llc_conn_tmr_common_cb(struct sock *sk, u8 type)
 
 void llc_conn_pf_cycle_tmr_cb(struct timer_list *t)
 {
-	struct llc_sock *llc = from_timer(llc, t, pf_cycle_timer.timer);
+	struct llc_sock *llc = timer_container_of(llc, t,
+						  pf_cycle_timer.timer);
 
 	llc_conn_tmr_common_cb(&llc->sk, LLC_CONN_EV_TYPE_P_TMR);
 }
 
 void llc_conn_busy_tmr_cb(struct timer_list *t)
 {
-	struct llc_sock *llc = from_timer(llc, t, busy_state_timer.timer);
+	struct llc_sock *llc = timer_container_of(llc, t,
+						  busy_state_timer.timer);
 
 	llc_conn_tmr_common_cb(&llc->sk, LLC_CONN_EV_TYPE_BUSY_TMR);
 }
 
 void llc_conn_ack_tmr_cb(struct timer_list *t)
 {
-	struct llc_sock *llc = from_timer(llc, t, ack_timer.timer);
+	struct llc_sock *llc = timer_container_of(llc, t, ack_timer.timer);
 
 	llc_conn_tmr_common_cb(&llc->sk, LLC_CONN_EV_TYPE_ACK_TMR);
 }
 
 void llc_conn_rej_tmr_cb(struct timer_list *t)
 {
-	struct llc_sock *llc = from_timer(llc, t, rej_sent_timer.timer);
+	struct llc_sock *llc = timer_container_of(llc, t,
+						  rej_sent_timer.timer);
 
 	llc_conn_tmr_common_cb(&llc->sk, LLC_CONN_EV_TYPE_REJ_TMR);
 }

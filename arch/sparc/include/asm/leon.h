@@ -59,7 +59,7 @@
 #define ASI_LEON3_SYSCTRL_CFG_SNOOPING (1 << 27)
 #define ASI_LEON3_SYSCTRL_CFG_SSIZE(c) (1 << ((c >> 20) & 0xf))
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 /* do a physical address bypass write, i.e. for 0x80000000 */
 static inline void leon_store_reg(unsigned long paddr, unsigned long value)
@@ -132,7 +132,7 @@ static inline int sparc_leon3_cpuid(void)
 	return sparc_leon3_asr17() >> 28;
 }
 
-#endif /*!__ASSEMBLY__*/
+#endif /*!__ASSEMBLER__*/
 
 #ifdef CONFIG_SMP
 # define LEON3_IRQ_IPI_DEFAULT		13
@@ -194,7 +194,7 @@ static inline int sparc_leon3_cpuid(void)
 #define LEON2_CCR_DSETS_MASK 0x03000000UL
 #define LEON2_CFG_SSIZE_MASK 0x00007000UL
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 struct vm_area_struct;
 
 unsigned long leon_swprobe(unsigned long vaddr, unsigned long *paddr);
@@ -225,7 +225,6 @@ void leon_update_virq_handling(unsigned int virq,
 			       irq_flow_handler_t flow_handler,
 			       const char *name, int do_ack);
 void leon_init_timers(void);
-void leon_trans_init(struct device_node *dp);
 void leon_node_init(struct device_node *dp, struct device_node ***nextp);
 void init_leon(void);
 void poke_leonsparc(void);
@@ -248,11 +247,20 @@ extern int leon_ipi_irq;
 
 #endif /* CONFIG_SMP */
 
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 
 /* macros used in leon_mm.c */
 #define PFN(x)           ((x) >> PAGE_SHIFT)
 #define _pfn_valid(pfn)	 ((pfn < last_valid_pfn) && (pfn >= PFN(phys_base)))
 #define _SRMMU_PTE_PMASK_LEON 0xffffffff
+
+/*
+ * On LEON PCI Memory space is mapped 1:1 with physical address space.
+ *
+ * I/O space is located at low 64Kbytes in PCI I/O space. The I/O addresses
+ * are converted into CPU addresses to virtual addresses that are mapped with
+ * MMU to the PCI Host PCI I/O space window which are translated to the low
+ * 64Kbytes by the Host controller.
+ */
 
 #endif

@@ -1,25 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * cs43130.c  --  CS43130 ALSA Soc Audio driver
  *
  * Copyright 2017 Cirrus Logic, Inc.
  *
  * Authors: Li Xu <li.xu@cirrus.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/delay.h>
-#include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
 #include <linux/i2c.h>
-#include <linux/of_device.h>
+#include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
 #include <sound/core.h>
@@ -29,16 +25,15 @@
 #include <sound/soc-dapm.h>
 #include <sound/initval.h>
 #include <sound/tlv.h>
-#include <linux/of_gpio.h>
 #include <linux/regulator/consumer.h>
 #include <linux/pm_runtime.h>
-#include <linux/of_irq.h>
 #include <linux/completion.h>
 #include <linux/mutex.h>
 #include <linux/workqueue.h>
 #include <sound/jack.h>
 
 #include "cs43130.h"
+#include "cirrus_legacy.h"
 
 static const struct reg_default cs43130_reg_defaults[] = {
 	{CS43130_SYS_CLK_CTL_1, 0x06},
@@ -241,7 +236,7 @@ static int cs43130_pll_config(struct snd_soc_component *component)
 	struct cs43130_private *cs43130 = snd_soc_component_get_drvdata(component);
 	const struct cs43130_pll_params *pll_entry;
 
-	dev_dbg(component->dev, "cs43130->mclk = %u, cs43130->mclk_int = %u\n",
+	dev_dbg(cs43130->dev, "cs43130->mclk = %u, cs43130->mclk_int = %u\n",
 		cs43130->mclk, cs43130->mclk_int);
 
 	pll_entry = cs43130_get_pll_table(cs43130->mclk, cs43130->mclk_int);
@@ -306,7 +301,7 @@ static int cs43130_set_pll(struct snd_soc_component *component, int pll_id, int 
 		cs43130->mclk = freq_in;
 		break;
 	default:
-		dev_err(component->dev,
+		dev_err(cs43130->dev,
 			"unsupported pll input reference clock:%d\n", freq_in);
 		return -EINVAL;
 	}
@@ -319,14 +314,42 @@ static int cs43130_set_pll(struct snd_soc_component *component, int pll_id, int 
 		cs43130->mclk_int = freq_out;
 		break;
 	default:
-		dev_err(component->dev,
+		dev_err(cs43130->dev,
 			"unsupported pll output ref clock: %u\n", freq_out);
 		return -EINVAL;
 	}
 
 	ret = cs43130_pll_config(component);
-	dev_dbg(component->dev, "cs43130->pll_bypass = %d", cs43130->pll_bypass);
+	dev_dbg(cs43130->dev, "cs43130->pll_bypass = %d", cs43130->pll_bypass);
 	return ret;
+}
+
+static int cs43130_wait_for_completion(struct cs43130_private *cs43130, struct completion *to_poll,
+					int time)
+{
+	int stickies, offset, flag, ret;
+
+	if (cs43130->has_irq_line) {
+		ret = wait_for_completion_timeout(to_poll, msecs_to_jiffies(time));
+		if (ret == 0)
+			return -ETIMEDOUT;
+		else
+			return 0; // Discard number of jiffies left till timeout and return success
+	}
+
+	if (to_poll == &cs43130->xtal_rdy) {
+		offset = 0;
+		flag = CS43130_XTAL_RDY_INT;
+	} else if (to_poll == &cs43130->pll_rdy) {
+		offset = 0;
+		flag = CS43130_PLL_RDY_INT;
+	} else {
+		return -EINVAL;
+	}
+
+	return regmap_read_poll_timeout(cs43130->regmap, CS43130_INT_STATUS_1 + offset,
+					stickies, (stickies & flag),
+					1000, time * 1000);
 }
 
 static int cs43130_change_clksrc(struct snd_soc_component *component,
@@ -349,7 +372,7 @@ static int cs43130_change_clksrc(struct snd_soc_component *component,
 		mclk_int_decoded = CS43130_MCLK_24P5;
 		break;
 	default:
-		dev_err(component->dev, "Invalid MCLK INT freq: %u\n", cs43130->mclk_int);
+		dev_err(cs43130->dev, "Invalid MCLK INT freq: %u\n", cs43130->mclk_int);
 		return -EINVAL;
 	}
 
@@ -367,14 +390,13 @@ static int cs43130_change_clksrc(struct snd_soc_component *component,
 					   CS43130_XTAL_RDY_INT_MASK, 0);
 			regmap_update_bits(cs43130->regmap, CS43130_PWDN_CTL,
 					   CS43130_PDN_XTAL_MASK, 0);
-			ret = wait_for_completion_timeout(&cs43130->xtal_rdy,
-							  msecs_to_jiffies(100));
+			ret = cs43130_wait_for_completion(cs43130, &cs43130->xtal_rdy, 100);
 			regmap_update_bits(cs43130->regmap, CS43130_INT_MASK_1,
 					   CS43130_XTAL_RDY_INT_MASK,
 					   1 << CS43130_XTAL_RDY_INT_SHIFT);
-			if (ret == 0) {
-				dev_err(component->dev, "Timeout waiting for XTAL_READY interrupt\n");
-				return -ETIMEDOUT;
+			if (ret) {
+				dev_err(cs43130->dev, "Error waiting for XTAL_READY interrupt: %d\n", ret);
+				return ret;
 			}
 		}
 
@@ -403,14 +425,13 @@ static int cs43130_change_clksrc(struct snd_soc_component *component,
 					   CS43130_XTAL_RDY_INT_MASK, 0);
 			regmap_update_bits(cs43130->regmap, CS43130_PWDN_CTL,
 					   CS43130_PDN_XTAL_MASK, 0);
-			ret = wait_for_completion_timeout(&cs43130->xtal_rdy,
-							  msecs_to_jiffies(100));
+			ret = cs43130_wait_for_completion(cs43130, &cs43130->xtal_rdy, 100);
 			regmap_update_bits(cs43130->regmap, CS43130_INT_MASK_1,
 					   CS43130_XTAL_RDY_INT_MASK,
 					   1 << CS43130_XTAL_RDY_INT_SHIFT);
-			if (ret == 0) {
-				dev_err(component->dev, "Timeout waiting for XTAL_READY interrupt\n");
-				return -ETIMEDOUT;
+			if (ret) {
+				dev_err(cs43130->dev, "Error waiting for XTAL_READY interrupt: %d\n", ret);
+				return ret;
 			}
 		}
 
@@ -419,14 +440,13 @@ static int cs43130_change_clksrc(struct snd_soc_component *component,
 				   CS43130_PLL_RDY_INT_MASK, 0);
 		regmap_update_bits(cs43130->regmap, CS43130_PWDN_CTL,
 				   CS43130_PDN_PLL_MASK, 0);
-		ret = wait_for_completion_timeout(&cs43130->pll_rdy,
-						  msecs_to_jiffies(100));
+		ret = cs43130_wait_for_completion(cs43130, &cs43130->pll_rdy, 100);
 		regmap_update_bits(cs43130->regmap, CS43130_INT_MASK_1,
 				   CS43130_PLL_RDY_INT_MASK,
 				   1 << CS43130_PLL_RDY_INT_SHIFT);
-		if (ret == 0) {
-			dev_err(component->dev, "Timeout waiting for PLL_READY interrupt\n");
-			return -ETIMEDOUT;
+		if (ret) {
+			dev_err(cs43130->dev, "Error waiting for PLL_READY interrupt: %d\n", ret);
+			return ret;
 		}
 
 		regmap_update_bits(cs43130->regmap, CS43130_SYS_CLK_CTL_1,
@@ -456,7 +476,7 @@ static int cs43130_change_clksrc(struct snd_soc_component *component,
 				   1 << CS43130_PDN_PLL_SHIFT);
 		break;
 	default:
-		dev_err(component->dev, "Invalid MCLK source value\n");
+		dev_err(cs43130->dev, "Invalid MCLK source value\n");
 		return -EINVAL;
 	}
 
@@ -581,7 +601,7 @@ static int cs43130_set_sp_fmt(int dai_id, unsigned int bitwidth_sclk,
 		break;
 	case SND_SOC_DAIFMT_LEFT_J:
 		hi_size = bitwidth_sclk;
-		frm_delay = 2;
+		frm_delay = 0;
 		frm_phase = 1;
 		break;
 	case SND_SOC_DAIFMT_DSP_A:
@@ -598,11 +618,32 @@ static int cs43130_set_sp_fmt(int dai_id, unsigned int bitwidth_sclk,
 		return -EINVAL;
 	}
 
+	switch (cs43130->dais[dai_id].dai_invert) {
+	case SND_SOC_DAIFMT_NB_NF:
+		sclk_edge = 1;
+		lrck_edge = 0;
+		break;
+	case SND_SOC_DAIFMT_IB_NF:
+		sclk_edge = 0;
+		lrck_edge = 0;
+		break;
+	case SND_SOC_DAIFMT_NB_IF:
+		sclk_edge = 1;
+		lrck_edge = 1;
+		break;
+	case SND_SOC_DAIFMT_IB_IF:
+		sclk_edge = 0;
+		lrck_edge = 1;
+		break;
+	default:
+		return -EINVAL;
+	}
+
 	switch (cs43130->dais[dai_id].dai_mode) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		dai_mode_val = 0;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		dai_mode_val = 1;
 		break;
 	default:
@@ -610,8 +651,6 @@ static int cs43130_set_sp_fmt(int dai_id, unsigned int bitwidth_sclk,
 	}
 
 	frm_size = bitwidth_sclk * params_channels(params);
-	sclk_edge = 1;
-	lrck_edge = 0;
 	loc_ch1 = 0;
 	loc_ch2 = bitwidth_sclk * (params_channels(params) - 1);
 
@@ -714,30 +753,30 @@ static int cs43130_set_sp_fmt(int dai_id, unsigned int bitwidth_sclk,
 	case CS43130_ASP_PCM_DAI:
 	case CS43130_ASP_DOP_DAI:
 		regmap_write(cs43130->regmap, CS43130_ASP_DEN_1,
-			     (clk_gen->den & CS43130_SP_M_LSB_DATA_MASK) >>
+			     (clk_gen->v.denominator & CS43130_SP_M_LSB_DATA_MASK) >>
 			     CS43130_SP_M_LSB_DATA_SHIFT);
 		regmap_write(cs43130->regmap, CS43130_ASP_DEN_2,
-			     (clk_gen->den & CS43130_SP_M_MSB_DATA_MASK) >>
+			     (clk_gen->v.denominator & CS43130_SP_M_MSB_DATA_MASK) >>
 			     CS43130_SP_M_MSB_DATA_SHIFT);
 		regmap_write(cs43130->regmap, CS43130_ASP_NUM_1,
-			     (clk_gen->num & CS43130_SP_N_LSB_DATA_MASK) >>
+			     (clk_gen->v.numerator & CS43130_SP_N_LSB_DATA_MASK) >>
 			     CS43130_SP_N_LSB_DATA_SHIFT);
 		regmap_write(cs43130->regmap, CS43130_ASP_NUM_2,
-			     (clk_gen->num & CS43130_SP_N_MSB_DATA_MASK) >>
+			     (clk_gen->v.numerator & CS43130_SP_N_MSB_DATA_MASK) >>
 			     CS43130_SP_N_MSB_DATA_SHIFT);
 		break;
 	case CS43130_XSP_DOP_DAI:
 		regmap_write(cs43130->regmap, CS43130_XSP_DEN_1,
-			     (clk_gen->den & CS43130_SP_M_LSB_DATA_MASK) >>
+			     (clk_gen->v.denominator & CS43130_SP_M_LSB_DATA_MASK) >>
 			     CS43130_SP_M_LSB_DATA_SHIFT);
 		regmap_write(cs43130->regmap, CS43130_XSP_DEN_2,
-			     (clk_gen->den & CS43130_SP_M_MSB_DATA_MASK) >>
+			     (clk_gen->v.denominator & CS43130_SP_M_MSB_DATA_MASK) >>
 			     CS43130_SP_M_MSB_DATA_SHIFT);
 		regmap_write(cs43130->regmap, CS43130_XSP_NUM_1,
-			     (clk_gen->num & CS43130_SP_N_LSB_DATA_MASK) >>
+			     (clk_gen->v.numerator & CS43130_SP_N_LSB_DATA_MASK) >>
 			     CS43130_SP_N_LSB_DATA_SHIFT);
 		regmap_write(cs43130->regmap, CS43130_XSP_NUM_2,
-			     (clk_gen->num & CS43130_SP_N_MSB_DATA_MASK) >>
+			     (clk_gen->v.numerator & CS43130_SP_N_MSB_DATA_MASK) >>
 			     CS43130_SP_N_MSB_DATA_SHIFT);
 		break;
 	default:
@@ -807,12 +846,12 @@ static int cs43130_dsd_hw_params(struct snd_pcm_substream *substream,
 		dsd_speed = 1;
 		break;
 	default:
-		dev_err(component->dev, "Rate(%u) not supported\n",
+		dev_err(cs43130->dev, "Rate(%u) not supported\n",
 			params_rate(params));
 		return -EINVAL;
 	}
 
-	if (cs43130->dais[dai->id].dai_mode == SND_SOC_DAIFMT_CBM_CFM)
+	if (cs43130->dais[dai->id].dai_mode == SND_SOC_DAIFMT_CBP_CFP)
 		regmap_update_bits(cs43130->regmap, CS43130_DSD_INT_CFG,
 				   CS43130_DSD_MASTER, CS43130_DSD_MASTER);
 	else
@@ -878,7 +917,7 @@ static int cs43130_hw_params(struct snd_pcm_substream *substream,
 			dsd_speed = 1;
 			break;
 		default:
-			dev_err(component->dev, "Rate(%u) not supported\n",
+			dev_err(cs43130->dev, "Rate(%u) not supported\n",
 				params_rate(params));
 			return -EINVAL;
 		}
@@ -895,7 +934,7 @@ static int cs43130_hw_params(struct snd_pcm_substream *substream,
 		regmap_write(cs43130->regmap, CS43130_SP_SRATE, rate_map->val);
 		break;
 	default:
-		dev_err(component->dev, "Invalid DAI (%d)\n", dai->id);
+		dev_err(cs43130->dev, "Invalid DAI (%d)\n", dai->id);
 		return -EINVAL;
 	}
 
@@ -912,28 +951,28 @@ static int cs43130_hw_params(struct snd_pcm_substream *substream,
 		break;
 	}
 
-	if (!sclk && cs43130->dais[dai->id].dai_mode == SND_SOC_DAIFMT_CBM_CFM)
+	if (!sclk && cs43130->dais[dai->id].dai_mode == SND_SOC_DAIFMT_CBP_CFP)
 		/* Calculate SCLK in master mode if unassigned */
 		sclk = params_rate(params) * bitwidth_dai *
 		       params_channels(params);
 
 	if (!sclk) {
 		/* at this point, SCLK must be set */
-		dev_err(component->dev, "SCLK freq is not set\n");
+		dev_err(cs43130->dev, "SCLK freq is not set\n");
 		return -EINVAL;
 	}
 
 	bitwidth_sclk = (sclk / params_rate(params)) / params_channels(params);
 	if (bitwidth_sclk < bitwidth_dai) {
-		dev_err(component->dev, "Format not supported: SCLK freq is too low\n");
+		dev_err(cs43130->dev, "Format not supported: SCLK freq is too low\n");
 		return -EINVAL;
 	}
 
-	dev_dbg(component->dev,
+	dev_dbg(cs43130->dev,
 		"sclk = %u, fs = %d, bitwidth_dai = %u\n",
 		sclk, params_rate(params), bitwidth_dai);
 
-	dev_dbg(component->dev,
+	dev_dbg(cs43130->dev,
 		"bitwidth_sclk = %u, num_ch = %u\n",
 		bitwidth_sclk, params_channels(params));
 
@@ -1023,7 +1062,7 @@ static int cs43130_pcm_ch_put(struct snd_kcontrol *kcontrol,
 {
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	unsigned int *item = ucontrol->value.enumerated.item;
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct cs43130_private *cs43130 = snd_soc_component_get_drvdata(component);
 	unsigned int val;
 
@@ -1192,7 +1231,7 @@ static int cs43130_dsd_event(struct snd_soc_dapm_widget *w,
 		}
 		break;
 	default:
-		dev_err(component->dev, "Invalid event = 0x%x\n", event);
+		dev_err(cs43130->dev, "Invalid event = 0x%x\n", event);
 		return -EINVAL;
 	}
 	return 0;
@@ -1249,7 +1288,7 @@ static int cs43130_pcm_event(struct snd_soc_dapm_widget *w,
 		}
 		break;
 	default:
-		dev_err(component->dev, "Invalid event = 0x%x\n", event);
+		dev_err(cs43130->dev, "Invalid event = 0x%x\n", event);
 		return -EINVAL;
 	}
 	return 0;
@@ -1325,7 +1364,7 @@ static int cs43130_dac_event(struct snd_soc_dapm_widget *w,
 		}
 		break;
 	default:
-		dev_err(component->dev, "Invalid DAC event = 0x%x\n", event);
+		dev_err(cs43130->dev, "Invalid DAC event = 0x%x\n", event);
 		return -EINVAL;
 	}
 	return 0;
@@ -1363,13 +1402,21 @@ static int cs43130_hpin_event(struct snd_soc_dapm_widget *w,
 				       ARRAY_SIZE(hpin_postpmu_seq));
 		break;
 	default:
-		dev_err(component->dev, "Invalid HPIN event = 0x%x\n", event);
+		dev_err(cs43130->dev, "Invalid HPIN event = 0x%x\n", event);
 		return -EINVAL;
 	}
 	return 0;
 }
 
-static const struct snd_soc_dapm_widget digital_hp_widgets[] = {
+static const char * const bypass_mux_text[] = {
+	"Internal",
+	"Alternative",
+};
+static SOC_ENUM_SINGLE_DECL(bypass_enum, SND_SOC_NOPM, 0, bypass_mux_text);
+static const struct snd_kcontrol_new bypass_ctrl = SOC_DAPM_ENUM("Switch", bypass_enum);
+
+static const struct snd_soc_dapm_widget hp_widgets[] = {
+	SND_SOC_DAPM_MUX("Bypass Switch", SND_SOC_NOPM, 0, 0, &bypass_ctrl),
 	SND_SOC_DAPM_OUTPUT("HPOUTA"),
 	SND_SOC_DAPM_OUTPUT("HPOUTB"),
 
@@ -1400,19 +1447,16 @@ static const struct snd_soc_dapm_widget digital_hp_widgets[] = {
 			   CS43130_PDN_HP_SHIFT, 1, cs43130_dac_event,
 			   (SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
 			    SND_SOC_DAPM_POST_PMD)),
-};
 
-static const struct snd_soc_dapm_widget analog_hp_widgets[] = {
+/* Some devices have some extra analog widgets */
+#define NUM_ANALOG_WIDGETS	1
+
 	SND_SOC_DAPM_DAC_E("Analog Playback", NULL, CS43130_HP_OUT_CTL_1,
 			   CS43130_HP_IN_EN_SHIFT, 0, cs43130_hpin_event,
 			   (SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD)),
 };
 
-static struct snd_soc_dapm_widget all_hp_widgets[
-			ARRAY_SIZE(digital_hp_widgets) +
-			ARRAY_SIZE(analog_hp_widgets)];
-
-static const struct snd_soc_dapm_route digital_hp_routes[] = {
+static const struct snd_soc_dapm_route hp_routes[] = {
 	{"ASPIN PCM", NULL, "ASP PCM Playback"},
 	{"ASPIN DoP", NULL, "ASP DoP Playback"},
 	{"XSPIN DoP", NULL, "XSP DoP Playback"},
@@ -1422,18 +1466,15 @@ static const struct snd_soc_dapm_route digital_hp_routes[] = {
 	{"DSD", NULL, "XSPIN DSD"},
 	{"HiFi DAC", NULL, "ASPIN PCM"},
 	{"HiFi DAC", NULL, "DSD"},
-	{"HPOUTA", NULL, "HiFi DAC"},
-	{"HPOUTB", NULL, "HiFi DAC"},
+	{"Bypass Switch", "Internal", "HiFi DAC"},
+	{"HPOUTA", NULL, "Bypass Switch"},
+	{"HPOUTB", NULL, "Bypass Switch"},
+
+/* Some devices have some extra analog routes */
+#define NUM_ANALOG_ROUTES	1
+	{"Bypass Switch", "Alternative", "Analog Playback"},
 };
 
-static const struct snd_soc_dapm_route analog_hp_routes[] = {
-	{"HPOUTA", NULL, "Analog Playback"},
-	{"HPOUTB", NULL, "Analog Playback"},
-};
-
-static struct snd_soc_dapm_route all_hp_routes[
-			ARRAY_SIZE(digital_hp_routes) +
-			ARRAY_SIZE(analog_hp_routes)];
 
 static const unsigned int cs43130_asp_src_rates[] = {
 	32000, 44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000
@@ -1475,14 +1516,33 @@ static int cs43130_pcm_set_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 	struct cs43130_private *cs43130 = snd_soc_component_get_drvdata(component);
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
-		cs43130->dais[codec_dai->id].dai_mode = SND_SOC_DAIFMT_CBS_CFS;
+	case SND_SOC_DAIFMT_CBC_CFC:
+		cs43130->dais[codec_dai->id].dai_mode = SND_SOC_DAIFMT_CBC_CFC;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
-		cs43130->dais[codec_dai->id].dai_mode = SND_SOC_DAIFMT_CBM_CFM;
+	case SND_SOC_DAIFMT_CBP_CFP:
+		cs43130->dais[codec_dai->id].dai_mode = SND_SOC_DAIFMT_CBP_CFP;
 		break;
 	default:
-		dev_err(component->dev, "unsupported mode\n");
+		dev_err(cs43130->dev, "unsupported mode\n");
+		return -EINVAL;
+	}
+
+	switch (fmt & SND_SOC_DAIFMT_INV_MASK) {
+	case SND_SOC_DAIFMT_NB_NF:
+		cs43130->dais[codec_dai->id].dai_invert = SND_SOC_DAIFMT_NB_NF;
+		break;
+	case SND_SOC_DAIFMT_IB_NF:
+		cs43130->dais[codec_dai->id].dai_invert = SND_SOC_DAIFMT_IB_NF;
+		break;
+	case SND_SOC_DAIFMT_NB_IF:
+		cs43130->dais[codec_dai->id].dai_invert = SND_SOC_DAIFMT_NB_IF;
+		break;
+	case SND_SOC_DAIFMT_IB_IF:
+		cs43130->dais[codec_dai->id].dai_invert = SND_SOC_DAIFMT_IB_IF;
+		break;
+	default:
+		dev_err(cs43130->dev, "Unsupported invert mode 0x%x\n",
+			fmt & SND_SOC_DAIFMT_INV_MASK);
 		return -EINVAL;
 	}
 
@@ -1500,12 +1560,12 @@ static int cs43130_pcm_set_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 		cs43130->dais[codec_dai->id].dai_format = SND_SOC_DAIFMT_DSP_B;
 		break;
 	default:
-		dev_err(component->dev,
+		dev_err(cs43130->dev,
 			"unsupported audio format\n");
 		return -EINVAL;
 	}
 
-	dev_dbg(component->dev, "dai_id = %d,  dai_mode = %u, dai_format = %u\n",
+	dev_dbg(cs43130->dev, "dai_id = %d,  dai_mode = %u, dai_format = %u\n",
 		codec_dai->id,
 		cs43130->dais[codec_dai->id].dai_mode,
 		cs43130->dais[codec_dai->id].dai_format);
@@ -1519,18 +1579,18 @@ static int cs43130_dsd_set_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 	struct cs43130_private *cs43130 = snd_soc_component_get_drvdata(component);
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
-		cs43130->dais[codec_dai->id].dai_mode = SND_SOC_DAIFMT_CBS_CFS;
+	case SND_SOC_DAIFMT_CBC_CFC:
+		cs43130->dais[codec_dai->id].dai_mode = SND_SOC_DAIFMT_CBC_CFC;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
-		cs43130->dais[codec_dai->id].dai_mode = SND_SOC_DAIFMT_CBM_CFM;
+	case SND_SOC_DAIFMT_CBP_CFP:
+		cs43130->dais[codec_dai->id].dai_mode = SND_SOC_DAIFMT_CBP_CFP;
 		break;
 	default:
-		dev_err(component->dev, "Unsupported DAI format.\n");
+		dev_err(cs43130->dev, "Unsupported DAI format.\n");
 		return -EINVAL;
 	}
 
-	dev_dbg(component->dev, "dai_mode = 0x%x\n",
+	dev_dbg(cs43130->dev, "dai_mode = 0x%x\n",
 		cs43130->dais[codec_dai->id].dai_mode);
 
 	return 0;
@@ -1543,7 +1603,7 @@ static int cs43130_set_sysclk(struct snd_soc_dai *codec_dai,
 	struct cs43130_private *cs43130 = snd_soc_component_get_drvdata(component);
 
 	cs43130->dais[codec_dai->id].sclk = freq;
-	dev_dbg(component->dev, "dai_id = %d,  sclk = %u\n", codec_dai->id,
+	dev_dbg(cs43130->dev, "dai_id = %d,  sclk = %u\n", codec_dai->id,
 		cs43130->dais[codec_dai->id].sclk);
 
 	return 0;
@@ -1584,7 +1644,7 @@ static struct snd_soc_dai_driver cs43130_dai[] = {
 			.formats = CS43130_PCM_FORMATS,
 		},
 		.ops = &cs43130_pcm_ops,
-		.symmetric_rates = 1,
+		.symmetric_rate = 1,
 	},
 	{
 		.name = "cs43130-asp-dop",
@@ -1597,7 +1657,7 @@ static struct snd_soc_dai_driver cs43130_dai[] = {
 			.formats = CS43130_DOP_FORMATS,
 		},
 		.ops = &cs43130_dop_ops,
-		.symmetric_rates = 1,
+		.symmetric_rate = 1,
 	},
 	{
 		.name = "cs43130-xsp-dop",
@@ -1610,7 +1670,7 @@ static struct snd_soc_dai_driver cs43130_dai[] = {
 			.formats = CS43130_DOP_FORMATS,
 		},
 		.ops = &cs43130_dop_ops,
-		.symmetric_rates = 1,
+		.symmetric_rate = 1,
 	},
 	{
 		.name = "cs43130-xsp-dsd",
@@ -1633,7 +1693,7 @@ static int cs43130_component_set_sysclk(struct snd_soc_component *component,
 {
 	struct cs43130_private *cs43130 = snd_soc_component_get_drvdata(component);
 
-	dev_dbg(component->dev, "clk_id = %d, source = %d, freq = %d, dir = %d\n",
+	dev_dbg(cs43130->dev, "clk_id = %d, source = %d, freq = %d, dir = %d\n",
 		clk_id, source, freq, dir);
 
 	switch (freq) {
@@ -1642,14 +1702,14 @@ static int cs43130_component_set_sysclk(struct snd_soc_component *component,
 		cs43130->mclk = freq;
 		break;
 	default:
-		dev_err(component->dev, "Invalid MCLK INT freq: %u\n", freq);
+		dev_err(cs43130->dev, "Invalid MCLK INT freq: %u\n", freq);
 		return -EINVAL;
 	}
 
 	if (source == CS43130_MCLK_SRC_EXT) {
 		cs43130->pll_bypass = true;
 	} else {
-		dev_err(component->dev, "Invalid MCLK source\n");
+		dev_err(cs43130->dev, "Invalid MCLK source\n");
 		return -EINVAL;
 	}
 
@@ -1668,25 +1728,24 @@ static int cs43130_show_dc(struct device *dev, char *buf, u8 ch)
 	struct cs43130_private *cs43130 = i2c_get_clientdata(client);
 
 	if (!cs43130->hpload_done)
-		return scnprintf(buf, PAGE_SIZE, "NO_HPLOAD\n");
+		return sysfs_emit(buf, "NO_HPLOAD\n");
 	else
-		return scnprintf(buf, PAGE_SIZE, "%u\n",
-				 cs43130->hpload_dc[ch]);
+		return sysfs_emit(buf, "%u\n", cs43130->hpload_dc[ch]);
 }
 
-static ssize_t cs43130_show_dc_l(struct device *dev,
-				 struct device_attribute *attr, char *buf)
+static ssize_t hpload_dc_l_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
 {
 	return cs43130_show_dc(dev, buf, HP_LEFT);
 }
 
-static ssize_t cs43130_show_dc_r(struct device *dev,
-				 struct device_attribute *attr, char *buf)
+static ssize_t hpload_dc_r_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
 {
 	return cs43130_show_dc(dev, buf, HP_RIGHT);
 }
 
-static u16 const cs43130_ac_freq[CS43130_AC_FREQ] = {
+static const u16 cs43130_ac_freq[CS43130_AC_FREQ] = {
 	24,
 	43,
 	93,
@@ -1707,8 +1766,8 @@ static int cs43130_show_ac(struct device *dev, char *buf, u8 ch)
 
 	if (cs43130->hpload_done && cs43130->ac_meas) {
 		for (i = 0; i < ARRAY_SIZE(cs43130_ac_freq); i++) {
-			tmp = scnprintf(buf + j, PAGE_SIZE - j, "%u\n",
-					cs43130->hpload_ac[i][ch]);
+			tmp = sysfs_emit_at(buf, j, "%u\n",
+					    cs43130->hpload_ac[i][ch]);
 			if (!tmp)
 				break;
 
@@ -1717,28 +1776,36 @@ static int cs43130_show_ac(struct device *dev, char *buf, u8 ch)
 
 		return j;
 	} else {
-		return scnprintf(buf, PAGE_SIZE, "NO_HPLOAD\n");
+		return sysfs_emit(buf, "NO_HPLOAD\n");
 	}
 }
 
-static ssize_t cs43130_show_ac_l(struct device *dev,
-				 struct device_attribute *attr, char *buf)
+static ssize_t hpload_ac_l_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
 {
 	return cs43130_show_ac(dev, buf, HP_LEFT);
 }
 
-static ssize_t cs43130_show_ac_r(struct device *dev,
-				 struct device_attribute *attr, char *buf)
+static ssize_t hpload_ac_r_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
 {
 	return cs43130_show_ac(dev, buf, HP_RIGHT);
 }
 
-static DEVICE_ATTR(hpload_dc_l, S_IRUGO, cs43130_show_dc_l, NULL);
-static DEVICE_ATTR(hpload_dc_r, S_IRUGO, cs43130_show_dc_r, NULL);
-static DEVICE_ATTR(hpload_ac_l, S_IRUGO, cs43130_show_ac_l, NULL);
-static DEVICE_ATTR(hpload_ac_r, S_IRUGO, cs43130_show_ac_r, NULL);
+static DEVICE_ATTR_RO(hpload_dc_l);
+static DEVICE_ATTR_RO(hpload_dc_r);
+static DEVICE_ATTR_RO(hpload_ac_l);
+static DEVICE_ATTR_RO(hpload_ac_r);
 
-static struct reg_sequence hp_en_cal_seq[] = {
+static struct attribute *hpload_attrs[] = {
+	&dev_attr_hpload_dc_l.attr,
+	&dev_attr_hpload_dc_r.attr,
+	&dev_attr_hpload_ac_l.attr,
+	&dev_attr_hpload_ac_r.attr,
+};
+ATTRIBUTE_GROUPS(hpload);
+
+static const struct reg_sequence hp_en_cal_seq[] = {
 	{CS43130_INT_MASK_4, CS43130_INT_MASK_ALL},
 	{CS43130_HP_MEAS_LOAD_1, 0},
 	{CS43130_HP_MEAS_LOAD_2, 0},
@@ -1753,7 +1820,7 @@ static struct reg_sequence hp_en_cal_seq[] = {
 	{CS43130_HP_LOAD_1, 0x80},
 };
 
-static struct reg_sequence hp_en_cal_seq2[] = {
+static const struct reg_sequence hp_en_cal_seq2[] = {
 	{CS43130_INT_MASK_4, CS43130_INT_MASK_ALL},
 	{CS43130_HP_MEAS_LOAD_1, 0},
 	{CS43130_HP_MEAS_LOAD_2, 0},
@@ -1761,7 +1828,7 @@ static struct reg_sequence hp_en_cal_seq2[] = {
 	{CS43130_HP_LOAD_1, 0x80},
 };
 
-static struct reg_sequence hp_dis_cal_seq[] = {
+static const struct reg_sequence hp_dis_cal_seq[] = {
 	{CS43130_HP_LOAD_1, 0x80},
 	{CS43130_DXD1, 0x99},
 	{CS43130_DXD12, 0},
@@ -1769,12 +1836,12 @@ static struct reg_sequence hp_dis_cal_seq[] = {
 	{CS43130_HP_LOAD_1, 0},
 };
 
-static struct reg_sequence hp_dis_cal_seq2[] = {
+static const struct reg_sequence hp_dis_cal_seq2[] = {
 	{CS43130_HP_LOAD_1, 0x80},
 	{CS43130_HP_LOAD_1, 0},
 };
 
-static struct reg_sequence hp_dc_ch_l_seq[] = {
+static const struct reg_sequence hp_dc_ch_l_seq[] = {
 	{CS43130_DXD1, 0x99},
 	{CS43130_DXD19, 0x0A},
 	{CS43130_DXD17, 0x93},
@@ -1784,12 +1851,12 @@ static struct reg_sequence hp_dc_ch_l_seq[] = {
 	{CS43130_HP_LOAD_1, 0x81},
 };
 
-static struct reg_sequence hp_dc_ch_l_seq2[] = {
+static const struct reg_sequence hp_dc_ch_l_seq2[] = {
 	{CS43130_HP_LOAD_1, 0x80},
 	{CS43130_HP_LOAD_1, 0x81},
 };
 
-static struct reg_sequence hp_dc_ch_r_seq[] = {
+static const struct reg_sequence hp_dc_ch_r_seq[] = {
 	{CS43130_DXD1, 0x99},
 	{CS43130_DXD19, 0x8A},
 	{CS43130_DXD17, 0x15},
@@ -1799,12 +1866,12 @@ static struct reg_sequence hp_dc_ch_r_seq[] = {
 	{CS43130_HP_LOAD_1, 0x91},
 };
 
-static struct reg_sequence hp_dc_ch_r_seq2[] = {
+static const struct reg_sequence hp_dc_ch_r_seq2[] = {
 	{CS43130_HP_LOAD_1, 0x90},
 	{CS43130_HP_LOAD_1, 0x91},
 };
 
-static struct reg_sequence hp_ac_ch_l_seq[] = {
+static const struct reg_sequence hp_ac_ch_l_seq[] = {
 	{CS43130_DXD1, 0x99},
 	{CS43130_DXD19, 0x0A},
 	{CS43130_DXD17, 0x93},
@@ -1814,12 +1881,12 @@ static struct reg_sequence hp_ac_ch_l_seq[] = {
 	{CS43130_HP_LOAD_1, 0x82},
 };
 
-static struct reg_sequence hp_ac_ch_l_seq2[] = {
+static const struct reg_sequence hp_ac_ch_l_seq2[] = {
 	{CS43130_HP_LOAD_1, 0x80},
 	{CS43130_HP_LOAD_1, 0x82},
 };
 
-static struct reg_sequence hp_ac_ch_r_seq[] = {
+static const struct reg_sequence hp_ac_ch_r_seq[] = {
 	{CS43130_DXD1, 0x99},
 	{CS43130_DXD19, 0x8A},
 	{CS43130_DXD17, 0x15},
@@ -1829,24 +1896,24 @@ static struct reg_sequence hp_ac_ch_r_seq[] = {
 	{CS43130_HP_LOAD_1, 0x92},
 };
 
-static struct reg_sequence hp_ac_ch_r_seq2[] = {
+static const struct reg_sequence hp_ac_ch_r_seq2[] = {
 	{CS43130_HP_LOAD_1, 0x90},
 	{CS43130_HP_LOAD_1, 0x92},
 };
 
-static struct reg_sequence hp_cln_seq[] = {
+static const struct reg_sequence hp_cln_seq[] = {
 	{CS43130_INT_MASK_4, CS43130_INT_MASK_ALL},
 	{CS43130_HP_MEAS_LOAD_1, 0},
 	{CS43130_HP_MEAS_LOAD_2, 0},
 };
 
 struct reg_sequences {
-	struct reg_sequence	*seq;
-	int			size;
-	unsigned int		msk;
+	const struct reg_sequence	*seq;
+	int				size;
+	unsigned int			msk;
 };
 
-static struct reg_sequences hpload_seq1[] = {
+static const struct reg_sequences hpload_seq1[] = {
 	{
 		.seq	= hp_en_cal_seq,
 		.size	= ARRAY_SIZE(hp_en_cal_seq),
@@ -1884,7 +1951,7 @@ static struct reg_sequences hpload_seq1[] = {
 	},
 };
 
-static struct reg_sequences hpload_seq2[] = {
+static const struct reg_sequences hpload_seq2[] = {
 	{
 		.seq	= hp_en_cal_seq2,
 		.size	= ARRAY_SIZE(hp_en_cal_seq2),
@@ -1929,7 +1996,6 @@ static int cs43130_update_hpload(unsigned int msk, int ac_idx,
 	unsigned int reg;
 	u32 addr;
 	u16 impedance;
-	struct snd_soc_component *component = cs43130->component;
 
 	switch (msk) {
 	case CS43130_HPLOAD_DC_INT:
@@ -1959,7 +2025,7 @@ static int cs43130_update_hpload(unsigned int msk, int ac_idx,
 		else
 			cs43130->hpload_dc[HP_RIGHT] = impedance;
 
-		dev_dbg(component->dev, "HP DC impedance (Ch %u): %u\n", !left_ch,
+		dev_dbg(cs43130->dev, "HP DC impedance (Ch %u): %u\n", !left_ch,
 			impedance);
 	} else {
 		if (left_ch)
@@ -1967,7 +2033,7 @@ static int cs43130_update_hpload(unsigned int msk, int ac_idx,
 		else
 			cs43130->hpload_ac[ac_idx][HP_RIGHT] = impedance;
 
-		dev_dbg(component->dev, "HP AC (%u Hz) impedance (Ch %u): %u\n",
+		dev_dbg(cs43130->dev, "HP AC (%u Hz) impedance (Ch %u): %u\n",
 			cs43130->ac_freq[ac_idx], !left_ch, impedance);
 	}
 
@@ -1975,13 +2041,12 @@ static int cs43130_update_hpload(unsigned int msk, int ac_idx,
 }
 
 static int cs43130_hpload_proc(struct cs43130_private *cs43130,
-			       struct reg_sequence *seq, int seq_size,
+			       const struct reg_sequence *seq, int seq_size,
 			       unsigned int rslt_msk, int ac_idx)
 {
 	int ret;
 	unsigned int msk;
 	u16 ac_reg_val;
-	struct snd_soc_component *component = cs43130->component;
 
 	reinit_completion(&cs43130->hpload_evt);
 
@@ -2004,17 +2069,17 @@ static int cs43130_hpload_proc(struct cs43130_private *cs43130,
 					  msecs_to_jiffies(1000));
 	regmap_read(cs43130->regmap, CS43130_INT_MASK_4, &msk);
 	if (!ret) {
-		dev_err(component->dev, "Timeout waiting for HPLOAD interrupt\n");
-		return -1;
+		dev_err(cs43130->dev, "Timeout waiting for HPLOAD interrupt\n");
+		return -ETIMEDOUT;
 	}
 
-	dev_dbg(component->dev, "HP load stat: %x, INT_MASK_4: %x\n",
+	dev_dbg(cs43130->dev, "HP load stat: %x, INT_MASK_4: %x\n",
 		cs43130->hpload_stat, msk);
 	if ((cs43130->hpload_stat & (CS43130_HPLOAD_NO_DC_INT |
 				     CS43130_HPLOAD_UNPLUG_INT |
 				     CS43130_HPLOAD_OOR_INT)) ||
 	    !(cs43130->hpload_stat & rslt_msk)) {
-		dev_dbg(component->dev, "HP load measure failed\n");
+		dev_dbg(cs43130->dev, "HP load measure failed\n");
 		return -1;
 	}
 
@@ -2057,7 +2122,7 @@ static void cs43130_imp_meas(struct work_struct *wk)
 	int i, ret, ac_idx;
 	struct cs43130_private *cs43130;
 	struct snd_soc_component *component;
-	struct reg_sequences *hpload_seq;
+	const struct reg_sequences *hpload_seq;
 
 	cs43130 = container_of(wk, struct cs43130_private, work);
 	component = cs43130->component;
@@ -2125,9 +2190,9 @@ static void cs43130_imp_meas(struct work_struct *wk)
 		snd_soc_jack_report(&cs43130->jack, CS43130_JACK_HEADPHONE,
 				    CS43130_JACK_MASK);
 
-	dev_dbg(component->dev, "Set HP output control. DC threshold\n");
+	dev_dbg(cs43130->dev, "Set HP output control. DC threshold\n");
 	for (i = 0; i < CS43130_DC_THRESHOLD; i++)
-		dev_dbg(component->dev, "DC threshold[%d]: %u.\n", i,
+		dev_dbg(cs43130->dev, "DC threshold[%d]: %u.\n", i,
 			cs43130->dc_threshold[i]);
 
 	cs43130_set_hv(cs43130->regmap, cs43130->hpload_dc[HP_LEFT],
@@ -2161,7 +2226,6 @@ exit:
 static irqreturn_t cs43130_irq_thread(int irq, void *data)
 {
 	struct cs43130_private *cs43130 = (struct cs43130_private *)data;
-	struct snd_soc_component *component = cs43130->component;
 	unsigned int stickies[CS43130_NUM_INT];
 	unsigned int irq_occurrence = 0;
 	unsigned int masks[CS43130_NUM_INT];
@@ -2179,8 +2243,6 @@ static irqreturn_t cs43130_irq_thread(int irq, void *data)
 		for (j = 0; j < 8; j++)
 			irq_occurrence += (stickies[i] >> j) & 1;
 	}
-	dev_dbg(component->dev, "number of interrupts occurred (%u)\n",
-		irq_occurrence);
 
 	if (!irq_occurrence)
 		return IRQ_NONE;
@@ -2197,7 +2259,7 @@ static irqreturn_t cs43130_irq_thread(int irq, void *data)
 
 	if (stickies[3] & CS43130_HPLOAD_NO_DC_INT) {
 		cs43130->hpload_stat = stickies[3];
-		dev_err(component->dev,
+		dev_err(cs43130->dev,
 			"DC load has not completed before AC load (%x)\n",
 			cs43130->hpload_stat);
 		complete(&cs43130->hpload_evt);
@@ -2206,7 +2268,7 @@ static irqreturn_t cs43130_irq_thread(int irq, void *data)
 
 	if (stickies[3] & CS43130_HPLOAD_UNPLUG_INT) {
 		cs43130->hpload_stat = stickies[3];
-		dev_err(component->dev, "HP unplugged during measurement (%x)\n",
+		dev_err(cs43130->dev, "HP unplugged during measurement (%x)\n",
 			cs43130->hpload_stat);
 		complete(&cs43130->hpload_evt);
 		return IRQ_HANDLED;
@@ -2214,7 +2276,7 @@ static irqreturn_t cs43130_irq_thread(int irq, void *data)
 
 	if (stickies[3] & CS43130_HPLOAD_OOR_INT) {
 		cs43130->hpload_stat = stickies[3];
-		dev_err(component->dev, "HP load out of range (%x)\n",
+		dev_err(cs43130->dev, "HP load out of range (%x)\n",
 			cs43130->hpload_stat);
 		complete(&cs43130->hpload_evt);
 		return IRQ_HANDLED;
@@ -2222,7 +2284,7 @@ static irqreturn_t cs43130_irq_thread(int irq, void *data)
 
 	if (stickies[3] & CS43130_HPLOAD_AC_INT) {
 		cs43130->hpload_stat = stickies[3];
-		dev_dbg(component->dev, "HP AC load measurement done (%x)\n",
+		dev_dbg(cs43130->dev, "HP AC load measurement done (%x)\n",
 			cs43130->hpload_stat);
 		complete(&cs43130->hpload_evt);
 		return IRQ_HANDLED;
@@ -2230,7 +2292,7 @@ static irqreturn_t cs43130_irq_thread(int irq, void *data)
 
 	if (stickies[3] & CS43130_HPLOAD_DC_INT) {
 		cs43130->hpload_stat = stickies[3];
-		dev_dbg(component->dev, "HP DC load measurement done (%x)\n",
+		dev_dbg(cs43130->dev, "HP DC load measurement done (%x)\n",
 			cs43130->hpload_stat);
 		complete(&cs43130->hpload_evt);
 		return IRQ_HANDLED;
@@ -2238,7 +2300,7 @@ static irqreturn_t cs43130_irq_thread(int irq, void *data)
 
 	if (stickies[3] & CS43130_HPLOAD_ON_INT) {
 		cs43130->hpload_stat = stickies[3];
-		dev_dbg(component->dev, "HP load state machine on done (%x)\n",
+		dev_dbg(cs43130->dev, "HP load state machine on done (%x)\n",
 			cs43130->hpload_stat);
 		complete(&cs43130->hpload_evt);
 		return IRQ_HANDLED;
@@ -2246,19 +2308,19 @@ static irqreturn_t cs43130_irq_thread(int irq, void *data)
 
 	if (stickies[3] & CS43130_HPLOAD_OFF_INT) {
 		cs43130->hpload_stat = stickies[3];
-		dev_dbg(component->dev, "HP load state machine off done (%x)\n",
+		dev_dbg(cs43130->dev, "HP load state machine off done (%x)\n",
 			cs43130->hpload_stat);
 		complete(&cs43130->hpload_evt);
 		return IRQ_HANDLED;
 	}
 
 	if (stickies[0] & CS43130_XTAL_ERR_INT) {
-		dev_err(component->dev, "Crystal err: clock is not running\n");
+		dev_err(cs43130->dev, "Crystal err: clock is not running\n");
 		return IRQ_HANDLED;
 	}
 
 	if (stickies[0] & CS43130_HP_UNPLUG_INT) {
-		dev_dbg(component->dev, "HP unplugged\n");
+		dev_dbg(cs43130->dev, "HP unplugged\n");
 		cs43130->hpload_done = false;
 		snd_soc_jack_report(&cs43130->jack, 0, CS43130_JACK_MASK);
 		return IRQ_HANDLED;
@@ -2267,7 +2329,7 @@ static irqreturn_t cs43130_irq_thread(int irq, void *data)
 	if (stickies[0] & CS43130_HP_PLUG_INT) {
 		if (cs43130->dc_meas && !cs43130->hpload_done &&
 		    !work_busy(&cs43130->work)) {
-			dev_dbg(component->dev, "HP load queue work\n");
+			dev_dbg(cs43130->dev, "HP load queue work\n");
 			queue_work(cs43130->wq, &cs43130->work);
 		}
 
@@ -2297,31 +2359,23 @@ static int cs43130_probe(struct snd_soc_component *component)
 	}
 
 	ret = snd_soc_card_jack_new(card, "Headphone", CS43130_JACK_MASK,
-				    &cs43130->jack, NULL, 0);
+				    &cs43130->jack);
 	if (ret < 0) {
-		dev_err(component->dev, "Cannot create jack\n");
+		dev_err(cs43130->dev, "Cannot create jack\n");
 		return ret;
 	}
 
 	cs43130->hpload_done = false;
 	if (cs43130->dc_meas) {
-		ret = device_create_file(component->dev, &dev_attr_hpload_dc_l);
-		if (ret < 0)
-			return ret;
-
-		ret = device_create_file(component->dev, &dev_attr_hpload_dc_r);
-		if (ret < 0)
-			return ret;
-
-		ret = device_create_file(component->dev, &dev_attr_hpload_ac_l);
-		if (ret < 0)
-			return ret;
-
-		ret = device_create_file(component->dev, &dev_attr_hpload_ac_r);
-		if (ret < 0)
+		ret = sysfs_create_groups(&cs43130->dev->kobj, hpload_groups);
+		if (ret)
 			return ret;
 
 		cs43130->wq = create_singlethread_workqueue("cs43130_hp");
+		if (!cs43130->wq) {
+			sysfs_remove_groups(&cs43130->dev->kobj, hpload_groups);
+			return -ENOMEM;
+		}
 		INIT_WORK(&cs43130->work, cs43130_imp_meas);
 	}
 
@@ -2338,7 +2392,7 @@ static int cs43130_probe(struct snd_soc_component *component)
 	return 0;
 }
 
-static struct snd_soc_component_driver soc_component_dev_cs43130 = {
+static const struct snd_soc_component_driver soc_component_dev_cs43130_digital = {
 	.probe			= cs43130_probe,
 	.controls		= cs43130_snd_controls,
 	.num_controls		= ARRAY_SIZE(cs43130_snd_controls),
@@ -2347,7 +2401,26 @@ static struct snd_soc_component_driver soc_component_dev_cs43130 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
+	/* Don't take into account the ending analog widgets and routes */
+	.dapm_widgets		= hp_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(hp_widgets) - NUM_ANALOG_WIDGETS,
+	.dapm_routes		= hp_routes,
+	.num_dapm_routes	= ARRAY_SIZE(hp_routes) - NUM_ANALOG_ROUTES,
+};
+
+static const struct snd_soc_component_driver soc_component_dev_cs43130_analog = {
+	.probe			= cs43130_probe,
+	.controls		= cs43130_snd_controls,
+	.num_controls		= ARRAY_SIZE(cs43130_snd_controls),
+	.set_sysclk		= cs43130_component_set_sysclk,
+	.set_pll		= cs43130_set_pll,
+	.idle_bias_on		= 1,
+	.use_pmdown_time	= 1,
+	.endianness		= 1,
+	.dapm_widgets		= hp_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(hp_widgets),
+	.dapm_routes		= hp_routes,
+	.num_dapm_routes	= ARRAY_SIZE(hp_routes),
 };
 
 static const struct regmap_config cs43130_regmap = {
@@ -2361,23 +2434,23 @@ static const struct regmap_config cs43130_regmap = {
 	.readable_reg		= cs43130_readable_register,
 	.precious_reg		= cs43130_precious_register,
 	.volatile_reg		= cs43130_volatile_register,
-	.cache_type		= REGCACHE_RBTREE,
-	.use_single_rw		= true, /* needed for regcache_sync */
+	.cache_type		= REGCACHE_MAPLE,
+	/* needed for regcache_sync */
+	.use_single_read	= true,
+	.use_single_write	= true,
 };
 
-static u16 const cs43130_dc_threshold[CS43130_DC_THRESHOLD] = {
+static const u16 cs43130_dc_threshold[CS43130_DC_THRESHOLD] = {
 	50,
 	120,
 };
 
-static int cs43130_handle_device_data(struct i2c_client *i2c_client,
-				      struct cs43130_private *cs43130)
+static int cs43130_handle_device_data(struct cs43130_private *cs43130)
 {
-	struct device_node *np = i2c_client->dev.of_node;
 	unsigned int val;
 	int i;
 
-	if (of_property_read_u32(np, "cirrus,xtal-ibias", &val) < 0) {
+	if (device_property_read_u32(cs43130->dev, "cirrus,xtal-ibias", &val) < 0) {
 		/* Crystal is unused. System clock is used for external MCLK */
 		cs43130->xtal_ibias = CS43130_XTAL_UNUSED;
 		return 0;
@@ -2394,23 +2467,23 @@ static int cs43130_handle_device_data(struct i2c_client *i2c_client,
 		cs43130->xtal_ibias = CS43130_XTAL_IBIAS_15UA;
 		break;
 	default:
-		dev_err(&i2c_client->dev,
+		dev_err(cs43130->dev,
 			"Invalid cirrus,xtal-ibias value: %d\n", val);
 		return -EINVAL;
 	}
 
-	cs43130->dc_meas = of_property_read_bool(np, "cirrus,dc-measure");
-	cs43130->ac_meas = of_property_read_bool(np, "cirrus,ac-measure");
+	cs43130->dc_meas = device_property_read_bool(cs43130->dev, "cirrus,dc-measure");
+	cs43130->ac_meas = device_property_read_bool(cs43130->dev, "cirrus,ac-measure");
 
-	if (of_property_read_u16_array(np, "cirrus,ac-freq", cs43130->ac_freq,
-					CS43130_AC_FREQ) < 0) {
+	if (!device_property_read_u16_array(cs43130->dev, "cirrus,ac-freq", cs43130->ac_freq,
+					CS43130_AC_FREQ)) {
 		for (i = 0; i < CS43130_AC_FREQ; i++)
 			cs43130->ac_freq[i] = cs43130_ac_freq[i];
 	}
 
-	if (of_property_read_u16_array(np, "cirrus,dc-threshold",
+	if (!device_property_read_u16_array(cs43130->dev, "cirrus,dc-threshold",
 				       cs43130->dc_threshold,
-				       CS43130_DC_THRESHOLD) < 0) {
+				       CS43130_DC_THRESHOLD)) {
 		for (i = 0; i < CS43130_DC_THRESHOLD; i++)
 			cs43130->dc_threshold[i] = cs43130_dc_threshold[i];
 	}
@@ -2418,18 +2491,19 @@ static int cs43130_handle_device_data(struct i2c_client *i2c_client,
 	return 0;
 }
 
-static int cs43130_i2c_probe(struct i2c_client *client,
-			     const struct i2c_device_id *id)
+static int cs43130_i2c_probe(struct i2c_client *client)
 {
+	const struct snd_soc_component_driver *component_driver;
 	struct cs43130_private *cs43130;
 	int ret;
-	unsigned int devid = 0;
 	unsigned int reg;
-	int i;
+	int i, devid;
 
 	cs43130 = devm_kzalloc(&client->dev, sizeof(*cs43130), GFP_KERNEL);
 	if (!cs43130)
 		return -ENOMEM;
+
+	cs43130->dev = &client->dev;
 
 	i2c_set_clientdata(client, cs43130);
 
@@ -2439,44 +2513,46 @@ static int cs43130_i2c_probe(struct i2c_client *client,
 		return ret;
 	}
 
-	if (client->dev.of_node) {
-		ret = cs43130_handle_device_data(client, cs43130);
+	if (dev_fwnode(cs43130->dev)) {
+		ret = cs43130_handle_device_data(cs43130);
 		if (ret != 0)
 			return ret;
 	}
+
 	for (i = 0; i < ARRAY_SIZE(cs43130->supplies); i++)
 		cs43130->supplies[i].supply = cs43130_supply_names[i];
 
-	ret = devm_regulator_bulk_get(&client->dev,
+	ret = devm_regulator_bulk_get(cs43130->dev,
 				      ARRAY_SIZE(cs43130->supplies),
 				      cs43130->supplies);
 	if (ret != 0) {
-		dev_err(&client->dev, "Failed to request supplies: %d\n", ret);
+		dev_err(cs43130->dev, "Failed to request supplies: %d\n", ret);
 		return ret;
 	}
 	ret = regulator_bulk_enable(ARRAY_SIZE(cs43130->supplies),
 				    cs43130->supplies);
 	if (ret != 0) {
-		dev_err(&client->dev, "Failed to enable supplies: %d\n", ret);
+		dev_err(cs43130->dev, "Failed to enable supplies: %d\n", ret);
 		return ret;
 	}
 
-	cs43130->reset_gpio = devm_gpiod_get_optional(&client->dev,
+	cs43130->reset_gpio = devm_gpiod_get_optional(cs43130->dev,
 						      "reset", GPIOD_OUT_LOW);
-	if (IS_ERR(cs43130->reset_gpio))
-		return PTR_ERR(cs43130->reset_gpio);
+	if (IS_ERR(cs43130->reset_gpio)) {
+		ret = PTR_ERR(cs43130->reset_gpio);
+		goto err_supplies;
+	}
 
 	gpiod_set_value_cansleep(cs43130->reset_gpio, 1);
 
 	usleep_range(2000, 2050);
 
-	ret = regmap_read(cs43130->regmap, CS43130_DEVID_AB, &reg);
-
-	devid = (reg & 0xFF) << 12;
-	ret = regmap_read(cs43130->regmap, CS43130_DEVID_CD, &reg);
-	devid |= (reg & 0xFF) << 4;
-	ret = regmap_read(cs43130->regmap, CS43130_DEVID_E, &reg);
-	devid |= (reg & 0xF0) >> 4;
+	devid = cirrus_read_device_id(cs43130->regmap, CS43130_DEVID_AB);
+	if (devid < 0) {
+		ret = devid;
+		dev_err(cs43130->dev, "Failed to read device ID: %d\n", ret);
+		goto err;
+	}
 
 	switch (devid) {
 	case CS43130_CHIP_ID:
@@ -2485,7 +2561,7 @@ static int cs43130_i2c_probe(struct i2c_client *client,
 	case CS43198_CHIP_ID:
 		break;
 	default:
-		dev_err(&client->dev,
+		dev_err(cs43130->dev,
 			"CS43130 Device ID %X. Expected ID %X, %X, %X or %X\n",
 			devid, CS43130_CHIP_ID, CS4399_CHIP_ID,
 			CS43131_CHIP_ID, CS43198_CHIP_ID);
@@ -2496,11 +2572,11 @@ static int cs43130_i2c_probe(struct i2c_client *client,
 	cs43130->dev_id = devid;
 	ret = regmap_read(cs43130->regmap, CS43130_REV_ID, &reg);
 	if (ret < 0) {
-		dev_err(&client->dev, "Get Revision ID failed\n");
+		dev_err(cs43130->dev, "Get Revision ID failed\n");
 		goto err;
 	}
 
-	dev_info(&client->dev,
+	dev_info(cs43130->dev,
 		 "Cirrus Logic CS43130 (%x), Revision: %02X\n", devid,
 		 reg & 0xFF);
 
@@ -2510,61 +2586,43 @@ static int cs43130_i2c_probe(struct i2c_client *client,
 	init_completion(&cs43130->pll_rdy);
 	init_completion(&cs43130->hpload_evt);
 
-	ret = devm_request_threaded_irq(&client->dev, client->irq,
-					NULL, cs43130_irq_thread,
-					IRQF_ONESHOT | IRQF_TRIGGER_LOW,
-					"cs43130", cs43130);
-	if (ret != 0) {
-		dev_err(&client->dev, "Failed to request IRQ: %d\n", ret);
-		return ret;
+	if (!client->irq) {
+		dev_dbg(cs43130->dev, "IRQ not found, will poll instead\n");
+		cs43130->has_irq_line = 0;
+	} else {
+		ret = devm_request_threaded_irq(cs43130->dev, client->irq,
+						NULL, cs43130_irq_thread,
+						IRQF_ONESHOT | IRQF_TRIGGER_LOW,
+						"cs43130", cs43130);
+		if (ret != 0) {
+			dev_err(cs43130->dev, "Failed to request IRQ: %d\n", ret);
+			goto err;
+		}
+		cs43130->has_irq_line = 1;
 	}
 
 	cs43130->mclk_int_src = CS43130_MCLK_SRC_RCO;
 
-	pm_runtime_set_autosuspend_delay(&client->dev, 100);
-	pm_runtime_use_autosuspend(&client->dev);
-	pm_runtime_set_active(&client->dev);
-	pm_runtime_enable(&client->dev);
+	pm_runtime_set_autosuspend_delay(cs43130->dev, 100);
+	pm_runtime_use_autosuspend(cs43130->dev);
+	pm_runtime_set_active(cs43130->dev);
+	pm_runtime_enable(cs43130->dev);
 
 	switch (cs43130->dev_id) {
 	case CS43130_CHIP_ID:
 	case CS43131_CHIP_ID:
-		memcpy(all_hp_widgets, digital_hp_widgets,
-		       sizeof(digital_hp_widgets));
-		memcpy(all_hp_widgets + ARRAY_SIZE(digital_hp_widgets),
-		       analog_hp_widgets, sizeof(analog_hp_widgets));
-		memcpy(all_hp_routes, digital_hp_routes,
-		       sizeof(digital_hp_routes));
-		memcpy(all_hp_routes + ARRAY_SIZE(digital_hp_routes),
-		       analog_hp_routes, sizeof(analog_hp_routes));
-
-		soc_component_dev_cs43130.dapm_widgets =
-			all_hp_widgets;
-		soc_component_dev_cs43130.num_dapm_widgets =
-			ARRAY_SIZE(all_hp_widgets);
-		soc_component_dev_cs43130.dapm_routes =
-			all_hp_routes;
-		soc_component_dev_cs43130.num_dapm_routes =
-			ARRAY_SIZE(all_hp_routes);
+		component_driver = &soc_component_dev_cs43130_analog;
 		break;
 	case CS43198_CHIP_ID:
 	case CS4399_CHIP_ID:
-		soc_component_dev_cs43130.dapm_widgets =
-			digital_hp_widgets;
-		soc_component_dev_cs43130.num_dapm_widgets =
-			ARRAY_SIZE(digital_hp_widgets);
-		soc_component_dev_cs43130.dapm_routes =
-			digital_hp_routes;
-		soc_component_dev_cs43130.num_dapm_routes =
-			ARRAY_SIZE(digital_hp_routes);
+		component_driver = &soc_component_dev_cs43130_digital;
 		break;
 	}
 
-	ret = devm_snd_soc_register_component(&client->dev,
-				     &soc_component_dev_cs43130,
+	ret = devm_snd_soc_register_component(cs43130->dev, component_driver,
 				     cs43130_dai, ARRAY_SIZE(cs43130_dai));
 	if (ret < 0) {
-		dev_err(&client->dev,
+		dev_err(cs43130->dev,
 			"snd_soc_register_component failed with ret = %d\n", ret);
 		goto err;
 	}
@@ -2575,11 +2633,17 @@ static int cs43130_i2c_probe(struct i2c_client *client,
 			   CS43130_XSP_3ST_MASK, 0);
 
 	return 0;
+
 err:
+	gpiod_set_value_cansleep(cs43130->reset_gpio, 0);
+err_supplies:
+	regulator_bulk_disable(ARRAY_SIZE(cs43130->supplies),
+			       cs43130->supplies);
+
 	return ret;
 }
 
-static int cs43130_i2c_remove(struct i2c_client *client)
+static void cs43130_i2c_remove(struct i2c_client *client)
 {
 	struct cs43130_private *cs43130 = i2c_get_clientdata(client);
 
@@ -2596,21 +2660,19 @@ static int cs43130_i2c_remove(struct i2c_client *client)
 		cancel_work_sync(&cs43130->work);
 		flush_workqueue(cs43130->wq);
 
-		device_remove_file(&client->dev, &dev_attr_hpload_dc_l);
-		device_remove_file(&client->dev, &dev_attr_hpload_dc_r);
-		device_remove_file(&client->dev, &dev_attr_hpload_ac_l);
-		device_remove_file(&client->dev, &dev_attr_hpload_ac_r);
+		device_remove_file(cs43130->dev, &dev_attr_hpload_dc_l);
+		device_remove_file(cs43130->dev, &dev_attr_hpload_dc_r);
+		device_remove_file(cs43130->dev, &dev_attr_hpload_ac_l);
+		device_remove_file(cs43130->dev, &dev_attr_hpload_ac_r);
 	}
 
 	gpiod_set_value_cansleep(cs43130->reset_gpio, 0);
 
-	pm_runtime_disable(&client->dev);
+	pm_runtime_disable(cs43130->dev);
 	regulator_bulk_disable(CS43130_NUM_SUPPLIES, cs43130->supplies);
-
-	return 0;
 }
 
-static int __maybe_unused cs43130_runtime_suspend(struct device *dev)
+static int cs43130_runtime_suspend(struct device *dev)
 {
 	struct cs43130_private *cs43130 = dev_get_drvdata(dev);
 
@@ -2629,7 +2691,7 @@ static int __maybe_unused cs43130_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused cs43130_runtime_resume(struct device *dev)
+static int cs43130_runtime_resume(struct device *dev)
 {
 	struct cs43130_private *cs43130 = dev_get_drvdata(dev);
 	int ret;
@@ -2665,10 +2727,10 @@ err:
 }
 
 static const struct dev_pm_ops cs43130_runtime_pm = {
-	SET_RUNTIME_PM_OPS(cs43130_runtime_suspend, cs43130_runtime_resume,
-			   NULL)
+	RUNTIME_PM_OPS(cs43130_runtime_suspend, cs43130_runtime_resume, NULL)
 };
 
+#if IS_ENABLED(CONFIG_OF)
 static const struct of_device_id cs43130_of_match[] = {
 	{.compatible = "cirrus,cs43130",},
 	{.compatible = "cirrus,cs4399",},
@@ -2678,22 +2740,34 @@ static const struct of_device_id cs43130_of_match[] = {
 };
 
 MODULE_DEVICE_TABLE(of, cs43130_of_match);
+#endif
+
+#if IS_ENABLED(CONFIG_ACPI)
+static const struct acpi_device_id cs43130_acpi_match[] = {
+	{ "CSC4399", 0 },
+	{}
+};
+
+MODULE_DEVICE_TABLE(acpi, cs43130_acpi_match);
+#endif
+
 
 static const struct i2c_device_id cs43130_i2c_id[] = {
-	{"cs43130", 0},
-	{"cs4399", 0},
-	{"cs43131", 0},
-	{"cs43198", 0},
-	{}
+	{ .name = "cs43130" },
+	{ .name = "cs4399" },
+	{ .name = "cs43131" },
+	{ .name = "cs43198" },
+	{ }
 };
 
 MODULE_DEVICE_TABLE(i2c, cs43130_i2c_id);
 
 static struct i2c_driver cs43130_i2c_driver = {
 	.driver = {
-		.name		= "cs43130",
-		.of_match_table	= cs43130_of_match,
-		.pm             = &cs43130_runtime_pm,
+		.name			= "cs43130",
+		.of_match_table		= of_match_ptr(cs43130_of_match),
+		.acpi_match_table	= ACPI_PTR(cs43130_acpi_match),
+		.pm			= pm_ptr(&cs43130_runtime_pm),
 	},
 	.id_table	= cs43130_i2c_id,
 	.probe		= cs43130_i2c_probe,

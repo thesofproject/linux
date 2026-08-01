@@ -240,23 +240,10 @@ static int ulpi_set_vbus(struct usb_otg *otg, bool on)
 	return usb_phy_io_write(phy, flags, ULPI_OTG_CTRL);
 }
 
-struct usb_phy *
-otg_ulpi_create(struct usb_phy_io_ops *ops,
-		unsigned int flags)
+static void otg_ulpi_init(struct usb_phy *phy, struct usb_otg *otg,
+			  struct usb_phy_io_ops *ops,
+			  unsigned int flags)
 {
-	struct usb_phy *phy;
-	struct usb_otg *otg;
-
-	phy = kzalloc(sizeof(*phy), GFP_KERNEL);
-	if (!phy)
-		return NULL;
-
-	otg = kzalloc(sizeof(*otg), GFP_KERNEL);
-	if (!otg) {
-		kfree(phy);
-		return NULL;
-	}
-
 	phy->label	= "ULPI";
 	phy->flags	= flags;
 	phy->io_ops	= ops;
@@ -266,8 +253,28 @@ otg_ulpi_create(struct usb_phy_io_ops *ops,
 	otg->usb_phy	= phy;
 	otg->set_host	= ulpi_set_host;
 	otg->set_vbus	= ulpi_set_vbus;
+}
+
+struct usb_phy *
+devm_otg_ulpi_create(struct device *dev,
+		     struct usb_phy_io_ops *ops,
+		     unsigned int flags)
+{
+	struct usb_phy *phy;
+	struct usb_otg *otg;
+
+	phy = devm_kzalloc(dev, sizeof(*phy), GFP_KERNEL);
+	if (!phy)
+		return NULL;
+
+	otg = devm_kzalloc(dev, sizeof(*otg), GFP_KERNEL);
+	if (!otg) {
+		devm_kfree(dev, phy);
+		return NULL;
+	}
+
+	otg_ulpi_init(phy, otg, ops, flags);
 
 	return phy;
 }
-EXPORT_SYMBOL_GPL(otg_ulpi_create);
-
+EXPORT_SYMBOL_GPL(devm_otg_ulpi_create);

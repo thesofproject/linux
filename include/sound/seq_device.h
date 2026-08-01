@@ -1,24 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef __SOUND_SEQ_DEVICE_H
 #define __SOUND_SEQ_DEVICE_H
 
 /*
  *  ALSA sequencer device management
  *  Copyright (c) 1999 by Takashi Iwai <tiwai@suse.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 /*
@@ -36,6 +22,7 @@ struct snd_seq_device {
 	void *private_data;	/* private data for the caller */
 	void (*private_free)(struct snd_seq_device *device);
 	struct device dev;
+	unsigned char args[];	/* driver-specific argument */
 };
 
 #define to_seq_dev(_dev) \
@@ -57,6 +44,8 @@ struct snd_seq_device {
  *	Typically, call snd_device_free(dev->card, dev->driver_data)
  */
 struct snd_seq_driver {
+	int (*probe)(struct snd_seq_device *dev);
+	void (*remove)(struct snd_seq_device *dev);
 	struct device_driver driver;
 	char *id;
 	int argsize;
@@ -76,7 +65,7 @@ void snd_seq_device_load_drivers(void);
 int snd_seq_device_new(struct snd_card *card, int device, const char *id,
 		       int argsize, struct snd_seq_device **result);
 
-#define SNDRV_SEQ_DEVICE_ARGPTR(dev) (void *)((char *)(dev) + sizeof(struct snd_seq_device))
+#define SNDRV_SEQ_DEVICE_ARGPTR(dev) ((void *)(dev)->args)
 
 int __must_check __snd_seq_driver_register(struct snd_seq_driver *drv,
 					   struct module *mod);
@@ -92,5 +81,6 @@ void snd_seq_driver_unregister(struct snd_seq_driver *drv);
  */
 #define SNDRV_SEQ_DEV_ID_MIDISYNTH	"seq-midi"
 #define SNDRV_SEQ_DEV_ID_OPL3		"opl3-synth"
+#define SNDRV_SEQ_DEV_ID_UMP		"seq-ump-client"
 
 #endif /* __SOUND_SEQ_DEVICE_H */

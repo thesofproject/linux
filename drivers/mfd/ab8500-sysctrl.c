@@ -1,9 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AB8500 system control driver
  *
  * Copyright (C) ST-Ericsson SA 2010
  * Author: Mattias Nilsson <mattias.i.nilsson@stericsson.com> for ST Ericsson.
- * License terms: GNU General Public License (GPL) version 2
  */
 
 #include <linux/err.h>
@@ -30,7 +30,7 @@ static void ab8500_power_off(void)
 {
 	sigset_t old;
 	sigset_t all;
-	static const char * const pss[] = {"ab8500_ac", "pm2301", "ab8500_usb"};
+	static const char * const pss[] = {"ab8500_ac", "ab8500_usb"};
 	int i;
 	bool charger_present = false;
 	union power_supply_propval val;
@@ -140,14 +140,12 @@ static int ab8500_sysctrl_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int ab8500_sysctrl_remove(struct platform_device *pdev)
+static void ab8500_sysctrl_remove(struct platform_device *pdev)
 {
 	sysctrl_dev = NULL;
 
 	if (pm_power_off == ab8500_power_off)
 		pm_power_off = NULL;
-
-	return 0;
 }
 
 static const struct of_device_id ab8500_sysctrl_match[] = {

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for the Diolan DLN-2 USB-I2C adapter
  *
@@ -6,10 +7,6 @@
  * Derived from:
  *  i2c-diolan-u2c.c
  *  Copyright (c) 2010-2011 Ericsson AB
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation, version 2.
  */
 
 #include <linux/kernel.h>
@@ -178,7 +175,7 @@ static u32 dln2_i2c_func(struct i2c_adapter *a)
 }
 
 static const struct i2c_algorithm dln2_i2c_usb_algorithm = {
-	.master_xfer = dln2_i2c_xfer,
+	.xfer = dln2_i2c_xfer,
 	.functionality = dln2_i2c_func,
 };
 
@@ -221,10 +218,8 @@ static int dln2_i2c_probe(struct platform_device *pdev)
 
 	/* initialize the i2c interface */
 	ret = dln2_i2c_enable(dln2, true);
-	if (ret < 0) {
-		dev_err(dev, "failed to initialize adapter: %d\n", ret);
-		return ret;
-	}
+	if (ret < 0)
+		return dev_err_probe(dev, ret, "failed to initialize adapter\n");
 
 	/* and finally attach to i2c layer */
 	ret = i2c_add_adapter(&dln2->adapter);
@@ -239,14 +234,12 @@ out_disable:
 	return ret;
 }
 
-static int dln2_i2c_remove(struct platform_device *pdev)
+static void dln2_i2c_remove(struct platform_device *pdev)
 {
 	struct dln2_i2c *dln2 = platform_get_drvdata(pdev);
 
 	i2c_del_adapter(&dln2->adapter);
 	dln2_i2c_enable(dln2, false);
-
-	return 0;
 }
 
 static struct platform_driver dln2_i2c_driver = {
@@ -258,6 +251,6 @@ static struct platform_driver dln2_i2c_driver = {
 module_platform_driver(dln2_i2c_driver);
 
 MODULE_AUTHOR("Laurentiu Palcu <laurentiu.palcu@intel.com>");
-MODULE_DESCRIPTION("Driver for the Diolan DLN2 I2C master interface");
+MODULE_DESCRIPTION("Driver for the Diolan DLN2 I2C controller interface");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:dln2-i2c");

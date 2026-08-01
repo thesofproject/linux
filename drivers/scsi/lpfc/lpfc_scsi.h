@@ -1,8 +1,8 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2017-2018 Broadcom. All Rights Reserved. The term *
- * “Broadcom” refers to Broadcom Limited and/or its subsidiaries.  *
+ * Copyright (C) 2017-2024 Broadcom. All Rights Reserved. The term *
+ * “Broadcom” refers to Broadcom Inc and/or its subsidiaries.  *
  * Copyright (C) 2004-2016 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.broadcom.com                                                *
@@ -24,6 +24,7 @@
 
 struct lpfc_hba;
 #define LPFC_FCP_CDB_LEN 16
+#define LPFC_FCP_CDB_LEN_32 32
 
 #define list_remove_head(list, entry, type, member)		\
 	do {							\
@@ -99,17 +100,11 @@ struct fcp_rsp {
 #define SNSCOD_BADCMD 0x20	/* sense code is byte 13 ([12]) */
 };
 
-struct fcp_cmnd {
-	struct scsi_lun  fcp_lun;
-
-	uint8_t fcpCntl0;	/* FCP_CNTL byte 0 (reserved) */
-	uint8_t fcpCntl1;	/* FCP_CNTL byte 1 task codes */
 #define  SIMPLE_Q        0x00
 #define  HEAD_OF_Q       0x01
 #define  ORDERED_Q       0x02
 #define  ACA_Q           0x04
 #define  UNTAGGED        0x05
-	uint8_t fcpCntl2;	/* FCP_CTL byte 2 task management codes */
 #define  FCP_ABORT_TASK_SET  0x02	/* Bit 1 */
 #define  FCP_CLEAR_TASK_SET  0x04	/* bit 2 */
 #define  FCP_BUS_RESET       0x08	/* bit 3 */
@@ -117,71 +112,32 @@ struct fcp_cmnd {
 #define  FCP_TARGET_RESET    0x20	/* bit 5 */
 #define  FCP_CLEAR_ACA       0x40	/* bit 6 */
 #define  FCP_TERMINATE_TASK  0x80	/* bit 7 */
-	uint8_t fcpCntl3;
 #define  WRITE_DATA      0x01	/* Bit 0 */
 #define  READ_DATA       0x02	/* Bit 1 */
 
+struct fcp_cmnd {
+	struct scsi_lun  fcp_lun;
+
+	uint8_t fcpCntl0;	/* FCP_CNTL byte 0 (reserved) */
+	uint8_t fcpCntl1;	/* FCP_CNTL byte 1 task codes */
+	uint8_t fcpCntl2;	/* FCP_CTL byte 2 task management codes */
+	uint8_t fcpCntl3;
+
 	uint8_t fcpCdb[LPFC_FCP_CDB_LEN]; /* SRB cdb field is copied here */
-	uint32_t fcpDl;		/* Total transfer length */
+	__be32 fcpDl;		/* Total transfer length */
 
 };
+struct fcp_cmnd32 {
+	struct scsi_lun  fcp_lun;
 
-struct lpfc_scsicmd_bkt {
-	uint32_t cmd_count;
-};
+	uint8_t fcpCntl0;	/* FCP_CNTL byte 0 (reserved) */
+	uint8_t fcpCntl1;	/* FCP_CNTL byte 1 task codes */
+	uint8_t fcpCntl2;	/* FCP_CTL byte 2 task management codes */
+	uint8_t fcpCntl3;
 
-struct lpfc_scsi_buf {
-	struct list_head list;
-	struct scsi_cmnd *pCmd;
-	struct lpfc_rport_data *rdata;
+	uint8_t fcpCdb[LPFC_FCP_CDB_LEN_32]; /* SRB cdb field is copied here */
+	__be32 fcpDl;		/* Total transfer length */
 
-	uint32_t timeout;
-
-	uint16_t flags;  /* TBD convert exch_busy to flags */
-#define LPFC_SBUF_XBUSY         0x1     /* SLI4 hba reported XB on WCQE cmpl */
-	uint16_t exch_busy;     /* SLI4 hba reported XB on complete WCQE */
-	uint16_t status;	/* From IOCB Word 7- ulpStatus */
-	uint32_t result;	/* From IOCB Word 4. */
-
-	uint32_t   seg_cnt;	/* Number of scatter-gather segments returned by
-				 * dma_map_sg.  The driver needs this for calls
-				 * to dma_unmap_sg. */
-	uint32_t prot_seg_cnt;  /* seg_cnt's counterpart for protection data */
-
-	dma_addr_t nonsg_phys;	/* Non scatter-gather physical address. */
-
-	/*
-	 * data and dma_handle are the kernel virtual and bus address of the
-	 * dma-able buffer containing the fcp_cmd, fcp_rsp and a scatter
-	 * gather bde list that supports the sg_tablesize value.
-	 */
-	void *data;
-	dma_addr_t dma_handle;
-
-	struct fcp_cmnd *fcp_cmnd;
-	struct fcp_rsp *fcp_rsp;
-	struct ulp_bde64 *fcp_bpl;
-
-	dma_addr_t dma_phys_bpl;
-
-	/* cur_iocbq has phys of the dma-able buffer.
-	 * Iotag is in here
-	 */
-	struct lpfc_iocbq cur_iocbq;
-	uint16_t cpu;
-
-	wait_queue_head_t *waitq;
-	unsigned long start_time;
-
-#ifdef CONFIG_SCSI_LPFC_DEBUG_FS
-	/* Used to restore any changes to protection data for error injection */
-	void *prot_data_segment;
-	uint32_t prot_data;
-	uint32_t prot_data_type;
-#define	LPFC_INJERR_REFTAG	1
-#define	LPFC_INJERR_APPTAG	2
-#define	LPFC_INJERR_GUARD	3
-#endif
 };
 
 #define LPFC_SCSI_DMA_EXT_SIZE	264
@@ -192,7 +148,16 @@ struct lpfc_scsi_buf {
 #define NO_MORE_OAS_LUN		-1
 #define NOT_OAS_ENABLED_LUN	NO_MORE_OAS_LUN
 
+#ifndef FC_PORTSPEED_128GBIT
+#define FC_PORTSPEED_128GBIT	0x2000
+#endif
+
+#ifndef FC_PORTSPEED_256GBIT
+#define FC_PORTSPEED_256GBIT	0x4000
+#endif
+
 #define TXRDY_PAYLOAD_LEN	12
 
-int lpfc_sli4_scmd_to_wqidx_distr(struct lpfc_hba *phba,
-				  struct lpfc_scsi_buf *lpfc_cmd);
+/* For sysfs/debugfs tmp string max len */
+#define LPFC_MAX_SCSI_INFO_TMP_LEN	79
+

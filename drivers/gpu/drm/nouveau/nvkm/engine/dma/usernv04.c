@@ -85,7 +85,7 @@ nv04_dmaobj_new(struct nvkm_dma *dma, const struct nvkm_oclass *oclass,
 	struct nv04_dmaobj *dmaobj;
 	int ret;
 
-	if (!(dmaobj = kzalloc(sizeof(*dmaobj), GFP_KERNEL)))
+	if (!(dmaobj = kzalloc_obj(*dmaobj)))
 		return -ENOMEM;
 	*pdmaobj = &dmaobj->base;
 
@@ -122,6 +122,7 @@ nv04_dmaobj_new(struct nvkm_dma *dma, const struct nvkm_oclass *oclass,
 		break;
 	case NV_MEM_ACCESS_WO:
 		dmaobj->flags0 |= 0x00008000;
+		fallthrough;
 	case NV_MEM_ACCESS_RW:
 		dmaobj->flags2 |= 0x00000002;
 		break;

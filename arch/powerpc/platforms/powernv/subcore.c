@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2013, Michael (Ellerman|Neuling), IBM Corporation.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt)	"powernv: " fmt
@@ -16,6 +12,7 @@
 #include <linux/gfp.h>
 #include <linux/smp.h>
 #include <linux/stop_machine.h>
+#include <linux/sysfs.h>
 
 #include <asm/cputhreads.h>
 #include <asm/cpuidle.h>
@@ -23,6 +20,8 @@
 #include <asm/machdep.h>
 #include <asm/opal.h>
 #include <asm/smp.h>
+
+#include <trace/events/ipi.h>
 
 #include "subcore.h"
 #include "powernv.h"
@@ -173,6 +172,16 @@ static void update_hid_in_slw(u64 hid0)
 	}
 }
 
+static inline void update_power8_hid0(unsigned long hid0)
+{
+	/*
+	 *  The HID0 update on Power8 should at the very least be
+	 *  preceded by a SYNC instruction followed by an ISYNC
+	 *  instruction
+	 */
+	asm volatile("sync; mtspr %0,%1; isync":: "i"(SPRN_HID0), "r"(hid0));
+}
+
 static void unsplit_core(void)
 {
 	u64 hid0, mask;
@@ -183,7 +192,7 @@ static void unsplit_core(void)
 	cpu = smp_processor_id();
 	if (cpu_thread_in_core(cpu) != 0) {
 		while (mfspr(SPRN_HID0) & mask)
-			power7_idle_insn(PNV_THREAD_NAP);
+			power7_idle_type(PNV_THREAD_NAP);
 
 		per_cpu(split_state, cpu).step = SYNC_STEP_UNSPLIT;
 		return;
@@ -401,7 +410,7 @@ out:
 static ssize_t show_subcores_per_core(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%x\n", subcores_per_core);
+	return sysfs_emit(buf, "%x\n", subcores_per_core);
 }
 
 static DEVICE_ATTR(subcores_per_core, 0644,
@@ -409,13 +418,16 @@ static DEVICE_ATTR(subcores_per_core, 0644,
 
 static int subcore_init(void)
 {
+	struct device *dev_root;
 	unsigned pvr_ver;
+	int rc = 0;
 
 	pvr_ver = PVR_VER(mfspr(SPRN_PVR));
 
 	if (pvr_ver != PVR_POWER8 &&
 	    pvr_ver != PVR_POWER8E &&
-	    pvr_ver != PVR_POWER8NVL)
+	    pvr_ver != PVR_POWER8NVL &&
+	    pvr_ver != PVR_HX_C2000)
 		return 0;
 
 	/*
@@ -429,7 +441,11 @@ static int subcore_init(void)
 
 	set_subcores_per_core(1);
 
-	return device_create_file(cpu_subsys.dev_root,
-				  &dev_attr_subcores_per_core);
+	dev_root = bus_get_dev_root(&cpu_subsys);
+	if (dev_root) {
+		rc = device_create_file(dev_root, &dev_attr_subcores_per_core);
+		put_device(dev_root);
+	}
+	return rc;
 }
 machine_device_initcall(powernv, subcore_init);

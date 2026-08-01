@@ -12,12 +12,14 @@
 
 #include <linux/delay.h>
 #include <linux/types.h>
+#include <linux/mfd/bcm2835-pm.h>
 #include <linux/module.h>
 #include <linux/io.h>
 #include <linux/watchdog.h>
 #include <linux/platform_device.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
+#include <linux/reboot.h>
 
 #define PM_RSTC				0x1c
 #define PM_RSTS				0x20
@@ -41,6 +43,7 @@
 
 #define SECS_TO_WDOG_TICKS(x) ((x) << 16)
 #define WDOG_TICKS_TO_SECS(x) ((x) >> 16)
+#define WDOG_TICKS_TO_MSECS(x) ((x) * 1000 >> 16)
 
 struct bcm2835_wdt {
 	void __iomem		*base;
@@ -137,7 +140,7 @@ static struct watchdog_device bcm2835_wdt_wdd = {
 	.info =		&bcm2835_wdt_info,
 	.ops =		&bcm2835_wdt_ops,
 	.min_timeout =	1,
-	.max_timeout =	WDOG_TICKS_TO_SECS(PM_WDOG_TIME_SET),
+	.max_hw_heartbeat_ms =	WDOG_TICKS_TO_MSECS(PM_WDOG_TIME_SET),
 	.timeout =	WDOG_TICKS_TO_SECS(PM_WDOG_TIME_SET),
 };
 
@@ -146,12 +149,9 @@ static struct watchdog_device bcm2835_wdt_wdd = {
  * indicate to bootcode.bin not to reboot, then most of the chip will be
  * powered off.
  */
-static void bcm2835_power_off(void)
+static int bcm2835_power_off(struct sys_off_data *data)
 {
-	struct device_node *np =
-		of_find_compatible_node(NULL, NULL, "brcm,bcm2835-pm-wdt");
-	struct platform_device *pdev = of_find_device_by_node(np);
-	struct bcm2835_wdt *wdt = platform_get_drvdata(pdev);
+	struct bcm2835_wdt *wdt = data->cb_data;
 	u32 val;
 
 	/*
@@ -165,11 +165,13 @@ static void bcm2835_power_off(void)
 
 	/* Continue with normal reset mechanism */
 	__bcm2835_restart(wdt);
+
+	return NOTIFY_DONE;
 }
 
 static int bcm2835_wdt_probe(struct platform_device *pdev)
 {
-	struct resource *res;
+	struct bcm2835_pm *pm = dev_get_drvdata(pdev->dev.parent);
 	struct device *dev = &pdev->dev;
 	struct bcm2835_wdt *wdt;
 	int err;
@@ -177,14 +179,10 @@ static int bcm2835_wdt_probe(struct platform_device *pdev)
 	wdt = devm_kzalloc(dev, sizeof(struct bcm2835_wdt), GFP_KERNEL);
 	if (!wdt)
 		return -ENOMEM;
-	platform_set_drvdata(pdev, wdt);
 
 	spin_lock_init(&wdt->lock);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	wdt->base = devm_ioremap_resource(dev, res);
-	if (IS_ERR(wdt->base))
-		return PTR_ERR(wdt->base);
+	wdt->base = pm->base;
 
 	watchdog_set_drvdata(&bcm2835_wdt_wdd, wdt);
 	watchdog_init_timeout(&bcm2835_wdt_wdd, heartbeat, dev);
@@ -206,38 +204,22 @@ static int bcm2835_wdt_probe(struct platform_device *pdev)
 
 	watchdog_stop_on_reboot(&bcm2835_wdt_wdd);
 	err = devm_watchdog_register_device(dev, &bcm2835_wdt_wdd);
-	if (err) {
-		dev_err(dev, "Failed to register watchdog device");
+	if (err)
 		return err;
-	}
 
-	if (pm_power_off == NULL)
-		pm_power_off = bcm2835_power_off;
+	if (of_device_is_system_power_controller(pdev->dev.parent->of_node))
+		devm_register_sys_off_handler(dev, SYS_OFF_MODE_POWER_OFF,
+					      SYS_OFF_PRIO_DEFAULT,
+					      bcm2835_power_off, wdt);
 
 	dev_info(dev, "Broadcom BCM2835 watchdog timer");
 	return 0;
 }
 
-static int bcm2835_wdt_remove(struct platform_device *pdev)
-{
-	if (pm_power_off == bcm2835_power_off)
-		pm_power_off = NULL;
-
-	return 0;
-}
-
-static const struct of_device_id bcm2835_wdt_of_match[] = {
-	{ .compatible = "brcm,bcm2835-pm-wdt", },
-	{},
-};
-MODULE_DEVICE_TABLE(of, bcm2835_wdt_of_match);
-
 static struct platform_driver bcm2835_wdt_driver = {
 	.probe		= bcm2835_wdt_probe,
-	.remove		= bcm2835_wdt_remove,
 	.driver = {
 		.name =		"bcm2835-wdt",
-		.of_match_table = bcm2835_wdt_of_match,
 	},
 };
 module_platform_driver(bcm2835_wdt_driver);
@@ -249,6 +231,7 @@ module_param(nowayout, bool, 0);
 MODULE_PARM_DESC(nowayout, "Watchdog cannot be stopped once started (default="
 				__MODULE_STRING(WATCHDOG_NOWAYOUT) ")");
 
+MODULE_ALIAS("platform:bcm2835-wdt");
 MODULE_AUTHOR("Lubomir Rintel <lkundrak@v3.sk>");
 MODULE_DESCRIPTION("Driver for Broadcom BCM2835 watchdog timer");
 MODULE_LICENSE("GPL");

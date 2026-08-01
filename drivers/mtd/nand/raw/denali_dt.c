@@ -1,38 +1,36 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * NAND Flash Controller Device Driver for DT
  *
  * Copyright © 2011, Picochip.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #include <linux/clk.h>
+#include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/io.h>
 #include <linux/ioport.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
+#include <linux/reset.h>
 
 #include "denali.h"
 
 struct denali_dt {
-	struct denali_nand_info	denali;
-	struct clk		*clk;
+	struct denali_controller controller;
+	struct clk *clk;	/* core clock */
+	struct clk *clk_x;	/* bus interface clock */
+	struct clk *clk_ecc;	/* ECC circuit clock */
+	struct reset_control *rst;	/* core reset */
+	struct reset_control *rst_reg;	/* register reset */
 };
 
 struct denali_dt_data {
 	unsigned int revision;
 	unsigned int caps;
+	unsigned int oob_skip_bytes;
 	const struct nand_ecc_caps *ecc_caps;
 };
 
@@ -40,6 +38,7 @@ NAND_ECC_CAPS_SINGLE(denali_socfpga_ecc_caps, denali_calc_ecc_bytes,
 		     512, 8, 15);
 static const struct denali_dt_data denali_socfpga_data = {
 	.caps = DENALI_CAP_HW_ECC_FIXUP,
+	.oob_skip_bytes = 2,
 	.ecc_caps = &denali_socfpga_ecc_caps,
 };
 
@@ -48,6 +47,7 @@ NAND_ECC_CAPS_SINGLE(denali_uniphier_v5a_ecc_caps, denali_calc_ecc_bytes,
 static const struct denali_dt_data denali_uniphier_v5a_data = {
 	.caps = DENALI_CAP_HW_ECC_FIXUP |
 		DENALI_CAP_DMA_64BIT,
+	.oob_skip_bytes = 8,
 	.ecc_caps = &denali_uniphier_v5a_ecc_caps,
 };
 
@@ -57,6 +57,7 @@ static const struct denali_dt_data denali_uniphier_v5b_data = {
 	.revision = 0x0501,
 	.caps = DENALI_CAP_HW_ECC_FIXUP |
 		DENALI_CAP_DMA_64BIT,
+	.oob_skip_bytes = 8,
 	.ecc_caps = &denali_uniphier_v5b_ecc_caps,
 };
 
@@ -77,75 +78,146 @@ static const struct of_device_id denali_nand_dt_ids[] = {
 };
 MODULE_DEVICE_TABLE(of, denali_nand_dt_ids);
 
+static int denali_dt_chip_init(struct denali_controller *denali,
+			       struct device_node *chip_np)
+{
+	struct denali_chip *dchip;
+	u32 bank;
+	int nsels, i, ret;
+
+	nsels = of_property_count_u32_elems(chip_np, "reg");
+	if (nsels < 0)
+		return nsels;
+
+	dchip = devm_kzalloc(denali->dev, struct_size(dchip, sels, nsels),
+			     GFP_KERNEL);
+	if (!dchip)
+		return -ENOMEM;
+
+	dchip->nsels = nsels;
+
+	for (i = 0; i < nsels; i++) {
+		ret = of_property_read_u32_index(chip_np, "reg", i, &bank);
+		if (ret)
+			return ret;
+
+		dchip->sels[i].bank = bank;
+
+		nand_set_flash_node(&dchip->chip, chip_np);
+	}
+
+	return denali_chip_init(denali, dchip);
+}
+
 static int denali_dt_probe(struct platform_device *pdev)
 {
-	struct resource *res;
+	struct device *dev = &pdev->dev;
 	struct denali_dt *dt;
 	const struct denali_dt_data *data;
-	struct denali_nand_info *denali;
+	struct denali_controller *denali;
 	int ret;
 
-	dt = devm_kzalloc(&pdev->dev, sizeof(*dt), GFP_KERNEL);
+	dt = devm_kzalloc(dev, sizeof(*dt), GFP_KERNEL);
 	if (!dt)
 		return -ENOMEM;
-	denali = &dt->denali;
+	denali = &dt->controller;
 
-	data = of_device_get_match_data(&pdev->dev);
-	if (data) {
-		denali->revision = data->revision;
-		denali->caps = data->caps;
-		denali->ecc_caps = data->ecc_caps;
-	}
+	data = of_device_get_match_data(dev);
+	if (WARN_ON(!data))
+		return -EINVAL;
 
-	denali->dev = &pdev->dev;
+	denali->revision = data->revision;
+	denali->caps = data->caps;
+	denali->oob_skip_bytes = data->oob_skip_bytes;
+	denali->ecc_caps = data->ecc_caps;
+
+	denali->dev = dev;
 	denali->irq = platform_get_irq(pdev, 0);
-	if (denali->irq < 0) {
-		dev_err(&pdev->dev, "no irq defined\n");
+	if (denali->irq < 0)
 		return denali->irq;
-	}
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "denali_reg");
-	denali->reg = devm_ioremap_resource(&pdev->dev, res);
+	denali->reg = devm_platform_ioremap_resource_byname(pdev, "denali_reg");
 	if (IS_ERR(denali->reg))
 		return PTR_ERR(denali->reg);
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "nand_data");
-	denali->host = devm_ioremap_resource(&pdev->dev, res);
+	denali->host = devm_platform_ioremap_resource_byname(pdev, "nand_data");
 	if (IS_ERR(denali->host))
 		return PTR_ERR(denali->host);
 
-	dt->clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(dt->clk)) {
-		dev_err(&pdev->dev, "no clk available\n");
+	dt->clk = devm_clk_get_enabled(dev, "nand");
+	if (IS_ERR(dt->clk))
 		return PTR_ERR(dt->clk);
-	}
-	ret = clk_prepare_enable(dt->clk);
+
+	dt->clk_x = devm_clk_get_enabled(dev, "nand_x");
+	if (IS_ERR(dt->clk_x))
+		return PTR_ERR(dt->clk_x);
+
+	dt->clk_ecc = devm_clk_get_enabled(dev, "ecc");
+	if (IS_ERR(dt->clk_ecc))
+		return PTR_ERR(dt->clk_ecc);
+
+	dt->rst = devm_reset_control_get_optional_shared(dev, "nand");
+	if (IS_ERR(dt->rst))
+		return PTR_ERR(dt->rst);
+
+	dt->rst_reg = devm_reset_control_get_optional_shared(dev, "reg");
+	if (IS_ERR(dt->rst_reg))
+		return PTR_ERR(dt->rst_reg);
+
+	denali->clk_rate = clk_get_rate(dt->clk);
+	denali->clk_x_rate = clk_get_rate(dt->clk_x);
+
+	/*
+	 * Deassert the register reset, and the core reset in this order.
+	 * Deasserting the core reset while the register reset is asserted
+	 * will cause unpredictable behavior in the controller.
+	 */
+	ret = reset_control_deassert(dt->rst_reg);
 	if (ret)
 		return ret;
 
-	denali->clk_x_rate = clk_get_rate(dt->clk);
+	ret = reset_control_deassert(dt->rst);
+	if (ret)
+		goto out_assert_rst_reg;
+
+	/*
+	 * When the reset is deasserted, the initialization sequence is kicked
+	 * (bootstrap process). The driver must wait until it finished.
+	 * Otherwise, it will result in unpredictable behavior.
+	 */
+	usleep_range(200, 1000);
 
 	ret = denali_init(denali);
 	if (ret)
-		goto out_disable_clk;
+		goto out_assert_rst;
+
+	for_each_child_of_node_scoped(dev->of_node, np) {
+		ret = denali_dt_chip_init(denali, np);
+		if (ret)
+			goto out_remove_denali;
+	}
 
 	platform_set_drvdata(pdev, dt);
+
 	return 0;
 
-out_disable_clk:
-	clk_disable_unprepare(dt->clk);
+out_remove_denali:
+	denali_remove(denali);
+out_assert_rst:
+	reset_control_assert(dt->rst);
+out_assert_rst_reg:
+	reset_control_assert(dt->rst_reg);
 
 	return ret;
 }
 
-static int denali_dt_remove(struct platform_device *pdev)
+static void denali_dt_remove(struct platform_device *pdev)
 {
 	struct denali_dt *dt = platform_get_drvdata(pdev);
 
-	denali_remove(&dt->denali);
-	clk_disable_unprepare(dt->clk);
-
-	return 0;
+	denali_remove(&dt->controller);
+	reset_control_assert(dt->rst);
+	reset_control_assert(dt->rst_reg);
 }
 
 static struct platform_driver denali_dt_driver = {
@@ -158,6 +230,6 @@ static struct platform_driver denali_dt_driver = {
 };
 module_platform_driver(denali_dt_driver);
 
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Jamie Iles");
 MODULE_DESCRIPTION("DT driver for Denali NAND controller");

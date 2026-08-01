@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Silicon Labs C2 port core Linux support
  *
  *  Copyright (c) 2007 Rodolfo Giometti <giometti@linux.it>
  *  Copyright (c) 2007 Eurotech S.p.A. <info@eurotech.it>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation
  */
 
 #include <linux/module.h>
@@ -717,7 +714,7 @@ static ssize_t __c2port_read_flash_data(struct c2port_device *dev,
 }
 
 static ssize_t c2port_read_flash_data(struct file *filp, struct kobject *kobj,
-				struct bin_attribute *attr,
+				const struct bin_attribute *attr,
 				char *buffer, loff_t offset, size_t count)
 {
 	struct c2port_device *c2dev = dev_get_drvdata(kobj_to_dev(kobj));
@@ -832,7 +829,7 @@ static ssize_t __c2port_write_flash_data(struct c2port_device *dev,
 }
 
 static ssize_t c2port_write_flash_data(struct file *filp, struct kobject *kobj,
-				struct bin_attribute *attr,
+				const struct bin_attribute *attr,
 				char *buffer, loff_t offset, size_t count)
 {
 	struct c2port_device *c2dev = dev_get_drvdata(kobj_to_dev(kobj));
@@ -852,8 +849,8 @@ static ssize_t c2port_write_flash_data(struct file *filp, struct kobject *kobj,
 	return ret;
 }
 /* size is computed at run-time */
-static BIN_ATTR(flash_data, 0644, c2port_read_flash_data,
-		c2port_write_flash_data, 0);
+static const BIN_ATTR(flash_data, 0644, c2port_read_flash_data,
+		      c2port_write_flash_data, 0);
 
 /*
  * Class attributes
@@ -872,14 +869,27 @@ static struct attribute *c2port_attrs[] = {
 	NULL,
 };
 
-static struct bin_attribute *c2port_bin_attrs[] = {
+static const struct bin_attribute *const c2port_bin_attrs[] = {
 	&bin_attr_flash_data,
 	NULL,
 };
 
+static size_t c2port_bin_attr_size(struct kobject *kobj,
+				   const struct bin_attribute *attr,
+				   int i)
+{
+	struct c2port_device *c2dev = dev_get_drvdata(kobj_to_dev(kobj));
+
+	if (attr == &bin_attr_flash_data)
+		return c2dev->ops->blocks_num * c2dev->ops->block_size;
+
+	return attr->size;
+}
+
 static const struct attribute_group c2port_group = {
 	.attrs = c2port_attrs,
 	.bin_attrs = c2port_bin_attrs,
+	.bin_size = c2port_bin_attr_size,
 };
 
 static const struct attribute_group *c2port_groups[] = {
@@ -902,7 +912,7 @@ struct c2port_device *c2port_device_register(char *name,
 		unlikely(!ops->c2d_get) || unlikely(!ops->c2d_set))
 		return ERR_PTR(-EINVAL);
 
-	c2dev = kmalloc(sizeof(struct c2port_device), GFP_KERNEL);
+	c2dev = kzalloc_obj(struct c2port_device);
 	if (unlikely(!c2dev))
 		return ERR_PTR(-ENOMEM);
 
@@ -915,8 +925,7 @@ struct c2port_device *c2port_device_register(char *name,
 	if (ret < 0)
 		goto error_idr_alloc;
 	c2dev->id = ret;
-
-	bin_attr_flash_data.size = ops->blocks_num * ops->block_size;
+	c2dev->ops = ops;
 
 	c2dev->dev = device_create(c2port_class, NULL, 0, c2dev,
 				   "c2port%d", c2dev->id);
@@ -926,8 +935,7 @@ struct c2port_device *c2port_device_register(char *name,
 	}
 	dev_set_drvdata(c2dev->dev, c2dev);
 
-	strncpy(c2dev->name, name, C2PORT_NAME_LEN);
-	c2dev->ops = ops;
+	strscpy(c2dev->name, name, sizeof(c2dev->name));
 	mutex_init(&c2dev->mutex);
 
 	/* By default C2 port access is off */
@@ -980,7 +988,7 @@ static int __init c2port_init(void)
 	printk(KERN_INFO "Silicon Labs C2 port support v. " DRIVER_VERSION
 		" - (C) 2007 Rodolfo Giometti\n");
 
-	c2port_class = class_create(THIS_MODULE, "c2port");
+	c2port_class = class_create("c2port");
 	if (IS_ERR(c2port_class)) {
 		printk(KERN_ERR "c2port: failed to allocate class\n");
 		return PTR_ERR(c2port_class);

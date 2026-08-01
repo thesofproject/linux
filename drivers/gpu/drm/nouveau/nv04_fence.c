@@ -21,12 +21,12 @@
  *
  * Authors: Ben Skeggs
  */
-
 #include "nouveau_drv.h"
 #include "nouveau_dma.h"
 #include "nouveau_fence.h"
 
 #include <nvif/if0004.h>
+#include <nvif/push006c.h>
 
 struct nv04_fence_chan {
 	struct nouveau_fence_chan base;
@@ -39,12 +39,11 @@ struct nv04_fence_priv {
 static int
 nv04_fence_emit(struct nouveau_fence *fence)
 {
-	struct nouveau_channel *chan = fence->channel;
-	int ret = RING_SPACE(chan, 2);
+	struct nvif_push *push = &unrcu_pointer(fence->channel)->chan.push;
+	int ret = PUSH_WAIT(push, 2);
 	if (ret == 0) {
-		BEGIN_NV04(chan, NvSubSw, 0x0150, 1);
-		OUT_RING  (chan, fence->base.seqno);
-		FIRE_RING (chan);
+		PUSH_NVSQ(push, NV_SW, 0x0150, fence->base.seqno);
+		PUSH_KICK(push);
 	}
 	return ret;
 }
@@ -77,7 +76,7 @@ nv04_fence_context_del(struct nouveau_channel *chan)
 static int
 nv04_fence_context_new(struct nouveau_channel *chan)
 {
-	struct nv04_fence_chan *fctx = kzalloc(sizeof(*fctx), GFP_KERNEL);
+	struct nv04_fence_chan *fctx = kzalloc_obj(*fctx);
 	if (fctx) {
 		nouveau_fence_context_new(chan, &fctx->base);
 		fctx->base.emit = nv04_fence_emit;
@@ -102,14 +101,12 @@ nv04_fence_create(struct nouveau_drm *drm)
 {
 	struct nv04_fence_priv *priv;
 
-	priv = drm->fence = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = drm->fence = kzalloc_obj(*priv);
 	if (!priv)
 		return -ENOMEM;
 
 	priv->base.dtor = nv04_fence_destroy;
 	priv->base.context_new = nv04_fence_context_new;
 	priv->base.context_del = nv04_fence_context_del;
-	priv->base.contexts = 15;
-	priv->base.context_base = dma_fence_context_alloc(priv->base.contexts);
 	return 0;
 }

@@ -1,32 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Serial Attached SCSI (SAS) Phy class
  *
  * Copyright (C) 2005 Adaptec, Inc.  All rights reserved.
  * Copyright (C) 2005 Luben Tuikov <luben_tuikov@adaptec.com>
- *
- * This file is licensed under GPLv2.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
- *
  */
 
 #include "sas_internal.h"
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_transport.h>
 #include <scsi/scsi_transport_sas.h>
-#include "../scsi_sas_internal.h"
+#include "scsi_sas_internal.h"
 
 /* ---------- Phy events ---------- */
 
@@ -35,9 +19,8 @@ static void sas_phye_loss_of_signal(struct work_struct *work)
 	struct asd_sas_event *ev = to_asd_sas_event(work);
 	struct asd_sas_phy *phy = ev->phy;
 
-	phy->in_shutdown = 0;
 	phy->error = 0;
-	sas_deform_port(phy, 1);
+	sas_deform_port(phy, true);
 }
 
 static void sas_phye_oob_done(struct work_struct *work)
@@ -45,7 +28,6 @@ static void sas_phye_oob_done(struct work_struct *work)
 	struct asd_sas_event *ev = to_asd_sas_event(work);
 	struct asd_sas_phy *phy = ev->phy;
 
-	phy->in_shutdown = 0;
 	phy->error = 0;
 }
 
@@ -56,9 +38,9 @@ static void sas_phye_oob_error(struct work_struct *work)
 	struct sas_ha_struct *sas_ha = phy->ha;
 	struct asd_sas_port *port = phy->port;
 	struct sas_internal *i =
-		to_sas_internal(sas_ha->core.shost->transportt);
+		to_sas_internal(sas_ha->shost->transportt);
 
-	sas_deform_port(phy, 1);
+	sas_deform_port(phy, true);
 
 	if (!port && phy->enabled && i->dft->lldd_control_phy) {
 		phy->error++;
@@ -84,7 +66,7 @@ static void sas_phye_spinup_hold(struct work_struct *work)
 	struct asd_sas_phy *phy = ev->phy;
 	struct sas_ha_struct *sas_ha = phy->ha;
 	struct sas_internal *i =
-		to_sas_internal(sas_ha->core.shost->transportt);
+		to_sas_internal(sas_ha->shost->transportt);
 
 	phy->error = 0;
 	i->dft->lldd_control_phy(phy, PHY_FUNC_RELEASE_SPINUP_HOLD, NULL);
@@ -103,7 +85,7 @@ static void sas_phye_resume_timeout(struct work_struct *work)
 
 	phy->error = 0;
 	phy->suspended = 0;
-	sas_deform_port(phy, 1);
+	sas_deform_port(phy, true);
 }
 
 
@@ -113,7 +95,7 @@ static void sas_phye_shutdown(struct work_struct *work)
 	struct asd_sas_phy *phy = ev->phy;
 	struct sas_ha_struct *sas_ha = phy->ha;
 	struct sas_internal *i =
-		to_sas_internal(sas_ha->core.shost->transportt);
+		to_sas_internal(sas_ha->shost->transportt);
 
 	if (phy->enabled) {
 		int ret;
@@ -122,11 +104,11 @@ static void sas_phye_shutdown(struct work_struct *work)
 		phy->enabled = 0;
 		ret = i->dft->lldd_control_phy(phy, PHY_FUNC_DISABLE, NULL);
 		if (ret)
-			sas_printk("lldd disable phy%02d returned %d\n",
-				phy->id, ret);
+			pr_notice("lldd disable phy%d returned %d\n", phy->id,
+				  ret);
 	} else
-		sas_printk("phy%02d is not enabled, cannot shutdown\n",
-			phy->id);
+		pr_notice("phy%d is not enabled, cannot shutdown\n", phy->id);
+	phy->in_shutdown = 0;
 }
 
 /* ---------- Phy class registration ---------- */
@@ -134,6 +116,7 @@ static void sas_phye_shutdown(struct work_struct *work)
 int sas_register_phys(struct sas_ha_struct *sas_ha)
 {
 	int i;
+	int err;
 
 	/* Now register the phys. */
 	for (i = 0; i < sas_ha->num_phys; i++) {
@@ -149,9 +132,11 @@ int sas_register_phys(struct sas_ha_struct *sas_ha)
 		spin_lock_init(&phy->sas_prim_lock);
 		phy->frame_rcvd_size = 0;
 
-		phy->phy = sas_phy_alloc(&sas_ha->core.shost->shost_gendev, i);
-		if (!phy->phy)
-			return -ENOMEM;
+		phy->phy = sas_phy_alloc(&sas_ha->shost->shost_gendev, i);
+		if (!phy->phy) {
+			err = -ENOMEM;
+			goto rollback;
+		}
 
 		phy->phy->identify.initiator_port_protocols =
 			phy->iproto;
@@ -164,10 +149,34 @@ int sas_register_phys(struct sas_ha_struct *sas_ha)
 		phy->phy->maximum_linkrate = SAS_LINK_RATE_UNKNOWN;
 		phy->phy->negotiated_linkrate = SAS_LINK_RATE_UNKNOWN;
 
-		sas_phy_add(phy->phy);
+		err = sas_phy_add(phy->phy);
+		if (err) {
+			sas_phy_free(phy->phy);
+			goto rollback;
+		}
 	}
 
 	return 0;
+rollback:
+	for (i-- ; i >= 0 ; i--) {
+		struct asd_sas_phy *phy = sas_ha->sas_phy[i];
+
+		sas_phy_delete(phy->phy);
+		sas_phy_free(phy->phy);
+	}
+	return err;
+}
+
+void sas_unregister_phys(struct sas_ha_struct *sas_ha)
+{
+	int i;
+
+	for (i = 0 ; i < sas_ha->num_phys ; i++) {
+		struct asd_sas_phy *phy = sas_ha->sas_phy[i];
+
+		sas_phy_delete(phy->phy);
+		sas_phy_free(phy->phy);
+	}
 }
 
 const work_func_t sas_phy_event_fns[PHY_NUM_EVENTS] = {

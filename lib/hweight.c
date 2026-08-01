@@ -4,13 +4,12 @@
 #include <asm/types.h>
 
 /**
- * hweightN - returns the hamming weight of a N-bit word
- * @x: the word to weigh
+ * DOC: __sw_hweightN - returns the hamming weight of a N-bit word
+ * @w: the word to weigh
  *
  * The Hamming Weight of a number is the total number of bits set in it.
  */
 
-#ifndef __HAVE_ARCH_SW_HWEIGHT
 unsigned int __sw_hweight32(unsigned int w)
 {
 #ifdef CONFIG_ARCH_HAS_FAST_MULTIPLIER
@@ -27,7 +26,6 @@ unsigned int __sw_hweight32(unsigned int w)
 #endif
 }
 EXPORT_SYMBOL(__sw_hweight32);
-#endif
 
 unsigned int __sw_hweight16(unsigned int w)
 {
@@ -46,7 +44,6 @@ unsigned int __sw_hweight8(unsigned int w)
 }
 EXPORT_SYMBOL(__sw_hweight8);
 
-#ifndef __HAVE_ARCH_SW_HWEIGHT
 unsigned long __sw_hweight64(__u64 w)
 {
 #if BITS_PER_LONG == 32
@@ -69,4 +66,3 @@ unsigned long __sw_hweight64(__u64 w)
 #endif
 }
 EXPORT_SYMBOL(__sw_hweight64);
-#endif

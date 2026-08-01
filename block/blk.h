@@ -2,162 +2,321 @@
 #ifndef BLK_INTERNAL_H
 #define BLK_INTERNAL_H
 
-#include <linux/idr.h>
-#include <linux/blk-mq.h>
-#include "blk-mq.h"
+#include <linux/bio-integrity.h>
+#include <linux/blk-crypto.h>
+#include <linux/part_stat.h>
+#include <linux/lockdep.h>
+#include <linux/memblock.h>	/* for max_pfn/max_low_pfn */
+#include <linux/sched/sysctl.h>
+#include <linux/timekeeping.h>
+#include <xen/xen.h>
+#include "blk-crypto-internal.h"
 
-/* Amount of time in which a process may batch requests */
-#define BLK_BATCH_TIME	(HZ/50UL)
+struct elv_change_ctx;
 
-/* Number of requests a "batching" process may submit */
-#define BLK_BATCH_REQ	32
+/*
+ * Default upper limit for the software max_sectors limit used for regular I/Os.
+ * This can be increased through sysfs.
+ *
+ * This should not be confused with the max_hw_sector limit that is entirely
+ * controlled by the block device driver, usually based on hardware limits.
+ */
+#define BLK_DEF_MAX_SECTORS_CAP	(SZ_4M >> SECTOR_SHIFT)
+
+#define	BLK_DEV_MAX_SECTORS	(LLONG_MAX >> 9)
+#define	BLK_MIN_SEGMENT_SIZE	4096
 
 /* Max future timer expiry for timeouts */
 #define BLK_MAX_TIMEOUT		(5 * HZ)
 
-#ifdef CONFIG_DEBUG_FS
+extern const struct kobj_type blk_queue_ktype;
 extern struct dentry *blk_debugfs_root;
-#endif
 
 struct blk_flush_queue {
-	unsigned int		flush_queue_delayed:1;
+	spinlock_t		mq_flush_lock;
 	unsigned int		flush_pending_idx:1;
 	unsigned int		flush_running_idx:1;
+	blk_status_t 		rq_status;
 	unsigned long		flush_pending_since;
 	struct list_head	flush_queue[2];
-	struct list_head	flush_data_in_flight;
+	unsigned long		flush_data_in_flight;
 	struct request		*flush_rq;
-
-	/*
-	 * flush_rq shares tag with this rq, both can't be active
-	 * at the same time
-	 */
-	struct request		*orig_rq;
-	spinlock_t		mq_flush_lock;
+	struct rcu_head		rcu_head;
 };
 
-extern struct kmem_cache *blk_requestq_cachep;
-extern struct kmem_cache *request_cachep;
-extern struct kobj_type blk_queue_ktype;
-extern struct ida blk_queue_ida;
+bool is_flush_rq(struct request *req);
 
-/*
- * @q->queue_lock is set while a queue is being initialized. Since we know
- * that no other threads access the queue object before @q->queue_lock has
- * been set, it is safe to manipulate queue flags without holding the
- * queue_lock if @q->queue_lock == NULL. See also blk_alloc_queue_node() and
- * blk_init_allocated_queue().
- */
-static inline void queue_lockdep_assert_held(struct request_queue *q)
-{
-	if (q->queue_lock)
-		lockdep_assert_held(q->queue_lock);
-}
-
-static inline void queue_flag_set_unlocked(unsigned int flag,
-					   struct request_queue *q)
-{
-	if (test_bit(QUEUE_FLAG_INIT_DONE, &q->queue_flags) &&
-	    kref_read(&q->kobj.kref))
-		lockdep_assert_held(q->queue_lock);
-	__set_bit(flag, &q->queue_flags);
-}
-
-static inline void queue_flag_clear_unlocked(unsigned int flag,
-					     struct request_queue *q)
-{
-	if (test_bit(QUEUE_FLAG_INIT_DONE, &q->queue_flags) &&
-	    kref_read(&q->kobj.kref))
-		lockdep_assert_held(q->queue_lock);
-	__clear_bit(flag, &q->queue_flags);
-}
-
-static inline int queue_flag_test_and_clear(unsigned int flag,
-					    struct request_queue *q)
-{
-	queue_lockdep_assert_held(q);
-
-	if (test_bit(flag, &q->queue_flags)) {
-		__clear_bit(flag, &q->queue_flags);
-		return 1;
-	}
-
-	return 0;
-}
-
-static inline int queue_flag_test_and_set(unsigned int flag,
-					  struct request_queue *q)
-{
-	queue_lockdep_assert_held(q);
-
-	if (!test_bit(flag, &q->queue_flags)) {
-		__set_bit(flag, &q->queue_flags);
-		return 0;
-	}
-
-	return 1;
-}
-
-static inline void queue_flag_set(unsigned int flag, struct request_queue *q)
-{
-	queue_lockdep_assert_held(q);
-	__set_bit(flag, &q->queue_flags);
-}
-
-static inline void queue_flag_clear(unsigned int flag, struct request_queue *q)
-{
-	queue_lockdep_assert_held(q);
-	__clear_bit(flag, &q->queue_flags);
-}
-
-static inline struct blk_flush_queue *blk_get_flush_queue(
-		struct request_queue *q, struct blk_mq_ctx *ctx)
-{
-	if (q->mq_ops)
-		return blk_mq_map_queue(q, ctx->cpu)->fq;
-	return q->fq;
-}
-
-static inline void __blk_get_queue(struct request_queue *q)
-{
-	kobject_get(&q->kobj);
-}
-
-struct blk_flush_queue *blk_alloc_flush_queue(struct request_queue *q,
-		int node, int cmd_size);
+struct blk_flush_queue *blk_alloc_flush_queue(int node, int cmd_size,
+					      gfp_t flags);
 void blk_free_flush_queue(struct blk_flush_queue *q);
 
-int blk_init_rl(struct request_list *rl, struct request_queue *q,
-		gfp_t gfp_mask);
-void blk_exit_rl(struct request_queue *q, struct request_list *rl);
-void blk_rq_bio_prep(struct request_queue *q, struct request *rq,
-			struct bio *bio);
-void blk_queue_bypass_start(struct request_queue *q);
-void blk_queue_bypass_end(struct request_queue *q);
-void __blk_queue_free_tags(struct request_queue *q);
-void blk_freeze_queue(struct request_queue *q);
+const char *blk_status_to_str(blk_status_t status);
+const char *blk_status_to_tag(blk_status_t status);
+blk_status_t tag_to_blk_status(const char *tag);
+enum req_op str_to_blk_op(const char *op);
 
-static inline void blk_queue_enter_live(struct request_queue *q)
+bool __blk_mq_unfreeze_queue(struct request_queue *q, bool force_atomic);
+bool blk_queue_start_drain(struct request_queue *q);
+bool __blk_freeze_queue_start(struct request_queue *q,
+			      struct task_struct *owner);
+int __bio_queue_enter(struct request_queue *q, struct bio *bio);
+void submit_bio_noacct_nocheck(struct bio *bio, bool split);
+int bio_submit_or_kill(struct bio *bio, unsigned int flags);
+
+static inline bool blk_try_enter_queue(struct request_queue *q, bool pm)
 {
+	rcu_read_lock();
+	if (!percpu_ref_tryget_live_rcu(&q->q_usage_counter))
+		goto fail;
+
 	/*
-	 * Given that running in generic_make_request() context
-	 * guarantees that a live reference against q_usage_counter has
-	 * been established, further references under that same context
-	 * need not check that the queue has been frozen (marked dead).
+	 * The code that increments the pm_only counter must ensure that the
+	 * counter is globally visible before the queue is unfrozen.
 	 */
-	percpu_ref_get(&q->q_usage_counter);
+	if (blk_queue_pm_only(q) &&
+	    (!pm || queue_rpm_status(q) == RPM_SUSPENDED))
+		goto fail_put;
+
+	rcu_read_unlock();
+	return true;
+
+fail_put:
+	blk_queue_exit(q);
+fail:
+	rcu_read_unlock();
+	return false;
+}
+
+static inline int bio_queue_enter(struct bio *bio)
+{
+	struct request_queue *q = bdev_get_queue(bio->bi_bdev);
+
+	if (blk_try_enter_queue(q, false)) {
+		rwsem_acquire_read(&q->io_lockdep_map, 0, 0, _RET_IP_);
+		rwsem_release(&q->io_lockdep_map, _RET_IP_);
+		return 0;
+	}
+	return __bio_queue_enter(q, bio);
+}
+
+static inline void blk_wait_io(struct completion *done)
+{
+	/* Prevent hang_check timer from firing at us during very long I/O */
+	unsigned long timeout = sysctl_hung_task_timeout_secs * HZ / 2;
+
+	if (timeout)
+		while (!wait_for_completion_io_timeout(done, timeout))
+			;
+	else
+		wait_for_completion_io(done);
+}
+
+struct block_device *blkdev_get_no_open(dev_t dev, bool autoload);
+void blkdev_put_no_open(struct block_device *bdev);
+
+bool bvec_try_merge_hw_page(struct request_queue *q, struct bio_vec *bv,
+		struct page *page, unsigned len, unsigned offset);
+
+static inline bool biovec_phys_mergeable(struct request_queue *q,
+		struct bio_vec *vec1, struct bio_vec *vec2)
+{
+	unsigned long mask = queue_segment_boundary(q);
+	phys_addr_t addr1 = bvec_phys(vec1);
+	phys_addr_t addr2 = bvec_phys(vec2);
+
+	/*
+	 * Merging adjacent physical pages may not work correctly under KMSAN
+	 * if their metadata pages aren't adjacent. Just disable merging.
+	 */
+	if (IS_ENABLED(CONFIG_KMSAN))
+		return false;
+
+	if (addr1 + vec1->bv_len != addr2)
+		return false;
+	if (!zone_device_pages_have_same_pgmap(vec1->bv_page, vec2->bv_page))
+		return false;
+	if (xen_domain() && !xen_biovec_phys_mergeable(vec1, vec2->bv_page))
+		return false;
+	if ((addr1 | mask) != ((addr2 + vec2->bv_len - 1) | mask))
+		return false;
+	return true;
+}
+
+/*
+ * Check if two pages from potentially different zone device pgmaps can
+ * coexist as separate bvec entries in the same bio.
+ *
+ * The block DMA iterator (blk_dma_map_iter_start) caches the P2PDMA mapping
+ * state from the first segment and applies it to all subsequent segments, so
+ * P2PDMA pages from different pgmaps must not be mixed in the same bio.
+ *
+ * Other zone device types (FS_DAX, GENERIC) use the same dma_map_phys() path
+ * as normal RAM.  PRIVATE and COHERENT pages never appear in bios.
+ */
+static inline bool zone_device_pages_compatible(const struct page *a,
+						const struct page *b)
+{
+	if (is_pci_p2pdma_page(a) || is_pci_p2pdma_page(b))
+		return zone_device_pages_have_same_pgmap(a, b);
+	return true;
+}
+
+static inline bool __bvec_gap_to_prev(const struct queue_limits *lim,
+		struct bio_vec *bprv, unsigned int offset)
+{
+	return (offset & lim->virt_boundary_mask) ||
+		((bprv->bv_offset + bprv->bv_len) & lim->virt_boundary_mask);
+}
+
+/*
+ * Check if adding a bio_vec after bprv with offset would create a gap in
+ * the SG list. Most drivers don't care about this, but some do.
+ */
+static inline bool bvec_gap_to_prev(const struct queue_limits *lim,
+		struct bio_vec *bprv, unsigned int offset)
+{
+	if (!lim->virt_boundary_mask)
+		return false;
+	return __bvec_gap_to_prev(lim, bprv, offset);
+}
+
+static inline bool rq_mergeable(struct request *rq)
+{
+	if (blk_rq_is_passthrough(rq))
+		return false;
+
+	if (req_op(rq) == REQ_OP_FLUSH)
+		return false;
+
+	if (req_op(rq) == REQ_OP_WRITE_ZEROES)
+		return false;
+
+	if (req_op(rq) == REQ_OP_ZONE_APPEND)
+		return false;
+
+	if (rq->cmd_flags & REQ_NOMERGE_FLAGS)
+		return false;
+	if (rq->rq_flags & RQF_NOMERGE_FLAGS)
+		return false;
+
+	return true;
+}
+
+/*
+ * There are two different ways to handle DISCARD merges:
+ *  1) If max_discard_segments > 1, the driver treats every bio as a range and
+ *     send the bios to controller together. The ranges don't need to be
+ *     contiguous.
+ *  2) Otherwise, the request will be normal read/write requests.  The ranges
+ *     need to be contiguous.
+ */
+static inline bool blk_discard_mergable(struct request *req)
+{
+	if (req_op(req) == REQ_OP_DISCARD &&
+	    queue_max_discard_segments(req->q) > 1)
+		return true;
+	return false;
+}
+
+static inline unsigned int blk_rq_get_max_segments(struct request *rq)
+{
+	if (req_op(rq) == REQ_OP_DISCARD)
+		return queue_max_discard_segments(rq->q);
+	return queue_max_segments(rq->q);
+}
+
+static inline unsigned int blk_queue_get_max_sectors(struct request *rq)
+{
+	struct request_queue *q = rq->q;
+	enum req_op op = req_op(rq);
+
+	if (unlikely(op == REQ_OP_DISCARD))
+		return min(q->limits.max_discard_sectors,
+			   UINT_MAX >> SECTOR_SHIFT);
+
+	if (unlikely(op == REQ_OP_SECURE_ERASE))
+		return min(q->limits.max_secure_erase_sectors,
+			   UINT_MAX >> SECTOR_SHIFT);
+
+	if (unlikely(op == REQ_OP_WRITE_ZEROES))
+		return q->limits.max_write_zeroes_sectors;
+
+	if (rq->cmd_flags & REQ_ATOMIC)
+		return q->limits.atomic_write_max_sectors;
+
+	return q->limits.max_sectors;
 }
 
 #ifdef CONFIG_BLK_DEV_INTEGRITY
 void blk_flush_integrity(void);
-bool __bio_integrity_endio(struct bio *);
+void bio_integrity_free(struct bio *bio);
+
+/*
+ * Integrity payloads can either be owned by the submitter, in which case
+ * bio_uninit will free them, or owned and generated by the block layer,
+ * in which case we'll verify them here (for reads) and free them before
+ * the bio is handed back to the submitted.
+ */
+bool __bio_integrity_endio(struct bio *bio);
 static inline bool bio_integrity_endio(struct bio *bio)
 {
-	if (bio_integrity(bio))
+	struct bio_integrity_payload *bip = bio_integrity(bio);
+
+	if (bip && (bip->bip_flags & BIP_BLOCK_INTEGRITY))
 		return __bio_integrity_endio(bio);
 	return true;
 }
-#else
+
+bool blk_integrity_merge_rq(struct request_queue *, struct request *,
+		struct request *);
+bool blk_integrity_merge_bio(struct request_queue *, struct request *,
+		struct bio *);
+
+static inline bool integrity_req_gap_back_merge(struct request *req,
+		struct bio *next)
+{
+	struct bio_integrity_payload *bip = bio_integrity(req->bio);
+	struct bio_integrity_payload *bip_next = bio_integrity(next);
+
+	return bvec_gap_to_prev(&req->q->limits,
+				&bip->bip_vec[bip->bip_vcnt - 1],
+				bip_next->bip_vec[0].bv_offset);
+}
+
+static inline bool integrity_req_gap_front_merge(struct request *req,
+		struct bio *bio)
+{
+	struct bio_integrity_payload *bip = bio_integrity(bio);
+	struct bio_integrity_payload *bip_next = bio_integrity(req->bio);
+
+	return bvec_gap_to_prev(&req->q->limits,
+				&bip->bip_vec[bip->bip_vcnt - 1],
+				bip_next->bip_vec[0].bv_offset);
+}
+
+extern const struct attribute_group blk_integrity_attr_group;
+#else /* CONFIG_BLK_DEV_INTEGRITY */
+static inline bool blk_integrity_merge_rq(struct request_queue *rq,
+		struct request *r1, struct request *r2)
+{
+	return true;
+}
+static inline bool blk_integrity_merge_bio(struct request_queue *rq,
+		struct request *r, struct bio *b)
+{
+	return true;
+}
+static inline bool integrity_req_gap_back_merge(struct request *req,
+		struct bio *next)
+{
+	return false;
+}
+static inline bool integrity_req_gap_front_merge(struct request *req,
+		struct bio *bio)
+{
+	return false;
+}
+
 static inline void blk_flush_integrity(void)
 {
 }
@@ -165,140 +324,167 @@ static inline bool bio_integrity_endio(struct bio *bio)
 {
 	return true;
 }
-#endif
+static inline void bio_integrity_free(struct bio *bio)
+{
+}
+#endif /* CONFIG_BLK_DEV_INTEGRITY */
 
-void blk_timeout_work(struct work_struct *work);
 unsigned long blk_rq_timeout(unsigned long timeout);
 void blk_add_timer(struct request *req);
-void blk_delete_timer(struct request *);
 
+enum bio_merge_status {
+	BIO_MERGE_OK,
+	BIO_MERGE_NONE,
+	BIO_MERGE_FAILED,
+};
 
-bool bio_attempt_front_merge(struct request_queue *q, struct request *req,
-			     struct bio *bio);
-bool bio_attempt_back_merge(struct request_queue *q, struct request *req,
-			    struct bio *bio);
-bool bio_attempt_discard_merge(struct request_queue *q, struct request *req,
-		struct bio *bio);
+enum bio_merge_status bio_attempt_back_merge(struct request *req,
+		struct bio *bio, unsigned int nr_segs);
 bool blk_attempt_plug_merge(struct request_queue *q, struct bio *bio,
-			    unsigned int *request_count,
-			    struct request **same_queue_rq);
-unsigned int blk_plug_queued_count(struct request_queue *q);
-
-void blk_account_io_start(struct request *req, bool new_io);
-void blk_account_io_completion(struct request *req, unsigned int bytes);
-void blk_account_io_done(struct request *req);
+		unsigned int nr_segs);
+bool blk_bio_list_merge(struct request_queue *q, struct list_head *list,
+			struct bio *bio, unsigned int nr_segs);
 
 /*
- * EH timer and IO completion will both attempt to 'grab' the request, make
- * sure that only one of them succeeds. Steal the bottom bit of the
- * __deadline field for this.
+ * Plug flush limits
  */
-static inline int blk_mark_rq_complete(struct request *rq)
-{
-	return test_and_set_bit(0, &rq->__deadline);
-}
-
-static inline void blk_clear_rq_complete(struct request *rq)
-{
-	clear_bit(0, &rq->__deadline);
-}
-
-static inline bool blk_rq_is_complete(struct request *rq)
-{
-	return test_bit(0, &rq->__deadline);
-}
+#define BLK_MAX_REQUEST_COUNT	32
+#define BLK_PLUG_FLUSH_SIZE	(128 * 1024)
 
 /*
  * Internal elevator interface
  */
 #define ELV_ON_HASH(rq) ((rq)->rq_flags & RQF_HASHED)
 
-void blk_insert_flush(struct request *rq);
+bool blk_insert_flush(struct request *rq);
 
-static inline void elv_activate_rq(struct request_queue *q, struct request *rq)
-{
-	struct elevator_queue *e = q->elevator;
+void elv_update_nr_hw_queues(struct request_queue *q,
+		struct elv_change_ctx *ctx);
+void elevator_set_default(struct request_queue *q);
+void elevator_set_none(struct request_queue *q);
 
-	if (e->type->ops.sq.elevator_activate_req_fn)
-		e->type->ops.sq.elevator_activate_req_fn(q, rq);
-}
-
-static inline void elv_deactivate_rq(struct request_queue *q, struct request *rq)
-{
-	struct elevator_queue *e = q->elevator;
-
-	if (e->type->ops.sq.elevator_deactivate_req_fn)
-		e->type->ops.sq.elevator_deactivate_req_fn(q, rq);
-}
-
-int elv_register_queue(struct request_queue *q);
-void elv_unregister_queue(struct request_queue *q);
-
-struct hd_struct *__disk_get_part(struct gendisk *disk, int partno);
-
-#ifdef CONFIG_FAIL_IO_TIMEOUT
-int blk_should_fake_timeout(struct request_queue *);
+ssize_t part_size_show(struct device *dev, struct device_attribute *attr,
+		char *buf);
+ssize_t part_stat_show(struct device *dev, struct device_attribute *attr,
+		char *buf);
+ssize_t part_inflight_show(struct device *dev, struct device_attribute *attr,
+		char *buf);
+ssize_t part_fail_show(struct device *dev, struct device_attribute *attr,
+		char *buf);
+ssize_t part_fail_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count);
 ssize_t part_timeout_show(struct device *, struct device_attribute *, char *);
 ssize_t part_timeout_store(struct device *, struct device_attribute *,
 				const char *, size_t);
-#else
-static inline int blk_should_fake_timeout(struct request_queue *q)
-{
-	return 0;
-}
-#endif
 
-int ll_back_merge_fn(struct request_queue *q, struct request *req,
-		     struct bio *bio);
-int ll_front_merge_fn(struct request_queue *q, struct request *req, 
-		      struct bio *bio);
-struct request *attempt_back_merge(struct request_queue *q, struct request *rq);
-struct request *attempt_front_merge(struct request_queue *q, struct request *rq);
-int blk_attempt_req_merge(struct request_queue *q, struct request *rq,
+struct bio *bio_split_discard(struct bio *bio, const struct queue_limits *lim,
+		unsigned *nsegs);
+struct bio *bio_split_write_zeroes(struct bio *bio,
+		const struct queue_limits *lim, unsigned *nsegs);
+struct bio *bio_split_rw(struct bio *bio, const struct queue_limits *lim,
+		unsigned *nr_segs);
+struct bio *bio_split_zone_append(struct bio *bio,
+		const struct queue_limits *lim, unsigned *nr_segs);
+
+/*
+ * All drivers must accept single-segments bios that are smaller than PAGE_SIZE.
+ *
+ * This is a quick and dirty check that relies on the fact that bi_io_vec[0] is
+ * always valid if a bio has data.  The check might lead to occasional false
+ * positives when bios are cloned, but compared to the performance impact of
+ * cloned bios themselves the loop below doesn't matter anyway.
+ */
+static inline bool bio_may_need_split(struct bio *bio,
+		const struct queue_limits *lim)
+{
+	const struct bio_vec *bv;
+
+	if (lim->chunk_sectors)
+		return true;
+
+	if (!bio->bi_io_vec)
+		return true;
+
+	bv = __bvec_iter_bvec(bio->bi_io_vec, bio->bi_iter);
+	if (bio->bi_iter.bi_size > bv->bv_len - bio->bi_iter.bi_bvec_done)
+		return true;
+	if ((bv->bv_offset | bv->bv_len) & lim->dma_alignment)
+		return true;
+	return bv->bv_len + bv->bv_offset > lim->max_fast_segment_size;
+}
+
+/**
+ * __bio_split_to_limits - split a bio to fit the queue limits
+ * @bio:     bio to be split
+ * @lim:     queue limits to split based on
+ * @nr_segs: returns the number of segments in the returned bio
+ *
+ * Check if @bio needs splitting based on the queue limits, and if so split off
+ * a bio fitting the limits from the beginning of @bio and return it.  @bio is
+ * shortened to the remainder and re-submitted.
+ *
+ * The split bio is allocated from @q->bio_split, which is provided by the
+ * block layer.
+ */
+static inline struct bio *__bio_split_to_limits(struct bio *bio,
+		const struct queue_limits *lim, unsigned int *nr_segs)
+{
+	switch (bio_op(bio)) {
+	case REQ_OP_READ:
+	case REQ_OP_WRITE:
+		if (bio_may_need_split(bio, lim))
+			return bio_split_rw(bio, lim, nr_segs);
+		*nr_segs = 1;
+		return bio;
+	case REQ_OP_ZONE_APPEND:
+		return bio_split_zone_append(bio, lim, nr_segs);
+	case REQ_OP_DISCARD:
+	case REQ_OP_SECURE_ERASE:
+		return bio_split_discard(bio, lim, nr_segs);
+	case REQ_OP_WRITE_ZEROES:
+		return bio_split_write_zeroes(bio, lim, nr_segs);
+	default:
+		/* other operations can't be split */
+		*nr_segs = 0;
+		return bio;
+	}
+}
+
+/**
+ * get_max_segment_size() - maximum number of bytes to add as a single segment
+ * @lim: Request queue limits.
+ * @paddr: address of the range to add
+ * @len: maximum length available to add at @paddr
+ *
+ * Returns the maximum number of bytes of the range starting at @paddr that can
+ * be added to a single segment.
+ */
+static inline unsigned get_max_segment_size(const struct queue_limits *lim,
+		phys_addr_t paddr, unsigned int len)
+{
+	/*
+	 * Prevent an overflow if mask = ULONG_MAX and offset = 0 by adding 1
+	 * after having calculated the minimum.
+	 */
+	return min_t(unsigned long, len,
+		min(lim->seg_boundary_mask - (lim->seg_boundary_mask & paddr),
+		    (unsigned long)lim->max_segment_size - 1) + 1);
+}
+
+int ll_back_merge_fn(struct request *req, struct bio *bio,
+		unsigned int nr_segs);
+bool blk_attempt_req_merge(struct request_queue *q, struct request *rq,
 				struct request *next);
-void blk_recalc_rq_segments(struct request *rq);
-void blk_rq_set_mixed_merge(struct request *rq);
+unsigned int blk_recalc_rq_segments(struct request *rq);
 bool blk_rq_merge_ok(struct request *rq, struct bio *bio);
 enum elv_merge blk_try_merge(struct request *rq, struct bio *bio);
 
-void blk_queue_congestion_threshold(struct request_queue *q);
-
+int blk_set_default_limits(struct queue_limits *lim);
+void blk_apply_bdi_limits(struct backing_dev_info *bdi,
+		struct queue_limits *lim);
 int blk_dev_init(void);
 
-
-/*
- * Return the threshold (number of used requests) at which the queue is
- * considered to be congested.  It include a little hysteresis to keep the
- * context switch rate down.
- */
-static inline int queue_congestion_on_threshold(struct request_queue *q)
-{
-	return q->nr_congestion_on;
-}
-
-/*
- * The threshold at which a queue is considered to be uncongested
- */
-static inline int queue_congestion_off_threshold(struct request_queue *q)
-{
-	return q->nr_congestion_off;
-}
-
-extern int blk_update_nr_requests(struct request_queue *, unsigned int);
-
-/*
- * Contribute to IO statistics IFF:
- *
- *	a) it's attached to a gendisk, and
- *	b) the queue had IO stats enabled when this request was started, and
- *	c) it's a file system request
- */
-static inline int blk_do_io_stat(struct request *rq)
-{
-	return rq->rq_disk &&
-	       (rq->rq_flags & RQF_IO_STAT) &&
-		!blk_rq_is_passthrough(rq);
-}
+void update_io_ticks(struct block_device *part, unsigned long now, bool end);
 
 static inline void req_set_nomerge(struct request_queue *q, struct request *req)
 {
@@ -307,106 +493,328 @@ static inline void req_set_nomerge(struct request_queue *q, struct request *req)
 		q->last_merge = NULL;
 }
 
-/*
- * Steal a bit from this field for legacy IO path atomic IO marking. Note that
- * setting the deadline clears the bottom bit, potentially clearing the
- * completed bit. The user has to be OK with this (current ones are fine).
- */
-static inline void blk_rq_set_deadline(struct request *rq, unsigned long time)
+static inline void bdev_inc_in_flight(struct block_device *bdev,
+				      enum req_op op)
 {
-	rq->__deadline = time & ~0x1UL;
+	bool rw = op_is_write(op);
+
+	part_stat_local_inc(bdev, in_flight[rw]);
+	if (bdev_is_partition(bdev))
+		part_stat_local_inc(bdev_whole(bdev), in_flight[rw]);
 }
 
-static inline unsigned long blk_rq_deadline(struct request *rq)
+static inline void bdev_dec_in_flight(struct block_device *bdev,
+				      enum req_op op)
 {
-	return rq->__deadline & ~0x1UL;
+	bool rw = op_is_write(op);
+
+	part_stat_local_dec(bdev, in_flight[rw]);
+	if (bdev_is_partition(bdev))
+		part_stat_local_dec(bdev_whole(bdev), in_flight[rw]);
 }
 
 /*
  * Internal io_context interface
  */
-void get_io_context(struct io_context *ioc);
-struct io_cq *ioc_lookup_icq(struct io_context *ioc, struct request_queue *q);
-struct io_cq *ioc_create_icq(struct io_context *ioc, struct request_queue *q,
-			     gfp_t gfp_mask);
+struct io_cq *ioc_find_get_icq(struct request_queue *q);
+struct io_cq *ioc_lookup_icq(struct request_queue *q);
+#ifdef CONFIG_BLK_ICQ
 void ioc_clear_queue(struct request_queue *q);
-
-int create_task_io_context(struct task_struct *task, gfp_t gfp_mask, int node);
-
-/**
- * rq_ioc - determine io_context for request allocation
- * @bio: request being allocated is for this bio (can be %NULL)
- *
- * Determine io_context to use for request allocation for @bio.  May return
- * %NULL if %current->io_context doesn't exist.
- */
-static inline struct io_context *rq_ioc(struct bio *bio)
+#else
+static inline void ioc_clear_queue(struct request_queue *q)
 {
-#ifdef CONFIG_BLK_CGROUP
-	if (bio && bio->bi_ioc)
-		return bio->bi_ioc;
-#endif
-	return current->io_context;
+}
+#endif /* CONFIG_BLK_ICQ */
+
+#ifdef CONFIG_BLK_DEV_ZONED
+void disk_init_zone_resources(struct gendisk *disk);
+void disk_release_zone_resources(struct gendisk *disk);
+static inline bool bio_zone_write_plugging(struct bio *bio)
+{
+	return bio_flagged(bio, BIO_ZONE_WRITE_PLUGGING);
+}
+static inline bool blk_req_bio_is_zone_append(struct request *rq,
+					      struct bio *bio)
+{
+	return req_op(rq) == REQ_OP_ZONE_APPEND ||
+	       bio_flagged(bio, BIO_EMULATES_ZONE_APPEND);
+}
+void blk_zone_write_plug_bio_merged(struct bio *bio);
+void blk_zone_write_plug_init_request(struct request *rq);
+void blk_zone_append_update_request_bio(struct request *rq, struct bio *bio);
+void blk_zone_mgmt_bio_endio(struct bio *bio);
+void blk_zone_write_plug_bio_endio(struct bio *bio);
+static inline void blk_zone_bio_endio(struct bio *bio)
+{
+	/*
+	 * Zone management BIOs may impact zone write plugs (e.g. a zone reset
+	 * changes a zone write plug zone write pointer offset), but these
+	 * operation do not go through zone write plugging as they may operate
+	 * on zones that do not have a zone write
+	 * plug. blk_zone_mgmt_bio_endio() handles the potential changes to zone
+	 * write plugs that are present.
+	 */
+	if (op_is_zone_mgmt(bio_op(bio))) {
+		blk_zone_mgmt_bio_endio(bio);
+		return;
+	}
+
+	/*
+	 * For write BIOs to zoned devices, signal the completion of the BIO so
+	 * that the next write BIO can be submitted by zone write plugging.
+	 */
+	if (bio_zone_write_plugging(bio))
+		blk_zone_write_plug_bio_endio(bio);
 }
 
-/**
- * create_io_context - try to create task->io_context
- * @gfp_mask: allocation mask
- * @node: allocation node
- *
- * If %current->io_context is %NULL, allocate a new io_context and install
- * it.  Returns the current %current->io_context which may be %NULL if
- * allocation failed.
- *
- * Note that this function can't be called with IRQ disabled because
- * task_lock which protects %current->io_context is IRQ-unsafe.
- */
-static inline struct io_context *create_io_context(gfp_t gfp_mask, int node)
+void blk_zone_write_plug_finish_request(struct request *rq);
+static inline void blk_zone_finish_request(struct request *rq)
 {
-	WARN_ON_ONCE(irqs_disabled());
-	if (unlikely(!current->io_context))
-		create_task_io_context(current, gfp_mask, node);
-	return current->io_context;
+	if (rq->rq_flags & RQF_ZONE_WRITE_PLUGGING)
+		blk_zone_write_plug_finish_request(rq);
 }
+int blkdev_report_zones_ioctl(struct block_device *bdev, unsigned int cmd,
+		unsigned long arg);
+int blkdev_zone_mgmt_ioctl(struct block_device *bdev, blk_mode_t mode,
+		unsigned int cmd, unsigned long arg);
+#else /* CONFIG_BLK_DEV_ZONED */
+static inline void disk_init_zone_resources(struct gendisk *disk)
+{
+}
+static inline void disk_release_zone_resources(struct gendisk *disk)
+{
+}
+static inline bool bio_zone_write_plugging(struct bio *bio)
+{
+	return false;
+}
+static inline bool blk_req_bio_is_zone_append(struct request *req,
+					      struct bio *bio)
+{
+	return false;
+}
+static inline void blk_zone_write_plug_bio_merged(struct bio *bio)
+{
+}
+static inline void blk_zone_write_plug_init_request(struct request *rq)
+{
+}
+static inline void blk_zone_append_update_request_bio(struct request *rq,
+						      struct bio *bio)
+{
+}
+static inline void blk_zone_bio_endio(struct bio *bio)
+{
+}
+static inline void blk_zone_finish_request(struct request *rq)
+{
+}
+static inline int blkdev_report_zones_ioctl(struct block_device *bdev,
+		unsigned int cmd, unsigned long arg)
+{
+	return -ENOTTY;
+}
+static inline int blkdev_zone_mgmt_ioctl(struct block_device *bdev,
+		blk_mode_t mode, unsigned int cmd, unsigned long arg)
+{
+	return -ENOTTY;
+}
+#endif /* CONFIG_BLK_DEV_ZONED */
+
+struct block_device *bdev_alloc(struct gendisk *disk, u8 partno);
+void bdev_add(struct block_device *bdev, dev_t dev);
+void bdev_unhash(struct block_device *bdev);
+void bdev_drop(struct block_device *bdev);
+
+int blk_alloc_ext_minor(void);
+void blk_free_ext_minor(unsigned int minor);
+#define ADDPART_FLAG_NONE	0
+#define ADDPART_FLAG_RAID	1
+#define ADDPART_FLAG_WHOLEDISK	2
+#define ADDPART_FLAG_READONLY	4
+int bdev_add_partition(struct gendisk *disk, int partno, sector_t start,
+		sector_t length);
+int bdev_del_partition(struct gendisk *disk, int partno);
+int bdev_resize_partition(struct gendisk *disk, int partno, sector_t start,
+		sector_t length);
+void drop_partition(struct block_device *part);
+
+void bdev_set_nr_sectors(struct block_device *bdev, sector_t sectors);
+
+struct gendisk *__alloc_disk_node(struct request_queue *q, int node_id,
+		struct lock_class_key *lkclass);
+struct request_queue *blk_alloc_queue(struct queue_limits *lim, int node_id);
+
+int disk_scan_partitions(struct gendisk *disk, blk_mode_t mode);
+
+int disk_alloc_events(struct gendisk *disk);
+void disk_add_events(struct gendisk *disk);
+void disk_del_events(struct gendisk *disk);
+void disk_release_events(struct gendisk *disk);
+void disk_block_events(struct gendisk *disk);
+void disk_unblock_events(struct gendisk *disk);
+void disk_flush_events(struct gendisk *disk, unsigned int mask);
+extern struct device_attribute dev_attr_events;
+extern struct device_attribute dev_attr_events_async;
+extern struct device_attribute dev_attr_events_poll_msecs;
+
+extern struct attribute_group blk_trace_attr_group;
+
+blk_mode_t file_to_blk_mode(struct file *file);
+int truncate_bdev_range(struct block_device *bdev, blk_mode_t mode,
+		loff_t lstart, loff_t lend);
+long blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg);
+int blkdev_uring_cmd(struct io_uring_cmd *cmd, unsigned int issue_flags);
+long compat_blkdev_ioctl(struct file *file, unsigned cmd, unsigned long arg);
+
+extern const struct address_space_operations def_blk_aops;
+
+int disk_register_independent_access_ranges(struct gendisk *disk);
+void disk_unregister_independent_access_ranges(struct gendisk *disk);
+
+int should_fail_bio(struct bio *bio);
+#ifdef CONFIG_FAIL_MAKE_REQUEST
+bool should_fail_request(struct block_device *part, unsigned int bytes);
+#else /* CONFIG_FAIL_MAKE_REQUEST */
+static inline bool should_fail_request(struct block_device *part,
+					unsigned int bytes)
+{
+	return false;
+}
+#endif /* CONFIG_FAIL_MAKE_REQUEST */
 
 /*
- * Internal throttling interface
+ * Optimized request reference counting. Ideally we'd make timeouts be more
+ * clever, as that's the only reason we need references at all... But until
+ * this happens, this is faster than using refcount_t. Also see:
+ *
+ * abc54d634334 ("io_uring: switch to atomic_t for io_kiocb reference count")
  */
-#ifdef CONFIG_BLK_DEV_THROTTLING
-extern void blk_throtl_drain(struct request_queue *q);
-extern int blk_throtl_init(struct request_queue *q);
-extern void blk_throtl_exit(struct request_queue *q);
-extern void blk_throtl_register_queue(struct request_queue *q);
-#else /* CONFIG_BLK_DEV_THROTTLING */
-static inline void blk_throtl_drain(struct request_queue *q) { }
-static inline int blk_throtl_init(struct request_queue *q) { return 0; }
-static inline void blk_throtl_exit(struct request_queue *q) { }
-static inline void blk_throtl_register_queue(struct request_queue *q) { }
-#endif /* CONFIG_BLK_DEV_THROTTLING */
-#ifdef CONFIG_BLK_DEV_THROTTLING_LOW
-extern ssize_t blk_throtl_sample_time_show(struct request_queue *q, char *page);
-extern ssize_t blk_throtl_sample_time_store(struct request_queue *q,
-	const char *page, size_t count);
-extern void blk_throtl_bio_endio(struct bio *bio);
-extern void blk_throtl_stat_add(struct request *rq, u64 time);
+#define req_ref_zero_or_close_to_overflow(req)	\
+	((unsigned int) atomic_read(&(req->ref)) + 127u <= 127u)
+
+static inline bool req_ref_inc_not_zero(struct request *req)
+{
+	return atomic_inc_not_zero(&req->ref);
+}
+
+static inline bool req_ref_put_and_test(struct request *req)
+{
+	WARN_ON_ONCE(req_ref_zero_or_close_to_overflow(req));
+	return atomic_dec_and_test(&req->ref);
+}
+
+static inline void req_ref_set(struct request *req, int value)
+{
+	atomic_set(&req->ref, value);
+}
+
+static inline int req_ref_read(struct request *req)
+{
+	return atomic_read(&req->ref);
+}
+
+static inline u64 blk_time_get_ns(void)
+{
+	struct blk_plug *plug = current->plug;
+	u64 now;
+
+	if (!plug || !in_task())
+		return ktime_get_ns();
+
+	/*
+	 * 0 could very well be a valid time, but rather than flag "this is
+	 * a valid timestamp" separately, just accept that we'll do an extra
+	 * ktime_get_ns() if we just happen to get 0 as the current time.
+	 *
+	 * cur_ktime can be zeroed by pre-emption the moment PF_BLOCK_TS is set.
+	 */
+	now = READ_ONCE(plug->cur_ktime);
+	if (!now) {
+		now = ktime_get_ns();
+		WRITE_ONCE(plug->cur_ktime, now);
+		/* Ensure PF_BLOCK_TS is set after cur_ktime. */
+		barrier();
+		current->flags |= PF_BLOCK_TS;
+	}
+	return now;
+}
+
+static inline ktime_t blk_time_get(void)
+{
+	return ns_to_ktime(blk_time_get_ns());
+}
+
+void bdev_release(struct file *bdev_file);
+int bdev_open(struct block_device *bdev, blk_mode_t mode, void *holder,
+	      const struct blk_holder_ops *hops, struct file *bdev_file);
+int bdev_permission(dev_t dev, blk_mode_t mode, void *holder);
+
+void bio_integrity_generate(struct bio *bio);
+blk_status_t bio_integrity_verify(struct bio *bio,
+		struct bvec_iter *saved_iter);
+
+void blk_integrity_prepare(struct request *rq);
+void blk_integrity_complete(struct request *rq, unsigned int nr_bytes);
+
+#ifdef CONFIG_LOCKDEP
+static inline void blk_freeze_acquire_lock(struct request_queue *q)
+{
+	if (!q->mq_freeze_disk_dead)
+		rwsem_acquire(&q->io_lockdep_map, 0, 1, _RET_IP_);
+	if (!q->mq_freeze_queue_dying)
+		rwsem_acquire(&q->q_lockdep_map, 0, 1, _RET_IP_);
+}
+
+static inline void blk_unfreeze_release_lock(struct request_queue *q)
+{
+	if (!q->mq_freeze_queue_dying)
+		rwsem_release(&q->q_lockdep_map, _RET_IP_);
+	if (!q->mq_freeze_disk_dead)
+		rwsem_release(&q->io_lockdep_map, _RET_IP_);
+}
 #else
-static inline void blk_throtl_bio_endio(struct bio *bio) { }
-static inline void blk_throtl_stat_add(struct request *rq, u64 time) { }
+static inline void blk_freeze_acquire_lock(struct request_queue *q)
+{
+}
+static inline void blk_unfreeze_release_lock(struct request_queue *q)
+{
+}
 #endif
 
-#ifdef CONFIG_BOUNCE
-extern int init_emergency_isa_pool(void);
-extern void blk_queue_bounce(struct request_queue *q, struct bio **bio);
-#else
-static inline int init_emergency_isa_pool(void)
+/*
+ * debugfs directory and file creation can trigger fs reclaim, which can enter
+ * back into the block layer request_queue. This can cause deadlock if the
+ * queue is frozen. Use NOIO context together with debugfs_mutex to prevent fs
+ * reclaim from triggering block I/O.
+ */
+static inline void blk_debugfs_lock_nomemsave(struct request_queue *q)
+	__acquires(&q->debugfs_mutex)
 {
-	return 0;
+	mutex_lock(&q->debugfs_mutex);
 }
-static inline void blk_queue_bounce(struct request_queue *q, struct bio **bio)
-{
-}
-#endif /* CONFIG_BOUNCE */
 
-extern void blk_drain_queue(struct request_queue *q);
+static inline void blk_debugfs_unlock_nomemrestore(struct request_queue *q)
+	__releases(&q->debugfs_mutex)
+{
+	mutex_unlock(&q->debugfs_mutex);
+}
+
+static inline unsigned int __must_check blk_debugfs_lock(struct request_queue *q)
+	__acquires(&q->debugfs_mutex)
+{
+	unsigned int memflags = memalloc_noio_save();
+
+	blk_debugfs_lock_nomemsave(q);
+	return memflags;
+}
+
+static inline void blk_debugfs_unlock(struct request_queue *q,
+				      unsigned int memflags)
+	__releases(&q->debugfs_mutex)
+{
+	blk_debugfs_unlock_nomemrestore(q);
+	memalloc_noio_restore(memflags);
+}
 
 #endif /* BLK_INTERNAL_H */

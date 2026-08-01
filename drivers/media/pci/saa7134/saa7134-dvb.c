@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  * (c) 2004 Gerd Knorr <kraxel@bytesex.org> [SuSE Labs]
  *
  *  Extended 3 / 2005 by Hartmut Hackmann to support various
  *  cards with the tda10046 DVB-T channel decoder
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #include "saa7134.h"
@@ -35,7 +26,7 @@
 #include "mt352_priv.h" /* FIXME */
 #include "tda1004x.h"
 #include "nxt200x.h"
-#include "tuner-xc2028.h"
+#include "xc2028.h"
 #include "xc5000.h"
 
 #include "tda10086.h"
@@ -61,6 +52,7 @@
 #include "s5h1411.h"
 
 MODULE_AUTHOR("Gerd Knorr <kraxel@bytesex.org> [SuSE Labs]");
+MODULE_DESCRIPTION("DVB/ATSC Support for saa7134 based TV cards");
 MODULE_LICENSE("GPL");
 
 static unsigned int antenna_pwr;
@@ -475,7 +467,9 @@ static int philips_europa_tuner_sleep(struct dvb_frontend *fe)
 	/* switch the board to analog mode */
 	if (fe->ops.i2c_gate_ctrl)
 		fe->ops.i2c_gate_ctrl(fe, 1);
-	i2c_transfer(&dev->i2c_adap, &analog_msg, 1);
+	if (i2c_transfer(&dev->i2c_adap, &analog_msg, 1) != 1)
+		return -EIO;
+
 	return 0;
 }
 
@@ -1027,7 +1021,9 @@ static int md8800_set_voltage2(struct dvb_frontend *fe,
 	else
 		wbuf[1] = rbuf & 0xef;
 	msg[0].len = 2;
-	i2c_transfer(&dev->i2c_adap, msg, 1);
+	if (i2c_transfer(&dev->i2c_adap, msg, 1) != 1)
+		return -EIO;
+
 	return 0;
 }
 
@@ -1198,6 +1194,22 @@ static struct s5h1411_config kworld_s5h1411_config = {
 		S5H1411_MPEGTIMING_CONTINUOUS_NONINVERTING_CLOCK,
 };
 
+static struct tda18271_config hdtv200h_tda18271_config = {
+	.gate    = TDA18271_GATE_ANALOG,
+	.config  = 3	/* Use tuner callback for AGC */
+};
+
+static struct s5h1411_config hdtv200h_s5h1411_config = {
+	.output_mode   = S5H1411_PARALLEL_OUTPUT,
+	.gpio          = S5H1411_GPIO_OFF,
+	.qam_if        = S5H1411_IF_4000,
+	.vsb_if        = S5H1411_IF_3250,
+	.inversion     = S5H1411_INVERSION_ON,
+	.status_mode   = S5H1411_DEMODLOCKING,
+	.mpeg_timing   =
+		S5H1411_MPEGTIMING_CONTINUOUS_NONINVERTING_CLOCK,
+};
+
 
 /* ==================================================================
  * Core code
@@ -1273,6 +1285,20 @@ static int dvb_init(struct saa7134_dev *dev)
 					       &medion_cardbus,
 					       &dev->i2c_adap);
 		if (fe0->dvb.frontend) {
+			/*
+			 * The TV tuner on this board is actually NOT
+			 * behind the demod i2c gate.
+			 * However, the demod EEPROM is indeed there and it
+			 * conflicts with the SAA7134 chip config EEPROM
+			 * if the i2c gate is open (since they have same
+			 * bus addresses) resulting in card PCI SVID / SSID
+			 * being garbage after a reboot from time to time.
+			 *
+			 * Let's just leave the gate permanently closed -
+			 * saa7134_i2c_eeprom_md7134_gate() will close it for
+			 * us at probe time if it was open for some reason.
+			 */
+			fe0->dvb.frontend->ops.i2c_gate_ctrl = NULL;
 			dvb_attach(simple_tuner_attach, fe0->dvb.frontend,
 				   &dev->i2c_adap, medion_cardbus.tuner_address,
 				   TUNER_PHILIPS_FMD1216ME_MK3);
@@ -1847,6 +1873,19 @@ static int dvb_init(struct saa7134_dev *dev)
 					0x60, &dev->i2c_adap) == NULL)
 				pr_warn("%s: No zl10039 found!\n",
 					__func__);
+		}
+		break;
+	case SAA7134_BOARD_LEADTEK_WINFAST_HDTV200_H:
+		fe0->dvb.frontend = dvb_attach(s5h1411_attach,
+					       &hdtv200h_s5h1411_config,
+					       &dev->i2c_adap);
+		if (fe0->dvb.frontend) {
+			dvb_attach(tda829x_attach, fe0->dvb.frontend,
+				   &dev->i2c_adap, 0x4b,
+				   &tda829x_no_probe);
+			dvb_attach(tda18271_attach, fe0->dvb.frontend,
+				   0x60, &dev->i2c_adap,
+				   &hdtv200h_tda18271_config);
 		}
 		break;
 	default:

@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * Marvell Wireless LAN device driver: station command handling
+ * NXP Wireless LAN device driver: station command handling
  *
- * Copyright (C) 2011-2014, Marvell International Ltd.
- *
- * This software file (the "File") is distributed by Marvell International
- * Ltd. under the terms of the GNU General Public License Version 2, June 1991
- * (the "License").  You may use, redistribute and/or modify this File in
- * accordance with the terms and conditions of the License, a copy of which
- * is available by writing to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA or on the
- * worldwide web at http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt.
- *
- * THE FILE IS DISTRIBUTED AS-IS, WITHOUT WARRANTY OF ANY KIND, AND THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE
- * ARE EXPRESSLY DISCLAIMED.  The License provides additional details about
- * this warranty disclaimer.
+ * Copyright 2011-2020 NXP
  */
 
 #include "decl.h"
@@ -120,7 +108,7 @@ static int mwifiex_cmd_802_11_snmp_mib(struct mwifiex_private *priv,
 		    "cmd: SNMP_CMD: cmd_oid = 0x%x\n", cmd_oid);
 	cmd->command = cpu_to_le16(HostCmd_CMD_802_11_SNMP_MIB);
 	cmd->size = cpu_to_le16(sizeof(struct host_cmd_ds_802_11_snmp_mib)
-				- 1 + S_DS_GEN);
+				+ S_DS_GEN);
 
 	snmp_mib->oid = cpu_to_le16((u16)cmd_oid);
 	if (cmd_action == HostCmd_ACT_GEN_GET) {
@@ -169,7 +157,7 @@ mwifiex_cmd_802_11_get_log(struct host_cmd_ds_command *cmd)
  */
 static int mwifiex_cmd_tx_rate_cfg(struct mwifiex_private *priv,
 				   struct host_cmd_ds_command *cmd,
-				   u16 cmd_action, u16 *pbitmap_rates)
+				   u16 cmd_action, const u16 *pbitmap_rates)
 {
 	struct host_cmd_ds_tx_rate_cfg *rate_cfg = &cmd->params.tx_rate_cfg;
 	struct mwifiex_rate_scope *rate_scope;
@@ -186,34 +174,19 @@ static int mwifiex_cmd_tx_rate_cfg(struct mwifiex_private *priv,
 	rate_scope->type = cpu_to_le16(TLV_TYPE_RATE_SCOPE);
 	rate_scope->length = cpu_to_le16
 		(sizeof(*rate_scope) - sizeof(struct mwifiex_ie_types_header));
-	if (pbitmap_rates != NULL) {
-		rate_scope->hr_dsss_rate_bitmap = cpu_to_le16(pbitmap_rates[0]);
-		rate_scope->ofdm_rate_bitmap = cpu_to_le16(pbitmap_rates[1]);
-		for (i = 0; i < ARRAY_SIZE(rate_scope->ht_mcs_rate_bitmap); i++)
-			rate_scope->ht_mcs_rate_bitmap[i] =
-				cpu_to_le16(pbitmap_rates[2 + i]);
-		if (priv->adapter->fw_api_ver == MWIFIEX_FW_V15) {
-			for (i = 0;
-			     i < ARRAY_SIZE(rate_scope->vht_mcs_rate_bitmap);
-			     i++)
-				rate_scope->vht_mcs_rate_bitmap[i] =
-					cpu_to_le16(pbitmap_rates[10 + i]);
-		}
-	} else {
-		rate_scope->hr_dsss_rate_bitmap =
-			cpu_to_le16(priv->bitmap_rates[0]);
-		rate_scope->ofdm_rate_bitmap =
-			cpu_to_le16(priv->bitmap_rates[1]);
-		for (i = 0; i < ARRAY_SIZE(rate_scope->ht_mcs_rate_bitmap); i++)
-			rate_scope->ht_mcs_rate_bitmap[i] =
-				cpu_to_le16(priv->bitmap_rates[2 + i]);
-		if (priv->adapter->fw_api_ver == MWIFIEX_FW_V15) {
-			for (i = 0;
-			     i < ARRAY_SIZE(rate_scope->vht_mcs_rate_bitmap);
-			     i++)
-				rate_scope->vht_mcs_rate_bitmap[i] =
-					cpu_to_le16(priv->bitmap_rates[10 + i]);
-		}
+	if (!pbitmap_rates)
+		pbitmap_rates = priv->bitmap_rates;
+
+	rate_scope->hr_dsss_rate_bitmap = cpu_to_le16(pbitmap_rates[0]);
+	rate_scope->ofdm_rate_bitmap = cpu_to_le16(pbitmap_rates[1]);
+
+	for (i = 0; i < ARRAY_SIZE(rate_scope->ht_mcs_rate_bitmap); i++)
+		rate_scope->ht_mcs_rate_bitmap[i] = cpu_to_le16(pbitmap_rates[2 + i]);
+
+	if (priv->adapter->fw_api_ver == MWIFIEX_FW_V15) {
+		for (i = 0; i < ARRAY_SIZE(rate_scope->vht_mcs_rate_bitmap); i++)
+			rate_scope->vht_mcs_rate_bitmap[i] =
+				cpu_to_le16(pbitmap_rates[10 + i]);
 	}
 
 	rate_drop = (struct mwifiex_rate_drop_pattern *) ((u8 *) rate_scope +
@@ -396,6 +369,10 @@ mwifiex_cmd_802_11_hs_cfg(struct mwifiex_private *priv,
 	if (hs_activate) {
 		hs_cfg->action = cpu_to_le16(HS_ACTIVATE);
 		hs_cfg->params.hs_activate.resp_ctrl = cpu_to_le16(RESP_NEEDED);
+
+		adapter->hs_activated_manually = true;
+		mwifiex_dbg(priv->adapter, CMD,
+			    "cmd: Activating host sleep manually\n");
 	} else {
 		hs_cfg->action = cpu_to_le16(HS_CONFIGURE);
 		hs_cfg->params.hs_config.conditions = hscfg_param->conditions;
@@ -840,56 +817,50 @@ mwifiex_cmd_802_11_key_material_v1(struct mwifiex_private *priv,
 	}
 
 	if (!enc_key) {
-		memset(&key_material->key_param_set, 0,
-		       (NUM_WEP_KEYS *
-			sizeof(struct mwifiex_ie_type_key_param_set)));
+		struct host_cmd_ds_802_11_key_material_wep *key_material_wep =
+			(struct host_cmd_ds_802_11_key_material_wep *)key_material;
+		memset(key_material_wep->key_param_set, 0,
+		       sizeof(key_material_wep->key_param_set));
 		ret = mwifiex_set_keyparamset_wep(priv,
-						  &key_material->key_param_set,
+						  &key_material_wep->key_param_set[0],
 						  &key_param_len);
 		cmd->size = cpu_to_le16(key_param_len +
-				    sizeof(key_material->action) + S_DS_GEN);
+				    sizeof(key_material_wep->action) + S_DS_GEN);
 		return ret;
 	} else
 		memset(&key_material->key_param_set, 0,
 		       sizeof(struct mwifiex_ie_type_key_param_set));
 	if (enc_key->is_wapi_key) {
-		mwifiex_dbg(priv->adapter, INFO, "info: Set WAPI Key\n");
-		key_material->key_param_set.key_type_id =
-						cpu_to_le16(KEY_TYPE_ID_WAPI);
-		if (cmd_oid == KEY_INFO_ENABLED)
-			key_material->key_param_set.key_info =
-						cpu_to_le16(KEY_ENABLED);
-		else
-			key_material->key_param_set.key_info =
-						cpu_to_le16(!KEY_ENABLED);
+		struct mwifiex_ie_type_key_param_set *set;
 
-		key_material->key_param_set.key[0] = enc_key->key_index;
+		mwifiex_dbg(priv->adapter, INFO, "info: Set WAPI Key\n");
+		set = &key_material->key_param_set;
+		set->key_type_id = cpu_to_le16(KEY_TYPE_ID_WAPI);
+		if (cmd_oid == KEY_INFO_ENABLED)
+			set->key_info = cpu_to_le16(KEY_ENABLED);
+		else
+			set->key_info = cpu_to_le16(!KEY_ENABLED);
+
+		set->key[0] = enc_key->key_index;
 		if (!priv->sec_info.wapi_key_on)
-			key_material->key_param_set.key[1] = 1;
+			set->key[1] = 1;
 		else
 			/* set 0 when re-key */
-			key_material->key_param_set.key[1] = 0;
+			set->key[1] = 0;
 
 		if (!is_broadcast_ether_addr(enc_key->mac_addr)) {
 			/* WAPI pairwise key: unicast */
-			key_material->key_param_set.key_info |=
-				cpu_to_le16(KEY_UNICAST);
+			set->key_info |= cpu_to_le16(KEY_UNICAST);
 		} else {	/* WAPI group key: multicast */
-			key_material->key_param_set.key_info |=
-				cpu_to_le16(KEY_MCAST);
+			set->key_info |= cpu_to_le16(KEY_MCAST);
 			priv->sec_info.wapi_key_on = true;
 		}
 
-		key_material->key_param_set.type =
-					cpu_to_le16(TLV_TYPE_KEY_MATERIAL);
-		key_material->key_param_set.key_len =
-						cpu_to_le16(WAPI_KEY_LEN);
-		memcpy(&key_material->key_param_set.key[2],
-		       enc_key->key_material, enc_key->key_len);
-		memcpy(&key_material->key_param_set.key[2 + enc_key->key_len],
-		       enc_key->pn, PN_LEN);
-		key_material->key_param_set.length =
-			cpu_to_le16(WAPI_KEY_LEN + KEYPARAMSET_FIXED_LEN);
+		set->type = cpu_to_le16(TLV_TYPE_KEY_MATERIAL);
+		set->key_len = cpu_to_le16(WAPI_KEY_LEN);
+		memcpy(&set->key[2], enc_key->key_material, enc_key->key_len);
+		memcpy(&set->key[2 + enc_key->key_len], enc_key->pn, PN_LEN);
+		set->length = cpu_to_le16(WAPI_KEY_LEN + KEYPARAMSET_FIXED_LEN);
 
 		key_param_len = (WAPI_KEY_LEN + KEYPARAMSET_FIXED_LEN) +
 				 sizeof(struct mwifiex_ie_types_header);
@@ -1449,7 +1420,7 @@ mwifiex_cmd_mef_cfg(struct mwifiex_private *priv,
 		mef_entry = (struct mwifiex_fw_mef_entry *)pos;
 		mef_entry->mode = mef->mef_entry[i].mode;
 		mef_entry->action = mef->mef_entry[i].action;
-		pos += sizeof(*mef_cfg->mef_entry);
+		pos += sizeof(*mef_entry);
 
 		if (mwifiex_cmd_append_rpn_expression(priv,
 						      &mef->mef_entry[i], &pos))
@@ -1512,6 +1483,114 @@ int mwifiex_dnld_dt_cfgdata(struct mwifiex_private *priv,
 	return 0;
 }
 
+static int mwifiex_rgpower_table_advance_to_content(u8 **pos, const u8 *data,
+						    const size_t size)
+{
+	while (*pos - data < size) {
+		/* skip spaces, tabs and empty lines */
+		if (**pos == '\r' || **pos == '\n' || **pos == '\0' ||
+		    isspace(**pos)) {
+			(*pos)++;
+			continue;
+		}
+		/* skip line comments */
+		if (**pos == '#') {
+			*pos = strchr(*pos, '\n');
+			if (!*pos)
+				return -EINVAL;
+			(*pos)++;
+			continue;
+		}
+		return 0;
+	}
+	return 0;
+}
+
+int mwifiex_send_rgpower_table(struct mwifiex_private *priv, const u8 *data,
+				const size_t size)
+{
+	int ret = 0;
+	bool start_raw = false;
+	u8 *ptr, *token, *pos = NULL;
+	u8 *_data __free(kfree) = NULL;
+	struct mwifiex_adapter *adapter = priv->adapter;
+	struct mwifiex_ds_misc_cmd *hostcmd __free(kfree) = NULL;
+
+	hostcmd = kzalloc_obj(*hostcmd);
+	if (!hostcmd)
+		return -ENOMEM;
+
+	_data = kmemdup(data, size, GFP_KERNEL);
+	if (!_data)
+		return -ENOMEM;
+
+	pos = _data;
+	ptr = hostcmd->cmd;
+	while ((pos - _data) < size) {
+		ret = mwifiex_rgpower_table_advance_to_content(&pos, _data, size);
+		if (ret) {
+			mwifiex_dbg(
+				adapter, ERROR,
+				"%s: failed to advance to content in rgpower table\n",
+				__func__);
+			return ret;
+		}
+
+		if (*pos == '}' && start_raw) {
+			hostcmd->len = get_unaligned_le16(&hostcmd->cmd[2]);
+			ret = mwifiex_send_cmd(priv, 0, 0, 0, hostcmd, false);
+			if (ret) {
+				mwifiex_dbg(adapter, ERROR,
+					    "%s: failed to send hostcmd %d\n",
+					    __func__, ret);
+				return ret;
+			}
+
+			memset(hostcmd->cmd, 0, MWIFIEX_SIZE_OF_CMD_BUFFER);
+			ptr = hostcmd->cmd;
+			start_raw = false;
+			pos++;
+			continue;
+		}
+
+		if (!start_raw) {
+			pos = strchr(pos, '=');
+			if (pos) {
+				pos = strchr(pos, '{');
+				if (pos) {
+					start_raw = true;
+					pos++;
+					continue;
+				}
+			}
+			mwifiex_dbg(adapter, ERROR,
+				    "%s: syntax error in hostcmd\n", __func__);
+			return -EINVAL;
+		}
+
+		while ((*pos != '\r' && *pos != '\n') &&
+		       (token = strsep((char **)&pos, " "))) {
+			if (ptr - hostcmd->cmd >= MWIFIEX_SIZE_OF_CMD_BUFFER) {
+				mwifiex_dbg(adapter, ERROR,
+					"%s: hostcmd is larger than %d, aborting\n",
+					__func__, MWIFIEX_SIZE_OF_CMD_BUFFER);
+				return -ENOMEM;
+			}
+
+			ret = kstrtou8(token, 16, ptr);
+			if (ret < 0) {
+				mwifiex_dbg(adapter, ERROR,
+					"%s: failed to parse hostcmd %d token: %s\n",
+					__func__, ret, token);
+				return ret;
+			}
+			ptr++;
+		}
+	}
+
+	return ret;
+}
+
 /* This function prepares command of set_cfg_data. */
 static int mwifiex_cmd_cfg_data(struct mwifiex_private *priv,
 				struct host_cmd_ds_command *cmd, void *data_buf)
@@ -1521,6 +1600,7 @@ static int mwifiex_cmd_cfg_data(struct mwifiex_private *priv,
 	u32 len;
 	u8 *data = (u8 *)cmd + S_DS_GEN;
 	int ret;
+	struct host_cmd_ds_802_11_cfg_data *pcfg_data;
 
 	if (prop) {
 		len = prop->length;
@@ -1528,12 +1608,20 @@ static int mwifiex_cmd_cfg_data(struct mwifiex_private *priv,
 						data, len);
 		if (ret)
 			return ret;
+
+		cmd->size = cpu_to_le16(S_DS_GEN + len);
 		mwifiex_dbg(adapter, INFO,
 			    "download cfg_data from device tree: %s\n",
 			    prop->name);
 	} else if (adapter->cal_data->data && adapter->cal_data->size > 0) {
 		len = mwifiex_parse_cal_cfg((u8 *)adapter->cal_data->data,
-					    adapter->cal_data->size, data);
+					    adapter->cal_data->size,
+					    data + sizeof(*pcfg_data));
+		pcfg_data = &cmd->params.cfg_data;
+		pcfg_data->action = cpu_to_le16(HOST_CMD_ACT_GEN_SET);
+		pcfg_data->type = cpu_to_le16(MWIFIEX_CFG_TYPE_CAL);
+		pcfg_data->data_len = cpu_to_le16(len);
+		cmd->size = cpu_to_le16(S_DS_GEN + sizeof(*pcfg_data) + len);
 		mwifiex_dbg(adapter, INFO,
 			    "download cfg_data from config file\n");
 	} else {
@@ -1541,7 +1629,6 @@ static int mwifiex_cmd_cfg_data(struct mwifiex_private *priv,
 	}
 
 	cmd->command = cpu_to_le16(HostCmd_CMD_CFG_DATA);
-	cmd->size = cpu_to_le16(S_DS_GEN + len);
 
 	return 0;
 }
@@ -1645,7 +1732,7 @@ mwifiex_cmd_coalesce_cfg(struct mwifiex_private *priv,
 
 	coalesce_cfg->action = cpu_to_le16(cmd_action);
 	coalesce_cfg->num_of_rules = cpu_to_le16(cfg->num_of_rules);
-	rule = coalesce_cfg->rule;
+	rule = (void *)coalesce_cfg->rule_data;
 
 	for (cnt = 0; cnt < cfg->num_of_rules; cnt++) {
 		rule->header.type = cpu_to_le16(TLV_TYPE_COALESCE_RULE);
@@ -1730,7 +1817,7 @@ mwifiex_cmd_tdls_config(struct mwifiex_private *priv,
 	default:
 		mwifiex_dbg(priv->adapter, ERROR,
 			    "Unknown TDLS configuration\n");
-		return -ENOTSUPP;
+		return -EOPNOTSUPP;
 	}
 
 	le16_unaligned_add_cpu(&cmd->size, len);
@@ -1792,29 +1879,31 @@ mwifiex_cmd_tdls_oper(struct mwifiex_private *priv,
 		wmm_qos_info->qos_info = 0;
 		config_len += sizeof(struct mwifiex_ie_types_qos_info);
 
-		if (params->ht_capa) {
+		if (params->link_sta_params.ht_capa) {
 			ht_capab = (struct mwifiex_ie_types_htcap *)(pos +
 								    config_len);
 			ht_capab->header.type =
 					    cpu_to_le16(WLAN_EID_HT_CAPABILITY);
 			ht_capab->header.len =
 				   cpu_to_le16(sizeof(struct ieee80211_ht_cap));
-			memcpy(&ht_capab->ht_cap, params->ht_capa,
+			memcpy(&ht_capab->ht_cap, params->link_sta_params.ht_capa,
 			       sizeof(struct ieee80211_ht_cap));
 			config_len += sizeof(struct mwifiex_ie_types_htcap);
 		}
 
-		if (params->supported_rates && params->supported_rates_len) {
+		if (params->link_sta_params.supported_rates &&
+		    params->link_sta_params.supported_rates_len) {
 			tlv_rates = (struct host_cmd_tlv_rates *)(pos +
 								  config_len);
 			tlv_rates->header.type =
 					       cpu_to_le16(WLAN_EID_SUPP_RATES);
 			tlv_rates->header.len =
-				       cpu_to_le16(params->supported_rates_len);
-			memcpy(tlv_rates->rates, params->supported_rates,
-			       params->supported_rates_len);
+				       cpu_to_le16(params->link_sta_params.supported_rates_len);
+			memcpy(tlv_rates->rates,
+			       params->link_sta_params.supported_rates,
+			       params->link_sta_params.supported_rates_len);
 			config_len += sizeof(struct host_cmd_tlv_rates) +
-				      params->supported_rates_len;
+				      params->link_sta_params.supported_rates_len;
 		}
 
 		if (params->ext_capab && params->ext_capab_len) {
@@ -1828,14 +1917,14 @@ mwifiex_cmd_tdls_oper(struct mwifiex_private *priv,
 			config_len += sizeof(struct mwifiex_ie_types_extcap) +
 				      params->ext_capab_len;
 		}
-		if (params->vht_capa) {
+		if (params->link_sta_params.vht_capa) {
 			vht_capab = (struct mwifiex_ie_types_vhtcap *)(pos +
 								    config_len);
 			vht_capab->header.type =
 					   cpu_to_le16(WLAN_EID_VHT_CAPABILITY);
 			vht_capab->header.len =
 				  cpu_to_le16(sizeof(struct ieee80211_vht_cap));
-			memcpy(&vht_capab->vht_cap, params->vht_capa,
+			memcpy(&vht_capab->vht_cap, params->link_sta_params.vht_capa,
 			       sizeof(struct ieee80211_vht_cap));
 			config_len += sizeof(struct mwifiex_ie_types_vhtcap);
 		}
@@ -1856,7 +1945,7 @@ mwifiex_cmd_tdls_oper(struct mwifiex_private *priv,
 		break;
 	default:
 		mwifiex_dbg(priv->adapter, ERROR, "Unknown TDLS operation\n");
-		return -ENOTSUPP;
+		return -EOPNOTSUPP;
 	}
 
 	le16_unaligned_add_cpu(&cmd->size, config_len);
@@ -2262,7 +2351,7 @@ int mwifiex_sta_prepare_cmd(struct mwifiex_private *priv, uint16_t cmd_no,
  *      - Set 11d control
  *      - Set MAC control (this must be the last command to initialize firmware)
  */
-int mwifiex_sta_init_cmd(struct mwifiex_private *priv, u8 first_sta, bool init)
+int mwifiex_sta_init_cmd(struct mwifiex_private *priv, u8 first_sta)
 {
 	struct mwifiex_adapter *adapter = priv->adapter;
 	int ret;
@@ -2305,9 +2394,13 @@ int mwifiex_sta_init_cmd(struct mwifiex_private *priv, u8 first_sta, bool init)
 						"marvell,caldata");
 		}
 
-		if (adapter->cal_data)
+		if (adapter->cal_data) {
 			mwifiex_send_cmd(priv, HostCmd_CMD_CFG_DATA,
 					 HostCmd_ACT_GEN_SET, 0, NULL, true);
+			release_firmware(adapter->cal_data);
+			adapter->cal_data = NULL;
+		}
+
 
 		/* Read MAC address from HW */
 		ret = mwifiex_send_cmd(priv, HostCmd_CMD_GET_HW_SPEC,
@@ -2432,12 +2525,6 @@ int mwifiex_sta_init_cmd(struct mwifiex_private *priv, u8 first_sta, bool init)
 	tx_cfg.tx_htcap = MWIFIEX_FW_DEF_HTTXCFG;
 	ret = mwifiex_send_cmd(priv, HostCmd_CMD_11N_CFG,
 			       HostCmd_ACT_GEN_SET, 0, &tx_cfg, true);
-
-	if (init) {
-		/* set last_init_cmd before sending the command */
-		priv->adapter->last_init_cmd = HostCmd_CMD_11N_CFG;
-		ret = -EINPROGRESS;
-	}
 
 	return ret;
 }

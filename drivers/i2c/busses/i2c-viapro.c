@@ -1,18 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     Copyright (c) 1998 - 2002  Frodo Looijaard <frodol@dds.nl>,
     Philip Edelbrock <phil@netroedge.com>, Kyösti Mälkki <kmalkki@cc.hut.fi>,
     Mark D. Studebaker <mdsxyz123@yahoo.com>
     Copyright (C) 2005 - 2008  Jean Delvare <jdelvare@suse.de>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
 */
 
 /*
@@ -236,7 +228,7 @@ static s32 vt596_access(struct i2c_adapter *adap, u16 addr,
 			goto exit_unsupported;
 		if (read_write == I2C_SMBUS_READ)
 			outb_p(data->block[0], SMBHSTDAT0);
-		/* Fall through */
+		fallthrough;
 	case I2C_SMBUS_BLOCK_DATA:
 		outb_p(command, SMBHSTCMD);
 		if (read_write == I2C_SMBUS_WRITE) {
@@ -312,7 +304,7 @@ static const struct i2c_algorithm smbus_algorithm = {
 
 static struct i2c_adapter vt596_adapter = {
 	.owner		= THIS_MODULE,
-	.class		= I2C_CLASS_HWMON | I2C_CLASS_SPD,
+	.class		= I2C_CLASS_HWMON,
 	.algo		= &smbus_algorithm,
 };
 
@@ -338,30 +330,27 @@ static int vt596_probe(struct pci_dev *pdev,
 			SMBHSTCFG = 0x84;
 		} else {
 			/* no matches at all */
-			dev_err(&pdev->dev, "Cannot configure "
-				"SMBus I/O Base address\n");
-			return -ENODEV;
+			return dev_err_probe(&pdev->dev, -ENODEV,
+					     "Cannot configure "
+					     "SMBus I/O Base address\n");
 		}
 	}
 
 	vt596_smba &= 0xfff0;
-	if (vt596_smba == 0) {
-		dev_err(&pdev->dev, "SMBus base address "
-			"uninitialized - upgrade BIOS or use "
-			"force_addr=0xaddr\n");
-		return -ENODEV;
-	}
+	if (vt596_smba == 0)
+		return dev_err_probe(&pdev->dev, -ENODEV, "SMBus base address "
+				     "uninitialized - upgrade BIOS or use "
+				     "force_addr=0xaddr\n");
 
 found:
 	error = acpi_check_region(vt596_smba, 8, vt596_driver.name);
 	if (error)
 		return -ENODEV;
 
-	if (!request_region(vt596_smba, 8, vt596_driver.name)) {
-		dev_err(&pdev->dev, "SMBus region 0x%x already in use!\n",
-			vt596_smba);
-		return -ENODEV;
-	}
+	if (!request_region(vt596_smba, 8, vt596_driver.name))
+		return dev_err_probe(&pdev->dev, -ENODEV,
+				     "SMBus region 0x%x already in use!\n",
+				     vt596_smba);
 
 	pci_read_config_byte(pdev, SMBHSTCFG, &temp);
 	/* If force_addr is set, we program the new address here. Just to make
@@ -383,10 +372,10 @@ found:
 			pci_write_config_byte(pdev, SMBHSTCFG, temp | 0x01);
 			dev_info(&pdev->dev, "Enabling SMBus device\n");
 		} else {
-			dev_err(&pdev->dev, "SMBUS: Error: Host SMBus "
-				"controller not enabled! - upgrade BIOS or "
-				"use force=1\n");
-			error = -ENODEV;
+			error = dev_err_probe(&pdev->dev, -ENODEV,
+					      "SMBUS: Error: Host SMBus "
+					      "controller not enabled! - "
+					      "upgrade BIOS or use force=1\n");
 			goto release_region;
 		}
 	}
@@ -497,9 +486,9 @@ static void __exit i2c_vt596_exit(void)
 	}
 }
 
-MODULE_AUTHOR("Kyosti Malkki <kmalkki@cc.hut.fi>, "
-	      "Mark D. Studebaker <mdsxyz123@yahoo.com> and "
-	      "Jean Delvare <jdelvare@suse.de>");
+MODULE_AUTHOR("Kyosti Malkki <kmalkki@cc.hut.fi>");
+MODULE_AUTHOR("Mark D. Studebaker <mdsxyz123@yahoo.com>");
+MODULE_AUTHOR("Jean Delvare <jdelvare@suse.de>");
 MODULE_DESCRIPTION("vt82c596 SMBus driver");
 MODULE_LICENSE("GPL");
 

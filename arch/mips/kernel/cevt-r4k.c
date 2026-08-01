@@ -8,6 +8,7 @@
  */
 #include <linux/clockchips.h>
 #include <linux/interrupt.h>
+#include <linux/cpufreq.h>
 #include <linux/percpu.h>
 #include <linux/smp.h>
 #include <linux/irq.h>
@@ -158,17 +159,6 @@ irqreturn_t c0_compare_interrupt(int irq, void *dev_id)
 	return IRQ_NONE;
 }
 
-struct irqaction c0_compare_irqaction = {
-	.handler = c0_compare_interrupt,
-	/*
-	 * IRQF_SHARED: The timer interrupt may be shared with other interrupts
-	 * such as perf counter and FDC interrupts.
-	 */
-	.flags = IRQF_PERCPU | IRQF_TIMER | IRQF_SHARED,
-	.name = "timer",
-};
-
-
 void mips_event_handler(struct clock_event_device *dev)
 {
 }
@@ -194,16 +184,12 @@ int c0_compare_int_usable(void)
 	unsigned int delta;
 	unsigned int cnt;
 
-#ifdef CONFIG_KVM_GUEST
-    return 1;
-#endif
-
 	/*
 	 * IP7 already pending?	 Try to clear it by acking the timer.
 	 */
 	if (c0_compare_int_pending()) {
 		cnt = read_c0_count();
-		write_c0_compare(cnt);
+		write_c0_compare(cnt - 1);
 		back_to_back_c0_hazard();
 		while (read_c0_count() < (cnt  + COMPARE_INT_SEEN_TICKS))
 			if (!c0_compare_int_pending())
@@ -231,7 +217,7 @@ int c0_compare_int_usable(void)
 	if (!c0_compare_int_pending())
 		return 0;
 	cnt = read_c0_count();
-	write_c0_compare(cnt);
+	write_c0_compare(cnt - 1);
 	back_to_back_c0_hazard();
 	while (read_c0_count() < (cnt + COMPARE_INT_SEEN_TICKS))
 		if (!c0_compare_int_pending())
@@ -250,8 +236,52 @@ unsigned int __weak get_c0_compare_int(void)
 	return MIPS_CPU_IRQ_BASE + cp0_compare_irq;
 }
 
+#ifdef CONFIG_CPU_FREQ
+
+static unsigned long mips_ref_freq;
+
+static int r4k_cpufreq_callback(struct notifier_block *nb,
+				unsigned long val, void *data)
+{
+	struct cpufreq_freqs *freq = data;
+	struct clock_event_device *cd;
+	unsigned long rate;
+	int cpu;
+
+	if (!mips_ref_freq)
+		mips_ref_freq = freq->old;
+
+	if (val == CPUFREQ_POSTCHANGE) {
+		rate = cpufreq_scale(mips_hpt_frequency, mips_ref_freq,
+				     freq->new);
+
+		for_each_cpu(cpu, freq->policy->cpus) {
+			cd = &per_cpu(mips_clockevent_device, cpu);
+
+			clockevents_update_freq(cd, rate);
+		}
+	}
+
+	return 0;
+}
+
+static struct notifier_block r4k_cpufreq_notifier = {
+	.notifier_call  = r4k_cpufreq_callback,
+};
+
+static int __init r4k_register_cpufreq_notifier(void)
+{
+	return cpufreq_register_notifier(&r4k_cpufreq_notifier,
+					 CPUFREQ_TRANSITION_NOTIFIER);
+
+}
+core_initcall(r4k_register_cpufreq_notifier);
+
+#endif /* !CONFIG_CPU_FREQ */
+
 int r4k_clockevent_init(void)
 {
+	unsigned long flags = IRQF_PERCPU | IRQF_TIMER | IRQF_SHARED;
 	unsigned int cpu = smp_processor_id();
 	struct clock_event_device *cd;
 	unsigned int irq, min_delta;
@@ -261,13 +291,6 @@ int r4k_clockevent_init(void)
 
 	if (!c0_compare_int_usable())
 		return -ENXIO;
-
-	/*
-	 * With vectored interrupts things are getting platform specific.
-	 * get_c0_compare_int is a hook to allow a platform to return the
-	 * interrupt number of its liking.
-	 */
-	irq = get_c0_compare_int();
 
 	cd = &per_cpu(mips_clockevent_device, cpu);
 
@@ -279,7 +302,6 @@ int r4k_clockevent_init(void)
 	min_delta		= calculate_min_delta();
 
 	cd->rating		= 300;
-	cd->irq			= irq;
 	cd->cpumask		= cpumask_of(cpu);
 	cd->set_next_event	= mips_next_event;
 	cd->event_handler	= mips_event_handler;
@@ -291,7 +313,16 @@ int r4k_clockevent_init(void)
 
 	cp0_timer_irq_installed = 1;
 
-	setup_irq(irq, &c0_compare_irqaction);
+	/*
+	 * With vectored interrupts things are getting platform specific.
+	 * get_c0_compare_int is a hook to allow a platform to return the
+	 * interrupt number of its liking.
+	 */
+	irq = get_c0_compare_int();
+
+	if (request_irq(irq, c0_compare_interrupt, flags, "timer",
+			c0_compare_interrupt))
+		pr_err("Failed to request irq %d (timer)\n", irq);
 
 	return 0;
 }

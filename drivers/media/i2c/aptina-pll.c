@@ -1,22 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Aptina Sensor PLL Configuration
  *
  * Copyright (C) 2012 Laurent Pinchart <laurent.pinchart@ideasonboard.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
 #include <linux/device.h>
 #include <linux/gcd.h>
 #include <linux/kernel.h>
-#include <linux/lcm.h>
 #include <linux/module.h>
 
 #include "aptina-pll.h"
@@ -137,6 +128,8 @@ int aptina_pll_calculate(struct device *dev,
 		     pll->ext_clock * pll->m));
 	p1_max = min(limits->p1_max, limits->out_clock_max * div /
 		     (pll->ext_clock * pll->m));
+
+	dev_dbg(dev, "pll: p1 min %u max %u\n", p1_min, p1_max);
 
 	for (p1 = p1_max & ~1; p1 >= p1_min; p1 -= 2) {
 		unsigned int mf_inc = p1 / gcd(div, p1);

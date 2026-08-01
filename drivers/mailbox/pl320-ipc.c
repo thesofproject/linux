@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2012 Calxeda, Inc.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include <linux/types.h>
 #include <linux/err.h>
@@ -56,18 +45,6 @@ static DEFINE_MUTEX(ipc_m1_lock);
 static DECLARE_COMPLETION(ipc_completion);
 static ATOMIC_NOTIFIER_HEAD(ipc_notifier);
 
-static inline void set_destination(int source, int mbox)
-{
-	writel_relaxed(CHAN_MASK(source), ipc_base + IPCMxDSET(mbox));
-	writel_relaxed(CHAN_MASK(source), ipc_base + IPCMxMSET(mbox));
-}
-
-static inline void clear_destination(int source, int mbox)
-{
-	writel_relaxed(CHAN_MASK(source), ipc_base + IPCMxDCLEAR(mbox));
-	writel_relaxed(CHAN_MASK(source), ipc_base + IPCMxMCLEAR(mbox));
-}
-
 static void __ipc_send(int mbox, u32 *data)
 {
 	int i;
@@ -84,7 +61,7 @@ static u32 __ipc_rcv(int mbox, u32 *data)
 	return data[1];
 }
 
-/* blocking implmentation from the A9 side, not usuable in interrupts! */
+/* blocking implementation from the A9 side, not usable in interrupts! */
 int pl320_ipc_transmit(u32 *data)
 {
 	int ret;
@@ -175,7 +152,7 @@ err:
 	return ret;
 }
 
-static struct amba_id pl320_ids[] = {
+static const struct amba_id pl320_ids[] = {
 	{
 		.id	= 0x00041320,
 		.mask	= 0x000fffff,

@@ -6,36 +6,21 @@
 ifdef CONFIG_FUNCTION_TRACER
 
 # Do not trace tracer code
-CFLAGS_REMOVE_ftrace.o	= $(CC_FLAGS_FTRACE)
+CFLAGS_REMOVE_ftrace.o		= $(CC_FLAGS_FTRACE)
 
 # Do not trace early setup code
-CFLAGS_REMOVE_als.o	= $(CC_FLAGS_FTRACE)
-CFLAGS_REMOVE_early.o	= $(CC_FLAGS_FTRACE)
+CFLAGS_REMOVE_early.o		= $(CC_FLAGS_FTRACE)
+CFLAGS_REMOVE_rethook.o		= $(CC_FLAGS_FTRACE)
+CFLAGS_REMOVE_stacktrace.o	= $(CC_FLAGS_FTRACE)
+CFLAGS_REMOVE_unwind_bc.o	= $(CC_FLAGS_FTRACE)
 
 endif
 
-GCOV_PROFILE_als.o	:= n
-GCOV_PROFILE_early.o	:= n
-
-KCOV_INSTRUMENT_als.o	:= n
-KCOV_INSTRUMENT_early.o	:= n
-
-UBSAN_SANITIZE_als.o	:= n
-UBSAN_SANITIZE_early.o	:= n
-
-#
-# Use -march=z900 for als.c to be able to print an error
-# message if the kernel is started on a machine which is too old
-#
-ifneq ($(CC_FLAGS_MARCH),-march=z900)
-CFLAGS_REMOVE_als.o	+= $(CC_FLAGS_MARCH)
-CFLAGS_REMOVE_als.o	+= $(CC_FLAGS_EXPOLINE)
-CFLAGS_als.o		+= -march=z900
-AFLAGS_REMOVE_head.o	+= $(CC_FLAGS_MARCH)
-AFLAGS_head.o		+= -march=z900
-endif
-
-CFLAGS_als.o		+= -D__NO_FORTIFY
+GCOV_PROFILE_early.o		:= n
+KCOV_INSTRUMENT_early.o		:= n
+UBSAN_SANITIZE_early.o		:= n
+KASAN_SANITIZE_ipl.o		:= n
+KASAN_SANITIZE_machine_kexec.o	:= n
 
 #
 # Passing null pointers is ok for smp code, since we access the lowcore here.
@@ -49,48 +34,53 @@ CFLAGS_smp.o		:= -Wno-nonnull
 #
 CFLAGS_stacktrace.o	+= -fno-optimize-sibling-calls
 CFLAGS_dumpstack.o	+= -fno-optimize-sibling-calls
+CFLAGS_unwind_bc.o	+= -fno-optimize-sibling-calls
 
-#
-# Pass UTS_MACHINE for user_regset definition
-#
-CFLAGS_ptrace.o		+= -DUTS_MACHINE='"$(UTS_MACHINE)"'
-
-obj-y	:= traps.o time.o process.o base.o early.o setup.o idle.o vtime.o
-obj-y	+= processor.o sys_s390.o ptrace.o signal.o cpcmd.o ebcdic.o nmi.o
-obj-y	+= debug.o irq.o ipl.o dis.o diag.o vdso.o als.o
-obj-y	+= sysinfo.o jump_label.o lgr.o os_info.o machine_kexec.o pgm_check.o
+obj-y	:= head.o traps.o time.o process.o early.o setup.o idle.o vtime.o
+obj-y	+= processor.o syscall.o ptrace.o signal.o cpcmd.o ebcdic.o nmi.o
+obj-y	+= debug.o irq.o ipl.o dis.o vdso.o cpufeature.o
+obj-y	+= sysinfo.o lgr.o os_info.o ctlreg.o
 obj-y	+= runtime_instr.o cache.o fpu.o dumpstack.o guarded_storage.o sthyi.o
-obj-y	+= entry.o reipl.o relocate_kernel.o kdebugfs.o alternative.o
-obj-y	+= nospec-branch.o
+obj-y	+= entry.o reipl.o kdebugfs.o alternative.o skey.o
+obj-y	+= nospec-branch.o ipl_vmparm.o machine_kexec_reloc.o unwind_bc.o
+obj-y	+= smp.o text_amode31.o stacktrace.o abs_lowcore.o facility.o uv.o wti.o
+obj-y	+= diag/
 
-extra-y				+= head.o head64.o vmlinux.lds
+always-$(KBUILD_BUILTIN)	+= vmlinux.lds
 
 obj-$(CONFIG_SYSFS)		+= nospec-sysfs.o
 CFLAGS_REMOVE_nospec-branch.o	+= $(CC_FLAGS_EXPOLINE)
 
+obj-$(CONFIG_SYSFS)		+= cpacf.o
 obj-$(CONFIG_MODULES)		+= module.o
-obj-$(CONFIG_SMP)		+= smp.o
-obj-$(CONFIG_SCHED_TOPOLOGY)	+= topology.o
-obj-$(CONFIG_HIBERNATION)	+= suspend.o swsusp.o
+obj-$(CONFIG_SCHED_TOPOLOGY)	+= topology.o hiperdispatch.o
+obj-$(CONFIG_NUMA)		+= numa.o
 obj-$(CONFIG_AUDIT)		+= audit.o
-compat-obj-$(CONFIG_AUDIT)	+= compat_audit.o
-obj-$(CONFIG_COMPAT)		+= compat_linux.o compat_signal.o
-obj-$(CONFIG_COMPAT)		+= compat_wrapper.o $(compat-obj-y)
 obj-$(CONFIG_EARLY_PRINTK)	+= early_printk.o
-obj-$(CONFIG_STACKTRACE)	+= stacktrace.o
 obj-$(CONFIG_KPROBES)		+= kprobes.o
-obj-$(CONFIG_FUNCTION_TRACER)	+= mcount.o ftrace.o
+obj-$(CONFIG_KPROBES)		+= mcount.o
+obj-$(CONFIG_RETHOOK)		+= rethook.o
+obj-$(CONFIG_FUNCTION_TRACER)	+= ftrace.o
+obj-$(CONFIG_FUNCTION_TRACER)	+= mcount.o
+obj-$(CONFIG_TRACING)		+= trace_clock.o
 obj-$(CONFIG_CRASH_DUMP)	+= crash_dump.o
+obj-$(CONFIG_KEXEC_CORE)	+= machine_kexec.o relocate_kernel.o
+obj-$(CONFIG_VMCORE_INFO)	+= vmcore_info.o
 obj-$(CONFIG_UPROBES)		+= uprobes.o
-
+obj-$(CONFIG_JUMP_LABEL)	+= jump_label.o
+obj-$(CONFIG_STACKPROTECTOR)	+= stackprotector.o
 obj-$(CONFIG_KEXEC_FILE)	+= machine_kexec_file.o kexec_image.o
 obj-$(CONFIG_KEXEC_FILE)	+= kexec_elf.o
+obj-$(CONFIG_CERT_STORE)	+= cert_store.o
 
-obj-$(CONFIG_PERF_EVENTS)	+= perf_event.o perf_cpum_cf.o perf_cpum_sf.o
+obj-$(CONFIG_PERF_EVENTS)	+= perf_event.o
+obj-$(CONFIG_PERF_EVENTS)	+= perf_cpum_cf.o perf_cpum_sf.o
 obj-$(CONFIG_PERF_EVENTS)	+= perf_cpum_cf_events.o perf_regs.o
+obj-$(CONFIG_PERF_EVENTS)	+= perf_pai.o
 
 obj-$(CONFIG_TRACEPOINTS)	+= trace.o
 
+obj-$(CONFIG_BPF_SYSCALL)	+= bpf.o
+
 # vdso
-obj-y				+= vdso64/
-obj-$(CONFIG_COMPAT)		+= vdso32/
+obj-y				+= vdso/

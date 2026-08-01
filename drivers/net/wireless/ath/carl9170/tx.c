@@ -189,7 +189,7 @@ static void carl9170_tx_accounting_free(struct ar9170 *ar, struct sk_buff *skb)
 
 static int carl9170_alloc_dev_space(struct ar9170 *ar, struct sk_buff *skb)
 {
-	struct _carl9170_tx_superframe *super = (void *) skb->data;
+	struct _carl9170_tx_superframe *super;
 	unsigned int chunks;
 	int cookie = -1;
 
@@ -246,8 +246,8 @@ static void carl9170_release_dev_space(struct ar9170 *ar, struct sk_buff *skb)
 	 *    of available memory blocks, so the number can
 	 *    never execeed the mem_blocks count.
 	 */
-	if (unlikely(WARN_ON_ONCE(cookie == 0) ||
-	    WARN_ON_ONCE(cookie > ar->fw.mem_blocks)))
+	if (WARN_ON_ONCE(cookie == 0) ||
+	    WARN_ON_ONCE(cookie > ar->fw.mem_blocks))
 		return;
 
 	atomic_add(DIV_ROUND_UP(skb->len, ar->fw.mem_block_size),
@@ -275,12 +275,13 @@ static void carl9170_tx_release(struct kref *ref)
 	if (WARN_ON_ONCE(!ar))
 		return;
 
-	BUILD_BUG_ON(
-	    offsetof(struct ieee80211_tx_info, status.ack_signal) != 20);
-
-	memset(&txinfo->status.ack_signal, 0,
-	       sizeof(struct ieee80211_tx_info) -
-	       offsetof(struct ieee80211_tx_info, status.ack_signal));
+	/*
+	 * This does not call ieee80211_tx_info_clear_status() because
+	 * carl9170_tx_fill_rateinfo() has filled the rate information
+	 * before we get to this point.
+	 */
+	memset(&txinfo->pad, 0, sizeof(txinfo->pad));
+	memset(&txinfo->rate_driver_data, 0, sizeof(txinfo->rate_driver_data));
 
 	if (atomic_read(&ar->tx_total_queued))
 		ar->tx_schedule = true;
@@ -365,8 +366,7 @@ static void carl9170_tx_shift_bm(struct ar9170 *ar,
 	if (WARN_ON_ONCE(off >= CARL9170_BAW_BITS))
 		return;
 
-	if (!bitmap_empty(tid_info->bitmap, off))
-		off = find_first_bit(tid_info->bitmap, off);
+	off = min(off, find_first_bit(tid_info->bitmap, off));
 
 	tid_info->bsn += off;
 	tid_info->bsn &= 0x0fff;
@@ -394,7 +394,7 @@ static void carl9170_tx_status_process_ampdu(struct ar9170 *ar,
 	if (unlikely(!sta))
 		goto out_rcu;
 
-	tid = get_tid_h(hdr);
+	tid = ieee80211_get_tid(hdr);
 
 	sta_info = (void *) sta->drv_priv;
 	tid_info = rcu_dereference(sta_info->agg[tid]);
@@ -663,7 +663,7 @@ static void __carl9170_tx_process_status(struct ar9170 *ar,
 	unsigned int r, t, q;
 	bool success = true;
 
-	q = ar9170_qmap[info & CARL9170_TX_STATUS_QUEUE];
+	q = ar9170_qmap(info & CARL9170_TX_STATUS_QUEUE);
 
 	skb = carl9170_get_queued_skb(ar, cookie, &ar->tx_status[q]);
 	if (!skb) {
@@ -692,7 +692,7 @@ void carl9170_tx_process_status(struct ar9170 *ar,
 	unsigned int i;
 
 	for (i = 0;  i < cmd->hdr.ext; i++) {
-		if (WARN_ON(i > ((cmd->hdr.len / 2) + 1))) {
+		if (WARN_ON(i >= (cmd->hdr.len / 2))) {
 			print_hex_dump_bytes("UU:", DUMP_PREFIX_NONE,
 					     (void *) cmd, cmd->hdr.len + 4);
 			break;
@@ -830,14 +830,17 @@ static bool carl9170_tx_rts_check(struct ar9170 *ar,
 	case CARL9170_ERP_AUTO:
 		if (ampdu)
 			break;
+		fallthrough;
 
 	case CARL9170_ERP_MAC80211:
 		if (!(rate->flags & IEEE80211_TX_RC_USE_RTS_CTS))
 			break;
+		fallthrough;
 
 	case CARL9170_ERP_RTS:
 		if (likely(!multi))
 			return true;
+		break;
 
 	default:
 		break;
@@ -854,6 +857,7 @@ static bool carl9170_tx_cts_check(struct ar9170 *ar,
 	case CARL9170_ERP_MAC80211:
 		if (!(rate->flags & IEEE80211_TX_RC_USE_CTS_PROTECT))
 			break;
+		fallthrough;
 
 	case CARL9170_ERP_CTS:
 		return true;
@@ -976,7 +980,7 @@ static int carl9170_tx_prepare(struct ar9170 *ar,
 		((CARL9170_TX_SUPER_MISC_VIF_ID >>
 		 CARL9170_TX_SUPER_MISC_VIF_ID_S) + 1));
 
-	hw_queue = ar9170_qmap[carl9170_get_queue(ar, skb)];
+	hw_queue = ar9170_qmap(carl9170_get_queue(ar, skb));
 
 	hdr = (void *)skb->data;
 	info = IEEE80211_SKB_CB(skb);
@@ -1040,8 +1044,9 @@ static int carl9170_tx_prepare(struct ar9170 *ar,
 		if (unlikely(!sta || !cvif))
 			goto err_out;
 
-		factor = min_t(unsigned int, 1u, sta->ht_cap.ampdu_factor);
-		density = sta->ht_cap.ampdu_density;
+		factor = min_t(unsigned int, 1u,
+			       sta->deflink.ht_cap.ampdu_factor);
+		density = sta->deflink.ht_cap.ampdu_density;
 
 		if (density) {
 			/*
@@ -1276,7 +1281,7 @@ void carl9170_tx_drop(struct ar9170 *ar, struct sk_buff *skb)
 
 	super = (void *)skb->data;
 	SET_VAL(CARL9170_TX_SUPER_MISC_QUEUE, q,
-		ar9170_qmap[carl9170_get_queue(ar, skb)]);
+		ar9170_qmap(carl9170_get_queue(ar, skb)));
 	__carl9170_tx_process_status(ar, super->s.cookie, q);
 }
 
@@ -1323,7 +1328,7 @@ static void carl9170_bar_check(struct ar9170 *ar, struct sk_buff *skb)
 		struct carl9170_bar_list_entry *entry;
 		unsigned int queue = skb_get_queue_mapping(skb);
 
-		entry = kmalloc(sizeof(*entry), GFP_ATOMIC);
+		entry = kmalloc_obj(*entry, GFP_ATOMIC);
 		if (!WARN_ON_ONCE(!entry)) {
 			entry->skb = skb;
 			spin_lock_bh(&ar->bar_list_lock[queue]);
@@ -1554,6 +1559,9 @@ static struct carl9170_vif_info *carl9170_pick_beaconing_vif(struct ar9170 *ar)
 					goto out;
 			}
 		} while (ar->beacon_enabled && i--);
+
+		/* no entry found in list */
+		return NULL;
 	}
 
 out:
@@ -1620,7 +1628,7 @@ int carl9170_update_beacon(struct ar9170 *ar, const bool submit)
 		goto out_unlock;
 
 	skb = ieee80211_beacon_get_tim(ar->hw, carl9170_get_vif(cvif),
-		NULL, NULL);
+				       NULL, NULL, 0);
 
 	if (!skb) {
 		err = -ENOMEM;

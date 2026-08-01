@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * linux/sound/wm5100.h -- Platform data for WM5100
  *
  * Copyright 2011 Wolfson Microelectronics. PLC.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __LINUX_SND_WM5100_H
@@ -39,11 +36,7 @@ struct wm5100_jack_mode {
 #define WM5100_GPIO_SET 0x10000
 
 struct wm5100_pdata {
-	int reset;      /** GPIO controlling /RESET, if any */
-	int ldo_ena;    /** GPIO controlling LODENA, if any */
-	int hp_pol;     /** GPIO controlling headset polarity, if any */
 	int irq_flags;
-	int gpio_base;
 
 	struct wm5100_jack_mode jack_modes[2];
 

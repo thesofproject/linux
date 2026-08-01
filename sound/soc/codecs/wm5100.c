@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * wm5100.c  --  WM5100 ALSA SoC Audio driver
  *
  * Copyright 2011-2 Wolfson Microelectronics plc
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -18,7 +15,7 @@
 #include <linux/pm.h>
 #include <linux/gcd.h>
 #include <linux/gpio/driver.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
@@ -58,6 +55,9 @@ struct wm5100_priv {
 	struct snd_soc_component *component;
 
 	struct regulator_bulk_data core_supplies[WM5100_NUM_CORE_SUPPLIES];
+	struct gpio_desc *reset;
+	struct gpio_desc *ldo_ena;
+	struct gpio_desc *hp_pol;
 
 	int rev;
 
@@ -140,7 +140,7 @@ static int wm5100_alloc_sr(struct snd_soc_component *component, int rate)
 				sr_free = i;
 				continue;
 			}
-			if ((snd_soc_component_read32(component, wm5100_sr_regs[i]) &
+			if ((snd_soc_component_read(component, wm5100_sr_regs[i]) &
 			     WM5100_SAMPLE_RATE_1_MASK) == sr_code)
 				break;
 		}
@@ -192,7 +192,7 @@ static void wm5100_free_sr(struct snd_soc_component *component, int rate)
 		if (!wm5100->sr_ref[i])
 			continue;
 
-		if ((snd_soc_component_read32(component, wm5100_sr_regs[i]) &
+		if ((snd_soc_component_read(component, wm5100_sr_regs[i]) &
 		     WM5100_SAMPLE_RATE_1_MASK) == sr_code)
 			break;
 	}
@@ -208,9 +208,9 @@ static void wm5100_free_sr(struct snd_soc_component *component, int rate)
 
 static int wm5100_reset(struct wm5100_priv *wm5100)
 {
-	if (wm5100->pdata.reset) {
-		gpio_set_value_cansleep(wm5100->pdata.reset, 0);
-		gpio_set_value_cansleep(wm5100->pdata.reset, 1);
+	if (wm5100->reset) {
+		gpiod_set_value_cansleep(wm5100->reset, 1);
+		gpiod_set_value_cansleep(wm5100->reset, 0);
 
 		return 0;
 	} else {
@@ -573,10 +573,10 @@ SND_SOC_BYTES_MASK("EQ4 Coefficients", WM5100_EQ4_1, 20, WM5100_EQ4_ENA),
 SND_SOC_BYTES_MASK("DRC Coefficients", WM5100_DRC1_CTRL1, 5,
 		   WM5100_DRCL_ENA | WM5100_DRCR_ENA),
 
-SND_SOC_BYTES("LHPF1 Coefficeints", WM5100_HPLPF1_2, 1),
-SND_SOC_BYTES("LHPF2 Coefficeints", WM5100_HPLPF2_2, 1),
-SND_SOC_BYTES("LHPF3 Coefficeints", WM5100_HPLPF3_2, 1),
-SND_SOC_BYTES("LHPF4 Coefficeints", WM5100_HPLPF4_2, 1),
+SND_SOC_BYTES("LHPF1 Coefficients", WM5100_HPLPF1_2, 1),
+SND_SOC_BYTES("LHPF2 Coefficients", WM5100_HPLPF2_2, 1),
+SND_SOC_BYTES("LHPF3 Coefficients", WM5100_HPLPF3_2, 1),
+SND_SOC_BYTES("LHPF4 Coefficients", WM5100_HPLPF4_2, 1),
 
 SOC_SINGLE("HPOUT1 High Performance Switch", WM5100_OUT_VOLUME_1L,
 	   WM5100_OUT1_OSR_SHIFT, 1, 0),
@@ -741,9 +741,9 @@ static void wm5100_seq_notifier(struct snd_soc_component *component,
 
 	/* Wait for the outputs to flag themselves as enabled */
 	if (wm5100->out_ena[0]) {
-		expect = snd_soc_component_read32(component, WM5100_CHANNEL_ENABLES_1);
+		expect = snd_soc_component_read(component, WM5100_CHANNEL_ENABLES_1);
 		for (i = 0; i < 200; i++) {
-			val = snd_soc_component_read32(component, WM5100_OUTPUT_STATUS_1);
+			val = snd_soc_component_read(component, WM5100_OUTPUT_STATUS_1);
 			if (val == expect) {
 				wm5100->out_ena[0] = false;
 				break;
@@ -756,9 +756,9 @@ static void wm5100_seq_notifier(struct snd_soc_component *component,
 	}
 
 	if (wm5100->out_ena[1]) {
-		expect = snd_soc_component_read32(component, WM5100_OUTPUT_ENABLES_2);
+		expect = snd_soc_component_read(component, WM5100_OUTPUT_ENABLES_2);
 		for (i = 0; i < 200; i++) {
-			val = snd_soc_component_read32(component, WM5100_OUTPUT_STATUS_2);
+			val = snd_soc_component_read(component, WM5100_OUTPUT_STATUS_2);
 			if (val == expect) {
 				wm5100->out_ena[1] = false;
 				break;
@@ -844,13 +844,13 @@ static int wm5100_post_ev(struct snd_soc_dapm_widget *w,
 	struct wm5100_priv *wm5100 = snd_soc_component_get_drvdata(component);
 	int ret;
 
-	ret = snd_soc_component_read32(component, WM5100_INTERRUPT_RAW_STATUS_3);
+	ret = snd_soc_component_read(component, WM5100_INTERRUPT_RAW_STATUS_3);
 	ret &= WM5100_SPK_SHUTDOWN_WARN_STS |
 		WM5100_SPK_SHUTDOWN_STS | WM5100_CLKGEN_ERR_STS |
 		WM5100_CLKGEN_ERR_ASYNC_STS;
 	wm5100_log_status3(wm5100, ret);
 
-	ret = snd_soc_component_read32(component, WM5100_INTERRUPT_RAW_STATUS_4);
+	ret = snd_soc_component_read(component, WM5100_INTERRUPT_RAW_STATUS_4);
 	wm5100_log_status4(wm5100, ret);
 
 	return 0;
@@ -1303,15 +1303,15 @@ static int wm5100_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	}
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
-	case SND_SOC_DAIFMT_CBS_CFM:
+	case SND_SOC_DAIFMT_CBC_CFP:
 		lrclk |= WM5100_AIF1TX_LRCLK_MSTR;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFS:
+	case SND_SOC_DAIFMT_CBP_CFC:
 		bclk |= WM5100_AIF1_BCLK_MSTR;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		lrclk |= WM5100_AIF1TX_LRCLK_MSTR;
 		bclk |= WM5100_AIF1_BCLK_MSTR;
 		break;
@@ -1851,7 +1851,7 @@ static int wm5100_set_fll(struct snd_soc_component *component, int fll_id, int s
 			msleep(1);
 		}
 
-		ret = snd_soc_component_read32(component,
+		ret = snd_soc_component_read(component,
 				   WM5100_INTERRUPT_RAW_STATUS_3);
 		if (ret < 0) {
 			dev_err(component->dev,
@@ -1977,7 +1977,7 @@ static void wm5100_set_detect_mode(struct wm5100_priv *wm5100, int the_mode)
 	if (WARN_ON(the_mode >= ARRAY_SIZE(wm5100->pdata.jack_modes)))
 		return;
 
-	gpio_set_value_cansleep(wm5100->pdata.hp_pol, mode->hp_pol);
+	gpiod_set_value_cansleep(wm5100->hp_pol, mode->hp_pol);
 	regmap_update_bits(wm5100->regmap, WM5100_ACCESSORY_DETECT_MODE_1,
 			   WM5100_ACCDET_BIAS_SRC_MASK |
 			   WM5100_ACCDET_SRC,
@@ -2101,7 +2101,7 @@ static void wm5100_micd_irq(struct wm5100_priv *wm5100)
 int wm5100_detect(struct snd_soc_component *component, struct snd_soc_jack *jack)
 {
 	struct wm5100_priv *wm5100 = snd_soc_component_get_drvdata(component);
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 
 	if (jack) {
 		wm5100->jack = jack;
@@ -2236,12 +2236,14 @@ static irqreturn_t wm5100_edge_irq(int irq, void *data)
 }
 
 #ifdef CONFIG_GPIOLIB
-static void wm5100_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
+static int wm5100_gpio_set(struct gpio_chip *chip, unsigned int offset,
+			   int value)
 {
 	struct wm5100_priv *wm5100 = gpiochip_get_data(chip);
 
-	regmap_update_bits(wm5100->regmap, WM5100_GPIO_CTRL_1 + offset,
-			   WM5100_GP1_LVL, !!value << WM5100_GP1_LVL_SHIFT);
+	return regmap_update_bits(wm5100->regmap, WM5100_GPIO_CTRL_1 + offset,
+				  WM5100_GP1_LVL,
+				  !!value << WM5100_GP1_LVL_SHIFT);
 }
 
 static int wm5100_gpio_direction_out(struct gpio_chip *chip,
@@ -2302,11 +2304,7 @@ static void wm5100_init_gpio(struct i2c_client *i2c)
 	wm5100->gpio_chip = wm5100_template_chip;
 	wm5100->gpio_chip.ngpio = 6;
 	wm5100->gpio_chip.parent = &i2c->dev;
-
-	if (wm5100->pdata.gpio_base)
-		wm5100->gpio_chip.base = wm5100->pdata.gpio_base;
-	else
-		wm5100->gpio_chip.base = -1;
+	wm5100->gpio_chip.base = -1;
 
 	ret = gpiochip_add_data(&wm5100->gpio_chip, wm5100);
 	if (ret != 0)
@@ -2331,7 +2329,7 @@ static void wm5100_free_gpio(struct i2c_client *i2c)
 
 static int wm5100_probe(struct snd_soc_component *component)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	struct i2c_client *i2c = to_i2c_client(component->dev);
 	struct wm5100_priv *wm5100 = snd_soc_component_get_drvdata(component);
 	int ret, i;
@@ -2352,35 +2350,20 @@ static int wm5100_probe(struct snd_soc_component *component)
 		snd_soc_dapm_new_controls(dapm, wm5100_dapm_widgets_noirq,
 					  ARRAY_SIZE(wm5100_dapm_widgets_noirq));
 
-	if (wm5100->pdata.hp_pol) {
-		ret = gpio_request_one(wm5100->pdata.hp_pol,
-				       GPIOF_OUT_INIT_HIGH, "WM5100 HP_POL");
-		if (ret < 0) {
-			dev_err(&i2c->dev, "Failed to request HP_POL %d: %d\n",
-				wm5100->pdata.hp_pol, ret);
-			goto err_gpio;
-		}
+	wm5100->hp_pol = devm_gpiod_get_optional(&i2c->dev, "hp-pol",
+						 GPIOD_OUT_HIGH);
+	if (IS_ERR(wm5100->hp_pol)) {
+		ret = PTR_ERR(wm5100->hp_pol);
+		dev_err(&i2c->dev, "Failed to request HP_POL GPIO: %d\n",
+			ret);
+		return ret;
 	}
 
 	return 0;
-
-err_gpio:
-
-	return ret;
-}
-
-static void wm5100_remove(struct snd_soc_component *component)
-{
-	struct wm5100_priv *wm5100 = snd_soc_component_get_drvdata(component);
-
-	if (wm5100->pdata.hp_pol) {
-		gpio_free(wm5100->pdata.hp_pol);
-	}
 }
 
 static const struct snd_soc_component_driver soc_component_dev_wm5100 = {
 	.probe			= wm5100_probe,
-	.remove			= wm5100_remove,
 	.set_sysclk		= wm5100_set_sysclk,
 	.set_pll		= wm5100_set_fll,
 	.seq_notifier		= wm5100_seq_notifier,
@@ -2392,7 +2375,6 @@ static const struct snd_soc_component_driver soc_component_dev_wm5100 = {
 	.num_dapm_routes	= ARRAY_SIZE(wm5100_dapm_routes),
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config wm5100_regmap = {
@@ -2404,7 +2386,7 @@ static const struct regmap_config wm5100_regmap = {
 	.num_reg_defaults = ARRAY_SIZE(wm5100_reg_defaults),
 	.volatile_reg = wm5100_volatile_register,
 	.readable_reg = wm5100_readable_register,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 };
 
 static const unsigned int wm5100_mic_ctrl_reg[] = {
@@ -2414,8 +2396,7 @@ static const unsigned int wm5100_mic_ctrl_reg[] = {
 	WM5100_IN4L_CONTROL,
 };
 
-static int wm5100_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+static int wm5100_i2c_probe(struct i2c_client *i2c)
 {
 	struct wm5100_pdata *pdata = dev_get_platdata(&i2c->dev);
 	struct wm5100_priv *wm5100;
@@ -2465,26 +2446,26 @@ static int wm5100_i2c_probe(struct i2c_client *i2c,
 		goto err;
 	}
 
-	if (wm5100->pdata.ldo_ena) {
-		ret = gpio_request_one(wm5100->pdata.ldo_ena,
-				       GPIOF_OUT_INIT_HIGH, "WM5100 LDOENA");
-		if (ret < 0) {
-			dev_err(&i2c->dev, "Failed to request LDOENA %d: %d\n",
-				wm5100->pdata.ldo_ena, ret);
-			goto err_enable;
-		}
+	wm5100->ldo_ena = devm_gpiod_get_optional(&i2c->dev, "wlf,ldo1ena",
+						  GPIOD_OUT_HIGH);
+	if (IS_ERR(wm5100->ldo_ena)) {
+		ret = PTR_ERR(wm5100->ldo_ena);
+		dev_err(&i2c->dev, "Failed to request LDOENA GPIO: %d\n", ret);
+		goto err_enable;
+	}
+	if (wm5100->ldo_ena) {
+		gpiod_set_consumer_name(wm5100->ldo_ena, "WM5100 LDOENA");
 		msleep(2);
 	}
 
-	if (wm5100->pdata.reset) {
-		ret = gpio_request_one(wm5100->pdata.reset,
-				       GPIOF_OUT_INIT_HIGH, "WM5100 /RESET");
-		if (ret < 0) {
-			dev_err(&i2c->dev, "Failed to request /RESET %d: %d\n",
-				wm5100->pdata.reset, ret);
-			goto err_ldo;
-		}
+	wm5100->reset = devm_gpiod_get_optional(&i2c->dev, "reset",
+						GPIOD_OUT_LOW);
+	if (IS_ERR(wm5100->reset)) {
+		ret = PTR_ERR(wm5100->reset);
+		dev_err(&i2c->dev, "Failed to request /RESET GPIO: %d\n", ret);
+		goto err_ldo;
 	}
+	gpiod_set_consumer_name(wm5100->reset, "WM5100 /RESET");
 
 	ret = regmap_read(wm5100->regmap, WM5100_SOFTWARE_RESET, &reg);
 	if (ret < 0) {
@@ -2620,18 +2601,13 @@ static int wm5100_i2c_probe(struct i2c_client *i2c,
 	return ret;
 
 err_reset:
+	pm_runtime_disable(&i2c->dev);
 	if (i2c->irq)
 		free_irq(i2c->irq, wm5100);
 	wm5100_free_gpio(i2c);
-	if (wm5100->pdata.reset) {
-		gpio_set_value_cansleep(wm5100->pdata.reset, 0);
-		gpio_free(wm5100->pdata.reset);
-	}
+	gpiod_set_value_cansleep(wm5100->reset, 1);
 err_ldo:
-	if (wm5100->pdata.ldo_ena) {
-		gpio_set_value_cansleep(wm5100->pdata.ldo_ena, 0);
-		gpio_free(wm5100->pdata.ldo_ena);
-	}
+	gpiod_set_value_cansleep(wm5100->ldo_ena, 0);
 err_enable:
 	regulator_bulk_disable(ARRAY_SIZE(wm5100->core_supplies),
 			       wm5100->core_supplies);
@@ -2639,34 +2615,25 @@ err:
 	return ret;
 }
 
-static int wm5100_i2c_remove(struct i2c_client *i2c)
+static void wm5100_i2c_remove(struct i2c_client *i2c)
 {
 	struct wm5100_priv *wm5100 = i2c_get_clientdata(i2c);
 
+	pm_runtime_disable(&i2c->dev);
 	if (i2c->irq)
 		free_irq(i2c->irq, wm5100);
 	wm5100_free_gpio(i2c);
-	if (wm5100->pdata.reset) {
-		gpio_set_value_cansleep(wm5100->pdata.reset, 0);
-		gpio_free(wm5100->pdata.reset);
-	}
-	if (wm5100->pdata.ldo_ena) {
-		gpio_set_value_cansleep(wm5100->pdata.ldo_ena, 0);
-		gpio_free(wm5100->pdata.ldo_ena);
-	}
-
-	return 0;
+	gpiod_set_value_cansleep(wm5100->reset, 1);
+	gpiod_set_value_cansleep(wm5100->ldo_ena, 0);
 }
 
-#ifdef CONFIG_PM
 static int wm5100_runtime_suspend(struct device *dev)
 {
 	struct wm5100_priv *wm5100 = dev_get_drvdata(dev);
 
 	regcache_cache_only(wm5100->regmap, true);
 	regcache_mark_dirty(wm5100->regmap);
-	if (wm5100->pdata.ldo_ena)
-		gpio_set_value_cansleep(wm5100->pdata.ldo_ena, 0);
+	gpiod_set_value_cansleep(wm5100->ldo_ena, 0);
 	regulator_bulk_disable(ARRAY_SIZE(wm5100->core_supplies),
 			       wm5100->core_supplies);
 
@@ -2686,8 +2653,8 @@ static int wm5100_runtime_resume(struct device *dev)
 		return ret;
 	}
 
-	if (wm5100->pdata.ldo_ena) {
-		gpio_set_value_cansleep(wm5100->pdata.ldo_ena, 1);
+	if (wm5100->ldo_ena) {
+		gpiod_set_value_cansleep(wm5100->ldo_ena, 1);
 		msleep(2);
 	}
 
@@ -2696,15 +2663,13 @@ static int wm5100_runtime_resume(struct device *dev)
 
 	return 0;
 }
-#endif
 
 static const struct dev_pm_ops wm5100_pm = {
-	SET_RUNTIME_PM_OPS(wm5100_runtime_suspend, wm5100_runtime_resume,
-			   NULL)
+	RUNTIME_PM_OPS(wm5100_runtime_suspend, wm5100_runtime_resume, NULL)
 };
 
 static const struct i2c_device_id wm5100_i2c_id[] = {
-	{ "wm5100", 0 },
+	{ .name = "wm5100" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, wm5100_i2c_id);
@@ -2712,7 +2677,7 @@ MODULE_DEVICE_TABLE(i2c, wm5100_i2c_id);
 static struct i2c_driver wm5100_i2c_driver = {
 	.driver = {
 		.name = "wm5100",
-		.pm = &wm5100_pm,
+		.pm = pm_ptr(&wm5100_pm),
 	},
 	.probe =    wm5100_i2c_probe,
 	.remove =   wm5100_i2c_remove,

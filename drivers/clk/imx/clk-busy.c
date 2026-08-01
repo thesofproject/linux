@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2012 Freescale Semiconductor, Inc.
  * Copyright 2012 Linaro Ltd.
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
  */
 
+#include <linux/bits.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/io.h>
@@ -51,12 +46,12 @@ static unsigned long clk_busy_divider_recalc_rate(struct clk_hw *hw,
 	return busy->div_ops->recalc_rate(&busy->div.hw, parent_rate);
 }
 
-static long clk_busy_divider_round_rate(struct clk_hw *hw, unsigned long rate,
-					unsigned long *prate)
+static int clk_busy_divider_determine_rate(struct clk_hw *hw,
+					   struct clk_rate_request *req)
 {
 	struct clk_busy_divider *busy = to_clk_busy_divider(hw);
 
-	return busy->div_ops->round_rate(&busy->div.hw, rate, prate);
+	return busy->div_ops->determine_rate(&busy->div.hw, req);
 }
 
 static int clk_busy_divider_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -74,19 +69,20 @@ static int clk_busy_divider_set_rate(struct clk_hw *hw, unsigned long rate,
 
 static const struct clk_ops clk_busy_divider_ops = {
 	.recalc_rate = clk_busy_divider_recalc_rate,
-	.round_rate = clk_busy_divider_round_rate,
+	.determine_rate = clk_busy_divider_determine_rate,
 	.set_rate = clk_busy_divider_set_rate,
 };
 
-struct clk *imx_clk_busy_divider(const char *name, const char *parent_name,
+struct clk_hw *imx_clk_hw_busy_divider(const char *name, const char *parent_name,
 				 void __iomem *reg, u8 shift, u8 width,
 				 void __iomem *busy_reg, u8 busy_shift)
 {
 	struct clk_busy_divider *busy;
-	struct clk *clk;
+	struct clk_hw *hw;
 	struct clk_init_data init;
+	int ret;
 
-	busy = kzalloc(sizeof(*busy), GFP_KERNEL);
+	busy = kzalloc_obj(*busy);
 	if (!busy)
 		return ERR_PTR(-ENOMEM);
 
@@ -107,11 +103,15 @@ struct clk *imx_clk_busy_divider(const char *name, const char *parent_name,
 
 	busy->div.hw.init = &init;
 
-	clk = clk_register(NULL, &busy->div.hw);
-	if (IS_ERR(clk))
-		kfree(busy);
+	hw = &busy->div.hw;
 
-	return clk;
+	ret = clk_hw_register(NULL, hw);
+	if (ret) {
+		kfree(busy);
+		return ERR_PTR(ret);
+	}
+
+	return hw;
 }
 
 struct clk_busy_mux {
@@ -148,19 +148,21 @@ static int clk_busy_mux_set_parent(struct clk_hw *hw, u8 index)
 }
 
 static const struct clk_ops clk_busy_mux_ops = {
+	.determine_rate = clk_hw_determine_rate_no_reparent,
 	.get_parent = clk_busy_mux_get_parent,
 	.set_parent = clk_busy_mux_set_parent,
 };
 
-struct clk *imx_clk_busy_mux(const char *name, void __iomem *reg, u8 shift,
+struct clk_hw *imx_clk_hw_busy_mux(const char *name, void __iomem *reg, u8 shift,
 			     u8 width, void __iomem *busy_reg, u8 busy_shift,
-			     const char **parent_names, int num_parents)
+			     const char * const *parent_names, int num_parents)
 {
 	struct clk_busy_mux *busy;
-	struct clk *clk;
+	struct clk_hw *hw;
 	struct clk_init_data init;
+	int ret;
 
-	busy = kzalloc(sizeof(*busy), GFP_KERNEL);
+	busy = kzalloc_obj(*busy);
 	if (!busy)
 		return ERR_PTR(-ENOMEM);
 
@@ -181,9 +183,13 @@ struct clk *imx_clk_busy_mux(const char *name, void __iomem *reg, u8 shift,
 
 	busy->mux.hw.init = &init;
 
-	clk = clk_register(NULL, &busy->mux.hw);
-	if (IS_ERR(clk))
-		kfree(busy);
+	hw = &busy->mux.hw;
 
-	return clk;
+	ret = clk_hw_register(NULL, hw);
+	if (ret) {
+		kfree(busy);
+		return ERR_PTR(ret);
+	}
+
+	return hw;
 }

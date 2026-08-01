@@ -33,18 +33,6 @@ Description:
 		An attribute which indicates whether the patch is currently in
 		transition.
 
-What:		/sys/kernel/livepatch/<patch>/signal
-Date:		Nov 2017
-KernelVersion:	4.15.0
-Contact:	live-patching@vger.kernel.org
-Description:
-		A writable attribute that allows administrator to affect the
-		course of an existing transition. Writing 1 sends a fake
-		signal to all remaining blocking tasks. The fake signal
-		means that no proper signal is delivered (there is no data in
-		signal pending structures). Tasks are interrupted or woken up,
-		and forced to change their patched state.
-
 What:		/sys/kernel/livepatch/<patch>/force
 Date:		Nov 2017
 KernelVersion:	4.15.0
@@ -57,7 +45,24 @@ Description:
 		use this feature without a clearance from a patch
 		distributor. Removal (rmmod) of patch modules is permanently
 		disabled when the feature is used. See
-		Documentation/livepatch/livepatch.txt for more information.
+		Documentation/livepatch/livepatch.rst for more information.
+
+What:		/sys/kernel/livepatch/<patch>/replace
+Date:		Jun 2024
+KernelVersion:	6.11.0
+Contact:	live-patching@vger.kernel.org
+Description:
+		An attribute which indicates whether the patch supports
+		atomic-replace.
+
+What:		/sys/kernel/livepatch/<patch>/stack_order
+Date:		Jan 2025
+KernelVersion:	6.14.0
+Description:
+		This attribute specifies the sequence in which live patch modules
+		are applied to the system. If multiple live patches modify the same
+		function, the implementation with the biggest 'stack_order' number
+		is used, unless a transition is currently in progress.
 
 What:		/sys/kernel/livepatch/<patch>/<object>
 Date:		Nov 2014
@@ -66,6 +71,14 @@ Contact:	live-patching@vger.kernel.org
 Description:
 		The object directory contains subdirectories for each function
 		that is patched within the object.
+
+What:		/sys/kernel/livepatch/<patch>/<object>/patched
+Date:		August 2022
+KernelVersion:	6.1.0
+Contact:	live-patching@vger.kernel.org
+Description:
+		An attribute which indicates whether the object is currently
+		patched.
 
 What:		/sys/kernel/livepatch/<patch>/<object>/<function,sympos>
 Date:		Nov 2014

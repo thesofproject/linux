@@ -20,9 +20,9 @@
 #include <linux/iio/types.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/power_supply.h>
+#include <linux/property.h>
 
 struct lego_ev3_battery {
 	struct iio_channel *iio_v;
@@ -39,7 +39,7 @@ static int lego_ev3_battery_get_property(struct power_supply *psy,
 					 union power_supply_propval *val)
 {
 	struct lego_ev3_battery *batt = power_supply_get_drvdata(psy);
-	int val2;
+	int ret, val2;
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
@@ -47,11 +47,18 @@ static int lego_ev3_battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 		/* battery voltage is iio channel * 2 + Vce of transistor */
-		iio_read_channel_processed(batt->iio_v, &val->intval);
+		ret = iio_read_channel_processed(batt->iio_v, &val->intval);
+		if (ret)
+			return ret;
+
 		val->intval *= 2000;
-		val->intval += 200000;
+		val->intval += 50000;
+
 		/* plus adjust for shunt resistor drop */
-		iio_read_channel_processed(batt->iio_i, &val2);
+		ret = iio_read_channel_processed(batt->iio_i, &val2);
+		if (ret)
+			return ret;
+
 		val2 *= 1000;
 		val2 /= 15;
 		val->intval += val2;
@@ -64,7 +71,10 @@ static int lego_ev3_battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
 		/* battery current is iio channel / 15 / 0.05 ohms */
-		iio_read_channel_processed(batt->iio_i, &val->intval);
+		ret = iio_read_channel_processed(batt->iio_i, &val->intval);
+		if (ret)
+			return ret;
+
 		val->intval *= 20000;
 		val->intval /= 15;
 		break;
@@ -156,27 +166,21 @@ static int lego_ev3_battery_probe(struct platform_device *pdev)
 
 	batt->iio_v = devm_iio_channel_get(dev, "voltage");
 	err = PTR_ERR_OR_ZERO(batt->iio_v);
-	if (err) {
-		if (err != -EPROBE_DEFER)
-			dev_err(dev, "Failed to get voltage iio channel\n");
-		return err;
-	}
+	if (err)
+		return dev_err_probe(dev, err,
+				     "Failed to get voltage iio channel\n");
 
 	batt->iio_i = devm_iio_channel_get(dev, "current");
 	err = PTR_ERR_OR_ZERO(batt->iio_i);
-	if (err) {
-		if (err != -EPROBE_DEFER)
-			dev_err(dev, "Failed to get current iio channel\n");
-		return err;
-	}
+	if (err)
+		return dev_err_probe(dev, err,
+				     "Failed to get current iio channel\n");
 
 	batt->rechargeable_gpio = devm_gpiod_get(dev, "rechargeable", GPIOD_IN);
 	err = PTR_ERR_OR_ZERO(batt->rechargeable_gpio);
-	if (err) {
-		if (err != -EPROBE_DEFER)
-			dev_err(dev, "Failed to get rechargeable gpio\n");
-		return err;
-	}
+	if (err)
+		return dev_err_probe(dev, err,
+				     "Failed to get rechargeable gpio\n");
 
 	/*
 	 * The rechargeable battery indication switch cannot be changed without
@@ -194,7 +198,7 @@ static int lego_ev3_battery_probe(struct platform_device *pdev)
 		batt->v_min = 48000000;
 	}
 
-	psy_cfg.of_node = pdev->dev.of_node;
+	psy_cfg.fwnode = dev_fwnode(&pdev->dev);
 	psy_cfg.drv_data = batt;
 
 	batt->psy = devm_power_supply_register(dev, &lego_ev3_battery_desc,

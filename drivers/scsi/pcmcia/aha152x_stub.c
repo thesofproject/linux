@@ -40,13 +40,16 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/ioport.h>
-#include <scsi/scsi.h>
 #include <linux/major.h>
 #include <linux/blkdev.h>
-#include <scsi/scsi_ioctl.h>
 
-#include "scsi.h"
+#include <scsi/scsi.h>
+#include <scsi/scsi_cmnd.h>
+#include <scsi/scsi_device.h>
+#include <scsi/scsi_eh.h>
 #include <scsi/scsi_host.h>
+#include <scsi/scsi_ioctl.h>
+#include <scsi/scsi_tcq.h>
 #include "aha152x.h"
 
 #include <pcmcia/cistpl.h>
@@ -72,6 +75,7 @@ module_param(synchronous, int, 0);
 module_param(reset_delay, int, 0);
 module_param(ext_trans, int, 0);
 
+MODULE_DESCRIPTION("Adaptec AHA152X-compatible PCMCIA SCSI card driver");
 MODULE_LICENSE("Dual MPL/GPL");
 
 /*====================================================================*/
@@ -92,7 +96,7 @@ static int aha152x_probe(struct pcmcia_device *link)
     dev_dbg(&link->dev, "aha152x_attach()\n");
 
     /* Create new SCSI device */
-    info = kzalloc(sizeof(*info), GFP_KERNEL);
+    info = kzalloc_obj(*info);
     if (!info) return -ENOMEM;
     info->p_dev = link;
     link->priv = info;
@@ -220,16 +224,4 @@ static struct pcmcia_driver aha152x_cs_driver = {
 	.id_table       = aha152x_ids,
 	.resume		= aha152x_resume,
 };
-
-static int __init init_aha152x_cs(void)
-{
-	return pcmcia_register_driver(&aha152x_cs_driver);
-}
-
-static void __exit exit_aha152x_cs(void)
-{
-	pcmcia_unregister_driver(&aha152x_cs_driver);
-}
-
-module_init(init_aha152x_cs);
-module_exit(exit_aha152x_cs);
+module_pcmcia_driver(aha152x_cs_driver);

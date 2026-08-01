@@ -3,6 +3,7 @@
 // Copyright (c) 2018 IBM Corp.
 
 #include <linux/bitops.h>
+#include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
@@ -43,6 +44,7 @@
 struct npcm_wdt {
 	struct watchdog_device  wdd;
 	void __iomem		*reg;
+	struct clk		*clk;
 };
 
 static inline struct npcm_wdt *to_npcm_wdt(struct watchdog_device *wdd)
@@ -65,6 +67,8 @@ static int npcm_wdt_start(struct watchdog_device *wdd)
 {
 	struct npcm_wdt *wdt = to_npcm_wdt(wdd);
 	u32 val;
+
+	clk_prepare_enable(wdt->clk);
 
 	if (wdd->timeout < 2)
 		val = 0x800;
@@ -100,9 +104,10 @@ static int npcm_wdt_stop(struct watchdog_device *wdd)
 
 	writel(0, wdt->reg);
 
+	clk_disable_unprepare(wdt->clk);
+
 	return 0;
 }
-
 
 static int npcm_wdt_set_timeout(struct watchdog_device *wdd,
 				unsigned int timeout)
@@ -110,23 +115,23 @@ static int npcm_wdt_set_timeout(struct watchdog_device *wdd,
 	if (timeout < 2)
 		wdd->timeout = 1;
 	else if (timeout < 3)
-	      wdd->timeout = 2;
+		wdd->timeout = 2;
 	else if (timeout < 6)
-	      wdd->timeout = 5;
+		wdd->timeout = 5;
 	else if (timeout < 11)
-	      wdd->timeout = 10;
+		wdd->timeout = 10;
 	else if (timeout < 22)
-	      wdd->timeout = 21;
+		wdd->timeout = 21;
 	else if (timeout < 44)
-	      wdd->timeout = 43;
+		wdd->timeout = 43;
 	else if (timeout < 87)
-	      wdd->timeout = 86;
+		wdd->timeout = 86;
 	else if (timeout < 173)
-	      wdd->timeout = 172;
+		wdd->timeout = 172;
 	else if (timeout < 688)
-	      wdd->timeout = 687;
+		wdd->timeout = 687;
 	else
-	      wdd->timeout = 2750;
+		wdd->timeout = 2750;
 
 	if (watchdog_active(wdd))
 		npcm_wdt_start(wdd);
@@ -147,6 +152,9 @@ static int npcm_wdt_restart(struct watchdog_device *wdd,
 			    unsigned long action, void *data)
 {
 	struct npcm_wdt *wdt = to_npcm_wdt(wdd);
+
+	/* For reset, we start the WDT clock and leave it running. */
+	clk_prepare_enable(wdt->clk);
 
 	writel(NPCM_WTR | NPCM_WTRE | NPCM_WTE, wdt->reg);
 	udelay(1000);
@@ -181,18 +189,20 @@ static int npcm_wdt_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct npcm_wdt *wdt;
-	struct resource *res;
 	int irq;
 	int ret;
 
-	wdt = devm_kzalloc(&pdev->dev, sizeof(*wdt), GFP_KERNEL);
+	wdt = devm_kzalloc(dev, sizeof(*wdt), GFP_KERNEL);
 	if (!wdt)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	wdt->reg = devm_ioremap_resource(dev, res);
+	wdt->reg = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(wdt->reg))
 		return PTR_ERR(wdt->reg);
+
+	wdt->clk = devm_clk_get_optional(&pdev->dev, NULL);
+	if (IS_ERR(wdt->clk))
+		return PTR_ERR(wdt->clk);
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
@@ -216,16 +226,14 @@ static int npcm_wdt_probe(struct platform_device *pdev)
 		set_bit(WDOG_HW_RUNNING, &wdt->wdd.status);
 	}
 
-	ret = devm_request_irq(dev, irq, npcm_wdt_interrupt, 0,
-			       "watchdog", wdt);
+	ret = devm_request_irq(dev, irq, npcm_wdt_interrupt, 0, "watchdog",
+			       wdt);
 	if (ret)
 		return ret;
 
 	ret = devm_watchdog_register_device(dev, &wdt->wdd);
-	if (ret) {
-		dev_err(dev, "failed to register watchdog\n");
+	if (ret)
 		return ret;
-	}
 
 	dev_info(dev, "NPCM watchdog driver enabled\n");
 
@@ -234,6 +242,7 @@ static int npcm_wdt_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_OF
 static const struct of_device_id npcm_wdt_match[] = {
+	{.compatible = "nuvoton,wpcm450-wdt"},
 	{.compatible = "nuvoton,npcm750-wdt"},
 	{},
 };

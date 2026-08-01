@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * System Control and Power Interface (SCPI) Protocol based clock driver
  *
  * Copyright (C) 2015 ARM Ltd.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/clk-provider.h>
@@ -21,7 +10,6 @@
 #include <linux/err.h>
 #include <linux/of.h>
 #include <linux/module.h>
-#include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/scpi_protocol.h>
 
@@ -44,8 +32,8 @@ static unsigned long scpi_clk_recalc_rate(struct clk_hw *hw,
 	return clk->scpi_ops->clk_get_val(clk->id);
 }
 
-static long scpi_clk_round_rate(struct clk_hw *hw, unsigned long rate,
-				unsigned long *parent_rate)
+static int scpi_clk_determine_rate(struct clk_hw *hw,
+				   struct clk_rate_request *req)
 {
 	/*
 	 * We can't figure out what rate it will be, so just return the
@@ -53,7 +41,7 @@ static long scpi_clk_round_rate(struct clk_hw *hw, unsigned long rate,
 	 * after the rate is set and we'll know what rate the clock is
 	 * running at then.
 	 */
-	return rate;
+	return 0;
 }
 
 static int scpi_clk_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -66,7 +54,7 @@ static int scpi_clk_set_rate(struct clk_hw *hw, unsigned long rate,
 
 static const struct clk_ops scpi_clk_ops = {
 	.recalc_rate = scpi_clk_recalc_rate,
-	.round_rate = scpi_clk_round_rate,
+	.determine_rate = scpi_clk_determine_rate,
 	.set_rate = scpi_clk_set_rate,
 };
 
@@ -104,12 +92,14 @@ static unsigned long scpi_dvfs_recalc_rate(struct clk_hw *hw,
 	return opp->freq;
 }
 
-static long scpi_dvfs_round_rate(struct clk_hw *hw, unsigned long rate,
-				 unsigned long *parent_rate)
+static int scpi_dvfs_determine_rate(struct clk_hw *hw,
+				    struct clk_rate_request *req)
 {
 	struct scpi_clk *clk = to_scpi_clk(hw);
 
-	return __scpi_dvfs_round_rate(clk, rate);
+	req->rate = __scpi_dvfs_round_rate(clk, req->rate);
+
+	return 0;
 }
 
 static int __scpi_find_dvfs_index(struct scpi_clk *clk, unsigned long rate)
@@ -136,11 +126,11 @@ static int scpi_dvfs_set_rate(struct clk_hw *hw, unsigned long rate,
 
 static const struct clk_ops scpi_dvfs_ops = {
 	.recalc_rate = scpi_dvfs_recalc_rate,
-	.round_rate = scpi_dvfs_round_rate,
+	.determine_rate = scpi_dvfs_determine_rate,
 	.set_rate = scpi_dvfs_set_rate,
 };
 
-static const struct of_device_id scpi_clk_match[] = {
+static const struct of_device_id scpi_clk_match[] __maybe_unused = {
 	{ .compatible = "arm,scpi-dvfs-clocks", .data = &scpi_dvfs_ops, },
 	{ .compatible = "arm,scpi-variable-clocks", .data = &scpi_clk_ops, },
 	{}
@@ -207,7 +197,7 @@ static int scpi_clk_add(struct device *dev, struct device_node *np,
 
 	count = of_property_count_strings(np, "clock-output-names");
 	if (count < 0) {
-		dev_err(dev, "%s: invalid clock output count\n", np->name);
+		dev_err(dev, "%pOFn: invalid clock output count\n", np);
 		return -EINVAL;
 	}
 
@@ -232,13 +222,13 @@ static int scpi_clk_add(struct device *dev, struct device_node *np,
 
 		if (of_property_read_string_index(np, "clock-output-names",
 						  idx, &name)) {
-			dev_err(dev, "invalid clock name @ %s\n", np->name);
+			dev_err(dev, "invalid clock name @ %pOFn\n", np);
 			return -EINVAL;
 		}
 
 		if (of_property_read_u32_index(np, "clock-indices",
 					       idx, &val)) {
-			dev_err(dev, "invalid clock index @ %s\n", np->name);
+			dev_err(dev, "invalid clock index @ %pOFn\n", np);
 			return -EINVAL;
 		}
 
@@ -257,7 +247,7 @@ static int scpi_clk_add(struct device *dev, struct device_node *np,
 	return of_clk_add_hw_provider(np, scpi_of_clk_src_get, clk_data);
 }
 
-static int scpi_clocks_remove(struct platform_device *pdev)
+static void scpi_clocks_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *child, *np = dev->of_node;
@@ -268,28 +258,26 @@ static int scpi_clocks_remove(struct platform_device *pdev)
 	}
 
 	for_each_available_child_of_node(np, child)
-		of_clk_del_provider(np);
-	return 0;
+		of_clk_del_provider(child);
 }
 
 static int scpi_clocks_probe(struct platform_device *pdev)
 {
 	int ret;
 	struct device *dev = &pdev->dev;
-	struct device_node *child, *np = dev->of_node;
+	struct device_node *np = dev->of_node;
 	const struct of_device_id *match;
 
 	if (!get_scpi_ops())
 		return -ENXIO;
 
-	for_each_available_child_of_node(np, child) {
+	for_each_available_child_of_node_scoped(np, child) {
 		match = of_match_node(scpi_clk_match, child);
 		if (!match)
 			continue;
 		ret = scpi_clk_add(dev, child, match);
 		if (ret) {
 			scpi_clocks_remove(pdev);
-			of_node_put(child);
 			return ret;
 		}
 

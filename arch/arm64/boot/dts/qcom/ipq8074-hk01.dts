@@ -1,52 +1,119 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /dts-v1/;
-/* Copyright (c) 2017, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+/*
+ * Copyright (c) 2017, The Linux Foundation. All rights reserved.
  */
 #include "ipq8074.dtsi"
+#include "pmp8074.dtsi"
+#include <dt-bindings/gpio/gpio.h>
 
 / {
-	#address-cells = <0x2>;
-	#size-cells = <0x2>;
 	model = "Qualcomm Technologies, Inc. IPQ8074-HK01";
 	compatible = "qcom,ipq8074-hk01", "qcom,ipq8074";
-	interrupt-parent = <&intc>;
 
 	aliases {
 		serial0 = &blsp1_uart5;
+		serial1 = &blsp1_uart3;
 	};
 
 	chosen {
 		stdout-path = "serial0";
 	};
 
-	memory {
+	memory@40000000 {
 		device_type = "memory";
 		reg = <0x0 0x40000000 0x0 0x20000000>;
 	};
 
-	soc {
-		pinctrl@1000000 {
-			serial_4_pins: serial4_pinmux {
-				mux {
-					pins = "gpio23", "gpio24";
-					function = "blsp4_uart1";
-					bias-disable;
-				};
-			};
-		};
+	vreg_dummy: regulator-dummy { };
+};
 
-		serial@78b3000 {
-			pinctrl-0 = <&serial_4_pins>;
-			pinctrl-names = "default";
-			status = "ok";
-		};
+&blsp1_i2c2 {
+	status = "okay";
+};
+
+&blsp1_spi1 {
+	status = "okay";
+
+	flash@0 {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <50000000>;
 	};
+};
+
+&blsp1_uart3 {
+	status = "okay";
+};
+
+&blsp1_uart5 {
+	status = "okay";
+};
+
+&pcie0 {
+	status = "okay";
+	perst-gpios = <&tlmm 61 GPIO_ACTIVE_LOW>;
+};
+
+&pcie1 {
+	status = "okay";
+	perst-gpios = <&tlmm 58 GPIO_ACTIVE_LOW>;
+};
+
+&pcie_qmp0 {
+	status = "okay";
+};
+
+&pcie_qmp1 {
+	status = "okay";
+};
+
+&qpic_bam {
+	status = "okay";
+};
+
+&qpic_nand {
+	status = "okay";
+
+	nand@0 {
+		reg = <0>;
+		nand-ecc-strength = <4>;
+		nand-ecc-step-size = <512>;
+		nand-bus-width = <8>;
+	};
+};
+
+&sdhc_1 {
+	status = "okay";
+	vqmmc-supply = <&l11>;
+};
+
+&qusb_phy_0 {
+	status = "okay";
+};
+
+&qusb_phy_1 {
+	status = "okay";
+};
+
+&ssphy_0 {
+	status = "okay";
+	vdda-phy-supply = <&vreg_dummy>;
+	vdda-pll-supply = <&vreg_dummy>;
+};
+
+&ssphy_1 {
+	status = "okay";
+	vdda-phy-supply = <&vreg_dummy>;
+	vdda-pll-supply = <&vreg_dummy>;
+};
+
+&usb_0 {
+	status = "okay";
+};
+
+&usb_1 {
+	status = "okay";
 };

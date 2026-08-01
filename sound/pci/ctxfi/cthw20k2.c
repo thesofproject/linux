@@ -1,9 +1,6 @@
-/**
+// SPDX-License-Identifier: GPL-2.0-only
+/*
  * Copyright (C) 2008, Creative Technology Ltd. All Rights Reserved.
- *
- * This source file is released under GPL v2 license (no other versions).
- * See the COPYING file included in the main directory of this source
- * distribution for the license terms and conditions.
  *
  * @File	cthw20k2.c
  *
@@ -12,7 +9,6 @@
  *
  * @Author	Liu Chun
  * @Date 	May 14 2008
- *
  */
 
 #include <linux/types.h>
@@ -161,7 +157,7 @@ static int src_get_rsc_ctrl_blk(void **rblk)
 	struct src_rsc_ctrl_blk *blk;
 
 	*rblk = NULL;
-	blk = kzalloc(sizeof(*blk), GFP_KERNEL);
+	blk = kzalloc_obj(*blk);
 	if (!blk)
 		return -ENOMEM;
 
@@ -487,7 +483,7 @@ static int src_mgr_get_ctrl_blk(void **rblk)
 	struct src_mgr_ctrl_blk *blk;
 
 	*rblk = NULL;
-	blk = kzalloc(sizeof(*blk), GFP_KERNEL);
+	blk = kzalloc_obj(*blk);
 	if (!blk)
 		return -ENOMEM;
 
@@ -508,7 +504,7 @@ static int srcimp_mgr_get_ctrl_blk(void **rblk)
 	struct srcimp_mgr_ctrl_blk *blk;
 
 	*rblk = NULL;
-	blk = kzalloc(sizeof(*blk), GFP_KERNEL);
+	blk = kzalloc_obj(*blk);
 	if (!blk)
 		return -ENOMEM;
 
@@ -697,7 +693,7 @@ static int amixer_rsc_get_ctrl_blk(void **rblk)
 	struct amixer_rsc_ctrl_blk *blk;
 
 	*rblk = NULL;
-	blk = kzalloc(sizeof(*blk), GFP_KERNEL);
+	blk = kzalloc_obj(*blk);
 	if (!blk)
 		return -ENOMEM;
 
@@ -886,7 +882,7 @@ static int dai_get_ctrl_blk(void **rblk)
 	struct dai_ctrl_blk *blk;
 
 	*rblk = NULL;
-	blk = kzalloc(sizeof(*blk), GFP_KERNEL);
+	blk = kzalloc_obj(*blk);
 	if (!blk)
 		return -ENOMEM;
 
@@ -914,7 +910,7 @@ static int dao_commit_write(struct hw *hw, unsigned int idx, void *blk)
 	struct dao_ctrl_blk *ctl = blk;
 
 	if (ctl->dirty.bf.atxcsl) {
-		if (idx < 4) {
+		if ((idx < 4) && ((hw->model != CTOK0010) || (idx < 3))) {
 			/* S/PDIF SPOSx */
 			hw_write_20kx(hw, AUDIO_IO_TX_CSTAT_L+0x40*idx,
 							ctl->atxcsl);
@@ -936,7 +932,7 @@ static int dao_get_ctrl_blk(void **rblk)
 	struct dao_ctrl_blk *blk;
 
 	*rblk = NULL;
-	blk = kzalloc(sizeof(*blk), GFP_KERNEL);
+	blk = kzalloc_obj(*blk);
 	if (!blk)
 		return -ENOMEM;
 
@@ -989,13 +985,14 @@ static int daio_mgr_dsb_dao(void *blk, unsigned int idx)
 	return 0;
 }
 
-static int daio_mgr_dao_init(void *blk, unsigned int idx, unsigned int conf)
+static int daio_mgr_dao_init(struct hw *hw, void *blk, unsigned int idx, unsigned int conf)
 {
 	struct daio_mgr_ctrl_blk *ctl = blk;
 
-	if (idx < 4) {
+	/* Port 3 is dedicated to RCA on SE-300PCIE */
+	if ((idx < 4) && ((hw->model != CTOK0010) || (idx < 3))) {
 		/* S/PDIF output */
-		switch ((conf & 0x7)) {
+		switch ((conf & 0xf)) {
 		case 1:
 			set_field(&ctl->txctl[idx], ATXCTL_NUC, 0);
 			break;
@@ -1087,7 +1084,7 @@ static int daio_mgr_get_ctrl_blk(struct hw *hw, void **rblk)
 	int i;
 
 	*rblk = NULL;
-	blk = kzalloc(sizeof(*blk), GFP_KERNEL);
+	blk = kzalloc_obj(*blk);
 	if (!blk)
 		return -ENOMEM;
 
@@ -1180,6 +1177,10 @@ static int hw_daio_init(struct hw *hw, const struct daio_conf *info)
 		hw_write_20kx(hw, AUDIO_IO_MCLK, 0x21011111);
 		hw_write_20kx(hw, AUDIO_IO_TX_BLRCLK, 0x21212121);
 		hw_write_20kx(hw, AUDIO_IO_RX_BLRCLK, 0);
+	} else if ((4 == info->msr) && (hw->model == CTOK0010)) {
+		hw_write_20kx(hw, AUDIO_IO_MCLK, 0x21212121);
+		hw_write_20kx(hw, AUDIO_IO_TX_BLRCLK, 0x21212121);
+		hw_write_20kx(hw, AUDIO_IO_RX_BLRCLK, 0);
 	} else {
 		dev_alert(hw->card->dev,
 			  "ERROR!!! Invalid sampling rate!!!\n");
@@ -1187,7 +1188,8 @@ static int hw_daio_init(struct hw *hw, const struct daio_conf *info)
 	}
 
 	for (i = 0; i < 8; i++) {
-		if (i <= 3) {
+		/* Port 3 is configured as I2S on SE-300PCIE */
+		if ((i < 4) && ((hw->model != CTOK0010) || (i < 3))) {
 			/* This comment looks wrong since loop is over 4  */
 			/* channels and emu20k2 supports 4 spdif IOs.     */
 			/* 1st 3 channels are SPDIFs (SB0960) */
@@ -1316,12 +1318,12 @@ static int hw_pll_init(struct hw *hw, unsigned int rsr)
 	set_field(&pllctl, PLLCTL_FD, 48000 == rsr ? 16 - 4 : 147 - 4);
 	set_field(&pllctl, PLLCTL_RD, 48000 == rsr ? 1 - 1 : 10 - 1);
 	hw_write_20kx(hw, PLL_CTL, pllctl);
-	mdelay(40);
+	msleep(40);
 
 	pllctl = hw_read_20kx(hw, PLL_CTL);
 	set_field(&pllctl, PLLCTL_FD, 48000 == rsr ? 16 - 2 : 147 - 2);
 	hw_write_20kx(hw, PLL_CTL, pllctl);
-	mdelay(40);
+	msleep(40);
 
 	for (i = 0; i < 1000; i++) {
 		pllstat = hw_read_20kx(hw, PLL_STAT);
@@ -1584,7 +1586,7 @@ static void hw_dac_stop(struct hw *hw)
 	data = hw_read_20kx(hw, GPIO_DATA);
 	data &= 0xFFFFFFFD;
 	hw_write_20kx(hw, GPIO_DATA, data);
-	mdelay(10);
+	usleep_range(10000, 11000);
 }
 
 static void hw_dac_start(struct hw *hw)
@@ -1593,7 +1595,7 @@ static void hw_dac_start(struct hw *hw)
 	data = hw_read_20kx(hw, GPIO_DATA);
 	data |= 0x2;
 	hw_write_20kx(hw, GPIO_DATA, data);
-	mdelay(50);
+	msleep(50);
 }
 
 static void hw_dac_reset(struct hw *hw)
@@ -1638,6 +1640,13 @@ static int hw_dac_init(struct hw *hw, const struct dac_conf *info)
 			data |= 0x0200; /* Double Speed Mode 50-100kHz */
 		else
 			data |= 0x0600; /* Quad Speed Mode 100-200kHz */
+		hw_write_20kx(hw, GPIO_DATA, data);
+		hw_dac_start(hw);
+		return 0;
+	} else if (hw->model == CTOK0010) {
+		hw_dac_stop(hw);
+		data = hw_read_20kx(hw, GPIO_DATA);
+		data |= 0x1000;
 		hw_write_20kx(hw, GPIO_DATA, data);
 		hw_dac_start(hw);
 		return 0;
@@ -1760,9 +1769,11 @@ End:
 static int hw_is_adc_input_selected(struct hw *hw, enum ADCSRC type)
 {
 	u32 data;
-	if (hw->model == CTSB1270) {
+	if ((hw->model == CTSB1270) || (hw->model == CTOK0010)) {
 		/* Titanium HD has two ADC chips, one for line in and one */
-		/* for MIC. We don't need to switch the ADC input. */
+		/* for MIC. Also, SE-300PCIE has a single ADC chip that */
+		/* simultaneously supports 4-channel input. We don't need */
+		/* to switch the ADC input. */
 		return 1;
 	}
 	data = hw_read_20kx(hw, GPIO_DATA);
@@ -1830,6 +1841,32 @@ static int hw_adc_input_select(struct hw *hw, enum ADCSRC type)
 	return 0;
 }
 
+static void hw_adc_stop(struct hw *hw)
+{
+	u32 data;
+	/* Reset the ADC (reset is active low). */
+	data = hw_read_20kx(hw, GPIO_DATA);
+	data &= ~(0x1 << 15);
+	hw_write_20kx(hw, GPIO_DATA, data);
+	usleep_range(10000, 11000);
+}
+
+static void hw_adc_start(struct hw *hw)
+{
+	u32 data;
+	/* Return the ADC to normal operation. */
+	data = hw_read_20kx(hw, GPIO_DATA);
+	data |= (0x1 << 15);
+	hw_write_20kx(hw, GPIO_DATA, data);
+	msleep(50);
+}
+
+static void hw_adc_reset(struct hw *hw)
+{
+	hw_adc_stop(hw);
+	hw_adc_start(hw);
+}
+
 static int hw_adc_init(struct hw *hw, const struct adc_conf *info)
 {
 	int err;
@@ -1840,6 +1877,12 @@ static int hw_adc_init(struct hw *hw, const struct adc_conf *info)
 	data |= (0x1 << 15);
 	hw_write_20kx(hw, GPIO_CTRL, data);
 
+	if (hw->model == CTOK0010) {
+		/* Manual ADC setup for SE-300PCIE is not needed. */
+		hw_adc_reset(hw);
+		return 0;
+	}
+
 	/* Initialize I2C */
 	err = hw20k2_i2c_init(hw, 0x1A, 1, 1);
 	if (err < 0) {
@@ -1847,10 +1890,7 @@ static int hw_adc_init(struct hw *hw, const struct adc_conf *info)
 		goto error;
 	}
 
-	/* Reset the ADC (reset is active low). */
-	data = hw_read_20kx(hw, GPIO_DATA);
-	data &= ~(0x1 << 15);
-	hw_write_20kx(hw, GPIO_DATA, data);
+	hw_adc_stop(hw);
 
 	if (hw->model == CTSB1270) {
 		/* Set up the PCM4220 ADC on Titanium HD */
@@ -1864,11 +1904,7 @@ static int hw_adc_init(struct hw *hw, const struct adc_conf *info)
 		hw_write_20kx(hw, GPIO_DATA, data);
 	}
 
-	mdelay(10);
-	/* Return the ADC to normal operation. */
-	data |= (0x1 << 15);
-	hw_write_20kx(hw, GPIO_DATA, data);
-	mdelay(50);
+	hw_adc_start(hw);
 
 	/* I2C write to register offset 0x0B to set ADC LRCLK polarity */
 	/* invert bit, interface format to I2S, word length to 24-bit, */
@@ -1914,7 +1950,8 @@ static struct capabilities hw_capabilities(struct hw *hw)
 	struct capabilities cap;
 
 	cap.digit_io_switch = 0;
-	cap.dedicated_mic = hw->model == CTSB1270;
+	cap.dedicated_mic = (hw->model == CTSB1270) || (hw->model == CTOK0010);
+	cap.dedicated_rca = hw->model == CTOK0010;
 	cap.output_switch = hw->model == CTSB1270;
 	cap.mic_source_switch = hw->model == CTSB1270;
 
@@ -2030,12 +2067,8 @@ static int hw_card_start(struct hw *hw)
 		return err;
 
 	/* Set DMA transfer mask */
-	if (!dma_set_mask(&pci->dev, DMA_BIT_MASK(dma_bits))) {
-		dma_set_coherent_mask(&pci->dev, DMA_BIT_MASK(dma_bits));
-	} else {
-		dma_set_mask(&pci->dev, DMA_BIT_MASK(32));
-		dma_set_coherent_mask(&pci->dev, DMA_BIT_MASK(32));
-	}
+	if (dma_set_mask_and_coherent(&pci->dev, DMA_BIT_MASK(dma_bits)))
+		dma_set_mask_and_coherent(&pci->dev, DMA_BIT_MASK(32));
 
 	if (!hw->io_base) {
 		err = pci_request_regions(pci, "XFi");
@@ -2065,6 +2098,7 @@ static int hw_card_start(struct hw *hw)
 			goto error2;
 		}
 		hw->irq = pci->irq;
+		hw->card->sync_irq = hw->irq;
 	}
 
 	pci_set_master(pci);
@@ -2154,15 +2188,17 @@ static int hw_card_init(struct hw *hw, struct card_conf *info)
 	/* Reset all SRC pending interrupts */
 	hw_write_20kx(hw, SRC_IP, 0);
 
-	if (hw->model != CTSB1270) {
+	if (hw->model == CTSB1270) {
+		hw_write_20kx(hw, GPIO_CTRL, 0x9E5F);
+	} else if (hw->model == CTOK0010) {
+		hw_write_20kx(hw, GPIO_CTRL, 0x9902);
+	} else {
 		/* TODO: detect the card ID and configure GPIO accordingly. */
 		/* Configures GPIO (0xD802 0x98028) */
 		/*hw_write_20kx(hw, GPIO_CTRL, 0x7F07);*/
 		/* Configures GPIO (SB0880) */
 		/*hw_write_20kx(hw, GPIO_CTRL, 0xFF07);*/
 		hw_write_20kx(hw, GPIO_CTRL, 0xD802);
-	} else {
-		hw_write_20kx(hw, GPIO_CTRL, 0x9E5F);
 	}
 	/* Enable audio ring */
 	hw_write_20kx(hw, MIXER_AR_ENABLE, 0x01);
@@ -2333,7 +2369,7 @@ int create_20k2_hw_obj(struct hw **rhw)
 	struct hw20k2 *hw20k2;
 
 	*rhw = NULL;
-	hw20k2 = kzalloc(sizeof(*hw20k2), GFP_KERNEL);
+	hw20k2 = kzalloc_obj(*hw20k2);
 	if (!hw20k2)
 		return -ENOMEM;
 

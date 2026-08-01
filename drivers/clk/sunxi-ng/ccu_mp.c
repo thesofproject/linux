@@ -1,27 +1,32 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2016 Maxime Ripard
  * Maxime Ripard <maxime.ripard@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
  */
 
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 
 #include "ccu_gate.h"
 #include "ccu_mp.h"
 
-static void ccu_mp_find_best(unsigned long parent, unsigned long rate,
-			     unsigned int max_m, unsigned int max_p,
-			     unsigned int *m, unsigned int *p)
+static unsigned int next_div(unsigned int div, bool shift)
+{
+	if (shift)
+		return div << 1;
+	return div + 1;
+}
+
+static unsigned long ccu_mp_find_best(unsigned long parent, unsigned long rate,
+				      unsigned int max_m, unsigned int max_p,
+				      bool shift,
+				      unsigned int *m, unsigned int *p)
 {
 	unsigned long best_rate = 0;
 	unsigned int best_m = 0, best_p = 0;
 	unsigned int _m, _p;
 
-	for (_p = 1; _p <= max_p; _p <<= 1) {
+	for (_p = 1; _p <= max_p; _p = next_div(_p, shift)) {
 		for (_m = 1; _m <= max_m; _m++) {
 			unsigned long tmp_rate = parent / _p / _m;
 
@@ -38,31 +43,101 @@ static void ccu_mp_find_best(unsigned long parent, unsigned long rate,
 
 	*m = best_m;
 	*p = best_p;
+
+	return best_rate;
 }
 
-static unsigned long ccu_mp_round_rate(struct ccu_mux_internal *mux,
-				       struct clk_hw *hw,
-				       unsigned long *parent_rate,
-				       unsigned long rate,
-				       void *data)
+static unsigned long ccu_mp_find_best_with_parent_adj(struct clk_hw *hw,
+						      unsigned long *parent,
+						      unsigned long rate,
+						      unsigned int max_m,
+						      unsigned int max_p,
+						      bool shift)
+{
+	unsigned long parent_rate_saved;
+	unsigned long parent_rate, now;
+	unsigned long best_rate = 0;
+	unsigned int _m, _p, div;
+	unsigned long maxdiv;
+
+	parent_rate_saved = *parent;
+
+	/*
+	 * The maximum divider we can use without overflowing
+	 * unsigned long in rate * m * p below
+	 */
+	maxdiv = max_m * max_p;
+	maxdiv = min(ULONG_MAX / rate, maxdiv);
+
+	for (_p = 1; _p <= max_p; _p = next_div(_p, shift)) {
+		for (_m = 1; _m <= max_m; _m++) {
+			div = _m * _p;
+
+			if (div > maxdiv)
+				break;
+
+			if (rate * div == parent_rate_saved) {
+				/*
+				 * It's the most ideal case if the requested
+				 * rate can be divided from parent clock without
+				 * needing to change parent rate, so return the
+				 * divider immediately.
+				 */
+				*parent = parent_rate_saved;
+				return rate;
+			}
+
+			parent_rate = clk_hw_round_rate(hw, rate * div);
+			now = parent_rate / div;
+
+			if (now <= rate && now > best_rate) {
+				best_rate = now;
+				*parent = parent_rate;
+
+				if (now == rate)
+					return rate;
+			}
+		}
+	}
+
+	return best_rate;
+}
+
+static int ccu_mp_determine_rate_helper(struct ccu_mux_internal *mux,
+					struct clk_rate_request *req,
+					void *data)
 {
 	struct ccu_mp *cmp = data;
 	unsigned int max_m, max_p;
 	unsigned int m, p;
+	bool shift = true;
 
 	if (cmp->common.features & CCU_FEATURE_FIXED_POSTDIV)
-		rate *= cmp->fixed_post_div;
+		req->rate *= cmp->fixed_post_div;
+
+	if (cmp->common.features & CCU_FEATURE_DUAL_DIV)
+		shift = false;
 
 	max_m = cmp->m.max ?: 1 << cmp->m.width;
-	max_p = cmp->p.max ?: 1 << ((1 << cmp->p.width) - 1);
+	if (shift)
+		max_p = cmp->p.max ?: 1 << ((1 << cmp->p.width) - 1);
+	else
+		max_p = cmp->p.max ?: 1 << cmp->p.width;
 
-	ccu_mp_find_best(*parent_rate, rate, max_m, max_p, &m, &p);
-	rate = *parent_rate / p / m;
+	if (!clk_hw_can_set_rate_parent(&cmp->common.hw)) {
+		req->rate = ccu_mp_find_best(req->best_parent_rate, req->rate,
+					     max_m, max_p, shift, &m, &p);
+	} else {
+		req->rate = ccu_mp_find_best_with_parent_adj(req->best_parent_hw,
+							     &req->best_parent_rate,
+							     req->rate, max_m, max_p,
+							     shift);
+	}
 
 	if (cmp->common.features & CCU_FEATURE_FIXED_POSTDIV)
-		rate /= cmp->fixed_post_div;
+		req->rate /= cmp->fixed_post_div;
 
-	return rate;
+	return 0;
 }
 
 static void ccu_mp_disable(struct clk_hw *hw)
@@ -109,7 +184,11 @@ static unsigned long ccu_mp_recalc_rate(struct clk_hw *hw,
 	p = reg >> cmp->p.shift;
 	p &= (1 << cmp->p.width) - 1;
 
-	rate = (parent_rate >> p) / m;
+	if (cmp->common.features & CCU_FEATURE_DUAL_DIV)
+		rate = (parent_rate / (p + cmp->p.offset)) / m;
+	else
+		rate = (parent_rate >> p) / m;
+
 	if (cmp->common.features & CCU_FEATURE_FIXED_POSTDIV)
 		rate /= cmp->fixed_post_div;
 
@@ -122,7 +201,7 @@ static int ccu_mp_determine_rate(struct clk_hw *hw,
 	struct ccu_mp *cmp = hw_to_ccu_mp(hw);
 
 	return ccu_mux_helper_determine_rate(&cmp->common, &cmp->mux,
-					     req, ccu_mp_round_rate, cmp);
+					     req, ccu_mp_determine_rate_helper, cmp);
 }
 
 static int ccu_mp_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -132,20 +211,27 @@ static int ccu_mp_set_rate(struct clk_hw *hw, unsigned long rate,
 	unsigned long flags;
 	unsigned int max_m, max_p;
 	unsigned int m, p;
+	bool shift = true;
 	u32 reg;
+
+	if (cmp->common.features & CCU_FEATURE_DUAL_DIV)
+		shift = false;
 
 	/* Adjust parent_rate according to pre-dividers */
 	parent_rate = ccu_mux_helper_apply_prediv(&cmp->common, &cmp->mux, -1,
 						  parent_rate);
 
 	max_m = cmp->m.max ?: 1 << cmp->m.width;
-	max_p = cmp->p.max ?: 1 << ((1 << cmp->p.width) - 1);
+	if (shift)
+		max_p = cmp->p.max ?: 1 << ((1 << cmp->p.width) - 1);
+	else
+		max_p = cmp->p.max ?: 1 << cmp->p.width;
 
 	/* Adjust target rate according to post-dividers */
 	if (cmp->common.features & CCU_FEATURE_FIXED_POSTDIV)
 		rate = rate * cmp->fixed_post_div;
 
-	ccu_mp_find_best(parent_rate, rate, max_m, max_p, &m, &p);
+	ccu_mp_find_best(parent_rate, rate, max_m, max_p, shift, &m, &p);
 
 	spin_lock_irqsave(cmp->common.lock, flags);
 
@@ -153,7 +239,10 @@ static int ccu_mp_set_rate(struct clk_hw *hw, unsigned long rate,
 	reg &= ~GENMASK(cmp->m.width + cmp->m.shift - 1, cmp->m.shift);
 	reg &= ~GENMASK(cmp->p.width + cmp->p.shift - 1, cmp->p.shift);
 	reg |= (m - cmp->m.offset) << cmp->m.shift;
-	reg |= ilog2(p) << cmp->p.shift;
+	if (shift)
+		reg |= ilog2(p) << cmp->p.shift;
+	else
+		reg |= (p - cmp->p.offset) << cmp->p.shift;
 
 	writel(reg, cmp->common.base + cmp->common.reg);
 
@@ -188,6 +277,7 @@ const struct clk_ops ccu_mp_ops = {
 	.recalc_rate	= ccu_mp_recalc_rate,
 	.set_rate	= ccu_mp_set_rate,
 };
+EXPORT_SYMBOL_NS_GPL(ccu_mp_ops, "SUNXI_CCU");
 
 /*
  * Support for MMC timing mode switching
@@ -268,3 +358,4 @@ const struct clk_ops ccu_mp_mmc_ops = {
 	.recalc_rate	= ccu_mp_mmc_recalc_rate,
 	.set_rate	= ccu_mp_mmc_set_rate,
 };
+EXPORT_SYMBOL_NS_GPL(ccu_mp_mmc_ops, "SUNXI_CCU");

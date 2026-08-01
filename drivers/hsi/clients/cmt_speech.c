@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * cmt_speech.c - HSI CMT speech driver
  *
@@ -5,20 +6,6 @@
  *
  * Contact: Kai Vehmanen <kai.vehmanen@nokia.com>
  * Original author: Peter Ujfalusi <peter.ujfalusi@nokia.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
  */
 
 #include <linux/errno.h>
@@ -152,7 +139,7 @@ static void cs_notify(u32 message, struct list_head *head)
 		goto out;
 	}
 
-	entry = kmalloc(sizeof(*entry), GFP_ATOMIC);
+	entry = kmalloc_obj(*entry, GFP_ATOMIC);
 	if (!entry) {
 		dev_err(&cs_char_data.cl->device,
 			"Can't allocate new entry for the queue.\n");
@@ -286,7 +273,7 @@ static int cs_alloc_cmds(struct cs_hsi_iface *hi)
 		msg = hsi_alloc_msg(1, GFP_KERNEL);
 		if (!msg)
 			goto out;
-		buf = kmalloc(sizeof(*buf), GFP_KERNEL);
+		buf = kmalloc_obj(*buf);
 		if (!buf) {
 			hsi_free_msg(msg);
 			goto out;
@@ -840,7 +827,7 @@ static int check_buf_params(struct cs_hsi_iface *hi,
 	return r;
 }
 
-/**
+/*
  * Block until pending data transfers have completed.
  */
 static int cs_hsi_data_sync(struct cs_hsi_iface *hi)
@@ -863,7 +850,7 @@ static int cs_hsi_data_sync(struct cs_hsi_iface *hi)
 			r = -ERESTARTSYS;
 			goto out;
 		}
-		/**
+		/*
 		 * prepare_to_wait must be called with hi->lock held
 		 * so that callbacks can check for waitqueue_active()
 		 */
@@ -905,7 +892,7 @@ static void cs_hsi_data_enable(struct cs_hsi_iface *hi,
 
 	data_start = L1_CACHE_ALIGN(sizeof(*hi->mmap_cfg));
 	dev_dbg(&hi->cl->device,
-			"setting data start at %u, cfg block %u, align %u\n",
+			"setting data start at %u, cfg block %zu, align %u\n",
 			data_start, sizeof(*hi->mmap_cfg), L1_CACHE_BYTES);
 
 	for (i = 0; i < hi->mmap_cfg->rx_bufs; i++) {
@@ -978,14 +965,13 @@ static int cs_hsi_buf_config(struct cs_hsi_iface *hi,
 
 	if (old_state != hi->iface_state) {
 		if (hi->iface_state == CS_STATE_CONFIGURED) {
-			pm_qos_add_request(&hi->pm_qos_req,
-				PM_QOS_CPU_DMA_LATENCY,
+			cpu_latency_qos_add_request(&hi->pm_qos_req,
 				CS_QOS_LATENCY_FOR_DATA_USEC);
 			local_bh_disable();
 			cs_hsi_read_on_data(hi);
 			local_bh_enable();
 		} else if (old_state == CS_STATE_CONFIGURED) {
-			pm_qos_remove_request(&hi->pm_qos_req);
+			cpu_latency_qos_remove_request(&hi->pm_qos_req);
 		}
 	}
 	return r;
@@ -999,7 +985,7 @@ static int cs_hsi_start(struct cs_hsi_iface **hi, struct hsi_client *cl,
 			unsigned long mmap_base, unsigned long mmap_size)
 {
 	int err = 0;
-	struct cs_hsi_iface *hsi_if = kzalloc(sizeof(*hsi_if), GFP_KERNEL);
+	struct cs_hsi_iface *hsi_if = kzalloc_obj(*hsi_if);
 
 	dev_dbg(&cl->device, "cs_hsi_start\n");
 
@@ -1088,8 +1074,8 @@ static void cs_hsi_stop(struct cs_hsi_iface *hi)
 	WARN_ON(!cs_state_idle(hi->control_state));
 	WARN_ON(!cs_state_idle(hi->data_state));
 
-	if (pm_qos_request_active(&hi->pm_qos_req))
-		pm_qos_remove_request(&hi->pm_qos_req);
+	if (cpu_latency_qos_request_active(&hi->pm_qos_req))
+		cpu_latency_qos_remove_request(&hi->pm_qos_req);
 
 	spin_lock_bh(&hi->lock);
 	cs_hsi_free_data(hi);
@@ -1098,12 +1084,12 @@ static void cs_hsi_stop(struct cs_hsi_iface *hi)
 	kfree(hi);
 }
 
-static int cs_char_vma_fault(struct vm_fault *vmf)
+static vm_fault_t cs_char_vma_fault(struct vm_fault *vmf)
 {
 	struct cs_char *csdata = vmf->vma->vm_private_data;
 	struct page *page;
 
-	page = virt_to_page(csdata->mmap_base);
+	page = virt_to_page((void *)csdata->mmap_base);
 	get_page(page);
 	vmf->page = page;
 
@@ -1278,7 +1264,7 @@ static int cs_char_mmap(struct file *file, struct vm_area_struct *vma)
 	if (vma_pages(vma) != 1)
 		return -EINVAL;
 
-	vma->vm_flags |= VM_IO | VM_DONTDUMP | VM_DONTEXPAND;
+	vm_flags_set(vma, VM_IO | VM_DONTDUMP | VM_DONTEXPAND);
 	vma->vm_ops = &cs_char_vm_ops;
 	vma->vm_private_data = file->private_data;
 

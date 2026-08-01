@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* AFS filesystem file handling
  *
  * Copyright (C) 2002, 2007 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -17,25 +13,33 @@
 #include <linux/writeback.h>
 #include <linux/gfp.h>
 #include <linux/task_io_accounting_ops.h>
+#include <linux/mm.h>
+#include <linux/swap.h>
+#include <linux/netfs.h>
+#include <trace/events/netfs.h>
 #include "internal.h"
 
-static int afs_file_mmap(struct file *file, struct vm_area_struct *vma);
-static int afs_readpage(struct file *file, struct page *page);
-static void afs_invalidatepage(struct page *page, unsigned int offset,
-			       unsigned int length);
-static int afs_releasepage(struct page *page, gfp_t gfp_flags);
+static int afs_file_mmap_prepare(struct vm_area_desc *desc);
 
-static int afs_readpages(struct file *filp, struct address_space *mapping,
-			 struct list_head *pages, unsigned nr_pages);
+static ssize_t afs_file_read_iter(struct kiocb *iocb, struct iov_iter *iter);
+static ssize_t afs_file_splice_read(struct file *in, loff_t *ppos,
+				    struct pipe_inode_info *pipe,
+				    size_t len, unsigned int flags);
+static void afs_vm_open(struct vm_area_struct *area);
+static void afs_vm_close(struct vm_area_struct *area);
+static vm_fault_t afs_vm_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff, pgoff_t end_pgoff);
+static int afs_mapped(unsigned long start, unsigned long end, pgoff_t pgoff,
+		      const struct file *file, void **vm_private_data);
 
 const struct file_operations afs_file_operations = {
 	.open		= afs_open,
 	.release	= afs_release,
 	.llseek		= generic_file_llseek,
-	.read_iter	= generic_file_read_iter,
-	.write_iter	= afs_file_write,
-	.mmap		= afs_file_mmap,
-	.splice_read	= generic_file_splice_read,
+	.read_iter	= afs_file_read_iter,
+	.write_iter	= netfs_file_write_iter,
+	.mmap_prepare	= afs_file_mmap_prepare,
+	.splice_read	= afs_file_splice_read,
+	.splice_write	= iter_file_splice_write,
 	.fsync		= afs_fsync,
 	.lock		= afs_lock,
 	.flock		= afs_flock,
@@ -45,25 +49,25 @@ const struct inode_operations afs_file_inode_operations = {
 	.getattr	= afs_getattr,
 	.setattr	= afs_setattr,
 	.permission	= afs_permission,
-	.listxattr	= afs_listxattr,
 };
 
-const struct address_space_operations afs_fs_aops = {
-	.readpage	= afs_readpage,
-	.readpages	= afs_readpages,
-	.set_page_dirty	= afs_set_page_dirty,
-	.launder_page	= afs_launder_page,
-	.releasepage	= afs_releasepage,
-	.invalidatepage	= afs_invalidatepage,
-	.write_begin	= afs_write_begin,
-	.write_end	= afs_write_end,
-	.writepage	= afs_writepage,
+const struct address_space_operations afs_file_aops = {
+	.direct_IO	= noop_direct_IO,
+	.read_folio	= netfs_read_folio,
+	.readahead	= netfs_readahead,
+	.dirty_folio	= netfs_dirty_folio,
+	.release_folio	= netfs_release_folio,
+	.invalidate_folio = netfs_invalidate_folio,
+	.migrate_folio	= filemap_migrate_folio,
 	.writepages	= afs_writepages,
 };
 
 static const struct vm_operations_struct afs_vm_ops = {
+	.mapped		= afs_mapped,
+	.open		= afs_vm_open,
+	.close		= afs_vm_close,
 	.fault		= filemap_fault,
-	.map_pages	= filemap_map_pages,
+	.map_pages	= afs_vm_map_pages,
 	.page_mkwrite	= afs_page_mkwrite,
 };
 
@@ -72,7 +76,7 @@ static const struct vm_operations_struct afs_vm_ops = {
  */
 void afs_put_wb_key(struct afs_wb_key *wbk)
 {
-	if (refcount_dec_and_test(&wbk->usage)) {
+	if (wbk && refcount_dec_and_test(&wbk->usage)) {
 		key_put(wbk->key);
 		kfree(wbk);
 	}
@@ -85,7 +89,7 @@ int afs_cache_wb_key(struct afs_vnode *vnode, struct afs_file *af)
 {
 	struct afs_wb_key *wbk, *p;
 
-	wbk = kzalloc(sizeof(struct afs_wb_key), GFP_KERNEL);
+	wbk = kzalloc_obj(struct afs_wb_key);
 	if (!wbk)
 		return -ENOMEM;
 	refcount_set(&wbk->usage, 2);
@@ -121,7 +125,7 @@ int afs_open(struct inode *inode, struct file *file)
 	struct key *key;
 	int ret;
 
-	_enter("{%x:%u},", vnode->fid.vid, vnode->fid.vnode);
+	_enter("{%llx:%llu},", vnode->fid.vid, vnode->fid.vnode);
 
 	key = afs_request_key(vnode->volume->cell);
 	if (IS_ERR(key)) {
@@ -129,7 +133,7 @@ int afs_open(struct inode *inode, struct file *file)
 		goto error;
 	}
 
-	af = kzalloc(sizeof(*af), GFP_KERNEL);
+	af = kzalloc_obj(*af);
 	if (!af) {
 		ret = -ENOMEM;
 		goto error_key;
@@ -148,7 +152,9 @@ int afs_open(struct inode *inode, struct file *file)
 
 	if (file->f_flags & O_TRUNC)
 		set_bit(AFS_VNODE_NEW_CONTENT, &vnode->flags);
-	
+
+	fscache_use_cookie(afs_vnode_cache(vnode), file->f_mode & FMODE_WRITE);
+
 	file->private_data = af;
 	_leave(" = 0");
 	return 0;
@@ -167,508 +173,424 @@ error:
  */
 int afs_release(struct inode *inode, struct file *file)
 {
+	struct afs_vnode_cache_aux aux;
 	struct afs_vnode *vnode = AFS_FS_I(inode);
 	struct afs_file *af = file->private_data;
+	loff_t i_size;
+	int ret = 0;
 
-	_enter("{%x:%u},", vnode->fid.vid, vnode->fid.vnode);
+	_enter("{%llx:%llu},", vnode->fid.vid, vnode->fid.vnode);
 
 	if ((file->f_mode & FMODE_WRITE))
-		return vfs_fsync(file, 0);
+		ret = vfs_fsync(file, 0);
 
 	file->private_data = NULL;
 	if (af->wb)
 		afs_put_wb_key(af->wb);
+
+	if ((file->f_mode & FMODE_WRITE)) {
+		i_size = i_size_read(&vnode->netfs.inode);
+		afs_set_cache_aux(vnode, &aux);
+		fscache_unuse_cookie(afs_vnode_cache(vnode), &aux, &i_size);
+	} else {
+		fscache_unuse_cookie(afs_vnode_cache(vnode), NULL, NULL);
+	}
+
 	key_put(af->key);
 	kfree(af);
 	afs_prune_wb_keys(vnode);
-	_leave(" = 0");
-	return 0;
+	_leave(" = %d", ret);
+	return ret;
+}
+
+static void afs_fetch_data_notify(struct afs_operation *op)
+{
+	struct netfs_io_subrequest *subreq = op->fetch.subreq;
+
+	subreq->error = afs_op_error(op);
+	netfs_read_subreq_terminated(subreq);
+}
+
+static void afs_fetch_data_success(struct afs_operation *op)
+{
+	struct afs_vnode *vnode = op->file[0].vnode;
+
+	_enter("op=%08x", op->debug_id);
+	afs_vnode_commit_status(op, &op->file[0]);
+	afs_stat_v(vnode, n_fetches);
+	atomic_long_add(op->fetch.subreq->transferred, &op->net->n_fetch_bytes);
+	afs_fetch_data_notify(op);
+}
+
+static void afs_fetch_data_aborted(struct afs_operation *op)
+{
+	afs_check_for_remote_deletion(op);
+	afs_fetch_data_notify(op);
+}
+
+const struct afs_operation_ops afs_fetch_data_operation = {
+	.issue_afs_rpc	= afs_fs_fetch_data,
+	.issue_yfs_rpc	= yfs_fs_fetch_data,
+	.success	= afs_fetch_data_success,
+	.aborted	= afs_fetch_data_aborted,
+	.failed		= afs_fetch_data_notify,
+};
+
+static void afs_issue_read_call(struct afs_operation *op)
+{
+	op->call_responded = false;
+	op->call_error = 0;
+	op->call_abort_code = 0;
+	if (test_bit(AFS_SERVER_FL_IS_YFS, &op->server->flags))
+		yfs_fs_fetch_data(op);
+	else
+		afs_fs_fetch_data(op);
+}
+
+static void afs_end_read(struct afs_operation *op)
+{
+	if (op->call_responded && op->server)
+		set_bit(AFS_SERVER_FL_RESPONDING, &op->server->flags);
+
+	if (!afs_op_error(op))
+		afs_fetch_data_success(op);
+	else if (op->cumul_error.aborted)
+		afs_fetch_data_aborted(op);
+	else
+		afs_fetch_data_notify(op);
+
+	afs_end_vnode_operation(op);
+	afs_put_operation(op);
 }
 
 /*
- * Dispose of a ref to a read record.
+ * Perform I/O processing on an asynchronous call.  The work item carries a ref
+ * to the call struct that we either need to release or to pass on.
  */
-void afs_put_read(struct afs_read *req)
+static void afs_read_receive(struct afs_call *call)
 {
-	int i;
+	struct afs_operation *op = call->op;
+	enum afs_call_state state;
 
-	if (refcount_dec_and_test(&req->usage)) {
-		for (i = 0; i < req->nr_pages; i++)
-			if (req->pages[i])
-				put_page(req->pages[i]);
-		if (req->pages != req->array)
-			kfree(req->pages);
-		kfree(req);
+	_enter("");
+
+	state = READ_ONCE(call->state);
+	if (state == AFS_CALL_COMPLETE)
+		return;
+	trace_afs_read_recv(op, call);
+
+	while (state < AFS_CALL_COMPLETE && READ_ONCE(call->need_attention)) {
+		WRITE_ONCE(call->need_attention, false);
+		afs_deliver_to_call(call);
+		state = READ_ONCE(call->state);
+	}
+
+	if (state < AFS_CALL_COMPLETE) {
+		netfs_read_subreq_progress(op->fetch.subreq);
+		if (rxrpc_kernel_check_life(call->net->socket, call->rxcall))
+			return;
+		/* rxrpc terminated the call. */
+		afs_set_call_complete(call, call->error, call->abort_code);
+	}
+
+	op->call_abort_code	= call->abort_code;
+	op->call_error		= call->error;
+	op->call_responded	= call->responded;
+	op->call		= NULL;
+	call->op		= NULL;
+	afs_put_call(call);
+
+	/* If the call failed, then we need to crank the server rotation
+	 * handle and try the next.
+	 */
+	if (afs_select_fileserver(op)) {
+		afs_issue_read_call(op);
+		return;
+	}
+
+	afs_end_read(op);
+}
+
+void afs_fetch_data_async_rx(struct work_struct *work)
+{
+	struct afs_call *call = container_of(work, struct afs_call, async_work);
+
+	afs_read_receive(call);
+	afs_put_call(call);
+}
+
+void afs_fetch_data_immediate_cancel(struct afs_call *call)
+{
+	if (call->async) {
+		afs_get_call(call, afs_call_trace_wake);
+		if (!queue_work(afs_async_calls, &call->async_work))
+			afs_deferred_put_call(call);
+		flush_work(&call->async_work);
 	}
 }
-
-#ifdef CONFIG_AFS_FSCACHE
-/*
- * deal with notification that a page was read from the cache
- */
-static void afs_file_readpage_read_complete(struct page *page,
-					    void *data,
-					    int error)
-{
-	_enter("%p,%p,%d", page, data, error);
-
-	/* if the read completes with an error, we just unlock the page and let
-	 * the VM reissue the readpage */
-	if (!error)
-		SetPageUptodate(page);
-	unlock_page(page);
-}
-#endif
 
 /*
  * Fetch file data from the volume.
  */
-int afs_fetch_data(struct afs_vnode *vnode, struct key *key, struct afs_read *desc)
+static void afs_issue_read(struct netfs_io_subrequest *subreq)
 {
-	struct afs_fs_cursor fc;
-	int ret;
+	struct afs_operation *op;
+	struct afs_vnode *vnode = AFS_FS_I(subreq->rreq->inode);
+	struct key *key = subreq->rreq->netfs_priv;
 
-	_enter("%s{%x:%u.%u},%x,,,",
+	_enter("%s{%llx:%llu.%u},%x,,,",
 	       vnode->volume->name,
 	       vnode->fid.vid,
 	       vnode->fid.vnode,
 	       vnode->fid.unique,
 	       key_serial(key));
 
-	ret = -ERESTARTSYS;
-	if (afs_begin_vnode_operation(&fc, vnode, key)) {
-		while (afs_select_fileserver(&fc)) {
-			fc.cb_break = afs_calc_vnode_cb_break(vnode);
-			afs_fs_fetch_data(&fc, desc);
-		}
-
-		afs_check_for_remote_deletion(&fc, fc.vnode);
-		afs_vnode_commit_status(&fc, vnode, fc.cb_break);
-		ret = afs_end_vnode_operation(&fc);
+	op = afs_alloc_operation(key, vnode->volume);
+	if (IS_ERR(op)) {
+		subreq->error = PTR_ERR(op);
+		netfs_read_subreq_terminated(subreq);
+		return;
 	}
 
-	if (ret == 0) {
-		afs_stat_v(vnode, n_fetches);
-		atomic_long_add(desc->actual_len,
-				&afs_v2net(vnode)->n_fetch_bytes);
-	}
+	afs_op_set_vnode(op, 0, vnode);
 
-	_leave(" = %d", ret);
-	return ret;
-}
+	op->fetch.subreq = subreq;
+	op->ops		= &afs_fetch_data_operation;
 
-/*
- * read page from file, directory or symlink, given a key to use
- */
-int afs_page_filler(void *data, struct page *page)
-{
-	struct inode *inode = page->mapping->host;
-	struct afs_vnode *vnode = AFS_FS_I(inode);
-	struct afs_read *req;
-	struct key *key = data;
-	int ret;
+	trace_netfs_sreq(subreq, netfs_sreq_trace_submit);
 
-	_enter("{%x},{%lu},{%lu}", key_serial(key), inode->i_ino, page->index);
+	if (subreq->rreq->origin == NETFS_READAHEAD ||
+	    subreq->rreq->iocb) {
+		op->flags |= AFS_OPERATION_ASYNC;
 
-	BUG_ON(!PageLocked(page));
-
-	ret = -ESTALE;
-	if (test_bit(AFS_VNODE_DELETED, &vnode->flags))
-		goto error;
-
-	/* is it cached? */
-#ifdef CONFIG_AFS_FSCACHE
-	ret = fscache_read_or_alloc_page(vnode->cache,
-					 page,
-					 afs_file_readpage_read_complete,
-					 NULL,
-					 GFP_KERNEL);
-#else
-	ret = -ENOBUFS;
-#endif
-	switch (ret) {
-		/* read BIO submitted (page in cache) */
-	case 0:
-		break;
-
-		/* page not yet cached */
-	case -ENODATA:
-		_debug("cache said ENODATA");
-		goto go_on;
-
-		/* page will not be cached */
-	case -ENOBUFS:
-		_debug("cache said ENOBUFS");
-	default:
-	go_on:
-		req = kzalloc(sizeof(struct afs_read) + sizeof(struct page *),
-			      GFP_KERNEL);
-		if (!req)
-			goto enomem;
-
-		/* We request a full page.  If the page is a partial one at the
-		 * end of the file, the server will return a short read and the
-		 * unmarshalling code will clear the unfilled space.
-		 */
-		refcount_set(&req->usage, 1);
-		req->pos = (loff_t)page->index << PAGE_SHIFT;
-		req->len = PAGE_SIZE;
-		req->nr_pages = 1;
-		req->pages = req->array;
-		req->pages[0] = page;
-		get_page(page);
-
-		/* read the contents of the file from the server into the
-		 * page */
-		ret = afs_fetch_data(vnode, key, req);
-		afs_put_read(req);
-
-		if (ret < 0) {
-			if (ret == -ENOENT) {
-				_debug("got NOENT from server"
-				       " - marking file deleted and stale");
-				set_bit(AFS_VNODE_DELETED, &vnode->flags);
-				ret = -ESTALE;
-			}
-
-#ifdef CONFIG_AFS_FSCACHE
-			fscache_uncache_page(vnode->cache, page);
-#endif
-			BUG_ON(PageFsCache(page));
-
-			if (ret == -EINTR ||
-			    ret == -ENOMEM ||
-			    ret == -ERESTARTSYS ||
-			    ret == -EAGAIN)
-				goto error;
-			goto io_error;
+		if (!afs_begin_vnode_operation(op)) {
+			subreq->error = afs_put_operation(op);
+			netfs_read_subreq_terminated(subreq);
+			return;
 		}
 
-		SetPageUptodate(page);
-
-		/* send the page to the cache */
-#ifdef CONFIG_AFS_FSCACHE
-		if (PageFsCache(page) &&
-		    fscache_write_page(vnode->cache, page, vnode->status.size,
-				       GFP_KERNEL) != 0) {
-			fscache_uncache_page(vnode->cache, page);
-			BUG_ON(PageFsCache(page));
+		if (!afs_select_fileserver(op)) {
+			afs_end_read(op);
+			return;
 		}
-#endif
-		unlock_page(page);
-	}
 
-	_leave(" = 0");
-	return 0;
-
-io_error:
-	SetPageError(page);
-	goto error;
-enomem:
-	ret = -ENOMEM;
-error:
-	unlock_page(page);
-	_leave(" = %d", ret);
-	return ret;
-}
-
-/*
- * read page from file, directory or symlink, given a file to nominate the key
- * to be used
- */
-static int afs_readpage(struct file *file, struct page *page)
-{
-	struct key *key;
-	int ret;
-
-	if (file) {
-		key = afs_file_key(file);
-		ASSERT(key != NULL);
-		ret = afs_page_filler(key, page);
+		afs_issue_read_call(op);
 	} else {
-		struct inode *inode = page->mapping->host;
-		key = afs_request_key(AFS_FS_S(inode->i_sb)->cell);
-		if (IS_ERR(key)) {
-			ret = PTR_ERR(key);
-		} else {
-			ret = afs_page_filler(key, page);
-			key_put(key);
-		}
+		afs_do_sync_operation(op);
 	}
-	return ret;
 }
 
-/*
- * Make pages available as they're filled.
- */
-static void afs_readpages_page_done(struct afs_call *call, struct afs_read *req)
+static int afs_init_request(struct netfs_io_request *rreq, struct file *file)
 {
-#ifdef CONFIG_AFS_FSCACHE
-	struct afs_vnode *vnode = call->reply[0];
-#endif
-	struct page *page = req->pages[req->index];
+	struct afs_vnode *vnode = AFS_FS_I(rreq->inode);
 
-	req->pages[req->index] = NULL;
-	SetPageUptodate(page);
+	if (file)
+		rreq->netfs_priv = key_get(afs_file_key(file));
+	rreq->rsize = 256 * 1024;
+	rreq->wsize = 256 * 1024 * 1024;
 
-	/* send the page to the cache */
-#ifdef CONFIG_AFS_FSCACHE
-	if (PageFsCache(page) &&
-	    fscache_write_page(vnode->cache, page, vnode->status.size,
-			       GFP_KERNEL) != 0) {
-		fscache_uncache_page(vnode->cache, page);
-		BUG_ON(PageFsCache(page));
-	}
-#endif
-	unlock_page(page);
-	put_page(page);
-}
+	switch (rreq->origin) {
+	case NETFS_READ_SINGLE:
+		if (!file) {
+			struct key *key = afs_request_key(vnode->volume->cell);
 
-/*
- * Read a contiguous set of pages.
- */
-static int afs_readpages_one(struct file *file, struct address_space *mapping,
-			     struct list_head *pages)
-{
-	struct afs_vnode *vnode = AFS_FS_I(mapping->host);
-	struct afs_read *req;
-	struct list_head *p;
-	struct page *first, *page;
-	struct key *key = afs_file_key(file);
-	pgoff_t index;
-	int ret, n, i;
-
-	/* Count the number of contiguous pages at the front of the list.  Note
-	 * that the list goes prev-wards rather than next-wards.
-	 */
-	first = list_entry(pages->prev, struct page, lru);
-	index = first->index + 1;
-	n = 1;
-	for (p = first->lru.prev; p != pages; p = p->prev) {
-		page = list_entry(p, struct page, lru);
-		if (page->index != index)
-			break;
-		index++;
-		n++;
-	}
-
-	req = kzalloc(sizeof(struct afs_read) + sizeof(struct page *) * n,
-		      GFP_NOFS);
-	if (!req)
-		return -ENOMEM;
-
-	refcount_set(&req->usage, 1);
-	req->page_done = afs_readpages_page_done;
-	req->pos = first->index;
-	req->pos <<= PAGE_SHIFT;
-	req->pages = req->array;
-
-	/* Transfer the pages to the request.  We add them in until one fails
-	 * to add to the LRU and then we stop (as that'll make a hole in the
-	 * contiguous run.
-	 *
-	 * Note that it's possible for the file size to change whilst we're
-	 * doing this, but we rely on the server returning less than we asked
-	 * for if the file shrank.  We also rely on this to deal with a partial
-	 * page at the end of the file.
-	 */
-	do {
-		page = list_entry(pages->prev, struct page, lru);
-		list_del(&page->lru);
-		index = page->index;
-		if (add_to_page_cache_lru(page, mapping, index,
-					  readahead_gfp_mask(mapping))) {
-#ifdef CONFIG_AFS_FSCACHE
-			fscache_uncache_page(vnode->cache, page);
-#endif
-			put_page(page);
-			break;
+			if (IS_ERR(key))
+				return PTR_ERR(key);
+			rreq->netfs_priv = key;
 		}
-
-		req->pages[req->nr_pages++] = page;
-		req->len += PAGE_SIZE;
-	} while (req->nr_pages < n);
-
-	if (req->nr_pages == 0) {
-		kfree(req);
-		return 0;
-	}
-
-	ret = afs_fetch_data(vnode, key, req);
-	if (ret < 0)
-		goto error;
-
-	task_io_account_read(PAGE_SIZE * req->nr_pages);
-	afs_put_read(req);
-	return 0;
-
-error:
-	if (ret == -ENOENT) {
-		_debug("got NOENT from server"
-		       " - marking file deleted and stale");
-		set_bit(AFS_VNODE_DELETED, &vnode->flags);
-		ret = -ESTALE;
-	}
-
-	for (i = 0; i < req->nr_pages; i++) {
-		page = req->pages[i];
-		if (page) {
-#ifdef CONFIG_AFS_FSCACHE
-			fscache_uncache_page(vnode->cache, page);
-#endif
-			SetPageError(page);
-			unlock_page(page);
-		}
-	}
-
-	afs_put_read(req);
-	return ret;
-}
-
-/*
- * read a set of pages
- */
-static int afs_readpages(struct file *file, struct address_space *mapping,
-			 struct list_head *pages, unsigned nr_pages)
-{
-	struct key *key = afs_file_key(file);
-	struct afs_vnode *vnode;
-	int ret = 0;
-
-	_enter("{%d},{%lu},,%d",
-	       key_serial(key), mapping->host->i_ino, nr_pages);
-
-	ASSERT(key != NULL);
-
-	vnode = AFS_FS_I(mapping->host);
-	if (test_bit(AFS_VNODE_DELETED, &vnode->flags)) {
-		_leave(" = -ESTALE");
-		return -ESTALE;
-	}
-
-	/* attempt to read as many of the pages as possible */
-#ifdef CONFIG_AFS_FSCACHE
-	ret = fscache_read_or_alloc_pages(vnode->cache,
-					  mapping,
-					  pages,
-					  &nr_pages,
-					  afs_file_readpage_read_complete,
-					  NULL,
-					  mapping_gfp_mask(mapping));
-#else
-	ret = -ENOBUFS;
-#endif
-
-	switch (ret) {
-		/* all pages are being read from the cache */
-	case 0:
-		BUG_ON(!list_empty(pages));
-		BUG_ON(nr_pages != 0);
-		_leave(" = 0 [reading all]");
-		return 0;
-
-		/* there were pages that couldn't be read from the cache */
-	case -ENODATA:
-	case -ENOBUFS:
 		break;
-
-		/* other error */
+	case NETFS_WRITEBACK:
+	case NETFS_WRITETHROUGH:
+	case NETFS_UNBUFFERED_WRITE:
+	case NETFS_DIO_WRITE:
+		if (S_ISREG(rreq->inode->i_mode))
+			rreq->io_streams[0].avail = true;
+		break;
+	case NETFS_WRITEBACK_SINGLE:
 	default:
-		_leave(" = %d", ret);
-		return ret;
+		break;
 	}
+	return 0;
+}
 
-	while (!list_empty(pages)) {
-		ret = afs_readpages_one(file, mapping, pages);
-		if (ret < 0)
-			break;
-	}
+static int afs_check_write_begin(struct file *file, loff_t pos, unsigned len,
+				 struct folio **foliop, void **_fsdata)
+{
+	struct afs_vnode *vnode = AFS_FS_I(file_inode(file));
 
-	_leave(" = %d [netting]", ret);
-	return ret;
+	return test_bit(AFS_VNODE_DELETED, &vnode->flags) ? -ESTALE : 0;
+}
+
+static void afs_free_request(struct netfs_io_request *rreq)
+{
+	key_put(rreq->netfs_priv);
+	afs_put_wb_key(rreq->netfs_priv2);
 }
 
 /*
- * invalidate part or all of a page
- * - release a page and clean up its private data if offset is 0 (indicating
- *   the entire page)
+ * Set the file size and block count, taking ->cb_lock and ->i_lock to maintain
+ * coherency and prevent 64-bit tearing on 32-bit arches.
+ *
+ * Also, estimate the number of 512 bytes blocks used, rounded up to nearest 1K
+ * for consistency with other AFS clients.
  */
-static void afs_invalidatepage(struct page *page, unsigned int offset,
-			       unsigned int length)
+void afs_set_i_size(struct afs_vnode *vnode, loff_t new_i_size)
 {
-	struct afs_vnode *vnode = AFS_FS_I(page->mapping->host);
-	unsigned long priv;
+	struct inode *inode = &vnode->netfs.inode;
+	loff_t i_size;
 
-	_enter("{%lu},%u,%u", page->index, offset, length);
-
-	BUG_ON(!PageLocked(page));
-
-	/* we clean up only if the entire page is being invalidated */
-	if (offset == 0 && length == PAGE_SIZE) {
-#ifdef CONFIG_AFS_FSCACHE
-		if (PageFsCache(page)) {
-			struct afs_vnode *vnode = AFS_FS_I(page->mapping->host);
-			fscache_wait_on_page_write(vnode->cache, page);
-			fscache_uncache_page(vnode->cache, page);
-		}
-#endif
-
-		if (PagePrivate(page)) {
-			priv = page_private(page);
-			trace_afs_page_dirty(vnode, tracepoint_string("inval"),
-					     page->index, priv);
-			set_page_private(page, 0);
-			ClearPagePrivate(page);
-		}
+	write_seqlock(&vnode->cb_lock);
+	spin_lock(&inode->i_lock);
+	i_size = i_size_read(inode);
+	if (new_i_size > i_size) {
+		i_size_write(inode, new_i_size);
+		inode_set_bytes(inode, round_up(new_i_size, 1024));
 	}
-
-	_leave("");
+	spin_unlock(&inode->i_lock);
+	write_sequnlock(&vnode->cb_lock);
+	fscache_update_cookie(afs_vnode_cache(vnode), NULL, &new_i_size);
 }
 
-/*
- * release a page and clean up its private state if it's not busy
- * - return true if the page can now be released, false if not
- */
-static int afs_releasepage(struct page *page, gfp_t gfp_flags)
+static void afs_update_i_size(struct inode *inode, loff_t new_i_size)
 {
-	struct afs_vnode *vnode = AFS_FS_I(page->mapping->host);
-	unsigned long priv;
+	afs_set_i_size(AFS_FS_I(inode), new_i_size);
+}
 
-	_enter("{{%x:%u}[%lu],%lx},%x",
-	       vnode->fid.vid, vnode->fid.vnode, page->index, page->flags,
-	       gfp_flags);
+static void afs_netfs_invalidate_cache(struct netfs_io_request *wreq)
+{
+	struct afs_vnode *vnode = AFS_FS_I(wreq->inode);
 
-	/* deny if page is being written to the cache and the caller hasn't
-	 * elected to wait */
-#ifdef CONFIG_AFS_FSCACHE
-	if (!fscache_maybe_release_page(vnode->cache, page, gfp_flags)) {
-		_leave(" = F [cache busy]");
-		return 0;
+	afs_invalidate_cache(vnode, 0);
+}
+
+const struct netfs_request_ops afs_req_ops = {
+	.init_request		= afs_init_request,
+	.free_request		= afs_free_request,
+	.check_write_begin	= afs_check_write_begin,
+	.issue_read		= afs_issue_read,
+	.update_i_size		= afs_update_i_size,
+	.invalidate_cache	= afs_netfs_invalidate_cache,
+	.begin_writeback	= afs_begin_writeback,
+	.prepare_write		= afs_prepare_write,
+	.issue_write		= afs_issue_write,
+	.retry_request		= afs_retry_request,
+};
+
+static void afs_add_open_mmap(struct afs_vnode *vnode)
+{
+	if (atomic_inc_return(&vnode->cb_nr_mmap) == 1) {
+		down_write(&vnode->volume->open_mmaps_lock);
+
+		if (list_empty(&vnode->cb_mmap_link))
+			list_add_tail(&vnode->cb_mmap_link, &vnode->volume->open_mmaps);
+
+		up_write(&vnode->volume->open_mmaps_lock);
 	}
-#endif
+}
 
-	if (PagePrivate(page)) {
-		priv = page_private(page);
-		trace_afs_page_dirty(vnode, tracepoint_string("rel"),
-				     page->index, priv);
-		set_page_private(page, 0);
-		ClearPagePrivate(page);
-	}
+static void afs_drop_open_mmap(struct afs_vnode *vnode)
+{
+	if (atomic_add_unless(&vnode->cb_nr_mmap, -1, 1))
+		return;
 
-	/* indicate that the page can be released */
-	_leave(" = T");
-	return 1;
+	down_write(&vnode->volume->open_mmaps_lock);
+
+	read_seqlock_excl(&vnode->cb_lock);
+	// the only place where ->cb_nr_mmap may hit 0
+	// see __afs_break_callback() for the other side...
+	if (atomic_dec_and_test(&vnode->cb_nr_mmap))
+		list_del_init(&vnode->cb_mmap_link);
+	read_sequnlock_excl(&vnode->cb_lock);
+
+	up_write(&vnode->volume->open_mmaps_lock);
+	flush_work(&vnode->cb_work);
 }
 
 /*
  * Handle setting up a memory mapping on an AFS file.
  */
-static int afs_file_mmap(struct file *file, struct vm_area_struct *vma)
+static int afs_file_mmap_prepare(struct vm_area_desc *desc)
 {
 	int ret;
 
-	ret = generic_file_mmap(file, vma);
+	ret = generic_file_mmap_prepare(desc);
+	if (ret)
+		return ret;
+
+	desc->vm_ops = &afs_vm_ops;
+	return ret;
+}
+
+static int afs_mapped(unsigned long start, unsigned long end, pgoff_t pgoff,
+		      const struct file *file, void **vm_private_data)
+{
+	struct afs_vnode *vnode = AFS_FS_I(file_inode(file));
+
+	afs_add_open_mmap(vnode);
+	return 0;
+}
+
+static void afs_vm_open(struct vm_area_struct *vma)
+{
+	struct file *file = vma->vm_file;
+	struct afs_vnode *vnode = AFS_FS_I(file_inode(file));
+
+	afs_add_open_mmap(vnode);
+}
+
+static void afs_vm_close(struct vm_area_struct *vma)
+{
+	struct file *file = vma->vm_file;
+	struct afs_vnode *vnode = AFS_FS_I(file_inode(file));
+
+	afs_drop_open_mmap(vnode);
+}
+
+static vm_fault_t afs_vm_map_pages(struct vm_fault *vmf, pgoff_t start_pgoff, pgoff_t end_pgoff)
+{
+	struct file *file = vmf->vma->vm_file;
+	struct afs_vnode *vnode = AFS_FS_I(file_inode(file));
+
+	if (afs_check_validity(vnode))
+		return filemap_map_pages(vmf, start_pgoff, end_pgoff);
+	return 0;
+}
+
+static ssize_t afs_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
+{
+	struct inode *inode = file_inode(iocb->ki_filp);
+	struct afs_vnode *vnode = AFS_FS_I(inode);
+	struct afs_file *af = iocb->ki_filp->private_data;
+	ssize_t ret;
+
+	if (iocb->ki_flags & IOCB_DIRECT)
+		return netfs_unbuffered_read_iter(iocb, iter);
+
+	ret = netfs_start_io_read(inode);
+	if (ret < 0)
+		return ret;
+	ret = afs_validate(vnode, af->key);
 	if (ret == 0)
-		vma->vm_ops = &afs_vm_ops;
+		ret = filemap_read(iocb, iter, 0);
+	netfs_end_io_read(inode);
+	return ret;
+}
+
+static ssize_t afs_file_splice_read(struct file *in, loff_t *ppos,
+				    struct pipe_inode_info *pipe,
+				    size_t len, unsigned int flags)
+{
+	struct inode *inode = file_inode(in);
+	struct afs_vnode *vnode = AFS_FS_I(inode);
+	struct afs_file *af = in->private_data;
+	ssize_t ret;
+
+	ret = netfs_start_io_read(inode);
+	if (ret < 0)
+		return ret;
+	ret = afs_validate(vnode, af->key);
+	if (ret == 0)
+		ret = filemap_splice_read(in, ppos, pipe, len, flags);
+	netfs_end_io_read(inode);
 	return ret;
 }

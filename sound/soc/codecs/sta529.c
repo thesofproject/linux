@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * ASoC codec driver for spear platform
  *
@@ -5,10 +6,6 @@
  *
  * Copyright (C) 2012 ST Microelectronics
  * Rajeev Kumar <rajeevkumar.linux@gmail.com>
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #include <linux/clk.h>
@@ -155,6 +152,7 @@ static int sta529_set_bias_level(struct snd_soc_component *component, enum
 		snd_soc_bias_level level)
 {
 	struct sta529 *sta529 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 
 	switch (level) {
 	case SND_SOC_BIAS_ON:
@@ -165,7 +163,7 @@ static int sta529_set_bias_level(struct snd_soc_component *component, enum
 				FFX_CLK_ENB);
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF)
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_OFF)
 			regcache_sync(sta529->regmap);
 		snd_soc_component_update_bits(component, STA529_FFXCFG0,
 					POWER_CNTLMSAK, POWER_STDBY);
@@ -251,7 +249,7 @@ static int sta529_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int sta529_mute(struct snd_soc_dai *dai, int mute)
+static int sta529_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	u8 val = 0;
 
@@ -291,7 +289,8 @@ static int sta529_set_dai_fmt(struct snd_soc_dai *codec_dai, u32 fmt)
 static const struct snd_soc_dai_ops sta529_dai_ops = {
 	.hw_params	=	sta529_hw_params,
 	.set_fmt	=	sta529_set_dai_fmt,
-	.digital_mute	=	sta529_mute,
+	.mute_stream	=	sta529_mute,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver sta529_dai = {
@@ -321,7 +320,6 @@ static const struct snd_soc_component_driver sta529_component_driver = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config sta529_regmap = {
@@ -331,13 +329,12 @@ static const struct regmap_config sta529_regmap = {
 	.max_register = STA529_MAX_REGISTER,
 	.readable_reg = sta529_readable,
 
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.reg_defaults = sta529_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(sta529_reg_defaults),
 };
 
-static int sta529_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+static int sta529_i2c_probe(struct i2c_client *i2c)
 {
 	struct sta529 *sta529;
 	int ret;
@@ -364,7 +361,7 @@ static int sta529_i2c_probe(struct i2c_client *i2c,
 }
 
 static const struct i2c_device_id sta529_i2c_id[] = {
-	{ "sta529", 0 },
+	{ .name = "sta529" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, sta529_i2c_id);

@@ -17,6 +17,12 @@
 
 #undef DEBUG_CMDLINE
 
+/*
+ * A 32-bit ARC PROM pass arguments and environment as 32-bit pointer.
+ * These macro take care of sign extension.
+ */
+#define prom_argv(index) ((char *) (long)argv[(index)])
+
 static char *ignored[] = {
 	"ConsoleIn=",
 	"ConsoleOut=",
@@ -32,16 +38,17 @@ static char *used_arc[][2] = {
 	{ "OSLoadOptions=", "" }
 };
 
-static char * __init move_firmware_args(char* cp)
+static char __init *move_firmware_args(int argc, LONG *argv, char *cp)
 {
 	char *s;
 	int actr, i;
+	size_t len;
 
 	actr = 1; /* Always ignore argv[0] */
 
-	while (actr < prom_argc) {
-		for(i = 0; i < ARRAY_SIZE(used_arc); i++) {
-			int len = strlen(used_arc[i][0]);
+	while (actr < argc) {
+		for (i = 0; i < ARRAY_SIZE(used_arc); i++) {
+			len = strlen(used_arc[i][0]);
 
 			if (!strncmp(prom_argv(actr), used_arc[i][0], len)) {
 			/* Ok, we want it. First append the replacement... */
@@ -51,8 +58,9 @@ static char * __init move_firmware_args(char* cp)
 				s = strchr(prom_argv(actr), '=');
 				if (s) {
 					s++;
-					strcpy(cp, s);
-					cp += strlen(s);
+					len = strlen(s);
+					memcpy(cp, s, len + 1);
+					cp += len;
 				}
 				*cp++ = ' ';
 				break;
@@ -64,10 +72,11 @@ static char * __init move_firmware_args(char* cp)
 	return cp;
 }
 
-void __init prom_init_cmdline(void)
+void __init prom_init_cmdline(int argc, LONG *argv)
 {
 	char *cp;
 	int actr, i;
+	size_t len;
 
 	actr = 1; /* Always ignore argv[0] */
 
@@ -76,18 +85,19 @@ void __init prom_init_cmdline(void)
 	 * Move ARC variables to the beginning to make sure they can be
 	 * overridden by later arguments.
 	 */
-	cp = move_firmware_args(cp);
+	cp = move_firmware_args(argc, argv, cp);
 
-	while (actr < prom_argc) {
+	while (actr < argc) {
 		for (i = 0; i < ARRAY_SIZE(ignored); i++) {
-			int len = strlen(ignored[i]);
-
+			len = strlen(ignored[i]);
 			if (!strncmp(prom_argv(actr), ignored[i], len))
 				goto pic_cont;
 		}
+
 		/* Ok, we want it. */
-		strcpy(cp, prom_argv(actr));
-		cp += strlen(prom_argv(actr));
+		len = strlen(prom_argv(actr));
+		memcpy(cp, prom_argv(actr), len + 1);
+		cp += len;
 		*cp++ = ' ';
 
 	pic_cont:
@@ -99,6 +109,6 @@ void __init prom_init_cmdline(void)
 	*cp = '\0';
 
 #ifdef DEBUG_CMDLINE
-	printk(KERN_DEBUG "prom cmdline: %s\n", arcs_cmdline);
+	pr_debug("prom cmdline: %s\n", arcs_cmdline);
 #endif
 }

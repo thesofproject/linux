@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Cryptographic API.
  *
@@ -5,32 +6,25 @@
  *
  * Copyright (c) 2008 Neil Horman <nhorman@tuxdriver.com>
  * Copyright (c) 2015 Herbert Xu <herbert@gondor.apana.org.au>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
  */
 
-#include <linux/atomic.h>
 #include <crypto/internal/rng.h>
+#include <linux/atomic.h>
+#include <linux/cryptouser.h>
 #include <linux/err.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/random.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/string.h>
-#include <linux/cryptouser.h>
-#include <linux/compiler.h>
 #include <net/netlink.h>
 
 #include "internal.h"
 
 static DEFINE_MUTEX(crypto_default_rng_lock);
-struct crypto_rng *crypto_default_rng;
-EXPORT_SYMBOL_GPL(crypto_default_rng);
+static struct crypto_rng *crypto_default_rng;
 static int crypto_default_rng_refcnt;
 
 int crypto_rng_reset(struct crypto_rng *tfm, const u8 *seed, unsigned int slen)
@@ -51,7 +45,7 @@ int crypto_rng_reset(struct crypto_rng *tfm, const u8 *seed, unsigned int slen)
 
 	err = crypto_rng_alg(tfm)->seed(tfm, seed, slen);
 out:
-	kzfree(buf);
+	kfree_sensitive(buf);
 	return err;
 }
 EXPORT_SYMBOL_GPL(crypto_rng_reset);
@@ -68,33 +62,20 @@ static unsigned int seedsize(struct crypto_alg *alg)
 	return ralg->seedsize;
 }
 
-#ifdef CONFIG_NET
-static int crypto_rng_report(struct sk_buff *skb, struct crypto_alg *alg)
+static int __maybe_unused crypto_rng_report(
+	struct sk_buff *skb, struct crypto_alg *alg)
 {
-	struct crypto_report_rng rrng;
-
-	strncpy(rrng.type, "rng", sizeof(rrng.type));
+	struct crypto_report_rng rrng = {
+		.type = "rng",
+	};
 
 	rrng.seedsize = seedsize(alg);
 
-	if (nla_put(skb, CRYPTOCFGA_REPORT_RNG,
-		    sizeof(struct crypto_report_rng), &rrng))
-		goto nla_put_failure;
-	return 0;
-
-nla_put_failure:
-	return -EMSGSIZE;
+	return nla_put(skb, CRYPTOCFGA_REPORT_RNG, sizeof(rrng), &rrng);
 }
-#else
-static int crypto_rng_report(struct sk_buff *skb, struct crypto_alg *alg)
-{
-	return -ENOSYS;
-}
-#endif
 
-static void crypto_rng_show(struct seq_file *m, struct crypto_alg *alg)
-	__maybe_unused;
-static void crypto_rng_show(struct seq_file *m, struct crypto_alg *alg)
+static void __maybe_unused crypto_rng_show(struct seq_file *m,
+					   struct crypto_alg *alg)
 {
 	seq_printf(m, "type         : rng\n");
 	seq_printf(m, "seedsize     : %u\n", seedsize(alg));
@@ -106,11 +87,14 @@ static const struct crypto_type crypto_rng_type = {
 #ifdef CONFIG_PROC_FS
 	.show = crypto_rng_show,
 #endif
+#if IS_ENABLED(CONFIG_CRYPTO_USER)
 	.report = crypto_rng_report,
+#endif
 	.maskclear = ~CRYPTO_ALG_TYPE_MASK,
 	.maskset = CRYPTO_ALG_TYPE_MASK,
 	.type = CRYPTO_ALG_TYPE_RNG,
 	.tfmsize = offsetof(struct crypto_rng, base),
+	.algsize = offsetof(struct rng_alg, base),
 };
 
 struct crypto_rng *crypto_alloc_rng(const char *alg_name, u32 type, u32 mask)
@@ -119,7 +103,7 @@ struct crypto_rng *crypto_alloc_rng(const char *alg_name, u32 type, u32 mask)
 }
 EXPORT_SYMBOL_GPL(crypto_alloc_rng);
 
-int crypto_get_default_rng(void)
+static int crypto_get_default_rng(void)
 {
 	struct crypto_rng *rng;
 	int err;
@@ -148,15 +132,27 @@ unlock:
 
 	return err;
 }
-EXPORT_SYMBOL_GPL(crypto_get_default_rng);
 
-void crypto_put_default_rng(void)
+static void crypto_put_default_rng(void)
 {
 	mutex_lock(&crypto_default_rng_lock);
 	crypto_default_rng_refcnt--;
 	mutex_unlock(&crypto_default_rng_lock);
 }
-EXPORT_SYMBOL_GPL(crypto_put_default_rng);
+
+int __crypto_stdrng_get_bytes(void *buf, unsigned int len)
+{
+	int err;
+
+	err = crypto_get_default_rng();
+	if (err)
+		return err;
+
+	err = crypto_rng_get_bytes(crypto_default_rng, buf, len);
+	crypto_put_default_rng();
+	return err;
+}
+EXPORT_SYMBOL_GPL(__crypto_stdrng_get_bytes);
 
 #if defined(CONFIG_CRYPTO_RNG) || defined(CONFIG_CRYPTO_RNG_MODULE)
 int crypto_del_default_rng(void)
@@ -180,6 +176,11 @@ out:
 EXPORT_SYMBOL_GPL(crypto_del_default_rng);
 #endif
 
+static void rng_default_set_ent(struct crypto_rng *tfm, const u8 *data,
+				unsigned int len)
+{
+}
+
 int crypto_register_rng(struct rng_alg *alg)
 {
 	struct crypto_alg *base = &alg->base;
@@ -190,6 +191,9 @@ int crypto_register_rng(struct rng_alg *alg)
 	base->cra_type = &crypto_rng_type;
 	base->cra_flags &= ~CRYPTO_ALG_TYPE_MASK;
 	base->cra_flags |= CRYPTO_ALG_TYPE_RNG;
+
+	if (!alg->set_ent)
+		alg->set_ent = rng_default_set_ent;
 
 	return crypto_register_alg(base);
 }
@@ -207,17 +211,13 @@ int crypto_register_rngs(struct rng_alg *algs, int count)
 
 	for (i = 0; i < count; i++) {
 		ret = crypto_register_rng(algs + i);
-		if (ret)
-			goto err;
+		if (ret) {
+			crypto_unregister_rngs(algs, i);
+			return ret;
+		}
 	}
 
 	return 0;
-
-err:
-	for (--i; i >= 0; --i)
-		crypto_unregister_rng(algs + i);
-
-	return ret;
 }
 EXPORT_SYMBOL_GPL(crypto_register_rngs);
 
@@ -229,6 +229,17 @@ void crypto_unregister_rngs(struct rng_alg *algs, int count)
 		crypto_unregister_rng(algs + i);
 }
 EXPORT_SYMBOL_GPL(crypto_unregister_rngs);
+
+static void __exit rng_exit(void)
+{
+	int err;
+
+	err = crypto_del_default_rng();
+	if (err)
+		pr_err("Failed delete default RNG: %d\n", err);
+}
+
+module_exit(rng_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Random Number Generator");

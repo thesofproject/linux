@@ -10,8 +10,7 @@
 #include <linux/module.h>
 #include <linux/power_supply.h>
 #include <linux/slab.h>
-
-#include "greybus.h"
+#include <linux/greybus.h>
 
 #define PROP_MAX 32
 
@@ -325,7 +324,7 @@ static struct gb_power_supply_prop *get_psy_prop(struct gb_power_supply *gbpsy,
 }
 
 static int is_psy_prop_writeable(struct gb_power_supply *gbpsy,
-				     enum power_supply_property psp)
+				 enum power_supply_property psp)
 {
 	struct gb_power_supply_prop *prop;
 
@@ -450,7 +449,7 @@ static int __gb_power_supply_set_name(char *init_name, char *name, size_t len)
 
 	if (!strlen(init_name))
 		init_name = "gb_power_supply";
-	strlcpy(name, init_name, len);
+	strscpy(name, init_name, len);
 
 	while ((ret < len) && (psy = power_supply_get_by_name(name))) {
 		power_supply_put(psy);
@@ -494,7 +493,7 @@ static int gb_power_supply_description_get(struct gb_power_supply *gbpsy)
 	if (!gbpsy->model_name)
 		return -ENOMEM;
 	gbpsy->serial_number = kstrndup(resp.serial_number, PROP_MAX,
-				       GFP_KERNEL);
+					GFP_KERNEL);
 	if (!gbpsy->serial_number)
 		return -ENOMEM;
 
@@ -520,8 +519,8 @@ static int gb_power_supply_prop_descriptors_get(struct gb_power_supply *gbpsy)
 
 	op = gb_operation_create(connection,
 				 GB_POWER_SUPPLY_TYPE_GET_PROP_DESCRIPTORS,
-				 sizeof(req), sizeof(*resp) + props_count *
-				 sizeof(struct gb_power_supply_props_desc),
+				 sizeof(*req),
+				 struct_size(resp, props, props_count),
 				 GFP_KERNEL);
 	if (!op)
 		return -ENOMEM;
@@ -546,15 +545,14 @@ static int gb_power_supply_prop_descriptors_get(struct gb_power_supply *gbpsy)
 		}
 	}
 
-	gbpsy->props = kcalloc(gbpsy->properties_count, sizeof(*gbpsy->props),
-			      GFP_KERNEL);
+	gbpsy->props = kzalloc_objs(*gbpsy->props, gbpsy->properties_count);
 	if (!gbpsy->props) {
 		ret = -ENOMEM;
 		goto out_put_operation;
 	}
 
-	gbpsy->props_raw = kcalloc(gbpsy->properties_count,
-				   sizeof(*gbpsy->props_raw), GFP_KERNEL);
+	gbpsy->props_raw = kzalloc_objs(*gbpsy->props_raw,
+					gbpsy->properties_count);
 	if (!gbpsy->props_raw) {
 		ret = -ENOMEM;
 		goto out_put_operation;
@@ -635,8 +633,8 @@ static int __gb_power_supply_property_get(struct gb_power_supply *gbpsy,
 }
 
 static int __gb_power_supply_property_strval_get(struct gb_power_supply *gbpsy,
-						enum power_supply_property psp,
-						union power_supply_propval *val)
+						 enum power_supply_property psp,
+						 union power_supply_propval *val)
 {
 	switch (psp) {
 	case POWER_SUPPLY_PROP_MODEL_NAME:
@@ -943,9 +941,8 @@ static int gb_power_supplies_setup(struct gb_power_supplies *supplies)
 	if (ret < 0)
 		goto out;
 
-	supplies->supply = kcalloc(supplies->supplies_count,
-				     sizeof(struct gb_power_supply),
-				     GFP_KERNEL);
+	supplies->supply = kzalloc_objs(struct gb_power_supply,
+					supplies->supplies_count);
 
 	if (!supplies->supply) {
 		ret = -ENOMEM;
@@ -1065,7 +1062,7 @@ static int gb_power_supply_probe(struct gb_bundle *bundle,
 	if (cport_desc->protocol_id != GREYBUS_PROTOCOL_POWER_SUPPLY)
 		return -ENODEV;
 
-	supplies = kzalloc(sizeof(*supplies), GFP_KERNEL);
+	supplies = kzalloc_obj(*supplies);
 	if (!supplies)
 		return -ENOMEM;
 
@@ -1137,4 +1134,5 @@ static struct greybus_driver gb_power_supply_driver = {
 };
 module_greybus_driver(gb_power_supply_driver);
 
+MODULE_DESCRIPTION("Power Supply driver for a Greybus module");
 MODULE_LICENSE("GPL v2");

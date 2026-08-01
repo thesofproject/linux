@@ -1,17 +1,7 @@
-/*
- * pv88080-regulator.c - Regulator device driver for PV88080
- * Copyright (C) 2016  Powerventure Semiconductor Ltd.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// pv88080-regulator.c - Regulator device driver for PV88080
+// Copyright (C) 2016  Powerventure Semiconductor Ltd.
 
 #include <linux/err.h>
 #include <linux/i2c.h>
@@ -38,19 +28,9 @@ enum {
 	PV88080_ID_HVBUCK,
 };
 
-enum pv88080_types {
-	TYPE_PV88080_AA,
-	TYPE_PV88080_BA,
-};
-
 struct pv88080_regulator {
 	struct regulator_desc desc;
-	/* Current limiting */
-	unsigned int n_current_limits;
-	const int *current_limits;
-	unsigned int limit_mask;
 	unsigned int mode_reg;
-	unsigned int limit_reg;
 	unsigned int conf2;
 	unsigned int conf5;
 };
@@ -102,11 +82,11 @@ static const struct regmap_config pv88080_regmap_config = {
  * Entry indexes corresponds to register values.
  */
 
-static const int pv88080_buck1_limits[] = {
+static const unsigned int pv88080_buck1_limits[] = {
 	3230000, 5130000, 6960000, 8790000
 };
 
-static const int pv88080_buck23_limits[] = {
+static const unsigned int pv88080_buck23_limits[] = {
 	1496000, 2393000, 3291000, 4189000
 };
 
@@ -211,16 +191,6 @@ static const struct pv88080_compatible_regmap pv88080_ba_regs = {
 	.hvbuck_vsel_mask		  = PV88080_VHVBUCK_MASK,
 };
 
-#ifdef CONFIG_OF
-static const struct of_device_id pv88080_dt_ids[] = {
-	{ .compatible = "pvs,pv88080",    .data = (void *)TYPE_PV88080_AA },
-	{ .compatible = "pvs,pv88080-aa", .data = (void *)TYPE_PV88080_AA },
-	{ .compatible = "pvs,pv88080-ba", .data = (void *)TYPE_PV88080_BA },
-	{},
-};
-MODULE_DEVICE_TABLE(of, pv88080_dt_ids);
-#endif
-
 static unsigned int pv88080_buck_get_mode(struct regulator_dev *rdev)
 {
 	struct pv88080_regulator *info = rdev_get_drvdata(rdev);
@@ -272,40 +242,6 @@ static int pv88080_buck_set_mode(struct regulator_dev *rdev,
 					PV88080_BUCK1_MODE_MASK, val);
 }
 
-static int pv88080_set_current_limit(struct regulator_dev *rdev, int min,
-				    int max)
-{
-	struct pv88080_regulator *info = rdev_get_drvdata(rdev);
-	int i;
-
-	/* search for closest to maximum */
-	for (i = info->n_current_limits; i >= 0; i--) {
-		if (min <= info->current_limits[i]
-			&& max >= info->current_limits[i]) {
-				return regmap_update_bits(rdev->regmap,
-					info->limit_reg,
-					info->limit_mask,
-					i << PV88080_BUCK1_ILIM_SHIFT);
-		}
-	}
-
-	return -EINVAL;
-}
-
-static int pv88080_get_current_limit(struct regulator_dev *rdev)
-{
-	struct pv88080_regulator *info = rdev_get_drvdata(rdev);
-	unsigned int data;
-	int ret;
-
-	ret = regmap_read(rdev->regmap, info->limit_reg, &data);
-	if (ret < 0)
-		return ret;
-
-	data = (data & info->limit_mask) >> PV88080_BUCK1_ILIM_SHIFT;
-	return info->current_limits[data];
-}
-
 static const struct regulator_ops pv88080_buck_ops = {
 	.get_mode = pv88080_buck_get_mode,
 	.set_mode = pv88080_buck_set_mode,
@@ -315,8 +251,8 @@ static const struct regulator_ops pv88080_buck_ops = {
 	.set_voltage_sel = regulator_set_voltage_sel_regmap,
 	.get_voltage_sel = regulator_get_voltage_sel_regmap,
 	.list_voltage = regulator_list_voltage_linear,
-	.set_current_limit = pv88080_set_current_limit,
-	.get_current_limit = pv88080_get_current_limit,
+	.set_current_limit = regulator_set_current_limit_regmap,
+	.get_current_limit = regulator_get_current_limit_regmap,
 };
 
 static const struct regulator_ops pv88080_hvbuck_ops = {
@@ -341,9 +277,9 @@ static const struct regulator_ops pv88080_hvbuck_ops = {
 		.min_uV = min, \
 		.uV_step = step, \
 		.n_voltages = ((max) - (min))/(step) + 1, \
+		.curr_table = limits_array, \
+		.n_current_limits = ARRAY_SIZE(limits_array), \
 	},\
-	.current_limits = limits_array, \
-	.n_current_limits = ARRAY_SIZE(limits_array), \
 }
 
 #define PV88080_HVBUCK(chip, regl_name, min, step, max) \
@@ -383,11 +319,10 @@ static irqreturn_t pv88080_irq_handler(int irq, void *data)
 
 	if (reg_val & PV88080_E_VDD_FLT) {
 		for (i = 0; i < PV88080_MAX_REGULATORS; i++) {
-			if (chip->rdev[i] != NULL) {
+			if (chip->rdev[i] != NULL)
 				regulator_notifier_call_chain(chip->rdev[i],
 					REGULATOR_EVENT_UNDER_VOLTAGE,
 					NULL);
-			}
 		}
 
 		err = regmap_write(chip->regmap, PV88080_REG_EVENT_A,
@@ -400,11 +335,10 @@ static irqreturn_t pv88080_irq_handler(int irq, void *data)
 
 	if (reg_val & PV88080_E_OVER_TEMP) {
 		for (i = 0; i < PV88080_MAX_REGULATORS; i++) {
-			if (chip->rdev[i] != NULL) {
+			if (chip->rdev[i] != NULL)
 				regulator_notifier_call_chain(chip->rdev[i],
 					REGULATOR_EVENT_OVER_TEMP,
 					NULL);
-			}
 		}
 
 		err = regmap_write(chip->regmap, PV88080_REG_EVENT_A,
@@ -425,13 +359,11 @@ error_i2c:
 /*
  * I2C driver interface functions
  */
-static int pv88080_i2c_probe(struct i2c_client *i2c,
-		const struct i2c_device_id *id)
+static int pv88080_i2c_probe(struct i2c_client *i2c)
 {
 	struct regulator_init_data *init_data = dev_get_platdata(&i2c->dev);
 	struct pv88080 *chip;
 	const struct pv88080_compatible_regmap *regmap_config;
-	const struct of_device_id *match;
 	struct regulator_config config = { };
 	int i, error, ret;
 	unsigned int conf2, conf5;
@@ -449,16 +381,9 @@ static int pv88080_i2c_probe(struct i2c_client *i2c,
 		return error;
 	}
 
-	if (i2c->dev.of_node) {
-		match = of_match_node(pv88080_dt_ids, i2c->dev.of_node);
-		if (!match) {
-			dev_err(chip->dev, "Failed to get of_match_node\n");
-			return -EINVAL;
-		}
-		chip->type = (unsigned long)match->data;
-	} else {
-		chip->type = id->driver_data;
-	}
+	chip->regmap_config = i2c_get_match_data(i2c);
+	if (!chip->regmap_config)
+		return -ENODEV;
 
 	i2c_set_clientdata(i2c, chip);
 
@@ -503,15 +428,6 @@ static int pv88080_i2c_probe(struct i2c_client *i2c,
 		dev_warn(chip->dev, "No IRQ configured\n");
 	}
 
-	switch (chip->type) {
-	case TYPE_PV88080_AA:
-		chip->regmap_config = &pv88080_aa_regs;
-		break;
-	case TYPE_PV88080_BA:
-		chip->regmap_config = &pv88080_ba_regs;
-		break;
-	}
-
 	regmap_config = chip->regmap_config;
 	config.dev = chip->dev;
 	config.regmap = chip->regmap;
@@ -521,9 +437,9 @@ static int pv88080_i2c_probe(struct i2c_client *i2c,
 		if (init_data)
 			config.init_data = &init_data[i];
 
-		pv88080_regulator_info[i].limit_reg
+		pv88080_regulator_info[i].desc.csel_reg
 			= regmap_config->buck_regmap[i].buck_limit_reg;
-		pv88080_regulator_info[i].limit_mask
+		pv88080_regulator_info[i].desc.csel_mask
 			= regmap_config->buck_regmap[i].buck_limit_mask;
 		pv88080_regulator_info[i].mode_reg
 			= regmap_config->buck_regmap[i].buck_mode_reg;
@@ -597,18 +513,27 @@ static int pv88080_i2c_probe(struct i2c_client *i2c,
 	return 0;
 }
 
+static const struct of_device_id pv88080_dt_ids[] = {
+	{ .compatible = "pvs,pv88080",    .data = &pv88080_aa_regs },
+	{ .compatible = "pvs,pv88080-aa", .data = &pv88080_aa_regs },
+	{ .compatible = "pvs,pv88080-ba", .data = &pv88080_ba_regs },
+	{}
+};
+MODULE_DEVICE_TABLE(of, pv88080_dt_ids);
+
 static const struct i2c_device_id pv88080_i2c_id[] = {
-	{ "pv88080",    TYPE_PV88080_AA },
-	{ "pv88080-aa", TYPE_PV88080_AA },
-	{ "pv88080-ba", TYPE_PV88080_BA },
-	{},
+	{ "pv88080",    (kernel_ulong_t)&pv88080_aa_regs },
+	{ "pv88080-aa", (kernel_ulong_t)&pv88080_aa_regs },
+	{ "pv88080-ba", (kernel_ulong_t)&pv88080_ba_regs },
+	{}
 };
 MODULE_DEVICE_TABLE(i2c, pv88080_i2c_id);
 
 static struct i2c_driver pv88080_regulator_driver = {
 	.driver = {
 		.name = "pv88080",
-		.of_match_table = of_match_ptr(pv88080_dt_ids),
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
+		.of_match_table = pv88080_dt_ids,
 	},
 	.probe = pv88080_i2c_probe,
 	.id_table = pv88080_i2c_id,

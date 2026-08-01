@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015 - 2016 Red Hat, Inc
  * Copyright (c) 2011, 2012 Synaptics Incorporated
  * Copyright (c) 2011 Unixphere
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -238,12 +235,29 @@ static void rmi_smb_clear_state(struct rmi_smb_xport *rmi_smb)
 
 static int rmi_smb_enable_smbus_mode(struct rmi_smb_xport *rmi_smb)
 {
-	int retval;
+	struct i2c_client *client = rmi_smb->client;
+	int smbus_version;
+
+	/*
+	 * psmouse driver resets the controller, we only need to wait
+	 * to give the firmware chance to fully reinitialize.
+	 */
+	if (rmi_smb->xport.pdata.reset_delay_ms)
+		msleep(rmi_smb->xport.pdata.reset_delay_ms);
 
 	/* we need to get the smbus version to activate the touchpad */
-	retval = rmi_smb_get_version(rmi_smb);
-	if (retval < 0)
-		return retval;
+	smbus_version = rmi_smb_get_version(rmi_smb);
+	if (smbus_version < 0)
+		return smbus_version;
+
+	rmi_dbg(RMI_DEBUG_XPORT, &client->dev, "Smbus version is %d",
+		smbus_version);
+
+	if (smbus_version != 2 && smbus_version != 3) {
+		dev_err(&client->dev, "Unrecognized SMB version %d\n",
+				smbus_version);
+		return -ENODEV;
+	}
 
 	return 0;
 }
@@ -256,11 +270,10 @@ static int rmi_smb_reset(struct rmi_transport_dev *xport, u16 reset_addr)
 	rmi_smb_clear_state(rmi_smb);
 
 	/*
-	 * we do not call the actual reset command, it has to be handled in
-	 * PS/2 or there will be races between PS/2 and SMBus.
-	 * PS/2 should ensure that a psmouse_reset is called before
-	 * intializing the device and after it has been removed to be in a known
-	 * state.
+	 * We do not call the actual reset command, it has to be handled in
+	 * PS/2 or there will be races between PS/2 and SMBus. PS/2 should
+	 * ensure that a psmouse_reset is called before initializing the
+	 * device and after it has been removed to be in a known state.
 	 */
 	return rmi_smb_enable_smbus_mode(rmi_smb);
 }
@@ -271,12 +284,10 @@ static const struct rmi_transport_ops rmi_smb_ops = {
 	.reset		= rmi_smb_reset,
 };
 
-static int rmi_smb_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int rmi_smb_probe(struct i2c_client *client)
 {
 	struct rmi_device_platform_data *pdata = dev_get_platdata(&client->dev);
 	struct rmi_smb_xport *rmi_smb;
-	int smbus_version;
 	int error;
 
 	if (!pdata) {
@@ -315,18 +326,9 @@ static int rmi_smb_probe(struct i2c_client *client,
 	rmi_smb->xport.proto_name = "smb";
 	rmi_smb->xport.ops = &rmi_smb_ops;
 
-	smbus_version = rmi_smb_get_version(rmi_smb);
-	if (smbus_version < 0)
-		return smbus_version;
-
-	rmi_dbg(RMI_DEBUG_XPORT, &client->dev, "Smbus version is %d",
-		smbus_version);
-
-	if (smbus_version != 2 && smbus_version != 3) {
-		dev_err(&client->dev, "Unrecognized SMB version %d\n",
-				smbus_version);
-		return -ENODEV;
-	}
+	error = rmi_smb_enable_smbus_mode(rmi_smb);
+	if (error)
+		return error;
 
 	i2c_set_clientdata(client, rmi_smb);
 
@@ -341,16 +343,14 @@ static int rmi_smb_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int rmi_smb_remove(struct i2c_client *client)
+static void rmi_smb_remove(struct i2c_client *client)
 {
 	struct rmi_smb_xport *rmi_smb = i2c_get_clientdata(client);
 
 	rmi_unregister_transport_device(&rmi_smb->xport);
-
-	return 0;
 }
 
-static int __maybe_unused rmi_smb_suspend(struct device *dev)
+static int rmi_smb_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct rmi_smb_xport *rmi_smb = i2c_get_clientdata(client);
@@ -363,7 +363,7 @@ static int __maybe_unused rmi_smb_suspend(struct device *dev)
 	return ret;
 }
 
-static int __maybe_unused rmi_smb_runtime_suspend(struct device *dev)
+static int rmi_smb_runtime_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct rmi_smb_xport *rmi_smb = i2c_get_clientdata(client);
@@ -376,7 +376,7 @@ static int __maybe_unused rmi_smb_runtime_suspend(struct device *dev)
 	return ret;
 }
 
-static int __maybe_unused rmi_smb_resume(struct device *dev)
+static int rmi_smb_resume(struct device *dev)
 {
 	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
 	struct rmi_smb_xport *rmi_smb = i2c_get_clientdata(client);
@@ -394,7 +394,7 @@ static int __maybe_unused rmi_smb_resume(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused rmi_smb_runtime_resume(struct device *dev)
+static int rmi_smb_runtime_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct rmi_smb_xport *rmi_smb = i2c_get_clientdata(client);
@@ -408,13 +408,12 @@ static int __maybe_unused rmi_smb_runtime_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops rmi_smb_pm = {
-	SET_SYSTEM_SLEEP_PM_OPS(rmi_smb_suspend, rmi_smb_resume)
-	SET_RUNTIME_PM_OPS(rmi_smb_runtime_suspend, rmi_smb_runtime_resume,
-			   NULL)
+	SYSTEM_SLEEP_PM_OPS(rmi_smb_suspend, rmi_smb_resume)
+	RUNTIME_PM_OPS(rmi_smb_runtime_suspend, rmi_smb_runtime_resume, NULL)
 };
 
 static const struct i2c_device_id rmi_id[] = {
-	{ "rmi4_smbus", 0 },
+	{ .name = "rmi4_smbus" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, rmi_id);
@@ -422,7 +421,7 @@ MODULE_DEVICE_TABLE(i2c, rmi_id);
 static struct i2c_driver rmi_smb_driver = {
 	.driver = {
 		.name	= "rmi4_smbus",
-		.pm	= &rmi_smb_pm,
+		.pm	= pm_ptr(&rmi_smb_pm),
 	},
 	.id_table	= rmi_id,
 	.probe		= rmi_smb_probe,

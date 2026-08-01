@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * vdso2c - A vdso image preparation tool
  * Copyright (c) 2014 Andy Lutomirski and others
- * Licensed under the GPL v2
  *
  * vdso2c requires stripped and unstripped input.  It would be trivial
  * to fully strip the input in here, but, for reasons described below,
@@ -58,34 +58,6 @@
 
 const char *outfilename;
 
-/* Symbols that we need in vdso2c. */
-enum {
-	sym_vvar_start,
-	sym_VDSO_FAKE_SECTION_TABLE_START,
-	sym_VDSO_FAKE_SECTION_TABLE_END,
-	sym_vread_tick,
-	sym_vread_tick_patch_start,
-	sym_vread_tick_patch_end
-};
-
-struct vdso_sym {
-	const char *name;
-	int export;
-};
-
-struct vdso_sym required_syms[] = {
-	[sym_vvar_start] = {"vvar_start", 1},
-	[sym_VDSO_FAKE_SECTION_TABLE_START] = {
-		"VDSO_FAKE_SECTION_TABLE_START", 0
-	},
-	[sym_VDSO_FAKE_SECTION_TABLE_END] = {
-		"VDSO_FAKE_SECTION_TABLE_END", 0
-	},
-	[sym_vread_tick] = {"vread_tick", 1},
-	[sym_vread_tick_patch_start] = {"vread_tick_patch_start", 1},
-	[sym_vread_tick_patch_end] = {"vread_tick_patch_end", 1}
-};
-
 __attribute__((format(printf, 1, 2))) __attribute__((noreturn))
 static void fail(const char *format, ...)
 {
@@ -124,8 +96,6 @@ static void fail(const char *format, ...)
 
 #define PUT_BE(x, val)					\
 	PBE(x, val, 64, PBE(x, val, 32, PBE(x, val, 16, LAST_PBE(x, val))))
-
-#define NSYMS ARRAY_SIZE(required_syms)
 
 #define BITSFUNC3(name, bits, suffix) name##bits##suffix
 #define BITSFUNC2(name, bits, suffix) BITSFUNC3(name, bits, suffix)

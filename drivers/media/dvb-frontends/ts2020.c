@@ -1,22 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     Montage Technology TS2020 - Silicon Tuner driver
     Copyright (C) 2009-2012 Konstantin Dimitrov <kosio.dimitrov@gmail.com>
 
     Copyright (C) 2009-2012 TurboSight.com
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <media/dvb_frontend.h>
@@ -180,6 +168,9 @@ static int ts2020_set_tuner_rf(struct dvb_frontend *fe)
 	unsigned int utmp;
 
 	ret = regmap_read(dev->regmap, 0x3d, &utmp);
+	if (ret)
+		return ret;
+
 	utmp &= 0x7f;
 	if (utmp < 0x16)
 		utmp = 0xa1;
@@ -498,8 +489,8 @@ static int ts2020_read_signal_strength(struct dvb_frontend *fe,
 static const struct dvb_tuner_ops ts2020_tuner_ops = {
 	.info = {
 		.name = "TS2020",
-		.frequency_min = 950000,
-		.frequency_max = 2150000
+		.frequency_min_hz =  950 * MHz,
+		.frequency_max_hz = 2150 * MHz
 	},
 	.init = ts2020_init,
 	.release = ts2020_release,
@@ -525,16 +516,16 @@ struct dvb_frontend *ts2020_attach(struct dvb_frontend *fe,
 	pdata.attach_in_use = true;
 
 	memset(&board_info, 0, sizeof(board_info));
-	strlcpy(board_info.type, "ts2020", I2C_NAME_SIZE);
+	strscpy(board_info.type, "ts2020", I2C_NAME_SIZE);
 	board_info.addr = config->tuner_address;
 	board_info.platform_data = &pdata;
-	client = i2c_new_device(i2c, &board_info);
-	if (!client || !client->dev.driver)
+	client = i2c_new_client_device(i2c, &board_info);
+	if (!i2c_client_has_driver(client))
 		return NULL;
 
 	return fe;
 }
-EXPORT_SYMBOL(ts2020_attach);
+EXPORT_SYMBOL_GPL(ts2020_attach);
 
 /*
  * We implement own regmap locking due to legacy DVB attach which uses frontend
@@ -559,18 +550,23 @@ static void ts2020_regmap_unlock(void *__dev)
 	mutex_unlock(&dev->regmap_mutex);
 }
 
-static int ts2020_probe(struct i2c_client *client,
-		const struct i2c_device_id *id)
+static int ts2020_probe(struct i2c_client *client)
 {
 	struct ts2020_config *pdata = client->dev.platform_data;
-	struct dvb_frontend *fe = pdata->fe;
+	struct dvb_frontend *fe;
 	struct ts2020_priv *dev;
 	int ret;
 	u8 u8tmp;
 	unsigned int utmp;
 	char *chip_str;
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	if (!pdata) {
+		dev_err(&client->dev, "platform data is mandatory\n");
+		return -EINVAL;
+	}
+
+	fe = pdata->fe;
+	dev = kzalloc_obj(*dev);
 	if (!dev) {
 		ret = -ENOMEM;
 		goto err;
@@ -578,11 +574,11 @@ static int ts2020_probe(struct i2c_client *client,
 
 	/* create regmap */
 	mutex_init(&dev->regmap_mutex);
-	dev->regmap_config.reg_bits = 8,
-	dev->regmap_config.val_bits = 8,
-	dev->regmap_config.lock = ts2020_regmap_lock,
-	dev->regmap_config.unlock = ts2020_regmap_unlock,
-	dev->regmap_config.lock_arg = dev,
+	dev->regmap_config.reg_bits = 8;
+	dev->regmap_config.val_bits = 8;
+	dev->regmap_config.lock = ts2020_regmap_lock;
+	dev->regmap_config.unlock = ts2020_regmap_unlock;
+	dev->regmap_config.lock_arg = dev;
 	dev->regmap = regmap_init_i2c(client, &dev->regmap_config);
 	if (IS_ERR(dev->regmap)) {
 		ret = PTR_ERR(dev->regmap);
@@ -705,7 +701,7 @@ err:
 	return ret;
 }
 
-static int ts2020_remove(struct i2c_client *client)
+static void ts2020_remove(struct i2c_client *client)
 {
 	struct ts2020_priv *dev = i2c_get_clientdata(client);
 
@@ -717,13 +713,12 @@ static int ts2020_remove(struct i2c_client *client)
 
 	regmap_exit(dev->regmap);
 	kfree(dev);
-	return 0;
 }
 
 static const struct i2c_device_id ts2020_id_table[] = {
-	{"ts2020", 0},
-	{"ts2022", 0},
-	{}
+	{ .name = "ts2020" },
+	{ .name = "ts2022" },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ts2020_id_table);
 

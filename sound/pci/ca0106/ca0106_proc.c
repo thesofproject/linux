@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (c) 2004 James Courtier-Dutton <James@superbug.demon.co.uk>
  *  Driver CA0106 chips. e.g. Sound Blaster Audigy LS and Live 24bit
@@ -44,21 +45,6 @@
  *
  *  This code was initially based on code from ALSA's emu10k1x.c which is:
  *  Copyright (c) by Francisco Moraes <fmoraes@nc.rr.com>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 #include <linux/delay.h>
 #include <linux/init.h>
@@ -80,7 +66,7 @@ struct snd_ca0106_category_str {
 	const char *name;
 };
 
-static struct snd_ca0106_category_str snd_ca0106_con_category[] = {
+static const struct snd_ca0106_category_str snd_ca0106_con_category[] = {
 	{ IEC958_AES1_CON_DAT, "DAT" },
 	{ IEC958_AES1_CON_VCR, "VCR" },
 	{ IEC958_AES1_CON_MICROPHONE, "microphone" },
@@ -295,16 +281,14 @@ static void snd_ca0106_proc_reg_write32(struct snd_info_entry *entry,
 				       struct snd_info_buffer *buffer)
 {
 	struct snd_ca0106 *emu = entry->private_data;
-	unsigned long flags;
         char line[64];
         u32 reg, val;
         while (!snd_info_get_line(buffer, line, sizeof(line))) {
                 if (sscanf(line, "%x %x", &reg, &val) != 2)
                         continue;
 		if (reg < 0x40 && val <= 0xffffffff) {
-			spin_lock_irqsave(&emu->emu_lock, flags);
+			guard(spinlock_irqsave)(&emu->emu_lock);
 			outl(val, emu->port + (reg & 0xfffffffc));
-			spin_unlock_irqrestore(&emu->emu_lock, flags);
 		}
         }
 }
@@ -314,13 +298,13 @@ static void snd_ca0106_proc_reg_read32(struct snd_info_entry *entry,
 {
 	struct snd_ca0106 *emu = entry->private_data;
 	unsigned long value;
-	unsigned long flags;
 	int i;
+
 	snd_iprintf(buffer, "Registers:\n\n");
 	for(i = 0; i < 0x20; i+=4) {
-		spin_lock_irqsave(&emu->emu_lock, flags);
-		value = inl(emu->port + i);
-		spin_unlock_irqrestore(&emu->emu_lock, flags);
+		scoped_guard(spinlock_irqsave, &emu->emu_lock) {
+			value = inl(emu->port + i);
+		}
 		snd_iprintf(buffer, "Register %02X: %08lX\n", i, value);
 	}
 }
@@ -330,13 +314,13 @@ static void snd_ca0106_proc_reg_read16(struct snd_info_entry *entry,
 {
 	struct snd_ca0106 *emu = entry->private_data;
         unsigned int value;
-	unsigned long flags;
 	int i;
+
 	snd_iprintf(buffer, "Registers:\n\n");
 	for(i = 0; i < 0x20; i+=2) {
-		spin_lock_irqsave(&emu->emu_lock, flags);
-		value = inw(emu->port + i);
-		spin_unlock_irqrestore(&emu->emu_lock, flags);
+		scoped_guard(spinlock_irqsave, &emu->emu_lock) {
+			value = inw(emu->port + i);
+		}
 		snd_iprintf(buffer, "Register %02X: %04X\n", i, value);
 	}
 }
@@ -346,13 +330,13 @@ static void snd_ca0106_proc_reg_read8(struct snd_info_entry *entry,
 {
 	struct snd_ca0106 *emu = entry->private_data;
 	unsigned int value;
-	unsigned long flags;
 	int i;
+
 	snd_iprintf(buffer, "Registers:\n\n");
 	for(i = 0; i < 0x20; i+=1) {
-		spin_lock_irqsave(&emu->emu_lock, flags);
-		value = inb(emu->port + i);
-		spin_unlock_irqrestore(&emu->emu_lock, flags);
+		scoped_guard(spinlock_irqsave, &emu->emu_lock) {
+			value = inb(emu->port + i);
+		}
 		snd_iprintf(buffer, "Register %02X: %02X\n", i, value);
 	}
 }
@@ -424,30 +408,20 @@ static void snd_ca0106_proc_i2c_write(struct snd_info_entry *entry,
 
 int snd_ca0106_proc_init(struct snd_ca0106 *emu)
 {
-	struct snd_info_entry *entry;
-	
-	if(! snd_card_proc_new(emu->card, "iec958", &entry))
-		snd_info_set_text_ops(entry, emu, snd_ca0106_proc_iec958);
-	if(! snd_card_proc_new(emu->card, "ca0106_reg32", &entry)) {
-		snd_info_set_text_ops(entry, emu, snd_ca0106_proc_reg_read32);
-		entry->c.text.write = snd_ca0106_proc_reg_write32;
-		entry->mode |= S_IWUSR;
-	}
-	if(! snd_card_proc_new(emu->card, "ca0106_reg16", &entry))
-		snd_info_set_text_ops(entry, emu, snd_ca0106_proc_reg_read16);
-	if(! snd_card_proc_new(emu->card, "ca0106_reg8", &entry))
-		snd_info_set_text_ops(entry, emu, snd_ca0106_proc_reg_read8);
-	if(! snd_card_proc_new(emu->card, "ca0106_regs1", &entry)) {
-		snd_info_set_text_ops(entry, emu, snd_ca0106_proc_reg_read1);
-		entry->c.text.write = snd_ca0106_proc_reg_write;
-		entry->mode |= S_IWUSR;
-	}
-	if(! snd_card_proc_new(emu->card, "ca0106_i2c", &entry)) {
-		entry->c.text.write = snd_ca0106_proc_i2c_write;
-		entry->private_data = emu;
-		entry->mode |= S_IWUSR;
-	}
-	if(! snd_card_proc_new(emu->card, "ca0106_regs2", &entry)) 
-		snd_info_set_text_ops(entry, emu, snd_ca0106_proc_reg_read2);
+	snd_card_ro_proc_new(emu->card, "iec958", emu, snd_ca0106_proc_iec958);
+	snd_card_rw_proc_new(emu->card, "ca0106_reg32", emu,
+			     snd_ca0106_proc_reg_read32,
+			     snd_ca0106_proc_reg_write32);
+	snd_card_ro_proc_new(emu->card, "ca0106_reg16", emu,
+			     snd_ca0106_proc_reg_read16);
+	snd_card_ro_proc_new(emu->card, "ca0106_reg8", emu,
+			     snd_ca0106_proc_reg_read8);
+	snd_card_rw_proc_new(emu->card, "ca0106_regs1", emu,
+			     snd_ca0106_proc_reg_read1,
+			     snd_ca0106_proc_reg_write);
+	snd_card_rw_proc_new(emu->card, "ca0106_i2c", emu, NULL,
+			     snd_ca0106_proc_i2c_write);
+	snd_card_ro_proc_new(emu->card, "ca0106_regs2", emu,
+			     snd_ca0106_proc_reg_read2);
 	return 0;
 }

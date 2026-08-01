@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * FPGA Manager Driver for Lattice iCE40.
  *
  *  Copyright (c) 2016 Joel Holdsworth
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
  *
  * This driver adds support to the FPGA manager for configuring the SRAM of
  * Lattice iCE40 FPGAs through slave SPI.
@@ -14,7 +11,6 @@
 #include <linux/fpga/fpga-mgr.h>
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
-#include <linux/of_gpio.h>
 #include <linux/spi/spi.h>
 #include <linux/stringify.h>
 
@@ -49,10 +45,16 @@ static int ice40_fpga_ops_write_init(struct fpga_manager *mgr,
 	struct spi_message message;
 	struct spi_transfer assert_cs_then_reset_delay = {
 		.cs_change   = 1,
-		.delay_usecs = ICE40_SPI_RESET_DELAY
+		.delay = {
+			.value = ICE40_SPI_RESET_DELAY,
+			.unit = SPI_DELAY_UNIT_USECS
+		}
 	};
 	struct spi_transfer housekeeping_delay_then_release_cs = {
-		.delay_usecs = ICE40_SPI_HOUSEKEEPING_DELAY
+		.delay = {
+			.value = ICE40_SPI_HOUSEKEEPING_DELAY,
+			.unit = SPI_DELAY_UNIT_USECS
+		}
 	};
 	int ret;
 
@@ -63,7 +65,7 @@ static int ice40_fpga_ops_write_init(struct fpga_manager *mgr,
 	}
 
 	/* Lock the bus, assert CRESET_B and SS_B and delay >200ns */
-	spi_bus_lock(dev->master);
+	spi_bus_lock(dev->controller);
 
 	gpiod_set_value(priv->reset, 1);
 
@@ -91,7 +93,7 @@ static int ice40_fpga_ops_write_init(struct fpga_manager *mgr,
 	ret = spi_sync_locked(dev, &message);
 
 fail:
-	spi_bus_unlock(dev->master);
+	spi_bus_unlock(dev->controller);
 
 	return ret;
 }
@@ -133,6 +135,7 @@ static int ice40_fpga_probe(struct spi_device *spi)
 {
 	struct device *dev = &spi->dev;
 	struct ice40_fpga_priv *priv;
+	struct fpga_manager *mgr;
 	int ret;
 
 	priv = devm_kzalloc(&spi->dev, sizeof(*priv), GFP_KERNEL);
@@ -174,15 +177,9 @@ static int ice40_fpga_probe(struct spi_device *spi)
 		return ret;
 	}
 
-	/* Register with the FPGA manager */
-	return fpga_mgr_register(dev, "Lattice iCE40 FPGA Manager",
-				 &ice40_fpga_ops, priv);
-}
-
-static int ice40_fpga_remove(struct spi_device *spi)
-{
-	fpga_mgr_unregister(&spi->dev);
-	return 0;
+	mgr = devm_fpga_mgr_register(dev, "Lattice iCE40 FPGA Manager",
+				     &ice40_fpga_ops, priv);
+	return PTR_ERR_OR_ZERO(mgr);
 }
 
 static const struct of_device_id ice40_fpga_of_match[] = {
@@ -191,13 +188,19 @@ static const struct of_device_id ice40_fpga_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, ice40_fpga_of_match);
 
+static const struct spi_device_id ice40_fpga_spi_ids[] = {
+	{ .name = "ice40-fpga-mgr", },
+	{},
+};
+MODULE_DEVICE_TABLE(spi, ice40_fpga_spi_ids);
+
 static struct spi_driver ice40_fpga_driver = {
 	.probe = ice40_fpga_probe,
-	.remove = ice40_fpga_remove,
 	.driver = {
 		.name = "ice40spi",
-		.of_match_table = of_match_ptr(ice40_fpga_of_match),
+		.of_match_table = ice40_fpga_of_match,
 	},
+	.id_table = ice40_fpga_spi_ids,
 };
 
 module_spi_driver(ice40_fpga_driver);

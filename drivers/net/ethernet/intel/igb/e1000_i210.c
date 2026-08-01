@@ -1,34 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Intel(R) Gigabit Ethernet Linux driver
- * Copyright(c) 2007-2014 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, see <http://www.gnu.org/licenses/>.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- */
+/* Copyright(c) 2007 - 2018 Intel Corporation. */
 
 /* e1000_i210
  * e1000_i211
  */
 
-#include <linux/types.h>
+#include <linux/bitfield.h>
 #include <linux/if_ether.h>
-
+#include <linux/types.h>
 #include "e1000_hw.h"
 #include "e1000_i210.h"
 
@@ -378,13 +357,14 @@ static s32 igb_read_invm_word_i210(struct e1000_hw *hw, u8 address, u16 *data)
 /**
  * igb_read_invm_i210 - Read invm wrapper function for I210/I211
  *  @hw: pointer to the HW structure
- *  @words: number of words to read
+ *  @offset: offset to read from
+ *  @words: number of words to read (unused)
  *  @data: pointer to the data read
  *
  *  Wrapper function to return data formerly found in the NVM.
  **/
 static s32 igb_read_invm_i210(struct e1000_hw *hw, u16 offset,
-				u16 words __always_unused, u16 *data)
+				u16 __always_unused words, u16 *data)
 {
 	s32 ret_val = 0;
 
@@ -493,7 +473,7 @@ s32 igb_read_invm_version(struct e1000_hw *hw,
 		/* Check if we have second version location used */
 		else if ((i == 1) &&
 			 ((*record & E1000_INVM_VER_FIELD_TWO) == 0)) {
-			version = (*record & E1000_INVM_VER_FIELD_ONE) >> 3;
+			version = FIELD_GET(E1000_INVM_VER_FIELD_ONE, *record);
 			status = 0;
 			break;
 		}
@@ -503,8 +483,8 @@ s32 igb_read_invm_version(struct e1000_hw *hw,
 		else if ((((*record & E1000_INVM_VER_FIELD_ONE) == 0) &&
 			 ((*record & 0x3) == 0)) || (((*record & 0x3) != 0) &&
 			 (i != 1))) {
-			version = (*next_record & E1000_INVM_VER_FIELD_TWO)
-				  >> 13;
+			version = FIELD_GET(E1000_INVM_VER_FIELD_TWO,
+					    *next_record);
 			status = 0;
 			break;
 		}
@@ -513,15 +493,15 @@ s32 igb_read_invm_version(struct e1000_hw *hw,
 		 */
 		else if (((*record & E1000_INVM_VER_FIELD_TWO) == 0) &&
 			 ((*record & 0x3) == 0)) {
-			version = (*record & E1000_INVM_VER_FIELD_ONE) >> 3;
+			version = FIELD_GET(E1000_INVM_VER_FIELD_ONE, *record);
 			status = 0;
 			break;
 		}
 	}
 
 	if (!status) {
-		invm_ver->invm_major = (version & E1000_INVM_MAJOR_MASK)
-					>> E1000_INVM_MAJOR_SHIFT;
+		invm_ver->invm_major = FIELD_GET(E1000_INVM_MAJOR_MASK,
+						 version);
 		invm_ver->invm_minor = version & E1000_INVM_MINOR_MASK;
 	}
 	/* Read Image Type */
@@ -540,7 +520,8 @@ s32 igb_read_invm_version(struct e1000_hw *hw,
 			 ((*record & E1000_INVM_IMGTYPE_FIELD) == 0)) ||
 			 ((((*record & 0x3) != 0) && (i != 1)))) {
 			invm_ver->invm_img_type =
-				(*next_record & E1000_INVM_IMGTYPE_FIELD) >> 23;
+				FIELD_GET(E1000_INVM_IMGTYPE_FIELD,
+					  *next_record);
 			status = 0;
 			break;
 		}
@@ -621,7 +602,7 @@ static s32 igb_update_nvm_checksum_i210(struct e1000_hw *hw)
 			}
 			checksum += nvm_data;
 		}
-		checksum = (u16) NVM_SUM - checksum;
+		checksum = NVM_SUM - checksum;
 		ret_val = igb_write_nvm_srwr(hw, NVM_CHECKSUM_REG, 1,
 						&checksum);
 		if (ret_val) {
@@ -812,7 +793,6 @@ s32 igb_write_xmdio_reg(struct e1000_hw *hw, u16 addr, u8 dev_addr, u16 data)
  **/
 s32 igb_init_nvm_params_i210(struct e1000_hw *hw)
 {
-	s32 ret_val = 0;
 	struct e1000_nvm_info *nvm = &hw->nvm;
 
 	nvm->ops.acquire = igb_acquire_nvm_i210;
@@ -833,7 +813,7 @@ s32 igb_init_nvm_params_i210(struct e1000_hw *hw)
 		nvm->ops.validate = NULL;
 		nvm->ops.update   = NULL;
 	}
-	return ret_val;
+	return 0;
 }
 
 /**
@@ -863,6 +843,7 @@ s32 igb_pll_workaround_i210(struct e1000_hw *hw)
 		nvm_word = E1000_INVM_DEFAULT_AL;
 	tmp_nvm = nvm_word | E1000_INVM_PLL_WO_VAL;
 	igb_write_phy_reg_82580(hw, I347AT4_PAGE_SELECT, E1000_PHY_PLL_FREQ_PAGE);
+	phy_word = E1000_PHY_PLL_UNCONF;
 	for (i = 0; i < E1000_MAX_PLL_TRIES; i++) {
 		/* check current state directly from internal PHY */
 		igb_read_phy_reg_82580(hw, E1000_PHY_PLL_FREQ_REG, &phy_word);

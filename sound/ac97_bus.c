@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Linux driver model AC97 bus interface
  *
  * Author:	Nicolas Pitre
  * Created:	Jan 14, 2005
  * Copyright:	(C) MontaVista Software Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/module.h>
@@ -50,16 +46,19 @@ static bool snd_ac97_check_id(struct snd_ac97 *ac97, unsigned int id,
  * @id_mask: Mask that is applied to the device ID before comparing to @id
  *
  * This function resets the AC'97 device. If @try_warm is true the function
- * first performs a warm reset. If the warm reset is successful the function
- * returns 1. Otherwise or if @try_warm is false the function issues cold reset
- * followed by a warm reset. If this is successful the function returns 0,
- * otherwise a negative error code. If @id is 0 any valid device ID will be
- * accepted, otherwise only the ID that matches @id and @id_mask is accepted.
+ * first performs a warm reset. If @try_warm is false the function issues
+ * cold reset followed by a warm reset. If @id is 0 any valid device ID
+ * will be accepted, otherwise only the ID that matches @id and @id_mask
+ * is accepted.
+ * Returns:
+ * * %1 - if warm reset is successful
+ * * %0 - if cold reset and warm reset is successful
+ * * %-ENODEV - if @id and @id_mask not matching
  */
 int snd_ac97_reset(struct snd_ac97 *ac97, bool try_warm, unsigned int id,
 	unsigned int id_mask)
 {
-	struct snd_ac97_bus_ops *ops = ac97->bus->ops;
+	const struct snd_ac97_bus_ops *ops = ac97->bus->ops;
 
 	if (try_warm && ops->warm_reset) {
 		ops->warm_reset(ac97);
@@ -74,25 +73,14 @@ int snd_ac97_reset(struct snd_ac97 *ac97, bool try_warm, unsigned int id,
 
 	if (snd_ac97_check_id(ac97, id, id_mask))
 		return 0;
-
 	return -ENODEV;
 }
 EXPORT_SYMBOL_GPL(snd_ac97_reset);
 
-/*
- * Let drivers decide whether they want to support given codec from their
- * probe method. Drivers have direct access to the struct snd_ac97
- * structure and may  decide based on the id field amongst other things.
- */
-static int ac97_bus_match(struct device *dev, struct device_driver *drv)
-{
-	return 1;
-}
-
-struct bus_type ac97_bus_type = {
+const struct bus_type ac97_bus_type = {
 	.name		= "ac97",
-	.match		= ac97_bus_match,
 };
+EXPORT_SYMBOL(ac97_bus_type);
 
 static int __init ac97_bus_init(void)
 {
@@ -108,6 +96,5 @@ static void __exit ac97_bus_exit(void)
 
 module_exit(ac97_bus_exit);
 
-EXPORT_SYMBOL(ac97_bus_type);
-
+MODULE_DESCRIPTION("Legacy AC97 bus interface");
 MODULE_LICENSE("GPL");

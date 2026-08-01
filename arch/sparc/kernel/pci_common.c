@@ -8,7 +8,8 @@
 #include <linux/slab.h>
 #include <linux/pci.h>
 #include <linux/device.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
 
 #include <asm/prom.h>
 #include <asm/oplib.h>
@@ -329,30 +330,13 @@ void pci_get_pbm_props(struct pci_pbm_info *pbm)
 	}
 }
 
-static void pci_register_legacy_regions(struct resource *io_res,
-					struct resource *mem_res)
-{
-	struct resource *p;
-
-	/* VGA Video RAM. */
-	p = kzalloc(sizeof(*p), GFP_KERNEL);
-	if (!p)
-		return;
-
-	p->name = "Video RAM area";
-	p->start = mem_res->start + 0xa0000UL;
-	p->end = p->start + 0x1ffffUL;
-	p->flags = IORESOURCE_BUSY;
-	request_resource(mem_res, p);
-}
-
 static void pci_register_iommu_region(struct pci_pbm_info *pbm)
 {
 	const u32 *vdma = of_get_property(pbm->op->dev.of_node, "virtual-dma",
 					  NULL);
 
 	if (vdma) {
-		struct resource *rp = kzalloc(sizeof(*rp), GFP_KERNEL);
+		struct resource *rp = kzalloc_obj(*rp);
 
 		if (!rp) {
 			pr_info("%s: Cannot allocate IOMMU resource.\n",
@@ -377,7 +361,7 @@ void pci_determine_mem_io_space(struct pci_pbm_info *pbm)
 	int i, saw_mem, saw_io;
 	int num_pbm_ranges;
 
-	/* Corresponding generic code in of_pci_get_host_bridge_resources() */
+	/* Corresponds to generic devm_of_pci_get_host_bridge_resources() */
 
 	saw_mem = saw_io = 0;
 	pbm_ranges = of_get_property(pbm->op->dev.of_node, "ranges", &i);
@@ -487,8 +471,6 @@ void pci_determine_mem_io_space(struct pci_pbm_info *pbm)
 	if (pbm->mem64_space.flags)
 		request_resource(&iomem_resource, &pbm->mem64_space);
 
-	pci_register_legacy_regions(&pbm->io_space,
-				    &pbm->mem_space);
 	pci_register_iommu_region(pbm);
 }
 
@@ -508,8 +490,8 @@ void pci_scan_for_target_abort(struct pci_pbm_info *pbm,
 				   PCI_STATUS_REC_TARGET_ABORT));
 		if (error_bits) {
 			pci_write_config_word(pdev, PCI_STATUS, error_bits);
-			printk("%s: Device %s saw Target Abort [%016x]\n",
-			       pbm->name, pci_name(pdev), status);
+			pci_info(pdev, "%s: Device saw Target Abort [%016x]\n",
+				 pbm->name, status);
 		}
 	}
 
@@ -531,8 +513,8 @@ void pci_scan_for_master_abort(struct pci_pbm_info *pbm,
 			(status & (PCI_STATUS_REC_MASTER_ABORT));
 		if (error_bits) {
 			pci_write_config_word(pdev, PCI_STATUS, error_bits);
-			printk("%s: Device %s received Master Abort [%016x]\n",
-			       pbm->name, pci_name(pdev), status);
+			pci_info(pdev, "%s: Device received Master Abort "
+				 "[%016x]\n", pbm->name, status);
 		}
 	}
 
@@ -555,8 +537,8 @@ void pci_scan_for_parity_error(struct pci_pbm_info *pbm,
 				   PCI_STATUS_DETECTED_PARITY));
 		if (error_bits) {
 			pci_write_config_word(pdev, PCI_STATUS, error_bits);
-			printk("%s: Device %s saw Parity Error [%016x]\n",
-			       pbm->name, pci_name(pdev), status);
+			pci_info(pdev, "%s: Device saw Parity Error [%016x]\n",
+				 pbm->name, status);
 		}
 	}
 

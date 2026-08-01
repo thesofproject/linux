@@ -7,12 +7,13 @@
  * for more details.
  */
 
-#include <linux/bootmem.h>
+#include <linux/dma-map-ops.h>
+#include <linux/memblock.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
-#include <linux/memblock.h>
 #include <linux/mm.h> /* mem_init */
 #include <linux/initrd.h>
+#include <linux/of_fdt.h>
 #include <linux/pagemap.h>
 #include <linux/pfn.h>
 #include <linux/slab.h>
@@ -29,11 +30,6 @@
 /* Use for MMU and noMMU because of PCI generic code */
 int mem_init_done;
 
-#ifndef CONFIG_MMU
-unsigned int __page_offset;
-EXPORT_SYMBOL(__page_offset);
-#endif /* CONFIG_MMU */
-
 char *klimit = _end;
 
 /*
@@ -46,108 +42,46 @@ unsigned long memory_size;
 EXPORT_SYMBOL(memory_size);
 unsigned long lowmem_size;
 
+EXPORT_SYMBOL(min_low_pfn);
+EXPORT_SYMBOL(max_low_pfn);
+
 #ifdef CONFIG_HIGHMEM
-pte_t *kmap_pte;
-EXPORT_SYMBOL(kmap_pte);
-pgprot_t kmap_prot;
-EXPORT_SYMBOL(kmap_prot);
-
-static inline pte_t *virt_to_kpte(unsigned long vaddr)
-{
-	return pte_offset_kernel(pmd_offset(pgd_offset_k(vaddr),
-			vaddr), vaddr);
-}
-
 static void __init highmem_init(void)
 {
 	pr_debug("%x\n", (u32)PKMAP_BASE);
 	map_page(PKMAP_BASE, 0, 0);	/* XXX gross */
 	pkmap_page_table = virt_to_kpte(PKMAP_BASE);
-
-	kmap_pte = virt_to_kpte(__fix_to_virt(FIX_KMAP_BEGIN));
-	kmap_prot = PAGE_KERNEL;
-}
-
-static void highmem_setup(void)
-{
-	unsigned long pfn;
-
-	for (pfn = max_low_pfn; pfn < max_pfn; ++pfn) {
-		struct page *page = pfn_to_page(pfn);
-
-		/* FIXME not sure about */
-		if (!memblock_is_reserved(pfn << PAGE_SHIFT))
-			free_highmem_page(page);
-	}
 }
 #endif /* CONFIG_HIGHMEM */
+
+void __init arch_zone_limits_init(unsigned long *max_zone_pfns)
+{
+#ifdef CONFIG_HIGHMEM
+	max_zone_pfns[ZONE_DMA] = max_low_pfn;
+	max_zone_pfns[ZONE_HIGHMEM] = max_pfn;
+#else
+	max_zone_pfns[ZONE_DMA] = max_pfn;
+#endif
+}
 
 /*
  * paging_init() sets up the page tables - in fact we've already done this.
  */
 static void __init paging_init(void)
 {
-	unsigned long zones_size[MAX_NR_ZONES];
-#ifdef CONFIG_MMU
 	int idx;
 
 	/* Setup fixmaps */
 	for (idx = 0; idx < __end_of_fixed_addresses; idx++)
 		clear_fixmap(idx);
-#endif
-
-	/* Clean every zones */
-	memset(zones_size, 0, sizeof(zones_size));
 
 #ifdef CONFIG_HIGHMEM
 	highmem_init();
-
-	zones_size[ZONE_DMA] = max_low_pfn;
-	zones_size[ZONE_HIGHMEM] = max_pfn;
-#else
-	zones_size[ZONE_DMA] = max_pfn;
 #endif
-
-	/* We don't have holes in memory map */
-	free_area_init_nodes(zones_size);
 }
 
 void __init setup_memory(void)
 {
-	struct memblock_region *reg;
-
-#ifndef CONFIG_MMU
-	u32 kernel_align_start, kernel_align_size;
-
-	/* Find main memory where is the kernel */
-	for_each_memblock(memory, reg) {
-		memory_start = (u32)reg->base;
-		lowmem_size = reg->size;
-		if ((memory_start <= (u32)_text) &&
-			((u32)_text <= (memory_start + lowmem_size - 1))) {
-			memory_size = lowmem_size;
-			PAGE_OFFSET = memory_start;
-			pr_info("%s: Main mem: 0x%x, size 0x%08x\n",
-				__func__, (u32) memory_start,
-					(u32) memory_size);
-			break;
-		}
-	}
-
-	if (!memory_start || !memory_size) {
-		panic("%s: Missing memory setting 0x%08x, size=0x%08x\n",
-			__func__, (u32) memory_start, (u32) memory_size);
-	}
-
-	/* reservation of region where is the kernel */
-	kernel_align_start = PAGE_DOWN((u32)_text);
-	/* ALIGN can be remove because _end in vmlinux.lds.S is align */
-	kernel_align_size = PAGE_UP((u32)klimit) - kernel_align_start;
-	pr_info("%s: kernel addr:0x%08x-0x%08x size=0x%08x\n",
-		__func__, kernel_align_start, kernel_align_start
-			+ kernel_align_size, kernel_align_size);
-	memblock_reserve(kernel_align_start, kernel_align_size);
-#endif
 	/*
 	 * Kernel:
 	 * start: base phys address of kernel - page align
@@ -155,82 +89,25 @@ void __init setup_memory(void)
 	 *
 	 * min_low_pfn - the first page (mm/bootmem.c - node_boot_start)
 	 * max_low_pfn
-	 * max_mapnr - the first unused page (mm/bootmem.c - node_low_pfn)
 	 */
 
 	/* memory start is from the kernel end (aligned) to higher addr */
 	min_low_pfn = memory_start >> PAGE_SHIFT; /* minimum for allocation */
-	/* RAM is assumed contiguous */
-	max_mapnr = memory_size >> PAGE_SHIFT;
 	max_low_pfn = ((u64)memory_start + (u64)lowmem_size) >> PAGE_SHIFT;
 	max_pfn = ((u64)memory_start + (u64)memory_size) >> PAGE_SHIFT;
 
-	pr_info("%s: max_mapnr: %#lx\n", __func__, max_mapnr);
 	pr_info("%s: min_low_pfn: %#lx\n", __func__, min_low_pfn);
 	pr_info("%s: max_low_pfn: %#lx\n", __func__, max_low_pfn);
 	pr_info("%s: max_pfn: %#lx\n", __func__, max_pfn);
 
-	/* Add active regions with valid PFNs */
-	for_each_memblock(memory, reg) {
-		unsigned long start_pfn, end_pfn;
-
-		start_pfn = memblock_region_memory_base_pfn(reg);
-		end_pfn = memblock_region_memory_end_pfn(reg);
-		memblock_set_node(start_pfn << PAGE_SHIFT,
-				  (end_pfn - start_pfn) << PAGE_SHIFT,
-				  &memblock.memory, 0);
-	}
-
-	/* XXX need to clip this if using highmem? */
-	sparse_memory_present_with_active_regions(0);
-
 	paging_init();
-}
-
-#ifdef CONFIG_BLK_DEV_INITRD
-void free_initrd_mem(unsigned long start, unsigned long end)
-{
-	free_reserved_area((void *)start, (void *)end, -1, "initrd");
-}
-#endif
-
-void free_initmem(void)
-{
-	free_initmem_default(-1);
 }
 
 void __init mem_init(void)
 {
-	high_memory = (void *)__va(memory_start + lowmem_size - 1);
-
-	/* this will put all memory onto the freelists */
-	free_all_bootmem();
-#ifdef CONFIG_HIGHMEM
-	highmem_setup();
-#endif
-
-	mem_init_print_info(NULL);
-#ifdef CONFIG_MMU
-	pr_info("Kernel virtual memory layout:\n");
-	pr_info("  * 0x%08lx..0x%08lx  : fixmap\n", FIXADDR_START, FIXADDR_TOP);
-#ifdef CONFIG_HIGHMEM
-	pr_info("  * 0x%08lx..0x%08lx  : highmem PTEs\n",
-		PKMAP_BASE, PKMAP_ADDR(LAST_PKMAP));
-#endif /* CONFIG_HIGHMEM */
-	pr_info("  * 0x%08lx..0x%08lx  : early ioremap\n",
-		ioremap_bot, ioremap_base);
-	pr_info("  * 0x%08lx..0x%08lx  : vmalloc & ioremap\n",
-		(unsigned long)VMALLOC_START, VMALLOC_END);
-#endif
 	mem_init_done = 1;
 }
 
-#ifndef CONFIG_MMU
-int page_is_ram(unsigned long pfn)
-{
-	return __range_ok(pfn, 0);
-}
-#else
 int page_is_ram(unsigned long pfn)
 {
 	return pfn < max_low_pfn;
@@ -239,7 +116,7 @@ int page_is_ram(unsigned long pfn)
 /*
  * Check for command-line options that affect what MMU_init will do.
  */
-static void mm_cmdline_setup(void)
+static void __init mm_cmdline_setup(void)
 {
 	unsigned long maxmem = 0;
 	char *p = cmd_line;
@@ -288,11 +165,6 @@ static void __init mmu_init_hw(void)
 asmlinkage void __init mmu_init(void)
 {
 	unsigned int kstart, ksize;
-
-	if (!memblock.reserved.cnt) {
-		pr_emerg("Error memory count\n");
-		machine_restart(NULL);
-	}
 
 	if ((u32) memblock.memory.regions[0].size < 0x400000) {
 		pr_emerg("Memory must be greater than 4MB\n");
@@ -355,31 +227,33 @@ asmlinkage void __init mmu_init(void)
 	/* This will also cause that unflatten device tree will be allocated
 	 * inside 768MB limit */
 	memblock_set_current_limit(memory_start + lowmem_size - 1);
+
+	parse_early_param();
+
+	early_init_fdt_scan_reserved_mem();
+
+	/* CMA initialization */
+	dma_contiguous_reserve(memory_start + lowmem_size - 1);
+
+	memblock_dump_all();
 }
 
-/* This is only called until mem_init is done. */
-void __init *early_get_page(void)
-{
-	/*
-	 * Mem start + kernel_tlb -> here is limit
-	 * because of mem mapping from head.S
-	 */
-	return __va(memblock_alloc_base(PAGE_SIZE, PAGE_SIZE,
-				memory_start + kernel_tlb));
-}
-
-#endif /* CONFIG_MMU */
-
-void * __ref zalloc_maybe_bootmem(size_t size, gfp_t mask)
-{
-	void *p;
-
-	if (mem_init_done)
-		p = kzalloc(size, mask);
-	else {
-		p = alloc_bootmem(size);
-		if (p)
-			memset(p, 0, size);
-	}
-	return p;
-}
+static const pgprot_t protection_map[16] = {
+	[VM_NONE]					= PAGE_NONE,
+	[VM_READ]					= PAGE_READONLY_X,
+	[VM_WRITE]					= PAGE_COPY,
+	[VM_WRITE | VM_READ]				= PAGE_COPY_X,
+	[VM_EXEC]					= PAGE_READONLY,
+	[VM_EXEC | VM_READ]				= PAGE_READONLY_X,
+	[VM_EXEC | VM_WRITE]				= PAGE_COPY,
+	[VM_EXEC | VM_WRITE | VM_READ]			= PAGE_COPY_X,
+	[VM_SHARED]					= PAGE_NONE,
+	[VM_SHARED | VM_READ]				= PAGE_READONLY_X,
+	[VM_SHARED | VM_WRITE]				= PAGE_SHARED,
+	[VM_SHARED | VM_WRITE | VM_READ]		= PAGE_SHARED_X,
+	[VM_SHARED | VM_EXEC]				= PAGE_READONLY,
+	[VM_SHARED | VM_EXEC | VM_READ]			= PAGE_READONLY_X,
+	[VM_SHARED | VM_EXEC | VM_WRITE]		= PAGE_SHARED,
+	[VM_SHARED | VM_EXEC | VM_WRITE | VM_READ]	= PAGE_SHARED_X
+};
+DECLARE_VM_GET_PAGE_PROT

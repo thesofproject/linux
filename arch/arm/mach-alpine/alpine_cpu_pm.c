@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Low-level power-management support for Alpine platform.
  *
  * Copyright (C) 2015 Annapurna Labs Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/io.h>
@@ -38,7 +29,7 @@ int alpine_cpu_wakeup(unsigned int phys_cpu, uint32_t phys_resume_addr)
 	/*
 	 * Set CPU resume address -
 	 * secure firmware running on boot will jump to this address
-	 * after setting proper CPU mode, and initialiing e.g. secure
+	 * after setting proper CPU mode, and initializing e.g. secure
 	 * regs (the same mode all CPUs are booted to - usually HYP)
 	 */
 	writel(phys_resume_addr,

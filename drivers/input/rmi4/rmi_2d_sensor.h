@@ -1,14 +1,14 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2011-2016 Synaptics Incorporated
  * Copyright (c) 2011 Unixphere
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #ifndef _RMI_2D_SENSOR_H
 #define _RMI_2D_SENSOR_H
+
+#include <linux/rmi.h>
+#include <linux/types.h>
 
 enum rmi_2d_sensor_object_type {
 	RMI_2D_OBJECT_NONE,
@@ -56,8 +56,8 @@ struct rmi_2d_sensor {
 	u16 max_y;
 	u8 nbr_fingers;
 	u8 *data_pkt;
-	int pkt_size;
-	int attn_size;
+	u32 pkt_size;
+	u32 attn_size;
 	bool topbuttonpad;
 	enum rmi_sensor_type sensor_type;
 	struct input_dev *input;

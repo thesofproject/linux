@@ -1,20 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  TW5864 driver - video encoding functions
  *
  *  Copyright (C) 2016 Bluecherry, LLC <maintainers@bluecherrydvr.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #include <linux/module.h>
+#include <linux/workqueue.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-event.h>
 #include <media/videobuf2-dma-contig.h>
@@ -184,7 +176,7 @@ static const unsigned int intra4x4_lambda3[] = {
 static v4l2_std_id tw5864_get_v4l2_std(enum tw5864_vid_std std);
 static enum tw5864_vid_std tw5864_from_v4l2_std(v4l2_std_id v4l2_std);
 
-static void tw5864_handle_frame_task(unsigned long data);
+static void tw5864_handle_frame_work(struct work_struct *t);
 static void tw5864_handle_frame(struct tw5864_h264_frame *frame);
 static void tw5864_frame_interval_set(struct tw5864_input *input);
 
@@ -479,8 +471,6 @@ static const struct vb2_ops tw5864_video_qops = {
 	.buf_queue = tw5864_buf_queue,
 	.start_streaming = tw5864_start_streaming,
 	.stop_streaming = tw5864_stop_streaming,
-	.wait_prepare = vb2_ops_wait_prepare,
-	.wait_finish = vb2_ops_wait_finish,
 };
 
 static int tw5864_s_ctrl(struct v4l2_ctrl *ctrl)
@@ -610,10 +600,9 @@ static int tw5864_querycap(struct file *file, void *priv,
 {
 	struct tw5864_input *input = video_drvdata(file);
 
-	strcpy(cap->driver, "tw5864");
+	strscpy(cap->driver, "tw5864", sizeof(cap->driver));
 	snprintf(cap->card, sizeof(cap->card), "TW5864 Encoder %d",
 		 input->nr);
-	sprintf(cap->bus_info, "PCI:%s", pci_name(input->root->pci));
 	return 0;
 }
 
@@ -776,6 +765,9 @@ static int tw5864_enum_frameintervals(struct file *file, void *priv,
 	fintv->type = V4L2_FRMIVAL_TYPE_STEPWISE;
 
 	ret = tw5864_frameinterval_get(input, &frameinterval);
+	if (ret)
+		return ret;
+
 	fintv->stepwise.step = frameinterval;
 	fintv->stepwise.min = frameinterval;
 	fintv->stepwise.max = frameinterval;
@@ -794,6 +786,9 @@ static int tw5864_g_parm(struct file *file, void *priv,
 	cp->capability = V4L2_CAP_TIMEPERFRAME;
 
 	ret = tw5864_frameinterval_get(input, &cp->timeperframe);
+	if (ret)
+		return ret;
+
 	cp->timeperframe.numerator *= input->frame_interval;
 	cp->capturemode = 0;
 	cp->readbuffers = 2;
@@ -1066,8 +1061,7 @@ int tw5864_video_init(struct tw5864_dev *dev, int *video_nr)
 	dev->irqmask |= TW5864_INTR_VLC_DONE | TW5864_INTR_TIMER;
 	tw5864_irqmask_apply(dev);
 
-	tasklet_init(&dev->tasklet, tw5864_handle_frame_task,
-		     (unsigned long)dev);
+	INIT_WORK(&dev->bh_work, tw5864_handle_frame_work);
 
 	for (i = 0; i < TW5864_INPUTS; i++) {
 		dev->inputs[i].root = dev;
@@ -1084,7 +1078,7 @@ fini_video_inputs:
 	for (i = last_input_nr_registered; i >= 0; i--)
 		tw5864_video_input_fini(&dev->inputs[i]);
 
-	tasklet_kill(&dev->tasklet);
+	cancel_work_sync(&dev->bh_work);
 
 free_dma:
 	for (i = last_dma_allocated; i >= 0; i--) {
@@ -1119,7 +1113,7 @@ static int tw5864_video_input_init(struct tw5864_input *input, int video_nr)
 	input->vidq.gfp_flags = 0;
 	input->vidq.buf_struct_size = sizeof(struct tw5864_buf);
 	input->vidq.lock = &input->lock;
-	input->vidq.min_buffers_needed = 2;
+	input->vidq.min_queued_buffers = 2;
 	input->vidq.dev = &input->root->pci->dev;
 	ret = vb2_queue_init(&input->vidq);
 	if (ret)
@@ -1165,7 +1159,7 @@ static int tw5864_video_input_init(struct tw5864_input *input, int video_nr)
 	input->gop = GOP_SIZE;
 	input->frame_interval = 1;
 
-	ret = video_register_device(&input->vdev, VFL_TYPE_GRABBER, video_nr);
+	ret = video_register_device(&input->vdev, VFL_TYPE_VIDEO, video_nr);
 	if (ret)
 		goto free_v4l2_hdl;
 
@@ -1187,7 +1181,6 @@ static int tw5864_video_input_init(struct tw5864_input *input, int video_nr)
 
 free_v4l2_hdl:
 	v4l2_ctrl_handler_free(hdl);
-	vb2_queue_release(&input->vidq);
 free_mutex:
 	mutex_destroy(&input->lock);
 
@@ -1196,16 +1189,15 @@ free_mutex:
 
 static void tw5864_video_input_fini(struct tw5864_input *dev)
 {
-	video_unregister_device(&dev->vdev);
+	vb2_video_unregister_device(&dev->vdev);
 	v4l2_ctrl_handler_free(&dev->hdl);
-	vb2_queue_release(&dev->vidq);
 }
 
 void tw5864_video_fini(struct tw5864_dev *dev)
 {
 	int i;
 
-	tasklet_kill(&dev->tasklet);
+	cancel_work_sync(&dev->bh_work);
 
 	for (i = 0; i < TW5864_INPUTS; i++)
 		tw5864_video_input_fini(&dev->inputs[i]);
@@ -1322,9 +1314,9 @@ static int tw5864_is_motion_triggered(struct tw5864_h264_frame *frame)
 	return detected;
 }
 
-static void tw5864_handle_frame_task(unsigned long data)
+static void tw5864_handle_frame_work(struct work_struct *t)
 {
-	struct tw5864_dev *dev = (struct tw5864_dev *)data;
+	struct tw5864_dev *dev = from_work(dev, t, bh_work);
 	unsigned long flags;
 	int batch_size = H264_BUF_CNT;
 
@@ -1395,12 +1387,12 @@ static void tw5864_handle_frame(struct tw5864_h264_frame *frame)
 	input->vb = NULL;
 	spin_unlock_irqrestore(&input->slock, flags);
 
-	v4l2_buf = to_vb2_v4l2_buffer(&vb->vb.vb2_buf);
-
 	if (!vb) { /* Gone because of disabling */
 		dev_dbg(&dev->pci->dev, "vb is empty, dropping frame\n");
 		return;
 	}
+
+	v4l2_buf = to_vb2_v4l2_buffer(&vb->vb.vb2_buf);
 
 	/*
 	 * Check for space.

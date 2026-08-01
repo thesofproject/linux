@@ -1,23 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * HSI core header file.
  *
  * Copyright (C) 2010 Nokia Corporation. All rights reserved.
  *
  * Contact: Carlos Chinea <carlos.chinea@nokia.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
  */
 
 #ifndef __LINUX_HSI_H__
@@ -284,7 +271,7 @@ struct hsi_controller {
 	struct module		*owner;
 	unsigned int		id;
 	unsigned int		num_ports;
-	struct hsi_port		**port;
+	struct hsi_port		*port[] __counted_by(num_ports);
 };
 
 #define to_hsi_controller(dev) container_of(dev, struct hsi_controller, device)

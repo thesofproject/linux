@@ -1,33 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2006 Intel Corporation
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- *
  * Authors:
  *    Eric Anholt <eric@anholt.net>
- *
  */
-#include <drm/drmP.h>
+
+#include <drm/display/drm_dp_helper.h>
 #include <drm/drm.h>
-#include <drm/gma_drm.h>
+#include <drm/drm_print.h>
+
+#include "intel_bios.h"
 #include "psb_drv.h"
 #include "psb_intel_drv.h"
 #include "psb_intel_reg.h"
-#include "intel_bios.h"
 
-#define	SLAVE_ADDR1	0x70
-#define	SLAVE_ADDR2	0x72
+#define	TARGET_ADDR1	0x70
+#define	TARGET_ADDR2	0x72
 
 static void *find_section(struct bdb_header *bdb, int section_id)
 {
@@ -63,7 +52,7 @@ parse_edp(struct drm_psb_private *dev_priv, struct bdb_header *bdb)
 	uint8_t	panel_type;
 
 	edp = find_section(bdb, BDB_EDP);
-	
+
 	dev_priv->edp.bpp = 18;
 	if (!edp) {
 		if (dev_priv->edp.support) {
@@ -93,7 +82,7 @@ parse_edp(struct drm_psb_private *dev_priv, struct bdb_header *bdb)
 	dev_priv->edp.pps = *edp_pps;
 
 	DRM_DEBUG_KMS("EDP timing in vbt t1_t3 %d t8 %d t9 %d t10 %d t11_t12 %d\n",
-				dev_priv->edp.pps.t1_t3, dev_priv->edp.pps.t8, 
+				dev_priv->edp.pps.t1_t3, dev_priv->edp.pps.t8,
 				dev_priv->edp.pps.t9, dev_priv->edp.pps.t10,
 				dev_priv->edp.pps.t11_t12);
 
@@ -220,7 +209,7 @@ static void parse_backlight_data(struct drm_psb_private *dev_priv,
 
 	lvds_bl = kmemdup(vbt_lvds_bl, sizeof(*vbt_lvds_bl), GFP_KERNEL);
 	if (!lvds_bl) {
-		dev_err(dev_priv->dev->dev, "out of memory for backlight data\n");
+		dev_err(dev_priv->dev.dev, "out of memory for backlight data\n");
 		return;
 	}
 	dev_priv->lvds_bl = lvds_bl;
@@ -258,10 +247,9 @@ static void parse_lfp_panel_data(struct drm_psb_private *dev_priv,
 	entry = &lvds_lfp_data->data[lvds_options->panel_type];
 	dvo_timing = &entry->dvo_timing;
 
-	panel_fixed_mode = kzalloc(sizeof(*panel_fixed_mode),
-				      GFP_KERNEL);
+	panel_fixed_mode = kzalloc_obj(*panel_fixed_mode);
 	if (panel_fixed_mode == NULL) {
-		dev_err(dev_priv->dev->dev, "out of memory for fixed panel mode\n");
+		dev_err(dev_priv->dev.dev, "out of memory for fixed panel mode\n");
 		return;
 	}
 
@@ -272,7 +260,7 @@ static void parse_lfp_panel_data(struct drm_psb_private *dev_priv,
 		dev_priv->lfp_lvds_vbt_mode = panel_fixed_mode;
 		drm_mode_debug_printmodeline(panel_fixed_mode);
 	} else {
-		dev_dbg(dev_priv->dev->dev, "ignoring invalid LVDS VBT\n");
+		dev_dbg(dev_priv->dev.dev, "ignoring invalid LVDS VBT\n");
 		dev_priv->lvds_vbt = 0;
 		kfree(panel_fixed_mode);
 	}
@@ -297,7 +285,7 @@ static void parse_sdvo_panel_data(struct drm_psb_private *dev_priv,
 	if (!dvo_timing)
 		return;
 
-	panel_fixed_mode = kzalloc(sizeof(*panel_fixed_mode), GFP_KERNEL);
+	panel_fixed_mode = kzalloc_obj(*panel_fixed_mode);
 
 	if (!panel_fixed_mode)
 		return;
@@ -369,10 +357,10 @@ parse_sdvo_device_mapping(struct drm_psb_private *dev_priv,
 			/* skip the device block if device type is invalid */
 			continue;
 		}
-		if (p_child->slave_addr != SLAVE_ADDR1 &&
-			p_child->slave_addr != SLAVE_ADDR2) {
+		if (p_child->target_addr != TARGET_ADDR1 &&
+			p_child->target_addr != TARGET_ADDR2) {
 			/*
-			 * If the slave address is neither 0x70 nor 0x72,
+			 * If the target address is neither 0x70 nor 0x72,
 			 * it is not a SDVO device. Skip it.
 			 */
 			continue;
@@ -383,22 +371,22 @@ parse_sdvo_device_mapping(struct drm_psb_private *dev_priv,
 			DRM_DEBUG_KMS("Incorrect SDVO port. Skip it\n");
 			continue;
 		}
-		DRM_DEBUG_KMS("the SDVO device with slave addr %2x is found on"
+		DRM_DEBUG_KMS("the SDVO device with target addr %2x is found on"
 				" %s port\n",
-				p_child->slave_addr,
+				p_child->target_addr,
 				(p_child->dvo_port == DEVICE_PORT_DVOB) ?
 					"SDVOB" : "SDVOC");
 		p_mapping = &(dev_priv->sdvo_mappings[p_child->dvo_port - 1]);
 		if (!p_mapping->initialized) {
 			p_mapping->dvo_port = p_child->dvo_port;
-			p_mapping->slave_addr = p_child->slave_addr;
+			p_mapping->target_addr = p_child->target_addr;
 			p_mapping->dvo_wiring = p_child->dvo_wiring;
 			p_mapping->ddc_pin = p_child->ddc_pin;
 			p_mapping->i2c_pin = p_child->i2c_pin;
 			p_mapping->initialized = 1;
 			DRM_DEBUG_KMS("SDVO device: dvo=%x, addr=%x, wiring=%d, ddc_pin=%d, i2c_pin=%d\n",
 				      p_mapping->dvo_port,
-				      p_mapping->slave_addr,
+				      p_mapping->target_addr,
 				      p_mapping->dvo_wiring,
 				      p_mapping->ddc_pin,
 				      p_mapping->i2c_pin);
@@ -406,10 +394,10 @@ parse_sdvo_device_mapping(struct drm_psb_private *dev_priv,
 			DRM_DEBUG_KMS("Maybe one SDVO port is shared by "
 					 "two SDVO device.\n");
 		}
-		if (p_child->slave2_addr) {
+		if (p_child->target2_addr) {
 			/* Maybe this is a SDVO device with multiple inputs */
 			/* And the mapping info is not added */
-			DRM_DEBUG_KMS("there exists the slave2_addr. Maybe this"
+			DRM_DEBUG_KMS("there exists the target2_addr. Maybe this"
 				" is a SDVO device with multiple inputs.\n");
 		}
 		count++;
@@ -435,6 +423,9 @@ parse_driver_features(struct drm_psb_private *dev_priv,
 
 	if (driver->lvds_config == BDB_DRIVER_FEATURE_EDP)
 		dev_priv->edp.support = 1;
+
+	dev_priv->lvds_enabled_in_vbt = driver->lvds_config != 0;
+	DRM_DEBUG_KMS("LVDS VBT config bits: 0x%x\n", driver->lvds_config);
 
 	/* This bit means to use 96Mhz for DPLL_A or not */
 	if (driver->primary_lfp_id)
@@ -486,7 +477,7 @@ parse_device_mapping(struct drm_psb_private *dev_priv,
 		DRM_DEBUG_KMS("no child dev is parsed from VBT\n");
 		return;
 	}
-	dev_priv->child_dev = kcalloc(count, sizeof(*p_child), GFP_KERNEL);
+	dev_priv->child_dev = kzalloc_objs(*p_child, count);
 	if (!dev_priv->child_dev) {
 		DRM_DEBUG_KMS("No memory space for child devices\n");
 		return;
@@ -525,8 +516,8 @@ parse_device_mapping(struct drm_psb_private *dev_priv,
  */
 int psb_intel_init_bios(struct drm_device *dev)
 {
-	struct drm_psb_private *dev_priv = dev->dev_private;
-	struct pci_dev *pdev = dev->pdev;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
 	struct vbt_header *vbt = NULL;
 	struct bdb_header *bdb = NULL;
 	u8 __iomem *bios = NULL;
@@ -584,12 +575,12 @@ int psb_intel_init_bios(struct drm_device *dev)
 	return 0;
 }
 
-/**
+/*
  * Destroy and free VBT data
  */
 void psb_intel_destroy_bios(struct drm_device *dev)
 {
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 
 	kfree(dev_priv->sdvo_lvds_vbt_mode);
 	kfree(dev_priv->lfp_lvds_vbt_mode);

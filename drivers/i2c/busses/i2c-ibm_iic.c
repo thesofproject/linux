@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/i2c/busses/i2c-ibm_iic.c
  *
@@ -23,12 +24,6 @@
  *
  *   	With some changes from Kyösti Mälkki <kmalkki@cc.hut.fi>
  *	and even Frodo Looijaard <frodol@dds.nl>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
  */
 
 #include <linux/module.h>
@@ -42,9 +37,10 @@
 #include <asm/irq.h>
 #include <linux/io.h>
 #include <linux/i2c.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
-#include <linux/of_platform.h>
+#include <linux/platform_device.h>
 
 #include "i2c-ibm_iic.h"
 
@@ -140,11 +136,11 @@ static void iic_dev_init(struct ibm_iic_private* dev)
 
 	DBG("%d: init\n", dev->idx);
 
-	/* Clear master address */
+	/* Clear remote target address */
 	out_8(&iic->lmadr, 0);
 	out_8(&iic->hmadr, 0);
 
-	/* Clear slave address */
+	/* Clear local target address */
 	out_8(&iic->lsadr, 0);
 	out_8(&iic->hsadr, 0);
 
@@ -341,7 +337,7 @@ static irqreturn_t iic_handler(int irq, void *dev_id)
 }
 
 /*
- * Get master transfer result and clear errors if any.
+ * Get controller transfer result and clear errors if any.
  * Returns the number of actually transferred bytes or error (<0)
  */
 static int iic_xfer_result(struct ibm_iic_private* dev)
@@ -356,7 +352,7 @@ static int iic_xfer_result(struct ibm_iic_private* dev)
 		out_8(&iic->extsts, EXTSTS_IRQP | EXTSTS_IRQD |
 			EXTSTS_LA | EXTSTS_ICT | EXTSTS_XFRA);
 
-		/* Flush master data buffer */
+		/* Flush controller data buffer */
 		out_8(&iic->mdcntl, in_8(&iic->mdcntl) | MDCNTL_FMDB);
 
 		/* Is bus free?
@@ -405,7 +401,7 @@ static void iic_abort_xfer(struct ibm_iic_private* dev)
 }
 
 /*
- * Wait for master transfer to complete.
+ * Wait for controller transfer to complete.
  * It puts current process to sleep until we get interrupt or timeout expires.
  * Returns the number of transferred bytes or error (<0)
  */
@@ -437,7 +433,7 @@ static int iic_wait_for_tc(struct ibm_iic_private* dev){
 				break;
 			}
 
-			if (unlikely(signal_pending(current))){
+			if (signal_pending(current)){
 				DBG("%d: poll interrupted\n", dev->idx);
 				ret = -ERESTARTSYS;
 				break;
@@ -456,9 +452,6 @@ static int iic_wait_for_tc(struct ibm_iic_private* dev){
 	return ret;
 }
 
-/*
- * Low level master transfer routine
- */
 static int iic_xfer_bytes(struct ibm_iic_private* dev, struct i2c_msg* pm,
 			  int combined_xfer)
 {
@@ -515,25 +508,21 @@ static int iic_xfer_bytes(struct ibm_iic_private* dev, struct i2c_msg* pm,
 	return ret > 0 ? 0 : ret;
 }
 
-/*
- * Set target slave address for master transfer
- */
+/* Set remote target address for transfer */
 static inline void iic_address(struct ibm_iic_private* dev, struct i2c_msg* msg)
 {
 	volatile struct iic_regs __iomem *iic = dev->vaddr;
-	u16 addr = msg->addr;
 
 	DBG2("%d: iic_address, 0x%03x (%d-bit)\n", dev->idx,
-		addr, msg->flags & I2C_M_TEN ? 10 : 7);
+		msg->addr, msg->flags & I2C_M_TEN ? 10 : 7);
 
-	if (msg->flags & I2C_M_TEN){
+	if (msg->flags & I2C_M_TEN) {
 	    out_8(&iic->cntl, CNTL_AMD);
-	    out_8(&iic->lmadr, addr);
-	    out_8(&iic->hmadr, 0xf0 | ((addr >> 7) & 0x06));
-	}
-	else {
+	    out_8(&iic->lmadr, i2c_10bit_addr_lo_from_msg(msg));
+	    out_8(&iic->hmadr, i2c_10bit_addr_hi_from_msg(msg) & ~I2C_M_RD);
+	} else {
 	    out_8(&iic->cntl, 0);
-	    out_8(&iic->lmadr, addr << 1);
+	    out_8(&iic->lmadr, i2c_8bit_addr_from_msg(msg) & ~I2C_M_RD);
 	}
 }
 
@@ -550,7 +539,7 @@ static inline int iic_address_neq(const struct i2c_msg* p1,
 }
 
 /*
- * Generic master transfer entrypoint.
+ * Generic transfer entrypoint.
  * Returns the number of processed messages or error (<0)
  */
 static int iic_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)
@@ -560,9 +549,6 @@ static int iic_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)
 	int i, ret = 0;
 
 	DBG2("%d: iic_xfer, %d msg(s)\n", dev->idx, num);
-
-	if (!num)
-		return 0;
 
 	/* Check the sanity of the passed messages.
 	 * Uhh, generic i2c layer is more suitable place for such code...
@@ -611,11 +597,11 @@ static int iic_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)
 		}
 	}
 	else {
-		/* Flush master data buffer (just in case) */
+		/* Flush controller data buffer (just in case) */
 		out_8(&iic->mdcntl, in_8(&iic->mdcntl) | MDCNTL_FMDB);
 	}
 
-	/* Load slave address */
+	/* Load target address */
 	iic_address(dev, &msgs[0]);
 
 	/* Do real transfer */
@@ -631,8 +617,8 @@ static u32 iic_func(struct i2c_adapter *adap)
 }
 
 static const struct i2c_algorithm iic_algo = {
-	.master_xfer 	= iic_xfer,
-	.functionality	= iic_func
+	.xfer = iic_xfer,
+	.functionality = iic_func
 };
 
 /*
@@ -701,11 +687,9 @@ static int iic_probe(struct platform_device *ofdev)
 	const u32 *freq;
 	int ret;
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
-	if (!dev) {
-		dev_err(&ofdev->dev, "failed to allocate device data\n");
+	dev = kzalloc_obj(*dev);
+	if (!dev)
 		return -ENOMEM;
-	}
 
 	platform_set_drvdata(ofdev, dev);
 
@@ -746,9 +730,9 @@ static int iic_probe(struct platform_device *ofdev)
 	adap = &dev->adap;
 	adap->dev.parent = &ofdev->dev;
 	adap->dev.of_node = of_node_get(np);
-	strlcpy(adap->name, "IBM IIC", sizeof(adap->name));
+	strscpy(adap->name, "IBM IIC", sizeof(adap->name));
 	i2c_set_adapdata(adap, dev);
-	adap->class = I2C_CLASS_HWMON | I2C_CLASS_SPD;
+	adap->class = I2C_CLASS_HWMON;
 	adap->algo = &iic_algo;
 	adap->timeout = HZ;
 
@@ -777,7 +761,7 @@ error_cleanup:
 /*
  * Cleanup initialized IIC interface
  */
-static int iic_remove(struct platform_device *ofdev)
+static void iic_remove(struct platform_device *ofdev)
 {
 	struct ibm_iic_private *dev = platform_get_drvdata(ofdev);
 
@@ -790,8 +774,6 @@ static int iic_remove(struct platform_device *ofdev)
 
 	iounmap(dev->vaddr);
 	kfree(dev);
-
-	return 0;
 }
 
 static const struct of_device_id ibm_iic_match[] = {
@@ -806,7 +788,7 @@ static struct platform_driver ibm_iic_driver = {
 		.of_match_table = ibm_iic_match,
 	},
 	.probe	= iic_probe,
-	.remove	= iic_remove,
+	.remove = iic_remove,
 };
 
 module_platform_driver(ibm_iic_driver);

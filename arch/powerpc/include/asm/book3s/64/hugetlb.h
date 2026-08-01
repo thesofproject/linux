@@ -1,6 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _ASM_POWERPC_BOOK3S_64_HUGETLB_H
 #define _ASM_POWERPC_BOOK3S_64_HUGETLB_H
+
+#include <asm/firmware.h>
+
 /*
  * For radix we want generic code to handle hugetlb. But then if we want
  * both hash and radix to be enabled together we need to workaround the
@@ -8,10 +11,10 @@
  */
 void radix__flush_hugetlb_page(struct vm_area_struct *vma, unsigned long vmaddr);
 void radix__local_flush_hugetlb_page(struct vm_area_struct *vma, unsigned long vmaddr);
-extern unsigned long
-radix__hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
-				unsigned long len, unsigned long pgoff,
-				unsigned long flags);
+
+extern void radix__huge_ptep_modify_prot_commit(struct vm_area_struct *vma,
+						unsigned long addr, pte_t *ptep,
+						pte_t old_pte, pte_t pte);
 
 static inline int hstate_get_psize(struct hstate *hstate)
 {
@@ -32,31 +35,69 @@ static inline int hstate_get_psize(struct hstate *hstate)
 	}
 }
 
-#define arch_make_huge_pte arch_make_huge_pte
-static inline pte_t arch_make_huge_pte(pte_t entry, struct vm_area_struct *vma,
-				       struct page *page, int writable)
+#define __HAVE_ARCH_GIGANTIC_PAGE_RUNTIME_SUPPORTED
+static inline bool gigantic_page_runtime_supported(void)
 {
-	unsigned long page_shift;
-
-	if (!cpu_has_feature(CPU_FTR_POWER9_DD1))
-		return entry;
-
-	page_shift = huge_page_shift(hstate_vma(vma));
 	/*
-	 * We don't support 1G hugetlb pages yet.
+	 * We used gigantic page reservation with hypervisor assist in some case.
+	 * We cannot use runtime allocation of gigantic pages in those platforms
+	 * This is hash translation mode LPARs.
 	 */
-	VM_WARN_ON(page_shift == mmu_psize_defs[MMU_PAGE_1G].shift);
-	if (page_shift == mmu_psize_defs[MMU_PAGE_2M].shift)
-		return __pte(pte_val(entry) | R_PAGE_LARGE);
-	else
-		return entry;
-}
+	if (firmware_has_feature(FW_FEATURE_LPAR) && !radix_enabled())
+		return false;
 
-#ifdef CONFIG_ARCH_HAS_GIGANTIC_PAGE
-static inline bool gigantic_page_supported(void)
-{
 	return true;
 }
-#endif
 
+#define huge_ptep_modify_prot_start huge_ptep_modify_prot_start
+extern pte_t huge_ptep_modify_prot_start(struct vm_area_struct *vma,
+					 unsigned long addr, pte_t *ptep);
+
+#define huge_ptep_modify_prot_commit huge_ptep_modify_prot_commit
+extern void huge_ptep_modify_prot_commit(struct vm_area_struct *vma,
+					 unsigned long addr, pte_t *ptep,
+					 pte_t old_pte, pte_t new_pte);
+
+static inline void flush_hugetlb_page(struct vm_area_struct *vma,
+				      unsigned long vmaddr)
+{
+	if (radix_enabled())
+		return radix__flush_hugetlb_page(vma, vmaddr);
+}
+
+void flush_hugetlb_page(struct vm_area_struct *vma, unsigned long vmaddr);
+
+static inline int check_and_get_huge_psize(int shift)
+{
+	int mmu_psize;
+
+	if (shift > SLICE_HIGH_SHIFT)
+		return -EINVAL;
+
+	mmu_psize = shift_to_mmu_psize(shift);
+
+	/*
+	 * We need to make sure that for different page sizes reported by
+	 * firmware we only add hugetlb support for page sizes that can be
+	 * supported by linux page table layout.
+	 * For now we have
+	 * Radix: 2M and 1G
+	 * Hash: 16M and 16G
+	 */
+	if (radix_enabled()) {
+		if (mmu_psize != MMU_PAGE_2M && mmu_psize != MMU_PAGE_1G)
+			return -EINVAL;
+	} else {
+		if (mmu_psize != MMU_PAGE_16M && mmu_psize != MMU_PAGE_16G)
+			return -EINVAL;
+	}
+	return mmu_psize;
+}
+
+#define arch_has_huge_bootmem_alloc arch_has_huge_bootmem_alloc
+
+static inline bool arch_has_huge_bootmem_alloc(void)
+{
+	return (firmware_has_feature(FW_FEATURE_LPAR) && !radix_enabled());
+}
 #endif

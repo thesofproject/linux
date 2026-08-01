@@ -23,15 +23,15 @@ struct inotify_event {
 	__u32		mask;		/* watch mask */
 	__u32		cookie;		/* cookie to synchronize two events */
 	__u32		len;		/* length (including nulls) of name */
-	char		name[0];	/* stub for possible name */
+	char		name[];	/* stub for possible name */
 };
 
 /* the following are legal, implemented events that user-space can watch for */
 #define IN_ACCESS		0x00000001	/* File was accessed */
 #define IN_MODIFY		0x00000002	/* File was modified */
 #define IN_ATTRIB		0x00000004	/* Metadata changed */
-#define IN_CLOSE_WRITE		0x00000008	/* Writtable file was closed */
-#define IN_CLOSE_NOWRITE	0x00000010	/* Unwrittable file closed */
+#define IN_CLOSE_WRITE		0x00000008	/* Writable file was closed */
+#define IN_CLOSE_NOWRITE	0x00000010	/* Unwritable file closed */
 #define IN_OPEN			0x00000020	/* File was opened */
 #define IN_MOVED_FROM		0x00000040	/* File was moved from X */
 #define IN_MOVED_TO		0x00000080	/* File was moved to Y */
@@ -53,6 +53,7 @@ struct inotify_event {
 #define IN_ONLYDIR		0x01000000	/* only watch the path if it is a directory */
 #define IN_DONT_FOLLOW		0x02000000	/* don't follow a sym link */
 #define IN_EXCL_UNLINK		0x04000000	/* exclude events on unlinked objects */
+#define IN_MASK_CREATE		0x10000000	/* only create watches */
 #define IN_MASK_ADD		0x20000000	/* add to the mask of an already existing watch */
 #define IN_ISDIR		0x40000000	/* event occurred against dir */
 #define IN_ONESHOT		0x80000000	/* only send event once */

@@ -30,8 +30,8 @@ struct __ip6_tnl_parm {
 	struct in6_addr laddr;	/* local tunnel end-point address */
 	struct in6_addr raddr;	/* remote tunnel end-point address */
 
-	__be16			i_flags;
-	__be16			o_flags;
+	IP_TUNNEL_DECLARE_FLAGS(i_flags);
+	IP_TUNNEL_DECLARE_FLAGS(o_flags);
 	__be32			i_key;
 	__be32			o_key;
 
@@ -46,6 +46,7 @@ struct __ip6_tnl_parm {
 struct ip6_tnl {
 	struct ip6_tnl __rcu *next;	/* next tunnel in list */
 	struct net_device *dev;	/* virtual device associated with tunnel */
+	netdevice_tracker dev_tracker;
 	struct net *net;	/* netns for packet i/o */
 	struct __ip6_tnl_parm parms;	/* tunnel configuration parameters */
 	struct flowi fl;	/* flowi template for xmit */
@@ -57,7 +58,7 @@ struct ip6_tnl {
 
 	/* These fields used only by GRE */
 	__u32 i_seqno;	/* The last seen seqno	*/
-	__u32 o_seqno;	/* The last output seqno */
+	atomic_t o_seqno;	/* The last output seqno */
 	int hlen;       /* tun_hlen + encap_hlen */
 	int tun_hlen;	/* Precalculated header length */
 	int encap_hlen; /* Encap header length (FOU,GUE) */
@@ -69,6 +70,8 @@ struct ip6_tnl_encap_ops {
 	size_t (*encap_hlen)(struct ip_tunnel_encap *e);
 	int (*build_header)(struct sk_buff *skb, struct ip_tunnel_encap *e,
 			    u8 *protocol, struct flowi6 *fl6);
+	int (*err_handler)(struct sk_buff *skb, struct inet6_skb_parm *opt,
+			   u8 type, u8 code, int offset, __be32 info);
 };
 
 #ifdef CONFIG_INET
@@ -149,16 +152,34 @@ int ip6_tnl_get_iflink(const struct net_device *dev);
 int ip6_tnl_change_mtu(struct net_device *dev, int new_mtu);
 
 static inline void ip6tunnel_xmit(struct sock *sk, struct sk_buff *skb,
-				  struct net_device *dev)
+				  struct net_device *dev, u16 ip6cb_flags)
 {
 	int pkt_len, err;
 
+	if (unlikely(dev_recursion_level() > IP_TUNNEL_RECURSION_LIMIT)) {
+		if (dev) {
+			net_crit_ratelimited("Dead loop on virtual device %s, fix it urgently!\n",
+					     dev->name);
+			DEV_STATS_INC(dev, tx_errors);
+		}
+		kfree_skb_reason(skb, SKB_DROP_REASON_RECURSION_LIMIT);
+		return;
+	}
+
+	dev_xmit_recursion_inc();
+
 	memset(skb->cb, 0, sizeof(struct inet6_skb_parm));
+	IP6CB(skb)->flags = ip6cb_flags;
 	pkt_len = skb->len - skb_inner_network_offset(skb);
-	err = ip6_local_out(dev_net(skb_dst(skb)->dev), sk, skb);
-	if (unlikely(net_xmit_eval(err)))
-		pkt_len = -1;
-	iptunnel_xmit_stats(dev, pkt_len);
+	err = ip6_local_out(skb_dst_dev_net(skb), sk, skb);
+
+	if (dev) {
+		if (unlikely(net_xmit_eval(err)))
+			pkt_len = -1;
+		iptunnel_xmit_stats(dev, pkt_len);
+	}
+
+	dev_xmit_recursion_dec();
 }
 #endif
 #endif

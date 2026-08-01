@@ -13,6 +13,8 @@
 comma   := ,
 squote  := '
 pound   := \#
+empty   :=
+space   := $(empty) $(empty)
 
 ###
 # Name of target with a '.' as filename prefix. foo/bar.o => foo/.bar.o
@@ -63,8 +65,8 @@ dep-cmd = $(if $(wildcard $(fixdep)),                                           
            $(fixdep) $(depfile) $@ '$(make-cmd)' > $(dot-target).tmp;           \
            rm -f $(depfile);                                                    \
            mv -f $(dot-target).tmp $(dot-target).cmd,                           \
-           printf '\# cannot find fixdep (%s)\n' $(fixdep) > $(dot-target).cmd; \
-           printf '\# using basic dep data\n\n' >> $(dot-target).cmd;           \
+           printf '$(pound) cannot find fixdep (%s)\n' $(fixdep) > $(dot-target).cmd; \
+           printf '$(pound) using basic dep data\n\n' >> $(dot-target).cmd;           \
            cat $(depfile) >> $(dot-target).cmd;                                 \
            printf '\n%s\n' 'cmd_$@ := $(make-cmd)' >> $(dot-target).cmd)
 
@@ -74,7 +76,8 @@ dep-cmd = $(if $(wildcard $(fixdep)),                                           
 #                   dependencies in the cmd file
 if_changed_dep = $(if $(strip $(any-prereq) $(arg-check)),         \
                   @set -e;                                         \
-                  $(echo-cmd) $(cmd_$(1)) && $(dep-cmd))
+                  $(echo-cmd) $(cmd_$(1));                         \
+                  $(dep-cmd))
 
 # if_changed      - execute command if any prerequisite is newer than
 #                   target, or command line has changed
@@ -96,6 +99,39 @@ c_flags   = $(filter-out $(CFLAGS_REMOVE_$(obj)), $(c_flags_2))
 cxx_flags = -Wp,-MD,$(depfile) -Wp,-MT,$@ $(CXXFLAGS) -D"BUILD_STR(s)=\#s" $(CXXFLAGS_$(basetarget).o) $(CXXFLAGS_$(obj))
 
 ###
+# Rust flags to be used on rule definition, includes:
+# - global $(RUST_FLAGS)
+# - per target Rust flags
+# - per object Rust flags
+rust_flags_1 = $(RUST_FLAGS) $(RUST_FLAGS_$(basetarget).o) $(RUST_FLAGS_$(obj))
+rust_flags_2 = $(filter-out $(RUST_FLAGS_REMOVE_$(basetarget).o), $(rust_flags_1))
+rust_flags   = $(filter-out $(RUST_FLAGS_REMOVE_$(obj)), $(rust_flags_2))
+
+###
 ## HOSTCC C flags
 
-host_c_flags = -Wp,-MD,$(depfile) -Wp,-MT,$@ $(CHOSTFLAGS) -D"BUILD_STR(s)=\#s" $(CHOSTFLAGS_$(basetarget).o) $(CHOSTFLAGS_$(obj))
+host_c_flags = -Wp,-MD,$(depfile) -Wp,-MT,$@ $(HOSTCFLAGS) -D"BUILD_STR(s)=\#s" $(HOSTCFLAGS_$(basetarget).o) $(HOSTCFLAGS_$(obj))
+
+# output directory for tests below
+TMPOUT = .tmp_$$$$
+
+# try-run
+# Usage: option = $(call try-run, $(CC)...-o "$$TMP",option-ok,otherwise)
+# Exit code chooses option. "$$TMP" serves as a temporary file and is
+# automatically cleaned up.
+try-run = $(shell set -e;		\
+	TMP=$(TMPOUT)/tmp;		\
+	mkdir -p $(TMPOUT);		\
+	trap "rm -rf $(TMPOUT)" EXIT;	\
+	if ($(1)) >/dev/null 2>&1;	\
+	then echo "$(2)";		\
+	else echo "$(3)";		\
+	fi)
+
+# cc-option
+# Usage: cflags-y += $(call cc-option,-march=winchip-c6,-march=i586)
+cc-option = $(call try-run, \
+	$(CC) -Werror $(1) -c -x c /dev/null -o "$$TMP",$(1),$(2))
+
+# delete partially updated (i.e. corrupted) files on error
+.DELETE_ON_ERROR:

@@ -1,16 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
  * Copyright SUSE Linux Products GmbH 2010
  *
@@ -23,6 +12,97 @@
 #include <linux/string.h>
 #include <asm/bitops.h>
 #include <asm/book3s/64/mmu-hash.h>
+#include <asm/cpu_has_feature.h>
+#include <asm/ppc-opcode.h>
+#include <asm/pte-walk.h>
+
+/*
+ * Structure for a nested guest, that is, for a guest that is managed by
+ * one of our guests.
+ */
+struct kvm_nested_guest {
+	struct kvm *l1_host;		/* L1 VM that owns this nested guest */
+	int l1_lpid;			/* lpid L1 guest thinks this guest is */
+	int shadow_lpid;		/* real lpid of this nested guest */
+	pgd_t *shadow_pgtable;		/* our page table for this guest */
+	u64 l1_gr_to_hr;		/* L1's addr of part'n-scoped table */
+	u64 process_table;		/* process table entry for this guest */
+	long refcnt;			/* number of pointers to this struct */
+	struct mutex tlb_lock;		/* serialize page faults and tlbies */
+	struct kvm_nested_guest *next;
+	cpumask_t need_tlb_flush;
+	short prev_cpu[NR_CPUS];
+	u8 radix;			/* is this nested guest radix */
+};
+
+/*
+ * We define a nested rmap entry as a single 64-bit quantity
+ * 0xFFF0000000000000	12-bit lpid field
+ * 0x000FFFFFFFFFF000	40-bit guest 4k page frame number
+ * 0x0000000000000001	1-bit  single entry flag
+ */
+#define RMAP_NESTED_LPID_MASK		0xFFF0000000000000UL
+#define RMAP_NESTED_LPID_SHIFT		(52)
+#define RMAP_NESTED_GPA_MASK		0x000FFFFFFFFFF000UL
+#define RMAP_NESTED_IS_SINGLE_ENTRY	0x0000000000000001UL
+
+/* Structure for a nested guest rmap entry */
+struct rmap_nested {
+	struct llist_node list;
+	u64 rmap;
+};
+
+/*
+ * for_each_nest_rmap_safe - iterate over the list of nested rmap entries
+ *			     safe against removal of the list entry or NULL list
+ * @pos:	a (struct rmap_nested *) to use as a loop cursor
+ * @node:	pointer to the first entry
+ *		NOTE: this can be NULL
+ * @rmapp:	an (unsigned long *) in which to return the rmap entries on each
+ *		iteration
+ *		NOTE: this must point to already allocated memory
+ *
+ * The nested_rmap is a llist of (struct rmap_nested) entries pointed to by the
+ * rmap entry in the memslot. The list is always terminated by a "single entry"
+ * stored in the list element of the final entry of the llist. If there is ONLY
+ * a single entry then this is itself in the rmap entry of the memslot, not a
+ * llist head pointer.
+ *
+ * Note that the iterator below assumes that a nested rmap entry is always
+ * non-zero.  This is true for our usage because the LPID field is always
+ * non-zero (zero is reserved for the host).
+ *
+ * This should be used to iterate over the list of rmap_nested entries with
+ * processing done on the u64 rmap value given by each iteration. This is safe
+ * against removal of list entries and it is always safe to call free on (pos).
+ *
+ * e.g.
+ * struct rmap_nested *cursor;
+ * struct llist_node *first;
+ * unsigned long rmap;
+ * for_each_nest_rmap_safe(cursor, first, &rmap) {
+ *	do_something(rmap);
+ *	free(cursor);
+ * }
+ */
+#define for_each_nest_rmap_safe(pos, node, rmapp)			       \
+	for ((pos) = llist_entry((node), typeof(*(pos)), list);		       \
+	     (node) &&							       \
+	     (*(rmapp) = ((RMAP_NESTED_IS_SINGLE_ENTRY & ((u64) (node))) ?     \
+			  ((u64) (node)) : ((pos)->rmap))) &&		       \
+	     (((node) = ((RMAP_NESTED_IS_SINGLE_ENTRY & ((u64) (node))) ?      \
+			 ((struct llist_node *) ((pos) = NULL)) :	       \
+			 (pos)->list.next)), true);			       \
+	     (pos) = llist_entry((node), typeof(*(pos)), list))
+
+struct kvm_nested_guest *kvmhv_get_nested(struct kvm *kvm, int l1_lpid,
+					  bool create);
+void kvmhv_put_nested(struct kvm_nested_guest *gp);
+int kvmhv_nested_next_lpid(struct kvm *kvm, int lpid);
+
+/* Encoding of first parameter for H_TLB_INVALIDATE */
+#define H_TLBIE_P1_ENC(ric, prs, r)	(___PPC_RIC(ric) | ___PPC_PRS(prs) | \
+					 ___PPC_R(r))
 
 /* Power architecture requires HPT is at least 256kiB, at most 64TiB */
 #define PPC_MIN_HPT_ORDER	18
@@ -48,8 +128,30 @@ static inline bool kvm_is_radix(struct kvm *kvm)
 	return kvm->arch.radix;
 }
 
+static inline bool kvmhv_vcpu_is_radix(struct kvm_vcpu *vcpu)
+{
+	bool radix;
+
+	if (vcpu->arch.nested)
+		radix = vcpu->arch.nested->radix;
+	else
+		radix = kvm_is_radix(vcpu->kvm);
+
+	return radix;
+}
+
+unsigned long kvmppc_msr_hard_disable_set_facilities(struct kvm_vcpu *vcpu, unsigned long msr);
+
+int kvmhv_vcpu_entry_p9(struct kvm_vcpu *vcpu, u64 time_limit, unsigned long lpcr, u64 *tb);
+
 #define KVM_DEFAULT_HPT_ORDER	24	/* 16MB HPT by default */
 #endif
+
+/*
+ * Invalid HDSISR value which is used to indicate when HW has not set the reg.
+ * Used to work around an errata.
+ */
+#define HDSISR_CANARY	0x7fff
 
 /*
  * We use a lock bit in HPTE dword 0 to synchronize updates and
@@ -264,6 +366,10 @@ static inline unsigned long compute_tlbie_rb(unsigned long v, unsigned long r,
 		rb |= 1;		/* L field */
 		rb |= r & 0xff000 & ((1ul << a_pgshift) - 1); /* LP field */
 	}
+	/*
+	 * This sets both bits of the B field in the PTE. 0b1x values are
+	 * reserved, but those will have been filtered by kvmppc_do_h_enter.
+	 */
 	rb |= (v >> HPTE_V_SSIZE_SHIFT) << 8;	/* B field */
 	return rb;
 }
@@ -330,7 +436,7 @@ static inline pte_t kvmppc_read_update_linux_pte(pte_t *ptep, int writing)
 			continue;
 		}
 		/* If pte is not present return None */
-		if (unlikely(!(pte_val(old_pte) & _PAGE_PRESENT)))
+		if (unlikely(!pte_present(old_pte)))
 			return __pte(0);
 
 		new_pte = pte_mkyoung(old_pte);
@@ -431,10 +537,11 @@ static inline void note_hpte_modification(struct kvm *kvm,
  */
 static inline struct kvm_memslots *kvm_memslots_raw(struct kvm *kvm)
 {
-	return rcu_dereference_raw_notrace(kvm->memslots[0]);
+	return rcu_dereference_raw_check(kvm->memslots[0]);
 }
 
 extern void kvmppc_mmu_debugfs_init(struct kvm *kvm);
+extern void kvmhv_radix_debugfs_init(struct kvm *kvm);
 
 extern void kvmhv_rm_send_ipi(int cpu);
 
@@ -482,16 +589,16 @@ static inline u64 sanitize_msr(u64 msr)
 #ifdef CONFIG_PPC_TRANSACTIONAL_MEM
 static inline void copy_from_checkpoint(struct kvm_vcpu *vcpu)
 {
-	vcpu->arch.cr  = vcpu->arch.cr_tm;
-	vcpu->arch.xer = vcpu->arch.xer_tm;
-	vcpu->arch.lr  = vcpu->arch.lr_tm;
-	vcpu->arch.ctr = vcpu->arch.ctr_tm;
+	vcpu->arch.regs.ccr  = vcpu->arch.cr_tm;
+	vcpu->arch.regs.xer = vcpu->arch.xer_tm;
+	vcpu->arch.regs.link  = vcpu->arch.lr_tm;
+	vcpu->arch.regs.ctr = vcpu->arch.ctr_tm;
 	vcpu->arch.amr = vcpu->arch.amr_tm;
 	vcpu->arch.ppr = vcpu->arch.ppr_tm;
 	vcpu->arch.dscr = vcpu->arch.dscr_tm;
 	vcpu->arch.tar = vcpu->arch.tar_tm;
-	memcpy(vcpu->arch.gpr, vcpu->arch.gpr_tm,
-	       sizeof(vcpu->arch.gpr));
+	memcpy(vcpu->arch.regs.gpr, vcpu->arch.gpr_tm,
+	       sizeof(vcpu->arch.regs.gpr));
 	vcpu->arch.fp  = vcpu->arch.fp_tm;
 	vcpu->arch.vr  = vcpu->arch.vr_tm;
 	vcpu->arch.vrsave = vcpu->arch.vrsave_tm;
@@ -499,21 +606,94 @@ static inline void copy_from_checkpoint(struct kvm_vcpu *vcpu)
 
 static inline void copy_to_checkpoint(struct kvm_vcpu *vcpu)
 {
-	vcpu->arch.cr_tm  = vcpu->arch.cr;
-	vcpu->arch.xer_tm = vcpu->arch.xer;
-	vcpu->arch.lr_tm  = vcpu->arch.lr;
-	vcpu->arch.ctr_tm = vcpu->arch.ctr;
+	vcpu->arch.cr_tm  = vcpu->arch.regs.ccr;
+	vcpu->arch.xer_tm = vcpu->arch.regs.xer;
+	vcpu->arch.lr_tm  = vcpu->arch.regs.link;
+	vcpu->arch.ctr_tm = vcpu->arch.regs.ctr;
 	vcpu->arch.amr_tm = vcpu->arch.amr;
 	vcpu->arch.ppr_tm = vcpu->arch.ppr;
 	vcpu->arch.dscr_tm = vcpu->arch.dscr;
 	vcpu->arch.tar_tm = vcpu->arch.tar;
-	memcpy(vcpu->arch.gpr_tm, vcpu->arch.gpr,
-	       sizeof(vcpu->arch.gpr));
+	memcpy(vcpu->arch.gpr_tm, vcpu->arch.regs.gpr,
+	       sizeof(vcpu->arch.regs.gpr));
 	vcpu->arch.fp_tm  = vcpu->arch.fp;
 	vcpu->arch.vr_tm  = vcpu->arch.vr;
 	vcpu->arch.vrsave_tm = vcpu->arch.vrsave;
 }
 #endif /* CONFIG_PPC_TRANSACTIONAL_MEM */
+
+extern int kvmppc_create_pte(struct kvm *kvm, pgd_t *pgtable, pte_t pte,
+			     unsigned long gpa, unsigned int level,
+			     unsigned long mmu_seq, u64 lpid,
+			     unsigned long *rmapp, struct rmap_nested **n_rmap);
+extern void kvmhv_insert_nest_rmap(struct kvm *kvm, unsigned long *rmapp,
+				   struct rmap_nested **n_rmap);
+extern void kvmhv_update_nest_rmap_rc_list(struct kvm *kvm, unsigned long *rmapp,
+					   unsigned long clr, unsigned long set,
+					   unsigned long hpa, unsigned long nbytes);
+extern void kvmhv_remove_nest_rmap_range(struct kvm *kvm,
+				const struct kvm_memory_slot *memslot,
+				unsigned long gpa, unsigned long hpa,
+				unsigned long nbytes);
+
+static inline pte_t *
+find_kvm_secondary_pte_unlocked(struct kvm *kvm, unsigned long ea,
+				unsigned *hshift)
+{
+	pte_t *pte;
+
+	pte = __find_linux_pte(kvm->arch.pgtable, ea, NULL, hshift);
+	return pte;
+}
+
+static inline pte_t *find_kvm_secondary_pte(struct kvm *kvm, unsigned long ea,
+					    unsigned *hshift)
+{
+	pte_t *pte;
+
+	VM_WARN(!spin_is_locked(&kvm->mmu_lock),
+		"%s called with kvm mmu_lock not held \n", __func__);
+	pte = __find_linux_pte(kvm->arch.pgtable, ea, NULL, hshift);
+
+	return pte;
+}
+
+static inline pte_t *find_kvm_host_pte(struct kvm *kvm, unsigned long mmu_seq,
+				       unsigned long ea, unsigned *hshift)
+{
+	pte_t *pte;
+
+	VM_WARN(!spin_is_locked(&kvm->mmu_lock),
+		"%s called with kvm mmu_lock not held \n", __func__);
+
+	if (mmu_invalidate_retry(kvm, mmu_seq))
+		return NULL;
+
+	pte = __find_linux_pte(kvm->mm->pgd, ea, NULL, hshift);
+
+	return pte;
+}
+
+extern pte_t *find_kvm_nested_guest_pte(struct kvm *kvm, unsigned long lpid,
+					unsigned long ea, unsigned *hshift);
+
+int kvmhv_nestedv2_vcpu_create(struct kvm_vcpu *vcpu, struct kvmhv_nestedv2_io *io);
+void kvmhv_nestedv2_vcpu_free(struct kvm_vcpu *vcpu, struct kvmhv_nestedv2_io *io);
+int kvmhv_nestedv2_flush_vcpu(struct kvm_vcpu *vcpu, u64 time_limit);
+int kvmhv_nestedv2_set_ptbl_entry(unsigned long lpid, u64 dw0, u64 dw1);
+int kvmhv_nestedv2_parse_output(struct kvm_vcpu *vcpu);
+int kvmhv_nestedv2_set_vpa(struct kvm_vcpu *vcpu, unsigned long vpa);
+
+int kvmhv_counters_tracepoint_regfunc(void);
+void kvmhv_counters_tracepoint_unregfunc(void);
+int kvmhv_get_l2_counters_status(void);
+void kvmhv_set_l2_counters_status(int cpu, bool status);
+u64 kvmhv_get_l1_to_l2_cs_time(void);
+u64 kvmhv_get_l2_to_l1_cs_time(void);
+u64 kvmhv_get_l2_runtime_agg(void);
+u64 kvmhv_get_l1_to_l2_cs_time_vcpu(void);
+u64 kvmhv_get_l2_to_l1_cs_time_vcpu(void);
+u64 kvmhv_get_l2_runtime_agg_vcpu(void);
 
 #endif /* CONFIG_KVM_BOOK3S_HV_POSSIBLE */
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014 Tomasz Figa <t.figa@samsung.com>
  *
@@ -6,12 +7,8 @@
  * Copyright (c) 2013 Samsung Electronics Co., Ltd.
  * Author: Padmavathi Venna <padma.v@samsung.com>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  * Driver for Audio Subsystem Clock Controller of S5PV210-compatible SoCs.
-*/
+ */
 
 #include <linux/io.h>
 #include <linux/clk.h>
@@ -38,7 +35,7 @@ static unsigned long reg_save[][2] = {
 	{ASS_CLK_GATE, 0},
 };
 
-static int s5pv210_audss_clk_suspend(void)
+static int s5pv210_audss_clk_suspend(void *data)
 {
 	int i;
 
@@ -48,7 +45,7 @@ static int s5pv210_audss_clk_suspend(void)
 	return 0;
 }
 
-static void s5pv210_audss_clk_resume(void)
+static void s5pv210_audss_clk_resume(void *data)
 {
 	int i;
 
@@ -56,9 +53,13 @@ static void s5pv210_audss_clk_resume(void)
 		writel(reg_save[i][1], reg_base + reg_save[i][0]);
 }
 
-static struct syscore_ops s5pv210_audss_clk_syscore_ops = {
+static const struct syscore_ops s5pv210_audss_clk_syscore_ops = {
 	.suspend	= s5pv210_audss_clk_suspend,
 	.resume		= s5pv210_audss_clk_resume,
+};
+
+static struct syscore s5pv210_audss_clk_syscore = {
+	.ops = &s5pv210_audss_clk_syscore_ops,
 };
 #endif /* CONFIG_PM_SLEEP */
 
@@ -66,23 +67,18 @@ static struct syscore_ops s5pv210_audss_clk_syscore_ops = {
 static int s5pv210_audss_clk_probe(struct platform_device *pdev)
 {
 	int i, ret = 0;
-	struct resource *res;
 	const char *mout_audss_p[2];
 	const char *mout_i2s_p[3];
 	const char *hclk_p;
 	struct clk_hw **clk_table;
 	struct clk *hclk, *pll_ref, *pll_in, *cdclk, *sclk_audio;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	reg_base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(reg_base)) {
-		dev_err(&pdev->dev, "failed to map audss registers\n");
+	reg_base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(reg_base))
 		return PTR_ERR(reg_base);
-	}
 
 	clk_data = devm_kzalloc(&pdev->dev,
-				sizeof(*clk_data) +
-				sizeof(*clk_data->hws) * AUDSS_MAX_CLKS,
+				struct_size(clk_data, hws, AUDSS_MAX_CLKS),
 				GFP_KERNEL);
 
 	if (!clk_data)
@@ -182,7 +178,7 @@ static int s5pv210_audss_clk_probe(struct platform_device *pdev)
 	}
 
 #ifdef CONFIG_PM_SLEEP
-	register_syscore_ops(&s5pv210_audss_clk_syscore_ops);
+	register_syscore(&s5pv210_audss_clk_syscore);
 #endif
 
 	return 0;

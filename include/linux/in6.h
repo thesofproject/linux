@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *	Types and definitions for AF_INET6 
  *	Linux INET6 implementation 
@@ -11,16 +12,18 @@
  *
  *	Advanced Sockets API for IPv6
  *	<draft-stevens-advanced-api-00.txt>
- *
- *	This program is free software; you can redistribute it and/or
- *      modify it under the terms of the GNU General Public License
- *      as published by the Free Software Foundation; either version
- *      2 of the License, or (at your option) any later version.
  */
 #ifndef _LINUX_IN6_H
 #define _LINUX_IN6_H
 
 #include <uapi/linux/in6.h>
+
+/* Large enough to hold both sockaddr_in and sockaddr_in6. */
+struct sockaddr_inet {
+	unsigned short	sa_family;
+	char		sa_data[sizeof(struct sockaddr_in6) -
+				sizeof(unsigned short)];
+};
 
 /* IPv6 Wildcard Address (::) and Loopback Address (::1) defined in RFC2553
  * NOTE: Be aware the IN6ADDR_* constants and in6addr_* externals are defined

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 
     bttv-gpio.c  --  gpio sub drivers
@@ -10,19 +11,6 @@
 			   & Marcus Metzler (mocm@thp.uni-koeln.de)
     (c) 1999-2003 Gerd Knorr <kraxel@bytesex.org>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 */
 
@@ -40,9 +28,9 @@
 /* ----------------------------------------------------------------------- */
 /* internal: the bttv "bus"                                                */
 
-static int bttv_sub_bus_match(struct device *dev, struct device_driver *drv)
+static int bttv_sub_bus_match(struct device *dev, const struct device_driver *drv)
 {
-	struct bttv_sub_driver *sub = to_bttv_sub_drv(drv);
+	const struct bttv_sub_driver *sub = to_bttv_sub_drv(drv);
 	int len = strlen(sub->wanted);
 
 	if (0 == strncmp(dev_name(dev), sub->wanted, len))
@@ -58,17 +46,16 @@ static int bttv_sub_probe(struct device *dev)
 	return sub->probe ? sub->probe(sdev) : -ENODEV;
 }
 
-static int bttv_sub_remove(struct device *dev)
+static void bttv_sub_remove(struct device *dev)
 {
 	struct bttv_sub_device *sdev = to_bttv_sub_dev(dev);
 	struct bttv_sub_driver *sub = to_bttv_sub_drv(dev->driver);
 
 	if (sub->remove)
 		sub->remove(sdev);
-	return 0;
 }
 
-struct bus_type bttv_sub_bus_type = {
+const struct bus_type bttv_sub_bus_type = {
 	.name   = "bttv-sub",
 	.match  = &bttv_sub_bus_match,
 	.probe  = bttv_sub_probe,
@@ -86,7 +73,7 @@ int bttv_sub_add_device(struct bttv_core *core, char *name)
 	struct bttv_sub_device *sub;
 	int err;
 
-	sub = kzalloc(sizeof(*sub),GFP_KERNEL);
+	sub = kzalloc_obj(*sub);
 	if (NULL == sub)
 		return -ENOMEM;
 

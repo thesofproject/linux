@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Interface the pinmux subsystem
  *
@@ -6,19 +7,14 @@
  * Based on bits of regulator core, gpio core and clk core
  *
  * Author: Linus Walleij <linus.walleij@linaro.org>
- *
- * License terms: GNU General Public License (GPL) version 2
  */
 #ifndef __LINUX_PINCTRL_PINMUX_H
 #define __LINUX_PINCTRL_PINMUX_H
 
-#include <linux/list.h>
-#include <linux/seq_file.h>
-#include <linux/pinctrl/pinctrl.h>
-
-#ifdef CONFIG_PINMUX
+#include <linux/types.h>
 
 struct pinctrl_dev;
+struct pinctrl_gpio_range;
 
 /**
  * struct pinmux_ops - pinmux operations, to be implemented by pin controller
@@ -39,12 +35,24 @@ struct pinctrl_dev;
  *	name can be used with the generic @pinctrl_ops to retrieve the
  *	actual pins affected. The applicable groups will be returned in
  *	@groups and the number of groups in @num_groups
+ * @function_is_gpio: determine if the indicated function selector passed
+ *	corresponds to the GPIO function which is used by the accelerated GPIO
+ *	functions @gpio_request_enable, @gpio_disable_free and
+ *	@gpio_set_direction. When the pin control core can properly determine
+ *	if a function is a GPIO function, it is easier to use the @strict mode
+ *	on the pin controller. Since a single function is passed, this is
+ *	only useful on pin controllers that use a specific function for GPIO,
+ *	and that usually presupposes that a one-group-per-pin approach is
+ *	used, so that a single function can be set on a single pin to turn
+ *	it to GPIO mode.
  * @set_mux: enable a certain muxing function with a certain pin group. The
  *	driver does not need to figure out whether enabling this function
  *	conflicts some other use of the pins in that group, such collisions
  *	are handled by the pinmux subsystem. The @func_selector selects a
  *	certain function whereas @group_selector selects a certain set of pins
  *	to be used. On simple controllers the latter argument may be ignored
+ * @release_mux: Release software resources acquired by @set_mux. This callback
+ *	must not change hardware state to avoid glitches when switching mux.
  * @gpio_request_enable: requests and enables GPIO on a certain pin.
  *	Implement this only if you can mux every pin individually as GPIO. The
  *	affected GPIO range is passed along with an offset(pin number) into that
@@ -61,30 +69,33 @@ struct pinctrl_dev;
  *	the pin request.
  */
 struct pinmux_ops {
-	int (*request) (struct pinctrl_dev *pctldev, unsigned offset);
-	int (*free) (struct pinctrl_dev *pctldev, unsigned offset);
+	int (*request) (struct pinctrl_dev *pctldev, unsigned int offset);
+	int (*free) (struct pinctrl_dev *pctldev, unsigned int offset);
 	int (*get_functions_count) (struct pinctrl_dev *pctldev);
 	const char *(*get_function_name) (struct pinctrl_dev *pctldev,
-					  unsigned selector);
+					  unsigned int selector);
 	int (*get_function_groups) (struct pinctrl_dev *pctldev,
-				  unsigned selector,
-				  const char * const **groups,
-				  unsigned *num_groups);
-	int (*set_mux) (struct pinctrl_dev *pctldev, unsigned func_selector,
-			unsigned group_selector);
+				    unsigned int selector,
+				    const char * const **groups,
+				    unsigned int *num_groups);
+	bool (*function_is_gpio) (struct pinctrl_dev *pctldev,
+				  unsigned int selector);
+	int (*set_mux) (struct pinctrl_dev *pctldev, unsigned int func_selector,
+			unsigned int group_selector);
+	void (*release_mux) (struct pinctrl_dev *pctldev,
+			     unsigned int func_selector,
+			     unsigned int group_selector);
 	int (*gpio_request_enable) (struct pinctrl_dev *pctldev,
 				    struct pinctrl_gpio_range *range,
-				    unsigned offset);
+				    unsigned int offset);
 	void (*gpio_disable_free) (struct pinctrl_dev *pctldev,
 				   struct pinctrl_gpio_range *range,
-				   unsigned offset);
+				   unsigned int offset);
 	int (*gpio_set_direction) (struct pinctrl_dev *pctldev,
 				   struct pinctrl_gpio_range *range,
-				   unsigned offset,
+				   unsigned int offset,
 				   bool input);
 	bool strict;
 };
-
-#endif /* CONFIG_PINMUX */
 
 #endif /* __LINUX_PINCTRL_PINMUX_H */

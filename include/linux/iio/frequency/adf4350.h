@@ -1,9 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * ADF4350/ADF4351 SPI PLL driver
  *
  * Copyright 2012-2013 Analog Devices Inc.
- *
- * Licensed under the GPL-2.
  */
 
 #ifndef IIO_PLL_ADF4350_H_
@@ -52,7 +51,7 @@
 
 /* REG3 Bit Definitions */
 #define ADF4350_REG3_12BIT_CLKDIV(x)		((x) << 3)
-#define ADF4350_REG3_12BIT_CLKDIV_MODE(x)	((x) << 16)
+#define ADF4350_REG3_12BIT_CLKDIV_MODE(x)	((x) << 15)
 #define ADF4350_REG3_12BIT_CSR_EN		(1 << 18)
 #define ADF4351_REG3_CHARGE_CANCELLATION_EN	(1 << 21)
 #define ADF4351_REG3_ANTI_BACKLASH_3ns_EN	(1 << 22)
@@ -104,9 +103,6 @@
  * @r2_user_settings:	User defined settings for ADF4350/1 REGISTER_2.
  * @r3_user_settings:	User defined settings for ADF4350/1 REGISTER_3.
  * @r4_user_settings:	User defined settings for ADF4350/1 REGISTER_4.
- * @gpio_lock_detect:	Optional, if set with a valid GPIO number,
- *			pll lock state is tested upon read.
- *			If not used - set to -1.
  */
 
 struct adf4350_platform_data {
@@ -122,7 +118,6 @@ struct adf4350_platform_data {
 	unsigned		r2_user_settings;
 	unsigned		r3_user_settings;
 	unsigned		r4_user_settings;
-	int			gpio_lock_detect;
 };
 
 #endif /* IIO_PLL_ADF4350_H_ */

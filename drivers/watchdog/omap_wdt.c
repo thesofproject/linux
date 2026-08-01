@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * omap_wdt.c
  *
@@ -6,10 +7,7 @@
  * Author: MontaVista Software, Inc.
  *	 <gdavis@mvista.com> or <source@mvista.com>
  *
- * 2003 (c) MontaVista Software, Inc. This file is licensed under the
- * terms of the GNU General Public License version 2. This program is
- * licensed "as is" without any warranty of any kind, whether express
- * or implied.
+ * 2003 (c) MontaVista Software, Inc.
  *
  * History:
  *
@@ -230,7 +228,6 @@ static const struct watchdog_ops omap_wdt_ops = {
 static int omap_wdt_probe(struct platform_device *pdev)
 {
 	struct omap_wd_timer_platform_data *pdata = dev_get_platdata(&pdev->dev);
-	struct resource *res;
 	struct omap_wdt_dev *wdev;
 	int ret;
 
@@ -244,8 +241,7 @@ static int omap_wdt_probe(struct platform_device *pdev)
 	mutex_init(&wdev->lock);
 
 	/* reserve static register mappings */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	wdev->base = devm_ioremap_resource(&pdev->dev, res);
+	wdev->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(wdev->base))
 		return PTR_ERR(wdev->base);
 
@@ -271,11 +267,16 @@ static int omap_wdt_probe(struct platform_device *pdev)
 			wdev->wdog.bootstatus = WDIOF_CARDRESET;
 	}
 
-	if (!early_enable)
+	if (early_enable) {
+		omap_wdt_start(&wdev->wdog);
+		set_bit(WDOG_HW_RUNNING, &wdev->wdog.status);
+	} else {
 		omap_wdt_disable(wdev);
+	}
 
 	ret = watchdog_register_device(&wdev->wdog);
 	if (ret) {
+		pm_runtime_put(wdev->dev);
 		pm_runtime_disable(wdev->dev);
 		return ret;
 	}
@@ -304,17 +305,13 @@ static void omap_wdt_shutdown(struct platform_device *pdev)
 	mutex_unlock(&wdev->lock);
 }
 
-static int omap_wdt_remove(struct platform_device *pdev)
+static void omap_wdt_remove(struct platform_device *pdev)
 {
 	struct omap_wdt_dev *wdev = platform_get_drvdata(pdev);
 
 	pm_runtime_disable(wdev->dev);
 	watchdog_unregister_device(&wdev->wdog);
-
-	return 0;
 }
-
-#ifdef	CONFIG_PM
 
 /* REVISIT ... not clear this is the best way to handle system suspend; and
  * it's very inappropriate for selective device suspend (e.g. suspending this
@@ -351,11 +348,6 @@ static int omap_wdt_resume(struct platform_device *pdev)
 	return 0;
 }
 
-#else
-#define	omap_wdt_suspend	NULL
-#define	omap_wdt_resume		NULL
-#endif
-
 static const struct of_device_id omap_wdt_of_match[] = {
 	{ .compatible = "ti,omap3-wdt", },
 	{},
@@ -366,8 +358,8 @@ static struct platform_driver omap_wdt_driver = {
 	.probe		= omap_wdt_probe,
 	.remove		= omap_wdt_remove,
 	.shutdown	= omap_wdt_shutdown,
-	.suspend	= omap_wdt_suspend,
-	.resume		= omap_wdt_resume,
+	.suspend	= pm_ptr(omap_wdt_suspend),
+	.resume		= pm_ptr(omap_wdt_resume),
 	.driver		= {
 		.name	= "omap_wdt",
 		.of_match_table = omap_wdt_of_match,
@@ -377,5 +369,6 @@ static struct platform_driver omap_wdt_driver = {
 module_platform_driver(omap_wdt_driver);
 
 MODULE_AUTHOR("George G. Davis");
+MODULE_DESCRIPTION("Driver for the TI OMAP 16xx/24xx/34xx 32KHz (non-secure) watchdog");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:omap_wdt");

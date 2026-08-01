@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   ALSA driver for ICEnsemble VT1724 (Envy24HT)
  *
@@ -5,21 +6,6 @@
  *
  *	Copyright (c) 2009 Takashi Iwai <tiwai@suse.de>
  *	Based on the patches by Rainer Zimmermann <mail@lightshed.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/init.h>
@@ -130,7 +116,7 @@ struct maya_vol_info {
 	unsigned char mux_bits[2];	/* extra bits for ADC mute */
 };
 
-static struct maya_vol_info vol_info[WM_NUM_VOLS] = {
+static const struct maya_vol_info vol_info[WM_NUM_VOLS] = {
 	[WM_VOL_HP] = {
 		.maxval = 80,
 		.regs = { WM8776_REG_HEADPHONE_L, WM8776_REG_HEADPHONE_R },
@@ -172,7 +158,7 @@ static int maya_vol_info(struct snd_kcontrol *kcontrol,
 			 struct snd_ctl_elem_info *uinfo)
 {
 	unsigned int idx = kcontrol->private_value;
-	struct maya_vol_info *vol = &vol_info[idx];
+	const struct maya_vol_info *vol = &vol_info[idx];
 
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
 	uinfo->count = 2;
@@ -189,10 +175,9 @@ static int maya_vol_get(struct snd_kcontrol *kcontrol,
 		&chip->wm[snd_ctl_get_ioff(kcontrol, &ucontrol->id)];
 	unsigned int idx = kcontrol->private_value;
 
-	mutex_lock(&chip->mutex);
+	guard(mutex)(&chip->mutex);
 	ucontrol->value.integer.value[0] = wm->volumes[idx][0];
 	ucontrol->value.integer.value[1] = wm->volumes[idx][1];
-	mutex_unlock(&chip->mutex);
 	return 0;
 }
 
@@ -203,11 +188,11 @@ static int maya_vol_put(struct snd_kcontrol *kcontrol,
 	struct snd_wm8776 *wm =
 		&chip->wm[snd_ctl_get_ioff(kcontrol, &ucontrol->id)];
 	unsigned int idx = kcontrol->private_value;
-	struct maya_vol_info *vol = &vol_info[idx];
+	const struct maya_vol_info *vol = &vol_info[idx];
 	unsigned int val, data;
 	int ch, changed = 0;
 
-	mutex_lock(&chip->mutex);
+	guard(mutex)(&chip->mutex);
 	for (ch = 0; ch < 2; ch++) {
 		val = ucontrol->value.integer.value[ch];
 		if (val > vol->maxval)
@@ -227,7 +212,6 @@ static int maya_vol_put(struct snd_kcontrol *kcontrol,
 					  val ? 0 : vol->mux_bits[ch]);
 		wm->volumes[idx][ch] = val;
 	}
-	mutex_unlock(&chip->mutex);
 	return changed;
 }
 
@@ -264,7 +248,7 @@ static int maya_sw_put(struct snd_kcontrol *kcontrol,
 	unsigned int mask, val;
 	int changed;
 
-	mutex_lock(&chip->mutex);
+	guard(mutex)(&chip->mutex);
 	mask = 1 << idx;
 	wm->switch_bits &= ~mask;
 	val = ucontrol->value.integer.value[0];
@@ -274,7 +258,6 @@ static int maya_sw_put(struct snd_kcontrol *kcontrol,
 	changed = wm8776_write_bits(chip->ice, wm,
 				    GET_SW_VAL_REG(kcontrol->private_value),
 				    mask, val ? mask : 0);
-	mutex_unlock(&chip->mutex);
 	return changed;
 }
 
@@ -329,14 +312,13 @@ static int maya_gpio_sw_put(struct snd_kcontrol *kcontrol,
 	unsigned int val, mask;
 	int changed;
 
-	mutex_lock(&chip->mutex);
+	guard(mutex)(&chip->mutex);
 	mask = 1 << shift;
 	val = ucontrol->value.integer.value[0];
 	if (GET_GPIO_VAL_INV(kcontrol->private_value))
 		val = !val;
 	val = val ? mask : 0;
 	changed = maya_set_gpio_bits(chip->ice, mask, val);
-	mutex_unlock(&chip->mutex);
 	return changed;
 }
 
@@ -383,11 +365,10 @@ static int maya_rec_src_put(struct snd_kcontrol *kcontrol,
 	int sel = ucontrol->value.enumerated.item[0];
 	int changed;
 
-	mutex_lock(&chip->mutex);
+	guard(mutex)(&chip->mutex);
 	changed = maya_set_gpio_bits(chip->ice, 1 << GPIO_MIC_RELAY,
 				     sel ? (1 << GPIO_MIC_RELAY) : 0);
 	wm8776_select_input(chip, 0, sel ? MAYA_MIC_IN : MAYA_LINE_IN);
-	mutex_unlock(&chip->mutex);
 	return changed;
 }
 
@@ -438,7 +419,7 @@ static int maya_pb_route_put(struct snd_kcontrol *kcontrol,
  * controls to be added
  */
 
-static struct snd_kcontrol_new maya_controls[] = {
+static const struct snd_kcontrol_new maya_controls[] = {
 	{
 		.name = "Crossmix Playback Volume",
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
@@ -649,12 +630,11 @@ static void set_rate(struct snd_ice1712 *ice, unsigned int rate)
 		val |= 8;
 	val |= ratio << 4;
 
-	mutex_lock(&chip->mutex);
+	guard(mutex)(&chip->mutex);
 	for (i = 0; i < 2; i++)
 		wm8776_write_bits(ice, &chip->wm[i],
 				  WM8776_REG_MASTER_MODE_CONTROL,
 				  0x180, val);
-	mutex_unlock(&chip->mutex);
 }
 
 /*
@@ -676,7 +656,7 @@ static const struct snd_pcm_hw_constraint_list dac_rates = {
 /*
  * chip addresses on I2C bus
  */
-static unsigned char wm8776_addr[2] = {
+static const unsigned char wm8776_addr[2] = {
 	0x34, 0x36, /* codec 0 & 1 */
 };
 
@@ -688,7 +668,7 @@ static int maya44_init(struct snd_ice1712 *ice)
 	int i;
 	struct snd_maya44 *chip;
 
-	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
+	chip = kzalloc_obj(*chip);
 	if (!chip)
 		return -ENOMEM;
 	mutex_init(&chip->mutex);
@@ -726,7 +706,7 @@ static int maya44_init(struct snd_ice1712 *ice)
  * hence the driver needs to sets up it properly.
  */
 
-static unsigned char maya44_eeprom[] = {
+static const unsigned char maya44_eeprom[] = {
 	[ICE_EEP2_SYSCONF]     = 0x45,
 		/* clock xin1=49.152MHz, mpu401, 2 stereo ADCs+DACs */
 	[ICE_EEP2_ACLINK]      = 0x80,

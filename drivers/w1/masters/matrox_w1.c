@@ -1,27 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	matrox_w1.c
  *
  * Copyright (c) 2004 Evgeniy Polyakov <zbr@ioremap.net>
- *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <asm/types.h>
 #include <linux/atomic.h>
-#include <asm/io.h>
+#include <linux/io.h>
 
 #include <linux/delay.h>
 #include <linux/kernel.h>
@@ -53,8 +39,7 @@
 #define MATROX_GET_DATA			0x2B
 #define MATROX_CURSOR_CTL		0x06
 
-struct matrox_device
-{
+struct matrox_device {
 	void __iomem *base_addr;
 	void __iomem *port_index;
 	void __iomem *port_data;
@@ -62,7 +47,6 @@ struct matrox_device
 
 	unsigned long phys_addr;
 	void __iomem *virt_addr;
-	unsigned long found;
 
 	struct w1_bus_master *bus_master;
 };
@@ -78,7 +62,7 @@ struct matrox_device
  *
  * Port mapping.
  */
-static __inline__ u8 matrox_w1_read_reg(struct matrox_device *dev, u8 reg)
+static inline u8 matrox_w1_read_reg(struct matrox_device *dev, u8 reg)
 {
 	u8 ret;
 
@@ -89,7 +73,7 @@ static __inline__ u8 matrox_w1_read_reg(struct matrox_device *dev, u8 reg)
 	return ret;
 }
 
-static __inline__ void matrox_w1_write_reg(struct matrox_device *dev, u8 reg, u8 val)
+static inline void matrox_w1_write_reg(struct matrox_device *dev, u8 reg, u8 val)
 {
 	writeb(reg, dev->port_index);
 	writeb(val, dev->port_data);
@@ -137,13 +121,8 @@ static int matrox_w1_probe(struct pci_dev *pdev, const struct pci_device_id *ent
 
 	dev = kzalloc(sizeof(struct matrox_device) +
 		       sizeof(struct w1_bus_master), GFP_KERNEL);
-	if (!dev) {
-		dev_err(&pdev->dev,
-			"%s: Failed to create new matrox_device object.\n",
-			__func__);
+	if (!dev)
 		return -ENOMEM;
-	}
-
 
 	dev->bus_master = (struct w1_bus_master *)(dev + 1);
 
@@ -153,7 +132,7 @@ static int matrox_w1_probe(struct pci_dev *pdev, const struct pci_device_id *ent
 
 	dev->phys_addr = pci_resource_start(pdev, 1);
 
-	dev->virt_addr = ioremap_nocache(dev->phys_addr, 16384);
+	dev->virt_addr = ioremap(dev->phys_addr, 16384);
 	if (!dev->virt_addr) {
 		dev_err(&pdev->dev, "%s: failed to ioremap(0x%lx, %d).\n",
 			__func__, dev->phys_addr, 16384);
@@ -178,8 +157,6 @@ static int matrox_w1_probe(struct pci_dev *pdev, const struct pci_device_id *ent
 
 	pci_set_drvdata(pdev, dev);
 
-	dev->found = 1;
-
 	dev_info(&pdev->dev, "Matrox G400 GPIO transport layer for 1-wire.\n");
 
 	return 0;
@@ -196,10 +173,9 @@ static void matrox_w1_remove(struct pci_dev *pdev)
 {
 	struct matrox_device *dev = pci_get_drvdata(pdev);
 
-	if (dev->found) {
-		w1_remove_master_device(dev->bus_master);
-		iounmap(dev->virt_addr);
-	}
+	w1_remove_master_device(dev->bus_master);
+	iounmap(dev->virt_addr);
+
 	kfree(dev);
 }
 

@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright 2015, Cyril Bur, IBM Corp.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include "basic_asm.h"
@@ -70,6 +66,40 @@ FUNC_START(check_fpu)
 	li	r3,0 # Success!!!
 1:	blr
 
+
+// int check_all_fprs(double darray[32])
+FUNC_START(check_all_fprs)
+	PUSH_BASIC_STACK(8)
+	mr	r4, r3	// r4 = darray
+	li	r3, 1	// prepare for failure
+
+	stfd	f31, STACK_FRAME_LOCAL(0, 0)(sp) // backup f31
+
+	// Check regs f0-f30, using f31 as scratch
+	.set i, 0
+	.rept 31
+	lfd	f31, (8 * i)(r4)	// load expected value
+	fcmpu	cr0, i, f31		// compare
+	bne	cr0, 1f			// bail if mismatch
+	.set i, i + 1
+	.endr
+
+	lfd	f31, STACK_FRAME_LOCAL(0, 0)(sp) // reload f31
+	stfd	f30, STACK_FRAME_LOCAL(0, 0)(sp) // backup f30
+
+	lfd	f30, (8 * 31)(r4)	// load expected value of f31
+	fcmpu	cr0, f30, f31		// compare
+	bne	cr0, 1f			// bail if mismatch
+
+	lfd	f30, STACK_FRAME_LOCAL(0, 0)(sp) // reload f30
+
+	// Success
+	li	r3, 0
+
+1:	POP_BASIC_STACK(8)
+	blr
+FUNC_END(check_all_fprs)
+
 FUNC_START(test_fpu)
 	# r3 holds pointer to where to put the result of fork
 	# r4 holds pointer to the pid
@@ -79,8 +109,9 @@ FUNC_START(test_fpu)
 	std	r3,STACK_FRAME_PARAM(0)(sp) # Address of darray
 	std r4,STACK_FRAME_PARAM(1)(sp) # Address of pid
 
-	bl load_fpu
-	nop
+	// Load FPRs with expected values
+	OP_REGS lfd, 8, 0, 31, r3
+
 	li	r0,__NR_fork
 	sc
 
@@ -89,7 +120,7 @@ FUNC_START(test_fpu)
 	std	r3,0(r9)
 
 	ld r3,STACK_FRAME_PARAM(0)(sp)
-	bl check_fpu
+	bl check_all_fprs
 	nop
 
 	POP_FPU(256)
@@ -108,8 +139,8 @@ FUNC_START(preempt_fpu)
 	std r4,STACK_FRAME_PARAM(1)(sp) # int *threads_starting
 	std r5,STACK_FRAME_PARAM(2)(sp) # int *running
 
-	bl load_fpu
-	nop
+	// Load FPRs with expected values
+	OP_REGS lfd, 8, 0, 31, r3
 
 	sync
 	# Atomic DEC
@@ -120,8 +151,7 @@ FUNC_START(preempt_fpu)
 	bne- 1b
 
 2:	ld r3,STACK_FRAME_PARAM(0)(sp)
-	bl check_fpu
-	nop
+	bl check_all_fprs
 	cmpdi r3,0
 	bne 3f
 	ld r4,STACK_FRAME_PARAM(2)(sp)

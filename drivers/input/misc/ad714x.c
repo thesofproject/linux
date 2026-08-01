@@ -1,12 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * AD714X CapTouch Programmable Controller driver supporting AD7142/3/7/8/7A
  *
  * Copyright 2009-2011 Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/device.h>
+#include <linux/export.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
 #include <linux/slab.h>
@@ -942,7 +942,7 @@ static irqreturn_t ad714x_interrupt_thread(int irq, void *data)
 	struct ad714x_chip *ad714x = data;
 	int i;
 
-	mutex_lock(&ad714x->mutex);
+	guard(mutex)(&ad714x->mutex);
 
 	ad714x->read(ad714x, STG_LOW_INT_STA_REG, &ad714x->l_state, 3);
 
@@ -954,8 +954,6 @@ static irqreturn_t ad714x_interrupt_thread(int irq, void *data)
 		ad714x_wheel_state_machine(ad714x, i);
 	for (i = 0; i < ad714x->hw->touchpad_num; i++)
 		ad714x_touchpad_state_machine(ad714x, i);
-
-	mutex_unlock(&ad714x->mutex);
 
 	return IRQ_HANDLED;
 }
@@ -1163,29 +1161,27 @@ struct ad714x_chip *ad714x_probe(struct device *dev, u16 bus_type, int irq,
 }
 EXPORT_SYMBOL(ad714x_probe);
 
-#ifdef CONFIG_PM
-int ad714x_disable(struct ad714x_chip *ad714x)
+static int ad714x_suspend(struct device *dev)
 {
+	struct ad714x_chip *ad714x = dev_get_drvdata(dev);
 	unsigned short data;
 
 	dev_dbg(ad714x->dev, "%s enter\n", __func__);
 
-	mutex_lock(&ad714x->mutex);
+	guard(mutex)(&ad714x->mutex);
 
 	data = ad714x->hw->sys_cfg_reg[AD714X_PWR_CTRL] | 0x3;
 	ad714x->write(ad714x, AD714X_PWR_CTRL, data);
 
-	mutex_unlock(&ad714x->mutex);
-
 	return 0;
 }
-EXPORT_SYMBOL(ad714x_disable);
 
-int ad714x_enable(struct ad714x_chip *ad714x)
+static int ad714x_resume(struct device *dev)
 {
+	struct ad714x_chip *ad714x = dev_get_drvdata(dev);
 	dev_dbg(ad714x->dev, "%s enter\n", __func__);
 
-	mutex_lock(&ad714x->mutex);
+	guard(mutex)(&ad714x->mutex);
 
 	/* resume to non-shutdown mode */
 
@@ -1198,12 +1194,10 @@ int ad714x_enable(struct ad714x_chip *ad714x)
 
 	ad714x->read(ad714x, STG_LOW_INT_STA_REG, &ad714x->l_state, 3);
 
-	mutex_unlock(&ad714x->mutex);
-
 	return 0;
 }
-EXPORT_SYMBOL(ad714x_enable);
-#endif
+
+EXPORT_SIMPLE_DEV_PM_OPS(ad714x_pm, ad714x_suspend, ad714x_resume);
 
 MODULE_DESCRIPTION("Analog Devices AD714X Capacitance Touch Sensor Driver");
 MODULE_AUTHOR("Barry Song <21cnbao@gmail.com>");

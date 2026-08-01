@@ -1,7 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * (C) 2002 - 2003 Dominik Brodowski <linux@brodo.de>
- *
- *  Licensed under the terms of the GNU GPL License version 2.
  *
  *  Library for common functions for Intel SpeedStep v.1 and v.2 support
  *
@@ -42,8 +41,8 @@ extern unsigned int speedstep_get_frequency(enum speedstep_processor processor);
  * SPEEDSTEP_LOW; the second argument is zero so that no
  * cpufreq_notify_transition calls are initiated.
  */
-extern unsigned int speedstep_get_freqs(enum speedstep_processor processor,
-	unsigned int *low_speed,
-	unsigned int *high_speed,
-	unsigned int *transition_latency,
-	void (*set_state) (unsigned int state));
+extern int speedstep_get_freqs(enum speedstep_processor processor,
+			       unsigned int *low_speed,
+			       unsigned int *high_speed,
+			       unsigned int *transition_latency,
+			       void (*set_state)(unsigned int state));

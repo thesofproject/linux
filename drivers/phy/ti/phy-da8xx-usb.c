@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * phy-da8xx-usb - TI DaVinci DA8xx USB PHY driver
  *
  * Copyright (C) 2016 David Lechner <david@lechnology.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
@@ -22,11 +14,13 @@
 #include <linux/phy/phy.h>
 #include <linux/platform_data/phy-da8xx-usb.h>
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 
 #define PHY_INIT_BITS	(CFGCHIP2_SESENDEN | CFGCHIP2_VBDTCTEN)
 
 struct da8xx_usb_phy {
+	struct device		*dev;
 	struct phy_provider	*phy_provider;
 	struct phy		*usb11_phy;
 	struct phy		*usb20_phy;
@@ -47,6 +41,12 @@ static int da8xx_usb11_phy_power_on(struct phy *phy)
 	regmap_write_bits(d_phy->regmap, CFGCHIP(2), CFGCHIP2_USB1SUSPENDM,
 			  CFGCHIP2_USB1SUSPENDM);
 
+	/*
+	 * USB1.1 can used USB2.0 output clock as reference clock so this is here to prevent USB2.0
+	 * from shutting PHY's power when USB1.1 might use it
+	 */
+	pm_runtime_get_sync(d_phy->dev);
+
 	return 0;
 }
 
@@ -57,6 +57,7 @@ static int da8xx_usb11_phy_power_off(struct phy *phy)
 	regmap_write_bits(d_phy->regmap, CFGCHIP(2), CFGCHIP2_USB1SUSPENDM, 0);
 
 	clk_disable_unprepare(d_phy->usb11_clk);
+	pm_runtime_put_sync(d_phy->dev);
 
 	return 0;
 }
@@ -93,7 +94,8 @@ static int da8xx_usb20_phy_power_off(struct phy *phy)
 	return 0;
 }
 
-static int da8xx_usb20_phy_set_mode(struct phy *phy, enum phy_mode mode)
+static int da8xx_usb20_phy_set_mode(struct phy *phy,
+				    enum phy_mode mode, int submode)
 {
 	struct da8xx_usb_phy *d_phy = phy_get_drvdata(phy);
 	u32 val;
@@ -125,8 +127,37 @@ static const struct phy_ops da8xx_usb20_phy_ops = {
 	.owner		= THIS_MODULE,
 };
 
+static int __maybe_unused da8xx_runtime_suspend(struct device *dev)
+{
+	struct da8xx_usb_phy *d_phy = dev_get_drvdata(dev);
+
+	dev_dbg(dev, "Suspending ...\n");
+
+	regmap_set_bits(d_phy->regmap, CFGCHIP(2), CFGCHIP2_PHYPWRDN | CFGCHIP2_OTGPWRDN);
+
+	return 0;
+}
+
+static int __maybe_unused da8xx_runtime_resume(struct device *dev)
+{
+	u32 mask = CFGCHIP2_RESET | CFGCHIP2_PHYPWRDN | CFGCHIP2_OTGPWRDN | CFGCHIP2_PHY_PLLON;
+	struct da8xx_usb_phy *d_phy = dev_get_drvdata(dev);
+	u32 pll_status;
+
+	regmap_update_bits(d_phy->regmap, CFGCHIP(2), mask, CFGCHIP2_PHY_PLLON);
+
+	dev_dbg(dev, "Resuming ...\n");
+
+	return regmap_read_poll_timeout(d_phy->regmap, CFGCHIP(2), pll_status,
+					pll_status & CFGCHIP2_PHYCLKGD, 1000, 500000);
+}
+
+static const struct dev_pm_ops da8xx_usb_phy_pm_ops = {
+	SET_RUNTIME_PM_OPS(da8xx_runtime_suspend, da8xx_runtime_resume, NULL)
+};
+
 static struct phy *da8xx_usb_phy_of_xlate(struct device *dev,
-					 struct of_phandle_args *args)
+					 const struct of_phandle_args *args)
 {
 	struct da8xx_usb_phy *d_phy = dev_get_drvdata(dev);
 
@@ -149,10 +180,13 @@ static int da8xx_usb_phy_probe(struct platform_device *pdev)
 	struct da8xx_usb_phy_platform_data *pdata = dev->platform_data;
 	struct device_node	*node = dev->of_node;
 	struct da8xx_usb_phy	*d_phy;
+	int ret;
 
 	d_phy = devm_kzalloc(dev, sizeof(*d_phy), GFP_KERNEL);
 	if (!d_phy)
 		return -ENOMEM;
+
+	d_phy->dev = dev;
 
 	if (pdata)
 		d_phy->regmap = pdata->cfgchip;
@@ -200,8 +234,6 @@ static int da8xx_usb_phy_probe(struct platform_device *pdev)
 			return PTR_ERR(d_phy->phy_provider);
 		}
 	} else {
-		int ret;
-
 		ret = phy_create_lookup(d_phy->usb11_phy, "usb-phy",
 					"ohci-da8xx");
 		if (ret)
@@ -215,10 +247,20 @@ static int da8xx_usb_phy_probe(struct platform_device *pdev)
 	regmap_write_bits(d_phy->regmap, CFGCHIP(2),
 			  PHY_INIT_BITS, PHY_INIT_BITS);
 
+	pm_runtime_set_active(dev);
+	ret = devm_pm_runtime_enable(dev);
+	if (ret)
+		return ret;
+	/*
+	 * Prevent runtime pm from being ON by default. Users can enable
+	 * it using power/control in sysfs.
+	 */
+	pm_runtime_forbid(dev);
+
 	return 0;
 }
 
-static int da8xx_usb_phy_remove(struct platform_device *pdev)
+static void da8xx_usb_phy_remove(struct platform_device *pdev)
 {
 	struct da8xx_usb_phy *d_phy = platform_get_drvdata(pdev);
 
@@ -226,8 +268,6 @@ static int da8xx_usb_phy_remove(struct platform_device *pdev)
 		phy_remove_lookup(d_phy->usb20_phy, "usb-phy", "musb-da8xx");
 		phy_remove_lookup(d_phy->usb11_phy, "usb-phy", "ohci-da8xx");
 	}
-
-	return 0;
 }
 
 static const struct of_device_id da8xx_usb_phy_ids[] = {
@@ -241,7 +281,8 @@ static struct platform_driver da8xx_usb_phy_driver = {
 	.remove	= da8xx_usb_phy_remove,
 	.driver	= {
 		.name	= "da8xx-usb-phy",
-		.of_match_table = da8xx_usb_phy_ids,
+		.pm	= &da8xx_usb_phy_pm_ops,
+		.of_match_table	= da8xx_usb_phy_ids,
 	},
 };
 

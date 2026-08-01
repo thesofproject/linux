@@ -32,8 +32,10 @@ struct slot {
 	unsigned int devfn;
 	struct pci_bus *bus;
 	struct pci_dev *dev;
+	unsigned int latch_status:1;
+	unsigned int adapter_status:1;
 	unsigned int extracting;
-	struct hotplug_slot *hotplug_slot;
+	struct hotplug_slot hotplug_slot;
 	struct list_head slot_list;
 };
 
@@ -42,9 +44,6 @@ struct cpci_hp_controller_ops {
 	int (*enable_irq)(void);
 	int (*disable_irq)(void);
 	int (*check_irq)(void *dev_id);
-	int (*hardware_test)(struct slot *slot, u32 value);
-	u8  (*get_power)(struct slot *slot);
-	int (*set_power)(struct slot *slot, int value);
 };
 
 struct cpci_hp_controller {
@@ -58,7 +57,12 @@ struct cpci_hp_controller {
 
 static inline const char *slot_name(struct slot *slot)
 {
-	return hotplug_slot_name(slot->hotplug_slot);
+	return hotplug_slot_name(&slot->hotplug_slot);
+}
+
+static inline struct slot *to_slot(struct hotplug_slot *hotplug_slot)
+{
+	return container_of(hotplug_slot, struct slot, hotplug_slot);
 }
 
 int cpci_hp_register_controller(struct cpci_hp_controller *controller);
@@ -68,13 +72,14 @@ int cpci_hp_unregister_bus(struct pci_bus *bus);
 int cpci_hp_start(void);
 int cpci_hp_stop(void);
 
+/* Global variables */
+extern int cpci_debug;
+
 /*
  * Internal function prototypes, these functions should not be used by
  * board/chassis drivers.
  */
 u8 cpci_get_attention_status(struct slot *slot);
-u8 cpci_get_latch_status(struct slot *slot);
-u8 cpci_get_adapter_status(struct slot *slot);
 u16 cpci_get_hs_csr(struct slot *slot);
 int cpci_set_attention_status(struct slot *slot, int status);
 int cpci_check_and_clear_ins(struct slot *slot);

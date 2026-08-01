@@ -106,7 +106,7 @@ config CPU_ARM922T
 	help
 	  The ARM922T is a version of the ARM920T, but with smaller
 	  instruction and data caches. It is used in Altera's
-	  Excalibur XA device family and Micrel's KS8695 Centaur.
+	  Excalibur XA device family and the ARM Integrator.
 
 	  Say Y if you want support for the ARM922T processor.
 	  Otherwise, say N.
@@ -386,6 +386,7 @@ config CPU_V6
 	select CPU_PABRT_V6
 	select CPU_THUMB_CAPABLE
 	select CPU_TLB_V6 if MMU
+	select SMP_ON_UP if SMP
 
 # ARMv6k
 config CPU_V6K
@@ -402,7 +403,7 @@ config CPU_V6K
 	select CPU_THUMB_CAPABLE
 	select CPU_TLB_V6 if MMU
 
-# ARMv7
+# ARMv7 and ARMv8 architectures
 config CPU_V7
 	bool
 	select CPU_32v6K
@@ -415,6 +416,7 @@ config CPU_V7
 	select CPU_CP15_MPU if !MMU
 	select CPU_HAS_ASID if MMU
 	select CPU_PABRT_V7
+	select CPU_SPECTRE if MMU
 	select CPU_THUMB_CAPABLE
 	select CPU_TLB_V7 if MMU
 
@@ -600,8 +602,6 @@ config CPU_TLB_V6
 config CPU_TLB_V7
 	bool
 
-config VERIFY_PERMISSION_FAULT
-	bool
 endif
 
 config CPU_HAS_ASID
@@ -631,13 +631,16 @@ config CPU_USE_DOMAINS
 	bool
 	help
 	  This option enables or disables the use of domain switching
-	  via the set_fs() function.
+	  using the DACR (domain access control register) to protect memory
+	  domains from each other. In Linux we use three domains: kernel, user
+	  and IO. The domains are used to protect userspace from kernelspace
+	  and to handle IO-space as a special type of memory by assigning
+	  manager or client roles to running code (such as a process).
 
 config CPU_V7M_NUM_IRQ
 	int "Number of external interrupts connected to the NVIC"
 	depends on CPU_V7M
 	default 90 if ARCH_STM32
-	default 38 if ARCH_EFM32
 	default 112 if SOC_VF610
 	default 240
 	help
@@ -661,6 +664,8 @@ config ARM_LPAE
 	bool "Support for the Large Physical Address Extension"
 	depends on MMU && CPU_32v7 && !CPU_32v6 && !CPU_32v5 && \
 		!CPU_32v4 && !CPU_32v3
+	select PHYS_ADDR_T_64BIT
+	select SWIOTLB
 	help
 	  Say Y if you have an ARMv7 processor supporting the LPAE page
 	  table format and you would like to access memory beyond the
@@ -673,15 +678,9 @@ config ARM_PV_FIXUP
 	def_bool y
 	depends on ARM_LPAE && ARM_PATCH_PHYS_VIRT && ARCH_KEYSTONE
 
-config ARCH_PHYS_ADDR_T_64BIT
-	def_bool ARM_LPAE
-
-config ARCH_DMA_ADDR_T_64BIT
-	bool
-
 config ARM_THUMB
 	bool "Support Thumb user binaries" if !CPU_THUMBONLY && EXPERT
-	depends on CPU_THUMB_CAPABLE
+	depends on CPU_THUMB_CAPABLE && !CPU_32v4
 	default y
 	help
 	  Say Y if you want to include kernel support for running user space
@@ -706,7 +705,6 @@ config ARM_THUMBEE
 
 config ARM_VIRT_EXT
 	bool
-	depends on MMU
 	default y if CPU_V7
 	help
 	  Enable the kernel to make use of the ARM Virtualization
@@ -714,7 +712,7 @@ config ARM_VIRT_EXT
 	  assistance.
 
 	  A compliant bootloader is required in order to make maximum
-	  use of this feature.  Refer to Documentation/arm/Booting for
+	  use of this feature.  Refer to Documentation/arch/arm/booting.rst for
 	  details.
 
 config SWP_EMULATE
@@ -744,19 +742,34 @@ config SWP_EMULATE
 
 	  If unsure, say Y.
 
+choice
+	prompt "CPU Endianness"
+	default CPU_LITTLE_ENDIAN
+
+config CPU_LITTLE_ENDIAN
+	bool "Built little-endian kernel"
+	help
+	  Say Y if you plan on running a kernel in little-endian mode.
+	  This is the default and is used in practically all modern user
+	  space builds.
+
 config CPU_BIG_ENDIAN
 	bool "Build big-endian kernel"
-	depends on ARCH_SUPPORTS_BIG_ENDIAN
+	depends on !LD_IS_LLD
 	help
 	  Say Y if you plan on running a kernel in big-endian mode.
-	  Note that your board must be properly built and your board
-	  port must properly enable any big-endian related features
-	  of your chipset/board/processor.
+	  This works on many machines using ARMv6 or newer processors
+	  but requires big-endian user space.
+
+	  The only ARMv5 platform with big-endian support is
+	  Intel IXP4xx.
+
+endchoice
 
 config CPU_ENDIAN_BE8
 	bool
 	depends on CPU_BIG_ENDIAN
-	default CPU_V6 || CPU_V6K || CPU_V7
+	default CPU_V6 || CPU_V6K || CPU_V7 || CPU_V7M
 	help
 	  Support for the BE-8 (big-endian) mode on ARMv6 and ARMv7 processors.
 
@@ -784,6 +797,14 @@ config CPU_ICACHE_DISABLE
 	help
 	  Say Y here to disable the processor instruction cache. Unless
 	  you have a reason not to or are unsure, say N.
+
+config CPU_ICACHE_MISMATCH_WORKAROUND
+	bool "Workaround for I-Cache line size mismatch between CPU cores"
+	depends on SMP && CPU_V7
+	help
+	  Some big.LITTLE systems have I-Cache line size mismatch between
+	  LITTLE and big cores.  Say Y here to enable a workaround for
+	  proper I-Cache support on such systems.  If unsure, say N.
 
 config CPU_DCACHE_DISABLE
 	bool "Disable D-Cache (C-bit)"
@@ -826,6 +847,39 @@ config CPU_BPREDICT_DISABLE
 	help
 	  Say Y here to disable branch prediction.  If unsure, say N.
 
+config CPU_SPECTRE
+	bool
+	select GENERIC_CPU_VULNERABILITIES
+
+config HARDEN_BRANCH_PREDICTOR
+	bool "Harden the branch predictor against aliasing attacks" if EXPERT
+	depends on CPU_SPECTRE
+	default y
+	help
+	   Speculation attacks against some high-performance processors rely
+	   on being able to manipulate the branch predictor for a victim
+	   context by executing aliasing branches in the attacker context.
+	   Such attacks can be partially mitigated against by clearing
+	   internal branch predictor state and limiting the prediction
+	   logic in some situations.
+
+	   This config option will take CPU-specific actions to harden
+	   the branch predictor against aliasing attacks and may rely on
+	   specific instruction sequences or control bits being set by
+	   the system firmware.
+
+	   If unsure, say Y.
+
+config HARDEN_BRANCH_HISTORY
+	bool "Harden Spectre style attacks against branch history" if EXPERT
+	depends on CPU_SPECTRE
+	default y
+	help
+	  Speculation attacks against some high-performance processors can
+	  make use of branch history to influence future speculation. When
+	  taking an exception, a sequence of branches overwrites the branch
+	  history, or branch history is invalidated.
+
 config TLS_REG_EMUL
 	bool
 	select NEED_KUSER_HELPERS
@@ -850,7 +904,7 @@ config KUSER_HELPERS
 	  the CPU type fitted to the system.  This permits binaries to be
 	  run on ARMv4 through to ARMv7 without modification.
 
-	  See Documentation/arm/kernel_user_helpers.txt for details.
+	  See Documentation/arch/arm/kernel_user_helpers.rst for details.
 
 	  However, the fixed address nature of these helpers can be used
 	  by ROP (return orientated programming) authors when creating
@@ -870,7 +924,8 @@ config VDSO
 	bool "Enable VDSO for acceleration of some system calls"
 	depends on AEABI && MMU && CPU_V7
 	default y if ARM_ARCH_TIMER
-	select GENERIC_TIME_VSYSCALL
+	select HAVE_GENERIC_VDSO
+	select GENERIC_GETTIMEOFDAY
 	help
 	  Place in the process address space an ELF shared object
 	  providing fast implementations of gettimeofday and
@@ -880,24 +935,6 @@ config VDSO
 	  You must have glibc 2.22 or later for programs to seamlessly
 	  take advantage of this.
 
-config DMA_CACHE_RWFO
-	bool "Enable read/write for ownership DMA cache maintenance"
-	depends on CPU_V6K && SMP
-	default y
-	help
-	  The Snoop Control Unit on ARM11MPCore does not detect the
-	  cache maintenance operations and the dma_{map,unmap}_area()
-	  functions may leave stale cache entries on other CPUs. By
-	  enabling this option, Read or Write For Ownership in the ARMv6
-	  DMA cache maintenance functions is performed. These LDR/STR
-	  instructions change the cache line state to shared or modified
-	  so that the cache operation has the desired effect.
-
-	  Note that the workaround is only valid on processors that do
-	  not perform speculative loads into the D-cache. For such
-	  processors, if cache maintenance operations are not broadcast
-	  in hardware, other workarounds are needed (e.g. cache
-	  maintenance broadcasting in software via FIQ).
 
 config OUTER_CACHE
 	bool
@@ -1015,7 +1052,7 @@ endif
 
 config CACHE_TAUROS2
 	bool "Enable the Tauros2 L2 cache controller"
-	depends on (ARCH_DOVE || ARCH_MMP || CPU_PJ4)
+	depends on (CPU_MOHAWK || CPU_PJ4)
 	default y
 	select OUTER_CACHE
 	help
@@ -1082,12 +1119,6 @@ config ARM_DMA_MEM_BUFFERABLE
 
 config ARM_HEAVY_MB
 	bool
-
-config ARCH_SUPPORTS_BIG_ENDIAN
-	bool
-	help
-	  This option specifies the architecture can support big endian
-	  operation.
 
 config DEBUG_ALIGN_RODATA
 	bool "Make rodata strictly non-executable"

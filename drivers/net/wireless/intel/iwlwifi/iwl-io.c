@@ -1,32 +1,8 @@
-/******************************************************************************
- *
- * Copyright(c) 2003 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2015 - 2016 Intel Deutschland GmbH
- *
- * Portions of this file are derived from the ipw3945 project.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- *  Intel Linux Wireless <linuxwifi@intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- *****************************************************************************/
-#include <linux/delay.h>
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+/*
+ * Copyright (C) 2003-2014, 2018-2022, 2024-2026 Intel Corporation
+ * Copyright (C) 2015-2016 Intel Deutschland GmbH
+ */
 #include <linux/device.h>
 #include <linux/export.h>
 
@@ -70,56 +46,51 @@ IWL_EXPORT_SYMBOL(iwl_read32);
 
 #define IWL_POLL_INTERVAL 10	/* microseconds */
 
-int iwl_poll_bit(struct iwl_trans *trans, u32 addr,
-		 u32 bits, u32 mask, int timeout)
+int iwl_poll_bits_mask(struct iwl_trans *trans, u32 addr,
+		       u32 bits, u32 mask, int timeout)
 {
 	int t = 0;
 
 	do {
 		if ((iwl_read32(trans, addr) & mask) == (bits & mask))
-			return t;
+			return 0;
 		udelay(IWL_POLL_INTERVAL);
 		t += IWL_POLL_INTERVAL;
 	} while (t < timeout);
 
 	return -ETIMEDOUT;
 }
-IWL_EXPORT_SYMBOL(iwl_poll_bit);
+IWL_EXPORT_SYMBOL(iwl_poll_bits_mask);
 
 u32 iwl_read_direct32(struct iwl_trans *trans, u32 reg)
 {
-	u32 value = 0x5a5a5a5a;
-	unsigned long flags;
-	if (iwl_trans_grab_nic_access(trans, &flags)) {
-		value = iwl_read32(trans, reg);
-		iwl_trans_release_nic_access(trans, &flags);
+	if (iwl_trans_grab_nic_access(trans)) {
+		u32 value = iwl_read32(trans, reg);
+
+		iwl_trans_release_nic_access(trans);
+		return value;
 	}
 
-	return value;
+	/* return as if we have a HW timeout/failure */
+	return 0x5a5a5a5a;
 }
-IWL_EXPORT_SYMBOL(iwl_read_direct32);
 
 void iwl_write_direct32(struct iwl_trans *trans, u32 reg, u32 value)
 {
-	unsigned long flags;
-
-	if (iwl_trans_grab_nic_access(trans, &flags)) {
+	if (iwl_trans_grab_nic_access(trans)) {
 		iwl_write32(trans, reg, value);
-		iwl_trans_release_nic_access(trans, &flags);
+		iwl_trans_release_nic_access(trans);
 	}
 }
 IWL_EXPORT_SYMBOL(iwl_write_direct32);
 
 void iwl_write_direct64(struct iwl_trans *trans, u64 reg, u64 value)
 {
-	unsigned long flags;
-
-	if (iwl_trans_grab_nic_access(trans, &flags)) {
+	if (iwl_trans_grab_nic_access(trans)) {
 		iwl_write64(trans, reg, value);
-		iwl_trans_release_nic_access(trans, &flags);
+		iwl_trans_release_nic_access(trans);
 	}
 }
-IWL_EXPORT_SYMBOL(iwl_write_direct64);
 
 int iwl_poll_direct_bit(struct iwl_trans *trans, u32 addr, u32 mask,
 			int timeout)
@@ -135,7 +106,6 @@ int iwl_poll_direct_bit(struct iwl_trans *trans, u32 addr, u32 mask,
 
 	return -ETIMEDOUT;
 }
-IWL_EXPORT_SYMBOL(iwl_poll_direct_bit);
 
 u32 iwl_read_prph_no_grab(struct iwl_trans *trans, u32 ofs)
 {
@@ -143,14 +113,12 @@ u32 iwl_read_prph_no_grab(struct iwl_trans *trans, u32 ofs)
 	trace_iwlwifi_dev_ioread_prph32(trans->dev, ofs, val);
 	return val;
 }
-IWL_EXPORT_SYMBOL(iwl_read_prph_no_grab);
 
 void iwl_write_prph_no_grab(struct iwl_trans *trans, u32 ofs, u32 val)
 {
 	trace_iwlwifi_dev_iowrite_prph32(trans->dev, ofs, val);
 	iwl_trans_write_prph(trans, ofs, val);
 }
-IWL_EXPORT_SYMBOL(iwl_write_prph_no_grab);
 
 void iwl_write_prph64_no_grab(struct iwl_trans *trans, u64 ofs, u64 val)
 {
@@ -158,31 +126,31 @@ void iwl_write_prph64_no_grab(struct iwl_trans *trans, u64 ofs, u64 val)
 	iwl_write_prph_no_grab(trans, ofs, val & 0xffffffff);
 	iwl_write_prph_no_grab(trans, ofs + 4, val >> 32);
 }
-IWL_EXPORT_SYMBOL(iwl_write_prph64_no_grab);
 
 u32 iwl_read_prph(struct iwl_trans *trans, u32 ofs)
 {
-	unsigned long flags;
-	u32 val = 0x5a5a5a5a;
+	if (iwl_trans_grab_nic_access(trans)) {
+		u32 val = iwl_read_prph_no_grab(trans, ofs);
 
-	if (iwl_trans_grab_nic_access(trans, &flags)) {
-		val = iwl_read_prph_no_grab(trans, ofs);
-		iwl_trans_release_nic_access(trans, &flags);
+		iwl_trans_release_nic_access(trans);
+
+		return val;
 	}
-	return val;
+
+	/* return as if we have a HW timeout/failure */
+	return 0x5a5a5a5a;
 }
 IWL_EXPORT_SYMBOL(iwl_read_prph);
 
-void iwl_write_prph(struct iwl_trans *trans, u32 ofs, u32 val)
+void iwl_write_prph_delay(struct iwl_trans *trans, u32 ofs, u32 val, u32 delay_ms)
 {
-	unsigned long flags;
-
-	if (iwl_trans_grab_nic_access(trans, &flags)) {
+	if (iwl_trans_grab_nic_access(trans)) {
+		mdelay(delay_ms);
 		iwl_write_prph_no_grab(trans, ofs, val);
-		iwl_trans_release_nic_access(trans, &flags);
+		iwl_trans_release_nic_access(trans);
 	}
 }
-IWL_EXPORT_SYMBOL(iwl_write_prph);
+IWL_EXPORT_SYMBOL(iwl_write_prph_delay);
 
 int iwl_poll_prph_bit(struct iwl_trans *trans, u32 addr,
 		      u32 bits, u32 mask, int timeout)
@@ -191,7 +159,23 @@ int iwl_poll_prph_bit(struct iwl_trans *trans, u32 addr,
 
 	do {
 		if ((iwl_read_prph(trans, addr) & mask) == (bits & mask))
-			return t;
+			return 0;
+		udelay(IWL_POLL_INTERVAL);
+		t += IWL_POLL_INTERVAL;
+	} while (t < timeout);
+
+	return -ETIMEDOUT;
+}
+
+int iwl_poll_umac_prph_bits_no_grab(struct iwl_trans *trans, u32 addr,
+				    u32 bits, u32 mask, int timeout)
+{
+	int t = 0;
+
+	do {
+		if ((iwl_read_umac_prph_no_grab(trans, addr) & mask) ==
+		    (bits & mask))
+			return 0;
 		udelay(IWL_POLL_INTERVAL);
 		t += IWL_POLL_INTERVAL;
 	} while (t < timeout);
@@ -201,13 +185,11 @@ int iwl_poll_prph_bit(struct iwl_trans *trans, u32 addr,
 
 void iwl_set_bits_prph(struct iwl_trans *trans, u32 ofs, u32 mask)
 {
-	unsigned long flags;
-
-	if (iwl_trans_grab_nic_access(trans, &flags)) {
+	if (iwl_trans_grab_nic_access(trans)) {
 		iwl_write_prph_no_grab(trans, ofs,
 				       iwl_read_prph_no_grab(trans, ofs) |
 				       mask);
-		iwl_trans_release_nic_access(trans, &flags);
+		iwl_trans_release_nic_access(trans);
 	}
 }
 IWL_EXPORT_SYMBOL(iwl_set_bits_prph);
@@ -215,38 +197,41 @@ IWL_EXPORT_SYMBOL(iwl_set_bits_prph);
 void iwl_set_bits_mask_prph(struct iwl_trans *trans, u32 ofs,
 			    u32 bits, u32 mask)
 {
-	unsigned long flags;
-
-	if (iwl_trans_grab_nic_access(trans, &flags)) {
+	if (iwl_trans_grab_nic_access(trans)) {
 		iwl_write_prph_no_grab(trans, ofs,
 				       (iwl_read_prph_no_grab(trans, ofs) &
 					mask) | bits);
-		iwl_trans_release_nic_access(trans, &flags);
+		iwl_trans_release_nic_access(trans);
 	}
 }
 IWL_EXPORT_SYMBOL(iwl_set_bits_mask_prph);
 
 void iwl_clear_bits_prph(struct iwl_trans *trans, u32 ofs, u32 mask)
 {
-	unsigned long flags;
 	u32 val;
 
-	if (iwl_trans_grab_nic_access(trans, &flags)) {
+	if (iwl_trans_grab_nic_access(trans)) {
 		val = iwl_read_prph_no_grab(trans, ofs);
 		iwl_write_prph_no_grab(trans, ofs, (val & ~mask));
-		iwl_trans_release_nic_access(trans, &flags);
+		iwl_trans_release_nic_access(trans);
 	}
 }
 IWL_EXPORT_SYMBOL(iwl_clear_bits_prph);
 
 void iwl_force_nmi(struct iwl_trans *trans)
 {
-	if (trans->cfg->device_family < IWL_DEVICE_FAMILY_9000)
-		iwl_write_prph(trans, DEVICE_SET_NMI_REG,
-			       DEVICE_SET_NMI_VAL_DRV);
+	if (trans->mac_cfg->device_family < IWL_DEVICE_FAMILY_9000)
+		iwl_write_prph_delay(trans, DEVICE_SET_NMI_REG,
+				     DEVICE_SET_NMI_VAL_DRV, 1);
+	else if (trans->mac_cfg->device_family < IWL_DEVICE_FAMILY_AX210)
+		iwl_write_umac_prph(trans, UREG_NIC_SET_NMI_DRIVER,
+				UREG_NIC_SET_NMI_DRIVER_NMI_FROM_DRIVER);
+	else if (trans->mac_cfg->device_family < IWL_DEVICE_FAMILY_BZ)
+		iwl_write_umac_prph(trans, UREG_DOORBELL_TO_ISR6,
+				    UREG_DOORBELL_TO_ISR6_NMI_BIT);
 	else
-		iwl_write_prph(trans, UREG_NIC_SET_NMI_DRIVER,
-			       UREG_NIC_SET_NMI_DRIVER_NMI_FROM_DRIVER_MSK);
+		iwl_write32(trans, CSR_DOORBELL_VECTOR,
+			    UREG_DOORBELL_TO_ISR6_NMI_BIT);
 }
 IWL_EXPORT_SYMBOL(iwl_force_nmi);
 
@@ -284,7 +269,7 @@ struct reg {
 static int iwl_dump_rfh(struct iwl_trans *trans, char **buf)
 {
 	int i, q;
-	int num_q = trans->num_rx_queues;
+	int num_q = trans->info.num_rxqs;
 	static const u32 rfh_tbl[] = {
 		RFH_RXF_DMA_CFG,
 		RFH_GEN_CFG,
@@ -392,7 +377,7 @@ int iwl_dump_fh(struct iwl_trans *trans, char **buf)
 		FH_TSSR_TX_ERROR_REG
 	};
 
-	if (trans->cfg->mq_rx_supported)
+	if (trans->mac_cfg->mq_rx_supported)
 		return iwl_dump_rfh(trans, buf);
 
 #ifdef CONFIG_IWLWIFI_DEBUGFS
@@ -424,4 +409,40 @@ int iwl_dump_fh(struct iwl_trans *trans, char **buf)
 			iwl_read_direct32(trans, fh_tbl[i]));
 
 	return 0;
+}
+
+void iwl_trans_sync_nmi_with_addr(struct iwl_trans *trans, u32 inta_addr,
+				  u32 sw_err_bit)
+{
+	unsigned long timeout = jiffies + IWL_TRANS_NMI_TIMEOUT;
+	bool interrupts_enabled = test_bit(STATUS_INT_ENABLED, &trans->status);
+
+	/* if the interrupts were already disabled, there is no point in
+	 * calling iwl_disable_interrupts
+	 */
+	if (interrupts_enabled)
+		iwl_trans_interrupts(trans, false);
+
+	iwl_force_nmi(trans);
+	while (time_after(timeout, jiffies)) {
+		u32 inta_hw = iwl_read32(trans, inta_addr);
+
+		/* Error detected by uCode */
+		if (inta_hw & sw_err_bit) {
+			/* Clear causes register */
+			iwl_write32(trans, inta_addr, inta_hw & sw_err_bit);
+			break;
+		}
+
+		mdelay(1);
+	}
+
+	/* enable interrupts only if there were already enabled before this
+	 * function to avoid a case were the driver enable interrupts before
+	 * proper configurations were made
+	 */
+	if (interrupts_enabled)
+		iwl_trans_interrupts(trans, true);
+
+	iwl_trans_fw_error(trans, IWL_ERR_TYPE_NMI_FORCED);
 }

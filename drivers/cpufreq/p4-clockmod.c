@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	Pentium 4/Xeon CPU on demand clock modulation/speed scaling
  *	(C) 2002 - 2003 Dominik Brodowski <linux@brodo.de>
@@ -6,18 +7,12 @@
  *	(C) 2002 Tora T. Engstad
  *	All Rights Reserved
  *
- *	This program is free software; you can redistribute it and/or
- *      modify it under the terms of the GNU General Public License
- *      as published by the Free Software Foundation; either version
- *      2 of the License, or (at your option) any later version.
- *
  *      The author(s) of this software shall not be held liable for damages
  *      of any nature resulting due to the use of this software. This
  *      software is provided AS-IS with no warranties.
  *
  *	Date		Errata			Description
  *	20020525	N44, O17	12.5% or 25% DC causes lockup
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -56,24 +51,24 @@ static unsigned int cpufreq_p4_get(unsigned int cpu);
 
 static int cpufreq_p4_setdc(unsigned int cpu, unsigned int newstate)
 {
-	u32 l, h;
+	struct msr val;
 
 	if ((newstate > DC_DISABLE) || (newstate == DC_RESV))
 		return -EINVAL;
 
-	rdmsr_on_cpu(cpu, MSR_IA32_THERM_STATUS, &l, &h);
+	rdmsrq_on_cpu(cpu, MSR_IA32_THERM_STATUS, &val.q);
 
-	if (l & 0x01)
+	if (val.l & 0x01)
 		pr_debug("CPU#%d currently thermal throttled\n", cpu);
 
 	if (has_N44_O17_errata[cpu] &&
 	    (newstate == DC_25PT || newstate == DC_DFLT))
 		newstate = DC_38PT;
 
-	rdmsr_on_cpu(cpu, MSR_IA32_THERM_CONTROL, &l, &h);
+	rdmsrq_on_cpu(cpu, MSR_IA32_THERM_CONTROL, &val.q);
 	if (newstate == DC_DISABLE) {
 		pr_debug("CPU#%d disabling modulation\n", cpu);
-		wrmsr_on_cpu(cpu, MSR_IA32_THERM_CONTROL, l & ~(1<<4), h);
+		wrmsrq_on_cpu(cpu, MSR_IA32_THERM_CONTROL, val.q & ~(1ULL << 4));
 	} else {
 		pr_debug("CPU#%d setting duty cycle to %d%%\n",
 			cpu, ((125 * newstate) / 10));
@@ -82,9 +77,9 @@ static int cpufreq_p4_setdc(unsigned int cpu, unsigned int newstate)
 		 * bits 3-1	: duty cycle
 		 * bit  0	: reserved
 		 */
-		l = (l & ~14);
-		l = l | (1<<4) | ((newstate & 0x7)<<1);
-		wrmsr_on_cpu(cpu, MSR_IA32_THERM_CONTROL, l, h);
+		val.l = (val.l & ~14);
+		val.l = val.l | (1<<4) | ((newstate & 0x7)<<1);
+		wrmsrq_on_cpu(cpu, MSR_IA32_THERM_CONTROL, val.q);
 	}
 
 	return 0;
@@ -134,7 +129,7 @@ static unsigned int cpufreq_p4_get_frequency(struct cpuinfo_x86 *c)
 			return speedstep_get_frequency(SPEEDSTEP_CPU_PCORE);
 		case 0x0D: /* Pentium M (Dothan) */
 			p4clockmod_driver.flags |= CPUFREQ_CONST_LOOPS;
-			/* fall through */
+			fallthrough;
 		case 0x09: /* Pentium M (Banias) */
 			return speedstep_get_frequency(SPEEDSTEP_CPU_PM);
 		}
@@ -210,18 +205,18 @@ static int cpufreq_p4_cpu_init(struct cpufreq_policy *policy)
 
 static unsigned int cpufreq_p4_get(unsigned int cpu)
 {
-	u32 l, h;
+	struct msr val;
 
-	rdmsr_on_cpu(cpu, MSR_IA32_THERM_CONTROL, &l, &h);
+	rdmsrq_on_cpu(cpu, MSR_IA32_THERM_CONTROL, &val.q);
 
-	if (l & 0x10) {
-		l = l >> 1;
-		l &= 0x7;
+	if (val.l & 0x10) {
+		val.l = val.l >> 1;
+		val.l &= 0x7;
 	} else
-		l = DC_DISABLE;
+		val.l = DC_DISABLE;
 
-	if (l != DC_DISABLE)
-		return stock_freq * l / 8;
+	if (val.l != DC_DISABLE)
+		return stock_freq * val.l / 8;
 
 	return stock_freq;
 }
@@ -232,11 +227,10 @@ static struct cpufreq_driver p4clockmod_driver = {
 	.init		= cpufreq_p4_cpu_init,
 	.get		= cpufreq_p4_get,
 	.name		= "p4-clockmod",
-	.attr		= cpufreq_generic_attr,
 };
 
 static const struct x86_cpu_id cpufreq_p4_id[] = {
-	{ X86_VENDOR_INTEL, X86_FAMILY_ANY, X86_MODEL_ANY, X86_FEATURE_ACC },
+	X86_MATCH_VENDOR_FEATURE(INTEL, X86_FEATURE_ACC, NULL),
 	{}
 };
 

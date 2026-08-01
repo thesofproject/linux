@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/net/ethernet/ibm/emac/zmii.c
  *
@@ -14,17 +15,12 @@
  * Based on original work by
  *      Armin Kuster <akuster@mvista.com>
  * 	Copyright 2001 MontaVista Softare Inc.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
  */
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/ethtool.h>
 #include <linux/of_address.h>
+#include <linux/platform_device.h>
 #include <asm/io.h>
 
 #include "emac.h"
@@ -83,7 +79,8 @@ static inline u32 zmii_mode_mask(int mode, int input)
 	}
 }
 
-int zmii_attach(struct platform_device *ofdev, int input, int *mode)
+int zmii_attach(struct platform_device *ofdev, int input,
+		phy_interface_t *mode)
 {
 	struct zmii_instance *dev = platform_get_drvdata(ofdev);
 	struct zmii_regs __iomem *p = dev->base;
@@ -234,32 +231,25 @@ void *zmii_dump_regs(struct platform_device *ofdev, void *buf)
 
 static int zmii_probe(struct platform_device *ofdev)
 {
-	struct device_node *np = ofdev->dev.of_node;
 	struct zmii_instance *dev;
-	struct resource regs;
-	int rc;
+	int err;
 
-	rc = -ENOMEM;
-	dev = kzalloc(sizeof(struct zmii_instance), GFP_KERNEL);
-	if (dev == NULL)
-		goto err_gone;
+	dev = devm_kzalloc(&ofdev->dev, sizeof(struct zmii_instance),
+			   GFP_KERNEL);
+	if (!dev)
+		return -ENOMEM;
 
-	mutex_init(&dev->lock);
+	err = devm_mutex_init(&ofdev->dev, &dev->lock);
+	if (err)
+		return err;
+
 	dev->ofdev = ofdev;
 	dev->mode = PHY_INTERFACE_MODE_NA;
 
-	rc = -ENXIO;
-	if (of_address_to_resource(np, 0, &regs)) {
-		printk(KERN_ERR "%pOF: Can't get registers address\n", np);
-		goto err_free;
-	}
-
-	rc = -ENOMEM;
-	dev->base = (struct zmii_regs __iomem *)ioremap(regs.start,
-						sizeof(struct zmii_regs));
-	if (dev->base == NULL) {
-		printk(KERN_ERR "%pOF: Can't map device registers!\n", np);
-		goto err_free;
+	dev->base = devm_platform_ioremap_resource(ofdev, 0);
+	if (IS_ERR(dev->base)) {
+		dev_err(&ofdev->dev, "can't map device registers");
+		return PTR_ERR(dev->base);
 	}
 
 	/* We may need FER value for autodetection later */
@@ -271,23 +261,6 @@ static int zmii_probe(struct platform_device *ofdev)
 	printk(KERN_INFO "ZMII %pOF initialized\n", ofdev->dev.of_node);
 	wmb();
 	platform_set_drvdata(ofdev, dev);
-
-	return 0;
-
- err_free:
-	kfree(dev);
- err_gone:
-	return rc;
-}
-
-static int zmii_remove(struct platform_device *ofdev)
-{
-	struct zmii_instance *dev = platform_get_drvdata(ofdev);
-
-	WARN_ON(dev->users != 0);
-
-	iounmap(dev->base);
-	kfree(dev);
 
 	return 0;
 }
@@ -310,7 +283,6 @@ static struct platform_driver zmii_driver = {
 		.of_match_table = zmii_match,
 	},
 	.probe = zmii_probe,
-	.remove = zmii_remove,
 };
 
 int __init zmii_init(void)

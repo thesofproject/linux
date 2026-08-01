@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel Sunrisepoint LPSS core support.
  *
@@ -7,28 +8,35 @@
  *          Mika Westerberg <mika.westerberg@linux.intel.com>
  *          Heikki Krogerus <heikki.krogerus@linux.intel.com>
  *          Jarkko Nikula <jarkko.nikula@linux.intel.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
-#include <linux/clk.h>
+#include <linux/array_size.h>
+#include <linux/bits.h>
 #include <linux/clkdev.h>
+#include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/debugfs.h>
+#include <linux/device.h>
+#include <linux/err.h>
+#include <linux/gfp_types.h>
 #include <linux/idr.h>
+#include <linux/io.h>
 #include <linux/ioport.h>
-#include <linux/kernel.h>
-#include <linux/module.h>
 #include <linux/mfd/core.h>
+#include <linux/module.h>
+#include <linux/pm.h>
 #include <linux/pm_qos.h>
 #include <linux/pm_runtime.h>
-#include <linux/property.h>
-#include <linux/seq_file.h>
+#include <linux/sprintf.h>
+#include <linux/types.h>
+
 #include <linux/io-64-nonatomic-lo-hi.h>
 
+#include <linux/dma/idma64.h>
+
 #include "intel-lpss.h"
+
+struct dentry;
 
 #define LPSS_DEV_OFFSET		0x000
 #define LPSS_DEV_SIZE		0x200
@@ -40,17 +48,17 @@
 
 /* Offsets from lpss->priv */
 #define LPSS_PRIV_RESETS		0x04
-#define LPSS_PRIV_RESETS_FUNC		BIT(2)
-#define LPSS_PRIV_RESETS_IDMA		0x3
+#define LPSS_PRIV_RESETS_IDMA		BIT(2)
+#define LPSS_PRIV_RESETS_FUNC		0x3
 
 #define LPSS_PRIV_ACTIVELTR		0x10
 #define LPSS_PRIV_IDLELTR		0x14
 
 #define LPSS_PRIV_LTR_REQ		BIT(15)
-#define LPSS_PRIV_LTR_SCALE_MASK	0xc00
-#define LPSS_PRIV_LTR_SCALE_1US		0x800
-#define LPSS_PRIV_LTR_SCALE_32US	0xc00
-#define LPSS_PRIV_LTR_VALUE_MASK	0x3ff
+#define LPSS_PRIV_LTR_SCALE_MASK	GENMASK(11, 10)
+#define LPSS_PRIV_LTR_SCALE_1US		(2 << 10)
+#define LPSS_PRIV_LTR_SCALE_32US	(3 << 10)
+#define LPSS_PRIV_LTR_VALUE_MASK	GENMASK(9, 0)
 
 #define LPSS_PRIV_SSP_REG		0x20
 #define LPSS_PRIV_SSP_REG_DIS_DMA_FIN	BIT(0)
@@ -59,8 +67,8 @@
 
 #define LPSS_PRIV_CAPS			0xfc
 #define LPSS_PRIV_CAPS_NO_IDMA		BIT(8)
+#define LPSS_PRIV_CAPS_TYPE_MASK	GENMASK(7, 4)
 #define LPSS_PRIV_CAPS_TYPE_SHIFT	4
-#define LPSS_PRIV_CAPS_TYPE_MASK	(0xf << LPSS_PRIV_CAPS_TYPE_SHIFT)
 
 /* This matches the type field in CAPS register */
 enum intel_lpss_dev_type {
@@ -96,8 +104,6 @@ static const struct resource intel_lpss_idma64_resources[] = {
 	DEFINE_RES_IRQ(0),
 };
 
-#define LPSS_IDMA64_DRIVER_NAME		"idma64"
-
 /*
  * Cells needs to be ordered so that the iDMA is created first. This is
  * because we need to be sure the DMA is available when the host controller
@@ -129,17 +135,6 @@ static const struct mfd_cell intel_lpss_spi_cell = {
 
 static DEFINE_IDA(intel_lpss_devid_ida);
 static struct dentry *intel_lpss_debugfs;
-
-static int intel_lpss_request_dma_module(const char *name)
-{
-	static bool intel_lpss_dma_requested;
-
-	if (intel_lpss_dma_requested)
-		return 0;
-
-	intel_lpss_dma_requested = true;
-	return request_module("%s", name);
-}
 
 static void intel_lpss_cache_ltr(struct intel_lpss *lpss)
 {
@@ -273,12 +268,15 @@ static void intel_lpss_init_dev(const struct intel_lpss *lpss)
 {
 	u32 value = LPSS_PRIV_SSP_REG_DIS_DMA_FIN;
 
+	/* Set the device in reset state */
+	writel(0, lpss->priv + LPSS_PRIV_RESETS);
+
 	intel_lpss_deassert_reset(lpss);
+
+	intel_lpss_set_remap_addr(lpss);
 
 	if (!intel_lpss_has_idma(lpss))
 		return;
-
-	intel_lpss_set_remap_addr(lpss);
 
 	/* Make sure that SPI multiblock DMA transfers are re-enabled */
 	if (lpss->type == LPSS_DEV_SPI)
@@ -302,6 +300,7 @@ static int intel_lpss_register_clock_divider(struct intel_lpss *lpss,
 {
 	char name[32];
 	struct clk *tmp = *clk;
+	int ret;
 
 	snprintf(name, sizeof(name), "%s-enable", devname);
 	tmp = clk_register_gate(NULL, name, __clk_get_name(tmp), 0,
@@ -311,11 +310,18 @@ static int intel_lpss_register_clock_divider(struct intel_lpss *lpss,
 
 	snprintf(name, sizeof(name), "%s-div", devname);
 	tmp = clk_register_fractional_divider(NULL, name, __clk_get_name(tmp),
-					      0, lpss->priv, 1, 15, 16, 15, 0,
+					      0, lpss->priv, 1, 15, 16, 15,
+					      CLK_FRAC_DIVIDER_POWER_OF_TWO_PS,
 					      NULL);
 	if (IS_ERR(tmp))
 		return PTR_ERR(tmp);
 	*clk = tmp;
+
+	if (lpss->info->quirks & QUIRK_CLOCK_DIVIDER_UNITY) {
+		ret = clk_set_rate(tmp, lpss->info->clk_rate);
+		if (ret)
+			return ret;
+	}
 
 	snprintf(name, sizeof(name), "%s-update", devname);
 	tmp = clk_register_gate(NULL, name, __clk_get_name(tmp),
@@ -387,14 +393,17 @@ int intel_lpss_probe(struct device *dev,
 	struct intel_lpss *lpss;
 	int ret;
 
-	if (!info || !info->mem || info->irq <= 0)
+	if (!info || !info->mem)
 		return -EINVAL;
+
+	if (info->irq < 0)
+		return info->irq;
 
 	lpss = devm_kzalloc(dev, sizeof(*lpss), GFP_KERNEL);
 	if (!lpss)
 		return -ENOMEM;
 
-	lpss->priv = devm_ioremap(dev, info->mem->start + LPSS_PRIV_OFFSET,
+	lpss->priv = devm_ioremap_uc(dev, info->mem->start + LPSS_PRIV_OFFSET,
 				  LPSS_PRIV_SIZE);
 	if (!lpss->priv)
 		return -ENOMEM;
@@ -409,11 +418,12 @@ int intel_lpss_probe(struct device *dev,
 	if (ret)
 		return ret;
 
-	lpss->cell->properties = info->properties;
+	lpss->cell->swnode = info->swnode;
+	lpss->cell->ignore_resource_conflicts = info->quirks & QUIRK_IGNORE_RESOURCE_CONFLICTS;
 
 	intel_lpss_init_dev(lpss);
 
-	lpss->devid = ida_simple_get(&intel_lpss_devid_ida, 0, 0, GFP_KERNEL);
+	lpss->devid = ida_alloc(&intel_lpss_devid_ida, GFP_KERNEL);
 	if (lpss->devid < 0)
 		return lpss->devid;
 
@@ -428,16 +438,6 @@ int intel_lpss_probe(struct device *dev,
 		dev_warn(dev, "Failed to create debugfs entries\n");
 
 	if (intel_lpss_has_idma(lpss)) {
-		/*
-		 * Ensure the DMA driver is loaded before the host
-		 * controller device appears, so that the host controller
-		 * driver can request its DMA channels as early as
-		 * possible.
-		 *
-		 * If the DMA module is not there that's OK as well.
-		 */
-		intel_lpss_request_dma_module(LPSS_IDMA64_DRIVER_NAME);
-
 		ret = mfd_add_devices(dev, lpss->devid, &intel_lpss_idma64_cell,
 				      1, info->mem, info->irq, NULL);
 		if (ret)
@@ -460,11 +460,11 @@ err_remove_ltr:
 	intel_lpss_unregister_clock(lpss);
 
 err_clk_register:
-	ida_simple_remove(&intel_lpss_devid_ida, lpss->devid);
+	ida_free(&intel_lpss_devid_ida, lpss->devid);
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(intel_lpss_probe);
+EXPORT_SYMBOL_NS_GPL(intel_lpss_probe, "INTEL_LPSS");
 
 void intel_lpss_remove(struct device *dev)
 {
@@ -474,19 +474,19 @@ void intel_lpss_remove(struct device *dev)
 	intel_lpss_debugfs_remove(lpss);
 	intel_lpss_ltr_hide(lpss);
 	intel_lpss_unregister_clock(lpss);
-	ida_simple_remove(&intel_lpss_devid_ida, lpss->devid);
+	ida_free(&intel_lpss_devid_ida, lpss->devid);
 }
-EXPORT_SYMBOL_GPL(intel_lpss_remove);
+EXPORT_SYMBOL_NS_GPL(intel_lpss_remove, "INTEL_LPSS");
 
 static int resume_lpss_device(struct device *dev, void *data)
 {
-	if (!dev_pm_test_driver_flags(dev, DPM_FLAG_SMART_SUSPEND))
+	if (!dev_pm_smart_suspend(dev))
 		pm_runtime_resume(dev);
 
 	return 0;
 }
 
-int intel_lpss_prepare(struct device *dev)
+static int intel_lpss_prepare(struct device *dev)
 {
 	/*
 	 * Resume both child devices before entering system sleep. This
@@ -495,9 +495,8 @@ int intel_lpss_prepare(struct device *dev)
 	device_for_each_child_reverse(dev, NULL, resume_lpss_device);
 	return 0;
 }
-EXPORT_SYMBOL_GPL(intel_lpss_prepare);
 
-int intel_lpss_suspend(struct device *dev)
+static int intel_lpss_suspend(struct device *dev)
 {
 	struct intel_lpss *lpss = dev_get_drvdata(dev);
 	unsigned int i;
@@ -516,9 +515,8 @@ int intel_lpss_suspend(struct device *dev)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(intel_lpss_suspend);
 
-int intel_lpss_resume(struct device *dev)
+static int intel_lpss_resume(struct device *dev)
 {
 	struct intel_lpss *lpss = dev_get_drvdata(dev);
 	unsigned int i;
@@ -531,7 +529,12 @@ int intel_lpss_resume(struct device *dev)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(intel_lpss_resume);
+
+EXPORT_NS_GPL_DEV_PM_OPS(intel_lpss_pm_ops, INTEL_LPSS) = {
+	.prepare = pm_sleep_ptr(&intel_lpss_prepare),
+	LATE_SYSTEM_SLEEP_PM_OPS(intel_lpss_suspend, intel_lpss_resume)
+	RUNTIME_PM_OPS(intel_lpss_suspend, intel_lpss_resume, NULL)
+};
 
 static int __init intel_lpss_init(void)
 {
@@ -542,6 +545,7 @@ module_init(intel_lpss_init);
 
 static void __exit intel_lpss_exit(void)
 {
+	ida_destroy(&intel_lpss_devid_ida);
 	debugfs_remove(intel_lpss_debugfs);
 }
 module_exit(intel_lpss_exit);
@@ -552,3 +556,11 @@ MODULE_AUTHOR("Heikki Krogerus <heikki.krogerus@linux.intel.com>");
 MODULE_AUTHOR("Jarkko Nikula <jarkko.nikula@linux.intel.com>");
 MODULE_DESCRIPTION("Intel LPSS core driver");
 MODULE_LICENSE("GPL v2");
+/*
+ * Ensure the DMA driver is loaded before the host controller device appears,
+ * so that the host controller driver can request its DMA channels as early
+ * as possible.
+ *
+ * If the DMA module is not there that's OK as well.
+ */
+MODULE_SOFTDEP("pre: platform:" LPSS_IDMA64_DRIVER_NAME);

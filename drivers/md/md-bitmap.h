@@ -7,115 +7,28 @@
 #ifndef BITMAP_H
 #define BITMAP_H 1
 
-#define BITMAP_MAJOR_LO 3
-/* version 4 insists the bitmap is in little-endian order
- * with version 3, it is host-endian which is non-portable
- * Version 5 is currently set only for clustered devices
- */
-#define BITMAP_MAJOR_HI 4
-#define BITMAP_MAJOR_CLUSTERED 5
-#define	BITMAP_MAJOR_HOSTENDIAN 3
-
-/*
- * in-memory bitmap:
- *
- * Use 16 bit block counters to track pending writes to each "chunk".
- * The 2 high order bits are special-purpose, the first is a flag indicating
- * whether a resync is needed.  The second is a flag indicating whether a
- * resync is active.
- * This means that the counter is actually 14 bits:
- *
- * +--------+--------+------------------------------------------------+
- * | resync | resync |               counter                          |
- * | needed | active |                                                |
- * |  (0-1) |  (0-1) |              (0-16383)                         |
- * +--------+--------+------------------------------------------------+
- *
- * The "resync needed" bit is set when:
- *    a '1' bit is read from storage at startup.
- *    a write request fails on some drives
- *    a resync is aborted on a chunk with 'resync active' set
- * It is cleared (and resync-active set) when a resync starts across all drives
- * of the chunk.
- *
- *
- * The "resync active" bit is set when:
- *    a resync is started on all drives, and resync_needed is set.
- *       resync_needed will be cleared (as long as resync_active wasn't already set).
- * It is cleared when a resync completes.
- *
- * The counter counts pending write requests, plus the on-disk bit.
- * When the counter is '1' and the resync bits are clear, the on-disk
- * bit can be cleared as well, thus setting the counter to 0.
- * When we set a bit, or in the counter (to start a write), if the fields is
- * 0, we first set the disk bit and set the counter to 1.
- *
- * If the counter is 0, the on-disk bit is clear and the stripe is clean
- * Anything that dirties the stripe pushes the counter to 2 (at least)
- * and sets the on-disk bit (lazily).
- * If a periodic sweep find the counter at 2, it is decremented to 1.
- * If the sweep find the counter at 1, the on-disk bit is cleared and the
- * counter goes to zero.
- *
- * Also, we'll hijack the "map" pointer itself and use it as two 16 bit block
- * counters as a fallback when "page" memory cannot be allocated:
- *
- * Normal case (page memory allocated):
- *
- *     page pointer (32-bit)
- *
- *     [ ] ------+
- *               |
- *               +-------> [   ][   ]..[   ] (4096 byte page == 2048 counters)
- *                          c1   c2    c2048
- *
- * Hijacked case (page memory allocation failed):
- *
- *     hijacked page pointer (32-bit)
- *
- *     [		  ][		  ] (no page memory allocated)
- *      counter #1 (16-bit) counter #2 (16-bit)
- *
- */
-
-#ifdef __KERNEL__
-
-#define PAGE_BITS (PAGE_SIZE << 3)
-#define PAGE_BIT_SHIFT (PAGE_SHIFT + 3)
-
-typedef __u16 bitmap_counter_t;
-#define COUNTER_BITS 16
-#define COUNTER_BIT_SHIFT 4
-#define COUNTER_BYTE_SHIFT (COUNTER_BIT_SHIFT - 3)
-
-#define NEEDED_MASK ((bitmap_counter_t) (1 << (COUNTER_BITS - 1)))
-#define RESYNC_MASK ((bitmap_counter_t) (1 << (COUNTER_BITS - 2)))
-#define COUNTER_MAX ((bitmap_counter_t) RESYNC_MASK - 1)
-#define NEEDED(x) (((bitmap_counter_t) x) & NEEDED_MASK)
-#define RESYNC(x) (((bitmap_counter_t) x) & RESYNC_MASK)
-#define COUNTER(x) (((bitmap_counter_t) x) & COUNTER_MAX)
-
-/* how many counters per page? */
-#define PAGE_COUNTER_RATIO (PAGE_BITS / COUNTER_BITS)
-/* same, except a shift value for more efficient bitops */
-#define PAGE_COUNTER_SHIFT (PAGE_BIT_SHIFT - COUNTER_BIT_SHIFT)
-/* same, except a mask value for more efficient bitops */
-#define PAGE_COUNTER_MASK  (PAGE_COUNTER_RATIO - 1)
-
-#define BITMAP_BLOCK_SHIFT 9
-
-#endif
-
-/*
- * bitmap structures:
- */
-
 #define BITMAP_MAGIC 0x6d746962
+
+/*
+ * version 3 is host-endian order, this is deprecated and not used for new
+ * array
+ */
+#define BITMAP_MAJOR_LO		3
+#define BITMAP_MAJOR_HOSTENDIAN	3
+/* version 4 is little-endian order, the default value */
+#define BITMAP_MAJOR_HI		4
+/* version 5 is only used for cluster */
+#define BITMAP_MAJOR_CLUSTERED	5
+/* version 6 is only used for lockless bitmap */
+#define BITMAP_MAJOR_LOCKLESS	6
 
 /* use these for bitmap->flags and bitmap->sb->state bit-fields */
 enum bitmap_state {
-	BITMAP_STALE	   = 1,  /* the bitmap file is out of date or had -EIO */
+	BITMAP_STALE	   = 1, /* the bitmap file is out of date or had -EIO */
 	BITMAP_WRITE_ERROR = 2, /* A write error has occurred */
+	BITMAP_FIRST_USE   = 3, /* llbitmap is just created */
+	BITMAP_CLEAN       = 4, /* llbitmap is created with assume_clean */
+	BITMAP_DAEMON_BUSY = 5, /* llbitmap daemon is not finished after daemon_sleep */
 	BITMAP_HOSTENDIAN  =15,
 };
 
@@ -152,127 +65,134 @@ typedef struct bitmap_super_s {
  *    devices.  For raid10 it is the size of the array.
  */
 
-#ifdef __KERNEL__
+struct md_bitmap_stats {
+	u64		events_cleared;
+	int		behind_writes;
+	bool		behind_wait;
 
-/* the in-memory bitmap is represented by bitmap_pages */
-struct bitmap_page {
-	/*
-	 * map points to the actual memory page
-	 */
-	char *map;
-	/*
-	 * in emergencies (when map cannot be alloced), hijack the map
-	 * pointer and use it as two counters itself
-	 */
-	unsigned int hijacked:1;
-	/*
-	 * If any counter in this page is '1' or '2' - and so could be
-	 * cleared then that page is marked as 'pending'
-	 */
-	unsigned int pending:1;
-	/*
-	 * count of dirty bits on the page
-	 */
-	unsigned int  count:30;
+	unsigned long	missing_pages;
+	unsigned long	file_pages;
+	unsigned long	sync_size;
+	unsigned long	pages;
+	struct file	*file;
 };
 
-/* the main bitmap structure - one per mddev */
-struct bitmap {
+typedef void (md_bitmap_fn)(struct mddev *mddev, sector_t offset,
+			    unsigned long sectors);
 
-	struct bitmap_counts {
-		spinlock_t lock;
-		struct bitmap_page *bp;
-		unsigned long pages;		/* total number of pages
-						 * in the bitmap */
-		unsigned long missing_pages;	/* number of pages
-						 * not yet allocated */
-		unsigned long chunkshift;	/* chunksize = 2^chunkshift
-						 * (for bitops) */
-		unsigned long chunks;		/* Total number of data
-						 * chunks for the array */
-	} counts;
+struct bitmap_operations {
+	struct md_submodule_head head;
 
-	struct mddev *mddev; /* the md device that the bitmap is for */
+	bool (*enabled)(void *data, bool flush);
+	int (*create)(struct mddev *mddev);
+	int (*resize)(struct mddev *mddev, sector_t blocks, int chunksize);
 
-	__u64	events_cleared;
-	int need_sync;
+	int (*load)(struct mddev *mddev);
+	void (*destroy)(struct mddev *mddev);
+	void (*flush)(struct mddev *mddev);
+	void (*write_all)(struct mddev *mddev);
+	void (*dirty_bits)(struct mddev *mddev, unsigned long s,
+			   unsigned long e);
+	void (*unplug)(struct mddev *mddev, bool sync);
+	void (*daemon_work)(struct mddev *mddev);
 
-	struct bitmap_storage {
-		struct file *file;		/* backing disk file */
-		struct page *sb_page;		/* cached copy of the bitmap
-						 * file superblock */
-		struct page **filemap;		/* list of cache pages for
-						 * the file */
-		unsigned long *filemap_attr;	/* attributes associated
-						 * w/ filemap pages */
-		unsigned long file_pages;	/* number of pages in the file*/
-		unsigned long bytes;		/* total bytes in the bitmap */
-	} storage;
+	void (*start_behind_write)(struct mddev *mddev);
+	void (*end_behind_write)(struct mddev *mddev);
+	bool (*wait_behind_writes)(struct mddev *mddev, bool nowait);
 
-	unsigned long flags;
+	md_bitmap_fn *start_write;
+	md_bitmap_fn *end_write;
+	md_bitmap_fn *start_discard;
+	md_bitmap_fn *end_discard;
 
-	int allclean;
+	sector_t (*skip_sync_blocks)(struct mddev *mddev, sector_t offset);
+	bool (*blocks_synced)(struct mddev *mddev, sector_t offset);
+	bool (*start_sync)(struct mddev *mddev, sector_t offset,
+			   sector_t *blocks, bool degraded);
+	void (*end_sync)(struct mddev *mddev, sector_t offset, sector_t *blocks);
+	void (*cond_end_sync)(struct mddev *mddev, sector_t sector, bool force);
+	void (*close_sync)(struct mddev *mddev);
 
-	atomic_t behind_writes;
-	unsigned long behind_writes_used; /* highest actual value at runtime */
+	void (*update_sb)(void *data);
+	int (*get_stats)(void *data, struct md_bitmap_stats *stats);
 
-	/*
-	 * the bitmap daemon - periodically wakes up and sweeps the bitmap
-	 * file, cleaning up bits and flushing out pages to disk as necessary
-	 */
-	unsigned long daemon_lastrun; /* jiffies of last run */
-	unsigned long last_end_sync; /* when we lasted called end_sync to
-				      * update bitmap with resync progress */
+	void (*sync_with_cluster)(struct mddev *mddev,
+				  sector_t old_lo, sector_t old_hi,
+				  sector_t new_lo, sector_t new_hi);
+	void *(*get_from_slot)(struct mddev *mddev, int slot);
+	int (*copy_from_slot)(struct mddev *mddev, int slot, sector_t *lo,
+			      sector_t *hi, bool clear_bits);
+	void (*set_pages)(void *data, unsigned long pages);
+	void (*free)(void *data);
 
-	atomic_t pending_writes; /* pending writes to the bitmap file */
-	wait_queue_head_t write_wait;
-	wait_queue_head_t overflow_wait;
-	wait_queue_head_t behind_wait;
-
-	struct kernfs_node *sysfs_can_clear;
-	int cluster_slot;		/* Slot offset for clustered env */
+	const struct attribute_group **groups;
 };
 
 /* the bitmap API */
+static inline bool md_bitmap_registered(struct mddev *mddev)
+{
+	return mddev->bitmap_ops != NULL;
+}
 
-/* these are used only by md/bitmap */
-struct bitmap *bitmap_create(struct mddev *mddev, int slot);
-int bitmap_load(struct mddev *mddev);
-void bitmap_flush(struct mddev *mddev);
-void bitmap_destroy(struct mddev *mddev);
+static inline bool md_bitmap_enabled(struct mddev *mddev, bool flush)
+{
+	/* bitmap_ops must be registered before creating bitmap. */
+	if (!md_bitmap_registered(mddev))
+		return false;
 
-void bitmap_print_sb(struct bitmap *bitmap);
-void bitmap_update_sb(struct bitmap *bitmap);
-void bitmap_status(struct seq_file *seq, struct bitmap *bitmap);
+	if (!mddev->bitmap)
+		return false;
 
-int  bitmap_setallbits(struct bitmap *bitmap);
-void bitmap_write_all(struct bitmap *bitmap);
+	return mddev->bitmap_ops->enabled(mddev->bitmap, flush);
+}
 
-void bitmap_dirty_bits(struct bitmap *bitmap, unsigned long s, unsigned long e);
+static inline bool md_bitmap_start_sync(struct mddev *mddev, sector_t offset,
+					sector_t *blocks, bool degraded)
+{
+	/* always resync if no bitmap */
+	if (!md_bitmap_enabled(mddev, false)) {
+		*blocks = 1024;
+		return true;
+	}
 
-/* these are exported */
-int bitmap_startwrite(struct bitmap *bitmap, sector_t offset,
-			unsigned long sectors, int behind);
-void bitmap_endwrite(struct bitmap *bitmap, sector_t offset,
-			unsigned long sectors, int success, int behind);
-int bitmap_start_sync(struct bitmap *bitmap, sector_t offset, sector_t *blocks, int degraded);
-void bitmap_end_sync(struct bitmap *bitmap, sector_t offset, sector_t *blocks, int aborted);
-void bitmap_close_sync(struct bitmap *bitmap);
-void bitmap_cond_end_sync(struct bitmap *bitmap, sector_t sector, bool force);
-void bitmap_sync_with_cluster(struct mddev *mddev,
-			      sector_t old_lo, sector_t old_hi,
-			      sector_t new_lo, sector_t new_hi);
+	return mddev->bitmap_ops->start_sync(mddev, offset, blocks, degraded);
+}
 
-void bitmap_unplug(struct bitmap *bitmap);
-void bitmap_daemon_work(struct mddev *mddev);
+static inline void md_bitmap_end_sync(struct mddev *mddev, sector_t offset,
+				      sector_t *blocks)
+{
+	if (!md_bitmap_enabled(mddev, false)) {
+		*blocks = 1024;
+		return;
+	}
 
-int bitmap_resize(struct bitmap *bitmap, sector_t blocks,
-		  int chunksize, int init);
-struct bitmap *get_bitmap_from_slot(struct mddev *mddev, int slot);
-int bitmap_copy_from_slot(struct mddev *mddev, int slot,
-				sector_t *lo, sector_t *hi, bool clear_bits);
-void bitmap_free(struct bitmap *bitmap);
-void bitmap_wait_behind_writes(struct mddev *mddev);
+	mddev->bitmap_ops->end_sync(mddev, offset, blocks);
+}
+
+#ifdef CONFIG_MD_BITMAP
+int md_bitmap_init(void);
+void md_bitmap_exit(void);
+#else
+static inline int md_bitmap_init(void)
+{
+	return 0;
+}
+static inline void md_bitmap_exit(void)
+{
+}
+#endif
+
+#ifdef CONFIG_MD_LLBITMAP
+int md_llbitmap_init(void);
+void md_llbitmap_exit(void);
+#else
+static inline int md_llbitmap_init(void)
+{
+	return 0;
+}
+static inline void md_llbitmap_exit(void)
+{
+}
 #endif
 
 #endif

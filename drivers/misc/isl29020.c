@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * isl29020.c - Intersil  ALS Driver
  *
@@ -5,18 +6,6 @@
  *
  *  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *
  * Data sheet at: http://www.intersil.com/data/fn/fn6505.pdf
@@ -79,7 +68,7 @@ static ssize_t als_lux_input_data_show(struct device *dev,
 	if (val < 0)
 		return val;
 	lux = ((((1 << (2 * (val & 3))))*1000) * ret_val) / 65536;
-	return sprintf(buf, "%ld\n", lux);
+	return sprintf(buf, "%lu\n", lux);
 }
 
 static ssize_t als_sensing_range_store(struct device *dev,
@@ -162,8 +151,7 @@ static int als_set_default_config(struct i2c_client *client)
 	return 0;
 }
 
-static int  isl29020_probe(struct i2c_client *client,
-					const struct i2c_device_id *id)
+static int  isl29020_probe(struct i2c_client *client)
 {
 	int res;
 
@@ -182,14 +170,14 @@ static int  isl29020_probe(struct i2c_client *client,
 	return res;
 }
 
-static int isl29020_remove(struct i2c_client *client)
+static void isl29020_remove(struct i2c_client *client)
 {
+	pm_runtime_disable(&client->dev);
 	sysfs_remove_group(&client->dev.kobj, &m_als_gr);
-	return 0;
 }
 
 static const struct i2c_device_id isl29020_id[] = {
-	{ "isl29020", 0 },
+	{ "isl29020" },
 	{ }
 };
 

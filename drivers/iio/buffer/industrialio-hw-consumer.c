@@ -28,7 +28,6 @@ struct hw_consumer_buffer {
 	struct list_head head;
 	struct iio_dev *indio_dev;
 	struct iio_buffer buffer;
-	long scan_mask[];
 };
 
 static struct hw_consumer_buffer *iio_buffer_to_hw_consumer_buffer(
@@ -41,6 +40,8 @@ static void iio_hw_buf_release(struct iio_buffer *buffer)
 {
 	struct hw_consumer_buffer *hw_buf =
 		iio_buffer_to_hw_consumer_buffer(buffer);
+
+	bitmap_free(buffer->scan_mask);
 	kfree(hw_buf);
 }
 
@@ -52,7 +53,6 @@ static const struct iio_buffer_access_funcs iio_hw_buf_access = {
 static struct hw_consumer_buffer *iio_hw_consumer_get_buffer(
 	struct iio_hw_consumer *hwc, struct iio_dev *indio_dev)
 {
-	size_t mask_size = BITS_TO_LONGS(indio_dev->masklength) * sizeof(long);
 	struct hw_consumer_buffer *buf;
 
 	list_for_each_entry(buf, &hwc->buffers, head) {
@@ -60,13 +60,18 @@ static struct hw_consumer_buffer *iio_hw_consumer_get_buffer(
 			return buf;
 	}
 
-	buf = kzalloc(sizeof(*buf) + mask_size, GFP_KERNEL);
+	buf = kzalloc_obj(*buf);
 	if (!buf)
 		return NULL;
 
 	buf->buffer.access = &iio_hw_buf_access;
 	buf->indio_dev = indio_dev;
-	buf->buffer.scan_mask = buf->scan_mask;
+	buf->buffer.scan_mask = bitmap_zalloc(iio_get_masklength(indio_dev),
+					      GFP_KERNEL);
+	if (!buf->buffer.scan_mask) {
+		kfree(buf);
+		return NULL;
+	}
 
 	iio_buffer_init(&buf->buffer);
 	list_add_tail(&buf->head, &hwc->buffers);
@@ -82,12 +87,12 @@ static struct hw_consumer_buffer *iio_hw_consumer_get_buffer(
  */
 struct iio_hw_consumer *iio_hw_consumer_alloc(struct device *dev)
 {
-	struct hw_consumer_buffer *buf;
+	struct hw_consumer_buffer *buf, *tmp;
 	struct iio_hw_consumer *hwc;
 	struct iio_channel *chan;
 	int ret;
 
-	hwc = kzalloc(sizeof(*hwc), GFP_KERNEL);
+	hwc = kzalloc_obj(*hwc);
 	if (!hwc)
 		return ERR_PTR(-ENOMEM);
 
@@ -113,7 +118,7 @@ struct iio_hw_consumer *iio_hw_consumer_alloc(struct device *dev)
 	return hwc;
 
 err_put_buffers:
-	list_for_each_entry(buf, &hwc->buffers, head)
+	list_for_each_entry_safe(buf, tmp, &hwc->buffers, head)
 		iio_buffer_put(&buf->buffer);
 	iio_channel_release_all(hwc->channels);
 err_free_hwc:
@@ -137,20 +142,9 @@ void iio_hw_consumer_free(struct iio_hw_consumer *hwc)
 }
 EXPORT_SYMBOL_GPL(iio_hw_consumer_free);
 
-static void devm_iio_hw_consumer_release(struct device *dev, void *res)
+static void devm_iio_hw_consumer_release(void *iio_hwc)
 {
-	iio_hw_consumer_free(*(struct iio_hw_consumer **)res);
-}
-
-static int devm_iio_hw_consumer_match(struct device *dev, void *res, void *data)
-{
-	struct iio_hw_consumer **r = res;
-
-	if (!r || !*r) {
-		WARN_ON(!r || !*r);
-		return 0;
-	}
-	return *r == data;
+	iio_hw_consumer_free(iio_hwc);
 }
 
 /**
@@ -160,48 +154,25 @@ static int devm_iio_hw_consumer_match(struct device *dev, void *res, void *data)
  * Managed iio_hw_consumer_alloc. iio_hw_consumer allocated with this function
  * is automatically freed on driver detach.
  *
- * If an iio_hw_consumer allocated with this function needs to be freed
- * separately, devm_iio_hw_consumer_free() must be used.
- *
  * returns pointer to allocated iio_hw_consumer on success, NULL on failure.
  */
 struct iio_hw_consumer *devm_iio_hw_consumer_alloc(struct device *dev)
 {
-	struct iio_hw_consumer **ptr, *iio_hwc;
-
-	ptr = devres_alloc(devm_iio_hw_consumer_release, sizeof(*ptr),
-			   GFP_KERNEL);
-	if (!ptr)
-		return NULL;
+	struct iio_hw_consumer *iio_hwc;
+	int ret;
 
 	iio_hwc = iio_hw_consumer_alloc(dev);
-	if (IS_ERR(iio_hwc)) {
-		devres_free(ptr);
-	} else {
-		*ptr = iio_hwc;
-		devres_add(dev, ptr);
-	}
+	if (IS_ERR(iio_hwc))
+		return iio_hwc;
+
+	ret = devm_add_action_or_reset(dev, devm_iio_hw_consumer_release,
+				       iio_hwc);
+	if (ret)
+		return ERR_PTR(ret);
 
 	return iio_hwc;
 }
 EXPORT_SYMBOL_GPL(devm_iio_hw_consumer_alloc);
-
-/**
- * devm_iio_hw_consumer_free - Resource-managed iio_hw_consumer_free()
- * @dev: Pointer to consumer device.
- * @hwc: iio_hw_consumer to free.
- *
- * Free iio_hw_consumer allocated with devm_iio_hw_consumer_alloc().
- */
-void devm_iio_hw_consumer_free(struct device *dev, struct iio_hw_consumer *hwc)
-{
-	int rc;
-
-	rc = devres_release(dev, devm_iio_hw_consumer_release,
-			    devm_iio_hw_consumer_match, hwc);
-	WARN_ON(rc);
-}
-EXPORT_SYMBOL_GPL(devm_iio_hw_consumer_free);
 
 /**
  * iio_hw_consumer_enable() - Enable IIO hardware consumer

@@ -1,22 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /******************************************************************************
  *
  * Copyright(c) 2003 - 2011 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
  *
  * Contact Information:
  *  Intel Linux Wireless <ilw@linux.intel.com>
@@ -533,13 +518,15 @@ struct il_channel_info {
 #define IEEE80211_FRAME_LEN             (IEEE80211_DATA_LEN + IEEE80211_HLEN)
 
 struct il_frame {
+	struct list_head list;
+
+	/* Must be last as it ends in a flexible-array member. */
 	union {
 		struct ieee80211_hdr frame;
 		struct il_tx_beacon_cmd beacon;
 		u8 raw[IEEE80211_FRAME_LEN];
 		u8 cmd[360];
 	} u;
-	struct list_head list;
 };
 
 enum {
@@ -568,12 +555,24 @@ struct il_device_cmd {
 		u8 val8;
 		u16 val16;
 		u32 val32;
-		struct il_tx_cmd tx;
+		struct il_tx_cmd_hdr tx;
 		u8 payload[DEF_CMD_PAYLOAD_SIZE];
 	} __packed cmd;
 } __packed;
 
 #define TFD_MAX_PAYLOAD_SIZE (sizeof(struct il_device_cmd))
+
+/**
+ * struct il_device_cmd_huge
+ *
+ * For use when sending huge commands.
+ */
+struct il_device_cmd_huge {
+	struct il_cmd_header hdr;	/* uCode API */
+	union {
+		u8 payload[IL_MAX_CMD_SIZE - sizeof(struct il_cmd_header)];
+	} __packed cmd;
+} __packed;
 
 struct il_host_cmd {
 	const void *data;
@@ -793,9 +792,6 @@ struct il_sensitivity_ranges {
 	u16 barker_corr_th_min_mrc;
 	u16 nrg_th_cca;
 };
-
-#define KELVIN_TO_CELSIUS(x) ((x)-273)
-#define CELSIUS_TO_KELVIN(x) ((x)+273)
 
 /**
  * struct il_hw_params
@@ -1701,7 +1697,8 @@ struct il_cfg {
  ***************************/
 
 int il_mac_conf_tx(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
-		   u16 queue, const struct ieee80211_tx_queue_params *params);
+		   unsigned int link_id, u16 queue,
+		   const struct ieee80211_tx_queue_params *params);
 int il_mac_tx_last_beacon(struct ieee80211_hw *hw);
 
 void il_set_rxon_hwcrypto(struct il_priv *il, int hw_decrypt);
@@ -1710,7 +1707,6 @@ int il_full_rxon_required(struct il_priv *il);
 int il_set_rxon_channel(struct il_priv *il, struct ieee80211_channel *ch);
 void il_set_flags_for_band(struct il_priv *il, enum nl80211_band band,
 			   struct ieee80211_vif *vif);
-u8 il_get_single_channel_number(struct il_priv *il, enum nl80211_band band);
 void il_set_rxon_ht(struct il_priv *il, struct il_ht_config *ht_conf);
 bool il_is_ht40_tx_allowed(struct il_priv *il,
 			   struct ieee80211_sta_ht_cap *ht_cap);
@@ -1962,10 +1958,10 @@ il_get_hw_mode(struct il_priv *il, enum nl80211_band band)
 }
 
 /* mac80211 handlers */
-int il_mac_config(struct ieee80211_hw *hw, u32 changed);
+int il_mac_config(struct ieee80211_hw *hw, int radio_idx, u32 changed);
 void il_mac_reset_tsf(struct ieee80211_hw *hw, struct ieee80211_vif *vif);
 void il_mac_bss_info_changed(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
-			     struct ieee80211_bss_conf *bss_conf, u32 changes);
+			     struct ieee80211_bss_conf *bss_conf, u64 changes);
 void il_tx_cmd_protection(struct il_priv *il, struct ieee80211_tx_info *info,
 			  __le16 fc, __le32 *tx_flags);
 
@@ -2030,13 +2026,6 @@ static inline void
 _il_release_nic_access(struct il_priv *il)
 {
 	_il_clear_bit(il, CSR_GP_CNTRL, CSR_GP_CNTRL_REG_FLAG_MAC_ACCESS_REQ);
-	/*
-	 * In above we are reading CSR_GP_CNTRL register, what will flush any
-	 * previous writes, but still want write, which clear MAC_ACCESS_REQ
-	 * bit, be performed on PCI bus before any other writes scheduled on
-	 * different CPUs (after we drop reg_lock).
-	 */
-	mmiowb();
 }
 
 static inline u32
@@ -2828,13 +2817,7 @@ struct il_lq_sta {
 	struct il_scale_tbl_info lq_info[LQ_SIZE];	/* "active", "search" */
 	struct il_traffic_load load[TID_MAX_LOAD_COUNT];
 	u8 tx_agg_tid_en;
-#ifdef CONFIG_MAC80211_DEBUGFS
-	struct dentry *rs_sta_dbgfs_scale_table_file;
-	struct dentry *rs_sta_dbgfs_stats_table_file;
-	struct dentry *rs_sta_dbgfs_rate_scale_data_file;
-	struct dentry *rs_sta_dbgfs_tx_agg_tid_en_file;
 	u32 dbg_fixed_rate;
-#endif
 	struct il_priv *drv;
 
 	/* used to be in sta_info */
@@ -2954,8 +2937,8 @@ do {									\
 #define IL_DBG(level, fmt, args...)					\
 do {									\
 	if (il_get_debug_level(il) & level)				\
-		dev_err(&il->hw->wiphy->dev, "%c %s " fmt,		\
-			in_interrupt() ? 'I' : 'U', __func__ , ##args); \
+		dev_err(&il->hw->wiphy->dev, "%s " fmt, __func__,	\
+			 ##args);					\
 } while (0)
 
 #define il_print_hex_dump(il, level, p, len)				\
@@ -2966,7 +2949,7 @@ do {									\
 } while (0)
 
 #else
-#define IL_DBG(level, fmt, args...)
+#define IL_DBG(level, fmt, args...) no_printk(fmt, ##args)
 static inline void
 il_print_hex_dump(struct il_priv *il, int level, const void *p, u32 len)
 {
@@ -2974,13 +2957,11 @@ il_print_hex_dump(struct il_priv *il, int level, const void *p, u32 len)
 #endif /* CONFIG_IWLEGACY_DEBUG */
 
 #ifdef CONFIG_IWLEGACY_DEBUGFS
-int il_dbgfs_register(struct il_priv *il, const char *name);
+void il_dbgfs_register(struct il_priv *il, const char *name);
 void il_dbgfs_unregister(struct il_priv *il);
 #else
-static inline int
-il_dbgfs_register(struct il_priv *il, const char *name)
+static inline void il_dbgfs_register(struct il_priv *il, const char *name)
 {
-	return 0;
 }
 
 static inline void

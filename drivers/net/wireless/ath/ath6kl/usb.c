@@ -71,6 +71,7 @@ struct ath6kl_usb {
 	u8 *diag_cmd_buffer;
 	u8 *diag_resp_buffer;
 	struct ath6kl *ar;
+	struct workqueue_struct *wq;
 };
 
 /* usb urb object */
@@ -92,7 +93,7 @@ struct ath6kl_urb_context {
 #define ATH6KL_USB_EP_ADDR_APP_DATA_MP_OUT      0x03
 #define ATH6KL_USB_EP_ADDR_APP_DATA_HP_OUT      0x04
 
-/* diagnostic command defnitions */
+/* diagnostic command definitions */
 #define ATH6KL_USB_CONTROL_REQ_SEND_BMI_CMD        1
 #define ATH6KL_USB_CONTROL_REQ_RECV_BMI_RESP       2
 #define ATH6KL_USB_CONTROL_REQ_DIAG_CMD            3
@@ -132,6 +133,10 @@ ath6kl_usb_alloc_urb_from_pipe(struct ath6kl_usb_pipe *pipe)
 	struct ath6kl_urb_context *urb_context = NULL;
 	unsigned long flags;
 
+	/* bail if this pipe is not initialized */
+	if (!pipe->ar_usb)
+		return NULL;
+
 	spin_lock_irqsave(&pipe->ar_usb->cs_lock, flags);
 	if (!list_empty(&pipe->urb_list_head)) {
 		urb_context =
@@ -149,6 +154,10 @@ static void ath6kl_usb_free_urb_to_pipe(struct ath6kl_usb_pipe *pipe,
 					struct ath6kl_urb_context *urb_context)
 {
 	unsigned long flags;
+
+	/* bail if this pipe is not initialized */
+	if (!pipe->ar_usb)
+		return;
 
 	spin_lock_irqsave(&pipe->ar_usb->cs_lock, flags);
 	pipe->urb_cnt++;
@@ -181,8 +190,7 @@ static int ath6kl_usb_alloc_pipe_resources(struct ath6kl_usb_pipe *pipe,
 	init_usb_anchor(&pipe->urb_submitted);
 
 	for (i = 0; i < urb_cnt; i++) {
-		urb_context = kzalloc(sizeof(struct ath6kl_urb_context),
-				      GFP_KERNEL);
+		urb_context = kzalloc_obj(struct ath6kl_urb_context);
 		if (urb_context == NULL) {
 			status = -ENOMEM;
 			goto fail_alloc_pipe_resources;
@@ -303,7 +311,7 @@ static int ath6kl_usb_setup_pipe_resources(struct ath6kl_usb *ar_usb)
 
 	ath6kl_dbg(ATH6KL_DBG_USB, "setting up USB Pipes using interface\n");
 
-	/* walk decriptors and setup pipes */
+	/* walk descriptors and setup pipes */
 	for (i = 0; i < iface_desc->desc.bNumEndpoints; ++i) {
 		endpoint = &iface_desc->endpoint[i].desc;
 
@@ -332,6 +340,11 @@ static int ath6kl_usb_setup_pipe_resources(struct ath6kl_usb *ar_usb)
 				   le16_to_cpu(endpoint->wMaxPacketSize),
 				   endpoint->bInterval);
 		}
+
+		/* Ignore broken descriptors. */
+		if (usb_endpoint_maxp(endpoint) == 0)
+			continue;
+
 		urbcount = 0;
 
 		pipe_num =
@@ -465,7 +478,7 @@ static void ath6kl_usb_flush_all(struct ath6kl_usb *ar_usb)
 	 * Flushing any pending I/O may schedule work this call will block
 	 * until all scheduled work runs to completion.
 	 */
-	flush_scheduled_work();
+	flush_workqueue(ar_usb->wq);
 }
 
 static void ath6kl_usb_start_recv_pipes(struct ath6kl_usb *ar_usb)
@@ -531,7 +544,7 @@ static void ath6kl_usb_recv_complete(struct urb *urb)
 
 	/* note: queue implements a lock */
 	skb_queue_tail(&pipe->io_comp_queue, skb);
-	schedule_work(&pipe->io_complete_work);
+	queue_work(pipe->ar_usb->wq, &pipe->io_complete_work);
 
 cleanup_recv_urb:
 	ath6kl_usb_cleanup_recv_urb(urb_context);
@@ -566,7 +579,7 @@ static void ath6kl_usb_usb_transmit_complete(struct urb *urb)
 
 	/* note: queue implements a lock */
 	skb_queue_tail(&pipe->io_comp_queue, skb);
-	schedule_work(&pipe->io_complete_work);
+	queue_work(pipe->ar_usb->wq, &pipe->io_complete_work);
 }
 
 static void ath6kl_usb_io_comp_work(struct work_struct *work)
@@ -606,6 +619,7 @@ static void ath6kl_usb_destroy(struct ath6kl_usb *ar_usb)
 
 	kfree(ar_usb->diag_cmd_buffer);
 	kfree(ar_usb->diag_resp_buffer);
+	destroy_workqueue(ar_usb->wq);
 
 	kfree(ar_usb);
 }
@@ -618,9 +632,15 @@ static struct ath6kl_usb *ath6kl_usb_create(struct usb_interface *interface)
 	int status = 0;
 	int i;
 
-	ar_usb = kzalloc(sizeof(struct ath6kl_usb), GFP_KERNEL);
+	/* ath6kl_usb_destroy() needs ar_usb != NULL && ar_usb->wq != NULL. */
+	ar_usb = kzalloc_obj(struct ath6kl_usb);
 	if (ar_usb == NULL)
-		goto fail_ath6kl_usb_create;
+		return NULL;
+	ar_usb->wq = alloc_workqueue("ath6kl_wq", WQ_PERCPU, 0);
+	if (!ar_usb->wq) {
+		kfree(ar_usb);
+		return NULL;
+	}
 
 	usb_set_intfdata(interface, ar_usb);
 	spin_lock_init(&(ar_usb->cs_lock));
@@ -861,7 +881,7 @@ static int ath6kl_usb_submit_ctrl_out(struct ath6kl_usb *ar_usb,
 			return -ENOMEM;
 	}
 
-	/* note: if successful returns number of bytes transfered */
+	/* note: if successful returns number of bytes transferred */
 	ret = usb_control_msg(ar_usb->udev,
 			      usb_sndctrlpipe(ar_usb->udev, 0),
 			      req,
@@ -893,13 +913,13 @@ static int ath6kl_usb_submit_ctrl_in(struct ath6kl_usb *ar_usb,
 			return -ENOMEM;
 	}
 
-	/* note: if successful returns number of bytes transfered */
+	/* note: if successful returns number of bytes transferred */
 	ret = usb_control_msg(ar_usb->udev,
 				 usb_rcvctrlpipe(ar_usb->udev, 0),
 				 req,
 				 USB_DIR_IN | USB_TYPE_VENDOR |
 				 USB_RECIP_DEVICE, value, index, buf,
-				 size, 2 * HZ);
+				 size, 2000);
 
 	if (ret < 0) {
 		ath6kl_warn("Failed to read usb control message: %d\n", ret);
@@ -1104,8 +1124,6 @@ static int ath6kl_usb_probe(struct usb_interface *interface,
 	int vendor_id, product_id;
 	int ret = 0;
 
-	usb_get_dev(dev);
-
 	vendor_id = le16_to_cpu(dev->descriptor.idVendor);
 	product_id = le16_to_cpu(dev->descriptor.idProduct);
 
@@ -1123,11 +1141,8 @@ static int ath6kl_usb_probe(struct usb_interface *interface,
 		ath6kl_dbg(ATH6KL_DBG_USB, "USB 1.1 Host\n");
 
 	ar_usb = ath6kl_usb_create(interface);
-
-	if (ar_usb == NULL) {
-		ret = -ENOMEM;
-		goto err_usb_put;
-	}
+	if (ar_usb == NULL)
+		return -ENOMEM;
 
 	ar = ath6kl_core_create(&ar_usb->udev->dev);
 	if (ar == NULL) {
@@ -1156,15 +1171,12 @@ err_core_free:
 	ath6kl_core_destroy(ar);
 err_usb_destroy:
 	ath6kl_usb_destroy(ar_usb);
-err_usb_put:
-	usb_put_dev(dev);
 
 	return ret;
 }
 
-static void ath6kl_usb_remove(struct usb_interface *interface)
+static void ath6kl_usb_disconnect(struct usb_interface *interface)
 {
-	usb_put_dev(interface_to_usbdev(interface));
 	ath6kl_usb_device_detached(interface);
 }
 
@@ -1204,6 +1216,7 @@ static int ath6kl_usb_pm_resume(struct usb_interface *interface)
 static const struct usb_device_id ath6kl_usb_ids[] = {
 	{USB_DEVICE(0x0cf3, 0x9375)},
 	{USB_DEVICE(0x0cf3, 0x9374)},
+	{USB_DEVICE(0x04da, 0x390d)},
 	{ /* Terminating entry */ },
 };
 
@@ -1214,7 +1227,7 @@ static struct usb_driver ath6kl_usb_driver = {
 	.probe = ath6kl_usb_probe,
 	.suspend = ath6kl_usb_pm_suspend,
 	.resume = ath6kl_usb_pm_resume,
-	.disconnect = ath6kl_usb_remove,
+	.disconnect = ath6kl_usb_disconnect,
 	.id_table = ath6kl_usb_ids,
 	.supports_autosuspend = true,
 	.disable_hub_initiated_lpm = 1,

@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * motu-transaction.c - a part of driver for MOTU FireWire series
  *
  * Copyright (c) 2015-2017 Takashi Sakamoto <o-takashi@sakamocchi.jp>
- *
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 
@@ -52,7 +51,6 @@ static void handle_message(struct fw_card *card, struct fw_request *request,
 {
 	struct snd_motu *motu = callback_data;
 	__be32 *buf = (__be32 *)data;
-	unsigned long flags;
 
 	if (tcode != TCODE_WRITE_QUADLET_REQUEST) {
 		fw_send_response(card, request, RCODE_COMPLETE);
@@ -64,9 +62,9 @@ static void handle_message(struct fw_card *card, struct fw_request *request,
 		return;
 	}
 
-	spin_lock_irqsave(&motu->lock, flags);
-	motu->msg = be32_to_cpu(*buf);
-	spin_unlock_irqrestore(&motu->lock, flags);
+	scoped_guard(spinlock_irqsave, &motu->lock) {
+		motu->msg = be32_to_cpu(*buf);
+	}
 
 	fw_send_response(card, request, RCODE_COMPLETE);
 

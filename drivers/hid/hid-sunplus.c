@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  HID driver for some sunplus "special" devices
  *
@@ -9,10 +10,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 #include <linux/device.h>
@@ -21,7 +18,7 @@
 
 #include "hid-ids.h"
 
-static __u8 *sp_report_fixup(struct hid_device *hdev, __u8 *rdesc,
+static const __u8 *sp_report_fixup(struct hid_device *hdev, __u8 *rdesc,
 		unsigned int *rsize)
 {
 	if (*rsize >= 112 && rdesc[104] == 0x26 && rdesc[105] == 0x80 &&
@@ -65,4 +62,5 @@ static struct hid_driver sp_driver = {
 };
 module_hid_driver(sp_driver);
 
+MODULE_DESCRIPTION("HID driver for some sunplus \"special\" devices");
 MODULE_LICENSE("GPL");

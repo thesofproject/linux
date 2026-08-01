@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (c) 2014-2015 Hisilicon Limited.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __HNAE_H
@@ -220,10 +216,10 @@ struct hnae_desc_cb {
 
 	/* priv data for the desc, e.g. skb when use with ip stack*/
 	void *priv;
-	u16 page_offset;
-	u16 reuse_flag;
+	u32 page_offset;
+	u32 length;     /* length of the buffer */
 
-	u16 length;     /* length of the buffer */
+	u16 reuse_flag;
 
        /* desc type, used by the ring user to mark the type of the priv data */
 	u16 type;
@@ -277,9 +273,6 @@ struct hnae_ring {
 
 	/* statistic */
 	struct ring_stats stats;
-
-	/* ring lock for poll one */
-	spinlock_t lock;
 
 	dma_addr_t desc_dma_addr;
 	u32 buf_size;       /* size for hnae_desc->addr, preset by AE */
@@ -357,7 +350,7 @@ struct hnae_buf_ops {
 };
 
 struct hnae_queue {
-	void __iomem *io_base;
+	u8 __iomem *io_base;
 	phys_addr_t phy_base;
 	struct hnae_ae_dev *dev;	/* the device who use this queue */
 	struct hnae_ring rx_ring ____cacheline_internodealigned_in_smp;
@@ -421,10 +414,6 @@ enum hnae_media_type {
  *   get ring bd number limit
  * get_pauseparam()
  *   get tx and rx of pause frame use
- * set_autoneg()
- *   set auto autonegotiation of pause frame use
- * get_autoneg()
- *   get auto autonegotiation of pause frame use
  * set_pauseparam()
  *   set tx and rx of pause frame use
  * get_coalesce_usecs()
@@ -486,14 +475,14 @@ struct hnae_ae_ops {
 			u8 *auto_neg, u16 *speed, u8 *duplex);
 	void (*toggle_ring_irq)(struct hnae_ring *ring, u32 val);
 	void (*adjust_link)(struct hnae_handle *handle, int speed, int duplex);
+	bool (*need_adjust_link)(struct hnae_handle *handle,
+				 int speed, int duplex);
 	int (*set_loopback)(struct hnae_handle *handle,
 			    enum hnae_loop loop_mode, int en);
 	void (*get_ring_bdnum_limit)(struct hnae_queue *queue,
 				     u32 *uplimit);
 	void (*get_pauseparam)(struct hnae_handle *handle,
 			       u32 *auto_neg, u32 *rx_en, u32 *tx_en);
-	int (*set_autoneg)(struct hnae_handle *handle, u8 enable);
-	int (*get_autoneg)(struct hnae_handle *handle);
 	int (*set_pauseparam)(struct hnae_handle *handle,
 			      u32 auto_neg, u32 rx_en, u32 tx_en);
 	void (*get_coalesce_usecs)(struct hnae_handle *handle,
@@ -510,7 +499,7 @@ struct hnae_ae_ops {
 				   u32 *tx_usecs_high, u32 *rx_usecs_high);
 	void (*set_promisc_mode)(struct hnae_handle *handle, u32 en);
 	int (*get_mac_addr)(struct hnae_handle *handle, void **p);
-	int (*set_mac_addr)(struct hnae_handle *handle, void *p);
+	int (*set_mac_addr)(struct hnae_handle *handle, const void *p);
 	int (*add_uc_addr)(struct hnae_handle *handle,
 			   const unsigned char *addr);
 	int (*rm_uc_addr)(struct hnae_handle *handle,
@@ -523,7 +512,7 @@ struct hnae_ae_ops {
 			     struct net_device_stats *net_stats);
 	void (*get_stats)(struct hnae_handle *handle, u64 *data);
 	void (*get_strings)(struct hnae_handle *handle,
-			    u32 stringset, u8 *data);
+			    u32 stringset, u8 **data);
 	int (*get_sset_count)(struct hnae_handle *handle, int stringset);
 	void (*update_led_status)(struct hnae_handle *handle);
 	int (*set_led_id)(struct hnae_handle *handle,
@@ -569,7 +558,7 @@ struct hnae_handle {
 	enum hnae_media_type media_type;
 	struct list_head node;    /* list to hnae_ae_dev->handle_list */
 	struct hnae_buf_ops *bops; /* operation for the buffer */
-	struct hnae_queue **qs;  /* array base of all queues */
+	struct hnae_queue *qs[];  /* flexible array of all queues */
 };
 
 #define ring_to_dev(ring) ((ring)->q->dev->dev)

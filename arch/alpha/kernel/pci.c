@@ -18,7 +18,7 @@
 #include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/kernel.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/module.h>
 #include <linux/cache.h>
 #include <linux/slab.h>
@@ -125,6 +125,7 @@ DECLARE_PCI_FIXUP_FINAL(PCI_ANY_ID, PCI_ANY_ID, pcibios_fixup_final);
 
 resource_size_t
 pcibios_align_resource(void *data, const struct resource *res,
+		       const struct resource *empty_res,
 		       resource_size_t size, resource_size_t align)
 {
 	struct pci_dev *dev = data;
@@ -220,7 +221,7 @@ static void pdev_save_srm_config(struct pci_dev *dev)
 		printed = 1;
 	}
 
-	tmp = kmalloc(sizeof(*tmp), GFP_KERNEL);
+	tmp = kmalloc_obj(*tmp);
 	if (!tmp) {
 		printk(KERN_ERR "%s: kmalloc() failed!\n", __func__);
 		return;
@@ -288,11 +289,10 @@ pcibios_claim_one_bus(struct pci_bus *b)
 	struct pci_bus *child_bus;
 
 	list_for_each_entry(dev, &b->devices, bus_list) {
+		struct resource *r;
 		int i;
 
-		for (i = 0; i < PCI_NUM_RESOURCES; i++) {
-			struct resource *r = &dev->resource[i];
-
+		pci_dev_for_each_resource(dev, r, i) {
 			if (r->parent || !r->start || !r->flags)
 				continue;
 			if (pci_has_flag(PCI_PROBE_ONLY) ||
@@ -392,7 +392,7 @@ alloc_pci_controller(void)
 {
 	struct pci_controller *hose;
 
-	hose = alloc_bootmem(sizeof(*hose));
+	hose = memblock_alloc_or_panic(sizeof(*hose), SMP_CACHE_BYTES);
 
 	*hose_tail = hose;
 	hose_tail = &hose->next;
@@ -403,7 +403,7 @@ alloc_pci_controller(void)
 struct resource * __init
 alloc_resource(void)
 {
-	return alloc_bootmem(sizeof(struct resource));
+	return memblock_alloc_or_panic(sizeof(struct resource), SMP_CACHE_BYTES);
 }
 
 

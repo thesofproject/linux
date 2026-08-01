@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2003 Sistina Software.
  * Copyright (C) 2004 Red Hat, Inc. All rights reserved.
@@ -86,7 +87,7 @@ out:
 
 static struct ps_internal *_alloc_path_selector(struct path_selector_type *pst)
 {
-	struct ps_internal *psi = kzalloc(sizeof(*psi), GFP_KERNEL);
+	struct ps_internal *psi = kzalloc_obj(*psi);
 
 	if (psi)
 		psi->pst = *pst;
@@ -106,7 +107,7 @@ int dm_register_path_selector(struct path_selector_type *pst)
 
 	if (__find_path_selector_type(pst->name)) {
 		kfree(psi);
-		r = -EEXIST;
+		r = -EBUSY;
 	} else
 		list_add(&psi->list, &_path_selectors);
 
@@ -114,17 +115,18 @@ int dm_register_path_selector(struct path_selector_type *pst)
 
 	return r;
 }
+EXPORT_SYMBOL_GPL(dm_register_path_selector);
 
-int dm_unregister_path_selector(struct path_selector_type *pst)
+void dm_unregister_path_selector(struct path_selector_type *pst)
 {
 	struct ps_internal *psi;
 
 	down_write(&_ps_lock);
 
 	psi = __find_path_selector_type(pst->name);
-	if (!psi) {
+	if (WARN_ON(!psi)) {
 		up_write(&_ps_lock);
-		return -EINVAL;
+		return;
 	}
 
 	list_del(&psi->list);
@@ -132,9 +134,5 @@ int dm_unregister_path_selector(struct path_selector_type *pst)
 	up_write(&_ps_lock);
 
 	kfree(psi);
-
-	return 0;
 }
-
-EXPORT_SYMBOL_GPL(dm_register_path_selector);
 EXPORT_SYMBOL_GPL(dm_unregister_path_selector);

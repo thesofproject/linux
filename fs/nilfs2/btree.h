@@ -1,17 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
- * btree.h - NILFS B-tree.
+ * NILFS B-tree.
  *
  * Copyright (C) 2005-2008 Nippon Telegraph and Telephone Corporation.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * Written by Koji Sato.
  */
@@ -33,6 +24,7 @@
  * @bp_index: index of child node
  * @bp_oldreq: ptr end request for old ptr
  * @bp_newreq: ptr alloc request for new ptr
+ * @bp_ctxt: context information for changing the key of a b-tree node block
  * @bp_op: rebalance operation
  */
 struct nilfs_btree_path {

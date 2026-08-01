@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * linux/sound/wm8996.h -- Platform data for WM8996
  *
  * Copyright 2011 Wolfson Microelectronics. PLC.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __LINUX_SND_WM8996_H
@@ -36,8 +33,6 @@ struct wm8996_retune_mobile_config {
 struct wm8996_pdata {
 	int irq_flags;  /** Set IRQ trigger flags; default active low */
 
-	int ldo_ena;  /** GPIO for LDO1; -1 for none */
-
 	int micdet_def;  /** Default MICDET_SRC/HP1FB_SRC/MICD_BIAS */
 
 	enum wm8996_inmode inl_mode;
@@ -45,7 +40,6 @@ struct wm8996_pdata {
 
 	u32 spkmute_seq;  /** Value for register 0x802 */
 
-	int gpio_base;
 	u32 gpio_default[5];
 
 	int num_retune_mobile_cfgs;

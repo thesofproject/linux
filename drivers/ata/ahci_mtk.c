@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MediaTek AHCI SATA driver
  *
  * Copyright (c) 2017 MediaTek Inc.
  * Author: Ryder Lee <ryder.lee@mediatek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/ahci_platform.h>
@@ -19,6 +11,7 @@
 #include <linux/libata.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
 #include <linux/regmap.h>
@@ -45,7 +38,7 @@ static const struct ata_port_info ahci_port_info = {
 	.port_ops	= &ahci_platform_ops,
 };
 
-static struct scsi_host_template ahci_platform_sht = {
+static const struct scsi_host_template ahci_platform_sht = {
 	AHCI_SHT(DRV_NAME),
 };
 
@@ -114,7 +107,7 @@ static int mtk_ahci_parse_property(struct ahci_host_priv *hpriv,
 	struct device_node *np = dev->of_node;
 
 	/* enable SATA function if needed */
-	if (of_find_property(np, "mediatek,phy-mode", NULL)) {
+	if (of_property_present(np, "mediatek,phy-mode")) {
 		plat->mode = syscon_regmap_lookup_by_phandle(
 					np, "mediatek,phy-mode");
 		if (IS_ERR(plat->mode)) {
@@ -125,8 +118,6 @@ static int mtk_ahci_parse_property(struct ahci_host_priv *hpriv,
 		regmap_update_bits(plat->mode, SYS_CFG, SYS_CFG_SATA_MSK,
 				   SYS_CFG_SATA_EN);
 	}
-
-	of_property_read_u32(np, "ports-implemented", &hpriv->force_port_map);
 
 	return 0;
 }
@@ -142,7 +133,7 @@ static int mtk_ahci_probe(struct platform_device *pdev)
 	if (!plat)
 		return -ENOMEM;
 
-	hpriv = ahci_platform_get_resources(pdev);
+	hpriv = ahci_platform_get_resources(pdev, 0);
 	if (IS_ERR(hpriv))
 		return PTR_ERR(hpriv);
 
@@ -177,7 +168,7 @@ static SIMPLE_DEV_PM_OPS(ahci_pm_ops, ahci_platform_suspend,
 
 static const struct of_device_id ahci_of_match[] = {
 	{ .compatible = "mediatek,mtk-ahci", },
-	{},
+	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, ahci_of_match);
 

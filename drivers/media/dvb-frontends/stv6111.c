@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Driver for the ST STV6111 tuner
  *
  * Copyright (C) 2014 Digital Devices GmbH
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 only, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/kernel.h>
@@ -170,7 +161,7 @@ static const struct slookup gain_rfagc_lookup[] = {
 };
 
 /*
- * This table is 6 dB too low comapred to the others (probably created with
+ * This table is 6 dB too low compared to the others (probably created with
  * a different BB_MAG setting)
  */
 static const struct slookup gain_channel_agc_nf_lookup[] = {
@@ -646,9 +637,8 @@ static int get_rf_strength(struct dvb_frontend *fe, u16 *st)
 static const struct dvb_tuner_ops tuner_ops = {
 	.info = {
 		.name		= "ST STV6111",
-		.frequency_min	= 950000,
-		.frequency_max	= 2150000,
-		.frequency_step	= 0
+		.frequency_min_hz =  950 * MHz,
+		.frequency_max_hz = 2150 * MHz,
 	},
 	.set_params		= set_params,
 	.release		= release,
@@ -663,7 +653,7 @@ struct dvb_frontend *stv6111_attach(struct dvb_frontend *fe,
 	int stat = -ENODEV;
 	int gatestat = 0;
 
-	state = kzalloc(sizeof(*state), GFP_KERNEL);
+	state = kzalloc_obj(*state);
 	if (!state)
 		return NULL;
 	state->adr = adr;
@@ -688,4 +678,4 @@ EXPORT_SYMBOL_GPL(stv6111_attach);
 
 MODULE_DESCRIPTION("ST STV6111 satellite tuner driver");
 MODULE_AUTHOR("Ralph Metzler, Manfred Voelkel");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");

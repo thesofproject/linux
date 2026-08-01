@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * VMware VMCI Driver
  *
  * Copyright (C) 2012 VMware, Inc. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation version 2 and no later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
- * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
  */
 
 #include <linux/vmw_vmci_defs.h>
@@ -266,23 +258,6 @@ static int dbell_unlink(struct vmci_handle handle)
 }
 
 /*
- * Notify another guest or the host.  We send a datagram down to the
- * host via the hypervisor with the notification info.
- */
-static int dbell_notify_as_guest(struct vmci_handle handle, u32 priv_flags)
-{
-	struct vmci_doorbell_notify_msg notify_msg;
-
-	notify_msg.hdr.dst = vmci_make_handle(VMCI_HYPERVISOR_CONTEXT_ID,
-					      VMCI_DOORBELL_NOTIFY);
-	notify_msg.hdr.src = VMCI_ANON_SRC_HANDLE;
-	notify_msg.hdr.payload_size = sizeof(notify_msg) - VMCI_DG_HEADERSIZE;
-	notify_msg.handle = handle;
-
-	return vmci_send_datagram(&notify_msg.hdr);
-}
-
-/*
  * Calls the specified callback in a delayed context.
  */
 static void dbell_delayed_dispatch(struct work_struct *work)
@@ -318,7 +293,8 @@ int vmci_dbell_host_context_notify(u32 src_cid, struct vmci_handle handle)
 
 	entry = container_of(resource, struct dbell_entry, resource);
 	if (entry->run_delayed) {
-		schedule_work(&entry->work);
+		if (!schedule_work(&entry->work))
+			vmci_resource_put(resource);
 	} else {
 		entry->notify_cb(entry->client_data);
 		vmci_resource_put(resource);
@@ -330,21 +306,24 @@ int vmci_dbell_host_context_notify(u32 src_cid, struct vmci_handle handle)
 /*
  * Register the notification bitmap with the host.
  */
-bool vmci_dbell_register_notification_bitmap(u32 bitmap_ppn)
+bool vmci_dbell_register_notification_bitmap(u64 bitmap_ppn)
 {
 	int result;
-	struct vmci_notify_bm_set_msg bitmap_set_msg;
+	struct vmci_notify_bm_set_msg bitmap_set_msg = { };
 
 	bitmap_set_msg.hdr.dst = vmci_make_handle(VMCI_HYPERVISOR_CONTEXT_ID,
 						  VMCI_SET_NOTIFY_BITMAP);
 	bitmap_set_msg.hdr.src = VMCI_ANON_SRC_HANDLE;
 	bitmap_set_msg.hdr.payload_size = sizeof(bitmap_set_msg) -
 	    VMCI_DG_HEADERSIZE;
-	bitmap_set_msg.bitmap_ppn = bitmap_ppn;
+	if (vmci_use_ppn64())
+		bitmap_set_msg.bitmap_ppn64 = bitmap_ppn;
+	else
+		bitmap_set_msg.bitmap_ppn32 = (u32) bitmap_ppn;
 
 	result = vmci_send_datagram(&bitmap_set_msg.hdr);
 	if (result != VMCI_SUCCESS) {
-		pr_devel("Failed to register (PPN=%u) as notification bitmap (error=%d)\n",
+		pr_devel("Failed to register (PPN=%llu) as notification bitmap (error=%d)\n",
 			 bitmap_ppn, result);
 		return false;
 	}
@@ -366,7 +345,8 @@ static void dbell_fire_entries(u32 notify_idx)
 		    atomic_read(&dbell->active) == 1) {
 			if (dbell->run_delayed) {
 				vmci_resource_get(&dbell->resource);
-				schedule_work(&dbell->work);
+				if (!schedule_work(&dbell->work))
+					vmci_resource_put(&dbell->resource);
 			} else {
 				dbell->notify_cb(dbell->client_data);
 			}
@@ -422,7 +402,7 @@ int vmci_doorbell_create(struct vmci_handle *handle,
 	    priv_flags & ~VMCI_PRIVILEGE_ALL_FLAGS)
 		return VMCI_ERROR_INVALID_ARGS;
 
-	entry = kmalloc(sizeof(*entry), GFP_KERNEL);
+	entry = kmalloc_obj(*entry);
 	if (entry == NULL) {
 		pr_warn("Failed allocating memory for datagram entry\n");
 		return VMCI_ERROR_NO_MEM;
@@ -569,39 +549,3 @@ int vmci_doorbell_destroy(struct vmci_handle handle)
 	return VMCI_SUCCESS;
 }
 EXPORT_SYMBOL_GPL(vmci_doorbell_destroy);
-
-/*
- * vmci_doorbell_notify() - Ring the doorbell (and hide in the bushes).
- * @dst:        The handlle identifying the doorbell resource
- * @priv_flags: Priviledge flags.
- *
- * Generates a notification on the doorbell identified by the
- * handle. For host side generation of notifications, the caller
- * can specify what the privilege of the calling side is.
- */
-int vmci_doorbell_notify(struct vmci_handle dst, u32 priv_flags)
-{
-	int retval;
-	enum vmci_route route;
-	struct vmci_handle src;
-
-	if (vmci_handle_is_invalid(dst) ||
-	    (priv_flags & ~VMCI_PRIVILEGE_ALL_FLAGS))
-		return VMCI_ERROR_INVALID_ARGS;
-
-	src = VMCI_INVALID_HANDLE;
-	retval = vmci_route(&src, &dst, false, &route);
-	if (retval < VMCI_SUCCESS)
-		return retval;
-
-	if (VMCI_ROUTE_AS_HOST == route)
-		return vmci_ctx_notify_dbell(VMCI_HOST_CONTEXT_ID,
-					     dst, priv_flags);
-
-	if (VMCI_ROUTE_AS_GUEST == route)
-		return dbell_notify_as_guest(dst, priv_flags);
-
-	pr_warn("Unknown route (%d) for doorbell\n", route);
-	return VMCI_ERROR_DST_UNREACHABLE;
-}
-EXPORT_SYMBOL_GPL(vmci_doorbell_notify);

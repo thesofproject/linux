@@ -1,54 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Initialization protocol for ISHTP driver
  *
  * Copyright (c) 2003-2016, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
  */
 
+#include <linux/devm-helpers.h>
 #include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
 #include "ishtp-dev.h"
 #include "hbm.h"
 #include "client.h"
-
-/**
- * ishtp_dev_state_str() -Convert to string format
- * @state: state to convert
- *
- * Convert state to string for prints
- *
- * Return: character pointer to converted string
- */
-const char *ishtp_dev_state_str(int state)
-{
-	switch (state) {
-	case ISHTP_DEV_INITIALIZING:
-		return	"INITIALIZING";
-	case ISHTP_DEV_INIT_CLIENTS:
-		return	"INIT_CLIENTS";
-	case ISHTP_DEV_ENABLED:
-		return	"ENABLED";
-	case ISHTP_DEV_RESETTING:
-		return	"RESETTING";
-	case ISHTP_DEV_DISABLED:
-		return	"DISABLED";
-	case ISHTP_DEV_POWER_DOWN:
-		return	"POWER_DOWN";
-	case ISHTP_DEV_POWER_UP:
-		return	"POWER_UP";
-	default:
-		return "unknown";
-	}
-}
+#include "loader.h"
 
 /**
  * ishtp_device_init() - ishtp device init
@@ -59,6 +23,8 @@ const char *ishtp_dev_state_str(int state)
  */
 void ishtp_device_init(struct ishtp_device *dev)
 {
+	int ret;
+
 	dev->dev_state = ISHTP_DEV_INITIALIZING;
 	INIT_LIST_HEAD(&dev->cl_list);
 	INIT_LIST_HEAD(&dev->device_list);
@@ -67,6 +33,7 @@ void ishtp_device_init(struct ishtp_device *dev)
 	spin_lock_init(&dev->rd_msg_spinlock);
 
 	init_waitqueue_head(&dev->wait_hbm_recvd_msg);
+	init_waitqueue_head(&dev->wait_loader_recvd_msg);
 	spin_lock_init(&dev->read_list_spinlock);
 	spin_lock_init(&dev->device_lock);
 	spin_lock_init(&dev->device_list_lock);
@@ -84,6 +51,9 @@ void ishtp_device_init(struct ishtp_device *dev)
 
 	INIT_LIST_HEAD(&dev->read_list.list);
 
+	ret = devm_work_autocancel(dev->devc, &dev->work_fw_loader, ishtp_loader_work);
+	if (ret)
+		dev_err_probe(dev->devc, ret, "Failed to initialise FW loader work\n");
 }
 EXPORT_SYMBOL(ishtp_device_init);
 

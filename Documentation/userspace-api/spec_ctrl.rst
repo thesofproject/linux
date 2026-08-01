@@ -26,26 +26,31 @@ PR_GET_SPECULATION_CTRL
 
 PR_GET_SPECULATION_CTRL returns the state of the speculation misfeature
 which is selected with arg2 of prctl(2). The return value uses bits 0-3 with
-the following meaning:
+the following meaning (with the caveat that PR_SPEC_L1D_FLUSH has less obvious
+semantics, see documentation for that specific control below):
 
-==== ===================== ===================================================
-Bit  Define                Description
-==== ===================== ===================================================
-0    PR_SPEC_PRCTL         Mitigation can be controlled per task by
-                           PR_SET_SPECULATION_CTRL.
-1    PR_SPEC_ENABLE        The speculation feature is enabled, mitigation is
-                           disabled.
-2    PR_SPEC_DISABLE       The speculation feature is disabled, mitigation is
-                           enabled.
-3    PR_SPEC_FORCE_DISABLE Same as PR_SPEC_DISABLE, but cannot be undone. A
-                           subsequent prctl(..., PR_SPEC_ENABLE) will fail.
-==== ===================== ===================================================
+==== ====================== ==================================================
+Bit  Define                 Description
+==== ====================== ==================================================
+0    PR_SPEC_PRCTL          Mitigation can be controlled per task by
+                            PR_SET_SPECULATION_CTRL.
+1    PR_SPEC_ENABLE         The speculation feature is enabled, mitigation is
+                            disabled.
+2    PR_SPEC_DISABLE        The speculation feature is disabled, mitigation is
+                            enabled.
+3    PR_SPEC_FORCE_DISABLE  Same as PR_SPEC_DISABLE, but cannot be undone. A
+                            subsequent prctl(..., PR_SPEC_ENABLE) will fail.
+4    PR_SPEC_DISABLE_NOEXEC Same as PR_SPEC_DISABLE, but the state will be
+                            cleared on :manpage:`execve(2)`.
+==== ====================== ==================================================
 
 If all bits are 0 the CPU is not affected by the speculation misfeature.
 
 If PR_SPEC_PRCTL is set, then the per-task control of the mitigation is
 available. If not set, prctl(PR_SET_SPECULATION_CTRL) for the speculation
 misfeature will fail.
+
+.. _set_spec_ctrl:
 
 PR_SET_SPECULATION_CTRL
 -----------------------
@@ -76,11 +81,15 @@ Value   Meaning
 ERANGE  arg3 is incorrect, i.e. it's neither PR_SPEC_ENABLE nor
         PR_SPEC_DISABLE nor PR_SPEC_FORCE_DISABLE.
 
-ENXIO   Control of the selected speculation misfeature is not possible.
-        See PR_GET_SPECULATION_CTRL.
+ENXIO   For PR_SPEC_STORE_BYPASS: control of the selected speculation misfeature
+        is not possible via prctl, because of the system's boot configuration.
 
-EPERM   Speculation was disabled with PR_SPEC_FORCE_DISABLE and caller
-        tried to enable it again.
+EPERM   Speculation was disabled with PR_SPEC_FORCE_DISABLE and caller tried to
+        enable it again.
+
+EPERM   For PR_SPEC_L1D_FLUSH and PR_SPEC_INDIRECT_BRANCH: control of the
+        mitigation is not possible because of the system's boot configuration.
+
 ======= =================================================================
 
 Speculation misfeature controls
@@ -92,3 +101,24 @@ Speculation misfeature controls
    * prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_STORE_BYPASS, PR_SPEC_ENABLE, 0, 0);
    * prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_STORE_BYPASS, PR_SPEC_DISABLE, 0, 0);
    * prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_STORE_BYPASS, PR_SPEC_FORCE_DISABLE, 0, 0);
+   * prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_STORE_BYPASS, PR_SPEC_DISABLE_NOEXEC, 0, 0);
+
+- PR_SPEC_INDIR_BRANCH: Indirect Branch Speculation in User Processes
+                        (Mitigate Spectre V2 style attacks against user processes)
+
+  Invocations:
+   * prctl(PR_GET_SPECULATION_CTRL, PR_SPEC_INDIRECT_BRANCH, 0, 0, 0);
+   * prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_INDIRECT_BRANCH, PR_SPEC_ENABLE, 0, 0);
+   * prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_INDIRECT_BRANCH, PR_SPEC_DISABLE, 0, 0);
+   * prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_INDIRECT_BRANCH, PR_SPEC_FORCE_DISABLE, 0, 0);
+
+- PR_SPEC_L1D_FLUSH: Flush L1D Cache on context switch out of the task
+                        (works only when tasks run on non SMT cores)
+
+For this control, PR_SPEC_ENABLE means that the **mitigation** is enabled (L1D
+is flushed), PR_SPEC_DISABLE means it is disabled.
+
+  Invocations:
+   * prctl(PR_GET_SPECULATION_CTRL, PR_SPEC_L1D_FLUSH, 0, 0, 0);
+   * prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_L1D_FLUSH, PR_SPEC_ENABLE, 0, 0);
+   * prctl(PR_SET_SPECULATION_CTRL, PR_SPEC_L1D_FLUSH, PR_SPEC_DISABLE, 0, 0);

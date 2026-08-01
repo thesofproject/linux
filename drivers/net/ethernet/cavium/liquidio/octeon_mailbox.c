@@ -24,10 +24,36 @@
 #include "octeon_device.h"
 #include "octeon_main.h"
 #include "octeon_mailbox.h"
+#include "cn23xx_pf_device.h"
+
+static struct pci_dev *lio_vf_pci_dev_by_qno(struct octeon_device *oct, u32 q_no)
+{
+	struct pci_dev *vfdev = NULL;
+	int vfidx;
+
+	if (!oct->sriov_info.rings_per_vf)
+		return NULL;
+
+	if (q_no % oct->sriov_info.rings_per_vf)
+		return NULL;
+
+	vfidx = q_no / oct->sriov_info.rings_per_vf;
+	if (vfidx >= oct->sriov_info.num_vfs_alloced)
+		return NULL;
+
+	while ((vfdev = pci_get_device(PCI_VENDOR_ID_CAVIUM,
+				       OCTEON_CN23XX_VF_VID, vfdev))) {
+		if (pci_physfn(vfdev) && pci_physfn(vfdev) == oct->pci_dev &&
+		    pci_iov_vf_id(vfdev) == vfidx)
+			return vfdev;
+	}
+
+	return NULL;
+}
 
 /**
  * octeon_mbox_read:
- * @oct: Pointer mailbox
+ * @mbox: Pointer mailbox
  *
  * Reads the 8-bytes of data from the mbox register
  * Writes back the acknowldgement inidcating completion of read
@@ -205,6 +231,26 @@ int octeon_mbox_write(struct octeon_device *oct,
 	return ret;
 }
 
+static void get_vf_stats(struct octeon_device *oct,
+			 struct oct_vf_stats *stats)
+{
+	int i;
+
+	for (i = 0; i < oct->num_iqs; i++) {
+		if (!oct->instr_queue[i])
+			continue;
+		stats->tx_packets += oct->instr_queue[i]->stats.tx_done;
+		stats->tx_bytes += oct->instr_queue[i]->stats.tx_tot_bytes;
+	}
+
+	for (i = 0; i < oct->num_oqs; i++) {
+		if (!oct->droq[i])
+			continue;
+		stats->rx_packets += oct->droq[i]->stats.rx_pkts_received;
+		stats->rx_bytes += oct->droq[i]->stats.rx_bytes_received;
+	}
+}
+
 /**
  * octeon_mbox_process_cmd:
  * @mbox: Pointer mailbox
@@ -216,6 +262,7 @@ static int octeon_mbox_process_cmd(struct octeon_mbox *mbox,
 				   struct octeon_mbox_cmd *mbox_cmd)
 {
 	struct octeon_device *oct = mbox->oct_dev;
+	struct pci_dev *vfdev;
 
 	switch (mbox_cmd->msg.s.cmd) {
 	case OCTEON_VF_ACTIVE:
@@ -239,9 +286,12 @@ static int octeon_mbox_process_cmd(struct octeon_mbox *mbox,
 		dev_info(&oct->pci_dev->dev,
 			 "got a request for FLR from VF that owns DPI ring %u\n",
 			 mbox->q_no);
-		pcie_capability_set_word(
-			oct->sriov_info.dpiring_to_vfpcidev_lut[mbox->q_no],
-			PCI_EXP_DEVCTL, PCI_EXP_DEVCTL_BCR_FLR);
+		vfdev = lio_vf_pci_dev_by_qno(oct, mbox->q_no);
+		if (!vfdev)
+			break;
+
+		pcie_flr(vfdev);
+		pci_dev_put(vfdev);
 		break;
 
 	case OCTEON_PF_CHANGED_VF_MACADDR:
@@ -250,6 +300,15 @@ static int octeon_mbox_process_cmd(struct octeon_mbox *mbox,
 						     mbox_cmd->msg.s.params);
 		break;
 
+	case OCTEON_GET_VF_STATS:
+		dev_dbg(&oct->pci_dev->dev, "Got VF stats request. Sending data back\n");
+		mbox_cmd->msg.s.type = OCTEON_MBOX_RESPONSE;
+		mbox_cmd->msg.s.resp_needed = 1;
+		mbox_cmd->msg.s.len = 1 +
+			sizeof(struct oct_vf_stats) / sizeof(u64);
+		get_vf_stats(oct, (struct oct_vf_stats *)mbox_cmd->data);
+		octeon_mbox_write(oct, mbox_cmd);
+		break;
 	default:
 		break;
 	}
@@ -257,7 +316,8 @@ static int octeon_mbox_process_cmd(struct octeon_mbox *mbox,
 }
 
 /**
- *octeon_mbox_process_message:
+ * octeon_mbox_process_message
+ * @mbox: mailbox
  *
  * Process the received mbox message.
  */
@@ -319,6 +379,28 @@ int octeon_mbox_process_message(struct octeon_mbox *mbox)
 
 	spin_unlock_irqrestore(&mbox->lock, flags);
 	WARN_ON(1);
+
+	return 0;
+}
+
+int octeon_mbox_cancel(struct octeon_device *oct, int q_no)
+{
+	struct octeon_mbox *mbox = oct->mbox[q_no];
+	struct octeon_mbox_cmd *mbox_cmd;
+	unsigned long flags = 0;
+
+	spin_lock_irqsave(&mbox->lock, flags);
+	mbox_cmd = &mbox->mbox_resp;
+
+	if (!(mbox->state & OCTEON_MBOX_STATE_RESPONSE_PENDING)) {
+		spin_unlock_irqrestore(&mbox->lock, flags);
+		return 1;
+	}
+
+	mbox->state = OCTEON_MBOX_STATE_IDLE;
+	memset(mbox_cmd, 0, sizeof(*mbox_cmd));
+	writeq(OCTEON_PFVFSIG, mbox->mbox_read_reg);
+	spin_unlock_irqrestore(&mbox->lock, flags);
 
 	return 0;
 }

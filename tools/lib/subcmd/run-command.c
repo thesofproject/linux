@@ -2,8 +2,10 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <ctype.h>
 #include <fcntl.h>
 #include <string.h>
+#include <linux/compiler.h>
 #include <linux/string.h>
 #include <errno.h>
 #include <sys/wait.h>
@@ -122,6 +124,8 @@ int start_command(struct child_process *cmd)
 		}
 		if (cmd->preexec_cb)
 			cmd->preexec_cb();
+		if (cmd->no_exec_cmd)
+			exit(cmd->no_exec_cmd(cmd));
 		if (cmd->exec_cmd) {
 			execv_cmd(cmd->argv);
 		} else {
@@ -163,43 +167,168 @@ int start_command(struct child_process *cmd)
 	return 0;
 }
 
-static int wait_or_whine(pid_t pid)
+static int wait_or_whine(struct child_process *cmd, bool block)
 {
-	char sbuf[STRERR_BUFSIZE];
+	bool finished;
+	int result;
 
-	for (;;) {
+	if (cmd->pid <= 0) {
+		cmd->finished = 1;
+		if (cmd->pid < 0 && cmd->finish_result == 0)
+			cmd->finish_result = -ERR_RUN_COMMAND_FORK;
+		return cmd->finish_result;
+	}
+
+	finished = cmd->finished;
+	result = cmd->finish_result;
+
+	while (!finished) {
 		int status, code;
-		pid_t waiting = waitpid(pid, &status, 0);
+		pid_t waiting = waitpid(cmd->pid, &status, block ? 0 : WNOHANG);
 
+		if (!block && waiting == 0)
+			break;
+
+		if (waiting < 0 && errno == EINTR)
+			continue;
+
+		finished = true;
 		if (waiting < 0) {
-			if (errno == EINTR)
-				continue;
+			char sbuf[STRERR_BUFSIZE];
+
 			fprintf(stderr, " Error: waitpid failed (%s)",
 				str_error_r(errno, sbuf, sizeof(sbuf)));
-			return -ERR_RUN_COMMAND_WAITPID;
-		}
-		if (waiting != pid)
-			return -ERR_RUN_COMMAND_WAITPID_WRONG_PID;
-		if (WIFSIGNALED(status))
-			return -ERR_RUN_COMMAND_WAITPID_SIGNAL;
-
-		if (!WIFEXITED(status))
-			return -ERR_RUN_COMMAND_WAITPID_NOEXIT;
-		code = WEXITSTATUS(status);
-		switch (code) {
-		case 127:
-			return -ERR_RUN_COMMAND_EXEC;
-		case 0:
-			return 0;
-		default:
-			return -code;
+			result = -ERR_RUN_COMMAND_WAITPID;
+		} else if (waiting != cmd->pid) {
+			result = -ERR_RUN_COMMAND_WAITPID_WRONG_PID;
+		} else if (WIFSIGNALED(status)) {
+			result = -ERR_RUN_COMMAND_WAITPID_SIGNAL;
+		} else if (!WIFEXITED(status)) {
+			result = -ERR_RUN_COMMAND_WAITPID_NOEXIT;
+		} else {
+			code = WEXITSTATUS(status);
+			switch (code) {
+			case 127:
+				result = -ERR_RUN_COMMAND_EXEC;
+				break;
+			case 0:
+				result = 0;
+				break;
+			default:
+				result = -code;
+				break;
+			}
 		}
 	}
+	if (finished) {
+		cmd->finished = 1;
+		cmd->finish_result = result;
+	}
+	return result;
+}
+
+/*
+ * Conservative estimate of number of characaters needed to hold an a decoded
+ * integer, assume each 3 bits needs a character byte and plus a possible sign
+ * character.
+ */
+#ifndef is_signed_type
+#define is_signed_type(type) (((type)(-1)) < (type)1)
+#endif
+#define MAX_STRLEN_TYPE(type) (sizeof(type) * 8 / 3 + (is_signed_type(type) ? 1 : 0))
+
+int check_if_command_finished(struct child_process *cmd)
+{
+#ifdef __linux__
+	char filename[6 + MAX_STRLEN_TYPE(typeof(cmd->pid)) + 7 + 1];
+	char status_line[256];
+	FILE *status_file;
+#endif
+
+	if (cmd->finished)
+		return 1;
+	if (cmd->pid <= 0) {
+		cmd->finished = 1;
+		if (cmd->pid < 0 && cmd->finish_result == 0)
+			cmd->finish_result = -ERR_RUN_COMMAND_FORK;
+		return 1;
+	}
+
+#ifdef __linux__
+	/*
+	 * Check by reading /proc/<pid>/status as calling waitpid causes
+	 * stdout/stderr to be closed and data lost.
+	 */
+	sprintf(filename, "/proc/%u/status", cmd->pid);
+	status_file = fopen(filename, "r");
+	if (status_file == NULL) {
+		int status;
+		pid_t waiting;
+
+		/*
+		 * fopen() can fail with ENOENT if the process has been reaped.
+		 * It can also fail with EMFILE/ENFILE if RLIMIT_NOFILE is reached.
+		 * In those cases, use waitpid(..., WNOHANG) to robustly check
+		 * and reap the process if it has exited.
+		 */
+		if (errno == ENOENT)
+			return 1;
+
+		waiting = waitpid(cmd->pid, &status, WNOHANG);
+		if (waiting == cmd->pid) {
+			int result;
+			int code;
+
+			cmd->finished = 1;
+			if (WIFSIGNALED(status)) {
+				result = -ERR_RUN_COMMAND_WAITPID_SIGNAL;
+			} else if (!WIFEXITED(status)) {
+				result = -ERR_RUN_COMMAND_WAITPID_NOEXIT;
+			} else {
+				code = WEXITSTATUS(status);
+				switch (code) {
+				case 127:
+					result = -ERR_RUN_COMMAND_EXEC;
+					break;
+				case 0:
+					result = 0;
+					break;
+				default:
+					result = -code;
+					break;
+				}
+			}
+			cmd->finish_result = result;
+			return 1;
+		}
+		if (waiting < 0 && (errno == ECHILD || errno == ESRCH))
+			return 1;
+		return 0;
+	}
+	while (fgets(status_line, sizeof(status_line), status_file) != NULL) {
+		char *p;
+
+		if (strncmp(status_line, "State:", 6))
+			continue;
+
+		fclose(status_file);
+		p = status_line + 6;
+		while (isspace(*p))
+			p++;
+		return *p == 'Z' ? 1 : 0;
+	}
+	/* Read failed assume finish_command was called. */
+	fclose(status_file);
+	return 1;
+#else
+	wait_or_whine(cmd, /*block=*/false);
+	return cmd->finished;
+#endif
 }
 
 int finish_command(struct child_process *cmd)
 {
-	return wait_or_whine(cmd->pid);
+	return wait_or_whine(cmd, /*block=*/true);
 }
 
 int run_command(struct child_process *cmd)

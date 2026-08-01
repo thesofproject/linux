@@ -1,14 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
 * Copyright (C) 2015 Broadcom Corporation
 *
-* This program is free software; you can redistribute it and/or
-* modify it under the terms of the GNU General Public License as
-* published by the Free Software Foundation version 2.
-*
-* This program is distributed "as is" WITHOUT ANY WARRANTY of any
-* kind, whether express or implied; without even the implied warranty
-* of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
 */
 #include <linux/module.h>
 #include <linux/init.h>
@@ -224,7 +217,7 @@ static irqreturn_t iproc_touchscreen_interrupt(int irq, void *data)
 			"pen up-down (%d)\n", priv->pen_status);
 	}
 
-	/* coordinates in FIFO exceed the theshold */
+	/* coordinates in FIFO exceed the threshold */
 	if (intr_status & TS_FIFO_INTR_MASK) {
 		for (i = 0; i < priv->cfg_params.fifo_threshold; i++) {
 			regmap_read(priv->regmap, FIFO_DATA, &raw_coordinate);
@@ -489,10 +482,8 @@ static int iproc_ts_probe(struct platform_device *pdev)
 
 	/* get interrupt */
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "platform_get_irq failed: %d\n", irq);
+	if (irq < 0)
 		return irq;
-	}
 
 	error = devm_request_irq(&pdev->dev, irq,
 				 iproc_touchscreen_interrupt,
@@ -520,7 +511,7 @@ static struct platform_driver iproc_ts_driver = {
 	.probe = iproc_ts_probe,
 	.driver = {
 		.name	= IPROC_TS_NAME,
-		.of_match_table = of_match_ptr(iproc_ts_of_match),
+		.of_match_table = iproc_ts_of_match,
 	},
 };
 

@@ -1,22 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- *  GPL LICENSE SUMMARY
- *
  *  Copyright(c) 2010 Intel Corporation. All rights reserved.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of version 2 of the GNU General Public License as
- *  published by the Free Software Foundation.
- *
- *  This program is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- *  The full GNU General Public License is included in this distribution
- *  in the file called LICENSE.GPL.
  *
  *  Contact Information:
  *    Intel Corporation
@@ -49,12 +33,6 @@ struct sim_dev_reg {
 	void (*read)(struct sim_dev_reg *reg, u32 *value);
 	void (*write)(struct sim_dev_reg *reg, u32 value);
 	struct sim_reg sim_reg;
-};
-
-struct sim_reg_op {
-	void (*init)(struct sim_dev_reg *reg);
-	void (*read)(struct sim_dev_reg *reg, u32 value);
-	void (*write)(struct sim_dev_reg *reg, u32 value);
 };
 
 #define MB (1024 * 1024)
@@ -99,7 +77,7 @@ static void ehci_reg_read(struct sim_dev_reg *reg, u32 *value)
 		*value |= 0x100;
 }
 
-void sata_revid_init(struct sim_dev_reg *reg)
+static void sata_revid_init(struct sim_dev_reg *reg)
 {
 	reg->sim_reg.value = 0x01060100;
 	reg->sim_reg.mask = 0;
@@ -188,7 +166,7 @@ static inline void extract_bytes(u32 *value, int reg, int len)
 	*value &= mask;
 }
 
-int bridge_read(unsigned int devfn, int reg, int len, u32 *value)
+static int bridge_read(unsigned int devfn, int reg, int len, u32 *value)
 {
 	u32 av_bridge_base, av_bridge_limit;
 	int retval = 0;

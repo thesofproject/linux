@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  AMD K7 Powernow driver.
  *  (C) 2003 Dave Jones on behalf of SuSE Labs.
  *
- *  Licensed under the terms of the GNU GPL License version 2.
  *  Based upon datasheets & sample CPUs kindly provided by AMD.
  *
  * Errata 5:
@@ -29,6 +29,7 @@
 #include <asm/timer.h>		/* Needed for recalibrate_cpu_khz() */
 #include <asm/msr.h>
 #include <asm/cpu_device_id.h>
+#include <asm/cpuid/api.h>
 
 #ifdef CONFIG_X86_POWERNOW_K7_ACPI
 #include <linux/acpi.h>
@@ -109,7 +110,7 @@ static int check_fsb(unsigned int fsbspeed)
 }
 
 static const struct x86_cpu_id powernow_k7_cpuids[] = {
-	{ X86_VENDOR_AMD, 6, },
+	X86_MATCH_VENDOR_FAM(AMD, 6, NULL),
 	{}
 };
 MODULE_DEVICE_TABLE(x86cpu, powernow_k7_cpuids);
@@ -219,13 +220,13 @@ static void change_FID(int fid)
 {
 	union msr_fidvidctl fidvidctl;
 
-	rdmsrl(MSR_K7_FID_VID_CTL, fidvidctl.val);
+	rdmsrq(MSR_K7_FID_VID_CTL, fidvidctl.val);
 	if (fidvidctl.bits.FID != fid) {
 		fidvidctl.bits.SGTC = latency;
 		fidvidctl.bits.FID = fid;
 		fidvidctl.bits.VIDC = 0;
 		fidvidctl.bits.FIDC = 1;
-		wrmsrl(MSR_K7_FID_VID_CTL, fidvidctl.val);
+		wrmsrq(MSR_K7_FID_VID_CTL, fidvidctl.val);
 	}
 }
 
@@ -234,13 +235,13 @@ static void change_VID(int vid)
 {
 	union msr_fidvidctl fidvidctl;
 
-	rdmsrl(MSR_K7_FID_VID_CTL, fidvidctl.val);
+	rdmsrq(MSR_K7_FID_VID_CTL, fidvidctl.val);
 	if (fidvidctl.bits.VID != vid) {
 		fidvidctl.bits.SGTC = latency;
 		fidvidctl.bits.VID = vid;
 		fidvidctl.bits.FIDC = 0;
 		fidvidctl.bits.VIDC = 1;
-		wrmsrl(MSR_K7_FID_VID_CTL, fidvidctl.val);
+		wrmsrq(MSR_K7_FID_VID_CTL, fidvidctl.val);
 	}
 }
 
@@ -260,7 +261,7 @@ static int powernow_target(struct cpufreq_policy *policy, unsigned int index)
 	fid = powernow_table[index].driver_data & 0xFF;
 	vid = (powernow_table[index].driver_data & 0xFF00) >> 8;
 
-	rdmsrl(MSR_K7_FID_VID_STATUS, fidvidstatus.val);
+	rdmsrq(MSR_K7_FID_VID_STATUS, fidvidstatus.val);
 	cfid = fidvidstatus.bits.CFID;
 	freqs.old = fsb * fid_codes[cfid] / 10;
 
@@ -304,7 +305,7 @@ static int powernow_acpi_init(void)
 		goto err0;
 	}
 
-	acpi_processor_perf = kzalloc(sizeof(*acpi_processor_perf), GFP_KERNEL);
+	acpi_processor_perf = kzalloc_obj(*acpi_processor_perf);
 	if (!acpi_processor_perf) {
 		retval = -ENOMEM;
 		goto err0;
@@ -557,7 +558,7 @@ static unsigned int powernow_get(unsigned int cpu)
 
 	if (cpu)
 		return 0;
-	rdmsrl(MSR_K7_FID_VID_STATUS, fidvidstatus.val);
+	rdmsrq(MSR_K7_FID_VID_STATUS, fidvidstatus.val);
 	cfid = fidvidstatus.bits.CFID;
 
 	return fsb * fid_codes[cfid] / 10;
@@ -598,7 +599,7 @@ static int powernow_cpu_init(struct cpufreq_policy *policy)
 	if (policy->cpu != 0)
 		return -ENODEV;
 
-	rdmsrl(MSR_K7_FID_VID_STATUS, fidvidstatus.val);
+	rdmsrq(MSR_K7_FID_VID_STATUS, fidvidstatus.val);
 
 	recalibrate_cpu_khz();
 
@@ -644,7 +645,7 @@ static int powernow_cpu_init(struct cpufreq_policy *policy)
 	return 0;
 }
 
-static int powernow_cpu_exit(struct cpufreq_policy *policy)
+static void powernow_cpu_exit(struct cpufreq_policy *policy)
 {
 #ifdef CONFIG_X86_POWERNOW_K7_ACPI
 	if (acpi_processor_perf) {
@@ -655,7 +656,6 @@ static int powernow_cpu_exit(struct cpufreq_policy *policy)
 #endif
 
 	kfree(powernow_table);
-	return 0;
 }
 
 static struct cpufreq_driver powernow_driver = {
@@ -668,7 +668,6 @@ static struct cpufreq_driver powernow_driver = {
 	.init		= powernow_cpu_init,
 	.exit		= powernow_cpu_exit,
 	.name		= "powernow-k7",
-	.attr		= cpufreq_generic_attr,
 };
 
 static int __init powernow_init(void)

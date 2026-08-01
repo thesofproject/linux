@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Renesas Solutions Highlander FPGA I2C/SMBus support.
  *
@@ -6,10 +7,6 @@
  * Copyright (C) 2008  Paul Mundt
  * Copyright (C) 2008  Renesas Solutions Corp.
  * Copyright (C) 2008  Atom Create Engineering Co., Ltd.
- *
- * This file is subject to the terms and conditions of the GNU General
- * Public License version 2. See the file "COPYING" in the main directory
- * of this archive for more details.
  */
 #include <linux/module.h>
 #include <linux/interrupt.h>
@@ -325,7 +322,7 @@ static int highlander_i2c_smbus_xfer(struct i2c_adapter *adap, u16 addr,
 		tmp |= (SMMR_MODE0 | SMMR_MODE1);
 		break;
 	default:
-		dev_err(dev->dev, "unsupported xfer size %d\n", dev->buf_len);
+		dev_err(dev->dev, "unsupported xfer size %zu\n", dev->buf_len);
 		return -EINVAL;
 	}
 
@@ -334,7 +331,7 @@ static int highlander_i2c_smbus_xfer(struct i2c_adapter *adap, u16 addr,
 	/* Ensure we're in a sane state */
 	highlander_i2c_done(dev);
 
-	/* Set slave address */
+	/* Set target address */
 	iowrite16((addr << 1) | read_write, dev->base + SMSMADR);
 
 	highlander_i2c_command(dev, command, dev->buf_len);
@@ -368,11 +365,11 @@ static int highlander_i2c_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
-	dev = kzalloc(sizeof(struct highlander_i2c_dev), GFP_KERNEL);
+	dev = kzalloc_obj(struct highlander_i2c_dev);
 	if (unlikely(!dev))
 		return -ENOMEM;
 
-	dev->base = ioremap_nocache(res->start, resource_size(res));
+	dev->base = ioremap(res->start, resource_size(res));
 	if (unlikely(!dev->base)) {
 		ret = -ENXIO;
 		goto err;
@@ -382,7 +379,7 @@ static int highlander_i2c_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, dev);
 
 	dev->irq = platform_get_irq(pdev, 0);
-	if (iic_force_poll)
+	if (dev->irq < 0 || iic_force_poll)
 		dev->irq = 0;
 
 	if (dev->irq) {
@@ -405,7 +402,7 @@ static int highlander_i2c_probe(struct platform_device *pdev)
 	i2c_set_adapdata(adap, dev);
 	adap->owner = THIS_MODULE;
 	adap->class = I2C_CLASS_HWMON;
-	strlcpy(adap->name, "HL FPGA I2C adapter", sizeof(adap->name));
+	strscpy(adap->name, "HL FPGA I2C adapter", sizeof(adap->name));
 	adap->algo = &highlander_i2c_algo;
 	adap->dev.parent = &pdev->dev;
 	adap->nr = pdev->id;
@@ -438,7 +435,7 @@ err:
 	return ret;
 }
 
-static int highlander_i2c_remove(struct platform_device *pdev)
+static void highlander_i2c_remove(struct platform_device *pdev)
 {
 	struct highlander_i2c_dev *dev = platform_get_drvdata(pdev);
 
@@ -449,8 +446,6 @@ static int highlander_i2c_remove(struct platform_device *pdev)
 
 	iounmap(dev->base);
 	kfree(dev);
-
-	return 0;
 }
 
 static struct platform_driver highlander_i2c_driver = {

@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for Digigram miXart soundcards
  *
  * mixer callbacks
  *
  * Copyright (c) 2003 by Digigram <alsa@digigram.com>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/time.h>
@@ -33,7 +20,7 @@
 #include <sound/tlv.h>
 #include "mixart_mixer.h"
 
-static u32 mixart_analog_level[256] = {
+static const u32 mixart_analog_level[256] = {
 	0xc2c00000,		/* [000] -96.0 dB */
 	0xc2bf0000,		/* [001] -95.5 dB */
 	0xc2be0000,		/* [002] -95.0 dB */
@@ -357,7 +344,8 @@ static int mixart_analog_vol_info(struct snd_kcontrol *kcontrol, struct snd_ctl_
 static int mixart_analog_vol_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_mixart *chip = snd_kcontrol_chip(kcontrol);
-	mutex_lock(&chip->mgr->mixer_mutex);
+
+	guard(mutex)(&chip->mgr->mixer_mutex);
 	if(kcontrol->private_value == 0) {	/* playback */
 		ucontrol->value.integer.value[0] = chip->analog_playback_volume[0];
 		ucontrol->value.integer.value[1] = chip->analog_playback_volume[1];
@@ -365,7 +353,6 @@ static int mixart_analog_vol_get(struct snd_kcontrol *kcontrol, struct snd_ctl_e
 		ucontrol->value.integer.value[0] = chip->analog_capture_volume[0];
 		ucontrol->value.integer.value[1] = chip->analog_capture_volume[1];
 	}
-	mutex_unlock(&chip->mgr->mixer_mutex);
 	return 0;
 }
 
@@ -375,7 +362,7 @@ static int mixart_analog_vol_put(struct snd_kcontrol *kcontrol, struct snd_ctl_e
 	int changed = 0;
 	int is_capture, i;
 
-	mutex_lock(&chip->mgr->mixer_mutex);
+	guard(mutex)(&chip->mgr->mixer_mutex);
 	is_capture = (kcontrol->private_value != 0);
 	for (i = 0; i < 2; i++) {
 		int new_volume = ucontrol->value.integer.value[i];
@@ -398,7 +385,6 @@ static int mixart_analog_vol_put(struct snd_kcontrol *kcontrol, struct snd_ctl_e
 	}
 	if (changed)
 		mixart_update_analog_audio_level(chip, is_capture);
-	mutex_unlock(&chip->mgr->mixer_mutex);
 	return changed;
 }
 
@@ -422,10 +408,9 @@ static int mixart_audio_sw_get(struct snd_kcontrol *kcontrol, struct snd_ctl_ele
 {
 	struct snd_mixart *chip = snd_kcontrol_chip(kcontrol);
 
-	mutex_lock(&chip->mgr->mixer_mutex);
+	guard(mutex)(&chip->mgr->mixer_mutex);
 	ucontrol->value.integer.value[0] = chip->analog_playback_active[0];
 	ucontrol->value.integer.value[1] = chip->analog_playback_active[1];
-	mutex_unlock(&chip->mgr->mixer_mutex);
 	return 0;
 }
 
@@ -433,7 +418,8 @@ static int mixart_audio_sw_put(struct snd_kcontrol *kcontrol, struct snd_ctl_ele
 {
 	struct snd_mixart *chip = snd_kcontrol_chip(kcontrol);
 	int i, changed = 0;
-	mutex_lock(&chip->mgr->mixer_mutex);
+
+	guard(mutex)(&chip->mgr->mixer_mutex);
 	for (i = 0; i < 2; i++) {
 		if (chip->analog_playback_active[i] !=
 		    ucontrol->value.integer.value[i]) {
@@ -444,7 +430,6 @@ static int mixart_audio_sw_put(struct snd_kcontrol *kcontrol, struct snd_ctl_ele
 	}
 	if (changed) /* update playback levels */
 		mixart_update_analog_audio_level(chip, 0);
-	mutex_unlock(&chip->mgr->mixer_mutex);
 	return changed;
 }
 
@@ -456,7 +441,7 @@ static const struct snd_kcontrol_new mixart_control_output_switch = {
 	.put =          mixart_audio_sw_put
 };
 
-static u32 mixart_digital_level[256] = {
+static const u32 mixart_digital_level[256] = {
 	0x00000000,		/* [000] = 0.00e+000 = mute if <= -109.5dB */
 	0x366e1c7a,		/* [001] = 3.55e-006 = pow(10.0, 0.05 * -109.0dB) */
 	0x367c3860,		/* [002] = 3.76e-006 = pow(10.0, 0.05 * -108.5dB) */
@@ -838,7 +823,8 @@ static int mixart_pcm_vol_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 	int *stored_volume;
 	int is_capture = kcontrol->private_value & MIXART_VOL_REC_MASK;
 	int is_aes = kcontrol->private_value & MIXART_VOL_AES_MASK;
-	mutex_lock(&chip->mgr->mixer_mutex);
+
+	guard(mutex)(&chip->mgr->mixer_mutex);
 	if(is_capture) {
 		if(is_aes)	stored_volume = chip->digital_capture_volume[1];	/* AES capture */
 		else		stored_volume = chip->digital_capture_volume[0];	/* analog capture */
@@ -849,7 +835,6 @@ static int mixart_pcm_vol_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 	}
 	ucontrol->value.integer.value[0] = stored_volume[0];
 	ucontrol->value.integer.value[1] = stored_volume[1];
-	mutex_unlock(&chip->mgr->mixer_mutex);
 	return 0;
 }
 
@@ -862,7 +847,8 @@ static int mixart_pcm_vol_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 	int is_aes = kcontrol->private_value & MIXART_VOL_AES_MASK;
 	int* stored_volume;
 	int i;
-	mutex_lock(&chip->mgr->mixer_mutex);
+
+	guard(mutex)(&chip->mgr->mixer_mutex);
 	if (is_capture) {
 		if (is_aes)	/* AES capture */
 			stored_volume = chip->digital_capture_volume[1];
@@ -891,7 +877,6 @@ static int mixart_pcm_vol_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 		else
 			mixart_update_playback_stream_level(chip, is_aes, idx);
 	}
-	mutex_unlock(&chip->mgr->mixer_mutex);
 	return changed;
 }
 
@@ -916,12 +901,12 @@ static int mixart_pcm_sw_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_
 	struct snd_mixart *chip = snd_kcontrol_chip(kcontrol);
 	int idx = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id); /* index */
 	snd_BUG_ON(idx >= MIXART_PLAYBACK_STREAMS);
-	mutex_lock(&chip->mgr->mixer_mutex);
+
+	guard(mutex)(&chip->mgr->mixer_mutex);
 	if(kcontrol->private_value & MIXART_VOL_AES_MASK)	/* AES playback */
 		idx += MIXART_PLAYBACK_STREAMS;
 	ucontrol->value.integer.value[0] = chip->digital_playback_active[idx][0];
 	ucontrol->value.integer.value[1] = chip->digital_playback_active[idx][1];
-	mutex_unlock(&chip->mgr->mixer_mutex);
 	return 0;
 }
 
@@ -933,7 +918,8 @@ static int mixart_pcm_sw_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_
 	int idx = snd_ctl_get_ioffidx(kcontrol, &ucontrol->id); /* index */
 	int i, j;
 	snd_BUG_ON(idx >= MIXART_PLAYBACK_STREAMS);
-	mutex_lock(&chip->mgr->mixer_mutex);
+
+	guard(mutex)(&chip->mgr->mixer_mutex);
 	j = idx;
 	if (is_aes)
 		j += MIXART_PLAYBACK_STREAMS;
@@ -947,7 +933,6 @@ static int mixart_pcm_sw_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_
 	}
 	if (changed)
 		mixart_update_playback_stream_level(chip, is_aes, idx);
-	mutex_unlock(&chip->mgr->mixer_mutex);
 	return changed;
 }
 
@@ -998,10 +983,10 @@ static int mixart_update_monitoring(struct snd_mixart* chip, int channel)
 static int mixart_monitor_vol_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_mixart *chip = snd_kcontrol_chip(kcontrol);
-	mutex_lock(&chip->mgr->mixer_mutex);
+
+	guard(mutex)(&chip->mgr->mixer_mutex);
 	ucontrol->value.integer.value[0] = chip->monitoring_volume[0];
 	ucontrol->value.integer.value[1] = chip->monitoring_volume[1];
-	mutex_unlock(&chip->mgr->mixer_mutex);
 	return 0;
 }
 
@@ -1010,7 +995,8 @@ static int mixart_monitor_vol_put(struct snd_kcontrol *kcontrol, struct snd_ctl_
 	struct snd_mixart *chip = snd_kcontrol_chip(kcontrol);
 	int changed = 0;
 	int i;
-	mutex_lock(&chip->mgr->mixer_mutex);
+
+	guard(mutex)(&chip->mgr->mixer_mutex);
 	for (i = 0; i < 2; i++) {
 		if (chip->monitoring_volume[i] !=
 		    ucontrol->value.integer.value[i]) {
@@ -1020,7 +1006,6 @@ static int mixart_monitor_vol_put(struct snd_kcontrol *kcontrol, struct snd_ctl_
 			changed = 1;
 		}
 	}
-	mutex_unlock(&chip->mgr->mixer_mutex);
 	return changed;
 }
 
@@ -1042,10 +1027,10 @@ static const struct snd_kcontrol_new mixart_control_monitor_vol = {
 static int mixart_monitor_sw_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_mixart *chip = snd_kcontrol_chip(kcontrol);
-	mutex_lock(&chip->mgr->mixer_mutex);
+
+	guard(mutex)(&chip->mgr->mixer_mutex);
 	ucontrol->value.integer.value[0] = chip->monitoring_active[0];
 	ucontrol->value.integer.value[1] = chip->monitoring_active[1];
-	mutex_unlock(&chip->mgr->mixer_mutex);
 	return 0;
 }
 
@@ -1054,7 +1039,8 @@ static int mixart_monitor_sw_put(struct snd_kcontrol *kcontrol, struct snd_ctl_e
 	struct snd_mixart *chip = snd_kcontrol_chip(kcontrol);
 	int changed = 0;
 	int i;
-	mutex_lock(&chip->mgr->mixer_mutex);
+
+	guard(mutex)(&chip->mgr->mixer_mutex);
 	for (i = 0; i < 2; i++) {
 		if (chip->monitoring_active[i] !=
 		    ucontrol->value.integer.value[i]) {
@@ -1087,7 +1073,6 @@ static int mixart_monitor_sw_put(struct snd_kcontrol *kcontrol, struct snd_ctl_e
 		}
 	}
 
-	mutex_unlock(&chip->mgr->mixer_mutex);
 	return (changed != 0);
 }
 
@@ -1127,10 +1112,12 @@ int snd_mixart_create_mixer(struct mixart_mgr *mgr)
 		temp = mixart_control_analog_level;
 		temp.name = "Master Playback Volume";
 		temp.private_value = 0; /* playback */
-		if ((err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip))) < 0)
+		err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip));
+		if (err < 0)
 			return err;
 		/* output mute controls */
-		if ((err = snd_ctl_add(chip->card, snd_ctl_new1(&mixart_control_output_switch, chip))) < 0)
+		err = snd_ctl_add(chip->card, snd_ctl_new1(&mixart_control_output_switch, chip));
+		if (err < 0)
 			return err;
 
 		/* analog input level control only on first two chips !*/
@@ -1138,7 +1125,8 @@ int snd_mixart_create_mixer(struct mixart_mgr *mgr)
 			temp = mixart_control_analog_level;
 			temp.name = "Master Capture Volume";
 			temp.private_value = 1; /* capture */
-			if ((err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip))) < 0)
+			err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip));
+			if (err < 0)
 				return err;
 		}
 
@@ -1146,45 +1134,53 @@ int snd_mixart_create_mixer(struct mixart_mgr *mgr)
 		temp.name = "PCM Playback Volume";
 		temp.count = MIXART_PLAYBACK_STREAMS;
 		temp.private_value = 0; /* playback analog */
-		if ((err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip))) < 0)
+		err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip));
+		if (err < 0)
 			return err;
 
 		temp.name = "PCM Capture Volume";
 		temp.count = 1;
 		temp.private_value = MIXART_VOL_REC_MASK; /* capture analog */
-		if ((err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip))) < 0)
+		err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip));
+		if (err < 0)
 			return err;
 
 		if(mgr->board_type == MIXART_DAUGHTER_TYPE_AES) {
 			temp.name = "AES Playback Volume";
 			temp.count = MIXART_PLAYBACK_STREAMS;
 			temp.private_value = MIXART_VOL_AES_MASK; /* playback AES/EBU */
-			if ((err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip))) < 0)
+			err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip));
+			if (err < 0)
 				return err;
 
 			temp.name = "AES Capture Volume";
 			temp.count = 0;
 			temp.private_value = MIXART_VOL_REC_MASK | MIXART_VOL_AES_MASK; /* capture AES/EBU */
-			if ((err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip))) < 0)
+			err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip));
+			if (err < 0)
 				return err;
 		}
 		temp = mixart_control_pcm_switch;
 		temp.name = "PCM Playback Switch";
 		temp.private_value = 0; /* playback analog */
-		if ((err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip))) < 0)
+		err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip));
+		if (err < 0)
 			return err;
 
 		if(mgr->board_type == MIXART_DAUGHTER_TYPE_AES) {
 			temp.name = "AES Playback Switch";
 			temp.private_value = MIXART_VOL_AES_MASK; /* playback AES/EBU */
-			if ((err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip))) < 0)
+			err = snd_ctl_add(chip->card, snd_ctl_new1(&temp, chip));
+			if (err < 0)
 				return err;
 		}
 
 		/* monitoring */
-		if ((err = snd_ctl_add(chip->card, snd_ctl_new1(&mixart_control_monitor_vol, chip))) < 0)
+		err = snd_ctl_add(chip->card, snd_ctl_new1(&mixart_control_monitor_vol, chip));
+		if (err < 0)
 			return err;
-		if ((err = snd_ctl_add(chip->card, snd_ctl_new1(&mixart_control_monitor_sw, chip))) < 0)
+		err = snd_ctl_add(chip->card, snd_ctl_new1(&mixart_control_monitor_sw, chip));
+		if (err < 0)
 			return err;
 
 		/* init all mixer data and program the master volumes/switches */

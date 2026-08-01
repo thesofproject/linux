@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * (C) 2008-2009 Pablo Neira Ayuso <pablo@netfilter.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/module.h>
@@ -110,7 +107,7 @@ xt_cluster_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	}
 
 	ct = nf_ct_get(skb, &ctinfo);
-	if (ct == NULL)
+	if (!ct || nf_ct_is_template(ct))
 		return false;
 
 	if (ct->master)
@@ -125,6 +122,7 @@ xt_cluster_mt(const struct sk_buff *skb, struct xt_action_param *par)
 static int xt_cluster_mt_checkentry(const struct xt_mtchk_param *par)
 {
 	struct xt_cluster_match_info *info = par->matchinfo;
+	int ret;
 
 	if (info->total_nodes > XT_CLUSTER_NODES_MAX) {
 		pr_info_ratelimited("you have exceeded the maximum number of cluster nodes (%u > %u)\n",
@@ -135,26 +133,50 @@ static int xt_cluster_mt_checkentry(const struct xt_mtchk_param *par)
 		pr_info_ratelimited("node mask cannot exceed total number of nodes\n");
 		return -EDOM;
 	}
-	return 0;
+
+	ret = nf_ct_netns_get(par->net, par->family);
+	if (ret < 0)
+		pr_info_ratelimited("cannot load conntrack support for proto=%u\n",
+				    par->family);
+	return ret;
 }
 
-static struct xt_match xt_cluster_match __read_mostly = {
-	.name		= "cluster",
-	.family		= NFPROTO_UNSPEC,
-	.match		= xt_cluster_mt,
-	.checkentry	= xt_cluster_mt_checkentry,
-	.matchsize	= sizeof(struct xt_cluster_match_info),
-	.me		= THIS_MODULE,
+static void xt_cluster_mt_destroy(const struct xt_mtdtor_param *par)
+{
+	nf_ct_netns_put(par->net, par->family);
+}
+
+static struct xt_match xt_cluster_match[] __read_mostly = {
+	{
+		.name		= "cluster",
+		.family		= NFPROTO_IPV4,
+		.match		= xt_cluster_mt,
+		.checkentry	= xt_cluster_mt_checkentry,
+		.matchsize	= sizeof(struct xt_cluster_match_info),
+		.destroy	= xt_cluster_mt_destroy,
+		.me		= THIS_MODULE,
+	},
+#if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
+	{
+		.name		= "cluster",
+		.family		= NFPROTO_IPV6,
+		.match		= xt_cluster_mt,
+		.checkentry	= xt_cluster_mt_checkentry,
+		.matchsize	= sizeof(struct xt_cluster_match_info),
+		.destroy	= xt_cluster_mt_destroy,
+		.me		= THIS_MODULE,
+	},
+#endif
 };
 
 static int __init xt_cluster_mt_init(void)
 {
-	return xt_register_match(&xt_cluster_match);
+	return xt_register_matches(xt_cluster_match, ARRAY_SIZE(xt_cluster_match));
 }
 
 static void __exit xt_cluster_mt_fini(void)
 {
-	xt_unregister_match(&xt_cluster_match);
+	xt_unregister_matches(xt_cluster_match, ARRAY_SIZE(xt_cluster_match));
 }
 
 MODULE_AUTHOR("Pablo Neira Ayuso <pablo@netfilter.org>");

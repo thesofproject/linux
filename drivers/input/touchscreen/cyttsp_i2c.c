@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * cyttsp_i2c.c
  * Cypress TrueTouch(TM) Standard Product (TTSP) I2C touchscreen driver.
@@ -9,18 +10,7 @@
  * Copyright (C) 2009, 2010, 2011 Cypress Semiconductor, Inc.
  * Copyright (C) 2012 Javier Martinez Canillas <javier@dowhile0.org>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2, and only version 2, as published by the
- * Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  * Contact Cypress Semiconductor at www.cypress.com <ttdrivers@cypress.com>
- *
  */
 
 #include "cyttsp_core.h"
@@ -28,7 +18,64 @@
 #include <linux/i2c.h>
 #include <linux/input.h>
 
+#define CY_I2C_NAME		"cyttsp-i2c"
+
 #define CY_I2C_DATA_SIZE	128
+
+static int cyttsp_i2c_read_block_data(struct device *dev, u8 *xfer_buf,
+				      u16 addr, u8 length, void *values)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	u8 client_addr = client->addr | ((addr >> 8) & 0x1);
+	u8 addr_lo = addr & 0xFF;
+	struct i2c_msg msgs[] = {
+		{
+			.addr = client_addr,
+			.flags = 0,
+			.len = 1,
+			.buf = &addr_lo,
+		},
+		{
+			.addr = client_addr,
+			.flags = I2C_M_RD,
+			.len = length,
+			.buf = values,
+		},
+	};
+	int retval;
+
+	retval = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
+	if (retval < 0)
+		return retval;
+
+	return retval != ARRAY_SIZE(msgs) ? -EIO : 0;
+}
+
+static int cyttsp_i2c_write_block_data(struct device *dev, u8 *xfer_buf,
+				       u16 addr, u8 length, const void *values)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	u8 client_addr = client->addr | ((addr >> 8) & 0x1);
+	u8 addr_lo = addr & 0xFF;
+	struct i2c_msg msgs[] = {
+		{
+			.addr = client_addr,
+			.flags = 0,
+			.len = length + 1,
+			.buf = xfer_buf,
+		},
+	};
+	int retval;
+
+	xfer_buf[0] = addr_lo;
+	memcpy(&xfer_buf[1], values, length);
+
+	retval = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
+	if (retval < 0)
+		return retval;
+
+	return retval != ARRAY_SIZE(msgs) ? -EIO : 0;
+}
 
 static const struct cyttsp_bus_ops cyttsp_i2c_bus_ops = {
 	.bustype	= BUS_I2C,
@@ -36,8 +83,7 @@ static const struct cyttsp_bus_ops cyttsp_i2c_bus_ops = {
 	.read           = cyttsp_i2c_read_block_data,
 };
 
-static int cyttsp_i2c_probe(struct i2c_client *client,
-				      const struct i2c_device_id *id)
+static int cyttsp_i2c_probe(struct i2c_client *client)
 {
 	struct cyttsp *ts;
 
@@ -57,15 +103,23 @@ static int cyttsp_i2c_probe(struct i2c_client *client,
 }
 
 static const struct i2c_device_id cyttsp_i2c_id[] = {
-	{ CY_I2C_NAME, 0 },
+	{ .name = CY_I2C_NAME },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, cyttsp_i2c_id);
 
+static const struct of_device_id cyttsp_of_i2c_match[] = {
+	{ .compatible = "cypress,cy8ctma340", },
+	{ .compatible = "cypress,cy8ctst341", },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, cyttsp_of_i2c_match);
+
 static struct i2c_driver cyttsp_i2c_driver = {
 	.driver = {
 		.name	= CY_I2C_NAME,
-		.pm	= &cyttsp_pm_ops,
+		.pm	= pm_sleep_ptr(&cyttsp_pm_ops),
+		.of_match_table = cyttsp_of_i2c_match,
 	},
 	.probe		= cyttsp_i2c_probe,
 	.id_table	= cyttsp_i2c_id,

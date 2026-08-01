@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Guillemot Maxi Radio FM 2000 PCI radio card driver for Linux
  * (C) 2001 Dimitromanolakis Apostolos <apdim@grecian.net>
@@ -121,7 +122,7 @@ static int maxiradio_probe(struct pci_dev *pdev,
 	struct v4l2_device *v4l2_dev;
 	int retval = -ENOMEM;
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	if (dev == NULL) {
 		dev_err(&pdev->dev, "not enough memory\n");
 		return -ENOMEM;
@@ -142,9 +143,7 @@ static int maxiradio_probe(struct pci_dev *pdev,
 	dev->tea.cannot_read_data = true;
 	dev->tea.v4l2_dev = v4l2_dev;
 	dev->tea.radio_nr = radio_nr;
-	strlcpy(dev->tea.card, "Maxi Radio FM2000", sizeof(dev->tea.card));
-	snprintf(dev->tea.bus_info, sizeof(dev->tea.bus_info),
-			"PCI:%s", pci_name(pdev));
+	strscpy(dev->tea.card, "Maxi Radio FM2000", sizeof(dev->tea.card));
 
 	retval = -ENODEV;
 
@@ -175,7 +174,7 @@ errfr:
 
 static void maxiradio_remove(struct pci_dev *pdev)
 {
-	struct v4l2_device *v4l2_dev = dev_get_drvdata(&pdev->dev);
+	struct v4l2_device *v4l2_dev = pci_get_drvdata(pdev);
 	struct maxiradio *dev = to_maxiradio(v4l2_dev);
 
 	snd_tea575x_exit(&dev->tea);

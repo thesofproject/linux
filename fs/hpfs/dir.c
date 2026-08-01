@@ -96,8 +96,8 @@ static int hpfs_readdir(struct file *file, struct dir_context *ctx)
 		}
 		if (!fnode_is_dir(fno)) {
 			e = 1;
-			hpfs_error(inode->i_sb, "not a directory, fnode %08lx",
-					(unsigned long)inode->i_ino);
+			hpfs_error(inode->i_sb, "not a directory, fnode %08llx",
+					inode->i_ino);
 		}
 		if (hpfs_inode->i_dno != le32_to_cpu(fno->u.external[0].disk_secno)) {
 			e = 1;
@@ -244,9 +244,10 @@ struct dentry *hpfs_lookup(struct inode *dir, struct dentry *dentry, unsigned in
 	result = iget_locked(dir->i_sb, ino);
 	if (!result) {
 		hpfs_error(dir->i_sb, "hpfs_lookup: can't get inode");
+		result = ERR_PTR(-ENOMEM);
 		goto bail1;
 	}
-	if (result->i_state & I_NEW) {
+	if (inode_state_read_once(result) & I_NEW) {
 		hpfs_init_inode(result);
 		if (de->directory)
 			hpfs_read_inode(result);
@@ -266,6 +267,8 @@ struct dentry *hpfs_lookup(struct inode *dir, struct dentry *dentry, unsigned in
 
 	if (de->has_acl || de->has_xtd_perm) if (!sb_rdonly(dir->i_sb)) {
 		hpfs_error(result->i_sb, "ACLs or XPERM found. This is probably HPFS386. This driver doesn't support it now. Send me some info on these structures");
+		iput(result);
+		result = ERR_PTR(-EINVAL);
 		goto bail1;
 	}
 
@@ -274,14 +277,16 @@ struct dentry *hpfs_lookup(struct inode *dir, struct dentry *dentry, unsigned in
 	 * inode.
 	 */
 
-	if (!result->i_ctime.tv_sec) {
-		if (!(result->i_ctime.tv_sec = local_to_gmt(dir->i_sb, le32_to_cpu(de->creation_date))))
-			result->i_ctime.tv_sec = 1;
-		result->i_ctime.tv_nsec = 0;
-		result->i_mtime.tv_sec = local_to_gmt(dir->i_sb, le32_to_cpu(de->write_date));
-		result->i_mtime.tv_nsec = 0;
-		result->i_atime.tv_sec = local_to_gmt(dir->i_sb, le32_to_cpu(de->read_date));
-		result->i_atime.tv_nsec = 0;
+	if (!inode_get_ctime_sec(result)) {
+		time64_t csec = local_to_gmt(dir->i_sb, le32_to_cpu(de->creation_date));
+
+		inode_set_ctime(result, csec ? csec : 1, 0);
+		inode_set_mtime(result,
+				local_to_gmt(dir->i_sb, le32_to_cpu(de->write_date)),
+				0);
+		inode_set_atime(result,
+				local_to_gmt(dir->i_sb, le32_to_cpu(de->read_date)),
+				0);
 		hpfs_result->i_ea_size = le32_to_cpu(de->ea_size);
 		if (!hpfs_result->i_ea_mode && de->read_only)
 			result->i_mode &= ~0222;
@@ -301,29 +306,17 @@ struct dentry *hpfs_lookup(struct inode *dir, struct dentry *dentry, unsigned in
 		}
 	}
 
+bail1:
 	hpfs_brelse4(&qbh);
 
 	/*
 	 * Made it.
 	 */
 
-	end:
-	end_add:
+end:
+end_add:
 	hpfs_unlock(dir->i_sb);
-	d_add(dentry, result);
-	return NULL;
-
-	/*
-	 * Didn't.
-	 */
-	bail1:
-	
-	hpfs_brelse4(&qbh);
-	
-	/*bail:*/
-
-	hpfs_unlock(dir->i_sb);
-	return ERR_PTR(-ENOENT);
+	return d_splice_alias(result, dentry);
 }
 
 const struct file_operations hpfs_dir_ops =
@@ -334,4 +327,5 @@ const struct file_operations hpfs_dir_ops =
 	.release	= hpfs_dir_release,
 	.fsync		= hpfs_file_fsync,
 	.unlocked_ioctl	= hpfs_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 };

@@ -1,61 +1,37 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Intel Sunrisepoint PCH pinctrl/GPIO driver
  *
- * Copyright (C) 2015, Intel Corporation
+ * Copyright (C) 2015 Intel Corporation
  * Authors: Mathias Nyman <mathias.nyman@linux.intel.com>
  *          Mika Westerberg <mika.westerberg@linux.intel.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
-#include <linux/acpi.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
+
 #include <linux/pinctrl/pinctrl.h>
 
 #include "pinctrl-intel.h"
 
-#define SPT_PAD_OWN	0x020
-#define SPT_PADCFGLOCK	0x0a0
-#define SPT_HOSTSW_OWN	0x0d0
-#define SPT_GPI_IE	0x120
+#define SPT_H_PAD_OWN		0x020
+#define SPT_H_PADCFGLOCK	0x090
+#define SPT_H_HOSTSW_OWN	0x0d0
+#define SPT_H_GPI_IS		0x100
+#define SPT_H_GPI_IE		0x120
 
-#define SPT_COMMUNITY(b, s, e)				\
-	{						\
-		.barno = (b),				\
-		.padown_offset = SPT_PAD_OWN,		\
-		.padcfglock_offset = SPT_PADCFGLOCK,	\
-		.hostown_offset = SPT_HOSTSW_OWN,	\
-		.ie_offset = SPT_GPI_IE,		\
-		.gpp_size = 24,				\
-		.gpp_num_padown_regs = 4,		\
-		.pin_base = (s),			\
-		.npins = ((e) - (s) + 1),		\
-	}
+#define SPT_LP_PAD_OWN		0x020
+#define SPT_LP_PADCFGLOCK	0x0a0
+#define SPT_LP_HOSTSW_OWN	0x0d0
+#define SPT_LP_GPI_IS		0x100
+#define SPT_LP_GPI_IE		0x120
 
-#define SPTH_GPP(r, s, e, g)				\
-	{						\
-		.reg_num = (r),				\
-		.base = (s),				\
-		.size = ((e) - (s) + 1),		\
-		.gpio_base = (g),			\
-	}
+#define SPT_H_COMMUNITY(b, s, e, g)			\
+	INTEL_COMMUNITY_GPPS(b, s, e, g, SPT_H)
 
-#define SPTH_COMMUNITY(b, s, e, g)			\
-	{						\
-		.barno = (b),				\
-		.padown_offset = SPT_PAD_OWN,		\
-		.padcfglock_offset = SPT_PADCFGLOCK,	\
-		.hostown_offset = SPT_HOSTSW_OWN,	\
-		.ie_offset = SPT_GPI_IE,		\
-		.pin_base = (s),			\
-		.npins = ((e) - (s) + 1),		\
-		.gpps = (g),				\
-		.ngpps = ARRAY_SIZE(g),			\
-	}
+#define SPT_LP_COMMUNITY(b, s, e)			\
+	INTEL_COMMUNITY_SIZE(b, s, e, 24, 4, SPT_LP)
 
 /* Sunrisepoint-LP */
 static const struct pinctrl_pin_desc sptlp_pins[] = {
@@ -291,9 +267,9 @@ static const struct intel_function sptlp_functions[] = {
 };
 
 static const struct intel_community sptlp_communities[] = {
-	SPT_COMMUNITY(0, 0, 47),
-	SPT_COMMUNITY(1, 48, 119),
-	SPT_COMMUNITY(2, 120, 151),
+	SPT_LP_COMMUNITY(0, 0, 47),
+	SPT_LP_COMMUNITY(1, 48, 119),
+	SPT_LP_COMMUNITY(2, 120, 151),
 };
 
 static const struct intel_pinctrl_soc_data sptlp_soc_data = {
@@ -553,27 +529,27 @@ static const struct intel_function spth_functions[] = {
 };
 
 static const struct intel_padgroup spth_community0_gpps[] = {
-	SPTH_GPP(0, 0, 23, 0),		/* GPP_A */
-	SPTH_GPP(1, 24, 47, 24),	/* GPP_B */
+	INTEL_GPP(0, 0, 23, 0),		/* GPP_A */
+	INTEL_GPP(1, 24, 47, 24),	/* GPP_B */
 };
 
 static const struct intel_padgroup spth_community1_gpps[] = {
-	SPTH_GPP(0, 48, 71, 48),	/* GPP_C */
-	SPTH_GPP(1, 72, 95, 72),	/* GPP_D */
-	SPTH_GPP(2, 96, 108, 96),	/* GPP_E */
-	SPTH_GPP(3, 109, 132, 120),	/* GPP_F */
-	SPTH_GPP(4, 133, 156, 144),	/* GPP_G */
-	SPTH_GPP(5, 157, 180, 168),	/* GPP_H */
+	INTEL_GPP(0, 48, 71, 48),	/* GPP_C */
+	INTEL_GPP(1, 72, 95, 72),	/* GPP_D */
+	INTEL_GPP(2, 96, 108, 96),	/* GPP_E */
+	INTEL_GPP(3, 109, 132, 120),	/* GPP_F */
+	INTEL_GPP(4, 133, 156, 144),	/* GPP_G */
+	INTEL_GPP(5, 157, 180, 168),	/* GPP_H */
 };
 
 static const struct intel_padgroup spth_community3_gpps[] = {
-	SPTH_GPP(0, 181, 191, 192),	/* GPP_I */
+	INTEL_GPP(0, 181, 191, 192),	/* GPP_I */
 };
 
 static const struct intel_community spth_communities[] = {
-	SPTH_COMMUNITY(0, 0, 47, spth_community0_gpps),
-	SPTH_COMMUNITY(1, 48, 180, spth_community1_gpps),
-	SPTH_COMMUNITY(2, 181, 191, spth_community3_gpps),
+	SPT_H_COMMUNITY(0, 0, 47, spth_community0_gpps),
+	SPT_H_COMMUNITY(1, 48, 180, spth_community1_gpps),
+	SPT_H_COMMUNITY(2, 181, 191, spth_community3_gpps),
 };
 
 static const struct intel_pinctrl_soc_data spth_soc_data = {
@@ -589,35 +565,18 @@ static const struct intel_pinctrl_soc_data spth_soc_data = {
 
 static const struct acpi_device_id spt_pinctrl_acpi_match[] = {
 	{ "INT344B", (kernel_ulong_t)&sptlp_soc_data },
+	{ "INT3451", (kernel_ulong_t)&spth_soc_data },
 	{ "INT345D", (kernel_ulong_t)&spth_soc_data },
 	{ }
 };
 MODULE_DEVICE_TABLE(acpi, spt_pinctrl_acpi_match);
 
-static int spt_pinctrl_probe(struct platform_device *pdev)
-{
-	const struct intel_pinctrl_soc_data *soc_data;
-	const struct acpi_device_id *id;
-
-	id = acpi_match_device(spt_pinctrl_acpi_match, &pdev->dev);
-	if (!id || !id->driver_data)
-		return -ENODEV;
-
-	soc_data = (const struct intel_pinctrl_soc_data *)id->driver_data;
-	return intel_pinctrl_probe(pdev, soc_data);
-}
-
-static const struct dev_pm_ops spt_pinctrl_pm_ops = {
-	SET_LATE_SYSTEM_SLEEP_PM_OPS(intel_pinctrl_suspend,
-				     intel_pinctrl_resume)
-};
-
 static struct platform_driver spt_pinctrl_driver = {
-	.probe = spt_pinctrl_probe,
+	.probe = intel_pinctrl_probe_by_hid,
 	.driver = {
 		.name = "sunrisepoint-pinctrl",
 		.acpi_match_table = spt_pinctrl_acpi_match,
-		.pm = &spt_pinctrl_pm_ops,
+		.pm = pm_sleep_ptr(&intel_pinctrl_pm_ops),
 	},
 };
 
@@ -637,3 +596,4 @@ MODULE_AUTHOR("Mathias Nyman <mathias.nyman@linux.intel.com>");
 MODULE_AUTHOR("Mika Westerberg <mika.westerberg@linux.intel.com>");
 MODULE_DESCRIPTION("Intel Sunrisepoint PCH pinctrl/GPIO driver");
 MODULE_LICENSE("GPL v2");
+MODULE_IMPORT_NS("PINCTRL_INTEL");

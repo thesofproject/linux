@@ -19,9 +19,9 @@
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/proc_fs.h>
-#include <linux/screen_info.h>
 #include <linux/kernel.h>
 #include <linux/percpu.h>
+#include <linux/reboot.h>
 #include <linux/cpu.h>
 #include <linux/of.h>
 #include <linux/of_fdt.h>
@@ -37,38 +37,25 @@
 #include <asm/bootparam.h>
 #include <asm/kasan.h>
 #include <asm/mmu_context.h>
-#include <asm/pgtable.h>
-#include <asm/processor.h>
-#include <asm/timex.h>
-#include <asm/platform.h>
 #include <asm/page.h>
-#include <asm/setup.h>
 #include <asm/param.h>
+#include <asm/platform.h>
+#include <asm/processor.h>
+#include <asm/sections.h>
+#include <asm/setup.h>
 #include <asm/smp.h>
 #include <asm/sysmem.h>
-
-#include <platform/hardware.h>
-
-#if defined(CONFIG_VGA_CONSOLE) || defined(CONFIG_DUMMY_CONSOLE)
-struct screen_info screen_info = {
-	.orig_x = 0,
-	.orig_y = 24,
-	.orig_video_cols = 80,
-	.orig_video_lines = 24,
-	.orig_video_isVGA = 1,
-	.orig_video_points = 16,
-};
-#endif
+#include <asm/timex.h>
+#include <asm/traps.h>
 
 #ifdef CONFIG_BLK_DEV_INITRD
 extern unsigned long initrd_start;
 extern unsigned long initrd_end;
-int initrd_is_mapped = 0;
 extern int initrd_below_start_ok;
 #endif
 
-#ifdef CONFIG_OF
-void *dtb_start = __dtb_start;
+#ifdef CONFIG_USE_OF
+static void *dtb_start __initdata = __dtb_start;
 #endif
 
 extern unsigned long loops_per_jiffy;
@@ -81,6 +68,7 @@ static char __initdata command_line[COMMAND_LINE_SIZE];
 static char default_command_line[COMMAND_LINE_SIZE] __initdata = CONFIG_CMDLINE;
 #endif
 
+#ifdef CONFIG_PARSE_BOOTPARAM
 /*
  * Boot parameter parsing.
  *
@@ -96,7 +84,7 @@ typedef struct tagtable {
 } tagtable_t;
 
 #define __tagtable(tag, fn) static tagtable_t __tagtable_##fn 		\
-	__attribute__((used, section(".taglist"))) = { tag, fn }
+	__section(".taglist") __attribute__((used)) = { tag, fn }
 
 /* parse current tag */
 
@@ -128,7 +116,7 @@ __tagtable(BP_TAG_INITRD, parse_tag_initrd);
 
 #endif /* CONFIG_BLK_DEV_INITRD */
 
-#ifdef CONFIG_OF
+#ifdef CONFIG_USE_OF
 
 static int __init parse_tag_fdt(const bp_tag_t *tag)
 {
@@ -138,11 +126,11 @@ static int __init parse_tag_fdt(const bp_tag_t *tag)
 
 __tagtable(BP_TAG_FDT, parse_tag_fdt);
 
-#endif /* CONFIG_OF */
+#endif /* CONFIG_USE_OF */
 
 static int __init parse_tag_cmdline(const bp_tag_t* tag)
 {
-	strlcpy(command_line, (char *)(tag->data), COMMAND_LINE_SIZE);
+	strscpy(command_line, (char *)(tag->data), COMMAND_LINE_SIZE);
 	return 0;
 }
 
@@ -178,8 +166,15 @@ static int __init parse_bootparam(const bp_tag_t* tag)
 
 	return 0;
 }
+#else
+static int __init parse_bootparam(const bp_tag_t *tag)
+{
+	pr_info("Ignoring boot parameters at %p\n", tag);
+	return 0;
+}
+#endif
 
-#ifdef CONFIG_OF
+#ifdef CONFIG_USE_OF
 
 #if !XCHAL_HAVE_PTP_MMU || XCHAL_HAVE_SPANNING_WAY
 unsigned long xtensa_kio_paddr = XCHAL_KIO_DEFAULT_PADDR;
@@ -221,14 +216,14 @@ static int __init xtensa_dt_io_area(unsigned long node, const char *uname,
 
 void __init early_init_devtree(void *params)
 {
-	early_init_dt_scan(params);
+	early_init_dt_scan(params, __pa(params));
 	of_scan_flat_dt(xtensa_dt_io_area, NULL);
 
 	if (!command_line[0])
-		strlcpy(command_line, boot_command_line, COMMAND_LINE_SIZE);
+		strscpy(command_line, boot_command_line, COMMAND_LINE_SIZE);
 }
 
-#endif /* CONFIG_OF */
+#endif /* CONFIG_USE_OF */
 
 /*
  * Initialize architecture. (Early stage)
@@ -236,6 +231,12 @@ void __init early_init_devtree(void *params)
 
 void __init init_arch(bp_tag_t *bp_start)
 {
+	/* Initialize basic exception handling if configuration may need it */
+
+	if (IS_ENABLED(CONFIG_KASAN) ||
+	    IS_ENABLED(CONFIG_XTENSA_LOAD_STORE))
+		early_trap_init();
+
 	/* Initialize MMU. */
 
 	init_mmu();
@@ -249,13 +250,13 @@ void __init init_arch(bp_tag_t *bp_start)
 	if (bp_start)
 		parse_bootparam(bp_start);
 
-#ifdef CONFIG_OF
+#ifdef CONFIG_USE_OF
 	early_init_devtree(dtb_start);
 #endif
 
 #ifdef CONFIG_CMDLINE_BOOL
 	if (!command_line[0])
-		strlcpy(command_line, default_command_line, COMMAND_LINE_SIZE);
+		strscpy(command_line, default_command_line, COMMAND_LINE_SIZE);
 #endif
 
 	/* Early hook for platforms */
@@ -267,44 +268,8 @@ void __init init_arch(bp_tag_t *bp_start)
  * Initialize system. Setup memory and reserve regions.
  */
 
-extern char _end[];
-extern char _stext[];
-extern char _WindowVectors_text_start;
-extern char _WindowVectors_text_end;
-extern char _DebugInterruptVector_text_start;
-extern char _DebugInterruptVector_text_end;
-extern char _KernelExceptionVector_text_start;
-extern char _KernelExceptionVector_text_end;
-extern char _UserExceptionVector_text_start;
-extern char _UserExceptionVector_text_end;
-extern char _DoubleExceptionVector_text_start;
-extern char _DoubleExceptionVector_text_end;
-#if XCHAL_EXCM_LEVEL >= 2
-extern char _Level2InterruptVector_text_start;
-extern char _Level2InterruptVector_text_end;
-#endif
-#if XCHAL_EXCM_LEVEL >= 3
-extern char _Level3InterruptVector_text_start;
-extern char _Level3InterruptVector_text_end;
-#endif
-#if XCHAL_EXCM_LEVEL >= 4
-extern char _Level4InterruptVector_text_start;
-extern char _Level4InterruptVector_text_end;
-#endif
-#if XCHAL_EXCM_LEVEL >= 5
-extern char _Level5InterruptVector_text_start;
-extern char _Level5InterruptVector_text_end;
-#endif
-#if XCHAL_EXCM_LEVEL >= 6
-extern char _Level6InterruptVector_text_start;
-extern char _Level6InterruptVector_text_end;
-#endif
-#ifdef CONFIG_SMP
-extern char _SecondaryResetVector_text_start;
-extern char _SecondaryResetVector_text_end;
-#endif
-
-static inline int mem_reserve(unsigned long start, unsigned long end)
+static inline int __init_memblock mem_reserve(unsigned long start,
+					      unsigned long end)
 {
 	return memblock_reserve(start, end - start);
 }
@@ -312,72 +277,80 @@ static inline int mem_reserve(unsigned long start, unsigned long end)
 void __init setup_arch(char **cmdline_p)
 {
 	pr_info("config ID: %08x:%08x\n",
-		get_sr(SREG_EPC), get_sr(SREG_EXCSAVE));
-	if (get_sr(SREG_EPC) != XCHAL_HW_CONFIGID0 ||
-	    get_sr(SREG_EXCSAVE) != XCHAL_HW_CONFIGID1)
+		xtensa_get_sr(SREG_EPC), xtensa_get_sr(SREG_EXCSAVE));
+	if (xtensa_get_sr(SREG_EPC) != XCHAL_HW_CONFIGID0 ||
+	    xtensa_get_sr(SREG_EXCSAVE) != XCHAL_HW_CONFIGID1)
 		pr_info("built for config ID: %08x:%08x\n",
 			XCHAL_HW_CONFIGID0, XCHAL_HW_CONFIGID1);
 
 	*cmdline_p = command_line;
 	platform_setup(cmdline_p);
-	strlcpy(boot_command_line, *cmdline_p, COMMAND_LINE_SIZE);
+	strscpy(boot_command_line, *cmdline_p, COMMAND_LINE_SIZE);
 
 	/* Reserve some memory regions */
 
 #ifdef CONFIG_BLK_DEV_INITRD
-	if (initrd_start < initrd_end) {
-		initrd_is_mapped = mem_reserve(__pa(initrd_start),
-					       __pa(initrd_end)) == 0;
+	if (initrd_start < initrd_end &&
+	    !mem_reserve(__pa(initrd_start), __pa(initrd_end)))
 		initrd_below_start_ok = 1;
-	} else {
+	else
 		initrd_start = 0;
-	}
 #endif
 
 	mem_reserve(__pa(_stext), __pa(_end));
+#ifdef CONFIG_XIP_KERNEL
+#ifdef CONFIG_VECTORS_ADDR
+	mem_reserve(__pa(_xip_text_start), __pa(_xip_text_end));
+#endif
+	mem_reserve(__pa(_xip_start), __pa(_xip_end));
+#endif
 
-#ifdef CONFIG_VECTORS_OFFSET
-	mem_reserve(__pa(&_WindowVectors_text_start),
-		    __pa(&_WindowVectors_text_end));
+#ifdef CONFIG_VECTORS_ADDR
+#ifdef SUPPORT_WINDOWED
+	mem_reserve(__pa(_WindowVectors_text_start),
+		    __pa(_WindowVectors_text_end));
+#endif
 
-	mem_reserve(__pa(&_DebugInterruptVector_text_start),
-		    __pa(&_DebugInterruptVector_text_end));
+	mem_reserve(__pa(_DebugInterruptVector_text_start),
+		    __pa(_DebugInterruptVector_text_end));
 
-	mem_reserve(__pa(&_KernelExceptionVector_text_start),
-		    __pa(&_KernelExceptionVector_text_end));
+	mem_reserve(__pa(_KernelExceptionVector_text_start),
+		    __pa(_KernelExceptionVector_text_end));
 
-	mem_reserve(__pa(&_UserExceptionVector_text_start),
-		    __pa(&_UserExceptionVector_text_end));
+	mem_reserve(__pa(_UserExceptionVector_text_start),
+		    __pa(_UserExceptionVector_text_end));
 
-	mem_reserve(__pa(&_DoubleExceptionVector_text_start),
-		    __pa(&_DoubleExceptionVector_text_end));
+	mem_reserve(__pa(_DoubleExceptionVector_text_start),
+		    __pa(_DoubleExceptionVector_text_end));
 
+	mem_reserve(__pa(_exception_text_start),
+		    __pa(_exception_text_end));
 #if XCHAL_EXCM_LEVEL >= 2
-	mem_reserve(__pa(&_Level2InterruptVector_text_start),
-		    __pa(&_Level2InterruptVector_text_end));
+	mem_reserve(__pa(_Level2InterruptVector_text_start),
+		    __pa(_Level2InterruptVector_text_end));
 #endif
 #if XCHAL_EXCM_LEVEL >= 3
-	mem_reserve(__pa(&_Level3InterruptVector_text_start),
-		    __pa(&_Level3InterruptVector_text_end));
+	mem_reserve(__pa(_Level3InterruptVector_text_start),
+		    __pa(_Level3InterruptVector_text_end));
 #endif
 #if XCHAL_EXCM_LEVEL >= 4
-	mem_reserve(__pa(&_Level4InterruptVector_text_start),
-		    __pa(&_Level4InterruptVector_text_end));
+	mem_reserve(__pa(_Level4InterruptVector_text_start),
+		    __pa(_Level4InterruptVector_text_end));
 #endif
 #if XCHAL_EXCM_LEVEL >= 5
-	mem_reserve(__pa(&_Level5InterruptVector_text_start),
-		    __pa(&_Level5InterruptVector_text_end));
+	mem_reserve(__pa(_Level5InterruptVector_text_start),
+		    __pa(_Level5InterruptVector_text_end));
 #endif
 #if XCHAL_EXCM_LEVEL >= 6
-	mem_reserve(__pa(&_Level6InterruptVector_text_start),
-		    __pa(&_Level6InterruptVector_text_end));
+	mem_reserve(__pa(_Level6InterruptVector_text_start),
+		    __pa(_Level6InterruptVector_text_end));
 #endif
 
-#endif /* CONFIG_VECTORS_OFFSET */
+#endif /* CONFIG_VECTORS_ADDR */
 
-#ifdef CONFIG_SMP
-	mem_reserve(__pa(&_SecondaryResetVector_text_start),
-		    __pa(&_SecondaryResetVector_text_end));
+#ifdef CONFIG_SECONDARY_RESET_VECTOR
+	mem_reserve(__pa(_SecondaryResetVector_text_start),
+		    __pa(_SecondaryResetVector_text_end));
 #endif
 	parse_early_param();
 	bootmem_init();
@@ -394,13 +367,7 @@ void __init setup_arch(char **cmdline_p)
 #ifdef CONFIG_VT
 # if defined(CONFIG_VGA_CONSOLE)
 	conswitchp = &vga_con;
-# elif defined(CONFIG_DUMMY_CONSOLE)
-	conswitchp = &dummy_con;
 # endif
-#endif
-
-#ifdef CONFIG_PCI
-	platform_pcibios_init();
 #endif
 }
 
@@ -508,6 +475,7 @@ void cpu_reset(void)
 				      "add	%2, %2, %7\n\t"
 				      "addi	%0, %0, -1\n\t"
 				      "bnez	%0, 1b\n\t"
+				      "isync\n\t"
 				      /* Jump to identity mapping */
 				      "jx	%3\n"
 				      "2:\n\t"
@@ -553,19 +521,30 @@ void cpu_reset(void)
 
 void machine_restart(char * cmd)
 {
-	platform_restart();
+	local_irq_disable();
+	smp_send_stop();
+	do_kernel_restart(cmd);
+	pr_err("Reboot failed -- System halted\n");
+	while (1)
+		cpu_relax();
 }
 
 void machine_halt(void)
 {
-	platform_halt();
-	while (1);
+	local_irq_disable();
+	smp_send_stop();
+	do_kernel_power_off();
+	while (1)
+		cpu_relax();
 }
 
 void machine_power_off(void)
 {
-	platform_power_off();
-	while (1);
+	local_irq_disable();
+	smp_send_stop();
+	do_kernel_power_off();
+	while (1)
+		cpu_relax();
 }
 #ifdef CONFIG_PROC_FS
 
@@ -590,7 +569,7 @@ c_show(struct seq_file *f, void *slot)
 		      num_online_cpus(),
 		      cpumask_pr_args(cpu_online_mask),
 		      XCHAL_BUILD_UNIQUE_ID,
-		      get_sr(SREG_EPC), get_sr(SREG_EXCSAVE),
+		      xtensa_get_sr(SREG_EPC), xtensa_get_sr(SREG_EXCSAVE),
 		      XCHAL_HAVE_BE ?  "big" : "little",
 		      ccount_freq/1000000,
 		      (ccount_freq/10000) % 100,
@@ -605,6 +584,12 @@ c_show(struct seq_file *f, void *slot)
 # if XCHAL_HAVE_OCD
 		     "ocd "
 # endif
+#if XCHAL_HAVE_TRAX
+		     "trax "
+#endif
+#if XCHAL_NUM_PERF_COUNTERS
+		     "perf "
+#endif
 #endif
 #if XCHAL_HAVE_DENSITY
 	    	     "density "
@@ -645,17 +630,22 @@ c_show(struct seq_file *f, void *slot)
 #if XCHAL_HAVE_S32C1I
 		     "s32c1i "
 #endif
+#if XCHAL_HAVE_EXCLUSIVE
+		     "exclusive "
+#endif
 		     "\n");
 
 	/* Registers. */
 	seq_printf(f,"physical aregs\t: %d\n"
 		     "misc regs\t: %d\n"
 		     "ibreak\t\t: %d\n"
-		     "dbreak\t\t: %d\n",
+		     "dbreak\t\t: %d\n"
+		     "perf counters\t: %d\n",
 		     XCHAL_NUM_AREGS,
 		     XCHAL_NUM_MISC_REGS,
 		     XCHAL_NUM_IBREAK,
-		     XCHAL_NUM_DBREAK);
+		     XCHAL_NUM_DBREAK,
+		     XCHAL_NUM_PERF_COUNTERS);
 
 
 	/* Interrupt. */
@@ -712,7 +702,8 @@ c_start(struct seq_file *f, loff_t *pos)
 static void *
 c_next(struct seq_file *f, void *v, loff_t *pos)
 {
-	return NULL;
+	++*pos;
+	return c_start(f, pos);
 }
 
 static void

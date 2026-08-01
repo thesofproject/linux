@@ -18,12 +18,7 @@
 #include <linux/pfn.h>
 #include <linux/const.h>
 
-/*
- * PAGE_SHIFT determines the page size
- */
-#define PAGE_SHIFT	12
-#define PAGE_SIZE	(_AC(1, UL) << PAGE_SHIFT)
-#define PAGE_MASK	(~(PAGE_SIZE - 1))
+#include <vdso/page.h>
 
 /*
  * PAGE_OFFSET -- the first address of the first page of memory.
@@ -31,7 +26,7 @@
 #define PAGE_OFFSET	\
 	(CONFIG_NIOS2_MEM_BASE + CONFIG_NIOS2_KERNEL_REGION_BASE)
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 /*
  * This gives the physical RAM offset.
@@ -50,6 +45,7 @@
 
 struct page;
 
+#define clear_user_page clear_user_page
 extern void clear_user_page(void *addr, unsigned long vaddr, struct page *page);
 extern void copy_user_page(void *vto, void *vfrom, unsigned long vaddr,
 				struct page *to);
@@ -86,31 +82,15 @@ extern struct page *mem_map;
 
 # define pfn_to_kaddr(pfn)	__va((pfn) << PAGE_SHIFT)
 
-static inline bool pfn_valid(unsigned long pfn)
-{
-	/* avoid <linux/mm.h> include hell */
-	extern unsigned long max_mapnr;
-	unsigned long pfn_offset = ARCH_PFN_OFFSET;
-
-	return pfn >= pfn_offset && pfn < max_mapnr;
-}
-
 # define virt_to_page(vaddr)	pfn_to_page(PFN_DOWN(virt_to_phys(vaddr)))
 # define virt_addr_valid(vaddr)	pfn_valid(PFN_DOWN(virt_to_phys(vaddr)))
 
-# define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | \
-				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
-
-# define UNCAC_ADDR(addr)	\
-	((void *)((unsigned)(addr) | CONFIG_NIOS2_IO_REGION_BASE))
-# define CAC_ADDR(addr)		\
-	((void *)(((unsigned)(addr) & ~CONFIG_NIOS2_IO_REGION_BASE) |	\
-		CONFIG_NIOS2_KERNEL_REGION_BASE))
+# define VMA_DATA_DEFAULT_FLAGS	VMA_DATA_FLAGS_NON_EXEC
 
 #include <asm-generic/memory_model.h>
 
 #include <asm-generic/getorder.h>
 
-#endif /* !__ASSEMBLY__ */
+#endif /* !__ASSEMBLER__ */
 
 #endif /* _ASM_NIOS2_PAGE_H */

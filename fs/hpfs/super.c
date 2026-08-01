@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/fs/hpfs/super.c
  *
@@ -8,7 +9,9 @@
 
 #include "hpfs_fn.h"
 #include <linux/module.h>
-#include <linux/parser.h>
+#include <linux/fs_struct.h>
+#include <linux/fs_context.h>
+#include <linux/fs_parser.h>
 #include <linux/init.h>
 #include <linux/statfs.h>
 #include <linux/magic.h>
@@ -89,7 +92,7 @@ void hpfs_error(struct super_block *s, const char *fmt, ...)
 	hpfs_sb(s)->sb_was_error = 1;
 }
 
-/* 
+/*
  * A little trick to detect cycles in many hpfs structures and don't let the
  * kernel crash on corrupted filesystem. When first called, set c2 to 0.
  *
@@ -191,8 +194,7 @@ static int hpfs_statfs(struct dentry *dentry, struct kstatfs *buf)
 	buf->f_bavail = sbi->sb_n_free;
 	buf->f_files = sbi->sb_dirband_size / 4;
 	buf->f_ffree = hpfs_get_free_dnodes(s);
-	buf->f_fsid.val[0] = (u32)id;
-	buf->f_fsid.val[1] = (u32)(id >> 32);
+	buf->f_fsid = u64_to_fsid(id);
 	buf->f_namelen = 254;
 
 	hpfs_unlock(s);
@@ -232,21 +234,15 @@ static struct kmem_cache * hpfs_inode_cachep;
 static struct inode *hpfs_alloc_inode(struct super_block *sb)
 {
 	struct hpfs_inode_info *ei;
-	ei = kmem_cache_alloc(hpfs_inode_cachep, GFP_NOFS);
+	ei = alloc_inode_sb(sb, hpfs_inode_cachep, GFP_NOFS);
 	if (!ei)
 		return NULL;
 	return &ei->vfs_inode;
 }
 
-static void hpfs_i_callback(struct rcu_head *head)
+static void hpfs_free_inode(struct inode *inode)
 {
-	struct inode *inode = container_of(head, struct inode, i_rcu);
 	kmem_cache_free(hpfs_inode_cachep, hpfs_i(inode));
-}
-
-static void hpfs_destroy_inode(struct inode *inode)
-{
-	call_rcu(&inode->i_rcu, hpfs_i_callback);
 }
 
 static void init_once(void *foo)
@@ -261,7 +257,7 @@ static int init_inodecache(void)
 	hpfs_inode_cachep = kmem_cache_create("hpfs_inode_cache",
 					     sizeof(struct hpfs_inode_info),
 					     0, (SLAB_RECLAIM_ACCOUNT|
-						SLAB_MEM_SPREAD|SLAB_ACCOUNT),
+						SLAB_ACCOUNT),
 					     init_once);
 	if (hpfs_inode_cachep == NULL)
 		return -ENOMEM;
@@ -278,146 +274,70 @@ static void destroy_inodecache(void)
 	kmem_cache_destroy(hpfs_inode_cachep);
 }
 
-/*
- * A tiny parser for option strings, stolen from dosfs.
- * Stolen again from read-only hpfs.
- * And updated for table-driven option parsing.
- */
-
 enum {
-	Opt_help, Opt_uid, Opt_gid, Opt_umask, Opt_case_lower, Opt_case_asis,
-	Opt_check_none, Opt_check_normal, Opt_check_strict,
-	Opt_err_cont, Opt_err_ro, Opt_err_panic,
-	Opt_eas_no, Opt_eas_ro, Opt_eas_rw,
-	Opt_chkdsk_no, Opt_chkdsk_errors, Opt_chkdsk_always,
-	Opt_timeshift, Opt_err,
+	Opt_help, Opt_uid, Opt_gid, Opt_umask, Opt_case,
+	Opt_check, Opt_err, Opt_eas, Opt_chkdsk, Opt_timeshift,
 };
 
-static const match_table_t tokens = {
-	{Opt_help, "help"},
-	{Opt_uid, "uid=%u"},
-	{Opt_gid, "gid=%u"},
-	{Opt_umask, "umask=%o"},
-	{Opt_case_lower, "case=lower"},
-	{Opt_case_asis, "case=asis"},
-	{Opt_check_none, "check=none"},
-	{Opt_check_normal, "check=normal"},
-	{Opt_check_strict, "check=strict"},
-	{Opt_err_cont, "errors=continue"},
-	{Opt_err_ro, "errors=remount-ro"},
-	{Opt_err_panic, "errors=panic"},
-	{Opt_eas_no, "eas=no"},
-	{Opt_eas_ro, "eas=ro"},
-	{Opt_eas_rw, "eas=rw"},
-	{Opt_chkdsk_no, "chkdsk=no"},
-	{Opt_chkdsk_errors, "chkdsk=errors"},
-	{Opt_chkdsk_always, "chkdsk=always"},
-	{Opt_timeshift, "timeshift=%d"},
-	{Opt_err, NULL},
+static const struct constant_table hpfs_param_case[] = {
+	{"asis",	0},
+	{"lower",	1},
+	{}
 };
 
-static int parse_opts(char *opts, kuid_t *uid, kgid_t *gid, umode_t *umask,
-		      int *lowercase, int *eas, int *chk, int *errs,
-		      int *chkdsk, int *timeshift)
-{
-	char *p;
-	int option;
+static const struct constant_table hpfs_param_check[] = {
+	{"none",	0},
+	{"normal",	1},
+	{"strict",	2},
+	{}
+};
 
-	if (!opts)
-		return 1;
+static const struct constant_table hpfs_param_err[] = {
+	{"continue",	0},
+	{"remount-ro",	1},
+	{"panic",	2},
+	{}
+};
 
-	/*pr_info("Parsing opts: '%s'\n",opts);*/
+static const struct constant_table hpfs_param_eas[] = {
+	{"no",		0},
+	{"ro",		1},
+	{"rw",		2},
+	{}
+};
 
-	while ((p = strsep(&opts, ",")) != NULL) {
-		substring_t args[MAX_OPT_ARGS];
-		int token;
-		if (!*p)
-			continue;
+static const struct constant_table hpfs_param_chkdsk[] = {
+	{"no",		0},
+	{"errors",	1},
+	{"always",	2},
+	{}
+};
 
-		token = match_token(p, tokens, args);
-		switch (token) {
-		case Opt_help:
-			return 2;
-		case Opt_uid:
-			if (match_int(args, &option))
-				return 0;
-			*uid = make_kuid(current_user_ns(), option);
-			if (!uid_valid(*uid))
-				return 0;
-			break;
-		case Opt_gid:
-			if (match_int(args, &option))
-				return 0;
-			*gid = make_kgid(current_user_ns(), option);
-			if (!gid_valid(*gid))
-				return 0;
-			break;
-		case Opt_umask:
-			if (match_octal(args, &option))
-				return 0;
-			*umask = option;
-			break;
-		case Opt_case_lower:
-			*lowercase = 1;
-			break;
-		case Opt_case_asis:
-			*lowercase = 0;
-			break;
-		case Opt_check_none:
-			*chk = 0;
-			break;
-		case Opt_check_normal:
-			*chk = 1;
-			break;
-		case Opt_check_strict:
-			*chk = 2;
-			break;
-		case Opt_err_cont:
-			*errs = 0;
-			break;
-		case Opt_err_ro:
-			*errs = 1;
-			break;
-		case Opt_err_panic:
-			*errs = 2;
-			break;
-		case Opt_eas_no:
-			*eas = 0;
-			break;
-		case Opt_eas_ro:
-			*eas = 1;
-			break;
-		case Opt_eas_rw:
-			*eas = 2;
-			break;
-		case Opt_chkdsk_no:
-			*chkdsk = 0;
-			break;
-		case Opt_chkdsk_errors:
-			*chkdsk = 1;
-			break;
-		case Opt_chkdsk_always:
-			*chkdsk = 2;
-			break;
-		case Opt_timeshift:
-		{
-			int m = 1;
-			char *rhs = args[0].from;
-			if (!rhs || !*rhs)
-				return 0;
-			if (*rhs == '-') m = -1;
-			if (*rhs == '+' || *rhs == '-') rhs++;
-			*timeshift = simple_strtoul(rhs, &rhs, 0) * m;
-			if (*rhs)
-				return 0;
-			break;
-		}
-		default:
-			return 0;
-		}
-	}
-	return 1;
-}
+static const struct fs_parameter_spec hpfs_param_spec[] = {
+	fsparam_flag	("help",	Opt_help),
+	fsparam_uid	("uid",		Opt_uid),
+	fsparam_gid	("gid",		Opt_gid),
+	fsparam_u32oct	("umask",	Opt_umask),
+	fsparam_enum	("case",	Opt_case,	hpfs_param_case),
+	fsparam_enum	("check",	Opt_check,	hpfs_param_check),
+	fsparam_enum	("errors",	Opt_err,	hpfs_param_err),
+	fsparam_enum	("eas",		Opt_eas,	hpfs_param_eas),
+	fsparam_enum	("chkdsk",	Opt_chkdsk,	hpfs_param_chkdsk),
+	fsparam_s32	("timeshift",	Opt_timeshift),
+	{}
+};
+
+struct hpfs_fc_context {
+	kuid_t uid;
+	kgid_t gid;
+	umode_t umask;
+	int lowercase;
+	int eas;
+	int chk;
+	int errs;
+	int chkdsk;
+	int timeshift;
+};
 
 static inline void hpfs_help(void)
 {
@@ -445,49 +365,88 @@ HPFS filesystem options:\n\
 \n");
 }
 
-static int hpfs_remount_fs(struct super_block *s, int *flags, char *data)
+static int hpfs_parse_param(struct fs_context *fc, struct fs_parameter *param)
 {
-	kuid_t uid;
-	kgid_t gid;
-	umode_t umask;
-	int lowercase, eas, chk, errs, chkdsk, timeshift;
-	int o;
+	struct hpfs_fc_context *ctx = fc->fs_private;
+	struct fs_parse_result result;
+	int opt;
+
+	opt = fs_parse(fc, hpfs_param_spec, param, &result);
+	if (opt < 0)
+		return opt;
+
+	switch (opt) {
+	case Opt_help:
+		hpfs_help();
+		return -EINVAL;
+	case Opt_uid:
+		ctx->uid = result.uid;
+		break;
+	case Opt_gid:
+		ctx->gid = result.gid;
+		break;
+	case Opt_umask:
+		ctx->umask = result.uint_32;
+		break;
+	case Opt_case:
+		ctx->lowercase = result.uint_32;
+		break;
+	case Opt_check:
+		ctx->chk = result.uint_32;
+		break;
+	case Opt_err:
+		ctx->errs = result.uint_32;
+		break;
+	case Opt_eas:
+		ctx->eas = result.uint_32;
+		break;
+	case Opt_chkdsk:
+		ctx->chkdsk = result.uint_32;
+		break;
+	case Opt_timeshift:
+		{
+			char *rhs = param->string;
+			int timeshift;
+
+			if (kstrtoint(rhs, 0, &timeshift))
+				return -EINVAL;
+			ctx->timeshift = timeshift;
+			break;
+		}
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int hpfs_reconfigure(struct fs_context *fc)
+{
+	struct hpfs_fc_context *ctx = fc->fs_private;
+	struct super_block *s = fc->root->d_sb;
 	struct hpfs_sb_info *sbi = hpfs_sb(s);
 
 	sync_filesystem(s);
 
-	*flags |= SB_NOATIME;
+	fc->sb_flags |= SB_NOATIME;
 
 	hpfs_lock(s);
-	uid = sbi->sb_uid; gid = sbi->sb_gid;
-	umask = 0777 & ~sbi->sb_mode;
-	lowercase = sbi->sb_lowercase;
-	eas = sbi->sb_eas; chk = sbi->sb_chk; chkdsk = sbi->sb_chkdsk;
-	errs = sbi->sb_err; timeshift = sbi->sb_timeshift;
 
-	if (!(o = parse_opts(data, &uid, &gid, &umask, &lowercase,
-	    &eas, &chk, &errs, &chkdsk, &timeshift))) {
-		pr_err("bad mount options.\n");
-		goto out_err;
-	}
-	if (o == 2) {
-		hpfs_help();
-		goto out_err;
-	}
-	if (timeshift != sbi->sb_timeshift) {
+	if (ctx->timeshift != sbi->sb_timeshift) {
 		pr_err("timeshift can't be changed using remount.\n");
 		goto out_err;
 	}
 
 	unmark_dirty(s);
 
-	sbi->sb_uid = uid; sbi->sb_gid = gid;
-	sbi->sb_mode = 0777 & ~umask;
-	sbi->sb_lowercase = lowercase;
-	sbi->sb_eas = eas; sbi->sb_chk = chk; sbi->sb_chkdsk = chkdsk;
-	sbi->sb_err = errs; sbi->sb_timeshift = timeshift;
+	sbi->sb_uid = ctx->uid; sbi->sb_gid = ctx->gid;
+	sbi->sb_mode = 0777 & ~ctx->umask;
+	sbi->sb_lowercase = ctx->lowercase;
+	sbi->sb_eas = ctx->eas; sbi->sb_chk = ctx->chk;
+	sbi->sb_chkdsk = ctx->chkdsk;
+	sbi->sb_err = ctx->errs; sbi->sb_timeshift = ctx->timeshift;
 
-	if (!(*flags & SB_RDONLY)) mark_dirty(s, 1);
+	if (!(fc->sb_flags & SB_RDONLY)) mark_dirty(s, 1);
 
 	hpfs_unlock(s);
 	return 0;
@@ -532,35 +491,29 @@ static int hpfs_show_options(struct seq_file *seq, struct dentry *root)
 static const struct super_operations hpfs_sops =
 {
 	.alloc_inode	= hpfs_alloc_inode,
-	.destroy_inode	= hpfs_destroy_inode,
+	.free_inode	= hpfs_free_inode,
 	.evict_inode	= hpfs_evict_inode,
 	.put_super	= hpfs_put_super,
 	.statfs		= hpfs_statfs,
-	.remount_fs	= hpfs_remount_fs,
 	.show_options	= hpfs_show_options,
 };
 
-static int hpfs_fill_super(struct super_block *s, void *options, int silent)
+static int hpfs_fill_super(struct super_block *s, struct fs_context *fc)
 {
+	struct hpfs_fc_context *ctx = fc->fs_private;
 	struct buffer_head *bh0, *bh1, *bh2;
 	struct hpfs_boot_block *bootblock;
 	struct hpfs_super_block *superblock;
 	struct hpfs_spare_block *spareblock;
 	struct hpfs_sb_info *sbi;
 	struct inode *root;
-
-	kuid_t uid;
-	kgid_t gid;
-	umode_t umask;
-	int lowercase, eas, chk, errs, chkdsk, timeshift;
+	int silent = fc->sb_flags & SB_SILENT;
 
 	dnode_secno root_dno;
 	struct hpfs_dirent *de = NULL;
 	struct quad_buffer_head qbh;
 
-	int o;
-
-	sbi = kzalloc(sizeof(*sbi), GFP_KERNEL);
+	sbi = kzalloc_obj(*sbi);
 	if (!sbi) {
 		return -ENOMEM;
 	}
@@ -569,28 +522,9 @@ static int hpfs_fill_super(struct super_block *s, void *options, int silent)
 	mutex_init(&sbi->hpfs_mutex);
 	hpfs_lock(s);
 
-	uid = current_uid();
-	gid = current_gid();
-	umask = current_umask();
-	lowercase = 0;
-	eas = 2;
-	chk = 1;
-	errs = 1;
-	chkdsk = 1;
-	timeshift = 0;
-
-	if (!(o = parse_opts(options, &uid, &gid, &umask, &lowercase,
-	    &eas, &chk, &errs, &chkdsk, &timeshift))) {
-		pr_err("bad mount options.\n");
-		goto bail0;
-	}
-	if (o==2) {
-		hpfs_help();
-		goto bail0;
-	}
-
 	/*sbi->sb_mounting = 1;*/
-	sb_set_blocksize(s, 512);
+	if (!sb_set_blocksize(s, 512))
+		goto bail0;
 	sbi->sb_fs_size = -1;
 	if (!(bootblock = hpfs_map_sector(s, 0, &bh0, 0))) goto bail1;
 	if (!(superblock = hpfs_map_sector(s, 16, &bh1, 1))) goto bail2;
@@ -618,7 +552,9 @@ static int hpfs_fill_super(struct super_block *s, void *options, int silent)
 	/* Fill superblock stuff */
 	s->s_magic = HPFS_SUPER_MAGIC;
 	s->s_op = &hpfs_sops;
-	s->s_d_op = &hpfs_dentry_operations;
+	set_default_d_op(s, &hpfs_dentry_operations);
+	s->s_time_min =  local_to_gmt(s, 0);
+	s->s_time_max =  local_to_gmt(s, U32_MAX);
 
 	sbi->sb_root = le32_to_cpu(superblock->root);
 	sbi->sb_fs_size = le32_to_cpu(superblock->n_sectors);
@@ -626,17 +562,17 @@ static int hpfs_fill_super(struct super_block *s, void *options, int silent)
 	sbi->sb_dirband_start = le32_to_cpu(superblock->dir_band_start);
 	sbi->sb_dirband_size = le32_to_cpu(superblock->n_dir_band);
 	sbi->sb_dmap = le32_to_cpu(superblock->dir_band_bitmap);
-	sbi->sb_uid = uid;
-	sbi->sb_gid = gid;
-	sbi->sb_mode = 0777 & ~umask;
+	sbi->sb_uid = ctx->uid;
+	sbi->sb_gid = ctx->gid;
+	sbi->sb_mode = 0777 & ~ctx->umask;
 	sbi->sb_n_free = -1;
 	sbi->sb_n_free_dnodes = -1;
-	sbi->sb_lowercase = lowercase;
-	sbi->sb_eas = eas;
-	sbi->sb_chk = chk;
-	sbi->sb_chkdsk = chkdsk;
-	sbi->sb_err = errs;
-	sbi->sb_timeshift = timeshift;
+	sbi->sb_lowercase = ctx->lowercase;
+	sbi->sb_eas = ctx->eas;
+	sbi->sb_chk = ctx->chk;
+	sbi->sb_chkdsk = ctx->chkdsk;
+	sbi->sb_err = ctx->errs;
+	sbi->sb_timeshift = ctx->timeshift;
 	sbi->sb_was_error = 0;
 	sbi->sb_cp_table = NULL;
 	sbi->sb_c_bitmap = -1;
@@ -657,7 +593,7 @@ static int hpfs_fill_super(struct super_block *s, void *options, int silent)
 	
 	/* Check for general fs errors*/
 	if (spareblock->dirty && !spareblock->old_wrote) {
-		if (errs == 2) {
+		if (sbi->sb_err == 2) {
 			pr_err("Improperly stopped, not mounted\n");
 			goto bail4;
 		}
@@ -671,16 +607,16 @@ static int hpfs_fill_super(struct super_block *s, void *options, int silent)
 	}
 
 	if (le32_to_cpu(spareblock->n_dnode_spares) != le32_to_cpu(spareblock->n_dnode_spares_free)) {
-		if (errs >= 2) {
+		if (sbi->sb_err >= 2) {
 			pr_err("Spare dnodes used, try chkdsk\n");
 			mark_dirty(s, 0);
 			goto bail4;
 		}
 		hpfs_error(s, "warning: spare dnodes used, try chkdsk");
-		if (errs == 0)
+		if (sbi->sb_err == 0)
 			pr_err("Proceeding, but your filesystem could be corrupted if you delete files or directories\n");
 	}
-	if (chk) {
+	if (sbi->sb_chk) {
 		unsigned a;
 		if (le32_to_cpu(superblock->dir_band_end) - le32_to_cpu(superblock->dir_band_start) + 1 != le32_to_cpu(superblock->n_dir_band) ||
 		    le32_to_cpu(superblock->dir_band_end) < le32_to_cpu(superblock->dir_band_start) || le32_to_cpu(superblock->n_dir_band) > 0x4000) {
@@ -729,12 +665,15 @@ static int hpfs_fill_super(struct super_block *s, void *options, int silent)
 	if (!de)
 		hpfs_error(s, "unable to find root dir");
 	else {
-		root->i_atime.tv_sec = local_to_gmt(s, le32_to_cpu(de->read_date));
-		root->i_atime.tv_nsec = 0;
-		root->i_mtime.tv_sec = local_to_gmt(s, le32_to_cpu(de->write_date));
-		root->i_mtime.tv_nsec = 0;
-		root->i_ctime.tv_sec = local_to_gmt(s, le32_to_cpu(de->creation_date));
-		root->i_ctime.tv_nsec = 0;
+		inode_set_atime(root,
+				local_to_gmt(s, le32_to_cpu(de->read_date)),
+				0);
+		inode_set_mtime(root,
+				local_to_gmt(s, le32_to_cpu(de->write_date)),
+				0);
+		inode_set_ctime(root,
+				local_to_gmt(s, le32_to_cpu(de->creation_date)),
+				0);
 		hpfs_i(root)->i_ea_size = le32_to_cpu(de->ea_size);
 		hpfs_i(root)->i_parent_dir = root->i_ino;
 		if (root->i_size == -1)
@@ -756,18 +695,70 @@ bail0:
 	return -EINVAL;
 }
 
-static struct dentry *hpfs_mount(struct file_system_type *fs_type,
-	int flags, const char *dev_name, void *data)
+static int hpfs_get_tree(struct fs_context *fc)
 {
-	return mount_bdev(fs_type, flags, dev_name, data, hpfs_fill_super);
+	return get_tree_bdev(fc, hpfs_fill_super);
 }
+
+static void hpfs_free_fc(struct fs_context *fc)
+{
+	kfree(fc->fs_private);
+}
+
+static const struct fs_context_operations hpfs_fc_context_ops = {
+	.parse_param	= hpfs_parse_param,
+	.get_tree	= hpfs_get_tree,
+	.reconfigure	= hpfs_reconfigure,
+	.free		= hpfs_free_fc,
+};
+
+static int hpfs_init_fs_context(struct fs_context *fc)
+{
+	struct hpfs_fc_context *ctx;
+
+	ctx = kzalloc_obj(struct hpfs_fc_context);
+	if (!ctx)
+		return -ENOMEM;
+
+	if (fc->purpose == FS_CONTEXT_FOR_RECONFIGURE) {
+		struct super_block *sb = fc->root->d_sb;
+		struct hpfs_sb_info *sbi = hpfs_sb(sb);
+
+		ctx->uid = sbi->sb_uid;
+		ctx->gid = sbi->sb_gid;
+		ctx->umask = 0777 & ~sbi->sb_mode;
+		ctx->lowercase = sbi->sb_lowercase;
+		ctx->eas = sbi->sb_eas;
+		ctx->chk = sbi->sb_chk;
+		ctx->chkdsk = sbi->sb_chkdsk;
+		ctx->errs = sbi->sb_err;
+		ctx->timeshift = sbi->sb_timeshift;
+
+	} else {
+		ctx->uid = current_uid();
+		ctx->gid = current_gid();
+		ctx->umask = current_umask();
+		ctx->lowercase = 0;
+		ctx->eas = 2;
+		ctx->chk = 1;
+		ctx->errs = 1;
+		ctx->chkdsk = 1;
+		ctx->timeshift = 0;
+	}
+
+	fc->fs_private = ctx;
+	fc->ops = &hpfs_fc_context_ops;
+
+	return 0;
+};
 
 static struct file_system_type hpfs_fs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "hpfs",
-	.mount		= hpfs_mount,
 	.kill_sb	= kill_block_super,
 	.fs_flags	= FS_REQUIRES_DEV,
+	.init_fs_context = hpfs_init_fs_context,
+	.parameters	= hpfs_param_spec,
 };
 MODULE_ALIAS_FS("hpfs");
 
@@ -794,4 +785,5 @@ static void __exit exit_hpfs_fs(void)
 
 module_init(init_hpfs_fs)
 module_exit(exit_hpfs_fs)
+MODULE_DESCRIPTION("OS/2 HPFS file system support");
 MODULE_LICENSE("GPL");

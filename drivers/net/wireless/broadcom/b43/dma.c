@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 
   Broadcom B43 wireless driver
@@ -10,20 +11,6 @@
   Copyright (C) 2002 David S. Miller
   Copyright (C) Pekka Pietikainen
 
-  This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 2 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program; see the file COPYING.  If not, write to
-  the Free Software Foundation, Inc., 51 Franklin Steet, Fifth Floor,
-  Boston, MA 02110-1301, USA.
 
 */
 
@@ -50,7 +37,7 @@
 static u32 b43_dma_address(struct b43_dma *dma, dma_addr_t dmaaddr,
 			   enum b43_addrtype addrtype)
 {
-	u32 uninitialized_var(addr);
+	u32 addr;
 
 	switch (addrtype) {
 	case B43_DMA_ADDR_LOW:
@@ -431,9 +418,9 @@ static int alloc_ringmemory(struct b43_dmaring *ring)
 	u16 ring_mem_size = (ring->type == B43_DMA_64BIT) ?
 				B43_DMA64_RINGMEMSIZE : B43_DMA32_RINGMEMSIZE;
 
-	ring->descbase = dma_zalloc_coherent(ring->dev->dev->dma_dev,
-					     ring_mem_size, &(ring->dmabase),
-					     GFP_KERNEL);
+	ring->descbase = dma_alloc_coherent(ring->dev->dev->dma_dev,
+					    ring_mem_size, &(ring->dmabase),
+					    GFP_KERNEL);
 	if (!ring->descbase)
 		return -ENOMEM;
 
@@ -810,7 +797,7 @@ static void free_all_descbuffers(struct b43_dmaring *ring)
 	}
 }
 
-static u64 supported_dma_mask(struct b43_wldev *dev)
+static enum b43_dmatype b43_engine_type(struct b43_wldev *dev)
 {
 	u32 tmp;
 	u16 mmio_base;
@@ -820,14 +807,14 @@ static u64 supported_dma_mask(struct b43_wldev *dev)
 	case B43_BUS_BCMA:
 		tmp = bcma_aread32(dev->dev->bdev, BCMA_IOST);
 		if (tmp & BCMA_IOST_DMA64)
-			return DMA_BIT_MASK(64);
+			return B43_DMA_64BIT;
 		break;
 #endif
 #ifdef CONFIG_B43_SSB
 	case B43_BUS_SSB:
 		tmp = ssb_read32(dev->dev->sdev, SSB_TMSHIGH);
 		if (tmp & SSB_TMSHIGH_DMA64)
-			return DMA_BIT_MASK(64);
+			return B43_DMA_64BIT;
 		break;
 #endif
 	}
@@ -836,20 +823,7 @@ static u64 supported_dma_mask(struct b43_wldev *dev)
 	b43_write32(dev, mmio_base + B43_DMA32_TXCTL, B43_DMA32_TXADDREXT_MASK);
 	tmp = b43_read32(dev, mmio_base + B43_DMA32_TXCTL);
 	if (tmp & B43_DMA32_TXADDREXT_MASK)
-		return DMA_BIT_MASK(32);
-
-	return DMA_BIT_MASK(30);
-}
-
-static enum b43_dmatype dma_mask_to_engine_type(u64 dmamask)
-{
-	if (dmamask == DMA_BIT_MASK(30))
-		return B43_DMA_30BIT;
-	if (dmamask == DMA_BIT_MASK(32))
 		return B43_DMA_32BIT;
-	if (dmamask == DMA_BIT_MASK(64))
-		return B43_DMA_64BIT;
-	B43_WARN_ON(1);
 	return B43_DMA_30BIT;
 }
 
@@ -863,19 +837,19 @@ struct b43_dmaring *b43_setup_dmaring(struct b43_wldev *dev,
 	struct b43_dmaring *ring;
 	int i, err;
 	dma_addr_t dma_test;
+	size_t nr_slots;
 
-	ring = kzalloc(sizeof(*ring), GFP_KERNEL);
+	if (for_tx)
+		nr_slots = B43_TXRING_SLOTS;
+	else
+		nr_slots = B43_RXRING_SLOTS;
+
+	ring = kzalloc_flex(*ring, meta, nr_slots);
 	if (!ring)
 		goto out;
 
-	ring->nr_slots = B43_RXRING_SLOTS;
-	if (for_tx)
-		ring->nr_slots = B43_TXRING_SLOTS;
+	ring->nr_slots = nr_slots;
 
-	ring->meta = kcalloc(ring->nr_slots, sizeof(struct b43_dmadesc_meta),
-			     GFP_KERNEL);
-	if (!ring->meta)
-		goto err_kfree_ring;
 	for (i = 0; i < ring->nr_slots; i++)
 		ring->meta->skb = B43_DMA_PTR_POISON;
 
@@ -970,8 +944,6 @@ struct b43_dmaring *b43_setup_dmaring(struct b43_wldev *dev,
       err_kfree_txhdr_cache:
 	kfree(ring->txhdr_cache);
       err_kfree_meta:
-	kfree(ring->meta);
-      err_kfree_ring:
 	kfree(ring);
 	ring = NULL;
 	goto out;
@@ -1031,7 +1003,6 @@ static void b43_destroy_dmaring(struct b43_dmaring *ring,
 	free_ringmemory(ring);
 
 	kfree(ring->txhdr_cache);
-	kfree(ring->meta);
 	kfree(ring);
 }
 
@@ -1056,42 +1027,6 @@ void b43_dma_free(struct b43_wldev *dev)
 	destroy_ring(dma, tx_ring_mcast);
 }
 
-static int b43_dma_set_mask(struct b43_wldev *dev, u64 mask)
-{
-	u64 orig_mask = mask;
-	bool fallback = false;
-	int err;
-
-	/* Try to set the DMA mask. If it fails, try falling back to a
-	 * lower mask, as we can always also support a lower one. */
-	while (1) {
-		err = dma_set_mask_and_coherent(dev->dev->dma_dev, mask);
-		if (!err)
-			break;
-		if (mask == DMA_BIT_MASK(64)) {
-			mask = DMA_BIT_MASK(32);
-			fallback = true;
-			continue;
-		}
-		if (mask == DMA_BIT_MASK(32)) {
-			mask = DMA_BIT_MASK(30);
-			fallback = true;
-			continue;
-		}
-		b43err(dev->wl, "The machine/kernel does not support "
-		       "the required %u-bit DMA mask\n",
-		       (unsigned int)dma_mask_to_engine_type(orig_mask));
-		return -EOPNOTSUPP;
-	}
-	if (fallback) {
-		b43info(dev->wl, "DMA mask fallback from %u-bit to %u-bit\n",
-			(unsigned int)dma_mask_to_engine_type(orig_mask),
-			(unsigned int)dma_mask_to_engine_type(mask));
-	}
-
-	return 0;
-}
-
 /* Some hardware with 64-bit DMA seems to be bugged and looks for translation
  * bit in low address word instead of high one.
  */
@@ -1114,15 +1049,15 @@ static bool b43_dma_translation_in_low_word(struct b43_wldev *dev,
 int b43_dma_init(struct b43_wldev *dev)
 {
 	struct b43_dma *dma = &dev->dma;
+	enum b43_dmatype type = b43_engine_type(dev);
 	int err;
-	u64 dmamask;
-	enum b43_dmatype type;
 
-	dmamask = supported_dma_mask(dev);
-	type = dma_mask_to_engine_type(dmamask);
-	err = b43_dma_set_mask(dev, dmamask);
-	if (err)
+	err = dma_set_mask_and_coherent(dev->dev->dma_dev, DMA_BIT_MASK(type));
+	if (err) {
+		b43err(dev->wl, "The machine/kernel does not support "
+		       "the required %u-bit DMA mask\n", type);
 		return err;
+	}
 
 	switch (dev->dev->bus_type) {
 #ifdef CONFIG_B43_BCMA
@@ -1379,7 +1314,7 @@ static struct b43_dmaring *select_ring_by_priority(struct b43_wldev *dev,
 		switch (queue_prio) {
 		default:
 			B43_WARN_ON(1);
-			/* fallthrough */
+			fallthrough;
 		case 0:
 			ring = dev->dma.tx_ring_AC_VO;
 			break;
@@ -1432,7 +1367,7 @@ int b43_dma_tx(struct b43_wldev *dev, struct sk_buff *skb)
 		goto out;
 	}
 
-	if (unlikely(WARN_ON(free_slots(ring) < TX_SLOTS_PER_FRAME))) {
+	if (WARN_ON(free_slots(ring) < TX_SLOTS_PER_FRAME)) {
 		/* If we get here, we have a real error with the queue
 		 * full, but queues not stopped. */
 		b43err(dev->wl, "DMA queue overflow\n");
@@ -1461,8 +1396,8 @@ int b43_dma_tx(struct b43_wldev *dev, struct sk_buff *skb)
 	    should_inject_overflow(ring)) {
 		/* This TX ring is full. */
 		unsigned int skb_mapping = skb_get_queue_mapping(skb);
-		ieee80211_stop_queue(dev->wl->hw, skb_mapping);
-		dev->wl->tx_queue_stopped[skb_mapping] = 1;
+		b43_stop_queue(dev, skb_mapping);
+		dev->wl->tx_queue_stopped[skb_mapping] = true;
 		ring->stopped = true;
 		if (b43_debug(dev, B43_DBG_DMAVERBOSE)) {
 			b43dbg(dev->wl, "Stopped TX ring %d\n", ring->index);
@@ -1484,7 +1419,7 @@ void b43_dma_handle_txstatus(struct b43_wldev *dev,
 	int slot, firstused;
 	bool frame_succeed;
 	int skip;
-	static u8 err_out1, err_out2;
+	static u8 err_out1;
 
 	ring = parse_cookie(dev, status->cookie, &slot);
 	if (unlikely(!ring))
@@ -1518,13 +1453,15 @@ void b43_dma_handle_txstatus(struct b43_wldev *dev,
 			}
 		} else {
 			/* More than a single header/data pair were missed.
-			 * Report this error once.
+			 * Report this error. If running with open-source
+			 * firmware, then reset the controller to
+			 * revive operation.
 			 */
-			if (!err_out2)
-				b43dbg(dev->wl,
-				       "Out of order TX status report on DMA ring %d. Expected %d, but got %d\n",
-				       ring->index, firstused, slot);
-			err_out2 = 1;
+			b43dbg(dev->wl,
+			       "Out of order TX status report on DMA ring %d. Expected %d, but got %d\n",
+			       ring->index, firstused, slot);
+			if (dev->fw.opensource)
+				b43_controller_restart(dev, "Out of order TX");
 			return;
 		}
 	}
@@ -1591,9 +1528,9 @@ void b43_dma_handle_txstatus(struct b43_wldev *dev,
 				ring->nr_failed_tx_packets++;
 			ring->nr_total_packet_tries += status->frame_count;
 #endif /* DEBUG */
-			ieee80211_tx_status(dev->wl->hw, meta->skb);
+			ieee80211_tx_status_skb(dev->wl->hw, meta->skb);
 
-			/* skb will be freed by ieee80211_tx_status().
+			/* skb will be freed by ieee80211_tx_status_skb().
 			 * Poison our pointer. */
 			meta->skb = B43_DMA_PTR_POISON;
 		} else {
@@ -1626,11 +1563,11 @@ void b43_dma_handle_txstatus(struct b43_wldev *dev,
 	}
 
 	if (dev->wl->tx_queue_stopped[ring->queue_prio]) {
-		dev->wl->tx_queue_stopped[ring->queue_prio] = 0;
+		dev->wl->tx_queue_stopped[ring->queue_prio] = false;
 	} else {
 		/* If the driver queue is running wake the corresponding
 		 * mac80211 queue. */
-		ieee80211_wake_queue(dev->wl->hw, ring->queue_prio);
+		b43_wake_queue(dev, ring->queue_prio);
 		if (b43_debug(dev, B43_DBG_DMAVERBOSE)) {
 			b43dbg(dev->wl, "Woke up TX ring %d\n", ring->index);
 		}
@@ -1824,7 +1761,7 @@ void b43_dma_direct_fifo_rx(struct b43_wldev *dev,
 	enum b43_dmatype type;
 	u16 mmio_base;
 
-	type = dma_mask_to_engine_type(supported_dma_mask(dev));
+	type = b43_engine_type(dev);
 
 	mmio_base = b43_dmacontroller_base(type, engine_index);
 	direct_fifo_rx(dev, type, mmio_base, enable);

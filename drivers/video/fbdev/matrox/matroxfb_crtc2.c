@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *
  * Hardware accelerated Matrox Millennium I, II, Mystique, G100, G200, G400 and G450.
@@ -562,19 +563,17 @@ static int matroxfb_dh_blank(int blank, struct fb_info* info) {
 #undef m2info
 }
 
-static struct fb_ops matroxfb_dh_ops = {
+static const struct fb_ops matroxfb_dh_ops = {
 	.owner =	THIS_MODULE,
 	.fb_open =	matroxfb_dh_open,
 	.fb_release =	matroxfb_dh_release,
+	FB_DEFAULT_IOMEM_OPS,
 	.fb_check_var =	matroxfb_dh_check_var,
 	.fb_set_par =	matroxfb_dh_set_par,
 	.fb_setcolreg =	matroxfb_dh_setcolreg,
 	.fb_pan_display =matroxfb_dh_pan_display,
 	.fb_blank =	matroxfb_dh_blank,
 	.fb_ioctl =	matroxfb_dh_ioctl,
-	.fb_fillrect =	cfb_fillrect,
-	.fb_copyarea =	cfb_copyarea,
-	.fb_imageblit =	cfb_imageblit,
 };
 
 static struct fb_var_screeninfo matroxfb_dh_defined = {
@@ -602,9 +601,8 @@ static int matroxfb_dh_regit(const struct matrox_fb_info *minfo,
 	void* oldcrtc2;
 
 	m2info->fbcon.fbops = &matroxfb_dh_ops;
-	m2info->fbcon.flags = FBINFO_FLAG_DEFAULT;
-	m2info->fbcon.flags |= FBINFO_HWACCEL_XPAN |
-			       FBINFO_HWACCEL_YPAN;
+	m2info->fbcon.flags = FBINFO_HWACCEL_XPAN |
+			      FBINFO_HWACCEL_YPAN;
 	m2info->fbcon.pseudo_palette = m2info->cmap;
 	fb_alloc_cmap(&m2info->fbcon.cmap, 256, 1);
 
@@ -695,7 +693,7 @@ static void* matroxfb_crtc2_probe(struct matrox_fb_info* minfo) {
 	/* hardware is CRTC2 incapable... */
 	if (!minfo->devflags.crtc2)
 		return NULL;
-	m2info = kzalloc(sizeof(*m2info), GFP_KERNEL);
+	m2info = kzalloc_obj(*m2info);
 	if (!m2info)
 		return NULL;
 

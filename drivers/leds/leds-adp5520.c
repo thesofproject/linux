@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * LEDs driver for Analog Devices ADP5520/ADP5501 MFD PMICs
  *
@@ -9,8 +10,6 @@
  *
  * Copyright (C) 2006-2008 Marvell International Ltd.
  *	Eric Miao <eric.miao@marvell.com>
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/module.h>
@@ -108,7 +107,7 @@ static int adp5520_led_probe(struct platform_device *pdev)
 		return -EFAULT;
 	}
 
-	led = devm_kzalloc(&pdev->dev, sizeof(*led) * pdata->num_leds,
+	led = devm_kcalloc(&pdev->dev, pdata->num_leds, sizeof(*led),
 				GFP_KERNEL);
 	if (!led)
 		return -ENOMEM;
@@ -164,7 +163,7 @@ err:
 	return ret;
 }
 
-static int adp5520_led_remove(struct platform_device *pdev)
+static void adp5520_led_remove(struct platform_device *pdev)
 {
 	struct adp5520_leds_platform_data *pdata = dev_get_platdata(&pdev->dev);
 	struct adp5520_led *led;
@@ -178,8 +177,6 @@ static int adp5520_led_remove(struct platform_device *pdev)
 	for (i = 0; i < pdata->num_leds; i++) {
 		led_classdev_unregister(&led[i].cdev);
 	}
-
-	return 0;
 }
 
 static struct platform_driver adp5520_led_driver = {

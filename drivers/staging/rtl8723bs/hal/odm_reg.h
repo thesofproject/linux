@@ -1,15 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2011 Realtek Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
  *
  ******************************************************************************/
 /*  File Name: odm_reg.h */
@@ -40,10 +32,8 @@
 #define	ODM_TXAGC_B_MCS32_5			0x838
 #define	ODM_TXAGC_B_MCS0_MCS3			0x83c
 #define	ODM_TXAGC_B_MCS4_MCS7			0x848
-#define	ODM_TXAGC_B_MCS8_MCS11			0x84c
 #define	ODM_ANALOG_REGISTER			0x85c
 #define	ODM_RF_INTERFACE_OUTPUT			0x860
-#define	ODM_TXAGC_B_MCS12_MCS15			0x868
 #define	ODM_TXAGC_B_11_A_2_11			0x86c
 #define	ODM_AD_DA_LSB_MASK			0x874
 #define	ODM_ENABLE_3_WIRE			0x88c
@@ -79,8 +69,6 @@
 #define	ODM_TXAGC_A_1_MCS32			0xe08
 #define	ODM_TXAGC_A_MCS0_MCS3			0xe10
 #define	ODM_TXAGC_A_MCS4_MCS7			0xe14
-#define	ODM_TXAGC_A_MCS8_MCS11			0xe18
-#define	ODM_TXAGC_A_MCS12_MCS15			0xe1c
 
 /* RF REG */
 #define	ODM_GAIN_SETTING			0x00

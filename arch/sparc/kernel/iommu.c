@@ -10,11 +10,11 @@
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/device.h>
-#include <linux/dma-mapping.h>
+#include <linux/dma-map-ops.h>
 #include <linux/errno.h>
 #include <linux/iommu-helper.h>
 #include <linux/bitmap.h>
-#include <linux/iommu-common.h>
+#include <asm/iommu-common.h>
 
 #ifdef CONFIG_PCI
 #include <linux/pci.h>
@@ -108,10 +108,9 @@ int iommu_table_init(struct iommu *iommu, int tsbsize,
 	/* Allocate and initialize the free area map.  */
 	sz = num_tsb_entries / 8;
 	sz = (sz + 7UL) & ~7UL;
-	iommu->tbl.map = kmalloc_node(sz, GFP_KERNEL, numa_node);
+	iommu->tbl.map = kzalloc_node(sz, GFP_KERNEL, numa_node);
 	if (!iommu->tbl.map)
 		return -ENOMEM;
-	memset(iommu->tbl.map, 0, sz);
 
 	iommu_tbl_pool_init(&iommu->tbl, num_tsb_entries, IO_PAGE_SHIFT,
 			    (tlb_type != hypervisor ? iommu_flushall : NULL),
@@ -261,18 +260,27 @@ static void dma_4u_free_coherent(struct device *dev, size_t size,
 		free_pages((unsigned long)cpu, order);
 }
 
-static dma_addr_t dma_4u_map_page(struct device *dev, struct page *page,
-				  unsigned long offset, size_t sz,
-				  enum dma_data_direction direction,
+static dma_addr_t dma_4u_map_phys(struct device *dev, phys_addr_t phys,
+				  size_t sz, enum dma_data_direction direction,
 				  unsigned long attrs)
 {
 	struct iommu *iommu;
 	struct strbuf *strbuf;
 	iopte_t *base;
 	unsigned long flags, npages, oaddr;
-	unsigned long i, base_paddr, ctx;
+	unsigned long i, ctx;
 	u32 bus_addr, ret;
 	unsigned long iopte_protection;
+
+	if (unlikely(attrs & DMA_ATTR_MMIO))
+		/*
+		 * This check is included because older versions of the code
+		 * lacked MMIO path support, and my ability to test this path
+		 * is limited. However, from a software technical standpoint,
+		 * there is no restriction, as the following code operates
+		 * solely on physical addresses.
+		 */
+		goto bad_no_ctx;
 
 	iommu = dev->archdata.iommu;
 	strbuf = dev->archdata.stc;
@@ -280,7 +288,7 @@ static dma_addr_t dma_4u_map_page(struct device *dev, struct page *page,
 	if (unlikely(direction == DMA_NONE))
 		goto bad_no_ctx;
 
-	oaddr = (unsigned long)(page_address(page) + offset);
+	oaddr = (unsigned long)(phys_to_virt(phys));
 	npages = IO_PAGE_ALIGN(oaddr + sz) - (oaddr & IO_PAGE_MASK);
 	npages >>= IO_PAGE_SHIFT;
 
@@ -297,7 +305,6 @@ static dma_addr_t dma_4u_map_page(struct device *dev, struct page *page,
 	bus_addr = (iommu->tbl.table_map_base +
 		    ((base - iommu->page_table) << IO_PAGE_SHIFT));
 	ret = bus_addr | (oaddr & ~IO_PAGE_MASK);
-	base_paddr = __pa(oaddr & IO_PAGE_MASK);
 	if (strbuf->strbuf_enabled)
 		iopte_protection = IOPTE_STREAMING(ctx);
 	else
@@ -305,8 +312,10 @@ static dma_addr_t dma_4u_map_page(struct device *dev, struct page *page,
 	if (direction != DMA_TO_DEVICE)
 		iopte_protection |= IOPTE_WRITE;
 
-	for (i = 0; i < npages; i++, base++, base_paddr += IO_PAGE_SIZE)
-		iopte_val(*base) = iopte_protection | base_paddr;
+	phys &= IO_PAGE_MASK;
+
+	for (i = 0; i < npages; i++, base++, phys += IO_PAGE_SIZE)
+		iopte_val(*base) = iopte_protection | phys;
 
 	return ret;
 
@@ -315,7 +324,7 @@ bad:
 bad_no_ctx:
 	if (printk_ratelimit())
 		WARN_ON(1);
-	return SPARC_MAPPING_ERROR;
+	return DMA_MAPPING_ERROR;
 }
 
 static void strbuf_flush(struct strbuf *strbuf, struct iommu *iommu,
@@ -384,7 +393,7 @@ do_flush_sync:
 		       vaddr, ctx, npages);
 }
 
-static void dma_4u_unmap_page(struct device *dev, dma_addr_t bus_addr,
+static void dma_4u_unmap_phys(struct device *dev, dma_addr_t bus_addr,
 			      size_t sz, enum dma_data_direction direction,
 			      unsigned long attrs)
 {
@@ -449,7 +458,7 @@ static int dma_4u_map_sg(struct device *dev, struct scatterlist *sglist,
 	iommu = dev->archdata.iommu;
 	strbuf = dev->archdata.stc;
 	if (nelems == 0 || !iommu)
-		return 0;
+		return -EINVAL;
 
 	spin_lock_irqsave(&iommu->lock, flags);
 
@@ -473,8 +482,7 @@ static int dma_4u_map_sg(struct device *dev, struct scatterlist *sglist,
 	outs->dma_length = 0;
 
 	max_seg_size = dma_get_max_seg_size(dev);
-	seg_boundary_size = ALIGN(dma_get_seg_boundary(dev) + 1,
-				  IO_PAGE_SIZE) >> IO_PAGE_SHIFT;
+	seg_boundary_size = dma_get_seg_boundary_nr_pages(dev, IO_PAGE_SHIFT);
 	base_shift = iommu->tbl.table_map_base >> IO_PAGE_SHIFT;
 	for_each_sg(sglist, s, nelems, i) {
 		unsigned long paddr, npages, entry, out_entry = 0, slen;
@@ -548,7 +556,6 @@ static int dma_4u_map_sg(struct device *dev, struct scatterlist *sglist,
 
 	if (outcount < incount) {
 		outs = sg_next(outs);
-		outs->dma_address = SPARC_MAPPING_ERROR;
 		outs->dma_length = 0;
 	}
 
@@ -574,7 +581,6 @@ iommu_map_failed:
 			iommu_tbl_range_free(&iommu->tbl, vaddr, npages,
 					     IOMMU_ERROR_CODE);
 
-			s->dma_address = SPARC_MAPPING_ERROR;
 			s->dma_length = 0;
 		}
 		if (s == outs)
@@ -582,7 +588,7 @@ iommu_map_failed:
 	}
 	spin_unlock_irqrestore(&iommu->lock, flags);
 
-	return 0;
+	return -EINVAL;
 }
 
 /* If contexts are being used, they are the same in all of the mappings
@@ -742,37 +748,28 @@ static void dma_4u_sync_sg_for_cpu(struct device *dev,
 	spin_unlock_irqrestore(&iommu->lock, flags);
 }
 
-static int dma_4u_mapping_error(struct device *dev, dma_addr_t dma_addr)
-{
-	return dma_addr == SPARC_MAPPING_ERROR;
-}
-
 static int dma_4u_supported(struct device *dev, u64 device_mask)
 {
 	struct iommu *iommu = dev->archdata.iommu;
 
-	if (device_mask > DMA_BIT_MASK(32))
-		return 0;
-	if ((device_mask & iommu->dma_addr_mask) == iommu->dma_addr_mask)
+	if (ali_sound_dma_hack(dev, device_mask))
 		return 1;
-#ifdef CONFIG_PCI
-	if (dev_is_pci(dev))
-		return pci64_dma_supported(to_pci_dev(dev), device_mask);
-#endif
-	return 0;
+
+	if (device_mask < iommu->dma_addr_mask)
+		return 0;
+	return 1;
 }
 
 static const struct dma_map_ops sun4u_dma_ops = {
 	.alloc			= dma_4u_alloc_coherent,
 	.free			= dma_4u_free_coherent,
-	.map_page		= dma_4u_map_page,
-	.unmap_page		= dma_4u_unmap_page,
+	.map_phys		= dma_4u_map_phys,
+	.unmap_phys		= dma_4u_unmap_phys,
 	.map_sg			= dma_4u_map_sg,
 	.unmap_sg		= dma_4u_unmap_sg,
 	.sync_single_for_cpu	= dma_4u_sync_single_for_cpu,
 	.sync_sg_for_cpu	= dma_4u_sync_sg_for_cpu,
 	.dma_supported		= dma_4u_supported,
-	.mapping_error		= dma_4u_mapping_error,
 };
 
 const struct dma_map_ops *dma_ops = &sun4u_dma_ops;

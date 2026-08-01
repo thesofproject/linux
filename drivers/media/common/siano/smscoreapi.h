@@ -1,21 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /****************************************************************
 
 Siano Mobile Silicon, Inc.
 MDTV receiver kernel modules.
 Copyright (C) 2006-2008, Uri Shkolnik, Anatoly Greenblat
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 2 of the License, or
-(at your option) any later version.
-
- This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ****************************************************************/
 
@@ -38,11 +27,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <asm/page.h>
 
 #include "smsir.h"
-
-#define kmutex_init(_p_) mutex_init(_p_)
-#define kmutex_lock(_p_) mutex_lock(_p_)
-#define kmutex_trylock(_p_) mutex_trylock(_p_)
-#define kmutex_unlock(_p_) mutex_unlock(_p_)
 
 /*
  * Define the firmware names used by the driver.
@@ -113,7 +97,6 @@ typedef int (*hotplug_t)(struct smscore_device_t *coredev,
 typedef int (*setmode_t)(void *context, int mode);
 typedef void (*detectmode_t)(void *context, int *mode);
 typedef int (*sendrequest_t)(void *context, void *buffer, size_t size);
-typedef int (*loadfirmware_t)(void *context, void *buffer, size_t size);
 typedef int (*preload_t)(void *context);
 typedef int (*postload_t)(void *context);
 
@@ -189,6 +172,8 @@ struct smscore_device_t {
 	postload_t postload_handler;
 
 	int mode, modes_supported;
+
+	gfp_t gfp_buf_flags;
 
 	/* host <--> device messages */
 	struct completion version_ex_done, data_download_done, trigger_done;
@@ -443,8 +428,8 @@ enum msg_types {
 	MSG_SMS_FLASH_DL_REQ = 732,
 	MSG_SMS_EXEC_TEST_1_REQ = 734,
 	MSG_SMS_EXEC_TEST_1_RES = 735,
-	MSG_SMS_ENBALE_TS_INTERFACE_REQ = 736,
-	MSG_SMS_ENBALE_TS_INTERFACE_RES = 737,
+	MSG_SMS_ENABLE_TS_INTERFACE_REQ = 736,
+	MSG_SMS_ENABLE_TS_INTERFACE_RES = 737,
 	MSG_SMS_SPI_SET_BUS_WIDTH_REQ = 738,
 	MSG_SMS_SPI_SET_BUS_WIDTH_RES = 739,
 	MSG_SMS_SEND_EMM_REQ = 740,
@@ -630,7 +615,7 @@ struct sms_msg_hdr {
 
 struct sms_msg_data {
 	struct sms_msg_hdr x_msg_header;
-	u32 msg_data[1];
+	u32 msg_data;
 };
 
 struct sms_msg_data2 {
@@ -638,9 +623,9 @@ struct sms_msg_data2 {
 	u32 msg_data[2];
 };
 
-struct sms_msg_data4 {
+struct sms_msg_data5 {
 	struct sms_msg_hdr x_msg_header;
-	u32 msg_data[4];
+	u32 msg_data[5];
 };
 
 struct sms_data_download {
@@ -680,7 +665,7 @@ struct sms_firmware {
 	u32			check_sum;
 	u32			length;
 	u32			start_address;
-	u8			payload[1];
+	u8			payload[];
 };
 
 /* statistics information returned as response for
@@ -748,7 +733,7 @@ struct sms_stats {
 	u32 num_of_corrected_mpe_tlbs;/* Number of MPE tables which were
 	corrected by MPE RS decoding */
 	/* Common params */
-	u32 ber_error_count;	/* Number of errornous SYNC bits. */
+	u32 ber_error_count;	/* Number of erroneous SYNC bits. */
 	u32 ber_bit_count;	/* Total number of SYNC bits. */
 
 	/* Interface information */
@@ -1056,20 +1041,6 @@ struct sms_srvm_signal_status {
 	u32 request_id;
 };
 
-struct sms_i2c_req {
-	u32	device_address; /* I2c device address */
-	u32	write_count; /* number of bytes to write */
-	u32	read_count; /* number of bytes to read */
-	u8	Data[1];
-};
-
-struct sms_i2c_res {
-	u32	status; /* non-zero value in case of failure */
-	u32	read_count; /* number of bytes read */
-	u8	Data[1];
-};
-
-
 struct smscore_config_gpio {
 #define SMS_GPIO_DIRECTION_INPUT  0
 #define SMS_GPIO_DIRECTION_OUTPUT 1
@@ -1125,13 +1096,11 @@ extern void smscore_unregister_hotplug(hotplug_t hotplug);
 
 extern int smscore_register_device(struct smsdevice_params_t *params,
 				   struct smscore_device_t **coredev,
+				   gfp_t gfp_buf_flags,
 				   void *mdev);
 extern void smscore_unregister_device(struct smscore_device_t *coredev);
 
 extern int smscore_start_device(struct smscore_device_t *coredev);
-extern int smscore_load_firmware(struct smscore_device_t *coredev,
-				 char *filename,
-				 loadfirmware_t loadfirmware_handler);
 
 extern int smscore_set_device_mode(struct smscore_device_t *coredev, int mode);
 extern int smscore_get_device_mode(struct smscore_device_t *coredev);
@@ -1145,12 +1114,6 @@ extern int smsclient_sendrequest(struct smscore_client_t *client,
 				 void *buffer, size_t size);
 extern void smscore_onresponse(struct smscore_device_t *coredev,
 			       struct smscore_buffer_t *cb);
-
-extern int smscore_get_common_buffer_size(struct smscore_device_t *coredev);
-extern int smscore_map_common_buffer(struct smscore_device_t *coredev,
-				      struct vm_area_struct *vma);
-extern int smscore_send_fw_file(struct smscore_device_t *coredev,
-				u8 *ufwbuf, int size);
 
 extern
 struct smscore_buffer_t *smscore_getbuffer(struct smscore_device_t *coredev);

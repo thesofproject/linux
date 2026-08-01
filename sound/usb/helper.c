@@ -1,18 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/init.h>
@@ -75,6 +62,7 @@ void *snd_usb_find_csint_desc(void *buffer, int buflen, void *after, u8 dsubtype
 	}
 	return NULL;
 }
+EXPORT_SYMBOL_GPL(snd_usb_find_csint_desc);
 
 /*
  * Wrapper for usb_control_msg().
@@ -87,6 +75,9 @@ int snd_usb_ctl_msg(struct usb_device *dev, unsigned int pipe, __u8 request,
 	int err;
 	void *buf = NULL;
 	int timeout;
+
+	if (usb_pipe_type_check(dev, pipe))
+		return -EINVAL;
 
 	if (size > 0) {
 		buf = kmemdup(data, size, GFP_KERNEL);
@@ -118,7 +109,6 @@ unsigned char snd_usb_parse_datainterval(struct snd_usb_audio *chip,
 {
 	switch (snd_usb_get_speed(chip->dev)) {
 	case USB_SPEED_HIGH:
-	case USB_SPEED_WIRELESS:
 	case USB_SPEED_SUPER:
 	case USB_SPEED_SUPER_PLUS:
 		if (get_endpoint(alts, 0)->bInterval >= 1 &&
@@ -131,3 +121,47 @@ unsigned char snd_usb_parse_datainterval(struct snd_usb_audio *chip,
 	return 0;
 }
 
+struct usb_host_interface *
+snd_usb_get_host_interface(struct snd_usb_audio *chip, int ifnum, int altsetting)
+{
+	struct usb_interface *iface;
+
+	iface = usb_ifnum_to_if(chip->dev, ifnum);
+	if (!iface)
+		return NULL;
+	return usb_altnum_to_altsetting(iface, altsetting);
+}
+
+int snd_usb_add_ctrl_interface_link(struct snd_usb_audio *chip, int ifnum,
+		int ctrlif)
+{
+	struct usb_device *dev = chip->dev;
+	struct usb_host_interface *host_iface;
+
+	if (chip->num_intf_to_ctrl >= MAX_CARD_INTERFACES) {
+		dev_info(&dev->dev, "Too many interfaces assigned to the single USB-audio card\n");
+		return -EINVAL;
+	}
+
+	/* find audiocontrol interface */
+	host_iface = &usb_ifnum_to_if(dev, ctrlif)->altsetting[0];
+
+	chip->intf_to_ctrl[chip->num_intf_to_ctrl].interface = ifnum;
+	chip->intf_to_ctrl[chip->num_intf_to_ctrl].ctrl_intf = host_iface;
+	chip->num_intf_to_ctrl++;
+
+	return 0;
+}
+
+struct usb_host_interface *snd_usb_find_ctrl_interface(struct snd_usb_audio *chip,
+							int ifnum)
+{
+	int i;
+
+	for (i = 0; i < chip->num_intf_to_ctrl; ++i)
+		if (chip->intf_to_ctrl[i].interface == ifnum)
+			return chip->intf_to_ctrl[i].ctrl_intf;
+
+	/* Fallback to first audiocontrol interface */
+	return chip->ctrl_intf;
+}

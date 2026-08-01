@@ -7,7 +7,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/fs.h>
 #include <linux/list.h>
-#include <linux/idr.h>
+#include <linux/xarray.h>
 #include <linux/mm_types.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>
@@ -26,6 +26,11 @@ struct fw_packet;
 
 
 /* -card */
+
+// This is the arbitrary value we use to indicate a mismatched gap count.
+#define GAP_COUNT_MISMATCHED	0
+
+#define isoc_cycles_to_jiffies(cycles) usecs_to_jiffies((u32)div_u64((u64)cycles * USEC_PER_SEC, 8000))
 
 extern __printf(2, 3)
 void fw_err(const struct fw_card *card, const char *fmt, ...);
@@ -60,6 +65,9 @@ struct fw_card_driver {
 	int (*enable)(struct fw_card *card,
 		      const __be32 *config_rom, size_t length);
 
+	// After returning the call, any function is no longer triggered to handle hardware event.
+	void (*disable)(struct fw_card *card);
+
 	int (*read_phy_reg)(struct fw_card *card, int address);
 	int (*update_phy_reg)(struct fw_card *card, int address,
 			      int clear_bits, int set_bits);
@@ -80,7 +88,7 @@ struct fw_card_driver {
 	/*
 	 * Allow the specified node ID to do direct DMA out and in of
 	 * host memory.  The card will disable this for all node when
-	 * a bus reset happens, so driver need to reenable this after
+	 * a bus reset happens, so driver need to re-enable this after
 	 * bus reset.  Returns 0 on success, -ENODEV if the card
 	 * doesn't support this, -ESTALE if the generation doesn't
 	 * match.
@@ -92,8 +100,8 @@ struct fw_card_driver {
 	void (*write_csr)(struct fw_card *card, int csr_offset, u32 value);
 
 	struct fw_iso_context *
-	(*allocate_iso_context)(struct fw_card *card,
-				int type, int channel, size_t header_size);
+	(*allocate_iso_context)(struct fw_card *card, int type, int channel, size_t header_size,
+				size_t header_storage_size);
 	void (*free_iso_context)(struct fw_iso_context *ctx);
 
 	int (*start_iso)(struct fw_iso_context *ctx,
@@ -115,8 +123,8 @@ struct fw_card_driver {
 
 void fw_card_initialize(struct fw_card *card,
 		const struct fw_card_driver *driver, struct device *device);
-int fw_card_add(struct fw_card *card,
-		u32 max_receive, u32 link_speed, u64 guid);
+int fw_card_add(struct fw_card *card, u32 max_receive, u32 link_speed, u64 guid,
+		unsigned int supported_isoc_contexts);
 void fw_core_remove_card(struct fw_card *card);
 int fw_compute_block_crc(__be32 *block);
 void fw_schedule_bm_work(struct fw_card *card, unsigned long delay);
@@ -133,7 +141,7 @@ void fw_cdev_handle_phy_packet(struct fw_card *card, struct fw_packet *p);
 /* -device */
 
 extern struct rw_semaphore fw_device_rwsem;
-extern struct idr fw_device_idr;
+extern struct xarray fw_device_xa;
 extern int fw_cdev_major;
 
 static inline struct fw_device *fw_device_get(struct fw_device *device)
@@ -158,11 +166,27 @@ void fw_node_event(struct fw_card *card, struct fw_node *node, int event);
 int fw_iso_buffer_alloc(struct fw_iso_buffer *buffer, int page_count);
 int fw_iso_buffer_map_dma(struct fw_iso_buffer *buffer, struct fw_card *card,
 			  enum dma_data_direction direction);
-int fw_iso_buffer_map_vma(struct fw_iso_buffer *buffer,
-			  struct vm_area_struct *vma);
+size_t fw_iso_buffer_lookup(struct fw_iso_buffer *buffer, dma_addr_t completed);
+
+static inline void fw_iso_context_init_work(struct fw_iso_context *ctx, work_func_t func)
+{
+	INIT_WORK(&ctx->work, func);
+}
+
+static inline struct fw_iso_context *fw_iso_mc_context_create(struct fw_card *card,
+		fw_iso_mc_callback_t callback, void *callback_data)
+{
+	union fw_iso_callback cb = { .mc = callback };
+
+	return __fw_iso_context_create(card, FW_ISO_CONTEXT_RECEIVE_MULTICHANNEL, 0, 0, 0, 0, cb,
+				       callback_data);
+}
 
 
 /* -topology */
+
+// The initial value of BUS_MANAGER_ID register, to express nothing registered.
+#define BUS_MANAGER_ID_NOT_REGISTERED	0x3f
 
 enum {
 	FW_NODE_CREATED,
@@ -185,28 +209,45 @@ struct fw_node {
 			 * local node to this node. */
 	u8 max_depth:4;	/* Maximum depth to any leaf node */
 	u8 max_hops:4;	/* Max hops in this sub tree */
-	refcount_t ref_count;
+
+	struct kref kref;
 
 	/* For serializing node topology into a list. */
 	struct list_head link;
 
-	/* Upper layer specific data. */
-	void *data;
+	// The device when already associated, else NULL.
+	struct fw_device *device;
 
-	struct fw_node *ports[0];
+	struct fw_node *ports[] __counted_by(port_count);
 };
 
 static inline struct fw_node *fw_node_get(struct fw_node *node)
 {
-	refcount_inc(&node->ref_count);
+	kref_get(&node->kref);
 
 	return node;
 }
 
+static void release_node(struct kref *kref)
+{
+	struct fw_node *node = container_of(kref, struct fw_node, kref);
+
+	kfree(node);
+}
+
 static inline void fw_node_put(struct fw_node *node)
 {
-	if (refcount_dec_and_test(&node->ref_count))
-		kfree(node);
+	kref_put(&node->kref, release_node);
+}
+
+static inline struct fw_device *fw_node_get_device(struct fw_node *node)
+{
+	return node->device;
+}
+
+static inline void fw_node_set_device(struct fw_node *node, struct fw_device *device)
+{
+	node->device = device;
 }
 
 void fw_core_handle_bus_reset(struct fw_card *card, int node_id,
@@ -227,13 +268,20 @@ static inline bool is_next_generation(int new_generation, int old_generation)
 
 #define TCODE_LINK_INTERNAL		0xe
 
-#define TCODE_IS_READ_REQUEST(tcode)	(((tcode) & ~1) == 4)
-#define TCODE_IS_BLOCK_PACKET(tcode)	(((tcode) &  1) != 0)
-#define TCODE_IS_LINK_INTERNAL(tcode)	((tcode) == TCODE_LINK_INTERNAL)
-#define TCODE_IS_REQUEST(tcode)		(((tcode) &  2) == 0)
-#define TCODE_IS_RESPONSE(tcode)	(((tcode) &  2) != 0)
-#define TCODE_HAS_REQUEST_DATA(tcode)	(((tcode) & 12) != 4)
-#define TCODE_HAS_RESPONSE_DATA(tcode)	(((tcode) & 12) != 0)
+static inline bool tcode_is_read_request(unsigned int tcode)
+{
+	return (tcode & ~1u) == 4u;
+}
+
+static inline bool tcode_is_block_packet(unsigned int tcode)
+{
+	return (tcode & 1u) != 0u;
+}
+
+static inline bool tcode_is_link_internal(unsigned int tcode)
+{
+	return (tcode == TCODE_LINK_INTERNAL);
+}
 
 #define LOCAL_BUS 0xffc0
 
@@ -246,6 +294,18 @@ int fw_get_response_length(struct fw_request *request);
 void fw_fill_response(struct fw_packet *response, u32 *request_header,
 		      int rcode, void *payload, size_t length);
 
+void fw_request_get(struct fw_request *request);
+void fw_request_put(struct fw_request *request);
+
+void fw_cancel_pending_transactions(struct fw_card *card);
+
+// Convert the value of IEEE 1394 CYCLE_TIME register to the format of timeStamp field in
+// descriptors of 1394 OHCI.
+static inline u32 cycle_time_to_ohci_tstamp(u32 tstamp)
+{
+	return (tstamp & 0x0ffff000) >> 12;
+}
+
 #define FW_PHY_CONFIG_NO_NODE_ID	-1
 #define FW_PHY_CONFIG_CURRENT_GAP_COUNT	-1
 void fw_send_phy_config(struct fw_card *card,
@@ -254,6 +314,12 @@ void fw_send_phy_config(struct fw_card *card,
 static inline bool is_ping_packet(u32 *data)
 {
 	return (data[0] & 0xc0ffffff) == 0 && ~data[0] == data[1];
+}
+
+static inline bool is_in_fcp_region(u64 offset, size_t length)
+{
+	return offset >= (CSR_REGISTER_BASE | CSR_FCP_COMMAND) &&
+		offset + length <= (CSR_REGISTER_BASE | CSR_FCP_END);
 }
 
 #endif /* _FIREWIRE_CORE_H */

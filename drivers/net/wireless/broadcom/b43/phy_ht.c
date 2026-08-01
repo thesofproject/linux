@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 
   Broadcom B43 wireless driver
@@ -5,20 +6,6 @@
 
   Copyright (c) 2011 Rafał Miłecki <zajec5@gmail.com>
 
-  This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 2 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program; see the file COPYING.  If not, write to
-  the Free Software Foundation, Inc., 51 Franklin Steet, Fifth Floor,
-  Boston, MA 02110-1301, USA.
 
 */
 
@@ -335,8 +322,8 @@ static void b43_phy_ht_bphy_reset(struct b43_wldev *dev, bool reset)
 			    B43_PHY_B_BBCFG_RSTCCA | B43_PHY_B_BBCFG_RSTRX);
 	else
 		b43_phy_mask(dev, B43_PHY_B_BBCFG,
-			     (u16)~(B43_PHY_B_BBCFG_RSTCCA |
-				    B43_PHY_B_BBCFG_RSTRX));
+			     0xffff & ~(B43_PHY_B_BBCFG_RSTCCA |
+					B43_PHY_B_BBCFG_RSTRX));
 
 	b43_write16(dev, B43_MMIO_PSM_PHY_HDR, tmp);
 }
@@ -564,7 +551,7 @@ static void b43_phy_ht_tx_power_ctl(struct b43_wldev *dev, bool enable)
 				phy_ht->tx_pwr_idx[i] =
 					b43_phy_read(dev, status_regs[i]);
 		}
-		b43_phy_mask(dev, B43_PHY_HT_TXPCTL_CMD_C1, ~en_bits);
+		b43_phy_mask(dev, B43_PHY_HT_TXPCTL_CMD_C1, 0xffff & ~en_bits);
 	} else {
 		b43_phy_set(dev, B43_PHY_HT_TXPCTL_CMD_C1, en_bits);
 
@@ -855,7 +842,7 @@ static int b43_phy_ht_op_allocate(struct b43_wldev *dev)
 {
 	struct b43_phy_ht *phy_ht;
 
-	phy_ht = kzalloc(sizeof(*phy_ht), GFP_KERNEL);
+	phy_ht = kzalloc_obj(*phy_ht);
 	if (!phy_ht)
 		return -ENOMEM;
 	dev->phy.ht = phy_ht;
@@ -912,9 +899,6 @@ static int b43_phy_ht_op_init(struct b43_wldev *dev)
 	b43_phy_write(dev, B43_PHY_EXTG(0x14f), 0xc8);
 	b43_phy_write(dev, 0x70, 0x50);
 	b43_phy_write(dev, 0x1ff, 0x30);
-
-	if (0) /* TODO: condition */
-		; /* TODO: PHY op on reg 0x217 */
 
 	if (b43_current_band(dev->wl) == NL80211_BAND_5GHZ)
 		b43_phy_ht_classifier(dev, B43_PHY_HT_CLASS_CTL_CCK_EN, 0);
@@ -1031,7 +1015,7 @@ static void b43_phy_ht_op_free(struct b43_wldev *dev)
 	phy->ht = NULL;
 }
 
-/* http://bcm-v4.sipsolutions.net/802.11/Radio/Switch%20Radio */
+/* https://bcm-v4.sipsolutions.net/802.11/Radio/Switch%20Radio */
 static void b43_phy_ht_op_software_rfkill(struct b43_wldev *dev,
 					bool blocked)
 {

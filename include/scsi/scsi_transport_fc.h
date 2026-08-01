@@ -1,35 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *  FiberChannel transport specific attributes exported to sysfs.
  *
  *  Copyright (c) 2003 Silicon Graphics, Inc.  All rights reserved.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
- *  ========
- *
  *  Copyright (C) 2004-2007   James Smart, Emulex Corporation
  *    Rewrite for host, target, device, and remote port attributes,
  *    statistics, and service functions...
- *
  */
 #ifndef SCSI_TRANSPORT_FC_H
 #define SCSI_TRANSPORT_FC_H
 
 #include <linux/sched.h>
 #include <linux/bsg-lib.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_netlink.h>
 #include <scsi/scsi_host.h>
@@ -84,6 +67,7 @@ enum fc_port_state {
 	FC_PORTSTATE_ERROR,
 	FC_PORTSTATE_LOOPBACK,
 	FC_PORTSTATE_DELETED,
+	FC_PORTSTATE_MARGINAL,
 };
 
 
@@ -141,6 +125,7 @@ enum fc_vport_state {
 #define FC_PORTSPEED_25GBIT		0x800
 #define FC_PORTSPEED_64GBIT		0x1000
 #define FC_PORTSPEED_128GBIT		0x2000
+#define FC_PORTSPEED_256GBIT		0x4000
 #define FC_PORTSPEED_NOT_NEGOTIATED	(1 << 15) /* Speed not established */
 
 /*
@@ -165,6 +150,9 @@ enum fc_tgtid_binding_type  {
 #define FC_PORT_ROLE_FCP_INITIATOR		0x02
 #define FC_PORT_ROLE_IP_PORT			0x04
 #define FC_PORT_ROLE_FCP_DUMMY_INITIATOR	0x08
+#define FC_PORT_ROLE_NVME_INITIATOR		0x10
+#define FC_PORT_ROLE_NVME_TARGET		0x20
+#define FC_PORT_ROLE_NVME_DISCOVERY		0x40
 
 /* The following are for compatibility */
 #define FC_RPORT_ROLE_UNKNOWN			FC_PORT_ROLE_UNKNOWN
@@ -298,6 +286,45 @@ struct fc_rport_identifiers {
 	u32 roles;
 };
 
+/*
+ * Fabric Performance Impact Notification Statistics
+ */
+struct fc_fpin_stats {
+	/* Delivery */
+	u64 dn;
+	u64 dn_unknown;
+	u64 dn_timeout;
+	u64 dn_unable_to_route;
+	u64 dn_device_specific;
+
+	/* Link Integrity */
+	u64 li;
+	u64 li_failure_unknown;
+	u64 li_link_failure_count;
+	u64 li_loss_of_sync_count;
+	u64 li_loss_of_signals_count;
+	u64 li_prim_seq_err_count;
+	u64 li_invalid_tx_word_count;
+	u64 li_invalid_crc_count;
+	u64 li_device_specific;
+
+	/* Congestion/Peer Congestion */
+	u64 cn;
+	u64 cn_clear;
+	u64 cn_lost_credit;
+	u64 cn_credit_stall;
+	u64 cn_oversubscription;
+	u64 cn_device_specific;
+};
+
+#define FC_RPORT_ENCRYPTION_STATUS_MAX_LEN      14
+/*
+ * Encryption Information
+ */
+struct fc_encryption_info {
+	/* Encryption Status */
+	u8 status;
+};
 
 /* Macro for use in defining Remote Port attributes */
 #define FC_RPORT_ATTR(_name,_mode,_show,_store)				\
@@ -339,12 +366,14 @@ struct fc_rport {	/* aka fc_starget_attrs */
 
 	/* Dynamic Attributes */
 	u32 dev_loss_tmo;	/* Remote Port loss timeout in seconds. */
+	struct fc_fpin_stats fpin_stats;
 
 	/* Private (Transport-managed) Attributes */
 	u64 node_name;
 	u64 port_name;
 	u32 port_id;
 	u32 roles;
+	struct fc_encryption_info enc_info;
 	enum fc_port_state port_state;	/* Will only be ONLINE or UNKNOWN */
 	u32 scsi_target_id;
 	u32 fast_io_fail_tmo;
@@ -364,6 +393,8 @@ struct fc_rport {	/* aka fc_starget_attrs */
  	struct work_struct stgt_delete_work;
 	struct work_struct rport_delete_work;
 	struct request_queue *rqst_q;	/* bsg support */
+
+	struct workqueue_struct *devloss_work_q;
 } __attribute__((aligned(sizeof(unsigned long))));
 
 /* bit field values for struct fc_rport "flags" field: */
@@ -450,6 +481,9 @@ struct fc_host_statistics {
 	u64 fc_seq_not_found;		/* seq is not found for exchange */
 	u64 fc_non_bls_resp;		/* a non BLS response frame with
 					   a sequence responder in new exch */
+	/* Host Congestion Signals */
+	u64 cn_sig_warn;
+	u64 cn_sig_alarm;
 };
 
 
@@ -473,6 +507,8 @@ enum fc_host_event_code  {
 	FCH_EVT_PORT_ONLINE		= 0x202,
 	FCH_EVT_PORT_FABRIC		= 0x204,
 	FCH_EVT_LINK_UNKNOWN		= 0x500,
+	FCH_EVT_LINK_FPIN		= 0x501,
+	FCH_EVT_LINK_FPIN_ACK		= 0x502,
 	FCH_EVT_VENDOR_UNIQUE		= 0xffff,
 };
 
@@ -494,10 +530,11 @@ enum fc_host_event_code  {
  * managed by the transport w/o driver interaction.
  */
 
+#define FC_VENDOR_IDENTIFIER		8
 #define FC_FC4_LIST_SIZE		32
 #define FC_SYMBOLIC_NAME_SIZE		256
 #define FC_VERSION_STRING_SIZE		64
-#define FC_SERIAL_NUMBER_SIZE		80
+#define FC_SERIAL_NUMBER_SIZE		64
 
 struct fc_host_attrs {
 	/* Fixed Attributes */
@@ -509,6 +546,10 @@ struct fc_host_attrs {
 	u32 supported_speeds;
 	u32 maxframe_size;
 	u16 max_npiv_vports;
+	u32 max_ct_payload;
+	u32 num_ports;
+	u32 num_discovered_ports;
+	u32 bootbios_state;
 	char serial_number[FC_SERIAL_NUMBER_SIZE];
 	char manufacturer[FC_SERIAL_NUMBER_SIZE];
 	char model[FC_SYMBOLIC_NAME_SIZE];
@@ -517,6 +558,9 @@ struct fc_host_attrs {
 	char driver_version[FC_VERSION_STRING_SIZE];
 	char firmware_version[FC_VERSION_STRING_SIZE];
 	char optionrom_version[FC_VERSION_STRING_SIZE];
+	char vendor_identifier[FC_VENDOR_IDENTIFIER];
+	char bootbios_version[FC_SYMBOLIC_NAME_SIZE];
+
 
 	/* Dynamic Attributes */
 	u32 port_id;
@@ -528,6 +572,7 @@ struct fc_host_attrs {
 	char symbolic_name[FC_SYMBOLIC_NAME_SIZE];
 	char system_hostname[FC_SYMBOLIC_NAME_SIZE];
 	u32 dev_loss_tmo;
+	struct fc_fpin_stats fpin_stats;
 
 	/* Private (Transport-managed) Attributes */
 	enum fc_tgtid_binding_type  tgtid_bind_type;
@@ -542,13 +587,13 @@ struct fc_host_attrs {
 	u16 npiv_vports_inuse;
 
 	/* work queues for rport state manipulation */
-	char work_q_name[20];
 	struct workqueue_struct *work_q;
-	char devloss_work_q_name[20];
-	struct workqueue_struct *devloss_work_q;
 
 	/* bsg support */
 	struct request_queue *rqst_q;
+
+	/* FDMI support version*/
+	u8 fdmi_version;
 };
 
 #define shost_to_fc_host(x) \
@@ -618,16 +663,22 @@ struct fc_host_attrs {
 	(((struct fc_host_attrs *)(x)->shost_data)->next_vport_number)
 #define fc_host_npiv_vports_inuse(x)	\
 	(((struct fc_host_attrs *)(x)->shost_data)->npiv_vports_inuse)
-#define fc_host_work_q_name(x) \
-	(((struct fc_host_attrs *)(x)->shost_data)->work_q_name)
 #define fc_host_work_q(x) \
 	(((struct fc_host_attrs *)(x)->shost_data)->work_q)
-#define fc_host_devloss_work_q_name(x) \
-	(((struct fc_host_attrs *)(x)->shost_data)->devloss_work_q_name)
-#define fc_host_devloss_work_q(x) \
-	(((struct fc_host_attrs *)(x)->shost_data)->devloss_work_q)
 #define fc_host_dev_loss_tmo(x) \
 	(((struct fc_host_attrs *)(x)->shost_data)->dev_loss_tmo)
+#define fc_host_max_ct_payload(x)  \
+	(((struct fc_host_attrs *)(x)->shost_data)->max_ct_payload)
+#define fc_host_vendor_identifier(x)  \
+	(((struct fc_host_attrs *)(x)->shost_data)->vendor_identifier)
+#define fc_host_num_discovered_ports(x)  \
+	(((struct fc_host_attrs *)(x)->shost_data)->num_discovered_ports)
+#define fc_host_num_ports(x)  \
+	(((struct fc_host_attrs *)(x)->shost_data)->num_ports)
+#define fc_host_bootbios_version(x)  \
+	(((struct fc_host_attrs *)(x)->shost_data)->bootbios_version)
+#define fc_host_bootbios_state(x)  \
+	(((struct fc_host_attrs *)(x)->shost_data)->bootbios_state)
 
 /* The functions by which the transport class and the driver communicate */
 struct fc_function_template {
@@ -650,6 +701,8 @@ struct fc_function_template {
 	struct fc_host_statistics * (*get_fc_host_stats)(struct Scsi_Host *);
 	void	(*reset_fc_host_stats)(struct Scsi_Host *);
 
+	struct fc_encryption_info * (*get_fc_rport_enc_info)(struct fc_rport *);
+
 	int	(*issue_fc_host_lip)(struct Scsi_Host *);
 
 	void    (*dev_loss_tmo_callbk)(struct fc_rport *);
@@ -661,6 +714,7 @@ struct fc_function_template {
 	int  	(*vport_delete)(struct fc_vport *);
 
 	/* bsg support */
+	u32				max_bsg_segments;
 	int	(*bsg_request)(struct bsg_job *);
 	int	(*bsg_timeout)(struct bsg_job *);
 
@@ -719,14 +773,12 @@ struct fc_function_template {
 	unsigned long	disable_target_scan:1;
 };
 
-
 /**
  * fc_remote_port_chkready - called to validate the remote port state
  *   prior to initiating io to the port.
- *
- * Returns a scsi result code that can be returned by the LLDD.
- *
  * @rport:	remote port to be checked
+ *
+ * Returns: a scsi result code that can be returned by the LLDD.
  **/
 static inline int
 fc_remote_port_chkready(struct fc_rport *rport)
@@ -735,6 +787,7 @@ fc_remote_port_chkready(struct fc_rport *rport)
 
 	switch (rport->port_state) {
 	case FC_PORTSTATE_ONLINE:
+	case FC_PORTSTATE_MARGINAL:
 		if (rport->roles & FC_PORT_ROLE_FCP_TARGET)
 			result = 0;
 		else if (rport->flags & FC_RPORT_DEVLOSS_PENDING)
@@ -755,7 +808,7 @@ fc_remote_port_chkready(struct fc_rport *rport)
 	return result;
 }
 
-static inline u64 wwn_to_u64(u8 *wwn)
+static inline u64 wwn_to_u64(const u8 *wwn)
 {
 	return get_unaligned_be64(wwn);
 }
@@ -798,17 +851,26 @@ u32 fc_get_event_number(void);
 void fc_host_post_event(struct Scsi_Host *shost, u32 event_number,
 		enum fc_host_event_code event_code, u32 event_data);
 void fc_host_post_vendor_event(struct Scsi_Host *shost, u32 event_number,
-		u32 data_len, char * data_buf, u64 vendor_id);
+		u32 data_len, char *data_buf, u64 vendor_id);
+struct fc_rport *fc_find_rport_by_wwpn(struct Scsi_Host *shost, u64 wwpn);
+void fc_host_post_fc_event(struct Scsi_Host *shost, u32 event_number,
+		enum fc_host_event_code event_code,
+		u32 data_len, char *data_buf, u64 vendor_id);
 	/* Note: when specifying vendor_id to fc_host_post_vendor_event()
-	 *   be sure to read the Vendor Type and ID formatting requirements
-	 *   specified in scsi_netlink.h
+	 *   or fc_host_post_fc_event(), be sure to read the Vendor Type
+	 *   and ID formatting requirements specified in scsi_netlink.h
+	 * Note: when calling fc_host_post_fc_event(), vendor_id may be
+	 *   specified as 0.
 	 */
+void fc_host_fpin_rcv(struct Scsi_Host *shost, u32 fpin_len, char *fpin_buf,
+		u8 event_acknowledge);
 struct fc_vport *fc_vport_create(struct Scsi_Host *shost, int channel,
 		struct fc_vport_identifiers *);
 int fc_vport_terminate(struct fc_vport *vport);
 int fc_block_rport(struct fc_rport *rport);
 int fc_block_scsi_eh(struct scsi_cmnd *cmnd);
-enum blk_eh_timer_return fc_eh_timed_out(struct scsi_cmnd *scmd);
+enum scsi_timeout_action fc_eh_timed_out(struct scsi_cmnd *scmd);
+bool fc_eh_should_retry_cmd(struct scsi_cmnd *scmd);
 
 static inline struct Scsi_Host *fc_bsg_to_shost(struct bsg_job *job)
 {

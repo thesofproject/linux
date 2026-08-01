@@ -1,28 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * dmic.c  --  SoC audio for Generic Digital MICs
  *
  * Author: Liam Girdwood <lrg@slimlogic.co.uk>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #include <linux/delay.h>
 #include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/platform_device.h>
+#include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <sound/core.h>
@@ -30,31 +17,73 @@
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
 
+#define MAX_MODESWITCH_DELAY 70
+static int modeswitch_delay;
+module_param(modeswitch_delay, uint, 0644);
+
+static int wakeup_delay;
+module_param(wakeup_delay, uint, 0644);
+
 struct dmic {
 	struct gpio_desc *gpio_en;
+	struct regulator *vref;
 	int wakeup_delay;
+	/* Delay after DMIC mode switch */
+	int modeswitch_delay;
+};
+
+static int dmic_daiops_trigger(struct snd_pcm_substream *substream,
+			       int cmd, struct snd_soc_dai *dai)
+{
+	struct snd_soc_component *component = dai->component;
+	struct dmic *dmic = snd_soc_component_get_drvdata(component);
+
+	switch (cmd) {
+	case SNDRV_PCM_TRIGGER_STOP:
+		if (dmic->modeswitch_delay)
+			mdelay(dmic->modeswitch_delay);
+
+		break;
+	}
+
+	return 0;
+}
+
+static const struct snd_soc_dai_ops dmic_dai_ops = {
+	.trigger	= dmic_daiops_trigger,
 };
 
 static int dmic_aif_event(struct snd_soc_dapm_widget *w,
 			  struct snd_kcontrol *kcontrol, int event) {
 	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
 	struct dmic *dmic = snd_soc_component_get_drvdata(component);
+	int ret = 0;
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
 		if (dmic->gpio_en)
-			gpiod_set_value(dmic->gpio_en, 1);
+			gpiod_set_value_cansleep(dmic->gpio_en, 1);
+
+		if (dmic->vref) {
+			ret = regulator_enable(dmic->vref);
+			if (ret)
+				return ret;
+		}
 
 		if (dmic->wakeup_delay)
 			msleep(dmic->wakeup_delay);
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		if (dmic->gpio_en)
-			gpiod_set_value(dmic->gpio_en, 0);
+			gpiod_set_value_cansleep(dmic->gpio_en, 0);
+
+		if (dmic->vref)
+			ret = regulator_disable(dmic->vref);
+
 		break;
 	}
 
-	return 0;
+	return ret;
 }
 
 static struct snd_soc_dai_driver dmic_dai = {
@@ -66,8 +95,14 @@ static struct snd_soc_dai_driver dmic_dai = {
 		.rates = SNDRV_PCM_RATE_CONTINUOUS,
 		.formats = SNDRV_PCM_FMTBIT_S32_LE
 			| SNDRV_PCM_FMTBIT_S24_LE
-			| SNDRV_PCM_FMTBIT_S16_LE,
+			| SNDRV_PCM_FMTBIT_S16_LE
+			| SNDRV_PCM_FMTBIT_DSD_U8
+			| SNDRV_PCM_FMTBIT_DSD_U16_LE
+			| SNDRV_PCM_FMTBIT_DSD_U32_LE
+			| SNDRV_PCM_FMTBIT_DSD_U16_BE
+			| SNDRV_PCM_FMTBIT_DSD_U32_BE,
 	},
+	.ops    = &dmic_dai_ops,
 };
 
 static int dmic_component_probe(struct snd_soc_component *component)
@@ -78,6 +113,14 @@ static int dmic_component_probe(struct snd_soc_component *component)
 	if (!dmic)
 		return -ENOMEM;
 
+	dmic->vref = devm_regulator_get_optional(component->dev, "vref");
+	if (IS_ERR(dmic->vref)) {
+		if (PTR_ERR(dmic->vref) != -ENODEV)
+			return dev_err_probe(component->dev, PTR_ERR(dmic->vref),
+					     "Failed to get vref\n");
+		dmic->vref = NULL;
+	}
+
 	dmic->gpio_en = devm_gpiod_get_optional(component->dev,
 						"dmicen", GPIOD_OUT_LOW);
 	if (IS_ERR(dmic->gpio_en))
@@ -85,6 +128,15 @@ static int dmic_component_probe(struct snd_soc_component *component)
 
 	device_property_read_u32(component->dev, "wakeup-delay-ms",
 				 &dmic->wakeup_delay);
+	device_property_read_u32(component->dev, "modeswitch-delay-ms",
+				 &dmic->modeswitch_delay);
+	if (wakeup_delay)
+		dmic->wakeup_delay  = wakeup_delay;
+	if (modeswitch_delay)
+		dmic->modeswitch_delay  = modeswitch_delay;
+
+	if (dmic->modeswitch_delay > MAX_MODESWITCH_DELAY)
+		dmic->modeswitch_delay = MAX_MODESWITCH_DELAY;
 
 	snd_soc_component_set_drvdata(component, dmic);
 
@@ -111,7 +163,6 @@ static const struct snd_soc_component_driver soc_dmic = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static int dmic_dev_probe(struct platform_device *pdev)
@@ -148,6 +199,7 @@ static const struct of_device_id dmic_dev_match[] = {
 	{.compatible = "dmic-codec"},
 	{}
 };
+MODULE_DEVICE_TABLE(of, dmic_dev_match);
 
 static struct platform_driver dmic_driver = {
 	.driver = {

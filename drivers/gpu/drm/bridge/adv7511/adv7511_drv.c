@@ -1,24 +1,28 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Analog Devices ADV7511 HDMI transmitter driver
  *
  * Copyright 2012 Analog Devices Inc.
- *
- * Licensed under the GPL-2.
  */
 
+#include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/slab.h>
-#include <linux/clk.h>
 
-#include <drm/drmP.h>
+#include <sound/pcm.h>
+
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
+#include <drm/drm_bridge_connector.h>
 #include <drm/drm_edid.h>
-
-#include <media/cec.h>
+#include <drm/drm_of.h>
+#include <drm/drm_print.h>
+#include <drm/drm_probe_helper.h>
+#include <drm/display/drm_hdmi_helper.h>
+#include <drm/display/drm_hdmi_state_helper.h>
 
 #include "adv7511.h"
 
@@ -121,11 +125,18 @@ static const struct regmap_config adv7511_regmap_config = {
 	.val_bits = 8,
 
 	.max_register = 0xff,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.reg_defaults_raw = adv7511_register_defaults,
 	.num_reg_defaults_raw = ARRAY_SIZE(adv7511_register_defaults),
 
 	.volatile_reg = adv7511_register_volatile,
+};
+
+static const struct regmap_config adv7511_packet_config = {
+	.reg_bits = 8,
+	.val_bits = 8,
+
+	.max_register = 0xff,
 };
 
 /* -----------------------------------------------------------------------------
@@ -202,62 +213,37 @@ static const uint16_t adv7511_csc_ycbcr_to_rgb[] = {
 
 static void adv7511_set_config_csc(struct adv7511 *adv7511,
 				   struct drm_connector *connector,
-				   bool rgb, bool hdmi_mode)
+				   bool rgb)
 {
 	struct adv7511_video_config config;
 	bool output_format_422, output_format_ycbcr;
 	unsigned int mode;
-	uint8_t infoframe[17];
-
-	config.hdmi_mode = hdmi_mode;
-
-	hdmi_avi_infoframe_init(&config.avi_infoframe);
-
-	config.avi_infoframe.scan_mode = HDMI_SCAN_MODE_UNDERSCAN;
 
 	if (rgb) {
 		config.csc_enable = false;
-		config.avi_infoframe.colorspace = HDMI_COLORSPACE_RGB;
+		output_format_422 = false;
+		output_format_ycbcr = false;
 	} else {
 		config.csc_scaling_factor = ADV7511_CSC_SCALING_4;
 		config.csc_coefficents = adv7511_csc_ycbcr_to_rgb;
 
 		if ((connector->display_info.color_formats &
-		     DRM_COLOR_FORMAT_YCRCB422) &&
-		    config.hdmi_mode) {
+		     BIT(DRM_OUTPUT_COLOR_FORMAT_YCBCR422)) &&
+		    connector->display_info.is_hdmi) {
 			config.csc_enable = false;
-			config.avi_infoframe.colorspace =
-				HDMI_COLORSPACE_YUV422;
-		} else {
-			config.csc_enable = true;
-			config.avi_infoframe.colorspace = HDMI_COLORSPACE_RGB;
-		}
-	}
-
-	if (config.hdmi_mode) {
-		mode = ADV7511_HDMI_CFG_MODE_HDMI;
-
-		switch (config.avi_infoframe.colorspace) {
-		case HDMI_COLORSPACE_YUV444:
-			output_format_422 = false;
-			output_format_ycbcr = true;
-			break;
-		case HDMI_COLORSPACE_YUV422:
 			output_format_422 = true;
 			output_format_ycbcr = true;
-			break;
-		default:
+		} else {
+			config.csc_enable = true;
 			output_format_422 = false;
 			output_format_ycbcr = false;
-			break;
 		}
-	} else {
-		mode = ADV7511_HDMI_CFG_MODE_DVI;
-		output_format_422 = false;
-		output_format_ycbcr = false;
 	}
 
-	adv7511_packet_disable(adv7511, ADV7511_PACKET_ENABLE_AVI_INFOFRAME);
+	if (connector->display_info.is_hdmi)
+		mode = ADV7511_HDMI_CFG_MODE_HDMI;
+	else
+		mode = ADV7511_HDMI_CFG_MODE_DVI;
 
 	adv7511_set_colormap(adv7511, config.csc_enable,
 			     config.csc_coefficents,
@@ -268,15 +254,6 @@ static void adv7511_set_config_csc(struct adv7511 *adv7511,
 
 	regmap_update_bits(adv7511->regmap, ADV7511_REG_HDCP_HDMI_CFG,
 			   ADV7511_HDMI_CFG_MODE_MASK, mode);
-
-	hdmi_avi_infoframe_pack(&config.avi_infoframe, infoframe,
-				sizeof(infoframe));
-
-	/* The AVI infoframe id is not configurable */
-	regmap_bulk_write(adv7511->regmap, ADV7511_REG_AVI_INFOFRAME_VERSION,
-			  infoframe + 1, sizeof(infoframe) - 1);
-
-	adv7511_packet_enable(adv7511, ADV7511_PACKET_ENABLE_AVI_INFOFRAME);
 }
 
 static void adv7511_set_link_config(struct adv7511 *adv7511,
@@ -351,11 +328,17 @@ static void __adv7511_power_on(struct adv7511 *adv7511)
 	 * from standby or are enabled. When the HPD goes low the adv7511 is
 	 * reset and the outputs are disabled which might cause the monitor to
 	 * go to standby again. To avoid this we ignore the HPD pin for the
-	 * first few seconds after enabling the output.
+	 * first few seconds after enabling the output. On the other hand
+	 * adv7535 require to enable HPD Override bit for proper HPD.
 	 */
-	regmap_update_bits(adv7511->regmap, ADV7511_REG_POWER2,
-			   ADV7511_REG_POWER2_HPD_SRC_MASK,
-			   ADV7511_REG_POWER2_HPD_SRC_NONE);
+	if (adv7511->info->hpd_override_enable)
+		regmap_update_bits(adv7511->regmap, ADV7511_REG_POWER2,
+				   ADV7535_REG_POWER2_HPD_OVERRIDE,
+				   ADV7535_REG_POWER2_HPD_OVERRIDE);
+	else
+		regmap_update_bits(adv7511->regmap, ADV7511_REG_POWER2,
+				   ADV7511_REG_POWER2_HPD_SRC_MASK,
+				   ADV7511_REG_POWER2_HPD_SRC_NONE);
 }
 
 static void adv7511_power_on(struct adv7511 *adv7511)
@@ -367,7 +350,7 @@ static void adv7511_power_on(struct adv7511 *adv7511)
 	 */
 	regcache_sync(adv7511->regmap);
 
-	if (adv7511->type == ADV7533)
+	if (adv7511->info->has_dsi)
 		adv7533_dsi_power_on(adv7511);
 	adv7511->powered = true;
 }
@@ -375,6 +358,10 @@ static void adv7511_power_on(struct adv7511 *adv7511)
 static void __adv7511_power_off(struct adv7511 *adv7511)
 {
 	/* TODO: setup additional power down modes */
+	if (adv7511->info->hpd_override_enable)
+		regmap_update_bits(adv7511->regmap, ADV7511_REG_POWER2,
+				   ADV7535_REG_POWER2_HPD_OVERRIDE, 0);
+
 	regmap_update_bits(adv7511->regmap, ADV7511_REG_POWER,
 			   ADV7511_POWER_POWER_DOWN,
 			   ADV7511_POWER_POWER_DOWN);
@@ -387,7 +374,7 @@ static void __adv7511_power_off(struct adv7511 *adv7511)
 static void adv7511_power_off(struct adv7511 *adv7511)
 {
 	__adv7511_power_off(adv7511);
-	if (adv7511->type == ADV7533)
+	if (adv7511->info->has_dsi)
 		adv7533_dsi_power_off(adv7511);
 	adv7511->powered = false;
 }
@@ -429,11 +416,22 @@ static void adv7511_hpd_work(struct work_struct *work)
 	else
 		status = connector_status_disconnected;
 
-	if (adv7511->connector.status != status) {
-		adv7511->connector.status = status;
-		if (status == connector_status_disconnected)
-			cec_phys_addr_invalidate(adv7511->cec_adap);
-		drm_kms_helper_hotplug_event(adv7511->connector.dev);
+	/*
+	 * The bridge resets its registers on unplug. So when we get a plug
+	 * event and we're already supposed to be powered, cycle the bridge to
+	 * restore its state.
+	 */
+	if (status == connector_status_connected &&
+	    adv7511->status == connector_status_disconnected &&
+	    adv7511->powered) {
+		regcache_mark_dirty(adv7511->regmap);
+		adv7511_power_on(adv7511);
+	}
+
+	if (adv7511->status != status) {
+		adv7511->status = status;
+
+		drm_bridge_hpd_notify(&adv7511->bridge, status);
 	}
 }
 
@@ -441,6 +439,8 @@ static int adv7511_irq_process(struct adv7511 *adv7511, bool process_hpd)
 {
 	unsigned int irq0, irq1;
 	int ret;
+	int cec_status = IRQ_NONE;
+	int irq_status = IRQ_NONE;
 
 	ret = regmap_read(adv7511->regmap, ADV7511_REG_INT(0), &irq0);
 	if (ret < 0)
@@ -453,21 +453,28 @@ static int adv7511_irq_process(struct adv7511 *adv7511, bool process_hpd)
 	regmap_write(adv7511->regmap, ADV7511_REG_INT(0), irq0);
 	regmap_write(adv7511->regmap, ADV7511_REG_INT(1), irq1);
 
-	if (process_hpd && irq0 & ADV7511_INT0_HPD && adv7511->bridge.encoder)
+	if (process_hpd && irq0 & ADV7511_INT0_HPD && adv7511->bridge.encoder) {
 		schedule_work(&adv7511->hpd_work);
+		irq_status = IRQ_HANDLED;
+	}
 
 	if (irq0 & ADV7511_INT0_EDID_READY || irq1 & ADV7511_INT1_DDC_ERROR) {
 		adv7511->edid_read = true;
 
 		if (adv7511->i2c_main->irq)
 			wake_up_all(&adv7511->wq);
+		irq_status = IRQ_HANDLED;
 	}
 
 #ifdef CONFIG_DRM_I2C_ADV7511_CEC
-	adv7511_cec_irq_process(adv7511, irq1);
+	cec_status = adv7511_cec_irq_process(adv7511, irq1);
 #endif
 
-	return 0;
+	/* If there is no IRQ to handle, exit indicating no IRQ data */
+	if (irq_status == IRQ_HANDLED || cec_status == IRQ_HANDLED)
+		return IRQ_HANDLED;
+
+	return IRQ_NONE;
 }
 
 static irqreturn_t adv7511_irq_handler(int irq, void *devid)
@@ -476,7 +483,7 @@ static irqreturn_t adv7511_irq_handler(int irq, void *devid)
 	int ret;
 
 	ret = adv7511_irq_process(adv7511, true);
-	return ret < 0 ? IRQ_NONE : IRQ_HANDLED;
+	return ret < 0 ? IRQ_NONE : ret;
 }
 
 /* -----------------------------------------------------------------------------
@@ -577,16 +584,15 @@ static int adv7511_get_edid_block(void *data, u8 *buf, unsigned int block,
  * ADV75xx helpers
  */
 
-static int adv7511_get_modes(struct adv7511 *adv7511,
-			     struct drm_connector *connector)
+static const struct drm_edid *adv7511_edid_read(struct adv7511 *adv7511,
+						struct drm_connector *connector)
 {
-	struct edid *edid;
-	unsigned int count;
+	const struct drm_edid *drm_edid;
 
 	/* Reading the EDID only works if the device is powered */
 	if (!adv7511->powered) {
 		unsigned int edid_i2c_addr =
-					(adv7511->i2c_main->addr << 1) + 4;
+					(adv7511->i2c_edid->addr << 1);
 
 		__adv7511_power_on(adv7511);
 
@@ -595,27 +601,16 @@ static int adv7511_get_modes(struct adv7511 *adv7511,
 			     edid_i2c_addr);
 	}
 
-	edid = drm_do_get_edid(connector, adv7511_get_edid_block, adv7511);
+	drm_edid = drm_edid_read_custom(connector, adv7511_get_edid_block, adv7511);
 
 	if (!adv7511->powered)
 		__adv7511_power_off(adv7511);
 
-
-	drm_mode_connector_update_edid_property(connector, edid);
-	count = drm_add_edid_modes(connector, edid);
-
-	adv7511_set_config_csc(adv7511, connector, adv7511->rgb,
-			       drm_detect_hdmi_monitor(edid));
-
-	cec_s_phys_addr_from_edid(adv7511->cec_adap, edid);
-
-	kfree(edid);
-
-	return count;
+	return drm_edid;
 }
 
 static enum drm_connector_status
-adv7511_detect(struct adv7511 *adv7511, struct drm_connector *connector)
+adv7511_detect(struct adv7511 *adv7511)
 {
 	enum drm_connector_status status;
 	unsigned int val;
@@ -640,32 +635,26 @@ adv7511_detect(struct adv7511 *adv7511, struct drm_connector *connector)
 	if (status == connector_status_connected && hpd && adv7511->powered) {
 		regcache_mark_dirty(adv7511->regmap);
 		adv7511_power_on(adv7511);
-		adv7511_get_modes(adv7511, connector);
 		if (adv7511->status == connector_status_connected)
 			status = connector_status_disconnected;
 	} else {
 		/* Renable HPD sensing */
-		regmap_update_bits(adv7511->regmap, ADV7511_REG_POWER2,
-				   ADV7511_REG_POWER2_HPD_SRC_MASK,
-				   ADV7511_REG_POWER2_HPD_SRC_BOTH);
+		if (adv7511->info->hpd_override_enable)
+			regmap_update_bits(adv7511->regmap, ADV7511_REG_POWER2,
+					   ADV7535_REG_POWER2_HPD_OVERRIDE,
+					   ADV7535_REG_POWER2_HPD_OVERRIDE);
+		else
+			regmap_update_bits(adv7511->regmap, ADV7511_REG_POWER2,
+					   ADV7511_REG_POWER2_HPD_SRC_MASK,
+					   ADV7511_REG_POWER2_HPD_SRC_BOTH);
 	}
 
 	adv7511->status = status;
 	return status;
 }
 
-static int adv7511_mode_valid(struct adv7511 *adv7511,
-			      struct drm_display_mode *mode)
-{
-	if (mode->clock > 165000)
-		return MODE_CLOCK_HIGH;
-
-	return MODE_OK;
-}
-
 static void adv7511_mode_set(struct adv7511 *adv7511,
-			     struct drm_display_mode *mode,
-			     struct drm_display_mode *adj_mode)
+			     const struct drm_display_mode *adj_mode)
 {
 	unsigned int low_refresh_rate;
 	unsigned int hsync_polarity = 0;
@@ -735,135 +724,143 @@ static void adv7511_mode_set(struct adv7511 *adv7511,
 			vsync_polarity = 1;
 	}
 
-	if (mode->vrefresh <= 24000)
+	if (drm_mode_vrefresh(adj_mode) <= 24)
 		low_refresh_rate = ADV7511_LOW_REFRESH_RATE_24HZ;
-	else if (mode->vrefresh <= 25000)
+	else if (drm_mode_vrefresh(adj_mode) <= 25)
 		low_refresh_rate = ADV7511_LOW_REFRESH_RATE_25HZ;
-	else if (mode->vrefresh <= 30000)
+	else if (drm_mode_vrefresh(adj_mode) <= 30)
 		low_refresh_rate = ADV7511_LOW_REFRESH_RATE_30HZ;
 	else
 		low_refresh_rate = ADV7511_LOW_REFRESH_RATE_NONE;
 
-	regmap_update_bits(adv7511->regmap, 0xfb,
-		0x6, low_refresh_rate << 1);
+	if (adv7511->info->type == ADV7511)
+		regmap_update_bits(adv7511->regmap, 0xfb,
+				   0x6, low_refresh_rate << 1);
+	else
+		regmap_update_bits(adv7511->regmap, 0x4a,
+				   0xc, low_refresh_rate << 2);
+
 	regmap_update_bits(adv7511->regmap, 0x17,
 		0x60, (vsync_polarity << 6) | (hsync_polarity << 5));
 
-	if (adv7511->type == ADV7533)
-		adv7533_mode_set(adv7511, adj_mode);
-
 	drm_mode_copy(&adv7511->curr_mode, adj_mode);
+
+	/* Update horizontal/vertical porch params */
+	if (adv7511->info->has_dsi && adv7511->use_timing_gen)
+		adv7533_dsi_config_timing_gen(adv7511);
 
 	/*
 	 * TODO Test first order 4:2:2 to 4:4:4 up conversion method, which is
 	 * supposed to give better results.
 	 */
 
-	adv7511->f_tmds = mode->clock;
+	adv7511->f_tmds = adj_mode->clock;
 }
 
-/* Connector funcs */
-static struct adv7511 *connector_to_adv7511(struct drm_connector *connector)
+static int adv7511_connector_init(struct adv7511 *adv)
 {
-	return container_of(connector, struct adv7511, connector);
+	struct drm_bridge *bridge = &adv->bridge;
+	struct drm_connector *connector;
+
+	connector = drm_bridge_connector_init(bridge->dev, bridge->encoder);
+	if (IS_ERR(connector)) {
+		DRM_ERROR("Failed to initialize connector with drm\n");
+		return PTR_ERR(connector);
+	}
+
+	return 0;
 }
 
-static int adv7511_connector_get_modes(struct drm_connector *connector)
-{
-	struct adv7511 *adv = connector_to_adv7511(connector);
+/* -----------------------------------------------------------------------------
+ * DRM Bridge Operations
+ */
 
-	return adv7511_get_modes(adv, connector);
-}
-
-static enum drm_mode_status
-adv7511_connector_mode_valid(struct drm_connector *connector,
-			     struct drm_display_mode *mode)
-{
-	struct adv7511 *adv = connector_to_adv7511(connector);
-
-	return adv7511_mode_valid(adv, mode);
-}
-
-static struct drm_connector_helper_funcs adv7511_connector_helper_funcs = {
-	.get_modes = adv7511_connector_get_modes,
-	.mode_valid = adv7511_connector_mode_valid,
-};
-
-static enum drm_connector_status
-adv7511_connector_detect(struct drm_connector *connector, bool force)
-{
-	struct adv7511 *adv = connector_to_adv7511(connector);
-
-	return adv7511_detect(adv, connector);
-}
-
-static const struct drm_connector_funcs adv7511_connector_funcs = {
-	.fill_modes = drm_helper_probe_single_connector_modes,
-	.detect = adv7511_connector_detect,
-	.destroy = drm_connector_cleanup,
-	.reset = drm_atomic_helper_connector_reset,
-	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
-	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
-};
-
-/* Bridge funcs */
-static struct adv7511 *bridge_to_adv7511(struct drm_bridge *bridge)
+static const struct adv7511 *bridge_to_adv7511_const(const struct drm_bridge *bridge)
 {
 	return container_of(bridge, struct adv7511, bridge);
 }
 
-static void adv7511_bridge_enable(struct drm_bridge *bridge)
+static void adv7511_bridge_atomic_enable(struct drm_bridge *bridge,
+					 struct drm_atomic_commit *state)
 {
 	struct adv7511 *adv = bridge_to_adv7511(bridge);
+	struct drm_connector *connector;
+	struct drm_connector_state *conn_state;
+	struct drm_crtc_state *crtc_state;
 
 	adv7511_power_on(adv);
+
+	connector = drm_atomic_get_new_connector_for_encoder(state, bridge->encoder);
+	if (WARN_ON(!connector))
+		return;
+
+	conn_state = drm_atomic_get_new_connector_state(state, connector);
+	if (WARN_ON(!conn_state))
+		return;
+
+	crtc_state = drm_atomic_get_new_crtc_state(state, conn_state->crtc);
+	if (WARN_ON(!crtc_state))
+		return;
+
+	adv7511_set_config_csc(adv, connector, adv->rgb);
+
+	adv7511_mode_set(adv, &crtc_state->adjusted_mode);
+
+	drm_atomic_helper_connector_hdmi_update_infoframes(connector, state);
 }
 
-static void adv7511_bridge_disable(struct drm_bridge *bridge)
+static void adv7511_bridge_atomic_disable(struct drm_bridge *bridge,
+					  struct drm_atomic_commit *state)
 {
 	struct adv7511 *adv = bridge_to_adv7511(bridge);
 
 	adv7511_power_off(adv);
 }
 
-static void adv7511_bridge_mode_set(struct drm_bridge *bridge,
-				    struct drm_display_mode *mode,
-				    struct drm_display_mode *adj_mode)
+static enum drm_mode_status
+adv7511_bridge_hdmi_tmds_char_rate_valid(const struct drm_bridge *bridge,
+					 const struct drm_display_mode *mode,
+					 unsigned long long tmds_rate)
 {
-	struct adv7511 *adv = bridge_to_adv7511(bridge);
+	const struct adv7511 *adv = bridge_to_adv7511_const(bridge);
 
-	adv7511_mode_set(adv, mode, adj_mode);
+	if (tmds_rate > 1000ULL * adv->info->max_mode_clock_khz)
+		return MODE_CLOCK_HIGH;
+
+	return MODE_OK;
 }
 
-static int adv7511_bridge_attach(struct drm_bridge *bridge)
+static enum drm_mode_status adv7511_bridge_mode_valid(struct drm_bridge *bridge,
+						      const struct drm_display_info *info,
+		const struct drm_display_mode *mode)
 {
 	struct adv7511 *adv = bridge_to_adv7511(bridge);
-	int ret;
 
-	if (!bridge->encoder) {
-		DRM_ERROR("Parent encoder object not found");
-		return -ENODEV;
+	if (!adv->info->has_dsi)
+		return MODE_OK;
+
+	return adv7533_mode_valid(adv, mode);
+}
+
+static int adv7511_bridge_attach(struct drm_bridge *bridge,
+				 struct drm_encoder *encoder,
+				 enum drm_bridge_attach_flags flags)
+{
+	struct adv7511 *adv = bridge_to_adv7511(bridge);
+	int ret = 0;
+
+	if (adv->bridge.next_bridge) {
+		ret = drm_bridge_attach(encoder, adv->bridge.next_bridge, bridge,
+					flags | DRM_BRIDGE_ATTACH_NO_CONNECTOR);
+		if (ret)
+			return ret;
 	}
 
-	if (adv->i2c_main->irq)
-		adv->connector.polled = DRM_CONNECTOR_POLL_HPD;
-	else
-		adv->connector.polled = DRM_CONNECTOR_POLL_CONNECT |
-				DRM_CONNECTOR_POLL_DISCONNECT;
-
-	ret = drm_connector_init(bridge->dev, &adv->connector,
-				 &adv7511_connector_funcs,
-				 DRM_MODE_CONNECTOR_HDMIA);
-	if (ret) {
-		DRM_ERROR("Failed to initialize connector with drm\n");
-		return ret;
+	if (!(flags & DRM_BRIDGE_ATTACH_NO_CONNECTOR)) {
+		ret = adv7511_connector_init(adv);
+		if (ret < 0)
+			return ret;
 	}
-	drm_connector_helper_add(&adv->connector,
-				 &adv7511_connector_helper_funcs);
-	drm_mode_connector_attach_encoder(&adv->connector, bridge->encoder);
-
-	if (adv->type == ADV7533)
-		ret = adv7533_attach_dsi(adv);
 
 	if (adv->i2c_main->irq)
 		regmap_write(adv->regmap, ADV7511_REG_INT_ENABLE(0),
@@ -872,11 +869,161 @@ static int adv7511_bridge_attach(struct drm_bridge *bridge)
 	return ret;
 }
 
+static enum drm_connector_status
+adv7511_bridge_detect(struct drm_bridge *bridge, struct drm_connector *connector)
+{
+	struct adv7511 *adv = bridge_to_adv7511(bridge);
+
+	return adv7511_detect(adv);
+}
+
+static const struct drm_edid *adv7511_bridge_edid_read(struct drm_bridge *bridge,
+						       struct drm_connector *connector)
+{
+	struct adv7511 *adv = bridge_to_adv7511(bridge);
+
+	return adv7511_edid_read(adv, connector);
+}
+
+static int adv7511_bridge_hdmi_clear_audio_infoframe(struct drm_bridge *bridge)
+{
+	struct adv7511 *adv7511 = bridge_to_adv7511(bridge);
+
+	adv7511_packet_disable(adv7511, ADV7511_PACKET_ENABLE_AUDIO_INFOFRAME);
+
+	return 0;
+}
+
+static int adv7511_bridge_hdmi_clear_avi_infoframe(struct drm_bridge *bridge)
+{
+	struct adv7511 *adv7511 = bridge_to_adv7511(bridge);
+
+	adv7511_packet_disable(adv7511, ADV7511_PACKET_ENABLE_AVI_INFOFRAME);
+
+	return 0;
+}
+
+static int adv7511_bridge_hdmi_clear_spd_infoframe(struct drm_bridge *bridge)
+{
+	struct adv7511 *adv7511 = bridge_to_adv7511(bridge);
+
+	adv7511_packet_disable(adv7511, ADV7511_PACKET_ENABLE_SPD);
+
+	return 0;
+}
+
+static int adv7511_bridge_hdmi_clear_hdmi_infoframe(struct drm_bridge *bridge)
+{
+	struct adv7511 *adv7511 = bridge_to_adv7511(bridge);
+
+	adv7511_packet_disable(adv7511, ADV7511_PACKET_ENABLE_SPARE1);
+
+	return 0;
+}
+
+static int adv7511_bridge_hdmi_write_audio_infoframe(struct drm_bridge *bridge,
+						     const u8 *buffer, size_t len)
+{
+	struct adv7511 *adv7511 = bridge_to_adv7511(bridge);
+
+	/* send current Audio infoframe values while updating */
+	regmap_update_bits(adv7511->regmap, ADV7511_REG_INFOFRAME_UPDATE,
+			   BIT(5), BIT(5));
+
+	/* The Audio infoframe id is not configurable */
+	regmap_bulk_write(adv7511->regmap, ADV7511_REG_AUDIO_INFOFRAME_VERSION,
+			  buffer + 1, len - 1);
+
+	/* use Audio infoframe updated info */
+	regmap_update_bits(adv7511->regmap, ADV7511_REG_INFOFRAME_UPDATE,
+			   BIT(5), 0);
+
+	adv7511_packet_enable(adv7511, ADV7511_PACKET_ENABLE_AUDIO_INFOFRAME);
+
+	return 0;
+}
+
+static int adv7511_bridge_hdmi_write_avi_infoframe(struct drm_bridge *bridge,
+						   const u8 *buffer, size_t len)
+{
+	struct adv7511 *adv7511 = bridge_to_adv7511(bridge);
+
+	/* send current AVI infoframe values while updating */
+	regmap_update_bits(adv7511->regmap, ADV7511_REG_INFOFRAME_UPDATE,
+			   BIT(6), BIT(6));
+
+	/* The AVI infoframe id is not configurable */
+	regmap_bulk_write(adv7511->regmap, ADV7511_REG_AVI_INFOFRAME_VERSION,
+			  buffer + 1, len - 1);
+
+	regmap_write(adv7511->regmap, ADV7511_REG_AUDIO_INFOFRAME_LENGTH, 0x2);
+	regmap_write(adv7511->regmap, ADV7511_REG_AUDIO_INFOFRAME(1), 0x1);
+
+	/* use AVI infoframe updated info */
+	regmap_update_bits(adv7511->regmap, ADV7511_REG_INFOFRAME_UPDATE,
+			   BIT(6), 0);
+
+	adv7511_packet_enable(adv7511, ADV7511_PACKET_ENABLE_AVI_INFOFRAME);
+
+	return 0;
+}
+
+static int adv7511_bridge_hdmi_write_spd_infoframe(struct drm_bridge *bridge,
+						   const u8 *buffer, size_t len)
+{
+	struct adv7511 *adv7511 = bridge_to_adv7511(bridge);
+
+	adv7511_packet_disable(adv7511, ADV7511_PACKET_ENABLE_SPD);
+	regmap_bulk_write(adv7511->regmap_packet, ADV7511_PACKET_SPD(0),
+			  buffer, len);
+	adv7511_packet_enable(adv7511, ADV7511_PACKET_ENABLE_SPD);
+
+	return 0;
+}
+
+static int adv7511_bridge_hdmi_write_hdmi_infoframe(struct drm_bridge *bridge,
+						    const u8 *buffer, size_t len)
+{
+	struct adv7511 *adv7511 = bridge_to_adv7511(bridge);
+
+	adv7511_packet_disable(adv7511, ADV7511_PACKET_ENABLE_SPARE1);
+	regmap_bulk_write(adv7511->regmap_packet, ADV7511_PACKET_SPARE1(0),
+			  buffer, len);
+	adv7511_packet_enable(adv7511, ADV7511_PACKET_ENABLE_SPARE1);
+
+	return 0;
+}
+
 static const struct drm_bridge_funcs adv7511_bridge_funcs = {
-	.enable = adv7511_bridge_enable,
-	.disable = adv7511_bridge_disable,
-	.mode_set = adv7511_bridge_mode_set,
+	.mode_valid = adv7511_bridge_mode_valid,
 	.attach = adv7511_bridge_attach,
+	.detect = adv7511_bridge_detect,
+	.edid_read = adv7511_bridge_edid_read,
+
+	.atomic_enable = adv7511_bridge_atomic_enable,
+	.atomic_disable = adv7511_bridge_atomic_disable,
+	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
+	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
+	.atomic_reset = drm_atomic_helper_bridge_reset,
+
+	.hdmi_tmds_char_rate_valid = adv7511_bridge_hdmi_tmds_char_rate_valid,
+	.hdmi_clear_audio_infoframe = adv7511_bridge_hdmi_clear_audio_infoframe,
+	.hdmi_write_audio_infoframe = adv7511_bridge_hdmi_write_audio_infoframe,
+	.hdmi_clear_avi_infoframe = adv7511_bridge_hdmi_clear_avi_infoframe,
+	.hdmi_write_avi_infoframe = adv7511_bridge_hdmi_write_avi_infoframe,
+	.hdmi_clear_spd_infoframe = adv7511_bridge_hdmi_clear_spd_infoframe,
+	.hdmi_write_spd_infoframe = adv7511_bridge_hdmi_write_spd_infoframe,
+	.hdmi_clear_hdmi_infoframe = adv7511_bridge_hdmi_clear_hdmi_infoframe,
+	.hdmi_write_hdmi_infoframe = adv7511_bridge_hdmi_write_hdmi_infoframe,
+
+	.hdmi_audio_startup = adv7511_hdmi_audio_startup,
+	.hdmi_audio_prepare = adv7511_hdmi_audio_prepare,
+	.hdmi_audio_shutdown = adv7511_hdmi_audio_shutdown,
+
+	.hdmi_cec_init = adv7511_cec_init,
+	.hdmi_cec_enable = adv7511_cec_enable,
+	.hdmi_cec_log_addr = adv7511_cec_log_addr,
+	.hdmi_cec_transmit = adv7511_cec_transmit,
 };
 
 /* -----------------------------------------------------------------------------
@@ -902,37 +1049,30 @@ static const char * const adv7533_supply_names[] = {
 
 static int adv7511_init_regulators(struct adv7511 *adv)
 {
+	const char * const *supply_names = adv->info->supply_names;
+	unsigned int num_supplies = adv->info->num_supplies;
 	struct device *dev = &adv->i2c_main->dev;
-	const char * const *supply_names;
 	unsigned int i;
 	int ret;
 
-	if (adv->type == ADV7511) {
-		supply_names = adv7511_supply_names;
-		adv->num_supplies = ARRAY_SIZE(adv7511_supply_names);
-	} else {
-		supply_names = adv7533_supply_names;
-		adv->num_supplies = ARRAY_SIZE(adv7533_supply_names);
-	}
-
-	adv->supplies = devm_kcalloc(dev, adv->num_supplies,
+	adv->supplies = devm_kcalloc(dev, num_supplies,
 				     sizeof(*adv->supplies), GFP_KERNEL);
 	if (!adv->supplies)
 		return -ENOMEM;
 
-	for (i = 0; i < adv->num_supplies; i++)
+	for (i = 0; i < num_supplies; i++)
 		adv->supplies[i].supply = supply_names[i];
 
-	ret = devm_regulator_bulk_get(dev, adv->num_supplies, adv->supplies);
+	ret = devm_regulator_bulk_get(dev, num_supplies, adv->supplies);
 	if (ret)
 		return ret;
 
-	return regulator_bulk_enable(adv->num_supplies, adv->supplies);
+	return regulator_bulk_enable(num_supplies, adv->supplies);
 }
 
 static void adv7511_uninit_regulators(struct adv7511 *adv)
 {
-	regulator_bulk_disable(adv->num_supplies, adv->supplies);
+	regulator_bulk_disable(adv->info->num_supplies, adv->supplies);
 }
 
 static bool adv7511_cec_register_volatile(struct device *dev, unsigned int reg)
@@ -940,14 +1080,19 @@ static bool adv7511_cec_register_volatile(struct device *dev, unsigned int reg)
 	struct i2c_client *i2c = to_i2c_client(dev);
 	struct adv7511 *adv7511 = i2c_get_clientdata(i2c);
 
-	if (adv7511->type == ADV7533)
-		reg -= ADV7533_REG_CEC_OFFSET;
+	reg -= adv7511->info->reg_cec_offset;
 
 	switch (reg) {
-	case ADV7511_REG_CEC_RX_FRAME_HDR:
-	case ADV7511_REG_CEC_RX_FRAME_DATA0...
-		ADV7511_REG_CEC_RX_FRAME_DATA0 + 14:
-	case ADV7511_REG_CEC_RX_FRAME_LEN:
+	case ADV7511_REG_CEC_RX1_FRAME_HDR:
+	case ADV7511_REG_CEC_RX1_FRAME_DATA0 ... ADV7511_REG_CEC_RX1_FRAME_DATA0 + 14:
+	case ADV7511_REG_CEC_RX1_FRAME_LEN:
+	case ADV7511_REG_CEC_RX2_FRAME_HDR:
+	case ADV7511_REG_CEC_RX2_FRAME_DATA0 ... ADV7511_REG_CEC_RX2_FRAME_DATA0 + 14:
+	case ADV7511_REG_CEC_RX2_FRAME_LEN:
+	case ADV7511_REG_CEC_RX3_FRAME_HDR:
+	case ADV7511_REG_CEC_RX3_FRAME_DATA0 ... ADV7511_REG_CEC_RX3_FRAME_DATA0 + 14:
+	case ADV7511_REG_CEC_RX3_FRAME_LEN:
+	case ADV7511_REG_CEC_RX_STATUS:
 	case ADV7511_REG_CEC_RX_BUFFERS:
 	case ADV7511_REG_CEC_TX_LOW_DRV_CNT:
 		return true;
@@ -961,7 +1106,7 @@ static const struct regmap_config adv7511_cec_regmap_config = {
 	.val_bits = 8,
 
 	.max_register = 0xff,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.volatile_reg = adv7511_cec_register_volatile,
 };
 
@@ -969,10 +1114,14 @@ static int adv7511_init_cec_regmap(struct adv7511 *adv)
 {
 	int ret;
 
-	adv->i2c_cec = i2c_new_dummy(adv->i2c_main->adapter,
-				     adv->i2c_main->addr - 1);
-	if (!adv->i2c_cec)
-		return -ENOMEM;
+	adv->i2c_cec = i2c_new_ancillary_device(adv->i2c_main, "cec",
+						ADV7511_CEC_I2C_ADDR_DEFAULT);
+	if (IS_ERR(adv->i2c_cec))
+		return PTR_ERR(adv->i2c_cec);
+
+	regmap_write(adv->regmap, ADV7511_REG_CEC_I2C_ADDR,
+		     adv->i2c_cec->addr << 1);
+
 	i2c_set_clientdata(adv->i2c_cec, adv);
 
 	adv->regmap_cec = devm_regmap_init_i2c(adv->i2c_cec,
@@ -982,7 +1131,7 @@ static int adv7511_init_cec_regmap(struct adv7511 *adv)
 		goto err;
 	}
 
-	if (adv->type == ADV7533) {
+	if (adv->info->reg_cec_offset == ADV7533_REG_CEC_OFFSET) {
 		ret = adv7533_patch_cec_registers(adv);
 		if (ret)
 			goto err;
@@ -1077,35 +1226,38 @@ static int adv7511_parse_dt(struct device_node *np,
 	return 0;
 }
 
-static int adv7511_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
+static int adv7511_probe(struct i2c_client *i2c)
 {
 	struct adv7511_link_config link_config;
 	struct adv7511 *adv7511;
 	struct device *dev = &i2c->dev;
-	unsigned int main_i2c_addr = i2c->addr << 1;
-	unsigned int edid_i2c_addr = main_i2c_addr + 4;
 	unsigned int val;
 	int ret;
 
 	if (!dev->of_node)
 		return -EINVAL;
 
-	adv7511 = devm_kzalloc(dev, sizeof(*adv7511), GFP_KERNEL);
-	if (!adv7511)
-		return -ENOMEM;
+	adv7511 = devm_drm_bridge_alloc(dev, struct adv7511, bridge,
+					&adv7511_bridge_funcs);
+	if (IS_ERR(adv7511))
+		return PTR_ERR(adv7511);
 
 	adv7511->i2c_main = i2c;
 	adv7511->powered = false;
 	adv7511->status = connector_status_disconnected;
-
-	if (dev->of_node)
-		adv7511->type = (enum adv7511_type)of_device_get_match_data(dev);
-	else
-		adv7511->type = id->driver_data;
+	adv7511->info = i2c_get_match_data(i2c);
 
 	memset(&link_config, 0, sizeof(link_config));
 
-	if (adv7511->type == ADV7511)
+	adv7511->bridge.next_bridge = of_drm_get_bridge_by_endpoint(dev->of_node, 1, -1);
+	if (IS_ERR(adv7511->bridge.next_bridge)) {
+		if (PTR_ERR(adv7511->bridge.next_bridge) == -ENODEV)
+			adv7511->bridge.next_bridge = NULL;
+		else
+			return PTR_ERR(adv7511->bridge.next_bridge);
+	}
+
+	if (adv7511->info->link_config)
 		ret = adv7511_parse_dt(dev->of_node, &link_config);
 	else
 		ret = adv7533_parse_dt(dev->of_node, adv7511);
@@ -1114,8 +1266,8 @@ static int adv7511_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 
 	ret = adv7511_init_regulators(adv7511);
 	if (ret) {
-		dev_err(dev, "failed to init regulators\n");
-		return ret;
+		dev_err_probe(dev, ret, "failed to init regulators\n");
+		goto err_of_node_put;
 	}
 
 	/*
@@ -1129,7 +1281,7 @@ static int adv7511_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 	}
 
 	if (adv7511->gpio_pd) {
-		mdelay(5);
+		usleep_range(5000, 6000);
 		gpiod_set_value_cansleep(adv7511->gpio_pd, 0);
 	}
 
@@ -1144,7 +1296,7 @@ static int adv7511_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 		goto uninit_regulators;
 	dev_dbg(dev, "Rev. %d\n", val);
 
-	if (adv7511->type == ADV7511)
+	if (adv7511->info->type == ADV7511)
 		ret = regmap_register_patch(adv7511->regmap,
 					    adv7511_fixed_registers,
 					    ARRAY_SIZE(adv7511_fixed_registers));
@@ -1153,109 +1305,187 @@ static int adv7511_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 	if (ret)
 		goto uninit_regulators;
 
-	regmap_write(adv7511->regmap, ADV7511_REG_EDID_I2C_ADDR, edid_i2c_addr);
-	regmap_write(adv7511->regmap, ADV7511_REG_PACKET_I2C_ADDR,
-		     main_i2c_addr - 0xa);
-	regmap_write(adv7511->regmap, ADV7511_REG_CEC_I2C_ADDR,
-		     main_i2c_addr - 2);
-
 	adv7511_packet_disable(adv7511, 0xffff);
 
-	adv7511->i2c_edid = i2c_new_dummy(i2c->adapter, edid_i2c_addr >> 1);
-	if (!adv7511->i2c_edid) {
-		ret = -ENOMEM;
+	adv7511->i2c_edid = i2c_new_ancillary_device(i2c, "edid",
+					ADV7511_EDID_I2C_ADDR_DEFAULT);
+	if (IS_ERR(adv7511->i2c_edid)) {
+		ret = PTR_ERR(adv7511->i2c_edid);
 		goto uninit_regulators;
 	}
 
+	regmap_write(adv7511->regmap, ADV7511_REG_EDID_I2C_ADDR,
+		     adv7511->i2c_edid->addr << 1);
+
+	adv7511->i2c_packet = i2c_new_ancillary_device(i2c, "packet",
+					ADV7511_PACKET_I2C_ADDR_DEFAULT);
+	if (IS_ERR(adv7511->i2c_packet)) {
+		ret = PTR_ERR(adv7511->i2c_packet);
+		goto err_i2c_unregister_edid;
+	}
+
+	adv7511->regmap_packet = devm_regmap_init_i2c(adv7511->i2c_packet,
+						      &adv7511_packet_config);
+	if (IS_ERR(adv7511->regmap_packet)) {
+		ret = PTR_ERR(adv7511->regmap_packet);
+		goto err_i2c_unregister_packet;
+	}
+
+	regmap_write(adv7511->regmap, ADV7511_REG_PACKET_I2C_ADDR,
+		     adv7511->i2c_packet->addr << 1);
+
 	ret = adv7511_init_cec_regmap(adv7511);
 	if (ret)
-		goto err_i2c_unregister_edid;
+		goto err_i2c_unregister_packet;
 
 	INIT_WORK(&adv7511->hpd_work, adv7511_hpd_work);
+
+	adv7511_power_off(adv7511);
+
+	i2c_set_clientdata(i2c, adv7511);
+
+	if (adv7511->info->link_config)
+		adv7511_set_link_config(adv7511, &link_config);
+
+	regmap_write(adv7511->regmap, ADV7511_REG_CEC_CTRL,
+		     ADV7511_CEC_CTRL_POWER_DOWN);
+
+	adv7511->bridge.ops = DRM_BRIDGE_OP_DETECT |
+		DRM_BRIDGE_OP_EDID |
+		DRM_BRIDGE_OP_HDMI |
+		DRM_BRIDGE_OP_HDMI_SPD_INFOFRAME;
+	if (adv7511->i2c_main->irq)
+		adv7511->bridge.ops |= DRM_BRIDGE_OP_HPD;
+
+	adv7511->bridge.vendor = "Analog";
+	adv7511->bridge.product = adv7511->info->name;
+
+#ifdef CONFIG_DRM_I2C_ADV7511_AUDIO
+	adv7511->bridge.ops |= DRM_BRIDGE_OP_HDMI_AUDIO;
+	adv7511->bridge.hdmi_audio_dev = dev;
+	adv7511->bridge.hdmi_audio_max_i2s_playback_channels = 2;
+	adv7511->bridge.hdmi_audio_i2s_formats = (SNDRV_PCM_FMTBIT_S16_LE |
+						  SNDRV_PCM_FMTBIT_S20_3LE |
+						  SNDRV_PCM_FMTBIT_S24_3LE |
+						  SNDRV_PCM_FMTBIT_S24_LE |
+						  SNDRV_PCM_FMTBIT_IEC958_SUBFRAME_LE),
+	adv7511->bridge.hdmi_audio_spdif_playback = 1;
+	adv7511->bridge.hdmi_audio_dai_port = 2;
+#endif
+
+#ifdef CONFIG_DRM_I2C_ADV7511_CEC
+	adv7511->bridge.ops |= DRM_BRIDGE_OP_HDMI_CEC_ADAPTER;
+	adv7511->bridge.hdmi_cec_dev = dev;
+	adv7511->bridge.hdmi_cec_adapter_name = dev_name(dev);
+	adv7511->bridge.hdmi_cec_available_las = ADV7511_MAX_ADDRS;
+#endif
+
+	adv7511->bridge.of_node = dev->of_node;
+	adv7511->bridge.type = DRM_MODE_CONNECTOR_HDMIA;
+
+	drm_bridge_add(&adv7511->bridge);
 
 	if (i2c->irq) {
 		init_waitqueue_head(&adv7511->wq);
 
 		ret = devm_request_threaded_irq(dev, i2c->irq, NULL,
 						adv7511_irq_handler,
-						IRQF_ONESHOT, dev_name(dev),
+						IRQF_ONESHOT | IRQF_SHARED,
+						dev_name(dev),
 						adv7511);
 		if (ret)
-			goto err_unregister_cec;
+			goto err_unregister_audio;
 	}
 
-	adv7511_power_off(adv7511);
+	if (adv7511->info->has_dsi) {
+		ret = adv7533_attach_dsi(adv7511);
+		if (ret)
+			goto err_unregister_audio;
+	}
 
-	i2c_set_clientdata(i2c, adv7511);
-
-	if (adv7511->type == ADV7511)
-		adv7511_set_link_config(adv7511, &link_config);
-
-	ret = adv7511_cec_init(dev, adv7511);
-	if (ret)
-		goto err_unregister_cec;
-
-	adv7511->bridge.funcs = &adv7511_bridge_funcs;
-	adv7511->bridge.of_node = dev->of_node;
-
-	drm_bridge_add(&adv7511->bridge);
-
-	adv7511_audio_init(dev, adv7511);
 	return 0;
 
-err_unregister_cec:
+err_unregister_audio:
+	drm_bridge_remove(&adv7511->bridge);
 	i2c_unregister_device(adv7511->i2c_cec);
-	if (adv7511->cec_clk)
-		clk_disable_unprepare(adv7511->cec_clk);
+	clk_disable_unprepare(adv7511->cec_clk);
+err_i2c_unregister_packet:
+	i2c_unregister_device(adv7511->i2c_packet);
 err_i2c_unregister_edid:
 	i2c_unregister_device(adv7511->i2c_edid);
 uninit_regulators:
 	adv7511_uninit_regulators(adv7511);
+err_of_node_put:
+	of_node_put(adv7511->host_node);
 
 	return ret;
 }
 
-static int adv7511_remove(struct i2c_client *i2c)
+static void adv7511_remove(struct i2c_client *i2c)
 {
 	struct adv7511 *adv7511 = i2c_get_clientdata(i2c);
 
-	if (adv7511->type == ADV7533)
-		adv7533_detach_dsi(adv7511);
-	i2c_unregister_device(adv7511->i2c_cec);
-	if (adv7511->cec_clk)
-		clk_disable_unprepare(adv7511->cec_clk);
+	of_node_put(adv7511->host_node);
 
 	adv7511_uninit_regulators(adv7511);
 
 	drm_bridge_remove(&adv7511->bridge);
 
-	adv7511_audio_exit(adv7511);
+	i2c_unregister_device(adv7511->i2c_cec);
+	clk_disable_unprepare(adv7511->cec_clk);
 
-	cec_unregister_adapter(adv7511->cec_adap);
-
+	i2c_unregister_device(adv7511->i2c_packet);
 	i2c_unregister_device(adv7511->i2c_edid);
-
-	return 0;
 }
 
+static const struct adv7511_chip_info adv7511_chip_info = {
+	.type = ADV7511,
+	.name = "ADV7511",
+	.max_mode_clock_khz = 165000,
+	.supply_names = adv7511_supply_names,
+	.num_supplies = ARRAY_SIZE(adv7511_supply_names),
+	.link_config = true,
+};
+
+static const struct adv7511_chip_info adv7533_chip_info = {
+	.type = ADV7533,
+	.name = "ADV7533",
+	.max_mode_clock_khz = 80000,
+	.max_lane_freq_khz = 800000,
+	.supply_names = adv7533_supply_names,
+	.num_supplies = ARRAY_SIZE(adv7533_supply_names),
+	.reg_cec_offset = ADV7533_REG_CEC_OFFSET,
+	.has_dsi = true,
+};
+
+static const struct adv7511_chip_info adv7535_chip_info = {
+	.type = ADV7535,
+	.name = "ADV7535",
+	.max_mode_clock_khz = 148500,
+	.max_lane_freq_khz = 891000,
+	.supply_names = adv7533_supply_names,
+	.num_supplies = ARRAY_SIZE(adv7533_supply_names),
+	.reg_cec_offset = ADV7533_REG_CEC_OFFSET,
+	.has_dsi = true,
+	.hpd_override_enable = true,
+};
+
 static const struct i2c_device_id adv7511_i2c_ids[] = {
-	{ "adv7511", ADV7511 },
-	{ "adv7511w", ADV7511 },
-	{ "adv7513", ADV7511 },
-#ifdef CONFIG_DRM_I2C_ADV7533
-	{ "adv7533", ADV7533 },
-#endif
+	{ "adv7511", (kernel_ulong_t)&adv7511_chip_info },
+	{ "adv7511w", (kernel_ulong_t)&adv7511_chip_info },
+	{ "adv7513", (kernel_ulong_t)&adv7511_chip_info },
+	{ "adv7533", (kernel_ulong_t)&adv7533_chip_info },
+	{ "adv7535", (kernel_ulong_t)&adv7535_chip_info },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, adv7511_i2c_ids);
 
 static const struct of_device_id adv7511_of_ids[] = {
-	{ .compatible = "adi,adv7511", .data = (void *)ADV7511 },
-	{ .compatible = "adi,adv7511w", .data = (void *)ADV7511 },
-	{ .compatible = "adi,adv7513", .data = (void *)ADV7511 },
-#ifdef CONFIG_DRM_I2C_ADV7533
-	{ .compatible = "adi,adv7533", .data = (void *)ADV7533 },
-#endif
+	{ .compatible = "adi,adv7511", .data = &adv7511_chip_info },
+	{ .compatible = "adi,adv7511w", .data = &adv7511_chip_info },
+	{ .compatible = "adi,adv7513", .data = &adv7511_chip_info },
+	{ .compatible = "adi,adv7533", .data = &adv7533_chip_info },
+	{ .compatible = "adi,adv7535", .data = &adv7535_chip_info },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, adv7511_of_ids);
@@ -1276,10 +1506,21 @@ static struct i2c_driver adv7511_driver = {
 
 static int __init adv7511_init(void)
 {
-	if (IS_ENABLED(CONFIG_DRM_MIPI_DSI))
-		mipi_dsi_driver_register(&adv7533_dsi_driver);
+	int ret;
 
-	return i2c_add_driver(&adv7511_driver);
+	if (IS_ENABLED(CONFIG_DRM_MIPI_DSI)) {
+		ret = mipi_dsi_driver_register(&adv7533_dsi_driver);
+		if (ret)
+			return ret;
+	}
+
+	ret = i2c_add_driver(&adv7511_driver);
+	if (ret) {
+		if (IS_ENABLED(CONFIG_DRM_MIPI_DSI))
+			mipi_dsi_driver_unregister(&adv7533_dsi_driver);
+	}
+
+	return ret;
 }
 module_init(adv7511_init);
 

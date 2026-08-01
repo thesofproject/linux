@@ -19,14 +19,39 @@ struct usb_phy_roothub {
 	struct list_head	list;
 };
 
+/* Allocate the roothub_entry by specific name of phy */
+static int usb_phy_roothub_add_phy_by_name(struct device *dev, const char *name,
+					   struct list_head *list)
+{
+	struct usb_phy_roothub *roothub_entry;
+	struct phy *phy;
+
+	phy = devm_of_phy_get(dev, dev->of_node, name);
+	if (IS_ERR(phy))
+		return PTR_ERR(phy);
+
+	roothub_entry = devm_kzalloc(dev, sizeof(*roothub_entry), GFP_KERNEL);
+	if (!roothub_entry)
+		return -ENOMEM;
+
+	INIT_LIST_HEAD(&roothub_entry->list);
+
+	roothub_entry->phy = phy;
+
+	list_add_tail(&roothub_entry->list, list);
+
+	return 0;
+}
+
 static int usb_phy_roothub_add_phy(struct device *dev, int index,
 				   struct list_head *list)
 {
 	struct usb_phy_roothub *roothub_entry;
-	struct phy *phy = devm_of_phy_get_by_index(dev, dev->of_node, index);
+	struct phy *phy;
 
-	if (IS_ERR_OR_NULL(phy)) {
-		if (!phy || PTR_ERR(phy) == -ENODEV)
+	phy = devm_of_phy_get_by_index(dev, dev->of_node, index);
+	if (IS_ERR(phy)) {
+		if (PTR_ERR(phy) == -ENODEV)
 			return 0;
 		else
 			return PTR_ERR(phy);
@@ -64,6 +89,9 @@ struct usb_phy_roothub *usb_phy_roothub_alloc(struct device *dev)
 
 	INIT_LIST_HEAD(&phy_roothub->list);
 
+	if (!usb_phy_roothub_add_phy_by_name(dev, "usb2-phy", &phy_roothub->list))
+		return phy_roothub;
+
 	for (i = 0; i < num_phys; i++) {
 		err = usb_phy_roothub_add_phy(dev, i, &phy_roothub->list);
 		if (err)
@@ -73,6 +101,51 @@ struct usb_phy_roothub *usb_phy_roothub_alloc(struct device *dev)
 	return phy_roothub;
 }
 EXPORT_SYMBOL_GPL(usb_phy_roothub_alloc);
+
+/**
+ * usb_phy_roothub_alloc_usb3_phy - alloc the roothub
+ * @dev: the device of the host controller
+ *
+ * Allocate the usb phy roothub if the host use a generic usb3-phy.
+ *
+ * Return: On success, a pointer to the usb_phy_roothub. Otherwise,
+ * %NULL if no use usb3 phy or %-ENOMEM if out of memory.
+ */
+struct usb_phy_roothub *usb_phy_roothub_alloc_usb3_phy(struct device *dev)
+{
+	struct usb_phy_roothub *phy_roothub;
+	int num_phys, usb2_phy_index;
+
+	if (!IS_ENABLED(CONFIG_GENERIC_PHY))
+		return NULL;
+
+	num_phys = of_count_phandle_with_args(dev->of_node, "phys",
+					      "#phy-cells");
+	if (num_phys <= 0)
+		return NULL;
+
+	/*
+	 * If 'usb2-phy' is not present, usb_phy_roothub_alloc() added
+	 * all PHYs to the primary HCD's phy_roothub already, so skip
+	 * adding 'usb3-phy' here to avoid double use of that.
+	 */
+	usb2_phy_index = of_property_match_string(dev->of_node, "phy-names",
+						  "usb2-phy");
+	if (usb2_phy_index < 0)
+		return NULL;
+
+	phy_roothub = devm_kzalloc(dev, sizeof(*phy_roothub), GFP_KERNEL);
+	if (!phy_roothub)
+		return ERR_PTR(-ENOMEM);
+
+	INIT_LIST_HEAD(&phy_roothub->list);
+
+	if (!usb_phy_roothub_add_phy_by_name(dev, "usb3-phy", &phy_roothub->list))
+		return phy_roothub;
+
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(usb_phy_roothub_alloc_usb3_phy);
 
 int usb_phy_roothub_init(struct usb_phy_roothub *phy_roothub)
 {
@@ -121,6 +194,107 @@ int usb_phy_roothub_exit(struct usb_phy_roothub *phy_roothub)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(usb_phy_roothub_exit);
+
+int usb_phy_roothub_set_mode(struct usb_phy_roothub *phy_roothub,
+			     enum phy_mode mode)
+{
+	struct usb_phy_roothub *roothub_entry;
+	struct list_head *head;
+	int err;
+
+	if (!phy_roothub)
+		return 0;
+
+	head = &phy_roothub->list;
+
+	list_for_each_entry(roothub_entry, head, list) {
+		err = phy_set_mode(roothub_entry->phy, mode);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(usb_phy_roothub_set_mode);
+
+int usb_phy_roothub_calibrate(struct usb_phy_roothub *phy_roothub)
+{
+	struct usb_phy_roothub *roothub_entry;
+	struct list_head *head;
+	int err;
+
+	if (!phy_roothub)
+		return 0;
+
+	head = &phy_roothub->list;
+
+	list_for_each_entry(roothub_entry, head, list) {
+		err = phy_calibrate(roothub_entry->phy);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(usb_phy_roothub_calibrate);
+
+/**
+ * usb_phy_roothub_notify_connect() - connect notification
+ * @phy_roothub: the phy of roothub, if the host use a generic phy.
+ * @port: the port index for connect
+ *
+ * If the phy needs to get connection status, the callback can be used.
+ * Returns: %0 if successful, a negative error code otherwise
+ */
+int usb_phy_roothub_notify_connect(struct usb_phy_roothub *phy_roothub, int port)
+{
+	struct usb_phy_roothub *roothub_entry;
+	struct list_head *head;
+	int err;
+
+	if (!phy_roothub)
+		return 0;
+
+	head = &phy_roothub->list;
+
+	list_for_each_entry(roothub_entry, head, list) {
+		err = phy_notify_connect(roothub_entry->phy, port);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(usb_phy_roothub_notify_connect);
+
+/**
+ * usb_phy_roothub_notify_disconnect() - disconnect notification
+ * @phy_roothub: the phy of roothub, if the host use a generic phy.
+ * @port: the port index for disconnect
+ *
+ * If the phy needs to get connection status, the callback can be used.
+ * Returns: %0 if successful, a negative error code otherwise
+ */
+int usb_phy_roothub_notify_disconnect(struct usb_phy_roothub *phy_roothub, int port)
+{
+	struct usb_phy_roothub *roothub_entry;
+	struct list_head *head;
+	int err;
+
+	if (!phy_roothub)
+		return 0;
+
+	head = &phy_roothub->list;
+
+	list_for_each_entry(roothub_entry, head, list) {
+		err = phy_notify_disconnect(roothub_entry->phy, port);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(usb_phy_roothub_notify_disconnect);
 
 int usb_phy_roothub_power_on(struct usb_phy_roothub *phy_roothub)
 {

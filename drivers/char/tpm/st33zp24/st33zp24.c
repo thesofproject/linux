@@ -1,21 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * STMicroelectronics TPM Linux driver for TPM ST33ZP24
  * Copyright (C) 2009 - 2016 STMicroelectronics
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <linux/acpi.h>
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/kernel.h>
@@ -24,7 +13,7 @@
 #include <linux/freezer.h>
 #include <linux/string.h>
 #include <linux/interrupt.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/sched.h>
 #include <linux/uaccess.h>
 #include <linux/io.h>
@@ -73,9 +62,7 @@ enum tis_defaults {
 };
 
 /*
- * clear_interruption clear the pending interrupt.
- * @param: tpm_dev, the tpm device device.
- * @return: the interrupt status value.
+ * clear the pending interrupt.
  */
 static u8 clear_interruption(struct st33zp24_dev *tpm_dev)
 {
@@ -84,12 +71,10 @@ static u8 clear_interruption(struct st33zp24_dev *tpm_dev)
 	tpm_dev->ops->recv(tpm_dev->phy_id, TPM_INT_STATUS, &interrupt, 1);
 	tpm_dev->ops->send(tpm_dev->phy_id, TPM_INT_STATUS, &interrupt, 1);
 	return interrupt;
-} /* clear_interruption() */
+}
 
 /*
- * st33zp24_cancel, cancel the current command execution or
- * set STS to COMMAND READY.
- * @param: chip, the tpm_chip description as specified in driver/char/tpm/tpm.h
+ * cancel the current command execution or set STS to COMMAND READY.
  */
 static void st33zp24_cancel(struct tpm_chip *chip)
 {
@@ -98,12 +83,10 @@ static void st33zp24_cancel(struct tpm_chip *chip)
 
 	data = TPM_STS_COMMAND_READY;
 	tpm_dev->ops->send(tpm_dev->phy_id, TPM_STS, &data, 1);
-} /* st33zp24_cancel() */
+}
 
 /*
- * st33zp24_status return the TPM_STS register
- * @param: chip, the tpm chip description
- * @return: the TPM_STS register value.
+ * return the TPM_STS register
  */
 static u8 st33zp24_status(struct tpm_chip *chip)
 {
@@ -112,12 +95,10 @@ static u8 st33zp24_status(struct tpm_chip *chip)
 
 	tpm_dev->ops->recv(tpm_dev->phy_id, TPM_STS, &data, 1);
 	return data;
-} /* st33zp24_status() */
+}
 
 /*
- * check_locality if the locality is active
- * @param: chip, the tpm chip description
- * @return: true if LOCALITY0 is active, otherwise false
+ * if the locality is active
  */
 static bool check_locality(struct tpm_chip *chip)
 {
@@ -132,13 +113,8 @@ static bool check_locality(struct tpm_chip *chip)
 		return true;
 
 	return false;
-} /* check_locality() */
+}
 
-/*
- * request_locality request the TPM locality
- * @param: chip, the chip description
- * @return: the active locality or negative value.
- */
 static int request_locality(struct tpm_chip *chip)
 {
 	struct st33zp24_dev *tpm_dev = dev_get_drvdata(&chip->dev);
@@ -165,12 +141,8 @@ static int request_locality(struct tpm_chip *chip)
 
 	/* could not get locality */
 	return -EACCES;
-} /* request_locality() */
+}
 
-/*
- * release_locality release the active locality
- * @param: chip, the tpm chip description.
- */
 static void release_locality(struct tpm_chip *chip)
 {
 	struct st33zp24_dev *tpm_dev = dev_get_drvdata(&chip->dev);
@@ -183,8 +155,6 @@ static void release_locality(struct tpm_chip *chip)
 
 /*
  * get_burstcount return the burstcount value
- * @param: chip, the chip description
- * return: the burstcount or negative value.
  */
 static int get_burstcount(struct tpm_chip *chip)
 {
@@ -212,18 +182,8 @@ static int get_burstcount(struct tpm_chip *chip)
 		msleep(TPM_TIMEOUT);
 	} while (time_before(jiffies, stop));
 	return -EBUSY;
-} /* get_burstcount() */
+}
 
-
-/*
- * wait_for_tpm_stat_cond
- * @param: chip, chip description
- * @param: mask, expected mask value
- * @param: check_cancel, does the command expected to be canceled ?
- * @param: canceled, did we received a cancel request ?
- * @return: true if status == mask or if the command is canceled.
- * false in other cases.
- */
 static bool wait_for_tpm_stat_cond(struct tpm_chip *chip, u8 mask,
 				bool check_cancel, bool *canceled)
 {
@@ -240,13 +200,7 @@ static bool wait_for_tpm_stat_cond(struct tpm_chip *chip, u8 mask,
 }
 
 /*
- * wait_for_stat wait for a TPM_STS value
- * @param: chip, the tpm chip description
- * @param: mask, the value mask to wait
- * @param: timeout, the timeout
- * @param: queue, the wait queue.
- * @param: check_cancel, does the command can be cancelled ?
- * @return: the tpm status, 0 if success, -ETIME if timeout is reached.
+ * wait for a TPM_STS value
  */
 static int wait_for_stat(struct tpm_chip *chip, u8 mask, unsigned long timeout,
 			wait_queue_head_t *queue, bool check_cancel)
@@ -304,15 +258,8 @@ static int wait_for_stat(struct tpm_chip *chip, u8 mask, unsigned long timeout,
 	}
 
 	return -ETIME;
-} /* wait_for_stat() */
+}
 
-/*
- * recv_data receive data
- * @param: chip, the tpm chip description
- * @param: buf, the buffer where the data are received
- * @param: count, the number of data to receive
- * @return: the number of bytes read from TPM FIFO.
- */
 static int recv_data(struct tpm_chip *chip, u8 *buf, size_t count)
 {
 	struct st33zp24_dev *tpm_dev = dev_get_drvdata(&chip->dev);
@@ -337,12 +284,6 @@ static int recv_data(struct tpm_chip *chip, u8 *buf, size_t count)
 	return size;
 }
 
-/*
- * tpm_ioserirq_handler the serirq irq handler
- * @param: irq, the tpm chip description
- * @param: dev_id, the description of the chip
- * @return: the status of the handler.
- */
 static irqreturn_t tpm_ioserirq_handler(int irq, void *dev_id)
 {
 	struct tpm_chip *chip = dev_id;
@@ -353,19 +294,13 @@ static irqreturn_t tpm_ioserirq_handler(int irq, void *dev_id)
 	disable_irq_nosync(tpm_dev->irq);
 
 	return IRQ_HANDLED;
-} /* tpm_ioserirq_handler() */
+}
 
 /*
- * st33zp24_send send TPM commands through the I2C bus.
- *
- * @param: chip, the tpm_chip description as specified in driver/char/tpm/tpm.h
- * @param: buf,	the buffer to send.
- * @param: count, the number of bytes to send.
- * @return: In case of success the number of bytes sent.
- *			In other case, a < 0 value describing the issue.
+ * send TPM commands through the I2C bus.
  */
 static int st33zp24_send(struct tpm_chip *chip, unsigned char *buf,
-			 size_t len)
+			 size_t bufsiz, size_t len)
 {
 	struct st33zp24_dev *tpm_dev = dev_get_drvdata(&chip->dev);
 	u32 status, i, size, ordinal;
@@ -373,8 +308,6 @@ static int st33zp24_send(struct tpm_chip *chip, unsigned char *buf,
 	int ret;
 	u8 data;
 
-	if (!chip)
-		return -EBUSY;
 	if (len < TPM_HEADER_SIZE)
 		return -EBUSY;
 
@@ -395,8 +328,10 @@ static int st33zp24_send(struct tpm_chip *chip, unsigned char *buf,
 
 	for (i = 0; i < len - 1;) {
 		burstcnt = get_burstcount(chip);
-		if (burstcnt < 0)
-			return burstcnt;
+		if (burstcnt < 0) {
+			ret = burstcnt;
+			goto out_err;
+		}
 		size = min_t(int, len - i - 1, burstcnt);
 		ret = tpm_dev->ops->send(tpm_dev->phy_id, TPM_DATA_FIFO,
 					 buf + i, size);
@@ -438,21 +373,13 @@ static int st33zp24_send(struct tpm_chip *chip, unsigned char *buf,
 			goto out_err;
 	}
 
-	return len;
+	return 0;
 out_err:
 	st33zp24_cancel(chip);
 	release_locality(chip);
 	return ret;
 }
 
-/*
- * st33zp24_recv received TPM response through TPM phy.
- * @param: chip, the tpm_chip description as specified in driver/char/tpm/tpm.h.
- * @param: buf,	the buffer to store datas.
- * @param: count, the number of bytes to send.
- * @return: In case of success the number of bytes received.
- *	    In other case, a < 0 value describing the issue.
- */
 static int st33zp24_recv(struct tpm_chip *chip, unsigned char *buf,
 			    size_t count)
 {
@@ -492,12 +419,6 @@ out:
 	return size;
 }
 
-/*
- * st33zp24_req_canceled
- * @param: chip, the tpm_chip description as specified in driver/char/tpm/tpm.h.
- * @param: status, the TPM status.
- * @return: Does TPM ready to compute a new command ? true.
- */
 static bool st33zp24_req_canceled(struct tpm_chip *chip, u8 status)
 {
 	return (status == TPM_STS_COMMAND_READY);
@@ -514,15 +435,18 @@ static const struct tpm_class_ops st33zp24_tpm = {
 	.req_canceled = st33zp24_req_canceled,
 };
 
+static const struct acpi_gpio_params lpcpd_gpios = { 1, 0, false };
+
+static const struct acpi_gpio_mapping acpi_st33zp24_gpios[] = {
+	{ "lpcpd-gpios", &lpcpd_gpios, 1 },
+	{ },
+};
+
 /*
- * st33zp24_probe initialize the TPM device
- * @param: client, the i2c_client drescription (TPM I2C description).
- * @param: id, the i2c_device_id struct.
- * @return: 0 in case of success.
- *	 -1 in other case.
+ * initialize the TPM device
  */
 int st33zp24_probe(void *phy_id, const struct st33zp24_phy_ops *ops,
-		   struct device *dev, int irq, int io_lpcpd)
+		   struct device *dev, int irq)
 {
 	int ret;
 	u8 intmask = 0;
@@ -548,6 +472,25 @@ int st33zp24_probe(void *phy_id, const struct st33zp24_phy_ops *ops,
 	chip->timeout_d = msecs_to_jiffies(TIS_SHORT_TIMEOUT);
 
 	tpm_dev->locality = LOCALITY0;
+
+	if (ACPI_COMPANION(dev)) {
+		ret = devm_acpi_dev_add_driver_gpios(dev, acpi_st33zp24_gpios);
+		if (ret)
+			return ret;
+	}
+
+	/*
+	 * Get LPCPD GPIO. If lpcpd pin is not specified. This is not an
+	 * issue as power management can be also managed by TPM specific
+	 * commands.
+	 */
+	tpm_dev->io_lpcpd = devm_gpiod_get_optional(dev, "lpcpd",
+						    GPIOD_OUT_HIGH);
+	ret = PTR_ERR_OR_ZERO(tpm_dev->io_lpcpd);
+	if (ret) {
+		dev_err(dev, "failed to request lpcpd gpio: %d\n", ret);
+		return ret;
+	}
 
 	if (irq) {
 		/* INTERRUPT Setup */
@@ -597,25 +540,13 @@ _tpm_clean_answer:
 }
 EXPORT_SYMBOL(st33zp24_probe);
 
-/*
- * st33zp24_remove remove the TPM device
- * @param: tpm_data, the tpm phy.
- * @return: 0 in case of success.
- */
-int st33zp24_remove(struct tpm_chip *chip)
+void st33zp24_remove(struct tpm_chip *chip)
 {
 	tpm_chip_unregister(chip);
-	return 0;
 }
 EXPORT_SYMBOL(st33zp24_remove);
 
 #ifdef CONFIG_PM_SLEEP
-/*
- * st33zp24_pm_suspend suspend the TPM device
- * @param: tpm_data, the tpm phy.
- * @param: mesg, the power management message.
- * @return: 0 in case of success.
- */
 int st33zp24_pm_suspend(struct device *dev)
 {
 	struct tpm_chip *chip = dev_get_drvdata(dev);
@@ -623,42 +554,37 @@ int st33zp24_pm_suspend(struct device *dev)
 
 	int ret = 0;
 
-	if (gpio_is_valid(tpm_dev->io_lpcpd))
-		gpio_set_value(tpm_dev->io_lpcpd, 0);
+	if (tpm_dev->io_lpcpd)
+		gpiod_set_value_cansleep(tpm_dev->io_lpcpd, 0);
 	else
 		ret = tpm_pm_suspend(dev);
 
 	return ret;
-} /* st33zp24_pm_suspend() */
+}
 EXPORT_SYMBOL(st33zp24_pm_suspend);
 
-/*
- * st33zp24_pm_resume resume the TPM device
- * @param: tpm_data, the tpm phy.
- * @return: 0 in case of success.
- */
 int st33zp24_pm_resume(struct device *dev)
 {
 	struct tpm_chip *chip = dev_get_drvdata(dev);
 	struct st33zp24_dev *tpm_dev = dev_get_drvdata(&chip->dev);
 	int ret = 0;
 
-	if (gpio_is_valid(tpm_dev->io_lpcpd)) {
-		gpio_set_value(tpm_dev->io_lpcpd, 1);
+	if (tpm_dev->io_lpcpd) {
+		gpiod_set_value_cansleep(tpm_dev->io_lpcpd, 1);
 		ret = wait_for_stat(chip,
 				TPM_STS_VALID, chip->timeout_b,
 				&tpm_dev->read_queue, false);
 	} else {
 		ret = tpm_pm_resume(dev);
 		if (!ret)
-			tpm_do_selftest(chip);
+			tpm1_do_selftest(chip);
 	}
 	return ret;
-} /* st33zp24_pm_resume() */
+}
 EXPORT_SYMBOL(st33zp24_pm_resume);
 #endif
 
-MODULE_AUTHOR("TPM support (TPMsupport@list.st.com)");
+MODULE_AUTHOR("TPM support <TPMsupport@list.st.com>");
 MODULE_DESCRIPTION("ST33ZP24 TPM 1.2 driver");
 MODULE_VERSION("1.3.0");
 MODULE_LICENSE("GPL");

@@ -51,6 +51,7 @@
 MODULE_DESCRIPTION("Driver for Lexar \"Jumpshot\" Compact Flash reader");
 MODULE_AUTHOR("Jimmie Mayfield <mayfield+usb@sackheads.org>");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS("USB_STORAGE");
 
 /*
  * The table of devices
@@ -61,7 +62,7 @@ MODULE_LICENSE("GPL");
 { USB_DEVICE_VER(id_vendor, id_product, bcdDeviceMin, bcdDeviceMax), \
   .driver_info = (flags) }
 
-static struct usb_device_id jumpshot_usb_ids[] = {
+static const struct usb_device_id jumpshot_usb_ids[] = {
 #	include "unusual_jumpshot.h"
 	{ }		/* Terminating entry */
 };
@@ -83,7 +84,7 @@ MODULE_DEVICE_TABLE(usb, jumpshot_usb_ids);
 	.initFunction = init_function,	\
 }
 
-static struct us_unusual_dev jumpshot_unusual_dev_list[] = {
+static const struct us_unusual_dev jumpshot_unusual_dev_list[] = {
 #	include "unusual_jumpshot.h"
 	{ }		/* Terminating entry */
 };
@@ -366,16 +367,16 @@ static int jumpshot_handle_mode_sense(struct us_data *us,
 				      struct scsi_cmnd * srb, 
 				      int sense_6)
 {
-	static unsigned char rw_err_page[12] = {
+	static const unsigned char rw_err_page[12] = {
 		0x1, 0xA, 0x21, 1, 0, 0, 0, 0, 1, 0, 0, 0
 	};
-	static unsigned char cache_page[12] = {
+	static const unsigned char cache_page[12] = {
 		0x8, 0xA, 0x1, 0, 0, 0, 0, 0, 0, 0, 0, 0
 	};
-	static unsigned char rbac_page[12] = {
+	static const unsigned char rbac_page[12] = {
 		0x1B, 0xA, 0, 0x81, 0, 0, 0, 0, 0, 0, 0, 0
 	};
-	static unsigned char timer_page[8] = {
+	static const unsigned char timer_page[8] = {
 		0x1C, 0x6, 0, 0, 0, 0
 	};
 	unsigned char pc, page_code;
@@ -476,12 +477,12 @@ static int jumpshot_transport(struct scsi_cmnd *srb, struct us_data *us)
 	int rc;
 	unsigned long block, blocks;
 	unsigned char *ptr = us->iobuf;
-	static unsigned char inquiry_response[8] = {
+	static const unsigned char inquiry_response[8] = {
 		0x00, 0x80, 0x00, 0x01, 0x1F, 0x00, 0x00, 0x00
 	};
 
 	if (!us->extra) {
-		us->extra = kzalloc(sizeof(struct jumpshot_info), GFP_NOIO);
+		us->extra = kzalloc_obj(struct jumpshot_info, GFP_NOIO);
 		if (!us->extra)
 			return USB_STOR_TRANSPORT_ERROR;
 

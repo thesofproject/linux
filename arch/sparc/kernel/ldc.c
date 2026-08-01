@@ -16,7 +16,7 @@
 #include <linux/list.h>
 #include <linux/init.h>
 #include <linux/bitmap.h>
-#include <linux/iommu-common.h>
+#include <asm/iommu-common.h>
 
 #include <asm/hypervisor.h>
 #include <asm/iommu.h>
@@ -1171,7 +1171,7 @@ struct ldc_channel *ldc_alloc(unsigned long id,
 
 	mssbuf = NULL;
 
-	lp = kzalloc(sizeof(*lp), GFP_KERNEL);
+	lp = kzalloc_obj(*lp);
 	err = -ENOMEM;
 	if (!lp)
 		goto out_err;
@@ -1854,7 +1854,7 @@ static int read_nonraw(struct ldc_channel *lp, void *buf, unsigned int size)
 			 * This seems the best behavior because this allows
 			 * a user of the LDC layer to start with a small
 			 * RX buffer for ldc_read() calls and use -EMSGSIZE
-			 * as a cue to enlarge it's read buffer.
+			 * as a cue to enlarge its read buffer.
 			 */
 			err = -EMSGSIZE;
 			break;

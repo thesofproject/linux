@@ -1,30 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  ALSA sequencer Memory Manager
  *  Copyright (c) 1998 by Frank van de Pol <fvdpol@coil.demon.nl>
  *                        Jaroslav Kysela <perex@perex.cz>
  *                2000 by Takashi Iwai <tiwai@suse.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/init.h>
 #include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/sched/signal.h>
-#include <linux/vmalloc.h>
+#include <linux/mm.h>
 #include <sound/core.h>
 
 #include <sound/seq_kernel.h>
@@ -77,18 +63,26 @@ static int get_var_len(const struct snd_seq_event *event)
 	return event->data.ext.len & ~SNDRV_SEQ_EXT_MASK;
 }
 
-int snd_seq_dump_var_event(const struct snd_seq_event *event,
-			   snd_seq_dump_func_t func, void *private_data)
+static int dump_var_event(const struct snd_seq_event *event,
+			  snd_seq_dump_func_t func, void *private_data,
+			  int offset, int maxlen)
 {
 	int len, err;
 	struct snd_seq_event_cell *cell;
 
-	if ((len = get_var_len(event)) <= 0)
+	len = get_var_len(event);
+	if (len <= 0)
 		return len;
+	if (len <= offset)
+		return 0;
+	if (maxlen && len > offset + maxlen)
+		len = offset + maxlen;
 
 	if (event->data.ext.len & SNDRV_SEQ_EXT_USRPTR) {
 		char buf[32];
 		char __user *curptr = (char __force __user *)event->data.ext.ptr;
+		curptr += offset;
+		len -= offset;
 		while (len > 0) {
 			int size = sizeof(buf);
 			if (len < size)
@@ -104,19 +98,34 @@ int snd_seq_dump_var_event(const struct snd_seq_event *event,
 		return 0;
 	}
 	if (!(event->data.ext.len & SNDRV_SEQ_EXT_CHAINED))
-		return func(private_data, event->data.ext.ptr, len);
+		return func(private_data, event->data.ext.ptr + offset,
+			    len - offset);
 
 	cell = (struct snd_seq_event_cell *)event->data.ext.ptr;
 	for (; len > 0 && cell; cell = cell->next) {
 		int size = sizeof(struct snd_seq_event);
+		char *curptr = (char *)&cell->event;
+
+		if (offset >= size) {
+			offset -= size;
+			len -= size;
+			continue;
+		}
 		if (len < size)
 			size = len;
-		err = func(private_data, &cell->event, size);
+		err = func(private_data, curptr + offset, size - offset);
 		if (err < 0)
 			return err;
+		offset = 0;
 		len -= size;
 	}
 	return 0;
+}
+
+int snd_seq_dump_var_event(const struct snd_seq_event *event,
+			   snd_seq_dump_func_t func, void *private_data)
+{
+	return dump_var_event(event, func, private_data, 0, 0);
 }
 EXPORT_SYMBOL(snd_seq_dump_var_event);
 
@@ -126,49 +135,88 @@ EXPORT_SYMBOL(snd_seq_dump_var_event);
  * expand the variable length event to linear buffer space.
  */
 
-static int seq_copy_in_kernel(char **bufptr, const void *src, int size)
+static int seq_copy_in_kernel(void *ptr, void *src, int size)
 {
+	char **bufptr = ptr;
+
 	memcpy(*bufptr, src, size);
 	*bufptr += size;
 	return 0;
 }
 
-static int seq_copy_in_user(char __user **bufptr, const void *src, int size)
+static int seq_copy_in_user(void *ptr, void *src, int size)
 {
+	char __user **bufptr = ptr;
+
 	if (copy_to_user(*bufptr, src, size))
 		return -EFAULT;
 	*bufptr += size;
 	return 0;
 }
 
+static int expand_var_event(const struct snd_seq_event *event,
+			    int offset, int size, char *buf, bool in_kernel)
+{
+	if (event->data.ext.len & SNDRV_SEQ_EXT_USRPTR) {
+		if (! in_kernel)
+			return -EINVAL;
+		if (copy_from_user(buf,
+				   (char __force __user *)event->data.ext.ptr + offset,
+				   size))
+			return -EFAULT;
+		return 0;
+	}
+	return dump_var_event(event,
+			     in_kernel ? seq_copy_in_kernel : seq_copy_in_user,
+			     &buf, offset, size);
+}
+
 int snd_seq_expand_var_event(const struct snd_seq_event *event, int count, char *buf,
 			     int in_kernel, int size_aligned)
 {
-	int len, newlen;
-	int err;
+	int len, newlen, err;
 
-	if ((len = get_var_len(event)) < 0)
+	len = get_var_len(event);
+	if (len < 0)
 		return len;
 	newlen = len;
 	if (size_aligned > 0)
 		newlen = roundup(len, size_aligned);
 	if (count < newlen)
 		return -EAGAIN;
-
-	if (event->data.ext.len & SNDRV_SEQ_EXT_USRPTR) {
-		if (! in_kernel)
-			return -EINVAL;
-		if (copy_from_user(buf, (void __force __user *)event->data.ext.ptr, len))
+	err = expand_var_event(event, 0, len, buf, in_kernel);
+	if (err < 0)
+		return err;
+	if (len != newlen) {
+		if (in_kernel)
+			memset(buf + len, 0, newlen - len);
+		else if (clear_user((__force void __user *)buf + len,
+				    newlen - len))
 			return -EFAULT;
-		return newlen;
 	}
-	err = snd_seq_dump_var_event(event,
-				     in_kernel ? (snd_seq_dump_func_t)seq_copy_in_kernel :
-				     (snd_seq_dump_func_t)seq_copy_in_user,
-				     &buf);
-	return err < 0 ? err : newlen;
+	return newlen;
 }
 EXPORT_SYMBOL(snd_seq_expand_var_event);
+
+int snd_seq_expand_var_event_at(const struct snd_seq_event *event, int count,
+				char *buf, int offset)
+{
+	int len, err;
+
+	len = get_var_len(event);
+	if (len < 0)
+		return len;
+	if (len <= offset)
+		return 0;
+	len -= offset;
+	if (len > count)
+		len = count;
+	err = expand_var_event(event, offset, len, buf, true);
+	if (err < 0)
+		return err;
+	return len;
+}
+EXPORT_SYMBOL_GPL(snd_seq_expand_var_event_at);
 
 /*
  * release this cell, free extended data if available
@@ -184,7 +232,6 @@ static inline void free_cell(struct snd_seq_pool *pool,
 
 void snd_seq_cell_free(struct snd_seq_event_cell * cell)
 {
-	unsigned long flags;
 	struct snd_seq_pool *pool;
 
 	if (snd_BUG_ON(!cell))
@@ -193,7 +240,7 @@ void snd_seq_cell_free(struct snd_seq_event_cell * cell)
 	if (snd_BUG_ON(!pool))
 		return;
 
-	spin_lock_irqsave(&pool->lock, flags);
+	guard(spinlock_irqsave)(&pool->lock);
 	free_cell(pool, cell);
 	if (snd_seq_ev_is_variable(&cell->event)) {
 		if (cell->event.data.ext.len & SNDRV_SEQ_EXT_CHAINED) {
@@ -211,7 +258,6 @@ void snd_seq_cell_free(struct snd_seq_event_cell * cell)
 		if (snd_seq_output_ok(pool))
 			wake_up(&pool->output_sleep);
 	}
-	spin_unlock_irqrestore(&pool->lock, flags);
 }
 
 
@@ -244,13 +290,13 @@ static int snd_seq_cell_alloc(struct snd_seq_pool *pool,
 
 		set_current_state(TASK_INTERRUPTIBLE);
 		add_wait_queue(&pool->output_sleep, &wait);
-		spin_unlock_irq(&pool->lock);
+		spin_unlock_irqrestore(&pool->lock, flags);
 		if (mutexp)
 			mutex_unlock(mutexp);
 		schedule();
 		if (mutexp)
 			mutex_lock(mutexp);
-		spin_lock_irq(&pool->lock);
+		spin_lock_irqsave(&pool->lock, flags);
 		remove_wait_queue(&pool->output_sleep, &wait);
 		/* interrupted? */
 		if (signal_pending(current)) {
@@ -297,6 +343,7 @@ int snd_seq_event_dup(struct snd_seq_pool *pool, struct snd_seq_event *event,
 	int ncells, err;
 	unsigned int extlen;
 	struct snd_seq_event_cell *cell;
+	int size;
 
 	*cellp = NULL;
 
@@ -304,7 +351,7 @@ int snd_seq_event_dup(struct snd_seq_pool *pool, struct snd_seq_event *event,
 	extlen = 0;
 	if (snd_seq_ev_is_variable(event)) {
 		extlen = event->data.ext.len & ~SNDRV_SEQ_EXT_MASK;
-		ncells = (extlen + sizeof(struct snd_seq_event) - 1) / sizeof(struct snd_seq_event);
+		ncells = DIV_ROUND_UP(extlen, sizeof(struct snd_seq_event));
 	}
 	if (ncells >= pool->total_elements)
 		return -ENOMEM;
@@ -314,7 +361,12 @@ int snd_seq_event_dup(struct snd_seq_pool *pool, struct snd_seq_event *event,
 		return err;
 
 	/* copy the event */
-	cell->event = *event;
+	size = snd_seq_event_packet_size(event);
+	memcpy(&cell->ump, event, size);
+#if IS_ENABLED(CONFIG_SND_SEQ_UMP)
+	if (size < sizeof(cell->ump))
+		cell->ump.raw.extra = 0;
+#endif
 
 	/* decompose */
 	if (snd_seq_ev_is_variable(event)) {
@@ -332,7 +384,7 @@ int snd_seq_event_dup(struct snd_seq_pool *pool, struct snd_seq_event *event,
 		tail = NULL;
 
 		while (ncells-- > 0) {
-			int size = sizeof(struct snd_seq_event);
+			size = sizeof(struct snd_seq_event);
 			if (len < size)
 				size = len;
 			err = snd_seq_cell_alloc(pool, &tmp, nonblock, file,
@@ -375,6 +427,7 @@ int snd_seq_pool_poll_wait(struct snd_seq_pool *pool, struct file *file,
 			   poll_table *wait)
 {
 	poll_wait(file, &pool->output_sleep, wait);
+	guard(spinlock_irq)(&pool->lock);
 	return snd_seq_output_ok(pool);
 }
 
@@ -384,20 +437,18 @@ int snd_seq_pool_init(struct snd_seq_pool *pool)
 {
 	int cell;
 	struct snd_seq_event_cell *cellptr;
-	unsigned long flags;
 
 	if (snd_BUG_ON(!pool))
 		return -EINVAL;
 
-	cellptr = vmalloc(sizeof(struct snd_seq_event_cell) * pool->size);
+	cellptr = kvmalloc_objs(struct snd_seq_event_cell, pool->size);
 	if (!cellptr)
 		return -ENOMEM;
 
 	/* add new cells to the free cell list */
-	spin_lock_irqsave(&pool->lock, flags);
+	guard(spinlock_irq)(&pool->lock);
 	if (pool->ptr) {
-		spin_unlock_irqrestore(&pool->lock, flags);
-		vfree(cellptr);
+		kvfree(cellptr);
 		return 0;
 	}
 
@@ -415,26 +466,21 @@ int snd_seq_pool_init(struct snd_seq_pool *pool)
 	/* init statistics */
 	pool->max_used = 0;
 	pool->total_elements = pool->size;
-	spin_unlock_irqrestore(&pool->lock, flags);
 	return 0;
 }
 
 /* refuse the further insertion to the pool */
 void snd_seq_pool_mark_closing(struct snd_seq_pool *pool)
 {
-	unsigned long flags;
-
 	if (snd_BUG_ON(!pool))
 		return;
-	spin_lock_irqsave(&pool->lock, flags);
+	guard(spinlock_irqsave)(&pool->lock);
 	pool->closing = 1;
-	spin_unlock_irqrestore(&pool->lock, flags);
 }
 
 /* remove events */
 int snd_seq_pool_done(struct snd_seq_pool *pool)
 {
-	unsigned long flags;
 	struct snd_seq_event_cell *ptr;
 
 	if (snd_BUG_ON(!pool))
@@ -448,18 +494,17 @@ int snd_seq_pool_done(struct snd_seq_pool *pool)
 		schedule_timeout_uninterruptible(1);
 	
 	/* release all resources */
-	spin_lock_irqsave(&pool->lock, flags);
-	ptr = pool->ptr;
-	pool->ptr = NULL;
-	pool->free = NULL;
-	pool->total_elements = 0;
-	spin_unlock_irqrestore(&pool->lock, flags);
+	scoped_guard(spinlock_irq, &pool->lock) {
+		ptr = pool->ptr;
+		pool->ptr = NULL;
+		pool->free = NULL;
+		pool->total_elements = 0;
+	}
 
-	vfree(ptr);
+	kvfree(ptr);
 
-	spin_lock_irqsave(&pool->lock, flags);
+	guard(spinlock_irq)(&pool->lock);
 	pool->closing = 0;
-	spin_unlock_irqrestore(&pool->lock, flags);
 
 	return 0;
 }
@@ -471,7 +516,7 @@ struct snd_seq_pool *snd_seq_pool_new(int poolsize)
 	struct snd_seq_pool *pool;
 
 	/* create pool block */
-	pool = kzalloc(sizeof(*pool), GFP_KERNEL);
+	pool = kzalloc_obj(*pool);
 	if (!pool)
 		return NULL;
 	spin_lock_init(&pool->lock);
@@ -502,18 +547,6 @@ int snd_seq_pool_delete(struct snd_seq_pool **ppool)
 	kfree(pool);
 	return 0;
 }
-
-/* initialize sequencer memory */
-int __init snd_sequencer_memory_init(void)
-{
-	return 0;
-}
-
-/* release sequencer memory */
-void __exit snd_sequencer_memory_done(void)
-{
-}
-
 
 /* exported to seq_clientmgr.c */
 void snd_seq_info_pool(struct snd_info_buffer *buffer,

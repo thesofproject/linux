@@ -21,7 +21,7 @@
 #include <linux/spinlock.h>
 
 #include <linux/coda.h>
-#include <linux/coda_psdev.h>
+#include "coda_psdev.h"
 #include "coda_linux.h"
 #include "coda_cache.h"
 
@@ -93,13 +93,15 @@ static void coda_flag_children(struct dentry *parent, int flag)
 	struct dentry *de;
 
 	spin_lock(&parent->d_lock);
-	list_for_each_entry(de, &parent->d_subdirs, d_child) {
+	rcu_read_lock();
+	hlist_for_each_entry(de, &parent->d_children, d_sib) {
+		struct inode *inode = d_inode_rcu(de);
 		/* don't know what to do with negative dentries */
-		if (d_inode(de) ) 
-			coda_flag_inode(d_inode(de), flag);
+		if (inode)
+			coda_flag_inode(inode, flag);
 	}
+	rcu_read_unlock();
 	spin_unlock(&parent->d_lock);
-	return; 
 }
 
 void coda_flag_inode_children(struct inode *inode, int flag)

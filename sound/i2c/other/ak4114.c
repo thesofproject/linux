@@ -1,23 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Routines for control of the AK4114 via I2C and 4-wire serial interface
  *  IEC958 (S/PDIF) receiver by Asahi Kasei
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/slab.h>
@@ -53,17 +38,6 @@ static inline unsigned char reg_read(struct ak4114 *ak4114, unsigned char reg)
 	return ak4114->read(ak4114->private_data, reg);
 }
 
-#if 0
-static void reg_dump(struct ak4114 *ak4114)
-{
-	int i;
-
-	printk(KERN_DEBUG "AK4114 REG DUMP:\n");
-	for (i = 0; i < 0x20; i++)
-		printk(KERN_DEBUG "reg[%02x] = %02x (%02x)\n", i, reg_read(ak4114, i), i < ARRAY_SIZE(ak4114->regmap) ? ak4114->regmap[i] : 0);
-}
-#endif
-
 static void snd_ak4114_free(struct ak4114 *chip)
 {
 	atomic_inc(&chip->wq_processing);	/* don't schedule new work */
@@ -86,11 +60,11 @@ int snd_ak4114_create(struct snd_card *card,
 	struct ak4114 *chip;
 	int err = 0;
 	unsigned char reg;
-	static struct snd_device_ops ops = {
+	static const struct snd_device_ops ops = {
 		.dev_free =     snd_ak4114_dev_free,
 	};
 
-	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
+	chip = kzalloc_obj(*chip);
 	if (chip == NULL)
 		return -ENOMEM;
 	spin_lock_init(&chip->lock);
@@ -112,7 +86,8 @@ int snd_ak4114_create(struct snd_card *card,
 	chip->rcs0 = reg_read(chip, AK4114_REG_RCS0) & ~(AK4114_QINT | AK4114_CINT);
 	chip->rcs1 = reg_read(chip, AK4114_REG_RCS1);
 
-	if ((err = snd_device_new(card, SNDRV_DEV_CODEC, chip, &ops)) < 0)
+	err = snd_device_new(card, SNDRV_DEV_CODEC, chip, &ops);
+	if (err < 0)
 		goto __fail;
 
 	if (r_ak4114)
@@ -157,9 +132,9 @@ void snd_ak4114_reinit(struct ak4114 *chip)
 {
 	if (atomic_inc_return(&chip->wq_processing) == 1)
 		cancel_delayed_work_sync(&chip->work);
-	mutex_lock(&chip->reinit_mutex);
-	ak4114_init_regs(chip);
-	mutex_unlock(&chip->reinit_mutex);
+	scoped_guard(mutex, &chip->reinit_mutex) {
+		ak4114_init_regs(chip);
+	}
 	/* bring up statistics / event queing */
 	if (atomic_dec_and_test(&chip->wq_processing))
 		schedule_delayed_work(&chip->work, HZ / 10);
@@ -195,11 +170,10 @@ static int snd_ak4114_in_error_get(struct snd_kcontrol *kcontrol,
 {
 	struct ak4114 *chip = snd_kcontrol_chip(kcontrol);
 
-	spin_lock_irq(&chip->lock);
+	guard(spinlock_irq)(&chip->lock);
 	ucontrol->value.integer.value[0] =
 		chip->errors[kcontrol->private_value];
 	chip->errors[kcontrol->private_value] = 0;
-	spin_unlock_irq(&chip->lock);
 	return 0;
 }
 
@@ -333,7 +307,7 @@ static int snd_ak4114_spdif_qget(struct snd_kcontrol *kcontrol,
 }
 
 /* Don't forget to change AK4114_CONTROLS define!!! */
-static struct snd_kcontrol_new snd_ak4114_iec958_controls[] = {
+static const struct snd_kcontrol_new snd_ak4114_iec958_controls[] = {
 {
 	.iface =	SNDRV_CTL_ELEM_IFACE_PCM,
 	.name =		"IEC958 Parity Errors",
@@ -465,9 +439,8 @@ static void snd_ak4114_proc_regs_read(struct snd_info_entry *entry,
 
 static void snd_ak4114_proc_init(struct ak4114 *ak4114)
 {
-	struct snd_info_entry *entry;
-	if (!snd_card_proc_new(ak4114->card, "ak4114", &entry))
-		snd_info_set_text_ops(entry, ak4114, snd_ak4114_proc_regs_read);
+	snd_card_ro_proc_new(ak4114->card, "ak4114", ak4114,
+			     snd_ak4114_proc_regs_read);
 }
 
 int snd_ak4114_build(struct ak4114 *ak4114,
@@ -578,21 +551,21 @@ int snd_ak4114_check_rate_and_errors(struct ak4114 *ak4114, unsigned int flags)
 	if (flags & AK4114_CHECK_NO_STAT)
 		goto __rate;
 	rcs0 = reg_read(ak4114, AK4114_REG_RCS0);
-	spin_lock_irqsave(&ak4114->lock, _flags);
-	if (rcs0 & AK4114_PAR)
-		ak4114->errors[AK4114_PARITY_ERRORS]++;
-	if (rcs1 & AK4114_V)
-		ak4114->errors[AK4114_V_BIT_ERRORS]++;
-	if (rcs1 & AK4114_CCRC)
-		ak4114->errors[AK4114_CCRC_ERRORS]++;
-	if (rcs1 & AK4114_QCRC)
-		ak4114->errors[AK4114_QCRC_ERRORS]++;
-	c0 = (ak4114->rcs0 & (AK4114_QINT | AK4114_CINT | AK4114_PEM | AK4114_AUDION | AK4114_AUTO | AK4114_UNLCK)) ^
-                     (rcs0 & (AK4114_QINT | AK4114_CINT | AK4114_PEM | AK4114_AUDION | AK4114_AUTO | AK4114_UNLCK));
-	c1 = (ak4114->rcs1 & 0xf0) ^ (rcs1 & 0xf0);
-	ak4114->rcs0 = rcs0 & ~(AK4114_QINT | AK4114_CINT);
-	ak4114->rcs1 = rcs1;
-	spin_unlock_irqrestore(&ak4114->lock, _flags);
+	scoped_guard(spinlock_irqsave, &ak4114->lock) {
+		if (rcs0 & AK4114_PAR)
+			ak4114->errors[AK4114_PARITY_ERRORS]++;
+		if (rcs1 & AK4114_V)
+			ak4114->errors[AK4114_V_BIT_ERRORS]++;
+		if (rcs1 & AK4114_CCRC)
+			ak4114->errors[AK4114_CCRC_ERRORS]++;
+		if (rcs1 & AK4114_QCRC)
+			ak4114->errors[AK4114_QCRC_ERRORS]++;
+		c0 = (ak4114->rcs0 & (AK4114_QINT | AK4114_CINT | AK4114_PEM | AK4114_AUDION | AK4114_AUTO | AK4114_UNLCK)) ^
+			(rcs0 & (AK4114_QINT | AK4114_CINT | AK4114_PEM | AK4114_AUDION | AK4114_AUTO | AK4114_UNLCK));
+		c1 = (ak4114->rcs1 & 0xf0) ^ (rcs1 & 0xf0);
+		ak4114->rcs0 = rcs0 & ~(AK4114_QINT | AK4114_CINT);
+		ak4114->rcs1 = rcs1;
+	}
 
 	ak4114_notify(ak4114, rcs0, rcs1, c0, c1);
 	if (ak4114->change_callback && (c0 | c1) != 0)
@@ -604,7 +577,6 @@ int snd_ak4114_check_rate_and_errors(struct ak4114 *ak4114, unsigned int flags)
 	if (!(flags & AK4114_CHECK_NO_RATE) && runtime && runtime->rate != res) {
 		snd_pcm_stream_lock_irqsave(ak4114->capture_substream, _flags);
 		if (snd_pcm_running(ak4114->capture_substream)) {
-			// printk(KERN_DEBUG "rate changed (%i <- %i)\n", runtime->rate, res);
 			snd_pcm_stop(ak4114->capture_substream, SNDRV_PCM_STATE_DRAINING);
 			res = 1;
 		}

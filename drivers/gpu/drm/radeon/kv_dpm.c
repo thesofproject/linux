@@ -21,13 +21,14 @@
  *
  */
 
-#include <drm/drmP.h>
-#include "radeon.h"
-#include "cikd.h"
-#include "r600_dpm.h"
-#include "kv_dpm.h"
-#include "radeon_asic.h"
+#include <linux/pci.h>
 #include <linux/seq_file.h>
+
+#include "cikd.h"
+#include "kv_dpm.h"
+#include "r600_dpm.h"
+#include "radeon.h"
+#include "radeon_asic.h"
 
 #define KV_MAX_DEEPSLEEP_DIVIDER_ID     5
 #define KV_MINIMUM_ENGINE_CLOCK         800
@@ -63,107 +64,7 @@ extern void cik_exit_rlc_safe_mode(struct radeon_device *rdev);
 extern void cik_update_cg(struct radeon_device *rdev,
 			  u32 block, bool enable);
 
-static const struct kv_lcac_config_values sx_local_cac_cfg_kv[] =
-{
-	{  0,       4,        1    },
-	{  1,       4,        1    },
-	{  2,       5,        1    },
-	{  3,       4,        2    },
-	{  4,       1,        1    },
-	{  5,       5,        2    },
-	{  6,       6,        1    },
-	{  7,       9,        2    },
-	{ 0xffffffff }
-};
-
-static const struct kv_lcac_config_values mc0_local_cac_cfg_kv[] =
-{
-	{  0,       4,        1    },
-	{ 0xffffffff }
-};
-
-static const struct kv_lcac_config_values mc1_local_cac_cfg_kv[] =
-{
-	{  0,       4,        1    },
-	{ 0xffffffff }
-};
-
-static const struct kv_lcac_config_values mc2_local_cac_cfg_kv[] =
-{
-	{  0,       4,        1    },
-	{ 0xffffffff }
-};
-
-static const struct kv_lcac_config_values mc3_local_cac_cfg_kv[] =
-{
-	{  0,       4,        1    },
-	{ 0xffffffff }
-};
-
-static const struct kv_lcac_config_values cpl_local_cac_cfg_kv[] =
-{
-	{  0,       4,        1    },
-	{  1,       4,        1    },
-	{  2,       5,        1    },
-	{  3,       4,        1    },
-	{  4,       1,        1    },
-	{  5,       5,        1    },
-	{  6,       6,        1    },
-	{  7,       9,        1    },
-	{  8,       4,        1    },
-	{  9,       2,        1    },
-	{  10,      3,        1    },
-	{  11,      6,        1    },
-	{  12,      8,        2    },
-	{  13,      1,        1    },
-	{  14,      2,        1    },
-	{  15,      3,        1    },
-	{  16,      1,        1    },
-	{  17,      4,        1    },
-	{  18,      3,        1    },
-	{  19,      1,        1    },
-	{  20,      8,        1    },
-	{  21,      5,        1    },
-	{  22,      1,        1    },
-	{  23,      1,        1    },
-	{  24,      4,        1    },
-	{  27,      6,        1    },
-	{  28,      1,        1    },
-	{ 0xffffffff }
-};
-
-static const struct kv_lcac_config_reg sx0_cac_config_reg[] =
-{
-	{ 0xc0400d00, 0x003e0000, 17, 0x3fc00000, 22, 0x0001fffe, 1, 0x00000001, 0 }
-};
-
-static const struct kv_lcac_config_reg mc0_cac_config_reg[] =
-{
-	{ 0xc0400d30, 0x003e0000, 17, 0x3fc00000, 22, 0x0001fffe, 1, 0x00000001, 0 }
-};
-
-static const struct kv_lcac_config_reg mc1_cac_config_reg[] =
-{
-	{ 0xc0400d3c, 0x003e0000, 17, 0x3fc00000, 22, 0x0001fffe, 1, 0x00000001, 0 }
-};
-
-static const struct kv_lcac_config_reg mc2_cac_config_reg[] =
-{
-	{ 0xc0400d48, 0x003e0000, 17, 0x3fc00000, 22, 0x0001fffe, 1, 0x00000001, 0 }
-};
-
-static const struct kv_lcac_config_reg mc3_cac_config_reg[] =
-{
-	{ 0xc0400d54, 0x003e0000, 17, 0x3fc00000, 22, 0x0001fffe, 1, 0x00000001, 0 }
-};
-
-static const struct kv_lcac_config_reg cpl_cac_config_reg[] =
-{
-	{ 0xc0400d80, 0x003e0000, 17, 0x3fc00000, 22, 0x0001fffe, 1, 0x00000001, 0 }
-};
-
-static const struct kv_pt_config_reg didt_config_kv[] =
-{
+static const struct kv_pt_config_reg didt_config_kv[] = {
 	{ 0x10, 0x000000ff, 0, 0x0, KV_CONFIGREG_DIDT_IND },
 	{ 0x10, 0x0000ff00, 8, 0x0, KV_CONFIGREG_DIDT_IND },
 	{ 0x10, 0x00ff0000, 16, 0x0, KV_CONFIGREG_DIDT_IND },
@@ -252,32 +153,6 @@ static struct kv_power_info *kv_get_pi(struct radeon_device *rdev)
 
 	return pi;
 }
-
-#if 0
-static void kv_program_local_cac_table(struct radeon_device *rdev,
-				       const struct kv_lcac_config_values *local_cac_table,
-				       const struct kv_lcac_config_reg *local_cac_reg)
-{
-	u32 i, count, data;
-	const struct kv_lcac_config_values *values = local_cac_table;
-
-	while (values->block_id != 0xffffffff) {
-		count = values->signal_id;
-		for (i = 0; i < count; i++) {
-			data = ((values->block_id << local_cac_reg->block_shift) &
-				local_cac_reg->block_mask);
-			data |= ((i << local_cac_reg->signal_shift) &
-				 local_cac_reg->signal_mask);
-			data |= ((values->t << local_cac_reg->t_shift) &
-				 local_cac_reg->t_mask);
-			data |= ((1 << local_cac_reg->enable_shift) &
-				 local_cac_reg->enable_mask);
-			WREG32_SMC(local_cac_reg->cntl, data);
-		}
-		values++;
-	}
-}
-#endif
 
 static int kv_program_pt_config_registers(struct radeon_device *rdev,
 					  const struct kv_pt_config_reg *cac_config_regs)
@@ -396,39 +271,6 @@ static int kv_enable_didt(struct radeon_device *rdev, bool enable)
 
 	return 0;
 }
-
-#if 0
-static void kv_initialize_hardware_cac_manager(struct radeon_device *rdev)
-{
-	struct kv_power_info *pi = kv_get_pi(rdev);
-
-	if (pi->caps_cac) {
-		WREG32_SMC(LCAC_SX0_OVR_SEL, 0);
-		WREG32_SMC(LCAC_SX0_OVR_VAL, 0);
-		kv_program_local_cac_table(rdev, sx_local_cac_cfg_kv, sx0_cac_config_reg);
-
-		WREG32_SMC(LCAC_MC0_OVR_SEL, 0);
-		WREG32_SMC(LCAC_MC0_OVR_VAL, 0);
-		kv_program_local_cac_table(rdev, mc0_local_cac_cfg_kv, mc0_cac_config_reg);
-
-		WREG32_SMC(LCAC_MC1_OVR_SEL, 0);
-		WREG32_SMC(LCAC_MC1_OVR_VAL, 0);
-		kv_program_local_cac_table(rdev, mc1_local_cac_cfg_kv, mc1_cac_config_reg);
-
-		WREG32_SMC(LCAC_MC2_OVR_SEL, 0);
-		WREG32_SMC(LCAC_MC2_OVR_VAL, 0);
-		kv_program_local_cac_table(rdev, mc2_local_cac_cfg_kv, mc2_cac_config_reg);
-
-		WREG32_SMC(LCAC_MC3_OVR_SEL, 0);
-		WREG32_SMC(LCAC_MC3_OVR_VAL, 0);
-		kv_program_local_cac_table(rdev, mc3_local_cac_cfg_kv, mc3_cac_config_reg);
-
-		WREG32_SMC(LCAC_CPL_OVR_SEL, 0);
-		WREG32_SMC(LCAC_CPL_OVR_VAL, 0);
-		kv_program_local_cac_table(rdev, cpl_local_cac_cfg_kv, cpl_cac_config_reg);
-	}
-}
-#endif
 
 static int kv_enable_smc_cac(struct radeon_device *rdev, bool enable)
 {
@@ -1088,9 +930,9 @@ static void kv_calculate_dfs_bypass_settings(struct radeon_device *rdev)
 					pi->graphics_level[i].ClkBypassCntl = 2;
 				else if (kv_get_clock_difference(table->entries[i].clk, 26600) < 200)
 					pi->graphics_level[i].ClkBypassCntl = 7;
-				else if (kv_get_clock_difference(table->entries[i].clk , 20000) < 200)
+				else if (kv_get_clock_difference(table->entries[i].clk, 20000) < 200)
 					pi->graphics_level[i].ClkBypassCntl = 6;
-				else if (kv_get_clock_difference(table->entries[i].clk , 10000) < 200)
+				else if (kv_get_clock_difference(table->entries[i].clk, 10000) < 200)
 					pi->graphics_level[i].ClkBypassCntl = 8;
 				else
 					pi->graphics_level[i].ClkBypassCntl = 0;
@@ -1226,9 +1068,7 @@ int kv_dpm_enable(struct radeon_device *rdev)
 		return ret;
 	}
 	kv_program_vc(rdev);
-#if 0
-	kv_initialize_hardware_cac_manager(rdev);
-#endif
+
 	kv_start_am(rdev);
 	if (pi->enable_auto_thermal_throttling) {
 		ret = kv_enable_auto_thermal_throttling(rdev);
@@ -1328,26 +1168,6 @@ void kv_dpm_disable(struct radeon_device *rdev)
 
 	kv_update_current_ps(rdev, rdev->pm.dpm.boot_ps);
 }
-
-#if 0
-static int kv_write_smc_soft_register(struct radeon_device *rdev,
-				      u16 reg_offset, u32 value)
-{
-	struct kv_power_info *pi = kv_get_pi(rdev);
-
-	return kv_copy_bytes_to_smc(rdev, pi->soft_regs_start + reg_offset,
-				    (u8 *)&value, sizeof(u16), pi->sram_end);
-}
-
-static int kv_read_smc_soft_register(struct radeon_device *rdev,
-				     u16 reg_offset, u32 *value)
-{
-	struct kv_power_info *pi = kv_get_pi(rdev);
-
-	return kv_read_smc_sram_dword(rdev, pi->soft_regs_start + reg_offset,
-				      value, pi->sram_end);
-}
-#endif
 
 static void kv_init_sclk_t(struct radeon_device *rdev)
 {
@@ -1756,7 +1576,7 @@ static void kv_set_valid_clock_range(struct radeon_device *rdev,
 			if ((new_ps->levels[0].sclk -
 			     table->entries[pi->highest_valid].sclk_frequency) >
 			    (table->entries[pi->lowest_valid].sclk_frequency -
-			     new_ps->levels[new_ps->num_levels -1].sclk))
+			     new_ps->levels[new_ps->num_levels - 1].sclk))
 				pi->highest_valid = pi->lowest_valid;
 			else
 				pi->lowest_valid =  pi->highest_valid;
@@ -1937,29 +1757,6 @@ void kv_dpm_setup_asic(struct radeon_device *rdev)
 	kv_init_powergate_state(rdev);
 	kv_init_sclk_t(rdev);
 }
-
-#if 0
-void kv_dpm_reset_asic(struct radeon_device *rdev)
-{
-	struct kv_power_info *pi = kv_get_pi(rdev);
-
-	if (rdev->family == CHIP_KABINI || rdev->family == CHIP_MULLINS) {
-		kv_force_lowest_valid(rdev);
-		kv_init_graphics_levels(rdev);
-		kv_program_bootup_state(rdev);
-		kv_upload_dpm_settings(rdev);
-		kv_force_lowest_valid(rdev);
-		kv_unforce_levels(rdev);
-	} else {
-		kv_init_graphics_levels(rdev);
-		kv_program_bootup_state(rdev);
-		kv_freeze_sclk_dpm(rdev, true);
-		kv_upload_dpm_settings(rdev);
-		kv_freeze_sclk_dpm(rdev, false);
-		kv_set_enabled_level(rdev, pi->graphics_boot_level);
-	}
-}
-#endif
 
 //XXX use sumo_dpm_display_configuration_changed
 
@@ -2532,7 +2329,7 @@ static int kv_parse_sys_info_table(struct radeon_device *rdev)
 				le32_to_cpu(igp_info->info_8.ulNbpStateNClkFreq[i]);
 		}
 		if (le32_to_cpu(igp_info->info_8.ulGPUCapInfo) &
-		    SYS_INFO_GPUCAPS__ENABEL_DFS_BYPASS)
+		    SYS_INFO_GPUCAPS__ENABLE_DFS_BYPASS)
 			pi->caps_enable_dfs_bypass = true;
 
 		sumo_construct_sclk_voltage_mapping_table(rdev,
@@ -2660,8 +2457,8 @@ static int kv_parse_power_table(struct radeon_device *rdev)
 		(mode_info->atom_context->bios + data_offset +
 		 le16_to_cpu(power_info->pplib.usNonClockInfoArrayOffset));
 
-	rdev->pm.dpm.ps = kzalloc(sizeof(struct radeon_ps) *
-				  state_array->ucNumEntries, GFP_KERNEL);
+	rdev->pm.dpm.ps = kzalloc_objs(struct radeon_ps,
+				       state_array->ucNumEntries);
 	if (!rdev->pm.dpm.ps)
 		return -ENOMEM;
 	power_state_offset = (u8 *)state_array->states;
@@ -2673,7 +2470,7 @@ static int kv_parse_power_table(struct radeon_device *rdev)
 			&non_clock_info_array->nonClockInfo[non_clock_array_index];
 		if (!rdev->pm.power_state[i].clock_info)
 			return -EINVAL;
-		ps = kzalloc(sizeof(struct kv_ps), GFP_KERNEL);
+		ps = kzalloc_obj(struct kv_ps);
 		if (ps == NULL) {
 			kfree(rdev->pm.dpm.ps);
 			return -ENOMEM;
@@ -2722,7 +2519,7 @@ int kv_dpm_init(struct radeon_device *rdev)
 	struct kv_power_info *pi;
 	int ret, i;
 
-	pi = kzalloc(sizeof(struct kv_power_info), GFP_KERNEL);
+	pi = kzalloc_obj(struct kv_power_info);
 	if (pi == NULL)
 		return -ENOMEM;
 	rdev->pm.dpm.priv = pi;

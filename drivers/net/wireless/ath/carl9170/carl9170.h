@@ -68,7 +68,10 @@
 
 #define PAYLOAD_MAX	(CARL9170_MAX_CMD_LEN / 4 - 1)
 
-static const u8 ar9170_qmap[__AR9170_NUM_TXQ] = { 3, 2, 1, 0 };
+static inline u8 ar9170_qmap(u8 idx)
+{
+	return 3 - idx; /* { 3, 2, 1, 0 } */
+}
 
 #define CARL9170_MAX_RX_BUFFER_SIZE		8192
 
@@ -372,11 +375,6 @@ struct ar9170 {
 	u8 *readbuf;
 	spinlock_t cmd_lock;
 	struct completion cmd_wait;
-	union {
-		__le32 cmd_buf[PAYLOAD_MAX + 1];
-		struct carl9170_cmd cmd;
-		struct carl9170_rsp rsp;
-	};
 
 	/* statistics */
 	unsigned int tx_dropped;
@@ -455,12 +453,18 @@ struct ar9170 {
 # define CARL9170_HWRNG_CACHE_SIZE	CARL9170_MAX_CMD_PAYLOAD_LEN
 	struct {
 		struct hwrng rng;
-		bool initialized;
 		char name[30 + 1];
 		u16 cache[CARL9170_HWRNG_CACHE_SIZE / sizeof(u16)];
 		unsigned int cache_idx;
 	} rng;
 #endif /* CONFIG_CARL9170_HWRNG */
+
+	/* Must be last as it ends in a flexible-array member. */
+	union {
+		__le32 cmd_buf[PAYLOAD_MAX + 1];
+		struct carl9170_cmd cmd;
+		struct carl9170_rsp rsp;
+	};
 };
 
 enum carl9170_ps_off_override_reasons {
@@ -628,14 +632,9 @@ static inline u16 carl9170_get_seq(struct sk_buff *skb)
 	return get_seq_h(carl9170_get_hdr(skb));
 }
 
-static inline u16 get_tid_h(struct ieee80211_hdr *hdr)
-{
-	return (ieee80211_get_qos_ctl(hdr))[0] & IEEE80211_QOS_CTL_TID_MASK;
-}
-
 static inline u16 carl9170_get_tid(struct sk_buff *skb)
 {
-	return get_tid_h(carl9170_get_hdr(skb));
+	return ieee80211_get_tid(carl9170_get_hdr(skb));
 }
 
 static inline struct ieee80211_vif *

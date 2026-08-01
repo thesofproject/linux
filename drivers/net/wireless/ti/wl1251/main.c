@@ -1,22 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This file is part of wl1251
  *
  * Copyright (C) 2008-2009 Nokia Corporation
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #include <linux/module.h>
@@ -418,7 +404,7 @@ static int wl1251_op_start(struct ieee80211_hw *hw)
 
 	/* update hw/fw version info in wiphy struct */
 	wiphy->hw_version = wl->chip_id;
-	strncpy(wiphy->fw_version, wl->fw_ver, sizeof(wiphy->fw_version));
+	strscpy(wiphy->fw_version, wl->fw_ver, sizeof(wiphy->fw_version));
 
 out:
 	if (ret < 0)
@@ -429,7 +415,7 @@ out:
 	return ret;
 }
 
-static void wl1251_op_stop(struct ieee80211_hw *hw)
+static void wl1251_op_stop(struct ieee80211_hw *hw, bool suspend)
 {
 	struct wl1251 *wl = hw->priv;
 
@@ -560,7 +546,7 @@ static int wl1251_build_null_data(struct wl1251 *wl)
 		size = sizeof(struct wl12xx_null_data_template);
 		ptr = NULL;
 	} else {
-		skb = ieee80211_nullfunc_get(wl->hw, wl->vif, false);
+		skb = ieee80211_nullfunc_get(wl->hw, wl->vif, -1, false);
 		if (!skb)
 			goto out;
 		size = skb->len;
@@ -572,7 +558,7 @@ static int wl1251_build_null_data(struct wl1251 *wl)
 out:
 	dev_kfree_skb(skb);
 	if (ret)
-		wl1251_warning("cmd buld null data failed: %d", ret);
+		wl1251_warning("cmd build null data failed: %d", ret);
 
 	return ret;
 }
@@ -603,7 +589,7 @@ static bool wl1251_can_do_pm(struct ieee80211_conf *conf, struct wl1251 *wl)
 	return (conf->flags & IEEE80211_CONF_PS) && !wl->monitor_present;
 }
 
-static int wl1251_op_config(struct ieee80211_hw *hw, u32 changed)
+static int wl1251_op_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
 {
 	struct wl1251 *wl = hw->priv;
 	struct ieee80211_conf *conf = &hw->conf;
@@ -739,7 +725,7 @@ static u64 wl1251_op_prepare_multicast(struct ieee80211_hw *hw,
 	if (unlikely(wl->state == WL1251_STATE_OFF))
 		return 0;
 
-	fp = kzalloc(sizeof(*fp), GFP_ATOMIC);
+	fp = kzalloc_obj(*fp, GFP_ATOMIC);
 	if (!fp) {
 		wl1251_error("Out of memory setting filters.");
 		return 0;
@@ -892,7 +878,7 @@ static int wl1251_op_set_key(struct ieee80211_hw *hw, enum set_key_cmd cmd,
 
 	wl1251_debug(DEBUG_MAC80211, "mac80211 set key");
 
-	wl_cmd = kzalloc(sizeof(*wl_cmd), GFP_KERNEL);
+	wl_cmd = kzalloc_obj(*wl_cmd);
 	if (!wl_cmd) {
 		ret = -ENOMEM;
 		goto out;
@@ -1065,7 +1051,8 @@ out:
 	return ret;
 }
 
-static int wl1251_op_set_rts_threshold(struct ieee80211_hw *hw, u32 value)
+static int wl1251_op_set_rts_threshold(struct ieee80211_hw *hw, int radio_idx,
+				       u32 value)
 {
 	struct wl1251 *wl = hw->priv;
 	int ret;
@@ -1091,7 +1078,7 @@ out:
 static void wl1251_op_bss_info_changed(struct ieee80211_hw *hw,
 				       struct ieee80211_vif *vif,
 				       struct ieee80211_bss_conf *bss_conf,
-				       u32 changed)
+				       u64 changed)
 {
 	struct wl1251 *wl = hw->priv;
 	struct sk_buff *beacon, *skb;
@@ -1137,7 +1124,7 @@ static void wl1251_op_bss_info_changed(struct ieee80211_hw *hw,
 	}
 
 	if (changed & BSS_CHANGED_ASSOC) {
-		if (bss_conf->assoc) {
+		if (vif->cfg.assoc) {
 			wl->beacon_int = bss_conf->beacon_int;
 
 			skb = ieee80211_pspoll_get(wl->hw, wl->vif);
@@ -1151,7 +1138,7 @@ static void wl1251_op_bss_info_changed(struct ieee80211_hw *hw,
 			if (ret < 0)
 				goto out_sleep;
 
-			ret = wl1251_acx_aid(wl, bss_conf->aid);
+			ret = wl1251_acx_aid(wl, vif->cfg.aid);
 			if (ret < 0)
 				goto out_sleep;
 		} else {
@@ -1190,17 +1177,17 @@ static void wl1251_op_bss_info_changed(struct ieee80211_hw *hw,
 	}
 
 	if (changed & BSS_CHANGED_ARP_FILTER) {
-		__be32 addr = bss_conf->arp_addr_list[0];
+		__be32 addr = vif->cfg.arp_addr_list[0];
 		WARN_ON(wl->bss_type != BSS_TYPE_STA_BSS);
 
-		enable = bss_conf->arp_addr_cnt == 1 && bss_conf->assoc;
+		enable = vif->cfg.arp_addr_cnt == 1 && vif->cfg.assoc;
 		ret = wl1251_acx_arp_ip_filter(wl, enable, addr);
 		if (ret < 0)
 			goto out_sleep;
 	}
 
 	if (changed & BSS_CHANGED_BEACON) {
-		beacon = ieee80211_beacon_get(hw, vif);
+		beacon = ieee80211_beacon_get(hw, vif, 0);
 		if (!beacon)
 			goto out_sleep;
 
@@ -1296,7 +1283,8 @@ static struct ieee80211_channel wl1251_channels[] = {
 };
 
 static int wl1251_op_conf_tx(struct ieee80211_hw *hw,
-			     struct ieee80211_vif *vif, u16 queue,
+			     struct ieee80211_vif *vif,
+			     unsigned int link_id, u16 queue,
 			     const struct ieee80211_tx_queue_params *params)
 {
 	enum wl1251_acx_ps_scheme ps_scheme;
@@ -1364,6 +1352,10 @@ static struct ieee80211_supported_band wl1251_band_2ghz = {
 };
 
 static const struct ieee80211_ops wl1251_ops = {
+	.add_chanctx = ieee80211_emulate_add_chanctx,
+	.remove_chanctx = ieee80211_emulate_remove_chanctx,
+	.change_chanctx = ieee80211_emulate_change_chanctx,
+	.switch_vif_chanctx = ieee80211_emulate_switch_vif_chanctx,
 	.start = wl1251_op_start,
 	.stop = wl1251_op_stop,
 	.add_interface = wl1251_op_add_interface,
@@ -1372,6 +1364,7 @@ static const struct ieee80211_ops wl1251_ops = {
 	.prepare_multicast = wl1251_op_prepare_multicast,
 	.configure_filter = wl1251_op_configure_filter,
 	.tx = wl1251_op_tx,
+	.wake_tx_queue = ieee80211_handle_wake_tx_queue,
 	.set_key = wl1251_op_set_key,
 	.hw_scan = wl1251_op_hw_scan,
 	.bss_info_changed = wl1251_op_bss_info_changed,
@@ -1534,6 +1527,12 @@ int wl1251_init_ieee80211(struct wl1251 *wl)
 	wl->hw->wiphy->interface_modes = BIT(NL80211_IFTYPE_STATION) |
 					 BIT(NL80211_IFTYPE_ADHOC);
 	wl->hw->wiphy->max_scan_ssids = 1;
+
+	/* We set max_scan_ie_len to a random value to make wpa_supplicant scans not
+	 * fail, as the driver will the ignore the extra passed IEs anyway
+	 */
+	wl->hw->wiphy->max_scan_ie_len = 512;
+
 	wl->hw->wiphy->bands[NL80211_BAND_2GHZ] = &wl1251_band_2ghz;
 
 	wl->hw->queues = 4;
@@ -1641,7 +1640,7 @@ struct ieee80211_hw *wl1251_alloc_hw(void)
 	wl->tx_mgmt_frm_rate = DEFAULT_HW_GEN_TX_RATE;
 	wl->tx_mgmt_frm_mod = DEFAULT_HW_GEN_MODULATION_TYPE;
 
-	wl->rx_descriptor = kmalloc(sizeof(*wl->rx_descriptor), GFP_KERNEL);
+	wl->rx_descriptor = kmalloc_obj(*wl->rx_descriptor);
 	if (!wl->rx_descriptor) {
 		wl1251_error("could not allocate memory for rx descriptor");
 		ieee80211_free_hw(hw);

@@ -60,9 +60,10 @@
  */
 #include <linux/interrupt.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/of_irq.h>
-#include <linux/of_address.h>
 #include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmapool.h>
 #include <linux/dmaengine.h>
@@ -154,16 +155,14 @@ static void fsl_re_cleanup_descs(struct fsl_re_chan *re_chan)
 	fsl_re_issue_pending(&re_chan->chan);
 }
 
-static void fsl_re_dequeue(unsigned long data)
+static void fsl_re_dequeue(struct tasklet_struct *t)
 {
-	struct fsl_re_chan *re_chan;
+	struct fsl_re_chan *re_chan = from_tasklet(re_chan, t, irqtask);
 	struct fsl_re_desc *desc, *_desc;
 	struct fsl_re_hw_desc *hwdesc;
 	unsigned long flags;
 	unsigned int count, oub_count;
 	int found;
-
-	re_chan = dev_get_drvdata((struct device *)data);
 
 	fsl_re_cleanup_descs(re_chan);
 
@@ -291,7 +290,7 @@ static struct fsl_re_desc *fsl_re_chan_alloc_desc(struct fsl_re_chan *re_chan,
 	spin_unlock_irqrestore(&re_chan->desc_lock, lock_flag);
 
 	if (!desc) {
-		desc = kzalloc(sizeof(*desc), GFP_NOWAIT);
+		desc = kzalloc_obj(*desc, GFP_NOWAIT);
 		if (!desc)
 			return NULL;
 
@@ -580,7 +579,7 @@ static int fsl_re_alloc_chan_resources(struct dma_chan *chan)
 
 	re_chan = container_of(chan, struct fsl_re_chan, chan);
 	for (i = 0; i < FSL_RE_MIN_DESCS; i++) {
-		desc = kzalloc(sizeof(*desc), GFP_KERNEL);
+		desc = kzalloc_obj(*desc);
 		if (!desc)
 			break;
 
@@ -671,7 +670,7 @@ static int fsl_re_chan_probe(struct platform_device *ofdev,
 	snprintf(chan->name, sizeof(chan->name), "re_jr%02d", q);
 
 	chandev = &chan_ofdev->dev;
-	tasklet_init(&chan->irqtask, fsl_re_dequeue, (unsigned long)chandev);
+	tasklet_setup(&chan->irqtask, fsl_re_dequeue);
 
 	ret = request_irq(chan->irq, fsl_re_isr, 0, chan->name, chandev);
 	if (ret) {
@@ -747,7 +746,6 @@ err_free:
 static int fsl_re_probe(struct platform_device *ofdev)
 {
 	struct fsl_re_drv_private *re_priv;
-	struct device_node *np;
 	struct device_node *child;
 	u32 off;
 	u8 ridx = 0;
@@ -824,11 +822,10 @@ static int fsl_re_probe(struct platform_device *ofdev)
 	dev_set_drvdata(dev, re_priv);
 
 	/* Parse Device tree to find out the total number of JQs present */
-	for_each_compatible_node(np, NULL, "fsl,raideng-v1.0-job-queue") {
+	for_each_compatible_node_scoped(np, NULL, "fsl,raideng-v1.0-job-queue") {
 		rc = of_property_read_u32(np, "reg", &off);
 		if (rc) {
 			dev_err(dev, "Reg property not found in JQ node\n");
-			of_node_put(np);
 			return -ENODEV;
 		}
 		/* Find out the Job Rings present under each JQ */
@@ -858,7 +855,7 @@ static void fsl_re_remove_chan(struct fsl_re_chan *chan)
 		      chan->oub_phys_addr);
 }
 
-static int fsl_re_remove(struct platform_device *ofdev)
+static void fsl_re_remove(struct platform_device *ofdev)
 {
 	struct fsl_re_drv_private *re_priv;
 	struct device *dev;
@@ -873,8 +870,6 @@ static int fsl_re_remove(struct platform_device *ofdev)
 
 	/* Unregister the driver */
 	dma_async_device_unregister(&re_priv->dma_dev);
-
-	return 0;
 }
 
 static const struct of_device_id fsl_re_ids[] = {

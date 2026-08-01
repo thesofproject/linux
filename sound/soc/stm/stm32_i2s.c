@@ -1,26 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  STM32 ALSA SoC Digital Audio Interface (I2S) driver.
  *
  * Copyright (C) 2017, STMicroelectronics - All Rights Reserved
  * Author(s): Olivier Moysan <olivier.moysan@st.com> for STMicroelectronics.
- *
- * License terms: GPL V2.0.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
- * details.
  */
 
+#include <linux/bitfield.h>
 #include <linux/clk.h>
+#include <linux/clk-provider.h>
 #include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/of_irq.h>
 #include <linux/of_platform.h>
+#include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/reset.h>
 #include <linux/spinlock.h>
@@ -37,6 +30,10 @@
 #define STM32_I2S_TXDR_REG	0X20
 #define STM32_I2S_RXDR_REG	0x30
 #define STM32_I2S_CGFR_REG	0X50
+#define STM32_I2S_HWCFGR_REG	0x3F0
+#define STM32_I2S_VERR_REG	0x3F4
+#define STM32_I2S_IPIDR_REG	0x3F8
+#define STM32_I2S_SIDR_REG	0x3FC
 
 /* Bit definition for SPI2S_CR1 register */
 #define I2S_CR1_SPE		BIT(0)
@@ -143,6 +140,23 @@
 #define I2S_CGFR_ODD		BIT(I2S_CGFR_ODD_SHIFT)
 #define I2S_CGFR_MCKOE		BIT(25)
 
+/* Registers below apply to I2S version 1.1 and more */
+
+/* Bit definition for SPI_HWCFGR register */
+#define I2S_HWCFGR_I2S_SUPPORT_MASK	GENMASK(15, 12)
+
+/* Bit definition for SPI_VERR register */
+#define I2S_VERR_MIN_MASK	GENMASK(3, 0)
+#define I2S_VERR_MAJ_MASK	GENMASK(7, 4)
+
+/* Bit definition for SPI_IPIDR register */
+#define I2S_IPIDR_ID_MASK	GENMASK(31, 0)
+
+/* Bit definition for SPI_SIDR register */
+#define I2S_SIDR_ID_MASK	GENMASK(31, 0)
+
+#define I2S_IPIDR_NUMBER	0x00130022
+
 enum i2s_master_mode {
 	I2S_MS_NOT_SET,
 	I2S_MS_MASTER,
@@ -179,35 +193,48 @@ enum i2s_datlen {
 	I2S_I2SMOD_DATLEN_32,
 };
 
-#define STM32_I2S_DAI_NAME_SIZE		20
 #define STM32_I2S_FIFO_SIZE		16
 
 #define STM32_I2S_IS_MASTER(x)		((x)->ms_flg == I2S_MS_MASTER)
 #define STM32_I2S_IS_SLAVE(x)		((x)->ms_flg == I2S_MS_SLAVE)
 
+#define STM32_I2S_NAME_LEN		32
+#define STM32_I2S_RATE_11K		11025
+#define STM32_I2S_MAX_SAMPLE_RATE_8K	192000
+#define STM32_I2S_MAX_SAMPLE_RATE_11K	176400
+#define STM32_I2S_CLK_RATE_TOLERANCE	1000 /* ppm */
+
 /**
- * @regmap_conf: I2S register map configuration pointer
- * @egmap: I2S register map pointer
+ * struct stm32_i2s_data - private data of I2S
+ * @conf: I2S configuration pointer
+ * @regmap: I2S register map pointer
  * @pdev: device data pointer
  * @dai_drv: DAI driver pointer
  * @dma_data_tx: dma configuration data for tx channel
  * @dma_data_rx: dma configuration data for tx channel
  * @substream: PCM substream data pointer
  * @i2sclk: kernel clock feeding the I2S clock generator
+ * @i2smclk: master clock from I2S mclk provider
  * @pclk: peripheral clock driving bus interface
  * @x8kclk: I2S parent clock for sampling frequencies multiple of 8kHz
  * @x11kclk: I2S parent clock for sampling frequencies multiple of 11kHz
  * @base:  mmio register base virtual address
  * @phys_addr: I2S registers physical base address
  * @lock_fd: lock to manage race conditions in full duplex mode
- * @dais_name: DAI name
+ * @irq_lock: prevent race condition with IRQ
  * @mclk_rate: master clock frequency (Hz)
  * @fmt: DAI protocol
+ * @divider: prescaler division ratio
+ * @div: prescaler div field
+ * @odd: prescaler odd field
+ * @i2s_clk_flg: flag set while exclusivity on I2S kernel clock is active
  * @refcount: keep count of opened streams on I2S
  * @ms_flg: master mode flag.
+ * @set_i2s_clk_rate: set I2S kernel clock rate
+ * @put_i2s_clk_rate: put I2S kernel clock rate
  */
 struct stm32_i2s_data {
-	const struct regmap_config *regmap_conf;
+	const struct stm32_i2s_conf *conf;
 	struct regmap *regmap;
 	struct platform_device *pdev;
 	struct snd_soc_dai_driver *dai_drv;
@@ -215,18 +242,344 @@ struct stm32_i2s_data {
 	struct snd_dmaengine_dai_dma_data dma_data_rx;
 	struct snd_pcm_substream *substream;
 	struct clk *i2sclk;
+	struct clk *i2smclk;
 	struct clk *pclk;
 	struct clk *x8kclk;
 	struct clk *x11kclk;
 	void __iomem *base;
 	dma_addr_t phys_addr;
 	spinlock_t lock_fd; /* Manage race conditions for full duplex */
-	char dais_name[STM32_I2S_DAI_NAME_SIZE];
+	spinlock_t irq_lock; /* used to prevent race condition with IRQ */
 	unsigned int mclk_rate;
 	unsigned int fmt;
+	unsigned int divider;
+	unsigned int div;
+	bool odd;
+	bool i2s_clk_flg;
 	int refcount;
 	int ms_flg;
+	int (*set_i2s_clk_rate)(struct stm32_i2s_data *i2s, unsigned int rate);
+	void (*put_i2s_clk_rate)(struct stm32_i2s_data *i2s);
 };
+
+/**
+ * struct stm32_i2s_conf - I2S configuration
+ * @regmap_conf: regmap configuration pointer
+ * @get_i2s_clk_parent: get parent clock of I2S kernel clock
+ */
+struct stm32_i2s_conf {
+	const struct regmap_config *regmap_conf;
+	int (*get_i2s_clk_parent)(struct stm32_i2s_data *i2s);
+};
+
+struct stm32_i2smclk_data {
+	struct clk_hw hw;
+	unsigned long freq;
+	struct stm32_i2s_data *i2s_data;
+};
+
+#define to_mclk_data(_hw) container_of(_hw, struct stm32_i2smclk_data, hw)
+
+static int stm32_i2s_get_parent_clk(struct stm32_i2s_data *i2s);
+
+static int stm32_i2s_calc_clk_div(struct stm32_i2s_data *i2s,
+				  unsigned long input_rate,
+				  unsigned long output_rate)
+{
+	unsigned int ratio, div, divider = 1;
+	bool odd;
+
+	ratio = DIV_ROUND_CLOSEST(input_rate, output_rate);
+
+	/* Check the parity of the divider */
+	odd = ratio & 0x1;
+
+	/* Compute the div prescaler */
+	div = ratio >> 1;
+
+	/* If div is 0 actual divider is 1 */
+	if (div) {
+		divider = ((2 * div) + odd);
+		dev_dbg(&i2s->pdev->dev, "Divider: 2*%d(div)+%d(odd) = %d\n",
+			div, odd, divider);
+	}
+
+	/* Division by three is not allowed by I2S prescaler */
+	if ((div == 1 && odd) || div > I2S_CGFR_I2SDIV_MAX) {
+		dev_err(&i2s->pdev->dev, "Wrong divider setting\n");
+		return -EINVAL;
+	}
+
+	if (input_rate % divider)
+		dev_dbg(&i2s->pdev->dev,
+			"Rate not accurate. requested (%ld), actual (%ld)\n",
+			output_rate, input_rate / divider);
+
+	i2s->div = div;
+	i2s->odd = odd;
+	i2s->divider = divider;
+
+	return 0;
+}
+
+static int stm32_i2s_set_clk_div(struct stm32_i2s_data *i2s)
+{
+	u32 cgfr, cgfr_mask;
+
+	cgfr = I2S_CGFR_I2SDIV_SET(i2s->div) | (i2s->odd << I2S_CGFR_ODD_SHIFT);
+	cgfr_mask = I2S_CGFR_I2SDIV_MASK | I2S_CGFR_ODD;
+
+	return regmap_update_bits(i2s->regmap, STM32_I2S_CGFR_REG,
+				  cgfr_mask, cgfr);
+}
+
+static bool stm32_i2s_rate_accurate(struct stm32_i2s_data *i2s,
+				    unsigned int max_rate, unsigned int rate)
+{
+	struct platform_device *pdev = i2s->pdev;
+	u64 delta, dividend;
+	int ratio;
+
+	if (!rate) {
+		dev_err(&pdev->dev, "Unexpected null rate\n");
+		return false;
+	}
+
+	ratio = DIV_ROUND_CLOSEST(max_rate, rate);
+	if (!ratio)
+		return false;
+
+	dividend = mul_u32_u32(1000000, abs(max_rate - (ratio * rate)));
+	delta = div_u64(dividend, max_rate);
+
+	if (delta <= STM32_I2S_CLK_RATE_TOLERANCE)
+		return true;
+
+	dev_dbg(&pdev->dev, "Rate [%u] not accurate\n", rate);
+
+	return false;
+}
+
+static int stm32_i2s_set_parent_clock(struct stm32_i2s_data *i2s,
+				      unsigned int rate)
+{
+	struct platform_device *pdev = i2s->pdev;
+	struct clk *parent_clk;
+	int ret;
+
+	if (!(rate % STM32_I2S_RATE_11K))
+		parent_clk = i2s->x11kclk;
+	else
+		parent_clk = i2s->x8kclk;
+
+	ret = clk_set_parent(i2s->i2sclk, parent_clk);
+	if (ret)
+		dev_err(&pdev->dev,
+			"Error %d setting i2sclk parent clock\n", ret);
+
+	return ret;
+}
+
+static void stm32_i2s_put_parent_rate(struct stm32_i2s_data *i2s)
+{
+	if (i2s->i2s_clk_flg) {
+		i2s->i2s_clk_flg = false;
+		clk_rate_exclusive_put(i2s->i2sclk);
+	}
+}
+
+static int stm32_i2s_set_parent_rate(struct stm32_i2s_data *i2s,
+				     unsigned int rate)
+{
+	struct platform_device *pdev = i2s->pdev;
+	unsigned int i2s_clk_rate, i2s_clk_max_rate, i2s_curr_rate, i2s_new_rate;
+	int ret, div;
+
+	/*
+	 * Set maximum expected kernel clock frequency
+	 * - mclk on:
+	 *   f_i2s_ck = MCKDIV * mclk-fs * fs
+	 *   Here typical 256 ratio is assumed for mclk-fs
+	 * - mclk off:
+	 *   f_i2s_ck = MCKDIV * FRL * fs
+	 *   Where FRL=[16,32], MCKDIV=[1..256]
+	 *   f_i2s_ck = i2s_clk_max_rate * 32 / 256
+	 */
+	if (!(rate % STM32_I2S_RATE_11K))
+		i2s_clk_max_rate = STM32_I2S_MAX_SAMPLE_RATE_11K * 256;
+	else
+		i2s_clk_max_rate = STM32_I2S_MAX_SAMPLE_RATE_8K * 256;
+
+	if (!i2s->i2smclk)
+		i2s_clk_max_rate /= 8;
+
+	/* Request exclusivity, as the clock may be shared by I2S instances */
+	clk_rate_exclusive_get(i2s->i2sclk);
+	i2s->i2s_clk_flg = true;
+
+	/*
+	 * Check current kernel clock rate. If it gives the expected accuracy
+	 * return immediately.
+	 */
+	i2s_curr_rate = clk_get_rate(i2s->i2sclk);
+	if (stm32_i2s_rate_accurate(i2s, i2s_clk_max_rate, i2s_curr_rate))
+		return 0;
+
+	/*
+	 * Otherwise try to set the maximum rate and check the new actual rate.
+	 * If the new rate does not give the expected accuracy, try to set
+	 * lower rates for the kernel clock.
+	 */
+	i2s_clk_rate = i2s_clk_max_rate;
+	div = 1;
+	do {
+		/* Check new rate accuracy. Return if ok */
+		i2s_new_rate = clk_round_rate(i2s->i2sclk, i2s_clk_rate);
+		if (stm32_i2s_rate_accurate(i2s, i2s_clk_rate, i2s_new_rate)) {
+			ret = clk_set_rate(i2s->i2sclk, i2s_clk_rate);
+			if (ret) {
+				dev_err(&pdev->dev, "Error %d setting i2s_clk_rate rate. %s",
+					ret, ret == -EBUSY ?
+					"Active stream rates may be in conflict\n" : "\n");
+				goto err;
+			}
+
+			return 0;
+		}
+
+		/* Try a lower frequency */
+		div++;
+		i2s_clk_rate = i2s_clk_max_rate / div;
+	} while (i2s_clk_rate > rate);
+
+	/* no accurate rate found */
+	dev_err(&pdev->dev, "Failed to find an accurate rate");
+
+err:
+	stm32_i2s_put_parent_rate(i2s);
+
+	return -EINVAL;
+}
+
+static int stm32_i2smclk_determine_rate(struct clk_hw *hw,
+					struct clk_rate_request *req)
+{
+	struct stm32_i2smclk_data *mclk = to_mclk_data(hw);
+	struct stm32_i2s_data *i2s = mclk->i2s_data;
+	int ret;
+
+	ret = stm32_i2s_calc_clk_div(i2s, req->best_parent_rate, req->rate);
+	if (ret)
+		return ret;
+
+	mclk->freq = req->best_parent_rate / i2s->divider;
+
+	req->rate = mclk->freq;
+
+	return 0;
+}
+
+static unsigned long stm32_i2smclk_recalc_rate(struct clk_hw *hw,
+					       unsigned long parent_rate)
+{
+	struct stm32_i2smclk_data *mclk = to_mclk_data(hw);
+
+	return mclk->freq;
+}
+
+static int stm32_i2smclk_set_rate(struct clk_hw *hw, unsigned long rate,
+				  unsigned long parent_rate)
+{
+	struct stm32_i2smclk_data *mclk = to_mclk_data(hw);
+	struct stm32_i2s_data *i2s = mclk->i2s_data;
+	int ret;
+
+	ret = stm32_i2s_calc_clk_div(i2s, parent_rate, rate);
+	if (ret)
+		return ret;
+
+	ret = stm32_i2s_set_clk_div(i2s);
+	if (ret)
+		return ret;
+
+	mclk->freq = rate;
+
+	return 0;
+}
+
+static int stm32_i2smclk_enable(struct clk_hw *hw)
+{
+	struct stm32_i2smclk_data *mclk = to_mclk_data(hw);
+	struct stm32_i2s_data *i2s = mclk->i2s_data;
+
+	dev_dbg(&i2s->pdev->dev, "Enable master clock\n");
+
+	return regmap_update_bits(i2s->regmap, STM32_I2S_CGFR_REG,
+				    I2S_CGFR_MCKOE, I2S_CGFR_MCKOE);
+}
+
+static void stm32_i2smclk_disable(struct clk_hw *hw)
+{
+	struct stm32_i2smclk_data *mclk = to_mclk_data(hw);
+	struct stm32_i2s_data *i2s = mclk->i2s_data;
+
+	dev_dbg(&i2s->pdev->dev, "Disable master clock\n");
+
+	regmap_update_bits(i2s->regmap, STM32_I2S_CGFR_REG, I2S_CGFR_MCKOE, 0);
+}
+
+static const struct clk_ops mclk_ops = {
+	.enable = stm32_i2smclk_enable,
+	.disable = stm32_i2smclk_disable,
+	.recalc_rate = stm32_i2smclk_recalc_rate,
+	.determine_rate = stm32_i2smclk_determine_rate,
+	.set_rate = stm32_i2smclk_set_rate,
+};
+
+static int stm32_i2s_add_mclk_provider(struct stm32_i2s_data *i2s)
+{
+	struct clk_hw *hw;
+	struct stm32_i2smclk_data *mclk;
+	struct device *dev = &i2s->pdev->dev;
+	const char *pname = __clk_get_name(i2s->i2sclk);
+	char *mclk_name, *p, *s = (char *)pname;
+	int ret, i = 0;
+
+	mclk = devm_kzalloc(dev, sizeof(*mclk), GFP_KERNEL);
+	if (!mclk)
+		return -ENOMEM;
+
+	mclk_name = devm_kcalloc(dev, sizeof(char),
+				 STM32_I2S_NAME_LEN, GFP_KERNEL);
+	if (!mclk_name)
+		return -ENOMEM;
+
+	/*
+	 * Forge mclk clock name from parent clock name and suffix.
+	 * String after "_" char is stripped in parent name.
+	 */
+	p = mclk_name;
+	while (*s && *s != '_' && (i < (STM32_I2S_NAME_LEN - 7))) {
+		*p++ = *s++;
+		i++;
+	}
+	strcat(p, "_mclk");
+
+	mclk->hw.init = CLK_HW_INIT(mclk_name, pname, &mclk_ops, 0);
+	mclk->i2s_data = i2s;
+	hw = &mclk->hw;
+
+	dev_dbg(dev, "Register master clock %s\n", mclk_name);
+	ret = devm_clk_hw_register(&i2s->pdev->dev, hw);
+	if (ret) {
+		dev_err(dev, "mclk register fails with error %d\n", ret);
+		return ret;
+	}
+	i2s->i2smclk = hw->clk;
+
+	/* register mclk provider */
+	return devm_of_clk_add_hw_provider(dev, of_clk_hw_simple_get, hw);
+}
 
 static irqreturn_t stm32_i2s_isr(int irq, void *devid)
 {
@@ -246,8 +599,8 @@ static irqreturn_t stm32_i2s_isr(int irq, void *devid)
 		return IRQ_NONE;
 	}
 
-	regmap_update_bits(i2s->regmap, STM32_I2S_IFCR_REG,
-			   I2S_IFCR_MASK, flags);
+	regmap_write_bits(i2s->regmap, STM32_I2S_IFCR_REG,
+			  I2S_IFCR_MASK, flags);
 
 	if (flags & I2S_SR_OVR) {
 		dev_dbg(&pdev->dev, "Overrun\n");
@@ -262,8 +615,10 @@ static irqreturn_t stm32_i2s_isr(int irq, void *devid)
 	if (flags & I2S_SR_TIFRE)
 		dev_dbg(&pdev->dev, "Frame error\n");
 
-	if (err)
-		snd_pcm_stop_xrun(i2s->substream);
+	scoped_guard(spinlock, &i2s->irq_lock) {
+		if (err && i2s->substream)
+			snd_pcm_stop_xrun(i2s->substream);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -276,10 +631,12 @@ static bool stm32_i2s_readable_reg(struct device *dev, unsigned int reg)
 	case STM32_I2S_CFG2_REG:
 	case STM32_I2S_IER_REG:
 	case STM32_I2S_SR_REG:
-	case STM32_I2S_IFCR_REG:
-	case STM32_I2S_TXDR_REG:
 	case STM32_I2S_RXDR_REG:
 	case STM32_I2S_CGFR_REG:
+	case STM32_I2S_HWCFGR_REG:
+	case STM32_I2S_VERR_REG:
+	case STM32_I2S_IPIDR_REG:
+	case STM32_I2S_SIDR_REG:
 		return true;
 	default:
 		return false;
@@ -289,7 +646,7 @@ static bool stm32_i2s_readable_reg(struct device *dev, unsigned int reg)
 static bool stm32_i2s_volatile_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
-	case STM32_I2S_TXDR_REG:
+	case STM32_I2S_SR_REG:
 	case STM32_I2S_RXDR_REG:
 		return true;
 	default:
@@ -367,16 +724,16 @@ static int stm32_i2s_set_dai_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
 	}
 
 	/* DAI clock master masks */
-	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	switch (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) {
+	case SND_SOC_DAIFMT_BC_FC:
 		i2s->ms_flg = I2S_MS_SLAVE;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_BP_FP:
 		i2s->ms_flg = I2S_MS_MASTER;
 		break;
 	default:
 		dev_err(cpu_dai->dev, "Unsupported mode %#x\n",
-			fmt & SND_SOC_DAIFMT_MASTER_MASK);
+			fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK);
 		return -EINVAL;
 	}
 
@@ -389,18 +746,50 @@ static int stm32_i2s_set_sysclk(struct snd_soc_dai *cpu_dai,
 				int clk_id, unsigned int freq, int dir)
 {
 	struct stm32_i2s_data *i2s = snd_soc_dai_get_drvdata(cpu_dai);
+	int ret = 0;
 
-	dev_dbg(cpu_dai->dev, "I2S MCLK frequency is %uHz\n", freq);
+	dev_dbg(cpu_dai->dev, "I2S MCLK frequency is %uHz. mode: %s, dir: %s\n",
+		freq, STM32_I2S_IS_MASTER(i2s) ? "master" : "slave",
+		dir ? "output" : "input");
 
-	if ((dir == SND_SOC_CLOCK_OUT) && STM32_I2S_IS_MASTER(i2s)) {
-		i2s->mclk_rate = freq;
+	/* MCLK generation is available only in master mode */
+	if (dir == SND_SOC_CLOCK_OUT && STM32_I2S_IS_MASTER(i2s)) {
+		if (!i2s->i2smclk) {
+			dev_dbg(cpu_dai->dev, "No MCLK registered\n");
+			return 0;
+		}
 
-		/* Enable master clock if master mode and mclk-fs are set */
-		return regmap_update_bits(i2s->regmap, STM32_I2S_CGFR_REG,
-					  I2S_CGFR_MCKOE, I2S_CGFR_MCKOE);
+		/* Assume shutdown if requested frequency is 0Hz */
+		if (!freq) {
+			/* Release mclk rate only if rate was actually set */
+			if (i2s->mclk_rate) {
+				clk_rate_exclusive_put(i2s->i2smclk);
+				i2s->mclk_rate = 0;
+			}
+
+			if (i2s->put_i2s_clk_rate)
+				i2s->put_i2s_clk_rate(i2s);
+
+			return regmap_update_bits(i2s->regmap,
+						  STM32_I2S_CGFR_REG,
+						  I2S_CGFR_MCKOE, 0);
+		}
+		/* If master clock is used, set parent clock now */
+		ret = i2s->set_i2s_clk_rate(i2s, freq);
+		if (ret)
+			return ret;
+		ret = clk_set_rate_exclusive(i2s->i2smclk, freq);
+		if (ret) {
+			dev_err(cpu_dai->dev, "Could not set mclk rate\n");
+			return ret;
+		}
+		ret = regmap_update_bits(i2s->regmap, STM32_I2S_CGFR_REG,
+					 I2S_CGFR_MCKOE, I2S_CGFR_MCKOE);
+		if (!ret)
+			i2s->mclk_rate = freq;
 	}
 
-	return 0;
+	return ret;
 }
 
 static int stm32_i2s_configure_clock(struct snd_soc_dai *cpu_dai,
@@ -408,16 +797,16 @@ static int stm32_i2s_configure_clock(struct snd_soc_dai *cpu_dai,
 {
 	struct stm32_i2s_data *i2s = snd_soc_dai_get_drvdata(cpu_dai);
 	unsigned long i2s_clock_rate;
-	unsigned int tmp, div, real_div, nb_bits, frame_len;
+	unsigned int nb_bits, frame_len;
 	unsigned int rate = params_rate(params);
+	u32 cgfr;
 	int ret;
-	u32 cgfr, cgfr_mask;
-	bool odd;
 
-	if (!(rate % 11025))
-		clk_set_parent(i2s->i2sclk, i2s->x11kclk);
-	else
-		clk_set_parent(i2s->i2sclk, i2s->x8kclk);
+	if (!i2s->mclk_rate) {
+		ret = i2s->set_i2s_clk_rate(i2s, rate);
+		if (ret)
+			return ret;
+	}
 	i2s_clock_rate = clk_get_rate(i2s->i2sclk);
 
 	/*
@@ -433,7 +822,10 @@ static int stm32_i2s_configure_clock(struct snd_soc_dai *cpu_dai,
 	 *   dsp mode : div = i2s_clk / (nb_bits x ws)
 	 */
 	if (i2s->mclk_rate) {
-		tmp = DIV_ROUND_CLOSEST(i2s_clock_rate, i2s->mclk_rate);
+		ret = stm32_i2s_calc_clk_div(i2s, i2s_clock_rate,
+					     i2s->mclk_rate);
+		if (ret)
+			return ret;
 	} else {
 		frame_len = 32;
 		if ((i2s->fmt & SND_SOC_DAIFMT_FORMAT_MASK) ==
@@ -445,35 +837,14 @@ static int stm32_i2s_configure_clock(struct snd_soc_dai *cpu_dai,
 		if (ret < 0)
 			return ret;
 
-		nb_bits = frame_len * ((cgfr & I2S_CGFR_CHLEN) + 1);
-		tmp = DIV_ROUND_CLOSEST(i2s_clock_rate, (nb_bits * rate));
+		nb_bits = frame_len * (FIELD_GET(I2S_CGFR_CHLEN, cgfr) + 1);
+		ret = stm32_i2s_calc_clk_div(i2s, i2s_clock_rate,
+					     (nb_bits * rate));
+		if (ret)
+			return ret;
 	}
 
-	/* Check the parity of the divider */
-	odd = tmp & 0x1;
-
-	/* Compute the div prescaler */
-	div = tmp >> 1;
-
-	cgfr = I2S_CGFR_I2SDIV_SET(div) | (odd << I2S_CGFR_ODD_SHIFT);
-	cgfr_mask = I2S_CGFR_I2SDIV_MASK | I2S_CGFR_ODD;
-
-	real_div = ((2 * div) + odd);
-	dev_dbg(cpu_dai->dev, "I2S clk: %ld, SCLK: %d\n",
-		i2s_clock_rate, rate);
-	dev_dbg(cpu_dai->dev, "Divider: 2*%d(div)+%d(odd) = %d\n",
-		div, odd, real_div);
-
-	if (((div == 1) && odd) || (div > I2S_CGFR_I2SDIV_MAX)) {
-		dev_err(cpu_dai->dev, "Wrong divider setting\n");
-		return -EINVAL;
-	}
-
-	if (!div && !odd)
-		dev_warn(cpu_dai->dev, "real divider forced to 1\n");
-
-	ret = regmap_update_bits(i2s->regmap, STM32_I2S_CGFR_REG,
-				 cgfr_mask, cgfr);
+	ret = stm32_i2s_set_clk_div(i2s);
 	if (ret < 0)
 		return ret;
 
@@ -488,20 +859,14 @@ static int stm32_i2s_configure(struct snd_soc_dai *cpu_dai,
 {
 	struct stm32_i2s_data *i2s = snd_soc_dai_get_drvdata(cpu_dai);
 	int format = params_width(params);
-	u32 cfgr, cfgr_mask, cfg1, cfg1_mask;
+	u32 cfgr, cfgr_mask, cfg1;
 	unsigned int fthlv;
 	int ret;
-
-	if ((params_channels(params) == 1) &&
-	    ((i2s->fmt & SND_SOC_DAIFMT_FORMAT_MASK) != SND_SOC_DAIFMT_DSP_A)) {
-		dev_err(cpu_dai->dev, "Mono mode supported only by DSP_A\n");
-		return -EINVAL;
-	}
 
 	switch (format) {
 	case 16:
 		cfgr = I2S_CGFR_DATLEN_SET(I2S_I2SMOD_DATLEN_16);
-		cfgr_mask = I2S_CGFR_DATLEN_MASK;
+		cfgr_mask = I2S_CGFR_DATLEN_MASK | I2S_CGFR_CHLEN;
 		break;
 	case 32:
 		cfgr = I2S_CGFR_DATLEN_SET(I2S_I2SMOD_DATLEN_32) |
@@ -529,30 +894,34 @@ static int stm32_i2s_configure(struct snd_soc_dai *cpu_dai,
 	if (ret < 0)
 		return ret;
 
-	cfg1 = I2S_CFG1_RXDMAEN | I2S_CFG1_TXDMAEN;
-	cfg1_mask = cfg1;
-
 	fthlv = STM32_I2S_FIFO_SIZE * I2S_FIFO_TH_ONE_QUARTER / 4;
-	cfg1 |= I2S_CFG1_FTHVL_SET(fthlv - 1);
-	cfg1_mask |= I2S_CFG1_FTHVL_MASK;
+	cfg1 = I2S_CFG1_FTHVL_SET(fthlv - 1);
 
 	return regmap_update_bits(i2s->regmap, STM32_I2S_CFG1_REG,
-				  cfg1_mask, cfg1);
+				  I2S_CFG1_FTHVL_MASK, cfg1);
 }
 
 static int stm32_i2s_startup(struct snd_pcm_substream *substream,
 			     struct snd_soc_dai *cpu_dai)
 {
 	struct stm32_i2s_data *i2s = snd_soc_dai_get_drvdata(cpu_dai);
+	int ret;
 
-	i2s->substream = substream;
+	scoped_guard(spinlock_irqsave, &i2s->irq_lock)
+		i2s->substream = substream;
 
-	spin_lock(&i2s->lock_fd);
-	i2s->refcount++;
-	spin_unlock(&i2s->lock_fd);
+	if ((i2s->fmt & SND_SOC_DAIFMT_FORMAT_MASK) != SND_SOC_DAIFMT_DSP_A)
+		snd_pcm_hw_constraint_single(substream->runtime,
+					     SNDRV_PCM_HW_PARAM_CHANNELS, 2);
 
-	return regmap_update_bits(i2s->regmap, STM32_I2S_IFCR_REG,
-				  I2S_IFCR_MASK, I2S_IFCR_MASK);
+	ret = clk_prepare_enable(i2s->i2sclk);
+	if (ret < 0) {
+		dev_err(cpu_dai->dev, "Failed to enable clock: %d\n", ret);
+		return ret;
+	}
+
+	return regmap_write_bits(i2s->regmap, STM32_I2S_IFCR_REG,
+				 I2S_IFCR_MASK, I2S_IFCR_MASK);
 }
 
 static int stm32_i2s_hw_params(struct snd_pcm_substream *substream,
@@ -587,7 +956,12 @@ static int stm32_i2s_trigger(struct snd_pcm_substream *substream, int cmd,
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 		/* Enable i2s */
-		dev_dbg(cpu_dai->dev, "start I2S\n");
+		dev_dbg(cpu_dai->dev, "start I2S %s\n",
+			snd_pcm_direction_name(substream->stream));
+
+		cfg1_mask = I2S_CFG1_RXDMAEN | I2S_CFG1_TXDMAEN;
+		regmap_update_bits(i2s->regmap, STM32_I2S_CFG1_REG,
+				   cfg1_mask, cfg1_mask);
 
 		ret = regmap_update_bits(i2s->regmap, STM32_I2S_CR1_REG,
 					 I2S_CR1_SPE, I2S_CR1_SPE);
@@ -596,27 +970,28 @@ static int stm32_i2s_trigger(struct snd_pcm_substream *substream, int cmd,
 			return ret;
 		}
 
-		ret = regmap_update_bits(i2s->regmap, STM32_I2S_CR1_REG,
-					 I2S_CR1_CSTART, I2S_CR1_CSTART);
+		ret = regmap_write_bits(i2s->regmap, STM32_I2S_CR1_REG,
+					I2S_CR1_CSTART, I2S_CR1_CSTART);
 		if (ret < 0) {
 			dev_err(cpu_dai->dev, "Error %d starting I2S\n", ret);
 			return ret;
 		}
 
-		regmap_update_bits(i2s->regmap, STM32_I2S_IFCR_REG,
-				   I2S_IFCR_MASK, I2S_IFCR_MASK);
+		regmap_write_bits(i2s->regmap, STM32_I2S_IFCR_REG,
+				  I2S_IFCR_MASK, I2S_IFCR_MASK);
 
-		if (playback_flg) {
-			ier = I2S_IER_UDRIE;
-		} else {
-			ier = I2S_IER_OVRIE;
+		scoped_guard(spinlock, &i2s->lock_fd) {
+			i2s->refcount++;
+			if (playback_flg) {
+				ier = I2S_IER_UDRIE;
+			} else {
+				ier = I2S_IER_OVRIE;
 
-			spin_lock(&i2s->lock_fd);
-			if (i2s->refcount == 1)
-				/* dummy write to trigger capture */
-				regmap_write(i2s->regmap,
-					     STM32_I2S_TXDR_REG, 0);
-			spin_unlock(&i2s->lock_fd);
+				if (STM32_I2S_IS_MASTER(i2s) && i2s->refcount == 1)
+					/* dummy write to gate bus clocks */
+					regmap_write(i2s->regmap,
+						     STM32_I2S_TXDR_REG, 0);
+			}
 		}
 
 		if (STM32_I2S_IS_SLAVE(i2s))
@@ -627,6 +1002,9 @@ static int stm32_i2s_trigger(struct snd_pcm_substream *substream, int cmd,
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		dev_dbg(cpu_dai->dev, "stop I2S %s\n",
+			snd_pcm_direction_name(substream->stream));
+
 		if (playback_flg)
 			regmap_update_bits(i2s->regmap, STM32_I2S_IER_REG,
 					   I2S_IER_UDRIE,
@@ -636,21 +1014,17 @@ static int stm32_i2s_trigger(struct snd_pcm_substream *substream, int cmd,
 					   I2S_IER_OVRIE,
 					   (unsigned int)~I2S_IER_OVRIE);
 
-		spin_lock(&i2s->lock_fd);
-		i2s->refcount--;
-		if (i2s->refcount) {
-			spin_unlock(&i2s->lock_fd);
-			break;
-		}
-		spin_unlock(&i2s->lock_fd);
+		scoped_guard(spinlock, &i2s->lock_fd) {
+			i2s->refcount--;
+			if (i2s->refcount)
+				return 0;
 
-		dev_dbg(cpu_dai->dev, "stop I2S\n");
-
-		ret = regmap_update_bits(i2s->regmap, STM32_I2S_CR1_REG,
-					 I2S_CR1_SPE, 0);
-		if (ret < 0) {
-			dev_err(cpu_dai->dev, "Error %d disabling I2S\n", ret);
-			return ret;
+			ret = regmap_update_bits(i2s->regmap, STM32_I2S_CR1_REG,
+						 I2S_CR1_SPE, 0);
+			if (ret < 0) {
+				dev_err(cpu_dai->dev, "Error %d disabling I2S\n", ret);
+				return ret;
+			}
 		}
 
 		cfg1_mask = I2S_CFG1_RXDMAEN | I2S_CFG1_TXDMAEN;
@@ -669,10 +1043,18 @@ static void stm32_i2s_shutdown(struct snd_pcm_substream *substream,
 {
 	struct stm32_i2s_data *i2s = snd_soc_dai_get_drvdata(cpu_dai);
 
-	i2s->substream = NULL;
+	clk_disable_unprepare(i2s->i2sclk);
 
-	regmap_update_bits(i2s->regmap, STM32_I2S_CGFR_REG,
-			   I2S_CGFR_MCKOE, (unsigned int)~I2S_CGFR_MCKOE);
+	/*
+	 * Release kernel clock if following conditions are fulfilled
+	 * - Master clock is not used. Kernel clock won't be released trough sysclk
+	 * - Put handler is defined. Involve that clock is managed exclusively
+	 */
+	if (!i2s->i2smclk && i2s->put_i2s_clk_rate)
+		i2s->put_i2s_clk_rate(i2s);
+
+	scoped_guard(spinlock_irqsave, &i2s->irq_lock)
+		i2s->substream = NULL;
 }
 
 static int stm32_i2s_dai_probe(struct snd_soc_dai *cpu_dai)
@@ -698,14 +1080,17 @@ static const struct regmap_config stm32_h7_i2s_regmap_conf = {
 	.reg_bits = 32,
 	.reg_stride = 4,
 	.val_bits = 32,
-	.max_register = STM32_I2S_CGFR_REG,
+	.max_register = STM32_I2S_SIDR_REG,
 	.readable_reg = stm32_i2s_readable_reg,
 	.volatile_reg = stm32_i2s_volatile_reg,
 	.writeable_reg = stm32_i2s_writeable_reg,
+	.num_reg_defaults_raw = STM32_I2S_SIDR_REG / sizeof(u32) + 1,
 	.fast_io = true,
+	.cache_type = REGCACHE_FLAT,
 };
 
 static const struct snd_soc_dai_ops stm32_i2s_pcm_dai_ops = {
+	.probe		= stm32_i2s_dai_probe,
 	.set_sysclk	= stm32_i2s_set_sysclk,
 	.set_fmt	= stm32_i2s_set_dai_fmt,
 	.startup	= stm32_i2s_startup,
@@ -717,7 +1102,8 @@ static const struct snd_soc_dai_ops stm32_i2s_pcm_dai_ops = {
 static const struct snd_pcm_hardware stm32_i2s_pcm_hw = {
 	.info = SNDRV_PCM_INFO_INTERLEAVED | SNDRV_PCM_INFO_MMAP,
 	.buffer_bytes_max = 8 * PAGE_SIZE,
-	.period_bytes_max = 2048,
+	.period_bytes_min = 1024,
+	.period_bytes_max = 4 * PAGE_SIZE,
 	.periods_min = 2,
 	.periods_max = 8,
 };
@@ -730,6 +1116,7 @@ static const struct snd_dmaengine_pcm_config stm32_i2s_pcm_config = {
 
 static const struct snd_soc_component_driver stm32_i2s_component = {
 	.name = "stm32-i2s",
+	.legacy_dai_naming = 1,
 };
 
 static void stm32_i2s_dai_init(struct snd_soc_pcm_stream *stream,
@@ -753,12 +1140,7 @@ static int stm32_i2s_dais_init(struct platform_device *pdev,
 	if (!dai_ptr)
 		return -ENOMEM;
 
-	snprintf(i2s->dais_name, STM32_I2S_DAI_NAME_SIZE,
-		 "%s", dev_name(&pdev->dev));
-
-	dai_ptr->probe = stm32_i2s_dai_probe;
 	dai_ptr->ops = &stm32_i2s_pcm_dai_ops;
-	dai_ptr->name = i2s->dais_name;
 	dai_ptr->id = 1;
 	stm32_i2s_dai_init(&dai_ptr->playback, "playback");
 	stm32_i2s_dai_init(&dai_ptr->capture, "capture");
@@ -767,19 +1149,40 @@ static int stm32_i2s_dais_init(struct platform_device *pdev,
 	return 0;
 }
 
+static const struct stm32_i2s_conf stm32_i2s_conf_h7 = {
+	.regmap_conf = &stm32_h7_i2s_regmap_conf,
+	.get_i2s_clk_parent = stm32_i2s_get_parent_clk,
+};
+
+static const struct stm32_i2s_conf stm32_i2s_conf_mp25 = {
+	.regmap_conf = &stm32_h7_i2s_regmap_conf
+};
+
 static const struct of_device_id stm32_i2s_ids[] = {
-	{
-		.compatible = "st,stm32h7-i2s",
-		.data = &stm32_h7_i2s_regmap_conf
-	},
+	{ .compatible = "st,stm32h7-i2s", .data = &stm32_i2s_conf_h7 },
+	{ .compatible = "st,stm32mp25-i2s", .data = &stm32_i2s_conf_mp25 },
 	{},
 };
+
+static int stm32_i2s_get_parent_clk(struct stm32_i2s_data *i2s)
+{
+	struct device *dev = &i2s->pdev->dev;
+
+	i2s->x8kclk = devm_clk_get(dev, "x8k");
+	if (IS_ERR(i2s->x8kclk))
+		return dev_err_probe(dev, PTR_ERR(i2s->x8kclk), "Cannot get x8k parent clock\n");
+
+	i2s->x11kclk = devm_clk_get(dev, "x11k");
+	if (IS_ERR(i2s->x11kclk))
+		return dev_err_probe(dev, PTR_ERR(i2s->x11kclk), "Cannot get x11k parent clock\n");
+
+	return 0;
+}
 
 static int stm32_i2s_parse_dt(struct platform_device *pdev,
 			      struct stm32_i2s_data *i2s)
 {
 	struct device_node *np = pdev->dev.of_node;
-	const struct of_device_id *of_id;
 	struct reset_control *rst;
 	struct resource *res;
 	int irq, ret;
@@ -787,14 +1190,11 @@ static int stm32_i2s_parse_dt(struct platform_device *pdev,
 	if (!np)
 		return -ENODEV;
 
-	of_id = of_match_device(stm32_i2s_ids, &pdev->dev);
-	if (of_id)
-		i2s->regmap_conf = (const struct regmap_config *)of_id->data;
-	else
+	i2s->conf = device_get_match_data(&pdev->dev);
+	if (!i2s->conf)
 		return -EINVAL;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	i2s->base = devm_ioremap_resource(&pdev->dev, res);
+	i2s->base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(i2s->base))
 		return PTR_ERR(i2s->base);
 
@@ -802,37 +1202,41 @@ static int stm32_i2s_parse_dt(struct platform_device *pdev,
 
 	/* Get clocks */
 	i2s->pclk = devm_clk_get(&pdev->dev, "pclk");
-	if (IS_ERR(i2s->pclk)) {
-		dev_err(&pdev->dev, "Could not get pclk\n");
-		return PTR_ERR(i2s->pclk);
-	}
+	if (IS_ERR(i2s->pclk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(i2s->pclk),
+				     "Could not get pclk\n");
 
 	i2s->i2sclk = devm_clk_get(&pdev->dev, "i2sclk");
-	if (IS_ERR(i2s->i2sclk)) {
-		dev_err(&pdev->dev, "Could not get i2sclk\n");
-		return PTR_ERR(i2s->i2sclk);
+	if (IS_ERR(i2s->i2sclk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(i2s->i2sclk),
+				     "Could not get i2sclk\n");
+
+	if (i2s->conf->get_i2s_clk_parent) {
+		i2s->set_i2s_clk_rate = stm32_i2s_set_parent_clock;
+	} else {
+		i2s->set_i2s_clk_rate = stm32_i2s_set_parent_rate;
+		i2s->put_i2s_clk_rate = stm32_i2s_put_parent_rate;
 	}
 
-	i2s->x8kclk = devm_clk_get(&pdev->dev, "x8k");
-	if (IS_ERR(i2s->x8kclk)) {
-		dev_err(&pdev->dev, "missing x8k parent clock\n");
-		return PTR_ERR(i2s->x8kclk);
+	if (i2s->conf->get_i2s_clk_parent) {
+		ret = i2s->conf->get_i2s_clk_parent(i2s);
+		if (ret)
+			return ret;
 	}
 
-	i2s->x11kclk = devm_clk_get(&pdev->dev, "x11k");
-	if (IS_ERR(i2s->x11kclk)) {
-		dev_err(&pdev->dev, "missing x11k parent clock\n");
-		return PTR_ERR(i2s->x11kclk);
+	/* Register mclk provider if requested */
+	if (of_property_present(np, "#clock-cells")) {
+		ret = stm32_i2s_add_mclk_provider(i2s);
+		if (ret < 0)
+			return ret;
 	}
 
 	/* Get irqs */
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "no irq for node %s\n", pdev->name);
-		return -ENOENT;
-	}
+	if (irq < 0)
+		return irq;
 
-	ret = devm_request_irq(&pdev->dev, irq, stm32_i2s_isr, IRQF_ONESHOT,
+	ret = devm_request_irq(&pdev->dev, irq, stm32_i2s_isr, 0,
 			       dev_name(&pdev->dev), i2s);
 	if (ret) {
 		dev_err(&pdev->dev, "irq request returned %d\n", ret);
@@ -840,99 +1244,136 @@ static int stm32_i2s_parse_dt(struct platform_device *pdev,
 	}
 
 	/* Reset */
-	rst = devm_reset_control_get_exclusive(&pdev->dev, NULL);
-	if (!IS_ERR(rst)) {
-		reset_control_assert(rst);
-		udelay(2);
-		reset_control_deassert(rst);
-	}
+	rst = devm_reset_control_get_optional_exclusive(&pdev->dev, NULL);
+	if (IS_ERR(rst))
+		return dev_err_probe(&pdev->dev, PTR_ERR(rst),
+				     "Reset controller error\n");
+
+	reset_control_assert(rst);
+	udelay(2);
+	reset_control_deassert(rst);
 
 	return 0;
+}
+
+static void stm32_i2s_remove(struct platform_device *pdev)
+{
+	snd_dmaengine_pcm_unregister(&pdev->dev);
+	snd_soc_unregister_component(&pdev->dev);
+	pm_runtime_disable(&pdev->dev);
 }
 
 static int stm32_i2s_probe(struct platform_device *pdev)
 {
 	struct stm32_i2s_data *i2s;
+	u32 val;
 	int ret;
 
 	i2s = devm_kzalloc(&pdev->dev, sizeof(*i2s), GFP_KERNEL);
 	if (!i2s)
 		return -ENOMEM;
 
-	ret = stm32_i2s_parse_dt(pdev, i2s);
-	if (ret)
-		return ret;
-
 	i2s->pdev = pdev;
 	i2s->ms_flg = I2S_MS_NOT_SET;
 	spin_lock_init(&i2s->lock_fd);
+	spin_lock_init(&i2s->irq_lock);
 	platform_set_drvdata(pdev, i2s);
+
+	ret = stm32_i2s_parse_dt(pdev, i2s);
+	if (ret)
+		return ret;
 
 	ret = stm32_i2s_dais_init(pdev, i2s);
 	if (ret)
 		return ret;
 
-	i2s->regmap = devm_regmap_init_mmio(&pdev->dev, i2s->base,
-					    i2s->regmap_conf);
-	if (IS_ERR(i2s->regmap)) {
-		dev_err(&pdev->dev, "regmap init failed\n");
-		return PTR_ERR(i2s->regmap);
-	}
+	i2s->regmap = devm_regmap_init_mmio_clk(&pdev->dev, "pclk",
+						i2s->base, i2s->conf->regmap_conf);
+	if (IS_ERR(i2s->regmap))
+		return dev_err_probe(&pdev->dev, PTR_ERR(i2s->regmap),
+				     "Regmap init error\n");
 
-	ret = clk_prepare_enable(i2s->pclk);
+	ret = snd_dmaengine_pcm_register(&pdev->dev, &stm32_i2s_pcm_config, 0);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret, "PCM DMA register error\n");
+
+	ret = snd_soc_register_component(&pdev->dev, &stm32_i2s_component,
+					 i2s->dai_drv, 1);
 	if (ret) {
-		dev_err(&pdev->dev, "Enable pclk failed: %d\n", ret);
+		snd_dmaengine_pcm_unregister(&pdev->dev);
 		return ret;
 	}
-
-	ret = clk_prepare_enable(i2s->i2sclk);
-	if (ret) {
-		dev_err(&pdev->dev, "Enable i2sclk failed: %d\n", ret);
-		goto err_pclk_disable;
-	}
-
-	ret = devm_snd_soc_register_component(&pdev->dev, &stm32_i2s_component,
-					      i2s->dai_drv, 1);
-	if (ret)
-		goto err_clocks_disable;
-
-	ret = devm_snd_dmaengine_pcm_register(&pdev->dev,
-					      &stm32_i2s_pcm_config, 0);
-	if (ret)
-		goto err_clocks_disable;
 
 	/* Set SPI/I2S in i2s mode */
 	ret = regmap_update_bits(i2s->regmap, STM32_I2S_CGFR_REG,
 				 I2S_CGFR_I2SMOD, I2S_CGFR_I2SMOD);
 	if (ret)
-		goto err_clocks_disable;
+		goto error;
+
+	ret = regmap_read(i2s->regmap, STM32_I2S_IPIDR_REG, &val);
+	if (ret)
+		goto error;
+
+	if (val == I2S_IPIDR_NUMBER) {
+		ret = regmap_read(i2s->regmap, STM32_I2S_HWCFGR_REG, &val);
+		if (ret)
+			goto error;
+
+		if (!FIELD_GET(I2S_HWCFGR_I2S_SUPPORT_MASK, val)) {
+			dev_err(&pdev->dev,
+				"Device does not support i2s mode\n");
+			ret = -EPERM;
+			goto error;
+		}
+
+		ret = regmap_read(i2s->regmap, STM32_I2S_VERR_REG, &val);
+		if (ret)
+			goto error;
+
+		dev_dbg(&pdev->dev, "I2S version: %lu.%lu registered\n",
+			FIELD_GET(I2S_VERR_MAJ_MASK, val),
+			FIELD_GET(I2S_VERR_MIN_MASK, val));
+	}
+
+	pm_runtime_enable(&pdev->dev);
 
 	return ret;
 
-err_clocks_disable:
-	clk_disable_unprepare(i2s->i2sclk);
-err_pclk_disable:
-	clk_disable_unprepare(i2s->pclk);
+error:
+	stm32_i2s_remove(pdev);
 
 	return ret;
 }
 
-static int stm32_i2s_remove(struct platform_device *pdev)
-{
-	struct stm32_i2s_data *i2s = platform_get_drvdata(pdev);
+MODULE_DEVICE_TABLE(of, stm32_i2s_ids);
 
-	clk_disable_unprepare(i2s->i2sclk);
-	clk_disable_unprepare(i2s->pclk);
+static int stm32_i2s_suspend(struct device *dev)
+{
+	struct stm32_i2s_data *i2s = dev_get_drvdata(dev);
+
+	regcache_cache_only(i2s->regmap, true);
+	regcache_mark_dirty(i2s->regmap);
 
 	return 0;
 }
 
-MODULE_DEVICE_TABLE(of, stm32_i2s_ids);
+static int stm32_i2s_resume(struct device *dev)
+{
+	struct stm32_i2s_data *i2s = dev_get_drvdata(dev);
+
+	regcache_cache_only(i2s->regmap, false);
+	return regcache_sync(i2s->regmap);
+}
+
+static const struct dev_pm_ops stm32_i2s_pm_ops = {
+	SYSTEM_SLEEP_PM_OPS(stm32_i2s_suspend, stm32_i2s_resume)
+};
 
 static struct platform_driver stm32_i2s_driver = {
 	.driver = {
 		.name = "st,stm32-i2s",
 		.of_match_table = stm32_i2s_ids,
+		.pm = pm_ptr(&stm32_i2s_pm_ops),
 	},
 	.probe = stm32_i2s_probe,
 	.remove = stm32_i2s_remove,

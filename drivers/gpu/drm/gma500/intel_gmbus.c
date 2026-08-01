@@ -26,13 +26,16 @@
  *	Eric Anholt <eric@anholt.net>
  *	Chris Wilson <chris@chris-wilson.co.uk>
  */
-#include <linux/module.h>
-#include <linux/i2c.h>
+
+#include <linux/delay.h>
 #include <linux/i2c-algo-bit.h>
-#include <drm/drmP.h>
-#include "psb_intel_drv.h"
-#include <drm/gma_drm.h>
+#include <linux/i2c.h>
+#include <linux/module.h>
+
+#include <drm/drm_print.h>
+
 #include "psb_drv.h"
+#include "psb_intel_drv.h"
 #include "psb_intel_reg.h"
 
 #define _wait_for(COND, MS, W) ({ \
@@ -43,13 +46,13 @@
 			ret__ = -ETIMEDOUT;				\
 			break;						\
 		}							\
-		if (W && !(in_atomic() || in_dbg_master())) msleep(W);	\
+		if (W && !(in_dbg_master()))				\
+			msleep(W);					\
 	}								\
 	ret__;								\
 })
 
 #define wait_for(COND, MS) _wait_for(COND, MS, 1)
-#define wait_for_atomic(COND, MS) _wait_for(COND, MS, 0)
 
 #define GMBUS_REG_READ(reg) ioread32(dev_priv->gmbus_reg + (reg))
 #define GMBUS_REG_WRITE(reg, val) iowrite32((val), dev_priv->gmbus_reg + (reg))
@@ -74,7 +77,7 @@ struct intel_gpio {
 void
 gma_intel_i2c_reset(struct drm_device *dev)
 {
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	GMBUS_REG_WRITE(GMBUS0, 0);
 }
 
@@ -184,7 +187,7 @@ intel_gpio_create(struct drm_psb_private *dev_priv, u32 pin)
 	if (pin >= ARRAY_SIZE(map_pin_to_reg) || !map_pin_to_reg[pin])
 		return NULL;
 
-	gpio = kzalloc(sizeof(struct intel_gpio), GFP_KERNEL);
+	gpio = kzalloc_obj(struct intel_gpio);
 	if (gpio == NULL)
 		return NULL;
 
@@ -195,7 +198,7 @@ intel_gpio_create(struct drm_psb_private *dev_priv, u32 pin)
 		 "gma500 GPIO%c", "?BACDE?F"[pin]);
 	gpio->adapter.owner = THIS_MODULE;
 	gpio->adapter.algo_data	= &gpio->algo;
-	gpio->adapter.dev.parent = &dev_priv->dev->pdev->dev;
+	gpio->adapter.dev.parent = dev_priv->dev.dev;
 	gpio->algo.setsda = set_data;
 	gpio->algo.setscl = set_clock;
 	gpio->algo.getsda = get_data;
@@ -225,7 +228,7 @@ intel_i2c_quirk_xfer(struct drm_psb_private *dev_priv,
 					       adapter);
 	int ret;
 
-	gma_intel_i2c_reset(dev_priv->dev);
+	gma_intel_i2c_reset(&dev_priv->dev);
 
 	intel_i2c_quirk_set(dev_priv, true);
 	set_data(gpio, 1);
@@ -332,7 +335,7 @@ gmbus_xfer(struct i2c_adapter *adapter,
 clear_err:
 	/* Toggle the Software Clear Interrupt bit. This has the effect
 	 * of resetting the GMBUS controller and so clearing the
-	 * BUS_ERROR raised by the slave's NAK.
+	 * BUS_ERROR raised by the target's NAK.
 	 */
 	GMBUS_REG_WRITE(GMBUS1 + reg_offset, GMBUS_SW_CLR_INT);
 	GMBUS_REG_WRITE(GMBUS1 + reg_offset, 0);
@@ -378,7 +381,7 @@ static const struct i2c_algorithm gmbus_algorithm = {
 };
 
 /**
- * intel_gmbus_setup - instantiate all Intel i2c GMBuses
+ * gma_intel_setup_gmbus() - instantiate all Intel i2c GMBuses
  * @dev: DRM device
  */
 int gma_intel_setup_gmbus(struct drm_device *dev)
@@ -393,11 +396,10 @@ int gma_intel_setup_gmbus(struct drm_device *dev)
 		"reserved",
 		"dpd",
 	};
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	int ret, i;
 
-	dev_priv->gmbus = kcalloc(GMBUS_NUM_PORTS, sizeof(struct intel_gmbus),
-				  GFP_KERNEL);
+	dev_priv->gmbus = kzalloc_objs(struct intel_gmbus, GMBUS_NUM_PORTS);
 	if (dev_priv->gmbus == NULL)
 		return -ENOMEM;
 
@@ -410,13 +412,12 @@ int gma_intel_setup_gmbus(struct drm_device *dev)
 		struct intel_gmbus *bus = &dev_priv->gmbus[i];
 
 		bus->adapter.owner = THIS_MODULE;
-		bus->adapter.class = I2C_CLASS_DDC;
 		snprintf(bus->adapter.name,
 			 sizeof(bus->adapter.name),
 			 "gma500 gmbus %s",
 			 names[i]);
 
-		bus->adapter.dev.parent = &dev->pdev->dev;
+		bus->adapter.dev.parent = dev->dev;
 		bus->adapter.algo_data	= dev_priv;
 
 		bus->adapter.algo = &gmbus_algorithm;
@@ -431,7 +432,7 @@ int gma_intel_setup_gmbus(struct drm_device *dev)
 		bus->force_bit = intel_gpio_create(dev_priv, i);
 	}
 
-	gma_intel_i2c_reset(dev_priv->dev);
+	gma_intel_i2c_reset(&dev_priv->dev);
 
 	return 0;
 
@@ -479,7 +480,7 @@ void gma_intel_gmbus_force_bit(struct i2c_adapter *adapter, bool force_bit)
 
 void gma_intel_teardown_gmbus(struct drm_device *dev)
 {
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	int i;
 
 	if (dev_priv->gmbus == NULL)

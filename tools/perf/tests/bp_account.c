@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Powerpc needs __SANE_USERSPACE_TYPES__ before <linux/types.h> to select
  * 'int-ll64.h' and avoid compile warnings when printing __u64 with %llu.
@@ -9,20 +10,30 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <time.h>
 #include <fcntl.h>
-#include <signal.h>
-#include <sys/mman.h>
-#include <linux/compiler.h>
 #include <linux/hw_breakpoint.h>
-#include <sys/ioctl.h>
 
 #include "tests.h"
 #include "debug.h"
-#include "perf.h"
+#include "event.h"
+#include "parse-events.h"
+#include "../perf-sys.h"
 #include "cloexec.h"
 
-volatile long the_var;
+/*
+ * PowerPC and S390 do not support creation of instruction breakpoints using the
+ * perf_event interface.
+ *
+ * Just disable the test for these architectures until these issues are
+ * resolved.
+ */
+#if defined(__powerpc__) || defined(__s390x__)
+#define BP_ACCOUNT_IS_SUPPORTED 0
+#else
+#define BP_ACCOUNT_IS_SUPPORTED 1
+#endif
+
+static volatile long the_var;
 
 static noinline int test_function(void)
 {
@@ -40,7 +51,7 @@ static int __event(bool is_x, void *addr, struct perf_event_attr *attr)
 	attr->config = 0;
 	attr->bp_type = is_x ? HW_BREAKPOINT_X : HW_BREAKPOINT_W;
 	attr->bp_addr = (unsigned long) addr;
-	attr->bp_len = sizeof(long);
+	attr->bp_len = is_x ? default_breakpoint_len() : sizeof(long);
 
 	attr->sample_period = 1;
 	attr->sample_type = PERF_SAMPLE_IP;
@@ -82,6 +93,7 @@ static int bp_accounting(int wp_cnt, int share)
 	attr_mod = attr;
 	attr_mod.bp_type = HW_BREAKPOINT_X;
 	attr_mod.bp_addr = (unsigned long) test_function;
+	attr_mod.bp_len = default_breakpoint_len();
 
 	ret = ioctl(fd[0], PERF_EVENT_IOC_MODIFY_ATTRIBUTES, &attr_mod);
 	TEST_ASSERT_VAL("failed to modify wp\n", ret == 0);
@@ -92,6 +104,7 @@ static int bp_accounting(int wp_cnt, int share)
 		fd_wp = wp_event((void *)&the_var, &attr_new);
 		TEST_ASSERT_VAL("failed to create max wp\n", fd_wp != -1);
 		pr_debug("wp max created\n");
+		close(fd_wp);
 	}
 
 	for (i = 0; i < wp_cnt; i++)
@@ -141,11 +154,21 @@ static int detect_ioctl(void)
 static int detect_share(int wp_cnt, int bp_cnt)
 {
 	struct perf_event_attr attr;
-	int i, fd[wp_cnt + bp_cnt], ret;
+	int i, *fd = NULL, ret = -1;
+
+	if (wp_cnt + bp_cnt == 0)
+		return 0;
+
+	fd = malloc(sizeof(int) * (wp_cnt + bp_cnt));
+	if (!fd)
+		return -1;
 
 	for (i = 0; i < wp_cnt; i++) {
 		fd[i] = wp_event((void *)&the_var, &attr);
-		TEST_ASSERT_VAL("failed to create wp\n", fd[i] != -1);
+		if (fd[i] == -1) {
+			pr_err("failed to create wp\n");
+			goto out;
+		}
 	}
 
 	for (; i < (bp_cnt + wp_cnt); i++) {
@@ -156,9 +179,11 @@ static int detect_share(int wp_cnt, int bp_cnt)
 
 	ret = i != (bp_cnt + wp_cnt);
 
+out:
 	while (i--)
 		close(fd[i]);
 
+	free(fd);
 	return ret;
 }
 
@@ -176,12 +201,17 @@ static int detect_share(int wp_cnt, int bp_cnt)
  *     we create another watchpoint to ensure
  *     the slot accounting is correct
  */
-int test__bp_accounting(struct test *test __maybe_unused, int subtest __maybe_unused)
+static int test__bp_accounting(struct test_suite *test __maybe_unused, int subtest __maybe_unused)
 {
 	int has_ioctl = detect_ioctl();
 	int wp_cnt = detect_cnt(false);
 	int bp_cnt = detect_cnt(true);
 	int share  = detect_share(wp_cnt, bp_cnt);
+
+	if (!BP_ACCOUNT_IS_SUPPORTED) {
+		pr_debug("Test not supported on this architecture");
+		return TEST_SKIP;
+	}
 
 	pr_debug("watchpoints count %d, breakpoints count %d, has_ioctl %d, share %d\n",
 		 wp_cnt, bp_cnt, has_ioctl, share);
@@ -191,3 +221,5 @@ int test__bp_accounting(struct test *test __maybe_unused, int subtest __maybe_un
 
 	return bp_accounting(wp_cnt, share);
 }
+
+DEFINE_SUITE("Breakpoint accounting", bp_accounting);

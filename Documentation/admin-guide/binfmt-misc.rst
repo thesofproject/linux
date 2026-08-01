@@ -1,5 +1,5 @@
-Kernel Support for miscellaneous (your favourite) Binary Formats v1.1
-=====================================================================
+Kernel Support for miscellaneous Binary Formats (binfmt_misc)
+=============================================================
 
 This Kernel feature allows you to invoke almost (for restrictions see below)
 every program by simply typing its name in the shell.
@@ -23,7 +23,7 @@ Here is what the fields mean:
 
 - ``name``
    is an identifier string. A new /proc file will be created with this
-   ``name below /proc/sys/fs/binfmt_misc``; cannot contain slashes ``/`` for
+   name below ``/proc/sys/fs/binfmt_misc``; cannot contain slashes ``/`` for
    obvious reasons.
 - ``type``
    is the type of recognition. Give ``M`` for magic and ``E`` for extension.
@@ -68,10 +68,10 @@ Here is what the fields mean:
 	    Legacy behavior of binfmt_misc is to pass the full path
             of the binary to the interpreter as an argument. When this flag is
             included, binfmt_misc will open the file for reading and pass its
-            descriptor as an argument, instead of the full path, thus allowing
-            the interpreter to execute non-readable binaries. This feature
-            should be used with care - the interpreter has to be trusted not to
-            emit the contents of the non-readable binary.
+            descriptor into the auxilary vector with the key "AT_EXECFD", thus
+            allowing the interpreter to execute non-readable binaries. This
+            feature should be used with care - the interpreter has to be trusted
+            not to emit the contents of the non-readable binary.
       ``C`` - credentials
             Currently, the behavior of binfmt_misc is to calculate
             the credentials and security token of the new process according to
@@ -83,7 +83,7 @@ Here is what the fields mean:
       ``F`` - fix binary
             The usual behaviour of binfmt_misc is to spawn the
 	    binary lazily when the misc format file is invoked.  However,
-	    this doesn``t work very well in the face of mount namespaces and
+	    this doesn't work very well in the face of mount namespaces and
 	    changeroots, so the ``F`` mode opens the binary as soon as the
 	    emulation is installed and uses the opened image to spawn the
 	    emulator, meaning it is always available once installed,
@@ -140,8 +140,8 @@ Hints
 -----
 
 If you want to pass special arguments to your interpreter, you can
-write a wrapper script for it. See Documentation/admin-guide/java.rst for an
-example.
+write a wrapper script for it.
+See :doc:`Documentation/admin-guide/java.rst <./java>` for an example.
 
 Your interpreter should NOT look in the PATH for the filename; the kernel
 passes it the full filename (or the file descriptor) to use.  Using ``$PATH`` can

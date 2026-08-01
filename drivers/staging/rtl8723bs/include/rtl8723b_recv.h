@@ -1,15 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2011 Realtek Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
  *
  ******************************************************************************/
 #ifndef __RTL8723B_RECV_H__
@@ -17,8 +9,7 @@
 
 #include <rtl8192c_recv.h>
 
-typedef struct rxreport_8723b
-{
+struct rxreport_8723b {
 	/* DWORD 0 */
 	u32 pktlen:14;
 	u32 crc32:1;
@@ -88,57 +79,17 @@ typedef struct rxreport_8723b
 
 	/* DWORD 5 */
 	u32 tsfl;
-} RXREPORT, *PRXREPORT;
-
-typedef struct phystatus_8723b
-{
-	u32 rxgain_a:7;
-	u32 trsw_a:1;
-	u32 rxgain_b:7;
-	u32 trsw_b:1;
-	u32 chcorr_l:16;
-
-	u32 sigqualcck:8;
-	u32 cfo_a:8;
-	u32 cfo_b:8;
-	u32 chcorr_h:8;
-
-	u32 noisepwrdb_h:8;
-	u32 cfo_tail_a:8;
-	u32 cfo_tail_b:8;
-	u32 rsvd0824:8;
-
-	u32 rsvd1200:8;
-	u32 rxevm_a:8;
-	u32 rxevm_b:8;
-	u32 rxsnr_a:8;
-
-	u32 rxsnr_b:8;
-	u32 noisepwrdb_l:8;
-	u32 rsvd1616:8;
-	u32 postsnr_a:8;
-
-	u32 postsnr_b:8;
-	u32 csi_a:8;
-	u32 csi_b:8;
-	u32 targetcsi_a:8;
-
-	u32 targetcsi_b:8;
-	u32 sigevm:8;
-	u32 maxexpwr:8;
-	u32 exintflag:1;
-	u32 sgien:1;
-	u32 rxsc:2;
-	u32 idlelong:1;
-	u32 anttrainen:1;
-	u32 antselb:1;
-	u32 antsel:1;
-} PHYSTATUS, *PPHYSTATUS;
+};
 
 s32 rtl8723bs_init_recv_priv(struct adapter *padapter);
 void rtl8723bs_free_recv_priv(struct adapter *padapter);
 
 void rtl8723b_query_rx_phy_status(union recv_frame *prframe, struct phy_stat *pphy_stat);
 void rtl8723b_process_phy_info(struct adapter *padapter, void *prframe);
+
+void rtl8723b_read_chip_version(struct adapter *padapter);
+void rtl8723bs_init_default_value(struct adapter *padapter);
+void rtl8723bs_interface_configure(struct adapter *padapter);
+void rtw_read_adapter_info(struct adapter *padapter);
 
 #endif

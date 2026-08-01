@@ -613,7 +613,7 @@ endpoints configuration from the hardware, so we use line 12 instruction
 to bypass reading the configuration from silicon, and rely on a
 hard-coded table that describes the endpoints configuration instead::
 
-    static struct musb_fifo_cfg jz4740_musb_fifo_cfg[] = {
+    static const struct musb_fifo_cfg jz4740_musb_fifo_cfg[] = {
 	{ .hw_ep_num = 1, .style = FIFO_TX, .maxpacket = 512, },
 	{ .hw_ep_num = 1, .style = FIFO_RX, .maxpacket = 512, },
 	{ .hw_ep_num = 2, .style = FIFO_TX, .maxpacket = 64, },
@@ -707,14 +707,14 @@ cheerful guidance and support.
 Resources
 =========
 
-USB Home Page: http://www.usb.org
+USB Home Page: https://www.usb.org
 
-linux-usb Mailing List Archives: http://marc.info/?l=linux-usb
+linux-usb Mailing List Archives: https://lore.kernel.org/linux-usb
 
 USB On-the-Go Basics:
-http://www.maximintegrated.com/app-notes/index.mvp/id/1822
+https://www.maximintegrated.com/app-notes/index.mvp/id/1822
 
 :ref:`Writing USB Device Drivers <writing-usb-driver>`
 
 Texas Instruments USB Configuration Wiki Page:
-http://processors.wiki.ti.com/index.php/Usbgeneralpage
+https://web.archive.org/web/20201215135015/http://processors.wiki.ti.com/index.php/Usbgeneralpage

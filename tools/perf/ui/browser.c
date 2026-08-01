@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
-#include "../util.h"
-#include "../string2.h"
-#include "../config.h"
-#include "../../perf.h"
+#include "../util/string2.h"
+#include "../util/config.h"
 #include "libslang.h"
 #include "ui.h"
 #include "util.h"
@@ -15,8 +13,9 @@
 #include "browser.h"
 #include "helpline.h"
 #include "keysyms.h"
-#include "../color.h"
-#include "sane_ctype.h"
+#include "../util/color.h"
+#include <linux/ctype.h>
+#include <linux/zalloc.h>
 
 static int ui_browser__percent_color(struct ui_browser *browser,
 				     double percent, bool current)
@@ -58,12 +57,12 @@ void ui_browser__gotorc(struct ui_browser *browser, int y, int x)
 void ui_browser__write_nstring(struct ui_browser *browser __maybe_unused, const char *msg,
 			       unsigned int width)
 {
-	slsmg_write_nstring(msg, width);
+	SLsmg_write_nstring(msg, width);
 }
 
 void ui_browser__vprintf(struct ui_browser *browser __maybe_unused, const char *fmt, va_list args)
 {
-	slsmg_vprintf(fmt, args);
+	SLsmg_vprintf(fmt, args);
 }
 
 void ui_browser__printf(struct ui_browser *browser __maybe_unused, const char *fmt, ...)
@@ -204,7 +203,7 @@ void ui_browser__refresh_dimensions(struct ui_browser *browser)
 void ui_browser__handle_resize(struct ui_browser *browser)
 {
 	ui__refresh_dimensions(false);
-	ui_browser__show(browser, browser->title, ui_helpline__current);
+	ui_browser__show(browser, browser->title ?: "", ui_helpline__current);
 	ui_browser__refresh(browser);
 }
 
@@ -232,6 +231,14 @@ int ui_browser__warning(struct ui_browser *browser, int timeout,
 	}
 
 	return key;
+}
+
+int ui_browser__warn_unhandled_hotkey(struct ui_browser *browser, int key, int timeout, const char *help)
+{
+	char kname[32];
+
+	key_name(key, kname, sizeof(kname));
+	return ui_browser__warning(browser, timeout, "\n'%s' key not associated%s!\n", kname, help ?: "");
 }
 
 int ui_browser__help_window(struct ui_browser *browser, const char *text)
@@ -269,9 +276,9 @@ void __ui_browser__show_title(struct ui_browser *browser, const char *title)
 
 void ui_browser__show_title(struct ui_browser *browser, const char *title)
 {
-	pthread_mutex_lock(&ui__lock);
+	mutex_lock(&ui__lock);
 	__ui_browser__show_title(browser, title);
-	pthread_mutex_unlock(&ui__lock);
+	mutex_unlock(&ui__lock);
 }
 
 int ui_browser__show(struct ui_browser *browser, const char *title,
@@ -285,10 +292,11 @@ int ui_browser__show(struct ui_browser *browser, const char *title,
 
 	browser->refresh_dimensions(browser);
 
-	pthread_mutex_lock(&ui__lock);
+	mutex_lock(&ui__lock);
 	__ui_browser__show_title(browser, title);
 
-	browser->title = title;
+	free(browser->title);
+	browser->title = strdup(title);
 	zfree(&browser->helpline);
 
 	va_start(ap, helpline);
@@ -296,16 +304,17 @@ int ui_browser__show(struct ui_browser *browser, const char *title,
 	va_end(ap);
 	if (err > 0)
 		ui_helpline__push(browser->helpline);
-	pthread_mutex_unlock(&ui__lock);
+	mutex_unlock(&ui__lock);
 	return err ? 0 : -1;
 }
 
 void ui_browser__hide(struct ui_browser *browser)
 {
-	pthread_mutex_lock(&ui__lock);
+	mutex_lock(&ui__lock);
 	ui_helpline__pop();
 	zfree(&browser->helpline);
-	pthread_mutex_unlock(&ui__lock);
+	zfree(&browser->title);
+	mutex_unlock(&ui__lock);
 }
 
 static void ui_browser__scrollbar_set(struct ui_browser *browser)
@@ -346,14 +355,16 @@ static int __ui_browser__refresh(struct ui_browser *browser)
 	SLsmg_fill_region(browser->y + row + browser->extra_title_lines, browser->x,
 			  browser->rows - row, width, ' ');
 
+	if (browser->nr_entries == 0 && browser->no_samples_msg)
+		__ui__info_window(NULL, browser->no_samples_msg, NULL);
 	return 0;
 }
 
 int ui_browser__refresh(struct ui_browser *browser)
 {
-	pthread_mutex_lock(&ui__lock);
+	mutex_lock(&ui__lock);
 	__ui_browser__refresh(browser);
-	pthread_mutex_unlock(&ui__lock);
+	mutex_unlock(&ui__lock);
 
 	return 0;
 }
@@ -389,10 +400,10 @@ int ui_browser__run(struct ui_browser *browser, int delay_secs)
 	while (1) {
 		off_t offset;
 
-		pthread_mutex_lock(&ui__lock);
+		mutex_lock(&ui__lock);
 		err = __ui_browser__refresh(browser);
 		SLsmg_refresh();
-		pthread_mutex_unlock(&ui__lock);
+		mutex_unlock(&ui__lock);
 		if (err < 0)
 			break;
 
@@ -448,6 +459,8 @@ int ui_browser__run(struct ui_browser *browser, int delay_secs)
 				goto out;
 			if (browser->horiz_scroll != 0)
 				--browser->horiz_scroll;
+			else
+				goto out;
 			break;
 		case K_PGDN:
 		case ' ':
@@ -499,6 +512,9 @@ unsigned int ui_browser__list_head_refresh(struct ui_browser *browser)
 	struct list_head *pos;
 	struct list_head *head = browser->entries;
 	int row = 0;
+
+	if (browser->nr_entries == 0)
+		return 0;
 
 	if (browser->top == NULL || browser->top == browser->entries)
                 browser->top = ui_browser__list_head_filter_entries(browser, head->next);
@@ -594,7 +610,7 @@ static int ui_browser__color_config(const char *var, const char *value,
 			break;
 
 		*bg = '\0';
-		bg = ltrim(++bg);
+		bg = skip_spaces(bg + 1);
 		ui_browser__colorsets[i].bg = bg;
 		ui_browser__colorsets[i].fg = fg;
 		return 0;
@@ -611,14 +627,16 @@ void ui_browser__argv_seek(struct ui_browser *browser, off_t offset, int whence)
 		browser->top = browser->entries;
 		break;
 	case SEEK_CUR:
-		browser->top = browser->top + browser->top_idx + offset;
+		browser->top = (char **)browser->top + offset;
 		break;
 	case SEEK_END:
-		browser->top = browser->top + browser->nr_entries - 1 + offset;
+		browser->top = (char **)browser->entries + browser->nr_entries - 1 + offset;
 		break;
 	default:
 		return;
 	}
+	assert((char **)browser->top < (char **)browser->entries + browser->nr_entries);
+	assert((char **)browser->top >= (char **)browser->entries);
 }
 
 unsigned int ui_browser__argv_refresh(struct ui_browser *browser)
@@ -630,7 +648,9 @@ unsigned int ui_browser__argv_refresh(struct ui_browser *browser)
 		browser->top = browser->entries;
 
 	pos = (char **)browser->top;
-	while (idx < browser->nr_entries) {
+	while (idx < browser->nr_entries &&
+	       row < (unsigned)SLtt_Screen_Rows - 1) {
+		assert(pos < (char **)browser->entries + browser->nr_entries);
 		if (!browser->filter || !browser->filter(browser, *pos)) {
 			ui_browser__gotorc(browser, row, 0);
 			browser->write(browser, pos, row);
@@ -752,25 +772,40 @@ void __ui_browser__line_arrow(struct ui_browser *browser, unsigned int column,
 }
 
 void ui_browser__mark_fused(struct ui_browser *browser, unsigned int column,
-			    unsigned int row, bool arrow_down)
+			    unsigned int row, int diff, bool arrow_down)
 {
-	unsigned int end_row;
+	int end_row;
 
-	if (row >= browser->top_idx)
-		end_row = row - browser->top_idx;
-	else
+	if (diff <= 0)
 		return;
 
 	SLsmg_set_char_set(1);
 
 	if (arrow_down) {
+		if (row + diff <= browser->top_idx)
+			return;
+
+		end_row = row + diff - browser->top_idx;
 		ui_browser__gotorc(browser, end_row, column - 1);
-		SLsmg_write_char(SLSMG_ULCORN_CHAR);
-		ui_browser__gotorc(browser, end_row, column);
-		SLsmg_draw_hline(2);
-		ui_browser__gotorc(browser, end_row + 1, column - 1);
 		SLsmg_write_char(SLSMG_LTEE_CHAR);
+
+		while (--end_row >= 0 && end_row > (int)(row - browser->top_idx)) {
+			ui_browser__gotorc(browser, end_row, column - 1);
+			SLsmg_draw_vline(1);
+		}
+
+		end_row = (int)(row - browser->top_idx);
+		if (end_row >= 0) {
+			ui_browser__gotorc(browser, end_row, column - 1);
+			SLsmg_write_char(SLSMG_ULCORN_CHAR);
+			ui_browser__gotorc(browser, end_row, column);
+			SLsmg_draw_hline(2);
+		}
 	} else {
+		if (row < browser->top_idx)
+			return;
+
+		end_row = row - browser->top_idx;
 		ui_browser__gotorc(browser, end_row, column - 1);
 		SLsmg_write_char(SLSMG_LTEE_CHAR);
 		ui_browser__gotorc(browser, end_row, column);
@@ -788,6 +823,6 @@ void ui_browser__init(void)
 
 	while (ui_browser__colorsets[i].name) {
 		struct ui_browser_colorset *c = &ui_browser__colorsets[i++];
-		sltt_set_color(c->colorset, c->name, c->fg, c->bg);
+		SLtt_set_color(c->colorset, c->name, c->fg, c->bg);
 	}
 }

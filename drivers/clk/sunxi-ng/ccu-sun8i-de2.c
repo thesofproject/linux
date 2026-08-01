@@ -1,20 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017 Icenowy Zheng <icenowy@aosc.io>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
-#include <linux/of_address.h>
-#include <linux/of_platform.h>
+#include <linux/io.h>
+#include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/reset.h>
 
@@ -31,6 +24,8 @@ static SUNXI_CCU_GATE(bus_mixer1_clk,	"bus-mixer1",	"bus-de",
 		      0x04, BIT(1), 0);
 static SUNXI_CCU_GATE(bus_wb_clk,	"bus-wb",	"bus-de",
 		      0x04, BIT(2), 0);
+static SUNXI_CCU_GATE(bus_rot_clk,	"bus-rot",	"bus-de",
+		      0x04, BIT(3), 0);
 
 static SUNXI_CCU_GATE(mixer0_clk,	"mixer0",	"mixer0-div",
 		      0x00, BIT(0), CLK_SET_RATE_PARENT);
@@ -38,12 +33,16 @@ static SUNXI_CCU_GATE(mixer1_clk,	"mixer1",	"mixer1-div",
 		      0x00, BIT(1), CLK_SET_RATE_PARENT);
 static SUNXI_CCU_GATE(wb_clk,		"wb",		"wb-div",
 		      0x00, BIT(2), CLK_SET_RATE_PARENT);
+static SUNXI_CCU_GATE(rot_clk,		"rot",		"rot-div",
+		      0x00, BIT(3), CLK_SET_RATE_PARENT);
 
 static SUNXI_CCU_M(mixer0_div_clk, "mixer0-div", "de", 0x0c, 0, 4,
 		   CLK_SET_RATE_PARENT);
 static SUNXI_CCU_M(mixer1_div_clk, "mixer1-div", "de", 0x0c, 4, 4,
 		   CLK_SET_RATE_PARENT);
 static SUNXI_CCU_M(wb_div_clk, "wb-div", "de", 0x0c, 8, 4,
+		   CLK_SET_RATE_PARENT);
+static SUNXI_CCU_M(rot_div_clk, "rot-div", "de", 0x0c, 0x0c, 4,
 		   CLK_SET_RATE_PARENT);
 
 static SUNXI_CCU_M(mixer0_div_a83_clk, "mixer0-div", "pll-de", 0x0c, 0, 4,
@@ -52,44 +51,29 @@ static SUNXI_CCU_M(mixer1_div_a83_clk, "mixer1-div", "pll-de", 0x0c, 4, 4,
 		   CLK_SET_RATE_PARENT);
 static SUNXI_CCU_M(wb_div_a83_clk, "wb-div", "pll-de", 0x0c, 8, 4,
 		   CLK_SET_RATE_PARENT);
+static SUNXI_CCU_M(rot_div_a83_clk, "rot-div", "pll-de", 0x0c, 0x0c, 4,
+		   CLK_SET_RATE_PARENT);
 
-static struct ccu_common *sun8i_a83t_de2_clks[] = {
+static struct ccu_common *sun8i_de2_ccu_clks[] = {
 	&mixer0_clk.common,
 	&mixer1_clk.common,
 	&wb_clk.common,
+	&rot_clk.common,
 
 	&bus_mixer0_clk.common,
 	&bus_mixer1_clk.common,
 	&bus_wb_clk.common,
-
-	&mixer0_div_a83_clk.common,
-	&mixer1_div_a83_clk.common,
-	&wb_div_a83_clk.common,
-};
-
-static struct ccu_common *sun8i_h3_de2_clks[] = {
-	&mixer0_clk.common,
-	&mixer1_clk.common,
-	&wb_clk.common,
-
-	&bus_mixer0_clk.common,
-	&bus_mixer1_clk.common,
-	&bus_wb_clk.common,
+	&bus_rot_clk.common,
 
 	&mixer0_div_clk.common,
 	&mixer1_div_clk.common,
 	&wb_div_clk.common,
-};
+	&rot_div_clk.common,
 
-static struct ccu_common *sun8i_v3s_de2_clks[] = {
-	&mixer0_clk.common,
-	&wb_clk.common,
-
-	&bus_mixer0_clk.common,
-	&bus_wb_clk.common,
-
-	&mixer0_div_clk.common,
-	&wb_div_clk.common,
+	&mixer0_div_a83_clk.common,
+	&mixer1_div_a83_clk.common,
+	&wb_div_a83_clk.common,
+	&rot_div_a83_clk.common,
 };
 
 static struct clk_hw_onecell_data sun8i_a83t_de2_hw_clks = {
@@ -97,16 +81,19 @@ static struct clk_hw_onecell_data sun8i_a83t_de2_hw_clks = {
 		[CLK_MIXER0]		= &mixer0_clk.common.hw,
 		[CLK_MIXER1]		= &mixer1_clk.common.hw,
 		[CLK_WB]		= &wb_clk.common.hw,
+		[CLK_ROT]		= &rot_clk.common.hw,
 
 		[CLK_BUS_MIXER0]	= &bus_mixer0_clk.common.hw,
 		[CLK_BUS_MIXER1]	= &bus_mixer1_clk.common.hw,
 		[CLK_BUS_WB]		= &bus_wb_clk.common.hw,
+		[CLK_BUS_ROT]		= &bus_rot_clk.common.hw,
 
 		[CLK_MIXER0_DIV]	= &mixer0_div_a83_clk.common.hw,
 		[CLK_MIXER1_DIV]	= &mixer1_div_a83_clk.common.hw,
 		[CLK_WB_DIV]		= &wb_div_a83_clk.common.hw,
+		[CLK_ROT_DIV]		= &rot_div_a83_clk.common.hw,
 	},
-	.num	= CLK_NUMBER,
+	.num	= CLK_NUMBER_WITH_ROT,
 };
 
 static struct clk_hw_onecell_data sun8i_h3_de2_hw_clks = {
@@ -123,7 +110,7 @@ static struct clk_hw_onecell_data sun8i_h3_de2_hw_clks = {
 		[CLK_MIXER1_DIV]	= &mixer1_div_clk.common.hw,
 		[CLK_WB_DIV]		= &wb_div_clk.common.hw,
 	},
-	.num	= CLK_NUMBER,
+	.num	= CLK_NUMBER_WITHOUT_ROT,
 };
 
 static struct clk_hw_onecell_data sun8i_v3s_de2_hw_clks = {
@@ -137,28 +124,65 @@ static struct clk_hw_onecell_data sun8i_v3s_de2_hw_clks = {
 		[CLK_MIXER0_DIV]	= &mixer0_div_clk.common.hw,
 		[CLK_WB_DIV]		= &wb_div_clk.common.hw,
 	},
-	.num	= CLK_NUMBER,
+	.num	= CLK_NUMBER_WITHOUT_ROT,
 };
 
-static struct ccu_reset_map sun8i_a83t_de2_resets[] = {
+static struct clk_hw_onecell_data sun50i_a64_de2_hw_clks = {
+	.hws	= {
+		[CLK_MIXER0]		= &mixer0_clk.common.hw,
+		[CLK_MIXER1]		= &mixer1_clk.common.hw,
+		[CLK_WB]		= &wb_clk.common.hw,
+		[CLK_ROT]		= &rot_clk.common.hw,
+
+		[CLK_BUS_MIXER0]	= &bus_mixer0_clk.common.hw,
+		[CLK_BUS_MIXER1]	= &bus_mixer1_clk.common.hw,
+		[CLK_BUS_WB]		= &bus_wb_clk.common.hw,
+		[CLK_BUS_ROT]		= &bus_rot_clk.common.hw,
+
+		[CLK_MIXER0_DIV]	= &mixer0_div_clk.common.hw,
+		[CLK_MIXER1_DIV]	= &mixer1_div_clk.common.hw,
+		[CLK_WB_DIV]		= &wb_div_clk.common.hw,
+		[CLK_ROT_DIV]		= &rot_div_clk.common.hw,
+	},
+	.num	= CLK_NUMBER_WITH_ROT,
+};
+
+static const struct ccu_reset_map sun8i_a83t_de2_resets[] = {
 	[RST_MIXER0]	= { 0x08, BIT(0) },
 	/*
-	 * For A83T, H3 and R40, mixer1 reset line is shared with wb, so
-	 * only RST_WB is exported here.
-	 * For V3s there's just no mixer1, so it also shares this struct.
+	 * Mixer1 reset line is shared with wb, so only RST_WB is
+	 * exported here.
+	 */
+	[RST_WB]	= { 0x08, BIT(2) },
+	[RST_ROT]	= { 0x08, BIT(3) },
+};
+
+static const struct ccu_reset_map sun8i_h3_de2_resets[] = {
+	[RST_MIXER0]	= { 0x08, BIT(0) },
+	/*
+	 * Mixer1 reset line is shared with wb, so only RST_WB is
+	 * exported here.
+	 * V3s doesn't have mixer1, so it also shares this struct.
 	 */
 	[RST_WB]	= { 0x08, BIT(2) },
 };
 
-static struct ccu_reset_map sun50i_a64_de2_resets[] = {
+static const struct ccu_reset_map sun50i_a64_de2_resets[] = {
+	[RST_MIXER0]	= { 0x08, BIT(0) },
+	[RST_MIXER1]	= { 0x08, BIT(1) },
+	[RST_WB]	= { 0x08, BIT(2) },
+	[RST_ROT]	= { 0x08, BIT(3) },
+};
+
+static const struct ccu_reset_map sun50i_h5_de2_resets[] = {
 	[RST_MIXER0]	= { 0x08, BIT(0) },
 	[RST_MIXER1]	= { 0x08, BIT(1) },
 	[RST_WB]	= { 0x08, BIT(2) },
 };
 
 static const struct sunxi_ccu_desc sun8i_a83t_de2_clk_desc = {
-	.ccu_clks	= sun8i_a83t_de2_clks,
-	.num_ccu_clks	= ARRAY_SIZE(sun8i_a83t_de2_clks),
+	.ccu_clks	= sun8i_de2_ccu_clks,
+	.num_ccu_clks	= ARRAY_SIZE(sun8i_de2_ccu_clks),
 
 	.hw_clks	= &sun8i_a83t_de2_hw_clks,
 
@@ -167,28 +191,28 @@ static const struct sunxi_ccu_desc sun8i_a83t_de2_clk_desc = {
 };
 
 static const struct sunxi_ccu_desc sun8i_h3_de2_clk_desc = {
-	.ccu_clks	= sun8i_h3_de2_clks,
-	.num_ccu_clks	= ARRAY_SIZE(sun8i_h3_de2_clks),
+	.ccu_clks	= sun8i_de2_ccu_clks,
+	.num_ccu_clks	= ARRAY_SIZE(sun8i_de2_ccu_clks),
 
 	.hw_clks	= &sun8i_h3_de2_hw_clks,
+
+	.resets		= sun8i_h3_de2_resets,
+	.num_resets	= ARRAY_SIZE(sun8i_h3_de2_resets),
+};
+
+static const struct sunxi_ccu_desc sun8i_r40_de2_clk_desc = {
+	.ccu_clks	= sun8i_de2_ccu_clks,
+	.num_ccu_clks	= ARRAY_SIZE(sun8i_de2_ccu_clks),
+
+	.hw_clks	= &sun50i_a64_de2_hw_clks,
 
 	.resets		= sun8i_a83t_de2_resets,
 	.num_resets	= ARRAY_SIZE(sun8i_a83t_de2_resets),
 };
 
-static const struct sunxi_ccu_desc sun50i_a64_de2_clk_desc = {
-	.ccu_clks	= sun8i_h3_de2_clks,
-	.num_ccu_clks	= ARRAY_SIZE(sun8i_h3_de2_clks),
-
-	.hw_clks	= &sun8i_h3_de2_hw_clks,
-
-	.resets		= sun50i_a64_de2_resets,
-	.num_resets	= ARRAY_SIZE(sun50i_a64_de2_resets),
-};
-
 static const struct sunxi_ccu_desc sun8i_v3s_de2_clk_desc = {
-	.ccu_clks	= sun8i_v3s_de2_clks,
-	.num_ccu_clks	= ARRAY_SIZE(sun8i_v3s_de2_clks),
+	.ccu_clks	= sun8i_de2_ccu_clks,
+	.num_ccu_clks	= ARRAY_SIZE(sun8i_de2_ccu_clks),
 
 	.hw_clks	= &sun8i_v3s_de2_hw_clks,
 
@@ -196,9 +220,38 @@ static const struct sunxi_ccu_desc sun8i_v3s_de2_clk_desc = {
 	.num_resets	= ARRAY_SIZE(sun8i_a83t_de2_resets),
 };
 
+static const struct sunxi_ccu_desc sun50i_a64_de2_clk_desc = {
+	.ccu_clks	= sun8i_de2_ccu_clks,
+	.num_ccu_clks	= ARRAY_SIZE(sun8i_de2_ccu_clks),
+
+	.hw_clks	= &sun50i_a64_de2_hw_clks,
+
+	.resets		= sun50i_a64_de2_resets,
+	.num_resets	= ARRAY_SIZE(sun50i_a64_de2_resets),
+};
+
+static const struct sunxi_ccu_desc sun50i_h5_de2_clk_desc = {
+	.ccu_clks	= sun8i_de2_ccu_clks,
+	.num_ccu_clks	= ARRAY_SIZE(sun8i_de2_ccu_clks),
+
+	.hw_clks	= &sun8i_h3_de2_hw_clks,
+
+	.resets		= sun50i_h5_de2_resets,
+	.num_resets	= ARRAY_SIZE(sun50i_h5_de2_resets),
+};
+
+static const struct sunxi_ccu_desc sun50i_h616_de33_clk_desc = {
+	.ccu_clks	= sun8i_de2_ccu_clks,
+	.num_ccu_clks	= ARRAY_SIZE(sun8i_de2_ccu_clks),
+
+	.hw_clks	= &sun8i_h3_de2_hw_clks,
+
+	.resets		= sun50i_h5_de2_resets,
+	.num_resets	= ARRAY_SIZE(sun50i_h5_de2_resets),
+};
+
 static int sunxi_de2_clk_probe(struct platform_device *pdev)
 {
-	struct resource *res;
 	struct clk *bus_clk, *mod_clk;
 	struct reset_control *rstc;
 	void __iomem *reg;
@@ -209,35 +262,24 @@ static int sunxi_de2_clk_probe(struct platform_device *pdev)
 	if (!ccu_desc)
 		return -EINVAL;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	reg = devm_ioremap_resource(&pdev->dev, res);
+	reg = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(reg))
 		return PTR_ERR(reg);
 
 	bus_clk = devm_clk_get(&pdev->dev, "bus");
-	if (IS_ERR(bus_clk)) {
-		ret = PTR_ERR(bus_clk);
-		if (ret != -EPROBE_DEFER)
-			dev_err(&pdev->dev, "Couldn't get bus clk: %d\n", ret);
-		return ret;
-	}
+	if (IS_ERR(bus_clk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(bus_clk),
+				     "Couldn't get bus clk\n");
 
 	mod_clk = devm_clk_get(&pdev->dev, "mod");
-	if (IS_ERR(mod_clk)) {
-		ret = PTR_ERR(mod_clk);
-		if (ret != -EPROBE_DEFER)
-			dev_err(&pdev->dev, "Couldn't get mod clk: %d\n", ret);
-		return ret;
-	}
+	if (IS_ERR(mod_clk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(mod_clk),
+				     "Couldn't get mod clk\n");
 
 	rstc = devm_reset_control_get_exclusive(&pdev->dev, NULL);
-	if (IS_ERR(rstc)) {
-		ret = PTR_ERR(rstc);
-		if (ret != -EPROBE_DEFER)
-			dev_err(&pdev->dev,
-				"Couldn't get reset control: %d\n", ret);
-		return ret;
-	}
+	if (IS_ERR(rstc))
+		return dev_err_probe(&pdev->dev, PTR_ERR(rstc),
+				     "Couldn't get reset control\n");
 
 	/* The clocks need to be enabled for us to access the registers */
 	ret = clk_prepare_enable(bus_clk);
@@ -260,7 +302,17 @@ static int sunxi_de2_clk_probe(struct platform_device *pdev)
 		goto err_disable_mod_clk;
 	}
 
-	ret = sunxi_ccu_probe(pdev->dev.of_node, reg, ccu_desc);
+	/*
+	 * The DE33 requires these additional (unknown) registers set
+	 * during initialisation.
+	 */
+	if (of_device_is_compatible(pdev->dev.of_node,
+				    "allwinner,sun50i-h616-de33-clk")) {
+		writel(0, reg + 0x24);
+		writel(0x0000a980, reg + 0x28);
+	}
+
+	ret = devm_sunxi_ccu_probe(&pdev->dev, reg, ccu_desc);
 	if (ret)
 		goto err_assert_reset;
 
@@ -285,22 +337,32 @@ static const struct of_device_id sunxi_de2_clk_ids[] = {
 		.data = &sun8i_h3_de2_clk_desc,
 	},
 	{
+		.compatible = "allwinner,sun8i-r40-de2-clk",
+		.data = &sun8i_r40_de2_clk_desc,
+	},
+	{
 		.compatible = "allwinner,sun8i-v3s-de2-clk",
 		.data = &sun8i_v3s_de2_clk_desc,
 	},
 	{
-		.compatible = "allwinner,sun50i-h5-de2-clk",
+		.compatible = "allwinner,sun50i-a64-de2-clk",
 		.data = &sun50i_a64_de2_clk_desc,
 	},
-	/*
-	 * The Allwinner A64 SoC needs some bit to be poke in syscon to make
-	 * DE2 really working.
-	 * So there's currently no A64 compatible here.
-	 * H5 shares the same reset line with A64, so here H5 is using the
-	 * clock description of A64.
-	 */
+	{
+		.compatible = "allwinner,sun50i-h5-de2-clk",
+		.data = &sun50i_h5_de2_clk_desc,
+	},
+	{
+		.compatible = "allwinner,sun50i-h6-de3-clk",
+		.data = &sun50i_h5_de2_clk_desc,
+	},
+	{
+		.compatible = "allwinner,sun50i-h616-de33-clk",
+		.data = &sun50i_h616_de33_clk_desc,
+	},
 	{ }
 };
+MODULE_DEVICE_TABLE(of, sunxi_de2_clk_ids);
 
 static struct platform_driver sunxi_de2_clk_driver = {
 	.probe	= sunxi_de2_clk_probe,
@@ -309,4 +371,8 @@ static struct platform_driver sunxi_de2_clk_driver = {
 		.of_match_table	= sunxi_de2_clk_ids,
 	},
 };
-builtin_platform_driver(sunxi_de2_clk_driver);
+module_platform_driver(sunxi_de2_clk_driver);
+
+MODULE_IMPORT_NS("SUNXI_CCU");
+MODULE_DESCRIPTION("Support for the Allwinner SoCs DE2 CCU");
+MODULE_LICENSE("GPL");

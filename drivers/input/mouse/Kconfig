@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Mouse driver configuration
 #
@@ -91,14 +92,14 @@ config MOUSE_PS2_SYNAPTICS_SMBUS
 	  If unsure, say Y.
 
 config MOUSE_PS2_CYPRESS
-       bool "Cypress PS/2 mouse protocol extension" if EXPERT
-       default y
-       depends on MOUSE_PS2
-       help
-         Say Y here if you have a Cypress PS/2 Trackpad connected to
-         your system.
+	bool "Cypress PS/2 mouse protocol extension" if EXPERT
+	default y
+	depends on MOUSE_PS2
+	help
+	  Say Y here if you have a Cypress PS/2 Trackpad connected to
+	  your system.
 
-         If unsure, say Y.
+	  If unsure, say Y.
 
 config MOUSE_PS2_LIFEBOOK
 	bool "Fujitsu Lifebook PS/2 mouse protocol extension" if EXPERT
@@ -129,9 +130,21 @@ config MOUSE_PS2_ELANTECH
 
 	  This driver exposes some configuration registers via sysfs
 	  entries. For further information,
-	  see <file:Documentation/input/elantech.txt>.
+	  see <file:Documentation/input/devices/elantech.rst>.
 
 	  If unsure, say N.
+
+config MOUSE_PS2_ELANTECH_SMBUS
+	bool "Elantech PS/2 SMbus companion" if EXPERT
+	default y
+	depends on MOUSE_PS2 && MOUSE_PS2_ELANTECH
+	depends on I2C=y || I2C=MOUSE_PS2
+	select MOUSE_PS2_SMBUS
+	help
+	  Say Y here if you have a Elantech touchpad connected to
+	  to an SMBus, but enumerated through PS/2.
+
+	  If unsure, say Y.
 
 config MOUSE_PS2_SENTELIC
 	bool "Sentelic Finger Sensing Pad PS/2 protocol extension"
@@ -148,16 +161,6 @@ config MOUSE_PS2_TOUCHKIT
 	help
 	  Say Y here if you have an eGalax TouchKit PS/2 touchscreen
 	  connected to your system.
-
-	  If unsure, say N.
-
-config MOUSE_PS2_OLPC
-	bool "OLPC PS/2 mouse protocol extension"
-	depends on MOUSE_PS2 && OLPC
-	help
-	  Say Y here if you have an OLPC XO-1 laptop (with built-in
-	  PS/2 touchpad/tablet device).  The manufacturer calls the
-	  touchpad an HGPK.
 
 	  If unsure, say N.
 
@@ -216,7 +219,7 @@ config MOUSE_APPLETOUCH
 	  scrolling in X11.
 
 	  For further information, see
-	  <file:Documentation/input/appletouch.txt>.
+	  <file:Documentation/input/devices/appletouch.rst>.
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called appletouch.
@@ -239,7 +242,7 @@ config MOUSE_BCM5974
 
 	  The interface is currently identical to the appletouch interface,
 	  for further information, see
-	  <file:Documentation/input/appletouch.txt>.
+	  <file:Documentation/input/devices/appletouch.rst>.
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called bcm5974.
@@ -287,42 +290,6 @@ config MOUSE_ELAN_I2C_SMBUS
 
 	   If unsure, say Y.
 
-config MOUSE_INPORT
-	tristate "InPort/MS/ATIXL busmouse"
-	depends on ISA
-	help
-	  Say Y here if you have an InPort, Microsoft or ATI XL busmouse.
-	  They are rather rare these days.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called inport.
-
-config MOUSE_ATIXL
-	bool "ATI XL variant"
-	depends on MOUSE_INPORT
-	help
-	  Say Y here if your mouse is of the ATI XL variety.
-
-config MOUSE_LOGIBM
-	tristate "Logitech busmouse"
-	depends on ISA
-	help
-	  Say Y here if you have a Logitech busmouse.
-	  They are rather rare these days.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called logibm.
-
-config MOUSE_PC110PAD
-	tristate "IBM PC110 touchpad"
-	depends on ISA
-	help
-	  Say Y if you have the IBM PC-110 micro-notebook and want its
-	  touchpad supported.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called pc110pad.
-
 config MOUSE_AMIGA
 	tristate "Amiga mouse"
 	depends on AMIGA
@@ -359,7 +326,7 @@ config MOUSE_VSXXXAA
 	select SERIO
 	help
 	  Say Y (or M) if you want to use a DEC VSXXX-AA (hockey
-	  puck) or a VSXXX-GA (rectangular) mouse. Theses mice are
+	  puck) or a VSXXX-GA (rectangular) mouse. These mice are
 	  typically used on DECstations or VAXstations, but can also
 	  be used on any box capable of RS232 (with some adaptor
 	  described in the source file). This driver also works with the
@@ -368,7 +335,6 @@ config MOUSE_VSXXXAA
 config MOUSE_GPIO
 	tristate "GPIO mouse"
 	depends on GPIOLIB || COMPILE_TEST
-	select INPUT_POLLDEV
 	help
 	  This driver simulates a mouse on GPIO lines of various CPUs (and some
 	  other chips).
@@ -380,12 +346,6 @@ config MOUSE_GPIO
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called gpio_mouse.
-
-config MOUSE_PXA930_TRKBALL
-	tristate "PXA930 Trackball mouse"
-	depends on CPU_PXA930 || CPU_PXA935
-	help
-	  Say Y here to support PXA930 Trackball mouse.
 
 config MOUSE_MAPLE
 	tristate "Maple mouse (for the Dreamcast)"
@@ -432,17 +392,5 @@ config MOUSE_SYNAPTICS_USB
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called synaptics_usb.
-
-config MOUSE_NAVPOINT_PXA27x
-	tristate "Synaptics NavPoint (PXA27x SSP/SPI)"
-	depends on PXA27x && PXA_SSP
-	help
-	  This driver adds support for the Synaptics NavPoint touchpad connected
-	  to a PXA27x SSP port in SPI slave mode. The device emulates a mouse;
-	  a tap or tap-and-a-half drag gesture emulates the left mouse button.
-	  For example, use the xf86-input-evdev driver for an X pointing device.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called navpoint.
 
 endif

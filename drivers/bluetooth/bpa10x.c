@@ -1,24 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  Digianswer Bluetooth USB driver
  *
  *  Copyright (C) 2004-2007  Marcel Holtmann <marcel@holtmann.org>
- *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
  */
 
 #include <linux/kernel.h>
@@ -35,7 +20,7 @@
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
 
-#include "h4_recv.h"
+#include "hci_uart.h"
 
 #define VERSION "0.11"
 
@@ -56,6 +41,7 @@ struct bpa10x_data {
 	struct usb_anchor rx_anchor;
 
 	struct sk_buff *rx_skb[2];
+	struct hci_uart hu;
 };
 
 static void bpa10x_tx_complete(struct urb *urb)
@@ -111,7 +97,7 @@ static void bpa10x_rx_complete(struct urb *urb)
 	if (urb->status == 0) {
 		bool idx = usb_pipebulk(urb->pipe);
 
-		data->rx_skb[idx] = h4_recv_buf(hdev, data->rx_skb[idx],
+		data->rx_skb[idx] = h4_recv_buf(&data->hu, data->rx_skb[idx],
 						urb->transfer_buffer,
 						urb->actual_length,
 						bpa10x_recv_pkts,
@@ -269,9 +255,13 @@ static int bpa10x_setup(struct hci_dev *hdev)
 	if (IS_ERR(skb))
 		return PTR_ERR(skb);
 
-	bt_dev_info(hdev, "%s", (char *)(skb->data + 1));
+	/* Bounded print: the device controls skb->len. */
+	if (skb->len > 1) {
+		int len = skb->len - 1;
 
-	hci_set_fw_info(hdev, "%s", skb->data + 1);
+		bt_dev_info(hdev, "%.*s", len, (char *)(skb->data + 1));
+		hci_set_fw_info(hdev, "%.*s", len, skb->data + 1);
+	}
 
 	kfree_skb(skb);
 	return 0;
@@ -289,7 +279,7 @@ static int bpa10x_send_frame(struct hci_dev *hdev, struct sk_buff *skb)
 
 	skb->dev = (void *) hdev;
 
-	urb = usb_alloc_urb(0, GFP_ATOMIC);
+	urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!urb)
 		return -ENOMEM;
 
@@ -298,7 +288,7 @@ static int bpa10x_send_frame(struct hci_dev *hdev, struct sk_buff *skb)
 
 	switch (hci_skb_pkt_type(skb)) {
 	case HCI_COMMAND_PKT:
-		dr = kmalloc(sizeof(*dr), GFP_ATOMIC);
+		dr = kmalloc_obj(*dr);
 		if (!dr) {
 			usb_free_urb(urb);
 			return -ENOMEM;
@@ -343,7 +333,7 @@ static int bpa10x_send_frame(struct hci_dev *hdev, struct sk_buff *skb)
 
 	usb_anchor_urb(urb, &data->tx_anchor);
 
-	err = usb_submit_urb(urb, GFP_ATOMIC);
+	err = usb_submit_urb(urb, GFP_KERNEL);
 	if (err < 0) {
 		bt_dev_err(hdev, "urb %p submission failed", urb);
 		kfree(urb->setup_packet);
@@ -352,7 +342,7 @@ static int bpa10x_send_frame(struct hci_dev *hdev, struct sk_buff *skb)
 
 	usb_free_urb(urb);
 
-	return 0;
+	return err;
 }
 
 static int bpa10x_set_diag(struct hci_dev *hdev, bool enable)
@@ -374,7 +364,8 @@ static int bpa10x_set_diag(struct hci_dev *hdev, bool enable)
 	return 0;
 }
 
-static int bpa10x_probe(struct usb_interface *intf, const struct usb_device_id *id)
+static int bpa10x_probe(struct usb_interface *intf,
+			const struct usb_device_id *id)
 {
 	struct bpa10x_data *data;
 	struct hci_dev *hdev;
@@ -402,6 +393,7 @@ static int bpa10x_probe(struct usb_interface *intf, const struct usb_device_id *
 	hci_set_drvdata(hdev, data);
 
 	data->hdev = hdev;
+	data->hu.hdev = hdev;
 
 	SET_HCIDEV_DEV(hdev, &intf->dev);
 
@@ -412,7 +404,7 @@ static int bpa10x_probe(struct usb_interface *intf, const struct usb_device_id *
 	hdev->send     = bpa10x_send_frame;
 	hdev->set_diag = bpa10x_set_diag;
 
-	set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
+	hci_set_quirk(hdev, HCI_QUIRK_RESET_ON_CLOSE);
 
 	err = hci_register_dev(hdev);
 	if (err < 0) {

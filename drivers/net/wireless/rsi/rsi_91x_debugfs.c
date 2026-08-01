@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (c) 2014 Redpine Signals Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
@@ -28,8 +28,7 @@ static int rsi_sdio_stats_read(struct seq_file *seq, void *data)
 {
 	struct rsi_common *common = seq->private;
 	struct rsi_hw *adapter = common->priv;
-	struct rsi_91x_sdiodev *dev =
-		(struct rsi_91x_sdiodev *)adapter->rsi_dev;
+	struct rsi_91x_sdiodev *dev = adapter->rsi_dev;
 
 	seq_printf(seq, "total_sdio_interrupts: %d\n",
 		   dev->rx_info.sdio_int_counter);
@@ -59,7 +58,7 @@ static int rsi_sdio_stats_read(struct seq_file *seq, void *data)
 }
 
 /**
- * rsi_sdio_stats_open() - This funtion calls single open function of seq_file
+ * rsi_sdio_stats_open() - This function calls single open function of seq_file
  *			   to open file and read contents from it.
  * @inode: Pointer to the inode structure.
  * @file: Pointer to the file structure.
@@ -93,7 +92,7 @@ static int rsi_version_read(struct seq_file *seq, void *data)
 }
 
 /**
- * rsi_version_open() - This funtion calls single open function of seq_file to
+ * rsi_version_open() - This function calls single open function of seq_file to
  *			open file and read contents from it.
  * @inode: Pointer to the inode structure.
  * @file: Pointer to the file structure.
@@ -117,7 +116,7 @@ static int rsi_stats_read(struct seq_file *seq, void *data)
 {
 	struct rsi_common *common = seq->private;
 
-	unsigned char fsm_state[][32] = {
+	static const unsigned char fsm_state[][32] = {
 		"FSM_FW_NOT_LOADED",
 		"FSM_CARD_NOT_READY",
 		"FSM_COMMON_DEV_PARAMS_SENT",
@@ -178,7 +177,7 @@ static int rsi_stats_read(struct seq_file *seq, void *data)
 }
 
 /**
- * rsi_stats_open() - This funtion calls single open function of seq_file to
+ * rsi_stats_open() - This function calls single open function of seq_file to
  *		      open file and read contents from it.
  * @inode: Pointer to the inode structure.
  * @file: Pointer to the file structure.
@@ -207,7 +206,7 @@ static int rsi_debug_zone_read(struct seq_file *seq, void *data)
 }
 
 /**
- * rsi_debug_read() - This funtion calls single open function of seq_file to
+ * rsi_debug_read() - This function calls single open function of seq_file to
  *		      open file and read contents from it.
  * @inode: Pointer to the inode structure.
  * @file: Pointer to the file structure.
@@ -286,7 +285,7 @@ int rsi_init_dbgfs(struct rsi_hw *adapter)
 	int ii;
 	const struct rsi_dbg_files *files;
 
-	dev_dbgfs = kzalloc(sizeof(*dev_dbgfs), GFP_KERNEL);
+	dev_dbgfs = kzalloc_obj(*dev_dbgfs);
 	if (!dev_dbgfs)
 		return -ENOMEM;
 
@@ -296,11 +295,6 @@ int rsi_init_dbgfs(struct rsi_hw *adapter)
 		 wiphy_name(adapter->hw->wiphy));
 
 	dev_dbgfs->subdir = debugfs_create_dir(devdir, NULL);
-
-	if (!dev_dbgfs->subdir) {
-		kfree(dev_dbgfs);
-		return -ENOMEM;
-	}
 
 	for (ii = 0; ii < adapter->num_debugfs_entries; ii++) {
 		files = &dev_debugfs_files[ii];

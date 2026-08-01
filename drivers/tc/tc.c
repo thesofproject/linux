@@ -2,7 +2,7 @@
  *	TURBOchannel bus services.
  *
  *	Copyright (c) Harald Koerfgen, 1998
- *	Copyright (c) 2001, 2003, 2005, 2006  Maciej W. Rozycki
+ *	Copyright (c) 2001, 2003, 2005, 2006, 2018  Maciej W. Rozycki
  *	Copyright (c) 2005  James Simmons
  *
  *	This file is subject to the terms and conditions of the GNU
@@ -10,6 +10,7 @@
  *	directory of this archive for more details.
  */
 #include <linux/compiler.h>
+#include <linux/dma-mapping.h>
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/ioport.h>
@@ -46,7 +47,7 @@ static void __init tc_bus_add_devices(struct tc_bus *tbus)
 	for (slot = 0; slot < tbus->num_tcslots; slot++) {
 		slotaddr = tbus->slot_base + slot * slotsize;
 		extslotaddr = tbus->ext_slot_base + slot * extslotsize;
-		module = ioremap_nocache(slotaddr, slotsize);
+		module = ioremap(slotaddr, slotsize);
 		BUG_ON(!module);
 
 		offset = TC_OLDCARD;
@@ -81,7 +82,7 @@ static void __init tc_bus_add_devices(struct tc_bus *tbus)
 			goto out_err;
 
 		/* Found a board, allocate it an entry in the list */
-		tdev = kzalloc(sizeof(*tdev), GFP_KERNEL);
+		tdev = kzalloc_obj(*tdev);
 		if (!tdev) {
 			pr_err("tc%x: unable to allocate tc_dev\n", slot);
 			goto out_err;
@@ -91,6 +92,11 @@ static void __init tc_bus_add_devices(struct tc_bus *tbus)
 		tdev->dev.parent = &tbus->dev;
 		tdev->dev.bus = &tc_bus_type;
 		tdev->slot = slot;
+
+		/* TURBOchannel has 34-bit DMA addressing (16GiB space). */
+		tdev->dma_mask = DMA_BIT_MASK(34);
+		tdev->dev.dma_mask = &tdev->dma_mask;
+		tdev->dev.coherent_dma_mask = DMA_BIT_MASK(34);
 
 		for (i = 0; i < 8; i++) {
 			tdev->firmware[i] =
@@ -156,7 +162,7 @@ static int __init tc_init(void)
 	if (tc_bus.info.slot_size) {
 		unsigned int tc_clock = tc_get_speed(&tc_bus) / 100000;
 
-		pr_info("tc: TURBOchannel rev. %d at %d.%d MHz "
+		pr_info("tc: TURBOchannel rev. %d at %u.%u MHz "
 			"(with%s parity)\n", tc_bus.info.revision,
 			tc_clock / 10, tc_clock % 10,
 			tc_bus.info.parity ? "" : "out");

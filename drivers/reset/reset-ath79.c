@@ -1,18 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * AR71xx Reset Controller Driver
  * Author: Alban Bedel
  *
  * Copyright (C) 2015 Alban Bedel <albeu@free.fr>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/io.h>
@@ -23,7 +14,6 @@
 
 struct ath79_reset {
 	struct reset_controller_dev rcdev;
-	struct notifier_block restart_nb;
 	void __iomem *base;
 	spinlock_t lock;
 };
@@ -80,11 +70,9 @@ static const struct reset_control_ops ath79_reset_ops = {
 	.status = ath79_reset_status,
 };
 
-static int ath79_reset_restart_handler(struct notifier_block *nb,
-				unsigned long action, void *data)
+static int ath79_reset_restart_handler(struct sys_off_data *data)
 {
-	struct ath79_reset *ath79_reset =
-		container_of(nb, struct ath79_reset, restart_nb);
+	struct ath79_reset *ath79_reset = data->cb_data;
 
 	ath79_reset_assert(&ath79_reset->rcdev, FULL_CHIP_RESET);
 
@@ -94,7 +82,6 @@ static int ath79_reset_restart_handler(struct notifier_block *nb,
 static int ath79_reset_probe(struct platform_device *pdev)
 {
 	struct ath79_reset *ath79_reset;
-	struct resource *res;
 	int err;
 
 	ath79_reset = devm_kzalloc(&pdev->dev,
@@ -102,10 +89,7 @@ static int ath79_reset_probe(struct platform_device *pdev)
 	if (!ath79_reset)
 		return -ENOMEM;
 
-	platform_set_drvdata(pdev, ath79_reset);
-
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	ath79_reset->base = devm_ioremap_resource(&pdev->dev, res);
+	ath79_reset->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(ath79_reset->base))
 		return PTR_ERR(ath79_reset->base);
 
@@ -120,10 +104,7 @@ static int ath79_reset_probe(struct platform_device *pdev)
 	if (err)
 		return err;
 
-	ath79_reset->restart_nb.notifier_call = ath79_reset_restart_handler;
-	ath79_reset->restart_nb.priority = 128;
-
-	err = register_restart_handler(&ath79_reset->restart_nb);
+	err = devm_register_restart_handler(&pdev->dev, ath79_reset_restart_handler, ath79_reset);
 	if (err)
 		dev_warn(&pdev->dev, "Failed to register restart handler\n");
 

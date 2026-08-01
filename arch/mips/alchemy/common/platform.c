@@ -51,9 +51,9 @@ static void alchemy_8250_pm(struct uart_port *port, unsigned int state,
 #define PORT(_base, _irq)					\
 	{							\
 		.mapbase	= _base,			\
+		.mapsize	= 0x1000,			\
 		.irq		= _irq,				\
 		.regshift	= 2,				\
-		.iotype		= UPIO_AU,			\
 		.flags		= UPF_SKIP_TEST | UPF_IOREMAP | \
 				  UPF_FIXED_TYPE,		\
 		.type		= PORT_16550A,			\
@@ -115,7 +115,7 @@ static void __init alchemy_setup_uarts(int ctype)
 	uartclk = clk_get_rate(clk);
 	clk_put(clk);
 
-	ports = kzalloc(s * (c + 1), GFP_KERNEL);
+	ports = kcalloc(s, (c + 1), GFP_KERNEL);
 	if (!ports) {
 		printk(KERN_INFO "Alchemy: no memory for UART data\n");
 		return;
@@ -124,16 +124,20 @@ static void __init alchemy_setup_uarts(int ctype)
 	au1xx0_uart_device.dev.platform_data = ports;
 
 	/* Fill up uartclk. */
-	for (s = 0; s < c; s++)
+	for (s = 0; s < c; s++) {
 		ports[s].uartclk = uartclk;
+		if (au_platform_setup(&ports[s]) < 0) {
+			kfree(ports);
+			printk(KERN_INFO "Alchemy: missing support for UARTs\n");
+			return;
+		}
+	}
 	if (platform_device_register(&au1xx0_uart_device))
 		printk(KERN_INFO "Alchemy: failed to register UARTs\n");
 }
 
 
-/* The dmamask must be set for OHCI/EHCI to work */
-static u64 alchemy_ohci_dmamask = DMA_BIT_MASK(32);
-static u64 __maybe_unused alchemy_ehci_dmamask = DMA_BIT_MASK(32);
+static u64 alchemy_all_dmamask = DMA_BIT_MASK(32);
 
 /* Power on callback for the ehci platform driver */
 static int alchemy_ehci_power_on(struct platform_device *pdev)
@@ -198,10 +202,10 @@ static unsigned long alchemy_ehci_data[][2] __initdata = {
 
 static int __init _new_usbres(struct resource **r, struct platform_device **d)
 {
-	*r = kzalloc(sizeof(struct resource) * 2, GFP_KERNEL);
+	*r = kzalloc_objs(struct resource, 2);
 	if (!*r)
 		return -ENOMEM;
-	*d = kzalloc(sizeof(struct platform_device), GFP_KERNEL);
+	*d = kzalloc_obj(struct platform_device);
 	if (!*d) {
 		kfree(*r);
 		return -ENOMEM;
@@ -231,7 +235,7 @@ static void __init alchemy_setup_usb(int ctype)
 	res[1].flags = IORESOURCE_IRQ;
 	pdev->name = "ohci-platform";
 	pdev->id = 0;
-	pdev->dev.dma_mask = &alchemy_ohci_dmamask;
+	pdev->dev.dma_mask = &alchemy_all_dmamask;
 	pdev->dev.platform_data = &alchemy_ohci_pdata;
 
 	if (platform_device_register(pdev))
@@ -251,7 +255,7 @@ static void __init alchemy_setup_usb(int ctype)
 		res[1].flags = IORESOURCE_IRQ;
 		pdev->name = "ehci-platform";
 		pdev->id = 0;
-		pdev->dev.dma_mask = &alchemy_ehci_dmamask;
+		pdev->dev.dma_mask = &alchemy_all_dmamask;
 		pdev->dev.platform_data = &alchemy_ehci_pdata;
 
 		if (platform_device_register(pdev))
@@ -271,7 +275,7 @@ static void __init alchemy_setup_usb(int ctype)
 		res[1].flags = IORESOURCE_IRQ;
 		pdev->name = "ohci-platform";
 		pdev->id = 1;
-		pdev->dev.dma_mask = &alchemy_ohci_dmamask;
+		pdev->dev.dma_mask = &alchemy_all_dmamask;
 		pdev->dev.platform_data = &alchemy_ohci_pdata;
 
 		if (platform_device_register(pdev))
@@ -338,7 +342,11 @@ static struct platform_device au1xxx_eth0_device = {
 	.name		= "au1000-eth",
 	.id		= 0,
 	.num_resources	= MAC_RES_COUNT,
-	.dev.platform_data = &au1xxx_eth0_platform_data,
+	.dev = {
+		.dma_mask               = &alchemy_all_dmamask,
+		.coherent_dma_mask      = DMA_BIT_MASK(32),
+		.platform_data          = &au1xxx_eth0_platform_data,
+	},
 };
 
 static struct resource au1xxx_eth1_resources[][MAC_RES_COUNT] __initdata = {
@@ -370,7 +378,11 @@ static struct platform_device au1xxx_eth1_device = {
 	.name		= "au1000-eth",
 	.id		= 1,
 	.num_resources	= MAC_RES_COUNT,
-	.dev.platform_data = &au1xxx_eth1_platform_data,
+	.dev = {
+		.dma_mask               = &alchemy_all_dmamask,
+		.coherent_dma_mask      = DMA_BIT_MASK(32),
+		.platform_data          = &au1xxx_eth1_platform_data,
+	},
 };
 
 void __init au1xxx_override_eth_cfg(unsigned int port,
@@ -397,8 +409,8 @@ static void __init alchemy_setup_macs(int ctype)
 	if (alchemy_get_macs(ctype) < 1)
 		return;
 
-	macres = kmemdup(au1xxx_eth0_resources[ctype],
-			 sizeof(struct resource) * MAC_RES_COUNT, GFP_KERNEL);
+	macres = kmemdup_array(au1xxx_eth0_resources[ctype], MAC_RES_COUNT,
+			       sizeof(*macres), GFP_KERNEL);
 	if (!macres) {
 		printk(KERN_INFO "Alchemy: no memory for MAC0 resources\n");
 		return;
@@ -418,8 +430,8 @@ static void __init alchemy_setup_macs(int ctype)
 	if (alchemy_get_macs(ctype) < 2)
 		return;
 
-	macres = kmemdup(au1xxx_eth1_resources[ctype],
-			 sizeof(struct resource) * MAC_RES_COUNT, GFP_KERNEL);
+	macres = kmemdup_array(au1xxx_eth1_resources[ctype], MAC_RES_COUNT,
+			       sizeof(*macres), GFP_KERNEL);
 	if (!macres) {
 		printk(KERN_INFO "Alchemy: no memory for MAC1 resources\n");
 		return;

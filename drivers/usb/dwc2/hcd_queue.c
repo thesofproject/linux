@@ -3,36 +3,6 @@
  * hcd_queue.c - DesignWare HS OTG Controller host queuing routines
  *
  * Copyright (C) 2004-2013 Synopsys, Inc.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer,
- *    without modification.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The names of the above-listed copyright holders may not be used
- *    to endorse or promote products derived from this software without
- *    specific prior written permission.
- *
- * ALTERNATIVELY, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") as published by the Free Software
- * Foundation; either version 2 of the License, or (at your option) any
- * later version.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
- * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 /*
@@ -46,6 +16,7 @@
 #include <linux/interrupt.h>
 #include <linux/dma-mapping.h>
 #include <linux/io.h>
+#include <linux/seq_buf.h>
 #include <linux/slab.h>
 #include <linux/usb.h>
 
@@ -59,7 +30,7 @@
 #define DWC2_UNRESERVE_DELAY (msecs_to_jiffies(5))
 
 /* If we get a NAK, wait this long before retrying */
-#define DWC2_RETRY_WAIT_DELAY (msecs_to_jiffies(1))
+#define DWC2_RETRY_WAIT_DELAY (1 * NSEC_PER_MSEC)
 
 /**
  * dwc2_periodic_channel_available() - Checks that a channel is available for a
@@ -383,47 +354,12 @@ static unsigned long *dwc2_get_ls_map(struct dwc2_hsotg *hsotg,
 	/* Get the map and adjust if this is a multi_tt hub */
 	map = qh->dwc_tt->periodic_bitmaps;
 	if (qh->dwc_tt->usb_tt->multi)
-		map += DWC2_ELEMENTS_PER_LS_BITMAP * qh->ttport;
+		map += DWC2_ELEMENTS_PER_LS_BITMAP * (qh->ttport - 1);
 
 	return map;
 }
 
 #ifdef DWC2_PRINT_SCHEDULE
-/*
- * cat_printf() - A printf() + strcat() helper
- *
- * This is useful for concatenating a bunch of strings where each string is
- * constructed using printf.
- *
- * @buf:   The destination buffer; will be updated to point after the printed
- *         data.
- * @size:  The number of bytes in the buffer (includes space for '\0').
- * @fmt:   The format for printf.
- * @...:   The args for printf.
- */
-static __printf(3, 4)
-void cat_printf(char **buf, size_t *size, const char *fmt, ...)
-{
-	va_list args;
-	int i;
-
-	if (*size == 0)
-		return;
-
-	va_start(args, fmt);
-	i = vsnprintf(*buf, *size, fmt, args);
-	va_end(args);
-
-	if (i >= *size) {
-		(*buf)[*size - 1] = '\0';
-		*buf += *size;
-		*size = 0;
-	} else {
-		*buf += i;
-		*size -= i;
-	}
-}
-
 /*
  * pmap_print() - Print the given periodic map
  *
@@ -446,9 +382,7 @@ static void pmap_print(unsigned long *map, int bits_per_period,
 	int period;
 
 	for (period = 0; period < periods_in_map; period++) {
-		char tmp[64];
-		char *buf = tmp;
-		size_t buf_size = sizeof(tmp);
+		DECLARE_SEQ_BUF(buf, 64);
 		int period_start = period * bits_per_period;
 		int period_end = period_start + bits_per_period;
 		int start = 0;
@@ -472,19 +406,19 @@ static void pmap_print(unsigned long *map, int bits_per_period,
 				continue;
 
 			if (!printed)
-				cat_printf(&buf, &buf_size, "%s %d: ",
-					   period_name, period);
+				seq_buf_printf(&buf, "%s %d: ",
+					       period_name, period);
 			else
-				cat_printf(&buf, &buf_size, ", ");
+				seq_buf_puts(&buf, ", ");
 			printed = true;
 
-			cat_printf(&buf, &buf_size, "%d %s -%3d %s", start,
-				   units, start + count - 1, units);
+			seq_buf_printf(&buf, "%d %s -%3d %s", start,
+				       units, start + count - 1, units);
 			count = 0;
 		}
 
 		if (printed)
-			print_fn(tmp, print_data);
+			print_fn(seq_buf_str(&buf), print_data);
 	}
 }
 
@@ -675,10 +609,11 @@ static int dwc2_hs_pmap_schedule(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh,
 }
 
 /**
- * dwc2_ls_pmap_unschedule() - Undo work done by dwc2_hs_pmap_schedule()
+ * dwc2_hs_pmap_unschedule() - Undo work done by dwc2_hs_pmap_schedule()
  *
  * @hsotg:       The HCD state structure for the DWC OTG controller.
  * @qh:          QH for the periodic transfer.
+ * @index:       Transfer index
  */
 static void dwc2_hs_pmap_unschedule(struct dwc2_hsotg *hsotg,
 				    struct dwc2_qh *qh, int index)
@@ -707,7 +642,7 @@ static void dwc2_hs_pmap_unschedule(struct dwc2_hsotg *hsotg,
 static int dwc2_uframe_schedule_split(struct dwc2_hsotg *hsotg,
 				      struct dwc2_qh *qh)
 {
-	int bytecount = dwc2_hb_mult(qh->maxp) * dwc2_max_packet(qh->maxp);
+	int bytecount = qh->maxp_mult * qh->maxp;
 	int ls_search_slice;
 	int err = 0;
 	int host_interval_in_sched;
@@ -1107,7 +1042,7 @@ static void dwc2_pick_first_frame(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh)
 	earliest_frame = dwc2_frame_num_inc(frame_number, 1);
 	next_active_frame = earliest_frame;
 
-	/* Get the "no microframe schduler" out of the way... */
+	/* Get the "no microframe scheduler" out of the way... */
 	if (!hsotg->params.uframe_sched) {
 		if (qh->do_split)
 			/* Splits are active at microframe 0 minus 1 */
@@ -1276,11 +1211,11 @@ static void dwc2_do_unreserve(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh)
  * release the reservation.  This worker is called after the appropriate
  * delay.
  *
- * @work: Pointer to a qh unreserve_work.
+ * @t: Address to a qh unreserve_work.
  */
 static void dwc2_unreserve_timer_fn(struct timer_list *t)
 {
-	struct dwc2_qh *qh = from_timer(qh, t, unreserve_timer);
+	struct dwc2_qh *qh = timer_container_of(qh, t, unreserve_timer);
 	struct dwc2_hsotg *hsotg = qh->hsotg;
 	unsigned long flags;
 
@@ -1331,7 +1266,7 @@ static int dwc2_check_max_xfer_size(struct dwc2_hsotg *hsotg,
 	u32 max_channel_xfer_size;
 	int status = 0;
 
-	max_xfer_size = dwc2_max_packet(qh->maxp) * dwc2_hb_mult(qh->maxp);
+	max_xfer_size = qh->maxp * qh->maxp_mult;
 	max_channel_xfer_size = hsotg->params.max_transfer_size;
 
 	if (max_xfer_size > max_channel_xfer_size) {
@@ -1367,7 +1302,7 @@ static int dwc2_schedule_periodic(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh)
 	}
 
 	/* Cancel pending unreserve; if canceled OK, unreserve was pending */
-	if (del_timer(&qh->unreserve_timer))
+	if (timer_delete(&qh->unreserve_timer))
 		WARN_ON(!qh->unreserve_pending);
 
 	/*
@@ -1463,10 +1398,12 @@ static void dwc2_deschedule_periodic(struct dwc2_hsotg *hsotg,
  * qh back to the "inactive" list, then queues transactions.
  *
  * @t: Pointer to wait_timer in a qh.
+ *
+ * Return: HRTIMER_NORESTART to not automatically restart this timer.
  */
-static void dwc2_wait_timer_fn(struct timer_list *t)
+static enum hrtimer_restart dwc2_wait_timer_fn(struct hrtimer *t)
 {
-	struct dwc2_qh *qh = from_timer(qh, t, wait_timer);
+	struct dwc2_qh *qh = container_of(t, struct dwc2_qh, wait_timer);
 	struct dwc2_hsotg *hsotg = qh->hsotg;
 	unsigned long flags;
 
@@ -1490,6 +1427,7 @@ static void dwc2_wait_timer_fn(struct timer_list *t)
 	}
 
 	spin_unlock_irqrestore(&hsotg->lock, flags);
+	return HRTIMER_NORESTART;
 }
 
 /**
@@ -1509,23 +1447,25 @@ static void dwc2_qh_init(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh,
 	bool ep_is_in = !!dwc2_hcd_is_pipe_in(&urb->pipe_info);
 	bool ep_is_isoc = (ep_type == USB_ENDPOINT_XFER_ISOC);
 	bool ep_is_int = (ep_type == USB_ENDPOINT_XFER_INT);
-	u32 hprt = dwc2_readl(hsotg->regs + HPRT0);
+	u32 hprt = dwc2_readl(hsotg, HPRT0);
 	u32 prtspd = (hprt & HPRT0_SPD_MASK) >> HPRT0_SPD_SHIFT;
 	bool do_split = (prtspd == HPRT0_SPD_HIGH_SPEED &&
 			 dev_speed != USB_SPEED_HIGH);
-	int maxp = dwc2_hcd_get_mps(&urb->pipe_info);
-	int bytecount = dwc2_hb_mult(maxp) * dwc2_max_packet(maxp);
+	int maxp = dwc2_hcd_get_maxp(&urb->pipe_info);
+	int maxp_mult = dwc2_hcd_get_maxp_mult(&urb->pipe_info);
+	int bytecount = maxp_mult * maxp;
 	char *speed, *type;
 
 	/* Initialize QH */
 	qh->hsotg = hsotg;
 	timer_setup(&qh->unreserve_timer, dwc2_unreserve_timer_fn, 0);
-	timer_setup(&qh->wait_timer, dwc2_wait_timer_fn, 0);
+	hrtimer_setup(&qh->wait_timer, &dwc2_wait_timer_fn, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	qh->ep_type = ep_type;
 	qh->ep_is_in = ep_is_in;
 
 	qh->data_toggle = DWC2_HC_PID_DATA0;
 	qh->maxp = maxp;
+	qh->maxp_mult = maxp_mult;
 	INIT_LIST_HEAD(&qh->qtd_list);
 	INIT_LIST_HEAD(&qh->qh_list_entry);
 
@@ -1631,7 +1571,7 @@ static void dwc2_qh_init(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh,
  * @hsotg:        The HCD state structure for the DWC OTG controller
  * @urb:          Holds the information about the device/endpoint needed
  *                to initialize the QH
- * @atomic_alloc: Flag to do atomic allocation if needed
+ * @mem_flags:   Flags for allocating memory.
  *
  * Return: Pointer to the newly allocated QH, or NULL on error
  */
@@ -1645,7 +1585,7 @@ struct dwc2_qh *dwc2_hcd_qh_create(struct dwc2_hsotg *hsotg,
 		return NULL;
 
 	/* Allocate memory */
-	qh = kzalloc(sizeof(*qh), mem_flags);
+	qh = kzalloc_obj(*qh, mem_flags);
 	if (!qh)
 		return NULL;
 
@@ -1674,7 +1614,7 @@ struct dwc2_qh *dwc2_hcd_qh_create(struct dwc2_hsotg *hsotg,
 void dwc2_hcd_qh_free(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh)
 {
 	/* Make sure any unreserve work is finished. */
-	if (del_timer_sync(&qh->unreserve_timer)) {
+	if (timer_delete_sync(&qh->unreserve_timer)) {
 		unsigned long flags;
 
 		spin_lock_irqsave(&hsotg->lock, flags);
@@ -1689,12 +1629,15 @@ void dwc2_hcd_qh_free(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh)
 	 * won't do anything anyway, but we want it to finish before we free
 	 * memory.
 	 */
-	del_timer_sync(&qh->wait_timer);
+	hrtimer_cancel(&qh->wait_timer);
 
 	dwc2_host_put_tt_info(hsotg, qh->dwc_tt);
 
 	if (qh->desc_list)
 		dwc2_hcd_qh_free_ddma(hsotg, qh);
+	else if (hsotg->unaligned_cache && qh->dw_align_buf)
+		kmem_cache_free(hsotg->unaligned_cache, qh->dw_align_buf);
+
 	kfree(qh);
 }
 
@@ -1712,6 +1655,7 @@ int dwc2_hcd_qh_add(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh)
 {
 	int status;
 	u32 intr_mask;
+	ktime_t delay;
 
 	if (dbg_qh(qh))
 		dev_vdbg(hsotg->dev, "%s()\n", __func__);
@@ -1730,8 +1674,8 @@ int dwc2_hcd_qh_add(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh)
 			list_add_tail(&qh->qh_list_entry,
 				      &hsotg->non_periodic_sched_waiting);
 			qh->wait_timer_cancel = false;
-			mod_timer(&qh->wait_timer,
-				  jiffies + DWC2_RETRY_WAIT_DELAY + 1);
+			delay = ktime_set(0, DWC2_RETRY_WAIT_DELAY);
+			hrtimer_start(&qh->wait_timer, delay, HRTIMER_MODE_REL);
 		} else {
 			list_add_tail(&qh->qh_list_entry,
 				      &hsotg->non_periodic_sched_inactive);
@@ -1743,9 +1687,9 @@ int dwc2_hcd_qh_add(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh)
 	if (status)
 		return status;
 	if (!hsotg->periodic_qh_count) {
-		intr_mask = dwc2_readl(hsotg->regs + GINTMSK);
+		intr_mask = dwc2_readl(hsotg, GINTMSK);
 		intr_mask |= GINTSTS_SOF;
-		dwc2_writel(intr_mask, hsotg->regs + GINTMSK);
+		dwc2_writel(hsotg, intr_mask, GINTMSK);
 	}
 	hsotg->periodic_qh_count++;
 
@@ -1784,9 +1728,9 @@ void dwc2_hcd_qh_unlink(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh)
 	hsotg->periodic_qh_count--;
 	if (!hsotg->periodic_qh_count &&
 	    !hsotg->params.dma_desc_enable) {
-		intr_mask = dwc2_readl(hsotg->regs + GINTMSK);
+		intr_mask = dwc2_readl(hsotg, GINTMSK);
 		intr_mask &= ~GINTSTS_SOF;
-		dwc2_writel(intr_mask, hsotg->regs + GINTMSK);
+		dwc2_writel(hsotg, intr_mask, GINTMSK);
 	}
 }
 

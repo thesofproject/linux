@@ -1,4 +1,4 @@
-/**
+/*
  * @section LICENSE
  * Copyright (c) 2014 Redpine Signals Inc.
  *
@@ -22,10 +22,15 @@
 #include "rsi_main.h"
 #include "rsi_common.h"
 
+#define RSI_USB_VENDOR_ID	0x1618
+#define RSI_USB_PID_9113	0x9113
+#define RSI_USB_PID_9116	0x9116
+
 #define USB_INTERNAL_REG_1           0x25000
 #define RSI_USB_READY_MAGIC_NUM      0xab
 #define FW_STATUS_REG                0x41050012
 #define RSI_TA_HOLD_REG              0x22000844
+#define RSI_FW_WDT_DISABLE_REQ	     0x69
 
 #define USB_VENDOR_REGISTER_READ     0x15
 #define USB_VENDOR_REGISTER_WRITE    0x16
@@ -38,6 +43,8 @@
 
 #define RSI_USB_BUF_SIZE	     4096
 #define RSI_USB_CTRL_BUF_SIZE	     0x04
+
+#define RSI_MAX_RX_USB_PKT_SIZE	3000
 
 struct rx_usb_ctrl_block {
 	u8 *data;

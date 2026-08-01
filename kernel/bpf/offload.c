@@ -1,16 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2017 Netronome Systems, Inc.
- *
- * This software is licensed under the GNU General License Version 2,
- * June 1991 as shown in the file COPYING in the top-level directory of this
- * source tree.
- *
- * THE COPYRIGHT HOLDERS AND/OR OTHER PARTIES PROVIDE THE PROGRAM "AS IS"
- * WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING,
- * BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE. THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE
- * OF THE PROGRAM IS WITH YOU. SHOULD THE PROGRAM PROVE DEFECTIVE, YOU ASSUME
- * THE COST OF ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
+ * Copyright (C) 2017-2018 Netronome Systems, Inc.
  */
 
 #include <linux/bpf.h>
@@ -18,19 +8,46 @@
 #include <linux/bug.h>
 #include <linux/kdev_t.h>
 #include <linux/list.h>
+#include <linux/lockdep.h>
 #include <linux/netdevice.h>
 #include <linux/printk.h>
 #include <linux/proc_ns.h>
+#include <linux/rhashtable.h>
 #include <linux/rtnetlink.h>
 #include <linux/rwsem.h>
+#include <net/netdev_lock.h>
+#include <net/xdp.h>
 
-/* Protects bpf_prog_offload_devs, bpf_map_offload_devs and offload members
+/* Protects offdevs, members of bpf_offload_netdev and offload members
  * of all progs.
  * RTNL lock cannot be taken when holding this lock.
  */
 static DECLARE_RWSEM(bpf_devs_lock);
-static LIST_HEAD(bpf_prog_offload_devs);
-static LIST_HEAD(bpf_map_offload_devs);
+
+struct bpf_offload_dev {
+	const struct bpf_prog_offload_ops *ops;
+	struct list_head netdevs;
+	void *priv;
+};
+
+struct bpf_offload_netdev {
+	struct rhash_head l;
+	struct net_device *netdev;
+	struct bpf_offload_dev *offdev; /* NULL when bound-only */
+	struct list_head progs;
+	struct list_head maps;
+	struct list_head offdev_netdevs;
+};
+
+static const struct rhashtable_params offdevs_params = {
+	.nelem_hint		= 4,
+	.key_len		= sizeof(struct net_device *),
+	.key_offset		= offsetof(struct bpf_offload_netdev, netdev),
+	.head_offset		= offsetof(struct bpf_offload_netdev, l),
+	.automatic_shrinking	= true,
+};
+
+static struct rhashtable offdevs;
 
 static int bpf_dev_offload_check(struct net_device *netdev)
 {
@@ -41,84 +58,246 @@ static int bpf_dev_offload_check(struct net_device *netdev)
 	return 0;
 }
 
-int bpf_prog_offload_init(struct bpf_prog *prog, union bpf_attr *attr)
+static struct bpf_offload_netdev *
+bpf_offload_find_netdev(struct net_device *netdev)
 {
+	lockdep_assert_held(&bpf_devs_lock);
+
+	return rhashtable_lookup_fast(&offdevs, &netdev, offdevs_params);
+}
+
+static int __bpf_offload_dev_netdev_register(struct bpf_offload_dev *offdev,
+					     struct net_device *netdev)
+{
+	struct bpf_offload_netdev *ondev;
+	int err;
+
+	ondev = kzalloc_obj(*ondev);
+	if (!ondev)
+		return -ENOMEM;
+
+	ondev->netdev = netdev;
+	ondev->offdev = offdev;
+	INIT_LIST_HEAD(&ondev->progs);
+	INIT_LIST_HEAD(&ondev->maps);
+
+	err = rhashtable_insert_fast(&offdevs, &ondev->l, offdevs_params);
+	if (err) {
+		netdev_warn(netdev, "failed to register for BPF offload\n");
+		goto err_free;
+	}
+
+	if (offdev)
+		list_add(&ondev->offdev_netdevs, &offdev->netdevs);
+	return 0;
+
+err_free:
+	kfree(ondev);
+	return err;
+}
+
+static void __bpf_prog_offload_destroy(struct bpf_prog *prog)
+{
+	struct bpf_prog_offload *offload = prog->aux->offload;
+
+	if (offload->dev_state)
+		offload->offdev->ops->destroy(prog);
+
+	list_del_init(&offload->offloads);
+	kfree(offload);
+	prog->aux->offload = NULL;
+}
+
+static int bpf_map_offload_ndo(struct bpf_offloaded_map *offmap,
+			       enum bpf_netdev_command cmd)
+{
+	struct netdev_bpf data = {};
+	struct net_device *netdev;
+
+	ASSERT_RTNL();
+
+	data.command = cmd;
+	data.offmap = offmap;
+	/* Caller must make sure netdev is valid */
+	netdev = offmap->netdev;
+
+	return netdev->netdev_ops->ndo_bpf(netdev, &data);
+}
+
+static void __bpf_map_offload_destroy(struct bpf_offloaded_map *offmap)
+{
+	WARN_ON(bpf_map_offload_ndo(offmap, BPF_OFFLOAD_MAP_FREE));
+	/* Make sure BPF_MAP_GET_NEXT_ID can't find this dead map */
+	bpf_map_free_id(&offmap->map);
+	list_del_init(&offmap->offloads);
+	offmap->netdev = NULL;
+}
+
+static void __bpf_offload_dev_netdev_unregister(struct bpf_offload_dev *offdev,
+						struct net_device *netdev)
+{
+	struct bpf_offload_netdev *ondev, *altdev = NULL;
+	struct bpf_offloaded_map *offmap, *mtmp;
+	struct bpf_prog_offload *offload, *ptmp;
+
+	ASSERT_RTNL();
+
+	ondev = rhashtable_lookup_fast(&offdevs, &netdev, offdevs_params);
+	if (WARN_ON(!ondev))
+		return;
+
+	WARN_ON(rhashtable_remove_fast(&offdevs, &ondev->l, offdevs_params));
+
+	/* Try to move the objects to another netdev of the device */
+	if (offdev) {
+		list_del(&ondev->offdev_netdevs);
+		altdev = list_first_entry_or_null(&offdev->netdevs,
+						  struct bpf_offload_netdev,
+						  offdev_netdevs);
+	}
+
+	if (altdev) {
+		list_for_each_entry(offload, &ondev->progs, offloads)
+			offload->netdev = altdev->netdev;
+		list_splice_init(&ondev->progs, &altdev->progs);
+
+		list_for_each_entry(offmap, &ondev->maps, offloads)
+			offmap->netdev = altdev->netdev;
+		list_splice_init(&ondev->maps, &altdev->maps);
+	} else {
+		list_for_each_entry_safe(offload, ptmp, &ondev->progs, offloads)
+			__bpf_prog_offload_destroy(offload->prog);
+		list_for_each_entry_safe(offmap, mtmp, &ondev->maps, offloads)
+			__bpf_map_offload_destroy(offmap);
+	}
+
+	WARN_ON(!list_empty(&ondev->progs));
+	WARN_ON(!list_empty(&ondev->maps));
+	kfree(ondev);
+}
+
+static int __bpf_prog_dev_bound_init(struct bpf_prog *prog, struct net_device *netdev)
+{
+	struct bpf_offload_netdev *ondev;
 	struct bpf_prog_offload *offload;
+	int err;
+
+	offload = kzalloc_obj(*offload, GFP_USER);
+	if (!offload)
+		return -ENOMEM;
+
+	offload->prog = prog;
+	offload->netdev = netdev;
+
+	ondev = bpf_offload_find_netdev(offload->netdev);
+	/* When program is offloaded require presence of "true"
+	 * bpf_offload_netdev, avoid the one created for !ondev case below.
+	 */
+	if (bpf_prog_is_offloaded(prog->aux) && (!ondev || !ondev->offdev)) {
+		err = -EINVAL;
+		goto err_free;
+	}
+	if (!ondev) {
+		/* When only binding to the device, explicitly
+		 * create an entry in the hashtable.
+		 */
+		err = __bpf_offload_dev_netdev_register(NULL, offload->netdev);
+		if (err)
+			goto err_free;
+		ondev = bpf_offload_find_netdev(offload->netdev);
+	}
+	offload->offdev = ondev->offdev;
+	prog->aux->offload = offload;
+	list_add_tail(&offload->offloads, &ondev->progs);
+
+	return 0;
+err_free:
+	kfree(offload);
+	return err;
+}
+
+int bpf_prog_dev_bound_init(struct bpf_prog *prog, union bpf_attr *attr)
+{
+	struct net_device *netdev;
 	int err;
 
 	if (attr->prog_type != BPF_PROG_TYPE_SCHED_CLS &&
 	    attr->prog_type != BPF_PROG_TYPE_XDP)
 		return -EINVAL;
 
-	if (attr->prog_flags)
+	if (attr->prog_flags & ~(BPF_F_XDP_DEV_BOUND_ONLY | BPF_F_XDP_HAS_FRAGS))
 		return -EINVAL;
 
-	offload = kzalloc(sizeof(*offload), GFP_USER);
-	if (!offload)
-		return -ENOMEM;
+	/* Frags are allowed only if program is dev-bound-only, but not
+	 * if it is requesting bpf offload.
+	 */
+	if (attr->prog_flags & BPF_F_XDP_HAS_FRAGS &&
+	    !(attr->prog_flags & BPF_F_XDP_DEV_BOUND_ONLY))
+		return -EINVAL;
 
-	offload->prog = prog;
+	if (attr->prog_type == BPF_PROG_TYPE_SCHED_CLS &&
+	    attr->prog_flags & BPF_F_XDP_DEV_BOUND_ONLY)
+		return -EINVAL;
 
-	offload->netdev = dev_get_by_index(current->nsproxy->net_ns,
-					   attr->prog_ifindex);
-	err = bpf_dev_offload_check(offload->netdev);
+	netdev = dev_get_by_index(current->nsproxy->net_ns, attr->prog_ifindex);
+	if (!netdev)
+		return -EINVAL;
+
+	err = bpf_dev_offload_check(netdev);
 	if (err)
-		goto err_maybe_put;
+		goto out;
+
+	prog->aux->offload_requested = !(attr->prog_flags & BPF_F_XDP_DEV_BOUND_ONLY);
 
 	down_write(&bpf_devs_lock);
-	if (offload->netdev->reg_state != NETREG_REGISTERED) {
-		err = -EINVAL;
-		goto err_unlock;
-	}
-	prog->aux->offload = offload;
-	list_add_tail(&offload->offloads, &bpf_prog_offload_devs);
-	dev_put(offload->netdev);
+	err = __bpf_prog_dev_bound_init(prog, netdev);
 	up_write(&bpf_devs_lock);
 
-	return 0;
-err_unlock:
-	up_write(&bpf_devs_lock);
-err_maybe_put:
-	if (offload->netdev)
-		dev_put(offload->netdev);
-	kfree(offload);
+out:
+	dev_put(netdev);
 	return err;
 }
 
-static int __bpf_offload_ndo(struct bpf_prog *prog, enum bpf_netdev_command cmd,
-			     struct netdev_bpf *data)
+int bpf_prog_dev_bound_inherit(struct bpf_prog *new_prog, struct bpf_prog *old_prog)
 {
-	struct bpf_prog_offload *offload = prog->aux->offload;
-	struct net_device *netdev;
-
-	ASSERT_RTNL();
-
-	if (!offload)
-		return -ENODEV;
-	netdev = offload->netdev;
-
-	data->command = cmd;
-
-	return netdev->netdev_ops->ndo_bpf(netdev, data);
-}
-
-int bpf_prog_offload_verifier_prep(struct bpf_verifier_env *env)
-{
-	struct netdev_bpf data = {};
 	int err;
 
-	data.verifier.prog = env->prog;
+	if (!bpf_prog_is_dev_bound(old_prog->aux))
+		return 0;
 
-	rtnl_lock();
-	err = __bpf_offload_ndo(env->prog, BPF_OFFLOAD_VERIFIER_PREP, &data);
-	if (err)
-		goto exit_unlock;
+	if (bpf_prog_is_offloaded(old_prog->aux))
+		return -EINVAL;
 
-	env->prog->aux->offload->dev_ops = data.verifier.ops;
-	env->prog->aux->offload->dev_state = true;
-exit_unlock:
-	rtnl_unlock();
+	new_prog->aux->dev_bound = old_prog->aux->dev_bound;
+	new_prog->aux->offload_requested = old_prog->aux->offload_requested;
+
+	down_write(&bpf_devs_lock);
+	if (!old_prog->aux->offload) {
+		err = -EINVAL;
+		goto out;
+	}
+
+	err = __bpf_prog_dev_bound_init(new_prog, old_prog->aux->offload->netdev);
+
+out:
+	up_write(&bpf_devs_lock);
 	return err;
+}
+
+int bpf_prog_offload_verifier_prep(struct bpf_prog *prog)
+{
+	struct bpf_prog_offload *offload;
+	int ret = -ENODEV;
+
+	down_read(&bpf_devs_lock);
+	offload = prog->aux->offload;
+	if (offload) {
+		ret = offload->offdev->ops->prepare(prog);
+		offload->dev_state = !ret;
+	}
+	up_read(&bpf_devs_lock);
+
+	return ret;
 }
 
 int bpf_prog_offload_verify_insn(struct bpf_verifier_env *env,
@@ -130,50 +309,97 @@ int bpf_prog_offload_verify_insn(struct bpf_verifier_env *env,
 	down_read(&bpf_devs_lock);
 	offload = env->prog->aux->offload;
 	if (offload)
-		ret = offload->dev_ops->insn_hook(env, insn_idx, prev_insn_idx);
+		ret = offload->offdev->ops->insn_hook(env, insn_idx,
+						      prev_insn_idx);
 	up_read(&bpf_devs_lock);
 
 	return ret;
 }
 
-static void __bpf_prog_offload_destroy(struct bpf_prog *prog)
+int bpf_prog_offload_finalize(struct bpf_verifier_env *env)
 {
-	struct bpf_prog_offload *offload = prog->aux->offload;
-	struct netdev_bpf data = {};
+	struct bpf_prog_offload *offload;
+	int ret = -ENODEV;
 
-	data.offload.prog = prog;
+	down_read(&bpf_devs_lock);
+	offload = env->prog->aux->offload;
+	if (offload) {
+		if (offload->offdev->ops->finalize)
+			ret = offload->offdev->ops->finalize(env);
+		else
+			ret = 0;
+	}
+	up_read(&bpf_devs_lock);
 
-	if (offload->dev_state)
-		WARN_ON(__bpf_offload_ndo(prog, BPF_OFFLOAD_DESTROY, &data));
-
-	/* Make sure BPF_PROG_GET_NEXT_ID can't find this dead program */
-	bpf_prog_free_id(prog, true);
-
-	list_del_init(&offload->offloads);
-	kfree(offload);
-	prog->aux->offload = NULL;
+	return ret;
 }
 
-void bpf_prog_offload_destroy(struct bpf_prog *prog)
+void
+bpf_prog_offload_replace_insn(struct bpf_verifier_env *env, u32 off,
+			      struct bpf_insn *insn)
 {
+	const struct bpf_prog_offload_ops *ops;
+	struct bpf_prog_offload *offload;
+	int ret = -EOPNOTSUPP;
+
+	down_read(&bpf_devs_lock);
+	offload = env->prog->aux->offload;
+	if (offload) {
+		ops = offload->offdev->ops;
+		if (!offload->opt_failed && ops->replace_insn)
+			ret = ops->replace_insn(env, off, insn);
+		offload->opt_failed |= ret;
+	}
+	up_read(&bpf_devs_lock);
+}
+
+void
+bpf_prog_offload_remove_insns(struct bpf_verifier_env *env, u32 off, u32 cnt)
+{
+	struct bpf_prog_offload *offload;
+	int ret = -EOPNOTSUPP;
+
+	down_read(&bpf_devs_lock);
+	offload = env->prog->aux->offload;
+	if (offload) {
+		if (!offload->opt_failed && offload->offdev->ops->remove_insns)
+			ret = offload->offdev->ops->remove_insns(env, off, cnt);
+		offload->opt_failed |= ret;
+	}
+	up_read(&bpf_devs_lock);
+}
+
+void bpf_prog_dev_bound_destroy(struct bpf_prog *prog)
+{
+	struct bpf_offload_netdev *ondev;
+	struct net_device *netdev;
+
 	rtnl_lock();
 	down_write(&bpf_devs_lock);
-	if (prog->aux->offload)
+	if (prog->aux->offload) {
+		list_del_init(&prog->aux->offload->offloads);
+
+		netdev = prog->aux->offload->netdev;
 		__bpf_prog_offload_destroy(prog);
+
+		ondev = bpf_offload_find_netdev(netdev);
+		if (!ondev->offdev && list_empty(&ondev->progs))
+			__bpf_offload_dev_netdev_unregister(NULL, netdev);
+	}
 	up_write(&bpf_devs_lock);
 	rtnl_unlock();
 }
 
 static int bpf_prog_offload_translate(struct bpf_prog *prog)
 {
-	struct netdev_bpf data = {};
-	int ret;
+	struct bpf_prog_offload *offload;
+	int ret = -ENODEV;
 
-	data.offload.prog = prog;
-
-	rtnl_lock();
-	ret = __bpf_offload_ndo(prog, BPF_OFFLOAD_TRANSLATE, &data);
-	rtnl_unlock();
+	down_read(&bpf_devs_lock);
+	offload = prog->aux->offload;
+	if (offload)
+		ret = offload->offdev->ops->translate(prog);
+	up_read(&bpf_devs_lock);
 
 	return ret;
 }
@@ -209,9 +435,8 @@ static struct ns_common *bpf_prog_offload_info_fill_ns(void *private_data)
 
 	if (aux->offload) {
 		args->info->ifindex = aux->offload->netdev->ifindex;
-		net = dev_net(aux->offload->netdev);
-		get_net(net);
-		ns = &net->ns;
+		net = maybe_get_net(dev_net(aux->offload->netdev));
+		ns = net ? &net->ns : NULL;
 	} else {
 		args->info->ifindex = 0;
 		ns = NULL;
@@ -234,14 +459,14 @@ int bpf_prog_offload_info_fill(struct bpf_prog_info *info,
 	struct inode *ns_inode;
 	struct path ns_path;
 	char __user *uinsns;
-	void *res;
+	int res;
 	u32 ulen;
 
 	res = ns_get_path_cb(&ns_path, bpf_prog_offload_info_fill_ns, &args);
-	if (IS_ERR(res)) {
+	if (res) {
 		if (!info->ifindex)
 			return -ENODEV;
-		return PTR_ERR(res);
+		return res;
 	}
 
 	down_read(&bpf_devs_lock);
@@ -253,7 +478,7 @@ int bpf_prog_offload_info_fill(struct bpf_prog_info *info,
 
 	ulen = info->jited_prog_len;
 	info->jited_prog_len = aux->offload->jited_len;
-	if (info->jited_prog_len & ulen) {
+	if (info->jited_prog_len && ulen) {
 		uinsns = u64_to_user_ptr(info->jited_prog_insns);
 		ulen = min_t(u32, info->jited_prog_len, ulen);
 		if (copy_to_user(uinsns, aux->offload->jited_image, ulen)) {
@@ -275,25 +500,10 @@ int bpf_prog_offload_info_fill(struct bpf_prog_info *info,
 const struct bpf_prog_ops bpf_offload_prog_ops = {
 };
 
-static int bpf_map_offload_ndo(struct bpf_offloaded_map *offmap,
-			       enum bpf_netdev_command cmd)
-{
-	struct netdev_bpf data = {};
-	struct net_device *netdev;
-
-	ASSERT_RTNL();
-
-	data.command = cmd;
-	data.offmap = offmap;
-	/* Caller must make sure netdev is valid */
-	netdev = offmap->netdev;
-
-	return netdev->netdev_ops->ndo_bpf(netdev, &data);
-}
-
 struct bpf_map *bpf_map_offload_map_alloc(union bpf_attr *attr)
 {
 	struct net *net = current->nsproxy->net_ns;
+	struct bpf_offload_netdev *ondev;
 	struct bpf_offloaded_map *offmap;
 	int err;
 
@@ -303,43 +513,44 @@ struct bpf_map *bpf_map_offload_map_alloc(union bpf_attr *attr)
 	    attr->map_type != BPF_MAP_TYPE_HASH)
 		return ERR_PTR(-EINVAL);
 
-	offmap = kzalloc(sizeof(*offmap), GFP_USER);
+	offmap = bpf_map_area_alloc(sizeof(*offmap), NUMA_NO_NODE);
 	if (!offmap)
 		return ERR_PTR(-ENOMEM);
 
 	bpf_map_init_from_attr(&offmap->map, attr);
-
 	rtnl_lock();
-	down_write(&bpf_devs_lock);
 	offmap->netdev = __dev_get_by_index(net, attr->map_ifindex);
 	err = bpf_dev_offload_check(offmap->netdev);
 	if (err)
+		goto err_unlock_rtnl;
+
+	netdev_lock_ops(offmap->netdev);
+	down_write(&bpf_devs_lock);
+
+	ondev = bpf_offload_find_netdev(offmap->netdev);
+	if (!ondev) {
+		err = -EINVAL;
 		goto err_unlock;
+	}
 
 	err = bpf_map_offload_ndo(offmap, BPF_OFFLOAD_MAP_ALLOC);
 	if (err)
 		goto err_unlock;
 
-	list_add_tail(&offmap->offloads, &bpf_map_offload_devs);
+	list_add_tail(&offmap->offloads, &ondev->maps);
 	up_write(&bpf_devs_lock);
+	netdev_unlock_ops(offmap->netdev);
 	rtnl_unlock();
 
 	return &offmap->map;
 
 err_unlock:
 	up_write(&bpf_devs_lock);
+	netdev_unlock_ops(offmap->netdev);
+err_unlock_rtnl:
 	rtnl_unlock();
-	kfree(offmap);
+	bpf_map_area_free(offmap);
 	return ERR_PTR(err);
-}
-
-static void __bpf_map_offload_destroy(struct bpf_offloaded_map *offmap)
-{
-	WARN_ON(bpf_map_offload_ndo(offmap, BPF_OFFLOAD_MAP_FREE));
-	/* Make sure BPF_MAP_GET_NEXT_ID can't find this dead map */
-	bpf_map_free_id(&offmap->map, true);
-	list_del_init(&offmap->offloads);
-	offmap->netdev = NULL;
 }
 
 void bpf_map_offload_map_free(struct bpf_map *map)
@@ -353,7 +564,13 @@ void bpf_map_offload_map_free(struct bpf_map *map)
 	up_write(&bpf_devs_lock);
 	rtnl_unlock();
 
-	kfree(offmap);
+	bpf_map_area_free(offmap);
+}
+
+u64 bpf_map_offload_map_mem_usage(const struct bpf_map *map)
+{
+	/* The memory dynamically allocated in netdev dev_ops is not counted */
+	return sizeof(struct bpf_offloaded_map);
 }
 
 int bpf_map_offload_lookup_elem(struct bpf_map *map, void *key, void *value)
@@ -429,9 +646,8 @@ static struct ns_common *bpf_map_offload_info_fill_ns(void *private_data)
 
 	if (args->offmap->netdev) {
 		args->info->ifindex = args->offmap->netdev->ifindex;
-		net = dev_net(args->offmap->netdev);
-		get_net(net);
-		ns = &net->ns;
+		net = maybe_get_net(dev_net(args->offmap->netdev));
+		ns = net ? &net->ns : NULL;
 	} else {
 		args->info->ifindex = 0;
 		ns = NULL;
@@ -451,13 +667,13 @@ int bpf_map_offload_info_fill(struct bpf_map_info *info, struct bpf_map *map)
 	};
 	struct inode *ns_inode;
 	struct path ns_path;
-	void *res;
+	int res;
 
 	res = ns_get_path_cb(&ns_path, bpf_map_offload_info_fill_ns, &args);
-	if (IS_ERR(res)) {
+	if (res) {
 		if (!info->ifindex)
 			return -ENODEV;
-		return PTR_ERR(res);
+		return res;
 	}
 
 	ns_inode = ns_path.dentry->d_inode;
@@ -468,75 +684,183 @@ int bpf_map_offload_info_fill(struct bpf_map_info *info, struct bpf_map *map)
 	return 0;
 }
 
-bool bpf_offload_dev_match(struct bpf_prog *prog, struct bpf_map *map)
+static bool __bpf_offload_dev_match(struct bpf_prog *prog,
+				    struct net_device *netdev)
 {
-	struct bpf_offloaded_map *offmap;
+	struct bpf_offload_netdev *ondev1, *ondev2;
 	struct bpf_prog_offload *offload;
+
+	if (!bpf_prog_is_dev_bound(prog->aux))
+		return false;
+
+	offload = prog->aux->offload;
+	if (!offload)
+		return false;
+	if (offload->netdev == netdev)
+		return true;
+
+	ondev1 = bpf_offload_find_netdev(offload->netdev);
+	ondev2 = bpf_offload_find_netdev(netdev);
+
+	return ondev1 && ondev2 && ondev1->offdev == ondev2->offdev;
+}
+
+bool bpf_offload_dev_match(struct bpf_prog *prog, struct net_device *netdev)
+{
 	bool ret;
 
-	if (!bpf_prog_is_dev_bound(prog->aux) || !bpf_map_is_dev_bound(map))
+	down_read(&bpf_devs_lock);
+	ret = __bpf_offload_dev_match(prog, netdev);
+	up_read(&bpf_devs_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(bpf_offload_dev_match);
+
+bool bpf_prog_dev_bound_match(const struct bpf_prog *lhs, const struct bpf_prog *rhs)
+{
+	bool ret;
+
+	if (bpf_prog_is_offloaded(lhs->aux) != bpf_prog_is_offloaded(rhs->aux))
 		return false;
 
 	down_read(&bpf_devs_lock);
-	offload = prog->aux->offload;
-	offmap = map_to_offmap(map);
-
-	ret = offload && offload->netdev == offmap->netdev;
+	ret = lhs->aux->offload && rhs->aux->offload &&
+	      lhs->aux->offload->netdev &&
+	      lhs->aux->offload->netdev == rhs->aux->offload->netdev;
 	up_read(&bpf_devs_lock);
 
 	return ret;
 }
 
-static void bpf_offload_orphan_all_progs(struct net_device *netdev)
+bool bpf_offload_prog_map_match(struct bpf_prog *prog, struct bpf_map *map)
 {
-	struct bpf_prog_offload *offload, *tmp;
+	struct bpf_offloaded_map *offmap;
+	bool ret;
 
-	list_for_each_entry_safe(offload, tmp, &bpf_prog_offload_devs, offloads)
-		if (offload->netdev == netdev)
-			__bpf_prog_offload_destroy(offload->prog);
+	if (!bpf_map_is_offloaded(map))
+		return bpf_map_offload_neutral(map);
+	offmap = map_to_offmap(map);
+
+	down_read(&bpf_devs_lock);
+	ret = __bpf_offload_dev_match(prog, offmap->netdev);
+	up_read(&bpf_devs_lock);
+
+	return ret;
 }
 
-static void bpf_offload_orphan_all_maps(struct net_device *netdev)
+int bpf_offload_dev_netdev_register(struct bpf_offload_dev *offdev,
+				    struct net_device *netdev)
 {
-	struct bpf_offloaded_map *offmap, *tmp;
+	int err;
 
-	list_for_each_entry_safe(offmap, tmp, &bpf_map_offload_devs, offloads)
-		if (offmap->netdev == netdev)
-			__bpf_map_offload_destroy(offmap);
+	down_write(&bpf_devs_lock);
+	err = __bpf_offload_dev_netdev_register(offdev, netdev);
+	up_write(&bpf_devs_lock);
+	return err;
 }
+EXPORT_SYMBOL_GPL(bpf_offload_dev_netdev_register);
 
-static int bpf_offload_notification(struct notifier_block *notifier,
-				    ulong event, void *ptr)
+void bpf_offload_dev_netdev_unregister(struct bpf_offload_dev *offdev,
+				       struct net_device *netdev)
 {
-	struct net_device *netdev = netdev_notifier_info_to_dev(ptr);
+	down_write(&bpf_devs_lock);
+	__bpf_offload_dev_netdev_unregister(offdev, netdev);
+	up_write(&bpf_devs_lock);
+}
+EXPORT_SYMBOL_GPL(bpf_offload_dev_netdev_unregister);
+
+struct bpf_offload_dev *
+bpf_offload_dev_create(const struct bpf_prog_offload_ops *ops, void *priv)
+{
+	struct bpf_offload_dev *offdev;
+
+	offdev = kzalloc_obj(*offdev);
+	if (!offdev)
+		return ERR_PTR(-ENOMEM);
+
+	offdev->ops = ops;
+	offdev->priv = priv;
+	INIT_LIST_HEAD(&offdev->netdevs);
+
+	return offdev;
+}
+EXPORT_SYMBOL_GPL(bpf_offload_dev_create);
+
+void bpf_offload_dev_destroy(struct bpf_offload_dev *offdev)
+{
+	WARN_ON(!list_empty(&offdev->netdevs));
+	kfree(offdev);
+}
+EXPORT_SYMBOL_GPL(bpf_offload_dev_destroy);
+
+void *bpf_offload_dev_priv(struct bpf_offload_dev *offdev)
+{
+	return offdev->priv;
+}
+EXPORT_SYMBOL_GPL(bpf_offload_dev_priv);
+
+void bpf_dev_bound_netdev_unregister(struct net_device *dev)
+{
+	struct bpf_offload_netdev *ondev;
 
 	ASSERT_RTNL();
 
-	switch (event) {
-	case NETDEV_UNREGISTER:
-		/* ignore namespace changes */
-		if (netdev->reg_state != NETREG_UNREGISTERING)
-			break;
-
-		down_write(&bpf_devs_lock);
-		bpf_offload_orphan_all_progs(netdev);
-		bpf_offload_orphan_all_maps(netdev);
-		up_write(&bpf_devs_lock);
-		break;
-	default:
-		break;
-	}
-	return NOTIFY_OK;
+	down_write(&bpf_devs_lock);
+	ondev = bpf_offload_find_netdev(dev);
+	if (ondev && !ondev->offdev)
+		__bpf_offload_dev_netdev_unregister(NULL, ondev->netdev);
+	up_write(&bpf_devs_lock);
 }
 
-static struct notifier_block bpf_offload_notifier = {
-	.notifier_call = bpf_offload_notification,
-};
-
-static int __init bpf_offload_init(void)
+int bpf_dev_bound_kfunc_check(struct bpf_verifier_log *log,
+			      struct bpf_prog_aux *prog_aux)
 {
-	register_netdevice_notifier(&bpf_offload_notifier);
+	if (!bpf_prog_is_dev_bound(prog_aux)) {
+		bpf_log(log, "metadata kfuncs require device-bound program\n");
+		return -EINVAL;
+	}
+
+	if (bpf_prog_is_offloaded(prog_aux)) {
+		bpf_log(log, "metadata kfuncs can't be offloaded\n");
+		return -EINVAL;
+	}
+
 	return 0;
 }
 
-subsys_initcall(bpf_offload_init);
+void *bpf_dev_bound_resolve_kfunc(struct bpf_prog *prog, u32 func_id)
+{
+	const struct xdp_metadata_ops *ops;
+	void *p = NULL;
+
+	/* We don't hold bpf_devs_lock while resolving several
+	 * kfuncs and can race with the unregister_netdevice().
+	 * We rely on bpf_dev_bound_match() check at attach
+	 * to render this program unusable.
+	 */
+	down_read(&bpf_devs_lock);
+	if (!prog->aux->offload)
+		goto out;
+
+	ops = prog->aux->offload->netdev->xdp_metadata_ops;
+	if (!ops)
+		goto out;
+
+#define XDP_METADATA_KFUNC(name, _, __, xmo) \
+	if (func_id == bpf_xdp_metadata_kfunc_id(name)) p = ops->xmo;
+	XDP_METADATA_KFUNC_xxx
+#undef XDP_METADATA_KFUNC
+
+out:
+	up_read(&bpf_devs_lock);
+
+	return p;
+}
+
+static int __init bpf_offload_init(void)
+{
+	return rhashtable_init(&offdevs, &offdevs_params);
+}
+
+core_initcall(bpf_offload_init);

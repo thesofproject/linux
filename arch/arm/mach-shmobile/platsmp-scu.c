@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * SMP support for SoCs with SCU covered by mach-shmobile
  *
  * Copyright (C) 2013  Magnus Damm
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/cpu.h>
 #include <linux/delay.h>
@@ -67,7 +64,7 @@ static int shmobile_smp_scu_psr_core_disabled(int cpu)
 {
 	unsigned long mask = SCU_PM_POWEROFF << (cpu * 8);
 
-	if ((__raw_readl(shmobile_scu_base + 8) & mask) == mask)
+	if ((readl(shmobile_scu_base + 8) & mask) == mask)
 		return 1;
 
 	return 0;

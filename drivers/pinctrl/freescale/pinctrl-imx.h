@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * IMX pinmux core definitions
  *
@@ -5,38 +6,54 @@
  * Copyright (C) 2012 Linaro Ltd.
  *
  * Author: Dong Aisheng <dong.aisheng@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __DRIVERS_PINCTRL_IMX_H
 #define __DRIVERS_PINCTRL_IMX_H
 
-#include <linux/pinctrl/pinconf-generic.h>
 #include <linux/pinctrl/pinmux.h>
 
 struct platform_device;
 
 extern struct pinmux_ops imx_pmx_ops;
+extern const struct dev_pm_ops imx_pinctrl_pm_ops;
 
 /**
- * struct imx_pin - describes a single i.MX pin
- * @pin: the pin_id of this pin
+ * struct imx_pin_mmio - MMIO pin configurations
  * @mux_mode: the mux mode for this pin.
  * @input_reg: the select input register offset for this pin if any
  *	0 if no select input setting needed.
  * @input_val: the select input value for this pin.
  * @configs: the config for this pin.
  */
-struct imx_pin {
-	unsigned int pin;
+struct imx_pin_mmio {
 	unsigned int mux_mode;
 	u16 input_reg;
 	unsigned int input_val;
 	unsigned long config;
+};
+
+/**
+ * struct imx_pin_scu - SCU pin configurations
+ * @mux: the mux mode for this pin.
+ * @configs: the config for this pin.
+ */
+struct imx_pin_scu {
+	unsigned int mux_mode;
+	unsigned long config;
+};
+
+/**
+ * struct imx_pin - describes a single i.MX pin
+ * @pin: the pin_id of this pin
+ * @conf: config type of this pin, either mmio or scu
+ */
+struct imx_pin {
+	unsigned int pin;
+	union {
+		struct imx_pin_mmio mmio;
+		struct imx_pin_scu scu;
+	} conf;
 };
 
 /**
@@ -47,39 +64,6 @@ struct imx_pin {
 struct imx_pin_reg {
 	s16 mux_reg;
 	s16 conf_reg;
-};
-
-/* decode a generic config into raw register value */
-struct imx_cfg_params_decode {
-	enum pin_config_param param;
-	u32 mask;
-	u8 shift;
-	bool invert;
-};
-
-struct imx_pinctrl_soc_info {
-	const struct pinctrl_pin_desc *pins;
-	unsigned int npins;
-	unsigned int flags;
-	const char *gpr_compatible;
-
-	/* MUX_MODE shift and mask in case SHARE_MUX_CONF_REG */
-	unsigned int mux_mask;
-	u8 mux_shift;
-
-	/* generic pinconf */
-	bool generic_pinconf;
-	const struct pinconf_generic_params *custom_params;
-	unsigned int num_custom_params;
-	const struct imx_cfg_params_decode *decodes;
-	unsigned int num_decodes;
-	void (*fixup)(unsigned long *configs, unsigned int num_configs,
-		      u32 *raw_config);
-
-	int (*gpio_set_direction)(struct pinctrl_dev *pctldev,
-				  struct pinctrl_gpio_range *range,
-				  unsigned offset,
-				  bool input);
 };
 
 /**
@@ -97,14 +81,32 @@ struct imx_pinctrl {
 	struct mutex mutex;
 };
 
-#define IMX_CFG_PARAMS_DECODE(p, m, o) \
-	{ .param = p, .mask = m, .shift = o, .invert = false, }
+struct imx_pinctrl_soc_info {
+	const struct pinctrl_pin_desc *pins;
+	unsigned int npins;
+	unsigned int flags;
+	const char *gpr_compatible;
 
-#define IMX_CFG_PARAMS_DECODE_INVERT(p, m, o) \
-	{ .param = p, .mask = m, .shift = o, .invert = true, }
+	/* MUX_MODE shift and mask in case SHARE_MUX_CONF_REG */
+	unsigned int mux_mask;
+	u8 mux_shift;
 
-#define SHARE_MUX_CONF_REG	0x1
-#define ZERO_OFFSET_VALID	0x2
+	int (*gpio_set_direction)(struct pinctrl_dev *pctldev,
+				  struct pinctrl_gpio_range *range,
+				  unsigned offset,
+				  bool input);
+	int (*imx_pinconf_get)(struct pinctrl_dev *pctldev, unsigned int pin_id,
+			       unsigned long *config);
+	int (*imx_pinconf_set)(struct pinctrl_dev *pctldev, unsigned int pin_id,
+			       unsigned long *configs, unsigned int num_configs);
+	void (*imx_pinctrl_parse_pin)(struct imx_pinctrl *ipctl,
+				      unsigned int *pin_id, struct imx_pin *pin,
+				      const __be32 **list_p);
+};
+
+#define SHARE_MUX_CONF_REG	BIT(0)
+#define ZERO_OFFSET_VALID	BIT(1)
+#define IMX_USE_SCU		BIT(2)
 
 #define NO_MUX		0x0
 #define NO_PAD		0x0
@@ -117,4 +119,17 @@ struct imx_pinctrl {
 
 int imx_pinctrl_probe(struct platform_device *pdev,
 			const struct imx_pinctrl_soc_info *info);
+
+#define BM_PAD_CTL_GP_ENABLE		BIT(30)
+#define BM_PAD_CTL_IFMUX_ENABLE		BIT(31)
+#define BP_PAD_CTL_IFMUX		27
+
+int imx_pinctrl_sc_ipc_init(struct platform_device *pdev);
+int imx_pinconf_get_scu(struct pinctrl_dev *pctldev, unsigned pin_id,
+			unsigned long *config);
+int imx_pinconf_set_scu(struct pinctrl_dev *pctldev, unsigned pin_id,
+			unsigned long *configs, unsigned num_configs);
+void imx_pinctrl_parse_pin_scu(struct imx_pinctrl *ipctl,
+			       unsigned int *pin_id, struct imx_pin *pin,
+			       const __be32 **list_p);
 #endif /* __DRIVERS_PINCTRL_IMX_H */

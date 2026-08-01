@@ -58,7 +58,7 @@ of_init(struct nvkm_bios *bios, const char *name)
 	struct priv *priv;
 	if (!(dn = pci_device_to_OF_node(pdev)))
 		return ERR_PTR(-ENODEV);
-	if (!(priv = kzalloc(sizeof(*priv), GFP_KERNEL)))
+	if (!(priv = kzalloc_obj(*priv)))
 		return ERR_PTR(-ENOMEM);
 	if ((priv->data = of_get_property(dn, "NVDA,BMP", &priv->size)))
 		return priv;
@@ -66,11 +66,16 @@ of_init(struct nvkm_bios *bios, const char *name)
 	return ERR_PTR(-EINVAL);
 }
 
+static void of_fini(void *p)
+{
+	kfree(p);
+}
+
 const struct nvbios_source
 nvbios_of = {
 	.name = "OpenFirmware",
 	.init = of_init,
-	.fini = (void(*)(void *))kfree,
+	.fini = of_fini,
 	.read = of_read,
 	.size = of_size,
 	.rw = false,

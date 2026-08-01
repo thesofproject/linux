@@ -1,42 +1,70 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * cs42l56.c -- CS42L56 ALSA SoC audio driver
  *
  * Copyright 2014 CirrusLogic, Inc.
  *
  * Author: Brian Austin <brian.austin@cirrus.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
+#include <linux/delay.h>
+#include <linux/gpio/consumer.h>
+#include <linux/i2c.h>
+#include <linux/init.h>
+#include <linux/input.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
-#include <linux/kernel.h>
-#include <linux/init.h>
-#include <linux/delay.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
 #include <linux/pm.h>
-#include <linux/i2c.h>
-#include <linux/input.h>
 #include <linux/regmap.h>
+#include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
-#include <linux/platform_device.h>
-#include <linux/regulator/consumer.h>
-#include <linux/of_device.h>
-#include <linux/of_gpio.h>
 #include <sound/core.h>
+#include <sound/initval.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
-#include <sound/initval.h>
 #include <sound/tlv.h>
-#include <sound/cs42l56.h>
 #include "cs42l56.h"
 
 #define CS42L56_NUM_SUPPLIES 3
+
+struct cs42l56_platform_data {
+	/* GPIO for Reset */
+	struct gpio_desc *gpio_nreset;
+
+	/* MICBIAS Level. Check datasheet Pg48 */
+	unsigned int micbias_lvl;
+
+	/* Analog Input 1A Reference 0=Single 1=Pseudo-Differential */
+	unsigned int ain1a_ref_cfg;
+
+	/* Analog Input 2A Reference 0=Single 1=Pseudo-Differential */
+	unsigned int ain2a_ref_cfg;
+
+	/* Analog Input 1B Reference 0=Single 1=Pseudo-Differential */
+	unsigned int ain1b_ref_cfg;
+
+	/* Analog Input 2B Reference 0=Single 1=Pseudo-Differential */
+	unsigned int ain2b_ref_cfg;
+
+	/* Charge Pump Freq. Check datasheet Pg62 */
+	unsigned int chgfreq;
+
+	/* HighPass Filter Right Channel Corner Frequency */
+	unsigned int hpfb_freq;
+
+	/* HighPass Filter Left Channel Corner Frequency */
+	unsigned int hpfa_freq;
+
+	/* Adaptive Power Control for LO/HP */
+	unsigned int adaptive_pwr;
+};
+
 static const char *const cs42l56_supply_names[CS42L56_NUM_SUPPLIES] = {
 	"VA",
 	"VCP",
@@ -202,14 +230,6 @@ static const char * const beep_bass_text[] = {
 static const struct soc_enum beep_bass_enum =
 	SOC_ENUM_SINGLE(CS42L56_BEEP_TONE_CFG, 1,
 			ARRAY_SIZE(beep_bass_text), beep_bass_text);
-
-static const char * const adc_swap_text[] = {
-	"None", "A+B/2", "A-B/2", "Swap"
-};
-
-static const struct soc_enum adc_swap_enum =
-	SOC_ENUM_SINGLE(CS42L56_MISC_ADC_CTL, 3,
-			ARRAY_SIZE(adc_swap_text), adc_swap_text);
 
 static const char * const pgaa_mux_text[] = {
 	"AIN1A", "AIN2A", "AIN3A"};
@@ -403,9 +423,9 @@ static const struct snd_kcontrol_new cs42l56_snd_controls[] = {
 	SOC_DOUBLE("ADC Boost Switch", CS42L56_GAIN_BIAS_CTL, 3, 2, 1, 1),
 
 	SOC_DOUBLE_R_SX_TLV("Headphone Volume", CS42L56_HPA_VOLUME,
-			      CS42L56_HPB_VOLUME, 0, 0x84, 0x48, hl_tlv),
+			      CS42L56_HPB_VOLUME, 0, 0x44, 0x48, hl_tlv),
 	SOC_DOUBLE_R_SX_TLV("LineOut Volume", CS42L56_LOA_VOLUME,
-			      CS42L56_LOB_VOLUME, 0, 0x84, 0x48, hl_tlv),
+			      CS42L56_LOB_VOLUME, 0, 0x44, 0x48, hl_tlv),
 
 	SOC_SINGLE_TLV("Bass Shelving Volume", CS42L56_TONE_CTL,
 			0, 0x00, 1, tone_tlv),
@@ -769,10 +789,10 @@ static int cs42l56_set_dai_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 	struct cs42l56_private *cs42l56 = snd_soc_component_get_drvdata(component);
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		cs42l56->iface = CS42L56_MASTER_MODE;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		cs42l56->iface = CS42L56_SLAVE_MODE;
 		break;
 	default:
@@ -812,7 +832,7 @@ static int cs42l56_set_dai_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 	return 0;
 }
 
-static int cs42l56_digital_mute(struct snd_soc_dai *dai, int mute)
+static int cs42l56_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
 
@@ -891,6 +911,7 @@ static int cs42l56_set_bias_level(struct snd_soc_component *component,
 					enum snd_soc_bias_level level)
 {
 	struct cs42l56_private *cs42l56 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	int ret;
 
 	switch (level) {
@@ -903,7 +924,7 @@ static int cs42l56_set_bias_level(struct snd_soc_component *component,
 				    CS42L56_PDN_ALL_MASK, 0);
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF) {
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_OFF) {
 			regcache_cache_only(cs42l56->regmap, false);
 			regcache_sync(cs42l56->regmap);
 			ret = regulator_bulk_enable(ARRAY_SIZE(cs42l56->supplies),
@@ -941,9 +962,10 @@ static int cs42l56_set_bias_level(struct snd_soc_component *component,
 
 static const struct snd_soc_dai_ops cs42l56_ops = {
 	.hw_params	= cs42l56_pcm_hw_params,
-	.digital_mute	= cs42l56_digital_mute,
+	.mute_stream	= cs42l56_mute,
 	.set_fmt	= cs42l56_set_dai_fmt,
 	.set_sysclk	= cs42l56_set_sysclk,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver cs42l56_dai = {
@@ -975,7 +997,7 @@ static void cs42l56_beep_work(struct work_struct *work)
 	struct cs42l56_private *cs42l56 =
 		container_of(work, struct cs42l56_private, beep_work);
 	struct snd_soc_component *component = cs42l56->component;
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	int i;
 	int val = 0;
 	int best = 0;
@@ -1019,6 +1041,7 @@ static int cs42l56_beep_event(struct input_dev *dev, unsigned int type,
 	case SND_BELL:
 		if (hz)
 			hz = 261;
+		break;
 	case SND_TONE:
 		break;
 	default:
@@ -1031,9 +1054,8 @@ static int cs42l56_beep_event(struct input_dev *dev, unsigned int type,
 	return 0;
 }
 
-static ssize_t cs42l56_beep_set(struct device *dev,
-			       struct device_attribute *attr,
-			       const char *buf, size_t count)
+static ssize_t beep_store(struct device *dev, struct device_attribute *attr,
+			  const char *buf, size_t count)
 {
 	struct cs42l56_private *cs42l56 = dev_get_drvdata(dev);
 	long int time;
@@ -1048,7 +1070,7 @@ static ssize_t cs42l56_beep_set(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(beep, 0200, NULL, cs42l56_beep_set);
+static DEVICE_ATTR_WO(beep);
 
 static void cs42l56_init_beep(struct snd_soc_component *component)
 {
@@ -1125,7 +1147,6 @@ static const struct snd_soc_component_driver soc_component_dev_cs42l56 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config cs42l56_regmap = {
@@ -1137,7 +1158,7 @@ static const struct regmap_config cs42l56_regmap = {
 	.num_reg_defaults = ARRAY_SIZE(cs42l56_reg_defaults),
 	.readable_reg = cs42l56_readable_register,
 	.volatile_reg = cs42l56_volatile_register,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 };
 
 static int cs42l56_handle_of_data(struct i2c_client *i2c_client,
@@ -1173,19 +1194,22 @@ static int cs42l56_handle_of_data(struct i2c_client *i2c_client,
 	if (of_property_read_u32(np, "cirrus,hpf-left-freq", &val32) >= 0)
 		pdata->hpfb_freq = val32;
 
-	pdata->gpio_nreset = of_get_named_gpio(np, "cirrus,gpio-nreset", 0);
+	pdata->gpio_nreset = devm_gpiod_get_optional(&i2c_client->dev, "cirrus,gpio-nreset",
+						     GPIOD_OUT_LOW);
+
+	if (IS_ERR(pdata->gpio_nreset))
+		return PTR_ERR(pdata->gpio_nreset);
+
+	gpiod_set_consumer_name(pdata->gpio_nreset, "CS42L56 /RST");
 
 	return 0;
 }
 
-static int cs42l56_i2c_probe(struct i2c_client *i2c_client,
-			     const struct i2c_device_id *id)
+static int cs42l56_i2c_probe(struct i2c_client *i2c_client)
 {
 	struct cs42l56_private *cs42l56;
-	struct cs42l56_platform_data *pdata =
-		dev_get_platdata(&i2c_client->dev);
 	int ret, i;
-	unsigned int devid = 0;
+	unsigned int devid;
 	unsigned int alpha_rev, metal_rev;
 	unsigned int reg;
 
@@ -1201,36 +1225,16 @@ static int cs42l56_i2c_probe(struct i2c_client *i2c_client,
 		return ret;
 	}
 
-	if (pdata) {
-		cs42l56->pdata = *pdata;
-	} else {
-		pdata = devm_kzalloc(&i2c_client->dev, sizeof(*pdata),
-				     GFP_KERNEL);
-		if (!pdata)
-			return -ENOMEM;
-
-		if (i2c_client->dev.of_node) {
-			ret = cs42l56_handle_of_data(i2c_client,
-						     &cs42l56->pdata);
-			if (ret != 0)
-				return ret;
-		}
-		cs42l56->pdata = *pdata;
+	if (i2c_client->dev.of_node) {
+		ret = cs42l56_handle_of_data(i2c_client, &cs42l56->pdata);
+		if (ret != 0)
+			return ret;
 	}
 
 	if (cs42l56->pdata.gpio_nreset) {
-		ret = gpio_request_one(cs42l56->pdata.gpio_nreset,
-				       GPIOF_OUT_INIT_HIGH, "CS42L56 /RST");
-		if (ret < 0) {
-			dev_err(&i2c_client->dev,
-				"Failed to request /RST %d: %d\n",
-				cs42l56->pdata.gpio_nreset, ret);
-			return ret;
-		}
-		gpio_set_value_cansleep(cs42l56->pdata.gpio_nreset, 0);
-		gpio_set_value_cansleep(cs42l56->pdata.gpio_nreset, 1);
+		gpiod_set_value_cansleep(cs42l56->pdata.gpio_nreset, 1);
+		gpiod_set_value_cansleep(cs42l56->pdata.gpio_nreset, 0);
 	}
-
 
 	i2c_set_clientdata(i2c_client, cs42l56);
 
@@ -1255,11 +1259,17 @@ static int cs42l56_i2c_probe(struct i2c_client *i2c_client,
 	}
 
 	ret = regmap_read(cs42l56->regmap, CS42L56_CHIP_ID_1, &reg);
+	if (ret) {
+		dev_err(&i2c_client->dev, "Failed to read chip ID: %d\n", ret);
+		goto err_enable;
+	}
+
 	devid = reg & CS42L56_CHIP_ID_MASK;
 	if (devid != CS42L56_DEVID) {
 		dev_err(&i2c_client->dev,
 			"CS42L56 Device ID (%X). Expected %X\n",
 			devid, CS42L56_DEVID);
+		ret = -EINVAL;
 		goto err_enable;
 	}
 	alpha_rev = reg & CS42L56_AREV_MASK;
@@ -1317,7 +1327,7 @@ static int cs42l56_i2c_probe(struct i2c_client *i2c_client,
 	ret =  devm_snd_soc_register_component(&i2c_client->dev,
 			&soc_component_dev_cs42l56, &cs42l56_dai, 1);
 	if (ret < 0)
-		return ret;
+		goto err_enable;
 
 	return 0;
 
@@ -1327,13 +1337,12 @@ err_enable:
 	return ret;
 }
 
-static int cs42l56_i2c_remove(struct i2c_client *client)
+static void cs42l56_i2c_remove(struct i2c_client *client)
 {
 	struct cs42l56_private *cs42l56 = i2c_get_clientdata(client);
 
 	regulator_bulk_disable(ARRAY_SIZE(cs42l56->supplies),
 			       cs42l56->supplies);
-	return 0;
 }
 
 static const struct of_device_id cs42l56_of_match[] = {
@@ -1344,7 +1353,7 @@ MODULE_DEVICE_TABLE(of, cs42l56_of_match);
 
 
 static const struct i2c_device_id cs42l56_id[] = {
-	{ "cs42l56", 0 },
+	{ .name = "cs42l56" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, cs42l56_id);

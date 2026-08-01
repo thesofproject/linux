@@ -91,7 +91,7 @@ static enum ib_rate tavor_rate_to_ib(u8 mthca_rate, u8 port_rate)
 	}
 }
 
-enum ib_rate mthca_rate_to_ib(struct mthca_dev *dev, u8 mthca_rate, u8 port)
+enum ib_rate mthca_rate_to_ib(struct mthca_dev *dev, u8 mthca_rate, u32 port)
 {
 	if (mthca_is_memfree(dev)) {
 		/* Handle old Arbel FW */
@@ -115,7 +115,7 @@ static u8 ib_rate_to_memfree(u8 req_rate, u8 cur_rate)
 	switch ((cur_rate - 1) / req_rate) {
 	case 0:	 return MTHCA_RATE_MEMFREE_FULL;
 	case 1:	 return MTHCA_RATE_MEMFREE_HALF;
-	case 2:	 /* fall through */
+	case 2:
 	case 3:	 return MTHCA_RATE_MEMFREE_QUARTER;
 	default: return MTHCA_RATE_MEMFREE_EIGHTH;
 	}
@@ -131,7 +131,7 @@ static u8 ib_rate_to_tavor(u8 static_rate)
 	}
 }
 
-u8 mthca_get_rate(struct mthca_dev *dev, int static_rate, u8 port)
+u8 mthca_get_rate(struct mthca_dev *dev, int static_rate, u32 port)
 {
 	u8 rate;
 
@@ -161,7 +161,7 @@ int mthca_create_ah(struct mthca_dev *dev,
 	ah->type = MTHCA_AH_PCI_POOL;
 
 	if (mthca_is_memfree(dev)) {
-		ah->av   = kmalloc(sizeof *ah->av, GFP_ATOMIC);
+		ah->av = kmalloc_obj(*ah->av, GFP_ATOMIC);
 		if (!ah->av)
 			return -ENOMEM;
 
@@ -175,7 +175,7 @@ int mthca_create_ah(struct mthca_dev *dev,
 		if (index == -1)
 			goto on_hca_fail;
 
-		av = kmalloc(sizeof *av, GFP_ATOMIC);
+		av = kmalloc_obj(*av, GFP_ATOMIC);
 		if (!av)
 			goto on_hca_fail;
 
@@ -281,10 +281,7 @@ int mthca_read_ah(struct mthca_dev *dev, struct mthca_ah *ah,
 		header->grh.flow_label    =
 			ah->av->sl_tclass_flowlabel & cpu_to_be32(0xfffff);
 		header->grh.hop_limit     = ah->av->hop_limit;
-		ib_get_cached_gid(&dev->ib_dev,
-				  be32_to_cpu(ah->av->port_pd) >> 24,
-				  ah->av->gid_index % dev->limits.gid_table_len,
-				  &header->grh.source_gid, NULL);
+		header->grh.source_gid = ah->ibah.sgid_attr->gid;
 		memcpy(header->grh.destination_gid.raw,
 		       ah->av->dgid, 16);
 	}
@@ -296,7 +293,7 @@ int mthca_ah_query(struct ib_ah *ibah, struct rdma_ah_attr *attr)
 {
 	struct mthca_ah *ah   = to_mah(ibah);
 	struct mthca_dev *dev = to_mdev(ibah->device);
-	u8 port_num = be32_to_cpu(ah->av->port_pd) >> 24;
+	u32 port_num = be32_to_cpu(ah->av->port_pd) >> 24;
 
 	/* Only implement for MAD and memfree ah for now. */
 	if (ah->type == MTHCA_AH_ON_HCA)

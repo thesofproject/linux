@@ -39,7 +39,7 @@
 #include <linux/slab.h>
 #include <linux/bitops.h>
 #include <linux/err.h>
-#include <linux/random.h>
+#include <linux/prandom.h>
 #include <linux/parman.h>
 
 #define TEST_PARMAN_PRIO_SHIFT 7 /* defines number of prios for testing */
@@ -219,7 +219,7 @@ static struct test_parman *test_parman_create(const struct parman_ops *ops)
 	struct test_parman *test_parman;
 	int err;
 
-	test_parman = kzalloc(sizeof(*test_parman), GFP_KERNEL);
+	test_parman = kzalloc_obj(*test_parman);
 	if (!test_parman)
 		return ERR_PTR(-ENOMEM);
 	err = test_parman_resize(test_parman, TEST_PARMAN_BASE_COUNT);

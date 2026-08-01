@@ -17,7 +17,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/export.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "ath9k.h"
 
@@ -96,21 +96,16 @@ static ssize_t read_file_debug(struct file *file, char __user *user_buf,
 }
 
 static ssize_t write_file_debug(struct file *file, const char __user *user_buf,
-			     size_t count, loff_t *ppos)
+				size_t count, loff_t *ppos)
 {
 	struct ath_softc *sc = file->private_data;
 	struct ath_common *common = ath9k_hw_common(sc->sc_ah);
 	unsigned long mask;
-	char buf[32];
-	ssize_t len;
+	ssize_t ret;
 
-	len = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, user_buf, len))
-		return -EFAULT;
-
-	buf[len] = '\0';
-	if (kstrtoul(buf, 0, &mask))
-		return -EINVAL;
+	ret = kstrtoul_from_user(user_buf, count, 0, &mask);
+	if (ret)
+		return ret;
 
 	common->debug_mask = mask;
 	return count;
@@ -148,7 +143,7 @@ static ssize_t read_file_ani(struct file *file, char __user *user_buf,
 		{ "OFDM LEVEL", ah->ani.ofdmNoiseImmunityLevel },
 		{ "CCK LEVEL", ah->ani.cckNoiseImmunityLevel },
 		{ "SPUR UP", ah->stats.ast_ani_spurup },
-		{ "SPUR DOWN", ah->stats.ast_ani_spurup },
+		{ "SPUR DOWN", ah->stats.ast_ani_spurdown },
 		{ "OFDM WS-DET ON", ah->stats.ast_ani_ofdmon },
 		{ "OFDM WS-DET OFF", ah->stats.ast_ani_ofdmoff },
 		{ "MRC-CCK ON", ah->stats.ast_ani_ccklow },
@@ -191,16 +186,11 @@ static ssize_t write_file_ani(struct file *file,
 	struct ath_softc *sc = file->private_data;
 	struct ath_common *common = ath9k_hw_common(sc->sc_ah);
 	unsigned long ani;
-	char buf[32];
-	ssize_t len;
+	ssize_t ret;
 
-	len = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, user_buf, len))
-		return -EFAULT;
-
-	buf[len] = '\0';
-	if (kstrtoul(buf, 0, &ani))
-		return -EINVAL;
+	ret = kstrtoul_from_user(user_buf, count, 0, &ani);
+	if (ret)
+		return ret;
 
 	if (ani > 1)
 		return -EINVAL;
@@ -248,19 +238,14 @@ static ssize_t write_file_bt_ant_diversity(struct file *file,
 	struct ath_common *common = ath9k_hw_common(sc->sc_ah);
 	struct ath9k_hw_capabilities *pCap = &sc->sc_ah->caps;
 	unsigned long bt_ant_diversity;
-	char buf[32];
-	ssize_t len;
+	ssize_t ret;
 
-	len = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, user_buf, len))
-		return -EFAULT;
+	ret = kstrtoul_from_user(user_buf, count, 0, &bt_ant_diversity);
+	if (ret)
+		return ret;
 
 	if (!(pCap->hw_caps & ATH9K_HW_CAP_BT_ANT_DIV))
 		goto exit;
-
-	buf[len] = '\0';
-	if (kstrtoul(buf, 0, &bt_ant_diversity))
-		return -EINVAL;
 
 	common->bt_ant_diversity = !!bt_ant_diversity;
 	ath9k_ps_wakeup(sc);
@@ -538,7 +523,7 @@ static int read_file_interrupt(struct seq_file *file, void *data)
 	if (sc->sc_ah->caps.hw_caps & ATH9K_HW_CAP_EDMA) {
 		PR_IS("RXLP", rxlp);
 		PR_IS("RXHP", rxhp);
-		PR_IS("WATHDOG", bb_watchdog);
+		PR_IS("WATCHDOG", bb_watchdog);
 	} else {
 		PR_IS("RX", rxok);
 	}
@@ -735,10 +720,10 @@ static int read_file_misc(struct seq_file *file, void *data)
 		ath9k_calculate_iter_data(sc, ctx, &iter_data);
 
 		seq_printf(file,
-			   "VIFS: CTX %i(%i) AP: %i STA: %i MESH: %i WDS: %i",
+			   "VIFS: CTX %i(%i) AP: %i STA: %i MESH: %i",
 			   i++, (int)(ctx->assigned), iter_data.naps,
 			   iter_data.nstations,
-			   iter_data.nmeshes, iter_data.nwds);
+			   iter_data.nmeshes);
 		seq_printf(file, " ADHOC: %i OCB: %i TOTAL: %hi BEACON-VIF: %hi\n",
 			   iter_data.nadhocs, iter_data.nocbs, sc->cur_chan->nvifs,
 			   sc->nbcnvifs);
@@ -749,9 +734,9 @@ static int read_file_misc(struct seq_file *file, void *data)
 
 static int read_file_reset(struct seq_file *file, void *data)
 {
-	struct ieee80211_hw *hw = dev_get_drvdata(file->private);
-	struct ath_softc *sc = hw->priv;
+	struct ath_softc *sc = file->private;
 	static const char * const reset_cause[__RESET_TYPE_MAX] = {
+		[RESET_TYPE_USER] = "User reset",
 		[RESET_TYPE_BB_HANG] = "Baseband Hang",
 		[RESET_TYPE_BB_WATCHDOG] = "Baseband Watchdog",
 		[RESET_TYPE_FATAL_INT] = "Fatal HW Error",
@@ -765,6 +750,7 @@ static int read_file_reset(struct seq_file *file, void *data)
 		[RESET_TYPE_CALIBRATION] = "Calibration error",
 		[RESET_TX_DMA_ERROR] = "Tx DMA stop error",
 		[RESET_RX_DMA_ERROR] = "Rx DMA stop error",
+		[RESET_TYPE_RX_INACTIVE] = "Rx path inactive",
 	};
 	int i;
 
@@ -779,41 +765,85 @@ static int read_file_reset(struct seq_file *file, void *data)
 	return 0;
 }
 
+static int open_file_reset(struct inode *inode, struct file *f)
+{
+	return single_open(f, read_file_reset, inode->i_private);
+}
+
+static ssize_t write_file_reset(struct file *file,
+				const char __user *user_buf,
+				size_t count, loff_t *ppos)
+{
+	struct ath_softc *sc = file_inode(file)->i_private;
+	struct ath_hw *ah = sc->sc_ah;
+	struct ath_common *common = ath9k_hw_common(ah);
+	unsigned long val;
+	ssize_t ret;
+
+	ret = kstrtoul_from_user(user_buf, count, 0, &val);
+	if (ret)
+		return ret;
+
+	if (val != 1)
+		return -EINVAL;
+
+	/* avoid rearming hw_reset_work on shutdown */
+	mutex_lock(&sc->mutex);
+	if (test_bit(ATH_OP_INVALID, &common->op_flags)) {
+		mutex_unlock(&sc->mutex);
+		return -EBUSY;
+	}
+
+	ath9k_queue_reset(sc, RESET_TYPE_USER);
+	mutex_unlock(&sc->mutex);
+
+	return count;
+}
+
+static const struct file_operations fops_reset = {
+	.read = seq_read,
+	.write = write_file_reset,
+	.open = open_file_reset,
+	.owner = THIS_MODULE,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 void ath_debug_stat_tx(struct ath_softc *sc, struct ath_buf *bf,
 		       struct ath_tx_status *ts, struct ath_txq *txq,
 		       unsigned int flags)
 {
 	int qnum = txq->axq_qnum;
 
-	TX_STAT_INC(qnum, tx_pkts_all);
+	TX_STAT_INC(sc, qnum, tx_pkts_all);
 	sc->debug.stats.txstats[qnum].tx_bytes_all += bf->bf_mpdu->len;
 
 	if (bf_isampdu(bf)) {
 		if (flags & ATH_TX_ERROR)
-			TX_STAT_INC(qnum, a_xretries);
+			TX_STAT_INC(sc, qnum, a_xretries);
 		else
-			TX_STAT_INC(qnum, a_completed);
+			TX_STAT_INC(sc, qnum, a_completed);
 	} else {
 		if (ts->ts_status & ATH9K_TXERR_XRETRY)
-			TX_STAT_INC(qnum, xretries);
+			TX_STAT_INC(sc, qnum, xretries);
 		else
-			TX_STAT_INC(qnum, completed);
+			TX_STAT_INC(sc, qnum, completed);
 	}
 
 	if (ts->ts_status & ATH9K_TXERR_FILT)
-		TX_STAT_INC(qnum, txerr_filtered);
+		TX_STAT_INC(sc, qnum, txerr_filtered);
 	if (ts->ts_status & ATH9K_TXERR_FIFO)
-		TX_STAT_INC(qnum, fifo_underrun);
+		TX_STAT_INC(sc, qnum, fifo_underrun);
 	if (ts->ts_status & ATH9K_TXERR_XTXOP)
-		TX_STAT_INC(qnum, xtxop);
+		TX_STAT_INC(sc, qnum, xtxop);
 	if (ts->ts_status & ATH9K_TXERR_TIMER_EXPIRED)
-		TX_STAT_INC(qnum, timer_exp);
+		TX_STAT_INC(sc, qnum, timer_exp);
 	if (ts->ts_flags & ATH9K_TX_DESC_CFG_ERR)
-		TX_STAT_INC(qnum, desc_cfg_err);
+		TX_STAT_INC(sc, qnum, desc_cfg_err);
 	if (ts->ts_flags & ATH9K_TX_DATA_UNDERRUN)
-		TX_STAT_INC(qnum, data_underrun);
+		TX_STAT_INC(sc, qnum, data_underrun);
 	if (ts->ts_flags & ATH9K_TX_DELIM_UNDERRUN)
-		TX_STAT_INC(qnum, delim_underrun);
+		TX_STAT_INC(sc, qnum, delim_underrun);
 }
 
 void ath_debug_stat_rx(struct ath_softc *sc, struct ath_rx_status *rs)
@@ -837,16 +867,11 @@ static ssize_t write_file_regidx(struct file *file, const char __user *user_buf,
 {
 	struct ath_softc *sc = file->private_data;
 	unsigned long regidx;
-	char buf[32];
-	ssize_t len;
+	ssize_t ret;
 
-	len = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, user_buf, len))
-		return -EFAULT;
-
-	buf[len] = '\0';
-	if (kstrtoul(buf, 0, &regidx))
-		return -EINVAL;
+	ret = kstrtoul_from_user(user_buf, count, 0, &regidx);
+	if (ret)
+		return ret;
 
 	sc->debug.regidx = regidx;
 	return count;
@@ -882,16 +907,11 @@ static ssize_t write_file_regval(struct file *file, const char __user *user_buf,
 	struct ath_softc *sc = file->private_data;
 	struct ath_hw *ah = sc->sc_ah;
 	unsigned long regval;
-	char buf[32];
-	ssize_t len;
+	ssize_t ret;
 
-	len = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, user_buf, len))
-		return -EFAULT;
-
-	buf[len] = '\0';
-	if (kstrtoul(buf, 0, &regval))
-		return -EINVAL;
+	ret = kstrtoul_from_user(user_buf, count, 0, &regval);
+	if (ret)
+		return ret;
 
 	ath9k_ps_wakeup(sc);
 	REG_WRITE_D(ah, sc->debug.regidx, regval);
@@ -990,19 +1010,6 @@ static int read_file_dump_nfcal(struct seq_file *file, void *data)
 	return 0;
 }
 
-static int open_file_dump_nfcal(struct inode *inode, struct file *f)
-{
-	return single_open(f, read_file_dump_nfcal, inode->i_private);
-}
-
-static const struct file_operations fops_dump_nfcal = {
-	.read = seq_read,
-	.open = open_file_dump_nfcal,
-	.owner = THIS_MODULE,
-	.llseek = seq_lseek,
-	.release = single_release,
-};
-
 #ifdef CONFIG_ATH9K_BTCOEX_SUPPORT
 static ssize_t read_file_btcoex(struct file *file, char __user *user_buf,
 				size_t count, loff_t *ppos)
@@ -1092,16 +1099,11 @@ static ssize_t write_file_wow(struct file *file, const char __user *user_buf,
 {
 	struct ath_softc *sc = file->private_data;
 	unsigned long val;
-	char buf[32];
-	ssize_t len;
+	ssize_t ret;
 
-	len = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, user_buf, len))
-		return -EFAULT;
-
-	buf[len] = '\0';
-	if (kstrtoul(buf, 0, &val))
-		return -EINVAL;
+	ret = kstrtoul_from_user(user_buf, count, 0, &val);
+	if (ret)
+		return ret;
 
 	if (val != 1)
 		return -EINVAL;
@@ -1155,17 +1157,12 @@ static ssize_t write_file_tpc(struct file *file, const char __user *user_buf,
 	struct ath_softc *sc = file->private_data;
 	struct ath_hw *ah = sc->sc_ah;
 	unsigned long val;
-	char buf[32];
-	ssize_t len;
+	ssize_t ret;
 	bool tpc_enabled;
 
-	len = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, user_buf, len))
-		return -EFAULT;
-
-	buf[len] = '\0';
-	if (kstrtoul(buf, 0, &val))
-		return -EINVAL;
+	ret = kstrtoul_from_user(user_buf, count, 0, &val);
+	if (ret)
+		return ret;
 
 	if (val > 1)
 		return -EINVAL;
@@ -1236,8 +1233,11 @@ static ssize_t write_file_nf_override(struct file *file,
 
 	ah->nf_override = val;
 
-	if (ah->curchan)
+	if (ah->curchan) {
+		ath9k_ps_wakeup(sc);
 		ath9k_hw_loadnf(ah, ah->curchan);
+		ath9k_ps_restore(sc);
+	}
 
 	return count;
 }
@@ -1294,7 +1294,7 @@ void ath9k_get_et_strings(struct ieee80211_hw *hw,
 			  u32 sset, u8 *data)
 {
 	if (sset == ETH_SS_STATS)
-		memcpy(data, *ath9k_gstrings_stats,
+		memcpy(data, ath9k_gstrings_stats,
 		       sizeof(ath9k_gstrings_stats));
 }
 
@@ -1326,11 +1326,11 @@ void ath9k_get_et_stats(struct ieee80211_hw *hw,
 	struct ath_softc *sc = hw->priv;
 	int i = 0;
 
-	data[i++] = (sc->debug.stats.txstats[PR_QNUM(IEEE80211_AC_BE)].tx_pkts_all +
+	data[i++] = ((u64)sc->debug.stats.txstats[PR_QNUM(IEEE80211_AC_BE)].tx_pkts_all +
 		     sc->debug.stats.txstats[PR_QNUM(IEEE80211_AC_BK)].tx_pkts_all +
 		     sc->debug.stats.txstats[PR_QNUM(IEEE80211_AC_VI)].tx_pkts_all +
 		     sc->debug.stats.txstats[PR_QNUM(IEEE80211_AC_VO)].tx_pkts_all);
-	data[i++] = (sc->debug.stats.txstats[PR_QNUM(IEEE80211_AC_BE)].tx_bytes_all +
+	data[i++] = ((u64)sc->debug.stats.txstats[PR_QNUM(IEEE80211_AC_BE)].tx_bytes_all +
 		     sc->debug.stats.txstats[PR_QNUM(IEEE80211_AC_BK)].tx_bytes_all +
 		     sc->debug.stats.txstats[PR_QNUM(IEEE80211_AC_VI)].tx_bytes_all +
 		     sc->debug.stats.txstats[PR_QNUM(IEEE80211_AC_VO)].tx_bytes_all);
@@ -1377,12 +1377,10 @@ void ath9k_deinit_debug(struct ath_softc *sc)
 int ath9k_init_debug(struct ath_hw *ah)
 {
 	struct ath_common *common = ath9k_hw_common(ah);
-	struct ath_softc *sc = (struct ath_softc *) common->priv;
+	struct ath_softc *sc = common->priv;
 
 	sc->debug.debugfs_phy = debugfs_create_dir("ath9k",
 						   sc->hw->wiphy->debugfsdir);
-	if (!sc->debug.debugfs_phy)
-		return -ENOMEM;
 
 #ifdef CONFIG_ATH_DEBUG
 	debugfs_create_file("debug", 0600, sc->debug.debugfs_phy,
@@ -1403,8 +1401,8 @@ int ath9k_init_debug(struct ath_hw *ah)
 				    read_file_queues);
 	debugfs_create_devm_seqfile(sc->dev, "misc", sc->debug.debugfs_phy,
 				    read_file_misc);
-	debugfs_create_devm_seqfile(sc->dev, "reset", sc->debug.debugfs_phy,
-				    read_file_reset);
+	debugfs_create_file("reset", 0600, sc->debug.debugfs_phy,
+			    sc, &fops_reset);
 
 	ath9k_cmn_debug_recv(sc->debug.debugfs_phy, &sc->debug.stats.rxstats);
 	ath9k_cmn_debug_phy_err(sc->debug.debugfs_phy, &sc->debug.stats.rxstats);
@@ -1455,9 +1453,6 @@ int ath9k_init_debug(struct ath_hw *ah)
 			    sc, &fops_ackto);
 #endif
 	debugfs_create_file("tpc", 0600, sc->debug.debugfs_phy, sc, &fops_tpc);
-
-	debugfs_create_u16("airtime_flags", 0600,
-			   sc->debug.debugfs_phy, &sc->airtime_flags);
 
 	debugfs_create_file("nf_override", 0600,
 			    sc->debug.debugfs_phy, sc, &fops_nf_override);

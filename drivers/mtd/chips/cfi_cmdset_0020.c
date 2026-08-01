@@ -1,8 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Common Flash Interface support:
  *   ST Advanced Architecture Command Set (ID 0x0020)
  *
- * (C) 2000 Red Hat. GPL'd
+ * (C) 2000 Red Hat.
  *
  * 10/10/2000	Nicolas Pitre <nico@fluxnic.net>
  * 	- completely revamped method functions so they are aware and
@@ -171,26 +172,20 @@ static struct mtd_info *cfi_staa_setup(struct map_info *map)
 	int i,j;
 	unsigned long devsize = (1<<cfi->cfiq->DevSize) * cfi->interleave;
 
-	mtd = kzalloc(sizeof(*mtd), GFP_KERNEL);
+	mtd = kzalloc_obj(*mtd);
 	//printk(KERN_DEBUG "number of CFI chips: %d\n", cfi->numchips);
-
-	if (!mtd) {
-		kfree(cfi->cmdset_priv);
-		return NULL;
-	}
+	if (!mtd)
+		goto free_cmdset_priv;
 
 	mtd->priv = map;
 	mtd->type = MTD_NORFLASH;
 	mtd->size = devsize * cfi->numchips;
 
 	mtd->numeraseregions = cfi->cfiq->NumEraseRegions * cfi->numchips;
-	mtd->eraseregions = kmalloc(sizeof(struct mtd_erase_region_info)
-			* mtd->numeraseregions, GFP_KERNEL);
-	if (!mtd->eraseregions) {
-		kfree(cfi->cmdset_priv);
-		kfree(mtd);
-		return NULL;
-	}
+	mtd->eraseregions = kmalloc_objs(struct mtd_erase_region_info,
+					 mtd->numeraseregions);
+	if (!mtd->eraseregions)
+		goto free_mtd;
 
 	for (i=0; i<cfi->cfiq->NumEraseRegions; i++) {
 		unsigned long ernum, ersize;
@@ -212,9 +207,7 @@ static struct mtd_info *cfi_staa_setup(struct map_info *map)
 		/* Argh */
 		printk(KERN_WARNING "Sum of regions (%lx) != total size of set of interleaved chips (%lx)\n", offset, devsize);
 		kfree(mtd->eraseregions);
-		kfree(cfi->cmdset_priv);
-		kfree(mtd);
-		return NULL;
+		goto free_mtd;
 	}
 
 	for (i=0; i<mtd->numeraseregions;i++){
@@ -241,6 +234,12 @@ static struct mtd_info *cfi_staa_setup(struct map_info *map)
 	__module_get(THIS_MODULE);
 	mtd->name = map->name;
 	return mtd;
+
+free_mtd:
+	kfree(mtd);
+free_cmdset_priv:
+	kfree(cfi->cmdset_priv);
+	return NULL;
 }
 
 
@@ -323,7 +322,7 @@ static inline int do_read_onechip(struct map_info *map, struct flchip *chip, lof
 	case FL_JEDEC_QUERY:
 		map_write(map, CMD(0x70), cmd_addr);
 		chip->state = FL_STATUS;
-
+		fallthrough;
 	case FL_STATUS:
 		status = map_read(map, cmd_addr);
 		if (map_word_andequal(map, status, status_OK, status_OK)) {
@@ -460,7 +459,7 @@ static int do_write_buffer(struct map_info *map, struct flchip *chip,
 #ifdef DEBUG_CFI_FEATURES
 	printk("%s: 1 status[%x]\n", __func__, map_read(map, cmd_adr));
 #endif
-
+		fallthrough;
 	case FL_STATUS:
 		status = map_read(map, cmd_adr);
 		if (map_word_andequal(map, status, status_OK, status_OK))
@@ -608,7 +607,7 @@ static int cfi_staa_write_buffers (struct mtd_info *mtd, loff_t to,
 	struct map_info *map = mtd->priv;
 	struct cfi_private *cfi = map->fldrv_priv;
 	int wbufsize = cfi_interleave(cfi) << cfi->cfiq->MaxBufWriteSize;
-	int ret = 0;
+	int ret;
 	int chipnum;
 	unsigned long ofs;
 
@@ -753,7 +752,7 @@ retry:
 	case FL_READY:
 		map_write(map, CMD(0x70), adr);
 		chip->state = FL_STATUS;
-
+		fallthrough;
 	case FL_STATUS:
 		status = map_read(map, adr);
 		if (map_word_andequal(map, status, status_OK, status_OK))
@@ -891,7 +890,7 @@ static int cfi_staa_erase_varsize(struct mtd_info *mtd,
 {	struct map_info *map = mtd->priv;
 	struct cfi_private *cfi = map->fldrv_priv;
 	unsigned long adr, len;
-	int chipnum, ret = 0;
+	int chipnum, ret;
 	int i, first;
 	struct mtd_erase_region_info *regions = mtd->eraseregions;
 
@@ -994,6 +993,7 @@ static void cfi_staa_sync (struct mtd_info *mtd)
 			 * as the whole point is that nobody can do anything
 			 * with the chip now anyway.
 			 */
+			fallthrough;
 		case FL_SYNCING:
 			mutex_unlock(&chip->mutex);
 			break;
@@ -1049,7 +1049,7 @@ retry:
 	case FL_READY:
 		map_write(map, CMD(0x70), adr);
 		chip->state = FL_STATUS;
-
+		fallthrough;
 	case FL_STATUS:
 		status = map_read(map, adr);
 		if (map_word_andequal(map, status, status_OK, status_OK))
@@ -1126,7 +1126,7 @@ static int cfi_staa_lock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 	struct map_info *map = mtd->priv;
 	struct cfi_private *cfi = map->fldrv_priv;
 	unsigned long adr;
-	int chipnum, ret = 0;
+	int chipnum, ret;
 #ifdef DEBUG_LOCK_BITS
 	int ofs_factor = cfi->interleave * cfi->device_type;
 #endif
@@ -1195,7 +1195,7 @@ retry:
 	case FL_READY:
 		map_write(map, CMD(0x70), adr);
 		chip->state = FL_STATUS;
-
+		fallthrough;
 	case FL_STATUS:
 		status = map_read(map, adr);
 		if (map_word_andequal(map, status, status_OK, status_OK))
@@ -1272,7 +1272,7 @@ static int cfi_staa_unlock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 	struct map_info *map = mtd->priv;
 	struct cfi_private *cfi = map->fldrv_priv;
 	unsigned long adr;
-	int chipnum, ret = 0;
+	int chipnum, ret;
 #ifdef DEBUG_LOCK_BITS
 	int ofs_factor = cfi->interleave * cfi->device_type;
 #endif
@@ -1330,6 +1330,8 @@ static int cfi_staa_suspend(struct mtd_info *mtd)
 			 * as the whole point is that nobody can do anything
 			 * with the chip now anyway.
 			 */
+			break;
+
 		case FL_PM_SUSPENDED:
 			break;
 
@@ -1394,4 +1396,5 @@ static void cfi_staa_destroy(struct mtd_info *mtd)
 	kfree(cfi);
 }
 
+MODULE_DESCRIPTION("MTD chip driver for ST Advanced Architecture Command Set (ID 0x0020)");
 MODULE_LICENSE("GPL");

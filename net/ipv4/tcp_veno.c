@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TCP Veno congestion control
  *
@@ -6,7 +7,7 @@
  *    "TCP Veno: TCP Enhancement for Transmission over Wireless Access Networks."
  *    IEEE Journal on Selected Areas in Communication,
  *    Feb. 2003.
- * 	See http://www.ie.cuhk.edu.hk/fileadmin/staff_upload/soung/Journal/J3.pdf
+ * 	See https://www.ie.cuhk.edu.hk/fileadmin/staff_upload/soung/Journal/J3.pdf
  */
 
 #include <linux/mm.h>
@@ -111,8 +112,13 @@ static void tcp_veno_state(struct sock *sk, u8 ca_state)
  */
 static void tcp_veno_cwnd_event(struct sock *sk, enum tcp_ca_event event)
 {
-	if (event == CA_EVENT_CWND_RESTART || event == CA_EVENT_TX_START)
+	if (event == CA_EVENT_CWND_RESTART)
 		tcp_veno_init(sk);
+}
+
+static void tcp_veno_cwnd_event_tx_start(struct sock *sk)
+{
+	tcp_veno_init(sk);
 }
 
 static void tcp_veno_cong_avoid(struct sock *sk, u32 ack, u32 acked)
@@ -145,42 +151,45 @@ static void tcp_veno_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 
 		rtt = veno->minrtt;
 
-		target_cwnd = (u64)tp->snd_cwnd * veno->basertt;
+		target_cwnd = (u64)tcp_snd_cwnd(tp) * veno->basertt;
 		target_cwnd <<= V_PARAM_SHIFT;
 		do_div(target_cwnd, rtt);
 
-		veno->diff = (tp->snd_cwnd << V_PARAM_SHIFT) - target_cwnd;
+		veno->diff = (tcp_snd_cwnd(tp) << V_PARAM_SHIFT) - target_cwnd;
 
 		if (tcp_in_slow_start(tp)) {
-			/* Slow start.  */
-			tcp_slow_start(tp, acked);
-		} else {
-			/* Congestion avoidance. */
-			if (veno->diff < beta) {
-				/* In the "non-congestive state", increase cwnd
-				 *  every rtt.
-				 */
-				tcp_cong_avoid_ai(tp, tp->snd_cwnd, 1);
-			} else {
-				/* In the "congestive state", increase cwnd
-				 * every other rtt.
-				 */
-				if (tp->snd_cwnd_cnt >= tp->snd_cwnd) {
-					if (veno->inc &&
-					    tp->snd_cwnd < tp->snd_cwnd_clamp) {
-						tp->snd_cwnd++;
-						veno->inc = 0;
-					} else
-						veno->inc = 1;
-					tp->snd_cwnd_cnt = 0;
-				} else
-					tp->snd_cwnd_cnt++;
-			}
+			/* Slow start. */
+			acked = tcp_slow_start(tp, acked);
+			if (!acked)
+				goto done;
 		}
-		if (tp->snd_cwnd < 2)
-			tp->snd_cwnd = 2;
-		else if (tp->snd_cwnd > tp->snd_cwnd_clamp)
-			tp->snd_cwnd = tp->snd_cwnd_clamp;
+
+		/* Congestion avoidance. */
+		if (veno->diff < beta) {
+			/* In the "non-congestive state", increase cwnd
+			 * every rtt.
+			 */
+			tcp_cong_avoid_ai(tp, tcp_snd_cwnd(tp), acked);
+		} else {
+			/* In the "congestive state", increase cwnd
+			 * every other rtt.
+			 */
+			if (tp->snd_cwnd_cnt >= tcp_snd_cwnd(tp)) {
+				if (veno->inc &&
+				    tcp_snd_cwnd(tp) < tp->snd_cwnd_clamp) {
+					tcp_snd_cwnd_set(tp, tcp_snd_cwnd(tp) + 1);
+					veno->inc = 0;
+				} else
+					veno->inc = 1;
+				tp->snd_cwnd_cnt = 0;
+			} else
+				tp->snd_cwnd_cnt += acked;
+		}
+done:
+		if (tcp_snd_cwnd(tp) < 2)
+			tcp_snd_cwnd_set(tp, 2);
+		else if (tcp_snd_cwnd(tp) > tp->snd_cwnd_clamp)
+			tcp_snd_cwnd_set(tp, tp->snd_cwnd_clamp);
 	}
 	/* Wipe the slate clean for the next rtt. */
 	/* veno->cntrtt = 0; */
@@ -195,10 +204,10 @@ static u32 tcp_veno_ssthresh(struct sock *sk)
 
 	if (veno->diff < beta)
 		/* in "non-congestive state", cut cwnd by 1/5 */
-		return max(tp->snd_cwnd * 4 / 5, 2U);
+		return max(tcp_snd_cwnd(tp) * 4 / 5, 2U);
 	else
 		/* in "congestive state", cut cwnd by 1/2 */
-		return max(tp->snd_cwnd >> 1U, 2U);
+		return max(tcp_snd_cwnd(tp) >> 1U, 2U);
 }
 
 static struct tcp_congestion_ops tcp_veno __read_mostly = {
@@ -209,6 +218,7 @@ static struct tcp_congestion_ops tcp_veno __read_mostly = {
 	.pkts_acked	= tcp_veno_pkts_acked,
 	.set_state	= tcp_veno_state,
 	.cwnd_event	= tcp_veno_cwnd_event,
+	.cwnd_event_tx_start = tcp_veno_cwnd_event_tx_start,
 
 	.owner		= THIS_MODULE,
 	.name		= "veno",

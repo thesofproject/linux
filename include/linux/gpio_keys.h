@@ -2,6 +2,8 @@
 #ifndef _GPIO_KEYS_H
 #define _GPIO_KEYS_H
 
+#include <linux/types.h>
+
 struct device;
 
 /**
@@ -19,6 +21,7 @@ struct device;
  *			disable button via sysfs
  * @value:		axis value for %EV_ABS
  * @irq:		Irq number in case of interrupt keys
+ * @wakeirq:		Optional dedicated wake-up interrupt
  */
 struct gpio_keys_button {
 	unsigned int code;
@@ -32,6 +35,7 @@ struct gpio_keys_button {
 	bool can_disable;
 	int value;
 	unsigned int irq;
+	unsigned int wakeirq;
 };
 
 /**

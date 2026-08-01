@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /* Kernel module to match connection tracking byte counter.
- * GPL (C) 2002 Martin Devera (devik@cdi.cz).
+ *  (C) 2002 Martin Devera (devik@cdi.cz).
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/module.h>
@@ -111,9 +112,11 @@ static int connbytes_mt_check(const struct xt_mtchk_param *par)
 		return -EINVAL;
 
 	ret = nf_ct_netns_get(par->net, par->family);
-	if (ret < 0)
+	if (ret < 0) {
 		pr_info_ratelimited("cannot load conntrack support for proto=%u\n",
 				    par->family);
+		return ret;
+	}
 
 	/*
 	 * This filter cannot function correctly unless connection tracking

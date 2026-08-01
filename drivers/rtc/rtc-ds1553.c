@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * An rtc driver for the Dallas DS1553
  *
  * Copyright (C) 2006 Atsushi Nemoto <anemo@mba.ocn.ne.jp>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/bcd.h>
@@ -73,8 +70,7 @@ struct rtc_plat_data {
 
 static int ds1553_rtc_set_time(struct device *dev, struct rtc_time *tm)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
+	struct rtc_plat_data *pdata = dev_get_drvdata(dev);
 	void __iomem *ioaddr = pdata->ioaddr;
 	u8 century;
 
@@ -98,8 +94,7 @@ static int ds1553_rtc_set_time(struct device *dev, struct rtc_time *tm)
 
 static int ds1553_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
+	struct rtc_plat_data *pdata = dev_get_drvdata(dev);
 	void __iomem *ioaddr = pdata->ioaddr;
 	unsigned int year, month, day, hour, minute, second, week;
 	unsigned int century;
@@ -155,8 +150,7 @@ static void ds1553_rtc_update_alarm(struct rtc_plat_data *pdata)
 
 static int ds1553_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
+	struct rtc_plat_data *pdata = dev_get_drvdata(dev);
 
 	if (pdata->irq <= 0)
 		return -EINVAL;
@@ -172,8 +166,7 @@ static int ds1553_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 
 static int ds1553_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
+	struct rtc_plat_data *pdata = dev_get_drvdata(dev);
 
 	if (pdata->irq <= 0)
 		return -EINVAL;
@@ -208,8 +201,7 @@ static irqreturn_t ds1553_rtc_interrupt(int irq, void *dev_id)
 
 static int ds1553_rtc_alarm_irq_enable(struct device *dev, unsigned int enabled)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
+	struct rtc_plat_data *pdata = dev_get_drvdata(dev);
 
 	if (pdata->irq <= 0)
 		return -EINVAL;
@@ -257,7 +249,6 @@ static int ds1553_nvram_write(void *priv, unsigned int pos, void *val,
 
 static int ds1553_rtc_probe(struct platform_device *pdev)
 {
-	struct resource *res;
 	unsigned int cen, sec;
 	struct rtc_plat_data *pdata;
 	void __iomem *ioaddr;
@@ -276,8 +267,7 @@ static int ds1553_rtc_probe(struct platform_device *pdev)
 	if (!pdata)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	ioaddr = devm_ioremap_resource(&pdev->dev, res);
+	ioaddr = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(ioaddr))
 		return PTR_ERR(ioaddr);
 	pdata->ioaddr = ioaddr;
@@ -304,9 +294,8 @@ static int ds1553_rtc_probe(struct platform_device *pdev)
 		return PTR_ERR(pdata->rtc);
 
 	pdata->rtc->ops = &ds1553_rtc_ops;
-	pdata->rtc->nvram_old_abi = true;
 
-	ret = rtc_register_device(pdata->rtc);
+	ret = devm_rtc_register_device(pdata->rtc);
 	if (ret)
 		return ret;
 
@@ -320,8 +309,7 @@ static int ds1553_rtc_probe(struct platform_device *pdev)
 		}
 	}
 
-	if (rtc_nvmem_register(pdata->rtc, &nvmem_cfg))
-		dev_err(&pdev->dev, "unable to register nvmem\n");
+	devm_rtc_nvmem_register(pdata->rtc, &nvmem_cfg);
 
 	return 0;
 }

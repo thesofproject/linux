@@ -1,26 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Marvell 88SE64xx hardware specific head file
  *
  * Copyright 2007 Red Hat, Inc.
  * Copyright 2008 Marvell. <kewei@marvell.com>
  * Copyright 2009-2011 Marvell. <yuxiangl@marvell.com>
- *
- * This file is licensed under GPLv2.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; version 2 of the
- * License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
- * USA
 */
 
 #ifndef _MVS64XX_REG_H_
@@ -117,8 +101,8 @@ enum sas_sata_vsp_regs {
 	VSR_PHY_MODE9		= 0x09, /* Test */
 	VSR_PHY_MODE10		= 0x0A, /* Power */
 	VSR_PHY_MODE11		= 0x0B, /* Phy Mode */
-	VSR_PHY_VS0		= 0x0C, /* Vednor Specific 0 */
-	VSR_PHY_VS1		= 0x0D, /* Vednor Specific 1 */
+	VSR_PHY_VS0		= 0x0C, /* Vendor Specific 0 */
+	VSR_PHY_VS1		= 0x0D, /* Vendor Specific 1 */
 };
 
 enum chip_register_bits {

@@ -24,7 +24,7 @@ static int pvc_shutdown(struct socket *sock, int how)
 	return 0;
 }
 
-static int pvc_bind(struct socket *sock, struct sockaddr *sockaddr,
+static int pvc_bind(struct socket *sock, struct sockaddr_unsized *sockaddr,
 		    int sockaddr_len)
 {
 	struct sock *sk = sock->sk;
@@ -56,14 +56,14 @@ out:
 	return error;
 }
 
-static int pvc_connect(struct socket *sock, struct sockaddr *sockaddr,
+static int pvc_connect(struct socket *sock, struct sockaddr_unsized *sockaddr,
 		       int sockaddr_len, int flags)
 {
 	return pvc_bind(sock, sockaddr, sockaddr_len);
 }
 
 static int pvc_setsockopt(struct socket *sock, int level, int optname,
-			  char __user *optval, unsigned int optlen)
+			  sockptr_t optval, unsigned int optlen)
 {
 	struct sock *sk = sock->sk;
 	int error;
@@ -75,13 +75,13 @@ static int pvc_setsockopt(struct socket *sock, int level, int optname,
 }
 
 static int pvc_getsockopt(struct socket *sock, int level, int optname,
-			  char __user *optval, int __user *optlen)
+			  sockopt_t *opt)
 {
 	struct sock *sk = sock->sk;
 	int error;
 
 	lock_sock(sk);
-	error = vcc_getsockopt(sock, level, optname, optval, optlen);
+	error = vcc_getsockopt(sock, level, optname, opt);
 	release_sock(sk);
 	return error;
 }
@@ -118,14 +118,14 @@ static const struct proto_ops pvc_proto_ops = {
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = vcc_compat_ioctl,
 #endif
+	.gettstamp =	sock_gettstamp,
 	.listen =	sock_no_listen,
 	.shutdown =	pvc_shutdown,
 	.setsockopt =	pvc_setsockopt,
-	.getsockopt =	pvc_getsockopt,
+	.getsockopt_iter = pvc_getsockopt,
 	.sendmsg =	vcc_sendmsg,
 	.recvmsg =	vcc_recvmsg,
 	.mmap =		sock_no_mmap,
-	.sendpage =	sock_no_sendpage,
 };
 
 

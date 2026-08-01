@@ -47,8 +47,10 @@
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/ieee802154.h>
+#include <linux/if_arp.h>
 
 #include <net/ipv6.h>
+#include <net/netdev_lock.h>
 
 #include "6lowpan_i.h"
 
@@ -90,12 +92,18 @@ static int lowpan_neigh_construct(struct net_device *dev, struct neighbour *n)
 	return 0;
 }
 
+static int lowpan_get_iflink(const struct net_device *dev)
+{
+	return READ_ONCE(lowpan_802154_dev(dev)->wdev->ifindex);
+}
+
 static const struct net_device_ops lowpan_netdev_ops = {
 	.ndo_init		= lowpan_dev_init,
 	.ndo_start_xmit		= lowpan_xmit,
 	.ndo_open		= lowpan_open,
 	.ndo_stop		= lowpan_stop,
 	.ndo_neigh_construct    = lowpan_neigh_construct,
+	.ndo_get_iflink         = lowpan_get_iflink,
 };
 
 static void lowpan_setup(struct net_device *ldev)
@@ -109,7 +117,7 @@ static void lowpan_setup(struct net_device *ldev)
 	ldev->netdev_ops	= &lowpan_netdev_ops;
 	ldev->header_ops	= &lowpan_header_ops;
 	ldev->needs_free_netdev	= true;
-	ldev->features		|= NETIF_F_NETNS_LOCAL;
+	ldev->netns_immutable	= true;
 }
 
 static int lowpan_validate(struct nlattr *tb[], struct nlattr *data[],
@@ -122,10 +130,11 @@ static int lowpan_validate(struct nlattr *tb[], struct nlattr *data[],
 	return 0;
 }
 
-static int lowpan_newlink(struct net *src_net, struct net_device *ldev,
-			  struct nlattr *tb[], struct nlattr *data[],
+static int lowpan_newlink(struct net_device *ldev,
+			  struct rtnl_newlink_params *params,
 			  struct netlink_ext_ack *extack)
 {
+	struct nlattr **tb = params->tb;
 	struct net_device *wdev;
 	int ret;
 
@@ -134,6 +143,8 @@ static int lowpan_newlink(struct net *src_net, struct net_device *ldev,
 	pr_debug("adding new link\n");
 
 	if (!tb[IFLA_LINK])
+		return -EINVAL;
+	if (params->link_net && !net_eq(params->link_net, dev_net(ldev)))
 		return -EINVAL;
 	/* find and hold wpan device */
 	wdev = dev_get_by_index(dev_net(ldev), nla_get_u32(tb[IFLA_LINK]));
@@ -151,7 +162,7 @@ static int lowpan_newlink(struct net *src_net, struct net_device *ldev,
 
 	lowpan_802154_dev(ldev)->wdev = wdev;
 	/* Set the lowpan hardware address to the wpan hardware address. */
-	memcpy(ldev->dev_addr, wdev->dev_addr, IEEE802154_ADDR_LEN);
+	__dev_addr_set(ldev, wdev->dev_addr, IEEE802154_ADDR_LEN);
 	/* We need headroom for possible wpan_dev_hard_header call and tailroom
 	 * for encryption/fcs handling. The lowpan interface will replace
 	 * the IPv6 header with 6LoWPAN header. At worst case the 6LoWPAN
@@ -273,5 +284,6 @@ static void __exit lowpan_cleanup_module(void)
 
 module_init(lowpan_init_module);
 module_exit(lowpan_cleanup_module);
+MODULE_DESCRIPTION("IPv6 over Low power Wireless Personal Area Network IEEE 802.15.4 core");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS_RTNL_LINK("lowpan");

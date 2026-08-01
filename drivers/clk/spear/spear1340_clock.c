@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * arch/arm/mach-spear13xx/spear1340_clock.c
  *
@@ -5,16 +6,12 @@
  *
  * Copyright (C) 2012 ST Microelectronics
  * Viresh Kumar <vireshk@kernel.org>
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #include <linux/clkdev.h>
+#include <linux/clk/spear.h>
 #include <linux/err.h>
 #include <linux/io.h>
-#include <linux/of_platform.h>
 #include <linux/spinlock_types.h>
 #include "clk.h"
 
@@ -202,7 +199,7 @@ static struct frac_rate_tbl amba_synth_rtbl[] = {
  * We can program this synthesizer to make cpu run on different clock
  * frequencies.
  * Following table provides configuration values to let cpu run on 200,
- * 250, 332, 400 or 500 MHz considering different possibilites of input
+ * 250, 332, 400 or 500 MHz considering different possibilities of input
  * (vco1div2) clock.
  *
  * --------------------------------------------------------------------
@@ -335,7 +332,7 @@ static const struct aux_clk_masks i2s_prs1_masks = {
 };
 
 /* i2s sclk (bit clock) syynthesizers masks */
-static struct aux_clk_masks i2s_sclk_masks = {
+static const struct aux_clk_masks i2s_sclk_masks = {
 	.eq_sel_mask = AUX_EQ_SEL_MASK,
 	.eq_sel_shift = SPEAR1340_I2S_SCLK_EQ_SEL_SHIFT,
 	.eq1_mask = AUX_EQ1_SEL,

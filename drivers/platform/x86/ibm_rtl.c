@@ -1,25 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * IBM Real-Time Linux driver
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  *
  * Copyright (C) IBM Corporation, 2010
  *
  * Author: Keith Mannthey <kmannth@us.ibm.com>
  *         Vernon Mauery <vernux@us.ibm.com>
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -43,6 +29,7 @@ static bool debug;
 module_param(debug, bool, 0644);
 MODULE_PARM_DESC(debug, "Show debug output");
 
+MODULE_DESCRIPTION("IBM Premium Real Time Mode (PRTM) driver");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Keith Mannthey <kmmanth@us.ibm.com>");
 MODULE_AUTHOR("Vernon Mauery <vernux@us.ibm.com>");
@@ -193,7 +180,7 @@ static ssize_t rtl_set_state(struct device *dev,
 	return ret;
 }
 
-static struct bus_type rtl_subsys = {
+static const struct bus_type rtl_subsys = {
 	.name = "ibm_rtl",
 	.dev_name = "ibm_rtl",
 };
@@ -213,16 +200,26 @@ static int rtl_setup_sysfs(void) {
 
 	ret = subsys_system_register(&rtl_subsys, NULL);
 	if (!ret) {
-		for (i = 0; rtl_attributes[i]; i ++)
-			device_create_file(rtl_subsys.dev_root, rtl_attributes[i]);
+		struct device *dev_root = bus_get_dev_root(&rtl_subsys);
+
+		if (dev_root) {
+			for (i = 0; rtl_attributes[i]; i ++)
+				device_create_file(dev_root, rtl_attributes[i]);
+			put_device(dev_root);
+		}
 	}
 	return ret;
 }
 
 static void rtl_teardown_sysfs(void) {
+	struct device *dev_root = bus_get_dev_root(&rtl_subsys);
 	int i;
-	for (i = 0; rtl_attributes[i]; i ++)
-		device_remove_file(rtl_subsys.dev_root, rtl_attributes[i]);
+
+	if (dev_root) {
+		for (i = 0; rtl_attributes[i]; i ++)
+			device_remove_file(dev_root, rtl_attributes[i]);
+		put_device(dev_root);
+	}
 	bus_unregister(&rtl_subsys);
 }
 
@@ -276,7 +273,7 @@ static int __init ibm_rtl_init(void) {
 	/* search for the _RTL_ signature at the start of the table */
 	for (i = 0 ; i < ebda_size/sizeof(unsigned int); i++) {
 		struct ibm_rtl_table __iomem * tmp;
-		tmp = (struct ibm_rtl_table __iomem *) (ebda_map+i);
+		tmp = (struct ibm_rtl_table __iomem *) (ebda_map + i*sizeof(unsigned int));
 		if ((readq(&tmp->signature) & RTL_MASK) == RTL_SIGNATURE) {
 			phys_addr_t addr;
 			unsigned int plen;

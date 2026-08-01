@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * wm831x-irq.c  --  Interrupt controller support for Wolfson WM831x PMICs
  *
  * Copyright 2009 Wolfson Microelectronics PLC.
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
  */
 
 #include <linux/kernel.h>
@@ -592,16 +587,11 @@ int wm831x_irq_init(struct wm831x *wm831x, int irq)
 	}
 
 	if (irq_base)
-		domain = irq_domain_add_legacy(wm831x->dev->of_node,
-					       ARRAY_SIZE(wm831x_irqs),
-					       irq_base, 0,
-					       &wm831x_irq_domain_ops,
-					       wm831x);
+		domain = irq_domain_create_legacy(dev_fwnode(wm831x->dev), ARRAY_SIZE(wm831x_irqs),
+						  irq_base, 0, &wm831x_irq_domain_ops, wm831x);
 	else
-		domain = irq_domain_add_linear(wm831x->dev->of_node,
-					       ARRAY_SIZE(wm831x_irqs),
-					       &wm831x_irq_domain_ops,
-					       wm831x);
+		domain = irq_domain_create_linear(dev_fwnode(wm831x->dev), ARRAY_SIZE(wm831x_irqs),
+						  &wm831x_irq_domain_ops, wm831x);
 
 	if (!domain) {
 		dev_warn(wm831x->dev, "Failed to allocate IRQ domain\n");

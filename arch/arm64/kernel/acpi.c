@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  ARM64 Specific Low-Level ACPI Boot Support
  *
@@ -7,34 +8,33 @@
  *	Author: Hanjun Guo <hanjun.guo@linaro.org>
  *	Author: Tomasz Nowicki <tomasz.nowicki@linaro.org>
  *	Author: Naresh Bhat <naresh.bhat@linaro.org>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  */
 
 #define pr_fmt(fmt) "ACPI: " fmt
 
 #include <linux/acpi.h>
-#include <linux/bootmem.h>
+#include <linux/arm-smccc.h>
 #include <linux/cpumask.h>
+#include <linux/efi.h>
 #include <linux/efi-bgrt.h>
 #include <linux/init.h>
 #include <linux/irq.h>
 #include <linux/irqdomain.h>
+#include <linux/irq_work.h>
 #include <linux/memblock.h>
 #include <linux/of_fdt.h>
+#include <linux/libfdt.h>
 #include <linux/smp.h>
 #include <linux/serial_core.h>
+#include <linux/suspend.h>
+#include <linux/pgtable.h>
 
+#include <acpi/ghes.h>
+#include <acpi/processor.h>
 #include <asm/cputype.h>
 #include <asm/cpu_ops.h>
+#include <asm/daifflags.h>
 #include <asm/smp_plat.h>
-
-#ifdef CONFIG_ACPI_APEI
-# include <linux/efi.h>
-# include <asm/pgtable.h>
-#endif
 
 int acpi_noirq = 1;		/* skip ACPI IRQ initialization */
 int acpi_disabled = 1;
@@ -46,6 +46,7 @@ EXPORT_SYMBOL(acpi_pci_disabled);
 static bool param_acpi_off __initdata;
 static bool param_acpi_on __initdata;
 static bool param_acpi_force __initdata;
+static bool param_acpi_nospcr __initdata;
 
 static int __init parse_acpi(char *arg)
 {
@@ -59,6 +60,8 @@ static int __init parse_acpi(char *arg)
 		param_acpi_on = true;
 	else if (strcmp(arg, "force") == 0) /* force ACPI to be enabled */
 		param_acpi_force = true;
+	else if (strcmp(arg, "nospcr") == 0) /* disable SPCR as default console */
+		param_acpi_nospcr = true;
 	else
 		return -EINVAL;	/* Core will print when we return error */
 
@@ -66,29 +69,22 @@ static int __init parse_acpi(char *arg)
 }
 early_param("acpi", parse_acpi);
 
-static int __init dt_scan_depth1_nodes(unsigned long node,
-				       const char *uname, int depth,
-				       void *data)
+static bool __init dt_is_stub(void)
 {
-	/*
-	 * Ignore anything not directly under the root node; we'll
-	 * catch its parent instead.
-	 */
-	if (depth != 1)
-		return 0;
+	int node;
 
-	if (strcmp(uname, "chosen") == 0)
-		return 0;
+	fdt_for_each_subnode(node, initial_boot_params, 0) {
+		const char *name = fdt_get_name(initial_boot_params, node, NULL);
+		if (strcmp(name, "chosen") == 0)
+			continue;
+		if (strcmp(name, "hypervisor") == 0 &&
+		    of_flat_dt_is_compatible(node, "xen,xen"))
+			continue;
 
-	if (strcmp(uname, "hypervisor") == 0 &&
-	    of_flat_dt_is_compatible(node, "xen,xen"))
-		return 0;
+		return false;
+	}
 
-	/*
-	 * This node at depth 1 is neither a chosen node nor a xen node,
-	 * which we do not expect.
-	 */
-	return 1;
+	return true;
 }
 
 /*
@@ -137,7 +133,7 @@ static int __init acpi_fadt_sanity_check(void)
 
 	/*
 	 * FADT is required on arm64; retrieve it to check its presence
-	 * and carry out revision and ACPI HW reduced compliancy tests
+	 * and carry out revision and ACPI HW reduced compliance tests
 	 */
 	status = acpi_get_table(ACPI_SIG_FADT, 0, &table);
 	if (ACPI_FAILURE(status)) {
@@ -157,10 +153,14 @@ static int __init acpi_fadt_sanity_check(void)
 	 */
 	if (table->revision < 5 ||
 	   (table->revision == 5 && fadt->minor_revision < 1)) {
-		pr_err("Unsupported FADT revision %d.%d, should be 5.1+\n",
+		pr_err(FW_BUG "Unsupported FADT revision %d.%d, should be 5.1+\n",
 		       table->revision, fadt->minor_revision);
-		ret = -EINVAL;
-		goto out;
+
+		if (!fadt->arm_boot_flags) {
+			ret = -EINVAL;
+			goto out;
+		}
+		pr_err("FADT has ARM boot flags set, assuming 5.1\n");
 	}
 
 	if (!(fadt->flags & ACPI_FADT_HW_REDUCED)) {
@@ -205,8 +205,7 @@ void __init acpi_boot_table_init(void)
 	 *   and ACPI has not been [force] enabled (acpi=on|force)
 	 */
 	if (param_acpi_off ||
-	    (!param_acpi_on && !param_acpi_force &&
-	     of_scan_flat_dt(dt_scan_depth1_nodes, NULL)))
+	    (!param_acpi_on && !param_acpi_force && !dt_is_stub()))
 		goto done;
 
 	/*
@@ -233,21 +232,52 @@ done:
 		if (earlycon_acpi_spcr_enable)
 			early_init_dt_scan_chosen_stdout();
 	} else {
-		acpi_parse_spcr(earlycon_acpi_spcr_enable, true);
+#ifdef CONFIG_HIBERNATION
+		struct acpi_table_header *facs = NULL;
+		acpi_get_table(ACPI_SIG_FACS, 1, &facs);
+		if (facs) {
+			swsusp_hardware_signature =
+				((struct acpi_table_facs *)facs)->hardware_signature;
+			acpi_put_table(facs);
+		}
+#endif
+
+		/*
+		 * For varying privacy and security reasons, sometimes need
+		 * to completely silence the serial console output, and only
+		 * enable it when needed.
+		 * But there are many existing systems that depend on this
+		 * behaviour, use acpi=nospcr to disable console in ACPI SPCR
+		 * table as default serial console.
+		 */
+		acpi_parse_spcr(earlycon_acpi_spcr_enable,
+			!param_acpi_nospcr);
+
 		if (IS_ENABLED(CONFIG_ACPI_BGRT))
 			acpi_table_parse(ACPI_SIG_BGRT, acpi_parse_bgrt);
 	}
 }
 
-#ifdef CONFIG_ACPI_APEI
-pgprot_t arch_apei_get_mem_attribute(phys_addr_t addr)
+static pgprot_t __acpi_get_writethrough_mem_attribute(void)
+{
+	/*
+	 * Although UEFI specifies the use of Normal Write-through for
+	 * EFI_MEMORY_WT, it is seldom used in practice and not implemented
+	 * by most (all?) CPUs. Rather than allocate a MAIR just for this
+	 * purpose, emit a warning and use Normal Non-cacheable instead.
+	 */
+	pr_warn_once("No MAIR allocation for EFI_MEMORY_WT; treating as Normal Non-cacheable\n");
+	return __pgprot(PROT_NORMAL_NC);
+}
+
+pgprot_t __acpi_get_mem_attribute(phys_addr_t addr)
 {
 	/*
 	 * According to "Table 8 Map: EFI memory types to AArch64 memory
 	 * types" of UEFI 2.5 section 2.3.6.1, each EFI memory type is
 	 * mapped to a corresponding MAIR attribute encoding.
 	 * The EFI memory attribute advises all possible capabilities
-	 * of a memory region. We use the most efficient capability.
+	 * of a memory region.
 	 */
 
 	u64 attr;
@@ -255,10 +285,208 @@ pgprot_t arch_apei_get_mem_attribute(phys_addr_t addr)
 	attr = efi_mem_attributes(addr);
 	if (attr & EFI_MEMORY_WB)
 		return PAGE_KERNEL;
-	if (attr & EFI_MEMORY_WT)
-		return __pgprot(PROT_NORMAL_WT);
 	if (attr & EFI_MEMORY_WC)
 		return __pgprot(PROT_NORMAL_NC);
+	if (attr & EFI_MEMORY_WT)
+		return __acpi_get_writethrough_mem_attribute();
 	return __pgprot(PROT_DEVICE_nGnRnE);
 }
-#endif
+
+void __iomem *acpi_os_ioremap(acpi_physical_address phys, acpi_size size)
+{
+	efi_memory_desc_t *md, *region = NULL;
+	pgprot_t prot;
+
+	if (WARN_ON_ONCE(!efi_enabled(EFI_MEMMAP)))
+		return NULL;
+
+	for_each_efi_memory_desc(md) {
+		u64 end = md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT);
+
+		if (phys < md->phys_addr || phys >= end)
+			continue;
+
+		if (phys + size > end) {
+			pr_warn(FW_BUG "requested region covers multiple EFI memory regions\n");
+			return NULL;
+		}
+		region = md;
+		break;
+	}
+
+	/*
+	 * It is fine for AML to remap regions that are not represented in the
+	 * EFI memory map at all, as it only describes normal memory, and MMIO
+	 * regions that require a virtual mapping to make them accessible to
+	 * the EFI runtime services.
+	 */
+	prot = __pgprot(PROT_DEVICE_nGnRnE);
+	if (region) {
+		switch (region->type) {
+		case EFI_LOADER_CODE:
+		case EFI_LOADER_DATA:
+		case EFI_BOOT_SERVICES_CODE:
+		case EFI_BOOT_SERVICES_DATA:
+		case EFI_CONVENTIONAL_MEMORY:
+		case EFI_PERSISTENT_MEMORY:
+			if (memblock_is_map_memory(phys) ||
+			    !memblock_is_region_memory(phys, size)) {
+				pr_warn(FW_BUG "requested region covers kernel memory @ %pa\n", &phys);
+				return NULL;
+			}
+			/*
+			 * Mapping kernel memory is permitted if the region in
+			 * question is covered by a single memblock with the
+			 * NOMAP attribute set: this enables the use of ACPI
+			 * table overrides passed via initramfs, which are
+			 * reserved in memory using arch_reserve_mem_area()
+			 * below. As this particular use case only requires
+			 * read access, fall through to the R/O mapping case.
+			 */
+			fallthrough;
+
+		case EFI_RUNTIME_SERVICES_CODE:
+			/*
+			 * This would be unusual, but not problematic per se,
+			 * as long as we take care not to create a writable
+			 * mapping for executable code.
+			 */
+			prot = PAGE_KERNEL_RO;
+			break;
+
+		case EFI_ACPI_RECLAIM_MEMORY:
+			/*
+			 * ACPI reclaim memory is used to pass firmware tables
+			 * and other data that is intended for consumption by
+			 * the OS only, which may decide it wants to reclaim
+			 * that memory and use it for something else. We never
+			 * do that, but we usually add it to the linear map
+			 * anyway, in which case we should use the existing
+			 * mapping.
+			 */
+			if (memblock_is_map_memory(phys))
+				return (void __iomem *)__phys_to_virt(phys);
+			fallthrough;
+
+		default:
+			if (region->attribute & EFI_MEMORY_WB)
+				prot = PAGE_KERNEL;
+			else if (region->attribute & EFI_MEMORY_WC)
+				prot = __pgprot(PROT_NORMAL_NC);
+			else if (region->attribute & EFI_MEMORY_WT)
+				prot = __acpi_get_writethrough_mem_attribute();
+		}
+	}
+	return __ioremap_prot(phys, size, prot);
+}
+
+/*
+ * Claim Synchronous External Aborts as a firmware first notification.
+ *
+ * Used by KVM and the arch do_sea handler.
+ * @regs may be NULL when called from process context.
+ */
+int apei_claim_sea(struct pt_regs *regs)
+{
+	int err = -ENOENT;
+	bool return_to_irqs_enabled;
+	unsigned long current_flags;
+
+	if (!IS_ENABLED(CONFIG_ACPI_APEI_GHES))
+		return err;
+
+	current_flags = local_daif_save_flags();
+
+	/* current_flags isn't useful here as daif doesn't tell us about pNMI */
+	return_to_irqs_enabled = !irqs_disabled_flags(arch_local_save_flags());
+
+	if (regs)
+		return_to_irqs_enabled = !regs_irqs_disabled(regs);
+
+	/*
+	 * SEA can interrupt SError, mask it and describe this as an NMI so
+	 * that APEI defers the handling.
+	 */
+	local_daif_restore(DAIF_ERRCTX);
+	nmi_enter();
+	err = ghes_notify_sea();
+	nmi_exit();
+
+	/*
+	 * APEI NMI-like notifications are deferred to irq_work. Unless
+	 * we interrupted irqs-masked code, we can do that now.
+	 */
+	if (!err) {
+		if (return_to_irqs_enabled) {
+			local_daif_restore(DAIF_PROCCTX_NOIRQ);
+			__irq_enter();
+			irq_work_run();
+			__irq_exit();
+		} else {
+			pr_warn_ratelimited("APEI work queued but not completed\n");
+			err = -EINPROGRESS;
+		}
+	}
+
+	local_daif_restore(current_flags);
+
+	return err;
+}
+
+void arch_reserve_mem_area(acpi_physical_address addr, size_t size)
+{
+	memblock_mark_nomap(addr, size);
+}
+
+#ifdef CONFIG_ACPI_HOTPLUG_CPU
+int acpi_map_cpu(acpi_handle handle, phys_cpuid_t physid, u32 apci_id,
+		 int *pcpu)
+{
+	/* If an error code is passed in this stub can't fix it */
+	if (*pcpu < 0) {
+		pr_warn_once("Unable to map CPU to valid ID\n");
+		return *pcpu;
+	}
+
+	set_cpu_present(*pcpu, true);
+	return 0;
+}
+EXPORT_SYMBOL(acpi_map_cpu);
+
+int acpi_unmap_cpu(int cpu)
+{
+	set_cpu_present(cpu, false);
+	return 0;
+}
+EXPORT_SYMBOL(acpi_unmap_cpu);
+#endif /* CONFIG_ACPI_HOTPLUG_CPU */
+
+int acpi_get_cpu_uid(unsigned int cpu, u32 *uid)
+{
+	struct acpi_madt_generic_interrupt *gicc;
+
+	if (cpu >= nr_cpu_ids)
+		return -EINVAL;
+
+	gicc = acpi_cpu_get_madt_gicc(cpu);
+	if (!gicc)
+		return -ENODEV;
+
+	*uid = gicc->uid;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(acpi_get_cpu_uid);
+
+int get_cpu_for_acpi_id(u32 uid)
+{
+	u32 cpu_uid;
+	int ret;
+
+	for (int cpu = 0; cpu < nr_cpu_ids; cpu++) {
+		ret = acpi_get_cpu_uid(cpu, &cpu_uid);
+		if (ret == 0 && uid == cpu_uid)
+			return cpu;
+	}
+
+	return -EINVAL;
+}

@@ -1,18 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 2008 Ilya Yanok, Emcraft Systems
- *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/irq.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
-#include <linux/of_platform.h>
 #include <linux/io.h>
+
+#include "socrates_fpga_pic.h"
 
 /*
  * The FPGA supports 9 interrupt sources, which can be routed to 3
@@ -87,7 +83,7 @@ static inline unsigned int socrates_fpga_pic_get_irq(unsigned int irq)
 		if (cause >> (i + 16))
 			break;
 	}
-	return irq_linear_revmap(socrates_fpga_pic_irq_host,
+	return irq_find_mapping(socrates_fpga_pic_irq_host,
 			(irq_hw_number_t)i);
 }
 
@@ -276,13 +272,13 @@ static const struct irq_domain_ops socrates_fpga_pic_host_ops = {
 	.xlate  = socrates_fpga_pic_host_xlate,
 };
 
-void socrates_fpga_pic_init(struct device_node *pic)
+void __init socrates_fpga_pic_init(struct device_node *pic)
 {
 	unsigned long flags;
 	int i;
 
 	/* Setup an irq_domain structure */
-	socrates_fpga_pic_irq_host = irq_domain_add_linear(pic,
+	socrates_fpga_pic_irq_host = irq_domain_create_linear(of_fwnode_handle(pic),
 		    SOCRATES_FPGA_NUM_IRQS, &socrates_fpga_pic_host_ops, NULL);
 	if (socrates_fpga_pic_irq_host == NULL) {
 		pr_err("FPGA PIC: Unable to allocate host\n");

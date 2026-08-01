@@ -6,7 +6,7 @@
  * Copyright (c) 2007 SUSE Linux Products GmbH
  * Copyright (c) 2007 Tejun Heo <teheo@suse.de>
  *
- * Please see Documentation/filesystems/sysfs.txt for more information.
+ * Please see Documentation/filesystems/sysfs.rst for more information.
  */
 
 #define pr_fmt(fmt)	"sysfs: " fmt
@@ -37,11 +37,14 @@ void sysfs_warn_dup(struct kernfs_node *parent, const char *name)
  * @kobj: object we're creating directory for
  * @ns: the namespace tag to use
  */
-int sysfs_create_dir_ns(struct kobject *kobj, const void *ns)
+int sysfs_create_dir_ns(struct kobject *kobj, const struct ns_common *ns)
 {
 	struct kernfs_node *parent, *kn;
+	kuid_t uid;
+	kgid_t gid;
 
-	BUG_ON(!kobj);
+	if (WARN_ON(!kobj))
+		return -EINVAL;
 
 	if (kobj->parent)
 		parent = kobj->parent->sd;
@@ -51,8 +54,10 @@ int sysfs_create_dir_ns(struct kobject *kobj, const void *ns)
 	if (!parent)
 		return -ENOENT;
 
-	kn = kernfs_create_dir_ns(parent, kobject_name(kobj),
-				  S_IRWXU | S_IRUGO | S_IXUGO, kobj, ns);
+	kobject_get_ownership(kobj, &uid, &gid);
+
+	kn = kernfs_create_dir_ns(parent, kobject_name(kobj), 0755, uid, gid,
+				  kobj, ns);
 	if (IS_ERR(kn)) {
 		if (PTR_ERR(kn) == -EEXIST)
 			sysfs_warn_dup(parent, kobject_name(kobj));
@@ -76,7 +81,7 @@ void sysfs_remove_dir(struct kobject *kobj)
 	struct kernfs_node *kn = kobj->sd;
 
 	/*
-	 * In general, kboject owner is responsible for ensuring removal
+	 * In general, kobject owner is responsible for ensuring removal
 	 * doesn't race with other operations and sysfs doesn't provide any
 	 * protection; however, when @kobj is used as a symlink target, the
 	 * symlinking entity usually doesn't own @kobj and thus has no
@@ -98,7 +103,7 @@ void sysfs_remove_dir(struct kobject *kobj)
 }
 
 int sysfs_rename_dir_ns(struct kobject *kobj, const char *new_name,
-			const void *new_ns)
+			const struct ns_common *new_ns)
 {
 	struct kernfs_node *parent;
 	int ret;
@@ -110,7 +115,7 @@ int sysfs_rename_dir_ns(struct kobject *kobj, const char *new_name,
 }
 
 int sysfs_move_dir_ns(struct kobject *kobj, struct kobject *new_parent_kobj,
-		      const void *new_ns)
+		      const struct ns_common *new_ns)
 {
 	struct kernfs_node *kn = kobj->sd;
 	struct kernfs_node *new_parent;
@@ -118,7 +123,7 @@ int sysfs_move_dir_ns(struct kobject *kobj, struct kobject *new_parent_kobj,
 	new_parent = new_parent_kobj && new_parent_kobj->sd ?
 		new_parent_kobj->sd : sysfs_root_kn;
 
-	return kernfs_rename_ns(kn, new_parent, kn->name, new_ns);
+	return kernfs_rename_ns(kn, new_parent, NULL, new_ns);
 }
 
 /**

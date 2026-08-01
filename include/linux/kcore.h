@@ -11,7 +11,6 @@ enum kcore_type {
 	KCORE_RAM,
 	KCORE_VMEMMAP,
 	KCORE_USER,
-	KCORE_OTHER,
 };
 
 struct kcore_list {
@@ -21,15 +20,10 @@ struct kcore_list {
 	int type;
 };
 
-struct vmcore {
-	struct list_head list;
-	unsigned long long paddr;
-	unsigned long long size;
-	loff_t offset;
-};
-
 #ifdef CONFIG_PROC_KCORE
-extern void kclist_add(struct kcore_list *, void *, size_t, int type);
+void __init kclist_add(struct kcore_list *, void *, size_t, int type);
+
+extern int __init register_mem_pfn_is_ram(int (*fn)(unsigned long pfn));
 #else
 static inline
 void kclist_add(struct kcore_list *new, void *addr, size_t size, int type)

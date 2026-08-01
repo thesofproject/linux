@@ -1,19 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * MPC8377E WLAN Device Tree Source
  *
  * Copyright 2007-2009 Freescale Semiconductor Inc.
  * Copyright 2009 MontaVista Software, Inc.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 /dts-v1/;
 
 / {
 	compatible = "fsl,mpc8377wlan";
+	model = "fsl,mpc8377wlan";
 	#address-cells = <1>;
 	#size-cells = <1>;
 
@@ -44,7 +41,7 @@
 		};
 	};
 
-	memory {
+	memory@0 {
 		device_type = "memory";
 		reg = <0x00000000 0x20000000>;	// 512MB at 0
 	};
@@ -93,7 +90,7 @@
 		reg = <0xe0000000 0x00000200>;
 		bus-frequency = <0>;
 
-		wdt@200 {
+		watchdog@200 {
 			device_type = "watchdog";
 			compatible = "mpc83xx_wdt";
 			reg = <0x200 0x100>;

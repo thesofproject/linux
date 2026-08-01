@@ -7,7 +7,28 @@
 #define _SCSI_COMMON_H_
 
 #include <linux/types.h>
+#include <uapi/linux/pr.h>
 #include <scsi/scsi_proto.h>
+
+/* From the standard INQUIRY data description in SPC-6. */
+#define INQUIRY_VENDOR_OFFSET	8
+#define INQUIRY_VENDOR_LEN	8
+#define INQUIRY_MODEL_OFFSET	16
+#define INQUIRY_MODEL_LEN	16
+#define INQUIRY_REVISION_OFFSET	32
+#define INQUIRY_REVISION_LEN	4
+
+enum scsi_pr_type {
+	SCSI_PR_WRITE_EXCLUSIVE			= 0x01,
+	SCSI_PR_EXCLUSIVE_ACCESS		= 0x03,
+	SCSI_PR_WRITE_EXCLUSIVE_REG_ONLY	= 0x05,
+	SCSI_PR_EXCLUSIVE_ACCESS_REG_ONLY	= 0x06,
+	SCSI_PR_WRITE_EXCLUSIVE_ALL_REGS	= 0x07,
+	SCSI_PR_EXCLUSIVE_ACCESS_ALL_REGS	= 0x08,
+};
+
+enum scsi_pr_type block_pr_type_to_scsi(enum pr_type type);
+enum pr_type scsi_pr_type_to_block(enum scsi_pr_type type);
 
 static inline unsigned
 scsi_varlen_cdb_length(const void *hdr)
@@ -23,6 +44,13 @@ scsi_command_size(const unsigned char *cmnd)
 {
 	return (cmnd[0] == VARIABLE_LENGTH_CMD) ?
 		scsi_varlen_cdb_length(cmnd) : COMMAND_SIZE(cmnd[0]);
+}
+
+static inline unsigned char
+scsi_command_control(const unsigned char *cmnd)
+{
+	return (cmnd[0] == VARIABLE_LENGTH_CMD) ?
+		cmnd[1] : cmnd[COMMAND_SIZE(cmnd[0]) - 1];
 }
 
 /* Returns a human-readable name for the device */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   Scarlett Driver for ALSA
  *
@@ -12,17 +13,6 @@
  *
  *   Code cleanup:
  *   David Henningsson <david.henningsson at canonical.com>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
  */
 
 /*
@@ -31,7 +21,7 @@
  * Auto-detection via UAC2 is not feasible to properly discover the vast
  * majority of features. It's related to both Linux/ALSA's UAC2 as well as
  * Focusrite's implementation of it. Eventually quirks may be sufficient but
- * right now it's a major headache to work arount these things.
+ * right now it's a major headache to work around these things.
  *
  * NB. Neither the OSX nor the win driver provided by Focusrite performs
  * discovery, they seem to operate the same as this driver.
@@ -145,13 +135,20 @@
 /* some gui mixers can't handle negative ctl values */
 #define SND_SCARLETT_LEVEL_BIAS 128
 #define SND_SCARLETT_MATRIX_IN_MAX 18
-#define SND_SCARLETT_CONTROLS_MAX 10
+#define SND_SCARLETT_CONTROLS_MAX 14
 #define SND_SCARLETT_OFFSETS_MAX 5
 
 enum {
 	SCARLETT_OUTPUTS,
 	SCARLETT_SWITCH_IMPEDANCE,
 	SCARLETT_SWITCH_PAD,
+	SCARLETT_SWITCH_GAIN,
+	FORTE_INPUT_SOURCE,     /* mic/line/instrument selection */
+	FORTE_INPUT_HPF,        /* high pass filter */
+	FORTE_INPUT_PHANTOM,    /* 48V phantom power */
+	FORTE_INPUT_PHASE,      /* phase invert */
+	FORTE_INPUT_PAD,        /* pad */
+	FORTE_INPUT_GAIN,       /* preamp gain 0-42 (~0-75dB for mic) */
 };
 
 enum {
@@ -181,6 +178,8 @@ struct scarlett_device_info {
 	int input_len;
 	int output_len;
 
+	bool has_output_source_routing;
+
 	struct scarlett_mixer_elem_enum_info opt_master;
 	struct scarlett_mixer_elem_enum_info opt_matrix;
 
@@ -199,6 +198,15 @@ static const struct scarlett_mixer_elem_enum_info opt_pad = {
 	.offsets = {},
 	.names = (char const * const []){
 		"0dB", "-10dB"
+	}
+};
+
+static const struct scarlett_mixer_elem_enum_info opt_gain = {
+	.start = 0,
+	.len = 2,
+	.offsets = {},
+	.names = (char const * const []){
+		"Lo", "Hi"
 	}
 };
 
@@ -228,6 +236,239 @@ static const struct scarlett_mixer_elem_enum_info opt_sync = {
 		"No Lock", "Locked"
 	}
 };
+
+/* Forte-specific input control options */
+static const struct scarlett_mixer_elem_enum_info opt_forte_source = {
+	.start = 0,
+	.len = 3,
+	.offsets = {},
+	.names = (char const * const []){
+		"Mic", "Line", "Inst"
+	}
+};
+
+/*
+ * Forte-specific USB control functions
+ * Forte input controls use bRequest=0x03 (UAC2_CS_MEM) instead of 0x01
+ * wValue = (control_code << 8) | channel
+ * wIndex = interface | (0x3c << 8) like Scarlett meter/matrix controls
+ */
+static int forte_set_ctl_value(struct usb_mixer_elem_info *elem, int value)
+{
+	struct snd_usb_audio *chip = elem->head.mixer->chip;
+	unsigned char buf[2];
+	int wValue = elem->control;  /* Just control code, NO shift, NO channel */
+	int idx = snd_usb_ctrl_intf(elem->head.mixer->hostif) | (elem->head.id << 8);
+	int err;
+
+	/* Wiki format: "2 bytes, chan 0,1 and value"
+	 * Data order: [channel, value] - channel FIRST per wiki
+	 */
+	buf[0] = elem->idx_off;  /* Channel: 0 or 1 */
+	buf[1] = value & 0xff;   /* Value: 0-2 for source, 0-1 for switches */
+
+	err = snd_usb_lock_shutdown(chip);
+	if (err < 0)
+		return -EIO;
+
+	err = snd_usb_ctl_msg(chip->dev,
+			      usb_sndctrlpipe(chip->dev, 0),
+			      UAC2_CS_MEM,  /* bRequest = 0x03 */
+			      USB_RECIP_INTERFACE | USB_TYPE_CLASS | USB_DIR_OUT,
+			      wValue, idx, buf, 2);
+
+	snd_usb_unlock_shutdown(chip);
+
+	if (err < 0) {
+		usb_audio_err(chip, "forte_set FAILED: req=0x03 wVal=0x%04x wIdx=0x%04x buf=[%02x,%02x] err=%d\n",
+			      wValue, idx, buf[0], buf[1], err);
+		return err;
+	}
+	return 0;
+}
+
+static int forte_get_ctl_value(struct usb_mixer_elem_info *elem, int *value)
+{
+	/* Device may not support reading input controls.
+	 * Return cached value or default to avoid blocking module load.
+	 */
+	if (elem->cached)
+		*value = elem->cache_val[0];
+	else
+		*value = 0;  /* Default: first option */
+
+	return 0;
+}
+
+/*
+ * Forte Input Gain control functions
+ * Gain range is 0-42 (0x00-0x2a) which maps to approximately:
+ * - Mic: 0 to +75dB (~1.8dB per step)
+ * - Instrument: +14 to +68dB
+ * - Line: -12 to +42dB
+ * We use a TLV scale of 0 to 7500 centidB (0 to 75dB) in ~179 cB steps
+ */
+#define FORTE_INPUT_GAIN_MAX 42
+
+static int forte_input_gain_info(struct snd_kcontrol *kctl,
+				 struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	uinfo->count = 1;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = FORTE_INPUT_GAIN_MAX;
+	uinfo->value.integer.step = 1;
+	return 0;
+}
+
+static int forte_input_gain_get(struct snd_kcontrol *kctl,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct usb_mixer_elem_info *elem = kctl->private_data;
+	int err, val;
+
+	/* Use Forte-specific USB command with UAC2_CS_MEM */
+	err = forte_get_ctl_value(elem, &val);
+	if (err < 0)
+		return err;
+
+	ucontrol->value.integer.value[0] = clamp(val, 0, FORTE_INPUT_GAIN_MAX);
+	return 0;
+}
+
+static int forte_input_gain_put(struct snd_kcontrol *kctl,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct usb_mixer_elem_info *elem = kctl->private_data;
+	int err, oval, val;
+
+	/* Read current value */
+	err = forte_get_ctl_value(elem, &oval);
+	if (err < 0)
+		return err;
+
+	val = clamp((int)ucontrol->value.integer.value[0], 0, FORTE_INPUT_GAIN_MAX);
+	if (oval != val) {
+		/* Use Forte-specific USB command */
+		err = forte_set_ctl_value(elem, val);
+		if (err < 0)
+			return err;
+		elem->cached |= 1;
+		elem->cache_val[0] = val;
+		return 1;
+	}
+	return 0;
+}
+
+static int forte_input_gain_resume(struct usb_mixer_elem_list *list)
+{
+	struct usb_mixer_elem_info *elem = mixer_elem_list_to_info(list);
+
+	if (elem->cached)
+		forte_set_ctl_value(elem, *elem->cache_val);
+	return 0;
+}
+
+/*
+ * Forte-specific enum control functions (for Source selection)
+ * Uses bRequest=0x03 (UAC2_CS_MEM) instead of standard 0x01
+ */
+static int forte_ctl_enum_get(struct snd_kcontrol *kctl,
+			      struct snd_ctl_elem_value *ucontrol)
+{
+	struct usb_mixer_elem_info *elem = kctl->private_data;
+	struct scarlett_mixer_elem_enum_info *opt = elem->private_data;
+	int err, val;
+
+	err = forte_get_ctl_value(elem, &val);
+	if (err < 0)
+		return err;
+
+	val = clamp(val - opt->start, 0, opt->len - 1);
+	ucontrol->value.enumerated.item[0] = val;
+	return 0;
+}
+
+static int forte_ctl_enum_put(struct snd_kcontrol *kctl,
+			      struct snd_ctl_elem_value *ucontrol)
+{
+	struct usb_mixer_elem_info *elem = kctl->private_data;
+	struct scarlett_mixer_elem_enum_info *opt = elem->private_data;
+	int err, oval, val;
+
+	err = forte_get_ctl_value(elem, &oval);
+	if (err < 0)
+		return err;
+
+	val = ucontrol->value.integer.value[0] + opt->start;
+	if (val != oval) {
+		err = forte_set_ctl_value(elem, val);
+		if (err < 0)
+			return err;
+		elem->cached |= 1;
+		elem->cache_val[0] = val;
+		return 1;
+	}
+	return 0;
+}
+
+static int forte_ctl_enum_resume(struct usb_mixer_elem_list *list)
+{
+	struct usb_mixer_elem_info *elem = mixer_elem_list_to_info(list);
+
+	if (elem->cached)
+		forte_set_ctl_value(elem, *elem->cache_val);
+	return 0;
+}
+
+/*
+ * Forte-specific switch control functions (for HPF, 48V, Phase, Pad)
+ * Uses bRequest=0x03 (UAC2_CS_MEM) instead of standard 0x01
+ */
+static int forte_ctl_switch_get(struct snd_kcontrol *kctl,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct usb_mixer_elem_info *elem = kctl->private_data;
+	int err, val;
+
+	err = forte_get_ctl_value(elem, &val);
+	if (err < 0)
+		return err;
+
+	ucontrol->value.integer.value[0] = val ? 1 : 0;
+	return 0;
+}
+
+static int forte_ctl_switch_put(struct snd_kcontrol *kctl,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct usb_mixer_elem_info *elem = kctl->private_data;
+	int err, oval, val;
+
+	err = forte_get_ctl_value(elem, &oval);
+	if (err < 0)
+		return err;
+
+	val = ucontrol->value.integer.value[0] ? 1 : 0;
+	if (val != oval) {
+		err = forte_set_ctl_value(elem, val);
+		if (err < 0)
+			return err;
+		elem->cached |= 1;
+		elem->cache_val[0] = val;
+		return 1;
+	}
+	return 0;
+}
+
+static int forte_ctl_switch_resume(struct usb_mixer_elem_list *list)
+{
+	struct usb_mixer_elem_info *elem = mixer_elem_list_to_info(list);
+
+	if (elem->cached)
+		forte_set_ctl_value(elem, *elem->cache_val);
+	return 0;
+}
 
 static int scarlett_ctl_switch_info(struct snd_kcontrol *kctl,
 		struct snd_ctl_elem_info *uinfo)
@@ -287,8 +528,7 @@ static int scarlett_ctl_switch_put(struct snd_kcontrol *kctl,
 
 static int scarlett_ctl_resume(struct usb_mixer_elem_list *list)
 {
-	struct usb_mixer_elem_info *elem =
-		container_of(list, struct usb_mixer_elem_info, head);
+	struct usb_mixer_elem_info *elem = mixer_elem_list_to_info(list);
 	int i;
 
 	for (i = 0; i < elem->channels; i++)
@@ -358,21 +598,21 @@ static int scarlett_ctl_put(struct snd_kcontrol *kctl,
 	return changed;
 }
 
-static void scarlett_generate_name(int i, char *dst, int offsets[])
+static void scarlett_generate_name(int i, char *dst, size_t size, int offsets[])
 {
 	if (i > offsets[SCARLETT_OFFSET_MIX])
-		sprintf(dst, "Mix %c",
-			'A'+(i - offsets[SCARLETT_OFFSET_MIX] - 1));
+		scnprintf(dst, size, "Mix %c",
+			  'A'+(i - offsets[SCARLETT_OFFSET_MIX] - 1));
 	else if (i > offsets[SCARLETT_OFFSET_ADAT])
-		sprintf(dst, "ADAT %d", i - offsets[SCARLETT_OFFSET_ADAT]);
+		scnprintf(dst, size, "ADAT %d", i - offsets[SCARLETT_OFFSET_ADAT]);
 	else if (i > offsets[SCARLETT_OFFSET_SPDIF])
-		sprintf(dst, "SPDIF %d", i - offsets[SCARLETT_OFFSET_SPDIF]);
+		scnprintf(dst, size, "SPDIF %d", i - offsets[SCARLETT_OFFSET_SPDIF]);
 	else if (i > offsets[SCARLETT_OFFSET_ANALOG])
-		sprintf(dst, "Analog %d", i - offsets[SCARLETT_OFFSET_ANALOG]);
+		scnprintf(dst, size, "Analog %d", i - offsets[SCARLETT_OFFSET_ANALOG]);
 	else if (i > offsets[SCARLETT_OFFSET_PCM])
-		sprintf(dst, "PCM %d", i - offsets[SCARLETT_OFFSET_PCM]);
+		scnprintf(dst, size, "PCM %d", i - offsets[SCARLETT_OFFSET_PCM]);
 	else
-		sprintf(dst, "Off");
+		scnprintf(dst, size, "Off");
 }
 
 static int scarlett_ctl_enum_dynamic_info(struct snd_kcontrol *kctl,
@@ -392,6 +632,7 @@ static int scarlett_ctl_enum_dynamic_info(struct snd_kcontrol *kctl,
 	/* generate name dynamically based on item number and offset info */
 	scarlett_generate_name(uinfo->value.enumerated.item,
 			       uinfo->value.enumerated.name,
+			       sizeof(uinfo->value.enumerated.name),
 			       opt->offsets);
 
 	return 0;
@@ -439,7 +680,9 @@ static int scarlett_ctl_enum_put(struct snd_kcontrol *kctl,
 	val = ucontrol->value.integer.value[0];
 	val = val + opt->start;
 	if (val != oval) {
-		snd_usb_set_cur_mix_value(elem, 0, 0, val);
+		err = snd_usb_set_cur_mix_value(elem, 0, 0, val);
+		if (err < 0)
+			return err;
 		return 1;
 	}
 	return 0;
@@ -447,8 +690,7 @@ static int scarlett_ctl_enum_put(struct snd_kcontrol *kctl,
 
 static int scarlett_ctl_enum_resume(struct usb_mixer_elem_list *list)
 {
-	struct usb_mixer_elem_info *elem =
-		container_of(list, struct usb_mixer_elem_info, head);
+	struct usb_mixer_elem_info *elem = mixer_elem_list_to_info(list);
 
 	if (elem->cached)
 		snd_usb_set_cur_mix_value(elem, 0, 0, *elem->cache_val);
@@ -462,7 +704,7 @@ static int scarlett_ctl_meter_get(struct snd_kcontrol *kctl,
 	struct snd_usb_audio *chip = elem->head.mixer->chip;
 	unsigned char buf[2 * MAX_CHANNELS] = {0, };
 	int wValue = (elem->control << 8) | elem->idx_off;
-	int idx = snd_usb_ctrl_intf(chip) | (elem->head.id << 8);
+	int idx = snd_usb_ctrl_intf(elem->head.mixer->hostif) | (elem->head.id << 8);
 	int err;
 
 	err = snd_usb_ctl_msg(chip->dev,
@@ -535,6 +777,37 @@ static const struct snd_kcontrol_new usb_scarlett_ctl_sync = {
 	.get =  scarlett_ctl_meter_get,
 };
 
+/* Forte-specific control structures - use bRequest=0x03 instead of 0x01 */
+static const struct snd_kcontrol_new usb_forte_ctl_enum = {
+	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+	.name = "",
+	.info = scarlett_ctl_enum_info,
+	.get =  forte_ctl_enum_get,
+	.put =  forte_ctl_enum_put,
+};
+
+static const struct snd_kcontrol_new usb_forte_ctl_switch = {
+	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+	.name = "",
+	.info = snd_ctl_boolean_mono_info,
+	.get =  forte_ctl_switch_get,
+	.put =  forte_ctl_switch_put,
+};
+
+/* Forte input gain: 0-42 maps to approximately 0-75dB (~179 cB per step) */
+static const DECLARE_TLV_DB_SCALE(db_scale_forte_input_gain, 0, 179, 0);
+
+static const struct snd_kcontrol_new usb_forte_ctl_input_gain = {
+	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
+	.access = SNDRV_CTL_ELEM_ACCESS_READWRITE |
+		  SNDRV_CTL_ELEM_ACCESS_TLV_READ,
+	.name = "",
+	.info = forte_input_gain_info,
+	.get =  forte_input_gain_get,
+	.put =  forte_input_gain_put,
+	.tlv = { .p = db_scale_forte_input_gain }
+};
+
 static int add_new_ctl(struct usb_mixer_interface *mixer,
 		       const struct snd_kcontrol_new *ncontrol,
 		       usb_mixer_elem_resume_func_t resume,
@@ -548,7 +821,7 @@ static int add_new_ctl(struct usb_mixer_interface *mixer,
 	struct usb_mixer_elem_info *elem;
 	int err;
 
-	elem = kzalloc(sizeof(*elem), GFP_KERNEL);
+	elem = kzalloc_obj(*elem);
 	if (!elem)
 		return -ENOMEM;
 
@@ -571,7 +844,7 @@ static int add_new_ctl(struct usb_mixer_interface *mixer,
 	}
 	kctl->private_free = snd_usb_mixer_elem_free;
 
-	strlcpy(kctl->id.name, name, sizeof(kctl->id.name));
+	strscpy(kctl->id.name, name, sizeof(kctl->id.name));
 
 	err = snd_usb_mixer_add_control(&elem->head, kctl);
 	if (err < 0)
@@ -609,37 +882,83 @@ static int add_output_ctls(struct usb_mixer_interface *mixer,
 	if (err < 0)
 		return err;
 
-	/* Add L channel source playback enumeration */
-	snprintf(mx, sizeof(mx), "Master %dL (%s) Source Playback Enum",
-		index + 1, name);
-	err = add_new_ctl(mixer, &usb_scarlett_ctl_dynamic_enum,
-			  scarlett_ctl_enum_resume, 0x33, 0x00,
-			  2*index, USB_MIXER_S16, 1, mx, &info->opt_master,
-			  &elem);
-	if (err < 0)
-		return err;
+	/* Add L/R source routing if device supports it */
+	if (info->has_output_source_routing) {
+		/* Add L channel source playback enumeration */
+		snprintf(mx, sizeof(mx), "Master %dL (%s) Source Playback Enum",
+			index + 1, name);
+		err = add_new_ctl(mixer, &usb_scarlett_ctl_dynamic_enum,
+				  scarlett_ctl_enum_resume, 0x33, 0x00,
+				  2*index, USB_MIXER_S16, 1, mx, &info->opt_master,
+				  &elem);
+		if (err < 0)
+			return err;
 
-	/* Add R channel source playback enumeration */
-	snprintf(mx, sizeof(mx), "Master %dR (%s) Source Playback Enum",
-		index + 1, name);
-	err = add_new_ctl(mixer, &usb_scarlett_ctl_dynamic_enum,
-			  scarlett_ctl_enum_resume, 0x33, 0x00,
-			  2*index+1, USB_MIXER_S16, 1, mx, &info->opt_master,
-			  &elem);
-	if (err < 0)
-		return err;
+		/* Add R channel source playback enumeration */
+		snprintf(mx, sizeof(mx), "Master %dR (%s) Source Playback Enum",
+			index + 1, name);
+		err = add_new_ctl(mixer, &usb_scarlett_ctl_dynamic_enum,
+				  scarlett_ctl_enum_resume, 0x33, 0x00,
+				  2*index+1, USB_MIXER_S16, 1, mx, &info->opt_master,
+				  &elem);
+		if (err < 0)
+			return err;
+	}
 
 	return 0;
 }
 
 /********************** device-specific config *************************/
 
+static const struct scarlett_device_info forte_info = {
+	.matrix_in = 6,
+	.matrix_out = 4,
+	.input_len = 2,
+	.output_len = 4,
+	.has_output_source_routing = false,
+
+	.opt_master = {
+		.start = -1,
+		.len = 13,
+		.offsets = {0, 4, 6, 6, 6},
+		.names = NULL
+	},
+
+	.opt_matrix = {
+		.start = -1,
+		.len = 7,
+		.offsets = {0, 4, 6, 6, 6},
+		.names = NULL
+	},
+
+	.num_controls = 14,
+	.controls = {
+		{ .num = 0, .type = SCARLETT_OUTPUTS, .name = "Line Out" },
+		{ .num = 1, .type = SCARLETT_OUTPUTS, .name = "Headphone" },
+		/* Input 1 controls */
+		{ .num = 1, .type = FORTE_INPUT_GAIN, .name = NULL},
+		{ .num = 1, .type = FORTE_INPUT_SOURCE, .name = NULL},
+		{ .num = 1, .type = FORTE_INPUT_HPF, .name = NULL},
+		{ .num = 1, .type = FORTE_INPUT_PHANTOM, .name = NULL},
+		{ .num = 1, .type = FORTE_INPUT_PHASE, .name = NULL},
+		{ .num = 1, .type = FORTE_INPUT_PAD, .name = NULL},
+		/* Input 2 controls */
+		{ .num = 2, .type = FORTE_INPUT_GAIN, .name = NULL},
+		{ .num = 2, .type = FORTE_INPUT_SOURCE, .name = NULL},
+		{ .num = 2, .type = FORTE_INPUT_HPF, .name = NULL},
+		{ .num = 2, .type = FORTE_INPUT_PHANTOM, .name = NULL},
+		{ .num = 2, .type = FORTE_INPUT_PHASE, .name = NULL},
+		{ .num = 2, .type = FORTE_INPUT_PAD, .name = NULL},
+	},
+};
+
 /*  untested...  */
-static struct scarlett_device_info s6i6_info = {
+static const struct scarlett_device_info s6i6_info = {
 	.matrix_in = 18,
 	.matrix_out = 8,
 	.input_len = 6,
 	.output_len = 6,
+	.has_output_source_routing = true,
 
 	.opt_master = {
 		.start = -1,
@@ -664,8 +983,8 @@ static struct scarlett_device_info s6i6_info = {
 		{ .num = 1, .type = SCARLETT_SWITCH_PAD, .name = NULL},
 		{ .num = 2, .type = SCARLETT_SWITCH_IMPEDANCE, .name = NULL},
 		{ .num = 2, .type = SCARLETT_SWITCH_PAD, .name = NULL},
-		{ .num = 3, .type = SCARLETT_SWITCH_PAD, .name = NULL},
-		{ .num = 4, .type = SCARLETT_SWITCH_PAD, .name = NULL},
+		{ .num = 3, .type = SCARLETT_SWITCH_GAIN, .name = NULL},
+		{ .num = 4, .type = SCARLETT_SWITCH_GAIN, .name = NULL},
 	},
 
 	.matrix_mux_init = {
@@ -677,11 +996,12 @@ static struct scarlett_device_info s6i6_info = {
 };
 
 /*  untested...  */
-static struct scarlett_device_info s8i6_info = {
+static const struct scarlett_device_info s8i6_info = {
 	.matrix_in = 18,
 	.matrix_out = 6,
 	.input_len = 8,
 	.output_len = 6,
+	.has_output_source_routing = true,
 
 	.opt_master = {
 		.start = -1,
@@ -716,11 +1036,12 @@ static struct scarlett_device_info s8i6_info = {
 	}
 };
 
-static struct scarlett_device_info s18i6_info = {
+static const struct scarlett_device_info s18i6_info = {
 	.matrix_in = 18,
 	.matrix_out = 6,
 	.input_len = 18,
 	.output_len = 6,
+	.has_output_source_routing = true,
 
 	.opt_master = {
 		.start = -1,
@@ -753,11 +1074,12 @@ static struct scarlett_device_info s18i6_info = {
 	}
 };
 
-static struct scarlett_device_info s18i8_info = {
+static const struct scarlett_device_info s18i8_info = {
 	.matrix_in = 18,
 	.matrix_out = 8,
 	.input_len = 18,
 	.output_len = 8,
+	.has_output_source_routing = true,
 
 	.opt_master = {
 		.start = -1,
@@ -795,11 +1117,12 @@ static struct scarlett_device_info s18i8_info = {
 	}
 };
 
-static struct scarlett_device_info s18i20_info = {
+static const struct scarlett_device_info s18i20_info = {
 	.matrix_in = 18,
 	.matrix_out = 8,
 	.input_len = 18,
 	.output_len = 20,
+	.has_output_source_routing = true,
 
 	.opt_master = {
 		.start = -1,
@@ -845,7 +1168,7 @@ static struct scarlett_device_info s18i20_info = {
 
 
 static int scarlett_controls_create_generic(struct usb_mixer_interface *mixer,
-	struct scarlett_device_info *info)
+	const struct scarlett_device_info *info)
 {
 	int i, err;
 	char mx[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
@@ -878,7 +1201,8 @@ static int scarlett_controls_create_generic(struct usb_mixer_interface *mixer,
 				return err;
 			break;
 		case SCARLETT_SWITCH_IMPEDANCE:
-			sprintf(mx, "Input %d Impedance Switch", ctl->num);
+			scnprintf(mx, sizeof(mx),
+				  "Input %d Impedance Switch", ctl->num);
 			err = add_new_ctl(mixer, &usb_scarlett_ctl_enum,
 					  scarlett_ctl_enum_resume, 0x01,
 					  0x09, ctl->num, USB_MIXER_S16, 1, mx,
@@ -887,11 +1211,77 @@ static int scarlett_controls_create_generic(struct usb_mixer_interface *mixer,
 				return err;
 			break;
 		case SCARLETT_SWITCH_PAD:
-			sprintf(mx, "Input %d Pad Switch", ctl->num);
+			scnprintf(mx, sizeof(mx),
+				  "Input %d Pad Switch", ctl->num);
 			err = add_new_ctl(mixer, &usb_scarlett_ctl_enum,
 					  scarlett_ctl_enum_resume, 0x01,
 					  0x0b, ctl->num, USB_MIXER_S16, 1, mx,
 					  &opt_pad, &elem);
+			if (err < 0)
+				return err;
+			break;
+		case SCARLETT_SWITCH_GAIN:
+			scnprintf(mx, sizeof(mx),
+				  "Input %d Gain Switch", ctl->num);
+			err = add_new_ctl(mixer, &usb_scarlett_ctl_enum,
+					  scarlett_ctl_enum_resume, 0x01,
+					  0x08, ctl->num, USB_MIXER_S16, 1, mx,
+					  &opt_gain, &elem);
+			if (err < 0)
+				return err;
+			break;
+		/* Forte input controls - use wIndex 0x3c per wiki docs */
+		case FORTE_INPUT_GAIN:
+			sprintf(mx, "Line In %d Gain Capture Volume", ctl->num);
+			err = add_new_ctl(mixer, &usb_forte_ctl_input_gain,
+					  forte_input_gain_resume, 0x3c,
+					  0x06, ctl->num - 1, USB_MIXER_S16, 1, mx,
+					  NULL, &elem);
+			if (err < 0)
+				return err;
+			break;
+		case FORTE_INPUT_SOURCE:
+			sprintf(mx, "Input %d Source", ctl->num);
+			err = add_new_ctl(mixer, &usb_forte_ctl_enum,
+					  forte_ctl_enum_resume, 0x3c,
+					  0x07, ctl->num - 1, USB_MIXER_S16, 1, mx,
+					  &opt_forte_source, &elem);
+			if (err < 0)
+				return err;
+			break;
+		case FORTE_INPUT_HPF:
+			sprintf(mx, "Input %d High Pass Filter Switch", ctl->num);
+			err = add_new_ctl(mixer, &usb_forte_ctl_switch,
+					  forte_ctl_switch_resume, 0x3c,
+					  0x08, ctl->num - 1, USB_MIXER_S16, 1, mx,
+					  NULL, &elem);
+			if (err < 0)
+				return err;
+			break;
+		case FORTE_INPUT_PHANTOM:
+			sprintf(mx, "Input %d 48V Phantom Power Switch", ctl->num);
+			err = add_new_ctl(mixer, &usb_forte_ctl_switch,
+					  forte_ctl_switch_resume, 0x3c,
+					  0x09, ctl->num - 1, USB_MIXER_S16, 1, mx,
+					  NULL, &elem);
+			if (err < 0)
+				return err;
+			break;
+		case FORTE_INPUT_PHASE:
+			sprintf(mx, "Input %d Phase Invert Switch", ctl->num);
+			err = add_new_ctl(mixer, &usb_forte_ctl_switch,
+					  forte_ctl_switch_resume, 0x3c,
+					  0x0a, ctl->num - 1, USB_MIXER_S16, 1, mx,
+					  NULL, &elem);
+			if (err < 0)
+				return err;
+			break;
+		case FORTE_INPUT_PAD:
+			sprintf(mx, "Input %d Pad Switch", ctl->num);
+			err = add_new_ctl(mixer, &usb_forte_ctl_switch,
+					  forte_ctl_switch_resume, 0x3c,
+					  0x0b, ctl->num - 1, USB_MIXER_S16, 1, mx,
+					  NULL, &elem);
 			if (err < 0)
 				return err;
 			break;
@@ -908,7 +1298,7 @@ int snd_scarlett_controls_create(struct usb_mixer_interface *mixer)
 {
 	int err, i, o;
 	char mx[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
-	struct scarlett_device_info *info;
+	const struct scarlett_device_info *info;
 	struct usb_mixer_elem_info *elem;
 	static char sample_rate_buffer[4] = { '\x80', '\xbb', '\x00', '\x00' };
 
@@ -953,8 +1343,9 @@ int snd_scarlett_controls_create(struct usb_mixer_interface *mixer)
 			return err;
 
 		for (o = 0; o < info->matrix_out; o++) {
-			sprintf(mx, "Matrix %02d Mix %c Playback Volume", i+1,
-				o+'A');
+			scnprintf(mx, sizeof(mx),
+				  "Matrix %02d Mix %c Playback Volume", i+1,
+				  o+'A');
 			err = add_new_ctl(mixer, &usb_scarlett_ctl,
 					  scarlett_ctl_resume, 0x3c, 0x00,
 					  (i << 3) + (o & 0x07), USB_MIXER_S16,
@@ -995,8 +1386,69 @@ int snd_scarlett_controls_create(struct usb_mixer_interface *mixer)
 	err = snd_usb_ctl_msg(mixer->chip->dev,
 		usb_sndctrlpipe(mixer->chip->dev, 0), UAC2_CS_CUR,
 		USB_RECIP_INTERFACE | USB_TYPE_CLASS |
-		USB_DIR_OUT, 0x0100, snd_usb_ctrl_intf(mixer->chip) |
+		USB_DIR_OUT, 0x0100, snd_usb_ctrl_intf(mixer->hostif) |
 		(0x29 << 8), sample_rate_buffer, 4);
+	if (err < 0)
+		return err;
+
+	return err;
+}
+
+/*
+ * Create and initialize a mixer for the Focusrite(R) Forte
+ */
+int snd_forte_controls_create(struct usb_mixer_interface *mixer)
+{
+	int err, i, o;
+	char mx[SNDRV_CTL_ELEM_ID_NAME_MAXLEN];
+	const struct scarlett_device_info *info;
+	struct usb_mixer_elem_info *elem;
+
+	/* only use UAC_VERSION_2 */
+	if (!mixer->protocol)
+		return 0;
+
+	switch (mixer->chip->usb_id) {
+	case USB_ID(0x1235, 0x8010):
+		info = &forte_info;
+		break;
+	default: /* device not (yet) supported */
+		return -EINVAL;
+	}
+
+	/* generic function to create controls */
+	err = scarlett_controls_create_generic(mixer, info);
+	if (err < 0)
+		return err;
+
+	/* setup matrix controls */
+	for (i = 0; i < info->matrix_in; i++) {
+		snprintf(mx, sizeof(mx), "Matrix %02d Input Playback Route",
+			 i+1);
+		err = add_new_ctl(mixer, &usb_scarlett_ctl_dynamic_enum,
+				  scarlett_ctl_enum_resume, 0x32,
+				  0x06, i, USB_MIXER_S16, 1, mx,
+				  &info->opt_matrix, &elem);
+		if (err < 0)
+			return err;
+
+		for (o = 0; o < info->matrix_out; o++) {
+			sprintf(mx, "Matrix %02d Mix %c Playback Volume", i+1,
+				o+'A');
+			err = add_new_ctl(mixer, &usb_scarlett_ctl,
+					  scarlett_ctl_resume, 0x3c, 0x01,
+					  (i << 2) + (o & 0x03), USB_MIXER_S16,
+					  1, mx, NULL, &elem);
+			if (err < 0)
+				return err;
+
+		}
+	}
+
+	/* val_len == 1 and UAC2_CS_MEM */
+	err = add_new_ctl(mixer, &usb_scarlett_ctl_sync, NULL, 0x3c, 0x00, 2,
+			  USB_MIXER_U8, 1, "Sample Clock Sync Status",
+			  &opt_sync, &elem);
 	if (err < 0)
 		return err;
 

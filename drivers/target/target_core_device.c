@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*******************************************************************************
  * Filename:  target_core_device.c (based on iscsi_target_device.c)
  *
@@ -7,20 +8,6 @@
  * (c) Copyright 2003-2013 Datera, Inc.
  *
  * Nicholas A. Bellinger <nab@kernel.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  *
  ******************************************************************************/
 
@@ -34,7 +21,7 @@
 #include <linux/in.h>
 #include <linux/export.h>
 #include <linux/t10-pi.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <net/sock.h>
 #include <net/tcp.h>
 #include <scsi/scsi_common.h>
@@ -50,7 +37,6 @@
 #include "target_core_ua.h"
 
 static DEFINE_MUTEX(device_mutex);
-static LIST_HEAD(device_list);
 static DEFINE_IDR(devices_idr);
 
 static struct se_hba *lun0_hba;
@@ -58,7 +44,7 @@ static struct se_hba *lun0_hba;
 struct se_device *g_lun0_dev;
 
 sense_reason_t
-transport_lookup_cmd_lun(struct se_cmd *se_cmd, u64 unpacked_lun)
+transport_lookup_cmd_lun(struct se_cmd *se_cmd)
 {
 	struct se_lun *se_lun = NULL;
 	struct se_session *se_sess = se_cmd->se_sess;
@@ -67,40 +53,38 @@ transport_lookup_cmd_lun(struct se_cmd *se_cmd, u64 unpacked_lun)
 	sense_reason_t ret = TCM_NO_SENSE;
 
 	rcu_read_lock();
-	deve = target_nacl_find_deve(nacl, unpacked_lun);
+	deve = target_nacl_find_deve(nacl, se_cmd->orig_fe_lun);
 	if (deve) {
-		atomic_long_inc(&deve->total_cmds);
+		this_cpu_inc(deve->stats->total_cmds);
 
 		if (se_cmd->data_direction == DMA_TO_DEVICE)
-			atomic_long_add(se_cmd->data_length,
-					&deve->write_bytes);
+			this_cpu_add(deve->stats->write_bytes,
+				     se_cmd->data_length);
 		else if (se_cmd->data_direction == DMA_FROM_DEVICE)
-			atomic_long_add(se_cmd->data_length,
-					&deve->read_bytes);
+			this_cpu_add(deve->stats->read_bytes,
+				     se_cmd->data_length);
 
-		se_lun = rcu_dereference(deve->se_lun);
+		if ((se_cmd->data_direction == DMA_TO_DEVICE) &&
+		    deve->lun_access_ro) {
+			pr_err("TARGET_CORE[%s]: Detected WRITE_PROTECTED LUN"
+				" Access for 0x%08llx\n",
+				se_cmd->se_tfo->fabric_name,
+				se_cmd->orig_fe_lun);
+			rcu_read_unlock();
+			return TCM_WRITE_PROTECTED;
+		}
+
+		se_lun = deve->se_lun;
 
 		if (!percpu_ref_tryget_live(&se_lun->lun_ref)) {
 			se_lun = NULL;
 			goto out_unlock;
 		}
 
-		se_cmd->se_lun = rcu_dereference(deve->se_lun);
+		se_cmd->se_lun = se_lun;
 		se_cmd->pr_res_key = deve->pr_res_key;
-		se_cmd->orig_fe_lun = unpacked_lun;
 		se_cmd->se_cmd_flags |= SCF_SE_LUN_CMD;
 		se_cmd->lun_ref_active = true;
-
-		if ((se_cmd->data_direction == DMA_TO_DEVICE) &&
-		    deve->lun_access_ro) {
-			pr_err("TARGET_CORE[%s]: Detected WRITE_PROTECTED LUN"
-				" Access for 0x%08llx\n",
-				se_cmd->se_tfo->get_fabric_name(),
-				unpacked_lun);
-			rcu_read_unlock();
-			ret = TCM_WRITE_PROTECTED;
-			goto ref_dev;
-		}
 	}
 out_unlock:
 	rcu_read_unlock();
@@ -111,30 +95,29 @@ out_unlock:
 		 * REPORT_LUNS, et al to be returned when no active
 		 * MappedLUN=0 exists for this Initiator Port.
 		 */
-		if (unpacked_lun != 0) {
+		if (se_cmd->orig_fe_lun != 0) {
 			pr_err("TARGET_CORE[%s]: Detected NON_EXISTENT_LUN"
-				" Access for 0x%08llx\n",
-				se_cmd->se_tfo->get_fabric_name(),
-				unpacked_lun);
+				" Access for 0x%08llx from %s\n",
+				se_cmd->se_tfo->fabric_name,
+				se_cmd->orig_fe_lun,
+				nacl->initiatorname);
 			return TCM_NON_EXISTENT_LUN;
 		}
-
-		se_lun = se_sess->se_tpg->tpg_virt_lun0;
-		se_cmd->se_lun = se_sess->se_tpg->tpg_virt_lun0;
-		se_cmd->orig_fe_lun = 0;
-		se_cmd->se_cmd_flags |= SCF_SE_LUN_CMD;
-
-		percpu_ref_get(&se_lun->lun_ref);
-		se_cmd->lun_ref_active = true;
 
 		/*
 		 * Force WRITE PROTECT for virtual LUN 0
 		 */
 		if ((se_cmd->data_direction != DMA_FROM_DEVICE) &&
-		    (se_cmd->data_direction != DMA_NONE)) {
-			ret = TCM_WRITE_PROTECTED;
-			goto ref_dev;
-		}
+		    (se_cmd->data_direction != DMA_NONE))
+			return TCM_WRITE_PROTECTED;
+
+		se_lun = se_sess->se_tpg->tpg_virt_lun0;
+		if (!percpu_ref_tryget_live(&se_lun->lun_ref))
+			return TCM_NON_EXISTENT_LUN;
+
+		se_cmd->se_lun = se_sess->se_tpg->tpg_virt_lun0;
+		se_cmd->se_cmd_flags |= SCF_SE_LUN_CMD;
+		se_cmd->lun_ref_active = true;
 	}
 	/*
 	 * RCU reference protected by percpu se_lun->lun_ref taken above that
@@ -142,43 +125,40 @@ out_unlock:
 	 * pointer can be kfree_rcu() by the final se_lun->lun_group put via
 	 * target_core_fabric_configfs.c:target_fabric_port_release
 	 */
-ref_dev:
 	se_cmd->se_dev = rcu_dereference_raw(se_lun->lun_se_dev);
-	atomic_long_inc(&se_cmd->se_dev->num_cmds);
+	this_cpu_inc(se_cmd->se_dev->stats->total_cmds);
 
 	if (se_cmd->data_direction == DMA_TO_DEVICE)
-		atomic_long_add(se_cmd->data_length,
-				&se_cmd->se_dev->write_bytes);
+		this_cpu_add(se_cmd->se_dev->stats->write_bytes,
+			     se_cmd->data_length);
 	else if (se_cmd->data_direction == DMA_FROM_DEVICE)
-		atomic_long_add(se_cmd->data_length,
-				&se_cmd->se_dev->read_bytes);
+		this_cpu_add(se_cmd->se_dev->stats->read_bytes,
+			     se_cmd->data_length);
 
 	return ret;
 }
 EXPORT_SYMBOL(transport_lookup_cmd_lun);
 
-int transport_lookup_tmr_lun(struct se_cmd *se_cmd, u64 unpacked_lun)
+int transport_lookup_tmr_lun(struct se_cmd *se_cmd)
 {
 	struct se_dev_entry *deve;
 	struct se_lun *se_lun = NULL;
 	struct se_session *se_sess = se_cmd->se_sess;
 	struct se_node_acl *nacl = se_sess->se_node_acl;
 	struct se_tmr_req *se_tmr = se_cmd->se_tmr_req;
-	unsigned long flags;
 
 	rcu_read_lock();
-	deve = target_nacl_find_deve(nacl, unpacked_lun);
+	deve = target_nacl_find_deve(nacl, se_cmd->orig_fe_lun);
 	if (deve) {
-		se_lun = rcu_dereference(deve->se_lun);
+		se_lun = deve->se_lun;
 
 		if (!percpu_ref_tryget_live(&se_lun->lun_ref)) {
 			se_lun = NULL;
 			goto out_unlock;
 		}
 
-		se_cmd->se_lun = rcu_dereference(deve->se_lun);
+		se_cmd->se_lun = se_lun;
 		se_cmd->pr_res_key = deve->pr_res_key;
-		se_cmd->orig_fe_lun = unpacked_lun;
 		se_cmd->se_cmd_flags |= SCF_SE_LUN_CMD;
 		se_cmd->lun_ref_active = true;
 	}
@@ -187,17 +167,14 @@ out_unlock:
 
 	if (!se_lun) {
 		pr_debug("TARGET_CORE[%s]: Detected NON_EXISTENT_LUN"
-			" Access for 0x%08llx\n",
-			se_cmd->se_tfo->get_fabric_name(),
-			unpacked_lun);
+			" Access for 0x%08llx for %s\n",
+			se_cmd->se_tfo->fabric_name,
+			se_cmd->orig_fe_lun,
+			nacl->initiatorname);
 		return -ENODEV;
 	}
 	se_cmd->se_dev = rcu_dereference_raw(se_lun->lun_se_dev);
 	se_tmr->tmr_dev = rcu_dereference_raw(se_lun->lun_se_dev);
-
-	spin_lock_irqsave(&se_tmr->tmr_dev->se_tmr_lock, flags);
-	list_add_tail(&se_tmr->tmr_list, &se_tmr->tmr_dev->dev_tmr_list);
-	spin_unlock_irqrestore(&se_tmr->tmr_dev->se_tmr_lock, flags);
 
 	return 0;
 }
@@ -233,14 +210,14 @@ struct se_dev_entry *core_get_se_deve_from_rtpi(
 
 	rcu_read_lock();
 	hlist_for_each_entry_rcu(deve, &nacl->lun_entry_hlist, link) {
-		lun = rcu_dereference(deve->se_lun);
+		lun = deve->se_lun;
 		if (!lun) {
 			pr_err("%s device entries device pointer is"
 				" NULL, but Initiator has access.\n",
-				tpg->se_tpg_tfo->get_fabric_name());
+				tpg->se_tpg_tfo->fabric_name);
 			continue;
 		}
-		if (lun->lun_rtpi != rtpi)
+		if (lun->lun_tpg->tpg_rtpi != rtpi)
 			continue;
 
 		kref_get(&deve->pr_kref);
@@ -260,11 +237,8 @@ void core_free_device_list_for_node(
 	struct se_dev_entry *deve;
 
 	mutex_lock(&nacl->lun_entry_mutex);
-	hlist_for_each_entry_rcu(deve, &nacl->lun_entry_hlist, link) {
-		struct se_lun *lun = rcu_dereference_check(deve->se_lun,
-					lockdep_is_held(&nacl->lun_entry_mutex));
-		core_disable_device_list_for_node(lun, deve, nacl, tpg);
-	}
+	hlist_for_each_entry_rcu(deve, &nacl->lun_entry_hlist, link)
+		core_disable_device_list_for_node(deve->se_lun, deve, nacl, tpg);
 	mutex_unlock(&nacl->lun_entry_mutex);
 }
 
@@ -304,6 +278,25 @@ void target_pr_kref_release(struct kref *kref)
 	complete(&deve->pr_comp);
 }
 
+/*
+ * Establish UA condition on SCSI device - all LUNs
+ */
+void target_dev_ua_allocate(struct se_device *dev, u8 asc, u8 ascq)
+{
+	struct se_dev_entry *se_deve;
+	struct se_lun *lun;
+
+	spin_lock(&dev->se_port_lock);
+	list_for_each_entry(lun, &dev->dev_sep_list, lun_dev_link) {
+
+		spin_lock(&lun->lun_deve_lock);
+		list_for_each_entry(se_deve, &lun->lun_deve_list, lun_link)
+			core_scsi3_ua_allocate(se_deve, asc, ascq);
+		spin_unlock(&lun->lun_deve_lock);
+	}
+	spin_unlock(&dev->se_port_lock);
+}
+
 static void
 target_luns_data_has_changed(struct se_node_acl *nacl, struct se_dev_entry *new,
 			     bool skip_new)
@@ -329,14 +322,20 @@ int core_enable_device_list_for_node(
 	struct se_portal_group *tpg)
 {
 	struct se_dev_entry *orig, *new;
+	int ret = 0;
 
-	new = kzalloc(sizeof(*new), GFP_KERNEL);
+	new = kzalloc_obj(*new);
 	if (!new) {
 		pr_err("Unable to allocate se_dev_entry memory\n");
 		return -ENOMEM;
 	}
 
-	atomic_set(&new->ua_count, 0);
+	new->stats = alloc_percpu(struct se_dev_entry_io_stats);
+	if (!new->stats) {
+		ret = -ENOMEM;
+		goto free_deve;
+	}
+
 	spin_lock_init(&new->ua_lock);
 	INIT_LIST_HEAD(&new->ua_list);
 	INIT_LIST_HEAD(&new->lun_link);
@@ -352,16 +351,15 @@ int core_enable_device_list_for_node(
 	mutex_lock(&nacl->lun_entry_mutex);
 	orig = target_nacl_find_deve(nacl, mapped_lun);
 	if (orig && orig->se_lun) {
-		struct se_lun *orig_lun = rcu_dereference_check(orig->se_lun,
-					lockdep_is_held(&nacl->lun_entry_mutex));
+		struct se_lun *orig_lun = orig->se_lun;
 
 		if (orig_lun != lun) {
 			pr_err("Existing orig->se_lun doesn't match new lun"
 			       " for dynamic -> explicit NodeACL conversion:"
 				" %s\n", nacl->initiatorname);
 			mutex_unlock(&nacl->lun_entry_mutex);
-			kfree(new);
-			return -EINVAL;
+			ret = -EINVAL;
+			goto free_stats;
 		}
 		if (orig->se_lun_acl != NULL) {
 			pr_warn_ratelimited("Detected existing explicit"
@@ -369,12 +367,12 @@ int core_enable_device_list_for_node(
 				" mapped_lun: %llu, failing\n",
 				 nacl->initiatorname, mapped_lun);
 			mutex_unlock(&nacl->lun_entry_mutex);
-			kfree(new);
-			return -EINVAL;
+			ret = -EINVAL;
+			goto free_stats;
 		}
 
-		rcu_assign_pointer(new->se_lun, lun);
-		rcu_assign_pointer(new->se_lun_acl, lun_acl);
+		new->se_lun = lun;
+		new->se_lun_acl = lun_acl;
 		hlist_del_rcu(&orig->link);
 		hlist_add_head_rcu(&new->link, &nacl->lun_entry_hlist);
 		mutex_unlock(&nacl->lun_entry_mutex);
@@ -392,8 +390,8 @@ int core_enable_device_list_for_node(
 		return 0;
 	}
 
-	rcu_assign_pointer(new->se_lun, lun);
-	rcu_assign_pointer(new->se_lun_acl, lun_acl);
+	new->se_lun = lun;
+	new->se_lun_acl = lun_acl;
 	hlist_add_head_rcu(&new->link, &nacl->lun_entry_hlist);
 	mutex_unlock(&nacl->lun_entry_mutex);
 
@@ -403,11 +401,22 @@ int core_enable_device_list_for_node(
 
 	target_luns_data_has_changed(nacl, new, true);
 	return 0;
+
+free_stats:
+	free_percpu(new->stats);
+free_deve:
+	kfree(new);
+	return ret;
 }
 
-/*
- *	Called with se_node_acl->lun_entry_mutex held.
- */
+static void target_free_dev_entry(struct rcu_head *head)
+{
+	struct se_dev_entry *deve = container_of(head, struct se_dev_entry,
+						 rcu_head);
+	free_percpu(deve->stats);
+	kfree(deve);
+}
+
 void core_disable_device_list_for_node(
 	struct se_lun *lun,
 	struct se_dev_entry *orig,
@@ -419,6 +428,9 @@ void core_disable_device_list_for_node(
 	 * reference to se_device->dev_group.
 	 */
 	struct se_device *dev = rcu_dereference_raw(lun->lun_se_dev);
+
+	lockdep_assert_held(&nacl->lun_entry_mutex);
+
 	/*
 	 * If the MappedLUN entry is being disabled, the entry in
 	 * lun->lun_deve_list must be removed now before clearing the
@@ -452,10 +464,7 @@ void core_disable_device_list_for_node(
 	kref_put(&orig->pr_kref, target_pr_kref_release);
 	wait_for_completion(&orig->pr_comp);
 
-	rcu_assign_pointer(orig->se_lun, NULL);
-	rcu_assign_pointer(orig->se_lun_acl, NULL);
-
-	kfree_rcu(orig, rcu_head);
+	call_rcu(&orig->rcu_head, target_free_dev_entry);
 
 	core_scsi3_free_pr_reg_from_nacl(dev, nacl);
 	target_luns_data_has_changed(nacl, NULL, false);
@@ -475,10 +484,7 @@ void core_clear_lun_from_tpg(struct se_lun *lun, struct se_portal_group *tpg)
 
 		mutex_lock(&nacl->lun_entry_mutex);
 		hlist_for_each_entry_rcu(deve, &nacl->lun_entry_hlist, link) {
-			struct se_lun *tmp_lun = rcu_dereference_check(deve->se_lun,
-					lockdep_is_held(&nacl->lun_entry_mutex));
-
-			if (lun != tmp_lun)
+			if (lun != deve->se_lun)
 				continue;
 
 			core_disable_device_list_for_node(lun, deve, nacl, tpg);
@@ -486,47 +492,6 @@ void core_clear_lun_from_tpg(struct se_lun *lun, struct se_portal_group *tpg)
 		mutex_unlock(&nacl->lun_entry_mutex);
 	}
 	mutex_unlock(&tpg->acl_node_mutex);
-}
-
-int core_alloc_rtpi(struct se_lun *lun, struct se_device *dev)
-{
-	struct se_lun *tmp;
-
-	spin_lock(&dev->se_port_lock);
-	if (dev->export_count == 0x0000ffff) {
-		pr_warn("Reached dev->dev_port_count =="
-				" 0x0000ffff\n");
-		spin_unlock(&dev->se_port_lock);
-		return -ENOSPC;
-	}
-again:
-	/*
-	 * Allocate the next RELATIVE TARGET PORT IDENTIFIER for this struct se_device
-	 * Here is the table from spc4r17 section 7.7.3.8.
-	 *
-	 *    Table 473 -- RELATIVE TARGET PORT IDENTIFIER field
-	 *
-	 * Code      Description
-	 * 0h        Reserved
-	 * 1h        Relative port 1, historically known as port A
-	 * 2h        Relative port 2, historically known as port B
-	 * 3h to FFFFh    Relative port 3 through 65 535
-	 */
-	lun->lun_rtpi = dev->dev_rpti_counter++;
-	if (!lun->lun_rtpi)
-		goto again;
-
-	list_for_each_entry(tmp, &dev->dev_sep_list, lun_dev_link) {
-		/*
-		 * Make sure RELATIVE TARGET PORT IDENTIFIER is unique
-		 * for 16-bit wrap..
-		 */
-		if (lun->lun_rtpi == tmp->lun_rtpi)
-			goto again;
-	}
-	spin_unlock(&dev->se_port_lock);
-
-	return 0;
 }
 
 static void se_release_vpd_for_dev(struct se_device *dev)
@@ -572,9 +537,9 @@ int core_dev_add_lun(
 		return rc;
 
 	pr_debug("%s_TPG[%u]_LUN[%llu] - Activated %s Logical Unit from"
-		" CORE HBA: %u\n", tpg->se_tpg_tfo->get_fabric_name(),
+		" CORE HBA: %u\n", tpg->se_tpg_tfo->fabric_name,
 		tpg->se_tpg_tfo->tpg_get_tag(tpg), lun->unpacked_lun,
-		tpg->se_tpg_tfo->get_fabric_name(), dev->se_hba->hba_id);
+		tpg->se_tpg_tfo->fabric_name, dev->se_hba->hba_id);
 	/*
 	 * Update LUN maps for dynamically added initiators when
 	 * generate_node_acl is enabled.
@@ -605,9 +570,9 @@ void core_dev_del_lun(
 	struct se_lun *lun)
 {
 	pr_debug("%s_TPG[%u]_LUN[%llu] - Deactivating %s Logical Unit from"
-		" device object\n", tpg->se_tpg_tfo->get_fabric_name(),
+		" device object\n", tpg->se_tpg_tfo->fabric_name,
 		tpg->se_tpg_tfo->tpg_get_tag(tpg), lun->unpacked_lun,
-		tpg->se_tpg_tfo->get_fabric_name());
+		tpg->se_tpg_tfo->fabric_name);
 
 	core_tpg_remove_lun(tpg, lun);
 }
@@ -622,11 +587,11 @@ struct se_lun_acl *core_dev_init_initiator_node_lun_acl(
 
 	if (strlen(nacl->initiatorname) >= TRANSPORT_IQN_LEN) {
 		pr_err("%s InitiatorName exceeds maximum size.\n",
-			tpg->se_tpg_tfo->get_fabric_name());
+			tpg->se_tpg_tfo->fabric_name);
 		*ret = -EOVERFLOW;
 		return NULL;
 	}
-	lacl = kzalloc(sizeof(struct se_lun_acl), GFP_KERNEL);
+	lacl = kzalloc_obj(struct se_lun_acl);
 	if (!lacl) {
 		pr_err("Unable to allocate memory for struct se_lun_acl.\n");
 		*ret = -ENOMEM;
@@ -665,7 +630,7 @@ int core_dev_add_initiator_node_lun_acl(
 		return -EINVAL;
 
 	pr_debug("%s_TPG[%hu]_LUN[%llu->%llu] - Added %s ACL for "
-		" InitiatorNode: %s\n", tpg->se_tpg_tfo->get_fabric_name(),
+		" InitiatorNode: %s\n", tpg->se_tpg_tfo->fabric_name,
 		tpg->se_tpg_tfo->tpg_get_tag(tpg), lun->unpacked_lun, lacl->mapped_lun,
 		lun_access_ro ? "RO" : "RW",
 		nacl->initiatorname);
@@ -698,7 +663,7 @@ int core_dev_del_initiator_node_lun_acl(
 
 	pr_debug("%s_TPG[%hu]_LUN[%llu] - Removed ACL for"
 		" InitiatorNode: %s Mapped LUN: %llu\n",
-		tpg->se_tpg_tfo->get_fabric_name(),
+		tpg->se_tpg_tfo->fabric_name,
 		tpg->se_tpg_tfo->tpg_get_tag(tpg), lun->unpacked_lun,
 		nacl->initiatorname, lacl->mapped_lun);
 
@@ -710,9 +675,9 @@ void core_dev_free_initiator_node_lun_acl(
 	struct se_lun_acl *lacl)
 {
 	pr_debug("%s_TPG[%hu] - Freeing ACL for %s InitiatorNode: %s"
-		" Mapped LUN: %llu\n", tpg->se_tpg_tfo->get_fabric_name(),
+		" Mapped LUN: %llu\n", tpg->se_tpg_tfo->fabric_name,
 		tpg->se_tpg_tfo->tpg_get_tag(tpg),
-		tpg->se_tpg_tfo->get_fabric_name(),
+		tpg->se_tpg_tfo->fabric_name,
 		lacl->se_lun_nacl->initiatorname, lacl->mapped_lun);
 
 	kfree(lacl);
@@ -721,59 +686,76 @@ void core_dev_free_initiator_node_lun_acl(
 static void scsi_dump_inquiry(struct se_device *dev)
 {
 	struct t10_wwn *wwn = &dev->t10_wwn;
-	char buf[17];
-	int i, device_type;
+	int device_type = dev->transport->get_device_type(dev);
+
 	/*
 	 * Print Linux/SCSI style INQUIRY formatting to the kernel ring buffer
 	 */
-	for (i = 0; i < 8; i++)
-		if (wwn->vendor[i] >= 0x20)
-			buf[i] = wwn->vendor[i];
-		else
-			buf[i] = ' ';
-	buf[i] = '\0';
-	pr_debug("  Vendor: %s\n", buf);
-
-	for (i = 0; i < 16; i++)
-		if (wwn->model[i] >= 0x20)
-			buf[i] = wwn->model[i];
-		else
-			buf[i] = ' ';
-	buf[i] = '\0';
-	pr_debug("  Model: %s\n", buf);
-
-	for (i = 0; i < 4; i++)
-		if (wwn->revision[i] >= 0x20)
-			buf[i] = wwn->revision[i];
-		else
-			buf[i] = ' ';
-	buf[i] = '\0';
-	pr_debug("  Revision: %s\n", buf);
-
-	device_type = dev->transport->get_device_type(dev);
+	pr_debug("  Vendor: %-" __stringify(INQUIRY_VENDOR_LEN) "s\n",
+		wwn->vendor);
+	pr_debug("  Model: %-" __stringify(INQUIRY_MODEL_LEN) "s\n",
+		wwn->model);
+	pr_debug("  Revision: %-" __stringify(INQUIRY_REVISION_LEN) "s\n",
+		wwn->revision);
 	pr_debug("  Type:   %s ", scsi_device_type(device_type));
+}
+
+static void target_non_ordered_release(struct percpu_ref *ref)
+{
+	struct se_device *dev = container_of(ref, struct se_device,
+					     non_ordered);
+	unsigned long flags;
+
+	spin_lock_irqsave(&dev->delayed_cmd_lock, flags);
+	if (!list_empty(&dev->delayed_cmd_list))
+		schedule_work(&dev->delayed_cmd_work);
+	spin_unlock_irqrestore(&dev->delayed_cmd_lock, flags);
 }
 
 struct se_device *target_alloc_device(struct se_hba *hba, const char *name)
 {
 	struct se_device *dev;
 	struct se_lun *xcopy_lun;
+	int i;
 
 	dev = hba->backend->ops->alloc_device(hba, name);
 	if (!dev)
 		return NULL;
 
+	dev->stats = alloc_percpu(struct se_dev_io_stats);
+	if (!dev->stats)
+		goto free_device;
+
+	dev->queues = kzalloc_objs(*dev->queues, nr_cpu_ids);
+	if (!dev->queues)
+		goto free_stats;
+
+	dev->queue_cnt = nr_cpu_ids;
+	for (i = 0; i < dev->queue_cnt; i++) {
+		struct se_device_queue *q;
+
+		q = &dev->queues[i];
+		INIT_LIST_HEAD(&q->state_list);
+		spin_lock_init(&q->lock);
+
+		init_llist_head(&q->sq.cmd_list);
+		INIT_WORK(&q->sq.work, target_queued_submit_work);
+	}
+
+	if (percpu_ref_init(&dev->non_ordered, target_non_ordered_release,
+			    PERCPU_REF_ALLOW_REINIT, GFP_KERNEL))
+		goto free_queues;
+
 	dev->se_hba = hba;
 	dev->transport = hba->backend->ops;
+	dev->transport_flags = dev->transport->transport_flags_default;
 	dev->prot_length = sizeof(struct t10_pi_tuple);
 	dev->hba_index = hba->hba_index;
 
 	INIT_LIST_HEAD(&dev->dev_sep_list);
 	INIT_LIST_HEAD(&dev->dev_tmr_list);
 	INIT_LIST_HEAD(&dev->delayed_cmd_list);
-	INIT_LIST_HEAD(&dev->state_list);
 	INIT_LIST_HEAD(&dev->qf_cmd_list);
-	spin_lock_init(&dev->execute_task_lock);
 	spin_lock_init(&dev->delayed_cmd_lock);
 	spin_lock_init(&dev->dev_reservation_lock);
 	spin_lock_init(&dev->se_port_lock);
@@ -791,7 +773,15 @@ struct se_device *target_alloc_device(struct se_hba *hba, const char *name)
 	INIT_LIST_HEAD(&dev->t10_alua.lba_map_list);
 	spin_lock_init(&dev->t10_alua.lba_map_lock);
 
+	INIT_WORK(&dev->delayed_cmd_work, target_do_delayed_work);
+	mutex_init(&dev->lun_reset_mutex);
+
 	dev->t10_wwn.t10_dev = dev;
+	/*
+	 * Use OpenFabrics IEEE Company ID: 00 14 05
+	 */
+	dev->t10_wwn.company_id = 0x001405;
+
 	dev->t10_alua.t10_dev = dev;
 
 	dev->dev_attrib.da_dev = dev;
@@ -800,12 +790,14 @@ struct se_device *target_alloc_device(struct se_hba *hba, const char *name)
 	dev->dev_attrib.emulate_fua_write = 1;
 	dev->dev_attrib.emulate_fua_read = 1;
 	dev->dev_attrib.emulate_write_cache = DA_EMULATE_WRITE_CACHE;
-	dev->dev_attrib.emulate_ua_intlck_ctrl = DA_EMULATE_UA_INTLLCK_CTRL;
+	dev->dev_attrib.emulate_ua_intlck_ctrl = TARGET_UA_INTLCK_CTRL_CLEAR;
 	dev->dev_attrib.emulate_tas = DA_EMULATE_TAS;
 	dev->dev_attrib.emulate_tpu = DA_EMULATE_TPU;
 	dev->dev_attrib.emulate_tpws = DA_EMULATE_TPWS;
 	dev->dev_attrib.emulate_caw = DA_EMULATE_CAW;
 	dev->dev_attrib.emulate_3pc = DA_EMULATE_3PC;
+	dev->dev_attrib.emulate_pr = DA_EMULATE_PR;
+	dev->dev_attrib.emulate_rsoc = DA_EMULATE_RSOC;
 	dev->dev_attrib.pi_prot_type = TARGET_DIF_TYPE0_PROT;
 	dev->dev_attrib.enforce_pr_isids = DA_ENFORCE_PR_ISIDS;
 	dev->dev_attrib.force_pr_aptpl = DA_FORCE_PR_APTPL;
@@ -820,45 +812,77 @@ struct se_device *target_alloc_device(struct se_hba *hba, const char *name)
 	dev->dev_attrib.unmap_zeroes_data =
 				DA_UNMAP_ZEROES_DATA_DEFAULT;
 	dev->dev_attrib.max_write_same_len = DA_MAX_WRITE_SAME_LEN;
+	dev->dev_attrib.submit_type = TARGET_FABRIC_DEFAULT_SUBMIT;
+	dev->dev_attrib.complete_type = TARGET_FABRIC_DEFAULT_COMPL;
 
+	/* Skip allocating lun_stats since we can't export them. */
 	xcopy_lun = &dev->xcopy_lun;
 	rcu_assign_pointer(xcopy_lun->lun_se_dev, dev);
-	init_completion(&xcopy_lun->lun_ref_comp);
 	init_completion(&xcopy_lun->lun_shutdown_comp);
 	INIT_LIST_HEAD(&xcopy_lun->lun_deve_list);
 	INIT_LIST_HEAD(&xcopy_lun->lun_dev_link);
 	mutex_init(&xcopy_lun->lun_tg_pt_md_mutex);
 	xcopy_lun->lun_tpg = &xcopy_pt_tpg;
 
+	/* Preload the default INQUIRY const values */
+	strscpy(dev->t10_wwn.vendor, "LIO-ORG", sizeof(dev->t10_wwn.vendor));
+	strscpy(dev->t10_wwn.model, dev->transport->inquiry_prod,
+		sizeof(dev->t10_wwn.model));
+	strscpy(dev->t10_wwn.revision, dev->transport->inquiry_rev,
+		sizeof(dev->t10_wwn.revision));
+
 	return dev;
+
+free_queues:
+	kfree(dev->queues);
+free_stats:
+	free_percpu(dev->stats);
+free_device:
+	hba->backend->ops->free_device(dev);
+	return NULL;
 }
 
-/*
- * Check if the underlying struct block_device request_queue supports
- * the QUEUE_FLAG_DISCARD bit for UNMAP/WRITE_SAME in SCSI + TRIM
- * in ATA and we need to set TPE=1
- */
-bool target_configure_unmap_from_queue(struct se_dev_attrib *attrib,
-				       struct request_queue *q)
+void target_configure_write_atomic_from_bdev(struct se_dev_attrib *attrib,
+					     struct block_device *bdev)
 {
-	int block_size = queue_logical_block_size(q);
+	struct request_queue *q = bdev_get_queue(bdev);
+	int block_size = bdev_logical_block_size(bdev);
 
-	if (!blk_queue_discard(q))
+	if (!bdev_can_atomic_write(bdev))
+		return;
+
+	attrib->atomic_max_len = queue_atomic_write_max_bytes(q) / block_size;
+	attrib->atomic_granularity = attrib->atomic_alignment =
+		queue_atomic_write_unit_min_bytes(q) / block_size;
+	attrib->atomic_max_with_boundary = 0;
+	attrib->atomic_max_boundary = 0;
+}
+EXPORT_SYMBOL_GPL(target_configure_write_atomic_from_bdev);
+
+/*
+ * Check if the underlying struct block_device supports discard and if yes
+ * configure the UNMAP parameters.
+ */
+bool target_configure_unmap_from_bdev(struct se_dev_attrib *attrib,
+				      struct block_device *bdev)
+{
+	int block_size = bdev_logical_block_size(bdev);
+
+	if (!bdev_max_discard_sectors(bdev))
 		return false;
 
 	attrib->max_unmap_lba_count =
-		q->limits.max_discard_sectors >> (ilog2(block_size) - 9);
+		bdev_max_discard_sectors(bdev) >> (ilog2(block_size) - 9);
 	/*
 	 * Currently hardcoded to 1 in Linux/SCSI code..
 	 */
 	attrib->max_unmap_block_desc_count = 1;
-	attrib->unmap_granularity = q->limits.discard_granularity / block_size;
-	attrib->unmap_granularity_alignment = q->limits.discard_alignment /
-								block_size;
-	attrib->unmap_zeroes_data = (q->limits.max_write_zeroes_sectors);
+	attrib->unmap_granularity = bdev_discard_granularity(bdev) / block_size;
+	attrib->unmap_granularity_alignment =
+		bdev_discard_alignment(bdev) / block_size;
 	return true;
 }
-EXPORT_SYMBOL(target_configure_unmap_from_queue);
+EXPORT_SYMBOL(target_configure_unmap_from_bdev);
 
 /*
  * Convert from blocksize advertised to the initiator to the 512 byte
@@ -879,39 +903,18 @@ sector_t target_to_linux_sector(struct se_device *dev, sector_t lb)
 }
 EXPORT_SYMBOL(target_to_linux_sector);
 
-/**
- * target_find_device - find a se_device by its dev_index
- * @id: dev_index
- * @do_depend: true if caller needs target_depend_item to be done
- *
- * If do_depend is true, the caller must do a target_undepend_item
- * when finished using the device.
- *
- * If do_depend is false, the caller must be called in a configfs
- * callback or during removal.
- */
-struct se_device *target_find_device(int id, bool do_depend)
-{
-	struct se_device *dev;
-
-	mutex_lock(&device_mutex);
-	dev = idr_find(&devices_idr, id);
-	if (dev && do_depend && target_depend_item(&dev->dev_group.cg_item))
-		dev = NULL;
-	mutex_unlock(&device_mutex);
-	return dev;
-}
-EXPORT_SYMBOL(target_find_device);
-
 struct devices_idr_iter {
 	int (*fn)(struct se_device *dev, void *data);
 	void *data;
 };
 
 static int target_devices_idr_iter(int id, void *p, void *data)
+	 __must_hold(&device_mutex)
 {
 	struct devices_idr_iter *iter = data;
 	struct se_device *dev = p;
+	struct config_item *item;
+	int ret;
 
 	/*
 	 * We add the device early to the idr, so it can be used
@@ -919,10 +922,19 @@ static int target_devices_idr_iter(int id, void *p, void *data)
 	 * to allow other callers to access partially setup devices,
 	 * so we skip them here.
 	 */
-	if (!(dev->dev_flags & DF_CONFIGURED))
+	if (!target_dev_configured(dev))
 		return 0;
 
-	return iter->fn(dev, iter->data);
+	item = config_item_get_unless_zero(&dev->dev_group.cg_item);
+	if (!item)
+		return 0;
+	mutex_unlock(&device_mutex);
+
+	ret = iter->fn(dev, iter->data);
+	config_item_put(item);
+
+	mutex_lock(&device_mutex);
+	return ret;
 }
 
 /**
@@ -936,11 +948,8 @@ static int target_devices_idr_iter(int id, void *p, void *data)
 int target_for_each_device(int (*fn)(struct se_device *dev, void *data),
 			   void *data)
 {
-	struct devices_idr_iter iter;
+	struct devices_idr_iter iter = { .fn = fn, .data = data };
 	int ret;
-
-	iter.fn = fn;
-	iter.data = data;
 
 	mutex_lock(&device_mutex);
 	ret = idr_for_each(&devices_idr, target_devices_idr_iter, &iter);
@@ -953,7 +962,7 @@ int target_configure_device(struct se_device *dev)
 	struct se_hba *hba = dev->se_hba;
 	int ret, id;
 
-	if (dev->dev_flags & DF_CONFIGURED) {
+	if (target_dev_configured(dev)) {
 		pr_err("se_dev->se_dev_ptr already set for storage"
 				" object\n");
 		return -EEXIST;
@@ -979,6 +988,12 @@ int target_configure_device(struct se_device *dev)
 	ret = dev->transport->configure_device(dev);
 	if (ret)
 		goto out_free_index;
+
+	if (dev->transport->configure_unmap &&
+	    dev->transport->configure_unmap(dev)) {
+		pr_debug("Discard support available, but disabled by default.\n");
+	}
+
 	/*
 	 * XXX: there is not much point to have two different values here..
 	 */
@@ -1000,34 +1015,9 @@ int target_configure_device(struct se_device *dev)
 		goto out_destroy_device;
 
 	/*
-	 * Startup the struct se_device processing thread
-	 */
-	dev->tmr_wq = alloc_workqueue("tmr-%s", WQ_MEM_RECLAIM | WQ_UNBOUND, 1,
-				      dev->transport->name);
-	if (!dev->tmr_wq) {
-		pr_err("Unable to create tmr workqueue for %s\n",
-			dev->transport->name);
-		ret = -ENOMEM;
-		goto out_free_alua;
-	}
-
-	/*
 	 * Setup work_queue for QUEUE_FULL
 	 */
 	INIT_WORK(&dev->qf_work_queue, target_qf_do_work);
-
-	/*
-	 * Preload the initial INQUIRY const values if we are doing
-	 * anything virtual (IBLOCK, FILEIO, RAMDISK), but not for TCM/pSCSI
-	 * passthrough because this is being provided by the backend LLD.
-	 */
-	if (!(dev->transport->transport_flags & TRANSPORT_FLAG_PASSTHROUGH)) {
-		strncpy(&dev->t10_wwn.vendor[0], "LIO-ORG", 8);
-		strncpy(&dev->t10_wwn.model[0],
-			dev->transport->inquiry_prod, 16);
-		strncpy(&dev->t10_wwn.revision[0],
-			dev->transport->inquiry_rev, 4);
-	}
 
 	scsi_dump_inquiry(dev);
 
@@ -1039,8 +1029,6 @@ int target_configure_device(struct se_device *dev)
 
 	return 0;
 
-out_free_alua:
-	core_alua_free_lu_gp_mem(dev);
 out_destroy_device:
 	dev->transport->destroy_device(dev);
 out_free_index:
@@ -1058,9 +1046,10 @@ void target_free_device(struct se_device *dev)
 
 	WARN_ON(!list_empty(&dev->dev_sep_list));
 
-	if (dev->dev_flags & DF_CONFIGURED) {
-		destroy_workqueue(dev->tmr_wq);
+	percpu_ref_exit(&dev->non_ordered);
+	cancel_work_sync(&dev->delayed_cmd_work);
 
+	if (target_dev_configured(dev)) {
 		dev->transport->destroy_device(dev);
 
 		mutex_lock(&device_mutex);
@@ -1080,6 +1069,8 @@ void target_free_device(struct se_device *dev)
 	if (dev->transport->free_prot)
 		dev->transport->free_prot(dev);
 
+	kfree(dev->queues);
+	free_percpu(dev->stats);
 	dev->transport->free_device(dev);
 }
 
@@ -1087,7 +1078,7 @@ int core_dev_setup_virtual_lun0(void)
 {
 	struct se_hba *hba;
 	struct se_device *dev;
-	char buf[] = "rd_pages=8,rd_nullio=1";
+	char buf[] = "rd_pages=8,rd_nullio=1,rd_dummy=1";
 	int ret;
 
 	hba = core_alloc_hba("rd_mcp", 0, HBA_FLAGS_INTERNAL_USE);
@@ -1142,27 +1133,6 @@ passthrough_parse_cdb(struct se_cmd *cmd,
 	unsigned int size;
 
 	/*
-	 * Clear a lun set in the cdb if the initiator talking to use spoke
-	 * and old standards version, as we can't assume the underlying device
-	 * won't choke up on it.
-	 */
-	switch (cdb[0]) {
-	case READ_10: /* SBC - RDProtect */
-	case READ_12: /* SBC - RDProtect */
-	case READ_16: /* SBC - RDProtect */
-	case SEND_DIAGNOSTIC: /* SPC - SELF-TEST Code */
-	case VERIFY: /* SBC - VRProtect */
-	case VERIFY_16: /* SBC - VRProtect */
-	case WRITE_VERIFY: /* SBC - VRProtect */
-	case WRITE_VERIFY_12: /* SBC - VRProtect */
-	case MAINTENANCE_IN: /* SPC - Parameter Data Format for SA RTPG */
-		break;
-	default:
-		cdb[1] &= 0x1f; /* clear logical unit number */
-		break;
-	}
-
-	/*
 	 * For REPORT LUNS we always need to emulate the response, for everything
 	 * else, pass it up.
 	 */
@@ -1172,11 +1142,23 @@ passthrough_parse_cdb(struct se_cmd *cmd,
 	}
 
 	/*
+	 * With emulate_pr disabled, all reservation requests should fail,
+	 * regardless of whether or not TRANSPORT_FLAG_PASSTHROUGH_PGR is set.
+	 */
+	if (!dev->dev_attrib.emulate_pr &&
+	    ((cdb[0] == PERSISTENT_RESERVE_IN) ||
+	     (cdb[0] == PERSISTENT_RESERVE_OUT) ||
+	     (cdb[0] == RELEASE_6 || cdb[0] == RELEASE_10) ||
+	     (cdb[0] == RESERVE_6 || cdb[0] == RESERVE_10))) {
+		return TCM_UNSUPPORTED_SCSI_OPCODE;
+	}
+
+	/*
 	 * For PERSISTENT RESERVE IN/OUT, RELEASE, and RESERVE we need to
 	 * emulate the response, since tcmu does not have the information
 	 * required to process these commands.
 	 */
-	if (!(dev->transport->transport_flags &
+	if (!(dev->transport_flags &
 	      TRANSPORT_FLAG_PASSTHROUGH_PGR)) {
 		if (cdb[0] == PERSISTENT_RESERVE_IN) {
 			cmd->execute_cmd = target_scsi3_emulate_pr_in;
@@ -1189,7 +1171,7 @@ passthrough_parse_cdb(struct se_cmd *cmd,
 			return target_cmd_size_check(cmd, size);
 		}
 
-		if (cdb[0] == RELEASE || cdb[0] == RELEASE_10) {
+		if (cdb[0] == RELEASE_6 || cdb[0] == RELEASE_10) {
 			cmd->execute_cmd = target_scsi2_reservation_release;
 			if (cdb[0] == RELEASE_10)
 				size = get_unaligned_be16(&cdb[7]);
@@ -1197,7 +1179,7 @@ passthrough_parse_cdb(struct se_cmd *cmd,
 				size = cmd->data_length;
 			return target_cmd_size_check(cmd, size);
 		}
-		if (cdb[0] == RESERVE || cdb[0] == RESERVE_10) {
+		if (cdb[0] == RESERVE_6 || cdb[0] == RESERVE_10) {
 			cmd->execute_cmd = target_scsi2_reservation_reserve;
 			if (cdb[0] == RESERVE_10)
 				size = get_unaligned_be16(&cdb[7]);

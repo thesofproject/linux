@@ -1,11 +1,22 @@
 /*
- * Copyright 2017 Broadcom. All Rights Reserved.
- * The term "Broadcom" refers to Broadcom Limited and/or its subsidiaries.
+ * This file is part of the Emulex Linux Device Driver for Enterprise iSCSI
+ * Host Bus Adapters. Refer to the README file included with this package
+ * for driver version and adapter compatibility.
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation. The full GNU General
- * Public License is included in this distribution in the file called COPYING.
+ * Copyright (c) 2018 Broadcom. All Rights Reserved.
+ * The term “Broadcom” refers to Broadcom Inc. and/or its subsidiaries.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of version 2 of the GNU General Public License as published
+ * by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful. ALL EXPRESS
+ * OR IMPLIED CONDITIONS, REPRESENTATIONS AND WARRANTIES, INCLUDING ANY
+ * IMPLIED WARRANTY OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+ * OR NON-INFRINGEMENT, ARE DISCLAIMED, EXCEPT TO THE EXTENT THAT SUCH
+ * DISCLAIMERS ARE HELD TO BE LEGALLY INVALID.
+ * See the GNU General Public License for more details, a copy of which
+ * can be found in the file COPYING included with this package.
  *
  * Contact Information:
  * linux-drivers@broadcom.com
@@ -86,6 +97,7 @@ unsigned int mgmt_vendor_specific_fw_cmd(struct be_ctrl_info *ctrl,
 
 /**
  * mgmt_open_connection()- Establish a TCP CXN
+ * @phba: driver priv structure
  * @dst_addr: Destination Address
  * @beiscsi_ep: ptr to device endpoint struct
  * @nonemb_cmd: ptr to memory allocated for command
@@ -198,7 +210,7 @@ int mgmt_open_connection(struct beiscsi_hba *phba,
 	return tag;
 }
 
-/*
+/**
  * beiscsi_exec_nemb_cmd()- execute non-embedded MBX cmd
  * @phba: driver priv structure
  * @nonemb_cmd: DMA address of the MBX command to be issued
@@ -223,8 +235,7 @@ static int beiscsi_exec_nemb_cmd(struct beiscsi_hba *phba,
 	wrb = alloc_mcc_wrb(phba, &tag);
 	if (!wrb) {
 		mutex_unlock(&ctrl->mbox_lock);
-		rc = -ENOMEM;
-		goto free_cmd;
+		return -ENOMEM;
 	}
 
 	sge = nonembedded_sgl(wrb);
@@ -257,24 +268,6 @@ static int beiscsi_exec_nemb_cmd(struct beiscsi_hba *phba,
 	/* copy the response, if any */
 	if (resp_buf)
 		memcpy(resp_buf, nonemb_cmd->va, resp_buf_len);
-	/**
-	 * This is special case of NTWK_GET_IF_INFO where the size of
-	 * response is not known. beiscsi_if_get_info checks the return
-	 * value to free DMA buffer.
-	 */
-	if (rc == -EAGAIN)
-		return rc;
-
-	/**
-	 * If FW is busy that is driver timed out, DMA buffer is saved with
-	 * the tag, only when the cmd completes this buffer is freed.
-	 */
-	if (rc == -EBUSY)
-		return rc;
-
-free_cmd:
-	pci_free_consistent(ctrl->pdev, nonemb_cmd->size,
-			    nonemb_cmd->va, nonemb_cmd->dma);
 	return rc;
 }
 
@@ -282,7 +275,8 @@ static int beiscsi_prep_nemb_cmd(struct beiscsi_hba *phba,
 				 struct be_dma_mem *cmd,
 				 u8 subsystem, u8 opcode, u32 size)
 {
-	cmd->va = pci_zalloc_consistent(phba->ctrl.pdev, size, &cmd->dma);
+	cmd->va = dma_alloc_coherent(&phba->ctrl.pdev->dev, size, &cmd->dma,
+				     GFP_KERNEL);
 	if (!cmd->va) {
 		beiscsi_log(phba, KERN_ERR, BEISCSI_LOG_CONFIG,
 			    "BG_%d : Failed to allocate memory for if info\n");
@@ -296,6 +290,19 @@ static int beiscsi_prep_nemb_cmd(struct beiscsi_hba *phba,
 	return 0;
 }
 
+static void beiscsi_free_nemb_cmd(struct beiscsi_hba *phba,
+				  struct be_dma_mem *cmd, int rc)
+{
+	/*
+	 * If FW is busy the DMA buffer is saved with the tag. When the cmd
+	 * completes this buffer is freed.
+	 */
+	if (rc == -EBUSY)
+		return;
+
+	dma_free_coherent(&phba->ctrl.pdev->dev, cmd->size, cmd->va, cmd->dma);
+}
+
 static void __beiscsi_eq_delay_compl(struct beiscsi_hba *phba, unsigned int tag)
 {
 	struct be_dma_mem *tag_mem;
@@ -304,7 +311,7 @@ static void __beiscsi_eq_delay_compl(struct beiscsi_hba *phba, unsigned int tag)
 	__beiscsi_mcc_compl_status(phba, tag, NULL, NULL);
 	tag_mem = &phba->ctrl.ptag_state[tag].tag_mem_state;
 	if (tag_mem->size) {
-		pci_free_consistent(phba->pcidev, tag_mem->size,
+		dma_free_coherent(&phba->pcidev->dev, tag_mem->size,
 				    tag_mem->va, tag_mem->dma);
 		tag_mem->size = 0;
 	}
@@ -331,8 +338,16 @@ int beiscsi_modify_eq_delay(struct beiscsi_hba *phba,
 				cpu_to_le32(set_eqd[i].delay_multiplier);
 	}
 
-	return beiscsi_exec_nemb_cmd(phba, &nonemb_cmd,
-				     __beiscsi_eq_delay_compl, NULL, 0);
+	rc = beiscsi_exec_nemb_cmd(phba, &nonemb_cmd, __beiscsi_eq_delay_compl,
+				   NULL, 0);
+	if (rc) {
+		/*
+		 * Only free on failure. Async cmds are handled like -EBUSY
+		 * where it's handled for us.
+		 */
+		beiscsi_free_nemb_cmd(phba, &nonemb_cmd, rc);
+	}
+	return rc;
 }
 
 /**
@@ -359,6 +374,7 @@ int beiscsi_get_initiator_name(struct beiscsi_hba *phba, char *name, bool cfg)
 		req->hdr.version = 1;
 	rc = beiscsi_exec_nemb_cmd(phba, &nonemb_cmd, NULL,
 				   &resp, sizeof(resp));
+	beiscsi_free_nemb_cmd(phba, &nonemb_cmd, rc);
 	if (rc) {
 		beiscsi_log(phba, KERN_ERR,
 			    BEISCSI_LOG_CONFIG | BEISCSI_LOG_MBOX,
@@ -436,7 +452,9 @@ static int beiscsi_if_mod_gw(struct beiscsi_hba *phba,
 	req->ip_addr.ip_type = ip_type;
 	memcpy(req->ip_addr.addr, gw,
 	       (ip_type < BEISCSI_IP_TYPE_V6) ? IP_V4_LEN : IP_V6_LEN);
-	return beiscsi_exec_nemb_cmd(phba, &nonemb_cmd, NULL, NULL, 0);
+	rt_val = beiscsi_exec_nemb_cmd(phba, &nonemb_cmd, NULL, NULL, 0);
+	beiscsi_free_nemb_cmd(phba, &nonemb_cmd, rt_val);
+	return rt_val;
 }
 
 int beiscsi_if_set_gw(struct beiscsi_hba *phba, u32 ip_type, u8 *gw)
@@ -486,8 +504,10 @@ int beiscsi_if_get_gw(struct beiscsi_hba *phba, u32 ip_type,
 	req = nonemb_cmd.va;
 	req->ip_type = ip_type;
 
-	return beiscsi_exec_nemb_cmd(phba, &nonemb_cmd, NULL,
-				     resp, sizeof(*resp));
+	rc = beiscsi_exec_nemb_cmd(phba, &nonemb_cmd, NULL, resp,
+				   sizeof(*resp));
+	beiscsi_free_nemb_cmd(phba, &nonemb_cmd, rc);
+	return rc;
 }
 
 static int
@@ -524,6 +544,7 @@ beiscsi_if_clr_ip(struct beiscsi_hba *phba,
 			    "BG_%d : failed to clear IP: rc %d status %d\n",
 			    rc, req->ip_params.ip_record.status);
 	}
+	beiscsi_free_nemb_cmd(phba, &nonemb_cmd, rc);
 	return rc;
 }
 
@@ -568,6 +589,7 @@ beiscsi_if_set_ip(struct beiscsi_hba *phba, u8 *ip,
 		if (req->ip_params.ip_record.status)
 			rc = -EINVAL;
 	}
+	beiscsi_free_nemb_cmd(phba, &nonemb_cmd, rc);
 	return rc;
 }
 
@@ -595,6 +617,7 @@ int beiscsi_if_en_static(struct beiscsi_hba *phba, u32 ip_type,
 		reldhcp->interface_hndl = phba->interface_handle;
 		reldhcp->ip_type = ip_type;
 		rc = beiscsi_exec_nemb_cmd(phba, &nonemb_cmd, NULL, NULL, 0);
+		beiscsi_free_nemb_cmd(phba, &nonemb_cmd, rc);
 		if (rc < 0) {
 			beiscsi_log(phba, KERN_WARNING, BEISCSI_LOG_CONFIG,
 				    "BG_%d : failed to release existing DHCP: %d\n",
@@ -676,7 +699,7 @@ int beiscsi_if_en_dhcp(struct beiscsi_hba *phba, u32 ip_type)
 	dhcpreq->interface_hndl = phba->interface_handle;
 	dhcpreq->ip_type = ip_type;
 	rc = beiscsi_exec_nemb_cmd(phba, &nonemb_cmd, NULL, NULL, 0);
-
+	beiscsi_free_nemb_cmd(phba, &nonemb_cmd, rc);
 exit:
 	kfree(if_info);
 	return rc;
@@ -749,11 +772,8 @@ int beiscsi_if_get_info(struct beiscsi_hba *phba, int ip_type,
 				    BEISCSI_LOG_INIT | BEISCSI_LOG_CONFIG,
 				    "BG_%d : Memory Allocation Failure\n");
 
-				/* Free the DMA memory for the IOCTL issuing */
-				pci_free_consistent(phba->ctrl.pdev,
-						    nonemb_cmd.size,
-						    nonemb_cmd.va,
-						    nonemb_cmd.dma);
+				beiscsi_free_nemb_cmd(phba, &nonemb_cmd,
+						      -ENOMEM);
 				return -ENOMEM;
 		}
 
@@ -768,15 +788,13 @@ int beiscsi_if_get_info(struct beiscsi_hba *phba, int ip_type,
 				      nonemb_cmd.va)->actual_resp_len;
 			ioctl_size += sizeof(struct be_cmd_req_hdr);
 
-			/* Free the previous allocated DMA memory */
-			pci_free_consistent(phba->ctrl.pdev, nonemb_cmd.size,
-					    nonemb_cmd.va,
-					    nonemb_cmd.dma);
-
+			beiscsi_free_nemb_cmd(phba, &nonemb_cmd, rc);
 			/* Free the virtual memory */
 			kfree(*if_info);
-		} else
+		} else {
+			beiscsi_free_nemb_cmd(phba, &nonemb_cmd, rc);
 			break;
+		}
 	} while (true);
 	return rc;
 }
@@ -793,8 +811,9 @@ int mgmt_get_nic_conf(struct beiscsi_hba *phba,
 	if (rc)
 		return rc;
 
-	return beiscsi_exec_nemb_cmd(phba, &nonemb_cmd, NULL,
-				     nic, sizeof(*nic));
+	rc = beiscsi_exec_nemb_cmd(phba, &nonemb_cmd, NULL, nic, sizeof(*nic));
+	beiscsi_free_nemb_cmd(phba, &nonemb_cmd, rc);
+	return rc;
 }
 
 static void beiscsi_boot_process_compl(struct beiscsi_hba *phba,
@@ -858,7 +877,7 @@ static void beiscsi_boot_process_compl(struct beiscsi_hba *phba,
 				      status);
 			boot_work = 0;
 		}
-		pci_free_consistent(phba->ctrl.pdev, bs->nonemb_cmd.size,
+		dma_free_coherent(&phba->ctrl.pdev->dev, bs->nonemb_cmd.size,
 				    bs->nonemb_cmd.va, bs->nonemb_cmd.dma);
 		bs->nonemb_cmd.va = NULL;
 		break;
@@ -1001,10 +1020,12 @@ unsigned int beiscsi_boot_get_sinfo(struct beiscsi_hba *phba)
 
 	nonemb_cmd = &phba->boot_struct.nonemb_cmd;
 	nonemb_cmd->size = sizeof(struct be_cmd_get_session_resp);
-	nonemb_cmd->va = pci_alloc_consistent(phba->ctrl.pdev,
+	nonemb_cmd->va = dma_alloc_coherent(&phba->ctrl.pdev->dev,
 					      nonemb_cmd->size,
-					      &nonemb_cmd->dma);
+					      &nonemb_cmd->dma,
+					      GFP_KERNEL);
 	if (!nonemb_cmd->va) {
+		free_mcc_wrb(ctrl, tag);
 		mutex_unlock(&ctrl->mbox_lock);
 		return 0;
 	}
@@ -1165,12 +1186,12 @@ beiscsi_active_session_disp(struct device *dev, struct device_attribute *attr,
 		if (test_bit(ulp_num, (void *)&phba->fw_config.ulp_supported)) {
 			avlbl_cids = BEISCSI_ULP_AVLBL_CID(phba, ulp_num);
 			total_cids = BEISCSI_GET_CID_COUNT(phba, ulp_num);
-			len += snprintf(buf+len, PAGE_SIZE - len,
-					"ULP%d : %d\n", ulp_num,
-					(total_cids - avlbl_cids));
+			len += scnprintf(buf+len, PAGE_SIZE - len,
+					 "ULP%d : %d\n", ulp_num,
+					 (total_cids - avlbl_cids));
 		} else
-			len += snprintf(buf+len, PAGE_SIZE - len,
-					"ULP%d : %d\n", ulp_num, 0);
+			len += scnprintf(buf+len, PAGE_SIZE - len,
+					 "ULP%d : %d\n", ulp_num, 0);
 	}
 
 	return len;
@@ -1195,12 +1216,12 @@ beiscsi_free_session_disp(struct device *dev, struct device_attribute *attr,
 
 	for (ulp_num = 0; ulp_num < BEISCSI_ULP_COUNT; ulp_num++) {
 		if (test_bit(ulp_num, (void *)&phba->fw_config.ulp_supported))
-			len += snprintf(buf+len, PAGE_SIZE - len,
-					"ULP%d : %d\n", ulp_num,
-					BEISCSI_ULP_AVLBL_CID(phba, ulp_num));
+			len += scnprintf(buf+len, PAGE_SIZE - len,
+					 "ULP%d : %d\n", ulp_num,
+					 BEISCSI_ULP_AVLBL_CID(phba, ulp_num));
 		else
-			len += snprintf(buf+len, PAGE_SIZE - len,
-					"ULP%d : %d\n", ulp_num, 0);
+			len += scnprintf(buf+len, PAGE_SIZE - len,
+					 "ULP%d : %d\n", ulp_num, 0);
 	}
 
 	return len;
@@ -1230,23 +1251,19 @@ beiscsi_adap_family_disp(struct device *dev, struct device_attribute *attr,
 	case OC_DEVICE_ID2:
 		return snprintf(buf, PAGE_SIZE,
 				"Obsolete/Unsupported BE2 Adapter Family\n");
-		break;
 	case BE_DEVICE_ID2:
 	case OC_DEVICE_ID3:
 		return snprintf(buf, PAGE_SIZE, "BE3-R Adapter Family\n");
-		break;
 	case OC_SKH_ID1:
 		return snprintf(buf, PAGE_SIZE, "Skyhawk-R Adapter Family\n");
-		break;
 	default:
 		return snprintf(buf, PAGE_SIZE,
 				"Unknown Adapter Family: 0x%x\n", dev_id);
-		break;
 	}
 }
 
 /**
- * beiscsi_phys_port()- Display Physical Port Identifier
+ * beiscsi_phys_port_disp()- Display Physical Port Identifier
  * @dev: ptr to device not used.
  * @attr: device attribute, not used.
  * @buf: contains formatted text port identifier
@@ -1497,9 +1514,9 @@ int beiscsi_mgmt_invalidate_icds(struct beiscsi_hba *phba,
 		return -EINVAL;
 
 	nonemb_cmd.size = sizeof(union be_invldt_cmds_params);
-	nonemb_cmd.va = pci_zalloc_consistent(phba->ctrl.pdev,
-					      nonemb_cmd.size,
-					      &nonemb_cmd.dma);
+	nonemb_cmd.va = dma_alloc_coherent(&phba->ctrl.pdev->dev,
+					   nonemb_cmd.size, &nonemb_cmd.dma,
+					   GFP_KERNEL);
 	if (!nonemb_cmd.va) {
 		beiscsi_log(phba, KERN_ERR, BEISCSI_LOG_EH,
 			    "BM_%d : invldt_cmds_params alloc failed\n");
@@ -1510,7 +1527,7 @@ int beiscsi_mgmt_invalidate_icds(struct beiscsi_hba *phba,
 	wrb = alloc_mcc_wrb(phba, &tag);
 	if (!wrb) {
 		mutex_unlock(&ctrl->mbox_lock);
-		pci_free_consistent(phba->ctrl.pdev, nonemb_cmd.size,
+		dma_free_coherent(&phba->ctrl.pdev->dev, nonemb_cmd.size,
 				    nonemb_cmd.va, nonemb_cmd.dma);
 		return -ENOMEM;
 	}
@@ -1537,7 +1554,7 @@ int beiscsi_mgmt_invalidate_icds(struct beiscsi_hba *phba,
 
 	rc = beiscsi_mccq_compl_wait(phba, tag, NULL, &nonemb_cmd);
 	if (rc != -EBUSY)
-		pci_free_consistent(phba->ctrl.pdev, nonemb_cmd.size,
+		dma_free_coherent(&phba->ctrl.pdev->dev, nonemb_cmd.size,
 				    nonemb_cmd.va, nonemb_cmd.dma);
 	return rc;
 }

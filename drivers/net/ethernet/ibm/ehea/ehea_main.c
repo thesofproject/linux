@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  linux/drivers/net/ethernet/ibm/ehea/ehea_main.c
  *
@@ -9,21 +10,6 @@
  *	 Christoph Raisch <raisch@de.ibm.com>
  *	 Jan-Bernd Themann <themann@de.ibm.com>
  *	 Thomas Klein <tklein@de.ibm.com>
- *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.	 See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -43,6 +29,9 @@
 #include <asm/kexec.h>
 #include <linux/mutex.h>
 #include <linux/prefetch.h>
+#include <linux/of.h>
+#include <linux/of_device.h>
+#include <linux/platform_device.h>
 
 #include <net/ip.h>
 
@@ -101,7 +90,7 @@ static struct ehea_bcmc_reg_array ehea_bcmc_regs;
 
 static int ehea_probe_adapter(struct platform_device *dev);
 
-static int ehea_remove(struct platform_device *dev);
+static void ehea_remove(struct platform_device *dev);
 
 static const struct of_device_id ehea_module_device_table[] = {
 	{
@@ -123,6 +112,7 @@ static const struct of_device_id ehea_device_table[] = {
 	},
 	{},
 };
+MODULE_DEVICE_TABLE(of, ehea_device_table);
 
 static struct platform_driver ehea_driver = {
 	.driver = {
@@ -183,7 +173,7 @@ static void ehea_update_firmware_handles(void)
 			 num_portres * EHEA_NUM_PORTRES_FW_HANDLES;
 
 	if (num_fw_handles) {
-		arr = kcalloc(num_fw_handles, sizeof(*arr), GFP_KERNEL);
+		arr = kzalloc_objs(*arr, num_fw_handles);
 		if (!arr)
 			goto out;  /* Keep the existing array */
 	} else
@@ -266,7 +256,7 @@ static void ehea_update_bcmc_registrations(void)
 		}
 
 	if (num_registrations) {
-		arr = kcalloc(num_registrations, sizeof(*arr), GFP_ATOMIC);
+		arr = kzalloc_objs(*arr, num_registrations, GFP_ATOMIC);
 		if (!arr)
 			goto out;  /* Keep the existing array */
 	} else
@@ -778,12 +768,11 @@ static void check_sqs(struct ehea_port *port)
 {
 	struct ehea_swqe *swqe;
 	int swqe_index;
-	int i, k;
+	int i;
 
 	for (i = 0; i < port->num_def_qps; i++) {
 		struct ehea_port_res *pr = &port->port_res[i];
 		int ret;
-		k = 0;
 		swqe = ehea_get_swqe(pr->qp, &swqe_index);
 		memset(swqe, 0, SWQE_HEADER_SIZE);
 		atomic_dec(&pr->swqe_avail);
@@ -911,7 +900,7 @@ static int ehea_poll(struct napi_struct *napi, int budget)
 		if (!cqe && !cqe_skb)
 			return rx;
 
-		if (!napi_reschedule(napi))
+		if (!napi_schedule(napi))
 			return rx;
 
 		cqe_skb = ehea_proc_cqes(pr, EHEA_POLL_MAX_CQES);
@@ -920,17 +909,6 @@ static int ehea_poll(struct napi_struct *napi, int budget)
 
 	return rx;
 }
-
-#ifdef CONFIG_NET_POLL_CONTROLLER
-static void ehea_netpoll(struct net_device *dev)
-{
-	struct ehea_port *port = netdev_priv(dev);
-	int i;
-
-	for (i = 0; i < port->num_def_qps; i++)
-		napi_schedule(&port->port_res[i].napi);
-}
-#endif
 
 static irqreturn_t ehea_recv_irq_handler(int irq, void *param)
 {
@@ -1238,9 +1216,9 @@ static void ehea_parse_eqe(struct ehea_adapter *adapter, u64 eqe)
 	}
 }
 
-static void ehea_neq_tasklet(unsigned long data)
+static void ehea_neq_tasklet(struct tasklet_struct *t)
 {
-	struct ehea_adapter *adapter = (struct ehea_adapter *)data;
+	struct ehea_adapter *adapter = from_tasklet(adapter, t, neq_tasklet);
 	struct ehea_eqe *eqe;
 	u64 event_mask;
 
@@ -1475,7 +1453,7 @@ static int ehea_init_port_res(struct ehea_port *port, struct ehea_port_res *pr,
 
 	memset(pr, 0, sizeof(struct ehea_port_res));
 
-	pr->tx_bytes = rx_bytes;
+	pr->tx_bytes = tx_bytes;
 	pr->tx_packets = tx_packets;
 	pr->rx_bytes = rx_bytes;
 	pr->rx_packets = rx_packets;
@@ -1509,7 +1487,7 @@ static int ehea_init_port_res(struct ehea_port *port, struct ehea_port_res *pr,
 			pr->send_cq->attr.act_nr_of_cqes,
 			pr->recv_cq->attr.act_nr_of_cqes);
 
-	init_attr = kzalloc(sizeof(*init_attr), GFP_KERNEL);
+	init_attr = kzalloc_obj(*init_attr);
 	if (!init_attr) {
 		ret = -ENOMEM;
 		pr_err("no mem for ehea_qp_init_attr\n");
@@ -1569,7 +1547,7 @@ static int ehea_init_port_res(struct ehea_port *port, struct ehea_port_res *pr,
 
 	kfree(init_attr);
 
-	netif_napi_add(pr->port->netdev, &pr->napi, ehea_poll, 64);
+	netif_napi_add(pr->port->netdev, &pr->napi, ehea_poll);
 
 	ret = 0;
 	goto out;
@@ -1603,20 +1581,16 @@ static int ehea_clean_portres(struct ehea_port *port, struct ehea_port_res *pr)
 		ehea_destroy_eq(pr->eq);
 
 		for (i = 0; i < pr->rq1_skba.len; i++)
-			if (pr->rq1_skba.arr[i])
-				dev_kfree_skb(pr->rq1_skba.arr[i]);
+			dev_kfree_skb(pr->rq1_skba.arr[i]);
 
 		for (i = 0; i < pr->rq2_skba.len; i++)
-			if (pr->rq2_skba.arr[i])
-				dev_kfree_skb(pr->rq2_skba.arr[i]);
+			dev_kfree_skb(pr->rq2_skba.arr[i]);
 
 		for (i = 0; i < pr->rq3_skba.len; i++)
-			if (pr->rq3_skba.arr[i])
-				dev_kfree_skb(pr->rq3_skba.arr[i]);
+			dev_kfree_skb(pr->rq3_skba.arr[i]);
 
 		for (i = 0; i < pr->sq_skba.len; i++)
-			if (pr->sq_skba.arr[i])
-				dev_kfree_skb(pr->sq_skba.arr[i]);
+			dev_kfree_skb(pr->sq_skba.arr[i]);
 
 		vfree(pr->rq1_skba.arr);
 		vfree(pr->rq2_skba.arr);
@@ -1644,7 +1618,7 @@ static void write_swqe2_immediate(struct sk_buff *skb, struct ehea_swqe *swqe,
 		 * For TSO packets we only copy the headers into the
 		 * immediate area.
 		 */
-		immediate_len = ETH_HLEN + ip_hdrlen(skb) + tcp_hdrlen(skb);
+		immediate_len = skb_tcp_all_headers(skb);
 	}
 
 	if (skb_is_gso(skb) || skb_data_size >= SWQE2_MAX_IMM) {
@@ -1770,7 +1744,7 @@ static int ehea_set_mac_addr(struct net_device *dev, void *sa)
 		goto out_free;
 	}
 
-	memcpy(dev->dev_addr, mac_addr->sa_data, dev->addr_len);
+	eth_hw_addr_set(dev, mac_addr->sa_data);
 
 	/* Deregister old MAC in pHYP */
 	if (port->state == EHEA_PORT_UP) {
@@ -1925,7 +1899,7 @@ static void ehea_add_multicast_entry(struct ehea_port *port, u8 *mc_mac_addr)
 	struct ehea_mc_list *ehea_mcl_entry;
 	u64 hret;
 
-	ehea_mcl_entry = kzalloc(sizeof(*ehea_mcl_entry), GFP_ATOMIC);
+	ehea_mcl_entry = kzalloc_obj(*ehea_mcl_entry, GFP_ATOMIC);
 	if (!ehea_mcl_entry)
 		return;
 
@@ -2038,7 +2012,7 @@ static void ehea_xmit3(struct sk_buff *skb, struct net_device *dev,
 	dev_consume_skb_any(skb);
 }
 
-static int ehea_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t ehea_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct ehea_port *port = netdev_priv(dev);
 	struct ehea_swqe *swqe;
@@ -2647,10 +2621,8 @@ static int ehea_restart_qps(struct net_device *dev)
 	u16 dummy16 = 0;
 
 	cb0 = (void *)get_zeroed_page(GFP_KERNEL);
-	if (!cb0) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	if (!cb0)
+		return -ENOMEM;
 
 	for (i = 0; i < (port->num_def_qps); i++) {
 		struct ehea_port_res *pr =  &port->port_res[i];
@@ -2670,6 +2642,7 @@ static int ehea_restart_qps(struct net_device *dev)
 					    cb0);
 		if (hret != H_SUCCESS) {
 			netdev_err(dev, "query_ehea_qp failed (1)\n");
+			ret = -EFAULT;
 			goto out;
 		}
 
@@ -2682,6 +2655,7 @@ static int ehea_restart_qps(struct net_device *dev)
 					     &dummy64, &dummy16, &dummy16);
 		if (hret != H_SUCCESS) {
 			netdev_err(dev, "modify_ehea_qp failed (1)\n");
+			ret = -EFAULT;
 			goto out;
 		}
 
@@ -2690,6 +2664,7 @@ static int ehea_restart_qps(struct net_device *dev)
 					    cb0);
 		if (hret != H_SUCCESS) {
 			netdev_err(dev, "query_ehea_qp failed (2)\n");
+			ret = -EFAULT;
 			goto out;
 		}
 
@@ -2816,7 +2791,7 @@ out:
 	return;
 }
 
-static void ehea_tx_watchdog(struct net_device *dev)
+static void ehea_tx_watchdog(struct net_device *dev, unsigned int txqueue)
 {
 	struct ehea_port *port = netdev_priv(dev);
 
@@ -2896,14 +2871,14 @@ out:
 	return ret;
 }
 
-static ssize_t ehea_show_port_id(struct device *dev,
-				 struct device_attribute *attr, char *buf)
+static ssize_t log_port_id_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
 {
 	struct ehea_port *port = container_of(dev, struct ehea_port, ofdev.dev);
 	return sprintf(buf, "%d", port->logical_port_id);
 }
 
-static DEVICE_ATTR(log_port_id, 0444, ehea_show_port_id, NULL);
+static DEVICE_ATTR_RO(log_port_id);
 
 static void logical_port_release(struct device *dev)
 {
@@ -2926,6 +2901,7 @@ static struct device *ehea_register_port(struct ehea_port *port,
 	ret = of_device_register(&port->ofdev);
 	if (ret) {
 		pr_err("failed to register device. ret=%d\n", ret);
+		put_device(&port->ofdev.dev);
 		goto out;
 	}
 
@@ -2953,9 +2929,6 @@ static const struct net_device_ops ehea_netdev_ops = {
 	.ndo_open		= ehea_open,
 	.ndo_stop		= ehea_stop,
 	.ndo_start_xmit		= ehea_start_xmit,
-#ifdef CONFIG_NET_POLL_CONTROLLER
-	.ndo_poll_controller	= ehea_netpoll,
-#endif
 	.ndo_get_stats64	= ehea_get_stats64,
 	.ndo_set_mac_address	= ehea_set_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
@@ -2995,7 +2968,7 @@ static struct ehea_port *ehea_setup_single_port(struct ehea_adapter *adapter,
 
 	port->msg_enable = netif_msg_init(msg_level, EHEA_MSG_DEFAULT);
 
-	port->mc_list = kzalloc(sizeof(struct ehea_mc_list), GFP_KERNEL);
+	port->mc_list = kzalloc_obj(struct ehea_mc_list);
 	if (!port->mc_list) {
 		ret = -ENOMEM;
 		goto out_free_ethdev;
@@ -3017,7 +2990,7 @@ static struct ehea_port *ehea_setup_single_port(struct ehea_adapter *adapter,
 	SET_NETDEV_DEV(dev, port_dev);
 
 	/* initialize net_device structure */
-	memcpy(dev->dev_addr, &port->mac_addr, ETH_ALEN);
+	eth_hw_addr_set(dev, (u8 *)&port->mac_addr);
 
 	dev->netdev_ops = &ehea_netdev_ops;
 	ehea_set_ethtool_ops(dev);
@@ -3090,14 +3063,13 @@ static void ehea_shutdown_single_port(struct ehea_port *port)
 static int ehea_setup_ports(struct ehea_adapter *adapter)
 {
 	struct device_node *lhea_dn;
-	struct device_node *eth_dn = NULL;
+	struct device_node *eth_dn;
 
 	const u32 *dn_log_port_id;
 	int i = 0;
 
 	lhea_dn = adapter->ofdev->dev.of_node;
-	while ((eth_dn = of_get_next_child(lhea_dn, eth_dn))) {
-
+	for_each_child_of_node(lhea_dn, eth_dn) {
 		dn_log_port_id = of_get_property(eth_dn, "ibm,hea-port-no",
 						 NULL);
 		if (!dn_log_port_id) {
@@ -3129,12 +3101,11 @@ static struct device_node *ehea_get_eth_dn(struct ehea_adapter *adapter,
 					   u32 logical_port_id)
 {
 	struct device_node *lhea_dn;
-	struct device_node *eth_dn = NULL;
+	struct device_node *eth_dn;
 	const u32 *dn_log_port_id;
 
 	lhea_dn = adapter->ofdev->dev.of_node;
-	while ((eth_dn = of_get_next_child(lhea_dn, eth_dn))) {
-
+	for_each_child_of_node(lhea_dn, eth_dn) {
 		dn_log_port_id = of_get_property(eth_dn, "ibm,hea-port-no",
 						 NULL);
 		if (dn_log_port_id)
@@ -3145,7 +3116,7 @@ static struct device_node *ehea_get_eth_dn(struct ehea_adapter *adapter,
 	return NULL;
 }
 
-static ssize_t ehea_probe_port(struct device *dev,
+static ssize_t probe_port_store(struct device *dev,
 			       struct device_attribute *attr,
 			       const char *buf, size_t count)
 {
@@ -3175,6 +3146,7 @@ static ssize_t ehea_probe_port(struct device *dev,
 
 	if (ehea_add_adapter_mr(adapter)) {
 		pr_err("creating MR failed\n");
+		of_node_put(eth_dn);
 		return -EIO;
 	}
 
@@ -3199,9 +3171,9 @@ static ssize_t ehea_probe_port(struct device *dev,
 	return (ssize_t) count;
 }
 
-static ssize_t ehea_remove_port(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count)
+static ssize_t remove_port_store(struct device *dev,
+				 struct device_attribute *attr,
+				 const char *buf, size_t count)
 {
 	struct ehea_adapter *adapter = dev_get_drvdata(dev);
 	struct ehea_port *port;
@@ -3234,8 +3206,8 @@ static ssize_t ehea_remove_port(struct device *dev,
 	return (ssize_t) count;
 }
 
-static DEVICE_ATTR(probe_port, 0200, NULL, ehea_probe_port);
-static DEVICE_ATTR(remove_port, 0200, NULL, ehea_remove_port);
+static DEVICE_ATTR_WO(probe_port);
+static DEVICE_ATTR_WO(remove_port);
 
 static int ehea_create_device_sysfs(struct platform_device *dev)
 {
@@ -3244,6 +3216,8 @@ static int ehea_create_device_sysfs(struct platform_device *dev)
 		goto out;
 
 	ret = device_create_file(&dev->dev, &dev_attr_remove_port);
+	if (ret)
+		device_remove_file(&dev->dev, &dev_attr_probe_port);
 out:
 	return ret;
 }
@@ -3279,7 +3253,7 @@ static int ehea_mem_notifier(struct notifier_block *nb,
 	switch (action) {
 	case MEM_CANCEL_OFFLINE:
 		pr_info("memory offlining canceled");
-		/* Fall through: re-add canceled memory block */
+		fallthrough;	/* re-add canceled memory block */
 
 	case MEM_ONLINE:
 		pr_info("memory is going online");
@@ -3449,8 +3423,7 @@ static int ehea_probe_adapter(struct platform_device *dev)
 		goto out_free_ad;
 	}
 
-	tasklet_init(&adapter->neq_tasklet, ehea_neq_tasklet,
-		     (unsigned long)adapter);
+	tasklet_setup(&adapter->neq_tasklet, ehea_neq_tasklet);
 
 	ret = ehea_create_device_sysfs(dev);
 	if (ret)
@@ -3498,7 +3471,7 @@ out:
 	return ret;
 }
 
-static int ehea_remove(struct platform_device *dev)
+static void ehea_remove(struct platform_device *dev)
 {
 	struct ehea_adapter *adapter = platform_get_drvdata(dev);
 	int i;
@@ -3519,8 +3492,6 @@ static int ehea_remove(struct platform_device *dev)
 	list_del(&adapter->list);
 
 	ehea_update_firmware_handles();
-
-	return 0;
 }
 
 static int check_module_parm(void)

@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * SSM2602/SSM2603/SSM2604 I2C audio driver
  *
  * Copyright 2014 Analog Devices Inc.
- *
- * Licensed under the GPL-2.
  */
 
 #include <linux/module.h>
@@ -20,17 +19,16 @@
  *    low  = 0x1a
  *    high = 0x1b
  */
-static int ssm2602_i2c_probe(struct i2c_client *client,
-			     const struct i2c_device_id *id)
+static int ssm2602_i2c_probe(struct i2c_client *client)
 {
-	return ssm2602_probe(&client->dev, id->driver_data,
+	return ssm2602_probe(&client->dev, (uintptr_t)i2c_get_match_data(client),
 		devm_regmap_init_i2c(client, &ssm2602_regmap_config));
 }
 
 static const struct i2c_device_id ssm2602_i2c_id[] = {
-	{ "ssm2602", SSM2602 },
-	{ "ssm2603", SSM2602 },
-	{ "ssm2604", SSM2604 },
+	{ .name = "ssm2602", .driver_data = SSM2602 },
+	{ .name = "ssm2603", .driver_data = SSM2602 },
+	{ .name = "ssm2604", .driver_data = SSM2604 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ssm2602_i2c_id);

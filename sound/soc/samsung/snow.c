@@ -1,27 +1,22 @@
-/*
- * ASoC machine driver for Snow boards
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// ASoC machine driver for Snow boards
 
 #include <linux/clk.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 
 #include "i2s.h"
 
 #define FIN_PLL_RATE		24000000
+
+SND_SOC_DAILINK_DEFS(links,
+	DAILINK_COMP_ARRAY(COMP_EMPTY()),
+	DAILINK_COMP_ARRAY(COMP_EMPTY()),
+	DAILINK_COMP_ARRAY(COMP_EMPTY()));
 
 struct snow_priv {
 	struct snd_soc_dai_link dai_link;
@@ -34,7 +29,7 @@ static int snow_card_hw_params(struct snd_pcm_substream *substream,
 	static const unsigned int pll_rate[] = {
 		73728000U, 67737602U, 49152000U, 45158401U, 32768001U
 	};
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snow_priv *priv = snd_soc_card_get_drvdata(rtd->card);
 	int bfs, psr, rfs, bitwidth;
 	unsigned long int rclk;
@@ -110,13 +105,10 @@ static int snow_late_probe(struct snd_soc_card *card)
 	struct snd_soc_pcm_runtime *rtd;
 	struct snd_soc_dai *codec_dai;
 
-	rtd = snd_soc_get_pcm_runtime(card, card->dai_link[0].name);
+	rtd = snd_soc_get_pcm_runtime(card, &card->dai_link[0]);
 
 	/* In the multi-codec case codec_dais 0 is MAX98095 and 1 is HDMI. */
-	if (rtd->num_codecs > 1)
-		codec_dai = rtd->codec_dais[0];
-	else
-		codec_dai = rtd->codec_dai;
+	codec_dai = snd_soc_rtd_to_codec(rtd, 0);
 
 	/* Set the MCLK rate for the codec */
 	return snd_soc_dai_set_sysclk(codec_dai, 0,
@@ -145,10 +137,17 @@ static int snow_probe(struct platform_device *pdev)
 	link = &priv->dai_link;
 
 	link->dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-			SND_SOC_DAIFMT_CBS_CFS;
+			SND_SOC_DAIFMT_CBC_CFC;
 
 	link->name = "Primary";
 	link->stream_name = link->name;
+
+	link->cpus = links_cpus;
+	link->num_cpus = ARRAY_SIZE(links_cpus);
+	link->codecs = links_codecs;
+	link->num_codecs = ARRAY_SIZE(links_codecs);
+	link->platforms = links_platforms;
+	link->num_platforms = ARRAY_SIZE(links_platforms);
 
 	card->dai_link = link;
 	card->num_links = 1;
@@ -160,10 +159,10 @@ static int snow_probe(struct platform_device *pdev)
 	if (cpu) {
 		link->ops = &snow_card_ops;
 
-		link->cpu_of_node = of_parse_phandle(cpu, "sound-dai", 0);
+		link->cpus->of_node = of_parse_phandle(cpu, "sound-dai", 0);
 		of_node_put(cpu);
 
-		if (!link->cpu_of_node) {
+		if (!link->cpus->of_node) {
 			dev_err(dev, "Failed parsing cpu/sound-dai property\n");
 			return -EINVAL;
 		}
@@ -173,38 +172,38 @@ static int snow_probe(struct platform_device *pdev)
 		of_node_put(codec);
 
 		if (ret < 0) {
-			of_node_put(link->cpu_of_node);
+			of_node_put(link->cpus->of_node);
 			dev_err(dev, "Failed parsing codec node\n");
 			return ret;
 		}
 
-		priv->clk_i2s_bus = of_clk_get_by_name(link->cpu_of_node,
+		priv->clk_i2s_bus = of_clk_get_by_name(link->cpus->of_node,
 						       "i2s_opclk0");
 		if (IS_ERR(priv->clk_i2s_bus)) {
 			snd_soc_of_put_dai_link_codecs(link);
-			of_node_put(link->cpu_of_node);
+			of_node_put(link->cpus->of_node);
 			return PTR_ERR(priv->clk_i2s_bus);
 		}
 	} else {
-		link->codec_dai_name = "HiFi",
+		link->codecs->dai_name = "HiFi";
 
-		link->cpu_of_node = of_parse_phandle(dev->of_node,
+		link->cpus->of_node = of_parse_phandle(dev->of_node,
 						"samsung,i2s-controller", 0);
-		if (!link->cpu_of_node) {
+		if (!link->cpus->of_node) {
 			dev_err(dev, "i2s-controller property parse error\n");
 			return -EINVAL;
 		}
 
-		link->codec_of_node = of_parse_phandle(dev->of_node,
+		link->codecs->of_node = of_parse_phandle(dev->of_node,
 						"samsung,audio-codec", 0);
-		if (!link->codec_of_node) {
-			of_node_put(link->cpu_of_node);
+		if (!link->codecs->of_node) {
+			of_node_put(link->cpus->of_node);
 			dev_err(dev, "audio-codec property parse error\n");
 			return -EINVAL;
 		}
 	}
 
-	link->platform_of_node = link->cpu_of_node;
+	link->platforms->of_node = link->cpus->of_node;
 
 	/* Update card-name if provided through DT, else use default name */
 	snd_soc_of_parse_card_name(card, "samsung,model");
@@ -212,26 +211,23 @@ static int snow_probe(struct platform_device *pdev)
 	snd_soc_card_set_drvdata(card, priv);
 
 	ret = devm_snd_soc_register_card(dev, card);
-	if (ret) {
-		dev_err(&pdev->dev, "snd_soc_register_card failed (%d)\n", ret);
-		return ret;
-	}
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret,
+				     "snd_soc_register_card failed\n");
 
-	return ret;
+	return 0;
 }
 
-static int snow_remove(struct platform_device *pdev)
+static void snow_remove(struct platform_device *pdev)
 {
 	struct snow_priv *priv = platform_get_drvdata(pdev);
 	struct snd_soc_dai_link *link = &priv->dai_link;
 
-	of_node_put(link->cpu_of_node);
-	of_node_put(link->codec_of_node);
+	of_node_put(link->cpus->of_node);
+	of_node_put(link->codecs->of_node);
 	snd_soc_of_put_dai_link_codecs(link);
 
 	clk_put(priv->clk_i2s_bus);
-
-	return 0;
 }
 
 static const struct of_device_id snow_of_match[] = {

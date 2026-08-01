@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 /******************************************************************************
  * arch-x86/mca.h
  * Guest OS machine check interface to x86 Xen.
@@ -49,7 +50,7 @@
 /* OUT: There was no machine check data to fetch. */
 #define XEN_MC_NODATA		0x2
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 /* vIRQ injected to Dom0 */
 #define VIRQ_MCA VIRQ_ARCH_0
 
@@ -183,7 +184,6 @@ struct mc_info {
 DEFINE_GUEST_HANDLE_STRUCT(mc_info);
 
 #define __MC_MSR_ARRAYSIZE 8
-#define __MC_MSR_MCGCAP 0
 #define __MC_NMSRS 1
 #define MC_NCAPS 7
 struct mcinfo_logical_cpu {
@@ -332,7 +332,11 @@ struct xen_mc {
 };
 DEFINE_GUEST_HANDLE_STRUCT(xen_mc);
 
-/* Fields are zero when not available */
+/*
+ * Fields are zero when not available. Also, this struct is shared with
+ * userspace mcelog and thus must keep existing fields at current offsets.
+ * Only add new fields to the end of the structure
+ */
 struct xen_mce {
 	__u64 status;
 	__u64 misc;
@@ -353,6 +357,9 @@ struct xen_mce {
 	__u32 socketid;	/* CPU socket ID */
 	__u32 apicid;	/* CPU initial apic ID */
 	__u64 mcgcap;	/* MCGCAP MSR: machine check capabilities of CPU */
+	__u64 synd;	/* MCA_SYND MSR: only valid on SMCA systems */
+	__u64 ipid;	/* MCA_IPID MSR: only valid on SMCA systems */
+	__u64 ppin;	/* Protected Processor Inventory Number */
 };
 
 /*
@@ -365,7 +372,7 @@ struct xen_mce {
 #define XEN_MCE_LOG_LEN 32
 
 struct xen_mce_log {
-	char signature[12]; /* "MACHINECHECK" */
+	char signature[12] __nonstring; /* "MACHINECHECK" */
 	unsigned len;	    /* = XEN_MCE_LOG_LEN */
 	unsigned next;
 	unsigned flags;
@@ -381,5 +388,5 @@ struct xen_mce_log {
 #define MCE_GET_LOG_LEN      _IOR('M', 2, int)
 #define MCE_GETCLEAR_FLAGS   _IOR('M', 3, int)
 
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 #endif /* __XEN_PUBLIC_ARCH_X86_MCA_H__ */

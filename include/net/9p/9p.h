@@ -1,27 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * include/net/9p/9p.h
- *
  * 9P protocol definitions.
  *
  *  Copyright (C) 2005 by Latchesar Ionkov <lucho@ionkov.net>
  *  Copyright (C) 2004 by Eric Van Hensbergen <ericvh@gmail.com>
  *  Copyright (C) 2002 by Ron Minnich <rminnich@lanl.gov>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2
- *  as published by the Free Software Foundation.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to:
- *  Free Software Foundation
- *  51 Franklin Street, Fifth Floor
- *  Boston, MA  02111-1301  USA
- *
  */
 
 #ifndef NET_9P_H
@@ -41,24 +24,28 @@
  * @P9_DEBUG_PKT: packet marshalling/unmarshalling
  * @P9_DEBUG_FSC: FS-cache tracing
  * @P9_DEBUG_VPKT: Verbose packet debugging (full packet dump)
+ * @P9_DEBUG_CACHE: cache operations tracing
+ * @P9_DEBUG_MMAP: memory-mapped I/O tracing
  *
  * These flags are passed at mount time to turn on various levels of
  * verbosity and tracing which will be output to the system logs.
  */
 
 enum p9_debug_flags {
-	P9_DEBUG_ERROR = 	(1<<0),
-	P9_DEBUG_9P = 		(1<<2),
+	P9_DEBUG_ERROR =	(1<<0),
+	P9_DEBUG_9P =		(1<<2),
 	P9_DEBUG_VFS =		(1<<3),
 	P9_DEBUG_CONV =		(1<<4),
 	P9_DEBUG_MUX =		(1<<5),
 	P9_DEBUG_TRANS =	(1<<6),
-	P9_DEBUG_SLABS =      	(1<<7),
+	P9_DEBUG_SLABS =	(1<<7),
 	P9_DEBUG_FCALL =	(1<<8),
 	P9_DEBUG_FID =		(1<<9),
 	P9_DEBUG_PKT =		(1<<10),
 	P9_DEBUG_FSC =		(1<<11),
 	P9_DEBUG_VPKT =		(1<<12),
+	P9_DEBUG_CACHE =	(1<<13),
+	P9_DEBUG_MMAP =		(1<<14),
 };
 
 #ifdef CONFIG_NET_9P_DEBUG
@@ -83,13 +70,39 @@ void _p9_debug(enum p9_debug_flags level, const char *func,
  * @P9_RSYMLINK: make symlink response
  * @P9_TMKNOD: create a special file object request
  * @P9_RMKNOD: create a special file object response
+ * @P9_TLOPEN: open a file for I/O (9P2000.L)
+ * @P9_RLOPEN: response with qid and iounit (9P2000.L)
  * @P9_TLCREATE: prepare a handle for I/O on an new file for 9P2000.L
  * @P9_RLCREATE: response with file access information for 9P2000.L
  * @P9_TRENAME: rename request
  * @P9_RRENAME: rename response
- * @P9_TMKDIR: create a directory request
- * @P9_RMKDIR: create a directory response
- * @P9_TVERSION: version handshake request
+ * @P9_TREADLINK: read symbolic link target (9P2000.L)
+ * @P9_RREADLINK: response with symbolic link target (9P2000.L)
+ * @P9_TGETATTR: get file attributes request (9P2000.L)
+ * @P9_RGETATTR: get file attributes response (9P2000.L)
+ * @P9_TSETATTR: set file attributes request (9P2000.L)
+ * @P9_RSETATTR: set file attributes response (9P2000.L)
+ * @P9_TXATTRWALK: prepare to read/list extended attributes (9P2000.L)
+ * @P9_RXATTRWALK: response with extended attribute size (9P2000.L)
+ * @P9_TXATTRCREATE: prepare to set extended attribute (9P2000.L)
+ * @P9_RXATTRCREATE: set extended attribute response (9P2000.L)
+ * @P9_TREADDIR: read directory entries request (9P2000.L)
+ * @P9_RREADDIR: read directory entries response (9P2000.L)
+ * @P9_TFSYNC: flush cached file data to storage request (9P2000.L)
+ * @P9_RFSYNC: flush cached file data to storage response (9P2000.L)
+ * @P9_TLOCK: acquire or release a POSIX record lock (9P2000.L)
+ * @P9_RLOCK: POSIX record lock response (9P2000.L)
+ * @P9_TGETLOCK: test for existence of POSIX record lock (9P2000.L)
+ * @P9_RGETLOCK: POSIX record lock test response (9P2000.L)
+ * @P9_TLINK: create a hard link (9P2000.L)
+ * @P9_RLINK: hard link response (9P2000.L)
+ * @P9_TRENAMEAT: safely rename across directories (9P2000.L)
+ * @P9_RRENAMEAT: rename response (9P2000.L)
+ * @P9_TUNLINKAT: unlink a file or directory (9P2000.L)
+ * @P9_RUNLINKAT: unlink response (9P2000.L)
+ * @P9_TMKDIR: create a directory request (9P2000.L)
+ * @P9_RMKDIR: create a directory response (9P2000.L)
+ * @P9_TVERSION: negotiate protocol version and message size
  * @P9_RVERSION: version handshake response
  * @P9_TAUTH: request to establish authentication channel
  * @P9_RAUTH: response with authentication information
@@ -209,6 +222,10 @@ enum p9_msg_t {
  * @P9_ORCLOSE: remove the file when the file is closed
  * @P9_OAPPEND: open the file and seek to the end
  * @P9_OEXCL: only create a file, do not open it
+ * @P9L_MODE_MASK: mask for protocol mode bits (client-side only)
+ * @P9L_DIRECT: disable client-side caching for this file
+ * @P9L_NOWRITECACHE: disable write caching for this file
+ * @P9L_LOOSE: enable loose cache consistency
  *
  * 9P open modes differ slightly from Posix standard modes.
  * In particular, there are extra modes which specify different
@@ -230,6 +247,10 @@ enum p9_open_mode_t {
 	P9_ORCLOSE = 0x40,
 	P9_OAPPEND = 0x80,
 	P9_OEXCL = 0x1000,
+	P9L_MODE_MASK = 0x1FFF, /* don't send anything under this to server */
+	P9L_DIRECT = 0x2000, /* cache disabled */
+	P9L_NOWRITECACHE = 0x4000, /* no write caching  */
+	P9L_LOOSE = 0x8000, /* loose cache */
 };
 
 /**
@@ -332,9 +353,12 @@ enum p9_qid_t {
 };
 
 /* 9P Magic Numbers */
-#define P9_NOTAG	(u16)(~0)
-#define P9_NOFID	(u32)(~0)
+#define P9_NOTAG	((u16)(~0))
+#define P9_NOFID	((u32)(~0))
 #define P9_MAXWELEM	16
+
+/* Minimal header size: size[4] type[1] tag[2] */
+#define P9_HDRSZ	7
 
 /* ample room for Twrite/Rread header */
 #define P9_IOHDRSZ	24
@@ -344,6 +368,9 @@ enum p9_qid_t {
 
 /* size of header for zero copy read/write */
 #define P9_ZC_HDR_SZ 4096
+
+/* maximum length of an error string */
+#define P9_ERRMAX 128
 
 /**
  * struct p9_qid - file system entity information
@@ -542,6 +569,7 @@ struct p9_rstatfs {
  * @offset: used by marshalling routines to track current position in buffer
  * @capacity: used by marshalling routines to track total malloc'd capacity
  * @sdata: payload
+ * @zc: whether zero-copy is used
  *
  * &p9_fcall represents the structure for all 9P RPC
  * transactions.  Requests are packaged into fcalls, and reponses
@@ -558,20 +586,12 @@ struct p9_fcall {
 	size_t offset;
 	size_t capacity;
 
+	struct kmem_cache *cache;
 	u8 *sdata;
+	bool zc;
 };
-
-struct p9_idpool;
 
 int p9_errstr2errno(char *errstr, int len);
 
-struct p9_idpool *p9_idpool_create(void);
-void p9_idpool_destroy(struct p9_idpool *);
-int p9_idpool_get(struct p9_idpool *p);
-void p9_idpool_put(int id, struct p9_idpool *p);
-int p9_idpool_check(int id, struct p9_idpool *p);
-
 int p9_error_init(void);
-int p9_trans_fd_init(void);
-void p9_trans_fd_exit(void);
 #endif /* NET_9P_H */

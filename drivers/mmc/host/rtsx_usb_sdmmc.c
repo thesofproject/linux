@@ -1,18 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Realtek USB SD/MMC Card Interface driver
  *
  * Copyright(c) 2009-2013 Realtek Semiconductor Corp. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  * Author:
  *   Roger Tseng <rogerable@realtek.com>
@@ -26,13 +15,13 @@
 #include <linux/mmc/host.h>
 #include <linux/mmc/mmc.h>
 #include <linux/mmc/sd.h>
-#include <linux/mmc/sdio.h>
 #include <linux/mmc/card.h>
 #include <linux/scatterlist.h>
+#include <linux/pm.h>
 #include <linux/pm_runtime.h>
 
 #include <linux/rtsx_usb.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #if defined(CONFIG_LEDS_CLASS) || (defined(CONFIG_LEDS_CLASS_MODULE) && \
 		defined(CONFIG_MMC_REALTEK_USB_MODULE))
@@ -59,7 +48,7 @@ struct rtsx_usb_sdmmc {
 	bool			ddr_mode;
 
 	unsigned char		power_mode;
-
+	u16			ocp_stat;
 #ifdef RTSX_USB_USE_LEDS_CLASS
 	struct led_classdev	led;
 	char			led_name[32];
@@ -324,9 +313,6 @@ static void sd_send_cmd_get_rsp(struct rtsx_usb_sdmmc *host,
 	case MMC_RSP_R1:
 		rsp_type = SD_RSP_TYPE_R1;
 		break;
-	case MMC_RSP_R1_NO_CRC:
-		rsp_type = SD_RSP_TYPE_R1 | SD_NO_CHECK_CRC7;
-		break;
 	case MMC_RSP_R1B:
 		rsp_type = SD_RSP_TYPE_R1b;
 		break;
@@ -343,7 +329,7 @@ static void sd_send_cmd_get_rsp(struct rtsx_usb_sdmmc *host,
 	}
 
 	if (rsp_type == SD_RSP_TYPE_R1b)
-		timeout = 3000;
+		timeout = cmd->busy_timeout ? cmd->busy_timeout : 3000;
 
 	if (cmd->opcode == SD_SWITCH_VOLTAGE) {
 		err = rtsx_usb_write_register(ucr, SD_BUS_STAT,
@@ -590,7 +576,6 @@ static void sd_normal_rw(struct rtsx_usb_sdmmc *host,
 static int sd_change_phase(struct rtsx_usb_sdmmc *host, u8 sample_point, int tx)
 {
 	struct rtsx_ucr *ucr = host->ucr;
-	int err;
 
 	dev_dbg(sdmmc_dev(host), "%s: %s sample_point = %d\n",
 			__func__, tx ? "TX" : "RX", sample_point);
@@ -612,11 +597,7 @@ static int sd_change_phase(struct rtsx_usb_sdmmc *host, u8 sample_point, int tx)
 	rtsx_usb_add_cmd(ucr, WRITE_REG_CMD, CLK_DIV, CLK_CHANGE, 0);
 	rtsx_usb_add_cmd(ucr, WRITE_REG_CMD, SD_CFG1, SD_ASYNC_FIFO_RST, 0);
 
-	err = rtsx_usb_send_cmd(ucr, MODE_C, 100);
-	if (err)
-		return err;
-
-	return 0;
+	return rtsx_usb_send_cmd(ucr, MODE_C, 100);
 }
 
 static inline u32 get_phase_point(u32 phase_map, unsigned int idx)
@@ -665,12 +646,11 @@ static u8 sd_search_final_phase(struct rtsx_usb_sdmmc *host, u32 phase_map)
 
 static void sd_wait_data_idle(struct rtsx_usb_sdmmc *host)
 {
-	int err, i;
+	int i;
 	u8 val = 0;
 
 	for (i = 0; i < 100; i++) {
-		err = rtsx_usb_ep0_read_register(host->ucr,
-				SD_DATA_STATE, &val);
+		rtsx_usb_ep0_read_register(host->ucr, SD_DATA_STATE, &val);
 		if (val & SD_DATA_IDLE)
 			return;
 
@@ -809,12 +789,20 @@ static int sdmmc_get_cd(struct mmc_host *mmc)
 	if (err)
 		goto no_card;
 
+	/* get OCP status */
+	host->ocp_stat = (val >> 4) & 0x03;
+
 	if (val & SD_CD) {
 		host->card_exist = true;
 		return 1;
 	}
 
 no_card:
+	/* clear OCP status */
+	if (host->ocp_stat & (MS_OCP_NOW | MS_OCP_EVER)) {
+		rtsx_usb_write_register(ucr, OCPCTL, MS_OCP_CLEAR, MS_OCP_CLEAR);
+		host->ocp_stat = 0;
+	}
 	host->card_exist = false;
 	return 0;
 }
@@ -838,18 +826,11 @@ static void sdmmc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		cmd->error = -ENOMEDIUM;
 		goto finish_detect_card;
 	}
-
-	/*
-	 * Reject SDIO CMDs to speed up card identification
-	 * since unsupported
-	 */
-	if (cmd->opcode == SD_IO_SEND_OP_COND ||
-	    cmd->opcode == SD_IO_RW_DIRECT ||
-	    cmd->opcode == SD_IO_RW_EXTENDED) {
-		cmd->error = -EINVAL;
-		goto finish;
+	/* check OCP stat */
+	if (host->ocp_stat & (MS_OCP_NOW | MS_OCP_EVER)) {
+		cmd->error = -ENOMEDIUM;
+		goto finish_detect_card;
 	}
-
 	mutex_lock(&ucr->dev_mutex);
 
 	mutex_lock(&host->host_mutex);
@@ -983,6 +964,10 @@ static int sd_power_on(struct rtsx_usb_sdmmc *host)
 	struct rtsx_ucr *ucr = host->ucr;
 	int err;
 
+	if (host->ocp_stat & (MS_OCP_NOW | MS_OCP_EVER)) {
+		dev_dbg(sdmmc_dev(host), "over current\n");
+		return -EIO;
+	}
 	dev_dbg(sdmmc_dev(host), "%s\n", __func__);
 	rtsx_usb_init_cmd(ucr);
 	rtsx_usb_add_cmd(ucr, WRITE_REG_CMD, CARD_SELECT, 0x07, SD_MOD_SEL);
@@ -1009,8 +994,18 @@ static int sd_power_on(struct rtsx_usb_sdmmc *host)
 	usleep_range(800, 1000);
 
 	rtsx_usb_init_cmd(ucr);
+	/* WA OCP issue: after OCP, there were problems with reopen card power */
+	rtsx_usb_add_cmd(ucr, WRITE_REG_CMD, CARD_PWR_CTL, POWER_MASK, POWER_ON);
+	rtsx_usb_add_cmd(ucr, WRITE_REG_CMD, FPDCTL, SSC_POWER_MASK, SSC_POWER_DOWN);
+	err = rtsx_usb_send_cmd(ucr, MODE_C, 100);
+	if (err)
+		return err;
+	msleep(20);
+	rtsx_usb_write_register(ucr, FPDCTL, SSC_POWER_MASK, SSC_POWER_ON);
+	usleep_range(180, 200);
+	rtsx_usb_init_cmd(ucr);
 	rtsx_usb_add_cmd(ucr, WRITE_REG_CMD, CARD_PWR_CTL,
-			POWER_MASK|LDO3318_PWR_MASK, POWER_ON|LDO_ON);
+			LDO3318_PWR_MASK, LDO_ON);
 	rtsx_usb_add_cmd(ucr, WRITE_REG_CMD, CARD_OE,
 			SD_OUTPUT_EN, SD_OUTPUT_EN);
 
@@ -1041,36 +1036,51 @@ static int sd_power_off(struct rtsx_usb_sdmmc *host)
 	return sd_pull_ctl_disable_qfn24(ucr);
 }
 
-static int sd_set_power_mode(struct rtsx_usb_sdmmc *host,
+static void sd_set_power_mode(struct rtsx_usb_sdmmc *host,
 		unsigned char power_mode)
 {
 	int err;
-
-	if (power_mode != MMC_POWER_OFF)
-		power_mode = MMC_POWER_ON;
+	struct rtsx_ucr *ucr = host->ucr;
 
 	if (power_mode == host->power_mode)
-		return 0;
+		return;
 
-	if (power_mode == MMC_POWER_OFF) {
+	switch (power_mode) {
+	case MMC_POWER_OFF:
 		err = sd_power_off(host);
-		pm_runtime_put(sdmmc_dev(host));
-	} else {
-		pm_runtime_get_sync(sdmmc_dev(host));
+		if (err)
+			dev_dbg(sdmmc_dev(host), "power-off (err = %d)\n", err);
+		pm_runtime_put_noidle(sdmmc_dev(host));
+		break;
+
+	case MMC_POWER_UP:
+		pm_runtime_get_noresume(sdmmc_dev(host));
 		err = sd_power_on(host);
+		if (err)
+			dev_dbg(sdmmc_dev(host), "power-on (err = %d)\n", err);
+		/* issue the clock signals to card at least 74 clocks */
+		rtsx_usb_write_register(ucr, SD_BUS_STAT, SD_CLK_TOGGLE_EN, SD_CLK_TOGGLE_EN);
+		break;
+
+	case MMC_POWER_ON:
+		/* stop to send the clock signals */
+		rtsx_usb_write_register(ucr, SD_BUS_STAT, SD_CLK_TOGGLE_EN, 0x00);
+		break;
+
+	case MMC_POWER_UNDEFINED:
+		break;
+
+	default:
+		break;
 	}
 
-	if (!err)
-		host->power_mode = power_mode;
-
-	return err;
+	host->power_mode = power_mode;
 }
 
 static int sd_set_timing(struct rtsx_usb_sdmmc *host,
 		unsigned char timing, bool *ddr_mode)
 {
 	struct rtsx_ucr *ucr = host->ucr;
-	int err;
 
 	*ddr_mode = false;
 
@@ -1125,9 +1135,7 @@ static int sd_set_timing(struct rtsx_usb_sdmmc *host,
 		break;
 	}
 
-	err = rtsx_usb_send_cmd(ucr, MODE_C, 100);
-
-	return err;
+	return rtsx_usb_send_cmd(ucr, MODE_C, 100);
 }
 
 static void sdmmc_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
@@ -1309,16 +1317,20 @@ static void rtsx_usb_update_led(struct work_struct *work)
 		container_of(work, struct rtsx_usb_sdmmc, led_work);
 	struct rtsx_ucr *ucr = host->ucr;
 
-	pm_runtime_get_sync(sdmmc_dev(host));
+	pm_runtime_get_noresume(sdmmc_dev(host));
 	mutex_lock(&ucr->dev_mutex);
+
+	if (host->power_mode == MMC_POWER_OFF)
+		goto out;
 
 	if (host->led.brightness == LED_OFF)
 		rtsx_usb_turn_off_led(ucr);
 	else
 		rtsx_usb_turn_on_led(ucr);
 
+out:
 	mutex_unlock(&ucr->dev_mutex);
-	pm_runtime_put(sdmmc_dev(host));
+	pm_runtime_put_sync_suspend(sdmmc_dev(host));
 }
 #endif
 
@@ -1332,8 +1344,9 @@ static void rtsx_usb_init_host(struct rtsx_usb_sdmmc *host)
 	mmc->caps = MMC_CAP_4_BIT_DATA | MMC_CAP_SD_HIGHSPEED |
 		MMC_CAP_MMC_HIGHSPEED | MMC_CAP_BUS_WIDTH_TEST |
 		MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25 | MMC_CAP_UHS_SDR50 |
-		MMC_CAP_NEEDS_POLL;
-	mmc->caps2 = MMC_CAP2_NO_PRESCAN_POWERUP | MMC_CAP2_FULL_PWR_CYCLE;
+		MMC_CAP_SYNC_RUNTIME_PM;
+	mmc->caps2 = MMC_CAP2_NO_PRESCAN_POWERUP | MMC_CAP2_FULL_PWR_CYCLE |
+		MMC_CAP2_NO_SDIO;
 
 	mmc->max_current_330 = 400;
 	mmc->max_current_180 = 800;
@@ -1345,6 +1358,7 @@ static void rtsx_usb_init_host(struct rtsx_usb_sdmmc *host)
 	mmc->max_req_size = 524288;
 
 	host->power_mode = MMC_POWER_OFF;
+	host->ocp_stat = 0;
 }
 
 static int rtsx_usb_sdmmc_drv_probe(struct platform_device *pdev)
@@ -1355,6 +1369,7 @@ static int rtsx_usb_sdmmc_drv_probe(struct platform_device *pdev)
 #ifdef RTSX_USB_USE_LEDS_CLASS
 	int err;
 #endif
+	int ret;
 
 	ucr = usb_get_intfdata(to_usb_interface(pdev->dev.parent));
 	if (!ucr)
@@ -1362,7 +1377,7 @@ static int rtsx_usb_sdmmc_drv_probe(struct platform_device *pdev)
 
 	dev_dbg(&(pdev->dev), ": Realtek USB SD/MMC controller found\n");
 
-	mmc = mmc_alloc_host(sizeof(*host), &pdev->dev);
+	mmc = devm_mmc_alloc_host(&pdev->dev, sizeof(*host));
 	if (!mmc)
 		return -ENOMEM;
 
@@ -1374,8 +1389,6 @@ static int rtsx_usb_sdmmc_drv_probe(struct platform_device *pdev)
 
 	mutex_init(&host->host_mutex);
 	rtsx_usb_init_host(host);
-	pm_runtime_use_autosuspend(&pdev->dev);
-	pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
 	pm_runtime_enable(&pdev->dev);
 
 #ifdef RTSX_USB_USE_LEDS_CLASS
@@ -1393,18 +1406,25 @@ static int rtsx_usb_sdmmc_drv_probe(struct platform_device *pdev)
 	INIT_WORK(&host->led_work, rtsx_usb_update_led);
 
 #endif
-	mmc_add_host(mmc);
+	ret = mmc_add_host(mmc);
+	if (ret) {
+#ifdef RTSX_USB_USE_LEDS_CLASS
+		led_classdev_unregister(&host->led);
+#endif
+		pm_runtime_disable(&pdev->dev);
+		return ret;
+	}
 
 	return 0;
 }
 
-static int rtsx_usb_sdmmc_drv_remove(struct platform_device *pdev)
+static void rtsx_usb_sdmmc_drv_remove(struct platform_device *pdev)
 {
 	struct rtsx_usb_sdmmc *host = platform_get_drvdata(pdev);
 	struct mmc_host *mmc;
 
 	if (!host)
-		return 0;
+		return;
 
 	mmc = host->mmc;
 	host->host_removal = true;
@@ -1428,16 +1448,34 @@ static int rtsx_usb_sdmmc_drv_remove(struct platform_device *pdev)
 	led_classdev_unregister(&host->led);
 #endif
 
-	mmc_free_host(mmc);
 	pm_runtime_disable(&pdev->dev);
-	pm_runtime_dont_use_autosuspend(&pdev->dev);
 	platform_set_drvdata(pdev, NULL);
 
 	dev_dbg(&(pdev->dev),
 		": Realtek USB SD/MMC module has been removed\n");
+}
 
+static int rtsx_usb_sdmmc_runtime_suspend(struct device *dev)
+{
+	struct rtsx_usb_sdmmc *host = dev_get_drvdata(dev);
+
+	host->mmc->caps &= ~MMC_CAP_NEEDS_POLL;
 	return 0;
 }
+
+static int rtsx_usb_sdmmc_runtime_resume(struct device *dev)
+{
+	struct rtsx_usb_sdmmc *host = dev_get_drvdata(dev);
+
+	host->mmc->caps |= MMC_CAP_NEEDS_POLL;
+	if (sdmmc_get_cd(host->mmc) == 1)
+		mmc_detect_change(host->mmc, 0);
+	return 0;
+}
+
+static const struct dev_pm_ops rtsx_usb_sdmmc_dev_pm_ops = {
+	RUNTIME_PM_OPS(rtsx_usb_sdmmc_runtime_suspend, rtsx_usb_sdmmc_runtime_resume, NULL)
+};
 
 static const struct platform_device_id rtsx_usb_sdmmc_ids[] = {
 	{
@@ -1454,6 +1492,8 @@ static struct platform_driver rtsx_usb_sdmmc_driver = {
 	.id_table       = rtsx_usb_sdmmc_ids,
 	.driver		= {
 		.name	= "rtsx_usb_sdmmc",
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
+		.pm	= pm_ptr(&rtsx_usb_sdmmc_dev_pm_ops),
 	},
 };
 module_platform_driver(rtsx_usb_sdmmc_driver);

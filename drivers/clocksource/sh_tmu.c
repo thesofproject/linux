@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * SuperH Timer Support - TMU
  *
  *  Copyright (C) 2009 Magnus Damm
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
@@ -31,6 +23,10 @@
 #include <linux/sh_timer.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
+
+#ifdef CONFIG_SUPERH
+#include <asm/platform_early.h>
+#endif
 
 enum sh_tmu_model {
 	SH_TMU,
@@ -147,16 +143,6 @@ static void sh_tmu_start_stop_ch(struct sh_tmu_channel *ch, int start)
 
 static int __sh_tmu_enable(struct sh_tmu_channel *ch)
 {
-	int ret;
-
-	/* enable clock */
-	ret = clk_enable(ch->tmu->clk);
-	if (ret) {
-		dev_err(&ch->tmu->pdev->dev, "ch%u: cannot enable clock\n",
-			ch->index);
-		return ret;
-	}
-
 	/* make sure channel is disabled */
 	sh_tmu_start_stop_ch(ch, 0);
 
@@ -178,7 +164,6 @@ static int sh_tmu_enable(struct sh_tmu_channel *ch)
 	if (ch->enable_count++ > 0)
 		return 0;
 
-	pm_runtime_get_sync(&ch->tmu->pdev->dev);
 	dev_pm_syscore_device(&ch->tmu->pdev->dev, true);
 
 	return __sh_tmu_enable(ch);
@@ -191,9 +176,6 @@ static void __sh_tmu_disable(struct sh_tmu_channel *ch)
 
 	/* disable interrupts in TMU block */
 	sh_tmu_write(ch, TCR, TCR_TPSC_CLK4);
-
-	/* stop clock */
-	clk_disable(ch->tmu->clk);
 }
 
 static void sh_tmu_disable(struct sh_tmu_channel *ch)
@@ -207,7 +189,6 @@ static void sh_tmu_disable(struct sh_tmu_channel *ch)
 	__sh_tmu_disable(ch);
 
 	dev_pm_syscore_device(&ch->tmu->pdev->dev, false);
-	pm_runtime_put(&ch->tmu->pdev->dev);
 }
 
 static void sh_tmu_set_next(struct sh_tmu_channel *ch, unsigned long delta,
@@ -296,7 +277,7 @@ static void sh_tmu_clocksource_suspend(struct clocksource *cs)
 
 	if (--ch->enable_count == 0) {
 		__sh_tmu_disable(ch);
-		pm_genpd_syscore_poweroff(&ch->tmu->pdev->dev);
+		dev_pm_genpd_suspend(&ch->tmu->pdev->dev);
 	}
 }
 
@@ -308,7 +289,7 @@ static void sh_tmu_clocksource_resume(struct clocksource *cs)
 		return;
 
 	if (ch->enable_count++ == 0) {
-		pm_genpd_syscore_poweron(&ch->tmu->pdev->dev);
+		dev_pm_genpd_resume(&ch->tmu->pdev->dev);
 		__sh_tmu_enable(ch);
 	}
 }
@@ -398,12 +379,12 @@ static int sh_tmu_clock_event_next(unsigned long delta,
 
 static void sh_tmu_clock_event_suspend(struct clock_event_device *ced)
 {
-	pm_genpd_syscore_poweroff(&ced_to_sh_tmu(ced)->tmu->pdev->dev);
+	dev_pm_genpd_suspend(&ced_to_sh_tmu(ced)->tmu->pdev->dev);
 }
 
 static void sh_tmu_clock_event_resume(struct clock_event_device *ced)
 {
-	pm_genpd_syscore_poweron(&ced_to_sh_tmu(ced)->tmu->pdev->dev);
+	dev_pm_genpd_resume(&ced_to_sh_tmu(ced)->tmu->pdev->dev);
 }
 
 static void sh_tmu_register_clockevent(struct sh_tmu_channel *ch,
@@ -470,11 +451,8 @@ static int sh_tmu_channel_setup(struct sh_tmu_channel *ch, unsigned int index,
 		ch->base = tmu->mapbase + 8 + ch->index * 12;
 
 	ch->irq = platform_get_irq(tmu->pdev, index);
-	if (ch->irq < 0) {
-		dev_err(&tmu->pdev->dev, "ch%u: failed to get irq\n",
-			ch->index);
+	if (ch->irq < 0)
 		return ch->irq;
-	}
 
 	ch->cs_enabled = false;
 	ch->enable_count = 0;
@@ -493,7 +471,7 @@ static int sh_tmu_map_memory(struct sh_tmu_device *tmu)
 		return -ENXIO;
 	}
 
-	tmu->mapbase = ioremap_nocache(res->start, resource_size(res));
+	tmu->mapbase = ioremap(res->start, resource_size(res));
 	if (tmu->mapbase == NULL)
 		return -ENXIO;
 
@@ -559,7 +537,6 @@ static int sh_tmu_setup(struct sh_tmu_device *tmu, struct platform_device *pdev)
 		goto err_clk_unprepare;
 
 	tmu->rate = clk_get_rate(tmu->clk) / 4;
-	clk_disable(tmu->clk);
 
 	/* Map the memory resource. */
 	ret = sh_tmu_map_memory(tmu);
@@ -569,8 +546,7 @@ static int sh_tmu_setup(struct sh_tmu_device *tmu, struct platform_device *pdev)
 	}
 
 	/* Allocate and setup the channels. */
-	tmu->channels = kzalloc(sizeof(*tmu->channels) * tmu->num_channels,
-				GFP_KERNEL);
+	tmu->channels = kzalloc_objs(*tmu->channels, tmu->num_channels);
 	if (tmu->channels == NULL) {
 		ret = -ENOMEM;
 		goto err_unmap;
@@ -606,7 +582,7 @@ static int sh_tmu_probe(struct platform_device *pdev)
 	struct sh_tmu_device *tmu = platform_get_drvdata(pdev);
 	int ret;
 
-	if (!is_early_platform_device(pdev)) {
+	if (!is_sh_early_platform_device(pdev)) {
 		pm_runtime_set_active(&pdev->dev);
 		pm_runtime_enable(&pdev->dev);
 	}
@@ -616,7 +592,7 @@ static int sh_tmu_probe(struct platform_device *pdev)
 		goto out;
 	}
 
-	tmu = kzalloc(sizeof(*tmu), GFP_KERNEL);
+	tmu = kzalloc_obj(*tmu);
 	if (tmu == NULL)
 		return -ENOMEM;
 
@@ -626,21 +602,15 @@ static int sh_tmu_probe(struct platform_device *pdev)
 		pm_runtime_idle(&pdev->dev);
 		return ret;
 	}
-	if (is_early_platform_device(pdev))
+
+	if (is_sh_early_platform_device(pdev))
 		return 0;
 
  out:
 	if (tmu->has_clockevent || tmu->has_clocksource)
 		pm_runtime_irq_safe(&pdev->dev);
-	else
-		pm_runtime_idle(&pdev->dev);
 
 	return 0;
-}
-
-static int sh_tmu_remove(struct platform_device *pdev)
-{
-	return -EBUSY; /* cannot unregister clockevent and clocksource */
 }
 
 static const struct platform_device_id sh_tmu_id_table[] = {
@@ -658,10 +628,10 @@ MODULE_DEVICE_TABLE(of, sh_tmu_of_table);
 
 static struct platform_driver sh_tmu_device_driver = {
 	.probe		= sh_tmu_probe,
-	.remove		= sh_tmu_remove,
 	.driver		= {
 		.name	= "sh_tmu",
 		.of_match_table = of_match_ptr(sh_tmu_of_table),
+		.suppress_bind_attrs = true,
 	},
 	.id_table	= sh_tmu_id_table,
 };
@@ -676,10 +646,12 @@ static void __exit sh_tmu_exit(void)
 	platform_driver_unregister(&sh_tmu_device_driver);
 }
 
-early_platform_init("earlytimer", &sh_tmu_device_driver);
+#ifdef CONFIG_SUPERH
+sh_early_platform_init("earlytimer", &sh_tmu_device_driver);
+#endif
+
 subsys_initcall(sh_tmu_init);
 module_exit(sh_tmu_exit);
 
 MODULE_AUTHOR("Magnus Damm");
 MODULE_DESCRIPTION("SuperH TMU Timer Driver");
-MODULE_LICENSE("GPL v2");

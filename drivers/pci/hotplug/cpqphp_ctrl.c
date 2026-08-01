@@ -428,7 +428,7 @@ static struct pci_resource *do_pre_bridge_resource_split(struct pci_resource **h
 		/* this one isn't an aligned length, so we'll make a new entry
 		 * and split it up.
 		 */
-		split_node = kmalloc(sizeof(*split_node), GFP_KERNEL);
+		split_node = kmalloc_obj(*split_node);
 
 		if (!split_node)
 			return NULL;
@@ -519,7 +519,7 @@ error:
  * @head: list to search
  * @size: size of node to find, must be a power of two.
  *
- * Description: This function sorts the resource list by size and then returns
+ * Description: This function sorts the resource list by size and then
  * returns the first node of "size" length that is not in the ISA aliasing
  * window.  If it finds a node larger than "size" it will split it up.
  */
@@ -553,7 +553,7 @@ static struct pci_resource *get_io_resource(struct pci_resource **head, u32 size
 			if ((node->length - (temp_dword - node->base)) < size)
 				continue;
 
-			split_node = kmalloc(sizeof(*split_node), GFP_KERNEL);
+			split_node = kmalloc_obj(*split_node);
 
 			if (!split_node)
 				return NULL;
@@ -573,7 +573,7 @@ static struct pci_resource *get_io_resource(struct pci_resource **head, u32 size
 			/* this one is longer than we need
 			 * so we'll make a new entry and split it up
 			 */
-			split_node = kmalloc(sizeof(*split_node), GFP_KERNEL);
+			split_node = kmalloc_obj(*split_node);
 
 			if (!split_node)
 				return NULL;
@@ -650,7 +650,7 @@ static struct pci_resource *get_max_resource(struct pci_resource **head, u32 siz
 			if ((max->length - (temp_dword - max->base)) < size)
 				continue;
 
-			split_node = kmalloc(sizeof(*split_node), GFP_KERNEL);
+			split_node = kmalloc_obj(*split_node);
 
 			if (!split_node)
 				return NULL;
@@ -668,7 +668,7 @@ static struct pci_resource *get_max_resource(struct pci_resource **head, u32 siz
 			/* this one isn't end aligned properly at the top
 			 * so we'll make a new entry and split it up
 			 */
-			split_node = kmalloc(sizeof(*split_node), GFP_KERNEL);
+			split_node = kmalloc_obj(*split_node);
 
 			if (!split_node)
 				return NULL;
@@ -747,7 +747,7 @@ static struct pci_resource *get_resource(struct pci_resource **head, u32 size)
 			if ((node->length - (temp_dword - node->base)) < size)
 				continue;
 
-			split_node = kmalloc(sizeof(*split_node), GFP_KERNEL);
+			split_node = kmalloc_obj(*split_node);
 
 			if (!split_node)
 				return NULL;
@@ -767,7 +767,7 @@ static struct pci_resource *get_resource(struct pci_resource **head, u32 size)
 			/* this one is longer than we need
 			 * so we'll make a new entry and split it up
 			 */
-			split_node = kmalloc(sizeof(*split_node), GFP_KERNEL);
+			split_node = kmalloc_obj(*split_node);
 
 			if (!split_node)
 				return NULL;
@@ -881,7 +881,6 @@ irqreturn_t cpqhp_ctrl_intr(int IRQ, void *data)
 	u8 reset;
 	u16 misc;
 	u32 Diff;
-	u32 temp_dword;
 
 
 	misc = readw(ctrl->hpc_reg + MISC);
@@ -917,7 +916,7 @@ irqreturn_t cpqhp_ctrl_intr(int IRQ, void *data)
 		writel(Diff, ctrl->hpc_reg + INT_INPUT_CLEAR);
 
 		/* Read it back to clear any posted writes */
-		temp_dword = readl(ctrl->hpc_reg + INT_INPUT_CLEAR);
+		readl(ctrl->hpc_reg + INT_INPUT_CLEAR);
 
 		if (!Diff)
 			/* Clear all interrupts */
@@ -956,7 +955,7 @@ struct pci_func *cpqhp_slot_create(u8 busnumber)
 	struct pci_func *new_slot;
 	struct pci_func *next;
 
-	new_slot = kzalloc(sizeof(*new_slot), GFP_KERNEL);
+	new_slot = kzalloc_obj(*new_slot);
 	if (new_slot == NULL)
 		return new_slot;
 
@@ -1130,9 +1129,7 @@ static u8 set_controller_speed(struct controller *ctrl, u8 adapter_speed, u8 hp_
 	for (slot = ctrl->slot; slot; slot = slot->next) {
 		if (slot->device == (hp_slot + ctrl->slot_device_offset))
 			continue;
-		if (!slot->hotplug_slot || !slot->hotplug_slot->info)
-			continue;
-		if (slot->hotplug_slot->info->adapter_status == 0)
+		if (get_presence_status(ctrl, slot) == 0)
 			continue;
 		/* If another adapter is running on the same segment but at a
 		 * lower speed/mode, we allow the new adapter to function at
@@ -1204,7 +1201,7 @@ static u8 set_controller_speed(struct controller *ctrl, u8 adapter_speed, u8 hp_
 
 	mdelay(5);
 
-	/* Reenable interrupts */
+	/* Re-enable interrupts */
 	writel(0, ctrl->hpc_reg + INT_MASK);
 
 	pci_write_config_byte(ctrl->pci_dev, 0x41, reg);
@@ -1414,7 +1411,6 @@ static u32 board_added(struct pci_func *func, struct controller *ctrl)
 	u32 rc = 0;
 	struct pci_func *new_slot = NULL;
 	struct pci_bus *bus = ctrl->pci_bus;
-	struct slot *p_slot;
 	struct resource_lists res_lists;
 
 	hp_slot = func->device - ctrl->slot_device_offset;
@@ -1461,7 +1457,7 @@ static u32 board_added(struct pci_func *func, struct controller *ctrl)
 	if (rc)
 		return rc;
 
-	p_slot = cpqhp_find_slot(ctrl, hp_slot + ctrl->slot_device_offset);
+	cpqhp_find_slot(ctrl, hp_slot + ctrl->slot_device_offset);
 
 	/* turn on board and blink green LED */
 
@@ -1616,7 +1612,6 @@ static u32 remove_board(struct pci_func *func, u32 replace_flag, struct controll
 	u8 device;
 	u8 hp_slot;
 	u8 temp_byte;
-	u32 rc;
 	struct resource_lists res_lists;
 	struct pci_func *temp_func;
 
@@ -1631,7 +1626,7 @@ static u32 remove_board(struct pci_func *func, u32 replace_flag, struct controll
 	/* When we get here, it is safe to change base address registers.
 	 * We will attempt to save the base address register lengths */
 	if (replace_flag || !ctrl->add_support)
-		rc = cpqhp_save_base_addr_length(ctrl, func);
+		cpqhp_save_base_addr_length(ctrl, func);
 	else if (!func->bus_head && !func->mem_head &&
 		 !func->p_mem_head && !func->io_head) {
 		/* Here we check to see if we've saved any of the board's
@@ -1649,7 +1644,7 @@ static u32 remove_board(struct pci_func *func, u32 replace_flag, struct controll
 		}
 
 		if (!skip)
-			rc = cpqhp_save_used_resources(ctrl, func);
+			cpqhp_save_used_resources(ctrl, func);
 	}
 	/* Change status to shutdown */
 	if (func->is_a_board)
@@ -1767,27 +1762,9 @@ void cpqhp_event_stop_thread(void)
 }
 
 
-static int update_slot_info(struct controller *ctrl, struct slot *slot)
-{
-	struct hotplug_slot_info *info;
-	int result;
-
-	info = kmalloc(sizeof(*info), GFP_KERNEL);
-	if (!info)
-		return -ENOMEM;
-
-	info->power_status = get_slot_enabled(ctrl, slot);
-	info->attention_status = cpq_get_attention_status(ctrl, slot);
-	info->latch_status = cpq_get_latch_status(ctrl, slot);
-	info->adapter_status = get_presence_status(ctrl, slot);
-	result = pci_hp_change_slot_info(slot->hotplug_slot, info);
-	kfree(info);
-	return result;
-}
-
 static void interrupt_event_handler(struct controller *ctrl)
 {
-	int loop = 0;
+	int loop;
 	int change = 1;
 	struct pci_func *func;
 	u8 hp_slot;
@@ -1817,7 +1794,7 @@ static void interrupt_event_handler(struct controller *ctrl)
 				} else if (ctrl->event_queue[loop].event_type ==
 					   INT_BUTTON_CANCEL) {
 					dbg("button cancel\n");
-					del_timer(&p_slot->task_event);
+					timer_delete(&p_slot->task_event);
 
 					mutex_lock(&ctrl->crit_sect);
 
@@ -1884,9 +1861,6 @@ static void interrupt_event_handler(struct controller *ctrl)
 				/***********POWER FAULT */
 				else if (ctrl->event_queue[loop].event_type == INT_POWER_FAULT) {
 					dbg("power fault\n");
-				} else {
-					/* refresh notification */
-					update_slot_info(ctrl, p_slot);
 				}
 
 				ctrl->event_queue[loop].event_type = 0;
@@ -1895,14 +1869,12 @@ static void interrupt_event_handler(struct controller *ctrl)
 			}
 		}		/* End of FOR loop */
 	}
-
-	return;
 }
 
 
 /**
  * cpqhp_pushbutton_thread - handle pushbutton events
- * @slot: target slot (struct)
+ * @t: pointer to struct timer_list which holds all timer-related callbacks
  *
  * Scheduled procedure to handle blocking stuff for the pushbuttons.
  * Handles all pending events and exits.
@@ -1910,15 +1882,12 @@ static void interrupt_event_handler(struct controller *ctrl)
 void cpqhp_pushbutton_thread(struct timer_list *t)
 {
 	u8 hp_slot;
-	u8 device;
 	struct pci_func *func;
-	struct slot *p_slot = from_timer(p_slot, t, task_event);
+	struct slot *p_slot = timer_container_of(p_slot, t, task_event);
 	struct controller *ctrl = (struct controller *) p_slot->ctrl;
 
 	pushbutton_pending = NULL;
 	hp_slot = p_slot->hp_slot;
-
-	device = p_slot->device;
 
 	if (is_slot_enabled(ctrl, hp_slot)) {
 		p_slot->state = POWEROFF_STATE;
@@ -1966,8 +1935,6 @@ void cpqhp_pushbutton_thread(struct timer_list *t)
 
 		p_slot->state = STATIC_STATE;
 	}
-
-	return;
 }
 
 
@@ -1978,15 +1945,12 @@ int cpqhp_process_SI(struct controller *ctrl, struct pci_func *func)
 	u32 tempdword;
 	int rc;
 	struct slot *p_slot;
-	int physical_slot = 0;
 
 	tempdword = 0;
 
 	device = func->device;
 	hp_slot = device - ctrl->slot_device_offset;
 	p_slot = cpqhp_find_slot(ctrl, device);
-	if (p_slot)
-		physical_slot = p_slot->number;
 
 	/* Check to see if the interlock is closed */
 	tempdword = readl(ctrl->hpc_reg + INT_INPUT_CLEAR);
@@ -2057,9 +2021,6 @@ int cpqhp_process_SI(struct controller *ctrl, struct pci_func *func)
 	if (rc)
 		dbg("%s: rc = %d\n", __func__, rc);
 
-	if (p_slot)
-		update_slot_info(ctrl, p_slot);
-
 	return rc;
 }
 
@@ -2073,13 +2034,10 @@ int cpqhp_process_SS(struct controller *ctrl, struct pci_func *func)
 	unsigned int devfn;
 	struct slot *p_slot;
 	struct pci_bus *pci_bus = ctrl->pci_bus;
-	int physical_slot = 0;
 
 	device = func->device;
 	func = cpqhp_slot_find(ctrl->bus, device, index++);
 	p_slot = cpqhp_find_slot(ctrl, device);
-	if (p_slot)
-		physical_slot = p_slot->number;
 
 	/* Make sure there are no video controllers here */
 	while (func && !rc) {
@@ -2101,7 +2059,7 @@ int cpqhp_process_SS(struct controller *ctrl, struct pci_func *func)
 				return rc;
 
 			/* If it's a bridge, check the VGA Enable bit */
-			if ((header_type & 0x7F) == PCI_HEADER_TYPE_BRIDGE) {
+			if ((header_type & PCI_HEADER_TYPE_MASK) == PCI_HEADER_TYPE_BRIDGE) {
 				rc = pci_bus_read_config_byte(pci_bus, devfn, PCI_BRIDGE_CONTROL, &BCR);
 				if (rc)
 					return rc;
@@ -2124,9 +2082,6 @@ int cpqhp_process_SS(struct controller *ctrl, struct pci_func *func)
 	} else if (!rc) {
 		rc = 1;
 	}
-
-	if (p_slot)
-		update_slot_info(ctrl, p_slot);
 
 	return rc;
 }
@@ -2306,7 +2261,7 @@ static u32 configure_new_device(struct controller  *ctrl, struct pci_func  *func
 		while ((function < max_functions) && (!stop_it)) {
 			pci_bus_read_config_dword(ctrl->pci_bus, PCI_DEVFN(func->device, function), 0x00, &ID);
 
-			if (ID == 0xFFFFFFFF) {
+			if (PCI_POSSIBLE_ERROR(ID)) {
 				function++;
 			} else {
 				/* Setup slot structure. */
@@ -2387,7 +2342,7 @@ static int configure_new_function(struct controller *ctrl, struct pci_func *func
 	if (rc)
 		return rc;
 
-	if ((temp_byte & 0x7F) == PCI_HEADER_TYPE_BRIDGE) {
+	if ((temp_byte & PCI_HEADER_TYPE_MASK) == PCI_HEADER_TYPE_BRIDGE) {
 		/* set Primary bus */
 		dbg("set Primary bus = %d\n", func->bus);
 		rc = pci_bus_write_config_byte(pci_bus, devfn, PCI_PRIMARY_BUS, func->bus);
@@ -2480,10 +2435,10 @@ static int configure_new_function(struct controller *ctrl, struct pci_func *func
 		/* Make copies of the nodes we are going to pass down so that
 		 * if there is a problem,we can just use these to free resources
 		 */
-		hold_bus_node = kmalloc(sizeof(*hold_bus_node), GFP_KERNEL);
-		hold_IO_node = kmalloc(sizeof(*hold_IO_node), GFP_KERNEL);
-		hold_mem_node = kmalloc(sizeof(*hold_mem_node), GFP_KERNEL);
-		hold_p_mem_node = kmalloc(sizeof(*hold_p_mem_node), GFP_KERNEL);
+		hold_bus_node = kmalloc_obj(*hold_bus_node);
+		hold_IO_node = kmalloc_obj(*hold_IO_node);
+		hold_mem_node = kmalloc_obj(*hold_mem_node);
+		hold_p_mem_node = kmalloc_obj(*hold_p_mem_node);
 
 		if (!hold_bus_node || !hold_IO_node || !hold_mem_node || !hold_p_mem_node) {
 			kfree(hold_bus_node);
@@ -2550,7 +2505,7 @@ static int configure_new_function(struct controller *ctrl, struct pci_func *func
 			pci_bus_read_config_dword(pci_bus, PCI_DEVFN(device, 0), 0x00, &ID);
 			pci_bus->number = func->bus;
 
-			if (ID != 0xFFFFFFFF) {	  /*  device present */
+			if (!PCI_POSSIBLE_ERROR(ID)) {	  /*  device present */
 				/* Setup slot structure. */
 				new_slot = cpqhp_slot_create(hold_bus_node->base);
 
@@ -2784,7 +2739,7 @@ static int configure_new_function(struct controller *ctrl, struct pci_func *func
 					 *   PCI_BRIDGE_CTL_SERR |
 					 *   PCI_BRIDGE_CTL_NO_ISA */
 		rc = pci_bus_write_config_word(pci_bus, devfn, PCI_BRIDGE_CONTROL, command);
-	} else if ((temp_byte & 0x7F) == PCI_HEADER_TYPE_NORMAL) {
+	} else if ((temp_byte & PCI_HEADER_TYPE_MASK) == PCI_HEADER_TYPE_NORMAL) {
 		/* Standard device */
 		rc = pci_bus_read_config_byte(pci_bus, devfn, 0x0B, &class_code);
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * et8ek8_driver.c
  *
@@ -11,15 +12,6 @@
  *
  * This driver is based on the Micron MT9T012 camera imager driver
  * (C) Texas Instruments.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
 #include <linux/clk.h>
@@ -824,7 +816,6 @@ static int et8ek8_power_on(struct et8ek8_sensor *sensor)
 {
 	struct v4l2_subdev *subdev = &sensor->subdev;
 	struct i2c_client *client = v4l2_get_subdevdata(subdev);
-	unsigned int xclk_freq;
 	int val, rval;
 
 	rval = regulator_enable(sensor->vana);
@@ -833,17 +824,6 @@ static int et8ek8_power_on(struct et8ek8_sensor *sensor)
 		return rval;
 	}
 
-	if (sensor->current_reglist)
-		xclk_freq = sensor->current_reglist->mode.ext_clock;
-	else
-		xclk_freq = sensor->xclk_freq;
-
-	rval = clk_set_rate(sensor->ext_clk, xclk_freq);
-	if (rval < 0) {
-		dev_err(&client->dev, "unable to set extclk clock freq to %u\n",
-			xclk_freq);
-		goto out;
-	}
 	rval = clk_prepare_enable(sensor->ext_clk);
 	if (rval < 0) {
 		dev_err(&client->dev, "failed to enable extclk\n");
@@ -855,9 +835,13 @@ static int et8ek8_power_on(struct et8ek8_sensor *sensor)
 
 	udelay(10); /* I wish this is a good value */
 
+	/*
+	 * Note: Misinterpretation of reset assertion - do not re-use this code.
+	 * The reset pin is using incorrect (for a reset signal) logical level.
+	 */
 	gpiod_set_value(sensor->reset, 1);
 
-	msleep(5000 * 1000 / xclk_freq + 1); /* Wait 5000 cycles */
+	msleep(5000 * 1000 / sensor->xclk_freq + 1); /* Wait 5000 cycles */
 
 	rval = et8ek8_i2c_reglist_find_write(client, &meta_reglist,
 					     ET8EK8_REGLIST_POWERON);
@@ -890,7 +874,7 @@ out:
  */
 #define MAX_FMTS 4
 static int et8ek8_enum_mbus_code(struct v4l2_subdev *subdev,
-				 struct v4l2_subdev_pad_config *cfg,
+				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
 	struct et8ek8_reglist **list =
@@ -928,7 +912,7 @@ static int et8ek8_enum_mbus_code(struct v4l2_subdev *subdev,
 }
 
 static int et8ek8_enum_frame_size(struct v4l2_subdev *subdev,
-				  struct v4l2_subdev_pad_config *cfg,
+				  struct v4l2_subdev_state *sd_state,
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
 	struct et8ek8_reglist **list =
@@ -966,7 +950,7 @@ static int et8ek8_enum_frame_size(struct v4l2_subdev *subdev,
 }
 
 static int et8ek8_enum_frame_ival(struct v4l2_subdev *subdev,
-				  struct v4l2_subdev_pad_config *cfg,
+				  struct v4l2_subdev_state *sd_state,
 				  struct v4l2_subdev_frame_interval_enum *fie)
 {
 	struct et8ek8_reglist **list =
@@ -998,12 +982,12 @@ static int et8ek8_enum_frame_ival(struct v4l2_subdev *subdev,
 
 static struct v4l2_mbus_framefmt *
 __et8ek8_get_pad_format(struct et8ek8_sensor *sensor,
-			struct v4l2_subdev_pad_config *cfg,
+			struct v4l2_subdev_state *sd_state,
 			unsigned int pad, enum v4l2_subdev_format_whence which)
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_format(&sensor->subdev, cfg, pad);
+		return v4l2_subdev_state_get_format(sd_state, pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		return &sensor->format;
 	default:
@@ -1012,13 +996,14 @@ __et8ek8_get_pad_format(struct et8ek8_sensor *sensor,
 }
 
 static int et8ek8_get_pad_format(struct v4l2_subdev *subdev,
-				 struct v4l2_subdev_pad_config *cfg,
+				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_format *fmt)
 {
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 	struct v4l2_mbus_framefmt *format;
 
-	format = __et8ek8_get_pad_format(sensor, cfg, fmt->pad, fmt->which);
+	format = __et8ek8_get_pad_format(sensor, sd_state, fmt->pad,
+					 fmt->which);
 	if (!format)
 		return -EINVAL;
 
@@ -1028,14 +1013,15 @@ static int et8ek8_get_pad_format(struct v4l2_subdev *subdev,
 }
 
 static int et8ek8_set_pad_format(struct v4l2_subdev *subdev,
-				 struct v4l2_subdev_pad_config *cfg,
+				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_format *fmt)
 {
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 	struct v4l2_mbus_framefmt *format;
 	struct et8ek8_reglist *reglist;
 
-	format = __et8ek8_get_pad_format(sensor, cfg, fmt->pad, fmt->which);
+	format = __et8ek8_get_pad_format(sensor, sd_state, fmt->pad,
+					 fmt->which);
 	if (!format)
 		return -EINVAL;
 
@@ -1052,9 +1038,17 @@ static int et8ek8_set_pad_format(struct v4l2_subdev *subdev,
 }
 
 static int et8ek8_get_frame_interval(struct v4l2_subdev *subdev,
+				     struct v4l2_subdev_state *sd_state,
 				     struct v4l2_subdev_frame_interval *fi)
 {
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
+
+	/*
+	 * FIXME: Implement support for V4L2_SUBDEV_FORMAT_TRY, using the V4L2
+	 * subdev active state API.
+	 */
+	if (fi->which != V4L2_SUBDEV_FORMAT_ACTIVE)
+		return -EINVAL;
 
 	memset(fi, 0, sizeof(*fi));
 	fi->interval = sensor->current_reglist->mode.timeperframe;
@@ -1063,19 +1057,24 @@ static int et8ek8_get_frame_interval(struct v4l2_subdev *subdev,
 }
 
 static int et8ek8_set_frame_interval(struct v4l2_subdev *subdev,
+				     struct v4l2_subdev_state *sd_state,
 				     struct v4l2_subdev_frame_interval *fi)
 {
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 	struct et8ek8_reglist *reglist;
+
+	/*
+	 * FIXME: Implement support for V4L2_SUBDEV_FORMAT_TRY, using the V4L2
+	 * subdev active state API.
+	 */
+	if (fi->which != V4L2_SUBDEV_FORMAT_ACTIVE)
+		return -EINVAL;
 
 	reglist = et8ek8_reglist_find_mode_ival(&meta_reglist,
 						sensor->current_reglist,
 						&fi->interval);
 
 	if (!reglist)
-		return -EINVAL;
-
-	if (sensor->current_reglist->mode.ext_clock != reglist->mode.ext_clock)
 		return -EINVAL;
 
 	sensor->current_reglist = reglist;
@@ -1242,10 +1241,9 @@ out_poweroff:
  * sysfs attributes
  */
 static ssize_t
-et8ek8_priv_mem_read(struct device *dev, struct device_attribute *attr,
-		     char *buf)
+priv_mem_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	struct v4l2_subdev *subdev = i2c_get_clientdata(to_i2c_client(dev));
+	struct v4l2_subdev *subdev = dev_get_drvdata(dev);
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 
 #if PAGE_SIZE < ET8EK8_PRIV_MEM_SIZE
@@ -1256,7 +1254,7 @@ et8ek8_priv_mem_read(struct device *dev, struct device_attribute *attr,
 
 	return ET8EK8_PRIV_MEM_SIZE;
 }
-static DEVICE_ATTR(priv_mem, 0444, et8ek8_priv_mem_read, NULL);
+static DEVICE_ATTR_RO(priv_mem);
 
 /* --------------------------------------------------------------------------
  * V4L2 subdev core operations
@@ -1335,7 +1333,7 @@ static int et8ek8_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	struct et8ek8_reglist *reglist;
 
 	reglist = et8ek8_reglist_find_type(&meta_reglist, ET8EK8_REGLIST_MODE);
-	format = __et8ek8_get_pad_format(sensor, fh->pad, 0,
+	format = __et8ek8_get_pad_format(sensor, fh->state, 0,
 					 V4L2_SUBDEV_FORMAT_TRY);
 	et8ek8_reglist_to_mbus(reglist, format);
 
@@ -1349,8 +1347,6 @@ static int et8ek8_close(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 
 static const struct v4l2_subdev_video_ops et8ek8_video_ops = {
 	.s_stream = et8ek8_s_stream,
-	.g_frame_interval = et8ek8_get_frame_interval,
-	.s_frame_interval = et8ek8_set_frame_interval,
 };
 
 static const struct v4l2_subdev_core_ops et8ek8_core_ops = {
@@ -1363,6 +1359,8 @@ static const struct v4l2_subdev_pad_ops et8ek8_pad_ops = {
 	.enum_frame_interval = et8ek8_enum_frame_ival,
 	.get_fmt = et8ek8_get_pad_format,
 	.set_fmt = et8ek8_set_pad_format,
+	.get_frame_interval = et8ek8_get_frame_interval,
+	.set_frame_interval = et8ek8_set_frame_interval,
 };
 
 static const struct v4l2_subdev_ops et8ek8_ops = {
@@ -1382,8 +1380,7 @@ static const struct v4l2_subdev_internal_ops et8ek8_internal_ops = {
  */
 static int __maybe_unused et8ek8_suspend(struct device *dev)
 {
-	struct i2c_client *client = to_i2c_client(dev);
-	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
+	struct v4l2_subdev *subdev = dev_get_drvdata(dev);
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 
 	if (!sensor->power_count)
@@ -1394,8 +1391,7 @@ static int __maybe_unused et8ek8_suspend(struct device *dev)
 
 static int __maybe_unused et8ek8_resume(struct device *dev)
 {
-	struct i2c_client *client = to_i2c_client(dev);
-	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
+	struct v4l2_subdev *subdev = dev_get_drvdata(dev);
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 
 	if (!sensor->power_count)
@@ -1404,8 +1400,7 @@ static int __maybe_unused et8ek8_resume(struct device *dev)
 	return __et8ek8_set_power(sensor, true);
 }
 
-static int et8ek8_probe(struct i2c_client *client,
-			const struct i2c_device_id *devid)
+static int et8ek8_probe(struct i2c_client *client)
 {
 	struct et8ek8_sensor *sensor;
 	struct device *dev = &client->dev;
@@ -1427,18 +1422,13 @@ static int et8ek8_probe(struct i2c_client *client,
 		return PTR_ERR(sensor->vana);
 	}
 
-	sensor->ext_clk = devm_clk_get(dev, NULL);
-	if (IS_ERR(sensor->ext_clk)) {
-		dev_err(&client->dev, "could not get clock\n");
-		return PTR_ERR(sensor->ext_clk);
-	}
+	sensor->ext_clk = devm_v4l2_sensor_clk_get_legacy(dev, NULL, true,
+							  9600000);
+	if (IS_ERR(sensor->ext_clk))
+		return dev_err_probe(&client->dev, PTR_ERR(sensor->ext_clk),
+				     "could not get clock\n");
 
-	ret = of_property_read_u32(dev->of_node, "clock-frequency",
-				   &sensor->xclk_freq);
-	if (ret) {
-		dev_warn(dev, "can't get clock-frequency\n");
-		return ret;
-	}
+	sensor->xclk_freq = clk_get_rate(sensor->ext_clk);
 
 	mutex_init(&sensor->power_lock);
 
@@ -1446,6 +1436,7 @@ static int et8ek8_probe(struct i2c_client *client,
 	sensor->subdev.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	sensor->subdev.internal_ops = &et8ek8_internal_ops;
 
+	sensor->subdev.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
 	ret = media_entity_pads_init(&sensor->subdev.entity, 1, &sensor->pad);
 	if (ret < 0) {
@@ -1453,7 +1444,7 @@ static int et8ek8_probe(struct i2c_client *client,
 		goto err_mutex;
 	}
 
-	ret = v4l2_async_register_subdev_sensor_common(&sensor->subdev);
+	ret = v4l2_async_register_subdev_sensor(&sensor->subdev);
 	if (ret < 0)
 		goto err_entity;
 
@@ -1468,7 +1459,7 @@ err_mutex:
 	return ret;
 }
 
-static int __exit et8ek8_remove(struct i2c_client *client)
+static void et8ek8_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
@@ -1485,8 +1476,6 @@ static int __exit et8ek8_remove(struct i2c_client *client)
 	v4l2_async_unregister_subdev(&sensor->subdev);
 	media_entity_cleanup(&sensor->subdev.entity);
 	mutex_destroy(&sensor->power_lock);
-
-	return 0;
 }
 
 static const struct of_device_id et8ek8_of_table[] = {
@@ -1496,7 +1485,7 @@ static const struct of_device_id et8ek8_of_table[] = {
 MODULE_DEVICE_TABLE(of, et8ek8_of_table);
 
 static const struct i2c_device_id et8ek8_id_table[] = {
-	{ ET8EK8_NAME, 0 },
+	{ .name = ET8EK8_NAME },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, et8ek8_id_table);
@@ -1512,7 +1501,7 @@ static struct i2c_driver et8ek8_i2c_driver = {
 		.of_match_table	= et8ek8_of_table,
 	},
 	.probe		= et8ek8_probe,
-	.remove		= __exit_p(et8ek8_remove),
+	.remove		= et8ek8_remove,
 	.id_table	= et8ek8_id_table,
 };
 

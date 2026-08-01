@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/io.h>
@@ -136,7 +128,6 @@ static int qcom_ipq806x_sata_phy_probe(struct platform_device *pdev)
 {
 	struct qcom_ipq806x_sata_phy *phy;
 	struct device *dev = &pdev->dev;
-	struct resource *res;
 	struct phy_provider *phy_provider;
 	struct phy *generic_phy;
 	int ret;
@@ -145,8 +136,7 @@ static int qcom_ipq806x_sata_phy_probe(struct platform_device *pdev)
 	if (!phy)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	phy->mmio = devm_ioremap_resource(dev, res);
+	phy->mmio = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(phy->mmio))
 		return PTR_ERR(phy->mmio);
 
@@ -180,13 +170,11 @@ static int qcom_ipq806x_sata_phy_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int qcom_ipq806x_sata_phy_remove(struct platform_device *pdev)
+static void qcom_ipq806x_sata_phy_remove(struct platform_device *pdev)
 {
 	struct qcom_ipq806x_sata_phy *phy = platform_get_drvdata(pdev);
 
 	clk_disable_unprepare(phy->cfg_clk);
-
-	return 0;
 }
 
 static const struct of_device_id qcom_ipq806x_sata_phy_of_match[] = {
@@ -196,11 +184,11 @@ static const struct of_device_id qcom_ipq806x_sata_phy_of_match[] = {
 MODULE_DEVICE_TABLE(of, qcom_ipq806x_sata_phy_of_match);
 
 static struct platform_driver qcom_ipq806x_sata_phy_driver = {
-	.probe	= qcom_ipq806x_sata_phy_probe,
-	.remove	= qcom_ipq806x_sata_phy_remove,
+	.probe = qcom_ipq806x_sata_phy_probe,
+	.remove = qcom_ipq806x_sata_phy_remove,
 	.driver = {
-		.name	= "qcom-ipq806x-sata-phy",
-		.of_match_table	= qcom_ipq806x_sata_phy_of_match,
+		.name = "qcom-ipq806x-sata-phy",
+		.of_match_table = qcom_ipq806x_sata_phy_of_match,
 	}
 };
 module_platform_driver(qcom_ipq806x_sata_phy_driver);

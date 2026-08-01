@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* IP tables module for matching the routing realm
  *
  * (C) 2003 by Sampsa Ranta <sampsa@netsonic.fi>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -36,7 +33,7 @@ static struct xt_match realm_mt_reg __read_mostly = {
 	.matchsize	= sizeof(struct xt_realm_info),
 	.hooks		= (1 << NF_INET_POST_ROUTING) | (1 << NF_INET_FORWARD) |
 			  (1 << NF_INET_LOCAL_OUT) | (1 << NF_INET_LOCAL_IN),
-	.family		= NFPROTO_UNSPEC,
+	.family		= NFPROTO_IPV4,
 	.me		= THIS_MODULE
 };
 

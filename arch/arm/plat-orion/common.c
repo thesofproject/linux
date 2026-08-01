@@ -18,7 +18,6 @@
 #include <linux/clkdev.h>
 #include <linux/mv643xx_eth.h>
 #include <linux/mv643xx_i2c.h>
-#include <net/dsa.h>
 #include <linux/platform_data/dma-mv_xor.h>
 #include <linux/platform_data/usb-ehci-orion.h>
 #include <plat/common.h>
@@ -468,36 +467,6 @@ void __init orion_ge11_init(struct mv643xx_eth_platform_data *eth_data,
 		    eth_data, &orion_ge11);
 }
 
-#ifdef CONFIG_ARCH_ORION5X
-/*****************************************************************************
- * Ethernet switch
- ****************************************************************************/
-static __initdata struct mdio_board_info orion_ge00_switch_board_info = {
-	.bus_id   = "orion-mii",
-	.modalias = "mv88e6085",
-};
-
-void __init orion_ge00_switch_init(struct dsa_chip_data *d)
-{
-	unsigned int i;
-
-	if (!IS_BUILTIN(CONFIG_PHYLIB))
-		return;
-
-	for (i = 0; i < ARRAY_SIZE(d->port_names); i++) {
-		if (!strcmp(d->port_names[i], "cpu")) {
-			d->netdev[i] = &orion_ge00.dev;
-			break;
-		}
-	}
-
-	orion_ge00_switch_board_info.mdio_addr = d->sw_addr;
-	orion_ge00_switch_board_info.platform_data = d;
-
-	mdiobus_register_board_info(&orion_ge00_switch_board_info, 1);
-}
-#endif
-
 /*****************************************************************************
  * I2C
  ****************************************************************************/
@@ -622,7 +591,7 @@ static struct platform_device orion_xor0_shared = {
 	.resource	= orion_xor0_shared_resources,
 	.dev            = {
 		.dma_mask               = &orion_xor_dmamask,
-		.coherent_dma_mask      = DMA_BIT_MASK(64),
+		.coherent_dma_mask      = DMA_BIT_MASK(32),
 		.platform_data          = &orion_xor0_pdata,
 	},
 };
@@ -683,7 +652,7 @@ static struct platform_device orion_xor1_shared = {
 	.resource	= orion_xor1_shared_resources,
 	.dev            = {
 		.dma_mask               = &orion_xor_dmamask,
-		.coherent_dma_mask      = DMA_BIT_MASK(64),
+		.coherent_dma_mask      = DMA_BIT_MASK(32),
 		.platform_data          = &orion_xor1_pdata,
 	},
 };

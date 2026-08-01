@@ -138,7 +138,7 @@ static int octeon_l2c_probe(struct platform_device *pdev)
 
 	/* 'Tags' are block 0, 'Data' is block 1*/
 	l2c = edac_device_alloc_ctl_info(0, "l2c", num_tads, "l2c", 2, 0,
-					 NULL, 0, edac_device_alloc_index());
+					 edac_device_alloc_index());
 	if (!l2c)
 		return -ENOMEM;
 
@@ -184,14 +184,12 @@ err:
 	return -ENXIO;
 }
 
-static int octeon_l2c_remove(struct platform_device *pdev)
+static void octeon_l2c_remove(struct platform_device *pdev)
 {
 	struct edac_device_ctl_info *l2c = platform_get_drvdata(pdev);
 
 	edac_device_del_device(&pdev->dev);
 	edac_device_free_ctl_info(l2c);
-
-	return 0;
 }
 
 static struct platform_driver octeon_l2c_driver = {
@@ -203,5 +201,6 @@ static struct platform_driver octeon_l2c_driver = {
 };
 module_platform_driver(octeon_l2c_driver);
 
+MODULE_DESCRIPTION("Cavium Octeon Secondary Caches (L2C) EDAC driver");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Ralf Baechle <ralf@linux-mips.org>");

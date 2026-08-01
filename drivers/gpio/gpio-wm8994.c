@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * gpiolib support for Wolfson WM8994
  *
@@ -5,17 +6,13 @@
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
  *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
  */
 
+#include <linux/cleanup.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <linux/mfd/core.h>
 #include <linux/platform_device.h>
 #include <linux/seq_file.h>
@@ -92,7 +89,8 @@ static int wm8994_gpio_direction_out(struct gpio_chip *chip,
 			       WM8994_GPN_DIR | WM8994_GPN_LVL, value);
 }
 
-static void wm8994_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
+static int wm8994_gpio_set(struct gpio_chip *chip, unsigned int offset,
+			   int value)
 {
 	struct wm8994_gpio *wm8994_gpio = gpiochip_get_data(chip);
 	struct wm8994 *wm8994 = wm8994_gpio->wm8994;
@@ -100,7 +98,8 @@ static void wm8994_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 	if (value)
 		value = WM8994_GPN_LVL;
 
-	wm8994_set_bits(wm8994, WM8994_GPIO_1 + offset, WM8994_GPN_LVL, value);
+	return wm8994_set_bits(wm8994, WM8994_GPIO_1 + offset, WM8994_GPN_LVL,
+			       value);
 }
 
 static int wm8994_gpio_set_config(struct gpio_chip *chip, unsigned int offset,
@@ -195,26 +194,26 @@ static void wm8994_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 	int i;
 
 	for (i = 0; i < chip->ngpio; i++) {
-		int gpio = i + chip->base;
 		int reg;
-		const char *label;
 
 		/* We report the GPIO even if it's not requested since
 		 * we're also reporting things like alternate
 		 * functions which apply even when the GPIO is not in
 		 * use as a GPIO.
 		 */
-		label = gpiochip_is_requested(chip, i);
-		if (!label)
-			label = "Unrequested";
+		char *label __free(kfree) = gpiochip_dup_line_label(chip, i);
+		if (IS_ERR(label)) {
+			dev_err(wm8994->dev, "Failed to duplicate label\n");
+			continue;
+		}
 
-		seq_printf(s, " gpio-%-3d (%-20.20s) ", gpio, label);
+		seq_printf(s, " gpio-%-3d (%-20.20s) ", i,
+			   label ?: "Unrequested");
 
 		reg = wm8994_reg_read(wm8994, WM8994_GPIO_1 + i);
 		if (reg < 0) {
 			dev_err(wm8994->dev,
-				"GPIO control %d read failed: %d\n",
-				gpio, reg);
+				"GPIO control %d read failed: %d\n", i, reg);
 			seq_printf(s, "\n");
 			continue;
 		}
@@ -267,7 +266,6 @@ static int wm8994_gpio_probe(struct platform_device *pdev)
 	struct wm8994 *wm8994 = dev_get_drvdata(pdev->dev.parent);
 	struct wm8994_pdata *pdata = dev_get_platdata(wm8994->dev);
 	struct wm8994_gpio *wm8994_gpio;
-	int ret;
 
 	wm8994_gpio = devm_kzalloc(&pdev->dev, sizeof(*wm8994_gpio),
 				   GFP_KERNEL);
@@ -283,17 +281,7 @@ static int wm8994_gpio_probe(struct platform_device *pdev)
 	else
 		wm8994_gpio->gpio_chip.base = -1;
 
-	ret = devm_gpiochip_add_data(&pdev->dev, &wm8994_gpio->gpio_chip,
-				     wm8994_gpio);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Could not register gpiochip, %d\n",
-			ret);
-		return ret;
-	}
-
-	platform_set_drvdata(pdev, wm8994_gpio);
-
-	return ret;
+	return devm_gpiochip_add_data(&pdev->dev, &wm8994_gpio->gpio_chip, wm8994_gpio);
 }
 
 static struct platform_driver wm8994_gpio_driver = {

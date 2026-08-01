@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/acorn/net/etherh.c
  *
  *  Copyright (C) 2000-2002 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * NS8390 I-cubed EtherH and ANT EtherM specific driver
  * Thanks to I-Cubed for information on their cards.
@@ -261,7 +258,7 @@ static int etherh_set_config(struct net_device *dev, struct ifmap *map)
 		 * media type, turn off automedia detection.
 		 */
 		dev->flags &= ~IFF_AUTOMEDIA;
-		dev->if_port = map->port;
+		WRITE_ONCE(dev->if_port, map->port);
 		break;
 
 	default:
@@ -558,32 +555,35 @@ static int __init etherm_addr(char *addr)
 
 static void etherh_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 {
-	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
-	strlcpy(info->bus_info, dev_name(dev->dev.parent),
+	strscpy(info->driver, DRV_NAME, sizeof(info->driver));
+	strscpy(info->version, DRV_VERSION, sizeof(info->version));
+	strscpy(info->bus_info, dev_name(dev->dev.parent),
 		sizeof(info->bus_info));
 }
 
-static int etherh_get_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+static int etherh_get_link_ksettings(struct net_device *dev,
+				     struct ethtool_link_ksettings *cmd)
 {
-	cmd->supported	= etherh_priv(dev)->supported;
-	ethtool_cmd_speed_set(cmd, SPEED_10);
-	cmd->duplex	= DUPLEX_HALF;
-	cmd->port	= dev->if_port == IF_PORT_10BASET ? PORT_TP : PORT_BNC;
-	cmd->autoneg	= (dev->flags & IFF_AUTOMEDIA ?
-			   AUTONEG_ENABLE : AUTONEG_DISABLE);
+	ethtool_convert_legacy_u32_to_link_mode(cmd->link_modes.supported,
+						etherh_priv(dev)->supported);
+	cmd->base.speed = SPEED_10;
+	cmd->base.duplex = DUPLEX_HALF;
+	cmd->base.port = dev->if_port == IF_PORT_10BASET ? PORT_TP : PORT_BNC;
+	cmd->base.autoneg = (dev->flags & IFF_AUTOMEDIA ? AUTONEG_ENABLE :
+							  AUTONEG_DISABLE);
 	return 0;
 }
 
-static int etherh_set_settings(struct net_device *dev, struct ethtool_cmd *cmd)
+static int etherh_set_link_ksettings(struct net_device *dev,
+				     const struct ethtool_link_ksettings *cmd)
 {
-	switch (cmd->autoneg) {
+	switch (cmd->base.autoneg) {
 	case AUTONEG_ENABLE:
 		dev->flags |= IFF_AUTOMEDIA;
 		break;
 
 	case AUTONEG_DISABLE:
-		switch (cmd->port) {
+		switch (cmd->base.port) {
 		case PORT_TP:
 			dev->if_port = IF_PORT_10BASET;
 			break;
@@ -622,12 +622,12 @@ static void etherh_set_msglevel(struct net_device *dev, u32 v)
 }
 
 static const struct ethtool_ops etherh_ethtool_ops = {
-	.get_settings	= etherh_get_settings,
-	.set_settings	= etherh_set_settings,
-	.get_drvinfo	= etherh_get_drvinfo,
-	.get_ts_info	= ethtool_op_get_ts_info,
-	.get_msglevel	= etherh_get_msglevel,
-	.set_msglevel	= etherh_set_msglevel,
+	.get_drvinfo		= etherh_get_drvinfo,
+	.get_ts_info		= ethtool_op_get_ts_info,
+	.get_msglevel		= etherh_get_msglevel,
+	.set_msglevel		= etherh_set_msglevel,
+	.get_link_ksettings	= etherh_get_link_ksettings,
+	.set_link_ksettings	= etherh_set_link_ksettings,
 };
 
 static const struct net_device_ops etherh_netdev_ops = {
@@ -655,6 +655,7 @@ etherh_probe(struct expansion_card *ec, const struct ecard_id *id)
 	struct ei_device *ei_local;
 	struct net_device *dev;
 	struct etherh_priv *eh;
+	u8 addr[ETH_ALEN];
 	int ret;
 
 	ret = ecard_request_resources(ec);
@@ -724,12 +725,13 @@ etherh_probe(struct expansion_card *ec, const struct ecard_id *id)
 	spin_lock_init(&ei_local->page_lock);
 
 	if (ec->cid.product == PROD_ANT_ETHERM) {
-		etherm_addr(dev->dev_addr);
+		etherm_addr(addr);
 		ei_local->reg_offset = etherm_regoffsets;
 	} else {
-		etherh_addr(dev->dev_addr, ec);
+		etherh_addr(addr, ec);
 		ei_local->reg_offset = etherh_regoffsets;
 	}
+	eth_hw_addr_set(dev, addr);
 
 	ei_local->name          = dev->name;
 	ei_local->word16        = 1;

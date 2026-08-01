@@ -1,8 +1,8 @@
 /*******************************************************************
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
- * Copyright (C) 2017 Broadcom. All Rights Reserved. The term      *
- * “Broadcom” refers to Broadcom Limited and/or its subsidiaries.  *
+ * Copyright (C) 2017-2024 Broadcom. All Rights Reserved. The term *
+ * “Broadcom” refers to Broadcom Inc. and/or its subsidiaries.     *
  * Copyright (C) 2010-2015 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.broadcom.com                                                *
@@ -33,11 +33,15 @@
 #define LPFC_BSG_VENDOR_DIAG_RUN_LOOPBACK	5
 #define LPFC_BSG_VENDOR_GET_MGMT_REV		6
 #define LPFC_BSG_VENDOR_MBOX			7
-#define LPFC_BSG_VENDOR_MENLO_CMD		8
-#define LPFC_BSG_VENDOR_MENLO_DATA		9
 #define LPFC_BSG_VENDOR_DIAG_MODE_END		10
 #define LPFC_BSG_VENDOR_LINK_DIAG_TEST		11
 #define LPFC_BSG_VENDOR_FORCED_LINK_SPEED	14
+#define LPFC_BSG_VENDOR_RAS_GET_LWPD		16
+#define LPFC_BSG_VENDOR_RAS_GET_FWLOG		17
+#define LPFC_BSG_VENDOR_RAS_GET_CONFIG		18
+#define LPFC_BSG_VENDOR_RAS_SET_CONFIG		19
+#define LPFC_BSG_VENDOR_GET_TRUNK_INFO		20
+#define LPFC_BSG_VENDOR_GET_CGNBUF_INFO		21
 
 struct set_ct_event {
 	uint32_t command;
@@ -63,6 +67,7 @@ struct send_mgmt_resp {
 };
 
 
+#define DISABLE_LOOP_BACK  0x0 /* disables loop back */
 #define INTERNAL_LOOP_BACK 0x1 /* adapter short cuts the loop internally */
 #define EXTERNAL_LOOP_BACK 0x2 /* requires an external loopback plug */
 
@@ -70,6 +75,7 @@ struct diag_mode_set {
 	uint32_t command;
 	uint32_t type;
 	uint32_t timeout;
+	uint32_t physical_link;
 };
 
 struct sli4_link_diag {
@@ -121,16 +127,6 @@ struct dfc_mbox_req {
 	uint32_t outExtWLen;
 	uint32_t extMboxTag;
 	uint32_t extSeqNum;
-};
-
-/* Used for menlo command or menlo data. The xri is only used for menlo data */
-struct menlo_command {
-	uint32_t cmd;
-	uint32_t xri;
-};
-
-struct menlo_response {
-	uint32_t xri; /* return the xri of the iocb exchange */
 };
 
 /*
@@ -218,6 +214,10 @@ struct lpfc_sli_config_hdr {
 	uint32_t reserved5;
 };
 
+#define LPFC_CSF_BOOT_DEV		0x1D
+#define LPFC_CSF_QUERY			0
+#define LPFC_CSF_SAVE			1
+
 struct lpfc_sli_config_emb0_subsys {
 	struct lpfc_sli_config_hdr	sli_config_hdr;
 #define LPFC_MBX_SLI_CONFIG_MAX_MSE     19
@@ -236,6 +236,30 @@ struct lpfc_sli_config_emb0_subsys {
 #define FCOE_OPCODE_ADD_FCF		0x09
 #define FCOE_OPCODE_SET_DPORT_MODE	0x27
 #define FCOE_OPCODE_GET_DPORT_RESULTS	0x28
+	uint32_t timeout;		/* comn_set_feature timeout */
+	uint32_t request_length;	/* comn_set_feature request len */
+	uint32_t version;		/* comn_set_feature version */
+	uint32_t word68;		/* comn_set_feature feature */
+#define lpfc_emb0_subcmnd_csf_feat_SHIFT		0
+#define lpfc_emb0_subcmnd_csf_feat_MASK			0xffffffff
+#define lpfc_emb0_subcmnd_csf_feat_WORD			word68
+#define lpfc_emb0_subcmnd_rd_obj_des_rd_len_SHIFT	0
+#define lpfc_emb0_subcmnd_rd_obj_des_rd_len_MASK	0x00ffffff
+#define lpfc_emb0_subcmnd_rd_obj_des_rd_len_WORD	word68
+	uint32_t word69;		/* comn_set_feature parameter len */
+	uint32_t word70;		/* comn_set_feature parameter val0 */
+#define lpfc_emb0_subcmnd_csf_p0_SHIFT	0
+#define lpfc_emb0_subcmnd_csf_p0_MASK	0x3
+#define lpfc_emb0_subcmnd_csf_p0_WORD	word70
+	uint32_t reserved71[25];
+	uint32_t word96;		/* rd_obj hbd_count */
+#define lpfc_emb0_subcmnd_rd_obj_hbd_cnt_SHIFT	0
+#define lpfc_emb0_subcmnd_rd_obj_hbd_cnt_MASK	0xffffffff
+#define lpfc_emb0_subcmnd_rd_obj_hbd_cnt_WORD	word96
+#define LPFC_EMB0_MAX_RD_OBJ_HBD_CNT		31
+	struct lpfc_sli_config_hbd hbd[LPFC_EMB0_MAX_RD_OBJ_HBD_CNT];
+	uint32_t word190;
+	uint32_t word191;
 };
 
 struct lpfc_sli_config_emb1_subsys {
@@ -254,6 +278,7 @@ struct lpfc_sli_config_emb1_subsys {
 #define COMN_OPCODE_WRITE_OBJECT	0xAC
 #define COMN_OPCODE_READ_OBJECT_LIST	0xAD
 #define COMN_OPCODE_DELETE_OBJECT	0xAE
+#define COMN_OPCODE_SET_FEATURES	0xBF
 #define COMN_OPCODE_GET_CNTL_ADDL_ATTRIBUTES	0x79
 #define COMN_OPCODE_GET_CNTL_ATTRIBUTES	0x20
 	uint32_t timeout;
@@ -294,6 +319,82 @@ struct get_forced_link_speed_support {
 };
 struct forced_link_speed_support_reply {
 	uint8_t supported;
+};
+
+struct lpfc_bsg_ras_req {
+	uint32_t command;
+};
+
+struct lpfc_bsg_get_fwlog_req {
+	uint32_t command;
+	uint32_t read_size;
+	uint32_t read_offset;
+};
+
+struct lpfc_bsg_get_ras_lwpd {
+	uint32_t offset;
+	uint32_t wrap_count;
+};
+
+struct lpfc_bsg_set_ras_config_req {
+	uint32_t command;
+	uint8_t action;
+#define LPFC_RASACTION_STOP_LOGGING     0x00
+#define LPFC_RASACTION_START_LOGGING    0x01
+	uint8_t log_level;
+};
+
+struct lpfc_bsg_get_ras_config_reply {
+	uint8_t state;
+#define LPFC_RASLOG_STATE_STOPPED 0x00
+#define LPFC_RASLOG_STATE_RUNNING 0x01
+	uint8_t log_level;
+	uint32_t log_buff_sz;
+};
+
+struct lpfc_trunk_info {
+	uint32_t word0;
+#define lpfc_trunk_info_link_status_SHIFT      0
+#define lpfc_trunk_info_link_status_MASK       1
+#define lpfc_trunk_info_link_status_WORD       word0
+#define lpfc_trunk_info_trunk_active0_SHIFT    8
+#define lpfc_trunk_info_trunk_active0_MASK     1
+#define lpfc_trunk_info_trunk_active0_WORD     word0
+#define lpfc_trunk_info_trunk_active1_SHIFT    9
+#define lpfc_trunk_info_trunk_active1_MASK     1
+#define lpfc_trunk_info_trunk_active1_WORD     word0
+#define lpfc_trunk_info_trunk_active2_SHIFT    10
+#define lpfc_trunk_info_trunk_active2_MASK     1
+#define lpfc_trunk_info_trunk_active2_WORD     word0
+#define lpfc_trunk_info_trunk_active3_SHIFT    11
+#define lpfc_trunk_info_trunk_active3_MASK     1
+#define lpfc_trunk_info_trunk_active3_WORD     word0
+#define lpfc_trunk_info_trunk_config0_SHIFT    12
+#define lpfc_trunk_info_trunk_config0_MASK     1
+#define lpfc_trunk_info_trunk_config0_WORD     word0
+#define lpfc_trunk_info_trunk_config1_SHIFT    13
+#define lpfc_trunk_info_trunk_config1_MASK     1
+#define lpfc_trunk_info_trunk_config1_WORD     word0
+#define lpfc_trunk_info_trunk_config2_SHIFT    14
+#define lpfc_trunk_info_trunk_config2_MASK     1
+#define lpfc_trunk_info_trunk_config2_WORD     word0
+#define lpfc_trunk_info_trunk_config3_SHIFT    15
+#define lpfc_trunk_info_trunk_config3_MASK     1
+#define lpfc_trunk_info_trunk_config3_WORD     word0
+	uint16_t    port_speed;
+	uint16_t    logical_speed;
+	uint32_t    reserved3;
+};
+
+struct get_trunk_info_req {
+	uint32_t command;
+};
+
+struct get_cgnbuf_info_req {
+	uint32_t command;
+	uint32_t read_size;
+	uint32_t reset;
+#define LPFC_BSG_CGN_RESET_STAT		1
 };
 
 /* driver only */

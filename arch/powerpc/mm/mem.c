@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  PowerPC version
  *    Copyright (C) 1995-1996 Gary Thomas (gdt@linuxppc.org)
@@ -9,105 +10,60 @@
  *
  *  Derived from "arch/i386/mm/init.c"
  *    Copyright (C) 1991, 1992, 1993, 1994  Linus Torvalds
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version
- *  2 of the License, or (at your option) any later version.
- *
  */
 
-#include <linux/export.h>
-#include <linux/sched.h>
-#include <linux/kernel.h>
-#include <linux/errno.h>
-#include <linux/string.h>
-#include <linux/gfp.h>
-#include <linux/types.h>
-#include <linux/mm.h>
-#include <linux/stddef.h>
-#include <linux/init.h>
-#include <linux/bootmem.h>
-#include <linux/highmem.h>
-#include <linux/initrd.h>
-#include <linux/pagemap.h>
-#include <linux/suspend.h>
 #include <linux/memblock.h>
-#include <linux/hugetlb.h>
-#include <linux/slab.h>
+#include <linux/highmem.h>
+#include <linux/suspend.h>
+#include <linux/dma-direct.h>
+#include <linux/execmem.h>
 #include <linux/vmalloc.h>
-#include <linux/memremap.h>
 
-#include <asm/pgalloc.h>
-#include <asm/prom.h>
-#include <asm/io.h>
-#include <asm/mmu_context.h>
-#include <asm/pgtable.h>
-#include <asm/mmu.h>
-#include <asm/smp.h>
-#include <asm/machdep.h>
-#include <asm/btext.h>
-#include <asm/tlb.h>
-#include <asm/sections.h>
-#include <asm/sparsemem.h>
-#include <asm/vdso.h>
-#include <asm/fixmap.h>
 #include <asm/swiotlb.h>
+#include <asm/machdep.h>
 #include <asm/rtas.h>
+#include <asm/kasan.h>
+#include <asm/svm.h>
+#include <asm/mmzone.h>
+#include <asm/ftrace.h>
+#include <asm/text-patching.h>
+#include <asm/setup.h>
+#include <asm/fixmap.h>
 
-#include "mmu_decl.h"
+#include <asm/fadump.h>
+#include <asm/kexec.h>
+#include <asm/kvm_ppc.h>
 
-#ifndef CPU_FTR_COHERENT_ICACHE
-#define CPU_FTR_COHERENT_ICACHE	0	/* XXX for now */
-#define CPU_FTR_NOEXECUTE	0
-#endif
+#include <mm/mmu_decl.h>
 
-unsigned long long memory_limit;
+unsigned long long memory_limit __initdata;
 
-#ifdef CONFIG_HIGHMEM
-pte_t *kmap_pte;
-EXPORT_SYMBOL(kmap_pte);
-pgprot_t kmap_prot;
-EXPORT_SYMBOL(kmap_prot);
-#define TOP_ZONE ZONE_HIGHMEM
-
-static inline pte_t *virt_to_kpte(unsigned long vaddr)
-{
-	return pte_offset_kernel(pmd_offset(pud_offset(pgd_offset_k(vaddr),
-			vaddr), vaddr), vaddr);
-}
-#else
-#define TOP_ZONE ZONE_NORMAL
-#endif
-
-int page_is_ram(unsigned long pfn)
-{
-	return memblock_is_memory(__pfn_to_phys(pfn));
-}
-
-pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
-			      unsigned long size, pgprot_t vma_prot)
+pgprot_t __phys_mem_access_prot(unsigned long pfn, unsigned long size,
+				pgprot_t vma_prot)
 {
 	if (ppc_md.phys_mem_access_prot)
-		return ppc_md.phys_mem_access_prot(file, pfn, size, vma_prot);
+		return ppc_md.phys_mem_access_prot(pfn, size, vma_prot);
 
 	if (!page_is_ram(pfn))
 		vma_prot = pgprot_noncached(vma_prot);
 
 	return vma_prot;
 }
-EXPORT_SYMBOL(phys_mem_access_prot);
+EXPORT_SYMBOL(__phys_mem_access_prot);
 
 #ifdef CONFIG_MEMORY_HOTPLUG
+static DEFINE_MUTEX(linear_mapping_mutex);
 
 #ifdef CONFIG_NUMA
 int memory_add_physaddr_to_nid(u64 start)
 {
 	return hot_add_scn_to_nid(start);
 }
+EXPORT_SYMBOL_GPL(memory_add_physaddr_to_nid);
 #endif
 
-int __weak create_section_mapping(unsigned long start, unsigned long end, int nid)
+int __weak create_section_mapping(unsigned long start, unsigned long end,
+				  int nid, pgprot_t prot)
 {
 	return -ENODEV;
 }
@@ -117,93 +73,103 @@ int __weak remove_section_mapping(unsigned long start, unsigned long end)
 	return -ENODEV;
 }
 
-int __meminit arch_add_memory(int nid, u64 start, u64 size, struct vmem_altmap *altmap,
-		bool want_memblock)
+int __ref arch_create_linear_mapping(int nid, u64 start, u64 size,
+				     struct mhp_params *params)
 {
-	unsigned long start_pfn = start >> PAGE_SHIFT;
-	unsigned long nr_pages = size >> PAGE_SHIFT;
 	int rc;
 
-	resize_hpt_for_hotplug(memblock_phys_mem_size());
-
 	start = (unsigned long)__va(start);
-	rc = create_section_mapping(start, start + size, nid);
+	mutex_lock(&linear_mapping_mutex);
+	rc = create_section_mapping(start, start + size, nid,
+				    params->pgprot);
+	mutex_unlock(&linear_mapping_mutex);
 	if (rc) {
-		pr_warn("Unable to create mapping for hot added memory 0x%llx..0x%llx: %d\n",
+		pr_warn("Unable to create linear mapping for 0x%llx..0x%llx: %d\n",
 			start, start + size, rc);
 		return -EFAULT;
 	}
-	flush_inval_dcache_range(start, start + size);
-
-	return __add_pages(nid, start_pfn, nr_pages, altmap, want_memblock);
+	return 0;
 }
 
-#ifdef CONFIG_MEMORY_HOTREMOVE
-int __meminit arch_remove_memory(u64 start, u64 size, struct vmem_altmap *altmap)
+void __ref arch_remove_linear_mapping(u64 start, u64 size)
 {
-	unsigned long start_pfn = start >> PAGE_SHIFT;
-	unsigned long nr_pages = size >> PAGE_SHIFT;
-	struct page *page;
 	int ret;
-
-	/*
-	 * If we have an altmap then we need to skip over any reserved PFNs
-	 * when querying the zone.
-	 */
-	page = pfn_to_page(start_pfn);
-	if (altmap)
-		page += vmem_altmap_offset(altmap);
-
-	ret = __remove_pages(page_zone(page), start_pfn, nr_pages, altmap);
-	if (ret)
-		return ret;
 
 	/* Remove htab bolted mappings for this section of memory */
 	start = (unsigned long)__va(start);
-	flush_inval_dcache_range(start, start + size);
+
+	mutex_lock(&linear_mapping_mutex);
 	ret = remove_section_mapping(start, start + size);
+	mutex_unlock(&linear_mapping_mutex);
+	if (ret)
+		pr_warn("Unable to remove linear mapping for 0x%llx..0x%llx: %d\n",
+			start, start + size, ret);
 
 	/* Ensure all vmalloc mappings are flushed in case they also
 	 * hit that section of memory
 	 */
 	vm_unmap_aliases();
-
-	resize_hpt_for_hotplug(memblock_phys_mem_size());
-
-	return ret;
 }
-#endif
-#endif /* CONFIG_MEMORY_HOTPLUG */
 
 /*
- * walk_memory_resource() needs to make sure there is no holes in a given
- * memory range.  PPC64 does not maintain the memory layout in /proc/iomem.
- * Instead it maintains it in memblock.memory structures.  Walk through the
- * memory regions, find holes and callback for contiguous regions.
+ * After memory hotplug the variables max_pfn, max_low_pfn and high_memory need
+ * updating.
  */
-int
-walk_system_ram_range(unsigned long start_pfn, unsigned long nr_pages,
-		void *arg, int (*func)(unsigned long, unsigned long, void *))
+static void update_end_of_memory_vars(u64 start, u64 size)
 {
-	struct memblock_region *reg;
-	unsigned long end_pfn = start_pfn + nr_pages;
-	unsigned long tstart, tend;
-	int ret = -1;
+	unsigned long end_pfn = PFN_UP(start + size);
 
-	for_each_memblock(memory, reg) {
-		tstart = max(start_pfn, memblock_region_memory_base_pfn(reg));
-		tend = min(end_pfn, memblock_region_memory_end_pfn(reg));
-		if (tstart >= tend)
-			continue;
-		ret = (*func)(tstart, tend - tstart, arg);
-		if (ret)
-			break;
+	if (end_pfn > max_pfn) {
+		max_pfn = end_pfn;
+		max_low_pfn = end_pfn;
+		high_memory = (void *)__va(max_pfn * PAGE_SIZE - 1) + 1;
 	}
+}
+
+int __ref add_pages(int nid, unsigned long start_pfn, unsigned long nr_pages,
+		    struct mhp_params *params)
+{
+	int ret;
+
+	ret = __add_pages(nid, start_pfn, nr_pages, params);
+	if (ret)
+		return ret;
+
+	/* update max_pfn, max_low_pfn and high_memory */
+	update_end_of_memory_vars(start_pfn << PAGE_SHIFT,
+				  nr_pages << PAGE_SHIFT);
+
 	return ret;
 }
-EXPORT_SYMBOL_GPL(walk_system_ram_range);
 
-#ifndef CONFIG_NEED_MULTIPLE_NODES
+int __ref arch_add_memory(int nid, u64 start, u64 size,
+			  struct mhp_params *params)
+{
+	unsigned long start_pfn = start >> PAGE_SHIFT;
+	unsigned long nr_pages = size >> PAGE_SHIFT;
+	int rc;
+
+	rc = arch_create_linear_mapping(nid, start, size, params);
+	if (rc)
+		return rc;
+	rc = add_pages(nid, start_pfn, nr_pages, params);
+	if (rc)
+		arch_remove_linear_mapping(start, size);
+	return rc;
+}
+
+void __ref arch_remove_memory(u64 start, u64 size, struct vmem_altmap *altmap,
+			      struct dev_pagemap *pgmap)
+{
+	unsigned long start_pfn = start >> PAGE_SHIFT;
+	unsigned long nr_pages = size >> PAGE_SHIFT;
+
+	__remove_pages(start_pfn, nr_pages, altmap, pgmap);
+	arch_remove_linear_mapping(start, size);
+}
+#endif
+
+#ifndef CONFIG_NUMA
 void __init mem_topology_setup(void)
 {
 	max_low_pfn = max_pfn = memblock_end_of_DRAM() >> PAGE_SHIFT;
@@ -215,84 +181,52 @@ void __init mem_topology_setup(void)
 	/* Place all memblock_regions in the same node and merge contiguous
 	 * memblock_regions
 	 */
-	memblock_set_node(0, (phys_addr_t)ULLONG_MAX, &memblock.memory, 0);
-}
-
-void __init initmem_init(void)
-{
-	/* XXX need to clip this if using highmem? */
-	sparse_memory_present_with_active_regions(0);
-	sparse_init();
+	memblock_set_node(0, PHYS_ADDR_MAX, &memblock.memory, 0);
 }
 
 /* mark pages that don't exist as nosave */
 static int __init mark_nonram_nosave(void)
 {
-	struct memblock_region *reg, *prev = NULL;
+	unsigned long spfn, epfn, prev = 0;
+	int i;
 
-	for_each_memblock(memory, reg) {
-		if (prev &&
-		    memblock_region_memory_end_pfn(prev) < memblock_region_memory_base_pfn(reg))
-			register_nosave_region(memblock_region_memory_end_pfn(prev),
-					       memblock_region_memory_base_pfn(reg));
-		prev = reg;
+	for_each_mem_pfn_range(i, MAX_NUMNODES, &spfn, &epfn, NULL) {
+		if (prev && prev < spfn)
+			register_nosave_region(prev, spfn);
+
+		prev = epfn;
 	}
+
 	return 0;
 }
-#else /* CONFIG_NEED_MULTIPLE_NODES */
+#else /* CONFIG_NUMA */
 static int __init mark_nonram_nosave(void)
 {
 	return 0;
 }
 #endif
 
-static bool zone_limits_final;
-
 /*
- * The memory zones past TOP_ZONE are managed by generic mm code.
- * These should be set to zero since that's what every other
- * architecture does.
- */
-static unsigned long max_zone_pfns[MAX_NR_ZONES] = {
-	[0            ... TOP_ZONE        ] = ~0UL,
-	[TOP_ZONE + 1 ... MAX_NR_ZONES - 1] = 0
-};
-
-/*
- * Restrict the specified zone and all more restrictive zones
- * to be below the specified pfn.  May not be called after
- * paging_init().
- */
-void __init limit_zone_pfn(enum zone_type zone, unsigned long pfn_limit)
-{
-	int i;
-
-	if (WARN_ON(zone_limits_final))
-		return;
-
-	for (i = zone; i >= 0; i--) {
-		if (max_zone_pfns[i] > pfn_limit)
-			max_zone_pfns[i] = pfn_limit;
-	}
-}
-
-/*
- * Find the least restrictive zone that is entirely below the
- * specified pfn limit.  Returns < 0 if no suitable zone is found.
+ * Zones usage:
  *
- * pfn_limit must be u64 because it can exceed 32 bits even on 32-bit
- * systems -- the DMA limit can be higher than any possible real pfn.
+ * We setup ZONE_DMA to be 31-bits on all platforms and ZONE_NORMAL to be
+ * everything else. GFP_DMA32 page allocations automatically fall back to
+ * ZONE_DMA.
+ *
+ * By using 31-bit unconditionally, we can exploit zone_dma_limit to inform the
+ * generic DMA mapping code.  32-bit only devices (if not handled by an IOMMU
+ * anyway) will take a first dip into ZONE_NORMAL and get otherwise served by
+ * ZONE_DMA.
  */
-int dma_pfn_limit_to_zone(u64 pfn_limit)
+void __init arch_zone_limits_init(unsigned long *max_zone_pfns)
 {
-	int i;
-
-	for (i = TOP_ZONE; i >= 0; i--) {
-		if (max_zone_pfns[i] <= pfn_limit)
-			return i;
-	}
-
-	return -EPERM;
+#ifdef CONFIG_ZONE_DMA
+	max_zone_pfns[ZONE_DMA] = min((zone_dma_limit >> PAGE_SHIFT) + 1, max_low_pfn);
+#endif
+	max_zone_pfns[ZONE_NORMAL] = max_low_pfn;
+#ifdef CONFIG_HIGHMEM
+	max_zone_pfns[ZONE_HIGHMEM] = max_pfn;
+#endif
 }
 
 /*
@@ -302,21 +236,17 @@ void __init paging_init(void)
 {
 	unsigned long long total_ram = memblock_phys_mem_size();
 	phys_addr_t top_of_ram = memblock_end_of_DRAM();
-
-#ifdef CONFIG_PPC32
-	unsigned long v = __fix_to_virt(__end_of_fixed_addresses - 1);
-	unsigned long end = __fix_to_virt(FIX_HOLE);
-
-	for (; v < end; v += PAGE_SIZE)
-		map_kernel_page(v, 0, 0); /* XXX gross */
-#endif
+	int zone_dma_bits;
 
 #ifdef CONFIG_HIGHMEM
-	map_kernel_page(PKMAP_BASE, 0, 0);	/* XXX gross */
-	pkmap_page_table = virt_to_kpte(PKMAP_BASE);
+	unsigned long v = __fix_to_virt(FIX_KMAP_END);
+	unsigned long end = __fix_to_virt(FIX_KMAP_BEGIN);
 
-	kmap_pte = virt_to_kpte(__fix_to_virt(FIX_KMAP_BEGIN));
-	kmap_prot = PAGE_KERNEL;
+	for (; v < end; v += PAGE_SIZE)
+		map_kernel_page(v, 0, __pgprot(0)); /* XXX gross */
+
+	map_kernel_page(PKMAP_BASE, 0, __pgprot(0));	/* XXX gross */
+	pkmap_page_table = virt_to_kpte(PKMAP_BASE);
 #endif /* CONFIG_HIGHMEM */
 
 	printk(KERN_DEBUG "Top of RAM: 0x%llx, Total RAM: 0x%llx\n",
@@ -324,18 +254,32 @@ void __init paging_init(void)
 	printk(KERN_DEBUG "Memory hole size: %ldMB\n",
 	       (long int)((top_of_ram - total_ram) >> 20));
 
-#ifdef CONFIG_HIGHMEM
-	limit_zone_pfn(ZONE_NORMAL, lowmem_end_addr >> PAGE_SHIFT);
-#endif
-	limit_zone_pfn(TOP_ZONE, top_of_ram >> PAGE_SHIFT);
-	zone_limits_final = true;
-	free_area_init_nodes(max_zone_pfns);
+	/*
+	 * Allow 30-bit DMA for very limited Broadcom wifi chips on many
+	 * powerbooks.
+	 */
+	if (IS_ENABLED(CONFIG_PPC32))
+		zone_dma_bits = 30;
+	else
+		zone_dma_bits = 31;
+
+	zone_dma_limit = DMA_BIT_MASK(zone_dma_bits);
 
 	mark_nonram_nosave();
 }
 
-void __init mem_init(void)
+void __init arch_mm_preinit(void)
 {
+
+	/*
+	 * Reserve large chunks of memory for use by CMA for kdump, fadump, KVM
+	 * and hugetlb. These must be called after pageblock_order is
+	 * initialised.
+	 */
+	fadump_cma_init();
+	kdump_cma_reserve();
+	kvm_cma_reserve();
+
 	/*
 	 * book3s is limited to 16 page sizes due to encoding this in
 	 * a 4-bit field for slices.
@@ -343,28 +287,20 @@ void __init mem_init(void)
 	BUILD_BUG_ON(MMU_PAGE_COUNT > 16);
 
 #ifdef CONFIG_SWIOTLB
-	swiotlb_init(0);
+	/*
+	 * Some platforms (e.g. 85xx) limit DMA-able memory way below
+	 * 4G. We force memblock to bottom-up mode to ensure that the
+	 * memory allocated in swiotlb_init() is DMA-able.
+	 * As it's the last memblock allocation, no need to reset it
+	 * back to to-down.
+	 */
+	memblock_set_bottom_up(true);
+	swiotlb_init(ppc_swiotlb_enable, ppc_swiotlb_flags);
 #endif
 
-	high_memory = (void *) __va(max_low_pfn * PAGE_SIZE);
-	set_max_mapnr(max_pfn);
-	free_all_bootmem();
+	kasan_late_init();
 
-#ifdef CONFIG_HIGHMEM
-	{
-		unsigned long pfn, highmem_mapnr;
-
-		highmem_mapnr = lowmem_end_addr >> PAGE_SHIFT;
-		for (pfn = highmem_mapnr; pfn < max_mapnr; ++pfn) {
-			phys_addr_t paddr = (phys_addr_t)pfn << PAGE_SHIFT;
-			struct page *page = pfn_to_page(pfn);
-			if (!memblock_is_reserved(paddr))
-				free_highmem_page(page);
-		}
-	}
-#endif /* CONFIG_HIGHMEM */
-
-#if defined(CONFIG_PPC_FSL_BOOK3E) && !defined(CONFIG_SMP)
+#if defined(CONFIG_PPC_E500) && !defined(CONFIG_SMP)
 	/*
 	 * If smp is enabled, next_tlbcam_idx is initialized in the cpu up
 	 * functions.... do it here for the non-smp case.
@@ -372,24 +308,6 @@ void __init mem_init(void)
 	per_cpu(next_tlbcam_idx, smp_processor_id()) =
 		(mfspr(SPRN_TLB1CFG) & TLBnCFG_N_ENTRY) - 1;
 #endif
-
-	mem_init_print_info(NULL);
-#ifdef CONFIG_PPC32
-	pr_info("Kernel virtual memory layout:\n");
-	pr_info("  * 0x%08lx..0x%08lx  : fixmap\n", FIXADDR_START, FIXADDR_TOP);
-#ifdef CONFIG_HIGHMEM
-	pr_info("  * 0x%08lx..0x%08lx  : highmem PTEs\n",
-		PKMAP_BASE, PKMAP_ADDR(LAST_PKMAP));
-#endif /* CONFIG_HIGHMEM */
-#ifdef CONFIG_NOT_COHERENT_CACHE
-	pr_info("  * 0x%08lx..0x%08lx  : consistent mem\n",
-		IOREMAP_TOP, IOREMAP_TOP + CONFIG_CONSISTENT_SIZE);
-#endif /* CONFIG_NOT_COHERENT_CACHE */
-	pr_info("  * 0x%08lx..0x%08lx  : early ioremap\n",
-		ioremap_bot, IOREMAP_TOP);
-	pr_info("  * 0x%08lx..0x%08lx  : vmalloc & ioremap\n",
-		VMALLOC_START, VMALLOC_END);
-#endif /* CONFIG_PPC32 */
 }
 
 void free_initmem(void)
@@ -397,152 +315,7 @@ void free_initmem(void)
 	ppc_md.progress = ppc_printk_progress;
 	mark_initmem_nx();
 	free_initmem_default(POISON_FREE_INITMEM);
-}
-
-#ifdef CONFIG_BLK_DEV_INITRD
-void __init free_initrd_mem(unsigned long start, unsigned long end)
-{
-	free_reserved_area((void *)start, (void *)end, -1, "initrd");
-}
-#endif
-
-/*
- * This is called when a page has been modified by the kernel.
- * It just marks the page as not i-cache clean.  We do the i-cache
- * flush later when the page is given to a user process, if necessary.
- */
-void flush_dcache_page(struct page *page)
-{
-	if (cpu_has_feature(CPU_FTR_COHERENT_ICACHE))
-		return;
-	/* avoid an atomic op if possible */
-	if (test_bit(PG_arch_1, &page->flags))
-		clear_bit(PG_arch_1, &page->flags);
-}
-EXPORT_SYMBOL(flush_dcache_page);
-
-void flush_dcache_icache_page(struct page *page)
-{
-#ifdef CONFIG_HUGETLB_PAGE
-	if (PageCompound(page)) {
-		flush_dcache_icache_hugepage(page);
-		return;
-	}
-#endif
-#if defined(CONFIG_PPC_8xx) || defined(CONFIG_PPC64)
-	/* On 8xx there is no need to kmap since highmem is not supported */
-	__flush_dcache_icache(page_address(page));
-#else
-	if (IS_ENABLED(CONFIG_BOOKE) || sizeof(phys_addr_t) > sizeof(void *)) {
-		void *start = kmap_atomic(page);
-		__flush_dcache_icache(start);
-		kunmap_atomic(start);
-	} else {
-		__flush_dcache_icache_phys(page_to_pfn(page) << PAGE_SHIFT);
-	}
-#endif
-}
-EXPORT_SYMBOL(flush_dcache_icache_page);
-
-void clear_user_page(void *page, unsigned long vaddr, struct page *pg)
-{
-	clear_page(page);
-
-	/*
-	 * We shouldn't have to do this, but some versions of glibc
-	 * require it (ld.so assumes zero filled pages are icache clean)
-	 * - Anton
-	 */
-	flush_dcache_page(pg);
-}
-EXPORT_SYMBOL(clear_user_page);
-
-void copy_user_page(void *vto, void *vfrom, unsigned long vaddr,
-		    struct page *pg)
-{
-	copy_page(vto, vfrom);
-
-	/*
-	 * We should be able to use the following optimisation, however
-	 * there are two problems.
-	 * Firstly a bug in some versions of binutils meant PLT sections
-	 * were not marked executable.
-	 * Secondly the first word in the GOT section is blrl, used
-	 * to establish the GOT address. Until recently the GOT was
-	 * not marked executable.
-	 * - Anton
-	 */
-#if 0
-	if (!vma->vm_file && ((vma->vm_flags & VM_EXEC) == 0))
-		return;
-#endif
-
-	flush_dcache_page(pg);
-}
-
-void flush_icache_user_range(struct vm_area_struct *vma, struct page *page,
-			     unsigned long addr, int len)
-{
-	unsigned long maddr;
-
-	maddr = (unsigned long) kmap(page) + (addr & ~PAGE_MASK);
-	flush_icache_range(maddr, maddr + len);
-	kunmap(page);
-}
-EXPORT_SYMBOL(flush_icache_user_range);
-
-/*
- * This is called at the end of handling a user page fault, when the
- * fault has been handled by updating a PTE in the linux page tables.
- * We use it to preload an HPTE into the hash table corresponding to
- * the updated linux PTE.
- * 
- * This must always be called with the pte lock held.
- */
-void update_mmu_cache(struct vm_area_struct *vma, unsigned long address,
-		      pte_t *ptep)
-{
-#ifdef CONFIG_PPC_STD_MMU
-	/*
-	 * We don't need to worry about _PAGE_PRESENT here because we are
-	 * called with either mm->page_table_lock held or ptl lock held
-	 */
-	unsigned long access, trap;
-
-	if (radix_enabled())
-		return;
-
-	/* We only want HPTEs for linux PTEs that have _PAGE_ACCESSED set */
-	if (!pte_young(*ptep) || address >= TASK_SIZE)
-		return;
-
-	/* We try to figure out if we are coming from an instruction
-	 * access fault and pass that down to __hash_page so we avoid
-	 * double-faulting on execution of fresh text. We have to test
-	 * for regs NULL since init will get here first thing at boot
-	 *
-	 * We also avoid filling the hash if not coming from a fault
-	 */
-
-	trap = current->thread.regs ? TRAP(current->thread.regs) : 0UL;
-	switch (trap) {
-	case 0x300:
-		access = 0UL;
-		break;
-	case 0x400:
-		access = _PAGE_EXEC;
-		break;
-	default:
-		return;
-	}
-
-	hash_preload(vma->vm_mm, address, access, trap);
-#endif /* CONFIG_PPC_STD_MMU */
-#if (defined(CONFIG_PPC_BOOK3E_64) || defined(CONFIG_PPC_FSL_BOOK3E)) \
-	&& defined(CONFIG_HUGETLB_PAGE)
-	if (is_vm_hugetlb_page(vma))
-		book3e_hugetlb_preload(vma, address, *ptep);
-#endif
+	ftrace_free_init_tramp();
 }
 
 /*
@@ -551,22 +324,26 @@ void update_mmu_cache(struct vm_area_struct *vma, unsigned long address,
  */
 static int __init add_system_ram_resources(void)
 {
-	struct memblock_region *reg;
+	phys_addr_t start, end;
+	u64 i;
 
-	for_each_memblock(memory, reg) {
+	for_each_mem_range(i, &start, &end) {
 		struct resource *res;
-		unsigned long base = reg->base;
-		unsigned long size = reg->size;
 
-		res = kzalloc(sizeof(struct resource), GFP_KERNEL);
+		res = kzalloc_obj(struct resource);
 		WARN_ON(!res);
 
 		if (res) {
 			res->name = "System RAM";
-			res->start = base;
-			res->end = base + size - 1;
+			res->start = start;
+			/*
+			 * In memblock, end points to the first byte after
+			 * the range while in resourses, end points to the
+			 * last byte in the range.
+			 */
+			res->end = end - 1;
 			res->flags = IORESOURCE_SYSTEM_RAM | IORESOURCE_BUSY;
-			WARN_ON(request_resource(&iomem_resource, res) < 0);
+			WARN_ON(insert_resource(&iomem_resource, res) < 0);
 		}
 	}
 
@@ -593,3 +370,84 @@ int devmem_is_allowed(unsigned long pfn)
 	return 0;
 }
 #endif /* CONFIG_STRICT_DEVMEM */
+
+/*
+ * This is defined in kernel/resource.c but only powerpc needs to export it, for
+ * the EHEA driver. Drop this when drivers/net/ethernet/ibm/ehea is removed.
+ */
+EXPORT_SYMBOL_GPL(walk_system_ram_range);
+
+#ifdef CONFIG_EXECMEM
+static struct execmem_info execmem_info __ro_after_init;
+
+#if defined(CONFIG_PPC_8xx) || defined(CONFIG_PPC_BOOK3S_603)
+static void prealloc_execmem_pgtable(void)
+{
+	unsigned long va;
+
+	for (va = ALIGN_DOWN(MODULES_VADDR, PGDIR_SIZE); va < MODULES_END; va += PGDIR_SIZE)
+		pte_alloc_kernel(pmd_off_k(va), va);
+}
+#else
+static void prealloc_execmem_pgtable(void) { }
+#endif
+
+struct execmem_info __init *execmem_arch_setup(void)
+{
+	pgprot_t kprobes_prot = strict_module_rwx_enabled() ? PAGE_KERNEL_ROX : PAGE_KERNEL_EXEC;
+	pgprot_t prot = strict_module_rwx_enabled() ? PAGE_KERNEL : PAGE_KERNEL_EXEC;
+	unsigned long fallback_start = 0, fallback_end = 0;
+	unsigned long start, end;
+
+	/*
+	 * BOOK3S_32 and 8xx define MODULES_VADDR for text allocations and
+	 * allow allocating data in the entire vmalloc space
+	 */
+#ifdef MODULES_VADDR
+	unsigned long limit = (unsigned long)_etext - SZ_32M;
+
+	/* First try within 32M limit from _etext to avoid branch trampolines */
+	if (MODULES_VADDR < PAGE_OFFSET && MODULES_END > limit) {
+		start = limit;
+		fallback_start = MODULES_VADDR;
+		fallback_end = MODULES_END;
+	} else {
+		start = MODULES_VADDR;
+	}
+
+	end = MODULES_END;
+#else
+	start = VMALLOC_START;
+	end = VMALLOC_END;
+#endif
+
+	prealloc_execmem_pgtable();
+
+	execmem_info = (struct execmem_info){
+		.ranges = {
+			[EXECMEM_DEFAULT] = {
+				.start	= start,
+				.end	= end,
+				.pgprot	= prot,
+				.alignment = 1,
+				.fallback_start	= fallback_start,
+				.fallback_end	= fallback_end,
+			},
+			[EXECMEM_KPROBES] = {
+				.start	= VMALLOC_START,
+				.end	= VMALLOC_END,
+				.pgprot	= kprobes_prot,
+				.alignment = 1,
+			},
+			[EXECMEM_MODULE_DATA] = {
+				.start	= VMALLOC_START,
+				.end	= VMALLOC_END,
+				.pgprot	= PAGE_KERNEL,
+				.alignment = 1,
+			},
+		},
+	};
+
+	return &execmem_info;
+}
+#endif /* CONFIG_EXECMEM */

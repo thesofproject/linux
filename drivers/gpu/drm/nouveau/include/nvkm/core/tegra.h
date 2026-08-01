@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: MIT */
 #ifndef __NVKM_DEVICE_TEGRA_H__
 #define __NVKM_DEVICE_TEGRA_H__
 #include <core/device.h>
@@ -8,7 +8,8 @@ struct nvkm_device_tegra {
 	const struct nvkm_device_tegra_func *func;
 	struct nvkm_device device;
 	struct platform_device *pdev;
-	int irq;
+
+	void __iomem *regs;
 
 	struct reset_control *rst;
 	struct clk *clk;
@@ -16,6 +17,8 @@ struct nvkm_device_tegra {
 	struct clk *clk_pwr;
 
 	struct regulator *vdd;
+
+	struct tegra_pmc *pmc;
 
 	struct {
 		/*
@@ -52,6 +55,5 @@ struct nvkm_device_tegra_func {
 int nvkm_device_tegra_new(const struct nvkm_device_tegra_func *,
 			  struct platform_device *,
 			  const char *cfg, const char *dbg,
-			  bool detect, bool mmio, u64 subdev_mask,
 			  struct nvkm_device **);
 #endif

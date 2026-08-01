@@ -9,14 +9,13 @@
  */
 
 #include <linux/slab.h>
-#include <linux/compat.h>
 #include <linux/device.h>
+#include <linux/io.h>
 #include <linux/module.h>
 #include <linux/uaccess.h>
 #include <linux/miscdevice.h>
 #include <linux/kernel_stat.h>
 
-#include <asm/compat.h>
 #include <asm/cio.h>
 #include <asm/chsc.h>
 #include <asm/isc.h>
@@ -82,26 +81,21 @@ static int chsc_subchannel_probe(struct subchannel *sch)
 	CHSC_MSG(6, "Detected chsc subchannel 0.%x.%04x\n",
 		 sch->schid.ssid, sch->schid.sch_no);
 	sch->isc = CHSC_SCH_ISC;
-	private = kzalloc(sizeof(*private), GFP_KERNEL);
+	private = kzalloc_obj(*private);
 	if (!private)
 		return -ENOMEM;
 	dev_set_drvdata(&sch->dev, private);
-	ret = cio_enable_subchannel(sch, (u32)(unsigned long)sch);
+	ret = cio_enable_subchannel(sch, (u32)virt_to_phys(sch));
 	if (ret) {
 		CHSC_MSG(0, "Failed to enable 0.%x.%04x: %d\n",
 			 sch->schid.ssid, sch->schid.sch_no, ret);
 		dev_set_drvdata(&sch->dev, NULL);
 		kfree(private);
-	} else {
-		if (dev_get_uevent_suppress(&sch->dev)) {
-			dev_set_uevent_suppress(&sch->dev, 0);
-			kobject_uevent(&sch->dev.kobj, KOBJ_ADD);
-		}
 	}
 	return ret;
 }
 
-static int chsc_subchannel_remove(struct subchannel *sch)
+static void chsc_subchannel_remove(struct subchannel *sch)
 {
 	struct chsc_private *private;
 
@@ -113,37 +107,11 @@ static int chsc_subchannel_remove(struct subchannel *sch)
 		put_device(&sch->dev);
 	}
 	kfree(private);
-	return 0;
 }
 
 static void chsc_subchannel_shutdown(struct subchannel *sch)
 {
 	cio_disable_subchannel(sch);
-}
-
-static int chsc_subchannel_prepare(struct subchannel *sch)
-{
-	int cc;
-	struct schib schib;
-	/*
-	 * Don't allow suspend while the subchannel is not idle
-	 * since we don't have a way to clear the subchannel and
-	 * cannot disable it with a request running.
-	 */
-	cc = stsch(sch->schid, &schib);
-	if (!cc && scsw_stctl(&schib.scsw))
-		return -EAGAIN;
-	return 0;
-}
-
-static int chsc_subchannel_freeze(struct subchannel *sch)
-{
-	return cio_disable_subchannel(sch);
-}
-
-static int chsc_subchannel_restore(struct subchannel *sch)
-{
-	return cio_enable_subchannel(sch, (u32)(unsigned long)sch);
 }
 
 static struct css_device_id chsc_subchannel_ids[] = {
@@ -162,10 +130,6 @@ static struct css_driver chsc_subchannel_driver = {
 	.probe = chsc_subchannel_probe,
 	.remove = chsc_subchannel_remove,
 	.shutdown = chsc_subchannel_shutdown,
-	.prepare = chsc_subchannel_prepare,
-	.freeze = chsc_subchannel_freeze,
-	.thaw = chsc_subchannel_restore,
-	.restore = chsc_subchannel_restore,
 };
 
 static int __init chsc_init_dbfs(void)
@@ -204,7 +168,7 @@ static void chsc_cleanup_sch_driver(void)
 
 static DEFINE_SPINLOCK(chsc_lock);
 
-static int chsc_subchannel_match_next_free(struct device *dev, void *data)
+static int chsc_subchannel_match_next_free(struct device *dev, const void *data)
 {
 	struct subchannel *sch = to_subchannel(dev);
 
@@ -246,10 +210,10 @@ static int chsc_async(struct chsc_async_area *chsc_area,
 
 	chsc_area->header.key = PAGE_DEFAULT_KEY >> 4;
 	while ((sch = chsc_get_next_subchannel(sch))) {
-		spin_lock(sch->lock);
+		spin_lock(&sch->lock);
 		private = dev_get_drvdata(&sch->dev);
 		if (private->request) {
-			spin_unlock(sch->lock);
+			spin_unlock(&sch->lock);
 			ret = -EBUSY;
 			continue;
 		}
@@ -274,7 +238,7 @@ static int chsc_async(struct chsc_async_area *chsc_area,
 		default:
 			ret = -ENODEV;
 		}
-		spin_unlock(sch->lock);
+		spin_unlock(&sch->lock);
 		CHSC_MSG(2, "chsc on 0.%x.%04x returned cc=%d\n",
 			 sch->schid.ssid, sch->schid.sch_no, cc);
 		if (ret == -EINPROGRESS)
@@ -331,7 +295,7 @@ static int chsc_ioctl_start(void __user *user_area)
 	chsc_area = (void *)get_zeroed_page(GFP_DMA | GFP_KERNEL);
 	if (!chsc_area)
 		return -ENOMEM;
-	request = kzalloc(sizeof(*request), GFP_KERNEL);
+	request = kzalloc_obj(*request);
 	if (!request) {
 		ret = -ENOMEM;
 		goto out_free;
@@ -371,7 +335,7 @@ static int chsc_ioctl_on_close_set(void __user *user_area)
 		ret = -EBUSY;
 		goto out_unlock;
 	}
-	on_close_request = kzalloc(sizeof(*on_close_request), GFP_KERNEL);
+	on_close_request = kzalloc_obj(*on_close_request);
 	if (!on_close_request) {
 		ret = -ENOMEM;
 		goto out_unlock;
@@ -477,7 +441,7 @@ static int chsc_ioctl_info_channel_path(void __user *user_cd)
 	scpcd_area = (void *)get_zeroed_page(GFP_KERNEL | GFP_DMA);
 	if (!scpcd_area)
 		return -ENOMEM;
-	cd = kzalloc(sizeof(*cd), GFP_KERNEL);
+	cd = kzalloc_obj(*cd);
 	if (!cd) {
 		ret = -ENOMEM;
 		goto out_free;
@@ -539,7 +503,7 @@ static int chsc_ioctl_info_cu(void __user *user_cd)
 	scucd_area = (void *)get_zeroed_page(GFP_KERNEL | GFP_DMA);
 	if (!scucd_area)
 		return -ENOMEM;
-	cd = kzalloc(sizeof(*cd), GFP_KERNEL);
+	cd = kzalloc_obj(*cd);
 	if (!cd) {
 		ret = -ENOMEM;
 		goto out_free;
@@ -602,7 +566,7 @@ static int chsc_ioctl_info_sch_cu(void __user *user_cud)
 	sscud_area = (void *)get_zeroed_page(GFP_KERNEL | GFP_DMA);
 	if (!sscud_area)
 		return -ENOMEM;
-	cud = kzalloc(sizeof(*cud), GFP_KERNEL);
+	cud = kzalloc_obj(*cud);
 	if (!cud) {
 		ret = -ENOMEM;
 		goto out_free;
@@ -664,7 +628,7 @@ static int chsc_ioctl_conf_info(void __user *user_ci)
 	sci_area = (void *)get_zeroed_page(GFP_KERNEL | GFP_DMA);
 	if (!sci_area)
 		return -ENOMEM;
-	ci = kzalloc(sizeof(*ci), GFP_KERNEL);
+	ci = kzalloc_obj(*ci);
 	if (!ci) {
 		ret = -ENOMEM;
 		goto out_free;
@@ -735,7 +699,7 @@ static int chsc_ioctl_conf_comp_list(void __user *user_ccl)
 	sccl_area = (void *)get_zeroed_page(GFP_KERNEL | GFP_DMA);
 	if (!sccl_area)
 		return -ENOMEM;
-	ccl = kzalloc(sizeof(*ccl), GFP_KERNEL);
+	ccl = kzalloc_obj(*ccl);
 	if (!ccl) {
 		ret = -ENOMEM;
 		goto out_free;
@@ -791,7 +755,7 @@ static int chsc_ioctl_chpd(void __user *user_chpd)
 	struct chsc_cpd_info *chpd;
 	int ret;
 
-	chpd = kzalloc(sizeof(*chpd), GFP_KERNEL);
+	chpd = kzalloc_obj(*chpd);
 	scpd_area = (void *)get_zeroed_page(GFP_KERNEL | GFP_DMA);
 	if (!scpd_area || !chpd) {
 		ret = -ENOMEM;
@@ -835,7 +799,7 @@ static int chsc_ioctl_dcal(void __user *user_dcal)
 	sdcal_area = (void *)get_zeroed_page(GFP_KERNEL | GFP_DMA);
 	if (!sdcal_area)
 		return -ENOMEM;
-	dcal = kzalloc(sizeof(*dcal), GFP_KERNEL);
+	dcal = kzalloc_obj(*dcal);
 	if (!dcal) {
 		ret = -ENOMEM;
 		goto out_free;
@@ -880,10 +844,7 @@ static long chsc_ioctl(struct file *filp, unsigned int cmd,
 	void __user *argp;
 
 	CHSC_MSG(2, "chsc_ioctl called, cmd=%x\n", cmd);
-	if (is_compat_task())
-		argp = compat_ptr(arg);
-	else
-		argp = (void __user *)arg;
+	argp = (void __user *)arg;
 	switch (cmd) {
 	case CHSC_START:
 		return chsc_ioctl_start(argp);
@@ -958,8 +919,6 @@ static const struct file_operations chsc_fops = {
 	.open = chsc_open,
 	.release = chsc_release,
 	.unlocked_ioctl = chsc_ioctl,
-	.compat_ioctl = chsc_ioctl,
-	.llseek = no_llseek,
 };
 
 static struct miscdevice chsc_misc_device = {

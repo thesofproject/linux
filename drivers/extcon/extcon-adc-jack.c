@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * drivers/extcon/extcon-adc-jack.c
  *
@@ -10,11 +11,6 @@
  * MyungJoo Ham <myungjoo.ham@samsung.com>
  *
  * Modified for calling to IIO to get adc by <anish.singh@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/module.h>
@@ -30,6 +26,7 @@
 
 /**
  * struct adc_jack_data - internal data for adc_jack device driver
+ * @dev:		The device structure associated with the adc_jack.
  * @edev:		extcon device.
  * @cable_names:	list of supported cables.
  * @adc_conditions:	list of adc value conditions.
@@ -39,6 +36,7 @@
  *			handling at handling_delay jiffies.
  * @handler:		extcon event handler called by interrupt handler.
  * @chan:		iio channel being queried.
+ * @wakeup_source:	Indicates if the device can wake up the system.
  */
 struct adc_jack_data {
 	struct device *dev;
@@ -128,7 +126,7 @@ static int adc_jack_probe(struct platform_device *pdev)
 	for (i = 0; data->adc_conditions[i].id != EXTCON_NONE; i++);
 	data->num_conditions = i;
 
-	data->chan = iio_channel_get(&pdev->dev, pdata->consumer_channel);
+	data->chan = devm_iio_channel_get(&pdev->dev, pdata->consumer_channel);
 	if (IS_ERR(data->chan))
 		return PTR_ERR(data->chan);
 
@@ -144,10 +142,8 @@ static int adc_jack_probe(struct platform_device *pdev)
 		return err;
 
 	data->irq = platform_get_irq(pdev, 0);
-	if (data->irq < 0) {
-		dev_err(&pdev->dev, "platform_get_irq failed\n");
+	if (data->irq < 0)
 		return -ENODEV;
-	}
 
 	err = request_any_context_irq(data->irq, adc_jack_irq_thread,
 			pdata->irq_flags, pdata->name, data);
@@ -164,15 +160,14 @@ static int adc_jack_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int adc_jack_remove(struct platform_device *pdev)
+static void adc_jack_remove(struct platform_device *pdev)
 {
 	struct adc_jack_data *data = platform_get_drvdata(pdev);
 
+	if (data->wakeup_source)
+		device_init_wakeup(&pdev->dev, false);
 	free_irq(data->irq, data);
 	cancel_work_sync(&data->handler.work);
-	iio_channel_release(data->chan);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP

@@ -1,26 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for NXP MCR20A 802.15.4 Wireless-PAN Networking controller
  *
  * Copyright (C) 2018 Xue Liu <liuxuenetmail@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/spi/spi.h>
 #include <linux/workqueue.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/skbuff.h>
-#include <linux/of_gpio.h>
 #include <linux/regmap.h>
 #include <linux/ieee802154.h>
 #include <linux/debugfs.h>
@@ -131,11 +122,6 @@ static const struct reg_sequence mar20a_iar_overwrites[] = {
 };
 
 #define MCR20A_VALID_CHANNELS (0x07FFF800)
-
-struct mcr20a_platform_data {
-	int rst_gpio;
-};
-
 #define MCR20A_MAX_BUF		(127)
 
 #define printdev(X) (&X->spi->dev)
@@ -264,7 +250,7 @@ static const struct regmap_config mcr20a_dar_regmap = {
 	.val_bits		= 8,
 	.write_flag_mask	= REGISTER_ACCESS | REGISTER_WRITE,
 	.read_flag_mask		= REGISTER_ACCESS | REGISTER_READ,
-	.cache_type		= REGCACHE_RBTREE,
+	.cache_type		= REGCACHE_MAPLE,
 	.writeable_reg		= mcr20a_dar_writeable,
 	.readable_reg		= mcr20a_dar_readable,
 	.volatile_reg		= mcr20a_dar_volatile,
@@ -400,7 +386,7 @@ static const struct regmap_config mcr20a_iar_regmap = {
 	.val_bits		= 8,
 	.write_flag_mask	= REGISTER_ACCESS | REGISTER_WRITE | IAR_INDEX,
 	.read_flag_mask		= REGISTER_ACCESS | REGISTER_READ  | IAR_INDEX,
-	.cache_type		= REGCACHE_RBTREE,
+	.cache_type		= REGCACHE_MAPLE,
 	.writeable_reg		= mcr20a_iar_writeable,
 	.readable_reg		= mcr20a_iar_readable,
 	.volatile_reg		= mcr20a_iar_volatile,
@@ -411,7 +397,6 @@ struct mcr20a_local {
 	struct spi_device *spi;
 
 	struct ieee802154_hw *hw;
-	struct mcr20a_platform_data *pdata;
 	struct regmap *regmap_dar;
 	struct regmap *regmap_iar;
 
@@ -538,6 +523,8 @@ mcr20a_start(struct ieee802154_hw *hw)
 	dev_dbg(printdev(lp), "no slotted operation\n");
 	ret = regmap_update_bits(lp->regmap_dar, DAR_PHY_CTRL1,
 				 DAR_PHY_CTRL1_SLOTTED, 0x0);
+	if (ret < 0)
+		return ret;
 
 	/* enable irq */
 	enable_irq(lp->spi->irq);
@@ -545,11 +532,15 @@ mcr20a_start(struct ieee802154_hw *hw)
 	/* Unmask SEQ interrupt */
 	ret = regmap_update_bits(lp->regmap_dar, DAR_PHY_CTRL2,
 				 DAR_PHY_CTRL2_SEQMSK, 0x0);
+	if (ret < 0)
+		return ret;
 
 	/* Start the RX sequence */
 	dev_dbg(printdev(lp), "start the RX sequence\n");
 	ret = regmap_update_bits(lp->regmap_dar, DAR_PHY_CTRL1,
 				 DAR_PHY_CTRL1_XCVSEQ_MASK, MCR20A_XCVSEQ_RX);
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }
@@ -808,7 +799,7 @@ mcr20a_handle_rx_read_buf_complete(void *context)
 	if (!skb)
 		return;
 
-	memcpy(skb_put(skb, len), lp->rx_buf, len);
+	__skb_put_data(skb, lp->rx_buf, len);
 	ieee802154_rx_irqsafe(lp->hw, skb, lp->rx_lqi[0]);
 
 	print_hex_dump_debug("mcr20a rx: ", DUMP_PREFIX_OFFSET, 16, 1,
@@ -902,19 +893,19 @@ mcr20a_irq_clean_complete(void *context)
 
 	switch (seq_state) {
 	/* TX IRQ, RX IRQ and SEQ IRQ */
-	case (0x03):
+	case (DAR_IRQSTS1_TXIRQ | DAR_IRQSTS1_SEQIRQ):
 		if (lp->is_tx) {
 			lp->is_tx = 0;
 			dev_dbg(printdev(lp), "TX is done. No ACK\n");
 			mcr20a_handle_tx_complete(lp);
 		}
 		break;
-	case (0x05):
-			/* rx is starting */
-			dev_dbg(printdev(lp), "RX is starting\n");
-			mcr20a_handle_rx(lp);
+	case (DAR_IRQSTS1_RXIRQ | DAR_IRQSTS1_SEQIRQ):
+		/* rx is starting */
+		dev_dbg(printdev(lp), "RX is starting\n");
+		mcr20a_handle_rx(lp);
 		break;
-	case (0x07):
+	case (DAR_IRQSTS1_RXIRQ | DAR_IRQSTS1_TXIRQ | DAR_IRQSTS1_SEQIRQ):
 		if (lp->is_tx) {
 			/* tx is done */
 			lp->is_tx = 0;
@@ -926,7 +917,7 @@ mcr20a_irq_clean_complete(void *context)
 			mcr20a_handle_rx(lp);
 		}
 		break;
-	case (0x01):
+	case (DAR_IRQSTS1_SEQIRQ):
 		if (lp->is_tx) {
 			dev_dbg(printdev(lp), "TX is starting\n");
 			mcr20a_handle_tx(lp);
@@ -975,20 +966,6 @@ static irqreturn_t mcr20a_irq_isr(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static int mcr20a_get_platform_data(struct spi_device *spi,
-				    struct mcr20a_platform_data *pdata)
-{
-	int ret = 0;
-
-	if (!spi->dev.of_node)
-		return -EINVAL;
-
-	pdata->rst_gpio = of_get_named_gpio(spi->dev.of_node, "rst_b-gpio", 0);
-	dev_dbg(&spi->dev, "rst_b-gpio: %d\n", pdata->rst_gpio);
-
-	return ret;
-}
-
 static void mcr20a_hw_setup(struct mcr20a_local *lp)
 {
 	u8 i;
@@ -996,10 +973,6 @@ static void mcr20a_hw_setup(struct mcr20a_local *lp)
 	struct wpan_phy *phy = lp->hw->phy;
 
 	dev_dbg(printdev(lp), "%s\n", __func__);
-
-	phy->symbol_duration = 16;
-	phy->lifs_period = 40;
-	phy->sifs_period = 12;
 
 	hw->flags = IEEE802154_HW_TX_OMIT_CKSUM |
 			IEEE802154_HW_AFILT |
@@ -1028,7 +1001,6 @@ static void mcr20a_hw_setup(struct mcr20a_local *lp)
 	phy->current_page = 0;
 	/* MCR20A default reset value */
 	phy->current_channel = 20;
-	phy->symbol_duration = 16;
 	phy->supported.tx_powers = mcr20a_powers;
 	phy->supported.tx_powers_size = ARRAY_SIZE(mcr20a_powers);
 	phy->cca_ed_level = phy->supported.cca_ed_levels[75];
@@ -1248,7 +1220,7 @@ mcr20a_probe(struct spi_device *spi)
 {
 	struct ieee802154_hw *hw;
 	struct mcr20a_local *lp;
-	struct mcr20a_platform_data *pdata;
+	struct gpio_desc *rst_b;
 	int irq_type;
 	int ret = -ENOMEM;
 
@@ -1259,48 +1231,29 @@ mcr20a_probe(struct spi_device *spi)
 		return -EINVAL;
 	}
 
-	pdata = kmalloc(sizeof(*pdata), GFP_KERNEL);
-	if (!pdata)
-		return -ENOMEM;
-
-	/* set mcr20a platform data */
-	ret = mcr20a_get_platform_data(spi, pdata);
-	if (ret < 0) {
-		dev_crit(&spi->dev, "mcr20a_get_platform_data failed.\n");
-		goto free_pdata;
-	}
-
-	/* init reset gpio */
-	if (gpio_is_valid(pdata->rst_gpio)) {
-		ret = devm_gpio_request_one(&spi->dev, pdata->rst_gpio,
-					    GPIOF_OUT_INIT_HIGH, "reset");
-		if (ret)
-			goto free_pdata;
-	}
+	rst_b = devm_gpiod_get(&spi->dev, "rst_b", GPIOD_OUT_HIGH);
+	if (IS_ERR(rst_b))
+		return dev_err_probe(&spi->dev, PTR_ERR(rst_b),
+				     "Failed to get 'rst_b' gpio");
 
 	/* reset mcr20a */
-	if (gpio_is_valid(pdata->rst_gpio)) {
-		usleep_range(10, 20);
-		gpio_set_value_cansleep(pdata->rst_gpio, 0);
-		usleep_range(10, 20);
-		gpio_set_value_cansleep(pdata->rst_gpio, 1);
-		usleep_range(120, 240);
-	}
+	usleep_range(10, 20);
+	gpiod_set_value_cansleep(rst_b, 1);
+	usleep_range(10, 20);
+	gpiod_set_value_cansleep(rst_b, 0);
+	usleep_range(120, 240);
 
 	/* allocate ieee802154_hw and private data */
 	hw = ieee802154_alloc_hw(sizeof(*lp), &mcr20a_hw_ops);
 	if (!hw) {
 		dev_crit(&spi->dev, "ieee802154_alloc_hw failed\n");
-		ret = -ENOMEM;
-		goto free_pdata;
+		return ret;
 	}
 
 	/* init mcr20a local data */
 	lp = hw->priv;
 	lp->hw = hw;
 	lp->spi = spi;
-	lp->spi->dev.platform_data = pdata;
-	lp->pdata = pdata;
 
 	/* init ieee802154_hw */
 	hw->parent = &spi->dev;
@@ -1349,15 +1302,12 @@ mcr20a_probe(struct spi_device *spi)
 		irq_type = IRQF_TRIGGER_FALLING;
 
 	ret = devm_request_irq(&spi->dev, spi->irq, mcr20a_irq_isr,
-			       irq_type, dev_name(&spi->dev), lp);
+			       irq_type | IRQF_NO_AUTOEN, dev_name(&spi->dev), lp);
 	if (ret) {
 		dev_err(&spi->dev, "could not request_irq for mcr20a\n");
 		ret = -ENODEV;
 		goto free_dev;
 	}
-
-	/* disable_irq by default and wait for starting hardware */
-	disable_irq(spi->irq);
 
 	ret = ieee802154_register_hw(hw);
 	if (ret) {
@@ -1369,13 +1319,11 @@ mcr20a_probe(struct spi_device *spi)
 
 free_dev:
 	ieee802154_free_hw(lp->hw);
-free_pdata:
-	kfree(pdata);
 
 	return ret;
 }
 
-static int mcr20a_remove(struct spi_device *spi)
+static void mcr20a_remove(struct spi_device *spi)
 {
 	struct mcr20a_local *lp = spi_get_drvdata(spi);
 
@@ -1383,8 +1331,6 @@ static int mcr20a_remove(struct spi_device *spi)
 
 	ieee802154_unregister_hw(lp->hw);
 	ieee802154_free_hw(lp->hw);
-
-	return 0;
 }
 
 static const struct of_device_id mcr20a_of_match[] = {
@@ -1402,7 +1348,7 @@ MODULE_DEVICE_TABLE(spi, mcr20a_device_id);
 static struct spi_driver mcr20a_driver = {
 	.id_table = mcr20a_device_id,
 	.driver = {
-		.of_match_table = of_match_ptr(mcr20a_of_match),
+		.of_match_table = mcr20a_of_match,
 		.name	= "mcr20a",
 	},
 	.probe      = mcr20a_probe,

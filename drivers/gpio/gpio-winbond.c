@@ -385,12 +385,13 @@ static int winbond_gpio_get(struct gpio_chip *gc, unsigned int offset)
 	unsigned long *base = gpiochip_get_data(gc);
 	const struct winbond_gpio_info *info;
 	bool val;
+	int ret;
 
 	winbond_gpio_get_info(&offset, &info);
 
-	val = winbond_sio_enter(*base);
-	if (val)
-		return val;
+	ret = winbond_sio_enter(*base);
+	if (ret)
+		return ret;
 
 	winbond_sio_select_logical(*base, info->dev);
 
@@ -457,17 +458,19 @@ static int winbond_gpio_direction_out(struct gpio_chip *gc,
 	return 0;
 }
 
-static void winbond_gpio_set(struct gpio_chip *gc, unsigned int offset,
-			     int val)
+static int winbond_gpio_set(struct gpio_chip *gc, unsigned int offset,
+			    int val)
 {
 	unsigned long *base = gpiochip_get_data(gc);
 	const struct winbond_gpio_info *info;
+	int ret;
 
 	if (!winbond_gpio_get_info(&offset, &info))
-		return;
+		return -EACCES;
 
-	if (winbond_sio_enter(*base) != 0)
-		return;
+	ret = winbond_sio_enter(*base);
+	if (ret)
+		return ret;
 
 	winbond_sio_select_logical(*base, info->dev);
 
@@ -480,6 +483,8 @@ static void winbond_gpio_set(struct gpio_chip *gc, unsigned int offset,
 		winbond_sio_reg_bclear(*base, info->datareg, offset);
 
 	winbond_sio_leave(*base);
+
+	return 0;
 }
 
 static struct gpio_chip winbond_gpio_chip = {

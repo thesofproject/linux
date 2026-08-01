@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   ALSA modem driver for Intel ICH (i8x0) chipsets
  *
@@ -5,22 +6,6 @@
  *
  *   This is modified (by Sasha Khapyorsky <sashak@alsa-project.org>) version
  *   of ALSA ICH sound driver intel8x0.c .
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */      
 
 #include <linux/io.h>
@@ -40,21 +25,6 @@ MODULE_AUTHOR("Jaroslav Kysela <perex@perex.cz>");
 MODULE_DESCRIPTION("Intel 82801AA,82901AB,i810,i820,i830,i840,i845,MX440; "
 		   "SiS 7013; NVidia MCP/2/2S/3 modems");
 MODULE_LICENSE("GPL");
-MODULE_SUPPORTED_DEVICE("{{Intel,82801AA-ICH},"
-		"{Intel,82901AB-ICH0},"
-		"{Intel,82801BA-ICH2},"
-		"{Intel,82801CA-ICH3},"
-		"{Intel,82801DB-ICH4},"
-		"{Intel,ICH5},"
-		"{Intel,ICH6},"
-		"{Intel,ICH7},"
-	        "{Intel,MX440},"
-		"{SiS,7013},"
-		"{NVidia,NForce Modem},"
-		"{NVidia,NForce2 Modem},"
-		"{NVidia,NForce2s Modem},"
-		"{NVidia,NForce3 Modem},"
-		"{AMD,AMD768}}");
 
 static int index = -2; /* Exclude the first card */
 static char *id = SNDRV_DEFAULT_STR1;	/* ID for this card */
@@ -87,7 +57,7 @@ enum { \
 	ICH_REG_##name##_PICB	= base + 0x08,	/* word - position in current buffer */ \
 	ICH_REG_##name##_PIV	= base + 0x0a,	/* byte - prefetched index value */ \
 	ICH_REG_##name##_CR	= base + 0x0b,	/* byte - control register */ \
-};
+}
 
 /* busmaster blocks */
 DEFINE_REGSET(OFF, 0);		/* offset */
@@ -168,7 +138,7 @@ enum { ALID_MDMIN, ALID_MDMOUT, ALID_MDMLAST = ALID_MDMOUT };
 struct ichdev {
 	unsigned int ichd;			/* ich device number */
 	unsigned long reg_offset;		/* offset to bmaddr */
-	u32 *bdbar;				/* CPU address (32bit) */
+	__le32 *bdbar;				/* CPU address (32bit) */
 	unsigned int bdbar_addr;		/* PCI bus address (32bit) */
 	struct snd_pcm_substream *substream;
 	unsigned int physbuf;			/* physical address (32bit) */
@@ -212,7 +182,7 @@ struct intel8x0m {
 
 	spinlock_t reg_lock;
 	
-	struct snd_dma_buffer bdbars;
+	struct snd_dma_buffer *bdbars;
 	u32 bdbars_count;
 	u32 int_sta_reg;		/* interrupt status register */
 	u32 int_sta_mask;		/* interrupt status mask */
@@ -220,26 +190,78 @@ struct intel8x0m {
 };
 
 static const struct pci_device_id snd_intel8x0m_ids[] = {
-	{ PCI_VDEVICE(INTEL, 0x2416), DEVICE_INTEL },	/* 82801AA */
-	{ PCI_VDEVICE(INTEL, 0x2426), DEVICE_INTEL },	/* 82901AB */
-	{ PCI_VDEVICE(INTEL, 0x2446), DEVICE_INTEL },	/* 82801BA */
-	{ PCI_VDEVICE(INTEL, 0x2486), DEVICE_INTEL },	/* ICH3 */
-	{ PCI_VDEVICE(INTEL, 0x24c6), DEVICE_INTEL }, /* ICH4 */
-	{ PCI_VDEVICE(INTEL, 0x24d6), DEVICE_INTEL }, /* ICH5 */
-	{ PCI_VDEVICE(INTEL, 0x266d), DEVICE_INTEL },	/* ICH6 */
-	{ PCI_VDEVICE(INTEL, 0x27dd), DEVICE_INTEL },	/* ICH7 */
-	{ PCI_VDEVICE(INTEL, 0x7196), DEVICE_INTEL },	/* 440MX */
-	{ PCI_VDEVICE(AMD, 0x7446), DEVICE_INTEL },	/* AMD768 */
-	{ PCI_VDEVICE(SI, 0x7013), DEVICE_SIS },	/* SI7013 */
-	{ PCI_VDEVICE(NVIDIA, 0x01c1), DEVICE_NFORCE }, /* NFORCE */
-	{ PCI_VDEVICE(NVIDIA, 0x0069), DEVICE_NFORCE }, /* NFORCE2 */
-	{ PCI_VDEVICE(NVIDIA, 0x0089), DEVICE_NFORCE }, /* NFORCE2s */
-	{ PCI_VDEVICE(NVIDIA, 0x00d9), DEVICE_NFORCE }, /* NFORCE3 */
-	{ PCI_VDEVICE(AMD, 0x746e), DEVICE_INTEL },	/* AMD8111 */
+	{
+		/* 82801AA */
+		PCI_VDEVICE(INTEL, 0x2416),
+		.driver_data = DEVICE_INTEL,
+	}, {
+		/* 82901AB */
+		PCI_VDEVICE(INTEL, 0x2426),
+		.driver_data = DEVICE_INTEL
+	}, {
+		/* 82801BA */
+		PCI_VDEVICE(INTEL, 0x2446),
+		.driver_data = DEVICE_INTEL
+	}, {
+		/* ICH3 */
+		PCI_VDEVICE(INTEL, 0x2486),
+		.driver_data = DEVICE_INTEL
+	}, {
+		/* ICH4 */
+		PCI_VDEVICE(INTEL, 0x24c6),
+		.driver_data = DEVICE_INTEL,
+	}, {
+		/* ICH5 */
+		PCI_VDEVICE(INTEL, 0x24d6),
+		.driver_data = DEVICE_INTEL,
+	}, {
+		/* ICH6 */
+		PCI_VDEVICE(INTEL, 0x266d),
+		.driver_data = DEVICE_INTEL,
+	}, {
+		/* ICH7 */
+		PCI_VDEVICE(INTEL, 0x27dd),
+		.driver_data = DEVICE_INTEL,
+	}, {
+		/* 440MX */
+		PCI_VDEVICE(INTEL, 0x7196),
+		.driver_data = DEVICE_INTEL,
+	}, {
+		/* AMD768 */
+		PCI_VDEVICE(AMD, 0x7446),
+		.driver_data = DEVICE_INTEL,
+	}, {
+		/* SI7013 */
+		PCI_VDEVICE(SI, 0x7013),
+		.driver_data = DEVICE_SIS,
+	}, {
+		/* NFORCE */
+		PCI_VDEVICE(NVIDIA, 0x01c1),
+		.driver_data = DEVICE_NFORCE,
+	}, {
+		/* NFORCE2 */
+		PCI_VDEVICE(NVIDIA, 0x0069),
+		.driver_data = DEVICE_NFORCE,
+	}, {
+		/* NFORCE2s */
+		PCI_VDEVICE(NVIDIA, 0x0089),
+		.driver_data = DEVICE_NFORCE,
+	}, {
+		/* NFORCE3 */
+		PCI_VDEVICE(NVIDIA, 0x00d9),
+		.driver_data = DEVICE_NFORCE,
+	}, {
+		/* AMD8111 */
+		PCI_VDEVICE(AMD, 0x746e),
+		.driver_data = DEVICE_INTEL
 #if 0
-	{ PCI_VDEVICE(AL, 0x5455), DEVICE_ALI },   /* Ali5455 */
+	}, {
+		/* Ali5455 */
+		PCI_VDEVICE(AL, 0x5455),
+		.driver_data = DEVICE_ALI,
 #endif
-	{ 0, }
+	},
+	{ }
 };
 
 MODULE_DEVICE_TABLE(pci, snd_intel8x0m_ids);
@@ -303,7 +325,7 @@ static inline void iaputword(struct intel8x0m *chip, u32 offset, u16 val)
 /* return the GLOB_STA bit for the corresponding codec */
 static unsigned int get_ich_codec_bit(struct intel8x0m *chip, unsigned int codec)
 {
-	static unsigned int codec_bit[3] = {
+	static const unsigned int codec_bit[3] = {
 		ICH_PCR, ICH_SCR, ICH_TCR
 	};
 	if (snd_BUG_ON(codec >= 3))
@@ -372,7 +394,8 @@ static unsigned short snd_intel8x0m_codec_read(struct snd_ac97 *ac97,
 		res = 0xffff;
 	} else {
 		res = iagetword(chip, reg + ac97->num * 0x80);
-		if ((tmp = igetdword(chip, ICHREG(GLOB_STA))) & ICH_RCS) {
+		tmp = igetdword(chip, ICHREG(GLOB_STA));
+		if (tmp & ICH_RCS) {
 			/* reset RCS and preserve other R/WC bits */
 			iputdword(chip, ICHREG(GLOB_STA),
 				  tmp & ~(ICH_SRI|ICH_PRI|ICH_TRI|ICH_GSCI));
@@ -395,7 +418,7 @@ static unsigned short snd_intel8x0m_codec_read(struct snd_ac97 *ac97,
 static void snd_intel8x0m_setup_periods(struct intel8x0m *chip, struct ichdev *ichdev)
 {
 	int idx;
-	u32 *bdbar = ichdev->bdbar;
+	__le32 *bdbar = ichdev->bdbar;
 	unsigned long port = ichdev->reg_offset;
 
 	iputdword(chip, port + ICH_REG_OFF_BDBAR, ichdev->bdbar_addr);
@@ -452,7 +475,6 @@ static inline void snd_intel8x0m_update(struct intel8x0m *chip, struct ichdev *i
 
 	civ = igetbyte(chip, port + ICH_REG_OFF_CIV);
 	if (civ == ichdev->civ) {
-		// snd_printd("civ same %d\n", civ);
 		step = 1;
 		ichdev->civ++;
 		ichdev->civ &= ICH_REG_LVI_MASK;
@@ -460,8 +482,6 @@ static inline void snd_intel8x0m_update(struct intel8x0m *chip, struct ichdev *i
 		step = civ - ichdev->civ;
 		if (step < 0)
 			step += ICH_REG_LVI_MASK + 1;
-		// if (step != 1)
-		//	snd_printd("step = %d, %d -> %d\n", step, ichdev->civ, civ);
 		ichdev->civ = civ;
 	}
 
@@ -503,16 +523,13 @@ static irqreturn_t snd_intel8x0m_interrupt(int irq, void *dev_id)
 	unsigned int status;
 	unsigned int i;
 
-	spin_lock(&chip->reg_lock);
+	guard(spinlock)(&chip->reg_lock);
 	status = igetdword(chip, chip->int_sta_reg);
-	if (status == 0xffffffff) { /* we are not yet resumed */
-		spin_unlock(&chip->reg_lock);
+	if (status == 0xffffffff) /* we are not yet resumed */
 		return IRQ_NONE;
-	}
 	if ((status & chip->int_sta_mask) == 0) {
 		if (status)
 			iputdword(chip, chip->int_sta_reg, status);
-		spin_unlock(&chip->reg_lock);
 		return IRQ_NONE;
 	}
 
@@ -524,7 +541,6 @@ static irqreturn_t snd_intel8x0m_interrupt(int irq, void *dev_id)
 
 	/* ack them */
 	iputdword(chip, chip->int_sta_reg, status & chip->int_sta_mask);
-	spin_unlock(&chip->reg_lock);
 	
 	return IRQ_HANDLED;
 }
@@ -566,17 +582,6 @@ static int snd_intel8x0m_pcm_trigger(struct snd_pcm_substream *substream, int cm
 		iputbyte(chip, port + ICH_REG_OFF_CR, ICH_RESETREGS);
 	}
 	return 0;
-}
-
-static int snd_intel8x0m_hw_params(struct snd_pcm_substream *substream,
-				  struct snd_pcm_hw_params *hw_params)
-{
-	return snd_pcm_lib_malloc_pages(substream, params_buffer_bytes(hw_params));
-}
-
-static int snd_intel8x0m_hw_free(struct snd_pcm_substream *substream)
-{
-	return snd_pcm_lib_free_pages(substream);
 }
 
 static snd_pcm_uframes_t snd_intel8x0m_pcm_pointer(struct snd_pcm_substream *substream)
@@ -688,9 +693,6 @@ static int snd_intel8x0m_capture_close(struct snd_pcm_substream *substream)
 static const struct snd_pcm_ops snd_intel8x0m_playback_ops = {
 	.open =		snd_intel8x0m_playback_open,
 	.close =	snd_intel8x0m_playback_close,
-	.ioctl =	snd_pcm_lib_ioctl,
-	.hw_params =	snd_intel8x0m_hw_params,
-	.hw_free =	snd_intel8x0m_hw_free,
 	.prepare =	snd_intel8x0m_pcm_prepare,
 	.trigger =	snd_intel8x0m_pcm_trigger,
 	.pointer =	snd_intel8x0m_pcm_pointer,
@@ -699,9 +701,6 @@ static const struct snd_pcm_ops snd_intel8x0m_playback_ops = {
 static const struct snd_pcm_ops snd_intel8x0m_capture_ops = {
 	.open =		snd_intel8x0m_capture_open,
 	.close =	snd_intel8x0m_capture_close,
-	.ioctl =	snd_pcm_lib_ioctl,
-	.hw_params =	snd_intel8x0m_hw_params,
-	.hw_free =	snd_intel8x0m_hw_free,
 	.prepare =	snd_intel8x0m_pcm_prepare,
 	.trigger =	snd_intel8x0m_pcm_trigger,
 	.pointer =	snd_intel8x0m_pcm_pointer,
@@ -718,7 +717,7 @@ struct ich_pcm_table {
 };
 
 static int snd_intel8x0m_pcm1(struct intel8x0m *chip, int device,
-			      struct ich_pcm_table *rec)
+			      const struct ich_pcm_table *rec)
 {
 	struct snd_pcm *pcm;
 	int err;
@@ -727,7 +726,7 @@ static int snd_intel8x0m_pcm1(struct intel8x0m *chip, int device,
 	if (rec->suffix)
 		sprintf(name, "Intel ICH - %s", rec->suffix);
 	else
-		strcpy(name, "Intel ICH");
+		strscpy(name, "Intel ICH");
 	err = snd_pcm_new(chip->card, name, device,
 			  rec->playback_ops ? 1 : 0,
 			  rec->capture_ops ? 1 : 0, &pcm);
@@ -745,18 +744,18 @@ static int snd_intel8x0m_pcm1(struct intel8x0m *chip, int device,
 	if (rec->suffix)
 		sprintf(pcm->name, "%s - %s", chip->card->shortname, rec->suffix);
 	else
-		strcpy(pcm->name, chip->card->shortname);
+		strscpy(pcm->name, chip->card->shortname);
 	chip->pcm[device] = pcm;
 
-	snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_DEV,
-					      snd_dma_pci_data(chip->pci),
-					      rec->prealloc_size,
-					      rec->prealloc_max_size);
+	snd_pcm_set_managed_buffer_all(pcm, SNDRV_DMA_TYPE_DEV,
+				       &chip->pci->dev,
+				       rec->prealloc_size,
+				       rec->prealloc_max_size);
 
 	return 0;
 }
 
-static struct ich_pcm_table intel_pcms[] = {
+static const struct ich_pcm_table intel_pcms[] = {
 	{
 		.suffix = "Modem",
 		.playback_ops = &snd_intel8x0m_playback_ops,
@@ -769,7 +768,7 @@ static struct ich_pcm_table intel_pcms[] = {
 static int snd_intel8x0m_pcm(struct intel8x0m *chip)
 {
 	int i, tblsize, device, err;
-	struct ich_pcm_table *tbl, *rec;
+	const struct ich_pcm_table *tbl, *rec;
 
 #if 1
 	tbl = intel_pcms;
@@ -833,7 +832,7 @@ static int snd_intel8x0m_mixer(struct intel8x0m *chip, int ac97_clock)
 	struct snd_ac97 *x97;
 	int err;
 	unsigned int glob_sta = 0;
-	static struct snd_ac97_bus_ops ops = {
+	static const struct snd_ac97_bus_ops ops = {
 		.write = snd_intel8x0m_codec_write,
 		.read = snd_intel8x0m_codec_read,
 	};
@@ -847,7 +846,8 @@ static int snd_intel8x0m_mixer(struct intel8x0m *chip, int ac97_clock)
 
 	glob_sta = igetdword(chip, ICHREG(GLOB_STA));
 
-	if ((err = snd_ac97_bus(chip->card, 0, &ops, chip, &pbus)) < 0)
+	err = snd_ac97_bus(chip->card, 0, &ops, chip, &pbus);
+	if (err < 0)
 		goto __err;
 	pbus->private_free = snd_intel8x0m_mixer_free_ac97_bus;
 	if (ac97_clock >= 8000 && ac97_clock <= 48000)
@@ -856,7 +856,8 @@ static int snd_intel8x0m_mixer(struct intel8x0m *chip, int ac97_clock)
 
 	ac97.pci = chip->pci;
 	ac97.num = glob_sta & ICH_SCR ? 1 : 0;
-	if ((err = snd_ac97_mixer(pbus, &ac97, &x97)) < 0) {
+	err = snd_ac97_mixer(pbus, &ac97, &x97);
+	if (err < 0) {
 		dev_err(chip->card->dev,
 			"Unable to initialize codec #%d\n", ac97.num);
 		if (ac97.num == 0)
@@ -962,7 +963,7 @@ static int snd_intel8x0m_ich_chip_init(struct intel8x0m *chip, int probing)
 	}
 
 	if (chip->device_type == DEVICE_SIS) {
-		/* unmute the output on SIS7012 */
+		/* unmute the output on SIS7013 */
 		iputword(chip, 0x4c, igetword(chip, 0x4c) | 1);
 	}
 
@@ -974,7 +975,8 @@ static int snd_intel8x0m_chip_init(struct intel8x0m *chip, int probing)
 	unsigned int i;
 	int err;
 	
-	if ((err = snd_intel8x0m_ich_chip_init(chip, probing)) < 0)
+	err = snd_intel8x0m_ich_chip_init(chip, probing);
+	if (err < 0)
 		return err;
 	iagetword(chip, 0);	/* clear semaphore flag */
 
@@ -990,8 +992,9 @@ static int snd_intel8x0m_chip_init(struct intel8x0m *chip, int probing)
 	return 0;
 }
 
-static int snd_intel8x0m_free(struct intel8x0m *chip)
+static void snd_intel8x0m_free(struct snd_card *card)
 {
+	struct intel8x0m *chip = card->private_data;
 	unsigned int i;
 
 	if (chip->irq < 0)
@@ -1005,19 +1008,8 @@ static int snd_intel8x0m_free(struct intel8x0m *chip)
  __hw_end:
 	if (chip->irq >= 0)
 		free_irq(chip->irq, chip);
-	if (chip->bdbars.area)
-		snd_dma_free_pages(&chip->bdbars);
-	if (chip->addr)
-		pci_iounmap(chip->pci, chip->addr);
-	if (chip->bmaddr)
-		pci_iounmap(chip->pci, chip->bmaddr);
-	pci_release_regions(chip->pci);
-	pci_disable_device(chip->pci);
-	kfree(chip);
-	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
 /*
  * power management
  */
@@ -1025,15 +1017,13 @@ static int intel8x0m_suspend(struct device *dev)
 {
 	struct snd_card *card = dev_get_drvdata(dev);
 	struct intel8x0m *chip = card->private_data;
-	int i;
 
 	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
-	for (i = 0; i < chip->pcm_devs; i++)
-		snd_pcm_suspend_all(chip->pcm[i]);
 	snd_ac97_suspend(chip->ac97);
 	if (chip->irq >= 0) {
 		free_irq(chip->irq, chip);
 		chip->irq = -1;
+		card->sync_irq = -1;
 	}
 	return 0;
 }
@@ -1052,6 +1042,7 @@ static int intel8x0m_resume(struct device *dev)
 		return -EIO;
 	}
 	chip->irq = pci->irq;
+	card->sync_irq = chip->irq;
 	snd_intel8x0m_chip_init(chip, 0);
 	snd_ac97_resume(chip->ac97);
 
@@ -1059,11 +1050,7 @@ static int intel8x0m_resume(struct device *dev)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(intel8x0m_pm, intel8x0m_suspend, intel8x0m_resume);
-#define INTEL8X0M_PM_OPS	&intel8x0m_pm
-#else
-#define INTEL8X0M_PM_OPS	NULL
-#endif /* CONFIG_PM_SLEEP */
+static DEFINE_SIMPLE_DEV_PM_OPS(intel8x0m_pm, intel8x0m_suspend, intel8x0m_resume);
 
 static void snd_intel8x0m_proc_read(struct snd_info_entry * entry,
 				   struct snd_info_buffer *buffer)
@@ -1087,16 +1074,8 @@ static void snd_intel8x0m_proc_read(struct snd_info_entry * entry,
 
 static void snd_intel8x0m_proc_init(struct intel8x0m *chip)
 {
-	struct snd_info_entry *entry;
-
-	if (! snd_card_proc_new(chip->card, "intel8x0m", &entry))
-		snd_info_set_text_ops(entry, chip, snd_intel8x0m_proc_read);
-}
-
-static int snd_intel8x0m_dev_free(struct snd_device *device)
-{
-	struct intel8x0m *chip = device->device_data;
-	return snd_intel8x0m_free(chip);
+	snd_card_ro_proc_new(chip->card, "intel8x0m", chip,
+			     snd_intel8x0m_proc_read);
 }
 
 struct ich_reg_info {
@@ -1104,82 +1083,48 @@ struct ich_reg_info {
 	unsigned int offset;
 };
 
-static int snd_intel8x0m_create(struct snd_card *card,
-				struct pci_dev *pci,
-				unsigned long device_type,
-				struct intel8x0m **r_intel8x0m)
+static int snd_intel8x0m_init(struct snd_card *card,
+			      struct pci_dev *pci,
+			      unsigned long device_type)
 {
-	struct intel8x0m *chip;
+	struct intel8x0m *chip = card->private_data;
 	int err;
 	unsigned int i;
 	unsigned int int_sta_masks;
 	struct ichdev *ichdev;
-	static struct snd_device_ops ops = {
-		.dev_free =	snd_intel8x0m_dev_free,
-	};
-	static struct ich_reg_info intel_regs[2] = {
+	static const struct ich_reg_info intel_regs[2] = {
 		{ ICH_MIINT, 0 },
 		{ ICH_MOINT, 0x10 },
 	};
-	struct ich_reg_info *tbl;
+	const struct ich_reg_info *tbl;
 
-	*r_intel8x0m = NULL;
-
-	if ((err = pci_enable_device(pci)) < 0)
+	err = pcim_enable_device(pci);
+	if (err < 0)
 		return err;
 
-	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
-	if (chip == NULL) {
-		pci_disable_device(pci);
-		return -ENOMEM;
-	}
 	spin_lock_init(&chip->reg_lock);
 	chip->device_type = device_type;
 	chip->card = card;
 	chip->pci = pci;
 	chip->irq = -1;
 
-	if ((err = pci_request_regions(pci, card->shortname)) < 0) {
-		kfree(chip);
-		pci_disable_device(pci);
+	err = pcim_request_all_regions(pci, card->shortname);
+	if (err < 0)
 		return err;
-	}
 
 	if (device_type == DEVICE_ALI) {
 		/* ALI5455 has no ac97 region */
-		chip->bmaddr = pci_iomap(pci, 0, 0);
-		goto port_inited;
+		chip->bmaddr = pcim_iomap(pci, 0, 0);
+	} else {
+		if (pci_resource_flags(pci, 2) & IORESOURCE_MEM) /* ICH4 and Nforce */
+			chip->addr = pcim_iomap(pci, 2, 0);
+		else
+			chip->addr = pcim_iomap(pci, 0, 0);
+		if (pci_resource_flags(pci, 3) & IORESOURCE_MEM) /* ICH4 */
+			chip->bmaddr = pcim_iomap(pci, 3, 0);
+		else
+			chip->bmaddr = pcim_iomap(pci, 1, 0);
 	}
-
-	if (pci_resource_flags(pci, 2) & IORESOURCE_MEM) /* ICH4 and Nforce */
-		chip->addr = pci_iomap(pci, 2, 0);
-	else
-		chip->addr = pci_iomap(pci, 0, 0);
-	if (!chip->addr) {
-		dev_err(card->dev, "AC'97 space ioremap problem\n");
-		snd_intel8x0m_free(chip);
-		return -EIO;
-	}
-	if (pci_resource_flags(pci, 3) & IORESOURCE_MEM) /* ICH4 */
-		chip->bmaddr = pci_iomap(pci, 3, 0);
-	else
-		chip->bmaddr = pci_iomap(pci, 1, 0);
-	if (!chip->bmaddr) {
-		dev_err(card->dev, "Controller space ioremap problem\n");
-		snd_intel8x0m_free(chip);
-		return -EIO;
-	}
-
- port_inited:
-	if (request_irq(pci->irq, snd_intel8x0m_interrupt, IRQF_SHARED,
-			KBUILD_MODNAME, chip)) {
-		dev_err(card->dev, "unable to grab IRQ %d\n", pci->irq);
-		snd_intel8x0m_free(chip);
-		return -EBUSY;
-	}
-	chip->irq = pci->irq;
-	pci_set_master(pci);
-	synchronize_irq(chip->irq);
 
 	/* initialize offsets */
 	chip->bdbars_count = 2;
@@ -1206,35 +1151,44 @@ static int snd_intel8x0m_create(struct snd_card *card,
 
 	/* allocate buffer descriptor lists */
 	/* the start of each lists must be aligned to 8 bytes */
-	if (snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV, snd_dma_pci_data(pci),
-				chip->bdbars_count * sizeof(u32) * ICH_MAX_FRAGS * 2,
-				&chip->bdbars) < 0) {
-		snd_intel8x0m_free(chip);
+	chip->bdbars = snd_devm_alloc_pages(&pci->dev, SNDRV_DMA_TYPE_DEV,
+					    chip->bdbars_count * sizeof(u32) *
+					    ICH_MAX_FRAGS * 2);
+	if (!chip->bdbars)
 		return -ENOMEM;
-	}
+
 	/* tables must be aligned to 8 bytes here, but the kernel pages
 	   are much bigger, so we don't care (on i386) */
 	int_sta_masks = 0;
 	for (i = 0; i < chip->bdbars_count; i++) {
 		ichdev = &chip->ichd[i];
-		ichdev->bdbar = ((u32 *)chip->bdbars.area) + (i * ICH_MAX_FRAGS * 2);
-		ichdev->bdbar_addr = chip->bdbars.addr + (i * sizeof(u32) * ICH_MAX_FRAGS * 2);
+		ichdev->bdbar = ((__le32 *)chip->bdbars->area) + (i * ICH_MAX_FRAGS * 2);
+		ichdev->bdbar_addr = chip->bdbars->addr + (i * sizeof(u32) * ICH_MAX_FRAGS * 2);
 		int_sta_masks |= ichdev->int_sta_mask;
 	}
 	chip->int_sta_reg = ICH_REG_GLOB_STA;
 	chip->int_sta_mask = int_sta_masks;
 
-	if ((err = snd_intel8x0m_chip_init(chip, 1)) < 0) {
-		snd_intel8x0m_free(chip);
-		return err;
-	}
+	pci_set_master(pci);
 
-	if ((err = snd_device_new(card, SNDRV_DEV_LOWLEVEL, chip, &ops)) < 0) {
-		snd_intel8x0m_free(chip);
+	err = snd_intel8x0m_chip_init(chip, 1);
+	if (err < 0)
 		return err;
-	}
 
-	*r_intel8x0m = chip;
+	/* NOTE: we don't use devm version here since it's released /
+	 * re-acquired in PM callbacks.
+	 * It's released explicitly in snd_intel8x0m_free(), too.
+	 */
+	if (request_irq(pci->irq, snd_intel8x0m_interrupt, IRQF_SHARED,
+			KBUILD_MODNAME, chip)) {
+		dev_err(card->dev, "unable to grab IRQ %d\n", pci->irq);
+		return -EBUSY;
+	}
+	chip->irq = pci->irq;
+	card->sync_irq = chip->irq;
+
+	card->private_free = snd_intel8x0m_free;
+
 	return 0;
 }
 
@@ -1264,68 +1218,65 @@ static struct shortname_table {
 	{ 0 },
 };
 
-static int snd_intel8x0m_probe(struct pci_dev *pci,
-			       const struct pci_device_id *pci_id)
+static int __snd_intel8x0m_probe(struct pci_dev *pci,
+				 const struct pci_device_id *pci_id)
 {
 	struct snd_card *card;
 	struct intel8x0m *chip;
 	int err;
 	struct shortname_table *name;
 
-	err = snd_card_new(&pci->dev, index, id, THIS_MODULE, 0, &card);
+	err = snd_devm_card_new(&pci->dev, index, id, THIS_MODULE,
+				sizeof(*chip), &card);
 	if (err < 0)
 		return err;
+	chip = card->private_data;
 
-	strcpy(card->driver, "ICH-MODEM");
-	strcpy(card->shortname, "Intel ICH");
+	strscpy(card->driver, "ICH-MODEM");
+	strscpy(card->shortname, "Intel ICH");
 	for (name = shortnames; name->id; name++) {
 		if (pci->device == name->id) {
-			strcpy(card->shortname, name->s);
+			strscpy(card->shortname, name->s);
 			break;
 		}
 	}
 	strcat(card->shortname," Modem");
 
-	if ((err = snd_intel8x0m_create(card, pci, pci_id->driver_data, &chip)) < 0) {
-		snd_card_free(card);
+	err = snd_intel8x0m_init(card, pci, pci_id->driver_data);
+	if (err < 0)
 		return err;
-	}
-	card->private_data = chip;
 
-	if ((err = snd_intel8x0m_mixer(chip, ac97_clock)) < 0) {
-		snd_card_free(card);
+	err = snd_intel8x0m_mixer(chip, ac97_clock);
+	if (err < 0)
 		return err;
-	}
-	if ((err = snd_intel8x0m_pcm(chip)) < 0) {
-		snd_card_free(card);
+	err = snd_intel8x0m_pcm(chip);
+	if (err < 0)
 		return err;
-	}
 	
 	snd_intel8x0m_proc_init(chip);
 
 	sprintf(card->longname, "%s at irq %i",
 		card->shortname, chip->irq);
 
-	if ((err = snd_card_register(card)) < 0) {
-		snd_card_free(card);
+	err = snd_card_register(card);
+	if (err < 0)
 		return err;
-	}
 	pci_set_drvdata(pci, card);
 	return 0;
 }
 
-static void snd_intel8x0m_remove(struct pci_dev *pci)
+static int snd_intel8x0m_probe(struct pci_dev *pci,
+			       const struct pci_device_id *pci_id)
 {
-	snd_card_free(pci_get_drvdata(pci));
+	return snd_card_free_on_error(&pci->dev, __snd_intel8x0m_probe(pci, pci_id));
 }
 
 static struct pci_driver intel8x0m_driver = {
 	.name = KBUILD_MODNAME,
 	.id_table = snd_intel8x0m_ids,
 	.probe = snd_intel8x0m_probe,
-	.remove = snd_intel8x0m_remove,
 	.driver = {
-		.pm = INTEL8X0M_PM_OPS,
+		.pm = &intel8x0m_pm,
 	},
 };
 

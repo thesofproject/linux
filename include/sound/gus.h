@@ -1,25 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef __SOUND_GUS_H
 #define __SOUND_GUS_H
 
 /*
  *  Global structures used for GUS part of ALSA driver
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <sound/pcm.h>
@@ -528,25 +513,8 @@ struct _SND_IW_LFO_PROGRAM {
 	unsigned short depth;
 };
 
-#if 0
-extern irqreturn_t snd_gf1_lfo_effect_interrupt(struct snd_gus_card * gus, snd_gf1_voice_t * voice);
-#endif
-extern void snd_gf1_lfo_init(struct snd_gus_card * gus);
-extern void snd_gf1_lfo_done(struct snd_gus_card * gus);
-extern void snd_gf1_lfo_program(struct snd_gus_card * gus, int voice, int lfo_type, struct _SND_IW_LFO_PROGRAM *program);
-extern void snd_gf1_lfo_enable(struct snd_gus_card * gus, int voice, int lfo_type);
-extern void snd_gf1_lfo_disable(struct snd_gus_card * gus, int voice, int lfo_type);
-extern void snd_gf1_lfo_change_freq(struct snd_gus_card * gus, int voice, int lfo_type, int freq);
-extern void snd_gf1_lfo_change_depth(struct snd_gus_card * gus, int voice, int lfo_type, int depth);
-extern void snd_gf1_lfo_setup(struct snd_gus_card * gus, int voice, int lfo_type, int freq, int current_depth, int depth, int sweep, int shape);
-extern void snd_gf1_lfo_shutdown(struct snd_gus_card * gus, int voice, int lfo_type);
-#if 0
-extern void snd_gf1_lfo_command(struct snd_gus_card * gus, int voice, unsigned char *command);
-#endif
-
 /* gus_mem.c */
 
-void snd_gf1_mem_lock(struct snd_gf1_mem * alloc, int xup);
 int snd_gf1_mem_xfree(struct snd_gf1_mem * alloc, struct snd_gf1_mem_block * block);
 struct snd_gf1_mem_block *snd_gf1_mem_alloc(struct snd_gf1_mem * alloc, int owner,
 				       char *name, int size, int w_16,
@@ -568,6 +536,7 @@ int snd_gf1_dma_transfer_block(struct snd_gus_card * gus,
 			       struct snd_gf1_dma_block * block,
 			       int atomic,
 			       int synth);
+void snd_gf1_dma_suspend(struct snd_gus_card *gus);
 
 /* gus_volume.c */
 
@@ -584,6 +553,8 @@ struct snd_gus_voice *snd_gf1_alloc_voice(struct snd_gus_card * gus, int type, i
 void snd_gf1_free_voice(struct snd_gus_card * gus, struct snd_gus_voice *voice);
 int snd_gf1_start(struct snd_gus_card * gus);
 int snd_gf1_stop(struct snd_gus_card * gus);
+int snd_gf1_suspend(struct snd_gus_card *gus);
+int snd_gf1_resume(struct snd_gus_card *gus);
 
 /* gus_mixer.c */
 
@@ -593,14 +564,8 @@ int snd_gf1_new_mixer(struct snd_gus_card * gus);
 
 int snd_gf1_pcm_new(struct snd_gus_card *gus, int pcm_dev, int control_index);
 
-#ifdef CONFIG_SND_DEBUG
-extern void snd_gf1_print_voice_registers(struct snd_gus_card * gus);
-#endif
-
 /* gus.c */
 
-int snd_gus_use_inc(struct snd_gus_card * gus);
-void snd_gus_use_dec(struct snd_gus_card * gus);
 int snd_gus_create(struct snd_card *card,
 		   unsigned long port,
 		   int irq, int dma1, int dma2,
@@ -610,6 +575,8 @@ int snd_gus_create(struct snd_card *card,
 		   int effect,
 		   struct snd_gus_card ** rgus);
 int snd_gus_initialize(struct snd_gus_card * gus);
+int snd_gus_suspend(struct snd_gus_card *gus);
+int snd_gus_resume(struct snd_gus_card *gus);
 
 /* gus_irq.c */
 
@@ -621,11 +588,18 @@ void snd_gus_irq_profile_init(struct snd_gus_card *gus);
 /* gus_uart.c */
 
 int snd_gf1_rawmidi_new(struct snd_gus_card *gus, int device);
+void snd_gf1_uart_suspend(struct snd_gus_card *gus);
+void snd_gf1_uart_resume(struct snd_gus_card *gus);
 
 /* gus_dram.c */
 int snd_gus_dram_write(struct snd_gus_card *gus, char __user *ptr,
 		       unsigned int addr, unsigned int size);
 int snd_gus_dram_read(struct snd_gus_card *gus, char __user *ptr,
 		      unsigned int addr, unsigned int size, int rom);
+
+/* gus_timer.c */
+void snd_gf1_timers_init(struct snd_gus_card *gus);
+void snd_gf1_timers_done(struct snd_gus_card *gus);
+void snd_gf1_timers_resume(struct snd_gus_card *gus);
 
 #endif /* __SOUND_GUS_H */

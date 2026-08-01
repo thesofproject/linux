@@ -1,21 +1,23 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for watchdog device controlled through GPIO-line
  *
  * Author: 2013, Alexander Shiyan <shc_work@mail.ru>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
-#include <linux/err.h>
 #include <linux/delay.h>
-#include <linux/module.h>
+#include <linux/err.h>
 #include <linux/gpio/consumer.h>
-#include <linux/of.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/watchdog.h>
+
+static bool nowayout = WATCHDOG_NOWAYOUT;
+module_param(nowayout, bool, 0);
+MODULE_PARM_DESC(nowayout,
+		"Watchdog cannot be stopped once started (default="
+				__MODULE_STRING(WATCHDOG_NOWAYOUT) ")");
 
 #define SOFT_TIMEOUT_MIN	1
 #define SOFT_TIMEOUT_DEF	60
@@ -104,7 +106,6 @@ static const struct watchdog_ops gpio_wdt_ops = {
 static int gpio_wdt_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct device_node *np = dev->of_node;
 	struct gpio_wdt_priv *priv;
 	enum gpiod_flags gflags;
 	unsigned int hw_margin;
@@ -117,7 +118,7 @@ static int gpio_wdt_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, priv);
 
-	ret = of_property_read_string(np, "hw_algo", &algo);
+	ret = device_property_read_string(dev, "hw_algo", &algo);
 	if (ret)
 		return ret;
 	if (!strcmp(algo, "toggle")) {
@@ -134,16 +135,14 @@ static int gpio_wdt_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->gpiod))
 		return PTR_ERR(priv->gpiod);
 
-	ret = of_property_read_u32(np,
-				   "hw_margin_ms", &hw_margin);
+	ret = device_property_read_u32(dev, "hw_margin_ms", &hw_margin);
 	if (ret)
 		return ret;
 	/* Disallow values lower than 2 and higher than 65535 ms */
 	if (hw_margin < 2 || hw_margin > 65535)
 		return -EINVAL;
 
-	priv->always_running = of_property_read_bool(np,
-						     "always-running");
+	priv->always_running = device_property_read_bool(dev, "always-running");
 
 	watchdog_set_drvdata(&priv->wdd, priv);
 
@@ -154,25 +153,15 @@ static int gpio_wdt_probe(struct platform_device *pdev)
 	priv->wdd.parent	= dev;
 	priv->wdd.timeout	= SOFT_TIMEOUT_DEF;
 
-	watchdog_init_timeout(&priv->wdd, 0, &pdev->dev);
+	watchdog_init_timeout(&priv->wdd, 0, dev);
+	watchdog_set_nowayout(&priv->wdd, nowayout);
 
 	watchdog_stop_on_reboot(&priv->wdd);
 
 	if (priv->always_running)
 		gpio_wdt_start(&priv->wdd);
 
-	ret = watchdog_register_device(&priv->wdd);
-
-	return ret;
-}
-
-static int gpio_wdt_remove(struct platform_device *pdev)
-{
-	struct gpio_wdt_priv *priv = platform_get_drvdata(pdev);
-
-	watchdog_unregister_device(&priv->wdd);
-
-	return 0;
+	return devm_watchdog_register_device(dev, &priv->wdd);
 }
 
 static const struct of_device_id gpio_wdt_dt_ids[] = {
@@ -187,7 +176,6 @@ static struct platform_driver gpio_wdt_driver = {
 		.of_match_table	= gpio_wdt_dt_ids,
 	},
 	.probe	= gpio_wdt_probe,
-	.remove	= gpio_wdt_remove,
 };
 
 #ifdef CONFIG_GPIO_WATCHDOG_ARCH_INITCALL

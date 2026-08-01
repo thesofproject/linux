@@ -1,21 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright 2011 Florian Tobias Schandinat <FlorianSchandinat@gmx.de>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License as published by the Free Software Foundation;
- * either version 2, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTIES OR REPRESENTATIONS; without even
- * the implied warranty of MERCHANTABILITY or FITNESS FOR
- * A PARTICULAR PURPOSE.See the GNU General Public License
- * for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc.,
- * 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 /*
  * infrastructure for devices connected via I2C
@@ -39,7 +24,7 @@ struct via_aux_drv {
 	struct list_head chain;		/* chain to support multiple drivers */
 
 	struct via_aux_bus *bus;	/* the I2C bus used */
-	u8 addr;			/* the I2C slave address */
+	u8 addr;			/* the I2C target address */
 
 	const char *name;	/* human readable name of the driver */
 	void *data;		/* private data of this driver */
@@ -57,7 +42,7 @@ const struct fb_videomode *via_aux_get_preferred_mode(struct via_aux_bus *bus);
 
 static inline bool via_aux_add(struct via_aux_drv *drv)
 {
-	struct via_aux_drv *data = kmalloc(sizeof(*data), GFP_KERNEL);
+	struct via_aux_drv *data = kmalloc_obj(*data);
 
 	if (!data)
 		return false;

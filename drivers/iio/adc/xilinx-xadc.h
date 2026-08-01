@@ -1,10 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Xilinx XADC driver
  *
  * Copyright 2013 Analog Devices Inc.
- *  Author: Lars-Peter Clauen <lars@metafoo.de>
- *
- * Licensed under the GPL-2.
+ *  Author: Lars-Peter Clausen <lars@metafoo.de>
  */
 
 #ifndef __IIO_XILINX_XADC__
@@ -26,7 +25,7 @@ int xadc_read_event_config(struct iio_dev *indio_dev,
 	enum iio_event_direction dir);
 int xadc_write_event_config(struct iio_dev *indio_dev,
 	const struct iio_chan_spec *chan, enum iio_event_type type,
-	enum iio_event_direction dir, int state);
+	enum iio_event_direction dir, bool state);
 int xadc_read_event_value(struct iio_dev *indio_dev,
 	const struct iio_chan_spec *chan, enum iio_event_type type,
 	enum iio_event_direction dir, enum iio_event_info info,
@@ -70,6 +69,11 @@ struct xadc {
 	struct completion completion;
 };
 
+enum xadc_type {
+	XADC_TYPE_S7, /* Series 7 */
+	XADC_TYPE_US, /* UltraScale and UltraScale+ */
+};
+
 struct xadc_ops {
 	int (*read)(struct xadc *xadc, unsigned int reg, uint16_t *val);
 	int (*write)(struct xadc *xadc, unsigned int reg, uint16_t val);
@@ -80,6 +84,9 @@ struct xadc_ops {
 	irqreturn_t (*interrupt_handler)(int irq, void *devid);
 
 	unsigned int flags;
+	enum xadc_type type;
+	int temp_scale;
+	int temp_offset;
 };
 
 static inline int _xadc_read_adc_reg(struct xadc *xadc, unsigned int reg,

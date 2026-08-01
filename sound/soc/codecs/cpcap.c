@@ -11,10 +11,28 @@
 #include <linux/module.h>
 #include <linux/regmap.h>
 #include <linux/platform_device.h>
+#include <linux/regulator/consumer.h>
 #include <linux/mfd/motorola-cpcap.h>
 #include <sound/core.h>
+#include <linux/input.h>
+#include <sound/jack.h>
 #include <sound/soc.h>
 #include <sound/tlv.h>
+
+/* Register 8 - CPCAP_REG_INTS1  --- Interrupt Sense 1 */
+#define CPCAP_BIT_HS_S                    9  /* Headset */
+#define CPCAP_BIT_MB2_S                   10 /* Mic Bias2 */
+
+/* Register 9 - CPCAP_REG_INTS2   --- Interrupt Sense 2 */
+#define CPCAP_BIT_PTT_S                   11 /* Push To Talk */
+
+/* Register 512 CPCAP_REG_VAUDIOC --- Audio Regulator and Bias Voltage */
+#define CPCAP_BIT_AUDIO_LOW_PWR           6
+#define CPCAP_BIT_AUD_LOWPWR_SPEED        5
+#define CPCAP_BIT_VAUDIOPRISTBY           4
+#define CPCAP_BIT_VAUDIO_MODE1            2
+#define CPCAP_BIT_VAUDIO_MODE0            1
+#define CPCAP_BIT_V_AUDIO_EN              0
 
 /* Register 513 CPCAP_REG_CC     --- CODEC */
 #define CPCAP_BIT_CDC_CLK2                15
@@ -221,6 +239,7 @@ struct cpcap_reg_info {
 };
 
 static const struct cpcap_reg_info cpcap_default_regs[] = {
+	{ CPCAP_REG_VAUDIOC, 0x003F, 0x0000 },
 	{ CPCAP_REG_CC, 0xFFFF, 0x0000 },
 	{ CPCAP_REG_CC, 0xFFFF, 0x0000 },
 	{ CPCAP_REG_CDI, 0xBFFF, 0x0000 },
@@ -251,6 +270,10 @@ struct cpcap_audio {
 	int codec_clk_id;
 	int codec_freq;
 	int codec_format;
+	struct regulator *vaudio;
+	int hsirq;
+	int mb2irq;
+	struct snd_soc_jack jack;
 };
 
 static int cpcap_st_workaround(struct snd_soc_dapm_widget *w,
@@ -357,7 +380,7 @@ static SOC_ENUM_SINGLE_DECL(cpcap_emu_r_mux_enum, 0, 8, cpcap_out_mux_texts);
 static int cpcap_output_mux_get_enum(struct snd_kcontrol *kcontrol,
 				     struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_dapm_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_soc_dapm_kcontrol_to_component(kcontrol);
 	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	unsigned int shift = e->shift_l;
@@ -400,10 +423,9 @@ static int cpcap_output_mux_get_enum(struct snd_kcontrol *kcontrol,
 static int cpcap_output_mux_put_enum(struct snd_kcontrol *kcontrol,
 				     struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_dapm_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_soc_dapm_kcontrol_to_component(kcontrol);
 	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
-	struct snd_soc_dapm_context *dapm =
-		snd_soc_dapm_kcontrol_dapm(kcontrol);
+	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kcontrol);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	unsigned int muxval = ucontrol->value.enumerated.item[0];
 	unsigned int mask = BIT(e->shift_l);
@@ -445,7 +467,7 @@ static int cpcap_output_mux_put_enum(struct snd_kcontrol *kcontrol,
 static int cpcap_input_right_mux_get_enum(struct snd_kcontrol *kcontrol,
 					  struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_dapm_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_soc_dapm_kcontrol_to_component(kcontrol);
 	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
 	int regval, mask;
 	int err;
@@ -484,10 +506,9 @@ static int cpcap_input_right_mux_get_enum(struct snd_kcontrol *kcontrol,
 static int cpcap_input_right_mux_put_enum(struct snd_kcontrol *kcontrol,
 					  struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_dapm_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_soc_dapm_kcontrol_to_component(kcontrol);
 	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
-	struct snd_soc_dapm_context *dapm =
-		snd_soc_dapm_kcontrol_dapm(kcontrol);
+	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kcontrol);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	unsigned int muxval = ucontrol->value.enumerated.item[0];
 	int regval = 0, mask;
@@ -529,7 +550,7 @@ static int cpcap_input_right_mux_put_enum(struct snd_kcontrol *kcontrol,
 static int cpcap_input_left_mux_get_enum(struct snd_kcontrol *kcontrol,
 					 struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_dapm_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_soc_dapm_kcontrol_to_component(kcontrol);
 	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
 	int regval, mask;
 	int err;
@@ -560,10 +581,9 @@ static int cpcap_input_left_mux_get_enum(struct snd_kcontrol *kcontrol,
 static int cpcap_input_left_mux_put_enum(struct snd_kcontrol *kcontrol,
 					 struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_dapm_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_soc_dapm_kcontrol_to_component(kcontrol);
 	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
-	struct snd_soc_dapm_context *dapm =
-		snd_soc_dapm_kcontrol_dapm(kcontrol);
+	struct snd_soc_dapm_context *dapm = snd_soc_dapm_kcontrol_to_dapm(kcontrol);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	unsigned int muxval = ucontrol->value.enumerated.item[0];
 	int regval = 0, mask;
@@ -1159,15 +1179,15 @@ static int cpcap_hifi_set_dai_fmt(struct snd_soc_dai *codec_dai,
 
 	/*
 	 * "HiFi Playback" should always be configured as
-	 * SND_SOC_DAIFMT_CBM_CFM - codec clk & frm master
+	 * SND_SOC_DAIFMT_CBP_CFP - codec clk & frm provider
 	 * SND_SOC_DAIFMT_I2S - I2S mode
 	 */
-	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	switch (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) {
+	case SND_SOC_DAIFMT_CBP_CFP:
 		val &= ~BIT(CPCAP_BIT_SMB_ST_DAC);
 		break;
 	default:
-		dev_err(dev, "HiFi dai fmt failed: CPCAP should be master");
+		dev_err(dev, "HiFi dai fmt failed: CPCAP should be provider");
 		return -EINVAL;
 	}
 
@@ -1216,7 +1236,7 @@ static int cpcap_hifi_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	return regmap_update_bits(cpcap->regmap, reg, mask, val);
 }
 
-static int cpcap_hifi_set_mute(struct snd_soc_dai *dai, int mute)
+static int cpcap_hifi_set_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
 	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
@@ -1237,7 +1257,8 @@ static const struct snd_soc_dai_ops cpcap_dai_hifi_ops = {
 	.hw_params	= cpcap_hifi_hw_params,
 	.set_sysclk	= cpcap_hifi_set_dai_sysclk,
 	.set_fmt	= cpcap_hifi_set_dai_fmt,
-	.digital_mute	= cpcap_hifi_set_mute,
+	.mute_stream	= cpcap_hifi_set_mute,
+	.no_capture_mute = 1,
 };
 
 static int cpcap_voice_hw_params(struct snd_pcm_substream *substream,
@@ -1263,12 +1284,12 @@ static int cpcap_voice_hw_params(struct snd_pcm_substream *substream,
 
 	if (direction == SNDRV_PCM_STREAM_CAPTURE) {
 		mask = 0x0000;
-		mask |= CPCAP_BIT_MIC1_RX_TIMESLOT0;
-		mask |= CPCAP_BIT_MIC1_RX_TIMESLOT1;
-		mask |= CPCAP_BIT_MIC1_RX_TIMESLOT2;
-		mask |= CPCAP_BIT_MIC2_TIMESLOT0;
-		mask |= CPCAP_BIT_MIC2_TIMESLOT1;
-		mask |= CPCAP_BIT_MIC2_TIMESLOT2;
+		mask |= BIT(CPCAP_BIT_MIC1_RX_TIMESLOT0);
+		mask |= BIT(CPCAP_BIT_MIC1_RX_TIMESLOT1);
+		mask |= BIT(CPCAP_BIT_MIC1_RX_TIMESLOT2);
+		mask |= BIT(CPCAP_BIT_MIC2_TIMESLOT0);
+		mask |= BIT(CPCAP_BIT_MIC2_TIMESLOT1);
+		mask |= BIT(CPCAP_BIT_MIC2_TIMESLOT2);
 		val = 0x0000;
 		if (channels >= 2)
 			val = BIT(CPCAP_BIT_MIC1_RX_TIMESLOT0);
@@ -1308,15 +1329,15 @@ static int cpcap_voice_set_dai_fmt(struct snd_soc_dai *codec_dai,
 
 	/*
 	 * "Voice Playback" and "Voice Capture" should always be
-	 * configured as SND_SOC_DAIFMT_CBM_CFM - codec clk & frm
-	 * master
+	 * configured as SND_SOC_DAIFMT_CBP_CFP - codec clk & frm
+	 * provider
 	 */
-	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	switch (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) {
+	case SND_SOC_DAIFMT_CBP_CFP:
 		val &= ~BIT(CPCAP_BIT_SMB_CDC);
 		break;
 	default:
-		dev_err(component->dev, "Voice dai fmt failed: CPCAP should be the master");
+		dev_err(component->dev, "Voice dai fmt failed: CPCAP should be the provider");
 		val &= ~BIT(CPCAP_BIT_SMB_CDC);
 		break;
 	}
@@ -1370,7 +1391,121 @@ static int cpcap_voice_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	return 0;
 }
 
-static int cpcap_voice_set_mute(struct snd_soc_dai *dai, int mute)
+
+/*
+ * Configure codec for voice call if requested.
+ *
+ * We can configure most with snd_soc_dai_set_sysclk(), snd_soc_dai_set_fmt()
+ * and snd_soc_dai_set_tdm_slot(). This function configures the rest of the
+ * cpcap related hardware as CPU is not involved in the voice call.
+ */
+static int cpcap_voice_call(struct cpcap_audio *cpcap, struct snd_soc_dai *dai,
+			    bool voice_call)
+{
+	int mask, err;
+
+	/* Modem to codec VAUDIO_MODE1 */
+	mask = BIT(CPCAP_BIT_VAUDIO_MODE1);
+	err = regmap_update_bits(cpcap->regmap, CPCAP_REG_VAUDIOC,
+				 mask, voice_call ? mask : 0);
+	if (err)
+		return err;
+
+	/* Clear MIC1_MUX for call */
+	mask = BIT(CPCAP_BIT_MIC1_MUX);
+	err = regmap_update_bits(cpcap->regmap, CPCAP_REG_TXI,
+				 mask, voice_call ? 0 : mask);
+	if (err)
+		return err;
+
+	/* Set MIC2_MUX for call */
+	mask = BIT(CPCAP_BIT_MB_ON1L) | BIT(CPCAP_BIT_MB_ON1R) |
+		BIT(CPCAP_BIT_MIC2_MUX) | BIT(CPCAP_BIT_MIC2_PGA_EN);
+	err = regmap_update_bits(cpcap->regmap, CPCAP_REG_TXI,
+				 mask, voice_call ? mask : 0);
+	if (err)
+		return err;
+
+	/* Enable LDSP for call */
+	mask = BIT(CPCAP_BIT_A2_LDSP_L_EN) | BIT(CPCAP_BIT_A2_LDSP_R_EN);
+	err = regmap_update_bits(cpcap->regmap, CPCAP_REG_RXOA,
+				 mask, voice_call ? mask : 0);
+	if (err)
+		return err;
+
+	/* Enable CPCAP_BIT_PGA_CDC_EN for call */
+	mask = BIT(CPCAP_BIT_PGA_CDC_EN);
+	err = regmap_update_bits(cpcap->regmap, CPCAP_REG_RXCOA,
+				 mask, voice_call ? mask : 0);
+	if (err)
+		return err;
+
+	/* Unmute voice for call */
+	if (dai) {
+		err = snd_soc_dai_digital_mute(dai, !voice_call,
+					       SNDRV_PCM_STREAM_PLAYBACK);
+		if (err)
+			return err;
+	}
+
+	/* Set modem to codec mic CDC and HPF for call */
+	mask = BIT(CPCAP_BIT_MIC2_CDC_EN) | BIT(CPCAP_BIT_CDC_EN_RX) |
+	       BIT(CPCAP_BIT_AUDOHPF_1) | BIT(CPCAP_BIT_AUDOHPF_0) |
+	       BIT(CPCAP_BIT_AUDIHPF_1) | BIT(CPCAP_BIT_AUDIHPF_0);
+	err = regmap_update_bits(cpcap->regmap, CPCAP_REG_CC,
+				 mask, voice_call ? mask : 0);
+	if (err)
+		return err;
+
+	/* Enable modem to codec CDC for call*/
+	mask = BIT(CPCAP_BIT_CDC_CLK_EN);
+	err = regmap_update_bits(cpcap->regmap, CPCAP_REG_CDI,
+				 mask, voice_call ? mask : 0);
+
+	return err;
+}
+
+static int cpcap_voice_set_tdm_slot(struct snd_soc_dai *dai,
+				    unsigned int tx_mask, unsigned int rx_mask,
+				    int slots, int slot_width)
+{
+	struct snd_soc_component *component = dai->component;
+	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
+	int err, ts_mask, mask;
+	bool voice_call;
+
+	/*
+	 * Primitive test for voice call, probably needs more checks
+	 * later on for 16-bit calls detected, Bluetooth headset etc.
+	 */
+	if (tx_mask == 0 && rx_mask == 1 && slot_width == 8)
+		voice_call = true;
+	else
+		voice_call = false;
+
+	ts_mask = 0x7 << CPCAP_BIT_MIC2_TIMESLOT0;
+	ts_mask |= 0x7 << CPCAP_BIT_MIC1_RX_TIMESLOT0;
+
+	mask = (tx_mask & 0x7) << CPCAP_BIT_MIC2_TIMESLOT0;
+	mask |= (rx_mask & 0x7) << CPCAP_BIT_MIC1_RX_TIMESLOT0;
+
+	err = regmap_update_bits(cpcap->regmap, CPCAP_REG_CDI,
+				 ts_mask, mask);
+	if (err)
+		return err;
+
+	err = cpcap_set_samprate(cpcap, CPCAP_DAI_VOICE, slot_width * 1000);
+	if (err)
+		return err;
+
+	err = cpcap_voice_call(cpcap, dai, voice_call);
+	if (err)
+		return err;
+
+	return 0;
+}
+
+static int cpcap_voice_set_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
 	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
@@ -1391,7 +1526,9 @@ static const struct snd_soc_dai_ops cpcap_dai_voice_ops = {
 	.hw_params	= cpcap_voice_hw_params,
 	.set_sysclk	= cpcap_voice_set_dai_sysclk,
 	.set_fmt	= cpcap_voice_set_dai_fmt,
-	.digital_mute	= cpcap_voice_set_mute,
+	.set_tdm_slot	= cpcap_voice_set_tdm_slot,
+	.mute_stream	= cpcap_voice_set_mute,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver cpcap_dai[] = {
@@ -1500,16 +1637,122 @@ static int cpcap_audio_reset(struct snd_soc_component *component,
 	return 0;
 }
 
+static irqreturn_t cpcap_hs_irq_thread(int irq, void *data)
+{
+	struct snd_soc_component *component = data;
+	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
+	struct regmap *regmap = cpcap->regmap;
+	int status = 0;
+	int mask = SND_JACK_HEADSET;
+	int val;
+
+	if (!regmap_test_bits(regmap, CPCAP_REG_INTS1, BIT(CPCAP_BIT_HS_S))) {
+		val = BIT(CPCAP_BIT_MB_ON2) | BIT(CPCAP_BIT_PTT_CMP_EN);
+		regmap_update_bits(regmap, CPCAP_REG_TXI, val, val);
+
+		val = BIT(CPCAP_BIT_ST_HS_CP_EN);
+		regmap_update_bits(regmap, CPCAP_REG_RXOA, val, val);
+
+		regulator_set_mode(cpcap->vaudio, REGULATOR_MODE_NORMAL);
+
+		/* Give PTTS time to settle */
+		msleep(20);
+
+		if (!regmap_test_bits(regmap, CPCAP_REG_INTS2,
+				      BIT(CPCAP_BIT_PTT_S))) {
+			/* Headphones detected. (May also be a headset with the
+			 * MFB pressed.)
+			 */
+			status = SND_JACK_HEADPHONE;
+			dev_info(component->dev, "HP plugged in\n");
+		} else if (regmap_test_bits(regmap, CPCAP_REG_INTS1,
+					    BIT(CPCAP_BIT_MB2_S)) == 1) {
+			status = SND_JACK_HEADSET;
+			dev_info(component->dev, "HS plugged in\n");
+		} else
+			dev_info(component->dev, "Unsupported HS plugged in\n");
+	} else {
+		bool mic = cpcap->jack.status & SND_JACK_MICROPHONE;
+
+		dev_info(component->dev, "H%s disconnect\n", mic ? "S" : "P");
+		val = BIT(CPCAP_BIT_MB_ON2) | BIT(CPCAP_BIT_PTT_CMP_EN);
+		regmap_update_bits(cpcap->regmap, CPCAP_REG_TXI, val, 0);
+
+		val = BIT(CPCAP_BIT_ST_HS_CP_EN);
+		regmap_update_bits(cpcap->regmap, CPCAP_REG_RXOA, val, 0);
+
+		regulator_set_mode(cpcap->vaudio, REGULATOR_MODE_STANDBY);
+
+		mask |= SND_JACK_BTN_0;
+	}
+
+	snd_soc_jack_report(&cpcap->jack, status, mask);
+
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t cpcap_mb2_irq_thread(int irq, void *data)
+{
+	struct snd_soc_component *component = data;
+	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
+	struct regmap *regmap = cpcap->regmap;
+	int status = 0;
+	int mb2;
+	int ptt;
+
+	if (regmap_test_bits(regmap, CPCAP_REG_INTS1, BIT(CPCAP_BIT_HS_S)) == 1)
+		return IRQ_HANDLED;
+
+	mb2 = regmap_test_bits(regmap, CPCAP_REG_INTS1, BIT(CPCAP_BIT_MB2_S));
+	ptt = regmap_test_bits(regmap, CPCAP_REG_INTS2, BIT(CPCAP_BIT_PTT_S));
+
+	/* Initial detection might have been with MFB pressed */
+	if (!(cpcap->jack.status & SND_JACK_MICROPHONE)) {
+		if (ptt == 1 && mb2 == 1) {
+			dev_info(component->dev, "MIC plugged in\n");
+			snd_soc_jack_report(&cpcap->jack, SND_JACK_MICROPHONE,
+					    SND_JACK_MICROPHONE);
+		}
+
+		return IRQ_HANDLED;
+	}
+
+	if (!mb2 || !ptt)
+		status = SND_JACK_BTN_0;
+
+	snd_soc_jack_report(&cpcap->jack, status, SND_JACK_BTN_0);
+
+	return IRQ_HANDLED;
+}
+
 static int cpcap_soc_probe(struct snd_soc_component *component)
 {
+	struct platform_device *pdev = to_platform_device(component->dev);
+	struct snd_soc_card *card = component->card;
 	struct cpcap_audio *cpcap;
 	int err;
 
 	cpcap = devm_kzalloc(component->dev, sizeof(*cpcap), GFP_KERNEL);
 	if (!cpcap)
 		return -ENOMEM;
+
 	snd_soc_component_set_drvdata(component, cpcap);
 	cpcap->component = component;
+
+	cpcap->vaudio = devm_regulator_get(component->dev, "VAUDIO");
+	if (IS_ERR(cpcap->vaudio))
+		return dev_err_probe(component->dev, PTR_ERR(cpcap->vaudio),
+				     "Cannot get VAUDIO regulator\n");
+
+	err = snd_soc_card_jack_new(card, "Headphones",
+				    SND_JACK_HEADSET | SND_JACK_BTN_0,
+				    &cpcap->jack);
+	if (err < 0) {
+		dev_err(component->dev, "Cannot create HS jack: %i\n", err);
+		return err;
+	}
+
+	snd_jack_set_key(cpcap->jack.jack, SND_JACK_BTN_0, KEY_MEDIA);
 
 	cpcap->regmap = dev_get_regmap(component->dev->parent, NULL);
 	if (!cpcap->regmap)
@@ -1520,27 +1763,106 @@ static int cpcap_soc_probe(struct snd_soc_component *component)
 	if (err)
 		return err;
 
-	return cpcap_audio_reset(component, false);
+	cpcap->hsirq = platform_get_irq_byname(pdev, "hs");
+	if (cpcap->hsirq < 0)
+		return cpcap->hsirq;
+
+	err = devm_request_threaded_irq(component->dev, cpcap->hsirq, NULL,
+					cpcap_hs_irq_thread,
+					IRQF_TRIGGER_RISING |
+					IRQF_TRIGGER_FALLING |
+					IRQF_ONESHOT,
+					"cpcap-codec-hs",
+					component);
+	if (err) {
+		dev_warn(component->dev, "no HS irq%i: %i\n",
+			 cpcap->hsirq, err);
+		return err;
+	}
+
+	cpcap->mb2irq = platform_get_irq_byname(pdev, "mb2");
+	if (cpcap->mb2irq < 0)
+		return cpcap->mb2irq;
+
+	err = devm_request_threaded_irq(component->dev, cpcap->mb2irq, NULL,
+					cpcap_mb2_irq_thread,
+					IRQF_TRIGGER_RISING |
+					IRQF_TRIGGER_FALLING |
+					IRQF_ONESHOT,
+					"cpcap-codec-mb2",
+					component);
+	if (err) {
+		dev_warn(component->dev, "no MB2 irq%i: %i\n",
+			 cpcap->mb2irq, err);
+		return err;
+	}
+
+	err = cpcap_audio_reset(component, false);
+	if (err)
+		return err;
+
+	cpcap_hs_irq_thread(cpcap->hsirq, component);
+
+	enable_irq_wake(cpcap->hsirq);
+	enable_irq_wake(cpcap->mb2irq);
+
+	return 0;
 }
 
-static struct snd_soc_component_driver soc_codec_dev_cpcap = {
+static void cpcap_soc_remove(struct snd_soc_component *component)
+{
+	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
+
+	disable_irq_wake(cpcap->hsirq);
+	disable_irq_wake(cpcap->mb2irq);
+}
+
+static int cpcap_set_bias_level(struct snd_soc_component *component,
+		enum snd_soc_bias_level level)
+{
+	struct cpcap_audio *cpcap = snd_soc_component_get_drvdata(component);
+
+	/* VAIDIO should be kept in normal mode in order MIC/PTT to work */
+	if (cpcap->jack.status & SND_JACK_MICROPHONE)
+		return 0;
+
+	switch (level) {
+	case SND_SOC_BIAS_OFF:
+		break;
+	case SND_SOC_BIAS_PREPARE:
+		regulator_set_mode(cpcap->vaudio, REGULATOR_MODE_NORMAL);
+		break;
+	case SND_SOC_BIAS_STANDBY:
+		regulator_set_mode(cpcap->vaudio, REGULATOR_MODE_STANDBY);
+		break;
+	case SND_SOC_BIAS_ON:
+		break;
+	}
+
+	return 0;
+}
+
+static const struct snd_soc_component_driver soc_codec_dev_cpcap = {
 	.probe			= cpcap_soc_probe,
+	.remove			= cpcap_soc_remove,
 	.controls		= cpcap_snd_controls,
 	.num_controls		= ARRAY_SIZE(cpcap_snd_controls),
 	.dapm_widgets		= cpcap_dapm_widgets,
 	.num_dapm_widgets	= ARRAY_SIZE(cpcap_dapm_widgets),
 	.dapm_routes		= intercon,
 	.num_dapm_routes	= ARRAY_SIZE(intercon),
+	.set_bias_level		= cpcap_set_bias_level,
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static int cpcap_codec_probe(struct platform_device *pdev)
 {
 	struct device_node *codec_node =
 		of_get_child_by_name(pdev->dev.parent->of_node, "audio-codec");
+	if (!codec_node)
+		return -ENODEV;
 
 	pdev->dev.of_node = codec_node;
 

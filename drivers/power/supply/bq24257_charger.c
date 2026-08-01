@@ -1,22 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * TI BQ24257 charger driver
  *
  * Copyright (C) 2015 Intel Corporation
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  * Datasheets:
- * http://www.ti.com/product/bq24250
- * http://www.ti.com/product/bq24251
- * http://www.ti.com/product/bq24257
+ * https://www.ti.com/product/bq24250
+ * https://www.ti.com/product/bq24251
+ * https://www.ti.com/product/bq24257
  */
 
 #include <linux/module.h>
@@ -44,20 +35,15 @@
 
 #define BQ24257_ILIM_SET_DELAY		1000	/* msec */
 
-/*
- * When adding support for new devices make sure that enum bq2425x_chip and
- * bq2425x_chip_name[] always stay in sync!
- */
 enum bq2425x_chip {
 	BQ24250,
 	BQ24251,
 	BQ24257,
 };
 
-static const char *const bq2425x_chip_name[] = {
-	"bq24250",
-	"bq24251",
-	"bq24257",
+struct bq2425x_chip_info {
+	const char *const name;
+	enum bq2425x_chip chip;
 };
 
 enum bq24257_fields {
@@ -93,7 +79,7 @@ struct bq24257_device {
 	struct device *dev;
 	struct power_supply *charger;
 
-	enum bq2425x_chip chip;
+	const struct bq2425x_chip_info *info;
 
 	struct regmap *rmap;
 	struct regmap_field *rmap_fields[F_MAX_FIELDS];
@@ -127,7 +113,7 @@ static const struct regmap_config bq24257_regmap_config = {
 	.val_bits = 8,
 
 	.max_register = BQ24257_REG_7,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 
 	.volatile_reg = bq24257_is_volatile_reg,
 };
@@ -296,7 +282,7 @@ static int bq24257_set_input_current_limit(struct bq24257_device *bq,
 {
 	/*
 	 * Address the case where the user manually sets an input current limit
-	 * while the charger auto-detection mechanism is is active. In this
+	 * while the charger auto-detection mechanism is active. In this
 	 * case we want to abort and go straight to the user-specified value.
 	 */
 	if (bq->iilimit_autoset_enable)
@@ -338,7 +324,7 @@ static int bq24257_power_supply_get_property(struct power_supply *psy,
 		break;
 
 	case POWER_SUPPLY_PROP_MODEL_NAME:
-		val->strval = bq2425x_chip_name[bq->chip];
+		val->strval = bq->info->name;
 		break;
 
 	case POWER_SUPPLY_PROP_ONLINE:
@@ -773,29 +759,27 @@ static ssize_t bq24257_show_ovp_voltage(struct device *dev,
 					struct device_attribute *attr,
 					char *buf)
 {
-	struct power_supply *psy = dev_get_drvdata(dev);
+	struct power_supply *psy = dev_to_psy(dev);
 	struct bq24257_device *bq = power_supply_get_drvdata(psy);
 
-	return scnprintf(buf, PAGE_SIZE, "%u\n",
-			 bq24257_vovp_map[bq->init_data.vovp]);
+	return sysfs_emit(buf, "%u\n", bq24257_vovp_map[bq->init_data.vovp]);
 }
 
 static ssize_t bq24257_show_in_dpm_voltage(struct device *dev,
 					   struct device_attribute *attr,
 					   char *buf)
 {
-	struct power_supply *psy = dev_get_drvdata(dev);
+	struct power_supply *psy = dev_to_psy(dev);
 	struct bq24257_device *bq = power_supply_get_drvdata(psy);
 
-	return scnprintf(buf, PAGE_SIZE, "%u\n",
-			 bq24257_vindpm_map[bq->init_data.vindpm]);
+	return sysfs_emit(buf, "%u\n", bq24257_vindpm_map[bq->init_data.vindpm]);
 }
 
 static ssize_t bq24257_sysfs_show_enable(struct device *dev,
 					 struct device_attribute *attr,
 					 char *buf)
 {
-	struct power_supply *psy = dev_get_drvdata(dev);
+	struct power_supply *psy = dev_to_psy(dev);
 	struct bq24257_device *bq = power_supply_get_drvdata(psy);
 	int ret;
 
@@ -809,7 +793,7 @@ static ssize_t bq24257_sysfs_show_enable(struct device *dev,
 	if (ret < 0)
 		return ret;
 
-	return scnprintf(buf, PAGE_SIZE, "%d\n", ret);
+	return sysfs_emit(buf, "%d\n", ret);
 }
 
 static ssize_t bq24257_sysfs_set_enable(struct device *dev,
@@ -817,7 +801,7 @@ static ssize_t bq24257_sysfs_set_enable(struct device *dev,
 					const char *buf,
 					size_t count)
 {
-	struct power_supply *psy = dev_get_drvdata(dev);
+	struct power_supply *psy = dev_to_psy(dev);
 	struct bq24257_device *bq = power_supply_get_drvdata(psy);
 	long val;
 	int ret;
@@ -845,7 +829,7 @@ static DEVICE_ATTR(high_impedance_enable, S_IWUSR | S_IRUGO,
 static DEVICE_ATTR(sysoff_enable, S_IWUSR | S_IRUGO,
 		   bq24257_sysfs_show_enable, bq24257_sysfs_set_enable);
 
-static struct attribute *bq24257_charger_attr[] = {
+static struct attribute *bq24257_charger_sysfs_attrs[] = {
 	&dev_attr_ovp_voltage.attr,
 	&dev_attr_in_dpm_voltage.attr,
 	&dev_attr_high_impedance_enable.attr,
@@ -853,14 +837,13 @@ static struct attribute *bq24257_charger_attr[] = {
 	NULL,
 };
 
-static const struct attribute_group bq24257_attr_group = {
-	.attrs = bq24257_charger_attr,
-};
+ATTRIBUTE_GROUPS(bq24257_charger_sysfs);
 
 static int bq24257_power_supply_init(struct bq24257_device *bq)
 {
 	struct power_supply_config psy_cfg = { .drv_data = bq, };
 
+	psy_cfg.attr_grp = bq24257_charger_sysfs_groups;
 	psy_cfg.supplied_to = bq24257_charger_supplied_to;
 	psy_cfg.num_supplicants = ARRAY_SIZE(bq24257_charger_supplied_to);
 
@@ -957,12 +940,10 @@ static int bq24257_fw_probe(struct bq24257_device *bq)
 	return 0;
 }
 
-static int bq24257_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int bq24257_probe(struct i2c_client *client)
 {
-	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
+	struct i2c_adapter *adapter = client->adapter;
 	struct device *dev = &client->dev;
-	const struct acpi_device_id *acpi_id;
 	struct bq24257_device *bq;
 	int ret;
 	int i;
@@ -979,17 +960,9 @@ static int bq24257_probe(struct i2c_client *client,
 	bq->client = client;
 	bq->dev = dev;
 
-	if (ACPI_HANDLE(dev)) {
-		acpi_id = acpi_match_device(dev->driver->acpi_match_table,
-					    &client->dev);
-		if (!acpi_id) {
-			dev_err(dev, "Failed to match ACPI device\n");
-			return -ENODEV;
-		}
-		bq->chip = (enum bq2425x_chip)acpi_id->driver_data;
-	} else {
-		bq->chip = (enum bq2425x_chip)id->driver_data;
-	}
+	bq->info = i2c_get_match_data(client);
+	if (!bq->info)
+		return dev_err_probe(dev, -ENODEV, "Failed to match device\n");
 
 	mutex_init(&bq->lock);
 
@@ -1027,7 +1000,7 @@ static int bq24257_probe(struct i2c_client *client,
 	 * used for the automatic setting of the input current limit setting so
 	 * explicitly disable that feature.
 	 */
-	if (bq->chip == BQ24250)
+	if (bq->info->chip == BQ24250)
 		bq->iilimit_autoset_enable = false;
 
 	if (bq->iilimit_autoset_enable)
@@ -1040,7 +1013,7 @@ static int bq24257_probe(struct i2c_client *client,
 	 * the PG state. We also use a SW-based approach for all other devices
 	 * if the PG pin is either not defined or can't be probed.
 	 */
-	if (bq->chip != BQ24250)
+	if (bq->info->chip != BQ24250)
 		bq24257_pg_gpio_probe(bq);
 
 	if (PTR_ERR(bq->pg) == -EPROBE_DEFER)
@@ -1078,33 +1051,23 @@ static int bq24257_probe(struct i2c_client *client,
 					bq24257_irq_handler_thread,
 					IRQF_TRIGGER_FALLING |
 					IRQF_TRIGGER_RISING | IRQF_ONESHOT,
-					bq2425x_chip_name[bq->chip], bq);
+					bq->info->name, bq);
 	if (ret) {
 		dev_err(dev, "Failed to request IRQ #%d\n", client->irq);
-		return ret;
-	}
-
-	ret = sysfs_create_group(&bq->charger->dev.kobj, &bq24257_attr_group);
-	if (ret < 0) {
-		dev_err(dev, "Can't create sysfs entries\n");
 		return ret;
 	}
 
 	return 0;
 }
 
-static int bq24257_remove(struct i2c_client *client)
+static void bq24257_remove(struct i2c_client *client)
 {
 	struct bq24257_device *bq = i2c_get_clientdata(client);
 
 	if (bq->iilimit_autoset_enable)
 		cancel_delayed_work_sync(&bq->iilimit_setup_work);
 
-	sysfs_remove_group(&bq->charger->dev.kobj, &bq24257_attr_group);
-
 	bq24257_field_write(bq, F_RESET, 1); /* reset to defaults */
-
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -1154,29 +1117,46 @@ static const struct dev_pm_ops bq24257_pm = {
 	SET_SYSTEM_SLEEP_PM_OPS(bq24257_suspend, bq24257_resume)
 };
 
+static const struct bq2425x_chip_info bq24250_info = {
+	.name = "bq24250",
+	.chip = BQ24250,
+};
+
+static const struct bq2425x_chip_info bq24251_info = {
+	.name = "bq24251",
+	.chip = BQ24251,
+};
+
+static const struct bq2425x_chip_info bq24257_info = {
+	.name = "bq24257",
+	.chip = BQ24257,
+};
+
 static const struct i2c_device_id bq24257_i2c_ids[] = {
-	{ "bq24250", BQ24250 },
-	{ "bq24251", BQ24251 },
-	{ "bq24257", BQ24257 },
-	{},
+	{ .name = "bq24250", .driver_data = (kernel_ulong_t)&bq24250_info },
+	{ .name = "bq24251", .driver_data = (kernel_ulong_t)&bq24251_info },
+	{ .name = "bq24257", .driver_data = (kernel_ulong_t)&bq24257_info },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, bq24257_i2c_ids);
 
-static const struct of_device_id bq24257_of_match[] = {
-	{ .compatible = "ti,bq24250", },
-	{ .compatible = "ti,bq24251", },
-	{ .compatible = "ti,bq24257", },
-	{ },
+static const struct of_device_id bq24257_of_match[] __maybe_unused = {
+	{ .compatible = "ti,bq24250", &bq24250_info },
+	{ .compatible = "ti,bq24251", &bq24251_info },
+	{ .compatible = "ti,bq24257", &bq24257_info },
+	{}
 };
 MODULE_DEVICE_TABLE(of, bq24257_of_match);
 
+#ifdef CONFIG_ACPI
 static const struct acpi_device_id bq24257_acpi_match[] = {
-	{ "BQ242500", BQ24250 },
-	{ "BQ242510", BQ24251 },
-	{ "BQ242570", BQ24257 },
-	{},
+	{ "BQ242500", (kernel_ulong_t)&bq24250_info },
+	{ "BQ242510", (kernel_ulong_t)&bq24251_info },
+	{ "BQ242570", (kernel_ulong_t)&bq24257_info },
+	{}
 };
 MODULE_DEVICE_TABLE(acpi, bq24257_acpi_match);
+#endif
 
 static struct i2c_driver bq24257_driver = {
 	.driver = {

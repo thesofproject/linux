@@ -1,28 +1,16 @@
-/**
+// SPDX-License-Identifier: GPL-2.0-only
+/*
  * eCryptfs: Linux filesystem encryption layer
  *
  * Copyright (C) 2008 International Business Machines Corp.
  *   Author(s): Michael A. Halcrow <mhalcrow@us.ibm.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
- * 02111-1307, USA.
  */
 
 #include <linux/fs.h>
 #include <linux/hash.h>
 #include <linux/random.h>
 #include <linux/miscdevice.h>
+#include <linux/overflow.h>
 #include <linux/poll.h>
 #include <linux/slab.h>
 #include <linux/wait.h>
@@ -161,8 +149,10 @@ int ecryptfs_send_miscdev(char *data, size_t data_size,
 			  u16 msg_flags, struct ecryptfs_daemon *daemon)
 {
 	struct ecryptfs_message *msg;
+	size_t msg_size;
 
-	msg = kmalloc((sizeof(*msg) + data_size), GFP_KERNEL);
+	msg_size = struct_size(msg, data, data_size);
+	msg = kmalloc(msg_size, GFP_KERNEL);
 	if (!msg)
 		return -ENOMEM;
 
@@ -172,7 +162,7 @@ int ecryptfs_send_miscdev(char *data, size_t data_size,
 	msg_ctx->msg->data_len = data_size;
 	msg_ctx->type = msg_type;
 	memcpy(msg_ctx->msg->data, data, data_size);
-	msg_ctx->msg_size = (sizeof(*msg_ctx->msg) + data_size);
+	msg_ctx->msg_size = msg_size;
 	list_add_tail(&msg_ctx->daemon_out_list, &daemon->msg_ctx_out_queue);
 	mutex_unlock(&msg_ctx->mux);
 
@@ -325,6 +315,7 @@ out_unlock_daemon:
 
 /**
  * ecryptfs_miscdev_response - miscdevess response to message previously sent to daemon
+ * @daemon: eCryptfs daemon object
  * @data: Bytes comprising struct ecryptfs_message
  * @data_size: sizeof(struct ecryptfs_message) + data len
  * @seq: Sequence number for miscdev response packet

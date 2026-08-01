@@ -40,7 +40,7 @@ e.g.
 	.prepare	= wm8731_pcm_prepare,
 	.hw_params	= wm8731_hw_params,
 	.shutdown	= wm8731_shutdown,
-	.digital_mute	= wm8731_mute,
+	.mute_stream	= wm8731_mute,
 	.set_sysclk	= wm8731_set_dai_sysclk,
 	.set_fmt	= wm8731_set_dai_fmt,
   };
@@ -60,7 +60,7 @@ e.g.
 		.rates = WM8731_RATES,
 		.formats = WM8731_FORMATS,},
 	.ops = &wm8731_dai_ops,
-	.symmetric_rates = 1,
+	.symmetric_rate = 1,
   };
 
 
@@ -131,15 +131,15 @@ The codec driver also supports the following ALSA PCM operations:-
 	int (*prepare)(struct snd_pcm_substream *);
   };
 
-Please refer to the ALSA driver PCM documentation for details.
-http://www.alsa-project.org/~iwai/writing-an-alsa-driver/
+Please refer to the :doc:`ALSA driver PCM documentation
+<../kernel-api/writing-an-alsa-driver>` for details.
 
 
 DAPM description
 ----------------
 The Dynamic Audio Power Management description describes the codec power
 components and their relationships and registers to the ASoC core.
-Please read dapm.txt for details of building the description.
+Please read dapm.rst for details of building the description.
 
 Please also see the examples in other codec drivers.
 
@@ -177,14 +177,14 @@ when the mute is applied or freed.
 i.e.
 ::
 
-  static int wm8974_mute(struct snd_soc_dai *dai, int mute)
+  static int wm8974_mute(struct snd_soc_dai *dai, int mute, int direction)
   {
-	struct snd_soc_codec *codec = dai->codec;
-	u16 mute_reg = snd_soc_read(codec, WM8974_DAC) & 0xffbf;
+	struct snd_soc_component *component = dai->component;
+	u16 mute_reg = snd_soc_component_read(component, WM8974_DAC) & 0xffbf;
 
 	if (mute)
-		snd_soc_write(codec, WM8974_DAC, mute_reg | 0x40);
+		snd_soc_component_write(component, WM8974_DAC, mute_reg | 0x40);
 	else
-		snd_soc_write(codec, WM8974_DAC, mute_reg);
+		snd_soc_component_write(component, WM8974_DAC, mute_reg);
 	return 0;
   }

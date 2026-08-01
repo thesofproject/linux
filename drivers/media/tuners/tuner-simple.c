@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * i2c tv tuner chip device driver
  * controls all those simple 4-control-bytes style tuners.
@@ -111,7 +112,7 @@ struct tuner_simple_priv {
 	struct list_head hybrid_tuner_instance_list;
 
 	unsigned int type;
-	struct tunertype *tun;
+	const struct tunertype *tun;
 
 	u32 frequency;
 	u32 bandwidth;
@@ -231,11 +232,11 @@ static inline char *tuner_param_name(enum param_type type)
 	return name;
 }
 
-static struct tuner_params *simple_tuner_params(struct dvb_frontend *fe,
-						enum param_type desired_type)
+static const struct tuner_params *simple_tuner_params(struct dvb_frontend *fe,
+						      enum param_type desired_type)
 {
 	struct tuner_simple_priv *priv = fe->tuner_priv;
-	struct tunertype *tun = priv->tun;
+	const struct tunertype *tun = priv->tun;
 	int i;
 
 	for (i = 0; i < tun->count; i++)
@@ -256,7 +257,7 @@ static struct tuner_params *simple_tuner_params(struct dvb_frontend *fe,
 }
 
 static int simple_config_lookup(struct dvb_frontend *fe,
-				struct tuner_params *t_params,
+				const struct tuner_params *t_params,
 				unsigned *frequency, u8 *config, u8 *cb)
 {
 	struct tuner_simple_priv *priv = fe->tuner_priv;
@@ -499,7 +500,7 @@ static int simple_radio_bandswitch(struct dvb_frontend *fe, u8 *buffer)
 	case TUNER_TENA_9533_DI:
 	case TUNER_YMEC_TVF_5533MF:
 		tuner_dbg("This tuner doesn't have FM. Most cards have a TEA5767 for FM\n");
-		return 0;
+		return -EINVAL;
 	case TUNER_PHILIPS_FM1216ME_MK3:
 	case TUNER_PHILIPS_FM1236_MK3:
 	case TUNER_PHILIPS_FMD1216ME_MK3:
@@ -548,7 +549,7 @@ static int simple_set_tv_freq(struct dvb_frontend *fe,
 	u8 buffer[4];
 	int rc, IFPCoff, i;
 	enum param_type desired_type;
-	struct tuner_params *t_params;
+	const struct tuner_params *t_params;
 
 	/* IFPCoff = Video Intermediate Frequency - Vif:
 		940  =16*58.75  NTSC/J (Japan)
@@ -663,13 +664,14 @@ static int simple_set_tv_freq(struct dvb_frontend *fe,
 static int simple_set_radio_freq(struct dvb_frontend *fe,
 				 struct analog_parameters *params)
 {
-	struct tunertype *tun;
+	const struct tunertype *tun;
 	struct tuner_simple_priv *priv = fe->tuner_priv;
 	u8 buffer[4];
 	u16 div;
 	int rc, j;
-	struct tuner_params *t_params;
+	const struct tuner_params *t_params;
 	unsigned int freq = params->frequency;
+	bool mono = params->audmode == V4L2_TUNER_MODE_MONO;
 
 	tun = priv->tun;
 
@@ -700,7 +702,8 @@ static int simple_set_radio_freq(struct dvb_frontend *fe,
 		    TUNER_RATIO_SELECT_50; /* 50 kHz step */
 
 	/* Bandswitch byte */
-	simple_radio_bandswitch(fe, &buffer[0]);
+	if (simple_radio_bandswitch(fe, &buffer[0]))
+		return 0;
 
 	/* Convert from 1/16 kHz V4L steps to 1/20 MHz (=50 kHz) PLL steps
 	   freq * (1 Mhz / 16000 V4L steps) * (20 PLL steps / 1 MHz) =
@@ -736,8 +739,8 @@ static int simple_set_radio_freq(struct dvb_frontend *fe,
 			config |= TDA9887_PORT2_ACTIVE;
 		if (t_params->intercarrier_mode)
 			config |= TDA9887_INTERCARRIER;
-/*		if (t_params->port1_set_for_fm_mono)
-			config &= ~TDA9887_PORT1_ACTIVE;*/
+		if (t_params->port1_set_for_fm_mono && mono)
+			config &= ~TDA9887_PORT1_ACTIVE;
 		if (t_params->fm_gain_normal)
 			config |= TDA9887_GAIN_NORMAL;
 		if (t_params->radio_if == 2)
@@ -845,8 +848,8 @@ static u32 simple_dvb_configure(struct dvb_frontend *fe, u8 *buf,
 {
 	/* This function returns the tuned frequency on success, 0 on error */
 	struct tuner_simple_priv *priv = fe->tuner_priv;
-	struct tunertype *tun = priv->tun;
-	struct tuner_params *t_params;
+	const struct tunertype *tun = priv->tun;
+	const struct tuner_params *t_params;
 	u8 config, cb;
 	u32 div;
 	int ret;
@@ -1129,7 +1132,7 @@ struct dvb_frontend *simple_tuner_attach(struct dvb_frontend *fe,
 				   priv->nr, dtv_input[priv->nr]);
 	}
 
-	strlcpy(fe->ops.tuner_ops.info.name, priv->tun->name,
+	strscpy(fe->ops.tuner_ops.info.name, priv->tun->name,
 		sizeof(fe->ops.tuner_ops.info.name));
 
 	return fe;

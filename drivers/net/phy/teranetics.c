@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Driver for Teranetics PHY
  *
  * Author: Shaohui Xie <Shaohui.Xie@freescale.com>
  *
  * Copyright 2015 Freescale Semiconductor, Inc.
- *
- * This file is licensed under the terms of the GNU General Public License
- * version 2.  This program is licensed "as is" without any warranty of any
- * kind, whether express or implied.
  */
 
 #include <linux/kernel.h>
@@ -70,7 +67,8 @@ static int teranetics_read_status(struct phy_device *phydev)
 	return 0;
 }
 
-static int teranetics_match_phy_device(struct phy_device *phydev)
+static int teranetics_match_phy_device(struct phy_device *phydev,
+				       const struct phy_driver *phydrv)
 {
 	return phydev->c45_ids.device_ids[3] == PHY_ID_TN2020;
 }
@@ -80,9 +78,8 @@ static struct phy_driver teranetics_driver[] = {
 	.phy_id		= PHY_ID_TN2020,
 	.phy_id_mask	= 0xffffffff,
 	.name		= "Teranetics TN2020",
-	.soft_reset	= gen10g_no_soft_reset,
+	.features       = PHY_10GBIT_FEATURES,
 	.aneg_done	= teranetics_aneg_done,
-	.config_init    = gen10g_config_init,
 	.config_aneg    = gen10g_config_aneg,
 	.read_status	= teranetics_read_status,
 	.match_phy_device = teranetics_match_phy_device,
@@ -91,7 +88,7 @@ static struct phy_driver teranetics_driver[] = {
 
 module_phy_driver(teranetics_driver);
 
-static struct mdio_device_id __maybe_unused teranetics_tbl[] = {
+static const struct mdio_device_id __maybe_unused teranetics_tbl[] = {
 	{ PHY_ID_TN2020, 0xffffffff },
 	{ }
 };

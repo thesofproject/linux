@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
 	STV6110(A) Silicon tuner driver
 
@@ -5,19 +6,6 @@
 
 	Copyright (C) ST Microelectronics
 
-	This program is free software; you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; either version 2 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
 #ifndef __STV6110x_PRIV_H
@@ -32,13 +20,13 @@
 #define dprintk(__y, __z, format, arg...) do {						\
 	if (__z) {									\
 		if	((verbose > FE_ERROR) && (verbose > __y))			\
-			printk(KERN_ERR "%s: " format "\n", __func__ , ##arg);		\
+			printk(KERN_ERR "%s: " format "\n", __func__, ##arg);		\
 		else if	((verbose > FE_NOTICE) && (verbose > __y))			\
-			printk(KERN_NOTICE "%s: " format "\n", __func__ , ##arg);	\
+			printk(KERN_NOTICE "%s: " format "\n", __func__, ##arg);	\
 		else if ((verbose > FE_INFO) && (verbose > __y))			\
-			printk(KERN_INFO "%s: " format "\n", __func__ , ##arg);		\
+			printk(KERN_INFO "%s: " format "\n", __func__, ##arg);		\
 		else if ((verbose > FE_DEBUG) && (verbose > __y))			\
-			printk(KERN_DEBUG "%s: " format "\n", __func__ , ##arg);	\
+			printk(KERN_DEBUG "%s: " format "\n", __func__, ##arg);	\
 	} else {									\
 		if (verbose > __y)							\
 			printk(format, ##arg);						\
@@ -66,11 +54,12 @@
 #define REFCLOCK_MHz				(stv6110x->config->refclk / 1000000)
 
 struct stv6110x_state {
+	struct dvb_frontend		*frontend;
 	struct i2c_adapter		*i2c;
 	const struct stv6110x_config	*config;
 	u8				regs[8];
 
-	const struct stv6110x_devctl	*devctl;
+	struct stv6110x_devctl	*devctl;
 };
 
 #endif /* __STV6110x_PRIV_H */

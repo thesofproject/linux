@@ -33,6 +33,8 @@ There are a few areas these helpers can grouped into:
   pipeline: Planes, handling rectangles for visibility checking and scissoring,
   flip queues and assorted bits.
 
+.. contents::
+
 Modeset Helper Reference for Common Vtables
 ===========================================
 
@@ -59,12 +61,6 @@ Implementing Asynchronous Atomic Commit
 .. kernel-doc:: drivers/gpu/drm/drm_atomic_helper.c
    :doc: implementing nonblocking commit
 
-Atomic State Reset and Initialization
--------------------------------------
-
-.. kernel-doc:: drivers/gpu/drm/drm_atomic_helper.c
-   :doc: atomic state reset and initialization
-
 Helper Functions Reference
 --------------------------
 
@@ -74,16 +70,40 @@ Helper Functions Reference
 .. kernel-doc:: drivers/gpu/drm/drm_atomic_helper.c
    :export:
 
-Simple KMS Helper Reference
-===========================
+Atomic State Reset and Initialization
+-------------------------------------
 
-.. kernel-doc:: drivers/gpu/drm/drm_simple_kms_helper.c
+.. kernel-doc:: drivers/gpu/drm/drm_atomic_state_helper.c
+   :doc: atomic state reset and initialization
+
+Atomic State Helper Reference
+-----------------------------
+
+.. kernel-doc:: drivers/gpu/drm/drm_atomic_state_helper.c
+   :export:
+
+GEM Atomic Helper Reference
+---------------------------
+
+.. kernel-doc:: drivers/gpu/drm/drm_gem_atomic_helper.c
    :doc: overview
 
-.. kernel-doc:: include/drm/drm_simple_kms_helper.h
+.. kernel-doc:: include/drm/drm_gem_atomic_helper.h
    :internal:
 
-.. kernel-doc:: drivers/gpu/drm/drm_simple_kms_helper.c
+.. kernel-doc:: drivers/gpu/drm/drm_gem_atomic_helper.c
+   :export:
+
+VBLANK Helper Reference
+-----------------------
+
+.. kernel-doc:: drivers/gpu/drm/drm_vblank_helper.c
+   :doc: overview
+
+.. kernel-doc:: include/drm/drm_vblank_helper.h
+   :internal:
+
+.. kernel-doc:: drivers/gpu/drm/drm_vblank_helper.c
    :export:
 
 fbdev Helper Functions Reference
@@ -98,13 +118,28 @@ fbdev Helper Functions Reference
 .. kernel-doc:: drivers/gpu/drm/drm_fb_helper.c
    :export:
 
-Framebuffer CMA Helper Functions Reference
+format Helper Functions Reference
+=================================
+
+.. kernel-doc:: drivers/gpu/drm/drm_format_helper.c
+   :export:
+
+Framebuffer DMA Helper Functions Reference
 ==========================================
 
-.. kernel-doc:: drivers/gpu/drm/drm_fb_cma_helper.c
-   :doc: framebuffer cma helper functions
+.. kernel-doc:: drivers/gpu/drm/drm_fb_dma_helper.c
+   :doc: framebuffer dma helper functions
 
-.. kernel-doc:: drivers/gpu/drm/drm_fb_cma_helper.c
+.. kernel-doc:: drivers/gpu/drm/drm_fb_dma_helper.c
+   :export:
+
+Framebuffer GEM Helper Reference
+================================
+
+.. kernel-doc:: drivers/gpu/drm/drm_gem_framebuffer_helper.c
+   :doc: overview
+
+.. kernel-doc:: drivers/gpu/drm/drm_gem_framebuffer_helper.c
    :export:
 
 .. _drm_bridges:
@@ -118,11 +153,29 @@ Overview
 .. kernel-doc:: drivers/gpu/drm/drm_bridge.c
    :doc: overview
 
-Default bridge callback sequence
---------------------------------
+Display Driver Integration
+--------------------------
 
 .. kernel-doc:: drivers/gpu/drm/drm_bridge.c
-   :doc: bridge callbacks
+   :doc: display driver integration
+
+Special Care with MIPI-DSI bridges
+----------------------------------
+
+.. kernel-doc:: drivers/gpu/drm/drm_bridge.c
+   :doc: special care dsi
+
+Bridge Operations
+-----------------
+
+.. kernel-doc:: drivers/gpu/drm/drm_bridge.c
+   :doc: bridge operations
+
+Bridge Connector Helper
+-----------------------
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_bridge_connector.c
+   :doc: overview
 
 
 Bridge Helper Reference
@@ -132,6 +185,19 @@ Bridge Helper Reference
    :internal:
 
 .. kernel-doc:: drivers/gpu/drm/drm_bridge.c
+   :export:
+
+MIPI-DSI bridge operation
+-------------------------
+
+.. kernel-doc:: drivers/gpu/drm/drm_bridge.c
+   :doc: dsi bridge operations
+
+
+Bridge Connector Helper Reference
+---------------------------------
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_bridge_connector.c
    :export:
 
 Panel-Bridge Helper Reference
@@ -157,40 +223,119 @@ Panel Helper Reference
 .. kernel-doc:: drivers/gpu/drm/drm_panel_orientation_quirks.c
    :export:
 
+.. kernel-doc:: drivers/gpu/drm/drm_panel_backlight_quirks.c
+   :export:
+
+Panel Self Refresh Helper Reference
+===================================
+
+.. kernel-doc:: drivers/gpu/drm/drm_self_refresh_helper.c
+   :doc: overview
+
+.. kernel-doc:: drivers/gpu/drm/drm_self_refresh_helper.c
+   :export:
+
+HDMI Atomic State Helpers
+=========================
+
+Overview
+--------
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_hdmi_state_helper.c
+   :doc: hdmi helpers
+
+Functions Reference
+-------------------
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_hdmi_state_helper.c
+   :export:
+
+HDCP Helper Functions Reference
+===============================
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_hdcp_helper.c
+   :export:
+
 Display Port Helper Functions Reference
 =======================================
 
-.. kernel-doc:: drivers/gpu/drm/drm_dp_helper.c
+.. kernel-doc:: drivers/gpu/drm/display/drm_dp_helper.c
    :doc: dp helpers
 
-.. kernel-doc:: include/drm/drm_dp_helper.h
+.. kernel-doc:: include/drm/display/drm_dp.h
    :internal:
 
-.. kernel-doc:: drivers/gpu/drm/drm_dp_helper.c
+.. kernel-doc:: include/drm/display/drm_dp_helper.h
+   :internal:
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_dp_helper.c
+   :export:
+
+Display Port CEC Helper Functions Reference
+===========================================
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_dp_cec.c
+   :doc: dp cec helpers
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_dp_cec.c
    :export:
 
 Display Port Dual Mode Adaptor Helper Functions Reference
 =========================================================
 
-.. kernel-doc:: drivers/gpu/drm/drm_dp_dual_mode_helper.c
+.. kernel-doc:: drivers/gpu/drm/display/drm_dp_dual_mode_helper.c
    :doc: dp dual mode helpers
 
-.. kernel-doc:: include/drm/drm_dp_dual_mode_helper.h
+.. kernel-doc:: include/drm/display/drm_dp_dual_mode_helper.h
    :internal:
 
-.. kernel-doc:: drivers/gpu/drm/drm_dp_dual_mode_helper.c
+.. kernel-doc:: drivers/gpu/drm/display/drm_dp_dual_mode_helper.c
    :export:
 
-Display Port MST Helper Functions Reference
-===========================================
+Display Port MST Helpers
+========================
 
-.. kernel-doc:: drivers/gpu/drm/drm_dp_mst_topology.c
+Overview
+--------
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_dp_mst_topology.c
    :doc: dp mst helper
 
-.. kernel-doc:: include/drm/drm_dp_mst_helper.h
+.. kernel-doc:: drivers/gpu/drm/display/drm_dp_mst_topology.c
+   :doc: Branch device and port refcounting
+
+Functions Reference
+-------------------
+
+.. kernel-doc:: include/drm/display/drm_dp_mst_helper.h
    :internal:
 
-.. kernel-doc:: drivers/gpu/drm/drm_dp_mst_topology.c
+.. kernel-doc:: drivers/gpu/drm/display/drm_dp_mst_topology.c
+   :export:
+
+Topology Lifetime Internals
+---------------------------
+
+These functions aren't exported to drivers, but are documented here to help make
+the MST topology helpers easier to understand
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_dp_mst_topology.c
+   :functions: drm_dp_mst_topology_try_get_mstb drm_dp_mst_topology_get_mstb
+               drm_dp_mst_topology_put_mstb
+               drm_dp_mst_topology_try_get_port drm_dp_mst_topology_get_port
+               drm_dp_mst_topology_put_port
+               drm_dp_mst_get_mstb_malloc drm_dp_mst_put_mstb_malloc
+
+MIPI DBI Helper Functions Reference
+===================================
+
+.. kernel-doc:: drivers/gpu/drm/drm_mipi_dbi.c
+   :doc: overview
+
+.. kernel-doc:: include/drm/drm_mipi_dbi.h
+   :internal:
+
+.. kernel-doc:: drivers/gpu/drm/drm_mipi_dbi.c
    :export:
 
 MIPI DSI Helper Functions Reference
@@ -203,6 +348,18 @@ MIPI DSI Helper Functions Reference
    :internal:
 
 .. kernel-doc:: drivers/gpu/drm/drm_mipi_dsi.c
+   :export:
+
+Display Stream Compression Helper Functions Reference
+=====================================================
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_dsc_helper.c
+   :doc: dsc helpers
+
+.. kernel-doc:: include/drm/display/drm_dsc.h
+   :internal:
+
+.. kernel-doc:: drivers/gpu/drm/display/drm_dsc_helper.c
    :export:
 
 Output Probing Helper Functions Reference
@@ -223,16 +380,36 @@ EDID Helper Functions Reference
 .. kernel-doc:: drivers/gpu/drm/drm_edid.c
    :export:
 
+.. kernel-doc:: include/drm/drm_eld.h
+   :internal:
+
+.. kernel-doc:: drivers/gpu/drm/drm_eld.c
+   :export:
+
 SCDC Helper Functions Reference
 ===============================
 
-.. kernel-doc:: drivers/gpu/drm/drm_scdc_helper.c
+.. kernel-doc:: drivers/gpu/drm/display/drm_scdc_helper.c
    :doc: scdc helpers
 
-.. kernel-doc:: include/drm/drm_scdc_helper.h
+.. kernel-doc:: include/drm/display/drm_scdc_helper.h
    :internal:
 
-.. kernel-doc:: drivers/gpu/drm/drm_scdc_helper.c
+.. kernel-doc:: drivers/gpu/drm/display/drm_scdc_helper.c
+   :export:
+
+HDMI Infoframes Helper Reference
+================================
+
+Strictly speaking this is not a DRM helper library but generally usable
+by any driver interfacing with HDMI outputs like v4l or alsa drivers.
+But it nicely fits into the overall topic of mode setting helper
+libraries and hence is also included here.
+
+.. kernel-doc:: include/linux/hdmi.h
+   :internal:
+
+.. kernel-doc:: drivers/video/hdmi.c
    :export:
 
 Rectangle Utilities Reference
@@ -245,20 +422,6 @@ Rectangle Utilities Reference
    :internal:
 
 .. kernel-doc:: drivers/gpu/drm/drm_rect.c
-   :export:
-
-HDMI Infoframes Helper Reference
-================================
-
-Strictly speaking this is not a DRM helper library but generally useable
-by any driver interfacing with HDMI outputs like v4l or alsa drivers.
-But it nicely fits into the overall topic of mode setting helper
-libraries and hence is also included here.
-
-.. kernel-doc:: include/linux/hdmi.h
-   :internal:
-
-.. kernel-doc:: drivers/video/hdmi.c
    :export:
 
 Flip-work Helper Reference
@@ -282,13 +445,13 @@ Auxiliary Modeset Helpers
 .. kernel-doc:: drivers/gpu/drm/drm_modeset_helper.c
    :export:
 
-Framebuffer GEM Helper Reference
-================================
+OF/DT Helpers
+=============
 
-.. kernel-doc:: drivers/gpu/drm/drm_gem_framebuffer_helper.c
+.. kernel-doc:: drivers/gpu/drm/drm_of.c
    :doc: overview
 
-.. kernel-doc:: drivers/gpu/drm/drm_gem_framebuffer_helper.c
+.. kernel-doc:: drivers/gpu/drm/drm_of.c
    :export:
 
 Legacy Plane Helper Reference
@@ -307,4 +470,19 @@ Legacy CRTC/Modeset Helper Functions Reference
    :doc: overview
 
 .. kernel-doc:: drivers/gpu/drm/drm_crtc_helper.c
+   :export:
+
+Privacy-screen class
+====================
+
+.. kernel-doc:: drivers/gpu/drm/drm_privacy_screen.c
+   :doc: overview
+
+.. kernel-doc:: include/drm/drm_privacy_screen_driver.h
+   :internal:
+
+.. kernel-doc:: include/drm/drm_privacy_screen_machine.h
+   :internal:
+
+.. kernel-doc:: drivers/gpu/drm/drm_privacy_screen.c
    :export:

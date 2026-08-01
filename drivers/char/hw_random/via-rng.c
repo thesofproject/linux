@@ -135,7 +135,7 @@ static int via_rng_init(struct hwrng *rng)
 	 * is always enabled if CPUID rng_en is set.  There is no
 	 * RNG configuration like it used to be the case in this
 	 * register */
-	if ((c->x86 == 6) && (c->x86_model >= 0x0f)) {
+	if (((c->x86 == 6) && (c->x86_model >= 0x0f))  || (c->x86 > 6)){
 		if (!boot_cpu_has(X86_FEATURE_XSTORE_EN)) {
 			pr_err(PFX "can't enable hardware RNG "
 				"if XSTORE is not enabled\n");
@@ -145,7 +145,7 @@ static int via_rng_init(struct hwrng *rng)
 	}
 
 	/* Control the RNG via MSR.  Tread lightly and pay very close
-	 * close attention to values written, as the reserved fields
+	 * attention to values written, as the reserved fields
 	 * are documented to be "undefined and unpredictable"; but it
 	 * does not say to write them as zero, so I make a guess that
 	 * we restore the values we find in the register.
@@ -192,7 +192,7 @@ static struct hwrng via_rng = {
 };
 
 
-static int __init mod_init(void)
+static int __init via_rng_mod_init(void)
 {
 	int err;
 
@@ -209,20 +209,19 @@ static int __init mod_init(void)
 out:
 	return err;
 }
+module_init(via_rng_mod_init);
 
-static void __exit mod_exit(void)
+static void __exit via_rng_mod_exit(void)
 {
 	hwrng_unregister(&via_rng);
 }
-
-module_init(mod_init);
-module_exit(mod_exit);
+module_exit(via_rng_mod_exit);
 
 static struct x86_cpu_id __maybe_unused via_rng_cpu_id[] = {
-	X86_FEATURE_MATCH(X86_FEATURE_XSTORE),
+	X86_MATCH_FEATURE(X86_FEATURE_XSTORE, NULL),
 	{}
 };
+MODULE_DEVICE_TABLE(x86cpu, via_rng_cpu_id);
 
 MODULE_DESCRIPTION("H/W RNG driver for VIA CPU with PadLock");
 MODULE_LICENSE("GPL");
-MODULE_DEVICE_TABLE(x86cpu, via_rng_cpu_id);

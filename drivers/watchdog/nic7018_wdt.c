@@ -1,23 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2016 National Instruments Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
-#include <linux/acpi.h>
 #include <linux/bitops.h>
 #include <linux/device.h>
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/types.h>
 #include <linux/watchdog.h>
 
 #define LOCK			0xA5
@@ -211,10 +202,7 @@ static int nic7018_probe(struct platform_device *pdev)
 
 	watchdog_set_drvdata(wdd, wdt);
 	watchdog_set_nowayout(wdd, nowayout);
-
-	ret = watchdog_init_timeout(wdd, timeout, dev);
-	if (ret)
-		dev_warn(dev, "unable to set timeout value, using default\n");
+	watchdog_init_timeout(wdd, timeout, dev);
 
 	/* Unlock WDT register */
 	outb(UNLOCK, wdt->io_base + WDT_REG_LOCK);
@@ -222,7 +210,6 @@ static int nic7018_probe(struct platform_device *pdev)
 	ret = watchdog_register_device(wdd);
 	if (ret) {
 		outb(LOCK, wdt->io_base + WDT_REG_LOCK);
-		dev_err(dev, "failed to register watchdog\n");
 		return ret;
 	}
 
@@ -231,7 +218,7 @@ static int nic7018_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int nic7018_remove(struct platform_device *pdev)
+static void nic7018_remove(struct platform_device *pdev)
 {
 	struct nic7018_wdt *wdt = platform_get_drvdata(pdev);
 
@@ -239,13 +226,11 @@ static int nic7018_remove(struct platform_device *pdev)
 
 	/* Lock WDT register */
 	outb(LOCK, wdt->io_base + WDT_REG_LOCK);
-
-	return 0;
 }
 
 static const struct acpi_device_id nic7018_device_ids[] = {
-	{"NIC7018", 0},
-	{"", 0},
+	{ "NIC7018" },
+	{ }
 };
 MODULE_DEVICE_TABLE(acpi, nic7018_device_ids);
 
@@ -254,7 +239,7 @@ static struct platform_driver watchdog_driver = {
 	.remove = nic7018_remove,
 	.driver = {
 		.name = KBUILD_MODNAME,
-		.acpi_match_table = ACPI_PTR(nic7018_device_ids),
+		.acpi_match_table = nic7018_device_ids,
 	},
 };
 

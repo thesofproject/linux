@@ -222,7 +222,7 @@ static struct clk_hw *clk_register_ready_gate(struct device *dev,
 	struct clk_hw *hw;
 	int ret;
 
-	rgate = kzalloc(sizeof(*rgate), GFP_KERNEL);
+	rgate = kzalloc_obj(*rgate);
 	if (!rgate)
 		return ERR_PTR(-ENOMEM);
 
@@ -297,7 +297,7 @@ static struct clk_mux *_get_cmux(void __iomem *reg, u8 shift, u8 width,
 {
 	struct clk_mux *mux;
 
-	mux = kzalloc(sizeof(*mux), GFP_KERNEL);
+	mux = kzalloc_obj(*mux);
 	if (!mux)
 		return ERR_PTR(-ENOMEM);
 
@@ -315,7 +315,7 @@ static struct clk_divider *_get_cdiv(void __iomem *reg, u8 shift, u8 width,
 {
 	struct clk_divider *div;
 
-	div = kzalloc(sizeof(*div), GFP_KERNEL);
+	div = kzalloc_obj(*div);
 
 	if (!div)
 		return ERR_PTR(-ENOMEM);
@@ -334,7 +334,7 @@ static struct clk_gate *_get_cgate(void __iomem *reg, u8 bit_idx, u32 flags,
 {
 	struct clk_gate *gate;
 
-	gate = kzalloc(sizeof(*gate), GFP_KERNEL);
+	gate = kzalloc_obj(*gate);
 	if (!gate)
 		return ERR_PTR(-ENOMEM);
 
@@ -467,7 +467,7 @@ static struct clk_hw *clk_register_stm32_timer_ker(struct device *dev,
 	struct clk_hw *hw;
 	int err;
 
-	element = kzalloc(sizeof(*element), GFP_KERNEL);
+	element = kzalloc_obj(*element);
 	if (!element)
 		return ERR_PTR(-ENOMEM);
 
@@ -667,7 +667,6 @@ struct stm32_fractional_divider {
 	void __iomem	*mreg;
 	u8		mshift;
 	u8		mwidth;
-	u32		mmask;
 
 	void __iomem	*nreg;
 	u8		nshift;
@@ -793,7 +792,7 @@ static struct clk_hw *clk_register_stm32_pll(struct device *dev,
 	struct stm32_fractional_divider *div = NULL;
 	struct stm32_ready_gate *rgate;
 
-	pll = kzalloc(sizeof(*pll), GFP_KERNEL);
+	pll = kzalloc_obj(*pll);
 	if (!pll)
 		return ERR_PTR(-ENOMEM);
 
@@ -845,10 +844,10 @@ static unsigned long odf_divider_recalc_rate(struct clk_hw *hw,
 	return clk_divider_ops.recalc_rate(hw, parent_rate);
 }
 
-static long odf_divider_round_rate(struct clk_hw *hw, unsigned long rate,
-		unsigned long *prate)
+static int odf_divider_determine_rate(struct clk_hw *hw,
+				      struct clk_rate_request *req)
 {
-	return clk_divider_ops.round_rate(hw, rate, prate);
+	return clk_divider_ops.determine_rate(hw, req);
 }
 
 static int odf_divider_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -875,7 +874,7 @@ static int odf_divider_set_rate(struct clk_hw *hw, unsigned long rate,
 
 static const struct clk_ops odf_divider_ops = {
 	.recalc_rate	= odf_divider_recalc_rate,
-	.round_rate	= odf_divider_round_rate,
+	.determine_rate	= odf_divider_determine_rate,
 	.set_rate	= odf_divider_set_rate,
 };
 
@@ -1201,9 +1200,7 @@ static void __init stm32h7_rcc_init(struct device_node *np)
 	const char *hse_clk, *lse_clk, *i2s_clk;
 	struct regmap *pdrm;
 
-	clk_data = kzalloc(sizeof(*clk_data) +
-			sizeof(*clk_data->hws) * STM32H7_MAX_CLKS,
-			GFP_KERNEL);
+	clk_data = kzalloc_flex(*clk_data, hws, STM32H7_MAX_CLKS);
 	if (!clk_data)
 		return;
 
@@ -1217,7 +1214,7 @@ static void __init stm32h7_rcc_init(struct device_node *np)
 	/* get RCC base @ from DT */
 	base = of_iomap(np, 0);
 	if (!base) {
-		pr_err("%s: unable to map resource", np->name);
+		pr_err("%pOFn: unable to map resource", np);
 		goto err_free_clks;
 	}
 

@@ -25,11 +25,8 @@
 #include <linux/workqueue.h>
 #include <linux/atomic.h>
 #include <linux/pm_runtime.h>
-
+#include <linux/greybus.h>
 #include <asm/div64.h>
-
-#include "greybus.h"
-#include "connection.h"
 
 #define NSEC_PER_DAY 86400000000000ULL
 
@@ -47,8 +44,6 @@ struct gb_loopback_device {
 
 	/* We need to take a lock in atomic context */
 	spinlock_t lock;
-	struct list_head list;
-	struct list_head list_op_async;
 	wait_queue_head_t wq;
 };
 
@@ -68,7 +63,6 @@ struct gb_loopback {
 	struct kfifo kfifo_lat;
 	struct mutex mutex;
 	struct task_struct *task;
-	struct list_head entry;
 	struct device *dev;
 	wait_queue_head_t wq;
 	wait_queue_head_t wq_completion;
@@ -97,7 +91,6 @@ struct gb_loopback {
 	u32 timeout_min;
 	u32 timeout_max;
 	u32 outstanding_operations_max;
-	u32 lbid;
 	u64 elapsed_nsecs;
 	u32 apbridge_latency_ts;
 	u32 gbphy_latency_ts;
@@ -107,8 +100,8 @@ struct gb_loopback {
 
 static struct class loopback_class = {
 	.name		= "gb_loopback",
-	.owner		= THIS_MODULE,
 };
+
 static DEFINE_IDA(loopback_ida);
 
 /* Min/max values in jiffies */
@@ -132,7 +125,7 @@ static ssize_t field##_show(struct device *dev,			\
 			    char *buf)					\
 {									\
 	struct gb_loopback *gb = dev_get_drvdata(dev);			\
-	return sprintf(buf, "%u\n", gb->field);			\
+	return sysfs_emit(buf, "%u\n", gb->field);			\
 }									\
 static DEVICE_ATTR_RO(field)
 
@@ -142,10 +135,10 @@ static ssize_t name##_##field##_show(struct device *dev,	\
 			    char *buf)					\
 {									\
 	struct gb_loopback *gb = dev_get_drvdata(dev);			\
-	/* Report 0 for min and max if no transfer successed */		\
+	/* Report 0 for min and max if no transfer succeeded */		\
 	if (!gb->requests_completed)					\
-		return sprintf(buf, "0\n");				\
-	return sprintf(buf, "%"#type"\n", gb->name.field);	\
+		return sysfs_emit(buf, "0\n");				\
+	return sysfs_emit(buf, "%" #type "\n", gb->name.field);		\
 }									\
 static DEVICE_ATTR_RO(name##_##field)
 
@@ -165,7 +158,7 @@ static ssize_t name##_avg_show(struct device *dev,		\
 	rem = do_div(avg, count);					\
 	rem *= 1000000;							\
 	do_div(rem, count);						\
-	return sprintf(buf, "%llu.%06u\n", avg, (u32)rem);		\
+	return sysfs_emit(buf, "%llu.%06u\n", avg, (u32)rem);		\
 }									\
 static DEVICE_ATTR_RO(name##_avg)
 
@@ -180,7 +173,7 @@ static ssize_t field##_show(struct device *dev,				\
 			    char *buf)					\
 {									\
 	struct gb_loopback *gb = dev_get_drvdata(dev);			\
-	return sprintf(buf, "%"#type"\n", gb->field);			\
+	return sysfs_emit(buf, "%" #type "\n", gb->field);			\
 }									\
 static ssize_t field##_store(struct device *dev,			\
 			    struct device_attribute *attr,		\
@@ -200,13 +193,13 @@ static ssize_t field##_store(struct device *dev,			\
 }									\
 static DEVICE_ATTR_RW(field)
 
-#define gb_dev_loopback_ro_attr(field, conn)				\
+#define gb_dev_loopback_ro_attr(field)				\
 static ssize_t field##_show(struct device *dev,		\
 			    struct device_attribute *attr,		\
 			    char *buf)					\
 {									\
 	struct gb_loopback *gb = dev_get_drvdata(dev);			\
-	return sprintf(buf, "%u\n", gb->field);				\
+	return sysfs_emit(buf, "%u\n", gb->field);				\
 }									\
 static DEVICE_ATTR_RO(field)
 
@@ -216,7 +209,7 @@ static ssize_t field##_show(struct device *dev,				\
 			    char *buf)					\
 {									\
 	struct gb_loopback *gb = dev_get_drvdata(dev);			\
-	return sprintf(buf, "%"#type"\n", gb->field);			\
+	return sysfs_emit(buf, "%" #type "\n", gb->field);			\
 }									\
 static ssize_t field##_store(struct device *dev,			\
 			    struct device_attribute *attr,		\
@@ -312,7 +305,7 @@ gb_dev_loopback_rw_attr(us_wait, d);
 /* Maximum iterations for a given operation: 1-(2^32-1), 0 implies infinite */
 gb_dev_loopback_rw_attr(iteration_max, u);
 /* The current index of the for (i = 0; i < iteration_max; i++) loop */
-gb_dev_loopback_ro_attr(iteration_count, false);
+gb_dev_loopback_ro_attr(iteration_count);
 /* A flag to indicate synchronous or asynchronous operations */
 gb_dev_loopback_rw_attr(async, u);
 /* Timeout of an individual asynchronous request */
@@ -478,7 +471,7 @@ static int gb_loopback_async_operation(struct gb_loopback *gb, int type,
 	struct gb_operation *operation;
 	int ret;
 
-	op_async = kzalloc(sizeof(*op_async), GFP_KERNEL);
+	op_async = kzalloc_obj(*op_async);
 	if (!op_async)
 		return -ENOMEM;
 
@@ -877,7 +870,7 @@ static int gb_loopback_fn(void *data)
 		if (gb->send_count == gb->iteration_max) {
 			mutex_unlock(&gb->mutex);
 
-			/* Wait for synchronous and asynchronus completion */
+			/* Wait for synchronous and asynchronous completion */
 			gb_loopback_async_wait_all(gb);
 
 			/* Mark complete unless user-space has poked us */
@@ -886,7 +879,7 @@ static int gb_loopback_fn(void *data)
 				gb->type = 0;
 				gb->send_count = 0;
 				sysfs_notify(&gb->dev->kobj,  NULL,
-						"iteration_count");
+					     "iteration_count");
 				dev_dbg(&bundle->dev, "load test complete\n");
 			} else {
 				dev_dbg(&bundle->dev,
@@ -974,57 +967,7 @@ static int gb_loopback_dbgfs_latency_show(struct seq_file *s, void *unused)
 	return gb_loopback_dbgfs_latency_show_common(s, &gb->kfifo_lat,
 						     &gb->mutex);
 }
-
-static int gb_loopback_latency_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, gb_loopback_dbgfs_latency_show,
-			   inode->i_private);
-}
-
-static const struct file_operations gb_loopback_debugfs_latency_ops = {
-	.open		= gb_loopback_latency_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static int gb_loopback_bus_id_compare(void *priv, struct list_head *lha,
-				      struct list_head *lhb)
-{
-	struct gb_loopback *a = list_entry(lha, struct gb_loopback, entry);
-	struct gb_loopback *b = list_entry(lhb, struct gb_loopback, entry);
-	struct gb_connection *ca = a->connection;
-	struct gb_connection *cb = b->connection;
-
-	if (ca->bundle->intf->interface_id < cb->bundle->intf->interface_id)
-		return -1;
-	if (cb->bundle->intf->interface_id < ca->bundle->intf->interface_id)
-		return 1;
-	if (ca->bundle->id < cb->bundle->id)
-		return -1;
-	if (cb->bundle->id < ca->bundle->id)
-		return 1;
-	if (ca->intf_cport_id < cb->intf_cport_id)
-		return -1;
-	else if (cb->intf_cport_id < ca->intf_cport_id)
-		return 1;
-
-	return 0;
-}
-
-static void gb_loopback_insert_id(struct gb_loopback *gb)
-{
-	struct gb_loopback *gb_list;
-	u32 new_lbid = 0;
-
-	/* perform an insertion sort */
-	list_add_tail(&gb->entry, &gb_dev.list);
-	list_sort(NULL, &gb_dev.list, gb_loopback_bus_id_compare);
-	list_for_each_entry(gb_list, &gb_dev.list, entry) {
-		gb_list->lbid = 1 << new_lbid;
-		new_lbid++;
-	}
-}
+DEFINE_SHOW_ATTRIBUTE(gb_loopback_dbgfs_latency);
 
 #define DEBUGFS_NAMELEN 32
 
@@ -1046,7 +989,7 @@ static int gb_loopback_probe(struct gb_bundle *bundle,
 	if (cport_desc->protocol_id != GREYBUS_PROTOCOL_LOOPBACK)
 		return -ENODEV;
 
-	gb = kzalloc(sizeof(*gb), GFP_KERNEL);
+	gb = kzalloc_obj(*gb);
 	if (!gb)
 		return -ENOMEM;
 
@@ -1084,9 +1027,9 @@ static int gb_loopback_probe(struct gb_bundle *bundle,
 	snprintf(name, sizeof(name), "raw_latency_%s",
 		 dev_name(&connection->bundle->dev));
 	gb->file = debugfs_create_file(name, S_IFREG | 0444, gb_dev.root, gb,
-				       &gb_loopback_debugfs_latency_ops);
+				       &gb_loopback_dbgfs_latency_fops);
 
-	gb->id = ida_simple_get(&loopback_ida, 0, 0, GFP_KERNEL);
+	gb->id = ida_alloc(&loopback_ida, GFP_KERNEL);
 	if (gb->id < 0) {
 		retval = gb->id;
 		goto out_debugfs_remove;
@@ -1108,7 +1051,7 @@ static int gb_loopback_probe(struct gb_bundle *bundle,
 
 	/* Allocate kfifo */
 	if (kfifo_alloc(&gb->kfifo_lat, kfifo_depth * sizeof(u32),
-			  GFP_KERNEL)) {
+			GFP_KERNEL)) {
 		retval = -ENOMEM;
 		goto out_conn;
 	}
@@ -1121,7 +1064,6 @@ static int gb_loopback_probe(struct gb_bundle *bundle,
 	}
 
 	spin_lock_irqsave(&gb_dev.lock, flags);
-	gb_loopback_insert_id(gb);
 	gb_dev.count++;
 	spin_unlock_irqrestore(&gb_dev.lock, flags);
 
@@ -1138,7 +1080,7 @@ out_conn:
 out_connection_disable:
 	gb_connection_disable(connection);
 out_ida_remove:
-	ida_simple_remove(&loopback_ida, gb->id);
+	ida_free(&loopback_ida, gb->id);
 out_debugfs_remove:
 	debugfs_remove(gb->file);
 out_connection_destroy:
@@ -1177,11 +1119,10 @@ static void gb_loopback_disconnect(struct gb_bundle *bundle)
 
 	spin_lock_irqsave(&gb_dev.lock, flags);
 	gb_dev.count--;
-	list_del(&gb->entry);
 	spin_unlock_irqrestore(&gb_dev.lock, flags);
 
 	device_unregister(gb->dev);
-	ida_simple_remove(&loopback_ida, gb->id);
+	ida_free(&loopback_ida, gb->id);
 
 	gb_connection_destroy(gb->connection);
 	kfree(gb);
@@ -1204,8 +1145,6 @@ static int loopback_init(void)
 {
 	int retval;
 
-	INIT_LIST_HEAD(&gb_dev.list);
-	INIT_LIST_HEAD(&gb_dev.list_op_async);
 	spin_lock_init(&gb_dev.lock);
 	gb_dev.root = debugfs_create_dir("gb_loopback", NULL);
 
@@ -1236,4 +1175,5 @@ static void __exit loopback_exit(void)
 }
 module_exit(loopback_exit);
 
+MODULE_DESCRIPTION("Loopback bridge driver for the Greybus loopback module");
 MODULE_LICENSE("GPL v2");

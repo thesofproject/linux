@@ -22,6 +22,7 @@
 MODULE_DESCRIPTION("SAT support for Cypress USB/ATA bridges with ATACB");
 MODULE_AUTHOR("Matthieu Castet <castet.matthieu@free.fr>");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS("USB_STORAGE");
 
 /*
  * The table of devices
@@ -32,7 +33,7 @@ MODULE_LICENSE("GPL");
 { USB_DEVICE_VER(id_vendor, id_product, bcdDeviceMin, bcdDeviceMax), \
   .driver_info = (flags) }
 
-static struct usb_device_id cypress_usb_ids[] = {
+static const struct usb_device_id cypress_usb_ids[] = {
 #	include "unusual_cypress.h"
 	{ }		/* Terminating entry */
 };
@@ -54,7 +55,7 @@ MODULE_DEVICE_TABLE(usb, cypress_usb_ids);
 	.initFunction = init_function,	\
 }
 
-static struct us_unusual_dev cypress_unusual_dev_list[] = {
+static const struct us_unusual_dev cypress_unusual_dev_list[] = {
 #	include "unusual_cypress.h"
 	{ }		/* Terminating entry */
 };
@@ -176,7 +177,6 @@ static void cypress_atacb_passthrough(struct scsi_cmnd *srb, struct us_data *us)
 		 * but reading register selected in srb->cmnd[4]
 		 */
 		srb->cmd_len = 16;
-		srb->cmnd = ses.cmnd;
 		srb->cmnd[2] = 1;
 
 		usb_stor_transparent_scsi_command(srb, us);
@@ -220,11 +220,11 @@ static void cypress_atacb_passthrough(struct scsi_cmnd *srb, struct us_data *us)
 		desc[12] = regs[6];  /* device */
 		desc[13] = regs[7];  /* command */
 
-		srb->result = (DRIVER_SENSE << 24) | SAM_STAT_CHECK_CONDITION;
+		srb->result = SAM_STAT_CHECK_CONDITION;
 	}
 	goto end;
 invalid_fld:
-	srb->result = (DRIVER_SENSE << 24) | SAM_STAT_CHECK_CONDITION;
+	srb->result = SAM_STAT_CHECK_CONDITION;
 
 	memcpy(srb->sense_buffer,
 			usb_stor_sense_invalidCDB,

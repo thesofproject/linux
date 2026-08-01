@@ -30,7 +30,7 @@ enum bcma_boot_dev {
 	BCMA_BOOT_DEV_NAND,
 };
 
-/* The 47162a0 hangs when reading MIPS DMP registers registers */
+/* The 47162a0 hangs when reading MIPS DMP registers */
 static inline bool bcma_core_mips_bcm47162a0_quirk(struct bcma_device *dev)
 {
 	return dev->bus->chipinfo.id == BCMA_CHIP_ID_BCM47162 &&
@@ -45,35 +45,6 @@ static inline bool bcma_core_mips_bcm5357b0_quirk(struct bcma_device *dev)
 	       dev->bus->chipinfo.pkg == 11 &&
 	       dev->id.id == BCMA_CORE_USB20_HOST;
 }
-
-static inline u32 mips_read32(struct bcma_drv_mips *mcore,
-			      u16 offset)
-{
-	return bcma_read32(mcore->core, offset);
-}
-
-static inline void mips_write32(struct bcma_drv_mips *mcore,
-				u16 offset,
-				u32 value)
-{
-	bcma_write32(mcore->core, offset, value);
-}
-
-static const u32 ipsflag_irq_mask[] = {
-	0,
-	BCMA_MIPS_IPSFLAG_IRQ1,
-	BCMA_MIPS_IPSFLAG_IRQ2,
-	BCMA_MIPS_IPSFLAG_IRQ3,
-	BCMA_MIPS_IPSFLAG_IRQ4,
-};
-
-static const u32 ipsflag_irq_shift[] = {
-	0,
-	BCMA_MIPS_IPSFLAG_IRQ1_SHIFT,
-	BCMA_MIPS_IPSFLAG_IRQ2_SHIFT,
-	BCMA_MIPS_IPSFLAG_IRQ3_SHIFT,
-	BCMA_MIPS_IPSFLAG_IRQ4_SHIFT,
-};
 
 static u32 bcma_core_mips_irqflag(struct bcma_device *dev)
 {

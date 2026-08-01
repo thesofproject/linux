@@ -16,11 +16,10 @@
 #include <linux/sched.h>
 #include <linux/init.h>
 #include <linux/vmalloc.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 
 #include <asm/ptrace.h>
 #include <asm/smp.h>
-#include <asm/pgalloc.h>
 #include <asm/tlbflush.h>
 #include <asm/vga.h>
 
@@ -316,10 +315,12 @@ titan_init_one_pachip_port(titan_pachip_port *port, int index)
 	 * Window 1 is direct access 1GB at 2GB
 	 * Window 2 is scatter-gather 1GB at 3GB
 	 */
-	hose->sg_isa = iommu_arena_new(hose, 0x00800000, 0x00800000, 0);
+	hose->sg_isa = iommu_arena_new(hose, 0x00800000, 0x00800000,
+				       SMP_CACHE_BYTES);
 	hose->sg_isa->align_entry = 8; /* 64KB for ISA */
 
-	hose->sg_pci = iommu_arena_new(hose, 0xc0000000, 0x40000000, 0);
+	hose->sg_pci = iommu_arena_new(hose, 0xc0000000, 0x40000000,
+				       SMP_CACHE_BYTES);
 	hose->sg_pci->align_entry = 4; /* Titan caches 4 PTEs at a time */
 
 	port->wsba[0].csr = hose->sg_isa->dma_base | 3;
@@ -593,7 +594,7 @@ titan_agp_setup(alpha_agp_info *agp)
 	if (!alpha_agpgart_size)
 		return -ENOMEM;
 
-	aper = kmalloc(sizeof(struct titan_agp_aperture), GFP_KERNEL);
+	aper = kmalloc_obj(struct titan_agp_aperture);
 	if (aper == NULL)
 		return -ENOMEM;
 
@@ -759,7 +760,7 @@ titan_agp_info(void)
 	/*
 	 * Allocate the info structure.
 	 */
-	agp = kmalloc(sizeof(*agp), GFP_KERNEL);
+	agp = kmalloc_obj(*agp);
 	if (!agp)
 		return NULL;
 

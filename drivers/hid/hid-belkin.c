@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  HID driver for some belkin "special" devices
  *
@@ -9,10 +10,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 #include <linux/device.h>
@@ -30,7 +27,8 @@ static int belkin_input_mapping(struct hid_device *hdev, struct hid_input *hi,
 		struct hid_field *field, struct hid_usage *usage,
 		unsigned long **bit, int *max)
 {
-	unsigned long quirks = (unsigned long)hid_get_drvdata(hdev);
+	const struct hid_device_id *id = hid_get_drvdata(hdev);
+	unsigned long quirks = id->driver_data;
 
 	if ((usage->hid & HID_USAGE_PAGE) != HID_UP_CONSUMER ||
 			!(quirks & BELKIN_WKBD))
@@ -51,7 +49,7 @@ static int belkin_probe(struct hid_device *hdev, const struct hid_device_id *id)
 	unsigned long quirks = id->driver_data;
 	int ret;
 
-	hid_set_drvdata(hdev, (void *)quirks);
+	hid_set_drvdata(hdev, (void *)id);
 
 	ret = hid_parse(hdev);
 	if (ret) {
@@ -88,4 +86,5 @@ static struct hid_driver belkin_driver = {
 };
 module_hid_driver(belkin_driver);
 
+MODULE_DESCRIPTION("HID driver for some belkin \"special\" devices");
 MODULE_LICENSE("GPL");

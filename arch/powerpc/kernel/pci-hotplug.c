@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Derived from "arch/powerpc/platforms/pseries/pci_dlpar.c"
  *
@@ -7,15 +8,11 @@
  * Updates, 2005, John Rose <johnrose@austin.ibm.com>
  * Updates, 2005, Linas Vepstas <linas@austin.ibm.com>
  * Updates, 2013, Gavin Shan <shangw@linux.vnet.ibm.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/pci.h>
 #include <linux/export.h>
+#include <linux/of.h>
 #include <asm/pci-bridge.h>
 #include <asm/ppc-pci.h>
 #include <asm/firmware.h>
@@ -59,11 +56,16 @@ EXPORT_SYMBOL_GPL(pci_find_bus_by_node);
 void pcibios_release_device(struct pci_dev *dev)
 {
 	struct pci_controller *phb = pci_bus_to_host(dev->bus);
-
-	eeh_remove_device(dev);
+	struct pci_dn *pdn = pci_get_pdn(dev);
 
 	if (phb->controller_ops.release_device)
 		phb->controller_ops.release_device(dev);
+
+	/* free()ing the pci_dn has been deferred to us, do it now */
+	if (pdn && (pdn->flags & PCI_DN_FLAG_DEAD)) {
+		pci_dbg(dev, "freeing dead pdn\n");
+		kfree(pdn);
+	}
 }
 
 /**
@@ -91,6 +93,36 @@ void pci_hp_remove_devices(struct pci_bus *bus)
 }
 EXPORT_SYMBOL_GPL(pci_hp_remove_devices);
 
+static void traverse_siblings_and_scan_slot(struct device_node *start, struct pci_bus *bus)
+{
+	struct device_node *dn;
+	int slotno;
+
+	u32 class = 0;
+
+	if (!of_property_read_u32(start->child, "class-code", &class)) {
+		/* Call of pci_scan_slot for non-bridge/EP case */
+		if (!((class >> 8) == PCI_CLASS_BRIDGE_PCI)) {
+			slotno = PCI_SLOT(PCI_DN(start->child)->devfn);
+			pci_scan_slot(bus, PCI_DEVFN(slotno, 0));
+			return;
+		}
+	}
+
+	/* Iterate all siblings */
+	for_each_child_of_node(start, dn) {
+		class = 0;
+
+		if (!of_property_read_u32(start->child, "class-code", &class)) {
+			/* Call of pci_scan_slot on each sibling-nodes/bridge-ports */
+			if ((class >> 8) == PCI_CLASS_BRIDGE_PCI) {
+				slotno = PCI_SLOT(PCI_DN(dn)->devfn);
+				pci_scan_slot(bus, PCI_DEVFN(slotno, 0));
+			}
+		}
+	}
+}
+
 /**
  * pci_hp_add_devices - adds new pci devices to bus
  * @bus: the indicated PCI bus
@@ -104,12 +136,13 @@ EXPORT_SYMBOL_GPL(pci_hp_remove_devices);
  */
 void pci_hp_add_devices(struct pci_bus *bus)
 {
-	int slotno, mode, max;
+	int mode, max;
 	struct pci_dev *dev;
 	struct pci_controller *phb;
 	struct device_node *dn = pci_bus_to_OF_node(bus);
 
-	eeh_add_device_tree_early(PCI_DN(dn));
+	if (!dn)
+		return;
 
 	phb = pci_bus_to_host(bus);
 
@@ -129,9 +162,7 @@ void pci_hp_add_devices(struct pci_bus *bus)
 		 * order for fully rescan all the way down to pick them up.
 		 * They can have been removed during partial hotplug.
 		 */
-		slotno = PCI_SLOT(PCI_DN(dn->child)->devfn);
-		pci_scan_slot(bus, PCI_DEVFN(slotno, 0));
-		pcibios_setup_bus_devices(bus);
+		traverse_siblings_and_scan_slot(dn, bus);
 		max = bus->busn_res.start;
 		/*
 		 * Scan bridges that are already configured. We don't touch

@@ -7,6 +7,7 @@
  */
 
 #include <linux/device.h>
+#include <linux/export.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
@@ -28,20 +29,21 @@ static int scmdev_probe(struct device *dev)
 	return scmdrv->probe ? scmdrv->probe(scmdev) : -ENODEV;
 }
 
-static int scmdev_remove(struct device *dev)
+static void scmdev_remove(struct device *dev)
 {
 	struct scm_device *scmdev = to_scm_dev(dev);
 	struct scm_driver *scmdrv = to_scm_drv(dev->driver);
 
-	return scmdrv->remove ? scmdrv->remove(scmdev) : -ENODEV;
+	if (scmdrv->remove)
+		scmdrv->remove(scmdev);
 }
 
-static int scmdev_uevent(struct device *dev, struct kobj_uevent_env *env)
+static int scmdev_uevent(const struct device *dev, struct kobj_uevent_env *env)
 {
 	return add_uevent_var(env, "MODALIAS=scm:scmdev");
 }
 
-static struct bus_type scm_bus_type = {
+static const struct bus_type scm_bus_type = {
 	.name  = "scm",
 	.probe = scmdev_probe,
 	.remove = scmdev_remove,
@@ -90,7 +92,7 @@ static ssize_t show_##name(struct device *dev,				\
 	int ret;							\
 									\
 	device_lock(dev);						\
-	ret = sprintf(buf, "%u\n", scmdev->attrs.name);			\
+	ret = sysfs_emit(buf, "%u\n", scmdev->attrs.name);		\
 	device_unlock(dev);						\
 									\
 	return ret;							\
@@ -174,10 +176,10 @@ out:
 		kobject_uevent(&scmdev->dev.kobj, KOBJ_CHANGE);
 }
 
-static int check_address(struct device *dev, void *data)
+static int check_address(struct device *dev, const void *data)
 {
 	struct scm_device *scmdev = to_scm_dev(dev);
-	struct sale *sale = data;
+	const struct sale *sale = data;
 
 	return scmdev->address == sale->sa;
 }
@@ -205,7 +207,7 @@ static int scm_add(struct chsc_scm_info *scm_info, size_t num)
 			put_device(&scmdev->dev);
 			continue;
 		}
-		scmdev = kzalloc(sizeof(*scmdev), GFP_KERNEL);
+		scmdev = kzalloc_obj(*scmdev);
 		if (!scmdev)
 			return -ENODEV;
 		scmdev_setup(scmdev, sale, scm_info->is, scm_info->mbc);

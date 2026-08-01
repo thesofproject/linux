@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright 2009-2015 Freescale Semiconductor, Inc. and others
  *
@@ -9,11 +10,6 @@
  *          Jason Jin <Jason.jin@freescale.com>
  *
  * Based on original driver mpc5121_nfc.c.
- *
- * This is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  *
  * Limitations:
  * - Untested on MPC5125 and M54418.
@@ -33,8 +29,9 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/rawnand.h>
 #include <linux/mtd/partitions.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/slab.h>
 #include <linux/swab.h>
 
@@ -152,6 +149,7 @@ enum vf610_nfc_variant {
 };
 
 struct vf610_nfc {
+	struct nand_controller base;
 	struct nand_chip chip;
 	struct device *dev;
 	void __iomem *regs;
@@ -167,11 +165,6 @@ struct vf610_nfc {
 	bool data_access;
 	u32 ecc_mode;
 };
-
-static inline struct vf610_nfc *mtd_to_nfc(struct mtd_info *mtd)
-{
-	return container_of(mtd_to_nand(mtd), struct vf610_nfc, chip);
-}
 
 static inline struct vf610_nfc *chip_to_nfc(struct nand_chip *chip)
 {
@@ -214,7 +207,7 @@ static inline bool vf610_nfc_kernel_is_little_endian(void)
 #endif
 }
 
-/**
+/*
  * Read accessor for internal SRAM buffer
  * @dst: destination address in regular memory
  * @src: source address in SRAM buffer
@@ -249,7 +242,7 @@ static inline void vf610_nfc_rd_from_sram(void *dst, const void __iomem *src,
 	}
 }
 
-/**
+/*
  * Write accessor for internal SRAM buffer
  * @dst: destination address in SRAM buffer
  * @src: source address in regular memory
@@ -316,8 +309,7 @@ static void vf610_nfc_done(struct vf610_nfc *nfc)
 
 static irqreturn_t vf610_nfc_irq(int irq, void *data)
 {
-	struct mtd_info *mtd = data;
-	struct vf610_nfc *nfc = mtd_to_nfc(mtd);
+	struct vf610_nfc *nfc = data;
 
 	vf610_nfc_clear(nfc, NFC_IRQ_STATUS, IDLE_EN_BIT);
 	complete(&nfc->cmd_done);
@@ -330,11 +322,6 @@ static inline void vf610_nfc_ecc_mode(struct vf610_nfc *nfc, int ecc_mode)
 	vf610_nfc_set_field(nfc, NFC_FLASH_CONFIG,
 			    CONFIG_ECC_MODE_MASK,
 			    CONFIG_ECC_MODE_SHIFT, ecc_mode);
-}
-
-static inline void vf610_nfc_transfer_size(struct vf610_nfc *nfc, int size)
-{
-	vf610_nfc_write(nfc, NFC_SECTOR_SIZE, size);
 }
 
 static inline void vf610_nfc_run(struct vf610_nfc *nfc, u32 col, u32 row,
@@ -373,7 +360,7 @@ static int vf610_nfc_cmd(struct nand_chip *chip,
 {
 	const struct nand_op_instr *instr;
 	struct vf610_nfc *nfc = chip_to_nfc(chip);
-	int op_id = -1, trfr_sz = 0, offset;
+	int op_id = -1, trfr_sz = 0, offset = 0;
 	u32 col = 0, row = 0, cmd1 = 0, cmd2 = 0, code = 0;
 	bool force8bit = false;
 
@@ -487,40 +474,42 @@ static const struct nand_op_parser vf610_nfc_op_parser = NAND_OP_PARSER(
 		NAND_OP_PARSER_PAT_DATA_IN_ELEM(true, PAGE_2K + OOB_MAX)),
 	);
 
-static int vf610_nfc_exec_op(struct nand_chip *chip,
-			     const struct nand_operation *op,
-			     bool check_only)
-{
-	return nand_op_parser_exec_op(chip, &vf610_nfc_op_parser, op,
-				      check_only);
-}
-
 /*
  * This function supports Vybrid only (MPC5125 would have full RB and four CS)
  */
-static void vf610_nfc_select_chip(struct mtd_info *mtd, int chip)
+static void vf610_nfc_select_target(struct nand_chip *chip, unsigned int cs)
 {
-	struct vf610_nfc *nfc = mtd_to_nfc(mtd);
-	u32 tmp = vf610_nfc_read(nfc, NFC_ROW_ADDR);
+	struct vf610_nfc *nfc = chip_to_nfc(chip);
+	u32 tmp;
 
 	/* Vybrid only (MPC5125 would have full RB and four CS) */
 	if (nfc->variant != NFC_VFC610)
 		return;
 
+	tmp = vf610_nfc_read(nfc, NFC_ROW_ADDR);
 	tmp &= ~(ROW_ADDR_CHIP_SEL_RB_MASK | ROW_ADDR_CHIP_SEL_MASK);
-
-	if (chip >= 0) {
-		tmp |= 1 << ROW_ADDR_CHIP_SEL_RB_SHIFT;
-		tmp |= BIT(chip) << ROW_ADDR_CHIP_SEL_SHIFT;
-	}
+	tmp |= 1 << ROW_ADDR_CHIP_SEL_RB_SHIFT;
+	tmp |= BIT(cs) << ROW_ADDR_CHIP_SEL_SHIFT;
 
 	vf610_nfc_write(nfc, NFC_ROW_ADDR, tmp);
 }
 
-static inline int vf610_nfc_correct_data(struct mtd_info *mtd, uint8_t *dat,
+static int vf610_nfc_exec_op(struct nand_chip *chip,
+			     const struct nand_operation *op,
+			     bool check_only)
+{
+	if (!check_only)
+		vf610_nfc_select_target(chip, op->cs);
+
+	return nand_op_parser_exec_op(chip, &vf610_nfc_op_parser, op,
+				      check_only);
+}
+
+static inline int vf610_nfc_correct_data(struct nand_chip *chip, uint8_t *dat,
 					 uint8_t *oob, int page)
 {
-	struct vf610_nfc *nfc = mtd_to_nfc(mtd);
+	struct vf610_nfc *nfc = chip_to_nfc(chip);
+	struct mtd_info *mtd = nand_to_mtd(chip);
 	u32 ecc_status_off = NFC_MAIN_AREA(0) + ECC_SRAM_ADDR + ECC_STATUS;
 	u8 ecc_status;
 	u8 ecc_count;
@@ -557,13 +546,16 @@ static void vf610_nfc_fill_row(struct nand_chip *chip, int page, u32 *code,
 	}
 }
 
-static int vf610_nfc_read_page(struct mtd_info *mtd, struct nand_chip *chip,
-				uint8_t *buf, int oob_required, int page)
+static int vf610_nfc_read_page(struct nand_chip *chip, uint8_t *buf,
+			       int oob_required, int page)
 {
-	struct vf610_nfc *nfc = mtd_to_nfc(mtd);
+	struct vf610_nfc *nfc = chip_to_nfc(chip);
+	struct mtd_info *mtd = nand_to_mtd(chip);
 	int trfr_sz = mtd->writesize + mtd->oobsize;
 	u32 row = 0, cmd1 = 0, cmd2 = 0, code = 0;
 	int stat;
+
+	vf610_nfc_select_target(chip, chip->cur_cs);
 
 	cmd2 |= NAND_CMD_READ0 << CMD_BYTE1_SHIFT;
 	code |= COMMAND_CMD_BYTE1 | COMMAND_CAR_BYTE1 | COMMAND_CAR_BYTE2;
@@ -591,7 +583,7 @@ static int vf610_nfc_read_page(struct mtd_info *mtd, struct nand_chip *chip,
 						   mtd->writesize,
 				       mtd->oobsize, false);
 
-	stat = vf610_nfc_correct_data(mtd, buf, chip->oob_poi, page);
+	stat = vf610_nfc_correct_data(chip, buf, chip->oob_poi, page);
 
 	if (stat < 0) {
 		mtd->ecc_stats.failed++;
@@ -602,14 +594,17 @@ static int vf610_nfc_read_page(struct mtd_info *mtd, struct nand_chip *chip,
 	}
 }
 
-static int vf610_nfc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
-				const uint8_t *buf, int oob_required, int page)
+static int vf610_nfc_write_page(struct nand_chip *chip, const uint8_t *buf,
+				int oob_required, int page)
 {
-	struct vf610_nfc *nfc = mtd_to_nfc(mtd);
+	struct vf610_nfc *nfc = chip_to_nfc(chip);
+	struct mtd_info *mtd = nand_to_mtd(chip);
 	int trfr_sz = mtd->writesize + mtd->oobsize;
 	u32 row = 0, cmd1 = 0, cmd2 = 0, code = 0;
 	u8 status;
 	int ret;
+
+	vf610_nfc_select_target(chip, chip->cur_cs);
 
 	cmd2 |= NAND_CMD_SEQIN << CMD_BYTE1_SHIFT;
 	code |= COMMAND_CMD_BYTE1 | COMMAND_CAR_BYTE1 | COMMAND_CAR_BYTE2;
@@ -643,25 +638,24 @@ static int vf610_nfc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 	return 0;
 }
 
-static int vf610_nfc_read_page_raw(struct mtd_info *mtd,
-				   struct nand_chip *chip, u8 *buf,
+static int vf610_nfc_read_page_raw(struct nand_chip *chip, u8 *buf,
 				   int oob_required, int page)
 {
-	struct vf610_nfc *nfc = mtd_to_nfc(mtd);
+	struct vf610_nfc *nfc = chip_to_nfc(chip);
 	int ret;
 
 	nfc->data_access = true;
-	ret = nand_read_page_raw(mtd, chip, buf, oob_required, page);
+	ret = nand_read_page_raw(chip, buf, oob_required, page);
 	nfc->data_access = false;
 
 	return ret;
 }
 
-static int vf610_nfc_write_page_raw(struct mtd_info *mtd,
-				    struct nand_chip *chip, const u8 *buf,
+static int vf610_nfc_write_page_raw(struct nand_chip *chip, const u8 *buf,
 				    int oob_required, int page)
 {
-	struct vf610_nfc *nfc = mtd_to_nfc(mtd);
+	struct vf610_nfc *nfc = chip_to_nfc(chip);
+	struct mtd_info *mtd = nand_to_mtd(chip);
 	int ret;
 
 	nfc->data_access = true;
@@ -677,23 +671,22 @@ static int vf610_nfc_write_page_raw(struct mtd_info *mtd,
 	return nand_prog_page_end_op(chip);
 }
 
-static int vf610_nfc_read_oob(struct mtd_info *mtd, struct nand_chip *chip,
-			      int page)
+static int vf610_nfc_read_oob(struct nand_chip *chip, int page)
 {
-	struct vf610_nfc *nfc = mtd_to_nfc(mtd);
+	struct vf610_nfc *nfc = chip_to_nfc(chip);
 	int ret;
 
 	nfc->data_access = true;
-	ret = nand_read_oob_std(mtd, chip, page);
+	ret = nand_read_oob_std(chip, page);
 	nfc->data_access = false;
 
 	return ret;
 }
 
-static int vf610_nfc_write_oob(struct mtd_info *mtd, struct nand_chip *chip,
-			       int page)
+static int vf610_nfc_write_oob(struct nand_chip *chip, int page)
 {
-	struct vf610_nfc *nfc = mtd_to_nfc(mtd);
+	struct mtd_info *mtd = nand_to_mtd(chip);
+	struct vf610_nfc *nfc = chip_to_nfc(chip);
 	int ret;
 
 	nfc->data_access = true;
@@ -735,7 +728,7 @@ static void vf610_nfc_init_controller(struct vf610_nfc *nfc)
 	else
 		vf610_nfc_clear(nfc, NFC_FLASH_CONFIG, CONFIG_16BIT);
 
-	if (nfc->chip.ecc.mode == NAND_ECC_HW) {
+	if (nfc->chip.ecc.engine_type == NAND_ECC_ENGINE_TYPE_ON_HOST) {
 		/* Set ECC status offset in SRAM */
 		vf610_nfc_set_field(nfc, NFC_FLASH_CONFIG,
 				    CONFIG_ECC_SRAM_ADDR_MASK,
@@ -747,14 +740,76 @@ static void vf610_nfc_init_controller(struct vf610_nfc *nfc)
 	}
 }
 
+static int vf610_nfc_attach_chip(struct nand_chip *chip)
+{
+	struct mtd_info *mtd = nand_to_mtd(chip);
+	struct vf610_nfc *nfc = chip_to_nfc(chip);
+
+	vf610_nfc_init_controller(nfc);
+
+	/* Bad block options. */
+	if (chip->bbt_options & NAND_BBT_USE_FLASH)
+		chip->bbt_options |= NAND_BBT_NO_OOB;
+
+	/* Single buffer only, max 256 OOB minus ECC status */
+	if (mtd->writesize + mtd->oobsize > PAGE_2K + OOB_MAX - 8) {
+		dev_err(nfc->dev, "Unsupported flash page size\n");
+		return -ENXIO;
+	}
+
+	if (chip->ecc.engine_type != NAND_ECC_ENGINE_TYPE_ON_HOST)
+		return 0;
+
+	if (mtd->writesize != PAGE_2K && mtd->oobsize < 64) {
+		dev_err(nfc->dev, "Unsupported flash with hwecc\n");
+		return -ENXIO;
+	}
+
+	if (chip->ecc.size != mtd->writesize) {
+		dev_err(nfc->dev, "Step size needs to be page size\n");
+		return -ENXIO;
+	}
+
+	/* Only 64 byte ECC layouts known */
+	if (mtd->oobsize > 64)
+		mtd->oobsize = 64;
+
+	/* Use default large page ECC layout defined in NAND core */
+	mtd_set_ooblayout(mtd, nand_get_large_page_ooblayout());
+	if (chip->ecc.strength == 32) {
+		nfc->ecc_mode = ECC_60_BYTE;
+		chip->ecc.bytes = 60;
+	} else if (chip->ecc.strength == 24) {
+		nfc->ecc_mode = ECC_45_BYTE;
+		chip->ecc.bytes = 45;
+	} else {
+		dev_err(nfc->dev, "Unsupported ECC strength\n");
+		return -ENXIO;
+	}
+
+	chip->ecc.read_page = vf610_nfc_read_page;
+	chip->ecc.write_page = vf610_nfc_write_page;
+	chip->ecc.read_page_raw = vf610_nfc_read_page_raw;
+	chip->ecc.write_page_raw = vf610_nfc_write_page_raw;
+	chip->ecc.read_oob = vf610_nfc_read_oob;
+	chip->ecc.write_oob = vf610_nfc_write_oob;
+
+	chip->ecc.size = PAGE_2K;
+
+	return 0;
+}
+
+static const struct nand_controller_ops vf610_nfc_controller_ops = {
+	.attach_chip = vf610_nfc_attach_chip,
+	.exec_op = vf610_nfc_exec_op,
+
+};
+
 static int vf610_nfc_probe(struct platform_device *pdev)
 {
 	struct vf610_nfc *nfc;
-	struct resource *res;
 	struct mtd_info *mtd;
 	struct nand_chip *chip;
-	struct device_node *child;
-	const struct of_device_id *of_id;
 	int err;
 	int irq;
 
@@ -771,35 +826,30 @@ static int vf610_nfc_probe(struct platform_device *pdev)
 	mtd->name = DRV_NAME;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq <= 0)
-		return -EINVAL;
+	if (irq < 0)
+		return irq;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	nfc->regs = devm_ioremap_resource(nfc->dev, res);
+	nfc->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(nfc->regs))
 		return PTR_ERR(nfc->regs);
 
-	nfc->clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(nfc->clk))
+	nfc->clk = devm_clk_get_enabled(&pdev->dev, NULL);
+	if (IS_ERR(nfc->clk)) {
+		dev_err(nfc->dev, "Unable to get and enable clock!\n");
 		return PTR_ERR(nfc->clk);
-
-	err = clk_prepare_enable(nfc->clk);
-	if (err) {
-		dev_err(nfc->dev, "Unable to enable clock!\n");
-		return err;
 	}
 
-	of_id = of_match_device(vf610_nfc_dt_ids, &pdev->dev);
-	nfc->variant = (enum vf610_nfc_variant)of_id->data;
+	nfc->variant = (unsigned long)device_get_match_data(&pdev->dev);
+	if (!nfc->variant)
+		return -ENODEV;
 
-	for_each_available_child_of_node(nfc->dev->of_node, child) {
+	for_each_available_child_of_node_scoped(nfc->dev->of_node, child) {
 		if (of_device_is_compatible(child, "fsl,vf610-nfc-nandcs")) {
 
 			if (nand_get_flash_node(chip)) {
 				dev_err(nfc->dev,
 					"Only one NAND chip supported!\n");
-				err = -EINVAL;
-				goto err_disable_clk;
+				return -EINVAL;
 			}
 
 			nand_set_flash_node(chip, child);
@@ -808,90 +858,31 @@ static int vf610_nfc_probe(struct platform_device *pdev)
 
 	if (!nand_get_flash_node(chip)) {
 		dev_err(nfc->dev, "NAND chip sub-node missing!\n");
-		err = -ENODEV;
-		goto err_disable_clk;
+		return -ENODEV;
 	}
-
-	chip->exec_op = vf610_nfc_exec_op;
-	chip->select_chip = vf610_nfc_select_chip;
 
 	chip->options |= NAND_NO_SUBPAGE_WRITE;
 
 	init_completion(&nfc->cmd_done);
 
-	err = devm_request_irq(nfc->dev, irq, vf610_nfc_irq, 0, DRV_NAME, mtd);
+	err = devm_request_irq(nfc->dev, irq, vf610_nfc_irq, 0, DRV_NAME, nfc);
 	if (err) {
 		dev_err(nfc->dev, "Error requesting IRQ!\n");
-		goto err_disable_clk;
+		return err;
 	}
 
 	vf610_nfc_preinit_controller(nfc);
 
-	/* first scan to find the device and get the page size */
-	err = nand_scan_ident(mtd, 1, NULL);
+	nand_controller_init(&nfc->base);
+	nfc->base.ops = &vf610_nfc_controller_ops;
+	chip->controller = &nfc->base;
+
+	/* Scan the NAND chip */
+	err = nand_scan(chip, 1);
 	if (err)
-		goto err_disable_clk;
+		return err;
 
-	vf610_nfc_init_controller(nfc);
-
-	/* Bad block options. */
-	if (chip->bbt_options & NAND_BBT_USE_FLASH)
-		chip->bbt_options |= NAND_BBT_NO_OOB;
-
-	/* Single buffer only, max 256 OOB minus ECC status */
-	if (mtd->writesize + mtd->oobsize > PAGE_2K + OOB_MAX - 8) {
-		dev_err(nfc->dev, "Unsupported flash page size\n");
-		err = -ENXIO;
-		goto err_disable_clk;
-	}
-
-	if (chip->ecc.mode == NAND_ECC_HW) {
-		if (mtd->writesize != PAGE_2K && mtd->oobsize < 64) {
-			dev_err(nfc->dev, "Unsupported flash with hwecc\n");
-			err = -ENXIO;
-			goto err_disable_clk;
-		}
-
-		if (chip->ecc.size != mtd->writesize) {
-			dev_err(nfc->dev, "Step size needs to be page size\n");
-			err = -ENXIO;
-			goto err_disable_clk;
-		}
-
-		/* Only 64 byte ECC layouts known */
-		if (mtd->oobsize > 64)
-			mtd->oobsize = 64;
-
-		/* Use default large page ECC layout defined in NAND core */
-		mtd_set_ooblayout(mtd, &nand_ooblayout_lp_ops);
-		if (chip->ecc.strength == 32) {
-			nfc->ecc_mode = ECC_60_BYTE;
-			chip->ecc.bytes = 60;
-		} else if (chip->ecc.strength == 24) {
-			nfc->ecc_mode = ECC_45_BYTE;
-			chip->ecc.bytes = 45;
-		} else {
-			dev_err(nfc->dev, "Unsupported ECC strength\n");
-			err = -ENXIO;
-			goto err_disable_clk;
-		}
-
-		chip->ecc.read_page = vf610_nfc_read_page;
-		chip->ecc.write_page = vf610_nfc_write_page;
-		chip->ecc.read_page_raw = vf610_nfc_read_page_raw;
-		chip->ecc.write_page_raw = vf610_nfc_write_page_raw;
-		chip->ecc.read_oob = vf610_nfc_read_oob;
-		chip->ecc.write_oob = vf610_nfc_write_oob;
-
-		chip->ecc.size = PAGE_2K;
-	}
-
-	/* second phase scan */
-	err = nand_scan_tail(mtd);
-	if (err)
-		goto err_disable_clk;
-
-	platform_set_drvdata(pdev, mtd);
+	platform_set_drvdata(pdev, nfc);
 
 	/* Register device in MTD */
 	err = mtd_device_register(mtd, NULL, 0);
@@ -901,26 +892,24 @@ static int vf610_nfc_probe(struct platform_device *pdev)
 
 err_cleanup_nand:
 	nand_cleanup(chip);
-err_disable_clk:
-	clk_disable_unprepare(nfc->clk);
 	return err;
 }
 
-static int vf610_nfc_remove(struct platform_device *pdev)
+static void vf610_nfc_remove(struct platform_device *pdev)
 {
-	struct mtd_info *mtd = platform_get_drvdata(pdev);
-	struct vf610_nfc *nfc = mtd_to_nfc(mtd);
+	struct vf610_nfc *nfc = platform_get_drvdata(pdev);
+	struct nand_chip *chip = &nfc->chip;
+	int ret;
 
-	nand_release(mtd);
-	clk_disable_unprepare(nfc->clk);
-	return 0;
+	ret = mtd_device_unregister(nand_to_mtd(chip));
+	WARN_ON(ret);
+	nand_cleanup(chip);
 }
 
 #ifdef CONFIG_PM_SLEEP
 static int vf610_nfc_suspend(struct device *dev)
 {
-	struct mtd_info *mtd = dev_get_drvdata(dev);
-	struct vf610_nfc *nfc = mtd_to_nfc(mtd);
+	struct vf610_nfc *nfc = dev_get_drvdata(dev);
 
 	clk_disable_unprepare(nfc->clk);
 	return 0;
@@ -928,10 +917,8 @@ static int vf610_nfc_suspend(struct device *dev)
 
 static int vf610_nfc_resume(struct device *dev)
 {
+	struct vf610_nfc *nfc = dev_get_drvdata(dev);
 	int err;
-
-	struct mtd_info *mtd = dev_get_drvdata(dev);
-	struct vf610_nfc *nfc = mtd_to_nfc(mtd);
 
 	err = clk_prepare_enable(nfc->clk);
 	if (err)

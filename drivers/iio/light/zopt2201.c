@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * zopt2201.c - Support for IDT ZOPT2201 ambient light and UV B sensor
  *
  * Copyright 2017 Peter Meerwald-Stadler <pmeerw@pmeerw.net>
- *
- * This file is subject to the terms and conditions of version 2 of
- * the GNU General Public License.  See the file COPYING in the main
- * directory of this archive for more details.
  *
  * Datasheet: https://www.idt.com/document/dst/zopt2201-datasheet
  * 7-bit I2C slave addresses 0x53 (default) or 0x52 (programmed)
@@ -13,11 +10,13 @@
  * TODO: interrupt support, ALS/UVB raw mode
  */
 
-#include <linux/module.h>
-#include <linux/i2c.h>
-#include <linux/mutex.h>
-#include <linux/err.h>
+#include <linux/cleanup.h>
 #include <linux/delay.h>
+#include <linux/err.h>
+#include <linux/i2c.h>
+#include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/unaligned.h>
 
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
@@ -114,11 +113,13 @@ static const struct {
 	{ 13,   3125 },
 };
 
-static const struct {
+struct zopt2201_scale {
 	unsigned int scale, uscale; /* scale factor as integer + micro */
 	u8 gain; /* gain register value */
 	u8 res; /* resolution register value */
-} zopt2201_scale_als[] = {
+};
+
+static const struct zopt2201_scale zopt2201_scale_als[] = {
 	{ 19, 200000, 0, 5 },
 	{  6, 400000, 1, 5 },
 	{  3, 200000, 2, 5 },
@@ -143,11 +144,7 @@ static const struct {
 	{  0,   8333, 4, 0 },
 };
 
-static const struct {
-	unsigned int scale, uscale; /* scale factor as integer + micro */
-	u8 gain; /* gain register value */
-	u8 res; /* resolution register value */
-} zopt2201_scale_uvb[] = {
+static const struct zopt2201_scale zopt2201_scale_uvb[] = {
 	{ 0, 460800, 0, 5 },
 	{ 0, 153600, 1, 5 },
 	{ 0,  76800, 2, 5 },
@@ -189,10 +186,10 @@ static int zopt2201_read(struct zopt2201_data *data, u8 reg)
 	u8 buf[3];
 	int ret;
 
-	mutex_lock(&data->lock);
+	guard(mutex)(&data->lock);
 	ret = zopt2201_enable_mode(data, reg == ZOPT2201_UVB_DATA);
 	if (ret < 0)
-		goto fail;
+		return ret;
 
 	while (tries--) {
 		unsigned long t = zopt2201_resolution[data->res].us;
@@ -203,30 +200,25 @@ static int zopt2201_read(struct zopt2201_data *data, u8 reg)
 			msleep(t / 1000);
 		ret = i2c_smbus_read_byte_data(client, ZOPT2201_MAIN_STATUS);
 		if (ret < 0)
-			goto fail;
+			return ret;
 		if (ret & ZOPT2201_MAIN_STATUS_DRDY)
 			break;
 	}
 
 	if (tries < 0) {
 		ret = -ETIMEDOUT;
-		goto fail;
+		return ret;
 	}
 
 	ret = i2c_smbus_read_i2c_block_data(client, reg, sizeof(buf), buf);
 	if (ret < 0)
-		goto fail;
+		return ret;
 
 	ret = i2c_smbus_write_byte_data(client, ZOPT2201_MAIN_CTRL, 0x00);
 	if (ret < 0)
-		goto fail;
-	mutex_unlock(&data->lock);
+		return ret;
 
-	return (buf[2] << 16) | (buf[1] << 8) | buf[0];
-
-fail:
-	mutex_unlock(&data->lock);
-	return ret;
+	return get_unaligned_le24(&buf[0]);
 }
 
 static const struct iio_chan_spec zopt2201_channels[] = {
@@ -320,17 +312,15 @@ static int zopt2201_set_resolution(struct zopt2201_data *data, u8 res)
 static int zopt2201_write_resolution(struct zopt2201_data *data,
 				     int val, int val2)
 {
-	int i, ret;
+	int i;
 
 	if (val != 0)
 		return -EINVAL;
 
 	for (i = 0; i < ARRAY_SIZE(zopt2201_resolution); i++)
 		if (val2 == zopt2201_resolution[i].us) {
-			mutex_lock(&data->lock);
-			ret = zopt2201_set_resolution(data, i);
-			mutex_unlock(&data->lock);
-			return ret;
+			guard(mutex)(&data->lock);
+			return zopt2201_set_resolution(data, i);
 		}
 
 	return -EINVAL;
@@ -349,20 +339,17 @@ static int zopt2201_set_gain(struct zopt2201_data *data, u8 gain)
 	return 0;
 }
 
-static int zopt2201_write_scale_als_by_idx(struct zopt2201_data *data, int idx)
+static int zopt2201_write_scale_by_idx(struct zopt2201_data *data, int idx,
+				       const struct zopt2201_scale *zopt2201_scale_array)
 {
 	int ret;
 
-	mutex_lock(&data->lock);
-	ret = zopt2201_set_resolution(data, zopt2201_scale_als[idx].res);
+	guard(mutex)(&data->lock);
+	ret = zopt2201_set_resolution(data, zopt2201_scale_array[idx].res);
 	if (ret < 0)
-		goto unlock;
+		return ret;
 
-	ret = zopt2201_set_gain(data, zopt2201_scale_als[idx].gain);
-
-unlock:
-	mutex_unlock(&data->lock);
-	return ret;
+	return zopt2201_set_gain(data, zopt2201_scale_array[idx].gain);
 }
 
 static int zopt2201_write_scale_als(struct zopt2201_data *data,
@@ -372,27 +359,10 @@ static int zopt2201_write_scale_als(struct zopt2201_data *data,
 
 	for (i = 0; i < ARRAY_SIZE(zopt2201_scale_als); i++)
 		if (val == zopt2201_scale_als[i].scale &&
-		    val2 == zopt2201_scale_als[i].uscale) {
-			return zopt2201_write_scale_als_by_idx(data, i);
-		}
+		    val2 == zopt2201_scale_als[i].uscale)
+			return zopt2201_write_scale_by_idx(data, i, zopt2201_scale_als);
 
 	return -EINVAL;
-}
-
-static int zopt2201_write_scale_uvb_by_idx(struct zopt2201_data *data, int idx)
-{
-	int ret;
-
-	mutex_lock(&data->lock);
-	ret = zopt2201_set_resolution(data, zopt2201_scale_als[idx].res);
-	if (ret < 0)
-		goto unlock;
-
-	ret = zopt2201_set_gain(data, zopt2201_scale_als[idx].gain);
-
-unlock:
-	mutex_unlock(&data->lock);
-	return ret;
 }
 
 static int zopt2201_write_scale_uvb(struct zopt2201_data *data,
@@ -403,7 +373,7 @@ static int zopt2201_write_scale_uvb(struct zopt2201_data *data,
 	for (i = 0; i < ARRAY_SIZE(zopt2201_scale_uvb); i++)
 		if (val == zopt2201_scale_uvb[i].scale &&
 		    val2 == zopt2201_scale_uvb[i].uscale)
-			return zopt2201_write_scale_uvb_by_idx(data, i);
+			return zopt2201_write_scale_by_idx(data, i, zopt2201_scale_uvb);
 
 	return -EINVAL;
 }
@@ -502,8 +472,7 @@ static const struct iio_info zopt2201_info = {
 	.attrs = &zopt2201_attribute_group,
 };
 
-static int zopt2201_probe(struct i2c_client *client,
-			  const struct i2c_device_id *id)
+static int zopt2201_probe(struct i2c_client *client)
 {
 	struct zopt2201_data *data;
 	struct iio_dev *indio_dev;
@@ -528,7 +497,6 @@ static int zopt2201_probe(struct i2c_client *client,
 	data->client = client;
 	mutex_init(&data->lock);
 
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->info = &zopt2201_info;
 	indio_dev->channels = zopt2201_channels;
 	indio_dev->num_channels = ARRAY_SIZE(zopt2201_channels);
@@ -548,7 +516,7 @@ static int zopt2201_probe(struct i2c_client *client,
 }
 
 static const struct i2c_device_id zopt2201_id[] = {
-	{ "zopt2201", 0 },
+	{ .name = "zopt2201" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, zopt2201_id);
@@ -557,7 +525,7 @@ static struct i2c_driver zopt2201_driver = {
 	.driver = {
 		.name   = ZOPT2201_DRV_NAME,
 	},
-	.probe  = zopt2201_probe,
+	.probe = zopt2201_probe,
 	.id_table = zopt2201_id,
 };
 

@@ -1,9 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AimsLab RadioTrack (aka RadioVeveal) driver
  *
  * Copyright 1997 M. Kirkwood
  *
- * Converted to the radio-isa framework by Hans Verkuil <hans.verkuil@cisco.com>
+ * Converted to the radio-isa framework by Hans Verkuil <hverkuil@kernel.org>
  * Converted to V4L2 API by Mauro Carvalho Chehab <mchehab@kernel.org>
  * Converted to new API by Alan Cox <alan@lxorguk.ukuu.org.uk>
  * Various bugfixes and enhancements by Russell Kroll <rkroll@exploits.org>
@@ -66,7 +67,7 @@ struct rtrack {
 
 static struct radio_isa_card *rtrack_alloc(void)
 {
-	struct rtrack *rt = kzalloc(sizeof(struct rtrack), GFP_KERNEL);
+	struct rtrack *rt = kzalloc_obj(struct rtrack);
 
 	if (rt)
 		rt->curvol = 0xff;

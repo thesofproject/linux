@@ -77,12 +77,12 @@
 #include <linux/timer.h>
 #include <linux/uaccess.h>
 #include <net/checksum.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 static unsigned char *encode(unsigned char *cp, unsigned short n);
-static long decode(unsigned char **cpp);
+static long decode(unsigned char **cpp, const unsigned char *end);
 static unsigned char * put16(unsigned char *cp, unsigned short x);
-static unsigned short pull16(unsigned char **cpp);
+static long pull16(unsigned char **cpp, const unsigned char *end);
 
 /* Allocate compression data structure
  *	slots must be in range 0 to 255 (zero meaning no compression)
@@ -91,14 +91,14 @@ static unsigned short pull16(unsigned char **cpp);
 struct slcompress *
 slhc_init(int rslots, int tslots)
 {
-	register short i;
-	register struct cstate *ts;
+	short i;
+	struct cstate *ts;
 	struct slcompress *comp;
 
 	if (rslots < 0 || rslots > 255 || tslots < 0 || tslots > 255)
 		return ERR_PTR(-EINVAL);
 
-	comp = kzalloc(sizeof(struct slcompress), GFP_KERNEL);
+	comp = kzalloc_obj(struct slcompress);
 	if (! comp)
 		goto out_fail;
 
@@ -153,7 +153,7 @@ out_fail:
 void
 slhc_free(struct slcompress *comp)
 {
-	if ( comp == NULLSLCOMPR )
+	if ( IS_ERR_OR_NULL(comp) )
 		return;
 
 	if ( comp->tstate != NULLSLSTATE )
@@ -190,30 +190,34 @@ encode(unsigned char *cp, unsigned short n)
 	return cp;
 }
 
-/* Pull a 16-bit integer in host order from buffer in network byte order */
-static unsigned short
-pull16(unsigned char **cpp)
+/* Pull a 16-bit integer in host order from buffer in network byte order.
+ * Returns -1 if the buffer is exhausted, otherwise the 16-bit value.
+ */
+static long
+pull16(unsigned char **cpp, const unsigned char *end)
 {
-	short rval;
+	long rval;
 
+	if (*cpp + 2 > end)
+		return -1;
 	rval = *(*cpp)++;
 	rval <<= 8;
 	rval |= *(*cpp)++;
 	return rval;
 }
 
-/* Decode a number */
+/* Decode a number. Returns -1 if the buffer is exhausted. */
 static long
-decode(unsigned char **cpp)
+decode(unsigned char **cpp, const unsigned char *end)
 {
-	register int x;
+	int x;
 
+	if (*cpp >= end)
+		return -1;
 	x = *(*cpp)++;
-	if(x == 0){
-		return pull16(cpp) & 0xffff;	/* pull16 returns -1 on error */
-	} else {
-		return x & 0xff;		/* -1 if PULLCHAR returned error */
-	}
+	if (x == 0)
+		return pull16(cpp, end);
+	return x & 0xff;
 }
 
 /*
@@ -227,14 +231,14 @@ int
 slhc_compress(struct slcompress *comp, unsigned char *icp, int isize,
 	unsigned char *ocp, unsigned char **cpp, int compress_cid)
 {
-	register struct cstate *ocs = &(comp->tstate[comp->xmit_oldest]);
-	register struct cstate *lcs = ocs;
-	register struct cstate *cs = lcs->next;
-	register unsigned long deltaS, deltaA;
-	register short changes = 0;
-	int hlen;
+	struct cstate *ocs = &(comp->tstate[comp->xmit_oldest]);
+	struct cstate *lcs = ocs;
+	struct cstate *cs = lcs->next;
+	unsigned long deltaS, deltaA;
+	short changes = 0;
+	int nlen, hlen;
 	unsigned char new_seq[16];
-	register unsigned char *cp = new_seq;
+	unsigned char *cp = new_seq;
 	struct iphdr *ip;
 	struct tcphdr *th, *oth;
 	__sum16 csum;
@@ -248,6 +252,8 @@ slhc_compress(struct slcompress *comp, unsigned char *icp, int isize,
 		return isize;
 
 	ip = (struct iphdr *) icp;
+	if (ip->version != 4 || ip->ihl < 5)
+		return isize;
 
 	/* Bail if this packet isn't TCP, or is an IP fragment */
 	if (ip->protocol != IPPROTO_TCP || (ntohs(ip->frag_off) & 0x3fff)) {
@@ -258,10 +264,14 @@ slhc_compress(struct slcompress *comp, unsigned char *icp, int isize,
 			comp->sls_o_tcp++;
 		return isize;
 	}
-	/* Extract TCP header */
+	nlen = ip->ihl * 4;
+	if (isize < nlen + sizeof(*th))
+		return isize;
 
-	th = (struct tcphdr *)(((unsigned char *)ip) + ip->ihl*4);
-	hlen = ip->ihl*4 + th->doff*4;
+	th = (struct tcphdr *)(icp + nlen);
+	if (th->doff < sizeof(struct tcphdr) / 4)
+		return isize;
+	hlen = nlen + th->doff * 4;
 
 	/*  Bail if the TCP packet isn't `compressible' (i.e., ACK isn't set or
 	 *  some other control bit is set). Also uncompressible if
@@ -319,7 +329,7 @@ found:
 	 * Found it -- move to the front on the connection list.
 	 */
 	if(lcs == ocs) {
- 		/* found at most recently used */
+		/* found at most recently used */
 	} else if (cs == ocs) {
 		/* found at least recently used */
 		comp->xmit_oldest = lcs->cs_this;
@@ -486,13 +496,14 @@ uncompressed:
 int
 slhc_uncompress(struct slcompress *comp, unsigned char *icp, int isize)
 {
-	register int changes;
+	int changes;
 	long x;
-	register struct tcphdr *thp;
-	register struct iphdr *ip;
-	register struct cstate *cs;
+	struct tcphdr *thp;
+	struct iphdr *ip;
+	struct cstate *cs;
 	int len, hdrlen;
 	unsigned char *cp = icp;
+	const unsigned char *end = icp + isize;
 
 	/* We've got a compressed packet; read the change byte */
 	comp->sls_i_compressed++;
@@ -500,6 +511,8 @@ slhc_uncompress(struct slcompress *comp, unsigned char *icp, int isize)
 		comp->sls_i_error++;
 		return 0;
 	}
+	if (!comp->rstate)
+		goto bad;
 	changes = *cp++;
 	if(changes & NEW_C){
 		/* Make sure the state index is in range, then grab the state.
@@ -528,6 +541,8 @@ slhc_uncompress(struct slcompress *comp, unsigned char *icp, int isize)
 	thp = &cs->cs_tcp;
 	ip = &cs->cs_ip;
 
+	if (cp + 2 > end)
+		goto bad;
 	thp->check = *(__sum16 *)cp;
 	cp += 2;
 
@@ -543,7 +558,7 @@ slhc_uncompress(struct slcompress *comp, unsigned char *icp, int isize)
 	switch(changes & SPECIALS_MASK){
 	case SPECIAL_I:		/* Echoed terminal traffic */
 		{
-		register short i;
+		short i;
 		i = ntohs(ip->tot_len) - hdrlen;
 		thp->ack_seq = htonl( ntohl(thp->ack_seq) + i);
 		thp->seq = htonl( ntohl(thp->seq) + i);
@@ -558,26 +573,26 @@ slhc_uncompress(struct slcompress *comp, unsigned char *icp, int isize)
 	default:
 		if(changes & NEW_U){
 			thp->urg = 1;
-			if((x = decode(&cp)) == -1) {
+			if((x = decode(&cp, end)) == -1) {
 				goto bad;
 			}
 			thp->urg_ptr = htons(x);
 		} else
 			thp->urg = 0;
 		if(changes & NEW_W){
-			if((x = decode(&cp)) == -1) {
+			if((x = decode(&cp, end)) == -1) {
 				goto bad;
 			}
 			thp->window = htons( ntohs(thp->window) + x);
 		}
 		if(changes & NEW_A){
-			if((x = decode(&cp)) == -1) {
+			if((x = decode(&cp, end)) == -1) {
 				goto bad;
 			}
 			thp->ack_seq = htonl( ntohl(thp->ack_seq) + x);
 		}
 		if(changes & NEW_S){
-			if((x = decode(&cp)) == -1) {
+			if((x = decode(&cp, end)) == -1) {
 				goto bad;
 			}
 			thp->seq = htonl( ntohl(thp->seq) + x);
@@ -585,7 +600,7 @@ slhc_uncompress(struct slcompress *comp, unsigned char *icp, int isize)
 		break;
 	}
 	if(changes & NEW_I){
-		if((x = decode(&cp)) == -1) {
+		if((x = decode(&cp, end)) == -1) {
 			goto bad;
 		}
 		ip->id = htons (ntohs (ip->id) + x);
@@ -637,46 +652,61 @@ bad:
 int
 slhc_remember(struct slcompress *comp, unsigned char *icp, int isize)
 {
-	register struct cstate *cs;
-	unsigned ihl;
-
+	const struct tcphdr *th;
 	unsigned char index;
+	struct iphdr *iph;
+	struct cstate *cs;
+	unsigned int ihl;
 
-	if(isize < 20) {
-		/* The packet is shorter than a legal IP header */
-		comp->sls_i_runt++;
-		return slhc_toss( comp );
+	if (!comp->rstate) {
+		comp->sls_i_error++;
+		return slhc_toss(comp);
 	}
+	/* The packet is shorter than a legal IP header.
+	 * Also make sure isize is positive.
+	 */
+	if (isize < (int)sizeof(struct iphdr)) {
+runt:
+		comp->sls_i_runt++;
+		return slhc_toss(comp);
+	}
+	iph = (struct iphdr *)icp;
 	/* Peek at the IP header's IHL field to find its length */
-	ihl = icp[0] & 0xf;
-	if(ihl < 20 / 4){
-		/* The IP header length field is too small */
-		comp->sls_i_runt++;
-		return slhc_toss( comp );
-	}
-	index = icp[9];
-	icp[9] = IPPROTO_TCP;
+	ihl = iph->ihl;
+	/* The IP header length field is too small,
+	 * or packet is shorter than the IP header followed
+	 * by minimal tcp header.
+	 */
+	if (ihl < 5 || isize < ihl * 4 + sizeof(struct tcphdr))
+		goto runt;
+
+	index = iph->protocol;
+	iph->protocol = IPPROTO_TCP;
 
 	if (ip_fast_csum(icp, ihl)) {
 		/* Bad IP header checksum; discard */
 		comp->sls_i_badcheck++;
-		return slhc_toss( comp );
+		return slhc_toss(comp);
 	}
-	if(index > comp->rslot_limit) {
+	if (index > comp->rslot_limit) {
 		comp->sls_i_error++;
 		return slhc_toss(comp);
 	}
-
+	th = (struct tcphdr *)(icp + ihl * 4);
+	if (th->doff < sizeof(struct tcphdr) / 4)
+		goto runt;
+	if (isize < ihl * 4 + th->doff * 4)
+		goto runt;
 	/* Update local state */
 	cs = &comp->rstate[comp->recv_current = index];
 	comp->flags &=~ SLF_TOSS;
-	memcpy(&cs->cs_ip,icp,20);
-	memcpy(&cs->cs_tcp,icp + ihl*4,20);
+	memcpy(&cs->cs_ip, iph, sizeof(*iph));
+	memcpy(&cs->cs_tcp, th, sizeof(*th));
 	if (ihl > 5)
-	  memcpy(cs->cs_ipopt, icp + sizeof(struct iphdr), (ihl - 5) * 4);
-	if (cs->cs_tcp.doff > 5)
-	  memcpy(cs->cs_tcpopt, icp + ihl*4 + sizeof(struct tcphdr), (cs->cs_tcp.doff - 5) * 4);
-	cs->cs_hsize = ihl*2 + cs->cs_tcp.doff*2;
+	  memcpy(cs->cs_ipopt, &iph[1], (ihl - 5) * 4);
+	if (th->doff > 5)
+	  memcpy(cs->cs_tcpopt, &th[1], (th->doff - 5) * 4);
+	cs->cs_hsize = ihl*2 + th->doff*2;
 	cs->initialized = true;
 	/* Put headers back on packet
 	 * Neither header checksum is recalculated
@@ -746,4 +776,5 @@ EXPORT_SYMBOL(slhc_compress);
 EXPORT_SYMBOL(slhc_uncompress);
 EXPORT_SYMBOL(slhc_toss);
 
+MODULE_DESCRIPTION("Compression helpers for SLIP (serial line)");
 MODULE_LICENSE("Dual BSD/GPL");

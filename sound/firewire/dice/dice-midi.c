@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * dice_midi.c - a part of driver for Dice based devices
  *
  * Copyright (c) 2014 Takashi Sakamoto
- *
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 #include "dice.h"
 
@@ -16,12 +15,15 @@ static int midi_open(struct snd_rawmidi_substream *substream)
 	if (err < 0)
 		return err;
 
-	mutex_lock(&dice->mutex);
-
-	dice->substreams_counter++;
-	err = snd_dice_stream_start_duplex(dice, 0);
-
-	mutex_unlock(&dice->mutex);
+	scoped_guard(mutex, &dice->mutex) {
+		err = snd_dice_stream_reserve_duplex(dice, 0, 0, 0);
+		if (err >= 0) {
+			++dice->substreams_counter;
+			err = snd_dice_stream_start_duplex(dice);
+			if (err < 0)
+				--dice->substreams_counter;
+		}
+	}
 
 	if (err < 0)
 		snd_dice_stream_lock_release(dice);
@@ -33,12 +35,10 @@ static int midi_close(struct snd_rawmidi_substream *substream)
 {
 	struct snd_dice *dice = substream->rmidi->private_data;
 
-	mutex_lock(&dice->mutex);
-
-	dice->substreams_counter--;
-	snd_dice_stream_stop_duplex(dice);
-
-	mutex_unlock(&dice->mutex);
+	scoped_guard(mutex, &dice->mutex) {
+		--dice->substreams_counter;
+		snd_dice_stream_stop_duplex(dice);
+	}
 
 	snd_dice_stream_lock_release(dice);
 	return 0;
@@ -47,9 +47,8 @@ static int midi_close(struct snd_rawmidi_substream *substream)
 static void midi_capture_trigger(struct snd_rawmidi_substream *substrm, int up)
 {
 	struct snd_dice *dice = substrm->rmidi->private_data;
-	unsigned long flags;
 
-	spin_lock_irqsave(&dice->lock, flags);
+	guard(spinlock_irqsave)(&dice->lock);
 
 	if (up)
 		amdtp_am824_midi_trigger(&dice->tx_stream[0],
@@ -57,16 +56,13 @@ static void midi_capture_trigger(struct snd_rawmidi_substream *substrm, int up)
 	else
 		amdtp_am824_midi_trigger(&dice->tx_stream[0],
 					  substrm->number, NULL);
-
-	spin_unlock_irqrestore(&dice->lock, flags);
 }
 
 static void midi_playback_trigger(struct snd_rawmidi_substream *substrm, int up)
 {
 	struct snd_dice *dice = substrm->rmidi->private_data;
-	unsigned long flags;
 
-	spin_lock_irqsave(&dice->lock, flags);
+	guard(spinlock_irqsave)(&dice->lock);
 
 	if (up)
 		amdtp_am824_midi_trigger(&dice->rx_stream[0],
@@ -74,8 +70,6 @@ static void midi_playback_trigger(struct snd_rawmidi_substream *substrm, int up)
 	else
 		amdtp_am824_midi_trigger(&dice->rx_stream[0],
 					 substrm->number, NULL);
-
-	spin_unlock_irqrestore(&dice->lock, flags);
 }
 
 static void set_midi_substream_names(struct snd_dice *dice,
@@ -84,8 +78,8 @@ static void set_midi_substream_names(struct snd_dice *dice,
 	struct snd_rawmidi_substream *subs;
 
 	list_for_each_entry(subs, &str->substreams, list) {
-		snprintf(subs->name, sizeof(subs->name),
-			 "%s MIDI %d", dice->card->shortname, subs->number + 1);
+		scnprintf(subs->name, sizeof(subs->name),
+			  "%s MIDI %d", dice->card->shortname, subs->number + 1);
 	}
 }
 
@@ -101,27 +95,18 @@ int snd_dice_create_midi(struct snd_dice *dice)
 		.close		= midi_close,
 		.trigger	= midi_playback_trigger,
 	};
-	__be32 reg;
 	struct snd_rawmidi *rmidi;
 	struct snd_rawmidi_str *str;
 	unsigned int midi_in_ports, midi_out_ports;
+	int i;
 	int err;
 
-	/*
-	 * Use the number of MIDI conformant data channel at current sampling
-	 * transfer frequency.
-	 */
-	err = snd_dice_transaction_read_tx(dice, TX_NUMBER_MIDI,
-					   &reg, sizeof(reg));
-	if (err < 0)
-		return err;
-	midi_in_ports = be32_to_cpu(reg);
-
-	err = snd_dice_transaction_read_rx(dice, RX_NUMBER_MIDI,
-					   &reg, sizeof(reg));
-	if (err < 0)
-		return err;
-	midi_out_ports = be32_to_cpu(reg);
+	midi_in_ports = 0;
+	midi_out_ports = 0;
+	for (i = 0; i < MAX_STREAMS; ++i) {
+		midi_in_ports = max(midi_in_ports, dice->tx_midi_ports[i]);
+		midi_out_ports = max(midi_out_ports, dice->rx_midi_ports[i]);
+	}
 
 	if (midi_in_ports + midi_out_ports == 0)
 		return 0;

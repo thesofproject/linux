@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   ALSA driver for ICEnsemble ICE1712 (Envy24)
  *
@@ -5,21 +6,6 @@
  *			    Audiophile, Digigram VX442
  *
  *	Copyright (c) 2000 Jaroslav Kysela <perex@perex.cz>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */      
 
 #include <linux/delay.h>
@@ -140,13 +126,12 @@ static int ap_cs8427_sendbytes(struct snd_i2c_device *device, unsigned char *byt
 	int res = count;
 	unsigned char tmp;
 
-	mutex_lock(&ice->gpio_mutex);
+	guard(mutex)(&ice->gpio_mutex);
 	tmp = ap_cs8427_codec_select(ice);
 	ap_cs8427_write_byte(ice, (device->addr << 1) | 0, tmp); /* address + write mode */
 	while (count-- > 0)
 		ap_cs8427_write_byte(ice, *bytes++, tmp);
 	ap_cs8427_codec_deassert(ice, tmp);
-	mutex_unlock(&ice->gpio_mutex);
 	return res;
 }
 
@@ -157,13 +142,12 @@ static int ap_cs8427_readbytes(struct snd_i2c_device *device, unsigned char *byt
 	int res = count;
 	unsigned char tmp;
 	
-	mutex_lock(&ice->gpio_mutex);
+	guard(mutex)(&ice->gpio_mutex);
 	tmp = ap_cs8427_codec_select(ice);
 	ap_cs8427_write_byte(ice, (device->addr << 1) | 1, tmp); /* address + read mode */
 	while (count-- > 0)
 		*bytes++ = ap_cs8427_read_byte(ice, tmp);
 	ap_cs8427_codec_deassert(ice, tmp);
-	mutex_unlock(&ice->gpio_mutex);
 	return res;
 }
 
@@ -190,7 +174,7 @@ static void snd_ice1712_delta_cs8403_spdif_write(struct snd_ice1712 *ice, unsign
 	/* send byte to transmitter */
 	mask1 = ICE1712_DELTA_SPDIF_OUT_STAT_CLOCK;
 	mask2 = ICE1712_DELTA_SPDIF_OUT_STAT_DATA;
-	mutex_lock(&ice->gpio_mutex);
+	guard(mutex)(&ice->gpio_mutex);
 	tmp = snd_ice1712_read(ice, ICE1712_IREG_GPIO_DATA);
 	for (idx = 7; idx >= 0; idx--) {
 		tmp &= ~(mask1 | mask2);
@@ -204,7 +188,6 @@ static void snd_ice1712_delta_cs8403_spdif_write(struct snd_ice1712 *ice, unsign
 	}
 	tmp &= ~mask1;
 	snd_ice1712_write(ice, ICE1712_IREG_GPIO_DATA, tmp);
-	mutex_unlock(&ice->gpio_mutex);
 }
 
 
@@ -219,15 +202,13 @@ static int delta_spdif_default_put(struct snd_ice1712 *ice, struct snd_ctl_elem_
 	int change;
 
 	val = snd_cs8403_encode_spdif_bits(&ucontrol->value.iec958);
-	spin_lock_irq(&ice->reg_lock);
-	change = ice->spdif.cs8403_bits != val;
-	ice->spdif.cs8403_bits = val;
-	if (change && ice->playback_pro_substream == NULL) {
-		spin_unlock_irq(&ice->reg_lock);
-		snd_ice1712_delta_cs8403_spdif_write(ice, val);
-	} else {
-		spin_unlock_irq(&ice->reg_lock);
+	scoped_guard(spinlock_irq, &ice->reg_lock) {
+		change = ice->spdif.cs8403_bits != val;
+		ice->spdif.cs8403_bits = val;
+		if (!change || ice->playback_pro_substream)
+			return change;
 	}
+	snd_ice1712_delta_cs8403_spdif_write(ice, val);
 	return change;
 }
 
@@ -242,15 +223,13 @@ static int delta_spdif_stream_put(struct snd_ice1712 *ice, struct snd_ctl_elem_v
 	int change;
 
 	val = snd_cs8403_encode_spdif_bits(&ucontrol->value.iec958);
-	spin_lock_irq(&ice->reg_lock);
-	change = ice->spdif.cs8403_stream_bits != val;
-	ice->spdif.cs8403_stream_bits = val;
-	if (change && ice->playback_pro_substream != NULL) {
-		spin_unlock_irq(&ice->reg_lock);
-		snd_ice1712_delta_cs8403_spdif_write(ice, val);
-	} else {
-		spin_unlock_irq(&ice->reg_lock);
+	scoped_guard(spinlock_irq, &ice->reg_lock) {
+		change = ice->spdif.cs8403_stream_bits != val;
+		ice->spdif.cs8403_stream_bits = val;
+		if (!change || ice->playback_pro_substream)
+			return change;
 	}
+	snd_ice1712_delta_cs8403_spdif_write(ice, val);
 	return change;
 }
 
@@ -320,14 +299,13 @@ static void delta_1010_set_rate_val(struct snd_ice1712 *ice, unsigned int rate)
 	if (rate == 0)	/* no hint - S/PDIF input is master, simply return */
 		return;
 
-	mutex_lock(&ice->gpio_mutex);
+	guard(mutex)(&ice->gpio_mutex);
 	tmp = snd_ice1712_read(ice, ICE1712_IREG_GPIO_DATA);
 	tmp2 = tmp & ~ICE1712_DELTA_DFS;
 	if (rate > 48000)
 		tmp2 |= ICE1712_DELTA_DFS;
 	if (tmp != tmp2)
 		snd_ice1712_write(ice, ICE1712_IREG_GPIO_DATA, tmp2);
-	mutex_unlock(&ice->gpio_mutex);
 }
 
 /*
@@ -342,9 +320,9 @@ static void delta_ak4524_set_rate_val(struct snd_akm4xxx *ak, unsigned int rate)
 		return;
 
 	/* check before reset ak4524 to avoid unnecessary clicks */
-	mutex_lock(&ice->gpio_mutex);
-	tmp = snd_ice1712_read(ice, ICE1712_IREG_GPIO_DATA);
-	mutex_unlock(&ice->gpio_mutex);
+	scoped_guard(mutex, &ice->gpio_mutex) {
+		tmp = snd_ice1712_read(ice, ICE1712_IREG_GPIO_DATA);
+	}
 	tmp2 = tmp & ~ICE1712_DELTA_DFS; 
 	if (rate > 48000)
 		tmp2 |= ICE1712_DELTA_DFS;
@@ -353,12 +331,12 @@ static void delta_ak4524_set_rate_val(struct snd_akm4xxx *ak, unsigned int rate)
 
 	/* do it again */
 	snd_akm4xxx_reset(ak, 1);
-	mutex_lock(&ice->gpio_mutex);
-	tmp = snd_ice1712_read(ice, ICE1712_IREG_GPIO_DATA) & ~ICE1712_DELTA_DFS;
-	if (rate > 48000)
-		tmp |= ICE1712_DELTA_DFS;
-	snd_ice1712_write(ice, ICE1712_IREG_GPIO_DATA, tmp);
-	mutex_unlock(&ice->gpio_mutex);
+	scoped_guard(mutex, &ice->gpio_mutex) {
+		tmp = snd_ice1712_read(ice, ICE1712_IREG_GPIO_DATA) & ~ICE1712_DELTA_DFS;
+		if (rate > 48000)
+			tmp |= ICE1712_DELTA_DFS;
+		snd_ice1712_write(ice, ICE1712_IREG_GPIO_DATA, tmp);
+	}
 	snd_akm4xxx_reset(ak, 0);
 }
 
@@ -393,23 +371,22 @@ static void delta_open_spdif(struct snd_ice1712 *ice, struct snd_pcm_substream *
 /* set up */
 static void delta_setup_spdif(struct snd_ice1712 *ice, int rate)
 {
-	unsigned long flags;
 	unsigned int tmp;
 	int change;
 
-	spin_lock_irqsave(&ice->reg_lock, flags);
-	tmp = ice->spdif.cs8403_stream_bits;
-	if (tmp & 0x01)		/* consumer */
-		tmp &= (tmp & 0x01) ? ~0x06 : ~0x18;
-	switch (rate) {
-	case 32000: tmp |= (tmp & 0x01) ? 0x04 : 0x00; break;
-	case 44100: tmp |= (tmp & 0x01) ? 0x00 : 0x10; break;
-	case 48000: tmp |= (tmp & 0x01) ? 0x02 : 0x08; break;
-	default: tmp |= (tmp & 0x01) ? 0x00 : 0x18; break;
+	scoped_guard(spinlock_irqsave, &ice->reg_lock) {
+		tmp = ice->spdif.cs8403_stream_bits;
+		if (tmp & 0x01)		/* consumer */
+			tmp &= (tmp & 0x01) ? ~0x06 : ~0x18;
+		switch (rate) {
+		case 32000: tmp |= (tmp & 0x01) ? 0x04 : 0x00; break;
+		case 44100: tmp |= (tmp & 0x01) ? 0x00 : 0x10; break;
+		case 48000: tmp |= (tmp & 0x01) ? 0x02 : 0x08; break;
+		default: tmp |= (tmp & 0x01) ? 0x00 : 0x18; break;
+		}
+		change = ice->spdif.cs8403_stream_bits != tmp;
+		ice->spdif.cs8403_stream_bits = tmp;
 	}
-	change = ice->spdif.cs8403_stream_bits != tmp;
-	ice->spdif.cs8403_stream_bits = tmp;
-	spin_unlock_irqrestore(&ice->reg_lock, flags);
 	if (change)
 		snd_ctl_notify(ice->card, SNDRV_CTL_EVENT_MASK_VALUE, &ice->spdif.stream_ctl->id);
 	snd_ice1712_delta_cs8403_spdif_write(ice, tmp);
@@ -690,13 +667,15 @@ static int snd_ice1712_delta_init(struct snd_ice1712 *ice)
 	case ICE1712_SUBDEVICE_DELTA1010LT:
 	case ICE1712_SUBDEVICE_VX442:
 	case ICE1712_SUBDEVICE_DELTA66E:
-		if ((err = snd_i2c_bus_create(ice->card, "ICE1712 GPIO 1", NULL, &ice->i2c)) < 0) {
+		err = snd_i2c_bus_create(ice->card, "ICE1712 GPIO 1", NULL, &ice->i2c);
+		if (err < 0) {
 			dev_err(ice->card->dev, "unable to create I2C bus\n");
 			return err;
 		}
 		ice->i2c->private_data = ice;
 		ice->i2c->ops = &ap_cs8427_i2c_ops;
-		if ((err = snd_ice1712_init_cs8427(ice, CS8427_BASE_ADDR)) < 0)
+		err = snd_ice1712_init_cs8427(ice, CS8427_BASE_ADDR);
+		if (err < 0)
 			return err;
 		break;
 	case ICE1712_SUBDEVICE_DELTA1010:
@@ -705,7 +684,7 @@ static int snd_ice1712_delta_init(struct snd_ice1712 *ice)
 		break;
 	case ICE1712_SUBDEVICE_DELTADIO2496:
 		ice->gpio.set_pro_rate = delta_1010_set_rate_val;
-		/* fall thru */
+		fallthrough;
 	case ICE1712_SUBDEVICE_DELTA66:
 		ice->spdif.ops.open = delta_open_spdif;
 		ice->spdif.ops.setup_rate = delta_setup_spdif;
@@ -728,7 +707,7 @@ static int snd_ice1712_delta_init(struct snd_ice1712 *ice)
 	}
 
 	/* second stage of initialization, analog parts and others */
-	ak = ice->akm = kmalloc(sizeof(struct snd_akm4xxx), GFP_KERNEL);
+	ak = ice->akm = kmalloc_obj(struct snd_akm4xxx);
 	if (! ak)
 		return -ENOMEM;
 	ice->akm_codecs = 1;
@@ -767,15 +746,15 @@ static int snd_ice1712_delta_init(struct snd_ice1712 *ice)
  * additional controls for M-Audio cards
  */
 
-static struct snd_kcontrol_new snd_ice1712_delta1010_wordclock_select =
+static const struct snd_kcontrol_new snd_ice1712_delta1010_wordclock_select =
 ICE1712_GPIO(SNDRV_CTL_ELEM_IFACE_MIXER, "Word Clock Sync", 0, ICE1712_DELTA_WORD_CLOCK_SELECT, 1, 0);
-static struct snd_kcontrol_new snd_ice1712_delta1010lt_wordclock_select =
+static const struct snd_kcontrol_new snd_ice1712_delta1010lt_wordclock_select =
 ICE1712_GPIO(SNDRV_CTL_ELEM_IFACE_MIXER, "Word Clock Sync", 0, ICE1712_DELTA_1010LT_WORDCLOCK, 0, 0);
-static struct snd_kcontrol_new snd_ice1712_delta1010_wordclock_status =
+static const struct snd_kcontrol_new snd_ice1712_delta1010_wordclock_status =
 ICE1712_GPIO(SNDRV_CTL_ELEM_IFACE_MIXER, "Word Clock Status", 0, ICE1712_DELTA_WORD_CLOCK_STATUS, 1, SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE);
-static struct snd_kcontrol_new snd_ice1712_deltadio2496_spdif_in_select =
+static const struct snd_kcontrol_new snd_ice1712_deltadio2496_spdif_in_select =
 ICE1712_GPIO(SNDRV_CTL_ELEM_IFACE_MIXER, "IEC958 Input Optical", 0, ICE1712_DELTA_SPDIF_INPUT_SELECT, 0, 0);
-static struct snd_kcontrol_new snd_ice1712_delta_spdif_in_status =
+static const struct snd_kcontrol_new snd_ice1712_delta_spdif_in_status =
 ICE1712_GPIO(SNDRV_CTL_ELEM_IFACE_MIXER, "Delta IEC958 Input Status", 0, ICE1712_DELTA_SPDIF_IN_STAT, 1, SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE);
 
 

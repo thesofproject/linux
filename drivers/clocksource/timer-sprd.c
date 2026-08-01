@@ -30,6 +30,7 @@
 #define TIMER_VALUE_SHDW_HI	0x1c
 
 #define TIMER_VALUE_LO_MASK	GENMASK(31, 0)
+#define TIMER_VALUE_HI_MASK	GENMASK(31, 0)
 
 static void sprd_timer_enable(void __iomem *base, u32 flag)
 {
@@ -156,4 +157,65 @@ static int __init sprd_timer_init(struct device_node *np)
 	return 0;
 }
 
+static struct timer_of suspend_to = {
+	.flags = TIMER_OF_BASE | TIMER_OF_CLOCK,
+};
+
+static u64 sprd_suspend_timer_read(struct clocksource *cs)
+{
+	u32 lo, hi;
+
+	do {
+		hi = readl_relaxed(timer_of_base(&suspend_to) +
+				   TIMER_VALUE_SHDW_HI);
+		lo = readl_relaxed(timer_of_base(&suspend_to) +
+				   TIMER_VALUE_SHDW_LO);
+	} while (hi != readl_relaxed(timer_of_base(&suspend_to) + TIMER_VALUE_SHDW_HI));
+
+	return ~(((u64)hi << 32) | lo);
+}
+
+static int sprd_suspend_timer_enable(struct clocksource *cs)
+{
+	writel_relaxed(TIMER_VALUE_LO_MASK,
+		       timer_of_base(&suspend_to) + TIMER_LOAD_LO);
+	writel_relaxed(TIMER_VALUE_HI_MASK,
+		       timer_of_base(&suspend_to) + TIMER_LOAD_HI);
+	sprd_timer_enable(timer_of_base(&suspend_to),
+			  TIMER_CTL_PERIOD_MODE|TIMER_CTL_64BIT_WIDTH);
+
+	return 0;
+}
+
+static void sprd_suspend_timer_disable(struct clocksource *cs)
+{
+	sprd_timer_disable(timer_of_base(&suspend_to));
+}
+
+static struct clocksource suspend_clocksource = {
+	.name	= "sprd_suspend_timer",
+	.rating	= 200,
+	.read	= sprd_suspend_timer_read,
+	.enable = sprd_suspend_timer_enable,
+	.disable = sprd_suspend_timer_disable,
+	.mask	= CLOCKSOURCE_MASK(64),
+	.flags	= CLOCK_SOURCE_IS_CONTINUOUS | CLOCK_SOURCE_SUSPEND_NONSTOP,
+};
+
+static int __init sprd_suspend_timer_init(struct device_node *np)
+{
+	int ret;
+
+	ret = timer_of_init(np, &suspend_to);
+	if (ret)
+		return ret;
+
+	clocksource_register_hz(&suspend_clocksource,
+				timer_of_rate(&suspend_to));
+
+	return 0;
+}
+
 TIMER_OF_DECLARE(sc9860_timer, "sprd,sc9860-timer", sprd_timer_init);
+TIMER_OF_DECLARE(sc9860_persistent_timer, "sprd,sc9860-suspend-timer",
+		 sprd_suspend_timer_init);

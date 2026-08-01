@@ -12,9 +12,7 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/pinctrl/pinctrl.h>
-#include <linux/reset.h>
 
 #include "pinctrl-sunxi.h"
 
@@ -153,6 +151,7 @@ static const struct sunxi_pinctrl_desc sun9i_a80_r_pinctrl_data = {
 	.pin_base = PL_BASE,
 	.irq_banks = 2,
 	.disable_strict_mode = true,
+	.io_bias_cfg_variant = BIAS_VOLTAGE_GRP_CONFIG,
 };
 
 static int sun9i_a80_r_pinctrl_probe(struct platform_device *pdev)
@@ -170,7 +169,6 @@ static struct platform_driver sun9i_a80_r_pinctrl_driver = {
 	.probe	= sun9i_a80_r_pinctrl_probe,
 	.driver	= {
 		.name		= "sun9i-a80-r-pinctrl",
-		.owner		= THIS_MODULE,
 		.of_match_table	= sun9i_a80_r_pinctrl_match,
 	},
 };

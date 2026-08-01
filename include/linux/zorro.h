@@ -17,7 +17,7 @@
 #include <linux/device.h>
 #include <linux/init.h>
 #include <linux/ioport.h>
-#include <linux/mod_devicetable.h>
+#include <linux/device-id/zorro.h>
 
 #include <asm/zorro.h>
 
@@ -29,7 +29,6 @@
 struct zorro_dev {
     struct ExpansionRom rom;
     zorro_id id;
-    struct zorro_driver *driver;	/* which driver has allocated this device */
     struct device dev;			/* Generic device interface */
     u16 slotaddr;
     u16 slotsize;
@@ -38,13 +37,6 @@ struct zorro_dev {
 };
 
 #define	to_zorro_dev(n)	container_of(n, struct zorro_dev, dev)
-
-
-    /*
-     *  Zorro bus
-     */
-
-extern struct bus_type zorro_bus_type;
 
 
     /*
@@ -60,7 +52,7 @@ struct zorro_driver {
     struct device_driver driver;
 };
 
-#define	to_zorro_driver(drv)	container_of(drv, struct zorro_driver, driver)
+#define	to_zorro_driver(drv)	container_of_const(drv, struct zorro_driver, driver)
 
 
 #define zorro_for_each_dev(dev)	\
@@ -70,11 +62,6 @@ struct zorro_driver {
 /* New-style probing */
 extern int zorro_register_driver(struct zorro_driver *);
 extern void zorro_unregister_driver(struct zorro_driver *);
-extern const struct zorro_device_id *zorro_match_device(const struct zorro_device_id *ids, const struct zorro_dev *z);
-static inline struct zorro_driver *zorro_dev_driver(const struct zorro_dev *z)
-{
-    return z->driver;
-}
 
 
 extern unsigned int zorro_num_autocon;	/* # of autoconfig devices found */

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright © 2009 - Maxim Levitsky
  * SmartMedia/xD translation layer
@@ -5,10 +6,6 @@
  * Based loosly on ssfdc.c which is
  *  © 2005 Eptar srl
  *  Author: Claudio Lanconelli <lanconelli.claudio@eptar.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/mtd/blktrans.h>
@@ -42,7 +39,6 @@ struct sm_ftl {
 	int cis_block;			/* CIS block location */
 	int cis_boffset;		/* CIS offset in the block */
 	int cis_page_offset;		/* CIS offset in the page */
-	void *cis_buffer;		/* tmp buffer for cis reads */
 
 	/* Cache */
 	int cache_block;		/* block number of cached block */
@@ -59,6 +55,7 @@ struct sm_ftl {
 	int cylinders;
 
 	struct attribute_group *disk_attributes;
+	u8 cis_buffer[];		/* tmp buffer for cis reads */
 };
 
 struct chs_entry {

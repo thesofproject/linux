@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Parisc performance counters
  *  Copyright (C) 2001 Randolph Chung <tausq@debian.org>
  *
  *  This code is derived, with permission, from HP/UX sources.
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2, or (at your option)
- *    any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
- *
- *    You should have received a copy of the GNU General Public License
- *    along with this program; if not, write to the Free Software
- *    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 /*
@@ -70,7 +57,7 @@ struct rdr_tbl_ent {
 static int perf_processor_interface __read_mostly = UNKNOWN_INTF;
 static int perf_enabled __read_mostly;
 static DEFINE_SPINLOCK(perf_lock);
-struct parisc_device *cpu_device __read_mostly;
+static struct parisc_device *cpu_device __read_mostly;
 
 /* RDRs to write for PCX-W */
 static const int perf_rdrs_W[] =
@@ -301,7 +288,7 @@ static ssize_t perf_read(struct file *file, char __user *buf, size_t cnt, loff_t
 static ssize_t perf_write(struct file *file, const char __user *buf,
 	size_t count, loff_t *ppos)
 {
-	size_t image_size;
+	size_t image_size __maybe_unused;
 	uint32_t image_type;
 	uint32_t interface_type;
 	uint32_t test;
@@ -313,7 +300,7 @@ static ssize_t perf_write(struct file *file, const char __user *buf,
 	else
 		return -EFAULT;
 
-	if (!capable(CAP_SYS_ADMIN))
+	if (!perfmon_capable())
 		return -EACCES;
 
 	if (count != sizeof(uint32_t))
@@ -479,7 +466,6 @@ static long perf_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 }
 
 static const struct file_operations perf_fops = {
-	.llseek = no_llseek,
 	.read = perf_read,
 	.write = perf_write,
 	.unlocked_ioctl = perf_ioctl,
@@ -489,9 +475,9 @@ static const struct file_operations perf_fops = {
 };
 
 static struct miscdevice perf_dev = {
-	MISC_DYNAMIC_MINOR,
-	PA_PERF_DEV,
-	&perf_fops
+	.minor	= MISC_DYNAMIC_MINOR,
+	.name	= PA_PERF_DEV,
+	.fops	= &perf_fops,
 };
 
 /*
@@ -805,7 +791,7 @@ static int perf_write_image(uint64_t *memaddr)
 		return -1;
 	}
 
-	runway = ioremap_nocache(cpu_device->hpa.start, 4096);
+	runway = ioremap(cpu_device->hpa.start, 4096);
 	if (!runway) {
 		pr_err("perf_write_image: ioremap failed!\n");
 		return -ENOMEM;

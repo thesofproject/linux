@@ -26,6 +26,8 @@
 #ifndef __DAL_IRQ_TYPES_H__
 #define __DAL_IRQ_TYPES_H__
 
+#include "os_types.h"
+
 struct dc_context;
 
 typedef void (*interrupt_handler)(void *);
@@ -135,6 +137,44 @@ enum dc_irq_source {
 	DC_IRQ_SOURCE_VBLANK5,
 	DC_IRQ_SOURCE_VBLANK6,
 
+	DC_IRQ_SOURCE_DC1_VLINE0,
+	DC_IRQ_SOURCE_DC2_VLINE0,
+	DC_IRQ_SOURCE_DC3_VLINE0,
+	DC_IRQ_SOURCE_DC4_VLINE0,
+	DC_IRQ_SOURCE_DC5_VLINE0,
+	DC_IRQ_SOURCE_DC6_VLINE0,
+
+	DC_IRQ_SOURCE_DC1_VLINE1,
+	DC_IRQ_SOURCE_DC2_VLINE1,
+	DC_IRQ_SOURCE_DC3_VLINE1,
+	DC_IRQ_SOURCE_DC4_VLINE1,
+	DC_IRQ_SOURCE_DC5_VLINE1,
+	DC_IRQ_SOURCE_DC6_VLINE1,
+	DC_IRQ_SOURCE_DMCUB_OUTBOX,
+	DC_IRQ_SOURCE_DMCUB_OUTBOX0,
+	DC_IRQ_SOURCE_DMCUB_GENERAL_DATAOUT,
+
+	DC_IRQ_SOURCE_DPCX_TX_PHYA,
+	DC_IRQ_SOURCE_DPCX_TX_PHYB,
+	DC_IRQ_SOURCE_DPCX_TX_PHYC,
+	DC_IRQ_SOURCE_DPCX_TX_PHYD,
+	DC_IRQ_SOURCE_DPCX_TX_PHYE,
+	DC_IRQ_SOURCE_DPCX_TX_PHYF,
+
+	DC_IRQ_SOURCE_DC1_VLINE2,
+	DC_IRQ_SOURCE_DC2_VLINE2,
+	DC_IRQ_SOURCE_DC3_VLINE2,
+	DC_IRQ_SOURCE_DC4_VLINE2,
+	DC_IRQ_SOURCE_DC5_VLINE2,
+	DC_IRQ_SOURCE_DC6_VLINE2,
+
+	DC_IRQ_SOURCE_DCI2C_RR_DDC1,
+	DC_IRQ_SOURCE_DCI2C_RR_DDC2,
+	DC_IRQ_SOURCE_DCI2C_RR_DDC3,
+	DC_IRQ_SOURCE_DCI2C_RR_DDC4,
+	DC_IRQ_SOURCE_DCI2C_RR_DDC5,
+	DC_IRQ_SOURCE_DCI2C_RR_DDC6,
+
 	DAL_IRQ_SOURCES_NUMBER
 };
 
@@ -143,10 +183,14 @@ enum irq_type
 	IRQ_TYPE_PFLIP = DC_IRQ_SOURCE_PFLIP1,
 	IRQ_TYPE_VUPDATE = DC_IRQ_SOURCE_VUPDATE1,
 	IRQ_TYPE_VBLANK = DC_IRQ_SOURCE_VBLANK1,
+	IRQ_TYPE_VLINE0 = DC_IRQ_SOURCE_DC1_VLINE0,
+	IRQ_TYPE_VLINE1 = DC_IRQ_SOURCE_DC1_VLINE1,
+	IRQ_TYPE_VLINE2 = DC_IRQ_SOURCE_DC1_VLINE2,
+	IRQ_TYPE_DCUNDERFLOW = DC_IRQ_SOURCE_DC1UNDERFLOW,
 };
 
 #define DAL_VALID_IRQ_SRC_NUM(src) \
-	((src) <= DAL_IRQ_SOURCES_NUMBER && (src) > DC_IRQ_SOURCE_INVALID)
+	((src) < DAL_IRQ_SOURCES_NUMBER && (src) > DC_IRQ_SOURCE_INVALID)
 
 /* Number of Page Flip IRQ Sources. */
 #define DAL_PFLIP_IRQ_SRC_NUM \
@@ -159,7 +203,7 @@ enum dc_interrupt_context {
 	INTERRUPT_CONTEXT_NUMBER
 };
 
-enum dc_interrupt_porlarity {
+enum dc_interrupt_polarity {
 	INTERRUPT_POLARITY_DEFAULT = 0,
 	INTERRUPT_POLARITY_LOW = INTERRUPT_POLARITY_DEFAULT,
 	INTERRUPT_POLARITY_HIGH,
@@ -180,12 +224,12 @@ struct dc_interrupt_params {
 	/* The polarity *change* which will trigger an interrupt.
 	 * If 'requested_polarity == INTERRUPT_POLARITY_BOTH', then
 	 * 'current_polarity' must be initialised. */
-	enum dc_interrupt_porlarity requested_polarity;
+	enum dc_interrupt_polarity requested_polarity;
 	/* If 'requested_polarity == INTERRUPT_POLARITY_BOTH',
 	 * 'current_polarity' should contain the current state, which means
 	 * the interrupt will be triggered when state changes from what is,
 	 * in 'current_polarity'. */
-	enum dc_interrupt_porlarity current_polarity;
+	enum dc_interrupt_polarity current_polarity;
 	enum dc_irq_source irq_source;
 	enum dc_interrupt_context int_context;
 };

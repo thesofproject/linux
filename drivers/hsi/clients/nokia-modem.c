@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * nokia-modem.c
  *
  * HSI client driver for Nokia N900 modem.
  *
  * Copyright (C) 2014 Sebastian Reichel <sre@kernel.org>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
  */
 
 #include <linux/gpio/consumer.h>
@@ -26,7 +13,6 @@
 #include <linux/interrupt.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
-#include <linux/of_gpio.h>
 #include <linux/hsi/ssi_protocol.h>
 
 static unsigned int pm = 1;
@@ -88,8 +74,7 @@ static int nokia_modem_gpio_probe(struct device *dev)
 	struct nokia_modem_device *modem = dev_get_drvdata(dev);
 	int gpio_count, gpio_name_count, i, err;
 
-	gpio_count = of_gpio_count(np);
-
+	gpio_count = gpiod_count(dev, NULL);
 	if (gpio_count < 0) {
 		dev_err(dev, "missing gpios: %d\n", gpio_count);
 		return gpio_count;

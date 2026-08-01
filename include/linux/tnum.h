@@ -5,6 +5,10 @@
  * propagate the unknown bits such that the tnum result represents all the
  * possible results for possible values of the operands.
  */
+
+#ifndef _LINUX_TNUM_H
+#define _LINUX_TNUM_H
+
 #include <linux/types.h>
 
 struct tnum {
@@ -17,18 +21,27 @@ struct tnum {
 struct tnum tnum_const(u64 value);
 /* A completely unknown value */
 extern const struct tnum tnum_unknown;
-/* A value that's unknown except that @min <= value <= @max */
+/* An unknown value that is a superset of @min <= value <= @max.
+ *
+ * Could include values outside the range of [@min, @max].
+ * For example tnum_range(0, 2) is represented by {0, 1, 2, *3*},
+ * rather than the intended set of {0, 1, 2}.
+ */
 struct tnum tnum_range(u64 min, u64 max);
 
 /* Arithmetic and logical ops */
 /* Shift a tnum left (by a fixed shift) */
 struct tnum tnum_lshift(struct tnum a, u8 shift);
-/* Shift a tnum right (by a fixed shift) */
+/* Shift (rsh) a tnum right (by a fixed shift) */
 struct tnum tnum_rshift(struct tnum a, u8 shift);
+/* Shift (arsh) a tnum right (by a fixed min_shift) */
+struct tnum tnum_arshift(struct tnum a, u8 min_shift, u8 insn_bitness);
 /* Add two tnums, return @a + @b */
 struct tnum tnum_add(struct tnum a, struct tnum b);
 /* Subtract two tnums, return @a - @b */
 struct tnum tnum_sub(struct tnum a, struct tnum b);
+/* Neg of a tnum, return  0 - @a */
+struct tnum tnum_neg(struct tnum a);
 /* Bitwise-AND, return @a & @b */
 struct tnum tnum_and(struct tnum a, struct tnum b);
 /* Bitwise-OR, return @a | @b */
@@ -38,11 +51,22 @@ struct tnum tnum_xor(struct tnum a, struct tnum b);
 /* Multiply two tnums, return @a * @b */
 struct tnum tnum_mul(struct tnum a, struct tnum b);
 
+/* Return true if the known bits of both tnums have the same value */
+bool tnum_overlap(struct tnum a, struct tnum b);
+
 /* Return a tnum representing numbers satisfying both @a and @b */
 struct tnum tnum_intersect(struct tnum a, struct tnum b);
 
+/* Returns a tnum representing numbers satisfying either @a or @b */
+struct tnum tnum_union(struct tnum t1, struct tnum t2);
+
 /* Return @a with all but the lowest @size bytes cleared */
 struct tnum tnum_cast(struct tnum a, u8 size);
+
+/* Swap the bytes of a tnum */
+struct tnum tnum_bswap16(struct tnum a);
+struct tnum tnum_bswap32(struct tnum a);
+struct tnum tnum_bswap64(struct tnum a);
 
 /* Returns true if @a is a known constant */
 static inline bool tnum_is_const(struct tnum a)
@@ -67,7 +91,18 @@ static inline bool tnum_is_unknown(struct tnum a)
  */
 bool tnum_is_aligned(struct tnum a, u64 size);
 
-/* Returns true if @b represents a subset of @a. */
+/* Returns true if @b represents a subset of @a.
+ *
+ * Note that using tnum_range() as @a requires extra cautions as tnum_in() may
+ * return true unexpectedly due to tnum limited ability to represent tight
+ * range, e.g.
+ *
+ *   tnum_in(tnum_range(0, 2), tnum_const(3)) == true
+ *
+ * As a rule of thumb, if @a is explicitly coded rather than coming from
+ * reg->var_off, it should be in form of tnum_const(), tnum_range(0, 2**n - 1),
+ * or tnum_range(2**n, 2**(n+1) - 1).
+ */
 bool tnum_in(struct tnum a, struct tnum b);
 
 /* Formatting functions.  These have snprintf-like semantics: they will write
@@ -79,3 +114,24 @@ bool tnum_in(struct tnum a, struct tnum b);
 int tnum_strn(char *str, size_t size, struct tnum a);
 /* Format a tnum as tristate binary expansion */
 int tnum_sbin(char *str, size_t size, struct tnum a);
+
+/* Returns the 32-bit subreg */
+struct tnum tnum_subreg(struct tnum a);
+/* Returns the tnum with the lower 32-bit subreg cleared */
+struct tnum tnum_clear_subreg(struct tnum a);
+/* Returns the tnum with the lower 32-bit subreg in *reg* set to the lower
+ * 32-bit subreg in *subreg*
+ */
+struct tnum tnum_with_subreg(struct tnum reg, struct tnum subreg);
+/* Returns the tnum with the lower 32-bit subreg set to value */
+struct tnum tnum_const_subreg(struct tnum a, u32 value);
+/* Returns true if 32-bit subreg @a is a known constant*/
+static inline bool tnum_subreg_is_const(struct tnum a)
+{
+	return !(tnum_subreg(a)).mask;
+}
+
+/* Returns the smallest member of t larger than z */
+u64 tnum_step(struct tnum t, u64 z);
+
+#endif /* _LINUX_TNUM_H */

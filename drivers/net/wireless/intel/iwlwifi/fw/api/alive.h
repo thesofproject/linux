@@ -1,65 +1,9 @@
-/******************************************************************************
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
- * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * The full GNU General Public License is included in this distribution
- * in the file called COPYING.
- *
- * Contact Information:
- *  Intel Linux Wireless <linuxwifi@intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- * BSD LICENSE
- *
- * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
- * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
-
+/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
+/*
+ * Copyright (C) 2012-2014, 2018, 2020-2021, 2024-2025 Intel Corporation
+ * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
+ * Copyright (C) 2016-2017 Intel Deutschland GmbH
+ */
 #ifndef __iwl_fw_api_alive_h__
 #define __iwl_fw_api_alive_h__
 
@@ -94,14 +38,7 @@ enum {
 
 #define IWL_ALIVE_FLG_RFKILL	BIT(0)
 
-struct iwl_lmac_alive {
-	__le32 ucode_major;
-	__le32 ucode_minor;
-	u8 ver_subtype;
-	u8 ver_type;
-	u8 mac;
-	u8 opt;
-	__le32 timestamp;
+struct iwl_lmac_debug_addrs {
 	__le32 error_event_table_ptr;	/* SRAM address for error log */
 	__le32 log_event_table_ptr;	/* SRAM address for LMAC event log */
 	__le32 cpu_register_ptr;
@@ -110,35 +47,72 @@ struct iwl_lmac_alive {
 	__le32 scd_base_ptr;		/* SRAM address for SCD */
 	__le32 st_fwrd_addr;		/* pointer to Store and forward */
 	__le32 st_fwrd_size;
+} __packed; /* UCODE_DEBUG_ADDRS_API_S_VER_2 */
+
+struct iwl_lmac_alive {
+	__le32 ucode_major;
+	__le32 ucode_minor;
+	u8 ver_subtype;
+	u8 ver_type;
+	u8 mac;
+	u8 opt;
+	__le32 timestamp;
+	struct iwl_lmac_debug_addrs dbg_ptrs;
 } __packed; /* UCODE_ALIVE_NTFY_API_S_VER_3 */
+
+struct iwl_umac_debug_addrs {
+	__le32 error_info_addr;		/* SRAM address for UMAC error log */
+	__le32 dbg_print_buff_addr;
+} __packed; /* UMAC_DEBUG_ADDRS_API_S_VER_1 */
 
 struct iwl_umac_alive {
 	__le32 umac_major;		/* UMAC version: major */
 	__le32 umac_minor;		/* UMAC version: minor */
-	__le32 error_info_addr;		/* SRAM address for UMAC error log */
-	__le32 dbg_print_buff_addr;
+	struct iwl_umac_debug_addrs dbg_ptrs;
 } __packed; /* UMAC_ALIVE_DATA_API_S_VER_2 */
 
-struct mvm_alive_resp_v3 {
+struct iwl_sku_id {
+	__le32 data[3];
+} __packed; /* SKU_ID_API_S_VER_1 */
+
+struct iwl_alive_ntf_v3 {
 	__le16 status;
 	__le16 flags;
 	struct iwl_lmac_alive lmac_data;
 	struct iwl_umac_alive umac_data;
-} __packed; /* ALIVE_RES_API_S_VER_3 */
+} __packed; /* UCODE_ALIVE_NTFY_API_S_VER_3 */
 
-struct mvm_alive_resp {
+struct iwl_imr_alive_info {
+	__le64 base_addr;
+	__le32 size;
+	__le32 enabled;
+} __packed; /* IMR_ALIVE_INFO_API_S_VER_1 */
+
+struct iwl_alive_ntf_v7 {
 	__le16 status;
 	__le16 flags;
 	struct iwl_lmac_alive lmac_data[2];
 	struct iwl_umac_alive umac_data;
-} __packed; /* ALIVE_RES_API_S_VER_4 */
+	struct iwl_sku_id sku_id;
+	struct iwl_imr_alive_info imr;
+} __packed; /* UCODE_ALIVE_NTFY_API_S_VER_6 */
+
+struct iwl_alive_ntf {
+	__le16 status;
+	__le16 flags;
+	struct iwl_lmac_alive lmac_data[2];
+	struct iwl_umac_alive umac_data;
+	struct iwl_sku_id sku_id;
+	struct iwl_imr_alive_info imr;
+	__le64 platform_id;
+} __packed; /* UCODE_ALIVE_NTFY_API_S_VER_8 */
 
 /**
- * enum iwl_extended_cfg_flag - commands driver may send before
+ * enum iwl_extended_cfg_flags - commands driver may send before
  *	finishing init flow
  * @IWL_INIT_DEBUG_CFG: driver is going to send debug config command
  * @IWL_INIT_NVM: driver is going to send NVM_ACCESS commands
- * @IWL_INIT_PHY: driver is going to send PHY_DB commands
+ * @IWL_INIT_PHY: driver is going to send the PHY_CONFIGURATION_CMD
  */
 enum iwl_extended_cfg_flags {
 	IWL_INIT_DEBUG_CFG,
@@ -147,7 +121,7 @@ enum iwl_extended_cfg_flags {
 };
 
 /**
- * struct iwl_extended_cfg_cmd - mark what commands ucode should wait for
+ * struct iwl_init_extended_cfg_cmd - mark what commands ucode should wait for
  * before finishing init flows
  * @init_flags: values from iwl_extended_cfg_flags
  */
@@ -179,28 +153,23 @@ enum iwl_card_state_flags {
 };
 
 /**
- * struct iwl_radio_version_notif - information on the card state
- * ( CARD_STATE_NOTIFICATION = 0xa1 )
- * @flags: &enum iwl_card_state_flags
+ * enum iwl_error_recovery_flags - flags for error recovery cmd
+ * @ERROR_RECOVERY_UPDATE_DB: update db from blob sent
+ * @ERROR_RECOVERY_END_OF_RECOVERY: end of recovery
  */
-struct iwl_card_state_notif {
-	__le32 flags;
-} __packed; /* CARD_STATE_NTFY_API_S_VER_1 */
+enum iwl_error_recovery_flags {
+	ERROR_RECOVERY_UPDATE_DB = BIT(0),
+	ERROR_RECOVERY_END_OF_RECOVERY = BIT(1),
+};
 
 /**
- * struct iwl_fseq_ver_mismatch_nty - Notification about version
- *
- * This notification does not have a direct impact on the init flow.
- * It means that another core (not WiFi) has initiated the FSEQ flow
- * and updated the FSEQ version.  The driver only prints an error when
- * this occurs.
- *
- * @aux_read_fseq_ver: auxiliary read FSEQ version
- * @wifi_fseq_ver: FSEQ version (embedded in WiFi)
+ * struct iwl_fw_error_recovery_cmd - recovery cmd sent upon assert
+ * @flags: &enum iwl_error_recovery_flags
+ * @buf_size: db buffer size in bytes
  */
-struct iwl_fseq_ver_mismatch_ntf {
-	__le32 aux_read_fseq_ver;
-	__le32 wifi_fseq_ver;
-} __packed; /* FSEQ_VER_MISMATCH_NTFY_API_S_VER_1 */
+struct iwl_fw_error_recovery_cmd {
+	__le32 flags;
+	__le32 buf_size;
+} __packed; /* ERROR_RECOVERY_CMD_HDR_API_S_VER_1 */
 
 #endif /* __iwl_fw_api_alive_h__ */

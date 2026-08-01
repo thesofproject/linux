@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * udc.h - ChipIdea UDC structures
  *
@@ -61,21 +61,21 @@ struct td_node {
 	struct list_head	td;
 	dma_addr_t		dma;
 	struct ci_hw_td		*ptr;
+	int			td_remaining_size;
 };
 
 /**
  * struct ci_hw_req - usb request representation
  * @req: request structure for gadget drivers
  * @queue: link to QH list
- * @ptr: transfer descriptor for this request
- * @dma: dma address for the transfer descriptor
- * @zptr: transfer descriptor for the zero packet
- * @zdma: dma address of the zero packet's transfer descriptor
+ * @tds: link to TD list
+ * @sgt: hold original sglist when bounce sglist
  */
 struct ci_hw_req {
 	struct usb_request	req;
 	struct list_head	queue;
 	struct list_head	tds;
+	struct sg_table		sgt;
 };
 
 #ifdef CONFIG_USB_CHIPIDEA_UDC

@@ -1,15 +1,10 @@
-/*
- * extcon-max77843.c - Maxim MAX77843 extcon driver to support
- *			MUIC(Micro USB Interface Controller)
- *
- * Copyright (C) 2015 Samsung Electronics
- * Author: Jaewon Kim <jaewon02.kim@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// extcon-max77843.c - Maxim MAX77843 extcon driver to support
+//			MUIC(Micro USB Interface Controller)
+//
+// Copyright (C) 2015 Samsung Electronics
+// Author: Jaewon Kim <jaewon02.kim@samsung.com>
 
 #include <linux/extcon-provider.h>
 #include <linux/i2c.h>
@@ -194,8 +189,7 @@ static const struct regmap_irq max77843_muic_irq[] = {
 static const struct regmap_irq_chip max77843_muic_irq_chip = {
 	.name           = "max77843-muic",
 	.status_base    = MAX77843_MUIC_REG_INT1,
-	.mask_base      = MAX77843_MUIC_REG_INTMASK1,
-	.mask_invert    = true,
+	.unmask_base    = MAX77843_MUIC_REG_INTMASK1,
 	.num_regs       = 3,
 	.irqs           = max77843_muic_irq,
 	.num_irqs       = ARRAY_SIZE(max77843_muic_irq),
@@ -779,12 +773,12 @@ static int max77843_init_muic_regmap(struct max77693_dev *max77843)
 {
 	int ret;
 
-	max77843->i2c_muic = i2c_new_dummy(max77843->i2c->adapter,
+	max77843->i2c_muic = i2c_new_dummy_device(max77843->i2c->adapter,
 			I2C_ADDR_MUIC);
-	if (!max77843->i2c_muic) {
+	if (IS_ERR(max77843->i2c_muic)) {
 		dev_err(&max77843->i2c->dev,
 				"Cannot allocate I2C device for MUIC\n");
-		return -ENOMEM;
+		return PTR_ERR(max77843->i2c_muic);
 	}
 
 	i2c_set_clientdata(max77843->i2c_muic, max77843);
@@ -817,6 +811,8 @@ static int max77843_muic_probe(struct platform_device *pdev)
 	struct max77693_dev *max77843 = dev_get_drvdata(pdev->dev.parent);
 	struct max77843_muic_info *info;
 	unsigned int id;
+	int cable_type;
+	bool attached;
 	int i, ret;
 
 	info = devm_kzalloc(&pdev->dev, sizeof(*info), GFP_KERNEL);
@@ -848,7 +844,7 @@ static int max77843_muic_probe(struct platform_device *pdev)
 			max77843_extcon_cable);
 	if (IS_ERR(info->edev)) {
 		dev_err(&pdev->dev, "Failed to allocate memory for extcon\n");
-		ret = -ENODEV;
+		ret = PTR_ERR(info->edev);
 		goto err_muic_irq;
 	}
 
@@ -861,9 +857,19 @@ static int max77843_muic_probe(struct platform_device *pdev)
 	/* Set ADC debounce time */
 	max77843_muic_set_debounce_time(info, MAX77843_DEBOUNCE_TIME_25MS);
 
-	/* Set initial path for UART */
-	max77843_muic_set_path(info, MAX77843_MUIC_CONTROL1_SW_UART, true,
-			       false);
+	/* Set initial path for UART when JIG is connected to get serial logs */
+	ret = regmap_bulk_read(max77843->regmap_muic,
+			MAX77843_MUIC_REG_STATUS1, info->status,
+			MAX77843_MUIC_STATUS_NUM);
+	if (ret) {
+		dev_err(info->dev, "Cannot read STATUS registers\n");
+		goto err_muic_irq;
+	}
+	cable_type = max77843_muic_get_cable_type(info, MAX77843_CABLE_GROUP_ADC,
+					 &attached);
+	if (attached && cable_type == MAX77843_MUIC_ADC_FACTORY_MODE_UART_OFF)
+		max77843_muic_set_path(info, MAX77843_MUIC_CONTROL1_SW_UART,
+				       true, false);
 
 	/* Check revision number of MUIC device */
 	ret = regmap_read(max77843->regmap_muic, MAX77843_MUIC_REG_ID, &id);
@@ -922,7 +928,7 @@ err_muic_irq:
 	return ret;
 }
 
-static int max77843_muic_remove(struct platform_device *pdev)
+static void max77843_muic_remove(struct platform_device *pdev)
 {
 	struct max77843_muic_info *info = platform_get_drvdata(pdev);
 	struct max77693_dev *max77843 = info->max77843;
@@ -930,8 +936,6 @@ static int max77843_muic_remove(struct platform_device *pdev)
 	cancel_work_sync(&info->irq_work);
 	regmap_del_irq_chip(max77843->irq, max77843->irq_data_muic);
 	i2c_unregister_device(max77843->i2c_muic);
-
-	return 0;
 }
 
 static const struct platform_device_id max77843_muic_id[] = {
@@ -940,9 +944,16 @@ static const struct platform_device_id max77843_muic_id[] = {
 };
 MODULE_DEVICE_TABLE(platform, max77843_muic_id);
 
+static const struct of_device_id of_max77843_muic_dt_match[] = {
+	{ .compatible = "maxim,max77843-muic", },
+	{ /* sentinel */ },
+};
+MODULE_DEVICE_TABLE(of, of_max77843_muic_dt_match);
+
 static struct platform_driver max77843_muic_driver = {
 	.driver		= {
 		.name		= "max77843-muic",
+		.of_match_table = of_max77843_muic_dt_match,
 	},
 	.probe		= max77843_muic_probe,
 	.remove		= max77843_muic_remove,

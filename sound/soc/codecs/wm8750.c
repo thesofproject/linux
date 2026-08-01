@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * wm8750.c -- WM8750 ALSA SoC audio driver
  *
@@ -6,10 +7,6 @@
  * Author: Richard Purdie <richard@openedhand.com>
  *
  * Based on WM8753.c
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -18,10 +15,10 @@
 #include <linux/delay.h>
 #include <linux/pm.h>
 #include <linux/i2c.h>
+#include <linux/of.h>
 #include <linux/regmap.h>
 #include <linux/spi/spi.h>
 #include <linux/slab.h>
-#include <linux/of_device.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -525,10 +522,10 @@ static int wm8750_set_dai_fmt(struct snd_soc_dai *codec_dai,
 
 	/* set master/slave audio interface */
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		iface = 0x0040;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
 	default:
 		return -EINVAL;
@@ -581,8 +578,8 @@ static int wm8750_pcm_hw_params(struct snd_pcm_substream *substream,
 {
 	struct snd_soc_component *component = dai->component;
 	struct wm8750_priv *wm8750 = snd_soc_component_get_drvdata(component);
-	u16 iface = snd_soc_component_read32(component, WM8750_IFACE) & 0x1f3;
-	u16 srate = snd_soc_component_read32(component, WM8750_SRATE) & 0x1c0;
+	u16 iface = snd_soc_component_read(component, WM8750_IFACE) & 0x1f3;
+	u16 srate = snd_soc_component_read(component, WM8750_SRATE) & 0x1c0;
 	int coeff = get_coeff(wm8750->sysclk, params_rate(params));
 
 	/* bit size */
@@ -609,10 +606,10 @@ static int wm8750_pcm_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static int wm8750_mute(struct snd_soc_dai *dai, int mute)
+static int wm8750_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
-	u16 mute_reg = snd_soc_component_read32(component, WM8750_ADCDAC) & 0xfff7;
+	u16 mute_reg = snd_soc_component_read(component, WM8750_ADCDAC) & 0xfff7;
 
 	if (mute)
 		snd_soc_component_write(component, WM8750_ADCDAC, mute_reg | 0x8);
@@ -624,7 +621,8 @@ static int wm8750_mute(struct snd_soc_dai *dai, int mute)
 static int wm8750_set_bias_level(struct snd_soc_component *component,
 				 enum snd_soc_bias_level level)
 {
-	u16 pwr_reg = snd_soc_component_read32(component, WM8750_PWR1) & 0xfe3e;
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
+	u16 pwr_reg = snd_soc_component_read(component, WM8750_PWR1) & 0xfe3e;
 
 	switch (level) {
 	case SND_SOC_BIAS_ON:
@@ -634,7 +632,7 @@ static int wm8750_set_bias_level(struct snd_soc_component *component,
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF) {
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_OFF) {
 			snd_soc_component_cache_sync(component);
 
 			/* Set VMID to 5k */
@@ -663,9 +661,10 @@ static int wm8750_set_bias_level(struct snd_soc_component *component,
 
 static const struct snd_soc_dai_ops wm8750_dai_ops = {
 	.hw_params	= wm8750_pcm_hw_params,
-	.digital_mute	= wm8750_mute,
+	.mute_stream	= wm8750_mute,
 	.set_fmt	= wm8750_set_dai_fmt,
 	.set_sysclk	= wm8750_set_dai_sysclk,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver wm8750_dai = {
@@ -721,7 +720,6 @@ static const struct snd_soc_component_driver soc_component_dev_wm8750 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct of_device_id wm8750_of_match[] = {
@@ -738,7 +736,7 @@ static const struct regmap_config wm8750_regmap = {
 
 	.reg_defaults = wm8750_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(wm8750_reg_defaults),
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 };
 
 #if defined(CONFIG_SPI_MASTER)
@@ -782,8 +780,7 @@ static struct spi_driver wm8750_spi_driver = {
 #endif /* CONFIG_SPI_MASTER */
 
 #if IS_ENABLED(CONFIG_I2C)
-static int wm8750_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+static int wm8750_i2c_probe(struct i2c_client *i2c)
 {
 	struct wm8750_priv *wm8750;
 	struct regmap *regmap;
@@ -806,8 +803,8 @@ static int wm8750_i2c_probe(struct i2c_client *i2c,
 }
 
 static const struct i2c_device_id wm8750_i2c_id[] = {
-	{ "wm8750", 0 },
-	{ "wm8987", 0 },
+	{ .name = "wm8750" },
+	{ .name = "wm8987" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, wm8750_i2c_id);
@@ -817,7 +814,7 @@ static struct i2c_driver wm8750_i2c_driver = {
 		.name = "wm8750",
 		.of_match_table = wm8750_of_match,
 	},
-	.probe =    wm8750_i2c_probe,
+	.probe = wm8750_i2c_probe,
 	.id_table = wm8750_i2c_id,
 };
 #endif

@@ -25,6 +25,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <sched.h>
 
 static const int PORT = 8888;
 
@@ -129,7 +130,7 @@ static void test(int *rcv_fds, int count, int proto)
 {
 	struct epoll_event ev;
 	int epfd, i, test_fd;
-	uint16_t test_family;
+	int test_family;
 	socklen_t len;
 
 	epfd = epoll_create(1);
@@ -146,6 +147,7 @@ static void test(int *rcv_fds, int count, int proto)
 	send_from_v4(proto);
 
 	test_fd = receive_once(epfd, proto);
+	len = sizeof(test_family);
 	if (getsockopt(test_fd, SOL_SOCKET, SO_DOMAIN, &test_family, &len))
 		error(1, errno, "failed to read socket domain");
 	if (test_family != AF_INET)
@@ -155,9 +157,19 @@ static void test(int *rcv_fds, int count, int proto)
 	close(epfd);
 }
 
+static void setup_netns(void)
+{
+	if (unshare(CLONE_NEWNET))
+		error(1, errno, "failed to unshare netns");
+	if (system("ip link set lo up"))
+		error(1, 0, "failed to bring up lo interface in netns");
+}
+
 int main(void)
 {
 	int rcv_fds[32], i;
+
+	setup_netns();
 
 	fprintf(stderr, "---- UDP IPv4 created before IPv6 ----\n");
 	build_rcv_fd(AF_INET, SOCK_DGRAM, rcv_fds, 5);

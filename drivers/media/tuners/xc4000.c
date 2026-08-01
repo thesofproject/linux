@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for Xceive XC4000 "QAM/8VSB single chip tuner"
  *
@@ -6,16 +7,6 @@
  *  Copyright (c) 2009 Devin Heitmueller <dheitmueller@kernellabs.com>
  *  Copyright (c) 2009 Davide Ferri <d.ferri@zero11.it>
  *  Copyright (c) 2010 Istvan Varga <istvan_v@mailbox.hu>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -25,13 +16,13 @@
 #include <linux/dvb/frontend.h>
 #include <linux/i2c.h>
 #include <linux/mutex.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include <media/dvb_frontend.h>
 
 #include "xc4000.h"
 #include "tuner-i2c.h"
-#include "tuner-xc2028-types.h"
+#include "xc2028-types.h"
 
 static int debug;
 module_param(debug, int, 0644);
@@ -291,15 +282,13 @@ static int xc4000_tuner_reset(struct dvb_frontend *fe)
 static int xc_write_reg(struct xc4000_priv *priv, u16 regAddr, u16 i2cData)
 {
 	u8 buf[4];
-	int result;
 
 	buf[0] = (regAddr >> 8) & 0xFF;
 	buf[1] = regAddr & 0xFF;
 	buf[2] = (i2cData >> 8) & 0xFF;
 	buf[3] = i2cData & 0xFF;
-	result = xc_send_i2c_data(priv, buf, 4);
 
-	return result;
+	return xc_send_i2c_data(priv, buf, 4);
 }
 
 static int xc_load_i2c_sequence(struct dvb_frontend *fe, const u8 *i2c_sequence)
@@ -398,8 +387,8 @@ static int xc_set_rf_frequency(struct xc4000_priv *priv, u32 freq_hz)
 
 	dprintk(1, "%s(%u)\n", __func__, freq_hz);
 
-	if ((freq_hz > xc4000_tuner_ops.info.frequency_max) ||
-	    (freq_hz < xc4000_tuner_ops.info.frequency_min))
+	if ((freq_hz > xc4000_tuner_ops.info.frequency_max_hz) ||
+	    (freq_hz < xc4000_tuner_ops.info.frequency_min_hz))
 		return -EINVAL;
 
 	freq_code = (u16)(freq_hz / 15625);
@@ -774,7 +763,7 @@ static int xc4000_fwupload(struct dvb_frontend *fe)
 		n_array, fname, name,
 		priv->firm_version >> 8, priv->firm_version & 0xff);
 
-	priv->firm = kcalloc(n_array, sizeof(*priv->firm), GFP_KERNEL);
+	priv->firm = kzalloc_objs(*priv->firm, n_array);
 	if (priv->firm == NULL) {
 		printk(KERN_ERR "Not enough memory to load firmware file.\n");
 		rc = -ENOMEM;
@@ -815,13 +804,13 @@ static int xc4000_fwupload(struct dvb_frontend *fe)
 		p += sizeof(size);
 
 		if (!size || size > endp - p) {
-			printk(KERN_ERR "Firmware type (%x), id %llx is corrupted (size=%d, expected %d)\n",
+			printk(KERN_ERR "Firmware type (%x), id %llx is corrupted (size=%zd, expected %d)\n",
 			       type, (unsigned long long)id,
-			       (unsigned)(endp - p), size);
+			       endp - p, size);
 			goto corrupt;
 		}
 
-		priv->firm[n].ptr = kzalloc(size, GFP_KERNEL);
+		priv->firm[n].ptr = kmemdup(p, size, GFP_KERNEL);
 		if (priv->firm[n].ptr == NULL) {
 			printk(KERN_ERR "Not enough memory to load firmware file.\n");
 			rc = -ENOMEM;
@@ -835,7 +824,6 @@ static int xc4000_fwupload(struct dvb_frontend *fe)
 			       type, (unsigned long long)id, size);
 		}
 
-		memcpy(priv->firm[n].ptr, p, size);
 		priv->firm[n].type = type;
 		priv->firm[n].id   = id;
 		priv->firm[n].size = size;
@@ -1099,12 +1087,12 @@ fail:
 
 static void xc_debug_dump(struct xc4000_priv *priv)
 {
-	u16	adc_envelope;
+	u16	adc_envelope = 0;
 	u32	freq_error_hz = 0;
-	u16	lock_status;
+	u16	lock_status = 0;
 	u32	hsync_freq_hz = 0;
-	u16	frame_lines;
-	u16	quality;
+	u16	frame_lines = 0;
+	u16	quality = 0;
 	u16	signal = 0;
 	u16	noise = 0;
 	u8	hw_majorversion = 0, hw_minorversion = 0;
@@ -1471,8 +1459,8 @@ static int xc4000_get_signal(struct dvb_frontend *fe, u16 *strength)
 	if (rc < 0)
 		goto ret;
 
-	/* Informations from real testing of DVB-T and radio part,
-	   coeficient for one dB is 0xff.
+	/* Information from real testing of DVB-T and radio part,
+	   coefficient for one dB is 0xff.
 	 */
 	tuner_dbg("Signal strength: -%ddB (%05d)\n", value >> 8, value);
 
@@ -1527,10 +1515,10 @@ static int xc4000_get_frequency(struct dvb_frontend *fe, u32 *freq)
 {
 	struct xc4000_priv *priv = fe->tuner_priv;
 
+	mutex_lock(&priv->lock);
 	*freq = priv->freq_hz + priv->freq_offset;
 
 	if (debug) {
-		mutex_lock(&priv->lock);
 		if ((priv->cur_fw.type
 		     & (BASE | FM | DTV6 | DTV7 | DTV78 | DTV8)) == BASE) {
 			u16	snr = 0;
@@ -1541,8 +1529,8 @@ static int xc4000_get_frequency(struct dvb_frontend *fe, u32 *freq)
 				return 0;
 			}
 		}
-		mutex_unlock(&priv->lock);
 	}
+	mutex_unlock(&priv->lock);
 
 	dprintk(1, "%s()\n", __func__);
 
@@ -1635,10 +1623,10 @@ static void xc4000_release(struct dvb_frontend *fe)
 
 static const struct dvb_tuner_ops xc4000_tuner_ops = {
 	.info = {
-		.name           = "Xceive XC4000",
-		.frequency_min  =    1000000,
-		.frequency_max  = 1023000000,
-		.frequency_step =      50000,
+		.name              = "Xceive XC4000",
+		.frequency_min_hz  =    1 * MHz,
+		.frequency_max_hz  = 1023 * MHz,
+		.frequency_step_hz =   50 * kHz,
 	},
 
 	.release	   = xc4000_release,
@@ -1754,7 +1742,7 @@ fail2:
 	xc4000_release(fe);
 	return NULL;
 }
-EXPORT_SYMBOL(xc4000_attach);
+EXPORT_SYMBOL_GPL(xc4000_attach);
 
 MODULE_AUTHOR("Steven Toth, Davide Ferri");
 MODULE_DESCRIPTION("Xceive xc4000 silicon tuner driver");

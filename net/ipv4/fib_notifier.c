@@ -6,15 +6,14 @@
 #include <linux/export.h>
 #include <net/net_namespace.h>
 #include <net/fib_notifier.h>
-#include <net/netns/ipv4.h>
 #include <net/ip_fib.h>
 
-int call_fib4_notifier(struct notifier_block *nb, struct net *net,
+int call_fib4_notifier(struct notifier_block *nb,
 		       enum fib_event_type event_type,
 		       struct fib_notifier_info *info)
 {
 	info->family = AF_INET;
-	return call_fib_notifier(nb, net, event_type, info);
+	return call_fib_notifier(nb, event_type, info);
 }
 
 int call_fib4_notifiers(struct net *net, enum fib_event_type event_type,
@@ -23,28 +22,27 @@ int call_fib4_notifiers(struct net *net, enum fib_event_type event_type,
 	ASSERT_RTNL();
 
 	info->family = AF_INET;
-	net->ipv4.fib_seq++;
+	/* Paired with READ_ONCE() in fib4_seq_read() */
+	WRITE_ONCE(net->ipv4.fib_seq, net->ipv4.fib_seq + 1);
 	return call_fib_notifiers(net, event_type, info);
 }
 
-static unsigned int fib4_seq_read(struct net *net)
+static unsigned int fib4_seq_read(const struct net *net)
 {
-	ASSERT_RTNL();
-
-	return net->ipv4.fib_seq + fib4_rules_seq_read(net);
+	/* Paired with WRITE_ONCE() in call_fib4_notifiers() */
+	return READ_ONCE(net->ipv4.fib_seq) + fib4_rules_seq_read(net);
 }
 
-static int fib4_dump(struct net *net, struct notifier_block *nb)
+static int fib4_dump(struct net *net, struct notifier_block *nb,
+		     struct netlink_ext_ack *extack)
 {
 	int err;
 
-	err = fib4_rules_dump(net, nb);
+	err = fib4_rules_dump(net, nb, extack);
 	if (err)
 		return err;
 
-	fib_notify(net, nb);
-
-	return 0;
+	return fib_notify(net, nb, extack);
 }
 
 static const struct fib_notifier_ops fib4_notifier_ops_template = {

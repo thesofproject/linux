@@ -45,10 +45,15 @@ acpi_status acpi_ut_convert_octal_string(char *string, u64 *return_value_ptr)
 	/* Convert each ASCII byte in the input string */
 
 	while (*string) {
-
-		/* Character must be ASCII 0-7, otherwise terminate with no error */
-
+		/*
+		 * Character must be ASCII 0-7, otherwise:
+		 * 1) Runtime: terminate with no error, per the ACPI spec
+		 * 2) Compiler: return an error
+		 */
 		if (!(ACPI_IS_OCTAL_DIGIT(*string))) {
+#ifdef ACPI_ASL_COMPILER
+			status = AE_BAD_OCTAL_CONSTANT;
+#endif
 			break;
 		}
 
@@ -94,10 +99,15 @@ acpi_status acpi_ut_convert_decimal_string(char *string, u64 *return_value_ptr)
 	/* Convert each ASCII byte in the input string */
 
 	while (*string) {
-
-		/* Character must be ASCII 0-9, otherwise terminate with no error */
-
-		if (!isdigit(*string)) {
+		/*
+		 * Character must be ASCII 0-9, otherwise:
+		 * 1) Runtime: terminate with no error, per the ACPI spec
+		 * 2) Compiler: return an error
+		 */
+		if (!isdigit((int)*string)) {
+#ifdef ACPI_ASL_COMPILER
+			status = AE_BAD_DECIMAL_CONSTANT;
+#endif
 			break;
 		}
 
@@ -143,10 +153,15 @@ acpi_status acpi_ut_convert_hex_string(char *string, u64 *return_value_ptr)
 	/* Convert each ASCII byte in the input string */
 
 	while (*string) {
-
-		/* Must be ASCII A-F, a-f, or 0-9, otherwise terminate with no error */
-
-		if (!isxdigit(*string)) {
+		/*
+		 * Character must be ASCII A-F, a-f, or 0-9, otherwise:
+		 * 1) Runtime: terminate with no error, per the ACPI spec
+		 * 2) Compiler: return an error
+		 */
+		if (!isxdigit((int)*string)) {
+#ifdef ACPI_ASL_COMPILER
+			status = AE_BAD_HEX_CONSTANT;
+#endif
 			break;
 		}
 
@@ -231,14 +246,34 @@ char acpi_ut_remove_whitespace(char **string)
 
 u8 acpi_ut_detect_hex_prefix(char **string)
 {
+	char *initial_position = *string;
 
-	if ((**string == ACPI_ASCII_ZERO) &&
-	    (tolower((int)*(*string + 1)) == 'x')) {
-		*string += 2;	/* Go past the leading 0x */
-		return (TRUE);
+	acpi_ut_remove_hex_prefix(string);
+	if (*string != initial_position) {
+		return (TRUE);	/* String is past leading 0x */
 	}
 
 	return (FALSE);		/* Not a hex string */
+}
+
+/*******************************************************************************
+ *
+ * FUNCTION:    acpi_ut_remove_hex_prefix
+ *
+ * PARAMETERS:  string                  - Pointer to input ASCII string
+ *
+ * RETURN:      none
+ *
+ * DESCRIPTION: Remove a hex "0x" prefix
+ *
+ ******************************************************************************/
+
+void acpi_ut_remove_hex_prefix(char **string)
+{
+	if ((**string == ACPI_ASCII_ZERO) &&
+	    (tolower((int)*(*string + 1)) == 'x')) {
+		*string += 2;	/* Go past the leading 0x */
+	}
 }
 
 /*******************************************************************************

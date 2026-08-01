@@ -23,22 +23,17 @@
  * Authors: Dave Airlie
  *          Alex Deucher
  */
-#include <linux/export.h>
 
-#include <drm/drmP.h>
+#include <linux/export.h>
+#include <linux/pci.h>
+
+#include <drm/drm_device.h>
 #include <drm/drm_edid.h>
 #include <drm/radeon_drm.h>
+
 #include "radeon.h"
 #include "atom.h"
 
-extern int radeon_atom_hw_i2c_xfer(struct i2c_adapter *i2c_adap,
-				   struct i2c_msg *msgs, int num);
-extern u32 radeon_atom_hw_i2c_func(struct i2c_adapter *adap);
-
-/**
- * radeon_ddc_probe
- *
- */
 bool radeon_ddc_probe(struct radeon_connector *radeon_connector, bool use_aux)
 {
 	u8 out = 0x0;
@@ -917,14 +912,13 @@ struct radeon_i2c_chan *radeon_i2c_create(struct drm_device *dev,
 	if (rec->mm_i2c && (radeon_hw_i2c == 0))
 		return NULL;
 
-	i2c = kzalloc(sizeof(struct radeon_i2c_chan), GFP_KERNEL);
+	i2c = kzalloc_obj(struct radeon_i2c_chan);
 	if (i2c == NULL)
 		return NULL;
 
 	i2c->rec = *rec;
 	i2c->adapter.owner = THIS_MODULE;
-	i2c->adapter.class = I2C_CLASS_DDC;
-	i2c->adapter.dev.parent = &dev->pdev->dev;
+	i2c->adapter.dev.parent = dev->dev;
 	i2c->dev = dev;
 	i2c_set_adapdata(&i2c->adapter, i2c);
 	mutex_init(&i2c->mutex);
@@ -937,7 +931,7 @@ struct radeon_i2c_chan *radeon_i2c_create(struct drm_device *dev,
 		snprintf(i2c->adapter.name, sizeof(i2c->adapter.name),
 			 "Radeon i2c hw bus %s", name);
 		i2c->adapter.algo = &radeon_i2c_algo;
-		ret = i2c_add_adapter(&i2c->adapter);
+		ret = devm_i2c_add_adapter(dev->dev, &i2c->adapter);
 		if (ret)
 			goto out_free;
 	} else if (rec->hw_capable &&
@@ -978,15 +972,6 @@ out_free:
 
 }
 
-void radeon_i2c_destroy(struct radeon_i2c_chan *i2c)
-{
-	if (!i2c)
-		return;
-	WARN_ON(i2c->has_aux);
-	i2c_del_adapter(&i2c->adapter);
-	kfree(i2c);
-}
-
 /* Add the default buses */
 void radeon_i2c_init(struct radeon_device *rdev)
 {
@@ -1005,10 +990,8 @@ void radeon_i2c_fini(struct radeon_device *rdev)
 	int i;
 
 	for (i = 0; i < RADEON_MAX_I2C_BUS; i++) {
-		if (rdev->i2c_bus[i]) {
-			radeon_i2c_destroy(rdev->i2c_bus[i]);
+		if (rdev->i2c_bus[i])
 			rdev->i2c_bus[i] = NULL;
-		}
 	}
 }
 
@@ -1017,7 +1000,7 @@ void radeon_i2c_add(struct radeon_device *rdev,
 		    struct radeon_i2c_bus_rec *rec,
 		    const char *name)
 {
-	struct drm_device *dev = rdev->ddev;
+	struct drm_device *dev = rdev_to_drm(rdev);
 	int i;
 
 	for (i = 0; i < RADEON_MAX_I2C_BUS; i++) {

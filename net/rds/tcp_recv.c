@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006 Oracle.  All rights reserved.
+ * Copyright (c) 2006, 2017 Oracle and/or its affiliates. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -33,6 +33,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <net/tcp.h>
+#include <trace/events/sock.h>
 
 #include "rds.h"
 #include "tcp.h"
@@ -177,9 +178,9 @@ static int rds_tcp_data_recv(read_descriptor_t *desc, struct sk_buff *skb,
 				goto out;
 			}
 			tc->t_tinc = tinc;
-			rdsdebug("alloced tinc %p\n", tinc);
+			rdsdebug("allocated tinc %p\n", tinc);
 			rds_inc_path_init(&tinc->ti_inc, cp,
-					  cp->cp_conn->c_faddr);
+					  &cp->cp_conn->c_faddr);
 			tinc->ti_inc.i_rx_lat_trace[RDS_MSG_RX_HDR] =
 					local_clock();
 
@@ -239,8 +240,9 @@ static int rds_tcp_data_recv(read_descriptor_t *desc, struct sk_buff *skb,
 			if (tinc->ti_inc.i_hdr.h_flags == RDS_FLAG_CONG_BITMAP)
 				rds_tcp_cong_recv(conn, tinc);
 			else
-				rds_recv_incoming(conn, conn->c_faddr,
-						  conn->c_laddr, &tinc->ti_inc,
+				rds_recv_incoming(conn, &conn->c_faddr,
+						  &conn->c_laddr,
+						  &tinc->ti_inc,
 						  arg->gfp);
 
 			tc->t_tinc_hdr_rem = sizeof(struct rds_header);
@@ -273,8 +275,12 @@ static int rds_tcp_read_sock(struct rds_conn_path *cp, gfp_t gfp)
 	desc.count = 1; /* give more than one skb per call */
 
 	tcp_read_sock(sock->sk, &desc, rds_tcp_data_recv);
-	rdsdebug("tcp_read_sock for tc %p gfp 0x%x returned %d\n", tc, gfp,
+	rdsdebug("tcp_read_sock for tc %p gfp %pGg returned %d\n", tc, &gfp,
 		 desc.error);
+
+	if (skb_queue_empty_lockless(&sock->sk->sk_receive_queue) &&
+	    wq_has_sleeper(&tc->t_recv_done_waitq))
+		wake_up(&tc->t_recv_done_waitq);
 
 	return desc.error;
 }
@@ -308,6 +314,7 @@ void rds_tcp_data_ready(struct sock *sk)
 	struct rds_conn_path *cp;
 	struct rds_tcp_connection *tc;
 
+	trace_sk_data_ready(sk);
 	rdsdebug("data ready sk %p\n", sk);
 
 	read_lock_bh(&sk->sk_callback_lock);
@@ -324,7 +331,7 @@ void rds_tcp_data_ready(struct sock *sk)
 	if (rds_tcp_read_sock(cp, GFP_ATOMIC) == -ENOMEM) {
 		rcu_read_lock();
 		if (!rds_destroy_pending(cp->cp_conn))
-			queue_delayed_work(rds_wq, &cp->cp_recv_w, 0);
+			queue_delayed_work(cp->cp_wq, &cp->cp_recv_w, 0);
 		rcu_read_unlock();
 	}
 out:
@@ -334,9 +341,7 @@ out:
 
 int rds_tcp_recv_init(void)
 {
-	rds_tcp_incoming_slab = kmem_cache_create("rds_tcp_incoming",
-					sizeof(struct rds_tcp_incoming),
-					0, 0, NULL);
+	rds_tcp_incoming_slab = KMEM_CACHE(rds_tcp_incoming, 0);
 	if (!rds_tcp_incoming_slab)
 		return -ENOMEM;
 	return 0;

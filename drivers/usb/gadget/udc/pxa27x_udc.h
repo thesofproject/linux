@@ -326,7 +326,7 @@ struct udc_usb_ep {
  * @addr: usb endpoint number
  * @config: configuration in which this endpoint is active
  * @interface: interface in which this endpoint is active
- * @alternate: altsetting in which this endpoitn is active
+ * @alternate: altsetting in which this endpoint is active
  * @fifo_size: max packet size in the endpoint fifo
  * @type: endpoint type (bulk, iso, int, ...)
  * @udccsr_value: save register of UDCCSR0 for suspend/resume
@@ -426,7 +426,6 @@ struct udc_stats {
  * @usb_gadget: udc gadget structure
  * @driver: bound gadget (zero, g_ether, g_mass_storage, ...)
  * @dev: device
- * @udc_command: machine specific function to activate D+ pullup
  * @gpiod: gpio descriptor of gpio for D+ pullup (or NULL if none)
  * @transceiver: external transceiver to handle vbus sense and D+ pullup
  * @ep0state: control endpoint state machine state
@@ -440,7 +439,6 @@ struct udc_stats {
  * @last_interface: UDC interface of the last SET_INTERFACE host request
  * @last_alternate: UDC altsetting of the last SET_INTERFACE host request
  * @udccsr0: save of udccsr0 in case of suspend
- * @debugfs_root: root entry of debug filesystem
  * @debugfs_state: debugfs entry for "udcstate"
  * @debugfs_queues: debugfs entry for "queues"
  * @debugfs_eps: debugfs entry for "epstate"
@@ -453,7 +451,6 @@ struct pxa_udc {
 	struct usb_gadget			gadget;
 	struct usb_gadget_driver		*driver;
 	struct device				*dev;
-	void					(*udc_command)(int);
 	struct gpio_desc			*gpiod;
 	struct usb_phy				*transceiver;
 
@@ -473,12 +470,6 @@ struct pxa_udc {
 
 #ifdef CONFIG_PM
 	unsigned				udccsr0;
-#endif
-#ifdef CONFIG_USB_GADGET_DEBUG_FS
-	struct dentry				*debugfs_root;
-	struct dentry				*debugfs_state;
-	struct dentry				*debugfs_queues;
-	struct dentry				*debugfs_eps;
 #endif
 };
 #define to_pxa(g)	(container_of((g), struct pxa_udc, gadget))

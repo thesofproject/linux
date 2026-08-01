@@ -25,15 +25,14 @@ prom_printf(char *fmt, ...)
 {
 	va_list args;
 	char ch, *bptr;
-	int i;
 
 	va_start(args, fmt);
 
 #ifdef CONFIG_KGDB
 	ppbuf[0] = 'O';
-	i = vsprintf(ppbuf + 1, fmt, args) + 1;
+	vsnprintf(ppbuf + 1, sizeof(ppbuf) - 1, fmt, args);
 #else
-	i = vsprintf(ppbuf, fmt, args);
+	vsnprintf(ppbuf, sizeof(ppbuf), fmt, args);
 #endif
 
 	bptr = ppbuf;

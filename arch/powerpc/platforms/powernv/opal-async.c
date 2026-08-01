@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * PowerNV OPAL asynchronous completion interfaces
  *
  * Copyright 2013-2017 IBM Corp.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #undef DEBUG
@@ -108,7 +104,7 @@ static int __opal_async_release_token(int token)
 	 */
 	case ASYNC_TOKEN_DISPATCHED:
 		opal_async_tokens[token].state = ASYNC_TOKEN_ABANDONED;
-		/* Fall through */
+		fallthrough;
 	default:
 		rc = 1;
 	}
@@ -269,8 +265,8 @@ int __init opal_async_comp_init(void)
 	}
 
 	opal_max_async_tokens = be32_to_cpup(async);
-	opal_async_tokens = kcalloc(opal_max_async_tokens,
-			sizeof(*opal_async_tokens), GFP_KERNEL);
+	opal_async_tokens = kzalloc_objs(*opal_async_tokens,
+					 opal_max_async_tokens);
 	if (!opal_async_tokens) {
 		err = -ENOMEM;
 		goto out_opal_node;

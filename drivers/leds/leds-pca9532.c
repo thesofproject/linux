@@ -1,15 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * pca9532.c - 16-bit Led dimmer
  *
  * Copyright (C) 2011 Jan Weitzel
  * Copyright (C) 2008 Riku Voipio
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
  * Datasheet: http://www.nxp.com/documents/data_sheet/PCA9532.pdf
- *
  */
 
 #include <linux/module.h>
@@ -20,9 +16,8 @@
 #include <linux/mutex.h>
 #include <linux/workqueue.h>
 #include <linux/leds-pca9532.h>
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 
 /* m =  num_leds*/
 #define PCA9532_REG_INPUT(i)	((i) >> 3)
@@ -31,6 +26,11 @@
 #define PCA9532_REG_PWM(m, i)	(PCA9532_REG_OFFSET(m) + 0x2 + (i) * 2)
 #define LED_REG(m, led)		(PCA9532_REG_OFFSET(m) + 0x5 + (led >> 2))
 #define LED_NUM(led)		(led & 0x3)
+#define LED_SHIFT(led)		(LED_NUM(led) * 2)
+#define LED_MASK(led)		(0x3 << LED_SHIFT(led))
+
+#define PCA9532_PWM_PERIOD_DIV	152
+#define PCA9532_PWM_DUTY_DIV	256
 
 #define ldev_to_led(c)       container_of(c, struct pca9532_led, ldev)
 
@@ -48,13 +48,16 @@ struct pca9532_data {
 	struct gpio_chip gpio;
 #endif
 	const struct pca9532_chip_info *chip_info;
+
+#define PCA9532_PWM_ID_0	0
+#define PCA9532_PWM_ID_1	1
 	u8 pwm[2];
 	u8 psc[2];
+	bool hw_blink;
 };
 
-static int pca9532_probe(struct i2c_client *client,
-	const struct i2c_device_id *id);
-static int pca9532_remove(struct i2c_client *client);
+static int pca9532_probe(struct i2c_client *client);
+static void pca9532_remove(struct i2c_client *client);
 
 enum {
 	pca9530,
@@ -64,10 +67,10 @@ enum {
 };
 
 static const struct i2c_device_id pca9532_id[] = {
-	{ "pca9530", pca9530 },
-	{ "pca9531", pca9531 },
-	{ "pca9532", pca9532 },
-	{ "pca9533", pca9533 },
+	{ .name = "pca9530", .driver_data = pca9530 },
+	{ .name = "pca9531", .driver_data = pca9531 },
+	{ .name = "pca9532", .driver_data = pca9532 },
+	{ .name = "pca9533", .driver_data = pca9533 },
 	{ }
 };
 
@@ -166,9 +169,9 @@ static void pca9532_setled(struct pca9532_led *led)
 	mutex_lock(&data->update_lock);
 	reg = i2c_smbus_read_byte_data(client, LED_REG(maxleds, led->id));
 	/* zero led bits */
-	reg = reg & ~(0x3<<LED_NUM(led->id)*2);
+	reg = reg & ~LED_MASK(led->id);
 	/* set the new value */
-	reg = reg | (led->state << LED_NUM(led->id)*2);
+	reg = reg | (led->state << LED_SHIFT(led->id));
 	i2c_smbus_write_byte_data(client, LED_REG(maxleds, led->id), reg);
 	mutex_unlock(&data->update_lock);
 }
@@ -179,20 +182,58 @@ static int pca9532_set_brightness(struct led_classdev *led_cdev,
 	int err = 0;
 	struct pca9532_led *led = ldev_to_led(led_cdev);
 
-	if (value == LED_OFF)
+	if (value == LED_OFF) {
 		led->state = PCA9532_OFF;
-	else if (value == LED_FULL)
+	} else if (led->state == PCA9532_PWM1) {
+		return 0; /* Non-zero brightness shall not stop HW blinking */
+	} else if (value == LED_FULL) {
 		led->state = PCA9532_ON;
-	else {
+	} else {
 		led->state = PCA9532_PWM0; /* Thecus: hardcode one pwm */
-		err = pca9532_calcpwm(led->client, 0, 0, value);
+		err = pca9532_calcpwm(led->client, PCA9532_PWM_ID_0, 0, value);
 		if (err)
 			return err;
 	}
 	if (led->state == PCA9532_PWM0)
-		pca9532_setpwm(led->client, 0);
+		pca9532_setpwm(led->client, PCA9532_PWM_ID_0);
 	pca9532_setled(led);
 	return err;
+}
+
+static int pca9532_update_hw_blink(struct pca9532_led *led,
+				   unsigned long delay_on, unsigned long delay_off)
+{
+	struct pca9532_data *data = i2c_get_clientdata(led->client);
+	unsigned int psc;
+	int i;
+
+	/* Look for others LEDs that already use PWM1 */
+	for (i = 0; i < data->chip_info->num_leds; i++) {
+		struct pca9532_led *other = &data->leds[i];
+
+		if (other == led)
+			continue;
+
+		if (other->state == PCA9532_PWM1) {
+			if (other->ldev.blink_delay_on != delay_on ||
+			    other->ldev.blink_delay_off != delay_off) {
+				/* HW can handle only one blink configuration at a time */
+				return -EINVAL;
+			}
+		}
+	}
+
+	psc = ((delay_on + delay_off) * PCA9532_PWM_PERIOD_DIV - 1) / 1000;
+	if (psc > U8_MAX) {
+		/* Blink period too long to be handled by hardware */
+		return -EINVAL;
+	}
+
+	led->state = PCA9532_PWM1;
+	data->psc[PCA9532_PWM_ID_1] = psc;
+	data->pwm[PCA9532_PWM_ID_1] = (delay_on * PCA9532_PWM_DUTY_DIV) / (delay_on + delay_off);
+
+	return pca9532_setpwm(data->client, PCA9532_PWM_ID_1);
 }
 
 static int pca9532_set_blink(struct led_classdev *led_cdev,
@@ -200,24 +241,22 @@ static int pca9532_set_blink(struct led_classdev *led_cdev,
 {
 	struct pca9532_led *led = ldev_to_led(led_cdev);
 	struct i2c_client *client = led->client;
-	int psc;
-	int err = 0;
+	struct pca9532_data *data = i2c_get_clientdata(client);
+	int err;
+
+	if (!data->hw_blink)
+		return -EINVAL;
 
 	if (*delay_on == 0 && *delay_off == 0) {
 		/* led subsystem ask us for a blink rate */
-		*delay_on = 1000;
-		*delay_off = 1000;
+		*delay_on = 500;
+		*delay_off = 500;
 	}
-	if (*delay_on != *delay_off || *delay_on > 1690 || *delay_on < 6)
-		return -EINVAL;
 
-	/* Thecus specific: only use PSC/PWM 0 */
-	psc = (*delay_on * 152-1)/1000;
-	err = pca9532_calcpwm(client, 0, psc, led_cdev->brightness);
+	err = pca9532_update_hw_blink(led, *delay_on, *delay_off);
 	if (err)
 		return err;
-	if (led->state == PCA9532_PWM0)
-		pca9532_setpwm(led->client, 0);
+
 	pca9532_setled(led);
 
 	return 0;
@@ -233,9 +272,9 @@ static int pca9532_event(struct input_dev *dev, unsigned int type,
 
 	/* XXX: allow different kind of beeps with psc/pwm modifications */
 	if (value > 1 && value < 32767)
-		data->pwm[1] = 127;
+		data->pwm[PCA9532_PWM_ID_1] = 127;
 	else
-		data->pwm[1] = 0;
+		data->pwm[PCA9532_PWM_ID_1] = 0;
 
 	schedule_work(&data->work);
 
@@ -250,7 +289,7 @@ static void pca9532_input_work(struct work_struct *work)
 
 	mutex_lock(&data->update_lock);
 	i2c_smbus_write_byte_data(data->client, PCA9532_REG_PWM(maxleds, 1),
-		data->pwm[1]);
+		data->pwm[PCA9532_PWM_ID_1]);
 	mutex_unlock(&data->update_lock);
 }
 
@@ -264,7 +303,7 @@ static enum pca9532_state pca9532_getled(struct pca9532_led *led)
 
 	mutex_lock(&data->update_lock);
 	reg = i2c_smbus_read_byte_data(client, LED_REG(maxleds, led->id));
-	ret = reg >> LED_NUM(led->id)/2;
+	ret = (reg & LED_MASK(led->id)) >> LED_SHIFT(led->id);
 	mutex_unlock(&data->update_lock);
 	return ret;
 }
@@ -281,7 +320,8 @@ static int pca9532_gpio_request_pin(struct gpio_chip *gc, unsigned offset)
 	return -EBUSY;
 }
 
-static void pca9532_gpio_set_value(struct gpio_chip *gc, unsigned offset, int val)
+static int pca9532_gpio_set_value(struct gpio_chip *gc, unsigned int offset,
+				  int val)
 {
 	struct pca9532_data *data = gpiochip_get_data(gc);
 	struct pca9532_led *led = &data->leds[offset];
@@ -292,6 +332,8 @@ static void pca9532_gpio_set_value(struct gpio_chip *gc, unsigned offset, int va
 		led->state = PCA9532_OFF;
 
 	pca9532_setled(led);
+
+	return 0;
 }
 
 static int pca9532_gpio_get_value(struct gpio_chip *gc, unsigned offset)
@@ -314,18 +356,13 @@ static int pca9532_gpio_direction_input(struct gpio_chip *gc, unsigned offset)
 
 static int pca9532_gpio_direction_output(struct gpio_chip *gc, unsigned offset, int val)
 {
-	pca9532_gpio_set_value(gc, offset, val);
-
-	return 0;
+	return pca9532_gpio_set_value(gc, offset, val);
 }
 #endif /* CONFIG_LEDS_PCA9532_GPIO */
 
-static int pca9532_destroy_devices(struct pca9532_data *data, int n_devs)
+static void pca9532_destroy_devices(struct pca9532_data *data, int n_devs)
 {
 	int i = n_devs;
-
-	if (!data)
-		return -EINVAL;
 
 	while (--i >= 0) {
 		switch (data->leds[i].type) {
@@ -348,8 +385,6 @@ static int pca9532_destroy_devices(struct pca9532_data *data, int n_devs)
 	if (data->gpio.parent)
 		gpiochip_remove(&data->gpio);
 #endif
-
-	return 0;
 }
 
 static int pca9532_configure(struct i2c_client *client,
@@ -368,6 +403,7 @@ static int pca9532_configure(struct i2c_client *client,
 			data->psc[i]);
 	}
 
+	data->hw_blink = true;
 	for (i = 0; i < data->chip_info->num_leds; i++) {
 		struct pca9532_led *led = &data->leds[i];
 		struct pca9532_led *pled = &pdata->leds[i];
@@ -402,6 +438,8 @@ static int pca9532_configure(struct i2c_client *client,
 			pca9532_setled(led);
 			break;
 		case PCA9532_TYPE_N2100_BEEP:
+			/* PWM1 is reserved for beeper so blink will not use hardware */
+			data->hw_blink = false;
 			BUG_ON(data->idev);
 			led->state = PCA9532_PWM1;
 			pca9532_setled(led);
@@ -470,24 +508,25 @@ static struct pca9532_platform_data *
 pca9532_of_populate_pdata(struct device *dev, struct device_node *np)
 {
 	struct pca9532_platform_data *pdata;
-	struct device_node *child;
-	const struct of_device_id *match;
 	int devid, maxleds;
 	int i = 0;
 	const char *state;
 
-	match = of_match_device(of_pca9532_leds_match, dev);
-	if (!match)
-		return ERR_PTR(-ENODEV);
-
-	devid = (int)(uintptr_t)match->data;
+	devid = (int)(uintptr_t)of_device_get_match_data(dev);
 	maxleds = pca9532_chip_info_tbl[devid].num_leds;
 
 	pdata = devm_kzalloc(dev, sizeof(*pdata), GFP_KERNEL);
 	if (!pdata)
 		return ERR_PTR(-ENOMEM);
 
-	for_each_child_of_node(np, child) {
+	pdata->gpio_base = -1;
+
+	of_property_read_u8_array(np, "nxp,pwm", &pdata->pwm[PCA9532_PWM_ID_0],
+				  ARRAY_SIZE(pdata->pwm));
+	of_property_read_u8_array(np, "nxp,psc", &pdata->psc[PCA9532_PWM_ID_0],
+				  ARRAY_SIZE(pdata->psc));
+
+	for_each_available_child_of_node_scoped(np, child) {
 		if (of_property_read_string(child, "label",
 					    &pdata->leds[i].name))
 			pdata->leds[i].name = child->name;
@@ -500,23 +539,21 @@ pca9532_of_populate_pdata(struct device *dev, struct device_node *np)
 			else if (!strcmp(state, "keep"))
 				pdata->leds[i].state = PCA9532_KEEP;
 		}
-		if (++i >= maxleds) {
-			of_node_put(child);
+		if (++i >= maxleds)
 			break;
-		}
 	}
 
 	return pdata;
 }
 
-static int pca9532_probe(struct i2c_client *client,
-	const struct i2c_device_id *id)
+static int pca9532_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	int devid;
 	struct pca9532_data *data = i2c_get_clientdata(client);
 	struct pca9532_platform_data *pca9532_pdata =
 			dev_get_platdata(&client->dev);
-	struct device_node *np = client->dev.of_node;
+	struct device_node *np = dev_of_node(&client->dev);
 
 	if (!pca9532_pdata) {
 		if (np) {
@@ -528,8 +565,7 @@ static int pca9532_probe(struct i2c_client *client,
 			dev_err(&client->dev, "no platform data\n");
 			return -EINVAL;
 		}
-		devid = (int)(uintptr_t)of_match_device(
-			of_pca9532_leds_match, &client->dev)->data;
+		devid = (int)(uintptr_t)of_device_get_match_data(&client->dev);
 	} else {
 		devid = id->driver_data;
 	}
@@ -552,16 +588,11 @@ static int pca9532_probe(struct i2c_client *client,
 	return pca9532_configure(client, data, pca9532_pdata);
 }
 
-static int pca9532_remove(struct i2c_client *client)
+static void pca9532_remove(struct i2c_client *client)
 {
 	struct pca9532_data *data = i2c_get_clientdata(client);
-	int err;
 
-	err = pca9532_destroy_devices(data, data->chip_info->num_leds);
-	if (err)
-		return err;
-
-	return 0;
+	pca9532_destroy_devices(data, data->chip_info->num_leds);
 }
 
 module_i2c_driver(pca9532_driver);

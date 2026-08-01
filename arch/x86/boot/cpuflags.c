@@ -3,7 +3,6 @@
 #include "bitops.h"
 
 #include <asm/processor-flags.h>
-#include <asm/required-features.h>
 #include <asm/msr-index.h>
 #include "cpuflags.h"
 
@@ -29,56 +28,38 @@ static int has_fpu(void)
 	return fsw == 0 && (fcw & 0x103f) == 0x003f;
 }
 
+#ifdef CONFIG_X86_32
 /*
  * For building the 16-bit code we want to explicitly specify 32-bit
  * push/pop operations, rather than just saying 'pushf' or 'popf' and
- * letting the compiler choose. But this is also included from the
- * compressed/ directory where it may be 64-bit code, and thus needs
- * to be 'pushfq' or 'popfq' in that case.
+ * letting the compiler choose.
  */
-#ifdef __x86_64__
-#define PUSHF "pushfq"
-#define POPF "popfq"
-#else
-#define PUSHF "pushfl"
-#define POPF "popfl"
-#endif
-
-int has_eflag(unsigned long mask)
+bool has_eflag(unsigned long mask)
 {
 	unsigned long f0, f1;
 
-	asm volatile(PUSHF "	\n\t"
-		     PUSHF "	\n\t"
+	asm volatile("pushfl	\n\t"
+		     "pushfl	\n\t"
 		     "pop %0	\n\t"
 		     "mov %0,%1	\n\t"
 		     "xor %2,%1	\n\t"
 		     "push %1	\n\t"
-		     POPF "	\n\t"
-		     PUSHF "	\n\t"
+		     "popfl	\n\t"
+		     "pushfl	\n\t"
 		     "pop %1	\n\t"
-		     POPF
+		     "popfl"
 		     : "=&r" (f0), "=&r" (f1)
 		     : "ri" (mask));
 
 	return !!((f0^f1) & mask);
 }
-
-/* Handle x86_32 PIC using ebx. */
-#if defined(__i386__) && defined(__PIC__)
-# define EBX_REG "=r"
-#else
-# define EBX_REG "=b"
 #endif
 
-static inline void cpuid_count(u32 id, u32 count,
-		u32 *a, u32 *b, u32 *c, u32 *d)
+void cpuid_count(u32 id, u32 count, u32 *a, u32 *b, u32 *c, u32 *d)
 {
-	asm volatile(".ifnc %%ebx,%3 ; movl  %%ebx,%3 ; .endif	\n\t"
-		     "cpuid					\n\t"
-		     ".ifnc %%ebx,%3 ; xchgl %%ebx,%3 ; .endif	\n\t"
-		    : "=a" (*a), "=c" (*c), "=d" (*d), EBX_REG (*b)
-		    : "a" (id), "c" (count)
+	asm volatile("cpuid"
+		     : "=a" (*a), "=b" (*b), "=c" (*c), "=d" (*d)
+		     : "0" (id), "2" (count)
 	);
 }
 

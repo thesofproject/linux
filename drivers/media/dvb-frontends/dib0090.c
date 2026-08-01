@@ -1,23 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Linux-DVB Driver for DiBcom's DiB0090 base-band RF Tuner.
  *
  * Copyright (C) 2005-9 DiBcom (http://www.dibcom.fr/)
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *
- * GNU General Public License for more details.
- *
- *
  * This code is more or less generated from another driver, please
  * excuse some codingstyle oddities.
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -90,7 +78,7 @@ MODULE_PARM_DESC(debug, "turn on debugging (default: 0)");
 #define SOC_8090_P1G_11R1 0x86
 #define SOC_8090_P1G_21R1 0x8e
 
-/* else use thos ones to check */
+/* else use those ones to check */
 #define P1A_B      0x0
 #define P1C	   0x1
 #define P1D_E_F    0x3
@@ -1072,45 +1060,45 @@ static void dib0090_set_bbramp_pwm(struct dib0090_state *state, const u16 * cfg)
 void dib0090_pwm_gain_reset(struct dvb_frontend *fe)
 {
 	struct dib0090_state *state = fe->tuner_priv;
-	u16 *bb_ramp = (u16 *)&bb_ramp_pwm_normal; /* default baseband config */
-	u16 *rf_ramp = NULL;
+	const u16 *bb_ramp = bb_ramp_pwm_normal; /* default baseband config */
+	const u16 *rf_ramp = NULL;
 	u8 en_pwm_rf_mux = 1;
 
 	/* reset the AGC */
 	if (state->config->use_pwm_agc) {
 		if (state->current_band == BAND_CBAND) {
 			if (state->identity.in_soc) {
-				bb_ramp = (u16 *)&bb_ramp_pwm_normal_socs;
+				bb_ramp = bb_ramp_pwm_normal_socs;
 				if (state->identity.version == SOC_8090_P1G_11R1 || state->identity.version == SOC_8090_P1G_21R1)
-					rf_ramp = (u16 *)&rf_ramp_pwm_cband_8090;
+					rf_ramp = rf_ramp_pwm_cband_8090;
 				else if (state->identity.version == SOC_7090_P1G_11R1 || state->identity.version == SOC_7090_P1G_21R1) {
 					if (state->config->is_dib7090e) {
 						if (state->rf_ramp == NULL)
-							rf_ramp = (u16 *)&rf_ramp_pwm_cband_7090e_sensitivity;
+							rf_ramp = rf_ramp_pwm_cband_7090e_sensitivity;
 						else
-							rf_ramp = (u16 *)state->rf_ramp;
+							rf_ramp = state->rf_ramp;
 					} else
-						rf_ramp = (u16 *)&rf_ramp_pwm_cband_7090p;
+						rf_ramp = rf_ramp_pwm_cband_7090p;
 				}
 			} else
-				rf_ramp = (u16 *)&rf_ramp_pwm_cband;
+				rf_ramp = rf_ramp_pwm_cband;
 		} else
 
 			if (state->current_band == BAND_VHF) {
 				if (state->identity.in_soc) {
-					bb_ramp = (u16 *)&bb_ramp_pwm_normal_socs;
+					bb_ramp = bb_ramp_pwm_normal_socs;
 					/* rf_ramp = &rf_ramp_pwm_vhf_socs; */ /* TODO */
 				} else
-					rf_ramp = (u16 *)&rf_ramp_pwm_vhf;
+					rf_ramp = rf_ramp_pwm_vhf;
 			} else if (state->current_band == BAND_UHF) {
 				if (state->identity.in_soc) {
-					bb_ramp = (u16 *)&bb_ramp_pwm_normal_socs;
+					bb_ramp = bb_ramp_pwm_normal_socs;
 					if (state->identity.version == SOC_8090_P1G_11R1 || state->identity.version == SOC_8090_P1G_21R1)
-						rf_ramp = (u16 *)&rf_ramp_pwm_uhf_8090;
+						rf_ramp = rf_ramp_pwm_uhf_8090;
 					else if (state->identity.version == SOC_7090_P1G_11R1 || state->identity.version == SOC_7090_P1G_21R1)
-						rf_ramp = (u16 *)&rf_ramp_pwm_uhf_7090;
+						rf_ramp = rf_ramp_pwm_uhf_7090;
 				} else
-					rf_ramp = (u16 *)&rf_ramp_pwm_uhf;
+					rf_ramp = rf_ramp_pwm_uhf;
 			}
 		if (rf_ramp)
 			dib0090_set_rframp_pwm(state, rf_ramp);
@@ -1416,9 +1404,9 @@ int dib0090_update_rframp_7090(struct dvb_frontend *fe, u8 cfg_sensitivity)
 	}
 
 	if (cfg_sensitivity)
-		state->rf_ramp = (const u16 *)&rf_ramp_pwm_cband_7090e_sensitivity;
+		state->rf_ramp = rf_ramp_pwm_cband_7090e_sensitivity;
 	else
-		state->rf_ramp = (const u16 *)&rf_ramp_pwm_cband_7090e_aci;
+		state->rf_ramp = rf_ramp_pwm_cband_7090e_aci;
 	dib0090_pwm_gain_reset(fe);
 
 	return 0;
@@ -1586,7 +1574,7 @@ static int dib0090_reset(struct dvb_frontend *fe)
 	if (((state->identity.version & 0x1f) >= P1D_E_F) || (state->identity.in_soc))
 		dib0090_set_EFUSE(state);
 
-	/* Congigure in function of the crystal */
+	/* Configure in function of the crystal */
 	if (state->config->force_crystal_mode != 0)
 		dib0090_write_reg(state, 0x14,
 				state->config->force_crystal_mode & 3);
@@ -1705,7 +1693,7 @@ static int dib0090_dc_offset_calibration(struct dib0090_state *state, enum front
 		if (state->identity.p1g)
 			state->dc = dc_p1g_table;
 
-		/* fall through */
+		fallthrough;
 	case CT_TUNER_STEP_0:
 		dprintk("Start/continue DC calibration for %s path\n",
 			(state->dc->i == 1) ? "I" : "Q");
@@ -1760,7 +1748,8 @@ static int dib0090_dc_offset_calibration(struct dib0090_state *state, enum front
 			}
 
 			dib0090_set_trim(state);
-			dprintk("BB Offset Cal, BBreg=%hd,Offset=%hd,Value Set=%hd\n", state->dc->addr, state->adc_diff, state->step);
+			dprintk("BB Offset Cal, BBreg=%u,Offset=%d,Value Set=%d\n",
+				state->dc->addr, state->adc_diff, state->step);
 
 			state->dc++;
 			if (state->dc->addr == 0)	/* done */
@@ -1776,6 +1765,8 @@ static int dib0090_dc_offset_calibration(struct dib0090_state *state, enum front
 		dib0090_write_reg(state, 0x1f, 0x7);
 		*tune_state = CT_TUNER_START;	/* reset done -> real tuning can now begin */
 		state->calibrate &= ~DC_CAL;
+		break;
+
 	default:
 		break;
 	}
@@ -2459,7 +2450,7 @@ static int dib0090_tune(struct dvb_frontend *fe)
 		state->current_standard = state->fe->dtv_property_cache.delivery_system;
 
 		ret = 20;
-		state->calibrate = CAPTRIM_CAL;	/* captrim serach now */
+		state->calibrate = CAPTRIM_CAL;	/* captrim search now */
 	}
 
 	else if (*tune_state == CT_TUNER_STEP_0) {	/* Warning : because of captrim cal, if you change this step, change it also in _cal.c file because it is the step following captrim cal state machine */
@@ -2578,9 +2569,9 @@ static int dib0090_set_params(struct dvb_frontend *fe)
 static const struct dvb_tuner_ops dib0090_ops = {
 	.info = {
 		 .name = "DiBcom DiB0090",
-		 .frequency_min = 45000000,
-		 .frequency_max = 860000000,
-		 .frequency_step = 1000,
+		 .frequency_min_hz  =  45 * MHz,
+		 .frequency_max_hz  = 860 * MHz,
+		 .frequency_step_hz =   1 * kHz,
 		 },
 	.release = dib0090_release,
 
@@ -2593,9 +2584,9 @@ static const struct dvb_tuner_ops dib0090_ops = {
 static const struct dvb_tuner_ops dib0090_fw_ops = {
 	.info = {
 		 .name = "DiBcom DiB0090",
-		 .frequency_min = 45000000,
-		 .frequency_max = 860000000,
-		 .frequency_step = 1000,
+		 .frequency_min_hz  =  45 * MHz,
+		 .frequency_max_hz  = 860 * MHz,
+		 .frequency_step_hz =   1 * kHz,
 		 },
 	.release = dib0090_release,
 
@@ -2615,7 +2606,7 @@ static const struct dib0090_wbd_slope dib0090_wbd_table_default[] = {
 
 struct dvb_frontend *dib0090_register(struct dvb_frontend *fe, struct i2c_adapter *i2c, const struct dib0090_config *config)
 {
-	struct dib0090_state *st = kzalloc(sizeof(struct dib0090_state), GFP_KERNEL);
+	struct dib0090_state *st = kzalloc_obj(struct dib0090_state);
 	if (st == NULL)
 		return NULL;
 
@@ -2643,11 +2634,11 @@ struct dvb_frontend *dib0090_register(struct dvb_frontend *fe, struct i2c_adapte
 	return NULL;
 }
 
-EXPORT_SYMBOL(dib0090_register);
+EXPORT_SYMBOL_GPL(dib0090_register);
 
 struct dvb_frontend *dib0090_fw_register(struct dvb_frontend *fe, struct i2c_adapter *i2c, const struct dib0090_config *config)
 {
-	struct dib0090_fw_state *st = kzalloc(sizeof(struct dib0090_fw_state), GFP_KERNEL);
+	struct dib0090_fw_state *st = kzalloc_obj(struct dib0090_fw_state);
 	if (st == NULL)
 		return NULL;
 
@@ -2669,7 +2660,7 @@ free_mem:
 	fe->tuner_priv = NULL;
 	return NULL;
 }
-EXPORT_SYMBOL(dib0090_fw_register);
+EXPORT_SYMBOL_GPL(dib0090_fw_register);
 
 MODULE_AUTHOR("Patrick Boettcher <patrick.boettcher@posteo.de>");
 MODULE_AUTHOR("Olivier Grenie <olivier.grenie@parrot.com>");

@@ -8,8 +8,6 @@
  *
  */
 
-#define KMSG_COMPONENT "dasd"
-
 #include <linux/kernel_stat.h>
 #include <linux/stddef.h>
 #include <linux/kernel.h>
@@ -19,20 +17,21 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/jiffies.h>
-
+#include <asm/asm-extable.h>
+#include <asm/machine.h>
 #include <asm/dasd.h>
 #include <asm/debug.h>
 #include <asm/diag.h>
 #include <asm/ebcdic.h>
-#include <asm/io.h>
+#include <linux/io.h>
 #include <asm/irq.h>
 #include <asm/vtoc.h>
+#include <asm/asm.h>
 
 #include "dasd_int.h"
 #include "dasd_diag.h"
 
-#define PRINTK_HEADER "dasd(diag):"
-
+MODULE_DESCRIPTION("S/390 Support for DIAG access to DASD Disks");
 MODULE_LICENSE("GPL");
 
 /* The maximum number of blocks per request (max_blocks) is dependent on the
@@ -58,7 +57,7 @@ struct dasd_diag_private {
 
 struct dasd_diag_req {
 	unsigned int block_count;
-	struct dasd_diag_bio bio[0];
+	struct dasd_diag_bio bio[];
 };
 
 static const u8 DASD_DIAG_CMS1[] = { 0xc3, 0xd4, 0xe2, 0xf1 };/* EBCDIC CMS1 */
@@ -69,25 +68,26 @@ static const u8 DASD_DIAG_CMS1[] = { 0xc3, 0xd4, 0xe2, 0xf1 };/* EBCDIC CMS1 */
  * resulting condition code and DIAG return code. */
 static inline int __dia250(void *iob, int cmd)
 {
-	register unsigned long reg2 asm ("2") = (unsigned long) iob;
+	union register_pair rx = { .even = (unsigned long)iob, };
+	int cc, exception;
 	typedef union {
 		struct dasd_diag_init_io init_io;
 		struct dasd_diag_rw_io rw_io;
 	} addr_type;
-	int rc;
 
-	rc = 3;
-	asm volatile(
-		"	diag	2,%2,0x250\n"
-		"0:	ipm	%0\n"
-		"	srl	%0,28\n"
-		"	or	%0,3\n"
+	exception = 1;
+	asm_inline volatile(
+		"	diag	%[rx],%[cmd],0x250\n"
+		"0:	lhi	%[exc],0\n"
 		"1:\n"
+		CC_IPM(cc)
 		EX_TABLE(0b,1b)
-		: "+d" (rc), "=m" (*(addr_type *) iob)
-		: "d" (cmd), "d" (reg2), "m" (*(addr_type *) iob)
-		: "3", "cc");
-	return rc;
+		: CC_OUT(cc, cc), [rx] "+d" (rx.pair),
+		  "+m" (*(addr_type *)iob), [exc] "+d" (exception)
+		: [cmd] "d" (cmd)
+		: CC_CLOBBER);
+	cc = exception ? 3 : CC_TRANSFORM(cc);
+	return cc | rx.odd;
 }
 
 static inline int dia250(void *iob, int cmd)
@@ -319,13 +319,13 @@ dasd_diag_check_device(struct dasd_device *device)
 	struct dasd_diag_characteristics *rdc_data;
 	struct vtoc_cms_label *label;
 	struct dasd_block *block;
-	struct dasd_diag_bio bio;
+	struct dasd_diag_bio *bio;
 	unsigned int sb, bsize;
 	blocknum_t end_block;
 	int rc;
 
 	if (private == NULL) {
-		private = kzalloc(sizeof(*private), GFP_KERNEL);
+		private = kzalloc_obj(*private);
 		if (private == NULL) {
 			DBF_DEV_EVENT(DBF_WARNING, device, "%s",
 				"Allocating memory for private DASD data "
@@ -395,29 +395,36 @@ dasd_diag_check_device(struct dasd_device *device)
 		rc = -ENOMEM;
 		goto out;
 	}
+	bio = kzalloc_obj(*bio);
+	if (bio == NULL)  {
+		DBF_DEV_EVENT(DBF_WARNING, device, "%s",
+			      "No memory to allocate initialization bio");
+		rc = -ENOMEM;
+		goto out_label;
+	}
 	rc = 0;
 	end_block = 0;
 	/* try all sizes - needed for ECKD devices */
 	for (bsize = 512; bsize <= PAGE_SIZE; bsize <<= 1) {
 		mdsk_init_io(device, bsize, 0, &end_block);
-		memset(&bio, 0, sizeof (struct dasd_diag_bio));
-		bio.type = MDSK_READ_REQ;
-		bio.block_number = private->pt_block + 1;
-		bio.buffer = label;
+		memset(bio, 0, sizeof(*bio));
+		bio->type = MDSK_READ_REQ;
+		bio->block_number = private->pt_block + 1;
+		bio->buffer = label;
 		memset(&private->iob, 0, sizeof (struct dasd_diag_rw_io));
 		private->iob.dev_nr = rdc_data->dev_nr;
 		private->iob.key = 0;
 		private->iob.flags = 0;	/* do synchronous io */
 		private->iob.block_count = 1;
 		private->iob.interrupt_params = 0;
-		private->iob.bio_list = &bio;
+		private->iob.bio_list = bio;
 		private->iob.flaga = DASD_DIAG_FLAGA_DEFAULT;
 		rc = dia250(&private->iob, RW_BIO);
 		if (rc == 3) {
 			pr_warn("%s: A 64-bit DIAG call failed\n",
 				dev_name(&device->cdev->dev));
 			rc = -EOPNOTSUPP;
-			goto out_label;
+			goto out_bio;
 		}
 		mdsk_term_io(device);
 		if (rc == 0)
@@ -427,7 +434,7 @@ dasd_diag_check_device(struct dasd_device *device)
 		pr_warn("%s: Accessing the DASD failed because of an incorrect format (rc=%d)\n",
 			dev_name(&device->cdev->dev), rc);
 		rc = -EIO;
-		goto out_label;
+		goto out_bio;
 	}
 	/* check for label block */
 	if (memcmp(label->label_id, DASD_DIAG_CMS1,
@@ -457,6 +464,8 @@ dasd_diag_check_device(struct dasd_device *device)
 			(rc == 4) ? ", read-only device" : "");
 		rc = 0;
 	}
+out_bio:
+	kfree(bio);
 out_label:
 	free_page((long) label);
 out:
@@ -506,7 +515,7 @@ static struct dasd_ccw_req *dasd_diag_build_cp(struct dasd_device *memdev,
 	struct req_iterator iter;
 	struct bio_vec bv;
 	char *dst;
-	unsigned int count, datasize;
+	unsigned int count;
 	sector_t recid, first_rec, last_rec;
 	unsigned int blksize, off;
 	unsigned char rw_cmd;
@@ -534,9 +543,8 @@ static struct dasd_ccw_req *dasd_diag_build_cp(struct dasd_device *memdev,
 	if (count != last_rec - first_rec + 1)
 		return ERR_PTR(-EINVAL);
 	/* Build the request */
-	datasize = sizeof(struct dasd_diag_req) +
-		count*sizeof(struct dasd_diag_bio);
-	cqr = dasd_smalloc_request(DASD_DIAG_MAGIC, 0, datasize, memdev);
+	cqr = dasd_smalloc_request(DASD_DIAG_MAGIC, 0, struct_size(dreq, bio, count),
+				   memdev, blk_mq_rq_to_pdu(req));
 	if (IS_ERR(cqr))
 		return cqr;
 
@@ -545,7 +553,7 @@ static struct dasd_ccw_req *dasd_diag_build_cp(struct dasd_device *memdev,
 	dbio = dreq->bio;
 	recid = first_rec;
 	rq_for_each_segment(bv, req, iter) {
-		dst = page_address(bv.bv_page) + bv.bv_offset;
+		dst = bvec_virt(&bv);
 		for (off = 0; off < bv.bv_len; off += blksize) {
 			memset(dbio, 0, sizeof (struct dasd_diag_bio));
 			dbio->type = rw_cmd;
@@ -614,13 +622,24 @@ dasd_diag_dump_sense(struct dasd_device *device, struct dasd_ccw_req * req,
 		    "dump sense not available for DIAG data");
 }
 
+static unsigned int dasd_diag_max_sectors(struct dasd_block *block)
+{
+	return DIAG_MAX_BLOCKS << block->s2b_shift;
+}
+
+static int dasd_diag_pe_handler(struct dasd_device *device,
+				__u8 tbvpm, __u8 fcsecpm)
+{
+	return dasd_generic_verify_path(device, tbvpm);
+}
+
 static struct dasd_discipline dasd_diag_discipline = {
 	.owner = THIS_MODULE,
 	.name = "DIAG",
 	.ebcname = "DIAG",
-	.max_blocks = DIAG_MAX_BLOCKS,
+	.max_sectors = dasd_diag_max_sectors,
 	.check_device = dasd_diag_check_device,
-	.verify_path = dasd_generic_verify_path,
+	.pe_handler = dasd_diag_pe_handler,
 	.fill_geometry = dasd_diag_fill_geometry,
 	.start_IO = dasd_start_diag,
 	.term_IO = dasd_diag_term_IO,
@@ -636,7 +655,7 @@ static struct dasd_discipline dasd_diag_discipline = {
 static int __init
 dasd_diag_init(void)
 {
-	if (!MACHINE_IS_VM) {
+	if (!machine_is_vm()) {
 		pr_info("Discipline %s cannot be used without z/VM\n",
 			dasd_diag_discipline.name);
 		return -ENODEV;

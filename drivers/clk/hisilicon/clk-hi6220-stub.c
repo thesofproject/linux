@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Hi6220 stub clock driver
  *
@@ -5,11 +6,6 @@
  * Copyright (c) 2015 Linaro Limited.
  *
  * Author: Leo Yan <leo.yan@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/clk-provider.h>
@@ -18,7 +14,7 @@
 #include <linux/mfd/syscon.h>
 #include <linux/mailbox_client.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
+#include <linux/platform_device.h>
 #include <linux/regmap.h>
 
 /* Stub clocks id */
@@ -165,11 +161,11 @@ static int hi6220_stub_clk_set_rate(struct clk_hw *hw, unsigned long rate,
 	return ret;
 }
 
-static long hi6220_stub_clk_round_rate(struct clk_hw *hw, unsigned long rate,
-		unsigned long *parent_rate)
+static int hi6220_stub_clk_determine_rate(struct clk_hw *hw,
+					  struct clk_rate_request *req)
 {
 	struct hi6220_stub_clk *stub_clk = to_stub_clk(hw);
-	unsigned long new_rate = rate / 1000;  /* kHz */
+	unsigned long new_rate = req->rate / 1000;  /* kHz */
 
 	switch (stub_clk->id) {
 	case HI6220_STUB_ACPU0:
@@ -185,12 +181,14 @@ static long hi6220_stub_clk_round_rate(struct clk_hw *hw, unsigned long rate,
 		break;
 	}
 
-	return new_rate;
+	req->rate = new_rate;
+
+	return 0;
 }
 
 static const struct clk_ops hi6220_stub_clk_ops = {
 	.recalc_rate	= hi6220_stub_clk_recalc_rate,
-	.round_rate	= hi6220_stub_clk_round_rate,
+	.determine_rate = hi6220_stub_clk_determine_rate,
 	.set_rate	= hi6220_stub_clk_set_rate,
 };
 

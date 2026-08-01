@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Input core configuration
 #
@@ -47,25 +48,12 @@ config SERIO_SERPORT
 	  Say Y here if you plan to use an input device (mouse, joystick,
 	  tablet, 6dof) that communicates over the RS232 serial (COM) port.
 
-	  More information is available: <file:Documentation/input/input.txt>
+	  More information is available: <file:Documentation/input/input.rst>
 
 	  If unsure, say Y.
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called serport.
-
-config SERIO_CT82C710
-	tristate "ct82c710 Aux port controller"
-	depends on X86
-	help
-	  Say Y here if you have a Texas Instruments TravelMate notebook
-	  equipped with the ct82c710 chip and want to use a mouse connected
-	  to the "QuickPort".
-
-	  If unsure, say N.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called ct82c710.
 
 config SERIO_Q40KBD
 	tristate "Q40 keyboard controller"
@@ -78,7 +66,7 @@ config SERIO_PARKBD
 	  Say Y here if you built a simple parallel port adapter to attach
 	  an additional AT keyboard, XT keyboard or PS/2 mouse.
 
-	  More information is available: <file:Documentation/input/input.txt>
+	  More information is available: <file:Documentation/input/input.rst>
 
 	  If unsure, say N.
 
@@ -147,6 +135,7 @@ config HIL_MLC
 config SERIO_PCIPS2
 	tristate "PCI PS/2 keyboard and PS/2 mouse controller"
 	depends on PCI
+	depends on HAS_IOPORT
 	help
 	  Say Y here if you have a Mobility Docking station with PS/2
 	  keyboard and mice ports.
@@ -163,6 +152,16 @@ config SERIO_MACEPS2
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called maceps2.
+
+config SERIO_SGI_IOC3
+	tristate "SGI IOC3 PS/2 controller"
+	depends on SGI_MFD_IOC3
+	help
+	  Say Y here if you have an SGI Onyx2, SGI Octane or IOC3 PCI card
+	  and you want to attach and use a keyboard, mouse, or both.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called ioc3kbd.
 
 config SERIO_LIBPS2
 	tristate "PS/2 driver library"
@@ -189,16 +188,6 @@ config SERIO_RAW
 	  To compile this driver as a module, choose M here: the
 	  module will be called serio_raw.
 
-config SERIO_XILINX_XPS_PS2
-	tristate "Xilinx XPS PS/2 Controller Support"
-	depends on PPC || MICROBLAZE
-	help
-	  This driver supports XPS PS/2 IP from the Xilinx EDK on
-	  PowerPC platform.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called xilinx_ps2.
-
 config SERIO_ALTERA_PS2
 	tristate "Altera UP PS/2 controller"
 	depends on HAS_IOMEM
@@ -212,7 +201,7 @@ config SERIO_AMS_DELTA
 	tristate "Amstrad Delta (E3) mailboard support"
 	depends on MACH_AMS_DELTA
 	default y
-	---help---
+	help
 	  Say Y here if you have an E3 and want to use its mailboard,
 	  or any standard AT keyboard connected to the mailboard port.
 
@@ -244,7 +233,7 @@ config SERIO_ARC_PS2
 
 config SERIO_APBPS2
 	tristate "GRLIB APBPS2 PS/2 keyboard/mouse controller"
-	depends on OF
+	depends on OF && HAS_IOMEM
 	help
 	  Say Y here if you want support for GRLIB APBPS2 peripherals used
 	  to connect to PS/2 keyboard and/or mouse.
@@ -254,7 +243,7 @@ config SERIO_APBPS2
 
 config SERIO_OLPC_APSP
 	tristate "OLPC AP-SP input support"
-	depends on OLPC || COMPILE_TEST
+	depends on ARCH_MMP || COMPILE_TEST
 	help
 	  Say Y here if you want support for the keyboard and touchpad included
 	  in the OLPC XO-1.75 and XO-4 laptops.
@@ -264,8 +253,8 @@ config SERIO_OLPC_APSP
 
 config HYPERV_KEYBOARD
 	tristate "Microsoft Synthetic Keyboard driver"
-	depends on HYPERV
-	default HYPERV
+	depends on HYPERV_VMBUS
+	default HYPERV_VMBUS
 	help
 	  Select this option to enable the Hyper-V Keyboard driver.
 

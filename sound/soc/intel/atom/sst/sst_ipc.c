@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  sst_ipc.c - Intel SST Driver for audio engine
  *
@@ -8,39 +9,29 @@
  *		KP Jeeja <jeeja.kp@intel.com>
  *  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
- *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 #include <linux/pci.h>
 #include <linux/firmware.h>
 #include <linux/sched.h>
 #include <linux/delay.h>
-#include <linux/pm_runtime.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/soc.h>
 #include <sound/compress_driver.h>
-#include <asm/intel-mid.h>
+
 #include <asm/platform_sst_audio.h>
+
 #include "../sst-mfld-platform.h"
 #include "sst.h"
-#include "../../common/sst-dsp.h"
 
 struct sst_block *sst_create_block(struct intel_sst_drv *ctx,
 					u32 msg_id, u32 drv_id)
 {
-	struct sst_block *msg = NULL;
+	struct sst_block *msg;
 
 	dev_dbg(ctx->dev, "Enter\n");
-	msg = kzalloc(sizeof(*msg), GFP_KERNEL);
+	msg = kzalloc_obj(*msg);
 	if (!msg)
 		return NULL;
 	msg->condition = false;
@@ -72,7 +63,7 @@ struct sst_block *sst_create_block(struct intel_sst_drv *ctx,
 int sst_wake_up_block(struct intel_sst_drv *ctx, int result,
 		u32 drv_id, u32 ipc, void *data, u32 size)
 {
-	struct sst_block *block = NULL;
+	struct sst_block *block;
 
 	dev_dbg(ctx->dev, "Enter\n");
 
@@ -100,7 +91,7 @@ int sst_wake_up_block(struct intel_sst_drv *ctx, int result,
 
 int sst_free_block(struct intel_sst_drv *ctx, struct sst_block *freed)
 {
-	struct sst_block *block = NULL, *__block;
+	struct sst_block *block, *__block;
 
 	dev_dbg(ctx->dev, "Enter\n");
 	spin_lock_bh(&ctx->block_lock);
@@ -137,7 +128,7 @@ int sst_post_message_mrfld(struct intel_sst_drv *sst_drv_ctx,
 		while (header.p.header_high.part.busy) {
 			if (loop_count > 25) {
 				dev_err(sst_drv_ctx->dev,
-					"sst: Busy wait failed, cant send this msg\n");
+					"sst: Busy wait failed, can't send this msg\n");
 				retval = -EBUSY;
 				goto out;
 			}
@@ -350,7 +341,7 @@ void sst_process_reply_mrfld(struct intel_sst_drv *sst_drv_ctx,
 	}
 
 	/* FW sent short error response for an IPC */
-	if (msg_high.part.result && drv_id && !msg_high.part.large) {
+	if (msg_high.part.result && !msg_high.part.large) {
 		/* 32-bit FW error code in msg_low */
 		dev_err(sst_drv_ctx->dev, "FW sent error response 0x%x", msg_low);
 		sst_wake_up_block(sst_drv_ctx, msg_high.part.result,

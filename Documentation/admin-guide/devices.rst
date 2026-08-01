@@ -1,3 +1,4 @@
+.. _admin_devices:
 
 Linux allocated devices (4.x+ version)
 ======================================
@@ -6,17 +7,16 @@ This list is the Linux Device List, the official registry of allocated
 device numbers and ``/dev`` directory nodes for the Linux operating
 system.
 
-The LaTeX version of this document is no longer maintained, nor is
-the document that used to reside at lanana.org.  This version in the
-mainline Linux kernel is the master document.  Updates shall be sent
-as patches to the kernel maintainers (see the
+The version of this document at lanana.org is no longer maintained.  This
+version in the mainline Linux kernel is the master document.  Updates
+shall be sent as patches to the kernel maintainers (see the
 :ref:`Documentation/process/submitting-patches.rst <submittingpatches>` document).
 Specifically explore the sections titled "CHAR and MISC DRIVERS", and
 "BLOCK LAYER" in the MAINTAINERS file to find the right maintainers
 to involve for character and block devices.
 
 This document is included by reference into the Filesystem Hierarchy
-Standard (FHS).	 The FHS is available from http://www.pathname.com/fhs/.
+Standard (FHS).	 The FHS is available from https://www.pathname.com/fhs/.
 
 Allocations marked (68k/Amiga) apply to Linux/68k on the Amiga
 platform only.	Allocations marked (68k/Atari) apply to Linux/68k on
@@ -97,8 +97,11 @@ It is recommended that these links exist on all systems:
 /dev/bttv0	video0		symbolic	Backward compatibility
 /dev/radio	radio0		symbolic	Backward compatibility
 /dev/i2o*	/dev/i2o/*	symbolic	Backward compatibility
-/dev/scd?	sr?		hard		Alternate SCSI CD-ROM name
 =============== =============== =============== ===============================
+
+Suggested earlier ``/dev/scd?`` alternative names for ``/dev/sr?``
+CD-ROM and other optical drives (using SCSI commands) were removed
+in ``udev`` version 174 that was released in 2011.
 
 Locally defined links
 +++++++++++++++++++++
@@ -112,7 +115,6 @@ exist, they should have the following uses.
 /dev/mouse	mouse port	symbolic	Current mouse device
 /dev/tape	tape device	symbolic	Current tape device
 /dev/cdrom	CD-ROM device	symbolic	Current CD-ROM device
-/dev/cdwriter	CD-writer	symbolic	Current CD-writer device
 /dev/scanner	scanner		symbolic	Current scanner device
 /dev/modem	modem port	symbolic	Current dialout device
 /dev/root	root device	symbolic	Current root filesystem
@@ -126,8 +128,8 @@ exists, ``/dev/modem`` should point to the appropriate primary TTY device
 
 For SCSI devices, ``/dev/tape`` and ``/dev/cdrom`` should point to the
 *cooked* devices (``/dev/st*`` and ``/dev/sr*``, respectively), whereas
-``/dev/cdwriter`` and /dev/scanner should point to the appropriate generic
-SCSI devices (/dev/sg*).
+``/dev/scanner`` should point to the appropriate generic
+SCSI device (``/dev/sg*``).
 
 ``/dev/mouse`` may point to a primary serial TTY device, a hardware mouse
 device, or a socket for a mouse driver program (e.g. ``/dev/gpmdata``).

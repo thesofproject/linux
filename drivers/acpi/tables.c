@@ -1,22 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  acpi_tables.c - ACPI Boot-Time Table Parsing
  *
  *  Copyright (C) 2001 Paul Diefenbaugh <paul.s.diefenbaugh@intel.com>
- *
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
  */
 
 /* Uncomment next line to get verbose printout */
@@ -31,10 +17,11 @@
 #include <linux/irq.h>
 #include <linux/errno.h>
 #include <linux/acpi.h>
-#include <linux/bootmem.h>
-#include <linux/earlycpio.h>
 #include <linux/memblock.h>
+#include <linux/earlycpio.h>
 #include <linux/initrd.h>
+#include <linux/security.h>
+#include <linux/kmemleak.h>
 #include "internal.h"
 
 #ifdef CONFIG_ACPI_CUSTOM_DSDT
@@ -48,13 +35,13 @@ static char *mps_inti_flags_trigger[] = { "dfl", "edge", "res", "level" };
 
 static struct acpi_table_desc initial_tables[ACPI_MAX_TABLES] __initdata;
 
-static int acpi_apic_instance __initdata;
+static int acpi_apic_instance __initdata_or_acpilib;
 
 /*
  * Disable table checksum verification for the early stage due to the size
  * limitation of the current x86 early mapping implementation.
  */
-static bool acpi_verify_table_checksum __initdata = false;
+static bool acpi_verify_table_checksum __initdata_or_acpilib = false;
 
 void acpi_table_print_madt_entry(struct acpi_subtable_header *header)
 {
@@ -69,7 +56,7 @@ void acpi_table_print_madt_entry(struct acpi_subtable_header *header)
 			    (struct acpi_madt_local_apic *)header;
 			pr_debug("LAPIC (acpi_id[0x%02x] lapic_id[0x%02x] %s)\n",
 				 p->processor_id, p->id,
-				 (p->lapic_flags & ACPI_MADT_ENABLED) ? "enabled" : "disabled");
+				 str_enabled_disabled(p->lapic_flags & ACPI_MADT_ENABLED));
 		}
 		break;
 
@@ -79,7 +66,7 @@ void acpi_table_print_madt_entry(struct acpi_subtable_header *header)
 			    (struct acpi_madt_local_x2apic *)header;
 			pr_debug("X2APIC (apic_id[0x%02x] uid[0x%02x] %s)\n",
 				 p->local_apic_id, p->uid,
-				 (p->lapic_flags & ACPI_MADT_ENABLED) ? "enabled" : "disabled");
+				 str_enabled_disabled(p->lapic_flags & ACPI_MADT_ENABLED));
 		}
 		break;
 
@@ -152,8 +139,8 @@ void acpi_table_print_madt_entry(struct acpi_subtable_header *header)
 		{
 			struct acpi_madt_local_apic_override *p =
 			    (struct acpi_madt_local_apic_override *)header;
-			pr_info("LAPIC_ADDR_OVR (address[%p])\n",
-				(void *)(unsigned long)p->address);
+			pr_info("LAPIC_ADDR_OVR (address[0x%llx])\n",
+				p->address);
 		}
 		break;
 
@@ -173,7 +160,7 @@ void acpi_table_print_madt_entry(struct acpi_subtable_header *header)
 			    (struct acpi_madt_local_sapic *)header;
 			pr_debug("LSAPIC (acpi_id[0x%02x] lsapic_id[0x%02x] lsapic_eid[0x%02x] %s)\n",
 				 p->processor_id, p->id, p->eid,
-				 (p->lapic_flags & ACPI_MADT_ENABLED) ? "enabled" : "disabled");
+				 str_enabled_disabled(p->lapic_flags & ACPI_MADT_ENABLED));
 		}
 		break;
 
@@ -196,7 +183,7 @@ void acpi_table_print_madt_entry(struct acpi_subtable_header *header)
 			pr_debug("GICC (acpi_id[0x%04x] address[%llx] MPIDR[0x%llx] %s)\n",
 				 p->uid, p->base_address,
 				 p->arm_mpidr,
-				 (p->flags & ACPI_MADT_ENABLED) ? "enabled" : "disabled");
+				 str_enabled_disabled(p->flags & ACPI_MADT_ENABLED));
 
 		}
 		break;
@@ -211,6 +198,40 @@ void acpi_table_print_madt_entry(struct acpi_subtable_header *header)
 		}
 		break;
 
+	case ACPI_MADT_TYPE_MULTIPROC_WAKEUP:
+		{
+			struct acpi_madt_multiproc_wakeup *p =
+				(struct acpi_madt_multiproc_wakeup *)header;
+			u64 reset_vector = 0;
+
+			if (p->version >= ACPI_MADT_MP_WAKEUP_VERSION_V1)
+				reset_vector = p->reset_vector;
+
+			pr_debug("MP Wakeup (version[%d], mailbox[%#llx], reset[%#llx])\n",
+				 p->version, p->mailbox_address, reset_vector);
+		}
+		break;
+
+	case ACPI_MADT_TYPE_CORE_PIC:
+		{
+			struct acpi_madt_core_pic *p = (struct acpi_madt_core_pic *)header;
+
+			pr_debug("CORE PIC (processor_id[0x%02x] core_id[0x%02x] %s)\n",
+				 p->processor_id, p->core_id,
+				 str_enabled_disabled(p->flags & ACPI_MADT_ENABLED));
+		}
+		break;
+
+	case ACPI_MADT_TYPE_RINTC:
+		{
+			struct acpi_madt_rintc *p = (struct acpi_madt_rintc *)header;
+
+			pr_debug("RISC-V INTC (acpi_uid[0x%04x] hart_id[0x%llx] %s)\n",
+				 p->uid, p->hart_id,
+				 str_enabled_disabled(p->flags & ACPI_MADT_ENABLED));
+		}
+		break;
+
 	default:
 		pr_warn("Found unsupported MADT entry (type = 0x%x)\n",
 			header->type);
@@ -218,103 +239,9 @@ void acpi_table_print_madt_entry(struct acpi_subtable_header *header)
 	}
 }
 
-/**
- * acpi_parse_entries_array - for each proc_num find a suitable subtable
- *
- * @id: table id (for debugging purposes)
- * @table_size: single entry size
- * @table_header: where does the table start?
- * @proc: array of acpi_subtable_proc struct containing entry id
- *        and associated handler with it
- * @proc_num: how big proc is?
- * @max_entries: how many entries can we process?
- *
- * For each proc_num find a subtable with proc->id and run proc->handler
- * on it. Assumption is that there's only single handler for particular
- * entry id.
- *
- * On success returns sum of all matching entries for all proc handlers.
- * Otherwise, -ENODEV or -EINVAL is returned.
- */
-static int __init
-acpi_parse_entries_array(char *id, unsigned long table_size,
-		struct acpi_table_header *table_header,
-		struct acpi_subtable_proc *proc, int proc_num,
-		unsigned int max_entries)
-{
-	struct acpi_subtable_header *entry;
-	unsigned long table_end;
-	int count = 0;
-	int errs = 0;
-	int i;
-
-	if (acpi_disabled)
-		return -ENODEV;
-
-	if (!id)
-		return -EINVAL;
-
-	if (!table_size)
-		return -EINVAL;
-
-	if (!table_header) {
-		pr_warn("%4.4s not present\n", id);
-		return -ENODEV;
-	}
-
-	table_end = (unsigned long)table_header + table_header->length;
-
-	/* Parse all entries looking for a match. */
-
-	entry = (struct acpi_subtable_header *)
-	    ((unsigned long)table_header + table_size);
-
-	while (((unsigned long)entry) + sizeof(struct acpi_subtable_header) <
-	       table_end) {
-		if (max_entries && count >= max_entries)
-			break;
-
-		for (i = 0; i < proc_num; i++) {
-			if (entry->type != proc[i].id)
-				continue;
-			if (!proc[i].handler ||
-			     (!errs && proc[i].handler(entry, table_end))) {
-				errs++;
-				continue;
-			}
-
-			proc[i].count++;
-			break;
-		}
-		if (i != proc_num)
-			count++;
-
-		/*
-		 * If entry->length is 0, break from this loop to avoid
-		 * infinite loop.
-		 */
-		if (entry->length == 0) {
-			pr_err("[%4.4s:0x%02x] Invalid zero length\n", id, proc->id);
-			return -EINVAL;
-		}
-
-		entry = (struct acpi_subtable_header *)
-		    ((unsigned long)entry + entry->length);
-	}
-
-	if (max_entries && count > max_entries) {
-		pr_warn("[%4.4s:0x%02x] found the maximum %i entries\n",
-			id, proc->id, count);
-	}
-
-	return errs ? -EINVAL : count;
-}
-
-int __init
-acpi_table_parse_entries_array(char *id,
-			 unsigned long table_size,
-			 struct acpi_subtable_proc *proc, int proc_num,
-			 unsigned int max_entries)
+int __init_or_acpilib acpi_table_parse_entries_array(
+	char *id, unsigned long table_size, struct acpi_subtable_proc *proc,
+	int proc_num, unsigned int max_entries)
 {
 	struct acpi_table_header *table_header = NULL;
 	int count;
@@ -326,40 +253,62 @@ acpi_table_parse_entries_array(char *id,
 	if (!id)
 		return -EINVAL;
 
+	if (!table_size)
+		return -EINVAL;
+
 	if (!strncmp(id, ACPI_SIG_MADT, 4))
 		instance = acpi_apic_instance;
 
 	acpi_get_table(id, instance, &table_header);
 	if (!table_header) {
-		pr_warn("%4.4s not present\n", id);
+		pr_debug("%4.4s not present\n", id);
 		return -ENODEV;
 	}
 
-	count = acpi_parse_entries_array(id, table_size, table_header,
-			proc, proc_num, max_entries);
+	count = acpi_parse_entries_array(id, table_size,
+					 (union fw_table_header *)table_header,
+					 0, proc, proc_num, max_entries);
 
 	acpi_put_table(table_header);
 	return count;
 }
 
-int __init
-acpi_table_parse_entries(char *id,
-			unsigned long table_size,
-			int entry_id,
-			acpi_tbl_entry_handler handler,
-			unsigned int max_entries)
+static int __init_or_acpilib __acpi_table_parse_entries(
+	char *id, unsigned long table_size, int entry_id,
+	acpi_tbl_entry_handler handler, acpi_tbl_entry_handler_arg handler_arg,
+	void *arg, unsigned int max_entries)
 {
 	struct acpi_subtable_proc proc = {
 		.id		= entry_id,
 		.handler	= handler,
+		.handler_arg	= handler_arg,
+		.arg		= arg,
 	};
 
 	return acpi_table_parse_entries_array(id, table_size, &proc, 1,
 						max_entries);
 }
 
-int __init
-acpi_table_parse_madt(enum acpi_madt_type id,
+int __init_or_acpilib
+acpi_table_parse_cedt(enum acpi_cedt_type id,
+		      acpi_tbl_entry_handler_arg handler_arg, void *arg)
+{
+	return __acpi_table_parse_entries(ACPI_SIG_CEDT,
+					  sizeof(struct acpi_table_cedt), id,
+					  NULL, handler_arg, arg, 0);
+}
+EXPORT_SYMBOL_ACPI_LIB(acpi_table_parse_cedt);
+
+int __init acpi_table_parse_entries(char *id, unsigned long table_size,
+				    int entry_id,
+				    acpi_tbl_entry_handler handler,
+				    unsigned int max_entries)
+{
+	return __acpi_table_parse_entries(id, table_size, entry_id, handler,
+					  NULL, NULL, max_entries);
+}
+
+int __init acpi_table_parse_madt(enum acpi_madt_type id,
 		      acpi_tbl_entry_handler handler, unsigned int max_entries)
 {
 	return acpi_table_parse_entries(ACPI_SIG_MADT,
@@ -400,7 +349,7 @@ int __init acpi_table_parse(char *id, acpi_tbl_table_handler handler)
 		return -ENODEV;
 }
 
-/* 
+/*
  * The BIOS is supposed to supply a single APIC/MADT,
  * but some report two.  Provide a knob to use either.
  * (don't you wish instance 0 and 1 were not the same?)
@@ -447,17 +396,19 @@ static u8 __init acpi_table_checksum(u8 *buffer, u32 length)
 }
 
 /* All but ACPI_SIG_RSDP and ACPI_SIG_FACS: */
-static const char * const table_sigs[] = {
-	ACPI_SIG_BERT, ACPI_SIG_CPEP, ACPI_SIG_ECDT, ACPI_SIG_EINJ,
-	ACPI_SIG_ERST, ACPI_SIG_HEST, ACPI_SIG_MADT, ACPI_SIG_MSCT,
-	ACPI_SIG_SBST, ACPI_SIG_SLIT, ACPI_SIG_SRAT, ACPI_SIG_ASF,
-	ACPI_SIG_BOOT, ACPI_SIG_DBGP, ACPI_SIG_DMAR, ACPI_SIG_HPET,
-	ACPI_SIG_IBFT, ACPI_SIG_IVRS, ACPI_SIG_MCFG, ACPI_SIG_MCHI,
-	ACPI_SIG_SLIC, ACPI_SIG_SPCR, ACPI_SIG_SPMI, ACPI_SIG_TCPA,
-	ACPI_SIG_UEFI, ACPI_SIG_WAET, ACPI_SIG_WDAT, ACPI_SIG_WDDT,
-	ACPI_SIG_WDRT, ACPI_SIG_DSDT, ACPI_SIG_FADT, ACPI_SIG_PSDT,
-	ACPI_SIG_RSDT, ACPI_SIG_XSDT, ACPI_SIG_SSDT, ACPI_SIG_IORT,
-	ACPI_SIG_NFIT, ACPI_SIG_HMAT, NULL };
+static const char table_sigs[][ACPI_NAMESEG_SIZE] __nonstring_array __initconst = {
+	ACPI_SIG_BERT, ACPI_SIG_BGRT, ACPI_SIG_CPEP, ACPI_SIG_ECDT,
+	ACPI_SIG_EINJ, ACPI_SIG_ERST, ACPI_SIG_HEST, ACPI_SIG_MADT,
+	ACPI_SIG_MSCT, ACPI_SIG_SBST, ACPI_SIG_SLIT, ACPI_SIG_SRAT,
+	ACPI_SIG_ASF,  ACPI_SIG_BOOT, ACPI_SIG_DBGP, ACPI_SIG_DMAR,
+	ACPI_SIG_HPET, ACPI_SIG_IBFT, ACPI_SIG_IVRS, ACPI_SIG_MCFG,
+	ACPI_SIG_MCHI, ACPI_SIG_SLIC, ACPI_SIG_SPCR, ACPI_SIG_SPMI,
+	ACPI_SIG_TCPA, ACPI_SIG_UEFI, ACPI_SIG_WAET, ACPI_SIG_WDAT,
+	ACPI_SIG_WDDT, ACPI_SIG_WDRT, ACPI_SIG_DSDT, ACPI_SIG_FADT,
+	ACPI_SIG_PSDT, ACPI_SIG_RSDT, ACPI_SIG_XSDT, ACPI_SIG_SSDT,
+	ACPI_SIG_IORT, ACPI_SIG_NFIT, ACPI_SIG_HMAT, ACPI_SIG_PPTT,
+	ACPI_SIG_NHLT, ACPI_SIG_AEST, ACPI_SIG_CEDT, ACPI_SIG_AGDI,
+	ACPI_SIG_NBFT, ACPI_SIG_SWFT, ACPI_SIG_MPAM};
 
 #define ACPI_HEADER_SIZE sizeof(struct acpi_table_header)
 
@@ -469,13 +420,21 @@ static DECLARE_BITMAP(acpi_initrd_installed, NR_ACPI_INITRD_TABLES);
 
 void __init acpi_table_upgrade(void)
 {
-	void *data = (void *)initrd_start;
-	size_t size = initrd_end - initrd_start;
+	void *data;
+	size_t size;
 	int sig, no, table_nr = 0, total_offset = 0;
 	long offset = 0;
 	struct acpi_table_header *table;
 	char cpio_path[32] = "kernel/firmware/acpi/";
 	struct cpio_data file;
+
+	if (IS_ENABLED(CONFIG_ACPI_TABLE_OVERRIDE_VIA_BUILTIN_INITRD)) {
+		data = __initramfs_start;
+		size = __initramfs_size;
+	} else {
+		data = (void *)initrd_start;
+		size = initrd_end - initrd_start;
+	}
 
 	if (data == NULL || size == 0)
 		return;
@@ -496,11 +455,11 @@ void __init acpi_table_upgrade(void)
 
 		table = file.data;
 
-		for (sig = 0; table_sigs[sig]; sig++)
+		for (sig = 0; sig < ARRAY_SIZE(table_sigs); sig++)
 			if (!memcmp(table->signature, table_sigs[sig], 4))
 				break;
 
-		if (!table_sigs[sig]) {
+		if (sig >= ARRAY_SIZE(table_sigs)) {
 			pr_err("ACPI OVERRIDE: Unknown signature [%s%s]\n",
 				cpio_path, file.name);
 			continue;
@@ -527,9 +486,14 @@ void __init acpi_table_upgrade(void)
 	if (table_nr == 0)
 		return;
 
+	if (security_locked_down(LOCKDOWN_ACPI_TABLES)) {
+		pr_notice("kernel is locked down, ignoring table override\n");
+		return;
+	}
+
 	acpi_tables_addr =
-		memblock_find_in_range(0, ACPI_TABLE_UPGRADE_MAX_PHYS,
-				       all_tables_size, PAGE_SIZE);
+		memblock_phys_alloc_range(all_tables_size, PAGE_SIZE,
+					  0, ACPI_TABLE_UPGRADE_MAX_PHYS);
 	if (!acpi_tables_addr) {
 		WARN_ON(1);
 		return;
@@ -544,8 +508,9 @@ void __init acpi_table_upgrade(void)
 	 * Both memblock_reserve and e820__range_add (via arch_reserve_mem_area)
 	 * works fine.
 	 */
-	memblock_reserve(acpi_tables_addr, all_tables_size);
 	arch_reserve_mem_area(acpi_tables_addr, all_tables_size);
+
+	kmemleak_ignore_phys(acpi_tables_addr);
 
 	/*
 	 * early_ioremap only can remap 256k one time. If we map all
@@ -658,15 +623,15 @@ static void __init acpi_table_initrd_scan(void)
 		table_length = table->length;
 
 		/* Skip RSDT/XSDT which should only be used for override */
-		if (ACPI_COMPARE_NAME(table->signature, ACPI_SIG_RSDT) ||
-		    ACPI_COMPARE_NAME(table->signature, ACPI_SIG_XSDT)) {
+		if (ACPI_COMPARE_NAMESEG(table->signature, ACPI_SIG_RSDT) ||
+		    ACPI_COMPARE_NAMESEG(table->signature, ACPI_SIG_XSDT)) {
 			acpi_os_unmap_memory(table, ACPI_HEADER_SIZE);
 			goto next_table;
 		}
 		/*
 		 * Mark the table to avoid being used in
 		 * acpi_table_initrd_override(). Though this is not possible
-		 * because override is disabled in acpi_install_table().
+		 * because override is disabled in acpi_install_physical_table().
 		 */
 		if (test_and_set_bit(table_index, acpi_initrd_installed)) {
 			acpi_os_unmap_memory(table, ACPI_HEADER_SIZE);
@@ -677,7 +642,7 @@ static void __init acpi_table_initrd_scan(void)
 			table->signature, table->oem_id,
 			table->oem_table_id);
 		acpi_os_unmap_memory(table, ACPI_HEADER_SIZE);
-		acpi_install_table(acpi_tables_addr + table_offset, TRUE);
+		acpi_install_physical_table(acpi_tables_addr + table_offset);
 next_table:
 		table_offset += table_length;
 		table_index++;
@@ -708,8 +673,12 @@ acpi_os_physical_table_override(struct acpi_table_header *existing_table,
 					  table_length);
 }
 
-acpi_status
-acpi_os_table_override(struct acpi_table_header *existing_table,
+#ifdef CONFIG_ACPI_CUSTOM_DSDT
+static void *amlcode __attribute__ ((weakref("AmlCode")));
+static void *dsdt_amlcode __attribute__ ((weakref("dsdt_aml_code")));
+#endif
+
+acpi_status acpi_os_table_override(struct acpi_table_header *existing_table,
 		       struct acpi_table_header **new_table)
 {
 	if (!existing_table || !new_table)
@@ -718,8 +687,11 @@ acpi_os_table_override(struct acpi_table_header *existing_table,
 	*new_table = NULL;
 
 #ifdef CONFIG_ACPI_CUSTOM_DSDT
-	if (strncmp(existing_table->signature, "DSDT", 4) == 0)
-		*new_table = (struct acpi_table_header *)AmlCode;
+	if (!strncmp(existing_table->signature, "DSDT", 4)) {
+		*new_table = (struct acpi_table_header *)&amlcode;
+		if (!(*new_table))
+			*new_table = (struct acpi_table_header *)&dsdt_amlcode;
+	}
 #endif
 	if (*new_table != NULL)
 		acpi_table_taint(existing_table);
@@ -727,15 +699,14 @@ acpi_os_table_override(struct acpi_table_header *existing_table,
 }
 
 /*
- * acpi_table_init()
+ * acpi_locate_initial_tables()
  *
- * find RSDP, find and checksum SDT/XSDT.
- * checksum all tables, print SDT/XSDT
+ * Get the RSDP, then find and checksum all the ACPI tables.
  *
- * result: sdt_entry[] is initialized
+ * result: initial_tables[] is initialized, and points to
+ * a list of ACPI tables.
  */
-
-int __init acpi_table_init(void)
+int __init acpi_locate_initial_tables(void)
 {
 	acpi_status status;
 
@@ -748,11 +719,51 @@ int __init acpi_table_init(void)
 	}
 
 	status = acpi_initialize_tables(initial_tables, ACPI_MAX_TABLES, 0);
-	if (ACPI_FAILURE(status))
-		return -EINVAL;
-	acpi_table_initrd_scan();
+	if (ACPI_FAILURE(status)) {
+		const char *msg = acpi_format_exception(status);
 
+		pr_warn("Failed to initialize tables, status=0x%x (%s)", status, msg);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+void __init acpi_reserve_initial_tables(void)
+{
+	int i;
+
+	for (i = 0; i < ACPI_MAX_TABLES; i++) {
+		struct acpi_table_desc *table_desc = &initial_tables[i];
+		u64 start = table_desc->address;
+		u64 size = table_desc->length;
+
+		if (!start || !size)
+			break;
+
+		pr_info("Reserving %4s table memory at [mem 0x%llx-0x%llx]\n",
+			table_desc->signature.ascii, start, start + size - 1);
+
+		memblock_reserve(start, size);
+	}
+}
+
+void __init acpi_table_init_complete(void)
+{
+	acpi_table_initrd_scan();
 	check_multiple_madt();
+}
+
+int __init acpi_table_init(void)
+{
+	int ret;
+
+	ret = acpi_locate_initial_tables();
+	if (ret)
+		return ret;
+
+	acpi_table_init_complete();
+
 	return 0;
 }
 
@@ -768,7 +779,6 @@ static int __init acpi_parse_apic_instance(char *str)
 
 	return 0;
 }
-
 early_param("acpi_apic_instance", acpi_parse_apic_instance);
 
 static int __init acpi_force_table_verification_setup(char *s)
@@ -777,7 +787,6 @@ static int __init acpi_force_table_verification_setup(char *s)
 
 	return 0;
 }
-
 early_param("acpi_force_table_verification", acpi_force_table_verification_setup);
 
 static int __init acpi_force_32bit_fadt_addr(char *s)
@@ -787,5 +796,4 @@ static int __init acpi_force_32bit_fadt_addr(char *s)
 
 	return 0;
 }
-
 early_param("acpi_force_32bit_fadt_addr", acpi_force_32bit_fadt_addr);

@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * acpi_lpat.c - LPAT table processing functions
  *
  * Copyright (C) 2015 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/export.h>
@@ -22,7 +14,7 @@
  * LPAT conversion table
  *
  * @lpat_table: the temperature_raw mapping table structure
- * @raw: the raw value, used as a key to get the temerature from the
+ * @raw: the raw value, used as a key to get the temperature from the
  *       above mapping table
  *
  * A positive converted temperature value will be returned on success,
@@ -112,7 +104,7 @@ struct acpi_lpat_conversion_table *acpi_lpat_get_conversion_table(acpi_handle
 	    (obj_p->package.count % 2) || (obj_p->package.count < 4))
 		goto out;
 
-	lpat = kcalloc(obj_p->package.count, sizeof(int), GFP_KERNEL);
+	lpat = kzalloc_objs(int, obj_p->package.count);
 	if (!lpat)
 		goto out;
 
@@ -125,7 +117,7 @@ struct acpi_lpat_conversion_table *acpi_lpat_get_conversion_table(acpi_handle
 		lpat[i] = (s64)obj_e->integer.value;
 	}
 
-	lpat_table = kzalloc(sizeof(*lpat_table), GFP_KERNEL);
+	lpat_table = kzalloc_obj(*lpat_table);
 	if (!lpat_table) {
 		kfree(lpat);
 		goto out;

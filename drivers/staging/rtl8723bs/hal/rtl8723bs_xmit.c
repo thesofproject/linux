@@ -1,21 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2012 Realtek Corporation. All rights reserved.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
- *
  ******************************************************************************/
-#define _RTL8723BS_XMIT_C_
 
 #include <drv_types.h>
-#include <rtw_debug.h>
 #include <rtl8723b_hal.h>
 
 static u8 rtw_sdio_wait_enough_TxOQT_space(struct adapter *padapter, u8 agg_num)
@@ -25,29 +15,20 @@ static u8 rtw_sdio_wait_enough_TxOQT_space(struct adapter *padapter, u8 agg_num)
 
 	while (pHalData->SdioTxOQTFreeSpace < agg_num) {
 		if (
-			(padapter->bSurpriseRemoved == true) ||
-			(padapter->bDriverStopped == true)
-		) {
-			DBG_871X("%s: bSurpriseRemoved or bDriverStopped (wait TxOQT)\n", __func__);
+			(padapter->bSurpriseRemoved) ||
+			(padapter->bDriverStopped)
+		)
 			return false;
-		}
 
 		HalQueryTxOQTBufferStatus8723BSdio(padapter);
 
 		if ((++n % 60) == 0) {
-			if ((n % 300) == 0) {
-				DBG_871X("%s(%d): QOT free space(%d), agg_num: %d\n",
-				__func__, n, pHalData->SdioTxOQTFreeSpace, agg_num);
-			}
 			msleep(1);
 			/* yield(); */
 		}
 	}
 
 	pHalData->SdioTxOQTFreeSpace -= agg_num;
-
-	/* if (n > 1) */
-	/* 	++priv->pshare->nr_out_of_txoqt_space; */
 
 	return true;
 }
@@ -66,12 +47,12 @@ static s32 rtl8723_dequeue_writeport(struct adapter *padapter)
 
 	ret = ret || check_fwstate(pmlmepriv, _FW_UNDER_SURVEY);
 
-	if (true == ret)
+	if (ret)
 		pxmitbuf = dequeue_pending_xmitbuf_under_survey(pxmitpriv);
 	else
 		pxmitbuf = dequeue_pending_xmitbuf(pxmitpriv);
 
-	if (pxmitbuf == NULL)
+	if (!pxmitbuf)
 		return true;
 
 	deviceId = ffaddr2deviceId(pdvobjpriv, pxmitbuf->ff_hwaddr);
@@ -93,9 +74,9 @@ static s32 rtl8723_dequeue_writeport(struct adapter *padapter)
 
 query_free_page:
 	/*  check if hardware tx fifo page is enough */
-	if (false == rtw_hal_sdio_query_tx_freepage(pri_padapter, PageIdx, pxmitbuf->pg_num)) {
+	if (!rtw_hal_sdio_query_tx_freepage(pri_padapter, PageIdx, pxmitbuf->pg_num)) {
 		if (!bUpdatePageNum) {
-			/*  Total number of page is NOT available, so update current FIFO status */
+			/* Total page count is not available, so update current FIFO status */
 			HalQueryTxBufferStatus8723BSdio(padapter);
 			bUpdatePageNum = true;
 			goto query_free_page;
@@ -107,18 +88,12 @@ query_free_page:
 	}
 
 	if (
-		(padapter->bSurpriseRemoved == true) ||
-		(padapter->bDriverStopped == true)
-	) {
-		RT_TRACE(
-			_module_hal_xmit_c_,
-			_drv_notice_,
-			("%s: bSurpriseRemoved(write port)\n", __func__)
-		);
+		(padapter->bSurpriseRemoved) ||
+		(padapter->bDriverStopped)
+	)
 		goto free_xmitbuf;
-	}
 
-	if (rtw_sdio_wait_enough_TxOQT_space(padapter, pxmitbuf->agg_num) == false)
+	if (!rtw_sdio_wait_enough_TxOQT_space(padapter, pxmitbuf->agg_num))
 		goto free_xmitbuf;
 
 	traffic_check_for_leave_lps(padapter, true, pxmitbuf->agg_num);
@@ -131,10 +106,6 @@ free_xmitbuf:
 	/* rtw_free_xmitframe(pxmitpriv, pframe); */
 	/* pxmitbuf->priv_data = NULL; */
 	rtw_free_xmitbuf(pxmitpriv, pxmitbuf);
-
-#ifdef CONFIG_SDIO_TX_TASKLET
-	tasklet_hi_schedule(&pxmitpriv->xmit_tasklet);
-#endif
 
 	return _FAIL;
 }
@@ -149,36 +120,23 @@ free_xmitbuf:
  */
 s32 rtl8723bs_xmit_buf_handler(struct adapter *padapter)
 {
-	struct xmit_priv *pxmitpriv;
+	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
 	u8 queue_empty, queue_pending;
 	s32 ret;
 
-
-	pxmitpriv = &padapter->xmitpriv;
-
-	if (down_interruptible(&pxmitpriv->xmit_sema)) {
-		DBG_871X_LEVEL(_drv_emerg_, "%s: down SdioXmitBufSema fail!\n", __func__);
+	if (wait_for_completion_interruptible(&pxmitpriv->xmit_comp)) {
+		netdev_emerg(padapter->pnetdev,
+			     "%s: down SdioXmitBufSema fail!\n", __func__);
 		return _FAIL;
 	}
 
-	ret = (padapter->bDriverStopped == true) || (padapter->bSurpriseRemoved == true);
-	if (ret) {
-		RT_TRACE(
-			_module_hal_xmit_c_,
-			_drv_err_,
-			(
-				"%s: bDriverStopped(%d) bSurpriseRemoved(%d)!\n",
-				__func__,
-				padapter->bDriverStopped,
-				padapter->bSurpriseRemoved
-			)
-		);
+	ret = (padapter->bDriverStopped) || (padapter->bSurpriseRemoved);
+	if (ret)
 		return _FAIL;
-	}
 
 	queue_pending = check_pending_xmitbuf(pxmitpriv);
 
-	if (queue_pending == false)
+	if (!queue_pending)
 		return _SUCCESS;
 
 	ret = rtw_register_tx_alive(padapter);
@@ -188,7 +146,7 @@ s32 rtl8723bs_xmit_buf_handler(struct adapter *padapter)
 
 	do {
 		queue_empty = rtl8723_dequeue_writeport(padapter);
-/* 	dump secondary adapter xmitbuf */
+/*	dump secondary adapter xmitbuf */
 	} while (!queue_empty);
 
 	rtw_unregister_tx_alive(padapter);
@@ -210,9 +168,9 @@ static s32 xmit_xmitframes(struct adapter *padapter, struct xmit_priv *pxmitpriv
 	s32 err, ret;
 	u32 k = 0;
 	struct hw_xmit *hwxmits, *phwxmit;
-	u8 no_res, idx, hwentry;
+	u8 idx, hwentry;
 	struct tx_servq *ptxservq;
-	struct list_head *sta_plist, *sta_phead, *frame_plist, *frame_phead;
+	struct list_head *sta_plist, *sta_phead, *frame_plist, *frame_phead, *tmp;
 	struct xmit_frame *pxmitframe;
 	struct __queue *pframe_queue;
 	struct xmit_buf *pxmitbuf;
@@ -221,7 +179,6 @@ static s32 xmit_xmitframes(struct adapter *padapter, struct xmit_priv *pxmitpriv
 	int inx[4];
 
 	err = 0;
-	no_res = false;
 	hwxmits = pxmitpriv->hwxmits;
 	hwentry = pxmitpriv->hwxmit_entry;
 	ptxservq = NULL;
@@ -244,8 +201,8 @@ static s32 xmit_xmitframes(struct adapter *padapter, struct xmit_priv *pxmitpriv
 		phwxmit = hwxmits + inx[idx];
 
 		if (
-			(check_pending_xmitbuf(pxmitpriv) == true) &&
-			(padapter->mlmepriv.LinkDetectInfo.bHigherBusyTxTraffic == true)
+			(check_pending_xmitbuf(pxmitpriv)) &&
+			(padapter->mlmepriv.link_detect_info.higher_busy_tx_traffic)
 		) {
 			if ((phwxmit->accnt > 0) && (phwxmit->accnt < 5)) {
 				err = -2;
@@ -258,49 +215,32 @@ static s32 xmit_xmitframes(struct adapter *padapter, struct xmit_priv *pxmitpriv
 		spin_lock_bh(&pxmitpriv->lock);
 
 		sta_phead = get_list_head(phwxmit->sta_queue);
-		sta_plist = get_next(sta_phead);
 		/* because stop_sta_xmit may delete sta_plist at any time */
 		/* so we should add lock here, or while loop can not exit */
-		while (sta_phead != sta_plist) {
-			ptxservq = LIST_CONTAINOR(sta_plist, struct tx_servq, tx_pending);
-			sta_plist = get_next(sta_plist);
+		list_for_each_safe(sta_plist, tmp, sta_phead) {
+			ptxservq = list_entry(sta_plist, struct tx_servq,
+					      tx_pending);
 
-#ifdef DBG_XMIT_BUF
-			DBG_871X(
-				"%s idx:%d hwxmit_pkt_num:%d ptxservq_pkt_num:%d\n",
-				__func__,
-				idx,
-				phwxmit->accnt,
-				ptxservq->qcnt
-			);
-			DBG_871X(
-				"%s free_xmit_extbuf_cnt =%d free_xmitbuf_cnt =%d free_xmitframe_cnt =%d\n",
-				__func__,
-				pxmitpriv->free_xmit_extbuf_cnt,
-				pxmitpriv->free_xmitbuf_cnt,
-				pxmitpriv->free_xmitframe_cnt
-			);
-#endif
 			pframe_queue = &ptxservq->sta_pending;
 
 			frame_phead = get_list_head(pframe_queue);
 
-			while (list_empty(frame_phead) == false) {
+			while (!list_empty(frame_phead)) {
 				frame_plist = get_next(frame_phead);
-				pxmitframe = LIST_CONTAINOR(frame_plist, struct xmit_frame, list);
+				pxmitframe = container_of(frame_plist, struct xmit_frame, list);
 
 				/*  check xmit_buf size enough or not */
 				txlen = txdesc_size + rtw_wlan_pkt_size(pxmitframe);
-				if (
-					(NULL == pxmitbuf) ||
+				if (!pxmitbuf ||
 					((_RND(pxmitbuf->len, 8) + txlen) > max_xmit_len) ||
-					(k >= (rtw_hal_sdio_max_txoqt_free_space(padapter)-1))
+					(k >= (rtw_hal_sdio_max_txoqt_free_space(padapter) - 1))
 				) {
 					if (pxmitbuf) {
 						/* pxmitbuf->priv_data will be NULL, and will crash here */
 						if (pxmitbuf->len > 0 &&
 						    pxmitbuf->priv_data) {
 							struct xmit_frame *pframe;
+
 							pframe = (struct xmit_frame *)pxmitbuf->priv_data;
 							pframe->agg_num = k;
 							pxmitbuf->agg_num = k;
@@ -315,31 +255,21 @@ static s32 xmit_xmitframes(struct adapter *padapter, struct xmit_priv *pxmitpriv
 					}
 
 					pxmitbuf = rtw_alloc_xmitbuf(pxmitpriv);
-					if (pxmitbuf == NULL) {
-#ifdef DBG_XMIT_BUF
-						DBG_871X_LEVEL(_drv_err_, "%s: xmit_buf is not enough!\n", __func__);
-#endif
+					if (!pxmitbuf) {
 						err = -2;
-						up(&(pxmitpriv->xmit_sema));
+						complete(&(pxmitpriv->xmit_comp));
 						break;
 					}
 					k = 0;
 				}
 
 				/*  ok to send, remove frame from queue */
-				if (check_fwstate(&padapter->mlmepriv, WIFI_AP_STATE) == true) {
+				if (check_fwstate(&padapter->mlmepriv, WIFI_AP_STATE))
 					if (
 						(pxmitframe->attrib.psta->state & WIFI_SLEEP_STATE) &&
 						(pxmitframe->attrib.triggered == 0)
-					) {
-						DBG_871X(
-							"%s: one not triggered pkt in queue when this STA sleep,"
-							" break and goto next sta\n",
-							__func__
-						);
+					)
 						break;
-					}
-				}
 
 				list_del_init(&pxmitframe->list);
 				ptxservq->qcnt--;
@@ -355,8 +285,10 @@ static s32 xmit_xmitframes(struct adapter *padapter, struct xmit_priv *pxmitpriv
 				pxmitframe->buf_addr = pxmitbuf->ptail;
 
 				ret = rtw_xmitframe_coalesce(padapter, pxmitframe->pkt, pxmitframe);
-				if (ret == _FAIL) {
-					DBG_871X_LEVEL(_drv_err_, "%s: coalesce FAIL!", __func__);
+				if (ret != _SUCCESS) {
+					netdev_err(padapter->pnetdev,
+						   "%s: coalesce failed with error %d\n",
+						   __func__, ret);
 					/*  Todo: error handler */
 				} else {
 					k++;
@@ -365,10 +297,8 @@ static s32 xmit_xmitframes(struct adapter *padapter, struct xmit_priv *pxmitpriv
 					rtw_count_tx_stats(padapter, pxmitframe, pxmitframe->attrib.last_txcmdsz);
 
 					txlen = txdesc_size + pxmitframe->attrib.last_txcmdsz;
-					pxmitframe->pg_num = (txlen + 127)/128;
-					pxmitbuf->pg_num += (txlen + 127)/128;
-				    /* if (k != 1) */
-					/* 	((struct xmit_frame*)pxmitbuf->priv_data)->pg_num += pxmitframe->pg_num; */
+					pxmitframe->pg_num = (txlen + 127) / 128;
+					pxmitbuf->pg_num += (txlen + 127) / 128;
 					pxmitbuf->ptail += _RND(txlen, 8); /*  round to 8 bytes alignment */
 					pxmitbuf->len = _RND(pxmitbuf->len, 8) + txlen;
 				}
@@ -388,10 +318,9 @@ static s32 xmit_xmitframes(struct adapter *padapter, struct xmit_priv *pxmitpriv
 
 		/*  dump xmit_buf to hw tx fifo */
 		if (pxmitbuf) {
-			RT_TRACE(_module_hal_xmit_c_, _drv_info_, ("pxmitbuf->len =%d enqueue\n", pxmitbuf->len));
-
 			if (pxmitbuf->len > 0) {
 				struct xmit_frame *pframe;
+
 				pframe = (struct xmit_frame *)pxmitbuf->priv_data;
 				pframe->agg_num = k;
 				pxmitbuf->agg_num = k;
@@ -422,34 +351,21 @@ static s32 xmit_xmitframes(struct adapter *padapter, struct xmit_priv *pxmitpriv
  */
 static s32 rtl8723bs_xmit_handler(struct adapter *padapter)
 {
-	struct xmit_priv *pxmitpriv;
+	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
 	s32 ret;
 
-
-	pxmitpriv = &padapter->xmitpriv;
-
-	if (down_interruptible(&pxmitpriv->SdioXmitSema)) {
-		DBG_871X_LEVEL(_drv_emerg_, "%s: down sema fail!\n", __func__);
+	if (wait_for_completion_interruptible(&pxmitpriv->SdioXmitStart)) {
+		netdev_emerg(padapter->pnetdev, "%s: SdioXmitStart fail!\n",
+			     __func__);
 		return _FAIL;
 	}
 
 next:
 	if (
-		(padapter->bDriverStopped == true) ||
-		(padapter->bSurpriseRemoved == true)
-	) {
-		RT_TRACE(
-			_module_hal_xmit_c_,
-			_drv_notice_,
-			(
-				"%s: bDriverStopped(%d) bSurpriseRemoved(%d)\n",
-				__func__,
-				padapter->bDriverStopped,
-				padapter->bSurpriseRemoved
-			)
-		);
+		(padapter->bDriverStopped) ||
+		(padapter->bSurpriseRemoved)
+	)
 		return _FAIL;
-	}
 
 	spin_lock_bh(&pxmitpriv->lock);
 	ret = rtw_txframes_pending(padapter);
@@ -474,46 +390,30 @@ next:
 	spin_lock_bh(&pxmitpriv->lock);
 	ret = rtw_txframes_pending(padapter);
 	spin_unlock_bh(&pxmitpriv->lock);
-	if (ret == 1) {
+	if (ret == 1)
 		goto next;
-	}
 
 	return _SUCCESS;
 }
 
 int rtl8723bs_xmit_thread(void *context)
 {
-	s32 ret;
-	struct adapter *padapter;
-	struct xmit_priv *pxmitpriv;
-	u8 thread_name[20] = "RTWHALXT";
+	s32 ret = _SUCCESS;
+	struct adapter *padapter = context;
+	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
 
-
-	ret = _SUCCESS;
-	padapter = context;
-	pxmitpriv = &padapter->xmitpriv;
-
-	rtw_sprintf(thread_name, 20, "%s-"ADPT_FMT, thread_name, ADPT_ARG(padapter));
-	thread_enter(thread_name);
-
-	DBG_871X("start "FUNC_ADPT_FMT"\n", FUNC_ADPT_ARG(padapter));
-
-	/*  For now, no one would down sema to check thread is running, */
-	/*  so mark this temporary, Lucas@20130820 */
-/* 	up(&pxmitpriv->SdioXmitTerminateSema); */
+	allow_signal(SIGTERM);
 
 	do {
 		ret = rtl8723bs_xmit_handler(padapter);
 		if (signal_pending(current)) {
 			flush_signals(current);
 		}
-	} while (_SUCCESS == ret);
+	} while (ret == _SUCCESS);
 
-	up(&pxmitpriv->SdioXmitTerminateSema);
+	complete(&pxmitpriv->SdioXmitTerminate);
 
-	RT_TRACE(_module_hal_xmit_c_, _drv_notice_, ("-%s\n", __func__));
-
-	thread_exit();
+	return 0;
 }
 
 s32 rtl8723bs_mgnt_xmit(
@@ -521,22 +421,17 @@ s32 rtl8723bs_mgnt_xmit(
 )
 {
 	s32 ret = _SUCCESS;
-	struct pkt_attrib *pattrib;
-	struct xmit_buf *pxmitbuf;
+	struct pkt_attrib *pattrib = &pmgntframe->attrib;
+	struct xmit_buf *pxmitbuf = pmgntframe->pxmitbuf;
 	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
 	struct dvobj_priv *pdvobjpriv = adapter_to_dvobj(padapter);
 	u8 *pframe = (u8 *)(pmgntframe->buf_addr) + TXDESC_OFFSET;
 	u8 txdesc_size = TXDESC_SIZE;
 
-	RT_TRACE(_module_hal_xmit_c_, _drv_info_, ("+%s\n", __func__));
-
-	pattrib = &pmgntframe->attrib;
-	pxmitbuf = pmgntframe->pxmitbuf;
-
 	rtl8723b_update_txdesc(pmgntframe, pmgntframe->buf_addr);
 
 	pxmitbuf->len = txdesc_size + pattrib->last_txcmdsz;
-	pxmitbuf->pg_num = (pxmitbuf->len + 127)/128; /*  128 is tx page size */
+	pxmitbuf->pg_num = (pxmitbuf->len + 127) / 128; /*  128 is tx page size */
 	pxmitbuf->ptail = pmgntframe->buf_addr + pxmitbuf->len;
 	pxmitbuf->ff_hwaddr = rtw_get_ff_hwaddr(pmgntframe);
 
@@ -563,8 +458,8 @@ s32 rtl8723bs_mgnt_xmit(
  *Handle xmitframe(packet) come from rtw_xmit()
  *
  * Return:
- *true	dump packet directly ok
- *false	enqueue, temporary can't transmit packets to hardware
+ * true      dump packet directly ok
+ * false     enqueue, temporary can't transmit packets to hardware
  */
 s32 rtl8723bs_hal_xmit(
 	struct adapter *padapter, struct xmit_frame *pxmitframe
@@ -572,7 +467,6 @@ s32 rtl8723bs_hal_xmit(
 {
 	struct xmit_priv *pxmitpriv;
 	s32 err;
-
 
 	pxmitframe->attrib.qsel = pxmitframe->attrib.priority;
 	pxmitpriv = &padapter->xmitpriv;
@@ -583,22 +477,21 @@ s32 rtl8723bs_hal_xmit(
 		(pxmitframe->attrib.ether_type != 0x888e) &&
 		(pxmitframe->attrib.dhcp_pkt != 1)
 	) {
-		if (padapter->mlmepriv.LinkDetectInfo.bBusyTraffic == true)
+		if (padapter->mlmepriv.link_detect_info.busy_traffic)
 			rtw_issue_addbareq_cmd(padapter, pxmitframe);
 	}
 
 	spin_lock_bh(&pxmitpriv->lock);
 	err = rtw_xmitframe_enqueue(padapter, pxmitframe);
 	spin_unlock_bh(&pxmitpriv->lock);
-	if (err != _SUCCESS) {
-		RT_TRACE(_module_hal_xmit_c_, _drv_err_, ("rtl8723bs_hal_xmit: enqueue xmitframe fail\n"));
+	if (err) {
 		rtw_free_xmitframe(pxmitpriv, pxmitframe);
 
 		pxmitpriv->tx_drop++;
 		return true;
 	}
 
-	up(&pxmitpriv->SdioXmitSema);
+	complete(&pxmitpriv->SdioXmitStart);
 
 	return false;
 }
@@ -611,16 +504,12 @@ s32	rtl8723bs_hal_xmitframe_enqueue(
 	s32 err;
 
 	err = rtw_xmitframe_enqueue(padapter, pxmitframe);
-	if (err != _SUCCESS) {
+	if (err) {
 		rtw_free_xmitframe(pxmitpriv, pxmitframe);
 
 		pxmitpriv->tx_drop++;
 	} else {
-#ifdef CONFIG_SDIO_TX_TASKLET
-		tasklet_hi_schedule(&pxmitpriv->xmit_tasklet);
-#else
-		up(&pxmitpriv->SdioXmitSema);
-#endif
+		complete(&pxmitpriv->SdioXmitStart);
 	}
 
 	return err;
@@ -638,29 +527,23 @@ s32 rtl8723bs_init_xmit_priv(struct adapter *padapter)
 	struct xmit_priv *xmitpriv = &padapter->xmitpriv;
 	struct hal_com_data *phal;
 
-
 	phal = GET_HAL_DATA(padapter);
 
 	spin_lock_init(&phal->SdioTxFIFOFreePageLock);
-	sema_init(&xmitpriv->SdioXmitSema, 0);
-	sema_init(&xmitpriv->SdioXmitTerminateSema, 0);
+	init_completion(&xmitpriv->SdioXmitStart);
+	init_completion(&xmitpriv->SdioXmitTerminate);
 
 	return _SUCCESS;
 }
 
 void rtl8723bs_free_xmit_priv(struct adapter *padapter)
 {
-	struct hal_com_data *phal;
-	struct xmit_priv *pxmitpriv;
+	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
 	struct xmit_buf *pxmitbuf;
-	struct __queue *pqueue;
+	struct __queue *pqueue = &pxmitpriv->pending_xmitbuf_queue;
 	struct list_head *plist, *phead;
 	struct list_head tmplist;
 
-
-	phal = GET_HAL_DATA(padapter);
-	pxmitpriv = &padapter->xmitpriv;
-	pqueue = &pxmitpriv->pending_xmitbuf_queue;
 	phead = get_list_head(pqueue);
 	INIT_LIST_HEAD(&tmplist);
 
@@ -674,11 +557,11 @@ void rtl8723bs_free_xmit_priv(struct adapter *padapter)
 	spin_unlock_bh(&pqueue->lock);
 
 	phead = &tmplist;
-	while (list_empty(phead) == false) {
+	while (!list_empty(phead)) {
 		plist = get_next(phead);
 		list_del_init(plist);
 
-		pxmitbuf = LIST_CONTAINOR(plist, struct xmit_buf, list);
+		pxmitbuf = container_of(plist, struct xmit_buf, list);
 		rtw_free_xmitframe(pxmitpriv, (struct xmit_frame *)pxmitbuf->priv_data);
 		pxmitbuf->priv_data = NULL;
 		rtw_free_xmitbuf(pxmitpriv, pxmitbuf);

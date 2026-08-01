@@ -1,20 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Hisilicon's Hi6220 mailbox driver
  *
- * Copyright (c) 2015 Hisilicon Limited.
+ * Copyright (c) 2015 HiSilicon Limited.
  * Copyright (c) 2015 Linaro Limited.
  *
  * Author: Leo Yan <leo.yan@linaro.org>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/device.h>
@@ -24,6 +15,7 @@
 #include <linux/kfifo.h>
 #include <linux/mailbox_controller.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
@@ -87,12 +79,12 @@ struct hi6220_mbox {
 	/* region for mailbox */
 	void __iomem *base;
 
-	unsigned int chan_num;
-	struct hi6220_mbox_chan *mchan;
-
 	void *irq_map_chan[MBOX_CHAN_MAX];
 	struct mbox_chan *chan;
 	struct mbox_controller controller;
+
+	unsigned int chan_num;
+	struct hi6220_mbox_chan mchan[] __counted_by(chan_num);
 };
 
 static void mbox_set_state(struct hi6220_mbox *mbox,
@@ -273,22 +265,17 @@ static int hi6220_mbox_probe(struct platform_device *pdev)
 	struct device_node *node = pdev->dev.of_node;
 	struct device *dev = &pdev->dev;
 	struct hi6220_mbox *mbox;
-	struct resource *res;
 	int i, err;
 
-	mbox = devm_kzalloc(dev, sizeof(*mbox), GFP_KERNEL);
+	mbox = devm_kzalloc(dev, struct_size(mbox, mchan, MBOX_CHAN_MAX), GFP_KERNEL);
 	if (!mbox)
 		return -ENOMEM;
 
-	mbox->dev = dev;
 	mbox->chan_num = MBOX_CHAN_MAX;
-	mbox->mchan = devm_kzalloc(dev,
-		mbox->chan_num * sizeof(*mbox->mchan), GFP_KERNEL);
-	if (!mbox->mchan)
-		return -ENOMEM;
+	mbox->dev = dev;
 
-	mbox->chan = devm_kzalloc(dev,
-		mbox->chan_num * sizeof(*mbox->chan), GFP_KERNEL);
+	mbox->chan = devm_kcalloc(dev,
+		mbox->chan_num, sizeof(*mbox->chan), GFP_KERNEL);
 	if (!mbox->chan)
 		return -ENOMEM;
 
@@ -296,15 +283,13 @@ static int hi6220_mbox_probe(struct platform_device *pdev)
 	if (mbox->irq < 0)
 		return mbox->irq;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	mbox->ipc = devm_ioremap_resource(dev, res);
+	mbox->ipc = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(mbox->ipc)) {
 		dev_err(dev, "ioremap ipc failed\n");
 		return PTR_ERR(mbox->ipc);
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	mbox->base = devm_ioremap_resource(dev, res);
+	mbox->base = devm_platform_ioremap_resource(pdev, 1);
 	if (IS_ERR(mbox->base)) {
 		dev_err(dev, "ioremap buffer failed\n");
 		return PTR_ERR(mbox->base);
@@ -337,10 +322,7 @@ static int hi6220_mbox_probe(struct platform_device *pdev)
 	writel(~0x0, ACK_INT_CLR_REG(mbox->ipc));
 
 	/* use interrupt for tx's ack */
-	if (of_find_property(node, "hi6220,mbox-tx-noirq", NULL))
-		mbox->tx_irq_mode = false;
-	else
-		mbox->tx_irq_mode = true;
+	mbox->tx_irq_mode = !of_property_read_bool(node, "hi6220,mbox-tx-noirq");
 
 	if (mbox->tx_irq_mode)
 		mbox->controller.txdone_irq = true;
@@ -349,7 +331,7 @@ static int hi6220_mbox_probe(struct platform_device *pdev)
 		mbox->controller.txpoll_period = 5;
 	}
 
-	err = mbox_controller_register(&mbox->controller);
+	err = devm_mbox_controller_register(dev, &mbox->controller);
 	if (err) {
 		dev_err(dev, "Failed to register mailbox %d\n", err);
 		return err;
@@ -360,22 +342,12 @@ static int hi6220_mbox_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int hi6220_mbox_remove(struct platform_device *pdev)
-{
-	struct hi6220_mbox *mbox = platform_get_drvdata(pdev);
-
-	mbox_controller_unregister(&mbox->controller);
-	return 0;
-}
-
 static struct platform_driver hi6220_mbox_driver = {
 	.driver = {
 		.name = "hi6220-mbox",
-		.owner = THIS_MODULE,
 		.of_match_table = hi6220_mbox_of_match,
 	},
 	.probe	= hi6220_mbox_probe,
-	.remove	= hi6220_mbox_remove,
 };
 
 static int __init hi6220_mbox_init(void)

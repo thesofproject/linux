@@ -50,7 +50,7 @@ static DEFINE_SPINLOCK(gemini_clk_lock);
 #define PCI_DLL_TAP_SEL_MASK		0x1f
 
 /**
- * struct gemini_data_data - Gemini gated clocks
+ * struct gemini_gate_data - Gemini gated clocks
  * @bit_idx: the bit used to gate this clock in the clock register
  * @name: the clock name
  * @parent_name: the name of the parent clock
@@ -67,12 +67,10 @@ struct gemini_gate_data {
  * struct clk_gemini_pci - Gemini PCI clock
  * @hw: corresponding clock hardware entry
  * @map: regmap to access the registers
- * @rate: current rate
  */
 struct clk_gemini_pci {
 	struct clk_hw hw;
 	struct regmap *map;
-	unsigned long rate;
 };
 
 /**
@@ -128,13 +126,16 @@ static unsigned long gemini_pci_recalc_rate(struct clk_hw *hw,
 	return 33000000;
 }
 
-static long gemini_pci_round_rate(struct clk_hw *hw, unsigned long rate,
-				  unsigned long *prate)
+static int gemini_pci_determine_rate(struct clk_hw *hw,
+				     struct clk_rate_request *req)
 {
 	/* We support 33 and 66 MHz */
-	if (rate < 48000000)
-		return 33000000;
-	return 66000000;
+	if (req->rate < 48000000)
+		req->rate = 33000000;
+	else
+		req->rate = 66000000;
+
+	return 0;
 }
 
 static int gemini_pci_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -181,7 +182,7 @@ static int gemini_pci_is_enabled(struct clk_hw *hw)
 
 static const struct clk_ops gemini_pci_clk_ops = {
 	.recalc_rate = gemini_pci_recalc_rate,
-	.round_rate = gemini_pci_round_rate,
+	.determine_rate = gemini_pci_determine_rate,
 	.set_rate = gemini_pci_set_rate,
 	.enable = gemini_pci_enable,
 	.disable = gemini_pci_disable,
@@ -196,7 +197,7 @@ static struct clk_hw *gemini_pci_clk_setup(const char *name,
 	struct clk_init_data init;
 	int ret;
 
-	pciclk = kzalloc(sizeof(*pciclk), GFP_KERNEL);
+	pciclk = kzalloc_obj(*pciclk);
 	if (!pciclk)
 		return ERR_PTR(-ENOMEM);
 
@@ -276,7 +277,6 @@ static int gemini_clk_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
 	unsigned int mult, div;
-	struct resource *res;
 	u32 val;
 	int ret;
 	int i;
@@ -286,8 +286,7 @@ static int gemini_clk_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	/* Remap the system controller for the exclusive register */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(dev, res);
+	base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
@@ -399,11 +398,10 @@ static void __init gemini_cc_init(struct device_node *np)
 	int ret;
 	int i;
 
-	gemini_clk_data = kzalloc(sizeof(*gemini_clk_data) +
-			sizeof(*gemini_clk_data->hws) * GEMINI_NUM_CLKS,
-			GFP_KERNEL);
+	gemini_clk_data = kzalloc_flex(*gemini_clk_data, hws, GEMINI_NUM_CLKS);
 	if (!gemini_clk_data)
 		return;
+	gemini_clk_data->num = GEMINI_NUM_CLKS;
 
 	/*
 	 * This way all clock fetched before the platform device probes,
@@ -457,7 +455,6 @@ static void __init gemini_cc_init(struct device_node *np)
 	gemini_clk_data->hws[GEMINI_CLK_APB] = hw;
 
 	/* Register the clocks to be accessed by the device tree */
-	gemini_clk_data->num = GEMINI_NUM_CLKS;
 	of_clk_add_hw_provider(np, of_clk_hw_onecell_get, gemini_clk_data);
 }
 CLK_OF_DECLARE_DRIVER(gemini_cc, "cortina,gemini-syscon", gemini_cc_init);

@@ -1,17 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Support for OLPC XO-1.5 System Control Interrupts (SCI)
  *
  * Copyright (C) 2009-2010 One Laptop per Child
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/device.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/workqueue.h>
+#include <linux/platform_device.h>
 #include <linux/power_supply.h>
 #include <linux/olpc-ec.h>
 
@@ -31,7 +29,7 @@ static bool				lid_wake_on_close;
  * wake-on-close. This is implemented as standard by the XO-1.5 DSDT.
  *
  * We provide here a sysfs attribute that will additionally enable
- * wake-on-close behavior. This is useful (e.g.) when we oportunistically
+ * wake-on-close behavior. This is useful (e.g.) when we opportunistically
  * suspend with the display running; if the lid is then closed, we want to
  * wake up to turn the display off.
  *
@@ -43,7 +41,7 @@ static int set_lid_wake_behavior(bool wake_on_close)
 
 	status = acpi_execute_simple_method(NULL, "\\_SB.PCI0.LID.LIDW", wake_on_close);
 	if (ACPI_FAILURE(status)) {
-		pr_warning(PFX "failed to set lid behavior\n");
+		pr_warn(PFX "failed to set lid behavior\n");
 		return 1;
 	}
 
@@ -79,7 +77,7 @@ static struct kobj_attribute lid_wake_on_close_attr =
 
 static void battery_status_changed(void)
 {
-	struct power_supply *psy = power_supply_get_by_name("olpc-battery");
+	struct power_supply *psy = power_supply_get_by_name("olpc_battery");
 
 	if (psy) {
 		power_supply_changed(psy);
@@ -89,7 +87,7 @@ static void battery_status_changed(void)
 
 static void ac_status_changed(void)
 {
-	struct power_supply *psy = power_supply_get_by_name("olpc-ac");
+	struct power_supply *psy = power_supply_get_by_name("olpc_ac");
 
 	if (psy) {
 		power_supply_changed(psy);
@@ -139,17 +137,19 @@ static u32 xo15_sci_gpe_handler(acpi_handle gpe_device, u32 gpe, void *context)
 	return ACPI_INTERRUPT_HANDLED | ACPI_REENABLE_GPE;
 }
 
-static int xo15_sci_add(struct acpi_device *device)
+static int xo15_sci_probe(struct platform_device *pdev)
 {
+	struct acpi_device *device;
 	unsigned long long tmp;
 	acpi_status status;
 	int r;
 
+	device = ACPI_COMPANION(&pdev->dev);
 	if (!device)
-		return -EINVAL;
+		return -ENODEV;
 
-	strcpy(acpi_device_name(device), XO15_SCI_DEVICE_NAME);
-	strcpy(acpi_device_class(device), XO15_SCI_CLASS);
+	strscpy(acpi_device_name(device), XO15_SCI_DEVICE_NAME);
+	strscpy(acpi_device_class(device), XO15_SCI_CLASS);
 
 	/* Get GPE bit assignment (EC events). */
 	status = acpi_evaluate_integer(device->handle, "_GPE", NULL, &tmp);
@@ -163,7 +163,7 @@ static int xo15_sci_add(struct acpi_device *device)
 	if (ACPI_FAILURE(status))
 		return -ENODEV;
 
-	dev_info(&device->dev, "Initialized, GPE = 0x%lx\n", xo15_sci_gpe);
+	dev_info(&pdev->dev, "Initialized, GPE = 0x%lx\n", xo15_sci_gpe);
 
 	r = sysfs_create_file(&device->dev.kobj, &lid_wake_on_close_attr.attr);
 	if (r)
@@ -177,7 +177,7 @@ static int xo15_sci_add(struct acpi_device *device)
 
 	/* Enable wake-on-EC */
 	if (device->wakeup.flags.valid)
-		device_init_wakeup(&device->dev, true);
+		device_init_wakeup(&pdev->dev, true);
 
 	return 0;
 
@@ -187,13 +187,15 @@ err_sysfs:
 	return r;
 }
 
-static int xo15_sci_remove(struct acpi_device *device)
+static void xo15_sci_remove(struct platform_device *pdev)
 {
+	struct acpi_device *device = ACPI_COMPANION(&pdev->dev);
+
+	device_init_wakeup(&pdev->dev, false);
 	acpi_disable_gpe(NULL, xo15_sci_gpe);
 	acpi_remove_gpe_handler(NULL, xo15_sci_gpe, xo15_sci_gpe_handler);
 	cancel_work_sync(&sci_work);
 	sysfs_remove_file(&device->dev.kobj, &lid_wake_on_close_attr.attr);
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -217,19 +219,18 @@ static const struct acpi_device_id xo15_sci_device_ids[] = {
 	{"", 0},
 };
 
-static struct acpi_driver xo15_sci_drv = {
-	.name = DRV_NAME,
-	.class = XO15_SCI_CLASS,
-	.ids = xo15_sci_device_ids,
-	.ops = {
-		.add = xo15_sci_add,
-		.remove = xo15_sci_remove,
+static struct platform_driver xo15_sci_drv = {
+	.probe = xo15_sci_probe,
+	.remove = xo15_sci_remove,
+	.driver = {
+		.name = DRV_NAME,
+		.acpi_match_table = xo15_sci_device_ids,
+		.pm = &xo15_sci_pm,
 	},
-	.drv.pm = &xo15_sci_pm,
 };
 
 static int __init xo15_sci_init(void)
 {
-	return acpi_bus_register_driver(&xo15_sci_drv);
+	return platform_driver_register(&xo15_sci_drv);
 }
 device_initcall(xo15_sci_init);

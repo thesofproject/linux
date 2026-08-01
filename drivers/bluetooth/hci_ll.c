@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Texas Instruments' Bluetooth HCILL UART protocol
  *
@@ -11,20 +12,6 @@
  *  Acknowledgements:
  *  This file is based on hci_h4.c, which was written
  *  by Maxim Krasnyansky and Marcel Holtmann.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2
- *  as published by the Free Software Foundation
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
  */
 
 #include <linux/module.h>
@@ -81,6 +68,7 @@ struct ll_device {
 	struct gpio_desc *enable_gpio;
 	struct clk *ext_clk;
 	bdaddr_t bdaddr;
+	bool broken_enhanced_setup;
 };
 
 struct ll_struct {
@@ -127,7 +115,7 @@ static int ll_open(struct hci_uart *hu)
 
 	BT_DBG("hu %p", hu);
 
-	ll = kzalloc(sizeof(*ll), GFP_KERNEL);
+	ll = kzalloc_obj(*ll);
 	if (!ll)
 		return -ENOMEM;
 
@@ -141,7 +129,7 @@ static int ll_open(struct hci_uart *hu)
 
 	if (hu->serdev) {
 		struct ll_device *lldev = serdev_device_get_drvdata(hu->serdev);
-		serdev_device_open(hu->serdev);
+
 		if (!IS_ERR(lldev->ext_clk))
 			clk_prepare_enable(lldev->ext_clk);
 	}
@@ -176,11 +164,10 @@ static int ll_close(struct hci_uart *hu)
 
 	if (hu->serdev) {
 		struct ll_device *lldev = serdev_device_get_drvdata(hu->serdev);
+
 		gpiod_set_value_cansleep(lldev->enable_gpio, 0);
 
 		clk_disable_unprepare(lldev->ext_clk);
-
-		serdev_device_close(hu->serdev);
 	}
 
 	hu->priv = NULL;
@@ -233,7 +220,7 @@ static void ll_device_want_to_wakeup(struct hci_uart *hu)
 		 * perfectly safe to always send one.
 		 */
 		BT_DBG("dual wake-up-indication");
-		/* fall through */
+		fallthrough;
 	case HCILL_ASLEEP:
 		/* acknowledge device wake up */
 		if (send_hcill_cmd(HCILL_WAKE_UP_ACK, hu) < 0) {
@@ -243,7 +230,8 @@ static void ll_device_want_to_wakeup(struct hci_uart *hu)
 		break;
 	default:
 		/* any other state is illegal */
-		BT_ERR("received HCILL_WAKE_UP_IND in state %ld", ll->hcill_state);
+		BT_ERR("received HCILL_WAKE_UP_IND in state %ld",
+		       ll->hcill_state);
 		break;
 	}
 
@@ -272,7 +260,8 @@ static void ll_device_want_to_sleep(struct hci_uart *hu)
 
 	/* sanity check */
 	if (ll->hcill_state != HCILL_AWAKE)
-		BT_ERR("ERR: HCILL_GO_TO_SLEEP_IND in state %ld", ll->hcill_state);
+		BT_ERR("ERR: HCILL_GO_TO_SLEEP_IND in state %ld",
+		       ll->hcill_state);
 
 	/* acknowledge device sleep */
 	if (send_hcill_cmd(HCILL_GO_TO_SLEEP_ACK, hu) < 0) {
@@ -305,7 +294,8 @@ static void ll_device_woke_up(struct hci_uart *hu)
 
 	/* sanity check */
 	if (ll->hcill_state != HCILL_ASLEEP_TO_AWAKE)
-		BT_ERR("received HCILL_WAKE_UP_ACK in state %ld", ll->hcill_state);
+		BT_ERR("received HCILL_WAKE_UP_ACK in state %ld",
+		       ll->hcill_state);
 
 	/* send pending packets and change state to HCILL_AWAKE */
 	__ll_do_awake(ll);
@@ -316,7 +306,7 @@ static void ll_device_woke_up(struct hci_uart *hu)
 	hci_uart_tx_wakeup(hu);
 }
 
-/* Enqueue frame for transmittion (padding, crc, etc) */
+/* Enqueue frame for transmission (padding, crc, etc) */
 /* may be called from two simultaneous tasklets */
 static int ll_enqueue(struct hci_uart *hu, struct sk_buff *skb)
 {
@@ -354,8 +344,9 @@ static int ll_enqueue(struct hci_uart *hu, struct sk_buff *skb)
 		skb_queue_tail(&ll->tx_wait_q, skb);
 		break;
 	default:
-		BT_ERR("illegal hcill state: %ld (losing packet)", ll->hcill_state);
-		kfree_skb(skb);
+		BT_ERR("illegal hcill state: %ld (losing packet)",
+		       ll->hcill_state);
+		dev_kfree_skb_irq(skb);
 		break;
 	}
 
@@ -439,7 +430,7 @@ static int ll_recv(struct hci_uart *hu, const void *data, int count)
 	if (!test_bit(HCI_UART_REGISTERED, &hu->flags))
 		return -EUNATCH;
 
-	ll->rx_skb = h4_recv_buf(hu->hdev, ll->rx_skb, data, count,
+	ll->rx_skb = h4_recv_buf(hu, ll->rx_skb, data, count,
 				 ll_recv_pkts, ARRAY_SIZE(ll_recv_pkts));
 	if (IS_ERR(ll->rx_skb)) {
 		int err = PTR_ERR(ll->rx_skb);
@@ -454,6 +445,7 @@ static int ll_recv(struct hci_uart *hu, const void *data, int count)
 static struct sk_buff *ll_dequeue(struct hci_uart *hu)
 {
 	struct ll_struct *ll = hu->priv;
+
 	return skb_dequeue(&ll->txq);
 }
 
@@ -465,7 +457,8 @@ static int read_local_version(struct hci_dev *hdev)
 	struct sk_buff *skb;
 	struct hci_rp_read_local_version *ver;
 
-	skb = __hci_cmd_sync(hdev, HCI_OP_READ_LOCAL_VERSION, 0, NULL, HCI_INIT_TIMEOUT);
+	skb = __hci_cmd_sync(hdev, HCI_OP_READ_LOCAL_VERSION, 0, NULL,
+			     HCI_INIT_TIMEOUT);
 	if (IS_ERR(skb)) {
 		bt_dev_err(hdev, "Reading TI version information failed (%ld)",
 			   PTR_ERR(skb));
@@ -485,12 +478,39 @@ static int read_local_version(struct hci_dev *hdev)
 	version = le16_to_cpu(ver->lmp_subver);
 
 out:
-	if (err) bt_dev_err(hdev, "Failed to read TI version info: %d", err);
+	if (err)
+		bt_dev_err(hdev, "Failed to read TI version info: %d", err);
 	kfree_skb(skb);
 	return err ? err : version;
 }
 
-/**
+static int send_command_from_firmware(struct ll_device *lldev,
+				      struct hci_command *cmd)
+{
+	struct sk_buff *skb;
+
+	if (cmd->opcode == HCI_VS_UPDATE_UART_HCI_BAUDRATE) {
+		/* ignore remote change
+		 * baud rate HCI VS command
+		 */
+		bt_dev_warn(lldev->hu.hdev,
+			    "change remote baud rate command in firmware");
+		return 0;
+	}
+	if (cmd->prefix != 1)
+		bt_dev_dbg(lldev->hu.hdev, "command type %d", cmd->prefix);
+
+	skb = __hci_cmd_sync(lldev->hu.hdev, cmd->opcode, cmd->plen,
+			     &cmd->speed, HCI_INIT_TIMEOUT);
+	if (IS_ERR(skb)) {
+		bt_dev_err(lldev->hu.hdev, "send command failed");
+		return PTR_ERR(skb);
+	}
+	kfree_skb(skb);
+	return 0;
+}
+
+/*
  * download_firmware -
  *	internal function which parses through the .bts firmware
  *	script file intreprets SEND, DELAY actions only as of now
@@ -502,7 +522,6 @@ static int download_firmware(struct ll_device *lldev)
 	unsigned char *ptr, *action_ptr;
 	unsigned char bts_scr_name[40];	/* 40 char long bts scr name? */
 	const struct firmware *fw;
-	struct sk_buff *skb;
 	struct hci_command *cmd;
 
 	version = read_local_version(lldev->hu.hdev);
@@ -523,6 +542,8 @@ static int download_firmware(struct ll_device *lldev)
 	if (err || !fw->data || !fw->size) {
 		bt_dev_err(lldev->hu.hdev, "request_firmware failed(errno %d) for %s",
 			   err, bts_scr_name);
+		if (!err)
+			release_firmware(fw);
 		return -EINVAL;
 	}
 	ptr = (void *)fw->data;
@@ -544,23 +565,9 @@ static int download_firmware(struct ll_device *lldev)
 		case ACTION_SEND_COMMAND:	/* action send */
 			bt_dev_dbg(lldev->hu.hdev, "S");
 			cmd = (struct hci_command *)action_ptr;
-			if (cmd->opcode == HCI_VS_UPDATE_UART_HCI_BAUDRATE) {
-				/* ignore remote change
-				 * baud rate HCI VS command
-				 */
-				bt_dev_warn(lldev->hu.hdev, "change remote baud rate command in firmware");
-				break;
-			}
-			if (cmd->prefix != 1)
-				bt_dev_dbg(lldev->hu.hdev, "command type %d", cmd->prefix);
-
-			skb = __hci_cmd_sync(lldev->hu.hdev, cmd->opcode, cmd->plen, &cmd->speed, HCI_INIT_TIMEOUT);
-			if (IS_ERR(skb)) {
-				bt_dev_err(lldev->hu.hdev, "send command failed");
-				err = PTR_ERR(skb);
+			err = send_command_from_firmware(lldev, cmd);
+			if (err)
 				goto out_rel_fw;
-			}
-			kfree_skb(skb);
 			break;
 		case ACTION_WAIT_EVENT:  /* wait */
 			/* no need to wait as command was synchronous */
@@ -622,6 +629,7 @@ static int ll_setup(struct hci_uart *hu)
 		gpiod_set_value_cansleep(lldev->enable_gpio, 0);
 		msleep(5);
 		gpiod_set_value_cansleep(lldev->enable_gpio, 1);
+		mdelay(100);
 		err = serdev_device_wait_for_cts(serdev, true, 200);
 		if (err) {
 			bt_dev_err(hu->hdev, "Failed to get CTS");
@@ -644,12 +652,16 @@ static int ll_setup(struct hci_uart *hu)
 		/* This means that there was an error getting the BD address
 		 * during probe, so mark the device as having a bad address.
 		 */
-		set_bit(HCI_QUIRK_INVALID_BDADDR, &hu->hdev->quirks);
+		hci_set_quirk(hu->hdev, HCI_QUIRK_INVALID_BDADDR);
 	} else if (bacmp(&lldev->bdaddr, BDADDR_ANY)) {
 		err = ll_set_bdaddr(hu->hdev, &lldev->bdaddr);
 		if (err)
-			set_bit(HCI_QUIRK_INVALID_BDADDR, &hu->hdev->quirks);
+			hci_set_quirk(hu->hdev, HCI_QUIRK_INVALID_BDADDR);
 	}
+
+	if (lldev->broken_enhanced_setup)
+		hci_set_quirk(hu->hdev,
+			      HCI_QUIRK_BROKEN_ENHANCED_SETUP_SYNC_CONN);
 
 	/* Operational speed if any */
 	if (hu->oper_speed)
@@ -692,7 +704,9 @@ static int hci_ti_probe(struct serdev_device *serdev)
 	serdev_device_set_drvdata(serdev, lldev);
 	lldev->serdev = hu->serdev = serdev;
 
-	lldev->enable_gpio = devm_gpiod_get_optional(&serdev->dev, "enable", GPIOD_OUT_LOW);
+	lldev->enable_gpio = devm_gpiod_get_optional(&serdev->dev,
+						     "enable",
+						     GPIOD_OUT_LOW);
 	if (IS_ERR(lldev->enable_gpio))
 		return PTR_ERR(lldev->enable_gpio);
 
@@ -702,6 +716,11 @@ static int hci_ti_probe(struct serdev_device *serdev)
 
 	of_property_read_u32(serdev->dev.of_node, "max-speed", &max_speed);
 	hci_uart_set_speeds(hu, 115200, max_speed);
+
+	if (of_device_is_compatible(serdev->dev.of_node, "ti,wl1831-st") ||
+	    of_device_is_compatible(serdev->dev.of_node, "ti,wl1835-st") ||
+	    of_device_is_compatible(serdev->dev.of_node, "ti,wl1837-st"))
+		lldev->broken_enhanced_setup = true;
 
 	/* optional BD address from nvram */
 	bdaddr_cell = nvmem_cell_get(&serdev->dev, "bd-address");
@@ -779,7 +798,7 @@ MODULE_DEVICE_TABLE(of, hci_ti_of_match);
 static struct serdev_device_driver hci_ti_drv = {
 	.driver		= {
 		.name	= "hci-ti",
-		.of_match_table = of_match_ptr(hci_ti_of_match),
+		.of_match_table = hci_ti_of_match,
 	},
 	.probe	= hci_ti_probe,
 	.remove	= hci_ti_remove,

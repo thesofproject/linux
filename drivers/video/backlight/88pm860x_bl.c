@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Backlight driver for Marvell Semiconductor 88PM8606
  *
  * Copyright (C) 2009 Marvell International Ltd.
  *	Haojian Zhuang <haojian.zhuang@marvell.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/init.h>
@@ -14,7 +11,6 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
-#include <linux/fb.h>
 #include <linux/i2c.h>
 #include <linux/backlight.h>
 #include <linux/mfd/88pm860x.h>
@@ -124,18 +120,7 @@ out:
 
 static int pm860x_backlight_update_status(struct backlight_device *bl)
 {
-	int brightness = bl->props.brightness;
-
-	if (bl->props.power != FB_BLANK_UNBLANK)
-		brightness = 0;
-
-	if (bl->props.fb_blank != FB_BLANK_UNBLANK)
-		brightness = 0;
-
-	if (bl->props.state & BL_CORE_SUSPENDED)
-		brightness = 0;
-
-	return pm860x_backlight_set(bl, brightness);
+	return pm860x_backlight_set(bl, backlight_get_brightness(bl));
 }
 
 static int pm860x_backlight_get_brightness(struct backlight_device *bl)
@@ -165,7 +150,7 @@ static int pm860x_backlight_dt_init(struct platform_device *pdev,
 				    struct pm860x_backlight_data *data,
 				    char *name)
 {
-	struct device_node *nproot, *np;
+	struct device_node *nproot;
 	int iset = 0;
 
 	nproot = of_get_child_by_name(pdev->dev.parent->of_node, "backlights");
@@ -173,14 +158,13 @@ static int pm860x_backlight_dt_init(struct platform_device *pdev,
 		dev_err(&pdev->dev, "failed to find backlights node\n");
 		return -ENODEV;
 	}
-	for_each_child_of_node(nproot, np) {
-		if (!of_node_cmp(np->name, name)) {
+	for_each_child_of_node_scoped(nproot, np) {
+		if (of_node_name_eq(np, name)) {
 			of_property_read_u32(np, "marvell,88pm860x-iset",
 					     &iset);
 			data->iset = PM8606_WLED_CURRENT(iset);
 			of_property_read_u32(np, "marvell,88pm860x-pwm",
 					     &data->pwm);
-			of_node_put(np);
 			break;
 		}
 	}

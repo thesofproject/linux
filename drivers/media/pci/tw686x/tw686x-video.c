@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2015 VanguardiaSur - www.vanguardiasur.com.ar
  *
  * Based on original driver by Krzysztof Ha?asa:
  * Copyright (C) 2015 Industrial Research Institute for Automation
  * and Measurements PIAP
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License
- * as published by the Free Software Foundation.
- *
  */
 
 #include <linux/init.h>
@@ -96,8 +92,8 @@ static void tw686x_memcpy_dma_free(struct tw686x_video_channel *vc,
 	}
 
 	if (desc->virt) {
-		pci_free_consistent(dev->pci_dev, desc->size,
-				    desc->virt, desc->phys);
+		dma_free_coherent(&dev->pci_dev->dev, desc->size, desc->virt,
+				  desc->phys);
 		desc->virt = NULL;
 	}
 }
@@ -114,8 +110,8 @@ static int tw686x_memcpy_dma_alloc(struct tw686x_video_channel *vc,
 	     "Allocating buffer but previous still here\n");
 
 	len = (vc->width * vc->height * vc->format->depth) >> 3;
-	virt = pci_alloc_consistent(dev->pci_dev, len,
-				    &vc->dma_descs[pb].phys);
+	virt = dma_alloc_coherent(&dev->pci_dev->dev, len,
+				  &vc->dma_descs[pb].phys, GFP_KERNEL);
 	if (!virt) {
 		v4l2_err(&dev->v4l2_dev,
 			 "dma%d: unable to allocate %s-buffer\n",
@@ -262,8 +258,8 @@ static void tw686x_sg_dma_free(struct tw686x_video_channel *vc,
 	struct tw686x_dev *dev = vc->dev;
 
 	if (desc->size) {
-		pci_free_consistent(dev->pci_dev, desc->size,
-				    desc->virt, desc->phys);
+		dma_free_coherent(&dev->pci_dev->dev, desc->size, desc->virt,
+				  desc->phys);
 		desc->virt = NULL;
 	}
 
@@ -280,9 +276,8 @@ static int tw686x_sg_dma_alloc(struct tw686x_video_channel *vc,
 	void *virt;
 
 	if (desc->size) {
-
-		virt = pci_alloc_consistent(dev->pci_dev, desc->size,
-					    &desc->phys);
+		virt = dma_alloc_coherent(&dev->pci_dev->dev, desc->size,
+					  &desc->phys, GFP_KERNEL);
 		if (!virt) {
 			v4l2_err(&dev->v4l2_dev,
 				 "dma%d: unable to allocate %s-buffer\n",
@@ -428,6 +423,7 @@ static int tw686x_queue_setup(struct vb2_queue *vq,
 			      unsigned int sizes[], struct device *alloc_devs[])
 {
 	struct tw686x_video_channel *vc = vb2_get_drv_priv(vq);
+	unsigned int q_num_bufs = vb2_get_num_buffers(vq);
 	unsigned int szimage =
 		(vc->width * vc->height * vc->format->depth) >> 3;
 
@@ -435,8 +431,8 @@ static int tw686x_queue_setup(struct vb2_queue *vq,
 	 * Let's request at least three buffers: two for the
 	 * DMA engine and one for userspace.
 	 */
-	if (vq->num_buffers + *nbuffers < 3)
-		*nbuffers = 3 - vq->num_buffers;
+	if (q_num_bufs + *nbuffers < 3)
+		*nbuffers = 3 - q_num_bufs;
 
 	if (*nplanes) {
 		if (*nplanes != 1 || sizes[0] < szimage)
@@ -583,8 +579,6 @@ static const struct vb2_ops tw686x_video_qops = {
 	.buf_prepare		= tw686x_buf_prepare,
 	.start_streaming	= tw686x_start_streaming,
 	.stop_streaming		= tw686x_stop_streaming,
-	.wait_prepare		= vb2_ops_wait_prepare,
-	.wait_finish		= vb2_ops_wait_finish,
 };
 
 static int tw686x_s_ctrl(struct v4l2_ctrl *ctrl)
@@ -765,13 +759,8 @@ static int tw686x_querycap(struct file *file, void *priv,
 	struct tw686x_video_channel *vc = video_drvdata(file);
 	struct tw686x_dev *dev = vc->dev;
 
-	strlcpy(cap->driver, "tw686x", sizeof(cap->driver));
-	strlcpy(cap->card, dev->name, sizeof(cap->card));
-	snprintf(cap->bus_info, sizeof(cap->bus_info),
-		 "PCI:%s", pci_name(dev->pci_dev));
-	cap->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING |
-			   V4L2_CAP_READWRITE;
-	cap->capabilities = cap->device_caps | V4L2_CAP_DEVICE_CAPS;
+	strscpy(cap->driver, "tw686x", sizeof(cap->driver));
+	strscpy(cap->card, dev->name, sizeof(cap->card));
 	return 0;
 }
 
@@ -1190,6 +1179,14 @@ int tw686x_video_init(struct tw686x_dev *dev)
 			return err;
 	}
 
+	/* Initialize vc->dev and vc->ch for the error path */
+	for (ch = 0; ch < max_channels(dev); ch++) {
+		struct tw686x_video_channel *vc = &dev->video_channels[ch];
+
+		vc->dev = dev;
+		vc->ch = ch;
+	}
+
 	for (ch = 0; ch < max_channels(dev); ch++) {
 		struct tw686x_video_channel *vc = &dev->video_channels[ch];
 		struct video_device *vdev;
@@ -1197,9 +1194,6 @@ int tw686x_video_init(struct tw686x_dev *dev)
 		mutex_init(&vc->vb_mutex);
 		spin_lock_init(&vc->qlock);
 		INIT_LIST_HEAD(&vc->vidq_queued);
-
-		vc->dev = dev;
-		vc->ch = ch;
 
 		/* default settings */
 		err = tw686x_set_standard(vc, V4L2_STD_NTSC);
@@ -1226,9 +1220,10 @@ int tw686x_video_init(struct tw686x_dev *dev)
 		vc->vidq.ops = &tw686x_video_qops;
 		vc->vidq.mem_ops = dev->dma_ops->mem_ops;
 		vc->vidq.timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
-		vc->vidq.min_buffers_needed = 2;
+		vc->vidq.min_queued_buffers = 2;
 		vc->vidq.lock = &vc->vb_mutex;
-		vc->vidq.gfp_flags = GFP_DMA32;
+		vc->vidq.gfp_flags = dev->dma_mode != TW686X_DMA_MODE_MEMCPY ?
+				     GFP_DMA32 : 0;
 		vc->vidq.dev = &dev->pci_dev->dev;
 
 		err = vb2_queue_init(&vc->vidq);
@@ -1278,12 +1273,16 @@ int tw686x_video_init(struct tw686x_dev *dev)
 		vdev->minor = -1;
 		vdev->lock = &vc->vb_mutex;
 		vdev->ctrl_handler = &vc->ctrl_handler;
+		vdev->device_caps = V4L2_CAP_VIDEO_CAPTURE |
+				    V4L2_CAP_STREAMING | V4L2_CAP_READWRITE;
 		vc->device = vdev;
 		video_set_drvdata(vdev, vc);
 
-		err = video_register_device(vdev, VFL_TYPE_GRABBER, -1);
-		if (err < 0)
+		err = video_register_device(vdev, VFL_TYPE_VIDEO, -1);
+		if (err < 0) {
+			video_device_release(vdev);
 			goto error;
+		}
 		vc->num = vdev->num;
 	}
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* radio-trust.c - Trust FM Radio card driver for Linux 2.2
  * by Eric Lammerts <eric@scintilla.utwente.nl>
  *
@@ -15,7 +16,6 @@
  * Converted to V4L2 API by Mauro Carvalho Chehab <mchehab@kernel.org>
  */
 
-#include <stdarg.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/ioport.h>
@@ -55,7 +55,7 @@ struct trust {
 
 static struct radio_isa_card *trust_alloc(void)
 {
-	struct trust *tr = kzalloc(sizeof(*tr), GFP_KERNEL);
+	struct trust *tr = kzalloc_obj(*tr);
 
 	return tr ? &tr->isa : NULL;
 }

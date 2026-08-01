@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/mfd/ucb1x00-core.c
  *
  *  Copyright (C) 2001 Russell King, All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License.
  *
  *  The UCB1x00 core driver provides basic services for handling IO,
  *  the ADC, interrupts, and accessing registers.  It is designed
@@ -107,7 +104,8 @@ unsigned int ucb1x00_io_read(struct ucb1x00 *ucb)
 	return ucb1x00_reg_read(ucb, UCB_IO_DATA);
 }
 
-static void ucb1x00_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
+static int ucb1x00_gpio_set(struct gpio_chip *chip, unsigned int offset,
+			    int value)
 {
 	struct ucb1x00 *ucb = gpiochip_get_data(chip);
 	unsigned long flags;
@@ -122,6 +120,8 @@ static void ucb1x00_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 	ucb1x00_reg_write(ucb, UCB_IO_DATA, ucb->io_out);
 	ucb1x00_disable(ucb);
 	spin_unlock_irqrestore(&ucb->io_lock, flags);
+
+	return 0;
 }
 
 static int ucb1x00_gpio_get(struct gpio_chip *chip, unsigned offset)
@@ -395,7 +395,7 @@ static int ucb1x00_add_dev(struct ucb1x00 *ucb, struct ucb1x00_driver *drv)
 	struct ucb1x00_dev *dev;
 	int ret;
 
-	dev = kmalloc(sizeof(struct ucb1x00_dev), GFP_KERNEL);
+	dev = kmalloc_obj(struct ucb1x00_dev);
 	if (!dev)
 		return -ENOMEM;
 
@@ -513,7 +513,7 @@ static int ucb1x00_probe(struct mcp *mcp)
 		goto out;
 	}
 
-	ucb = kzalloc(sizeof(struct ucb1x00), GFP_KERNEL);
+	ucb = kzalloc_obj(struct ucb1x00);
 	ret = -ENOMEM;
 	if (!ucb)
 		goto out;
@@ -663,7 +663,6 @@ void ucb1x00_unregister_driver(struct ucb1x00_driver *drv)
 	mutex_unlock(&ucb1x00_mutex);
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int ucb1x00_suspend(struct device *dev)
 {
 	struct ucb1x00_plat_data *pdata = dev_get_platdata(dev);
@@ -731,15 +730,15 @@ static int ucb1x00_resume(struct device *dev)
 	mutex_unlock(&ucb1x00_mutex);
 	return 0;
 }
-#endif
 
-static SIMPLE_DEV_PM_OPS(ucb1x00_pm_ops, ucb1x00_suspend, ucb1x00_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(ucb1x00_pm_ops,
+				ucb1x00_suspend, ucb1x00_resume);
 
 static struct mcp_driver ucb1x00_driver = {
 	.drv		= {
 		.name	= "ucb1x00",
 		.owner	= THIS_MODULE,
-		.pm	= &ucb1x00_pm_ops,
+		.pm	= pm_sleep_ptr(&ucb1x00_pm_ops),
 	},
 	.probe		= ucb1x00_probe,
 	.remove		= ucb1x00_remove,

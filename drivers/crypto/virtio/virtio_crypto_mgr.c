@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
  /* Management for virtio crypto devices (refer to adf_dev_mgr.c)
   *
   * Copyright 2016 HUAWEI TECHNOLOGIES CO., LTD.
-  *
-  * This program is free software; you can redistribute it and/or modify
-  * it under the terms of the GNU General Public License as published by
-  * the Free Software Foundation; either version 2 of the License, or
-  * (at your option) any later version.
-  *
-  * This program is distributed in the hope that it will be useful,
-  * but WITHOUT ANY WARRANTY; without even the implied warranty of
-  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  * GNU General Public License for more details.
-  *
-  * You should have received a copy of the GNU General Public License
-  * along with this program; if not, see <http://www.gnu.org/licenses/>.
   */
 
 #include <linux/mutex.h>
@@ -94,42 +82,6 @@ void virtcrypto_devmgr_rm_dev(struct virtio_crypto *vcrypto_dev)
 }
 
 /*
- * virtcrypto_devmgr_get_first()
- *
- * Function returns the first virtio crypto device from the acceleration
- * framework.
- *
- * To be used by virtio crypto device specific drivers.
- *
- * Return: pointer to vcrypto_dev or NULL if not found.
- */
-struct virtio_crypto *virtcrypto_devmgr_get_first(void)
-{
-	struct virtio_crypto *dev = NULL;
-
-	mutex_lock(&table_lock);
-	if (!list_empty(&virtio_crypto_table))
-		dev = list_first_entry(&virtio_crypto_table,
-					struct virtio_crypto,
-				    list);
-	mutex_unlock(&table_lock);
-	return dev;
-}
-
-/*
- * virtcrypto_dev_in_use() - Check whether vcrypto_dev is currently in use
- * @vcrypto_dev: Pointer to virtio crypto device.
- *
- * To be used by virtio crypto device specific drivers.
- *
- * Return: 1 when device is in use, 0 otherwise.
- */
-int virtcrypto_dev_in_use(struct virtio_crypto *vcrypto_dev)
-{
-	return atomic_read(&vcrypto_dev->ref_count) != 0;
-}
-
-/*
  * virtcrypto_dev_get() - Increment vcrypto_dev reference count
  * @vcrypto_dev: Pointer to virtio crypto device.
  *
@@ -181,14 +133,20 @@ int virtcrypto_dev_started(struct virtio_crypto *vcrypto_dev)
 /*
  * virtcrypto_get_dev_node() - Get vcrypto_dev on the node.
  * @node:  Node id the driver works.
+ * @service: Crypto service that needs to be supported by the
+ *	      dev
+ * @algo: The algorithm number that needs to be supported by the
+ *	  dev
  *
- * Function returns the virtio crypto device used fewest on the node.
+ * Function returns the virtio crypto device used fewest on the node,
+ * and supports the given crypto service and algorithm.
  *
  * To be used by virtio crypto device specific drivers.
  *
  * Return: pointer to vcrypto_dev or NULL if not found.
  */
-struct virtio_crypto *virtcrypto_get_dev_node(int node)
+struct virtio_crypto *virtcrypto_get_dev_node(int node, uint32_t service,
+					      uint32_t algo)
 {
 	struct virtio_crypto *vcrypto_dev = NULL, *tmp_dev;
 	unsigned long best = ~0;
@@ -199,7 +157,8 @@ struct virtio_crypto *virtcrypto_get_dev_node(int node)
 
 		if ((node == dev_to_node(&tmp_dev->vdev->dev) ||
 		     dev_to_node(&tmp_dev->vdev->dev) < 0) &&
-		    virtcrypto_dev_started(tmp_dev)) {
+		    virtcrypto_dev_started(tmp_dev) &&
+		    virtcrypto_algo_is_supported(tmp_dev, service, algo)) {
 			ctr = atomic_read(&tmp_dev->ref_count);
 			if (best > ctr) {
 				vcrypto_dev = tmp_dev;
@@ -214,7 +173,9 @@ struct virtio_crypto *virtcrypto_get_dev_node(int node)
 		/* Get any started device */
 		list_for_each_entry(tmp_dev,
 				virtcrypto_devmgr_get_head(), list) {
-			if (virtcrypto_dev_started(tmp_dev)) {
+			if (virtcrypto_dev_started(tmp_dev) &&
+			    virtcrypto_algo_is_supported(tmp_dev,
+			    service, algo)) {
 				vcrypto_dev = tmp_dev;
 				break;
 			}
@@ -240,8 +201,14 @@ struct virtio_crypto *virtcrypto_get_dev_node(int node)
  */
 int virtcrypto_dev_start(struct virtio_crypto *vcrypto)
 {
-	if (virtio_crypto_algs_register()) {
-		pr_err("virtio_crypto: Failed to register crypto algs\n");
+	if (virtio_crypto_skcipher_algs_register(vcrypto)) {
+		pr_err("virtio_crypto: Failed to register crypto skcipher algs\n");
+		return -EFAULT;
+	}
+
+	if (virtio_crypto_akcipher_algs_register(vcrypto)) {
+		pr_err("virtio_crypto: Failed to register crypto akcipher algs\n");
+		virtio_crypto_skcipher_algs_unregister(vcrypto);
 		return -EFAULT;
 	}
 
@@ -253,12 +220,77 @@ int virtcrypto_dev_start(struct virtio_crypto *vcrypto)
  * @vcrypto:    Pointer to virtio crypto device.
  *
  * Function notifies all the registered services that the virtio crypto device
- * is ready to be used.
+ * shall no longer be used.
  * To be used by virtio crypto device specific drivers.
  *
  * Return: void
  */
 void virtcrypto_dev_stop(struct virtio_crypto *vcrypto)
 {
-	virtio_crypto_algs_unregister();
+	virtio_crypto_skcipher_algs_unregister(vcrypto);
+	virtio_crypto_akcipher_algs_unregister(vcrypto);
+}
+
+/*
+ * vcrypto_algo_is_supported()
+ * @vcrypto: Pointer to virtio crypto device.
+ * @service: The bit number for service validate.
+ *	      See VIRTIO_CRYPTO_SERVICE_*
+ * @algo : The bit number for the algorithm to validate.
+ *
+ *
+ * Validate if the virtio crypto device supports a service and
+ * algo.
+ *
+ * Return true if device supports a service and algo.
+ */
+
+bool virtcrypto_algo_is_supported(struct virtio_crypto *vcrypto,
+				  uint32_t service,
+				  uint32_t algo)
+{
+	uint32_t service_mask = 1u << service;
+	uint32_t algo_mask = 0;
+	bool low = true;
+
+	if (algo > 31) {
+		algo -= 32;
+		low = false;
+	}
+
+	if (!(vcrypto->crypto_services & service_mask))
+		return false;
+
+	switch (service) {
+	case VIRTIO_CRYPTO_SERVICE_CIPHER:
+		if (low)
+			algo_mask = vcrypto->cipher_algo_l;
+		else
+			algo_mask = vcrypto->cipher_algo_h;
+		break;
+
+	case VIRTIO_CRYPTO_SERVICE_HASH:
+		algo_mask = vcrypto->hash_algo;
+		break;
+
+	case VIRTIO_CRYPTO_SERVICE_MAC:
+		if (low)
+			algo_mask = vcrypto->mac_algo_l;
+		else
+			algo_mask = vcrypto->mac_algo_h;
+		break;
+
+	case VIRTIO_CRYPTO_SERVICE_AEAD:
+		algo_mask = vcrypto->aead_algo;
+		break;
+
+	case VIRTIO_CRYPTO_SERVICE_AKCIPHER:
+		algo_mask = vcrypto->akcipher_algo;
+		break;
+	}
+
+	if (!(algo_mask & (1u << algo)))
+		return false;
+
+	return true;
 }

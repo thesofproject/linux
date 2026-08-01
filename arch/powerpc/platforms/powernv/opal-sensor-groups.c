@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * PowerNV OPAL Sensor-groups interface
  *
  * Copyright 2017 IBM Corp.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt)     "opal-sensor-groups: " fmt
@@ -17,7 +13,7 @@
 
 #include <asm/opal.h>
 
-DEFINE_MUTEX(sg_mutex);
+static DEFINE_MUTEX(sg_mutex);
 
 static struct kobject *sg_kobj;
 
@@ -31,6 +27,34 @@ static struct sensor_group {
 	struct attribute_group sg;
 	struct sg_attr *sgattrs;
 } *sgs;
+
+int sensor_group_enable(u32 handle, bool enable)
+{
+	struct opal_msg msg;
+	int token, ret;
+
+	token = opal_async_get_token_interruptible();
+	if (token < 0)
+		return token;
+
+	ret = opal_sensor_group_enable(handle, token, enable);
+	if (ret == OPAL_ASYNC_COMPLETION) {
+		ret = opal_async_wait_response(token, &msg);
+		if (ret) {
+			pr_devel("Failed to wait for the async response\n");
+			ret = -EIO;
+			goto out;
+		}
+		ret = opal_error_code(opal_get_async_rc(msg));
+	} else {
+		ret = opal_error_code(ret);
+	}
+
+out:
+	opal_async_release_token(token);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(sensor_group_enable);
 
 static ssize_t sg_store(struct kobject *kobj, struct kobj_attribute *attr,
 			const char *buf, size_t count)
@@ -102,7 +126,7 @@ static void add_attr(int handle, struct sg_attr *attr, int index)
 	attr->attr.store = ops_info[index].store;
 }
 
-static int add_attr_group(const __be32 *ops, int len, struct sensor_group *sg,
+static int __init add_attr_group(const __be32 *ops, int len, struct sensor_group *sg,
 			   u32 handle)
 {
 	int i, j;
@@ -120,7 +144,7 @@ static int add_attr_group(const __be32 *ops, int len, struct sensor_group *sg,
 	return sysfs_create_group(sg_kobj, &sg->sg);
 }
 
-static int get_nr_attrs(const __be32 *ops, int len)
+static int __init get_nr_attrs(const __be32 *ops, int len)
 {
 	int i, j;
 	int nr_attrs = 0;
@@ -144,9 +168,9 @@ void __init opal_sensor_groups_init(void)
 		return;
 	}
 
-	sgs = kcalloc(of_get_child_count(sg), sizeof(*sgs), GFP_KERNEL);
+	sgs = kzalloc_objs(*sgs, of_get_child_count(sg));
 	if (!sgs)
-		return;
+		goto out_sg_put;
 
 	sg_kobj = kobject_create_and_add("sensor_groups", opal_kobj);
 	if (!sg_kobj) {
@@ -166,14 +190,11 @@ void __init opal_sensor_groups_init(void)
 		if (!nr_attrs)
 			continue;
 
-		sgs[i].sgattrs = kcalloc(nr_attrs, sizeof(*sgs[i].sgattrs),
-					 GFP_KERNEL);
+		sgs[i].sgattrs = kzalloc_objs(*sgs[i].sgattrs, nr_attrs);
 		if (!sgs[i].sgattrs)
 			goto out_sgs_sgattrs;
 
-		sgs[i].sg.attrs = kcalloc(nr_attrs + 1,
-					  sizeof(*sgs[i].sg.attrs),
-					  GFP_KERNEL);
+		sgs[i].sg.attrs = kzalloc_objs(*sgs[i].sg.attrs, nr_attrs + 1);
 
 		if (!sgs[i].sg.attrs) {
 			kfree(sgs[i].sgattrs);
@@ -186,9 +207,9 @@ void __init opal_sensor_groups_init(void)
 		}
 
 		if (!of_property_read_u32(node, "ibm,chip-id", &chipid))
-			sprintf(sgs[i].name, "%s%d", node->name, chipid);
+			sprintf(sgs[i].name, "%pOFn%d", node, chipid);
 		else
-			sprintf(sgs[i].name, "%s", node->name);
+			sprintf(sgs[i].name, "%pOFn", node);
 
 		sgs[i].sg.name = sgs[i].name;
 		if (add_attr_group(ops, len, &sgs[i], sgid)) {
@@ -198,6 +219,7 @@ void __init opal_sensor_groups_init(void)
 		}
 		i++;
 	}
+	of_node_put(sg);
 
 	return;
 
@@ -207,6 +229,9 @@ out_sgs_sgattrs:
 		kfree(sgs[i].sg.attrs);
 	}
 	kobject_put(sg_kobj);
+	of_node_put(node);
 out_sgs:
 	kfree(sgs);
+out_sg_put:
+	of_node_put(sg);
 }

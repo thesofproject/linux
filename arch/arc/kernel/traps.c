@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Traps/Non-MMU Exception handling for ARC
  *
  * Copyright (C) 2004, 2007-2010, 2011-2012 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * vineetg: May 2011
  *  -user-space unaligned access emulation
@@ -19,14 +16,11 @@
 #include <linux/ptrace.h>
 #include <linux/kprobes.h>
 #include <linux/kgdb.h>
+#include <asm/entry.h>
 #include <asm/setup.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <asm/kprobes.h>
-
-void __init trap_init(void)
-{
-	return;
-}
+#include "unaligned.h"
 
 void die(const char *str, struct pt_regs *regs, unsigned long address)
 {
@@ -42,21 +36,22 @@ void die(const char *str, struct pt_regs *regs, unsigned long address)
  *  -for kernel, chk if due to copy_(to|from)_user, otherwise die()
  */
 static noinline int
-unhandled_exception(const char *str, struct pt_regs *regs, siginfo_t *info)
+unhandled_exception(const char *str, struct pt_regs *regs,
+		    int signo, int si_code, void __user *addr)
 {
 	if (user_mode(regs)) {
 		struct task_struct *tsk = current;
 
-		tsk->thread.fault_address = (__force unsigned int)info->si_addr;
+		tsk->thread.fault_address = (__force unsigned int)addr;
 
-		force_sig_info(info->si_signo, info, tsk);
+		force_sig_fault(signo, si_code, addr);
 
 	} else {
 		/* If not due to copy_(to|from)_user, we are doomed */
 		if (fixup_exception(regs))
 			return 0;
 
-		die(str, regs, (unsigned long)info->si_addr);
+		die(str, regs, (unsigned long)addr);
 	}
 
 	return 1;
@@ -64,16 +59,9 @@ unhandled_exception(const char *str, struct pt_regs *regs, siginfo_t *info)
 
 #define DO_ERROR_INFO(signr, str, name, sicode) \
 int name(unsigned long address, struct pt_regs *regs) \
-{						\
-	siginfo_t info;				\
-						\
-	clear_siginfo(&info);			\
-	info.si_signo = signr;			\
-	info.si_errno = 0;			\
-	info.si_code  = sicode;			\
-	info.si_addr = (void __user *)address;	\
-						\
-	return unhandled_exception(str, regs, &info);\
+{								\
+	return unhandled_exception(str, regs, signr, sicode,	\
+				   (void __user *)address);	\
 }
 
 /*
@@ -102,7 +90,7 @@ int do_misaligned_access(unsigned long address, struct pt_regs *regs,
 
 /*
  * Entry point for miscll errors such as Nested Exceptions
- *  -Duplicate TLB entry is handled seperately though
+ *  -Duplicate TLB entry is handled separately though
  */
 void do_machine_check_fault(unsigned long address, struct pt_regs *regs)
 {
@@ -123,9 +111,7 @@ void do_machine_check_fault(unsigned long address, struct pt_regs *regs)
  */
 void do_non_swi_trap(unsigned long address, struct pt_regs *regs)
 {
-	unsigned int param = regs->ecr_param;
-
-	switch (param) {
+	switch (regs->ecr.param) {
 	case 1:
 		trap_is_brkpt(address, regs);
 		break;

@@ -1,20 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2015 Maxime Ripard
  *
  * Maxime Ripard <maxime.ripard@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/of_address.h>
 #include <linux/reset-controller.h>
@@ -134,7 +126,7 @@ static void __init sun4i_a10_display_init(struct device_node *node,
 		goto unmap;
 	}
 
-	mux = kzalloc(sizeof(*mux), GFP_KERNEL);
+	mux = kzalloc_obj(*mux);
 	if (!mux)
 		goto unmap;
 
@@ -143,7 +135,7 @@ static void __init sun4i_a10_display_init(struct device_node *node,
 	mux->mask = (1 << data->width_mux) - 1;
 	mux->lock = &sun4i_a10_display_lock;
 
-	gate = kzalloc(sizeof(*gate), GFP_KERNEL);
+	gate = kzalloc_obj(*gate);
 	if (!gate)
 		goto free_mux;
 
@@ -152,7 +144,7 @@ static void __init sun4i_a10_display_init(struct device_node *node,
 	gate->lock = &sun4i_a10_display_lock;
 
 	if (data->has_div) {
-		div = kzalloc(sizeof(*div), GFP_KERNEL);
+		div = kzalloc_obj(*div);
 		if (!div)
 			goto free_gate;
 
@@ -183,7 +175,7 @@ static void __init sun4i_a10_display_init(struct device_node *node,
 	if (!data->num_rst)
 		return;
 
-	reset_data = kzalloc(sizeof(*reset_data), GFP_KERNEL);
+	reset_data = kzalloc_obj(*reset_data);
 	if (!reset_data)
 		goto free_of_clk;
 

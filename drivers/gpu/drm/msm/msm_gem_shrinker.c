@@ -1,106 +1,235 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2016 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+
+#include <linux/vmalloc.h>
+#include <linux/sched/mm.h>
 
 #include "msm_drv.h"
 #include "msm_gem.h"
+#include "msm_gpu.h"
+#include "msm_gpu_trace.h"
 
-static bool msm_gem_shrinker_lock(struct drm_device *dev, bool *unlock)
+/* Default disabled for now until it has some more testing on the different
+ * iommu combinations that can be paired with the driver:
+ */
+static bool enable_eviction = true;
+MODULE_PARM_DESC(enable_eviction, "Enable swappable GEM buffers");
+module_param(enable_eviction, bool, 0600);
+
+static bool can_swap(void)
 {
-	/* NOTE: we are *closer* to being able to get rid of
-	 * mutex_trylock_recursive().. the msm_gem code itself does
-	 * not need struct_mutex, although codepaths that can trigger
-	 * shrinker are still called in code-paths that hold the
-	 * struct_mutex.
-	 *
-	 * Also, msm_obj->madv is protected by struct_mutex.
-	 *
-	 * The next step is probably split out a seperate lock for
-	 * protecting inactive_list, so that shrinker does not need
-	 * struct_mutex.
-	 */
-	switch (mutex_trylock_recursive(&dev->struct_mutex)) {
-	case MUTEX_TRYLOCK_FAILED:
-		return false;
+	return enable_eviction && get_nr_swap_pages() > 0;
+}
 
-	case MUTEX_TRYLOCK_SUCCESS:
-		*unlock = true;
-		return true;
-
-	case MUTEX_TRYLOCK_RECURSIVE:
-		*unlock = false;
-		return true;
-	}
-
-	BUG();
+static bool can_block(struct shrink_control *sc)
+{
+	return (sc->gfp_mask & __GFP_DIRECT_RECLAIM) ||
+	       (current_is_kswapd() && (sc->gfp_mask & __GFP_KSWAPD_RECLAIM));
 }
 
 static unsigned long
 msm_gem_shrinker_count(struct shrinker *shrinker, struct shrink_control *sc)
 {
-	struct msm_drm_private *priv =
-		container_of(shrinker, struct msm_drm_private, shrinker);
-	struct drm_device *dev = priv->dev;
-	struct msm_gem_object *msm_obj;
-	unsigned long count = 0;
-	bool unlock;
+	struct msm_drm_private *priv = shrinker->private_data;
+	unsigned count = priv->lru.dontneed.count;
 
-	if (!msm_gem_shrinker_lock(dev, &unlock))
-		return 0;
-
-	list_for_each_entry(msm_obj, &priv->inactive_list, mm_list) {
-		if (is_purgeable(msm_obj))
-			count += msm_obj->base.size >> PAGE_SHIFT;
-	}
-
-	if (unlock)
-		mutex_unlock(&dev->struct_mutex);
+	if (can_swap())
+		count += priv->lru.willneed.count;
 
 	return count;
+}
+
+static bool
+with_vm_locks(void (*fn)(struct drm_gem_object *obj),
+	      struct drm_gem_object *obj)
+{
+	/*
+	 * Track last locked entry for for unwinding locks in error and
+	 * success paths
+	 */
+	struct drm_gpuvm_bo *vm_bo, *last_locked = NULL;
+	bool locked = true;
+
+	drm_gem_for_each_gpuvm_bo (vm_bo, obj) {
+		struct dma_resv *resv = drm_gpuvm_resv(vm_bo->vm);
+
+		if (resv == obj->resv)
+			continue;
+
+		/*
+		 * dma_resv_lock can't be used due to acquiring 'ticket' before the
+		 * fs_reclaim lock, which is held in shrinker context
+		 */
+		if (!dma_resv_trylock(resv)) {
+			locked = false;
+			goto out_unlock;
+		}
+
+		/*
+		 * Hold a ref to prevent the vm_bo from being freed
+		 * and removed from the obj's gpuva list, as that would
+		 * would result in missing the unlock below
+		 */
+		drm_gpuvm_bo_get(vm_bo);
+
+		last_locked = vm_bo;
+	}
+
+	fn(obj);
+
+out_unlock:
+	if (last_locked) {
+		drm_gem_for_each_gpuvm_bo (vm_bo, obj) {
+			struct dma_resv *resv = drm_gpuvm_resv(vm_bo->vm);
+
+			if (resv == obj->resv)
+				continue;
+
+			dma_resv_unlock(resv);
+
+			/* Drop the ref taken while locking: */
+			drm_gpuvm_bo_put(vm_bo);
+
+			if (last_locked == vm_bo)
+				break;
+		}
+	}
+
+	return locked;
+}
+
+static bool
+purge(struct drm_gem_object *obj, struct ww_acquire_ctx *unused)
+{
+	if (!is_purgeable(to_msm_bo(obj)))
+		return false;
+
+	if (msm_gem_active(obj))
+		return false;
+
+	return with_vm_locks(msm_gem_purge, obj);
+}
+
+static bool
+evict(struct drm_gem_object *obj, struct ww_acquire_ctx *unused)
+{
+	if (is_unevictable(to_msm_bo(obj)))
+		return false;
+
+	if (msm_gem_active(obj))
+		return false;
+
+	return with_vm_locks(msm_gem_evict, obj);
+}
+
+static bool
+wait_for_idle(struct drm_gem_object *obj)
+{
+	enum dma_resv_usage usage = DMA_RESV_USAGE_BOOKKEEP;
+	return dma_resv_wait_timeout(obj->resv, usage, false, 10) > 0;
+}
+
+static bool
+active_purge(struct drm_gem_object *obj, struct ww_acquire_ctx *ticket)
+{
+	if (!wait_for_idle(obj))
+		return false;
+
+	return purge(obj, ticket);
+}
+
+static bool
+active_evict(struct drm_gem_object *obj, struct ww_acquire_ctx *ticket)
+{
+	if (!wait_for_idle(obj))
+		return false;
+
+	return evict(obj, ticket);
 }
 
 static unsigned long
 msm_gem_shrinker_scan(struct shrinker *shrinker, struct shrink_control *sc)
 {
-	struct msm_drm_private *priv =
-		container_of(shrinker, struct msm_drm_private, shrinker);
-	struct drm_device *dev = priv->dev;
-	struct msm_gem_object *msm_obj;
+	struct msm_drm_private *priv = shrinker->private_data;
+	struct {
+		struct drm_gem_lru *lru;
+		bool (*shrink)(struct drm_gem_object *obj, struct ww_acquire_ctx *ticket);
+		bool cond;
+		unsigned long freed;
+		unsigned long remaining;
+	} stages[] = {
+		/* Stages of progressively more aggressive/expensive reclaim: */
+		{ &priv->lru.dontneed, purge,        true },
+		{ &priv->lru.willneed, evict,        can_swap() },
+		{ &priv->lru.dontneed, active_purge, can_block(sc) },
+		{ &priv->lru.willneed, active_evict, can_swap() && can_block(sc) },
+	};
+	long nr = sc->nr_to_scan;
 	unsigned long freed = 0;
-	bool unlock;
+	unsigned long remaining = 0;
 
-	if (!msm_gem_shrinker_lock(dev, &unlock))
-		return SHRINK_STOP;
-
-	list_for_each_entry(msm_obj, &priv->inactive_list, mm_list) {
-		if (freed >= sc->nr_to_scan)
-			break;
-		if (is_purgeable(msm_obj)) {
-			msm_gem_purge(&msm_obj->base, OBJ_LOCK_SHRINKER);
-			freed += msm_obj->base.size >> PAGE_SHIFT;
-		}
+	for (unsigned i = 0; (nr > 0) && (i < ARRAY_SIZE(stages)); i++) {
+		if (!stages[i].cond)
+			continue;
+		/*
+		 * 'ticket' not needed on trylock paths
+		 */
+		stages[i].freed =
+			drm_gem_lru_scan(priv->dev, stages[i].lru, nr,
+					 &stages[i].remaining,
+					 stages[i].shrink,
+					 NULL);
+		nr -= stages[i].freed;
+		freed += stages[i].freed;
+		remaining += stages[i].remaining;
 	}
 
-	if (unlock)
-		mutex_unlock(&dev->struct_mutex);
+	if (freed) {
+		trace_msm_gem_shrink(sc->nr_to_scan, stages[0].freed,
+				     stages[1].freed, stages[2].freed,
+				     stages[3].freed);
+	}
 
-	if (freed > 0)
-		pr_info_ratelimited("Purging %lu bytes\n", freed << PAGE_SHIFT);
+	return (freed > 0 && remaining > 0) ? freed : SHRINK_STOP;
+}
 
-	return freed;
+#ifdef CONFIG_DEBUG_FS
+unsigned long
+msm_gem_shrinker_shrink(struct drm_device *dev, unsigned long nr_to_scan)
+{
+	struct msm_drm_private *priv = dev->dev_private;
+	struct shrink_control sc = {
+		.nr_to_scan = nr_to_scan,
+	};
+	unsigned long ret = SHRINK_STOP;
+
+	fs_reclaim_acquire(GFP_KERNEL);
+	if (priv->shrinker)
+		ret = msm_gem_shrinker_scan(priv->shrinker, &sc);
+	fs_reclaim_release(GFP_KERNEL);
+
+	return ret;
+}
+#endif
+
+/* since we don't know any better, lets bail after a few
+ * and if necessary the shrinker will be invoked again.
+ * Seems better than unmapping *everything*
+ */
+static const int vmap_shrink_limit = 15;
+
+static bool
+vmap_shrink(struct drm_gem_object *obj, struct ww_acquire_ctx *ticket)
+{
+	if (!is_vunmapable(to_msm_bo(obj)))
+		return false;
+
+	msm_gem_vunmap(obj);
+
+	return true;
 }
 
 static int
@@ -108,58 +237,60 @@ msm_gem_shrinker_vmap(struct notifier_block *nb, unsigned long event, void *ptr)
 {
 	struct msm_drm_private *priv =
 		container_of(nb, struct msm_drm_private, vmap_notifier);
-	struct drm_device *dev = priv->dev;
-	struct msm_gem_object *msm_obj;
-	unsigned unmapped = 0;
-	bool unlock;
+	struct drm_gem_lru *lrus[] = {
+		&priv->lru.dontneed,
+		&priv->lru.willneed,
+		&priv->lru.pinned,
+		NULL,
+	};
+	unsigned idx, unmapped = 0;
+	unsigned long remaining = 0;
 
-	if (!msm_gem_shrinker_lock(dev, &unlock))
-		return NOTIFY_DONE;
-
-	list_for_each_entry(msm_obj, &priv->inactive_list, mm_list) {
-		if (is_vunmapable(msm_obj)) {
-			msm_gem_vunmap(&msm_obj->base, OBJ_LOCK_SHRINKER);
-			/* since we don't know any better, lets bail after a few
-			 * and if necessary the shrinker will be invoked again.
-			 * Seems better than unmapping *everything*
-			 */
-			if (++unmapped >= 15)
-				break;
-		}
+	for (idx = 0; lrus[idx] && unmapped < vmap_shrink_limit; idx++) {
+		unmapped += drm_gem_lru_scan(priv->dev, lrus[idx],
+					     vmap_shrink_limit - unmapped,
+					     &remaining,
+					     vmap_shrink,
+					     NULL);
 	}
-
-	if (unlock)
-		mutex_unlock(&dev->struct_mutex);
 
 	*(unsigned long *)ptr += unmapped;
 
 	if (unmapped > 0)
-		pr_info_ratelimited("Purging %u vmaps\n", unmapped);
+		trace_msm_gem_purge_vmaps(unmapped);
 
 	return NOTIFY_DONE;
 }
 
 /**
  * msm_gem_shrinker_init - Initialize msm shrinker
- * @dev_priv: msm device
+ * @dev: drm device
  *
  * This function registers and sets up the msm shrinker.
  */
-void msm_gem_shrinker_init(struct drm_device *dev)
+int msm_gem_shrinker_init(struct drm_device *dev)
 {
 	struct msm_drm_private *priv = dev->dev_private;
-	priv->shrinker.count_objects = msm_gem_shrinker_count;
-	priv->shrinker.scan_objects = msm_gem_shrinker_scan;
-	priv->shrinker.seeks = DEFAULT_SEEKS;
-	WARN_ON(register_shrinker(&priv->shrinker));
+
+	priv->shrinker = shrinker_alloc(0, "drm-msm_gem");
+	if (!priv->shrinker)
+		return -ENOMEM;
+
+	priv->shrinker->count_objects = msm_gem_shrinker_count;
+	priv->shrinker->scan_objects = msm_gem_shrinker_scan;
+	priv->shrinker->private_data = priv;
+
+	shrinker_register(priv->shrinker);
 
 	priv->vmap_notifier.notifier_call = msm_gem_shrinker_vmap;
 	WARN_ON(register_vmap_purge_notifier(&priv->vmap_notifier));
+
+	return 0;
 }
 
 /**
  * msm_gem_shrinker_cleanup - Clean up msm shrinker
- * @dev_priv: msm device
+ * @dev: drm device
  *
  * This function unregisters the msm shrinker.
  */
@@ -167,8 +298,8 @@ void msm_gem_shrinker_cleanup(struct drm_device *dev)
 {
 	struct msm_drm_private *priv = dev->dev_private;
 
-	if (priv->shrinker.nr_deferred) {
+	if (priv->shrinker) {
 		WARN_ON(unregister_vmap_purge_notifier(&priv->vmap_notifier));
-		unregister_shrinker(&priv->shrinker);
+		shrinker_free(priv->shrinker);
 	}
 }

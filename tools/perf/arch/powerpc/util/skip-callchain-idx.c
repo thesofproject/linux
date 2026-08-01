@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Use DWARF Debug information to skip unnecessary callchain entries.
  *
  * Copyright (C) 2014 Sukadev Bhattiprolu, IBM Corporation.
  * Copyright (C) 2014 Ulrich Weigand, IBM Corporation.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 #include <inttypes.h>
 #include <dwarf.h>
@@ -16,6 +12,10 @@
 #include "util/thread.h"
 #include "util/callchain.h"
 #include "util/debug.h"
+#include "util/dso.h"
+#include "util/event.h" // struct ip_callchain
+#include "util/map.h"
+#include "util/symbol.h"
 
 /*
  * When saving the callchain on Power, the kernel conservatively saves
@@ -30,14 +30,6 @@
  * The libdwfl code in this file is based on code from elfutils
  * (libdwfl/argp-std.c, libdwfl/tests/addrcfi.c, etc).
  */
-static char *debuginfo_path;
-
-static const Dwfl_Callbacks offline_callbacks = {
-	.debuginfo_path = &debuginfo_path,
-	.find_debuginfo = dwfl_standard_find_debuginfo,
-	.section_address = dwfl_offline_section_address,
-};
-
 
 /*
  * Use the DWARF expression for the Call-frame-address and determine
@@ -45,7 +37,7 @@ static const Dwfl_Callbacks offline_callbacks = {
  */
 static int check_return_reg(int ra_regno, Dwarf_Frame *frame)
 {
-	Dwarf_Op ops_mem[2];
+	Dwarf_Op ops_mem[3];
 	Dwarf_Op dummy;
 	Dwarf_Op *ops = &dummy;
 	size_t nops;
@@ -58,9 +50,13 @@ static int check_return_reg(int ra_regno, Dwarf_Frame *frame)
 	}
 
 	/*
-	 * Check if return address is on the stack.
+	 * Check if return address is on the stack. If return address
+	 * is in a register (typically R0), it is yet to be saved on
+	 * the stack.
 	 */
-	if (nops != 0 || ops != NULL)
+	if ((nops != 0 || ops != NULL) &&
+		!(nops == 1 && ops[0].atom == DW_OP_regx &&
+			ops[0].number2 == 0 && ops[0].offset == 0))
 		return 0;
 
 	/*
@@ -145,44 +141,22 @@ static Dwarf_Frame *get_dwarf_frame(Dwfl_Module *mod, Dwarf_Addr pc)
  *		yet used)
  *	-1 in case of errors
  */
-static int check_return_addr(struct dso *dso, u64 map_start, Dwarf_Addr pc)
+static int check_return_addr(struct dso *dso, Dwarf_Addr mapped_pc)
 {
 	int		rc = -1;
 	Dwfl		*dwfl;
 	Dwfl_Module	*mod;
 	Dwarf_Frame	*frame;
 	int		ra_regno;
-	Dwarf_Addr	start = pc;
-	Dwarf_Addr	end = pc;
+	Dwarf_Addr	start = mapped_pc;
+	Dwarf_Addr	end = mapped_pc;
 	bool		signalp;
-	const char	*exec_file = dso->long_name;
 
-	dwfl = dso->dwfl;
+	dwfl = dso__libdw_dwfl(dso);
+	if (!dwfl)
+		return -1;
 
-	if (!dwfl) {
-		dwfl = dwfl_begin(&offline_callbacks);
-		if (!dwfl) {
-			pr_debug("dwfl_begin() failed: %s\n", dwarf_errmsg(-1));
-			return -1;
-		}
-
-		mod = dwfl_report_elf(dwfl, exec_file, exec_file, -1,
-						map_start, false);
-		if (!mod) {
-			pr_debug("dwfl_report_elf() failed %s\n",
-						dwarf_errmsg(-1));
-			/*
-			 * We normally cache the DWARF debug info and never
-			 * call dwfl_end(). But to prevent fd leak, free in
-			 * case of error.
-			 */
-			dwfl_end(dwfl);
-			goto out;
-		}
-		dso->dwfl = dwfl;
-	}
-
-	mod = dwfl_addrmodule(dwfl, pc);
+	mod = dwfl_addrmodule(dwfl, mapped_pc);
 	if (!mod) {
 		pr_debug("dwfl_addrmodule() failed, %s\n", dwarf_errmsg(-1));
 		goto out;
@@ -192,9 +166,9 @@ static int check_return_addr(struct dso *dso, u64 map_start, Dwarf_Addr pc)
 	 * To work with split debug info files (eg: glibc), check both
 	 * .eh_frame and .debug_frame sections of the ELF header.
 	 */
-	frame = get_eh_frame(mod, pc);
+	frame = get_eh_frame(mod, mapped_pc);
 	if (!frame) {
-		frame = get_dwarf_frame(mod, pc);
+		frame = get_dwarf_frame(mod, mapped_pc);
 		if (!frame)
 			goto out;
 	}
@@ -243,26 +217,27 @@ int arch_skip_callchain_idx(struct thread *thread, struct ip_callchain *chain)
 	u64 ip;
 	u64 skip_slot = -1;
 
-	if (chain->nr < 3)
+	if (!chain || chain->nr < 3)
 		return skip_slot;
 
-	ip = chain->ips[2];
+	addr_location__init(&al);
+	ip = chain->ips[1];
 
-	thread__find_addr_location(thread, PERF_RECORD_MISC_USER,
-			MAP__FUNCTION, ip, &al);
+	thread__find_symbol(thread, PERF_RECORD_MISC_USER, ip, &al);
 
 	if (al.map)
-		dso = al.map->dso;
+		dso = map__dso(al.map);
 
 	if (!dso) {
 		pr_debug("%" PRIx64 " dso is NULL\n", ip);
+		addr_location__exit(&al);
 		return skip_slot;
 	}
 
-	rc = check_return_addr(dso, al.map->start, ip);
+	rc = check_return_addr(dso, map__map_ip(al.map, ip));
 
 	pr_debug("[DSO %s, sym %s, ip 0x%" PRIx64 "] rc %d\n",
-				dso->long_name, al.sym->name, ip, rc);
+		dso__long_name(dso), al.sym->name, ip, rc);
 
 	if (rc == 0) {
 		/*
@@ -276,5 +251,7 @@ int arch_skip_callchain_idx(struct thread *thread, struct ip_callchain *chain)
 		 */
 		skip_slot = 3;
 	}
+
+	addr_location__exit(&al);
 	return skip_slot;
 }

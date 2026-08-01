@@ -3,7 +3,7 @@
  *
  * Module Name: utinit - Common ACPI subsystem initialization
  *
- * Copyright (C) 2000 - 2018, Intel Corp.
+ * Copyright (C) 2000 - 2026, Intel Corp.
  *
  *****************************************************************************/
 
@@ -154,7 +154,7 @@ acpi_status acpi_ut_init_globals(void)
 
 	/* Global Lock support */
 
-	acpi_gbl_global_lock_semaphore = NULL;
+	acpi_gbl_global_lock_semaphore = ACPI_SEMAPHORE_NULL;
 	acpi_gbl_global_lock_mutex = NULL;
 	acpi_gbl_global_lock_acquired = FALSE;
 	acpi_gbl_global_lock_handle = 0;
@@ -180,7 +180,6 @@ acpi_status acpi_ut_init_globals(void)
 
 	/* Namespace */
 
-	acpi_gbl_module_code_list = NULL;
 	acpi_gbl_root_node = NULL;
 	acpi_gbl_root_node_struct.name.integer = ACPI_ROOT_NAME;
 	acpi_gbl_root_node_struct.descriptor_type = ACPI_DESC_TYPE_NAMED;

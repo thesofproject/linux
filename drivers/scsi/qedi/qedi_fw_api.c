@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* QLogic iSCSI Offload Driver
  * Copyright (c) 2016 Cavium Inc.
- *
- * This software is available under the terms of the GNU General Public License
- * (GPL) Version 2, available from the file COPYING in the main directory of
- * this source tree.
  */
 
 #include <linux/types.h>
@@ -126,22 +123,24 @@ static void init_sqe(struct iscsi_task_params *task_params,
 						     sgl_task_params,
 						     dif_task_params);
 
-		if (scsi_is_slow_sgl(sgl_task_params->num_sges,
-				     sgl_task_params->small_mid_sge))
-			num_sges = ISCSI_WQE_NUM_SGES_SLOWIO;
-		else
-			num_sges = min(sgl_task_params->num_sges,
-				       (u16)SCSI_NUM_SGES_SLOW_SGL_THR);
-	}
+			if (scsi_is_slow_sgl(sgl_task_params->num_sges,
+					     sgl_task_params->small_mid_sge))
+				num_sges = ISCSI_WQE_NUM_SGES_SLOWIO;
+			else
+				num_sges = min(sgl_task_params->num_sges,
+					       (u16)SCSI_NUM_SGES_SLOW_SGL_THR);
+		}
 
-	SET_FIELD(task_params->sqe->flags, ISCSI_WQE_NUM_SGES, num_sges);
-	SET_FIELD(task_params->sqe->contlen_cdbsize, ISCSI_WQE_CONT_LEN,
-		  buf_size);
+		SET_FIELD(task_params->sqe->flags, ISCSI_WQE_NUM_SGES,
+			  num_sges);
+		SET_FIELD(task_params->sqe->contlen_cdbsize, ISCSI_WQE_CONT_LEN,
+			  buf_size);
 
-	if (GET_FIELD(pdu_header->hdr_second_dword,
-		      ISCSI_CMD_HDR_TOTAL_AHS_LEN))
-		SET_FIELD(task_params->sqe->contlen_cdbsize, ISCSI_WQE_CDB_SIZE,
-			  cmd_params->extended_cdb_sge.sge_len);
+		if (GET_FIELD(pdu_header->hdr_second_dword,
+			      ISCSI_CMD_HDR_TOTAL_AHS_LEN))
+			SET_FIELD(task_params->sqe->contlen_cdbsize,
+				  ISCSI_WQE_CDB_SIZE,
+				  cmd_params->extended_cdb_sge.sge_len);
 	}
 		break;
 	case ISCSI_TASK_TYPE_INITIATOR_READ:
@@ -203,7 +202,7 @@ static void init_default_iscsi_task(struct iscsi_task_params *task_params,
 				    struct data_hdr *pdu_header,
 				    enum iscsi_task_type task_type)
 {
-	struct e4_iscsi_task_context *context;
+	struct iscsi_task_context *context;
 	u32 val;
 	u16 index;
 	u8 val_byte;
@@ -225,7 +224,7 @@ static void init_default_iscsi_task(struct iscsi_task_params *task_params,
 					    cpu_to_le16(task_params->conn_icid);
 
 	SET_FIELD(context->ustorm_ag_context.flags1,
-		  E4_USTORM_ISCSI_TASK_AG_CTX_R2T2RECV, 1);
+		  USTORM_ISCSI_TASK_AG_CTX_R2T2RECV, 1);
 
 	context->ustorm_st_context.task_type = task_type;
 	context->ustorm_st_context.cq_rss_number = task_params->cq_rss_number;
@@ -255,7 +254,7 @@ void init_initiator_rw_cdb_ystorm_context(struct ystorm_iscsi_task_st_ctx *ystc,
 
 static
 void init_ustorm_task_contexts(struct ustorm_iscsi_task_st_ctx *ustorm_st_cxt,
-			struct e4_ustorm_iscsi_task_ag_ctx *ustorm_ag_cxt,
+			struct ustorm_iscsi_task_ag_ctx *ustorm_ag_cxt,
 			u32 remaining_recv_len, u32 expected_data_transfer_len,
 			u8 num_sges, bool tx_dif_conn_err_en)
 {
@@ -267,12 +266,12 @@ void init_ustorm_task_contexts(struct ustorm_iscsi_task_st_ctx *ustorm_st_cxt,
 	ustorm_st_cxt->exp_data_transfer_len = val;
 	SET_FIELD(ustorm_st_cxt->reg1.reg1_map, ISCSI_REG1_NUM_SGES, num_sges);
 	SET_FIELD(ustorm_ag_cxt->flags2,
-		  E4_USTORM_ISCSI_TASK_AG_CTX_DIF_ERROR_CF_EN,
+		  USTORM_ISCSI_TASK_AG_CTX_DIF_ERROR_CF_EN,
 		  tx_dif_conn_err_en ? 1 : 0);
 }
 
 static
-void set_rw_exp_data_acked_and_cont_len(struct e4_iscsi_task_context *context,
+void set_rw_exp_data_acked_and_cont_len(struct iscsi_task_context *context,
 					struct iscsi_conn_params  *conn_params,
 					enum iscsi_task_type task_type,
 					u32 task_size,
@@ -471,7 +470,7 @@ void init_rtdif_task_context(struct rdif_task_context *rdif_context,
 	}
 }
 
-static void set_local_completion_context(struct e4_iscsi_task_context *context)
+static void set_local_completion_context(struct iscsi_task_context *context)
 {
 	SET_FIELD(context->ystorm_st_context.state.flags,
 		  YSTORM_ISCSI_TASK_STATE_LOCAL_COMP, 1);
@@ -488,7 +487,7 @@ static int init_rw_iscsi_task(struct iscsi_task_params *task_params,
 			      struct scsi_dif_task_params *dif_task_params)
 {
 	u32 exp_data_transfer_len = conn_params->max_burst_length;
-	struct e4_iscsi_task_context *cxt;
+	struct iscsi_task_context *cxt;
 	bool slow_io = false;
 	u32 task_size, val;
 	u8 num_sges = 0;
@@ -616,7 +615,7 @@ int init_initiator_login_request_task(struct iscsi_task_params *task_params,
 				      struct scsi_sgl_task_params *tx_params,
 				      struct scsi_sgl_task_params *rx_params)
 {
-	struct e4_iscsi_task_context *cxt;
+	struct iscsi_task_context *cxt;
 
 	cxt = task_params->context;
 
@@ -658,7 +657,7 @@ int init_initiator_nop_out_task(struct iscsi_task_params *task_params,
 				struct scsi_sgl_task_params *tx_sgl_task_params,
 				struct scsi_sgl_task_params *rx_sgl_task_params)
 {
-	struct e4_iscsi_task_context *cxt;
+	struct iscsi_task_context *cxt;
 
 	cxt = task_params->context;
 
@@ -704,7 +703,7 @@ int init_initiator_logout_request_task(struct iscsi_task_params *task_params,
 				       struct scsi_sgl_task_params *tx_params,
 				       struct scsi_sgl_task_params *rx_params)
 {
-	struct e4_iscsi_task_context *cxt;
+	struct iscsi_task_context *cxt;
 
 	cxt = task_params->context;
 
@@ -759,7 +758,7 @@ int init_initiator_text_request_task(struct iscsi_task_params *task_params,
 				     struct scsi_sgl_task_params *tx_params,
 				     struct scsi_sgl_task_params *rx_params)
 {
-	struct e4_iscsi_task_context *cxt;
+	struct iscsi_task_context *cxt;
 
 	cxt = task_params->context;
 

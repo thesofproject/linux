@@ -1,15 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Sample fifo dma implementation
  *
  * Copyright (C) 2010 Stefani Seibold <stefani@seibold.net>
- *
- * Released under the GPL version 2 only.
- *
  */
 
 #include <linux/init.h>
-#include <linux/module.h>
 #include <linux/kfifo.h>
+#include <linux/module.h>
+#include <linux/scatterlist.h>
+#include <linux/dma-mapping.h>
 
 /*
  * This module shows how to handle fifo dma operations.
@@ -139,5 +139,6 @@ static void __exit example_exit(void)
 
 module_init(example_init);
 module_exit(example_exit);
+MODULE_DESCRIPTION("Sample fifo dma implementation");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Stefani Seibold <stefani@seibold.net>");

@@ -41,7 +41,7 @@ int compare_pnp_id(struct pnp_id *pos, const char *id)
 	return 0;
 }
 
-static const struct pnp_device_id *match_device(struct pnp_driver *drv,
+static const struct pnp_device_id *match_device(const struct pnp_driver *drv,
 						struct pnp_dev *dev)
 {
 	const struct pnp_device_id *drv_id = drv->id_table;
@@ -68,6 +68,7 @@ int pnp_device_attach(struct pnp_dev *pnp_dev)
 	mutex_unlock(&pnp_lock);
 	return 0;
 }
+EXPORT_SYMBOL(pnp_device_attach);
 
 void pnp_device_detach(struct pnp_dev *pnp_dev)
 {
@@ -76,6 +77,7 @@ void pnp_device_detach(struct pnp_dev *pnp_dev)
 		pnp_dev->status = PNP_READY;
 	mutex_unlock(&pnp_lock);
 }
+EXPORT_SYMBOL(pnp_device_detach);
 
 static int pnp_device_probe(struct device *dev)
 {
@@ -121,7 +123,7 @@ fail:
 	return error;
 }
 
-static int pnp_device_remove(struct device *dev)
+static void pnp_device_remove(struct device *dev)
 {
 	struct pnp_dev *pnp_dev = to_pnp_dev(dev);
 	struct pnp_driver *drv = pnp_dev->driver;
@@ -137,7 +139,6 @@ static int pnp_device_remove(struct device *dev)
 		pnp_disable_dev(pnp_dev);
 
 	pnp_device_detach(pnp_dev);
-	return 0;
 }
 
 static void pnp_device_shutdown(struct device *dev)
@@ -149,10 +150,28 @@ static void pnp_device_shutdown(struct device *dev)
 		drv->shutdown(pnp_dev);
 }
 
-static int pnp_bus_match(struct device *dev, struct device_driver *drv)
+static int pnp_uevent(const struct device *dev, struct kobj_uevent_env *env)
+{
+	struct pnp_id *pos;
+	const struct pnp_dev *pnp_dev = to_pnp_dev(dev);
+
+	if (!dev)
+		return -ENODEV;
+
+	pos = pnp_dev->id;
+	while (pos) {
+		if (add_uevent_var(env, "MODALIAS=pnp:d%s", pos->id))
+			return -ENOMEM;
+		pos = pos->next;
+	}
+
+	return 0;
+}
+
+static int pnp_bus_match(struct device *dev, const struct device_driver *drv)
 {
 	struct pnp_dev *pnp_dev = to_pnp_dev(dev);
-	struct pnp_driver *pnp_drv = to_pnp_driver(drv);
+	const struct pnp_driver *pnp_drv = to_pnp_driver(drv);
 
 	if (match_device(pnp_drv, pnp_dev) == NULL)
 		return 0;
@@ -170,7 +189,7 @@ static int __pnp_bus_suspend(struct device *dev, pm_message_t state)
 
 	if (pnp_drv->driver.pm && pnp_drv->driver.pm->suspend) {
 		error = pnp_drv->driver.pm->suspend(dev);
-		suspend_report_result(pnp_drv->driver.pm->suspend, error);
+		suspend_report_result(dev, pnp_drv->driver.pm->suspend, error);
 		if (error)
 			return error;
 	}
@@ -181,7 +200,8 @@ static int __pnp_bus_suspend(struct device *dev, pm_message_t state)
 			return error;
 	}
 
-	if (pnp_can_disable(pnp_dev)) {
+	/* can_write is necessary to be able to re-start the device on resume */
+	if (pnp_can_disable(pnp_dev) && pnp_can_write(pnp_dev)) {
 		error = pnp_stop_dev(pnp_dev);
 		if (error)
 			return error;
@@ -254,15 +274,22 @@ static const struct dev_pm_ops pnp_bus_dev_pm_ops = {
 	.restore = pnp_bus_resume,
 };
 
-struct bus_type pnp_bus_type = {
+const struct bus_type pnp_bus_type = {
 	.name    = "pnp",
 	.match   = pnp_bus_match,
+	.uevent  = pnp_uevent,
 	.probe   = pnp_device_probe,
 	.remove  = pnp_device_remove,
 	.shutdown = pnp_device_shutdown,
 	.pm	 = &pnp_bus_dev_pm_ops,
 	.dev_groups = pnp_dev_groups,
 };
+
+bool dev_is_pnp(const struct device *dev)
+{
+	return dev->bus == &pnp_bus_type;
+}
+EXPORT_SYMBOL_GPL(dev_is_pnp);
 
 int pnp_register_driver(struct pnp_driver *drv)
 {
@@ -271,11 +298,13 @@ int pnp_register_driver(struct pnp_driver *drv)
 
 	return driver_register(&drv->driver);
 }
+EXPORT_SYMBOL(pnp_register_driver);
 
 void pnp_unregister_driver(struct pnp_driver *drv)
 {
 	driver_unregister(&drv->driver);
 }
+EXPORT_SYMBOL(pnp_unregister_driver);
 
 /**
  * pnp_add_id - adds an EISA id to the specified device
@@ -286,7 +315,7 @@ struct pnp_id *pnp_add_id(struct pnp_dev *dev, const char *id)
 {
 	struct pnp_id *dev_id, *ptr;
 
-	dev_id = kzalloc(sizeof(struct pnp_id), GFP_KERNEL);
+	dev_id = kzalloc_obj(struct pnp_id);
 	if (!dev_id)
 		return NULL;
 
@@ -310,8 +339,3 @@ struct pnp_id *pnp_add_id(struct pnp_dev *dev, const char *id)
 
 	return dev_id;
 }
-
-EXPORT_SYMBOL(pnp_register_driver);
-EXPORT_SYMBOL(pnp_unregister_driver);
-EXPORT_SYMBOL(pnp_device_attach);
-EXPORT_SYMBOL(pnp_device_detach);

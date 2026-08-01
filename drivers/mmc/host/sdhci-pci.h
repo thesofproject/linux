@@ -11,6 +11,10 @@
 #define PCI_DEVICE_ID_O2_FUJIN2		0x8520
 #define PCI_DEVICE_ID_O2_SEABIRD0	0x8620
 #define PCI_DEVICE_ID_O2_SEABIRD1	0x8621
+#define PCI_DEVICE_ID_O2_GG8_9860	0x9860
+#define PCI_DEVICE_ID_O2_GG8_9861	0x9861
+#define PCI_DEVICE_ID_O2_GG8_9862	0x9862
+#define PCI_DEVICE_ID_O2_GG8_9863	0x9863
 
 #define PCI_DEVICE_ID_INTEL_PCH_SDIO0	0x8809
 #define PCI_DEVICE_ID_INTEL_PCH_SDIO1	0x880a
@@ -48,15 +52,35 @@
 #define PCI_DEVICE_ID_INTEL_CNP_EMMC	0x9dc4
 #define PCI_DEVICE_ID_INTEL_CNP_SD	0x9df5
 #define PCI_DEVICE_ID_INTEL_CNPH_SD	0xa375
+#define PCI_DEVICE_ID_INTEL_ICP_EMMC	0x34c4
+#define PCI_DEVICE_ID_INTEL_ICP_SD	0x34f8
+#define PCI_DEVICE_ID_INTEL_EHL_EMMC	0x4b47
+#define PCI_DEVICE_ID_INTEL_EHL_SD	0x4b48
+#define PCI_DEVICE_ID_INTEL_CML_EMMC	0x02c4
+#define PCI_DEVICE_ID_INTEL_CML_SD	0x02f5
+#define PCI_DEVICE_ID_INTEL_CMLH_SD	0x06f5
+#define PCI_DEVICE_ID_INTEL_JSL_EMMC	0x4dc4
+#define PCI_DEVICE_ID_INTEL_JSL_SD	0x4df8
+#define PCI_DEVICE_ID_INTEL_LKF_EMMC	0x98c4
+#define PCI_DEVICE_ID_INTEL_LKF_SD	0x98f8
+#define PCI_DEVICE_ID_INTEL_ADL_EMMC	0x54c4
 
 #define PCI_DEVICE_ID_SYSKONNECT_8000	0x8000
 #define PCI_DEVICE_ID_VIA_95D0		0x95d0
 #define PCI_DEVICE_ID_REALTEK_5250	0x5250
 
 #define PCI_SUBDEVICE_ID_NI_7884	0x7884
+#define PCI_SUBDEVICE_ID_NI_78E3	0x78e3
 
 #define PCI_VENDOR_ID_ARASAN		0x16e6
 #define PCI_DEVICE_ID_ARASAN_PHY_EMMC	0x0670
+
+#define PCI_DEVICE_ID_SYNOPSYS_DWC_MSHC 0xc202
+
+#define PCI_DEVICE_ID_GLI_9755		0x9755
+#define PCI_DEVICE_ID_GLI_9750		0x9750
+#define PCI_DEVICE_ID_GLI_9763E		0xe763
+#define PCI_DEVICE_ID_GLI_9767		0x9767
 
 /*
  * PCI device class and mask
@@ -121,6 +145,7 @@ struct sdhci_pci_fixes {
 	int			(*probe_slot) (struct sdhci_pci_slot *);
 	int			(*add_host) (struct sdhci_pci_slot *);
 	void			(*remove_slot) (struct sdhci_pci_slot *, int);
+	void			(*remove_host) (struct sdhci_pci_slot *, int);
 
 #ifdef CONFIG_PM_SLEEP
 	int			(*suspend) (struct sdhci_pci_chip *);
@@ -132,23 +157,19 @@ struct sdhci_pci_fixes {
 #endif
 
 	const struct sdhci_ops	*ops;
+	const struct dmi_system_id *cd_gpio_override;
 	size_t			priv_size;
 };
 
 struct sdhci_pci_slot {
 	struct sdhci_pci_chip	*chip;
 	struct sdhci_host	*host;
-	struct sdhci_pci_data	*data;
-
-	int			rst_n_gpio;
-	int			cd_gpio;
-	int			cd_irq;
 
 	int			cd_idx;
 	bool			cd_override_level;
 
 	void (*hw_reset)(struct sdhci_host *host);
-	unsigned long		private[0] ____cacheline_aligned;
+	unsigned long		private[] ____cacheline_aligned;
 };
 
 struct sdhci_pci_chip {
@@ -170,16 +191,19 @@ static inline void *sdhci_pci_priv(struct sdhci_pci_slot *slot)
 	return (void *)slot->private;
 }
 
+int sdhci_pci_uhs2_add_host(struct sdhci_pci_slot *slot);
+void sdhci_pci_uhs2_remove_host(struct sdhci_pci_slot *slot, int dead);
 #ifdef CONFIG_PM_SLEEP
 int sdhci_pci_resume_host(struct sdhci_pci_chip *chip);
 #endif
 int sdhci_pci_enable_dma(struct sdhci_host *host);
-int sdhci_pci_o2_probe_slot(struct sdhci_pci_slot *slot);
-int sdhci_pci_o2_probe(struct sdhci_pci_chip *chip);
-#ifdef CONFIG_PM_SLEEP
-int sdhci_pci_o2_resume(struct sdhci_pci_chip *chip);
-#endif
 
 extern const struct sdhci_pci_fixes sdhci_arasan;
+extern const struct sdhci_pci_fixes sdhci_snps;
+extern const struct sdhci_pci_fixes sdhci_o2;
+extern const struct sdhci_pci_fixes sdhci_gl9750;
+extern const struct sdhci_pci_fixes sdhci_gl9755;
+extern const struct sdhci_pci_fixes sdhci_gl9763e;
+extern const struct sdhci_pci_fixes sdhci_gl9767;
 
 #endif /* __SDHCI_PCI_H */

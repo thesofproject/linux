@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* ZD1211 USB-WLAN driver for Linux
  *
  * Copyright (C) 2005-2007 Ulrich Kunitz <kune@deine-taler.de>
  * Copyright (C) 2006-2007 Daniel Drake <dsd@gentoo.org>
  * Copyright (C) 2006-2007 Michael Wu <flamingice@sourmilk.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/kernel.h>
@@ -29,7 +17,7 @@
 #include <linux/workqueue.h>
 #include <linux/module.h>
 #include <net/mac80211.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "zd_def.h"
 #include "zd_mac.h"
@@ -77,7 +65,6 @@ static const struct usb_device_id usb_ids[] = {
 	{ USB_DEVICE(0x0586, 0x3412), .driver_info = DEVICE_ZD1211B },
 	{ USB_DEVICE(0x0586, 0x3413), .driver_info = DEVICE_ZD1211B },
 	{ USB_DEVICE(0x079b, 0x0062), .driver_info = DEVICE_ZD1211B },
-	{ USB_DEVICE(0x07b8, 0x6001), .driver_info = DEVICE_ZD1211B },
 	{ USB_DEVICE(0x07fa, 0x1196), .driver_info = DEVICE_ZD1211B },
 	{ USB_DEVICE(0x083a, 0x4505), .driver_info = DEVICE_ZD1211B },
 	{ USB_DEVICE(0x083a, 0xe501), .driver_info = DEVICE_ZD1211B },
@@ -371,28 +358,29 @@ static inline void handle_regs_int_override(struct urb *urb)
 {
 	struct zd_usb *usb = urb->context;
 	struct zd_usb_interrupt *intr = &usb->intr;
+	unsigned long flags;
 
-	spin_lock(&intr->lock);
+	spin_lock_irqsave(&intr->lock, flags);
 	if (atomic_read(&intr->read_regs_enabled)) {
 		atomic_set(&intr->read_regs_enabled, 0);
 		intr->read_regs_int_overridden = 1;
 		complete(&intr->read_regs.completion);
 	}
-	spin_unlock(&intr->lock);
+	spin_unlock_irqrestore(&intr->lock, flags);
 }
 
 static inline void handle_regs_int(struct urb *urb)
 {
 	struct zd_usb *usb = urb->context;
 	struct zd_usb_interrupt *intr = &usb->intr;
+	unsigned long flags;
 	int len;
 	u16 int_num;
 
-	ZD_ASSERT(in_interrupt());
-	spin_lock(&intr->lock);
+	spin_lock_irqsave(&intr->lock, flags);
 
 	int_num = le16_to_cpu(*(__le16 *)(urb->transfer_buffer+2));
-	if (int_num == CR_INTERRUPT) {
+	if (int_num == (u16)CR_INTERRUPT) {
 		struct zd_mac *mac = zd_hw_mac(zd_usb_to_hw(urb->context));
 		spin_lock(&mac->lock);
 		memcpy(&mac->intr_buffer, urb->transfer_buffer,
@@ -425,10 +413,11 @@ static inline void handle_regs_int(struct urb *urb)
 	}
 
 out:
-	spin_unlock(&intr->lock);
+	spin_unlock_irqrestore(&intr->lock, flags);
 
 	/* CR_INTERRUPT might override read_reg too. */
-	if (int_num == CR_INTERRUPT && atomic_read(&intr->read_regs_enabled))
+	if (int_num == (u16)CR_INTERRUPT &&
+	    atomic_read(&intr->read_regs_enabled))
 		handle_regs_int_override(urb);
 }
 
@@ -456,7 +445,7 @@ static void int_urb_complete(struct urb *urb)
 	}
 
 	if (urb->actual_length < sizeof(hdr)) {
-		dev_dbg_f(urb_dev(urb), "error: urb %p to small\n", urb);
+		dev_dbg_f(urb_dev(urb), "error: urb %p too small\n", urb);
 		goto resubmit;
 	}
 
@@ -610,9 +599,7 @@ void zd_usb_disable_int(struct zd_usb *usb)
 	dev_dbg_f(zd_usb_dev(usb), "urb %p killed\n", urb);
 	usb_free_urb(urb);
 
-	if (buffer)
-		usb_free_coherent(udev, USB_MAX_EP_INT_BUFFER,
-				  buffer, buffer_dma);
+	usb_free_coherent(udev, USB_MAX_EP_INT_BUFFER, buffer, buffer_dma);
 }
 
 static void handle_rx_packet(struct zd_usb *usb, const u8 *buffer,
@@ -665,6 +652,7 @@ static void rx_urb_complete(struct urb *urb)
 	struct zd_usb_rx *rx;
 	const u8 *buffer;
 	unsigned int length;
+	unsigned long flags;
 
 	switch (urb->status) {
 	case 0:
@@ -693,14 +681,14 @@ static void rx_urb_complete(struct urb *urb)
 		/* If there is an old first fragment, we don't care. */
 		dev_dbg_f(urb_dev(urb), "*** first fragment ***\n");
 		ZD_ASSERT(length <= ARRAY_SIZE(rx->fragment));
-		spin_lock(&rx->lock);
+		spin_lock_irqsave(&rx->lock, flags);
 		memcpy(rx->fragment, buffer, length);
 		rx->fragment_length = length;
-		spin_unlock(&rx->lock);
+		spin_unlock_irqrestore(&rx->lock, flags);
 		goto resubmit;
 	}
 
-	spin_lock(&rx->lock);
+	spin_lock_irqsave(&rx->lock, flags);
 	if (rx->fragment_length > 0) {
 		/* We are on a second fragment, we believe */
 		ZD_ASSERT(length + rx->fragment_length <=
@@ -710,9 +698,9 @@ static void rx_urb_complete(struct urb *urb)
 		handle_rx_packet(usb, rx->fragment,
 			         rx->fragment_length + length);
 		rx->fragment_length = 0;
-		spin_unlock(&rx->lock);
+		spin_unlock_irqrestore(&rx->lock, flags);
 	} else {
-		spin_unlock(&rx->lock);
+		spin_unlock_irqrestore(&rx->lock, flags);
 		handle_rx_packet(usb, buffer, length);
 	}
 
@@ -764,7 +752,7 @@ static int __zd_usb_enable_rx(struct zd_usb *usb)
 	dev_dbg_f(zd_usb_dev(usb), "\n");
 
 	r = -ENOMEM;
-	urbs = kcalloc(RX_URBS_COUNT, sizeof(struct urb *), GFP_KERNEL);
+	urbs = kzalloc_objs(struct urb *, RX_URBS_COUNT);
 	if (!urbs)
 		goto error;
 	for (i = 0; i < RX_URBS_COUNT; i++) {
@@ -803,6 +791,7 @@ error:
 	if (urbs) {
 		for (i = 0; i < RX_URBS_COUNT; i++)
 			free_rx_urb(urbs[i]);
+		kfree(urbs);
 	}
 	return r;
 }
@@ -1019,7 +1008,7 @@ resubmit:
  * @usb: the zd1211rw-private USB structure
  * @skb: a &struct sk_buff pointer
  *
- * This function tranmits a frame to the device. It doesn't wait for
+ * This function transmits a frame to the device. It doesn't wait for
  * completion. The frame must contain the control set and have all the
  * control set information available.
  *
@@ -1151,9 +1140,9 @@ static void zd_rx_idle_timer_handler(struct work_struct *work)
 	zd_usb_reset_rx(usb);
 }
 
-static void zd_usb_reset_rx_idle_timer_tasklet(unsigned long param)
+static void zd_usb_reset_rx_idle_timer_tasklet(struct tasklet_struct *t)
 {
-	struct zd_usb *usb = (struct zd_usb *)param;
+	struct zd_usb *usb = from_tasklet(usb, t, rx.reset_timer_tasklet);
 
 	zd_usb_reset_rx_idle_timer(usb);
 }
@@ -1189,8 +1178,9 @@ static inline void init_usb_rx(struct zd_usb *usb)
 	}
 	ZD_ASSERT(rx->fragment_length == 0);
 	INIT_DELAYED_WORK(&rx->idle_work, zd_rx_idle_timer_handler);
-	rx->reset_timer_tasklet.func = zd_usb_reset_rx_idle_timer_tasklet;
-	rx->reset_timer_tasklet.data = (unsigned long)usb;
+	rx->reset_timer_tasklet.func = (void (*))
+					zd_usb_reset_rx_idle_timer_tasklet;
+	rx->reset_timer_tasklet.data = (unsigned long)&rx->reset_timer_tasklet;
 }
 
 static inline void init_usb_tx(struct zd_usb *usb)
@@ -1272,7 +1262,7 @@ static void print_id(struct usb_device *udev)
 static int eject_installer(struct usb_interface *intf)
 {
 	struct usb_device *udev = interface_to_usbdev(intf);
-	struct usb_host_interface *iface_desc = &intf->altsetting[0];
+	struct usb_host_interface *iface_desc = intf->cur_altsetting;
 	struct usb_endpoint_descriptor *endpoint;
 	unsigned char *cmd;
 	u8 bulk_out_ep;
@@ -1487,7 +1477,7 @@ static void zd_usb_stop(struct zd_usb *usb)
 {
 	dev_dbg_f(zd_usb_dev(usb), "\n");
 
-	zd_op_stop(zd_usb_to_hw(usb));
+	zd_op_stop(zd_usb_to_hw(usb), false);
 
 	zd_usb_disable_tx(usb);
 	zd_usb_disable_rx(usb);
@@ -1555,14 +1545,14 @@ static int __init usb_init(void)
 
 	zd_workqueue = create_singlethread_workqueue(driver.name);
 	if (zd_workqueue == NULL) {
-		printk(KERN_ERR "%s couldn't create workqueue\n", driver.name);
+		pr_err("%s couldn't create workqueue\n", driver.name);
 		return -ENOMEM;
 	}
 
 	r = usb_register(&driver);
 	if (r) {
 		destroy_workqueue(zd_workqueue);
-		printk(KERN_ERR "%s usb_register() failed. Error number %d\n",
+		pr_err("%s usb_register() failed. Error number %d\n",
 		       driver.name, r);
 		return r;
 	}
@@ -1606,11 +1596,6 @@ static int zd_ep_regs_out_msg(struct usb_device *udev, void *data, int len,
 	}
 }
 
-static int usb_int_regs_length(unsigned int count)
-{
-	return sizeof(struct usb_int_regs) + count * sizeof(struct reg_data);
-}
-
 static void prepare_read_regs_int(struct zd_usb *usb,
 				  struct usb_req_read_regs *req,
 				  unsigned int count)
@@ -1645,10 +1630,10 @@ static bool check_read_regs(struct zd_usb *usb, struct usb_req_read_regs *req,
 	/* The created block size seems to be larger than expected.
 	 * However results appear to be correct.
 	 */
-	if (rr->length < usb_int_regs_length(count)) {
+	if (rr->length < struct_size(regs, regs, count)) {
 		dev_dbg_f(zd_usb_dev(usb),
-			 "error: actual length %d less than expected %d\n",
-			 rr->length, usb_int_regs_length(count));
+			 "error: actual length %d less than expected %zu\n",
+			 rr->length, struct_size(regs, regs, count));
 		return false;
 	}
 
@@ -1714,7 +1699,7 @@ int zd_usb_ioread16v(struct zd_usb *usb, u16 *values,
 	int r, i, req_len, actual_req_len, try_count = 0;
 	struct usb_device *udev;
 	struct usb_req_read_regs *req = NULL;
-	unsigned long timeout;
+	unsigned long time_left;
 	bool retry = false;
 
 	if (count < 1) {
@@ -1726,11 +1711,6 @@ int zd_usb_ioread16v(struct zd_usb *usb, u16 *values,
 			 "error: count %u exceeds possible max %u\n",
 			 count, USB_MAX_IOREAD16_COUNT);
 		return -EINVAL;
-	}
-	if (in_atomic()) {
-		dev_dbg_f(zd_usb_dev(usb),
-			 "error: io in atomic context not supported\n");
-		return -EWOULDBLOCK;
 	}
 	if (!usb_int_enabled(usb)) {
 		dev_dbg_f(zd_usb_dev(usb),
@@ -1769,9 +1749,9 @@ retry_read:
 		goto error;
 	}
 
-	timeout = wait_for_completion_timeout(&usb->intr.read_regs.completion,
-					      msecs_to_jiffies(50));
-	if (!timeout) {
+	time_left = wait_for_completion_timeout(&usb->intr.read_regs.completion,
+						msecs_to_jiffies(50));
+	if (!time_left) {
 		disable_read_regs_int(usb);
 		dev_dbg_f(zd_usb_dev(usb), "read timed out\n");
 		r = -ETIMEDOUT;
@@ -1898,11 +1878,6 @@ int zd_usb_iowrite16v_async(struct zd_usb *usb, const struct zd_ioreq16 *ioreqs,
 			count, USB_MAX_IOWRITE16_COUNT);
 		return -EINVAL;
 	}
-	if (in_atomic()) {
-		dev_dbg_f(zd_usb_dev(usb),
-			"error: io in atomic context not supported\n");
-		return -EWOULDBLOCK;
-	}
 
 	udev = zd_usb_to_usbdev(usb);
 
@@ -1914,8 +1889,7 @@ int zd_usb_iowrite16v_async(struct zd_usb *usb, const struct zd_ioreq16 *ioreqs,
 	if (!urb)
 		return -ENOMEM;
 
-	req_len = sizeof(struct usb_req_write_regs) +
-		  count * sizeof(struct reg_data);
+	req_len = struct_size(req, reg_writes, count);
 	req = kmalloc(req_len, GFP_KERNEL);
 	if (!req) {
 		r = -ENOMEM;
@@ -1983,11 +1957,6 @@ int zd_usb_rfwrite(struct zd_usb *usb, u32 value, u8 bits)
 	int i, req_len, actual_req_len;
 	u16 bit_value_template;
 
-	if (in_atomic()) {
-		dev_dbg_f(zd_usb_dev(usb),
-			"error: io in atomic context not supported\n");
-		return -EWOULDBLOCK;
-	}
 	if (bits < USB_MIN_RFWRITE_BIT_COUNT) {
 		dev_dbg_f(zd_usb_dev(usb),
 			"error: bits %d are smaller than"

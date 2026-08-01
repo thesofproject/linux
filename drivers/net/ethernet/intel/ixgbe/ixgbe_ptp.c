@@ -1,30 +1,6 @@
-/*******************************************************************************
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 1999 - 2018 Intel Corporation. */
 
-  Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2016 Intel Corporation.
-
-  This program is free software; you can redistribute it and/or modify it
-  under the terms and conditions of the GNU General Public License,
-  version 2, as published by the Free Software Foundation.
-
-  This program is distributed in the hope it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, write to the Free Software Foundation, Inc.,
-  51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
-
-  The full GNU General Public License is included in this distribution in
-  the file called "COPYING".
-
-  Contact Information:
-  Linux NICS <linux.nics@intel.com>
-  e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
-  Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
-
-*******************************************************************************/
 #include "ixgbe.h"
 #include <linux/ptp_classify.h>
 #include <linux/clocksource.h>
@@ -96,13 +72,13 @@
 #define IXGBE_INCPER_SHIFT_82599 24
 
 #define IXGBE_OVERFLOW_PERIOD    (HZ * 30)
-#define IXGBE_PTP_TX_TIMEOUT     (HZ * 15)
+#define IXGBE_PTP_TX_TIMEOUT     (HZ)
 
-/* half of a one second clock period, for use with PPS signal. We have to use
- * this instead of something pre-defined like IXGBE_PTP_PPS_HALF_SECOND, in
- * order to force at least 64bits of precision for shifting
+/* We use our own definitions instead of NSEC_PER_SEC because we want to mark
+ * the value as a ULL to force precision when bit shifting.
  */
-#define IXGBE_PTP_PPS_HALF_SECOND 500000000ULL
+#define NS_PER_SEC      1000000000ULL
+#define NS_PER_HALF_SEC  500000000ULL
 
 /* In contrast, the X550 controller has two registers, SYSTIMEH and SYSTIMEL
  * which contain measurements of seconds and nanoseconds respectively. This
@@ -137,12 +113,16 @@
  * the sign bit. This register enables software to calculate frequency
  * adjustments and apply them directly to the clock rate.
  *
- * The math for converting ppb into TIMINCA values is fairly straightforward.
- *   TIMINCA value = ( Base_Frequency * ppb ) / 1000000000ULL
+ * The math for converting scaled_ppm into TIMINCA values is fairly
+ * straightforward.
  *
- * This assumes that ppb is never high enough to create a value bigger than
- * TIMINCA's 31 bits can store. This is ensured by the stack. Calculating this
- * value is also simple.
+ *   TIMINCA value = ( Base_Frequency * scaled_ppm ) / 1000000ULL << 16
+ *
+ * To avoid overflow, we simply use mul_u64_u64_div_u64.
+ *
+ * This assumes that scaled_ppm is never high enough to create a value bigger
+ * than TIMINCA's 31 bits can store. This is ensured by the stack, and is
+ * measured in parts per billion. Calculating this value is also simple.
  *   Max ppb = ( Max Adjustment / Base Frequency ) / 1000000000ULL
  *
  * For the X550, the Max adjustment is +/- 0.5 ns, and the base frequency is
@@ -160,28 +140,31 @@
  * proper mult and shift to convert the cycles into nanoseconds of time.
  */
 #define IXGBE_X550_BASE_PERIOD 0xC80000000ULL
+#define IXGBE_E610_BASE_PERIOD 0x333333333ULL
 #define INCVALUE_MASK	0x7FFFFFFF
 #define ISGN		0x80000000
-#define MAX_TIMADJ	0x7FFFFFFF
 
 /**
- * ixgbe_ptp_setup_sdp_x540
+ * ixgbe_ptp_setup_sdp_X540
  * @adapter: private adapter structure
  *
  * this function enables or disables the clock out feature on SDP0 for
- * the X540 device. It will create a 1second periodic output that can
+ * the X540 device. It will create a 1 second periodic output that can
  * be used as the PPS (via an interrupt).
  *
- * It calculates when the systime will be on an exact second, and then
- * aligns the start of the PPS signal to that value. The shift is
- * necessary because it can change based on the link speed.
+ * It calculates when the system time will be on an exact second, and then
+ * aligns the start of the PPS signal to that value.
+ *
+ * This works by using the cycle counter shift and mult values in reverse, and
+ * assumes that the values we're shifting will not overflow.
  */
-static void ixgbe_ptp_setup_sdp_x540(struct ixgbe_adapter *adapter)
+static void ixgbe_ptp_setup_sdp_X540(struct ixgbe_adapter *adapter)
 {
+	struct cyclecounter *cc = &adapter->hw_cc;
 	struct ixgbe_hw *hw = &adapter->hw;
-	int shift = adapter->hw_cc.shift;
 	u32 esdp, tsauxc, clktiml, clktimh, trgttiml, trgttimh, rem;
-	u64 ns = 0, clock_edge = 0;
+	u64 ns = 0, clock_edge = 0, clock_period;
+	unsigned long flags;
 
 	/* disable the pin first */
 	IXGBE_WRITE_REG(hw, IXGBE_TSAUXC, 0x0);
@@ -201,26 +184,33 @@ static void ixgbe_ptp_setup_sdp_x540(struct ixgbe_adapter *adapter)
 	/* enable the Clock Out feature on SDP0, and allow
 	 * interrupts to occur when the pin changes
 	 */
-	tsauxc = IXGBE_TSAUXC_EN_CLK |
-		 IXGBE_TSAUXC_SYNCLK |
-		 IXGBE_TSAUXC_SDP0_INT;
+	tsauxc = (IXGBE_TSAUXC_EN_CLK |
+		  IXGBE_TSAUXC_SYNCLK |
+		  IXGBE_TSAUXC_SDP0_INT);
 
-	/* clock period (or pulse length) */
-	clktiml = (u32)(IXGBE_PTP_PPS_HALF_SECOND << shift);
-	clktimh = (u32)((IXGBE_PTP_PPS_HALF_SECOND << shift) >> 32);
-
-	/* Account for the cyclecounter wrap-around value by
-	 * using the converted ns value of the current time to
-	 * check for when the next aligned second would occur.
+	/* Determine the clock time period to use. This assumes that the
+	 * cycle counter shift is small enough to avoid overflow.
 	 */
-	clock_edge |= (u64)IXGBE_READ_REG(hw, IXGBE_SYSTIML);
-	clock_edge |= (u64)IXGBE_READ_REG(hw, IXGBE_SYSTIMH) << 32;
-	ns = timecounter_cyc2time(&adapter->hw_tc, clock_edge);
+	clock_period = div_u64((NS_PER_HALF_SEC << cc->shift), cc->mult);
+	clktiml = (u32)(clock_period);
+	clktimh = (u32)(clock_period >> 32);
 
-	div_u64_rem(ns, IXGBE_PTP_PPS_HALF_SECOND, &rem);
-	clock_edge += ((IXGBE_PTP_PPS_HALF_SECOND - (u64)rem) << shift);
+	/* Read the current clock time, and save the cycle counter value */
+	spin_lock_irqsave(&adapter->tmreg_lock, flags);
+	ns = timecounter_read(&adapter->hw_tc);
+	clock_edge = adapter->hw_tc.cycle_last;
+	spin_unlock_irqrestore(&adapter->tmreg_lock, flags);
 
-	/* specify the initial clock start time */
+	/* Figure out how many seconds to add in order to round up */
+	div_u64_rem(ns, NS_PER_SEC, &rem);
+
+	/* Figure out how many nanoseconds to add to round the clock edge up
+	 * to the next full second
+	 */
+	rem = (NS_PER_SEC - rem);
+
+	/* Adjust the clock edge to align with the next full second. */
+	clock_edge += div_u64(((u64)rem << cc->shift), cc->mult);
 	trgttiml = (u32)clock_edge;
 	trgttimh = (u32)(clock_edge >> 32);
 
@@ -236,8 +226,100 @@ static void ixgbe_ptp_setup_sdp_x540(struct ixgbe_adapter *adapter)
 }
 
 /**
+ * ixgbe_ptp_setup_sdp_X550
+ * @adapter: private adapter structure
+ *
+ * Enable or disable a clock output signal on SDP 0 for X550 hardware.
+ *
+ * Use the target time feature to align the output signal on the next full
+ * second.
+ *
+ * This works by using the cycle counter shift and mult values in reverse, and
+ * assumes that the values we're shifting will not overflow.
+ */
+static void ixgbe_ptp_setup_sdp_X550(struct ixgbe_adapter *adapter)
+{
+	u32 esdp, tsauxc, freqout, trgttiml, trgttimh, rem, tssdp;
+	struct cyclecounter *cc = &adapter->hw_cc;
+	struct ixgbe_hw *hw = &adapter->hw;
+	u64 ns = 0, clock_edge = 0;
+	struct timespec64 ts;
+	unsigned long flags;
+
+	/* disable the pin first */
+	IXGBE_WRITE_REG(hw, IXGBE_TSAUXC, 0x0);
+	IXGBE_WRITE_FLUSH(hw);
+
+	if (!(adapter->flags2 & IXGBE_FLAG2_PTP_PPS_ENABLED))
+		return;
+
+	esdp = IXGBE_READ_REG(hw, IXGBE_ESDP);
+
+	/* enable the SDP0 pin as output, and connected to the
+	 * native function for Timesync (ClockOut)
+	 */
+	esdp |= IXGBE_ESDP_SDP0_DIR |
+		IXGBE_ESDP_SDP0_NATIVE;
+
+	/* enable the Clock Out feature on SDP0, and use Target Time 0 to
+	 * enable generation of interrupts on the clock change.
+	 */
+#define IXGBE_TSAUXC_DIS_TS_CLEAR 0x40000000
+	tsauxc = (IXGBE_TSAUXC_EN_CLK | IXGBE_TSAUXC_ST0 |
+		  IXGBE_TSAUXC_EN_TT0 | IXGBE_TSAUXC_SDP0_INT |
+		  IXGBE_TSAUXC_DIS_TS_CLEAR);
+
+	tssdp = (IXGBE_TSSDP_TS_SDP0_EN |
+		 IXGBE_TSSDP_TS_SDP0_CLK0);
+
+	/* Determine the clock time period to use. This assumes that the
+	 * cycle counter shift is small enough to avoid overflowing a 32bit
+	 * value.
+	 */
+	freqout = div_u64(NS_PER_HALF_SEC << cc->shift,  cc->mult);
+
+	/* Read the current clock time, and save the cycle counter value */
+	spin_lock_irqsave(&adapter->tmreg_lock, flags);
+	ns = timecounter_read(&adapter->hw_tc);
+	clock_edge = adapter->hw_tc.cycle_last;
+	spin_unlock_irqrestore(&adapter->tmreg_lock, flags);
+
+	/* Figure out how far past the next second we are */
+	div_u64_rem(ns, NS_PER_SEC, &rem);
+
+	/* Figure out how many nanoseconds to add to round the clock edge up
+	 * to the next full second
+	 */
+	rem = (NS_PER_SEC - rem);
+
+	/* Adjust the clock edge to align with the next full second. */
+	clock_edge += div_u64(((u64)rem << cc->shift), cc->mult);
+
+	/* X550 hardware stores the time in 32bits of 'billions of cycles' and
+	 * 32bits of 'cycles'. There's no guarantee that cycles represents
+	 * nanoseconds. However, we can use the math from a timespec64 to
+	 * convert into the hardware representation.
+	 *
+	 * See ixgbe_ptp_read_X550() for more details.
+	 */
+	ts = ns_to_timespec64(clock_edge);
+	trgttiml = (u32)ts.tv_nsec;
+	trgttimh = (u32)ts.tv_sec;
+
+	IXGBE_WRITE_REG(hw, IXGBE_FREQOUT0, freqout);
+	IXGBE_WRITE_REG(hw, IXGBE_TRGTTIML0, trgttiml);
+	IXGBE_WRITE_REG(hw, IXGBE_TRGTTIMH0, trgttimh);
+
+	IXGBE_WRITE_REG(hw, IXGBE_ESDP, esdp);
+	IXGBE_WRITE_REG(hw, IXGBE_TSSDP, tssdp);
+	IXGBE_WRITE_REG(hw, IXGBE_TSAUXC, tsauxc);
+
+	IXGBE_WRITE_FLUSH(hw);
+}
+
+/**
  * ixgbe_ptp_read_X550 - read cycle counter value
- * @hw_cc: cyclecounter structure
+ * @cc: cyclecounter structure
  *
  * This function reads SYSTIME registers. It is called by the cyclecounter
  * structure to convert from internal representation into nanoseconds. We need
@@ -245,10 +327,10 @@ static void ixgbe_ptp_setup_sdp_x540(struct ixgbe_adapter *adapter)
  * result of SYSTIME is 32bits of "billions of cycles" and 32 bits of
  * "cycles", rather than seconds and nanoseconds.
  */
-static u64 ixgbe_ptp_read_X550(const struct cyclecounter *hw_cc)
+static u64 ixgbe_ptp_read_X550(struct cyclecounter *cc)
 {
 	struct ixgbe_adapter *adapter =
-			container_of(hw_cc, struct ixgbe_adapter, hw_cc);
+		container_of(cc, struct ixgbe_adapter, hw_cc);
 	struct ixgbe_hw *hw = &adapter->hw;
 	struct timespec64 ts;
 
@@ -282,7 +364,7 @@ static u64 ixgbe_ptp_read_X550(const struct cyclecounter *hw_cc)
  * cyclecounter structure used to construct a ns counter from the
  * arbitrary fixed point registers
  */
-static u64 ixgbe_ptp_read_82599(const struct cyclecounter *cc)
+static u64 ixgbe_ptp_read_82599(struct cyclecounter *cc)
 {
 	struct ixgbe_adapter *adapter =
 		container_of(cc, struct ixgbe_adapter, hw_cc);
@@ -334,6 +416,7 @@ static void ixgbe_ptp_convert_to_hwtstamp(struct ixgbe_adapter *adapter,
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
 	case ixgbe_mac_x550em_a:
+	case ixgbe_mac_e610:
 		/* Upper 32 bits represent billions of cycles, lower 32 bits
 		 * represent cycles. However, we use timespec64_to_ns for the
 		 * correct math even though the units haven't been corrected
@@ -356,45 +439,35 @@ static void ixgbe_ptp_convert_to_hwtstamp(struct ixgbe_adapter *adapter,
 }
 
 /**
- * ixgbe_ptp_adjfreq_82599
+ * ixgbe_ptp_adjfine_82599
  * @ptp: the ptp clock structure
- * @ppb: parts per billion adjustment from base
+ * @scaled_ppm: scaled parts per million adjustment from base
  *
- * adjust the frequency of the ptp cycle counter by the
- * indicated ppb from the base frequency.
+ * Adjust the frequency of the ptp cycle counter by the
+ * indicated scaled_ppm from the base frequency.
+ *
+ * Scaled parts per million is ppm with a 16-bit binary fractional field.
  */
-static int ixgbe_ptp_adjfreq_82599(struct ptp_clock_info *ptp, s32 ppb)
+static int ixgbe_ptp_adjfine_82599(struct ptp_clock_info *ptp, long scaled_ppm)
 {
 	struct ixgbe_adapter *adapter =
 		container_of(ptp, struct ixgbe_adapter, ptp_caps);
 	struct ixgbe_hw *hw = &adapter->hw;
-	u64 freq, incval;
-	u32 diff;
-	int neg_adj = 0;
-
-	if (ppb < 0) {
-		neg_adj = 1;
-		ppb = -ppb;
-	}
+	u64 incval;
 
 	smp_mb();
 	incval = READ_ONCE(adapter->base_incval);
-
-	freq = incval;
-	freq *= ppb;
-	diff = div_u64(freq, 1000000000ULL);
-
-	incval = neg_adj ? (incval - diff) : (incval + diff);
+	incval = adjust_by_scaled_ppm(incval, scaled_ppm);
 
 	switch (hw->mac.type) {
 	case ixgbe_mac_X540:
 		if (incval > 0xFFFFFFFFULL)
-			e_dev_warn("PTP ppb adjusted SYSTIME rate overflowed!\n");
+			e_dev_warn("PTP scaled_ppm adjusted SYSTIME rate overflowed!\n");
 		IXGBE_WRITE_REG(hw, IXGBE_TIMINCA, (u32)incval);
 		break;
 	case ixgbe_mac_82599EB:
 		if (incval > 0x00FFFFFFULL)
-			e_dev_warn("PTP ppb adjusted SYSTIME rate overflowed!\n");
+			e_dev_warn("PTP scaled_ppm adjusted SYSTIME rate overflowed!\n");
 		IXGBE_WRITE_REG(hw, IXGBE_TIMINCA,
 				BIT(IXGBE_INCPER_SHIFT_82599) |
 				((u32)incval & 0x00FFFFFFUL));
@@ -407,32 +480,31 @@ static int ixgbe_ptp_adjfreq_82599(struct ptp_clock_info *ptp, s32 ppb)
 }
 
 /**
- * ixgbe_ptp_adjfreq_X550
+ * ixgbe_ptp_adjfine_X550
  * @ptp: the ptp clock structure
- * @ppb: parts per billion adjustment from base
+ * @scaled_ppm: scaled parts per million adjustment from base
  *
- * adjust the frequency of the SYSTIME registers by the indicated ppb from base
- * frequency
+ * Adjust the frequency of the SYSTIME registers by the indicated scaled_ppm
+ * from base frequency.
+ *
+ * Scaled parts per million is ppm with a 16-bit binary fractional field.
  */
-static int ixgbe_ptp_adjfreq_X550(struct ptp_clock_info *ptp, s32 ppb)
+static int ixgbe_ptp_adjfine_X550(struct ptp_clock_info *ptp, long scaled_ppm)
 {
 	struct ixgbe_adapter *adapter =
 			container_of(ptp, struct ixgbe_adapter, ptp_caps);
 	struct ixgbe_hw *hw = &adapter->hw;
-	int neg_adj = 0;
-	u64 rate = IXGBE_X550_BASE_PERIOD;
+	u64 rate, base;
+	bool neg_adj;
 	u32 inca;
 
-	if (ppb < 0) {
-		neg_adj = 1;
-		ppb = -ppb;
-	}
-	rate *= ppb;
-	rate = div_u64(rate, 1000000000ULL);
+	base = hw->mac.type == ixgbe_mac_e610 ? IXGBE_E610_BASE_PERIOD :
+						IXGBE_X550_BASE_PERIOD;
+	neg_adj = diff_by_scaled_ppm(base, scaled_ppm, &rate);
 
 	/* warn if rate is too large */
 	if (rate >= INCVALUE_MASK)
-		e_dev_warn("PTP ppb adjusted SYSTIME rate overflowed!\n");
+		e_dev_warn("PTP scaled_ppm adjusted SYSTIME rate overflowed!\n");
 
 	inca = rate & INCVALUE_MASK;
 	if (neg_adj)
@@ -467,22 +539,53 @@ static int ixgbe_ptp_adjtime(struct ptp_clock_info *ptp, s64 delta)
 }
 
 /**
- * ixgbe_ptp_gettime
+ * ixgbe_ptp_gettimex
  * @ptp: the ptp clock structure
- * @ts: timespec structure to hold the current time value
+ * @ts: timespec to hold the PHC timestamp
+ * @sts: structure to hold the system time before and after reading the PHC
  *
  * read the timecounter and return the correct value on ns,
  * after converting it into a struct timespec.
  */
-static int ixgbe_ptp_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts)
+static int ixgbe_ptp_gettimex(struct ptp_clock_info *ptp,
+			      struct timespec64 *ts,
+			      struct ptp_system_timestamp *sts)
 {
 	struct ixgbe_adapter *adapter =
 		container_of(ptp, struct ixgbe_adapter, ptp_caps);
+	struct ixgbe_hw *hw = &adapter->hw;
 	unsigned long flags;
-	u64 ns;
+	u64 ns, stamp;
 
 	spin_lock_irqsave(&adapter->tmreg_lock, flags);
-	ns = timecounter_read(&adapter->hw_tc);
+
+	switch (adapter->hw.mac.type) {
+	case ixgbe_mac_X550:
+	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
+	case ixgbe_mac_e610:
+		/* Upper 32 bits represent billions of cycles, lower 32 bits
+		 * represent cycles. However, we use timespec64_to_ns for the
+		 * correct math even though the units haven't been corrected
+		 * yet.
+		 */
+		ptp_read_system_prets(sts);
+		IXGBE_READ_REG(hw, IXGBE_SYSTIMR);
+		ptp_read_system_postts(sts);
+		ts->tv_nsec = IXGBE_READ_REG(hw, IXGBE_SYSTIML);
+		ts->tv_sec = IXGBE_READ_REG(hw, IXGBE_SYSTIMH);
+		stamp = timespec64_to_ns(ts);
+		break;
+	default:
+		ptp_read_system_prets(sts);
+		stamp = IXGBE_READ_REG(hw, IXGBE_SYSTIML);
+		ptp_read_system_postts(sts);
+		stamp |= (u64)IXGBE_READ_REG(hw, IXGBE_SYSTIMH) << 32;
+		break;
+	}
+
+	ns = timecounter_cyc2time(&adapter->hw_tc, stamp);
+
 	spin_unlock_irqrestore(&adapter->tmreg_lock, flags);
 
 	*ts = ns_to_timespec64(ns);
@@ -538,7 +641,7 @@ static int ixgbe_ptp_feature_enable(struct ptp_clock_info *ptp,
 	 * disabled
 	 */
 	if (rq->type != PTP_CLK_REQ_PPS || !adapter->ptp_setup_sdp)
-		return -ENOTSUPP;
+		return -EOPNOTSUPP;
 
 	if (on)
 		adapter->flags2 |= IXGBE_FLAG2_PTP_PPS_ENABLED;
@@ -591,10 +694,14 @@ void ixgbe_ptp_overflow_check(struct ixgbe_adapter *adapter)
 {
 	bool timeout = time_is_before_jiffies(adapter->last_overflow_check +
 					     IXGBE_OVERFLOW_PERIOD);
-	struct timespec64 ts;
+	unsigned long flags;
 
 	if (timeout) {
-		ixgbe_ptp_gettime(&adapter->ptp_caps, &ts);
+		/* Update the timecounter */
+		spin_lock_irqsave(&adapter->tmreg_lock, flags);
+		timecounter_read(&adapter->hw_tc);
+		spin_unlock_irqrestore(&adapter->tmreg_lock, flags);
+
 		adapter->last_overflow_check = jiffies;
 	}
 }
@@ -828,12 +935,23 @@ void ixgbe_ptp_rx_rgtstamp(struct ixgbe_q_vector *q_vector,
 	ixgbe_ptp_convert_to_hwtstamp(adapter, skb_hwtstamps(skb), regval);
 }
 
-int ixgbe_ptp_get_ts_config(struct ixgbe_adapter *adapter, struct ifreq *ifr)
+/**
+ * ixgbe_ptp_hwtstamp_get - get current hardware timestamping configuration
+ * @netdev: pointer to net device structure
+ * @config: timestamping configuration structure
+ *
+ * This function returns the current timestamping settings. Rather than
+ * attempt to deconstruct registers to fill in the values, simply keep a copy
+ * of the old settings around, and return a copy when requested.
+ */
+int ixgbe_ptp_hwtstamp_get(struct net_device *netdev,
+			   struct kernel_hwtstamp_config *config)
 {
-	struct hwtstamp_config *config = &adapter->tstamp_config;
+	struct ixgbe_adapter *adapter = ixgbe_from_netdev(netdev);
 
-	return copy_to_user(ifr->ifr_data, config,
-			    sizeof(*config)) ? -EFAULT : 0;
+	*config = adapter->tstamp_config;
+
+	return 0;
 }
 
 /**
@@ -862,22 +980,20 @@ int ixgbe_ptp_get_ts_config(struct ixgbe_adapter *adapter, struct ifreq *ifr)
  * mode, if required to support the specifically requested mode.
  */
 static int ixgbe_ptp_set_timestamp_mode(struct ixgbe_adapter *adapter,
-				 struct hwtstamp_config *config)
+					struct kernel_hwtstamp_config *config)
 {
 	struct ixgbe_hw *hw = &adapter->hw;
 	u32 tsync_tx_ctl = IXGBE_TSYNCTXCTL_ENABLED;
 	u32 tsync_rx_ctl = IXGBE_TSYNCRXCTL_ENABLED;
 	u32 tsync_rx_mtrl = PTP_EV_PORT << 16;
+	u32 aflags = adapter->flags;
 	bool is_l2 = false;
 	u32 regval;
-
-	/* reserved for future extensions */
-	if (config->flags)
-		return -EINVAL;
 
 	switch (config->tx_type) {
 	case HWTSTAMP_TX_OFF:
 		tsync_tx_ctl = 0;
+		break;
 	case HWTSTAMP_TX_ON:
 		break;
 	default:
@@ -888,20 +1004,20 @@ static int ixgbe_ptp_set_timestamp_mode(struct ixgbe_adapter *adapter,
 	case HWTSTAMP_FILTER_NONE:
 		tsync_rx_ctl = 0;
 		tsync_rx_mtrl = 0;
-		adapter->flags &= ~(IXGBE_FLAG_RX_HWTSTAMP_ENABLED |
-				    IXGBE_FLAG_RX_HWTSTAMP_IN_REGISTER);
+		aflags &= ~(IXGBE_FLAG_RX_HWTSTAMP_ENABLED |
+			    IXGBE_FLAG_RX_HWTSTAMP_IN_REGISTER);
 		break;
 	case HWTSTAMP_FILTER_PTP_V1_L4_SYNC:
 		tsync_rx_ctl |= IXGBE_TSYNCRXCTL_TYPE_L4_V1;
 		tsync_rx_mtrl |= IXGBE_RXMTRL_V1_SYNC_MSG;
-		adapter->flags |= (IXGBE_FLAG_RX_HWTSTAMP_ENABLED |
-				   IXGBE_FLAG_RX_HWTSTAMP_IN_REGISTER);
+		aflags |= (IXGBE_FLAG_RX_HWTSTAMP_ENABLED |
+			   IXGBE_FLAG_RX_HWTSTAMP_IN_REGISTER);
 		break;
 	case HWTSTAMP_FILTER_PTP_V1_L4_DELAY_REQ:
 		tsync_rx_ctl |= IXGBE_TSYNCRXCTL_TYPE_L4_V1;
 		tsync_rx_mtrl |= IXGBE_RXMTRL_V1_DELAY_REQ_MSG;
-		adapter->flags |= (IXGBE_FLAG_RX_HWTSTAMP_ENABLED |
-				   IXGBE_FLAG_RX_HWTSTAMP_IN_REGISTER);
+		aflags |= (IXGBE_FLAG_RX_HWTSTAMP_ENABLED |
+			   IXGBE_FLAG_RX_HWTSTAMP_IN_REGISTER);
 		break;
 	case HWTSTAMP_FILTER_PTP_V2_EVENT:
 	case HWTSTAMP_FILTER_PTP_V2_L2_EVENT:
@@ -915,8 +1031,8 @@ static int ixgbe_ptp_set_timestamp_mode(struct ixgbe_adapter *adapter,
 		tsync_rx_ctl |= IXGBE_TSYNCRXCTL_TYPE_EVENT_V2;
 		is_l2 = true;
 		config->rx_filter = HWTSTAMP_FILTER_PTP_V2_EVENT;
-		adapter->flags |= (IXGBE_FLAG_RX_HWTSTAMP_ENABLED |
-				   IXGBE_FLAG_RX_HWTSTAMP_IN_REGISTER);
+		aflags |= (IXGBE_FLAG_RX_HWTSTAMP_ENABLED |
+			   IXGBE_FLAG_RX_HWTSTAMP_IN_REGISTER);
 		break;
 	case HWTSTAMP_FILTER_PTP_V1_L4_EVENT:
 	case HWTSTAMP_FILTER_NTP_ALL:
@@ -927,10 +1043,10 @@ static int ixgbe_ptp_set_timestamp_mode(struct ixgbe_adapter *adapter,
 		if (hw->mac.type >= ixgbe_mac_X550) {
 			tsync_rx_ctl |= IXGBE_TSYNCRXCTL_TYPE_ALL;
 			config->rx_filter = HWTSTAMP_FILTER_ALL;
-			adapter->flags |= IXGBE_FLAG_RX_HWTSTAMP_ENABLED;
+			aflags |= IXGBE_FLAG_RX_HWTSTAMP_ENABLED;
 			break;
 		}
-		/* fall through */
+		fallthrough;
 	default:
 		/*
 		 * register RXMTRL must be set in order to do V1 packets,
@@ -938,8 +1054,6 @@ static int ixgbe_ptp_set_timestamp_mode(struct ixgbe_adapter *adapter,
 		 * Delay_Req messages and hardware does not support
 		 * timestamping all packets => return error
 		 */
-		adapter->flags &= ~(IXGBE_FLAG_RX_HWTSTAMP_ENABLED |
-				    IXGBE_FLAG_RX_HWTSTAMP_IN_REGISTER);
 		config->rx_filter = HWTSTAMP_FILTER_NONE;
 		return -ERANGE;
 	}
@@ -960,6 +1074,7 @@ static int ixgbe_ptp_set_timestamp_mode(struct ixgbe_adapter *adapter,
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
 	case ixgbe_mac_x550em_a:
+	case ixgbe_mac_e610:
 		/* enable timestamping all packets only if at least some
 		 * packets were requested. Otherwise, play nice and disable
 		 * timestamping
@@ -971,8 +1086,8 @@ static int ixgbe_ptp_set_timestamp_mode(struct ixgbe_adapter *adapter,
 			       IXGBE_TSYNCRXCTL_TYPE_ALL |
 			       IXGBE_TSYNCRXCTL_TSIP_UT_EN;
 		config->rx_filter = HWTSTAMP_FILTER_ALL;
-		adapter->flags |= IXGBE_FLAG_RX_HWTSTAMP_ENABLED;
-		adapter->flags &= ~IXGBE_FLAG_RX_HWTSTAMP_IN_REGISTER;
+		aflags |= IXGBE_FLAG_RX_HWTSTAMP_ENABLED;
+		aflags &= ~IXGBE_FLAG_RX_HWTSTAMP_IN_REGISTER;
 		is_l2 = true;
 		break;
 	default:
@@ -1005,6 +1120,9 @@ static int ixgbe_ptp_set_timestamp_mode(struct ixgbe_adapter *adapter,
 
 	IXGBE_WRITE_FLUSH(hw);
 
+	/* configure adapter flags only when HW is actually configured */
+	adapter->flags = aflags;
+
 	/* clear TX/RX time stamp registers, just to be sure */
 	ixgbe_ptp_clear_tx_timestamp(adapter);
 	IXGBE_READ_REG(hw, IXGBE_RXSTMPH);
@@ -1013,31 +1131,29 @@ static int ixgbe_ptp_set_timestamp_mode(struct ixgbe_adapter *adapter,
 }
 
 /**
- * ixgbe_ptp_set_ts_config - user entry point for timestamp mode
- * @adapter: pointer to adapter struct
- * @ifr: ioctl data
+ * ixgbe_ptp_hwtstamp_set - user entry point for timestamp mode
+ * @netdev: pointer to net device structure
+ * @config: timestamping configuration structure
+ * @extack: netlink extended ack structure for error reporting
  *
  * Set hardware to requested mode. If unsupported, return an error with no
  * changes. Otherwise, store the mode for future reference.
  */
-int ixgbe_ptp_set_ts_config(struct ixgbe_adapter *adapter, struct ifreq *ifr)
+int ixgbe_ptp_hwtstamp_set(struct net_device *netdev,
+			   struct kernel_hwtstamp_config *config,
+			   struct netlink_ext_ack *extack)
 {
-	struct hwtstamp_config config;
+	struct ixgbe_adapter *adapter = ixgbe_from_netdev(netdev);
 	int err;
 
-	if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
-		return -EFAULT;
-
-	err = ixgbe_ptp_set_timestamp_mode(adapter, &config);
+	err = ixgbe_ptp_set_timestamp_mode(adapter, config);
 	if (err)
 		return err;
 
 	/* save these settings for future reference */
-	memcpy(&adapter->tstamp_config, &config,
-	       sizeof(adapter->tstamp_config));
+	adapter->tstamp_config = *config;
 
-	return copy_to_user(ifr->ifr_data, &config, sizeof(config)) ?
-		-EFAULT : 0;
+	return 0;
 }
 
 static void ixgbe_ptp_link_speed_adjust(struct ixgbe_adapter *adapter,
@@ -1090,7 +1206,6 @@ void ixgbe_ptp_start_cyclecounter(struct ixgbe_adapter *adapter)
 	struct cyclecounter cc;
 	unsigned long flags;
 	u32 incval = 0;
-	u32 tsauxc = 0;
 	u32 fuse0 = 0;
 
 	/* For some of the boards below this mask is technically incorrect.
@@ -1121,22 +1236,11 @@ void ixgbe_ptp_start_cyclecounter(struct ixgbe_adapter *adapter)
 			cc.mult = 3;
 			cc.shift = 2;
 		}
-		/* fallthrough */
+		fallthrough;
 	case ixgbe_mac_x550em_a:
 	case ixgbe_mac_X550:
+	case ixgbe_mac_e610:
 		cc.read = ixgbe_ptp_read_X550;
-
-		/* enable SYSTIME counter */
-		IXGBE_WRITE_REG(hw, IXGBE_SYSTIMR, 0);
-		IXGBE_WRITE_REG(hw, IXGBE_SYSTIML, 0);
-		IXGBE_WRITE_REG(hw, IXGBE_SYSTIMH, 0);
-		tsauxc = IXGBE_READ_REG(hw, IXGBE_TSAUXC);
-		IXGBE_WRITE_REG(hw, IXGBE_TSAUXC,
-				tsauxc & ~IXGBE_TSAUXC_DISABLE_SYSTIME);
-		IXGBE_WRITE_REG(hw, IXGBE_TSIM, IXGBE_TSIM_TXTS);
-		IXGBE_WRITE_REG(hw, IXGBE_EIMS, IXGBE_EIMS_TIMESYNC);
-
-		IXGBE_WRITE_FLUSH(hw);
 		break;
 	case ixgbe_mac_X540:
 		cc.read = ixgbe_ptp_read_82599;
@@ -1169,6 +1273,51 @@ void ixgbe_ptp_start_cyclecounter(struct ixgbe_adapter *adapter)
 }
 
 /**
+ * ixgbe_ptp_init_systime - Initialize SYSTIME registers
+ * @adapter: the ixgbe private board structure
+ *
+ * Initialize and start the SYSTIME registers.
+ */
+static void ixgbe_ptp_init_systime(struct ixgbe_adapter *adapter)
+{
+	struct ixgbe_hw *hw = &adapter->hw;
+	u32 tsauxc;
+
+	switch (hw->mac.type) {
+	case ixgbe_mac_X550EM_x:
+	case ixgbe_mac_x550em_a:
+	case ixgbe_mac_X550:
+	case ixgbe_mac_e610:
+		tsauxc = IXGBE_READ_REG(hw, IXGBE_TSAUXC);
+
+		/* Reset SYSTIME registers to 0 */
+		IXGBE_WRITE_REG(hw, IXGBE_SYSTIMR, 0);
+		IXGBE_WRITE_REG(hw, IXGBE_SYSTIML, 0);
+		IXGBE_WRITE_REG(hw, IXGBE_SYSTIMH, 0);
+
+		/* Reset interrupt settings */
+		IXGBE_WRITE_REG(hw, IXGBE_TSIM, IXGBE_TSIM_TXTS);
+		IXGBE_WRITE_REG(hw, IXGBE_EIMS, IXGBE_EIMS_TIMESYNC);
+
+		/* Activate the SYSTIME counter */
+		IXGBE_WRITE_REG(hw, IXGBE_TSAUXC,
+				tsauxc & ~IXGBE_TSAUXC_DISABLE_SYSTIME);
+		break;
+	case ixgbe_mac_X540:
+	case ixgbe_mac_82599EB:
+		/* Reset SYSTIME registers to 0 */
+		IXGBE_WRITE_REG(hw, IXGBE_SYSTIML, 0);
+		IXGBE_WRITE_REG(hw, IXGBE_SYSTIMH, 0);
+		break;
+	default:
+		/* Other devices aren't supported */
+		return;
+	}
+
+	IXGBE_WRITE_FLUSH(hw);
+}
+
+/**
  * ixgbe_ptp_reset
  * @adapter: the ixgbe private board structure
  *
@@ -1193,6 +1342,8 @@ void ixgbe_ptp_reset(struct ixgbe_adapter *adapter)
 		return;
 
 	ixgbe_ptp_start_cyclecounter(adapter);
+
+	ixgbe_ptp_init_systime(adapter);
 
 	spin_lock_irqsave(&adapter->tmreg_lock, flags);
 	timecounter_init(&adapter->hw_tc, &adapter->hw_cc,
@@ -1238,12 +1389,12 @@ static long ixgbe_ptp_create_clock(struct ixgbe_adapter *adapter)
 		adapter->ptp_caps.n_ext_ts = 0;
 		adapter->ptp_caps.n_per_out = 0;
 		adapter->ptp_caps.pps = 1;
-		adapter->ptp_caps.adjfreq = ixgbe_ptp_adjfreq_82599;
+		adapter->ptp_caps.adjfine = ixgbe_ptp_adjfine_82599;
 		adapter->ptp_caps.adjtime = ixgbe_ptp_adjtime;
-		adapter->ptp_caps.gettime64 = ixgbe_ptp_gettime;
+		adapter->ptp_caps.gettimex64 = ixgbe_ptp_gettimex;
 		adapter->ptp_caps.settime64 = ixgbe_ptp_settime;
 		adapter->ptp_caps.enable = ixgbe_ptp_feature_enable;
-		adapter->ptp_setup_sdp = ixgbe_ptp_setup_sdp_x540;
+		adapter->ptp_setup_sdp = ixgbe_ptp_setup_sdp_X540;
 		break;
 	case ixgbe_mac_82599EB:
 		snprintf(adapter->ptp_caps.name,
@@ -1255,28 +1406,29 @@ static long ixgbe_ptp_create_clock(struct ixgbe_adapter *adapter)
 		adapter->ptp_caps.n_ext_ts = 0;
 		adapter->ptp_caps.n_per_out = 0;
 		adapter->ptp_caps.pps = 0;
-		adapter->ptp_caps.adjfreq = ixgbe_ptp_adjfreq_82599;
+		adapter->ptp_caps.adjfine = ixgbe_ptp_adjfine_82599;
 		adapter->ptp_caps.adjtime = ixgbe_ptp_adjtime;
-		adapter->ptp_caps.gettime64 = ixgbe_ptp_gettime;
+		adapter->ptp_caps.gettimex64 = ixgbe_ptp_gettimex;
 		adapter->ptp_caps.settime64 = ixgbe_ptp_settime;
 		adapter->ptp_caps.enable = ixgbe_ptp_feature_enable;
 		break;
 	case ixgbe_mac_X550:
 	case ixgbe_mac_X550EM_x:
 	case ixgbe_mac_x550em_a:
+	case ixgbe_mac_e610:
 		snprintf(adapter->ptp_caps.name, 16, "%s", netdev->name);
 		adapter->ptp_caps.owner = THIS_MODULE;
 		adapter->ptp_caps.max_adj = 30000000;
 		adapter->ptp_caps.n_alarm = 0;
 		adapter->ptp_caps.n_ext_ts = 0;
 		adapter->ptp_caps.n_per_out = 0;
-		adapter->ptp_caps.pps = 0;
-		adapter->ptp_caps.adjfreq = ixgbe_ptp_adjfreq_X550;
+		adapter->ptp_caps.pps = 1;
+		adapter->ptp_caps.adjfine = ixgbe_ptp_adjfine_X550;
 		adapter->ptp_caps.adjtime = ixgbe_ptp_adjtime;
-		adapter->ptp_caps.gettime64 = ixgbe_ptp_gettime;
+		adapter->ptp_caps.gettimex64 = ixgbe_ptp_gettimex;
 		adapter->ptp_caps.settime64 = ixgbe_ptp_settime;
 		adapter->ptp_caps.enable = ixgbe_ptp_feature_enable;
-		adapter->ptp_setup_sdp = NULL;
+		adapter->ptp_setup_sdp = ixgbe_ptp_setup_sdp_X550;
 		break;
 	default:
 		adapter->ptp_clock = NULL;

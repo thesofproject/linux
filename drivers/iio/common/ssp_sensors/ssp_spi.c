@@ -1,22 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (C) 2014, Samsung Electronics Co. Ltd. All Rights Reserved.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
  */
 
 #include "ssp.h"
 
 #define SSP_DEV (&data->spi->dev)
-#define SSP_GET_MESSAGE_TYPE(data) (data & (3 << SSP_RW))
+#define SSP_GET_MESSAGE_TYPE(data) ((data) & (3 << SSP_RW))
 
 /*
  * SSP -> AP Instruction
@@ -39,7 +29,7 @@ struct ssp_msg_header {
 	__le16 length;
 	__le16 options;
 	__le32 data;
-} __attribute__((__packed__));
+} __packed;
 
 struct ssp_msg {
 	u16 length;
@@ -87,7 +77,7 @@ static struct ssp_msg *ssp_create_msg(u8 cmd, u16 len, u16 opt, u32 data)
 	struct ssp_msg_header h;
 	struct ssp_msg *msg;
 
-	msg = kzalloc(sizeof(*msg), GFP_KERNEL);
+	msg = kzalloc_obj(*msg);
 	if (!msg)
 		return NULL;
 
@@ -114,7 +104,7 @@ static struct ssp_msg *ssp_create_msg(u8 cmd, u16 len, u16 opt, u32 data)
 /*
  * It is a bit heavy to do it this way but often the function is used to compose
  * the message from smaller chunks which are placed on the stack.  Often the
- * chunks are small so memcpy should be optimalized.
+ * chunks are small so memcpy should be optimized.
  */
 static inline void ssp_fill_buffer(struct ssp_msg *m, unsigned int offset,
 				   const void *src, unsigned int len)
@@ -129,9 +119,9 @@ static inline void ssp_get_buffer(struct ssp_msg *m, unsigned int offset,
 }
 
 #define SSP_GET_BUFFER_AT_INDEX(m, index) \
-	(m->buffer[SSP_HEADER_SIZE_ALIGNED + index])
+	((m)->buffer[SSP_HEADER_SIZE_ALIGNED + (index)])
 #define SSP_SET_BUFFER_AT_INDEX(m, index, val) \
-	(m->buffer[SSP_HEADER_SIZE_ALIGNED + index] = val)
+	((m)->buffer[SSP_HEADER_SIZE_ALIGNED + (index)] = val)
 
 static void ssp_clean_msg(struct ssp_msg *m)
 {
@@ -147,7 +137,7 @@ static int ssp_print_mcu_debug(char *data_frame, int *data_index,
 	if (length > received_len - *data_index || length <= 0) {
 		ssp_dbg("[SSP]: MSG From MCU-invalid debug length(%d/%d)\n",
 			length, received_len);
-		return length ? length : -EPROTO;
+		return -EPROTO;
 	}
 
 	ssp_dbg("[SSP]: MSG From MCU - %s\n", &data_frame[*data_index]);
@@ -165,9 +155,9 @@ static int ssp_check_lines(struct ssp_data *data, bool state)
 {
 	int delay_cnt = 0;
 
-	gpio_set_value_cansleep(data->ap_mcu_gpio, state);
+	gpiod_set_value_cansleep(data->ap_mcu_gpiod, state);
 
-	while (gpio_get_value_cansleep(data->mcu_ap_gpio) != state) {
+	while (gpiod_get_value_cansleep(data->mcu_ap_gpiod) != state) {
 		usleep_range(3000, 3500);
 
 		if (data->shut_down || delay_cnt++ > 500) {
@@ -175,7 +165,7 @@ static int ssp_check_lines(struct ssp_data *data, bool state)
 				__func__, state);
 
 			if (!state)
-				gpio_set_value_cansleep(data->ap_mcu_gpio, 1);
+				gpiod_set_value_cansleep(data->ap_mcu_gpiod, 1);
 
 			return -ETIMEDOUT;
 		}
@@ -207,7 +197,7 @@ static int ssp_do_transfer(struct ssp_data *data, struct ssp_msg *msg,
 
 	status = spi_write(data->spi, msg->buffer, SSP_HEADER_SIZE);
 	if (status < 0) {
-		gpio_set_value_cansleep(data->ap_mcu_gpio, 1);
+		gpiod_set_value_cansleep(data->ap_mcu_gpiod, 1);
 		dev_err(SSP_DEV, "%s spi_write fail\n", __func__);
 		goto _error_locked;
 	}
@@ -283,6 +273,8 @@ static int ssp_parse_dataframe(struct ssp_data *data, char *dataframe, int len)
 	for (idx = 0; idx < len;) {
 		switch (dataframe[idx++]) {
 		case SSP_MSG2AP_INST_BYPASS_DATA:
+			if (idx >= len)
+				return -EPROTO;
 			sd = dataframe[idx++];
 			if (sd < 0 || sd >= SSP_SENSOR_MAX) {
 				dev_err(SSP_DEV,
@@ -292,10 +284,13 @@ static int ssp_parse_dataframe(struct ssp_data *data, char *dataframe, int len)
 
 			if (indio_devs[sd]) {
 				spd = iio_priv(indio_devs[sd]);
-				if (spd->process_data)
+				if (spd->process_data) {
+					if (idx >= len)
+						return -EPROTO;
 					spd->process_data(indio_devs[sd],
 							  &dataframe[idx],
 							  data->timestamp);
+				}
 			} else {
 				dev_err(SSP_DEV, "no client for frame\n");
 			}
@@ -303,6 +298,8 @@ static int ssp_parse_dataframe(struct ssp_data *data, char *dataframe, int len)
 			idx += ssp_offset_map[sd];
 			break;
 		case SSP_MSG2AP_INST_DEBUG_DATA:
+			if (idx >= len)
+				return -EPROTO;
 			sd = ssp_print_mcu_debug(dataframe, &idx, len);
 			if (sd) {
 				dev_err(SSP_DEV,
@@ -334,12 +331,11 @@ static int ssp_parse_dataframe(struct ssp_data *data, char *dataframe, int len)
 /* threaded irq */
 int ssp_irq_msg(struct ssp_data *data)
 {
-	bool found = false;
 	char *buffer;
 	u8 msg_type;
 	int ret;
 	u16 length, msg_options;
-	struct ssp_msg *msg, *n;
+	struct ssp_msg *msg = NULL, *iter, *n;
 
 	ret = spi_read(data->spi, data->header_buffer, SSP_HEADER_BUFFER_SIZE);
 	if (ret < 0) {
@@ -365,15 +361,15 @@ int ssp_irq_msg(struct ssp_data *data)
 		 * received with no order
 		 */
 		mutex_lock(&data->pending_lock);
-		list_for_each_entry_safe(msg, n, &data->pending_list, list) {
-			if (msg->options == msg_options) {
-				list_del(&msg->list);
-				found = true;
+		list_for_each_entry_safe(iter, n, &data->pending_list, list) {
+			if (iter->options == msg_options) {
+				list_del(&iter->list);
+				msg = iter;
 				break;
 			}
 		}
 
-		if (!found) {
+		if (!msg) {
 			/*
 			 * here can be implemented dead messages handling
 			 * but the slave should not send such ones - it is to

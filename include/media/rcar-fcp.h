@@ -1,14 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * rcar-fcp.h  --  R-Car Frame Compression Processor Driver
  *
  * Copyright (C) 2016 Renesas Electronics Corporation
  *
  * Contact: Laurent Pinchart (laurent.pinchart@ideasonboard.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 #ifndef __MEDIA_RCAR_FCP_H__
 #define __MEDIA_RCAR_FCP_H__
@@ -22,6 +18,7 @@ void rcar_fcp_put(struct rcar_fcp_device *fcp);
 struct device *rcar_fcp_get_device(struct rcar_fcp_device *fcp);
 int rcar_fcp_enable(struct rcar_fcp_device *fcp);
 void rcar_fcp_disable(struct rcar_fcp_device *fcp);
+int rcar_fcp_soft_reset(struct rcar_fcp_device *fcp);
 #else
 static inline struct rcar_fcp_device *rcar_fcp_get(const struct device_node *np)
 {
@@ -37,6 +34,10 @@ static inline int rcar_fcp_enable(struct rcar_fcp_device *fcp)
 	return 0;
 }
 static inline void rcar_fcp_disable(struct rcar_fcp_device *fcp) { }
+static inline int rcar_fcp_soft_reset(struct rcar_fcp_device *fcp)
+{
+	return 0;
+}
 #endif
 
 #endif /* __MEDIA_RCAR_FCP_H__ */

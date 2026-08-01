@@ -1,21 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * ddbridge-regs.h: Digital Devices PCIe bridge driver
  *
  * Copyright (C) 2010-2017 Digital Devices GmbH
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 only, as published by the Free Software Foundation.
- *
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * To obtain the license, point your browser to
- * http://www.gnu.org/copyleft/gpl.html
  */
+
+#ifndef __DDBRIDGE_REGS_H__
+#define __DDBRIDGE_REGS_H__
 
 /* ------------------------------------------------------------------------- */
 /* SPI Controller */
@@ -29,14 +20,6 @@
 #define GPIO_OUTPUT      0x20
 #define GPIO_INPUT       0x24
 #define GPIO_DIRECTION   0x28
-
-/* ------------------------------------------------------------------------- */
-/* MDIO */
-
-#define MDIO_CTRL        0x20
-#define MDIO_ADR         0x24
-#define MDIO_REG         0x28
-#define MDIO_VAL         0x2C
 
 /* ------------------------------------------------------------------------- */
 
@@ -154,3 +137,4 @@
 #define LNB_BUF_LEVEL(i)		(LNB_BASE + (i) * 0x20 + 0x10)
 #define LNB_BUF_WRITE(i)		(LNB_BASE + (i) * 0x20 + 0x14)
 
+#endif /* __DDBRIDGE_REGS_H__ */

@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 	Fujitsu MB86A16 DVB-S/DSS DC Receiver driver
 
 	Copyright (C) Manu Abraham (abraham.manu@gmail.com)
 
-	This program is free software; you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; either version 2 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
 #include <linux/init.h>
@@ -1464,11 +1452,8 @@ static int mb86a16_set_fe(struct mb86a16_state *state)
 							wait_t = (786432 + state->srate / 2) / state->srate;
 						else
 							wait_t = (1572864 + state->srate / 2) / state->srate;
-						if (state->srate < 5000)
-							/* FIXME ! , should be a long wait ! */
-							msleep_interruptible(wait_t);
-						else
-							msleep_interruptible(wait_t);
+
+						msleep_interruptible(wait_t);
 
 						if (sync_chk(state, &junk) == 0) {
 							iq_vt_set(state, 1);
@@ -1502,10 +1487,12 @@ static int mb86a16_set_fe(struct mb86a16_state *state)
 		}
 	}
 
-	mb86a16_read(state, 0x15, &agcval);
-	mb86a16_read(state, 0x26, &cnmval);
-	dprintk(verbose, MB86A16_INFO, 1, "AGC = %02x CNM = %02x", agcval, cnmval);
-
+	if (mb86a16_read(state, 0x15, &agcval) != 2 ||	mb86a16_read(state, 0x26, &cnmval) != 2) {
+		dprintk(verbose, MB86A16_ERROR, 1, "I2C transfer error");
+		ret = -EREMOTEIO;
+	} else {
+		dprintk(verbose, MB86A16_INFO, 1, "AGC = %02x CNM = %02x", agcval, cnmval);
+	}
 	return ret;
 }
 
@@ -1513,6 +1500,7 @@ static int mb86a16_send_diseqc_msg(struct dvb_frontend *fe,
 				   struct dvb_diseqc_master_cmd *cmd)
 {
 	struct mb86a16_state *state = fe->demodulator_priv;
+	int ret = -EREMOTEIO;
 	int i;
 	u8 regs;
 
@@ -1525,8 +1513,10 @@ static int mb86a16_send_diseqc_msg(struct dvb_frontend *fe,
 
 	regs = 0x18;
 
-	if (cmd->msg_len > 5 || cmd->msg_len < 4)
-		return -EINVAL;
+	if (cmd->msg_len > 5 || cmd->msg_len < 4) {
+		ret = -EINVAL;
+		goto err;
+	}
 
 	for (i = 0; i < cmd->msg_len; i++) {
 		if (mb86a16_write(state, regs, cmd->msg[i]) < 0)
@@ -1547,7 +1537,7 @@ static int mb86a16_send_diseqc_msg(struct dvb_frontend *fe,
 
 err:
 	dprintk(verbose, MB86A16_ERROR, 1, "I2C transfer error");
-	return -EREMOTEIO;
+	return ret;
 }
 
 static int mb86a16_send_diseqc_burst(struct dvb_frontend *fe,
@@ -1808,10 +1798,9 @@ static const struct dvb_frontend_ops mb86a16_ops = {
 	.delsys = { SYS_DVBS },
 	.info = {
 		.name			= "Fujitsu MB86A16 DVB-S",
-		.frequency_min		= 950000,
-		.frequency_max		= 2150000,
-		.frequency_stepsize	= 3000,
-		.frequency_tolerance	= 0,
+		.frequency_min_hz	=  950 * MHz,
+		.frequency_max_hz	= 2150 * MHz,
+		.frequency_stepsize_hz	=    3 * MHz,
 		.symbol_rate_min	= 1000000,
 		.symbol_rate_max	= 45000000,
 		.symbol_rate_tolerance	= 500,
@@ -1844,7 +1833,7 @@ struct dvb_frontend *mb86a16_attach(const struct mb86a16_config *config,
 	u8 dev_id = 0;
 	struct mb86a16_state *state = NULL;
 
-	state = kmalloc(sizeof(struct mb86a16_state), GFP_KERNEL);
+	state = kmalloc_obj(struct mb86a16_state);
 	if (state == NULL)
 		goto error;
 
@@ -1864,6 +1853,7 @@ error:
 	kfree(state);
 	return NULL;
 }
-EXPORT_SYMBOL(mb86a16_attach);
+EXPORT_SYMBOL_GPL(mb86a16_attach);
+MODULE_DESCRIPTION("Fujitsu MB86A16 DVB-S/DSS DC Receiver driver");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Manu Abraham");

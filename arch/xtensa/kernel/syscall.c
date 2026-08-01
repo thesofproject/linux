@@ -17,7 +17,6 @@
  */
 #include <linux/uaccess.h>
 #include <asm/syscall.h>
-#include <asm/unistd.h>
 #include <linux/linkage.h>
 #include <linux/stringify.h>
 #include <linux/errno.h>
@@ -28,13 +27,9 @@
 #include <linux/sched/mm.h>
 #include <linux/shm.h>
 
-typedef void (*syscall_t)(void);
-
-syscall_t sys_call_table[__NR_syscall_count] /* FIXME __cacheline_aligned */= {
-	[0 ... __NR_syscall_count - 1] = (syscall_t)&sys_ni_syscall,
-
-#define __SYSCALL(nr,symbol,nargs) [ nr ] = (syscall_t)symbol,
-#include <uapi/asm/unistd.h>
+syscall_t sys_call_table[] /* FIXME __cacheline_aligned */= {
+#define __SYSCALL(nr, entry)	(syscall_t)entry,
+#include <asm/syscall_table.h>
 };
 
 #define COLOUR_ALIGN(addr, pgoff) \
@@ -60,9 +55,11 @@ asmlinkage long xtensa_fadvise64_64(int fd, int advice,
 
 #ifdef CONFIG_MMU
 unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr,
-		unsigned long len, unsigned long pgoff, unsigned long flags)
+		unsigned long len, unsigned long pgoff, unsigned long flags,
+		vm_flags_t vm_flags)
 {
 	struct vm_area_struct *vmm;
+	struct vma_iterator vmi;
 
 	if (flags & MAP_FIXED) {
 		/* We do not accept a shared mapping if it would violate
@@ -84,15 +81,20 @@ unsigned long arch_get_unmapped_area(struct file *filp, unsigned long addr,
 	else
 		addr = PAGE_ALIGN(addr);
 
-	for (vmm = find_vma(current->mm, addr); ; vmm = vmm->vm_next) {
-		/* At this point:  (!vmm || addr < vmm->vm_end). */
-		if (TASK_SIZE - len < addr)
-			return -ENOMEM;
-		if (!vmm || addr + len <= vm_start_gap(vmm))
-			return addr;
+	vma_iter_init(&vmi, current->mm, addr);
+	for_each_vma(vmi, vmm) {
+		/* At this point:  (addr < vmm->vm_end). */
+		if (addr + len <= vm_start_gap(vmm))
+			break;
+
 		addr = vmm->vm_end;
 		if (flags & MAP_SHARED)
 			addr = COLOUR_ALIGN(addr, pgoff);
 	}
+
+	if (TASK_SIZE - len < addr)
+		return -ENOMEM;
+
+	return addr;
 }
 #endif

@@ -24,10 +24,13 @@
  */
 
 #include <linux/irqdomain.h>
+#include <linux/pci.h>
 #include <linux/pm_domain.h>
 #include <linux/platform_device.h>
 #include <sound/designware_i2s.h>
 #include <sound/pcm.h>
+#include <linux/acpi.h>
+#include <linux/dmi.h>
 
 #include "amdgpu.h"
 #include "atom.h"
@@ -35,17 +38,18 @@
 
 #include "acp_gfx_if.h"
 
-#define ACP_TILE_ON_MASK                	0x03
-#define ACP_TILE_OFF_MASK               	0x02
-#define ACP_TILE_ON_RETAIN_REG_MASK     	0x1f
-#define ACP_TILE_OFF_RETAIN_REG_MASK    	0x20
+#define ST_JADEITE 1
+#define ACP_TILE_ON_MASK			0x03
+#define ACP_TILE_OFF_MASK			0x02
+#define ACP_TILE_ON_RETAIN_REG_MASK		0x1f
+#define ACP_TILE_OFF_RETAIN_REG_MASK		0x20
 
-#define ACP_TILE_P1_MASK                	0x3e
-#define ACP_TILE_P2_MASK                	0x3d
-#define ACP_TILE_DSP0_MASK              	0x3b
-#define ACP_TILE_DSP1_MASK              	0x37
+#define ACP_TILE_P1_MASK			0x3e
+#define ACP_TILE_P2_MASK			0x3d
+#define ACP_TILE_DSP0_MASK			0x3b
+#define ACP_TILE_DSP1_MASK			0x37
 
-#define ACP_TILE_DSP2_MASK              	0x2f
+#define ACP_TILE_DSP2_MASK			0x2f
 
 #define ACP_DMA_REGS_END			0x146c0
 #define ACP_I2S_PLAY_REGS_START			0x14840
@@ -57,6 +61,10 @@
 #define ACP_I2S_COMP2_CAP_REG_OFFSET		0xa8
 #define ACP_I2S_COMP1_PLAY_REG_OFFSET		0x6c
 #define ACP_I2S_COMP2_PLAY_REG_OFFSET		0x68
+#define ACP_BT_PLAY_REGS_START			0x14970
+#define ACP_BT_PLAY_REGS_END			0x14a24
+#define ACP_BT_COMP1_REG_OFFSET			0xac
+#define ACP_BT_COMP2_REG_OFFSET			0xa8
 
 #define mmACP_PGFSM_RETAIN_REG			0x51c9
 #define mmACP_PGFSM_CONFIG_REG			0x51ca
@@ -70,15 +78,17 @@
 #define mmACP_CONTROL				0x5131
 #define mmACP_STATUS				0x5133
 #define mmACP_SOFT_RESET			0x5134
-#define ACP_CONTROL__ClkEn_MASK 		0x1
-#define ACP_SOFT_RESET__SoftResetAud_MASK 	0x100
+#define ACP_CONTROL__ClkEn_MASK			0x1
+#define ACP_SOFT_RESET__SoftResetAud_MASK	0x100
 #define ACP_SOFT_RESET__SoftResetAudDone_MASK	0x1000000
 #define ACP_CLOCK_EN_TIME_OUT_VALUE		0x000000FF
 #define ACP_SOFT_RESET_DONE_TIME_OUT_VALUE	0x000000FF
 
 #define ACP_TIMEOUT_LOOP			0x000000FF
-#define ACP_DEVS				3
+#define ACP_DEVS				4
 #define ACP_SRC_ID				162
+
+static unsigned long acp_machine_id;
 
 enum {
 	ACP_TILE_P1 = 0,
@@ -88,9 +98,9 @@ enum {
 	ACP_TILE_DSP2,
 };
 
-static int acp_sw_init(void *handle)
+static int acp_sw_init(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	adev->acp.parent = adev->dev;
 
@@ -102,9 +112,9 @@ static int acp_sw_init(void *handle)
 	return 0;
 }
 
-static int acp_sw_fini(void *handle)
+static int acp_sw_fini(struct amdgpu_ip_block *ip_block)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	if (adev->acp.cgs_device)
 		amdgpu_cgs_destroy_device(adev->acp.cgs_device);
@@ -112,305 +122,328 @@ static int acp_sw_fini(void *handle)
 	return 0;
 }
 
-/* power off a tile/block within ACP */
-static int acp_suspend_tile(void *cgs_dev, int tile)
-{
-	u32 val = 0;
-	u32 count = 0;
-
-	if ((tile  < ACP_TILE_P1) || (tile > ACP_TILE_DSP2)) {
-		pr_err("Invalid ACP tile : %d to suspend\n", tile);
-		return -1;
-	}
-
-	val = cgs_read_register(cgs_dev, mmACP_PGFSM_READ_REG_0 + tile);
-	val &= ACP_TILE_ON_MASK;
-
-	if (val == 0x0) {
-		val = cgs_read_register(cgs_dev, mmACP_PGFSM_RETAIN_REG);
-		val = val | (1 << tile);
-		cgs_write_register(cgs_dev, mmACP_PGFSM_RETAIN_REG, val);
-		cgs_write_register(cgs_dev, mmACP_PGFSM_CONFIG_REG,
-					0x500 + tile);
-
-		count = ACP_TIMEOUT_LOOP;
-		while (true) {
-			val = cgs_read_register(cgs_dev, mmACP_PGFSM_READ_REG_0
-								+ tile);
-			val = val & ACP_TILE_ON_MASK;
-			if (val == ACP_TILE_OFF_MASK)
-				break;
-			if (--count == 0) {
-				pr_err("Timeout reading ACP PGFSM status\n");
-				return -ETIMEDOUT;
-			}
-			udelay(100);
-		}
-
-		val = cgs_read_register(cgs_dev, mmACP_PGFSM_RETAIN_REG);
-
-		val |= ACP_TILE_OFF_RETAIN_REG_MASK;
-		cgs_write_register(cgs_dev, mmACP_PGFSM_RETAIN_REG, val);
-	}
-	return 0;
-}
-
-/* power on a tile/block within ACP */
-static int acp_resume_tile(void *cgs_dev, int tile)
-{
-	u32 val = 0;
-	u32 count = 0;
-
-	if ((tile  < ACP_TILE_P1) || (tile > ACP_TILE_DSP2)) {
-		pr_err("Invalid ACP tile to resume\n");
-		return -1;
-	}
-
-	val = cgs_read_register(cgs_dev, mmACP_PGFSM_READ_REG_0 + tile);
-	val = val & ACP_TILE_ON_MASK;
-
-	if (val != 0x0) {
-		cgs_write_register(cgs_dev, mmACP_PGFSM_CONFIG_REG,
-					0x600 + tile);
-		count = ACP_TIMEOUT_LOOP;
-		while (true) {
-			val = cgs_read_register(cgs_dev, mmACP_PGFSM_READ_REG_0
-							+ tile);
-			val = val & ACP_TILE_ON_MASK;
-			if (val == 0x0)
-				break;
-			if (--count == 0) {
-				pr_err("Timeout reading ACP PGFSM status\n");
-				return -ETIMEDOUT;
-			}
-			udelay(100);
-		}
-		val = cgs_read_register(cgs_dev, mmACP_PGFSM_RETAIN_REG);
-		if (tile == ACP_TILE_P1)
-			val = val & (ACP_TILE_P1_MASK);
-		else if (tile == ACP_TILE_P2)
-			val = val & (ACP_TILE_P2_MASK);
-
-		cgs_write_register(cgs_dev, mmACP_PGFSM_RETAIN_REG, val);
-	}
-	return 0;
-}
-
 struct acp_pm_domain {
-	void *cgs_dev;
+	void *adev;
 	struct generic_pm_domain gpd;
 };
 
 static int acp_poweroff(struct generic_pm_domain *genpd)
 {
-	int i, ret;
 	struct acp_pm_domain *apd;
+	struct amdgpu_device *adev;
 
 	apd = container_of(genpd, struct acp_pm_domain, gpd);
-	if (apd != NULL) {
-		/* Donot return abruptly if any of power tile fails to suspend.
-		 * Log it and continue powering off other tile
-		 */
-		for (i = 4; i >= 0 ; i--) {
-			ret = acp_suspend_tile(apd->cgs_dev, ACP_TILE_P1 + i);
-			if (ret)
-				pr_err("ACP tile %d tile suspend failed\n", i);
-		}
-	}
+	adev = apd->adev;
+	/* call smu to POWER GATE ACP block
+	 * smu will
+	 * 1. turn off the acp clock
+	 * 2. power off the acp tiles
+	 * 3. check and enter ulv state
+	 */
+	amdgpu_dpm_set_powergating_by_smu(adev, AMD_IP_BLOCK_TYPE_ACP, true, 0);
 	return 0;
 }
 
 static int acp_poweron(struct generic_pm_domain *genpd)
 {
-	int i, ret;
 	struct acp_pm_domain *apd;
+	struct amdgpu_device *adev;
 
 	apd = container_of(genpd, struct acp_pm_domain, gpd);
-	if (apd != NULL) {
-		for (i = 0; i < 2; i++) {
-			ret = acp_resume_tile(apd->cgs_dev, ACP_TILE_P1 + i);
-			if (ret) {
-				pr_err("ACP tile %d resume failed\n", i);
-				break;
-			}
-		}
-
-		/* Disable DSPs which are not going to be used */
-		for (i = 0; i < 3; i++) {
-			ret = acp_suspend_tile(apd->cgs_dev, ACP_TILE_DSP0 + i);
-			/* Continue suspending other DSP, even if one fails */
-			if (ret)
-				pr_err("ACP DSP %d suspend failed\n", i);
-		}
-	}
+	adev = apd->adev;
+	/* call smu to UNGATE ACP block
+	 * smu will
+	 * 1. exit ulv
+	 * 2. turn on acp clock
+	 * 3. power on acp tiles
+	 */
+	amdgpu_dpm_set_powergating_by_smu(adev, AMD_IP_BLOCK_TYPE_ACP, false, 0);
 	return 0;
 }
 
-static struct device *get_mfd_cell_dev(const char *device_name, int r)
+static int acp_genpd_add_device(struct device *dev, void *data)
 {
-	char auto_dev_name[25];
-	struct device *dev;
+	struct generic_pm_domain *gpd = data;
+	int ret;
 
-	snprintf(auto_dev_name, sizeof(auto_dev_name),
-		 "%s.%d.auto", device_name, r);
-	dev = bus_find_device_by_name(&platform_bus_type, NULL, auto_dev_name);
-	dev_info(dev, "device %s added to pm domain\n", auto_dev_name);
+	ret = pm_genpd_add_device(gpd, dev);
+	if (ret)
+		dev_err(dev, "Failed to add dev to genpd %d\n", ret);
 
-	return dev;
+	return ret;
 }
+
+static int acp_genpd_remove_device(struct device *dev, void *data)
+{
+	int ret;
+
+	ret = pm_genpd_remove_device(dev);
+	if (ret)
+		dev_err(dev, "Failed to remove dev from genpd %d\n", ret);
+
+	/* Continue to remove */
+	return 0;
+}
+
+static int acp_quirk_cb(const struct dmi_system_id *id)
+{
+	acp_machine_id = ST_JADEITE;
+	return 1;
+}
+
+static const struct dmi_system_id acp_quirk_table[] = {
+	{
+		.callback = acp_quirk_cb,
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AMD"),
+			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "Jadeite"),
+		}
+	},
+	{
+		.callback = acp_quirk_cb,
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "IP3 Technology CO.,Ltd."),
+			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ASN1D"),
+		},
+	},
+	{
+		.callback = acp_quirk_cb,
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "Standard"),
+			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ASN10"),
+		},
+	},
+	{}
+};
 
 /**
  * acp_hw_init - start and test ACP block
  *
- * @adev: amdgpu_device pointer
+ * @ip_block: Pointer to the amdgpu_ip_block for this hw instance.
  *
  */
-static int acp_hw_init(void *handle)
+static int acp_hw_init(struct amdgpu_ip_block *ip_block)
 {
-	int r, i;
-	uint64_t acp_base;
+	int r;
+	u64 acp_base;
 	u32 val = 0;
 	u32 count = 0;
-	struct device *dev;
-	struct i2s_platform_data *i2s_pdata;
 
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	const struct amdgpu_ip_block *ip_block =
-		amdgpu_device_ip_get_ip_block(adev, AMD_IP_BLOCK_TYPE_ACP);
-
-	if (!ip_block)
-		return -EINVAL;
+	struct amdgpu_device *adev = ip_block->adev;
 
 	r = amd_acp_hw_init(adev->acp.cgs_device,
 			    ip_block->version->major, ip_block->version->minor);
 	/* -ENODEV means board uses AZ rather than ACP */
-	if (r == -ENODEV)
+	if (r == -ENODEV) {
+		amdgpu_dpm_set_powergating_by_smu(adev, AMD_IP_BLOCK_TYPE_ACP, true, 0);
 		return 0;
-	else if (r)
+	} else if (r) {
 		return r;
-
-	r = cgs_get_pci_resource(adev->acp.cgs_device, CGS_RESOURCE_TYPE_MMIO,
-			0x5289, 0, &acp_base);
-	if (r == -ENODEV)
-		return 0;
-	else if (r)
-		return r;
-	if (adev->asic_type != CHIP_STONEY) {
-		adev->acp.acp_genpd = kzalloc(sizeof(struct acp_pm_domain), GFP_KERNEL);
-		if (adev->acp.acp_genpd == NULL)
-			return -ENOMEM;
-
-		adev->acp.acp_genpd->gpd.name = "ACP_AUDIO";
-		adev->acp.acp_genpd->gpd.power_off = acp_poweroff;
-		adev->acp.acp_genpd->gpd.power_on = acp_poweron;
-
-
-		adev->acp.acp_genpd->cgs_dev = adev->acp.cgs_device;
-
-		pm_genpd_init(&adev->acp.acp_genpd->gpd, NULL, false);
 	}
 
-	adev->acp.acp_cell = kzalloc(sizeof(struct mfd_cell) * ACP_DEVS,
-							GFP_KERNEL);
+	if (adev->rmmio_size == 0 || adev->rmmio_size < 0x5289)
+		return -EINVAL;
 
-	if (adev->acp.acp_cell == NULL)
+	acp_base = adev->rmmio_base;
+	adev->acp.acp_genpd = kzalloc_obj(struct acp_pm_domain);
+	if (!adev->acp.acp_genpd)
 		return -ENOMEM;
 
-	adev->acp.acp_res = kzalloc(sizeof(struct resource) * 4, GFP_KERNEL);
+	adev->acp.acp_genpd->gpd.name = "ACP_AUDIO";
+	adev->acp.acp_genpd->gpd.power_off = acp_poweroff;
+	adev->acp.acp_genpd->gpd.power_on = acp_poweron;
+	adev->acp.acp_genpd->adev = adev;
 
-	if (adev->acp.acp_res == NULL) {
-		kfree(adev->acp.acp_cell);
-		return -ENOMEM;
-	}
-
-	i2s_pdata = kzalloc(sizeof(struct i2s_platform_data) * 2, GFP_KERNEL);
-	if (i2s_pdata == NULL) {
-		kfree(adev->acp.acp_res);
-		kfree(adev->acp.acp_cell);
-		return -ENOMEM;
-	}
-
-	switch (adev->asic_type) {
-	case CHIP_STONEY:
-		i2s_pdata[0].quirks = DW_I2S_QUIRK_COMP_REG_OFFSET |
-			DW_I2S_QUIRK_16BIT_IDX_OVERRIDE;
-		break;
-	default:
-		i2s_pdata[0].quirks = DW_I2S_QUIRK_COMP_REG_OFFSET;
-	}
-	i2s_pdata[0].cap = DWC_I2S_PLAY;
-	i2s_pdata[0].snd_rates = SNDRV_PCM_RATE_8000_96000;
-	i2s_pdata[0].i2s_reg_comp1 = ACP_I2S_COMP1_PLAY_REG_OFFSET;
-	i2s_pdata[0].i2s_reg_comp2 = ACP_I2S_COMP2_PLAY_REG_OFFSET;
-	switch (adev->asic_type) {
-	case CHIP_STONEY:
-		i2s_pdata[1].quirks = DW_I2S_QUIRK_COMP_REG_OFFSET |
-			DW_I2S_QUIRK_COMP_PARAM1 |
-			DW_I2S_QUIRK_16BIT_IDX_OVERRIDE;
-		break;
-	default:
-		i2s_pdata[1].quirks = DW_I2S_QUIRK_COMP_REG_OFFSET |
-			DW_I2S_QUIRK_COMP_PARAM1;
-	}
-
-	i2s_pdata[1].cap = DWC_I2S_RECORD;
-	i2s_pdata[1].snd_rates = SNDRV_PCM_RATE_8000_96000;
-	i2s_pdata[1].i2s_reg_comp1 = ACP_I2S_COMP1_CAP_REG_OFFSET;
-	i2s_pdata[1].i2s_reg_comp2 = ACP_I2S_COMP2_CAP_REG_OFFSET;
-
-	adev->acp.acp_res[0].name = "acp2x_dma";
-	adev->acp.acp_res[0].flags = IORESOURCE_MEM;
-	adev->acp.acp_res[0].start = acp_base;
-	adev->acp.acp_res[0].end = acp_base + ACP_DMA_REGS_END;
-
-	adev->acp.acp_res[1].name = "acp2x_dw_i2s_play";
-	adev->acp.acp_res[1].flags = IORESOURCE_MEM;
-	adev->acp.acp_res[1].start = acp_base + ACP_I2S_PLAY_REGS_START;
-	adev->acp.acp_res[1].end = acp_base + ACP_I2S_PLAY_REGS_END;
-
-	adev->acp.acp_res[2].name = "acp2x_dw_i2s_cap";
-	adev->acp.acp_res[2].flags = IORESOURCE_MEM;
-	adev->acp.acp_res[2].start = acp_base + ACP_I2S_CAP_REGS_START;
-	adev->acp.acp_res[2].end = acp_base + ACP_I2S_CAP_REGS_END;
-
-	adev->acp.acp_res[3].name = "acp2x_dma_irq";
-	adev->acp.acp_res[3].flags = IORESOURCE_IRQ;
-	adev->acp.acp_res[3].start = amdgpu_irq_create_mapping(adev, 162);
-	adev->acp.acp_res[3].end = adev->acp.acp_res[3].start;
-
-	adev->acp.acp_cell[0].name = "acp_audio_dma";
-	adev->acp.acp_cell[0].num_resources = 4;
-	adev->acp.acp_cell[0].resources = &adev->acp.acp_res[0];
-	adev->acp.acp_cell[0].platform_data = &adev->asic_type;
-	adev->acp.acp_cell[0].pdata_size = sizeof(adev->asic_type);
-
-	adev->acp.acp_cell[1].name = "designware-i2s";
-	adev->acp.acp_cell[1].num_resources = 1;
-	adev->acp.acp_cell[1].resources = &adev->acp.acp_res[1];
-	adev->acp.acp_cell[1].platform_data = &i2s_pdata[0];
-	adev->acp.acp_cell[1].pdata_size = sizeof(struct i2s_platform_data);
-
-	adev->acp.acp_cell[2].name = "designware-i2s";
-	adev->acp.acp_cell[2].num_resources = 1;
-	adev->acp.acp_cell[2].resources = &adev->acp.acp_res[2];
-	adev->acp.acp_cell[2].platform_data = &i2s_pdata[1];
-	adev->acp.acp_cell[2].pdata_size = sizeof(struct i2s_platform_data);
-
-	r = mfd_add_hotplug_devices(adev->acp.parent, adev->acp.acp_cell,
-								ACP_DEVS);
-	if (r)
-		return r;
-
-	if (adev->asic_type != CHIP_STONEY) {
-		for (i = 0; i < ACP_DEVS ; i++) {
-			dev = get_mfd_cell_dev(adev->acp.acp_cell[i].name, i);
-			r = pm_genpd_add_device(&adev->acp.acp_genpd->gpd, dev);
-			if (r) {
-				dev_err(dev, "Failed to add dev to genpd\n");
-				return r;
-			}
+	pm_genpd_init(&adev->acp.acp_genpd->gpd, NULL, false);
+	dmi_check_system(acp_quirk_table);
+	switch (acp_machine_id) {
+	case ST_JADEITE:
+	{
+		adev->acp.acp_cell = kzalloc_objs(struct mfd_cell, 2);
+		if (!adev->acp.acp_cell) {
+			r = -ENOMEM;
+			goto failure;
 		}
+
+		adev->acp.acp_res = kzalloc_objs(struct resource, 3);
+		if (!adev->acp.acp_res) {
+			r = -ENOMEM;
+			goto failure;
+		}
+
+		adev->acp.i2s_pdata = kzalloc_objs(struct i2s_platform_data, 1);
+		if (!adev->acp.i2s_pdata) {
+			r = -ENOMEM;
+			goto failure;
+		}
+
+		adev->acp.i2s_pdata[0].quirks = DW_I2S_QUIRK_COMP_REG_OFFSET |
+						DW_I2S_QUIRK_16BIT_IDX_OVERRIDE;
+		adev->acp.i2s_pdata[0].cap = DWC_I2S_PLAY | DWC_I2S_RECORD;
+		adev->acp.i2s_pdata[0].snd_rates = SNDRV_PCM_RATE_8000_96000;
+		adev->acp.i2s_pdata[0].i2s_reg_comp1 = ACP_I2S_COMP1_CAP_REG_OFFSET;
+		adev->acp.i2s_pdata[0].i2s_reg_comp2 = ACP_I2S_COMP2_CAP_REG_OFFSET;
+
+		adev->acp.acp_res[0].name = "acp2x_dma";
+		adev->acp.acp_res[0].flags = IORESOURCE_MEM;
+		adev->acp.acp_res[0].start = acp_base;
+		adev->acp.acp_res[0].end = acp_base + ACP_DMA_REGS_END;
+
+		adev->acp.acp_res[1].name = "acp2x_dw_i2s_play_cap";
+		adev->acp.acp_res[1].flags = IORESOURCE_MEM;
+		adev->acp.acp_res[1].start = acp_base + ACP_I2S_CAP_REGS_START;
+		adev->acp.acp_res[1].end = acp_base + ACP_I2S_CAP_REGS_END;
+
+		adev->acp.acp_res[2].name = "acp2x_dma_irq";
+		adev->acp.acp_res[2].flags = IORESOURCE_IRQ;
+		adev->acp.acp_res[2].start = amdgpu_irq_create_mapping(adev, 162);
+		adev->acp.acp_res[2].end = adev->acp.acp_res[2].start;
+
+		adev->acp.acp_cell[0].name = "acp_audio_dma";
+		adev->acp.acp_cell[0].id = 0;
+		adev->acp.acp_cell[0].num_resources = 3;
+		adev->acp.acp_cell[0].resources = &adev->acp.acp_res[0];
+		adev->acp.acp_cell[0].platform_data = &adev->asic_type;
+		adev->acp.acp_cell[0].pdata_size = sizeof(adev->asic_type);
+
+		adev->acp.acp_cell[1].name = "designware-i2s";
+		adev->acp.acp_cell[1].id = 1;
+		adev->acp.acp_cell[1].num_resources = 1;
+		adev->acp.acp_cell[1].resources = &adev->acp.acp_res[1];
+		adev->acp.acp_cell[1].platform_data = &adev->acp.i2s_pdata[0];
+		adev->acp.acp_cell[1].pdata_size = sizeof(struct i2s_platform_data);
+		r = mfd_add_devices(adev->acp.parent, 0, adev->acp.acp_cell, 2, NULL, 0, NULL);
+		if (r)
+			goto failure;
+		r = device_for_each_child(adev->acp.parent, &adev->acp.acp_genpd->gpd,
+					  acp_genpd_add_device);
+		if (r)
+			goto failure;
+		break;
+	}
+	default:
+		adev->acp.acp_cell = kzalloc_objs(struct mfd_cell, ACP_DEVS);
+
+		if (!adev->acp.acp_cell) {
+			r = -ENOMEM;
+			goto failure;
+		}
+
+		adev->acp.acp_res = kzalloc_objs(struct resource, 5);
+		if (!adev->acp.acp_res) {
+			r = -ENOMEM;
+			goto failure;
+		}
+
+		adev->acp.i2s_pdata = kzalloc_objs(struct i2s_platform_data, 3);
+		if (!adev->acp.i2s_pdata) {
+			r = -ENOMEM;
+			goto failure;
+		}
+
+		switch (adev->asic_type) {
+		case CHIP_STONEY:
+			adev->acp.i2s_pdata[0].quirks = DW_I2S_QUIRK_COMP_REG_OFFSET |
+							DW_I2S_QUIRK_16BIT_IDX_OVERRIDE;
+			break;
+		default:
+			adev->acp.i2s_pdata[0].quirks = DW_I2S_QUIRK_COMP_REG_OFFSET;
+		}
+		adev->acp.i2s_pdata[0].cap = DWC_I2S_PLAY;
+		adev->acp.i2s_pdata[0].snd_rates = SNDRV_PCM_RATE_8000_96000;
+		adev->acp.i2s_pdata[0].i2s_reg_comp1 = ACP_I2S_COMP1_PLAY_REG_OFFSET;
+		adev->acp.i2s_pdata[0].i2s_reg_comp2 = ACP_I2S_COMP2_PLAY_REG_OFFSET;
+		switch (adev->asic_type) {
+		case CHIP_STONEY:
+			adev->acp.i2s_pdata[1].quirks = DW_I2S_QUIRK_COMP_REG_OFFSET |
+							DW_I2S_QUIRK_COMP_PARAM1 |
+							DW_I2S_QUIRK_16BIT_IDX_OVERRIDE;
+			break;
+		default:
+			adev->acp.i2s_pdata[1].quirks = DW_I2S_QUIRK_COMP_REG_OFFSET |
+							DW_I2S_QUIRK_COMP_PARAM1;
+		}
+
+		adev->acp.i2s_pdata[1].cap = DWC_I2S_RECORD;
+		adev->acp.i2s_pdata[1].snd_rates = SNDRV_PCM_RATE_8000_96000;
+		adev->acp.i2s_pdata[1].i2s_reg_comp1 = ACP_I2S_COMP1_CAP_REG_OFFSET;
+		adev->acp.i2s_pdata[1].i2s_reg_comp2 = ACP_I2S_COMP2_CAP_REG_OFFSET;
+
+		adev->acp.i2s_pdata[2].quirks = DW_I2S_QUIRK_COMP_REG_OFFSET;
+		switch (adev->asic_type) {
+		case CHIP_STONEY:
+			adev->acp.i2s_pdata[2].quirks |= DW_I2S_QUIRK_16BIT_IDX_OVERRIDE;
+			break;
+		default:
+			break;
+		}
+
+		adev->acp.i2s_pdata[2].cap = DWC_I2S_PLAY | DWC_I2S_RECORD;
+		adev->acp.i2s_pdata[2].snd_rates = SNDRV_PCM_RATE_8000_96000;
+		adev->acp.i2s_pdata[2].i2s_reg_comp1 = ACP_BT_COMP1_REG_OFFSET;
+		adev->acp.i2s_pdata[2].i2s_reg_comp2 = ACP_BT_COMP2_REG_OFFSET;
+
+		adev->acp.acp_res[0].name = "acp2x_dma";
+		adev->acp.acp_res[0].flags = IORESOURCE_MEM;
+		adev->acp.acp_res[0].start = acp_base;
+		adev->acp.acp_res[0].end = acp_base + ACP_DMA_REGS_END;
+
+		adev->acp.acp_res[1].name = "acp2x_dw_i2s_play";
+		adev->acp.acp_res[1].flags = IORESOURCE_MEM;
+		adev->acp.acp_res[1].start = acp_base + ACP_I2S_PLAY_REGS_START;
+		adev->acp.acp_res[1].end = acp_base + ACP_I2S_PLAY_REGS_END;
+
+		adev->acp.acp_res[2].name = "acp2x_dw_i2s_cap";
+		adev->acp.acp_res[2].flags = IORESOURCE_MEM;
+		adev->acp.acp_res[2].start = acp_base + ACP_I2S_CAP_REGS_START;
+		adev->acp.acp_res[2].end = acp_base + ACP_I2S_CAP_REGS_END;
+
+		adev->acp.acp_res[3].name = "acp2x_dw_bt_i2s_play_cap";
+		adev->acp.acp_res[3].flags = IORESOURCE_MEM;
+		adev->acp.acp_res[3].start = acp_base + ACP_BT_PLAY_REGS_START;
+		adev->acp.acp_res[3].end = acp_base + ACP_BT_PLAY_REGS_END;
+
+		adev->acp.acp_res[4].name = "acp2x_dma_irq";
+		adev->acp.acp_res[4].flags = IORESOURCE_IRQ;
+		adev->acp.acp_res[4].start = amdgpu_irq_create_mapping(adev, 162);
+		adev->acp.acp_res[4].end = adev->acp.acp_res[4].start;
+
+		adev->acp.acp_cell[0].name = "acp_audio_dma";
+		adev->acp.acp_cell[0].id = 0;
+		adev->acp.acp_cell[0].num_resources = 5;
+		adev->acp.acp_cell[0].resources = &adev->acp.acp_res[0];
+		adev->acp.acp_cell[0].platform_data = &adev->asic_type;
+		adev->acp.acp_cell[0].pdata_size = sizeof(adev->asic_type);
+
+		adev->acp.acp_cell[1].name = "designware-i2s";
+		adev->acp.acp_cell[1].id = 1;
+		adev->acp.acp_cell[1].num_resources = 1;
+		adev->acp.acp_cell[1].resources = &adev->acp.acp_res[1];
+		adev->acp.acp_cell[1].platform_data = &adev->acp.i2s_pdata[0];
+		adev->acp.acp_cell[1].pdata_size = sizeof(struct i2s_platform_data);
+
+		adev->acp.acp_cell[2].name = "designware-i2s";
+		adev->acp.acp_cell[2].id = 2;
+		adev->acp.acp_cell[2].num_resources = 1;
+		adev->acp.acp_cell[2].resources = &adev->acp.acp_res[2];
+		adev->acp.acp_cell[2].platform_data = &adev->acp.i2s_pdata[1];
+		adev->acp.acp_cell[2].pdata_size = sizeof(struct i2s_platform_data);
+
+		adev->acp.acp_cell[3].name = "designware-i2s";
+		adev->acp.acp_cell[3].id = 3;
+		adev->acp.acp_cell[3].num_resources = 1;
+		adev->acp.acp_cell[3].resources = &adev->acp.acp_res[3];
+		adev->acp.acp_cell[3].platform_data = &adev->acp.i2s_pdata[2];
+		adev->acp.acp_cell[3].pdata_size = sizeof(struct i2s_platform_data);
+
+		r = mfd_add_devices(adev->acp.parent, 0, adev->acp.acp_cell, ACP_DEVS, NULL, 0, NULL);
+		if (r)
+			goto failure;
+
+		r = device_for_each_child(adev->acp.parent, &adev->acp.acp_genpd->gpd,
+					  acp_genpd_add_device);
+		if (r)
+			goto failure;
 	}
 
 	/* Assert Soft reset of ACP */
@@ -427,7 +460,8 @@ static int acp_hw_init(void *handle)
 			break;
 		if (--count == 0) {
 			dev_err(&adev->pdev->dev, "Failed to reset ACP\n");
-			return -ETIMEDOUT;
+			r = -ETIMEDOUT;
+			goto failure;
 		}
 		udelay(100);
 	}
@@ -444,7 +478,8 @@ static int acp_hw_init(void *handle)
 			break;
 		if (--count == 0) {
 			dev_err(&adev->pdev->dev, "Failed to reset ACP\n");
-			return -ETIMEDOUT;
+			r = -ETIMEDOUT;
+			goto failure;
 		}
 		udelay(100);
 	}
@@ -452,27 +487,34 @@ static int acp_hw_init(void *handle)
 	val = cgs_read_register(adev->acp.cgs_device, mmACP_SOFT_RESET);
 	val &= ~ACP_SOFT_RESET__SoftResetAud_MASK;
 	cgs_write_register(adev->acp.cgs_device, mmACP_SOFT_RESET, val);
-
 	return 0;
+
+failure:
+	kfree(adev->acp.i2s_pdata);
+	kfree(adev->acp.acp_res);
+	kfree(adev->acp.acp_cell);
+	kfree(adev->acp.acp_genpd);
+	return r;
 }
 
 /**
  * acp_hw_fini - stop the hardware block
  *
- * @adev: amdgpu_device pointer
+ * @ip_block: Pointer to the amdgpu_ip_block for this hw instance.
  *
  */
-static int acp_hw_fini(void *handle)
+static int acp_hw_fini(struct amdgpu_ip_block *ip_block)
 {
-	int i, ret;
 	u32 val = 0;
 	u32 count = 0;
-	struct device *dev;
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	struct amdgpu_device *adev = ip_block->adev;
+	int ret = 0;
 
 	/* return early if no ACP */
-	if (!adev->acp.acp_cell)
+	if (!adev->acp.acp_genpd) {
+		amdgpu_dpm_set_powergating_by_smu(adev, AMD_IP_BLOCK_TYPE_ACP, false, 0);
 		return 0;
+	}
 
 	/* Assert Soft reset of ACP */
 	val = cgs_read_register(adev->acp.cgs_device, mmACP_SOFT_RESET);
@@ -488,7 +530,8 @@ static int acp_hw_fini(void *handle)
 			break;
 		if (--count == 0) {
 			dev_err(&adev->pdev->dev, "Failed to reset ACP\n");
-			return -ETIMEDOUT;
+			ret = -ETIMEDOUT;
+			goto out;
 		}
 		udelay(100);
 	}
@@ -505,75 +548,70 @@ static int acp_hw_fini(void *handle)
 			break;
 		if (--count == 0) {
 			dev_err(&adev->pdev->dev, "Failed to reset ACP\n");
-			return -ETIMEDOUT;
+			ret = -ETIMEDOUT;
+			goto out;
 		}
 		udelay(100);
 	}
-
-	if (adev->acp.acp_genpd) {
-		for (i = 0; i < ACP_DEVS ; i++) {
-			dev = get_mfd_cell_dev(adev->acp.acp_cell[i].name, i);
-			ret = pm_genpd_remove_device(&adev->acp.acp_genpd->gpd, dev);
-			/* If removal fails, dont giveup and try rest */
-			if (ret)
-				dev_err(dev, "remove dev from genpd failed\n");
-		}
-		kfree(adev->acp.acp_genpd);
-	}
+out:
+	device_for_each_child(adev->acp.parent, NULL,
+			      acp_genpd_remove_device);
 
 	mfd_remove_devices(adev->acp.parent);
+	kfree(adev->acp.i2s_pdata);
 	kfree(adev->acp.acp_res);
+	pm_genpd_remove(&adev->acp.acp_genpd->gpd);
+	kfree(adev->acp.acp_genpd);
+	adev->acp.acp_genpd = NULL;
 	kfree(adev->acp.acp_cell);
 
-	return 0;
+	return ret;
 }
 
-static int acp_suspend(void *handle)
+static int acp_suspend(struct amdgpu_ip_block *ip_block)
 {
+	struct amdgpu_device *adev = ip_block->adev;
+
+	/* power up on suspend */
+	if (!adev->acp.acp_cell)
+		amdgpu_dpm_set_powergating_by_smu(adev, AMD_IP_BLOCK_TYPE_ACP, false, 0);
 	return 0;
 }
 
-static int acp_resume(void *handle)
+static int acp_resume(struct amdgpu_ip_block *ip_block)
 {
+	struct amdgpu_device *adev = ip_block->adev;
+
+	/* power down again on resume */
+	if (!adev->acp.acp_cell)
+		amdgpu_dpm_set_powergating_by_smu(adev, AMD_IP_BLOCK_TYPE_ACP, true, 0);
 	return 0;
 }
 
-static int acp_early_init(void *handle)
-{
-	return 0;
-}
-
-static bool acp_is_idle(void *handle)
+static bool acp_is_idle(struct amdgpu_ip_block *ip_block)
 {
 	return true;
 }
 
-static int acp_wait_for_idle(void *handle)
-{
-	return 0;
-}
-
-static int acp_soft_reset(void *handle)
-{
-	return 0;
-}
-
-static int acp_set_clockgating_state(void *handle,
+static int acp_set_clockgating_state(struct amdgpu_ip_block *ip_block,
 				     enum amd_clockgating_state state)
 {
 	return 0;
 }
 
-static int acp_set_powergating_state(void *handle,
+static int acp_set_powergating_state(struct amdgpu_ip_block *ip_block,
 				     enum amd_powergating_state state)
 {
+	struct amdgpu_device *adev = ip_block->adev;
+	bool enable = (state == AMD_PG_STATE_GATE);
+
+	amdgpu_dpm_set_powergating_by_smu(adev, AMD_IP_BLOCK_TYPE_ACP, enable, 0);
+
 	return 0;
 }
 
 static const struct amd_ip_funcs acp_ip_funcs = {
 	.name = "acp_ip",
-	.early_init = acp_early_init,
-	.late_init = NULL,
 	.sw_init = acp_sw_init,
 	.sw_fini = acp_sw_fini,
 	.hw_init = acp_hw_init,
@@ -581,14 +619,11 @@ static const struct amd_ip_funcs acp_ip_funcs = {
 	.suspend = acp_suspend,
 	.resume = acp_resume,
 	.is_idle = acp_is_idle,
-	.wait_for_idle = acp_wait_for_idle,
-	.soft_reset = acp_soft_reset,
 	.set_clockgating_state = acp_set_clockgating_state,
 	.set_powergating_state = acp_set_powergating_state,
 };
 
-const struct amdgpu_ip_block_version acp_ip_block =
-{
+const struct amdgpu_ip_block_version acp_ip_block = {
 	.type = AMD_IP_BLOCK_TYPE_ACP,
 	.major = 2,
 	.minor = 2,

@@ -8,12 +8,10 @@
 #include <linux/wait.h>
 #include <linux/string.h>
 #include <linux/fs.h>
-#include <linux/sysctl.h>
 #include <linux/uaccess.h>
 #include <uapi/linux/poll.h>
 #include <uapi/linux/eventpoll.h>
 
-extern struct ctl_table epoll_table[]; /* for sysctl */
 /* ~832 bytes of stack space used max in sys_select/sys_poll before allocating
    additional memory. */
 #define MAX_STACK_ALLOC 832
@@ -27,14 +25,14 @@ extern struct ctl_table epoll_table[]; /* for sysctl */
 
 struct poll_table_struct;
 
-/* 
+/*
  * structures and helpers for f_op->poll implementations
  */
 typedef void (*poll_queue_proc)(struct file *, wait_queue_head_t *, struct poll_table_struct *);
 
 /*
- * Do not touch the structure directly, use the access functions
- * poll_does_not_wait() and poll_requested_events() instead.
+ * Do not touch the structure directly, use the access function
+ * poll_requested_events() instead.
  */
 typedef struct poll_table_struct {
 	poll_queue_proc _qproc;
@@ -43,18 +41,16 @@ typedef struct poll_table_struct {
 
 static inline void poll_wait(struct file * filp, wait_queue_head_t * wait_address, poll_table *p)
 {
-	if (p && p->_qproc && wait_address)
+	if (p && p->_qproc) {
 		p->_qproc(filp, wait_address, p);
-}
-
-/*
- * Return true if it is guaranteed that poll will not wait. This is the case
- * if the poll() of another file descriptor in the set got an event, so there
- * is no need for waiting.
- */
-static inline bool poll_does_not_wait(const poll_table *p)
-{
-	return p == NULL || p->_qproc == NULL;
+		/*
+		 * This memory barrier is paired in the wq_has_sleeper().
+		 * See the comment above prepare_to_wait(), we need to
+		 * ensure that subsequent tests in this thread can't be
+		 * reordered with __add_wait_queue() in _qproc() paths.
+		 */
+		smp_mb();
+	}
 }
 
 /*
@@ -72,6 +68,18 @@ static inline void init_poll_funcptr(poll_table *pt, poll_queue_proc qproc)
 {
 	pt->_qproc = qproc;
 	pt->_key   = ~(__poll_t)0; /* all events enabled */
+}
+
+static inline bool file_can_poll(struct file *file)
+{
+	return file->f_op->poll;
+}
+
+static inline __poll_t vfs_poll(struct file *file, struct poll_table_struct *pt)
+{
+	if (unlikely(!file->f_op->poll))
+		return DEFAULT_POLLMASK;
+	return file->f_op->poll(file, pt);
 }
 
 struct poll_table_entry {
@@ -96,8 +104,6 @@ struct poll_wqueues {
 
 extern void poll_initwait(struct poll_wqueues *pwq);
 extern void poll_freewait(struct poll_wqueues *pwq);
-extern int poll_schedule_timeout(struct poll_wqueues *pwq, int state,
-				 ktime_t *expires, unsigned long slack);
 extern u64 select_estimate_accuracy(struct timespec64 *tv);
 
 #define MAX_INT64_SECONDS (((s64)(~((u64)0)>>1)/HZ)-1)

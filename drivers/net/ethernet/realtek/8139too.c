@@ -11,7 +11,7 @@
 
 	-----<snip>-----
 
-        	Written 1997-2001 by Donald Becker.
+		Written 1997-2001 by Donald Becker.
 		This software may be used and distributed according to the
 		terms of the GNU General Public License (GPL), incorporated
 		herein by reference.  Drivers based on or derived from this
@@ -92,8 +92,6 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #define DRV_NAME	"8139too"
-#define DRV_VERSION	"0.9.28"
-
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -114,8 +112,6 @@
 #include <linux/gfp.h>
 #include <linux/if_vlan.h>
 #include <asm/irq.h>
-
-#define RTL8139_DRIVER_NAME   DRV_NAME " Fast Ethernet driver " DRV_VERSION
 
 /* Default Message level */
 #define RTL8139_DEF_MSG_ENABLE   (NETIF_MSG_DRV   | \
@@ -239,43 +235,44 @@ static const struct {
 
 
 static const struct pci_device_id rtl8139_pci_tbl[] = {
-	{0x10ec, 0x8139, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x10ec, 0x8138, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x1113, 0x1211, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x1500, 0x1360, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x4033, 0x1360, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x1186, 0x1300, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x1186, 0x1340, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x13d1, 0xab06, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x1259, 0xa117, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x1259, 0xa11e, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x14ea, 0xab06, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x14ea, 0xab07, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x11db, 0x1234, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x1432, 0x9130, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x02ac, 0x1012, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x018a, 0x0106, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x126c, 0x1211, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x1743, 0x8139, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
-	{0x021b, 0x8139, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
+	{ PCI_DEVICE(0x10ec, 0x8139), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x10ec, 0x8138), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x1113, 0x1211), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x1500, 0x1360), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x4033, 0x1360), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x1186, 0x1300), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x1186, 0x1340), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x13d1, 0xab06), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x1259, 0xa117), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x1259, 0xa11e), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x14ea, 0xab06), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x14ea, 0xab07), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x11db, 0x1234), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x1432, 0x9130), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x02ac, 0x1012), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x018a, 0x0106), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x126c, 0x1211), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x1743, 0x8139), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x021b, 0x8139), .driver_data = RTL8139 },
+	{ PCI_DEVICE(0x16ec, 0xab06), .driver_data = RTL8139 },
 
 #ifdef CONFIG_SH_SECUREEDGE5410
 	/* Bogus 8139 silicon reports 8129 without external PROM :-( */
-	{0x10ec, 0x8129, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8139 },
+	{ PCI_DEVICE(0x10ec, 0x8129), .driver_data = RTL8139 },
 #endif
 #ifdef CONFIG_8139TOO_8129
-	{0x10ec, 0x8129, PCI_ANY_ID, PCI_ANY_ID, 0, 0, RTL8129 },
+	{ PCI_DEVICE(0x10ec, 0x8129), .driver_data = RTL8129 },
 #endif
 
 	/* some crazy cards report invalid vendor ids like
 	 * 0x0001 here.  The other ids are valid and constant,
 	 * so we simply don't match on the main vendor id.
 	 */
-	{PCI_ANY_ID, 0x8139, 0x10ec, 0x8139, 0, 0, RTL8139 },
-	{PCI_ANY_ID, 0x8139, 0x1186, 0x1300, 0, 0, RTL8139 },
-	{PCI_ANY_ID, 0x8139, 0x13d1, 0xab06, 0, 0, RTL8139 },
+	{ PCI_DEVICE_SUB(PCI_ANY_ID, 0x8139, 0x10ec, 0x8139), .driver_data = RTL8139 },
+	{ PCI_DEVICE_SUB(PCI_ANY_ID, 0x8139, 0x1186, 0x1300), .driver_data = RTL8139 },
+	{ PCI_DEVICE_SUB(PCI_ANY_ID, 0x8139, 0x13d1, 0xab06), .driver_data = RTL8139 },
 
-	{0,}
+	{ }
 };
 MODULE_DEVICE_TABLE (pci, rtl8139_pci_tbl);
 
@@ -547,8 +544,8 @@ static const struct {
 
 	{ "RTL-8100",
 	  HW_REVID(1, 1, 1, 1, 0, 1, 0),
- 	  HasLWake,
- 	},
+	  HasLWake,
+	},
 
 	{ "RTL-8100B/8139D",
 	  HW_REVID(1, 1, 1, 0, 1, 0, 1),
@@ -622,7 +619,6 @@ struct rtl8139_private {
 MODULE_AUTHOR ("Jeff Garzik <jgarzik@pobox.com>");
 MODULE_DESCRIPTION ("RealTek RTL-8139 Fast Ethernet driver");
 MODULE_LICENSE("GPL");
-MODULE_VERSION(DRV_VERSION);
 
 module_param(use_io, bool, 0);
 MODULE_PARM_DESC(use_io, "Force use of I/O access mode. 0=MMIO 1=PIO");
@@ -641,7 +637,7 @@ static int mdio_read (struct net_device *dev, int phy_id, int location);
 static void mdio_write (struct net_device *dev, int phy_id, int location,
 			int val);
 static void rtl8139_start_thread(struct rtl8139_private *tp);
-static void rtl8139_tx_timeout (struct net_device *dev);
+static void rtl8139_tx_timeout (struct net_device *dev, unsigned int txqueue);
 static void rtl8139_init_ring (struct net_device *dev);
 static netdev_tx_t rtl8139_start_xmit (struct sk_buff *skb,
 				       struct net_device *dev);
@@ -931,7 +927,7 @@ static const struct net_device_ops rtl8139_netdev_ops = {
 	.ndo_set_mac_address 	= rtl8139_set_mac_address,
 	.ndo_start_xmit		= rtl8139_start_xmit,
 	.ndo_set_rx_mode	= rtl8139_set_rx_mode,
-	.ndo_do_ioctl		= netdev_ioctl,
+	.ndo_eth_ioctl		= netdev_ioctl,
 	.ndo_tx_timeout		= rtl8139_tx_timeout,
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller	= rtl8139_poll_controller,
@@ -944,6 +940,7 @@ static int rtl8139_init_one(struct pci_dev *pdev,
 {
 	struct net_device *dev = NULL;
 	struct rtl8139_private *tp;
+	__le16 addr[ETH_ALEN / 2];
 	int i, addr_len, option;
 	void __iomem *ioaddr;
 	static int board_idx = -1;
@@ -952,17 +949,6 @@ static int rtl8139_init_one(struct pci_dev *pdev,
 	assert (ent != NULL);
 
 	board_idx++;
-
-	/* when we're built into the kernel, the driver version message
-	 * is only printed if at least one 8139 board has been found
-	 */
-#ifndef MODULE
-	{
-		static int printed_version;
-		if (!printed_version++)
-			pr_info(RTL8139_DRIVER_NAME "\n");
-	}
-#endif
 
 	if (pdev->vendor == PCI_VENDOR_ID_REALTEK &&
 	    pdev->device == PCI_DEVICE_ID_REALTEK_8139 && pdev->revision >= 0x20) {
@@ -977,7 +963,7 @@ static int rtl8139_init_one(struct pci_dev *pdev,
 	    pdev->subsystem_vendor == PCI_VENDOR_ID_ATHEROS &&
 	    pdev->subsystem_device == PCI_DEVICE_ID_REALTEK_8139) {
 		pr_info("OQO Model 2 detected. Forcing PIO\n");
-		use_io = 1;
+		use_io = true;
 	}
 
 	dev = rtl8139_init_board (pdev);
@@ -993,14 +979,14 @@ static int rtl8139_init_one(struct pci_dev *pdev,
 
 	addr_len = read_eeprom (ioaddr, 0, 8) == 0x8129 ? 8 : 6;
 	for (i = 0; i < 3; i++)
-		((__le16 *) (dev->dev_addr))[i] =
-		    cpu_to_le16(read_eeprom (ioaddr, i + 7, addr_len));
+		addr[i] = cpu_to_le16(read_eeprom (ioaddr, i + 7, addr_len));
+	eth_hw_addr_set(dev, (u8 *)addr);
 
 	/* The Rtl8139-specific entries in the device structure. */
 	dev->netdev_ops = &rtl8139_netdev_ops;
 	dev->ethtool_ops = &rtl8139_ethtool_ops;
 	dev->watchdog_timeo = TX_TIMEOUT;
-	netif_napi_add(dev, &tp->napi, rtl8139_poll, 64);
+	netif_napi_add(dev, &tp->napi, rtl8139_poll);
 
 	/* note: the hardware is not capable of sg/csum/highdma, however
 	 * through the use of skb_copy_and_csum_dev we enable these
@@ -1104,7 +1090,6 @@ static int rtl8139_init_one(struct pci_dev *pdev,
 	return 0;
 
 err_out:
-	netif_napi_del(&tp->napi);
 	__rtl8139_cleanup_dev (dev);
 	pci_disable_device (pdev);
 	return i;
@@ -1119,7 +1104,6 @@ static void rtl8139_remove_one(struct pci_dev *pdev)
 	assert (dev != NULL);
 
 	cancel_delayed_work_sync(&tp->thread);
-	netif_napi_del(&tp->napi);
 
 	unregister_netdev (dev);
 
@@ -1663,7 +1647,7 @@ static void rtl8139_tx_timeout_task (struct work_struct *work)
 
 	napi_disable(&tp->napi);
 	netif_stop_queue(dev);
-	synchronize_sched();
+	synchronize_rcu();
 
 	netdev_dbg(dev, "Transmit timeout, status %02x %04x %04x media %02x\n",
 		   RTL_R8(ChipCmd), RTL_R16(IntrStatus),
@@ -1684,6 +1668,7 @@ static void rtl8139_tx_timeout_task (struct work_struct *work)
 	if (tmp8 & CmdTxEnb)
 		RTL_W8 (ChipCmd, CmdRxEnb);
 
+	netdev_lock(dev);
 	spin_lock_bh(&tp->rx_lock);
 	/* Disable interrupts by clearing the interrupt mask. */
 	RTL_W16 (IntrMask, 0x0000);
@@ -1694,14 +1679,15 @@ static void rtl8139_tx_timeout_task (struct work_struct *work)
 	spin_unlock_irq(&tp->lock);
 
 	/* ...and finally, reset everything */
-	napi_enable(&tp->napi);
+	napi_enable_locked(&tp->napi);
 	rtl8139_hw_start(dev);
 	netif_wake_queue(dev);
 
 	spin_unlock_bh(&tp->rx_lock);
+	netdev_unlock(dev);
 }
 
-static void rtl8139_tx_timeout (struct net_device *dev)
+static void rtl8139_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct rtl8139_private *tp = netdev_priv(dev);
 
@@ -2239,7 +2225,7 @@ static int rtl8139_set_mac_address(struct net_device *dev, void *p)
 	if (!is_valid_ether_addr(addr->sa_data))
 		return -EADDRNOTAVAIL;
 
-	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
+	eth_hw_addr_set(dev, addr->sa_data);
 
 	spin_lock_irq(&tp->lock);
 
@@ -2380,9 +2366,8 @@ static int rtl8139_set_wol(struct net_device *dev, struct ethtool_wolinfo *wol)
 static void rtl8139_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 {
 	struct rtl8139_private *tp = netdev_priv(dev);
-	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
-	strlcpy(info->bus_info, pci_name(tp->pci_dev), sizeof(info->bus_info));
+	strscpy(info->driver, DRV_NAME, sizeof(info->driver));
+	strscpy(info->bus_info, pci_name(tp->pci_dev), sizeof(info->bus_info));
 }
 
 static int rtl8139_get_link_ksettings(struct net_device *dev,
@@ -2532,16 +2517,16 @@ rtl8139_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats)
 	netdev_stats_to_stats64(stats, &dev->stats);
 
 	do {
-		start = u64_stats_fetch_begin_irq(&tp->rx_stats.syncp);
+		start = u64_stats_fetch_begin(&tp->rx_stats.syncp);
 		stats->rx_packets = tp->rx_stats.packets;
 		stats->rx_bytes = tp->rx_stats.bytes;
-	} while (u64_stats_fetch_retry_irq(&tp->rx_stats.syncp, start));
+	} while (u64_stats_fetch_retry(&tp->rx_stats.syncp, start));
 
 	do {
-		start = u64_stats_fetch_begin_irq(&tp->tx_stats.syncp);
+		start = u64_stats_fetch_begin(&tp->tx_stats.syncp);
 		stats->tx_packets = tp->tx_stats.packets;
 		stats->tx_bytes = tp->tx_stats.bytes;
-	} while (u64_stats_fetch_retry_irq(&tp->tx_stats.syncp, start));
+	} while (u64_stats_fetch_retry(&tp->tx_stats.syncp, start));
 }
 
 /* Set or clear the multicast filter for this adaptor.
@@ -2604,16 +2589,12 @@ static void rtl8139_set_rx_mode (struct net_device *dev)
 	spin_unlock_irqrestore (&tp->lock, flags);
 }
 
-#ifdef CONFIG_PM
-
-static int rtl8139_suspend (struct pci_dev *pdev, pm_message_t state)
+static int __maybe_unused rtl8139_suspend(struct device *device)
 {
-	struct net_device *dev = pci_get_drvdata (pdev);
+	struct net_device *dev = dev_get_drvdata(device);
 	struct rtl8139_private *tp = netdev_priv(dev);
 	void __iomem *ioaddr = tp->mmio_addr;
 	unsigned long flags;
-
-	pci_save_state (pdev);
 
 	if (!netif_running (dev))
 		return 0;
@@ -2632,59 +2613,30 @@ static int rtl8139_suspend (struct pci_dev *pdev, pm_message_t state)
 
 	spin_unlock_irqrestore (&tp->lock, flags);
 
-	pci_set_power_state (pdev, PCI_D3hot);
-
 	return 0;
 }
 
-
-static int rtl8139_resume (struct pci_dev *pdev)
+static int __maybe_unused rtl8139_resume(struct device *device)
 {
-	struct net_device *dev = pci_get_drvdata (pdev);
+	struct net_device *dev = dev_get_drvdata(device);
 
-	pci_restore_state (pdev);
 	if (!netif_running (dev))
 		return 0;
-	pci_set_power_state (pdev, PCI_D0);
+
 	rtl8139_init_ring (dev);
 	rtl8139_hw_start (dev);
 	netif_device_attach (dev);
 	return 0;
 }
 
-#endif /* CONFIG_PM */
-
+static SIMPLE_DEV_PM_OPS(rtl8139_pm_ops, rtl8139_suspend, rtl8139_resume);
 
 static struct pci_driver rtl8139_pci_driver = {
 	.name		= DRV_NAME,
 	.id_table	= rtl8139_pci_tbl,
 	.probe		= rtl8139_init_one,
 	.remove		= rtl8139_remove_one,
-#ifdef CONFIG_PM
-	.suspend	= rtl8139_suspend,
-	.resume		= rtl8139_resume,
-#endif /* CONFIG_PM */
+	.driver.pm	= &rtl8139_pm_ops,
 };
 
-
-static int __init rtl8139_init_module (void)
-{
-	/* when we're a module, we always print a version message,
-	 * even if no 8139 board is found.
-	 */
-#ifdef MODULE
-	pr_info(RTL8139_DRIVER_NAME "\n");
-#endif
-
-	return pci_register_driver(&rtl8139_pci_driver);
-}
-
-
-static void __exit rtl8139_cleanup_module (void)
-{
-	pci_unregister_driver (&rtl8139_pci_driver);
-}
-
-
-module_init(rtl8139_init_module);
-module_exit(rtl8139_cleanup_module);
+module_pci_driver(rtl8139_pci_driver);

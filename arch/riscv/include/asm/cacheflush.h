@@ -1,44 +1,67 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2015 Regents of the University of California
- *
- *   This program is free software; you can redistribute it and/or
- *   modify it under the terms of the GNU General Public License
- *   as published by the Free Software Foundation, version 2.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
  */
 
 #ifndef _ASM_RISCV_CACHEFLUSH_H
 #define _ASM_RISCV_CACHEFLUSH_H
 
-#include <asm-generic/cacheflush.h>
-
-#undef flush_icache_range
-#undef flush_icache_user_range
-#undef flush_dcache_page
+#include <linux/mm.h>
 
 static inline void local_flush_icache_all(void)
 {
 	asm volatile ("fence.i" ::: "memory");
 }
 
+static inline void local_flush_icache_range(unsigned long start,
+					    unsigned long end)
+{
+	local_flush_icache_all();
+}
+
 #define PG_dcache_clean PG_arch_1
+
+static inline void flush_dcache_folio(struct folio *folio)
+{
+	if (test_bit(PG_dcache_clean, &folio->flags.f))
+		clear_bit(PG_dcache_clean, &folio->flags.f);
+}
+#define flush_dcache_folio flush_dcache_folio
+#define ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE 1
 
 static inline void flush_dcache_page(struct page *page)
 {
-	if (test_bit(PG_dcache_clean, &page->flags))
-		clear_bit(PG_dcache_clean, &page->flags);
+	flush_dcache_folio(page_folio(page));
 }
 
-/*
- * RISC-V doesn't have an instruction to flush parts of the instruction cache,
- * so instead we just flush the whole thing.
- */
-#define flush_icache_range(start, end) flush_icache_all()
-#define flush_icache_user_range(vma, pg, addr, len) flush_icache_all()
+#define flush_icache_user_page(vma, pg, addr, len)	\
+do {							\
+	if (vma->vm_flags & VM_EXEC)			\
+		flush_icache_mm(vma->vm_mm, 0);		\
+} while (0)
+
+#if defined(CONFIG_64BIT) && defined(CONFIG_MMU)
+/* This is accessed in assembly code. cpumask_var_t would be too complex. */
+extern DECLARE_BITMAP(new_valid_map_cpus, NR_CPUS);
+extern char _end[];
+static inline void mark_new_valid_map(void)
+{
+	/*
+	 * We don't care if concurrently a cpu resets this value since
+	 * the only place this can happen is in handle_exception() where
+	 * an sfence.vma is emitted.
+	 */
+	bitmap_fill(new_valid_map_cpus, NR_CPUS);
+}
+#define flush_cache_vmap flush_cache_vmap
+static inline void flush_cache_vmap(unsigned long start, unsigned long end)
+{
+	if (is_vmalloc_or_module_addr((void *)start) ||
+	    (start >= VMEMMAP_START && end <= VMEMMAP_END))
+		mark_new_valid_map();
+}
+#define flush_cache_vmap_early(start, end)	local_flush_tlb_kernel_range(start, end)
+#endif
 
 #ifndef CONFIG_SMP
 
@@ -47,15 +70,40 @@ static inline void flush_dcache_page(struct page *page)
 
 #else /* CONFIG_SMP */
 
-#define flush_icache_all() sbi_remote_fence_i(0)
+void flush_icache_all(void);
 void flush_icache_mm(struct mm_struct *mm, bool local);
 
 #endif /* CONFIG_SMP */
+
+/*
+ * RISC-V doesn't have an instruction to flush parts of the instruction cache,
+ * so instead we just flush the whole thing.
+ */
+#define flush_icache_range flush_icache_range
+static inline void flush_icache_range(unsigned long start, unsigned long end)
+{
+	flush_icache_all();
+}
+
+extern unsigned int riscv_cbom_block_size;
+extern unsigned int riscv_cboz_block_size;
+extern unsigned int riscv_cbop_block_size;
+void riscv_init_cbo_blocksizes(void);
+
+#ifdef CONFIG_RISCV_DMA_NONCOHERENT
+void riscv_noncoherent_supported(void);
+void __init riscv_set_dma_cache_alignment(void);
+#else
+static inline void riscv_noncoherent_supported(void) {}
+static inline void riscv_set_dma_cache_alignment(void) {}
+#endif
 
 /*
  * Bits in sys_riscv_flush_icache()'s flags argument.
  */
 #define SYS_RISCV_FLUSH_ICACHE_LOCAL 1UL
 #define SYS_RISCV_FLUSH_ICACHE_ALL   (SYS_RISCV_FLUSH_ICACHE_LOCAL)
+
+#include <asm-generic/cacheflush.h>
 
 #endif /* _ASM_RISCV_CACHEFLUSH_H */

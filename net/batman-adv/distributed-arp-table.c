@@ -1,19 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright (C) 2011-2018  B.A.T.M.A.N. contributors:
+/* Copyright (C) B.A.T.M.A.N. contributors:
  *
  * Antonio Quartulli
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of version 2 of the GNU General Public
- * License as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "distributed-arp-table.h"
@@ -21,7 +9,10 @@
 
 #include <linux/atomic.h>
 #include <linux/bitops.h>
+#include <linux/bug.h>
 #include <linux/byteorder/generic.h>
+#include <linux/container_of.h>
+#include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/etherdevice.h>
 #include <linux/gfp.h>
@@ -29,24 +20,24 @@
 #include <linux/if_ether.h>
 #include <linux/if_vlan.h>
 #include <linux/in.h>
+#include <linux/ip.h>
 #include <linux/jiffies.h>
-#include <linux/kernel.h>
 #include <linux/kref.h>
 #include <linux/list.h>
 #include <linux/netlink.h>
 #include <linux/rculist.h>
 #include <linux/rcupdate.h>
-#include <linux/seq_file.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/stddef.h>
 #include <linux/string.h>
+#include <linux/udp.h>
+#include <linux/unaligned.h>
 #include <linux/workqueue.h>
 #include <net/arp.h>
 #include <net/genetlink.h>
 #include <net/netlink.h>
-#include <net/sock.h>
 #include <uapi/linux/batman_adv.h>
 
 #include "bridge_loop_avoidance.h"
@@ -56,19 +47,60 @@
 #include "netlink.h"
 #include "originator.h"
 #include "send.h"
-#include "soft-interface.h"
 #include "translation-table.h"
 #include "tvlv.h"
+
+enum batadv_bootpop {
+	BATADV_BOOTREPLY	= 2,
+};
+
+enum batadv_boothtype {
+	BATADV_HTYPE_ETHERNET	= 1,
+};
+
+enum batadv_dhcpoptioncode {
+	BATADV_DHCP_OPT_PAD		= 0,
+	BATADV_DHCP_OPT_MSG_TYPE	= 53,
+	BATADV_DHCP_OPT_END		= 255,
+};
+
+enum batadv_dhcptype {
+	BATADV_DHCPACK		= 5,
+};
+
+/* { 99, 130, 83, 99 } */
+#define BATADV_DHCP_MAGIC 1669485411
+
+struct batadv_dhcp_packet {
+	__u8 op;
+	__u8 htype;
+	__u8 hlen;
+	__u8 hops;
+	__be32 xid;
+	__be16 secs;
+	__be16 flags;
+	__be32 ciaddr;
+	__be32 yiaddr;
+	__be32 siaddr;
+	__be32 giaddr;
+	__u8 chaddr[16];
+	__u8 sname[64];
+	__u8 file[128];
+	__be32 magic;
+	/* __u8 options[]; */
+};
+
+#define BATADV_DHCP_YIADDR_LEN sizeof(((struct batadv_dhcp_packet *)0)->yiaddr)
+#define BATADV_DHCP_CHADDR_LEN sizeof(((struct batadv_dhcp_packet *)0)->chaddr)
 
 static void batadv_dat_purge(struct work_struct *work);
 
 /**
  * batadv_dat_start_timer() - initialise the DAT periodic worker
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  */
 static void batadv_dat_start_timer(struct batadv_priv *bat_priv)
 {
-	INIT_DELAYED_WORK(&bat_priv->dat.work, batadv_dat_purge);
 	queue_delayed_work(batadv_event_workqueue, &bat_priv->dat.work,
 			   msecs_to_jiffies(10000));
 }
@@ -94,6 +126,9 @@ static void batadv_dat_entry_release(struct kref *ref)
  */
 static void batadv_dat_entry_put(struct batadv_dat_entry *dat_entry)
 {
+	if (!dat_entry)
+		return;
+
 	kref_put(&dat_entry->refcount, batadv_dat_entry_release);
 }
 
@@ -111,7 +146,7 @@ static bool batadv_dat_to_purge(struct batadv_dat_entry *dat_entry)
 
 /**
  * __batadv_dat_purge() - delete entries from the DAT local storage
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @to_purge: function in charge to decide whether an entry has to be purged or
  *	      not. This function takes the dat_entry as argument and has to
  *	      returns a boolean value: true is the entry has to be deleted,
@@ -180,10 +215,13 @@ static void batadv_dat_purge(struct work_struct *work)
  */
 static bool batadv_compare_dat(const struct hlist_node *node, const void *data2)
 {
-	const void *data1 = container_of(node, struct batadv_dat_entry,
-					 hash_entry);
+	const struct batadv_dat_entry *entry1;
+	const struct batadv_dat_entry *entry2;
 
-	return memcmp(data1, data2, sizeof(__be32)) == 0;
+	entry1 = container_of(node, struct batadv_dat_entry, hash_entry);
+	entry2 = data2;
+
+	return entry1->ip == entry2->ip && entry1->vid == entry2->vid;
 }
 
 /**
@@ -212,7 +250,7 @@ static u8 *batadv_arp_hw_src(struct sk_buff *skb, int hdr_size)
  */
 static __be32 batadv_arp_ip_src(struct sk_buff *skb, int hdr_size)
 {
-	return *(__be32 *)(batadv_arp_hw_src(skb, hdr_size) + ETH_ALEN);
+	return *(__force __be32 *)(batadv_arp_hw_src(skb, hdr_size) + ETH_ALEN);
 }
 
 /**
@@ -236,7 +274,9 @@ static u8 *batadv_arp_hw_dst(struct sk_buff *skb, int hdr_size)
  */
 static __be32 batadv_arp_ip_dst(struct sk_buff *skb, int hdr_size)
 {
-	return *(__be32 *)(batadv_arp_hw_src(skb, hdr_size) + ETH_ALEN * 2 + 4);
+	u8 *dst = batadv_arp_hw_src(skb, hdr_size) + ETH_ALEN * 2 + 4;
+
+	return *(__force __be32 *)dst;
 }
 
 /**
@@ -251,16 +291,18 @@ static u32 batadv_hash_dat(const void *data, u32 size)
 	u32 hash = 0;
 	const struct batadv_dat_entry *dat = data;
 	const unsigned char *key;
+	__be16 vid;
 	u32 i;
 
-	key = (const unsigned char *)&dat->ip;
+	key = (__force const unsigned char *)&dat->ip;
 	for (i = 0; i < sizeof(dat->ip); i++) {
 		hash += key[i];
 		hash += (hash << 10);
 		hash ^= (hash >> 6);
 	}
 
-	key = (const unsigned char *)&dat->vid;
+	vid = htons(dat->vid);
+	key = (__force const unsigned char *)&vid;
 	for (i = 0; i < sizeof(dat->vid); i++) {
 		hash += key[i];
 		hash += (hash << 10);
@@ -277,7 +319,7 @@ static u32 batadv_hash_dat(const void *data, u32 size)
 /**
  * batadv_dat_entry_hash_find() - look for a given dat_entry in the local hash
  * table
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @ip: search key
  * @vid: VLAN identifier
  *
@@ -306,6 +348,9 @@ batadv_dat_entry_hash_find(struct batadv_priv *bat_priv, __be32 ip,
 		if (dat_entry->ip != ip)
 			continue;
 
+		if (dat_entry->vid != vid)
+			continue;
+
 		if (!kref_get_unless_zero(&dat_entry->refcount))
 			continue;
 
@@ -319,7 +364,7 @@ batadv_dat_entry_hash_find(struct batadv_priv *bat_priv, __be32 ip,
 
 /**
  * batadv_dat_entry_add() - add a new dat entry or update it if already exists
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @ip: ipv4 to add/edit
  * @mac_addr: mac address to assign to the given ipv4
  * @vid: VLAN identifier
@@ -343,7 +388,7 @@ static void batadv_dat_entry_add(struct batadv_priv *bat_priv, __be32 ip,
 		goto out;
 	}
 
-	dat_entry = kmalloc(sizeof(*dat_entry), GFP_ATOMIC);
+	dat_entry = kmalloc_obj(*dat_entry, GFP_ATOMIC);
 	if (!dat_entry)
 		goto out;
 
@@ -368,8 +413,7 @@ static void batadv_dat_entry_add(struct batadv_priv *bat_priv, __be32 ip,
 		   &dat_entry->ip, dat_entry->mac_addr, batadv_print_vid(vid));
 
 out:
-	if (dat_entry)
-		batadv_dat_entry_put(dat_entry);
+	batadv_dat_entry_put(dat_entry);
 }
 
 #ifdef CONFIG_BATMAN_ADV_DEBUG
@@ -377,7 +421,7 @@ out:
 /**
  * batadv_dbg_arp() - print a debug message containing all the ARP packet
  *  details
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: ARP packet
  * @hdr_size: size of the possible header before the ARP packet
  * @msg: message to print together with the debugging information
@@ -502,7 +546,7 @@ static bool batadv_is_orig_node_eligible(struct batadv_dat_candidate *res,
 	 * the one with the lowest address
 	 */
 	if (tmp_max == max && max_orig_node &&
-	    batadv_compare_eth(candidate->orig, max_orig_node->orig))
+	    memcmp(candidate->orig, max_orig_node->orig, ETH_ALEN) >= 0)
 		goto out;
 
 	ret = true;
@@ -512,7 +556,7 @@ out:
 
 /**
  * batadv_choose_next_candidate() - select the next DHT candidate
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @cands: candidates array
  * @select: number of candidates already present in the array
  * @ip_key: key to look up in the DHT
@@ -557,8 +601,7 @@ static void batadv_choose_next_candidate(struct batadv_priv *bat_priv,
 				continue;
 
 			max = tmp_max;
-			if (max_orig_node)
-				batadv_orig_node_put(max_orig_node);
+			batadv_orig_node_put(max_orig_node);
 			max_orig_node = orig_node;
 		}
 		rcu_read_unlock();
@@ -577,7 +620,7 @@ static void batadv_choose_next_candidate(struct batadv_priv *bat_priv,
 /**
  * batadv_dat_select_candidates() - select the nodes which the DHT message has
  *  to be sent to
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @ip_dst: ipv4 to look up in the DHT
  * @vid: VLAN identifier
  *
@@ -599,8 +642,7 @@ batadv_dat_select_candidates(struct batadv_priv *bat_priv, __be32 ip_dst,
 	if (!bat_priv->orig_hash)
 		return NULL;
 
-	res = kmalloc_array(BATADV_DAT_CANDIDATES_NUM, sizeof(*res),
-			    GFP_ATOMIC);
+	res = kmalloc_objs(*res, BATADV_DAT_CANDIDATES_NUM, GFP_ATOMIC);
 	if (!res)
 		return NULL;
 
@@ -621,22 +663,22 @@ batadv_dat_select_candidates(struct batadv_priv *bat_priv, __be32 ip_dst,
 }
 
 /**
- * batadv_dat_send_data() - send a payload to the selected candidates
- * @bat_priv: the bat priv with all the soft interface information
+ * batadv_dat_forward_data() - copy and send payload to the selected candidates
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: payload to send
  * @ip: the DHT key
  * @vid: VLAN identifier
  * @packet_subtype: unicast4addr packet subtype to use
  *
- * This function copies the skb with pskb_copy() and is sent as unicast packet
+ * This function copies the skb with pskb_copy() and is sent as a unicast packet
  * to each of the selected candidates.
  *
  * Return: true if the packet is sent to at least one candidate, false
  * otherwise.
  */
-static bool batadv_dat_send_data(struct batadv_priv *bat_priv,
-				 struct sk_buff *skb, __be32 ip,
-				 unsigned short vid, int packet_subtype)
+static bool batadv_dat_forward_data(struct batadv_priv *bat_priv,
+				    struct sk_buff *skb, __be32 ip,
+				    unsigned short vid, int packet_subtype)
 {
 	int i;
 	bool ret = false;
@@ -647,7 +689,7 @@ static bool batadv_dat_send_data(struct batadv_priv *bat_priv,
 
 	cand = batadv_dat_select_candidates(bat_priv, ip, vid);
 	if (!cand)
-		goto out;
+		return ret;
 
 	batadv_dbg(BATADV_DBG_DAT, bat_priv, "DHT_SEND for %pI4\n", &ip);
 
@@ -661,6 +703,9 @@ static bool batadv_dat_send_data(struct batadv_priv *bat_priv,
 			goto free_orig;
 
 		tmp_skb = pskb_copy_for_clone(skb, GFP_ATOMIC);
+		if (!tmp_skb)
+			goto free_neigh;
+
 		if (!batadv_send_skb_prepare_unicast_4addr(bat_priv, tmp_skb,
 							   cand[i].orig_node,
 							   packet_subtype)) {
@@ -691,7 +736,6 @@ free_orig:
 		batadv_orig_node_put(cand[i].orig_node);
 	}
 
-out:
 	kfree(cand);
 	return ret;
 }
@@ -699,13 +743,13 @@ out:
 /**
  * batadv_dat_tvlv_container_update() - update the dat tvlv container after dat
  *  setting change
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  */
 static void batadv_dat_tvlv_container_update(struct batadv_priv *bat_priv)
 {
 	char dat_mode;
 
-	dat_mode = atomic_read(&bat_priv->distributed_arp_table);
+	dat_mode = READ_ONCE(bat_priv->distributed_arp_table);
 
 	switch (dat_mode) {
 	case 0:
@@ -721,7 +765,7 @@ static void batadv_dat_tvlv_container_update(struct batadv_priv *bat_priv)
 /**
  * batadv_dat_status_update() - update the dat tvlv container after dat
  *  setting change
- * @net_dev: the soft interface net device
+ * @net_dev: the mesh interface net device
  */
 void batadv_dat_status_update(struct net_device *net_dev)
 {
@@ -732,7 +776,7 @@ void batadv_dat_status_update(struct net_device *net_dev)
 
 /**
  * batadv_dat_tvlv_ogm_handler_v1() - process incoming dat tvlv container
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @orig: the orig_node of the ogm
  * @flags: flags indicating the tvlv state (see batadv_tvlv_handler_flags)
  * @tvlv_value: tvlv buffer containing the gateway data
@@ -751,7 +795,7 @@ static void batadv_dat_tvlv_ogm_handler_v1(struct batadv_priv *bat_priv,
 
 /**
  * batadv_dat_hash_free() - free the local DAT hash table
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  */
 static void batadv_dat_hash_free(struct batadv_priv *bat_priv)
 {
@@ -767,7 +811,7 @@ static void batadv_dat_hash_free(struct batadv_priv *bat_priv)
 
 /**
  * batadv_dat_init() - initialise the DAT internals
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  *
  * Return: 0 in case of success, a negative error code otherwise
  */
@@ -781,10 +825,11 @@ int batadv_dat_init(struct batadv_priv *bat_priv)
 	if (!bat_priv->dat.hash)
 		return -ENOMEM;
 
+	INIT_DELAYED_WORK(&bat_priv->dat.work, batadv_dat_purge);
 	batadv_dat_start_timer(bat_priv);
 
 	batadv_tvlv_handler_register(bat_priv, batadv_dat_tvlv_ogm_handler_v1,
-				     NULL, BATADV_TVLV_DAT, 1,
+				     NULL, NULL, BATADV_TVLV_DAT, 1,
 				     BATADV_TVLV_HANDLER_OGM_CIFNOTFND);
 	batadv_dat_tvlv_container_update(bat_priv);
 	return 0;
@@ -792,93 +837,43 @@ int batadv_dat_init(struct batadv_priv *bat_priv)
 
 /**
  * batadv_dat_free() - free the DAT internals
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  */
 void batadv_dat_free(struct batadv_priv *bat_priv)
 {
 	batadv_tvlv_container_unregister(bat_priv, BATADV_TVLV_DAT, 1);
 	batadv_tvlv_handler_unregister(bat_priv, BATADV_TVLV_DAT, 1);
 
-	cancel_delayed_work_sync(&bat_priv->dat.work);
+	disable_delayed_work_sync(&bat_priv->dat.work);
 
 	batadv_dat_hash_free(bat_priv);
 }
-
-#ifdef CONFIG_BATMAN_ADV_DEBUGFS
-/**
- * batadv_dat_cache_seq_print_text() - print the local DAT hash table
- * @seq: seq file to print on
- * @offset: not used
- *
- * Return: always 0
- */
-int batadv_dat_cache_seq_print_text(struct seq_file *seq, void *offset)
-{
-	struct net_device *net_dev = (struct net_device *)seq->private;
-	struct batadv_priv *bat_priv = netdev_priv(net_dev);
-	struct batadv_hashtable *hash = bat_priv->dat.hash;
-	struct batadv_dat_entry *dat_entry;
-	struct batadv_hard_iface *primary_if;
-	struct hlist_head *head;
-	unsigned long last_seen_jiffies;
-	int last_seen_msecs, last_seen_secs, last_seen_mins;
-	u32 i;
-
-	primary_if = batadv_seq_print_text_primary_if_get(seq);
-	if (!primary_if)
-		goto out;
-
-	seq_printf(seq, "Distributed ARP Table (%s):\n", net_dev->name);
-	seq_puts(seq,
-		 "          IPv4             MAC        VID   last-seen\n");
-
-	for (i = 0; i < hash->size; i++) {
-		head = &hash->table[i];
-
-		rcu_read_lock();
-		hlist_for_each_entry_rcu(dat_entry, head, hash_entry) {
-			last_seen_jiffies = jiffies - dat_entry->last_update;
-			last_seen_msecs = jiffies_to_msecs(last_seen_jiffies);
-			last_seen_mins = last_seen_msecs / 60000;
-			last_seen_msecs = last_seen_msecs % 60000;
-			last_seen_secs = last_seen_msecs / 1000;
-
-			seq_printf(seq, " * %15pI4 %pM %4i %6i:%02i\n",
-				   &dat_entry->ip, dat_entry->mac_addr,
-				   batadv_print_vid(dat_entry->vid),
-				   last_seen_mins, last_seen_secs);
-		}
-		rcu_read_unlock();
-	}
-
-out:
-	if (primary_if)
-		batadv_hardif_put(primary_if);
-	return 0;
-}
-#endif
 
 /**
  * batadv_dat_cache_dump_entry() - dump one entry of the DAT cache table to a
  *  netlink socket
  * @msg: buffer for the message
  * @portid: netlink port
- * @seq: Sequence number of netlink message
+ * @cb: Control block containing additional options
  * @dat_entry: entry to dump
  *
  * Return: 0 or error code.
  */
 static int
-batadv_dat_cache_dump_entry(struct sk_buff *msg, u32 portid, u32 seq,
+batadv_dat_cache_dump_entry(struct sk_buff *msg, u32 portid,
+			    struct netlink_callback *cb,
 			    struct batadv_dat_entry *dat_entry)
 {
 	int msecs;
 	void *hdr;
 
-	hdr = genlmsg_put(msg, portid, seq, &batadv_netlink_family,
-			  NLM_F_MULTI, BATADV_CMD_GET_DAT_CACHE);
+	hdr = genlmsg_put(msg, portid, cb->nlh->nlmsg_seq,
+			  &batadv_netlink_family, NLM_F_MULTI,
+			  BATADV_CMD_GET_DAT_CACHE);
 	if (!hdr)
 		return -ENOBUFS;
+
+	genl_dump_check_consistent(cb, hdr);
 
 	msecs = jiffies_to_msecs(jiffies - dat_entry->last_update);
 
@@ -901,27 +896,31 @@ batadv_dat_cache_dump_entry(struct sk_buff *msg, u32 portid, u32 seq,
  *  a netlink socket
  * @msg: buffer for the message
  * @portid: netlink port
- * @seq: Sequence number of netlink message
- * @head: bucket to dump
+ * @cb: Control block containing additional options
+ * @hash: hash to dump
+ * @bucket: bucket index to dump
  * @idx_skip: How many entries to skip
  *
  * Return: 0 or error code.
  */
 static int
-batadv_dat_cache_dump_bucket(struct sk_buff *msg, u32 portid, u32 seq,
-			     struct hlist_head *head, int *idx_skip)
+batadv_dat_cache_dump_bucket(struct sk_buff *msg, u32 portid,
+			     struct netlink_callback *cb,
+			     struct batadv_hashtable *hash, unsigned int bucket,
+			     int *idx_skip)
 {
 	struct batadv_dat_entry *dat_entry;
 	int idx = 0;
 
-	rcu_read_lock();
-	hlist_for_each_entry_rcu(dat_entry, head, hash_entry) {
+	spin_lock_bh(&hash->list_locks[bucket]);
+	cb->seq = atomic_read(&hash->generation) << 1 | 1;
+
+	hlist_for_each_entry(dat_entry, &hash->table[bucket], hash_entry) {
 		if (idx < *idx_skip)
 			goto skip;
 
-		if (batadv_dat_cache_dump_entry(msg, portid, seq,
-						dat_entry)) {
-			rcu_read_unlock();
+		if (batadv_dat_cache_dump_entry(msg, portid, cb, dat_entry)) {
+			spin_unlock_bh(&hash->list_locks[bucket]);
 			*idx_skip = idx;
 
 			return -EMSGSIZE;
@@ -930,7 +929,7 @@ batadv_dat_cache_dump_bucket(struct sk_buff *msg, u32 portid, u32 seq,
 skip:
 		idx++;
 	}
-	rcu_read_unlock();
+	spin_unlock_bh(&hash->list_locks[bucket]);
 
 	return 0;
 }
@@ -946,28 +945,18 @@ int batadv_dat_cache_dump(struct sk_buff *msg, struct netlink_callback *cb)
 {
 	struct batadv_hard_iface *primary_if = NULL;
 	int portid = NETLINK_CB(cb->skb).portid;
-	struct net *net = sock_net(cb->skb->sk);
-	struct net_device *soft_iface;
+	struct net_device *mesh_iface;
 	struct batadv_hashtable *hash;
 	struct batadv_priv *bat_priv;
 	int bucket = cb->args[0];
-	struct hlist_head *head;
 	int idx = cb->args[1];
-	int ifindex;
 	int ret = 0;
 
-	ifindex = batadv_netlink_get_ifindex(cb->nlh,
-					     BATADV_ATTR_MESH_IFINDEX);
-	if (!ifindex)
-		return -EINVAL;
+	mesh_iface = batadv_netlink_get_meshif(cb);
+	if (IS_ERR(mesh_iface))
+		return PTR_ERR(mesh_iface);
 
-	soft_iface = dev_get_by_index(net, ifindex);
-	if (!soft_iface || !batadv_softif_is_valid(soft_iface)) {
-		ret = -ENODEV;
-		goto out;
-	}
-
-	bat_priv = netdev_priv(soft_iface);
+	bat_priv = netdev_priv(mesh_iface);
 	hash = bat_priv->dat.hash;
 
 	primary_if = batadv_primary_if_get_selected(bat_priv);
@@ -977,10 +966,7 @@ int batadv_dat_cache_dump(struct sk_buff *msg, struct netlink_callback *cb)
 	}
 
 	while (bucket < hash->size) {
-		head = &hash->table[bucket];
-
-		if (batadv_dat_cache_dump_bucket(msg, portid,
-						 cb->nlh->nlmsg_seq, head,
+		if (batadv_dat_cache_dump_bucket(msg, portid, cb, hash, bucket,
 						 &idx))
 			break;
 
@@ -994,18 +980,16 @@ int batadv_dat_cache_dump(struct sk_buff *msg, struct netlink_callback *cb)
 	ret = msg->len;
 
 out:
-	if (primary_if)
-		batadv_hardif_put(primary_if);
+	batadv_hardif_put(primary_if);
 
-	if (soft_iface)
-		dev_put(soft_iface);
+	dev_put(mesh_iface);
 
 	return ret;
 }
 
 /**
  * batadv_arp_get_type() - parse an ARP packet and gets the type
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: packet to analyse
  * @hdr_size: size of the possible header before the ARP packet in the skb
  *
@@ -1082,6 +1066,9 @@ out:
  * @skb: the buffer containing the packet to extract the VID from
  * @hdr_size: the size of the batman-adv header encapsulating the packet
  *
+ * The caller must ensure that at least @hdr_size + ETH_HLEN bytes are
+ * accessible after skb->data.
+ *
  * Return: If the packet embedded in the skb is vlan tagged this function
  * returns the VID with the BATADV_VLAN_HAS_TAG flag. Otherwise BATADV_NO_FLAGS
  * is returned.
@@ -1105,7 +1092,7 @@ static unsigned short batadv_dat_get_vid(struct sk_buff *skb, int *hdr_size)
 
 /**
  * batadv_dat_arp_create_reply() - create an ARP Reply
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @ip_src: ARP sender IP
  * @ip_dst: ARP target IP
  * @hw_src: Ethernet source and ARP sender MAC
@@ -1124,7 +1111,7 @@ batadv_dat_arp_create_reply(struct batadv_priv *bat_priv, __be32 ip_src,
 {
 	struct sk_buff *skb;
 
-	skb = arp_create(ARPOP_REPLY, ETH_P_ARP, ip_dst, bat_priv->soft_iface,
+	skb = arp_create(ARPOP_REPLY, ETH_P_ARP, ip_dst, bat_priv->mesh_iface,
 			 ip_src, hw_dst, hw_src, hw_dst);
 	if (!skb)
 		return NULL;
@@ -1141,7 +1128,7 @@ batadv_dat_arp_create_reply(struct batadv_priv *bat_priv, __be32 ip_src,
 /**
  * batadv_dat_snoop_outgoing_arp_request() - snoop the ARP request and try to
  * answer using DAT
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: packet to check
  *
  * Return: true if the message has been sent to the dht candidates, false
@@ -1157,11 +1144,15 @@ bool batadv_dat_snoop_outgoing_arp_request(struct batadv_priv *bat_priv,
 	bool ret = false;
 	struct batadv_dat_entry *dat_entry = NULL;
 	struct sk_buff *skb_new;
-	struct net_device *soft_iface = bat_priv->soft_iface;
+	struct net_device *mesh_iface = bat_priv->mesh_iface;
 	int hdr_size = 0;
 	unsigned short vid;
 
-	if (!atomic_read(&bat_priv->distributed_arp_table))
+	if (!READ_ONCE(bat_priv->distributed_arp_table))
+		goto out;
+
+	/* first, find out the vid. */
+	if (!pskb_may_pull(skb, hdr_size + ETH_HLEN))
 		goto out;
 
 	vid = batadv_dat_get_vid(skb, &hdr_size);
@@ -1187,7 +1178,7 @@ bool batadv_dat_snoop_outgoing_arp_request(struct batadv_priv *bat_priv,
 		 * client will answer itself. DAT would only generate a
 		 * duplicate packet.
 		 *
-		 * Moreover, if the soft-interface is enslaved into a bridge, an
+		 * Moreover, if the mesh-interface is enslaved into a bridge, an
 		 * additional DAT answer may trigger kernel warnings about
 		 * a packet coming from the wrong port.
 		 */
@@ -1216,7 +1207,7 @@ bool batadv_dat_snoop_outgoing_arp_request(struct batadv_priv *bat_priv,
 		if (!skb_new)
 			goto out;
 
-		skb_new->protocol = eth_type_trans(skb_new, soft_iface);
+		skb_new->protocol = eth_type_trans(skb_new, mesh_iface);
 
 		batadv_inc_counter(bat_priv, BATADV_CNT_RX);
 		batadv_add_counter(bat_priv, BATADV_CNT_RX_BYTES,
@@ -1227,19 +1218,18 @@ bool batadv_dat_snoop_outgoing_arp_request(struct batadv_priv *bat_priv,
 		ret = true;
 	} else {
 		/* Send the request to the DHT */
-		ret = batadv_dat_send_data(bat_priv, skb, ip_dst, vid,
-					   BATADV_P_DAT_DHT_GET);
+		ret = batadv_dat_forward_data(bat_priv, skb, ip_dst, vid,
+					      BATADV_P_DAT_DHT_GET);
 	}
 out:
-	if (dat_entry)
-		batadv_dat_entry_put(dat_entry);
+	batadv_dat_entry_put(dat_entry);
 	return ret;
 }
 
 /**
  * batadv_dat_snoop_incoming_arp_request() - snoop the ARP request and try to
  * answer using the local DAT storage
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: packet to check
  * @hdr_size: size of the encapsulation header
  *
@@ -1257,7 +1247,11 @@ bool batadv_dat_snoop_incoming_arp_request(struct batadv_priv *bat_priv,
 	unsigned short vid;
 	int err;
 
-	if (!atomic_read(&bat_priv->distributed_arp_table))
+	if (!READ_ONCE(bat_priv->distributed_arp_table))
+		goto out;
+
+	/* first, find out the vid. */
+	if (!pskb_may_pull(skb, hdr_size + ETH_HLEN))
 		goto out;
 
 	vid = batadv_dat_get_vid(skb, &hdr_size);
@@ -1299,8 +1293,7 @@ bool batadv_dat_snoop_incoming_arp_request(struct batadv_priv *bat_priv,
 		ret = true;
 	}
 out:
-	if (dat_entry)
-		batadv_dat_entry_put(dat_entry);
+	batadv_dat_entry_put(dat_entry);
 	if (ret)
 		kfree_skb(skb);
 	return ret;
@@ -1308,7 +1301,7 @@ out:
 
 /**
  * batadv_dat_snoop_outgoing_arp_reply() - snoop the ARP reply and fill the DHT
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: packet to check
  */
 void batadv_dat_snoop_outgoing_arp_reply(struct batadv_priv *bat_priv,
@@ -1320,7 +1313,11 @@ void batadv_dat_snoop_outgoing_arp_reply(struct batadv_priv *bat_priv,
 	int hdr_size = 0;
 	unsigned short vid;
 
-	if (!atomic_read(&bat_priv->distributed_arp_table))
+	if (!READ_ONCE(bat_priv->distributed_arp_table))
+		return;
+
+	/* first, find out the vid. */
+	if (!pskb_may_pull(skb, hdr_size + ETH_HLEN))
 		return;
 
 	vid = batadv_dat_get_vid(skb, &hdr_size);
@@ -1342,14 +1339,16 @@ void batadv_dat_snoop_outgoing_arp_reply(struct batadv_priv *bat_priv,
 	/* Send the ARP reply to the candidates for both the IP addresses that
 	 * the node obtained from the ARP reply
 	 */
-	batadv_dat_send_data(bat_priv, skb, ip_src, vid, BATADV_P_DAT_DHT_PUT);
-	batadv_dat_send_data(bat_priv, skb, ip_dst, vid, BATADV_P_DAT_DHT_PUT);
+	batadv_dat_forward_data(bat_priv, skb, ip_src, vid,
+				BATADV_P_DAT_DHT_PUT);
+	batadv_dat_forward_data(bat_priv, skb, ip_dst, vid,
+				BATADV_P_DAT_DHT_PUT);
 }
 
 /**
  * batadv_dat_snoop_incoming_arp_reply() - snoop the ARP reply and fill the
  *  local DAT storage only
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @skb: packet to check
  * @hdr_size: size of the encapsulation header
  *
@@ -1366,7 +1365,11 @@ bool batadv_dat_snoop_incoming_arp_reply(struct batadv_priv *bat_priv,
 	bool dropped = false;
 	unsigned short vid;
 
-	if (!atomic_read(&bat_priv->distributed_arp_table))
+	if (!READ_ONCE(bat_priv->distributed_arp_table))
+		goto out;
+
+	/* first, find out the vid. */
+	if (!pskb_may_pull(skb, hdr_size + ETH_HLEN))
 		goto out;
 
 	vid = batadv_dat_get_vid(skb, &hdr_size);
@@ -1394,7 +1397,6 @@ bool batadv_dat_snoop_incoming_arp_reply(struct batadv_priv *bat_priv,
 			   hw_src, &ip_src, hw_dst, &ip_dst,
 			   dat_entry->mac_addr,	&dat_entry->ip);
 		dropped = true;
-		goto out;
 	}
 
 	/* Update our internal cache with both the IP addresses the node got
@@ -1402,6 +1404,9 @@ bool batadv_dat_snoop_incoming_arp_reply(struct batadv_priv *bat_priv,
 	 */
 	batadv_dat_entry_add(bat_priv, ip_src, hw_src, vid);
 	batadv_dat_entry_add(bat_priv, ip_dst, hw_dst, vid);
+
+	if (dropped)
+		goto out;
 
 	/* If BLA is enabled, only forward ARP replies if we have claimed the
 	 * source of the ARP reply or if no one else of the same backbone has
@@ -1429,16 +1434,375 @@ bool batadv_dat_snoop_incoming_arp_reply(struct batadv_priv *bat_priv,
 out:
 	if (dropped)
 		kfree_skb(skb);
-	if (dat_entry)
-		batadv_dat_entry_put(dat_entry);
+	batadv_dat_entry_put(dat_entry);
 	/* if dropped == false -> deliver to the interface */
 	return dropped;
 }
 
 /**
+ * batadv_dat_check_dhcp_ipudp() - check skb for IP+UDP headers valid for DHCP
+ * @skb: the packet to check
+ * @ip_src: a buffer to store the IPv4 source address in
+ *
+ * Checks whether the given skb has an IP and UDP header valid for a DHCP
+ * message from a DHCP server. And if so, stores the IPv4 source address in
+ * the provided buffer.
+ *
+ * Return: True if valid, false otherwise.
+ */
+static bool
+batadv_dat_check_dhcp_ipudp(struct sk_buff *skb, __be32 *ip_src)
+{
+	unsigned int offset = skb_network_offset(skb);
+	struct udphdr *udphdr, _udphdr;
+	struct iphdr *iphdr, _iphdr;
+
+	iphdr = skb_header_pointer(skb, offset, sizeof(_iphdr), &_iphdr);
+	if (!iphdr || iphdr->version != 4 || iphdr->ihl * 4 < sizeof(_iphdr))
+		return false;
+
+	if (iphdr->protocol != IPPROTO_UDP)
+		return false;
+
+	offset += iphdr->ihl * 4;
+	skb_set_transport_header(skb, offset);
+
+	udphdr = skb_header_pointer(skb, offset, sizeof(_udphdr), &_udphdr);
+	if (!udphdr || udphdr->source != htons(67))
+		return false;
+
+	*ip_src = get_unaligned(&iphdr->saddr);
+
+	return true;
+}
+
+/**
+ * batadv_dat_check_dhcp() - examine packet for valid DHCP message
+ * @skb: the packet to check
+ * @proto: ethernet protocol hint (behind a potential vlan)
+ * @ip_src: a buffer to store the IPv4 source address in
+ *
+ * Checks whether the given skb is a valid DHCP packet. And if so, stores the
+ * IPv4 source address in the provided buffer.
+ *
+ * Caller needs to ensure that the skb network header is set correctly.
+ *
+ * Return: If skb is a valid DHCP packet, then returns its op code
+ * (e.g. BOOTREPLY vs. BOOTREQUEST). Otherwise returns -EINVAL.
+ */
+static int
+batadv_dat_check_dhcp(struct sk_buff *skb, __be16 proto, __be32 *ip_src)
+{
+	__be32 *magic, _magic;
+	unsigned int offset;
+	struct {
+		__u8 op;
+		__u8 htype;
+		__u8 hlen;
+		__u8 hops;
+	} *dhcp_h, _dhcp_h;
+
+	if (proto != htons(ETH_P_IP))
+		return -EINVAL;
+
+	if (!batadv_dat_check_dhcp_ipudp(skb, ip_src))
+		return -EINVAL;
+
+	offset = skb_transport_offset(skb) + sizeof(struct udphdr);
+	if (skb->len < offset + sizeof(struct batadv_dhcp_packet))
+		return -EINVAL;
+
+	dhcp_h = skb_header_pointer(skb, offset, sizeof(_dhcp_h), &_dhcp_h);
+	if (!dhcp_h || dhcp_h->htype != BATADV_HTYPE_ETHERNET ||
+	    dhcp_h->hlen != ETH_ALEN)
+		return -EINVAL;
+
+	offset += offsetof(struct batadv_dhcp_packet, magic);
+
+	magic = skb_header_pointer(skb, offset, sizeof(_magic), &_magic);
+	if (!magic || get_unaligned(magic) != htonl(BATADV_DHCP_MAGIC))
+		return -EINVAL;
+
+	return dhcp_h->op;
+}
+
+/**
+ * batadv_dat_get_dhcp_message_type() - get message type of a DHCP packet
+ * @skb: the DHCP packet to parse
+ *
+ * Iterates over the DHCP options of the given DHCP packet to find a
+ * DHCP Message Type option and parse it.
+ *
+ * Caller needs to ensure that the given skb is a valid DHCP packet and
+ * that the skb transport header is set correctly.
+ *
+ * Return: The found DHCP message type value, if found. -EINVAL otherwise.
+ */
+static int batadv_dat_get_dhcp_message_type(struct sk_buff *skb)
+{
+	unsigned int offset = skb_transport_offset(skb) + sizeof(struct udphdr);
+	u8 *type, _type;
+	struct {
+		u8 type;
+		u8 len;
+	} *tl, _tl;
+
+	offset += sizeof(struct batadv_dhcp_packet);
+
+	while ((tl = skb_header_pointer(skb, offset, sizeof(_tl), &_tl))) {
+		if (tl->type == BATADV_DHCP_OPT_MSG_TYPE)
+			break;
+
+		if (tl->type == BATADV_DHCP_OPT_END)
+			break;
+
+		if (tl->type == BATADV_DHCP_OPT_PAD)
+			offset++;
+		else
+			offset += tl->len + sizeof(_tl);
+	}
+
+	/* Option Overload Code not supported */
+	if (!tl || tl->type != BATADV_DHCP_OPT_MSG_TYPE ||
+	    tl->len != sizeof(_type))
+		return -EINVAL;
+
+	offset += sizeof(_tl);
+
+	type = skb_header_pointer(skb, offset, sizeof(_type), &_type);
+	if (!type)
+		return -EINVAL;
+
+	return *type;
+}
+
+/**
+ * batadv_dat_dhcp_get_yiaddr() - get yiaddr from a DHCP packet
+ * @skb: the DHCP packet to parse
+ * @buf: a buffer to store the yiaddr in
+ *
+ * Caller needs to ensure that the given skb is a valid DHCP packet and
+ * that the skb transport header is set correctly.
+ *
+ * Return: True on success, false otherwise.
+ */
+static bool batadv_dat_dhcp_get_yiaddr(struct sk_buff *skb, __be32 *buf)
+{
+	unsigned int offset = skb_transport_offset(skb) + sizeof(struct udphdr);
+	__be32 *yiaddr;
+
+	offset += offsetof(struct batadv_dhcp_packet, yiaddr);
+	yiaddr = skb_header_pointer(skb, offset, BATADV_DHCP_YIADDR_LEN, buf);
+
+	if (!yiaddr)
+		return false;
+
+	if (yiaddr != buf)
+		*buf = get_unaligned(yiaddr);
+
+	return true;
+}
+
+/**
+ * batadv_dat_get_dhcp_chaddr() - get chaddr from a DHCP packet
+ * @skb: the DHCP packet to parse
+ * @buf: a buffer to store the chaddr in
+ *
+ * Caller needs to ensure that the given skb is a valid DHCP packet and
+ * that the skb transport header is set correctly.
+ *
+ * Return: True on success, false otherwise
+ */
+static bool batadv_dat_get_dhcp_chaddr(struct sk_buff *skb, u8 *buf)
+{
+	unsigned int offset = skb_transport_offset(skb) + sizeof(struct udphdr);
+	u8 *chaddr;
+
+	offset += offsetof(struct batadv_dhcp_packet, chaddr);
+	chaddr = skb_header_pointer(skb, offset, BATADV_DHCP_CHADDR_LEN, buf);
+
+	if (!chaddr)
+		return false;
+
+	if (chaddr != buf)
+		memcpy(buf, chaddr, BATADV_DHCP_CHADDR_LEN);
+
+	return true;
+}
+
+/**
+ * batadv_dat_put_dhcp() - puts addresses from a DHCP packet into the DHT and
+ *  DAT cache
+ * @bat_priv: the bat priv with all the mesh interface information
+ * @chaddr: the DHCP client MAC address
+ * @yiaddr: the DHCP client IP address
+ * @hw_dst: the DHCP server MAC address
+ * @ip_dst: the DHCP server IP address
+ * @vid: VLAN identifier
+ *
+ * Adds given MAC/IP pairs to the local DAT cache and propagates them further
+ * into the DHT.
+ *
+ * For the DHT propagation, client MAC + IP will appear as the ARP Reply
+ * transmitter (and hw_dst/ip_dst as the target).
+ */
+static void batadv_dat_put_dhcp(struct batadv_priv *bat_priv, u8 *chaddr,
+				__be32 yiaddr, u8 *hw_dst, __be32 ip_dst,
+				unsigned short vid)
+{
+	struct sk_buff *skb;
+
+	skb = batadv_dat_arp_create_reply(bat_priv, yiaddr, ip_dst, chaddr,
+					  hw_dst, vid);
+	if (!skb)
+		return;
+
+	skb_set_network_header(skb, ETH_HLEN);
+
+	batadv_dat_entry_add(bat_priv, yiaddr, chaddr, vid);
+	batadv_dat_entry_add(bat_priv, ip_dst, hw_dst, vid);
+
+	batadv_dat_forward_data(bat_priv, skb, yiaddr, vid,
+				BATADV_P_DAT_DHT_PUT);
+	batadv_dat_forward_data(bat_priv, skb, ip_dst, vid,
+				BATADV_P_DAT_DHT_PUT);
+
+	consume_skb(skb);
+
+	batadv_dbg(BATADV_DBG_DAT, bat_priv,
+		   "Snooped from outgoing DHCPACK (server address): %pI4, %pM (vid: %i)\n",
+		   &ip_dst, hw_dst, batadv_print_vid(vid));
+	batadv_dbg(BATADV_DBG_DAT, bat_priv,
+		   "Snooped from outgoing DHCPACK (client address): %pI4, %pM (vid: %i)\n",
+		   &yiaddr, chaddr, batadv_print_vid(vid));
+}
+
+/**
+ * batadv_dat_check_dhcp_ack() - examine packet for valid DHCP message
+ * @skb: the packet to check
+ * @proto: ethernet protocol hint (behind a potential vlan)
+ * @ip_src: a buffer to store the IPv4 source address in
+ * @chaddr: a buffer to store the DHCP Client Hardware Address in
+ * @yiaddr: a buffer to store the DHCP Your IP Address in
+ *
+ * Checks whether the given skb is a valid DHCPACK. And if so, stores the
+ * IPv4 server source address (ip_src), client MAC address (chaddr) and client
+ * IPv4 address (yiaddr) in the provided buffers.
+ *
+ * Caller needs to ensure that the skb network header is set correctly.
+ *
+ * Return: True if the skb is a valid DHCPACK. False otherwise.
+ */
+static bool
+batadv_dat_check_dhcp_ack(struct sk_buff *skb, __be16 proto, __be32 *ip_src,
+			  u8 *chaddr, __be32 *yiaddr)
+{
+	int type;
+
+	type = batadv_dat_check_dhcp(skb, proto, ip_src);
+	if (type != BATADV_BOOTREPLY)
+		return false;
+
+	type = batadv_dat_get_dhcp_message_type(skb);
+	if (type != BATADV_DHCPACK)
+		return false;
+
+	if (!batadv_dat_dhcp_get_yiaddr(skb, yiaddr))
+		return false;
+
+	if (!batadv_dat_get_dhcp_chaddr(skb, chaddr))
+		return false;
+
+	return true;
+}
+
+/**
+ * batadv_dat_snoop_outgoing_dhcp_ack() - snoop DHCPACK and fill DAT with it
+ * @bat_priv: the bat priv with all the mesh interface information
+ * @skb: the packet to snoop
+ * @proto: ethernet protocol hint (behind a potential vlan)
+ * @vid: VLAN identifier
+ *
+ * This function first checks whether the given skb is a valid DHCPACK. If
+ * so then its source MAC and IP as well as its DHCP Client Hardware Address
+ * field and DHCP Your IP Address field are added to the local DAT cache and
+ * propagated into the DHT.
+ *
+ * Caller needs to ensure that the skb mac and network headers are set
+ * correctly.
+ */
+void batadv_dat_snoop_outgoing_dhcp_ack(struct batadv_priv *bat_priv,
+					struct sk_buff *skb,
+					__be16 proto,
+					unsigned short vid)
+{
+	u8 chaddr[BATADV_DHCP_CHADDR_LEN];
+	__be32 ip_src, yiaddr;
+
+	if (!READ_ONCE(bat_priv->distributed_arp_table))
+		return;
+
+	if (!batadv_dat_check_dhcp_ack(skb, proto, &ip_src, chaddr, &yiaddr))
+		return;
+
+	batadv_dat_put_dhcp(bat_priv, chaddr, yiaddr, eth_hdr(skb)->h_source,
+			    ip_src, vid);
+}
+
+/**
+ * batadv_dat_snoop_incoming_dhcp_ack() - snoop DHCPACK and fill DAT cache
+ * @bat_priv: the bat priv with all the mesh interface information
+ * @skb: the packet to snoop
+ * @hdr_size: header size, up to the tail of the batman-adv header
+ *
+ * This function first checks whether the given skb is a valid DHCPACK. If
+ * so then its source MAC and IP as well as its DHCP Client Hardware Address
+ * field and DHCP Your IP Address field are added to the local DAT cache.
+ */
+void batadv_dat_snoop_incoming_dhcp_ack(struct batadv_priv *bat_priv,
+					struct sk_buff *skb, int hdr_size)
+{
+	u8 chaddr[BATADV_DHCP_CHADDR_LEN];
+	struct ethhdr *ethhdr;
+	__be32 ip_src, yiaddr;
+	unsigned short vid;
+	int hdr_size_tmp;
+	__be16 proto;
+	u8 *hw_src;
+
+	if (!READ_ONCE(bat_priv->distributed_arp_table))
+		return;
+
+	if (unlikely(!pskb_may_pull(skb, hdr_size + ETH_HLEN)))
+		return;
+
+	ethhdr = (struct ethhdr *)(skb->data + hdr_size);
+	skb_set_network_header(skb, hdr_size + ETH_HLEN);
+	proto = ethhdr->h_proto;
+
+	if (!batadv_dat_check_dhcp_ack(skb, proto, &ip_src, chaddr, &yiaddr))
+		return;
+
+	hdr_size_tmp = hdr_size;
+	vid = batadv_dat_get_vid(skb, &hdr_size_tmp);
+	ethhdr = (struct ethhdr *)(skb->data + hdr_size);
+	hw_src = ethhdr->h_source;
+
+	batadv_dat_entry_add(bat_priv, yiaddr, chaddr, vid);
+	batadv_dat_entry_add(bat_priv, ip_src, hw_src, vid);
+
+	batadv_dbg(BATADV_DBG_DAT, bat_priv,
+		   "Snooped from incoming DHCPACK (server address): %pI4, %pM (vid: %i)\n",
+		   &ip_src, hw_src, batadv_print_vid(vid));
+	batadv_dbg(BATADV_DBG_DAT, bat_priv,
+		   "Snooped from incoming DHCPACK (client address): %pI4, %pM (vid: %i)\n",
+		   &yiaddr, chaddr, batadv_print_vid(vid));
+}
+
+/**
  * batadv_dat_drop_broadcast_packet() - check if an ARP request has to be
  *  dropped (because the node has already obtained the reply via DAT) or not
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  * @forw_packet: the broadcast packet
  *
  * Return: true if the node can drop the packet, false otherwise.
@@ -1453,13 +1817,17 @@ bool batadv_dat_drop_broadcast_packet(struct batadv_priv *bat_priv,
 	int hdr_size = sizeof(struct batadv_bcast_packet);
 	unsigned short vid;
 
-	if (!atomic_read(&bat_priv->distributed_arp_table))
+	if (!READ_ONCE(bat_priv->distributed_arp_table))
 		goto out;
 
 	/* If this packet is an ARP_REQUEST and the node already has the
 	 * information that it is going to ask, then the packet can be dropped
 	 */
 	if (batadv_forw_packet_is_rebroadcast(forw_packet))
+		goto out;
+
+	/* first, find out the vid. */
+	if (!pskb_may_pull(forw_packet->skb, hdr_size + ETH_HLEN))
 		goto out;
 
 	vid = batadv_dat_get_vid(forw_packet->skb, &hdr_size);
@@ -1482,7 +1850,6 @@ bool batadv_dat_drop_broadcast_packet(struct batadv_priv *bat_priv,
 	ret = true;
 
 out:
-	if (dat_entry)
-		batadv_dat_entry_put(dat_entry);
+	batadv_dat_entry_put(dat_entry);
 	return ret;
 }

@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Low Level Transport (NDLC) Driver for STMicroelectronics NFC Chip
  *
  * Copyright (C) 2014-2015  STMicroelectronics SAS. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/sched.h>
@@ -172,8 +161,8 @@ static void llt_ndlc_rcv_queue(struct llt_ndlc *ndlc)
 			case PCB_SYNC_ACK:
 				skb = skb_dequeue(&ndlc->ack_pending_q);
 				kfree_skb(skb);
-				del_timer_sync(&ndlc->t1_timer);
-				del_timer_sync(&ndlc->t2_timer);
+				timer_delete_sync(&ndlc->t1_timer);
+				timer_delete_sync(&ndlc->t2_timer);
 				ndlc->t2_active = false;
 				ndlc->t1_active = false;
 				break;
@@ -224,8 +213,8 @@ static void llt_ndlc_sm_work(struct work_struct *work)
 		pr_debug("Handle T2(recv DATA) elapsed (T2 now inactive)\n");
 		ndlc->t2_active = false;
 		ndlc->t1_active = false;
-		del_timer_sync(&ndlc->t1_timer);
-		del_timer_sync(&ndlc->t2_timer);
+		timer_delete_sync(&ndlc->t1_timer);
+		timer_delete_sync(&ndlc->t2_timer);
 		ndlc_close(ndlc);
 		ndlc->hard_fault = -EREMOTEIO;
 	}
@@ -248,25 +237,21 @@ EXPORT_SYMBOL(ndlc_recv);
 
 static void ndlc_t1_timeout(struct timer_list *t)
 {
-	struct llt_ndlc *ndlc = from_timer(ndlc, t, t1_timer);
-
-	pr_debug("\n");
+	struct llt_ndlc *ndlc = timer_container_of(ndlc, t, t1_timer);
 
 	schedule_work(&ndlc->sm_work);
 }
 
 static void ndlc_t2_timeout(struct timer_list *t)
 {
-	struct llt_ndlc *ndlc = from_timer(ndlc, t, t2_timer);
-
-	pr_debug("\n");
+	struct llt_ndlc *ndlc = timer_container_of(ndlc, t, t2_timer);
 
 	schedule_work(&ndlc->sm_work);
 }
 
-int ndlc_probe(void *phy_id, struct nfc_phy_ops *phy_ops, struct device *dev,
-	       int phy_headroom, int phy_tailroom, struct llt_ndlc **ndlc_id,
-	       struct st_nci_se_status *se_status)
+int ndlc_probe(void *phy_id, const struct nfc_phy_ops *phy_ops,
+	       struct device *dev, int phy_headroom, int phy_tailroom,
+	       struct llt_ndlc **ndlc_id, struct st_nci_se_status *se_status)
 {
 	struct llt_ndlc *ndlc;
 
@@ -297,13 +282,15 @@ EXPORT_SYMBOL(ndlc_probe);
 
 void ndlc_remove(struct llt_ndlc *ndlc)
 {
-	st_nci_remove(ndlc->ndev);
-
 	/* cancel timers */
-	del_timer_sync(&ndlc->t1_timer);
-	del_timer_sync(&ndlc->t2_timer);
+	timer_delete_sync(&ndlc->t1_timer);
+	timer_delete_sync(&ndlc->t2_timer);
 	ndlc->t2_active = false;
 	ndlc->t1_active = false;
+	/* cancel work */
+	cancel_work_sync(&ndlc->sm_work);
+
+	st_nci_remove(ndlc->ndev);
 
 	skb_queue_purge(&ndlc->rcv_q);
 	skb_queue_purge(&ndlc->send_q);

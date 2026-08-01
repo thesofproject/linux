@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * arch/powerpc/platforms/powermac/low_i2c.c
  *
  *  Copyright (C) 2003-2005 Ben. Herrenschmidt (benh@kernel.crashing.org)
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version
- *  2 of the License, or (at your option) any later version.
  *
  * The linux i2c layer isn't completely suitable for our needs for various
  * reasons ranging from too late initialisation to semantics not perfectly
@@ -44,10 +40,10 @@
 #include <linux/mutex.h>
 #include <linux/i2c.h>
 #include <linux/slab.h>
+#include <linux/of_irq.h>
 #include <asm/keylargo.h>
 #include <asm/uninorth.h>
 #include <asm/io.h>
-#include <asm/prom.h>
 #include <asm/machdep.h>
 #include <asm/smu.h>
 #include <asm/pmac_pfunc.h>
@@ -351,7 +347,7 @@ static irqreturn_t kw_i2c_irq(int irq, void *dev_id)
 	unsigned long flags;
 
 	spin_lock_irqsave(&host->lock, flags);
-	del_timer(&host->timeout_timer);
+	timer_delete(&host->timeout_timer);
 	kw_i2c_handle_interrupt(host, kw_read_reg(reg_isr));
 	if (host->state != state_idle) {
 		host->timeout_timer.expires = jiffies + KW_POLL_TIMEOUT;
@@ -363,7 +359,8 @@ static irqreturn_t kw_i2c_irq(int irq, void *dev_id)
 
 static void kw_i2c_timeout(struct timer_list *t)
 {
-	struct pmac_i2c_host_kw *host = from_timer(host, t, timeout_timer);
+	struct pmac_i2c_host_kw *host = timer_container_of(host, t,
+							   timeout_timer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&host->lock, flags);
@@ -492,7 +489,7 @@ static struct pmac_i2c_host_kw *__init kw_i2c_host_init(struct device_node *np)
 	const u32		*psteps, *prate, *addrp;
 	u32			steps;
 
-	host = kzalloc(sizeof(*host), GFP_KERNEL);
+	host = kzalloc_obj(*host);
 	if (host == NULL) {
 		printk(KERN_ERR "low_i2c: Can't allocate host for %pOF\n",
 		       np);
@@ -572,7 +569,7 @@ static void __init kw_i2c_add(struct pmac_i2c_host_kw *host,
 {
 	struct pmac_i2c_bus *bus;
 
-	bus = kzalloc(sizeof(struct pmac_i2c_bus), GFP_KERNEL);
+	bus = kzalloc_obj(struct pmac_i2c_bus);
 	if (bus == NULL)
 		return;
 
@@ -586,6 +583,7 @@ static void __init kw_i2c_add(struct pmac_i2c_host_kw *host,
 	bus->close = kw_i2c_close;
 	bus->xfer = kw_i2c_xfer;
 	mutex_init(&bus->mutex);
+	lockdep_register_key(&bus->lock_key);
 	lockdep_set_class(&bus->mutex, &bus->lock_key);
 	if (controller == busnode)
 		bus->flags = pmac_i2c_multibus;
@@ -617,7 +615,7 @@ static void __init kw_i2c_probe(void)
 		 * but not for now
 		 */
 		child = of_get_next_child(np, NULL);
-		multibus = !child || strcmp(child->name, "i2c-bus");
+		multibus = !of_node_name_eq(child, "i2c-bus");
 		of_node_put(child);
 
 		/* For a multibus setup, we get the bus count based on the
@@ -630,11 +628,11 @@ static void __init kw_i2c_probe(void)
 			if (parent == NULL)
 				continue;
 			chans = parent->name[0] == 'u' ? 2 : 1;
+			of_node_put(parent);
 			for (i = 0; i < chans; i++)
 				kw_i2c_add(host, np, np, i);
 		} else {
-			for (child = NULL;
-			     (child = of_get_next_child(np, child)) != NULL;) {
+			for_each_child_of_node(np, child) {
 				const u32 *reg = of_get_property(child,
 						"reg", NULL);
 				if (reg == NULL)
@@ -815,6 +813,7 @@ static void __init pmu_i2c_probe(void)
 		bus->hostdata = bus + 1;
 		bus->xfer = pmu_i2c_xfer;
 		mutex_init(&bus->mutex);
+		lockdep_register_key(&bus->lock_key);
 		lockdep_set_class(&bus->mutex, &bus->lock_key);
 		bus->flags = pmac_i2c_multibus;
 		list_add(&bus->link, &pmac_i2c_busses);
@@ -917,10 +916,9 @@ static void __init smu_i2c_probe(void)
 	 * type as older device trees mix i2c busses and other things
 	 * at the same level
 	 */
-	for (busnode = NULL;
-	     (busnode = of_get_next_child(controller, busnode)) != NULL;) {
-		if (strcmp(busnode->type, "i2c") &&
-		    strcmp(busnode->type, "i2c-bus"))
+	for_each_child_of_node(controller, busnode) {
+		if (!of_node_is_type(busnode, "i2c") &&
+		    !of_node_is_type(busnode, "i2c-bus"))
 			continue;
 		reg = of_get_property(busnode, "reg", NULL);
 		if (reg == NULL)
@@ -928,8 +926,10 @@ static void __init smu_i2c_probe(void)
 
 		sz = sizeof(struct pmac_i2c_bus) + sizeof(struct smu_i2c_cmd);
 		bus = kzalloc(sz, GFP_KERNEL);
-		if (bus == NULL)
+		if (bus == NULL) {
+			of_node_put(busnode);
 			return;
+		}
 
 		bus->controller = controller;
 		bus->busnode = of_node_get(busnode);
@@ -939,6 +939,7 @@ static void __init smu_i2c_probe(void)
 		bus->hostdata = bus + 1;
 		bus->xfer = smu_i2c_xfer;
 		mutex_init(&bus->mutex);
+		lockdep_register_key(&bus->lock_key);
 		lockdep_set_class(&bus->mutex, &bus->lock_key);
 		bus->flags = 0;
 		list_add(&bus->link, &pmac_i2c_busses);
@@ -1057,40 +1058,6 @@ int pmac_i2c_match_adapter(struct device_node *dev, struct i2c_adapter *adapter)
 }
 EXPORT_SYMBOL_GPL(pmac_i2c_match_adapter);
 
-int pmac_low_i2c_lock(struct device_node *np)
-{
-	struct pmac_i2c_bus *bus, *found = NULL;
-
-	list_for_each_entry(bus, &pmac_i2c_busses, link) {
-		if (np == bus->controller) {
-			found = bus;
-			break;
-		}
-	}
-	if (!found)
-		return -ENODEV;
-	return pmac_i2c_open(bus, 0);
-}
-EXPORT_SYMBOL_GPL(pmac_low_i2c_lock);
-
-int pmac_low_i2c_unlock(struct device_node *np)
-{
-	struct pmac_i2c_bus *bus, *found = NULL;
-
-	list_for_each_entry(bus, &pmac_i2c_busses, link) {
-		if (np == bus->controller) {
-			found = bus;
-			break;
-		}
-	}
-	if (!found)
-		return -ENODEV;
-	pmac_i2c_close(bus);
-	return 0;
-}
-EXPORT_SYMBOL_GPL(pmac_low_i2c_unlock);
-
-
 int pmac_i2c_open(struct pmac_i2c_bus *bus, int polled)
 {
 	int rc;
@@ -1192,21 +1159,20 @@ static void pmac_i2c_devscan(void (*callback)(struct device_node *dev,
 		{ NULL, NULL, 0 },
 	};
 
-	/* Only some devices need to have platform functions instanciated
+	/* Only some devices need to have platform functions instantiated
 	 * here. For now, we have a table. Others, like 9554 i2c GPIOs used
 	 * on Xserve, if we ever do a driver for them, will use their own
 	 * platform function instance
 	 */
 	list_for_each_entry(bus, &pmac_i2c_busses, link) {
-		for (np = NULL;
-		     (np = of_get_next_child(bus->busnode, np)) != NULL;) {
+		for_each_child_of_node(bus->busnode, np) {
 			struct whitelist_ent *p;
 			/* If multibus, check if device is on that bus */
 			if (bus->flags & pmac_i2c_multibus)
 				if (bus != pmac_i2c_find_bus(np))
 					continue;
 			for (p = whitelist; p->name != NULL; p++) {
-				if (strcmp(np->name, p->name))
+				if (!of_node_name_eq(np, p->name))
 					continue;
 				if (p->compatible &&
 				    !of_device_is_compatible(np, p->compatible))
@@ -1254,7 +1220,7 @@ static void* pmac_i2c_do_begin(struct pmf_function *func, struct pmf_args *args)
 	 * near OOM that need to be resolved, the allocator itself should
 	 * probably make GFP_NOIO implicit during suspend
 	 */
-	inst = kzalloc(sizeof(struct pmac_i2c_pf_inst), GFP_KERNEL);
+	inst = kzalloc_obj(struct pmac_i2c_pf_inst);
 	if (inst == NULL) {
 		pmac_i2c_close(bus);
 		return NULL;
@@ -1476,7 +1442,7 @@ int __init pmac_i2c_init(void)
 	smu_i2c_probe();
 #endif
 
-	/* Now add plaform functions for some known devices */
+	/* Now add platform functions for some known devices */
 	pmac_i2c_devscan(pmac_i2c_dev_create);
 
 	return 0;

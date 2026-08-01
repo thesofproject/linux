@@ -12,7 +12,7 @@
 #include "internal.h"
 
 
-static const struct proc_ns_operations *ns_entries[] = {
+static const struct proc_ns_operations *const ns_entries[] = {
 #ifdef CONFIG_NET_NS
 	&netns_operations,
 #endif
@@ -33,6 +33,10 @@ static const struct proc_ns_operations *ns_entries[] = {
 #ifdef CONFIG_CGROUPS
 	&cgroupns_operations,
 #endif
+#ifdef CONFIG_TIME_NS
+	&timens_operations,
+	&timens_for_children_operations,
+#endif
 };
 
 static const char *proc_ns_get_link(struct dentry *dentry,
@@ -42,22 +46,33 @@ static const char *proc_ns_get_link(struct dentry *dentry,
 	const struct proc_ns_operations *ns_ops = PROC_I(inode)->ns_ops;
 	struct task_struct *task;
 	struct path ns_path;
-	void *error = ERR_PTR(-EACCES);
+	int error;
 
 	if (!dentry)
 		return ERR_PTR(-ECHILD);
 
 	task = get_proc_task(inode);
 	if (!task)
-		return error;
+		return ERR_PTR(-EACCES);
 
-	if (ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS)) {
-		error = ns_get_path(&ns_path, task, ns_ops);
-		if (!error)
-			nd_jump_link(&ns_path);
-	}
+	error = down_read_killable(&task->signal->exec_update_lock);
+	if (error)
+		goto out_put_task;
+
+	error = -EACCES;
+	if (!ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS))
+		goto out;
+
+	error = ns_get_path(&ns_path, task, ns_ops);
+	if (error)
+		goto out;
+
+	error = nd_jump_link(&ns_path);
+out:
+	up_read(&task->signal->exec_update_lock);
+out_put_task:
 	put_task_struct(task);
-	return error;
+	return ERR_PTR(error);
 }
 
 static int proc_ns_readlink(struct dentry *dentry, char __user *buffer, int buflen)
@@ -72,11 +87,18 @@ static int proc_ns_readlink(struct dentry *dentry, char __user *buffer, int bufl
 	if (!task)
 		return res;
 
+	res = down_read_killable(&task->signal->exec_update_lock);
+	if (res)
+		goto out_put_task;
+
+	res = -EACCES;
 	if (ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS)) {
 		res = ns_get_name(name, sizeof(name), task, ns_ops);
 		if (res >= 0)
-			res = readlink_copy(buffer, buflen, name);
+			res = readlink_copy(buffer, buflen, name, strlen(name));
 	}
+	up_read(&task->signal->exec_update_lock);
+out_put_task:
 	put_task_struct(task);
 	return res;
 }
@@ -84,37 +106,32 @@ static int proc_ns_readlink(struct dentry *dentry, char __user *buffer, int bufl
 static const struct inode_operations proc_ns_link_inode_operations = {
 	.readlink	= proc_ns_readlink,
 	.get_link	= proc_ns_get_link,
-	.setattr	= proc_setattr,
+	.setattr	= proc_nochmod_setattr,
 };
 
-static int proc_ns_instantiate(struct inode *dir,
-	struct dentry *dentry, struct task_struct *task, const void *ptr)
+static struct dentry *proc_ns_instantiate(struct dentry *dentry,
+	struct task_struct *task, const void *ptr)
 {
 	const struct proc_ns_operations *ns_ops = ptr;
 	struct inode *inode;
 	struct proc_inode *ei;
 
-	inode = proc_pid_make_inode(dir->i_sb, task, S_IFLNK | S_IRWXUGO);
+	inode = proc_pid_make_inode(dentry->d_sb, task, S_IFLNK | S_IRWXUGO);
 	if (!inode)
-		goto out;
+		return ERR_PTR(-ENOENT);
 
 	ei = PROC_I(inode);
 	inode->i_op = &proc_ns_link_inode_operations;
 	ei->ns_ops = ns_ops;
+	pid_update_inode(task, inode);
 
-	d_set_d_op(dentry, &pid_dentry_operations);
-	d_add(dentry, inode);
-	/* Close the race of the process dying before we return the dentry */
-	if (pid_revalidate(dentry, 0))
-		return 0;
-out:
-	return -ENOENT;
+	return d_splice_alias_ops(inode, dentry, &pid_dentry_operations);
 }
 
 static int proc_ns_dir_readdir(struct file *file, struct dir_context *ctx)
 {
 	struct task_struct *task = get_proc_task(file_inode(file));
-	const struct proc_ns_operations **entry, **last;
+	const struct proc_ns_operations *const *entry, *const *last;
 
 	if (!task)
 		return -ENOENT;
@@ -147,12 +164,10 @@ const struct file_operations proc_ns_dir_operations = {
 static struct dentry *proc_ns_dir_lookup(struct inode *dir,
 				struct dentry *dentry, unsigned int flags)
 {
-	int error;
 	struct task_struct *task = get_proc_task(dir);
-	const struct proc_ns_operations **entry, **last;
+	const struct proc_ns_operations *const *entry, *const *last;
 	unsigned int len = dentry->d_name.len;
-
-	error = -ENOENT;
+	struct dentry *res = ERR_PTR(-ENOENT);
 
 	if (!task)
 		goto out_no_task;
@@ -167,15 +182,15 @@ static struct dentry *proc_ns_dir_lookup(struct inode *dir,
 	if (entry == last)
 		goto out;
 
-	error = proc_ns_instantiate(dir, dentry, task, *entry);
+	res = proc_ns_instantiate(dentry, task, *entry);
 out:
 	put_task_struct(task);
 out_no_task:
-	return ERR_PTR(error);
+	return res;
 }
 
 const struct inode_operations proc_ns_dir_inode_operations = {
 	.lookup		= proc_ns_dir_lookup,
 	.getattr	= pid_getattr,
-	.setattr	= proc_setattr,
+	.setattr	= proc_nochmod_setattr,
 };

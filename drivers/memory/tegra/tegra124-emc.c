@@ -1,38 +1,38 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2014, NVIDIA CORPORATION.  All rights reserved.
  *
  * Author:
  *	Mikko Perttunen <mperttunen@nvidia.com>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/clk-provider.h>
 #include <linux/clk.h>
 #include <linux/clkdev.h>
+#include <linux/clk/tegra.h>
 #include <linux/debugfs.h>
 #include <linux/delay.h>
+#include <linux/interconnect-provider.h>
+#include <linux/io.h>
+#include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
+#include <linux/pm_opp.h>
 #include <linux/sort.h>
 #include <linux/string.h>
 
-#include <soc/tegra/emc.h>
 #include <soc/tegra/fuse.h>
 #include <soc/tegra/mc.h>
+
+#include "mc.h"
+#include "tegra-emc-common.h"
 
 #define EMC_FBIO_CFG5				0x104
 #define	EMC_FBIO_CFG5_DRAM_TYPE_MASK		0x3
 #define	EMC_FBIO_CFG5_DRAM_TYPE_SHIFT		0
+#define EMC_FBIO_CFG5_DRAM_WIDTH_X64		BIT(4)
 
 #define EMC_INTSTATUS				0x0
 #define EMC_INTSTATUS_CLKCHANGE_COMPLETE	BIT(4)
@@ -273,8 +273,8 @@
 #define EMC_PUTERM_ADJ				0x574
 
 #define DRAM_DEV_SEL_ALL			0
-#define DRAM_DEV_SEL_0				(2 << 30)
-#define DRAM_DEV_SEL_1				(1 << 30)
+#define DRAM_DEV_SEL_0				BIT(31)
+#define DRAM_DEV_SEL_1				BIT(30)
 
 #define EMC_CFG_POWER_FEATURES_MASK		\
 	(EMC_CFG_DYN_SREF | EMC_CFG_DRAM_ACPD | EMC_CFG_DRAM_CLKSTOP_SR | \
@@ -475,12 +475,25 @@ struct tegra_emc {
 
 	void __iomem *regs;
 
+	struct clk *clk;
+
 	enum emc_dram_type dram_type;
+	unsigned int dram_bus_width;
 	unsigned int dram_num;
 
 	struct emc_timing last_timing;
 	struct emc_timing *timings;
 	unsigned int num_timings;
+
+	struct {
+		struct dentry *root;
+		unsigned long min_rate;
+		unsigned long max_rate;
+	} debugfs;
+
+	struct icc_provider provider;
+
+	struct tegra_emc_rate_requests reqs;
 };
 
 /* Timing change sequence functions */
@@ -541,8 +554,8 @@ static void emc_seq_wait_clkchange(struct tegra_emc *emc)
 	dev_err(emc->dev, "clock change timed out\n");
 }
 
-static struct emc_timing *tegra_emc_find_timing(struct tegra_emc *emc,
-						unsigned long rate)
+static struct emc_timing *tegra124_emc_find_timing(struct tegra_emc *emc,
+						   unsigned long rate)
 {
 	struct emc_timing *timing = NULL;
 	unsigned int i;
@@ -562,10 +575,10 @@ static struct emc_timing *tegra_emc_find_timing(struct tegra_emc *emc,
 	return timing;
 }
 
-int tegra_emc_prepare_timing_change(struct tegra_emc *emc,
-				    unsigned long rate)
+static int tegra124_emc_prepare_timing_change(struct tegra_emc *emc,
+					      unsigned long rate)
 {
-	struct emc_timing *timing = tegra_emc_find_timing(emc, rate);
+	struct emc_timing *timing = tegra124_emc_find_timing(emc, rate);
 	struct emc_timing *last = &emc->last_timing;
 	enum emc_dll_change dll_change;
 	unsigned int pre_wait = 0;
@@ -578,7 +591,7 @@ int tegra_emc_prepare_timing_change(struct tegra_emc *emc,
 
 	if ((last->emc_mode_1 & 0x1) == (timing->emc_mode_1 & 0x1))
 		dll_change = DLL_CHANGE_NONE;
-	else if (timing->emc_mode_1 & 0x1)
+	else if (!(timing->emc_mode_1 & 0x1))
 		dll_change = DLL_CHANGE_ON;
 	else
 		dll_change = DLL_CHANGE_OFF;
@@ -790,10 +803,10 @@ int tegra_emc_prepare_timing_change(struct tegra_emc *emc,
 	return 0;
 }
 
-void tegra_emc_complete_timing_change(struct tegra_emc *emc,
-				      unsigned long rate)
+static void tegra124_emc_complete_timing_change(struct tegra_emc *emc,
+						unsigned long rate)
 {
-	struct emc_timing *timing = tegra_emc_find_timing(emc, rate);
+	struct emc_timing *timing = tegra124_emc_find_timing(emc, rate);
 	struct emc_timing *last = &emc->last_timing;
 	u32 val;
 
@@ -866,17 +879,23 @@ static void emc_read_current_timing(struct tegra_emc *emc,
 	timing->emc_mode_reset = 0;
 }
 
-static int emc_init(struct tegra_emc *emc)
+static void emc_init(struct tegra_emc *emc)
 {
 	emc->dram_type = readl(emc->regs + EMC_FBIO_CFG5);
+
+	if (emc->dram_type & EMC_FBIO_CFG5_DRAM_WIDTH_X64)
+		emc->dram_bus_width = 64;
+	else
+		emc->dram_bus_width = 32;
+
+	dev_info_once(emc->dev, "%ubit DRAM bus\n", emc->dram_bus_width);
+
 	emc->dram_type &= EMC_FBIO_CFG5_DRAM_TYPE_MASK;
 	emc->dram_type >>= EMC_FBIO_CFG5_DRAM_TYPE_SHIFT;
 
 	emc->dram_num = tegra_mc_get_emem_device_count(emc->mc);
 
 	emc_read_current_timing(emc, &emc->last_timing);
-
-	return 0;
 }
 
 static int load_one_timing_from_dt(struct tegra_emc *emc,
@@ -888,8 +907,8 @@ static int load_one_timing_from_dt(struct tegra_emc *emc,
 
 	err = of_property_read_u32(node, "clock-frequency", &value);
 	if (err) {
-		dev_err(emc->dev, "timing %s: failed to read rate: %d\n",
-			node->name, err);
+		dev_err(emc->dev, "timing %pOFn: failed to read rate: %d\n",
+			node, err);
 		return err;
 	}
 
@@ -900,16 +919,16 @@ static int load_one_timing_from_dt(struct tegra_emc *emc,
 					 ARRAY_SIZE(timing->emc_burst_data));
 	if (err) {
 		dev_err(emc->dev,
-			"timing %s: failed to read emc burst data: %d\n",
-			node->name, err);
+			"timing %pOFn: failed to read emc burst data: %d\n",
+			node, err);
 		return err;
 	}
 
 #define EMC_READ_PROP(prop, dtprop) { \
 	err = of_property_read_u32(node, dtprop, &timing->prop); \
 	if (err) { \
-		dev_err(emc->dev, "timing %s: failed to read " #prop ": %d\n", \
-			node->name, err); \
+		dev_err(emc->dev, "timing %pOFn: failed to read " #prop ": %d\n", \
+			node, err); \
 		return err; \
 	} \
 }
@@ -950,11 +969,10 @@ static int cmp_timings(const void *_a, const void *_b)
 		return 1;
 }
 
-static int tegra_emc_load_timings_from_dt(struct tegra_emc *emc,
-					  struct device_node *node)
+static int tegra124_emc_load_timings_from_dt(struct tegra_emc *emc,
+					     struct device_node *node)
 {
 	int child_count = of_get_child_count(node);
-	struct device_node *child;
 	struct emc_timing *timing;
 	unsigned int i = 0;
 	int err;
@@ -966,14 +984,12 @@ static int tegra_emc_load_timings_from_dt(struct tegra_emc *emc,
 
 	emc->num_timings = child_count;
 
-	for_each_child_of_node(node, child) {
+	for_each_child_of_node_scoped(node, child) {
 		timing = &emc->timings[i++];
 
 		err = load_one_timing_from_dt(emc, timing, child);
-		if (err) {
-			of_node_put(child);
+		if (err)
 			return err;
-		}
 	}
 
 	sort(emc->timings, emc->num_timings, sizeof(*timing), cmp_timings,
@@ -982,13 +998,15 @@ static int tegra_emc_load_timings_from_dt(struct tegra_emc *emc,
 	return 0;
 }
 
-static const struct of_device_id tegra_emc_of_match[] = {
+static const struct of_device_id tegra124_emc_of_match[] = {
 	{ .compatible = "nvidia,tegra124-emc" },
+	{ .compatible = "nvidia,tegra132-emc" },
 	{}
 };
+MODULE_DEVICE_TABLE(of, tegra124_emc_of_match);
 
 static struct device_node *
-tegra_emc_find_node_by_ram_code(struct device_node *node, u32 ram_code)
+tegra124_emc_find_node_by_ram_code(struct device_node *node, u32 ram_code)
 {
 	struct device_node *np;
 	int err;
@@ -1006,38 +1024,51 @@ tegra_emc_find_node_by_ram_code(struct device_node *node, u32 ram_code)
 	return NULL;
 }
 
-/* Debugfs entry */
+/*
+ * debugfs interface
+ *
+ * The memory controller driver exposes some files in debugfs that can be used
+ * to control the EMC frequency. The top-level directory can be found here:
+ *
+ *   /sys/kernel/debug/emc
+ *
+ * It contains the following files:
+ *
+ *   - available_rates: This file contains a list of valid, space-separated
+ *     EMC frequencies.
+ *
+ *   - min_rate: Writing a value to this file sets the given frequency as the
+ *       floor of the permitted range. If this is higher than the currently
+ *       configured EMC frequency, this will cause the frequency to be
+ *       increased so that it stays within the valid range.
+ *
+ *   - max_rate: Similarily to the min_rate file, writing a value to this file
+ *       sets the given frequency as the ceiling of the permitted range. If
+ *       the value is lower than the currently configured EMC frequency, this
+ *       will cause the frequency to be decreased so that it stays within the
+ *       valid range.
+ */
 
-static int emc_debug_rate_get(void *data, u64 *rate)
+static bool tegra124_emc_validate_rate(struct tegra_emc *emc, unsigned long rate)
 {
-	struct clk *c = data;
+	unsigned int i;
 
-	*rate = clk_get_rate(c);
+	for (i = 0; i < emc->num_timings; i++)
+		if (rate == emc->timings[i].rate)
+			return true;
 
-	return 0;
+	return false;
 }
 
-static int emc_debug_rate_set(void *data, u64 rate)
-{
-	struct clk *c = data;
-
-	return clk_set_rate(c, rate);
-}
-
-DEFINE_SIMPLE_ATTRIBUTE(emc_debug_rate_fops, emc_debug_rate_get,
-			emc_debug_rate_set, "%lld\n");
-
-static int emc_debug_supported_rates_show(struct seq_file *s, void *data)
+static int tegra124_emc_debug_available_rates_show(struct seq_file *s,
+						   void *data)
 {
 	struct tegra_emc *emc = s->private;
 	const char *prefix = "";
 	unsigned int i;
 
 	for (i = 0; i < emc->num_timings; i++) {
-		struct emc_timing *timing = &emc->timings[i];
-
-		seq_printf(s, "%s%lu", prefix, timing->rate);
-
+		seq_printf(s, "%s%lu", prefix, emc->timings[i].rate);
 		prefix = " ";
 	}
 
@@ -1046,54 +1077,269 @@ static int emc_debug_supported_rates_show(struct seq_file *s, void *data)
 	return 0;
 }
 
-static int emc_debug_supported_rates_open(struct inode *inode,
-					  struct file *file)
+DEFINE_SHOW_ATTRIBUTE(tegra124_emc_debug_available_rates);
+
+static int tegra124_emc_debug_min_rate_get(void *data, u64 *rate)
 {
-	return single_open(file, emc_debug_supported_rates_show,
-			   inode->i_private);
+	struct tegra_emc *emc = data;
+
+	*rate = emc->debugfs.min_rate;
+
+	return 0;
 }
 
-static const struct file_operations emc_debug_supported_rates_fops = {
-	.open = emc_debug_supported_rates_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = single_release,
-};
+static int tegra124_emc_debug_min_rate_set(void *data, u64 rate)
+{
+	struct tegra_emc *emc = data;
+	int err;
+
+	if (!tegra124_emc_validate_rate(emc, rate))
+		return -EINVAL;
+
+	err = tegra_emc_set_min_rate(&emc->reqs, rate, TEGRA_EMC_RATE_DEBUG);
+	if (err < 0)
+		return err;
+
+	emc->debugfs.min_rate = rate;
+
+	return 0;
+}
+
+DEFINE_DEBUGFS_ATTRIBUTE(tegra124_emc_debug_min_rate_fops,
+			 tegra124_emc_debug_min_rate_get,
+			 tegra124_emc_debug_min_rate_set, "%llu\n");
+
+static int tegra124_emc_debug_max_rate_get(void *data, u64 *rate)
+{
+	struct tegra_emc *emc = data;
+
+	*rate = emc->debugfs.max_rate;
+
+	return 0;
+}
+
+static int tegra124_emc_debug_max_rate_set(void *data, u64 rate)
+{
+	struct tegra_emc *emc = data;
+	int err;
+
+	if (!tegra124_emc_validate_rate(emc, rate))
+		return -EINVAL;
+
+	err = tegra_emc_set_max_rate(&emc->reqs, rate, TEGRA_EMC_RATE_DEBUG);
+	if (err < 0)
+		return err;
+
+	emc->debugfs.max_rate = rate;
+
+	return 0;
+}
+
+DEFINE_DEBUGFS_ATTRIBUTE(tegra124_emc_debug_max_rate_fops,
+			 tegra124_emc_debug_max_rate_get,
+			 tegra124_emc_debug_max_rate_set, "%llu\n");
 
 static void emc_debugfs_init(struct device *dev, struct tegra_emc *emc)
 {
-	struct dentry *root, *file;
-	struct clk *clk;
+	unsigned int i;
+	int err;
 
-	root = debugfs_create_dir("emc", NULL);
-	if (!root) {
-		dev_err(dev, "failed to create debugfs directory\n");
+	emc->debugfs.min_rate = ULONG_MAX;
+	emc->debugfs.max_rate = 0;
+
+	for (i = 0; i < emc->num_timings; i++) {
+		if (emc->timings[i].rate < emc->debugfs.min_rate)
+			emc->debugfs.min_rate = emc->timings[i].rate;
+
+		if (emc->timings[i].rate > emc->debugfs.max_rate)
+			emc->debugfs.max_rate = emc->timings[i].rate;
+	}
+
+	if (!emc->num_timings) {
+		emc->debugfs.min_rate = clk_get_rate(emc->clk);
+		emc->debugfs.max_rate = emc->debugfs.min_rate;
+	}
+
+	err = clk_set_rate_range(emc->clk, emc->debugfs.min_rate,
+				 emc->debugfs.max_rate);
+	if (err < 0) {
+		dev_err(dev, "failed to set rate range [%lu-%lu] for %pC\n",
+			emc->debugfs.min_rate, emc->debugfs.max_rate,
+			emc->clk);
 		return;
 	}
 
-	clk = clk_get_sys("tegra-clk-debug", "emc");
-	if (IS_ERR(clk)) {
-		dev_err(dev, "failed to get debug clock: %ld\n", PTR_ERR(clk));
-		return;
-	}
+	emc->debugfs.root = debugfs_create_dir("emc", NULL);
 
-	file = debugfs_create_file("rate", S_IRUGO | S_IWUSR, root, clk,
-				   &emc_debug_rate_fops);
-	if (!file)
-		dev_err(dev, "failed to create debugfs entry\n");
-
-	file = debugfs_create_file("supported_rates", S_IRUGO, root, emc,
-				   &emc_debug_supported_rates_fops);
-	if (!file)
-		dev_err(dev, "failed to create debugfs entry\n");
+	debugfs_create_file("available_rates", 0444, emc->debugfs.root, emc,
+			    &tegra124_emc_debug_available_rates_fops);
+	debugfs_create_file("min_rate", 0644, emc->debugfs.root,
+			    emc, &tegra124_emc_debug_min_rate_fops);
+	debugfs_create_file("max_rate", 0644, emc->debugfs.root,
+			    emc, &tegra124_emc_debug_max_rate_fops);
 }
 
-static int tegra_emc_probe(struct platform_device *pdev)
+static inline struct tegra_emc *
+to_tegra_emc_provider(struct icc_provider *provider)
 {
-	struct platform_device *mc;
+	return container_of(provider, struct tegra_emc, provider);
+}
+
+static struct icc_node_data *
+emc_of_icc_xlate_extended(const struct of_phandle_args *spec, void *data)
+{
+	struct icc_provider *provider = data;
+	struct icc_node_data *ndata;
+	struct icc_node *node;
+
+	/* External Memory is the only possible ICC route */
+	list_for_each_entry(node, &provider->nodes, node_list) {
+		if (node->id != TEGRA_ICC_EMEM)
+			continue;
+
+		ndata = kzalloc_obj(*ndata);
+		if (!ndata)
+			return ERR_PTR(-ENOMEM);
+
+		/*
+		 * SRC and DST nodes should have matching TAG in order to have
+		 * it set by default for a requested path.
+		 */
+		ndata->tag = TEGRA_MC_ICC_TAG_ISO;
+		ndata->node = node;
+
+		return ndata;
+	}
+
+	return ERR_PTR(-EPROBE_DEFER);
+}
+
+static int emc_icc_set(struct icc_node *src, struct icc_node *dst)
+{
+	struct tegra_emc *emc = to_tegra_emc_provider(dst->provider);
+	unsigned long long peak_bw = icc_units_to_bps(dst->peak_bw);
+	unsigned long long avg_bw = icc_units_to_bps(dst->avg_bw);
+	unsigned long long rate = max(avg_bw, peak_bw);
+	unsigned int dram_data_bus_width_bytes;
+	const unsigned int ddr = 2;
+	int err;
+
+	/*
+	 * Tegra124 EMC runs on a clock rate of SDRAM bus. This means that
+	 * EMC clock rate is twice smaller than the peak data rate because
+	 * data is sampled on both EMC clock edges.
+	 */
+	dram_data_bus_width_bytes = emc->dram_bus_width / 8;
+	do_div(rate, ddr * dram_data_bus_width_bytes);
+	rate = min_t(u64, rate, U32_MAX);
+
+	err = tegra_emc_set_min_rate(&emc->reqs, rate, TEGRA_EMC_RATE_ICC);
+	if (err)
+		return err;
+
+	return 0;
+}
+
+static int tegra124_emc_interconnect_init(struct tegra_emc *emc)
+{
+	const struct tegra_mc_soc *soc = emc->mc->soc;
+	struct icc_node *node;
+	int err;
+
+	emc->provider.dev = emc->dev;
+	emc->provider.set = emc_icc_set;
+	emc->provider.data = &emc->provider;
+	emc->provider.aggregate = soc->icc_ops->aggregate;
+	emc->provider.xlate_extended = emc_of_icc_xlate_extended;
+
+	icc_provider_init(&emc->provider);
+
+	/* create External Memory Controller node */
+	node = icc_node_create(TEGRA_ICC_EMC);
+	if (IS_ERR(node))
+		return PTR_ERR(node);
+
+	node->name = "External Memory Controller";
+	icc_node_add(node, &emc->provider);
+
+	/* link External Memory Controller to External Memory (DRAM) */
+	err = icc_link_create(node, TEGRA_ICC_EMEM);
+	if (err)
+		goto remove_nodes;
+
+	/* create External Memory node */
+	node = icc_node_create(TEGRA_ICC_EMEM);
+	if (IS_ERR(node)) {
+		err = PTR_ERR(node);
+		goto remove_nodes;
+	}
+
+	node->name = "External Memory (DRAM)";
+	icc_node_add(node, &emc->provider);
+
+	err = icc_provider_register(&emc->provider);
+	if (err)
+		goto remove_nodes;
+
+	return 0;
+
+remove_nodes:
+	icc_nodes_remove(&emc->provider);
+
+	return dev_err_probe(emc->dev, err, "failed to initialize ICC\n");
+}
+
+static int tegra124_emc_opp_table_init(struct tegra_emc *emc)
+{
+	u32 hw_version = BIT(tegra_sku_info.soc_speedo_id);
+	int opp_token, err;
+
+	err = dev_pm_opp_set_supported_hw(emc->dev, &hw_version, 1);
+	if (err < 0)
+		return dev_err_probe(emc->dev, err, "failed to set OPP supported HW\n");
+
+	opp_token = err;
+
+	err = dev_pm_opp_of_add_table(emc->dev);
+	if (err) {
+		if (err == -ENODEV)
+			dev_err_probe(emc->dev, err,
+				      "OPP table not found, please update your device tree\n");
+		else
+			dev_err_probe(emc->dev, err, "failed to add OPP table\n");
+
+		goto put_hw_table;
+	}
+
+	dev_info_once(emc->dev, "OPP HW ver. 0x%x, current clock rate %lu MHz\n",
+		      hw_version, clk_get_rate(emc->clk) / 1000000);
+
+	/* first dummy rate-set initializes voltage state */
+	err = dev_pm_opp_set_rate(emc->dev, clk_get_rate(emc->clk));
+	if (err) {
+		dev_err_probe(emc->dev, err, "failed to initialize OPP clock\n");
+		goto remove_table;
+	}
+
+	return 0;
+
+remove_table:
+	dev_pm_opp_of_remove_table(emc->dev);
+put_hw_table:
+	dev_pm_opp_put_supported_hw(opp_token);
+
+	return err;
+}
+
+static void devm_tegra124_emc_unset_callback(void *data)
+{
+	tegra124_clk_set_emc_callbacks(NULL, NULL);
+}
+
+static int tegra124_emc_probe(struct platform_device *pdev)
+{
 	struct device_node *np;
 	struct tegra_emc *emc;
-	struct resource *res;
 	u32 ram_code;
 	int err;
 
@@ -1103,73 +1349,77 @@ static int tegra_emc_probe(struct platform_device *pdev)
 
 	emc->dev = &pdev->dev;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	emc->regs = devm_ioremap_resource(&pdev->dev, res);
+	emc->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(emc->regs))
 		return PTR_ERR(emc->regs);
 
-	np = of_parse_phandle(pdev->dev.of_node, "nvidia,memory-controller", 0);
-	if (!np) {
-		dev_err(&pdev->dev, "could not get memory controller\n");
-		return -ENOENT;
-	}
-
-	mc = of_find_device_by_node(np);
-	of_node_put(np);
-	if (!mc)
-		return -ENOENT;
-
-	emc->mc = platform_get_drvdata(mc);
-	if (!emc->mc)
-		return -EPROBE_DEFER;
+	emc->mc = devm_tegra_memory_controller_get(&pdev->dev);
+	if (IS_ERR(emc->mc))
+		return PTR_ERR(emc->mc);
 
 	ram_code = tegra_read_ram_code();
 
-	np = tegra_emc_find_node_by_ram_code(pdev->dev.of_node, ram_code);
-	if (!np) {
-		dev_err(&pdev->dev,
-			"no memory timings for RAM code %u found in DT\n",
-			ram_code);
-		return -ENOENT;
+	np = tegra124_emc_find_node_by_ram_code(pdev->dev.of_node, ram_code);
+	if (np) {
+		err = tegra124_emc_load_timings_from_dt(emc, np);
+		of_node_put(np);
+		if (err)
+			return err;
+	} else {
+		dev_info_once(&pdev->dev,
+			      "no memory timings for RAM code %u found in DT\n",
+			      ram_code);
 	}
 
-	err = tegra_emc_load_timings_from_dt(emc, np);
-	of_node_put(np);
+	emc_init(emc);
+
+	platform_set_drvdata(pdev, emc);
+
+	tegra124_clk_set_emc_callbacks(tegra124_emc_prepare_timing_change,
+				       tegra124_emc_complete_timing_change);
+
+	err = devm_add_action_or_reset(&pdev->dev, devm_tegra124_emc_unset_callback,
+				       NULL);
 	if (err)
 		return err;
 
-	if (emc->num_timings == 0) {
-		dev_err(&pdev->dev,
-			"no memory timings for RAM code %u registered\n",
-			ram_code);
-		return -ENOENT;
-	}
+	emc->clk = devm_clk_get(&pdev->dev, "emc");
+	if (IS_ERR(emc->clk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(emc->clk),
+				     "failed to get EMC clock\n");
 
-	err = emc_init(emc);
-	if (err) {
-		dev_err(&pdev->dev, "EMC initialization failed: %d\n", err);
+	err = tegra124_emc_opp_table_init(emc);
+	if (err)
 		return err;
-	}
 
-	platform_set_drvdata(pdev, emc);
+	tegra_emc_rate_requests_init(&emc->reqs, &pdev->dev);
 
 	if (IS_ENABLED(CONFIG_DEBUG_FS))
 		emc_debugfs_init(&pdev->dev, emc);
 
+	tegra124_emc_interconnect_init(emc);
+
+	/*
+	 * Don't allow the kernel module to be unloaded. Unloading adds some
+	 * extra complexity which doesn't really worth the effort in a case of
+	 * this driver.
+	 */
+	try_module_get(THIS_MODULE);
+
 	return 0;
 };
 
-static struct platform_driver tegra_emc_driver = {
-	.probe = tegra_emc_probe,
+static struct platform_driver tegra124_emc_driver = {
+	.probe = tegra124_emc_probe,
 	.driver = {
 		.name = "tegra-emc",
-		.of_match_table = tegra_emc_of_match,
+		.of_match_table = tegra124_emc_of_match,
 		.suppress_bind_attrs = true,
+		.sync_state = icc_sync_state,
 	},
 };
+module_platform_driver(tegra124_emc_driver);
 
-static int tegra_emc_init(void)
-{
-	return platform_driver_register(&tegra_emc_driver);
-}
-subsys_initcall(tegra_emc_init);
+MODULE_AUTHOR("Mikko Perttunen <mperttunen@nvidia.com>");
+MODULE_DESCRIPTION("NVIDIA Tegra124 EMC driver");
+MODULE_LICENSE("GPL v2");

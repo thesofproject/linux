@@ -11,6 +11,7 @@
 #include <asm/asm-offsets.h>
 #include <asm/page.h>
 #include <asm/sigp.h>
+#include <asm/ptrace.h>
 
 /* The purgatory is the code running between two kernels. It's main purpose
  * is to verify that the next kernel was not corrupted after load and to
@@ -43,11 +44,14 @@
 .endm
 
 .macro MEMSWAP dst,src,buf,len
-10:	cghi	\len,bufsz
+10:	larl	%r0,purgatory_end
+	larl	%r1,stack
+	slgr	%r0,%r1
+	cgr	\len,%r0
 	jh	11f
 	lgr	%r4,\len
 	j	12f
-11:	lghi	%r4,bufsz
+11:	lgr	%r4,%r0
 
 12:	MEMCPY	\buf,\dst,%r4
 	MEMCPY	\dst,\src,%r4
@@ -61,19 +65,20 @@
 	jh	10b
 .endm
 
-.macro START_NEXT_KERNEL base
+.macro START_NEXT_KERNEL base subcode
 	lg	%r4,kernel_entry-\base(%r13)
 	lg	%r5,load_psw_mask-\base(%r13)
 	ogr	%r4,%r5
 	stg	%r4,0(%r0)
 
 	xgr	%r0,%r0
-	diag	%r0,%r0,0x308
+	lghi	%r1,\subcode
+	diag	%r0,%r1,0x308
 .endm
 
-.text
-.align PAGE_SIZE
-ENTRY(purgatory_start)
+	.text
+	.balign PAGE_SIZE
+SYM_CODE_START(purgatory_start)
 	/* The purgatory might be called after a diag308 so better set
 	 * architecture and addressing mode.
 	 */
@@ -88,15 +93,14 @@ ENTRY(purgatory_start)
 .base_crash:
 
 	/* Setup stack */
-	larl	%r15,purgatory_end
-	aghi	%r15,-160
+	larl	%r15,purgatory_end-STACK_FRAME_OVERHEAD
 
 	/* If the next kernel is KEXEC_TYPE_CRASH the purgatory is called
 	 * directly with a flag passed in %r2 whether the purgatory shall do
 	 * checksum verification only (%r2 = 0 -> verification only).
 	 *
 	 * Check now and preserve over C function call by storing in
-	 * %r10 whith
+	 * %r10 with
 	 *	1 -> checksum verification only
 	 *	0 -> load new kernel
 	 */
@@ -123,7 +127,7 @@ ENTRY(purgatory_start)
 	je	.start_crash_kernel
 
 	/* start normal kernel */
-	START_NEXT_KERNEL .base_crash
+	START_NEXT_KERNEL .base_crash 0
 
 .return_old_kernel:
 	lmg	%r6,%r15,gprregs-.base_crash(%r13)
@@ -134,29 +138,39 @@ ENTRY(purgatory_start)
 
 .start_crash_kernel:
 	/* Location of purgatory_start in crash memory */
+	larl	%r0,.base_crash
+	larl	%r1,purgatory_start
+	slgr	%r0,%r1
 	lgr	%r8,%r13
-	aghi	%r8,-(.base_crash-purgatory_start)
+	sgr	%r8,%r0
 
 	/* Destination for this code i.e. end of memory to be swapped. */
+	larl	%r0,purgatory_end
+	larl	%r1,purgatory_start
+	slgr	%r0,%r1
 	lg	%r9,crash_size-.base_crash(%r13)
-	aghi	%r9,-(purgatory_end-purgatory_start)
+	sgr	%r9,%r0
 
 	/* Destination in crash memory, i.e. same as r9 but in crash memory. */
 	lg	%r10,crash_start-.base_crash(%r13)
 	agr	%r10,%r9
 
 	/* Buffer location (in crash memory) and size. As the purgatory is
-	 * behind the point of no return it can re-use the stack as buffer.
+	 * behind the point of no return it can reuse the stack as buffer.
 	 */
-	lghi	%r11,bufsz
+	larl	%r11,purgatory_end
 	larl	%r12,stack
+	slgr	%r11,%r12
 
 	MEMCPY	%r12,%r9,%r11	/* dst	-> (crash) buf */
 	MEMCPY	%r9,%r8,%r11	/* self -> dst */
 
 	/* Jump to new location. */
 	lgr	%r7,%r9
-	aghi	%r7,.jump_to_dst-purgatory_start
+	larl	%r0,.jump_to_dst
+	larl	%r1,purgatory_start
+	slgr	%r0,%r1
+	agr	%r7,%r0
 	br	%r7
 
 .jump_to_dst:
@@ -168,7 +182,10 @@ ENTRY(purgatory_start)
 
 	/* Load new buffer location after jump */
 	larl	%r7,stack
-	aghi	%r10,stack-purgatory_start
+	lgr	%r0,%r7
+	larl	%r1,purgatory_start
+	slgr	%r0,%r1
+	agr	%r10,%r0
 	MEMCPY	%r10,%r7,%r11	/* (new) buf -> (crash) buf */
 
 	/* Now the code is set up to run from its designated location. Start
@@ -227,53 +244,22 @@ ENTRY(purgatory_start)
 	MEMCPY	%r9,%r10,%r11
 
 	/* start crash kernel */
-	START_NEXT_KERNEL .base_dst
+	START_NEXT_KERNEL .base_dst 1
+SYM_CODE_END(purgatory_start)
 
-
-load_psw_mask:
-	.long	0x00080000,0x80000000
-
-	.align	8
-disabled_wait_psw:
-	.quad	0x0002000180000000
-	.quad	0x0000000000000000 + .do_checksum_verification
-
-gprregs:
-	.rept	10
-	.quad	0
-	.endr
-
-purgatory_sha256_digest:
-	.global purgatory_sha256_digest
-	.rept	32	/* SHA256_DIGEST_SIZE */
-	.byte	0
-	.endr
-
-purgatory_sha_regions:
-	.global purgatory_sha_regions
-	.rept	16 * __KEXEC_SHA_REGION_SIZE	/* KEXEC_SEGMENTS_MAX */
-	.byte	0
-	.endr
-
-kernel_entry:
-	.global kernel_entry
-	.quad	0
-
-kernel_type:
-	.global kernel_type
-	.quad	0
-
-crash_start:
-	.global crash_start
-	.quad	0
-
-crash_size:
-	.global crash_size
-	.quad	0
-
-	.align	PAGE_SIZE
-stack:
+SYM_DATA_LOCAL(load_psw_mask,		.long 0x00080000,0x80000000)
+	.balign	8
+SYM_DATA_LOCAL(disabled_wait_psw,	.quad 0x0002000180000000,.do_checksum_verification)
+SYM_DATA_LOCAL(gprregs,			.fill 10,8,0)
+SYM_DATA(purgatory_sha256_digest,	.skip 32)
+SYM_DATA(purgatory_sha_regions,		.skip 16*__KEXEC_SHA_REGION_SIZE)
+SYM_DATA(kernel_entry,			.skip 8)
+SYM_DATA(kernel_type,			.skip 8)
+SYM_DATA(crash_start,			.skip 8)
+SYM_DATA(crash_size,			.skip 8)
+	.balign	PAGE_SIZE
+SYM_DATA_START_LOCAL(stack)
 	/* The buffer to move this code must be as big as the code. */
 	.skip	stack-purgatory_start
-	.align	PAGE_SIZE
-purgatory_end:
+	.balign	PAGE_SIZE
+SYM_DATA_END_LABEL(stack, SYM_L_LOCAL, purgatory_end)

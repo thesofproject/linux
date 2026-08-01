@@ -473,13 +473,6 @@ static inline void sci_swab32_cpy(void *_dest, void *_src, ssize_t word_cnt)
 		dest[word_cnt] = swab32(src[word_cnt]);
 }
 
-extern unsigned char no_outbound_task_to;
-extern u16 ssp_max_occ_to;
-extern u16 stp_max_occ_to;
-extern u16 ssp_inactive_to;
-extern u16 stp_inactive_to;
-extern unsigned char phy_gen;
-extern unsigned char max_concurr_spinup;
 extern uint cable_selection_override;
 
 irqreturn_t isci_msix_isr(int vec, void *data);
@@ -488,9 +481,9 @@ irqreturn_t isci_error_isr(int vec, void *data);
 
 /*
  * Each timer is associated with a cancellation flag that is set when
- * del_timer() is called and checked in the timer callback function. This
- * is needed since del_timer_sync() cannot be called with sci_lock held.
- * For deinit however, del_timer_sync() is used without holding the lock.
+ * timer_delete() is called and checked in the timer callback function. This
+ * is needed since timer_delete_sync() cannot be called with sci_lock held.
+ * For deinit however, timer_delete_sync() is used without holding the lock.
  */
 struct sci_timer {
 	struct timer_list	timer;
@@ -500,20 +493,20 @@ struct sci_timer {
 static inline
 void sci_init_timer(struct sci_timer *tmr, void (*fn)(struct timer_list *t))
 {
-	tmr->cancel = 0;
+	tmr->cancel = false;
 	timer_setup(&tmr->timer, fn, 0);
 }
 
 static inline void sci_mod_timer(struct sci_timer *tmr, unsigned long msec)
 {
-	tmr->cancel = 0;
+	tmr->cancel = false;
 	mod_timer(&tmr->timer, jiffies + msecs_to_jiffies(msec));
 }
 
 static inline void sci_del_timer(struct sci_timer *tmr)
 {
-	tmr->cancel = 1;
-	del_timer(&tmr->timer);
+	tmr->cancel = true;
+	timer_delete(&tmr->timer);
 }
 
 struct sci_base_state_machine {

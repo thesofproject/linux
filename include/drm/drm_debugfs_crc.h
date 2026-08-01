@@ -22,13 +22,19 @@
 #ifndef __DRM_DEBUGFS_CRC_H__
 #define __DRM_DEBUGFS_CRC_H__
 
+#include <linux/spinlock_types.h>
+#include <linux/types.h>
+#include <linux/wait.h>
+
+struct drm_crtc;
+
 #define DRM_MAX_CRC_NR		10
 
 /**
  * struct drm_crtc_crc_entry - entry describing a frame's content
  * @has_frame_counter: whether the source was able to provide a frame number
  * @frame: number of the frame this CRC is about, if @has_frame_counter is true
- * @crc: array of values that characterize the frame
+ * @crcs: array of values that characterize the frame
  */
 struct drm_crtc_crc_entry {
 	bool has_frame_counter;
@@ -43,6 +49,7 @@ struct drm_crtc_crc_entry {
  * @lock: protects the fields in this struct
  * @source: name of the currently configured source of CRCs
  * @opened: whether userspace has opened the data file for reading
+ * @overflow: whether an overflow occurred
  * @entries: array of entries, with size of %DRM_CRC_ENTRIES_NR
  * @head: head of circular queue
  * @tail: tail of circular queue
@@ -52,7 +59,7 @@ struct drm_crtc_crc_entry {
 struct drm_crtc_crc {
 	spinlock_t lock;
 	const char *source;
-	bool opened;
+	bool opened, overflow;
 	struct drm_crtc_crc_entry *entries;
 	int head, tail;
 	size_t values_cnt;

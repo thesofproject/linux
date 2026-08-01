@@ -1,13 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel 7300 class Memory Controllers kernel module (Clarksboro)
- *
- * This file may be distributed under the terms of the
- * GNU General Public License version 2 only.
  *
  * Copyright (c) 2010 by:
  *	 Mauro Carvalho Chehab
  *
- * Red Hat Inc. http://www.redhat.com
+ * Red Hat Inc. https://www.redhat.com
  *
  * Intel 7300 Chipset Memory Controller Hub (MCH) - Datasheet
  *	http://www.intel.com/Assets/PDF/datasheet/318082.pdf
@@ -25,6 +23,7 @@
 #include <linux/slab.h>
 #include <linux/edac.h>
 #include <linux/mmzone.h>
+#include <linux/string_choices.h>
 
 #include "edac_module.h"
 
@@ -112,6 +111,9 @@ struct i7300_pvt {
 
 	/* Temporary buffer for use when preparing error messages */
 	char *tmp_prt_buffer;
+
+	/* Hardware error reporting status */
+	bool enabled_error_reporting;
 };
 
 /* FIXME: Why do we need to have this static? */
@@ -551,11 +553,12 @@ static void i7300_clear_error(struct mem_ctl_info *mci)
 }
 
 /**
- * i7300_enable_error_reporting() - Enable the memory reporting logic at the
+ * i7300_set_error_reporting() - Enable or disable the memory reporting logic at the
  *				    hardware
  * @mci: struct mem_ctl_info pointer
+ * @enable: enables if 'true', disables if 'false'
  */
-static void i7300_enable_error_reporting(struct mem_ctl_info *mci)
+static void i7300_set_error_reporting(struct mem_ctl_info *mci, bool enable)
 {
 	struct i7300_pvt *pvt = mci->pvt_info;
 	u32 fbd_error_mask;
@@ -564,8 +567,11 @@ static void i7300_enable_error_reporting(struct mem_ctl_info *mci)
 	pci_read_config_dword(pvt->pci_dev_16_1_fsb_addr_map,
 			      EMASK_FBD, &fbd_error_mask);
 
-	/* Enable with a '0' */
-	fbd_error_mask &= ~(EMASK_FBD_ERR_MASK);
+	/* Enable with 0, disable with 1 */
+	if (enable)
+		fbd_error_mask &= ~(EMASK_FBD_ERR_MASK);
+	else
+		fbd_error_mask |= EMASK_FBD_ERR_MASK;
 
 	pci_write_config_dword(pvt->pci_dev_16_1_fsb_addr_map,
 			       EMASK_FBD, fbd_error_mask);
@@ -582,7 +588,7 @@ static void i7300_enable_error_reporting(struct mem_ctl_info *mci)
  * @ch: Channel number within the branch (0 or 1)
  * @branch: Branch number (0 or 1)
  * @dinfo: Pointer to DIMM info where dimm size is stored
- * @p_csrow: Pointer to the struct csrow_info that corresponds to that element
+ * @dimm: Pointer to the struct dimm_info that corresponds to that element
  */
 static int decode_mtr(struct i7300_pvt *pvt,
 		      int slot, int ch, int branch,
@@ -622,7 +628,7 @@ static int decode_mtr(struct i7300_pvt *pvt,
 	edac_dbg(2, "\t\tWIDTH: x%d\n", MTR_DRAM_WIDTH(mtr));
 
 	edac_dbg(2, "\t\tELECTRICAL THROTTLING is %s\n",
-		 MTR_DIMMS_ETHROTTLE(mtr) ? "enabled" : "disabled");
+		 str_enabled_disabled(MTR_DIMMS_ETHROTTLE(mtr)));
 
 	edac_dbg(2, "\t\tNUMBANK: %d bank(s)\n", MTR_DRAM_BANKS(mtr));
 	edac_dbg(2, "\t\tNUMRANK: %s\n",
@@ -796,8 +802,7 @@ static int i7300_init_csrows(struct mem_ctl_info *mci)
 			for (ch = 0; ch < max_channel; ch++) {
 				int channel = to_channel(ch, branch);
 
-				dimm = EDAC_DIMM_PTR(mci->layers, mci->dimms,
-					       mci->n_layers, branch, ch, slot);
+				dimm = edac_get_dimm(mci, branch, ch, slot);
 
 				dinfo = &pvt->dimm_info[slot][channel];
 
@@ -819,7 +824,7 @@ static int i7300_init_csrows(struct mem_ctl_info *mci)
 
 /**
  * decode_mir() - Decodes Memory Interleave Register (MIR) info
- * @int mir_no: number of the MIR register to decode
+ * @mir_no: number of the MIR register to decode
  * @mir: array with the MIR data cached on the driver
  */
 static void decode_mir(int mir_no, u16 mir[MAX_MIR])
@@ -874,9 +879,9 @@ static int i7300_get_mc_regs(struct mem_ctl_info *mci)
 			 IS_MIRRORED(pvt->mc_settings) ? "" : "non-");
 
 	edac_dbg(0, "Error detection is %s\n",
-		 IS_ECC_ENABLED(pvt->mc_settings) ? "enabled" : "disabled");
+		 str_enabled_disabled(IS_ECC_ENABLED(pvt->mc_settings)));
 	edac_dbg(0, "Retry is %s\n",
-		 IS_RETRY_ENABLED(pvt->mc_settings) ? "enabled" : "disabled");
+		 str_enabled_disabled(IS_RETRY_ENABLED(pvt->mc_settings)));
 
 	/* Get Memory Interleave Range registers */
 	pci_read_config_word(pvt->pci_dev_16_1_fsb_addr_map, MIR0,
@@ -1089,17 +1094,19 @@ static int i7300_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (i7300_get_mc_regs(mci)) {
 		edac_dbg(0, "MC: Setting mci->edac_cap to EDAC_FLAG_NONE because i7300_init_csrows() returned nonzero value\n");
 		mci->edac_cap = EDAC_FLAG_NONE;	/* no csrows found */
+		pvt->enabled_error_reporting = false;
 	} else {
 		edac_dbg(1, "MC: Enable error reporting now\n");
-		i7300_enable_error_reporting(mci);
+		i7300_set_error_reporting(mci, true);
+		pvt->enabled_error_reporting = true;
 	}
 
 	/* add this new MC control structure to EDAC's list of MCs */
 	if (edac_mc_add_mc(mci)) {
 		edac_dbg(0, "MC: failed edac_mc_add_mc()\n");
-		/* FIXME: perhaps some code should go here that disables error
-		 * reporting if we just enabled it
-		 */
+		/* Disable error reporting if we just enabled it */
+		if (pvt->enabled_error_reporting)
+			i7300_set_error_reporting(mci, false);
 		goto fail1;
 	}
 
@@ -1136,6 +1143,7 @@ fail0:
 static void i7300_remove_one(struct pci_dev *pdev)
 {
 	struct mem_ctl_info *mci;
+	struct i7300_pvt *pvt;
 	char *tmp;
 
 	edac_dbg(0, "\n");
@@ -1147,7 +1155,12 @@ static void i7300_remove_one(struct pci_dev *pdev)
 	if (!mci)
 		return;
 
-	tmp = ((struct i7300_pvt *)mci->pvt_info)->tmp_prt_buffer;
+	pvt = (struct i7300_pvt *)mci->pvt_info;
+	tmp = pvt->tmp_prt_buffer;
+
+	/* Disable error reporting before unregistering device */
+	if (pvt->enabled_error_reporting)
+		i7300_set_error_reporting(mci, false);
 
 	/* retrieve references to resources, and free those resources */
 	i7300_put_devices(mci);
@@ -1196,7 +1209,7 @@ static int __init i7300_init(void)
 }
 
 /**
- * i7300_init() - Unregisters the driver
+ * i7300_exit() - Unregisters the driver
  */
 static void __exit i7300_exit(void)
 {
@@ -1209,7 +1222,7 @@ module_exit(i7300_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Mauro Carvalho Chehab");
-MODULE_AUTHOR("Red Hat Inc. (http://www.redhat.com)");
+MODULE_AUTHOR("Red Hat Inc. (https://www.redhat.com)");
 MODULE_DESCRIPTION("MC Driver for Intel I7300 memory controllers - "
 		   I7300_REVISION);
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  ebt_snat
  *
@@ -21,7 +22,7 @@ ebt_snat_tg(struct sk_buff *skb, const struct xt_action_param *par)
 {
 	const struct ebt_nat_info *info = par->targinfo;
 
-	if (!skb_make_writable(skb, 0))
+	if (skb_ensure_writable(skb, 0))
 		return EBT_DROP;
 
 	ether_addr_copy(eth_hdr(skb)->h_source, info->mac);
@@ -29,6 +30,9 @@ ebt_snat_tg(struct sk_buff *skb, const struct xt_action_param *par)
 	    eth_hdr(skb)->h_proto == htons(ETH_P_ARP)) {
 		const struct arphdr *ap;
 		struct arphdr _ah;
+
+		if (skb_ensure_writable(skb, sizeof(_ah) + ETH_ALEN))
+			return EBT_DROP;
 
 		ap = skb_header_pointer(skb, 0, sizeof(_ah), &_ah);
 		if (ap == NULL)

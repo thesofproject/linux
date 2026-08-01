@@ -10,14 +10,11 @@
 #include <asm/pal.h>
 #include <asm/errno.h>
 #include <asm/unistd.h>
+#include <linux/errno.h>
 
 	.text
 	.set noat
 	.cfi_sections	.debug_frame
-
-/* Stack offsets.  */
-#define SP_OFF			184
-#define SWITCH_STACK_SIZE	320
 
 .macro	CFI_START_OSF_FRAME	func
 	.align	4
@@ -38,6 +35,64 @@
 	.cfi_endproc
 	.size	\func, . - \func
 .endm
+
+/*
+ * SYSCALL_SKIP_RETURN_RESTART_GATE
+ *
+ * Used when syscall dispatch is skipped (seccomp/ptrace injected nr=-1).
+ *  - Ensure we never return r0==-1 with a3==0 (success); convert to ENOSYS.
+ *  - Gate whether syscall restart is allowed by preserving restart context
+ *    only for ERESTART* returns. Result:
+ *        $26 = 0  => restart allowed
+ *        $26 = 1  => restart NOT allowed
+ *        $18 = preserved syscall nr (regs->r2) if restart allowed, else 0
+ */
+.macro  SYSCALL_SKIP_RETURN_RESTART_GATE
+	/* Fix up invalid "-1 success" return state. */
+	ldq	$19, 72($sp)		/* a3 */
+	bne	$19, 1f			/* already error => skip fixup */
+
+	ldq	$20, 0($sp)		/* r0 */
+	lda	$21, -1($31)
+	cmpeq	$20, $21, $22
+	beq	$22, 1f			/* r0 != -1 => skip fixup */
+
+
+	lda	$20, ENOSYS($31)
+	stq	$20, 0($sp)		/* r0 = ENOSYS */
+	lda	$19, 1($31)
+	stq	$19, 72($sp)		/* a3 = 1 */
+1:
+	/* Restart gating: success is never restartable here. */
+	ldq	$19, 72($sp)		/* a3 */
+	beq	$19, 3f			/* success => not restartable */
+
+	ldq	$20, 0($sp)		/* r0 (positive errno if a3==1) */
+	lda	$21, ERESTARTSYS($31)
+	cmpeq	$20, $21, $22
+	bne	$22, 2f
+	lda	$21, ERESTARTNOINTR($31)
+	cmpeq	$20, $21, $22
+	bne	$22, 2f
+	lda	$21, ERESTARTNOHAND($31)
+	cmpeq	$20, $21, $22
+	bne	$22, 2f
+	lda	$21, ERESTART_RESTARTBLOCK($31)
+	cmpeq	$20, $21, $22
+	bne	$22, 2f
+
+3:	/* Not a restart code (or success) => restart NOT allowed. */
+	addq	$31, 1, $26		/* $26=1 => restart NOT allowed */
+	mov	0, $18
+	br	4f
+
+2:	/* Restart allowed. */
+	ldq	$18, 16($sp)		/* preserved syscall nr (regs->r2) */
+	mov	$31, $26		/* $26=0 => restart allowed */
+	br	4f
+4:
+.endm
+
 
 /*
  * This defines the normal kernel pt-regs layout.
@@ -159,7 +214,6 @@
 	.cfi_rel_offset	$13, 32
 	.cfi_rel_offset	$14, 40
 	.cfi_rel_offset	$15, 48
-	/* We don't really care about the FP registers for debugging.  */
 .endm
 
 .macro	UNDO_SWITCH_STACK
@@ -199,8 +253,8 @@ CFI_END_OSF_FRAME entArith
 CFI_START_OSF_FRAME entMM
 	SAVE_ALL
 /* save $9 - $15 so the inline exception code can manipulate them.  */
-	subq	$sp, 56, $sp
-	.cfi_adjust_cfa_offset	56
+	subq	$sp, 64, $sp
+	.cfi_adjust_cfa_offset	64
 	stq	$9, 0($sp)
 	stq	$10, 8($sp)
 	stq	$11, 16($sp)
@@ -215,7 +269,7 @@ CFI_START_OSF_FRAME entMM
 	.cfi_rel_offset	$13, 32
 	.cfi_rel_offset	$14, 40
 	.cfi_rel_offset	$15, 48
-	addq	$sp, 56, $19
+	addq	$sp, 64, $19
 /* handle the fault */
 	lda	$8, 0x3fff
 	bic	$sp, $8, $8
@@ -228,7 +282,7 @@ CFI_START_OSF_FRAME entMM
 	ldq	$13, 32($sp)
 	ldq	$14, 40($sp)
 	ldq	$15, 48($sp)
-	addq	$sp, 56, $sp
+	addq	$sp, 64, $sp
 	.cfi_restore	$9
 	.cfi_restore	$10
 	.cfi_restore	$11
@@ -236,7 +290,7 @@ CFI_START_OSF_FRAME entMM
 	.cfi_restore	$13
 	.cfi_restore	$14
 	.cfi_restore	$15
-	.cfi_adjust_cfa_offset	-56
+	.cfi_adjust_cfa_offset	-64
 /* finish up the syscall as normal.  */
 	br	ret_from_sys_call
 CFI_END_OSF_FRAME entMM
@@ -383,8 +437,8 @@ entUnaUser:
 	.cfi_restore	$0
 	.cfi_adjust_cfa_offset	-256
 	SAVE_ALL		/* setup normal kernel stack */
-	lda	$sp, -56($sp)
-	.cfi_adjust_cfa_offset	56
+	lda	$sp, -64($sp)
+	.cfi_adjust_cfa_offset	64
 	stq	$9, 0($sp)
 	stq	$10, 8($sp)
 	stq	$11, 16($sp)
@@ -400,7 +454,7 @@ entUnaUser:
 	.cfi_rel_offset	$14, 40
 	.cfi_rel_offset	$15, 48
 	lda	$8, 0x3fff
-	addq	$sp, 56, $19
+	addq	$sp, 64, $19
 	bic	$sp, $8, $8
 	jsr	$26, do_entUnaUser
 	ldq	$9, 0($sp)
@@ -410,7 +464,7 @@ entUnaUser:
 	ldq	$13, 32($sp)
 	ldq	$14, 40($sp)
 	ldq	$15, 48($sp)
-	lda	$sp, 56($sp)
+	lda	$sp, 64($sp)
 	.cfi_restore	$9
 	.cfi_restore	$10
 	.cfi_restore	$11
@@ -418,7 +472,7 @@ entUnaUser:
 	.cfi_restore	$13
 	.cfi_restore	$14
 	.cfi_restore	$15
-	.cfi_adjust_cfa_offset	-56
+	.cfi_adjust_cfa_offset	-64
 	br	ret_from_sys_call
 CFI_END_OSF_FRAME entUna
 
@@ -430,7 +484,7 @@ CFI_START_OSF_FRAME entDbg
 	mov	$sp, $16
 	jsr	$31, do_entDbg
 CFI_END_OSF_FRAME entDbg
-
+
 /*
  * The system call entry point is special.  Most importantly, it looks
  * like a function call to userspace as far as clobbered registers.  We
@@ -440,6 +494,17 @@ CFI_END_OSF_FRAME entDbg
  * So much for theory.  We don't take advantage of this yet.
  *
  * Note that a0-a2 are not saved by PALcode as with the other entry points.
+ *
+ * Alpha syscall ABI uses:
+ *   - r0 for return value
+ *   - r19 ("a3") as error indicator (0=success, 1=error; r0 holds errno)
+ *
+ * For seccomp/ptrace/generic syscall helpers we track the syscall
+ * number separately:
+ *   - regs->r1: current (mutable) syscall number (may be changed or set to -1)
+ *   - regs->r2: original syscall number for restart/rollback
+ *
+ * On entry PAL provides the syscall number in r0; copy it into r1/r2.
  */
 
 	.align	4
@@ -452,9 +517,13 @@ CFI_END_OSF_FRAME entDbg
 	.cfi_rel_offset	$gp, 16
 entSys:
 	SAVE_ALL
+        ldq     $1, 0($sp)          /* syscall nr from saved r0 */
+        stq     $1, 8($sp)          /* regs->r1 = shadow syscall nr */
+        stq     $1, 16($sp)         /* regs->r2 = restart syscall nr */
+
 	lda	$8, 0x3fff
 	bic	$sp, $8, $8
-	lda	$4, NR_SYSCALLS($31)
+	lda	$4, NR_syscalls($31)
 	stq	$16, SP_OFF+24($sp)
 	lda	$5, sys_call_table
 	lda	$27, sys_ni_syscall
@@ -467,15 +536,22 @@ entSys:
 	.cfi_rel_offset	$17, SP_OFF+32
 	.cfi_rel_offset	$18, SP_OFF+40
 #ifdef CONFIG_AUDITSYSCALL
-	lda     $6, _TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT
+	lda     $6, _TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT | _TIF_SECCOMP
 	and     $3, $6, $3
-#endif
 	bne     $3, strace
+#else
+	lda     $6, _TIF_SYSCALL_TRACE | _TIF_SECCOMP
+	and     $3, $6, $3
+	bne     $3, strace
+#endif
 	beq	$4, 1f
 	ldq	$27, 0($5)
-1:	jsr	$26, ($27), alpha_ni_syscall
+1:	ldq	$0, 8($sp)		/* syscall nr shadow (regs->r1) */
+
+	jsr	$26, ($27), sys_ni_syscall
 	ldgp	$gp, 0($26)
 	blt	$0, $syscall_error	/* the call failed */
+$ret_success:
 	stq	$0, 0($sp)
 	stq	$31, 72($sp)		/* a3=0 => no error */
 
@@ -495,6 +571,10 @@ ret_to_user:
 	and	$17, _TIF_WORK_MASK, $2
 	bne	$2, work_pending
 restore_all:
+	ldl	$2, TI_STATUS($8)
+	and	$2, TS_SAVED_FP | TS_RESTORE_FP, $3
+	bne	$3, restore_fpu
+restore_other:
 	.cfi_remember_state
 	RESTORE_ALL
 	call_pal PAL_rti
@@ -503,19 +583,12 @@ ret_to_kernel:
 	.cfi_restore_state
 	lda	$16, 7
 	call_pal PAL_swpipl
-	br restore_all
+	br restore_other
 
 	.align 3
 $syscall_error:
-	/*
-	 * Some system calls (e.g., ptrace) can return arbitrary
-	 * values which might normally be mistaken as error numbers.
-	 * Those functions must zero $0 (v0) directly in the stack
-	 * frame to indicate that a negative return value wasn't an
-	 * error number..
-	 */
-	ldq	$18, 0($sp)	/* old syscall nr (zero if success) */
-	beq	$18, $ret_success
+        /* Restart syscall nr comes from saved r2 (preserved even if r0 overwritten). */
+	ldq	$18, 16($sp)	/* old syscall nr for restart */
 
 	ldq	$19, 72($sp)	/* .. and this a3 */
 	subq	$31, $0, $0	/* with error in v0 */
@@ -523,11 +596,6 @@ $syscall_error:
 	stq	$0, 0($sp)
 	mov	$31, $26	/* tell "ret_from_sys_call" we can restart */
 	stq	$1, 72($sp)	/* a3 for return */
-	br	ret_from_sys_call
-
-$ret_success:
-	stq	$0, 0($sp)
-	stq	$31, 72($sp)	/* a3=0 => no error */
 	br	ret_from_sys_call
 
 /*
@@ -544,7 +612,7 @@ $ret_success:
 	.align	4
 	.type	work_pending, @function
 work_pending:
-	and	$17, _TIF_NOTIFY_RESUME | _TIF_SIGPENDING, $2
+	and	$17, _TIF_NOTIFY_RESUME | _TIF_SIGPENDING | _TIF_NOTIFY_SIGNAL, $2
 	bne	$2, $work_notifysig
 
 $work_resched:
@@ -572,9 +640,19 @@ $work_notifysig:
 	.type	strace, @function
 strace:
 	/* set up signal stack, call syscall_trace */
+	// NB: if anyone adds preemption, this block will need to be protected
+	ldl	$1, TI_STATUS($8)
+	and	$1, TS_SAVED_FP, $3
+	or	$1, TS_SAVED_FP, $2
+	bne	$3, 1f
+	stl	$2, TI_STATUS($8)
+	bsr	$26, __save_fpu
+1:
 	DO_SWITCH_STACK
 	jsr	$26, syscall_trace_enter /* returns the syscall number */
 	UNDO_SWITCH_STACK
+
+	stq     $0, 8($sp)		/* regs->r1 = shadow syscall nr */
 
 	/* get the arguments back.. */
 	ldq	$16, SP_OFF+24($sp)
@@ -584,10 +662,15 @@ strace:
 	ldq	$20, 80($sp)
 	ldq	$21, 88($sp)
 
+	/* nr == -1: internal skip-dispatch or userspace syscall(-1)? */
+        lda     $6, -1($31)
+        cmpeq   $0, $6, $6
+	bne	$6, $strace_skip_call	/* nr == -1 => dispatch */
+
 	/* get the system call pointer.. */
-	lda	$1, NR_SYSCALLS($31)
+	lda	$1, NR_syscalls($31)
 	lda	$2, sys_call_table
-	lda	$27, alpha_ni_syscall
+	lda	$27, sys_ni_syscall
 	cmpult	$0, $1, $1
 	s8addq	$0, $2, $2
 	beq	$1, 1f
@@ -598,10 +681,12 @@ ret_from_straced:
 
 	/* check return.. */
 	blt	$0, $strace_error	/* the call failed */
-	stq	$31, 72($sp)		/* a3=0 => no error */
 $strace_success:
+	stq	$31, 72($sp)		/* a3=0 => no error */
 	stq	$0, 0($sp)		/* save return value */
 
+$strace_skip_call:
+	SYSCALL_SKIP_RETURN_RESTART_GATE
 	DO_SWITCH_STACK
 	jsr	$26, syscall_trace_leave
 	UNDO_SWITCH_STACK
@@ -609,8 +694,7 @@ $strace_success:
 
 	.align	3
 $strace_error:
-	ldq	$18, 0($sp)	/* old syscall nr (zero if success) */
-	beq	$18, $strace_success
+	ldq	$18, 16($sp)	/* restart syscall nr */
 	ldq	$19, 72($sp)	/* .. and this a3 */
 
 	subq	$31, $0, $0	/* with error in v0 */
@@ -629,7 +713,7 @@ $strace_error:
 	mov	$31, $26	/* tell "ret_from_sys_call" we can restart */
 	br	ret_from_sys_call
 CFI_END_OSF_FRAME entSys
-
+
 /*
  * Save and restore the switch stack -- aka the balance of the user context.
  */
@@ -651,40 +735,6 @@ do_switch_stack:
 	stq	$14, 40($sp)
 	stq	$15, 48($sp)
 	stq	$26, 56($sp)
-	stt	$f0, 64($sp)
-	stt	$f1, 72($sp)
-	stt	$f2, 80($sp)
-	stt	$f3, 88($sp)
-	stt	$f4, 96($sp)
-	stt	$f5, 104($sp)
-	stt	$f6, 112($sp)
-	stt	$f7, 120($sp)
-	stt	$f8, 128($sp)
-	stt	$f9, 136($sp)
-	stt	$f10, 144($sp)
-	stt	$f11, 152($sp)
-	stt	$f12, 160($sp)
-	stt	$f13, 168($sp)
-	stt	$f14, 176($sp)
-	stt	$f15, 184($sp)
-	stt	$f16, 192($sp)
-	stt	$f17, 200($sp)
-	stt	$f18, 208($sp)
-	stt	$f19, 216($sp)
-	stt	$f20, 224($sp)
-	stt	$f21, 232($sp)
-	stt	$f22, 240($sp)
-	stt	$f23, 248($sp)
-	stt	$f24, 256($sp)
-	stt	$f25, 264($sp)
-	stt	$f26, 272($sp)
-	stt	$f27, 280($sp)
-	mf_fpcr	$f0		# get fpcr
-	stt	$f28, 288($sp)
-	stt	$f29, 296($sp)
-	stt	$f30, 304($sp)
-	stt	$f0, 312($sp)	# save fpcr in slot of $f31
-	ldt	$f0, 64($sp)	# dont let "do_switch_stack" change fp state.
 	ret	$31, ($1), 1
 	.cfi_endproc
 	.size	do_switch_stack, .-do_switch_stack
@@ -703,54 +753,71 @@ undo_switch_stack:
 	ldq	$14, 40($sp)
 	ldq	$15, 48($sp)
 	ldq	$26, 56($sp)
-	ldt	$f30, 312($sp)	# get saved fpcr
-	ldt	$f0, 64($sp)
-	ldt	$f1, 72($sp)
-	ldt	$f2, 80($sp)
-	ldt	$f3, 88($sp)
-	mt_fpcr	$f30		# install saved fpcr
-	ldt	$f4, 96($sp)
-	ldt	$f5, 104($sp)
-	ldt	$f6, 112($sp)
-	ldt	$f7, 120($sp)
-	ldt	$f8, 128($sp)
-	ldt	$f9, 136($sp)
-	ldt	$f10, 144($sp)
-	ldt	$f11, 152($sp)
-	ldt	$f12, 160($sp)
-	ldt	$f13, 168($sp)
-	ldt	$f14, 176($sp)
-	ldt	$f15, 184($sp)
-	ldt	$f16, 192($sp)
-	ldt	$f17, 200($sp)
-	ldt	$f18, 208($sp)
-	ldt	$f19, 216($sp)
-	ldt	$f20, 224($sp)
-	ldt	$f21, 232($sp)
-	ldt	$f22, 240($sp)
-	ldt	$f23, 248($sp)
-	ldt	$f24, 256($sp)
-	ldt	$f25, 264($sp)
-	ldt	$f26, 272($sp)
-	ldt	$f27, 280($sp)
-	ldt	$f28, 288($sp)
-	ldt	$f29, 296($sp)
-	ldt	$f30, 304($sp)
 	lda	$sp, SWITCH_STACK_SIZE($sp)
 	ret	$31, ($1), 1
 	.cfi_endproc
 	.size	undo_switch_stack, .-undo_switch_stack
+
+#define FR(n) n * 8 + TI_FP($8)
+	.align	4
+	.globl	__save_fpu
+	.type	__save_fpu, @function
+__save_fpu:
+#define V(n) stt	$f##n, FR(n)
+	V( 0); V( 1); V( 2); V( 3)
+	V( 4); V( 5); V( 6); V( 7)
+	V( 8); V( 9); V(10); V(11)
+	V(12); V(13); V(14); V(15)
+	V(16); V(17); V(18); V(19)
+	V(20); V(21); V(22); V(23)
+	V(24); V(25); V(26); V(27)
+	mf_fpcr	$f0		# get fpcr
+	V(28); V(29); V(30)
+	stt	$f0, FR(31)	# save fpcr in slot of $f31
+	ldt	$f0, FR(0)	# don't let "__save_fpu" change fp state.
+	ret
+#undef V
+	.size	__save_fpu, .-__save_fpu
+
+	.align	4
+restore_fpu:
+	and	$3, TS_RESTORE_FP, $3
+	bic	$2, TS_SAVED_FP | TS_RESTORE_FP, $2
+	beq	$3, 1f
+#define V(n) ldt	$f##n, FR(n)
+	ldt	$f30, FR(31)	# get saved fpcr
+	V( 0); V( 1); V( 2); V( 3)
+	mt_fpcr	$f30		# install saved fpcr
+	V( 4); V( 5); V( 6); V( 7)
+	V( 8); V( 9); V(10); V(11)
+	V(12); V(13); V(14); V(15)
+	V(16); V(17); V(18); V(19)
+	V(20); V(21); V(22); V(23)
+	V(24); V(25); V(26); V(27)
+	V(28); V(29); V(30)
+1:	stl $2, TI_STATUS($8)
+	br restore_other
+#undef V
+
 
 /*
  * The meat of the context switch code.
  */
-
 	.align	4
 	.globl	alpha_switch_to
 	.type	alpha_switch_to, @function
 	.cfi_startproc
 alpha_switch_to:
 	DO_SWITCH_STACK
+	ldl	$1, TI_STATUS($8)
+	and	$1, TS_RESTORE_FP, $3
+	bne	$3, 1f
+	or	$1, TS_RESTORE_FP | TS_SAVED_FP, $2
+	and	$1, TS_SAVED_FP, $3
+	stl	$2, TI_STATUS($8)
+	bne	$3, 1f
+	bsr	$26, __save_fpu
+1:
 	call_pal PAL_swpctx
 	lda	$8, 0x3fff
 	UNDO_SWITCH_STACK
@@ -768,7 +835,7 @@ alpha_switch_to:
 	.align	4
 	.ent	ret_from_fork
 ret_from_fork:
-	lda	$26, ret_from_sys_call
+	lda	$26, ret_to_user
 	mov	$17, $16
 	jmp	$31, schedule_tail
 .end ret_from_fork
@@ -791,7 +858,7 @@ ret_from_kernel_thread:
 
 /*
  * Special system calls.  Most of these are special in that they either
- * have to play switch_stack games or in some way use the pt_regs struct.
+ * have to play switch_stack games.
  */
 
 .macro	fork_like name
@@ -801,6 +868,14 @@ ret_from_kernel_thread:
 alpha_\name:
 	.prologue 0
 	bsr	$1, do_switch_stack
+	// NB: if anyone adds preemption, this block will need to be protected
+	ldl	$1, TI_STATUS($8)
+	and	$1, TS_SAVED_FP, $3
+	or	$1, TS_SAVED_FP, $2
+	bne	$3, 1f
+	stl	$2, TI_STATUS($8)
+	bsr	$26, __save_fpu
+1:
 	jsr	$26, sys_\name
 	ldq	$26, 56($sp)
 	lda	$sp, SWITCH_STACK_SIZE($sp)
@@ -811,47 +886,43 @@ alpha_\name:
 fork_like fork
 fork_like vfork
 fork_like clone
+fork_like clone3
 
+.macro	sigreturn_like name
 	.align	4
-	.globl	sys_sigreturn
-	.ent	sys_sigreturn
-sys_sigreturn:
+	.globl	sys_\name
+	.ent	sys_\name
+sys_\name:
 	.prologue 0
 	lda	$9, ret_from_straced
 	cmpult	$26, $9, $9
 	lda	$sp, -SWITCH_STACK_SIZE($sp)
-	jsr	$26, do_sigreturn
+	jsr	$26, do_\name
 	bne	$9, 1f
 	jsr	$26, syscall_trace_leave
 1:	br	$1, undo_switch_stack
 	br	ret_from_sys_call
-.end sys_sigreturn
+.end sys_\name
+.endm
+
+sigreturn_like sigreturn
+sigreturn_like rt_sigreturn
 
 	.align	4
-	.globl	sys_rt_sigreturn
-	.ent	sys_rt_sigreturn
-sys_rt_sigreturn:
+	.globl	alpha_syscall_zero
+	.ent	alpha_syscall_zero
+alpha_syscall_zero:
 	.prologue 0
-	lda	$9, ret_from_straced
-	cmpult	$26, $9, $9
-	lda	$sp, -SWITCH_STACK_SIZE($sp)
-	jsr	$26, do_rt_sigreturn
-	bne	$9, 1f
-	jsr	$26, syscall_trace_leave
-1:	br	$1, undo_switch_stack
-	br	ret_from_sys_call
-.end sys_rt_sigreturn
-
-	.align	4
-	.globl	alpha_ni_syscall
-	.ent	alpha_ni_syscall
-alpha_ni_syscall:
-	.prologue 0
-	/* Special because it also implements overflow handling via
-	   syscall number 0.  And if you recall, zero is a special
-	   trigger for "not an error".  Store large non-zero there.  */
+	/* Special because it needs to do something opposite to
+	   force_successful_syscall_return().  We use the saved
+	   syscall number for that, zero meaning "not an error".
+	   That works nicely, but for real syscall 0 we need to
+	   make sure that this logics doesn't get confused.
+	   Store a non-zero there - -ENOSYS we need in register
+	   for our return value will do just fine.
+	  */
 	lda	$0, -ENOSYS
 	unop
 	stq	$0, 0($sp)
 	ret
-.end alpha_ni_syscall
+.end alpha_syscall_zero

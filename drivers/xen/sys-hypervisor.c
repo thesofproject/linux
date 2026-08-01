@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  copyright (c) 2006 IBM Corporation
  *  Authored by: Mike D. Day <ncmike@us.ibm.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  */
 
 #include <linux/slab.h>
@@ -25,17 +22,19 @@
 #endif
 
 #define HYPERVISOR_ATTR_RO(_name) \
-static struct hyp_sysfs_attr  _name##_attr = __ATTR_RO(_name)
+static struct hyp_sysfs_attr _name##_attr = __ATTR_RO(_name)
 
 #define HYPERVISOR_ATTR_RW(_name) \
-static struct hyp_sysfs_attr _name##_attr = \
-	__ATTR(_name, 0644, _name##_show, _name##_store)
+static struct hyp_sysfs_attr _name##_attr = __ATTR_RW(_name)
 
 struct hyp_sysfs_attr {
 	struct attribute attr;
 	ssize_t (*show)(struct hyp_sysfs_attr *, char *);
 	ssize_t (*store)(struct hyp_sysfs_attr *, const char *, size_t);
-	void *hyp_attr_data;
+	union {
+		void *hyp_attr_data;
+		unsigned long hyp_attr_value;
+	};
 };
 
 static ssize_t type_show(struct hyp_sysfs_attr *attr, char *buffer)
@@ -183,7 +182,7 @@ static ssize_t compiler_show(struct hyp_sysfs_attr *attr, char *buffer)
 	int ret = -ENOMEM;
 	struct xen_compile_info *info;
 
-	info = kmalloc(sizeof(struct xen_compile_info), GFP_KERNEL);
+	info = kmalloc_obj(struct xen_compile_info);
 	if (info) {
 		ret = HYPERVISOR_xen_version(XENVER_compile_info, info);
 		if (!ret)
@@ -201,7 +200,7 @@ static ssize_t compiled_by_show(struct hyp_sysfs_attr *attr, char *buffer)
 	int ret = -ENOMEM;
 	struct xen_compile_info *info;
 
-	info = kmalloc(sizeof(struct xen_compile_info), GFP_KERNEL);
+	info = kmalloc_obj(struct xen_compile_info);
 	if (info) {
 		ret = HYPERVISOR_xen_version(XENVER_compile_info, info);
 		if (!ret)
@@ -219,7 +218,7 @@ static ssize_t compile_date_show(struct hyp_sysfs_attr *attr, char *buffer)
 	int ret = -ENOMEM;
 	struct xen_compile_info *info;
 
-	info = kmalloc(sizeof(struct xen_compile_info), GFP_KERNEL);
+	info = kmalloc_obj(struct xen_compile_info);
 	if (info) {
 		ret = HYPERVISOR_xen_version(XENVER_compile_info, info);
 		if (!ret)
@@ -292,7 +291,7 @@ static ssize_t virtual_start_show(struct hyp_sysfs_attr *attr, char *buffer)
 	int ret = -ENOMEM;
 	struct xen_platform_parameters *parms;
 
-	parms = kmalloc(sizeof(struct xen_platform_parameters), GFP_KERNEL);
+	parms = kmalloc_obj(struct xen_platform_parameters);
 	if (parms) {
 		ret = HYPERVISOR_xen_version(XENVER_platform_parameters,
 					     parms);
@@ -367,6 +366,8 @@ static ssize_t buildid_show(struct hyp_sysfs_attr *attr, char *buffer)
 			ret = sprintf(buffer, "<denied>");
 		return ret;
 	}
+	if (ret > PAGE_SIZE)
+		return -ENOSPC;
 
 	buildid = kmalloc(sizeof(*buildid) + ret, GFP_KERNEL);
 	if (!buildid)
@@ -374,8 +375,10 @@ static ssize_t buildid_show(struct hyp_sysfs_attr *attr, char *buffer)
 
 	buildid->len = ret;
 	ret = HYPERVISOR_xen_version(XENVER_build_id, buildid);
-	if (ret > 0)
-		ret = sprintf(buffer, "%s", buildid->buf);
+	if (ret > 0) {
+		/* Build id is binary, not a string. */
+		memcpy(buffer, buildid->buf, ret);
+	}
 	kfree(buildid);
 
 	return ret;
@@ -401,6 +404,60 @@ static const struct attribute_group xen_properties_group = {
 static int __init xen_sysfs_properties_init(void)
 {
 	return sysfs_create_group(hypervisor_kobj, &xen_properties_group);
+}
+
+#define FLAG_UNAME "unknown"
+#define FLAG_UNAME_FMT FLAG_UNAME "%02u"
+#define FLAG_UNAME_MAX sizeof(FLAG_UNAME "XX")
+#define FLAG_COUNT (sizeof(xen_start_flags) * BITS_PER_BYTE)
+static_assert(sizeof(xen_start_flags) <=
+	      sizeof_field(struct hyp_sysfs_attr, hyp_attr_value));
+
+static ssize_t flag_show(struct hyp_sysfs_attr *attr, char *buffer)
+{
+	char *p = buffer;
+
+	*p++ = '0' + ((xen_start_flags & attr->hyp_attr_value) != 0);
+	*p++ = '\n';
+	return p - buffer;
+}
+
+#define FLAG_NODE(flag, node)				\
+	[ilog2(flag)] = {				\
+		.attr = { .name = #node, .mode = 0444 },\
+		.show = flag_show,			\
+		.hyp_attr_value = flag			\
+	}
+
+/*
+ * Add new, known flags here.  No other changes are required, but
+ * note that each known flag wastes one entry in flag_unames[].
+ * The code/complexity machinations to avoid this isn't worth it
+ * for a few entries, but keep it in mind.
+ */
+static struct hyp_sysfs_attr flag_attrs[FLAG_COUNT] = {
+	FLAG_NODE(SIF_PRIVILEGED, privileged),
+	FLAG_NODE(SIF_INITDOMAIN, initdomain)
+};
+static struct attribute_group xen_flags_group = {
+	.name = "start_flags",
+	.attrs = (struct attribute *[FLAG_COUNT + 1]){}
+};
+static char flag_unames[FLAG_COUNT][FLAG_UNAME_MAX];
+
+static int __init xen_sysfs_flags_init(void)
+{
+	for (unsigned fnum = 0; fnum != FLAG_COUNT; fnum++) {
+		if (likely(flag_attrs[fnum].attr.name == NULL)) {
+			sprintf(flag_unames[fnum], FLAG_UNAME_FMT, fnum);
+			flag_attrs[fnum].attr.name = flag_unames[fnum];
+			flag_attrs[fnum].attr.mode = 0444;
+			flag_attrs[fnum].show = flag_show;
+			flag_attrs[fnum].hyp_attr_value = 1 << fnum;
+		}
+		xen_flags_group.attrs[fnum] = &flag_attrs[fnum].attr;
+	}
+	return sysfs_create_group(hypervisor_kobj, &xen_flags_group);
 }
 
 #ifdef CONFIG_XEN_HAVE_VPMU
@@ -543,18 +600,22 @@ static int __init hyper_sysfs_init(void)
 	ret = xen_sysfs_properties_init();
 	if (ret)
 		goto prop_out;
+	ret = xen_sysfs_flags_init();
+	if (ret)
+		goto flags_out;
 #ifdef CONFIG_XEN_HAVE_VPMU
 	if (xen_initial_domain()) {
 		ret = xen_sysfs_pmu_init();
 		if (ret) {
-			sysfs_remove_group(hypervisor_kobj,
-					   &xen_properties_group);
-			goto prop_out;
+			sysfs_remove_group(hypervisor_kobj, &xen_flags_group);
+			goto flags_out;
 		}
 	}
 #endif
 	goto out;
 
+flags_out:
+	sysfs_remove_group(hypervisor_kobj, &xen_properties_group);
 prop_out:
 	sysfs_remove_file(hypervisor_kobj, &uuid_attr.attr);
 uuid_out:
@@ -598,7 +659,7 @@ static const struct sysfs_ops hyp_sysfs_ops = {
 	.store = hyp_sysfs_store,
 };
 
-static struct kobj_type hyp_sysfs_kobj_type = {
+static const struct kobj_type hyp_sysfs_kobj_type = {
 	.sysfs_ops = &hyp_sysfs_ops,
 };
 

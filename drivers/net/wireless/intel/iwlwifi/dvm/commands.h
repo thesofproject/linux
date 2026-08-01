@@ -1,65 +1,7 @@
-/******************************************************************************
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2005 - 2014 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110,
- * USA
- *
- * The full GNU General Public License is included in this distribution
- * in the file called COPYING.
- *
- * Contact Information:
- *  Intel Linux Wireless <linuxwifi@intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- * BSD LICENSE
- *
- * Copyright(c) 2005 - 2014 Intel Corporation. All rights reserved.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
+/*
+ * Copyright (C) 2005-2014, 2023-2025 Intel Corporation
+ */
 /*
  * Please use this file (commands.h) only for uCode API definitions.
  * Please use iwl-xxxx-hw.h for hardware-related definitions.
@@ -235,7 +177,7 @@ enum {
  *
  *****************************************************************************/
 
-/**
+/*
  * iwlagn rate_n_flags bit fields
  *
  * rate_n_flags format is used in following iwlagn commands:
@@ -309,7 +251,7 @@ enum {
 #define RATE_MCS_SGI_POS 13
 #define RATE_MCS_SGI_MSK 0x2000
 
-/**
+/*
  * rate_n_flags Tx antenna masks
  * bit14:16
  */
@@ -328,7 +270,7 @@ enum {
 #define IWL_PWR_NUM_HT_OFDM_ENTRIES		24
 #define IWL_PWR_CCK_ENTRIES			2
 
-/**
+/*
  * struct tx_power_dual_stream
  *
  * Table entries in REPLY_TX_PWR_TABLE_CMD, REPLY_CHANNEL_SWITCH
@@ -339,7 +281,7 @@ struct tx_power_dual_stream {
 	__le32 dw;
 } __packed;
 
-/**
+/*
  * Command REPLY_TX_POWER_DBM_CMD = 0x98
  * struct iwlagn_tx_power_dbm_cmd
  */
@@ -353,7 +295,7 @@ struct iwlagn_tx_power_dbm_cmd {
 	u8 reserved;
 } __packed;
 
-/**
+/*
  * Command TX_ANT_CONFIGURATION_CMD = 0x98
  * This command is used to configure valid Tx antenna.
  * By default uCode concludes the valid antenna according to the radio flavor.
@@ -371,7 +313,7 @@ struct iwl_tx_ant_config_cmd {
 
 #define UCODE_VALID_OK	cpu_to_le32(0x1)
 
-/**
+/*
  * REPLY_ALIVE = 0x1 (response only, not a command)
  *
  * uCode issues this "alive" notification once the runtime image is ready
@@ -592,7 +534,7 @@ enum {
 /* transfer to host non bssid beacons in associated state */
 #define RXON_FILTER_BCON_AWARE_MSK      cpu_to_le32(1 << 6)
 
-/**
+/*
  * REPLY_RXON = 0x10 (command, has simple generic response)
  *
  * RXON tunes the radio tuner to a service channel, and sets up a number
@@ -672,7 +614,7 @@ struct iwl_rxon_time_cmd {
  * REPLY_CHANNEL_SWITCH = 0x72 (command, has simple generic response)
  */
 /**
- * struct iwl5000_channel_switch_cmd
+ * struct iwl5000_channel_switch_cmd - channel switch command (5000 series)
  * @band: 0- 5.2GHz, 1- 2.4GHz
  * @expect_beacon: 0- resume transmits after channel switch
  *		   1- wait for beacon to resume transmits
@@ -693,7 +635,7 @@ struct iwl5000_channel_switch_cmd {
 } __packed;
 
 /**
- * struct iwl6000_channel_switch_cmd
+ * struct iwl6000_channel_switch_cmd - channel switch command (6000 series)
  * @band: 0- 5.2GHz, 1- 2.4GHz
  * @expect_beacon: 0- resume transmits after channel switch
  *		   1- wait for beacon to resume transmits
@@ -739,6 +681,7 @@ struct iwl_csa_notification {
  * @aifsn:  Number of slots in Arbitration Interframe Space (before
  *          performing random backoff timing prior to Tx).  Device default 1.
  * @edca_txop:  Length of Tx opportunity, in uSecs.  Device default is 0.
+ * @reserved1: reserved for alignment
  *
  * Device will automatically increase contention window by (2*CW) + 1 for each
  * transmission retry.  Device uses cw_max as a bit mask, ANDed with new CW
@@ -848,10 +791,12 @@ struct iwl_keyinfo {
 } __packed;
 
 /**
- * struct sta_id_modify
- * @addr[ETH_ALEN]: station's MAC address
+ * struct sta_id_modify - station modify command
+ * @addr: station's MAC address
+ * @reserved1: reserved for alignment
  * @sta_id: index of station in uCode's station table
  * @modify_mask: STA_MODIFY_*, 1: modify, 0: don't change
+ * @reserved2: reserved for alignment
  *
  * Driver selects unused table index when adding new station,
  * or the index to a pre-existing station entry when modifying that station.
@@ -1028,7 +973,7 @@ struct iwl_wep_cmd {
 	u8 global_key_type;
 	u8 flags;
 	u8 reserved;
-	struct iwl_wep_key key[0];
+	struct iwl_wep_key key[];
 } __packed;
 
 #define WEP_KEY_WEP_TYPE 1
@@ -1235,83 +1180,87 @@ struct iwl_dram_scratch {
 } __packed;
 
 struct iwl_tx_cmd {
-	/*
-	 * MPDU byte count:
-	 * MAC header (24/26/30/32 bytes) + 2 bytes pad if 26/30 header size,
-	 * + 8 byte IV for CCM or TKIP (not used for WEP)
-	 * + Data payload
-	 * + 8-byte MIC (not used for CCM/WEP)
-	 * NOTE:  Does not include Tx command bytes, post-MAC pad bytes,
-	 *        MIC (CCM) 8 bytes, ICV (WEP/TKIP/CKIP) 4 bytes, CRC 4 bytes.i
-	 * Range: 14-2342 bytes.
-	 */
-	__le16 len;
+	/* New members MUST be added within the __struct_group() macro below. */
+	__struct_group(iwl_tx_cmd_hdr, __hdr, __packed,
+		/*
+		 * MPDU byte count:
+		 * MAC header (24/26/30/32 bytes) + 2 bytes pad if 26/30 header size,
+		 * + 8 byte IV for CCM or TKIP (not used for WEP)
+		 * + Data payload
+		 * + 8-byte MIC (not used for CCM/WEP)
+		 * NOTE:  Does not include Tx command bytes, post-MAC pad bytes,
+		 *        MIC (CCM) 8 bytes, ICV (WEP/TKIP/CKIP) 4 bytes, CRC 4 bytes.i
+		 * Range: 14-2342 bytes.
+		 */
+		__le16 len;
 
-	/*
-	 * MPDU or MSDU byte count for next frame.
-	 * Used for fragmentation and bursting, but not 11n aggregation.
-	 * Same as "len", but for next frame.  Set to 0 if not applicable.
-	 */
-	__le16 next_frame_len;
+		/*
+		 * MPDU or MSDU byte count for next frame.
+		 * Used for fragmentation and bursting, but not 11n aggregation.
+		 * Same as "len", but for next frame.  Set to 0 if not applicable.
+		 */
+		__le16 next_frame_len;
 
-	__le32 tx_flags;	/* TX_CMD_FLG_* */
+		__le32 tx_flags;	/* TX_CMD_FLG_* */
 
-	/* uCode may modify this field of the Tx command (in host DRAM!).
-	 * Driver must also set dram_lsb_ptr and dram_msb_ptr in this cmd. */
-	struct iwl_dram_scratch scratch;
+		/* uCode may modify this field of the Tx command (in host DRAM!).
+		 * Driver must also set dram_lsb_ptr and dram_msb_ptr in this cmd. */
+		struct iwl_dram_scratch scratch;
 
-	/* Rate for *all* Tx attempts, if TX_CMD_FLG_STA_RATE_MSK is cleared. */
-	__le32 rate_n_flags;	/* RATE_MCS_* */
+		/* Rate for *all* Tx attempts, if TX_CMD_FLG_STA_RATE_MSK is cleared. */
+		__le32 rate_n_flags;	/* RATE_MCS_* */
 
-	/* Index of destination station in uCode's station table */
-	u8 sta_id;
+		/* Index of destination station in uCode's station table */
+		u8 sta_id;
 
-	/* Type of security encryption:  CCM or TKIP */
-	u8 sec_ctl;		/* TX_CMD_SEC_* */
+		/* Type of security encryption:  CCM or TKIP */
+		u8 sec_ctl;		/* TX_CMD_SEC_* */
 
-	/*
-	 * Index into rate table (see REPLY_TX_LINK_QUALITY_CMD) for initial
-	 * Tx attempt, if TX_CMD_FLG_STA_RATE_MSK is set.  Normally "0" for
-	 * data frames, this field may be used to selectively reduce initial
-	 * rate (via non-0 value) for special frames (e.g. management), while
-	 * still supporting rate scaling for all frames.
-	 */
-	u8 initial_rate_index;
-	u8 reserved;
-	u8 key[16];
-	__le16 next_frame_flags;
-	__le16 reserved2;
-	union {
-		__le32 life_time;
-		__le32 attempt;
-	} stop_time;
+		/*
+		 * Index into rate table (see REPLY_TX_LINK_QUALITY_CMD) for initial
+		 * Tx attempt, if TX_CMD_FLG_STA_RATE_MSK is set.  Normally "0" for
+		 * data frames, this field may be used to selectively reduce initial
+		 * rate (via non-0 value) for special frames (e.g. management), while
+		 * still supporting rate scaling for all frames.
+		 */
+		u8 initial_rate_index;
+		u8 reserved;
+		u8 key[16];
+		__le16 next_frame_flags;
+		__le16 reserved2;
+		union {
+			__le32 life_time;
+			__le32 attempt;
+		} stop_time;
 
-	/* Host DRAM physical address pointer to "scratch" in this command.
-	 * Must be dword aligned.  "0" in dram_lsb_ptr disables usage. */
-	__le32 dram_lsb_ptr;
-	u8 dram_msb_ptr;
+		/* Host DRAM physical address pointer to "scratch" in this command.
+		 * Must be dword aligned.  "0" in dram_lsb_ptr disables usage. */
+		__le32 dram_lsb_ptr;
+		u8 dram_msb_ptr;
 
-	u8 rts_retry_limit;	/*byte 50 */
-	u8 data_retry_limit;	/*byte 51 */
-	u8 tid_tspec;
-	union {
-		__le16 pm_frame_timeout;
-		__le16 attempt_duration;
-	} timeout;
+		u8 rts_retry_limit;	/*byte 50 */
+		u8 data_retry_limit;	/*byte 51 */
+		u8 tid_tspec;
+		union {
+			__le16 pm_frame_timeout;
+			__le16 attempt_duration;
+		} timeout;
 
-	/*
-	 * Duration of EDCA burst Tx Opportunity, in 32-usec units.
-	 * Set this if txop time is not specified by HCCA protocol (e.g. by AP).
-	 */
-	__le16 driver_txop;
+		/*
+		 * Duration of EDCA burst Tx Opportunity, in 32-usec units.
+		 * Set this if txop time is not specified by HCCA protocol (e.g. by AP).
+		 */
+		__le16 driver_txop;
 
+	);
 	/*
 	 * MAC header goes here, followed by 2 bytes padding if MAC header
 	 * length is 26 or 30 bytes, followed by payload data
 	 */
-	u8 payload[0];
-	struct ieee80211_hdr hdr[0];
+	struct ieee80211_hdr hdr[];
 } __packed;
+static_assert(offsetof(struct iwl_tx_cmd, hdr) == sizeof(struct iwl_tx_cmd_hdr),
+	      "struct member likely outside of __struct_group()");
 
 /*
  * TX command response is sent after *agn* transmission attempts.
@@ -1520,7 +1469,7 @@ struct iwl_compressed_ba_resp {
 #define  LINK_QUAL_ANT_MSK   (LINK_QUAL_ANT_A_MSK|LINK_QUAL_ANT_B_MSK)
 
 
-/**
+/*
  * struct iwl_link_qual_general_params
  *
  * Used in REPLY_TX_LINK_QUALITY_CMD
@@ -1563,7 +1512,7 @@ struct iwl_link_qual_general_params {
 #define LINK_QUAL_AGG_FRAME_LIMIT_MAX	(63)
 #define LINK_QUAL_AGG_FRAME_LIMIT_MIN	(0)
 
-/**
+/*
  * struct iwl_link_qual_agg_params
  *
  * Used in REPLY_TX_LINK_QUALITY_CMD
@@ -2077,7 +2026,7 @@ struct iwl_spectrum_notification {
 	u8 channel;
 	u8 type;		/* see enum iwl_measurement_type */
 	u8 reserved1;
-	/* NOTE:  cca_ofdm, cca_cck, basic_type, and histogram are only only
+	/* NOTE:  cca_ofdm, cca_cck, basic_type, and histogram are only
 	 * valid if applicable for measurement type requested. */
 	__le32 cca_ofdm;	/* cca fraction time in 40Mhz clock periods */
 	__le32 cca_cck;		/* cca fraction time in 44Mhz clock periods */
@@ -2096,7 +2045,7 @@ struct iwl_spectrum_notification {
  *
  *****************************************************************************/
 
-/**
+/*
  * struct iwl_powertable_cmd - Power Table Command
  * @flags: See below:
  *
@@ -2227,7 +2176,7 @@ struct iwl_ct_kill_throttling_config {
 #define SCAN_CHANNEL_TYPE_PASSIVE cpu_to_le32(0)
 #define SCAN_CHANNEL_TYPE_ACTIVE  cpu_to_le32(1)
 
-/**
+/*
  * struct iwl_scan_channel - entry in REPLY_SCAN_CMD channel table
  *
  * One for each channel in the scan list.
@@ -2266,7 +2215,7 @@ struct iwl_scan_channel {
 /* set number of direct probes __le32 type */
 #define IWL_SCAN_PROBE_MASK(n) 	cpu_to_le32((BIT(n) | (BIT(n) - BIT(1))))
 
-/**
+/*
  * struct iwl_ssid_ie - directed scan network information element
  *
  * Up to 20 of these may appear in REPLY_SCAN_CMD,
@@ -2365,7 +2314,7 @@ struct iwl_scan_cmd {
 
 	/* For active scans (set to all-0s for passive scans).
 	 * Does not include payload.  Must specify Tx rate; no rate scaling. */
-	struct iwl_tx_cmd tx_cmd;
+	struct iwl_tx_cmd_hdr tx_cmd;
 
 	/* For directed active scans (set to all-0s otherwise) */
 	struct iwl_ssid_ie direct_scan[PROBE_OPTION_MAX];
@@ -2385,7 +2334,7 @@ struct iwl_scan_cmd {
 	 * for one scan to complete (i.e. receive SCAN_COMPLETE_NOTIFICATION)
 	 * before requesting another scan.
 	 */
-	u8 data[0];
+	u8 data[];
 } __packed;
 
 /* Can abort will notify by complete notification with abort status. */
@@ -2476,11 +2425,11 @@ struct iwlagn_beacon_notif {
  */
 
 struct iwl_tx_beacon_cmd {
-	struct iwl_tx_cmd tx;
+	struct iwl_tx_cmd_hdr tx;
 	__le16 tim_idx;
 	u8 tim_size;
 	u8 reserved1;
-	struct ieee80211_hdr frame[0];	/* beacon frame */
+	struct ieee80211_hdr frame[];	/* beacon frame */
 } __packed;
 
 /******************************************************************************
@@ -2616,6 +2565,7 @@ struct statistics_rx_bt {
  * @ant_a: current tx power on chain a in 1/2 dB step
  * @ant_b: current tx power on chain b in 1/2 dB step
  * @ant_c: current tx power on chain c in 1/2 dB step
+ * @reserved: reserved for alignment
  */
 struct statistics_tx_power {
 	u8 ant_a;
@@ -2819,7 +2769,7 @@ struct iwl_missed_beacon_notif {
  *
  *****************************************************************************/
 
-/**
+/*
  * SENSITIVITY_CMD = 0xa8 (command, has simple generic response)
  *
  * This command sets up the Rx signal detector for a sensitivity level that
@@ -3042,7 +2992,7 @@ struct iwl_missed_beacon_notif {
 #define SENSITIVITY_CMD_CONTROL_WORK_TABLE	cpu_to_le16(1)
 
 /**
- * struct iwl_sensitivity_cmd
+ * struct iwl_sensitivity_cmd - sensitivity configuration command
  * @control:  (1) updates working table, (0) updates default table
  * @table:  energy threshold values, use HD_* as index into table
  *
@@ -3062,7 +3012,7 @@ struct iwl_enhance_sensitivity_cmd {
 } __packed;
 
 
-/**
+/*
  * REPLY_PHY_CALIBRATION_CMD = 0xb0 (command, has simple generic response)
  *
  * This command sets the relative gains of agn device's 3 radio receiver chains.
@@ -3193,7 +3143,7 @@ struct iwl_calib_hdr {
 
 struct iwl_calib_cmd {
 	struct iwl_calib_hdr hdr;
-	u8 data[0];
+	u8 data[];
 } __packed;
 
 struct iwl_calib_xtal_freq_cmd {
@@ -3221,7 +3171,7 @@ struct iwl_calib_temperature_offset_v2_cmd {
 /* IWL_PHY_CALIBRATE_CHAIN_NOISE_RESET_CMD */
 struct iwl_calib_chain_noise_reset_cmd {
 	struct iwl_calib_hdr hdr;
-	u8 data[0];
+	u8 data[];
 };
 
 /* IWL_PHY_CALIBRATE_CHAIN_NOISE_GAIN_CMD */
@@ -3898,11 +3848,12 @@ struct iwlagn_wowlan_status {
 #define IWL_MIN_SLOT_TIME	20
 
 /**
- * struct iwl_wipan_slot
+ * struct iwl_wipan_slot - WiPAN slot configuration
  * @width: Time in TU
  * @type:
  *   0 - BSS
  *   1 - PAN
+ * @reserved: reserved for alignment
  */
 struct iwl_wipan_slot {
 	__le16 width;
@@ -3917,7 +3868,7 @@ struct iwl_wipan_slot {
 #define IWL_WIPAN_PARAMS_FLG_FULL_SLOTTED_MODE		BIT(5)
 
 /**
- * struct iwl_wipan_params_cmd
+ * struct iwl_wipan_params_cmd - WiPAN parameters
  * @flags:
  *   bit0: reserved
  *   bit1: CP leave channel with CTS
@@ -3930,6 +3881,8 @@ struct iwl_wipan_slot {
  *         uCode will perform leaving channel methods in context switch
  *         also when working in same channel mode
  * @num_slots: 1 - 10
+ * @slots: per-slot data
+ * @reserved: reserved for alignment
  */
 struct iwl_wipan_params_cmd {
 	__le16 flags;

@@ -21,15 +21,21 @@
  *
  */
 
-#include <drm/drmP.h>
+#include <linux/math64.h>
+#include <linux/pci.h>
+#include <linux/seq_file.h>
+
+#include "atom.h"
+#include "evergreen.h"
+#include "r600_dpm.h"
+#include "rv770.h"
 #include "radeon.h"
 #include "radeon_asic.h"
-#include "sid.h"
-#include "r600_dpm.h"
+#include "ni_dpm.h"
 #include "si_dpm.h"
-#include "atom.h"
-#include <linux/math64.h>
-#include <linux/seq_file.h>
+#include "si.h"
+#include "sid.h"
+#include "vce.h"
 
 #define MC_CG_ARB_FREQ_F0           0x0a
 #define MC_CG_ARB_FREQ_F1           0x0b
@@ -40,8 +46,7 @@
 
 #define SCLK_MIN_DEEPSLEEP_FREQ     1350
 
-static const struct si_cac_config_reg cac_weights_tahiti[] =
-{
+static const struct si_cac_config_reg cac_weights_tahiti[] = {
 	{ 0x0, 0x0000ffff, 0, 0xc, SISLANDS_CACCONFIG_CGIND },
 	{ 0x0, 0xffff0000, 16, 0x0, SISLANDS_CACCONFIG_CGIND },
 	{ 0x1, 0x0000ffff, 0, 0x101, SISLANDS_CACCONFIG_CGIND },
@@ -105,8 +110,7 @@ static const struct si_cac_config_reg cac_weights_tahiti[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg lcac_tahiti[] =
-{
+static const struct si_cac_config_reg lcac_tahiti[] = {
 	{ 0x143, 0x0001fffe, 1, 0x3, SISLANDS_CACCONFIG_CGIND },
 	{ 0x143, 0x00000001, 0, 0x1, SISLANDS_CACCONFIG_CGIND },
 	{ 0x146, 0x0001fffe, 1, 0x3, SISLANDS_CACCONFIG_CGIND },
@@ -197,13 +201,11 @@ static const struct si_cac_config_reg lcac_tahiti[] =
 
 };
 
-static const struct si_cac_config_reg cac_override_tahiti[] =
-{
+static const struct si_cac_config_reg cac_override_tahiti[] = {
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_powertune_data powertune_data_tahiti =
-{
+static const struct si_powertune_data powertune_data_tahiti = {
 	((1 << 16) | 27027),
 	6,
 	0,
@@ -233,8 +235,7 @@ static const struct si_powertune_data powertune_data_tahiti =
 	true
 };
 
-static const struct si_dte_data dte_data_tahiti =
-{
+static const struct si_dte_data dte_data_tahiti = {
 	{ 1159409, 0, 0, 0, 0 },
 	{ 777, 0, 0, 0, 0 },
 	2,
@@ -251,26 +252,7 @@ static const struct si_dte_data dte_data_tahiti =
 	false
 };
 
-static const struct si_dte_data dte_data_tahiti_le =
-{
-	{ 0x1E8480, 0x7A1200, 0x2160EC0, 0x3938700, 0 },
-	{ 0x7D, 0x7D, 0x4E4, 0xB00, 0 },
-	0x5,
-	0xAFC8,
-	0x64,
-	0x32,
-	1,
-	0,
-	0x10,
-	{ 0x78, 0x7C, 0x82, 0x88, 0x8E, 0x94, 0x9A, 0xA0, 0xA6, 0xAC, 0xB0, 0xB4, 0xB8, 0xBC, 0xC0, 0xC4 },
-	{ 0x3938700, 0x3938700, 0x3938700, 0x3938700, 0x3938700, 0x3938700, 0x3938700, 0x3938700, 0x3938700, 0x3938700, 0x3938700, 0x3938700, 0x3938700, 0x3938700, 0x3938700, 0x3938700 },
-	{ 0x2AF8, 0x2AF8, 0x29BB, 0x27F9, 0x2637, 0x2475, 0x22B3, 0x20F1, 0x1F2F, 0x1D6D, 0x1734, 0x1414, 0x10F4, 0xDD4, 0xAB4, 0x794 },
-	85,
-	true
-};
-
-static const struct si_dte_data dte_data_tahiti_pro =
-{
+static const struct si_dte_data dte_data_tahiti_pro = {
 	{ 0x1E8480, 0x3D0900, 0x989680, 0x2625A00, 0x0 },
 	{ 0x0, 0x0, 0x0, 0x0, 0x0 },
 	5,
@@ -287,8 +269,7 @@ static const struct si_dte_data dte_data_tahiti_pro =
 	true
 };
 
-static const struct si_dte_data dte_data_new_zealand =
-{
+static const struct si_dte_data dte_data_new_zealand = {
 	{ 0x1E8480, 0x3D0900, 0x989680, 0x2625A00, 0 },
 	{ 0x29B, 0x3E9, 0x537, 0x7D2, 0 },
 	0x5,
@@ -305,8 +286,7 @@ static const struct si_dte_data dte_data_new_zealand =
 	true
 };
 
-static const struct si_dte_data dte_data_aruba_pro =
-{
+static const struct si_dte_data dte_data_aruba_pro = {
 	{ 0x1E8480, 0x3D0900, 0x989680, 0x2625A00, 0x0 },
 	{ 0x0, 0x0, 0x0, 0x0, 0x0 },
 	5,
@@ -323,8 +303,7 @@ static const struct si_dte_data dte_data_aruba_pro =
 	true
 };
 
-static const struct si_dte_data dte_data_malta =
-{
+static const struct si_dte_data dte_data_malta = {
 	{ 0x1E8480, 0x3D0900, 0x989680, 0x2625A00, 0x0 },
 	{ 0x0, 0x0, 0x0, 0x0, 0x0 },
 	5,
@@ -341,8 +320,7 @@ static const struct si_dte_data dte_data_malta =
 	true
 };
 
-struct si_cac_config_reg cac_weights_pitcairn[] =
-{
+static struct si_cac_config_reg cac_weights_pitcairn[] = {
 	{ 0x0, 0x0000ffff, 0, 0x8a, SISLANDS_CACCONFIG_CGIND },
 	{ 0x0, 0xffff0000, 16, 0x0, SISLANDS_CACCONFIG_CGIND },
 	{ 0x1, 0x0000ffff, 0, 0x0, SISLANDS_CACCONFIG_CGIND },
@@ -406,8 +384,7 @@ struct si_cac_config_reg cac_weights_pitcairn[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg lcac_pitcairn[] =
-{
+static const struct si_cac_config_reg lcac_pitcairn[] = {
 	{ 0x98, 0x0001fffe, 1, 0x2, SISLANDS_CACCONFIG_CGIND },
 	{ 0x98, 0x00000001, 0, 0x1, SISLANDS_CACCONFIG_CGIND },
 	{ 0x104, 0x0001fffe, 1, 0x2, SISLANDS_CACCONFIG_CGIND },
@@ -497,13 +474,11 @@ static const struct si_cac_config_reg lcac_pitcairn[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg cac_override_pitcairn[] =
-{
+static const struct si_cac_config_reg cac_override_pitcairn[] = {
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_powertune_data powertune_data_pitcairn =
-{
+static const struct si_powertune_data powertune_data_pitcairn = {
 	((1 << 16) | 27027),
 	5,
 	0,
@@ -533,8 +508,7 @@ static const struct si_powertune_data powertune_data_pitcairn =
 	true
 };
 
-static const struct si_dte_data dte_data_pitcairn =
-{
+static const struct si_dte_data dte_data_pitcairn = {
 	{ 0, 0, 0, 0, 0 },
 	{ 0, 0, 0, 0, 0 },
 	0,
@@ -551,8 +525,7 @@ static const struct si_dte_data dte_data_pitcairn =
 	false
 };
 
-static const struct si_dte_data dte_data_curacao_xt =
-{
+static const struct si_dte_data dte_data_curacao_xt = {
 	{ 0x1E8480, 0x3D0900, 0x989680, 0x2625A00, 0x0 },
 	{ 0x0, 0x0, 0x0, 0x0, 0x0 },
 	5,
@@ -569,8 +542,7 @@ static const struct si_dte_data dte_data_curacao_xt =
 	true
 };
 
-static const struct si_dte_data dte_data_curacao_pro =
-{
+static const struct si_dte_data dte_data_curacao_pro = {
 	{ 0x1E8480, 0x3D0900, 0x989680, 0x2625A00, 0x0 },
 	{ 0x0, 0x0, 0x0, 0x0, 0x0 },
 	5,
@@ -587,8 +559,7 @@ static const struct si_dte_data dte_data_curacao_pro =
 	true
 };
 
-static const struct si_dte_data dte_data_neptune_xt =
-{
+static const struct si_dte_data dte_data_neptune_xt = {
 	{ 0x1E8480, 0x3D0900, 0x989680, 0x2625A00, 0x0 },
 	{ 0x0, 0x0, 0x0, 0x0, 0x0 },
 	5,
@@ -605,8 +576,7 @@ static const struct si_dte_data dte_data_neptune_xt =
 	true
 };
 
-static const struct si_cac_config_reg cac_weights_chelsea_pro[] =
-{
+static const struct si_cac_config_reg cac_weights_chelsea_pro[] = {
 	{ 0x0, 0x0000ffff, 0, 0x82, SISLANDS_CACCONFIG_CGIND },
 	{ 0x0, 0xffff0000, 16, 0x4F, SISLANDS_CACCONFIG_CGIND },
 	{ 0x1, 0x0000ffff, 0, 0x153, SISLANDS_CACCONFIG_CGIND },
@@ -670,8 +640,7 @@ static const struct si_cac_config_reg cac_weights_chelsea_pro[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg cac_weights_chelsea_xt[] =
-{
+static const struct si_cac_config_reg cac_weights_chelsea_xt[] = {
 	{ 0x0, 0x0000ffff, 0, 0x82, SISLANDS_CACCONFIG_CGIND },
 	{ 0x0, 0xffff0000, 16, 0x4F, SISLANDS_CACCONFIG_CGIND },
 	{ 0x1, 0x0000ffff, 0, 0x153, SISLANDS_CACCONFIG_CGIND },
@@ -735,8 +704,7 @@ static const struct si_cac_config_reg cac_weights_chelsea_xt[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg cac_weights_heathrow[] =
-{
+static const struct si_cac_config_reg cac_weights_heathrow[] = {
 	{ 0x0, 0x0000ffff, 0, 0x82, SISLANDS_CACCONFIG_CGIND },
 	{ 0x0, 0xffff0000, 16, 0x4F, SISLANDS_CACCONFIG_CGIND },
 	{ 0x1, 0x0000ffff, 0, 0x153, SISLANDS_CACCONFIG_CGIND },
@@ -800,8 +768,7 @@ static const struct si_cac_config_reg cac_weights_heathrow[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg cac_weights_cape_verde_pro[] =
-{
+static const struct si_cac_config_reg cac_weights_cape_verde_pro[] = {
 	{ 0x0, 0x0000ffff, 0, 0x82, SISLANDS_CACCONFIG_CGIND },
 	{ 0x0, 0xffff0000, 16, 0x4F, SISLANDS_CACCONFIG_CGIND },
 	{ 0x1, 0x0000ffff, 0, 0x153, SISLANDS_CACCONFIG_CGIND },
@@ -865,8 +832,7 @@ static const struct si_cac_config_reg cac_weights_cape_verde_pro[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg cac_weights_cape_verde[] =
-{
+static const struct si_cac_config_reg cac_weights_cape_verde[] = {
 	{ 0x0, 0x0000ffff, 0, 0x82, SISLANDS_CACCONFIG_CGIND },
 	{ 0x0, 0xffff0000, 16, 0x4F, SISLANDS_CACCONFIG_CGIND },
 	{ 0x1, 0x0000ffff, 0, 0x153, SISLANDS_CACCONFIG_CGIND },
@@ -930,8 +896,7 @@ static const struct si_cac_config_reg cac_weights_cape_verde[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg lcac_cape_verde[] =
-{
+static const struct si_cac_config_reg lcac_cape_verde[] = {
 	{ 0x98, 0x0001fffe, 1, 0x2, SISLANDS_CACCONFIG_CGIND },
 	{ 0x98, 0x00000001, 0, 0x1, SISLANDS_CACCONFIG_CGIND },
 	{ 0x104, 0x0001fffe, 1, 0x2, SISLANDS_CACCONFIG_CGIND },
@@ -989,13 +954,11 @@ static const struct si_cac_config_reg lcac_cape_verde[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg cac_override_cape_verde[] =
-{
+static const struct si_cac_config_reg cac_override_cape_verde[] = {
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_powertune_data powertune_data_cape_verde =
-{
+static const struct si_powertune_data powertune_data_cape_verde = {
 	((1 << 16) | 0x6993),
 	5,
 	0,
@@ -1025,8 +988,7 @@ static const struct si_powertune_data powertune_data_cape_verde =
 	true
 };
 
-static const struct si_dte_data dte_data_cape_verde =
-{
+static const struct si_dte_data dte_data_cape_verde = {
 	{ 0, 0, 0, 0, 0 },
 	{ 0, 0, 0, 0, 0 },
 	0,
@@ -1043,8 +1005,7 @@ static const struct si_dte_data dte_data_cape_verde =
 	false
 };
 
-static const struct si_dte_data dte_data_venus_xtx =
-{
+static const struct si_dte_data dte_data_venus_xtx = {
 	{ 0x1E8480, 0x3D0900, 0x989680, 0x2625A00, 0x0 },
 	{ 0x71C, 0xAAB, 0xE39, 0x11C7, 0x0 },
 	5,
@@ -1061,8 +1022,7 @@ static const struct si_dte_data dte_data_venus_xtx =
 	true
 };
 
-static const struct si_dte_data dte_data_venus_xt =
-{
+static const struct si_dte_data dte_data_venus_xt = {
 	{ 0x1E8480, 0x3D0900, 0x989680, 0x2625A00, 0x0 },
 	{ 0xBDA, 0x11C7, 0x17B4, 0x1DA1, 0x0 },
 	5,
@@ -1079,8 +1039,7 @@ static const struct si_dte_data dte_data_venus_xt =
 	true
 };
 
-static const struct si_dte_data dte_data_venus_pro =
-{
+static const struct si_dte_data dte_data_venus_pro = {
 	{  0x1E8480, 0x3D0900, 0x989680, 0x2625A00, 0x0 },
 	{ 0x11C7, 0x1AAB, 0x238E, 0x2C72, 0x0 },
 	5,
@@ -1097,8 +1056,7 @@ static const struct si_dte_data dte_data_venus_pro =
 	true
 };
 
-struct si_cac_config_reg cac_weights_oland[] =
-{
+static struct si_cac_config_reg cac_weights_oland[] = {
 	{ 0x0, 0x0000ffff, 0, 0x82, SISLANDS_CACCONFIG_CGIND },
 	{ 0x0, 0xffff0000, 16, 0x4F, SISLANDS_CACCONFIG_CGIND },
 	{ 0x1, 0x0000ffff, 0, 0x153, SISLANDS_CACCONFIG_CGIND },
@@ -1162,8 +1120,7 @@ struct si_cac_config_reg cac_weights_oland[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg cac_weights_mars_pro[] =
-{
+static const struct si_cac_config_reg cac_weights_mars_pro[] = {
 	{ 0x0, 0x0000ffff, 0, 0x43, SISLANDS_CACCONFIG_CGIND },
 	{ 0x0, 0xffff0000, 16, 0x29, SISLANDS_CACCONFIG_CGIND },
 	{ 0x1, 0x0000ffff, 0, 0xAF, SISLANDS_CACCONFIG_CGIND },
@@ -1227,8 +1184,7 @@ static const struct si_cac_config_reg cac_weights_mars_pro[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg cac_weights_mars_xt[] =
-{
+static const struct si_cac_config_reg cac_weights_mars_xt[] = {
 	{ 0x0, 0x0000ffff, 0, 0x43, SISLANDS_CACCONFIG_CGIND },
 	{ 0x0, 0xffff0000, 16, 0x29, SISLANDS_CACCONFIG_CGIND },
 	{ 0x1, 0x0000ffff, 0, 0xAF, SISLANDS_CACCONFIG_CGIND },
@@ -1292,8 +1248,7 @@ static const struct si_cac_config_reg cac_weights_mars_xt[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg cac_weights_oland_pro[] =
-{
+static const struct si_cac_config_reg cac_weights_oland_pro[] = {
 	{ 0x0, 0x0000ffff, 0, 0x43, SISLANDS_CACCONFIG_CGIND },
 	{ 0x0, 0xffff0000, 16, 0x29, SISLANDS_CACCONFIG_CGIND },
 	{ 0x1, 0x0000ffff, 0, 0xAF, SISLANDS_CACCONFIG_CGIND },
@@ -1357,8 +1312,7 @@ static const struct si_cac_config_reg cac_weights_oland_pro[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg cac_weights_oland_xt[] =
-{
+static const struct si_cac_config_reg cac_weights_oland_xt[] = {
 	{ 0x0, 0x0000ffff, 0, 0x43, SISLANDS_CACCONFIG_CGIND },
 	{ 0x0, 0xffff0000, 16, 0x29, SISLANDS_CACCONFIG_CGIND },
 	{ 0x1, 0x0000ffff, 0, 0xAF, SISLANDS_CACCONFIG_CGIND },
@@ -1422,8 +1376,7 @@ static const struct si_cac_config_reg cac_weights_oland_xt[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg lcac_oland[] =
-{
+static const struct si_cac_config_reg lcac_oland[] = {
 	{ 0x98, 0x0001fffe, 1, 0x2, SISLANDS_CACCONFIG_CGIND },
 	{ 0x98, 0x00000001, 0, 0x1, SISLANDS_CACCONFIG_CGIND },
 	{ 0x104, 0x0001fffe, 1, 0x2, SISLANDS_CACCONFIG_CGIND },
@@ -1469,8 +1422,7 @@ static const struct si_cac_config_reg lcac_oland[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg lcac_mars_pro[] =
-{
+static const struct si_cac_config_reg lcac_mars_pro[] = {
 	{ 0x98, 0x0001fffe, 1, 0x2, SISLANDS_CACCONFIG_CGIND },
 	{ 0x98, 0x00000001, 0, 0x1, SISLANDS_CACCONFIG_CGIND },
 	{ 0x104, 0x0001fffe, 1, 0x2, SISLANDS_CACCONFIG_CGIND },
@@ -1516,13 +1468,11 @@ static const struct si_cac_config_reg lcac_mars_pro[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_cac_config_reg cac_override_oland[] =
-{
+static const struct si_cac_config_reg cac_override_oland[] = {
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_powertune_data powertune_data_oland =
-{
+static const struct si_powertune_data powertune_data_oland = {
 	((1 << 16) | 0x6993),
 	5,
 	0,
@@ -1552,8 +1502,7 @@ static const struct si_powertune_data powertune_data_oland =
 	true
 };
 
-static const struct si_powertune_data powertune_data_mars_pro =
-{
+static const struct si_powertune_data powertune_data_mars_pro = {
 	((1 << 16) | 0x6993),
 	5,
 	0,
@@ -1583,8 +1532,7 @@ static const struct si_powertune_data powertune_data_mars_pro =
 	true
 };
 
-static const struct si_dte_data dte_data_oland =
-{
+static const struct si_dte_data dte_data_oland = {
 	{ 0, 0, 0, 0, 0 },
 	{ 0, 0, 0, 0, 0 },
 	0,
@@ -1601,8 +1549,7 @@ static const struct si_dte_data dte_data_oland =
 	false
 };
 
-static const struct si_dte_data dte_data_mars_pro =
-{
+static const struct si_dte_data dte_data_mars_pro = {
 	{ 0x1E8480, 0x3D0900, 0x989680, 0x2625A00, 0x0 },
 	{ 0x0, 0x0, 0x0, 0x0, 0x0 },
 	5,
@@ -1619,8 +1566,7 @@ static const struct si_dte_data dte_data_mars_pro =
 	true
 };
 
-static const struct si_dte_data dte_data_sun_xt =
-{
+static const struct si_dte_data dte_data_sun_xt = {
 	{ 0x1E8480, 0x3D0900, 0x989680, 0x2625A00, 0x0 },
 	{ 0x0, 0x0, 0x0, 0x0, 0x0 },
 	5,
@@ -1638,8 +1584,7 @@ static const struct si_dte_data dte_data_sun_xt =
 };
 
 
-static const struct si_cac_config_reg cac_weights_hainan[] =
-{
+static const struct si_cac_config_reg cac_weights_hainan[] = {
 	{ 0x0, 0x0000ffff, 0, 0x2d9, SISLANDS_CACCONFIG_CGIND },
 	{ 0x0, 0xffff0000, 16, 0x22b, SISLANDS_CACCONFIG_CGIND },
 	{ 0x1, 0x0000ffff, 0, 0x21c, SISLANDS_CACCONFIG_CGIND },
@@ -1703,8 +1648,7 @@ static const struct si_cac_config_reg cac_weights_hainan[] =
 	{ 0xFFFFFFFF }
 };
 
-static const struct si_powertune_data powertune_data_hainan =
-{
+static const struct si_powertune_data powertune_data_hainan = {
 	((1 << 16) | 0x6993),
 	5,
 	0,
@@ -1733,14 +1677,6 @@ static const struct si_powertune_data powertune_data_hainan =
 	},
 	true
 };
-
-struct rv7xx_power_info *rv770_get_pi(struct radeon_device *rdev);
-struct evergreen_power_info *evergreen_get_pi(struct radeon_device *rdev);
-struct ni_power_info *ni_get_pi(struct radeon_device *rdev);
-struct ni_ps *ni_get_ps(struct radeon_ps *rps);
-
-extern int si_mc_load_microcode(struct radeon_device *rdev);
-extern void vce_v1_0_enable_mgcg(struct radeon_device *rdev, bool enable);
 
 static int si_populate_voltage_value(struct radeon_device *rdev,
 				     const struct atom_voltage_table *table,
@@ -1956,6 +1892,7 @@ static void si_initialize_powertune_defaults(struct radeon_device *rdev)
 		case 0x682C:
 			si_pi->cac_weights = cac_weights_cape_verde_pro;
 			si_pi->dte_data = dte_data_sun_xt;
+			update_dte_from_pl2 = true;
 			break;
 		case 0x6825:
 		case 0x6827:
@@ -2482,7 +2419,7 @@ static int si_initialize_smc_dte_tables(struct radeon_device *rdev)
 	if (dte_data->k <= 0)
 		return -EINVAL;
 
-	dte_tables = kzalloc(sizeof(Smc_SIslands_DTE_Configuration), GFP_KERNEL);
+	dte_tables = kzalloc_obj(Smc_SIslands_DTE_Configuration);
 	if (dte_tables == NULL) {
 		si_pi->enable_dte = false;
 		return -ENOMEM;
@@ -2662,7 +2599,7 @@ static int si_initialize_smc_cac_tables(struct radeon_device *rdev)
 	if (ni_pi->enable_cac == false)
 		return 0;
 
-	cac_tables = kzalloc(sizeof(PP_SIslands_CacConfig), GFP_KERNEL);
+	cac_tables = kzalloc_obj(PP_SIslands_CacConfig);
 	if (!cac_tables)
 		return -ENOMEM;
 
@@ -2857,7 +2794,7 @@ static int si_init_smc_spll_table(struct radeon_device *rdev)
 	if (si_pi->spll_table_start == 0)
 		return -EINVAL;
 
-	spll_table = kzalloc(sizeof(SMC_SISLANDS_SPLL_DIV_TABLE), GFP_KERNEL);
+	spll_table = kzalloc_obj(SMC_SISLANDS_SPLL_DIV_TABLE);
 	if (spll_table == NULL)
 		return -ENOMEM;
 
@@ -2977,17 +2914,23 @@ static void si_apply_state_adjust_rules(struct radeon_device *rdev,
 
 	if (rdev->family == CHIP_HAINAN) {
 		if ((rdev->pdev->revision == 0x81) ||
-		    (rdev->pdev->revision == 0x83) ||
 		    (rdev->pdev->revision == 0xC3) ||
+		    (rdev->pdev->device == 0x6660) ||
 		    (rdev->pdev->device == 0x6664) ||
 		    (rdev->pdev->device == 0x6665) ||
-		    (rdev->pdev->device == 0x6667)) {
+		    (rdev->pdev->device == 0x6667) ||
+		    (rdev->pdev->device == 0x666F)) {
 			max_sclk = 75000;
 		}
 		if ((rdev->pdev->revision == 0xC3) ||
 		    (rdev->pdev->device == 0x6665)) {
 			max_sclk = 60000;
 			max_mclk = 80000;
+		}
+		if ((rdev->pdev->device == 0x666f) &&
+		    (rdev->pdev->revision == 0x00)) {
+			max_sclk = 80000;
+			max_mclk = 95000;
 		}
 	} else if (rdev->family == CHIP_OLAND) {
 		if ((rdev->pdev->revision == 0xC7) ||
@@ -2999,6 +2942,9 @@ static void si_apply_state_adjust_rules(struct radeon_device *rdev,
 		    (rdev->pdev->device == 0x6605)) {
 			max_sclk = 75000;
 		}
+
+		if (rdev->pm.dpm.high_pixelclock_count > 1)
+			disable_sclk_switching = true;
 	}
 
 	if (rps->vce_active) {
@@ -3637,14 +3583,13 @@ static int si_notify_smc_display_change(struct radeon_device *rdev,
 
 static void si_program_response_times(struct radeon_device *rdev)
 {
-	u32 voltage_response_time, backbias_response_time, acpi_delay_time, vbi_time_out;
+	u32 voltage_response_time, acpi_delay_time, vbi_time_out;
 	u32 vddc_dly, acpi_dly, vbi_dly;
 	u32 reference_clock;
 
 	si_write_smc_soft_register(rdev, SI_SMC_SOFT_REGISTER_mvdd_chg_time, 1);
 
 	voltage_response_time = (u32)rdev->pm.dpm.voltage_response_time;
-	backbias_response_time = (u32)rdev->pm.dpm.backbias_response_time;
 
 	if (voltage_response_time == 0)
 		voltage_response_time = 1000;
@@ -4371,70 +4316,70 @@ static int si_populate_smc_initial_state(struct radeon_device *rdev,
 	u32 reg;
 	int ret;
 
-	table->initialState.levels[0].mclk.vDLL_CNTL =
+	table->initialState.level.mclk.vDLL_CNTL =
 		cpu_to_be32(si_pi->clock_registers.dll_cntl);
-	table->initialState.levels[0].mclk.vMCLK_PWRMGT_CNTL =
+	table->initialState.level.mclk.vMCLK_PWRMGT_CNTL =
 		cpu_to_be32(si_pi->clock_registers.mclk_pwrmgt_cntl);
-	table->initialState.levels[0].mclk.vMPLL_AD_FUNC_CNTL =
+	table->initialState.level.mclk.vMPLL_AD_FUNC_CNTL =
 		cpu_to_be32(si_pi->clock_registers.mpll_ad_func_cntl);
-	table->initialState.levels[0].mclk.vMPLL_DQ_FUNC_CNTL =
+	table->initialState.level.mclk.vMPLL_DQ_FUNC_CNTL =
 		cpu_to_be32(si_pi->clock_registers.mpll_dq_func_cntl);
-	table->initialState.levels[0].mclk.vMPLL_FUNC_CNTL =
+	table->initialState.level.mclk.vMPLL_FUNC_CNTL =
 		cpu_to_be32(si_pi->clock_registers.mpll_func_cntl);
-	table->initialState.levels[0].mclk.vMPLL_FUNC_CNTL_1 =
+	table->initialState.level.mclk.vMPLL_FUNC_CNTL_1 =
 		cpu_to_be32(si_pi->clock_registers.mpll_func_cntl_1);
-	table->initialState.levels[0].mclk.vMPLL_FUNC_CNTL_2 =
+	table->initialState.level.mclk.vMPLL_FUNC_CNTL_2 =
 		cpu_to_be32(si_pi->clock_registers.mpll_func_cntl_2);
-	table->initialState.levels[0].mclk.vMPLL_SS =
+	table->initialState.level.mclk.vMPLL_SS =
 		cpu_to_be32(si_pi->clock_registers.mpll_ss1);
-	table->initialState.levels[0].mclk.vMPLL_SS2 =
+	table->initialState.level.mclk.vMPLL_SS2 =
 		cpu_to_be32(si_pi->clock_registers.mpll_ss2);
 
-	table->initialState.levels[0].mclk.mclk_value =
+	table->initialState.level.mclk.mclk_value =
 		cpu_to_be32(initial_state->performance_levels[0].mclk);
 
-	table->initialState.levels[0].sclk.vCG_SPLL_FUNC_CNTL =
+	table->initialState.level.sclk.vCG_SPLL_FUNC_CNTL =
 		cpu_to_be32(si_pi->clock_registers.cg_spll_func_cntl);
-	table->initialState.levels[0].sclk.vCG_SPLL_FUNC_CNTL_2 =
+	table->initialState.level.sclk.vCG_SPLL_FUNC_CNTL_2 =
 		cpu_to_be32(si_pi->clock_registers.cg_spll_func_cntl_2);
-	table->initialState.levels[0].sclk.vCG_SPLL_FUNC_CNTL_3 =
+	table->initialState.level.sclk.vCG_SPLL_FUNC_CNTL_3 =
 		cpu_to_be32(si_pi->clock_registers.cg_spll_func_cntl_3);
-	table->initialState.levels[0].sclk.vCG_SPLL_FUNC_CNTL_4 =
+	table->initialState.level.sclk.vCG_SPLL_FUNC_CNTL_4 =
 		cpu_to_be32(si_pi->clock_registers.cg_spll_func_cntl_4);
-	table->initialState.levels[0].sclk.vCG_SPLL_SPREAD_SPECTRUM =
+	table->initialState.level.sclk.vCG_SPLL_SPREAD_SPECTRUM =
 		cpu_to_be32(si_pi->clock_registers.cg_spll_spread_spectrum);
-	table->initialState.levels[0].sclk.vCG_SPLL_SPREAD_SPECTRUM_2  =
+	table->initialState.level.sclk.vCG_SPLL_SPREAD_SPECTRUM_2  =
 		cpu_to_be32(si_pi->clock_registers.cg_spll_spread_spectrum_2);
 
-	table->initialState.levels[0].sclk.sclk_value =
+	table->initialState.level.sclk.sclk_value =
 		cpu_to_be32(initial_state->performance_levels[0].sclk);
 
-	table->initialState.levels[0].arbRefreshState =
+	table->initialState.level.arbRefreshState =
 		SISLANDS_INITIAL_STATE_ARB_INDEX;
 
-	table->initialState.levels[0].ACIndex = 0;
+	table->initialState.level.ACIndex = 0;
 
 	ret = si_populate_voltage_value(rdev, &eg_pi->vddc_voltage_table,
 					initial_state->performance_levels[0].vddc,
-					&table->initialState.levels[0].vddc);
+					&table->initialState.level.vddc);
 
 	if (!ret) {
 		u16 std_vddc;
 
 		ret = si_get_std_voltage_value(rdev,
-					       &table->initialState.levels[0].vddc,
+					       &table->initialState.level.vddc,
 					       &std_vddc);
 		if (!ret)
 			si_populate_std_voltage_value(rdev, std_vddc,
-						      table->initialState.levels[0].vddc.index,
-						      &table->initialState.levels[0].std_vddc);
+						      table->initialState.level.vddc.index,
+						      &table->initialState.level.std_vddc);
 	}
 
 	if (eg_pi->vddci_control)
 		si_populate_voltage_value(rdev,
 					  &eg_pi->vddci_voltage_table,
 					  initial_state->performance_levels[0].vddci,
-					  &table->initialState.levels[0].vddci);
+					  &table->initialState.level.vddci);
 
 	if (si_pi->vddc_phase_shed_control)
 		si_populate_phase_shedding_value(rdev,
@@ -4442,43 +4387,43 @@ static int si_populate_smc_initial_state(struct radeon_device *rdev,
 						 initial_state->performance_levels[0].vddc,
 						 initial_state->performance_levels[0].sclk,
 						 initial_state->performance_levels[0].mclk,
-						 &table->initialState.levels[0].vddc);
+						 &table->initialState.level.vddc);
 
-	si_populate_initial_mvdd_value(rdev, &table->initialState.levels[0].mvdd);
+	si_populate_initial_mvdd_value(rdev, &table->initialState.level.mvdd);
 
 	reg = CG_R(0xffff) | CG_L(0);
-	table->initialState.levels[0].aT = cpu_to_be32(reg);
+	table->initialState.level.aT = cpu_to_be32(reg);
 
-	table->initialState.levels[0].bSP = cpu_to_be32(pi->dsp);
+	table->initialState.level.bSP = cpu_to_be32(pi->dsp);
 
-	table->initialState.levels[0].gen2PCIE = (u8)si_pi->boot_pcie_gen;
+	table->initialState.level.gen2PCIE = (u8)si_pi->boot_pcie_gen;
 
 	if (pi->mem_gddr5) {
-		table->initialState.levels[0].strobeMode =
+		table->initialState.level.strobeMode =
 			si_get_strobe_mode_settings(rdev,
 						    initial_state->performance_levels[0].mclk);
 
 		if (initial_state->performance_levels[0].mclk > pi->mclk_edc_enable_threshold)
-			table->initialState.levels[0].mcFlags = SISLANDS_SMC_MC_EDC_RD_FLAG | SISLANDS_SMC_MC_EDC_WR_FLAG;
+			table->initialState.level.mcFlags = SISLANDS_SMC_MC_EDC_RD_FLAG | SISLANDS_SMC_MC_EDC_WR_FLAG;
 		else
-			table->initialState.levels[0].mcFlags =  0;
+			table->initialState.level.mcFlags =  0;
 	}
 
 	table->initialState.levelCount = 1;
 
 	table->initialState.flags |= PPSMC_SWSTATE_FLAG_DC;
 
-	table->initialState.levels[0].dpm2.MaxPS = 0;
-	table->initialState.levels[0].dpm2.NearTDPDec = 0;
-	table->initialState.levels[0].dpm2.AboveSafeInc = 0;
-	table->initialState.levels[0].dpm2.BelowSafeInc = 0;
-	table->initialState.levels[0].dpm2.PwrEfficiencyRatio = 0;
+	table->initialState.level.dpm2.MaxPS = 0;
+	table->initialState.level.dpm2.NearTDPDec = 0;
+	table->initialState.level.dpm2.AboveSafeInc = 0;
+	table->initialState.level.dpm2.BelowSafeInc = 0;
+	table->initialState.level.dpm2.PwrEfficiencyRatio = 0;
 
 	reg = MIN_POWER_MASK | MAX_POWER_MASK;
-	table->initialState.levels[0].SQPowerThrottle = cpu_to_be32(reg);
+	table->initialState.level.SQPowerThrottle = cpu_to_be32(reg);
 
 	reg = MAX_POWER_DELTA_MASK | STI_SIZE_MASK | LTI_RATIO_MASK;
-	table->initialState.levels[0].SQPowerThrottle_2 = cpu_to_be32(reg);
+	table->initialState.level.SQPowerThrottle_2 = cpu_to_be32(reg);
 
 	return 0;
 }
@@ -4509,18 +4454,18 @@ static int si_populate_smc_acpi_state(struct radeon_device *rdev,
 
 	if (pi->acpi_vddc) {
 		ret = si_populate_voltage_value(rdev, &eg_pi->vddc_voltage_table,
-						pi->acpi_vddc, &table->ACPIState.levels[0].vddc);
+						pi->acpi_vddc, &table->ACPIState.level.vddc);
 		if (!ret) {
 			u16 std_vddc;
 
 			ret = si_get_std_voltage_value(rdev,
-						       &table->ACPIState.levels[0].vddc, &std_vddc);
+						       &table->ACPIState.level.vddc, &std_vddc);
 			if (!ret)
 				si_populate_std_voltage_value(rdev, std_vddc,
-							      table->ACPIState.levels[0].vddc.index,
-							      &table->ACPIState.levels[0].std_vddc);
+							      table->ACPIState.level.vddc.index,
+							      &table->ACPIState.level.std_vddc);
 		}
-		table->ACPIState.levels[0].gen2PCIE = si_pi->acpi_pcie_gen;
+		table->ACPIState.level.gen2PCIE = si_pi->acpi_pcie_gen;
 
 		if (si_pi->vddc_phase_shed_control) {
 			si_populate_phase_shedding_value(rdev,
@@ -4528,23 +4473,23 @@ static int si_populate_smc_acpi_state(struct radeon_device *rdev,
 							 pi->acpi_vddc,
 							 0,
 							 0,
-							 &table->ACPIState.levels[0].vddc);
+							 &table->ACPIState.level.vddc);
 		}
 	} else {
 		ret = si_populate_voltage_value(rdev, &eg_pi->vddc_voltage_table,
-						pi->min_vddc_in_table, &table->ACPIState.levels[0].vddc);
+						pi->min_vddc_in_table, &table->ACPIState.level.vddc);
 		if (!ret) {
 			u16 std_vddc;
 
 			ret = si_get_std_voltage_value(rdev,
-						       &table->ACPIState.levels[0].vddc, &std_vddc);
+						       &table->ACPIState.level.vddc, &std_vddc);
 
 			if (!ret)
 				si_populate_std_voltage_value(rdev, std_vddc,
-							      table->ACPIState.levels[0].vddc.index,
-							      &table->ACPIState.levels[0].std_vddc);
+							      table->ACPIState.level.vddc.index,
+							      &table->ACPIState.level.std_vddc);
 		}
-		table->ACPIState.levels[0].gen2PCIE = (u8)r600_get_pcie_gen_support(rdev,
+		table->ACPIState.level.gen2PCIE = (u8)r600_get_pcie_gen_support(rdev,
 										    si_pi->sys_pcie_mask,
 										    si_pi->boot_pcie_gen,
 										    RADEON_PCIE_GEN1);
@@ -4555,14 +4500,14 @@ static int si_populate_smc_acpi_state(struct radeon_device *rdev,
 							 pi->min_vddc_in_table,
 							 0,
 							 0,
-							 &table->ACPIState.levels[0].vddc);
+							 &table->ACPIState.level.vddc);
 	}
 
 	if (pi->acpi_vddc) {
 		if (eg_pi->acpi_vddci)
 			si_populate_voltage_value(rdev, &eg_pi->vddci_voltage_table,
 						  eg_pi->acpi_vddci,
-						  &table->ACPIState.levels[0].vddci);
+						  &table->ACPIState.level.vddci);
 	}
 
 	mclk_pwrmgt_cntl |= MRDCK0_RESET | MRDCK1_RESET;
@@ -4573,59 +4518,59 @@ static int si_populate_smc_acpi_state(struct radeon_device *rdev,
 	spll_func_cntl_2 &= ~SCLK_MUX_SEL_MASK;
 	spll_func_cntl_2 |= SCLK_MUX_SEL(4);
 
-	table->ACPIState.levels[0].mclk.vDLL_CNTL =
+	table->ACPIState.level.mclk.vDLL_CNTL =
 		cpu_to_be32(dll_cntl);
-	table->ACPIState.levels[0].mclk.vMCLK_PWRMGT_CNTL =
+	table->ACPIState.level.mclk.vMCLK_PWRMGT_CNTL =
 		cpu_to_be32(mclk_pwrmgt_cntl);
-	table->ACPIState.levels[0].mclk.vMPLL_AD_FUNC_CNTL =
+	table->ACPIState.level.mclk.vMPLL_AD_FUNC_CNTL =
 		cpu_to_be32(mpll_ad_func_cntl);
-	table->ACPIState.levels[0].mclk.vMPLL_DQ_FUNC_CNTL =
+	table->ACPIState.level.mclk.vMPLL_DQ_FUNC_CNTL =
 		cpu_to_be32(mpll_dq_func_cntl);
-	table->ACPIState.levels[0].mclk.vMPLL_FUNC_CNTL =
+	table->ACPIState.level.mclk.vMPLL_FUNC_CNTL =
 		cpu_to_be32(mpll_func_cntl);
-	table->ACPIState.levels[0].mclk.vMPLL_FUNC_CNTL_1 =
+	table->ACPIState.level.mclk.vMPLL_FUNC_CNTL_1 =
 		cpu_to_be32(mpll_func_cntl_1);
-	table->ACPIState.levels[0].mclk.vMPLL_FUNC_CNTL_2 =
+	table->ACPIState.level.mclk.vMPLL_FUNC_CNTL_2 =
 		cpu_to_be32(mpll_func_cntl_2);
-	table->ACPIState.levels[0].mclk.vMPLL_SS =
+	table->ACPIState.level.mclk.vMPLL_SS =
 		cpu_to_be32(si_pi->clock_registers.mpll_ss1);
-	table->ACPIState.levels[0].mclk.vMPLL_SS2 =
+	table->ACPIState.level.mclk.vMPLL_SS2 =
 		cpu_to_be32(si_pi->clock_registers.mpll_ss2);
 
-	table->ACPIState.levels[0].sclk.vCG_SPLL_FUNC_CNTL =
+	table->ACPIState.level.sclk.vCG_SPLL_FUNC_CNTL =
 		cpu_to_be32(spll_func_cntl);
-	table->ACPIState.levels[0].sclk.vCG_SPLL_FUNC_CNTL_2 =
+	table->ACPIState.level.sclk.vCG_SPLL_FUNC_CNTL_2 =
 		cpu_to_be32(spll_func_cntl_2);
-	table->ACPIState.levels[0].sclk.vCG_SPLL_FUNC_CNTL_3 =
+	table->ACPIState.level.sclk.vCG_SPLL_FUNC_CNTL_3 =
 		cpu_to_be32(spll_func_cntl_3);
-	table->ACPIState.levels[0].sclk.vCG_SPLL_FUNC_CNTL_4 =
+	table->ACPIState.level.sclk.vCG_SPLL_FUNC_CNTL_4 =
 		cpu_to_be32(spll_func_cntl_4);
 
-	table->ACPIState.levels[0].mclk.mclk_value = 0;
-	table->ACPIState.levels[0].sclk.sclk_value = 0;
+	table->ACPIState.level.mclk.mclk_value = 0;
+	table->ACPIState.level.sclk.sclk_value = 0;
 
-	si_populate_mvdd_value(rdev, 0, &table->ACPIState.levels[0].mvdd);
+	si_populate_mvdd_value(rdev, 0, &table->ACPIState.level.mvdd);
 
 	if (eg_pi->dynamic_ac_timing)
-		table->ACPIState.levels[0].ACIndex = 0;
+		table->ACPIState.level.ACIndex = 0;
 
-	table->ACPIState.levels[0].dpm2.MaxPS = 0;
-	table->ACPIState.levels[0].dpm2.NearTDPDec = 0;
-	table->ACPIState.levels[0].dpm2.AboveSafeInc = 0;
-	table->ACPIState.levels[0].dpm2.BelowSafeInc = 0;
-	table->ACPIState.levels[0].dpm2.PwrEfficiencyRatio = 0;
+	table->ACPIState.level.dpm2.MaxPS = 0;
+	table->ACPIState.level.dpm2.NearTDPDec = 0;
+	table->ACPIState.level.dpm2.AboveSafeInc = 0;
+	table->ACPIState.level.dpm2.BelowSafeInc = 0;
+	table->ACPIState.level.dpm2.PwrEfficiencyRatio = 0;
 
 	reg = MIN_POWER_MASK | MAX_POWER_MASK;
-	table->ACPIState.levels[0].SQPowerThrottle = cpu_to_be32(reg);
+	table->ACPIState.level.SQPowerThrottle = cpu_to_be32(reg);
 
 	reg = MAX_POWER_DELTA_MASK | STI_SIZE_MASK | LTI_RATIO_MASK;
-	table->ACPIState.levels[0].SQPowerThrottle_2 = cpu_to_be32(reg);
+	table->ACPIState.level.SQPowerThrottle_2 = cpu_to_be32(reg);
 
 	return 0;
 }
 
 static int si_populate_ulv_state(struct radeon_device *rdev,
-				 SISLANDS_SMC_SWSTATE *state)
+				 struct SISLANDS_SMC_SWSTATE_SINGLE *state)
 {
 	struct evergreen_power_info *eg_pi = evergreen_get_pi(rdev);
 	struct si_power_info *si_pi = si_get_pi(rdev);
@@ -4634,19 +4579,19 @@ static int si_populate_ulv_state(struct radeon_device *rdev,
 	int ret;
 
 	ret = si_convert_power_level_to_smc(rdev, &ulv->pl,
-					    &state->levels[0]);
+					    &state->level);
 	if (!ret) {
 		if (eg_pi->sclk_deep_sleep) {
 			if (sclk_in_sr <= SCLK_MIN_DEEPSLEEP_FREQ)
-				state->levels[0].stateFlags |= PPSMC_STATEFLAG_DEEPSLEEP_BYPASS;
+				state->level.stateFlags |= PPSMC_STATEFLAG_DEEPSLEEP_BYPASS;
 			else
-				state->levels[0].stateFlags |= PPSMC_STATEFLAG_DEEPSLEEP_THROTTLE;
+				state->level.stateFlags |= PPSMC_STATEFLAG_DEEPSLEEP_THROTTLE;
 		}
 		if (ulv->one_pcie_lane_in_ulv)
 			state->flags |= PPSMC_SWSTATE_FLAG_PCIE_X1;
-		state->levels[0].arbRefreshState = (u8)(SISLANDS_ULV_STATE_ARB_INDEX);
-		state->levels[0].ACIndex = 1;
-		state->levels[0].std_vddc = state->levels[0].vddc;
+		state->level.arbRefreshState = (u8)(SISLANDS_ULV_STATE_ARB_INDEX);
+		state->level.ACIndex = 1;
+		state->level.std_vddc = state->level.vddc;
 		state->levelCount = 1;
 
 		state->flags |= PPSMC_SWSTATE_FLAG_DC;
@@ -4746,7 +4691,9 @@ static int si_init_smc_table(struct radeon_device *rdev)
 	if (ret)
 		return ret;
 
-	table->driverState = table->initialState;
+	table->driverState.flags = table->initialState.flags;
+	table->driverState.levelCount = table->initialState.levelCount;
+	table->driverState.levels[0] = table->initialState.level;
 
 	ret = si_do_program_memory_timing_parameters(rdev, radeon_boot_state,
 						     SISLANDS_INITIAL_STATE_ARB_INDEX);
@@ -5271,10 +5218,9 @@ static int si_upload_sw_state(struct radeon_device *rdev,
 	int ret;
 	u32 address = si_pi->state_table_start +
 		offsetof(SISLANDS_SMC_STATETABLE, driverState);
-	u32 state_size = sizeof(SISLANDS_SMC_SWSTATE) +
-		((new_state->performance_level_count - 1) *
-		 sizeof(SISLANDS_SMC_HW_PERFORMANCE_LEVEL));
 	SISLANDS_SMC_SWSTATE *smc_state = &si_pi->smc_statetable.driverState;
+	size_t state_size = struct_size(smc_state, levels,
+					new_state->performance_level_count);
 
 	memset(smc_state, 0, state_size);
 
@@ -5297,8 +5243,8 @@ static int si_upload_ulv_state(struct radeon_device *rdev)
 	if (ulv->supported && ulv->pl.vddc) {
 		u32 address = si_pi->state_table_start +
 			offsetof(SISLANDS_SMC_STATETABLE, ULVState);
-		SISLANDS_SMC_SWSTATE *smc_state = &si_pi->smc_statetable.ULVState;
-		u32 state_size = sizeof(SISLANDS_SMC_SWSTATE);
+		struct SISLANDS_SMC_SWSTATE_SINGLE *smc_state = &si_pi->smc_statetable.ULVState;
+		u32 state_size = sizeof(struct SISLANDS_SMC_SWSTATE_SINGLE);
 
 		memset(smc_state, 0, state_size);
 
@@ -5535,7 +5481,7 @@ static int si_initialize_mc_reg_table(struct radeon_device *rdev)
 	u8 module_index = rv770_get_memory_module_index(rdev);
 	int ret;
 
-	table = kzalloc(sizeof(struct atom_mc_reg_table), GFP_KERNEL);
+	table = kzalloc_obj(struct atom_mc_reg_table);
 	if (!table)
 		return -ENOMEM;
 
@@ -5762,9 +5708,11 @@ static void si_request_link_speed_change_before_state_change(struct radeon_devic
 			si_pi->force_pcie_gen = RADEON_PCIE_GEN2;
 			if (current_link_speed == RADEON_PCIE_GEN2)
 				break;
+			fallthrough;
 		case RADEON_PCIE_GEN2:
 			if (radeon_acpi_pcie_performance_request(rdev, PCIE_PERF_REQ_PECI_GEN2, false) == 0)
 				break;
+			fallthrough;
 #endif
 		default:
 			si_pi->force_pcie_gen = si_get_current_pcie_speed(rdev);
@@ -5895,7 +5843,7 @@ static int si_patch_single_dependency_table_based_on_leakage(struct radeon_devic
 
 static int si_patch_dependency_tables_based_on_leakage(struct radeon_device *rdev)
 {
-	int ret = 0;
+	int ret;
 
 	ret = si_patch_single_dependency_table_based_on_leakage(rdev,
 								&rdev->pm.dpm.dyn_state.vddc_dependency_on_sclk);
@@ -6832,8 +6780,8 @@ static int si_parse_power_table(struct radeon_device *rdev)
 		(mode_info->atom_context->bios + data_offset +
 		 le16_to_cpu(power_info->pplib.usNonClockInfoArrayOffset));
 
-	rdev->pm.dpm.ps = kzalloc(sizeof(struct radeon_ps) *
-				  state_array->ucNumEntries, GFP_KERNEL);
+	rdev->pm.dpm.ps = kzalloc_objs(struct radeon_ps,
+				       state_array->ucNumEntries);
 	if (!rdev->pm.dpm.ps)
 		return -ENOMEM;
 	power_state_offset = (u8 *)state_array->states;
@@ -6845,7 +6793,7 @@ static int si_parse_power_table(struct radeon_device *rdev)
 			&non_clock_info_array->nonClockInfo[non_clock_array_index];
 		if (!rdev->pm.power_state[i].clock_info)
 			return -EINVAL;
-		ps = kzalloc(sizeof(struct ni_ps), GFP_KERNEL);
+		ps = kzalloc_obj(struct ni_ps);
 		if (ps == NULL) {
 			kfree(rdev->pm.dpm.ps);
 			return -ENOMEM;
@@ -6898,10 +6846,11 @@ int si_dpm_init(struct radeon_device *rdev)
 	struct ni_power_info *ni_pi;
 	struct si_power_info *si_pi;
 	struct atom_clock_dividers dividers;
+	enum pci_bus_speed speed_cap = PCI_SPEED_UNKNOWN;
+	struct pci_dev *root = rdev->pdev->bus->self;
 	int ret;
-	u32 mask;
 
-	si_pi = kzalloc(sizeof(struct si_power_info), GFP_KERNEL);
+	si_pi = kzalloc_obj(struct si_power_info);
 	if (si_pi == NULL)
 		return -ENOMEM;
 	rdev->pm.dpm.priv = si_pi;
@@ -6909,11 +6858,21 @@ int si_dpm_init(struct radeon_device *rdev)
 	eg_pi = &ni_pi->eg;
 	pi = &eg_pi->rv7xx;
 
-	ret = drm_pcie_get_speed_cap_mask(rdev->ddev, &mask);
-	if (ret)
+	if (!pci_is_root_bus(rdev->pdev->bus))
+		speed_cap = pcie_get_speed_cap(root);
+	if (speed_cap == PCI_SPEED_UNKNOWN) {
 		si_pi->sys_pcie_mask = 0;
-	else
-		si_pi->sys_pcie_mask = mask;
+	} else {
+		if (speed_cap == PCIE_SPEED_8_0GT)
+			si_pi->sys_pcie_mask = RADEON_PCIE_SPEED_25 |
+				RADEON_PCIE_SPEED_50 |
+				RADEON_PCIE_SPEED_80;
+		else if (speed_cap == PCIE_SPEED_5_0GT)
+			si_pi->sys_pcie_mask = RADEON_PCIE_SPEED_25 |
+				RADEON_PCIE_SPEED_50;
+		else
+			si_pi->sys_pcie_mask = RADEON_PCIE_SPEED_25;
+	}
 	si_pi->force_pcie_gen = RADEON_PCIE_GEN_INVALID;
 	si_pi->boot_pcie_gen = si_get_current_pcie_speed(rdev);
 
@@ -6941,7 +6900,7 @@ int si_dpm_init(struct radeon_device *rdev)
 		return ret;
 
 	rdev->pm.dpm.dyn_state.vddc_dependency_on_dispclk.entries =
-		kzalloc(4 * sizeof(struct radeon_clock_voltage_dependency_entry), GFP_KERNEL);
+		kzalloc_objs(struct radeon_clock_voltage_dependency_entry, 4);
 	if (!rdev->pm.dpm.dyn_state.vddc_dependency_on_dispclk.entries) {
 		r600_free_extended_power_table(rdev);
 		return -ENOMEM;

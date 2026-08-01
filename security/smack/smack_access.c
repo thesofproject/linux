@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2007 Casey Schaufler <casey@schaufler-ca.com>
  *
- *      This program is free software; you can redistribute it and/or modify
- *      it under the terms of the GNU General Public License as published by
- *      the Free Software Foundation, version 2.
- *
  * Author:
  *      Casey Schaufler <casey@schaufler-ca.com>
- *
  */
 
 #include <linux/types.h>
@@ -49,11 +45,13 @@ LIST_HEAD(smack_known_list);
  */
 static u32 smack_next_secid = 10;
 
+#ifdef CONFIG_AUDIT
 /*
  * what events do we log
  * can be overwritten at run-time by /smack/logging
  */
 int log_policy = SMACK_AUDIT_DENIED;
+#endif /* CONFIG_AUDIT */
 
 /**
  * smk_access_entry - look up matching access rule
@@ -85,23 +83,22 @@ int log_policy = SMACK_AUDIT_DENIED;
 int smk_access_entry(char *subject_label, char *object_label,
 			struct list_head *rule_list)
 {
-	int may = -ENOENT;
 	struct smack_rule *srp;
 
 	list_for_each_entry_rcu(srp, rule_list, list) {
 		if (srp->smk_object->smk_known == object_label &&
 		    srp->smk_subject->smk_known == subject_label) {
-			may = srp->smk_access;
-			break;
+			int may = srp->smk_access;
+			/*
+			 * MAY_WRITE implies MAY_LOCK.
+			 */
+			if ((may & MAY_WRITE) == MAY_WRITE)
+				may |= MAY_LOCK;
+			return may;
 		}
 	}
 
-	/*
-	 * MAY_WRITE implies MAY_LOCK.
-	 */
-	if ((may & MAY_WRITE) == MAY_WRITE)
-		may |= MAY_LOCK;
-	return may;
+	return -ENOENT;
 }
 
 /**
@@ -247,7 +244,7 @@ int smk_tskacc(struct task_smack *tsp, struct smack_known *obj_known,
 	}
 
 	/*
-	 * Allow for priviliged to override policy.
+	 * Allow for privileged to override policy.
 	 */
 	if (rc != 0 && smack_privileged(CAP_MAC_OVERRIDE))
 		rc = 0;
@@ -275,20 +272,19 @@ out_audit:
 int smk_curacc(struct smack_known *obj_known,
 	       u32 mode, struct smk_audit_info *a)
 {
-	struct task_smack *tsp = current_security();
+	struct task_smack *tsp = smack_cred(current_cred());
 
 	return smk_tskacc(tsp, obj_known, mode, a);
 }
 
-#ifdef CONFIG_AUDIT
 /**
- * smack_str_from_perm : helper to transalate an int to a
+ * smack_str_from_perm : helper to translate an int to a
  * readable string
  * @string : the string to fill
  * @access : the int
  *
  */
-static inline void smack_str_from_perm(char *string, int access)
+int smack_str_from_perm(char *string, int access)
 {
 	int i = 0;
 
@@ -304,8 +300,15 @@ static inline void smack_str_from_perm(char *string, int access)
 		string[i++] = 't';
 	if (access & MAY_LOCK)
 		string[i++] = 'l';
+	if (access & MAY_BRINGUP)
+		string[i++] = 'b';
+	if (i == 0)
+		string[i++] = '-';
 	string[i] = '\0';
+	return i;
 }
+
+#ifdef CONFIG_AUDIT
 /**
  * smack_log_callback - SMACK specific information
  * will be called by generic audit code
@@ -336,7 +339,7 @@ static void smack_log_callback(struct audit_buffer *ab, void *a)
  *  @object_label  : smack label of the object being accessed
  *  @request: requested permissions
  *  @result: result from smk_access
- *  @a:  auxiliary audit data
+ *  @ad:  auxiliary audit data
  *
  * Audit the granting or denial of permissions in accordance
  * with the policy.
@@ -389,7 +392,7 @@ void smack_log(char *subject_label, char *object_label, int request,
 }
 #else /* #ifdef CONFIG_AUDIT */
 void smack_log(char *subject_label, char *object_label, int request,
-               int result, struct smk_audit_info *ad)
+	       int result, struct smk_audit_info *ad)
 {
 }
 #endif
@@ -400,6 +403,7 @@ struct hlist_head smack_known_hash[SMACK_HASH_SLOTS];
 
 /**
  * smk_insert_entry - insert a smack label into a hash map,
+ * @skp: smack label
  *
  * this function must be called under smack_known_lock
  */
@@ -439,19 +443,19 @@ struct smack_known *smk_find_entry(const char *string)
 }
 
 /**
- * smk_parse_smack - parse smack label from a text string
- * @string: a text string that might contain a Smack label
- * @len: the maximum size, or zero if it is NULL terminated.
+ * smk_parse_label_len - calculate the length of the starting segment
+ *                       in the string that constitutes a valid smack label
+ * @string: a text string that might contain a Smack label at the beginning
+ * @len: the maximum size to look into, may be zero if string is null-terminated
  *
- * Returns a pointer to the clean label or an error code.
+ * Returns the length of the segment (0 < L < SMK_LONGLABEL) or an error code.
  */
-char *smk_parse_smack(const char *string, int len)
+int smk_parse_label_len(const char *string, int len)
 {
-	char *smack;
 	int i;
 
-	if (len <= 0)
-		len = strlen(string) + 1;
+	if (len <= 0 || len > SMK_LONGLABEL)
+		len = SMK_LONGLABEL;
 
 	/*
 	 * Reserve a leading '-' as an indicator that
@@ -459,7 +463,7 @@ char *smk_parse_smack(const char *string, int len)
 	 * including /smack/cipso and /smack/cipso2
 	 */
 	if (string[0] == '-')
-		return ERR_PTR(-EINVAL);
+		return -EINVAL;
 
 	for (i = 0; i < len; i++)
 		if (string[i] > '~' || string[i] <= ' ' || string[i] == '/' ||
@@ -467,21 +471,39 @@ char *smk_parse_smack(const char *string, int len)
 			break;
 
 	if (i == 0 || i >= SMK_LONGLABEL)
+		return -EINVAL;
+
+	return i;
+}
+
+/**
+ * smk_parse_smack - copy the starting segment in the string
+ *                   that constitutes a valid smack label
+ * @string: a text string that might contain a Smack label at the beginning
+ * @len: the maximum size to look into, may be zero if string is null-terminated
+ *
+ * Returns a pointer to the copy of the label or an error code.
+ */
+char *smk_parse_smack(const char *string, int len)
+{
+	char *smack;
+	int i = smk_parse_label_len(string, len);
+
+	if (i < 0)
 		return ERR_PTR(-EINVAL);
 
-	smack = kzalloc(i + 1, GFP_KERNEL);
-	if (smack == NULL)
+	smack = kstrndup(string, i, GFP_NOFS);
+	if (!smack)
 		return ERR_PTR(-ENOMEM);
-
-	strncpy(smack, string, i);
-
 	return smack;
 }
 
 /**
  * smk_netlbl_mls - convert a catset to netlabel mls categories
+ * @level: MLS sensitivity level
  * @catset: the Smack categories
  * @sap: where to put the netlabel categories
+ * @len: number of bytes for the levels in a CIPSO IP option
  *
  * Allocates and fills attr.mls
  * Returns 0 on success, error code on failure.
@@ -504,7 +526,7 @@ int smk_netlbl_mls(int level, char *catset, struct netlbl_lsm_secattr *sap,
 			if ((m & *cp) == 0)
 				continue;
 			rc = netlbl_catmap_setbit(&sap->attr.mls.cat,
-						  cat, GFP_KERNEL);
+						  cat, GFP_NOFS);
 			if (rc < 0) {
 				netlbl_catmap_free(sap->attr.mls.cat);
 				return rc;
@@ -515,24 +537,54 @@ int smk_netlbl_mls(int level, char *catset, struct netlbl_lsm_secattr *sap,
 }
 
 /**
- * smk_import_entry - import a label, return the list entry
- * @string: a text string that might be a Smack label
- * @len: the maximum size, or zero if it is NULL terminated.
+ * smack_populate_secattr - fill in the smack_known netlabel information
+ * @skp: pointer to the structure to fill
  *
- * Returns a pointer to the entry in the label list that
- * matches the passed string, adding it if necessary,
- * or an error code.
+ * Populate the netlabel secattr structure for a Smack label.
+ *
+ * Returns 0 unless creating the category mapping fails
  */
-struct smack_known *smk_import_entry(const char *string, int len)
+int smack_populate_secattr(struct smack_known *skp)
+{
+	int slen;
+
+	skp->smk_netlabel.attr.secid = skp->smk_secid;
+	skp->smk_netlabel.domain = skp->smk_known;
+	skp->smk_netlabel.cache = netlbl_secattr_cache_alloc(GFP_ATOMIC);
+	if (skp->smk_netlabel.cache != NULL) {
+		skp->smk_netlabel.flags |= NETLBL_SECATTR_CACHE;
+		skp->smk_netlabel.cache->free = NULL;
+		skp->smk_netlabel.cache->data = skp;
+	}
+	skp->smk_netlabel.flags |= NETLBL_SECATTR_SECID |
+				   NETLBL_SECATTR_MLS_LVL |
+				   NETLBL_SECATTR_DOMAIN;
+	/*
+	 * If direct labeling works use it.
+	 * Otherwise use mapped labeling.
+	 */
+	slen = strlen(skp->smk_known);
+	if (slen < SMK_CIPSOLEN)
+		return smk_netlbl_mls(smack_cipso_direct, skp->smk_known,
+				      &skp->smk_netlabel, slen);
+
+	return smk_netlbl_mls(smack_cipso_mapped, (char *)&skp->smk_secid,
+			      &skp->smk_netlabel, sizeof(skp->smk_secid));
+}
+
+/**
+ * smk_import_valid_allocated_label - import a label, return the list entry
+ * @smack: a text string that is a valid Smack label and may be kfree()ed.
+ *         It is consumed: either becomes a part of the entry or kfree'ed.
+ * @gfp: Allocation type
+ *
+ * Returns: see description of smk_import_entry()
+ */
+static struct smack_known *
+smk_import_allocated_label(char *smack, gfp_t gfp)
 {
 	struct smack_known *skp;
-	char *smack;
-	int slen;
 	int rc;
-
-	smack = smk_parse_smack(string, len);
-	if (IS_ERR(smack))
-		return ERR_CAST(smack);
 
 	mutex_lock(&smack_known_lock);
 
@@ -540,7 +592,7 @@ struct smack_known *smk_import_entry(const char *string, int len)
 	if (skp != NULL)
 		goto freeout;
 
-	skp = kzalloc(sizeof(*skp), GFP_KERNEL);
+	skp = kzalloc_obj(*skp, gfp);
 	if (skp == NULL) {
 		skp = ERR_PTR(-ENOMEM);
 		goto freeout;
@@ -548,21 +600,8 @@ struct smack_known *smk_import_entry(const char *string, int len)
 
 	skp->smk_known = smack;
 	skp->smk_secid = smack_next_secid++;
-	skp->smk_netlabel.domain = skp->smk_known;
-	skp->smk_netlabel.flags =
-		NETLBL_SECATTR_DOMAIN | NETLBL_SECATTR_MLS_LVL;
-	/*
-	 * If direct labeling works use it.
-	 * Otherwise use mapped labeling.
-	 */
-	slen = strlen(smack);
-	if (slen < SMK_CIPSOLEN)
-		rc = smk_netlbl_mls(smack_cipso_direct, skp->smk_known,
-			       &skp->smk_netlabel, slen);
-	else
-		rc = smk_netlbl_mls(smack_cipso_mapped, (char *)&skp->smk_secid,
-			       &skp->smk_netlabel, sizeof(skp->smk_secid));
 
+	rc = smack_populate_secattr(skp);
 	if (rc >= 0) {
 		INIT_LIST_HEAD(&skp->smk_rules);
 		mutex_init(&skp->smk_rules_lock);
@@ -573,9 +612,6 @@ struct smack_known *smk_import_entry(const char *string, int len)
 		smk_insert_entry(skp);
 		goto unlockout;
 	}
-	/*
-	 * smk_netlbl_mls failed.
-	 */
 	kfree(skp);
 	skp = ERR_PTR(rc);
 freeout:
@@ -584,6 +620,44 @@ unlockout:
 	mutex_unlock(&smack_known_lock);
 
 	return skp;
+}
+
+/**
+ * smk_import_entry - import a label, return the list entry
+ * @string: a text string that might contain a Smack label at the beginning
+ * @len: the maximum size to look into, may be zero if string is null-terminated
+ *
+ * Returns a pointer to the entry in the label list that
+ * matches the passed string, adding it if necessary,
+ * or an error code.
+ */
+struct smack_known *smk_import_entry(const char *string, int len)
+{
+	char *smack = smk_parse_smack(string, len);
+
+	if (IS_ERR(smack))
+		return ERR_CAST(smack);
+
+	return smk_import_allocated_label(smack, GFP_NOFS);
+}
+
+/**
+ * smk_import_valid_label - import a label, return the list entry
+ * @label: a text string that is a valid Smack label, not null-terminated
+ * @label_len: the length of the text string in the @label
+ * @gfp: the GFP mask used for allocating memory for the @label text string copy
+ *
+ * Return: see description of smk_import_entry()
+ */
+struct smack_known *
+smk_import_valid_label(const char *label, int label_len, gfp_t gfp)
+{
+	char *smack = kstrndup(label, label_len, gfp);
+
+	if  (!smack)
+		return ERR_PTR(-ENOMEM);
+
+	return smk_import_allocated_label(smack, gfp);
 }
 
 /**
@@ -635,12 +709,12 @@ DEFINE_MUTEX(smack_onlycap_lock);
  */
 bool smack_privileged_cred(int cap, const struct cred *cred)
 {
-	struct task_smack *tsp = cred->security;
+	struct task_smack *tsp = smack_cred(cred);
 	struct smack_known *skp = tsp->smk_task;
 	struct smack_known_list_elem *sklep;
 	int rc;
 
-	rc = cap_capable(cred, &init_user_ns, cap, SECURITY_CAP_AUDIT);
+	rc = cap_capable(cred, &init_user_ns, cap, CAP_OPT_NONE);
 	if (rc)
 		return false;
 

@@ -1,17 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2009 Chen Liqin <liqin.chen@sunplusct.com>
  * Copyright (C) 2012 Regents of the University of California
  * Copyright (C) 2017 SiFive
  * Copyright (C) 2017 XiaojingZhu <zhuxiaoj@ict.ac.cn>
- *
- *   This program is free software; you can redistribute it and/or
- *   modify it under the terms of the GNU General Public License
- *   as published by the Free Software Foundation, version 2.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
  */
 
 #ifndef _ASM_RISCV_PAGE_H
@@ -20,37 +12,41 @@
 #include <linux/pfn.h>
 #include <linux/const.h>
 
-#define PAGE_SHIFT	(12)
-#define PAGE_SIZE	(_AC(1, UL) << PAGE_SHIFT)
-#define PAGE_MASK	(~(PAGE_SIZE - 1))
+#include <vdso/page.h>
+
+#define HPAGE_SHIFT		PMD_SHIFT
+#define HPAGE_SIZE		(_AC(1, UL) << HPAGE_SHIFT)
+#define HPAGE_MASK              (~(HPAGE_SIZE - 1))
+#define HUGETLB_PAGE_ORDER      (HPAGE_SHIFT - PAGE_SHIFT)
 
 /*
  * PAGE_OFFSET -- the first address of the first page of memory.
  * When not using MMU this corresponds to the first free page in
  * physical memory (aligned on a page boundary).
  */
-#define PAGE_OFFSET		_AC(CONFIG_PAGE_OFFSET, UL)
+#ifdef CONFIG_MMU
+#ifdef CONFIG_64BIT
+#define PAGE_OFFSET_L5		_AC(0xff60000000000000, UL)
+#define PAGE_OFFSET_L4		_AC(0xffffaf8000000000, UL)
+#define PAGE_OFFSET_L3		_AC(0xffffffd600000000, UL)
+#define PAGE_OFFSET		kernel_map.page_offset
+#else
+#define PAGE_OFFSET		_AC(0xc0000000, UL)
+#endif /* CONFIG_64BIT */
+#else
+#define PAGE_OFFSET		((unsigned long)phys_ram_base)
+#endif /* CONFIG_MMU */
 
-#define KERN_VIRT_SIZE (-PAGE_OFFSET)
+#ifndef __ASSEMBLER__
 
-#ifndef __ASSEMBLY__
-
-#define PAGE_UP(addr)	(((addr)+((PAGE_SIZE)-1))&(~((PAGE_SIZE)-1)))
-#define PAGE_DOWN(addr)	((addr)&(~((PAGE_SIZE)-1)))
-
-/* align addr on a size boundary - adjust address up/down if needed */
-#define _ALIGN_UP(addr, size)	(((addr)+((size)-1))&(~((size)-1)))
-#define _ALIGN_DOWN(addr, size)	((addr)&(~((size)-1)))
-
-/* align addr on a size boundary - adjust address up if needed */
-#define _ALIGN(addr, size)	_ALIGN_UP(addr, size)
-
+#ifdef CONFIG_RISCV_ISA_ZICBOZ
+void clear_page(void *page);
+#else
 #define clear_page(pgaddr)			memset((pgaddr), 0, PAGE_SIZE)
+#endif
 #define copy_page(to, from)			memcpy((to), (from), PAGE_SIZE)
 
-#define clear_user_page(pgaddr, vaddr, page)	memset((pgaddr), 0, PAGE_SIZE)
-#define copy_user_page(vto, vfrom, vaddr, topg) \
-			memcpy((vto), (vfrom), PAGE_SIZE)
+#define copy_user_page(vto, vfrom, vaddr, topg) copy_page(vto, vfrom)
 
 /*
  * Use struct definitions to apply C type checking
@@ -80,20 +76,79 @@ typedef struct page *pgtable_t;
 #define __pgd(x)	((pgd_t) { (x) })
 #define __pgprot(x)	((pgprot_t) { (x) })
 
-#ifdef CONFIG_64BITS
+#ifdef CONFIG_64BIT
 #define PTE_FMT "%016lx"
 #else
 #define PTE_FMT "%08lx"
 #endif
 
-extern unsigned long va_pa_offset;
-extern unsigned long pfn_base;
+#if defined(CONFIG_64BIT) && defined(CONFIG_MMU)
+/*
+ * We override this value as its generic definition uses __pa too early in
+ * the boot process (before kernel_map.va_pa_offset is set).
+ */
+#define MIN_MEMBLOCK_ADDR      0
+#endif
 
-extern unsigned long max_low_pfn;
-extern unsigned long min_low_pfn;
+#define ARCH_PFN_OFFSET		(PFN_DOWN((unsigned long)phys_ram_base))
 
-#define __pa(x)		((unsigned long)(x) - va_pa_offset)
-#define __va(x)		((void *)((unsigned long) (x) + va_pa_offset))
+struct kernel_mapping {
+	unsigned long virt_addr;
+	unsigned long virt_offset;
+	uintptr_t phys_addr;
+	uintptr_t size;
+	/* Offset between linear mapping virtual address and kernel load address */
+	unsigned long va_pa_offset;
+	/* Offset between kernel mapping virtual address and kernel load address */
+	unsigned long page_offset;
+	unsigned long va_kernel_pa_offset;
+};
+
+extern struct kernel_mapping kernel_map;
+extern phys_addr_t phys_ram_base;
+extern unsigned long vmemmap_start_pfn;
+
+#define is_kernel_mapping(x)	\
+	((x) >= kernel_map.virt_addr && (x) < (kernel_map.virt_addr + kernel_map.size))
+
+#define is_linear_mapping(x)	\
+	((x) >= PAGE_OFFSET && (!IS_ENABLED(CONFIG_64BIT) || (x) < PAGE_OFFSET + KERN_VIRT_SIZE))
+
+#ifndef CONFIG_DEBUG_VIRTUAL
+#define linear_mapping_pa_to_va(x)	((void *)((unsigned long)(x) + kernel_map.va_pa_offset))
+#else
+void *linear_mapping_pa_to_va(unsigned long x);
+#endif
+
+#define kernel_mapping_pa_to_va(y) ((void *)((unsigned long)(y) + kernel_map.va_kernel_pa_offset))
+
+#define __pa_to_va_nodebug(x)		linear_mapping_pa_to_va(x)
+
+#ifndef CONFIG_DEBUG_VIRTUAL
+#define linear_mapping_va_to_pa(x)	((unsigned long)(x) - kernel_map.va_pa_offset)
+#else
+phys_addr_t linear_mapping_va_to_pa(unsigned long x);
+#endif
+
+#define kernel_mapping_va_to_pa(y) ((unsigned long)(y) - kernel_map.va_kernel_pa_offset)
+
+#define __va_to_pa_nodebug(x)	({						\
+	unsigned long _x = x;							\
+	is_linear_mapping(_x) ?							\
+		linear_mapping_va_to_pa(_x) : kernel_mapping_va_to_pa(_x);	\
+	})
+
+#ifdef CONFIG_DEBUG_VIRTUAL
+extern phys_addr_t __virt_to_phys(unsigned long x);
+extern phys_addr_t __phys_addr_symbol(unsigned long x);
+#else
+#define __virt_to_phys(x)	__va_to_pa_nodebug(x)
+#define __phys_addr_symbol(x)	__va_to_pa_nodebug(x)
+#endif /* CONFIG_DEBUG_VIRTUAL */
+
+#define __pa_symbol(x)	__phys_addr_symbol(RELOC_HIDE((unsigned long)(x), 0))
+#define __pa(x)		__virt_to_phys((unsigned long)(x))
+#define __va(x)		((void *)__pa_to_va_nodebug((phys_addr_t)(x)))
 
 #define phys_to_pfn(phys)	(PFN_DOWN(phys))
 #define pfn_to_phys(pfn)	(PFN_PHYS(pfn))
@@ -104,27 +159,28 @@ extern unsigned long min_low_pfn;
 #define virt_to_page(vaddr)	(pfn_to_page(virt_to_pfn(vaddr)))
 #define page_to_virt(page)	(pfn_to_virt(page_to_pfn(page)))
 
-#define page_to_phys(page)	(pfn_to_phys(page_to_pfn(page)))
-#define page_to_bus(page)	(page_to_phys(page))
-#define phys_to_page(paddr)	(pfn_to_page(phys_to_pfn(paddr)))
+#define sym_to_pfn(x)           __phys_to_pfn(__pa_symbol(x))
 
-#define pfn_valid(pfn) \
-	(((pfn) >= pfn_base) && (((pfn)-pfn_base) < max_mapnr))
+static inline unsigned long kaslr_offset(void)
+{
+	return kernel_map.virt_offset;
+}
 
-#define ARCH_PFN_OFFSET		(pfn_base)
+static __always_inline void *pfn_to_kaddr(unsigned long pfn)
+{
+	return __va(pfn << PAGE_SHIFT);
+}
 
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 
-#define virt_addr_valid(vaddr)	(pfn_valid(virt_to_pfn(vaddr)))
+#define virt_addr_valid(vaddr)	({						\
+	unsigned long _addr = (unsigned long)vaddr;				\
+	(unsigned long)(_addr) >= PAGE_OFFSET && pfn_valid(virt_to_pfn(_addr));	\
+})
 
-#define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | \
-				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
+#define VMA_DATA_DEFAULT_FLAGS	VMA_DATA_FLAGS_NON_EXEC
 
 #include <asm-generic/memory_model.h>
 #include <asm-generic/getorder.h>
-
-/* vDSO support */
-/* We do define AT_SYSINFO_EHDR but don't use the gate mechanism */
-#define __HAVE_ARCH_GATE_AREA
 
 #endif /* _ASM_RISCV_PAGE_H */

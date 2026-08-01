@@ -37,12 +37,12 @@ static const char version[] =
 #include <linux/etherdevice.h>
 #include <linux/skbuff.h>
 #include <linux/bitops.h>
+#include <linux/pgtable.h>
 
 #include <asm/cacheflush.h>
 #include <asm/setup.h>
 #include <asm/irq.h>
 #include <asm/io.h>
-#include <asm/pgtable.h>
 #include <asm/dvma.h>
 #include <asm/idprom.h>
 #include <asm/machines.h>
@@ -74,6 +74,7 @@ static int lance_debug = 1;
 #endif
 module_param(lance_debug, int, 0);
 MODULE_PARM_DESC(lance_debug, "SUN3 Lance debug level (0-3)");
+MODULE_DESCRIPTION("Sun3/Sun3x on-board LANCE Ethernet driver");
 MODULE_LICENSE("GPL");
 
 #define	DPRINTK(n,a) \
@@ -150,7 +151,7 @@ struct lance_memory {
 struct lance_private {
 	volatile unsigned short	*iobase;
 	struct lance_memory	*mem;
-     	int new_rx, new_tx;	/* The next free ring entry */
+	int new_rx, new_tx;	/* The next free ring entry */
 	int old_tx, old_rx;     /* ring entry to be processed */
 /* These two must be longs for set_bit() */
 	long	    tx_full;
@@ -236,7 +237,8 @@ struct lance_private {
 static int lance_probe( struct net_device *dev);
 static int lance_open( struct net_device *dev );
 static void lance_init_ring( struct net_device *dev );
-static int lance_start_xmit( struct sk_buff *skb, struct net_device *dev );
+static netdev_tx_t lance_start_xmit(struct sk_buff *skb,
+				    struct net_device *dev);
 static irqreturn_t lance_interrupt( int irq, void *dev_id);
 static int lance_rx( struct net_device *dev );
 static int lance_close( struct net_device *dev );
@@ -244,7 +246,7 @@ static void set_multicast_list( struct net_device *dev );
 
 /************************* End of Prototypes **************************/
 
-struct net_device * __init sun3lance_probe(int unit)
+static struct net_device * __init sun3lance_probe(void)
 {
 	struct net_device *dev;
 	static int found;
@@ -271,10 +273,6 @@ struct net_device * __init sun3lance_probe(int unit)
 	dev = alloc_etherdev(sizeof(struct lance_private));
 	if (!dev)
 		return ERR_PTR(-ENOMEM);
-	if (unit >= 0) {
-		sprintf(dev->name, "eth%d", unit);
-		netdev_boot_setup_check(dev);
-	}
 
 	if (!lance_probe(dev))
 		goto out;
@@ -308,7 +306,6 @@ static int __init lance_probe( struct net_device *dev)
 	unsigned long ioaddr;
 
 	struct lance_private	*lp;
-	int 			i;
 	static int 		did_version;
 	volatile unsigned short *ioaddr_probe;
 	unsigned short tmp1, tmp2;
@@ -345,7 +342,7 @@ static int __init lance_probe( struct net_device *dev)
 
 	/* XXX - leak? */
 	MEM = dvma_malloc_align(sizeof(struct lance_memory), 0x10000);
-	if (MEM == NULL) {
+	if (!MEM) {
 #ifdef CONFIG_SUN3
 		iounmap((void __iomem *)ioaddr);
 #endif
@@ -376,8 +373,7 @@ static int __init lance_probe( struct net_device *dev)
 		   dev->irq);
 
 	/* copy in the ethernet address from the prom */
-	for(i = 0; i < 6 ; i++)
-	     dev->dev_addr[i] = idprom->id_ethaddr[i];
+	eth_hw_addr_set(dev, idprom->id_ethaddr);
 
 	/* tell the card it's ether address, bytes swapped */
 	MEM->init.hwaddr[0] = dev->dev_addr[1];
@@ -464,7 +460,7 @@ static void lance_init_ring( struct net_device *dev )
 	for( i = 0; i < TX_RING_SIZE; i++ ) {
 		MEM->tx_head[i].base = dvma_vtob(MEM->tx_data[i]);
 		MEM->tx_head[i].flag = 0;
- 		MEM->tx_head[i].base_hi =
+		MEM->tx_head[i].base_hi =
 			(dvma_vtob(MEM->tx_data[i])) >>16;
 		MEM->tx_head[i].length = 0;
 		MEM->tx_head[i].misc = 0;
@@ -511,7 +507,8 @@ static void lance_init_ring( struct net_device *dev )
 }
 
 
-static int lance_start_xmit( struct sk_buff *skb, struct net_device *dev )
+static netdev_tx_t
+lance_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct lance_private *lp = netdev_priv(dev);
 	int entry, len;
@@ -579,8 +576,8 @@ static int lance_start_xmit( struct sk_buff *skb, struct net_device *dev )
 	}
 
 	AREG = CSR0;
-  	DPRINTK( 2, ( "%s: lance_start_xmit() called, csr0 %4.4x.\n",
-  				  dev->name, DREG ));
+	DPRINTK( 2, ( "%s: lance_start_xmit() called, csr0 %4.4x.\n",
+				  dev->name, DREG ));
 
 #ifdef CONFIG_SUN3X
 	/* this weirdness doesn't appear on sun3... */
@@ -634,8 +631,8 @@ static int lance_start_xmit( struct sk_buff *skb, struct net_device *dev )
 	/* Trigger an immediate send poll. */
 	REGA(CSR0) = CSR0_INEA | CSR0_TDMD | CSR0_STRT;
 	AREG = CSR0;
-  	DPRINTK( 2, ( "%s: lance_start_xmit() exiting, csr0 %4.4x.\n",
-  				  dev->name, DREG ));
+	DPRINTK( 2, ( "%s: lance_start_xmit() exiting, csr0 %4.4x.\n",
+				  dev->name, DREG ));
 	dev_kfree_skb(skb);
 
 	lp->lock = 0;
@@ -655,16 +652,6 @@ static irqreturn_t lance_interrupt( int irq, void *dev_id)
 	struct net_device *dev = dev_id;
 	struct lance_private *lp = netdev_priv(dev);
 	int csr0;
-	static int in_interrupt;
-
-	if (dev == NULL) {
-		DPRINTK( 1, ( "lance_interrupt(): invalid dev_id\n" ));
-		return IRQ_NONE;
-	}
-
-	if (in_interrupt)
-		DPRINTK( 2, ( "%s: Re-entering the interrupt handler.\n", dev->name ));
-	in_interrupt = 1;
 
  still_more:
 	flush_cache_all();
@@ -772,7 +759,6 @@ static irqreturn_t lance_interrupt( int irq, void *dev_id)
 
 	DPRINTK( 2, ( "%s: exiting interrupt, csr0=%#04x.\n",
 				  dev->name, DREG ));
-	in_interrupt = 0;
 	return IRQ_HANDLED;
 }
 
@@ -811,7 +797,7 @@ static int lance_rx( struct net_device *dev )
 			}
 			else {
 				skb = netdev_alloc_skb(dev, pkt_len + 2);
-				if (skb == NULL) {
+				if (!skb) {
 					dev->stats.rx_dropped++;
 					head->msg_length = 0;
 					head->flag |= RMD1_OWN_CHIP;
@@ -933,17 +919,16 @@ static void set_multicast_list( struct net_device *dev )
 }
 
 
-#ifdef MODULE
-
 static struct net_device *sun3lance_dev;
 
-int __init init_module(void)
+static int __init sun3lance_init(void)
 {
-	sun3lance_dev = sun3lance_probe(-1);
+	sun3lance_dev = sun3lance_probe();
 	return PTR_ERR_OR_ZERO(sun3lance_dev);
 }
+module_init(sun3lance_init);
 
-void __exit cleanup_module(void)
+static void __exit sun3lance_cleanup(void)
 {
 	unregister_netdev(sun3lance_dev);
 #ifdef CONFIG_SUN3
@@ -951,6 +936,4 @@ void __exit cleanup_module(void)
 #endif
 	free_netdev(sun3lance_dev);
 }
-
-#endif /* MODULE */
-
+module_exit(sun3lance_cleanup);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * horus3a.h
  *
@@ -7,16 +8,6 @@
  * Copyright (C) 2014 NetUP Inc.
  * Copyright (C) 2014 Sergey Kozlov <serjk@netup.ru>
  * Copyright (C) 2014 Abylay Ospan <aospan@netup.ru>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/slab.h>
@@ -330,9 +321,9 @@ static int horus3a_get_frequency(struct dvb_frontend *fe, u32 *frequency)
 static const struct dvb_tuner_ops horus3a_tuner_ops = {
 	.info = {
 		.name = "Sony Horus3a",
-		.frequency_min = 950000,
-		.frequency_max = 2150000,
-		.frequency_step = 1000,
+		.frequency_min_hz  =  950 * MHz,
+		.frequency_max_hz  = 2150 * MHz,
+		.frequency_step_hz =    1 * MHz,
 	},
 	.init = horus3a_init,
 	.release = horus3a_release,
@@ -348,7 +339,7 @@ struct dvb_frontend *horus3a_attach(struct dvb_frontend *fe,
 	u8 buf[3], val;
 	struct horus3a_priv *priv = NULL;
 
-	priv = kzalloc(sizeof(struct horus3a_priv), GFP_KERNEL);
+	priv = kzalloc_obj(struct horus3a_priv);
 	if (priv == NULL)
 		return NULL;
 	priv->i2c_address = (config->i2c_address >> 1);
@@ -404,7 +395,7 @@ struct dvb_frontend *horus3a_attach(struct dvb_frontend *fe,
 		priv->i2c_address, priv->i2c);
 	return fe;
 }
-EXPORT_SYMBOL(horus3a_attach);
+EXPORT_SYMBOL_GPL(horus3a_attach);
 
 MODULE_DESCRIPTION("Sony HORUS3A satellite tuner driver");
 MODULE_AUTHOR("Sergey Kozlov <serjk@netup.ru>");

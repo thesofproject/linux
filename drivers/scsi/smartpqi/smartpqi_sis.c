@@ -1,18 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- *    driver for Microsemi PQI-based storage controllers
- *    Copyright (c) 2016-2017 Microsemi Corporation
+ *    driver for Microchip PQI-based storage controllers
+ *    Copyright (c) 2019-2023 Microchip Technology Inc. and its subsidiaries
+ *    Copyright (c) 2016-2018 Microsemi Corporation
  *    Copyright (c) 2016 PMC-Sierra, Inc.
  *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; version 2 of the License.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
- *    NON INFRINGEMENT.  See the GNU General Public License for more details.
- *
- *    Questions/Comments/Bugfixes to esc.storagedev@microsemi.com
+ *    Questions/Comments/Bugfixes to storagedev@microchip.com
  *
  */
 
@@ -21,7 +14,7 @@
 #include <linux/delay.h>
 #include <linux/pci.h>
 #include <scsi/scsi_device.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include "smartpqi.h"
 #include "smartpqi_sis.h"
 
@@ -34,7 +27,9 @@
 #define SIS_REENABLE_SIS_MODE			0x1
 #define SIS_ENABLE_MSIX				0x40
 #define SIS_ENABLE_INTX				0x80
+#define SIS_SOFT_RESET				0x100
 #define SIS_CMD_READY				0x200
+#define SIS_NOTIFY_KDUMP			0x400
 #define SIS_TRIGGER_SHUTDOWN			0x800000
 #define SIS_PQI_RESET_QUIESCE			0x1000000
 
@@ -57,11 +52,28 @@
 #define SIS_BASE_STRUCT_REVISION		9
 #define SIS_BASE_STRUCT_ALIGNMENT		16
 
+#define SIS_CTRL_KERNEL_FW_TRIAGE		0x3
+#define SIS_CTRL_KERNEL_CTRL_LOGGING		0x4
+#define SIS_CTRL_KERNEL_CTRL_LOGGING_STATUS	0x18
 #define SIS_CTRL_KERNEL_UP			0x80
 #define SIS_CTRL_KERNEL_PANIC			0x100
-#define SIS_CTRL_READY_TIMEOUT_SECS		30
+#define SIS_CTRL_READY_TIMEOUT_SECS		180
 #define SIS_CTRL_READY_RESUME_TIMEOUT_SECS	90
 #define SIS_CTRL_READY_POLL_INTERVAL_MSECS	10
+
+enum sis_fw_triage_status {
+	FW_TRIAGE_NOT_STARTED = 0,
+	FW_TRIAGE_STARTED,
+	FW_TRIAGE_COND_INVALID,
+	FW_TRIAGE_COMPLETED
+};
+
+enum sis_ctrl_logging_status {
+	CTRL_LOGGING_NOT_STARTED = 0,
+	CTRL_LOGGING_STARTED,
+	CTRL_LOGGING_COND_INVALID,
+	CTRL_LOGGING_COMPLETED
+};
 
 #pragma pack(1)
 
@@ -77,12 +89,14 @@ struct sis_base_struct {
 						/* error response data */
 	__le32	error_buffer_element_length;	/* length of each PQI error */
 						/* response buffer element */
-						/*   in bytes */
+						/* in bytes */
 	__le32	error_buffer_num_elements;	/* total number of PQI error */
 						/* response buffers available */
 };
 
 #pragma pack()
+
+unsigned int sis_ctrl_ready_timeout_secs = SIS_CTRL_READY_TIMEOUT_SECS;
 
 static int sis_wait_for_ctrl_ready_with_timeout(struct pqi_ctrl_info *ctrl_info,
 	unsigned int timeout_secs)
@@ -120,7 +134,7 @@ static int sis_wait_for_ctrl_ready_with_timeout(struct pqi_ctrl_info *ctrl_info,
 int sis_wait_for_ctrl_ready(struct pqi_ctrl_info *ctrl_info)
 {
 	return sis_wait_for_ctrl_ready_with_timeout(ctrl_info,
-		SIS_CTRL_READY_TIMEOUT_SECS);
+		sis_ctrl_ready_timeout_secs);
 }
 
 int sis_wait_for_ctrl_ready_resume(struct pqi_ctrl_info *ctrl_info)
@@ -136,7 +150,7 @@ bool sis_is_firmware_running(struct pqi_ctrl_info *ctrl_info)
 
 	status = readl(&ctrl_info->registers->sis_firmware_status);
 
-	if (status & SIS_CTRL_KERNEL_PANIC)
+	if (status != ~0 && (status & SIS_CTRL_KERNEL_PANIC))
 		running = false;
 	else
 		running = true;
@@ -152,7 +166,12 @@ bool sis_is_firmware_running(struct pqi_ctrl_info *ctrl_info)
 bool sis_is_kernel_up(struct pqi_ctrl_info *ctrl_info)
 {
 	return readl(&ctrl_info->registers->sis_firmware_status) &
-				SIS_CTRL_KERNEL_UP;
+		SIS_CTRL_KERNEL_UP;
+}
+
+u32 sis_get_product_id(struct pqi_ctrl_info *ctrl_info)
+{
+	return readl(&ctrl_info->registers->sis_product_identifier);
 }
 
 /* used for passing command parameters/results when issuing SIS commands */
@@ -187,6 +206,7 @@ static int sis_send_sync_cmd(struct pqi_ctrl_info *ctrl_info,
 
 	/* Disable doorbell interrupts by masking all interrupts. */
 	writel(~0, &registers->sis_interrupt_mask);
+	usleep_range(1000, 2000);
 
 	/*
 	 * Force the completion of the interrupt mask register write before
@@ -316,9 +336,9 @@ int sis_init_base_struct_addr(struct pqi_ctrl_info *ctrl_info)
 	put_unaligned_le32(ctrl_info->max_io_slots,
 		&base_struct->error_buffer_num_elements);
 
-	bus_address = pci_map_single(ctrl_info->pci_dev, base_struct,
-		sizeof(*base_struct), PCI_DMA_TODEVICE);
-	if (pci_dma_mapping_error(ctrl_info->pci_dev, bus_address)) {
+	bus_address = dma_map_single(&ctrl_info->pci_dev->dev, base_struct,
+		sizeof(*base_struct), DMA_TO_DEVICE);
+	if (dma_mapping_error(&ctrl_info->pci_dev->dev, bus_address)) {
 		rc = -ENOMEM;
 		goto out;
 	}
@@ -331,9 +351,8 @@ int sis_init_base_struct_addr(struct pqi_ctrl_info *ctrl_info)
 	rc = sis_send_sync_cmd(ctrl_info, SIS_CMD_INIT_BASE_STRUCT_ADDRESS,
 		&params);
 
-	pci_unmap_single(ctrl_info->pci_dev, bus_address, sizeof(*base_struct),
-		PCI_DMA_TODEVICE);
-
+	dma_unmap_single(&ctrl_info->pci_dev->dev, bus_address,
+			sizeof(*base_struct), DMA_TO_DEVICE);
 out:
 	kfree(base_struct_unaligned);
 
@@ -377,6 +396,7 @@ static int sis_wait_for_doorbell_bit_to_clear(
 static inline int sis_set_doorbell_bit(struct pqi_ctrl_info *ctrl_info, u32 bit)
 {
 	writel(bit, &ctrl_info->registers->sis_host_to_ctrl_doorbell);
+	usleep_range(1000, 2000);
 
 	return sis_wait_for_doorbell_bit_to_clear(ctrl_info, bit);
 }
@@ -391,14 +411,17 @@ void sis_enable_intx(struct pqi_ctrl_info *ctrl_info)
 	sis_set_doorbell_bit(ctrl_info, SIS_ENABLE_INTX);
 }
 
-void sis_shutdown_ctrl(struct pqi_ctrl_info *ctrl_info)
+void sis_shutdown_ctrl(struct pqi_ctrl_info *ctrl_info,
+	enum pqi_ctrl_shutdown_reason ctrl_shutdown_reason)
 {
 	if (readl(&ctrl_info->registers->sis_firmware_status) &
 		SIS_CTRL_KERNEL_PANIC)
 		return;
 
-	writel(SIS_TRIGGER_SHUTDOWN,
-		&ctrl_info->registers->sis_host_to_ctrl_doorbell);
+	if (ctrl_info->firmware_triage_supported)
+		writel(ctrl_shutdown_reason, &ctrl_info->registers->sis_ctrl_shutdown_reason_code);
+
+	writel(SIS_TRIGGER_SHUTDOWN, &ctrl_info->registers->sis_host_to_ctrl_doorbell);
 }
 
 int sis_pqi_reset_quiesce(struct pqi_ctrl_info *ctrl_info)
@@ -414,6 +437,7 @@ int sis_reenable_sis_mode(struct pqi_ctrl_info *ctrl_info)
 void sis_write_driver_scratch(struct pqi_ctrl_info *ctrl_info, u32 value)
 {
 	writel(value, &ctrl_info->registers->sis_driver_scratch);
+	usleep_range(1000, 2000);
 }
 
 u32 sis_read_driver_scratch(struct pqi_ctrl_info *ctrl_info)
@@ -421,7 +445,106 @@ u32 sis_read_driver_scratch(struct pqi_ctrl_info *ctrl_info)
 	return readl(&ctrl_info->registers->sis_driver_scratch);
 }
 
-static void __attribute__((unused)) verify_structures(void)
+static inline enum sis_fw_triage_status
+	sis_read_firmware_triage_status(struct pqi_ctrl_info *ctrl_info)
+{
+	return ((enum sis_fw_triage_status)(readl(&ctrl_info->registers->sis_firmware_status) &
+		SIS_CTRL_KERNEL_FW_TRIAGE));
+}
+
+bool sis_is_ctrl_logging_supported(struct pqi_ctrl_info *ctrl_info)
+{
+	return readl(&ctrl_info->registers->sis_firmware_status) & SIS_CTRL_KERNEL_CTRL_LOGGING;
+}
+
+void sis_notify_kdump(struct pqi_ctrl_info *ctrl_info)
+{
+	sis_set_doorbell_bit(ctrl_info, SIS_NOTIFY_KDUMP);
+}
+
+static inline enum sis_ctrl_logging_status sis_read_ctrl_logging_status(struct pqi_ctrl_info *ctrl_info)
+{
+	return ((enum sis_ctrl_logging_status)((readl(&ctrl_info->registers->sis_firmware_status) & SIS_CTRL_KERNEL_CTRL_LOGGING_STATUS) >> 3));
+}
+
+void sis_soft_reset(struct pqi_ctrl_info *ctrl_info)
+{
+	writel(SIS_SOFT_RESET,
+		&ctrl_info->registers->sis_host_to_ctrl_doorbell);
+}
+
+#define SIS_FW_TRIAGE_STATUS_TIMEOUT_SECS		300
+#define SIS_FW_TRIAGE_STATUS_POLL_INTERVAL_SECS		1
+
+int sis_wait_for_fw_triage_completion(struct pqi_ctrl_info *ctrl_info)
+{
+	int rc;
+	enum sis_fw_triage_status status;
+	unsigned long timeout;
+
+	timeout = (SIS_FW_TRIAGE_STATUS_TIMEOUT_SECS * HZ) + jiffies;
+	while (1) {
+		status = sis_read_firmware_triage_status(ctrl_info);
+		if (status == FW_TRIAGE_COND_INVALID) {
+			dev_err(&ctrl_info->pci_dev->dev,
+				"firmware triage condition invalid\n");
+			rc = -EINVAL;
+			break;
+		} else if (status == FW_TRIAGE_NOT_STARTED ||
+			status == FW_TRIAGE_COMPLETED) {
+			rc = 0;
+			break;
+		}
+
+		if (time_after(jiffies, timeout)) {
+			dev_err(&ctrl_info->pci_dev->dev,
+				"timed out waiting for firmware triage status\n");
+			rc = -ETIMEDOUT;
+			break;
+		}
+
+		ssleep(SIS_FW_TRIAGE_STATUS_POLL_INTERVAL_SECS);
+	}
+
+	return rc;
+}
+
+#define SIS_CTRL_LOGGING_STATUS_TIMEOUT_SECS		180
+#define SIS_CTRL_LOGGING_STATUS_POLL_INTERVAL_SECS	1
+
+int sis_wait_for_ctrl_logging_completion(struct pqi_ctrl_info *ctrl_info)
+{
+	int rc;
+	enum sis_ctrl_logging_status status;
+	unsigned long timeout;
+
+	timeout = (SIS_CTRL_LOGGING_STATUS_TIMEOUT_SECS * HZ) + jiffies;
+	while (1) {
+		status = sis_read_ctrl_logging_status(ctrl_info);
+		if (status == CTRL_LOGGING_COND_INVALID) {
+			dev_err(&ctrl_info->pci_dev->dev,
+				"controller data logging condition invalid\n");
+			rc = -EINVAL;
+			break;
+		} else if (status == CTRL_LOGGING_COMPLETED) {
+			rc = 0;
+			break;
+		}
+
+		if (time_after(jiffies, timeout)) {
+			dev_err(&ctrl_info->pci_dev->dev,
+				"timed out waiting for controller data logging status\n");
+			rc = -ETIMEDOUT;
+			break;
+		}
+
+		ssleep(SIS_CTRL_LOGGING_STATUS_POLL_INTERVAL_SECS);
+	}
+
+	return rc;
+}
+
+void sis_verify_structures(void)
 {
 	BUILD_BUG_ON(offsetof(struct sis_base_struct,
 		revision) != 0x0);

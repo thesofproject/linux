@@ -1,22 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
  *  Routines for control of ICS 2101 chip and "mixer" in GF1 chip
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/time.h>
@@ -52,7 +37,6 @@ static int snd_gf1_get_single(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 static int snd_gf1_put_single(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_gus_card *gus = snd_kcontrol_chip(kcontrol);
-	unsigned long flags;
 	int shift = kcontrol->private_value & 0xff;
 	int invert = (kcontrol->private_value >> 8) & 1;
 	int change;
@@ -62,13 +46,12 @@ static int snd_gf1_put_single(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 	if (invert)
 		nval ^= 1;
 	nval <<= shift;
-	spin_lock_irqsave(&gus->reg_lock, flags);
+	guard(spinlock_irqsave)(&gus->reg_lock);
 	oval = gus->mix_cntrl_reg;
 	nval = (oval & ~(1 << shift)) | nval;
 	change = nval != oval;
 	outb(gus->mix_cntrl_reg = nval, GUSP(gus, MIXCNTRLREG));
 	outb(gus->gf1.active_voice = 0, GUSP(gus, GF1PAGE));
-	spin_unlock_irqrestore(&gus->reg_lock, flags);
 	return change;
 }
 
@@ -90,14 +73,12 @@ static int snd_ics_info_double(struct snd_kcontrol *kcontrol, struct snd_ctl_ele
 static int snd_ics_get_double(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_gus_card *gus = snd_kcontrol_chip(kcontrol);
-	unsigned long flags;
 	int addr = kcontrol->private_value & 0xff;
 	unsigned char left, right;
 	
-	spin_lock_irqsave(&gus->reg_lock, flags);
+	guard(spinlock_irqsave)(&gus->reg_lock);
 	left = gus->gf1.ics_regs[addr][0];
 	right = gus->gf1.ics_regs[addr][1];
-	spin_unlock_irqrestore(&gus->reg_lock, flags);
 	ucontrol->value.integer.value[0] = left & 127;
 	ucontrol->value.integer.value[1] = right & 127;
 	return 0;
@@ -106,14 +87,13 @@ static int snd_ics_get_double(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 static int snd_ics_put_double(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_gus_card *gus = snd_kcontrol_chip(kcontrol);
-	unsigned long flags;
 	int addr = kcontrol->private_value & 0xff;
 	int change;
 	unsigned char val1, val2, oval1, oval2;
 	
 	val1 = ucontrol->value.integer.value[0] & 127;
 	val2 = ucontrol->value.integer.value[1] & 127;
-	spin_lock_irqsave(&gus->reg_lock, flags);
+	guard(spinlock_irqsave)(&gus->reg_lock);
 	oval1 = gus->gf1.ics_regs[addr][0];
 	oval2 = gus->gf1.ics_regs[addr][1];
 	change = val1 != oval1 || val2 != oval2;
@@ -131,17 +111,16 @@ static int snd_ics_put_double(struct snd_kcontrol *kcontrol, struct snd_ctl_elem
 	outb(2, GUSP(gus, MIXDATAPORT));
 	outb(addr | 3, GUSP(gus, MIXCNTRLPORT));
 	outb((unsigned char) val2, GUSP(gus, MIXDATAPORT));
-	spin_unlock_irqrestore(&gus->reg_lock, flags);
 	return change;
 }
 
-static struct snd_kcontrol_new snd_gf1_controls[] = {
+static const struct snd_kcontrol_new snd_gf1_controls[] = {
 GF1_SINGLE("Master Playback Switch", 0, 1, 1),
 GF1_SINGLE("Line Switch", 0, 0, 1),
 GF1_SINGLE("Mic Switch", 0, 2, 0)
 };
 
-static struct snd_kcontrol_new snd_ics_controls[] = {
+static const struct snd_kcontrol_new snd_ics_controls[] = {
 GF1_SINGLE("Master Playback Switch", 0, 1, 1),
 ICS_DOUBLE("Master Playback Volume", 0, SNDRV_ICS_MASTER_DEV),
 ICS_DOUBLE("Synth Playback Volume", 0, SNDRV_ICS_GF1_DEV),
@@ -167,7 +146,7 @@ int snd_gf1_new_mixer(struct snd_gus_card * gus)
 	if (gus->ics_flag)
 		snd_component_add(card, "ICS2101");
 	if (card->mixername[0] == '\0') {
-		strcpy(card->mixername, gus->ics_flag ? "GF1,ICS2101" : "GF1");
+		strscpy(card->mixername, gus->ics_flag ? "GF1,ICS2101" : "GF1");
 	} else {
 		if (gus->ics_flag)
 			strcat(card->mixername, ",ICS2101");
@@ -177,12 +156,14 @@ int snd_gf1_new_mixer(struct snd_gus_card * gus)
 	if (!gus->ics_flag) {
 		max = gus->ess_flag ? 1 : ARRAY_SIZE(snd_gf1_controls);
 		for (idx = 0; idx < max; idx++) {
-			if ((err = snd_ctl_add(card, snd_ctl_new1(&snd_gf1_controls[idx], gus))) < 0)
+			err = snd_ctl_add(card, snd_ctl_new1(&snd_gf1_controls[idx], gus));
+			if (err < 0)
 				return err;
 		}
 	} else {
 		for (idx = 0; idx < ARRAY_SIZE(snd_ics_controls); idx++) {
-			if ((err = snd_ctl_add(card, snd_ctl_new1(&snd_ics_controls[idx], gus))) < 0)
+			err = snd_ctl_add(card, snd_ctl_new1(&snd_ics_controls[idx], gus));
+			if (err < 0)
 				return err;
 		}
 	}

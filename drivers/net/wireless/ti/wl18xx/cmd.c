@@ -1,22 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This file is part of wl18xx
  *
  * Copyright (C) 2011 Texas Instruments Inc.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #include "../wlcore/cmd.h"
@@ -36,7 +22,7 @@ int wl18xx_cmd_channel_switch(struct wl1271 *wl,
 	wl1271_debug(DEBUG_ACX, "cmd channel switch (count=%d)",
 		     ch_switch->count);
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+	cmd = kzalloc_obj(*cmd);
 	if (!cmd) {
 		ret = -ENOMEM;
 		goto out;
@@ -92,7 +78,7 @@ int wl18xx_cmd_smart_config_start(struct wl1271 *wl, u32 group_bitmap)
 	wl1271_debug(DEBUG_CMD, "cmd smart config start group_bitmap=0x%x",
 		     group_bitmap);
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+	cmd = kzalloc_obj(*cmd);
 	if (!cmd) {
 		ret = -ENOMEM;
 		goto out;
@@ -119,7 +105,7 @@ int wl18xx_cmd_smart_config_stop(struct wl1271 *wl)
 
 	wl1271_debug(DEBUG_CMD, "cmd smart config stop");
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+	cmd = kzalloc_obj(*cmd);
 	if (!cmd) {
 		ret = -ENOMEM;
 		goto out;
@@ -151,7 +137,7 @@ int wl18xx_cmd_smart_config_set_group_key(struct wl1271 *wl, u16 group_id,
 		return -E2BIG;
 	}
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+	cmd = kzalloc_obj(*cmd);
 	if (!cmd) {
 		ret = -ENOMEM;
 		goto out;
@@ -181,7 +167,7 @@ int wl18xx_cmd_set_cac(struct wl1271 *wl, struct wl12xx_vif *wlvif, bool start)
 	wl1271_debug(DEBUG_CMD, "cmd cac (channel %d) %s",
 		     wlvif->channel, start ? "start" : "stop");
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+	cmd = kzalloc_obj(*cmd);
 	if (!cmd)
 		return -ENOMEM;
 
@@ -212,7 +198,7 @@ int wl18xx_cmd_radar_detection_debug(struct wl1271 *wl, u8 channel)
 	wl1271_debug(DEBUG_CMD, "cmd radar detection debug (chan %d)",
 		     channel);
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+	cmd = kzalloc_obj(*cmd);
 	if (!cmd)
 		return -ENOMEM;
 
@@ -238,7 +224,7 @@ int wl18xx_cmd_dfs_master_restart(struct wl1271 *wl, struct wl12xx_vif *wlvif)
 	wl1271_debug(DEBUG_CMD, "cmd dfs master restart (role %d)",
 		     wlvif->role_id);
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+	cmd = kzalloc_obj(*cmd);
 	if (!cmd)
 		return -ENOMEM;
 

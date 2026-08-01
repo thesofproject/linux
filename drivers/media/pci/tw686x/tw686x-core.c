@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2015 VanguardiaSur - www.vanguardiasur.com.ar
  *
  * Based on original driver by Krzysztof Ha?asa:
  * Copyright (C) 2015 Industrial Research Institute for Automation
  * and Measurements PIAP
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License
- * as published by the Free Software Foundation.
  *
  * Notes
  * -----
@@ -128,7 +125,7 @@ void tw686x_enable_channel(struct tw686x_dev *dev, unsigned int channel)
  */
 static void tw686x_dma_delay(struct timer_list *t)
 {
-	struct tw686x_dev *dev = from_timer(dev, t, dma_delay_timer);
+	struct tw686x_dev *dev = timer_container_of(dev, t, dma_delay_timer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&dev->lock, flags);
@@ -246,22 +243,22 @@ static int tw686x_probe(struct pci_dev *pci_dev,
 	struct tw686x_dev *dev;
 	int err;
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	if (!dev)
 		return -ENOMEM;
 	dev->type = pci_id->driver_data;
 	dev->dma_mode = dma_mode;
 	sprintf(dev->name, "tw%04X", pci_dev->device);
 
-	dev->video_channels = kcalloc(max_channels(dev),
-		sizeof(*dev->video_channels), GFP_KERNEL);
+	dev->video_channels = kzalloc_objs(*dev->video_channels,
+					   max_channels(dev));
 	if (!dev->video_channels) {
 		err = -ENOMEM;
 		goto free_dev;
 	}
 
-	dev->audio_channels = kcalloc(max_channels(dev),
-		sizeof(*dev->audio_channels), GFP_KERNEL);
+	dev->audio_channels = kzalloc_objs(*dev->audio_channels,
+					   max_channels(dev));
 	if (!dev->audio_channels) {
 		err = -ENOMEM;
 		goto free_video;
@@ -279,7 +276,7 @@ static int tw686x_probe(struct pci_dev *pci_dev,
 	}
 
 	pci_set_master(pci_dev);
-	err = pci_set_dma_mask(pci_dev, DMA_BIT_MASK(32));
+	err = dma_set_mask(&pci_dev->dev, DMA_BIT_MASK(32));
 	if (err) {
 		dev_err(&pci_dev->dev, "32-bit PCI DMA not supported\n");
 		err = -EIO;
@@ -318,13 +315,6 @@ static int tw686x_probe(struct pci_dev *pci_dev,
 
 	spin_lock_init(&dev->lock);
 
-	err = request_irq(pci_dev->irq, tw686x_irq, IRQF_SHARED,
-			  dev->name, dev);
-	if (err < 0) {
-		dev_err(&pci_dev->dev, "unable to request interrupt\n");
-		goto iounmap;
-	}
-
 	timer_setup(&dev->dma_delay_timer, tw686x_dma_delay, 0);
 
 	/*
@@ -336,18 +326,26 @@ static int tw686x_probe(struct pci_dev *pci_dev,
 	err = tw686x_video_init(dev);
 	if (err) {
 		dev_err(&pci_dev->dev, "can't register video\n");
-		goto free_irq;
+		goto iounmap;
 	}
 
 	err = tw686x_audio_init(dev);
 	if (err)
 		dev_warn(&pci_dev->dev, "can't register audio\n");
 
+	err = request_irq(pci_dev->irq, tw686x_irq, IRQF_SHARED,
+			  dev->name, dev);
+	if (err < 0) {
+		dev_err(&pci_dev->dev, "unable to request interrupt\n");
+		goto tw686x_free;
+	}
+
 	pci_set_drvdata(pci_dev, dev);
 	return 0;
 
-free_irq:
-	free_irq(pci_dev->irq, dev);
+tw686x_free:
+	tw686x_video_free(dev);
+	tw686x_audio_free(dev);
 iounmap:
 	pci_iounmap(pci_dev, dev->mmio);
 free_region:
@@ -375,7 +373,7 @@ static void tw686x_remove(struct pci_dev *pci_dev)
 
 	tw686x_video_free(dev);
 	tw686x_audio_free(dev);
-	del_timer_sync(&dev->dma_delay_timer);
+	timer_delete_sync(&dev->dma_delay_timer);
 
 	pci_iounmap(pci_dev, dev->mmio);
 	pci_release_regions(pci_dev);

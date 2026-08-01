@@ -18,6 +18,8 @@
 #include <asm/ptrace.h>
 #include <asm/tlbdebug.h>
 
+#include "ip32-common.h"
+
 static int ip32_be_handler(struct pt_regs *regs, int is_fixup)
 {
 	int data = regs->cp0_cause & 4;
@@ -29,10 +31,10 @@ static int ip32_be_handler(struct pt_regs *regs, int is_fixup)
 	show_regs(regs);
 	dump_tlb_all();
 	while(1);
-	force_sig(SIGBUS, current);
+	force_sig(SIGBUS);
 }
 
 void __init ip32_be_init(void)
 {
-	board_be_handler = ip32_be_handler;
+	mips_set_be_handler(ip32_be_handler);
 }

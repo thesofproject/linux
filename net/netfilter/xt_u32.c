@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *	xt_u32 - kernel module to match u32 packet content
  *
@@ -13,8 +14,8 @@
 #include <linux/netfilter/x_tables.h>
 #include <linux/netfilter/xt_u32.h>
 
-static bool u32_match_it(const struct xt_u32 *data,
-			 const struct sk_buff *skb)
+static int u32_match_it(const struct xt_u32 *data,
+			const struct sk_buff *skb)
 {
 	const struct xt_u32_test *ct;
 	unsigned int testind;
@@ -39,7 +40,8 @@ static bool u32_match_it(const struct xt_u32 *data,
 			return false;
 
 		if (skb_copy_bits(skb, pos, &n, sizeof(n)) < 0)
-			BUG();
+			return -1;
+
 		val   = ntohl(n);
 		nnums = ct->nnums;
 
@@ -67,7 +69,7 @@ static bool u32_match_it(const struct xt_u32 *data,
 
 				if (skb_copy_bits(skb, at + pos, &n,
 						    sizeof(n)) < 0)
-					BUG();
+					return -1;
 				val = ntohl(n);
 				break;
 			}
@@ -89,10 +91,45 @@ static bool u32_match_it(const struct xt_u32 *data,
 static bool u32_mt(const struct sk_buff *skb, struct xt_action_param *par)
 {
 	const struct xt_u32 *data = par->matchinfo;
-	bool ret;
+	int ret;
 
 	ret = u32_match_it(data, skb);
+	if (ret < 0) {
+		par->hotdrop = true;
+		return false;
+	}
+
 	return ret ^ data->invert;
+}
+
+static int u32_mt_checkentry(const struct xt_mtchk_param *par)
+{
+	const struct xt_u32 *data = par->matchinfo;
+	const struct xt_u32_test *ct;
+	unsigned int i, j;
+
+	if (data->ntests > ARRAY_SIZE(data->tests))
+		return -EINVAL;
+
+	for (i = 0; i < data->ntests; ++i) {
+		ct = &data->tests[i];
+
+		if (ct->nnums > ARRAY_SIZE(ct->location) ||
+		    ct->nvalues > ARRAY_SIZE(ct->value))
+			return -EINVAL;
+
+		for (j = 1; j < ct->nnums; ++j) {
+			switch (ct->location[j].nextop) {
+			case XT_U32_LEFTSH:
+			case XT_U32_RIGHTSH:
+				if (ct->location[j].number >= 32)
+					return -EINVAL;
+				break;
+			}
+		}
+	}
+
+	return 0;
 }
 
 static struct xt_match xt_u32_mt_reg __read_mostly = {
@@ -100,6 +137,7 @@ static struct xt_match xt_u32_mt_reg __read_mostly = {
 	.revision   = 0,
 	.family     = NFPROTO_UNSPEC,
 	.match      = u32_mt,
+	.checkentry = u32_mt_checkentry,
 	.matchsize  = sizeof(struct xt_u32),
 	.me         = THIS_MODULE,
 };

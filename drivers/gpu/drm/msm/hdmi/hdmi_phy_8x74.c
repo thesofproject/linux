@@ -1,24 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "hdmi.h"
 
 static void hdmi_phy_8x74_powerup(struct hdmi_phy *phy,
-		unsigned long int pixclock)
+				  unsigned long pixclock)
 {
 	hdmi_phy_write(phy, REG_HDMI_8x74_ANA_CFG0,   0x1b);
 	hdmi_phy_write(phy, REG_HDMI_8x74_ANA_CFG1,   0xf2);

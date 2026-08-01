@@ -70,14 +70,14 @@
 #include <xen/gntalloc.h>
 #include <xen/events.h>
 
-static int limit = 1024;
-module_param(limit, int, 0644);
+static unsigned int limit = 1024;
+module_param(limit, uint, 0644);
 MODULE_PARM_DESC(limit, "Maximum number of grants that may be allocated by "
 		"the gntalloc device");
 
 static LIST_HEAD(gref_list);
 static DEFINE_MUTEX(gref_mutex);
-static int gref_size;
+static unsigned int gref_size;
 
 struct notify_info {
 	uint16_t pgoff:12;    /* Bits 0-11: Offset of the byte to clear */
@@ -128,7 +128,7 @@ static int add_grefs(struct ioctl_gntalloc_alloc_gref *op,
 
 	readonly = !(op->flags & GNTALLOC_FLAG_WRITABLE);
 	for (i = 0; i < op->count; i++) {
-		gref = kzalloc(sizeof(*gref), GFP_KERNEL);
+		gref = kzalloc_obj(*gref);
 		if (!gref) {
 			rc = -ENOMEM;
 			goto undo;
@@ -169,14 +169,6 @@ undo:
 		__del_gref(gref);
 	}
 
-	/* It's possible for the target domain to map the just-allocated grant
-	 * references by blindly guessing their IDs; if this is done, then
-	 * __del_gref will leave them in the queue_gref list. They need to be
-	 * added to the global list so that we can free them when they are no
-	 * longer referenced.
-	 */
-	if (unlikely(!list_empty(&queue_gref)))
-		list_splice_tail(&queue_gref, &gref_list);
 	mutex_unlock(&gref_mutex);
 	return rc;
 }
@@ -184,9 +176,9 @@ undo:
 static void __del_gref(struct gntalloc_gref *gref)
 {
 	if (gref->notify.flags & UNMAP_NOTIFY_CLEAR_BYTE) {
-		uint8_t *tmp = kmap(gref->page);
+		uint8_t *tmp = kmap_local_page(gref->page);
 		tmp[gref->notify.pgoff] = 0;
-		kunmap(gref->page);
+		kunmap_local(tmp);
 	}
 	if (gref->notify.flags & UNMAP_NOTIFY_SEND_EVENT) {
 		notify_remote_via_evtchn(gref->notify.event);
@@ -196,20 +188,14 @@ static void __del_gref(struct gntalloc_gref *gref)
 	gref->notify.flags = 0;
 
 	if (gref->gref_id) {
-		if (gnttab_query_foreign_access(gref->gref_id))
-			return;
-
-		if (!gnttab_end_foreign_access_ref(gref->gref_id, 0))
-			return;
-
-		gnttab_free_grant_reference(gref->gref_id);
+		if (gref->page)
+			gnttab_end_foreign_access(gref->gref_id, gref->page);
+		else
+			gnttab_free_grant_reference(gref->gref_id);
 	}
 
 	gref_size--;
 	list_del(&gref->next_gref);
-
-	if (gref->page)
-		__free_page(gref->page);
 
 	kfree(gref);
 }
@@ -243,7 +229,7 @@ static int gntalloc_open(struct inode *inode, struct file *filp)
 {
 	struct gntalloc_file_private_data *priv;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc_obj(*priv);
 	if (!priv)
 		goto out_nomem;
 	INIT_LIST_HEAD(&priv->list);
@@ -286,11 +272,18 @@ static long gntalloc_ioctl_alloc(struct gntalloc_file_private_data *priv,
 	int rc = 0;
 	struct ioctl_gntalloc_alloc_gref op;
 	uint32_t *gref_ids;
+	unsigned int limit_snapshot;
 
 	pr_debug("%s: priv %p\n", __func__, priv);
 
 	if (copy_from_user(&op, arg, sizeof(op))) {
 		rc = -EFAULT;
+		goto out;
+	}
+
+	limit_snapshot = READ_ONCE(limit);
+	if (op.count > limit_snapshot) {
+		rc = -ENOSPC;
 		goto out;
 	}
 
@@ -306,14 +299,16 @@ static long gntalloc_ioctl_alloc(struct gntalloc_file_private_data *priv,
 	 * are about to enforce, removing them here is a good idea.
 	 */
 	do_cleanup();
-	if (gref_size + op.count > limit) {
+	limit_snapshot = READ_ONCE(limit);
+	if (gref_size > limit_snapshot ||
+	    op.count > limit_snapshot - gref_size) {
 		mutex_unlock(&gref_mutex);
 		rc = -ENOSPC;
 		goto out_free;
 	}
 	gref_size += op.count;
 	op.index = priv->index;
-	priv->index += op.count * PAGE_SIZE;
+	priv->index += (uint64_t)op.count * PAGE_SIZE;
 	mutex_unlock(&gref_mutex);
 
 	rc = add_grefs(&op, gref_ids, priv);
@@ -331,7 +326,7 @@ static long gntalloc_ioctl_alloc(struct gntalloc_file_private_data *priv,
 		rc = -EFAULT;
 		goto out_free;
 	}
-	if (copy_to_user(arg->gref_ids, gref_ids,
+	if (copy_to_user(arg->gref_ids_flex, gref_ids,
 			sizeof(gref_ids[0]) * op.count)) {
 		rc = -EFAULT;
 		goto out_free;
@@ -515,7 +510,7 @@ static int gntalloc_mmap(struct file *filp, struct vm_area_struct *vma)
 		return -EINVAL;
 	}
 
-	vm_priv = kmalloc(sizeof(*vm_priv), GFP_KERNEL);
+	vm_priv = kmalloc_obj(*vm_priv);
 	if (!vm_priv)
 		return -ENOMEM;
 
@@ -539,7 +534,7 @@ static int gntalloc_mmap(struct file *filp, struct vm_area_struct *vma)
 
 	vma->vm_private_data = vm_priv;
 
-	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
+	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
 
 	vma->vm_ops = &gntalloc_vmops;
 

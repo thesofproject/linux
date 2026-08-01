@@ -1,25 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  exynos_adc.c - Support for ADC in EXYNOS SoCs
  *
  *  8 ~ 10 channel, 10/12-bit ADC
  *
  *  Copyright (C) 2013 Naveen Krishna Chatradhi <ch.naveen@samsung.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+#include <linux/compiler.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
@@ -31,11 +19,9 @@
 #include <linux/clk.h>
 #include <linux/completion.h>
 #include <linux/of.h>
-#include <linux/of_irq.h>
 #include <linux/regulator/consumer.h>
 #include <linux/of_platform.h>
 #include <linux/err.h>
-#include <linux/input.h>
 
 #include <linux/iio/iio.h>
 #include <linux/iio/machine.h>
@@ -43,21 +29,14 @@
 #include <linux/mfd/syscon.h>
 #include <linux/regmap.h>
 
-#include <linux/platform_data/touchscreen-s3c2410.h>
-
 /* S3C/EXYNOS4412/5250 ADC_V1 registers definitions */
 #define ADC_V1_CON(x)		((x) + 0x00)
-#define ADC_V1_TSC(x)		((x) + 0x04)
 #define ADC_V1_DLY(x)		((x) + 0x08)
 #define ADC_V1_DATX(x)		((x) + 0x0C)
 #define ADC_V1_DATY(x)		((x) + 0x10)
 #define ADC_V1_UPDN(x)		((x) + 0x14)
 #define ADC_V1_INTCLR(x)	((x) + 0x18)
 #define ADC_V1_MUX(x)		((x) + 0x1c)
-#define ADC_V1_CLRINTPNDNUP(x)	((x) + 0x20)
-
-/* S3C2410 ADC registers definitions */
-#define ADC_S3C2410_MUX(x)	((x) + 0x18)
 
 /* Future ADC_V2 registers definitions */
 #define ADC_V2_CON1(x)		((x) + 0x00)
@@ -73,13 +52,8 @@
 #define ADC_V1_CON_PRSCLV(x)	(((x) & 0xFF) << 6)
 #define ADC_V1_CON_STANDBY	(1u << 2)
 
-/* Bit definitions for S3C2410 ADC */
+/* Bit definitions for S3C2410 / S3C6410 ADC */
 #define ADC_S3C2410_CON_SELMUX(x) (((x) & 7) << 3)
-#define ADC_S3C2410_DATX_MASK	0x3FF
-#define ADC_S3C2416_CON_RES_SEL	(1u << 3)
-
-/* touch screen always uses channel 0 */
-#define ADC_S3C2410_MUX_TS	0
 
 /* ADCTSC Register Bits */
 #define ADC_S3C2443_TSC_UD_SEN		(1u << 8)
@@ -87,20 +61,12 @@
 #define ADC_S3C2410_TSC_YP_SEN		(1u << 6)
 #define ADC_S3C2410_TSC_XM_SEN		(1u << 5)
 #define ADC_S3C2410_TSC_XP_SEN		(1u << 4)
-#define ADC_S3C2410_TSC_PULL_UP_DISABLE	(1u << 3)
-#define ADC_S3C2410_TSC_AUTO_PST	(1u << 2)
 #define ADC_S3C2410_TSC_XY_PST(x)	(((x) & 0x3) << 0)
 
 #define ADC_TSC_WAIT4INT (ADC_S3C2410_TSC_YM_SEN | \
 			 ADC_S3C2410_TSC_YP_SEN | \
 			 ADC_S3C2410_TSC_XP_SEN | \
 			 ADC_S3C2410_TSC_XY_PST(3))
-
-#define ADC_TSC_AUTOPST	(ADC_S3C2410_TSC_YM_SEN | \
-			 ADC_S3C2410_TSC_YP_SEN | \
-			 ADC_S3C2410_TSC_XP_SEN | \
-			 ADC_S3C2410_TSC_AUTO_PST | \
-			 ADC_S3C2410_TSC_XY_PST(0))
 
 /* Bit definitions for ADC_V2 */
 #define ADC_V2_CON1_SOFT_RESET	(1u << 2)
@@ -115,6 +81,8 @@
 #define MAX_ADC_V2_CHANNELS		10
 #define MAX_ADC_V1_CHANNELS		8
 #define MAX_EXYNOS3250_ADC_CHANNELS	2
+#define MAX_EXYNOS4212_ADC_CHANNELS	4
+#define MAX_S5PV210_ADC_CHANNELS	10
 
 /* Bit definitions common for ADC_V1 and ADC_V2 */
 #define ADC_CON_EN_START	(1u << 0)
@@ -131,14 +99,11 @@
 struct exynos_adc {
 	struct exynos_adc_data	*data;
 	struct device		*dev;
-	struct input_dev	*input;
 	void __iomem		*regs;
 	struct regmap		*pmu_map;
 	struct clk		*clk;
 	struct clk		*sclk;
 	unsigned int		irq;
-	unsigned int		tsirq;
-	unsigned int		delay;
 	struct regulator	*vdd;
 
 	struct completion	completion;
@@ -146,9 +111,15 @@ struct exynos_adc {
 	u32			value;
 	unsigned int            version;
 
-	bool			read_ts;
-	u32			ts_x;
-	u32			ts_y;
+	/*
+	 * Lock to protect from potential concurrent access to the
+	 * completion callback during a manual conversion. For this driver
+	 * a wait-callback is used to wait for the conversion result,
+	 * so in the meantime no other read request (or conversion start)
+	 * must be performed, otherwise it would interfere with the
+	 * current conversion result.
+	 */
+	struct mutex		lock;
 };
 
 struct exynos_adc_data {
@@ -239,7 +210,7 @@ static void exynos_adc_v1_init_hw(struct exynos_adc *info)
 	writel(con1, ADC_V1_CON(info->regs));
 
 	/* set touchscreen delay */
-	writel(info->delay, ADC_V1_DLY(info->regs));
+	writel(10000, ADC_V1_DLY(info->regs));
 }
 
 static void exynos_adc_v1_exit_hw(struct exynos_adc *info)
@@ -270,6 +241,19 @@ static void exynos_adc_v1_start_conv(struct exynos_adc *info,
 	writel(con1 | ADC_CON_EN_START, ADC_V1_CON(info->regs));
 }
 
+/* Exynos4212 and 4412 is like ADCv1 but with four channels only */
+static const struct exynos_adc_data exynos4212_adc_data = {
+	.num_channels	= MAX_EXYNOS4212_ADC_CHANNELS,
+	.mask		= ADC_DATX_MASK,	/* 12 bit ADC resolution */
+	.needs_adc_phy	= true,
+	.phy_offset	= EXYNOS_ADCV1_PHY_OFFSET,
+
+	.init_hw	= exynos_adc_v1_init_hw,
+	.exit_hw	= exynos_adc_v1_exit_hw,
+	.clear_irq	= exynos_adc_v1_clear_irq,
+	.start_conv	= exynos_adc_v1_start_conv,
+};
+
 static const struct exynos_adc_data exynos_adc_v1_data = {
 	.num_channels	= MAX_ADC_V1_CHANNELS,
 	.mask		= ADC_DATX_MASK,	/* 12 bit ADC resolution */
@@ -282,51 +266,14 @@ static const struct exynos_adc_data exynos_adc_v1_data = {
 	.start_conv	= exynos_adc_v1_start_conv,
 };
 
-static void exynos_adc_s3c2416_start_conv(struct exynos_adc *info,
-					  unsigned long addr)
-{
-	u32 con1;
-
-	/* Enable 12 bit ADC resolution */
-	con1 = readl(ADC_V1_CON(info->regs));
-	con1 |= ADC_S3C2416_CON_RES_SEL;
-	writel(con1, ADC_V1_CON(info->regs));
-
-	/* Select channel for S3C2416 */
-	writel(addr, ADC_S3C2410_MUX(info->regs));
-
-	con1 = readl(ADC_V1_CON(info->regs));
-	writel(con1 | ADC_CON_EN_START, ADC_V1_CON(info->regs));
-}
-
-static struct exynos_adc_data const exynos_adc_s3c2416_data = {
-	.num_channels	= MAX_ADC_V1_CHANNELS,
+static const struct exynos_adc_data exynos_adc_s5pv210_data = {
+	.num_channels	= MAX_S5PV210_ADC_CHANNELS,
 	.mask		= ADC_DATX_MASK,	/* 12 bit ADC resolution */
 
 	.init_hw	= exynos_adc_v1_init_hw,
 	.exit_hw	= exynos_adc_v1_exit_hw,
-	.start_conv	= exynos_adc_s3c2416_start_conv,
-};
-
-static void exynos_adc_s3c2443_start_conv(struct exynos_adc *info,
-					  unsigned long addr)
-{
-	u32 con1;
-
-	/* Select channel for S3C2433 */
-	writel(addr, ADC_S3C2410_MUX(info->regs));
-
-	con1 = readl(ADC_V1_CON(info->regs));
-	writel(con1 | ADC_CON_EN_START, ADC_V1_CON(info->regs));
-}
-
-static struct exynos_adc_data const exynos_adc_s3c2443_data = {
-	.num_channels	= MAX_ADC_V1_CHANNELS,
-	.mask		= ADC_S3C2410_DATX_MASK, /* 10 bit ADC resolution */
-
-	.init_hw	= exynos_adc_v1_init_hw,
-	.exit_hw	= exynos_adc_v1_exit_hw,
-	.start_conv	= exynos_adc_s3c2443_start_conv,
+	.clear_irq	= exynos_adc_v1_clear_irq,
+	.start_conv	= exynos_adc_v1_start_conv,
 };
 
 static void exynos_adc_s3c64xx_start_conv(struct exynos_adc *info,
@@ -339,15 +286,6 @@ static void exynos_adc_s3c64xx_start_conv(struct exynos_adc *info,
 	con1 |= ADC_S3C2410_CON_SELMUX(addr);
 	writel(con1 | ADC_CON_EN_START, ADC_V1_CON(info->regs));
 }
-
-static struct exynos_adc_data const exynos_adc_s3c24xx_data = {
-	.num_channels	= MAX_ADC_V1_CHANNELS,
-	.mask		= ADC_S3C2410_DATX_MASK, /* 10 bit ADC resolution */
-
-	.init_hw	= exynos_adc_v1_init_hw,
-	.exit_hw	= exynos_adc_v1_exit_hw,
-	.start_conv	= exynos_adc_s3c64xx_start_conv,
-};
 
 static struct exynos_adc_data const exynos_adc_s3c64xx_data = {
 	.num_channels	= MAX_ADC_V1_CHANNELS,
@@ -437,9 +375,6 @@ static void exynos_adc_exynos7_init_hw(struct exynos_adc *info)
 {
 	u32 con1, con2;
 
-	if (info->data->needs_adc_phy)
-		regmap_write(info->pmu_map, info->data->phy_offset, 1);
-
 	con1 = ADC_V2_CON1_SOFT_RESET;
 	writel(con1, ADC_V2_CON1(info->regs));
 
@@ -464,20 +399,14 @@ static const struct exynos_adc_data exynos7_adc_data = {
 
 static const struct of_device_id exynos_adc_match[] = {
 	{
-		.compatible = "samsung,s3c2410-adc",
-		.data = &exynos_adc_s3c24xx_data,
-	}, {
-		.compatible = "samsung,s3c2416-adc",
-		.data = &exynos_adc_s3c2416_data,
-	}, {
-		.compatible = "samsung,s3c2440-adc",
-		.data = &exynos_adc_s3c24xx_data,
-	}, {
-		.compatible = "samsung,s3c2443-adc",
-		.data = &exynos_adc_s3c2443_data,
-	}, {
 		.compatible = "samsung,s3c6410-adc",
 		.data = &exynos_adc_s3c64xx_data,
+	}, {
+		.compatible = "samsung,s5pv210-adc",
+		.data = &exynos_adc_s5pv210_data,
+	}, {
+		.compatible = "samsung,exynos4212-adc",
+		.data = &exynos4212_adc_data,
 	}, {
 		.compatible = "samsung,exynos-adc-v1",
 		.data = &exynos_adc_v1_data,
@@ -491,7 +420,7 @@ static const struct of_device_id exynos_adc_match[] = {
 		.compatible = "samsung,exynos7-adc",
 		.data = &exynos7_adc_data,
 	},
-	{},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, exynos_adc_match);
 
@@ -510,22 +439,33 @@ static int exynos_read_raw(struct iio_dev *indio_dev,
 				long mask)
 {
 	struct exynos_adc *info = iio_priv(indio_dev);
-	unsigned long timeout;
+	unsigned long time_left;
 	int ret;
 
-	if (mask != IIO_CHAN_INFO_RAW)
-		return -EINVAL;
+	if (mask == IIO_CHAN_INFO_SCALE) {
+		ret = regulator_get_voltage(info->vdd);
+		if (ret < 0)
+			return ret;
 
-	mutex_lock(&indio_dev->mlock);
+		/* Regulator voltage is in uV, but need mV */
+		*val = ret / 1000;
+		*val2 = info->data->mask;
+
+		return IIO_VAL_FRACTIONAL;
+	} else if (mask != IIO_CHAN_INFO_RAW) {
+		return -EINVAL;
+	}
+
+	mutex_lock(&info->lock);
 	reinit_completion(&info->completion);
 
 	/* Select the channel to be used and Trigger conversion */
 	if (info->data->start_conv)
 		info->data->start_conv(info, chan->address);
 
-	timeout = wait_for_completion_timeout(&info->completion,
-					      EXYNOS_ADC_TIMEOUT);
-	if (timeout == 0) {
+	time_left = wait_for_completion_timeout(&info->completion,
+						EXYNOS_ADC_TIMEOUT);
+	if (time_left == 0) {
 		dev_warn(&indio_dev->dev, "Conversion timed out! Resetting\n");
 		if (info->data->init_hw)
 			info->data->init_hw(info);
@@ -536,43 +476,7 @@ static int exynos_read_raw(struct iio_dev *indio_dev,
 		ret = IIO_VAL_INT;
 	}
 
-	mutex_unlock(&indio_dev->mlock);
-
-	return ret;
-}
-
-static int exynos_read_s3c64xx_ts(struct iio_dev *indio_dev, int *x, int *y)
-{
-	struct exynos_adc *info = iio_priv(indio_dev);
-	unsigned long timeout;
-	int ret;
-
-	mutex_lock(&indio_dev->mlock);
-	info->read_ts = true;
-
-	reinit_completion(&info->completion);
-
-	writel(ADC_S3C2410_TSC_PULL_UP_DISABLE | ADC_TSC_AUTOPST,
-	       ADC_V1_TSC(info->regs));
-
-	/* Select the ts channel to be used and Trigger conversion */
-	info->data->start_conv(info, ADC_S3C2410_MUX_TS);
-
-	timeout = wait_for_completion_timeout(&info->completion,
-					      EXYNOS_ADC_TIMEOUT);
-	if (timeout == 0) {
-		dev_warn(&indio_dev->dev, "Conversion timed out! Resetting\n");
-		if (info->data->init_hw)
-			info->data->init_hw(info);
-		ret = -ETIMEDOUT;
-	} else {
-		*x = info->ts_x;
-		*y = info->ts_y;
-		ret = 0;
-	}
-
-	info->read_ts = false;
-	mutex_unlock(&indio_dev->mlock);
+	mutex_unlock(&info->lock);
 
 	return ret;
 }
@@ -583,59 +487,13 @@ static irqreturn_t exynos_adc_isr(int irq, void *dev_id)
 	u32 mask = info->data->mask;
 
 	/* Read value */
-	if (info->read_ts) {
-		info->ts_x = readl(ADC_V1_DATX(info->regs));
-		info->ts_y = readl(ADC_V1_DATY(info->regs));
-		writel(ADC_TSC_WAIT4INT | ADC_S3C2443_TSC_UD_SEN, ADC_V1_TSC(info->regs));
-	} else {
-		info->value = readl(ADC_V1_DATX(info->regs)) & mask;
-	}
+	info->value = readl(ADC_V1_DATX(info->regs)) & mask;
 
 	/* clear irq */
 	if (info->data->clear_irq)
 		info->data->clear_irq(info);
 
 	complete(&info->completion);
-
-	return IRQ_HANDLED;
-}
-
-/*
- * Here we (ab)use a threaded interrupt handler to stay running
- * for as long as the touchscreen remains pressed, we report
- * a new event with the latest data and then sleep until the
- * next timer tick. This mirrors the behavior of the old
- * driver, with much less code.
- */
-static irqreturn_t exynos_ts_isr(int irq, void *dev_id)
-{
-	struct exynos_adc *info = dev_id;
-	struct iio_dev *dev = dev_get_drvdata(info->dev);
-	u32 x, y;
-	bool pressed;
-	int ret;
-
-	while (info->input->users) {
-		ret = exynos_read_s3c64xx_ts(dev, &x, &y);
-		if (ret == -ETIMEDOUT)
-			break;
-
-		pressed = x & y & ADC_DATX_PRESSED;
-		if (!pressed) {
-			input_report_key(info->input, BTN_TOUCH, 0);
-			input_sync(info->input);
-			break;
-		}
-
-		input_report_abs(info->input, ABS_X, x & ADC_DATX_MASK);
-		input_report_abs(info->input, ABS_Y, y & ADC_DATY_MASK);
-		input_report_key(info->input, BTN_TOUCH, 1);
-		input_sync(info->input);
-
-		usleep_range(1000, 1100);
-	};
-
-	writel(0, ADC_V1_CLRINTPNDNUP(info->regs));
 
 	return IRQ_HANDLED;
 }
@@ -665,6 +523,7 @@ static const struct iio_info exynos_adc_iio_info = {
 	.channel = _index,				\
 	.address = _index,				\
 	.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),	\
+	.info_mask_shared_by_all = BIT(IIO_CHAN_INFO_SCALE),	\
 	.datasheet_name = _id,				\
 }
 
@@ -681,151 +540,59 @@ static const struct iio_chan_spec exynos_adc_iio_channels[] = {
 	ADC_CHANNEL(9, "adc9"),
 };
 
-static int exynos_adc_remove_devices(struct device *dev, void *c)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-
-	platform_device_unregister(pdev);
-
-	return 0;
-}
-
-static int exynos_adc_ts_open(struct input_dev *dev)
-{
-	struct exynos_adc *info = input_get_drvdata(dev);
-
-	enable_irq(info->tsirq);
-
-	return 0;
-}
-
-static void exynos_adc_ts_close(struct input_dev *dev)
-{
-	struct exynos_adc *info = input_get_drvdata(dev);
-
-	disable_irq(info->tsirq);
-}
-
-static int exynos_adc_ts_init(struct exynos_adc *info)
-{
-	int ret;
-
-	if (info->tsirq <= 0)
-		return -ENODEV;
-
-	info->input = input_allocate_device();
-	if (!info->input)
-		return -ENOMEM;
-
-	info->input->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
-	info->input->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH);
-
-	input_set_abs_params(info->input, ABS_X, 0, 0x3FF, 0, 0);
-	input_set_abs_params(info->input, ABS_Y, 0, 0x3FF, 0, 0);
-
-	info->input->name = "S3C24xx TouchScreen";
-	info->input->id.bustype = BUS_HOST;
-	info->input->open = exynos_adc_ts_open;
-	info->input->close = exynos_adc_ts_close;
-
-	input_set_drvdata(info->input, info);
-
-	ret = input_register_device(info->input);
-	if (ret) {
-		input_free_device(info->input);
-		return ret;
-	}
-
-	disable_irq(info->tsirq);
-	ret = request_threaded_irq(info->tsirq, NULL, exynos_ts_isr,
-				   IRQF_ONESHOT, "touchscreen", info);
-	if (ret)
-		input_unregister_device(info->input);
-
-	return ret;
-}
-
 static int exynos_adc_probe(struct platform_device *pdev)
 {
 	struct exynos_adc *info = NULL;
+	struct device *dev = &pdev->dev;
 	struct device_node *np = pdev->dev.of_node;
-	struct s3c2410_ts_mach_info *pdata = dev_get_platdata(&pdev->dev);
 	struct iio_dev *indio_dev = NULL;
-	struct resource	*mem;
-	bool has_ts = false;
-	int ret = -ENODEV;
+	int ret;
 	int irq;
 
-	indio_dev = devm_iio_device_alloc(&pdev->dev, sizeof(struct exynos_adc));
-	if (!indio_dev) {
-		dev_err(&pdev->dev, "failed allocating iio device\n");
+	indio_dev = devm_iio_device_alloc(dev, sizeof(struct exynos_adc));
+	if (!indio_dev)
 		return -ENOMEM;
-	}
 
 	info = iio_priv(indio_dev);
 
 	info->data = exynos_adc_get_data(pdev);
-	if (!info->data) {
-		dev_err(&pdev->dev, "failed getting exynos_adc_data\n");
-		return -EINVAL;
-	}
+	if (!info->data)
+		return dev_err_probe(dev, -EINVAL, "failed getting exynos_adc_data\n");
 
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	info->regs = devm_ioremap_resource(&pdev->dev, mem);
+	info->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(info->regs))
 		return PTR_ERR(info->regs);
 
 
 	if (info->data->needs_adc_phy) {
-		info->pmu_map = syscon_regmap_lookup_by_phandle(
-					pdev->dev.of_node,
-					"samsung,syscon-phandle");
-		if (IS_ERR(info->pmu_map)) {
-			dev_err(&pdev->dev, "syscon regmap lookup failed.\n");
-			return PTR_ERR(info->pmu_map);
-		}
+		info->pmu_map = syscon_regmap_lookup_by_phandle(np, "samsung,syscon-phandle");
+		if (IS_ERR(info->pmu_map))
+			return dev_err_probe(dev, PTR_ERR(info->pmu_map),
+					     "syscon regmap lookup failed.\n");
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "no irq resource?\n");
+	if (irq < 0)
 		return irq;
-	}
 	info->irq = irq;
-
-	irq = platform_get_irq(pdev, 1);
-	if (irq == -EPROBE_DEFER)
-		return irq;
-
-	info->tsirq = irq;
-
-	info->dev = &pdev->dev;
+	info->dev = dev;
 
 	init_completion(&info->completion);
 
-	info->clk = devm_clk_get(&pdev->dev, "adc");
-	if (IS_ERR(info->clk)) {
-		dev_err(&pdev->dev, "failed getting clock, err = %ld\n",
-							PTR_ERR(info->clk));
-		return PTR_ERR(info->clk);
-	}
+	info->clk = devm_clk_get(dev, "adc");
+	if (IS_ERR(info->clk))
+		return dev_err_probe(dev, PTR_ERR(info->clk), "failed getting clock\n");
 
 	if (info->data->needs_sclk) {
-		info->sclk = devm_clk_get(&pdev->dev, "sclk");
-		if (IS_ERR(info->sclk)) {
-			dev_err(&pdev->dev,
-				"failed getting sclk clock, err = %ld\n",
-				PTR_ERR(info->sclk));
-			return PTR_ERR(info->sclk);
-		}
+		info->sclk = devm_clk_get(dev, "sclk");
+		if (IS_ERR(info->sclk))
+			return dev_err_probe(dev, PTR_ERR(info->sclk),
+					     "failed getting sclk clock\n");
 	}
 
-	info->vdd = devm_regulator_get(&pdev->dev, "vdd");
-	if (IS_ERR(info->vdd)) {
-		dev_err(&pdev->dev, "failed getting regulator, err = %ld\n",
-							PTR_ERR(info->vdd));
-		return PTR_ERR(info->vdd);
-	}
+	info->vdd = devm_regulator_get(dev, "vdd");
+	if (IS_ERR(info->vdd))
+		return dev_err_probe(dev, PTR_ERR(info->vdd), "failed getting regulator");
 
 	ret = regulator_enable(info->vdd);
 	if (ret)
@@ -841,19 +608,17 @@ static int exynos_adc_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, indio_dev);
 
-	indio_dev->name = dev_name(&pdev->dev);
-	indio_dev->dev.parent = &pdev->dev;
-	indio_dev->dev.of_node = pdev->dev.of_node;
+	indio_dev->name = dev_name(dev);
 	indio_dev->info = &exynos_adc_iio_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = exynos_adc_iio_channels;
 	indio_dev->num_channels = info->data->num_channels;
 
-	ret = request_irq(info->irq, exynos_adc_isr,
-					0, dev_name(&pdev->dev), info);
+	mutex_init(&info->lock);
+
+	ret = request_irq(info->irq, exynos_adc_isr, 0, dev_name(dev), info);
 	if (ret < 0) {
-		dev_err(&pdev->dev, "failed requesting irq, irq = %d\n",
-							info->irq);
+		dev_err(dev, "failed requesting irq, irq = %d\n", info->irq);
 		goto err_disable_clk;
 	}
 
@@ -864,38 +629,16 @@ static int exynos_adc_probe(struct platform_device *pdev)
 	if (info->data->init_hw)
 		info->data->init_hw(info);
 
-	/* leave out any TS related code if unreachable */
-	if (IS_REACHABLE(CONFIG_INPUT)) {
-		has_ts = of_property_read_bool(pdev->dev.of_node,
-					       "has-touchscreen") || pdata;
-	}
-
-	if (pdata)
-		info->delay = pdata->delay;
-	else
-		info->delay = 10000;
-
-	if (has_ts)
-		ret = exynos_adc_ts_init(info);
-	if (ret)
-		goto err_iio;
-
 	ret = of_platform_populate(np, exynos_adc_match, NULL, &indio_dev->dev);
 	if (ret < 0) {
-		dev_err(&pdev->dev, "failed adding child nodes\n");
+		dev_err(dev, "failed adding child nodes\n");
 		goto err_of_populate;
 	}
 
 	return 0;
 
 err_of_populate:
-	device_for_each_child(&indio_dev->dev, NULL,
-				exynos_adc_remove_devices);
-	if (has_ts) {
-		input_unregister_device(info->input);
-		free_irq(info->tsirq, info);
-	}
-err_iio:
+	of_platform_depopulate(&indio_dev->dev);
 	iio_device_unregister(indio_dev);
 err_irq:
 	free_irq(info->irq, info);
@@ -910,17 +653,12 @@ err_disable_reg:
 	return ret;
 }
 
-static int exynos_adc_remove(struct platform_device *pdev)
+static void exynos_adc_remove(struct platform_device *pdev)
 {
 	struct iio_dev *indio_dev = platform_get_drvdata(pdev);
 	struct exynos_adc *info = iio_priv(indio_dev);
 
-	if (IS_REACHABLE(CONFIG_INPUT)) {
-		free_irq(info->tsirq, info);
-		input_unregister_device(info->input);
-	}
-	device_for_each_child(&indio_dev->dev, NULL,
-				exynos_adc_remove_devices);
+	of_platform_depopulate(&indio_dev->dev);
 	iio_device_unregister(indio_dev);
 	free_irq(info->irq, info);
 	if (info->data->exit_hw)
@@ -928,11 +666,8 @@ static int exynos_adc_remove(struct platform_device *pdev)
 	exynos_adc_disable_clk(info);
 	exynos_adc_unprepare_clk(info);
 	regulator_disable(info->vdd);
-
-	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int exynos_adc_suspend(struct device *dev)
 {
 	struct iio_dev *indio_dev = dev_get_drvdata(dev);
@@ -965,11 +700,9 @@ static int exynos_adc_resume(struct device *dev)
 
 	return 0;
 }
-#endif
 
-static SIMPLE_DEV_PM_OPS(exynos_adc_pm_ops,
-			exynos_adc_suspend,
-			exynos_adc_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(exynos_adc_pm_ops, exynos_adc_suspend,
+				exynos_adc_resume);
 
 static struct platform_driver exynos_adc_driver = {
 	.probe		= exynos_adc_probe,
@@ -977,7 +710,7 @@ static struct platform_driver exynos_adc_driver = {
 	.driver		= {
 		.name	= "exynos-adc",
 		.of_match_table = exynos_adc_match,
-		.pm	= &exynos_adc_pm_ops,
+		.pm	= pm_sleep_ptr(&exynos_adc_pm_ops),
 	},
 };
 

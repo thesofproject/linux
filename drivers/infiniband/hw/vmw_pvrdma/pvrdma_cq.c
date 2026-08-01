@@ -49,6 +49,7 @@
 #include <rdma/ib_addr.h>
 #include <rdma/ib_smi.h>
 #include <rdma/ib_user_verbs.h>
+#include <rdma/uverbs_ioctl.h>
 
 #include "pvrdma.h"
 
@@ -91,22 +92,20 @@ int pvrdma_req_notify_cq(struct ib_cq *ibcq,
 
 /**
  * pvrdma_create_cq - create completion queue
- * @ibdev: the device
+ * @ibcq: Allocated CQ
  * @attr: completion queue attributes
- * @context: user context
- * @udata: user data
+ * @attrs: bundle
  *
- * @return: ib_cq completion queue pointer on success,
- *          otherwise returns negative errno.
+ * @return: 0 on success
  */
-struct ib_cq *pvrdma_create_cq(struct ib_device *ibdev,
-			       const struct ib_cq_init_attr *attr,
-			       struct ib_ucontext *context,
-			       struct ib_udata *udata)
+int pvrdma_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
+		     struct uverbs_attr_bundle *attrs)
 {
+	struct ib_udata *udata = &attrs->driver_udata;
+	struct ib_device *ibdev = ibcq->device;
 	int entries = attr->cqe;
 	struct pvrdma_dev *dev = to_vdev(ibdev);
-	struct pvrdma_cq *cq;
+	struct pvrdma_cq *cq = to_vcq(ibcq);
 	int ret;
 	int npages;
 	unsigned long flags;
@@ -114,41 +113,39 @@ struct ib_cq *pvrdma_create_cq(struct ib_device *ibdev,
 	union pvrdma_cmd_resp rsp;
 	struct pvrdma_cmd_create_cq *cmd = &req.create_cq;
 	struct pvrdma_cmd_create_cq_resp *resp = &rsp.create_cq_resp;
-	struct pvrdma_create_cq_resp cq_resp = {0};
+	struct pvrdma_create_cq_resp cq_resp = {};
 	struct pvrdma_create_cq ucmd;
+	struct pvrdma_ucontext *context = rdma_udata_to_drv_context(
+		udata, struct pvrdma_ucontext, ibucontext);
 
 	BUILD_BUG_ON(sizeof(struct pvrdma_cqe) != 64);
 
+	if (attr->flags)
+		return -EOPNOTSUPP;
+
 	entries = roundup_pow_of_two(entries);
 	if (entries < 1 || entries > dev->dsr->caps.max_cqe)
-		return ERR_PTR(-EINVAL);
+		return -EINVAL;
 
 	if (!atomic_add_unless(&dev->num_cqs, 1, dev->dsr->caps.max_cq))
-		return ERR_PTR(-ENOMEM);
-
-	cq = kzalloc(sizeof(*cq), GFP_KERNEL);
-	if (!cq) {
-		atomic_dec(&dev->num_cqs);
-		return ERR_PTR(-ENOMEM);
-	}
+		return -ENOMEM;
 
 	cq->ibcq.cqe = entries;
-	cq->is_kernel = !context;
+	cq->is_kernel = !udata;
 
 	if (!cq->is_kernel) {
-		if (ib_copy_from_udata(&ucmd, udata, sizeof(ucmd))) {
-			ret = -EFAULT;
+		ret = ib_copy_validate_udata_in(udata, ucmd, reserved);
+		if (ret)
 			goto err_cq;
-		}
 
-		cq->umem = ib_umem_get(context, ucmd.buf_addr, ucmd.buf_size,
-				       IB_ACCESS_LOCAL_WRITE, 1);
+		cq->umem = ib_umem_get_va(ibdev, ucmd.buf_addr, ucmd.buf_size,
+					  IB_ACCESS_LOCAL_WRITE);
 		if (IS_ERR(cq->umem)) {
 			ret = PTR_ERR(cq->umem);
 			goto err_cq;
 		}
 
-		npages = ib_umem_page_count(cq->umem);
+		npages = ib_umem_num_dma_blocks(cq->umem, PAGE_SIZE);
 	} else {
 		/* One extra page for shared ring state */
 		npages = 1 + (entries * sizeof(struct pvrdma_cqe) +
@@ -185,8 +182,7 @@ struct ib_cq *pvrdma_create_cq(struct ib_device *ibdev,
 	memset(cmd, 0, sizeof(*cmd));
 	cmd->hdr.cmd = PVRDMA_CMD_CREATE_CQ;
 	cmd->nchunks = npages;
-	cmd->ctx_handle = (context) ?
-		(u64)to_vucontext(context)->ctx_handle : 0;
+	cmd->ctx_handle = context ? context->ctx_handle : 0;
 	cmd->cqe = entries;
 	cmd->pdir_dma = cq->pdir.dir_dma;
 	ret = pvrdma_cmd_post(dev, &req, &rsp, PVRDMA_CMD_CREATE_CQ_RESP);
@@ -204,29 +200,25 @@ struct ib_cq *pvrdma_create_cq(struct ib_device *ibdev,
 	spin_unlock_irqrestore(&dev->cq_tbl_lock, flags);
 
 	if (!cq->is_kernel) {
-		cq->uar = &(to_vucontext(context)->uar);
+		cq->uar = &context->uar;
 
 		/* Copy udata back. */
-		if (ib_copy_to_udata(udata, &cq_resp, sizeof(cq_resp))) {
-			dev_warn(&dev->pdev->dev,
-				 "failed to copy back udata\n");
-			pvrdma_destroy_cq(&cq->ibcq);
-			return ERR_PTR(-EINVAL);
+		ret = ib_respond_udata(udata, cq_resp);
+		if (ret) {
+			pvrdma_destroy_cq(&cq->ibcq, udata);
+			return ret;
 		}
 	}
 
-	return &cq->ibcq;
+	return 0;
 
 err_page_dir:
 	pvrdma_page_dir_cleanup(dev, &cq->pdir);
 err_umem:
-	if (!cq->is_kernel)
-		ib_umem_release(cq->umem);
+	ib_umem_release(cq->umem);
 err_cq:
 	atomic_dec(&dev->num_cqs);
-	kfree(cq);
-
-	return ERR_PTR(ret);
+	return ret;
 }
 
 static void pvrdma_free_cq(struct pvrdma_dev *dev, struct pvrdma_cq *cq)
@@ -235,20 +227,17 @@ static void pvrdma_free_cq(struct pvrdma_dev *dev, struct pvrdma_cq *cq)
 		complete(&cq->free);
 	wait_for_completion(&cq->free);
 
-	if (!cq->is_kernel)
-		ib_umem_release(cq->umem);
+	ib_umem_release(cq->umem);
 
 	pvrdma_page_dir_cleanup(dev, &cq->pdir);
-	kfree(cq);
 }
 
 /**
  * pvrdma_destroy_cq - destroy completion queue
  * @cq: the completion queue to destroy.
- *
- * @return: 0 for success.
+ * @udata: user data or null for kernel object
  */
-int pvrdma_destroy_cq(struct ib_cq *cq)
+int pvrdma_destroy_cq(struct ib_cq *cq, struct ib_udata *udata)
 {
 	struct pvrdma_cq *vcq = to_vcq(cq);
 	union pvrdma_cmd_req req;
@@ -274,21 +263,7 @@ int pvrdma_destroy_cq(struct ib_cq *cq)
 
 	pvrdma_free_cq(dev, vcq);
 	atomic_dec(&dev->num_cqs);
-
-	return ret;
-}
-
-/**
- * pvrdma_modify_cq - modify the CQ moderation parameters
- * @ibcq: the CQ to modify
- * @cq_count: number of CQEs that will trigger an event
- * @cq_period: max period of time in usec before triggering an event
- *
- * @return: -EOPNOTSUPP as CQ resize is not supported.
- */
-int pvrdma_modify_cq(struct ib_cq *cq, u16 cq_count, u16 cq_period)
-{
-	return -EOPNOTSUPP;
+	return 0;
 }
 
 static inline struct pvrdma_cqe *get_cqe(struct pvrdma_cq *cq, int i)
@@ -391,7 +366,7 @@ retry:
 	wc->dlid_path_bits = cqe->dlid_path_bits;
 	wc->port_num = cqe->port_num;
 	wc->vendor_err = cqe->vendor_err;
-	wc->network_hdr_type = cqe->network_hdr_type;
+	wc->network_hdr_type = pvrdma_network_type_to_ib(cqe->network_hdr_type);
 
 	/* Update shared ring state */
 	pvrdma_idx_ring_inc(&cq->ring_state->rx.cons_head, cq->ibcq.cqe);
@@ -403,7 +378,7 @@ retry:
  * pvrdma_poll_cq - poll for work completion queue entries
  * @ibcq: completion queue
  * @num_entries: the maximum number of entries
- * @entry: pointer to work completion array
+ * @wc: pointer to work completion array
  *
  * @return: number of polled completion entries
  */
@@ -427,17 +402,4 @@ int pvrdma_poll_cq(struct ib_cq *ibcq, int num_entries, struct ib_wc *wc)
 
 	/* Ensure we do not return errors from poll_cq */
 	return npolled;
-}
-
-/**
- * pvrdma_resize_cq - resize CQ
- * @ibcq: the completion queue
- * @entries: CQ entries
- * @udata: user data
- *
- * @return: -EOPNOTSUPP as CQ resize is not supported.
- */
-int pvrdma_resize_cq(struct ib_cq *ibcq, int entries, struct ib_udata *udata)
-{
-	return -EOPNOTSUPP;
 }

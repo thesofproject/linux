@@ -46,17 +46,16 @@
  *
  **********************************************************************************/
 
-/**
-* Enable CRTCV
-*/
+/*
+ * Enable CRTCV
+ */
 
 static bool dce110_timing_generator_v_enable_crtc(struct timing_generator *tg)
 {
 /*
-* Set MASTER_UPDATE_MODE to 0
-* This is needed for DRR, and also suggested to be default value by Syed.
-*/
-
+ * Set MASTER_UPDATE_MODE to 0
+ * This is needed for DRR, and also suggested to be default value by Syed.
+ */
 	uint32_t value;
 
 	value = 0;
@@ -209,9 +208,9 @@ static void dce110_timing_generator_v_wait_for_vblank(struct timing_generator *t
 	}
 }
 
-/**
-* Wait till we are in VActive (anywhere in VActive)
-*/
+/*
+ * Wait till we are in VActive (anywhere in VActive)
+ */
 static void dce110_timing_generator_v_wait_for_vactive(struct timing_generator *tg)
 {
 	while (dce110_timing_generator_v_is_in_vertical_blank(tg)) {
@@ -435,8 +434,20 @@ static void dce110_timing_generator_v_set_blank(struct timing_generator *tg,
 
 static void dce110_timing_generator_v_program_timing(struct timing_generator *tg,
 	const struct dc_crtc_timing *timing,
+	int vready_offset,
+	int vstartup_start,
+	int vupdate_offset,
+	int vupdate_width,
+	int pstate_keepout,
+	const enum signal_type signal,
 	bool use_vbios)
 {
+	(void)vready_offset;
+	(void)vstartup_start;
+	(void)vupdate_offset;
+	(void)vupdate_width;
+	(void)pstate_keepout;
+	(void)signal;
 	if (use_vbios)
 		dce110_timing_generator_program_timing_generator(tg, timing);
 	else
@@ -616,6 +627,7 @@ static void dce110_timing_generator_v_setup_global_swap_lock(
 	struct timing_generator *tg,
 	const struct dcp_gsl_params *gsl_params)
 {
+	(void)gsl_params;
 	DC_LOG_ERROR("Timing Sync not supported on underlay pipe\n");
 	return;
 }
@@ -624,6 +636,7 @@ static void dce110_timing_generator_v_enable_reset_trigger(
 	struct timing_generator *tg,
 	int source_tg_inst)
 {
+	(void)source_tg_inst;
 	DC_LOG_ERROR("Timing Sync not supported on underlay pipe\n");
 	return;
 }
@@ -645,13 +658,8 @@ static void dce110_timing_generator_v_tear_down_global_swap_lock(
 static void dce110_timing_generator_v_disable_vga(
 	struct timing_generator *tg)
 {
+	(void)tg;
 	return;
-}
-
-static bool dce110_tg_v_is_blanked(struct timing_generator *tg)
-{
-	/* Signal comes from the primary pipe, underlay is never blanked. */
-	return false;
 }
 
 /** ********************************************************************************************
@@ -670,7 +678,6 @@ static const struct timing_generator_funcs dce110_tg_v_funcs = {
 		.set_early_control = dce110_timing_generator_v_set_early_control,
 		.wait_for_state = dce110_timing_generator_v_wait_for_state,
 		.set_blank = dce110_timing_generator_v_set_blank,
-		.is_blanked = dce110_tg_v_is_blanked,
 		.set_colors = dce110_timing_generator_v_set_colors,
 		.set_overscan_blank_color =
 				dce110_timing_generator_v_set_overscan_color_black,
@@ -685,7 +692,8 @@ static const struct timing_generator_funcs dce110_tg_v_funcs = {
 		.tear_down_global_swap_lock =
 				dce110_timing_generator_v_tear_down_global_swap_lock,
 		.enable_advanced_request =
-				dce110_timing_generator_v_enable_advanced_request
+				dce110_timing_generator_v_enable_advanced_request,
+		.is_two_pixels_per_container = dce110_is_two_pixels_per_container,
 };
 
 void dce110_timing_generator_v_construct(

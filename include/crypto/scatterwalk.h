@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Cryptographic scatter and gather helpers.
  *
@@ -5,78 +6,24 @@
  * Copyright (c) 2002 Adam J. Richter <adam@yggdrasil.com>
  * Copyright (c) 2004 Jean-Luc Cooke <jlcooke@certainkey.com>
  * Copyright (c) 2007 Herbert Xu <herbert@gondor.apana.org.au>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
  */
 
 #ifndef _CRYPTO_SCATTERWALK_H
 #define _CRYPTO_SCATTERWALK_H
 
 #include <crypto/algapi.h>
+
 #include <linux/highmem.h>
-#include <linux/kernel.h>
+#include <linux/mm.h>
 #include <linux/scatterlist.h>
 
 static inline void scatterwalk_crypto_chain(struct scatterlist *head,
-					    struct scatterlist *sg,
-					    int chain, int num)
+					    struct scatterlist *sg, int num)
 {
-	if (chain) {
-		head->length += sg->length;
-		sg = sg_next(sg);
-	}
-
 	if (sg)
 		sg_chain(head, num, sg);
 	else
 		sg_mark_end(head);
-}
-
-static inline unsigned long scatterwalk_samebuf(struct scatter_walk *walk_in,
-						struct scatter_walk *walk_out)
-{
-	return !(((sg_page(walk_in->sg) - sg_page(walk_out->sg)) << PAGE_SHIFT) +
-		 (int)(walk_in->offset - walk_out->offset));
-}
-
-static inline unsigned int scatterwalk_pagelen(struct scatter_walk *walk)
-{
-	unsigned int len = walk->sg->offset + walk->sg->length - walk->offset;
-	unsigned int len_this_page = offset_in_page(~walk->offset) + 1;
-	return len_this_page > len ? len : len_this_page;
-}
-
-static inline unsigned int scatterwalk_clamp(struct scatter_walk *walk,
-					     unsigned int nbytes)
-{
-	unsigned int len_this_page = scatterwalk_pagelen(walk);
-	return nbytes > len_this_page ? len_this_page : nbytes;
-}
-
-static inline void scatterwalk_advance(struct scatter_walk *walk,
-				       unsigned int nbytes)
-{
-	walk->offset += nbytes;
-}
-
-static inline unsigned int scatterwalk_aligned(struct scatter_walk *walk,
-					       unsigned int alignmask)
-{
-	return !(walk->offset & alignmask);
-}
-
-static inline struct page *scatterwalk_page(struct scatter_walk *walk)
-{
-	return sg_page(walk->sg) + (walk->offset >> PAGE_SHIFT);
-}
-
-static inline void scatterwalk_unmap(void *vaddr)
-{
-	kunmap_atomic(vaddr);
 }
 
 static inline void scatterwalk_start(struct scatter_walk *walk,
@@ -86,45 +33,221 @@ static inline void scatterwalk_start(struct scatter_walk *walk,
 	walk->offset = sg->offset;
 }
 
-static inline void *scatterwalk_map(struct scatter_walk *walk)
+/*
+ * This is equivalent to scatterwalk_start(walk, sg) followed by
+ * scatterwalk_skip(walk, pos).
+ */
+static inline void scatterwalk_start_at_pos(struct scatter_walk *walk,
+					    struct scatterlist *sg,
+					    unsigned int pos)
 {
-	return kmap_atomic(scatterwalk_page(walk)) +
-	       offset_in_page(walk->offset);
+	while (pos > sg->length) {
+		pos -= sg->length;
+		sg = sg_next(sg);
+	}
+	walk->sg = sg;
+	walk->offset = sg->offset + pos;
 }
 
-static inline void scatterwalk_pagedone(struct scatter_walk *walk, int out,
-					unsigned int more)
+static inline unsigned int scatterwalk_clamp(struct scatter_walk *walk,
+					     unsigned int nbytes)
 {
-	if (out) {
+	unsigned int len_this_sg;
+	unsigned int limit;
+
+	if (walk->offset >= walk->sg->offset + walk->sg->length)
+		scatterwalk_start(walk, sg_next(walk->sg));
+	len_this_sg = walk->sg->offset + walk->sg->length - walk->offset;
+
+	/*
+	 * HIGHMEM case: the page may have to be mapped into memory.  To avoid
+	 * the complexity of having to map multiple pages at once per sg entry,
+	 * clamp the returned length to not cross a page boundary.
+	 *
+	 * !HIGHMEM case: no mapping is needed; all pages of the sg entry are
+	 * already mapped contiguously in the kernel's direct map.  For improved
+	 * performance, allow the walker to return data segments that cross a
+	 * page boundary.  Do still cap the length to PAGE_SIZE, since some
+	 * users rely on that to avoid disabling preemption for too long when
+	 * using SIMD.  It's also needed for when skcipher_walk uses a bounce
+	 * page due to the data not being aligned to the algorithm's alignmask.
+	 */
+	if (IS_ENABLED(CONFIG_HIGHMEM))
+		limit = PAGE_SIZE - offset_in_page(walk->offset);
+	else
+		limit = PAGE_SIZE;
+
+	return min3(nbytes, len_this_sg, limit);
+}
+
+/*
+ * Create a scatterlist that represents the remaining data in a walk.  Uses
+ * chaining to reference the original scatterlist, so this uses at most two
+ * entries in @sg_out regardless of the number of entries in the original list.
+ * Assumes that sg_init_table() was already done.
+ */
+static inline void scatterwalk_get_sglist(struct scatter_walk *walk,
+					  struct scatterlist sg_out[2])
+{
+	if (walk->offset >= walk->sg->offset + walk->sg->length)
+		scatterwalk_start(walk, sg_next(walk->sg));
+	sg_set_page(sg_out, sg_page(walk->sg),
+		    walk->sg->offset + walk->sg->length - walk->offset,
+		    walk->offset);
+	scatterwalk_crypto_chain(sg_out, sg_next(walk->sg), 2);
+}
+
+static inline void scatterwalk_map(struct scatter_walk *walk)
+{
+	struct page *base_page = sg_page(walk->sg);
+	unsigned int offset = walk->offset;
+	void *addr;
+
+	if (IS_ENABLED(CONFIG_HIGHMEM)) {
 		struct page *page;
 
-		page = sg_page(walk->sg) + ((walk->offset - 1) >> PAGE_SHIFT);
-		/* Test ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE first as
-		 * PageSlab cannot be optimised away per se due to
-		 * use of volatile pointer.
+		page = base_page + (offset >> PAGE_SHIFT);
+		offset = offset_in_page(offset);
+		addr = kmap_local_page(page) + offset;
+	} else {
+		/*
+		 * When !HIGHMEM we allow the walker to return segments that
+		 * span a page boundary; see scatterwalk_clamp().  To make it
+		 * clear that in this case we're working in the linear buffer of
+		 * the whole sg entry in the kernel's direct map rather than
+		 * within the mapped buffer of a single page, compute the
+		 * address as an offset from the page_address() of the first
+		 * page of the sg entry.  Either way the result is the address
+		 * in the direct map, but this makes it clearer what is really
+		 * going on.
 		 */
-		if (ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE && !PageSlab(page))
-			flush_dcache_page(page);
+		addr = page_address(base_page) + offset;
 	}
 
-	if (more && walk->offset >= walk->sg->offset + walk->sg->length)
-		scatterwalk_start(walk, sg_next(walk->sg));
+	walk->__addr = addr;
 }
 
-static inline void scatterwalk_done(struct scatter_walk *walk, int out,
-				    int more)
+/**
+ * scatterwalk_next() - Get the next data buffer in a scatterlist walk
+ * @walk: the scatter_walk
+ * @total: the total number of bytes remaining, > 0
+ *
+ * A virtual address for the next segment of data from the scatterlist will
+ * be placed into @walk->addr.  The caller must call scatterwalk_done_src()
+ * or scatterwalk_done_dst() when it is done using this virtual address.
+ *
+ * Returns: the next number of bytes available, <= @total
+ */
+static inline unsigned int scatterwalk_next(struct scatter_walk *walk,
+					    unsigned int total)
 {
-	if (!more || walk->offset >= walk->sg->offset + walk->sg->length ||
-	    !(walk->offset & (PAGE_SIZE - 1)))
-		scatterwalk_pagedone(walk, out, more);
+	unsigned int nbytes = scatterwalk_clamp(walk, total);
+
+	scatterwalk_map(walk);
+	return nbytes;
 }
 
-void scatterwalk_copychunks(void *buf, struct scatter_walk *walk,
-			    size_t nbytes, int out);
-void *scatterwalk_map(struct scatter_walk *walk);
+static inline void scatterwalk_unmap(struct scatter_walk *walk)
+{
+	if (IS_ENABLED(CONFIG_HIGHMEM))
+		kunmap_local(walk->__addr);
+}
 
-void scatterwalk_map_and_copy(void *buf, struct scatterlist *sg,
-			      unsigned int start, unsigned int nbytes, int out);
+static inline void scatterwalk_advance(struct scatter_walk *walk,
+				       unsigned int nbytes)
+{
+	walk->offset += nbytes;
+}
+
+/**
+ * scatterwalk_done_src() - Finish one step of a walk of source scatterlist
+ * @walk: the scatter_walk
+ * @nbytes: the number of bytes processed this step, less than or equal to the
+ *	    number of bytes that scatterwalk_next() returned.
+ *
+ * Use this if the mapped address was not written to, i.e. it is source data.
+ */
+static inline void scatterwalk_done_src(struct scatter_walk *walk,
+					unsigned int nbytes)
+{
+	scatterwalk_unmap(walk);
+	scatterwalk_advance(walk, nbytes);
+}
+
+/*
+ * Flush the dcache of any pages that overlap the region
+ * [offset, offset + nbytes) relative to base_page.
+ *
+ * This should be called only when ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE, to ensure
+ * that all relevant code (including the call to sg_page() in the caller, if
+ * applicable) gets fully optimized out when !ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE.
+ */
+static inline void __scatterwalk_flush_dcache_pages(struct page *base_page,
+						    unsigned int offset,
+						    unsigned int nbytes)
+{
+	unsigned int num_pages;
+
+	base_page += offset / PAGE_SIZE;
+	offset %= PAGE_SIZE;
+
+	/*
+	 * This is an overflow-safe version of
+	 * num_pages = DIV_ROUND_UP(offset + nbytes, PAGE_SIZE).
+	 */
+	num_pages = nbytes / PAGE_SIZE;
+	num_pages += DIV_ROUND_UP(offset + (nbytes % PAGE_SIZE), PAGE_SIZE);
+
+	for (unsigned int i = 0; i < num_pages; i++)
+		flush_dcache_page(base_page + i);
+}
+
+/**
+ * scatterwalk_done_dst() - Finish one step of a walk of destination scatterlist
+ * @walk: the scatter_walk
+ * @nbytes: the number of bytes processed this step, less than or equal to the
+ *	    number of bytes that scatterwalk_next() returned.
+ *
+ * Use this if the mapped address may have been written to, i.e. it is
+ * destination data.
+ */
+static inline void scatterwalk_done_dst(struct scatter_walk *walk,
+					unsigned int nbytes)
+{
+	scatterwalk_unmap(walk);
+	if (ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE)
+		__scatterwalk_flush_dcache_pages(sg_page(walk->sg),
+						 walk->offset, nbytes);
+	scatterwalk_advance(walk, nbytes);
+}
+
+void scatterwalk_skip(struct scatter_walk *walk, unsigned int nbytes);
+
+void memcpy_from_scatterwalk(void *buf, struct scatter_walk *walk,
+			     unsigned int nbytes);
+
+void memcpy_to_scatterwalk(struct scatter_walk *walk, const void *buf,
+			   unsigned int nbytes);
+
+void memcpy_from_sglist(void *buf, struct scatterlist *sg,
+			unsigned int start, unsigned int nbytes);
+
+void memcpy_to_sglist(struct scatterlist *sg, unsigned int start,
+		      const void *buf, unsigned int nbytes);
+
+void memcpy_sglist(struct scatterlist *dst, struct scatterlist *src,
+		   unsigned int nbytes);
+
+/* In new code, please use memcpy_{from,to}_sglist() directly instead. */
+static inline void scatterwalk_map_and_copy(void *buf, struct scatterlist *sg,
+					    unsigned int start,
+					    unsigned int nbytes, int out)
+{
+	if (out)
+		memcpy_to_sglist(sg, start, buf, nbytes);
+	else
+		memcpy_from_sglist(buf, sg, start, nbytes);
+}
 
 struct scatterlist *scatterwalk_ffwd(struct scatterlist dst[2],
 				     struct scatterlist *src,

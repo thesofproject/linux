@@ -25,7 +25,7 @@ struct isp1301 {
 #define phy_to_isp(p)		(container_of((p), struct isp1301, phy))
 
 static const struct i2c_device_id isp1301_id[] = {
-	{ "isp1301", 0 },
+	{ .name = "isp1301" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, isp1301_id);
@@ -92,8 +92,7 @@ static int isp1301_phy_set_vbus(struct usb_phy *phy, int on)
 	return 0;
 }
 
-static int isp1301_probe(struct i2c_client *client,
-			 const struct i2c_device_id *i2c_id)
+static int isp1301_probe(struct i2c_client *client)
 {
 	struct isp1301 *isp;
 	struct usb_phy *phy;
@@ -120,14 +119,12 @@ static int isp1301_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int isp1301_remove(struct i2c_client *client)
+static void isp1301_remove(struct i2c_client *client)
 {
 	struct isp1301 *isp = i2c_get_clientdata(client);
 
 	usb_remove_phy(&isp->phy);
 	isp1301_i2c_client = NULL;
-
-	return 0;
 }
 
 static struct i2c_driver isp1301_driver = {
@@ -142,24 +139,22 @@ static struct i2c_driver isp1301_driver = {
 
 module_i2c_driver(isp1301_driver);
 
-static int match(struct device *dev, void *data)
-{
-	struct device_node *node = (struct device_node *)data;
-	return (dev->of_node == node) &&
-		(dev->driver == &isp1301_driver.driver);
-}
-
 struct i2c_client *isp1301_get_client(struct device_node *node)
 {
-	if (node) { /* reference of ISP1301 I2C node via DT */
-		struct device *dev = bus_find_device(&i2c_bus_type, NULL,
-						     node, match);
-		if (!dev)
-			return NULL;
-		return to_i2c_client(dev);
-	} else { /* non-DT: only one ISP1301 chip supported */
+	struct i2c_client *client;
+
+	/* reference of ISP1301 I2C node via DT */
+	client = of_find_i2c_device_by_node(node);
+	if (client)
+		return client;
+
+	/* non-DT: only one ISP1301 chip supported */
+	if (isp1301_i2c_client) {
+		get_device(&isp1301_i2c_client->dev);
 		return isp1301_i2c_client;
 	}
+
+	return NULL;
 }
 EXPORT_SYMBOL_GPL(isp1301_get_client);
 

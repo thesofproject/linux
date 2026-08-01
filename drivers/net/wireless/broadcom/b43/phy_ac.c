@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Broadcom B43 wireless driver
  * IEEE 802.11ac AC-PHY support
  *
  * Copyright (c) 2015 Rafał Miłecki <zajec5@gmail.com>
- *
- * This program is free software; you can redistribute	it and/or modify it
- * under  the terms of	the GNU General	 Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include "b43.h"
@@ -21,7 +17,7 @@ static int b43_phy_ac_op_allocate(struct b43_wldev *dev)
 {
 	struct b43_phy_ac *phy_ac;
 
-	phy_ac = kzalloc(sizeof(*phy_ac), GFP_KERNEL);
+	phy_ac = kzalloc_obj(*phy_ac);
 	if (!phy_ac)
 		return -ENOMEM;
 	dev->phy.ac = phy_ac;

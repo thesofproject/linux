@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) Sistina Software, Inc.  1997-2003 All rights reserved.
  * Copyright (C) 2004-2006 Red Hat, Inc.  All rights reserved.
- *
- * This copyrighted material is made available to anyone wishing to use,
- * modify, copy, or redistribute it subject to the terms and conditions
- * of the GNU General Public License version 2.
  */
 
 #include <linux/spinlock.h>
@@ -24,7 +21,9 @@
 
 /**
  * gfs2_drevalidate - Check directory lookup consistency
- * @dentry: the mapping to check
+ * @dir: expected parent directory inode
+ * @name: expexted name
+ * @dentry: dentry to check
  * @flags: lookup flags
  *
  * Check to make sure the lookup necessary to arrive at this inode from its
@@ -33,74 +32,44 @@
  * Returns: 1 if the dentry is ok, 0 if it isn't
  */
 
-static int gfs2_drevalidate(struct dentry *dentry, unsigned int flags)
+static int gfs2_drevalidate(struct inode *dir, const struct qstr *name,
+			    struct dentry *dentry, unsigned int flags)
 {
-	struct dentry *parent;
-	struct gfs2_sbd *sdp;
-	struct gfs2_inode *dip;
+	struct gfs2_sbd *sdp = GFS2_SB(dir);
+	struct gfs2_inode *dip = GFS2_I(dir);
 	struct inode *inode;
 	struct gfs2_holder d_gh;
 	struct gfs2_inode *ip = NULL;
-	int error;
+	int error, valid;
 	int had_lock = 0;
 
 	if (flags & LOOKUP_RCU)
 		return -ECHILD;
 
-	parent = dget_parent(dentry);
-	sdp = GFS2_SB(d_inode(parent));
-	dip = GFS2_I(d_inode(parent));
 	inode = d_inode(dentry);
 
 	if (inode) {
 		if (is_bad_inode(inode))
-			goto invalid;
+			return 0;
 		ip = GFS2_I(inode);
 	}
 
 	if (sdp->sd_lockstruct.ls_ops->lm_mount == NULL)
-		goto valid;
+		return 1;
 
 	had_lock = (gfs2_glock_is_locked_by_me(dip->i_gl) != NULL);
 	if (!had_lock) {
 		error = gfs2_glock_nq_init(dip->i_gl, LM_ST_SHARED, 0, &d_gh);
 		if (error)
-			goto fail;
-	} 
-
-	error = gfs2_dir_check(d_inode(parent), &dentry->d_name, ip);
-	switch (error) {
-	case 0:
-		if (!inode)
-			goto invalid_gunlock;
-		break;
-	case -ENOENT:
-		if (!inode)
-			goto valid_gunlock;
-		goto invalid_gunlock;
-	default:
-		goto fail_gunlock;
+			return 0;
 	}
 
-valid_gunlock:
+	error = gfs2_dir_check(dir, name, ip);
+	valid = inode ? !error : (error == -ENOENT);
+
 	if (!had_lock)
 		gfs2_glock_dq_uninit(&d_gh);
-valid:
-	dput(parent);
-	return 1;
-
-invalid_gunlock:
-	if (!had_lock)
-		gfs2_glock_dq_uninit(&d_gh);
-invalid:
-	dput(parent);
-	return 0;
-
-fail_gunlock:
-	gfs2_glock_dq_uninit(&d_gh);
-fail:
-	dput(parent);
-	return 0;
+	return valid;
 }
 
 static int gfs2_dhash(const struct dentry *dentry, struct qstr *str)

@@ -16,6 +16,7 @@
 
 /* We use the hw_value as an index into our private channel structure */
 
+#include <linux/export.h>
 #include "common.h"
 
 #define CHAN2G(_freq, _idx)  { \
@@ -124,7 +125,7 @@ static struct ieee80211_rate ath9k_legacy_rates[] = {
 
 int ath9k_cmn_init_channels_rates(struct ath_common *common)
 {
-	struct ath_hw *ah = (struct ath_hw *)common->ah;
+	struct ath_hw *ah = common->ah;
 	void *channels;
 
 	BUILD_BUG_ON(ARRAY_SIZE(ath9k_2ghz_chantable) +
@@ -132,13 +133,11 @@ int ath9k_cmn_init_channels_rates(struct ath_common *common)
 		     ATH9K_NUM_CHANNELS);
 
 	if (ah->caps.hw_caps & ATH9K_HW_CAP_2GHZ) {
-		channels = devm_kzalloc(ah->dev,
+		channels = devm_kmemdup(ah->dev, ath9k_2ghz_chantable,
 			sizeof(ath9k_2ghz_chantable), GFP_KERNEL);
 		if (!channels)
 		    return -ENOMEM;
 
-		memcpy(channels, ath9k_2ghz_chantable,
-		       sizeof(ath9k_2ghz_chantable));
 		common->sbands[NL80211_BAND_2GHZ].channels = channels;
 		common->sbands[NL80211_BAND_2GHZ].band = NL80211_BAND_2GHZ;
 		common->sbands[NL80211_BAND_2GHZ].n_channels =
@@ -149,13 +148,11 @@ int ath9k_cmn_init_channels_rates(struct ath_common *common)
 	}
 
 	if (ah->caps.hw_caps & ATH9K_HW_CAP_5GHZ) {
-		channels = devm_kzalloc(ah->dev,
+		channels = devm_kmemdup(ah->dev, ath9k_5ghz_chantable,
 			sizeof(ath9k_5ghz_chantable), GFP_KERNEL);
 		if (!channels)
 			return -ENOMEM;
 
-		memcpy(channels, ath9k_5ghz_chantable,
-		       sizeof(ath9k_5ghz_chantable));
 		common->sbands[NL80211_BAND_5GHZ].channels = channels;
 		common->sbands[NL80211_BAND_5GHZ].band = NL80211_BAND_5GHZ;
 		common->sbands[NL80211_BAND_5GHZ].n_channels =

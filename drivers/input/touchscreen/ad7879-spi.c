@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * AD7879/AD7889 touchscreen (SPI bus)
  *
  * Copyright (C) 2008-2010 Michael Hennerich, Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/input.h>	/* BUS_SPI */
@@ -57,9 +56,10 @@ MODULE_DEVICE_TABLE(of, ad7879_spi_dt_ids);
 
 static struct spi_driver ad7879_spi_driver = {
 	.driver = {
-		.name	= "ad7879",
-		.pm	= &ad7879_pm_ops,
-		.of_match_table = of_match_ptr(ad7879_spi_dt_ids),
+		.name		= "ad7879",
+		.dev_groups	= ad7879_groups,
+		.pm		= &ad7879_pm_ops,
+		.of_match_table	= of_match_ptr(ad7879_spi_dt_ids),
 	},
 	.probe		= ad7879_spi_probe,
 };

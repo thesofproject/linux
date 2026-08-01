@@ -23,7 +23,7 @@
 
 /**
  * struct radar_types - contains array of patterns defined for one DFS domain
- * @domain: DFS regulatory domain
+ * @region: regulatory DFS region
  * @num_radar_types: number of radar types to follow
  * @radar_types: radar types array
  */
@@ -111,7 +111,7 @@ static const struct radar_detector_specs jp_radar_ref_types[] = {
 	JP_PATTERN(0, 0, 1, 1428, 1428, 1, 18, 29, false),
 	JP_PATTERN(1, 2, 3, 3846, 3846, 1, 18, 29, false),
 	JP_PATTERN(2, 0, 1, 1388, 1388, 1, 18, 50, false),
-	JP_PATTERN(3, 1, 2, 4000, 4000, 1, 18, 50, false),
+	JP_PATTERN(3, 0, 4, 4000, 4000, 1, 18, 50, false),
 	JP_PATTERN(4, 0, 5, 150, 230, 1, 23, 50, false),
 	JP_PATTERN(5, 6, 10, 200, 500, 1, 16, 50, false),
 	JP_PATTERN(6, 11, 20, 200, 500, 1, 12, 50, false),
@@ -133,8 +133,9 @@ static const struct radar_types *dfs_domains[] = {
 
 /**
  * get_dfs_domain_radar_types() - get radar types for a given DFS domain
- * @param domain DFS domain
- * @return radar_types ptr on success, NULL if DFS domain is not supported
+ * @region: regulatory DFS region
+ *
+ * Return value: radar_types ptr on success, NULL if DFS domain is not supported
  */
 static const struct radar_types *
 get_dfs_domain_radar_types(enum nl80211_dfs_regions region)
@@ -160,7 +161,7 @@ get_dfs_domain_radar_types(enum nl80211_dfs_regions region)
 struct channel_detector {
 	struct list_head head;
 	u16 freq;
-	struct pri_detector **detectors;
+	struct pri_detector *detectors[];
 };
 
 /* channel_detector_reset() - reset detector lines for a given channel */
@@ -182,31 +183,28 @@ static void channel_detector_exit(struct dfs_pattern_detector *dpd,
 	if (cd == NULL)
 		return;
 	list_del(&cd->head);
+
 	for (i = 0; i < dpd->num_radar_types; i++) {
 		struct pri_detector *de = cd->detectors[i];
 		if (de != NULL)
 			de->exit(de);
 	}
-	kfree(cd->detectors);
+
 	kfree(cd);
 }
 
 static struct channel_detector *
 channel_detector_create(struct dfs_pattern_detector *dpd, u16 freq)
 {
-	u32 sz, i;
+	u32 i;
 	struct channel_detector *cd;
 
-	cd = kmalloc(sizeof(*cd), GFP_ATOMIC);
+	cd = kzalloc_flex(*cd, detectors, dpd->num_radar_types, GFP_ATOMIC);
 	if (cd == NULL)
 		goto fail;
 
 	INIT_LIST_HEAD(&cd->head);
 	cd->freq = freq;
-	sz = sizeof(cd->detectors) * dpd->num_radar_types;
-	cd->detectors = kzalloc(sz, GFP_ATOMIC);
-	if (cd->detectors == NULL)
-		goto fail;
 
 	for (i = 0; i < dpd->num_radar_types; i++) {
 		const struct radar_detector_specs *rs = &dpd->radar_spec[i];
@@ -227,9 +225,10 @@ fail:
 
 /**
  * channel_detector_get() - get channel detector for given frequency
- * @param dpd instance pointer
- * @param freq frequency in MHz
- * @return pointer to channel detector on success, NULL otherwise
+ * @dpd: DPD instance pointer
+ * @freq: freq frequency in MHz
+ *
+ * Return value: pointer to channel detector on success, NULL otherwise
  *
  * Return existing channel detector for the given frequency or return a
  * newly create one.
@@ -253,22 +252,21 @@ channel_detector_get(struct dfs_pattern_detector *dpd, u16 freq)
 static void dpd_reset(struct dfs_pattern_detector *dpd)
 {
 	struct channel_detector *cd;
-	if (!list_empty(&dpd->channel_detectors))
-		list_for_each_entry(cd, &dpd->channel_detectors, head)
-			channel_detector_reset(dpd, cd);
+	list_for_each_entry(cd, &dpd->channel_detectors, head)
+		channel_detector_reset(dpd, cd);
 
 }
 static void dpd_exit(struct dfs_pattern_detector *dpd)
 {
 	struct channel_detector *cd, *cd0;
-	if (!list_empty(&dpd->channel_detectors))
-		list_for_each_entry_safe(cd, cd0, &dpd->channel_detectors, head)
-			channel_detector_exit(dpd, cd);
+	list_for_each_entry_safe(cd, cd0, &dpd->channel_detectors, head)
+		channel_detector_exit(dpd, cd);
 	kfree(dpd);
 }
 
 static bool
-dpd_add_pulse(struct dfs_pattern_detector *dpd, struct pulse_event *event)
+dpd_add_pulse(struct dfs_pattern_detector *dpd, struct pulse_event *event,
+	      struct radar_detector_specs *rs)
 {
 	u32 i;
 	struct channel_detector *cd;
@@ -294,6 +292,8 @@ dpd_add_pulse(struct dfs_pattern_detector *dpd, struct pulse_event *event)
 		struct pri_detector *pd = cd->detectors[i];
 		struct pri_sequence *ps = pd->add_pulse(pd, event);
 		if (ps != NULL) {
+			if (rs != NULL)
+				memcpy(rs, pd->rs, sizeof(*rs));
 			ath_dbg(dpd->common, DFS,
 				"DFS: radar found on freq=%d: id=%d, pri=%d, "
 				"count=%d, count_false=%d\n",
@@ -328,9 +328,8 @@ static bool dpd_set_domain(struct dfs_pattern_detector *dpd,
 		return false;
 
 	/* delete all channel detectors for previous DFS domain */
-	if (!list_empty(&dpd->channel_detectors))
-		list_for_each_entry_safe(cd, cd0, &dpd->channel_detectors, head)
-			channel_detector_exit(dpd, cd);
+	list_for_each_entry_safe(cd, cd0, &dpd->channel_detectors, head)
+		channel_detector_exit(dpd, cd);
 	dpd->radar_spec = rt->radar_types;
 	dpd->num_radar_types = rt->num_radar_types;
 
@@ -355,7 +354,7 @@ dfs_pattern_detector_init(struct ath_common *common,
 	if (!IS_ENABLED(CONFIG_CFG80211_CERTIFICATION_ONUS))
 		return NULL;
 
-	dpd = kmalloc(sizeof(*dpd), GFP_KERNEL);
+	dpd = kmalloc_obj(*dpd);
 	if (dpd == NULL)
 		return NULL;
 

@@ -14,6 +14,8 @@
 #include <linux/interrupt.h>
 #include <linux/kernel_stat.h>
 
+#include <asm/irq_regs.h>
+
 #include <trace/events/irq.h>
 
 #include "internals.h"
@@ -131,25 +133,85 @@ void __irq_wake_thread(struct irq_desc *desc, struct irqaction *action)
 	 */
 	atomic_inc(&desc->threads_active);
 
-	wake_up_process(action->thread);
+	/*
+	 * This might be a premature wakeup before the thread reached the
+	 * thread function and set the IRQTF_READY bit. It's waiting in
+	 * kthread code with state UNINTERRUPTIBLE. Once it reaches the
+	 * thread function it waits with INTERRUPTIBLE. The wakeup is not
+	 * lost in that case because the thread is guaranteed to observe
+	 * the RUN flag before it goes to sleep in wait_for_interrupt().
+	 */
+	wake_up_state(action->thread, TASK_INTERRUPTIBLE);
 }
 
-irqreturn_t __handle_irq_event_percpu(struct irq_desc *desc, unsigned int *flags)
+static DEFINE_STATIC_KEY_FALSE(irqhandler_duration_check_enabled);
+static u64 irqhandler_duration_threshold_ns __ro_after_init;
+
+static int __init irqhandler_duration_check_setup(char *arg)
+{
+	unsigned long val;
+	int ret;
+
+	ret = kstrtoul(arg, 0, &val);
+	if (ret) {
+		pr_err("Unable to parse irqhandler.duration_warn_us setting: ret=%d\n", ret);
+		return 0;
+	}
+
+	if (!val) {
+		pr_err("Invalid irqhandler.duration_warn_us setting, must be > 0\n");
+		return 0;
+	}
+
+	irqhandler_duration_threshold_ns = val * 1000;
+	static_branch_enable(&irqhandler_duration_check_enabled);
+
+	return 1;
+}
+__setup("irqhandler.duration_warn_us=", irqhandler_duration_check_setup);
+
+static inline void irqhandler_duration_check(u64 ts_start, unsigned int irq,
+					     const struct irqaction *action)
+{
+	u64 delta_ns = local_clock() - ts_start;
+
+	if (unlikely(delta_ns > irqhandler_duration_threshold_ns)) {
+		pr_warn_ratelimited("[CPU%u] long duration of IRQ[%u:%ps], took: %llu us\n",
+				    smp_processor_id(), irq, action->handler,
+				    div_u64(delta_ns, NSEC_PER_USEC));
+	}
+}
+
+irqreturn_t __handle_irq_event_percpu(struct irq_desc *desc)
 {
 	irqreturn_t retval = IRQ_NONE;
 	unsigned int irq = desc->irq_data.irq;
 	struct irqaction *action;
 
-	record_irq_time(desc);
-
 	for_each_action_of_desc(desc, action) {
 		irqreturn_t res;
 
+		/*
+		 * If this IRQ would be threaded under force_irqthreads, mark it so.
+		 */
+		if (irq_settings_can_thread(desc) &&
+		    !(action->flags & (IRQF_NO_THREAD | IRQF_PERCPU | IRQF_ONESHOT)))
+			lockdep_hardirq_threaded();
+
 		trace_irq_handler_entry(irq, action);
-		res = action->handler(irq, action->dev_id);
+
+		if (static_branch_unlikely(&irqhandler_duration_check_enabled)) {
+			u64 ts_start = local_clock();
+
+			res = action->handler(irq, action->dev_id);
+			irqhandler_duration_check(ts_start, irq, action);
+		} else {
+			res = action->handler(irq, action->dev_id);
+		}
+
 		trace_irq_handler_exit(irq, action, res);
 
-		if (WARN_ONCE(!irqs_disabled(),"irq %u handler %pF enabled interrupts\n",
+		if (WARN_ONCE(!irqs_disabled(),"irq %u handler %pS enabled interrupts\n",
 			      irq, action->handler))
 			local_irq_disable();
 
@@ -165,10 +227,6 @@ irqreturn_t __handle_irq_event_percpu(struct irq_desc *desc, unsigned int *flags
 			}
 
 			__irq_wake_thread(desc, action);
-
-			/* Fall through to add to randomness */
-		case IRQ_HANDLED:
-			*flags |= action->flags;
 			break;
 
 		default:
@@ -184,13 +242,12 @@ irqreturn_t __handle_irq_event_percpu(struct irq_desc *desc, unsigned int *flags
 irqreturn_t handle_irq_event_percpu(struct irq_desc *desc)
 {
 	irqreturn_t retval;
-	unsigned int flags = 0;
 
-	retval = __handle_irq_event_percpu(desc, &flags);
+	retval = __handle_irq_event_percpu(desc);
 
-	add_interrupt_randomness(desc->irq_data.irq, flags);
+	add_interrupt_randomness(desc->irq_data.irq);
 
-	if (!noirqdebug)
+	if (!irq_settings_no_debug(desc))
 		note_interrupt(desc, retval);
 	return retval;
 }
@@ -218,5 +275,21 @@ int __init set_handle_irq(void (*handle_irq)(struct pt_regs *))
 
 	handle_arch_irq = handle_irq;
 	return 0;
+}
+
+/**
+ * generic_handle_arch_irq - root irq handler for architectures which do no
+ *                           entry accounting themselves
+ * @regs:	Register file coming from the low-level handling code
+ */
+asmlinkage void noinstr generic_handle_arch_irq(struct pt_regs *regs)
+{
+	struct pt_regs *old_regs;
+
+	irq_enter();
+	old_regs = set_irq_regs(regs);
+	handle_arch_irq(regs);
+	set_irq_regs(old_regs);
+	irq_exit();
 }
 #endif

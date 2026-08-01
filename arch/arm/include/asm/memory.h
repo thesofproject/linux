@@ -1,17 +1,19 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  arch/arm/include/asm/memory.h
  *
  *  Copyright (C) 2000-2002 Russell King
  *  modification for nommu, Hyok S. Choi, 2004
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- *  Note: this file should not be included by non-asm/.h files
+ *  Note: this file should not be included explicitly, include <asm/page.h>
+ *  to get access to these definitions.
  */
 #ifndef __ASM_ARM_MEMORY_H
 #define __ASM_ARM_MEMORY_H
+
+#ifndef _ASMARM_PAGE_H
+#error "Do not include <asm/memory.h> directly"
+#endif
 
 #include <linux/compiler.h>
 #include <linux/const.h>
@@ -21,9 +23,16 @@
 #ifdef CONFIG_NEED_MACH_MEMORY_H
 #include <mach/memory.h>
 #endif
+#include <asm/kasan_def.h>
 
-/* PAGE_OFFSET - the virtual address of the start of the kernel image */
+/*
+ * PAGE_OFFSET: the virtual address of the start of lowmem, memory above
+ *   the virtual address range for userspace.
+ * KERNEL_OFFSET: the virtual address of the start of the kernel image.
+ *   we may further offset this with TEXT_OFFSET in practice.
+ */
 #define PAGE_OFFSET		UL(CONFIG_PAGE_OFFSET)
+#define KERNEL_OFFSET		(PAGE_OFFSET)
 
 #ifdef CONFIG_MMU
 
@@ -31,7 +40,11 @@
  * TASK_SIZE - the maximum size of a user space task.
  * TASK_UNMAPPED_BASE - the lower boundary of the mmap VM area
  */
+#ifndef CONFIG_KASAN
 #define TASK_SIZE		(UL(CONFIG_PAGE_OFFSET) - UL(SZ_16M))
+#else
+#define TASK_SIZE		(KASAN_SHADOW_START)
+#endif
 #define TASK_UNMAPPED_BASE	ALIGN(TASK_SIZE / 3, SZ_16M)
 
 /*
@@ -69,6 +82,10 @@
  * with its virtual address while keeping offset from the base section.
  */
 #define XIP_VIRT_ADDR(physaddr)  (MODULES_VADDR + ((physaddr) & 0x000fffff))
+
+#define FDT_FIXED_BASE		UL(0xff800000)
+#define FDT_FIXED_SIZE		(2 * SECTION_SIZE)
+#define FDT_VIRT_BASE(physbase)	((void *)(FDT_FIXED_BASE | (physbase) % SECTION_SIZE))
 
 #if !defined(CONFIG_SMP) && !defined(CONFIG_ARM_LPAE)
 /*
@@ -110,6 +127,7 @@ extern unsigned long vectors_base;
 #define MODULES_VADDR		PAGE_OFFSET
 
 #define XIP_VIRT_ADDR(physaddr)  (physaddr)
+#define FDT_VIRT_BASE(physbase)  ((void *)(physbase))
 
 #endif /* !CONFIG_MMU */
 
@@ -130,12 +148,6 @@ extern unsigned long vectors_base;
 #endif
 
 /*
- * Convert a page to/from a physical address
- */
-#define page_to_phys(page)	(__pfn_to_phys(page_to_pfn(page)))
-#define phys_to_page(phys)	(pfn_to_page(__phys_to_pfn(phys)))
-
-/*
  * PLAT_PHYS_OFFSET is the offset (from zero) of the start of physical
  * memory.  This is used for XIP and NoMMU kernels, and on platforms that don't
  * have CONFIG_ARM_PATCH_PHYS_VIRT. Assembly code must always use
@@ -143,22 +155,15 @@ extern unsigned long vectors_base;
  */
 #define PLAT_PHYS_OFFSET	UL(CONFIG_PHYS_OFFSET)
 
-#ifdef CONFIG_XIP_KERNEL
-/*
- * When referencing data in RAM from the XIP region in a relative manner
- * with the MMU off, we need the relative offset between the two physical
- * addresses.  The macro below achieves this, which is:
- *    __pa(v_data) - __xip_pa(v_text)
- */
-#define PHYS_RELATIVE(v_data, v_text) \
-	(((v_data) - PAGE_OFFSET + PLAT_PHYS_OFFSET) - \
-	 ((v_text) - XIP_VIRT_ADDR(CONFIG_XIP_PHYS_ADDR) + \
-          CONFIG_XIP_PHYS_ADDR))
-#else
-#define PHYS_RELATIVE(v_data, v_text) ((v_data) - (v_text))
-#endif
-
 #ifndef __ASSEMBLY__
+
+/*
+ * Physical start and end address of the kernel sections. These addresses are
+ * 2MB-aligned to match the section mappings placed over the kernel. We use
+ * u64 so that LPAE mappings beyond the 32bit limit will work out as well.
+ */
+extern u64 kernel_sec_start;
+extern u64 kernel_sec_end;
 
 /*
  * Physical vs virtual RAM address space conversion.  These are
@@ -176,6 +181,7 @@ extern unsigned long vectors_base;
  * so that all we need to do is modify the 8-bit constant field.
  */
 #define __PV_BITS_31_24	0x81000000
+#define __PV_BITS_23_16	0x810000
 #define __PV_BITS_7_0	0x81
 
 extern unsigned long __pv_phys_pfn_offset;
@@ -186,43 +192,65 @@ extern const void *__pv_table_begin, *__pv_table_end;
 #define PHYS_OFFSET	((phys_addr_t)__pv_phys_pfn_offset << PAGE_SHIFT)
 #define PHYS_PFN_OFFSET	(__pv_phys_pfn_offset)
 
-#define __pv_stub(from,to,instr,type)			\
+#ifndef CONFIG_THUMB2_KERNEL
+#define __pv_stub(from,to,instr)			\
 	__asm__("@ __pv_stub\n"				\
 	"1:	" instr "	%0, %1, %2\n"		\
+	"2:	" instr "	%0, %0, %3\n"		\
 	"	.pushsection .pv_table,\"a\"\n"		\
-	"	.long	1b\n"				\
+	"	.long	1b - ., 2b - .\n"		\
 	"	.popsection\n"				\
 	: "=r" (to)					\
-	: "r" (from), "I" (type))
-
-#define __pv_stub_mov_hi(t)				\
-	__asm__ volatile("@ __pv_stub_mov\n"		\
-	"1:	mov	%R0, %1\n"			\
-	"	.pushsection .pv_table,\"a\"\n"		\
-	"	.long	1b\n"				\
-	"	.popsection\n"				\
-	: "=r" (t)					\
-	: "I" (__PV_BITS_7_0))
+	: "r" (from), "I" (__PV_BITS_31_24),		\
+	  "I"(__PV_BITS_23_16))
 
 #define __pv_add_carry_stub(x, y)			\
-	__asm__ volatile("@ __pv_add_carry_stub\n"	\
-	"1:	adds	%Q0, %1, %2\n"			\
+	__asm__("@ __pv_add_carry_stub\n"		\
+	"0:	movw	%R0, #0\n"			\
+	"	adds	%Q0, %1, %R0, lsl #20\n"	\
+	"1:	mov	%R0, %2\n"			\
 	"	adc	%R0, %R0, #0\n"			\
 	"	.pushsection .pv_table,\"a\"\n"		\
-	"	.long	1b\n"				\
+	"	.long	0b - ., 1b - .\n"		\
 	"	.popsection\n"				\
-	: "+r" (y)					\
-	: "r" (x), "I" (__PV_BITS_31_24)		\
+	: "=&r" (y)					\
+	: "r" (x), "I" (__PV_BITS_7_0)			\
 	: "cc")
+
+#else
+#define __pv_stub(from,to,instr)			\
+	__asm__("@ __pv_stub\n"				\
+	"0:	movw	%0, #0\n"			\
+	"	lsl	%0, #21\n"			\
+	"	" instr " %0, %1, %0\n"			\
+	"	.pushsection .pv_table,\"a\"\n"		\
+	"	.long	0b - .\n"			\
+	"	.popsection\n"				\
+	: "=&r" (to)					\
+	: "r" (from))
+
+#define __pv_add_carry_stub(x, y)			\
+	__asm__("@ __pv_add_carry_stub\n"		\
+	"0:	movw	%R0, #0\n"			\
+	"	lsls	%R0, #21\n"			\
+	"	adds	%Q0, %1, %R0\n"			\
+	"1:	mvn	%R0, #0\n"			\
+	"	adc	%R0, %R0, #0\n"			\
+	"	.pushsection .pv_table,\"a\"\n"		\
+	"	.long	0b - ., 1b - .\n"		\
+	"	.popsection\n"				\
+	: "=&r" (y)					\
+	: "r" (x)					\
+	: "cc")
+#endif
 
 static inline phys_addr_t __virt_to_phys_nodebug(unsigned long x)
 {
 	phys_addr_t t;
 
 	if (sizeof(phys_addr_t) == 4) {
-		__pv_stub(x, t, "add", __PV_BITS_31_24);
+		__pv_stub(x, t, "add");
 	} else {
-		__pv_stub_mov_hi(t);
 		__pv_add_carry_stub(x, t);
 	}
 	return t;
@@ -238,7 +266,7 @@ static inline unsigned long __phys_to_virt(phys_addr_t x)
 	 * assembler expression receives 32 bit argument
 	 * in place where 'r' 32 bit operand is expected.
 	 */
-	__pv_stub((unsigned long) x, t, "sub", __PV_BITS_31_24);
+	__pv_stub((unsigned long) x, t, "sub");
 	return t;
 }
 
@@ -259,10 +287,12 @@ static inline unsigned long __phys_to_virt(phys_addr_t x)
 
 #endif
 
-#define virt_to_pfn(kaddr) \
-	((((unsigned long)(kaddr) - PAGE_OFFSET) >> PAGE_SHIFT) + \
-	 PHYS_PFN_OFFSET)
-
+static inline unsigned long virt_to_pfn(const void *p)
+{
+	unsigned long kaddr = (unsigned long)p;
+	return (((kaddr - PAGE_OFFSET) >> PAGE_SHIFT) +
+		PHYS_PFN_OFFSET);
+}
 #define __pa_symbol_nodebug(x)	__virt_to_phys_nodebug((x))
 
 #ifdef CONFIG_DEBUG_VIRTUAL
@@ -341,19 +371,6 @@ static inline unsigned long __virt_to_idmap(unsigned long x)
 #define virt_to_idmap(x)	__virt_to_idmap((unsigned long)(x))
 
 /*
- * Virtual <-> DMA view memory address translations
- * Again, these are *only* valid on the kernel direct mapped RAM
- * memory.  Use of these is *deprecated* (and that doesn't mean
- * use the __ prefixed forms instead.)  See dma-mapping.h.
- */
-#ifndef __virt_to_bus
-#define __virt_to_bus	__virt_to_phys
-#define __bus_to_virt	__phys_to_virt
-#define __pfn_to_bus(x)	__pfn_to_phys(x)
-#define __bus_to_pfn(x)	__phys_to_pfn(x)
-#endif
-
-/*
  * Conversion between a struct page and a physical address.
  *
  *  page_to_pfn(page)	convert a struct page * to a PFN number
@@ -369,7 +386,5 @@ static inline unsigned long __virt_to_idmap(unsigned long x)
 					&& pfn_valid(virt_to_pfn(kaddr)))
 
 #endif
-
-#include <asm-generic/memory_model.h>
 
 #endif

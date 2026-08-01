@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *  PS3 Platfom gelic network driver.
  *
@@ -10,20 +11,6 @@
  *
  * Authors : Utz Bacher <utz.bacher@de.ibm.com>
  *           Jens Osterkamp <Jens.Osterkamp@de.ibm.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 #ifndef _GELIC_NET_H
 #define _GELIC_NET_H
@@ -32,8 +19,9 @@
 #define GELIC_NET_RX_DESCRIPTORS        128 /* num of descriptors */
 #define GELIC_NET_TX_DESCRIPTORS        128 /* num of descriptors */
 
-#define GELIC_NET_MAX_MTU               VLAN_ETH_FRAME_LEN
-#define GELIC_NET_MIN_MTU               VLAN_ETH_ZLEN
+#define GELIC_NET_MAX_FRAME             2312
+#define GELIC_NET_MAX_MTU               2294
+#define GELIC_NET_MIN_MTU               64
 #define GELIC_NET_RXBUF_ALIGN           128
 #define GELIC_CARD_RX_CSUM_DEFAULT      1 /* hw chksum */
 #define GELIC_NET_WATCHDOG_TIMEOUT      5*HZ
@@ -233,29 +221,35 @@ enum gelic_lv1_phy {
 	GELIC_LV1_PHY_ETHERNET_0	= 0x0000000000000002L,
 };
 
-/* size of hardware part of gelic descriptor */
-#define GELIC_DESCR_SIZE	(32)
-
 enum gelic_port_type {
 	GELIC_PORT_ETHERNET_0	= 0,
 	GELIC_PORT_WIRELESS	= 1,
 	GELIC_PORT_MAX
 };
 
-struct gelic_descr {
-	/* as defined by the hardware */
-	__be32 buf_addr;
-	__be32 buf_size;
+/* As defined by the gelic hardware device. */
+struct gelic_hw_regs {
+	struct  {
+		__be32 dev_addr;
+		__be32 size;
+	} __packed payload;
 	__be32 next_descr_addr;
 	__be32 dmac_cmd_status;
 	__be32 result_size;
 	__be32 valid_size;	/* all zeroes for tx */
 	__be32 data_status;
 	__be32 data_error;	/* all zeroes for tx */
+} __packed;
 
-	/* used in the driver */
+struct gelic_chain_link {
+	dma_addr_t cpu_addr;
+	unsigned int size;
+};
+
+struct gelic_descr {
+	struct gelic_hw_regs hw_regs;
+	struct gelic_chain_link link;
 	struct sk_buff *skb;
-	dma_addr_t bus_addr;
 	struct gelic_descr *next;
 	struct gelic_descr *prev;
 } __attribute__((aligned(32)));
@@ -274,6 +268,7 @@ struct gelic_vlan_id {
 struct gelic_card {
 	struct napi_struct napi;
 	struct net_device *netdev[GELIC_PORT_MAX];
+	struct timer_list rx_oom_timer;
 	/*
 	 * hypervisor requires irq_status should be
 	 * 8 bytes aligned, but u64 member is
@@ -314,14 +309,14 @@ struct gelic_card {
 	 */
 	unsigned int irq;
 	struct gelic_descr *tx_top, *rx_top;
-	struct gelic_descr descr[0]; /* must be the last */
+	struct gelic_descr descr[]; /* must be the last */
 };
 
 struct gelic_port {
 	struct gelic_card *card;
 	struct net_device *netdev;
 	enum gelic_port_type type;
-	long priv[0]; /* long for alignment */
+	long priv[]; /* long for alignment */
 };
 
 static inline struct gelic_card *port_to_card(struct gelic_port *p)
@@ -358,21 +353,15 @@ static inline void *port_priv(struct gelic_port *port)
 	return port->priv;
 }
 
-#ifdef CONFIG_PPC_EARLY_DEBUG_PS3GELIC
-void udbg_shutdown_ps3gelic(void);
-#else
-static inline void udbg_shutdown_ps3gelic(void) {}
-#endif
-
 int gelic_card_set_irq_mask(struct gelic_card *card, u64 mask);
 /* shared netdev ops */
 void gelic_card_up(struct gelic_card *card);
 void gelic_card_down(struct gelic_card *card);
 int gelic_net_open(struct net_device *netdev);
 int gelic_net_stop(struct net_device *netdev);
-int gelic_net_xmit(struct sk_buff *skb, struct net_device *netdev);
+netdev_tx_t gelic_net_xmit(struct sk_buff *skb, struct net_device *netdev);
 void gelic_net_set_multi(struct net_device *netdev);
-void gelic_net_tx_timeout(struct net_device *netdev);
+void gelic_net_tx_timeout(struct net_device *netdev, unsigned int txqueue);
 int gelic_net_setup_netdev(struct net_device *netdev, struct gelic_card *card);
 
 /* shared ethtool ops */

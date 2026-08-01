@@ -1,23 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This file is part of wl12xx
  *
  * Copyright (C) 2009-2010 Nokia Corporation
  * Copyright (C) 2011 Texas Instruments Inc.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #include "../wlcore/cmd.h"
@@ -36,7 +22,7 @@ int wl1271_cmd_ext_radio_parms(struct wl1271 *wl)
 	if (!wl->nvs)
 		return -ENODEV;
 
-	ext_radio_parms = kzalloc(sizeof(*ext_radio_parms), GFP_KERNEL);
+	ext_radio_parms = kzalloc_obj(*ext_radio_parms);
 	if (!ext_radio_parms)
 		return -ENOMEM;
 
@@ -77,7 +63,7 @@ int wl1271_cmd_general_parms(struct wl1271 *wl)
 		return -EINVAL;
 	}
 
-	gen_parms = kzalloc(sizeof(*gen_parms), GFP_KERNEL);
+	gen_parms = kzalloc_obj(*gen_parms);
 	if (!gen_parms)
 		return -ENOMEM;
 
@@ -144,7 +130,7 @@ int wl128x_cmd_general_parms(struct wl1271 *wl)
 		return -EINVAL;
 	}
 
-	gen_parms = kzalloc(sizeof(*gen_parms), GFP_KERNEL);
+	gen_parms = kzalloc_obj(*gen_parms);
 	if (!gen_parms)
 		return -ENOMEM;
 
@@ -205,7 +191,7 @@ int wl1271_cmd_radio_parms(struct wl1271 *wl)
 	if (!wl->nvs)
 		return -ENODEV;
 
-	radio_parms = kzalloc(sizeof(*radio_parms), GFP_KERNEL);
+	radio_parms = kzalloc_obj(*radio_parms);
 	if (!radio_parms)
 		return -ENOMEM;
 
@@ -249,7 +235,7 @@ int wl128x_cmd_radio_parms(struct wl1271 *wl)
 	if (!wl->nvs)
 		return -ENODEV;
 
-	radio_parms = kzalloc(sizeof(*radio_parms), GFP_KERNEL);
+	radio_parms = kzalloc_obj(*radio_parms);
 	if (!radio_parms)
 		return -ENOMEM;
 
@@ -294,7 +280,7 @@ int wl12xx_cmd_channel_switch(struct wl1271 *wl,
 
 	wl1271_debug(DEBUG_ACX, "cmd channel switch");
 
-	cmd = kzalloc(sizeof(*cmd), GFP_KERNEL);
+	cmd = kzalloc_obj(*cmd);
 	if (!cmd) {
 		ret = -ENOMEM;
 		goto out;

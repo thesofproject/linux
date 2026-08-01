@@ -25,13 +25,10 @@ int fbtft_gamma_parse_str(struct fbtft_par *par, u32 *curves,
 	unsigned long val = 0;
 	int ret = 0;
 	int curve_counter, value_counter;
-
-	fbtft_par_dbg(DEBUG_SYSFS, par, "%s() str=\n", __func__);
+	int _count;
 
 	if (!str || !curves)
 		return -EINVAL;
-
-	fbtft_par_dbg(DEBUG_SYSFS, par, "%s\n", str);
 
 	tmp = kmemdup(str, size + 1, GFP_KERNEL);
 	if (!tmp)
@@ -68,7 +65,10 @@ int fbtft_gamma_parse_str(struct fbtft_par *par, u32 *curves,
 			ret = get_next_ulong(&curve_p, &val, " ", 16);
 			if (ret)
 				goto out;
-			curves[curve_counter * par->gamma.num_values + value_counter] = val;
+
+			_count = curve_counter * par->gamma.num_values +
+				 value_counter;
+			curves[_count] = val;
 			value_counter++;
 		}
 		if (value_counter != par->gamma.num_values) {
@@ -126,7 +126,8 @@ static ssize_t store_gamma_curve(struct device *device,
 
 	mutex_lock(&par->gamma.lock);
 	memcpy(par->gamma.curves, tmp_curves,
-	       par->gamma.num_curves * par->gamma.num_values * sizeof(tmp_curves[0]));
+	       par->gamma.num_curves * par->gamma.num_values *
+	       sizeof(tmp_curves[0]));
 	mutex_unlock(&par->gamma.lock);
 
 	return count;
@@ -194,7 +195,7 @@ static ssize_t show_debug(struct device *device,
 	struct fb_info *fb_info = dev_get_drvdata(device);
 	struct fbtft_par *par = fb_info->par;
 
-	return snprintf(buf, PAGE_SIZE, "%lu\n", par->debug);
+	return sysfs_emit(buf, "%lu\n", par->debug);
 }
 
 static struct device_attribute debug_device_attr =
@@ -202,14 +203,26 @@ static struct device_attribute debug_device_attr =
 
 void fbtft_sysfs_init(struct fbtft_par *par)
 {
-	device_create_file(par->info->dev, &debug_device_attr);
+	struct device *dev;
+
+	dev = dev_of_fbinfo(par->info);
+	if (!dev)
+		return;
+
+	device_create_file(dev, &debug_device_attr);
 	if (par->gamma.curves && par->fbtftops.set_gamma)
-		device_create_file(par->info->dev, &gamma_device_attrs[0]);
+		device_create_file(dev, &gamma_device_attrs[0]);
 }
 
 void fbtft_sysfs_exit(struct fbtft_par *par)
 {
-	device_remove_file(par->info->dev, &debug_device_attr);
+	struct device *dev;
+
+	dev = dev_of_fbinfo(par->info);
+	if (!dev)
+		return;
+
+	device_remove_file(dev, &debug_device_attr);
 	if (par->gamma.curves && par->fbtftops.set_gamma)
-		device_remove_file(par->info->dev, &gamma_device_attrs[0]);
+		device_remove_file(dev, &gamma_device_attrs[0]);
 }

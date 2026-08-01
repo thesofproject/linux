@@ -3,11 +3,14 @@
 #define _LINUX_RESET_CONTROLLER_H_
 
 #include <linux/list.h>
+#include <linux/mutex.h>
 
+struct fwnode_handle;
+struct fwnode_reference_args;
 struct reset_controller_dev;
 
 /**
- * struct reset_control_ops
+ * struct reset_control_ops - reset controller driver callbacks
  *
  * @reset: for self-deasserting resets, does all necessary
  *         things to reset the device
@@ -27,31 +30,6 @@ struct device_node;
 struct of_phandle_args;
 
 /**
- * struct reset_control_lookup - represents a single lookup entry
- *
- * @list: internal list of all reset lookup entries
- * @provider: name of the reset controller device controlling this reset line
- * @index: ID of the reset controller in the reset controller device
- * @dev_id: name of the device associated with this reset line
- * @con_id name of the reset line (can be NULL)
- */
-struct reset_control_lookup {
-	struct list_head list;
-	const char *provider;
-	unsigned int index;
-	const char *dev_id;
-	const char *con_id;
-};
-
-#define RESET_LOOKUP(_provider, _index, _dev_id, _con_id)		\
-	{								\
-		.provider = _provider,					\
-		.index = _index,					\
-		.dev_id = _dev_id,					\
-		.con_id = _con_id,					\
-	}
-
-/**
  * struct reset_controller_dev - reset controller entity that might
  *                               provide multiple reset controls
  * @ops: a pointer to device specific struct reset_control_ops
@@ -63,7 +41,13 @@ struct reset_control_lookup {
  * @of_reset_n_cells: number of cells in reset line specifiers
  * @of_xlate: translation function to translate from specifier as found in the
  *            device tree to id as given to the reset control ops
+ * @fwnode: firmware node associated with this device
+ * @fwnode_reset_n_cells: number of cells in reset line specifiers
+ * @fwnode_xlate: translation function to translate from firmware specifier to
+ *                id as given to the reset control ops, defaults to
+ *                :c:func:`fwnode_reset_simple_xlate`
  * @nr_resets: number of reset controls in this reset controller device
+ * @lock: protects the reset control list from concurrent access
  */
 struct reset_controller_dev {
 	const struct reset_control_ops *ops;
@@ -75,17 +59,36 @@ struct reset_controller_dev {
 	int of_reset_n_cells;
 	int (*of_xlate)(struct reset_controller_dev *rcdev,
 			const struct of_phandle_args *reset_spec);
+	struct fwnode_handle *fwnode;
+	int fwnode_reset_n_cells;
+	int (*fwnode_xlate)(struct reset_controller_dev *rcdev,
+			    const struct fwnode_reference_args *reset_spec);
 	unsigned int nr_resets;
+	struct mutex lock;
 };
 
+#if IS_ENABLED(CONFIG_RESET_CONTROLLER)
 int reset_controller_register(struct reset_controller_dev *rcdev);
 void reset_controller_unregister(struct reset_controller_dev *rcdev);
 
 struct device;
 int devm_reset_controller_register(struct device *dev,
 				   struct reset_controller_dev *rcdev);
+#else
+static inline int reset_controller_register(struct reset_controller_dev *rcdev)
+{
+	return 0;
+}
 
-void reset_controller_add_lookup(struct reset_control_lookup *lookup,
-				 unsigned int num_entries);
+static inline void reset_controller_unregister(struct reset_controller_dev *rcdev)
+{
+}
+
+static inline int devm_reset_controller_register(struct device *dev,
+						 struct reset_controller_dev *rcdev)
+{
+	return 0;
+}
+#endif
 
 #endif

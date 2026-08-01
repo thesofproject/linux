@@ -12,25 +12,31 @@ To enable this feature, build your kernel with CONFIG_UPROBE_EVENTS=y.
 
 Similar to the kprobe-event tracer, this doesn't need to be activated via
 current_tracer. Instead of that, add probe points via
-/sys/kernel/debug/tracing/uprobe_events, and enable it via
-/sys/kernel/debug/tracing/events/uprobes/<EVENT>/enabled.
+/sys/kernel/tracing/uprobe_events, and enable it via
+/sys/kernel/tracing/events/uprobes/<EVENT>/enable.
 
 However unlike kprobe-event tracer, the uprobe event interface expects the
 user to calculate the offset of the probepoint in the object.
+
+You can also use /sys/kernel/tracing/dynamic_events instead of
+uprobe_events. That interface will provide unified access to other
+dynamic events too.
 
 Synopsis of uprobe_tracer
 -------------------------
 ::
 
-  p[:[GRP/]EVENT] PATH:OFFSET [FETCHARGS] : Set a uprobe
-  r[:[GRP/]EVENT] PATH:OFFSET [FETCHARGS] : Set a return uprobe (uretprobe)
-  -:[GRP/]EVENT                           : Clear uprobe or uretprobe event
+  p[:[GRP/][EVENT]] PATH:OFFSET [FETCHARGS] : Set a uprobe
+  r[:[GRP/][EVENT]] PATH:OFFSET [FETCHARGS] : Set a return uprobe (uretprobe)
+  p[:[GRP/][EVENT]] PATH:OFFSET%return [FETCHARGS] : Set a return uprobe (uretprobe)
+  -:[GRP/][EVENT]                           : Clear uprobe or uretprobe event
 
   GRP           : Group name. If omitted, "uprobes" is the default value.
   EVENT         : Event name. If omitted, the event name is generated based
                   on PATH+OFFSET.
   PATH          : Path to an executable or a library.
   OFFSET        : Offset where the probe is inserted.
+  OFFSET%return : Offset where the return probe is inserted.
 
   FETCHARGS     : Arguments. Each probe can have up to 128 args.
    %REG         : Fetch register REG
@@ -38,16 +44,19 @@ Synopsis of uprobe_tracer
    @+OFFSET	: Fetch memory at OFFSET (OFFSET from same file as PATH)
    $stackN	: Fetch Nth entry of stack (N >= 0)
    $stack	: Fetch stack address.
-   $retval	: Fetch return value.(*)
+   $retval	: Fetch return value.(\*1)
    $comm	: Fetch current task comm.
-   +|-offs(FETCHARG) : Fetch memory at FETCHARG +|- offs address.(**)
+   +|-[u]OFFS(FETCHARG) : Fetch memory at FETCHARG +|- OFFS address.(\*2)(\*3)
+   \IMM		: Store an immediate value to the argument.
    NAME=FETCHARG     : Set NAME as the argument name of FETCHARG.
    FETCHARG:TYPE     : Set TYPE as the type of FETCHARG. Currently, basic types
 		       (u8/u16/u32/u64/s8/s16/s32/s64), hexadecimal types
 		       (x8/x16/x32/x64), "string" and bitfield are supported.
 
-  (*) only for return probe.
-  (**) this is useful for fetching a field of data structures.
+  (\*1) only for return probe.
+  (\*2) this is useful for fetching a field of data structures.
+  (\*3) Unlike kprobe event, "u" prefix will just be ignored, because uprobe
+        events can access only user-space memory.
 
 Types
 -----
@@ -69,38 +78,37 @@ For $comm, the default type is "string"; any other type is invalid.
 
 Event Profiling
 ---------------
-You can check the total number of probe hits and probe miss-hits via
-/sys/kernel/debug/tracing/uprobe_profile.
-The first column is event name, the second is the number of probe hits,
-the third is the number of probe miss-hits.
+You can check the total number of probe hits per event via
+/sys/kernel/tracing/uprobe_profile. The first column is the filename,
+the second is the event name, the third is the number of probe hits.
 
 Usage examples
 --------------
  * Add a probe as a new uprobe event, write a new definition to uprobe_events
    as below (sets a uprobe at an offset of 0x4245c0 in the executable /bin/bash)::
 
-    echo 'p /bin/bash:0x4245c0' > /sys/kernel/debug/tracing/uprobe_events
+    echo 'p /bin/bash:0x4245c0' > /sys/kernel/tracing/uprobe_events
 
  * Add a probe as a new uretprobe event::
 
-    echo 'r /bin/bash:0x4245c0' > /sys/kernel/debug/tracing/uprobe_events
+    echo 'r /bin/bash:0x4245c0' > /sys/kernel/tracing/uprobe_events
 
  * Unset registered event::
 
-    echo '-:p_bash_0x4245c0' >> /sys/kernel/debug/tracing/uprobe_events
+    echo '-:p_bash_0x4245c0' >> /sys/kernel/tracing/uprobe_events
 
  * Print out the events that are registered::
 
-    cat /sys/kernel/debug/tracing/uprobe_events
+    cat /sys/kernel/tracing/uprobe_events
 
  * Clear all events::
 
-    echo > /sys/kernel/debug/tracing/uprobe_events
+    echo > /sys/kernel/tracing/uprobe_events
 
 Following example shows how to dump the instruction pointer and %ax register
 at the probed text address. Probe zfree function in /bin/zsh::
 
-    # cd /sys/kernel/debug/tracing/
+    # cd /sys/kernel/tracing/
     # cat /proc/`pgrep zsh`/maps | grep /bin/zsh | grep r-xp
     00400000-0048a000 r-xp 00000000 08:03 130904 /bin/zsh
     # objdump -T /bin/zsh | grep -w zfree
@@ -149,13 +157,18 @@ events, you need to enable it by::
 
     # echo 1 > events/uprobes/enable
 
-Lets disable the event after sleeping for some time.
+Lets start tracing, sleep for some time and stop tracing.
 ::
 
+    # echo 1 > tracing_on
     # sleep 20
+    # echo 0 > tracing_on
+
+Also, you can disable the event by::
+
     # echo 0 > events/uprobes/enable
 
-And you can see the traced information via /sys/kernel/debug/tracing/trace.
+And you can see the traced information via /sys/kernel/tracing/trace.
 ::
 
     # cat trace

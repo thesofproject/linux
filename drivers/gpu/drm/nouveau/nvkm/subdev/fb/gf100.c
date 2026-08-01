@@ -46,10 +46,10 @@ gf100_fb_oneinit(struct nvkm_fb *base)
 {
 	struct gf100_fb *fb = gf100_fb(base);
 	struct nvkm_device *device = fb->base.subdev.device;
-	int ret, size = 0x1000;
+	int ret, size = 1 << (fb->base.page ? fb->base.page : 17);
 
 	size = nvkm_longopt(device->cfgopt, "MmuDebugBufferSize", size);
-	size = min(size, 0x1000);
+	size = max(size, 0x1000);
 
 	ret = nvkm_memory_new(device, NVKM_MEM_TARGET_INST, size, 0x1000,
 			      true, &fb->base.mmu_rd);
@@ -60,14 +60,6 @@ gf100_fb_oneinit(struct nvkm_fb *base)
 			      true, &fb->base.mmu_wr);
 	if (ret)
 		return ret;
-
-	fb->r100c10_page = alloc_page(GFP_KERNEL | __GFP_ZERO);
-	if (fb->r100c10_page) {
-		fb->r100c10 = dma_map_page(device->dev, fb->r100c10_page, 0,
-					   PAGE_SIZE, DMA_BIDIRECTIONAL);
-		if (dma_mapping_error(device->dev, fb->r100c10))
-			return -EFAULT;
-	}
 
 	return 0;
 }
@@ -86,13 +78,19 @@ gf100_fb_init_page(struct nvkm_fb *fb)
 }
 
 void
+gf100_fb_sysmem_flush_page_init(struct nvkm_fb *fb)
+{
+	// Ensure that the address can actually fit in the register
+	WARN_ON(fb->sysmem.flush_page_addr > DMA_BIT_MASK(40));
+
+	nvkm_wr32(fb->subdev.device, 0x100c10, fb->sysmem.flush_page_addr >> 8);
+}
+
+void
 gf100_fb_init(struct nvkm_fb *base)
 {
 	struct gf100_fb *fb = gf100_fb(base);
 	struct nvkm_device *device = fb->base.subdev.device;
-
-	if (fb->r100c10_page)
-		nvkm_wr32(device, 0x100c10, fb->r100c10 >> 8);
 
 	if (base->func->clkgate_pack) {
 		nvkm_therm_clkgate_init(device->therm,
@@ -104,26 +102,19 @@ void *
 gf100_fb_dtor(struct nvkm_fb *base)
 {
 	struct gf100_fb *fb = gf100_fb(base);
-	struct nvkm_device *device = fb->base.subdev.device;
-
-	if (fb->r100c10_page) {
-		dma_unmap_page(device->dev, fb->r100c10, PAGE_SIZE,
-			       DMA_BIDIRECTIONAL);
-		__free_page(fb->r100c10_page);
-	}
 
 	return fb;
 }
 
 int
 gf100_fb_new_(const struct nvkm_fb_func *func, struct nvkm_device *device,
-	      int index, struct nvkm_fb **pfb)
+	      enum nvkm_subdev_type type, int inst, struct nvkm_fb **pfb)
 {
 	struct gf100_fb *fb;
 
-	if (!(fb = kzalloc(sizeof(*fb), GFP_KERNEL)))
+	if (!(fb = kzalloc_obj(*fb)))
 		return -ENOMEM;
-	nvkm_fb_ctor(func, device, index, &fb->base);
+	nvkm_fb_ctor(func, device, type, inst, &fb->base);
 	*pfb = &fb->base;
 
 	return 0;
@@ -136,12 +127,13 @@ gf100_fb = {
 	.init = gf100_fb_init,
 	.init_page = gf100_fb_init_page,
 	.intr = gf100_fb_intr,
+	.sysmem.flush_page_init = gf100_fb_sysmem_flush_page_init,
 	.ram_new = gf100_ram_new,
 	.default_bigpage = 17,
 };
 
 int
-gf100_fb_new(struct nvkm_device *device, int index, struct nvkm_fb **pfb)
+gf100_fb_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst, struct nvkm_fb **pfb)
 {
-	return gf100_fb_new_(&gf100_fb, device, index, pfb);
+	return gf100_fb_new_(&gf100_fb, device, type, inst, pfb);
 }

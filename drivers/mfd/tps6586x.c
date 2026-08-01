@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Core driver for TI TPS6586x PMIC family
  *
@@ -9,10 +10,6 @@
  * Mike Rapoport <mike@compulab.co.il>
  * Copyright (C) 2006-2008 Marvell International Ltd.
  * Eric Miao <eric.miao@marvell.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/interrupt.h>
@@ -25,6 +22,7 @@
 #include <linux/err.h>
 #include <linux/i2c.h>
 #include <linux/platform_device.h>
+#include <linux/reboot.h>
 #include <linux/regmap.h>
 #include <linux/of.h>
 
@@ -32,6 +30,7 @@
 #include <linux/mfd/tps6586x.h>
 
 #define TPS6586X_SUPPLYENE	0x14
+#define SOFT_RST_BIT		BIT(0)
 #define EXITSLREQ_BIT		BIT(1)
 #define SLEEP_MODE_BIT		BIT(3)
 
@@ -95,7 +94,7 @@ static const struct tps6586x_irq_data tps6586x_irqs[] = {
 	[TPS6586X_INT_RTC_ALM2] = TPS6586X_IRQ(TPS6586X_INT_MASK4, 1 << 1),
 };
 
-static struct resource tps6586x_rtc_resources[] = {
+static const struct resource tps6586x_rtc_resources[] = {
 	{
 		.start  = TPS6586X_INT_RTC_ALM1,
 		.end	= TPS6586X_INT_RTC_ALM1,
@@ -272,15 +271,11 @@ static void tps6586x_irq_sync_unlock(struct irq_data *data)
 	mutex_unlock(&tps6586x->irq_lock);
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int tps6586x_irq_set_wake(struct irq_data *irq_data, unsigned int on)
 {
 	struct tps6586x *tps6586x = irq_data_get_irq_chip_data(irq_data);
 	return irq_set_irq_wake(tps6586x->irq, on);
 }
-#else
-#define tps6586x_irq_set_wake NULL
-#endif
 
 static struct irq_chip tps6586x_irq_chip = {
 	.name = "tps6586x",
@@ -288,7 +283,7 @@ static struct irq_chip tps6586x_irq_chip = {
 	.irq_bus_sync_unlock = tps6586x_irq_sync_unlock,
 	.irq_disable = tps6586x_irq_disable,
 	.irq_enable = tps6586x_irq_enable,
-	.irq_set_wake = tps6586x_irq_set_wake,
+	.irq_set_wake = pm_sleep_ptr(tps6586x_irq_set_wake),
 };
 
 static int tps6586x_irq_map(struct irq_domain *h, unsigned int virq,
@@ -312,18 +307,19 @@ static const struct irq_domain_ops tps6586x_domain_ops = {
 static irqreturn_t tps6586x_irq(int irq, void *data)
 {
 	struct tps6586x *tps6586x = data;
-	u32 acks;
+	uint32_t acks;
+	__le32 val;
 	int ret = 0;
 
 	ret = tps6586x_reads(tps6586x->dev, TPS6586X_INT_ACK1,
-			     sizeof(acks), (uint8_t *)&acks);
+			     sizeof(acks), (uint8_t *)&val);
 
 	if (ret < 0) {
 		dev_err(tps6586x->dev, "failed to read interrupt status\n");
 		return IRQ_NONE;
 	}
 
-	acks = le32_to_cpu(acks);
+	acks = le32_to_cpu(val);
 
 	while (acks) {
 		int i = __ffs(acks);
@@ -367,9 +363,9 @@ static int tps6586x_irq_init(struct tps6586x *tps6586x, int irq,
 		new_irq_base = 0;
 	}
 
-	tps6586x->irq_domain = irq_domain_add_simple(tps6586x->dev->of_node,
-				irq_num, new_irq_base, &tps6586x_domain_ops,
-				tps6586x);
+	tps6586x->irq_domain = irq_domain_create_simple(dev_fwnode(tps6586x->dev), irq_num,
+							new_irq_base, &tps6586x_domain_ops,
+							tps6586x);
 	if (!tps6586x->irq_domain) {
 		dev_err(tps6586x->dev, "Failed to create IRQ domain\n");
 		return -ENOMEM;
@@ -401,7 +397,7 @@ static int tps6586x_add_subdevs(struct tps6586x *tps6586x,
 
 		pdev->dev.parent = tps6586x->dev;
 		pdev->dev.platform_data = subdev->platform_data;
-		pdev->dev.of_node = subdev->of_node;
+		pdev->dev.of_node = of_node_get(subdev->of_node);
 
 		ret = platform_device_add(pdev);
 		if (ret) {
@@ -423,10 +419,8 @@ static struct tps6586x_platform_data *tps6586x_parse_dt(struct i2c_client *clien
 	struct tps6586x_platform_data *pdata;
 
 	pdata = devm_kzalloc(&client->dev, sizeof(*pdata), GFP_KERNEL);
-	if (!pdata) {
-		dev_err(&client->dev, "Memory allocation failed\n");
+	if (!pdata)
 		return NULL;
-	}
 
 	pdata->num_subdevs = 0;
 	pdata->subdevs = NULL;
@@ -462,16 +456,37 @@ static const struct regmap_config tps6586x_regmap_config = {
 	.val_bits = 8,
 	.max_register = TPS6586X_MAX_REGISTER,
 	.volatile_reg = is_volatile_reg,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 };
 
-static struct device *tps6586x_dev;
-static void tps6586x_power_off(void)
+static int tps6586x_power_off_handler(struct sys_off_data *data)
 {
-	if (tps6586x_clr_bits(tps6586x_dev, TPS6586X_SUPPLYENE, EXITSLREQ_BIT))
-		return;
+	int ret;
 
-	tps6586x_set_bits(tps6586x_dev, TPS6586X_SUPPLYENE, SLEEP_MODE_BIT);
+	/* Put the PMIC into sleep state. This takes at least 20ms. */
+	ret = tps6586x_clr_bits(data->dev, TPS6586X_SUPPLYENE, EXITSLREQ_BIT);
+	if (ret)
+		return notifier_from_errno(ret);
+
+	ret = tps6586x_set_bits(data->dev, TPS6586X_SUPPLYENE, SLEEP_MODE_BIT);
+	if (ret)
+		return notifier_from_errno(ret);
+
+	mdelay(50);
+	return notifier_from_errno(-ETIME);
+}
+
+static int tps6586x_restart_handler(struct sys_off_data *data)
+{
+	int ret;
+
+	/* Put the PMIC into hard reboot state. This takes at least 20ms. */
+	ret = tps6586x_set_bits(data->dev, TPS6586X_SUPPLYENE, SOFT_RST_BIT);
+	if (ret)
+		return notifier_from_errno(ret);
+
+	mdelay(50);
+	return notifier_from_errno(-ETIME);
 }
 
 static void tps6586x_print_version(struct i2c_client *client, int version)
@@ -503,8 +518,7 @@ static void tps6586x_print_version(struct i2c_client *client, int version)
 	dev_info(&client->dev, "Found %s, VERSIONCRC is %02x\n", name, version);
 }
 
-static int tps6586x_i2c_probe(struct i2c_client *client,
-					const struct i2c_device_id *id)
+static int tps6586x_i2c_probe(struct i2c_client *client)
 {
 	struct tps6586x_platform_data *pdata = dev_get_platdata(&client->dev);
 	struct tps6586x *tps6586x;
@@ -568,9 +582,20 @@ static int tps6586x_i2c_probe(struct i2c_client *client,
 		goto err_add_devs;
 	}
 
-	if (pdata->pm_off && !pm_power_off) {
-		tps6586x_dev = &client->dev;
-		pm_power_off = tps6586x_power_off;
+	if (pdata->pm_off) {
+		ret = devm_register_power_off_handler(&client->dev, &tps6586x_power_off_handler,
+						      NULL);
+		if (ret) {
+			dev_err(&client->dev, "register power off handler failed: %d\n", ret);
+			goto err_add_devs;
+		}
+
+		ret = devm_register_restart_handler(&client->dev, &tps6586x_restart_handler,
+						    NULL);
+		if (ret) {
+			dev_err(&client->dev, "register restart handler failed: %d\n", ret);
+			goto err_add_devs;
+		}
 	}
 
 	return 0;
@@ -583,7 +608,7 @@ err_mfd_add:
 	return ret;
 }
 
-static int tps6586x_i2c_remove(struct i2c_client *client)
+static void tps6586x_i2c_remove(struct i2c_client *client)
 {
 	struct tps6586x *tps6586x = i2c_get_clientdata(client);
 
@@ -591,12 +616,34 @@ static int tps6586x_i2c_remove(struct i2c_client *client)
 	mfd_remove_devices(tps6586x->dev);
 	if (client->irq)
 		free_irq(client->irq, tps6586x);
+}
+
+static int __maybe_unused tps6586x_i2c_suspend(struct device *dev)
+{
+	struct tps6586x *tps6586x = dev_get_drvdata(dev);
+
+	if (tps6586x->client->irq)
+		disable_irq(tps6586x->client->irq);
+
 	return 0;
 }
 
+static int __maybe_unused tps6586x_i2c_resume(struct device *dev)
+{
+	struct tps6586x *tps6586x = dev_get_drvdata(dev);
+
+	if (tps6586x->client->irq)
+		enable_irq(tps6586x->client->irq);
+
+	return 0;
+}
+
+static SIMPLE_DEV_PM_OPS(tps6586x_pm_ops, tps6586x_i2c_suspend,
+			 tps6586x_i2c_resume);
+
 static const struct i2c_device_id tps6586x_id_table[] = {
-	{ "tps6586x", 0 },
-	{ },
+	{ "tps6586x" },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, tps6586x_id_table);
 
@@ -604,6 +651,7 @@ static struct i2c_driver tps6586x_driver = {
 	.driver	= {
 		.name	= "tps6586x",
 		.of_match_table = of_match_ptr(tps6586x_of_match),
+		.pm	= &tps6586x_pm_ops,
 	},
 	.probe		= tps6586x_i2c_probe,
 	.remove		= tps6586x_i2c_remove,
@@ -624,4 +672,3 @@ module_exit(tps6586x_exit);
 
 MODULE_DESCRIPTION("TPS6586X core driver");
 MODULE_AUTHOR("Mike Rapoport <mike@compulab.co.il>");
-MODULE_LICENSE("GPL");

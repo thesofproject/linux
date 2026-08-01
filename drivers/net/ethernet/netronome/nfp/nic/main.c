@@ -1,40 +1,12 @@
-/*
- * Copyright (C) 2017 Netronome Systems, Inc.
- *
- * This software is dual licensed under the GNU General License Version 2,
- * June 1991 as shown in the file COPYING in the top-level directory of this
- * source tree or the BSD 2-Clause License provided below.  You have the
- * option to license this software under the complete terms of either license.
- *
- * The BSD 2-Clause License:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      1. Redistributions of source code must retain the above
- *         copyright notice, this list of conditions and the following
- *         disclaimer.
- *
- *      2. Redistributions in binary form must reproduce the above
- *         copyright notice, this list of conditions and the following
- *         disclaimer in the documentation and/or other materials
- *         provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/* Copyright (C) 2017 Netronome Systems, Inc. */
 
 #include "../nfpcore/nfp_cpp.h"
 #include "../nfpcore/nfp_nsp.h"
 #include "../nfp_app.h"
 #include "../nfp_main.h"
+#include "../nfp_net.h"
+#include "main.h"
 
 static int nfp_nic_init(struct nfp_app *app)
 {
@@ -58,13 +30,50 @@ static void nfp_nic_sriov_disable(struct nfp_app *app)
 {
 }
 
+static int nfp_nic_vnic_init(struct nfp_app *app, struct nfp_net *nn)
+{
+	return nfp_nic_dcb_init(nn);
+}
+
+static void nfp_nic_vnic_clean(struct nfp_app *app, struct nfp_net *nn)
+{
+	nfp_nic_dcb_clean(nn);
+}
+
+static int nfp_nic_vnic_alloc(struct nfp_app *app, struct nfp_net *nn,
+			      unsigned int id)
+{
+	struct nfp_app_nic_private *app_pri = nn->app_priv;
+	int err;
+
+	err = nfp_app_nic_vnic_alloc(app, nn, id);
+	if (err)
+		return err;
+
+	if (sizeof(*app_pri)) {
+		nn->app_priv = kzalloc_obj(*app_pri);
+		if (!nn->app_priv)
+			return -ENOMEM;
+	}
+
+	return 0;
+}
+
+static void nfp_nic_vnic_free(struct nfp_app *app, struct nfp_net *nn)
+{
+	kfree(nn->app_priv);
+}
+
 const struct nfp_app_type app_nic = {
 	.id		= NFP_APP_CORE_NIC,
 	.name		= "nic",
 
 	.init		= nfp_nic_init,
-	.vnic_alloc	= nfp_app_nic_vnic_alloc,
-
+	.vnic_alloc	= nfp_nic_vnic_alloc,
+	.vnic_free	= nfp_nic_vnic_free,
 	.sriov_enable	= nfp_nic_sriov_enable,
 	.sriov_disable	= nfp_nic_sriov_disable,
+
+	.vnic_init      = nfp_nic_vnic_init,
+	.vnic_clean     = nfp_nic_vnic_clean,
 };

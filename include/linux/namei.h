@@ -2,96 +2,196 @@
 #ifndef _LINUX_NAMEI_H
 #define _LINUX_NAMEI_H
 
+#include <linux/fs.h>
 #include <linux/kernel.h>
 #include <linux/path.h>
 #include <linux/fcntl.h>
 #include <linux/errno.h>
+#include <linux/fs_struct.h>
 
 enum { MAX_NESTED_LINKS = 8 };
 
 #define MAXSYMLINKS 40
 
-/*
- * Type of the last component on LOOKUP_PARENT
- */
-enum {LAST_NORM, LAST_ROOT, LAST_DOT, LAST_DOTDOT, LAST_BIND};
+/* pathwalk mode */
+#define LOOKUP_FOLLOW		BIT(0)	/* follow links at the end */
+#define LOOKUP_DIRECTORY	BIT(1)	/* require a directory */
+#define LOOKUP_AUTOMOUNT	BIT(2)  /* force terminal automount */
+#define LOOKUP_EMPTY		BIT(3)	/* accept empty path [user_... only] */
+#define LOOKUP_LINKAT_EMPTY	BIT(4) /* Linkat request with empty path. */
+#define LOOKUP_DOWN		BIT(5)	/* follow mounts in the starting point */
+#define LOOKUP_MOUNTPOINT	BIT(6)	/* follow mounts in the end */
+#define LOOKUP_REVAL		BIT(7)	/* tell ->d_revalidate() to trust no cache */
+#define LOOKUP_RCU		BIT(8)	/* RCU pathwalk mode; semi-internal */
+#define LOOKUP_CACHED		BIT(9) /* Only do cached lookup */
+#define LOOKUP_PARENT		BIT(10)	/* Looking up final parent in path */
+/* 5 spare bits for pathwalk */
 
-/*
- * The bitmask for a lookup event:
- *  - follow links at the end
- *  - require a directory
- *  - ending slashes ok even for nonexistent files
- *  - internal "there are more path components" flag
- *  - dentry cache is untrusted; force a real lookup
- *  - suppress terminal automount
- */
-#define LOOKUP_FOLLOW		0x0001
-#define LOOKUP_DIRECTORY	0x0002
-#define LOOKUP_AUTOMOUNT	0x0004
+/* These tell filesystem methods that we are dealing with the final component... */
+#define LOOKUP_OPEN		BIT(16)	/* ... in open */
+#define LOOKUP_CREATE		BIT(17)	/* ... in object creation */
+#define LOOKUP_EXCL		BIT(18)	/* ... in target must not exist */
+#define LOOKUP_RENAME_TARGET	BIT(19)	/* ... in destination of rename() */
 
-#define LOOKUP_PARENT		0x0010
-#define LOOKUP_REVAL		0x0020
-#define LOOKUP_RCU		0x0040
-#define LOOKUP_NO_REVAL		0x0080
+/* 4 spare bits for intent */
 
-/*
- * Intent data
- */
-#define LOOKUP_OPEN		0x0100
-#define LOOKUP_CREATE		0x0200
-#define LOOKUP_EXCL		0x0400
-#define LOOKUP_RENAME_TARGET	0x0800
-
-#define LOOKUP_JUMPED		0x1000
-#define LOOKUP_ROOT		0x2000
-#define LOOKUP_EMPTY		0x4000
-#define LOOKUP_DOWN		0x8000
+/* Scoping flags for lookup. */
+#define LOOKUP_NO_SYMLINKS	BIT(24) /* No symlink crossing. */
+#define LOOKUP_NO_MAGICLINKS	BIT(25) /* No nd_jump_link() crossing. */
+#define LOOKUP_NO_XDEV		BIT(26) /* No mountpoint crossing. */
+#define LOOKUP_BENEATH		BIT(27) /* No escaping from starting point. */
+#define LOOKUP_IN_ROOT		BIT(28) /* Treat dirfd as fs root. */
+/* LOOKUP_* flags which do scope-related checks based on the dirfd. */
+#define LOOKUP_IS_SCOPED (LOOKUP_BENEATH | LOOKUP_IN_ROOT)
+/* 3 spare bits for scoping */
 
 extern int path_pts(struct path *path);
 
-extern int user_path_at_empty(int, const char __user *, unsigned, struct path *, int *empty);
-
-static inline int user_path_at(int dfd, const char __user *name, unsigned flags,
-		 struct path *path)
-{
-	return user_path_at_empty(dfd, name, flags, path, NULL);
-}
-
-static inline int user_path(const char __user *name, struct path *path)
-{
-	return user_path_at_empty(AT_FDCWD, name, LOOKUP_FOLLOW, path, NULL);
-}
-
-static inline int user_lpath(const char __user *name, struct path *path)
-{
-	return user_path_at_empty(AT_FDCWD, name, 0, path, NULL);
-}
-
-static inline int user_path_dir(const char __user *name, struct path *path)
-{
-	return user_path_at_empty(AT_FDCWD, name,
-				  LOOKUP_FOLLOW | LOOKUP_DIRECTORY, path, NULL);
-}
+extern int user_path_at(int, const char __user *, unsigned, struct path *);
 
 extern int kern_path(const char *, unsigned, struct path *);
+struct dentry *kern_path_parent(const char *name, struct path *parent);
 
-extern struct dentry *kern_path_create(int, const char *, struct path *, unsigned int);
-extern struct dentry *user_path_create(int, const char __user *, struct path *, unsigned int);
-extern void done_path_create(struct path *, struct dentry *);
-extern struct dentry *kern_path_locked(const char *, struct path *);
-extern int kern_path_mountpoint(int, const char *, struct path *, unsigned int);
+extern struct dentry *start_creating_path(int, const char *, struct path *, unsigned int);
+extern struct dentry *start_creating_user_path(int, const char __user *, struct path *, unsigned int);
+extern void end_creating_path(const struct path *, struct dentry *);
+extern struct dentry *start_removing_path(const char *, struct path *);
+static inline void end_removing_path(const struct path *path , struct dentry *dentry)
+{
+	end_creating_path(path, dentry);
+}
+int vfs_path_parent_lookup(struct filename *filename, unsigned int flags,
+			   struct path *parent, struct qstr *last,
+			   const struct path *root);
+int vfs_path_lookup(struct dentry *, struct vfsmount *, const char *,
+		    unsigned int, struct path *);
 
-extern struct dentry *lookup_one_len(const char *, struct dentry *, int);
-extern struct dentry *lookup_one_len_unlocked(const char *, struct dentry *, int);
+extern struct dentry *try_lookup_noperm(struct qstr *, struct dentry *);
+extern struct dentry *lookup_noperm(struct qstr *, struct dentry *);
+extern struct dentry *lookup_noperm_unlocked(struct qstr *, struct dentry *);
+extern struct dentry *lookup_noperm_positive_unlocked(struct qstr *, struct dentry *);
+struct dentry *lookup_one(struct mnt_idmap *, struct qstr *, struct dentry *);
+struct dentry *lookup_one_unlocked(struct mnt_idmap *idmap,
+				   struct qstr *name, struct dentry *base);
+struct dentry *lookup_one_positive_unlocked(struct mnt_idmap *idmap,
+					    struct qstr *name,
+					    struct dentry *base);
+struct dentry *lookup_one_positive_killable(struct mnt_idmap *idmap,
+					    struct qstr *name,
+					    struct dentry *base);
+
+struct dentry *start_creating(struct mnt_idmap *idmap, struct dentry *parent,
+			      struct qstr *name);
+struct dentry *start_removing(struct mnt_idmap *idmap, struct dentry *parent,
+			      struct qstr *name);
+struct dentry *start_creating_killable(struct mnt_idmap *idmap,
+				       struct dentry *parent,
+				       struct qstr *name);
+struct dentry *start_removing_killable(struct mnt_idmap *idmap,
+				       struct dentry *parent,
+				       struct qstr *name);
+struct dentry *start_creating_noperm(struct dentry *parent, struct qstr *name);
+struct dentry *start_removing_noperm(struct dentry *parent, struct qstr *name);
+struct dentry *start_creating_dentry(struct dentry *parent,
+				     struct dentry *child);
+struct dentry *start_removing_dentry(struct dentry *parent,
+				     struct dentry *child);
+
+/* end_creating - finish action started with start_creating
+ * @child: dentry returned by start_creating() or vfs_mkdir()
+ *
+ * Unlock and release the child. This can be called after
+ * start_creating() whether that function succeeded or not,
+ * but it is not needed on failure.
+ *
+ * If vfs_mkdir() was called then the value returned from that function
+ * should be given for @child rather than the original dentry, as vfs_mkdir()
+ * may have provided a new dentry.
+ *
+ *
+ * If vfs_mkdir() was not called, then @child will be a valid dentry and
+ * @parent will be ignored.
+ */
+static inline void end_creating(struct dentry *child)
+{
+	end_dirop(child);
+}
+
+/* end_creating_keep - finish action started with start_creating() and return result
+ * @child: dentry returned by start_creating() or vfs_mkdir()
+ *
+ * Unlock and return the child. This can be called after
+ * start_creating() whether that function succeeded or not,
+ * but it is not needed on failure.
+ *
+ * If vfs_mkdir() was called then the value returned from that function
+ * should be given for @child rather than the original dentry, as vfs_mkdir()
+ * may have provided a new dentry.
+ *
+ * Returns: @child, which may be a dentry or an error.
+ *
+ */
+static inline struct dentry *end_creating_keep(struct dentry *child)
+{
+	if (!IS_ERR(child))
+		dget(child);
+	end_dirop(child);
+	return child;
+}
+
+/**
+ * end_removing - finish action started with start_removing
+ * @child:  dentry returned by start_removing()
+ * @parent: dentry given to start_removing()
+ *
+ * Unlock and release the child.
+ *
+ * This is identical to end_dirop().  It can be passed the result of
+ * start_removing() whether that was successful or not, but it not needed
+ * if start_removing() failed.
+ */
+static inline void end_removing(struct dentry *child)
+{
+	end_dirop(child);
+}
 
 extern int follow_down_one(struct path *);
-extern int follow_down(struct path *);
+extern int follow_down(struct path *path, unsigned int flags);
 extern int follow_up(struct path *);
 
-extern struct dentry *lock_rename(struct dentry *, struct dentry *);
-extern void unlock_rename(struct dentry *, struct dentry *);
+int start_renaming(struct renamedata *rd, int lookup_flags,
+		   struct qstr *old_last, struct qstr *new_last);
+int start_renaming_dentry(struct renamedata *rd, int lookup_flags,
+			  struct dentry *old_dentry, struct qstr *new_last);
+int start_renaming_two_dentries(struct renamedata *rd,
+				struct dentry *old_dentry, struct dentry *new_dentry);
+void end_renaming(struct renamedata *rd);
 
-extern void nd_jump_link(struct path *path);
+/**
+ * mode_strip_umask - handle vfs umask stripping
+ * @dir:	parent directory of the new inode
+ * @mode:	mode of the new inode to be created in @dir
+ *
+ * In most filesystems, umask stripping depends on whether or not the
+ * filesystem supports POSIX ACLs. If the filesystem doesn't support it umask
+ * stripping is done directly in here. If the filesystem does support POSIX
+ * ACLs umask stripping is deferred until the filesystem calls
+ * posix_acl_create().
+ *
+ * Some filesystems (like NFSv4) also want to avoid umask stripping by the
+ * VFS, but don't support POSIX ACLs. Those filesystems can set SB_I_NOUMASK
+ * to get this effect without declaring that they support POSIX ACLs.
+ *
+ * Returns: mode
+ */
+static inline umode_t __must_check mode_strip_umask(const struct inode *dir, umode_t mode)
+{
+	if (!IS_POSIXACL(dir) && !(dir->i_sb->s_iflags & SB_I_NOUMASK))
+		mode &= ~current_umask();
+	return mode;
+}
+
+extern int __must_check nd_jump_link(const struct path *path);
 
 static inline void nd_terminate_link(void *name, size_t len, size_t maxlen)
 {
@@ -111,7 +211,7 @@ static inline void nd_terminate_link(void *name, size_t len, size_t maxlen)
 static inline bool
 retry_estale(const long error, const unsigned int flags)
 {
-	return error == -ESTALE && !(flags & LOOKUP_REVAL);
+	return unlikely(error == -ESTALE && !(flags & LOOKUP_REVAL));
 }
 
 #endif /* _LINUX_NAMEI_H */

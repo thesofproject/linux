@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
  * Copyright (c) 2014- QLogic Corporation.
@@ -5,15 +6,6 @@
  * www.qlogic.com
  *
  * Linux driver for QLogic BR-series Fibre Channel Host Bus Adapter.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License (GPL) Version 2 as
- * published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 #ifndef __BFA_H__
 #define __BFA_H__
@@ -28,7 +20,6 @@
 struct bfa_s;
 
 typedef void (*bfa_isr_func_t) (struct bfa_s *bfa, struct bfi_msg_s *m);
-typedef void (*bfa_cb_cbfn_status_t) (void *cbarg, bfa_status_t status);
 
 /*
  * Interrupt message handlers
@@ -62,8 +53,7 @@ void bfa_isr_unhandled(struct bfa_s *bfa, struct bfi_msg_s *m);
 			((__bfa)->iocfc.cfg.drvcfg.num_reqq_elems - 1); \
 		writel((__bfa)->iocfc.req_cq_pi[__reqq],		\
 			(__bfa)->iocfc.bfa_regs.cpe_q_pi[__reqq]);	\
-		mmiowb();      \
-	} while (0)
+		} while (0)
 
 #define bfa_rspq_pi(__bfa, __rspq)					\
 	(*(u32 *)((__bfa)->iocfc.rsp_cq_shadow_pi[__rspq].kva))
@@ -148,14 +138,6 @@ bfa_reqq_winit(struct bfa_reqq_wait_s *wqe, void (*qresume) (void *cbarg),
 	} while (0)
 
 
-/*
- * PCI devices supported by the current BFA
- */
-struct bfa_pciid_s {
-	u16	device_id;
-	u16	vendor_id;
-};
-
 extern char     bfa_version[];
 
 struct bfa_iocfc_regs_s {
@@ -225,8 +207,27 @@ struct bfa_faa_args_s {
 	bfa_boolean_t		busy;
 };
 
+/*
+ * IOCFC state machine definitions/declarations
+ */
+enum iocfc_event {
+	IOCFC_E_INIT		= 1,	/* IOCFC init request		*/
+	IOCFC_E_START		= 2,	/* IOCFC mod start request	*/
+	IOCFC_E_STOP		= 3,	/* IOCFC stop request		*/
+	IOCFC_E_ENABLE		= 4,	/* IOCFC enable request		*/
+	IOCFC_E_DISABLE		= 5,	/* IOCFC disable request	*/
+	IOCFC_E_IOC_ENABLED	= 6,	/* IOC enabled message		*/
+	IOCFC_E_IOC_DISABLED	= 7,	/* IOC disabled message		*/
+	IOCFC_E_IOC_FAILED	= 8,	/* failure notice by IOC sm	*/
+	IOCFC_E_DCONF_DONE	= 9,	/* dconf read/write done	*/
+	IOCFC_E_CFG_DONE	= 10,	/* IOCFC config complete	*/
+};
+
+struct bfa_iocfc_s;
+typedef void (*bfa_iocfs_fsm_t)(struct bfa_iocfc_s *, enum iocfc_event);
+
 struct bfa_iocfc_s {
-	bfa_fsm_t		fsm;
+	bfa_iocfs_fsm_t		fsm;
 	struct bfa_s		*bfa;
 	struct bfa_iocfc_cfg_s	cfg;
 	u32		req_cq_pi[BFI_IOC_MAX_CQS];
@@ -399,9 +400,7 @@ int bfa_iocfc_get_pbc_vports(struct bfa_s *bfa,
 	(((&(_bfa)->modules.dconf_mod)->min_cfg)		\
 	 ? BFA_LUNMASK_MINCFG : ((bfa_get_lun_mask(_bfa))->status))
 
-void bfa_get_pciids(struct bfa_pciid_s **pciids, int *npciids);
 void bfa_cfg_get_default(struct bfa_iocfc_cfg_s *cfg);
-void bfa_cfg_get_min(struct bfa_iocfc_cfg_s *cfg);
 void bfa_cfg_get_meminfo(struct bfa_iocfc_cfg_s *cfg,
 			struct bfa_meminfo_s *meminfo,
 			struct bfa_s *bfa);
@@ -441,6 +440,14 @@ struct bfa_cb_pending_q_s {
 #define bfa_pending_q_init(__qe, __cbfn, __cbarg, __data) do {	\
 	bfa_q_qe_init(&((__qe)->hcb_qe.qe));			\
 	(__qe)->hcb_qe.cbfn = (__cbfn);				\
+	(__qe)->hcb_qe.cbarg = (__cbarg);			\
+	(__qe)->hcb_qe.pre_rmv = BFA_TRUE;			\
+	(__qe)->data = (__data);				\
+} while (0)
+
+#define bfa_pending_q_init_status(__qe, __cbfn, __cbarg, __data) do {	\
+	bfa_q_qe_init(&((__qe)->hcb_qe.qe));			\
+	(__qe)->hcb_qe.cbfn_status = (__cbfn);			\
 	(__qe)->hcb_qe.cbarg = (__cbarg);			\
 	(__qe)->hcb_qe.pre_rmv = BFA_TRUE;			\
 	(__qe)->data = (__data);				\

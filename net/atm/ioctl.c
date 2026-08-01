@@ -11,20 +11,12 @@
 #include <linux/net.h>		/* struct socket, struct proto_ops */
 #include <linux/atm.h>		/* ATM stuff */
 #include <linux/atmdev.h>
-#include <linux/atmclip.h>	/* CLIP_*ENCAP */
-#include <linux/atmarp.h>	/* manifest constants */
 #include <linux/capability.h>
-#include <linux/sonet.h>	/* for ioctls */
-#include <linux/atmsvc.h>
-#include <linux/atmmpc.h>
-#include <net/atmclip.h>
-#include <linux/atmlec.h>
 #include <linux/mutex.h>
 #include <asm/ioctls.h>
 #include <net/compat.h>
 
 #include "resources.h"
-#include "signaling.h"		/* for WAITING and sigd_attach */
 #include "common.h"
 
 
@@ -56,6 +48,8 @@ static int do_vcc_ioctl(struct socket *sock, unsigned int cmd,
 	int error;
 	struct list_head *pos;
 	void __user *argp = (void __user *)arg;
+	void __user *buf;
+	int __user *len;
 
 	vcc = ATM_SD(sock);
 	switch (cmd) {
@@ -66,71 +60,28 @@ static int do_vcc_ioctl(struct socket *sock, unsigned int cmd,
 			goto done;
 		}
 		error = put_user(sk->sk_sndbuf - sk_wmem_alloc_get(sk),
-				 (int __user *)argp) ? -EFAULT : 0;
+				 (int __user *)argp);
 		goto done;
 	case SIOCINQ:
 	{
 		struct sk_buff *skb;
+		int amount;
 
 		if (sock->state != SS_CONNECTED) {
 			error = -EINVAL;
 			goto done;
 		}
+		spin_lock_irq(&sk->sk_receive_queue.lock);
 		skb = skb_peek(&sk->sk_receive_queue);
-		error = put_user(skb ? skb->len : 0,
-				 (int __user *)argp) ? -EFAULT : 0;
+		amount = skb ? skb->len : 0;
+		spin_unlock_irq(&sk->sk_receive_queue.lock);
+		error = put_user(amount, (int __user *)argp);
 		goto done;
 	}
-	case SIOCGSTAMP: /* borrowed from IP */
-#ifdef CONFIG_COMPAT
-		if (compat)
-			error = compat_sock_get_timestamp(sk, argp);
-		else
-#endif
-			error = sock_get_timestamp(sk, argp);
-		goto done;
-	case SIOCGSTAMPNS: /* borrowed from IP */
-#ifdef CONFIG_COMPAT
-		if (compat)
-			error = compat_sock_get_timestampns(sk, argp);
-		else
-#endif
-			error = sock_get_timestampns(sk, argp);
-		goto done;
 	case ATM_SETSC:
 		net_warn_ratelimited("ATM_SETSC is obsolete; used by %s:%d\n",
 				     current->comm, task_pid_nr(current));
 		error = 0;
-		goto done;
-	case ATMSIGD_CTRL:
-		if (!capable(CAP_NET_ADMIN)) {
-			error = -EPERM;
-			goto done;
-		}
-		/*
-		 * The user/kernel protocol for exchanging signalling
-		 * info uses kernel pointers as opaque references,
-		 * so the holder of the file descriptor can scribble
-		 * on the kernel... so we should make sure that we
-		 * have the same privileges that /proc/kcore needs
-		 */
-		if (!capable(CAP_SYS_RAWIO)) {
-			error = -EPERM;
-			goto done;
-		}
-#ifdef CONFIG_COMPAT
-		/* WTF? I don't even want to _think_ about making this
-		   work for 32-bit userspace. TBH I don't really want
-		   to think about it at all. dwmw2. */
-		if (compat) {
-			net_warn_ratelimited("32-bit task cannot be atmsigd\n");
-			error = -EINVAL;
-			goto done;
-		}
-#endif
-		error = sigd_attach(vcc);
-		if (!error)
-			sock->state = SS_CONNECTED;
 		goto done;
 	case ATM_SETBACKEND:
 	case ATM_NEWBACKENDIF:
@@ -149,16 +100,6 @@ static int do_vcc_ioctl(struct socket *sock, unsigned int cmd,
 		}
 		break;
 	}
-	case ATMMPC_CTRL:
-	case ATMMPC_DATA:
-		request_module("mpoa");
-		break;
-	case ATMARPD_CTRL:
-		request_module("clip");
-		break;
-	case ATMLEC_CTRL:
-		request_module("lec");
-		break;
 	}
 
 	error = -ENOIOCTLCMD;
@@ -178,7 +119,49 @@ static int do_vcc_ioctl(struct socket *sock, unsigned int cmd,
 	if (error != -ENOIOCTLCMD)
 		goto done;
 
-	error = atm_dev_ioctl(cmd, argp, compat);
+	if (cmd == ATM_GETNAMES) {
+		if (IS_ENABLED(CONFIG_COMPAT) && compat) {
+#ifdef CONFIG_COMPAT
+			struct compat_atm_iobuf __user *ciobuf = argp;
+			compat_uptr_t cbuf;
+			len = &ciobuf->length;
+			if (get_user(cbuf, &ciobuf->buffer))
+				return -EFAULT;
+			buf = compat_ptr(cbuf);
+#endif
+		} else {
+			struct atm_iobuf __user *iobuf = argp;
+			len = &iobuf->length;
+			if (get_user(buf, &iobuf->buffer))
+				return -EFAULT;
+		}
+		error = atm_getnames(buf, len);
+	} else {
+		int number;
+
+		if (IS_ENABLED(CONFIG_COMPAT) && compat) {
+#ifdef CONFIG_COMPAT
+			struct compat_atmif_sioc __user *csioc = argp;
+			compat_uptr_t carg;
+
+			len = &csioc->length;
+			if (get_user(carg, &csioc->arg))
+				return -EFAULT;
+			buf = compat_ptr(carg);
+			if (get_user(number, &csioc->number))
+				return -EFAULT;
+#endif
+		} else {
+			struct atmif_sioc __user *sioc = argp;
+
+			len = &sioc->length;
+			if (get_user(buf, &sioc->arg))
+				return -EFAULT;
+			if (get_user(number, &sioc->number))
+				return -EFAULT;
+		}
+		error = atm_dev_ioctl(cmd, buf, len, number, compat);
+	}
 
 done:
 	return error;
@@ -204,10 +187,6 @@ int vcc_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 #define ATM_GETNAMES32    _IOW('a', ATMIOC_ITF+3, struct compat_atm_iobuf)
 #define ATM_GETTYPE32     _IOW('a', ATMIOC_ITF+4, struct compat_atmif_sioc)
 #define ATM_GETESI32	  _IOW('a', ATMIOC_ITF+5, struct compat_atmif_sioc)
-#define ATM_GETADDR32	  _IOW('a', ATMIOC_ITF+6, struct compat_atmif_sioc)
-#define ATM_RSTADDR32	  _IOW('a', ATMIOC_ITF+7, struct compat_atmif_sioc)
-#define ATM_ADDADDR32	  _IOW('a', ATMIOC_ITF+8, struct compat_atmif_sioc)
-#define ATM_DELADDR32	  _IOW('a', ATMIOC_ITF+9, struct compat_atmif_sioc)
 #define ATM_GETCIRANGE32  _IOW('a', ATMIOC_ITF+10, struct compat_atmif_sioc)
 #define ATM_SETCIRANGE32  _IOW('a', ATMIOC_ITF+11, struct compat_atmif_sioc)
 #define ATM_SETESI32      _IOW('a', ATMIOC_ITF+12, struct compat_atmif_sioc)
@@ -226,10 +205,6 @@ static struct {
 	{ ATM_GETNAMES32,    ATM_GETNAMES },
 	{ ATM_GETTYPE32,     ATM_GETTYPE },
 	{ ATM_GETESI32,	     ATM_GETESI },
-	{ ATM_GETADDR32,     ATM_GETADDR },
-	{ ATM_RSTADDR32,     ATM_RSTADDR },
-	{ ATM_ADDADDR32,     ATM_ADDADDR },
-	{ ATM_DELADDR32,     ATM_DELADDR },
 	{ ATM_GETCIRANGE32,  ATM_GETCIRANGE },
 	{ ATM_SETCIRANGE32,  ATM_SETCIRANGE },
 	{ ATM_SETESI32,	     ATM_SETESI },
@@ -246,61 +221,25 @@ static struct {
 static int do_atm_iobuf(struct socket *sock, unsigned int cmd,
 			unsigned long arg)
 {
-	struct atm_iobuf __user *iobuf;
-	struct compat_atm_iobuf __user *iobuf32;
+	struct compat_atm_iobuf __user *iobuf32 = compat_ptr(arg);
 	u32 data;
-	void __user *datap;
-	int len, err;
 
-	iobuf = compat_alloc_user_space(sizeof(*iobuf));
-	iobuf32 = compat_ptr(arg);
-
-	if (get_user(len, &iobuf32->length) ||
-	    get_user(data, &iobuf32->buffer))
-		return -EFAULT;
-	datap = compat_ptr(data);
-	if (put_user(len, &iobuf->length) ||
-	    put_user(datap, &iobuf->buffer))
+	if (get_user(data, &iobuf32->buffer))
 		return -EFAULT;
 
-	err = do_vcc_ioctl(sock, cmd, (unsigned long) iobuf, 0);
-
-	if (!err) {
-		if (copy_in_user(&iobuf32->length, &iobuf->length,
-				 sizeof(int)))
-			err = -EFAULT;
-	}
-
-	return err;
+	return atm_getnames(&iobuf32->length, compat_ptr(data));
 }
 
 static int do_atmif_sioc(struct socket *sock, unsigned int cmd,
 			 unsigned long arg)
 {
-	struct atmif_sioc __user *sioc;
-	struct compat_atmif_sioc __user *sioc32;
+	struct compat_atmif_sioc __user *sioc32 = compat_ptr(arg);
+	int number;
 	u32 data;
-	void __user *datap;
-	int err;
 
-	sioc = compat_alloc_user_space(sizeof(*sioc));
-	sioc32 = compat_ptr(arg);
-
-	if (copy_in_user(&sioc->number, &sioc32->number, 2 * sizeof(int)) ||
-	    get_user(data, &sioc32->arg))
+	if (get_user(data, &sioc32->arg) || get_user(number, &sioc32->number))
 		return -EFAULT;
-	datap = compat_ptr(data);
-	if (put_user(datap, &sioc->arg))
-		return -EFAULT;
-
-	err = do_vcc_ioctl(sock, cmd, (unsigned long) sioc, 0);
-
-	if (!err) {
-		if (copy_in_user(&sioc32->length, &sioc->length,
-				 sizeof(int)))
-			err = -EFAULT;
-	}
-	return err;
+	return atm_dev_ioctl(cmd, compat_ptr(data), &sioc32->length, number, 0);
 }
 
 static int do_atm_ioctl(struct socket *sock, unsigned int cmd32,
@@ -308,18 +247,6 @@ static int do_atm_ioctl(struct socket *sock, unsigned int cmd32,
 {
 	int i;
 	unsigned int cmd = 0;
-
-	switch (cmd32) {
-	case SONET_GETSTAT:
-	case SONET_GETSTATZ:
-	case SONET_GETDIAG:
-	case SONET_SETDIAG:
-	case SONET_CLRDIAG:
-	case SONET_SETFRAMING:
-	case SONET_GETFRAMING:
-	case SONET_GETFRSENSE:
-		return do_atmif_sioc(sock, cmd32, arg);
-	}
 
 	for (i = 0; i < NR_ATM_IOCTL; i++) {
 		if (cmd32 == atm_ioctl_map[i].cmd32) {
@@ -337,10 +264,6 @@ static int do_atm_ioctl(struct socket *sock, unsigned int cmd32,
 	case ATM_GETLINKRATE:
 	case ATM_GETTYPE:
 	case ATM_GETESI:
-	case ATM_GETADDR:
-	case ATM_RSTADDR:
-	case ATM_ADDADDR:
-	case ATM_DELADDR:
 	case ATM_GETCIRANGE:
 	case ATM_SETCIRANGE:
 	case ATM_SETESI:

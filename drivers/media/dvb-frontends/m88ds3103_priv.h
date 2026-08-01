@@ -1,17 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Montage Technology M88DS3103/M88RS6000 demodulator driver
  *
  * Copyright (C) 2013 Antti Palosaari <crope@iki.fi>
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2 of the License, or
- *    (at your option) any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
  */
 
 #ifndef M88DS3103_PRIV_H
@@ -19,19 +10,29 @@
 
 #include <media/dvb_frontend.h>
 #include "m88ds3103.h"
-#include <media/dvb_math.h>
+#include <linux/int_log.h>
 #include <linux/firmware.h>
 #include <linux/i2c-mux.h>
 #include <linux/regmap.h>
 #include <linux/math64.h>
 
-#define M88DS3103_FIRMWARE "dvb-demod-m88ds3103.fw"
-#define M88RS6000_FIRMWARE "dvb-demod-m88rs6000.fw"
-#define M88RS6000_CHIP_ID 0x74
-#define M88DS3103_CHIP_ID 0x70
+#define M88DS3103B_FIRMWARE "dvb-demod-m88ds3103b.fw"
+#define M88DS3103C_FIRMWARE "dvb-demod-m88ds3103c.fw"
+#define M88DS3103_FIRMWARE  "dvb-demod-m88ds3103.fw"
+#define M88RS6000_FIRMWARE  "dvb-demod-m88rs6000.fw"
+
+#define M88DS3103_CHIP_ID  0x70
+#define M88RS6000_CHIP_ID  0x74
+#define M88DS3103C_CHIP_ID 0x71
+
+#define M88DS3103_CHIPTYPE_3103   0
+#define M88DS3103_CHIPTYPE_RS6000 1
+#define M88DS3103_CHIPTYPE_3103B  2
+#define M88DS3103_CHIPTYPE_3103C  3
 
 struct m88ds3103_dev {
 	struct i2c_client *client;
+	struct i2c_client *dt_client;
 	struct regmap_config regmap_config;
 	struct regmap *regmap;
 	struct m88ds3103_config config;
@@ -44,10 +45,13 @@ struct m88ds3103_dev {
 	struct i2c_mux_core *muxc;
 	/* auto detect chip id to do different config */
 	u8 chip_id;
+	/* chip type to differentiate m88rs6000 from m88ds3103b */
+	u8 chiptype;
 	/* main mclk is calculated for M88RS6000 dynamically */
 	s32 mclk;
 	u64 post_bit_error;
 	u64 post_bit_count;
+	u8 dt_addr;
 };
 
 struct m88ds3103_reg_val {
@@ -398,4 +402,43 @@ static const struct m88ds3103_reg_val m88rs6000_dvbs2_init_reg_vals[] = {
 	{0xb8, 0x00},
 	{0x29, 0x01},
 };
+
+static const struct m88ds3103_reg_val m88ds3103c_dvbs_init_reg_vals[] = {
+	{0x04, 0x10},
+	{0x8a, 0x01},
+	{0x16, 0xa7},
+	{0x30, 0x08},
+	{0x32, 0x32},
+	{0x33, 0x35},
+	{0x35, 0xff},
+	{0x4a, 0x80},
+	{0x4d, 0x93},
+	{0xae, 0x09},
+	{0x22, 0x01},
+	{0x23, 0x00},
+	{0x24, 0x00},
+	{0x27, 0x07},
+	{0x9c, 0x31},
+	{0x9d, 0xc1},
+	{0xcb, 0xf4},
+	{0xca, 0x00},
+	{0x7f, 0x04},
+	{0x78, 0x0c},
+	{0x85, 0x08},
+	{0x08, 0x47},
+	{0xf0, 0x03},
+	{0xfa, 0x01},
+	{0xf2, 0x00},
+	{0xfa, 0x00},
+	{0xe6, 0x00},
+	{0xe7, 0xf3},
+	{0x08, 0x43},
+	{0xe0, 0xf8},
+	{0x00, 0x00},
+	{0xbd, 0x82},
+	{0x80, 0xa8},
+	{0x81, 0xea},
+	{0xbe, 0xa1}
+};
+
 #endif

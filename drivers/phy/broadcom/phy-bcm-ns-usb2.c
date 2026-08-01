@@ -1,37 +1,35 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Broadcom Northstar USB 2.0 PHY Driver
  *
  * Copyright (C) 2016 Rafał Miłecki <zajec5@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/bcma/bcma.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/err.h>
+#include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/phy/phy.h>
 #include <linux/platform_device.h>
+#include <linux/regmap.h>
 #include <linux/slab.h>
 
 struct bcm_ns_usb2 {
 	struct device *dev;
 	struct clk *ref_clk;
 	struct phy *phy;
-	void __iomem *dmu;
+	struct regmap *clkset;
+	void __iomem *base;
 };
 
 static int bcm_ns_usb2_phy_init(struct phy *phy)
 {
 	struct bcm_ns_usb2 *usb2 = phy_get_drvdata(phy);
 	struct device *dev = usb2->dev;
-	void __iomem *dmu = usb2->dmu;
 	u32 ref_clk_rate, usb2ctl, usb_pll_ndiv, usb_pll_pdiv;
 	int err = 0;
 
@@ -48,7 +46,7 @@ static int bcm_ns_usb2_phy_init(struct phy *phy)
 		goto err_clk_off;
 	}
 
-	usb2ctl = readl(dmu + BCMA_DMU_CRU_USB2_CONTROL);
+	usb2ctl = readl(usb2->base);
 
 	if (usb2ctl & BCMA_DMU_CRU_USB2_CONTROL_USB_PLL_PDIV_MASK) {
 		usb_pll_pdiv = usb2ctl;
@@ -62,15 +60,16 @@ static int bcm_ns_usb2_phy_init(struct phy *phy)
 	usb_pll_ndiv = (1920000000 * usb_pll_pdiv) / ref_clk_rate;
 
 	/* Unlock DMU PLL settings with some magic value */
-	writel(0x0000ea68, dmu + BCMA_DMU_CRU_CLKSET_KEY);
+	regmap_write(usb2->clkset, 0, 0x0000ea68);
 
 	/* Write USB 2.0 PLL control setting */
 	usb2ctl &= ~BCMA_DMU_CRU_USB2_CONTROL_USB_PLL_NDIV_MASK;
 	usb2ctl |= usb_pll_ndiv << BCMA_DMU_CRU_USB2_CONTROL_USB_PLL_NDIV_SHIFT;
-	writel(usb2ctl, dmu + BCMA_DMU_CRU_USB2_CONTROL);
+
+	writel(usb2ctl, usb2->base);
 
 	/* Lock DMU PLL settings */
-	writel(0x00000000, dmu + BCMA_DMU_CRU_CLKSET_KEY);
+	regmap_write(usb2->clkset, 0, 0x00000000);
 
 err_clk_off:
 	clk_disable_unprepare(usb2->ref_clk);
@@ -87,7 +86,6 @@ static int bcm_ns_usb2_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct bcm_ns_usb2 *usb2;
-	struct resource *res;
 	struct phy_provider *phy_provider;
 
 	usb2 = devm_kzalloc(&pdev->dev, sizeof(*usb2), GFP_KERNEL);
@@ -95,16 +93,22 @@ static int bcm_ns_usb2_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	usb2->dev = dev;
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dmu");
-	usb2->dmu = devm_ioremap_resource(dev, res);
-	if (IS_ERR(usb2->dmu)) {
-		dev_err(dev, "Failed to map DMU regs\n");
-		return PTR_ERR(usb2->dmu);
+	usb2->base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(usb2->base)) {
+		dev_err(dev, "Failed to map control reg\n");
+		return PTR_ERR(usb2->base);
+	}
+
+	usb2->clkset = syscon_regmap_lookup_by_phandle(dev->of_node,
+						       "brcm,syscon-clkset");
+	if (IS_ERR(usb2->clkset)) {
+		dev_err(dev, "Failed to lookup clkset regmap\n");
+		return PTR_ERR(usb2->clkset);
 	}
 
 	usb2->ref_clk = devm_clk_get(dev, "phy-ref-clk");
 	if (IS_ERR(usb2->ref_clk)) {
-		dev_err(dev, "Clock not defined\n");
+		dev_err_probe(dev, PTR_ERR(usb2->ref_clk), "failed to get ref clk\n");
 		return PTR_ERR(usb2->ref_clk);
 	}
 
@@ -134,4 +138,5 @@ static struct platform_driver bcm_ns_usb2_driver = {
 };
 module_platform_driver(bcm_ns_usb2_driver);
 
+MODULE_DESCRIPTION("Broadcom Northstar USB 2.0 PHY Driver");
 MODULE_LICENSE("GPL v2");

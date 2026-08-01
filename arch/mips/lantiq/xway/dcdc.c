@@ -1,14 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License version 2 as published
- *  by the Free Software Foundation.
  *
  *  Copyright (C) 2012 John Crispin <john@phrozen.org>
  *  Copyright (C) 2010 Sameer Ahmad, Lantiq GmbH
  */
 
 #include <linux/ioport.h>
-#include <linux/of_platform.h>
+#include <linux/platform_device.h>
 
 #include <lantiq_soc.h>
 
@@ -24,10 +22,7 @@ static void __iomem *dcdc_membase;
 
 static int dcdc_probe(struct platform_device *pdev)
 {
-	struct resource *res;
-
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	dcdc_membase = devm_ioremap_resource(&pdev->dev, res);
+	dcdc_membase = devm_platform_get_and_ioremap_resource(pdev, 0, NULL);
 	if (IS_ERR(dcdc_membase))
 		return PTR_ERR(dcdc_membase);
 
@@ -50,7 +45,7 @@ static struct platform_driver dcdc_driver = {
 	},
 };
 
-int __init dcdc_init(void)
+static int __init dcdc_init(void)
 {
 	int ret = platform_driver_register(&dcdc_driver);
 

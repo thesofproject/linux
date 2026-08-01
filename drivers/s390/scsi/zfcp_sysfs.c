@@ -4,13 +4,13 @@
  *
  * sysfs attributes.
  *
- * Copyright IBM Corp. 2008, 2010
+ * Copyright IBM Corp. 2008, 2020
  */
 
-#define KMSG_COMPONENT "zfcp"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "zfcp: " fmt
 
 #include <linux/slab.h>
+#include "zfcp_diag.h"
 #include "zfcp_ext.h"
 
 #define ZFCP_DEV_ATTR(_feat, _name, _mode, _show, _store) \
@@ -23,7 +23,7 @@ static ssize_t zfcp_sysfs_##_feat##_##_name##_show(struct device *dev,	       \
 {									       \
 	struct _feat_def *_feat = container_of(dev, struct _feat_def, dev);    \
 									       \
-	return sprintf(buf, _format, _value);				       \
+	return sysfs_emit(buf, _format, _value);			       \
 }									       \
 static ZFCP_DEV_ATTR(_feat, _name, S_IRUGO,				       \
 		     zfcp_sysfs_##_feat##_##_name##_show, NULL);
@@ -33,7 +33,7 @@ static ssize_t zfcp_sysfs_##_feat##_##_name##_show(struct device *dev,	       \
 						   struct device_attribute *at,\
 						   char *buf)		       \
 {									       \
-	return sprintf(buf, _format, _value);				       \
+	return sysfs_emit(buf, _format, _value);			       \
 }									       \
 static ZFCP_DEV_ATTR(_feat, _name, S_IRUGO,				       \
 		     zfcp_sysfs_##_feat##_##_name##_show, NULL);
@@ -50,7 +50,7 @@ static ssize_t zfcp_sysfs_adapter_##_name##_show(struct device *dev,	     \
 	if (!adapter)							     \
 		return -ENODEV;						     \
 									     \
-	i = sprintf(buf, _format, _value);				     \
+	i = sysfs_emit(buf, _format, _value);				     \
 	zfcp_ccw_adapter_put(adapter);					     \
 	return i;							     \
 }									     \
@@ -94,9 +94,9 @@ static ssize_t zfcp_sysfs_port_failed_show(struct device *dev,
 	struct zfcp_port *port = container_of(dev, struct zfcp_port, dev);
 
 	if (atomic_read(&port->status) & ZFCP_STATUS_COMMON_ERP_FAILED)
-		return sprintf(buf, "1\n");
+		return sysfs_emit(buf, "1\n");
 
-	return sprintf(buf, "0\n");
+	return sysfs_emit(buf, "0\n");
 }
 
 static ssize_t zfcp_sysfs_port_failed_store(struct device *dev,
@@ -134,7 +134,7 @@ static ssize_t zfcp_sysfs_unit_failed_show(struct device *dev,
 		scsi_device_put(sdev);
 	}
 
-	return sprintf(buf, "%d\n", failed);
+	return sysfs_emit(buf, "%d\n", failed);
 }
 
 static ssize_t zfcp_sysfs_unit_failed_store(struct device *dev,
@@ -175,9 +175,9 @@ static ssize_t zfcp_sysfs_adapter_failed_show(struct device *dev,
 		return -ENODEV;
 
 	if (atomic_read(&adapter->status) & ZFCP_STATUS_COMMON_ERP_FAILED)
-		i = sprintf(buf, "1\n");
+		i = sysfs_emit(buf, "1\n");
 	else
-		i = sprintf(buf, "0\n");
+		i = sysfs_emit(buf, "0\n");
 
 	zfcp_ccw_adapter_put(adapter);
 	return i;
@@ -200,10 +200,7 @@ static ssize_t zfcp_sysfs_adapter_failed_store(struct device *dev,
 		goto out;
 	}
 
-	zfcp_erp_set_adapter_status(adapter, ZFCP_STATUS_COMMON_RUNNING);
-	zfcp_erp_adapter_reopen(adapter, ZFCP_STATUS_COMMON_ERP_FAILED,
-				"syafai2");
-	zfcp_erp_wait(adapter);
+	zfcp_erp_adapter_reset_sync(adapter, "syafai2");
 out:
 	zfcp_ccw_adapter_put(adapter);
 	return retval ? retval : (ssize_t) count;
@@ -218,9 +215,21 @@ static ssize_t zfcp_sysfs_port_rescan_store(struct device *dev,
 {
 	struct ccw_device *cdev = to_ccwdev(dev);
 	struct zfcp_adapter *adapter = zfcp_ccw_adapter_by_cdev(cdev);
+	int retval = 0;
 
 	if (!adapter)
 		return -ENODEV;
+
+	/*
+	 * If `scsi_host` is missing, we can't schedule `scan_work`, as it
+	 * makes use of the corresponding fc_host object. But this state is
+	 * only possible if xconfig/xport data has never completed yet,
+	 * and we couldn't successfully scan for ports anyway.
+	 */
+	if (adapter->scsi_host == NULL) {
+		retval = -ENODEV;
+		goto out;
+	}
 
 	/*
 	 * Users wish is our command: immediately schedule and flush a
@@ -229,14 +238,61 @@ static ssize_t zfcp_sysfs_port_rescan_store(struct device *dev,
 	 */
 	queue_delayed_work(adapter->work_queue, &adapter->scan_work, 0);
 	flush_delayed_work(&adapter->scan_work);
+out:
 	zfcp_ccw_adapter_put(adapter);
-
-	return (ssize_t) count;
+	return retval ? retval : (ssize_t) count;
 }
 static ZFCP_DEV_ATTR(adapter, port_rescan, S_IWUSR, NULL,
 		     zfcp_sysfs_port_rescan_store);
 
 DEFINE_MUTEX(zfcp_sysfs_port_units_mutex);
+
+static void zfcp_sysfs_port_set_removing(struct zfcp_port *const port)
+{
+	lockdep_assert_held(&zfcp_sysfs_port_units_mutex);
+	atomic_set(&port->units, -1);
+}
+
+bool zfcp_sysfs_port_is_removing(const struct zfcp_port *const port)
+{
+	lockdep_assert_held(&zfcp_sysfs_port_units_mutex);
+	return atomic_read(&port->units) == -1;
+}
+
+static bool zfcp_sysfs_port_in_use(struct zfcp_port *const port)
+{
+	struct zfcp_adapter *const adapter = port->adapter;
+	unsigned long flags;
+	struct scsi_device *sdev;
+	bool in_use = true;
+
+	mutex_lock(&zfcp_sysfs_port_units_mutex);
+	if (atomic_read(&port->units) > 0)
+		goto unlock_port_units_mutex; /* zfcp_unit(s) under port */
+
+	spin_lock_irqsave(adapter->scsi_host->host_lock, flags);
+	__shost_for_each_device(sdev, adapter->scsi_host) {
+		const struct zfcp_scsi_dev *zsdev = sdev_to_zfcp(sdev);
+
+		if (sdev->sdev_state == SDEV_DEL ||
+		    sdev->sdev_state == SDEV_CANCEL)
+			continue;
+		if (zsdev->port != port)
+			continue;
+		/* alive scsi_device under port of interest */
+		goto unlock_host_lock;
+	}
+
+	/* port is about to be removed, so no more unit_add or sdev_init */
+	zfcp_sysfs_port_set_removing(port);
+	in_use = false;
+
+unlock_host_lock:
+	spin_unlock_irqrestore(adapter->scsi_host->host_lock, flags);
+unlock_port_units_mutex:
+	mutex_unlock(&zfcp_sysfs_port_units_mutex);
+	return in_use;
+}
 
 static ssize_t zfcp_sysfs_port_remove_store(struct device *dev,
 					    struct device_attribute *attr,
@@ -260,30 +316,105 @@ static ssize_t zfcp_sysfs_port_remove_store(struct device *dev,
 	else
 		retval = 0;
 
-	mutex_lock(&zfcp_sysfs_port_units_mutex);
-	if (atomic_read(&port->units) > 0) {
+	if (zfcp_sysfs_port_in_use(port)) {
 		retval = -EBUSY;
-		mutex_unlock(&zfcp_sysfs_port_units_mutex);
+		put_device(&port->dev); /* undo zfcp_get_port_by_wwpn() */
 		goto out;
 	}
-	/* port is about to be removed, so no more unit_add */
-	atomic_set(&port->units, -1);
-	mutex_unlock(&zfcp_sysfs_port_units_mutex);
 
 	write_lock_irq(&adapter->port_list_lock);
 	list_del(&port->list);
 	write_unlock_irq(&adapter->port_list_lock);
 
-	put_device(&port->dev);
-
 	zfcp_erp_port_shutdown(port, 0, "syprs_1");
 	device_unregister(&port->dev);
+
+	put_device(&port->dev); /* undo zfcp_get_port_by_wwpn() */
  out:
 	zfcp_ccw_adapter_put(adapter);
 	return retval ? retval : (ssize_t) count;
 }
 static ZFCP_DEV_ATTR(adapter, port_remove, S_IWUSR, NULL,
 		     zfcp_sysfs_port_remove_store);
+
+static ssize_t
+zfcp_sysfs_adapter_diag_max_age_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
+{
+	struct zfcp_adapter *adapter = zfcp_ccw_adapter_by_cdev(to_ccwdev(dev));
+	ssize_t rc;
+
+	if (!adapter)
+		return -ENODEV;
+
+	rc = sysfs_emit(buf, "%lu\n", adapter->diagnostics->max_age);
+
+	zfcp_ccw_adapter_put(adapter);
+	return rc;
+}
+
+static ssize_t
+zfcp_sysfs_adapter_diag_max_age_store(struct device *dev,
+				      struct device_attribute *attr,
+				      const char *buf, size_t count)
+{
+	struct zfcp_adapter *adapter = zfcp_ccw_adapter_by_cdev(to_ccwdev(dev));
+	unsigned long max_age;
+	ssize_t rc;
+
+	if (!adapter)
+		return -ENODEV;
+
+	rc = kstrtoul(buf, 10, &max_age);
+	if (rc != 0)
+		goto out;
+
+	adapter->diagnostics->max_age = max_age;
+
+	rc = count;
+out:
+	zfcp_ccw_adapter_put(adapter);
+	return rc;
+}
+static ZFCP_DEV_ATTR(adapter, diag_max_age, 0644,
+		     zfcp_sysfs_adapter_diag_max_age_show,
+		     zfcp_sysfs_adapter_diag_max_age_store);
+
+static ssize_t zfcp_sysfs_adapter_fc_security_show(
+	struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct ccw_device *cdev = to_ccwdev(dev);
+	struct zfcp_adapter *adapter = zfcp_ccw_adapter_by_cdev(cdev);
+	unsigned int status;
+	int i;
+
+	if (!adapter)
+		return -ENODEV;
+
+	/*
+	 * Adapter status COMMON_OPEN implies xconf data and xport data
+	 * was done. Adapter FC Endpoint Security capability remains
+	 * unchanged in case of COMMON_ERP_FAILED (e.g. due to local link
+	 * down).
+	 */
+	status = atomic_read(&adapter->status);
+	if (0 == (status & ZFCP_STATUS_COMMON_OPEN))
+		i = sysfs_emit(buf, "unknown\n");
+	else if (!(adapter->adapter_features & FSF_FEATURE_FC_SECURITY))
+		i = sysfs_emit(buf, "unsupported\n");
+	else {
+		i = zfcp_fsf_scnprint_fc_security(
+			buf, PAGE_SIZE - 1, adapter->fc_security_algorithms,
+			ZFCP_FSF_PRINT_FMT_LIST);
+		i += sysfs_emit_at(buf, i, "\n");
+	}
+
+	zfcp_ccw_adapter_put(adapter);
+	return i;
+}
+static ZFCP_DEV_ATTR(adapter, fc_security, S_IRUGO,
+		     zfcp_sysfs_adapter_fc_security_show,
+		     NULL);
 
 static struct attribute *zfcp_adapter_attrs[] = {
 	&dev_attr_adapter_failed.attr,
@@ -297,10 +428,12 @@ static struct attribute *zfcp_adapter_attrs[] = {
 	&dev_attr_adapter_lic_version.attr,
 	&dev_attr_adapter_status.attr,
 	&dev_attr_adapter_hardware_version.attr,
+	&dev_attr_adapter_diag_max_age.attr,
+	&dev_attr_adapter_fc_security.attr,
 	NULL
 };
 
-struct attribute_group zfcp_sysfs_adapter_attrs = {
+static const struct attribute_group zfcp_sysfs_adapter_attr_group = {
 	.attrs = zfcp_adapter_attrs,
 };
 
@@ -314,6 +447,8 @@ static ssize_t zfcp_sysfs_unit_add_store(struct device *dev,
 
 	if (kstrtoull(buf, 0, (unsigned long long *) &fcp_lun))
 		return -EINVAL;
+
+	flush_work(&port->rport_work);
 
 	retval = zfcp_unit_add(port, fcp_lun);
 	if (retval)
@@ -340,6 +475,37 @@ static ssize_t zfcp_sysfs_unit_remove_store(struct device *dev,
 }
 static DEVICE_ATTR(unit_remove, S_IWUSR, NULL, zfcp_sysfs_unit_remove_store);
 
+static ssize_t zfcp_sysfs_port_fc_security_show(struct device *dev,
+						struct device_attribute *attr,
+						char *buf)
+{
+	struct zfcp_port *port = container_of(dev, struct zfcp_port, dev);
+	struct zfcp_adapter *adapter = port->adapter;
+	unsigned int status = atomic_read(&port->status);
+	int i;
+
+	if (0 == (status & ZFCP_STATUS_COMMON_OPEN) ||
+	    0 == (status & ZFCP_STATUS_COMMON_UNBLOCKED) ||
+	    0 == (status & ZFCP_STATUS_PORT_PHYS_OPEN) ||
+	    0 != (status & ZFCP_STATUS_PORT_LINK_TEST) ||
+	    0 != (status & ZFCP_STATUS_COMMON_ERP_FAILED) ||
+	    0 != (status & ZFCP_STATUS_COMMON_ACCESS_BOXED))
+		i = sysfs_emit(buf, "unknown\n");
+	else if (!(adapter->adapter_features & FSF_FEATURE_FC_SECURITY))
+		i = sysfs_emit(buf, "unsupported\n");
+	else {
+		i = zfcp_fsf_scnprint_fc_security(
+			buf, PAGE_SIZE - 1, port->connection_info,
+			ZFCP_FSF_PRINT_FMT_SINGLEITEM);
+		i += sysfs_emit_at(buf, i, "\n");
+	}
+
+	return i;
+}
+static ZFCP_DEV_ATTR(port, fc_security, S_IRUGO,
+		     zfcp_sysfs_port_fc_security_show,
+		     NULL);
+
 static struct attribute *zfcp_port_attrs[] = {
 	&dev_attr_unit_add.attr,
 	&dev_attr_unit_remove.attr,
@@ -347,6 +513,7 @@ static struct attribute *zfcp_port_attrs[] = {
 	&dev_attr_port_in_recovery.attr,
 	&dev_attr_port_status.attr,
 	&dev_attr_port_access_denied.attr,
+	&dev_attr_port_fc_security.attr,
 	NULL
 };
 static struct attribute_group zfcp_port_attr_group = {
@@ -402,8 +569,8 @@ zfcp_sysfs_unit_##_name##_latency_show(struct device *dev,		\
 	do_div(cmin, 1000);						\
 	do_div(cmax, 1000);						\
 									\
-	return sprintf(buf, "%llu %llu %llu %llu %llu %llu %llu\n",	\
-		       fmin, fmax, fsum, cmin, cmax, csum, cc); 	\
+	return sysfs_emit(buf, "%llu %llu %llu %llu %llu %llu %llu\n",	\
+			  fmin, fmax, fsum, cmin, cmax, csum, cc);	\
 }									\
 static ssize_t								\
 zfcp_sysfs_unit_##_name##_latency_store(struct device *dev,		\
@@ -443,8 +610,8 @@ static ssize_t zfcp_sysfs_scsi_##_name##_show(struct device *dev,	\
 	struct scsi_device *sdev = to_scsi_device(dev);			 \
 	struct zfcp_scsi_dev *zfcp_sdev = sdev_to_zfcp(sdev);		 \
 									 \
-	return sprintf(buf, _format, _value);                            \
-}                                                                        \
+	return sysfs_emit(buf, _format, _value);			 \
+}									 \
 static DEVICE_ATTR(_name, S_IRUGO, zfcp_sysfs_scsi_##_name##_show, NULL);
 
 ZFCP_DEFINE_SCSI_ATTR(hba_id, "%s\n",
@@ -458,7 +625,7 @@ static ssize_t zfcp_sysfs_scsi_fcp_lun_show(struct device *dev,
 {
 	struct scsi_device *sdev = to_scsi_device(dev);
 
-	return sprintf(buf, "0x%016llx\n", zfcp_scsi_dev_lun(sdev));
+	return sysfs_emit(buf, "0x%016llx\n", zfcp_scsi_dev_lun(sdev));
 }
 static DEVICE_ATTR(fcp_lun, S_IRUGO, zfcp_sysfs_scsi_fcp_lun_show, NULL);
 
@@ -474,7 +641,7 @@ static ssize_t zfcp_sysfs_scsi_zfcp_failed_show(struct device *dev,
 	unsigned int status = atomic_read(&sdev_to_zfcp(sdev)->status);
 	unsigned int failed = status & ZFCP_STATUS_COMMON_ERP_FAILED ? 1 : 0;
 
-	return sprintf(buf, "%d\n", failed);
+	return sysfs_emit(buf, "%d\n", failed);
 }
 
 static ssize_t zfcp_sysfs_scsi_zfcp_failed_store(struct device *dev,
@@ -505,17 +672,26 @@ ZFCP_DEFINE_SCSI_ATTR(zfcp_in_recovery, "%d\n",
 ZFCP_DEFINE_SCSI_ATTR(zfcp_status, "0x%08x\n",
 		      atomic_read(&zfcp_sdev->status));
 
-struct device_attribute *zfcp_sysfs_sdev_attrs[] = {
-	&dev_attr_fcp_lun,
-	&dev_attr_wwpn,
-	&dev_attr_hba_id,
-	&dev_attr_read_latency,
-	&dev_attr_write_latency,
-	&dev_attr_cmd_latency,
-	&dev_attr_zfcp_access_denied,
-	&dev_attr_zfcp_failed,
-	&dev_attr_zfcp_in_recovery,
-	&dev_attr_zfcp_status,
+static struct attribute *zfcp_sdev_attrs[] = {
+	&dev_attr_fcp_lun.attr,
+	&dev_attr_wwpn.attr,
+	&dev_attr_hba_id.attr,
+	&dev_attr_read_latency.attr,
+	&dev_attr_write_latency.attr,
+	&dev_attr_cmd_latency.attr,
+	&dev_attr_zfcp_access_denied.attr,
+	&dev_attr_zfcp_failed.attr,
+	&dev_attr_zfcp_in_recovery.attr,
+	&dev_attr_zfcp_status.attr,
+	NULL
+};
+
+static const struct attribute_group zfcp_sysfs_sdev_attr_group = {
+	.attrs = zfcp_sdev_attrs
+};
+
+const struct attribute_group *zfcp_sysfs_sdev_attr_groups[] = {
+	&zfcp_sysfs_sdev_attr_group,
 	NULL
 };
 
@@ -532,14 +708,14 @@ static ssize_t zfcp_sysfs_adapter_util_show(struct device *dev,
 	if (!(adapter->adapter_features & FSF_FEATURE_MEASUREMENT_DATA))
 		return -EOPNOTSUPP;
 
-	qtcb_port = kzalloc(sizeof(struct fsf_qtcb_bottom_port), GFP_KERNEL);
+	qtcb_port = kzalloc_obj(struct fsf_qtcb_bottom_port);
 	if (!qtcb_port)
 		return -ENOMEM;
 
 	retval = zfcp_fsf_exchange_port_data_sync(adapter->qdio, qtcb_port);
-	if (!retval)
-		retval = sprintf(buf, "%u %u %u\n", qtcb_port->cp_util,
-				 qtcb_port->cb_util, qtcb_port->a_util);
+	if (retval == 0 || retval == -EAGAIN)
+		retval = sysfs_emit(buf, "%u %u %u\n", qtcb_port->cp_util,
+				    qtcb_port->cb_util, qtcb_port->a_util);
 	kfree(qtcb_port);
 	return retval;
 }
@@ -557,13 +733,12 @@ static int zfcp_sysfs_adapter_ex_config(struct device *dev,
 	if (!(adapter->adapter_features & FSF_FEATURE_MEASUREMENT_DATA))
 		return -EOPNOTSUPP;
 
-	qtcb_config = kzalloc(sizeof(struct fsf_qtcb_bottom_config),
-			      GFP_KERNEL);
+	qtcb_config = kzalloc_obj(struct fsf_qtcb_bottom_config);
 	if (!qtcb_config)
 		return -ENOMEM;
 
 	retval = zfcp_fsf_exchange_config_data_sync(adapter->qdio, qtcb_config);
-	if (!retval)
+	if (retval == 0 || retval == -EAGAIN)
 		*stat_inf = qtcb_config->stat_info;
 
 	kfree(qtcb_config);
@@ -582,7 +757,7 @@ static ssize_t zfcp_sysfs_adapter_##_name##_show(struct device *dev,	\
 	if (retval)							\
 		return retval;						\
 									\
-	return sprintf(buf, _format, ## _arg);				\
+	return sysfs_emit(buf, _format, ## _arg);			\
 }									\
 static DEVICE_ATTR(_name, S_IRUGO, zfcp_sysfs_adapter_##_name##_show, NULL);
 
@@ -611,16 +786,150 @@ static ssize_t zfcp_sysfs_adapter_q_full_show(struct device *dev,
 	util = qdio->req_q_util;
 	spin_unlock_bh(&qdio->stat_lock);
 
-	return sprintf(buf, "%d %llu\n", atomic_read(&qdio->req_q_full),
-		       (unsigned long long)util);
+	return sysfs_emit(buf, "%d %llu\n", atomic_read(&qdio->req_q_full),
+			  (unsigned long long)util);
 }
 static DEVICE_ATTR(queue_full, S_IRUGO, zfcp_sysfs_adapter_q_full_show, NULL);
 
-struct device_attribute *zfcp_sysfs_shost_attrs[] = {
-	&dev_attr_utilization,
-	&dev_attr_requests,
-	&dev_attr_megabytes,
-	&dev_attr_seconds_active,
-	&dev_attr_queue_full,
+static struct attribute *zfcp_sysfs_shost_attrs[] = {
+	&dev_attr_utilization.attr,
+	&dev_attr_requests.attr,
+	&dev_attr_megabytes.attr,
+	&dev_attr_seconds_active.attr,
+	&dev_attr_queue_full.attr,
 	NULL
+};
+
+static const struct attribute_group zfcp_sysfs_shost_attr_group = {
+	.attrs = zfcp_sysfs_shost_attrs
+};
+
+const struct attribute_group *zfcp_sysfs_shost_attr_groups[] = {
+	&zfcp_sysfs_shost_attr_group,
+	NULL
+};
+
+static ssize_t zfcp_sysfs_adapter_diag_b2b_credit_show(
+	struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct zfcp_adapter *adapter = zfcp_ccw_adapter_by_cdev(to_ccwdev(dev));
+	struct zfcp_diag_header *diag_hdr;
+	struct fc_els_flogi *nsp;
+	ssize_t rc = -ENOLINK;
+	unsigned long flags;
+	unsigned int status;
+
+	if (!adapter)
+		return -ENODEV;
+
+	status = atomic_read(&adapter->status);
+	if (0 == (status & ZFCP_STATUS_COMMON_OPEN) ||
+	    0 == (status & ZFCP_STATUS_COMMON_UNBLOCKED) ||
+	    0 != (status & ZFCP_STATUS_COMMON_ERP_FAILED))
+		goto out;
+
+	diag_hdr = &adapter->diagnostics->config_data.header;
+
+	rc = zfcp_diag_update_buffer_limited(
+		adapter, diag_hdr, zfcp_diag_update_config_data_buffer);
+	if (rc != 0)
+		goto out;
+
+	spin_lock_irqsave(&diag_hdr->access_lock, flags);
+	/* nport_serv_param doesn't contain the ELS_Command code */
+	nsp = (struct fc_els_flogi *)((unsigned long)
+					      adapter->diagnostics->config_data
+						      .data.nport_serv_param -
+				      sizeof(u32));
+
+	rc = sysfs_emit(buf, "%hu\n", be16_to_cpu(nsp->fl_csp.sp_bb_cred));
+	spin_unlock_irqrestore(&diag_hdr->access_lock, flags);
+
+out:
+	zfcp_ccw_adapter_put(adapter);
+	return rc;
+}
+static ZFCP_DEV_ATTR(adapter_diag, b2b_credit, 0400,
+		     zfcp_sysfs_adapter_diag_b2b_credit_show, NULL);
+
+#define ZFCP_DEFINE_DIAG_SFP_ATTR(_name, _qtcb_member, _prtfmt)		       \
+	static ssize_t zfcp_sysfs_adapter_diag_sfp_##_name##_show(	       \
+		struct device *dev, struct device_attribute *attr, char *buf)  \
+	{								       \
+		struct zfcp_adapter *const adapter =			       \
+			zfcp_ccw_adapter_by_cdev(to_ccwdev(dev));	       \
+		struct zfcp_diag_header *diag_hdr;			       \
+		ssize_t rc = -ENOLINK;					       \
+		unsigned long flags;					       \
+		unsigned int status;					       \
+									       \
+		if (!adapter)						       \
+			return -ENODEV;					       \
+									       \
+		status = atomic_read(&adapter->status);			       \
+		if (0 == (status & ZFCP_STATUS_COMMON_OPEN) ||		       \
+		    0 == (status & ZFCP_STATUS_COMMON_UNBLOCKED) ||	       \
+		    0 != (status & ZFCP_STATUS_COMMON_ERP_FAILED))	       \
+			goto out;					       \
+									       \
+		if (!zfcp_diag_support_sfp(adapter)) {			       \
+			rc = -EOPNOTSUPP;				       \
+			goto out;					       \
+		}							       \
+									       \
+		diag_hdr = &adapter->diagnostics->port_data.header;	       \
+									       \
+		rc = zfcp_diag_update_buffer_limited(			       \
+			adapter, diag_hdr, zfcp_diag_update_port_data_buffer); \
+		if (rc != 0)						       \
+			goto out;					       \
+									       \
+		spin_lock_irqsave(&diag_hdr->access_lock, flags);	       \
+		rc = sysfs_emit(					       \
+			buf, _prtfmt "\n",				       \
+			adapter->diagnostics->port_data.data._qtcb_member);    \
+		spin_unlock_irqrestore(&diag_hdr->access_lock, flags);	       \
+									       \
+	out:								       \
+		zfcp_ccw_adapter_put(adapter);				       \
+		return rc;						       \
+	}								       \
+	static ZFCP_DEV_ATTR(adapter_diag_sfp, _name, 0400,		       \
+			     zfcp_sysfs_adapter_diag_sfp_##_name##_show, NULL)
+
+ZFCP_DEFINE_DIAG_SFP_ATTR(temperature, temperature, "%hd");
+ZFCP_DEFINE_DIAG_SFP_ATTR(vcc, vcc, "%hu");
+ZFCP_DEFINE_DIAG_SFP_ATTR(tx_bias, tx_bias, "%hu");
+ZFCP_DEFINE_DIAG_SFP_ATTR(tx_power, tx_power, "%hu");
+ZFCP_DEFINE_DIAG_SFP_ATTR(rx_power, rx_power, "%hu");
+ZFCP_DEFINE_DIAG_SFP_ATTR(port_tx_type, sfp_flags.port_tx_type, "%hu");
+ZFCP_DEFINE_DIAG_SFP_ATTR(optical_port, sfp_flags.optical_port, "%hu");
+ZFCP_DEFINE_DIAG_SFP_ATTR(sfp_invalid, sfp_flags.sfp_invalid, "%hu");
+ZFCP_DEFINE_DIAG_SFP_ATTR(connector_type, sfp_flags.connector_type, "%hu");
+ZFCP_DEFINE_DIAG_SFP_ATTR(fec_active, sfp_flags.fec_active, "%hu");
+
+static struct attribute *zfcp_sysfs_diag_attrs[] = {
+	&dev_attr_adapter_diag_sfp_temperature.attr,
+	&dev_attr_adapter_diag_sfp_vcc.attr,
+	&dev_attr_adapter_diag_sfp_tx_bias.attr,
+	&dev_attr_adapter_diag_sfp_tx_power.attr,
+	&dev_attr_adapter_diag_sfp_rx_power.attr,
+	&dev_attr_adapter_diag_sfp_port_tx_type.attr,
+	&dev_attr_adapter_diag_sfp_optical_port.attr,
+	&dev_attr_adapter_diag_sfp_sfp_invalid.attr,
+	&dev_attr_adapter_diag_sfp_connector_type.attr,
+	&dev_attr_adapter_diag_sfp_fec_active.attr,
+	&dev_attr_adapter_diag_b2b_credit.attr,
+	NULL,
+};
+
+static const struct attribute_group zfcp_sysfs_diag_attr_group = {
+	.name = "diagnostics",
+	.attrs = zfcp_sysfs_diag_attrs,
+};
+
+const struct attribute_group *zfcp_sysfs_adapter_attr_groups[] = {
+	&zfcp_sysfs_adapter_attr_group,
+	&zfcp_sysfs_diag_attr_group,
+	NULL,
 };

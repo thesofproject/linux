@@ -10,7 +10,6 @@
 #include <linux/module.h>
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
-#include <linux/uaccess.h>
 
 #define XSENS_VID 0x2639
 
@@ -49,7 +48,6 @@ static int xsens_mt_probe(struct usb_serial *serial,
 
 static struct usb_serial_driver xsens_mt_device = {
 	.driver = {
-		.owner = THIS_MODULE,
 		.name = "xsens_mt",
 	},
 	.id_table = id_table,

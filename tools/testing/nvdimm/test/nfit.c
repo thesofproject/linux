@@ -1,20 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright(c) 2013-2015 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/workqueue.h>
 #include <linux/libnvdimm.h>
+#include <linux/genalloc.h>
 #include <linux/vmalloc.h>
 #include <linux/device.h>
 #include <linux/module.h>
@@ -24,6 +17,7 @@
 #include <linux/list.h>
 #include <linux/slab.h>
 #include <nd-core.h>
+#include <intel.h>
 #include <nfit.h>
 #include <nd.h>
 #include "nfit_test.h"
@@ -137,8 +131,39 @@ static u32 handle[] = {
 	[6] = NFIT_DIMM_HANDLE(1, 0, 0, 0, 1),
 };
 
-static unsigned long dimm_fail_cmd_flags[NUM_DCR];
-static int dimm_fail_cmd_code[NUM_DCR];
+static unsigned long dimm_fail_cmd_flags[ARRAY_SIZE(handle)];
+static int dimm_fail_cmd_code[ARRAY_SIZE(handle)];
+struct nfit_test_sec {
+	u8 state;
+	u8 ext_state;
+	u8 old_state;
+	u8 passphrase[32];
+	u8 master_passphrase[32];
+	u64 overwrite_end_time;
+} dimm_sec_info[NUM_DCR];
+
+static const struct nd_intel_smart smart_def = {
+	.flags = ND_INTEL_SMART_HEALTH_VALID
+		| ND_INTEL_SMART_SPARES_VALID
+		| ND_INTEL_SMART_ALARM_VALID
+		| ND_INTEL_SMART_USED_VALID
+		| ND_INTEL_SMART_SHUTDOWN_VALID
+		| ND_INTEL_SMART_SHUTDOWN_COUNT_VALID
+		| ND_INTEL_SMART_MTEMP_VALID
+		| ND_INTEL_SMART_CTEMP_VALID,
+	.health = ND_INTEL_SMART_NON_CRITICAL_HEALTH,
+	.media_temperature = 23 * 16,
+	.ctrl_temperature = 25 * 16,
+	.pmic_temperature = 40 * 16,
+	.spares = 75,
+	.alarm_flags = ND_INTEL_SMART_SPARE_TRIP
+		| ND_INTEL_SMART_TEMP_TRIP,
+	.ait_status = 1,
+	.life_used = 5,
+	.shutdown_state = 0,
+	.shutdown_count = 42,
+	.vendor_size = 0,
+};
 
 struct nfit_test_fw {
 	enum intel_fw_update_state state;
@@ -146,6 +171,9 @@ struct nfit_test_fw {
 	u64 version;
 	u32 size_received;
 	u64 end_time;
+	bool armed;
+	bool missed_activate;
+	unsigned long last_activate;
 };
 
 struct nfit_test {
@@ -179,7 +207,7 @@ struct nfit_test {
 		unsigned long deadline;
 		spinlock_t lock;
 	} ars_state;
-	struct device *dimm_dev[NUM_DCR];
+	struct device *dimm_dev[ARRAY_SIZE(handle)];
 	struct nd_intel_smart *smart;
 	struct nd_intel_smart_threshold *smart_threshold;
 	struct badrange badrange;
@@ -188,6 +216,10 @@ struct nfit_test {
 };
 
 static struct workqueue_struct *nfit_wq;
+
+static struct gen_pool *nfit_pool;
+
+static const char zero_key[NVDIMM_PASSPHRASE_LEN];
 
 static struct nfit_test *to_nfit_test(struct device *dev)
 {
@@ -314,7 +346,7 @@ static int nd_intel_test_finish_fw(struct nfit_test *t,
 			__func__, t, nd_cmd, buf_len, idx);
 
 	if (fw->state == FW_STATE_UPDATED) {
-		/* update already done, need cold boot */
+		/* update already done, need activation */
 		nd_cmd->status = 0x20007;
 		return 0;
 	}
@@ -397,10 +429,10 @@ static int nd_intel_test_finish_query(struct nfit_test *t,
 			dev_dbg(dev, "%s: still verifying\n", __func__);
 			break;
 		}
-
 		dev_dbg(dev, "%s: transition out verify\n", __func__);
 		fw->state = FW_STATE_UPDATED;
-		/* we are going to fall through if it's "done" */
+		fw->missed_activate = false;
+		fallthrough;
 	case FW_STATE_UPDATED:
 		nd_cmd->status = 0;
 		/* bogus test version */
@@ -638,6 +670,7 @@ static int nfit_test_search_spa(struct nvdimm_bus *bus,
 		.addr = spa->spa,
 		.region = NULL,
 	};
+	struct nfit_mem *nfit_mem;
 	u64 dpa;
 
 	ret = device_for_each_child(&bus->dev, &ctx,
@@ -655,8 +688,12 @@ static int nfit_test_search_spa(struct nvdimm_bus *bus,
 	 */
 	nd_mapping = &nd_region->mapping[nd_region->ndr_mappings - 1];
 	nvdimm = nd_mapping->nvdimm;
+	nfit_mem = nvdimm_provider_data(nvdimm);
+	if (!nfit_mem)
+		return -EINVAL;
 
-	spa->devices[0].nfit_device_handle = handle[nvdimm->id];
+	spa->devices[0].nfit_device_handle =
+		__to_nfit_memdev(nfit_mem)->device_handle;
 	spa->num_nvdimms = 1;
 	spa->devices[0].dpa = dpa;
 
@@ -750,15 +787,30 @@ static int nfit_test_cmd_smart_inject(
 	if (buf_len != sizeof(*inj))
 		return -EINVAL;
 
-	if (inj->mtemp_enable)
-		smart->media_temperature = inj->media_temperature;
-	if (inj->spare_enable)
-		smart->spares = inj->spares;
-	if (inj->fatal_enable)
-		smart->health = ND_INTEL_SMART_FATAL_HEALTH;
-	if (inj->unsafe_shutdown_enable) {
-		smart->shutdown_state = 1;
-		smart->shutdown_count++;
+	if (inj->flags & ND_INTEL_SMART_INJECT_MTEMP) {
+		if (inj->mtemp_enable)
+			smart->media_temperature = inj->media_temperature;
+		else
+			smart->media_temperature = smart_def.media_temperature;
+	}
+	if (inj->flags & ND_INTEL_SMART_INJECT_SPARE) {
+		if (inj->spare_enable)
+			smart->spares = inj->spares;
+		else
+			smart->spares = smart_def.spares;
+	}
+	if (inj->flags & ND_INTEL_SMART_INJECT_FATAL) {
+		if (inj->fatal_enable)
+			smart->health = ND_INTEL_SMART_FATAL_HEALTH;
+		else
+			smart->health = ND_INTEL_SMART_NON_CRITICAL_HEALTH;
+	}
+	if (inj->flags & ND_INTEL_SMART_INJECT_SHUTDOWN) {
+		if (inj->unsafe_shutdown_enable) {
+			smart->shutdown_state = 1;
+			smart->shutdown_count++;
+		} else
+			smart->shutdown_state = 0;
 	}
 	inj->status = 0;
 	smart_notify(bus_dev, dimm_dev, smart, thresh);
@@ -882,6 +934,386 @@ static int nd_intel_test_cmd_set_lss_status(struct nfit_test *t,
 	return 0;
 }
 
+static int override_return_code(int dimm, unsigned int func, int rc)
+{
+	if ((1 << func) & dimm_fail_cmd_flags[dimm]) {
+		if (dimm_fail_cmd_code[dimm])
+			return dimm_fail_cmd_code[dimm];
+		return -EIO;
+	}
+	return rc;
+}
+
+static int nd_intel_test_cmd_security_status(struct nfit_test *t,
+		struct nd_intel_get_security_state *nd_cmd,
+		unsigned int buf_len, int dimm)
+{
+	struct device *dev = &t->pdev.dev;
+	struct nfit_test_sec *sec = &dimm_sec_info[dimm];
+
+	nd_cmd->status = 0;
+	nd_cmd->state = sec->state;
+	nd_cmd->extended_state = sec->ext_state;
+	dev_dbg(dev, "security state (%#x) returned\n", nd_cmd->state);
+
+	return 0;
+}
+
+static int nd_intel_test_cmd_unlock_unit(struct nfit_test *t,
+		struct nd_intel_unlock_unit *nd_cmd,
+		unsigned int buf_len, int dimm)
+{
+	struct device *dev = &t->pdev.dev;
+	struct nfit_test_sec *sec = &dimm_sec_info[dimm];
+
+	if (!(sec->state & ND_INTEL_SEC_STATE_LOCKED) ||
+			(sec->state & ND_INTEL_SEC_STATE_FROZEN)) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_STATE;
+		dev_dbg(dev, "unlock unit: invalid state: %#x\n",
+				sec->state);
+	} else if (memcmp(nd_cmd->passphrase, sec->passphrase,
+				ND_INTEL_PASSPHRASE_SIZE) != 0) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_PASS;
+		dev_dbg(dev, "unlock unit: invalid passphrase\n");
+	} else {
+		nd_cmd->status = 0;
+		sec->state = ND_INTEL_SEC_STATE_ENABLED;
+		dev_dbg(dev, "Unit unlocked\n");
+	}
+
+	dev_dbg(dev, "unlocking status returned: %#x\n", nd_cmd->status);
+	return 0;
+}
+
+static int nd_intel_test_cmd_set_pass(struct nfit_test *t,
+		struct nd_intel_set_passphrase *nd_cmd,
+		unsigned int buf_len, int dimm)
+{
+	struct device *dev = &t->pdev.dev;
+	struct nfit_test_sec *sec = &dimm_sec_info[dimm];
+
+	if (sec->state & ND_INTEL_SEC_STATE_FROZEN) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_STATE;
+		dev_dbg(dev, "set passphrase: wrong security state\n");
+	} else if (memcmp(nd_cmd->old_pass, sec->passphrase,
+				ND_INTEL_PASSPHRASE_SIZE) != 0) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_PASS;
+		dev_dbg(dev, "set passphrase: wrong passphrase\n");
+	} else {
+		memcpy(sec->passphrase, nd_cmd->new_pass,
+				ND_INTEL_PASSPHRASE_SIZE);
+		sec->state |= ND_INTEL_SEC_STATE_ENABLED;
+		nd_cmd->status = 0;
+		dev_dbg(dev, "passphrase updated\n");
+	}
+
+	return 0;
+}
+
+static int nd_intel_test_cmd_freeze_lock(struct nfit_test *t,
+		struct nd_intel_freeze_lock *nd_cmd,
+		unsigned int buf_len, int dimm)
+{
+	struct device *dev = &t->pdev.dev;
+	struct nfit_test_sec *sec = &dimm_sec_info[dimm];
+
+	if (!(sec->state & ND_INTEL_SEC_STATE_ENABLED)) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_STATE;
+		dev_dbg(dev, "freeze lock: wrong security state\n");
+	} else {
+		sec->state |= ND_INTEL_SEC_STATE_FROZEN;
+		nd_cmd->status = 0;
+		dev_dbg(dev, "security frozen\n");
+	}
+
+	return 0;
+}
+
+static int nd_intel_test_cmd_disable_pass(struct nfit_test *t,
+		struct nd_intel_disable_passphrase *nd_cmd,
+		unsigned int buf_len, int dimm)
+{
+	struct device *dev = &t->pdev.dev;
+	struct nfit_test_sec *sec = &dimm_sec_info[dimm];
+
+	if (!(sec->state & ND_INTEL_SEC_STATE_ENABLED) ||
+			(sec->state & ND_INTEL_SEC_STATE_FROZEN)) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_STATE;
+		dev_dbg(dev, "disable passphrase: wrong security state\n");
+	} else if (memcmp(nd_cmd->passphrase, sec->passphrase,
+				ND_INTEL_PASSPHRASE_SIZE) != 0) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_PASS;
+		dev_dbg(dev, "disable passphrase: wrong passphrase\n");
+	} else {
+		memset(sec->passphrase, 0, ND_INTEL_PASSPHRASE_SIZE);
+		sec->state = 0;
+		dev_dbg(dev, "disable passphrase: done\n");
+	}
+
+	return 0;
+}
+
+static int nd_intel_test_cmd_secure_erase(struct nfit_test *t,
+		struct nd_intel_secure_erase *nd_cmd,
+		unsigned int buf_len, int dimm)
+{
+	struct device *dev = &t->pdev.dev;
+	struct nfit_test_sec *sec = &dimm_sec_info[dimm];
+
+	if (sec->state & ND_INTEL_SEC_STATE_FROZEN) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_STATE;
+		dev_dbg(dev, "secure erase: wrong security state\n");
+	} else if (memcmp(nd_cmd->passphrase, sec->passphrase,
+				ND_INTEL_PASSPHRASE_SIZE) != 0) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_PASS;
+		dev_dbg(dev, "secure erase: wrong passphrase\n");
+	} else {
+		if (!(sec->state & ND_INTEL_SEC_STATE_ENABLED)
+				&& (memcmp(nd_cmd->passphrase, zero_key,
+					ND_INTEL_PASSPHRASE_SIZE) != 0)) {
+			dev_dbg(dev, "invalid zero key\n");
+			return 0;
+		}
+		memset(sec->passphrase, 0, ND_INTEL_PASSPHRASE_SIZE);
+		memset(sec->master_passphrase, 0, ND_INTEL_PASSPHRASE_SIZE);
+		sec->state = 0;
+		sec->ext_state = ND_INTEL_SEC_ESTATE_ENABLED;
+		dev_dbg(dev, "secure erase: done\n");
+	}
+
+	return 0;
+}
+
+static int nd_intel_test_cmd_overwrite(struct nfit_test *t,
+		struct nd_intel_overwrite *nd_cmd,
+		unsigned int buf_len, int dimm)
+{
+	struct device *dev = &t->pdev.dev;
+	struct nfit_test_sec *sec = &dimm_sec_info[dimm];
+
+	if ((sec->state & ND_INTEL_SEC_STATE_ENABLED) &&
+			memcmp(nd_cmd->passphrase, sec->passphrase,
+				ND_INTEL_PASSPHRASE_SIZE) != 0) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_PASS;
+		dev_dbg(dev, "overwrite: wrong passphrase\n");
+		return 0;
+	}
+
+	sec->old_state = sec->state;
+	sec->state = ND_INTEL_SEC_STATE_OVERWRITE;
+	dev_dbg(dev, "overwrite progressing.\n");
+	sec->overwrite_end_time = get_jiffies_64() + 5 * HZ;
+
+	return 0;
+}
+
+static int nd_intel_test_cmd_query_overwrite(struct nfit_test *t,
+		struct nd_intel_query_overwrite *nd_cmd,
+		unsigned int buf_len, int dimm)
+{
+	struct device *dev = &t->pdev.dev;
+	struct nfit_test_sec *sec = &dimm_sec_info[dimm];
+
+	if (!(sec->state & ND_INTEL_SEC_STATE_OVERWRITE)) {
+		nd_cmd->status = ND_INTEL_STATUS_OQUERY_SEQUENCE_ERR;
+		return 0;
+	}
+
+	if (time_is_before_jiffies64(sec->overwrite_end_time)) {
+		sec->overwrite_end_time = 0;
+		sec->state = sec->old_state;
+		sec->old_state = 0;
+		sec->ext_state = ND_INTEL_SEC_ESTATE_ENABLED;
+		dev_dbg(dev, "overwrite is complete\n");
+	} else
+		nd_cmd->status = ND_INTEL_STATUS_OQUERY_INPROGRESS;
+	return 0;
+}
+
+static int nd_intel_test_cmd_master_set_pass(struct nfit_test *t,
+		struct nd_intel_set_master_passphrase *nd_cmd,
+		unsigned int buf_len, int dimm)
+{
+	struct device *dev = &t->pdev.dev;
+	struct nfit_test_sec *sec = &dimm_sec_info[dimm];
+
+	if (!(sec->ext_state & ND_INTEL_SEC_ESTATE_ENABLED)) {
+		nd_cmd->status = ND_INTEL_STATUS_NOT_SUPPORTED;
+		dev_dbg(dev, "master set passphrase: in wrong state\n");
+	} else if (sec->ext_state & ND_INTEL_SEC_ESTATE_PLIMIT) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_STATE;
+		dev_dbg(dev, "master set passphrase: in wrong security state\n");
+	} else if (memcmp(nd_cmd->old_pass, sec->master_passphrase,
+				ND_INTEL_PASSPHRASE_SIZE) != 0) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_PASS;
+		dev_dbg(dev, "master set passphrase: wrong passphrase\n");
+	} else {
+		memcpy(sec->master_passphrase, nd_cmd->new_pass,
+				ND_INTEL_PASSPHRASE_SIZE);
+		sec->ext_state = ND_INTEL_SEC_ESTATE_ENABLED;
+		dev_dbg(dev, "master passphrase: updated\n");
+	}
+
+	return 0;
+}
+
+static int nd_intel_test_cmd_master_secure_erase(struct nfit_test *t,
+		struct nd_intel_master_secure_erase *nd_cmd,
+		unsigned int buf_len, int dimm)
+{
+	struct device *dev = &t->pdev.dev;
+	struct nfit_test_sec *sec = &dimm_sec_info[dimm];
+
+	if (!(sec->ext_state & ND_INTEL_SEC_ESTATE_ENABLED)) {
+		nd_cmd->status = ND_INTEL_STATUS_NOT_SUPPORTED;
+		dev_dbg(dev, "master secure erase: in wrong state\n");
+	} else if (sec->ext_state & ND_INTEL_SEC_ESTATE_PLIMIT) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_STATE;
+		dev_dbg(dev, "master secure erase: in wrong security state\n");
+	} else if (memcmp(nd_cmd->passphrase, sec->master_passphrase,
+				ND_INTEL_PASSPHRASE_SIZE) != 0) {
+		nd_cmd->status = ND_INTEL_STATUS_INVALID_PASS;
+		dev_dbg(dev, "master secure erase: wrong passphrase\n");
+	} else {
+		/* we do not erase master state passphrase ever */
+		sec->ext_state = ND_INTEL_SEC_ESTATE_ENABLED;
+		memset(sec->passphrase, 0, ND_INTEL_PASSPHRASE_SIZE);
+		sec->state = 0;
+		dev_dbg(dev, "master secure erase: done\n");
+	}
+
+	return 0;
+}
+
+static unsigned long last_activate;
+
+static int nvdimm_bus_intel_fw_activate_businfo(struct nfit_test *t,
+		struct nd_intel_bus_fw_activate_businfo *nd_cmd,
+		unsigned int buf_len)
+{
+	int i, armed = 0;
+	int state;
+	u64 tmo;
+
+	for (i = 0; i < NUM_DCR; i++) {
+		struct nfit_test_fw *fw = &t->fw[i];
+
+		if (fw->armed)
+			armed++;
+	}
+
+	/*
+	 * Emulate 3 second activation max, and 1 second incremental
+	 * quiesce time per dimm requiring multiple activates to get all
+	 * DIMMs updated.
+	 */
+	if (armed)
+		state = ND_INTEL_FWA_ARMED;
+	else if (!last_activate || time_after(jiffies, last_activate + 3 * HZ))
+		state = ND_INTEL_FWA_IDLE;
+	else
+		state = ND_INTEL_FWA_BUSY;
+
+	tmo = armed * USEC_PER_SEC;
+	*nd_cmd = (struct nd_intel_bus_fw_activate_businfo) {
+		.capability = ND_INTEL_BUS_FWA_CAP_FWQUIESCE
+			| ND_INTEL_BUS_FWA_CAP_OSQUIESCE
+			| ND_INTEL_BUS_FWA_CAP_RESET,
+		.state = state,
+		.activate_tmo = tmo,
+		.cpu_quiesce_tmo = tmo,
+		.io_quiesce_tmo = tmo,
+		.max_quiesce_tmo = 3 * USEC_PER_SEC,
+	};
+
+	return 0;
+}
+
+static int nvdimm_bus_intel_fw_activate(struct nfit_test *t,
+		struct nd_intel_bus_fw_activate *nd_cmd,
+		unsigned int buf_len)
+{
+	struct nd_intel_bus_fw_activate_businfo info;
+	u32 status = 0;
+	int i;
+
+	nvdimm_bus_intel_fw_activate_businfo(t, &info, sizeof(info));
+	if (info.state == ND_INTEL_FWA_BUSY)
+		status = ND_INTEL_BUS_FWA_STATUS_BUSY;
+	else if (info.activate_tmo > info.max_quiesce_tmo)
+		status = ND_INTEL_BUS_FWA_STATUS_TMO;
+	else if (info.state == ND_INTEL_FWA_IDLE)
+		status = ND_INTEL_BUS_FWA_STATUS_NOARM;
+
+	dev_dbg(&t->pdev.dev, "status: %d\n", status);
+	nd_cmd->status = status;
+	if (status && status != ND_INTEL_BUS_FWA_STATUS_TMO)
+		return 0;
+
+	last_activate = jiffies;
+	for (i = 0; i < NUM_DCR; i++) {
+		struct nfit_test_fw *fw = &t->fw[i];
+
+		if (!fw->armed)
+			continue;
+		if (fw->state != FW_STATE_UPDATED)
+			fw->missed_activate = true;
+		else
+			fw->state = FW_STATE_NEW;
+		fw->armed = false;
+		fw->last_activate = last_activate;
+	}
+
+	return 0;
+}
+
+static int nd_intel_test_cmd_fw_activate_dimminfo(struct nfit_test *t,
+		struct nd_intel_fw_activate_dimminfo *nd_cmd,
+		unsigned int buf_len, int dimm)
+{
+	struct nd_intel_bus_fw_activate_businfo info;
+	struct nfit_test_fw *fw = &t->fw[dimm];
+	u32 result, state;
+
+	nvdimm_bus_intel_fw_activate_businfo(t, &info, sizeof(info));
+
+	if (info.state == ND_INTEL_FWA_BUSY)
+		state = ND_INTEL_FWA_BUSY;
+	else if (info.state == ND_INTEL_FWA_IDLE)
+		state = ND_INTEL_FWA_IDLE;
+	else if (fw->armed)
+		state = ND_INTEL_FWA_ARMED;
+	else
+		state = ND_INTEL_FWA_IDLE;
+
+	result = ND_INTEL_DIMM_FWA_NONE;
+	if (last_activate && fw->last_activate == last_activate &&
+			state == ND_INTEL_FWA_IDLE) {
+		if (fw->missed_activate)
+			result = ND_INTEL_DIMM_FWA_NOTSTAGED;
+		else
+			result = ND_INTEL_DIMM_FWA_SUCCESS;
+	}
+
+	*nd_cmd = (struct nd_intel_fw_activate_dimminfo) {
+		.result = result,
+		.state = state,
+	};
+
+	return 0;
+}
+
+static int nd_intel_test_cmd_fw_activate_arm(struct nfit_test *t,
+		struct nd_intel_fw_activate_arm *nd_cmd,
+		unsigned int buf_len, int dimm)
+{
+	struct nfit_test_fw *fw = &t->fw[dimm];
+
+	fw->armed = nd_cmd->activate_arm == ND_INTEL_DIMM_FWA_ARM;
+	nd_cmd->status = 0;
+	return 0;
+}
+
 static int get_dimm(struct nfit_mem *nfit_mem, unsigned int func)
 {
 	int i;
@@ -892,14 +1324,30 @@ static int get_dimm(struct nfit_mem *nfit_mem, unsigned int func)
 			break;
 	if (i >= ARRAY_SIZE(handle))
 		return -ENXIO;
-
-	if ((1 << func) & dimm_fail_cmd_flags[i]) {
-		if (dimm_fail_cmd_code[i])
-			return dimm_fail_cmd_code[i];
-		return -EIO;
-	}
-
 	return i;
+}
+
+static void nfit_ctl_dbg(struct acpi_nfit_desc *acpi_desc,
+		struct nvdimm *nvdimm, unsigned int cmd, void *buf,
+		unsigned int len)
+{
+	struct nfit_test *t = container_of(acpi_desc, typeof(*t), acpi_desc);
+	unsigned int func = cmd;
+	unsigned int family = 0;
+
+	if (cmd == ND_CMD_CALL) {
+		struct nd_cmd_pkg *pkg = buf;
+
+		len = pkg->nd_size_in;
+		family = pkg->nd_family;
+		buf = pkg->nd_payload;
+		func = pkg->nd_command;
+	}
+	dev_dbg(&t->pdev.dev, "%s family: %d cmd: %d: func: %d input length: %d\n",
+			nvdimm ? nvdimm_name(nvdimm) : "bus", family, cmd, func,
+			len);
+	print_hex_dump_debug("nvdimm in  ", DUMP_PREFIX_OFFSET, 16, 4,
+			buf, min(len, 256u), true);
 }
 
 static int nfit_test_ctl(struct nvdimm_bus_descriptor *nd_desc,
@@ -914,6 +1362,8 @@ static int nfit_test_ctl(struct nvdimm_bus_descriptor *nd_desc,
 	if (!cmd_rc)
 		cmd_rc = &__cmd_rc;
 	*cmd_rc = 0;
+
+	nfit_ctl_dbg(acpi_desc, nvdimm, cmd, buf, buf_len);
 
 	if (nvdimm) {
 		struct nfit_mem *nfit_mem = nvdimm_provider_data(nvdimm);
@@ -934,51 +1384,112 @@ static int nfit_test_ctl(struct nvdimm_bus_descriptor *nd_desc,
 			i = get_dimm(nfit_mem, func);
 			if (i < 0)
 				return i;
+			if (i >= NUM_DCR) {
+				dev_WARN_ONCE(&t->pdev.dev, 1,
+						"ND_CMD_CALL only valid for nfit_test0\n");
+				return -EINVAL;
+			}
 
 			switch (func) {
+			case NVDIMM_INTEL_GET_SECURITY_STATE:
+				rc = nd_intel_test_cmd_security_status(t,
+						buf, buf_len, i);
+				break;
+			case NVDIMM_INTEL_UNLOCK_UNIT:
+				rc = nd_intel_test_cmd_unlock_unit(t,
+						buf, buf_len, i);
+				break;
+			case NVDIMM_INTEL_SET_PASSPHRASE:
+				rc = nd_intel_test_cmd_set_pass(t,
+						buf, buf_len, i);
+				break;
+			case NVDIMM_INTEL_DISABLE_PASSPHRASE:
+				rc = nd_intel_test_cmd_disable_pass(t,
+						buf, buf_len, i);
+				break;
+			case NVDIMM_INTEL_FREEZE_LOCK:
+				rc = nd_intel_test_cmd_freeze_lock(t,
+						buf, buf_len, i);
+				break;
+			case NVDIMM_INTEL_SECURE_ERASE:
+				rc = nd_intel_test_cmd_secure_erase(t,
+						buf, buf_len, i);
+				break;
+			case NVDIMM_INTEL_OVERWRITE:
+				rc = nd_intel_test_cmd_overwrite(t,
+						buf, buf_len, i);
+				break;
+			case NVDIMM_INTEL_QUERY_OVERWRITE:
+				rc = nd_intel_test_cmd_query_overwrite(t,
+						buf, buf_len, i);
+				break;
+			case NVDIMM_INTEL_SET_MASTER_PASSPHRASE:
+				rc = nd_intel_test_cmd_master_set_pass(t,
+						buf, buf_len, i);
+				break;
+			case NVDIMM_INTEL_MASTER_SECURE_ERASE:
+				rc = nd_intel_test_cmd_master_secure_erase(t,
+						buf, buf_len, i);
+				break;
+			case NVDIMM_INTEL_FW_ACTIVATE_DIMMINFO:
+				rc = nd_intel_test_cmd_fw_activate_dimminfo(
+					t, buf, buf_len, i);
+				break;
+			case NVDIMM_INTEL_FW_ACTIVATE_ARM:
+				rc = nd_intel_test_cmd_fw_activate_arm(
+					t, buf, buf_len, i);
+				break;
 			case ND_INTEL_ENABLE_LSS_STATUS:
-				return nd_intel_test_cmd_set_lss_status(t,
+				rc = nd_intel_test_cmd_set_lss_status(t,
 						buf, buf_len);
+				break;
 			case ND_INTEL_FW_GET_INFO:
-				return nd_intel_test_get_fw_info(t, buf,
-						buf_len, i - t->dcr_idx);
+				rc = nd_intel_test_get_fw_info(t, buf,
+						buf_len, i);
+				break;
 			case ND_INTEL_FW_START_UPDATE:
-				return nd_intel_test_start_update(t, buf,
-						buf_len, i - t->dcr_idx);
+				rc = nd_intel_test_start_update(t, buf,
+						buf_len, i);
+				break;
 			case ND_INTEL_FW_SEND_DATA:
-				return nd_intel_test_send_data(t, buf,
-						buf_len, i - t->dcr_idx);
+				rc = nd_intel_test_send_data(t, buf,
+						buf_len, i);
+				break;
 			case ND_INTEL_FW_FINISH_UPDATE:
-				return nd_intel_test_finish_fw(t, buf,
-						buf_len, i - t->dcr_idx);
+				rc = nd_intel_test_finish_fw(t, buf,
+						buf_len, i);
+				break;
 			case ND_INTEL_FW_FINISH_QUERY:
-				return nd_intel_test_finish_query(t, buf,
-						buf_len, i - t->dcr_idx);
+				rc = nd_intel_test_finish_query(t, buf,
+						buf_len, i);
+				break;
 			case ND_INTEL_SMART:
-				return nfit_test_cmd_smart(buf, buf_len,
-						&t->smart[i - t->dcr_idx]);
+				rc = nfit_test_cmd_smart(buf, buf_len,
+						&t->smart[i]);
+				break;
 			case ND_INTEL_SMART_THRESHOLD:
-				return nfit_test_cmd_smart_threshold(buf,
+				rc = nfit_test_cmd_smart_threshold(buf,
 						buf_len,
-						&t->smart_threshold[i -
-							t->dcr_idx]);
+						&t->smart_threshold[i]);
+				break;
 			case ND_INTEL_SMART_SET_THRESHOLD:
-				return nfit_test_cmd_smart_set_threshold(buf,
+				rc = nfit_test_cmd_smart_set_threshold(buf,
 						buf_len,
-						&t->smart_threshold[i -
-							t->dcr_idx],
-						&t->smart[i - t->dcr_idx],
+						&t->smart_threshold[i],
+						&t->smart[i],
 						&t->pdev.dev, t->dimm_dev[i]);
+				break;
 			case ND_INTEL_SMART_INJECT:
-				return nfit_test_cmd_smart_inject(buf,
+				rc = nfit_test_cmd_smart_inject(buf,
 						buf_len,
-						&t->smart_threshold[i -
-							t->dcr_idx],
-						&t->smart[i - t->dcr_idx],
+						&t->smart_threshold[i],
+						&t->smart[i],
 						&t->pdev.dev, t->dimm_dev[i]);
+				break;
 			default:
 				return -ENOTTY;
 			}
+			return override_return_code(i, func, rc);
 		}
 
 		if (!test_bit(cmd, &cmd_mask)
@@ -1004,6 +1515,7 @@ static int nfit_test_ctl(struct nvdimm_bus_descriptor *nd_desc,
 		default:
 			return -ENOTTY;
 		}
+		return override_return_code(i, func, rc);
 	} else {
 		struct ars_state *ars_state = &t->ars_state;
 		struct nd_cmd_pkg *call_pkg = buf;
@@ -1011,9 +1523,9 @@ static int nfit_test_ctl(struct nvdimm_bus_descriptor *nd_desc,
 		if (!nd_desc)
 			return -ENOTTY;
 
-		if (cmd == ND_CMD_CALL) {
+		if (cmd == ND_CMD_CALL && call_pkg->nd_family
+				== NVDIMM_BUS_FAMILY_NFIT) {
 			func = call_pkg->nd_command;
-
 			buf_len = call_pkg->nd_size_in + call_pkg->nd_size_out;
 			buf = (void *) call_pkg->nd_payload;
 
@@ -1037,7 +1549,26 @@ static int nfit_test_ctl(struct nvdimm_bus_descriptor *nd_desc,
 			default:
 				return -ENOTTY;
 			}
-		}
+		} else if (cmd == ND_CMD_CALL && call_pkg->nd_family
+				== NVDIMM_BUS_FAMILY_INTEL) {
+			func = call_pkg->nd_command;
+			buf_len = call_pkg->nd_size_in + call_pkg->nd_size_out;
+			buf = (void *) call_pkg->nd_payload;
+
+			switch (func) {
+			case NVDIMM_BUS_INTEL_FW_ACTIVATE_BUSINFO:
+				rc = nvdimm_bus_intel_fw_activate_businfo(t,
+						buf, buf_len);
+				return rc;
+			case NVDIMM_BUS_INTEL_FW_ACTIVATE:
+				rc = nvdimm_bus_intel_fw_activate(t, buf,
+						buf_len);
+				return rc;
+			default:
+				return -ENOTTY;
+			}
+		} else if (cmd == ND_CMD_CALL)
+			return -ENOTTY;
 
 		if (!nd_desc || !test_bit(cmd, &nd_desc->cmd_mask))
 			return -ENOTTY;
@@ -1076,6 +1607,9 @@ static void release_nfit_res(void *data)
 	list_del(&nfit_res->list);
 	spin_unlock(&nfit_test_lock);
 
+	if (resource_size(&nfit_res->res) >= DIMM_SIZE)
+		gen_pool_free(nfit_pool, nfit_res->res.start,
+				resource_size(&nfit_res->res));
 	vfree(nfit_res->buf);
 	kfree(nfit_res);
 }
@@ -1088,7 +1622,7 @@ static void *__test_alloc(struct nfit_test *t, size_t size, dma_addr_t *dma,
 			GFP_KERNEL);
 	int rc;
 
-	if (!buf || !nfit_res)
+	if (!buf || !nfit_res || !*dma)
 		goto err;
 	rc = devm_add_action(dev, release_nfit_res, nfit_res);
 	if (rc)
@@ -1108,6 +1642,8 @@ static void *__test_alloc(struct nfit_test *t, size_t size, dma_addr_t *dma,
 
 	return nfit_res->buf;
  err:
+	if (*dma && size >= DIMM_SIZE)
+		gen_pool_free(nfit_pool, *dma, size);
 	if (buf)
 		vfree(buf);
 	kfree(nfit_res);
@@ -1116,9 +1652,16 @@ static void *__test_alloc(struct nfit_test *t, size_t size, dma_addr_t *dma,
 
 static void *test_alloc(struct nfit_test *t, size_t size, dma_addr_t *dma)
 {
+	struct genpool_data_align data = {
+		.align = SZ_128M,
+	};
 	void *buf = vmalloc(size);
 
-	*dma = (unsigned long) buf;
+	if (size >= DIMM_SIZE)
+		*dma = gen_pool_alloc_algo(nfit_pool, size,
+				gen_pool_first_fit_align, &data);
+	else
+		*dma = (unsigned long) buf;
 	return __test_alloc(t, size, dma, buf);
 }
 
@@ -1174,7 +1717,9 @@ static void put_dimms(void *data)
 			device_unregister(t->dimm_dev[i]);
 }
 
-static struct class *nfit_test_dimm;
+static const struct class nfit_test_dimm = {
+	.name = "nfit_test_dimm",
+};
 
 static int dimm_name_to_id(struct device *dev)
 {
@@ -1257,10 +1802,22 @@ static ssize_t fail_cmd_code_store(struct device *dev, struct device_attribute *
 }
 static DEVICE_ATTR_RW(fail_cmd_code);
 
+static ssize_t lock_dimm_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	int dimm = dimm_name_to_id(dev);
+	struct nfit_test_sec *sec = &dimm_sec_info[dimm];
+
+	sec->state = ND_INTEL_SEC_STATE_ENABLED | ND_INTEL_SEC_STATE_LOCKED;
+	return size;
+}
+static DEVICE_ATTR_WO(lock_dimm);
+
 static struct attribute *nfit_test_dimm_attributes[] = {
 	&dev_attr_fail_cmd.attr,
 	&dev_attr_fail_cmd_code.attr,
 	&dev_attr_handle.attr,
+	&dev_attr_lock_dimm.attr,
 	NULL,
 };
 
@@ -1280,7 +1837,7 @@ static int nfit_test_dimm_init(struct nfit_test *t)
 	if (devm_add_action_or_reset(&t->pdev.dev, put_dimms, t))
 		return -ENOMEM;
 	for (i = 0; i < t->num_dcr; i++) {
-		t->dimm_dev[i] = device_create_with_groups(nfit_test_dimm,
+		t->dimm_dev[i] = device_create_with_groups(&nfit_test_dimm,
 				&t->pdev.dev, 0, NULL,
 				nfit_test_dimm_attribute_groups,
 				"test_dimm%d", i + t->dcr_idx);
@@ -1288,6 +1845,17 @@ static int nfit_test_dimm_init(struct nfit_test *t)
 			return -ENOMEM;
 	}
 	return 0;
+}
+
+static void nfit_security_init(struct nfit_test *t)
+{
+	int i;
+
+	for (i = 0; i < t->num_dcr; i++) {
+		struct nfit_test_sec *sec = &dimm_sec_info[i];
+
+		sec->ext_state = ND_INTEL_SEC_ESTATE_ENABLED;
+	}
 }
 
 static void smart_init(struct nfit_test *t)
@@ -1300,44 +1868,31 @@ static void smart_init(struct nfit_test *t)
 		.ctrl_temperature = 30 * 16,
 		.spares = 5,
 	};
-	const struct nd_intel_smart smart_data = {
-		.flags = ND_INTEL_SMART_HEALTH_VALID
-			| ND_INTEL_SMART_SPARES_VALID
-			| ND_INTEL_SMART_ALARM_VALID
-			| ND_INTEL_SMART_USED_VALID
-			| ND_INTEL_SMART_SHUTDOWN_VALID
-			| ND_INTEL_SMART_MTEMP_VALID,
-		.health = ND_INTEL_SMART_NON_CRITICAL_HEALTH,
-		.media_temperature = 23 * 16,
-		.ctrl_temperature = 25 * 16,
-		.pmic_temperature = 40 * 16,
-		.spares = 75,
-		.alarm_flags = ND_INTEL_SMART_SPARE_TRIP
-			| ND_INTEL_SMART_TEMP_TRIP,
-		.ait_status = 1,
-		.life_used = 5,
-		.shutdown_state = 0,
-		.vendor_size = 0,
-		.shutdown_count = 100,
-	};
 
 	for (i = 0; i < t->num_dcr; i++) {
-		memcpy(&t->smart[i], &smart_data, sizeof(smart_data));
+		memcpy(&t->smart[i], &smart_def, sizeof(smart_def));
 		memcpy(&t->smart_threshold[i], &smart_t_data,
 				sizeof(smart_t_data));
 	}
 }
 
+static size_t sizeof_spa(struct acpi_nfit_system_address *spa)
+{
+	/* until spa location cookie support is added... */
+	return sizeof(*spa) - 8;
+}
+
 static int nfit_test0_alloc(struct nfit_test *t)
 {
-	size_t nfit_size = sizeof(struct acpi_nfit_system_address) * NUM_SPA
+	struct acpi_nfit_system_address *spa = NULL;
+	struct acpi_nfit_flush_address *flush;
+	size_t nfit_size = sizeof_spa(spa) * NUM_SPA
 			+ sizeof(struct acpi_nfit_memory_map) * NUM_MEM
 			+ sizeof(struct acpi_nfit_control_region) * NUM_DCR
 			+ offsetof(struct acpi_nfit_control_region,
 					window_size) * NUM_DCR
 			+ sizeof(struct acpi_nfit_data_region) * NUM_BDW
-			+ (sizeof(struct acpi_nfit_flush_address)
-					+ sizeof(u64) * NUM_HINTS) * NUM_DCR
+			+ struct_size(flush, hint_address, NUM_HINTS) * NUM_DCR
 			+ sizeof(struct acpi_nfit_capabilities);
 	int i;
 
@@ -1388,12 +1943,14 @@ static int nfit_test0_alloc(struct nfit_test *t)
 	if (nfit_test_dimm_init(t))
 		return -ENOMEM;
 	smart_init(t);
+	nfit_security_init(t);
 	return ars_state_init(&t->pdev.dev, &t->ars_state);
 }
 
 static int nfit_test1_alloc(struct nfit_test *t)
 {
-	size_t nfit_size = sizeof(struct acpi_nfit_system_address) * 2
+	struct acpi_nfit_system_address *spa = NULL;
+	size_t nfit_size = sizeof_spa(spa) * 2
 		+ sizeof(struct acpi_nfit_memory_map) * 2
 		+ offsetof(struct acpi_nfit_control_region, window_size) * 2;
 	int i;
@@ -1447,6 +2004,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 	struct acpi_nfit_flush_address *flush;
 	struct acpi_nfit_capabilities *pcap;
 	unsigned int offset = 0, i;
+	unsigned long *acpi_mask;
 
 	/*
 	 * spa0 (interleave first half of dimm0 and dimm1, note storage
@@ -1455,7 +2013,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 	 */
 	spa = nfit_buf;
 	spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-	spa->header.length = sizeof(*spa);
+	spa->header.length = sizeof_spa(spa);
 	memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_PM), 16);
 	spa->range_index = 0+1;
 	spa->address = t->spa_set_dma[0];
@@ -1469,7 +2027,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 	 */
 	spa = nfit_buf + offset;
 	spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-	spa->header.length = sizeof(*spa);
+	spa->header.length = sizeof_spa(spa);
 	memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_PM), 16);
 	spa->range_index = 1+1;
 	spa->address = t->spa_set_dma[1];
@@ -1479,7 +2037,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 	/* spa2 (dcr0) dimm0 */
 	spa = nfit_buf + offset;
 	spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-	spa->header.length = sizeof(*spa);
+	spa->header.length = sizeof_spa(spa);
 	memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_DCR), 16);
 	spa->range_index = 2+1;
 	spa->address = t->dcr_dma[0];
@@ -1489,7 +2047,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 	/* spa3 (dcr1) dimm1 */
 	spa = nfit_buf + offset;
 	spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-	spa->header.length = sizeof(*spa);
+	spa->header.length = sizeof_spa(spa);
 	memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_DCR), 16);
 	spa->range_index = 3+1;
 	spa->address = t->dcr_dma[1];
@@ -1499,7 +2057,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 	/* spa4 (dcr2) dimm2 */
 	spa = nfit_buf + offset;
 	spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-	spa->header.length = sizeof(*spa);
+	spa->header.length = sizeof_spa(spa);
 	memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_DCR), 16);
 	spa->range_index = 4+1;
 	spa->address = t->dcr_dma[2];
@@ -1509,7 +2067,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 	/* spa5 (dcr3) dimm3 */
 	spa = nfit_buf + offset;
 	spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-	spa->header.length = sizeof(*spa);
+	spa->header.length = sizeof_spa(spa);
 	memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_DCR), 16);
 	spa->range_index = 5+1;
 	spa->address = t->dcr_dma[3];
@@ -1519,7 +2077,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 	/* spa6 (bdw for dcr0) dimm0 */
 	spa = nfit_buf + offset;
 	spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-	spa->header.length = sizeof(*spa);
+	spa->header.length = sizeof_spa(spa);
 	memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_BDW), 16);
 	spa->range_index = 6+1;
 	spa->address = t->dimm_dma[0];
@@ -1529,7 +2087,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 	/* spa7 (bdw for dcr1) dimm1 */
 	spa = nfit_buf + offset;
 	spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-	spa->header.length = sizeof(*spa);
+	spa->header.length = sizeof_spa(spa);
 	memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_BDW), 16);
 	spa->range_index = 7+1;
 	spa->address = t->dimm_dma[1];
@@ -1539,7 +2097,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 	/* spa8 (bdw for dcr2) dimm2 */
 	spa = nfit_buf + offset;
 	spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-	spa->header.length = sizeof(*spa);
+	spa->header.length = sizeof_spa(spa);
 	memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_BDW), 16);
 	spa->range_index = 8+1;
 	spa->address = t->dimm_dma[2];
@@ -1549,7 +2107,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 	/* spa9 (bdw for dcr3) dimm3 */
 	spa = nfit_buf + offset;
 	spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-	spa->header.length = sizeof(*spa);
+	spa->header.length = sizeof_spa(spa);
 	memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_BDW), 16);
 	spa->range_index = 9+1;
 	spa->address = t->dimm_dma[3];
@@ -1989,8 +2547,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 	pcap->header.type = ACPI_NFIT_TYPE_CAPABILITIES;
 	pcap->header.length = sizeof(*pcap);
 	pcap->highest_capability = 1;
-	pcap->capabilities = ACPI_NFIT_CAPABILITY_CACHE_FLUSH |
-		ACPI_NFIT_CAPABILITY_MEM_FLUSH;
+	pcap->capabilities = ACPI_NFIT_CAPABILITY_MEM_FLUSH;
 	offset += pcap->header.length;
 
 	if (t->setup_hotplug) {
@@ -2037,7 +2594,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 		/* spa10 (dcr4) dimm4 */
 		spa = nfit_buf + offset;
 		spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-		spa->header.length = sizeof(*spa);
+		spa->header.length = sizeof_spa(spa);
 		memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_DCR), 16);
 		spa->range_index = 10+1;
 		spa->address = t->dcr_dma[4];
@@ -2051,7 +2608,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 		 */
 		spa = nfit_buf + offset;
 		spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-		spa->header.length = sizeof(*spa);
+		spa->header.length = sizeof_spa(spa);
 		memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_PM), 16);
 		spa->range_index = 11+1;
 		spa->address = t->spa_set_dma[2];
@@ -2061,7 +2618,7 @@ static void nfit_test0_setup(struct nfit_test *t)
 		/* spa12 (bdw for dcr4) dimm4 */
 		spa = nfit_buf + offset;
 		spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-		spa->header.length = sizeof(*spa);
+		spa->header.length = sizeof_spa(spa);
 		memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_BDW), 16);
 		spa->range_index = 12+1;
 		spa->address = t->dimm_dma[4];
@@ -2150,16 +2707,36 @@ static void nfit_test0_setup(struct nfit_test *t)
 	set_bit(ND_CMD_ARS_STATUS, &acpi_desc->bus_cmd_force_en);
 	set_bit(ND_CMD_CLEAR_ERROR, &acpi_desc->bus_cmd_force_en);
 	set_bit(ND_CMD_CALL, &acpi_desc->bus_cmd_force_en);
-	set_bit(NFIT_CMD_TRANSLATE_SPA, &acpi_desc->bus_nfit_cmd_force_en);
-	set_bit(NFIT_CMD_ARS_INJECT_SET, &acpi_desc->bus_nfit_cmd_force_en);
-	set_bit(NFIT_CMD_ARS_INJECT_CLEAR, &acpi_desc->bus_nfit_cmd_force_en);
-	set_bit(NFIT_CMD_ARS_INJECT_GET, &acpi_desc->bus_nfit_cmd_force_en);
+	set_bit(NFIT_CMD_TRANSLATE_SPA, &acpi_desc->bus_dsm_mask);
+	set_bit(NFIT_CMD_ARS_INJECT_SET, &acpi_desc->bus_dsm_mask);
+	set_bit(NFIT_CMD_ARS_INJECT_CLEAR, &acpi_desc->bus_dsm_mask);
+	set_bit(NFIT_CMD_ARS_INJECT_GET, &acpi_desc->bus_dsm_mask);
 	set_bit(ND_INTEL_FW_GET_INFO, &acpi_desc->dimm_cmd_force_en);
 	set_bit(ND_INTEL_FW_START_UPDATE, &acpi_desc->dimm_cmd_force_en);
 	set_bit(ND_INTEL_FW_SEND_DATA, &acpi_desc->dimm_cmd_force_en);
 	set_bit(ND_INTEL_FW_FINISH_UPDATE, &acpi_desc->dimm_cmd_force_en);
 	set_bit(ND_INTEL_FW_FINISH_QUERY, &acpi_desc->dimm_cmd_force_en);
 	set_bit(ND_INTEL_ENABLE_LSS_STATUS, &acpi_desc->dimm_cmd_force_en);
+	set_bit(NVDIMM_INTEL_GET_SECURITY_STATE,
+			&acpi_desc->dimm_cmd_force_en);
+	set_bit(NVDIMM_INTEL_SET_PASSPHRASE, &acpi_desc->dimm_cmd_force_en);
+	set_bit(NVDIMM_INTEL_DISABLE_PASSPHRASE,
+			&acpi_desc->dimm_cmd_force_en);
+	set_bit(NVDIMM_INTEL_UNLOCK_UNIT, &acpi_desc->dimm_cmd_force_en);
+	set_bit(NVDIMM_INTEL_FREEZE_LOCK, &acpi_desc->dimm_cmd_force_en);
+	set_bit(NVDIMM_INTEL_SECURE_ERASE, &acpi_desc->dimm_cmd_force_en);
+	set_bit(NVDIMM_INTEL_OVERWRITE, &acpi_desc->dimm_cmd_force_en);
+	set_bit(NVDIMM_INTEL_QUERY_OVERWRITE, &acpi_desc->dimm_cmd_force_en);
+	set_bit(NVDIMM_INTEL_SET_MASTER_PASSPHRASE,
+			&acpi_desc->dimm_cmd_force_en);
+	set_bit(NVDIMM_INTEL_MASTER_SECURE_ERASE,
+			&acpi_desc->dimm_cmd_force_en);
+	set_bit(NVDIMM_INTEL_FW_ACTIVATE_DIMMINFO, &acpi_desc->dimm_cmd_force_en);
+	set_bit(NVDIMM_INTEL_FW_ACTIVATE_ARM, &acpi_desc->dimm_cmd_force_en);
+
+	acpi_mask = &acpi_desc->family_dsm_mask[NVDIMM_BUS_FAMILY_INTEL];
+	set_bit(NVDIMM_BUS_INTEL_FW_ACTIVATE_BUSINFO, acpi_mask);
+	set_bit(NVDIMM_BUS_INTEL_FW_ACTIVATE, acpi_mask);
 }
 
 static void nfit_test1_setup(struct nfit_test *t)
@@ -2175,7 +2752,7 @@ static void nfit_test1_setup(struct nfit_test *t)
 	/* spa0 (flat range with no bdw aliasing) */
 	spa = nfit_buf + offset;
 	spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-	spa->header.length = sizeof(*spa);
+	spa->header.length = sizeof_spa(spa);
 	memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_PM), 16);
 	spa->range_index = 0+1;
 	spa->address = t->spa_set_dma[0];
@@ -2185,7 +2762,7 @@ static void nfit_test1_setup(struct nfit_test *t)
 	/* virtual cd region */
 	spa = nfit_buf + offset;
 	spa->header.type = ACPI_NFIT_TYPE_SYSTEM_ADDRESS;
-	spa->header.length = sizeof(*spa);
+	spa->header.length = sizeof_spa(spa);
 	memcpy(spa->range_guid, to_nfit_uuid(NFIT_SPA_VCD), 16);
 	spa->range_index = 0;
 	spa->address = t->spa_set_dma[1];
@@ -2270,28 +2847,6 @@ static void nfit_test1_setup(struct nfit_test *t)
 	set_bit(ND_CMD_SET_CONFIG_DATA, &acpi_desc->dimm_cmd_force_en);
 }
 
-static int nfit_test_blk_do_io(struct nd_blk_region *ndbr, resource_size_t dpa,
-		void *iobuf, u64 len, int rw)
-{
-	struct nfit_blk *nfit_blk = ndbr->blk_provider_data;
-	struct nfit_blk_mmio *mmio = &nfit_blk->mmio[BDW];
-	struct nd_region *nd_region = &ndbr->nd_region;
-	unsigned int lane;
-
-	lane = nd_region_acquire_lane(nd_region);
-	if (rw)
-		memcpy(mmio->addr.base + dpa, iobuf, len);
-	else {
-		memcpy(iobuf, mmio->addr.base + dpa, len);
-
-		/* give us some some coverage of the arch_invalidate_pmem() API */
-		arch_invalidate_pmem(mmio->addr.base + dpa, len);
-	}
-	nd_region_release_lane(nd_region, lane);
-
-	return 0;
-}
-
 static unsigned long nfit_ctl_handle;
 
 union acpi_object *result;
@@ -2328,14 +2883,18 @@ static int nfit_ctl_test(struct device *dev)
 	struct acpi_nfit_desc *acpi_desc;
 	const u64 test_val = 0x0123456789abcdefULL;
 	unsigned long mask, cmd_size, offset;
-	union {
-		struct nd_cmd_get_config_size cfg_size;
-		struct nd_cmd_clear_error clear_err;
-		struct nd_cmd_ars_status ars_stat;
-		struct nd_cmd_ars_cap ars_cap;
-		char buf[sizeof(struct nd_cmd_ars_status)
-			+ sizeof(struct nd_ars_record)];
-	} cmds;
+	struct nfit_ctl_test_cmd {
+		struct nd_cmd_pkg pkg;
+		union {
+			struct nd_cmd_get_config_size cfg_size;
+			struct nd_cmd_clear_error clear_err;
+			struct nd_cmd_ars_status ars_stat;
+			struct nd_cmd_ars_cap ars_cap;
+			struct nd_intel_bus_fw_activate_businfo fwa_info;
+			char buf[sizeof(struct nd_cmd_ars_status)
+				+ sizeof(struct nd_ars_record)];
+		};
+	} cmd;
 
 	adev = devm_kzalloc(dev, sizeof(*adev), GFP_KERNEL);
 	if (!adev)
@@ -2360,11 +2919,15 @@ static int nfit_ctl_test(struct device *dev)
 			.module = THIS_MODULE,
 			.provider_name = "ACPI.NFIT",
 			.ndctl = acpi_nfit_ctl,
-			.bus_dsm_mask = 1UL << NFIT_CMD_TRANSLATE_SPA
-				| 1UL << NFIT_CMD_ARS_INJECT_SET
-				| 1UL << NFIT_CMD_ARS_INJECT_CLEAR
-				| 1UL << NFIT_CMD_ARS_INJECT_GET,
+			.bus_family_mask = 1UL << NVDIMM_BUS_FAMILY_NFIT
+				| 1UL << NVDIMM_BUS_FAMILY_INTEL,
 		},
+		.bus_dsm_mask = 1UL << NFIT_CMD_TRANSLATE_SPA
+			| 1UL << NFIT_CMD_ARS_INJECT_SET
+			| 1UL << NFIT_CMD_ARS_INJECT_CLEAR
+			| 1UL << NFIT_CMD_ARS_INJECT_GET,
+		.family_dsm_mask[NVDIMM_BUS_FAMILY_INTEL] =
+			NVDIMM_BUS_INTEL_FW_ACTIVATE_CMDMASK,
 		.dev = &adev->dev,
 	};
 
@@ -2395,21 +2958,21 @@ static int nfit_ctl_test(struct device *dev)
 
 
 	/* basic checkout of a typical 'get config size' command */
-	cmd_size = sizeof(cmds.cfg_size);
-	cmds.cfg_size = (struct nd_cmd_get_config_size) {
+	cmd_size = sizeof(cmd.cfg_size);
+	cmd.cfg_size = (struct nd_cmd_get_config_size) {
 		.status = 0,
 		.config_size = SZ_128K,
 		.max_xfer = SZ_4K,
 	};
-	rc = setup_result(cmds.buf, cmd_size);
+	rc = setup_result(cmd.buf, cmd_size);
 	if (rc)
 		return rc;
 	rc = acpi_nfit_ctl(&acpi_desc->nd_desc, nvdimm, ND_CMD_GET_CONFIG_SIZE,
-			cmds.buf, cmd_size, &cmd_rc);
+			cmd.buf, cmd_size, &cmd_rc);
 
-	if (rc < 0 || cmd_rc || cmds.cfg_size.status != 0
-			|| cmds.cfg_size.config_size != SZ_128K
-			|| cmds.cfg_size.max_xfer != SZ_4K) {
+	if (rc < 0 || cmd_rc || cmd.cfg_size.status != 0
+			|| cmd.cfg_size.config_size != SZ_128K
+			|| cmd.cfg_size.max_xfer != SZ_4K) {
 		dev_dbg(dev, "%s: failed at: %d rc: %d cmd_rc: %d\n",
 				__func__, __LINE__, rc, cmd_rc);
 		return -EIO;
@@ -2418,14 +2981,14 @@ static int nfit_ctl_test(struct device *dev)
 
 	/* test ars_status with zero output */
 	cmd_size = offsetof(struct nd_cmd_ars_status, address);
-	cmds.ars_stat = (struct nd_cmd_ars_status) {
+	cmd.ars_stat = (struct nd_cmd_ars_status) {
 		.out_length = 0,
 	};
-	rc = setup_result(cmds.buf, cmd_size);
+	rc = setup_result(cmd.buf, cmd_size);
 	if (rc)
 		return rc;
 	rc = acpi_nfit_ctl(&acpi_desc->nd_desc, NULL, ND_CMD_ARS_STATUS,
-			cmds.buf, cmd_size, &cmd_rc);
+			cmd.buf, cmd_size, &cmd_rc);
 
 	if (rc < 0 || cmd_rc) {
 		dev_dbg(dev, "%s: failed at: %d rc: %d cmd_rc: %d\n",
@@ -2435,16 +2998,16 @@ static int nfit_ctl_test(struct device *dev)
 
 
 	/* test ars_cap with benign extended status */
-	cmd_size = sizeof(cmds.ars_cap);
-	cmds.ars_cap = (struct nd_cmd_ars_cap) {
+	cmd_size = sizeof(cmd.ars_cap);
+	cmd.ars_cap = (struct nd_cmd_ars_cap) {
 		.status = ND_ARS_PERSISTENT << 16,
 	};
 	offset = offsetof(struct nd_cmd_ars_cap, status);
-	rc = setup_result(cmds.buf + offset, cmd_size - offset);
+	rc = setup_result(cmd.buf + offset, cmd_size - offset);
 	if (rc)
 		return rc;
 	rc = acpi_nfit_ctl(&acpi_desc->nd_desc, NULL, ND_CMD_ARS_CAP,
-			cmds.buf, cmd_size, &cmd_rc);
+			cmd.buf, cmd_size, &cmd_rc);
 
 	if (rc < 0 || cmd_rc) {
 		dev_dbg(dev, "%s: failed at: %d rc: %d cmd_rc: %d\n",
@@ -2454,19 +3017,19 @@ static int nfit_ctl_test(struct device *dev)
 
 
 	/* test ars_status with 'status' trimmed from 'out_length' */
-	cmd_size = sizeof(cmds.ars_stat) + sizeof(struct nd_ars_record);
-	cmds.ars_stat = (struct nd_cmd_ars_status) {
+	cmd_size = sizeof(cmd.ars_stat) + sizeof(struct nd_ars_record);
+	cmd.ars_stat = (struct nd_cmd_ars_status) {
 		.out_length = cmd_size - 4,
 	};
-	record = &cmds.ars_stat.records[0];
+	record = &cmd.ars_stat.records[0];
 	*record = (struct nd_ars_record) {
 		.length = test_val,
 	};
-	rc = setup_result(cmds.buf, cmd_size);
+	rc = setup_result(cmd.buf, cmd_size);
 	if (rc)
 		return rc;
 	rc = acpi_nfit_ctl(&acpi_desc->nd_desc, NULL, ND_CMD_ARS_STATUS,
-			cmds.buf, cmd_size, &cmd_rc);
+			cmd.buf, cmd_size, &cmd_rc);
 
 	if (rc < 0 || cmd_rc || record->length != test_val) {
 		dev_dbg(dev, "%s: failed at: %d rc: %d cmd_rc: %d\n",
@@ -2476,19 +3039,19 @@ static int nfit_ctl_test(struct device *dev)
 
 
 	/* test ars_status with 'Output (Size)' including 'status' */
-	cmd_size = sizeof(cmds.ars_stat) + sizeof(struct nd_ars_record);
-	cmds.ars_stat = (struct nd_cmd_ars_status) {
+	cmd_size = sizeof(cmd.ars_stat) + sizeof(struct nd_ars_record);
+	cmd.ars_stat = (struct nd_cmd_ars_status) {
 		.out_length = cmd_size,
 	};
-	record = &cmds.ars_stat.records[0];
+	record = &cmd.ars_stat.records[0];
 	*record = (struct nd_ars_record) {
 		.length = test_val,
 	};
-	rc = setup_result(cmds.buf, cmd_size);
+	rc = setup_result(cmd.buf, cmd_size);
 	if (rc)
 		return rc;
 	rc = acpi_nfit_ctl(&acpi_desc->nd_desc, NULL, ND_CMD_ARS_STATUS,
-			cmds.buf, cmd_size, &cmd_rc);
+			cmd.buf, cmd_size, &cmd_rc);
 
 	if (rc < 0 || cmd_rc || record->length != test_val) {
 		dev_dbg(dev, "%s: failed at: %d rc: %d cmd_rc: %d\n",
@@ -2498,15 +3061,15 @@ static int nfit_ctl_test(struct device *dev)
 
 
 	/* test extended status for get_config_size results in failure */
-	cmd_size = sizeof(cmds.cfg_size);
-	cmds.cfg_size = (struct nd_cmd_get_config_size) {
+	cmd_size = sizeof(cmd.cfg_size);
+	cmd.cfg_size = (struct nd_cmd_get_config_size) {
 		.status = 1 << 16,
 	};
-	rc = setup_result(cmds.buf, cmd_size);
+	rc = setup_result(cmd.buf, cmd_size);
 	if (rc)
 		return rc;
 	rc = acpi_nfit_ctl(&acpi_desc->nd_desc, nvdimm, ND_CMD_GET_CONFIG_SIZE,
-			cmds.buf, cmd_size, &cmd_rc);
+			cmd.buf, cmd_size, &cmd_rc);
 
 	if (rc < 0 || cmd_rc >= 0) {
 		dev_dbg(dev, "%s: failed at: %d rc: %d cmd_rc: %d\n",
@@ -2515,16 +3078,46 @@ static int nfit_ctl_test(struct device *dev)
 	}
 
 	/* test clear error */
-	cmd_size = sizeof(cmds.clear_err);
-	cmds.clear_err = (struct nd_cmd_clear_error) {
+	cmd_size = sizeof(cmd.clear_err);
+	cmd.clear_err = (struct nd_cmd_clear_error) {
 		.length = 512,
 		.cleared = 512,
 	};
-	rc = setup_result(cmds.buf, cmd_size);
+	rc = setup_result(cmd.buf, cmd_size);
 	if (rc)
 		return rc;
 	rc = acpi_nfit_ctl(&acpi_desc->nd_desc, NULL, ND_CMD_CLEAR_ERROR,
-			cmds.buf, cmd_size, &cmd_rc);
+			cmd.buf, cmd_size, &cmd_rc);
+	if (rc < 0 || cmd_rc) {
+		dev_dbg(dev, "%s: failed at: %d rc: %d cmd_rc: %d\n",
+				__func__, __LINE__, rc, cmd_rc);
+		return -EIO;
+	}
+
+	/* test firmware activate bus info */
+	cmd_size = sizeof(cmd.fwa_info);
+	cmd = (struct nfit_ctl_test_cmd) {
+		.pkg = {
+			.nd_command = NVDIMM_BUS_INTEL_FW_ACTIVATE_BUSINFO,
+			.nd_family = NVDIMM_BUS_FAMILY_INTEL,
+			.nd_size_out = cmd_size,
+			.nd_fw_size = cmd_size,
+		},
+		.fwa_info = {
+			.state = ND_INTEL_FWA_IDLE,
+			.capability = ND_INTEL_BUS_FWA_CAP_FWQUIESCE
+				| ND_INTEL_BUS_FWA_CAP_OSQUIESCE,
+			.activate_tmo = 1,
+			.cpu_quiesce_tmo = 1,
+			.io_quiesce_tmo = 1,
+			.max_quiesce_tmo = 1,
+		},
+	};
+	rc = setup_result(cmd.buf, cmd_size);
+	if (rc)
+		return rc;
+	rc = acpi_nfit_ctl(&acpi_desc->nd_desc, NULL, ND_CMD_CALL,
+			&cmd, sizeof(cmd.pkg) + cmd_size, &cmd_rc);
 	if (rc < 0 || cmd_rc) {
 		dev_dbg(dev, "%s: failed at: %d rc: %d cmd_rc: %d\n",
 				__func__, __LINE__, rc, cmd_rc);
@@ -2609,7 +3202,6 @@ static int nfit_test_probe(struct platform_device *pdev)
 	nfit_test->setup(nfit_test);
 	acpi_desc = &nfit_test->acpi_desc;
 	acpi_nfit_desc_init(acpi_desc, &pdev->dev);
-	acpi_desc->blk_do_io = nfit_test_blk_do_io;
 	nd_desc = &acpi_desc->nd_desc;
 	nd_desc->provider_name = NULL;
 	nd_desc->module = THIS_MODULE;
@@ -2645,18 +3237,13 @@ static int nfit_test_probe(struct platform_device *pdev)
 		u32 nfit_handle = __to_nfit_memdev(nfit_mem)->device_handle;
 		int i;
 
-		for (i = 0; i < NUM_DCR; i++)
+		for (i = 0; i < ARRAY_SIZE(handle); i++)
 			if (nfit_handle == handle[i])
 				dev_set_drvdata(nfit_test->dimm_dev[i],
 						nfit_mem);
 	}
 	mutex_unlock(&acpi_desc->init_mutex);
 
-	return 0;
-}
-
-static int nfit_test_remove(struct platform_device *pdev)
-{
 	return 0;
 }
 
@@ -2674,7 +3261,6 @@ static const struct platform_device_id nfit_test_id[] = {
 
 static struct platform_driver nfit_test_driver = {
 	.probe = nfit_test_probe,
-	.remove = nfit_test_remove,
 	.driver = {
 		.name = KBUILD_MODNAME,
 	},
@@ -2689,6 +3275,7 @@ static __init int nfit_test_init(void)
 	libnvdimm_test();
 	acpi_nfit_test();
 	device_dax_test();
+	dax_pmem_test();
 
 	nfit_test_setup(nfit_test_lookup, nfit_test_evaluate_dsm);
 
@@ -2696,9 +3283,18 @@ static __init int nfit_test_init(void)
 	if (!nfit_wq)
 		return -ENOMEM;
 
-	nfit_test_dimm = class_create(THIS_MODULE, "nfit_test_dimm");
-	if (IS_ERR(nfit_test_dimm)) {
-		rc = PTR_ERR(nfit_test_dimm);
+	rc = class_register(&nfit_test_dimm);
+	if (rc)
+		goto err_register;
+
+	nfit_pool = gen_pool_create(ilog2(SZ_4M), NUMA_NO_NODE);
+	if (!nfit_pool) {
+		rc = -ENOMEM;
+		goto err_register;
+	}
+
+	if (gen_pool_add(nfit_pool, SZ_4G, SZ_4G, NUMA_NO_NODE)) {
+		rc = -ENOMEM;
 		goto err_register;
 	}
 
@@ -2757,6 +3353,9 @@ static __init int nfit_test_init(void)
 	return 0;
 
  err_register:
+	if (nfit_pool)
+		gen_pool_destroy(nfit_pool);
+
 	destroy_workqueue(nfit_wq);
 	for (i = 0; i < NUM_NFITS; i++)
 		if (instances[i])
@@ -2773,19 +3372,21 @@ static __exit void nfit_test_exit(void)
 {
 	int i;
 
-	flush_workqueue(nfit_wq);
 	destroy_workqueue(nfit_wq);
 	for (i = 0; i < NUM_NFITS; i++)
 		platform_device_unregister(&instances[i]->pdev);
 	platform_driver_unregister(&nfit_test_driver);
 	nfit_test_teardown();
 
+	gen_pool_destroy(nfit_pool);
+
 	for (i = 0; i < NUM_NFITS; i++)
 		put_device(&instances[i]->pdev.dev);
-	class_destroy(nfit_test_dimm);
+	class_unregister(&nfit_test_dimm);
 }
 
 module_init(nfit_test_init);
 module_exit(nfit_test_exit);
+MODULE_DESCRIPTION("Test ACPI NFIT devices");
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Intel Corporation");

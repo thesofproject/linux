@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /****************************************************************************
  * Driver for Solarflare network controllers and boards
  * Copyright 2011-2013 Solarflare Communications Inc.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation, incorporated herein by reference.
  */
 
 #include <linux/bitops.h>
@@ -288,7 +285,7 @@ efx_mcdi_mon_add_attr(struct efx_nic *efx, const char *name,
 	struct efx_mcdi_mon *hwmon = efx_mcdi_mon(efx);
 	struct efx_mcdi_mon_attribute *attr = &hwmon->attrs[hwmon->n_attrs];
 
-	strlcpy(attr->name, name, sizeof(attr->name));
+	strscpy(attr->name, name, sizeof(attr->name));
 	attr->index = index;
 	attr->type = type;
 	if (type < ARRAY_SIZE(efx_mcdi_sensor_type))
@@ -353,13 +350,12 @@ int efx_mcdi_mon_probe(struct efx_nic *efx)
 	 * value, min, max, crit, alarm and label for each sensor.
 	 */
 	n_attrs = 6 * n_sensors;
-	hwmon->attrs = kcalloc(n_attrs, sizeof(*hwmon->attrs), GFP_KERNEL);
+	hwmon->attrs = kzalloc_objs(*hwmon->attrs, n_attrs);
 	if (!hwmon->attrs) {
 		rc = -ENOMEM;
 		goto fail;
 	}
-	hwmon->group.attrs = kcalloc(n_attrs + 1, sizeof(struct attribute *),
-				     GFP_KERNEL);
+	hwmon->group.attrs = kzalloc_objs(struct attribute *, n_attrs + 1);
 	if (!hwmon->group.attrs) {
 		rc = -ENOMEM;
 		goto fail;

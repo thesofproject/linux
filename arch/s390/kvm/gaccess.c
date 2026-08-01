@@ -9,196 +9,44 @@
 #include <linux/vmalloc.h>
 #include <linux/mm_types.h>
 #include <linux/err.h>
-
-#include <asm/pgtable.h>
-#include <asm/gmap.h>
+#include <linux/pgtable.h>
+#include <linux/bitfield.h>
+#include <linux/kvm_host.h>
+#include <linux/kvm_types.h>
+#include <asm/diag.h>
+#include <asm/access-regs.h>
+#include <asm/fault.h>
+#include <asm/dat-bits.h>
 #include "kvm-s390.h"
+#include "dat.h"
+#include "gmap.h"
 #include "gaccess.h"
-#include <asm/switch_to.h>
+#include "faultin.h"
 
-union asce {
+#define GMAP_SHADOW_FAKE_TABLE 1ULL
+
+union dat_table_entry {
 	unsigned long val;
-	struct {
-		unsigned long origin : 52; /* Region- or Segment-Table Origin */
-		unsigned long	 : 2;
-		unsigned long g  : 1; /* Subspace Group Control */
-		unsigned long p  : 1; /* Private Space Control */
-		unsigned long s  : 1; /* Storage-Alteration-Event Control */
-		unsigned long x  : 1; /* Space-Switch-Event Control */
-		unsigned long r  : 1; /* Real-Space Control */
-		unsigned long	 : 1;
-		unsigned long dt : 2; /* Designation-Type Control */
-		unsigned long tl : 2; /* Region- or Segment-Table Length */
-	};
+	union region1_table_entry pgd;
+	union region2_table_entry p4d;
+	union region3_table_entry pud;
+	union segment_table_entry pmd;
+	union page_table_entry pte;
 };
 
-enum {
-	ASCE_TYPE_SEGMENT = 0,
-	ASCE_TYPE_REGION3 = 1,
-	ASCE_TYPE_REGION2 = 2,
-	ASCE_TYPE_REGION1 = 3
+#define WALK_N_ENTRIES 7
+#define LEVEL_MEM -2
+struct pgtwalk {
+	struct guest_fault raw_entries[WALK_N_ENTRIES];
+	gpa_t last_addr;
+	int level;
+	bool p;
 };
 
-union region1_table_entry {
-	unsigned long val;
-	struct {
-		unsigned long rto: 52;/* Region-Table Origin */
-		unsigned long	 : 2;
-		unsigned long p  : 1; /* DAT-Protection Bit */
-		unsigned long	 : 1;
-		unsigned long tf : 2; /* Region-Second-Table Offset */
-		unsigned long i  : 1; /* Region-Invalid Bit */
-		unsigned long	 : 1;
-		unsigned long tt : 2; /* Table-Type Bits */
-		unsigned long tl : 2; /* Region-Second-Table Length */
-	};
-};
-
-union region2_table_entry {
-	unsigned long val;
-	struct {
-		unsigned long rto: 52;/* Region-Table Origin */
-		unsigned long	 : 2;
-		unsigned long p  : 1; /* DAT-Protection Bit */
-		unsigned long	 : 1;
-		unsigned long tf : 2; /* Region-Third-Table Offset */
-		unsigned long i  : 1; /* Region-Invalid Bit */
-		unsigned long	 : 1;
-		unsigned long tt : 2; /* Table-Type Bits */
-		unsigned long tl : 2; /* Region-Third-Table Length */
-	};
-};
-
-struct region3_table_entry_fc0 {
-	unsigned long sto: 52;/* Segment-Table Origin */
-	unsigned long	 : 1;
-	unsigned long fc : 1; /* Format-Control */
-	unsigned long p  : 1; /* DAT-Protection Bit */
-	unsigned long	 : 1;
-	unsigned long tf : 2; /* Segment-Table Offset */
-	unsigned long i  : 1; /* Region-Invalid Bit */
-	unsigned long cr : 1; /* Common-Region Bit */
-	unsigned long tt : 2; /* Table-Type Bits */
-	unsigned long tl : 2; /* Segment-Table Length */
-};
-
-struct region3_table_entry_fc1 {
-	unsigned long rfaa : 33; /* Region-Frame Absolute Address */
-	unsigned long	 : 14;
-	unsigned long av : 1; /* ACCF-Validity Control */
-	unsigned long acc: 4; /* Access-Control Bits */
-	unsigned long f  : 1; /* Fetch-Protection Bit */
-	unsigned long fc : 1; /* Format-Control */
-	unsigned long p  : 1; /* DAT-Protection Bit */
-	unsigned long iep: 1; /* Instruction-Execution-Protection */
-	unsigned long	 : 2;
-	unsigned long i  : 1; /* Region-Invalid Bit */
-	unsigned long cr : 1; /* Common-Region Bit */
-	unsigned long tt : 2; /* Table-Type Bits */
-	unsigned long	 : 2;
-};
-
-union region3_table_entry {
-	unsigned long val;
-	struct region3_table_entry_fc0 fc0;
-	struct region3_table_entry_fc1 fc1;
-	struct {
-		unsigned long	 : 53;
-		unsigned long fc : 1; /* Format-Control */
-		unsigned long	 : 4;
-		unsigned long i  : 1; /* Region-Invalid Bit */
-		unsigned long cr : 1; /* Common-Region Bit */
-		unsigned long tt : 2; /* Table-Type Bits */
-		unsigned long	 : 2;
-	};
-};
-
-struct segment_entry_fc0 {
-	unsigned long pto: 53;/* Page-Table Origin */
-	unsigned long fc : 1; /* Format-Control */
-	unsigned long p  : 1; /* DAT-Protection Bit */
-	unsigned long	 : 3;
-	unsigned long i  : 1; /* Segment-Invalid Bit */
-	unsigned long cs : 1; /* Common-Segment Bit */
-	unsigned long tt : 2; /* Table-Type Bits */
-	unsigned long	 : 2;
-};
-
-struct segment_entry_fc1 {
-	unsigned long sfaa : 44; /* Segment-Frame Absolute Address */
-	unsigned long	 : 3;
-	unsigned long av : 1; /* ACCF-Validity Control */
-	unsigned long acc: 4; /* Access-Control Bits */
-	unsigned long f  : 1; /* Fetch-Protection Bit */
-	unsigned long fc : 1; /* Format-Control */
-	unsigned long p  : 1; /* DAT-Protection Bit */
-	unsigned long iep: 1; /* Instruction-Execution-Protection */
-	unsigned long	 : 2;
-	unsigned long i  : 1; /* Segment-Invalid Bit */
-	unsigned long cs : 1; /* Common-Segment Bit */
-	unsigned long tt : 2; /* Table-Type Bits */
-	unsigned long	 : 2;
-};
-
-union segment_table_entry {
-	unsigned long val;
-	struct segment_entry_fc0 fc0;
-	struct segment_entry_fc1 fc1;
-	struct {
-		unsigned long	 : 53;
-		unsigned long fc : 1; /* Format-Control */
-		unsigned long	 : 4;
-		unsigned long i  : 1; /* Segment-Invalid Bit */
-		unsigned long cs : 1; /* Common-Segment Bit */
-		unsigned long tt : 2; /* Table-Type Bits */
-		unsigned long	 : 2;
-	};
-};
-
-enum {
-	TABLE_TYPE_SEGMENT = 0,
-	TABLE_TYPE_REGION3 = 1,
-	TABLE_TYPE_REGION2 = 2,
-	TABLE_TYPE_REGION1 = 3
-};
-
-union page_table_entry {
-	unsigned long val;
-	struct {
-		unsigned long pfra : 52; /* Page-Frame Real Address */
-		unsigned long z  : 1; /* Zero Bit */
-		unsigned long i  : 1; /* Page-Invalid Bit */
-		unsigned long p  : 1; /* DAT-Protection Bit */
-		unsigned long iep: 1; /* Instruction-Execution-Protection */
-		unsigned long	 : 8;
-	};
-};
-
-/*
- * vaddress union in order to easily decode a virtual address into its
- * region first index, region second index etc. parts.
- */
-union vaddress {
-	unsigned long addr;
-	struct {
-		unsigned long rfx : 11;
-		unsigned long rsx : 11;
-		unsigned long rtx : 11;
-		unsigned long sx  : 11;
-		unsigned long px  : 8;
-		unsigned long bx  : 12;
-	};
-	struct {
-		unsigned long rfx01 : 2;
-		unsigned long	    : 9;
-		unsigned long rsx01 : 2;
-		unsigned long	    : 9;
-		unsigned long rtx01 : 2;
-		unsigned long	    : 9;
-		unsigned long sx01  : 2;
-		unsigned long	    : 29;
-	};
-};
+static inline struct guest_fault *get_entries(struct pgtwalk *w)
+{
+	return w->raw_entries - LEVEL_MEM;
+}
 
 /*
  * raddress union which will contain the result (real or absolute address)
@@ -261,119 +109,126 @@ struct aste {
 	/* .. more fields there */
 };
 
-int ipte_lock_held(struct kvm_vcpu *vcpu)
-{
-	if (vcpu->arch.sie_block->eca & ECA_SII) {
-		int rc;
+union oac {
+	unsigned int val;
+	struct {
+		struct {
+			unsigned short key : 4;
+			unsigned short     : 4;
+			unsigned short as  : 2;
+			unsigned short     : 4;
+			unsigned short k   : 1;
+			unsigned short a   : 1;
+		} oac1;
+		struct {
+			unsigned short key : 4;
+			unsigned short     : 4;
+			unsigned short as  : 2;
+			unsigned short     : 4;
+			unsigned short k   : 1;
+			unsigned short a   : 1;
+		} oac2;
+	};
+};
 
-		read_lock(&vcpu->kvm->arch.sca_lock);
-		rc = kvm_s390_get_ipte_control(vcpu->kvm)->kh != 0;
-		read_unlock(&vcpu->kvm->arch.sca_lock);
-		return rc;
-	}
-	return vcpu->kvm->arch.ipte_lock_count != 0;
+int ipte_lock_held(struct kvm *kvm)
+{
+	if (sclp.has_siif)
+		return kvm->arch.sca->ipte_control.kh != 0;
+
+	return kvm->arch.ipte_lock_count != 0;
 }
 
-static void ipte_lock_simple(struct kvm_vcpu *vcpu)
+static void ipte_lock_simple(struct kvm *kvm)
 {
 	union ipte_control old, new, *ic;
 
-	mutex_lock(&vcpu->kvm->arch.ipte_mutex);
-	vcpu->kvm->arch.ipte_lock_count++;
-	if (vcpu->kvm->arch.ipte_lock_count > 1)
+	mutex_lock(&kvm->arch.ipte_mutex);
+	kvm->arch.ipte_lock_count++;
+	if (kvm->arch.ipte_lock_count > 1)
 		goto out;
 retry:
-	read_lock(&vcpu->kvm->arch.sca_lock);
-	ic = kvm_s390_get_ipte_control(vcpu->kvm);
+	ic = &kvm->arch.sca->ipte_control;
+	old = READ_ONCE(*ic);
 	do {
-		old = READ_ONCE(*ic);
 		if (old.k) {
-			read_unlock(&vcpu->kvm->arch.sca_lock);
 			cond_resched();
 			goto retry;
 		}
 		new = old;
 		new.k = 1;
-	} while (cmpxchg(&ic->val, old.val, new.val) != old.val);
-	read_unlock(&vcpu->kvm->arch.sca_lock);
+	} while (!try_cmpxchg(&ic->val, &old.val, new.val));
 out:
-	mutex_unlock(&vcpu->kvm->arch.ipte_mutex);
+	mutex_unlock(&kvm->arch.ipte_mutex);
 }
 
-static void ipte_unlock_simple(struct kvm_vcpu *vcpu)
+static void ipte_unlock_simple(struct kvm *kvm)
 {
 	union ipte_control old, new, *ic;
 
-	mutex_lock(&vcpu->kvm->arch.ipte_mutex);
-	vcpu->kvm->arch.ipte_lock_count--;
-	if (vcpu->kvm->arch.ipte_lock_count)
+	mutex_lock(&kvm->arch.ipte_mutex);
+	kvm->arch.ipte_lock_count--;
+	if (kvm->arch.ipte_lock_count)
 		goto out;
-	read_lock(&vcpu->kvm->arch.sca_lock);
-	ic = kvm_s390_get_ipte_control(vcpu->kvm);
+	ic = &kvm->arch.sca->ipte_control;
+	old = READ_ONCE(*ic);
 	do {
-		old = READ_ONCE(*ic);
 		new = old;
 		new.k = 0;
-	} while (cmpxchg(&ic->val, old.val, new.val) != old.val);
-	read_unlock(&vcpu->kvm->arch.sca_lock);
-	wake_up(&vcpu->kvm->arch.ipte_wq);
+	} while (!try_cmpxchg(&ic->val, &old.val, new.val));
+	wake_up(&kvm->arch.ipte_wq);
 out:
-	mutex_unlock(&vcpu->kvm->arch.ipte_mutex);
+	mutex_unlock(&kvm->arch.ipte_mutex);
 }
 
-static void ipte_lock_siif(struct kvm_vcpu *vcpu)
+static void ipte_lock_siif(struct kvm *kvm)
 {
 	union ipte_control old, new, *ic;
 
 retry:
-	read_lock(&vcpu->kvm->arch.sca_lock);
-	ic = kvm_s390_get_ipte_control(vcpu->kvm);
+	ic = &kvm->arch.sca->ipte_control;
+	old = READ_ONCE(*ic);
 	do {
-		old = READ_ONCE(*ic);
 		if (old.kg) {
-			read_unlock(&vcpu->kvm->arch.sca_lock);
 			cond_resched();
 			goto retry;
 		}
 		new = old;
 		new.k = 1;
 		new.kh++;
-	} while (cmpxchg(&ic->val, old.val, new.val) != old.val);
-	read_unlock(&vcpu->kvm->arch.sca_lock);
+	} while (!try_cmpxchg(&ic->val, &old.val, new.val));
 }
 
-static void ipte_unlock_siif(struct kvm_vcpu *vcpu)
+static void ipte_unlock_siif(struct kvm *kvm)
 {
 	union ipte_control old, new, *ic;
 
-	read_lock(&vcpu->kvm->arch.sca_lock);
-	ic = kvm_s390_get_ipte_control(vcpu->kvm);
+	ic = &kvm->arch.sca->ipte_control;
+	old = READ_ONCE(*ic);
 	do {
-		old = READ_ONCE(*ic);
 		new = old;
 		new.kh--;
 		if (!new.kh)
 			new.k = 0;
-	} while (cmpxchg(&ic->val, old.val, new.val) != old.val);
-	read_unlock(&vcpu->kvm->arch.sca_lock);
+	} while (!try_cmpxchg(&ic->val, &old.val, new.val));
 	if (!new.kh)
-		wake_up(&vcpu->kvm->arch.ipte_wq);
+		wake_up(&kvm->arch.ipte_wq);
 }
 
-void ipte_lock(struct kvm_vcpu *vcpu)
+void ipte_lock(struct kvm *kvm)
 {
-	if (vcpu->arch.sie_block->eca & ECA_SII)
-		ipte_lock_siif(vcpu);
+	if (sclp.has_siif)
+		ipte_lock_siif(kvm);
 	else
-		ipte_lock_simple(vcpu);
+		ipte_lock_simple(kvm);
 }
 
-void ipte_unlock(struct kvm_vcpu *vcpu)
+void ipte_unlock(struct kvm *kvm)
 {
-	if (vcpu->arch.sie_block->eca & ECA_SII)
-		ipte_unlock_siif(vcpu);
+	if (sclp.has_siif)
+		ipte_unlock_siif(kvm);
 	else
-		ipte_unlock_simple(vcpu);
+		ipte_unlock_simple(kvm);
 }
 
 static int ar_translation(struct kvm_vcpu *vcpu, union asce *asce, u8 ar,
@@ -390,7 +245,8 @@ static int ar_translation(struct kvm_vcpu *vcpu, union asce *asce, u8 ar,
 	if (ar >= NUM_ACRS)
 		return -EINVAL;
 
-	save_access_regs(vcpu->run->s.regs.acrs);
+	if (vcpu->arch.acrs_loaded)
+		save_access_regs(vcpu->run->s.regs.acrs);
 	alet.val = vcpu->run->s.regs.acrs[ar];
 
 	if (ar == 0 || alet.val == 0) {
@@ -465,61 +321,55 @@ static int ar_translation(struct kvm_vcpu *vcpu, union asce *asce, u8 ar,
 	return 0;
 }
 
-struct trans_exc_code_bits {
-	unsigned long addr : 52; /* Translation-exception Address */
-	unsigned long fsi  : 2;  /* Access Exception Fetch/Store Indication */
-	unsigned long	   : 2;
-	unsigned long b56  : 1;
-	unsigned long	   : 3;
-	unsigned long b60  : 1;
-	unsigned long b61  : 1;
-	unsigned long as   : 2;  /* ASCE Identifier */
-};
-
-enum {
-	FSI_UNKNOWN = 0, /* Unknown wether fetch or store */
-	FSI_STORE   = 1, /* Exception was due to store operation */
-	FSI_FETCH   = 2  /* Exception was due to fetch operation */
-};
-
 enum prot_type {
 	PROT_TYPE_LA   = 0,
 	PROT_TYPE_KEYC = 1,
 	PROT_TYPE_ALC  = 2,
 	PROT_TYPE_DAT  = 3,
 	PROT_TYPE_IEP  = 4,
+	/* Dummy value for passing an initialized value when code != PGM_PROTECTION */
+	PROT_TYPE_DUMMY,
 };
 
-static int trans_exc(struct kvm_vcpu *vcpu, int code, unsigned long gva,
-		     u8 ar, enum gacc_mode mode, enum prot_type prot)
+static int trans_exc_ending(struct kvm_vcpu *vcpu, int code, unsigned long gva, u8 ar,
+			    enum gacc_mode mode, enum prot_type prot, bool terminate)
 {
 	struct kvm_s390_pgm_info *pgm = &vcpu->arch.pgm;
-	struct trans_exc_code_bits *tec;
+	union teid *teid;
 
 	memset(pgm, 0, sizeof(*pgm));
 	pgm->code = code;
-	tec = (struct trans_exc_code_bits *)&pgm->trans_exc_code;
+	teid = (union teid *)&pgm->trans_exc_code;
 
 	switch (code) {
 	case PGM_PROTECTION:
 		switch (prot) {
+		case PROT_TYPE_DUMMY:
+			/* We should never get here, acts like termination */
+			WARN_ON_ONCE(1);
+			break;
 		case PROT_TYPE_IEP:
-			tec->b61 = 1;
-			/* FALL THROUGH */
+			teid->b61 = 1;
+			fallthrough;
 		case PROT_TYPE_LA:
-			tec->b56 = 1;
+			teid->b56 = 1;
 			break;
 		case PROT_TYPE_KEYC:
-			tec->b60 = 1;
+			teid->b60 = 1;
 			break;
 		case PROT_TYPE_ALC:
-			tec->b60 = 1;
-			/* FALL THROUGH */
+			teid->b60 = 1;
+			fallthrough;
 		case PROT_TYPE_DAT:
-			tec->b61 = 1;
+			teid->b61 = 1;
 			break;
 		}
-		/* FALL THROUGH */
+		if (terminate) {
+			teid->b56 = 0;
+			teid->b60 = 0;
+			teid->b61 = 0;
+		}
+		fallthrough;
 	case PGM_ASCE_TYPE:
 	case PGM_PAGE_TRANSLATION:
 	case PGM_REGION_FIRST_TRANS:
@@ -531,10 +381,10 @@ static int trans_exc(struct kvm_vcpu *vcpu, int code, unsigned long gva,
 		 * exc_access_id has to be set to 0 for some instructions. Both
 		 * cases have to be handled by the caller.
 		 */
-		tec->addr = gva >> PAGE_SHIFT;
-		tec->fsi = mode == GACC_STORE ? FSI_STORE : FSI_FETCH;
-		tec->as = psw_bits(vcpu->arch.sie_block->gpsw).as;
-		/* FALL THROUGH */
+		teid->addr = gva >> PAGE_SHIFT;
+		teid->fsi = mode == GACC_STORE ? TEID_FSI_STORE : TEID_FSI_FETCH;
+		teid->as = psw_bits(vcpu->arch.sie_block->gpsw).as;
+		fallthrough;
 	case PGM_ALEN_TRANSLATION:
 	case PGM_ALE_SEQUENCE:
 	case PGM_ASTE_VALIDITY:
@@ -549,6 +399,12 @@ static int trans_exc(struct kvm_vcpu *vcpu, int code, unsigned long gva,
 		break;
 	}
 	return code;
+}
+
+static int trans_exc(struct kvm_vcpu *vcpu, int code, unsigned long gva, u8 ar,
+		     enum gacc_mode mode, enum prot_type prot)
+{
+	return trans_exc_ending(vcpu, code, gva, ar, mode, prot, false);
 }
 
 static int get_vcpu_asce(struct kvm_vcpu *vcpu, union asce *asce,
@@ -591,7 +447,7 @@ static int deref_table(struct kvm *kvm, unsigned long gpa, unsigned long *val)
 }
 
 /**
- * guest_translate - translate a guest virtual into a guest absolute address
+ * guest_translate_gva() - translate a guest virtual into a guest absolute address
  * @vcpu: virtual cpu
  * @gva: guest virtual address
  * @gpa: points to where guest physical (absolute) address should be stored
@@ -607,13 +463,13 @@ static int deref_table(struct kvm *kvm, unsigned long gpa, unsigned long *val)
  * Returns: - zero on success; @gpa contains the resulting absolute address
  *	    - a negative value if guest access failed due to e.g. broken
  *	      guest mapping
- *	    - a positve value if an access exception happened. In this case
+ *	    - a positive value if an access exception happened. In this case
  *	      the returned value is the program interruption code as defined
  *	      by the architecture
  */
-static unsigned long guest_translate(struct kvm_vcpu *vcpu, unsigned long gva,
-				     unsigned long *gpa, const union asce asce,
-				     enum gacc_mode mode, enum prot_type *prot)
+static unsigned long guest_translate_gva(struct kvm_vcpu *vcpu, unsigned long gva,
+					 unsigned long *gpa, const union asce asce,
+					 enum gacc_mode mode, enum prot_type *prot)
 {
 	union vaddress vaddr = {.addr = gva};
 	union raddress raddr = {.addr = gva};
@@ -630,7 +486,7 @@ static unsigned long guest_translate(struct kvm_vcpu *vcpu, unsigned long gva,
 	iep = ctlreg0.iep && test_kvm_facility(vcpu->kvm, 130);
 	if (asce.r)
 		goto real_address;
-	ptr = asce.origin * PAGE_SIZE;
+	ptr = asce.rsto * PAGE_SIZE;
 	switch (asce.dt) {
 	case ASCE_TYPE_REGION1:
 		if (vaddr.rfx01 > asce.tl)
@@ -663,7 +519,7 @@ static unsigned long guest_translate(struct kvm_vcpu *vcpu, unsigned long gva,
 	case ASCE_TYPE_REGION1:	{
 		union region1_table_entry rfte;
 
-		if (kvm_is_error_gpa(vcpu->kvm, ptr))
+		if (!kvm_is_gpa_in_memslot(vcpu->kvm, ptr))
 			return PGM_ADDRESSING;
 		if (deref_table(vcpu->kvm, ptr, &rfte.val))
 			return -EFAULT;
@@ -677,11 +533,11 @@ static unsigned long guest_translate(struct kvm_vcpu *vcpu, unsigned long gva,
 			dat_protection |= rfte.p;
 		ptr = rfte.rto * PAGE_SIZE + vaddr.rsx * 8;
 	}
-		/* fallthrough */
+		fallthrough;
 	case ASCE_TYPE_REGION2: {
 		union region2_table_entry rste;
 
-		if (kvm_is_error_gpa(vcpu->kvm, ptr))
+		if (!kvm_is_gpa_in_memslot(vcpu->kvm, ptr))
 			return PGM_ADDRESSING;
 		if (deref_table(vcpu->kvm, ptr, &rste.val))
 			return -EFAULT;
@@ -695,11 +551,11 @@ static unsigned long guest_translate(struct kvm_vcpu *vcpu, unsigned long gva,
 			dat_protection |= rste.p;
 		ptr = rste.rto * PAGE_SIZE + vaddr.rtx * 8;
 	}
-		/* fallthrough */
+		fallthrough;
 	case ASCE_TYPE_REGION3: {
 		union region3_table_entry rtte;
 
-		if (kvm_is_error_gpa(vcpu->kvm, ptr))
+		if (!kvm_is_gpa_in_memslot(vcpu->kvm, ptr))
 			return PGM_ADDRESSING;
 		if (deref_table(vcpu->kvm, ptr, &rtte.val))
 			return -EFAULT;
@@ -723,11 +579,11 @@ static unsigned long guest_translate(struct kvm_vcpu *vcpu, unsigned long gva,
 			dat_protection |= rtte.fc0.p;
 		ptr = rtte.fc0.sto * PAGE_SIZE + vaddr.sx * 8;
 	}
-		/* fallthrough */
+		fallthrough;
 	case ASCE_TYPE_SEGMENT: {
 		union segment_table_entry ste;
 
-		if (kvm_is_error_gpa(vcpu->kvm, ptr))
+		if (!kvm_is_gpa_in_memslot(vcpu->kvm, ptr))
 			return PGM_ADDRESSING;
 		if (deref_table(vcpu->kvm, ptr, &ste.val))
 			return -EFAULT;
@@ -747,7 +603,7 @@ static unsigned long guest_translate(struct kvm_vcpu *vcpu, unsigned long gva,
 		ptr = ste.fc0.pto * (PAGE_SIZE / 2) + vaddr.px * 8;
 	}
 	}
-	if (kvm_is_error_gpa(vcpu->kvm, ptr))
+	if (!kvm_is_gpa_in_memslot(vcpu->kvm, ptr))
 		return PGM_ADDRESSING;
 	if (deref_table(vcpu->kvm, ptr, &pte.val))
 		return -EFAULT;
@@ -769,7 +625,7 @@ absolute_address:
 		*prot = PROT_TYPE_IEP;
 		return PGM_PROTECTION;
 	}
-	if (kvm_is_error_gpa(vcpu->kvm, raddr.addr))
+	if (!kvm_is_gpa_in_memslot(vcpu->kvm, raddr.addr))
 		return PGM_ADDRESSING;
 	*gpa = raddr.addr;
 	return 0;
@@ -794,48 +650,296 @@ static int low_address_protection_enabled(struct kvm_vcpu *vcpu,
 	return 1;
 }
 
-static int guest_page_range(struct kvm_vcpu *vcpu, unsigned long ga, u8 ar,
-			    unsigned long *pages, unsigned long nr_pages,
-			    const union asce asce, enum gacc_mode mode)
+static int vm_check_access_key_gpa(struct kvm *kvm, u8 access_key,
+				   enum gacc_mode mode, gpa_t gpa)
+{
+	union skey storage_key;
+	int r;
+
+	scoped_guard(read_lock, &kvm->mmu_lock)
+		r = dat_get_storage_key(kvm->arch.gmap->asce, gpa_to_gfn(gpa), &storage_key);
+	if (r)
+		return r;
+	if (access_key == 0 || storage_key.acc == access_key)
+		return 0;
+	if ((mode == GACC_FETCH || mode == GACC_IFETCH) && !storage_key.fp)
+		return 0;
+	return PGM_PROTECTION;
+}
+
+static bool fetch_prot_override_applicable(struct kvm_vcpu *vcpu, enum gacc_mode mode,
+					   union asce asce)
 {
 	psw_t *psw = &vcpu->arch.sie_block->gpsw;
+	unsigned long override;
+
+	if (mode == GACC_FETCH || mode == GACC_IFETCH) {
+		/* check if fetch protection override enabled */
+		override = vcpu->arch.sie_block->gcr[0];
+		override &= CR0_FETCH_PROTECTION_OVERRIDE;
+		/* not applicable if subject to DAT && private space */
+		override = override && !(psw_bits(*psw).dat && asce.p);
+		return override;
+	}
+	return false;
+}
+
+static bool fetch_prot_override_applies(unsigned long ga, unsigned int len)
+{
+	return ga < 2048 && ga + len <= 2048;
+}
+
+static bool storage_prot_override_applicable(struct kvm_vcpu *vcpu)
+{
+	/* check if storage protection override enabled */
+	return vcpu->arch.sie_block->gcr[0] & CR0_STORAGE_PROTECTION_OVERRIDE;
+}
+
+static bool storage_prot_override_applies(u8 access_control)
+{
+	/* matches special storage protection override key (9) -> allow */
+	return access_control == PAGE_SPO_ACC;
+}
+
+static int vcpu_check_access_key_gpa(struct kvm_vcpu *vcpu, u8 access_key,
+				     enum gacc_mode mode, union asce asce, gpa_t gpa,
+				     unsigned long ga, unsigned int len)
+{
+	union skey storage_key;
+	int r;
+
+	/* access key 0 matches any storage key -> allow */
+	if (access_key == 0)
+		return 0;
+	/*
+	 * caller needs to ensure that gfn is accessible, so we can
+	 * assume that this cannot fail
+	 */
+	scoped_guard(read_lock, &vcpu->kvm->mmu_lock)
+		r = dat_get_storage_key(vcpu->arch.gmap->asce, gpa_to_gfn(gpa), &storage_key);
+	if (r)
+		return r;
+	/* access key matches storage key -> allow */
+	if (storage_key.acc == access_key)
+		return 0;
+	if (mode == GACC_FETCH || mode == GACC_IFETCH) {
+		/* it is a fetch and fetch protection is off -> allow */
+		if (!storage_key.fp)
+			return 0;
+		if (fetch_prot_override_applicable(vcpu, mode, asce) &&
+		    fetch_prot_override_applies(ga, len))
+			return 0;
+	}
+	if (storage_prot_override_applicable(vcpu) &&
+	    storage_prot_override_applies(storage_key.acc))
+		return 0;
+	return PGM_PROTECTION;
+}
+
+/**
+ * guest_range_to_gpas() - Calculate guest physical addresses of page fragments
+ * covering a logical range
+ * @vcpu: virtual cpu
+ * @ga: guest address, start of range
+ * @ar: access register
+ * @gpas: output argument, may be NULL
+ * @len: length of range in bytes
+ * @asce: address-space-control element to use for translation
+ * @mode: access mode
+ * @access_key: access key to mach the range's storage keys against
+ *
+ * Translate a logical range to a series of guest absolute addresses,
+ * such that the concatenation of page fragments starting at each gpa make up
+ * the whole range.
+ * The translation is performed as if done by the cpu for the given @asce, @ar,
+ * @mode and state of the @vcpu.
+ * If the translation causes an exception, its program interruption code is
+ * returned and the &struct kvm_s390_pgm_info pgm member of @vcpu is modified
+ * such that a subsequent call to kvm_s390_inject_prog_vcpu() will inject
+ * a correct exception into the guest.
+ * The resulting gpas are stored into @gpas, unless it is NULL.
+ *
+ * Note: All fragments except the first one start at the beginning of a page.
+ *	 When deriving the boundaries of a fragment from a gpa, all but the last
+ *	 fragment end at the end of the page.
+ *
+ * Return:
+ * * 0		- success
+ * * <0		- translation could not be performed, for example if  guest
+ *		  memory could not be accessed
+ * * >0		- an access exception occurred. In this case the returned value
+ *		  is the program interruption code and the contents of pgm may
+ *		  be used to inject an exception into the guest.
+ */
+static int guest_range_to_gpas(struct kvm_vcpu *vcpu, unsigned long ga, u8 ar,
+			       unsigned long *gpas, unsigned long len,
+			       const union asce asce, enum gacc_mode mode,
+			       u8 access_key)
+{
+	psw_t *psw = &vcpu->arch.sie_block->gpsw;
+	unsigned int offset = offset_in_page(ga);
+	unsigned int fragment_len;
 	int lap_enabled, rc = 0;
 	enum prot_type prot;
+	unsigned long gpa;
 
 	lap_enabled = low_address_protection_enabled(vcpu, asce);
-	while (nr_pages) {
+	while (min(PAGE_SIZE - offset, len) > 0) {
+		fragment_len = min(PAGE_SIZE - offset, len);
 		ga = kvm_s390_logical_to_effective(vcpu, ga);
 		if (mode == GACC_STORE && lap_enabled && is_low_address(ga))
 			return trans_exc(vcpu, PGM_PROTECTION, ga, ar, mode,
 					 PROT_TYPE_LA);
-		ga &= PAGE_MASK;
 		if (psw_bits(*psw).dat) {
-			rc = guest_translate(vcpu, ga, pages, asce, mode, &prot);
+			rc = guest_translate_gva(vcpu, ga, &gpa, asce, mode, &prot);
 			if (rc < 0)
 				return rc;
 		} else {
-			*pages = kvm_s390_real_to_abs(vcpu, ga);
-			if (kvm_is_error_gpa(vcpu->kvm, *pages))
+			gpa = kvm_s390_real_to_abs(vcpu, ga);
+			if (!kvm_is_gpa_in_memslot(vcpu->kvm, gpa)) {
 				rc = PGM_ADDRESSING;
+				prot = PROT_TYPE_DUMMY;
+			}
 		}
 		if (rc)
 			return trans_exc(vcpu, rc, ga, ar, mode, prot);
-		ga += PAGE_SIZE;
-		pages++;
-		nr_pages--;
+		rc = vcpu_check_access_key_gpa(vcpu, access_key, mode, asce, gpa, ga, fragment_len);
+		if (rc)
+			return trans_exc(vcpu, rc, ga, ar, mode, PROT_TYPE_KEYC);
+		if (gpas)
+			*gpas++ = gpa;
+		offset = 0;
+		ga += fragment_len;
+		len -= fragment_len;
 	}
 	return 0;
 }
 
-int access_guest(struct kvm_vcpu *vcpu, unsigned long ga, u8 ar, void *data,
-		 unsigned long len, enum gacc_mode mode)
+static int access_guest_page_gpa(struct kvm *kvm, enum gacc_mode mode, gpa_t gpa,
+				 void *data, unsigned int len)
+{
+	const unsigned int offset = offset_in_page(gpa);
+	const gfn_t gfn = gpa_to_gfn(gpa);
+	int rc;
+
+	if (!gfn_to_memslot(kvm, gfn))
+		return PGM_ADDRESSING;
+	if (mode == GACC_STORE)
+		rc = kvm_write_guest_page(kvm, gfn, data, offset, len);
+	else
+		rc = kvm_read_guest_page(kvm, gfn, data, offset, len);
+	return rc;
+}
+
+static int mvcos_key(void *to, const void *from, unsigned long size, u8 dst_key, u8 src_key)
+{
+	union oac spec = {
+		.oac1.key = dst_key,
+		.oac1.k = !!dst_key,
+		.oac2.key = src_key,
+		.oac2.k = !!src_key,
+	};
+	int exception = PGM_PROTECTION;
+
+	asm_inline volatile(
+		"       lr      %%r0,%[spec]\n"
+		"0:     mvcos   %[to],%[from],%[size]\n"
+		"1:     lhi     %[exc],0\n"
+		"2:\n"
+		EX_TABLE(0b, 2b)
+		EX_TABLE(1b, 2b)
+		: [size] "+d" (size), [to] "=Q" (*(char *)to), [exc] "+d" (exception)
+		: [spec] "d" (spec.val), [from] "Q" (*(const char *)from)
+		: "memory", "cc", "0");
+	return exception;
+}
+
+struct acc_page_key_context {
+	void *data;
+	int exception;
+	unsigned short offset;
+	unsigned short len;
+	bool store;
+	u8 access_key;
+};
+
+static void _access_guest_page_with_key_gpa(struct guest_fault *f)
+{
+	struct acc_page_key_context *context = f->priv;
+	void *ptr;
+	int r;
+
+	ptr = __va(PFN_PHYS(f->pfn) | context->offset);
+
+	if (context->store)
+		r = mvcos_key(ptr, context->data, context->len, context->access_key, 0);
+	else
+		r = mvcos_key(context->data, ptr, context->len, 0, context->access_key);
+
+	context->exception = r;
+}
+
+static int access_guest_page_with_key_gpa(struct kvm *kvm, enum gacc_mode mode, gpa_t gpa,
+					  void *data, unsigned int len, u8 acc)
+{
+	struct acc_page_key_context context = {
+		.offset = offset_in_page(gpa),
+		.len = len,
+		.data = data,
+		.access_key = acc,
+		.store = mode == GACC_STORE,
+	};
+	struct guest_fault fault = {
+		.gfn = gpa_to_gfn(gpa),
+		.priv = &context,
+		.write_attempt = mode == GACC_STORE,
+		.callback = _access_guest_page_with_key_gpa,
+	};
+	int rc;
+
+	if (KVM_BUG_ON((len + context.offset) > PAGE_SIZE, kvm))
+		return -EINVAL;
+
+	rc = kvm_s390_faultin_gfn(NULL, kvm, &fault);
+	if (rc)
+		return rc;
+	return context.exception;
+}
+
+int access_guest_abs_with_key(struct kvm *kvm, gpa_t gpa, void *data,
+			      unsigned long len, enum gacc_mode mode, u8 access_key)
+{
+	int offset = offset_in_page(gpa);
+	int fragment_len;
+	int rc;
+
+	while (min(PAGE_SIZE - offset, len) > 0) {
+		fragment_len = min(PAGE_SIZE - offset, len);
+		rc = access_guest_page_with_key_gpa(kvm, mode, gpa, data, fragment_len, access_key);
+		if (rc)
+			return rc;
+		offset = 0;
+		len -= fragment_len;
+		data += fragment_len;
+		gpa += fragment_len;
+	}
+	return 0;
+}
+
+int access_guest_with_key(struct kvm_vcpu *vcpu, unsigned long ga, u8 ar,
+			  void *data, unsigned long len, enum gacc_mode mode,
+			  u8 access_key)
 {
 	psw_t *psw = &vcpu->arch.sie_block->gpsw;
-	unsigned long _len, nr_pages, gpa, idx;
-	unsigned long pages_array[2];
-	unsigned long *pages;
+	unsigned long nr_pages, idx;
+	unsigned long gpa_array[2];
+	unsigned int fragment_len;
+	unsigned long *gpas;
+	enum prot_type prot;
 	int need_ipte_lock;
 	union asce asce;
+	bool try_storage_prot_override;
+	bool try_fetch_prot_override;
 	int rc;
 
 	if (!len)
@@ -845,55 +949,231 @@ int access_guest(struct kvm_vcpu *vcpu, unsigned long ga, u8 ar, void *data,
 	if (rc)
 		return rc;
 	nr_pages = (((ga & ~PAGE_MASK) + len - 1) >> PAGE_SHIFT) + 1;
-	pages = pages_array;
-	if (nr_pages > ARRAY_SIZE(pages_array))
-		pages = vmalloc(nr_pages * sizeof(unsigned long));
-	if (!pages)
+	gpas = gpa_array;
+	if (nr_pages > ARRAY_SIZE(gpa_array))
+		gpas = vmalloc(array_size(nr_pages, sizeof(unsigned long)));
+	if (!gpas)
 		return -ENOMEM;
+	try_fetch_prot_override = fetch_prot_override_applicable(vcpu, mode, asce);
+	try_storage_prot_override = storage_prot_override_applicable(vcpu);
 	need_ipte_lock = psw_bits(*psw).dat && !asce.r;
 	if (need_ipte_lock)
-		ipte_lock(vcpu);
-	rc = guest_page_range(vcpu, ga, ar, pages, nr_pages, asce, mode);
-	for (idx = 0; idx < nr_pages && !rc; idx++) {
-		gpa = *(pages + idx) + (ga & ~PAGE_MASK);
-		_len = min(PAGE_SIZE - (gpa & ~PAGE_MASK), len);
-		if (mode == GACC_STORE)
-			rc = kvm_write_guest(vcpu->kvm, gpa, data, _len);
-		else
-			rc = kvm_read_guest(vcpu->kvm, gpa, data, _len);
-		len -= _len;
-		ga += _len;
-		data += _len;
+		ipte_lock(vcpu->kvm);
+	/*
+	 * Since we do the access further down ultimately via a move instruction
+	 * that does key checking and returns an error in case of a protection
+	 * violation, we don't need to do the check during address translation.
+	 * Skip it by passing access key 0, which matches any storage key,
+	 * obviating the need for any further checks. As a result the check is
+	 * handled entirely in hardware on access, we only need to take care to
+	 * forego key protection checking if fetch protection override applies or
+	 * retry with the special key 9 in case of storage protection override.
+	 */
+	rc = guest_range_to_gpas(vcpu, ga, ar, gpas, len, asce, mode, 0);
+	if (rc)
+		goto out_unlock;
+	for (idx = 0; idx < nr_pages; idx++) {
+		fragment_len = min(PAGE_SIZE - offset_in_page(gpas[idx]), len);
+		if (try_fetch_prot_override && fetch_prot_override_applies(ga, fragment_len)) {
+			rc = access_guest_page_gpa(vcpu->kvm, mode, gpas[idx], data, fragment_len);
+		} else {
+			rc = access_guest_page_with_key_gpa(vcpu->kvm, mode, gpas[idx],
+							    data, fragment_len, access_key);
+		}
+		if (rc == PGM_PROTECTION && try_storage_prot_override)
+			rc = access_guest_page_with_key_gpa(vcpu->kvm, mode, gpas[idx],
+							    data, fragment_len, PAGE_SPO_ACC);
+		if (rc)
+			break;
+		len -= fragment_len;
+		data += fragment_len;
+		ga = kvm_s390_logical_to_effective(vcpu, ga + fragment_len);
 	}
+	if (rc > 0) {
+		bool terminate = (mode == GACC_STORE) && (idx > 0);
+
+		if (rc == PGM_PROTECTION)
+			prot = PROT_TYPE_KEYC;
+		else
+			prot = PROT_TYPE_DUMMY;
+		rc = trans_exc_ending(vcpu, rc, ga, ar, mode, prot, terminate);
+	}
+out_unlock:
 	if (need_ipte_lock)
-		ipte_unlock(vcpu);
-	if (nr_pages > ARRAY_SIZE(pages_array))
-		vfree(pages);
+		ipte_unlock(vcpu->kvm);
+	if (nr_pages > ARRAY_SIZE(gpa_array))
+		vfree(gpas);
 	return rc;
 }
 
 int access_guest_real(struct kvm_vcpu *vcpu, unsigned long gra,
 		      void *data, unsigned long len, enum gacc_mode mode)
 {
-	unsigned long _len, gpa;
+	unsigned int fragment_len;
+	unsigned long gpa;
 	int rc = 0;
 
 	while (len && !rc) {
 		gpa = kvm_s390_real_to_abs(vcpu, gra);
-		_len = min(PAGE_SIZE - (gpa & ~PAGE_MASK), len);
-		if (mode)
-			rc = write_guest_abs(vcpu, gpa, data, _len);
-		else
-			rc = read_guest_abs(vcpu, gpa, data, _len);
-		len -= _len;
-		gra += _len;
-		data += _len;
+		fragment_len = min(PAGE_SIZE - offset_in_page(gpa), len);
+		rc = access_guest_page_gpa(vcpu->kvm, mode, gpa, data, fragment_len);
+		len -= fragment_len;
+		gra += fragment_len;
+		data += fragment_len;
 	}
+	if (rc > 0)
+		vcpu->arch.pgm.code = rc;
 	return rc;
 }
 
 /**
- * guest_translate_address - translate guest logical into guest absolute address
+ * __cmpxchg_with_key() - Perform cmpxchg, honoring storage keys.
+ * @ptr: Address of value to compare to *@old and exchange with
+ *       @new. Must be aligned to @size.
+ * @old: Old value. Compared to the content pointed to by @ptr in order to
+ *       determine if the exchange occurs. The old value read from *@ptr is
+ *       written here.
+ * @new: New value to place at *@ptr.
+ * @size: Size of the operation in bytes, may only be a power of two up to 16.
+ * @access_key: Access key to use for checking storage key protection.
+ *
+ * Perform a cmpxchg on guest memory, honoring storage key protection.
+ * @access_key alone determines how key checking is performed, neither
+ * storage-protection-override nor fetch-protection-override apply.
+ * In case of an exception *@uval is set to zero.
+ *
+ * Return:
+ * * %0: cmpxchg executed successfully
+ * * %1: cmpxchg executed unsuccessfully
+ * * %PGM_PROTECTION: an exception happened when trying to access *@ptr
+ * * %-EAGAIN: maxed out number of retries (byte and short only)
+ * * %-EINVAL: invalid value for @size
+ */
+static int __cmpxchg_with_key(union kvm_s390_quad *ptr, union kvm_s390_quad *old,
+			      union kvm_s390_quad new, int size, u8 access_key)
+{
+	union kvm_s390_quad tmp = { .sixteen = 0 };
+	int rc;
+
+	/*
+	 * The cmpxchg_key macro depends on the type of "old", so we need
+	 * a case for each valid length and get some code duplication as long
+	 * as we don't introduce a new macro.
+	 */
+	switch (size) {
+	case 1:
+		rc = __cmpxchg_key1(&ptr->one, &tmp.one, old->one, new.one, access_key);
+		break;
+	case 2:
+		rc = __cmpxchg_key2(&ptr->two, &tmp.two, old->two, new.two, access_key);
+		break;
+	case 4:
+		rc = __cmpxchg_key4(&ptr->four, &tmp.four, old->four, new.four, access_key);
+		break;
+	case 8:
+		rc = __cmpxchg_key8(&ptr->eight, &tmp.eight, old->eight, new.eight, access_key);
+		break;
+	case 16:
+		rc = __cmpxchg_key16(&ptr->sixteen, &tmp.sixteen, old->sixteen, new.sixteen,
+				     access_key);
+		break;
+	default:
+		return -EINVAL;
+	}
+	if (!rc && memcmp(&tmp, old, size))
+		rc = 1;
+	*old = tmp;
+	/*
+	 * Assume that the fault is caused by protection, either key protection
+	 * or user page write protection.
+	 */
+	if (rc == -EFAULT)
+		rc = PGM_PROTECTION;
+	return rc;
+}
+
+struct cmpxchg_key_context {
+	union kvm_s390_quad new;
+	union kvm_s390_quad *old;
+	int exception;
+	unsigned short offset;
+	u8 access_key;
+	u8 len;
+};
+
+static void _cmpxchg_guest_abs_with_key(struct guest_fault *f)
+{
+	struct cmpxchg_key_context *context = f->priv;
+
+	context->exception = __cmpxchg_with_key(__va(PFN_PHYS(f->pfn) | context->offset),
+						context->old, context->new, context->len,
+						context->access_key);
+}
+
+/**
+ * cmpxchg_guest_abs_with_key() - Perform cmpxchg on guest absolute address.
+ * @kvm: Virtual machine instance.
+ * @gpa: Absolute guest address of the location to be changed.
+ * @len: Operand length of the cmpxchg, required: 1 <= len <= 16. Providing a
+ *       non power of two will result in failure.
+ * @old: Pointer to old value. If the location at @gpa contains this value,
+ *       the exchange will succeed. After calling cmpxchg_guest_abs_with_key()
+ *       *@old contains the value at @gpa before the attempt to
+ *       exchange the value.
+ * @new: The value to place at @gpa.
+ * @acc: The access key to use for the guest access.
+ * @success: output value indicating if an exchange occurred.
+ *
+ * Atomically exchange the value at @gpa by @new, if it contains *@old.
+ * Honors storage keys.
+ *
+ * Return: * 0: successful exchange
+ *         * >0: a program interruption code indicating the reason cmpxchg could
+ *               not be attempted
+ *         * -EINVAL: address misaligned or len not power of two
+ *         * -EAGAIN: transient failure (len 1 or 2)
+ *         * -EOPNOTSUPP: read-only memslot (should never occur)
+ */
+int cmpxchg_guest_abs_with_key(struct kvm *kvm, gpa_t gpa, int len, union kvm_s390_quad *old,
+			       union kvm_s390_quad new, u8 acc, bool *success)
+{
+	struct cmpxchg_key_context context = {
+		.old = old,
+		.new = new,
+		.offset = offset_in_page(gpa),
+		.len = len,
+		.access_key = acc,
+	};
+	struct guest_fault fault = {
+		.gfn = gpa_to_gfn(gpa),
+		.priv = &context,
+		.write_attempt = true,
+		.callback = _cmpxchg_guest_abs_with_key,
+	};
+	int rc;
+
+	lockdep_assert_held(&kvm->srcu);
+
+	if (len > 16 || !IS_ALIGNED(gpa, len))
+		return -EINVAL;
+
+	rc = kvm_s390_faultin_gfn(NULL, kvm, &fault);
+	if (rc)
+		return rc;
+	*success = !context.exception;
+	if (context.exception == 1)
+		return 0;
+	return context.exception;
+}
+
+/**
+ * guest_translate_address_with_key - translate guest logical into guest absolute address
+ * @vcpu: virtual cpu
+ * @gva: Guest virtual address
+ * @ar: Access register
+ * @gpa: Guest physical address
+ * @mode: Translation access mode
+ * @access_key: access key to mach the storage key with
  *
  * Parameter semantics are the same as the ones from guest_translate.
  * The memory contents at the guest address are not changed.
@@ -901,11 +1181,10 @@ int access_guest_real(struct kvm_vcpu *vcpu, unsigned long gra,
  * Note: The IPTE lock is not taken during this function, so the caller
  * has to take care of this.
  */
-int guest_translate_address(struct kvm_vcpu *vcpu, unsigned long gva, u8 ar,
-			    unsigned long *gpa, enum gacc_mode mode)
+int guest_translate_address_with_key(struct kvm_vcpu *vcpu, unsigned long gva, u8 ar,
+				     unsigned long *gpa, enum gacc_mode mode,
+				     u8 access_key)
 {
-	psw_t *psw = &vcpu->arch.sie_block->gpsw;
-	enum prot_type prot;
 	union asce asce;
 	int rc;
 
@@ -913,49 +1192,62 @@ int guest_translate_address(struct kvm_vcpu *vcpu, unsigned long gva, u8 ar,
 	rc = get_vcpu_asce(vcpu, &asce, gva, ar, mode);
 	if (rc)
 		return rc;
-	if (is_low_address(gva) && low_address_protection_enabled(vcpu, asce)) {
-		if (mode == GACC_STORE)
-			return trans_exc(vcpu, PGM_PROTECTION, gva, 0,
-					 mode, PROT_TYPE_LA);
-	}
+	return guest_range_to_gpas(vcpu, gva, ar, gpa, 1, asce, mode,
+				   access_key);
+}
 
-	if (psw_bits(*psw).dat && !asce.r) {	/* Use DAT? */
-		rc = guest_translate(vcpu, gva, gpa, asce, mode, &prot);
-		if (rc > 0)
-			return trans_exc(vcpu, rc, gva, 0, mode, prot);
-	} else {
-		*gpa = kvm_s390_real_to_abs(vcpu, gva);
-		if (kvm_is_error_gpa(vcpu->kvm, *gpa))
-			return trans_exc(vcpu, rc, gva, PGM_ADDRESSING, mode, 0);
-	}
+/**
+ * check_gva_range - test a range of guest virtual addresses for accessibility
+ * @vcpu: virtual cpu
+ * @gva: Guest virtual address
+ * @ar: Access register
+ * @length: Length of test range
+ * @mode: Translation access mode
+ * @access_key: access key to mach the storage keys with
+ */
+int check_gva_range(struct kvm_vcpu *vcpu, unsigned long gva, u8 ar,
+		    unsigned long length, enum gacc_mode mode, u8 access_key)
+{
+	union asce asce;
+	int rc = 0;
+
+	rc = get_vcpu_asce(vcpu, &asce, gva, ar, mode);
+	if (rc)
+		return rc;
+	ipte_lock(vcpu->kvm);
+	rc = guest_range_to_gpas(vcpu, gva, ar, NULL, length, asce, mode,
+				 access_key);
+	ipte_unlock(vcpu->kvm);
 
 	return rc;
 }
 
 /**
- * check_gva_range - test a range of guest virtual addresses for accessibility
+ * check_gpa_range - test a range of guest physical addresses for accessibility
+ * @kvm: virtual machine instance
+ * @gpa: guest physical address
+ * @length: length of test range
+ * @mode: access mode to test, relevant for storage keys
+ * @access_key: access key to mach the storage keys with
  */
-int check_gva_range(struct kvm_vcpu *vcpu, unsigned long gva, u8 ar,
-		    unsigned long length, enum gacc_mode mode)
+int check_gpa_range(struct kvm *kvm, unsigned long gpa, unsigned long length,
+		    enum gacc_mode mode, u8 access_key)
 {
-	unsigned long gpa;
-	unsigned long currlen;
+	unsigned int fragment_len;
 	int rc = 0;
 
-	ipte_lock(vcpu);
-	while (length > 0 && !rc) {
-		currlen = min(length, PAGE_SIZE - (gva % PAGE_SIZE));
-		rc = guest_translate_address(vcpu, gva, ar, &gpa, mode);
-		gva += currlen;
-		length -= currlen;
+	while (length && !rc) {
+		fragment_len = min(PAGE_SIZE - offset_in_page(gpa), length);
+		rc = vm_check_access_key_gpa(kvm, access_key, mode, gpa);
+		length -= fragment_len;
+		gpa += fragment_len;
 	}
-	ipte_unlock(vcpu);
-
 	return rc;
 }
 
 /**
  * kvm_s390_check_low_addr_prot_real - check for low-address protection
+ * @vcpu: virtual cpu
  * @gra: Guest real address
  *
  * Checks whether an address is subject to low-address protection and set
@@ -973,232 +1265,424 @@ int kvm_s390_check_low_addr_prot_real(struct kvm_vcpu *vcpu, unsigned long gra)
 }
 
 /**
- * kvm_s390_shadow_tables - walk the guest page table and create shadow tables
- * @sg: pointer to the shadow guest address space structure
- * @saddr: faulting address in the shadow gmap
- * @pgt: pointer to the page table address result
- * @fake: pgt references contiguous guest memory block, not a pgtable
+ * walk_guest_tables() - Walk the guest page table and pin the dat tables.
+ * @sg: Pointer to the shadow guest address space structure.
+ * @saddr: Faulting address in the shadow gmap.
+ * @w: Will be filled with information on the pinned pages.
+ * @wr: Wndicates a write access if true.
+ *
+ * Return:
+ * * %0 in case of success,
+ * * a PIC code > 0 in case the address translation fails
+ * * an error code < 0 if other errors happen in the host
  */
-static int kvm_s390_shadow_tables(struct gmap *sg, unsigned long saddr,
-				  unsigned long *pgt, int *dat_protection,
-				  int *fake)
+static int walk_guest_tables(struct gmap *sg, unsigned long saddr, struct pgtwalk *w, bool wr)
 {
-	struct gmap *parent;
-	union asce asce;
+	struct gmap *parent = sg->parent;
+	struct guest_fault *entries;
+	union dat_table_entry table;
 	union vaddress vaddr;
 	unsigned long ptr;
+	struct kvm *kvm;
+	union asce asce;
 	int rc;
 
-	*fake = 0;
-	*dat_protection = 0;
-	parent = sg->parent;
+	if (!parent)
+		return -EAGAIN;
+	kvm = parent->kvm;
+	WARN_ON(!kvm);
+	asce = sg->guest_asce;
+	entries = get_entries(w);
+
+	w->level = LEVEL_MEM;
+	w->last_addr = saddr;
+	if (asce.r)
+		return kvm_s390_get_guest_page(kvm, entries + LEVEL_MEM, gpa_to_gfn(saddr), false);
+
 	vaddr.addr = saddr;
-	asce.val = sg->orig_asce;
-	ptr = asce.origin * PAGE_SIZE;
-	if (asce.r) {
-		*fake = 1;
-		ptr = 0;
-		asce.dt = ASCE_TYPE_REGION1;
-	}
+	ptr = asce.rsto * PAGE_SIZE;
+
+	if (!asce_contains_gfn(asce, gpa_to_gfn(saddr)))
+		return PGM_ASCE_TYPE;
 	switch (asce.dt) {
 	case ASCE_TYPE_REGION1:
-		if (vaddr.rfx01 > asce.tl && !*fake)
+		if (vaddr.rfx01 > asce.tl)
 			return PGM_REGION_FIRST_TRANS;
 		break;
 	case ASCE_TYPE_REGION2:
-		if (vaddr.rfx)
-			return PGM_ASCE_TYPE;
 		if (vaddr.rsx01 > asce.tl)
 			return PGM_REGION_SECOND_TRANS;
 		break;
 	case ASCE_TYPE_REGION3:
-		if (vaddr.rfx || vaddr.rsx)
-			return PGM_ASCE_TYPE;
 		if (vaddr.rtx01 > asce.tl)
 			return PGM_REGION_THIRD_TRANS;
 		break;
 	case ASCE_TYPE_SEGMENT:
-		if (vaddr.rfx || vaddr.rsx || vaddr.rtx)
-			return PGM_ASCE_TYPE;
 		if (vaddr.sx01 > asce.tl)
 			return PGM_SEGMENT_TRANSLATION;
 		break;
 	}
 
+	w->level = asce.dt;
 	switch (asce.dt) {
-	case ASCE_TYPE_REGION1: {
-		union region1_table_entry rfte;
-
-		if (*fake) {
-			ptr += vaddr.rfx * _REGION1_SIZE;
-			rfte.val = ptr;
-			goto shadow_r2t;
-		}
-		rc = gmap_read_table(parent, ptr + vaddr.rfx * 8, &rfte.val);
+	case ASCE_TYPE_REGION1:
+		w->last_addr = ptr + vaddr.rfx * 8;
+		rc = kvm_s390_get_guest_page_and_read_gpa(kvm, entries + w->level,
+							  w->last_addr, &table.val);
 		if (rc)
 			return rc;
-		if (rfte.i)
+		if (table.pgd.i)
 			return PGM_REGION_FIRST_TRANS;
-		if (rfte.tt != TABLE_TYPE_REGION1)
+		if (table.pgd.tt != TABLE_TYPE_REGION1)
 			return PGM_TRANSLATION_SPEC;
-		if (vaddr.rsx01 < rfte.tf || vaddr.rsx01 > rfte.tl)
+		if (vaddr.rsx01 < table.pgd.tf || vaddr.rsx01 > table.pgd.tl)
 			return PGM_REGION_SECOND_TRANS;
 		if (sg->edat_level >= 1)
-			*dat_protection |= rfte.p;
-		ptr = rfte.rto * PAGE_SIZE;
-shadow_r2t:
-		rc = gmap_shadow_r2t(sg, saddr, rfte.val, *fake);
+			w->p |= table.pgd.p;
+		ptr = table.pgd.rto * PAGE_SIZE;
+		w->level--;
+		fallthrough;
+	case ASCE_TYPE_REGION2:
+		w->last_addr = ptr + vaddr.rsx * 8;
+		rc = kvm_s390_get_guest_page_and_read_gpa(kvm, entries + w->level,
+							  w->last_addr, &table.val);
 		if (rc)
 			return rc;
-	} /* fallthrough */
-	case ASCE_TYPE_REGION2: {
-		union region2_table_entry rste;
-
-		if (*fake) {
-			ptr += vaddr.rsx * _REGION2_SIZE;
-			rste.val = ptr;
-			goto shadow_r3t;
-		}
-		rc = gmap_read_table(parent, ptr + vaddr.rsx * 8, &rste.val);
-		if (rc)
-			return rc;
-		if (rste.i)
+		if (table.p4d.i)
 			return PGM_REGION_SECOND_TRANS;
-		if (rste.tt != TABLE_TYPE_REGION2)
+		if (table.p4d.tt != TABLE_TYPE_REGION2)
 			return PGM_TRANSLATION_SPEC;
-		if (vaddr.rtx01 < rste.tf || vaddr.rtx01 > rste.tl)
+		if (vaddr.rtx01 < table.p4d.tf || vaddr.rtx01 > table.p4d.tl)
 			return PGM_REGION_THIRD_TRANS;
 		if (sg->edat_level >= 1)
-			*dat_protection |= rste.p;
-		ptr = rste.rto * PAGE_SIZE;
-shadow_r3t:
-		rste.p |= *dat_protection;
-		rc = gmap_shadow_r3t(sg, saddr, rste.val, *fake);
+			w->p |= table.p4d.p;
+		ptr = table.p4d.rto * PAGE_SIZE;
+		w->level--;
+		fallthrough;
+	case ASCE_TYPE_REGION3:
+		w->last_addr = ptr + vaddr.rtx * 8;
+		rc = kvm_s390_get_guest_page_and_read_gpa(kvm, entries + w->level,
+							  w->last_addr, &table.val);
 		if (rc)
 			return rc;
-	} /* fallthrough */
-	case ASCE_TYPE_REGION3: {
-		union region3_table_entry rtte;
-
-		if (*fake) {
-			ptr += vaddr.rtx * _REGION3_SIZE;
-			rtte.val = ptr;
-			goto shadow_sgt;
-		}
-		rc = gmap_read_table(parent, ptr + vaddr.rtx * 8, &rtte.val);
-		if (rc)
-			return rc;
-		if (rtte.i)
+		if (table.pud.i)
 			return PGM_REGION_THIRD_TRANS;
-		if (rtte.tt != TABLE_TYPE_REGION3)
+		if (table.pud.tt != TABLE_TYPE_REGION3)
 			return PGM_TRANSLATION_SPEC;
-		if (rtte.cr && asce.p && sg->edat_level >= 2)
+		if (table.pud.cr && asce.p && sg->edat_level >= 2)
 			return PGM_TRANSLATION_SPEC;
-		if (rtte.fc && sg->edat_level >= 2) {
-			*dat_protection |= rtte.fc0.p;
-			*fake = 1;
-			ptr = rtte.fc1.rfaa * _REGION3_SIZE;
-			rtte.val = ptr;
-			goto shadow_sgt;
-		}
-		if (vaddr.sx01 < rtte.fc0.tf || vaddr.sx01 > rtte.fc0.tl)
-			return PGM_SEGMENT_TRANSLATION;
 		if (sg->edat_level >= 1)
-			*dat_protection |= rtte.fc0.p;
-		ptr = rtte.fc0.sto * PAGE_SIZE;
-shadow_sgt:
-		rtte.fc0.p |= *dat_protection;
-		rc = gmap_shadow_sgt(sg, saddr, rtte.val, *fake);
-		if (rc)
-			return rc;
-	} /* fallthrough */
-	case ASCE_TYPE_SEGMENT: {
-		union segment_table_entry ste;
-
-		if (*fake) {
-			ptr += vaddr.sx * _SEGMENT_SIZE;
-			ste.val = ptr;
-			goto shadow_pgt;
+			w->p |= table.pud.p;
+		if (table.pud.fc && sg->edat_level >= 2) {
+			table.val = u64_replace_bits(table.val, saddr, ~_REGION3_MASK);
+			goto edat_applies;
 		}
-		rc = gmap_read_table(parent, ptr + vaddr.sx * 8, &ste.val);
-		if (rc)
-			return rc;
-		if (ste.i)
+		if (vaddr.sx01 < table.pud.fc0.tf || vaddr.sx01 > table.pud.fc0.tl)
 			return PGM_SEGMENT_TRANSLATION;
-		if (ste.tt != TABLE_TYPE_SEGMENT)
-			return PGM_TRANSLATION_SPEC;
-		if (ste.cs && asce.p)
-			return PGM_TRANSLATION_SPEC;
-		*dat_protection |= ste.fc0.p;
-		if (ste.fc && sg->edat_level >= 1) {
-			*fake = 1;
-			ptr = ste.fc1.sfaa * _SEGMENT_SIZE;
-			ste.val = ptr;
-			goto shadow_pgt;
-		}
-		ptr = ste.fc0.pto * (PAGE_SIZE / 2);
-shadow_pgt:
-		ste.fc0.p |= *dat_protection;
-		rc = gmap_shadow_pgt(sg, saddr, ste.val, *fake);
+		ptr = table.pud.fc0.sto * PAGE_SIZE;
+		w->level--;
+		fallthrough;
+	case ASCE_TYPE_SEGMENT:
+		w->last_addr = ptr + vaddr.sx * 8;
+		rc = kvm_s390_get_guest_page_and_read_gpa(kvm, entries + w->level,
+							  w->last_addr, &table.val);
 		if (rc)
 			return rc;
+		if (table.pmd.i)
+			return PGM_SEGMENT_TRANSLATION;
+		if (table.pmd.tt != TABLE_TYPE_SEGMENT)
+			return PGM_TRANSLATION_SPEC;
+		if (table.pmd.cs && asce.p)
+			return PGM_TRANSLATION_SPEC;
+		w->p |= table.pmd.p;
+		if (table.pmd.fc && sg->edat_level >= 1) {
+			table.val = u64_replace_bits(table.val, saddr, ~_SEGMENT_MASK);
+			goto edat_applies;
+		}
+		ptr = table.pmd.fc0.pto * (PAGE_SIZE / 2);
+		w->level--;
 	}
+	w->last_addr = ptr + vaddr.px * 8;
+	rc = kvm_s390_get_guest_page_and_read_gpa(kvm, entries + w->level,
+						  w->last_addr, &table.val);
+	if (rc)
+		return rc;
+	if (table.pte.i)
+		return PGM_PAGE_TRANSLATION;
+	if (table.pte.z)
+		return PGM_TRANSLATION_SPEC;
+	w->p |= table.pte.p;
+edat_applies:
+	if (wr && w->p)
+		return PGM_PROTECTION;
+
+	return kvm_s390_get_guest_page(kvm, entries + LEVEL_MEM, table.pte.pfra, wr);
+}
+
+static int _do_shadow_pte(struct kvm_s390_mmu_cache *mc, struct gmap *sg, gpa_t raddr,
+			  union pte *ptep_h, union pte *ptep, struct guest_fault *f, bool p)
+{
+	union pgste pgste;
+	union pte newpte;
+	int rc;
+
+	lockdep_assert_held(&sg->kvm->mmu_lock);
+	lockdep_assert_held(&sg->parent->children_lock);
+
+	scoped_guard(spinlock, &sg->host_to_rmap_lock)
+		rc = gmap_insert_rmap(mc, sg, f->gfn, gpa_to_gfn(raddr), TABLE_TYPE_PAGE_TABLE);
+	if (rc)
+		return rc;
+
+	if (!pgste_get_trylock(ptep_h, &pgste))
+		return -EAGAIN;
+	newpte = _pte(f->pfn, f->writable, !p, ptep_h->s.s);
+	newpte.s.d |= ptep_h->s.d;
+	newpte.s.sd |= ptep_h->s.sd;
+	newpte.h.p &= ptep_h->h.p;
+	if (!newpte.h.p && !f->writable) {
+		rc = -EOPNOTSUPP;
+	} else {
+		pgste = _gmap_ptep_xchg(sg->parent, ptep_h, newpte, pgste, f->gfn, false);
+		pgste.vsie_notif = 1;
+		pgste.vsie_gmem = 1;
 	}
-	/* Return the parent address of the page table */
-	*pgt = ptr;
+	pgste_set_unlock(ptep_h, pgste);
+	if (rc)
+		return rc;
+	if (sg->invalidated)
+		return -EAGAIN;
+
+	newpte = _pte(f->pfn, 0, !p, 0);
+	if (!pgste_get_trylock(ptep, &pgste))
+		return -EAGAIN;
+	pgste = __dat_ptep_xchg(ptep, pgste, newpte, gpa_to_gfn(raddr), sg->asce, uses_skeys(sg));
+	pgste_set_unlock(ptep, pgste);
+
 	return 0;
 }
 
-/**
- * kvm_s390_shadow_fault - handle fault on a shadow page table
- * @vcpu: virtual cpu
- * @sg: pointer to the shadow guest address space structure
- * @saddr: faulting address in the shadow gmap
- *
- * Returns: - 0 if the shadow fault was successfully resolved
- *	    - > 0 (pgm exception code) on exceptions while faulting
- *	    - -EAGAIN if the caller can retry immediately
- *	    - -EFAULT when accessing invalid guest addresses
- *	    - -ENOMEM if out of memory
- */
-int kvm_s390_shadow_fault(struct kvm_vcpu *vcpu, struct gmap *sg,
-			  unsigned long saddr)
+static int _do_shadow_crste(struct kvm_s390_mmu_cache *mc, struct gmap *sg, gpa_t raddr,
+			    union crste *host, union crste *table, struct guest_fault *f, bool p)
 {
-	union vaddress vaddr;
-	union page_table_entry pte;
-	unsigned long pgt;
-	int dat_protection, fake;
+	union crste newcrste, oldcrste;
+	unsigned long mask;
+	gfn_t r_gfn;
 	int rc;
 
-	down_read(&sg->mm->mmap_sem);
-	/*
-	 * We don't want any guest-2 tables to change - so the parent
-	 * tables/pointers we read stay valid - unshadowing is however
-	 * always possible - only guest_table_lock protects us.
-	 */
-	ipte_lock(vcpu);
+	lockdep_assert_held(&sg->kvm->mmu_lock);
+	lockdep_assert_held(&sg->parent->children_lock);
 
-	rc = gmap_shadow_pgt_lookup(sg, saddr, &pgt, &dat_protection, &fake);
+	mask = is_pmd(*table) ? _SEGMENT_FR_MASK : _REGION3_FR_MASK;
+	r_gfn = gpa_to_gfn(raddr) & mask;
+	scoped_guard(spinlock, &sg->host_to_rmap_lock)
+		rc = gmap_insert_rmap(mc, sg, f->gfn & mask, r_gfn, host->h.tt);
 	if (rc)
-		rc = kvm_s390_shadow_tables(sg, saddr, &pgt, &dat_protection,
-					    &fake);
+		return rc;
 
-	vaddr.addr = saddr;
-	if (fake) {
-		pte.val = pgt + vaddr.px * PAGE_SIZE;
-		goto shadow_page;
+	do {
+		/* _gmap_crstep_xchg_atomic() could have unshadowed this shadow gmap */
+		if (sg->invalidated)
+			return -EAGAIN;
+		oldcrste = READ_ONCE(*host);
+		newcrste = _crste_fc1(f->pfn, oldcrste.h.tt, f->writable, !p);
+		newcrste.s.fc1.d |= oldcrste.s.fc1.d;
+		newcrste.s.fc1.sd |= oldcrste.s.fc1.sd;
+		newcrste.h.p &= oldcrste.h.p;
+		newcrste.s.fc1.vsie_notif = 1;
+		newcrste.s.fc1.prefix_notif = oldcrste.s.fc1.prefix_notif;
+		newcrste.s.fc1.s = oldcrste.s.fc1.s;
+		if (!newcrste.h.p && !f->writable)
+			return -EOPNOTSUPP;
+	} while (!_gmap_crstep_xchg_atomic(sg->parent, host, oldcrste, newcrste, f->gfn, false));
+	if (sg->invalidated)
+		return -EAGAIN;
+
+	newcrste = _crste_fc1(f->pfn, oldcrste.h.tt, 0, !p);
+	while (!dat_crstep_xchg_atomic(table, READ_ONCE(*table), newcrste, r_gfn, sg->asce))
+		;
+	return 0;
+}
+
+static int _gaccess_do_shadow(struct kvm_s390_mmu_cache *mc, struct gmap *sg,
+			      unsigned long saddr, struct pgtwalk *w)
+{
+	struct guest_fault *entries;
+	int flags, i, hl, gl, l, rc;
+	union crste *table, *host;
+	union pte *ptep, *ptep_h;
+
+	lockdep_assert_held(&sg->kvm->mmu_lock);
+	lockdep_assert_held(&sg->parent->children_lock);
+
+	entries = get_entries(w);
+	ptep_h = NULL;
+	ptep = NULL;
+
+	rc = dat_entry_walk(NULL, gpa_to_gfn(saddr), sg->asce, DAT_WALK_ANY, TABLE_TYPE_PAGE_TABLE,
+			    &table, &ptep);
+	if (rc)
+		return rc;
+
+	/* A race occurred. The shadow mapping is already valid, nothing to do */
+	if ((ptep && !ptep->h.i && ptep->h.p == w->p) ||
+	    (!ptep && crste_leaf(*table) && !table->h.i && table->h.p == w->p))
+		return 0;
+
+	gl = get_level(table, ptep);
+
+	/* In case of a real address space */
+	if (w->level <= LEVEL_MEM) {
+		l = TABLE_TYPE_PAGE_TABLE;
+		hl = TABLE_TYPE_REGION1;
+		goto real_address_space;
+	}
+
+	/*
+	 * Skip levels that are already protected. For each level, protect
+	 * only the page containing the entry, not the whole table.
+	 */
+	for (i = gl ; i >= w->level; i--) {
+		rc = gmap_protect_rmap(mc, sg, entries[i].gfn, gpa_to_gfn(saddr),
+				       entries[i].pfn, i + 1, entries[i].writable);
+		if (rc)
+			return rc;
+		if (sg->invalidated)
+			return -EAGAIN;
+	}
+
+	rc = dat_entry_walk(NULL, entries[LEVEL_MEM].gfn, sg->parent->asce, DAT_WALK_LEAF,
+			    TABLE_TYPE_PAGE_TABLE, &host, &ptep_h);
+	if (rc)
+		return rc;
+
+	hl = get_level(host, ptep_h);
+	/* Get the smallest granularity */
+	l = min3(gl, hl, w->level);
+
+real_address_space:
+	flags = DAT_WALK_SPLIT_ALLOC | (uses_skeys(sg->parent) ? DAT_WALK_USES_SKEYS : 0);
+	/* If necessary, create the shadow mapping */
+	if (l < gl) {
+		rc = dat_entry_walk(mc, gpa_to_gfn(saddr), sg->asce, flags, l, &table, &ptep);
+		if (rc)
+			return rc;
+	}
+	if (l < hl) {
+		rc = dat_entry_walk(mc, entries[LEVEL_MEM].gfn, sg->parent->asce,
+				    flags, l, &host, &ptep_h);
+		if (rc)
+			return rc;
+	}
+
+	if (KVM_BUG_ON(l > TABLE_TYPE_REGION3, sg->kvm))
+		return -EFAULT;
+	if (l == TABLE_TYPE_PAGE_TABLE)
+		return _do_shadow_pte(mc, sg, saddr, ptep_h, ptep, entries + LEVEL_MEM, w->p);
+	return _do_shadow_crste(mc, sg, saddr, host, table, entries + LEVEL_MEM, w->p);
+}
+
+static inline int ___gaccess_shadow_fault(struct kvm_vcpu *vcpu, struct gmap *sg, gpa_t saddr,
+					  unsigned long seq, struct pgtwalk *walk)
+{
+	struct gmap *parent;
+	int rc;
+
+	if (kvm_s390_array_needs_retry_safe(vcpu->kvm, seq, walk->raw_entries))
+		return -EAGAIN;
+	parent = READ_ONCE(sg->parent);
+	if (!parent)
+		return -EAGAIN;
+	scoped_guard(spinlock, &parent->children_lock) {
+		if (READ_ONCE(sg->parent) != parent)
+			return -EAGAIN;
+		sg->invalidated = false;
+		rc = _gaccess_do_shadow(vcpu->arch.mc, sg, saddr, walk);
 	}
 	if (!rc)
-		rc = gmap_read_table(sg->parent, pgt + vaddr.px * 8, &pte.val);
-	if (!rc && pte.i)
-		rc = PGM_PAGE_TRANSLATION;
-	if (!rc && pte.z)
-		rc = PGM_TRANSLATION_SPEC;
-shadow_page:
-	pte.p |= dat_protection;
+		kvm_s390_release_faultin_array(vcpu->kvm, walk->raw_entries, false);
+	return rc;
+}
+
+static inline int _gaccess_shadow_fault(struct kvm_vcpu *vcpu, struct gmap *sg, gpa_t saddr,
+					unsigned long seq, struct pgtwalk *walk)
+{
+	int rc;
+
+	if (kvm_s390_array_needs_retry_unsafe(vcpu->kvm, seq, walk->raw_entries))
+		return -EAGAIN;
+
+	do {
+		rc = kvm_s390_mmu_cache_topup(vcpu->arch.mc);
+		if (rc)
+			return rc;
+		rc = radix_tree_preload(GFP_KERNEL);
+		if (rc)
+			return rc;
+		scoped_guard(read_lock, &vcpu->kvm->mmu_lock)
+			rc = ___gaccess_shadow_fault(vcpu, sg, saddr, seq, walk);
+		radix_tree_preload_end();
+	} while (rc == -ENOMEM);
+
+	return rc;
+}
+
+/**
+ * __gaccess_shadow_fault() - Handle fault on a shadow page table.
+ * @vcpu: Virtual cpu that triggered the action.
+ * @sg: The shadow guest address space structure.
+ * @saddr: Faulting address in the shadow gmap.
+ * @datptr: Will contain the address of the faulting DAT table entry, or of
+ *	    the valid leaf, plus some flags.
+ * @wr: Whether this is a write access.
+ *
+ * Return:
+ * * %0 if the shadow fault was successfully resolved
+ * * > 0 (pgm exception code) on exceptions while faulting
+ * * %-EAGAIN if the caller can retry immediately
+ * * %-EFAULT when accessing invalid guest addresses
+ * * %-ENOMEM if out of memory
+ */
+static int __gaccess_shadow_fault(struct kvm_vcpu *vcpu, struct gmap *sg, gpa_t saddr,
+				  union mvpg_pei *datptr, bool wr)
+{
+	struct pgtwalk walk = {	.p = false, };
+	unsigned long seq;
+	int rc;
+
+	seq = vcpu->kvm->mmu_invalidate_seq;
+	/* Pairs with the smp_wmb() in kvm_mmu_invalidate_end(). */
+	smp_rmb();
+
+	rc = walk_guest_tables(sg, saddr, &walk, wr);
+	if (datptr) {
+		datptr->val = walk.last_addr;
+		datptr->dat_prot = wr && walk.p;
+		datptr->not_pte = walk.level > TABLE_TYPE_PAGE_TABLE;
+		datptr->real = sg->guest_asce.r;
+	}
 	if (!rc)
-		rc = gmap_shadow_page(sg, saddr, __pte(pte.val));
-	ipte_unlock(vcpu);
-	up_read(&sg->mm->mmap_sem);
+		rc = _gaccess_shadow_fault(vcpu, sg, saddr, seq, &walk);
+	if (rc)
+		kvm_s390_release_faultin_array(vcpu->kvm, walk.raw_entries, true);
+	return rc;
+}
+
+int gaccess_shadow_fault(struct kvm_vcpu *vcpu, struct gmap *sg, gpa_t saddr,
+			 union mvpg_pei *datptr, bool wr)
+{
+	int rc;
+
+	if (KVM_BUG_ON(!test_bit(GMAP_FLAG_SHADOW, &sg->flags), vcpu->kvm))
+		return -EFAULT;
+
+	rc = kvm_s390_mmu_cache_topup(vcpu->arch.mc);
+	if (rc)
+		return rc;
+
+	ipte_lock(vcpu->kvm);
+	rc = __gaccess_shadow_fault(vcpu, sg, saddr, datptr, wr || sg->guest_asce.r);
+	ipte_unlock(vcpu->kvm);
+
 	return rc;
 }

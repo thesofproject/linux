@@ -1,23 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * linux/include/video/mmp_disp.h
  * Header file for Marvell MMP Display Controller
  *
  * Copyright (C) 2012 Marvell Technology Group Ltd.
  * Authors: Zhou Zhu <zzhu3@marvell.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
- *
  */
 
 #ifndef _MMP_DISP_H_
@@ -169,7 +156,7 @@ struct mmp_overlay {
 	int status;
 	struct mutex access_ok;
 
-	struct mmp_overlay_ops *ops;
+	const struct mmp_overlay_ops *ops;
 };
 
 /* panel type */
@@ -244,7 +231,7 @@ struct mmp_path {
 
 	/* layers */
 	int overlay_num;
-	struct mmp_overlay overlays[0];
+	struct mmp_overlay overlays[] __counted_by(overlay_num);
 };
 
 extern struct mmp_path *mmp_get_path(const char *name);
@@ -312,7 +299,7 @@ struct mmp_path_info {
 	int overlay_num;
 	void (*set_mode)(struct mmp_path *path, struct mmp_mode *mode);
 	void (*set_onoff)(struct mmp_path *path, int status);
-	struct mmp_overlay_ops *overlay_ops;
+	const struct mmp_overlay_ops *overlay_ops;
 	void *plat_data;
 };
 

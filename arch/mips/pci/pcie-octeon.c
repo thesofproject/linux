@@ -94,8 +94,6 @@ union cvmx_pcie_address {
 
 static int cvmx_pcie_rc_initialize(int pcie_port);
 
-#include <dma-coherence.h>
-
 /**
  * Return the Core virtual base address for PCIe IO access. IOs are
  * read/written as an offset from this address.
@@ -232,10 +230,16 @@ static inline uint64_t __cvmx_pcie_build_config_addr(int pcie_port, int bus,
 {
 	union cvmx_pcie_address pcie_addr;
 	union cvmx_pciercx_cfg006 pciercx_cfg006;
+	union cvmx_pciercx_cfg032 pciercx_cfg032;
 
 	pciercx_cfg006.u32 =
 	    cvmx_pcie_cfgx_read(pcie_port, CVMX_PCIERCX_CFG006(pcie_port));
 	if ((bus <= pciercx_cfg006.s.pbnum) && (dev != 0))
+		return 0;
+
+	pciercx_cfg032.u32 =
+		cvmx_pcie_cfgx_read(pcie_port, CVMX_PCIERCX_CFG032(pcie_port));
+	if ((pciercx_cfg032.s.dlla == 0) || (pciercx_cfg032.s.lt == 1))
 		return 0;
 
 	pcie_addr.u64 = 0;
@@ -897,7 +901,7 @@ retry:
 	mem_access_subid.s.nsw = 0;	/* Enable Snoop for Writes. */
 	mem_access_subid.s.ror = 0;	/* Disable Relaxed Ordering for Reads. */
 	mem_access_subid.s.row = 0;	/* Disable Relaxed Ordering for Writes. */
-	mem_access_subid.s.ba = 0;	/* PCIe Adddress Bits <63:34>. */
+	mem_access_subid.s.ba = 0;	/* PCIe Address Bits <63:34>. */
 
 	/*
 	 * Setup mem access 12-15 for port 0, 16-19 for port 1,
@@ -1039,7 +1043,7 @@ retry:
 			in_fif_p_count = dbg_data.s.data & 0xff;
 		} while (in_fif_p_count != ((old_in_fif_p_count+1) & 0xff));
 
-		/* Update in_fif_p_count for it's offset with respect to out_p_count */
+		/* Update in_fif_p_count for its offset with respect to out_p_count */
 		in_fif_p_count = (in_fif_p_count + in_p_offset) & 0xff;
 
 		/* Read the OUT_P_COUNT from the debug select */
@@ -1239,14 +1243,14 @@ static int __cvmx_pcie_rc_initialize_gen2(int pcie_port)
 	/* CN63XX Pass 1.0 errata G-14395 requires the QLM De-emphasis be programmed */
 	if (OCTEON_IS_MODEL(OCTEON_CN63XX_PASS1_0)) {
 		if (pcie_port) {
-			union cvmx_ciu_qlm1 ciu_qlm;
+			union cvmx_ciu_qlm ciu_qlm;
 			ciu_qlm.u64 = cvmx_read_csr(CVMX_CIU_QLM1);
 			ciu_qlm.s.txbypass = 1;
 			ciu_qlm.s.txdeemph = 5;
 			ciu_qlm.s.txmargin = 0x17;
 			cvmx_write_csr(CVMX_CIU_QLM1, ciu_qlm.u64);
 		} else {
-			union cvmx_ciu_qlm0 ciu_qlm;
+			union cvmx_ciu_qlm ciu_qlm;
 			ciu_qlm.u64 = cvmx_read_csr(CVMX_CIU_QLM0);
 			ciu_qlm.s.txbypass = 1;
 			ciu_qlm.s.txdeemph = 5;
@@ -1347,7 +1351,7 @@ static int __cvmx_pcie_rc_initialize_gen2(int pcie_port)
 	mem_access_subid.s.esw = 1;	/* Endian-swap for Writes. */
 	mem_access_subid.s.wtype = 0;	/* "No snoop" and "Relaxed ordering" are not set */
 	mem_access_subid.s.rtype = 0;	/* "No snoop" and "Relaxed ordering" are not set */
-	/* PCIe Adddress Bits <63:34>. */
+	/* PCIe Address Bits <63:34>. */
 	if (OCTEON_IS_MODEL(OCTEON_CN68XX))
 		mem_access_subid.cn68xx.ba = 0;
 	else

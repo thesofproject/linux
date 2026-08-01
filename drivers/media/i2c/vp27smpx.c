@@ -1,20 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * vp27smpx - driver version 0.0.1
  *
- * Copyright (C) 2007 Hans Verkuil <hverkuil@xs4all.nl>
+ * Copyright (C) 2007 Hans Verkuil <hverkuil@kernel.org>
  *
  * Based on a tvaudio patch from Takahiro Adachi <tadachi@tadachi-net.com>
  * and Kazuhiko Kawakami <kazz-0@mail.goo.ne.jp>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -147,8 +138,7 @@ static const struct v4l2_subdev_ops vp27smpx_ops = {
  * concerning the addresses: i2c wants 7 bit (without the r/w bit), so '>>1'
  */
 
-static int vp27smpx_probe(struct i2c_client *client,
-			  const struct i2c_device_id *id)
+static int vp27smpx_probe(struct i2c_client *client)
 {
 	struct vp27smpx_state *state;
 	struct v4l2_subdev *sd;
@@ -172,18 +162,17 @@ static int vp27smpx_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int vp27smpx_remove(struct i2c_client *client)
+static void vp27smpx_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 
 	v4l2_device_unregister_subdev(sd);
-	return 0;
 }
 
 /* ----------------------------------------------------------------------- */
 
 static const struct i2c_device_id vp27smpx_id[] = {
-	{ "vp27smpx", 0 },
+	{ .name = "vp27smpx" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, vp27smpx_id);

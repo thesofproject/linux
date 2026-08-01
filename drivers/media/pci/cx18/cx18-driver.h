@@ -1,20 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *  cx18 driver internal defines and structures
  *
  *  Derived from ivtv-driver.h
  *
- *  Copyright (C) 2007  Hans Verkuil <hverkuil@xs4all.nl>
+ *  Copyright (C) 2007  Hans Verkuil <hverkuil@kernel.org>
  *  Copyright (C) 2008  Andy Walls <awalls@md.metrocast.net>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #ifndef CX18_DRIVER_H
@@ -57,9 +48,8 @@
 #include <media/dvb_net.h>
 #include <media/dvbdev.h>
 
-/* Videobuf / YUV support */
-#include <media/videobuf-core.h>
-#include <media/videobuf-vmalloc.h>
+/* vb2 YUV support */
+#include <media/videobuf2-vmalloc.h>
 
 #ifndef CONFIG_PCI
 #  error "This driver requires kernel PCI support."
@@ -281,17 +271,13 @@ struct cx18_options {
 #define CX18_SLICED_TYPE_WSS_625        (5)
 #define CX18_SLICED_TYPE_VPS            (7)
 
-/**
- * list_entry_is_past_end - check if a previous loop cursor is off list end
- * @pos:	the type * previously used as a loop cursor.
- * @head:	the head for your list.
- * @member:	the name of the list_head within the struct.
- *
- * Check if the entry's list_head is the head of the list, thus it's not a
- * real entry but was the loop cursor that walked past the end
- */
-#define list_entry_is_past_end(pos, head, member) \
-	(&pos->member == (head))
+struct cx18_vb2_buffer {
+	/* Common video buffer sub-system struct */
+	struct vb2_v4l2_buffer vb;
+	struct list_head list;
+	v4l2_std_id tvnorm; /* selected tv norm */
+	u32 bytes_used;
+};
 
 struct cx18_buffer {
 	struct list_head list;
@@ -408,17 +394,10 @@ struct cx18_stream {
 	struct list_head vb_capture;    /* video capture queue */
 	spinlock_t vb_lock;
 	struct timer_list vb_timeout;
+	u32 sequence;
 
-	struct videobuf_queue vbuf_q;
-	spinlock_t vbuf_q_lock; /* Protect vbuf_q */
+	struct vb2_queue vidq;
 	enum v4l2_buf_type vb_type;
-};
-
-struct cx18_videobuf_buffer {
-	/* Common video buffer sub-system struct */
-	struct videobuf_buffer vb;
-	v4l2_std_id tvnorm; /* selected tv norm */
-	u32 bytes_used;
 };
 
 struct cx18_open_id {
@@ -435,7 +414,7 @@ static inline struct cx18_open_id *fh2id(struct v4l2_fh *fh)
 
 static inline struct cx18_open_id *file2id(struct file *file)
 {
-	return fh2id(file->private_data);
+	return fh2id(file_to_v4l2_fh(file));
 }
 
 /* forward declaration of struct defined in cx18-cards.h */
@@ -640,7 +619,7 @@ struct cx18 {
 	u32 hw2_irq_mask;
 
 	struct workqueue_struct *in_work_queue;
-	char in_workq_name[11]; /* "cx18-NN-in" */
+	char in_workq_name[39]; /* "cx18-NN-in" */
 	struct cx18_in_work_order in_work_order[CX18_MAX_IN_WORK_ORDERS];
 	char epu_debug_str[256]; /* CX18_EPU_DEBUG is rare: use shared space */
 

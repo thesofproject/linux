@@ -1,21 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2011 Realtek Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
  *
  ******************************************************************************/
 
 #ifndef	__ODM_REGDEFINE11N_H__
 #define __ODM_REGDEFINE11N_H__
-
 
 /* 2 RF REG LIST */
 #define	ODM_REG_RF_MODE_11N				0x00
@@ -39,8 +30,8 @@
 #define	ODM_REG_TX_ANT_CTRL_11N			0x80C
 #define	ODM_REG_BB_PWR_SAV5_11N		0x818
 #define	ODM_REG_CCK_RPT_FORMAT_11N		0x824
-#define	ODM_REG_RX_DEFUALT_A_11N		0x858
-#define	ODM_REG_RX_DEFUALT_B_11N		0x85A
+#define	ODM_REG_RX_DEFAULT_A_11N		0x858
+#define	ODM_REG_RX_DEFAULT_B_11N		0x85A
 #define	ODM_REG_BB_PWR_SAV3_11N		0x85C
 #define	ODM_REG_ANTSEL_CTRL_11N			0x860
 #define	ODM_REG_RX_ANT_CTRL_11N			0x864
@@ -119,8 +110,6 @@
 #define	ODM_REG_TXAGC_A_1_MCS32_11N	0xE08
 #define	ODM_REG_TXAGC_A_MCS0_3_11N		0xE10
 #define	ODM_REG_TXAGC_A_MCS4_7_11N		0xE14
-#define	ODM_REG_TXAGC_A_MCS8_11_11N	0xE18
-#define	ODM_REG_TXAGC_A_MCS12_15_11N	0xE1C
 #define	ODM_REG_FPGA0_IQK_11N			0xE28
 #define	ODM_REG_TXIQK_TONE_A_11N		0xE30
 #define	ODM_REG_RXIQK_TONE_A_11N		0xE34
@@ -162,11 +151,10 @@
 #define	ODM_REG_ANT_TRAIN_PARA1_11N		0x7b0
 #define	ODM_REG_ANT_TRAIN_PARA2_11N		0x7b4
 
-
 /* DIG Related */
 #define	ODM_BIT_IGI_11N					0x0000007F
-#define	ODM_BIT_CCK_RPT_FORMAT_11N		BIT9
+#define	ODM_BIT_CCK_RPT_FORMAT_11N		BIT(9)
 #define	ODM_BIT_BB_RX_PATH_11N			0xF
-#define	ODM_BIT_BB_ATC_11N				BIT11
+#define	ODM_BIT_BB_ATC_11N				BIT(11)
 
 #endif

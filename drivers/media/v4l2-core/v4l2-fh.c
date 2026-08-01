@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * v4l2-fh.c
  *
@@ -6,15 +7,6 @@
  * Copyright (C) 2009--2010 Nokia Corporation.
  *
  * Contact: Sakari Ailus <sakari.ailus@iki.fi>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
 #include <linux/bitops.h>
@@ -45,12 +37,15 @@ void v4l2_fh_init(struct v4l2_fh *fh, struct video_device *vdev)
 	INIT_LIST_HEAD(&fh->available);
 	INIT_LIST_HEAD(&fh->subscribed);
 	fh->sequence = -1;
+	mutex_init(&fh->subscribe_lock);
 }
 EXPORT_SYMBOL_GPL(v4l2_fh_init);
 
-void v4l2_fh_add(struct v4l2_fh *fh)
+void v4l2_fh_add(struct v4l2_fh *fh, struct file *filp)
 {
 	unsigned long flags;
+
+	filp->private_data = fh;
 
 	v4l2_prio_open(fh->vdev->prio, &fh->prio);
 	spin_lock_irqsave(&fh->vdev->fh_lock, flags);
@@ -62,18 +57,17 @@ EXPORT_SYMBOL_GPL(v4l2_fh_add);
 int v4l2_fh_open(struct file *filp)
 {
 	struct video_device *vdev = video_devdata(filp);
-	struct v4l2_fh *fh = kzalloc(sizeof(*fh), GFP_KERNEL);
+	struct v4l2_fh *fh = kzalloc_obj(*fh);
 
-	filp->private_data = fh;
 	if (fh == NULL)
 		return -ENOMEM;
 	v4l2_fh_init(fh, vdev);
-	v4l2_fh_add(fh);
+	v4l2_fh_add(fh, filp);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(v4l2_fh_open);
 
-void v4l2_fh_del(struct v4l2_fh *fh)
+void v4l2_fh_del(struct v4l2_fh *fh, struct file *filp)
 {
 	unsigned long flags;
 
@@ -81,6 +75,8 @@ void v4l2_fh_del(struct v4l2_fh *fh)
 	list_del_init(&fh->list);
 	spin_unlock_irqrestore(&fh->vdev->fh_lock, flags);
 	v4l2_prio_close(fh->vdev->prio, fh->prio);
+
+	filp->private_data = NULL;
 }
 EXPORT_SYMBOL_GPL(v4l2_fh_del);
 
@@ -90,16 +86,17 @@ void v4l2_fh_exit(struct v4l2_fh *fh)
 		return;
 	v4l_disable_media_source(fh->vdev);
 	v4l2_event_unsubscribe_all(fh);
+	mutex_destroy(&fh->subscribe_lock);
 	fh->vdev = NULL;
 }
 EXPORT_SYMBOL_GPL(v4l2_fh_exit);
 
 int v4l2_fh_release(struct file *filp)
 {
-	struct v4l2_fh *fh = filp->private_data;
+	struct v4l2_fh *fh = file_to_v4l2_fh(filp);
 
 	if (fh) {
-		v4l2_fh_del(fh);
+		v4l2_fh_del(fh, filp);
 		v4l2_fh_exit(fh);
 		kfree(fh);
 	}

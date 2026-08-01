@@ -1,20 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014 Free Electrons
  * Copyright (C) 2014 Atmel
  *
  * Author: Boris BREZILLON <boris.brezillon@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/clk.h>
@@ -29,6 +18,7 @@
 
 struct atmel_hlcdc_regmap {
 	void __iomem *regs;
+	struct device *dev;
 };
 
 static const struct mfd_cell atmel_hlcdc_cells[] = {
@@ -49,10 +39,17 @@ static int regmap_atmel_hlcdc_reg_write(void *context, unsigned int reg,
 
 	if (reg <= ATMEL_HLCDC_DIS) {
 		u32 status;
+		int ret;
 
-		readl_poll_timeout_atomic(hregmap->regs + ATMEL_HLCDC_SR,
-					  status, !(status & ATMEL_HLCDC_SIP),
-					  1, 100);
+		ret = readl_poll_timeout_atomic(hregmap->regs + ATMEL_HLCDC_SR,
+						status,
+						!(status & ATMEL_HLCDC_SIP),
+						1, 100);
+		if (ret) {
+			dev_err(hregmap->dev,
+				"Timeout! Clock domain synchronization is in progress!\n");
+			return ret;
+		}
 	}
 
 	writel(val, hregmap->regs + reg);
@@ -85,7 +82,6 @@ static int atmel_hlcdc_probe(struct platform_device *pdev)
 	struct atmel_hlcdc_regmap *hregmap;
 	struct device *dev = &pdev->dev;
 	struct atmel_hlcdc *hlcdc;
-	struct resource *res;
 
 	hregmap = devm_kzalloc(dev, sizeof(*hregmap), GFP_KERNEL);
 	if (!hregmap)
@@ -95,10 +91,11 @@ static int atmel_hlcdc_probe(struct platform_device *pdev)
 	if (!hlcdc)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	hregmap->regs = devm_ioremap_resource(dev, res);
+	hregmap->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(hregmap->regs))
 		return PTR_ERR(hregmap->regs);
+
+	hregmap->dev = &pdev->dev;
 
 	hlcdc->irq = platform_get_irq(pdev, 0);
 	if (hlcdc->irq < 0)
@@ -110,10 +107,19 @@ static int atmel_hlcdc_probe(struct platform_device *pdev)
 		return PTR_ERR(hlcdc->periph_clk);
 	}
 
+	/*
+	 * Retrieve one of the primary clocks required for LCD operation:
+	 * prefer sys_clk (for RGB/MIPI), and fall back to lvds_pll_clk
+	 * (for LVDS) if needed.
+	 */
 	hlcdc->sys_clk = devm_clk_get(dev, "sys_clk");
 	if (IS_ERR(hlcdc->sys_clk)) {
-		dev_err(dev, "failed to get system clock\n");
-		return PTR_ERR(hlcdc->sys_clk);
+		hlcdc->sys_clk = NULL;
+		hlcdc->lvds_pll_clk = devm_clk_get(dev, "lvds_pll_clk");
+		if (IS_ERR(hlcdc->lvds_pll_clk)) {
+			dev_err(dev, "Failed to obtain both the LCDC (generic) and LVDS PLL clocks\n");
+			return PTR_ERR(hlcdc->lvds_pll_clk);
+		}
 	}
 
 	hlcdc->slow_clk = devm_clk_get(dev, "slow_clk");
@@ -140,6 +146,9 @@ static const struct of_device_id atmel_hlcdc_match[] = {
 	{ .compatible = "atmel,sama5d2-hlcdc" },
 	{ .compatible = "atmel,sama5d3-hlcdc" },
 	{ .compatible = "atmel,sama5d4-hlcdc" },
+	{ .compatible = "microchip,sam9x60-hlcdc" },
+	{ .compatible = "microchip,sam9x75-xlcdc" },
+	{ .compatible = "microchip,sama7d65-xlcdc" },
 	{ /* sentinel */ },
 };
 MODULE_DEVICE_TABLE(of, atmel_hlcdc_match);

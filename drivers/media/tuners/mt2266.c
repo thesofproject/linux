@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for Microtune MT2266 "Direct conversion low power broadband tuner"
  *
  *  Copyright (c) 2007 Olivier DANET <odanet@caramail.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -304,10 +295,10 @@ static void mt2266_release(struct dvb_frontend *fe)
 
 static const struct dvb_tuner_ops mt2266_tuner_ops = {
 	.info = {
-		.name           = "Microtune MT2266",
-		.frequency_min  = 174000000,
-		.frequency_max  = 862000000,
-		.frequency_step =     50000,
+		.name              = "Microtune MT2266",
+		.frequency_min_hz  = 174 * MHz,
+		.frequency_max_hz  = 862 * MHz,
+		.frequency_step_hz =  50 * kHz,
 	},
 	.release       = mt2266_release,
 	.init          = mt2266_init,
@@ -322,7 +313,7 @@ struct dvb_frontend * mt2266_attach(struct dvb_frontend *fe, struct i2c_adapter 
 	struct mt2266_priv *priv = NULL;
 	u8 id = 0;
 
-	priv = kzalloc(sizeof(struct mt2266_priv), GFP_KERNEL);
+	priv = kzalloc_obj(struct mt2266_priv);
 	if (priv == NULL)
 		return NULL;
 
@@ -345,7 +336,7 @@ struct dvb_frontend * mt2266_attach(struct dvb_frontend *fe, struct i2c_adapter 
 	mt2266_calibrate(priv);
 	return fe;
 }
-EXPORT_SYMBOL(mt2266_attach);
+EXPORT_SYMBOL_GPL(mt2266_attach);
 
 MODULE_AUTHOR("Olivier DANET");
 MODULE_DESCRIPTION("Microtune MT2266 silicon tuner driver");

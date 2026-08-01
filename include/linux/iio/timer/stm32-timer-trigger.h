@@ -1,9 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) STMicroelectronics 2016
  *
  * Author: Benjamin Gaignard <benjamin.gaignard@st.com>
- *
- * License terms:  GNU General Public License (GPL), version 2
  */
 
 #ifndef _STM32_TIMER_TRIGGER_H_
@@ -73,6 +72,21 @@
 
 #define TIM17_OC1	"tim17_oc1"
 
-bool is_stm32_timer_trigger(struct iio_trigger *trig);
+#define TIM20_OC1	"tim20_oc1"
+#define TIM20_OC2	"tim20_oc2"
+#define TIM20_OC3	"tim20_oc3"
+#define TIM20_TRGO	"tim20_trgo"
+#define TIM20_TRGO2	"tim20_trgo2"
 
+#if IS_REACHABLE(CONFIG_IIO_STM32_TIMER_TRIGGER)
+bool is_stm32_timer_trigger(struct iio_trigger *trig);
+#else
+static inline bool is_stm32_timer_trigger(struct iio_trigger *trig)
+{
+#if IS_ENABLED(CONFIG_IIO_STM32_TIMER_TRIGGER)
+	pr_warn_once("stm32-timer-trigger not linked in\n");
+#endif
+	return false;
+}
+#endif
 #endif

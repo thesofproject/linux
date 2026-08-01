@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  *	Berkshire USB-PC Watchdog Card Driver
  *
@@ -9,11 +10,6 @@
  *	  Matt Domsch <Matt_Domsch@dell.com>,
  *	  Rob Radez <rob@osinvestor.com>,
  *	  Greg Kroah-Hartman <greg@kroah.com>
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	as published by the Free Software Foundation; either version
- *	2 of the License, or (at your option) any later version.
  *
  *	Neither Wim Van Sebroeck nor Iguana vzw. admit liability nor
  *	provide warranty for any of this software. This material is
@@ -329,7 +325,8 @@ static int usb_pcwd_set_heartbeat(struct usb_pcwd_private *usb_pcwd, int t)
 static int usb_pcwd_get_temperature(struct usb_pcwd_private *usb_pcwd,
 							int *temperature)
 {
-	unsigned char msb, lsb;
+	unsigned char msb = 0x00;
+	unsigned char lsb = 0x00;
 
 	usb_pcwd_send_command(usb_pcwd, CMD_READ_TEMP, &msb, &lsb);
 
@@ -345,7 +342,8 @@ static int usb_pcwd_get_temperature(struct usb_pcwd_private *usb_pcwd,
 static int usb_pcwd_get_timeleft(struct usb_pcwd_private *usb_pcwd,
 								int *time_left)
 {
-	unsigned char msb, lsb;
+	unsigned char msb = 0x00;
+	unsigned char lsb = 0x00;
 
 	/* Read the time that's left before rebooting */
 	/* Note: if the board is not yet armed then we will read 0xFFFF */
@@ -456,7 +454,7 @@ static long usb_pcwd_ioctl(struct file *file, unsigned int cmd,
 
 		usb_pcwd_keepalive(usb_pcwd_device);
 	}
-		/* fall through */
+		fallthrough;
 
 	case WDIOC_GETTIMEOUT:
 		return put_user(heartbeat, p);
@@ -485,7 +483,7 @@ static int usb_pcwd_open(struct inode *inode, struct file *file)
 	/* Activate */
 	usb_pcwd_start(usb_pcwd_device);
 	usb_pcwd_keepalive(usb_pcwd_device);
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int usb_pcwd_release(struct inode *inode, struct file *file)
@@ -524,7 +522,7 @@ static ssize_t usb_pcwd_temperature_read(struct file *file, char __user *data,
 
 static int usb_pcwd_temperature_open(struct inode *inode, struct file *file)
 {
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static int usb_pcwd_temperature_release(struct inode *inode, struct file *file)
@@ -551,9 +549,9 @@ static int usb_pcwd_notify_sys(struct notifier_block *this, unsigned long code,
 
 static const struct file_operations usb_pcwd_fops = {
 	.owner =	THIS_MODULE,
-	.llseek =	no_llseek,
 	.write =	usb_pcwd_write,
 	.unlocked_ioctl = usb_pcwd_ioctl,
+	.compat_ioctl = compat_ptr_ioctl,
 	.open =		usb_pcwd_open,
 	.release =	usb_pcwd_release,
 };
@@ -566,7 +564,6 @@ static struct miscdevice usb_pcwd_miscdev = {
 
 static const struct file_operations usb_pcwd_temperature_fops = {
 	.owner =	THIS_MODULE,
-	.llseek =	no_llseek,
 	.read =		usb_pcwd_temperature_read,
 	.open =		usb_pcwd_temperature_open,
 	.release =	usb_pcwd_temperature_release,
@@ -582,19 +579,18 @@ static struct notifier_block usb_pcwd_notifier = {
 	.notifier_call =	usb_pcwd_notify_sys,
 };
 
-/**
+/*
  *	usb_pcwd_delete
  */
 static inline void usb_pcwd_delete(struct usb_pcwd_private *usb_pcwd)
 {
 	usb_free_urb(usb_pcwd->intr_urb);
-	if (usb_pcwd->intr_buffer != NULL)
-		usb_free_coherent(usb_pcwd->udev, usb_pcwd->intr_size,
-				  usb_pcwd->intr_buffer, usb_pcwd->intr_dma);
+	usb_free_coherent(usb_pcwd->udev, usb_pcwd->intr_size,
+			  usb_pcwd->intr_buffer, usb_pcwd->intr_dma);
 	kfree(usb_pcwd);
 }
 
-/**
+/*
  *	usb_pcwd_probe
  *
  *	Called by the usb core when a new device is connected that it thinks
@@ -645,7 +641,7 @@ static int usb_pcwd_probe(struct usb_interface *interface,
 	pipe = usb_rcvintpipe(udev, endpoint->bEndpointAddress);
 
 	/* allocate memory for our device and initialize it */
-	usb_pcwd = kzalloc(sizeof(struct usb_pcwd_private), GFP_KERNEL);
+	usb_pcwd = kzalloc_obj(struct usb_pcwd_private);
 	if (usb_pcwd == NULL)
 		goto error;
 
@@ -660,7 +656,7 @@ static int usb_pcwd_probe(struct usb_interface *interface,
 
 	/* set up the memory buffer's */
 	usb_pcwd->intr_buffer = usb_alloc_coherent(udev, usb_pcwd->intr_size,
-					GFP_ATOMIC, &usb_pcwd->intr_dma);
+					GFP_KERNEL, &usb_pcwd->intr_dma);
 	if (!usb_pcwd->intr_buffer) {
 		pr_err("Out of memory\n");
 		goto error;
@@ -762,7 +758,7 @@ error:
 }
 
 
-/**
+/*
  *	usb_pcwd_disconnect
  *
  *	Called by the usb core when the device is removed from the system.

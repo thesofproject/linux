@@ -1,12 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2013 Freescale Semiconductor, Inc.
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
  */
 
 #include <linux/clk-provider.h>
@@ -24,7 +18,7 @@
  * @fixup: a hook to fixup the write value
  *
  * The imx fixup divider clock is a subclass of basic clk_divider
- * with an addtional fixup hook.
+ * with an additional fixup hook.
  */
 struct clk_fixup_div {
 	struct clk_divider divider;
@@ -47,12 +41,12 @@ static unsigned long clk_fixup_div_recalc_rate(struct clk_hw *hw,
 	return fixup_div->ops->recalc_rate(&fixup_div->divider.hw, parent_rate);
 }
 
-static long clk_fixup_div_round_rate(struct clk_hw *hw, unsigned long rate,
-			       unsigned long *prate)
+static int clk_fixup_div_determine_rate(struct clk_hw *hw,
+					struct clk_rate_request *req)
 {
 	struct clk_fixup_div *fixup_div = to_clk_fixup_div(hw);
 
-	return fixup_div->ops->round_rate(&fixup_div->divider.hw, rate, prate);
+	return fixup_div->ops->determine_rate(&fixup_div->divider.hw, req);
 }
 
 static int clk_fixup_div_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -61,7 +55,7 @@ static int clk_fixup_div_set_rate(struct clk_hw *hw, unsigned long rate,
 	struct clk_fixup_div *fixup_div = to_clk_fixup_div(hw);
 	struct clk_divider *div = to_clk_divider(hw);
 	unsigned int divider, value;
-	unsigned long flags = 0;
+	unsigned long flags;
 	u32 val;
 
 	divider = parent_rate / rate;
@@ -87,22 +81,23 @@ static int clk_fixup_div_set_rate(struct clk_hw *hw, unsigned long rate,
 
 static const struct clk_ops clk_fixup_div_ops = {
 	.recalc_rate = clk_fixup_div_recalc_rate,
-	.round_rate = clk_fixup_div_round_rate,
+	.determine_rate = clk_fixup_div_determine_rate,
 	.set_rate = clk_fixup_div_set_rate,
 };
 
-struct clk *imx_clk_fixup_divider(const char *name, const char *parent,
+struct clk_hw *imx_clk_hw_fixup_divider(const char *name, const char *parent,
 				  void __iomem *reg, u8 shift, u8 width,
 				  void (*fixup)(u32 *val))
 {
 	struct clk_fixup_div *fixup_div;
-	struct clk *clk;
+	struct clk_hw *hw;
 	struct clk_init_data init;
+	int ret;
 
 	if (!fixup)
 		return ERR_PTR(-EINVAL);
 
-	fixup_div = kzalloc(sizeof(*fixup_div), GFP_KERNEL);
+	fixup_div = kzalloc_obj(*fixup_div);
 	if (!fixup_div)
 		return ERR_PTR(-ENOMEM);
 
@@ -120,9 +115,13 @@ struct clk *imx_clk_fixup_divider(const char *name, const char *parent,
 	fixup_div->ops = &clk_divider_ops;
 	fixup_div->fixup = fixup;
 
-	clk = clk_register(NULL, &fixup_div->divider.hw);
-	if (IS_ERR(clk))
-		kfree(fixup_div);
+	hw = &fixup_div->divider.hw;
 
-	return clk;
+	ret = clk_hw_register(NULL, hw);
+	if (ret) {
+		kfree(fixup_div);
+		return ERR_PTR(ret);
+	}
+
+	return hw;
 }

@@ -17,7 +17,7 @@
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/pagemap.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/mount.h>
 #include <linux/blkdev.h>
 #include <linux/module.h>
@@ -26,7 +26,6 @@
 #include <asm/setup.h>
 #include <asm/machdep.h>
 #include <asm/page.h>
-#include <asm/pgtable.h>
 #include <asm/atarihw.h>
 #include <asm/atari_stram.h>
 #include <asm/io.h>
@@ -95,7 +94,12 @@ void __init atari_stram_reserve_pages(void *start_mem)
 {
 	if (kernel_in_stram) {
 		pr_debug("atari_stram pool: kernel in ST-RAM, using alloc_bootmem!\n");
-		stram_pool.start = (resource_size_t)alloc_bootmem_low_pages(pool_size);
+		stram_pool.start = (resource_size_t)memblock_alloc_low(pool_size,
+								       PAGE_SIZE);
+		if (!stram_pool.start)
+			panic("%s: Failed to allocate %lu bytes align=%lx\n",
+			      __func__, pool_size, PAGE_SIZE);
+
 		stram_pool.end = stram_pool.start + pool_size - 1;
 		request_resource(&iomem_resource, &stram_pool);
 		stram_virt_offset = 0;
@@ -111,7 +115,7 @@ void __init atari_stram_reserve_pages(void *start_mem)
  * This function is called as arch initcall to reserve the pages needed for
  * ST-RAM management, if the kernel does not reside in ST-RAM.
  */
-int __init atari_stram_map_pages(void)
+static int __init atari_stram_map_pages(void)
 {
 	if (!kernel_in_stram) {
 		/*
@@ -157,7 +161,7 @@ void *atari_stram_alloc(unsigned long size, const char *owner)
 	/* round up */
 	size = PAGE_ALIGN(size);
 
-	res = kzalloc(sizeof(struct resource), GFP_KERNEL);
+	res = kzalloc_obj(struct resource);
 	if (!res)
 		return NULL;
 

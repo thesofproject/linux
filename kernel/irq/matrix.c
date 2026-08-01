@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-// Copyright (C) 2017 Thomas Gleixner <tglx@linutronix.de>
+// Copyright (C) 2017 Linutronix GmbH, Thomas Gleixner <tglx@kernel.org>
 
 #include <linux/spinlock.h>
 #include <linux/seq_file.h>
@@ -8,16 +8,15 @@
 #include <linux/cpu.h>
 #include <linux/irq.h>
 
-#define IRQ_MATRIX_SIZE	(BITS_TO_LONGS(IRQ_MATRIX_BITS) * sizeof(unsigned long))
-
 struct cpumap {
 	unsigned int		available;
 	unsigned int		allocated;
 	unsigned int		managed;
+	unsigned int		managed_allocated;
 	bool			initialized;
 	bool			online;
-	unsigned long		alloc_map[IRQ_MATRIX_SIZE];
-	unsigned long		managed_map[IRQ_MATRIX_SIZE];
+	unsigned long		*managed_map;
+	unsigned long		alloc_map[];
 };
 
 struct irq_matrix {
@@ -31,8 +30,8 @@ struct irq_matrix {
 	unsigned int		total_allocated;
 	unsigned int		online_maps;
 	struct cpumap __percpu	*maps;
-	unsigned long		scratch_map[IRQ_MATRIX_SIZE];
-	unsigned long		system_map[IRQ_MATRIX_SIZE];
+	unsigned long		*system_map;
+	unsigned long		scratch_map[];
 };
 
 #define CREATE_TRACE_POINTS
@@ -40,7 +39,7 @@ struct irq_matrix {
 
 /**
  * irq_alloc_matrix - Allocate a irq_matrix structure and initialize it
- * @matrix_bits:	Number of matrix bits must be <= IRQ_MATRIX_BITS
+ * @matrix_bits:	Number of matrix bits
  * @alloc_start:	From which bit the allocation search starts
  * @alloc_end:		At which bit the allocation search ends, i.e first
  *			invalid bit
@@ -49,24 +48,32 @@ __init struct irq_matrix *irq_alloc_matrix(unsigned int matrix_bits,
 					   unsigned int alloc_start,
 					   unsigned int alloc_end)
 {
+	unsigned int cpu, matrix_size = BITS_TO_LONGS(matrix_bits);
 	struct irq_matrix *m;
 
-	if (matrix_bits > IRQ_MATRIX_BITS)
-		return NULL;
-
-	m = kzalloc(sizeof(*m), GFP_KERNEL);
+	m = kzalloc_flex(*m, scratch_map, matrix_size * 2);
 	if (!m)
 		return NULL;
+
+	m->system_map = &m->scratch_map[matrix_size];
 
 	m->matrix_bits = matrix_bits;
 	m->alloc_start = alloc_start;
 	m->alloc_end = alloc_end;
 	m->alloc_size = alloc_end - alloc_start;
-	m->maps = alloc_percpu(*m->maps);
+	m->maps = __alloc_percpu(struct_size(m->maps, alloc_map, matrix_size * 2),
+				 __alignof__(*m->maps));
 	if (!m->maps) {
 		kfree(m);
 		return NULL;
 	}
+
+	for_each_possible_cpu(cpu) {
+		struct cpumap *cm = per_cpu_ptr(m->maps, cpu);
+
+		cm->managed_map = &cm->alloc_map[matrix_size];
+	}
+
 	return m;
 }
 
@@ -122,6 +129,48 @@ static unsigned int matrix_alloc_area(struct irq_matrix *m, struct cpumap *cm,
 	else
 		bitmap_set(cm->alloc_map, area, num);
 	return area;
+}
+
+/* Find the best CPU which has the lowest vector allocation count */
+static unsigned int matrix_find_best_cpu(struct irq_matrix *m,
+					const struct cpumask *msk)
+{
+	unsigned int cpu, best_cpu, maxavl = 0;
+	struct cpumap *cm;
+
+	best_cpu = UINT_MAX;
+
+	for_each_cpu(cpu, msk) {
+		cm = per_cpu_ptr(m->maps, cpu);
+
+		if (!cm->online || cm->available <= maxavl)
+			continue;
+
+		best_cpu = cpu;
+		maxavl = cm->available;
+	}
+	return best_cpu;
+}
+
+/* Find the best CPU which has the lowest number of managed IRQs allocated */
+static unsigned int matrix_find_best_cpu_managed(struct irq_matrix *m,
+						const struct cpumask *msk)
+{
+	unsigned int cpu, best_cpu, allocated = UINT_MAX;
+	struct cpumap *cm;
+
+	best_cpu = UINT_MAX;
+
+	for_each_cpu(cpu, msk) {
+		cm = per_cpu_ptr(m->maps, cpu);
+
+		if (!cm->online || cm->managed_allocated > allocated)
+			continue;
+
+		best_cpu = cpu;
+		allocated = cm->managed_allocated;
+	}
+	return best_cpu;
 }
 
 /**
@@ -237,13 +286,24 @@ void irq_matrix_remove_managed(struct irq_matrix *m, const struct cpumask *msk)
 /**
  * irq_matrix_alloc_managed - Allocate a managed interrupt in a CPU map
  * @m:		Matrix pointer
- * @cpu:	On which CPU the interrupt should be allocated
+ * @msk:	Which CPUs to search in
+ * @mapped_cpu:	Pointer to store the CPU for which the irq was allocated
  */
-int irq_matrix_alloc_managed(struct irq_matrix *m, unsigned int cpu)
+int irq_matrix_alloc_managed(struct irq_matrix *m, const struct cpumask *msk,
+			     unsigned int *mapped_cpu)
 {
-	struct cpumap *cm = per_cpu_ptr(m->maps, cpu);
-	unsigned int bit, end = m->alloc_end;
+	unsigned int bit, cpu, end;
+	struct cpumap *cm;
 
+	if (cpumask_empty(msk))
+		return -EINVAL;
+
+	cpu = matrix_find_best_cpu_managed(m, msk);
+	if (cpu == UINT_MAX)
+		return -ENOSPC;
+
+	cm = per_cpu_ptr(m->maps, cpu);
+	end = m->alloc_end;
 	/* Get managed bit which are not allocated */
 	bitmap_andnot(m->scratch_map, cm->managed_map, cm->alloc_map, end);
 	bit = find_first_bit(m->scratch_map, end);
@@ -251,7 +311,9 @@ int irq_matrix_alloc_managed(struct irq_matrix *m, unsigned int cpu)
 		return -ENOSPC;
 	set_bit(bit, cm->alloc_map);
 	cm->allocated++;
+	cm->managed_allocated++;
 	m->total_allocated++;
+	*mapped_cpu = cpu;
 	trace_irq_matrix_alloc_managed(bit, cpu, m, cm);
 	return bit;
 }
@@ -282,15 +344,14 @@ void irq_matrix_assign(struct irq_matrix *m, unsigned int bit)
  * irq_matrix_reserve - Reserve interrupts
  * @m:		Matrix pointer
  *
- * This is merily a book keeping call. It increments the number of globally
+ * This is merely a book keeping call. It increments the number of globally
  * reserved interrupt bits w/o actually allocating them. This allows to
  * setup interrupt descriptors w/o assigning low level resources to it.
  * The actual allocation happens when the interrupt gets activated.
  */
 void irq_matrix_reserve(struct irq_matrix *m)
 {
-	if (m->global_reserved <= m->global_available &&
-	    m->global_reserved + 1 > m->global_available)
+	if (m->global_reserved == m->global_available)
 		pr_warn("Interrupt reservation exceeds available resources\n");
 
 	m->global_reserved++;
@@ -301,7 +362,7 @@ void irq_matrix_reserve(struct irq_matrix *m)
  * irq_matrix_remove_reserved - Remove interrupt reservation
  * @m:		Matrix pointer
  *
- * This is merily a book keeping call. It decrements the number of globally
+ * This is merely a book keeping call. It decrements the number of globally
  * reserved interrupt bits. This is used to undo irq_matrix_reserve() when the
  * interrupt was never in use and a real vector allocated, which undid the
  * reservation.
@@ -322,37 +383,34 @@ void irq_matrix_remove_reserved(struct irq_matrix *m)
 int irq_matrix_alloc(struct irq_matrix *m, const struct cpumask *msk,
 		     bool reserved, unsigned int *mapped_cpu)
 {
-	unsigned int cpu, best_cpu, maxavl = 0;
+	unsigned int cpu, bit;
 	struct cpumap *cm;
-	unsigned int bit;
 
-	best_cpu = UINT_MAX;
-	for_each_cpu(cpu, msk) {
-		cm = per_cpu_ptr(m->maps, cpu);
+	/*
+	 * Not required in theory, but matrix_find_best_cpu() uses
+	 * for_each_cpu() which ignores the cpumask on UP .
+	 */
+	if (cpumask_empty(msk))
+		return -EINVAL;
 
-		if (!cm->online || cm->available <= maxavl)
-			continue;
+	cpu = matrix_find_best_cpu(m, msk);
+	if (cpu == UINT_MAX)
+		return -ENOSPC;
 
-		best_cpu = cpu;
-		maxavl = cm->available;
-	}
+	cm = per_cpu_ptr(m->maps, cpu);
+	bit = matrix_alloc_area(m, cm, 1, false);
+	if (bit >= m->alloc_end)
+		return -ENOSPC;
+	cm->allocated++;
+	cm->available--;
+	m->total_allocated++;
+	m->global_available--;
+	if (reserved)
+		m->global_reserved--;
+	*mapped_cpu = cpu;
+	trace_irq_matrix_alloc(bit, cpu, m, cm);
+	return bit;
 
-	if (maxavl) {
-		cm = per_cpu_ptr(m->maps, best_cpu);
-		bit = matrix_alloc_area(m, cm, 1, false);
-		if (bit < m->alloc_end) {
-			cm->allocated++;
-			cm->available--;
-			m->total_allocated++;
-			m->global_available--;
-			if (reserved)
-				m->global_reserved--;
-			*mapped_cpu = best_cpu;
-			trace_irq_matrix_alloc(bit, best_cpu, m, cm);
-			return bit;
-		}
-	}
-	return -ENOSPC;
 }
 
 /**
@@ -371,8 +429,12 @@ void irq_matrix_free(struct irq_matrix *m, unsigned int cpu,
 	if (WARN_ON_ONCE(bit < m->alloc_start || bit >= m->alloc_end))
 		return;
 
-	clear_bit(bit, cm->alloc_map);
+	if (WARN_ON_ONCE(!test_and_clear_bit(bit, cm->alloc_map)))
+		return;
+
 	cm->allocated--;
+	if(managed)
+		cm->managed_allocated--;
 
 	if (cm->online)
 		m->total_allocated--;
@@ -410,16 +472,16 @@ unsigned int irq_matrix_reserved(struct irq_matrix *m)
 }
 
 /**
- * irq_matrix_allocated - Get the number of allocated irqs on the local cpu
+ * irq_matrix_allocated - Get the number of allocated non-managed irqs on the local CPU
  * @m:		Pointer to the matrix to search
  *
- * This returns number of allocated irqs
+ * This returns number of allocated non-managed interrupts.
  */
 unsigned int irq_matrix_allocated(struct irq_matrix *m)
 {
 	struct cpumap *cm = this_cpu_ptr(m->maps);
 
-	return cm->allocated;
+	return cm->allocated - cm->managed_allocated;
 }
 
 #ifdef CONFIG_GENERIC_IRQ_DEBUGFS
@@ -442,13 +504,14 @@ void irq_matrix_debug_show(struct seq_file *sf, struct irq_matrix *m, int ind)
 	seq_printf(sf, "Total allocated:  %6u\n", m->total_allocated);
 	seq_printf(sf, "System: %u: %*pbl\n", nsys, m->matrix_bits,
 		   m->system_map);
-	seq_printf(sf, "%*s| CPU | avl | man | act | vectors\n", ind, " ");
+	seq_printf(sf, "%*s| CPU | avl | man | mac | act | vectors\n", ind, " ");
 	cpus_read_lock();
 	for_each_online_cpu(cpu) {
 		struct cpumap *cm = per_cpu_ptr(m->maps, cpu);
 
-		seq_printf(sf, "%*s %4d  %4u  %4u  %4u  %*pbl\n", ind, " ",
-			   cpu, cm->available, cm->managed, cm->allocated,
+		seq_printf(sf, "%*s %4d  %4u  %4u  %4u %4u  %*pbl\n", ind, " ",
+			   cpu, cm->available, cm->managed,
+			   cm->managed_allocated, cm->allocated,
 			   m->matrix_bits, cm->alloc_map);
 	}
 	cpus_read_unlock();

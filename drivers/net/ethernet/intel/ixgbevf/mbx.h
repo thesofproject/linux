@@ -1,29 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/*******************************************************************************
-
-  Intel 82599 Virtual Function driver
-  Copyright(c) 1999 - 2015 Intel Corporation.
-
-  This program is free software; you can redistribute it and/or modify it
-  under the terms and conditions of the GNU General Public License,
-  version 2, as published by the Free Software Foundation.
-
-  This program is distributed in the hope it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, see <http://www.gnu.org/licenses/>.
-
-  The full GNU General Public License is included in this distribution in
-  the file called "COPYING".
-
-  Contact Information:
-  e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
-  Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
-
-*******************************************************************************/
+/* Copyright(c) 1999 - 2018 Intel Corporation. */
 
 #ifndef _IXGBE_MBX_H_
 #define _IXGBE_MBX_H_
@@ -31,7 +7,6 @@
 #include "vf.h"
 
 #define IXGBE_VFMAILBOX_SIZE	16 /* 16 32 bit words - 64 bytes */
-#define IXGBE_ERR_MBX		-100
 
 #define IXGBE_VFMAILBOX		0x002FC
 #define IXGBE_VFMBMEM		0x00200
@@ -63,14 +38,17 @@
 
 /* If it's a IXGBE_VF_* msg then it originates in the VF and is sent to the
  * PF.  The reverse is true if it is IXGBE_PF_*.
- * Message ACK's are the value or'd with 0xF0000000
+ * Message results are the value or'd with 0xF0000000
  */
-/* Messages below or'd with this are the ACK */
-#define IXGBE_VT_MSGTYPE_ACK	0x80000000
-/* Messages below or'd with this are the NACK */
-#define IXGBE_VT_MSGTYPE_NACK	0x40000000
-/* Indicates that VF is still clear to send requests */
-#define IXGBE_VT_MSGTYPE_CTS	0x20000000
+#define IXGBE_VT_MSGTYPE_SUCCESS	0x80000000 /* Messages or'd with this
+						    * have succeeded
+						    */
+#define IXGBE_VT_MSGTYPE_FAILURE	0x40000000 /* Messages or'd with this
+						    * have failed
+						    */
+#define IXGBE_VT_MSGTYPE_CTS		0x20000000 /* Indicates that VF is still
+						    * clear to send requests
+						    */
 #define IXGBE_VT_MSGINFO_SHIFT	16
 /* bits 23:16 are used for exra info for certain messages */
 #define IXGBE_VT_MSGINFO_MASK	(0xFF << IXGBE_VT_MSGINFO_SHIFT)
@@ -86,6 +64,10 @@ enum ixgbe_pfvf_api_rev {
 	ixgbe_mbox_api_11,	/* API version 1.1, linux/freebsd VF driver */
 	ixgbe_mbox_api_12,	/* API version 1.2, linux/freebsd VF driver */
 	ixgbe_mbox_api_13,	/* API version 1.3, linux/freebsd VF driver */
+	ixgbe_mbox_api_14,	/* API version 1.4, linux/freebsd VF driver */
+	ixgbe_mbox_api_15,	/* API version 1.5, linux/freebsd VF driver */
+	ixgbe_mbox_api_16,      /* API version 1.6, linux/freebsd VF driver */
+	ixgbe_mbox_api_17,	/* API version 1.7, linux/freebsd VF driver */
 	/* This value should always be last */
 	ixgbe_mbox_api_unknown,	/* indicates that API version is not known */
 };
@@ -115,6 +97,18 @@ enum ixgbe_pfvf_api_rev {
 #define IXGBE_VF_GET_RSS_KEY	0x0b	/* get RSS hash key */
 
 #define IXGBE_VF_UPDATE_XCAST_MODE	0x0c
+
+/* mailbox API, version 1.4 VF requests */
+#define IXGBE_VF_IPSEC_ADD	0x0d
+#define IXGBE_VF_IPSEC_DEL	0x0e
+
+#define IXGBE_VF_GET_LINK_STATE 0x10 /* get vf link state */
+
+/* mailbox API, version 1.6 VF requests */
+#define IXGBE_VF_GET_PF_LINK_STATE	0x11 /* request PF to send link info */
+
+/* mailbox API, version 1.7 VF requests */
+#define IXGBE_VF_FEATURES_NEGOTIATE	0x12 /* get features supported by PF*/
 
 /* length of permanent address message returned from PF */
 #define IXGBE_VF_PERMADDR_MSG_LEN	4

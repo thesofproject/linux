@@ -30,7 +30,7 @@
 #include <linux/delay.h>
 
 static const struct i2c_device_id pm80x_id_table[] = {
-	{"88PM805", 0},
+	{ "88PM805" },
 	{} /* NULL terminated */
 };
 MODULE_DEVICE_TABLE(i2c, pm80x_id_table);
@@ -54,27 +54,14 @@ enum {
 };
 
 static struct resource codec_resources[] = {
-	{
-	 /* Headset microphone insertion or removal */
-	 .name = "micin",
-	 .start = PM805_IRQ_MIC_DET,
-	 .end = PM805_IRQ_MIC_DET,
-	 .flags = IORESOURCE_IRQ,
-	 },
-	{
-	 /* Audio short HP1 */
-	 .name = "audio-short1",
-	 .start = PM805_IRQ_HP1_SHRT,
-	 .end = PM805_IRQ_HP1_SHRT,
-	 .flags = IORESOURCE_IRQ,
-	 },
-	{
-	 /* Audio short HP2 */
-	 .name = "audio-short2",
-	 .start = PM805_IRQ_HP2_SHRT,
-	 .end = PM805_IRQ_HP2_SHRT,
-	 .flags = IORESOURCE_IRQ,
-	 },
+	/* Headset microphone insertion or removal */
+	DEFINE_RES_IRQ_NAMED(PM805_IRQ_MIC_DET, "micin"),
+
+	/* Audio short HP1 */
+	DEFINE_RES_IRQ_NAMED(PM805_IRQ_HP1_SHRT, "audio-short1"),
+
+	/* Audio short HP2 */
+	DEFINE_RES_IRQ_NAMED(PM805_IRQ_HP2_SHRT, "audio-short2"),
 };
 
 static const struct mfd_cell codec_devs[] = {
@@ -86,7 +73,7 @@ static const struct mfd_cell codec_devs[] = {
 	 },
 };
 
-static struct regmap_irq pm805_irqs[] = {
+static const struct regmap_irq pm805_irqs[] = {
 	/* INT0 */
 	[PM805_IRQ_LDO_OFF] = {
 		.mask = PM805_INT1_HP1_SHRT,
@@ -176,7 +163,7 @@ static void device_irq_exit_805(struct pm80x_chip *chip)
 	regmap_del_irq_chip(chip->irq, chip->irq_data);
 }
 
-static struct regmap_irq_chip pm805_irq_chip = {
+static const struct regmap_irq_chip pm805_irq_chip = {
 	.name = "88pm805",
 	.irqs = pm805_irqs,
 	.num_irqs = ARRAY_SIZE(pm805_irqs),
@@ -222,8 +209,7 @@ out_irq_init:
 	return ret;
 }
 
-static int pm805_probe(struct i2c_client *client,
-				 const struct i2c_device_id *id)
+static int pm805_probe(struct i2c_client *client)
 {
 	int ret = 0;
 	struct pm80x_chip *chip;
@@ -252,7 +238,7 @@ out_init:
 	return ret;
 }
 
-static int pm805_remove(struct i2c_client *client)
+static void pm805_remove(struct i2c_client *client)
 {
 	struct pm80x_chip *chip = i2c_get_clientdata(client);
 
@@ -260,14 +246,12 @@ static int pm805_remove(struct i2c_client *client)
 	device_irq_exit_805(chip);
 
 	pm80x_deinit();
-
-	return 0;
 }
 
 static struct i2c_driver pm805_driver = {
 	.driver = {
 		.name = "88PM805",
-		.pm = &pm80x_pm_ops,
+		.pm = pm_sleep_ptr(&pm80x_pm_ops),
 		},
 	.probe = pm805_probe,
 	.remove = pm805_remove,

@@ -1,25 +1,34 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * poll_state.c - Polling idle state
- *
- * This file is released under the GPLv2.
  */
 
 #include <linux/cpuidle.h>
+#include <linux/export.h>
+#include <linux/irqflags.h>
 #include <linux/sched.h>
 #include <linux/sched/clock.h>
 #include <linux/sched/idle.h>
+#include <linux/sprintf.h>
+#include <linux/types.h>
 
-#define POLL_IDLE_TIME_LIMIT	(TICK_NSEC / 16)
 #define POLL_IDLE_RELAX_COUNT	200
 
 static int __cpuidle poll_idle(struct cpuidle_device *dev,
 			       struct cpuidle_driver *drv, int index)
 {
-	u64 time_start = local_clock();
+	u64 time_start;
 
-	local_irq_enable();
+	time_start = local_clock_noinstr();
+
+	dev->poll_time_limit = false;
+
+	raw_local_irq_enable();
 	if (!current_set_polling_and_test()) {
 		unsigned int loop_count = 0;
+		u64 limit;
+
+		limit = cpuidle_poll_time(drv, dev);
 
 		while (!need_resched()) {
 			cpu_relax();
@@ -27,10 +36,14 @@ static int __cpuidle poll_idle(struct cpuidle_device *dev,
 				continue;
 
 			loop_count = 0;
-			if (local_clock() - time_start > POLL_IDLE_TIME_LIMIT)
+			if (local_clock_noinstr() - time_start > limit) {
+				dev->poll_time_limit = true;
 				break;
+			}
 		}
 	}
+	raw_local_irq_disable();
+
 	current_clr_polling();
 
 	return index;
@@ -44,9 +57,10 @@ void cpuidle_poll_state_init(struct cpuidle_driver *drv)
 	snprintf(state->desc, CPUIDLE_DESC_LEN, "CPUIDLE CORE POLL IDLE");
 	state->exit_latency = 0;
 	state->target_residency = 0;
+	state->exit_latency_ns = 0;
+	state->target_residency_ns = 0;
 	state->power_usage = -1;
 	state->enter = poll_idle;
-	state->disabled = false;
 	state->flags = CPUIDLE_FLAG_POLLING;
 }
 EXPORT_SYMBOL_GPL(cpuidle_poll_state_init);

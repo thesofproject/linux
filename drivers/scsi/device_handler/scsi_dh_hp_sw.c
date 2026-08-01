@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Basic HP/COMPAQ MSA 1000 support. This is only needed if your HW cannot be
  * upgraded.
@@ -5,20 +6,6 @@
  * Copyright (C) 2006 Red Hat, Inc.  All rights reserved.
  * Copyright (C) 2006 Mike Christie
  * Copyright (C) 2008 Hannes Reinecke <hare@suse.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; see the file COPYING.  If not, write to
- * the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/slab.h>
@@ -59,9 +46,6 @@ static int tur_done(struct scsi_device *sdev, struct hp_sw_dh_data *h,
 	int ret = SCSI_DH_IO;
 
 	switch (sshdr->sense_key) {
-	case UNIT_ATTENTION:
-		ret = SCSI_DH_IMM_RETRY;
-		break;
 	case NOT_READY:
 		if (sshdr->asc == 0x04 && sshdr->ascq == 2) {
 			/*
@@ -73,7 +57,7 @@ static int tur_done(struct scsi_device *sdev, struct hp_sw_dh_data *h,
 			ret = SCSI_DH_OK;
 			break;
 		}
-		/* Fallthrough */
+		fallthrough;
 	default:
 		sdev_printk(KERN_WARNING, sdev,
 			   "%s: sending tur failed, sense %x/%x/%x\n",
@@ -95,28 +79,40 @@ static int hp_sw_tur(struct scsi_device *sdev, struct hp_sw_dh_data *h)
 {
 	unsigned char cmd[6] = { TEST_UNIT_READY };
 	struct scsi_sense_hdr sshdr;
-	int ret = SCSI_DH_OK, res;
-	u64 req_flags = REQ_FAILFAST_DEV | REQ_FAILFAST_TRANSPORT |
-		REQ_FAILFAST_DRIVER;
+	int ret, res;
+	blk_opf_t opf = REQ_OP_DRV_IN | REQ_FAILFAST_DEV |
+				REQ_FAILFAST_TRANSPORT | REQ_FAILFAST_DRIVER;
+	struct scsi_failure failure_defs[] = {
+		{
+			.sense = UNIT_ATTENTION,
+			.asc = SCMD_FAILURE_ASC_ANY,
+			.ascq = SCMD_FAILURE_ASCQ_ANY,
+			.allowed = SCMD_FAILURE_NO_LIMIT,
+			.result = SAM_STAT_CHECK_CONDITION,
+		},
+		{}
+	};
+	struct scsi_failures failures = {
+		.failure_definitions = failure_defs,
+	};
+	const struct scsi_exec_args exec_args = {
+		.sshdr = &sshdr,
+		.failures = &failures,
+	};
 
-retry:
-	res = scsi_execute(sdev, cmd, DMA_NONE, NULL, 0, NULL, &sshdr,
-			HP_SW_TIMEOUT, HP_SW_RETRIES, req_flags, 0, NULL);
-	if (res) {
-		if (scsi_sense_valid(&sshdr))
-			ret = tur_done(sdev, h, &sshdr);
-		else {
-			sdev_printk(KERN_WARNING, sdev,
-				    "%s: sending tur failed with %x\n",
-				    HP_SW_NAME, res);
-			ret = SCSI_DH_IO;
-		}
-	} else {
+	res = scsi_execute_cmd(sdev, cmd, opf, NULL, 0, HP_SW_TIMEOUT,
+			       HP_SW_RETRIES, &exec_args);
+	if (res > 0 && scsi_sense_valid(&sshdr)) {
+		ret = tur_done(sdev, h, &sshdr);
+	} else if (res == 0) {
 		h->path_state = HP_SW_PATH_ACTIVE;
 		ret = SCSI_DH_OK;
+	} else {
+		sdev_printk(KERN_WARNING, sdev,
+			    "%s: sending tur failed with %x\n",
+			    HP_SW_NAME, res);
+		ret = SCSI_DH_IO;
 	}
-	if (ret == SCSI_DH_IMM_RETRY)
-		goto retry;
 
 	return ret;
 }
@@ -132,57 +128,71 @@ static int hp_sw_start_stop(struct hp_sw_dh_data *h)
 	unsigned char cmd[6] = { START_STOP, 0, 0, 0, 1, 0 };
 	struct scsi_sense_hdr sshdr;
 	struct scsi_device *sdev = h->sdev;
-	int res, rc = SCSI_DH_OK;
-	int retry_cnt = HP_SW_RETRIES;
-	u64 req_flags = REQ_FAILFAST_DEV | REQ_FAILFAST_TRANSPORT |
-		REQ_FAILFAST_DRIVER;
+	int res, rc;
+	blk_opf_t opf = REQ_OP_DRV_IN | REQ_FAILFAST_DEV |
+				REQ_FAILFAST_TRANSPORT | REQ_FAILFAST_DRIVER;
+	struct scsi_failure failure_defs[] = {
+		{
+			/*
+			 * LUN not ready - manual intervention required
+			 *
+			 * Switch-over in progress, retry.
+			 */
+			.sense = NOT_READY,
+			.asc = 0x04,
+			.ascq = 0x03,
+			.allowed = HP_SW_RETRIES,
+			.result = SAM_STAT_CHECK_CONDITION,
+		},
+		{}
+	};
+	struct scsi_failures failures = {
+		.failure_definitions = failure_defs,
+	};
+	const struct scsi_exec_args exec_args = {
+		.sshdr = &sshdr,
+		.failures = &failures,
+	};
 
-retry:
-	res = scsi_execute(sdev, cmd, DMA_NONE, NULL, 0, NULL, &sshdr,
-			HP_SW_TIMEOUT, HP_SW_RETRIES, req_flags, 0, NULL);
-	if (res) {
-		if (!scsi_sense_valid(&sshdr)) {
-			sdev_printk(KERN_WARNING, sdev,
-				    "%s: sending start_stop_unit failed, "
-				    "no sense available\n", HP_SW_NAME);
-			return SCSI_DH_IO;
-		}
-		switch (sshdr.sense_key) {
-		case NOT_READY:
-			if (sshdr.asc == 0x04 && sshdr.ascq == 3) {
-				/*
-				 * LUN not ready - manual intervention required
-				 *
-				 * Switch-over in progress, retry.
-				 */
-				if (--retry_cnt)
-					goto retry;
-				rc = SCSI_DH_RETRY;
-				break;
-			}
-			/* fall through */
-		default:
-			sdev_printk(KERN_WARNING, sdev,
-				    "%s: sending start_stop_unit failed, "
-				    "sense %x/%x/%x\n", HP_SW_NAME,
-				    sshdr.sense_key, sshdr.asc, sshdr.ascq);
-			rc = SCSI_DH_IO;
-		}
+	res = scsi_execute_cmd(sdev, cmd, opf, NULL, 0, HP_SW_TIMEOUT,
+			       HP_SW_RETRIES, &exec_args);
+	if (!res) {
+		return SCSI_DH_OK;
+	} else if (res < 0 || !scsi_sense_valid(&sshdr)) {
+		sdev_printk(KERN_WARNING, sdev,
+			    "%s: sending start_stop_unit failed, "
+			    "no sense available\n", HP_SW_NAME);
+		return SCSI_DH_IO;
 	}
+
+	switch (sshdr.sense_key) {
+	case NOT_READY:
+		if (sshdr.asc == 0x04 && sshdr.ascq == 3) {
+			rc = SCSI_DH_RETRY;
+			break;
+		}
+		fallthrough;
+	default:
+		sdev_printk(KERN_WARNING, sdev,
+			    "%s: sending start_stop_unit failed, "
+			    "sense %x/%x/%x\n", HP_SW_NAME,
+			    sshdr.sense_key, sshdr.asc, sshdr.ascq);
+		rc = SCSI_DH_IO;
+	}
+
 	return rc;
 }
 
-static int hp_sw_prep_fn(struct scsi_device *sdev, struct request *req)
+static blk_status_t hp_sw_prep_fn(struct scsi_device *sdev, struct request *req)
 {
 	struct hp_sw_dh_data *h = sdev->handler_data;
-	int ret = BLKPREP_OK;
 
 	if (h->path_state != HP_SW_PATH_ACTIVE) {
-		ret = BLKPREP_KILL;
 		req->rq_flags |= RQF_QUIET;
+		return BLK_STS_IOERR;
 	}
-	return ret;
 
+	return BLK_STS_OK;
 }
 
 /*
@@ -216,7 +226,7 @@ static int hp_sw_bus_attach(struct scsi_device *sdev)
 	struct hp_sw_dh_data *h;
 	int ret;
 
-	h = kzalloc(sizeof(*h), GFP_KERNEL);
+	h = kzalloc_obj(*h);
 	if (!h)
 		return SCSI_DH_NOMEM;
 	h->path_state = HP_SW_PATH_UNINITIALIZED;

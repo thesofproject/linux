@@ -31,441 +31,561 @@
  */
 
 #include <linux/mlx5/driver.h>
+#include <linux/mlx5/eswitch.h>
+#include <linux/mlx5/mlx5_ifc_vdpa.h>
+#include <linux/mlx5/vport.h>
 #include "mlx5_core.h"
+#include "devlink.h"
+#include "lag/lag.h"
 
-static LIST_HEAD(intf_list);
-static LIST_HEAD(mlx5_dev_list);
-/* intf dev list mutex */
-static DEFINE_MUTEX(mlx5_intf_mutex);
+static DEFINE_IDA(mlx5_adev_ida);
 
-struct mlx5_device_context {
-	struct list_head	list;
-	struct mlx5_interface  *intf;
-	void		       *context;
-	unsigned long		state;
-};
+static bool is_eth_rep_supported(struct mlx5_core_dev *dev)
+{
+	if (!IS_ENABLED(CONFIG_MLX5_ESWITCH))
+		return false;
 
-struct mlx5_delayed_event {
-	struct list_head	list;
-	struct mlx5_core_dev	*dev;
-	enum mlx5_dev_event	event;
-	unsigned long		param;
-};
+	if (!MLX5_ESWITCH_MANAGER(dev))
+		return false;
+
+	if (!is_mdev_switchdev_mode(dev))
+		return false;
+
+	return true;
+}
+
+bool mlx5_eth_supported(struct mlx5_core_dev *dev)
+{
+	if (!IS_ENABLED(CONFIG_MLX5_CORE_EN))
+		return false;
+
+	if (MLX5_CAP_GEN(dev, port_type) != MLX5_CAP_PORT_TYPE_ETH)
+		return false;
+
+	if (!MLX5_CAP_GEN(dev, eth_net_offloads)) {
+		mlx5_core_warn(dev, "Missing eth_net_offloads capability\n");
+		return false;
+	}
+
+	if (!MLX5_CAP_GEN(dev, nic_flow_table)) {
+		mlx5_core_warn(dev, "Missing nic_flow_table capability\n");
+		return false;
+	}
+
+	if (!MLX5_CAP_ETH(dev, csum_cap)) {
+		mlx5_core_warn(dev, "Missing csum_cap capability\n");
+		return false;
+	}
+
+	if (!MLX5_CAP_ETH(dev, max_lso_cap)) {
+		mlx5_core_warn(dev, "Missing max_lso_cap capability\n");
+		return false;
+	}
+
+	if (!MLX5_CAP_ETH(dev, vlan_cap)) {
+		mlx5_core_warn(dev, "Missing vlan_cap capability\n");
+		return false;
+	}
+
+	if (!MLX5_CAP_ETH(dev, rss_ind_tbl_cap)) {
+		mlx5_core_warn(dev, "Missing rss_ind_tbl_cap capability\n");
+		return false;
+	}
+
+	if (MLX5_CAP_FLOWTABLE(dev,
+			       flow_table_properties_nic_receive.max_ft_level) < 3) {
+		mlx5_core_warn(dev, "max_ft_level < 3\n");
+		return false;
+	}
+
+	if (!MLX5_CAP_ETH(dev, self_lb_en_modifiable))
+		mlx5_core_warn(dev, "Self loop back prevention is not supported\n");
+	if (!MLX5_CAP_GEN(dev, cq_moderation))
+		mlx5_core_warn(dev, "CQ moderation is not supported\n");
+
+	return true;
+}
+
+bool mlx5_vnet_supported(struct mlx5_core_dev *dev)
+{
+	if (!IS_ENABLED(CONFIG_MLX5_VDPA_NET))
+		return false;
+
+	if (mlx5_core_is_pf(dev))
+		return false;
+
+	if (!(MLX5_CAP_GEN_64(dev, general_obj_types) &
+	      MLX5_GENERAL_OBJ_TYPES_CAP_VIRTIO_NET_Q))
+		return false;
+
+	if (!(MLX5_CAP_DEV_VDPA_EMULATION(dev, event_mode) &
+	      MLX5_VIRTIO_Q_EVENT_MODE_QP_MODE))
+		return false;
+
+	if (!MLX5_CAP_DEV_VDPA_EMULATION(dev, eth_frame_offload_type))
+		return false;
+
+	return true;
+}
+
+static bool is_vnet_enabled(struct mlx5_core_dev *dev)
+{
+	union devlink_param_value val;
+	int err;
+
+	err = devl_param_driverinit_value_get(priv_to_devlink(dev),
+					      DEVLINK_PARAM_GENERIC_ID_ENABLE_VNET,
+					      &val);
+	return err ? false : val.vbool;
+}
+
+static bool is_ib_rep_supported(struct mlx5_core_dev *dev)
+{
+	if (!IS_ENABLED(CONFIG_MLX5_INFINIBAND))
+		return false;
+
+	if (dev->priv.flags & MLX5_PRIV_FLAGS_DISABLE_IB_ADEV)
+		return false;
+
+	if (!is_eth_rep_supported(dev))
+		return false;
+
+	if (mlx5_core_mp_enabled(dev))
+		return false;
+
+	return true;
+}
+
+static bool is_mp_supported(struct mlx5_core_dev *dev)
+{
+	if (!IS_ENABLED(CONFIG_MLX5_INFINIBAND))
+		return false;
+
+	if (dev->priv.flags & MLX5_PRIV_FLAGS_DISABLE_IB_ADEV)
+		return false;
+
+	if (is_ib_rep_supported(dev))
+		return false;
+
+	if (MLX5_CAP_GEN(dev, port_type) != MLX5_CAP_PORT_TYPE_ETH)
+		return false;
+
+	if (!mlx5_core_is_mp_slave(dev))
+		return false;
+
+	return true;
+}
+
+bool mlx5_rdma_supported(struct mlx5_core_dev *dev)
+{
+	if (!IS_ENABLED(CONFIG_MLX5_INFINIBAND))
+		return false;
+
+	if (dev->priv.flags & MLX5_PRIV_FLAGS_DISABLE_IB_ADEV)
+		return false;
+
+	if (is_ib_rep_supported(dev))
+		return false;
+
+	if (is_mp_supported(dev))
+		return false;
+
+	return true;
+}
+
+static bool is_ib_enabled(struct mlx5_core_dev *dev)
+{
+	union devlink_param_value val;
+	int err;
+
+	err = devl_param_driverinit_value_get(priv_to_devlink(dev),
+					      DEVLINK_PARAM_GENERIC_ID_ENABLE_RDMA,
+					      &val);
+	return err ? false : val.vbool;
+}
+
+static bool is_dpll_supported(struct mlx5_core_dev *dev)
+{
+	if (!IS_ENABLED(CONFIG_MLX5_DPLL))
+		return false;
+
+	if (!MLX5_CAP_MCAM_REG2(dev, synce_registers)) {
+		mlx5_core_dbg(dev, "Missing SyncE capability\n");
+		return false;
+	}
+
+	return true;
+}
 
 enum {
-	MLX5_INTERFACE_ADDED,
-	MLX5_INTERFACE_ATTACHED,
+	MLX5_INTERFACE_PROTOCOL_ETH,
+	MLX5_INTERFACE_PROTOCOL_ETH_REP,
+
+	MLX5_INTERFACE_PROTOCOL_IB,
+	MLX5_INTERFACE_PROTOCOL_IB_REP,
+	MLX5_INTERFACE_PROTOCOL_MPIB,
+
+	MLX5_INTERFACE_PROTOCOL_VNET,
+
+	MLX5_INTERFACE_PROTOCOL_DPLL,
+	MLX5_INTERFACE_PROTOCOL_FWCTL,
 };
 
-static void add_delayed_event(struct mlx5_priv *priv,
-			      struct mlx5_core_dev *dev,
-			      enum mlx5_dev_event event,
-			      unsigned long param)
+static bool is_fwctl_supported(struct mlx5_core_dev *dev)
 {
-	struct mlx5_delayed_event *delayed_event;
+	/* fwctl is most useful on PFs, prevent fwctl on SFs for now */
+	return MLX5_CAP_GEN(dev, uctx_cap) && !mlx5_core_is_sf(dev);
+}
 
-	delayed_event = kzalloc(sizeof(*delayed_event), GFP_ATOMIC);
-	if (!delayed_event) {
-		mlx5_core_err(dev, "event %d is missed\n", event);
-		return;
+static const struct mlx5_adev_device {
+	const char *suffix;
+	bool (*is_supported)(struct mlx5_core_dev *dev);
+	bool (*is_enabled)(struct mlx5_core_dev *dev);
+} mlx5_adev_devices[] = {
+	[MLX5_INTERFACE_PROTOCOL_VNET] = { .suffix = "vnet",
+					   .is_supported = &mlx5_vnet_supported,
+					   .is_enabled = &is_vnet_enabled },
+	[MLX5_INTERFACE_PROTOCOL_IB] = { .suffix = "rdma",
+					 .is_supported = &mlx5_rdma_supported,
+					 .is_enabled = &is_ib_enabled },
+	[MLX5_INTERFACE_PROTOCOL_ETH] = { .suffix = "eth",
+					  .is_supported = &mlx5_eth_supported,
+					  .is_enabled = &mlx5_core_is_eth_enabled },
+	[MLX5_INTERFACE_PROTOCOL_ETH_REP] = { .suffix = "eth-rep",
+					   .is_supported = &is_eth_rep_supported },
+	[MLX5_INTERFACE_PROTOCOL_IB_REP] = { .suffix = "rdma-rep",
+					   .is_supported = &is_ib_rep_supported },
+	[MLX5_INTERFACE_PROTOCOL_MPIB] = { .suffix = "multiport",
+					   .is_supported = &is_mp_supported },
+	[MLX5_INTERFACE_PROTOCOL_DPLL] = { .suffix = "dpll",
+					   .is_supported = &is_dpll_supported },
+	[MLX5_INTERFACE_PROTOCOL_FWCTL] = { .suffix = "fwctl",
+					    .is_supported = &is_fwctl_supported },
+};
+
+int mlx5_adev_idx_alloc(void)
+{
+	return ida_alloc(&mlx5_adev_ida, GFP_KERNEL);
+}
+
+void mlx5_adev_idx_free(int idx)
+{
+	ida_free(&mlx5_adev_ida, idx);
+}
+
+int mlx5_adev_init(struct mlx5_core_dev *dev)
+{
+	struct mlx5_priv *priv = &dev->priv;
+
+	priv->adev = kzalloc_objs(struct mlx5_adev *,
+				  ARRAY_SIZE(mlx5_adev_devices));
+	if (!priv->adev)
+		return -ENOMEM;
+
+	return 0;
+}
+
+void mlx5_adev_cleanup(struct mlx5_core_dev *dev)
+{
+	struct mlx5_priv *priv = &dev->priv;
+
+	kfree(priv->adev);
+}
+
+static void adev_release(struct device *dev)
+{
+	struct mlx5_adev *mlx5_adev =
+		container_of(dev, struct mlx5_adev, adev.dev);
+	struct mlx5_priv *priv = &mlx5_adev->mdev->priv;
+	int idx = mlx5_adev->idx;
+
+	kfree(mlx5_adev);
+	priv->adev[idx] = NULL;
+}
+
+static struct mlx5_adev *add_adev(struct mlx5_core_dev *dev, int idx)
+{
+	const char *suffix = mlx5_adev_devices[idx].suffix;
+	struct auxiliary_device *adev;
+	struct mlx5_adev *madev;
+	int ret;
+
+	madev = kzalloc_obj(*madev);
+	if (!madev)
+		return ERR_PTR(-ENOMEM);
+
+	adev = &madev->adev;
+	adev->id = dev->priv.adev_idx;
+	adev->name = suffix;
+	adev->dev.parent = dev->device;
+	adev->dev.release = adev_release;
+	madev->mdev = dev;
+	madev->idx = idx;
+
+	ret = auxiliary_device_init(adev);
+	if (ret) {
+		kfree(madev);
+		return ERR_PTR(ret);
 	}
 
-	mlx5_core_dbg(dev, "Accumulating event %d\n", event);
-	delayed_event->dev = dev;
-	delayed_event->event = event;
-	delayed_event->param = param;
-	list_add_tail(&delayed_event->list, &priv->waiting_events_list);
-}
-
-static void delayed_event_release(struct mlx5_device_context *dev_ctx,
-				  struct mlx5_priv *priv)
-{
-	struct mlx5_core_dev *dev = container_of(priv, struct mlx5_core_dev, priv);
-	struct mlx5_delayed_event *de;
-	struct mlx5_delayed_event *n;
-	struct list_head temp;
-
-	INIT_LIST_HEAD(&temp);
-
-	spin_lock_irq(&priv->ctx_lock);
-
-	priv->is_accum_events = false;
-	list_splice_init(&priv->waiting_events_list, &temp);
-	if (!dev_ctx->context)
-		goto out;
-	list_for_each_entry_safe(de, n, &temp, list)
-		dev_ctx->intf->event(dev, dev_ctx->context, de->event, de->param);
-
-out:
-	spin_unlock_irq(&priv->ctx_lock);
-
-	list_for_each_entry_safe(de, n, &temp, list) {
-		list_del(&de->list);
-		kfree(de);
+	ret = auxiliary_device_add(adev);
+	if (ret) {
+		auxiliary_device_uninit(adev);
+		return ERR_PTR(ret);
 	}
+	return madev;
 }
 
-/* accumulating events that can come after mlx5_ib calls to
- * ib_register_device, till adding that interface to the events list.
- */
-static void delayed_event_start(struct mlx5_priv *priv)
+static void del_adev(struct auxiliary_device *adev)
 {
-	spin_lock_irq(&priv->ctx_lock);
-	priv->is_accum_events = true;
-	spin_unlock_irq(&priv->ctx_lock);
+	auxiliary_device_delete(adev);
+	auxiliary_device_uninit(adev);
 }
 
-void mlx5_add_device(struct mlx5_interface *intf, struct mlx5_priv *priv)
+void mlx5_dev_set_lightweight(struct mlx5_core_dev *dev)
 {
-	struct mlx5_device_context *dev_ctx;
-	struct mlx5_core_dev *dev = container_of(priv, struct mlx5_core_dev, priv);
+	mlx5_devcom_comp_lock(dev->priv.hca_devcom_comp);
+	dev->priv.flags |= MLX5_PRIV_FLAGS_DISABLE_ALL_ADEV;
+	mlx5_devcom_comp_unlock(dev->priv.hca_devcom_comp);
+}
 
-	if (!mlx5_lag_intf_add(intf, priv))
-		return;
+bool mlx5_dev_is_lightweight(struct mlx5_core_dev *dev)
+{
+	return dev->priv.flags & MLX5_PRIV_FLAGS_DISABLE_ALL_ADEV;
+}
 
-	dev_ctx = kzalloc(sizeof(*dev_ctx), GFP_KERNEL);
-	if (!dev_ctx)
-		return;
+int mlx5_attach_device(struct mlx5_core_dev *dev)
+{
+	struct mlx5_priv *priv = &dev->priv;
+	struct auxiliary_device *adev;
+	const struct auxiliary_driver *adrv;
+	int ret = 0, i;
 
-	dev_ctx->intf = intf;
+	devl_assert_locked(priv_to_devlink(dev));
+	mlx5_devcom_comp_lock(dev->priv.hca_devcom_comp);
+	priv->flags &= ~MLX5_PRIV_FLAGS_DETACH;
+	for (i = 0; i < ARRAY_SIZE(mlx5_adev_devices); i++) {
+		if (!priv->adev[i]) {
+			bool is_supported = false;
 
-	delayed_event_start(priv);
+			if (mlx5_adev_devices[i].is_enabled) {
+				bool enabled;
 
-	dev_ctx->context = intf->add(dev);
-	set_bit(MLX5_INTERFACE_ADDED, &dev_ctx->state);
-	if (intf->attach)
-		set_bit(MLX5_INTERFACE_ATTACHED, &dev_ctx->state);
-
-	if (dev_ctx->context) {
-		spin_lock_irq(&priv->ctx_lock);
-		list_add_tail(&dev_ctx->list, &priv->ctx_list);
-
-#ifdef CONFIG_INFINIBAND_ON_DEMAND_PAGING
-		if (dev_ctx->intf->pfault) {
-			if (priv->pfault) {
-				mlx5_core_err(dev, "multiple page fault handlers not supported");
-			} else {
-				priv->pfault_ctx = dev_ctx->context;
-				priv->pfault = dev_ctx->intf->pfault;
+				enabled = mlx5_adev_devices[i].is_enabled(dev);
+				if (!enabled)
+					continue;
 			}
+
+			if (mlx5_adev_devices[i].is_supported)
+				is_supported = mlx5_adev_devices[i].is_supported(dev);
+
+			if (!is_supported)
+				continue;
+
+			priv->adev[i] = add_adev(dev, i);
+			if (IS_ERR(priv->adev[i])) {
+				ret = PTR_ERR(priv->adev[i]);
+				priv->adev[i] = NULL;
+			}
+		} else {
+			adev = &priv->adev[i]->adev;
+
+			/* Pay attention that this is not PCI driver that
+			 * mlx5_core_dev is connected, but auxiliary driver.
+			 */
+			if (!adev->dev.driver)
+				continue;
+			adrv = to_auxiliary_drv(adev->dev.driver);
+
+			if (adrv->resume)
+				ret = adrv->resume(adev);
 		}
-#endif
-		spin_unlock_irq(&priv->ctx_lock);
+		if (ret) {
+			mlx5_core_warn(dev, "Device[%d] (%s) failed to load\n",
+				       i, mlx5_adev_devices[i].suffix);
+
+			break;
+		}
 	}
-
-	delayed_event_release(dev_ctx, priv);
-
-	if (!dev_ctx->context)
-		kfree(dev_ctx);
+	mlx5_devcom_comp_unlock(dev->priv.hca_devcom_comp);
+	return ret;
 }
 
-static struct mlx5_device_context *mlx5_get_device(struct mlx5_interface *intf,
-						   struct mlx5_priv *priv)
-{
-	struct mlx5_device_context *dev_ctx;
-
-	list_for_each_entry(dev_ctx, &priv->ctx_list, list)
-		if (dev_ctx->intf == intf)
-			return dev_ctx;
-	return NULL;
-}
-
-void mlx5_remove_device(struct mlx5_interface *intf, struct mlx5_priv *priv)
-{
-	struct mlx5_device_context *dev_ctx;
-	struct mlx5_core_dev *dev = container_of(priv, struct mlx5_core_dev, priv);
-
-	dev_ctx = mlx5_get_device(intf, priv);
-	if (!dev_ctx)
-		return;
-
-#ifdef CONFIG_INFINIBAND_ON_DEMAND_PAGING
-	spin_lock_irq(&priv->ctx_lock);
-	if (priv->pfault == dev_ctx->intf->pfault)
-		priv->pfault = NULL;
-	spin_unlock_irq(&priv->ctx_lock);
-
-	synchronize_srcu(&priv->pfault_srcu);
-#endif
-
-	spin_lock_irq(&priv->ctx_lock);
-	list_del(&dev_ctx->list);
-	spin_unlock_irq(&priv->ctx_lock);
-
-	if (test_bit(MLX5_INTERFACE_ADDED, &dev_ctx->state))
-		intf->remove(dev, dev_ctx->context);
-
-	kfree(dev_ctx);
-}
-
-static void mlx5_attach_interface(struct mlx5_interface *intf, struct mlx5_priv *priv)
-{
-	struct mlx5_device_context *dev_ctx;
-	struct mlx5_core_dev *dev = container_of(priv, struct mlx5_core_dev, priv);
-
-	dev_ctx = mlx5_get_device(intf, priv);
-	if (!dev_ctx)
-		return;
-
-	delayed_event_start(priv);
-	if (intf->attach) {
-		if (test_bit(MLX5_INTERFACE_ATTACHED, &dev_ctx->state))
-			goto out;
-		intf->attach(dev, dev_ctx->context);
-		set_bit(MLX5_INTERFACE_ATTACHED, &dev_ctx->state);
-	} else {
-		if (test_bit(MLX5_INTERFACE_ADDED, &dev_ctx->state))
-			goto out;
-		dev_ctx->context = intf->add(dev);
-		set_bit(MLX5_INTERFACE_ADDED, &dev_ctx->state);
-	}
-
-out:
-	delayed_event_release(dev_ctx, priv);
-}
-
-void mlx5_attach_device(struct mlx5_core_dev *dev)
+void mlx5_detach_device(struct mlx5_core_dev *dev, bool suspend)
 {
 	struct mlx5_priv *priv = &dev->priv;
-	struct mlx5_interface *intf;
+	struct auxiliary_device *adev;
+	const struct auxiliary_driver *adrv;
+	pm_message_t pm = {};
+	int i;
 
-	mutex_lock(&mlx5_intf_mutex);
-	list_for_each_entry(intf, &intf_list, list)
-		mlx5_attach_interface(intf, priv);
-	mutex_unlock(&mlx5_intf_mutex);
-}
+	devl_assert_locked(priv_to_devlink(dev));
+	mlx5_devcom_comp_lock(dev->priv.hca_devcom_comp);
+	for (i = ARRAY_SIZE(mlx5_adev_devices) - 1; i >= 0; i--) {
+		if (!priv->adev[i])
+			continue;
 
-static void mlx5_detach_interface(struct mlx5_interface *intf, struct mlx5_priv *priv)
-{
-	struct mlx5_device_context *dev_ctx;
-	struct mlx5_core_dev *dev = container_of(priv, struct mlx5_core_dev, priv);
+		if (mlx5_adev_devices[i].is_enabled) {
+			bool enabled;
 
-	dev_ctx = mlx5_get_device(intf, priv);
-	if (!dev_ctx)
-		return;
+			enabled = mlx5_adev_devices[i].is_enabled(dev);
+			if (!enabled)
+				goto skip_suspend;
+		}
 
-	if (intf->detach) {
-		if (!test_bit(MLX5_INTERFACE_ATTACHED, &dev_ctx->state))
-			return;
-		intf->detach(dev, dev_ctx->context);
-		clear_bit(MLX5_INTERFACE_ATTACHED, &dev_ctx->state);
-	} else {
-		if (!test_bit(MLX5_INTERFACE_ADDED, &dev_ctx->state))
-			return;
-		intf->remove(dev, dev_ctx->context);
-		clear_bit(MLX5_INTERFACE_ADDED, &dev_ctx->state);
+		adev = &priv->adev[i]->adev;
+		/* Auxiliary driver was unbind manually through sysfs */
+		if (!adev->dev.driver)
+			goto skip_suspend;
+
+		adrv = to_auxiliary_drv(adev->dev.driver);
+
+		if (adrv->suspend && suspend) {
+			adrv->suspend(adev, pm);
+			continue;
+		}
+
+skip_suspend:
+		del_adev(&priv->adev[i]->adev);
+		priv->adev[i] = NULL;
 	}
-}
-
-void mlx5_detach_device(struct mlx5_core_dev *dev)
-{
-	struct mlx5_priv *priv = &dev->priv;
-	struct mlx5_interface *intf;
-
-	mutex_lock(&mlx5_intf_mutex);
-	list_for_each_entry(intf, &intf_list, list)
-		mlx5_detach_interface(intf, priv);
-	mutex_unlock(&mlx5_intf_mutex);
-}
-
-bool mlx5_device_registered(struct mlx5_core_dev *dev)
-{
-	struct mlx5_priv *priv;
-	bool found = false;
-
-	mutex_lock(&mlx5_intf_mutex);
-	list_for_each_entry(priv, &mlx5_dev_list, dev_list)
-		if (priv == &dev->priv)
-			found = true;
-	mutex_unlock(&mlx5_intf_mutex);
-
-	return found;
+	priv->flags |= MLX5_PRIV_FLAGS_DETACH;
+	mlx5_devcom_comp_unlock(dev->priv.hca_devcom_comp);
 }
 
 int mlx5_register_device(struct mlx5_core_dev *dev)
 {
-	struct mlx5_priv *priv = &dev->priv;
-	struct mlx5_interface *intf;
+	int ret;
 
-	mutex_lock(&mlx5_intf_mutex);
-	list_add_tail(&priv->dev_list, &mlx5_dev_list);
-	list_for_each_entry(intf, &intf_list, list)
-		mlx5_add_device(intf, priv);
-	mutex_unlock(&mlx5_intf_mutex);
+	devl_assert_locked(priv_to_devlink(dev));
+	mlx5_devcom_comp_lock(dev->priv.hca_devcom_comp);
+	dev->priv.flags &= ~MLX5_PRIV_FLAGS_DISABLE_ALL_ADEV;
+	ret = mlx5_rescan_drivers_locked(dev);
+	mlx5_devcom_comp_unlock(dev->priv.hca_devcom_comp);
+	if (ret)
+		mlx5_unregister_device(dev);
 
-	return 0;
+	return ret;
 }
 
 void mlx5_unregister_device(struct mlx5_core_dev *dev)
 {
+	devl_assert_locked(priv_to_devlink(dev));
+	mlx5_devcom_comp_lock(dev->priv.hca_devcom_comp);
+	dev->priv.flags = MLX5_PRIV_FLAGS_DISABLE_ALL_ADEV;
+	mlx5_rescan_drivers_locked(dev);
+	mlx5_devcom_comp_unlock(dev->priv.hca_devcom_comp);
+}
+
+static int add_drivers(struct mlx5_core_dev *dev)
+{
 	struct mlx5_priv *priv = &dev->priv;
-	struct mlx5_interface *intf;
+	int i, ret = 0;
 
-	mutex_lock(&mlx5_intf_mutex);
-	list_for_each_entry(intf, &intf_list, list)
-		mlx5_remove_device(intf, priv);
-	list_del(&priv->dev_list);
-	mutex_unlock(&mlx5_intf_mutex);
-}
+	for (i = 0; i < ARRAY_SIZE(mlx5_adev_devices); i++) {
+		bool is_supported = false;
 
-int mlx5_register_interface(struct mlx5_interface *intf)
-{
-	struct mlx5_priv *priv;
+		if (priv->adev[i])
+			continue;
 
-	if (!intf->add || !intf->remove)
-		return -EINVAL;
+		if (mlx5_adev_devices[i].is_enabled &&
+		    !(mlx5_adev_devices[i].is_enabled(dev)))
+			continue;
 
-	mutex_lock(&mlx5_intf_mutex);
-	list_add_tail(&intf->list, &intf_list);
-	list_for_each_entry(priv, &mlx5_dev_list, dev_list)
-		mlx5_add_device(intf, priv);
-	mutex_unlock(&mlx5_intf_mutex);
+		if (mlx5_adev_devices[i].is_supported)
+			is_supported = mlx5_adev_devices[i].is_supported(dev);
 
-	return 0;
-}
-EXPORT_SYMBOL(mlx5_register_interface);
+		if (!is_supported)
+			continue;
 
-void mlx5_unregister_interface(struct mlx5_interface *intf)
-{
-	struct mlx5_priv *priv;
-
-	mutex_lock(&mlx5_intf_mutex);
-	list_for_each_entry(priv, &mlx5_dev_list, dev_list)
-		mlx5_remove_device(intf, priv);
-	list_del(&intf->list);
-	mutex_unlock(&mlx5_intf_mutex);
-}
-EXPORT_SYMBOL(mlx5_unregister_interface);
-
-void mlx5_reload_interface(struct mlx5_core_dev *mdev, int protocol)
-{
-	mutex_lock(&mlx5_intf_mutex);
-	mlx5_remove_dev_by_protocol(mdev, protocol);
-	mlx5_add_dev_by_protocol(mdev, protocol);
-	mutex_unlock(&mlx5_intf_mutex);
-}
-
-void *mlx5_get_protocol_dev(struct mlx5_core_dev *mdev, int protocol)
-{
-	struct mlx5_priv *priv = &mdev->priv;
-	struct mlx5_device_context *dev_ctx;
-	unsigned long flags;
-	void *result = NULL;
-
-	spin_lock_irqsave(&priv->ctx_lock, flags);
-
-	list_for_each_entry(dev_ctx, &mdev->priv.ctx_list, list)
-		if ((dev_ctx->intf->protocol == protocol) &&
-		    dev_ctx->intf->get_dev) {
-			result = dev_ctx->intf->get_dev(dev_ctx->context);
-			break;
-		}
-
-	spin_unlock_irqrestore(&priv->ctx_lock, flags);
-
-	return result;
-}
-EXPORT_SYMBOL(mlx5_get_protocol_dev);
-
-/* Must be called with intf_mutex held */
-void mlx5_add_dev_by_protocol(struct mlx5_core_dev *dev, int protocol)
-{
-	struct mlx5_interface *intf;
-
-	list_for_each_entry(intf, &intf_list, list)
-		if (intf->protocol == protocol) {
-			mlx5_add_device(intf, &dev->priv);
-			break;
-		}
-}
-
-/* Must be called with intf_mutex held */
-void mlx5_remove_dev_by_protocol(struct mlx5_core_dev *dev, int protocol)
-{
-	struct mlx5_interface *intf;
-
-	list_for_each_entry(intf, &intf_list, list)
-		if (intf->protocol == protocol) {
-			mlx5_remove_device(intf, &dev->priv);
-			break;
-		}
-}
-
-static u16 mlx5_gen_pci_id(struct mlx5_core_dev *dev)
-{
-	return (u16)((dev->pdev->bus->number << 8) |
-		     PCI_SLOT(dev->pdev->devfn));
-}
-
-/* Must be called with intf_mutex held */
-struct mlx5_core_dev *mlx5_get_next_phys_dev(struct mlx5_core_dev *dev)
-{
-	u16 pci_id = mlx5_gen_pci_id(dev);
-	struct mlx5_core_dev *res = NULL;
-	struct mlx5_core_dev *tmp_dev;
-	struct mlx5_priv *priv;
-
-	list_for_each_entry(priv, &mlx5_dev_list, dev_list) {
-		tmp_dev = container_of(priv, struct mlx5_core_dev, priv);
-		if ((dev != tmp_dev) && (mlx5_gen_pci_id(tmp_dev) == pci_id)) {
-			res = tmp_dev;
-			break;
+		priv->adev[i] = add_adev(dev, i);
+		if (IS_ERR(priv->adev[i])) {
+			mlx5_core_warn(dev, "Device[%d] (%s) failed to load\n",
+				       i, mlx5_adev_devices[i].suffix);
+			/* We continue to rescan drivers and leave to the caller
+			 * to make decision if to release everything or continue.
+			 */
+			ret = PTR_ERR(priv->adev[i]);
+			priv->adev[i] = NULL;
 		}
 	}
-
-	return res;
+	return ret;
 }
 
-void mlx5_core_event(struct mlx5_core_dev *dev, enum mlx5_dev_event event,
-		     unsigned long param)
+static void delete_drivers(struct mlx5_core_dev *dev)
 {
 	struct mlx5_priv *priv = &dev->priv;
-	struct mlx5_device_context *dev_ctx;
-	unsigned long flags;
+	bool delete_all;
+	int i;
 
-	spin_lock_irqsave(&priv->ctx_lock, flags);
+	delete_all = priv->flags & MLX5_PRIV_FLAGS_DISABLE_ALL_ADEV;
 
-	if (priv->is_accum_events)
-		add_delayed_event(priv, dev, event, param);
+	for (i = ARRAY_SIZE(mlx5_adev_devices) - 1; i >= 0; i--) {
+		bool is_supported = false;
 
-	/* After mlx5_detach_device, the dev_ctx->intf is still set and dev_ctx is
-	 * still in priv->ctx_list. In this case, only notify the dev_ctx if its
-	 * ADDED or ATTACHED bit are set.
-	 */
-	list_for_each_entry(dev_ctx, &priv->ctx_list, list)
-		if (dev_ctx->intf->event &&
-		    (test_bit(MLX5_INTERFACE_ADDED, &dev_ctx->state) ||
-		     test_bit(MLX5_INTERFACE_ATTACHED, &dev_ctx->state)))
-			dev_ctx->intf->event(dev, dev_ctx->context, event, param);
+		if (!priv->adev[i])
+			continue;
 
-	spin_unlock_irqrestore(&priv->ctx_lock, flags);
+		if (mlx5_adev_devices[i].is_enabled) {
+			bool enabled;
+
+			enabled = mlx5_adev_devices[i].is_enabled(dev);
+			if (!enabled)
+				goto del_adev;
+		}
+
+		if (mlx5_adev_devices[i].is_supported && !delete_all)
+			is_supported = mlx5_adev_devices[i].is_supported(dev);
+
+		if (is_supported)
+			continue;
+
+del_adev:
+		del_adev(&priv->adev[i]->adev);
+		priv->adev[i] = NULL;
+	}
 }
 
-#ifdef CONFIG_INFINIBAND_ON_DEMAND_PAGING
-void mlx5_core_page_fault(struct mlx5_core_dev *dev,
-			  struct mlx5_pagefault *pfault)
+/* This function is used after mlx5_core_dev is reconfigured.
+ */
+int mlx5_rescan_drivers_locked(struct mlx5_core_dev *dev)
 {
 	struct mlx5_priv *priv = &dev->priv;
-	int srcu_idx;
 
-	srcu_idx = srcu_read_lock(&priv->pfault_srcu);
-	if (priv->pfault)
-		priv->pfault(dev, priv->pfault_ctx, pfault);
-	srcu_read_unlock(&priv->pfault_srcu, srcu_idx);
-}
-#endif
+	if (priv->flags & MLX5_PRIV_FLAGS_DETACH)
+		return 0;
 
-void mlx5_dev_list_lock(void)
-{
-	mutex_lock(&mlx5_intf_mutex);
+	delete_drivers(dev);
+	if (priv->flags & MLX5_PRIV_FLAGS_DISABLE_ALL_ADEV)
+		return 0;
+
+	return add_drivers(dev);
 }
 
-void mlx5_dev_list_unlock(void)
+bool mlx5_same_hw_devs(struct mlx5_core_dev *dev, struct mlx5_core_dev *peer_dev)
 {
-	mutex_unlock(&mlx5_intf_mutex);
+	u8 fsystem_guid[MLX5_SW_IMAGE_GUID_MAX_BYTES];
+	u8 psystem_guid[MLX5_SW_IMAGE_GUID_MAX_BYTES];
+	u8 flen;
+	u8 plen;
+
+	mlx5_query_nic_sw_system_image_guid(dev, fsystem_guid, &flen);
+	mlx5_query_nic_sw_system_image_guid(peer_dev, psystem_guid, &plen);
+
+	return plen && flen && flen == plen &&
+		!memcmp(fsystem_guid, psystem_guid, flen);
 }
 
-int mlx5_dev_list_trylock(void)
+void mlx5_core_reps_aux_devs_remove(struct mlx5_core_dev *dev)
 {
-	return mutex_trylock(&mlx5_intf_mutex);
+	struct mlx5_priv *priv = &dev->priv;
+
+	if (priv->adev[MLX5_INTERFACE_PROTOCOL_ETH])
+		device_lock_assert(&priv->adev[MLX5_INTERFACE_PROTOCOL_ETH]->adev.dev);
+	else
+		mlx5_core_err(dev, "ETH driver already removed\n");
+	if (priv->adev[MLX5_INTERFACE_PROTOCOL_IB_REP])
+		del_adev(&priv->adev[MLX5_INTERFACE_PROTOCOL_IB_REP]->adev);
+	if (priv->adev[MLX5_INTERFACE_PROTOCOL_ETH_REP])
+		del_adev(&priv->adev[MLX5_INTERFACE_PROTOCOL_ETH_REP]->adev);
 }

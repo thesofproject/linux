@@ -45,9 +45,9 @@ static u32 pit_cnt;
 
 static int cf_pit_set_periodic(struct clock_event_device *evt)
 {
-	__raw_writew(MCFPIT_PCSR_DISABLE, TA(MCFPIT_PCSR));
-	__raw_writew(PIT_CYCLES_PER_JIFFY, TA(MCFPIT_PMR));
-	__raw_writew(MCFPIT_PCSR_EN | MCFPIT_PCSR_PIE |
+	mcf_write16(MCFPIT_PCSR_DISABLE, TA(MCFPIT_PCSR));
+	mcf_write16(PIT_CYCLES_PER_JIFFY, TA(MCFPIT_PMR));
+	mcf_write16(MCFPIT_PCSR_EN | MCFPIT_PCSR_PIE |
 		     MCFPIT_PCSR_OVW | MCFPIT_PCSR_RLD |
 		     MCFPIT_PCSR_CLK64, TA(MCFPIT_PCSR));
 	return 0;
@@ -55,15 +55,15 @@ static int cf_pit_set_periodic(struct clock_event_device *evt)
 
 static int cf_pit_set_oneshot(struct clock_event_device *evt)
 {
-	__raw_writew(MCFPIT_PCSR_DISABLE, TA(MCFPIT_PCSR));
-	__raw_writew(MCFPIT_PCSR_EN | MCFPIT_PCSR_PIE |
+	mcf_write16(MCFPIT_PCSR_DISABLE, TA(MCFPIT_PCSR));
+	mcf_write16(MCFPIT_PCSR_EN | MCFPIT_PCSR_PIE |
 		     MCFPIT_PCSR_OVW | MCFPIT_PCSR_CLK64, TA(MCFPIT_PCSR));
 	return 0;
 }
 
 static int cf_pit_shutdown(struct clock_event_device *evt)
 {
-	__raw_writew(MCFPIT_PCSR_DISABLE, TA(MCFPIT_PCSR));
+	mcf_write16(MCFPIT_PCSR_DISABLE, TA(MCFPIT_PCSR));
 	return 0;
 }
 
@@ -75,7 +75,7 @@ static int cf_pit_shutdown(struct clock_event_device *evt)
 static int cf_pit_next_event(unsigned long delta,
 		struct clock_event_device *evt)
 {
-	__raw_writew(delta, TA(MCFPIT_PMR));
+	mcf_write16(delta, TA(MCFPIT_PMR));
 	return 0;
 }
 
@@ -101,21 +101,13 @@ static irqreturn_t pit_tick(int irq, void *dummy)
 	u16 pcsr;
 
 	/* Reset the ColdFire timer */
-	pcsr = __raw_readw(TA(MCFPIT_PCSR));
-	__raw_writew(pcsr | MCFPIT_PCSR_PIF, TA(MCFPIT_PCSR));
+	pcsr = mcf_read16(TA(MCFPIT_PCSR));
+	mcf_write16(pcsr | MCFPIT_PCSR_PIF, TA(MCFPIT_PCSR));
 
 	pit_cnt += PIT_CYCLES_PER_JIFFY;
 	evt->event_handler(evt);
 	return IRQ_HANDLED;
 }
-
-/***************************************************************************/
-
-static struct irqaction pit_irq = {
-	.name	 = "timer",
-	.flags	 = IRQF_TIMER,
-	.handler = pit_tick,
-};
 
 /***************************************************************************/
 
@@ -126,7 +118,7 @@ static u64 pit_read_clk(struct clocksource *cs)
 	u16 pcntr;
 
 	local_irq_save(flags);
-	pcntr = __raw_readw(TA(MCFPIT_PCNTR));
+	pcntr = mcf_read16(TA(MCFPIT_PCNTR));
 	cycles = pit_cnt;
 	local_irq_restore(flags);
 
@@ -144,8 +136,10 @@ static struct clocksource pit_clk = {
 
 /***************************************************************************/
 
-void hw_timer_init(irq_handler_t handler)
+void hw_timer_init(void)
 {
+	int ret;
+
 	cf_pit_clockevent.cpumask = cpumask_of(smp_processor_id());
 	cf_pit_clockevent.mult = div_sc(FREQ, NSEC_PER_SEC, 32);
 	cf_pit_clockevent.max_delta_ns =
@@ -156,7 +150,11 @@ void hw_timer_init(irq_handler_t handler)
 	cf_pit_clockevent.min_delta_ticks = 0x3f;
 	clockevents_register_device(&cf_pit_clockevent);
 
-	setup_irq(MCF_IRQ_PIT1, &pit_irq);
+	ret = request_irq(MCF_IRQ_PIT1, pit_tick, IRQF_TIMER, "timer", NULL);
+	if (ret) {
+		pr_err("Failed to request irq %d (timer): %pe\n", MCF_IRQ_PIT1,
+		       ERR_PTR(ret));
+	}
 
 	clocksource_register_hz(&pit_clk, FREQ);
 }

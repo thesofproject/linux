@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  linux/arch/arm/mm/tlbv4wbi.S
  *
  *  Copyright (C) 1997-2002 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  *  ARM architecture version 4 and version 5 TLB handling functions.
  *  These assume a split I/D TLBs, with a write buffer.
@@ -14,6 +11,7 @@
  */
 #include <linux/linkage.h>
 #include <linux/init.h>
+#include <linux/cfi_types.h>
 #include <asm/assembler.h>
 #include <asm/asm-offsets.h>
 #include <asm/tlbflush.h>
@@ -29,7 +27,7 @@
  *	- mm    - mm_struct describing address space
  */
 	.align	5
-ENTRY(v4wbi_flush_user_tlb_range)
+SYM_TYPED_FUNC_START(v4wbi_flush_user_tlb_range)
 	vma_vm_mm ip, r2
 	act_mm	r3				@ get current->active_mm
 	eors	r3, ip, r3			@ == mm ?
@@ -46,8 +44,9 @@ ENTRY(v4wbi_flush_user_tlb_range)
 	cmp	r0, r1
 	blo	1b
 	ret	lr
+SYM_FUNC_END(v4wbi_flush_user_tlb_range)
 
-ENTRY(v4wbi_flush_kern_tlb_range)
+SYM_TYPED_FUNC_START(v4wbi_flush_kern_tlb_range)
 	mov	r3, #0
 	mcr	p15, 0, r3, c7, c10, 4		@ drain WB
 	bic	r0, r0, #0x0ff
@@ -58,8 +57,4 @@ ENTRY(v4wbi_flush_kern_tlb_range)
 	cmp	r0, r1
 	blo	1b
 	ret	lr
-
-	__INITDATA
-
-	/* define struct cpu_tlb_fns (see <asm/tlbflush.h> and proc-macros.S) */
-	define_tlb_functions v4wbi, v4wbi_tlb_flags
+SYM_FUNC_END(v4wbi_flush_kern_tlb_range)

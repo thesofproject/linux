@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  linux/drivers/pinctrl/pinctrl-lantiq.h
  *  based on linux/drivers/pinctrl/pinctrl-pxa3xx.h
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  publishhed by the Free Software Foundation.
  *
  *  Copyright (C) 2012 John Crispin <john@phrozen.org>
  */
@@ -13,11 +10,12 @@
 #define __PINCTRL_LANTIQ_H
 
 #include <linux/clkdev.h>
-#include <linux/pinctrl/pinctrl.h>
-#include <linux/pinctrl/pinconf.h>
-#include <linux/pinctrl/pinmux.h>
+
 #include <linux/pinctrl/consumer.h>
 #include <linux/pinctrl/machine.h>
+#include <linux/pinctrl/pinconf.h>
+#include <linux/pinctrl/pinctrl.h>
+#include <linux/pinctrl/pinmux.h>
 
 #include "core.h"
 
@@ -200,5 +198,4 @@ enum ltq_pin {
 
 extern int ltq_pinctrl_register(struct platform_device *pdev,
 				   struct ltq_pinmux_info *info);
-extern int ltq_pinctrl_unregister(struct platform_device *pdev);
 #endif	/* __PINCTRL_LANTIQ_H */

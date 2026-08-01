@@ -43,7 +43,7 @@
 
 #define MAX_VFS		80
 #define MAX_PEND_REQS_PER_FUNC 4
-#define MAD_TIMEOUT_MS	2000
+#define MAD_TIMEOUT_SEC	2
 
 #define mcg_warn(fmt, arg...)	pr_warn("MCG WARNING: " fmt, ##arg)
 #define mcg_error(fmt, arg...)	pr_err(fmt, ##arg)
@@ -270,7 +270,7 @@ static int send_join_to_wire(struct mcast_group *group, struct ib_sa_mad *sa_mad
 	if (!ret) {
 		/* calls mlx4_ib_mcg_timeout_handler */
 		queue_delayed_work(group->demux->mcg_wq, &group->timeout_work,
-				msecs_to_jiffies(MAD_TIMEOUT_MS));
+				   secs_to_jiffies(MAD_TIMEOUT_SEC));
 	}
 
 	return ret;
@@ -309,7 +309,7 @@ static int send_leave_to_wire(struct mcast_group *group, u8 join_state)
 	if (!ret) {
 		/* calls mlx4_ib_mcg_timeout_handler */
 		queue_delayed_work(group->demux->mcg_wq, &group->timeout_work,
-				msecs_to_jiffies(MAD_TIMEOUT_MS));
+				   secs_to_jiffies(MAD_TIMEOUT_SEC));
 	}
 
 	return ret;
@@ -673,7 +673,7 @@ static void mlx4_ib_mcg_work_handler(struct work_struct *work)
 			if (!list_empty(&group->pending_list))
 				req = list_first_entry(&group->pending_list,
 						struct mcast_req, group_list);
-			if ((method == IB_MGMT_METHOD_GET_RESP)) {
+			if (method == IB_MGMT_METHOD_GET_RESP) {
 					if (req) {
 						send_reply_to_slave(req->func, group, &req->sa_mad, status);
 						--group->func[req->func].num_pend_reqs;
@@ -824,7 +824,7 @@ static struct mcast_group *acquire_group(struct mlx4_ib_demux_ctx *ctx,
 	if (!create)
 		return ERR_PTR(-ENOENT);
 
-	group = kzalloc(sizeof(*group), GFP_KERNEL);
+	group = kzalloc_obj(*group);
 	if (!group)
 		return ERR_PTR(-ENOMEM);
 
@@ -944,9 +944,9 @@ int mlx4_ib_mcg_multiplex_handler(struct ib_device *ibdev, int port,
 	switch (sa_mad->mad_hdr.method) {
 	case IB_MGMT_METHOD_SET:
 		may_create = 1;
-		/* fall through */
+		fallthrough;
 	case IB_SA_METHOD_DELETE:
-		req = kzalloc(sizeof *req, GFP_KERNEL);
+		req = kzalloc_obj(*req);
 		if (!req)
 			return -ENOMEM;
 
@@ -988,53 +988,63 @@ int mlx4_ib_mcg_multiplex_handler(struct ib_device *ibdev, int port,
 }
 
 static ssize_t sysfs_show_group(struct device *dev,
-		struct device_attribute *attr, char *buf)
+				struct device_attribute *attr, char *buf)
 {
 	struct mcast_group *group =
 		container_of(attr, struct mcast_group, dentry);
 	struct mcast_req *req = NULL;
-	char pending_str[40];
 	char state_str[40];
-	ssize_t len = 0;
-	int f;
+	char pending_str[40];
+	int len;
+	int i;
+	u32 hoplimit;
 
 	if (group->state == MCAST_IDLE)
-		sprintf(state_str, "%s", get_state_string(group->state));
+		scnprintf(state_str, sizeof(state_str), "%s",
+			  get_state_string(group->state));
 	else
-		sprintf(state_str, "%s(TID=0x%llx)",
-				get_state_string(group->state),
-				be64_to_cpu(group->last_req_tid));
-	if (list_empty(&group->pending_list)) {
-		sprintf(pending_str, "No");
-	} else {
-		req = list_first_entry(&group->pending_list, struct mcast_req, group_list);
-		sprintf(pending_str, "Yes(TID=0x%llx)",
-				be64_to_cpu(req->sa_mad.mad_hdr.tid));
-	}
-	len += sprintf(buf + len, "%1d [%02d,%02d,%02d] %4d %4s %5s     ",
-			group->rec.scope_join_state & 0xf,
-			group->members[2], group->members[1], group->members[0],
-			atomic_read(&group->refcount),
-			pending_str,
-			state_str);
-	for (f = 0; f < MAX_VFS; ++f)
-		if (group->func[f].state == MCAST_MEMBER)
-			len += sprintf(buf + len, "%d[%1x] ",
-					f, group->func[f].join_state);
+		scnprintf(state_str, sizeof(state_str), "%s(TID=0x%llx)",
+			  get_state_string(group->state),
+			  be64_to_cpu(group->last_req_tid));
 
-	len += sprintf(buf + len, "\t\t(%4hx %4x %2x %2x %2x %2x %2x "
-		"%4x %4x %2x %2x)\n",
-		be16_to_cpu(group->rec.pkey),
-		be32_to_cpu(group->rec.qkey),
-		(group->rec.mtusel_mtu & 0xc0) >> 6,
-		group->rec.mtusel_mtu & 0x3f,
-		group->rec.tclass,
-		(group->rec.ratesel_rate & 0xc0) >> 6,
-		group->rec.ratesel_rate & 0x3f,
-		(be32_to_cpu(group->rec.sl_flowlabel_hoplimit) & 0xf0000000) >> 28,
-		(be32_to_cpu(group->rec.sl_flowlabel_hoplimit) & 0x0fffff00) >> 8,
-		be32_to_cpu(group->rec.sl_flowlabel_hoplimit) & 0x000000ff,
-		group->rec.proxy_join);
+	if (list_empty(&group->pending_list)) {
+		scnprintf(pending_str, sizeof(pending_str), "No");
+	} else {
+		req = list_first_entry(&group->pending_list, struct mcast_req,
+				       group_list);
+		scnprintf(pending_str, sizeof(pending_str), "Yes(TID=0x%llx)",
+			  be64_to_cpu(req->sa_mad.mad_hdr.tid));
+	}
+
+	len = sysfs_emit(buf, "%1d [%02d,%02d,%02d] %4d %4s %5s     ",
+			 group->rec.scope_join_state & 0xf,
+			 group->members[2],
+			 group->members[1],
+			 group->members[0],
+			 atomic_read(&group->refcount),
+			 pending_str,
+			 state_str);
+
+	for (i = 0; i < MAX_VFS; i++) {
+		if (group->func[i].state == MCAST_MEMBER)
+			len += sysfs_emit_at(buf, len, "%d[%1x] ", i,
+					     group->func[i].join_state);
+	}
+
+	hoplimit = be32_to_cpu(group->rec.sl_flowlabel_hoplimit);
+	len += sysfs_emit_at(buf, len,
+			     "\t\t(%4hx %4x %2x %2x %2x %2x %2x %4x %4x %2x %2x)\n",
+			     be16_to_cpu(group->rec.pkey),
+			     be32_to_cpu(group->rec.qkey),
+			     (group->rec.mtusel_mtu & 0xc0) >> 6,
+			     (group->rec.mtusel_mtu & 0x3f),
+			     group->rec.tclass,
+			     (group->rec.ratesel_rate & 0xc0) >> 6,
+			     (group->rec.ratesel_rate & 0x3f),
+			     (hoplimit & 0xf0000000) >> 28,
+			     (hoplimit & 0x0fffff00) >> 8,
+			     (hoplimit & 0x000000ff),
+			     group->rec.proxy_join);
 
 	return len;
 }
@@ -1081,7 +1091,7 @@ static void _mlx4_ib_mcg_port_cleanup(struct mlx4_ib_demux_ctx *ctx, int destroy
 	for (i = 0; i < MAX_VFS; ++i)
 		clean_vf_mcast(ctx, i);
 
-	end = jiffies + msecs_to_jiffies(MAD_TIMEOUT_MS + 3000);
+	end = jiffies + secs_to_jiffies(MAD_TIMEOUT_SEC + 3);
 	do {
 		count = 0;
 		mutex_lock(&ctx->mcg_table_lock);
@@ -1140,7 +1150,7 @@ void mlx4_ib_mcg_port_cleanup(struct mlx4_ib_demux_ctx *ctx, int destroy_wq)
 		return;
 	}
 
-	work = kmalloc(sizeof *work, GFP_KERNEL);
+	work = kmalloc_obj(*work);
 	if (!work) {
 		ctx->flushing = 0;
 		return;
@@ -1201,7 +1211,7 @@ static int push_deleteing_req(struct mcast_group *group, int slave)
 	if (!group->func[slave].join_state)
 		return 0;
 
-	req = kzalloc(sizeof *req, GFP_KERNEL);
+	req = kzalloc_obj(*req);
 	if (!req)
 		return -ENOMEM;
 

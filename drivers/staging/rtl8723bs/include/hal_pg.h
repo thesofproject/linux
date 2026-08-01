@@ -1,15 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2011 Realtek Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
  *
  ******************************************************************************/
 
@@ -22,13 +14,9 @@
  */
 #define MAX_TX_COUNT				4
 
-/*  For VHT series TX power by rate table. */
-/*  VHT TX power by rate off setArray = */
-/*  Band:-2G&5G = 0 / 1 */
-/*  RF: at most 4*4 = ABCD = 0/1/2/3 */
-/*  CCK = 0 OFDM = 1/2 HT-MCS 0-15 =3/4/56 VHT =7/8/9/10/11 */
-#define TX_PWR_BY_RATE_NUM_BAND			2
-#define TX_PWR_BY_RATE_NUM_RF			4
+/*  TX power by rate table. */
+/*  RF: = AB = 0/1 */
+/*  CCK = 0 OFDM = 1 HT-MCS 0-7 = 2 */
 #define TX_PWR_BY_RATE_NUM_RATE			84
 #define MAX_RF_PATH_NUM				2
 #define	MAX_CHNL_GROUP_24G			6

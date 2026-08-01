@@ -6,7 +6,7 @@ Notes on Analysing Behaviour Using Events and Tracepoints
 1. Introduction
 ===============
 
-Tracepoints (see Documentation/trace/tracepoints.txt) can be used without
+Tracepoints (see Documentation/trace/tracepoints.rst) can be used without
 creating custom kernel modules to register probe functions using the event
 tracing infrastructure.
 
@@ -26,10 +26,10 @@ assumed that the PCL tool tools/perf has been installed and is in your path.
 2.1 Standard Utilities
 ----------------------
 
-All possible events are visible from /sys/kernel/debug/tracing/events. Simply
+All possible events are visible from /sys/kernel/tracing/events. Simply
 calling::
 
-  $ find /sys/kernel/debug/tracing/events -type d
+  $ find /sys/kernel/tracing/events -type d
 
 will give a fair indication of the number of events available.
 
@@ -55,11 +55,11 @@ simple case of::
 3.1 System-Wide Event Enabling
 ------------------------------
 
-See Documentation/trace/events.txt for a proper description on how events
+See Documentation/trace/events.rst for a proper description on how events
 can be enabled system-wide. A short example of enabling all events related
 to page allocation would look something like::
 
-  $ for i in `find /sys/kernel/debug/tracing/events -name "enable" | grep mm_`; do echo 1 > $i; done
+  $ for i in `find /sys/kernel/tracing/events -name "enable" | grep mm_`; do echo 1 > $i; done
 
 3.2 System-Wide Event Enabling with SystemTap
 ---------------------------------------------
@@ -112,7 +112,7 @@ at that point.
 3.4 Local Event Enabling
 ------------------------
 
-Documentation/trace/ftrace.txt describes how to enable events on a per-thread
+Documentation/trace/ftrace.rst describes how to enable events on a per-thread
 basis using set_ftrace_pid.
 
 3.5 Local Event Enablement with PCL
@@ -137,7 +137,7 @@ basis using PCL such as follows.
 4. Event Filtering
 ==================
 
-Documentation/trace/ftrace.txt covers in-depth how to filter events in
+Documentation/trace/ftrace.rst covers in-depth how to filter events in
 ftrace.  Obviously using grep and awk of trace_pipe is an option as well
 as any script reading trace_pipe.
 
@@ -189,7 +189,7 @@ time on a system-wide basis using -a and sleep.
 ============================================
 
 When events are enabled the events that are triggering can be read from
-/sys/kernel/debug/tracing/trace_pipe in human-readable format although binary
+/sys/kernel/tracing/trace_pipe in human-readable format although binary
 options exist as well. By post-processing the output, further information can
 be gathered on-line as appropriate. Examples of post-processing might include
 

@@ -243,7 +243,7 @@ static int cxgb_ulp_iscsi_ctl(struct adapter *adapter, unsigned int req,
 
 		/*
 		 * on rx, the iscsi pdu has to be < rx page size and the
-		 * the max rx data length programmed in TP
+		 * max rx data length programmed in TP
 		 */
 		val = min(adapter->params.tp.rx_pg_size,
 			  ((t3_read_reg(adapter, A_TP_PARA_REG2)) >>
@@ -515,23 +515,6 @@ void *cxgb3_free_atid(struct t3cdev *tdev, int atid)
 
 EXPORT_SYMBOL(cxgb3_free_atid);
 
-/*
- * Free a server TID and return it to the free pool.
- */
-void cxgb3_free_stid(struct t3cdev *tdev, int stid)
-{
-	struct tid_info *t = &(T3C_DATA(tdev))->tid_maps;
-	union listen_entry *p = stid2entry(t, stid);
-
-	spin_lock_bh(&t->stid_lock);
-	p->next = t->sfree;
-	t->sfree = p;
-	t->stids_in_use--;
-	spin_unlock_bh(&t->stid_lock);
-}
-
-EXPORT_SYMBOL(cxgb3_free_stid);
-
 void cxgb3_insert_tid(struct t3cdev *tdev, struct cxgb3_client *client,
 		      void *ctx, unsigned int tid)
 {
@@ -670,28 +653,6 @@ int cxgb3_alloc_atid(struct t3cdev *tdev, struct cxgb3_client *client,
 }
 
 EXPORT_SYMBOL(cxgb3_alloc_atid);
-
-int cxgb3_alloc_stid(struct t3cdev *tdev, struct cxgb3_client *client,
-		     void *ctx)
-{
-	int stid = -1;
-	struct tid_info *t = &(T3C_DATA(tdev))->tid_maps;
-
-	spin_lock_bh(&t->stid_lock);
-	if (t->sfree) {
-		union listen_entry *p = t->sfree;
-
-		stid = (p - t->stid_tab) + t->stid_base;
-		t->sfree = p->next;
-		p->t3c_tid.ctx = ctx;
-		p->t3c_tid.client = client;
-		t->stids_in_use++;
-	}
-	spin_unlock_bh(&t->stid_lock);
-	return stid;
-}
-
-EXPORT_SYMBOL(cxgb3_alloc_stid);
 
 /* Get the t3cdev associated with a net_device */
 struct t3cdev *dev2t3cdev(struct net_device *dev)
@@ -1224,7 +1185,7 @@ int cxgb3_offload_activate(struct adapter *adapter)
 	unsigned int l2t_capacity;
 	struct l2t_data *l2td;
 
-	t = kzalloc(sizeof(*t), GFP_KERNEL);
+	t = kzalloc_obj(*t);
 	if (!t)
 		return -ENOMEM;
 
@@ -1302,8 +1263,7 @@ void cxgb3_offload_deactivate(struct adapter *adapter)
 	rcu_read_unlock();
 	RCU_INIT_POINTER(tdev->l2opt, NULL);
 	call_rcu(&d->rcu_head, clean_l2_data);
-	if (t->nofail_skb)
-		kfree_skb(t->nofail_skb);
+	kfree_skb(t->nofail_skb);
 	kfree(t);
 }
 

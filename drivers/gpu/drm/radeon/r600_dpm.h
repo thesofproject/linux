@@ -23,6 +23,8 @@
 #ifndef __R600_DPM_H__
 #define __R600_DPM_H__
 
+#include "radeon.h"
+
 #define R600_ASI_DFLT                                10000
 #define R600_BSP_DFLT                                0x41EB
 #define R600_BSU_DFLT                                0x2
@@ -117,8 +119,7 @@ enum r600_display_watermark {
 	R600_DISPLAY_WATERMARK_HIGH = 1,
 };
 
-enum r600_display_gap
-{
+enum r600_display_gap {
     R600_PM_DISPLAY_GAP_VBLANK_OR_WM = 0,
     R600_PM_DISPLAY_GAP_VBLANK       = 1,
     R600_PM_DISPLAY_GAP_WATERMARK    = 2,

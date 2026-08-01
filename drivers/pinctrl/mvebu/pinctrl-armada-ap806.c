@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Marvell Armada ap806 pinctrl driver based on mvebu pinctrl core
  *
@@ -5,11 +6,6 @@
  *
  * Thomas Petazzoni <thomas.petazzoni@free-electrons.com>
  * Hanna Hawa <hannah@marvell.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/err.h>
@@ -17,7 +13,6 @@
 #include <linux/io.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/pinctrl/pinctrl.h>
 
 #include "pinctrl-mvebu.h"
@@ -110,10 +105,8 @@ static struct pinctrl_gpio_range armada_ap806_mpp_gpio_ranges[] = {
 static int armada_ap806_pinctrl_probe(struct platform_device *pdev)
 {
 	struct mvebu_pinctrl_soc_info *soc = &armada_ap806_pinctrl_info;
-	const struct of_device_id *match =
-		of_match_device(armada_ap806_pinctrl_of_match, &pdev->dev);
 
-	if (!match || !pdev->dev.parent)
+	if (!pdev->dev.parent)
 		return -ENODEV;
 
 	soc->variant = 0; /* no variants for Armada AP806 */

@@ -1,14 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * Common variables for the Maxim MAX77843 driver
  *
  * Copyright (C) 2015 Samsung Electronics
  * Author: Jaewon Kim <jaewon02.kim@samsung.com>
  * Author: Beomho Seo <beomho.seo@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __MAX77843_PRIVATE_H_
@@ -202,7 +198,7 @@ enum max77843_irq_muic {
 #define MAX77843_MCONFIG_MEN_MASK		BIT(MCONFIG_MEN_SHIFT)
 #define MAX77843_MCONFIG_PDIV_MASK		(0x3 << MCONFIG_PDIV_SHIFT)
 
-/* Max77843 charger insterrupts */
+/* Max77843 charger interrupts */
 #define MAX77843_CHG_BYP_I			BIT(0)
 #define MAX77843_CHG_BATP_I			BIT(2)
 #define MAX77843_CHG_BAT_I			BIT(3)

@@ -1,19 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * wl12xx SDIO routines
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
  *
  * Copyright (C) 2005 Texas Instruments Incorporated
  * Copyright (C) 2008 Google Inc
@@ -21,24 +8,15 @@
  */
 #include <linux/interrupt.h>
 #include <linux/module.h>
-#include <linux/mod_devicetable.h>
 #include <linux/mmc/sdio_func.h>
 #include <linux/mmc/sdio_ids.h>
 #include <linux/platform_device.h>
-#include <linux/wl12xx.h>
 #include <linux/irq.h>
 #include <linux/pm_runtime.h>
-#include <linux/gpio.h>
+#include <linux/of.h>
+#include <linux/of_irq.h>
 
 #include "wl1251.h"
-
-#ifndef SDIO_VENDOR_ID_TI
-#define SDIO_VENDOR_ID_TI		0x104c
-#endif
-
-#ifndef SDIO_DEVICE_ID_TI_WL1251
-#define SDIO_DEVICE_ID_TI_WL1251	0x9066
-#endif
 
 struct wl1251_sdio {
 	struct sdio_func *func;
@@ -62,7 +40,7 @@ static void wl1251_sdio_interrupt(struct sdio_func *func)
 }
 
 static const struct sdio_device_id wl1251_devices[] = {
-	{ SDIO_DEVICE(SDIO_VENDOR_ID_TI, SDIO_DEVICE_ID_TI_WL1251) },
+	{ SDIO_DEVICE(SDIO_VENDOR_ID_TI_WL1251, SDIO_DEVICE_ID_TI_WL1251) },
 	{}
 };
 MODULE_DEVICE_TABLE(sdio, wl1251_devices);
@@ -178,15 +156,6 @@ static int wl1251_sdio_set_power(struct wl1251 *wl, bool enable)
 	int ret;
 
 	if (enable) {
-		/*
-		 * Power is controlled by runtime PM, but we still call board
-		 * callback in case it wants to do any additional setup,
-		 * for example enabling clock buffer for the module.
-		 */
-		if (gpio_is_valid(wl->power_gpio))
-			gpio_set_value(wl->power_gpio, true);
-
-
 		ret = pm_runtime_get_sync(&func->dev);
 		if (ret < 0) {
 			pm_runtime_put_sync(&func->dev);
@@ -204,9 +173,6 @@ static int wl1251_sdio_set_power(struct wl1251 *wl, bool enable)
 		ret = pm_runtime_put_sync(&func->dev);
 		if (ret < 0)
 			goto out;
-
-		if (gpio_is_valid(wl->power_gpio))
-			gpio_set_value(wl->power_gpio, false);
 	}
 
 out:
@@ -229,7 +195,7 @@ static int wl1251_sdio_probe(struct sdio_func *func,
 	struct wl1251 *wl;
 	struct ieee80211_hw *hw;
 	struct wl1251_sdio *wl_sdio;
-	const struct wl1251_platform_data *wl1251_board_data;
+	struct device_node *np = func->dev.of_node;
 
 	hw = wl1251_alloc_hw();
 	if (IS_ERR(hw))
@@ -237,7 +203,7 @@ static int wl1251_sdio_probe(struct sdio_func *func,
 
 	wl = hw->priv;
 
-	wl_sdio = kzalloc(sizeof(*wl_sdio), GFP_KERNEL);
+	wl_sdio = kzalloc_obj(*wl_sdio);
 	if (wl_sdio == NULL) {
 		ret = -ENOMEM;
 		goto out_free_hw;
@@ -256,25 +222,18 @@ static int wl1251_sdio_probe(struct sdio_func *func,
 	wl->if_priv = wl_sdio;
 	wl->if_ops = &wl1251_sdio_ops;
 
-	wl1251_board_data = wl1251_get_platform_data();
-	if (!IS_ERR(wl1251_board_data)) {
-		wl->power_gpio = wl1251_board_data->power_gpio;
-		wl->irq = wl1251_board_data->irq;
-		wl->use_eeprom = wl1251_board_data->use_eeprom;
-	}
-
-	if (gpio_is_valid(wl->power_gpio)) {
-		ret = devm_gpio_request(&func->dev, wl->power_gpio,
-								"wl1251 power");
-		if (ret) {
-			wl1251_error("Failed to request gpio: %d\n", ret);
+	if (np) {
+		wl->use_eeprom = of_property_read_bool(np, "ti,wl1251-has-eeprom");
+		wl->irq = of_irq_get(np, 0);
+		if (wl->irq == -EPROBE_DEFER) {
+			ret = -EPROBE_DEFER;
 			goto disable;
 		}
 	}
 
 	if (wl->irq) {
-		irq_set_status_flags(wl->irq, IRQ_NOAUTOEN);
-		ret = request_irq(wl->irq, wl1251_line_irq, 0, "wl1251", wl);
+		ret = request_irq(wl->irq, wl1251_line_irq, IRQF_NO_AUTOEN,
+				  "wl1251", wl);
 		if (ret < 0) {
 			wl1251_error("request_irq() failed: %d", ret);
 			goto disable;
@@ -363,25 +322,8 @@ static struct sdio_driver wl1251_sdio_driver = {
 	.remove		= wl1251_sdio_remove,
 	.drv.pm		= &wl1251_sdio_pm_ops,
 };
+module_sdio_driver(wl1251_sdio_driver);
 
-static int __init wl1251_sdio_init(void)
-{
-	int err;
-
-	err = sdio_register_driver(&wl1251_sdio_driver);
-	if (err)
-		wl1251_error("failed to register sdio driver: %d", err);
-	return err;
-}
-
-static void __exit wl1251_sdio_exit(void)
-{
-	sdio_unregister_driver(&wl1251_sdio_driver);
-	wl1251_notice("unloaded");
-}
-
-module_init(wl1251_sdio_init);
-module_exit(wl1251_sdio_exit);
-
+MODULE_DESCRIPTION("TI WL1251 SDIO helpers");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Kalle Valo <kvalo@adurom.com>");

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	ALSA driver for ICEnsemble VT1724 (Envy24HT)
  *
@@ -6,21 +7,6 @@
  *		Copyright (c) 2006 Guedez Clement <klem.dev@gmail.com>
  *		Some functions are taken from the Prodigy192 driver
  *		source
- *
- *	This program is free software; you can redistribute it and/or modify
- *	it under the terms of the GNU General Public License as published by
- *	the Free Software Foundation; either version 2 of the License, or
- *	(at your option) any later version.
- *
- *	This program is distributed in the hope that it will be useful,
- *	but WITHOUT ANY WARRANTY; without even the implied warranty of
- *	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *	GNU General Public License for more details.
- *
- *	You should have received a copy of the GNU General Public License
- *	along with this program; if not, write to the Free Software
- *	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
  */
 
 
@@ -132,7 +118,7 @@ static int stac9460_dac_mute_get(struct snd_kcontrol *kcontrol,
 	unsigned char val;
 	int idx, id;
 
-	mutex_lock(&spec->mute_mutex);
+	guard(mutex)(&spec->mute_mutex);
 
 	if (kcontrol->private_value) {
 		idx = STAC946X_MASTER_VOLUME;
@@ -147,7 +133,6 @@ static int stac9460_dac_mute_get(struct snd_kcontrol *kcontrol,
 		val = stac9460_2_get(ice, idx - 6);
 	ucontrol->value.integer.value[0] = (~val >> 7) & 0x1;
 
-	mutex_unlock(&spec->mute_mutex);
 	return 0;
 }
 
@@ -469,7 +454,7 @@ static void stac9460_set_rate_val(struct snd_ice1712 *ice, unsigned int rate)
 		return;
 	/* change detected, setting master clock, muting first */
 	/* due to possible conflicts with mute controls - mutexing */
-	mutex_lock(&spec->mute_mutex);
+	guard(mutex)(&spec->mute_mutex);
 	/* we have to remember current mute status for each DAC */
 	changed = 0xFFFF;
 	stac9460_dac_mute_all(ice, 0, &changed);
@@ -480,7 +465,6 @@ static void stac9460_set_rate_val(struct snd_ice1712 *ice, unsigned int rate)
 	/* unmuting - only originally unmuted dacs -
 	* i.e. those changed when muting */
 	stac9460_dac_mute_all(ice, 1, &changed);
-	mutex_unlock(&spec->mute_mutex);
 }
 
 
@@ -491,7 +475,7 @@ static const DECLARE_TLV_DB_SCALE(db_scale_adc, 0, 150, 0);
 /*
  * Control tabs
  */
-static struct snd_kcontrol_new stac9640_controls[] = {
+static const struct snd_kcontrol_new stac9640_controls[] = {
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.access = (SNDRV_CTL_ELEM_ACCESS_READWRITE |
@@ -581,12 +565,12 @@ static int wtm_add_controls(struct snd_ice1712 *ice)
 
 static int wtm_init(struct snd_ice1712 *ice)
 {
-	static unsigned short stac_inits_wtm[] = {
+	static const unsigned short stac_inits_wtm[] = {
 		STAC946X_RESET, 0,
 		STAC946X_MASTER_CLOCKING, 0x11,
 		(unsigned short)-1
 	};
-	unsigned short *p;
+	const unsigned short *p;
 	struct wtm_spec *spec;
 
 	/*WTM 192M*/
@@ -595,7 +579,7 @@ static int wtm_init(struct snd_ice1712 *ice)
 	ice->force_rdma1 = 1;
 
 	/*init mutex for dac mute conflict*/
-	spec = kzalloc(sizeof(*spec), GFP_KERNEL);
+	spec = kzalloc_obj(*spec);
 	if (!spec)
 		return -ENOMEM;
 	ice->spec = spec;
@@ -613,7 +597,7 @@ static int wtm_init(struct snd_ice1712 *ice)
 }
 
 
-static unsigned char wtm_eeprom[] = {
+static const unsigned char wtm_eeprom[] = {
 	[ICE_EEP2_SYSCONF]      = 0x67, /*SYSCONF: clock 192KHz, mpu401,
 							4ADC, 8DAC */
 	[ICE_EEP2_ACLINK]       = 0x80, /* ACLINK : I2S */

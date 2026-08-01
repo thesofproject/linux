@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Technologic Systems TS-73xx SBC FPGA loader
  *
@@ -5,20 +6,12 @@
  *
  * FPGA Manager Driver for the on-board Altera Cyclone II FPGA found on
  * TS-7300, heavily based on load_fpga.c in their vendor tree.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
  */
 
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/string.h>
 #include <linux/iopoll.h>
@@ -39,11 +32,6 @@ struct ts73xx_fpga_priv {
 	void __iomem	*io_base;
 	struct device	*dev;
 };
-
-static enum fpga_mgr_states ts73xx_fpga_state(struct fpga_manager *mgr)
-{
-	return FPGA_MGR_STATE_UNKNOWN;
-}
 
 static int ts73xx_fpga_write_init(struct fpga_manager *mgr,
 				  struct fpga_image_info *info,
@@ -106,7 +94,6 @@ static int ts73xx_fpga_write_complete(struct fpga_manager *mgr,
 }
 
 static const struct fpga_manager_ops ts73xx_fpga_ops = {
-	.state		= ts73xx_fpga_state,
 	.write_init	= ts73xx_fpga_write_init,
 	.write		= ts73xx_fpga_write,
 	.write_complete	= ts73xx_fpga_write_complete,
@@ -116,7 +103,7 @@ static int ts73xx_fpga_probe(struct platform_device *pdev)
 {
 	struct device *kdev = &pdev->dev;
 	struct ts73xx_fpga_priv *priv;
-	struct resource *res;
+	struct fpga_manager *mgr;
 
 	priv = devm_kzalloc(kdev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -124,30 +111,28 @@ static int ts73xx_fpga_probe(struct platform_device *pdev)
 
 	priv->dev = kdev;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->io_base = devm_ioremap_resource(kdev, res);
-	if (IS_ERR(priv->io_base)) {
-		dev_err(kdev, "unable to remap registers\n");
+	priv->io_base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(priv->io_base))
 		return PTR_ERR(priv->io_base);
-	}
 
-	return fpga_mgr_register(kdev, "TS-73xx FPGA Manager",
-				 &ts73xx_fpga_ops, priv);
+	mgr = devm_fpga_mgr_register(kdev, "TS-73xx FPGA Manager",
+				     &ts73xx_fpga_ops, priv);
+	return PTR_ERR_OR_ZERO(mgr);
 }
 
-static int ts73xx_fpga_remove(struct platform_device *pdev)
-{
-	fpga_mgr_unregister(&pdev->dev);
+static const struct of_device_id ts73xx_fpga_of_match[] = {
+	{ .compatible = "technologic,ts7300-fpga" },
+	{},
+};
 
-	return 0;
-}
+MODULE_DEVICE_TABLE(of, ts73xx_fpga_of_match);
 
 static struct platform_driver ts73xx_fpga_driver = {
 	.driver	= {
 		.name	= "ts73xx-fpga-mgr",
+		.of_match_table = ts73xx_fpga_of_match,
 	},
 	.probe	= ts73xx_fpga_probe,
-	.remove	= ts73xx_fpga_remove,
 };
 module_platform_driver(ts73xx_fpga_driver);
 

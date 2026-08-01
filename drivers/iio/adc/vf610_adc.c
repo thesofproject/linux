@@ -1,36 +1,23 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Freescale Vybrid vf610 ADC driver
  *
  * Copyright 2013 Freescale Semiconductor, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/property.h>
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
+#include <linux/cleanup.h>
 #include <linux/delay.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/io.h>
 #include <linux/clk.h>
 #include <linux/completion.h>
-#include <linux/of.h>
-#include <linux/of_irq.h>
 #include <linux/regulator/consumer.h>
-#include <linux/of_platform.h>
 #include <linux/err.h>
 
 #include <linux/iio/iio.h>
@@ -39,9 +26,6 @@
 #include <linux/iio/trigger.h>
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/triggered_buffer.h>
-
-/* This will be the driver name the kernel reports */
-#define DRIVER_NAME "vf610-adc"
 
 /* Vybrid/IMX ADC registers */
 #define VF610_REG_ADC_HC0		0x00
@@ -170,6 +154,9 @@ struct vf610_adc {
 	void __iomem *regs;
 	struct clk *clk;
 
+	/* lock to protect against multiple access to the device */
+	struct mutex lock;
+
 	u32 vref_uv;
 	u32 value;
 	struct regulator *vref;
@@ -180,7 +167,15 @@ struct vf610_adc {
 	u32 sample_freq_avail[5];
 
 	struct completion completion;
-	u16 buffer[8];
+	/* Ensure the timestamp is naturally aligned */
+	struct {
+		u16 chan;
+		aligned_s64 timestamp;
+	} scan;
+};
+
+struct vf610_chip_info {
+	u8 num_channels;
 };
 
 static const u32 vf610_hw_avgs[] = { 1, 4, 8, 16, 32 };
@@ -477,11 +472,11 @@ static int vf610_set_conversion_mode(struct iio_dev *indio_dev,
 {
 	struct vf610_adc *info = iio_priv(indio_dev);
 
-	mutex_lock(&indio_dev->mlock);
+	mutex_lock(&info->lock);
 	info->adc_feature.conv_mode = mode;
 	vf610_adc_calculate_rates(info);
 	vf610_adc_hw_init(info);
-	mutex_unlock(&indio_dev->mlock);
+	mutex_unlock(&info->lock);
 
 	return 0;
 }
@@ -506,7 +501,7 @@ static const struct iio_enum vf610_conversion_mode = {
 
 static const struct iio_chan_spec_ext_info vf610_ext_info[] = {
 	IIO_ENUM("conversion_mode", IIO_SHARED_BY_DIR, &vf610_conversion_mode),
-	{},
+	{ }
 };
 
 #define VF610_ADC_CHAN(_idx, _chan_type) {			\
@@ -592,10 +587,10 @@ static irqreturn_t vf610_adc_isr(int irq, void *dev_id)
 	if (coco & VF610_ADC_HS_COCO0) {
 		info->value = vf610_adc_read_data(info);
 		if (iio_buffer_enabled(indio_dev)) {
-			info->buffer[0] = info->value;
-			iio_push_to_buffers_with_timestamp(indio_dev,
-					info->buffer,
-					iio_get_time_ns(indio_dev));
+			info->scan.chan = info->value;
+			iio_push_to_buffers_with_ts(indio_dev, &info->scan,
+						    sizeof(info->scan),
+						    iio_get_time_ns(indio_dev));
 			iio_trigger_notify_done(indio_dev->trig);
 		} else
 			complete(&info->completion);
@@ -632,6 +627,44 @@ static const struct attribute_group vf610_attribute_group = {
 	.attrs = vf610_attributes,
 };
 
+static int vf610_read_sample(struct vf610_adc *info,
+			     struct iio_chan_spec const *chan, int *val)
+{
+	unsigned int hc_cfg;
+	int ret;
+
+	guard(mutex)(&info->lock);
+	reinit_completion(&info->completion);
+	hc_cfg = VF610_ADC_ADCHC(chan->channel);
+	hc_cfg |= VF610_ADC_AIEN;
+	writel(hc_cfg, info->regs + VF610_REG_ADC_HC0);
+	ret = wait_for_completion_interruptible_timeout(&info->completion,
+							VF610_ADC_TIMEOUT);
+	if (ret == 0)
+		return -ETIMEDOUT;
+
+	if (ret < 0)
+		return ret;
+
+	switch (chan->type) {
+	case IIO_VOLTAGE:
+		*val = info->value;
+		return 0;
+	case IIO_TEMP:
+		/*
+		 * Calculate in degree Celsius times 1000
+		 * Using the typical sensor slope of 1.84 mV/°C
+		 * and VREFH_ADC at 3.3V, V at 25°C of 699 mV
+		 */
+		*val = 25000 - ((int)info->value - VF610_VTEMP25_3V3) *
+				1000000 / VF610_TEMP_SLOPE_COEFF;
+
+		return 0;
+	default:
+		return -EINVAL;
+	}
+}
+
 static int vf610_read_raw(struct iio_dev *indio_dev,
 			struct iio_chan_spec const *chan,
 			int *val,
@@ -639,53 +672,18 @@ static int vf610_read_raw(struct iio_dev *indio_dev,
 			long mask)
 {
 	struct vf610_adc *info = iio_priv(indio_dev);
-	unsigned int hc_cfg;
 	long ret;
 
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
 	case IIO_CHAN_INFO_PROCESSED:
-		mutex_lock(&indio_dev->mlock);
-		if (iio_buffer_enabled(indio_dev)) {
-			mutex_unlock(&indio_dev->mlock);
+		if (!iio_device_claim_direct(indio_dev))
 			return -EBUSY;
-		}
-
-		reinit_completion(&info->completion);
-		hc_cfg = VF610_ADC_ADCHC(chan->channel);
-		hc_cfg |= VF610_ADC_AIEN;
-		writel(hc_cfg, info->regs + VF610_REG_ADC_HC0);
-		ret = wait_for_completion_interruptible_timeout
-				(&info->completion, VF610_ADC_TIMEOUT);
-		if (ret == 0) {
-			mutex_unlock(&indio_dev->mlock);
-			return -ETIMEDOUT;
-		}
-		if (ret < 0) {
-			mutex_unlock(&indio_dev->mlock);
+		ret = vf610_read_sample(info, chan, val);
+		iio_device_release_direct(indio_dev);
+		if (ret < 0)
 			return ret;
-		}
 
-		switch (chan->type) {
-		case IIO_VOLTAGE:
-			*val = info->value;
-			break;
-		case IIO_TEMP:
-			/*
-			 * Calculate in degree Celsius times 1000
-			 * Using the typical sensor slope of 1.84 mV/°C
-			 * and VREFH_ADC at 3.3V, V at 25°C of 699 mV
-			 */
-			*val = 25000 - ((int)info->value - VF610_VTEMP25_3V3) *
-					1000000 / VF610_TEMP_SLOPE_COEFF;
-
-			break;
-		default:
-			mutex_unlock(&indio_dev->mlock);
-			return -EINVAL;
-		}
-
-		mutex_unlock(&indio_dev->mlock);
 		return IIO_VAL_INT;
 
 	case IIO_CHAN_INFO_SCALE:
@@ -737,19 +735,14 @@ static int vf610_adc_buffer_postenable(struct iio_dev *indio_dev)
 {
 	struct vf610_adc *info = iio_priv(indio_dev);
 	unsigned int channel;
-	int ret;
 	int val;
-
-	ret = iio_triggered_buffer_postenable(indio_dev);
-	if (ret)
-		return ret;
 
 	val = readl(info->regs + VF610_REG_ADC_GC);
 	val |= VF610_ADC_ADCON;
 	writel(val, info->regs + VF610_REG_ADC_GC);
 
 	channel = find_first_bit(indio_dev->active_scan_mask,
-						indio_dev->masklength);
+				 iio_get_masklength(indio_dev));
 
 	val = VF610_ADC_ADCHC(channel);
 	val |= VF610_ADC_AIEN;
@@ -774,7 +767,7 @@ static int vf610_adc_buffer_predisable(struct iio_dev *indio_dev)
 
 	writel(hc_cfg, info->regs + VF610_REG_ADC_HC0);
 
-	return iio_triggered_buffer_predisable(indio_dev);
+	return 0;
 }
 
 static const struct iio_buffer_setup_ops iio_triggered_buffer_setup_ops = {
@@ -805,54 +798,63 @@ static const struct iio_info vf610_adc_iio_info = {
 	.attrs = &vf610_attribute_group,
 };
 
+static const struct vf610_chip_info vf610_chip_info = {
+	.num_channels = ARRAY_SIZE(vf610_adc_iio_channels),
+};
+
+static const struct vf610_chip_info imx6sx_chip_info = {
+	.num_channels = 4,
+};
+
 static const struct of_device_id vf610_adc_match[] = {
-	{ .compatible = "fsl,vf610-adc", },
-	{ /* sentinel */ }
+	{ .compatible = "fsl,imx6sx-adc", .data = &imx6sx_chip_info},
+	{ .compatible = "fsl,vf610-adc", .data = &vf610_chip_info},
+	{ }
 };
 MODULE_DEVICE_TABLE(of, vf610_adc_match);
 
+static void vf610_adc_action_remove(void *d)
+{
+	struct vf610_adc *info = d;
+
+	regulator_disable(info->vref);
+}
+
 static int vf610_adc_probe(struct platform_device *pdev)
 {
+	const struct vf610_chip_info *chip_info;
+	struct device *dev = &pdev->dev;
 	struct vf610_adc *info;
 	struct iio_dev *indio_dev;
-	struct resource *mem;
 	int irq;
 	int ret;
 
 	indio_dev = devm_iio_device_alloc(&pdev->dev, sizeof(struct vf610_adc));
-	if (!indio_dev) {
-		dev_err(&pdev->dev, "Failed allocating iio device\n");
+	if (!indio_dev)
 		return -ENOMEM;
-	}
 
 	info = iio_priv(indio_dev);
 	info->dev = &pdev->dev;
 
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	info->regs = devm_ioremap_resource(&pdev->dev, mem);
+	info->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(info->regs))
 		return PTR_ERR(info->regs);
 
+	chip_info = device_get_match_data(dev);
+
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "no irq resource?\n");
+	if (irq < 0)
 		return irq;
-	}
 
 	ret = devm_request_irq(info->dev, irq,
 				vf610_adc_isr, 0,
 				dev_name(&pdev->dev), indio_dev);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "failed requesting irq, irq = %d\n", irq);
-		return ret;
-	}
+	if (ret < 0)
+		return dev_err_probe(&pdev->dev, ret, "failed requesting irq, irq = %d\n", irq);
 
-	info->clk = devm_clk_get(&pdev->dev, "adc");
-	if (IS_ERR(info->clk)) {
-		dev_err(&pdev->dev, "failed getting clock, err = %ld\n",
-						PTR_ERR(info->clk));
-		return PTR_ERR(info->clk);
-	}
+	info->clk = devm_clk_get_enabled(&pdev->dev, "adc");
+	if (IS_ERR(info->clk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(info->clk), "failed getting clock\n");
 
 	info->vref = devm_regulator_get(&pdev->dev, "vref");
 	if (IS_ERR(info->vref))
@@ -862,77 +864,44 @@ static int vf610_adc_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+	ret = devm_add_action_or_reset(&pdev->dev, vf610_adc_action_remove, info);
+	if (ret)
+		return ret;
+
 	info->vref_uv = regulator_get_voltage(info->vref);
 
-	of_property_read_u32_array(pdev->dev.of_node, "fsl,adck-max-frequency",
-			info->max_adck_rate, 3);
+	device_property_read_u32_array(dev, "fsl,adck-max-frequency", info->max_adck_rate, 3);
 
-	ret = of_property_read_u32(pdev->dev.of_node, "min-sample-time",
-			&info->adc_feature.default_sample_time);
-	if (ret)
-		info->adc_feature.default_sample_time = DEFAULT_SAMPLE_TIME;
+	info->adc_feature.default_sample_time = DEFAULT_SAMPLE_TIME;
+	device_property_read_u32(dev, "min-sample-time", &info->adc_feature.default_sample_time);
 
 	platform_set_drvdata(pdev, indio_dev);
 
 	init_completion(&info->completion);
 
 	indio_dev->name = dev_name(&pdev->dev);
-	indio_dev->dev.parent = &pdev->dev;
-	indio_dev->dev.of_node = pdev->dev.of_node;
 	indio_dev->info = &vf610_adc_iio_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = vf610_adc_iio_channels;
-	indio_dev->num_channels = ARRAY_SIZE(vf610_adc_iio_channels);
-
-	ret = clk_prepare_enable(info->clk);
-	if (ret) {
-		dev_err(&pdev->dev,
-			"Could not prepare or enable the clock.\n");
-		goto error_adc_clk_enable;
-	}
+	indio_dev->num_channels = chip_info->num_channels;
 
 	vf610_adc_cfg_init(info);
 	vf610_adc_hw_init(info);
 
-	ret = iio_triggered_buffer_setup(indio_dev, &iio_pollfunc_store_time,
-					NULL, &iio_triggered_buffer_setup_ops);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Couldn't initialise the buffer\n");
-		goto error_iio_device_register;
-	}
+	ret = devm_iio_triggered_buffer_setup(&pdev->dev, indio_dev, &iio_pollfunc_store_time,
+					      NULL, &iio_triggered_buffer_setup_ops);
+	if (ret < 0)
+		return dev_err_probe(&pdev->dev, ret, "Couldn't initialise the buffer\n");
 
-	ret = iio_device_register(indio_dev);
-	if (ret) {
-		dev_err(&pdev->dev, "Couldn't register the device.\n");
-		goto error_adc_buffer_init;
-	}
+	mutex_init(&info->lock);
 
-	return 0;
-
-error_adc_buffer_init:
-	iio_triggered_buffer_cleanup(indio_dev);
-error_iio_device_register:
-	clk_disable_unprepare(info->clk);
-error_adc_clk_enable:
-	regulator_disable(info->vref);
-
-	return ret;
-}
-
-static int vf610_adc_remove(struct platform_device *pdev)
-{
-	struct iio_dev *indio_dev = platform_get_drvdata(pdev);
-	struct vf610_adc *info = iio_priv(indio_dev);
-
-	iio_device_unregister(indio_dev);
-	iio_triggered_buffer_cleanup(indio_dev);
-	regulator_disable(info->vref);
-	clk_disable_unprepare(info->clk);
+	ret = devm_iio_device_register(&pdev->dev, indio_dev);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret, "Couldn't register the device.\n");
 
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int vf610_adc_suspend(struct device *dev)
 {
 	struct iio_dev *indio_dev = dev_get_drvdata(dev);
@@ -972,17 +941,16 @@ disable_reg:
 	regulator_disable(info->vref);
 	return ret;
 }
-#endif
 
-static SIMPLE_DEV_PM_OPS(vf610_adc_pm_ops, vf610_adc_suspend, vf610_adc_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(vf610_adc_pm_ops, vf610_adc_suspend,
+				vf610_adc_resume);
 
 static struct platform_driver vf610_adc_driver = {
 	.probe          = vf610_adc_probe,
-	.remove         = vf610_adc_remove,
 	.driver         = {
-		.name   = DRIVER_NAME,
+		.name   = "vf610-adc",
 		.of_match_table = vf610_adc_match,
-		.pm     = &vf610_adc_pm_ops,
+		.pm     = pm_sleep_ptr(&vf610_adc_pm_ops),
 	},
 };
 

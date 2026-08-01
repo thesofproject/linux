@@ -6,6 +6,8 @@ Required properties:
 	- compatible: "ti,tas6424" - TAS6424
 	- reg: I2C slave address
 	- sound-dai-cells: must be equal to 0
+	- standby-gpios: GPIO used to shut the TAS6424 down.
+	- mute-gpios: GPIO used to mute all the outputs
 
 Example:
 
@@ -17,4 +19,4 @@ tas6424: tas6424@6a {
 };
 
 For more product information please see the link below:
-http://www.ti.com/product/TAS6424-Q1
+https://www.ti.com/product/TAS6424-Q1

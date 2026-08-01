@@ -1,14 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  SR-IPv6 implementation
  *
  *  Author:
  *  David Lebrun <david.lebrun@uclouvain.be>
- *
- *
- *  This program is free software; you can redistribute it and/or
- *	  modify it under the terms of the GNU General Public License
- *	  as published by the Free Software Foundation; either version
- *	  2 of the License, or (at your option) any later version.
  */
 
 #include <linux/errno.h>
@@ -17,6 +12,7 @@
 #include <linux/net.h>
 #include <linux/in6.h>
 #include <linux/slab.h>
+#include <linux/rhashtable.h>
 
 #include <net/ipv6.h>
 #include <net/protocol.h>
@@ -25,14 +21,16 @@
 #include <net/genetlink.h>
 #include <linux/seg6.h>
 #include <linux/seg6_genl.h>
-#ifdef CONFIG_IPV6_SEG6_HMAC
 #include <net/seg6_hmac.h>
-#endif
 
-bool seg6_validate_srh(struct ipv6_sr_hdr *srh, int len)
+bool seg6_validate_srh(struct ipv6_sr_hdr *srh, int len, bool reduced)
 {
-	int trailing;
 	unsigned int tlv_offset;
+	int max_last_entry;
+	int trailing;
+
+	if (len < sizeof(*srh))
+		return false;
 
 	if (srh->type != IPV6_SRCRT_TYPE_4)
 		return false;
@@ -40,8 +38,17 @@ bool seg6_validate_srh(struct ipv6_sr_hdr *srh, int len)
 	if (((srh->hdrlen + 1) << 3) != len)
 		return false;
 
-	if (srh->segments_left > srh->first_segment)
+	if (!reduced && srh->segments_left > srh->first_segment) {
 		return false;
+	} else {
+		max_last_entry = (srh->hdrlen / 2) - 1;
+
+		if (srh->first_segment > max_last_entry)
+			return false;
+
+		if (srh->segments_left > srh->first_segment + 1)
+			return false;
+	}
 
 	tlv_offset = sizeof(*srh) + ((srh->first_segment + 1) << 4);
 
@@ -67,6 +74,65 @@ bool seg6_validate_srh(struct ipv6_sr_hdr *srh, int len)
 	}
 
 	return true;
+}
+
+struct ipv6_sr_hdr *seg6_get_srh(struct sk_buff *skb, int flags)
+{
+	struct ipv6_sr_hdr *srh;
+	int len, srhoff = 0;
+
+	if (ipv6_find_hdr(skb, &srhoff, IPPROTO_ROUTING, NULL, &flags) < 0)
+		return NULL;
+
+	if (!pskb_may_pull(skb, srhoff + sizeof(*srh)))
+		return NULL;
+
+	srh = (struct ipv6_sr_hdr *)(skb->data + srhoff);
+
+	len = (srh->hdrlen + 1) << 3;
+
+	if (!pskb_may_pull(skb, srhoff + len))
+		return NULL;
+
+	/* note that pskb_may_pull may change pointers in header;
+	 * for this reason it is necessary to reload them when needed.
+	 */
+	srh = (struct ipv6_sr_hdr *)(skb->data + srhoff);
+
+	if (!seg6_validate_srh(srh, len, true))
+		return NULL;
+
+	return srh;
+}
+
+/* Determine if an ICMP invoking packet contains a segment routing
+ * header.  If it does, extract the offset to the true destination
+ * address, which is in the first segment address.
+ */
+void seg6_icmp_srh(struct sk_buff *skb, struct inet6_skb_parm *opt)
+{
+	__u16 network_header = skb->network_header;
+	struct ipv6_sr_hdr *srh;
+
+	/* Update network header to point to the invoking packet
+	 * inside the ICMP packet, so we can use the seg6_get_srh()
+	 * helper.
+	 */
+	skb_reset_network_header(skb);
+
+	srh = seg6_get_srh(skb, 0);
+	if (!srh)
+		goto out;
+
+	if (srh->type != IPV6_SRCRT_TYPE_4)
+		goto out;
+
+	opt->flags |= IP6SKB_SEG6;
+	opt->srhoff = (unsigned char *)srh - skb->data;
+
+out:
+	/* Restore the network header back to the ICMP packet */
+	skb->network_header = network_header;
 }
 
 static struct genl_family seg6_genl_family;
@@ -116,15 +182,17 @@ static int seg6_genl_sethmac(struct sk_buff *skb, struct genl_info *info)
 	hinfo = seg6_hmac_info_lookup(net, hmackeyid);
 
 	if (!slen) {
-		if (!hinfo)
-			err = -ENOENT;
-
 		err = seg6_hmac_info_del(net, hmackeyid);
 
 		goto out_unlock;
 	}
 
 	if (!info->attrs[SEG6_ATTR_SECRET]) {
+		err = -EINVAL;
+		goto out_unlock;
+	}
+
+	if (slen > nla_len(info->attrs[SEG6_ATTR_SECRET])) {
 		err = -EINVAL;
 		goto out_unlock;
 	}
@@ -137,7 +205,7 @@ static int seg6_genl_sethmac(struct sk_buff *skb, struct genl_info *info)
 
 	secret = (char *)nla_data(info->attrs[SEG6_ATTR_SECRET]);
 
-	hinfo = kzalloc(sizeof(*hinfo), GFP_KERNEL);
+	hinfo = kzalloc_obj(*hinfo);
 	if (!hinfo) {
 		err = -ENOMEM;
 		goto out_unlock;
@@ -220,13 +288,10 @@ static int seg6_genl_get_tunsrc(struct sk_buff *skb, struct genl_info *info)
 	rcu_read_unlock();
 
 	genlmsg_end(msg, hdr);
-	genlmsg_reply(msg, info);
-
-	return 0;
+	return genlmsg_reply(msg, info);
 
 nla_put_failure:
 	rcu_read_unlock();
-	genlmsg_cancel(msg, hdr);
 free_msg:
 	nlmsg_free(msg);
 	return -ENOMEM;
@@ -277,7 +342,7 @@ static int seg6_genl_dumphmac_start(struct netlink_callback *cb)
 	iter = (struct rhashtable_iter *)cb->args[0];
 
 	if (!iter) {
-		iter = kmalloc(sizeof(*iter), GFP_KERNEL);
+		iter = kmalloc_obj(*iter);
 		if (!iter)
 			return -ENOMEM;
 
@@ -359,13 +424,13 @@ static int __net_init seg6_net_init(struct net *net)
 {
 	struct seg6_pernet_data *sdata;
 
-	sdata = kzalloc(sizeof(*sdata), GFP_KERNEL);
+	sdata = kzalloc_obj(*sdata);
 	if (!sdata)
 		return -ENOMEM;
 
 	mutex_init(&sdata->lock);
 
-	sdata->tun_src = kzalloc(sizeof(*sdata->tun_src), GFP_KERNEL);
+	sdata->tun_src = kzalloc_obj(*sdata->tun_src);
 	if (!sdata->tun_src) {
 		kfree(sdata);
 		return -ENOMEM;
@@ -373,9 +438,11 @@ static int __net_init seg6_net_init(struct net *net)
 
 	net->ipv6.seg6_data = sdata;
 
-#ifdef CONFIG_IPV6_SEG6_HMAC
-	seg6_hmac_net_init(net);
-#endif
+	if (seg6_hmac_net_init(net)) {
+		kfree(rcu_dereference_raw(sdata->tun_src));
+		kfree(sdata);
+		return -ENOMEM;
+	}
 
 	return 0;
 }
@@ -384,11 +451,9 @@ static void __net_exit seg6_net_exit(struct net *net)
 {
 	struct seg6_pernet_data *sdata = seg6_pernet(net);
 
-#ifdef CONFIG_IPV6_SEG6_HMAC
 	seg6_hmac_net_exit(net);
-#endif
 
-	kfree(sdata->tun_src);
+	kfree(rcu_dereference_raw(sdata->tun_src));
 	kfree(sdata);
 }
 
@@ -400,28 +465,28 @@ static struct pernet_operations ip6_segments_ops = {
 static const struct genl_ops seg6_genl_ops[] = {
 	{
 		.cmd	= SEG6_CMD_SETHMAC,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit	= seg6_genl_sethmac,
-		.policy	= seg6_genl_policy,
 		.flags	= GENL_ADMIN_PERM,
 	},
 	{
 		.cmd	= SEG6_CMD_DUMPHMAC,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.start	= seg6_genl_dumphmac_start,
 		.dumpit	= seg6_genl_dumphmac,
 		.done	= seg6_genl_dumphmac_done,
-		.policy	= seg6_genl_policy,
 		.flags	= GENL_ADMIN_PERM,
 	},
 	{
 		.cmd	= SEG6_CMD_SET_TUNSRC,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit	= seg6_genl_set_tunsrc,
-		.policy	= seg6_genl_policy,
 		.flags	= GENL_ADMIN_PERM,
 	},
 	{
 		.cmd	= SEG6_CMD_GET_TUNSRC,
+		.validate = GENL_DONT_VALIDATE_STRICT | GENL_DONT_VALIDATE_DUMP,
 		.doit	= seg6_genl_get_tunsrc,
-		.policy = seg6_genl_policy,
 		.flags	= GENL_ADMIN_PERM,
 	},
 };
@@ -431,69 +496,52 @@ static struct genl_family seg6_genl_family __ro_after_init = {
 	.name		= SEG6_GENL_NAME,
 	.version	= SEG6_GENL_VERSION,
 	.maxattr	= SEG6_ATTR_MAX,
+	.policy = seg6_genl_policy,
 	.netnsok	= true,
 	.parallel_ops	= true,
 	.ops		= seg6_genl_ops,
 	.n_ops		= ARRAY_SIZE(seg6_genl_ops),
+	.resv_start_op	= SEG6_CMD_GET_TUNSRC + 1,
 	.module		= THIS_MODULE,
 };
 
 int __init seg6_init(void)
 {
-	int err = -ENOMEM;
-
-	err = genl_register_family(&seg6_genl_family);
-	if (err)
-		goto out;
+	int err;
 
 	err = register_pernet_subsys(&ip6_segments_ops);
 	if (err)
-		goto out_unregister_genl;
+		goto out;
 
-#ifdef CONFIG_IPV6_SEG6_LWTUNNEL
-	err = seg6_iptunnel_init();
+	err = genl_register_family(&seg6_genl_family);
 	if (err)
 		goto out_unregister_pernet;
+
+	err = seg6_iptunnel_init();
+	if (err)
+		goto out_unregister_genl;
 
 	err = seg6_local_init();
 	if (err)
-		goto out_unregister_pernet;
-#endif
-
-#ifdef CONFIG_IPV6_SEG6_HMAC
-	err = seg6_hmac_init();
-	if (err)
 		goto out_unregister_iptun;
-#endif
 
 	pr_info("Segment Routing with IPv6\n");
 
 out:
 	return err;
-#ifdef CONFIG_IPV6_SEG6_HMAC
 out_unregister_iptun:
-#ifdef CONFIG_IPV6_SEG6_LWTUNNEL
-	seg6_local_exit();
 	seg6_iptunnel_exit();
-#endif
-#endif
-#ifdef CONFIG_IPV6_SEG6_LWTUNNEL
-out_unregister_pernet:
-	unregister_pernet_subsys(&ip6_segments_ops);
-#endif
 out_unregister_genl:
 	genl_unregister_family(&seg6_genl_family);
+out_unregister_pernet:
+	unregister_pernet_subsys(&ip6_segments_ops);
 	goto out;
 }
 
 void seg6_exit(void)
 {
-#ifdef CONFIG_IPV6_SEG6_HMAC
-	seg6_hmac_exit();
-#endif
-#ifdef CONFIG_IPV6_SEG6_LWTUNNEL
+	seg6_local_exit();
 	seg6_iptunnel_exit();
-#endif
-	unregister_pernet_subsys(&ip6_segments_ops);
 	genl_unregister_family(&seg6_genl_family);
+	unregister_pernet_subsys(&ip6_segments_ops);
 }

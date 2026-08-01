@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
  *  Universal interface for Audio Codec '97
@@ -5,22 +6,6 @@
  *  For more details look to AC '97 component specification revision 2.2
  *  by Intel Corporation (http://developer.intel.com) and to datasheets
  *  for specific codecs.
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/delay.h>
@@ -41,7 +26,7 @@
  *  PCM support
  */
 
-static unsigned char rate_reg_tables[2][4][9] = {
+static const unsigned char rate_reg_tables[2][4][9] = {
 {
   /* standard rates */
   {
@@ -144,7 +129,7 @@ static unsigned char rate_reg_tables[2][4][9] = {
 }};
 
 /* FIXME: more various mappings for ADC? */
-static unsigned char rate_cregs[9] = {
+static const unsigned char rate_cregs[9] = {
 	AC97_PCM_LR_ADC_RATE,	/* 3 */
 	AC97_PCM_LR_ADC_RATE,	/* 4 */
 	0xff,			/* 5 */
@@ -207,7 +192,7 @@ static int set_spdif_rate(struct snd_ac97 *ac97, unsigned short rate)
 		mask = AC97_SC_SPSR_MASK;
 	}
 
-	mutex_lock(&ac97->reg_mutex);
+	guard(mutex)(&ac97->reg_mutex);
 	old = snd_ac97_read(ac97, reg) & mask;
 	if (old != bits) {
 		snd_ac97_update_bits_nolock(ac97, AC97_EXTENDED_STATUS, AC97_EA_SPDIF, 0);
@@ -232,7 +217,6 @@ static int set_spdif_rate(struct snd_ac97 *ac97, unsigned short rate)
 		ac97->spdif_status = sbits;
 	}
 	snd_ac97_update_bits_nolock(ac97, AC97_EXTENDED_STATUS, AC97_EA_SPDIF, AC97_EA_SPDIF);
-	mutex_unlock(&ac97->reg_mutex);
 	return 0;
 }
 
@@ -246,7 +230,7 @@ static int set_spdif_rate(struct snd_ac97 *ac97, unsigned short rate)
  * If the codec doesn't support VAR, the rate must be 48000 (except
  * for SPDIF).
  *
- * The valid registers are AC97_PMC_MIC_ADC_RATE,
+ * The valid registers are AC97_PCM_MIC_ADC_RATE,
  * AC97_PCM_FRONT_DAC_RATE, AC97_PCM_LR_ADC_RATE.
  * AC97_PCM_SURR_DAC_RATE and AC97_PCM_LFE_DAC_RATE are accepted
  * if the codec supports them.
@@ -457,7 +441,7 @@ int snd_ac97_pcm_assign(struct snd_ac97_bus *bus,
 	unsigned int rates;
 	struct snd_ac97 *codec;
 
-	rpcms = kcalloc(pcms_count, sizeof(struct ac97_pcm), GFP_KERNEL);
+	rpcms = kzalloc_objs(struct ac97_pcm, pcms_count);
 	if (rpcms == NULL)
 		return -ENOMEM;
 	memset(avail_slots, 0, sizeof(avail_slots));
@@ -586,33 +570,31 @@ int snd_ac97_pcm_open(struct ac97_pcm *pcm, unsigned int rate,
 					return err;
 			}
 	}
-	spin_lock_irq(&pcm->bus->bus_lock);
-	for (i = 3; i < 12; i++) {
-		if (!(slots & (1 << i)))
-			continue;
-		ok_flag = 0;
-		for (cidx = 0; cidx < 4; cidx++) {
-			if (bus->used_slots[pcm->stream][cidx] & (1 << i)) {
-				spin_unlock_irq(&pcm->bus->bus_lock);
-				err = -EBUSY;
+	scoped_guard(spinlock_irq, &pcm->bus->bus_lock) {
+		for (i = 3; i < 12; i++) {
+			if (!(slots & (1 << i)))
+				continue;
+			ok_flag = 0;
+			for (cidx = 0; cidx < 4; cidx++) {
+				if (bus->used_slots[pcm->stream][cidx] & (1 << i)) {
+					err = -EBUSY;
+					goto error;
+				}
+				if (pcm->r[r].rslots[cidx] & (1 << i)) {
+					bus->used_slots[pcm->stream][cidx] |= (1 << i);
+					ok_flag++;
+				}
+			}
+			if (!ok_flag) {
+				dev_err(bus->card->dev,
+					"cannot find configuration for AC97 slot %i\n",
+					i);
+				err = -EAGAIN;
 				goto error;
 			}
-			if (pcm->r[r].rslots[cidx] & (1 << i)) {
-				bus->used_slots[pcm->stream][cidx] |= (1 << i);
-				ok_flag++;
-			}
 		}
-		if (!ok_flag) {
-			spin_unlock_irq(&pcm->bus->bus_lock);
-			dev_err(bus->card->dev,
-				"cannot find configuration for AC97 slot %i\n",
-				i);
-			err = -EAGAIN;
-			goto error;
-		}
+		pcm->cur_dbl = r;
 	}
-	pcm->cur_dbl = r;
-	spin_unlock_irq(&pcm->bus->bus_lock);
 	for (i = 3; i < 12; i++) {
 		if (!(slots & (1 << i)))
 			continue;
@@ -680,7 +662,7 @@ int snd_ac97_pcm_close(struct ac97_pcm *pcm)
 #endif
 
 	bus = pcm->bus;
-	spin_lock_irq(&pcm->bus->bus_lock);
+	guard(spinlock_irq)(&pcm->bus->bus_lock);
 	for (i = 3; i < 12; i++) {
 		if (!(slots & (1 << i)))
 			continue;
@@ -689,7 +671,6 @@ int snd_ac97_pcm_close(struct ac97_pcm *pcm)
 	}
 	pcm->aslots = 0;
 	pcm->cur_dbl = 0;
-	spin_unlock_irq(&pcm->bus->bus_lock);
 	return 0;
 }
 

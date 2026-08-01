@@ -1,9 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /**
  * Copyright (c) 2011 Jonathan Cameron
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  *
  * Join together the various functionality of iio_simple_dummy driver
  */
@@ -63,7 +60,7 @@ int iio_simple_dummy_write_event_config(struct iio_dev *indio_dev,
 					const struct iio_chan_spec *chan,
 					enum iio_event_type type,
 					enum iio_event_direction dir,
-					int state);
+					bool state);
 
 int iio_simple_dummy_read_event_value(struct iio_dev *indio_dev,
 				      const struct iio_chan_spec *chan,

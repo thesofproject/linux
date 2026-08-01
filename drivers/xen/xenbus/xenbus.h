@@ -44,6 +44,8 @@ struct xen_bus_type {
 	int (*get_bus_id)(char bus_id[XEN_BUS_ID_SIZE], const char *nodename);
 	int (*probe)(struct xen_bus_type *bus, const char *type,
 		     const char *dir);
+	bool (*otherend_will_handle)(struct xenbus_watch *watch,
+				     const char *path, const char *token);
 	void (*otherend_changed)(struct xenbus_watch *watch, const char *path,
 				 const char *token);
 	struct bus_type bus;
@@ -75,6 +77,7 @@ enum xb_req_state {
 struct xb_req_data {
 	struct list_head list;
 	wait_queue_head_t wq;
+	struct kref kref;
 	struct xsd_sockmsg msg;
 	uint32_t caller_req_id;
 	enum xsd_sockmsg_type type;
@@ -83,6 +86,7 @@ struct xb_req_data {
 	int num_vecs;
 	int err;
 	enum xb_req_state state;
+	bool user_req;
 	void (*cb)(struct xb_req_data *);
 	void *par;
 };
@@ -100,10 +104,11 @@ int xb_init_comms(void);
 void xb_deinit_comms(void);
 int xs_watch_msg(struct xs_watch_event *event);
 void xs_request_exit(struct xb_req_data *req);
+void xs_free_req(struct kref *kref);
 
-int xenbus_match(struct device *_dev, struct device_driver *_drv);
+int xenbus_match(struct device *_dev, const struct device_driver *_drv);
 int xenbus_dev_probe(struct device *_dev);
-int xenbus_dev_remove(struct device *_dev);
+void xenbus_dev_remove(struct device *_dev);
 int xenbus_register_driver_common(struct xenbus_driver *drv,
 				  struct xen_bus_type *bus,
 				  struct module *owner,
@@ -115,11 +120,9 @@ int xenbus_probe_devices(struct xen_bus_type *bus);
 
 void xenbus_dev_changed(const char *node, struct xen_bus_type *bus);
 
-void xenbus_dev_shutdown(struct device *_dev);
-
-int xenbus_dev_suspend(struct device *dev);
-int xenbus_dev_resume(struct device *dev);
-int xenbus_dev_cancel(struct device *dev);
+int xenbus_dev_freeze(struct device *dev);
+int xenbus_dev_restore(struct device *dev);
+int xenbus_dev_thaw(struct device *dev);
 
 void xenbus_otherend_changed(struct xenbus_watch *watch,
 			     const char *path, const char *token,
@@ -132,5 +135,7 @@ void xenbus_ring_ops_init(void);
 
 int xenbus_dev_request_and_reply(struct xsd_sockmsg *msg, void *par);
 void xenbus_dev_queue_reply(struct xb_req_data *req);
+
+extern unsigned int xb_dev_generation_id;
 
 #endif

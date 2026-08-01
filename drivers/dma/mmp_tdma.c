@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver For Marvell Two-channel DMA Engine
  *
  * Copyright: Marvell International Ltd.
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
  */
 
 #include <linux/err.h>
@@ -18,9 +14,9 @@
 #include <linux/slab.h>
 #include <linux/dmaengine.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/device.h>
-#include <linux/platform_data/dma-mmp_tdma.h>
-#include <linux/of_device.h>
+#include <linux/genalloc.h>
 #include <linux/of_dma.h>
 
 #include "dmaengine.h"
@@ -116,6 +112,7 @@ struct mmp_tdma_chan {
 	u32				burst_sz;
 	enum dma_slave_buswidth		buswidth;
 	enum dma_status			status;
+	struct dma_slave_config		slave_config;
 
 	int				idx;
 	enum mmp_tdma_type		type;
@@ -138,6 +135,10 @@ struct mmp_tdma_device {
 };
 
 #define to_mmp_tdma_chan(dchan) container_of(dchan, struct mmp_tdma_chan, chan)
+
+static int mmp_tdma_config_write(struct dma_chan *chan,
+				 enum dma_transfer_direction dir,
+				 struct dma_slave_config *dmaengine_cfg);
 
 static void mmp_tdma_chan_set_desc(struct mmp_tdma_chan *tdmac, dma_addr_t phys)
 {
@@ -234,7 +235,7 @@ static int mmp_tdma_config_chan(struct dma_chan *chan)
 			tdcr |= TDCR_BURSTSZ_128B;
 			break;
 		default:
-			dev_err(tdmac->dev, "mmp_tdma: unknown burst size.\n");
+			dev_err(tdmac->dev, "unknown burst size.\n");
 			return -EINVAL;
 		}
 
@@ -249,7 +250,7 @@ static int mmp_tdma_config_chan(struct dma_chan *chan)
 			tdcr |= TDCR_SSZ_32_BITS;
 			break;
 		default:
-			dev_err(tdmac->dev, "mmp_tdma: unknown bus size.\n");
+			dev_err(tdmac->dev, "unknown bus size.\n");
 			return -EINVAL;
 		}
 	} else if (tdmac->type == PXA910_SQU) {
@@ -275,7 +276,7 @@ static int mmp_tdma_config_chan(struct dma_chan *chan)
 			tdcr |= TDCR_BURSTSZ_SQU_32B;
 			break;
 		default:
-			dev_err(tdmac->dev, "mmp_tdma: unknown burst size.\n");
+			dev_err(tdmac->dev, "unknown burst size.\n");
 			return -EINVAL;
 		}
 	}
@@ -345,9 +346,9 @@ static irqreturn_t mmp_tdma_int_handler(int irq, void *dev_id)
 		return IRQ_NONE;
 }
 
-static void dma_do_tasklet(unsigned long data)
+static void dma_do_tasklet(struct tasklet_struct *t)
 {
-	struct mmp_tdma_chan *tdmac = (struct mmp_tdma_chan *)data;
+	struct mmp_tdma_chan *tdmac = from_tasklet(tdmac, t, tasklet);
 
 	dmaengine_desc_get_callback_invoke(&tdmac->desc, NULL);
 }
@@ -362,6 +363,8 @@ static void mmp_tdma_free_descriptor(struct mmp_tdma_chan *tdmac)
 		gen_pool_free(gpool, (unsigned long)tdmac->desc_arr,
 				size);
 	tdmac->desc_arr = NULL;
+	if (tdmac->status == DMA_ERROR)
+		tdmac->status = DMA_COMPLETE;
 
 	return;
 }
@@ -426,8 +429,15 @@ static struct dma_async_tx_descriptor *mmp_tdma_prep_dma_cyclic(
 	int num_periods = buf_len / period_len;
 	int i = 0, buf = 0;
 
-	if (tdmac->status != DMA_COMPLETE)
+	if (!is_slave_direction(direction)) {
+		dev_err(tdmac->dev, "unsupported transfer direction\n");
 		return NULL;
+	}
+
+	if (tdmac->status != DMA_COMPLETE) {
+		dev_err(tdmac->dev, "controller busy");
+		return NULL;
+	}
 
 	if (period_len > TDMA_MAX_XFER_BYTES) {
 		dev_err(tdmac->dev,
@@ -440,6 +450,9 @@ static struct dma_async_tx_descriptor *mmp_tdma_prep_dma_cyclic(
 	tdmac->desc_num = num_periods;
 	desc = mmp_tdma_alloc_descriptor(tdmac);
 	if (!desc)
+		goto err_out;
+
+	if (mmp_tdma_config_write(chan, direction, &tdmac->slave_config))
 		goto err_out;
 
 	while (buf < buf_len) {
@@ -495,7 +508,18 @@ static int mmp_tdma_config(struct dma_chan *chan,
 {
 	struct mmp_tdma_chan *tdmac = to_mmp_tdma_chan(chan);
 
-	if (dmaengine_cfg->direction == DMA_DEV_TO_MEM) {
+	memcpy(&tdmac->slave_config, dmaengine_cfg, sizeof(*dmaengine_cfg));
+
+	return 0;
+}
+
+static int mmp_tdma_config_write(struct dma_chan *chan,
+				 enum dma_transfer_direction dir,
+				 struct dma_slave_config *dmaengine_cfg)
+{
+	struct mmp_tdma_chan *tdmac = to_mmp_tdma_chan(chan);
+
+	if (dir == DMA_DEV_TO_MEM) {
 		tdmac->dev_addr = dmaengine_cfg->src_addr;
 		tdmac->burst_sz = dmaengine_cfg->src_maxburst;
 		tdmac->buswidth = dmaengine_cfg->src_addr_width;
@@ -504,7 +528,7 @@ static int mmp_tdma_config(struct dma_chan *chan,
 		tdmac->burst_sz = dmaengine_cfg->dst_maxburst;
 		tdmac->buswidth = dmaengine_cfg->dst_addr_width;
 	}
-	tdmac->dir = dmaengine_cfg->direction;
+	tdmac->dir = dir;
 
 	return mmp_tdma_config_chan(chan);
 }
@@ -528,12 +552,9 @@ static void mmp_tdma_issue_pending(struct dma_chan *chan)
 	mmp_tdma_enable_chan(tdmac);
 }
 
-static int mmp_tdma_remove(struct platform_device *pdev)
+static void mmp_tdma_remove(struct platform_device *pdev)
 {
-	struct mmp_tdma_device *tdev = platform_get_drvdata(pdev);
-
-	dma_async_device_unregister(&tdev->device);
-	return 0;
+	of_dma_controller_free(pdev->dev.of_node);
 }
 
 static int mmp_tdma_chan_init(struct mmp_tdma_device *tdev,
@@ -562,7 +583,7 @@ static int mmp_tdma_chan_init(struct mmp_tdma_device *tdev,
 	tdmac->pool	   = pool;
 	tdmac->status = DMA_COMPLETE;
 	tdev->tdmac[tdmac->idx] = tdmac;
-	tasklet_init(&tdmac->tasklet, dma_do_tasklet, (unsigned long)tdmac);
+	tasklet_setup(&tdmac->tasklet, dma_do_tasklet);
 
 	/* add the channel to tdma_chan list */
 	list_add_tail(&tdmac->chan.device_node,
@@ -571,18 +592,12 @@ static int mmp_tdma_chan_init(struct mmp_tdma_device *tdev,
 }
 
 struct mmp_tdma_filter_param {
-	struct device_node *of_node;
 	unsigned int chan_id;
 };
 
 static bool mmp_tdma_filter_fn(struct dma_chan *chan, void *fn_param)
 {
 	struct mmp_tdma_filter_param *param = fn_param;
-	struct mmp_tdma_chan *tdmac = to_mmp_tdma_chan(chan);
-	struct dma_device *pdma_device = tdmac->chan.device;
-
-	if (pdma_device->dev->of_node != param->of_node)
-		return false;
 
 	if (chan->chan_id != param->chan_id)
 		return false;
@@ -600,13 +615,13 @@ static struct dma_chan *mmp_tdma_xlate(struct of_phandle_args *dma_spec,
 	if (dma_spec->args_count != 1)
 		return NULL;
 
-	param.of_node = ofdma->of_node;
 	param.chan_id = dma_spec->args[0];
 
 	if (param.chan_id >= TDMA_CHANNEL_NUM)
 		return NULL;
 
-	return dma_request_channel(mask, mmp_tdma_filter_fn, &param);
+	return __dma_request_channel(&mask, mmp_tdma_filter_fn, &param,
+				     ofdma->of_node);
 }
 
 static const struct of_device_id mmp_tdma_dt_ids[] = {
@@ -619,19 +634,13 @@ MODULE_DEVICE_TABLE(of, mmp_tdma_dt_ids);
 static int mmp_tdma_probe(struct platform_device *pdev)
 {
 	enum mmp_tdma_type type;
-	const struct of_device_id *of_id;
 	struct mmp_tdma_device *tdev;
-	struct resource *iores;
 	int i, ret;
 	int irq = 0, irq_num = 0;
 	int chan_num = TDMA_CHANNEL_NUM;
 	struct gen_pool *pool = NULL;
 
-	of_id = of_match_device(mmp_tdma_dt_ids, &pdev->dev);
-	if (of_id)
-		type = (enum mmp_tdma_type) of_id->data;
-	else
-		type = platform_get_device_id(pdev)->driver_data;
+	type = (kernel_ulong_t)device_get_match_data(&pdev->dev);
 
 	/* always have couple channels */
 	tdev = devm_kzalloc(&pdev->dev, sizeof(*tdev), GFP_KERNEL);
@@ -645,17 +654,13 @@ static int mmp_tdma_probe(struct platform_device *pdev)
 			irq_num++;
 	}
 
-	iores = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	tdev->base = devm_ioremap_resource(&pdev->dev, iores);
+	tdev->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(tdev->base))
 		return PTR_ERR(tdev->base);
 
 	INIT_LIST_HEAD(&tdev->device.channels);
 
-	if (pdev->dev.of_node)
-		pool = of_gen_pool_get(pdev->dev.of_node, "asram", 0);
-	else
-		pool = sram_get_gpool("asram");
+	pool = of_gen_pool_get(pdev->dev.of_node, "asram", 0);
 	if (!pool) {
 		dev_err(&pdev->dev, "asram pool not available\n");
 		return -ENOMEM;
@@ -664,7 +669,7 @@ static int mmp_tdma_probe(struct platform_device *pdev)
 	if (irq_num != chan_num) {
 		irq = platform_get_irq(pdev, 0);
 		ret = devm_request_irq(&pdev->dev, irq,
-			mmp_tdma_int_handler, 0, "tdma", tdev);
+			mmp_tdma_int_handler, IRQF_SHARED, "tdma", tdev);
 		if (ret)
 			return ret;
 	}
@@ -693,41 +698,42 @@ static int mmp_tdma_probe(struct platform_device *pdev)
 	tdev->device.device_terminate_all = mmp_tdma_terminate_all;
 	tdev->device.copy_align = DMAENGINE_ALIGN_8_BYTES;
 
+	tdev->device.directions = BIT(DMA_DEV_TO_MEM) | BIT(DMA_MEM_TO_DEV);
+	if (type == MMP_AUD_TDMA) {
+		tdev->device.max_burst = SZ_128;
+		tdev->device.src_addr_widths = BIT(DMA_SLAVE_BUSWIDTH_4_BYTES);
+		tdev->device.dst_addr_widths = BIT(DMA_SLAVE_BUSWIDTH_4_BYTES);
+	} else if (type == PXA910_SQU) {
+		tdev->device.max_burst = SZ_32;
+	}
+	tdev->device.residue_granularity = DMA_RESIDUE_GRANULARITY_BURST;
+	tdev->device.descriptor_reuse = true;
+
 	dma_set_mask(&pdev->dev, DMA_BIT_MASK(64));
 	platform_set_drvdata(pdev, tdev);
 
-	ret = dma_async_device_register(&tdev->device);
+	ret = dmaenginem_async_device_register(&tdev->device);
 	if (ret) {
 		dev_err(tdev->device.dev, "unable to register\n");
 		return ret;
 	}
 
-	if (pdev->dev.of_node) {
-		ret = of_dma_controller_register(pdev->dev.of_node,
-							mmp_tdma_xlate, tdev);
-		if (ret) {
-			dev_err(tdev->device.dev,
-				"failed to register controller\n");
-			dma_async_device_unregister(&tdev->device);
-		}
+	ret = of_dma_controller_register(pdev->dev.of_node,
+					 mmp_tdma_xlate, tdev);
+	if (ret) {
+		dev_err(tdev->device.dev, "failed to register controller\n");
+		return ret;
 	}
 
 	dev_info(tdev->device.dev, "initialized\n");
 	return 0;
 }
 
-static const struct platform_device_id mmp_tdma_id_table[] = {
-	{ "mmp-adma",	MMP_AUD_TDMA },
-	{ "pxa910-squ",	PXA910_SQU },
-	{ },
-};
-
 static struct platform_driver mmp_tdma_driver = {
 	.driver		= {
 		.name	= "mmp-tdma",
 		.of_match_table = mmp_tdma_dt_ids,
 	},
-	.id_table	= mmp_tdma_id_table,
 	.probe		= mmp_tdma_probe,
 	.remove		= mmp_tdma_remove,
 };
@@ -736,6 +742,5 @@ module_platform_driver(mmp_tdma_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("MMP Two-Channel DMA Driver");
-MODULE_ALIAS("platform:mmp-tdma");
 MODULE_AUTHOR("Leo Yan <leoy@marvell.com>");
 MODULE_AUTHOR("Zhangfei Gao <zhangfei.gao@marvell.com>");

@@ -1,15 +1,9 @@
-/*
- * Interrupt controller support for MAX8998
- *
- * Copyright (C) 2010 Samsung Electronics Co.Ltd
- * Author: Joonyoung Shim <jy0922.shim@samsung.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// Interrupt controller support for MAX8998
+//
+// Copyright (C) 2010 Samsung Electronics Co.Ltd
+// Author: Joonyoung Shim <jy0922.shim@samsung.com>
 
 #include <linux/device.h>
 #include <linux/interrupt.h>
@@ -236,7 +230,7 @@ int max8998_irq_init(struct max8998_dev *max8998)
 	max8998_write_reg(max8998->i2c, MAX8998_REG_STATUSM1, 0xff);
 	max8998_write_reg(max8998->i2c, MAX8998_REG_STATUSM2, 0xff);
 
-	domain = irq_domain_add_simple(NULL, MAX8998_IRQ_NR,
+	domain = irq_domain_create_simple(NULL, MAX8998_IRQ_NR,
 			max8998->irq_base, &max8998_irq_domain_ops, max8998);
 	if (!domain) {
 		dev_err(max8998->dev, "could not create irq domain\n");

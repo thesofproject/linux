@@ -30,7 +30,7 @@
  *   Based on QEMU and Xen.
  */
 
-#define pr_fmt(fmt) "pit: " fmt
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/kvm_host.h>
 #include <linux/slab.h>
@@ -220,7 +220,8 @@ void __kvm_migrate_pit_timer(struct kvm_vcpu *vcpu)
 	struct kvm_pit *pit = vcpu->kvm->arch.vpit;
 	struct hrtimer *timer;
 
-	if (!kvm_vcpu_is_bsp(vcpu) || !pit)
+	/* Somewhat arbitrarily make vcpu0 the owner of the PIT. */
+	if (vcpu->vcpu_id || !pit)
 		return;
 
 	timer = &pit->pit_state.timer;
@@ -241,14 +242,14 @@ static void pit_do_work(struct kthread_work *work)
 	struct kvm_pit *pit = container_of(work, struct kvm_pit, expired);
 	struct kvm *kvm = pit->kvm;
 	struct kvm_vcpu *vcpu;
-	int i;
+	unsigned long i;
 	struct kvm_kpit_state *ps = &pit->pit_state;
 
 	if (atomic_read(&ps->reinject) && !atomic_xchg(&ps->irq_ack, 0))
 		return;
 
-	kvm_set_irq(kvm, pit->irq_source_id, 0, 1, false);
-	kvm_set_irq(kvm, pit->irq_source_id, 0, 0, false);
+	kvm_set_irq(kvm, KVM_PIT_IRQ_SOURCE_ID, 0, 1, false);
+	kvm_set_irq(kvm, KVM_PIT_IRQ_SOURCE_ID, 0, 0, false);
 
 	/*
 	 * Provides NMI watchdog support via Virtual Wire mode.
@@ -287,7 +288,7 @@ static inline void kvm_pit_reset_reinject(struct kvm_pit *pit)
 	atomic_set(&pit->pit_state.irq_ack, 1);
 }
 
-void kvm_pit_set_reinject(struct kvm_pit *pit, bool reinject)
+static void kvm_pit_set_reinject(struct kvm_pit *pit, bool reinject)
 {
 	struct kvm_kpit_state *ps = &pit->pit_state;
 	struct kvm *kvm = pit->kvm;
@@ -295,12 +296,22 @@ void kvm_pit_set_reinject(struct kvm_pit *pit, bool reinject)
 	if (atomic_read(&ps->reinject) == reinject)
 		return;
 
+	/*
+	 * AMD SVM AVIC accelerates EOI write and does not trap.
+	 * This cause in-kernel PIT re-inject mode to fail
+	 * since it checks ps->irq_ack before kvm_set_irq()
+	 * and relies on the ack notifier to timely queue
+	 * the pt->worker work iterm and reinject the missed tick.
+	 * So, deactivate APICv when PIT is in reinject mode.
+	 */
 	if (reinject) {
+		kvm_set_apicv_inhibit(kvm, APICV_INHIBIT_REASON_PIT_REINJ);
 		/* The initial state is preserved while ps->reinject == 0. */
 		kvm_pit_reset_reinject(pit);
 		kvm_register_irq_ack_notifier(kvm, &ps->irq_ack_notifier);
 		kvm_register_irq_mask_notifier(kvm, 0, &pit->mask_notifier);
 	} else {
+		kvm_clear_apicv_inhibit(kvm, APICV_INHIBIT_REASON_PIT_REINJ);
 		kvm_unregister_irq_ack_notifier(kvm, &ps->irq_ack_notifier);
 		kvm_unregister_irq_mask_notifier(kvm, 0, &pit->mask_notifier);
 	}
@@ -340,7 +351,7 @@ static void create_pit_timer(struct kvm_pit *pit, u32 val, int is_period)
 
 		if (ps->period < min_period) {
 			pr_info_ratelimited(
-			    "kvm: requested %lld ns "
+			    "requested %lld ns "
 			    "i8254 timer period limited to %lld ns\n",
 			    ps->period, min_period);
 			ps->period = min_period;
@@ -355,7 +366,7 @@ static void pit_load_count(struct kvm_pit *pit, int channel, u32 val)
 {
 	struct kvm_kpit_state *ps = &pit->pit_state;
 
-	pr_debug("load_count val is %d, channel is %d\n", val, channel);
+	pr_debug("load_count val is %u, channel is %d\n", val, channel);
 
 	/*
 	 * The largest possible initial count is 0; this is equivalent
@@ -389,8 +400,8 @@ static void pit_load_count(struct kvm_pit *pit, int channel, u32 val)
 	}
 }
 
-void kvm_pit_load_count(struct kvm_pit *pit, int channel, u32 val,
-		int hpet_legacy_start)
+static void kvm_pit_load_count(struct kvm_pit *pit, int channel, u32 val,
+			       int hpet_legacy_start)
 {
 	u8 saved_mode;
 
@@ -450,7 +461,6 @@ static int pit_ioport_write(struct kvm_vcpu *vcpu,
 		if (channel == 3) {
 			/* Read-Back Command. */
 			for (channel = 0; channel < 3; channel++) {
-				s = &pit_state->channels[channel];
 				if (val & (2 << channel)) {
 					if (!(val & 0x20))
 						pit_latch_count(pit, channel);
@@ -581,7 +591,10 @@ static int speaker_ioport_write(struct kvm_vcpu *vcpu,
 		return -EOPNOTSUPP;
 
 	mutex_lock(&pit_state->lock);
-	pit_state->speaker_data_on = (val >> 1) & 1;
+	if (val & (1 << 1))
+		pit_state->flags |= KVM_PIT_FLAGS_SPEAKER_DATA_ON;
+	else
+		pit_state->flags &= ~KVM_PIT_FLAGS_SPEAKER_DATA_ON;
 	pit_set_gate(pit, 2, val & 1);
 	mutex_unlock(&pit_state->lock);
 	return 0;
@@ -602,8 +615,9 @@ static int speaker_ioport_read(struct kvm_vcpu *vcpu,
 	refresh_clock = ((unsigned int)ktime_to_ns(ktime_get()) >> 14) & 1;
 
 	mutex_lock(&pit_state->lock);
-	ret = ((pit_state->speaker_data_on << 1) | pit_get_gate(pit, 2) |
-		(pit_get_out(pit, 2) << 5) | (refresh_clock << 4));
+	ret = (!!(pit_state->flags & KVM_PIT_FLAGS_SPEAKER_DATA_ON) << 1) |
+		pit_get_gate(pit, 2) | (pit_get_out(pit, 2) << 5) |
+		(refresh_clock << 4);
 	if (len > sizeof(ret))
 		len = sizeof(ret);
 	memcpy(data, (char *)&ret, len);
@@ -627,12 +641,85 @@ static void kvm_pit_reset(struct kvm_pit *pit)
 	kvm_pit_reset_reinject(pit);
 }
 
-static void pit_mask_notifer(struct kvm_irq_mask_notifier *kimn, bool mask)
+static void pit_mask_notifier(struct kvm_irq_mask_notifier *kimn, bool mask)
 {
 	struct kvm_pit *pit = container_of(kimn, struct kvm_pit, mask_notifier);
 
 	if (!mask)
 		kvm_pit_reset_reinject(pit);
+}
+
+int kvm_vm_ioctl_get_pit(struct kvm *kvm, struct kvm_pit_state *ps)
+{
+	struct kvm_kpit_state *kps = &kvm->arch.vpit->pit_state;
+
+	BUILD_BUG_ON(sizeof(*ps) != sizeof(kps->channels));
+
+	mutex_lock(&kps->lock);
+	memcpy(ps, &kps->channels, sizeof(*ps));
+	mutex_unlock(&kps->lock);
+	return 0;
+}
+
+int kvm_vm_ioctl_set_pit(struct kvm *kvm, struct kvm_pit_state *ps)
+{
+	int i;
+	struct kvm_pit *pit = kvm->arch.vpit;
+
+	mutex_lock(&pit->pit_state.lock);
+	memcpy(&pit->pit_state.channels, ps, sizeof(*ps));
+	for (i = 0; i < 3; i++)
+		kvm_pit_load_count(pit, i, ps->channels[i].count, 0);
+	mutex_unlock(&pit->pit_state.lock);
+	return 0;
+}
+
+int kvm_vm_ioctl_get_pit2(struct kvm *kvm, struct kvm_pit_state2 *ps)
+{
+	mutex_lock(&kvm->arch.vpit->pit_state.lock);
+	memcpy(ps->channels, &kvm->arch.vpit->pit_state.channels,
+		sizeof(ps->channels));
+	ps->flags = kvm->arch.vpit->pit_state.flags;
+	mutex_unlock(&kvm->arch.vpit->pit_state.lock);
+	memset(&ps->reserved, 0, sizeof(ps->reserved));
+	return 0;
+}
+
+int kvm_vm_ioctl_set_pit2(struct kvm *kvm, struct kvm_pit_state2 *ps)
+{
+	int start = 0;
+	int i;
+	u32 prev_legacy, cur_legacy;
+	struct kvm_pit *pit = kvm->arch.vpit;
+
+	mutex_lock(&pit->pit_state.lock);
+	prev_legacy = pit->pit_state.flags & KVM_PIT_FLAGS_HPET_LEGACY;
+	cur_legacy = ps->flags & KVM_PIT_FLAGS_HPET_LEGACY;
+	if (!prev_legacy && cur_legacy)
+		start = 1;
+	memcpy(&pit->pit_state.channels, &ps->channels,
+	       sizeof(pit->pit_state.channels));
+	pit->pit_state.flags = ps->flags;
+	for (i = 0; i < 3; i++)
+		kvm_pit_load_count(pit, i, pit->pit_state.channels[i].count,
+				   start && i == 0);
+	mutex_unlock(&pit->pit_state.lock);
+	return 0;
+}
+
+int kvm_vm_ioctl_reinject(struct kvm *kvm, struct kvm_reinject_control *control)
+{
+	struct kvm_pit *pit = kvm->arch.vpit;
+
+	/* pit->pit_state.lock was overloaded to prevent userspace from getting
+	 * an inconsistent state after running multiple KVM_REINJECT_CONTROL
+	 * ioctls in parallel.  Use a separate lock if that ioctl isn't rare.
+	 */
+	mutex_lock(&pit->pit_state.lock);
+	kvm_pit_set_reinject(pit, control->pit_reinject);
+	mutex_unlock(&pit->pit_state.lock);
+
+	return 0;
 }
 
 static const struct kvm_io_device_ops pit_dev_ops = {
@@ -653,13 +740,9 @@ struct kvm_pit *kvm_create_pit(struct kvm *kvm, u32 flags)
 	pid_t pid_nr;
 	int ret;
 
-	pit = kzalloc(sizeof(struct kvm_pit), GFP_KERNEL);
+	pit = kzalloc_obj(struct kvm_pit, GFP_KERNEL_ACCOUNT);
 	if (!pit)
 		return NULL;
-
-	pit->irq_source_id = kvm_request_irq_source_id(kvm);
-	if (pit->irq_source_id < 0)
-		goto fail_request;
 
 	mutex_init(&pit->pit_state.lock);
 
@@ -667,7 +750,7 @@ struct kvm_pit *kvm_create_pit(struct kvm *kvm, u32 flags)
 	pid_nr = pid_vnr(pid);
 	put_pid(pid);
 
-	pit->worker = kthread_create_worker(0, "kvm-pit/%d", pid_nr);
+	pit->worker = kthread_run_worker(0, "kvm-pit/%d", pid_nr);
 	if (IS_ERR(pit->worker))
 		goto fail_kthread;
 
@@ -676,12 +759,11 @@ struct kvm_pit *kvm_create_pit(struct kvm *kvm, u32 flags)
 	pit->kvm = kvm;
 
 	pit_state = &pit->pit_state;
-	hrtimer_init(&pit_state->timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
-	pit_state->timer.function = pit_timer_fn;
+	hrtimer_setup(&pit_state->timer, pit_timer_fn, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
 
 	pit_state->irq_ack_notifier.gsi = 0;
 	pit_state->irq_ack_notifier.irq_acked = kvm_pit_ack_irq;
-	pit->mask_notifier.func = pit_mask_notifer;
+	pit->mask_notifier.func = pit_mask_notifier;
 
 	kvm_pit_reset(pit);
 
@@ -713,8 +795,6 @@ fail_register_pit:
 	kvm_pit_set_reinject(pit, false);
 	kthread_destroy_worker(pit->worker);
 fail_kthread:
-	kvm_free_irq_source_id(kvm, pit->irq_source_id);
-fail_request:
 	kfree(pit);
 	return NULL;
 }
@@ -731,7 +811,6 @@ void kvm_free_pit(struct kvm *kvm)
 		kvm_pit_set_reinject(pit, false);
 		hrtimer_cancel(&pit->pit_state.timer);
 		kthread_destroy_worker(pit->worker);
-		kvm_free_irq_source_id(kvm, pit->irq_source_id);
 		kfree(pit);
 	}
 }

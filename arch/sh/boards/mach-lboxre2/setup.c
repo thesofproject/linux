@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * linux/arch/sh/boards/lbox/setup.c
  *
  * Copyright (C) 2007 Nobuhiro Iwamatsu
  *
  * NTT COMWARE L-BOX RE2 Support
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
- *
  */
 
 #include <linux/init.h>
@@ -57,7 +53,7 @@ static int __init lboxre2_devices_setup(void)
 	paddrbase = virt_to_phys((void*)PA_AREA5_IO);
 	psize = PAGE_SIZE;
 	prot = PAGE_KERNEL_PCC(1, _PAGE_PCC_IO16);
-	cf0_io_base = (u32)ioremap_prot(paddrbase, psize, pgprot_val(prot));
+	cf0_io_base = (u32)ioremap_prot(paddrbase, psize, prot);
 	if (!cf0_io_base) {
 		printk(KERN_ERR "%s : can't open CF I/O window!\n" , __func__ );
 		return -ENOMEM;

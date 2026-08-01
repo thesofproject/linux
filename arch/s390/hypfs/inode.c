@@ -6,24 +6,24 @@
  *    Author(s): Michael Holzheu <holzheu@de.ibm.com>
  */
 
-#define KMSG_COMPONENT "hypfs"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "hypfs: " fmt
 
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/fs.h>
+#include <linux/fs_context.h>
+#include <linux/fs_parser.h>
 #include <linux/namei.h>
 #include <linux/vfs.h>
 #include <linux/slab.h>
 #include <linux/pagemap.h>
 #include <linux/time.h>
-#include <linux/parser.h>
 #include <linux/sysfs.h>
 #include <linux/init.h>
 #include <linux/kobject.h>
 #include <linux/seq_file.h>
-#include <linux/mount.h>
 #include <linux/uio.h>
+#include <asm/machine.h>
 #include <asm/ebcdic.h>
 #include "hypfs.h"
 
@@ -36,7 +36,7 @@ struct hypfs_sb_info {
 	kuid_t uid;			/* uid used for files and dirs */
 	kgid_t gid;			/* gid used for files and dirs */
 	struct dentry *update_file;	/* file to trigger update */
-	time_t last_update;		/* last update time in secs since 1970 */
+	time64_t last_update;		/* last update, CLOCK_MONOTONIC time */
 	struct mutex lock;		/* lock to protect update process */
 };
 
@@ -52,41 +52,25 @@ static void hypfs_update_update(struct super_block *sb)
 	struct hypfs_sb_info *sb_info = sb->s_fs_info;
 	struct inode *inode = d_inode(sb_info->update_file);
 
-	sb_info->last_update = get_seconds();
-	inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+	sb_info->last_update = ktime_get_seconds();
+	simple_inode_init_ts(inode);
 }
 
 /* directory tree removal functions */
 
 static void hypfs_add_dentry(struct dentry *dentry)
 {
-	dentry->d_fsdata = hypfs_last_dentry;
-	hypfs_last_dentry = dentry;
-}
-
-static void hypfs_remove(struct dentry *dentry)
-{
-	struct dentry *parent;
-
-	parent = dentry->d_parent;
-	inode_lock(d_inode(parent));
-	if (simple_positive(dentry)) {
-		if (d_is_dir(dentry))
-			simple_rmdir(d_inode(parent), dentry);
-		else
-			simple_unlink(d_inode(parent), dentry);
+	if (IS_ROOT(dentry->d_parent)) {
+		dentry->d_fsdata = hypfs_last_dentry;
+		hypfs_last_dentry = dentry;
 	}
-	d_delete(dentry);
-	dput(dentry);
-	inode_unlock(d_inode(parent));
 }
 
-static void hypfs_delete_tree(struct dentry *root)
+static void hypfs_delete_tree(void)
 {
 	while (hypfs_last_dentry) {
-		struct dentry *next_dentry;
-		next_dentry = hypfs_last_dentry->d_fsdata;
-		hypfs_remove(hypfs_last_dentry);
+		struct dentry *next_dentry = hypfs_last_dentry->d_fsdata;
+		simple_recursive_removal(hypfs_last_dentry, NULL);
 		hypfs_last_dentry = next_dentry;
 	}
 }
@@ -101,7 +85,7 @@ static struct inode *hypfs_make_inode(struct super_block *sb, umode_t mode)
 		ret->i_mode = mode;
 		ret->i_uid = hypfs_info->uid;
 		ret->i_gid = hypfs_info->gid;
-		ret->i_atime = ret->i_mtime = ret->i_ctime = current_time(ret);
+		simple_inode_init_ts(ret);
 		if (S_ISDIR(mode))
 			set_nlink(ret, 2);
 	}
@@ -179,18 +163,18 @@ static ssize_t hypfs_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	 *    to restart data collection in this case.
 	 */
 	mutex_lock(&fs_info->lock);
-	if (fs_info->last_update == get_seconds()) {
+	if (fs_info->last_update == ktime_get_seconds()) {
 		rc = -EBUSY;
 		goto out;
 	}
-	hypfs_delete_tree(sb->s_root);
-	if (MACHINE_IS_VM)
+	hypfs_delete_tree();
+	if (machine_is_vm())
 		rc = hypfs_vm_create_files(sb->s_root);
 	else
 		rc = hypfs_diag_create_files(sb->s_root);
 	if (rc) {
 		pr_err("Updating the hypfs tree failed\n");
-		hypfs_delete_tree(sb->s_root);
+		hypfs_delete_tree();
 		goto out;
 	}
 	hypfs_update_update(sb);
@@ -207,52 +191,39 @@ static int hypfs_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-enum { opt_uid, opt_gid, opt_err };
+enum { Opt_uid, Opt_gid, };
 
-static const match_table_t hypfs_tokens = {
-	{opt_uid, "uid=%u"},
-	{opt_gid, "gid=%u"},
-	{opt_err, NULL}
+static const struct fs_parameter_spec hypfs_fs_parameters[] = {
+	fsparam_u32("gid", Opt_gid),
+	fsparam_u32("uid", Opt_uid),
+	{}
 };
 
-static int hypfs_parse_options(char *options, struct super_block *sb)
+static int hypfs_parse_param(struct fs_context *fc, struct fs_parameter *param)
 {
-	char *str;
-	substring_t args[MAX_OPT_ARGS];
+	struct hypfs_sb_info *hypfs_info = fc->s_fs_info;
+	struct fs_parse_result result;
 	kuid_t uid;
 	kgid_t gid;
+	int opt;
 
-	if (!options)
-		return 0;
-	while ((str = strsep(&options, ",")) != NULL) {
-		int token, option;
-		struct hypfs_sb_info *hypfs_info = sb->s_fs_info;
+	opt = fs_parse(fc, hypfs_fs_parameters, param, &result);
+	if (opt < 0)
+		return opt;
 
-		if (!*str)
-			continue;
-		token = match_token(str, hypfs_tokens, args);
-		switch (token) {
-		case opt_uid:
-			if (match_int(&args[0], &option))
-				return -EINVAL;
-			uid = make_kuid(current_user_ns(), option);
-			if (!uid_valid(uid))
-				return -EINVAL;
-			hypfs_info->uid = uid;
-			break;
-		case opt_gid:
-			if (match_int(&args[0], &option))
-				return -EINVAL;
-			gid = make_kgid(current_user_ns(), option);
-			if (!gid_valid(gid))
-				return -EINVAL;
-			hypfs_info->gid = gid;
-			break;
-		case opt_err:
-		default:
-			pr_err("%s is not a valid mount option\n", str);
-			return -EINVAL;
-		}
+	switch (opt) {
+	case Opt_uid:
+		uid = make_kuid(current_user_ns(), result.uint_32);
+		if (!uid_valid(uid))
+			return invalf(fc, "Unknown uid");
+		hypfs_info->uid = uid;
+		break;
+	case Opt_gid:
+		gid = make_kgid(current_user_ns(), result.uint_32);
+		if (!gid_valid(gid))
+			return invalf(fc, "Unknown gid");
+		hypfs_info->gid = gid;
+		break;
 	}
 	return 0;
 }
@@ -266,26 +237,18 @@ static int hypfs_show_options(struct seq_file *s, struct dentry *root)
 	return 0;
 }
 
-static int hypfs_fill_super(struct super_block *sb, void *data, int silent)
+static int hypfs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
+	struct hypfs_sb_info *sbi = sb->s_fs_info;
 	struct inode *root_inode;
-	struct dentry *root_dentry;
-	int rc = 0;
-	struct hypfs_sb_info *sbi;
+	struct dentry *root_dentry, *update_file;
+	int rc;
 
-	sbi = kzalloc(sizeof(struct hypfs_sb_info), GFP_KERNEL);
-	if (!sbi)
-		return -ENOMEM;
-	mutex_init(&sbi->lock);
-	sbi->uid = current_uid();
-	sbi->gid = current_gid();
-	sb->s_fs_info = sbi;
 	sb->s_blocksize = PAGE_SIZE;
 	sb->s_blocksize_bits = PAGE_SHIFT;
 	sb->s_magic = HYPFS_MAGIC;
 	sb->s_op = &hypfs_s_ops;
-	if (hypfs_parse_options(data, sb))
-		return -EINVAL;
+
 	root_inode = hypfs_make_inode(sb, S_IFDIR | 0755);
 	if (!root_inode)
 		return -ENOMEM;
@@ -294,37 +257,61 @@ static int hypfs_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_root = root_dentry = d_make_root(root_inode);
 	if (!root_dentry)
 		return -ENOMEM;
-	if (MACHINE_IS_VM)
+	if (machine_is_vm())
 		rc = hypfs_vm_create_files(root_dentry);
 	else
 		rc = hypfs_diag_create_files(root_dentry);
 	if (rc)
 		return rc;
-	sbi->update_file = hypfs_create_update_file(root_dentry);
-	if (IS_ERR(sbi->update_file))
-		return PTR_ERR(sbi->update_file);
+	update_file = hypfs_create_update_file(root_dentry);
+	if (IS_ERR(update_file))
+		return PTR_ERR(update_file);
+	sbi->update_file = update_file;
 	hypfs_update_update(sb);
 	pr_info("Hypervisor filesystem mounted\n");
 	return 0;
 }
 
-static struct dentry *hypfs_mount(struct file_system_type *fst, int flags,
-			const char *devname, void *data)
+static int hypfs_get_tree(struct fs_context *fc)
 {
-	return mount_single(fst, flags, data, hypfs_fill_super);
+	return get_tree_single(fc, hypfs_fill_super);
+}
+
+static void hypfs_free_fc(struct fs_context *fc)
+{
+	kfree(fc->s_fs_info);
+}
+
+static const struct fs_context_operations hypfs_context_ops = {
+	.free		= hypfs_free_fc,
+	.parse_param	= hypfs_parse_param,
+	.get_tree	= hypfs_get_tree,
+};
+
+static int hypfs_init_fs_context(struct fs_context *fc)
+{
+	struct hypfs_sb_info *sbi;
+
+	sbi = kzalloc_obj(struct hypfs_sb_info);
+	if (!sbi)
+		return -ENOMEM;
+
+	mutex_init(&sbi->lock);
+	sbi->uid = current_uid();
+	sbi->gid = current_gid();
+
+	fc->s_fs_info = sbi;
+	fc->ops = &hypfs_context_ops;
+	return 0;
 }
 
 static void hypfs_kill_super(struct super_block *sb)
 {
 	struct hypfs_sb_info *sb_info = sb->s_fs_info;
 
-	if (sb->s_root)
-		hypfs_delete_tree(sb->s_root);
-	if (sb_info && sb_info->update_file)
-		hypfs_remove(sb_info->update_file);
-	kfree(sb->s_fs_info);
-	sb->s_fs_info = NULL;
-	kill_litter_super(sb);
+	hypfs_last_dentry = NULL;
+	kill_anon_super(sb);
+	kfree(sb_info);
 }
 
 static struct dentry *hypfs_create_file(struct dentry *parent, const char *name,
@@ -333,17 +320,13 @@ static struct dentry *hypfs_create_file(struct dentry *parent, const char *name,
 	struct dentry *dentry;
 	struct inode *inode;
 
-	inode_lock(d_inode(parent));
-	dentry = lookup_one_len(name, parent, strlen(name));
-	if (IS_ERR(dentry)) {
-		dentry = ERR_PTR(-ENOMEM);
-		goto fail;
-	}
+	dentry = simple_start_creating(parent, name);
+	if (IS_ERR(dentry))
+		return ERR_PTR(-ENOMEM);
 	inode = hypfs_make_inode(parent->d_sb, mode);
 	if (!inode) {
-		dput(dentry);
-		dentry = ERR_PTR(-ENOMEM);
-		goto fail;
+		simple_done_creating(dentry);
+		return ERR_PTR(-ENOMEM);
 	}
 	if (S_ISREG(mode)) {
 		inode->i_fop = &hypfs_file_ops;
@@ -358,11 +341,9 @@ static struct dentry *hypfs_create_file(struct dentry *parent, const char *name,
 	} else
 		BUG();
 	inode->i_private = data;
-	d_instantiate(dentry, inode);
-	dget(dentry);
-fail:
-	inode_unlock(d_inode(parent));
-	return dentry;
+	d_make_persistent(dentry, inode);
+	simple_done_creating(dentry);
+	return dentry;	 // borrowed
 }
 
 struct dentry *hypfs_mkdir(struct dentry *parent, const char *name)
@@ -390,8 +371,7 @@ static struct dentry *hypfs_create_update_file(struct dentry *dir)
 	return dentry;
 }
 
-struct dentry *hypfs_create_u64(struct dentry *dir,
-				const char *name, __u64 value)
+int hypfs_create_u64(struct dentry *dir, const char *name, __u64 value)
 {
 	char *buffer;
 	char tmp[TMP_SIZE];
@@ -400,35 +380,34 @@ struct dentry *hypfs_create_u64(struct dentry *dir,
 	snprintf(tmp, TMP_SIZE, "%llu\n", (unsigned long long int)value);
 	buffer = kstrdup(tmp, GFP_KERNEL);
 	if (!buffer)
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 	dentry =
 	    hypfs_create_file(dir, name, buffer, S_IFREG | REG_FILE_MODE);
 	if (IS_ERR(dentry)) {
 		kfree(buffer);
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 	}
 	hypfs_add_dentry(dentry);
-	return dentry;
+	return 0;
 }
 
-struct dentry *hypfs_create_str(struct dentry *dir,
-				const char *name, char *string)
+int hypfs_create_str(struct dentry *dir, const char *name, char *string)
 {
 	char *buffer;
 	struct dentry *dentry;
 
 	buffer = kmalloc(strlen(string) + 2, GFP_KERNEL);
 	if (!buffer)
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 	sprintf(buffer, "%s\n", string);
 	dentry =
 	    hypfs_create_file(dir, name, buffer, S_IFREG | REG_FILE_MODE);
 	if (IS_ERR(dentry)) {
 		kfree(buffer);
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 	}
 	hypfs_add_dentry(dentry);
-	return dentry;
+	return 0;
 }
 
 static const struct file_operations hypfs_file_ops = {
@@ -436,13 +415,13 @@ static const struct file_operations hypfs_file_ops = {
 	.release	= hypfs_release,
 	.read_iter	= hypfs_read_iter,
 	.write_iter	= hypfs_write_iter,
-	.llseek		= no_llseek,
 };
 
 static struct file_system_type hypfs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "s390_hypfs",
-	.mount		= hypfs_mount,
+	.init_fs_context = hypfs_init_fs_context,
+	.parameters	= hypfs_fs_parameters,
 	.kill_sb	= hypfs_kill_super
 };
 
@@ -452,50 +431,18 @@ static const struct super_operations hypfs_s_ops = {
 	.show_options	= hypfs_show_options,
 };
 
-static int __init hypfs_init(void)
+int __init __hypfs_fs_init(void)
 {
 	int rc;
 
-	rc = hypfs_dbfs_init();
-	if (rc)
-		return rc;
-	if (hypfs_diag_init()) {
-		rc = -ENODATA;
-		goto fail_dbfs_exit;
-	}
-	if (hypfs_vm_init()) {
-		rc = -ENODATA;
-		goto fail_hypfs_diag_exit;
-	}
-	if (hypfs_sprp_init()) {
-		rc = -ENODATA;
-		goto fail_hypfs_vm_exit;
-	}
-	if (hypfs_diag0c_init()) {
-		rc = -ENODATA;
-		goto fail_hypfs_sprp_exit;
-	}
 	rc = sysfs_create_mount_point(hypervisor_kobj, "s390");
 	if (rc)
-		goto fail_hypfs_diag0c_exit;
+		return rc;
 	rc = register_filesystem(&hypfs_type);
 	if (rc)
-		goto fail_filesystem;
+		goto fail;
 	return 0;
-
-fail_filesystem:
+fail:
 	sysfs_remove_mount_point(hypervisor_kobj, "s390");
-fail_hypfs_diag0c_exit:
-	hypfs_diag0c_exit();
-fail_hypfs_sprp_exit:
-	hypfs_sprp_exit();
-fail_hypfs_vm_exit:
-	hypfs_vm_exit();
-fail_hypfs_diag_exit:
-	hypfs_diag_exit();
-fail_dbfs_exit:
-	hypfs_dbfs_exit();
-	pr_err("Initialization of hypfs failed with rc=%i\n", rc);
 	return rc;
 }
-device_initcall(hypfs_init)

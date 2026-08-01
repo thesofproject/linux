@@ -10,6 +10,7 @@
 
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/of.h>
@@ -17,9 +18,6 @@
 
 static DEFINE_SPINLOCK(sun9i_a80_cpus_lock);
 
-/**
- * sun9i_a80_cpus_clk_setup() - Setup function for a80 cpus composite clk
- */
 
 #define SUN9I_CPUS_MAX_PARENTS		4
 #define SUN9I_CPUS_MUX_PARENT_PLL4	3
@@ -179,6 +177,10 @@ static const struct clk_ops sun9i_a80_cpus_clk_ops = {
 	.set_rate	= sun9i_a80_cpus_clk_set_rate,
 };
 
+/**
+ * sun9i_a80_cpus_setup() - Setup function for a80 cpus composite clk
+ * @node: &struct device_node for the clock
+ */
 static void sun9i_a80_cpus_setup(struct device_node *node)
 {
 	const char *clk_name = node->name;
@@ -189,7 +191,7 @@ static void sun9i_a80_cpus_setup(struct device_node *node)
 	struct clk *clk;
 	int ret;
 
-	cpus = kzalloc(sizeof(*cpus), GFP_KERNEL);
+	cpus = kzalloc_obj(*cpus);
 	if (!cpus)
 		return;
 
@@ -202,7 +204,7 @@ static void sun9i_a80_cpus_setup(struct device_node *node)
 	/* we have a mux, we will have >1 parents */
 	ret = of_clk_parent_fill(node, parents, SUN9I_CPUS_MAX_PARENTS);
 
-	mux = kzalloc(sizeof(*mux), GFP_KERNEL);
+	mux = kzalloc_obj(*mux);
 	if (!mux)
 		goto err_unmap;
 

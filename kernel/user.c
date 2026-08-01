@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * The "user cache".
  *
@@ -17,54 +18,63 @@
 #include <linux/interrupt.h>
 #include <linux/export.h>
 #include <linux/user_namespace.h>
+#include <linux/binfmts.h>
 #include <linux/proc_ns.h>
+
+#if IS_ENABLED(CONFIG_BINFMT_MISC)
+struct binfmt_misc init_binfmt_misc = {
+	.entries = LIST_HEAD_INIT(init_binfmt_misc.entries),
+	.enabled = true,
+	.entries_lock = __RW_LOCK_UNLOCKED(init_binfmt_misc.entries_lock),
+};
+EXPORT_SYMBOL_GPL(init_binfmt_misc);
+#endif
 
 /*
  * userns count is 1 for root user, 1 for init_uts_ns,
  * and 1 for... ?
  */
 struct user_namespace init_user_ns = {
+	.ns = NS_COMMON_INIT(init_user_ns),
 	.uid_map = {
-		.nr_extents = 1,
 		{
 			.extent[0] = {
 				.first = 0,
 				.lower_first = 0,
 				.count = 4294967295U,
 			},
+			.nr_extents = 1,
 		},
 	},
 	.gid_map = {
-		.nr_extents = 1,
 		{
 			.extent[0] = {
 				.first = 0,
 				.lower_first = 0,
 				.count = 4294967295U,
 			},
+			.nr_extents = 1,
 		},
 	},
 	.projid_map = {
-		.nr_extents = 1,
 		{
 			.extent[0] = {
 				.first = 0,
 				.lower_first = 0,
 				.count = 4294967295U,
 			},
+			.nr_extents = 1,
 		},
 	},
-	.count = ATOMIC_INIT(3),
 	.owner = GLOBAL_ROOT_UID,
 	.group = GLOBAL_ROOT_GID,
-	.ns.inum = PROC_USER_INIT_INO,
-#ifdef CONFIG_USER_NS
-	.ns.ops = &userns_operations,
-#endif
 	.flags = USERNS_INIT_FLAGS,
-#ifdef CONFIG_PERSISTENT_KEYRINGS
-	.persistent_keyring_register_sem =
-	__RWSEM_INITIALIZER(init_user_ns.persistent_keyring_register_sem),
+#ifdef CONFIG_KEYS
+	.keyring_name_list = LIST_HEAD_INIT(init_user_ns.keyring_name_list),
+	.keyring_sem = __RWSEM_INITIALIZER(init_user_ns.keyring_sem),
+#endif
+#if IS_ENABLED(CONFIG_BINFMT_MISC)
+	.binfmt_misc = &init_binfmt_misc,
 #endif
 };
 EXPORT_SYMBOL_GPL(init_user_ns);
@@ -74,14 +84,14 @@ EXPORT_SYMBOL_GPL(init_user_ns);
  * when changing user ID's (ie setuid() and friends).
  */
 
-#define UIDHASH_BITS	(CONFIG_BASE_SMALL ? 3 : 7)
+#define UIDHASH_BITS	(IS_ENABLED(CONFIG_BASE_SMALL) ? 3 : 7)
 #define UIDHASH_SZ	(1 << UIDHASH_BITS)
 #define UIDHASH_MASK		(UIDHASH_SZ - 1)
 #define __uidhashfn(uid)	(((uid >> UIDHASH_BITS) + uid) & UIDHASH_MASK)
 #define uidhashentry(uid)	(uidhash_table + __uidhashfn((__kuid_val(uid))))
 
 static struct kmem_cache *uid_cachep;
-struct hlist_head uidhash_table[UIDHASH_SZ];
+static struct hlist_head uidhash_table[UIDHASH_SZ];
 
 /*
  * The uidhash_lock is mostly taken from process context, but it is
@@ -96,10 +106,7 @@ static DEFINE_SPINLOCK(uidhash_lock);
 
 /* root_user.__count is 1, for init task cred */
 struct user_struct root_user = {
-	.__count	= ATOMIC_INIT(1),
-	.processes	= ATOMIC_INIT(1),
-	.sigpending	= ATOMIC_INIT(0),
-	.locked_shm     = 0,
+	.__count	= REFCOUNT_INIT(1),
 	.uid		= GLOBAL_ROOT_UID,
 	.ratelimit	= RATELIMIT_STATE_INIT(root_user.ratelimit, 0, 0),
 };
@@ -123,12 +130,28 @@ static struct user_struct *uid_hash_find(kuid_t uid, struct hlist_head *hashent)
 
 	hlist_for_each_entry(user, hashent, uidhash_node) {
 		if (uid_eq(user->uid, uid)) {
-			atomic_inc(&user->__count);
+			refcount_inc(&user->__count);
 			return user;
 		}
 	}
 
 	return NULL;
+}
+
+static int user_epoll_alloc(struct user_struct *up)
+{
+#ifdef CONFIG_EPOLL
+	return percpu_counter_init(&up->epoll_watches, 0, GFP_KERNEL);
+#else
+	return 0;
+#endif
+}
+
+static void user_epoll_free(struct user_struct *up)
+{
+#ifdef CONFIG_EPOLL
+	percpu_counter_destroy(&up->epoll_watches);
+#endif
 }
 
 /* IRQs are disabled and uidhash_lock is held upon function entry.
@@ -140,8 +163,7 @@ static void free_user(struct user_struct *up, unsigned long flags)
 {
 	uid_hash_remove(up);
 	spin_unlock_irqrestore(&uidhash_lock, flags);
-	key_put(up->uid_keyring);
-	key_put(up->session_keyring);
+	user_epoll_free(up);
 	kmem_cache_free(uid_cachep, up);
 }
 
@@ -169,12 +191,10 @@ void free_uid(struct user_struct *up)
 	if (!up)
 		return;
 
-	local_irq_save(flags);
-	if (atomic_dec_and_lock(&up->__count, &uidhash_lock))
+	if (refcount_dec_and_lock_irqsave(&up->__count, &uidhash_lock, &flags))
 		free_user(up, flags);
-	else
-		local_irq_restore(flags);
 }
+EXPORT_SYMBOL_GPL(free_uid);
 
 struct user_struct *alloc_uid(kuid_t uid)
 {
@@ -188,10 +208,14 @@ struct user_struct *alloc_uid(kuid_t uid)
 	if (!up) {
 		new = kmem_cache_zalloc(uid_cachep, GFP_KERNEL);
 		if (!new)
-			goto out_unlock;
+			return NULL;
 
 		new->uid = uid;
-		atomic_set(&new->__count, 1);
+		refcount_set(&new->__count, 1);
+		if (user_epoll_alloc(new)) {
+			kmem_cache_free(uid_cachep, new);
+			return NULL;
+		}
 		ratelimit_state_init(&new->ratelimit, HZ, 100);
 		ratelimit_set_flags(&new->ratelimit, RATELIMIT_MSG_ON_RELEASE);
 
@@ -202,8 +226,7 @@ struct user_struct *alloc_uid(kuid_t uid)
 		spin_lock_irq(&uidhash_lock);
 		up = uid_hash_find(uid, hashent);
 		if (up) {
-			key_put(new->uid_keyring);
-			key_put(new->session_keyring);
+			user_epoll_free(new);
 			kmem_cache_free(uid_cachep, new);
 		} else {
 			uid_hash_insert(new, hashent);
@@ -213,9 +236,6 @@ struct user_struct *alloc_uid(kuid_t uid)
 	}
 
 	return up;
-
-out_unlock:
-	return NULL;
 }
 
 static int __init uid_cache_init(void)
@@ -227,6 +247,9 @@ static int __init uid_cache_init(void)
 
 	for(n = 0; n < UIDHASH_SZ; ++n)
 		INIT_HLIST_HEAD(uidhash_table + n);
+
+	if (user_epoll_alloc(&root_user))
+		panic("root_user epoll percpu counter alloc failed");
 
 	/* Insert the root user immediately (init already runs as root) */
 	spin_lock_irq(&uidhash_lock);

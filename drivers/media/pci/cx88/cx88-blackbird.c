@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Support for a cx23416 mpeg encoder via cx2388x host port.
  *  "blackbird" reference design.
@@ -9,16 +10,6 @@
  *        - video_ioctl2 conversion
  *
  *  Includes parts from the ivtv driver <http://sourceforge.net/projects/ivtv/>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #include "cx88.h"
@@ -37,7 +28,7 @@
 
 MODULE_DESCRIPTION("driver for cx2388x/cx23416 based mpeg encoder cards");
 MODULE_AUTHOR("Jelle Foks <jelle@foks.us>, Gerd Knorr <kraxel@bytesex.org> [SuSE Labs]");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
 MODULE_VERSION(CX88_VERSION);
 
 static unsigned int debug;
@@ -694,7 +685,8 @@ static void buffer_finish(struct vb2_buffer *vb)
 	struct cx88_riscmem *risc = &buf->risc;
 
 	if (risc->cpu)
-		pci_free_consistent(dev->pci, risc->size, risc->cpu, risc->dma);
+		dma_free_coherent(&dev->pci->dev, risc->size, risc->cpu,
+				  risc->dma);
 	memset(risc, 0, sizeof(*risc));
 }
 
@@ -789,8 +781,6 @@ static const struct vb2_ops blackbird_qops = {
 	.buf_prepare  = buffer_prepare,
 	.buf_finish = buffer_finish,
 	.buf_queue    = buffer_queue,
-	.wait_prepare = vb2_ops_wait_prepare,
-	.wait_finish = vb2_ops_wait_finish,
 	.start_streaming = start_streaming,
 	.stop_streaming = stop_streaming,
 };
@@ -803,8 +793,7 @@ static int vidioc_querycap(struct file *file, void  *priv,
 	struct cx8802_dev *dev = video_drvdata(file);
 	struct cx88_core *core = dev->core;
 
-	strcpy(cap->driver, "cx88_blackbird");
-	sprintf(cap->bus_info, "PCI:%s", pci_name(dev->pci));
+	strscpy(cap->driver, "cx88_blackbird", sizeof(cap->driver));
 	return cx88_querycap(file, core, cap);
 }
 
@@ -814,9 +803,7 @@ static int vidioc_enum_fmt_vid_cap(struct file *file, void  *priv,
 	if (f->index != 0)
 		return -EINVAL;
 
-	strlcpy(f->description, "MPEG", sizeof(f->description));
 	f->pixelformat = V4L2_PIX_FMT_MPEG;
-	f->flags = V4L2_FMT_FLAG_COMPRESSED;
 	return 0;
 }
 
@@ -995,7 +982,7 @@ static int vidioc_g_tuner(struct file *file, void *priv,
 	if (t->index != 0)
 		return -EINVAL;
 
-	strcpy(t->name, "Television");
+	strscpy(t->name, "Television", sizeof(t->name));
 	t->capability = V4L2_TUNER_CAP_NORM;
 	t->rangehigh  = 0xffffffffUL;
 	call_all(core, tuner, g_tuner, t);
@@ -1145,7 +1132,11 @@ static int blackbird_register_video(struct cx8802_dev *dev)
 	dev->mpeg_dev.ctrl_handler = &dev->cxhdl.hdl;
 	video_set_drvdata(&dev->mpeg_dev, dev);
 	dev->mpeg_dev.queue = &dev->vb2_mpegq;
-	err = video_register_device(&dev->mpeg_dev, VFL_TYPE_GRABBER, -1);
+	dev->mpeg_dev.device_caps = V4L2_CAP_READWRITE | V4L2_CAP_STREAMING |
+				    V4L2_CAP_VIDEO_CAPTURE;
+	if (dev->core->board.tuner_type != UNSET)
+		dev->mpeg_dev.device_caps |= V4L2_CAP_TUNER;
+	err = video_register_device(&dev->mpeg_dev, VFL_TYPE_VIDEO, -1);
 	if (err < 0) {
 		pr_info("can't register mpeg device\n");
 		return err;
@@ -1183,7 +1174,7 @@ static int cx8802_blackbird_probe(struct cx8802_driver *drv)
 	err = cx2341x_handler_init(&dev->cxhdl, 36);
 	if (err)
 		goto fail_core;
-	v4l2_ctrl_add_handler(&dev->cxhdl.hdl, &core->video_hdl, NULL);
+	v4l2_ctrl_add_handler(&dev->cxhdl.hdl, &core->video_hdl, NULL, false);
 
 	/* blackbird stuff */
 	pr_info("cx23416 based mpeg encoder (blackbird reference design)\n");
@@ -1202,7 +1193,7 @@ static int cx8802_blackbird_probe(struct cx8802_driver *drv)
 	q->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	q->io_modes = VB2_MMAP | VB2_USERPTR | VB2_DMABUF | VB2_READ;
 	q->gfp_flags = GFP_DMA32;
-	q->min_buffers_needed = 2;
+	q->min_queued_buffers = 2;
 	q->drv_priv = dev;
 	q->buf_struct_size = sizeof(struct cx88_buffer);
 	q->ops = &blackbird_qops;

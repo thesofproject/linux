@@ -22,9 +22,10 @@
  */
 
 #include <linux/prime_numbers.h>
-#include <linux/random.h>
+#include <linux/prandom.h>
 
-#include "../i915_selftest.h"
+#include "i915_selftest.h"
+#include "i915_utils.h"
 
 #define PFN_BIAS (1 << 10)
 
@@ -218,6 +219,10 @@ static int alloc_table(struct pfn_table *pt,
 {
 	struct scatterlist *sg;
 	unsigned long n, pfn;
+
+	/* restricted by sg_alloc_table */
+	if (overflows_type(max, unsigned int))
+		return -E2BIG;
 
 	if (sg_alloc_table(&pt->st, max,
 			   GFP_KERNEL | __GFP_NORETRY | __GFP_NOWARN))

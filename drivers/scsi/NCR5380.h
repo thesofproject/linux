@@ -3,10 +3,10 @@
  * NCR 5380 defines
  *
  * Copyright 1993, Drew Eckhardt
- *	Visionary Computing
- *	(Unix consulting and custom programming)
- * 	drew@colorado.edu
- *      +1 (303) 666-5836
+ * Visionary Computing
+ * (Unix consulting and custom programming)
+ * drew@colorado.edu
+ * +1 (303) 666-5836
  *
  * For more information, please consult 
  *
@@ -78,7 +78,7 @@
 #define ICR_DIFF_ENABLE		0x20	/* wo Set to enable diff. drivers */
 #define ICR_ASSERT_ACK		0x10	/* rw ini Set to assert ACK */
 #define ICR_ASSERT_BSY		0x08	/* rw Set to assert BSY */
-#define ICR_ASSERT_SEL 		0x04	/* rw Set to assert SEL */
+#define ICR_ASSERT_SEL		0x04	/* rw Set to assert SEL */
 #define ICR_ASSERT_ATN		0x02	/* rw Set to assert ATN */
 #define ICR_ASSERT_DATA		0x01	/* rw SCSI_DATA_REG is asserted */
 
@@ -135,7 +135,7 @@
 #define BASR_IRQ		0x10	/* ro mirror of IRQ pin */
 #define BASR_PHASE_MATCH	0x08	/* ro Set when MSG CD IO match TCR */
 #define BASR_BUSY_ERROR		0x04	/* ro Unexpected change to inactive state */
-#define BASR_ATN 		0x02	/* ro BUS status */
+#define BASR_ATN		0x02	/* ro BUS status */
 #define BASR_ACK		0x01	/* ro BUS status */
 
 /* Write any value to this register to start a DMA send */
@@ -170,7 +170,7 @@
 #define CSR_BASE CSR_53C80_INTR
 
 /* Note : PHASE_* macros are based on the values of the STATUS register */
-#define PHASE_MASK 	(SR_MSG | SR_CD | SR_IO)
+#define PHASE_MASK		(SR_MSG | SR_CD | SR_IO)
 
 #define PHASE_DATAOUT		0
 #define PHASE_DATAIN		SR_IO
@@ -227,19 +227,27 @@ struct NCR5380_hostdata {
 };
 
 struct NCR5380_cmd {
+	char *ptr;
+	int this_residual;
+	struct scatterlist *buffer;
+	int status;
+	int phase;
 	struct list_head list;
 };
-
-#define NCR5380_CMD_SIZE		(sizeof(struct NCR5380_cmd))
 
 #define NCR5380_PIO_CHUNK_SIZE		256
 
 /* Time limit (ms) to poll registers when IRQs are disabled, e.g. during PDMA */
-#define NCR5380_REG_POLL_TIME		15
+#define NCR5380_REG_POLL_TIME		10
 
 static inline struct scsi_cmnd *NCR5380_to_scmd(struct NCR5380_cmd *ncmd_ptr)
 {
 	return ((struct scsi_cmnd *)ncmd_ptr) - 1;
+}
+
+static inline struct NCR5380_cmd *NCR5380_to_ncmd(struct scsi_cmnd *cmd)
+{
+	return scsi_cmd_priv(cmd);
 }
 
 #ifndef NDEBUG
@@ -275,9 +283,11 @@ static irqreturn_t NCR5380_intr(int irq, void *dev_id);
 static void NCR5380_main(struct work_struct *work);
 static const char *NCR5380_info(struct Scsi_Host *instance);
 static void NCR5380_reselect(struct Scsi_Host *instance);
-static struct scsi_cmnd *NCR5380_select(struct Scsi_Host *, struct scsi_cmnd *);
+static bool NCR5380_select(struct Scsi_Host *, struct scsi_cmnd *);
 static int NCR5380_transfer_dma(struct Scsi_Host *instance, unsigned char *phase, int *count, unsigned char **data);
-static int NCR5380_transfer_pio(struct Scsi_Host *instance, unsigned char *phase, int *count, unsigned char **data);
+static void NCR5380_transfer_pio(struct Scsi_Host *instance,
+				 unsigned char *phase, int *count,
+				 unsigned char **data, unsigned int can_sleep);
 static int NCR5380_poll_politely2(struct NCR5380_hostdata *,
                                   unsigned int, u8, u8,
                                   unsigned int, u8, u8, unsigned long);

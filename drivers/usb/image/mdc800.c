@@ -38,7 +38,7 @@
  *
  * version 0.7.3
  * bugfix : The mdc800->state field gets set to READY after the
- * the disconnect function sets it to NOT_CONNECTED. This makes the
+ * disconnect function sets it to NOT_CONNECTED. This makes the
  * driver running like the camera is connected and causes some
  * hang ups.
  *
@@ -631,7 +631,6 @@ static int mdc800_device_open (struct inode* inode, struct file *file)
 	mdc800->camera_busy=0;
 	mdc800->camera_request_ready=0;
 
-	retval=0;
 	mdc800->irq_urb->dev = mdc800->dev;
 	retval = usb_submit_urb (mdc800->irq_urb, GFP_KERNEL);
 	if (retval) {
@@ -708,7 +707,7 @@ static ssize_t mdc800_device_read (struct file *file, char __user *buf, size_t l
 		if (signal_pending (current)) 
 		{
 			mutex_unlock(&mdc800->io_lock);
-			return -EINTR;
+			return len == left ? -EINTR : len-left;
 		}
 
 		sts=left > (mdc800->out_count-mdc800->out_ptr)?mdc800->out_count-mdc800->out_ptr:left;
@@ -731,9 +730,11 @@ static ssize_t mdc800_device_read (struct file *file, char __user *buf, size_t l
 					mutex_unlock(&mdc800->io_lock);
 					return len-left;
 				}
-				wait_event_timeout(mdc800->download_wait,
+				retval = wait_event_timeout(mdc800->download_wait,
 				     mdc800->downloaded,
 				     msecs_to_jiffies(TO_DOWNLOAD_GET_READY));
+				if (!retval)
+					usb_kill_urb(mdc800->download_urb);
 				mdc800->downloaded = 0;
 				if (mdc800->download_urb->status != 0)
 				{
@@ -880,7 +881,7 @@ static ssize_t mdc800_device_write (struct file *file, const char __user *buf, s
 						return -EIO;
 					}
 					mdc800->pic_len=-1;
-					/* fall through */
+					fallthrough;
 
 				case 0x09: /* Download Thumbnail */
 					mdc800->download_left=answersize+64;
@@ -983,7 +984,7 @@ static int __init usb_mdc800_init (void)
 {
 	int retval = -ENODEV;
 	/* Allocate Memory */
-	mdc800=kzalloc (sizeof (struct mdc800_data), GFP_KERNEL);
+	mdc800=kzalloc_obj(struct mdc800_data);
 	if (!mdc800)
 		goto cleanup_on_fail;
 

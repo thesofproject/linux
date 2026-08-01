@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * trace irqs off critical timings
  *
@@ -13,10 +14,10 @@
 #include <linux/uaccess.h>
 #include <linux/module.h>
 #include <linux/ftrace.h>
+#include <linux/kprobes.h>
 
 #include "trace.h"
 
-#define CREATE_TRACE_POINTS
 #include <trace/events/preemptirq.h>
 
 #if defined(CONFIG_IRQSOFF_TRACER) || defined(CONFIG_PREEMPT_TRACER)
@@ -41,12 +42,12 @@ static int start_irqsoff_tracer(struct trace_array *tr, int graph);
 
 #ifdef CONFIG_PREEMPT_TRACER
 static inline int
-preempt_trace(void)
+preempt_trace(int pc)
 {
-	return ((trace_type & TRACER_PREEMPT_OFF) && preempt_count());
+	return ((trace_type & TRACER_PREEMPT_OFF) && pc);
 }
 #else
-# define preempt_trace() (0)
+# define preempt_trace(pc) (0)
 #endif
 
 #ifdef CONFIG_IRQSOFF_TRACER
@@ -62,7 +63,7 @@ irq_trace(void)
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 static int irqsoff_display_graph(struct trace_array *tr, int set);
-# define is_graph(tr) ((tr)->trace_flags & TRACE_ITER_DISPLAY_GRAPH)
+# define is_graph(tr) ((tr)->trace_flags & TRACE_ITER(DISPLAY_GRAPH))
 #else
 static inline int irqsoff_display_graph(struct trace_array *tr, int set)
 {
@@ -121,13 +122,13 @@ static int func_prolog_dec(struct trace_array *tr,
 	if (!irqs_disabled_flags(*flags) && !preempt_count())
 		return 0;
 
-	*data = per_cpu_ptr(tr->trace_buffer.data, cpu);
-	disabled = atomic_inc_return(&(*data)->disabled);
+	*data = per_cpu_ptr(tr->array_buffer.data, cpu);
+	disabled = local_inc_return(&(*data)->disabled);
 
 	if (likely(disabled == 1))
 		return 1;
 
-	atomic_dec(&(*data)->disabled);
+	local_dec(&(*data)->disabled);
 
 	return 0;
 }
@@ -137,18 +138,21 @@ static int func_prolog_dec(struct trace_array *tr,
  */
 static void
 irqsoff_tracer_call(unsigned long ip, unsigned long parent_ip,
-		    struct ftrace_ops *op, struct pt_regs *pt_regs)
+		    struct ftrace_ops *op, struct ftrace_regs *fregs)
 {
 	struct trace_array *tr = irqsoff_trace;
 	struct trace_array_cpu *data;
 	unsigned long flags;
+	unsigned int trace_ctx;
 
 	if (!func_prolog_dec(tr, &data, &flags))
 		return;
 
-	trace_function(tr, ip, parent_ip, flags, preempt_count());
+	trace_ctx = tracing_gen_ctx_flags(flags);
 
-	atomic_dec(&data->disabled);
+	trace_function(tr, ip, parent_ip, trace_ctx, fregs);
+
+	local_dec(&data->disabled);
 }
 #endif /* CONFIG_FUNCTION_TRACER */
 
@@ -166,20 +170,23 @@ static int irqsoff_display_graph(struct trace_array *tr, int set)
 		per_cpu(tracing_cpu, cpu) = 0;
 
 	tr->max_latency = 0;
-	tracing_reset_online_cpus(&irqsoff_trace->trace_buffer);
+	tracing_reset_online_cpus(&irqsoff_trace->array_buffer);
 
 	return start_irqsoff_tracer(irqsoff_trace, set);
 }
 
-static int irqsoff_graph_entry(struct ftrace_graph_ent *trace)
+static int irqsoff_graph_entry(struct ftrace_graph_ent *trace,
+			       struct fgraph_ops *gops,
+			       struct ftrace_regs *fregs)
 {
 	struct trace_array *tr = irqsoff_trace;
 	struct trace_array_cpu *data;
 	unsigned long flags;
-	int ret;
-	int pc;
+	unsigned int trace_ctx;
+	u64 *calltime;
+	int ret = 0;
 
-	if (ftrace_graph_ignore_func(trace))
+	if (ftrace_graph_ignore_func(gops, trace))
 		return 0;
 	/*
 	 * Do not trace a function if it's filtered by set_graph_notrace.
@@ -194,33 +201,52 @@ static int irqsoff_graph_entry(struct ftrace_graph_ent *trace)
 	if (!func_prolog_dec(tr, &data, &flags))
 		return 0;
 
-	pc = preempt_count();
-	ret = __trace_graph_entry(tr, trace, flags, pc);
-	atomic_dec(&data->disabled);
+	calltime = fgraph_reserve_data(gops->idx, sizeof(*calltime));
+	if (calltime) {
+		*calltime = trace_clock_local();
+		trace_ctx = tracing_gen_ctx_flags(flags);
+		ret = __trace_graph_entry(tr, trace, trace_ctx);
+	}
+	local_dec(&data->disabled);
 
 	return ret;
 }
 
-static void irqsoff_graph_return(struct ftrace_graph_ret *trace)
+static void irqsoff_graph_return(struct ftrace_graph_ret *trace,
+				 struct fgraph_ops *gops,
+				 struct ftrace_regs *fregs)
 {
 	struct trace_array *tr = irqsoff_trace;
 	struct trace_array_cpu *data;
 	unsigned long flags;
-	int pc;
+	unsigned int trace_ctx;
+	u64 *calltime;
+	u64 rettime;
+	int size;
+
+	ftrace_graph_addr_finish(gops, trace);
 
 	if (!func_prolog_dec(tr, &data, &flags))
 		return;
 
-	pc = preempt_count();
-	__trace_graph_return(tr, trace, flags, pc);
-	atomic_dec(&data->disabled);
+	rettime = trace_clock_local();
+	calltime = fgraph_retrieve_data(gops->idx, &size);
+	if (calltime) {
+		trace_ctx = tracing_gen_ctx_flags(flags);
+		__trace_graph_return(tr, trace, trace_ctx, *calltime, rettime);
+	}
+	local_dec(&data->disabled);
 }
+
+static struct fgraph_ops fgraph_ops = {
+	.entryfunc		= &irqsoff_graph_entry,
+	.retfunc		= &irqsoff_graph_return,
+};
 
 static void irqsoff_trace_open(struct trace_iterator *iter)
 {
 	if (is_graph(iter->tr))
 		graph_trace_open(iter);
-
 }
 
 static void irqsoff_trace_close(struct trace_iterator *iter)
@@ -231,7 +257,7 @@ static void irqsoff_trace_close(struct trace_iterator *iter)
 
 #define GRAPH_TRACER_FLAGS (TRACE_GRAPH_PRINT_CPU | \
 			    TRACE_GRAPH_PRINT_PROC | \
-			    TRACE_GRAPH_PRINT_ABS_TIME | \
+			    TRACE_GRAPH_PRINT_REL_TIME | \
 			    TRACE_GRAPH_PRINT_DURATION)
 
 static enum print_line_t irqsoff_print_line(struct trace_iterator *iter)
@@ -259,23 +285,22 @@ static void irqsoff_print_header(struct seq_file *s)
 static void
 __trace_function(struct trace_array *tr,
 		 unsigned long ip, unsigned long parent_ip,
-		 unsigned long flags, int pc)
+		 unsigned int trace_ctx)
 {
 	if (is_graph(tr))
-		trace_graph_function(tr, ip, parent_ip, flags, pc);
+		trace_graph_function(tr, ip, parent_ip, trace_ctx);
 	else
-		trace_function(tr, ip, parent_ip, flags, pc);
+		trace_function(tr, ip, parent_ip, trace_ctx, NULL);
 }
 
 #else
-#define __trace_function trace_function
-
-#ifdef CONFIG_FUNCTION_TRACER
-static int irqsoff_graph_entry(struct ftrace_graph_ent *trace)
+static inline void
+__trace_function(struct trace_array *tr,
+		 unsigned long ip, unsigned long parent_ip,
+		 unsigned int trace_ctx)
 {
-	return -1;
+	return trace_function(tr, ip, parent_ip, trace_ctx, NULL);
 }
-#endif
 
 static enum print_line_t irqsoff_print_line(struct trace_iterator *iter)
 {
@@ -286,7 +311,6 @@ static void irqsoff_trace_open(struct trace_iterator *iter) { }
 static void irqsoff_trace_close(struct trace_iterator *iter) { }
 
 #ifdef CONFIG_FUNCTION_TRACER
-static void irqsoff_graph_return(struct ftrace_graph_ret *trace) { }
 static void irqsoff_print_header(struct seq_file *s)
 {
 	trace_default_header(s);
@@ -322,15 +346,13 @@ check_critical_timing(struct trace_array *tr,
 {
 	u64 T0, T1, delta;
 	unsigned long flags;
-	int pc;
+	unsigned int trace_ctx;
 
 	T0 = data->preempt_timestamp;
 	T1 = ftrace_now(cpu);
 	delta = T1-T0;
 
-	local_save_flags(flags);
-
-	pc = preempt_count();
+	trace_ctx = tracing_gen_ctx();
 
 	if (!report_latency(tr, delta))
 		goto out;
@@ -341,9 +363,9 @@ check_critical_timing(struct trace_array *tr,
 	if (!report_latency(tr, delta))
 		goto out_unlock;
 
-	__trace_function(tr, CALLER_ADDR0, parent_ip, flags, pc);
+	__trace_function(tr, CALLER_ADDR0, parent_ip, trace_ctx);
 	/* Skip 5 functions to get to the irq/preempt enable function */
-	__trace_stack(tr, flags, 5, pc);
+	__trace_stack(tr, trace_ctx, 5);
 
 	if (data->critical_sequence != max_sequence)
 		goto out_unlock;
@@ -363,16 +385,16 @@ out_unlock:
 out:
 	data->critical_sequence = max_sequence;
 	data->preempt_timestamp = ftrace_now(cpu);
-	__trace_function(tr, CALLER_ADDR0, parent_ip, flags, pc);
+	__trace_function(tr, CALLER_ADDR0, parent_ip, trace_ctx);
 }
 
-static inline void
+static nokprobe_inline void
 start_critical_timing(unsigned long ip, unsigned long parent_ip)
 {
 	int cpu;
 	struct trace_array *tr = irqsoff_trace;
 	struct trace_array_cpu *data;
-	unsigned long flags;
+	long disabled;
 
 	if (!tracer_enabled || !tracing_is_enabled())
 		return;
@@ -382,33 +404,34 @@ start_critical_timing(unsigned long ip, unsigned long parent_ip)
 	if (per_cpu(tracing_cpu, cpu))
 		return;
 
-	data = per_cpu_ptr(tr->trace_buffer.data, cpu);
+	data = per_cpu_ptr(tr->array_buffer.data, cpu);
 
-	if (unlikely(!data) || atomic_read(&data->disabled))
+	if (unlikely(!data) || local_read(&data->disabled))
 		return;
 
-	atomic_inc(&data->disabled);
+	disabled = local_inc_return(&data->disabled);
 
-	data->critical_sequence = max_sequence;
-	data->preempt_timestamp = ftrace_now(cpu);
-	data->critical_start = parent_ip ? : ip;
+	if (disabled == 1) {
+		data->critical_sequence = max_sequence;
+		data->preempt_timestamp = ftrace_now(cpu);
+		data->critical_start = parent_ip ? : ip;
 
-	local_save_flags(flags);
+		__trace_function(tr, ip, parent_ip, tracing_gen_ctx());
 
-	__trace_function(tr, ip, parent_ip, flags, preempt_count());
+		per_cpu(tracing_cpu, cpu) = 1;
+	}
 
-	per_cpu(tracing_cpu, cpu) = 1;
-
-	atomic_dec(&data->disabled);
+	local_dec(&data->disabled);
 }
 
-static inline void
+static nokprobe_inline void
 stop_critical_timing(unsigned long ip, unsigned long parent_ip)
 {
 	int cpu;
 	struct trace_array *tr = irqsoff_trace;
 	struct trace_array_cpu *data;
-	unsigned long flags;
+	unsigned int trace_ctx;
+	long disabled;
 
 	cpu = raw_smp_processor_id();
 	/* Always clear the tracing cpu on stopping the trace */
@@ -420,95 +443,40 @@ stop_critical_timing(unsigned long ip, unsigned long parent_ip)
 	if (!tracer_enabled || !tracing_is_enabled())
 		return;
 
-	data = per_cpu_ptr(tr->trace_buffer.data, cpu);
+	data = per_cpu_ptr(tr->array_buffer.data, cpu);
 
 	if (unlikely(!data) ||
-	    !data->critical_start || atomic_read(&data->disabled))
+	    !data->critical_start || local_read(&data->disabled))
 		return;
 
-	atomic_inc(&data->disabled);
+	disabled = local_inc_return(&data->disabled);
 
-	local_save_flags(flags);
-	__trace_function(tr, ip, parent_ip, flags, preempt_count());
-	check_critical_timing(tr, data, parent_ip ? : ip, cpu);
-	data->critical_start = 0;
-	atomic_dec(&data->disabled);
+	if (disabled == 1) {
+		trace_ctx = tracing_gen_ctx();
+		__trace_function(tr, ip, parent_ip, trace_ctx);
+		check_critical_timing(tr, data, parent_ip ? : ip, cpu);
+		data->critical_start = 0;
+	}
+
+	local_dec(&data->disabled);
 }
 
 /* start and stop critical timings used to for stoppage (in idle) */
 void start_critical_timings(void)
 {
-	if (preempt_trace() || irq_trace())
+	if (preempt_trace(preempt_count()) || irq_trace())
 		start_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
 }
 EXPORT_SYMBOL_GPL(start_critical_timings);
+NOKPROBE_SYMBOL(start_critical_timings);
 
 void stop_critical_timings(void)
 {
-	if (preempt_trace() || irq_trace())
+	if (preempt_trace(preempt_count()) || irq_trace())
 		stop_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
 }
 EXPORT_SYMBOL_GPL(stop_critical_timings);
-
-#ifdef CONFIG_IRQSOFF_TRACER
-#ifdef CONFIG_PROVE_LOCKING
-void time_hardirqs_on(unsigned long a0, unsigned long a1)
-{
-	if (!preempt_trace() && irq_trace())
-		stop_critical_timing(a0, a1);
-}
-
-void time_hardirqs_off(unsigned long a0, unsigned long a1)
-{
-	if (!preempt_trace() && irq_trace())
-		start_critical_timing(a0, a1);
-}
-
-#else /* !CONFIG_PROVE_LOCKING */
-
-/*
- * We are only interested in hardirq on/off events:
- */
-static inline void tracer_hardirqs_on(void)
-{
-	if (!preempt_trace() && irq_trace())
-		stop_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
-}
-
-static inline void tracer_hardirqs_off(void)
-{
-	if (!preempt_trace() && irq_trace())
-		start_critical_timing(CALLER_ADDR0, CALLER_ADDR1);
-}
-
-static inline void tracer_hardirqs_on_caller(unsigned long caller_addr)
-{
-	if (!preempt_trace() && irq_trace())
-		stop_critical_timing(CALLER_ADDR0, caller_addr);
-}
-
-static inline void tracer_hardirqs_off_caller(unsigned long caller_addr)
-{
-	if (!preempt_trace() && irq_trace())
-		start_critical_timing(CALLER_ADDR0, caller_addr);
-}
-
-#endif /* CONFIG_PROVE_LOCKING */
-#endif /*  CONFIG_IRQSOFF_TRACER */
-
-#ifdef CONFIG_PREEMPT_TRACER
-static inline void tracer_preempt_on(unsigned long a0, unsigned long a1)
-{
-	if (preempt_trace() && !irq_trace())
-		stop_critical_timing(a0, a1);
-}
-
-static inline void tracer_preempt_off(unsigned long a0, unsigned long a1)
-{
-	if (preempt_trace() && !irq_trace())
-		start_critical_timing(a0, a1);
-}
-#endif /* CONFIG_PREEMPT_TRACER */
+NOKPROBE_SYMBOL(stop_critical_timings);
 
 #ifdef CONFIG_FUNCTION_TRACER
 static bool function_enabled;
@@ -517,13 +485,12 @@ static int register_irqsoff_function(struct trace_array *tr, int graph, int set)
 {
 	int ret;
 
-	/* 'set' is set if TRACE_ITER_FUNCTION is about to be set */
-	if (function_enabled || (!set && !(tr->trace_flags & TRACE_ITER_FUNCTION)))
+	/* 'set' is set if TRACE_ITER(FUNCTION) is about to be set */
+	if (function_enabled || (!set && !(tr->trace_flags & TRACE_ITER(FUNCTION))))
 		return 0;
 
 	if (graph)
-		ret = register_ftrace_graph(&irqsoff_graph_return,
-					    &irqsoff_graph_entry);
+		ret = register_ftrace_graph(&fgraph_ops);
 	else
 		ret = register_ftrace_function(tr->ops);
 
@@ -539,7 +506,7 @@ static void unregister_irqsoff_function(struct trace_array *tr, int graph)
 		return;
 
 	if (graph)
-		unregister_ftrace_graph();
+		unregister_ftrace_graph(&fgraph_ops);
 	else
 		unregister_ftrace_function(tr->ops);
 
@@ -548,7 +515,7 @@ static void unregister_irqsoff_function(struct trace_array *tr, int graph)
 
 static int irqsoff_function_set(struct trace_array *tr, u32 mask, int set)
 {
-	if (!(mask & TRACE_ITER_FUNCTION))
+	if (!(mask & TRACE_ITER(FUNCTION)))
 		return 0;
 
 	if (set)
@@ -569,7 +536,7 @@ static inline int irqsoff_function_set(struct trace_array *tr, u32 mask, int set
 }
 #endif /* CONFIG_FUNCTION_TRACER */
 
-static int irqsoff_flag_changed(struct trace_array *tr, u32 mask, int set)
+static int irqsoff_flag_changed(struct trace_array *tr, u64 mask, int set)
 {
 	struct tracer *tracer = tr->current_trace;
 
@@ -577,7 +544,7 @@ static int irqsoff_flag_changed(struct trace_array *tr, u32 mask, int set)
 		return 0;
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
-	if (mask & TRACE_ITER_DISPLAY_GRAPH)
+	if (mask & TRACE_ITER(DISPLAY_GRAPH))
 		return irqsoff_display_graph(tr, set);
 #endif
 
@@ -615,8 +582,10 @@ static int __irqsoff_tracer_init(struct trace_array *tr)
 	save_flags = tr->trace_flags;
 
 	/* non overwrite screws up the latency tracers */
-	set_tracer_flag(tr, TRACE_ITER_OVERWRITE, 1);
-	set_tracer_flag(tr, TRACE_ITER_LATENCY_FMT, 1);
+	set_tracer_flag(tr, TRACE_ITER(OVERWRITE), 1);
+	set_tracer_flag(tr, TRACE_ITER(LATENCY_FMT), 1);
+	/* without pause, we will produce garbage if another latency occurs */
+	set_tracer_flag(tr, TRACE_ITER(PAUSE_ON_TRACE), 1);
 
 	tr->max_latency = 0;
 	irqsoff_trace = tr;
@@ -634,15 +603,17 @@ static int __irqsoff_tracer_init(struct trace_array *tr)
 	return 0;
 }
 
-static void irqsoff_tracer_reset(struct trace_array *tr)
+static void __irqsoff_tracer_reset(struct trace_array *tr)
 {
-	int lat_flag = save_flags & TRACE_ITER_LATENCY_FMT;
-	int overwrite_flag = save_flags & TRACE_ITER_OVERWRITE;
+	int lat_flag = save_flags & TRACE_ITER(LATENCY_FMT);
+	int overwrite_flag = save_flags & TRACE_ITER(OVERWRITE);
+	int pause_flag = save_flags & TRACE_ITER(PAUSE_ON_TRACE);
 
 	stop_irqsoff_tracer(tr, is_graph(tr));
 
-	set_tracer_flag(tr, TRACE_ITER_LATENCY_FMT, lat_flag);
-	set_tracer_flag(tr, TRACE_ITER_OVERWRITE, overwrite_flag);
+	set_tracer_flag(tr, TRACE_ITER(LATENCY_FMT), lat_flag);
+	set_tracer_flag(tr, TRACE_ITER(OVERWRITE), overwrite_flag);
+	set_tracer_flag(tr, TRACE_ITER(PAUSE_ON_TRACE), pause_flag);
 	ftrace_reset_array_ops(tr);
 
 	irqsoff_busy = false;
@@ -659,12 +630,35 @@ static void irqsoff_tracer_stop(struct trace_array *tr)
 }
 
 #ifdef CONFIG_IRQSOFF_TRACER
+/*
+ * We are only interested in hardirq on/off events:
+ */
+void tracer_hardirqs_on(unsigned long a0, unsigned long a1)
+{
+	if (!preempt_trace(preempt_count()) && irq_trace())
+		stop_critical_timing(a0, a1);
+}
+NOKPROBE_SYMBOL(tracer_hardirqs_on);
+
+void tracer_hardirqs_off(unsigned long a0, unsigned long a1)
+{
+	if (!preempt_trace(preempt_count()) && irq_trace())
+		start_critical_timing(a0, a1);
+}
+NOKPROBE_SYMBOL(tracer_hardirqs_off);
+
 static int irqsoff_tracer_init(struct trace_array *tr)
 {
 	trace_type = TRACER_IRQS_OFF;
 
 	return __irqsoff_tracer_init(tr);
 }
+
+static void irqsoff_tracer_reset(struct trace_array *tr)
+{
+	__irqsoff_tracer_reset(tr);
+}
+
 static struct tracer irqsoff_tracer __read_mostly =
 {
 	.name		= "irqsoff",
@@ -684,12 +678,21 @@ static struct tracer irqsoff_tracer __read_mostly =
 	.allow_instances = true,
 	.use_max_tr	= true,
 };
-# define register_irqsoff(trace) register_tracer(&trace)
-#else
-# define register_irqsoff(trace) do { } while (0)
-#endif
+#endif /*  CONFIG_IRQSOFF_TRACER */
 
 #ifdef CONFIG_PREEMPT_TRACER
+void tracer_preempt_on(unsigned long a0, unsigned long a1)
+{
+	if (preempt_trace(preempt_count()) && !irq_trace())
+		stop_critical_timing(a0, a1);
+}
+
+void tracer_preempt_off(unsigned long a0, unsigned long a1)
+{
+	if (preempt_trace(preempt_count()) && !irq_trace())
+		start_critical_timing(a0, a1);
+}
+
 static int preemptoff_tracer_init(struct trace_array *tr)
 {
 	trace_type = TRACER_PREEMPT_OFF;
@@ -697,11 +700,16 @@ static int preemptoff_tracer_init(struct trace_array *tr)
 	return __irqsoff_tracer_init(tr);
 }
 
+static void preemptoff_tracer_reset(struct trace_array *tr)
+{
+	__irqsoff_tracer_reset(tr);
+}
+
 static struct tracer preemptoff_tracer __read_mostly =
 {
 	.name		= "preemptoff",
 	.init		= preemptoff_tracer_init,
-	.reset		= irqsoff_tracer_reset,
+	.reset		= preemptoff_tracer_reset,
 	.start		= irqsoff_tracer_start,
 	.stop		= irqsoff_tracer_stop,
 	.print_max	= true,
@@ -716,13 +724,9 @@ static struct tracer preemptoff_tracer __read_mostly =
 	.allow_instances = true,
 	.use_max_tr	= true,
 };
-# define register_preemptoff(trace) register_tracer(&trace)
-#else
-# define register_preemptoff(trace) do { } while (0)
-#endif
+#endif /* CONFIG_PREEMPT_TRACER */
 
-#if defined(CONFIG_IRQSOFF_TRACER) && \
-	defined(CONFIG_PREEMPT_TRACER)
+#if defined(CONFIG_IRQSOFF_TRACER) && defined(CONFIG_PREEMPT_TRACER)
 
 static int preemptirqsoff_tracer_init(struct trace_array *tr)
 {
@@ -731,11 +735,16 @@ static int preemptirqsoff_tracer_init(struct trace_array *tr)
 	return __irqsoff_tracer_init(tr);
 }
 
+static void preemptirqsoff_tracer_reset(struct trace_array *tr)
+{
+	__irqsoff_tracer_reset(tr);
+}
+
 static struct tracer preemptirqsoff_tracer __read_mostly =
 {
 	.name		= "preemptirqsoff",
 	.init		= preemptirqsoff_tracer_init,
-	.reset		= irqsoff_tracer_reset,
+	.reset		= preemptirqsoff_tracer_reset,
 	.start		= irqsoff_tracer_start,
 	.stop		= irqsoff_tracer_stop,
 	.print_max	= true,
@@ -750,115 +759,21 @@ static struct tracer preemptirqsoff_tracer __read_mostly =
 	.allow_instances = true,
 	.use_max_tr	= true,
 };
-
-# define register_preemptirqsoff(trace) register_tracer(&trace)
-#else
-# define register_preemptirqsoff(trace) do { } while (0)
 #endif
 
 __init static int init_irqsoff_tracer(void)
 {
-	register_irqsoff(irqsoff_tracer);
-	register_preemptoff(preemptoff_tracer);
-	register_preemptirqsoff(preemptirqsoff_tracer);
+#ifdef CONFIG_IRQSOFF_TRACER
+	register_tracer(&irqsoff_tracer);
+#endif
+#ifdef CONFIG_PREEMPT_TRACER
+	register_tracer(&preemptoff_tracer);
+#endif
+#if defined(CONFIG_IRQSOFF_TRACER) && defined(CONFIG_PREEMPT_TRACER)
+	register_tracer(&preemptirqsoff_tracer);
+#endif
 
 	return 0;
 }
 core_initcall(init_irqsoff_tracer);
 #endif /* IRQSOFF_TRACER || PREEMPTOFF_TRACER */
-
-#ifndef CONFIG_IRQSOFF_TRACER
-static inline void tracer_hardirqs_on(void) { }
-static inline void tracer_hardirqs_off(void) { }
-static inline void tracer_hardirqs_on_caller(unsigned long caller_addr) { }
-static inline void tracer_hardirqs_off_caller(unsigned long caller_addr) { }
-#endif
-
-#ifndef CONFIG_PREEMPT_TRACER
-static inline void tracer_preempt_on(unsigned long a0, unsigned long a1) { }
-static inline void tracer_preempt_off(unsigned long a0, unsigned long a1) { }
-#endif
-
-#if defined(CONFIG_TRACE_IRQFLAGS) && !defined(CONFIG_PROVE_LOCKING)
-/* Per-cpu variable to prevent redundant calls when IRQs already off */
-static DEFINE_PER_CPU(int, tracing_irq_cpu);
-
-void trace_hardirqs_on(void)
-{
-	if (!this_cpu_read(tracing_irq_cpu))
-		return;
-
-	trace_irq_enable_rcuidle(CALLER_ADDR0, CALLER_ADDR1);
-	tracer_hardirqs_on();
-
-	this_cpu_write(tracing_irq_cpu, 0);
-}
-EXPORT_SYMBOL(trace_hardirqs_on);
-
-void trace_hardirqs_off(void)
-{
-	if (this_cpu_read(tracing_irq_cpu))
-		return;
-
-	this_cpu_write(tracing_irq_cpu, 1);
-
-	trace_irq_disable_rcuidle(CALLER_ADDR0, CALLER_ADDR1);
-	tracer_hardirqs_off();
-}
-EXPORT_SYMBOL(trace_hardirqs_off);
-
-__visible void trace_hardirqs_on_caller(unsigned long caller_addr)
-{
-	if (!this_cpu_read(tracing_irq_cpu))
-		return;
-
-	trace_irq_enable_rcuidle(CALLER_ADDR0, caller_addr);
-	tracer_hardirqs_on_caller(caller_addr);
-
-	this_cpu_write(tracing_irq_cpu, 0);
-}
-EXPORT_SYMBOL(trace_hardirqs_on_caller);
-
-__visible void trace_hardirqs_off_caller(unsigned long caller_addr)
-{
-	if (this_cpu_read(tracing_irq_cpu))
-		return;
-
-	this_cpu_write(tracing_irq_cpu, 1);
-
-	trace_irq_disable_rcuidle(CALLER_ADDR0, caller_addr);
-	tracer_hardirqs_off_caller(caller_addr);
-}
-EXPORT_SYMBOL(trace_hardirqs_off_caller);
-
-/*
- * Stubs:
- */
-
-void trace_softirqs_on(unsigned long ip)
-{
-}
-
-void trace_softirqs_off(unsigned long ip)
-{
-}
-
-inline void print_irqtrace_events(struct task_struct *curr)
-{
-}
-#endif
-
-#if defined(CONFIG_PREEMPT_TRACER) || \
-	(defined(CONFIG_DEBUG_PREEMPT) && defined(CONFIG_PREEMPTIRQ_EVENTS))
-void trace_preempt_on(unsigned long a0, unsigned long a1)
-{
-	trace_preempt_enable_rcuidle(a0, a1);
-	tracer_preempt_on(a0, a1);
-}
-
-void trace_preempt_off(unsigned long a0, unsigned long a1)
-{
-	trace_preempt_disable_rcuidle(a0, a1);
-	tracer_preempt_off(a0, a1);
-}
-#endif

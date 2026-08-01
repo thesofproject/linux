@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Sahara TouchIT-213 serial touchscreen driver
  *
@@ -9,11 +10,6 @@
  * and Dan Streetman <ddstreet@ieee.org>
  */
 
-/*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
- */
 
 #include <linux/errno.h>
 #include <linux/kernel.h>
@@ -143,7 +139,7 @@ static int touchit213_connect(struct serio *serio, struct serio_driver *drv)
 	struct input_dev *input_dev;
 	int err;
 
-	touchit213 = kzalloc(sizeof(struct touchit213), GFP_KERNEL);
+	touchit213 = kzalloc_obj(*touchit213);
 	input_dev = input_allocate_device();
 	if (!touchit213 || !input_dev) {
 		err = -ENOMEM;
@@ -152,8 +148,8 @@ static int touchit213_connect(struct serio *serio, struct serio_driver *drv)
 
 	touchit213->serio = serio;
 	touchit213->dev = input_dev;
-	snprintf(touchit213->phys, sizeof(touchit213->phys),
-		 "%s/input0", serio->phys);
+	scnprintf(touchit213->phys, sizeof(touchit213->phys),
+		  "%s/input0", serio->phys);
 
 	input_dev->name = "Sahara Touch-iT213 Serial TouchScreen";
 	input_dev->phys = touchit213->phys;

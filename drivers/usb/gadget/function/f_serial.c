@@ -233,13 +233,11 @@ static int gser_bind(struct usb_configuration *c, struct usb_function *f)
 	gser_ss_out_desc.bEndpointAddress = gser_fs_out_desc.bEndpointAddress;
 
 	status = usb_assign_descriptors(f, gser_fs_function, gser_hs_function,
-			gser_ss_function, NULL);
+			gser_ss_function, gser_ss_function);
 	if (status)
 		goto fail;
-	dev_dbg(&cdev->gadget->dev, "generic ttyGS%d: %s speed IN/%s OUT/%s\n",
+	dev_dbg(&cdev->gadget->dev, "generic ttyGS%d: IN/%s OUT/%s\n",
 		gser->port_num,
-		gadget_is_superspeed(c->cdev->gadget) ? "super" :
-		gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full",
 		gser->port.in->name, gser->port.out->name);
 	return 0;
 
@@ -262,9 +260,27 @@ static void serial_attr_release(struct config_item *item)
 	usb_put_function_instance(&opts->func_inst);
 }
 
-static struct configfs_item_operations serial_item_ops = {
+static const struct configfs_item_operations serial_item_ops = {
 	.release	= serial_attr_release,
 };
+
+#ifdef CONFIG_U_SERIAL_CONSOLE
+
+static ssize_t f_serial_console_store(struct config_item *item,
+		const char *page, size_t count)
+{
+	return gserial_set_console(to_f_serial_opts(item)->port_num,
+				   page, count);
+}
+
+static ssize_t f_serial_console_show(struct config_item *item, char *page)
+{
+	return gserial_get_console(to_f_serial_opts(item)->port_num, page);
+}
+
+CONFIGFS_ATTR(f_serial_, console);
+
+#endif /* CONFIG_U_SERIAL_CONSOLE */
 
 static ssize_t f_serial_port_num_show(struct config_item *item, char *page)
 {
@@ -274,6 +290,9 @@ static ssize_t f_serial_port_num_show(struct config_item *item, char *page)
 CONFIGFS_ATTR_RO(f_serial_, port_num);
 
 static struct configfs_attribute *acm_attrs[] = {
+#ifdef CONFIG_U_SERIAL_CONSOLE
+	&f_serial_attr_console,
+#endif
 	&f_serial_attr_port_num,
 	NULL,
 };
@@ -298,7 +317,7 @@ static struct usb_function_instance *gser_alloc_inst(void)
 	struct f_serial_opts *opts;
 	int ret;
 
-	opts = kzalloc(sizeof(*opts), GFP_KERNEL);
+	opts = kzalloc_obj(*opts);
 	if (!opts)
 		return ERR_PTR(-ENOMEM);
 
@@ -324,7 +343,31 @@ static void gser_free(struct usb_function *f)
 
 static void gser_unbind(struct usb_configuration *c, struct usb_function *f)
 {
+	struct f_gser	*gser = func_to_gser(f);
+
+	/* Ensure port is disconnected before unbinding */
+	gserial_disconnect(&gser->port);
 	usb_free_all_descriptors(f);
+}
+
+static void gser_resume(struct usb_function *f)
+{
+	struct f_gser *gser = func_to_gser(f);
+
+	gserial_resume(&gser->port);
+}
+
+static void gser_suspend(struct usb_function *f)
+{
+	struct f_gser *gser = func_to_gser(f);
+
+	gserial_suspend(&gser->port);
+}
+
+static int gser_get_status(struct usb_function *f)
+{
+	return (f->func_wakeup_armed ? USB_INTRF_STAT_FUNC_RW : 0) |
+		USB_INTRF_STAT_FUNC_RW_CAP;
 }
 
 static struct usb_function *gser_alloc(struct usb_function_instance *fi)
@@ -333,7 +376,7 @@ static struct usb_function *gser_alloc(struct usb_function_instance *fi)
 	struct f_serial_opts *opts;
 
 	/* allocate and initialize one new instance */
-	gser = kzalloc(sizeof(*gser), GFP_KERNEL);
+	gser = kzalloc_obj(*gser);
 	if (!gser)
 		return ERR_PTR(-ENOMEM);
 
@@ -348,11 +391,15 @@ static struct usb_function *gser_alloc(struct usb_function_instance *fi)
 	gser->port.func.set_alt = gser_set_alt;
 	gser->port.func.disable = gser_disable;
 	gser->port.func.free_func = gser_free;
+	gser->port.func.resume = gser_resume;
+	gser->port.func.suspend = gser_suspend;
+	gser->port.func.get_status = gser_get_status;
 
 	return &gser->port.func;
 }
 
 DECLARE_USB_FUNCTION_INIT(gser, gser_alloc_inst, gser_alloc);
+MODULE_DESCRIPTION("generic USB serial function driver");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Al Borchers");
 MODULE_AUTHOR("David Brownell");

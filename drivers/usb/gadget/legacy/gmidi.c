@@ -31,6 +31,7 @@
 /*-------------------------------------------------------------------------*/
 
 MODULE_AUTHOR("Ben Williamson");
+MODULE_DESCRIPTION("USB MIDI Gadget Driver");
 MODULE_LICENSE("GPL v2");
 
 static const char longname[] = "MIDI Gadget";
@@ -174,7 +175,7 @@ put:
 }
 
 static struct usb_composite_driver midi_driver = {
-	.name		= (char *) longname,
+	.name		= longname,
 	.dev		= &device_desc,
 	.strings	= dev_strings,
 	.max_speed	= USB_SPEED_HIGH,

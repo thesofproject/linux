@@ -17,6 +17,7 @@
  */
 
 #include <linux/pci_hotplug.h>
+#include <linux/pci_regs.h>
 
 extern int ibmphp_debug;
 
@@ -264,8 +265,6 @@ extern struct list_head ibmphp_slot_head;
 void ibmphp_free_ebda_hpc_queue(void);
 int ibmphp_access_ebda(void);
 struct slot *ibmphp_get_slot_from_physical_num(u8);
-int ibmphp_get_total_hp_slots(void);
-void ibmphp_free_ibm_slot(struct slot *);
 void ibmphp_free_bus_info_queue(void);
 void ibmphp_free_ebda_pci_rsrc_queue(void);
 struct bus_info *ibmphp_find_same_bus_num(u32);
@@ -288,8 +287,8 @@ int ibmphp_register_pci(void);
 
 /* pci specific defines */
 #define PCI_VENDOR_ID_NOTVALID		0xFFFF
-#define PCI_HEADER_TYPE_MULTIDEVICE	0x80
-#define PCI_HEADER_TYPE_MULTIBRIDGE	0x81
+#define PCI_HEADER_TYPE_MULTIDEVICE	(PCI_HEADER_TYPE_MFD|PCI_HEADER_TYPE_NORMAL)
+#define PCI_HEADER_TYPE_MULTIBRIDGE	(PCI_HEADER_TYPE_MFD|PCI_HEADER_TYPE_BRIDGE)
 
 #define LATENCY		0x64
 #define CACHE		64
@@ -352,7 +351,7 @@ struct resource_node {
 	u32 len;
 	int type;		/* MEM, IO, PFMEM */
 	u8 fromMem;		/* this is to indicate that the range is from
-				 * from the Memory bucket rather than from PFMem */
+				 * the Memory bucket rather than from PFMem */
 	struct resource_node *next;
 	struct resource_node *nextRange;	/* for the other mem range on bus */
 };
@@ -378,7 +377,6 @@ int ibmphp_add_pfmem_from_mem(struct resource_node *);
 struct bus_node *ibmphp_find_res_bus(u8);
 void ibmphp_print_test(void);	/* for debugging purposes */
 
-void ibmphp_hpc_initvars(void);
 int ibmphp_hpc_readslot(struct slot *, u8, u8 *);
 int ibmphp_hpc_writeslot(struct slot *, u8);
 void ibmphp_lock_operations(void);
@@ -698,7 +696,7 @@ struct slot {
 	u8 supported_bus_mode;
 	u8 flag;		/* this is for disable slot and polling */
 	u8 ctlr_index;
-	struct hotplug_slot *hotplug_slot;
+	struct hotplug_slot hotplug_slot;
 	struct controller *ctrl;
 	struct pci_func *func;
 	u8 irq[4];
@@ -737,10 +735,15 @@ struct controller {
 
 int ibmphp_init_devno(struct slot **);	/* This function is called from EBDA, so we need it not be static */
 int ibmphp_do_disable_slot(struct slot *slot_cur);
-int ibmphp_update_slot_info(struct slot *);	/* This function is called from HPC, so we need it to not be be static */
+int ibmphp_update_slot_info(struct slot *);	/* This function is called from HPC, so we need it to not be static */
 int ibmphp_configure_card(struct pci_func *, u8);
 int ibmphp_unconfigure_card(struct slot **, int);
-extern struct hotplug_slot_ops ibmphp_hotplug_slot_ops;
+extern const struct hotplug_slot_ops ibmphp_hotplug_slot_ops;
+
+static inline struct slot *to_slot(struct hotplug_slot *hotplug_slot)
+{
+	return container_of(hotplug_slot, struct slot, hotplug_slot);
+}
 
 #endif				//__IBMPHP_H
 

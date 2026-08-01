@@ -8,6 +8,7 @@
  * Copyright (c) 2007 Novell Inc.
  */
 
+#include <linux/device/driver.h>
 #include <linux/device.h>
 #include <linux/module.h>
 #include <linux/errno.h>
@@ -39,7 +40,7 @@ static struct device *next_device(struct klist_iter *i)
  * Iterate over the @drv's list of devices calling @fn for each one.
  */
 int driver_for_each_device(struct device_driver *drv, struct device *start,
-			   void *data, int (*fn)(struct device *, void *))
+			   void *data, device_iter_t fn)
 {
 	struct klist_iter i;
 	struct device *dev;
@@ -72,9 +73,9 @@ EXPORT_SYMBOL_GPL(driver_for_each_device);
  * if it does.  If the callback returns non-zero, this function will
  * return to the caller and not iterate over any more devices.
  */
-struct device *driver_find_device(struct device_driver *drv,
-				  struct device *start, void *data,
-				  int (*match)(struct device *dev, void *data))
+struct device *driver_find_device(const struct device_driver *drv,
+				  struct device *start, const void *data,
+				  device_match_t match)
 {
 	struct klist_iter i;
 	struct device *dev;
@@ -84,9 +85,12 @@ struct device *driver_find_device(struct device_driver *drv,
 
 	klist_iter_init_node(&drv->p->klist_devices, &i,
 			     (start ? &start->p->knode_driver : NULL));
-	while ((dev = next_device(&i)))
-		if (match(dev, data) && get_device(dev))
+	while ((dev = next_device(&i))) {
+		if (match(dev, data)) {
+			get_device(dev);
 			break;
+		}
+	}
 	klist_iter_exit(&i);
 	return dev;
 }
@@ -97,7 +101,7 @@ EXPORT_SYMBOL_GPL(driver_find_device);
  * @drv: driver.
  * @attr: driver attribute descriptor.
  */
-int driver_create_file(struct device_driver *drv,
+int driver_create_file(const struct device_driver *drv,
 		       const struct driver_attribute *attr)
 {
 	int error;
@@ -115,7 +119,7 @@ EXPORT_SYMBOL_GPL(driver_create_file);
  * @drv: driver.
  * @attr: driver attribute descriptor.
  */
-void driver_remove_file(struct device_driver *drv,
+void driver_remove_file(const struct device_driver *drv,
 			const struct driver_attribute *attr)
 {
 	if (drv)
@@ -123,14 +127,14 @@ void driver_remove_file(struct device_driver *drv,
 }
 EXPORT_SYMBOL_GPL(driver_remove_file);
 
-int driver_add_groups(struct device_driver *drv,
-		      const struct attribute_group **groups)
+int driver_add_groups(const struct device_driver *drv,
+		      const struct attribute_group *const *groups)
 {
 	return sysfs_create_groups(&drv->p->kobj, groups);
 }
 
-void driver_remove_groups(struct device_driver *drv,
-			  const struct attribute_group **groups)
+void driver_remove_groups(const struct device_driver *drv,
+			  const struct attribute_group *const *groups)
 {
 	sysfs_remove_groups(&drv->p->kobj, groups);
 }
@@ -148,17 +152,21 @@ int driver_register(struct device_driver *drv)
 	int ret;
 	struct device_driver *other;
 
-	BUG_ON(!drv->bus->p);
+	if (!bus_is_registered(drv->bus)) {
+		pr_err("Driver '%s' was unable to register with bus_type '%s' because the bus was not initialized.\n",
+			   drv->name, drv->bus->name);
+		return -EINVAL;
+	}
 
 	if ((drv->bus->probe && drv->probe) ||
 	    (drv->bus->remove && drv->remove) ||
 	    (drv->bus->shutdown && drv->shutdown))
-		printk(KERN_WARNING "Driver '%s' needs updating - please use "
+		pr_warn("Driver '%s' needs updating - please use "
 			"bus_type methods\n", drv->name);
 
 	other = driver_find(drv->name, drv->bus);
 	if (other) {
-		printk(KERN_ERR "Error: Driver '%s' is already registered, "
+		pr_err("Error: Driver '%s' is already registered, "
 			"aborting...\n", drv->name);
 		return -EBUSY;
 	}
@@ -172,6 +180,7 @@ int driver_register(struct device_driver *drv)
 		return ret;
 	}
 	kobject_uevent(&drv->p->kobj, KOBJ_ADD);
+	deferred_probe_extend_timeout();
 
 	return ret;
 }
@@ -193,30 +202,3 @@ void driver_unregister(struct device_driver *drv)
 	bus_remove_driver(drv);
 }
 EXPORT_SYMBOL_GPL(driver_unregister);
-
-/**
- * driver_find - locate driver on a bus by its name.
- * @name: name of the driver.
- * @bus: bus to scan for the driver.
- *
- * Call kset_find_obj() to iterate over list of drivers on
- * a bus to find driver by name. Return driver if found.
- *
- * This routine provides no locking to prevent the driver it returns
- * from being unregistered or unloaded while the caller is using it.
- * The caller is responsible for preventing this.
- */
-struct device_driver *driver_find(const char *name, struct bus_type *bus)
-{
-	struct kobject *k = kset_find_obj(bus->p->drivers_kset, name);
-	struct driver_private *priv;
-
-	if (k) {
-		/* Drop reference added by kset_find_obj() */
-		kobject_put(k);
-		priv = to_driver(k);
-		return priv->driver;
-	}
-	return NULL;
-}
-EXPORT_SYMBOL_GPL(driver_find);

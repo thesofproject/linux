@@ -6,7 +6,9 @@
 #include <linux/seq_file.h>
 #include <linux/poll.h>
 
-struct ring_buffer;
+#include <uapi/linux/trace_mmap.h>
+
+struct trace_buffer;
 struct ring_buffer_iter;
 
 /*
@@ -61,11 +63,12 @@ enum ring_buffer_type {
 
 unsigned ring_buffer_event_length(struct ring_buffer_event *event);
 void *ring_buffer_event_data(struct ring_buffer_event *event);
-u64 ring_buffer_event_time_stamp(struct ring_buffer_event *event);
+u64 ring_buffer_event_time_stamp(struct trace_buffer *buffer,
+				 struct ring_buffer_event *event);
 
 /*
  * ring_buffer_discard_commit will remove an event that has not
- *   ben committed yet. If this is used, then ring_buffer_unlock_commit
+ *   been committed yet. If this is used, then ring_buffer_unlock_commit
  *   must not be called on the discarded event. This function
  *   will try to remove the event from the ring buffer completely
  *   if another event has not been written after it.
@@ -77,14 +80,22 @@ u64 ring_buffer_event_time_stamp(struct ring_buffer_event *event);
  *  else
  *    ring_buffer_unlock_commit(buffer, event);
  */
-void ring_buffer_discard_commit(struct ring_buffer *buffer,
+void ring_buffer_discard_commit(struct trace_buffer *buffer,
 				struct ring_buffer_event *event);
 
 /*
  * size is in bytes for each per CPU buffer.
  */
-struct ring_buffer *
+struct trace_buffer *
 __ring_buffer_alloc(unsigned long size, unsigned flags, struct lock_class_key *key);
+
+struct trace_buffer *__ring_buffer_alloc_range(unsigned long size, unsigned flags,
+					       int order, unsigned long start,
+					       unsigned long range_size,
+					       unsigned long scratch_size,
+					       struct lock_class_key *key);
+
+void *ring_buffer_meta_scratch(struct trace_buffer *buffer, unsigned int *size);
 
 /*
  * Because the ring buffer is generic, if other users of the ring buffer get
@@ -97,110 +108,137 @@ __ring_buffer_alloc(unsigned long size, unsigned flags, struct lock_class_key *k
 	__ring_buffer_alloc((size), (flags), &__key);	\
 })
 
-int ring_buffer_wait(struct ring_buffer *buffer, int cpu, bool full);
-__poll_t ring_buffer_poll_wait(struct ring_buffer *buffer, int cpu,
-			  struct file *filp, poll_table *poll_table);
+/*
+ * Because the ring buffer is generic, if other users of the ring buffer get
+ * traced by ftrace, it can produce lockdep warnings. We need to keep each
+ * ring buffer's lock class separate.
+ */
+#define ring_buffer_alloc_range(size, flags, order, start, range_size, s_size)	\
+({									\
+	static struct lock_class_key __key;				\
+	__ring_buffer_alloc_range((size), (flags), (order), (start),	\
+				  (range_size), (s_size), &__key);	\
+})
 
+typedef bool (*ring_buffer_cond_fn)(void *data);
+int ring_buffer_wait(struct trace_buffer *buffer, int cpu, int full,
+		     ring_buffer_cond_fn cond, void *data);
+__poll_t ring_buffer_poll_wait(struct trace_buffer *buffer, int cpu,
+			  struct file *filp, poll_table *poll_table, int full);
+void ring_buffer_wake_waiters(struct trace_buffer *buffer, int cpu);
 
 #define RING_BUFFER_ALL_CPUS -1
 
-void ring_buffer_free(struct ring_buffer *buffer);
+void ring_buffer_free(struct trace_buffer *buffer);
 
-int ring_buffer_resize(struct ring_buffer *buffer, unsigned long size, int cpu);
+int ring_buffer_resize(struct trace_buffer *buffer, unsigned long size, int cpu);
 
-void ring_buffer_change_overwrite(struct ring_buffer *buffer, int val);
+void ring_buffer_change_overwrite(struct trace_buffer *buffer, int val);
 
-struct ring_buffer_event *ring_buffer_lock_reserve(struct ring_buffer *buffer,
+struct ring_buffer_event *ring_buffer_lock_reserve(struct trace_buffer *buffer,
 						   unsigned long length);
-int ring_buffer_unlock_commit(struct ring_buffer *buffer,
-			      struct ring_buffer_event *event);
-int ring_buffer_write(struct ring_buffer *buffer,
+int ring_buffer_unlock_commit(struct trace_buffer *buffer);
+int ring_buffer_write(struct trace_buffer *buffer,
 		      unsigned long length, void *data);
 
-void ring_buffer_nest_start(struct ring_buffer *buffer);
-void ring_buffer_nest_end(struct ring_buffer *buffer);
+void ring_buffer_nest_start(struct trace_buffer *buffer);
+void ring_buffer_nest_end(struct trace_buffer *buffer);
+
+DEFINE_GUARD(ring_buffer_nest, struct trace_buffer *,
+	     ring_buffer_nest_start(_T), ring_buffer_nest_end(_T))
 
 struct ring_buffer_event *
-ring_buffer_peek(struct ring_buffer *buffer, int cpu, u64 *ts,
+ring_buffer_peek(struct trace_buffer *buffer, int cpu, u64 *ts,
 		 unsigned long *lost_events);
 struct ring_buffer_event *
-ring_buffer_consume(struct ring_buffer *buffer, int cpu, u64 *ts,
+ring_buffer_consume(struct trace_buffer *buffer, int cpu, u64 *ts,
 		    unsigned long *lost_events);
 
 struct ring_buffer_iter *
-ring_buffer_read_prepare(struct ring_buffer *buffer, int cpu);
-void ring_buffer_read_prepare_sync(void);
-void ring_buffer_read_start(struct ring_buffer_iter *iter);
+ring_buffer_read_start(struct trace_buffer *buffer, int cpu, gfp_t flags);
 void ring_buffer_read_finish(struct ring_buffer_iter *iter);
 
 struct ring_buffer_event *
 ring_buffer_iter_peek(struct ring_buffer_iter *iter, u64 *ts);
-struct ring_buffer_event *
-ring_buffer_read(struct ring_buffer_iter *iter, u64 *ts);
+void ring_buffer_iter_advance(struct ring_buffer_iter *iter);
 void ring_buffer_iter_reset(struct ring_buffer_iter *iter);
 int ring_buffer_iter_empty(struct ring_buffer_iter *iter);
+bool ring_buffer_iter_dropped(struct ring_buffer_iter *iter);
 
-unsigned long ring_buffer_size(struct ring_buffer *buffer, int cpu);
+unsigned long ring_buffer_size(struct trace_buffer *buffer, int cpu);
+unsigned long ring_buffer_max_event_size(struct trace_buffer *buffer);
 
-void ring_buffer_reset_cpu(struct ring_buffer *buffer, int cpu);
-void ring_buffer_reset(struct ring_buffer *buffer);
+void ring_buffer_reset_cpu(struct trace_buffer *buffer, int cpu);
+void ring_buffer_reset_online_cpus(struct trace_buffer *buffer);
+void ring_buffer_reset(struct trace_buffer *buffer);
 
 #ifdef CONFIG_RING_BUFFER_ALLOW_SWAP
-int ring_buffer_swap_cpu(struct ring_buffer *buffer_a,
-			 struct ring_buffer *buffer_b, int cpu);
+int ring_buffer_swap_cpu(struct trace_buffer *buffer_a,
+			 struct trace_buffer *buffer_b, int cpu);
 #else
 static inline int
-ring_buffer_swap_cpu(struct ring_buffer *buffer_a,
-		     struct ring_buffer *buffer_b, int cpu)
+ring_buffer_swap_cpu(struct trace_buffer *buffer_a,
+		     struct trace_buffer *buffer_b, int cpu)
 {
 	return -ENODEV;
 }
 #endif
 
-bool ring_buffer_empty(struct ring_buffer *buffer);
-bool ring_buffer_empty_cpu(struct ring_buffer *buffer, int cpu);
+bool ring_buffer_empty(struct trace_buffer *buffer);
+bool ring_buffer_empty_cpu(struct trace_buffer *buffer, int cpu);
 
-void ring_buffer_record_disable(struct ring_buffer *buffer);
-void ring_buffer_record_enable(struct ring_buffer *buffer);
-void ring_buffer_record_off(struct ring_buffer *buffer);
-void ring_buffer_record_on(struct ring_buffer *buffer);
-int ring_buffer_record_is_on(struct ring_buffer *buffer);
-void ring_buffer_record_disable_cpu(struct ring_buffer *buffer, int cpu);
-void ring_buffer_record_enable_cpu(struct ring_buffer *buffer, int cpu);
+void ring_buffer_record_disable(struct trace_buffer *buffer);
+void ring_buffer_record_enable(struct trace_buffer *buffer);
+void ring_buffer_record_off(struct trace_buffer *buffer);
+void ring_buffer_record_on(struct trace_buffer *buffer);
+bool ring_buffer_record_is_on(struct trace_buffer *buffer);
+bool ring_buffer_record_is_set_on(struct trace_buffer *buffer);
+bool ring_buffer_record_is_on_cpu(struct trace_buffer *buffer, int cpu);
+void ring_buffer_record_disable_cpu(struct trace_buffer *buffer, int cpu);
+void ring_buffer_record_enable_cpu(struct trace_buffer *buffer, int cpu);
 
-u64 ring_buffer_oldest_event_ts(struct ring_buffer *buffer, int cpu);
-unsigned long ring_buffer_bytes_cpu(struct ring_buffer *buffer, int cpu);
-unsigned long ring_buffer_entries(struct ring_buffer *buffer);
-unsigned long ring_buffer_overruns(struct ring_buffer *buffer);
-unsigned long ring_buffer_entries_cpu(struct ring_buffer *buffer, int cpu);
-unsigned long ring_buffer_overrun_cpu(struct ring_buffer *buffer, int cpu);
-unsigned long ring_buffer_commit_overrun_cpu(struct ring_buffer *buffer, int cpu);
-unsigned long ring_buffer_dropped_events_cpu(struct ring_buffer *buffer, int cpu);
-unsigned long ring_buffer_read_events_cpu(struct ring_buffer *buffer, int cpu);
+u64 ring_buffer_oldest_event_ts(struct trace_buffer *buffer, int cpu);
+unsigned long ring_buffer_bytes_cpu(struct trace_buffer *buffer, int cpu);
+unsigned long ring_buffer_entries(struct trace_buffer *buffer);
+unsigned long ring_buffer_overruns(struct trace_buffer *buffer);
+unsigned long ring_buffer_entries_cpu(struct trace_buffer *buffer, int cpu);
+unsigned long ring_buffer_overrun_cpu(struct trace_buffer *buffer, int cpu);
+unsigned long ring_buffer_commit_overrun_cpu(struct trace_buffer *buffer, int cpu);
+unsigned long ring_buffer_dropped_events_cpu(struct trace_buffer *buffer, int cpu);
+unsigned long ring_buffer_read_events_cpu(struct trace_buffer *buffer, int cpu);
 
-u64 ring_buffer_time_stamp(struct ring_buffer *buffer, int cpu);
-void ring_buffer_normalize_time_stamp(struct ring_buffer *buffer,
+u64 ring_buffer_time_stamp(struct trace_buffer *buffer);
+void ring_buffer_normalize_time_stamp(struct trace_buffer *buffer,
 				      int cpu, u64 *ts);
-void ring_buffer_set_clock(struct ring_buffer *buffer,
+void ring_buffer_set_clock(struct trace_buffer *buffer,
 			   u64 (*clock)(void));
-void ring_buffer_set_time_stamp_abs(struct ring_buffer *buffer, bool abs);
-bool ring_buffer_time_stamp_abs(struct ring_buffer *buffer);
+void ring_buffer_set_time_stamp_abs(struct trace_buffer *buffer, bool abs);
+bool ring_buffer_time_stamp_abs(struct trace_buffer *buffer);
 
-size_t ring_buffer_page_len(void *page);
+size_t ring_buffer_nr_dirty_pages(struct trace_buffer *buffer, int cpu);
 
-
-void *ring_buffer_alloc_read_page(struct ring_buffer *buffer, int cpu);
-void ring_buffer_free_read_page(struct ring_buffer *buffer, int cpu, void *data);
-int ring_buffer_read_page(struct ring_buffer *buffer, void **data_page,
+struct buffer_data_read_page;
+struct buffer_data_read_page *
+ring_buffer_alloc_read_page(struct trace_buffer *buffer, int cpu);
+void ring_buffer_free_read_page(struct trace_buffer *buffer, int cpu,
+				struct buffer_data_read_page *page);
+int ring_buffer_read_page(struct trace_buffer *buffer,
+			  struct buffer_data_read_page *data_page,
 			  size_t len, int cpu, int full);
+void *ring_buffer_read_page_data(struct buffer_data_read_page *page);
 
 struct trace_seq;
 
 int ring_buffer_print_entry_header(struct trace_seq *s);
-int ring_buffer_print_page_header(struct trace_seq *s);
+int ring_buffer_print_page_header(struct trace_buffer *buffer, struct trace_seq *s);
+
+int ring_buffer_subbuf_order_get(struct trace_buffer *buffer);
+int ring_buffer_subbuf_order_set(struct trace_buffer *buffer, int order);
+int ring_buffer_subbuf_size_get(struct trace_buffer *buffer);
 
 enum ring_buffer_flags {
 	RB_FL_OVERWRITE		= 1 << 0,
+	RB_FL_TESTING		= 1 << 1,
 };
 
 #ifdef CONFIG_RING_BUFFER
@@ -209,4 +247,67 @@ int trace_rb_cpu_prepare(unsigned int cpu, struct hlist_node *node);
 #define trace_rb_cpu_prepare	NULL
 #endif
 
+int ring_buffer_map(struct trace_buffer *buffer, int cpu,
+		    struct vm_area_struct *vma);
+void ring_buffer_map_dup(struct trace_buffer *buffer, int cpu);
+int ring_buffer_unmap(struct trace_buffer *buffer, int cpu);
+int ring_buffer_map_get_reader(struct trace_buffer *buffer, int cpu);
+
+struct ring_buffer_desc {
+	int		cpu;
+	unsigned int	nr_page_va; /* excludes the meta page */
+	unsigned long	meta_va;
+	unsigned long	page_va[] __counted_by(nr_page_va);
+};
+
+struct trace_buffer_desc {
+	int		nr_cpus;
+	size_t		struct_len;
+	char		__data[]; /* list of ring_buffer_desc */
+};
+
+static inline struct ring_buffer_desc *__next_ring_buffer_desc(struct ring_buffer_desc *desc)
+{
+	size_t len = struct_size(desc, page_va, desc->nr_page_va);
+
+	return (struct ring_buffer_desc *)((void *)desc + len);
+}
+
+static inline struct ring_buffer_desc *__first_ring_buffer_desc(struct trace_buffer_desc *desc)
+{
+	return (struct ring_buffer_desc *)(&desc->__data[0]);
+}
+
+static inline size_t trace_buffer_desc_size(size_t buffer_size, unsigned int nr_cpus)
+{
+	unsigned int nr_pages = max(DIV_ROUND_UP(buffer_size, PAGE_SIZE), 2UL) + 1;
+	struct ring_buffer_desc *rbdesc;
+
+	return size_add(offsetof(struct trace_buffer_desc, __data),
+			size_mul(nr_cpus, struct_size(rbdesc, page_va, nr_pages)));
+}
+
+#define for_each_ring_buffer_desc(__pdesc, __cpu, __trace_pdesc)		\
+	for (__pdesc = __first_ring_buffer_desc(__trace_pdesc), __cpu = 0;	\
+	     (__cpu) < (__trace_pdesc)->nr_cpus;				\
+	     (__cpu)++, __pdesc = __next_ring_buffer_desc(__pdesc))
+
+struct ring_buffer_remote {
+	struct trace_buffer_desc	*desc;
+	int				(*swap_reader_page)(unsigned int cpu, void *priv);
+	int				(*reset)(unsigned int cpu, void *priv);
+	void				*priv;
+};
+
+int ring_buffer_poll_remote(struct trace_buffer *buffer, int cpu);
+
+struct trace_buffer *
+__ring_buffer_alloc_remote(struct ring_buffer_remote *remote,
+			   struct lock_class_key *key);
+
+#define ring_buffer_alloc_remote(remote)			\
+({								\
+	static struct lock_class_key __key;			\
+	__ring_buffer_alloc_remote(remote, &__key);		\
+})
 #endif /* _LINUX_RING_BUFFER_H */

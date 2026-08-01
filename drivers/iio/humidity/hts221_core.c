@@ -1,11 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * STMicroelectronics hts221 sensor driver
  *
  * Copyright 2016 STMicroelectronics Inc.
  *
  * Lorenzo Bianconi <lorenzo.bianconi@st.com>
- *
- * Licensed under the GPL-2.
  */
 
 #include <linux/kernel.h>
@@ -15,6 +14,7 @@
 #include <linux/delay.h>
 #include <linux/pm.h>
 #include <linux/regmap.h>
+#include <linux/regulator/consumer.h>
 #include <linux/bitfield.h>
 
 #include "hts221.h"
@@ -24,13 +24,6 @@
 
 #define HTS221_REG_CNTRL1_ADDR		0x20
 #define HTS221_REG_CNTRL2_ADDR		0x21
-
-#define HTS221_REG_AVG_ADDR		0x10
-#define HTS221_REG_H_OUT_L		0x28
-#define HTS221_REG_T_OUT_L		0x2a
-
-#define HTS221_HUMIDITY_AVG_MASK	0x07
-#define HTS221_TEMP_AVG_MASK		0x38
 
 #define HTS221_ODR_MASK			0x03
 #define HTS221_BDU_MASK			BIT(2)
@@ -67,8 +60,8 @@ static const struct hts221_odr hts221_odr_table[] = {
 
 static const struct hts221_avg hts221_avg_list[] = {
 	{
-		.addr = HTS221_REG_AVG_ADDR,
-		.mask = HTS221_HUMIDITY_AVG_MASK,
+		.addr = 0x10,
+		.mask = 0x07,
 		.avg_avl = {
 			4, /* 0.4 %RH */
 			8, /* 0.3 %RH */
@@ -81,8 +74,8 @@ static const struct hts221_avg hts221_avg_list[] = {
 		},
 	},
 	{
-		.addr = HTS221_REG_AVG_ADDR,
-		.mask = HTS221_TEMP_AVG_MASK,
+		.addr = 0x10,
+		.mask = 0x38,
 		.avg_avl = {
 			2, /* 0.08 degC */
 			4, /* 0.05 degC */
@@ -99,7 +92,7 @@ static const struct hts221_avg hts221_avg_list[] = {
 static const struct iio_chan_spec hts221_channels[] = {
 	{
 		.type = IIO_HUMIDITYRELATIVE,
-		.address = HTS221_REG_H_OUT_L,
+		.address = 0x28,
 		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
 				      BIT(IIO_CHAN_INFO_OFFSET) |
 				      BIT(IIO_CHAN_INFO_SCALE) |
@@ -115,7 +108,7 @@ static const struct iio_chan_spec hts221_channels[] = {
 	},
 	{
 		.type = IIO_TEMP,
-		.address = HTS221_REG_T_OUT_L,
+		.address = 0x2a,
 		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
 				      BIT(IIO_CHAN_INFO_OFFSET) |
 				      BIT(IIO_CHAN_INFO_SCALE) |
@@ -425,31 +418,22 @@ static int hts221_read_oneshot(struct hts221_hw *hw, u8 addr, int *val)
 	return IIO_VAL_INT;
 }
 
-static int hts221_read_raw(struct iio_dev *iio_dev,
-			   struct iio_chan_spec const *ch,
-			   int *val, int *val2, long mask)
+static int __hts221_read_raw(struct iio_dev *iio_dev,
+			     struct iio_chan_spec const *ch,
+			     int *val, int *val2, long mask)
 {
 	struct hts221_hw *hw = iio_priv(iio_dev);
-	int ret;
-
-	ret = iio_device_claim_direct_mode(iio_dev);
-	if (ret)
-		return ret;
 
 	switch (mask) {
 	case IIO_CHAN_INFO_RAW:
-		ret = hts221_read_oneshot(hw, ch->address, val);
-		break;
+		return hts221_read_oneshot(hw, ch->address, val);
 	case IIO_CHAN_INFO_SCALE:
-		ret = hts221_get_sensor_scale(hw, ch->type, val, val2);
-		break;
+		return hts221_get_sensor_scale(hw, ch->type, val, val2);
 	case IIO_CHAN_INFO_OFFSET:
-		ret = hts221_get_sensor_offset(hw, ch->type, val, val2);
-		break;
+		return hts221_get_sensor_offset(hw, ch->type, val, val2);
 	case IIO_CHAN_INFO_SAMP_FREQ:
 		*val = hw->odr;
-		ret = IIO_VAL_INT;
-		break;
+		return IIO_VAL_INT;
 	case IIO_CHAN_INFO_OVERSAMPLING_RATIO: {
 		u8 idx;
 		const struct hts221_avg *avg;
@@ -459,64 +443,72 @@ static int hts221_read_raw(struct iio_dev *iio_dev,
 			avg = &hts221_avg_list[HTS221_SENSOR_H];
 			idx = hw->sensors[HTS221_SENSOR_H].cur_avg_idx;
 			*val = avg->avg_avl[idx];
-			ret = IIO_VAL_INT;
-			break;
+			return IIO_VAL_INT;
 		case IIO_TEMP:
 			avg = &hts221_avg_list[HTS221_SENSOR_T];
 			idx = hw->sensors[HTS221_SENSOR_T].cur_avg_idx;
 			*val = avg->avg_avl[idx];
-			ret = IIO_VAL_INT;
-			break;
+			return IIO_VAL_INT;
 		default:
-			ret = -EINVAL;
-			break;
+			return -EINVAL;
 		}
-		break;
 	}
 	default:
-		ret = -EINVAL;
-		break;
+		return -EINVAL;
 	}
+}
 
-	iio_device_release_direct_mode(iio_dev);
+static int hts221_read_raw(struct iio_dev *iio_dev,
+			   struct iio_chan_spec const *ch,
+			   int *val, int *val2, long mask)
+{
+	int ret;
+
+	if (!iio_device_claim_direct(iio_dev))
+		return -EBUSY;
+
+	ret = __hts221_read_raw(iio_dev, ch, val, val2, mask);
+
+	iio_device_release_direct(iio_dev);
 
 	return ret;
+}
+
+static int __hts221_write_raw(struct iio_dev *iio_dev,
+			      struct iio_chan_spec const *chan,
+			      int val, long mask)
+{
+	struct hts221_hw *hw = iio_priv(iio_dev);
+
+	switch (mask) {
+	case IIO_CHAN_INFO_SAMP_FREQ:
+		return hts221_update_odr(hw, val);
+	case IIO_CHAN_INFO_OVERSAMPLING_RATIO:
+		switch (chan->type) {
+		case IIO_HUMIDITYRELATIVE:
+			return hts221_update_avg(hw, HTS221_SENSOR_H, val);
+		case IIO_TEMP:
+			return hts221_update_avg(hw, HTS221_SENSOR_T, val);
+		default:
+			return -EINVAL;
+		}
+	default:
+		return -EINVAL;
+	}
 }
 
 static int hts221_write_raw(struct iio_dev *iio_dev,
 			    struct iio_chan_spec const *chan,
 			    int val, int val2, long mask)
 {
-	struct hts221_hw *hw = iio_priv(iio_dev);
 	int ret;
 
-	ret = iio_device_claim_direct_mode(iio_dev);
-	if (ret)
-		return ret;
+	if (!iio_device_claim_direct(iio_dev))
+		return -EBUSY;
 
-	switch (mask) {
-	case IIO_CHAN_INFO_SAMP_FREQ:
-		ret = hts221_update_odr(hw, val);
-		break;
-	case IIO_CHAN_INFO_OVERSAMPLING_RATIO:
-		switch (chan->type) {
-		case IIO_HUMIDITYRELATIVE:
-			ret = hts221_update_avg(hw, HTS221_SENSOR_H, val);
-			break;
-		case IIO_TEMP:
-			ret = hts221_update_avg(hw, HTS221_SENSOR_T, val);
-			break;
-		default:
-			ret = -EINVAL;
-			break;
-		}
-		break;
-	default:
-		ret = -EINVAL;
-		break;
-	}
+	ret = __hts221_write_raw(iio_dev, chan, val, mask);
 
-	iio_device_release_direct_mode(iio_dev);
+	iio_device_release_direct(iio_dev);
 
 	return ret;
 }
@@ -555,6 +547,19 @@ static const struct iio_info hts221_info = {
 
 static const unsigned long hts221_scan_masks[] = {0x3, 0x0};
 
+static int hts221_init_regulators(struct device *dev)
+{
+	int err;
+
+	err = devm_regulator_get_enable(dev, "vdd");
+	if (err)
+		return dev_err_probe(dev, err, "failed to get vdd regulator\n");
+
+	msleep(50);
+
+	return 0;
+}
+
 int hts221_probe(struct device *dev, int irq, const char *name,
 		 struct regmap *regmap)
 {
@@ -567,7 +572,7 @@ int hts221_probe(struct device *dev, int irq, const char *name,
 	if (!iio_dev)
 		return -ENOMEM;
 
-	dev_set_drvdata(dev, (void *)iio_dev);
+	dev_set_drvdata(dev, iio_dev);
 
 	hw = iio_priv(iio_dev);
 	hw->name = name;
@@ -575,12 +580,15 @@ int hts221_probe(struct device *dev, int irq, const char *name,
 	hw->irq = irq;
 	hw->regmap = regmap;
 
+	err = hts221_init_regulators(dev);
+	if (err)
+		return err;
+
 	err = hts221_check_whoami(hw);
 	if (err < 0)
 		return err;
 
 	iio_dev->modes = INDIO_DIRECT_MODE;
-	iio_dev->dev.parent = hw->dev;
 	iio_dev->available_scan_masks = hts221_scan_masks;
 	iio_dev->channels = hts221_channels;
 	iio_dev->num_channels = ARRAY_SIZE(hts221_channels);
@@ -629,20 +637,20 @@ int hts221_probe(struct device *dev, int irq, const char *name,
 	}
 
 	if (hw->irq > 0) {
-		err = hts221_allocate_buffers(hw);
+		err = hts221_allocate_buffers(iio_dev);
 		if (err < 0)
 			return err;
 
-		err = hts221_allocate_trigger(hw);
+		err = hts221_allocate_trigger(iio_dev);
 		if (err)
 			return err;
 	}
 
 	return devm_iio_device_register(hw->dev, iio_dev);
 }
-EXPORT_SYMBOL(hts221_probe);
+EXPORT_SYMBOL_NS(hts221_probe, "IIO_HTS221");
 
-static int __maybe_unused hts221_suspend(struct device *dev)
+static int hts221_suspend(struct device *dev)
 {
 	struct iio_dev *iio_dev = dev_get_drvdata(dev);
 	struct hts221_hw *hw = iio_priv(iio_dev);
@@ -652,7 +660,7 @@ static int __maybe_unused hts221_suspend(struct device *dev)
 				  FIELD_PREP(HTS221_ENABLE_MASK, false));
 }
 
-static int __maybe_unused hts221_resume(struct device *dev)
+static int hts221_resume(struct device *dev)
 {
 	struct iio_dev *iio_dev = dev_get_drvdata(dev);
 	struct hts221_hw *hw = iio_priv(iio_dev);
@@ -666,10 +674,8 @@ static int __maybe_unused hts221_resume(struct device *dev)
 	return err;
 }
 
-const struct dev_pm_ops hts221_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(hts221_suspend, hts221_resume)
-};
-EXPORT_SYMBOL(hts221_pm_ops);
+EXPORT_NS_SIMPLE_DEV_PM_OPS(hts221_pm_ops, hts221_suspend, hts221_resume,
+			    IIO_HTS221);
 
 MODULE_AUTHOR("Lorenzo Bianconi <lorenzo.bianconi@st.com>");
 MODULE_DESCRIPTION("STMicroelectronics hts221 sensor driver");

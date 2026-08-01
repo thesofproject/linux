@@ -47,7 +47,7 @@ int atari_partition(struct parsed_partitions *state)
 	 * ATARI partition scheme supports 512 lba only.  If this is not
 	 * the case, bail early to avoid miscalculating hd_size.
 	 */
-	if (bdev_logical_block_size(state->bdev) != 512)
+	if (queue_logical_block_size(state->disk->queue) != 512)
 		return 0;
 
 	rs = read_part_sector(state, 0, &sect);
@@ -55,7 +55,7 @@ int atari_partition(struct parsed_partitions *state)
 		return -1;
 
 	/* Verify this is an Atari rootsector: */
-	hd_size = state->bdev->bd_inode->i_size >> 9;
+	hd_size = get_capacity(state->disk);
 	if (!VALID_PARTITION(&rs->part[0], hd_size) &&
 	    !VALID_PARTITION(&rs->part[1], hd_size) &&
 	    !VALID_PARTITION(&rs->part[2], hd_size) &&
@@ -70,7 +70,7 @@ int atari_partition(struct parsed_partitions *state)
 	}
 
 	pi = &rs->part[0];
-	strlcat(state->pp_buf, " AHDI", PAGE_SIZE);
+	seq_buf_puts(&state->pp_buf, " AHDI");
 	for (slot = 1; pi < &rs->part[4] && slot < state->limit; slot++, pi++) {
 		struct rootsector *xrs;
 		Sector sect2;
@@ -89,7 +89,7 @@ int atari_partition(struct parsed_partitions *state)
 #ifdef ICD_PARTS
 		part_fmt = 1;
 #endif
-		strlcat(state->pp_buf, " XGM<", PAGE_SIZE);
+		seq_buf_puts(&state->pp_buf, " XGM<");
 		partsect = extensect = be32_to_cpu(pi->st);
 		while (1) {
 			xrs = read_part_sector(state, partsect, &sect2);
@@ -128,30 +128,29 @@ int atari_partition(struct parsed_partitions *state)
 				break;
 			}
 		}
-		strlcat(state->pp_buf, " >", PAGE_SIZE);
+		seq_buf_puts(&state->pp_buf, " >");
 	}
 #ifdef ICD_PARTS
 	if ( part_fmt!=1 ) { /* no extended partitions -> test ICD-format */
 		pi = &rs->icdpart[0];
 		/* sanity check: no ICD format if first partition invalid */
 		if (OK_id(pi->id)) {
-			strlcat(state->pp_buf, " ICD<", PAGE_SIZE);
+			seq_buf_puts(&state->pp_buf, " ICD<");
 			for (; pi < &rs->icdpart[8] && slot < state->limit; slot++, pi++) {
 				/* accept only GEM,BGM,RAW,LNX,SWP partitions */
 				if (!((pi->flg & 1) && OK_id(pi->id)))
 					continue;
-				part_fmt = 2;
 				put_partition (state, slot,
 						be32_to_cpu(pi->st),
 						be32_to_cpu(pi->siz));
 			}
-			strlcat(state->pp_buf, " >", PAGE_SIZE);
+			seq_buf_puts(&state->pp_buf, " >");
 		}
 	}
 #endif
 	put_dev_sector(sect);
 
-	strlcat(state->pp_buf, "\n", PAGE_SIZE);
+	seq_buf_puts(&state->pp_buf, "\n");
 
 	return 1;
 }

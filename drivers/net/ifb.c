@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* drivers/net/ifb.c:
 
 	The purpose of this driver is to provide a device that allows
@@ -15,14 +16,10 @@
 	by Patrick McHardy and then maintained by Andre Correa.
 
 	You need the tc action  mirror or redirect to feed this device
-       	packets.
+	packets.
 
-	This program is free software; you can redistribute it and/or
-	modify it under the terms of the GNU General Public License
-	as published by the Free Software Foundation; either version
-	2 of the License, or (at your option) any later version.
 
-  	Authors:	Jamal Hadi Salim (2005)
+	Authors:	Jamal Hadi Salim (2005)
 
 */
 
@@ -30,41 +27,68 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/netdevice.h>
+#include <linux/ethtool.h>
 #include <linux/etherdevice.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/moduleparam.h>
+#include <linux/netfilter_netdev.h>
 #include <net/pkt_sched.h>
 #include <net/net_namespace.h>
 
 #define TX_Q_LIMIT    32
+
+struct ifb_q_stats {
+	u64_stats_t packets;
+	u64_stats_t bytes;
+	struct u64_stats_sync	sync;
+};
+
 struct ifb_q_private {
 	struct net_device	*dev;
 	struct tasklet_struct   ifb_tasklet;
 	int			tasklet_pending;
 	int			txqnum;
 	struct sk_buff_head     rq;
-	u64			rx_packets;
-	u64			rx_bytes;
-	struct u64_stats_sync	rsync;
-
-	struct u64_stats_sync	tsync;
-	u64			tx_packets;
-	u64			tx_bytes;
 	struct sk_buff_head     tq;
+	struct ifb_q_stats	rx_stats;
+	struct ifb_q_stats	tx_stats;
 } ____cacheline_aligned_in_smp;
 
 struct ifb_dev_private {
 	struct ifb_q_private *tx_private;
 };
 
+/* For ethtools stats. */
+struct ifb_q_stats_desc {
+	char	desc[ETH_GSTRING_LEN];
+	size_t	offset;
+};
+
+#define IFB_Q_STAT(m)	offsetof(struct ifb_q_stats, m)
+
+static const struct ifb_q_stats_desc ifb_q_stats_desc[] = {
+	{ "packets",	IFB_Q_STAT(packets) },
+	{ "bytes",	IFB_Q_STAT(bytes) },
+};
+
+#define IFB_Q_STATS_LEN	ARRAY_SIZE(ifb_q_stats_desc)
+
 static netdev_tx_t ifb_xmit(struct sk_buff *skb, struct net_device *dev);
 static int ifb_open(struct net_device *dev);
 static int ifb_close(struct net_device *dev);
 
-static void ifb_ri_tasklet(unsigned long _txp)
+static void ifb_update_q_stats(struct ifb_q_stats *stats, int len)
 {
-	struct ifb_q_private *txp = (struct ifb_q_private *)_txp;
+	u64_stats_update_begin(&stats->sync);
+	u64_stats_inc(&stats->packets);
+	u64_stats_add(&stats->bytes, len);
+	u64_stats_update_end(&stats->sync);
+}
+
+static void ifb_ri_tasklet(struct tasklet_struct *t)
+{
+	struct ifb_q_private *txp = from_tasklet(txp, t, ifb_tasklet);
 	struct netdev_queue *txq;
 	struct sk_buff *skb;
 
@@ -78,13 +102,14 @@ static void ifb_ri_tasklet(unsigned long _txp)
 	}
 
 	while ((skb = __skb_dequeue(&txp->tq)) != NULL) {
-		skb->tc_redirected = 0;
+		/* Skip tc and netfilter to prevent redirection loop. */
+		skb->redirected = 0;
+#ifdef CONFIG_NET_CLS_ACT
 		skb->tc_skip_classify = 1;
+#endif
+		nf_skip_egress(skb, true);
 
-		u64_stats_update_begin(&txp->tsync);
-		txp->tx_packets++;
-		txp->tx_bytes += skb->len;
-		u64_stats_update_end(&txp->tsync);
+		ifb_update_q_stats(&txp->tx_stats, skb->len);
 
 		rcu_read_lock();
 		skb->dev = dev_get_by_index_rcu(dev_net(txp->dev), skb->skb_iif);
@@ -99,10 +124,10 @@ static void ifb_ri_tasklet(unsigned long _txp)
 		rcu_read_unlock();
 		skb->skb_iif = txp->dev->ifindex;
 
-		if (!skb->tc_from_ingress) {
+		if (!skb->from_ingress) {
 			dev_queue_xmit(skb);
 		} else {
-			skb_pull(skb, skb->mac_len);
+			skb_pull_rcsum(skb, skb->mac_len);
 			netif_receive_skb(skb);
 		}
 	}
@@ -137,18 +162,18 @@ static void ifb_stats64(struct net_device *dev,
 
 	for (i = 0; i < dev->num_tx_queues; i++,txp++) {
 		do {
-			start = u64_stats_fetch_begin_irq(&txp->rsync);
-			packets = txp->rx_packets;
-			bytes = txp->rx_bytes;
-		} while (u64_stats_fetch_retry_irq(&txp->rsync, start));
+			start = u64_stats_fetch_begin(&txp->rx_stats.sync);
+			packets = u64_stats_read(&txp->rx_stats.packets);
+			bytes = u64_stats_read(&txp->rx_stats.bytes);
+		} while (u64_stats_fetch_retry(&txp->rx_stats.sync, start));
 		stats->rx_packets += packets;
 		stats->rx_bytes += bytes;
 
 		do {
-			start = u64_stats_fetch_begin_irq(&txp->tsync);
-			packets = txp->tx_packets;
-			bytes = txp->tx_bytes;
-		} while (u64_stats_fetch_retry_irq(&txp->tsync, start));
+			start = u64_stats_fetch_begin(&txp->tx_stats.sync);
+			packets = u64_stats_read(&txp->tx_stats.packets);
+			bytes = u64_stats_read(&txp->tx_stats.bytes);
+		} while (u64_stats_fetch_retry(&txp->tx_stats.sync, start));
 		stats->tx_packets += packets;
 		stats->tx_bytes += bytes;
 	}
@@ -162,7 +187,7 @@ static int ifb_dev_init(struct net_device *dev)
 	struct ifb_q_private *txp;
 	int i;
 
-	txp = kcalloc(dev->num_tx_queues, sizeof(*txp), GFP_KERNEL);
+	txp = kzalloc_objs(*txp, dev->num_tx_queues);
 	if (!txp)
 		return -ENOMEM;
 	dp->tx_private = txp;
@@ -171,13 +196,80 @@ static int ifb_dev_init(struct net_device *dev)
 		txp->dev = dev;
 		__skb_queue_head_init(&txp->rq);
 		__skb_queue_head_init(&txp->tq);
-		u64_stats_init(&txp->rsync);
-		u64_stats_init(&txp->tsync);
-		tasklet_init(&txp->ifb_tasklet, ifb_ri_tasklet,
-			     (unsigned long)txp);
+		u64_stats_init(&txp->rx_stats.sync);
+		u64_stats_init(&txp->tx_stats.sync);
+		tasklet_setup(&txp->ifb_tasklet, ifb_ri_tasklet);
 		netif_tx_start_queue(netdev_get_tx_queue(dev, i));
 	}
 	return 0;
+}
+
+static void ifb_get_strings(struct net_device *dev, u32 stringset, u8 *buf)
+{
+	u8 *p = buf;
+	int i, j;
+
+	switch (stringset) {
+	case ETH_SS_STATS:
+		for (i = 0; i < dev->num_tx_queues; i++)
+			for (j = 0; j < IFB_Q_STATS_LEN; j++)
+				ethtool_sprintf(&p, "rx_queue_%u_%.18s",
+						i, ifb_q_stats_desc[j].desc);
+
+		for (i = 0; i < dev->num_tx_queues; i++)
+			for (j = 0; j < IFB_Q_STATS_LEN; j++)
+				ethtool_sprintf(&p, "tx_queue_%u_%.18s",
+						i, ifb_q_stats_desc[j].desc);
+
+		break;
+	}
+}
+
+static int ifb_get_sset_count(struct net_device *dev, int sset)
+{
+	switch (sset) {
+	case ETH_SS_STATS:
+		return IFB_Q_STATS_LEN * dev->num_tx_queues * 2;
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
+static void ifb_fill_stats_data(u64 **data,
+				struct ifb_q_stats *q_stats)
+{
+	void *stats_base = (void *)q_stats;
+	unsigned int start;
+	size_t offset;
+	int j;
+
+	do {
+		start = u64_stats_fetch_begin(&q_stats->sync);
+		for (j = 0; j < IFB_Q_STATS_LEN; j++) {
+			offset = ifb_q_stats_desc[j].offset;
+			(*data)[j] = u64_stats_read((u64_stats_t *)(stats_base + offset));
+		}
+	} while (u64_stats_fetch_retry(&q_stats->sync, start));
+
+	*data += IFB_Q_STATS_LEN;
+}
+
+static void ifb_get_ethtool_stats(struct net_device *dev,
+				  struct ethtool_stats *stats, u64 *data)
+{
+	struct ifb_dev_private *dp = netdev_priv(dev);
+	struct ifb_q_private *txp;
+	int i;
+
+	for (i = 0; i < dev->num_tx_queues; i++) {
+		txp = dp->tx_private + i;
+		ifb_fill_stats_data(&data, &txp->rx_stats);
+	}
+
+	for (i = 0; i < dev->num_tx_queues; i++) {
+		txp = dp->tx_private + i;
+		ifb_fill_stats_data(&data, &txp->tx_stats);
+	}
 }
 
 static const struct net_device_ops ifb_netdev_ops = {
@@ -189,9 +281,14 @@ static const struct net_device_ops ifb_netdev_ops = {
 	.ndo_init	= ifb_dev_init,
 };
 
+static const struct ethtool_ops ifb_ethtool_ops = {
+	.get_strings		= ifb_get_strings,
+	.get_sset_count		= ifb_get_sset_count,
+	.get_ethtool_stats	= ifb_get_ethtool_stats,
+};
+
 #define IFB_FEATURES (NETIF_F_HW_CSUM | NETIF_F_SG  | NETIF_F_FRAGLIST	| \
-		      NETIF_F_TSO_ECN | NETIF_F_TSO | NETIF_F_TSO6	| \
-		      NETIF_F_GSO_ENCAP_ALL 				| \
+		      NETIF_F_GSO_SOFTWARE | NETIF_F_GSO_ENCAP_ALL	| \
 		      NETIF_F_HIGHDMA | NETIF_F_HW_VLAN_CTAG_TX		| \
 		      NETIF_F_HW_VLAN_STAG_TX)
 
@@ -213,6 +310,7 @@ static void ifb_setup(struct net_device *dev)
 {
 	/* Initialize the device structure. */
 	dev->netdev_ops = &ifb_netdev_ops;
+	dev->ethtool_ops = &ifb_ethtool_ops;
 
 	/* Fill in device structure with ethernet-generic values. */
 	ether_setup(dev);
@@ -234,6 +332,7 @@ static void ifb_setup(struct net_device *dev)
 
 	dev->min_mtu = 0;
 	dev->max_mtu = 0;
+	netif_set_tso_max_size(dev, GSO_MAX_SIZE);
 }
 
 static netdev_tx_t ifb_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -241,12 +340,9 @@ static netdev_tx_t ifb_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct ifb_dev_private *dp = netdev_priv(dev);
 	struct ifb_q_private *txp = dp->tx_private + skb_get_queue_mapping(skb);
 
-	u64_stats_update_begin(&txp->rsync);
-	txp->rx_packets++;
-	txp->rx_bytes += skb->len;
-	u64_stats_update_end(&txp->rsync);
+	ifb_update_q_stats(&txp->rx_stats, skb->len);
 
-	if (!skb->tc_redirected || !skb->skb_iif) {
+	if (!skb->redirected || !skb->skb_iif) {
 		dev_kfree_skb(skb);
 		dev->stats.rx_dropped++;
 		return NETDEV_TX_OK;
@@ -330,22 +426,21 @@ static int __init ifb_init_module(void)
 {
 	int i, err;
 
-	down_write(&pernet_ops_rwsem);
-	rtnl_lock();
-	err = __rtnl_link_register(&ifb_link_ops);
+	err = rtnl_link_register(&ifb_link_ops);
 	if (err < 0)
-		goto out;
+		return err;
+
+	rtnl_net_lock(&init_net);
 
 	for (i = 0; i < numifbs && !err; i++) {
 		err = ifb_init_one(i);
 		cond_resched();
 	}
-	if (err)
-		__rtnl_link_unregister(&ifb_link_ops);
 
-out:
-	rtnl_unlock();
-	up_write(&pernet_ops_rwsem);
+	rtnl_net_unlock(&init_net);
+
+	if (err)
+		rtnl_link_unregister(&ifb_link_ops);
 
 	return err;
 }
@@ -358,5 +453,6 @@ static void __exit ifb_cleanup_module(void)
 module_init(ifb_init_module);
 module_exit(ifb_cleanup_module);
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Intermediate Functional Block (ifb) netdevice driver for sharing of resources and ingress packet queuing");
 MODULE_AUTHOR("Jamal Hadi Salim");
 MODULE_ALIAS_RTNL_LINK("ifb");

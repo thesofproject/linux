@@ -288,8 +288,7 @@ extern void bttv_init_card1(struct bttv *btv);
 extern void bttv_init_card2(struct bttv *btv);
 extern void bttv_init_tuner(struct bttv *btv);
 
-/* card-specific funtions */
-extern void tea5757_set_freq(struct bttv *btv, unsigned short freq);
+/* card-specific functions */
 extern u32 bttv_tda9880_setnorm(struct bttv *btv, u32 gpiobits);
 
 /* extra tweaks for some chipsets */
@@ -342,7 +341,7 @@ struct bttv_sub_driver {
 	int                    (*probe)(struct bttv_sub_device *sub);
 	void                   (*remove)(struct bttv_sub_device *sub);
 };
-#define to_bttv_sub_drv(x) container_of((x), struct bttv_sub_driver, drv)
+#define to_bttv_sub_drv(x) container_of_const((x), struct bttv_sub_driver, drv)
 
 int bttv_sub_register(struct bttv_sub_driver *drv, char *wanted);
 int bttv_sub_unregister(struct bttv_sub_driver *drv);

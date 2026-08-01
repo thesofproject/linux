@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * omap_hwmod_2xxx_3xxx_ipblock_data.c - common IP block data for OMAP2/3
  *
  * Copyright (C) 2011 Nokia Corporation
  * Copyright (C) 2012 Texas Instruments, Inc.
  * Paul Walmsley
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/dmaengine.h>
@@ -65,7 +62,7 @@ struct omap_hwmod_class iva_hwmod_class = {
 	.name = "iva",
 };
 
-struct omap_hwmod_class_sysconfig omap2_hdq1w_sysc = {
+static struct omap_hwmod_class_sysconfig omap2_hdq1w_sysc = {
 	.rev_offs	= 0x0,
 	.sysc_offs	= 0x14,
 	.syss_offs	= 0x18,

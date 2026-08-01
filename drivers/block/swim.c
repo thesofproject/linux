@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for SWIM (Sander Woz Integrated Machine) floppy controller
  *
@@ -7,11 +8,6 @@
  * based on SWIM3 driver (c) Paul Mackerras, 1996
  * based on netBSD IWM driver (c) 1997, 1998 Hauke Fath.
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
- *
  * 2004-08-21 (lv) - Initial implementation
  * 2008-10-30 (lv) - Port to 2.6
  */
@@ -19,7 +15,8 @@
 #include <linux/module.h>
 #include <linux/fd.h>
 #include <linux/slab.h>
-#include <linux/blkdev.h>
+#include <linux/blk-mq.h>
+#include <linux/major.h>
 #include <linux/mutex.h>
 #include <linux/hdreg.h>
 #include <linux/kernel.h>
@@ -188,8 +185,10 @@ struct floppy_state {
 
 	int		track;
 	int		ref_count;
+	bool registered;
 
 	struct gendisk *disk;
+	struct blk_mq_tag_set tag_set;
 
 	/* parent controller */
 
@@ -211,7 +210,6 @@ enum head {
 struct swim_priv {
 	struct swim __iomem *base;
 	spinlock_t lock;
-	int fdc_queue;
 	int floppy_count;
 	struct floppy_state unit[FD_MAX_UNIT];
 };
@@ -331,7 +329,7 @@ static inline void swim_motor(struct swim __iomem *base,
 			swim_select(base, RELAX);
 			if (swim_readbit(base, MOTOR_ON))
 				break;
-			current->state = TASK_INTERRUPTIBLE;
+			set_current_state(TASK_INTERRUPTIBLE);
 			schedule_timeout(1);
 		}
 	} else if (action == OFF) {
@@ -350,7 +348,7 @@ static inline void swim_eject(struct swim __iomem *base)
 		swim_select(base, RELAX);
 		if (!swim_readbit(base, DISK_IN))
 			break;
-		current->state = TASK_INTERRUPTIBLE;
+		set_current_state(TASK_INTERRUPTIBLE);
 		schedule_timeout(1);
 	}
 	swim_select(base, RELAX);
@@ -374,7 +372,7 @@ static inline int swim_step(struct swim __iomem *base)
 
 	for (wait = 0; wait < HZ; wait++) {
 
-		current->state = TASK_INTERRUPTIBLE;
+		set_current_state(TASK_INTERRUPTIBLE);
 		schedule_timeout(1);
 
 		swim_select(base, RELAX);
@@ -525,58 +523,36 @@ static blk_status_t floppy_read_sectors(struct floppy_state *fs,
 	return 0;
 }
 
-static struct request *swim_next_request(struct swim_priv *swd)
+static blk_status_t swim_queue_rq(struct blk_mq_hw_ctx *hctx,
+				  const struct blk_mq_queue_data *bd)
 {
-	struct request_queue *q;
-	struct request *rq;
-	int old_pos = swd->fdc_queue;
+	struct floppy_state *fs = hctx->queue->queuedata;
+	struct swim_priv *swd = fs->swd;
+	struct request *req = bd->rq;
+	blk_status_t err;
+
+	if (!spin_trylock_irq(&swd->lock))
+		return BLK_STS_DEV_RESOURCE;
+
+	blk_mq_start_request(req);
+
+	if (!fs->disk_in || rq_data_dir(req) == WRITE) {
+		err = BLK_STS_IOERR;
+		goto out;
+	}
 
 	do {
-		q = swd->unit[swd->fdc_queue].disk->queue;
-		if (++swd->fdc_queue == swd->floppy_count)
-			swd->fdc_queue = 0;
-		if (q) {
-			rq = blk_fetch_request(q);
-			if (rq)
-				return rq;
-		}
-	} while (swd->fdc_queue != old_pos);
+		err = floppy_read_sectors(fs, blk_rq_pos(req),
+					  blk_rq_cur_sectors(req),
+					  bio_data(req->bio));
+	} while (blk_update_request(req, err, blk_rq_cur_bytes(req)));
+	__blk_mq_end_request(req, err);
 
-	return NULL;
-}
+	err = BLK_STS_OK;
+out:
+	spin_unlock_irq(&swd->lock);
+	return err;
 
-static void do_fd_request(struct request_queue *q)
-{
-	struct swim_priv *swd = q->queuedata;
-	struct request *req;
-	struct floppy_state *fs;
-
-	req = swim_next_request(swd);
-	while (req) {
-		blk_status_t err = BLK_STS_IOERR;
-
-		fs = req->rq_disk->private_data;
-		if (blk_rq_pos(req) >= fs->total_secs)
-			goto done;
-		if (!fs->disk_in)
-			goto done;
-		if (rq_data_dir(req) == WRITE && fs->write_protected)
-			goto done;
-
-		switch (rq_data_dir(req)) {
-		case WRITE:
-			/* NOT IMPLEMENTED */
-			break;
-		case READ:
-			err = floppy_read_sectors(fs, blk_rq_pos(req),
-						  blk_rq_cur_sectors(req),
-						  bio_data(req->bio));
-			break;
-		}
-	done:
-		if (!__blk_end_request_cur(req, err))
-			req = swim_next_request(swd);
-	}
 }
 
 static struct floppy_struct floppy_type[4] = {
@@ -632,20 +608,18 @@ static void setup_medium(struct floppy_state *fs)
 	}
 }
 
-static int floppy_open(struct block_device *bdev, fmode_t mode)
+static int floppy_open(struct gendisk *disk, blk_mode_t mode)
 {
-	struct floppy_state *fs = bdev->bd_disk->private_data;
+	struct floppy_state *fs = disk->private_data;
 	struct swim __iomem *base = fs->swd->base;
 	int err;
 
-	if (fs->ref_count == -1 || (fs->ref_count && mode & FMODE_EXCL))
+	if (fs->ref_count == -1 || (fs->ref_count && mode & BLK_OPEN_EXCL))
 		return -EBUSY;
-
-	if (mode & FMODE_EXCL)
+	if (mode & BLK_OPEN_EXCL)
 		fs->ref_count = -1;
 	else
 		fs->ref_count++;
-
 	swim_write(base, setup, S_IBM_DRIVE  | S_FCLK_DIV2);
 	udelay(10);
 	swim_drive(base, fs->location);
@@ -660,12 +634,13 @@ static int floppy_open(struct block_device *bdev, fmode_t mode)
 
 	set_capacity(fs->disk, fs->total_secs);
 
-	if (mode & FMODE_NDELAY)
+	if (mode & BLK_OPEN_NDELAY)
 		return 0;
 
-	if (mode & (FMODE_READ|FMODE_WRITE)) {
-		check_disk_change(bdev);
-		if ((mode & FMODE_WRITE) && fs->write_protected) {
+	if (mode & (BLK_OPEN_READ | BLK_OPEN_WRITE)) {
+		if (disk_check_media_change(disk) && fs->disk_in)
+			fs->ejected = 0;
+		if ((mode & BLK_OPEN_WRITE) && fs->write_protected) {
 			err = -EROFS;
 			goto out;
 		}
@@ -682,18 +657,18 @@ out:
 	return err;
 }
 
-static int floppy_unlocked_open(struct block_device *bdev, fmode_t mode)
+static int floppy_unlocked_open(struct gendisk *disk, blk_mode_t mode)
 {
 	int ret;
 
 	mutex_lock(&swim_mutex);
-	ret = floppy_open(bdev, mode);
+	ret = floppy_open(disk, mode);
 	mutex_unlock(&swim_mutex);
 
 	return ret;
 }
 
-static void floppy_release(struct gendisk *disk, fmode_t mode)
+static void floppy_release(struct gendisk *disk)
 {
 	struct floppy_state *fs = disk->private_data;
 	struct swim __iomem *base = fs->swd->base;
@@ -709,7 +684,7 @@ static void floppy_release(struct gendisk *disk, fmode_t mode)
 	mutex_unlock(&swim_mutex);
 }
 
-static int floppy_ioctl(struct block_device *bdev, fmode_t mode,
+static int floppy_ioctl(struct block_device *bdev, blk_mode_t mode,
 			unsigned int cmd, unsigned long param)
 {
 	struct floppy_state *fs = bdev->bd_disk->private_data;
@@ -736,9 +711,9 @@ static int floppy_ioctl(struct block_device *bdev, fmode_t mode,
 	return -ENOTTY;
 }
 
-static int floppy_getgeo(struct block_device *bdev, struct hd_geometry *geo)
+static int floppy_getgeo(struct gendisk *disk, struct hd_geometry *geo)
 {
-	struct floppy_state *fs = bdev->bd_disk->private_data;
+	struct floppy_state *fs = disk->private_data;
 	struct floppy_struct *g;
 	int ret;
 
@@ -761,24 +736,6 @@ static unsigned int floppy_check_events(struct gendisk *disk,
 	return fs->ejected ? DISK_EVENT_MEDIA_CHANGE : 0;
 }
 
-static int floppy_revalidate(struct gendisk *disk)
-{
-	struct floppy_state *fs = disk->private_data;
-	struct swim __iomem *base = fs->swd->base;
-
-	swim_drive(base, fs->location);
-
-	if (fs->ejected)
-		setup_medium(fs);
-
-	if (!fs->disk_in)
-		swim_motor(base, OFF);
-	else
-		fs->ejected = 0;
-
-	return !fs->disk_in;
-}
-
 static const struct block_device_operations floppy_fops = {
 	.owner		 = THIS_MODULE,
 	.open		 = floppy_unlocked_open,
@@ -786,20 +743,7 @@ static const struct block_device_operations floppy_fops = {
 	.ioctl		 = floppy_ioctl,
 	.getgeo		 = floppy_getgeo,
 	.check_events	 = floppy_check_events,
-	.revalidate_disk = floppy_revalidate,
 };
-
-static struct kobject *floppy_find(dev_t dev, int *part, void *data)
-{
-	struct swim_priv *swd = data;
-	int drive = (*part & 3);
-
-	if (drive >= swd->floppy_count)
-		return NULL;
-
-	*part = 0;
-	return get_disk_and_module(swd->unit[drive].disk);
-}
 
 static int swim_add_floppy(struct swim_priv *swd, enum drive_location location)
 {
@@ -823,8 +767,29 @@ static int swim_add_floppy(struct swim_priv *swd, enum drive_location location)
 	return 0;
 }
 
+static const struct blk_mq_ops swim_mq_ops = {
+	.queue_rq = swim_queue_rq,
+};
+
+static void swim_cleanup_floppy_disk(struct floppy_state *fs)
+{
+	struct gendisk *disk = fs->disk;
+
+	if (!disk)
+		return;
+
+	if (fs->registered)
+		del_gendisk(fs->disk);
+
+	put_disk(disk);
+	blk_mq_free_tag_set(&fs->tag_set);
+}
+
 static int swim_floppy_init(struct swim_priv *swd)
 {
+	struct queue_limits lim = {
+		.features		= BLK_FEAT_ROTATIONAL,
+	};
 	int err;
 	int drive;
 	struct swim __iomem *base = swd->base;
@@ -852,20 +817,20 @@ static int swim_floppy_init(struct swim_priv *swd)
 	spin_lock_init(&swd->lock);
 
 	for (drive = 0; drive < swd->floppy_count; drive++) {
-		swd->unit[drive].disk = alloc_disk(1);
-		if (swd->unit[drive].disk == NULL) {
-			err = -ENOMEM;
+		err = blk_mq_alloc_sq_tag_set(&swd->unit[drive].tag_set,
+				&swim_mq_ops, 2, 0);
+		if (err)
+			goto exit_put_disks;
+
+		swd->unit[drive].disk =
+			blk_mq_alloc_disk(&swd->unit[drive].tag_set, &lim,
+					  &swd->unit[drive]);
+		if (IS_ERR(swd->unit[drive].disk)) {
+			blk_mq_free_tag_set(&swd->unit[drive].tag_set);
+			err = PTR_ERR(swd->unit[drive].disk);
 			goto exit_put_disks;
 		}
-		swd->unit[drive].disk->queue = blk_init_queue(do_fd_request,
-							      &swd->lock);
-		if (!swd->unit[drive].disk->queue) {
-			err = -ENOMEM;
-			goto exit_put_disks;
-		}
-		blk_queue_bounce_limit(swd->unit[drive].disk->queue,
-				BLK_BOUNCE_HIGH);
-		swd->unit[drive].disk->queue->queuedata = swd;
+
 		swd->unit[drive].swd = swd;
 	}
 
@@ -873,22 +838,26 @@ static int swim_floppy_init(struct swim_priv *swd)
 		swd->unit[drive].disk->flags = GENHD_FL_REMOVABLE;
 		swd->unit[drive].disk->major = FLOPPY_MAJOR;
 		swd->unit[drive].disk->first_minor = drive;
+		swd->unit[drive].disk->minors = 1;
 		sprintf(swd->unit[drive].disk->disk_name, "fd%d", drive);
 		swd->unit[drive].disk->fops = &floppy_fops;
+		swd->unit[drive].disk->flags |= GENHD_FL_NO_PART;
+		swd->unit[drive].disk->events = DISK_EVENT_MEDIA_CHANGE;
 		swd->unit[drive].disk->private_data = &swd->unit[drive];
 		set_capacity(swd->unit[drive].disk, 2880);
-		add_disk(swd->unit[drive].disk);
+		err = add_disk(swd->unit[drive].disk);
+		if (err)
+			goto exit_put_disks;
+		swd->unit[drive].registered = true;
 	}
-
-	blk_register_region(MKDEV(FLOPPY_MAJOR, 0), 256, THIS_MODULE,
-			    floppy_find, NULL, swd);
 
 	return 0;
 
 exit_put_disks:
 	unregister_blkdev(FLOPPY_MAJOR, "fd");
-	while (drive--)
-		put_disk(swd->unit[drive].disk);
+	do {
+		swim_cleanup_floppy_disk(&swd->unit[drive]);
+	} while (drive--);
 	return err;
 }
 
@@ -927,7 +896,7 @@ static int swim_probe(struct platform_device *dev)
 
 	/* set platform driver data */
 
-	swd = kzalloc(sizeof(struct swim_priv), GFP_KERNEL);
+	swd = kzalloc_obj(struct swim_priv);
 	if (!swd) {
 		ret = -ENOMEM;
 		goto out_release_io;
@@ -950,19 +919,14 @@ out:
 	return ret;
 }
 
-static int swim_remove(struct platform_device *dev)
+static void swim_remove(struct platform_device *dev)
 {
 	struct swim_priv *swd = platform_get_drvdata(dev);
 	int drive;
 	struct resource *res;
 
-	blk_unregister_region(MKDEV(FLOPPY_MAJOR, 0), 256);
-
-	for (drive = 0; drive < swd->floppy_count; drive++) {
-		del_gendisk(swd->unit[drive].disk);
-		blk_cleanup_queue(swd->unit[drive].disk->queue);
-		put_disk(swd->unit[drive].disk);
-	}
+	for (drive = 0; drive < swd->floppy_count; drive++)
+		swim_cleanup_floppy_disk(&swd->unit[drive]);
 
 	unregister_blkdev(FLOPPY_MAJOR, "fd");
 
@@ -976,8 +940,6 @@ static int swim_remove(struct platform_device *dev)
 		release_mem_region(res->start, resource_size(res));
 
 	kfree(swd);
-
-	return 0;
 }
 
 static struct platform_driver swim_driver = {

@@ -16,7 +16,10 @@
 #include <linux/memblock.h>
 #include <linux/seq_file.h>
 #include <linux/kthread.h>
+#include <linux/proc_fs.h>
 #include <linux/initrd.h>
+#include <linux/pgtable.h>
+#include <linux/mm.h>
 
 #include <asm/pdc.h>
 #include <asm/pdcpat.h>
@@ -60,6 +63,7 @@ static unsigned long pdt_entry[MAX_PDT_ENTRIES] __page_aligned_bss;
 #define PDT_ADDR_PERM_ERR	(pdt_type != PDT_PDC ? 2UL : 0UL)
 #define PDT_ADDR_SINGLE_ERR	1UL
 
+#ifdef CONFIG_PROC_FS
 /* report PDT entries via /proc/meminfo */
 void arch_report_meminfo(struct seq_file *m)
 {
@@ -71,6 +75,7 @@ void arch_report_meminfo(struct seq_file *m)
 	seq_printf(m, "PDT_cur_entries: %7lu\n",
 			pdt_status.pdt_entries);
 }
+#endif
 
 static int get_info_pat_new(void)
 {
@@ -230,6 +235,7 @@ void __init pdc_pdt_init(void)
 
 		/* mark memory page bad */
 		memblock_reserve(pdt_entry[i] & PAGE_MASK, PAGE_SIZE);
+		num_poisoned_pages_inc(addr >> PAGE_SHIFT);
 	}
 }
 
@@ -327,8 +333,7 @@ static int pdt_mainloop(void *unused)
 			    ((pde & PDT_ADDR_SINGLE_ERR) == 0))
 				memory_failure(pde >> PAGE_SHIFT, 0);
 			else
-				soft_offline_page(
-					pfn_to_page(pde >> PAGE_SHIFT), 0);
+				soft_offline_page(pde >> PAGE_SHIFT, 0);
 #else
 			pr_crit("PDT: memory error at 0x%lx ignored.\n"
 				"Rebuild kernel with CONFIG_MEMORY_FAILURE=y "
@@ -350,13 +355,9 @@ static int __init pdt_initcall(void)
 	if (pdt_type == PDT_NONE)
 		return -ENODEV;
 
-	kpdtd_task = kthread_create(pdt_mainloop, NULL, "kpdtd");
-	if (IS_ERR(kpdtd_task))
-		return PTR_ERR(kpdtd_task);
+	kpdtd_task = kthread_run(pdt_mainloop, NULL, "kpdtd");
 
-	wake_up_process(kpdtd_task);
-
-	return 0;
+	return PTR_ERR_OR_ZERO(kpdtd_task);
 }
 
 late_initcall(pdt_initcall);

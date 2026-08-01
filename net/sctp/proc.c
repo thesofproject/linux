@@ -1,23 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* SCTP kernel implementation
  * Copyright (c) 2003 International Business Machines, Corp.
  *
  * This file is part of the SCTP kernel implementation
- *
- * This SCTP implementation is free software;
- * you can redistribute it and/or modify it under the terms of
- * the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * This SCTP implementation is distributed in the hope that it
- * will be useful, but WITHOUT ANY WARRANTY; without even the implied
- *                 ************************
- * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with GNU CC; see the file COPYING.  If not, see
- * <http://www.gnu.org/licenses/>.
  *
  * Please send any bug reports or fixes you make to the
  * email address(es):
@@ -67,39 +52,26 @@ static const struct snmp_mib sctp_snmp_list[] = {
 	SNMP_MIB_ITEM("SctpInPktBacklog", SCTP_MIB_IN_PKT_BACKLOG),
 	SNMP_MIB_ITEM("SctpInPktDiscards", SCTP_MIB_IN_PKT_DISCARDS),
 	SNMP_MIB_ITEM("SctpInDataChunkDiscards", SCTP_MIB_IN_DATA_CHUNK_DISCARDS),
-	SNMP_MIB_SENTINEL
 };
 
 /* Display sctp snmp mib statistics(/proc/net/sctp/snmp). */
 static int sctp_snmp_seq_show(struct seq_file *seq, void *v)
 {
-	unsigned long buff[SCTP_MIB_MAX];
+	unsigned long buff[ARRAY_SIZE(sctp_snmp_list)];
+	const int cnt = ARRAY_SIZE(sctp_snmp_list);
 	struct net *net = seq->private;
 	int i;
 
-	memset(buff, 0, sizeof(unsigned long) * SCTP_MIB_MAX);
+	memset(buff, 0, sizeof(buff));
 
-	snmp_get_cpu_field_batch(buff, sctp_snmp_list,
-				 net->sctp.sctp_statistics);
-	for (i = 0; sctp_snmp_list[i].name; i++)
+	snmp_get_cpu_field_batch_cnt(buff, sctp_snmp_list, cnt,
+				     net->sctp.sctp_statistics);
+	for (i = 0; i < cnt; i++)
 		seq_printf(seq, "%-32s\t%ld\n", sctp_snmp_list[i].name,
 						buff[i]);
 
 	return 0;
 }
-
-/* Initialize the seq file operations for 'snmp' object. */
-static int sctp_snmp_seq_open(struct inode *inode, struct file *file)
-{
-	return single_open_net(inode, file, sctp_snmp_seq_show);
-}
-
-static const struct file_operations sctp_snmp_seq_fops = {
-	.open	 = sctp_snmp_seq_open,
-	.read	 = seq_read,
-	.llseek	 = seq_lseek,
-	.release = single_release_net,
-};
 
 /* Dump local addresses of an association/endpoint. */
 static void sctp_seq_dump_local_addrs(struct seq_file *seq, struct sctp_ep_common *epb)
@@ -189,7 +161,6 @@ static void *sctp_eps_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 static int sctp_eps_seq_show(struct seq_file *seq, void *v)
 {
 	struct sctp_hashbucket *head;
-	struct sctp_ep_common *epb;
 	struct sctp_endpoint *ep;
 	struct sock *sk;
 	int    hash = *(loff_t *)v;
@@ -199,18 +170,17 @@ static int sctp_eps_seq_show(struct seq_file *seq, void *v)
 
 	head = &sctp_ep_hashtable[hash];
 	read_lock_bh(&head->lock);
-	sctp_for_each_hentry(epb, &head->chain) {
-		ep = sctp_ep(epb);
-		sk = epb->sk;
+	sctp_for_each_hentry(ep, &head->chain) {
+		sk = ep->base.sk;
 		if (!net_eq(sock_net(sk), seq_file_net(seq)))
 			continue;
-		seq_printf(seq, "%8pK %8pK %-3d %-3d %-4d %-5d %5u %5lu ", ep, sk,
+		seq_printf(seq, "%8pK %8pK %-3d %-3d %-4d %-5d %5u %5llu ", ep, sk,
 			   sctp_sk(sk)->type, sk->sk_state, hash,
-			   epb->bind_addr.port,
-			   from_kuid_munged(seq_user_ns(seq), sock_i_uid(sk)),
+			   ep->base.bind_addr.port,
+			   from_kuid_munged(seq_user_ns(seq), sk_uid(sk)),
 			   sock_i_ino(sk));
 
-		sctp_seq_dump_local_addrs(seq, epb);
+		sctp_seq_dump_local_addrs(seq, &ep->base);
 		seq_printf(seq, "\n");
 	}
 	read_unlock_bh(&head->lock);
@@ -225,25 +195,9 @@ static const struct seq_operations sctp_eps_ops = {
 	.show  = sctp_eps_seq_show,
 };
 
-
-/* Initialize the seq file operations for 'eps' object. */
-static int sctp_eps_seq_open(struct inode *inode, struct file *file)
-{
-	return seq_open_net(inode, file, &sctp_eps_ops,
-			    sizeof(struct seq_net_private));
-}
-
-static const struct file_operations sctp_eps_seq_fops = {
-	.open	 = sctp_eps_seq_open,
-	.read	 = seq_read,
-	.llseek	 = seq_lseek,
-	.release = seq_release_net,
-};
-
 struct sctp_ht_iter {
 	struct seq_net_private p;
 	struct rhashtable_iter hti;
-	int start_fail;
 };
 
 static void *sctp_transport_seq_start(struct seq_file *seq, loff_t *pos)
@@ -252,7 +206,6 @@ static void *sctp_transport_seq_start(struct seq_file *seq, loff_t *pos)
 
 	sctp_transport_walk_start(&iter->hti);
 
-	iter->start_fail = 0;
 	return sctp_transport_get_idx(seq_file_net(seq), &iter->hti, *pos);
 }
 
@@ -260,14 +213,24 @@ static void sctp_transport_seq_stop(struct seq_file *seq, void *v)
 {
 	struct sctp_ht_iter *iter = seq->private;
 
-	if (iter->start_fail)
-		return;
+	if (v && v != SEQ_START_TOKEN) {
+		struct sctp_transport *transport = v;
+
+		sctp_transport_put(transport);
+	}
+
 	sctp_transport_walk_stop(&iter->hti);
 }
 
 static void *sctp_transport_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 {
 	struct sctp_ht_iter *iter = seq->private;
+
+	if (v && v != SEQ_START_TOKEN) {
+		struct sctp_transport *transport = v;
+
+		sctp_transport_put(transport);
+	}
 
 	++*pos;
 
@@ -292,21 +255,19 @@ static int sctp_assocs_seq_show(struct seq_file *seq, void *v)
 	}
 
 	transport = (struct sctp_transport *)v;
-	if (!sctp_transport_hold(transport))
-		return 0;
 	assoc = transport->asoc;
 	epb = &assoc->base;
 	sk = epb->sk;
 
 	seq_printf(seq,
 		   "%8pK %8pK %-3d %-3d %-2d %-4d "
-		   "%4d %8d %8d %7u %5lu %-5d %5d ",
+		   "%4d %8d %8d %7u %5llu %-5d %5d ",
 		   assoc, sk, sctp_sk(sk)->type, sk->sk_state,
 		   assoc->state, 0,
 		   assoc->assoc_id,
 		   assoc->sndbuf_used,
 		   atomic_read(&assoc->rmem_alloc),
-		   from_kuid_munged(seq_user_ns(seq), sock_i_uid(sk)),
+		   from_kuid_munged(seq_user_ns(seq), sk_uid(sk)),
 		   sock_i_ino(sk),
 		   epb->bind_addr.port,
 		   assoc->peer.port);
@@ -321,12 +282,10 @@ static int sctp_assocs_seq_show(struct seq_file *seq, void *v)
 		assoc->init_retries, assoc->shutdown_retries,
 		assoc->rtx_data_chunks,
 		refcount_read(&sk->sk_wmem_alloc),
-		sk->sk_wmem_queued,
+		READ_ONCE(sk->sk_wmem_queued),
 		sk->sk_sndbuf,
 		sk->sk_rcvbuf);
 	seq_printf(seq, "\n");
-
-	sctp_transport_put(transport);
 
 	return 0;
 }
@@ -336,20 +295,6 @@ static const struct seq_operations sctp_assoc_ops = {
 	.next  = sctp_transport_seq_next,
 	.stop  = sctp_transport_seq_stop,
 	.show  = sctp_assocs_seq_show,
-};
-
-/* Initialize the seq file operations for 'assocs' object. */
-static int sctp_assocs_seq_open(struct inode *inode, struct file *file)
-{
-	return seq_open_net(inode, file, &sctp_assoc_ops,
-			    sizeof(struct sctp_ht_iter));
-}
-
-static const struct file_operations sctp_assocs_seq_fops = {
-	.open	 = sctp_assocs_seq_open,
-	.read	 = seq_read,
-	.llseek	 = seq_lseek,
-	.release = seq_release_net,
 };
 
 static int sctp_remaddr_seq_show(struct seq_file *seq, void *v)
@@ -364,8 +309,6 @@ static int sctp_remaddr_seq_show(struct seq_file *seq, void *v)
 	}
 
 	transport = (struct sctp_transport *)v;
-	if (!sctp_transport_hold(transport))
-		return 0;
 	assoc = transport->asoc;
 
 	list_for_each_entry_rcu(tsp, &assoc->peer.transport_addr_list,
@@ -419,8 +362,6 @@ static int sctp_remaddr_seq_show(struct seq_file *seq, void *v)
 		seq_printf(seq, "\n");
 	}
 
-	sctp_transport_put(transport);
-
 	return 0;
 }
 
@@ -431,36 +372,23 @@ static const struct seq_operations sctp_remaddr_ops = {
 	.show  = sctp_remaddr_seq_show,
 };
 
-static int sctp_remaddr_seq_open(struct inode *inode, struct file *file)
-{
-	return seq_open_net(inode, file, &sctp_remaddr_ops,
-			    sizeof(struct sctp_ht_iter));
-}
-
-static const struct file_operations sctp_remaddr_seq_fops = {
-	.open = sctp_remaddr_seq_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = seq_release_net,
-};
-
 /* Set up the proc fs entry for the SCTP protocol. */
 int __net_init sctp_proc_init(struct net *net)
 {
 	net->sctp.proc_net_sctp = proc_net_mkdir(net, "sctp", net->proc_net);
 	if (!net->sctp.proc_net_sctp)
 		return -ENOMEM;
-	if (!proc_create("snmp", 0444, net->sctp.proc_net_sctp,
-			 &sctp_snmp_seq_fops))
+	if (!proc_create_net_single("snmp", 0444, net->sctp.proc_net_sctp,
+			 sctp_snmp_seq_show, NULL))
 		goto cleanup;
-	if (!proc_create("eps", 0444, net->sctp.proc_net_sctp,
-			 &sctp_eps_seq_fops))
+	if (!proc_create_net("eps", 0444, net->sctp.proc_net_sctp,
+			&sctp_eps_ops, sizeof(struct seq_net_private)))
 		goto cleanup;
-	if (!proc_create("assocs", 0444, net->sctp.proc_net_sctp,
-			 &sctp_assocs_seq_fops))
+	if (!proc_create_net("assocs", 0444, net->sctp.proc_net_sctp,
+			&sctp_assoc_ops, sizeof(struct sctp_ht_iter)))
 		goto cleanup;
-	if (!proc_create("remaddr", 0444, net->sctp.proc_net_sctp,
-			 &sctp_remaddr_seq_fops))
+	if (!proc_create_net("remaddr", 0444, net->sctp.proc_net_sctp,
+			&sctp_remaddr_ops, sizeof(struct sctp_ht_iter)))
 		goto cleanup;
 	return 0;
 

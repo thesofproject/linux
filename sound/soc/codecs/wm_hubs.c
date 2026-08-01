@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * wm_hubs.c  --  WM8993/4 common code
  *
  * Copyright 2009-12 Wolfson Microelectronics plc
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
- *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -18,6 +14,7 @@
 #include <linux/pm.h>
 #include <linux/i2c.h>
 #include <linux/mfd/wm8994/registers.h>
+#include <linux/string_choices.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -89,7 +86,7 @@ static void wait_for_dc_servo(struct snd_soc_component *component, unsigned int 
 		else
 			msleep(1);
 
-		reg = snd_soc_component_read32(component, WM8993_DC_SERVO_0);
+		reg = snd_soc_component_read(component, WM8993_DC_SERVO_0);
 		dev_dbg(component->dev, "DC servo: %x\n", reg);
 	} while (reg & op && count < timeout);
 
@@ -113,7 +110,7 @@ static bool wm_hubs_dac_hp_direct(struct snd_soc_component *component)
 	int reg;
 
 	/* If we're going via the mixer we'll need to do additional checks */
-	reg = snd_soc_component_read32(component, WM8993_OUTPUT_MIXER1);
+	reg = snd_soc_component_read(component, WM8993_OUTPUT_MIXER1);
 	if (!(reg & WM8993_DACL_TO_HPOUT1L)) {
 		if (reg & ~WM8993_DACL_TO_MIXOUTL) {
 			dev_vdbg(component->dev, "Analogue paths connected: %x\n",
@@ -126,7 +123,7 @@ static bool wm_hubs_dac_hp_direct(struct snd_soc_component *component)
 		dev_vdbg(component->dev, "HPL connected to DAC\n");
 	}
 
-	reg = snd_soc_component_read32(component, WM8993_OUTPUT_MIXER2);
+	reg = snd_soc_component_read(component, WM8993_OUTPUT_MIXER2);
 	if (!(reg & WM8993_DACR_TO_HPOUT1R)) {
 		if (reg & ~WM8993_DACR_TO_MIXOUTR) {
 			dev_vdbg(component->dev, "Analogue paths connected: %x\n",
@@ -156,10 +153,10 @@ static bool wm_hubs_dcs_cache_get(struct snd_soc_component *component,
 	struct wm_hubs_dcs_cache *cache;
 	unsigned int left, right;
 
-	left = snd_soc_component_read32(component, WM8993_LEFT_OUTPUT_VOLUME);
+	left = snd_soc_component_read(component, WM8993_LEFT_OUTPUT_VOLUME);
 	left &= WM8993_HPOUT1L_VOL_MASK;
 
-	right = snd_soc_component_read32(component, WM8993_RIGHT_OUTPUT_VOLUME);
+	right = snd_soc_component_read(component, WM8993_RIGHT_OUTPUT_VOLUME);
 	right &= WM8993_HPOUT1R_VOL_MASK;
 
 	list_for_each_entry(cache, &hubs->dcs_cache, list) {
@@ -185,10 +182,10 @@ static void wm_hubs_dcs_cache_set(struct snd_soc_component *component, u16 dcs_c
 	if (!cache)
 		return;
 
-	cache->left = snd_soc_component_read32(component, WM8993_LEFT_OUTPUT_VOLUME);
+	cache->left = snd_soc_component_read(component, WM8993_LEFT_OUTPUT_VOLUME);
 	cache->left &= WM8993_HPOUT1L_VOL_MASK;
 
-	cache->right = snd_soc_component_read32(component, WM8993_RIGHT_OUTPUT_VOLUME);
+	cache->right = snd_soc_component_read(component, WM8993_RIGHT_OUTPUT_VOLUME);
 	cache->right &= WM8993_HPOUT1R_VOL_MASK;
 
 	cache->dcs_cfg = dcs_cfg;
@@ -220,14 +217,14 @@ static int wm_hubs_read_dc_servo(struct snd_soc_component *component,
 	 */
 	switch (hubs->dcs_readback_mode) {
 	case 0:
-		*reg_l = snd_soc_component_read32(component, WM8993_DC_SERVO_READBACK_1)
+		*reg_l = snd_soc_component_read(component, WM8993_DC_SERVO_READBACK_1)
 			& WM8993_DCS_INTEG_CHAN_0_MASK;
-		*reg_r = snd_soc_component_read32(component, WM8993_DC_SERVO_READBACK_2)
+		*reg_r = snd_soc_component_read(component, WM8993_DC_SERVO_READBACK_2)
 			& WM8993_DCS_INTEG_CHAN_1_MASK;
 		break;
 	case 2:
 	case 1:
-		reg = snd_soc_component_read32(component, dcs_reg);
+		reg = snd_soc_component_read(component, dcs_reg);
 		*reg_r = (reg & WM8993_DCS_DAC_WR_VAL_1_MASK)
 			>> WM8993_DCS_DAC_WR_VAL_1_SHIFT;
 		*reg_l = reg & WM8993_DCS_DAC_WR_VAL_0_MASK;
@@ -334,7 +331,7 @@ static void enable_dc_servo(struct snd_soc_component *component)
 static int wm8993_put_dc_servo(struct snd_kcontrol *kcontrol,
 			       struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct wm_hubs_data *hubs = snd_soc_component_get_drvdata(component);
 	int ret;
 
@@ -346,7 +343,7 @@ static int wm8993_put_dc_servo(struct snd_kcontrol *kcontrol,
 		return ret;
 
 	/* Only need to do this if the outputs are active */
-	if (snd_soc_component_read32(component, WM8993_POWER_MANAGEMENT_1)
+	if (snd_soc_component_read(component, WM8993_POWER_MANAGEMENT_1)
 	    & (WM8993_HPOUT1L_ENA | WM8993_HPOUT1R_ENA))
 		snd_soc_component_update_bits(component,
 				    WM8993_DC_SERVO_0,
@@ -542,7 +539,7 @@ static int hp_event(struct snd_soc_dapm_widget *w,
 		    struct snd_kcontrol *kcontrol, int event)
 {
 	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
-	unsigned int reg = snd_soc_component_read32(component, WM8993_ANALOGUE_HP_0);
+	unsigned int reg = snd_soc_component_read(component, WM8993_ANALOGUE_HP_0);
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
@@ -594,7 +591,7 @@ static int earpiece_event(struct snd_soc_dapm_widget *w,
 			  struct snd_kcontrol *control, int event)
 {
 	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
-	u16 reg = snd_soc_component_read32(component, WM8993_ANTIPOP1) & ~WM8993_HPOUT2_IN_ENA;
+	u16 reg = snd_soc_component_read(component, WM8993_ANTIPOP1) & ~WM8993_HPOUT2_IN_ENA;
 
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
@@ -678,15 +675,15 @@ void wm_hubs_update_class_w(struct snd_soc_component *component)
 	if (hubs->check_class_w_digital && !hubs->check_class_w_digital(component))
 		enable = false;
 
-	dev_vdbg(component->dev, "Class W %s\n", enable ? "enabled" : "disabled");
+	dev_vdbg(component->dev, "Class W %s\n", str_enabled_disabled(enable));
 
 	snd_soc_component_update_bits(component, WM8993_CLASS_W_0,
 			    WM8993_CP_DYN_V | WM8993_CP_DYN_FREQ, enable);
 
 	snd_soc_component_write(component, WM8993_LEFT_OUTPUT_VOLUME,
-		      snd_soc_component_read32(component, WM8993_LEFT_OUTPUT_VOLUME));
+		      snd_soc_component_read(component, WM8993_LEFT_OUTPUT_VOLUME));
 	snd_soc_component_write(component, WM8993_RIGHT_OUTPUT_VOLUME,
-		      snd_soc_component_read32(component, WM8993_RIGHT_OUTPUT_VOLUME));
+		      snd_soc_component_read(component, WM8993_RIGHT_OUTPUT_VOLUME));
 }
 EXPORT_SYMBOL_GPL(wm_hubs_update_class_w);
 
@@ -697,7 +694,7 @@ EXPORT_SYMBOL_GPL(wm_hubs_update_class_w);
 static int class_w_put_volsw(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_dapm_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_soc_dapm_kcontrol_to_component(kcontrol);
 	int ret;
 
 	ret = snd_soc_dapm_put_volsw(kcontrol, ucontrol);
@@ -717,7 +714,7 @@ static int class_w_put_volsw(struct snd_kcontrol *kcontrol,
 static int class_w_put_double(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_dapm_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_soc_dapm_kcontrol_to_component(kcontrol);
 	int ret;
 
 	ret = snd_soc_dapm_put_enum_double(kcontrol, ucontrol);
@@ -1115,7 +1112,7 @@ static const struct snd_soc_dapm_route lineout2_se_routes[] = {
 
 int wm_hubs_add_analogue_controls(struct snd_soc_component *component)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 
 	/* Latch volume update bits & default ZC on */
 	snd_soc_component_update_bits(component, WM8993_LEFT_LINE_INPUT_1_2_VOLUME,
@@ -1159,7 +1156,7 @@ int wm_hubs_add_analogue_routes(struct snd_soc_component *component,
 				int lineout1_diff, int lineout2_diff)
 {
 	struct wm_hubs_data *hubs = snd_soc_component_get_drvdata(component);
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 
 	hubs->component = component;
 
@@ -1226,6 +1223,9 @@ int wm_hubs_handle_analogue_pdata(struct snd_soc_component *component,
 	if (lineout2fb)
 		snd_soc_component_update_bits(component, WM8993_ADDITIONAL_CONTROL,
 				    WM8993_LINEOUT2_FB, WM8993_LINEOUT2_FB);
+
+	if (!hubs->micd_scthr)
+		return 0;
 
 	snd_soc_component_update_bits(component, WM8993_MICBIAS,
 			    WM8993_JD_SCTHR_MASK | WM8993_JD_THR_MASK |

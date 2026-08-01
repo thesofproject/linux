@@ -15,6 +15,8 @@ config ASYMMETRIC_PUBLIC_KEY_SUBTYPE
 	select MPILIB
 	select CRYPTO_HASH_INFO
 	select CRYPTO_AKCIPHER
+	select CRYPTO_SIG
+	select CRYPTO_HASH
 	help
 	  This option provides support for asymmetric public key type handling.
 	  If signature generation and/or verification are to be used,
@@ -25,20 +27,43 @@ config X509_CERTIFICATE_PARSER
 	tristate "X.509 certificate parser"
 	depends on ASYMMETRIC_PUBLIC_KEY_SUBTYPE
 	select ASN1
+	select CRYPTO_LIB_SHA256
 	select OID_REGISTRY
 	help
 	  This option provides support for parsing X.509 format blobs for key
 	  data and provides the ability to instantiate a crypto key from a
 	  public key packet found inside the certificate.
 
+config PKCS8_PRIVATE_KEY_PARSER
+	tristate "PKCS#8 private key parser"
+	depends on ASYMMETRIC_PUBLIC_KEY_SUBTYPE
+	select ASN1
+	select OID_REGISTRY
+	help
+	  This option provides support for parsing PKCS#8 format blobs for
+	  private key data and provides the ability to instantiate a crypto key
+	  from that data.
+
 config PKCS7_MESSAGE_PARSER
 	tristate "PKCS#7 message parser"
 	depends on X509_CERTIFICATE_PARSER
+	select CRYPTO_HASH
 	select ASN1
 	select OID_REGISTRY
 	help
 	  This option provides support for parsing PKCS#7 format messages for
 	  signature data and provides the ability to verify the signature.
+
+config PKCS7_WAIVE_AUTHATTRS_REJECTION_FOR_MLDSA
+	bool "Waive rejection of authenticatedAttributes for ML-DSA"
+	depends on PKCS7_MESSAGE_PARSER
+	depends on CRYPTO_MLDSA
+	help
+	  Due to use of CMS_NOATTR with ML-DSA not being supported in
+	  OpenSSL < 4.0 (and thus any released version), enabling this
+	  allows authenticatedAttributes to be used with ML-DSA for
+	  module signing.  Use of authenticatedAttributes in this
+	  context is normally rejected.
 
 config PKCS7_TEST_KEY
 	tristate "PKCS#7 testing key type"
@@ -56,10 +81,37 @@ config SIGNED_PE_FILE_VERIFICATION
 	bool "Support for PE file signature verification"
 	depends on PKCS7_MESSAGE_PARSER=y
 	depends on SYSTEM_DATA_VERIFICATION
+	select CRYPTO_HASH
 	select ASN1
 	select OID_REGISTRY
 	help
 	  This option provides support for verifying the signature(s) on a
 	  signed PE binary.
+
+config FIPS_SIGNATURE_SELFTEST
+	tristate "Run FIPS selftests on the X.509+PKCS7 signature verification"
+	help
+	  This option causes some selftests to be run on the signature
+	  verification code, using some built in data.  This is required
+	  for FIPS.
+	depends on KEYS
+	depends on PKCS7_MESSAGE_PARSER=X509_CERTIFICATE_PARSER
+	depends on X509_CERTIFICATE_PARSER
+	depends on CRYPTO_RSA
+	depends on CRYPTO_SHA256
+
+config FIPS_SIGNATURE_SELFTEST_RSA
+	bool
+	default y
+	depends on FIPS_SIGNATURE_SELFTEST
+	depends on CRYPTO_SHA256=y || CRYPTO_SHA256=FIPS_SIGNATURE_SELFTEST
+	depends on CRYPTO_RSA=y || CRYPTO_RSA=FIPS_SIGNATURE_SELFTEST
+
+config FIPS_SIGNATURE_SELFTEST_ECDSA
+	bool
+	default y
+	depends on FIPS_SIGNATURE_SELFTEST
+	depends on CRYPTO_SHA256=y || CRYPTO_SHA256=FIPS_SIGNATURE_SELFTEST
+	depends on CRYPTO_ECDSA=y || CRYPTO_ECDSA=FIPS_SIGNATURE_SELFTEST
 
 endif # ASYMMETRIC_KEY_TYPE

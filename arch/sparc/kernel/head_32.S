@@ -11,6 +11,7 @@
  * CompactPCI platform by Eric Brower, 1999.
  */
 
+#include <linux/export.h>
 #include <linux/version.h>
 #include <linux/init.h>
 
@@ -24,8 +25,7 @@
 #include <asm/winmacro.h>
 #include <asm/thread_info.h>	/* TI_UWINMASK */
 #include <asm/errno.h>
-#include <asm/pgtsrmmu.h>	/* SRMMU_PGDIR_SHIFT */
-#include <asm/export.h>
+#include <asm/pgtable.h>	/* PGDIR_SHIFT */
 
 	.data
 /* The following are used with the prom_vector node-ops to figure out
@@ -56,13 +56,6 @@ sun4e_notsup:
 #include "ttable_32.S"
 
 	.align PAGE_SIZE
-
-/* This was the only reasonable way I could think of to properly align
- * these page-table data structures.
- */
-	.globl empty_zero_page
-empty_zero_page:	.skip PAGE_SIZE
-EXPORT_SYMBOL(empty_zero_page)
 
 	.global root_flags
 	.global ram_flags
@@ -118,9 +111,12 @@ current_pc:
 		mov	%o7, %g3
 
 		tst	%o0
-		be	no_sun4u_here
+		bne	2f
 		 mov	%g4, %o7		/* Previous %o7. */
-
+		sethi	%hi(no_sun4u_here), %l1
+		jmpl	%l1 + %lo(no_sun4u_here), %g0
+		 nop
+2:
 		mov	%o0, %l0		! stash away romvec
 		mov	%o0, %g7		! put it here too
 		mov	%o1, %l1		! stash away debug_vec too
@@ -195,7 +191,8 @@ halt_notsup:
 		sub	%o0, %l6, %o0
 		call	%o1
 		 nop
-		ba	halt_me
+		sethi	%hi(halt_me), %o0
+		jmpl	%o0 + %lo(halt_me), %g0
 		 nop
 
 not_a_sun4:
@@ -273,7 +270,7 @@ not_a_sun4:
 		lda	[%o1] ASI_M_BYPASS, %o2		! This is the 0x0 16MB pgd
 
 		/* Calculate to KERNBASE entry. */
-		add	%o1, KERNBASE >> (SRMMU_PGDIR_SHIFT - 2), %o3
+		add	%o1, KERNBASE >> (PGDIR_SHIFT - 2), %o3
 
 		/* Poke the entry into the calculated address. */
 		sta	%o2, [%o3] ASI_M_BYPASS
@@ -317,7 +314,7 @@ srmmu_not_viking:
 		sll	%g1, 0x8, %g1			! make phys addr for l1 tbl
 
 		lda	[%g1] ASI_M_BYPASS, %g2		! get level1 entry for 0x0
-		add	%g1, KERNBASE >> (SRMMU_PGDIR_SHIFT - 2), %g3
+		add	%g1, KERNBASE >> (PGDIR_SHIFT - 2), %g3
 		sta	%g2, [%g3] ASI_M_BYPASS		! place at KERNBASE entry
 		b	go_to_highmem
 		 nop					! wheee....
@@ -341,7 +338,7 @@ leon_remap:
 		sll	%g1, 0x8, %g1			! make phys addr for l1 tbl
 
 		lda	[%g1] ASI_M_BYPASS, %g2		! get level1 entry for 0x0
-		add	%g1, KERNBASE >> (SRMMU_PGDIR_SHIFT - 2), %g3
+		add	%g1, KERNBASE >> (PGDIR_SHIFT - 2), %g3
 		sta	%g2, [%g3] ASI_M_BYPASS		! place at KERNBASE entry
 		b	go_to_highmem
 		 nop					! wheee....
@@ -431,8 +428,11 @@ leon_init:
 #ifdef CONFIG_SMP
 		ldub	[%g2 + %lo(boot_cpu_id)], %g1
 		cmp	%g1, 0xff		! unset means first CPU
-		bne	leon_smp_cpu_startup	! continue only with master
+		be 1f
+		 sethi	%hi(leon_smp_cpu_startup), %g1
+		jmpl	%g1 + %lo(leon_smp_cpu_startup), %g0
 		 nop
+1:
 #endif
 		/* Get CPU-ID from most significant 4-bit of ASR17 */
 		rd     %asr17, %g1
@@ -515,7 +515,7 @@ continue_boot:
 
 		/* I want a kernel stack NOW! */
 		set	init_thread_union, %g1
-		set	(THREAD_SIZE - STACKFRAME_SZ), %g2
+		set	(THREAD_SIZE - STACKFRAME_SZ - TRACEREG_SZ), %g2
 		add	%g1, %g2, %sp
 		mov	0, %fp			/* And for good luck */
 

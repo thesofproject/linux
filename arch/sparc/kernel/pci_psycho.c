@@ -13,7 +13,9 @@
 #include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
+#include <linux/of_platform.h>
+#include <linux/platform_device.h>
 
 #include <asm/iommu.h>
 #include <asm/irq.h>
@@ -517,7 +519,7 @@ static int psycho_probe(struct platform_device *op)
 	upa_portid = of_getintprop_default(dp, "upa-portid", 0xff);
 
 	err = -ENOMEM;
-	pbm = kzalloc(sizeof(*pbm), GFP_KERNEL);
+	pbm = kzalloc_obj(*pbm);
 	if (!pbm) {
 		printk(KERN_ERR PFX "Cannot allocate pci_pbm_info.\n");
 		goto out_err;
@@ -527,7 +529,7 @@ static int psycho_probe(struct platform_device *op)
 	if (pbm->sibling) {
 		iommu = pbm->sibling->iommu;
 	} else {
-		iommu = kzalloc(sizeof(struct iommu), GFP_KERNEL);
+		iommu = kzalloc_obj(struct iommu);
 		if (!iommu) {
 			printk(KERN_ERR PFX "Cannot allocate PBM iommu.\n");
 			goto out_free_controller;

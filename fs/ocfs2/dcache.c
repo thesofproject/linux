@@ -1,26 +1,10 @@
-/* -*- mode: c; c-basic-offset: 8; -*-
- * vim: noexpandtab sw=8 ts=8 sts=0:
- *
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
  * dcache.c
  *
  * dentry cache handling code
  *
  * Copyright (C) 2002, 2004 Oracle.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public
- * License along with this program; if not, write to the
- * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 021110-1307, USA.
  */
 
 #include <linux/fs.h>
@@ -48,7 +32,8 @@ void ocfs2_dentry_attach_gen(struct dentry *dentry)
 }
 
 
-static int ocfs2_dentry_revalidate(struct dentry *dentry, unsigned int flags)
+static int ocfs2_dentry_revalidate(struct inode *dir, const struct qstr *name,
+				   struct dentry *dentry, unsigned int flags)
 {
 	struct inode *inode;
 	int ret = 0;    /* if all else fails, just return false */
@@ -60,8 +45,7 @@ static int ocfs2_dentry_revalidate(struct dentry *dentry, unsigned int flags)
 	inode = d_inode(dentry);
 	osb = OCFS2_SB(dentry->d_sb);
 
-	trace_ocfs2_dentry_revalidate(dentry, dentry->d_name.len,
-				      dentry->d_name.name);
+	trace_ocfs2_dentry_revalidate(dentry, name->len, name->name);
 
 	/* For a negative dentry -
 	 * check the generation number of the parent and compare with the
@@ -69,12 +53,8 @@ static int ocfs2_dentry_revalidate(struct dentry *dentry, unsigned int flags)
 	 */
 	if (inode == NULL) {
 		unsigned long gen = (unsigned long) dentry->d_fsdata;
-		unsigned long pgen;
-		spin_lock(&dentry->d_lock);
-		pgen = OCFS2_I(d_inode(dentry->d_parent))->ip_dir_lock_gen;
-		spin_unlock(&dentry->d_lock);
-		trace_ocfs2_dentry_revalidate_negative(dentry->d_name.len,
-						       dentry->d_name.name,
+		unsigned long pgen = OCFS2_I(dir)->ip_dir_lock_gen;
+		trace_ocfs2_dentry_revalidate_negative(name->len, name->name,
 						       pgen, gen);
 		if (gen != pgen)
 			goto bail;
@@ -140,17 +120,10 @@ static int ocfs2_match_dentry(struct dentry *dentry,
 	if (!dentry->d_fsdata)
 		return 0;
 
-	if (!dentry->d_parent)
-		return 0;
-
 	if (skip_unhashed && d_unhashed(dentry))
 		return 0;
 
 	parent = d_inode(dentry->d_parent);
-	/* Negative parent dentry? */
-	if (!parent)
-		return 0;
-
 	/* Name is in a different directory. */
 	if (OCFS2_I(parent)->ip_blkno != parent_blkno)
 		return 0;
@@ -172,7 +145,7 @@ struct dentry *ocfs2_find_local_alias(struct inode *inode,
 	struct dentry *dentry;
 
 	spin_lock(&inode->i_lock);
-	hlist_for_each_entry(dentry, &inode->i_dentry, d_u.d_alias) {
+	for_each_alias(dentry, inode) {
 		spin_lock(&dentry->d_lock);
 		if (ocfs2_match_dentry(dentry, parent_blkno, skip_unhashed)) {
 			trace_ocfs2_find_local_alias(dentry->d_name.len,
@@ -292,7 +265,7 @@ int ocfs2_dentry_attach_lock(struct dentry *dentry,
 	/*
 	 * There are no other aliases
 	 */
-	dl = kmalloc(sizeof(*dl), GFP_NOFS);
+	dl = kmalloc_obj(*dl, GFP_NOFS);
 	if (!dl) {
 		ret = -ENOMEM;
 		mlog_errno(ret);
@@ -310,6 +283,18 @@ int ocfs2_dentry_attach_lock(struct dentry *dentry,
 
 out_attach:
 	spin_lock(&dentry_attach_lock);
+	if (unlikely(dentry->d_fsdata && !alias)) {
+		/* d_fsdata is set by a racing thread which is doing
+		 * the same thing as this thread is doing. Leave the racing
+		 * thread going ahead and we return here.
+		 */
+		spin_unlock(&dentry_attach_lock);
+		iput(dl->dl_inode);
+		ocfs2_lock_res_free(&dl->dl_lockres);
+		kfree(dl);
+		return 0;
+	}
+
 	dentry->d_fsdata = dl;
 	dl->dl_count++;
 	spin_unlock(&dentry_attach_lock);

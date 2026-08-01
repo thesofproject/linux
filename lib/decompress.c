@@ -13,6 +13,7 @@
 #include <linux/decompress/inflate.h>
 #include <linux/decompress/unlzo.h>
 #include <linux/decompress/unlz4.h>
+#include <linux/decompress/unzstd.h>
 
 #include <linux/types.h>
 #include <linux/string.h>
@@ -37,6 +38,9 @@
 #ifndef CONFIG_DECOMPRESS_LZ4
 # define unlz4 NULL
 #endif
+#ifndef CONFIG_DECOMPRESS_ZSTD
+# define unzstd NULL
+#endif
 
 struct compress_format {
 	unsigned char magic[2];
@@ -45,14 +49,15 @@ struct compress_format {
 };
 
 static const struct compress_format compressed_formats[] __initconst = {
-	{ {0x1f, 0x8b}, "gzip", gunzip },
-	{ {0x1f, 0x9e}, "gzip", gunzip },
-	{ {0x42, 0x5a}, "bzip2", bunzip2 },
-	{ {0x5d, 0x00}, "lzma", unlzma },
-	{ {0xfd, 0x37}, "xz", unxz },
-	{ {0x89, 0x4c}, "lzo", unlzo },
-	{ {0x02, 0x21}, "lz4", unlz4 },
-	{ {0, 0}, NULL, NULL }
+	{ .magic = {0x1f, 0x8b}, .name = "gzip", .decompressor = gunzip },
+	{ .magic = {0x1f, 0x9e}, .name = "gzip", .decompressor = gunzip },
+	{ .magic = {0x42, 0x5a}, .name = "bzip2", .decompressor = bunzip2 },
+	{ .magic = {0x5d, 0x00}, .name = "lzma", .decompressor = unlzma },
+	{ .magic = {0xfd, 0x37}, .name = "xz", .decompressor = unxz },
+	{ .magic = {0x89, 0x4c}, .name = "lzo", .decompressor = unlzo },
+	{ .magic = {0x02, 0x21}, .name = "lz4", .decompressor = unlz4 },
+	{ .magic = {0x28, 0xb5}, .name = "zstd", .decompressor = unzstd },
+	{ /* sentinel */ }
 };
 
 decompress_fn __init decompress_method(const unsigned char *inbuf, long len,
@@ -68,11 +73,10 @@ decompress_fn __init decompress_method(const unsigned char *inbuf, long len,
 
 	pr_debug("Compressed data magic: %#.2x %#.2x\n", inbuf[0], inbuf[1]);
 
-	for (cf = compressed_formats; cf->name; cf++) {
+	for (cf = compressed_formats; cf->name; cf++)
 		if (!memcmp(inbuf, cf->magic, 2))
 			break;
 
-	}
 	if (name)
 		*name = cf->name;
 	return cf->decompressor;

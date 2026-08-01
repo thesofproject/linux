@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * DT idle states parsing code.
  *
  * Copyright (C) 2014 ARM Ltd.
  * Author: Lorenzo Pieralisi <lorenzo.pieralisi@arm.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #define pr_fmt(fmt) "DT idle-states: " fmt
@@ -17,21 +14,16 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 
 #include "dt_idle_states.h"
 
 static int init_state_node(struct cpuidle_state *idle_state,
-			   const struct of_device_id *matches,
+			   const struct of_device_id *match_id,
 			   struct device_node *state_node)
 {
 	int err;
-	const struct of_device_id *match_id;
 	const char *desc;
 
-	match_id = of_match_node(matches, state_node);
-	if (!match_id)
-		return -ENODEV;
 	/*
 	 * CPUidle drivers are expected to initialize the const void *data
 	 * pointer of the passed in struct of_device_id array to the idle
@@ -84,7 +76,7 @@ static int init_state_node(struct cpuidle_state *idle_state,
 	if (err)
 		desc = state_node->name;
 
-	idle_state->flags = 0;
+	idle_state->flags = CPUIDLE_FLAG_RCU_IDLE;
 	if (of_property_read_bool(state_node, "local-timer-stop"))
 		idle_state->flags |= CPUIDLE_FLAG_TIMER_STOP;
 	/*
@@ -92,8 +84,8 @@ static int init_state_node(struct cpuidle_state *idle_state,
 	 *	replace with kstrdup and pointer assignment when name
 	 *	and desc become string pointers
 	 */
-	strncpy(idle_state->name, state_node->name, CPUIDLE_NAME_LEN - 1);
-	strncpy(idle_state->desc, desc, CPUIDLE_DESC_LEN - 1);
+	strscpy(idle_state->name, state_node->name, CPUIDLE_NAME_LEN);
+	strscpy(idle_state->desc, desc, CPUIDLE_DESC_LEN);
 	return 0;
 }
 
@@ -106,7 +98,6 @@ static bool idle_state_valid(struct device_node *state_node, unsigned int idx,
 {
 	int cpu;
 	struct device_node *cpu_node, *curr_state_node;
-	bool valid = true;
 
 	/*
 	 * Compare idle state phandles for index idx on all CPUs in the
@@ -115,21 +106,17 @@ static bool idle_state_valid(struct device_node *state_node, unsigned int idx,
 	 * retrieved from. If a mismatch is found bail out straight
 	 * away since we certainly hit a firmware misconfiguration.
 	 */
-	for (cpu = cpumask_next(cpumask_first(cpumask), cpumask);
-	     cpu < nr_cpu_ids; cpu = cpumask_next(cpu, cpumask)) {
+	cpu = cpumask_first(cpumask) + 1;
+	for_each_cpu_from(cpu, cpumask) {
 		cpu_node = of_cpu_device_node_get(cpu);
-		curr_state_node = of_parse_phandle(cpu_node, "cpu-idle-states",
-						   idx);
-		if (state_node != curr_state_node)
-			valid = false;
-
+		curr_state_node = of_get_cpu_state_node(cpu_node, idx);
 		of_node_put(curr_state_node);
 		of_node_put(cpu_node);
-		if (!valid)
-			break;
+		if (state_node != curr_state_node)
+			return false;
 	}
 
-	return valid;
+	return true;
 }
 
 /**
@@ -160,6 +147,7 @@ int dt_init_idle_driver(struct cpuidle_driver *drv,
 {
 	struct cpuidle_state *idle_state;
 	struct device_node *state_node, *cpu_node;
+	const struct of_device_id *match_id;
 	int i, err = 0;
 	const cpumask_t *cpumask;
 	unsigned int state_idx = start_idx;
@@ -176,9 +164,15 @@ int dt_init_idle_driver(struct cpuidle_driver *drv,
 	cpu_node = of_cpu_device_node_get(cpumask_first(cpumask));
 
 	for (i = 0; ; i++) {
-		state_node = of_parse_phandle(cpu_node, "cpu-idle-states", i);
+		state_node = of_get_cpu_state_node(cpu_node, i);
 		if (!state_node)
 			break;
+
+		match_id = of_match_node(matches, state_node);
+		if (!match_id) {
+			err = -ENODEV;
+			break;
+		}
 
 		if (!of_device_is_available(state_node)) {
 			of_node_put(state_node);
@@ -198,7 +192,7 @@ int dt_init_idle_driver(struct cpuidle_driver *drv,
 		}
 
 		idle_state = &drv->states[state_idx++];
-		err = init_state_node(idle_state, matches, state_node);
+		err = init_state_node(idle_state, match_id, state_node);
 		if (err) {
 			pr_err("Parsing idle state node %pOF failed with err %d\n",
 			       state_node, err);
@@ -212,18 +206,15 @@ int dt_init_idle_driver(struct cpuidle_driver *drv,
 	of_node_put(cpu_node);
 	if (err)
 		return err;
-	/*
-	 * Update the driver state count only if some valid DT idle states
-	 * were detected
-	 */
-	if (i)
-		drv->state_count = state_idx;
+
+	/* Set the number of total supported idle states. */
+	drv->state_count = state_idx;
 
 	/*
 	 * Return the number of present and valid DT idle states, which can
 	 * also be 0 on platforms with missing DT idle states or legacy DT
 	 * configuration predating the DT idle states bindings.
 	 */
-	return i;
+	return state_idx - start_idx;
 }
 EXPORT_SYMBOL_GPL(dt_init_idle_driver);

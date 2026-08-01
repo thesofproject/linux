@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (c) 1998-2001 Vojtech Pavlik
  *
@@ -7,26 +8,6 @@
 
 /*
  * ThrustMaster DirectConnect (BSP) joystick family driver for Linux
- */
-
-/*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
- * Should you need to contact me, the author, you can do so either by
- * e-mail - mail your message to <vojtech@ucw.cz>, or by paper mail:
- * Vojtech Pavlik, Simunkova 1594, Prague 8, 182 00 Czech Republic
  */
 
 #include <linux/delay.h>
@@ -99,7 +80,7 @@ static const struct tmdc_model {
 	const signed char *axes;
 	const short *buttons;
 } tmdc_models[] = {
-	{   1, "ThrustMaster Millenium 3D Inceptor",	  6, 2, { 4, 2 }, { 4, 6 }, tmdc_abs, tmdc_btn_joy },
+	{   1, "ThrustMaster Millennium 3D Inceptor",	  6, 2, { 4, 2 }, { 4, 6 }, tmdc_abs, tmdc_btn_joy },
 	{   3, "ThrustMaster Rage 3D Gamepad",		  2, 0, { 8, 2 }, { 0, 0 }, tmdc_abs, tmdc_btn_pad },
 	{   4, "ThrustMaster Attack Throttle",		  5, 2, { 4, 6 }, { 4, 2 }, tmdc_abs_at, tmdc_btn_at },
 	{   8, "ThrustMaster FragMaster",		  4, 0, { 8, 2 }, { 0, 0 }, tmdc_abs_fm, tmdc_btn_fm },
@@ -283,7 +264,7 @@ static int tmdc_setup_port(struct tmdc *tmdc, int idx, unsigned char *data)
 	int i, j, b = 0;
 	int err;
 
-	tmdc->port[idx] = port = kzalloc(sizeof (struct tmdc_port), GFP_KERNEL);
+	tmdc->port[idx] = port = kzalloc_obj(struct tmdc_port);
 	input_dev = input_allocate_device();
 	if (!port || !input_dev) {
 		err = -ENOMEM;
@@ -367,7 +348,8 @@ static int tmdc_connect(struct gameport *gameport, struct gameport_driver *drv)
 	int i;
 	int err;
 
-	if (!(tmdc = kzalloc(sizeof(struct tmdc), GFP_KERNEL)))
+	tmdc = kzalloc_obj(*tmdc);
+	if (!tmdc)
 		return -ENOMEM;
 
 	tmdc->gameport = gameport;

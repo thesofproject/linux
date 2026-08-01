@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Swap block device support for MTDs
  * Turns an MTD device into a swap device with block wear leveling
@@ -8,20 +9,6 @@
  *
  * Based on Richard Purdie's earlier implementation in 2007. Background
  * support and lock-less operation written by Adrian Hunter.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
  */
 
 #include <linux/kernel.h>
@@ -32,7 +19,7 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
-#include <linux/genhd.h>
+#include <linux/blkdev.h>
 #include <linux/swap.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
@@ -138,6 +125,7 @@ struct mtdswap_dev {
 
 	char *page_buf;
 	char *oob_buf;
+	struct dentry *debugfs_stats;
 };
 
 struct mtdswap_oobdata {
@@ -336,7 +324,7 @@ static int mtdswap_read_markers(struct mtdswap_dev *d, struct swap_eb *eb)
 	struct mtdswap_oobdata *data, *data2;
 	int ret;
 	loff_t offset;
-	struct mtd_oob_ops ops;
+	struct mtd_oob_ops ops = { };
 
 	offset = mtdswap_eb_offset(d, eb);
 
@@ -383,7 +371,7 @@ static int mtdswap_write_marker(struct mtdswap_dev *d, struct swap_eb *eb,
 	struct mtdswap_oobdata n;
 	int ret;
 	loff_t offset;
-	struct mtd_oob_ops ops;
+	struct mtd_oob_ops ops = { };
 
 	ops.ooboffs = 0;
 	ops.oobbuf = (uint8_t *)&n;
@@ -729,7 +717,6 @@ retry:
 		return ret;
 	}
 
-	eb = d->eb_data + *newblock / d->pages_per_eblk;
 	d->page_data[page] = *newblock;
 	d->revmap[oldblock] = PAGE_UNDEF;
 	eb = d->eb_data + oldblock / d->pages_per_eblk;
@@ -892,7 +879,7 @@ static unsigned int mtdswap_eblk_passes(struct mtdswap_dev *d,
 	loff_t base, pos;
 	unsigned int *p1 = (unsigned int *)d->page_buf;
 	unsigned char *p2 = (unsigned char *)d->oob_buf;
-	struct mtd_oob_ops ops;
+	struct mtd_oob_ops ops = { };
 	int ret;
 
 	ops.mode = MTD_OPS_AUTO_OOB;
@@ -1066,7 +1053,6 @@ static int mtdswap_writesect(struct mtd_blktrans_dev *dev,
 	if (ret < 0)
 		return ret;
 
-	eb = d->eb_data + (newblock / d->pages_per_eblk);
 	d->page_data[page] = newblock;
 
 	return 0;
@@ -1265,23 +1251,11 @@ static int mtdswap_show(struct seq_file *s, void *data)
 
 	return 0;
 }
-
-static int mtdswap_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, mtdswap_show, inode->i_private);
-}
-
-static const struct file_operations mtdswap_fops = {
-	.open		= mtdswap_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(mtdswap);
 
 static int mtdswap_add_debugfs(struct mtdswap_dev *d)
 {
 	struct dentry *root = d->mtd->dbg.dfs_dir;
-	struct dentry *dent;
 
 	if (!IS_ENABLED(CONFIG_DEBUG_FS))
 		return 0;
@@ -1289,12 +1263,8 @@ static int mtdswap_add_debugfs(struct mtdswap_dev *d)
 	if (IS_ERR_OR_NULL(root))
 		return -1;
 
-	dent = debugfs_create_file("mtdswap_stats", S_IRUSR, root, d,
-				&mtdswap_fops);
-	if (!dent) {
-		dev_err(d->dev, "debugfs_create_file failed\n");
-		return -1;
-	}
+	d->debugfs_stats = debugfs_create_file("mtdswap_stats", 0400, root,
+					       d, &mtdswap_fops);
 
 	return 0;
 }
@@ -1317,11 +1287,11 @@ static int mtdswap_init(struct mtdswap_dev *d, unsigned int eblocks,
 	for (i = 0; i < MTDSWAP_TREE_CNT; i++)
 		d->trees[i].root = RB_ROOT;
 
-	d->page_data = vmalloc(sizeof(int)*pages);
+	d->page_data = vmalloc_array(pages, sizeof(int));
 	if (!d->page_data)
 		goto page_data_fail;
 
-	d->revmap = vmalloc(sizeof(int)*blocks);
+	d->revmap = vmalloc_array(blocks, sizeof(int));
 	if (!d->revmap)
 		goto revmap_fail;
 
@@ -1340,7 +1310,7 @@ static int mtdswap_init(struct mtdswap_dev *d, unsigned int eblocks,
 	if (!d->page_buf)
 		goto page_buf_fail;
 
-	d->oob_buf = kmalloc(2 * mtd->oobavail, GFP_KERNEL);
+	d->oob_buf = kmalloc_array(2, mtd->oobavail, GFP_KERNEL);
 	if (!d->oob_buf)
 		goto oob_buf_fail;
 
@@ -1445,11 +1415,11 @@ static void mtdswap_add_mtd(struct mtd_blktrans_ops *tr, struct mtd_info *mtd)
 		"%u spare, %u bad blocks\n",
 		MTDSWAP_PREFIX, part, swap_size / 1024, spare_cnt, bad_blocks);
 
-	d = kzalloc(sizeof(struct mtdswap_dev), GFP_KERNEL);
+	d = kzalloc_obj(struct mtdswap_dev);
 	if (!d)
 		return;
 
-	mbd_dev = kzalloc(sizeof(struct mtd_blktrans_dev), GFP_KERNEL);
+	mbd_dev = kzalloc_obj(struct mtd_blktrans_dev);
 	if (!mbd_dev) {
 		kfree(d);
 		return;
@@ -1495,6 +1465,7 @@ static void mtdswap_remove_dev(struct mtd_blktrans_dev *dev)
 {
 	struct mtdswap_dev *d = MTDSWAP_MBD_TO_MTDSWAP(dev);
 
+	debugfs_remove(d->debugfs_stats);
 	del_mtd_blktrans_dev(dev);
 	mtdswap_cleanup(d);
 	kfree(d);
@@ -1515,19 +1486,7 @@ static struct mtd_blktrans_ops mtdswap_ops = {
 	.owner		= THIS_MODULE,
 };
 
-static int __init mtdswap_modinit(void)
-{
-	return register_mtd_blktrans(&mtdswap_ops);
-}
-
-static void __exit mtdswap_modexit(void)
-{
-	deregister_mtd_blktrans(&mtdswap_ops);
-}
-
-module_init(mtdswap_modinit);
-module_exit(mtdswap_modexit);
-
+module_mtd_blktrans(mtdswap_ops);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Jarkko Lavinen <jarkko.lavinen@nokia.com>");

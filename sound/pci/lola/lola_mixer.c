@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Support for Digigram Lola PCI-e boards
  *
  *  Copyright (c) 2011 Takashi Iwai <tiwai@suse.de>
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the Free
- *  Software Foundation; either version 2 of the License, or (at your option)
- *  any later version.
- *
- *  This program is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- *  more details.
- *
- *  You should have received a copy of the GNU General Public License along with
- *  this program; if not, write to the Free Software Foundation, Inc., 59
- *  Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 
 #include <linux/kernel.h>
@@ -134,6 +121,8 @@ int lola_init_mixer_widget(struct lola *chip, int nid)
 
 	/* reserve memory to copy mixer data for sleep mode transitions */
 	chip->mixer.array_saved = vmalloc(sizeof(struct lola_mixer_array));
+	if (!chip->mixer.array_saved)
+		return -ENOMEM;
 
 	/* mixer matrix sources are physical input data and play streams */
 	chip->mixer.src_stream_outs = chip->pcm[PLAY].num_streams;
@@ -345,49 +334,6 @@ int lola_setup_all_analog_gains(struct lola *chip, int dir, bool mute)
 		}
 	}
 	return lola_codec_flush(chip);
-}
-
-void lola_save_mixer(struct lola *chip)
-{
-	/* mute analog output */
-	if (chip->mixer.array_saved) {
-		/* store contents of mixer array */
-		memcpy_fromio(chip->mixer.array_saved, chip->mixer.array,
-			      sizeof(*chip->mixer.array));
-	}
-	lola_setup_all_analog_gains(chip, PLAY, true); /* output mute */
-}
-
-void lola_restore_mixer(struct lola *chip)
-{
-	int i;
-
-	/*lola_reset_setups(chip);*/
-	if (chip->mixer.array_saved) {
-		/* restore contents of mixer array */
-		memcpy_toio(chip->mixer.array, chip->mixer.array_saved,
-			    sizeof(*chip->mixer.array));
-		/* inform micro-controller about all restored values
-		 * and ignore return values
-		 */
-		for (i = 0; i < chip->mixer.src_phys_ins; i++)
-			lola_codec_write(chip, chip->mixer.nid,
-					 LOLA_VERB_SET_SOURCE_GAIN,
-					 i, 0);
-		for (i = 0; i < chip->mixer.src_stream_outs; i++)
-			lola_codec_write(chip, chip->mixer.nid,
-					 LOLA_VERB_SET_SOURCE_GAIN,
-					 chip->mixer.src_stream_out_ofs + i, 0);
-		for (i = 0; i < chip->mixer.dest_stream_ins; i++)
-			lola_codec_write(chip, chip->mixer.nid,
-					 LOLA_VERB_SET_DESTINATION_GAIN,
-					 i, 0);
-		for (i = 0; i < chip->mixer.dest_phys_outs; i++)
-			lola_codec_write(chip, chip->mixer.nid,
-					 LOLA_VERB_SET_DESTINATION_GAIN,
-					 chip->mixer.dest_phys_out_ofs + i, 0);
-		lola_codec_flush(chip);
-	}
 }
 
 /*

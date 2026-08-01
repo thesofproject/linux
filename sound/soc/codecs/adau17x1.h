@@ -10,6 +10,7 @@
 enum adau17x1_type {
 	ADAU1361,
 	ADAU1761,
+	ADAU1761_AS_1361,
 	ADAU1381,
 	ADAU1781,
 };
@@ -67,10 +68,6 @@ bool adau17x1_precious_register(struct device *dev, unsigned int reg);
 int adau17x1_resume(struct snd_soc_component *component);
 
 extern const struct snd_soc_dai_ops adau17x1_dai_ops;
-
-int adau17x1_setup_firmware(struct snd_soc_component *component,
-	unsigned int rate);
-bool adau17x1_has_dsp(struct adau *adau);
 
 #define ADAU17X1_CLOCK_CONTROL			0x4000
 #define ADAU17X1_PLL_CONTROL			0x4002

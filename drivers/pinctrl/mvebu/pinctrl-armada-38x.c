@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Marvell Armada 380/385 pinctrl driver based on mvebu pinctrl core
  *
  * Copyright (C) 2013 Marvell
  *
  * Thomas Petazzoni <thomas.petazzoni@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/err.h>
@@ -16,8 +12,8 @@
 #include <linux/io.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/pinctrl/pinctrl.h>
+#include <linux/property.h>
 
 #include "pinctrl-mvebu.h"
 
@@ -408,13 +404,8 @@ static struct pinctrl_gpio_range armada_38x_mpp_gpio_ranges[] = {
 static int armada_38x_pinctrl_probe(struct platform_device *pdev)
 {
 	struct mvebu_pinctrl_soc_info *soc = &armada_38x_pinctrl_info;
-	const struct of_device_id *match =
-		of_match_device(armada_38x_pinctrl_of_match, &pdev->dev);
 
-	if (!match)
-		return -ENODEV;
-
-	soc->variant = (unsigned) match->data & 0xff;
+	soc->variant = (unsigned)device_get_match_data(&pdev->dev) & 0xff;
 	soc->controls = armada_38x_mpp_controls;
 	soc->ncontrols = ARRAY_SIZE(armada_38x_mpp_controls);
 	soc->gpioranges = armada_38x_mpp_gpio_ranges;

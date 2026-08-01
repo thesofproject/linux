@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * (C) Copyright David Gibson <dwg@au1.ibm.com>, IBM Corporation.  2005.
- *
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307
- *                                                                   USA
  */
 
 #include "dtc.h"
+#include "srcpos.h"
 
 /*
  * Tree building functions
@@ -50,25 +36,27 @@ void delete_labels(struct label **labels)
 		label->deleted = 1;
 }
 
-struct property *build_property(char *name, struct data val)
+struct property *build_property(const char *name, struct data val,
+				struct srcpos *srcpos)
 {
 	struct property *new = xmalloc(sizeof(*new));
 
 	memset(new, 0, sizeof(*new));
 
-	new->name = name;
+	new->name = xstrdup(name);
 	new->val = val;
+	new->srcpos = srcpos_copy(srcpos);
 
 	return new;
 }
 
-struct property *build_property_delete(char *name)
+struct property *build_property_delete(const char *name)
 {
 	struct property *new = xmalloc(sizeof(*new));
 
 	memset(new, 0, sizeof(*new));
 
-	new->name = name;
+	new->name = xstrdup(name);
 	new->deleted = 1;
 
 	return new;
@@ -97,7 +85,8 @@ struct property *reverse_properties(struct property *first)
 	return head;
 }
 
-struct node *build_node(struct property *proplist, struct node *children)
+struct node *build_node(struct property *proplist, struct node *children,
+			struct srcpos *srcpos)
 {
 	struct node *new = xmalloc(sizeof(*new));
 	struct node *child;
@@ -106,6 +95,7 @@ struct node *build_node(struct property *proplist, struct node *children)
 
 	new->proplist = reverse_properties(proplist);
 	new->children = children;
+	new->srcpos = srcpos_copy(srcpos);
 
 	for_each_child(new, child) {
 		child->parent = new;
@@ -114,22 +104,37 @@ struct node *build_node(struct property *proplist, struct node *children)
 	return new;
 }
 
-struct node *build_node_delete(void)
+struct node *build_node_delete(struct srcpos *srcpos)
 {
 	struct node *new = xmalloc(sizeof(*new));
 
 	memset(new, 0, sizeof(*new));
 
 	new->deleted = 1;
+	new->srcpos = srcpos_copy(srcpos);
 
 	return new;
 }
 
-struct node *name_node(struct node *node, char *name)
+struct node *name_node(struct node *node, const char *name)
 {
 	assert(node->name == NULL);
 
-	node->name = name;
+	node->name = xstrdup(name);
+
+	return node;
+}
+
+struct node *omit_node_if_unused(struct node *node)
+{
+	node->omit_if_unused = 1;
+
+	return node;
+}
+
+struct node *reference_node(struct node *node)
+{
+	node->is_referenced = 1;
 
 	return node;
 }
@@ -169,6 +174,8 @@ struct node *merge_nodes(struct node *old_node, struct node *new_node)
 
 				old_prop->val = new_prop->val;
 				old_prop->deleted = 0;
+				srcpos_free(old_prop->srcpos);
+				old_prop->srcpos = new_prop->srcpos;
 				free(new_prop);
 				new_prop = NULL;
 				break;
@@ -209,6 +216,8 @@ struct node *merge_nodes(struct node *old_node, struct node *new_node)
 			add_child(old_node, new_child);
 	}
 
+	old_node->srcpos = srcpos_extend(old_node->srcpos, new_node->srcpos);
+
 	/* The new node contents are now merged into the old node.  Free
 	 * the new node. */
 	free(new_node);
@@ -224,16 +233,24 @@ struct node * add_orphan_node(struct node *dt, struct node *new_node, char *ref)
 	struct data d = empty_data;
 	char *name;
 
-	d = data_add_marker(d, REF_PHANDLE, ref);
-	d = data_append_integer(d, 0xffffffff, 32);
+	if (ref[0] == '/') {
+		d = data_add_marker(d, TYPE_STRING, ref);
+		d = data_append_data(d, ref, strlen(ref) + 1);
 
-	p = build_property("target", d);
+		p = build_property("target-path", d, NULL);
+	} else {
+		d = data_add_marker(d, REF_PHANDLE, ref);
+		d = data_append_integer(d, 0xffffffff, 32);
+
+		p = build_property("target", d, NULL);
+	}
 
 	xasprintf(&name, "fragment@%u",
 			next_orphan_fragment++);
 	name_node(new_node, "__overlay__");
-	node = build_node(p, new_node);
+	node = build_node(p, new_node, NULL);
 	name_node(node, name);
+	free(name);
 
 	add_child(dt, node);
 	return dt;
@@ -320,20 +337,76 @@ void delete_node(struct node *node)
 }
 
 void append_to_property(struct node *node,
-				    char *name, const void *data, int len)
+			char *name, const void *data, int len,
+			enum markertype type)
 {
-	struct data d;
+	struct property *p;
+
+	p = get_property(node, name);
+	if (!p) {
+		p = build_property(name, empty_data, NULL);
+		add_property(node, p);
+	}
+
+	p->val = data_add_marker(p->val, type, name);
+	p->val = data_append_data(p->val, data, len);
+}
+
+static int append_unique_str_to_property(struct node *node,
+					 char *name, const char *data, int len)
+{
 	struct property *p;
 
 	p = get_property(node, name);
 	if (p) {
-		d = data_append_data(p->val, data, len);
-		p->val = d;
+		const char *s;
+
+		if (p->val.len && p->val.val[p->val.len - 1] != '\0')
+			/* The current content doesn't look like a string */
+			return -1;
+
+		for (s = p->val.val; s < p->val.val + p->val.len; s = strchr(s, '\0') + 1) {
+			if (strcmp(data, s) == 0)
+				/* data already contained in node.name */
+				return 0;
+		}
 	} else {
-		d = data_append_data(empty_data, data, len);
-		p = build_property(name, d);
+		p = build_property(name, empty_data, NULL);
 		add_property(node, p);
 	}
+
+	p->val = data_add_marker(p->val, TYPE_STRING, name);
+	p->val = data_append_data(p->val, data, len);
+
+	return 0;
+}
+
+static int append_unique_u32_to_property(struct node *node, char *name, fdt32_t value)
+{
+	struct property *p;
+
+	p = get_property(node, name);
+	if (p) {
+		const fdt32_t *v, *val_end = (const fdt32_t *)p->val.val + p->val.len / 4;
+
+		if (p->val.len % 4 != 0)
+			/* The current content doesn't look like a u32 array */
+			return -1;
+
+		for (v = (const void *)p->val.val; v < val_end; v++) {
+			if (*v == value)
+				/* value already contained */
+				return 0;
+		}
+	} else {
+		p = build_property(name, empty_data, NULL);
+		add_property(node, p);
+	}
+
+	p->val = data_add_marker(p->val, TYPE_UINT32, name);
+	p->val = data_append_data(p->val, &value, 4);
+
+	return 0;
 }
 
 struct reserve_info *build_reserve_entry(uint64_t address, uint64_t size)
@@ -419,9 +492,9 @@ cell_t propval_cell(struct property *prop)
 	return fdt32_to_cpu(*((fdt32_t *)prop->val.val));
 }
 
-cell_t propval_cell_n(struct property *prop, int n)
+cell_t propval_cell_n(struct property *prop, unsigned int n)
 {
-	assert(prop->val.len / sizeof(cell_t) >= n);
+	assert(prop->val.len / sizeof(cell_t) > n);
 	return fdt32_to_cpu(*((fdt32_t *)prop->val.val + n));
 }
 
@@ -484,7 +557,7 @@ struct node *get_subnode(struct node *node, const char *nodename)
 	struct node *child;
 
 	for_each_child(node, child)
-		if (streq(child->name, nodename))
+		if (streq(child->name, nodename) && !child->deleted)
 			return child;
 
 	return NULL;
@@ -507,8 +580,7 @@ struct node *get_node_by_path(struct node *tree, const char *path)
 	p = strchr(path, '/');
 
 	for_each_child(tree, child) {
-		if (p && (strlen(child->name) == p-path) &&
-		    strprefixeq(path, p - path, child->name))
+		if (p && strprefixeq(path, (size_t)(p - path), child->name))
 			return get_node_by_path(child, p+1);
 		else if (!p && streq(path, child->name))
 			return child;
@@ -541,7 +613,7 @@ struct node *get_node_by_phandle(struct node *tree, cell_t phandle)
 {
 	struct node *child, *node;
 
-	if ((phandle == 0) || (phandle == -1)) {
+	if (!phandle_is_valid(phandle)) {
 		assert(generate_fixups);
 		return NULL;
 	}
@@ -563,19 +635,62 @@ struct node *get_node_by_phandle(struct node *tree, cell_t phandle)
 
 struct node *get_node_by_ref(struct node *tree, const char *ref)
 {
+	struct node *target = tree;
+	const char *label = NULL, *path = NULL;
+
 	if (streq(ref, "/"))
 		return tree;
-	else if (ref[0] == '/')
-		return get_node_by_path(tree, ref);
+
+	if (ref[0] == '/')
+		path = ref;
 	else
-		return get_node_by_label(tree, ref);
+		label = ref;
+
+	if (label) {
+		const char *slash = strchr(label, '/');
+		char *buf = NULL;
+
+		if (slash) {
+			buf = xstrndup(label, slash - label);
+			label = buf;
+			path = slash + 1;
+		}
+
+		target = get_node_by_label(tree, label);
+
+		free(buf);
+
+		if (!target)
+			return NULL;
+	}
+
+	if (path)
+		target = get_node_by_path(target, path);
+
+	return target;
+}
+
+static void add_phandle_property(struct node *node,
+				 const char *name, int format)
+{
+	struct data d;
+
+	if (!(phandle_format & format))
+		return;
+	if (get_property(node, name))
+		return;
+
+	d = data_add_marker(empty_data, TYPE_UINT32, NULL);
+	d = data_append_cell(d, node->phandle);
+
+	add_property(node, build_property(name, d, NULL));
 }
 
 cell_t get_node_phandle(struct node *root, struct node *node)
 {
 	static cell_t phandle = 1; /* FIXME: ick, static local */
 
-	if ((node->phandle != 0) && (node->phandle != -1))
+	if (phandle_is_valid(node->phandle))
 		return node->phandle;
 
 	while (get_node_by_phandle(root, phandle))
@@ -583,17 +698,8 @@ cell_t get_node_phandle(struct node *root, struct node *node)
 
 	node->phandle = phandle;
 
-	if (!get_property(node, "linux,phandle")
-	    && (phandle_format & PHANDLE_LEGACY))
-		add_property(node,
-			     build_property("linux,phandle",
-					    data_append_cell(empty_data, phandle)));
-
-	if (!get_property(node, "phandle")
-	    && (phandle_format & PHANDLE_EPAPR))
-		add_property(node,
-			     build_property("phandle",
-					    data_append_cell(empty_data, phandle)));
+	add_phandle_property(node, "linux,phandle", PHANDLE_LEGACY);
+	add_phandle_property(node, "phandle", PHANDLE_EPAPR);
 
 	/* If the node *does* have a phandle property, we must
 	 * be dealing with a self-referencing phandle, which will be
@@ -763,18 +869,18 @@ void sort_tree(struct dt_info *dti)
 }
 
 /* utility helper to avoid code duplication */
-static struct node *build_and_name_child_node(struct node *parent, char *name)
+static struct node *build_and_name_child_node(struct node *parent, const char *name)
 {
 	struct node *node;
 
-	node = build_node(NULL, NULL);
-	name_node(node, xstrdup(name));
+	node = build_node(NULL, NULL, NULL);
+	name_node(node, name);
 	add_child(parent, node);
 
 	return node;
 }
 
-static struct node *build_root_node(struct node *dt, char *name)
+static struct node *build_root_node(struct node *dt, const char *name)
 {
 	struct node *an;
 
@@ -828,8 +934,9 @@ static void generate_label_tree_internal(struct dt_info *dti,
 
 			/* insert it */
 			p = build_property(l->label,
-				data_copy_mem(node->fullpath,
-						strlen(node->fullpath) + 1));
+				data_copy_escape_string(node->fullpath,
+						strlen(node->fullpath)),
+				NULL);
 			add_property(an, p);
 		}
 
@@ -864,14 +971,21 @@ static bool any_fixup_tree(struct dt_info *dti, struct node *node)
 	return false;
 }
 
-static void add_fixup_entry(struct dt_info *dti, struct node *fn,
-			    struct node *node, struct property *prop,
-			    struct marker *m)
+static int add_fixup_entry(struct dt_info *dti, struct node *fn,
+			   struct node *node, struct property *prop,
+			   struct marker *m)
 {
 	char *entry;
+	int ret;
 
 	/* m->ref can only be a REF_PHANDLE, but check anyway */
 	assert(m->type == REF_PHANDLE);
+
+	/* The format only permits fixups for references to label, not
+	 * references to path */
+	if (strchr(m->ref, '/'))
+		die("Can't generate fixup for reference to path &{%s}\n",
+		    m->ref);
 
 	/* there shouldn't be any ':' in the arguments */
 	if (strchr(node->fullpath, ':') || strchr(prop->name, ':'))
@@ -879,32 +993,39 @@ static void add_fixup_entry(struct dt_info *dti, struct node *fn,
 
 	xasprintf(&entry, "%s:%s:%u",
 			node->fullpath, prop->name, m->offset);
-	append_to_property(fn, m->ref, entry, strlen(entry) + 1);
+	ret = append_unique_str_to_property(fn, m->ref, entry, strlen(entry) + 1);
 
 	free(entry);
+
+	return ret;
 }
 
-static void generate_fixups_tree_internal(struct dt_info *dti,
-					  struct node *fn,
-					  struct node *node)
+static int generate_fixups_tree_internal(struct dt_info *dti,
+					 struct node *fn,
+					 struct node *node)
 {
 	struct node *dt = dti->dt;
 	struct node *c;
 	struct property *prop;
 	struct marker *m;
 	struct node *refnode;
+	int ret = 0;
 
 	for_each_property(node, prop) {
 		m = prop->val.markers;
 		for_each_marker_of_type(m, REF_PHANDLE) {
 			refnode = get_node_by_ref(dt, m->ref);
 			if (!refnode)
-				add_fixup_entry(dti, fn, node, prop, m);
+				if (add_fixup_entry(dti, fn, node, prop, m))
+					ret = -1;
 		}
 	}
 
 	for_each_child(node, c)
-		generate_fixups_tree_internal(dti, fn, c);
+		if (generate_fixups_tree_internal(dti, fn, c))
+			ret = -1;
+
+	return ret;
 }
 
 static bool any_local_fixup_tree(struct dt_info *dti, struct node *node)
@@ -929,7 +1050,7 @@ static bool any_local_fixup_tree(struct dt_info *dti, struct node *node)
 	return false;
 }
 
-static void add_local_fixup_entry(struct dt_info *dti,
+static int add_local_fixup_entry(struct dt_info *dti,
 		struct node *lfn, struct node *node,
 		struct property *prop, struct marker *m,
 		struct node *refnode)
@@ -939,7 +1060,7 @@ static void add_local_fixup_entry(struct dt_info *dti,
 	char **compp;
 	int i, depth;
 
-	/* walk back retreiving depth */
+	/* walk back retrieving depth */
 	depth = 0;
 	for (wn = node; wn; wn = wn->parent)
 		depth++;
@@ -954,41 +1075,65 @@ static void add_local_fixup_entry(struct dt_info *dti,
 	/* walk the path components creating nodes if they don't exist */
 	for (wn = lfn, i = 1; i < depth; i++, wn = nwn) {
 		/* if no node exists, create it */
-		nwn = get_subnode(wn, compp[i]);
-		if (!nwn)
-			nwn = build_and_name_child_node(wn, compp[i]);
+		nwn = build_root_node(wn, compp[i]);
 	}
 
 	free(compp);
 
 	value_32 = cpu_to_fdt32(m->offset);
-	append_to_property(wn, prop->name, &value_32, sizeof(value_32));
+	return append_unique_u32_to_property(wn, prop->name, value_32);
 }
 
-static void generate_local_fixups_tree_internal(struct dt_info *dti,
-						struct node *lfn,
-						struct node *node)
+static int generate_local_fixups_tree_internal(struct dt_info *dti,
+					       struct node *lfn,
+					       struct node *node)
 {
 	struct node *dt = dti->dt;
 	struct node *c;
 	struct property *prop;
 	struct marker *m;
 	struct node *refnode;
+	int ret = 0;
 
 	for_each_property(node, prop) {
 		m = prop->val.markers;
 		for_each_marker_of_type(m, REF_PHANDLE) {
 			refnode = get_node_by_ref(dt, m->ref);
 			if (refnode)
-				add_local_fixup_entry(dti, lfn, node, prop, m, refnode);
+				if (add_local_fixup_entry(dti, lfn, node, prop, m, refnode))
+					ret = -1;
 		}
 	}
 
 	for_each_child(node, c)
-		generate_local_fixups_tree_internal(dti, lfn, c);
+		if (generate_local_fixups_tree_internal(dti, lfn, c))
+			ret = -1;
+
+	return ret;
 }
 
-void generate_label_tree(struct dt_info *dti, char *name, bool allocph)
+void generate_labels_from_tree(struct dt_info *dti, const char *name)
+{
+	struct node *an;
+	struct property *p;
+
+	an = get_subnode(dti->dt, name);
+	if (!an)
+		return;
+
+	for_each_property(an, p) {
+		struct node *labeled_node;
+
+		labeled_node = get_node_by_path(dti->dt, p->val.val);
+		if (labeled_node)
+			add_label(&labeled_node->labels, p->name);
+		else if (quiet < 1)
+			fprintf(stderr, "Warning: Path %s referenced in property %s/%s missing",
+				p->val.val, name, p->name);
+	}
+}
+
+void generate_label_tree(struct dt_info *dti, const char *name, bool allocph)
 {
 	if (!any_label_tree(dti, dti->dt))
 		return;
@@ -996,18 +1141,175 @@ void generate_label_tree(struct dt_info *dti, char *name, bool allocph)
 				     dti->dt, allocph);
 }
 
-void generate_fixups_tree(struct dt_info *dti, char *name)
+void generate_fixups_tree(struct dt_info *dti, const char *name)
 {
 	if (!any_fixup_tree(dti, dti->dt))
 		return;
-	generate_fixups_tree_internal(dti, build_root_node(dti->dt, name),
-				      dti->dt);
+	if (generate_fixups_tree_internal(dti, build_root_node(dti->dt, name), dti->dt))
+		fprintf(stderr,
+			"Warning: Preexisting data in %s malformed, some content could not be added.\n",
+			name);
 }
 
-void generate_local_fixups_tree(struct dt_info *dti, char *name)
+void fixup_phandles(struct dt_info *dti, const char *name)
+{
+	struct node *an;
+	struct property *fp;
+
+	an = get_subnode(dti->dt, name);
+	if (!an)
+		return;
+
+	for_each_property(an, fp) {
+		char *fnext = fp->val.val;
+		char *fv;
+		unsigned int fl;
+
+		while ((fl = fp->val.len - (fnext - fp->val.val))) {
+			char *propname, *soffset;
+			struct node *n;
+			struct property *p;
+			long offset;
+
+			fv = fnext;
+			fnext = memchr(fv, 0, fl);
+
+			if (!fnext) {
+				if (quiet < 1)
+					fprintf(stderr, "Warning: Malformed fixup entry for label %s\n",
+						fp->name);
+				break;
+			}
+			fnext += 1;
+
+			propname = memchr(fv, ':', fnext - 1 - fv);
+			if (!propname) {
+				if (quiet < 1)
+					fprintf(stderr, "Warning: Malformed fixup entry for label %s\n",
+						fp->name);
+				continue;
+			}
+			propname++;
+
+			soffset = memchr(propname, ':', fnext - 1 - propname);
+			if (!soffset) {
+				if (quiet < 1)
+					fprintf(stderr, "Warning: Malformed fixup entry for label %s\n",
+						fp->name);
+				continue;
+			}
+			soffset++;
+
+			/*
+			 * temporarily modify the property to not have to create
+			 * a copy for the node path.
+			 */
+			*(propname - 1) = '\0';
+
+			n = get_node_by_path(dti->dt, fv);
+			if (!n && quiet < 1)
+				fprintf(stderr, "Warning: Label %s references non-existing node %s\n",
+					fp->name, fv);
+
+			*(propname - 1) = ':';
+
+			if (!n)
+				continue;
+
+			/*
+			 * temporarily modify the property to not have to create
+			 * a copy for the property name.
+			 */
+			*(soffset - 1) = '\0';
+
+			p = get_property(n, propname);
+
+			if (!p && quiet < 1)
+				fprintf(stderr, "Warning: Label %s references non-existing property %s in node %s\n",
+					fp->name, n->fullpath, propname);
+
+			*(soffset - 1) = ':';
+
+			if (!p)
+				continue;
+
+			offset = strtol(soffset, NULL, 0);
+			if (offset < 0 || offset + 4 > p->val.len) {
+				if (quiet < 1)
+					fprintf(stderr,
+						"Warning: Label %s contains invalid offset for property %s in node %s\n",
+						fp->name, p->name, n->fullpath);
+				continue;
+			}
+
+			property_add_marker(p, REF_PHANDLE, offset, fp->name);
+		}
+	}
+}
+
+void generate_local_fixups_tree(struct dt_info *dti, const char *name)
 {
 	if (!any_local_fixup_tree(dti, dti->dt))
 		return;
-	generate_local_fixups_tree_internal(dti, build_root_node(dti->dt, name),
-					    dti->dt);
+	if (generate_local_fixups_tree_internal(dti, build_root_node(dti->dt, name), dti->dt))
+		fprintf(stderr,
+			"Warning: Preexisting data in %s malformed, some content could not be added.\n",
+			name);
+}
+
+static void local_fixup_phandles_node(struct dt_info *dti, struct node *lf, struct node *n)
+{
+	struct property *lfp;
+	struct node *lfsubnode;
+
+	for_each_property(lf, lfp) {
+		struct property *p = get_property(n, lfp->name);
+		fdt32_t *offsets = (fdt32_t *)lfp->val.val;
+		size_t i;
+
+		if (!p) {
+			if (quiet < 1)
+				fprintf(stderr, "Warning: Property %s in %s referenced in __local_fixups__ missing\n",
+					lfp->name, n->fullpath);
+			continue;
+		}
+
+		/*
+		 * Each property in the __local_fixups__ tree is a concatenation
+		 * of offsets, so it must be a multiple of sizeof(fdt32_t).
+		 */
+		if (lfp->val.len % sizeof(fdt32_t)) {
+			if (quiet < 1)
+				fprintf(stderr, "Warning: property %s in /__local_fixups__%s malformed\n",
+					lfp->name, n->fullpath);
+			continue;
+		}
+
+		for (i = 0; i < lfp->val.len / sizeof(fdt32_t); i++)
+			add_phandle_marker(dti, p, dtb_ld32(offsets + i));
+	}
+
+	for_each_child(lf, lfsubnode) {
+		struct node *subnode = get_subnode(n, lfsubnode->name);
+
+		if (!subnode) {
+			if (quiet < 1)
+				fprintf(stderr, "Warning: node %s/%s referenced in __local_fixups__ missing\n",
+					lfsubnode->name, n->fullpath);
+			continue;
+		}
+
+		local_fixup_phandles_node(dti, lfsubnode, subnode);
+	}
+}
+
+void local_fixup_phandles(struct dt_info *dti, const char *name)
+{
+	struct node *an;
+
+	an = get_subnode(dti->dt, name);
+	if (!an)
+		return;
+
+	local_fixup_phandles_node(dti, an, dti->dt);
 }

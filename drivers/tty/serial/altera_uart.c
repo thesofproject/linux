@@ -24,7 +24,6 @@
 #include <linux/io.h>
 #include <linux/altera_uart.h>
 
-#define DRV_NAME "altera_uart"
 #define SERIAL_ALTERA_MAJOR 204
 #define SERIAL_ALTERA_MINOR 213
 
@@ -164,18 +163,18 @@ static void altera_uart_break_ctl(struct uart_port *port, int break_state)
 	struct altera_uart *pp = container_of(port, struct altera_uart, port);
 	unsigned long flags;
 
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 	if (break_state == -1)
 		pp->imr |= ALTERA_UART_CONTROL_TRBK_MSK;
 	else
 		pp->imr &= ~ALTERA_UART_CONTROL_TRBK_MSK;
 	altera_uart_update_ctrl_reg(pp);
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 }
 
 static void altera_uart_set_termios(struct uart_port *port,
 				    struct ktermios *termios,
-				    struct ktermios *old)
+				    const struct ktermios *old)
 {
 	unsigned long flags;
 	unsigned int baud, baudclk;
@@ -187,10 +186,10 @@ static void altera_uart_set_termios(struct uart_port *port,
 		tty_termios_copy_hw(termios, old);
 	tty_termios_encode_baud_rate(termios, baud, baud);
 
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 	uart_update_timeout(port, termios->c_cflag, baud);
 	altera_uart_writel(port, baudclk, ALTERA_UART_DIVISOR_REG);
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 
 	/*
 	 * FIXME: port->read_status_mask and port->ignore_status_mask
@@ -199,11 +198,10 @@ static void altera_uart_set_termios(struct uart_port *port,
 	 */
 }
 
-static void altera_uart_rx_chars(struct altera_uart *pp)
+static void altera_uart_rx_chars(struct uart_port *port)
 {
-	struct uart_port *port = &pp->port;
-	unsigned char ch, flag;
 	unsigned short status;
+	u8 ch, flag;
 
 	while ((status = altera_uart_readl(port, ALTERA_UART_STATUS_REG)) &
 	       ALTERA_UART_STATUS_RRDY_MSK) {
@@ -243,64 +241,41 @@ static void altera_uart_rx_chars(struct altera_uart *pp)
 				 flag);
 	}
 
-	spin_unlock(&port->lock);
 	tty_flip_buffer_push(&port->state->port);
-	spin_lock(&port->lock);
 }
 
-static void altera_uart_tx_chars(struct altera_uart *pp)
+static void altera_uart_tx_chars(struct uart_port *port)
 {
-	struct uart_port *port = &pp->port;
-	struct circ_buf *xmit = &port->state->xmit;
+	u8 ch;
 
-	if (port->x_char) {
-		/* Send special char - probably flow control */
-		altera_uart_writel(port, port->x_char, ALTERA_UART_TXDATA_REG);
-		port->x_char = 0;
-		port->icount.tx++;
-		return;
-	}
-
-	while (altera_uart_readl(port, ALTERA_UART_STATUS_REG) &
-	       ALTERA_UART_STATUS_TRDY_MSK) {
-		if (xmit->head == xmit->tail)
-			break;
-		altera_uart_writel(port, xmit->buf[xmit->tail],
-		       ALTERA_UART_TXDATA_REG);
-		xmit->tail = (xmit->tail + 1) & (UART_XMIT_SIZE - 1);
-		port->icount.tx++;
-	}
-
-	if (uart_circ_chars_pending(xmit) < WAKEUP_CHARS)
-		uart_write_wakeup(port);
-
-	if (xmit->head == xmit->tail) {
-		pp->imr &= ~ALTERA_UART_CONTROL_TRDY_MSK;
-		altera_uart_update_ctrl_reg(pp);
-	}
+	uart_port_tx(port, ch,
+		altera_uart_readl(port, ALTERA_UART_STATUS_REG) &
+		                ALTERA_UART_STATUS_TRDY_MSK,
+		altera_uart_writel(port, ch, ALTERA_UART_TXDATA_REG));
 }
 
 static irqreturn_t altera_uart_interrupt(int irq, void *data)
 {
 	struct uart_port *port = data;
 	struct altera_uart *pp = container_of(port, struct altera_uart, port);
+	unsigned long flags;
 	unsigned int isr;
 
 	isr = altera_uart_readl(port, ALTERA_UART_STATUS_REG) & pp->imr;
 
-	spin_lock(&port->lock);
+	uart_port_lock_irqsave(port, &flags);
 	if (isr & ALTERA_UART_STATUS_RRDY_MSK)
-		altera_uart_rx_chars(pp);
+		altera_uart_rx_chars(port);
 	if (isr & ALTERA_UART_STATUS_TRDY_MSK)
-		altera_uart_tx_chars(pp);
-	spin_unlock(&port->lock);
+		altera_uart_tx_chars(port);
+	uart_port_unlock_irqrestore(port, flags);
 
 	return IRQ_RETVAL(isr);
 }
 
 static void altera_uart_timer(struct timer_list *t)
 {
-	struct altera_uart *pp = from_timer(pp, t, tmr);
+	struct altera_uart *pp = timer_container_of(pp, t, tmr);
 	struct uart_port *port = &pp->port;
 
 	altera_uart_interrupt(0, port);
@@ -329,21 +304,21 @@ static int altera_uart_startup(struct uart_port *port)
 		int ret;
 
 		ret = request_irq(port->irq, altera_uart_interrupt, 0,
-				DRV_NAME, port);
+				dev_name(port->dev), port);
 		if (ret) {
-			pr_err(DRV_NAME ": unable to attach Altera UART %d "
-			       "interrupt vector=%d\n", port->line, port->irq);
+			dev_err(port->dev, "unable to attach Altera UART %d interrupt vector=%d\n",
+				port->line, port->irq);
 			return ret;
 		}
 	}
 
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 
 	/* Enable RX interrupts now */
 	pp->imr = ALTERA_UART_CONTROL_RRDY_MSK;
 	altera_uart_update_ctrl_reg(pp);
 
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 
 	return 0;
 }
@@ -353,18 +328,18 @@ static void altera_uart_shutdown(struct uart_port *port)
 	struct altera_uart *pp = container_of(port, struct altera_uart, port);
 	unsigned long flags;
 
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 
 	/* Disable all interrupts now */
 	pp->imr = 0;
 	altera_uart_update_ctrl_reg(pp);
 
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 
 	if (port->irq)
 		free_irq(port->irq, port);
 	else
-		del_timer_sync(&pp->tmr);
+		timer_delete_sync(&pp->tmr);
 }
 
 static const char *altera_uart_type(struct uart_port *port)
@@ -440,7 +415,7 @@ static struct altera_uart altera_uart_ports[CONFIG_SERIAL_ALTERA_UART_MAXPORTS];
 
 #if defined(CONFIG_SERIAL_ALTERA_UART_CONSOLE)
 
-static void altera_uart_console_putc(struct uart_port *port, int c)
+static void altera_uart_console_putc(struct uart_port *port, unsigned char c)
 {
 	while (!(altera_uart_readl(port, ALTERA_UART_STATUS_REG) &
 		 ALTERA_UART_STATUS_TRDY_MSK))
@@ -542,7 +517,7 @@ OF_EARLYCON_DECLARE(uart, "altr,uart-1.0", altera_uart_earlycon_setup);
  */
 static struct uart_driver altera_uart_driver = {
 	.owner		= THIS_MODULE,
-	.driver_name	= DRV_NAME,
+	.driver_name	= KBUILD_MODNAME,
 	.dev_name	= "ttyAL",
 	.major		= SERIAL_ALTERA_MAJOR,
 	.minor		= SERIAL_ALTERA_MINOR,
@@ -555,7 +530,6 @@ static int altera_uart_probe(struct platform_device *pdev)
 	struct altera_uart_platform_uart *platp = dev_get_platdata(&pdev->dev);
 	struct uart_port *port;
 	struct resource *res_mem;
-	struct resource *res_irq;
 	int i = pdev->id;
 	int ret;
 
@@ -579,9 +553,11 @@ static int altera_uart_probe(struct platform_device *pdev)
 	else
 		return -EINVAL;
 
-	res_irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
-	if (res_irq)
-		port->irq = res_irq->start;
+	ret = platform_get_irq_optional(pdev, 0);
+	if (ret < 0 && ret != -ENXIO)
+		return ret;
+	if (ret > 0)
+		port->irq = ret;
 	else if (platp)
 		port->irq = platp->irq;
 
@@ -618,7 +594,7 @@ static int altera_uart_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int altera_uart_remove(struct platform_device *pdev)
+static void altera_uart_remove(struct platform_device *pdev)
 {
 	struct uart_port *port = platform_get_drvdata(pdev);
 
@@ -627,8 +603,6 @@ static int altera_uart_remove(struct platform_device *pdev)
 		port->mapbase = 0;
 		iounmap(port->membase);
 	}
-
-	return 0;
 }
 
 #ifdef CONFIG_OF
@@ -642,9 +616,9 @@ MODULE_DEVICE_TABLE(of, altera_uart_match);
 
 static struct platform_driver altera_uart_platform_driver = {
 	.probe	= altera_uart_probe,
-	.remove	= altera_uart_remove,
+	.remove = altera_uart_remove,
 	.driver	= {
-		.name		= DRV_NAME,
+		.name		= KBUILD_MODNAME,
 		.of_match_table	= of_match_ptr(altera_uart_match),
 	},
 };
@@ -674,5 +648,5 @@ module_exit(altera_uart_exit);
 MODULE_DESCRIPTION("Altera UART driver");
 MODULE_AUTHOR("Thomas Chou <thomas@wytron.com.tw>");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("platform:" DRV_NAME);
+MODULE_ALIAS("platform:" KBUILD_MODNAME);
 MODULE_ALIAS_CHARDEV_MAJOR(SERIAL_ALTERA_MAJOR);

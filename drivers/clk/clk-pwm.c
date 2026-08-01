@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014 Philipp Zabel, Pengutronix
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * PWM (mis)used as clock output
  */
@@ -17,6 +14,7 @@
 struct clk_pwm {
 	struct clk_hw hw;
 	struct pwm_device *pwm;
+	struct pwm_state state;
 	u32 fixed_rate;
 };
 
@@ -25,11 +23,28 @@ static inline struct clk_pwm *to_clk_pwm(struct clk_hw *hw)
 	return container_of(hw, struct clk_pwm, hw);
 }
 
+static int clk_pwm_enable(struct clk_hw *hw)
+{
+	struct clk_pwm *clk_pwm = to_clk_pwm(hw);
+
+	return pwm_apply_atomic(clk_pwm->pwm, &clk_pwm->state);
+}
+
+static void clk_pwm_disable(struct clk_hw *hw)
+{
+	struct clk_pwm *clk_pwm = to_clk_pwm(hw);
+	struct pwm_state state = clk_pwm->state;
+
+	state.enabled = false;
+
+	pwm_apply_atomic(clk_pwm->pwm, &state);
+}
+
 static int clk_pwm_prepare(struct clk_hw *hw)
 {
 	struct clk_pwm *clk_pwm = to_clk_pwm(hw);
 
-	return pwm_enable(clk_pwm->pwm);
+	return pwm_apply_might_sleep(clk_pwm->pwm, &clk_pwm->state);
 }
 
 static void clk_pwm_unprepare(struct clk_hw *hw)
@@ -47,10 +62,34 @@ static unsigned long clk_pwm_recalc_rate(struct clk_hw *hw,
 	return clk_pwm->fixed_rate;
 }
 
+static int clk_pwm_get_duty_cycle(struct clk_hw *hw, struct clk_duty *duty)
+{
+	struct clk_pwm *clk_pwm = to_clk_pwm(hw);
+	struct pwm_state state;
+	int ret;
+
+	ret = pwm_get_state_hw(clk_pwm->pwm, &state);
+	if (ret)
+		return ret;
+
+	duty->num = state.duty_cycle;
+	duty->den = state.period;
+
+	return 0;
+}
+
+static const struct clk_ops clk_pwm_ops_atomic = {
+	.enable = clk_pwm_enable,
+	.disable = clk_pwm_disable,
+	.recalc_rate = clk_pwm_recalc_rate,
+	.get_duty_cycle = clk_pwm_get_duty_cycle,
+};
+
 static const struct clk_ops clk_pwm_ops = {
 	.prepare = clk_pwm_prepare,
 	.unprepare = clk_pwm_unprepare,
 	.recalc_rate = clk_pwm_recalc_rate,
+	.get_duty_cycle = clk_pwm_get_duty_cycle,
 };
 
 static int clk_pwm_probe(struct platform_device *pdev)
@@ -78,7 +117,12 @@ static int clk_pwm_probe(struct platform_device *pdev)
 	}
 
 	if (of_property_read_u32(node, "clock-frequency", &clk_pwm->fixed_rate))
-		clk_pwm->fixed_rate = NSEC_PER_SEC / pargs.period;
+		clk_pwm->fixed_rate = div64_u64(NSEC_PER_SEC, pargs.period);
+
+	if (!clk_pwm->fixed_rate) {
+		dev_err(&pdev->dev, "fixed_rate cannot be zero\n");
+		return -EINVAL;
+	}
 
 	if (pargs.period != NSEC_PER_SEC / clk_pwm->fixed_rate &&
 	    pargs.period != DIV_ROUND_UP(NSEC_PER_SEC, clk_pwm->fixed_rate)) {
@@ -87,21 +131,20 @@ static int clk_pwm_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	/*
-	 * FIXME: pwm_apply_args() should be removed when switching to the
-	 * atomic PWM API.
-	 */
-	pwm_apply_args(pwm);
-	ret = pwm_config(pwm, (pargs.period + 1) >> 1, pargs.period);
-	if (ret < 0)
-		return ret;
+	pwm_init_state(pwm, &clk_pwm->state);
+	pwm_set_relative_duty_cycle(&clk_pwm->state, 1, 2);
+	clk_pwm->state.enabled = true;
 
 	clk_name = node->name;
 	of_property_read_string(node, "clock-output-names", &clk_name);
 
 	init.name = clk_name;
-	init.ops = &clk_pwm_ops;
-	init.flags = CLK_IS_BASIC;
+	if (pwm_might_sleep(pwm))
+		init.ops = &clk_pwm_ops;
+	else
+		init.ops = &clk_pwm_ops_atomic;
+
+	init.flags = 0;
 	init.num_parents = 0;
 
 	clk_pwm->pwm = pwm;
@@ -113,11 +156,9 @@ static int clk_pwm_probe(struct platform_device *pdev)
 	return of_clk_add_hw_provider(node, of_clk_hw_simple_get, &clk_pwm->hw);
 }
 
-static int clk_pwm_remove(struct platform_device *pdev)
+static void clk_pwm_remove(struct platform_device *pdev)
 {
 	of_clk_del_provider(pdev->dev.of_node);
-
-	return 0;
 }
 
 static const struct of_device_id clk_pwm_dt_ids[] = {
@@ -131,7 +172,7 @@ static struct platform_driver clk_pwm_driver = {
 	.remove = clk_pwm_remove,
 	.driver = {
 		.name = "pwm-clock",
-		.of_match_table = of_match_ptr(clk_pwm_dt_ids),
+		.of_match_table = clk_pwm_dt_ids,
 	},
 };
 

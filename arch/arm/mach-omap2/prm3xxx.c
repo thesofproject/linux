@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * OMAP3xxx PRM module functions
  *
@@ -6,10 +7,6 @@
  * Benoît Cousson
  * Paul Walmsley
  * Rajendra Nayak <rnayak@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -35,6 +32,7 @@ static void omap3xxx_prm_read_pending_irqs(unsigned long *events);
 static void omap3xxx_prm_ocp_barrier(void);
 static void omap3xxx_prm_save_and_clear_irqen(u32 *saved_mask);
 static void omap3xxx_prm_restore_irqen(u32 *saved_mask);
+static void omap3xxx_prm_iva_idle(void);
 
 static const struct omap_prcm_irq omap3_prcm_irqs[] = {
 	OMAP_PRCM_IRQ("wkup",	0,	0),
@@ -271,7 +269,7 @@ static int omap3xxx_prm_clear_mod_irqs(s16 module, u8 regs, u32 wkst_mask)
  * Toggles the reset signal to modem IP block. Required to allow
  * OMAP3430 without stacked modem to idle properly.
  */
-void __init omap3_prm_reset_modem(void)
+static void __init omap3_prm_reset_modem(void)
 {
 	omap2_prm_write_mod_reg(
 		OMAP3430_RM_RSTCTRL_CORE_MODEM_SW_RSTPWRON_MASK |
@@ -433,7 +431,7 @@ static void omap3_prm_reconfigure_io_chain(void)
  * registers, and omap3xxx_prm_reconfigure_io_chain() must be called.
  * No return value.
  */
-static void __init omap3xxx_prm_enable_io_wakeup(void)
+static void omap3xxx_prm_enable_io_wakeup(void)
 {
 	if (prm_features & PRM_HAS_IO_WAKEUP)
 		omap2_prm_set_mod_reg_bits(OMAP3430_EN_IO_MASK, WKUP_MOD,
@@ -472,7 +470,7 @@ static u32 omap3xxx_prm_read_reset_sources(void)
  * function forces the IVA2 into idle state so it can go
  * into retention/off and thus allow full-chip retention/off.
  */
-void omap3xxx_prm_iva_idle(void)
+static void omap3xxx_prm_iva_idle(void)
 {
 	/* ensure IVA2 clock is disabled */
 	omap2_cm_write_mod_reg(0, OMAP3430_IVA2_MOD, CM_FCLKEN);
@@ -711,6 +709,7 @@ static int omap3xxx_prm_late_init(void)
 	}
 
 	irq_num = of_irq_get(np, 0);
+	of_node_put(np);
 	if (irq_num == -EPROBE_DEFER)
 		return irq_num;
 

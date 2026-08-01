@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2011 Instituto Nokia de Tecnologia
  * Copyright (C) 2014 Marvell International Ltd.
@@ -5,19 +6,6 @@
  * Authors:
  *    Lauro Ramos Venancio <lauro.venancio@openbossa.org>
  *    Aloisio Almeida Jr <aloisio.almeida@openbossa.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef __NET_NFC_H
@@ -92,12 +80,14 @@ struct nfc_ops {
 #define NFC_ATR_REQ_GT_OFFSET 14
 
 /**
- * struct nfc_target - NFC target descriptiom
+ * struct nfc_target - NFC target description
  *
  * @sens_res: 2 bytes describing the target SENS_RES response, if the target
  *	is a type A one. The %sens_res most significant byte must be byte 2
  *	as described by the NFC Forum digital specification (i.e. the platform
  *	configuration one) while %sens_res least significant byte is byte 1.
+ * @ats_len: length of Answer To Select in bytes
+ * @ats: Answer To Select returned by an ISO 14443 Type A target upon activation
  */
 struct nfc_target {
 	u32 idx;
@@ -117,6 +107,8 @@ struct nfc_target {
 	u8 is_iso15693;
 	u8 iso15693_dsfid;
 	u8 iso15693_uid[NFC_ISO15693_UID_MAXSIZE];
+	u8 ats_len;
+	u8 ats[NFC_ATS_MAXSIZE];
 };
 
 /**
@@ -158,7 +150,7 @@ struct nfc_evt_transaction {
 	u32 aid_len;
 	u8 aid[NFC_MAX_AID_LENGTH];
 	u8 params_len;
-	u8 params[0];
+	u8 params[];
 } __packed;
 
 struct nfc_genl_data {
@@ -200,17 +192,17 @@ struct nfc_dev {
 
 	struct rfkill *rfkill;
 
-	struct nfc_vendor_cmd *vendor_cmds;
+	const struct nfc_vendor_cmd *vendor_cmds;
 	int n_vendor_cmds;
 
-	struct nfc_ops *ops;
+	const struct nfc_ops *ops;
 	struct genl_info *cur_cmd_info;
 };
 #define to_nfc_dev(_dev) container_of(_dev, struct nfc_dev, dev)
 
-extern struct class nfc_class;
+extern const struct class nfc_class;
 
-struct nfc_dev *nfc_allocate_device(struct nfc_ops *ops,
+struct nfc_dev *nfc_allocate_device(const struct nfc_ops *ops,
 				    u32 supported_protocols,
 				    int tx_headroom,
 				    int tx_tailroom);
@@ -227,6 +219,8 @@ static inline void nfc_free_device(struct nfc_dev *dev)
 
 int nfc_register_device(struct nfc_dev *dev);
 
+void nfc_unregister_rfkill(struct nfc_dev *dev);
+void nfc_remove_device(struct nfc_dev *dev);
 void nfc_unregister_device(struct nfc_dev *dev);
 
 /**
@@ -242,10 +236,10 @@ static inline void nfc_set_parent_dev(struct nfc_dev *nfc_dev,
 }
 
 /**
- * nfc_set_drvdata - set driver specifc data
+ * nfc_set_drvdata - set driver specific data
  *
  * @dev: The nfc device
- * @data: Pointer to driver specifc data
+ * @data: Pointer to driver specific data
  */
 static inline void nfc_set_drvdata(struct nfc_dev *dev, void *data)
 {
@@ -253,11 +247,11 @@ static inline void nfc_set_drvdata(struct nfc_dev *dev, void *data)
 }
 
 /**
- * nfc_get_drvdata - get driver specifc data
+ * nfc_get_drvdata - get driver specific data
  *
  * @dev: The nfc device
  */
-static inline void *nfc_get_drvdata(struct nfc_dev *dev)
+static inline void *nfc_get_drvdata(const struct nfc_dev *dev)
 {
 	return dev_get_drvdata(&dev->dev);
 }
@@ -267,7 +261,7 @@ static inline void *nfc_get_drvdata(struct nfc_dev *dev)
  *
  * @dev: The nfc device whose name to return
  */
-static inline const char *nfc_device_name(struct nfc_dev *dev)
+static inline const char *nfc_device_name(const struct nfc_dev *dev)
 {
 	return dev_name(&dev->dev);
 }
@@ -278,7 +272,7 @@ struct sk_buff *nfc_alloc_send_skb(struct nfc_dev *dev, struct sock *sk,
 struct sk_buff *nfc_alloc_recv_skb(unsigned int size, gfp_t gfp);
 
 int nfc_set_remote_general_bytes(struct nfc_dev *dev,
-				 u8 *gt, u8 gt_len);
+				 const u8 *gt, u8 gt_len);
 u8 *nfc_get_local_general_bytes(struct nfc_dev *dev, size_t *gb_len);
 
 int nfc_fw_download_done(struct nfc_dev *dev, const char *firmware_name,
@@ -292,7 +286,7 @@ int nfc_dep_link_is_up(struct nfc_dev *dev, u32 target_idx,
 		       u8 comm_mode, u8 rf_mode);
 
 int nfc_tm_activated(struct nfc_dev *dev, u32 protocol, u8 comm_mode,
-		     u8 *gb, size_t gb_len);
+		     const u8 *gb, size_t gb_len);
 int nfc_tm_deactivated(struct nfc_dev *dev);
 int nfc_tm_data_received(struct nfc_dev *dev, struct sk_buff *skb);
 
@@ -309,7 +303,7 @@ void nfc_send_to_raw_sock(struct nfc_dev *dev, struct sk_buff *skb,
 			  u8 payload_type, u8 direction);
 
 static inline int nfc_set_vendor_cmds(struct nfc_dev *dev,
-				      struct nfc_vendor_cmd *cmds,
+				      const struct nfc_vendor_cmd *cmds,
 				      int n_cmds)
 {
 	if (dev->vendor_cmds || dev->n_vendor_cmds)

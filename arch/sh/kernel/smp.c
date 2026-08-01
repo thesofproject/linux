@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * arch/sh/kernel/smp.c
  *
@@ -5,10 +6,6 @@
  *
  * Copyright (C) 2002 - 2010 Paul Mundt
  * Copyright (C) 2006 - 2007 Akio Idehara
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/err.h>
 #include <linux/cache.h>
@@ -24,6 +21,8 @@
 #include <linux/sched/hotplug.h>
 #include <linux/atomic.h>
 #include <linux/clockchips.h>
+#include <linux/profile.h>
+
 #include <asm/processor.h>
 #include <asm/mmu_context.h>
 #include <asm/smp.h>
@@ -173,7 +172,7 @@ void native_play_dead(void)
 }
 #endif
 
-asmlinkage void start_secondary(void)
+static asmlinkage void start_secondary(void)
 {
 	unsigned int cpu = smp_processor_id();
 	struct mm_struct *mm = &init_mm;
@@ -188,8 +187,6 @@ asmlinkage void start_secondary(void)
 #endif
 
 	per_cpu_trap_init();
-
-	preempt_disable();
 
 	notify_cpu_starting(cpu);
 
@@ -261,7 +258,7 @@ void __init smp_cpus_done(unsigned int max_cpus)
 	       (bogosum / (5000/HZ)) % 100);
 }
 
-void smp_send_reschedule(int cpu)
+void arch_smp_send_reschedule(int cpu)
 {
 	mp_ops->send_ipi(cpu, SMP_MSG_RESCHEDULE);
 }
@@ -325,11 +322,13 @@ void smp_message_recv(unsigned int msg)
 	}
 }
 
+#ifdef CONFIG_PROFILING
 /* Not really SMP stuff ... */
 int setup_profiling_timer(unsigned int multiplier)
 {
 	return 0;
 }
+#endif
 
 #ifdef CONFIG_MMU
 

@@ -43,7 +43,8 @@
  * to use) happens.
  */
 
-#include "uapi/drm/vc4_drm.h"
+#include <drm/drm_print.h>
+
 #include "vc4_drv.h"
 #include "vc4_packet.h"
 
@@ -65,7 +66,7 @@ utile_width(int cpp)
 	case 8:
 		return 2;
 	default:
-		DRM_ERROR("unknown cpp: %d\n", cpp);
+		pr_err("unknown cpp: %d\n", cpp);
 		return 1;
 	}
 }
@@ -82,7 +83,7 @@ utile_height(int cpp)
 	case 8:
 		return 4;
 	default:
-		DRM_ERROR("unknown cpp: %d\n", cpp);
+		pr_err("unknown cpp: %d\n", cpp);
 		return 1;
 	}
 }
@@ -102,18 +103,22 @@ size_is_lt(uint32_t width, uint32_t height, int cpp)
 		height <= 4 * utile_height(cpp));
 }
 
-struct drm_gem_cma_object *
+struct drm_gem_dma_object *
 vc4_use_bo(struct vc4_exec_info *exec, uint32_t hindex)
 {
-	struct drm_gem_cma_object *obj;
+	struct vc4_dev *vc4 = exec->dev;
+	struct drm_gem_dma_object *obj;
 	struct vc4_bo *bo;
+
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
+		return NULL;
 
 	if (hindex >= exec->bo_count) {
 		DRM_DEBUG("BO index %d greater than BO count %d\n",
 			  hindex, exec->bo_count);
 		return NULL;
 	}
-	obj = exec->bo[hindex];
+	obj = to_drm_gem_dma_obj(exec->bo[hindex]);
 	bo = to_vc4_bo(&obj->base);
 
 	if (bo->validated_shader) {
@@ -125,7 +130,7 @@ vc4_use_bo(struct vc4_exec_info *exec, uint32_t hindex)
 	return obj;
 }
 
-static struct drm_gem_cma_object *
+static struct drm_gem_dma_object *
 vc4_use_handle(struct vc4_exec_info *exec, uint32_t gem_handles_packet_index)
 {
 	return vc4_use_bo(exec, exec->bo_index[gem_handles_packet_index]);
@@ -156,13 +161,17 @@ gl_shader_rec_size(uint32_t pointer_bits)
 }
 
 bool
-vc4_check_tex_size(struct vc4_exec_info *exec, struct drm_gem_cma_object *fbo,
+vc4_check_tex_size(struct vc4_exec_info *exec, struct drm_gem_dma_object *fbo,
 		   uint32_t offset, uint8_t tiling_format,
 		   uint32_t width, uint32_t height, uint8_t cpp)
 {
+	struct vc4_dev *vc4 = exec->dev;
 	uint32_t aligned_width, aligned_height, stride, size;
 	uint32_t utile_w = utile_width(cpp);
 	uint32_t utile_h = utile_height(cpp);
+
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
+		return false;
 
 	/* The shaded vertex format stores signed 12.4 fixed point
 	 * (-2048,2047) offsets from the viewport center, so we should
@@ -255,7 +264,7 @@ validate_increment_semaphore(VALIDATE_ARGS)
 static int
 validate_indexed_prim_list(VALIDATE_ARGS)
 {
-	struct drm_gem_cma_object *ib;
+	struct drm_gem_dma_object *ib;
 	uint32_t length = *(uint32_t *)(untrusted + 1);
 	uint32_t offset = *(uint32_t *)(untrusted + 5);
 	uint32_t max_index = *(uint32_t *)(untrusted + 9);
@@ -276,9 +285,6 @@ validate_indexed_prim_list(VALIDATE_ARGS)
 	if (!ib)
 		return -EINVAL;
 
-	exec->bin_dep_seqno = max(exec->bin_dep_seqno,
-				  to_vc4_bo(&ib->base)->write_seqno);
-
 	if (offset > ib->base.size ||
 	    (ib->base.size - offset) / index_size < length) {
 		DRM_DEBUG("IB access overflow (%d + %d*%d > %zd)\n",
@@ -286,7 +292,7 @@ validate_indexed_prim_list(VALIDATE_ARGS)
 		return -EINVAL;
 	}
 
-	*(uint32_t *)(validated + 5) = ib->paddr + offset;
+	*(uint32_t *)(validated + 5) = ib->dma_addr + offset;
 
 	return 0;
 }
@@ -379,11 +385,28 @@ validate_tile_binning_config(VALIDATE_ARGS)
 		return -EINVAL;
 	}
 
+	/* The tile state data array is 48 bytes per tile, and we put it at
+	 * the start of a BO containing both it and the tile alloc.
+	 */
+	tile_state_size = 48 * tile_count;
+
+	/* Since the tile alloc array will follow us, align. */
+	tile_state_size = roundup(tile_state_size, 4096);
+
+	/* Reject configurations whose tile state would leave no room for
+	 * the tile alloc pool that follows it in the slot.
+	 */
+	if (tile_state_size >= vc4->bin_alloc_size) {
+		DRM_DEBUG("Tile binning config of %dx%d too large\n",
+			  exec->bin_tiles_x, exec->bin_tiles_y);
+		return -EINVAL;
+	}
+
 	bin_slot = vc4_v3d_get_bin_slot(vc4);
 	if (bin_slot < 0) {
 		if (bin_slot != -EINTR && bin_slot != -ERESTARTSYS) {
-			DRM_ERROR("Failed to allocate binner memory: %d\n",
-				  bin_slot);
+			drm_err(dev, "Failed to allocate binner memory: %d\n",
+				bin_slot);
 		}
 		return bin_slot;
 	}
@@ -392,15 +415,15 @@ validate_tile_binning_config(VALIDATE_ARGS)
 	 * free when the job completes rendering.
 	 */
 	exec->bin_slots |= BIT(bin_slot);
-	bin_addr = vc4->bin_bo->base.paddr + bin_slot * vc4->bin_alloc_size;
+	bin_addr = vc4->bin_bo->base.dma_addr + bin_slot * vc4->bin_alloc_size;
 
-	/* The tile state data array is 48 bytes per tile, and we put it at
-	 * the start of a BO containing both it and the tile alloc.
+	exec->tile_alloc_offset = bin_addr + tile_state_size;
+
+	/* The TSDA area must be zeroed out before use, otherwise the PTB might
+	 * consume a stale tile state.
 	 */
-	tile_state_size = 48 * tile_count;
-
-	/* Since the tile alloc array will follow us, align. */
-	exec->tile_alloc_offset = bin_addr + roundup(tile_state_size, 4096);
+	memset(vc4->bin_bo->base.vaddr + bin_slot * vc4->bin_alloc_size, 0,
+	       tile_state_size);
 
 	*(uint8_t *)(validated + 14) =
 		((flags & ~(VC4_BIN_CONFIG_ALLOC_INIT_BLOCK_SIZE_MASK |
@@ -482,9 +505,13 @@ vc4_validate_bin_cl(struct drm_device *dev,
 		    void *unvalidated,
 		    struct vc4_exec_info *exec)
 {
+	struct vc4_dev *vc4 = to_vc4_dev(dev);
 	uint32_t len = exec->args->bin_cl_size;
 	uint32_t dst_offset = 0;
 	uint32_t src_offset = 0;
+
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
+		return -ENODEV;
 
 	while (src_offset < len) {
 		void *dst_pkt = validated + dst_offset;
@@ -563,7 +590,7 @@ reloc_tex(struct vc4_exec_info *exec,
 	  struct vc4_texture_sample_info *sample,
 	  uint32_t texture_handle_index, bool is_cs)
 {
-	struct drm_gem_cma_object *tex;
+	struct drm_gem_dma_object *tex;
 	uint32_t p0 = *(uint32_t *)(uniform_data_u + sample->p_offset[0]);
 	uint32_t p1 = *(uint32_t *)(uniform_data_u + sample->p_offset[1]);
 	uint32_t p2 = (sample->p_offset[2] != ~0 ?
@@ -596,7 +623,7 @@ reloc_tex(struct vc4_exec_info *exec,
 				  "outside of UBO\n");
 			goto fail;
 		}
-		*validated_p0 = tex->paddr + p0;
+		*validated_p0 = tex->dma_addr + p0;
 		return true;
 	}
 
@@ -724,12 +751,7 @@ reloc_tex(struct vc4_exec_info *exec,
 		offset -= level_size;
 	}
 
-	*validated_p0 = tex->paddr + p0;
-
-	if (is_cs) {
-		exec->bin_dep_seqno = max(exec->bin_dep_seqno,
-					  to_vc4_bo(&tex->base)->write_seqno);
-	}
+	*validated_p0 = tex->dma_addr + p0;
 
 	return true;
  fail:
@@ -753,7 +775,7 @@ validate_gl_shader_rec(struct drm_device *dev,
 		28, /* cs */
 	};
 	uint32_t shader_reloc_count = ARRAY_SIZE(shader_reloc_offsets);
-	struct drm_gem_cma_object *bo[ARRAY_SIZE(shader_reloc_offsets) + 8];
+	struct drm_gem_dma_object *bo[ARRAY_SIZE(shader_reloc_offsets) + 8];
 	uint32_t nr_attributes, nr_relocs, packet_size;
 	int i;
 
@@ -798,7 +820,7 @@ validate_gl_shader_rec(struct drm_device *dev,
 			return -EINVAL;
 		}
 
-		bo[i] = exec->bo[src_handles[i]];
+		bo[i] = to_drm_gem_dma_obj(exec->bo[src_handles[i]]);
 		if (!bo[i])
 			return -EINVAL;
 	}
@@ -828,7 +850,7 @@ validate_gl_shader_rec(struct drm_device *dev,
 		void *uniform_data_u;
 		uint32_t tex, uni;
 
-		*(uint32_t *)(pkt_v + o) = bo[i]->paddr + src_offset;
+		*(uint32_t *)(pkt_v + o) = bo[i]->dma_addr + src_offset;
 
 		if (src_offset != 0) {
 			DRM_DEBUG("Shaders must be at offset 0 of "
@@ -884,16 +906,13 @@ validate_gl_shader_rec(struct drm_device *dev,
 	}
 
 	for (i = 0; i < nr_attributes; i++) {
-		struct drm_gem_cma_object *vbo =
+		struct drm_gem_dma_object *vbo =
 			bo[ARRAY_SIZE(shader_reloc_offsets) + i];
 		uint32_t o = 36 + i * 8;
 		uint32_t offset = *(uint32_t *)(pkt_u + o + 0);
 		uint32_t attr_size = *(uint8_t *)(pkt_u + o + 4) + 1;
 		uint32_t stride = *(uint8_t *)(pkt_u + o + 5);
 		uint32_t max_index;
-
-		exec->bin_dep_seqno = max(exec->bin_dep_seqno,
-					  to_vc4_bo(&vbo->base)->write_seqno);
 
 		if (state->addr & 0x8)
 			stride |= (*(uint32_t *)(pkt_u + 100 + i * 4)) & ~0xff;
@@ -916,7 +935,7 @@ validate_gl_shader_rec(struct drm_device *dev,
 			}
 		}
 
-		*(uint32_t *)(pkt_v + o) = vbo->paddr + offset;
+		*(uint32_t *)(pkt_v + o) = vbo->dma_addr + offset;
 	}
 
 	return 0;
@@ -926,8 +945,12 @@ int
 vc4_validate_shader_recs(struct drm_device *dev,
 			 struct vc4_exec_info *exec)
 {
+	struct vc4_dev *vc4 = to_vc4_dev(dev);
 	uint32_t i;
 	int ret = 0;
+
+	if (WARN_ON_ONCE(vc4->gen > VC4_GEN_4))
+		return -ENODEV;
 
 	for (i = 0; i < exec->shader_state_count; i++) {
 		ret = validate_gl_shader_rec(dev, exec, &exec->shader_state[i]);

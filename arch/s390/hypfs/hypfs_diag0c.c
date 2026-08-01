@@ -9,6 +9,7 @@
 
 #include <linux/slab.h>
 #include <linux/cpu.h>
+#include <asm/machine.h>
 #include <asm/diag.h>
 #include <asm/hypfs.h>
 #include "hypfs.h"
@@ -16,26 +17,11 @@
 #define DBFS_D0C_HDR_VERSION 0
 
 /*
- * Execute diagnose 0c in 31 bit mode
- */
-static void diag0c(struct hypfs_diag0c_entry *entry)
-{
-	diag_stat_inc(DIAG_STAT_X00C);
-	asm volatile (
-		"	sam31\n"
-		"	diag	%0,%0,0x0c\n"
-		"	sam64\n"
-		: /* no output register */
-		: "a" (entry)
-		: "memory");
-}
-
-/*
  * Get hypfs_diag0c_entry from CPU vector and store diag0c data
  */
 static void diag0c_fn(void *data)
 {
-	diag0c(((void **) data)[smp_processor_id()]);
+	diag0c(((void **)data)[smp_processor_id()]);
 }
 
 /*
@@ -47,15 +33,14 @@ static void *diag0c_store(unsigned int *count)
 	unsigned int cpu_count, cpu, i;
 	void **cpu_vec;
 
-	get_online_cpus();
+	cpus_read_lock();
 	cpu_count = num_online_cpus();
-	cpu_vec = kmalloc(sizeof(*cpu_vec) * num_possible_cpus(), GFP_KERNEL);
+	cpu_vec = kmalloc_objs(*cpu_vec, num_possible_cpus());
 	if (!cpu_vec)
-		goto fail_put_online_cpus;
+		goto fail_unlock_cpus;
 	/* Note: Diag 0c needs 8 byte alignment and real storage */
-	diag0c_data = kzalloc(sizeof(struct hypfs_diag0c_hdr) +
-			      cpu_count * sizeof(struct hypfs_diag0c_entry),
-			      GFP_KERNEL | GFP_DMA);
+	diag0c_data = kzalloc_flex(*diag0c_data, entry, cpu_count,
+				   GFP_KERNEL | GFP_DMA);
 	if (!diag0c_data)
 		goto fail_kfree_cpu_vec;
 	i = 0;
@@ -68,13 +53,13 @@ static void *diag0c_store(unsigned int *count)
 	on_each_cpu(diag0c_fn, cpu_vec, 1);
 	*count = cpu_count;
 	kfree(cpu_vec);
-	put_online_cpus();
+	cpus_read_unlock();
 	return diag0c_data;
 
 fail_kfree_cpu_vec:
 	kfree(cpu_vec);
-fail_put_online_cpus:
-	put_online_cpus();
+fail_unlock_cpus:
+	cpus_read_unlock();
 	return ERR_PTR(-ENOMEM);
 }
 
@@ -98,7 +83,7 @@ static int dbfs_diag0c_create(void **data, void **data_free_ptr, size_t *size)
 	if (IS_ERR(diag0c_data))
 		return PTR_ERR(diag0c_data);
 	memset(&diag0c_data->hdr, 0, sizeof(diag0c_data->hdr));
-	get_tod_clock_ext(diag0c_data->hdr.tod_ext);
+	store_tod_clock_ext((union tod_clock *)diag0c_data->hdr.tod_ext);
 	diag0c_data->hdr.len = count * sizeof(struct hypfs_diag0c_entry);
 	diag0c_data->hdr.version = DBFS_D0C_HDR_VERSION;
 	diag0c_data->hdr.count = count;
@@ -122,9 +107,10 @@ static struct hypfs_dbfs_file dbfs_file_0c = {
  */
 int __init hypfs_diag0c_init(void)
 {
-	if (!MACHINE_IS_VM)
+	if (!machine_is_vm())
 		return 0;
-	return hypfs_dbfs_create_file(&dbfs_file_0c);
+	hypfs_dbfs_create_file(&dbfs_file_0c);
+	return 0;
 }
 
 /*
@@ -132,7 +118,7 @@ int __init hypfs_diag0c_init(void)
  */
 void hypfs_diag0c_exit(void)
 {
-	if (!MACHINE_IS_VM)
+	if (!machine_is_vm())
 		return;
 	hypfs_dbfs_remove_file(&dbfs_file_0c);
 }

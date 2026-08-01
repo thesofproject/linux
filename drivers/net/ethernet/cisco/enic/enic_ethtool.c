@@ -1,20 +1,5 @@
-/**
- * Copyright 2013 Cisco Systems, Inc.  All rights reserved.
- *
- * This program is free software; you may redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- */
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright 2013 Cisco Systems, Inc.  All rights reserved.
 
 #include <linux/netdevice.h>
 #include <linux/ethtool.h>
@@ -47,6 +32,41 @@ struct enic_stat {
 	.index = offsetof(struct vnic_gen_stats, stat) / sizeof(u64)\
 }
 
+#define ENIC_PER_RQ_STAT(stat) { \
+	.name = "rq[%d]_"#stat, \
+	.index = offsetof(struct enic_rq_stats, stat) / sizeof(u64) \
+}
+
+#define ENIC_PER_WQ_STAT(stat) { \
+	.name = "wq[%d]_"#stat, \
+	.index = offsetof(struct enic_wq_stats, stat) / sizeof(u64) \
+}
+
+static const struct enic_stat enic_per_rq_stats[] = {
+	ENIC_PER_RQ_STAT(l4_rss_hash),
+	ENIC_PER_RQ_STAT(l3_rss_hash),
+	ENIC_PER_RQ_STAT(csum_unnecessary_encap),
+	ENIC_PER_RQ_STAT(vlan_stripped),
+	ENIC_PER_RQ_STAT(napi_complete),
+	ENIC_PER_RQ_STAT(napi_repoll),
+	ENIC_PER_RQ_STAT(no_skb),
+	ENIC_PER_RQ_STAT(desc_skip),
+};
+
+#define NUM_ENIC_PER_RQ_STATS   ARRAY_SIZE(enic_per_rq_stats)
+
+static const struct enic_stat enic_per_wq_stats[] = {
+	ENIC_PER_WQ_STAT(encap_tso),
+	ENIC_PER_WQ_STAT(encap_csum),
+	ENIC_PER_WQ_STAT(add_vlan),
+	ENIC_PER_WQ_STAT(cq_work),
+	ENIC_PER_WQ_STAT(cq_bytes),
+	ENIC_PER_WQ_STAT(null_pkt),
+	ENIC_PER_WQ_STAT(skb_linear_fail),
+	ENIC_PER_WQ_STAT(desc_full_awake),
+};
+
+#define NUM_ENIC_PER_WQ_STATS   ARRAY_SIZE(enic_per_wq_stats)
 static const struct enic_stat enic_tx_stats[] = {
 	ENIC_TX_STAT(tx_frames_ok),
 	ENIC_TX_STAT(tx_unicast_frames_ok),
@@ -60,6 +80,8 @@ static const struct enic_stat enic_tx_stats[] = {
 	ENIC_TX_STAT(tx_errors),
 	ENIC_TX_STAT(tx_tso),
 };
+
+#define NUM_ENIC_TX_STATS	ARRAY_SIZE(enic_tx_stats)
 
 static const struct enic_stat enic_rx_stats[] = {
 	ENIC_RX_STAT(rx_frames_ok),
@@ -85,13 +107,13 @@ static const struct enic_stat enic_rx_stats[] = {
 	ENIC_RX_STAT(rx_frames_to_max),
 };
 
+#define NUM_ENIC_RX_STATS	ARRAY_SIZE(enic_rx_stats)
+
 static const struct enic_stat enic_gen_stats[] = {
 	ENIC_GEN_STAT(dma_map_error),
 };
 
-static const unsigned int enic_n_tx_stats = ARRAY_SIZE(enic_tx_stats);
-static const unsigned int enic_n_rx_stats = ARRAY_SIZE(enic_rx_stats);
-static const unsigned int enic_n_gen_stats = ARRAY_SIZE(enic_gen_stats);
+#define NUM_ENIC_GEN_STATS	ARRAY_SIZE(enic_gen_stats)
 
 static void enic_intr_coal_set_rx(struct enic *enic, u32 timer)
 {
@@ -104,19 +126,160 @@ static void enic_intr_coal_set_rx(struct enic *enic, u32 timer)
 	}
 }
 
+static void enic_get_supp_adv_media_type(struct net_device *netdev,
+					 struct ethtool_link_ksettings *ecmd)
+{
+	struct enic *enic = netdev_priv(netdev);
+	struct ethtool_link_settings *base = &ecmd->base;
+	u16 sub_dev_id = 0;
+
+	base->port = PORT_OTHER;
+
+	if (enic->pdev)
+		sub_dev_id = enic->pdev->subsystem_device;
+
+	switch (sub_dev_id) {
+	case PCI_SUBDEV_ID_CISCO_VIC_1225:
+	case PCI_SUBDEV_ID_CISCO_VIC_1227:
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     10000baseSR_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported, FIBRE);
+		base->port = PORT_FIBRE;
+		break;
+	case PCI_SUBDEV_ID_CISCO_VIC_1285:
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     40000baseSR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported, FIBRE);
+		base->port = PORT_FIBRE;
+		break;
+	case PCI_SUBDEV_ID_CISCO_VIC_1225T:
+	case PCI_SUBDEV_ID_CISCO_VIC_1227T:
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     10000baseT_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported, FIBRE);
+		base->port = PORT_FIBRE;
+		break;
+	case PCI_SUBDEV_ID_CISCO_VIC_1385:
+	case PCI_SUBDEV_ID_CISCO_VIC_1387:
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     10000baseSR_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     10000baseLR_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     40000baseSR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     40000baseLR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported, FIBRE);
+		base->port = PORT_FIBRE;
+		break;
+	case PCI_SUBDEV_ID_CISCO_VIC_1477:
+	case PCI_SUBDEV_ID_CISCO_VIC_1485:
+	case PCI_SUBDEV_ID_CISCO_VIC_1487:
+	case PCI_SUBDEV_ID_CISCO_VIC_1495:
+	case PCI_SUBDEV_ID_CISCO_VIC_1497:
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     40000baseCR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     40000baseSR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     40000baseLR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     100000baseSR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     100000baseCR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported, FIBRE);
+		base->port = PORT_FIBRE;
+		break;
+	case PCI_SUBDEV_ID_CISCO_VIC_15235:
+	case PCI_SUBDEV_ID_CISCO_VIC_15237:
+	case PCI_SUBDEV_ID_CISCO_VIC_15238:
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     40000baseCR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     40000baseSR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     40000baseLR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     100000baseSR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     100000baseCR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     200000baseSR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     200000baseDR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     200000baseLR4_ER4_FR4_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported, FIBRE);
+		base->port = PORT_FIBRE;
+		break;
+	case PCI_SUBDEV_ID_CISCO_VIC_1455:
+	case PCI_SUBDEV_ID_CISCO_VIC_1457:
+	case PCI_SUBDEV_ID_CISCO_VIC_1467:
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     10000baseT_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     25000baseSR_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported, FIBRE);
+		base->port = PORT_FIBRE;
+		break;
+	case PCI_SUBDEV_ID_CISCO_VIC_15428:
+	case PCI_SUBDEV_ID_CISCO_VIC_15427:
+	case PCI_SUBDEV_ID_CISCO_VIC_15425:
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     10000baseT_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     25000baseSR_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     50000baseSR_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported, FIBRE);
+		base->port = PORT_FIBRE;
+		break;
+	/* Do not mention port type as FIBRE for blade VICs */
+	case PCI_SUBDEV_ID_CISCO_VIC_1240:
+	case PCI_SUBDEV_ID_CISCO_VIC_1280:
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     10000baseKR_Full);
+		break;
+	case PCI_SUBDEV_ID_CISCO_VIC_1340:
+	case PCI_SUBDEV_ID_CISCO_VIC_1380:
+	case PCI_SUBDEV_ID_CISCO_VIC_1440: /* 10G/40G KR */
+	case PCI_SUBDEV_ID_CISCO_VIC_1480: /* 10G/40G KR */
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     10000baseKR_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     40000baseKR4_Full);
+		break;
+	case PCI_SUBDEV_ID_CISCO_VIC_14425: /* 25G KR */
+	case PCI_SUBDEV_ID_CISCO_VIC_14825: /* 25G KR */
+	case PCI_SUBDEV_ID_CISCO_VIC_15420: /* 25G KR */
+	case PCI_SUBDEV_ID_CISCO_VIC_15422: /* 25G KR */
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     25000baseKR_Full);
+		break;
+	case PCI_SUBDEV_ID_CISCO_VIC_15411: /* 10G KR */
+	case PCI_SUBDEV_ID_CISCO_VIC_15412: /* 10G KR */
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     10000baseKR_Full);
+		break;
+	case PCI_SUBDEV_ID_CISCO_VIC_15231: /* 25G/100G/200G KR */
+	case PCI_SUBDEV_ID_CISCO_VIC_15230: /* 25G/100G/200G KR */
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     25000baseKR_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     100000baseKR_Full);
+		ethtool_link_ksettings_add_link_mode(ecmd, supported,
+						     200000baseKR4_Full);
+		break;
+	}
+}
+
 static int enic_get_ksettings(struct net_device *netdev,
 			      struct ethtool_link_ksettings *ecmd)
 {
 	struct enic *enic = netdev_priv(netdev);
 	struct ethtool_link_settings *base = &ecmd->base;
 
-	ethtool_link_ksettings_add_link_mode(ecmd, supported,
-					     10000baseT_Full);
-	ethtool_link_ksettings_add_link_mode(ecmd, supported, FIBRE);
-	ethtool_link_ksettings_add_link_mode(ecmd, advertising,
-					     10000baseT_Full);
-	ethtool_link_ksettings_add_link_mode(ecmd, advertising, FIBRE);
-	base->port = PORT_FIBRE;
+	enic_get_supp_adv_media_type(netdev, ecmd);
 
 	if (netif_carrier_ok(netdev)) {
 		base->speed = vnic_dev_port_speed(enic->vdev);
@@ -139,58 +302,77 @@ static void enic_get_drvinfo(struct net_device *netdev,
 	int err;
 
 	err = enic_dev_fw_info(enic, &fw_info);
-	/* return only when pci_zalloc_consistent fails in vnic_dev_fw_info
+	/* return only when dma_alloc_coherent fails in vnic_dev_fw_info
 	 * For other failures, like devcmd failure, we return previously
 	 * recorded info.
 	 */
 	if (err == -ENOMEM)
 		return;
 
-	strlcpy(drvinfo->driver, DRV_NAME, sizeof(drvinfo->driver));
-	strlcpy(drvinfo->version, DRV_VERSION, sizeof(drvinfo->version));
-	strlcpy(drvinfo->fw_version, fw_info->fw_version,
+	strscpy(drvinfo->driver, DRV_NAME, sizeof(drvinfo->driver));
+	strscpy(drvinfo->fw_version, fw_info->fw_version,
 		sizeof(drvinfo->fw_version));
-	strlcpy(drvinfo->bus_info, pci_name(enic->pdev),
+	strscpy(drvinfo->bus_info, pci_name(enic->pdev),
 		sizeof(drvinfo->bus_info));
 }
 
 static void enic_get_strings(struct net_device *netdev, u32 stringset,
 	u8 *data)
 {
+	struct enic *enic = netdev_priv(netdev);
 	unsigned int i;
+	unsigned int j;
 
 	switch (stringset) {
 	case ETH_SS_STATS:
-		for (i = 0; i < enic_n_tx_stats; i++) {
+		for (i = 0; i < NUM_ENIC_TX_STATS; i++) {
 			memcpy(data, enic_tx_stats[i].name, ETH_GSTRING_LEN);
 			data += ETH_GSTRING_LEN;
 		}
-		for (i = 0; i < enic_n_rx_stats; i++) {
+		for (i = 0; i < NUM_ENIC_RX_STATS; i++) {
 			memcpy(data, enic_rx_stats[i].name, ETH_GSTRING_LEN);
 			data += ETH_GSTRING_LEN;
 		}
-		for (i = 0; i < enic_n_gen_stats; i++) {
+		for (i = 0; i < NUM_ENIC_GEN_STATS; i++) {
 			memcpy(data, enic_gen_stats[i].name, ETH_GSTRING_LEN);
 			data += ETH_GSTRING_LEN;
+		}
+		for (i = 0; i < enic->rq_count; i++) {
+			for (j = 0; j < NUM_ENIC_PER_RQ_STATS; j++) {
+				snprintf(data, ETH_GSTRING_LEN,
+					 enic_per_rq_stats[j].name, i);
+				data += ETH_GSTRING_LEN;
+			}
+		}
+		for (i = 0; i < enic->wq_count; i++) {
+			for (j = 0; j < NUM_ENIC_PER_WQ_STATS; j++) {
+				snprintf(data, ETH_GSTRING_LEN,
+					 enic_per_wq_stats[j].name, i);
+				data += ETH_GSTRING_LEN;
+			}
 		}
 		break;
 	}
 }
 
 static void enic_get_ringparam(struct net_device *netdev,
-			       struct ethtool_ringparam *ring)
+			       struct ethtool_ringparam *ring,
+			       struct kernel_ethtool_ringparam *kernel_ring,
+			       struct netlink_ext_ack *extack)
 {
 	struct enic *enic = netdev_priv(netdev);
 	struct vnic_enet_config *c = &enic->config;
 
-	ring->rx_max_pending = ENIC_MAX_RQ_DESCS;
+	ring->rx_max_pending = c->max_rq_ring;
 	ring->rx_pending = c->rq_desc_count;
-	ring->tx_max_pending = ENIC_MAX_WQ_DESCS;
+	ring->tx_max_pending = c->max_wq_ring;
 	ring->tx_pending = c->wq_desc_count;
 }
 
 static int enic_set_ringparam(struct net_device *netdev,
-			      struct ethtool_ringparam *ring)
+			      struct ethtool_ringparam *ring,
+			      struct kernel_ethtool_ringparam *kernel_ring,
+			      struct netlink_ext_ack *extack)
 {
 	struct enic *enic = netdev_priv(netdev);
 	struct vnic_enet_config *c = &enic->config;
@@ -211,18 +393,18 @@ static int enic_set_ringparam(struct net_device *netdev,
 	}
 	rx_pending = c->rq_desc_count;
 	tx_pending = c->wq_desc_count;
-	if (ring->rx_pending > ENIC_MAX_RQ_DESCS ||
+	if (ring->rx_pending > c->max_rq_ring ||
 	    ring->rx_pending < ENIC_MIN_RQ_DESCS) {
 		netdev_info(netdev, "rx pending (%u) not in range [%u,%u]",
 			    ring->rx_pending, ENIC_MIN_RQ_DESCS,
-			    ENIC_MAX_RQ_DESCS);
+	      c->max_rq_ring);
 		return -EINVAL;
 	}
-	if (ring->tx_pending > ENIC_MAX_WQ_DESCS ||
+	if (ring->tx_pending > c->max_wq_ring ||
 	    ring->tx_pending < ENIC_MIN_WQ_DESCS) {
 		netdev_info(netdev, "tx pending (%u) not in range [%u,%u]",
 			    ring->tx_pending, ENIC_MIN_WQ_DESCS,
-			    ENIC_MAX_WQ_DESCS);
+			c->max_wq_ring);
 		return -EINVAL;
 	}
 	if (running)
@@ -241,7 +423,7 @@ static int enic_set_ringparam(struct net_device *netdev,
 	}
 	enic_init_vnic_resources(enic);
 	if (running) {
-		err = dev_open(netdev);
+		err = dev_open(netdev, NULL);
 		if (err)
 			goto err_out;
 	}
@@ -254,9 +436,19 @@ err_out:
 
 static int enic_get_sset_count(struct net_device *netdev, int sset)
 {
+	struct enic *enic = netdev_priv(netdev);
+	unsigned int n_per_rq_stats;
+	unsigned int n_per_wq_stats;
+	unsigned int n_stats;
+
 	switch (sset) {
 	case ETH_SS_STATS:
-		return enic_n_tx_stats + enic_n_rx_stats + enic_n_gen_stats;
+		n_per_rq_stats = NUM_ENIC_PER_RQ_STATS * enic->rq_count;
+		n_per_wq_stats = NUM_ENIC_PER_WQ_STATS * enic->wq_count;
+		n_stats = NUM_ENIC_TX_STATS + NUM_ENIC_RX_STATS +
+			NUM_ENIC_GEN_STATS +
+			n_per_rq_stats + n_per_wq_stats;
+		return n_stats;
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -268,22 +460,41 @@ static void enic_get_ethtool_stats(struct net_device *netdev,
 	struct enic *enic = netdev_priv(netdev);
 	struct vnic_stats *vstats;
 	unsigned int i;
+	unsigned int j;
 	int err;
 
 	err = enic_dev_stats_dump(enic, &vstats);
-	/* return only when pci_zalloc_consistent fails in vnic_dev_stats_dump
+	/* return only when dma_alloc_coherent fails in vnic_dev_stats_dump
 	 * For other failures, like devcmd failure, we return previously
 	 * recorded stats.
 	 */
 	if (err == -ENOMEM)
 		return;
 
-	for (i = 0; i < enic_n_tx_stats; i++)
+	for (i = 0; i < NUM_ENIC_TX_STATS; i++)
 		*(data++) = ((u64 *)&vstats->tx)[enic_tx_stats[i].index];
-	for (i = 0; i < enic_n_rx_stats; i++)
+	for (i = 0; i < NUM_ENIC_RX_STATS; i++)
 		*(data++) = ((u64 *)&vstats->rx)[enic_rx_stats[i].index];
-	for (i = 0; i < enic_n_gen_stats; i++)
+	for (i = 0; i < NUM_ENIC_GEN_STATS; i++)
 		*(data++) = ((u64 *)&enic->gen_stats)[enic_gen_stats[i].index];
+	for (i = 0; i < enic->rq_count; i++) {
+		struct enic_rq_stats *rqstats = &enic->rq[i].stats;
+		int index;
+
+		for (j = 0; j < NUM_ENIC_PER_RQ_STATS; j++) {
+			index = enic_per_rq_stats[j].index;
+			*(data++) = ((u64 *)rqstats)[index];
+		}
+	}
+	for (i = 0; i < enic->wq_count; i++) {
+		struct enic_wq_stats *wqstats = &enic->wq[i].stats;
+		int index;
+
+		for (j = 0; j < NUM_ENIC_PER_WQ_STATS; j++) {
+			index = enic_per_wq_stats[j].index;
+			*(data++) = ((u64 *)wqstats)[index];
+		}
+	}
 }
 
 static u32 enic_get_msglevel(struct net_device *netdev)
@@ -299,7 +510,9 @@ static void enic_set_msglevel(struct net_device *netdev, u32 value)
 }
 
 static int enic_get_coalesce(struct net_device *netdev,
-	struct ethtool_coalesce *ecmd)
+			     struct ethtool_coalesce *ecmd,
+			     struct kernel_ethtool_coalesce *kernel_coal,
+			     struct netlink_ext_ack *extack)
 {
 	struct enic *enic = netdev_priv(netdev);
 	struct enic_rx_coal *rxcoal = &enic->rx_coalesce_setting;
@@ -324,25 +537,6 @@ static int enic_coalesce_valid(struct enic *enic,
 	u32 rx_coalesce_usecs_low = min_t(u32, coalesce_usecs_max,
 					  ec->rx_coalesce_usecs_low);
 
-	if (ec->rx_max_coalesced_frames		||
-	    ec->rx_coalesce_usecs_irq		||
-	    ec->rx_max_coalesced_frames_irq	||
-	    ec->tx_max_coalesced_frames		||
-	    ec->tx_coalesce_usecs_irq		||
-	    ec->tx_max_coalesced_frames_irq	||
-	    ec->stats_block_coalesce_usecs	||
-	    ec->use_adaptive_tx_coalesce	||
-	    ec->pkt_rate_low			||
-	    ec->rx_max_coalesced_frames_low	||
-	    ec->tx_coalesce_usecs_low		||
-	    ec->tx_max_coalesced_frames_low	||
-	    ec->pkt_rate_high			||
-	    ec->rx_max_coalesced_frames_high	||
-	    ec->tx_coalesce_usecs_high		||
-	    ec->tx_max_coalesced_frames_high	||
-	    ec->rate_sample_interval)
-		return -EINVAL;
-
 	if ((vnic_dev_get_intr_mode(enic->vdev) != VNIC_DEV_INTR_MODE_MSIX) &&
 	    ec->tx_coalesce_usecs)
 		return -EINVAL;
@@ -363,7 +557,9 @@ static int enic_coalesce_valid(struct enic *enic,
 }
 
 static int enic_set_coalesce(struct net_device *netdev,
-	struct ethtool_coalesce *ecmd)
+			     struct ethtool_coalesce *ecmd,
+			     struct kernel_ethtool_coalesce *kernel_coal,
+			     struct netlink_ext_ack *extack)
 {
 	struct enic *enic = netdev_priv(netdev);
 	u32 tx_coalesce_usecs;
@@ -454,7 +650,6 @@ static int enic_grxclsrule(struct enic *enic, struct ethtool_rxnfc *cmd)
 		break;
 	default:
 		return -EINVAL;
-		break;
 	}
 
 	fsp->h_u.tcp_ip4_spec.ip4src = flow_get_u32_src(&n->keys);
@@ -474,20 +669,32 @@ static int enic_grxclsrule(struct enic *enic, struct ethtool_rxnfc *cmd)
 	return 0;
 }
 
-static int enic_get_rx_flow_hash(struct enic *enic, struct ethtool_rxnfc *cmd)
+static int enic_get_rx_flow_hash(struct net_device *dev,
+				 struct ethtool_rxfh_fields *cmd)
 {
+	struct enic *enic = netdev_priv(dev);
+	u8 rss_hash_type = 0;
 	cmd->data = 0;
 
+	spin_lock_bh(&enic->devcmd_lock);
+	(void)vnic_dev_capable_rss_hash_type(enic->vdev, &rss_hash_type);
+	spin_unlock_bh(&enic->devcmd_lock);
 	switch (cmd->flow_type) {
 	case TCP_V6_FLOW:
 	case TCP_V4_FLOW:
-		cmd->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3;
-		/* Fall through */
+		cmd->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3 |
+			     RXH_IP_SRC | RXH_IP_DST;
+		break;
 	case UDP_V6_FLOW:
-	case UDP_V4_FLOW:
-		if (vnic_dev_capable_udp_rss(enic->vdev))
+		cmd->data |= RXH_IP_SRC | RXH_IP_DST;
+		if (rss_hash_type & NIC_CFG_RSS_HASH_TYPE_UDP_IPV6)
 			cmd->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3;
-		/* Fall through */
+		break;
+	case UDP_V4_FLOW:
+		cmd->data |= RXH_IP_SRC | RXH_IP_DST;
+		if (rss_hash_type & NIC_CFG_RSS_HASH_TYPE_UDP_IPV4)
+			cmd->data |= RXH_L4_B_0_1 | RXH_L4_B_2_3;
+		break;
 	case SCTP_V4_FLOW:
 	case AH_ESP_V4_FLOW:
 	case AH_V4_FLOW:
@@ -507,6 +714,13 @@ static int enic_get_rx_flow_hash(struct enic *enic, struct ethtool_rxnfc *cmd)
 	return 0;
 }
 
+static u32 enic_get_rx_ring_count(struct net_device *dev)
+{
+	struct enic *enic = netdev_priv(dev);
+
+	return enic->rq_count;
+}
+
 static int enic_get_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd,
 			  u32 *rule_locs)
 {
@@ -514,9 +728,6 @@ static int enic_get_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd,
 	int ret = 0;
 
 	switch (cmd->cmd) {
-	case ETHTOOL_GRXRINGS:
-		cmd->data = enic->rq_count;
-		break;
 	case ETHTOOL_GRXCLSRLCNT:
 		spin_lock_bh(&enic->rfs_h.lock);
 		cmd->rule_cnt = enic->rfs_h.max - enic->rfs_h.free;
@@ -533,48 +744,8 @@ static int enic_get_rxnfc(struct net_device *dev, struct ethtool_rxnfc *cmd,
 		ret = enic_grxclsrule(enic, cmd);
 		spin_unlock_bh(&enic->rfs_h.lock);
 		break;
-	case ETHTOOL_GRXFH:
-		ret = enic_get_rx_flow_hash(enic, cmd);
-		break;
 	default:
 		ret = -EOPNOTSUPP;
-		break;
-	}
-
-	return ret;
-}
-
-static int enic_get_tunable(struct net_device *dev,
-			    const struct ethtool_tunable *tuna, void *data)
-{
-	struct enic *enic = netdev_priv(dev);
-	int ret = 0;
-
-	switch (tuna->id) {
-	case ETHTOOL_RX_COPYBREAK:
-		*(u32 *)data = enic->rx_copybreak;
-		break;
-	default:
-		ret = -EINVAL;
-		break;
-	}
-
-	return ret;
-}
-
-static int enic_set_tunable(struct net_device *dev,
-			    const struct ethtool_tunable *tuna,
-			    const void *data)
-{
-	struct enic *enic = netdev_priv(dev);
-	int ret = 0;
-
-	switch (tuna->id) {
-	case ETHTOOL_RX_COPYBREAK:
-		enic->rx_copybreak = *(u32 *)data;
-		break;
-	default:
-		ret = -EINVAL;
 		break;
 	}
 
@@ -586,46 +757,71 @@ static u32 enic_get_rxfh_key_size(struct net_device *netdev)
 	return ENIC_RSS_LEN;
 }
 
-static int enic_get_rxfh(struct net_device *netdev, u32 *indir, u8 *hkey,
-			 u8 *hfunc)
+static int enic_get_rxfh(struct net_device *netdev,
+			 struct ethtool_rxfh_param *rxfh)
 {
 	struct enic *enic = netdev_priv(netdev);
 
-	if (hkey)
-		memcpy(hkey, enic->rss_key, ENIC_RSS_LEN);
+	if (rxfh->key)
+		memcpy(rxfh->key, enic->rss_key, ENIC_RSS_LEN);
 
-	if (hfunc)
-		*hfunc = ETH_RSS_HASH_TOP;
+	rxfh->hfunc = ETH_RSS_HASH_TOP;
 
 	return 0;
 }
 
-static int enic_set_rxfh(struct net_device *netdev, const u32 *indir,
-			 const u8 *hkey, const u8 hfunc)
+static int enic_set_rxfh(struct net_device *netdev,
+			 struct ethtool_rxfh_param *rxfh,
+			 struct netlink_ext_ack *extack)
 {
 	struct enic *enic = netdev_priv(netdev);
 
-	if ((hfunc != ETH_RSS_HASH_NO_CHANGE && hfunc != ETH_RSS_HASH_TOP) ||
-	    indir)
+	if (rxfh->indir ||
+	    (rxfh->hfunc != ETH_RSS_HASH_NO_CHANGE &&
+	     rxfh->hfunc != ETH_RSS_HASH_TOP))
 		return -EINVAL;
 
-	if (hkey)
-		memcpy(enic->rss_key, hkey, ENIC_RSS_LEN);
+	if (rxfh->key)
+		memcpy(enic->rss_key, rxfh->key, ENIC_RSS_LEN);
 
 	return __enic_set_rsskey(enic);
 }
 
 static int enic_get_ts_info(struct net_device *netdev,
-			    struct ethtool_ts_info *info)
+			    struct kernel_ethtool_ts_info *info)
 {
-	info->so_timestamping = SOF_TIMESTAMPING_TX_SOFTWARE |
-				SOF_TIMESTAMPING_RX_SOFTWARE |
-				SOF_TIMESTAMPING_SOFTWARE;
+	info->so_timestamping = SOF_TIMESTAMPING_TX_SOFTWARE;
 
 	return 0;
 }
 
+static void enic_get_channels(struct net_device *netdev,
+			      struct ethtool_channels *channels)
+{
+	struct enic *enic = netdev_priv(netdev);
+
+	switch (vnic_dev_get_intr_mode(enic->vdev)) {
+	case VNIC_DEV_INTR_MODE_MSIX:
+		channels->max_rx = min(enic->rq_avail, ENIC_RQ_MAX);
+		channels->max_tx = min(enic->wq_avail, ENIC_WQ_MAX);
+		channels->rx_count = enic->rq_count;
+		channels->tx_count = enic->wq_count;
+		break;
+	case VNIC_DEV_INTR_MODE_MSI:
+	case VNIC_DEV_INTR_MODE_INTX:
+		channels->max_combined = 1;
+		channels->combined_count = 1;
+		break;
+	default:
+		break;
+	}
+}
+
 static const struct ethtool_ops enic_ethtool_ops = {
+	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
+				     ETHTOOL_COALESCE_USE_ADAPTIVE_RX |
+				     ETHTOOL_COALESCE_RX_USECS_LOW |
+				     ETHTOOL_COALESCE_RX_USECS_HIGH,
 	.get_drvinfo = enic_get_drvinfo,
 	.get_msglevel = enic_get_msglevel,
 	.set_msglevel = enic_set_msglevel,
@@ -638,13 +834,14 @@ static const struct ethtool_ops enic_ethtool_ops = {
 	.get_coalesce = enic_get_coalesce,
 	.set_coalesce = enic_set_coalesce,
 	.get_rxnfc = enic_get_rxnfc,
-	.get_tunable = enic_get_tunable,
-	.set_tunable = enic_set_tunable,
+	.get_rx_ring_count = enic_get_rx_ring_count,
 	.get_rxfh_key_size = enic_get_rxfh_key_size,
 	.get_rxfh = enic_get_rxfh,
 	.set_rxfh = enic_set_rxfh,
+	.get_rxfh_fields = enic_get_rx_flow_hash,
 	.get_link_ksettings = enic_get_ksettings,
 	.get_ts_info = enic_get_ts_info,
+	.get_channels = enic_get_channels,
 };
 
 void enic_set_ethtool_ops(struct net_device *netdev)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * asb100.c - Part of lm_sensors, Linux kernel modules for hardware
  *	      monitoring
@@ -9,20 +10,6 @@
  * Copyright (C) 1998 - 2003  Frodo Looijaard <frodol@dds.nl>,
  *			      Philip Edelbrock <phil@netroedge.com>, and
  *			      Mark Studebaker <mdsxyz123@yahoo.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 /*
@@ -199,7 +186,7 @@ struct asb100_data {
 	/* array of 2 pointers to subclients */
 	struct i2c_client *lm75[2];
 
-	char valid;		/* !=0 if following fields are valid */
+	bool valid;		/* true if following fields are valid */
 	u8 in[7];		/* Register value */
 	u8 in_max[7];		/* Register value */
 	u8 in_min[7];		/* Register value */
@@ -218,16 +205,15 @@ struct asb100_data {
 static int asb100_read_value(struct i2c_client *client, u16 reg);
 static void asb100_write_value(struct i2c_client *client, u16 reg, u16 val);
 
-static int asb100_probe(struct i2c_client *client,
-			const struct i2c_device_id *id);
+static int asb100_probe(struct i2c_client *client);
 static int asb100_detect(struct i2c_client *client,
 			 struct i2c_board_info *info);
-static int asb100_remove(struct i2c_client *client);
+static void asb100_remove(struct i2c_client *client);
 static struct asb100_data *asb100_update_device(struct device *dev);
 static void asb100_init_client(struct i2c_client *client);
 
 static const struct i2c_device_id asb100_id[] = {
-	{ "asb100", 0 },
+	{ .name = "asb100" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, asb100_id);
@@ -719,21 +705,21 @@ static int asb100_detect_subclients(struct i2c_client *client)
 		goto ERROR_SC_2;
 	}
 
-	data->lm75[0] = i2c_new_dummy(adapter, sc_addr[0]);
-	if (!data->lm75[0]) {
+	data->lm75[0] = i2c_new_dummy_device(adapter, sc_addr[0]);
+	if (IS_ERR(data->lm75[0])) {
 		dev_err(&client->dev,
 			"subclient %d registration at address 0x%x failed.\n",
 			1, sc_addr[0]);
-		err = -ENOMEM;
+		err = PTR_ERR(data->lm75[0]);
 		goto ERROR_SC_2;
 	}
 
-	data->lm75[1] = i2c_new_dummy(adapter, sc_addr[1]);
-	if (!data->lm75[1]) {
+	data->lm75[1] = i2c_new_dummy_device(adapter, sc_addr[1]);
+	if (IS_ERR(data->lm75[1])) {
 		dev_err(&client->dev,
 			"subclient %d registration at address 0x%x failed.\n",
 			2, sc_addr[1]);
-		err = -ENOMEM;
+		err = PTR_ERR(data->lm75[1]);
 		goto ERROR_SC_3;
 	}
 
@@ -783,13 +769,12 @@ static int asb100_detect(struct i2c_client *client,
 	if (val1 != 0x31 || val2 != 0x06)
 		return -ENODEV;
 
-	strlcpy(info->type, "asb100", I2C_NAME_SIZE);
+	strscpy(info->type, "asb100", I2C_NAME_SIZE);
 
 	return 0;
 }
 
-static int asb100_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int asb100_probe(struct i2c_client *client)
 {
 	int err;
 	struct asb100_data *data;
@@ -837,7 +822,7 @@ ERROR3:
 	return err;
 }
 
-static int asb100_remove(struct i2c_client *client)
+static void asb100_remove(struct i2c_client *client)
 {
 	struct asb100_data *data = i2c_get_clientdata(client);
 
@@ -846,8 +831,6 @@ static int asb100_remove(struct i2c_client *client)
 
 	i2c_unregister_device(data->lm75[1]);
 	i2c_unregister_device(data->lm75[0]);
-
-	return 0;
 }
 
 /*
@@ -1008,7 +991,7 @@ static struct asb100_data *asb100_update_device(struct device *dev)
 			(asb100_read_value(client, ASB100_REG_ALARM2) << 8);
 
 		data->last_updated = jiffies;
-		data->valid = 1;
+		data->valid = true;
 
 		dev_dbg(&client->dev, "... device update complete\n");
 	}

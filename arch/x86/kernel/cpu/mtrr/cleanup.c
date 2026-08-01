@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: LGPL-2.0+
 /*
  * MTRR (Memory Type Range Register) cleanup
  *
  *  Copyright (C) 2009 Yinghai Lu
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Library General Public License for more details.
- *
- * You should have received a copy of the GNU Library General Public
- * License along with this library; if not, write to the Free
- * Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 #include <linux/init.h>
 #include <linux/pci.h>
@@ -55,9 +42,6 @@ static int __initdata				nr_range;
 
 static struct var_mtrr_range_state __initdata	range_state[RANGE_NUM];
 
-static int __initdata debug_print;
-#define Dprintk(x...) do { if (debug_print) pr_debug(x); } while (0)
-
 #define BIOS_BUG_MSG \
 	"WARNING: BIOS bug: VAR MTRR %d contains strange UC entry under 1M, check with your system vendor!\n"
 
@@ -79,12 +63,11 @@ x86_get_mtrr_mem_range(struct range *range, int nr_range,
 		nr_range = add_range_with_merge(range, RANGE_NUM, nr_range,
 						base, base + size);
 	}
-	if (debug_print) {
-		pr_debug("After WB checking\n");
-		for (i = 0; i < nr_range; i++)
-			pr_debug("MTRR MAP PFN: %016llx - %016llx\n",
-				 range[i].start, range[i].end);
-	}
+
+	Dprintk("After WB checking\n");
+	for (i = 0; i < nr_range; i++)
+		Dprintk("MTRR MAP PFN: %016llx - %016llx\n",
+			 range[i].start, range[i].end);
 
 	/* Take out UC ranges: */
 	for (i = 0; i < num_var_ranges; i++) {
@@ -112,24 +95,22 @@ x86_get_mtrr_mem_range(struct range *range, int nr_range,
 		subtract_range(range, RANGE_NUM, extra_remove_base,
 				 extra_remove_base + extra_remove_size);
 
-	if  (debug_print) {
-		pr_debug("After UC checking\n");
-		for (i = 0; i < RANGE_NUM; i++) {
-			if (!range[i].end)
-				continue;
-			pr_debug("MTRR MAP PFN: %016llx - %016llx\n",
-				 range[i].start, range[i].end);
-		}
+	Dprintk("After UC checking\n");
+	for (i = 0; i < RANGE_NUM; i++) {
+		if (!range[i].end)
+			continue;
+
+		Dprintk("MTRR MAP PFN: %016llx - %016llx\n",
+			 range[i].start, range[i].end);
 	}
 
 	/* sort the ranges */
 	nr_range = clean_sort_range(range, RANGE_NUM);
-	if  (debug_print) {
-		pr_debug("After sorting\n");
-		for (i = 0; i < nr_range; i++)
-			pr_debug("MTRR MAP PFN: %016llx - %016llx\n",
-				 range[i].start, range[i].end);
-	}
+
+	Dprintk("After sorting\n");
+	for (i = 0; i < nr_range; i++)
+		Dprintk("MTRR MAP PFN: %016llx - %016llx\n",
+			range[i].start, range[i].end);
 
 	return nr_range;
 }
@@ -164,16 +145,9 @@ static int __init enable_mtrr_cleanup_setup(char *str)
 }
 early_param("enable_mtrr_cleanup", enable_mtrr_cleanup_setup);
 
-static int __init mtrr_cleanup_debug_setup(char *str)
-{
-	debug_print = 1;
-	return 0;
-}
-early_param("mtrr_cleanup_debug", mtrr_cleanup_debug_setup);
-
 static void __init
 set_var_mtrr(unsigned int reg, unsigned long basek, unsigned long sizek,
-	     unsigned char type, unsigned int address_bits)
+	     unsigned char type)
 {
 	u32 base_lo, base_hi, mask_lo, mask_hi;
 	u64 base, mask;
@@ -183,7 +157,7 @@ set_var_mtrr(unsigned int reg, unsigned long basek, unsigned long sizek,
 		return;
 	}
 
-	mask = (1ULL << address_bits) - 1;
+	mask = (1ULL << boot_cpu_data.x86_phys_bits) - 1;
 	mask &= ~((((u64)sizek) << 10) - 1);
 
 	base = ((u64)basek) << 10;
@@ -209,7 +183,7 @@ save_var_mtrr(unsigned int reg, unsigned long basek, unsigned long sizek,
 	range_state[reg].type = type;
 }
 
-static void __init set_var_mtrr_all(unsigned int address_bits)
+static void __init set_var_mtrr_all(void)
 {
 	unsigned long basek, sizek;
 	unsigned char type;
@@ -220,7 +194,7 @@ static void __init set_var_mtrr_all(unsigned int address_bits)
 		sizek = range_state[reg].size_pfn << (PAGE_SHIFT - 10);
 		type = range_state[reg].type;
 
-		set_var_mtrr(reg, basek, sizek, type, address_bits);
+		set_var_mtrr(reg, basek, sizek, type);
 	}
 }
 
@@ -267,7 +241,7 @@ range_to_mtrr(unsigned int reg, unsigned long range_startk,
 			align = max_align;
 
 		sizek = 1UL << align;
-		if (debug_print) {
+		if (mtrr_debug) {
 			char start_factor = 'K', size_factor = 'K';
 			unsigned long start_base, size_base;
 
@@ -296,7 +270,7 @@ range_to_mtrr_with_hole(struct var_mtrr_state *state, unsigned long basek,
 			unsigned long sizek)
 {
 	unsigned long hole_basek, hole_sizek;
-	unsigned long second_basek, second_sizek;
+	unsigned long second_sizek;
 	unsigned long range0_basek, range0_sizek;
 	unsigned long range_basek, range_sizek;
 	unsigned long chunk_sizek;
@@ -304,7 +278,6 @@ range_to_mtrr_with_hole(struct var_mtrr_state *state, unsigned long basek,
 
 	hole_basek = 0;
 	hole_sizek = 0;
-	second_basek = 0;
 	second_sizek = 0;
 	chunk_sizek = state->chunk_sizek;
 	gran_sizek = state->gran_sizek;
@@ -435,7 +408,7 @@ set_var_mtrr_range(struct var_mtrr_state *state, unsigned long base_pfn,
 	state->range_sizek  = sizek - second_sizek;
 }
 
-/* Mininum size of mtrr block that can take hole: */
+/* Minimum size of mtrr block that can take hole: */
 static u64 mtrr_chunk_size __initdata = (256ULL<<20);
 
 static int __init parse_mtrr_chunk_size_opt(char *p)
@@ -464,9 +437,10 @@ static unsigned long nr_mtrr_spare_reg __initdata =
 
 static int __init parse_mtrr_spare_reg(char *arg)
 {
-	if (arg)
-		nr_mtrr_spare_reg = simple_strtoul(arg, NULL, 0);
-	return 0;
+	if (!arg)
+		return -EINVAL;
+
+	return kstrtoul(arg, 0, &nr_mtrr_spare_reg);
 }
 early_param("mtrr_spare_reg_nr", parse_mtrr_spare_reg);
 
@@ -538,12 +512,12 @@ static void __init print_out_mtrr_range_state(void)
 		if (!size_base)
 			continue;
 
-		size_base = to_size_factor(size_base, &size_factor),
+		size_base = to_size_factor(size_base, &size_factor);
 		start_base = range_state[i].base_pfn << (PAGE_SHIFT - 10);
-		start_base = to_size_factor(start_base, &start_factor),
+		start_base = to_size_factor(start_base, &start_factor);
 		type = range_state[i].type;
 
-		pr_debug("reg %d, base: %ld%cB, range: %ld%cB, type %s\n",
+		Dprintk("reg %d, base: %ld%cB, range: %ld%cB, type %s\n",
 			i, start_base, start_factor,
 			size_base, size_factor,
 			(type == MTRR_TYPE_UNCACHABLE) ? "UC" :
@@ -681,7 +655,7 @@ static int __init mtrr_search_optimal_index(void)
 	return index_good;
 }
 
-int __init mtrr_cleanup(unsigned address_bits)
+int __init mtrr_cleanup(void)
 {
 	unsigned long x_remove_base, x_remove_size;
 	unsigned long base, size, def, dummy;
@@ -690,7 +664,10 @@ int __init mtrr_cleanup(unsigned address_bits)
 	int index_good;
 	int i;
 
-	if (!is_cpu(INTEL) || enable_mtrr_cleanup < 1)
+	if (!mtrr_enabled())
+		return 0;
+
+	if (!cpu_feature_enabled(X86_FEATURE_MTRR) || enable_mtrr_cleanup < 1)
 		return 0;
 
 	rdmsr(MSR_MTRRdefType, def, dummy);
@@ -712,7 +689,7 @@ int __init mtrr_cleanup(unsigned address_bits)
 		return 0;
 
 	/* Print original var MTRRs at first, for debugging: */
-	pr_debug("original variable MTRRs\n");
+	Dprintk("original variable MTRRs\n");
 	print_out_mtrr_range_state();
 
 	memset(range, 0, sizeof(range));
@@ -743,8 +720,8 @@ int __init mtrr_cleanup(unsigned address_bits)
 		mtrr_print_out_one_result(i);
 
 		if (!result[i].bad) {
-			set_var_mtrr_all(address_bits);
-			pr_debug("New variable MTRRs\n");
+			set_var_mtrr_all();
+			Dprintk("New variable MTRRs\n");
 			print_out_mtrr_range_state();
 			return 1;
 		}
@@ -764,7 +741,7 @@ int __init mtrr_cleanup(unsigned address_bits)
 
 			mtrr_calc_range_state(chunk_size, gran_size,
 				      x_remove_base, x_remove_size, i);
-			if (debug_print) {
+			if (mtrr_debug) {
 				mtrr_print_out_one_result(i);
 				pr_info("\n");
 			}
@@ -787,8 +764,8 @@ int __init mtrr_cleanup(unsigned address_bits)
 		gran_size = result[i].gran_sizek;
 		gran_size <<= 10;
 		x86_setup_var_mtrrs(range, nr_range, chunk_size, gran_size);
-		set_var_mtrr_all(address_bits);
-		pr_debug("New variable MTRRs\n");
+		set_var_mtrr_all();
+		Dprintk("New variable MTRRs\n");
 		print_out_mtrr_range_state();
 		return 1;
 	} else {
@@ -803,7 +780,7 @@ int __init mtrr_cleanup(unsigned address_bits)
 	return 0;
 }
 #else
-int __init mtrr_cleanup(unsigned address_bits)
+int __init mtrr_cleanup(void)
 {
 	return 0;
 }
@@ -831,12 +808,13 @@ int __init amd_special_default_mtrr(void)
 {
 	u32 l, h;
 
-	if (boot_cpu_data.x86_vendor != X86_VENDOR_AMD)
+	if (boot_cpu_data.x86_vendor != X86_VENDOR_AMD &&
+	    boot_cpu_data.x86_vendor != X86_VENDOR_HYGON)
 		return 0;
 	if (boot_cpu_data.x86 < 0xf)
 		return 0;
 	/* In case some hypervisor doesn't pass SYSCFG through: */
-	if (rdmsr_safe(MSR_K8_SYSCFG, &l, &h) < 0)
+	if (rdmsr_safe(MSR_AMD64_SYSCFG, &l, &h) < 0)
 		return 0;
 	/*
 	 * Memory between 4GB and top of mem is forced WB by this magic bit.
@@ -882,15 +860,18 @@ int __init mtrr_trim_uncached_memory(unsigned long end_pfn)
 	/* extra one for all 0 */
 	int num[MTRR_NUM_TYPES + 1];
 
+	if (!mtrr_enabled())
+		return 0;
+
 	/*
 	 * Make sure we only trim uncachable memory on machines that
 	 * support the Intel MTRR architecture:
 	 */
-	if (!is_cpu(INTEL) || disable_mtrr_trim)
+	if (!cpu_feature_enabled(X86_FEATURE_MTRR) || disable_mtrr_trim)
 		return 0;
 
 	rdmsr(MSR_MTRRdefType, def, dummy);
-	def &= 0xff;
+	def &= MTRR_DEF_TYPE_TYPE;
 	if (def != MTRR_TYPE_UNCACHABLE)
 		return 0;
 

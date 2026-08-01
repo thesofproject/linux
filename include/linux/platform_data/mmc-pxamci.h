@@ -7,6 +7,7 @@
 
 struct device;
 struct mmc_host;
+struct property_entry;
 
 struct pxamci_platform_data {
 	unsigned int ocr_mask;			/* available voltages */
@@ -15,14 +16,11 @@ struct pxamci_platform_data {
 	int (*get_ro)(struct device *);
 	int (*setpower)(struct device *, unsigned int);
 	void (*exit)(struct device *, void *);
-	int gpio_card_detect;			/* gpio detecting card insertion */
-	int gpio_card_ro;			/* gpio detecting read only toggle */
 	bool gpio_card_ro_invert;		/* gpio ro is inverted */
-	int gpio_power;				/* gpio powering up MMC bus */
-	bool gpio_power_invert;			/* gpio power is inverted */
 };
 
-extern void pxa_set_mci_info(struct pxamci_platform_data *info);
+extern void pxa_set_mci_info(const struct pxamci_platform_data *info,
+			     const struct property_entry *props);
 extern void pxa3xx_set_mci2_info(struct pxamci_platform_data *info);
 extern void pxa3xx_set_mci3_info(struct pxamci_platform_data *info);
 

@@ -1,22 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Avionic Design GmbH
  * Copyright (C) 2012-2013, NVIDIA Corporation
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <linux/debugfs.h>
+#include <linux/dma-mapping.h>
 #include <linux/host1x.h>
 #include <linux/of.h>
+#include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/of_device.h>
 
@@ -41,6 +33,7 @@ struct host1x_subdev {
 /**
  * host1x_subdev_add() - add a new subdevice with an associated device node
  * @device: host1x device to add the subdevice to
+ * @driver: host1x driver containing the subdevices
  * @np: device node
  */
 static int host1x_subdev_add(struct host1x_device *device,
@@ -48,10 +41,9 @@ static int host1x_subdev_add(struct host1x_device *device,
 			     struct device_node *np)
 {
 	struct host1x_subdev *subdev;
-	struct device_node *child;
 	int err;
 
-	subdev = kzalloc(sizeof(*subdev), GFP_KERNEL);
+	subdev = kzalloc_obj(*subdev);
 	if (!subdev)
 		return -ENOMEM;
 
@@ -63,13 +55,12 @@ static int host1x_subdev_add(struct host1x_device *device,
 	mutex_unlock(&device->subdevs_lock);
 
 	/* recursively add children */
-	for_each_child_of_node(np, child) {
+	for_each_child_of_node_scoped(np, child) {
 		if (of_match_node(driver->subdevs, child) &&
 		    of_device_is_available(child)) {
 			err = host1x_subdev_add(device, driver, child);
 			if (err < 0) {
 				/* XXX cleanup? */
-				of_node_put(child);
 				return err;
 			}
 		}
@@ -97,17 +88,14 @@ static void host1x_subdev_del(struct host1x_subdev *subdev)
 static int host1x_device_parse_dt(struct host1x_device *device,
 				  struct host1x_driver *driver)
 {
-	struct device_node *np;
 	int err;
 
-	for_each_child_of_node(device->dev.parent->of_node, np) {
+	for_each_child_of_node_scoped(device->dev.parent->of_node, np) {
 		if (of_match_node(driver->subdevs, np) &&
 		    of_device_is_available(np)) {
 			err = host1x_subdev_add(device, driver, np);
-			if (err < 0) {
-				of_node_put(np);
+			if (err < 0)
 				return err;
-			}
 		}
 	}
 
@@ -129,7 +117,7 @@ static void host1x_subdev_register(struct host1x_device *device,
 	mutex_lock(&device->clients_lock);
 	list_move_tail(&client->list, &device->clients);
 	list_move_tail(&subdev->list, &device->active);
-	client->parent = &device->dev;
+	client->host = &device->dev;
 	subdev->client = client;
 	mutex_unlock(&device->clients_lock);
 	mutex_unlock(&device->subdevs_lock);
@@ -165,7 +153,7 @@ static void __host1x_subdev_unregister(struct host1x_device *device,
 	 */
 	mutex_lock(&device->clients_lock);
 	subdev->client = NULL;
-	client->parent = NULL;
+	client->host = NULL;
 	list_move_tail(&subdev->list, &device->subdevs);
 	/*
 	 * XXX: Perhaps don't do this here, but rather explicitly remove it
@@ -205,6 +193,17 @@ int host1x_device_init(struct host1x_device *device)
 	mutex_lock(&device->clients_lock);
 
 	list_for_each_entry(client, &device->clients, list) {
+		if (client->ops && client->ops->early_init) {
+			err = client->ops->early_init(client);
+			if (err < 0) {
+				dev_err(&device->dev, "failed to early initialize %s: %d\n",
+					dev_name(client->dev), err);
+				goto teardown_late;
+			}
+		}
+	}
+
+	list_for_each_entry(client, &device->clients, list) {
 		if (client->ops && client->ops->init) {
 			err = client->ops->init(client);
 			if (err < 0) {
@@ -222,8 +221,16 @@ int host1x_device_init(struct host1x_device *device)
 
 teardown:
 	list_for_each_entry_continue_reverse(client, &device->clients, list)
-		if (client->ops->exit)
+		if (client->ops && client->ops->exit)
 			client->ops->exit(client);
+
+	/* reset client to end of list for late teardown */
+	client = list_entry(&device->clients, struct host1x_client, list);
+
+teardown_late:
+	list_for_each_entry_continue_reverse(client, &device->clients, list)
+		if (client->ops && client->ops->late_exit)
+			client->ops->late_exit(client);
 
 	mutex_unlock(&device->clients_lock);
 	return err;
@@ -252,6 +259,18 @@ int host1x_device_exit(struct host1x_device *device)
 			if (err < 0) {
 				dev_err(&device->dev,
 					"failed to cleanup %s: %d\n",
+					dev_name(client->dev), err);
+				mutex_unlock(&device->clients_lock);
+				return err;
+			}
+		}
+	}
+
+	list_for_each_entry_reverse(client, &device->clients, list) {
+		if (client->ops && client->ops->late_exit) {
+			err = client->ops->late_exit(client);
+			if (err < 0) {
+				dev_err(&device->dev, "failed to late cleanup %s: %d\n",
 					dev_name(client->dev), err);
 				mutex_unlock(&device->clients_lock);
 				return err;
@@ -309,10 +328,53 @@ static int host1x_del_client(struct host1x *host1x,
 	return -ENODEV;
 }
 
-static int host1x_device_match(struct device *dev, struct device_driver *drv)
+static int host1x_device_match(struct device *dev, const struct device_driver *drv)
 {
 	return strcmp(dev_name(dev), drv->name) == 0;
 }
+
+/*
+ * Note that this is really only needed for backwards compatibility
+ * with libdrm, which parses this information from sysfs and will
+ * fail if it can't find the OF_FULLNAME, specifically.
+ */
+static int host1x_device_uevent(const struct device *dev,
+				struct kobj_uevent_env *env)
+{
+	of_device_uevent(dev->parent, env);
+
+	return 0;
+}
+
+static int host1x_device_probe(struct device *dev)
+{
+	struct host1x_driver *driver = to_host1x_driver(dev->driver);
+	struct host1x_device *device = to_host1x_device(dev);
+
+	if (driver->probe)
+		return driver->probe(device);
+
+	return 0;
+}
+
+static void host1x_device_remove(struct device *dev)
+{
+	struct host1x_driver *driver = to_host1x_driver(dev->driver);
+	struct host1x_device *device = to_host1x_device(dev);
+
+	if (driver->remove)
+		driver->remove(device);
+}
+
+static void host1x_device_shutdown(struct device *dev)
+{
+	struct host1x_driver *driver = to_host1x_driver(dev->driver);
+	struct host1x_device *device = to_host1x_device(dev);
+
+	if (dev->driver && driver->shutdown)
+		driver->shutdown(device);
+}
+
 
 static const struct dev_pm_ops host1x_device_pm_ops = {
 	.suspend = pm_generic_suspend,
@@ -323,11 +385,14 @@ static const struct dev_pm_ops host1x_device_pm_ops = {
 	.restore = pm_generic_restore,
 };
 
-struct bus_type host1x_bus_type = {
+const struct bus_type host1x_bus_type = {
 	.name = "host1x",
 	.match = host1x_device_match,
+	.uevent = host1x_device_uevent,
+	.probe = host1x_device_probe,
+	.remove = host1x_device_remove,
+	.shutdown = host1x_device_shutdown,
 	.pm = &host1x_device_pm_ops,
-	.force_dma = true,
 };
 
 static void __host1x_device_del(struct host1x_device *device)
@@ -394,7 +459,7 @@ static int host1x_device_add(struct host1x *host1x,
 	struct host1x_device *device;
 	int err;
 
-	device = kzalloc(sizeof(*device), GFP_KERNEL);
+	device = kzalloc_obj(*device);
 	if (!device)
 		return -ENOMEM;
 
@@ -412,15 +477,15 @@ static int host1x_device_add(struct host1x *host1x,
 	device->dev.dma_mask = &device->dev.coherent_dma_mask;
 	dev_set_name(&device->dev, "%s", driver->driver.name);
 	device->dev.release = host1x_device_release;
-	device->dev.of_node = host1x->dev->of_node;
 	device->dev.bus = &host1x_bus_type;
 	device->dev.parent = host1x->dev;
 
-	of_dma_configure(&device->dev, host1x->dev->of_node);
+	device->dev.dma_parms = &device->dma_parms;
+	dma_set_max_seg_size(&device->dev, UINT_MAX);
 
 	err = host1x_device_parse_dt(device, driver);
 	if (err < 0) {
-		kfree(device);
+		put_device(&device->dev);
 		return err;
 	}
 
@@ -438,6 +503,18 @@ static int host1x_device_add(struct host1x *host1x,
 	}
 
 	mutex_unlock(&clients_lock);
+
+	/*
+	 * Add device even if there are no subdevs to ensure syncpoint functionality
+	 * is available regardless of whether any engine subdevices are present
+	 */
+	if (list_empty(&device->subdevs)) {
+		err = device_add(&device->dev);
+		if (err < 0)
+			dev_err(&device->dev, "failed to add device: %d\n", err);
+		else
+			device->registered = true;
+	}
 
 	return 0;
 }
@@ -495,6 +572,36 @@ static void host1x_detach_driver(struct host1x *host1x,
 	mutex_unlock(&host1x->devices_lock);
 }
 
+static int host1x_devices_show(struct seq_file *s, void *data)
+{
+	struct host1x *host1x = s->private;
+	struct host1x_device *device;
+
+	mutex_lock(&host1x->devices_lock);
+
+	list_for_each_entry(device, &host1x->devices, list) {
+		struct host1x_subdev *subdev;
+
+		seq_printf(s, "%s\n", dev_name(&device->dev));
+
+		mutex_lock(&device->subdevs_lock);
+
+		list_for_each_entry(subdev, &device->active, list)
+			seq_printf(s, "  %pOFf: %s\n", subdev->np,
+				   dev_name(subdev->client->dev));
+
+		list_for_each_entry(subdev, &device->subdevs, list)
+			seq_printf(s, "  %pOFf:\n", subdev->np);
+
+		mutex_unlock(&device->subdevs_lock);
+	}
+
+	mutex_unlock(&host1x->devices_lock);
+
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(host1x_devices);
+
 /**
  * host1x_register() - register a host1x controller
  * @host1x: host1x controller
@@ -517,6 +624,9 @@ int host1x_register(struct host1x *host1x)
 		host1x_attach_driver(host1x, driver);
 
 	mutex_unlock(&drivers_lock);
+
+	debugfs_create_file("devices", S_IRUGO, host1x->debugfs, host1x,
+			    &host1x_devices_fops);
 
 	return 0;
 }
@@ -544,37 +654,6 @@ int host1x_unregister(struct host1x *host1x)
 	mutex_unlock(&devices_lock);
 
 	return 0;
-}
-
-static int host1x_device_probe(struct device *dev)
-{
-	struct host1x_driver *driver = to_host1x_driver(dev->driver);
-	struct host1x_device *device = to_host1x_device(dev);
-
-	if (driver->probe)
-		return driver->probe(device);
-
-	return 0;
-}
-
-static int host1x_device_remove(struct device *dev)
-{
-	struct host1x_driver *driver = to_host1x_driver(dev->driver);
-	struct host1x_device *device = to_host1x_device(dev);
-
-	if (driver->remove)
-		return driver->remove(device);
-
-	return 0;
-}
-
-static void host1x_device_shutdown(struct device *dev)
-{
-	struct host1x_driver *driver = to_host1x_driver(dev->driver);
-	struct host1x_device *device = to_host1x_device(dev);
-
-	if (driver->shutdown)
-		driver->shutdown(device);
 }
 
 /**
@@ -607,9 +686,6 @@ int host1x_driver_register_full(struct host1x_driver *driver,
 
 	driver->driver.bus = &host1x_bus_type;
 	driver->driver.owner = owner;
-	driver->driver.probe = host1x_device_probe;
-	driver->driver.remove = host1x_device_remove;
-	driver->driver.shutdown = host1x_device_shutdown;
 
 	return driver_register(&driver->driver);
 }
@@ -624,7 +700,16 @@ EXPORT_SYMBOL(host1x_driver_register_full);
  */
 void host1x_driver_unregister(struct host1x_driver *driver)
 {
+	struct host1x *host1x;
+
 	driver_unregister(&driver->driver);
+
+	mutex_lock(&devices_lock);
+
+	list_for_each_entry(host1x, &devices, list)
+		host1x_detach_driver(host1x, driver);
+
+	mutex_unlock(&devices_lock);
 
 	mutex_lock(&drivers_lock);
 	list_del_init(&driver->list);
@@ -633,7 +718,31 @@ void host1x_driver_unregister(struct host1x_driver *driver)
 EXPORT_SYMBOL(host1x_driver_unregister);
 
 /**
- * host1x_client_register() - register a host1x client
+ * __host1x_client_init() - initialize a host1x client
+ * @client: host1x client
+ * @key: lock class key for the client-specific mutex
+ */
+void __host1x_client_init(struct host1x_client *client, struct lock_class_key *key)
+{
+	host1x_bo_cache_init(&client->cache);
+	INIT_LIST_HEAD(&client->list);
+	__mutex_init(&client->lock, "host1x client lock", key);
+	client->usecount = 0;
+}
+EXPORT_SYMBOL(__host1x_client_init);
+
+/**
+ * host1x_client_exit() - uninitialize a host1x client
+ * @client: host1x client
+ */
+void host1x_client_exit(struct host1x_client *client)
+{
+	mutex_destroy(&client->lock);
+}
+EXPORT_SYMBOL(host1x_client_exit);
+
+/**
+ * __host1x_client_register() - register a host1x client
  * @client: host1x client
  *
  * Registers a host1x client with each host1x controller instance. Note that
@@ -643,7 +752,7 @@ EXPORT_SYMBOL(host1x_driver_unregister);
  * device and call host1x_device_init(), which will in turn call each client's
  * &host1x_client_ops.init implementation.
  */
-int host1x_client_register(struct host1x_client *client)
+int __host1x_client_register(struct host1x_client *client)
 {
 	struct host1x *host1x;
 	int err;
@@ -666,7 +775,7 @@ int host1x_client_register(struct host1x_client *client)
 
 	return 0;
 }
-EXPORT_SYMBOL(host1x_client_register);
+EXPORT_SYMBOL(__host1x_client_register);
 
 /**
  * host1x_client_unregister() - unregister a host1x client
@@ -675,7 +784,7 @@ EXPORT_SYMBOL(host1x_client_register);
  * Removes a host1x client from its host1x controller instance. If a logical
  * device has already been initialized, it will be torn down.
  */
-int host1x_client_unregister(struct host1x_client *client)
+void host1x_client_unregister(struct host1x_client *client)
 {
 	struct host1x_client *c;
 	struct host1x *host1x;
@@ -687,7 +796,7 @@ int host1x_client_unregister(struct host1x_client *client)
 		err = host1x_del_client(host1x, client);
 		if (!err) {
 			mutex_unlock(&devices_lock);
-			return 0;
+			return;
 		}
 	}
 
@@ -703,6 +812,210 @@ int host1x_client_unregister(struct host1x_client *client)
 
 	mutex_unlock(&clients_lock);
 
-	return 0;
+	host1x_bo_cache_destroy(&client->cache);
 }
 EXPORT_SYMBOL(host1x_client_unregister);
+
+int host1x_client_suspend(struct host1x_client *client)
+{
+	int err = 0;
+
+	mutex_lock(&client->lock);
+
+	if (client->usecount == 1) {
+		if (client->ops && client->ops->suspend) {
+			err = client->ops->suspend(client);
+			if (err < 0)
+				goto unlock;
+		}
+	}
+
+	client->usecount--;
+	dev_dbg(client->dev, "use count: %u\n", client->usecount);
+
+	if (client->parent) {
+		err = host1x_client_suspend(client->parent);
+		if (err < 0)
+			goto resume;
+	}
+
+	goto unlock;
+
+resume:
+	if (client->usecount == 0)
+		if (client->ops && client->ops->resume)
+			client->ops->resume(client);
+
+	client->usecount++;
+unlock:
+	mutex_unlock(&client->lock);
+	return err;
+}
+EXPORT_SYMBOL(host1x_client_suspend);
+
+int host1x_client_resume(struct host1x_client *client)
+{
+	int err = 0;
+
+	mutex_lock(&client->lock);
+
+	if (client->parent) {
+		err = host1x_client_resume(client->parent);
+		if (err < 0)
+			goto unlock;
+	}
+
+	if (client->usecount == 0) {
+		if (client->ops && client->ops->resume) {
+			err = client->ops->resume(client);
+			if (err < 0)
+				goto suspend;
+		}
+	}
+
+	client->usecount++;
+	dev_dbg(client->dev, "use count: %u\n", client->usecount);
+
+	goto unlock;
+
+suspend:
+	if (client->parent)
+		host1x_client_suspend(client->parent);
+unlock:
+	mutex_unlock(&client->lock);
+	return err;
+}
+EXPORT_SYMBOL(host1x_client_resume);
+
+/**
+ * host1x_bo_pin() - Create a DMA mapping for the buffer object
+ * @dev: Device onto which DMA map to
+ * @bo: Buffer object to map
+ * @dir: DMA direction
+ * @cache: Cache in which to store mapping, or NULL
+ *
+ * Creates a DMA mapping pointing to @bo for @dev. The refcount of @bo is incremented
+ * until host1x_bo_unpin is called.
+ *
+ * If @cache is specified, the mapping is also stored in the cache and not released
+ * until @bo is freed (refcount drops to zero). This improves performance when a buffer
+ * is pinned and unpinned frequently as in the case of display use.
+ */
+struct host1x_bo_mapping *host1x_bo_pin(struct device *dev, struct host1x_bo *bo,
+					enum dma_data_direction dir,
+					struct host1x_bo_cache *cache)
+{
+	struct host1x_bo_mapping *mapping;
+
+	if (cache) {
+		mutex_lock(&cache->lock);
+
+		list_for_each_entry(mapping, &cache->mappings, entry) {
+			if (mapping->bo == bo && mapping->direction == dir) {
+				kref_get(&mapping->ref);
+				host1x_bo_get(bo);
+				goto unlock;
+			}
+		}
+	}
+
+	mapping = bo->ops->pin(dev, bo, dir);
+	if (IS_ERR(mapping))
+		goto unlock;
+
+	host1x_bo_get(bo);
+
+	spin_lock(&mapping->bo->lock);
+	list_add_tail(&mapping->list, &bo->mappings);
+	spin_unlock(&mapping->bo->lock);
+
+	if (cache) {
+		INIT_LIST_HEAD(&mapping->entry);
+		mapping->cache = cache;
+
+		list_add_tail(&mapping->entry, &cache->mappings);
+
+		/*
+		 * Bump the mapping reference count to track the mapping in the cache,
+		 * but do not bump the BO's refcount. This allows the BO to still get freed,
+		 * triggering the release of the cache mapping through
+		 * host1x_bo_clear_cached_mappings.
+		 */
+		kref_get(&mapping->ref);
+	}
+
+unlock:
+	if (cache)
+		mutex_unlock(&cache->lock);
+
+	return mapping;
+}
+EXPORT_SYMBOL(host1x_bo_pin);
+
+static void __host1x_bo_unpin(struct kref *ref)
+{
+	struct host1x_bo_mapping *mapping = to_host1x_bo_mapping(ref);
+
+	/*
+	 * When the last reference of the mapping goes away, make sure to remove the mapping from
+	 * the cache.
+	 */
+	if (mapping->cache)
+		list_del(&mapping->entry);
+
+	spin_lock(&mapping->bo->lock);
+	list_del(&mapping->list);
+	spin_unlock(&mapping->bo->lock);
+
+	mapping->bo->ops->unpin(mapping);
+}
+
+/**
+ * host1x_bo_unpin() - Release an established DMA mapping of a buffer object
+ * @mapping: Mapping to release
+ *
+ * Unmaps the given @mapping, unless it is cached. Decreases the refcount on
+ * the underlying buffer object.
+ */
+void host1x_bo_unpin(struct host1x_bo_mapping *mapping)
+{
+	struct host1x_bo_cache *cache = mapping->cache;
+	struct host1x_bo *bo = mapping->bo;
+
+	if (cache)
+		mutex_lock(&cache->lock);
+
+	kref_put(&mapping->ref, __host1x_bo_unpin);
+
+	if (cache)
+		mutex_unlock(&cache->lock);
+
+	host1x_bo_put(bo);
+}
+EXPORT_SYMBOL(host1x_bo_unpin);
+
+/**
+ * host1x_bo_clear_cached_mappings() - Remove all cached mappings pointing at a bo
+ * @bo: Buffer object to release mappings of
+ *
+ * Drops references to any mappings pointing to @bo left in any caches. This must
+ * be called by any host1x_bo implementers that may be pinned with caching enabled
+ * before freeing the bo.
+ */
+void host1x_bo_clear_cached_mappings(struct host1x_bo *bo)
+{
+	struct host1x_bo_mapping *mapping, *tmp;
+	struct host1x_bo_cache *cache;
+
+	list_for_each_entry_safe(mapping, tmp, &bo->mappings, list) {
+		cache = mapping->cache;
+		if (WARN_ON(!cache))
+			continue;
+
+		mutex_lock(&cache->lock);
+		WARN_ON(kref_read(&mapping->ref) != 1);
+		__host1x_bo_unpin(&mapping->ref);
+		mutex_unlock(&cache->lock);
+	}
+}
+EXPORT_SYMBOL(host1x_bo_clear_cached_mappings);

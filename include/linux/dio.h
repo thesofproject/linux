@@ -68,7 +68,7 @@ struct dio_bus {
 };
 
 extern struct dio_bus dio_bus;      /* Single DIO bus */
-extern struct bus_type dio_bus_type;
+extern const struct bus_type dio_bus_type;
 
     /*
      *  DIO device IDs
@@ -93,7 +93,7 @@ struct dio_driver {
 	struct device_driver driver;
 };
 
-#define to_dio_driver(drv)    container_of(drv, struct dio_driver, driver)
+#define to_dio_driver(drv)    container_of_const(drv, struct dio_driver, driver)
 
 /* DIO/DIO-II boards all have the following 8bit registers.
  * These are offsets from the base of the device.
@@ -112,9 +112,7 @@ struct dio_driver {
 #define DIOII_END               0x20000000      /* end of DIO-II space */
 #define DIOII_DEVSIZE           0x00400000      /* size of a DIO-II device */
 
-/* Highest valid select code. If we add DIO-II support this should become
- * 256 for everything except HP320, which only has DIO.
- */
+/* highest valid select code */
 #define DIO_SCMAX (hp300_model == HP_320 ? 32 : 256)
 #define DIOII_SCBASE 132 /* lowest DIO-II select code */
 #define DIO_SCINHOLE(scode) (((scode) >= 32) && ((scode) < DIOII_SCBASE))
@@ -247,11 +245,6 @@ extern int dio_create_sysfs_dev_files(struct dio_dev *);
 /* New-style probing */
 extern int dio_register_driver(struct dio_driver *);
 extern void dio_unregister_driver(struct dio_driver *);
-extern const struct dio_device_id *dio_match_device(const struct dio_device_id *ids, const struct dio_dev *z);
-static inline struct dio_driver *dio_dev_driver(const struct dio_dev *d)
-{
-    return d->driver;
-}
 
 #define dio_resource_start(d) ((d)->resource.start)
 #define dio_resource_end(d)   ((d)->resource.end)

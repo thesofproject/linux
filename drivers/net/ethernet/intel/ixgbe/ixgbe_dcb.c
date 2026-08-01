@@ -1,31 +1,5 @@
-/*******************************************************************************
-
-  Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2016 Intel Corporation.
-
-  This program is free software; you can redistribute it and/or modify it
-  under the terms and conditions of the GNU General Public License,
-  version 2, as published by the Free Software Foundation.
-
-  This program is distributed in the hope it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, write to the Free Software Foundation, Inc.,
-  51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
-
-  The full GNU General Public License is included in this distribution in
-  the file called "COPYING".
-
-  Contact Information:
-  Linux NICS <linux.nics@intel.com>
-  e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
-  Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
-
-*******************************************************************************/
-
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 1999 - 2018 Intel Corporation. */
 
 #include "ixgbe.h"
 #include "ixgbe_type.h"
@@ -44,7 +18,7 @@
  * @max: max credits by traffic class
  * @max_frame: maximum frame size
  */
-static s32 ixgbe_ieee_credits(__u8 *bw, __u16 *refill,
+static int ixgbe_ieee_credits(__u8 *bw, __u16 *refill,
 			      __u16 *max, int max_frame)
 {
 	int min_percent = 100;
@@ -85,7 +59,7 @@ static s32 ixgbe_ieee_credits(__u8 *bw, __u16 *refill,
  * It should be called only after the rules are checked by
  * ixgbe_dcb_check_config().
  */
-s32 ixgbe_dcb_calculate_tc_credits(struct ixgbe_hw *hw,
+int ixgbe_dcb_calculate_tc_credits(struct ixgbe_hw *hw,
 				   struct ixgbe_dcb_config *dcb_config,
 				   int max_frame, u8 direction)
 {
@@ -273,7 +247,7 @@ void ixgbe_dcb_unpack_map(struct ixgbe_dcb_config *cfg, int direction, u8 *map)
  *
  * Configure dcb settings and enable dcb mode.
  */
-s32 ixgbe_dcb_hw_config(struct ixgbe_hw *hw,
+int ixgbe_dcb_hw_config(struct ixgbe_hw *hw,
 			struct ixgbe_dcb_config *dcb_config)
 {
 	u8 pfc_en;
@@ -309,7 +283,7 @@ s32 ixgbe_dcb_hw_config(struct ixgbe_hw *hw,
 }
 
 /* Helper routines to abstract HW specifics from DCB netlink ops */
-s32 ixgbe_dcb_hw_pfc_config(struct ixgbe_hw *hw, u8 pfc_en, u8 *prio_tc)
+int ixgbe_dcb_hw_pfc_config(struct ixgbe_hw *hw, u8 pfc_en, u8 *prio_tc)
 {
 	switch (hw->mac.type) {
 	case ixgbe_mac_82598EB:
@@ -326,7 +300,7 @@ s32 ixgbe_dcb_hw_pfc_config(struct ixgbe_hw *hw, u8 pfc_en, u8 *prio_tc)
 	return -EINVAL;
 }
 
-s32 ixgbe_dcb_hw_ets(struct ixgbe_hw *hw, struct ieee_ets *ets, int max_frame)
+int ixgbe_dcb_hw_ets(struct ixgbe_hw *hw, struct ieee_ets *ets, int max_frame)
 {
 	__u16 refill[IEEE_8021QAZ_MAX_TCS], max[IEEE_8021QAZ_MAX_TCS];
 	__u8 prio_type[IEEE_8021QAZ_MAX_TCS];
@@ -359,7 +333,7 @@ s32 ixgbe_dcb_hw_ets(struct ixgbe_hw *hw, struct ieee_ets *ets, int max_frame)
 				       bwg_id, prio_type, ets->prio_tc);
 }
 
-s32 ixgbe_dcb_hw_ets_config(struct ixgbe_hw *hw,
+int ixgbe_dcb_hw_ets_config(struct ixgbe_hw *hw,
 			    u16 *refill, u16 *max, u8 *bwg_id,
 			    u8 *prio_type, u8 *prio_tc)
 {

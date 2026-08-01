@@ -295,7 +295,7 @@ int clk_enable(struct clk *clk)
 	int ret;
 
 	if (!clk)
-		return -EINVAL;
+		return 0;
 
 	spin_lock_irqsave(&clock_lock, flags);
 	ret = __clk_enable(clk);
@@ -368,7 +368,7 @@ static int clk_establish_mapping(struct clk *clk)
 	if (!mapping->base && mapping->phys) {
 		kref_init(&mapping->ref);
 
-		mapping->base = ioremap_nocache(mapping->phys, mapping->len);
+		mapping->base = ioremap(mapping->phys, mapping->len);
 		if (unlikely(!mapping->base))
 			return -ENXIO;
 	} else if (mapping->base) {
@@ -569,7 +569,7 @@ long clk_round_rate(struct clk *clk, unsigned long rate)
 EXPORT_SYMBOL_GPL(clk_round_rate);
 
 #ifdef CONFIG_PM
-static void clks_core_resume(void)
+static void clks_core_resume(void *data)
 {
 	struct clk *clkp;
 
@@ -588,13 +588,17 @@ static void clks_core_resume(void)
 	}
 }
 
-static struct syscore_ops clks_syscore_ops = {
+static const struct syscore_ops clks_syscore_ops = {
 	.resume = clks_core_resume,
+};
+
+static struct syscore clks_syscore = {
+	.ops = &clks_syscore_ops,
 };
 
 static int __init clk_syscore_init(void)
 {
-	register_syscore_ops(&clks_syscore_ops);
+	register_syscore(&clks_syscore);
 
 	return 0;
 }

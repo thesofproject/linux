@@ -310,9 +310,9 @@ static int ux500_dma_controller_start(struct ux500_dma_controller *controller)
 			dma_channel->max_len = SZ_16M;
 
 			ux500_channel->dma_chan =
-				dma_request_slave_channel(dev, chan_names[ch_num]);
+				dma_request_chan(dev, chan_names[ch_num]);
 
-			if (!ux500_channel->dma_chan)
+			if (IS_ERR(ux500_channel->dma_chan))
 				ux500_channel->dma_chan =
 					dma_request_channel(mask,
 							    data ?
@@ -362,7 +362,7 @@ ux500_dma_controller_create(struct musb *musb, void __iomem *base)
 	struct resource	*iomem;
 	int ret;
 
-	controller = kzalloc(sizeof(*controller), GFP_KERNEL);
+	controller = kzalloc_obj(*controller);
 	if (!controller)
 		goto kzalloc_fail;
 

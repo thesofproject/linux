@@ -1,12 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2002 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
- * Licensed under the GPL
  */
 
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <errno.h>
 #include <sched.h>
+#include <pthread.h>
 #include <linux/limits.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -45,7 +47,7 @@ int run_helper(void (*pre_exec)(void *), void *pre_data, char **argv)
 	unsigned long stack, sp;
 	int pid, fds[2], ret, n;
 
-	stack = alloc_stack(0, __cant_sleep());
+	stack = alloc_stack(0, __uml_cant_sleep());
 	if (stack == 0)
 		return -ENOMEM;
 
@@ -64,12 +66,12 @@ int run_helper(void (*pre_exec)(void *), void *pre_data, char **argv)
 		goto out_close;
 	}
 
-	sp = stack + UM_KERN_PAGE_SIZE - sizeof(void *);
+	sp = stack + UM_KERN_PAGE_SIZE;
 	data.pre_exec = pre_exec;
 	data.pre_data = pre_data;
 	data.argv = argv;
 	data.fd = fds[1];
-	data.buf = __cant_sleep() ? uml_kmalloc(PATH_MAX, UM_GFP_ATOMIC) :
+	data.buf = __uml_cant_sleep() ? uml_kmalloc(PATH_MAX, UM_GFP_ATOMIC) :
 					uml_kmalloc(PATH_MAX, UM_GFP_KERNEL);
 	pid = clone(helper_child, (void *) sp, CLONE_VM, &data);
 	if (pid < 0) {
@@ -99,6 +101,10 @@ int run_helper(void (*pre_exec)(void *), void *pre_data, char **argv)
 		CATCH_EINTR(waitpid(pid, NULL, __WALL));
 	}
 
+	if (ret < 0)
+		printk(UM_KERN_ERR "run_helper : failed to exec %s on host: %s\n",
+		       argv[0], strerror(-ret));
+
 out_free2:
 	kfree(data.buf);
 out_close:
@@ -116,11 +122,15 @@ int run_helper_thread(int (*proc)(void *), void *arg, unsigned int flags,
 	unsigned long stack, sp;
 	int pid, status, err;
 
-	stack = alloc_stack(0, __cant_sleep());
+	/* To share memory space, use os_run_helper_thread() instead. */
+	if (flags & CLONE_VM)
+		return -EINVAL;
+
+	stack = alloc_stack(0, __uml_cant_sleep());
 	if (stack == 0)
 		return -ENOMEM;
 
-	sp = stack + UM_KERN_PAGE_SIZE - sizeof(void *);
+	sp = stack + UM_KERN_PAGE_SIZE;
 	pid = clone(proc, (void *) sp, flags, arg);
 	if (pid < 0) {
 		err = -errno;
@@ -161,4 +171,66 @@ int helper_wait(int pid)
 		return -ECHILD;
 	} else
 		return 0;
+}
+
+struct os_helper_thread {
+	pthread_t handle;
+};
+
+int os_run_helper_thread(struct os_helper_thread **td_out,
+			 void *(*routine)(void *), void *arg)
+{
+	struct os_helper_thread *td;
+	sigset_t sigset, oset;
+	int err, flags;
+
+	flags = __uml_cant_sleep() ? UM_GFP_ATOMIC : UM_GFP_KERNEL;
+	td = uml_kmalloc(sizeof(*td), flags);
+	if (!td)
+		return -ENOMEM;
+
+	sigfillset(&sigset);
+	if (sigprocmask(SIG_SETMASK, &sigset, &oset) < 0) {
+		err = -errno;
+		kfree(td);
+		return err;
+	}
+
+	err = pthread_create(&td->handle, NULL, routine, arg);
+
+	if (sigprocmask(SIG_SETMASK, &oset, NULL) < 0)
+		panic("Failed to restore the signal mask: %d", errno);
+
+	if (err != 0)
+		kfree(td);
+	else
+		*td_out = td;
+
+	return -err;
+}
+
+void os_kill_helper_thread(struct os_helper_thread *td)
+{
+	pthread_cancel(td->handle);
+	pthread_join(td->handle, NULL);
+	kfree(td);
+}
+
+void os_fix_helper_thread_signals(void)
+{
+	sigset_t sigset;
+
+	sigemptyset(&sigset);
+
+	sigaddset(&sigset, SIGWINCH);
+	sigaddset(&sigset, SIGPIPE);
+	sigaddset(&sigset, SIGPROF);
+	sigaddset(&sigset, SIGINT);
+	sigaddset(&sigset, SIGTERM);
+	sigaddset(&sigset, SIGCHLD);
+	sigaddset(&sigset, SIGALRM);
+	sigaddset(&sigset, SIGIO);
+	sigaddset(&sigset, SIGUSR1);
+
+	pthread_sigmask(SIG_SETMASK, &sigset, NULL);
 }

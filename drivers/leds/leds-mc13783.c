@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * LEDs driver for Freescale MC13783/MC13892/MC34708
  *
@@ -9,12 +10,9 @@
  *
  * Copyright (C) 2006-2008 Marvell International Ltd.
  *      Eric Miao <eric.miao@marvell.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
+#include <linux/cleanup.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
@@ -116,7 +114,7 @@ static struct mc13xxx_leds_platform_data __init *mc13xxx_led_probe_dt(
 {
 	struct mc13xxx_leds *leds = platform_get_drvdata(pdev);
 	struct mc13xxx_leds_platform_data *pdata;
-	struct device_node *parent, *child;
+	struct device_node *child;
 	struct device *dev = &pdev->dev;
 	int i = 0, ret = -ENODATA;
 
@@ -124,26 +122,25 @@ static struct mc13xxx_leds_platform_data __init *mc13xxx_led_probe_dt(
 	if (!pdata)
 		return ERR_PTR(-ENOMEM);
 
-	parent = of_get_child_by_name(dev->parent->of_node, "leds");
+	struct device_node *parent __free(device_node) =
+		of_get_child_by_name(dev_of_node(dev->parent), "leds");
 	if (!parent)
-		goto out_node_put;
+		return ERR_PTR(-ENODATA);
 
 	ret = of_property_read_u32_array(parent, "led-control",
 					 pdata->led_control,
 					 leds->devtype->num_regs);
 	if (ret)
-		goto out_node_put;
+		return ERR_PTR(ret);
 
-	pdata->num_leds = of_get_child_count(parent);
+	pdata->num_leds = of_get_available_child_count(parent);
 
-	pdata->led = devm_kzalloc(dev, pdata->num_leds * sizeof(*pdata->led),
+	pdata->led = devm_kcalloc(dev, pdata->num_leds, sizeof(*pdata->led),
 				  GFP_KERNEL);
-	if (!pdata->led) {
-		ret = -ENOMEM;
-		goto out_node_put;
-	}
+	if (!pdata->led)
+		return ERR_PTR(-ENOMEM);
 
-	for_each_child_of_node(parent, child) {
+	for_each_available_child_of_node(parent, child) {
 		const char *str;
 		u32 tmp;
 
@@ -161,12 +158,10 @@ static struct mc13xxx_leds_platform_data __init *mc13xxx_led_probe_dt(
 	}
 
 	pdata->num_leds = i;
-	ret = i > 0 ? 0 : -ENODATA;
+	if (i <= 0)
+		return ERR_PTR(-ENODATA);
 
-out_node_put:
-	of_node_put(parent);
-
-	return ret ? ERR_PTR(ret) : pdata;
+	return pdata;
 }
 #else
 static inline struct mc13xxx_leds_platform_data __init *mc13xxx_led_probe_dt(
@@ -195,7 +190,7 @@ static int __init mc13xxx_led_probe(struct platform_device *pdev)
 	leds->master = mcdev;
 	platform_set_drvdata(pdev, leds);
 
-	if (dev->parent->of_node) {
+	if (dev_of_node(dev->parent)) {
 		pdata = mc13xxx_led_probe_dt(pdev);
 		if (IS_ERR(pdata))
 			return PTR_ERR(pdata);
@@ -210,7 +205,7 @@ static int __init mc13xxx_led_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	leds->led = devm_kzalloc(dev, leds->num_leds * sizeof(*leds->led),
+	leds->led = devm_kcalloc(dev, leds->num_leds, sizeof(*leds->led),
 				 GFP_KERNEL);
 	if (!leds->led)
 		return -ENOMEM;
@@ -264,15 +259,13 @@ static int __init mc13xxx_led_probe(struct platform_device *pdev)
 	return ret;
 }
 
-static int mc13xxx_led_remove(struct platform_device *pdev)
+static void mc13xxx_led_remove(struct platform_device *pdev)
 {
 	struct mc13xxx_leds *leds = platform_get_drvdata(pdev);
 	int i;
 
 	for (i = 0; i < leds->num_leds; i++)
 		led_classdev_unregister(&leds->led[i].cdev);
-
-	return 0;
 }
 
 static const struct mc13xxx_led_devtype mc13783_led_devtype = {

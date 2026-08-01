@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0+
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * Helpers for controlling modem lines via GPIO
  *
@@ -59,7 +59,7 @@ struct gpio_desc *mctrl_gpio_to_gpiod(struct mctrl_gpios *gpios,
 /*
  * Request and set direction of modem control line GPIOs and set up irq
  * handling.
- * devm_* functions are used, so there's no need to call mctrl_gpio_free().
+ * devm_* functions are used, so there's no need to explicitly free.
  * Returns a pointer to the allocated mctrl structure if ok, -ENOMEM on
  * allocation error.
  */
@@ -67,7 +67,7 @@ struct mctrl_gpios *mctrl_gpio_init(struct uart_port *port, unsigned int idx);
 
 /*
  * Request and set direction of modem control line GPIOs.
- * devm_* functions are used, so there's no need to call mctrl_gpio_free().
+ * devm_* functions are used, so there's no need to explicitly free.
  * Returns a pointer to the allocated mctrl structure if ok, -ENOMEM on
  * allocation error.
  */
@@ -75,21 +75,31 @@ struct mctrl_gpios *mctrl_gpio_init_noauto(struct device *dev,
 					   unsigned int idx);
 
 /*
- * Free the mctrl_gpios structure.
- * Normally, this function will not be called, as the GPIOs will
- * be disposed of by the resource management code.
- */
-void mctrl_gpio_free(struct device *dev, struct mctrl_gpios *gpios);
-
-/*
  * Enable gpio interrupts to report status line changes.
  */
 void mctrl_gpio_enable_ms(struct mctrl_gpios *gpios);
 
 /*
- * Disable gpio interrupts to report status line changes.
+ * Disable gpio interrupts to report status line changes, and block until
+ * any corresponding IRQ is processed
  */
-void mctrl_gpio_disable_ms(struct mctrl_gpios *gpios);
+void mctrl_gpio_disable_ms_sync(struct mctrl_gpios *gpios);
+
+/*
+ * Disable gpio interrupts to report status line changes, and return
+ * immediately
+ */
+void mctrl_gpio_disable_ms_no_sync(struct mctrl_gpios *gpios);
+
+/*
+ * Enable gpio wakeup interrupts to enable wake up source.
+ */
+void mctrl_gpio_enable_irq_wake(struct mctrl_gpios *gpios);
+
+/*
+ * Disable gpio wakeup interrupts to enable wake up source.
+ */
+void mctrl_gpio_disable_irq_wake(struct mctrl_gpios *gpios);
 
 #else /* GPIOLIB */
 
@@ -114,31 +124,38 @@ static inline
 struct gpio_desc *mctrl_gpio_to_gpiod(struct mctrl_gpios *gpios,
 				      enum mctrl_gpio_idx gidx)
 {
-	return ERR_PTR(-ENOSYS);
+	return NULL;
 }
 
 static inline
 struct mctrl_gpios *mctrl_gpio_init(struct uart_port *port, unsigned int idx)
 {
-	return ERR_PTR(-ENOSYS);
+	return NULL;
 }
 
 static inline
 struct mctrl_gpios *mctrl_gpio_init_noauto(struct device *dev, unsigned int idx)
 {
-	return ERR_PTR(-ENOSYS);
-}
-
-static inline
-void mctrl_gpio_free(struct device *dev, struct mctrl_gpios *gpios)
-{
+	return NULL;
 }
 
 static inline void mctrl_gpio_enable_ms(struct mctrl_gpios *gpios)
 {
 }
 
-static inline void mctrl_gpio_disable_ms(struct mctrl_gpios *gpios)
+static inline void mctrl_gpio_disable_ms_sync(struct mctrl_gpios *gpios)
+{
+}
+
+static inline void mctrl_gpio_disable_ms_no_sync(struct mctrl_gpios *gpios)
+{
+}
+
+static inline void mctrl_gpio_enable_irq_wake(struct mctrl_gpios *gpios)
+{
+}
+
+static inline void mctrl_gpio_disable_irq_wake(struct mctrl_gpios *gpios)
 {
 }
 

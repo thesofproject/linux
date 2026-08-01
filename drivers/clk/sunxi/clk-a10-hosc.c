@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2013 Emilio López
  *
  * Emilio López <emilio@elopez.com.ar>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk-provider.h>
@@ -35,10 +26,10 @@ static void __init sun4i_osc_clk_setup(struct device_node *node)
 		return;
 
 	/* allocate fixed-rate and gate clock structs */
-	fixed = kzalloc(sizeof(struct clk_fixed_rate), GFP_KERNEL);
+	fixed = kzalloc_obj(struct clk_fixed_rate);
 	if (!fixed)
 		return;
-	gate = kzalloc(sizeof(struct clk_gate), GFP_KERNEL);
+	gate = kzalloc_obj(struct clk_gate);
 	if (!gate)
 		goto err_free_fixed;
 

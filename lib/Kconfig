@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Library configuration
 #
@@ -7,11 +8,42 @@ config BINARY_PRINTF
 
 menu "Library routines"
 
-config RAID6_PQ
+config LINEAR_RANGES
 	tristate
+
+config PACKING
+	bool "Generic bitfield packing and unpacking"
+	select BITREVERSE
+	default n
+	help
+	  This option provides the packing() helper function, which permits
+	  converting bitfields between a CPU-usable representation and a
+	  memory representation that can have any combination of these quirks:
+	    - Is little endian (bytes are reversed within a 32-bit group)
+	    - The least-significant 32-bit word comes first (within a 64-bit
+	      group)
+	    - The most significant bit of a byte is at its right (bit 0 of a
+	      register description is numerically 2^7).
+	  Drivers may use these helpers to match the bit indices as described
+	  in the data sheets of the peripherals they are in control of.
+
+	  When in doubt, say N.
+
+config PACKING_KUNIT_TEST
+	tristate "KUnit tests for packing library" if !KUNIT_ALL_TESTS
+	depends on PACKING && KUNIT
+	default KUNIT_ALL_TESTS
+	help
+	  This builds KUnit tests for the packing library.
+
+	  For more information on KUnit and unit tests in general,
+	  please refer to the KUnit documentation in Documentation/dev-tools/kunit/.
+
+	  When in doubt, say N.
 
 config BITREVERSE
 	tristate
+	select GENERIC_BITREVERSE if !HAVE_ARCH_BITREVERSE
 
 config HAVE_ARCH_BITREVERSE
 	bool
@@ -21,25 +53,35 @@ config HAVE_ARCH_BITREVERSE
 	  This option enables the use of hardware bit-reversal instructions on
 	  architectures which support such operations.
 
-config RATIONAL
+config GENERIC_BITREVERSE
+	tristate
+	depends on BITREVERSE
+	help
+	  Generic bit reversal implementation. Drivers should never enable
+	  it explicitly. Instead, enable BITREVERSE.
+
+	  Architectures may want to select it as a fall-back option for
+	  HAVE_ARCH_BITREVERSE, when the hardware-accelerated bit reverse
+	  instruction set is optional, like RISC-V ZBKB extension.
+
+config ARCH_HAS_STRNCPY_FROM_USER
+	bool
+
+config ARCH_HAS_STRNLEN_USER
 	bool
 
 config GENERIC_STRNCPY_FROM_USER
-	bool
+	def_bool !ARCH_HAS_STRNCPY_FROM_USER
 
 config GENERIC_STRNLEN_USER
-	bool
+	def_bool !ARCH_HAS_STRNLEN_USER
 
 config GENERIC_NET_UTILS
 	bool
 
-config GENERIC_FIND_FIRST_BIT
-	bool
+source "lib/math/Kconfig"
 
 config NO_GENERIC_PCI_IOPORT_MAP
-	bool
-
-config GENERIC_PCI_IOMAP
 	bool
 
 config GENERIC_IOMAP
@@ -55,9 +97,13 @@ config ARCH_USE_CMPXCHG_LOCKREF
 config ARCH_HAS_FAST_MULTIPLIER
 	bool
 
+config ARCH_USE_SYM_ANNOTATIONS
+	bool
+
 config INDIRECT_PIO
 	bool "Access I/O in non-MMIO mode"
 	depends on ARM64
+	depends on HAS_IOPORT
 	help
 	  On some platforms where no separate I/O space exists, there are I/O
 	  hosts which can not be accessed in MMIO mode. Using the logical PIO
@@ -71,138 +117,30 @@ config INDIRECT_PIO
 
 	  When in doubt, say N.
 
-config CRC_CCITT
-	tristate "CRC-CCITT functions"
+config INDIRECT_IOMEM
+	bool
 	help
-	  This option is provided for the case where no in-kernel-tree
-	  modules require CRC-CCITT functions, but a module built outside
-	  the kernel tree does. Such modules that use library CRC-CCITT
-	  functions require M here.
+	  This is selected by other options/architectures to provide the
+	  emulated iomem accessors.
 
-config CRC16
-	tristate "CRC16 functions"
+config INDIRECT_IOMEM_FALLBACK
+	bool
+	depends on INDIRECT_IOMEM
 	help
-	  This option is provided for the case where no in-kernel-tree
-	  modules require CRC16 functions, but a module built outside
-	  the kernel tree does. Such modules that use library CRC16
-	  functions require M here.
+	  If INDIRECT_IOMEM is selected, this enables falling back to plain
+	  mmio accesses when the IO memory address is not a registered
+	  emulated region.
 
-config CRC_T10DIF
-	tristate "CRC calculation for the T10 Data Integrity Field"
-	select CRYPTO
-	select CRYPTO_CRCT10DIF
+config TRACE_MMIO_ACCESS
+	bool "Register read/write tracing"
+	depends on TRACING && ARCH_HAVE_TRACE_MMIO_ACCESS
 	help
-	  This option is only needed if a module that's not in the
-	  kernel tree needs to calculate CRC checks for use with the
-	  SCSI data integrity subsystem.
+	  Create tracepoints for MMIO read/write operations. These trace events
+	  can be used for logging all MMIO read/write operations.
 
-config CRC_ITU_T
-	tristate "CRC ITU-T V.41 functions"
-	help
-	  This option is provided for the case where no in-kernel-tree
-	  modules require CRC ITU-T V.41 functions, but a module built outside
-	  the kernel tree does. Such modules that use library CRC ITU-T V.41
-	  functions require M here.
-
-config CRC32
-	tristate "CRC32/CRC32c functions"
-	default y
-	select BITREVERSE
-	help
-	  This option is provided for the case where no in-kernel-tree
-	  modules require CRC32/CRC32c functions, but a module built outside
-	  the kernel tree does. Such modules that use library CRC32/CRC32c
-	  functions require M here.
-
-config CRC32_SELFTEST
-	tristate "CRC32 perform self test on init"
-	depends on CRC32
-	help
-	  This option enables the CRC32 library functions to perform a
-	  self test on initialization. The self test computes crc32_le
-	  and crc32_be over byte strings with random alignment and length
-	  and computes the total elapsed time and number of bytes processed.
-
-choice
-	prompt "CRC32 implementation"
-	depends on CRC32
-	default CRC32_SLICEBY8
-	help
-	  This option allows a kernel builder to override the default choice
-	  of CRC32 algorithm.  Choose the default ("slice by 8") unless you
-	  know that you need one of the others.
-
-config CRC32_SLICEBY8
-	bool "Slice by 8 bytes"
-	help
-	  Calculate checksum 8 bytes at a time with a clever slicing algorithm.
-	  This is the fastest algorithm, but comes with a 8KiB lookup table.
-	  Most modern processors have enough cache to hold this table without
-	  thrashing the cache.
-
-	  This is the default implementation choice.  Choose this one unless
-	  you have a good reason not to.
-
-config CRC32_SLICEBY4
-	bool "Slice by 4 bytes"
-	help
-	  Calculate checksum 4 bytes at a time with a clever slicing algorithm.
-	  This is a bit slower than slice by 8, but has a smaller 4KiB lookup
-	  table.
-
-	  Only choose this option if you know what you are doing.
-
-config CRC32_SARWATE
-	bool "Sarwate's Algorithm (one byte at a time)"
-	help
-	  Calculate checksum a byte at a time using Sarwate's algorithm.  This
-	  is not particularly fast, but has a small 256 byte lookup table.
-
-	  Only choose this option if you know what you are doing.
-
-config CRC32_BIT
-	bool "Classic Algorithm (one bit at a time)"
-	help
-	  Calculate checksum one bit at a time.  This is VERY slow, but has
-	  no lookup table.  This is provided as a debugging option.
-
-	  Only choose this option if you are debugging crc32.
-
-endchoice
-
-config CRC4
-	tristate "CRC4 functions"
-	help
-	  This option is provided for the case where no in-kernel-tree
-	  modules require CRC4 functions, but a module built outside
-	  the kernel tree does. Such modules that use library CRC4
-	  functions require M here.
-
-config CRC7
-	tristate "CRC7 functions"
-	help
-	  This option is provided for the case where no in-kernel-tree
-	  modules require CRC7 functions, but a module built outside
-	  the kernel tree does. Such modules that use library CRC7
-	  functions require M here.
-
-config LIBCRC32C
-	tristate "CRC32c (Castagnoli, et al) Cyclic Redundancy-Check"
-	select CRYPTO
-	select CRYPTO_CRC32C
-	help
-	  This option is provided for the case where no in-kernel-tree
-	  modules require CRC32c functions, but a module built outside the
-	  kernel tree does. Such modules that use library CRC32c functions
-	  require M here.  See Castagnoli93.
-	  Module will be libcrc32c.
-
-config CRC8
-	tristate "CRC8 function"
-	help
-	  This option provides CRC8 function. Drivers may select this
-	  when they need to do cyclic redundancy check according CRC8
-	  algorithm. Module will be called crc8.
+source "lib/crc/Kconfig"
+source "lib/crypto/Kconfig"
+source "lib/raid/Kconfig"
 
 config XXHASH
 	tristate
@@ -223,7 +161,6 @@ config AUDIT_COMPAT_GENERIC
 
 config RANDOM32_SELFTEST
 	bool "PRNG perform self test on init"
-	default n
 	help
 	  This option enables the 32 bit PRNG library functions to perform a
 	  self test on initialization.
@@ -246,6 +183,13 @@ config ZLIB_DEFLATE
 	tristate
 	select BITREVERSE
 
+config ZLIB_DFLTCC
+	def_bool y
+	depends on S390
+	prompt "Enable s390x DEFLATE CONVERSION CALL support for kernel zlib"
+	help
+	 Enable s390x hardware support for zlib in the kernel.
+
 config LZO_COMPRESS
 	tristate
 
@@ -261,12 +205,16 @@ config LZ4HC_COMPRESS
 config LZ4_DECOMPRESS
 	tristate
 
-config ZSTD_COMPRESS
+config ZSTD_COMMON
 	select XXHASH
 	tristate
 
+config ZSTD_COMPRESS
+	select ZSTD_COMMON
+	tristate
+
 config ZSTD_DECOMPRESS
-	select XXHASH
+	select ZSTD_COMMON
 	tristate
 
 source "lib/xz/Kconfig"
@@ -295,6 +243,10 @@ config DECOMPRESS_LZO
 
 config DECOMPRESS_LZ4
 	select LZ4_DECOMPRESS
+	tristate
+
+config DECOMPRESS_ZSTD
+	select ZSTD_DECOMPRESS
 	tristate
 
 #
@@ -326,6 +278,7 @@ config REED_SOLOMON_DEC16
 #
 config BCH
 	tristate
+	select BITREVERSE
 
 config BCH_CONST_PARAMS
 	bool
@@ -388,12 +341,19 @@ config INTERVAL_TREE
 
 	  See:
 
-		Documentation/rbtree.txt
+		Documentation/core-api/rbtree.rst
 
 	  for more information.
 
-config RADIX_TREE_MULTIORDER
+config INTERVAL_TREE_SPAN_ITER
 	bool
+	depends on INTERVAL_TREE
+
+config XARRAY_MULTI
+	bool
+	help
+	  Support entries which occupy multiple consecutive indices in the
+	  XArray.
 
 config ASSOCIATIVE_ARRAY
 	bool
@@ -405,39 +365,34 @@ config ASSOCIATIVE_ARRAY
 
 	  See:
 
-		Documentation/assoc_array.txt
+		Documentation/core-api/assoc_array.rst
 
 	  for more information.
+
+config CLOSURES
+	bool
 
 config HAS_IOMEM
 	bool
 	depends on !NO_IOMEM
-	select GENERIC_IO
 	default y
+
+config HAS_IOPORT
+	bool
 
 config HAS_IOPORT_MAP
 	bool
 	depends on HAS_IOMEM && !NO_IOPORT_MAP
 	default y
 
-config HAS_DMA
-	bool
-	depends on !NO_DMA
-	default y
+source "kernel/dma/Kconfig"
 
 config SGL_ALLOC
 	bool
 	default n
 
-config DMA_DIRECT_OPS
+config IOMMU_HELPER
 	bool
-	depends on HAS_DMA && (!64BIT || ARCH_DMA_ADDR_T_64BIT)
-	default n
-
-config DMA_VIRT_OPS
-	bool
-	depends on HAS_DMA && (!64BIT || ARCH_DMA_ADDR_T_64BIT)
-	default n
 
 config CHECK_SIGNATURE
 	bool
@@ -448,6 +403,9 @@ config CPUMASK_OFFSTACK
 	  Use dynamic allocation for cpumask_var_t, instead of putting
 	  them on the stack.  This is a bit more expensive, but avoids
 	  stack overflow.
+
+config FORCE_NR_CPUS
+	def_bool !SMP
 
 config CPU_RMAP
 	bool
@@ -475,19 +433,6 @@ config GLOB
 	  are compiling an out-of tree driver which tells you that it
 	  depends on this.
 
-config GLOB_SELFTEST
-	tristate "glob self-test on init"
-	depends on GLOB
-	help
-	  This option enables a simple self-test of the glob_match
-	  function on startup.	It is primarily useful for people
-	  working on the code to ensure they haven't introduced any
-	  regressions.
-
-	  It only adds a little bit of code and slows kernel boot (or
-	  module load) by a small amount, so you're welcome to play with
-	  it, but you probably don't need it.
-
 #
 # Netlink attribute parsing support is select'ed if needed
 #
@@ -506,20 +451,6 @@ config LRU_CACHE
 config CLZ_TAB
 	bool
 
-config CORDIC
-	tristate "CORDIC algorithm"
-	help
-	  This option provides an implementation of the CORDIC algorithm;
-	  calculations are in fixed point. Module will be called cordic.
-
-config DDR
-	bool "JEDEC DDR data"
-	help
-	  Data from JEDEC specs for DDR SDRAM memories,
-	  particularly the AC timing parameters and addressing
-	  information. This data is useful for drivers handling
-	  DDR SDRAM controllers.
-
 config IRQ_POLL
 	bool "IRQ polling library"
 	help
@@ -536,12 +467,19 @@ config MPILIB
 config SIGNATURE
 	tristate
 	depends on KEYS
-	select CRYPTO
-	select CRYPTO_SHA1
+	select CRYPTO_LIB_SHA1
 	select MPILIB
 	help
 	  Digital signature verification. Currently only RSA is supported.
 	  Implementation is done using GnuPG MPI library
+
+config DIMLIB
+	tristate
+	depends on NET
+	help
+	  Dynamic Interrupt Moderation library.
+	  Implements an algorithm for dynamically changing CQ moderation values
+	  according to run time performance.
 
 #
 # libfdt files, only selected if needed.
@@ -555,7 +493,12 @@ config OID_REGISTRY
 	  Enable fast lookup object identifier registry.
 
 config UCS2_STRING
-        tristate
+	tristate
+
+#
+# generic vdso
+#
+source "lib/vdso/Kconfig"
 
 source "lib/fonts/Kconfig"
 
@@ -577,18 +520,65 @@ config SG_POOL
 # sg chaining option
 #
 
-config ARCH_HAS_SG_CHAIN
+config ARCH_NO_SG_CHAIN
 	def_bool n
 
 config ARCH_HAS_PMEM_API
 	bool
 
+config MEMREGION
+	bool
+
+config ARCH_HAS_CPU_CACHE_INVALIDATE_MEMREGION
+	bool
+
+config GENERIC_CPU_CACHE_MAINTENANCE
+	bool
+
+config ARCH_HAS_MEMREMAP_COMPAT_ALIGN
+	bool
+
+# use memcpy to implement user copies for nommu architectures
+config UACCESS_MEMCPY
+	bool
+
 config ARCH_HAS_UACCESS_FLUSHCACHE
 	bool
+
+# arch has a concept of a recoverable synchronous exception due to a
+# memory-read error like x86 machine-check or ARM data-abort, and
+# implements copy_mc_to_{user,kernel} to abort and report
+# 'bytes-transferred' if that exception fires when accessing the source
+# buffer.
+config ARCH_HAS_COPY_MC
+	bool
+
+# Temporary. Goes away when all archs are cleaned up
+config ARCH_STACKWALK
+       bool
 
 config STACKDEPOT
 	bool
 	select STACKTRACE
+	help
+	  Stack depot: stack trace storage that avoids duplication
+
+config STACKDEPOT_ALWAYS_INIT
+	bool
+	select STACKDEPOT
+	help
+	  Always initialize stack depot during early boot
+
+config STACKDEPOT_MAX_FRAMES
+	int "Maximum number of frames in trace saved in stack depot"
+	range 1 256
+	default 64
+	depends on STACKDEPOT
+
+config REF_TRACKER
+	bool
+	depends on STACKTRACE_SUPPORT
+	select STACKDEPOT
 
 config SBITMAP
 	bool
@@ -596,28 +586,53 @@ config SBITMAP
 config PARMAN
 	tristate "parman" if COMPILE_TEST
 
-config PRIME_NUMBERS
-	tristate
+config OBJAGG
+	tristate "objagg" if COMPILE_TEST
 
-config STRING_SELFTEST
-	tristate "Test string functions"
+config LWQ_TEST
+	bool "Boot-time test for lwq queuing"
+	help
+	  Run boot-time test of light-weight queuing.
 
 endmenu
 
-config GENERIC_ASHLDI3
+config GENERIC_IOREMAP
 	bool
 
-config GENERIC_ASHRDI3
+config GENERIC_LIB_ASHLDI3
 	bool
 
-config GENERIC_LSHRDI3
+config GENERIC_LIB_ASHRDI3
 	bool
 
-config GENERIC_MULDI3
+config GENERIC_LIB_LSHRDI3
 	bool
 
-config GENERIC_CMPDI2
+config GENERIC_LIB_MULDI3
 	bool
 
-config GENERIC_UCMPDI2
+config GENERIC_LIB_CMPDI2
+	bool
+
+config GENERIC_LIB_UCMPDI2
+	bool
+
+config GENERIC_LIB_DEVMEM_IS_ALLOWED
+	bool
+
+config PLDMFW
+	bool
+	select CRC32
+	default n
+
+config ASN1_ENCODER
+       tristate
+
+config FIRMWARE_TABLE
+	bool
+
+config UNION_FIND
+	bool
+
+config MIN_HEAP
 	bool

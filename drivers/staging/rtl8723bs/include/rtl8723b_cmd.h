@@ -1,15 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2012 Realtek Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
  *
  ******************************************************************************/
 #ifndef __RTL8723B_CMD_H__
@@ -19,7 +11,7 @@
 /*     H2C CMD DEFINITION    ------------------------------------------------ */
 /*  */
 
-enum h2c_cmd_8723B{
+enum {
 	/* Common Class: 000 */
 	H2C_8723B_RSVD_PAGE = 0x00,
 	H2C_8723B_MEDIA_STATUS_RPT = 0x01,
@@ -183,17 +175,8 @@ void rtl8723b_set_FwMediaStatusRpt_cmd(struct adapter *padapter, u8 mstatus, u8 
 void rtl8723b_download_rsvd_page(struct adapter *padapter, u8 mstatus);
 void rtl8723b_download_BTCoex_AP_mode_rsvd_page(struct adapter *padapter);
 
-void CheckFwRsvdPageContent(struct adapter *padapter);
-
-#if defined(CONFIG_WOWLAN) || defined(CONFIG_AP_WOWLAN)
-void rtl8723b_set_wowlan_cmd(struct adapter *padapter, u8 enable);
-void rtl8723b_set_ap_wowlan_cmd(struct adapter *padapter, u8 enable);
-void SetFwRelatedForWoWLAN8723b(struct adapter *padapter, u8 bHostIsGoingtoSleep);
-#endif/* CONFIG_WOWLAN */
-
 void rtl8723b_set_FwPwrModeInIPS_cmd(struct adapter *padapter, u8 cmd_param);
 
 s32 FillH2CCmd8723B(struct adapter *padapter, u8 ElementID, u32 CmdLen, u8 *pCmdBuffer);
 
-#define FillH2CCmd FillH2CCmd8723B
 #endif

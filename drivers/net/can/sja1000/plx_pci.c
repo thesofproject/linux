@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2008-2010 Pavel Cheblakov <P.B.Cheblakov@inp.nsk.su>
  *
@@ -5,18 +6,6 @@
  *	Copyright (C) 2007 Wolfgang Grandegger <wg@grandegger.com>
  *	Copyright (C) 2008 Markus Plessing <plessing@ems-wuensche.com>
  *	Copyright (C) 2008 Sebastian Haas <haas@ems-wuensche.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the version 2 of the GNU General Public License
- * as published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/kernel.h>
@@ -36,17 +25,6 @@
 MODULE_AUTHOR("Pavel Cheblakov <P.B.Cheblakov@inp.nsk.su>");
 MODULE_DESCRIPTION("Socket-CAN driver for PLX90xx PCI-bridge cards with "
 		   "the SJA1000 chips");
-MODULE_SUPPORTED_DEVICE("Adlink PCI-7841/cPCI-7841, "
-			"Adlink PCI-7841/cPCI-7841 SE, "
-			"Marathon CAN-bus-PCI, "
-			"Marathon CAN-bus-PCIe, "
-			"TEWS TECHNOLOGIES TPMC810, "
-			"esd CAN-PCI/CPCI/PCI104/200, "
-			"esd CAN-PCI/PMC/266, "
-			"esd CAN-PCIe/2000, "
-			"Connect Tech Inc. CANpro/104-Plus Opto (CRG001), "
-			"IXXAT PC-I 04/PCI, "
-			"ELCUS CAN-200-PCI")
 MODULE_LICENSE("GPL v2");
 
 #define PLX_PCI_MAX_CHAN 2
@@ -70,7 +48,9 @@ struct plx_pci_card {
 					 */
 
 #define PLX_LINT1_EN	0x1		/* Local interrupt 1 enable */
+#define PLX_LINT1_POL	(1 << 1)	/* Local interrupt 1 polarity */
 #define PLX_LINT2_EN	(1 << 3)	/* Local interrupt 2 enable */
+#define PLX_LINT2_POL	(1 << 4)	/* Local interrupt 2 polarity */
 #define PLX_PCI_INT_EN	(1 << 6)	/* PCI Interrupt Enable */
 #define PLX_PCI_RESET	(1 << 30)	/* PCI Adapter Software Reset */
 
@@ -91,6 +71,9 @@ struct plx_pci_card {
  * This means normal output mode, push-pull and the correct polarity.
  */
 #define PLX_PCI_OCR	(OCR_TX0_PUSHPULL | OCR_TX1_PUSHPULL)
+
+/* OCR setting for ASEM Dual CAN raw */
+#define ASEM_PCI_OCR	0xfe
 
 /*
  * In the CDR register, you should set CBP to 1.
@@ -139,16 +122,25 @@ struct plx_pci_card {
 #define TEWS_PCI_VENDOR_ID		0x1498
 #define TEWS_PCI_DEVICE_ID_TMPC810	0x032A
 
-#define CTI_PCI_VENDOR_ID		0x12c4
 #define CTI_PCI_DEVICE_ID_CRG001	0x0900
 
 #define MOXA_PCI_VENDOR_ID		0x1393
 #define MOXA_PCI_DEVICE_ID		0x0100
 
+#define ASEM_RAW_CAN_VENDOR_ID		0x10b5
+#define ASEM_RAW_CAN_DEVICE_ID		0x9030
+#define ASEM_RAW_CAN_SUB_VENDOR_ID	0x3000
+#define ASEM_RAW_CAN_SUB_DEVICE_ID	0x1001
+#define ASEM_RAW_CAN_SUB_DEVICE_ID_BIS	0x1002
+#define ASEM_RAW_CAN_RST_REGISTER	0x54
+#define ASEM_RAW_CAN_RST_MASK_CAN1	0x20
+#define ASEM_RAW_CAN_RST_MASK_CAN2	0x04
+
 static void plx_pci_reset_common(struct pci_dev *pdev);
 static void plx9056_pci_reset_common(struct pci_dev *pdev);
 static void plx_pci_reset_marathon_pci(struct pci_dev *pdev);
 static void plx_pci_reset_marathon_pcie(struct pci_dev *pdev);
+static void plx_pci_reset_asem_dual_can_raw(struct pci_dev *pdev);
 
 struct plx_pci_channel_map {
 	u32 bar;
@@ -269,113 +261,100 @@ static struct plx_pci_card_info plx_pci_card_info_moxa = {
 	 /* based on PLX9052 */
 };
 
+static struct plx_pci_card_info plx_pci_card_info_asem_dual_can = {
+	"ASEM Dual CAN raw PCI", 2,
+	PLX_PCI_CAN_CLOCK, ASEM_PCI_OCR, PLX_PCI_CDR,
+	{0, 0x00, 0x00}, { {2, 0x00, 0x00}, {4, 0x00, 0x00} },
+	&plx_pci_reset_asem_dual_can_raw
+	/* based on PLX9030 */
+};
+
 static const struct pci_device_id plx_pci_tbl[] = {
 	{
 		/* Adlink PCI-7841/cPCI-7841 */
-		ADLINK_PCI_VENDOR_ID, ADLINK_PCI_DEVICE_ID,
-		PCI_ANY_ID, PCI_ANY_ID,
-		PCI_CLASS_NETWORK_OTHER << 8, ~0,
-		(kernel_ulong_t)&plx_pci_card_info_adlink
-	},
-	{
+		PCI_DEVICE(ADLINK_PCI_VENDOR_ID, ADLINK_PCI_DEVICE_ID),
+		.class = PCI_CLASS_NETWORK_OTHER << 8,
+		.class_mask = ~0,
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_adlink,
+	}, {
 		/* Adlink PCI-7841/cPCI-7841 SE */
-		ADLINK_PCI_VENDOR_ID, ADLINK_PCI_DEVICE_ID,
-		PCI_ANY_ID, PCI_ANY_ID,
-		PCI_CLASS_COMMUNICATION_OTHER << 8, ~0,
-		(kernel_ulong_t)&plx_pci_card_info_adlink_se
-	},
-	{
+		PCI_DEVICE(ADLINK_PCI_VENDOR_ID, ADLINK_PCI_DEVICE_ID),
+		.class = PCI_CLASS_COMMUNICATION_OTHER << 8,
+		.class_mask = ~0,
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_adlink_se,
+	}, {
 		/* esd CAN-PCI/200 */
-		PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_9050,
-		PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PCI200,
-		0, 0,
-		(kernel_ulong_t)&plx_pci_card_info_esd200
-	},
-	{
+		PCI_VDEVICE_SUB(PLX, PCI_DEVICE_ID_PLX_9050,
+				PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PCI200),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_esd200,
+	}, {
 		/* esd CAN-CPCI/200 */
-		PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_9030,
-		PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_CPCI200,
-		0, 0,
-		(kernel_ulong_t)&plx_pci_card_info_esd200
-	},
-	{
+		PCI_VDEVICE_SUB(PLX, PCI_DEVICE_ID_PLX_9030,
+				PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_CPCI200),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_esd200,
+	}, {
 		/* esd CAN-PCI104/200 */
-		PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_9030,
-		PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PCI104200,
-		0, 0,
-		(kernel_ulong_t)&plx_pci_card_info_esd200
-	},
-	{
+		PCI_VDEVICE_SUB(PLX, PCI_DEVICE_ID_PLX_9030,
+				PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PCI104200),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_esd200,
+	}, {
 		/* esd CAN-PCI/266 */
-		PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_9056,
-		PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PCI266,
-		0, 0,
-		(kernel_ulong_t)&plx_pci_card_info_esd266
-	},
-	{
+		PCI_VDEVICE_SUB(PLX, PCI_DEVICE_ID_PLX_9056,
+				PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PCI266),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_esd266,
+	}, {
 		/* esd CAN-PMC/266 */
-		PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_9056,
-		PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PMC266,
-		0, 0,
-		(kernel_ulong_t)&plx_pci_card_info_esd266
-	},
-	{
+		PCI_VDEVICE_SUB(PLX, PCI_DEVICE_ID_PLX_9056,
+				PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PMC266),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_esd266,
+	}, {
 		/* esd CAN-PCIE/2000 */
-		PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_9056,
-		PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PCIE2000,
-		0, 0,
-		(kernel_ulong_t)&plx_pci_card_info_esd2000
-	},
-	{
+		PCI_VDEVICE_SUB(PLX, PCI_DEVICE_ID_PLX_9056,
+				PCI_VENDOR_ID_ESDGMBH, ESD_PCI_SUB_SYS_ID_PCIE2000),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_esd2000,
+	}, {
 		/* IXXAT PC-I 04/PCI card */
-		IXXAT_PCI_VENDOR_ID, IXXAT_PCI_DEVICE_ID,
-		PCI_ANY_ID, IXXAT_PCI_SUB_SYS_ID,
-		0, 0,
-		(kernel_ulong_t)&plx_pci_card_info_ixxat
-	},
-	{
+		PCI_DEVICE_SUB(IXXAT_PCI_VENDOR_ID, IXXAT_PCI_DEVICE_ID,
+			       PCI_ANY_ID, IXXAT_PCI_SUB_SYS_ID),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_ixxat,
+	}, {
 		/* Marathon CAN-bus-PCI card */
-		PCI_VENDOR_ID_PLX, MARATHON_PCI_DEVICE_ID,
-		PCI_ANY_ID, PCI_ANY_ID,
-		0, 0,
-		(kernel_ulong_t)&plx_pci_card_info_marathon_pci
-	},
-	{
+		PCI_VDEVICE(PLX, MARATHON_PCI_DEVICE_ID),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_marathon_pci,
+	}, {
 		/* Marathon CAN-bus-PCIe card */
-		PCI_VENDOR_ID_PLX, MARATHON_PCIE_DEVICE_ID,
-		PCI_ANY_ID, PCI_ANY_ID,
-		0, 0,
-		(kernel_ulong_t)&plx_pci_card_info_marathon_pcie
-	},
-	{
+		PCI_VDEVICE(PLX, MARATHON_PCIE_DEVICE_ID),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_marathon_pcie,
+	}, {
 		/* TEWS TECHNOLOGIES TPMC810 card */
-		TEWS_PCI_VENDOR_ID, TEWS_PCI_DEVICE_ID_TMPC810,
-		PCI_ANY_ID, PCI_ANY_ID,
-		0, 0,
-		(kernel_ulong_t)&plx_pci_card_info_tews
-	},
-	{
+		PCI_DEVICE(TEWS_PCI_VENDOR_ID, TEWS_PCI_DEVICE_ID_TMPC810),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_tews,
+	}, {
 		/* Connect Tech Inc. CANpro/104-Plus Opto (CRG001) card */
-		PCI_VENDOR_ID_PLX, PCI_DEVICE_ID_PLX_9030,
-		CTI_PCI_VENDOR_ID, CTI_PCI_DEVICE_ID_CRG001,
-		0, 0,
-		(kernel_ulong_t)&plx_pci_card_info_cti
-	},
-	{
+		PCI_VDEVICE_SUB(PLX, PCI_DEVICE_ID_PLX_9030,
+				PCI_SUBVENDOR_ID_CONNECT_TECH, CTI_PCI_DEVICE_ID_CRG001),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_cti,
+	}, {
 		/* Elcus CAN-200-PCI */
-		CAN200PCI_VENDOR_ID, CAN200PCI_DEVICE_ID,
-		CAN200PCI_SUB_VENDOR_ID, CAN200PCI_SUB_DEVICE_ID,
-		0, 0,
-		(kernel_ulong_t)&plx_pci_card_info_elcus
-	},
-	{
+		PCI_DEVICE_SUB(CAN200PCI_VENDOR_ID, CAN200PCI_DEVICE_ID,
+			       CAN200PCI_SUB_VENDOR_ID, CAN200PCI_SUB_DEVICE_ID),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_elcus,
+	}, {
 		/* moxa */
-		MOXA_PCI_VENDOR_ID, MOXA_PCI_DEVICE_ID,
-		PCI_ANY_ID, PCI_ANY_ID,
-		0, 0,
-		(kernel_ulong_t)&plx_pci_card_info_moxa
+		PCI_DEVICE(MOXA_PCI_VENDOR_ID, MOXA_PCI_DEVICE_ID),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_moxa,
+	}, {
+		/* ASEM Dual CAN raw */
+		PCI_DEVICE_SUB(ASEM_RAW_CAN_VENDOR_ID, ASEM_RAW_CAN_DEVICE_ID,
+			       ASEM_RAW_CAN_SUB_VENDOR_ID, ASEM_RAW_CAN_SUB_DEVICE_ID),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_asem_dual_can,
+	}, {
+		/* ASEM Dual CAN raw -new model */
+		PCI_DEVICE_SUB(ASEM_RAW_CAN_VENDOR_ID, ASEM_RAW_CAN_DEVICE_ID,
+			       ASEM_RAW_CAN_SUB_VENDOR_ID, ASEM_RAW_CAN_SUB_DEVICE_ID_BIS),
+		.driver_data = (kernel_ulong_t)&plx_pci_card_info_asem_dual_can,
 	},
-	{ 0,}
+	{ }
 };
 MODULE_DEVICE_TABLE(pci, plx_pci_tbl);
 
@@ -524,6 +503,31 @@ static void plx_pci_reset_marathon_pcie(struct pci_dev *pdev)
 	}
 }
 
+/* Special reset function for ASEM Dual CAN raw card */
+static void plx_pci_reset_asem_dual_can_raw(struct pci_dev *pdev)
+{
+	void __iomem *bar0_addr;
+	u8 tmpval;
+
+	plx_pci_reset_common(pdev);
+
+	bar0_addr = pci_iomap(pdev, 0, 0);
+	if (!bar0_addr) {
+		dev_err(&pdev->dev, "Failed to remap reset space 0 (BAR0)\n");
+		return;
+	}
+
+	/* reset the two SJA1000 chips */
+	tmpval = ioread8(bar0_addr + ASEM_RAW_CAN_RST_REGISTER);
+	tmpval &= ~(ASEM_RAW_CAN_RST_MASK_CAN1 | ASEM_RAW_CAN_RST_MASK_CAN2);
+	iowrite8(tmpval, bar0_addr + ASEM_RAW_CAN_RST_REGISTER);
+	usleep_range(300, 400);
+	tmpval |= ASEM_RAW_CAN_RST_MASK_CAN1 | ASEM_RAW_CAN_RST_MASK_CAN2;
+	iowrite8(tmpval, bar0_addr + ASEM_RAW_CAN_RST_REGISTER);
+	usleep_range(300, 400);
+	pci_iounmap(pdev, bar0_addr);
+}
+
 static void plx_pci_del_card(struct pci_dev *pdev)
 {
 	struct plx_pci_card *card = pci_get_drvdata(pdev);
@@ -590,7 +594,7 @@ static int plx_pci_add_card(struct pci_dev *pdev,
 		 ci->name, PCI_SLOT(pdev->devfn));
 
 	/* Allocate card structures to hold addresses, ... */
-	card = kzalloc(sizeof(*card), GFP_KERNEL);
+	card = kzalloc_obj(*card);
 	if (!card) {
 		pci_disable_device(pdev);
 		return -ENOMEM;

@@ -1,23 +1,26 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * This file is part of the Linux kernel, and is made available under
- * the terms of the GNU General Public License version 2.
  *
  * Misc librarized functions for cmdline poking.
  */
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/ctype.h>
+
 #include <asm/setup.h>
+#include <asm/cmdline.h>
+#include <asm/bug.h>
 
 static inline int myisspace(u8 c)
 {
 	return c <= ' ';	/* Close enough approximation */
 }
 
-/**
+/*
  * Find a boolean option (like quiet,noapic,nosmp....)
  *
  * @cmdline: the cmdline string
+ * @max_cmdline_size: the maximum size of cmdline
  * @option: option string to look for
  *
  * Returns the position of that @option (starts counting with 1)
@@ -59,7 +62,7 @@ __cmdline_find_option_bool(const char *cmdline, int max_cmdline_size,
 			state = st_wordcmp;
 			opptr = option;
 			wstart = pos;
-			/* fall through */
+			fallthrough;
 
 		case st_wordcmp:
 			if (!*opptr) {
@@ -90,7 +93,7 @@ __cmdline_find_option_bool(const char *cmdline, int max_cmdline_size,
 				break;
 			}
 			state = st_wordskip;
-			/* fall through */
+			fallthrough;
 
 		case st_wordskip:
 			if (!c)
@@ -152,7 +155,7 @@ __cmdline_find_option(const char *cmdline, int max_cmdline_size,
 
 			state = st_wordcmp;
 			opptr = option;
-			/* fall through */
+			fallthrough;
 
 		case st_wordcmp:
 			if ((c == '=') && !*opptr) {
@@ -173,7 +176,7 @@ __cmdline_find_option(const char *cmdline, int max_cmdline_size,
 				break;
 			}
 			state = st_wordskip;
-			/* fall through */
+			fallthrough;
 
 		case st_wordskip:
 			if (myisspace(c))
@@ -204,12 +207,29 @@ __cmdline_find_option(const char *cmdline, int max_cmdline_size,
 
 int cmdline_find_option_bool(const char *cmdline, const char *option)
 {
-	return __cmdline_find_option_bool(cmdline, COMMAND_LINE_SIZE, option);
+	int ret;
+
+	ret = __cmdline_find_option_bool(cmdline, COMMAND_LINE_SIZE, option);
+	if (ret > 0)
+		return ret;
+
+	if (IS_ENABLED(CONFIG_CMDLINE_BOOL) && !builtin_cmdline_added)
+		return __cmdline_find_option_bool(builtin_cmdline, COMMAND_LINE_SIZE, option);
+
+	return ret;
 }
 
 int cmdline_find_option(const char *cmdline, const char *option, char *buffer,
 			int bufsize)
 {
-	return __cmdline_find_option(cmdline, COMMAND_LINE_SIZE, option,
-				     buffer, bufsize);
+	int ret;
+
+	ret = __cmdline_find_option(cmdline, COMMAND_LINE_SIZE, option, buffer, bufsize);
+	if (ret > 0)
+		return ret;
+
+	if (IS_ENABLED(CONFIG_CMDLINE_BOOL) && !builtin_cmdline_added)
+		return __cmdline_find_option(builtin_cmdline, COMMAND_LINE_SIZE, option, buffer, bufsize);
+
+	return ret;
 }

@@ -1,19 +1,47 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2000 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
- * Licensed under the GPL
  */
 
 #include <linux/module.h>
 #include <linux/ptrace.h>
 #include <linux/sched.h>
+#include <linux/ftrace.h>
 #include <asm/siginfo.h>
 #include <asm/signal.h>
 #include <asm/unistd.h>
 #include <frame_kern.h>
 #include <kern_util.h>
+#include <os.h>
 
 EXPORT_SYMBOL(block_signals);
 EXPORT_SYMBOL(unblock_signals);
+
+void block_signals_trace(void)
+{
+	block_signals();
+	if (current_thread_info())
+		trace_hardirqs_off();
+}
+
+void unblock_signals_trace(void)
+{
+	if (current_thread_info())
+		trace_hardirqs_on();
+	unblock_signals();
+}
+
+void um_trace_signals_on(void)
+{
+	if (current_thread_info())
+		trace_hardirqs_on();
+}
+
+void um_trace_signals_off(void)
+{
+	if (current_thread_info())
+		trace_hardirqs_off();
+}
 
 /*
  * OK, we're invoking a handler
@@ -25,7 +53,7 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 	unsigned long sp;
 	int err;
 
-	if ((current->ptrace & PT_DTRACE) && (current->ptrace & PT_PTRACED))
+	if (test_thread_flag(TIF_SINGLESTEP) && (current->ptrace & PT_PTRACED))
 		singlestep = 1;
 
 	/* Did we come from a system call? */
@@ -42,7 +70,7 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 				PT_REGS_SYSCALL_RET(regs) = -EINTR;
 				break;
 			}
-		/* fallthrough */
+			fallthrough;
 		case -ERESTARTNOINTR:
 			PT_REGS_RESTART_SYSCALL(regs);
 			PT_REGS_ORIG_SYSCALL(regs) = PT_REGS_SYSCALL_NR(regs);
@@ -91,18 +119,6 @@ void do_signal(struct pt_regs *regs)
 			break;
 		}
 	}
-
-	/*
-	 * This closes a way to execute a system call on the host.  If
-	 * you set a breakpoint on a system call instruction and singlestep
-	 * from it, the tracing thread used to PTRACE_SINGLESTEP the process
-	 * rather than PTRACE_SYSCALL it, allowing the system call to execute
-	 * on the host.  The tracing thread will check this flag and
-	 * PTRACE_SYSCALL if necessary.
-	 */
-	if (current->ptrace & PT_DTRACE)
-		current->thread.singlestep_syscall =
-			is_syscall(PT_REGS_IP(&current->thread.regs));
 
 	/*
 	 * if there's no signal to deliver, we just put the saved sigmask

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Linux device driver for RTL8187
  *
@@ -14,10 +15,6 @@
  *
  * Magic delays and register offsets below are taken from the original
  * r8187 driver sources.  Thanks to Realtek for their support!
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/usb.h>
@@ -132,7 +129,7 @@ static void rtl8187_iowrite_async(struct rtl8187_priv *priv, __le16 addr,
 	} *buf;
 	int rc;
 
-	buf = kmalloc(sizeof(*buf), GFP_ATOMIC);
+	buf = kmalloc_obj(*buf, GFP_ATOMIC);
 	if (!buf)
 		return;
 
@@ -341,14 +338,16 @@ static void rtl8187_rx_cb(struct urb *urb)
 	spin_unlock_irqrestore(&priv->rx_queue.lock, f);
 	skb_put(skb, urb->actual_length);
 
-	if (unlikely(urb->status)) {
-		dev_kfree_skb_irq(skb);
-		return;
-	}
+	if (unlikely(urb->status))
+		goto free_skb;
 
 	if (!priv->is_rtl8187b) {
-		struct rtl8187_rx_hdr *hdr =
-			(typeof(hdr))(skb_tail_pointer(skb) - sizeof(*hdr));
+		struct rtl8187_rx_hdr *hdr;
+
+		if (skb->len < sizeof(struct rtl8187_rx_hdr))
+			goto free_skb;
+
+		hdr = (typeof(hdr))(skb_tail_pointer(skb) - sizeof(*hdr));
 		flags = le32_to_cpu(hdr->flags);
 		/* As with the RTL8187B below, the AGC is used to calculate
 		 * signal strength. In this case, the scaling
@@ -358,8 +357,12 @@ static void rtl8187_rx_cb(struct urb *urb)
 		rx_status.antenna = (hdr->signal >> 7) & 1;
 		rx_status.mactime = le64_to_cpu(hdr->mac_time);
 	} else {
-		struct rtl8187b_rx_hdr *hdr =
-			(typeof(hdr))(skb_tail_pointer(skb) - sizeof(*hdr));
+		struct rtl8187b_rx_hdr *hdr;
+
+		if (skb->len < sizeof(struct rtl8187b_rx_hdr))
+			goto free_skb;
+
+		hdr = (typeof(hdr))(skb_tail_pointer(skb) - sizeof(*hdr));
 		/* The Realtek datasheet for the RTL8187B shows that the RX
 		 * header contains the following quantities: signal quality,
 		 * RSSI, AGC, the received power in dB, and the measured SNR.
@@ -412,6 +415,11 @@ static void rtl8187_rx_cb(struct urb *urb)
 		skb_unlink(skb, &priv->rx_queue);
 		dev_kfree_skb_irq(skb);
 	}
+	return;
+
+free_skb:
+	dev_kfree_skb_irq(skb);
+	return;
 }
 
 static int rtl8187_init_urbs(struct ieee80211_hw *dev)
@@ -444,12 +452,13 @@ static int rtl8187_init_urbs(struct ieee80211_hw *dev)
 		skb_queue_tail(&priv->rx_queue, skb);
 		usb_anchor_urb(entry, &priv->anchored);
 		ret = usb_submit_urb(entry, GFP_KERNEL);
-		usb_put_urb(entry);
 		if (ret) {
 			skb_unlink(skb, &priv->rx_queue);
 			usb_unanchor_urb(entry);
+			usb_put_urb(entry);
 			goto err;
 		}
+		usb_put_urb(entry);
 	}
 	return ret;
 
@@ -499,7 +508,7 @@ static void rtl8187b_status_cb(struct urb *urb)
 	if (cmd_type == 1) {
 		unsigned int pkt_rc, seq_no;
 		bool tok;
-		struct sk_buff *skb;
+		struct sk_buff *skb, *iter;
 		struct ieee80211_hdr *ieee80211hdr;
 		unsigned long flags;
 
@@ -508,8 +517,9 @@ static void rtl8187b_status_cb(struct urb *urb)
 		seq_no = (val >> 16) & 0xFFF;
 
 		spin_lock_irqsave(&priv->b_tx_status.queue.lock, flags);
-		skb_queue_reverse_walk(&priv->b_tx_status.queue, skb) {
-			ieee80211hdr = (struct ieee80211_hdr *)skb->data;
+		skb = NULL;
+		skb_queue_reverse_walk(&priv->b_tx_status.queue, iter) {
+			ieee80211hdr = (struct ieee80211_hdr *)iter->data;
 
 			/*
 			 * While testing, it was discovered that the seq_no
@@ -522,10 +532,12 @@ static void rtl8187b_status_cb(struct urb *urb)
 			 * it's unlikely we wrongly ack some sent data
 			 */
 			if ((le16_to_cpu(ieee80211hdr->seq_ctrl)
-			    & 0xFFF) == seq_no)
+			     & 0xFFF) == seq_no) {
+				skb = iter;
 				break;
+			}
 		}
-		if (skb != (struct sk_buff *) &priv->b_tx_status.queue) {
+		if (skb) {
 			struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 
 			__skb_unlink(skb, &priv->b_tx_status.queue);
@@ -1018,7 +1030,7 @@ rtl8187_start_exit:
 	return ret;
 }
 
-static void rtl8187_stop(struct ieee80211_hw *dev)
+static void rtl8187_stop(struct ieee80211_hw *dev, bool suspend)
 {
 	struct rtl8187_priv *priv = dev->priv;
 	struct sk_buff *skb;
@@ -1040,10 +1052,11 @@ static void rtl8187_stop(struct ieee80211_hw *dev)
 	rtl818x_iowrite8(priv, &priv->map->CONFIG4, reg | RTL818X_CONFIG4_VCOOFF);
 	rtl818x_iowrite8(priv, &priv->map->EEPROM_CMD, RTL818X_EEPROM_CMD_NORMAL);
 
+	usb_kill_anchored_urbs(&priv->anchored);
+
 	while ((skb = skb_dequeue(&priv->b_tx_status.queue)))
 		dev_kfree_skb_any(skb);
 
-	usb_kill_anchored_urbs(&priv->anchored);
 	mutex_unlock(&priv->conf_mutex);
 
 	if (!priv->is_rtl8187b)
@@ -1074,7 +1087,7 @@ static void rtl8187_beacon_work(struct work_struct *work)
 		goto resched;
 
 	/* grab a fresh beacon */
-	skb = ieee80211_beacon_get(dev, vif);
+	skb = ieee80211_beacon_get(dev, vif, 0);
 	if (!skb)
 		goto resched;
 
@@ -1150,7 +1163,7 @@ static void rtl8187_remove_interface(struct ieee80211_hw *dev,
 	mutex_unlock(&priv->conf_mutex);
 }
 
-static int rtl8187_config(struct ieee80211_hw *dev, u32 changed)
+static int rtl8187_config(struct ieee80211_hw *dev, int radio_idx, u32 changed)
 {
 	struct rtl8187_priv *priv = dev->priv;
 	struct ieee80211_conf *conf = &dev->conf;
@@ -1250,7 +1263,7 @@ static void rtl8187_conf_erp(struct rtl8187_priv *priv, bool use_short_slot,
 static void rtl8187_bss_info_changed(struct ieee80211_hw *dev,
 				     struct ieee80211_vif *vif,
 				     struct ieee80211_bss_conf *info,
-				     u32 changed)
+				     u64 changed)
 {
 	struct rtl8187_priv *priv = dev->priv;
 	struct rtl8187_vif *vif_priv;
@@ -1337,7 +1350,8 @@ static void rtl8187_configure_filter(struct ieee80211_hw *dev,
 }
 
 static int rtl8187_conf_tx(struct ieee80211_hw *dev,
-			   struct ieee80211_vif *vif, u16 queue,
+			   struct ieee80211_vif *vif,
+			   unsigned int link_id, u16 queue,
 			   const struct ieee80211_tx_queue_params *params)
 {
 	struct rtl8187_priv *priv = dev->priv;
@@ -1375,7 +1389,12 @@ static int rtl8187_conf_tx(struct ieee80211_hw *dev,
 
 
 static const struct ieee80211_ops rtl8187_ops = {
+	.add_chanctx = ieee80211_emulate_add_chanctx,
+	.remove_chanctx = ieee80211_emulate_remove_chanctx,
+	.change_chanctx = ieee80211_emulate_change_chanctx,
+	.switch_vif_chanctx = ieee80211_emulate_switch_vif_chanctx,
 	.tx			= rtl8187_tx,
+	.wake_tx_queue		= ieee80211_handle_wake_tx_queue,
 	.start			= rtl8187_start,
 	.stop			= rtl8187_stop,
 	.add_interface		= rtl8187_add_interface,
@@ -1444,7 +1463,7 @@ static int rtl8187_probe(struct usb_interface *intf,
 	priv->is_rtl8187b = (id->driver_info == DEVICE_RTL8187B);
 
 	/* allocate "DMA aware" buffer for register accesses */
-	priv->io_dmabuf = kmalloc(sizeof(*priv->io_dmabuf), GFP_KERNEL);
+	priv->io_dmabuf = kmalloc_obj(*priv->io_dmabuf);
 	if (!priv->io_dmabuf) {
 		err = -ENOMEM;
 		goto err_free_dev;
@@ -1455,8 +1474,6 @@ static int rtl8187_probe(struct usb_interface *intf,
 	SET_IEEE80211_DEV(dev, &intf->dev);
 	usb_set_intfdata(intf, dev);
 	priv->udev = udev;
-
-	usb_get_dev(udev);
 
 	skb_queue_head_init(&priv->rx_queue);
 
@@ -1644,7 +1661,6 @@ static int rtl8187_probe(struct usb_interface *intf,
  err_free_dmabuf:
 	kfree(priv->io_dmabuf);
 	usb_set_intfdata(intf, NULL);
-	usb_put_dev(udev);
  err_free_dev:
 	ieee80211_free_hw(dev);
 	return err;
@@ -1666,7 +1682,6 @@ static void rtl8187_disconnect(struct usb_interface *intf)
 
 	priv = dev->priv;
 	usb_reset_device(priv->udev);
-	usb_put_dev(interface_to_usbdev(intf));
 	kfree(priv->io_dmabuf);
 	ieee80211_free_hw(dev);
 }

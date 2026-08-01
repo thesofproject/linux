@@ -7,6 +7,7 @@
  * Copyright (C) 2009, 2012 Cavium, Inc.
  */
 #include <linux/clocksource.h>
+#include <linux/sched/clock.h>
 #include <linux/export.h>
 #include <linux/init.h>
 #include <linux/smp.h>
@@ -112,7 +113,7 @@ static struct clocksource clocksource_mips = {
 
 unsigned long long notrace sched_clock(void)
 {
-	/* 64-bit arithmatic can overflow, so use 128-bit.  */
+	/* 64-bit arithmetic can overflow, so use 128-bit.  */
 	u64 t1, t2, t3;
 	unsigned long long rv;
 	u64 mult = clocksource_mips.mult;

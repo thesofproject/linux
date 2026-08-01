@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2008 Freescale Semiconductor, Inc. All Rights Reserved.
  *
@@ -9,12 +10,6 @@
  *           York Sun <yorksun@freescale.com>
  *
  *   Based on imxfb.c Copyright (C) 2004 S.Hauer, Pengutronix
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
  */
 
 #include <linux/module.h>
@@ -360,6 +355,10 @@ struct mfb_info {
  * @ad[]: Area Descriptors for each real AOI
  * @gamma: gamma color table
  * @cursor: hardware cursor data
+ * @blank_cursor: blank cursor for hiding cursor
+ * @next_cursor: scratch space to build load cursor
+ * @edid_data: EDID information buffer
+ * @has_edid: whether or not the EDID buffer is valid
  *
  * This data structure must be allocated with 32-byte alignment, so that the
  * internal fields can be aligned properly.
@@ -381,6 +380,8 @@ struct fsl_diu_data {
 	__le16 cursor[MAX_CURS * MAX_CURS] __aligned(32);
 	/* Blank cursor data -- used to hide the cursor */
 	__le16 blank_cursor[MAX_CURS * MAX_CURS] __aligned(32);
+	/* Scratch cursor data -- used to build new cursor */
+	__le16 next_cursor[MAX_CURS * MAX_CURS] __aligned(32);
 	uint8_t edid_data[EDID_LENGTH];
 	bool has_edid;
 } __aligned(32);
@@ -489,7 +490,7 @@ static enum fsl_diu_monitor_port fsl_diu_name_to_port(const char *s)
  * Workaround for failed writing desc register of planes.
  * Needed with MPC5121 DIU rev 2.0 silicon.
  */
-void wr_reg_wa(u32 *reg, u32 val)
+static void wr_reg_wa(u32 *reg, u32 val)
 {
 	do {
 		out_be32(reg, val);
@@ -786,7 +787,7 @@ static void set_fix(struct fb_info *info)
 	struct fb_var_screeninfo *var = &info->var;
 	struct mfb_info *mfbi = info->par;
 
-	strncpy(fix->id, mfbi->id, sizeof(fix->id));
+	strscpy_pad(fix->id, mfbi->id);
 	fix->line_length = var->xres_virtual * var->bits_per_pixel / 8;
 	fix->type = FB_TYPE_PACKED_PIXELS;
 	fix->accel = FB_ACCEL_NONE;
@@ -871,12 +872,12 @@ static int map_video_memory(struct fb_info *info)
 
 	p = alloc_pages_exact(smem_len, GFP_DMA | __GFP_ZERO);
 	if (!p) {
-		dev_err(info->dev, "unable to allocate fb memory\n");
+		fb_err(info, "unable to allocate fb memory\n");
 		return -ENOMEM;
 	}
 	mutex_lock(&info->mm_lock);
 	info->screen_base = p;
-	info->fix.smem_start = virt_to_phys(info->screen_base);
+	info->fix.smem_start = virt_to_phys((__force const void *)info->screen_base);
 	info->fix.smem_len = smem_len;
 	mutex_unlock(&info->mm_lock);
 	info->screen_size = info->fix.smem_len;
@@ -1056,26 +1057,23 @@ static int fsl_diu_cursor(struct fb_info *info, struct fb_cursor *cursor)
 	 * FB_CUR_SETSHAPE - the cursor bitmask has changed
 	 */
 	if (cursor->set & (FB_CUR_SETSHAPE | FB_CUR_SETCMAP | FB_CUR_SETIMAGE)) {
+		/*
+		 * Determine the size of the cursor image data.  Normally,
+		 * it's 8x16.
+		 */
 		unsigned int image_size =
-			DIV_ROUND_UP(cursor->image.width, 8) * cursor->image.height;
+			DIV_ROUND_UP(cursor->image.width, 8) *
+			cursor->image.height;
 		unsigned int image_words =
 			DIV_ROUND_UP(image_size, sizeof(uint32_t));
 		unsigned int bg_idx = cursor->image.bg_color;
 		unsigned int fg_idx = cursor->image.fg_color;
-		uint8_t buffer[image_size];
 		uint32_t *image, *source, *mask;
 		uint16_t fg, bg;
 		unsigned int i;
 
 		if (info->state != FBINFO_STATE_RUNNING)
 			return 0;
-
-		/*
-		 * Determine the size of the cursor image data.  Normally,
-		 * it's 8x16.
-		 */
-		image_size = DIV_ROUND_UP(cursor->image.width, 8) *
-			cursor->image.height;
 
 		bg = ((info->cmap.red[bg_idx] & 0xf8) << 7) |
 		     ((info->cmap.green[bg_idx] & 0xf8) << 2) |
@@ -1088,7 +1086,7 @@ static int fsl_diu_cursor(struct fb_info *info, struct fb_cursor *cursor)
 		     1 << 15;
 
 		/* Use 32-bit operations on the data to improve performance */
-		image = (uint32_t *)buffer;
+		image = (uint32_t *)data->next_cursor;
 		source = (uint32_t *)cursor->image.data;
 		mask = (uint32_t *)cursor->mask;
 
@@ -1147,7 +1145,7 @@ static int fsl_diu_set_par(struct fb_info *info)
 
 		/* Memory allocation for framebuffer */
 		if (map_video_memory(info)) {
-			dev_err(info->dev, "unable to allocate fb memory 1\n");
+			fb_err(info, "unable to allocate fb memory 1\n");
 			return -ENOMEM;
 		}
 	}
@@ -1279,25 +1277,27 @@ static int fsl_diu_ioctl(struct fb_info *info, unsigned int cmd,
 	if (!arg)
 		return -EINVAL;
 
-	dev_dbg(info->dev, "ioctl %08x (dir=%s%s type=%u nr=%u size=%u)\n", cmd,
+	fb_dbg(info, "ioctl %08x (dir=%s%s type=%u nr=%u size=%u)\n", cmd,
 		_IOC_DIR(cmd) & _IOC_READ ? "R" : "",
 		_IOC_DIR(cmd) & _IOC_WRITE ? "W" : "",
 		_IOC_TYPE(cmd), _IOC_NR(cmd), _IOC_SIZE(cmd));
 
 	switch (cmd) {
 	case MFB_SET_PIXFMT_OLD:
-		dev_warn(info->dev,
-			 "MFB_SET_PIXFMT value of 0x%08x is deprecated.\n",
-			 MFB_SET_PIXFMT_OLD);
+		fb_warn(info,
+			"MFB_SET_PIXFMT value of 0x%08x is deprecated.\n",
+			MFB_SET_PIXFMT_OLD);
+		fallthrough;
 	case MFB_SET_PIXFMT:
 		if (copy_from_user(&pix_fmt, buf, sizeof(pix_fmt)))
 			return -EFAULT;
 		ad->pix_fmt = pix_fmt;
 		break;
 	case MFB_GET_PIXFMT_OLD:
-		dev_warn(info->dev,
-			 "MFB_GET_PIXFMT value of 0x%08x is deprecated.\n",
-			 MFB_GET_PIXFMT_OLD);
+		fb_warn(info,
+			"MFB_GET_PIXFMT value of 0x%08x is deprecated.\n",
+			MFB_GET_PIXFMT_OLD);
+		fallthrough;
 	case MFB_GET_PIXFMT:
 		pix_fmt = ad->pix_fmt;
 		if (copy_to_user(buf, &pix_fmt, sizeof(pix_fmt)))
@@ -1375,7 +1375,7 @@ static int fsl_diu_ioctl(struct fb_info *info, unsigned int cmd,
 	}
 #endif
 	default:
-		dev_err(info->dev, "unknown ioctl command (0x%08X)\n", cmd);
+		fb_err(info, "unknown ioctl command (0x%08X)\n", cmd);
 		return -ENOIOCTLCMD;
 	}
 
@@ -1425,7 +1425,6 @@ static int fsl_diu_open(struct fb_info *info, int user)
 static int fsl_diu_release(struct fb_info *info, int user)
 {
 	struct mfb_info *mfbi = info->par;
-	int res = 0;
 
 	spin_lock(&diu_lock);
 	mfbi->count--;
@@ -1447,18 +1446,16 @@ static int fsl_diu_release(struct fb_info *info, int user)
 	}
 
 	spin_unlock(&diu_lock);
-	return res;
+	return 0;
 }
 
-static struct fb_ops fsl_diu_ops = {
+static const struct fb_ops fsl_diu_ops = {
 	.owner = THIS_MODULE,
+	FB_DEFAULT_IOMEM_OPS,
 	.fb_check_var = fsl_diu_check_var,
 	.fb_set_par = fsl_diu_set_par,
 	.fb_setcolreg = fsl_diu_setcolreg,
 	.fb_pan_display = fsl_diu_pan_display,
-	.fb_fillrect = cfb_fillrect,
-	.fb_copyarea = cfb_copyarea,
-	.fb_imageblit = cfb_imageblit,
 	.fb_ioctl = fsl_diu_ioctl,
 	.fb_open = fsl_diu_open,
 	.fb_release = fsl_diu_release,
@@ -1477,7 +1474,7 @@ static int install_fb(struct fb_info *info)
 
 	info->var.activate = FB_ACTIVATE_NOW;
 	info->fbops = &fsl_diu_ops;
-	info->flags = FBINFO_DEFAULT | FBINFO_VIRTFB | FBINFO_PARTIAL_PAN_OK |
+	info->flags = FBINFO_VIRTFB | FBINFO_PARTIAL_PAN_OK |
 		FBINFO_READS_FAST;
 	info->pseudo_palette = mfbi->pseudo_palette;
 
@@ -1544,21 +1541,21 @@ static int install_fb(struct fb_info *info)
 	}
 
 	if (fsl_diu_check_var(&info->var, info)) {
-		dev_err(info->dev, "fsl_diu_check_var failed\n");
+		fb_err(info, "fsl_diu_check_var failed\n");
 		unmap_video_memory(info);
 		fb_dealloc_cmap(&info->cmap);
 		return -EINVAL;
 	}
 
 	if (register_framebuffer(info) < 0) {
-		dev_err(info->dev, "register_framebuffer failed\n");
+		fb_err(info, "register_framebuffer failed\n");
 		unmap_video_memory(info);
 		fb_dealloc_cmap(&info->cmap);
 		return -EINVAL;
 	}
 
 	mfbi->registered = 1;
-	dev_info(info->dev, "%s registered successfully\n", mfbi->id);
+	fb_info(info, "%s registered successfully\n", mfbi->id);
 
 	return 0;
 }
@@ -1572,8 +1569,7 @@ static void uninstall_fb(struct fb_info *info)
 
 	unregister_framebuffer(info);
 	unmap_video_memory(info);
-	if (&info->cmap)
-		fb_dealloc_cmap(&info->cmap);
+	fb_dealloc_cmap(&info->cmap);
 
 	mfbi->registered = 0;
 }
@@ -1825,12 +1821,13 @@ error:
 	return ret;
 }
 
-static int fsl_diu_remove(struct platform_device *pdev)
+static void fsl_diu_remove(struct platform_device *pdev)
 {
 	struct fsl_diu_data *data;
 	int i;
 
 	data = dev_get_drvdata(&pdev->dev);
+	device_remove_file(&pdev->dev, &data->dev_attr);
 	disable_lcdc(&data->fsl_diu_info[0]);
 
 	free_irq(data->irq, data->diu_reg);
@@ -1839,8 +1836,6 @@ static int fsl_diu_remove(struct platform_device *pdev)
 		uninstall_fb(&data->fsl_diu_info[i]);
 
 	iounmap(data->diu_reg);
-
-	return 0;
 }
 
 #ifndef MODULE
@@ -1882,12 +1877,12 @@ static const struct of_device_id fsl_diu_match[] = {
 MODULE_DEVICE_TABLE(of, fsl_diu_match);
 
 static struct platform_driver fsl_diu_driver = {
-	.driver = {
+	.driver		= {
 		.name = "fsl-diu-fb",
 		.of_match_table = fsl_diu_match,
 	},
-	.probe  	= fsl_diu_probe,
-	.remove 	= fsl_diu_remove,
+	.probe		= fsl_diu_probe,
+	.remove		= fsl_diu_remove,
 	.suspend	= fsl_diu_suspend,
 	.resume		= fsl_diu_resume,
 };
@@ -1922,7 +1917,7 @@ static int __init fsl_diu_init(void)
 	pr_info("Freescale Display Interface Unit (DIU) framebuffer driver\n");
 
 #ifdef CONFIG_NOT_COHERENT_CACHE
-	np = of_find_node_by_type(NULL, "cpu");
+	np = of_get_cpu_node(0, NULL);
 	if (!np) {
 		pr_err("fsl-diu-fb: can't find 'cpu' device node\n");
 		return -ENODEV;

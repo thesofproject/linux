@@ -1,66 +1,81 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
 *******************************************************************************
 **
 **  Copyright (C) Sistina Software, Inc.  1997-2003  All rights reserved.
 **  Copyright (C) 2004-2010 Red Hat, Inc.  All rights reserved.
 **
-**  This copyrighted material is made available to anyone wishing to use,
-**  modify, copy, or redistribute it subject to the terms and conditions
-**  of the GNU General Public License v.2.
 **
 *******************************************************************************
 ******************************************************************************/
 
+#include <trace/events/dlm.h>
+
 #include "dlm_internal.h"
+#include "lvb_table.h"
+#include "memory.h"
 #include "lock.h"
 #include "user.h"
 #include "ast.h"
 
-static uint64_t dlm_cb_seq;
-static DEFINE_SPINLOCK(dlm_cb_seq_spin);
-
-static void dlm_dump_lkb_callbacks(struct dlm_lkb *lkb)
+static void dlm_run_callback(uint32_t ls_id, uint32_t lkb_id, int8_t mode,
+			     uint32_t flags, uint8_t sb_flags, int sb_status,
+			     struct dlm_lksb *lksb,
+			     void (*astfn)(void *astparam),
+			     void (*bastfn)(void *astparam, int mode),
+			     void *astparam, const char *res_name,
+			     size_t res_length)
 {
-	int i;
-
-	log_print("last_bast %x %llu flags %x mode %d sb %d %x",
-		  lkb->lkb_id,
-		  (unsigned long long)lkb->lkb_last_bast.seq,
-		  lkb->lkb_last_bast.flags,
-		  lkb->lkb_last_bast.mode,
-		  lkb->lkb_last_bast.sb_status,
-		  lkb->lkb_last_bast.sb_flags);
-
-	log_print("last_cast %x %llu flags %x mode %d sb %d %x",
-		  lkb->lkb_id,
-		  (unsigned long long)lkb->lkb_last_cast.seq,
-		  lkb->lkb_last_cast.flags,
-		  lkb->lkb_last_cast.mode,
-		  lkb->lkb_last_cast.sb_status,
-		  lkb->lkb_last_cast.sb_flags);
-
-	for (i = 0; i < DLM_CALLBACKS_SIZE; i++) {
-		log_print("cb %x %llu flags %x mode %d sb %d %x",
-			  lkb->lkb_id,
-			  (unsigned long long)lkb->lkb_callbacks[i].seq,
-			  lkb->lkb_callbacks[i].flags,
-			  lkb->lkb_callbacks[i].mode,
-			  lkb->lkb_callbacks[i].sb_status,
-			  lkb->lkb_callbacks[i].sb_flags);
+	if (flags & DLM_CB_BAST) {
+		trace_dlm_bast(ls_id, lkb_id, mode, res_name, res_length);
+		bastfn(astparam, mode);
+	} else if (flags & DLM_CB_CAST) {
+		trace_dlm_ast(ls_id, lkb_id, sb_flags, sb_status, res_name,
+			      res_length);
+		lksb->sb_status = sb_status;
+		lksb->sb_flags = sb_flags;
+		astfn(astparam);
 	}
 }
 
-int dlm_add_lkb_callback(struct dlm_lkb *lkb, uint32_t flags, int mode,
-			 int status, uint32_t sbflags, uint64_t seq)
+static void dlm_do_callback(struct dlm_callback *cb)
 {
-	struct dlm_ls *ls = lkb->lkb_resource->res_ls;
-	uint64_t prev_seq;
-	int prev_mode;
-	int i, rv;
+	dlm_run_callback(cb->ls_id, cb->lkb_id, cb->mode, cb->flags,
+			 cb->sb_flags, cb->sb_status, cb->lkb_lksb,
+			 cb->astfn, cb->bastfn, cb->astparam,
+			 cb->res_name, cb->res_length);
+	dlm_free_cb(cb);
+}
 
-	for (i = 0; i < DLM_CALLBACKS_SIZE; i++) {
-		if (lkb->lkb_callbacks[i].seq)
-			continue;
+static void dlm_callback_work(struct work_struct *work)
+{
+	struct dlm_callback *cb = container_of(work, struct dlm_callback, work);
+
+	dlm_do_callback(cb);
+}
+
+bool dlm_may_skip_callback(struct dlm_lkb *lkb, uint32_t flags, int mode,
+			   int status, uint32_t sbflags, int *copy_lvb)
+{
+	struct dlm_rsb *rsb = lkb->lkb_resource;
+	struct dlm_ls *ls = rsb->res_ls;
+	int prev_mode;
+
+	if (copy_lvb)
+		*copy_lvb = 0;
+
+	if (flags & DLM_CB_BAST) {
+		/* if cb is a bast, it should be skipped if the blocking mode is
+		 * compatible with the last granted mode
+		 */
+		if (lkb->lkb_last_cast_cb_mode != -1) {
+			if (dlm_modes_compat(mode, lkb->lkb_last_cast_cb_mode)) {
+				log_debug(ls, "skip %x bast mode %d for cast mode %d",
+					  lkb->lkb_id, mode,
+					  lkb->lkb_last_cast_cb_mode);
+				return true;
+			}
+		}
 
 		/*
 		 * Suppress some redundant basts here, do more on removal.
@@ -68,209 +83,130 @@ int dlm_add_lkb_callback(struct dlm_lkb *lkb, uint32_t flags, int mode,
 		 * is a bast for the same mode or a more restrictive mode.
 		 * (the addional > PR check is needed for PR/CW inversion)
 		 */
-
-		if ((i > 0) && (flags & DLM_CB_BAST) &&
-		    (lkb->lkb_callbacks[i-1].flags & DLM_CB_BAST)) {
-
-			prev_seq = lkb->lkb_callbacks[i-1].seq;
-			prev_mode = lkb->lkb_callbacks[i-1].mode;
+		if (lkb->lkb_last_cb_mode != -1 &&
+		    lkb->lkb_last_cb_flags & DLM_CB_BAST) {
+			prev_mode = lkb->lkb_last_cb_mode;
 
 			if ((prev_mode == mode) ||
 			    (prev_mode > mode && prev_mode > DLM_LOCK_PR)) {
-
-				log_debug(ls, "skip %x add bast %llu mode %d "
-					  "for bast %llu mode %d",
-					  lkb->lkb_id,
-					  (unsigned long long)seq,
-					  mode,
-					  (unsigned long long)prev_seq,
-					  prev_mode);
-				rv = 0;
-				goto out;
+				log_debug(ls, "skip %x add bast mode %d for bast mode %d",
+					  lkb->lkb_id, mode, prev_mode);
+				return true;
 			}
 		}
 
-		lkb->lkb_callbacks[i].seq = seq;
-		lkb->lkb_callbacks[i].flags = flags;
-		lkb->lkb_callbacks[i].mode = mode;
-		lkb->lkb_callbacks[i].sb_status = status;
-		lkb->lkb_callbacks[i].sb_flags = (sbflags & 0x000000FF);
-		rv = 0;
-		break;
-	}
+		lkb->lkb_last_bast_time = ktime_get();
+		lkb->lkb_last_bast_cb_mode = mode;
+	} else if (flags & DLM_CB_CAST) {
+		if (test_bit(DLM_DFL_USER_BIT, &lkb->lkb_dflags)) {
+			prev_mode = lkb->lkb_last_cast_cb_mode;
 
-	if (i == DLM_CALLBACKS_SIZE) {
-		log_error(ls, "no callbacks %x %llu flags %x mode %d sb %d %x",
-			  lkb->lkb_id, (unsigned long long)seq,
-			  flags, mode, status, sbflags);
-		dlm_dump_lkb_callbacks(lkb);
-		rv = -1;
-		goto out;
-	}
- out:
-	return rv;
-}
-
-int dlm_rem_lkb_callback(struct dlm_ls *ls, struct dlm_lkb *lkb,
-			 struct dlm_callback *cb, int *resid)
-{
-	int i, rv;
-
-	*resid = 0;
-
-	if (!lkb->lkb_callbacks[0].seq) {
-		rv = -ENOENT;
-		goto out;
-	}
-
-	/* oldest undelivered cb is callbacks[0] */
-
-	memcpy(cb, &lkb->lkb_callbacks[0], sizeof(struct dlm_callback));
-	memset(&lkb->lkb_callbacks[0], 0, sizeof(struct dlm_callback));
-
-	/* shift others down */
-
-	for (i = 1; i < DLM_CALLBACKS_SIZE; i++) {
-		if (!lkb->lkb_callbacks[i].seq)
-			break;
-		memcpy(&lkb->lkb_callbacks[i-1], &lkb->lkb_callbacks[i],
-		       sizeof(struct dlm_callback));
-		memset(&lkb->lkb_callbacks[i], 0, sizeof(struct dlm_callback));
-		(*resid)++;
-	}
-
-	/* if cb is a bast, it should be skipped if the blocking mode is
-	   compatible with the last granted mode */
-
-	if ((cb->flags & DLM_CB_BAST) && lkb->lkb_last_cast.seq) {
-		if (dlm_modes_compat(cb->mode, lkb->lkb_last_cast.mode)) {
-			cb->flags |= DLM_CB_SKIP;
-
-			log_debug(ls, "skip %x bast %llu mode %d "
-				  "for cast %llu mode %d",
-				  lkb->lkb_id,
-				  (unsigned long long)cb->seq,
-				  cb->mode,
-				  (unsigned long long)lkb->lkb_last_cast.seq,
-				  lkb->lkb_last_cast.mode);
-			rv = 0;
-			goto out;
+			if (!status && lkb->lkb_lksb->sb_lvbptr &&
+			    dlm_lvb_operations[prev_mode + 1][mode + 1]) {
+				if (copy_lvb)
+					*copy_lvb = 1;
+			}
 		}
-	}
 
-	if (cb->flags & DLM_CB_CAST) {
-		memcpy(&lkb->lkb_last_cast, cb, sizeof(struct dlm_callback));
+		lkb->lkb_last_cast_cb_mode = mode;
 		lkb->lkb_last_cast_time = ktime_get();
 	}
 
-	if (cb->flags & DLM_CB_BAST) {
-		memcpy(&lkb->lkb_last_bast, cb, sizeof(struct dlm_callback));
-		lkb->lkb_last_bast_time = ktime_get();
-	}
-	rv = 0;
- out:
-	return rv;
+	lkb->lkb_last_cb_mode = mode;
+	lkb->lkb_last_cb_flags = flags;
+
+	return false;
+}
+
+int dlm_get_cb(struct dlm_lkb *lkb, uint32_t flags, int mode,
+	       int status, uint32_t sbflags,
+	       struct dlm_callback **cb)
+{
+	struct dlm_rsb *rsb = lkb->lkb_resource;
+	struct dlm_ls *ls = rsb->res_ls;
+
+	*cb = dlm_allocate_cb();
+	if (WARN_ON_ONCE(!*cb))
+		return -ENOMEM;
+
+	/* for tracing */
+	(*cb)->lkb_id = lkb->lkb_id;
+	(*cb)->ls_id = ls->ls_global_id;
+	memcpy((*cb)->res_name, rsb->res_name, rsb->res_length);
+	(*cb)->res_length = rsb->res_length;
+
+	(*cb)->flags = flags;
+	(*cb)->mode = mode;
+	(*cb)->sb_status = status;
+	(*cb)->sb_flags = (sbflags & 0x000000FF);
+	(*cb)->lkb_lksb = lkb->lkb_lksb;
+
+	return 0;
+}
+
+static int dlm_get_queue_cb(struct dlm_lkb *lkb, uint32_t flags, int mode,
+			    int status, uint32_t sbflags,
+			    struct dlm_callback **cb)
+{
+	int rv;
+
+	rv = dlm_get_cb(lkb, flags, mode, status, sbflags, cb);
+	if (rv)
+		return rv;
+
+	(*cb)->astfn = lkb->lkb_astfn;
+	(*cb)->bastfn = lkb->lkb_bastfn;
+	(*cb)->astparam = lkb->lkb_astparam;
+	INIT_WORK(&(*cb)->work, dlm_callback_work);
+
+	return 0;
 }
 
 void dlm_add_cb(struct dlm_lkb *lkb, uint32_t flags, int mode, int status,
 		uint32_t sbflags)
 {
-	struct dlm_ls *ls = lkb->lkb_resource->res_ls;
-	uint64_t new_seq, prev_seq;
+	struct dlm_rsb *rsb = lkb->lkb_resource;
+	struct dlm_ls *ls = rsb->res_ls;
+	struct dlm_callback *cb;
 	int rv;
 
-	spin_lock(&dlm_cb_seq_spin);
-	new_seq = ++dlm_cb_seq;
-	if (!dlm_cb_seq)
-		new_seq = ++dlm_cb_seq;
-	spin_unlock(&dlm_cb_seq_spin);
-
-	if (lkb->lkb_flags & DLM_IFL_USER) {
-		dlm_user_add_ast(lkb, flags, mode, status, sbflags, new_seq);
+	if (test_bit(DLM_DFL_USER_BIT, &lkb->lkb_dflags)) {
+		dlm_user_add_ast(lkb, flags, mode, status, sbflags);
 		return;
 	}
 
-	mutex_lock(&lkb->lkb_cb_mutex);
-	prev_seq = lkb->lkb_callbacks[0].seq;
+	if (dlm_may_skip_callback(lkb, flags, mode, status, sbflags, NULL))
+		return;
 
-	rv = dlm_add_lkb_callback(lkb, flags, mode, status, sbflags, new_seq);
-	if (rv < 0)
-		goto out;
-
-	if (!prev_seq) {
-		kref_get(&lkb->lkb_ref);
-
-		if (test_bit(LSFL_CB_DELAY, &ls->ls_flags)) {
-			mutex_lock(&ls->ls_cb_mutex);
-			list_add(&lkb->lkb_cb_list, &ls->ls_cb_delay);
-			mutex_unlock(&ls->ls_cb_mutex);
+	spin_lock_bh(&ls->ls_cb_lock);
+	if (test_bit(LSFL_CB_DELAY, &ls->ls_flags)) {
+		rv = dlm_get_queue_cb(lkb, flags, mode, status, sbflags, &cb);
+		if (!rv)
+			list_add(&cb->list, &ls->ls_cb_delay);
+	} else {
+		if (test_bit(LSFL_SOFTIRQ, &ls->ls_flags)) {
+			dlm_run_callback(ls->ls_global_id, lkb->lkb_id, mode, flags,
+					 sbflags, status, lkb->lkb_lksb,
+					 lkb->lkb_astfn, lkb->lkb_bastfn,
+					 lkb->lkb_astparam, rsb->res_name,
+					 rsb->res_length);
 		} else {
-			queue_work(ls->ls_callback_wq, &lkb->lkb_cb_work);
+			rv = dlm_get_queue_cb(lkb, flags, mode, status, sbflags, &cb);
+			if (!rv)
+				queue_work(ls->ls_callback_wq, &cb->work);
 		}
 	}
- out:
-	mutex_unlock(&lkb->lkb_cb_mutex);
-}
-
-void dlm_callback_work(struct work_struct *work)
-{
-	struct dlm_lkb *lkb = container_of(work, struct dlm_lkb, lkb_cb_work);
-	struct dlm_ls *ls = lkb->lkb_resource->res_ls;
-	void (*castfn) (void *astparam);
-	void (*bastfn) (void *astparam, int mode);
-	struct dlm_callback callbacks[DLM_CALLBACKS_SIZE];
-	int i, rv, resid;
-
-	memset(&callbacks, 0, sizeof(callbacks));
-
-	mutex_lock(&lkb->lkb_cb_mutex);
-	if (!lkb->lkb_callbacks[0].seq) {
-		/* no callback work exists, shouldn't happen */
-		log_error(ls, "dlm_callback_work %x no work", lkb->lkb_id);
-		dlm_print_lkb(lkb);
-		dlm_dump_lkb_callbacks(lkb);
-	}
-
-	for (i = 0; i < DLM_CALLBACKS_SIZE; i++) {
-		rv = dlm_rem_lkb_callback(ls, lkb, &callbacks[i], &resid);
-		if (rv < 0)
-			break;
-	}
-
-	if (resid) {
-		/* cbs remain, loop should have removed all, shouldn't happen */
-		log_error(ls, "dlm_callback_work %x resid %d", lkb->lkb_id,
-			  resid);
-		dlm_print_lkb(lkb);
-		dlm_dump_lkb_callbacks(lkb);
-	}
-	mutex_unlock(&lkb->lkb_cb_mutex);
-
-	castfn = lkb->lkb_astfn;
-	bastfn = lkb->lkb_bastfn;
-
-	for (i = 0; i < DLM_CALLBACKS_SIZE; i++) {
-		if (!callbacks[i].seq)
-			break;
-		if (callbacks[i].flags & DLM_CB_SKIP) {
-			continue;
-		} else if (callbacks[i].flags & DLM_CB_BAST) {
-			bastfn(lkb->lkb_astparam, callbacks[i].mode);
-		} else if (callbacks[i].flags & DLM_CB_CAST) {
-			lkb->lkb_lksb->sb_status = callbacks[i].sb_status;
-			lkb->lkb_lksb->sb_flags = callbacks[i].sb_flags;
-			castfn(lkb->lkb_astparam);
-		}
-	}
-
-	/* undo kref_get from dlm_add_callback, may cause lkb to be freed */
-	dlm_put_lkb(lkb);
+	spin_unlock_bh(&ls->ls_cb_lock);
 }
 
 int dlm_callback_start(struct dlm_ls *ls)
 {
-	ls->ls_callback_wq = alloc_workqueue("dlm_callback",
-					     WQ_HIGHPRI | WQ_MEM_RECLAIM, 0);
+	if (!test_bit(LSFL_FS, &ls->ls_flags) ||
+	    test_bit(LSFL_SOFTIRQ, &ls->ls_flags))
+		return 0;
+
+	ls->ls_callback_wq = alloc_ordered_workqueue("dlm_callback",
+						     WQ_HIGHPRI | WQ_MEM_RECLAIM);
 	if (!ls->ls_callback_wq) {
 		log_print("can't start dlm_callback workqueue");
 		return -ENOMEM;
@@ -286,31 +222,54 @@ void dlm_callback_stop(struct dlm_ls *ls)
 
 void dlm_callback_suspend(struct dlm_ls *ls)
 {
+	if (!test_bit(LSFL_FS, &ls->ls_flags))
+		return;
+
+	spin_lock_bh(&ls->ls_cb_lock);
 	set_bit(LSFL_CB_DELAY, &ls->ls_flags);
+	spin_unlock_bh(&ls->ls_cb_lock);
 
 	if (ls->ls_callback_wq)
 		flush_workqueue(ls->ls_callback_wq);
 }
 
+#define MAX_CB_QUEUE 25
+
 void dlm_callback_resume(struct dlm_ls *ls)
 {
-	struct dlm_lkb *lkb, *safe;
-	int count = 0;
+	struct dlm_callback *cb, *safe;
+	int count = 0, sum = 0;
+	bool empty;
 
-	clear_bit(LSFL_CB_DELAY, &ls->ls_flags);
-
-	if (!ls->ls_callback_wq)
+	if (!test_bit(LSFL_FS, &ls->ls_flags))
 		return;
 
-	mutex_lock(&ls->ls_cb_mutex);
-	list_for_each_entry_safe(lkb, safe, &ls->ls_cb_delay, lkb_cb_list) {
-		list_del_init(&lkb->lkb_cb_list);
-		queue_work(ls->ls_callback_wq, &lkb->lkb_cb_work);
-		count++;
-	}
-	mutex_unlock(&ls->ls_cb_mutex);
+more:
+	spin_lock_bh(&ls->ls_cb_lock);
+	list_for_each_entry_safe(cb, safe, &ls->ls_cb_delay, list) {
+		list_del(&cb->list);
+		if (test_bit(LSFL_SOFTIRQ, &ls->ls_flags))
+			dlm_do_callback(cb);
+		else
+			queue_work(ls->ls_callback_wq, &cb->work);
 
-	if (count)
-		log_rinfo(ls, "dlm_callback_resume %d", count);
+		count++;
+		if (count == MAX_CB_QUEUE)
+			break;
+	}
+	empty = list_empty(&ls->ls_cb_delay);
+	if (empty)
+		clear_bit(LSFL_CB_DELAY, &ls->ls_flags);
+	spin_unlock_bh(&ls->ls_cb_lock);
+
+	sum += count;
+	if (!empty) {
+		count = 0;
+		cond_resched();
+		goto more;
+	}
+
+	if (sum)
+		log_rinfo(ls, "%s %d", __func__, sum);
 }
 

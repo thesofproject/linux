@@ -1,26 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Intel(R) Gigabit Ethernet Linux driver
- * Copyright(c) 2007-2014 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, see <http://www.gnu.org/licenses/>.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- */
+/* Copyright(c) 2007 - 2018 Intel Corporation. */
 
 #ifndef _E1000_DEFINES_H_
 #define _E1000_DEFINES_H_
@@ -215,6 +194,8 @@
 /* enable link status from external LINK_0 and LINK_1 pins */
 #define E1000_CTRL_SWDPIN0  0x00040000  /* SWDPIN 0 value */
 #define E1000_CTRL_SWDPIN1  0x00080000  /* SWDPIN 1 value */
+#define E1000_CTRL_ADVD3WUC 0x00100000  /* D3 WUC */
+#define E1000_CTRL_EN_PHY_PWR_MGMT 0x00200000 /* PHY PM enable */
 #define E1000_CTRL_SDP0_DIR 0x00400000  /* SDP0 Data direction */
 #define E1000_CTRL_SDP1_DIR 0x00800000  /* SDP1 Data direction */
 #define E1000_CTRL_RST      0x04000000  /* Global reset */
@@ -355,13 +336,14 @@
 
 #define I210_RXPBSIZE_DEFAULT		0x000000A2 /* RXPBSIZE default */
 #define I210_RXPBSIZE_MASK		0x0000003F
+#define I210_RXPBSIZE_PB_30KB		0x0000001E
 #define I210_RXPBSIZE_PB_32KB		0x00000020
 #define I210_TXPBSIZE_DEFAULT		0x04000014 /* TXPBSIZE default */
 #define I210_TXPBSIZE_MASK		0xC0FFFFFF
-#define I210_TXPBSIZE_PB0_8KB		(8 << 0)
-#define I210_TXPBSIZE_PB1_8KB		(8 << 6)
-#define I210_TXPBSIZE_PB2_4KB		(4 << 12)
-#define I210_TXPBSIZE_PB3_4KB		(4 << 18)
+#define I210_TXPBSIZE_PB0_6KB		(6 << 0)
+#define I210_TXPBSIZE_PB1_6KB		(6 << 6)
+#define I210_TXPBSIZE_PB2_6KB		(6 << 12)
+#define I210_TXPBSIZE_PB3_6KB		(6 << 18)
 
 #define I210_DTXMXPKTSZ_DEFAULT		0x00000098
 
@@ -460,7 +442,7 @@
 /* Interrupt Cause Set */
 #define E1000_ICS_LSC       E1000_ICR_LSC       /* Link Status Change */
 #define E1000_ICS_RXDMT0    E1000_ICR_RXDMT0    /* rx desc min. threshold */
-#define E1000_ICS_DRSTA     E1000_ICR_DRSTA     /* Device Reset Aserted */
+#define E1000_ICS_DRSTA     E1000_ICR_DRSTA     /* Device Reset Asserted */
 
 /* Extended Interrupt Cause Set */
 /* E1000_EITR_CNT_IGNR is only for 82576 and newer */
@@ -491,6 +473,8 @@
  * manageability enabled, allowing us room for 15 multicast addresses.
  */
 #define E1000_RAH_AV  0x80000000        /* Receive descriptor valid */
+#define E1000_RAH_ASEL_SRC_ADDR 0x00010000
+#define E1000_RAH_QSEL_ENABLE 0x10000000
 #define E1000_RAL_MAC_ADDR_LEN 4
 #define E1000_RAH_MAC_ADDR_LEN 2
 #define E1000_RAH_POOL_MASK 0x03FC0000
@@ -1049,9 +1033,6 @@
 #define E1000_VFTA_ENTRY_MASK                0x7F
 #define E1000_VFTA_ENTRY_BIT_SHIFT_MASK      0x1F
 
-/* DMA Coalescing register fields */
-#define E1000_PCIEMISC_LX_DECISION      0x00000080 /* Lx power on DMA coal */
-
 /* Tx Rate-Scheduler Config fields */
 #define E1000_RTTBCNRC_RS_ENA		0x80000000
 #define E1000_RTTBCNRC_RF_DEC_MASK	0x00003FFF
@@ -1067,6 +1048,22 @@
 #define E1000_TQAVCTRL_XMIT_MODE	BIT(0)
 #define E1000_TQAVCTRL_DATAFETCHARB	BIT(4)
 #define E1000_TQAVCTRL_DATATRANARB	BIT(8)
+#define E1000_TQAVCTRL_DATATRANTIM	BIT(9)
+#define E1000_TQAVCTRL_SP_WAIT_SR	BIT(10)
+/* Fetch Time Delta - bits 31:16
+ *
+ * This field holds the value to be reduced from the launch time for
+ * fetch time decision. The FetchTimeDelta value is defined in 32 ns
+ * granularity.
+ *
+ * This field is 16 bits wide, and so the maximum value is:
+ *
+ * 65535 * 32 = 2097120 ~= 2.1 msec
+ *
+ * XXX: We are configuring the max value here since we couldn't come up
+ * with a reason for not doing so.
+ */
+#define E1000_TQAVCTRL_FETCHTIME_DELTA	(0xFFFF << 16)
 
 /* TX Qav Credit Control fields */
 #define E1000_TQAVCC_IDLESLOPE_MASK	0xFFFF

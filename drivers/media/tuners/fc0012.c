@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Fitipower FC0012 tuner driver
  *
  * Copyright (C) 2012 Hans-Frieder Vogt <hfvogt@gmx.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include "fc0012.h"
@@ -415,11 +406,10 @@ exit:
 
 static const struct dvb_tuner_ops fc0012_tuner_ops = {
 	.info = {
-		.name           = "Fitipower FC0012",
+		.name              = "Fitipower FC0012",
 
-		.frequency_min  = 37000000,	/* estimate */
-		.frequency_max  = 862000000,	/* estimate */
-		.frequency_step = 0,
+		.frequency_min_hz  =  37 * MHz,	/* estimate */
+		.frequency_max_hz  = 862 * MHz,	/* estimate */
 	},
 
 	.release	= fc0012_release,
@@ -445,7 +435,7 @@ struct dvb_frontend *fc0012_attach(struct dvb_frontend *fe,
 	if (fe->ops.i2c_gate_ctrl)
 		fe->ops.i2c_gate_ctrl(fe, 1);
 
-	priv = kzalloc(sizeof(struct fc0012_priv), GFP_KERNEL);
+	priv = kzalloc_obj(struct fc0012_priv);
 	if (!priv) {
 		ret = -ENOMEM;
 		dev_err(&i2c->dev, "%s: kzalloc() failed\n", KBUILD_MODNAME);
@@ -505,7 +495,7 @@ err:
 
 	return fe;
 }
-EXPORT_SYMBOL(fc0012_attach);
+EXPORT_SYMBOL_GPL(fc0012_attach);
 
 MODULE_DESCRIPTION("Fitipower FC0012 silicon tuner driver");
 MODULE_AUTHOR("Hans-Frieder Vogt <hfvogt@gmx.net>");

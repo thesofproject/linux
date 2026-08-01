@@ -1,22 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  *
  * Copyright (C) IBM Corporation, 2011
  *
  * Author: Anton Blanchard <anton@au.ibm.com>
  */
+#include <linux/export.h>
 #include <asm/ppc_asm.h>
 
 #ifdef __BIG_ENDIAN__
@@ -54,10 +43,14 @@
 	ld	r15,STK_REG(R15)(r1)
 	ld	r14,STK_REG(R14)(r1)
 .Ldo_err3:
-	bl	exit_vmx_usercopy
+	ld      r6,STK_REG(R31)(r1)	/* original destination pointer */
+	ld      r5,STK_REG(R29)(r1)	/* original number of bytes */
+	subf    r7,r6,r3		/* #bytes copied */
+	subf    r3,r7,r5		/* #bytes not copied in r3 */
 	ld	r0,STACKFRAMESIZE+16(r1)
 	mtlr	r0
-	b	.Lexit
+	addi    r1,r1,STACKFRAMESIZE
+	blr
 #endif /* CONFIG_ALTIVEC */
 
 .Ldo_err2:
@@ -80,17 +73,6 @@
 
 
 _GLOBAL(__copy_tofrom_user_power7)
-#ifdef CONFIG_ALTIVEC
-	cmpldi	r5,16
-	cmpldi	cr1,r5,3328
-
-	std	r3,-STACKFRAMESIZE+STK_REG(R31)(r1)
-	std	r4,-STACKFRAMESIZE+STK_REG(R30)(r1)
-	std	r5,-STACKFRAMESIZE+STK_REG(R29)(r1)
-
-	blt	.Lshort_copy
-	bge	cr1,.Lvmx_copy
-#else
 	cmpldi	r5,16
 
 	std	r3,-STACKFRAMESIZE+STK_REG(R31)(r1)
@@ -98,7 +80,7 @@ _GLOBAL(__copy_tofrom_user_power7)
 	std	r5,-STACKFRAMESIZE+STK_REG(R29)(r1)
 
 	blt	.Lshort_copy
-#endif
+
 
 .Lnonvmx_copy:
 	/* Get the source 8B aligned */
@@ -274,23 +256,14 @@ err1;	stb	r0,0(r3)
 15:	li	r3,0
 	blr
 
-.Lunwind_stack_nonvmx_copy:
-	addi	r1,r1,STACKFRAMESIZE
-	b	.Lnonvmx_copy
-
 #ifdef CONFIG_ALTIVEC
-.Lvmx_copy:
+_GLOBAL(__copy_tofrom_user_power7_vmx)
 	mflr	r0
 	std	r0,16(r1)
 	stdu	r1,-STACKFRAMESIZE(r1)
-	bl	enter_vmx_usercopy
-	cmpwi	cr1,r3,0
-	ld	r0,STACKFRAMESIZE+16(r1)
-	ld	r3,STK_REG(R31)(r1)
-	ld	r4,STK_REG(R30)(r1)
-	ld	r5,STK_REG(R29)(r1)
-	mtlr	r0
 
+	std     r3,STK_REG(R31)(r1)
+	std     r5,STK_REG(R29)(r1)
 	/*
 	 * We prefetch both the source and destination using enhanced touch
 	 * instructions. We use a stream ID of 0 for the load side and
@@ -309,19 +282,7 @@ err1;	stb	r0,0(r3)
 	or	r7,r7,r0
 	ori	r10,r7,1	/* stream=1 */
 
-	lis	r8,0x8000	/* GO=1 */
-	clrldi	r8,r8,32
-
-	/* setup read stream 0 */
-	dcbt	0,r6,0b01000   /* addr from */
-	dcbt	0,r7,0b01010   /* length and depth from */
-	/* setup write stream 1 */
-	dcbtst	0,r9,0b01000   /* addr to */
-	dcbtst	0,r10,0b01010  /* length and depth to */
-	eieio
-	dcbt	0,r8,0b01010	/* all streams GO */
-
-	beq	cr1,.Lunwind_stack_nonvmx_copy
+	DCBT_SETUP_STREAMS(r6, r7, r9, r10, r8)
 
 	/*
 	 * If source and destination are not relatively aligned we use a
@@ -499,7 +460,8 @@ err3;	lbz	r0,0(r4)
 err3;	stb	r0,0(r3)
 
 15:	addi	r1,r1,STACKFRAMESIZE
-	b	exit_vmx_usercopy	/* tail call optimise */
+	li r3,0
+	blr
 
 .Lvmx_unaligned_copy:
 	/* Get the destination 16B aligned */
@@ -702,5 +664,7 @@ err3;	lbz	r0,0(r4)
 err3;	stb	r0,0(r3)
 
 15:	addi	r1,r1,STACKFRAMESIZE
-	b	exit_vmx_usercopy	/* tail call optimise */
+	li r3,0
+	blr
+EXPORT_SYMBOL(__copy_tofrom_user_power7_vmx)
 #endif /* CONFIG_ALTIVEC */

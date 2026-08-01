@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2011 Alexander Stein <alexander.stein@systec-electronic.com>
  *
@@ -5,16 +6,6 @@
  * It reports up to two temperatures (its own plus an external one).
  *
  * This driver is based on lm95241.c
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/err.h>
@@ -22,7 +13,6 @@
 #include <linux/hwmon.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
 
@@ -92,23 +82,9 @@ static const unsigned short normal_i2c[] = {
 #define LM95235_REVISION	0xB1
 #define LM95245_REVISION	0xB3
 
-static const u8 lm95245_reg_address[] = {
-	LM95245_REG_R_LOCAL_TEMPH_S,
-	LM95245_REG_R_LOCAL_TEMPL_S,
-	LM95245_REG_R_REMOTE_TEMPH_S,
-	LM95245_REG_R_REMOTE_TEMPL_S,
-	LM95245_REG_R_REMOTE_TEMPH_U,
-	LM95245_REG_R_REMOTE_TEMPL_U,
-	LM95245_REG_RW_LOCAL_OS_TCRIT_LIMIT,
-	LM95245_REG_RW_REMOTE_TCRIT_LIMIT,
-	LM95245_REG_RW_COMMON_HYSTERESIS,
-	LM95245_REG_R_STATUS1,
-};
-
 /* Client data (each client gets its own) */
 struct lm95245_data {
 	struct regmap *regmap;
-	struct mutex update_lock;
 	int interval;	/* in msecs */
 };
 
@@ -183,18 +159,18 @@ static int lm95245_read_temp(struct device *dev, u32 attr, int channel,
 {
 	struct lm95245_data *data = dev_get_drvdata(dev);
 	struct regmap *regmap = data->regmap;
-	int ret, regl, regh, regvall, regvalh;
+	unsigned int regs[2];
+	unsigned int regval;
+	u8 regvals[2];
+	int ret;
 
 	switch (attr) {
 	case hwmon_temp_input:
-		regl = channel ? LM95245_REG_R_REMOTE_TEMPL_S :
-				 LM95245_REG_R_LOCAL_TEMPL_S;
-		regh = channel ? LM95245_REG_R_REMOTE_TEMPH_S :
-				 LM95245_REG_R_LOCAL_TEMPH_S;
-		ret = regmap_read(regmap, regl, &regvall);
-		if (ret < 0)
-			return ret;
-		ret = regmap_read(regmap, regh, &regvalh);
+		regs[0] = channel ? LM95245_REG_R_REMOTE_TEMPL_S :
+				    LM95245_REG_R_LOCAL_TEMPL_S;
+		regs[1] = channel ? LM95245_REG_R_REMOTE_TEMPH_S :
+				    LM95245_REG_R_LOCAL_TEMPH_S;
+		ret = regmap_multi_reg_read(regmap, regs, regvals, 2);
 		if (ret < 0)
 			return ret;
 		/*
@@ -203,92 +179,77 @@ static int lm95245_read_temp(struct device *dev, u32 attr, int channel,
 		 * Use signed calculation for remote if signed bit is set
 		 * or if reported temperature is below signed limit.
 		 */
-		if (!channel || (regvalh & 0x80) || regvalh < 0x7f) {
-			*val = temp_from_reg_signed(regvalh, regvall);
+		if (!channel || (regvals[1] & 0x80) || regvals[1] < 0x7f) {
+			*val = temp_from_reg_signed(regvals[1], regvals[0]);
 			return 0;
 		}
-		ret = regmap_read(regmap, LM95245_REG_R_REMOTE_TEMPL_U,
-				  &regvall);
-		if (ret < 0)
+		ret = regmap_bulk_read(regmap, LM95245_REG_R_REMOTE_TEMPH_U, regvals, 2);
+		if (ret)
 			return ret;
-		ret = regmap_read(regmap, LM95245_REG_R_REMOTE_TEMPH_U,
-				  &regvalh);
-		if (ret < 0)
-			return ret;
-		*val = temp_from_reg_unsigned(regvalh, regvall);
+		*val = temp_from_reg_unsigned(regvals[0], regvals[1]);
 		return 0;
 	case hwmon_temp_max:
 		ret = regmap_read(regmap, LM95245_REG_RW_REMOTE_OS_LIMIT,
-				  &regvalh);
+				  &regval);
 		if (ret < 0)
 			return ret;
-		*val = regvalh * 1000;
+		*val = regval * 1000;
 		return 0;
 	case hwmon_temp_crit:
-		regh = channel ? LM95245_REG_RW_REMOTE_TCRIT_LIMIT :
-				 LM95245_REG_RW_LOCAL_OS_TCRIT_LIMIT;
-		ret = regmap_read(regmap, regh, &regvalh);
+		regs[0] = channel ? LM95245_REG_RW_REMOTE_TCRIT_LIMIT :
+				    LM95245_REG_RW_LOCAL_OS_TCRIT_LIMIT;
+		ret = regmap_read(regmap, regs[0], &regval);
 		if (ret < 0)
 			return ret;
-		*val = regvalh * 1000;
+		*val = regval * 1000;
 		return 0;
 	case hwmon_temp_max_hyst:
-		ret = regmap_read(regmap, LM95245_REG_RW_REMOTE_OS_LIMIT,
-				  &regvalh);
+		regs[0] = LM95245_REG_RW_REMOTE_OS_LIMIT;
+		regs[1] = LM95245_REG_RW_COMMON_HYSTERESIS;
+		ret = regmap_multi_reg_read(regmap, regs, regvals, 2);
 		if (ret < 0)
 			return ret;
-		ret = regmap_read(regmap, LM95245_REG_RW_COMMON_HYSTERESIS,
-				  &regvall);
-		if (ret < 0)
-			return ret;
-		*val = (regvalh - regvall) * 1000;
+		*val = (regvals[0] - regvals[1]) * 1000;
 		return 0;
 	case hwmon_temp_crit_hyst:
-		regh = channel ? LM95245_REG_RW_REMOTE_TCRIT_LIMIT :
-				 LM95245_REG_RW_LOCAL_OS_TCRIT_LIMIT;
-		ret = regmap_read(regmap, regh, &regvalh);
+		regs[0] = channel ? LM95245_REG_RW_REMOTE_TCRIT_LIMIT :
+				    LM95245_REG_RW_LOCAL_OS_TCRIT_LIMIT;
+		regs[1] = LM95245_REG_RW_COMMON_HYSTERESIS;
+
+		ret = regmap_multi_reg_read(regmap, regs, regvals, 2);
 		if (ret < 0)
 			return ret;
-		ret = regmap_read(regmap, LM95245_REG_RW_COMMON_HYSTERESIS,
-				  &regvall);
-		if (ret < 0)
-			return ret;
-		*val = (regvalh - regvall) * 1000;
+		*val = (regvals[0] - regvals[1]) * 1000;
 		return 0;
 	case hwmon_temp_type:
-		ret = regmap_read(regmap, LM95245_REG_RW_CONFIG2, &regvalh);
+		ret = regmap_read(regmap, LM95245_REG_RW_CONFIG2, &regval);
 		if (ret < 0)
 			return ret;
-		*val = (regvalh & CFG2_REMOTE_TT) ? 1 : 2;
+		*val = (regval & CFG2_REMOTE_TT) ? 1 : 2;
 		return 0;
 	case hwmon_temp_offset:
-		ret = regmap_read(regmap, LM95245_REG_RW_REMOTE_OFFL,
-				  &regvall);
+		ret = regmap_bulk_read(regmap, LM95245_REG_RW_REMOTE_OFFH, regvals, 2);
 		if (ret < 0)
 			return ret;
-		ret = regmap_read(regmap, LM95245_REG_RW_REMOTE_OFFH,
-				  &regvalh);
-		if (ret < 0)
-			return ret;
-		*val = temp_from_reg_signed(regvalh, regvall);
+		*val = temp_from_reg_signed(regvals[0], regvals[1]);
 		return 0;
 	case hwmon_temp_max_alarm:
-		ret = regmap_read(regmap, LM95245_REG_R_STATUS1, &regvalh);
+		ret = regmap_read(regmap, LM95245_REG_R_STATUS1, &regval);
 		if (ret < 0)
 			return ret;
-		*val = !!(regvalh & STATUS1_ROS);
+		*val = !!(regval & STATUS1_ROS);
 		return 0;
 	case hwmon_temp_crit_alarm:
-		ret = regmap_read(regmap, LM95245_REG_R_STATUS1, &regvalh);
+		ret = regmap_read(regmap, LM95245_REG_R_STATUS1, &regval);
 		if (ret < 0)
 			return ret;
-		*val = !!(regvalh & (channel ? STATUS1_RTCRIT : STATUS1_LOC));
+		*val = !!(regval & (channel ? STATUS1_RTCRIT : STATUS1_LOC));
 		return 0;
 	case hwmon_temp_fault:
-		ret = regmap_read(regmap, LM95245_REG_R_STATUS1, &regvalh);
+		ret = regmap_read(regmap, LM95245_REG_R_STATUS1, &regval);
 		if (ret < 0)
 			return ret;
-		*val = !!(regvalh & STATUS1_DIODE_FAULT);
+		*val = !!(regval & STATUS1_DIODE_FAULT);
 		return 0;
 	default:
 		return -EOPNOTSUPP;
@@ -301,6 +262,7 @@ static int lm95245_write_temp(struct device *dev, u32 attr, int channel,
 	struct lm95245_data *data = dev_get_drvdata(dev);
 	struct regmap *regmap = data->regmap;
 	unsigned int regval;
+	u8 regvals[2];
 	int ret, reg;
 
 	switch (attr) {
@@ -315,34 +277,24 @@ static int lm95245_write_temp(struct device *dev, u32 attr, int channel,
 		ret = regmap_write(regmap, reg, val);
 		return ret;
 	case hwmon_temp_crit_hyst:
-		mutex_lock(&data->update_lock);
 		ret = regmap_read(regmap, LM95245_REG_RW_LOCAL_OS_TCRIT_LIMIT,
 				  &regval);
-		if (ret < 0) {
-			mutex_unlock(&data->update_lock);
+		if (ret < 0)
 			return ret;
-		}
 		/* Clamp to reasonable range to prevent overflow */
 		val = clamp_val(val, -1000000, 1000000);
 		val = regval - val / 1000;
 		val = clamp_val(val, 0, 31);
 		ret = regmap_write(regmap, LM95245_REG_RW_COMMON_HYSTERESIS,
 				   val);
-		mutex_unlock(&data->update_lock);
 		return ret;
 	case hwmon_temp_offset:
 		val = clamp_val(val, -128000, 127875);
 		val = val * 256 / 1000;
-		mutex_lock(&data->update_lock);
-		ret = regmap_write(regmap, LM95245_REG_RW_REMOTE_OFFL,
-				   val & 0xe0);
-		if (ret < 0) {
-			mutex_unlock(&data->update_lock);
-			return ret;
-		}
-		ret = regmap_write(regmap, LM95245_REG_RW_REMOTE_OFFH,
-				   (val >> 8) & 0xff);
-		mutex_unlock(&data->update_lock);
+		regvals[0] = val >> 8;
+		regvals[1] = val & 0xe0;
+
+		ret = regmap_bulk_write(regmap, LM95245_REG_RW_REMOTE_OFFH, regvals, 2);
 		return ret;
 	case hwmon_temp_type:
 		if (val != 1 && val != 2)
@@ -374,14 +326,10 @@ static int lm95245_write_chip(struct device *dev, u32 attr, int channel,
 			      long val)
 {
 	struct lm95245_data *data = dev_get_drvdata(dev);
-	int ret;
 
 	switch (attr) {
 	case hwmon_chip_update_interval:
-		mutex_lock(&data->update_lock);
-		ret = lm95245_set_conversion_rate(data, val);
-		mutex_unlock(&data->update_lock);
-		return ret;
+		return lm95245_set_conversion_rate(data, val);
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -421,14 +369,14 @@ static umode_t lm95245_temp_is_visible(const void *data, u32 attr, int channel)
 	case hwmon_temp_max_hyst:
 	case hwmon_temp_crit_alarm:
 	case hwmon_temp_fault:
-		return S_IRUGO;
+		return 0444;
 	case hwmon_temp_type:
 	case hwmon_temp_max:
 	case hwmon_temp_crit:
 	case hwmon_temp_offset:
-		return S_IRUGO | S_IWUSR;
+		return 0644;
 	case hwmon_temp_crit_hyst:
-		return (channel == 0) ? S_IRUGO | S_IWUSR : S_IRUGO;
+		return (channel == 0) ? 0644 : 0444;
 	default:
 		return 0;
 	}
@@ -442,7 +390,7 @@ static umode_t lm95245_is_visible(const void *data,
 	case hwmon_chip:
 		switch (attr) {
 		case hwmon_chip_update_interval:
-			return S_IRUGO | S_IWUSR;
+			return 0644;
 		default:
 			return 0;
 		}
@@ -483,7 +431,7 @@ static int lm95245_detect(struct i2c_client *new_client,
 		return -ENODEV;
 	}
 
-	strlcpy(info->type, name, I2C_NAME_SIZE);
+	strscpy(info->type, name, I2C_NAME_SIZE);
 	return 0;
 }
 
@@ -540,36 +488,21 @@ static const struct regmap_config lm95245_regmap_config = {
 	.val_bits = 8,
 	.writeable_reg = lm95245_is_writeable_reg,
 	.volatile_reg = lm95245_is_volatile_reg,
-	.cache_type = REGCACHE_RBTREE,
-	.use_single_rw = true,
+	.cache_type = REGCACHE_MAPLE,
+	.use_single_read = true,
+	.use_single_write = true,
 };
 
-static const u32 lm95245_chip_config[] = {
-	HWMON_C_UPDATE_INTERVAL,
-	0
-};
-
-static const struct hwmon_channel_info lm95245_chip = {
-	.type = hwmon_chip,
-	.config = lm95245_chip_config,
-};
-
-static const u32 lm95245_temp_config[] = {
-	HWMON_T_INPUT | HWMON_T_CRIT | HWMON_T_CRIT_HYST | HWMON_T_CRIT_ALARM,
-	HWMON_T_INPUT | HWMON_T_MAX | HWMON_T_MAX_HYST | HWMON_T_CRIT |
-		HWMON_T_CRIT_HYST | HWMON_T_FAULT | HWMON_T_MAX_ALARM |
-		HWMON_T_CRIT_ALARM | HWMON_T_TYPE | HWMON_T_OFFSET,
-	0
-};
-
-static const struct hwmon_channel_info lm95245_temp = {
-	.type = hwmon_temp,
-	.config = lm95245_temp_config,
-};
-
-static const struct hwmon_channel_info *lm95245_info[] = {
-	&lm95245_chip,
-	&lm95245_temp,
+static const struct hwmon_channel_info * const lm95245_info[] = {
+	HWMON_CHANNEL_INFO(chip,
+			   HWMON_C_UPDATE_INTERVAL),
+	HWMON_CHANNEL_INFO(temp,
+			   HWMON_T_INPUT | HWMON_T_CRIT | HWMON_T_CRIT_HYST |
+			   HWMON_T_CRIT_ALARM,
+			   HWMON_T_INPUT | HWMON_T_MAX | HWMON_T_MAX_HYST |
+			   HWMON_T_CRIT | HWMON_T_CRIT_HYST | HWMON_T_FAULT |
+			   HWMON_T_MAX_ALARM | HWMON_T_CRIT_ALARM |
+			   HWMON_T_TYPE | HWMON_T_OFFSET),
 	NULL
 };
 
@@ -584,8 +517,7 @@ static const struct hwmon_chip_info lm95245_chip_info = {
 	.info = lm95245_info,
 };
 
-static int lm95245_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int lm95245_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct lm95245_data *data;
@@ -599,8 +531,6 @@ static int lm95245_probe(struct i2c_client *client,
 	data->regmap = devm_regmap_init_i2c(client, &lm95245_regmap_config);
 	if (IS_ERR(data->regmap))
 		return PTR_ERR(data->regmap);
-
-	mutex_init(&data->update_lock);
 
 	/* Initialize the LM95245 chip */
 	ret = lm95245_init_client(data);
@@ -616,13 +546,13 @@ static int lm95245_probe(struct i2c_client *client,
 
 /* Driver data (common to all clients) */
 static const struct i2c_device_id lm95245_id[] = {
-	{ "lm95235", 0 },
-	{ "lm95245", 0 },
+	{ .name = "lm95235" },
+	{ .name = "lm95245" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, lm95245_id);
 
-static const struct of_device_id lm95245_of_match[] = {
+static const struct of_device_id __maybe_unused lm95245_of_match[] = {
 	{ .compatible = "national,lm95235" },
 	{ .compatible = "national,lm95245" },
 	{ },

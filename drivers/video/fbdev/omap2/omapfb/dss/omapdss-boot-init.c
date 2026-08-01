@@ -1,18 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014 Texas Instruments
  * Author: Tomi Valkeinen <tomi.valkeinen@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 /*
@@ -57,7 +46,7 @@ static void __init omapdss_update_prop(struct device_node *node, char *compat,
 {
 	struct property *prop;
 
-	prop = kzalloc(sizeof(*prop), GFP_KERNEL);
+	prop = kzalloc_obj(*prop);
 	if (!prop)
 		return;
 
@@ -111,6 +100,8 @@ static void __init omapdss_omapify_node(struct device_node *node)
 
 	new_len = prop->length + strlen(prefix) * num_strs;
 	new_compat = kmalloc(new_len, GFP_KERNEL);
+	if (!new_compat)
+		return;
 
 	omapdss_prefix_strcpy(new_compat, new_len, prop->value, prop->length);
 
@@ -119,8 +110,7 @@ static void __init omapdss_omapify_node(struct device_node *node)
 
 static void __init omapdss_add_to_list(struct device_node *node, bool root)
 {
-	struct dss_conv_node *n = kmalloc(sizeof(struct dss_conv_node),
-		GFP_KERNEL);
+	struct dss_conv_node *n = kmalloc_obj(struct dss_conv_node);
 	if (n) {
 		n->node = node;
 		n->root = root;
@@ -158,8 +148,7 @@ static void __init omapdss_walk_device(struct device_node *node, bool root)
 
 	of_node_put(n);
 
-	n = NULL;
-	while ((n = of_graph_get_next_endpoint(node, n)) != NULL) {
+	for_each_endpoint_of_node(node, n) {
 		struct device_node *pn;
 
 		pn = of_graph_get_remote_port_parent(n);
@@ -193,13 +182,15 @@ static int __init omapdss_boot_init(void)
 
 	dss = of_find_matching_node(NULL, omapdss_of_match);
 
-	if (dss == NULL || !of_device_is_available(dss))
+	if (dss == NULL || !of_device_is_available(dss)) {
+		of_node_put(dss);
 		return 0;
+	}
 
 	omapdss_walk_device(dss, true);
 
 	for_each_available_child_of_node(dss, child) {
-		if (!of_find_property(child, "compatible", NULL))
+		if (!of_property_present(child, "compatible"))
 			continue;
 
 		omapdss_walk_device(child, true);

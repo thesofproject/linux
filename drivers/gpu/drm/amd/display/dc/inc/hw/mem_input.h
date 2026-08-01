@@ -29,25 +29,41 @@
 #include "include/grph_object_id.h"
 
 #include "dml/display_mode_structs.h"
+#include "dml2_0/dml21/inc/dml_top_dchub_registers.h"
 
 struct dchub_init_data;
 struct cstate_pstate_watermarks_st {
 	uint32_t cstate_exit_ns;
+	uint32_t cstate_exit_z8_ns;
+	uint32_t cstate_enter_plus_exit_z8_ns;
 	uint32_t cstate_enter_plus_exit_ns;
 	uint32_t pstate_change_ns;
+	uint32_t fclk_pstate_change_ns;
 };
 
 struct dcn_watermarks {
 	uint32_t pte_meta_urgent_ns;
 	uint32_t urgent_ns;
+	uint32_t frac_urg_bw_nom;
+	uint32_t frac_urg_bw_flip;
+	uint32_t urgent_latency_ns;
 	struct cstate_pstate_watermarks_st cstate_pstate;
+	uint32_t usr_retraining_ns;
 };
 
-struct dcn_watermark_set {
-	struct dcn_watermarks a;
-	struct dcn_watermarks b;
-	struct dcn_watermarks c;
-	struct dcn_watermarks d;
+union dcn_watermark_set {
+	struct {
+		struct dcn_watermarks a;
+		struct dcn_watermarks b;
+		struct dcn_watermarks c;
+		struct dcn_watermarks d;
+	}; // legacy
+	struct {
+		struct dml2_dchub_watermark_regs a;
+		struct dml2_dchub_watermark_regs b;
+		struct dml2_dchub_watermark_regs c;
+		struct dml2_dchub_watermark_regs d;
+	} dcn4x; //dcn4+
 };
 
 struct dce_watermarks {
@@ -64,7 +80,7 @@ struct stutter_modes {
 };
 
 struct mem_input {
-	struct mem_input_funcs *funcs;
+	const struct mem_input_funcs *funcs;
 	struct dc_context *ctx;
 	struct dc_plane_address request_address;
 	struct dc_plane_address current_address;
@@ -104,6 +120,7 @@ struct mem_input_funcs {
 		struct mem_input *mem_input,
 		struct dce_watermarks nbp,
 		struct dce_watermarks stutter,
+		struct dce_watermarks stutter_enter,
 		struct dce_watermarks urgent,
 		uint32_t total_dest_line_time_ns);
 
@@ -133,7 +150,7 @@ struct mem_input_funcs {
 	void (*mem_input_program_pte_vm)(
 		struct mem_input *mem_input,
 		enum surface_pixel_format format,
-		union dc_tiling_info *tiling_info,
+		struct dc_tiling_info *tiling_info,
 		enum dc_rotation_angle rotation);
 
 	void (*mem_input_set_vm_system_aperture_settings)(
@@ -147,8 +164,8 @@ struct mem_input_funcs {
 	void (*mem_input_program_surface_config)(
 		struct mem_input *mem_input,
 		enum surface_pixel_format format,
-		union dc_tiling_info *tiling_info,
-		union plane_size *plane_size,
+		struct dc_tiling_info *tiling_info,
+		struct plane_size *plane_size,
 		enum dc_rotation_angle rotation,
 		struct dc_plane_dcc_param *dcc,
 		bool horizontal_mirror);
@@ -170,6 +187,8 @@ struct mem_input_funcs {
 			const struct dc_cursor_position *pos,
 			const struct dc_cursor_mi_param *param);
 
+	void (*mem_input_clear_tiling)(
+		struct mem_input *mem_input);
 };
 
 #endif

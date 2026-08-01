@@ -17,6 +17,7 @@
 #include <linux/completion.h>
 #include <linux/workqueue.h>
 #include <linux/debugfs.h>
+#include <linux/numa.h>
 
 #define EDAC_DEVICE_NAME_LEN	31
 
@@ -29,15 +30,7 @@ struct device;
 
 extern int edac_op_state;
 
-struct bus_type *edac_get_sysfs_subsys(void);
-int edac_get_report_status(void);
-void edac_set_report_status(int new);
-
-enum {
-	EDAC_REPORTING_ENABLED,
-	EDAC_REPORTING_DISABLED,
-	EDAC_REPORTING_FORCE
-};
+const struct bus_type *edac_get_sysfs_subsys(void);
 
 static inline void opstate_init(void)
 {
@@ -182,11 +175,20 @@ static inline char *mc_event_error_type(const unsigned int err_type)
  * @MEM_RDDR3:		Registered DDR3 RAM
  *			This is a variant of the DDR3 memories.
  * @MEM_LRDDR3:		Load-Reduced DDR3 memory.
+ * @MEM_LPDDR3:		Low-Power DDR3 memory.
  * @MEM_DDR4:		Unbuffered DDR4 RAM
  * @MEM_RDDR4:		Registered DDR4 RAM
  *			This is a variant of the DDR4 memories.
  * @MEM_LRDDR4:		Load-Reduced DDR4 memory.
+ * @MEM_LPDDR4:		Low-Power DDR4 memory.
+ * @MEM_DDR5:		Unbuffered DDR5 RAM
+ * @MEM_RDDR5:		Registered DDR5 RAM
+ * @MEM_LRDDR5:		Load-Reduced DDR5 memory.
+ * @MEM_LPDDR5:		Low-Power DDR5 memory.
  * @MEM_NVDIMM:		Non-volatile RAM
+ * @MEM_WIO2:		Wide I/O 2.
+ * @MEM_HBM2:		High bandwidth Memory Gen 2.
+ * @MEM_HBM3:		High bandwidth Memory Gen 3.
  */
 enum mem_type {
 	MEM_EMPTY = 0,
@@ -207,10 +209,19 @@ enum mem_type {
 	MEM_DDR3,
 	MEM_RDDR3,
 	MEM_LRDDR3,
+	MEM_LPDDR3,
 	MEM_DDR4,
 	MEM_RDDR4,
 	MEM_LRDDR4,
+	MEM_LPDDR4,
+	MEM_DDR5,
+	MEM_RDDR5,
+	MEM_LRDDR5,
+	MEM_LPDDR5,
 	MEM_NVDIMM,
+	MEM_WIO2,
+	MEM_HBM2,
+	MEM_HBM3,
 };
 
 #define MEM_FLAG_EMPTY		BIT(MEM_EMPTY)
@@ -224,19 +235,28 @@ enum mem_type {
 #define MEM_FLAG_DDR		BIT(MEM_DDR)
 #define MEM_FLAG_RDDR		BIT(MEM_RDDR)
 #define MEM_FLAG_RMBS		BIT(MEM_RMBS)
-#define MEM_FLAG_DDR2           BIT(MEM_DDR2)
-#define MEM_FLAG_FB_DDR2        BIT(MEM_FB_DDR2)
-#define MEM_FLAG_RDDR2          BIT(MEM_RDDR2)
-#define MEM_FLAG_XDR            BIT(MEM_XDR)
-#define MEM_FLAG_DDR3           BIT(MEM_DDR3)
-#define MEM_FLAG_RDDR3          BIT(MEM_RDDR3)
-#define MEM_FLAG_DDR4           BIT(MEM_DDR4)
-#define MEM_FLAG_RDDR4          BIT(MEM_RDDR4)
-#define MEM_FLAG_LRDDR4         BIT(MEM_LRDDR4)
-#define MEM_FLAG_NVDIMM         BIT(MEM_NVDIMM)
+#define MEM_FLAG_DDR2		BIT(MEM_DDR2)
+#define MEM_FLAG_FB_DDR2	BIT(MEM_FB_DDR2)
+#define MEM_FLAG_RDDR2		BIT(MEM_RDDR2)
+#define MEM_FLAG_XDR		BIT(MEM_XDR)
+#define MEM_FLAG_DDR3		BIT(MEM_DDR3)
+#define MEM_FLAG_RDDR3		BIT(MEM_RDDR3)
+#define MEM_FLAG_LPDDR3		BIT(MEM_LPDDR3)
+#define MEM_FLAG_DDR4		BIT(MEM_DDR4)
+#define MEM_FLAG_RDDR4		BIT(MEM_RDDR4)
+#define MEM_FLAG_LRDDR4		BIT(MEM_LRDDR4)
+#define MEM_FLAG_LPDDR4		BIT(MEM_LPDDR4)
+#define MEM_FLAG_DDR5		BIT(MEM_DDR5)
+#define MEM_FLAG_RDDR5		BIT(MEM_RDDR5)
+#define MEM_FLAG_LRDDR5		BIT(MEM_LRDDR5)
+#define MEM_FLAG_LPDDR5		BIT(MEM_LPDDR5)
+#define MEM_FLAG_NVDIMM		BIT(MEM_NVDIMM)
+#define MEM_FLAG_WIO2		BIT(MEM_WIO2)
+#define MEM_FLAG_HBM2		BIT(MEM_HBM2)
+#define MEM_FLAG_HBM3		BIT(MEM_HBM3)
 
 /**
- * enum edac-type - Error Detection and Correction capabilities and mode
+ * enum edac_type - Error Detection and Correction capabilities and mode
  * @EDAC_UNKNOWN:	Unknown if ECC is available
  * @EDAC_NONE:		Doesn't support ECC
  * @EDAC_RESERVED:	Reserved ECC type
@@ -316,7 +336,7 @@ enum scrub_type {
 #define OP_OFFLINE		0x300
 
 /**
- * enum edac_mc_layer - memory controller hierarchy layer
+ * enum edac_mc_layer_type - memory controller hierarchy layer
  *
  * @EDAC_MC_LAYER_BRANCH:	memory layer is named "branch"
  * @EDAC_MC_LAYER_CHANNEL:	memory layer is named "channel"
@@ -361,87 +381,16 @@ struct edac_mc_layer {
  */
 #define EDAC_MAX_LAYERS		3
 
-/**
- * EDAC_DIMM_OFF - Macro responsible to get a pointer offset inside a pointer
- *		   array for the element given by [layer0,layer1,layer2]
- *		   position
- *
- * @layers:	a struct edac_mc_layer array, describing how many elements
- *		were allocated for each layer
- * @nlayers:	Number of layers at the @layers array
- * @layer0:	layer0 position
- * @layer1:	layer1 position. Unused if n_layers < 2
- * @layer2:	layer2 position. Unused if n_layers < 3
- *
- * For 1 layer, this macro returns "var[layer0] - var";
- *
- * For 2 layers, this macro is similar to allocate a bi-dimensional array
- * and to return "var[layer0][layer1] - var";
- *
- * For 3 layers, this macro is similar to allocate a tri-dimensional array
- * and to return "var[layer0][layer1][layer2] - var".
- *
- * A loop could be used here to make it more generic, but, as we only have
- * 3 layers, this is a little faster.
- *
- * By design, layers can never be 0 or more than 3. If that ever happens,
- * a NULL is returned, causing an OOPS during the memory allocation routine,
- * with would point to the developer that he's doing something wrong.
- */
-#define EDAC_DIMM_OFF(layers, nlayers, layer0, layer1, layer2) ({		\
-	int __i;							\
-	if ((nlayers) == 1)						\
-		__i = layer0;						\
-	else if ((nlayers) == 2)					\
-		__i = (layer1) + ((layers[1]).size * (layer0));		\
-	else if ((nlayers) == 3)					\
-		__i = (layer2) + ((layers[2]).size * ((layer1) +	\
-			    ((layers[1]).size * (layer0))));		\
-	else								\
-		__i = -EINVAL;						\
-	__i;								\
-})
-
-/**
- * EDAC_DIMM_PTR - Macro responsible to get a pointer inside a pointer array
- *		   for the element given by [layer0,layer1,layer2] position
- *
- * @layers:	a struct edac_mc_layer array, describing how many elements
- *		were allocated for each layer
- * @var:	name of the var where we want to get the pointer
- *		(like mci->dimms)
- * @nlayers:	Number of layers at the @layers array
- * @layer0:	layer0 position
- * @layer1:	layer1 position. Unused if n_layers < 2
- * @layer2:	layer2 position. Unused if n_layers < 3
- *
- * For 1 layer, this macro returns "var[layer0]";
- *
- * For 2 layers, this macro is similar to allocate a bi-dimensional array
- * and to return "var[layer0][layer1]";
- *
- * For 3 layers, this macro is similar to allocate a tri-dimensional array
- * and to return "var[layer0][layer1][layer2]";
- */
-#define EDAC_DIMM_PTR(layers, var, nlayers, layer0, layer1, layer2) ({	\
-	typeof(*var) __p;						\
-	int ___i = EDAC_DIMM_OFF(layers, nlayers, layer0, layer1, layer2);	\
-	if (___i < 0)							\
-		__p = NULL;						\
-	else								\
-		__p = (var)[___i];					\
-	__p;								\
-})
-
 struct dimm_info {
 	struct device dev;
 
 	char label[EDAC_MC_LABEL_LEN + 1];	/* DIMM label on motherboard */
 
 	/* Memory location data */
-	unsigned location[EDAC_MAX_LAYERS];
+	unsigned int location[EDAC_MAX_LAYERS];
 
 	struct mem_ctl_info *mci;	/* the parent */
+	unsigned int idx;		/* index within the parent dimm array */
 
 	u32 grain;		/* granularity of reported error in bytes */
 	enum dev_type dtype;	/* memory device type */
@@ -450,7 +399,12 @@ struct dimm_info {
 
 	u32 nr_pages;			/* number of pages on this dimm */
 
-	unsigned csrow, cschannel;	/* Points to the old API data */
+	unsigned int csrow, cschannel;	/* Points to the old API data */
+
+	u16 smbios_handle;              /* Handle for SMBIOS type 17 */
+
+	u32 ce_count;
+	u32 ue_count;
 };
 
 /**
@@ -510,6 +464,7 @@ struct errcount_attribute_data {
  * struct edac_raw_error_desc - Raw error report structure
  * @grain:			minimum granularity for an error report, in bytes
  * @error_count:		number of errors of the same type
+ * @type:			severity of the error (CE/UE/Fatal)
  * @top_layer:			top layer of the error (layer[0])
  * @mid_layer:			middle layer of the error (layer[1])
  * @low_layer:			low layer of the error (layer[2])
@@ -521,20 +476,14 @@ struct errcount_attribute_data {
  * @location:			location of the error
  * @label:			label of the affected DIMM(s)
  * @other_detail:		other driver-specific detail about the error
- * @enable_per_layer_report:	if false, the error affects all layers
- *				(typically, a memory controller error)
  */
 struct edac_raw_error_desc {
-	/*
-	 * NOTE: everything before grain won't be cleaned by
-	 * edac_raw_error_desc_clean()
-	 */
 	char location[LOCATION_SIZE];
 	char label[(EDAC_MC_LABEL_LEN + 1 + sizeof(OTHER_LABEL)) * EDAC_MAX_LABELS];
 	long grain;
 
-	/* the vars below and grain will be cleaned on every new error report */
 	u16 error_count;
+	enum hw_event_mc_err_type type;
 	int top_layer;
 	int mid_layer;
 	int low_layer;
@@ -543,14 +492,13 @@ struct edac_raw_error_desc {
 	unsigned long syndrome;
 	const char *msg;
 	const char *other_detail;
-	bool enable_per_layer_report;
 };
 
 /* MEMORY controller information structure
  */
 struct mem_ctl_info {
 	struct device			dev;
-	struct bus_type			*bus;
+	const struct bus_type		*bus;
 
 	struct list_head link;	/* for global list of mem_ctl_info structs */
 
@@ -594,25 +542,14 @@ struct mem_ctl_info {
 					   unsigned long page);
 	int mc_idx;
 	struct csrow_info **csrows;
-	unsigned nr_csrows, num_cschannel;
+	unsigned int nr_csrows, num_cschannel;
 
-	/*
-	 * Memory Controller hierarchy
-	 *
-	 * There are basically two types of memory controller: the ones that
-	 * sees memory sticks ("dimms"), and the ones that sees memory ranks.
-	 * All old memory controllers enumerate memories per rank, but most
-	 * of the recent drivers enumerate memories per DIMM, instead.
-	 * When the memory controller is per rank, csbased is true.
-	 */
-	unsigned n_layers;
-	struct edac_mc_layer *layers;
 	bool csbased;
 
 	/*
 	 * DIMM info. Will eventually remove the entire csrows_info some day
 	 */
-	unsigned tot_dimms;
+	unsigned int tot_dimms;
 	struct dimm_info **dimms;
 
 	/*
@@ -633,7 +570,6 @@ struct mem_ctl_info {
 	 */
 	u32 ce_noinfo_count, ue_noinfo_count;
 	u32 ue_mc, ce_mc;
-	u32 *ce_per_layer[EDAC_MAX_LAYERS], *ue_per_layer[EDAC_MAX_LAYERS];
 
 	struct completion complete;
 
@@ -665,11 +601,290 @@ struct mem_ctl_info {
 	u8 fake_inject_layer[EDAC_MAX_LAYERS];
 	bool fake_inject_ue;
 	u16 fake_inject_count;
+
+	/*
+	 * Memory Controller hierarchy
+	 *
+	 * There are basically two types of memory controller: the ones that
+	 * sees memory sticks ("dimms"), and the ones that sees memory ranks.
+	 * All old memory controllers enumerate memories per rank, but most
+	 * of the recent drivers enumerate memories per DIMM, instead.
+	 * When the memory controller is per rank, csbased is true.
+	 */
+	unsigned int n_layers;
+	struct edac_mc_layer layers[] __counted_by(n_layers);
 };
 
-/*
- * Maximum number of memory controllers in the coherent fabric.
- */
-#define EDAC_MAX_MCS	16
+#define mci_for_each_dimm(mci, dimm)				\
+	for ((dimm) = (mci)->dimms[0];				\
+	     (dimm);						\
+	     (dimm) = (dimm)->idx + 1 < (mci)->tot_dimms	\
+		     ? (mci)->dimms[(dimm)->idx + 1]		\
+		     : NULL)
 
-#endif
+/**
+ * edac_get_dimm - Get DIMM info from a memory controller given by
+ *                 [layer0,layer1,layer2] position
+ *
+ * @mci:	MC descriptor struct mem_ctl_info
+ * @layer0:	layer0 position
+ * @layer1:	layer1 position. Unused if n_layers < 2
+ * @layer2:	layer2 position. Unused if n_layers < 3
+ *
+ * For 1 layer, this function returns "dimms[layer0]";
+ *
+ * For 2 layers, this function is similar to allocating a two-dimensional
+ * array and returning "dimms[layer0][layer1]";
+ *
+ * For 3 layers, this function is similar to allocating a tri-dimensional
+ * array and returning "dimms[layer0][layer1][layer2]";
+ */
+static inline struct dimm_info *edac_get_dimm(struct mem_ctl_info *mci,
+	int layer0, int layer1, int layer2)
+{
+	int index;
+
+	if (layer0 < 0
+	    || (mci->n_layers > 1 && layer1 < 0)
+	    || (mci->n_layers > 2 && layer2 < 0))
+		return NULL;
+
+	index = layer0;
+
+	if (mci->n_layers > 1)
+		index = index * mci->layers[1].size + layer1;
+
+	if (mci->n_layers > 2)
+		index = index * mci->layers[2].size + layer2;
+
+	if (index < 0 || index >= mci->tot_dimms)
+		return NULL;
+
+	if (WARN_ON_ONCE(mci->dimms[index]->idx != index))
+		return NULL;
+
+	return mci->dimms[index];
+}
+
+#define EDAC_FEAT_NAME_LEN	128
+
+/* RAS feature type */
+enum edac_dev_feat {
+	RAS_FEAT_SCRUB,
+	RAS_FEAT_ECS,
+	RAS_FEAT_MEM_REPAIR,
+	RAS_FEAT_MAX
+};
+
+/**
+ * struct edac_scrub_ops - scrub device operations (all elements optional)
+ * @read_addr: read base address of scrubbing range.
+ * @read_size: read offset of scrubbing range.
+ * @write_addr: set base address of the scrubbing range.
+ * @write_size: set offset of the scrubbing range.
+ * @get_enabled_bg: check if currently performing background scrub.
+ * @set_enabled_bg: start or stop a bg-scrub.
+ * @get_min_cycle: get minimum supported scrub cycle duration in seconds.
+ * @get_max_cycle: get maximum supported scrub cycle duration in seconds.
+ * @get_cycle_duration: get current scrub cycle duration in seconds.
+ * @set_cycle_duration: set current scrub cycle duration in seconds.
+ */
+struct edac_scrub_ops {
+	int (*read_addr)(struct device *dev, void *drv_data, u64 *base);
+	int (*read_size)(struct device *dev, void *drv_data, u64 *size);
+	int (*write_addr)(struct device *dev, void *drv_data, u64 base);
+	int (*write_size)(struct device *dev, void *drv_data, u64 size);
+	int (*get_enabled_bg)(struct device *dev, void *drv_data, bool *enable);
+	int (*set_enabled_bg)(struct device *dev, void *drv_data, bool enable);
+	int (*get_min_cycle)(struct device *dev, void *drv_data,  u32 *min);
+	int (*get_max_cycle)(struct device *dev, void *drv_data,  u32 *max);
+	int (*get_cycle_duration)(struct device *dev, void *drv_data, u32 *cycle);
+	int (*set_cycle_duration)(struct device *dev, void *drv_data, u32 cycle);
+};
+
+#if IS_ENABLED(CONFIG_EDAC_SCRUB)
+int edac_scrub_get_desc(struct device *scrub_dev,
+			const struct attribute_group **attr_groups,
+			u8 instance);
+#else
+static inline int edac_scrub_get_desc(struct device *scrub_dev,
+				      const struct attribute_group **attr_groups,
+				      u8 instance)
+{ return -EOPNOTSUPP; }
+#endif /* CONFIG_EDAC_SCRUB */
+
+/**
+ * struct edac_ecs_ops - ECS device operations (all elements optional)
+ * @get_log_entry_type: read the log entry type value.
+ * @set_log_entry_type: set the log entry type value.
+ * @get_mode: read the mode value.
+ * @set_mode: set the mode value.
+ * @reset: reset the ECS counter.
+ * @get_threshold: read the threshold count per gigabits of memory cells.
+ * @set_threshold: set the threshold count per gigabits of memory cells.
+ */
+struct edac_ecs_ops {
+	int (*get_log_entry_type)(struct device *dev, void *drv_data, int fru_id, u32 *val);
+	int (*set_log_entry_type)(struct device *dev, void *drv_data, int fru_id, u32 val);
+	int (*get_mode)(struct device *dev, void *drv_data, int fru_id, u32 *val);
+	int (*set_mode)(struct device *dev, void *drv_data, int fru_id, u32 val);
+	int (*reset)(struct device *dev, void *drv_data, int fru_id, u32 val);
+	int (*get_threshold)(struct device *dev, void *drv_data, int fru_id, u32 *threshold);
+	int (*set_threshold)(struct device *dev, void *drv_data, int fru_id, u32 threshold);
+};
+
+struct edac_ecs_ex_info {
+	u16 num_media_frus;
+};
+
+#if IS_ENABLED(CONFIG_EDAC_ECS)
+int edac_ecs_get_desc(struct device *ecs_dev,
+		      const struct attribute_group **attr_groups,
+		      u16 num_media_frus);
+#else
+static inline int edac_ecs_get_desc(struct device *ecs_dev,
+				    const struct attribute_group **attr_groups,
+				    u16 num_media_frus)
+{ return -EOPNOTSUPP; }
+#endif /* CONFIG_EDAC_ECS */
+
+enum edac_mem_repair_type {
+	EDAC_REPAIR_PPR,
+	EDAC_REPAIR_CACHELINE_SPARING,
+	EDAC_REPAIR_ROW_SPARING,
+	EDAC_REPAIR_BANK_SPARING,
+	EDAC_REPAIR_RANK_SPARING,
+	EDAC_REPAIR_MAX
+};
+
+extern const char * const edac_repair_type[];
+
+enum edac_mem_repair_cmd {
+	EDAC_DO_MEM_REPAIR = 1,
+};
+
+/**
+ * struct edac_mem_repair_ops - memory repair operations
+ * (all elements are optional except do_repair, set_hpa/set_dpa)
+ * @get_repair_type: get the memory repair type, listed in
+ *			 enum edac_mem_repair_function.
+ * @get_persist_mode: get the current persist mode.
+ *		      false - Soft repair type (temporary repair).
+ *		      true - Hard memory repair type (permanent repair).
+ * @set_persist_mode: set the persist mode of the memory repair instance.
+ * @get_repair_safe_when_in_use: get whether memory media is accessible and
+ *				 data is retained during repair operation.
+ * @get_hpa: get current host physical address (HPA) of memory to repair.
+ * @set_hpa: set host physical address (HPA) of memory to repair.
+ * @get_min_hpa: get the minimum supported host physical address (HPA).
+ * @get_max_hpa: get the maximum supported host physical address (HPA).
+ * @get_dpa: get current device physical address (DPA) of memory to repair.
+ * @set_dpa: set device physical address (DPA) of memory to repair.
+ *	     In some states of system configuration (e.g. before address decoders
+ *	     have been configured), memory devices (e.g. CXL) may not have an active
+ *	     mapping in the host physical address map. As such, the memory
+ *	     to repair must be identified by a device specific physical addressing
+ *	     scheme using a device physical address(DPA). The DPA and other control
+ *	     attributes to use for the repair operations will be presented in related
+ *	     error records.
+ * @get_min_dpa: get the minimum supported device physical address (DPA).
+ * @get_max_dpa: get the maximum supported device physical address (DPA).
+ * @get_nibble_mask: get current nibble mask of memory to repair.
+ * @set_nibble_mask: set nibble mask of memory to repair.
+ * @get_bank_group: get current bank group of memory to repair.
+ * @set_bank_group: set bank group of memory to repair.
+ * @get_bank: get current bank of memory to repair.
+ * @set_bank: set bank of memory to repair.
+ * @get_rank: get current rank of memory to repair.
+ * @set_rank: set rank of memory to repair.
+ * @get_row: get current row of memory to repair.
+ * @set_row: set row of memory to repair.
+ * @get_column: get current column of memory to repair.
+ * @set_column: set column of memory to repair.
+ * @get_channel: get current channel of memory to repair.
+ * @set_channel: set channel of memory to repair.
+ * @get_sub_channel: get current subchannel of memory to repair.
+ * @set_sub_channel: set subchannel of memory to repair.
+ * @do_repair: Issue memory repair operation for the HPA/DPA and
+ *	       other control attributes set for the memory to repair.
+ *
+ * All elements are optional except do_repair and at least one of set_hpa/set_dpa.
+ */
+struct edac_mem_repair_ops {
+	int (*get_repair_type)(struct device *dev, void *drv_data, const char **type);
+	int (*get_persist_mode)(struct device *dev, void *drv_data, bool *persist);
+	int (*set_persist_mode)(struct device *dev, void *drv_data, bool persist);
+	int (*get_repair_safe_when_in_use)(struct device *dev, void *drv_data, bool *safe);
+	int (*get_hpa)(struct device *dev, void *drv_data, u64 *hpa);
+	int (*set_hpa)(struct device *dev, void *drv_data, u64 hpa);
+	int (*get_min_hpa)(struct device *dev, void *drv_data, u64 *hpa);
+	int (*get_max_hpa)(struct device *dev, void *drv_data, u64 *hpa);
+	int (*get_dpa)(struct device *dev, void *drv_data, u64 *dpa);
+	int (*set_dpa)(struct device *dev, void *drv_data, u64 dpa);
+	int (*get_min_dpa)(struct device *dev, void *drv_data, u64 *dpa);
+	int (*get_max_dpa)(struct device *dev, void *drv_data, u64 *dpa);
+	int (*get_nibble_mask)(struct device *dev, void *drv_data, u32 *val);
+	int (*set_nibble_mask)(struct device *dev, void *drv_data, u32 val);
+	int (*get_bank_group)(struct device *dev, void *drv_data, u32 *val);
+	int (*set_bank_group)(struct device *dev, void *drv_data, u32 val);
+	int (*get_bank)(struct device *dev, void *drv_data, u32 *val);
+	int (*set_bank)(struct device *dev, void *drv_data, u32 val);
+	int (*get_rank)(struct device *dev, void *drv_data, u32 *val);
+	int (*set_rank)(struct device *dev, void *drv_data, u32 val);
+	int (*get_row)(struct device *dev, void *drv_data, u32 *val);
+	int (*set_row)(struct device *dev, void *drv_data, u32 val);
+	int (*get_column)(struct device *dev, void *drv_data, u32 *val);
+	int (*set_column)(struct device *dev, void *drv_data, u32 val);
+	int (*get_channel)(struct device *dev, void *drv_data, u32 *val);
+	int (*set_channel)(struct device *dev, void *drv_data, u32 val);
+	int (*get_sub_channel)(struct device *dev, void *drv_data, u32 *val);
+	int (*set_sub_channel)(struct device *dev, void *drv_data, u32 val);
+	int (*do_repair)(struct device *dev, void *drv_data, u32 val);
+};
+
+#if IS_ENABLED(CONFIG_EDAC_MEM_REPAIR)
+int edac_mem_repair_get_desc(struct device *dev,
+			     const struct attribute_group **attr_groups,
+			     u8 instance);
+#else
+static inline int edac_mem_repair_get_desc(struct device *dev,
+					   const struct attribute_group **attr_groups,
+					   u8 instance)
+{ return -EOPNOTSUPP; }
+#endif /* CONFIG_EDAC_MEM_REPAIR */
+
+/* EDAC device feature information structure */
+struct edac_dev_data {
+	union {
+		const struct edac_scrub_ops *scrub_ops;
+		const struct edac_ecs_ops *ecs_ops;
+		const struct edac_mem_repair_ops *mem_repair_ops;
+	};
+	u8 instance;
+	void *private;
+};
+
+struct edac_dev_feat_ctx {
+	struct device dev;
+	void *private;
+	struct edac_dev_data *scrub;
+	struct edac_dev_data ecs;
+	struct edac_dev_data *mem_repair;
+};
+
+struct edac_dev_feature {
+	enum edac_dev_feat ft_type;
+	u8 instance;
+	union {
+		const struct edac_scrub_ops *scrub_ops;
+		const struct edac_ecs_ops *ecs_ops;
+		const struct edac_mem_repair_ops *mem_repair_ops;
+	};
+	void *ctx;
+	struct edac_ecs_ex_info ecs_info;
+};
+
+int edac_dev_register(struct device *parent, char *dev_name,
+		      void *parent_pvt_data, int num_features,
+		      const struct edac_dev_feature *ras_features);
+#endif /* _LINUX_EDAC_H_ */

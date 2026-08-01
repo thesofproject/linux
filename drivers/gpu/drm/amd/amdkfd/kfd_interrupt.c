@@ -1,5 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0 OR MIT
 /*
- * Copyright 2014 Advanced Micro Devices, Inc.
+ * Copyright 2014-2022 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -45,28 +46,36 @@
 #include <linux/kfifo.h>
 #include "kfd_priv.h"
 
-#define KFD_IH_NUM_ENTRIES 8192
+#define KFD_IH_NUM_ENTRIES 16384
 
 static void interrupt_wq(struct work_struct *);
 
-int kfd_interrupt_init(struct kfd_dev *kfd)
+int kfd_interrupt_init(struct kfd_node *node)
 {
 	int r;
 
-	r = kfifo_alloc(&kfd->ih_fifo,
-		KFD_IH_NUM_ENTRIES * kfd->device_info->ih_ring_entry_size,
+	r = kfifo_alloc(&node->ih_fifo,
+		KFD_IH_NUM_ENTRIES * node->kfd->device_info.ih_ring_entry_size,
 		GFP_KERNEL);
 	if (r) {
-		dev_err(kfd_chardev(), "Failed to allocate IH fifo\n");
+		dev_err(node->adev->dev, "Failed to allocate IH fifo\n");
 		return r;
 	}
 
-	kfd->ih_wq = alloc_workqueue("KFD IH", WQ_HIGHPRI, 1);
-	spin_lock_init(&kfd->interrupt_lock);
+	if (!node->kfd->ih_wq) {
+		node->kfd->ih_wq = alloc_workqueue("KFD IH", WQ_HIGHPRI | WQ_UNBOUND,
+						   node->kfd->num_nodes);
+		if (unlikely(!node->kfd->ih_wq)) {
+			kfifo_free(&node->ih_fifo);
+			dev_err(node->adev->dev, "Failed to allocate KFD IH workqueue\n");
+			return -ENOMEM;
+		}
+	}
+	spin_lock_init(&node->interrupt_lock);
 
-	INIT_WORK(&kfd->interrupt_work, interrupt_wq);
+	INIT_WORK(&node->interrupt_work, interrupt_wq);
 
-	kfd->interrupts_active = true;
+	node->interrupts_active = true;
 
 	/*
 	 * After this function returns, the interrupt will be enabled. This
@@ -78,7 +87,7 @@ int kfd_interrupt_init(struct kfd_dev *kfd)
 	return 0;
 }
 
-void kfd_interrupt_exit(struct kfd_dev *kfd)
+void kfd_interrupt_exit(struct kfd_node *node)
 {
 	/*
 	 * Stop the interrupt handler from writing to the ring and scheduling
@@ -87,75 +96,73 @@ void kfd_interrupt_exit(struct kfd_dev *kfd)
 	 */
 	unsigned long flags;
 
-	spin_lock_irqsave(&kfd->interrupt_lock, flags);
-	kfd->interrupts_active = false;
-	spin_unlock_irqrestore(&kfd->interrupt_lock, flags);
-
-	/*
-	 * flush_work ensures that there are no outstanding
-	 * work-queue items that will access interrupt_ring. New work items
-	 * can't be created because we stopped interrupt handling above.
-	 */
-	flush_workqueue(kfd->ih_wq);
-
-	kfifo_free(&kfd->ih_fifo);
+	spin_lock_irqsave(&node->interrupt_lock, flags);
+	node->interrupts_active = false;
+	spin_unlock_irqrestore(&node->interrupt_lock, flags);
+	kfifo_free(&node->ih_fifo);
 }
 
 /*
  * Assumption: single reader/writer. This function is not re-entrant
  */
-bool enqueue_ih_ring_entry(struct kfd_dev *kfd,	const void *ih_ring_entry)
+bool enqueue_ih_ring_entry(struct kfd_node *node, const void *ih_ring_entry)
 {
-	int count;
-
-	count = kfifo_in(&kfd->ih_fifo, ih_ring_entry,
-				kfd->device_info->ih_ring_entry_size);
-	if (count != kfd->device_info->ih_ring_entry_size) {
-		dev_err_ratelimited(kfd_chardev(),
-			"Interrupt ring overflow, dropping interrupt %d\n",
-			count);
+	if (kfifo_is_full(&node->ih_fifo)) {
+		dev_warn_ratelimited(node->adev->dev, "KFD node %d ih_fifo overflow\n",
+				     node->node_id);
 		return false;
 	}
 
+	kfifo_in(&node->ih_fifo, ih_ring_entry, node->kfd->device_info.ih_ring_entry_size);
 	return true;
 }
 
 /*
  * Assumption: single reader/writer. This function is not re-entrant
  */
-static bool dequeue_ih_ring_entry(struct kfd_dev *kfd, void *ih_ring_entry)
+static bool dequeue_ih_ring_entry(struct kfd_node *node, u32 **ih_ring_entry)
 {
 	int count;
 
-	count = kfifo_out(&kfd->ih_fifo, ih_ring_entry,
-				kfd->device_info->ih_ring_entry_size);
+	if (kfifo_is_empty(&node->ih_fifo))
+		return false;
 
-	WARN_ON(count && count != kfd->device_info->ih_ring_entry_size);
-
-	return count == kfd->device_info->ih_ring_entry_size;
+	count = kfifo_out_linear_ptr(&node->ih_fifo, ih_ring_entry,
+				     node->kfd->device_info.ih_ring_entry_size);
+	WARN_ON(count != node->kfd->device_info.ih_ring_entry_size);
+	return count == node->kfd->device_info.ih_ring_entry_size;
 }
 
 static void interrupt_wq(struct work_struct *work)
 {
-	struct kfd_dev *dev = container_of(work, struct kfd_dev,
-						interrupt_work);
+	struct kfd_node *dev = container_of(work, struct kfd_node, interrupt_work);
+	uint32_t *ih_ring_entry;
+	unsigned long start_jiffies = jiffies;
 
-	uint32_t ih_ring_entry[DIV_ROUND_UP(
-				dev->device_info->ih_ring_entry_size,
-				sizeof(uint32_t))];
-
-	while (dequeue_ih_ring_entry(dev, ih_ring_entry))
-		dev->device_info->event_interrupt_class->interrupt_wq(dev,
+	while (dequeue_ih_ring_entry(dev, &ih_ring_entry)) {
+		dev->kfd->device_info.event_interrupt_class->interrupt_wq(dev,
 								ih_ring_entry);
+		kfifo_skip_count(&dev->ih_fifo, dev->kfd->device_info.ih_ring_entry_size);
+
+		if (time_is_before_jiffies(start_jiffies + HZ)) {
+			/* If we spent more than a second processing signals,
+			 * reschedule the worker to avoid soft-lockup warnings
+			 */
+			queue_work(dev->kfd->ih_wq, &dev->interrupt_work);
+			break;
+		}
+	}
 }
 
-bool interrupt_is_wanted(struct kfd_dev *dev, const uint32_t *ih_ring_entry)
+bool interrupt_is_wanted(struct kfd_node *dev,
+			const uint32_t *ih_ring_entry,
+			uint32_t *patched_ihre, bool *flag)
 {
 	/* integer and bitwise OR so there is no boolean short-circuiting */
 	unsigned int wanted = 0;
 
-	wanted |= dev->device_info->event_interrupt_class->interrupt_isr(dev,
-								ih_ring_entry);
+	wanted |= dev->kfd->device_info.event_interrupt_class->interrupt_isr(dev,
+					 ih_ring_entry, patched_ihre, flag);
 
 	return wanted != 0;
 }

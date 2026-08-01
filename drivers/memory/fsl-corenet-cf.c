@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * CoreNet Coherency Fabric error reporting
  *
  * Copyright 2014 Freescale Semiconductor Inc.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/interrupt.h>
@@ -14,10 +10,8 @@
 #include <linux/irq.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_address.h>
-#include <linux/of_device.h>
-#include <linux/of_irq.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 
 enum ccf_version {
 	CCF1,
@@ -176,33 +170,19 @@ out:
 static int ccf_probe(struct platform_device *pdev)
 {
 	struct ccf_private *ccf;
-	struct resource *r;
-	const struct of_device_id *match;
 	u32 errinten;
 	int ret, irq;
-
-	match = of_match_device(ccf_matches, &pdev->dev);
-	if (WARN_ON(!match))
-		return -ENODEV;
 
 	ccf = devm_kzalloc(&pdev->dev, sizeof(*ccf), GFP_KERNEL);
 	if (!ccf)
 		return -ENOMEM;
 
-	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!r) {
-		dev_err(&pdev->dev, "%s: no mem resource\n", __func__);
-		return -ENXIO;
-	}
-
-	ccf->regs = devm_ioremap_resource(&pdev->dev, r);
-	if (IS_ERR(ccf->regs)) {
-		dev_err(&pdev->dev, "%s: can't map mem resource\n", __func__);
+	ccf->regs = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(ccf->regs))
 		return PTR_ERR(ccf->regs);
-	}
 
 	ccf->dev = &pdev->dev;
-	ccf->info = match->data;
+	ccf->info = device_get_match_data(&pdev->dev);
 	ccf->err_regs = ccf->regs + ccf->info->err_reg_offs;
 
 	if (ccf->info->has_brr) {
@@ -215,10 +195,8 @@ static int ccf_probe(struct platform_device *pdev)
 	dev_set_drvdata(&pdev->dev, ccf);
 
 	irq = platform_get_irq(pdev, 0);
-	if (!irq) {
-		dev_err(&pdev->dev, "%s: no irq\n", __func__);
-		return -ENXIO;
-	}
+	if (irq < 0)
+		return irq;
 
 	ret = devm_request_irq(&pdev->dev, irq, ccf_irq, 0, pdev->name, ccf);
 	if (ret) {
@@ -245,7 +223,7 @@ static int ccf_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int ccf_remove(struct platform_device *pdev)
+static void ccf_remove(struct platform_device *pdev)
 {
 	struct ccf_private *ccf = dev_get_drvdata(&pdev->dev);
 
@@ -263,8 +241,6 @@ static int ccf_remove(struct platform_device *pdev)
 		iowrite32be(0, &ccf->err_regs->errinten);
 		break;
 	}
-
-	return 0;
 }
 
 static struct platform_driver ccf_driver = {

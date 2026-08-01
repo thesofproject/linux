@@ -1,25 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2011 Freescale Semiconductor, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/soc.h>
@@ -32,9 +18,9 @@
 static int mxs_sgtl5000_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *codec_dai = rtd->codec_dai;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	unsigned int rate = params_rate(params);
 	u32 mclk;
 	int ret;
@@ -73,23 +59,34 @@ static const struct snd_soc_ops mxs_sgtl5000_hifi_ops = {
 };
 
 #define MXS_SGTL5000_DAI_FMT (SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | \
-	SND_SOC_DAIFMT_CBS_CFS)
+	SND_SOC_DAIFMT_CBC_CFC)
+
+
+SND_SOC_DAILINK_DEFS(hifi_tx,
+	DAILINK_COMP_ARRAY(COMP_EMPTY()),
+	DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "sgtl5000")),
+	DAILINK_COMP_ARRAY(COMP_EMPTY()));
+
+SND_SOC_DAILINK_DEFS(hifi_rx,
+	DAILINK_COMP_ARRAY(COMP_EMPTY()),
+	DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "sgtl5000")),
+	DAILINK_COMP_ARRAY(COMP_EMPTY()));
 
 static struct snd_soc_dai_link mxs_sgtl5000_dai[] = {
 	{
 		.name		= "HiFi Tx",
 		.stream_name	= "HiFi Playback",
-		.codec_dai_name	= "sgtl5000",
 		.dai_fmt	= MXS_SGTL5000_DAI_FMT,
 		.ops		= &mxs_sgtl5000_hifi_ops,
 		.playback_only	= true,
+		SND_SOC_DAILINK_REG(hifi_tx),
 	}, {
 		.name		= "HiFi Rx",
 		.stream_name	= "HiFi Capture",
-		.codec_dai_name	= "sgtl5000",
 		.dai_fmt	= MXS_SGTL5000_DAI_FMT,
 		.ops		= &mxs_sgtl5000_hifi_ops,
 		.capture_only	= true,
+		SND_SOC_DAILINK_REG(hifi_rx),
 	},
 };
 
@@ -120,16 +117,19 @@ static int mxs_sgtl5000_probe(struct platform_device *pdev)
 	codec_np = of_parse_phandle(np, "audio-codec", 0);
 	if (!saif_np[0] || !saif_np[1] || !codec_np) {
 		dev_err(&pdev->dev, "phandle missing or invalid\n");
+		of_node_put(codec_np);
+		of_node_put(saif_np[0]);
+		of_node_put(saif_np[1]);
 		return -EINVAL;
 	}
 
 	for (i = 0; i < 2; i++) {
-		mxs_sgtl5000_dai[i].codec_name = NULL;
-		mxs_sgtl5000_dai[i].codec_of_node = codec_np;
-		mxs_sgtl5000_dai[i].cpu_dai_name = NULL;
-		mxs_sgtl5000_dai[i].cpu_of_node = saif_np[i];
-		mxs_sgtl5000_dai[i].platform_name = NULL;
-		mxs_sgtl5000_dai[i].platform_of_node = saif_np[i];
+		mxs_sgtl5000_dai[i].codecs->name = NULL;
+		mxs_sgtl5000_dai[i].codecs->of_node = codec_np;
+		mxs_sgtl5000_dai[i].cpus->dai_name = NULL;
+		mxs_sgtl5000_dai[i].cpus->of_node = saif_np[i];
+		mxs_sgtl5000_dai[i].platforms->name = NULL;
+		mxs_sgtl5000_dai[i].platforms->of_node = saif_np[i];
 	}
 
 	of_node_put(codec_np);
@@ -149,7 +149,7 @@ static int mxs_sgtl5000_probe(struct platform_device *pdev)
 
 	card->dev = &pdev->dev;
 
-	if (of_find_property(np, "audio-routing", NULL)) {
+	if (of_property_present(np, "audio-routing")) {
 		card->dapm_widgets = mxs_sgtl5000_dapm_widgets;
 		card->num_dapm_widgets = ARRAY_SIZE(mxs_sgtl5000_dapm_widgets);
 
@@ -157,26 +157,23 @@ static int mxs_sgtl5000_probe(struct platform_device *pdev)
 		if (ret) {
 			dev_err(&pdev->dev, "failed to parse audio-routing (%d)\n",
 				ret);
+			mxs_saif_put_mclk(0);
 			return ret;
 		}
 	}
 
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret) {
-		if (ret != -EPROBE_DEFER)
-			dev_err(&pdev->dev, "snd_soc_register_card failed (%d)\n",
-				ret);
-		return ret;
+		mxs_saif_put_mclk(0);
+		return dev_err_probe(&pdev->dev, ret, "snd_soc_register_card failed\n");
 	}
 
 	return 0;
 }
 
-static int mxs_sgtl5000_remove(struct platform_device *pdev)
+static void mxs_sgtl5000_remove(struct platform_device *pdev)
 {
 	mxs_saif_put_mclk(0);
-
-	return 0;
 }
 
 static const struct of_device_id mxs_sgtl5000_dt_ids[] = {

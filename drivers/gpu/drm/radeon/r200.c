@@ -25,7 +25,7 @@
  *          Alex Deucher
  *          Jerome Glisse
  */
-#include <drm/drmP.h>
+
 #include <drm/radeon_drm.h>
 #include "radeon_reg.h"
 #include "radeon.h"
@@ -84,7 +84,7 @@ struct radeon_fence *r200_copy_dma(struct radeon_device *rdev,
 				   uint64_t src_offset,
 				   uint64_t dst_offset,
 				   unsigned num_gpu_pages,
-				   struct reservation_object *resv)
+				   struct dma_resv *resv)
 {
 	struct radeon_ring *ring = &rdev->ring[RADEON_RING_TYPE_GFX_INDEX];
 	struct radeon_fence *fence;
@@ -163,8 +163,8 @@ int r200_packet0_check(struct radeon_cs_parser *p,
 	case RADEON_CRTC_GUI_TRIG_VLINE:
 		r = r100_cs_packet_parse_vline(p);
 		if (r) {
-			DRM_ERROR("No reloc for ib[%d]=0x%04X\n",
-				  idx, reg);
+			dev_warn_once(p->dev, "No reloc for ib[%d]=0x%04X\n",
+				      idx, reg);
 			radeon_cs_dump_packet(p, pkt);
 			return r;
 		}
@@ -180,8 +180,8 @@ int r200_packet0_check(struct radeon_cs_parser *p,
 	case RADEON_RB3D_DEPTHOFFSET:
 		r = radeon_cs_packet_next_reloc(p, &reloc, 0);
 		if (r) {
-			DRM_ERROR("No reloc for ib[%d]=0x%04X\n",
-				  idx, reg);
+			dev_warn_once(p->dev, "No reloc for ib[%d]=0x%04X\n",
+				      idx, reg);
 			radeon_cs_dump_packet(p, pkt);
 			return r;
 		}
@@ -193,8 +193,8 @@ int r200_packet0_check(struct radeon_cs_parser *p,
 	case RADEON_RB3D_COLOROFFSET:
 		r = radeon_cs_packet_next_reloc(p, &reloc, 0);
 		if (r) {
-			DRM_ERROR("No reloc for ib[%d]=0x%04X\n",
-				  idx, reg);
+			dev_warn_once(p->dev, "No reloc for ib[%d]=0x%04X\n",
+				      idx, reg);
 			radeon_cs_dump_packet(p, pkt);
 			return r;
 		}
@@ -212,8 +212,8 @@ int r200_packet0_check(struct radeon_cs_parser *p,
 		i = (reg - R200_PP_TXOFFSET_0) / 24;
 		r = radeon_cs_packet_next_reloc(p, &reloc, 0);
 		if (r) {
-			DRM_ERROR("No reloc for ib[%d]=0x%04X\n",
-				  idx, reg);
+			dev_warn_once(p->dev, "No reloc for ib[%d]=0x%04X\n",
+				      idx, reg);
 			radeon_cs_dump_packet(p, pkt);
 			return r;
 		}
@@ -265,8 +265,8 @@ int r200_packet0_check(struct radeon_cs_parser *p,
 		face = (reg - ((i * 24) + R200_PP_TXOFFSET_0)) / 4;
 		r = radeon_cs_packet_next_reloc(p, &reloc, 0);
 		if (r) {
-			DRM_ERROR("No reloc for ib[%d]=0x%04X\n",
-				  idx, reg);
+			dev_warn_once(p->dev, "No reloc for ib[%d]=0x%04X\n",
+				      idx, reg);
 			radeon_cs_dump_packet(p, pkt);
 			return r;
 		}
@@ -283,8 +283,8 @@ int r200_packet0_check(struct radeon_cs_parser *p,
 	case RADEON_RB3D_COLORPITCH:
 		r = radeon_cs_packet_next_reloc(p, &reloc, 0);
 		if (r) {
-			DRM_ERROR("No reloc for ib[%d]=0x%04X\n",
-				  idx, reg);
+			dev_warn_once(p->dev, "No reloc for ib[%d]=0x%04X\n",
+				      idx, reg);
 			radeon_cs_dump_packet(p, pkt);
 			return r;
 		}
@@ -326,12 +326,12 @@ int r200_packet0_check(struct radeon_cs_parser *p,
 			track->cb[0].cpp = 4;
 			break;
 		default:
-			DRM_ERROR("Invalid color buffer format (%d) !\n",
-				  ((idx_value >> RADEON_RB3D_COLOR_FORMAT_SHIFT) & 0x1f));
+			dev_warn_once(p->dev, "Invalid color buffer format (%d) !\n",
+				      ((idx_value >> RADEON_RB3D_COLOR_FORMAT_SHIFT) & 0x1f));
 			return -EINVAL;
 		}
 		if (idx_value & RADEON_DEPTHXY_OFFSET_ENABLE) {
-			DRM_ERROR("No support for depth xy offset in kms\n");
+			dev_warn_once(p->dev, "No support for depth xy offset in kms\n");
 			return -EINVAL;
 		}
 
@@ -360,8 +360,8 @@ int r200_packet0_check(struct radeon_cs_parser *p,
 	case RADEON_RB3D_ZPASS_ADDR:
 		r = radeon_cs_packet_next_reloc(p, &reloc, 0);
 		if (r) {
-			DRM_ERROR("No reloc for ib[%d]=0x%04X\n",
-				  idx, reg);
+			dev_warn_once(p->dev, "No reloc for ib[%d]=0x%04X\n",
+				      idx, reg);
 			radeon_cs_dump_packet(p, pkt);
 			return r;
 		}
@@ -476,8 +476,8 @@ int r200_packet0_check(struct radeon_cs_parser *p,
 			track->textures[i].use_pitch = 1;
 		} else {
 			track->textures[i].use_pitch = 0;
-			track->textures[i].width = 1 << ((idx_value >> RADEON_TXFORMAT_WIDTH_SHIFT) & RADEON_TXFORMAT_WIDTH_MASK);
-			track->textures[i].height = 1 << ((idx_value >> RADEON_TXFORMAT_HEIGHT_SHIFT) & RADEON_TXFORMAT_HEIGHT_MASK);
+			track->textures[i].width = 1 << ((idx_value & RADEON_TXFORMAT_WIDTH_MASK) >> RADEON_TXFORMAT_WIDTH_SHIFT);
+			track->textures[i].height = 1 << ((idx_value & RADEON_TXFORMAT_HEIGHT_MASK) >> RADEON_TXFORMAT_HEIGHT_SHIFT);
 		}
 		if (idx_value & R200_TXFORMAT_LOOKUP_DISABLE)
 			track->textures[i].lookup_disable = true;

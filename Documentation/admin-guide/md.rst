@@ -5,7 +5,7 @@ Boot time assembly of RAID arrays
 ---------------------------------
 
 Tools that manage md devices can be found at
-   http://www.kernel.org/pub/linux/utils/raid/
+   https://www.kernel.org/pub/linux/utils/raid/
 
 
 You can boot with your md device with the following kernel command
@@ -221,7 +221,7 @@ All md devices contain:
 
   layout
      The ``layout`` for the array for the particular level.  This is
-     simply a number that is interpretted differently by different
+     simply a number that is interpreted differently by different
      levels.  It can be written while assembling an array.
 
   array_size
@@ -237,6 +237,16 @@ All md devices contain:
      This can be used to reduce the size of the array before reducing
      the number of devices in a raid4/5/6, or to support external
      metadata formats which mandate such clipping.
+
+  logical_block_size
+     Configure the array's logical block size in bytes. This attribute
+     is only supported for 1.x meta. Write the value before starting
+     array. The final array LBS uses the maximum between this
+     configuration and LBS of all combined devices. Note that
+     LBS cannot exceed PAGE_SIZE before RAID supports folio.
+     WARNING: Arrays created on new kernel cannot be assembled at old
+     kernel due to padding check, Set module parameter 'check_new_feature'
+     to false to bypass, but data loss may occur.
 
   reshape_position
      This is either ``none`` or a sector number within the devices of
@@ -317,7 +327,7 @@ All md devices contain:
      suspended (not supported yet)
          All IO requests will block. The array can be reconfigured.
 
-         Writing this, if accepted, will block until array is quiessent
+         Writing this, if accepted, will block until array is quiescent
 
      readonly
          no resync can happen.  no superblocks get written.
@@ -346,6 +356,54 @@ All md devices contain:
 
      active-idle
          like active, but no writes have been seen for a while (safe_mode_delay).
+
+  consistency_policy
+     This indicates how the array maintains consistency in case of unexpected
+     shutdown. It can be:
+
+     none
+       Array has no redundancy information, e.g. raid0, linear.
+
+     resync
+       Full resync is performed and all redundancy is regenerated when the
+       array is started after unclean shutdown.
+
+     bitmap
+       Resync assisted by a write-intent bitmap.
+
+     journal
+       For raid4/5/6, journal device is used to log transactions and replay
+       after unclean shutdown.
+
+     ppl
+       For raid5 only, Partial Parity Log is used to close the write hole and
+       eliminate resync.
+
+     The accepted values when writing to this file are ``ppl`` and ``resync``,
+     used to enable and disable PPL.
+
+  uuid
+     This indicates the UUID of the array in the following format:
+     xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+  bitmap_type
+     [RW] When read, this file will display the current and available
+     bitmap for this array. The currently active bitmap will be enclosed
+     in [] brackets. Writing an bitmap name or ID to this file will switch
+     control of this array to that new bitmap. Note that writing a new
+     bitmap for created array is forbidden.
+
+     none
+         No bitmap
+     bitmap
+         The default internal bitmap
+     llbitmap
+         The lockless internal bitmap
+
+If bitmap_type is not none, then additional bitmap attributes bitmap/xxx or
+llbitmap/xxx will be created after md device KOBJ_CHANGE event.
+
+If bitmap_type is bitmap, then the md device will also contain:
 
   bitmap/location
      This indicates where the write-intent bitmap for the array is
@@ -401,31 +459,23 @@ All md devices contain:
      once the array becomes non-degraded, and this fact has been
      recorded in the metadata.
 
-  consistency_policy
-     This indicates how the array maintains consistency in case of unexpected
-     shutdown. It can be:
+If bitmap_type is llbitmap, then the md device will also contain:
 
-     none
-       Array has no redundancy information, e.g. raid0, linear.
+  llbitmap/bits
+     This is read-only, show status of bitmap bits, the number of each
+     value.
 
-     resync
-       Full resync is performed and all redundancy is regenerated when the
-       array is started after unclean shutdown.
+  llbitmap/metadata
+     This is read-only, show bitmap metadata, include chunksize, chunkshift,
+     chunks, offset and daemon_sleep.
 
-     bitmap
-       Resync assisted by a write-intent bitmap.
+  llbitmap/daemon_sleep
+     This is read-write, time in seconds that daemon function will be
+     triggered to clear dirty bits.
 
-     journal
-       For raid4/5/6, journal device is used to log transactions and replay
-       after unclean shutdown.
-
-     ppl
-       For raid5 only, Partial Parity Log is used to close the write hole and
-       eliminate resync.
-
-     The accepted values when writing to this file are ``ppl`` and ``resync``,
-     used to enable and disable PPL.
-
+  llbitmap/barrier_idle
+     This is read-write, time in seconds that page barrier will be idled,
+     means dirty bits in the page will be cleared.
 
 As component devices are added to an md array, they appear in the ``md``
 directory as new directories named::
@@ -684,7 +734,7 @@ also have
       They should be scaled by the bitmap_chunksize.
 
    sync_speed_min, sync_speed_max
-     This are similar to ``/proc/sys/dev/raid/speed_limit_{min,max}``
+     These are similar to ``/proc/sys/dev/raid/speed_limit_{min,max}``
      however they only apply to the particular array.
 
      If no value has been written to these, or if the word ``system``
@@ -754,5 +804,8 @@ These currently include:
 
   journal_mode (currently raid5 only)
       The cache mode for raid5. raid5 could include an extra disk for
-      caching. The mode can be "write-throuth" and "write-back". The
+      caching. The mode can be "write-through" or "write-back". The
       default is "write-through".
+
+  ppl_write_hint
+      NVMe stream ID to be set for each PPL write request.

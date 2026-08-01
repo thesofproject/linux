@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
  * Copyright (c) 2014- QLogic Corporation.
@@ -5,15 +6,6 @@
  * www.qlogic.com
  *
  * Linux driver for QLogic BR-series Fibre Channel Host Bus Adapter.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License (GPL) Version 2 as
- * published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
 #include <linux/debugfs.h>
@@ -54,7 +46,7 @@ bfad_debugfs_open_drvtrc(struct inode *inode, struct file *file)
 	struct bfad_s *bfad = port->bfad;
 	struct bfad_debug_info *debug;
 
-	debug = kzalloc(sizeof(struct bfad_debug_info), GFP_KERNEL);
+	debug = kzalloc_obj(struct bfad_debug_info);
 	if (!debug)
 		return -ENOMEM;
 
@@ -75,7 +67,7 @@ bfad_debugfs_open_fwtrc(struct inode *inode, struct file *file)
 	unsigned long flags;
 	int rc;
 
-	fw_debug = kzalloc(sizeof(struct bfad_debug_info), GFP_KERNEL);
+	fw_debug = kzalloc_obj(struct bfad_debug_info);
 	if (!fw_debug)
 		return -ENOMEM;
 
@@ -117,7 +109,7 @@ bfad_debugfs_open_fwsave(struct inode *inode, struct file *file)
 	unsigned long flags;
 	int rc;
 
-	fw_debug = kzalloc(sizeof(struct bfad_debug_info), GFP_KERNEL);
+	fw_debug = kzalloc_obj(struct bfad_debug_info);
 	if (!fw_debug)
 		return -ENOMEM;
 
@@ -155,7 +147,7 @@ bfad_debugfs_open_reg(struct inode *inode, struct file *file)
 {
 	struct bfad_debug_info *reg_debug;
 
-	reg_debug = kzalloc(sizeof(struct bfad_debug_info), GFP_KERNEL);
+	reg_debug = kzalloc_obj(struct bfad_debug_info);
 	if (!reg_debug)
 		return -ENOMEM;
 
@@ -258,7 +250,7 @@ bfad_debugfs_write_regrd(struct file *file, const char __user *buf,
 	unsigned long flags;
 	void *kern_buf;
 
-	kern_buf = memdup_user(buf, nbytes);
+	kern_buf = memdup_user_nul(buf, nbytes);
 	if (IS_ERR(kern_buf))
 		return PTR_ERR(kern_buf);
 
@@ -325,7 +317,7 @@ bfad_debugfs_write_regwr(struct file *file, const char __user *buf,
 	unsigned long flags;
 	void *kern_buf;
 
-	kern_buf = memdup_user(buf, nbytes);
+	kern_buf = memdup_user_nul(buf, nbytes);
 	if (IS_ERR(kern_buf))
 		return PTR_ERR(kern_buf);
 
@@ -379,8 +371,7 @@ bfad_debugfs_release_fwtrc(struct inode *inode, struct file *file)
 	if (!fw_debug)
 		return 0;
 
-	if (fw_debug->debug_buffer)
-		vfree(fw_debug->debug_buffer);
+	vfree(fw_debug->debug_buffer);
 
 	file->private_data = NULL;
 	kfree(fw_debug);
@@ -460,11 +451,6 @@ bfad_debugfs_init(struct bfad_port_s *port)
 	if (!bfa_debugfs_root) {
 		bfa_debugfs_root = debugfs_create_dir("bfa", NULL);
 		atomic_set(&bfa_debugfs_port_count, 0);
-		if (!bfa_debugfs_root) {
-			printk(KERN_WARNING
-				"BFA debugfs root dir creation failed\n");
-			goto err;
-		}
 	}
 
 	/* Setup the pci_dev debugfs directory for the port */
@@ -472,12 +458,6 @@ bfad_debugfs_init(struct bfad_port_s *port)
 	if (!port->port_debugfs_root) {
 		port->port_debugfs_root =
 			debugfs_create_dir(name, bfa_debugfs_root);
-		if (!port->port_debugfs_root) {
-			printk(KERN_WARNING
-				"bfa %s: debugfs root creation failed\n",
-				bfad->pci_name);
-			goto err;
-		}
 
 		atomic_inc(&bfa_debugfs_port_count);
 
@@ -489,16 +469,9 @@ bfad_debugfs_init(struct bfad_port_s *port)
 							port->port_debugfs_root,
 							port,
 							file->fops);
-			if (!bfad->bfad_dentry_files[i]) {
-				printk(KERN_WARNING
-					"bfa %s: debugfs %s creation failed\n",
-					bfad->pci_name, file->name);
-				goto err;
-			}
 		}
 	}
 
-err:
 	return;
 }
 

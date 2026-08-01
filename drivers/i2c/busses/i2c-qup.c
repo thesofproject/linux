@@ -14,12 +14,13 @@
 #include <linux/dma-mapping.h>
 #include <linux/err.h>
 #include <linux/i2c.h>
+#include <linux/interconnect.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
 #include <linux/scatterlist.h>
 
 /* QUP Registers */
@@ -137,7 +138,7 @@
 #define TOUT_MIN			2
 
 /* Default values. Use these if FW query fails */
-#define DEFAULT_CLK_FREQ 100000
+#define DEFAULT_CLK_FREQ I2C_MAX_STANDARD_MODE_FREQ
 #define DEFAULT_SRC_CLK 20000000
 
 /*
@@ -149,6 +150,12 @@
 #define RECV_MAX_DATA_LEN		254
 /* TAG length for DATA READ in RX FIFO  */
 #define READ_RX_TAGS_LEN		2
+
+#define QUP_BUS_WIDTH			8
+
+static unsigned int scl_freq;
+module_param_named(scl_freq, scl_freq, uint, 0444);
+MODULE_PARM_DESC(scl_freq, "SCL frequency override");
 
 /*
  * count: no of blocks
@@ -223,6 +230,7 @@ struct qup_i2c_dev {
 	int			irq;
 	struct clk		*clk;
 	struct clk		*pclk;
+	struct icc_path		*icc_path;
 	struct i2c_adapter	adap;
 
 	int			clk_ctl;
@@ -250,6 +258,10 @@ struct qup_i2c_dev {
 
 	/* To configure when bus is in run state */
 	u32			config_run;
+
+	/* bandwidth votes */
+	u32			src_clk_freq;
+	u32			cur_bw_clk_freq;
 
 	/* dma parameters */
 	bool			is_dma;
@@ -440,8 +452,10 @@ static int qup_i2c_bus_active(struct qup_i2c_dev *qup, int len)
 		if (!(status & I2C_STATUS_BUS_ACTIVE))
 			break;
 
-		if (time_after(jiffies, timeout))
+		if (time_after(jiffies, timeout)) {
 			ret = -ETIMEDOUT;
+			break;
+		}
 
 		usleep_range(len, len * 2);
 	}
@@ -449,11 +463,28 @@ static int qup_i2c_bus_active(struct qup_i2c_dev *qup, int len)
 	return ret;
 }
 
+static int qup_i2c_vote_bw(struct qup_i2c_dev *qup, u32 clk_freq)
+{
+	u32 needed_peak_bw;
+	int ret;
+
+	if (qup->cur_bw_clk_freq == clk_freq)
+		return 0;
+
+	needed_peak_bw = Bps_to_icc(clk_freq * QUP_BUS_WIDTH);
+	ret = icc_set_bw(qup->icc_path, 0, needed_peak_bw);
+	if (ret)
+		return ret;
+
+	qup->cur_bw_clk_freq = clk_freq;
+	return 0;
+}
+
 static void qup_i2c_write_tx_fifo_v1(struct qup_i2c_dev *qup)
 {
 	struct qup_i2c_block *blk = &qup->blk;
 	struct i2c_msg *msg = qup->msg;
-	u32 addr = msg->addr << 1;
+	u32 addr = i2c_8bit_addr_from_msg(msg);
 	u32 qup_tag;
 	int idx;
 	u32 val;
@@ -619,7 +650,7 @@ static int qup_i2c_req_dma(struct qup_i2c_dev *qup)
 	int err;
 
 	if (!qup->btx.dma) {
-		qup->btx.dma = dma_request_slave_channel_reason(qup->dev, "tx");
+		qup->btx.dma = dma_request_chan(qup->dev, "tx");
 		if (IS_ERR(qup->btx.dma)) {
 			err = PTR_ERR(qup->btx.dma);
 			qup->btx.dma = NULL;
@@ -629,7 +660,7 @@ static int qup_i2c_req_dma(struct qup_i2c_dev *qup)
 	}
 
 	if (!qup->brx.dma) {
-		qup->brx.dma = dma_request_slave_channel_reason(qup->dev, "rx");
+		qup->brx.dma = dma_request_chan(qup->dev, "rx");
 		if (IS_ERR(qup->brx.dma)) {
 			dev_err(qup->dev, "\n rx channel not available");
 			err = PTR_ERR(qup->brx.dma);
@@ -774,7 +805,7 @@ static int qup_i2c_bam_schedule_desc(struct qup_i2c_dev *qup)
 			ret = -EINVAL;
 
 			/* abort TX descriptors */
-			dmaengine_terminate_all(qup->btx.dma);
+			dmaengine_terminate_sync(qup->btx.dma);
 			goto desc_err;
 		}
 
@@ -789,15 +820,14 @@ static int qup_i2c_bam_schedule_desc(struct qup_i2c_dev *qup)
 		dma_async_issue_pending(qup->brx.dma);
 	}
 
-	if (!wait_for_completion_timeout(&qup->xfer, qup->xfer_timeout)) {
-		dev_err(qup->dev, "normal trans timed out\n");
+	if (!wait_for_completion_timeout(&qup->xfer, qup->xfer_timeout))
 		ret = -ETIMEDOUT;
-	}
 
 	if (ret || qup->bus_err || qup->qup_err) {
 		reinit_completion(&qup->xfer);
 
-		if (qup_i2c_change_state(qup, QUP_RUN_STATE)) {
+		ret = qup_i2c_change_state(qup, QUP_RUN_STATE);
+		if (ret) {
 			dev_err(qup->dev, "change to run state timed out");
 			goto desc_err;
 		}
@@ -834,6 +864,10 @@ static int qup_i2c_bam_xfer(struct i2c_adapter *adap, struct i2c_msg *msg,
 	struct qup_i2c_dev *qup = i2c_get_adapdata(adap);
 	int ret = 0;
 	int idx = 0;
+
+	ret = qup_i2c_vote_bw(qup, qup->src_clk_freq);
+	if (ret)
+		return ret;
 
 	enable_irq(qup->irq);
 	ret = qup_i2c_req_dma(qup);
@@ -952,10 +986,8 @@ static void qup_i2c_conf_v1(struct qup_i2c_dev *qup)
 	u32 qup_config = I2C_MINI_CORE | I2C_N_VAL;
 	u32 io_mode = QUP_REPACK_EN;
 
-	blk->is_tx_blk_mode =
-		blk->total_tx_len > qup->out_fifo_sz ? true : false;
-	blk->is_rx_blk_mode =
-		blk->total_rx_len > qup->in_fifo_sz ? true : false;
+	blk->is_tx_blk_mode = blk->total_tx_len > qup->out_fifo_sz;
+	blk->is_rx_blk_mode = blk->total_rx_len > qup->in_fifo_sz;
 
 	if (blk->is_tx_blk_mode) {
 		io_mode |= QUP_OUTPUT_BLK_MODE;
@@ -1079,11 +1111,6 @@ static int qup_i2c_xfer(struct i2c_adapter *adap,
 	writel(I2C_MINI_CORE | I2C_N_VAL, qup->base + QUP_CONFIG);
 
 	for (idx = 0; idx < num; idx++) {
-		if (msgs[idx].len == 0) {
-			ret = -EINVAL;
-			goto out;
-		}
-
 		if (qup_i2c_poll_state_i2c_master(qup)) {
 			ret = -EIO;
 			goto out;
@@ -1112,7 +1139,6 @@ static int qup_i2c_xfer(struct i2c_adapter *adap,
 		ret = num;
 out:
 
-	pm_runtime_mark_last_busy(qup->dev);
 	pm_runtime_put_autosuspend(qup->dev);
 
 	return ret;
@@ -1292,7 +1318,7 @@ static void qup_i2c_write_rx_tags_v2(struct qup_i2c_dev *qup)
  * 1. Check if tx_tags_sent is false i.e. the start of QUP block so write the
  *    tags to TX FIFO and set tx_tags_sent to true.
  * 2. Check if send_last_word is true. It will be set when last few data bytes
- *    (less than 4 bytes) are reamining to be written in FIFO because of no FIFO
+ *    (less than 4 bytes) are remaining to be written in FIFO because of no FIFO
  *    space. All this data bytes are available in tx_fifo_data so write this
  *    in FIFO.
  * 3. Write the data to TX FIFO and check for cur_blk_len. If it is non zero
@@ -1511,9 +1537,6 @@ qup_i2c_determine_mode_v2(struct qup_i2c_dev *qup,
 
 	/* All i2c_msgs should be transferred using either dma or cpu */
 	for (idx = 0; idx < num; idx++) {
-		if (msgs[idx].len == 0)
-			return -EINVAL;
-
 		if (msgs[idx].flags & I2C_M_RD)
 			max_rx_len = max_t(unsigned int, max_rx_len,
 					   msgs[idx].len);
@@ -1532,9 +1555,9 @@ qup_i2c_determine_mode_v2(struct qup_i2c_dev *qup,
 		qup->use_dma = true;
 	} else {
 		qup->blk.is_tx_blk_mode = max_tx_len > qup->out_fifo_sz -
-			QUP_MAX_TAGS_LEN ? true : false;
+			QUP_MAX_TAGS_LEN;
 		qup->blk.is_rx_blk_mode = max_rx_len > qup->in_fifo_sz -
-			READ_RX_TAGS_LEN ? true : false;
+			READ_RX_TAGS_LEN;
 	}
 
 	return 0;
@@ -1600,7 +1623,6 @@ static int qup_i2c_xfer_v2(struct i2c_adapter *adap,
 	if (ret == 0)
 		ret = num;
 out:
-	pm_runtime_mark_last_busy(qup->dev);
 	pm_runtime_put_autosuspend(qup->dev);
 
 	return ret;
@@ -1608,17 +1630,17 @@ out:
 
 static u32 qup_i2c_func(struct i2c_adapter *adap)
 {
-	return I2C_FUNC_I2C | (I2C_FUNC_SMBUS_EMUL & ~I2C_FUNC_SMBUS_QUICK);
+	return I2C_FUNC_I2C | (I2C_FUNC_SMBUS_EMUL_ALL & ~I2C_FUNC_SMBUS_QUICK);
 }
 
 static const struct i2c_algorithm qup_i2c_algo = {
-	.master_xfer	= qup_i2c_xfer,
-	.functionality	= qup_i2c_func,
+	.xfer = qup_i2c_xfer,
+	.functionality = qup_i2c_func,
 };
 
 static const struct i2c_algorithm qup_i2c_algo_v2 = {
-	.master_xfer	= qup_i2c_xfer_v2,
-	.functionality	= qup_i2c_func,
+	.xfer = qup_i2c_xfer_v2,
+	.functionality = qup_i2c_func,
 };
 
 /*
@@ -1627,7 +1649,12 @@ static const struct i2c_algorithm qup_i2c_algo_v2 = {
  * which limits the possible read to 256 (QUP_READ_LIMIT) bytes.
  */
 static const struct i2c_adapter_quirks qup_i2c_quirks = {
+	.flags = I2C_AQ_NO_ZERO_LEN,
 	.max_read_len = QUP_READ_LIMIT,
+};
+
+static const struct i2c_adapter_quirks qup_i2c_quirks_v2 = {
+	.flags = I2C_AQ_NO_ZERO_LEN,
 };
 
 static void qup_i2c_enable_clocks(struct qup_i2c_dev *qup)
@@ -1645,15 +1672,21 @@ static void qup_i2c_disable_clocks(struct qup_i2c_dev *qup)
 	config = readl(qup->base + QUP_CONFIG);
 	config |= QUP_CLOCK_AUTO_GATE;
 	writel(config, qup->base + QUP_CONFIG);
+	qup_i2c_vote_bw(qup, 0);
 	clk_disable_unprepare(qup->pclk);
 }
+
+static const struct acpi_device_id qup_i2c_acpi_match[] = {
+	{ "QCOM8010"},
+	{ }
+};
+MODULE_DEVICE_TABLE(acpi, qup_i2c_acpi_match);
 
 static int qup_i2c_probe(struct platform_device *pdev)
 {
 	static const int blk_sizes[] = {4, 16, 32};
 	struct qup_i2c_dev *qup;
 	unsigned long one_bit_t;
-	struct resource *res;
 	u32 io_mode, hw_ver, size;
 	int ret, fs_div, hs_div;
 	u32 src_clk_freq = DEFAULT_SRC_CLK;
@@ -1669,20 +1702,29 @@ static int qup_i2c_probe(struct platform_device *pdev)
 	init_completion(&qup->xfer);
 	platform_set_drvdata(pdev, qup);
 
-	ret = device_property_read_u32(qup->dev, "clock-frequency", &clk_freq);
-	if (ret) {
-		dev_notice(qup->dev, "using default clock-frequency %d",
-			DEFAULT_CLK_FREQ);
+	if (scl_freq) {
+		dev_notice(qup->dev, "Using override frequency of %u\n", scl_freq);
+		clk_freq = scl_freq;
+	} else {
+		ret = device_property_read_u32(qup->dev, "clock-frequency", &clk_freq);
+		if (ret) {
+			dev_notice(qup->dev, "using default clock-frequency %d",
+				DEFAULT_CLK_FREQ);
+		}
 	}
 
-	if (of_device_is_compatible(pdev->dev.of_node, "qcom,i2c-qup-v1.1.1")) {
+	if (device_is_compatible(&pdev->dev, "qcom,i2c-qup-v1.1.1")) {
 		qup->adap.algo = &qup_i2c_algo;
 		qup->adap.quirks = &qup_i2c_quirks;
 		is_qup_v1 = true;
 	} else {
 		qup->adap.algo = &qup_i2c_algo_v2;
+		qup->adap.quirks = &qup_i2c_quirks_v2;
 		is_qup_v1 = false;
-		ret = qup_i2c_req_dma(qup);
+		if (acpi_match_device(qup_i2c_acpi_match, qup->dev))
+			goto nodma;
+		else
+			ret = qup_i2c_req_dma(qup);
 
 		if (ret == -EPROBE_DEFER)
 			goto fail_dma;
@@ -1691,8 +1733,8 @@ static int qup_i2c_probe(struct platform_device *pdev)
 
 		qup->max_xfer_sg_len = (MX_BLOCKS << 1);
 		blocks = (MX_DMA_BLOCKS << 1) + 1;
-		qup->btx.sg = devm_kzalloc(&pdev->dev,
-					   sizeof(*qup->btx.sg) * blocks,
+		qup->btx.sg = devm_kcalloc(&pdev->dev,
+					   blocks, sizeof(*qup->btx.sg),
 					   GFP_KERNEL);
 		if (!qup->btx.sg) {
 			ret = -ENOMEM;
@@ -1700,8 +1742,8 @@ static int qup_i2c_probe(struct platform_device *pdev)
 		}
 		sg_init_table(qup->btx.sg, blocks);
 
-		qup->brx.sg = devm_kzalloc(&pdev->dev,
-					   sizeof(*qup->brx.sg) * blocks,
+		qup->brx.sg = devm_kcalloc(&pdev->dev,
+					   blocks, sizeof(*qup->brx.sg),
 					   GFP_KERNEL);
 		if (!qup->brx.sg) {
 			ret = -ENOMEM;
@@ -1731,25 +1773,32 @@ static int qup_i2c_probe(struct platform_device *pdev)
 			goto fail_dma;
 		}
 		qup->is_dma = true;
+
+		qup->icc_path = devm_of_icc_get(&pdev->dev, NULL);
+		if (IS_ERR(qup->icc_path))
+			return dev_err_probe(&pdev->dev, PTR_ERR(qup->icc_path),
+					     "failed to get interconnect path\n");
 	}
 
 nodma:
-	/* We support frequencies up to FAST Mode (400KHz) */
-	if (!clk_freq || clk_freq > 400000) {
+	/* We support frequencies up to FAST Mode Plus (1MHz) */
+	if (!clk_freq || clk_freq > I2C_MAX_FAST_MODE_PLUS_FREQ) {
 		dev_err(qup->dev, "clock frequency not supported %d\n",
 			clk_freq);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto fail_dma;
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	qup->base = devm_ioremap_resource(qup->dev, res);
-	if (IS_ERR(qup->base))
-		return PTR_ERR(qup->base);
+	qup->base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(qup->base)) {
+		ret = PTR_ERR(qup->base);
+		goto fail_dma;
+	}
 
 	qup->irq = platform_get_irq(pdev, 0);
 	if (qup->irq < 0) {
-		dev_err(qup->dev, "No IRQ defined\n");
-		return qup->irq;
+		ret = qup->irq;
+		goto fail_dma;
 	}
 
 	if (has_acpi_companion(qup->dev)) {
@@ -1764,17 +1813,20 @@ nodma:
 		qup->clk = devm_clk_get(qup->dev, "core");
 		if (IS_ERR(qup->clk)) {
 			dev_err(qup->dev, "Could not get core clock\n");
-			return PTR_ERR(qup->clk);
+			ret = PTR_ERR(qup->clk);
+			goto fail_dma;
 		}
 
 		qup->pclk = devm_clk_get(qup->dev, "iface");
 		if (IS_ERR(qup->pclk)) {
 			dev_err(qup->dev, "Could not get iface clock\n");
-			return PTR_ERR(qup->pclk);
+			ret = PTR_ERR(qup->pclk);
+			goto fail_dma;
 		}
 		qup_i2c_enable_clocks(qup);
 		src_clk_freq = clk_get_rate(qup->clk);
 	}
+	qup->src_clk_freq = src_clk_freq;
 
 	/*
 	 * Bootloaders might leave a pending interrupt on certain QUP's,
@@ -1786,12 +1838,12 @@ nodma:
 		goto fail;
 
 	ret = devm_request_irq(qup->dev, qup->irq, qup_i2c_interrupt,
-			       IRQF_TRIGGER_HIGH, "i2c_qup", qup);
+			       IRQF_TRIGGER_HIGH | IRQF_NO_AUTOEN,
+			       "i2c_qup", qup);
 	if (ret) {
 		dev_err(qup->dev, "Request %d IRQ failed\n", qup->irq);
 		goto fail;
 	}
-	disable_irq(qup->irq);
 
 	hw_ver = readl(qup->base + QUP_HW_VERSION);
 	dev_dbg(qup->dev, "Revision %x\n", hw_ver);
@@ -1839,9 +1891,15 @@ nodma:
 	size = QUP_INPUT_FIFO_SIZE(io_mode);
 	qup->in_fifo_sz = qup->in_blk_sz * (2 << size);
 
-	fs_div = ((src_clk_freq / clk_freq) / 2) - 3;
 	hs_div = 3;
-	qup->clk_ctl = (hs_div << 8) | (fs_div & 0xff);
+	if (clk_freq <= I2C_MAX_STANDARD_MODE_FREQ) {
+		fs_div = ((src_clk_freq / clk_freq) / 2) - 3;
+		qup->clk_ctl = (hs_div << 8) | (fs_div & 0xff);
+	} else {
+		/* 33%/66% duty cycle */
+		fs_div = ((src_clk_freq / clk_freq) - 6) * 2 / 3;
+		qup->clk_ctl = ((fs_div / 2) << 16) | (hs_div << 8) | (fs_div & 0xff);
+	}
 
 	/*
 	 * Time it takes for a byte to be clocked out on the bus.
@@ -1861,7 +1919,7 @@ nodma:
 	qup->adap.dev.of_node = pdev->dev.of_node;
 	qup->is_last = true;
 
-	strlcpy(qup->adap.name, "QUP I2C adapter", sizeof(qup->adap.name));
+	strscpy(qup->adap.name, "QUP I2C adapter", sizeof(qup->adap.name));
 
 	pm_runtime_set_autosuspend_delay(qup->dev, MSEC_PER_SEC);
 	pm_runtime_use_autosuspend(qup->dev);
@@ -1887,7 +1945,7 @@ fail_dma:
 	return ret;
 }
 
-static int qup_i2c_remove(struct platform_device *pdev)
+static void qup_i2c_remove(struct platform_device *pdev)
 {
 	struct qup_i2c_dev *qup = platform_get_drvdata(pdev);
 
@@ -1901,10 +1959,8 @@ static int qup_i2c_remove(struct platform_device *pdev)
 	i2c_del_adapter(&qup->adap);
 	pm_runtime_disable(qup->dev);
 	pm_runtime_set_suspended(qup->dev);
-	return 0;
 }
 
-#ifdef CONFIG_PM
 static int qup_i2c_pm_suspend_runtime(struct device *device)
 {
 	struct qup_i2c_dev *qup = dev_get_drvdata(device);
@@ -1922,9 +1978,7 @@ static int qup_i2c_pm_resume_runtime(struct device *device)
 	qup_i2c_enable_clocks(qup);
 	return 0;
 }
-#endif
 
-#ifdef CONFIG_PM_SLEEP
 static int qup_i2c_suspend(struct device *device)
 {
 	if (!pm_runtime_suspended(device))
@@ -1935,20 +1989,14 @@ static int qup_i2c_suspend(struct device *device)
 static int qup_i2c_resume(struct device *device)
 {
 	qup_i2c_pm_resume_runtime(device);
-	pm_runtime_mark_last_busy(device);
 	pm_request_autosuspend(device);
 	return 0;
 }
-#endif
 
 static const struct dev_pm_ops qup_i2c_qup_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(
-		qup_i2c_suspend,
-		qup_i2c_resume)
-	SET_RUNTIME_PM_OPS(
-		qup_i2c_pm_suspend_runtime,
-		qup_i2c_pm_resume_runtime,
-		NULL)
+	SYSTEM_SLEEP_PM_OPS(qup_i2c_suspend, qup_i2c_resume)
+	RUNTIME_PM_OPS(qup_i2c_pm_suspend_runtime,
+		       qup_i2c_pm_resume_runtime, NULL)
 };
 
 static const struct of_device_id qup_i2c_dt_match[] = {
@@ -1959,20 +2007,12 @@ static const struct of_device_id qup_i2c_dt_match[] = {
 };
 MODULE_DEVICE_TABLE(of, qup_i2c_dt_match);
 
-#if IS_ENABLED(CONFIG_ACPI)
-static const struct acpi_device_id qup_i2c_acpi_match[] = {
-	{ "QCOM8010"},
-	{ },
-};
-MODULE_DEVICE_TABLE(acpi, qup_i2c_acpi_match);
-#endif
-
 static struct platform_driver qup_i2c_driver = {
 	.probe  = qup_i2c_probe,
 	.remove = qup_i2c_remove,
 	.driver = {
 		.name = "i2c_qup",
-		.pm = &qup_i2c_qup_pm_ops,
+		.pm = pm_ptr(&qup_i2c_qup_pm_ops),
 		.of_match_table = qup_i2c_dt_match,
 		.acpi_match_table = ACPI_PTR(qup_i2c_acpi_match),
 	},
@@ -1980,5 +2020,6 @@ static struct platform_driver qup_i2c_driver = {
 
 module_platform_driver(qup_i2c_driver);
 
+MODULE_DESCRIPTION("Qualcomm QUP based I2C controller");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:i2c_qup");

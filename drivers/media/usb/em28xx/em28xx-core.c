@@ -7,16 +7,6 @@
 //		      Mauro Carvalho Chehab <mchehab@kernel.org>
 //		      Sascha Sommer <saschasommer@freenet.de>
 // Copyright (C) 2012 Frank Schäfer <fschaefer.oss@googlemail.com>
-//
-// This program is free software; you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation; either version 2 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
 
 #include "em28xx.h"
 
@@ -89,7 +79,7 @@ int em28xx_read_reg_req_len(struct em28xx *dev, u8 req, u16 reg,
 	mutex_lock(&dev->ctrl_urb_lock);
 	ret = usb_control_msg(udev, pipe, req,
 			      USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
-			      0x0000, reg, dev->urb_buf, len, HZ);
+			      0x0000, reg, dev->urb_buf, len, 1000);
 	if (ret < 0) {
 		em28xx_regdbg("(pipe 0x%08x): IN:  %02x %02x %02x %02x %02x %02x %02x %02x  failed with error %i\n",
 			      pipe,
@@ -158,7 +148,7 @@ int em28xx_write_regs_req(struct em28xx *dev, u8 req, u16 reg, char *buf,
 	memcpy(dev->urb_buf, buf, len);
 	ret = usb_control_msg(udev, pipe, req,
 			      USB_DIR_OUT | USB_TYPE_VENDOR | USB_RECIP_DEVICE,
-			      0x0000, reg, dev->urb_buf, len, HZ);
+			      0x0000, reg, dev->urb_buf, len, 1000);
 	mutex_unlock(&dev->ctrl_urb_lock);
 
 	if (ret < 0) {
@@ -426,8 +416,9 @@ int em28xx_audio_analog_set(struct em28xx *dev)
 	int ret, i;
 	u8 xclk;
 
+	/* Set GPIOs here for boards without audio */
 	if (dev->int_audio_type == EM28XX_INT_AUDIO_NONE)
-		return 0;
+		return em28xx_gpio_set(dev, INPUT(dev->ctl_input)->gpio);
 
 	/*
 	 * It is assumed that all devices use master volume for output.
@@ -508,7 +499,8 @@ int em28xx_audio_setup(struct em28xx *dev)
 	if (dev->chip_id == CHIP_ID_EM2870 ||
 	    dev->chip_id == CHIP_ID_EM2874 ||
 	    dev->chip_id == CHIP_ID_EM28174 ||
-	    dev->chip_id == CHIP_ID_EM28178) {
+	    dev->chip_id == CHIP_ID_EM28178 ||
+	    dev->chip_id == CHIP_ID_EM2828X) {
 		/* Digital only device - don't load any alsa module */
 		dev->int_audio_type = EM28XX_INT_AUDIO_NONE;
 		dev->usb_audio_type = EM28XX_USB_AUDIO_NONE;
@@ -628,6 +620,65 @@ const struct em28xx_led *em28xx_find_led(struct em28xx *dev,
 }
 EXPORT_SYMBOL_GPL(em28xx_find_led);
 
+void em2828X_decoder_vmux(struct em28xx *dev, unsigned int vin)
+{
+	switch (vin) {
+	case EM2828X_TELEVISION:
+		dev_dbg(&dev->intf->dev, "EM2828X_TELEVISION\n");
+		break;
+	case EM2828X_COMPOSITE:
+		dev_dbg(&dev->intf->dev, "EM2828X_COMPOSITE\n");
+		break;
+	default:
+		dev_dbg(&dev->intf->dev, "EM2828X_SVIDEO\n");
+		break;
+	};
+
+	em28xx_write_reg(dev, 0x24, 0x00);
+	em28xx_write_reg(dev, 0x25, 0x02);
+	em28xx_write_reg(dev, 0x2E, 0x00);
+
+	if (vin == EM2828X_TELEVISION) {
+		em28xx_write_reg(dev, 0x7A0B, 0xfc);
+		em28xx_write_reg(dev, 0xB6, 0x8F);
+		em28xx_write_reg(dev, 0xB8, 0x01);
+	} else {
+		em28xx_write_reg(dev, 0x7A0B, 0x00);
+		em28xx_write_reg(dev, 0xB6, 0x8F);
+		em28xx_write_reg(dev, 0xB8, 0x00);
+	}
+
+	em28xx_write_reg(dev, 0x7A1C, 0x1E);
+	em28xx_write_reg(dev, 0x7A1D, 0x99);
+	em28xx_write_reg(dev, 0x7A1E, 0x99);
+	em28xx_write_reg(dev, 0x7A1F, 0x9A);
+	em28xx_write_reg(dev, 0x7A20, 0x3d);
+	em28xx_write_reg(dev, 0x7A21, 0x3e);
+	em28xx_write_reg(dev, 0x7A29, 0x00);
+	em28xx_write_reg(dev, 0x7A2F, 0x52);
+	em28xx_write_reg(dev, 0x7A40, 0x05);
+	em28xx_write_reg(dev, 0x7A51, 0x00);
+	em28xx_write_reg(dev, 0x7AC1, 0x1B);
+
+	if (vin == EM2828X_COMPOSITE || vin == EM2828X_TELEVISION) {
+		em28xx_write_reg(dev, 0x38, 0x01);
+		em28xx_write_reg(dev, 0xB1, 0x70);
+		em28xx_write_reg(dev, 0xB3, 0x00);
+		em28xx_write_reg(dev, 0xB5, 0x00);
+		em28xx_write_reg(dev, 0x7A02, 0x4f);
+	} else {	/* EM2828X_SVIDEO */
+		em28xx_write_reg(dev, 0x38, 0x00);
+		em28xx_write_reg(dev, 0xB1, 0x60);
+		em28xx_write_reg(dev, 0xB3, 0x10);
+		em28xx_write_reg(dev, 0xB5, 0x10);
+		em28xx_write_reg(dev, 0x7A02, 0x4e);
+	}
+
+	em28xx_write_reg(dev, 0x7A3F, 0x01);
+	em28xx_write_reg(dev, 0x7A3F, 0x00);
+}
+EXPORT_SYMBOL_GPL(em2828X_decoder_vmux);
+
 int em28xx_capture_start(struct em28xx *dev, int start)
 {
 	int rc;
@@ -655,12 +706,16 @@ int em28xx_capture_start(struct em28xx *dev, int start)
 			rc = em28xx_write_reg_bits(dev,
 						   EM2874_R5F_TS_ENABLE,
 						   start ? EM2874_TS1_CAPTURE_ENABLE : 0x00,
-						   EM2874_TS1_CAPTURE_ENABLE);
+						   EM2874_TS1_CAPTURE_ENABLE |
+						   EM2874_TS1_FILTER_ENABLE |
+						   EM2874_TS1_NULL_DISCARD);
 		else
 			rc = em28xx_write_reg_bits(dev,
 						   EM2874_R5F_TS_ENABLE,
 						   start ? EM2874_TS2_CAPTURE_ENABLE : 0x00,
-						   EM2874_TS2_CAPTURE_ENABLE);
+						   EM2874_TS2_CAPTURE_ENABLE |
+						   EM2874_TS2_FILTER_ENABLE |
+						   EM2874_TS2_NULL_DISCARD);
 	} else {
 		/* FIXME: which is the best order? */
 		/* video registers are sampled by VREF */
@@ -673,33 +728,102 @@ int em28xx_capture_start(struct em28xx *dev, int start)
 			if (dev->is_webcam)
 				rc = em28xx_write_reg(dev, 0x13, 0x0c);
 
-			/* Enable video capture */
-			rc = em28xx_write_reg(dev, 0x48, 0x00);
-			if (rc < 0)
-				return rc;
+			if (dev->mode == EM28XX_ANALOG_MODE) {
+				/* Enable video capture */
+				rc = em28xx_write_reg(dev, 0x48, 0x00);
+				if (rc < 0)
+					return rc;
 
-			if (dev->mode == EM28XX_ANALOG_MODE)
 				rc = em28xx_write_reg(dev,
 						      EM28XX_R12_VINENABLE,
 						      0x67);
-			else
-				rc = em28xx_write_reg(dev,
-						      EM28XX_R12_VINENABLE,
-						      0x37);
+
+			} else if (dev->chip_id == CHIP_ID_EM2828X) {
+				/* The Transport Stream Enable Register moved in em2874 */
+				if (dev->dvb_xfer_bulk) {
+					/* Max Tx Size = 188 * 256 = 48128 - LCM(188,512) * 2 */
+					em28xx_write_reg(dev, (dev->ts == PRIMARY_TS) ?
+							 EM2874_R5D_TS1_PKT_SIZE :
+							 EM2874_R5E_TS2_PKT_SIZE,
+							 0xff);
+				} else {
+					/* ISOC Maximum Transfer Size = 188 * 5 */
+					em28xx_write_reg(dev, (dev->ts == PRIMARY_TS) ?
+							 EM2874_R5D_TS1_PKT_SIZE :
+							 EM2874_R5E_TS2_PKT_SIZE,
+							 dev->dvb_max_pkt_size_isoc / 188);
+				}
+
+				if (dev->ts == PRIMARY_TS)
+					rc = em28xx_write_reg_bits(dev,
+							EM2874_R5F_TS_ENABLE,
+							start ? EM2874_TS1_CAPTURE_ENABLE : 0x00,
+							EM2874_TS1_CAPTURE_ENABLE |
+							EM2874_TS1_FILTER_ENABLE |
+							EM2874_TS1_NULL_DISCARD);
+				else
+					rc = em28xx_write_reg_bits(dev,
+							EM2874_R5F_TS_ENABLE,
+							start ? EM2874_TS2_CAPTURE_ENABLE : 0x00,
+							EM2874_TS2_CAPTURE_ENABLE |
+							EM2874_TS2_FILTER_ENABLE |
+							EM2874_TS2_NULL_DISCARD);
+			} else {
+				/* Enable video capture */
+				rc = em28xx_write_reg(dev, 0x48, 0x00);
+				if (rc < 0)
+					return rc;
+				rc = em28xx_write_reg(dev, EM28XX_R12_VINENABLE, 0x37);
+			}
+
 			if (rc < 0)
 				return rc;
 
 			usleep_range(10000, 11000);
 		} else {
-			/* disable video capture */
-			rc = em28xx_write_reg(dev, EM28XX_R12_VINENABLE, 0x27);
+			if (dev->mode == EM28XX_DIGITAL_MODE && dev->chip_id == CHIP_ID_EM2828X) {
+				/* The Transport Stream Enable Register moved in em2874 */
+				if (dev->dvb_xfer_bulk) {
+					/* Max Tx Size = 188 * 256 = 48128 - LCM(188,512) * 2 */
+					em28xx_write_reg(dev, (dev->ts == PRIMARY_TS) ?
+							 EM2874_R5D_TS1_PKT_SIZE :
+							 EM2874_R5E_TS2_PKT_SIZE,
+							 0xff);
+				} else {
+					/* ISOC Maximum Transfer Size = 188 * 5 */
+					em28xx_write_reg(dev, (dev->ts == PRIMARY_TS) ?
+							 EM2874_R5D_TS1_PKT_SIZE :
+							 EM2874_R5E_TS2_PKT_SIZE,
+							 dev->dvb_max_pkt_size_isoc / 188);
+				}
+
+				if (dev->ts == PRIMARY_TS)
+					rc = em28xx_write_reg_bits(dev,
+							EM2874_R5F_TS_ENABLE,
+							start ? EM2874_TS1_CAPTURE_ENABLE : 0x00,
+							EM2874_TS1_CAPTURE_ENABLE |
+							EM2874_TS1_FILTER_ENABLE |
+							EM2874_TS1_NULL_DISCARD);
+				else
+					rc = em28xx_write_reg_bits(dev,
+							EM2874_R5F_TS_ENABLE,
+							start ? EM2874_TS2_CAPTURE_ENABLE : 0x00,
+							EM2874_TS2_CAPTURE_ENABLE |
+							EM2874_TS2_FILTER_ENABLE |
+							EM2874_TS2_NULL_DISCARD);
+			}  else {
+				/* disable video capture */
+				rc = em28xx_write_reg(dev, EM28XX_R12_VINENABLE, 0x27);
+			}
 		}
 	}
 
 	if (dev->mode == EM28XX_ANALOG_MODE)
 		led = em28xx_find_led(dev, EM28XX_LED_ANALOG_CAPTURING);
-	else
+	else if (dev->ts == PRIMARY_TS)
 		led = em28xx_find_led(dev, EM28XX_LED_DIGITAL_CAPTURING);
+	else
+		led = em28xx_find_led(dev, EM28XX_LED_DIGITAL_CAPTURING_TS2);
 
 	if (led)
 		em28xx_write_reg_bits(dev, led->gpio_reg,
@@ -777,6 +901,7 @@ EXPORT_SYMBOL_GPL(em28xx_set_mode);
 static void em28xx_irq_callback(struct urb *urb)
 {
 	struct em28xx *dev = urb->context;
+	unsigned long flags;
 	int i;
 
 	switch (urb->status) {
@@ -793,9 +918,9 @@ static void em28xx_irq_callback(struct urb *urb)
 	}
 
 	/* Copy data from URB */
-	spin_lock(&dev->slock);
+	spin_lock_irqsave(&dev->slock, flags);
 	dev->usb_ctl.urb_data_copy(dev, urb);
-	spin_unlock(&dev->slock);
+	spin_unlock_irqrestore(&dev->slock, flags);
 
 	/* Reset urb buffers */
 	for (i = 0; i < urb->number_of_packets; i++) {
@@ -930,7 +1055,7 @@ int em28xx_alloc_urbs(struct em28xx *dev, enum em28xx_mode mode, int xfer_bulk,
 
 	usb_bufs->buf = kcalloc(num_bufs, sizeof(void *), GFP_KERNEL);
 	if (!usb_bufs->buf) {
-		kfree(usb_bufs->buf);
+		kfree(usb_bufs->urb);
 		return -ENOMEM;
 	}
 
@@ -955,14 +1080,10 @@ int em28xx_alloc_urbs(struct em28xx *dev, enum em28xx_mode mode, int xfer_bulk,
 
 		usb_bufs->buf[i] = kzalloc(sb_size, GFP_KERNEL);
 		if (!usb_bufs->buf[i]) {
-			em28xx_uninit_usb_xfer(dev, mode);
-
 			for (i--; i >= 0; i--)
 				kfree(usb_bufs->buf[i]);
 
-			kfree(usb_bufs->buf);
-			usb_bufs->buf = NULL;
-
+			em28xx_uninit_usb_xfer(dev, mode);
 			return -ENOMEM;
 		}
 
@@ -1053,7 +1174,7 @@ int em28xx_init_usb_xfer(struct em28xx *dev, enum em28xx_mode mode,
 
 	/* submit urbs and enables IRQ */
 	for (i = 0; i < usb_bufs->num_bufs; i++) {
-		rc = usb_submit_urb(usb_bufs->urb[i], GFP_ATOMIC);
+		rc = usb_submit_urb(usb_bufs->urb[i], GFP_KERNEL);
 		if (rc) {
 			dev_err(&dev->intf->dev,
 				"submit of urb %i failed (error=%i)\n", i, rc);
@@ -1155,8 +1276,9 @@ int em28xx_suspend_extension(struct em28xx *dev)
 	dev_info(&dev->intf->dev, "Suspending extensions\n");
 	mutex_lock(&em28xx_devlist_mutex);
 	list_for_each_entry(ops, &em28xx_extension_devlist, next) {
-		if (ops->suspend)
-			ops->suspend(dev);
+		if (!ops->suspend)
+			continue;
+		ops->suspend(dev);
 		if (dev->dev_next)
 			ops->suspend(dev->dev_next);
 	}
@@ -1171,8 +1293,9 @@ int em28xx_resume_extension(struct em28xx *dev)
 	dev_info(&dev->intf->dev, "Resuming extensions\n");
 	mutex_lock(&em28xx_devlist_mutex);
 	list_for_each_entry(ops, &em28xx_extension_devlist, next) {
-		if (ops->resume)
-			ops->resume(dev);
+		if (!ops->resume)
+			continue;
+		ops->resume(dev);
 		if (dev->dev_next)
 			ops->resume(dev->dev_next);
 	}

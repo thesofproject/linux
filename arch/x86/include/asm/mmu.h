@@ -6,6 +6,18 @@
 #include <linux/rwsem.h>
 #include <linux/mutex.h>
 #include <linux/atomic.h>
+#include <linux/bits.h>
+
+/* Uprobes on this MM assume 32-bit code */
+#define MM_CONTEXT_UPROBE_IA32		0
+/* vsyscall page is accessible on this MM */
+#define MM_CONTEXT_HAS_VSYSCALL		1
+/* Do not allow changing LAM mode */
+#define MM_CONTEXT_LOCK_LAM		2
+/* Allow LAM and SVA coexisting */
+#define MM_CONTEXT_FORCE_TAGGED_SVA	3
+/* Tracks mm_cpumask */
+#define MM_CONTEXT_NOTRACK		4
 
 /*
  * x86 has arch-specific MMU state beyond what lives in mm_struct.
@@ -27,14 +39,21 @@ typedef struct {
 	 */
 	atomic64_t tlb_gen;
 
+	unsigned long next_trim_cpumask;
+
 #ifdef CONFIG_MODIFY_LDT_SYSCALL
 	struct rw_semaphore	ldt_usr_sem;
 	struct ldt_struct	*ldt;
 #endif
 
-#ifdef CONFIG_X86_64
-	/* True if mm supports a task running in 32 bit compatibility mode. */
-	unsigned short ia32_compat;
+	unsigned long flags;
+
+#ifdef CONFIG_ADDRESS_MASKING
+	/* Active LAM mode:  X86_CR3_LAM_U48 or X86_CR3_LAM_U57 or 0 (disabled) */
+	unsigned long lam_cr3_mask;
+
+	/* Significant bits of the virtual address. Excludes tag bits. */
+	u64 untag_mask;
 #endif
 
 	struct mutex lock;
@@ -45,22 +64,32 @@ typedef struct {
 #ifdef CONFIG_X86_INTEL_MEMORY_PROTECTION_KEYS
 	/*
 	 * One bit per protection key says whether userspace can
-	 * use it or not.  protected by mmap_sem.
+	 * use it or not.  protected by mmap_lock.
 	 */
 	u16 pkey_allocation_map;
 	s16 execute_only_pkey;
 #endif
-#ifdef CONFIG_X86_INTEL_MPX
-	/* address of the bounds directory */
-	void __user *bd_addr;
+
+#ifdef CONFIG_BROADCAST_TLB_FLUSH
+	/*
+	 * The global ASID will be a non-zero value when the process has
+	 * the same ASID across all CPUs, allowing it to make use of
+	 * hardware-assisted remote TLB invalidation like AMD INVLPGB.
+	 */
+	u16 global_asid;
+
+	/* The process is transitioning to a new global ASID number. */
+	bool asid_transition;
 #endif
 } mm_context_t;
 
 #define INIT_MM_CONTEXT(mm)						\
 	.context = {							\
 		.ctx_id = 1,						\
+		.lock = __MUTEX_INITIALIZER(mm.context.lock),		\
 	}
 
-void leave_mm(int cpu);
+void leave_mm(void);
+#define leave_mm leave_mm
 
 #endif /* _ASM_X86_MMU_H */

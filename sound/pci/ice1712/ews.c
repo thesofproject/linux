@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   ALSA driver for ICEnsemble ICE1712 (Envy24)
  *
@@ -5,21 +6,6 @@
  *
  *	Copyright (c) 2000 Jaroslav Kysela <perex@perex.cz>
  *                    2002 Takashi Iwai <tiwai@suse.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */      
 
 #include <linux/delay.h>
@@ -274,15 +260,13 @@ static int ews88_spdif_default_put(struct snd_ice1712 *ice, struct snd_ctl_elem_
 	int change;
 
 	val = snd_cs8404_encode_spdif_bits(&ucontrol->value.iec958);
-	spin_lock_irq(&ice->reg_lock);
-	change = ice->spdif.cs8403_bits != val;
-	ice->spdif.cs8403_bits = val;
-	if (change && ice->playback_pro_substream == NULL) {
-		spin_unlock_irq(&ice->reg_lock);
-		snd_ice1712_ews_cs8404_spdif_write(ice, val);
-	} else {
-		spin_unlock_irq(&ice->reg_lock);
+	scoped_guard(spinlock_irq, &ice->reg_lock) {
+		change = ice->spdif.cs8403_bits != val;
+		ice->spdif.cs8403_bits = val;
+		if (!change || ice->playback_pro_substream)
+			return change;
 	}
+	snd_ice1712_ews_cs8404_spdif_write(ice, val);
 	return change;
 }
 
@@ -297,15 +281,13 @@ static int ews88_spdif_stream_put(struct snd_ice1712 *ice, struct snd_ctl_elem_v
 	int change;
 
 	val = snd_cs8404_encode_spdif_bits(&ucontrol->value.iec958);
-	spin_lock_irq(&ice->reg_lock);
-	change = ice->spdif.cs8403_stream_bits != val;
-	ice->spdif.cs8403_stream_bits = val;
-	if (change && ice->playback_pro_substream != NULL) {
-		spin_unlock_irq(&ice->reg_lock);
-		snd_ice1712_ews_cs8404_spdif_write(ice, val);
-	} else {
-		spin_unlock_irq(&ice->reg_lock);
+	scoped_guard(spinlock_irq, &ice->reg_lock) {
+		change = ice->spdif.cs8403_stream_bits != val;
+		ice->spdif.cs8403_stream_bits = val;
+		if (!change || ice->playback_pro_substream)
+			return change;
 	}
+	snd_ice1712_ews_cs8404_spdif_write(ice, val);
 	return change;
 }
 
@@ -319,23 +301,22 @@ static void ews88_open_spdif(struct snd_ice1712 *ice, struct snd_pcm_substream *
 /* set up SPDIF for EWS88MT / EWS88D */
 static void ews88_setup_spdif(struct snd_ice1712 *ice, int rate)
 {
-	unsigned long flags;
 	unsigned char tmp;
 	int change;
 
-	spin_lock_irqsave(&ice->reg_lock, flags);
-	tmp = ice->spdif.cs8403_stream_bits;
-	if (tmp & 0x10)		/* consumer */
-		tmp &= (tmp & 0x01) ? ~0x06 : ~0x60;
-	switch (rate) {
-	case 32000: tmp |= (tmp & 0x01) ? 0x02 : 0x00; break;
-	case 44100: tmp |= (tmp & 0x01) ? 0x06 : 0x40; break;
-	case 48000: tmp |= (tmp & 0x01) ? 0x04 : 0x20; break;
-	default: tmp |= (tmp & 0x01) ? 0x06 : 0x40; break;
+	scoped_guard(spinlock_irqsave, &ice->reg_lock) {
+		tmp = ice->spdif.cs8403_stream_bits;
+		if (tmp & 0x10)		/* consumer */
+			tmp &= (tmp & 0x01) ? ~0x06 : ~0x60;
+		switch (rate) {
+		case 32000: tmp |= (tmp & 0x01) ? 0x02 : 0x00; break;
+		case 44100: tmp |= (tmp & 0x01) ? 0x06 : 0x40; break;
+		case 48000: tmp |= (tmp & 0x01) ? 0x04 : 0x20; break;
+		default: tmp |= (tmp & 0x01) ? 0x06 : 0x40; break;
+		}
+		change = ice->spdif.cs8403_stream_bits != tmp;
+		ice->spdif.cs8403_stream_bits = tmp;
 	}
-	change = ice->spdif.cs8403_stream_bits != tmp;
-	ice->spdif.cs8403_stream_bits = tmp;
-	spin_unlock_irqrestore(&ice->reg_lock, flags);
 	if (change)
 		snd_ctl_notify(ice->card, SNDRV_CTL_EVENT_MASK_VALUE, &ice->spdif.stream_ctl->id);
 	snd_ice1712_ews_cs8404_spdif_write(ice, tmp);
@@ -450,13 +431,14 @@ static int snd_ice1712_ews_init(struct snd_ice1712 *ice)
 		break;
 	}
 
-	spec = kzalloc(sizeof(*spec), GFP_KERNEL);
+	spec = kzalloc_obj(*spec);
 	if (!spec)
 		return -ENOMEM;
 	ice->spec = spec;
 
 	/* create i2c */
-	if ((err = snd_i2c_bus_create(ice->card, "ICE1712 GPIO 1", NULL, &ice->i2c)) < 0) {
+	err = snd_i2c_bus_create(ice->card, "ICE1712 GPIO 1", NULL, &ice->i2c);
+	if (err < 0) {
 		dev_err(ice->card->dev, "unable to create I2C bus\n");
 		return err;
 	}
@@ -497,7 +479,8 @@ static int snd_ice1712_ews_init(struct snd_ice1712 *ice)
 		if (err < 0)
 			return err;
 		/* Check if the front module is connected */
-		if ((err = snd_ice1712_ews88mt_chip_select(ice, 0x0f)) < 0)
+		err = snd_ice1712_ews88mt_chip_select(ice, 0x0f);
+		if (err < 0)
 			return err;
 		break;
 	case ICE1712_SUBDEVICE_EWS88D:
@@ -512,12 +495,14 @@ static int snd_ice1712_ews_init(struct snd_ice1712 *ice)
 	/* set up SPDIF interface */
 	switch (ice->eeprom.subvendor) {
 	case ICE1712_SUBDEVICE_EWX2496:
-		if ((err = snd_ice1712_init_cs8427(ice, CS8427_BASE_ADDR)) < 0)
+		err = snd_ice1712_init_cs8427(ice, CS8427_BASE_ADDR);
+		if (err < 0)
 			return err;
 		snd_cs8427_reg_write(ice->cs8427, CS8427_REG_RECVERRMASK, CS8427_UNLOCK | CS8427_CONF | CS8427_BIP | CS8427_PAR);
 		break;
 	case ICE1712_SUBDEVICE_DMX6FIRE:
-		if ((err = snd_ice1712_init_cs8427(ice, ICE1712_6FIRE_CS8427_ADDR)) < 0)
+		err = snd_ice1712_init_cs8427(ice, ICE1712_6FIRE_CS8427_ADDR);
+		if (err < 0)
 			return err;
 		snd_cs8427_reg_write(ice->cs8427, CS8427_REG_RECVERRMASK, CS8427_UNLOCK | CS8427_CONF | CS8427_BIP | CS8427_PAR);
 		break;
@@ -545,7 +530,7 @@ static int snd_ice1712_ews_init(struct snd_ice1712 *ice)
 	}
 
 	/* analog section */
-	ak = ice->akm = kzalloc(sizeof(struct snd_akm4xxx), GFP_KERNEL);
+	ak = ice->akm = kzalloc_obj(struct snd_akm4xxx);
 	if (! ak)
 		return -ENOMEM;
 	ice->akm_codecs = 1;
@@ -611,7 +596,7 @@ static int snd_ice1712_ewx_io_sense_put(struct snd_kcontrol *kcontrol, struct sn
 	return val != nval;
 }
 
-static struct snd_kcontrol_new snd_ice1712_ewx2496_controls[] = {
+static const struct snd_kcontrol_new snd_ice1712_ewx2496_controls[] = {
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "Input Sensitivity Switch",
@@ -806,7 +791,7 @@ static int snd_ice1712_ews88d_control_put(struct snd_kcontrol *kcontrol, struct 
   .private_value = xshift | (xinvert << 8),\
 }
 
-static struct snd_kcontrol_new snd_ice1712_ews88d_controls[] = {
+static const struct snd_kcontrol_new snd_ice1712_ews88d_controls[] = {
 	EWS88D_CONTROL(SNDRV_CTL_ELEM_IFACE_MIXER, "IEC958 Input Optical", 0, 1, 0), /* inverted */
 	EWS88D_CONTROL(SNDRV_CTL_ELEM_IFACE_MIXER, "ADAT Output Optical", 1, 0, 0),
 	EWS88D_CONTROL(SNDRV_CTL_ELEM_IFACE_MIXER, "ADAT External Master Clock", 2, 0, 0),
@@ -826,7 +811,12 @@ static int snd_ice1712_6fire_read_pca(struct snd_ice1712 *ice, unsigned char reg
 
 	snd_i2c_lock(ice->i2c);
 	byte = reg;
-	snd_i2c_sendbytes(spec->i2cdevs[EWS_I2C_6FIRE], &byte, 1);
+	if (snd_i2c_sendbytes(spec->i2cdevs[EWS_I2C_6FIRE], &byte, 1) != 1) {
+		snd_i2c_unlock(ice->i2c);
+		dev_err(ice->card->dev, "cannot send pca\n");
+		return -EIO;
+	}
+
 	byte = 0;
 	if (snd_i2c_readbytes(spec->i2cdevs[EWS_I2C_6FIRE], &byte, 1) != 1) {
 		snd_i2c_unlock(ice->i2c);
@@ -862,7 +852,8 @@ static int snd_ice1712_6fire_control_get(struct snd_kcontrol *kcontrol, struct s
 	int invert = (kcontrol->private_value >> 8) & 1;
 	int data;
 	
-	if ((data = snd_ice1712_6fire_read_pca(ice, PCF9554_REG_OUTPUT)) < 0)
+	data = snd_ice1712_6fire_read_pca(ice, PCF9554_REG_OUTPUT);
+	if (data < 0)
 		return data;
 	data = (data >> shift) & 1;
 	if (invert)
@@ -878,7 +869,8 @@ static int snd_ice1712_6fire_control_put(struct snd_kcontrol *kcontrol, struct s
 	int invert = (kcontrol->private_value >> 8) & 1;
 	int data, ndata;
 	
-	if ((data = snd_ice1712_6fire_read_pca(ice, PCF9554_REG_OUTPUT)) < 0)
+	data = snd_ice1712_6fire_read_pca(ice, PCF9554_REG_OUTPUT);
+	if (data < 0)
 		return data;
 	ndata = data & ~(1 << shift);
 	if (ucontrol->value.integer.value[0])
@@ -905,7 +897,8 @@ static int snd_ice1712_6fire_select_input_get(struct snd_kcontrol *kcontrol, str
 	struct snd_ice1712 *ice = snd_kcontrol_chip(kcontrol);
 	int data;
 	
-	if ((data = snd_ice1712_6fire_read_pca(ice, PCF9554_REG_OUTPUT)) < 0)
+	data = snd_ice1712_6fire_read_pca(ice, PCF9554_REG_OUTPUT);
+	if (data < 0)
 		return data;
 	ucontrol->value.integer.value[0] = data & 3;
 	return 0;
@@ -916,7 +909,8 @@ static int snd_ice1712_6fire_select_input_put(struct snd_kcontrol *kcontrol, str
 	struct snd_ice1712 *ice = snd_kcontrol_chip(kcontrol);
 	int data, ndata;
 	
-	if ((data = snd_ice1712_6fire_read_pca(ice, PCF9554_REG_OUTPUT)) < 0)
+	data = snd_ice1712_6fire_read_pca(ice, PCF9554_REG_OUTPUT);
+	if (data < 0)
 		return data;
 	ndata = data & ~3;
 	ndata |= (ucontrol->value.integer.value[0] & 3);
@@ -937,7 +931,7 @@ static int snd_ice1712_6fire_select_input_put(struct snd_kcontrol *kcontrol, str
   .private_value = xshift | (xinvert << 8),\
 }
 
-static struct snd_kcontrol_new snd_ice1712_6fire_controls[] = {
+static const struct snd_kcontrol_new snd_ice1712_6fire_controls[] = {
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "Analog Input Select",

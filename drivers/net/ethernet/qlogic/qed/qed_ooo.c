@@ -1,33 +1,7 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause)
 /* QLogic qed NIC Driver
  * Copyright (c) 2015-2017  QLogic Corporation
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * OpenIB.org BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and /or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright (c) 2019-2020 Marvell International Ltd.
  */
 
 #include <linux/types.h>
@@ -42,7 +16,7 @@
 #include "qed_ll2.h"
 #include "qed_ooo.h"
 #include "qed_cxt.h"
-
+#include "qed_nvmetcp.h"
 static struct qed_ooo_archipelago
 *qed_ooo_seek_archipelago(struct qed_hwfn *p_hwfn,
 			  struct qed_ooo_info
@@ -52,12 +26,12 @@ static struct qed_ooo_archipelago
 	u32 idx = (cid & 0xffff) - p_ooo_info->cid_base;
 	struct qed_ooo_archipelago *p_archipelago;
 
-	if (idx >= p_ooo_info->max_num_archipelagos)
+	if (unlikely(idx >= p_ooo_info->max_num_archipelagos))
 		return NULL;
 
 	p_archipelago = &p_ooo_info->p_archipelagos_mem[idx];
 
-	if (list_empty(&p_archipelago->isles_list))
+	if (unlikely(list_empty(&p_archipelago->isles_list)))
 		return NULL;
 
 	return p_archipelago;
@@ -72,7 +46,7 @@ static struct qed_ooo_isle *qed_ooo_seek_isle(struct qed_hwfn *p_hwfn,
 	u8 the_num_of_isle = 1;
 
 	p_archipelago = qed_ooo_seek_archipelago(p_hwfn, p_ooo_info, cid);
-	if (!p_archipelago) {
+	if (unlikely(!p_archipelago)) {
 		DP_NOTICE(p_hwfn,
 			  "Connection %d is not found in OOO list\n", cid);
 		return NULL;
@@ -109,7 +83,8 @@ int qed_ooo_alloc(struct qed_hwfn *p_hwfn)
 
 	switch (p_hwfn->hw_info.personality) {
 	case QED_PCI_ISCSI:
-		proto = PROTOCOLID_ISCSI;
+	case QED_PCI_NVMETCP:
+		proto = PROTOCOLID_TCP_ULP;
 		break;
 	case QED_PCI_ETH_RDMA:
 	case QED_PCI_ETH_IWARP:
@@ -132,7 +107,7 @@ int qed_ooo_alloc(struct qed_hwfn *p_hwfn)
 		return -EINVAL;
 	}
 
-	p_ooo_info = kzalloc(sizeof(*p_ooo_info), GFP_KERNEL);
+	p_ooo_info = kzalloc_obj(*p_ooo_info);
 	if (!p_ooo_info)
 		return -ENOMEM;
 
@@ -143,9 +118,8 @@ int qed_ooo_alloc(struct qed_hwfn *p_hwfn)
 	INIT_LIST_HEAD(&p_ooo_info->ready_buffers_list);
 	INIT_LIST_HEAD(&p_ooo_info->free_isles_list);
 
-	p_ooo_info->p_isles_mem = kcalloc(max_num_isles,
-					  sizeof(struct qed_ooo_isle),
-					  GFP_KERNEL);
+	p_ooo_info->p_isles_mem = kzalloc_objs(struct qed_ooo_isle,
+					       max_num_isles);
 	if (!p_ooo_info->p_isles_mem)
 		goto no_isles_mem;
 
@@ -156,9 +130,8 @@ int qed_ooo_alloc(struct qed_hwfn *p_hwfn)
 	}
 
 	p_ooo_info->p_archipelagos_mem =
-				kcalloc(max_num_archipelagos,
-					sizeof(struct qed_ooo_archipelago),
-					GFP_KERNEL);
+				kzalloc_objs(struct qed_ooo_archipelago,
+					     max_num_archipelagos);
 	if (!p_ooo_info->p_archipelagos_mem)
 		goto no_archipelagos_mem;
 
@@ -166,9 +139,8 @@ int qed_ooo_alloc(struct qed_hwfn *p_hwfn)
 		INIT_LIST_HEAD(&p_ooo_info->p_archipelagos_mem[i].isles_list);
 
 	p_ooo_info->ooo_history.p_cqes =
-				kcalloc(QED_MAX_NUM_OOO_HISTORY_ENTRIES,
-					sizeof(struct ooo_opaque),
-					GFP_KERNEL);
+				kzalloc_objs(struct ooo_opaque,
+					     QED_MAX_NUM_OOO_HISTORY_ENTRIES);
 	if (!p_ooo_info->ooo_history.p_cqes)
 		goto no_history_mem;
 
@@ -208,12 +180,8 @@ void qed_ooo_release_connection_isles(struct qed_hwfn *p_hwfn,
 						    struct qed_ooo_buffer,
 						    list_entry);
 
-			if (!p_buffer)
-				break;
-
-			list_del(&p_buffer->list_entry);
-			list_add_tail(&p_buffer->list_entry,
-				      &p_ooo_info->free_buffers_list);
+			list_move_tail(&p_buffer->list_entry,
+				       &p_ooo_info->free_buffers_list);
 		}
 		list_add_tail(&p_isle->list_entry,
 			      &p_ooo_info->free_isles_list);
@@ -244,12 +212,8 @@ void qed_ooo_release_all_isles(struct qed_hwfn *p_hwfn,
 						     struct qed_ooo_buffer,
 						     list_entry);
 
-				if (!p_buffer)
-					break;
-
-			list_del(&p_buffer->list_entry);
-				list_add_tail(&p_buffer->list_entry,
-					      &p_ooo_info->free_buffers_list);
+				list_move_tail(&p_buffer->list_entry,
+					       &p_ooo_info->free_buffers_list);
 			}
 			list_add_tail(&p_isle->list_entry,
 				      &p_ooo_info->free_isles_list);
@@ -281,9 +245,6 @@ void qed_ooo_free(struct qed_hwfn *p_hwfn)
 	while (!list_empty(&p_ooo_info->free_buffers_list)) {
 		p_buffer = list_first_entry(&p_ooo_info->free_buffers_list,
 					    struct qed_ooo_buffer, list_entry);
-
-		if (!p_buffer)
-			break;
 
 		list_del(&p_buffer->list_entry);
 		dma_free_coherent(&p_hwfn->cdev->pdev->dev,
@@ -353,11 +314,9 @@ void qed_ooo_delete_isles(struct qed_hwfn *p_hwfn,
 			  struct qed_ooo_info *p_ooo_info,
 			  u32 cid, u8 drop_isle, u8 drop_size)
 {
-	struct qed_ooo_archipelago *p_archipelago = NULL;
 	struct qed_ooo_isle *p_isle = NULL;
 	u8 isle_idx;
 
-	p_archipelago = qed_ooo_seek_archipelago(p_hwfn, p_ooo_info, cid);
 	for (isle_idx = 0; isle_idx < drop_size; isle_idx++) {
 		p_isle = qed_ooo_seek_isle(p_hwfn, p_ooo_info, cid, drop_isle);
 		if (!p_isle) {
@@ -391,7 +350,7 @@ void qed_ooo_add_new_isle(struct qed_hwfn *p_hwfn,
 	if (ooo_isle > 1) {
 		p_prev_isle = qed_ooo_seek_isle(p_hwfn,
 						p_ooo_info, cid, ooo_isle - 1);
-		if (!p_prev_isle) {
+		if (unlikely(!p_prev_isle)) {
 			DP_NOTICE(p_hwfn,
 				  "Isle %d is not found(cid %d)\n",
 				  ooo_isle - 1, cid);
@@ -399,7 +358,7 @@ void qed_ooo_add_new_isle(struct qed_hwfn *p_hwfn,
 		}
 	}
 	p_archipelago = qed_ooo_seek_archipelago(p_hwfn, p_ooo_info, cid);
-	if (!p_archipelago && (ooo_isle != 1)) {
+	if (unlikely(!p_archipelago && ooo_isle != 1)) {
 		DP_NOTICE(p_hwfn,
 			  "Connection %d is not found in OOO list\n", cid);
 		return;
@@ -410,7 +369,7 @@ void qed_ooo_add_new_isle(struct qed_hwfn *p_hwfn,
 					  struct qed_ooo_isle, list_entry);
 
 		list_del(&p_isle->list_entry);
-		if (!list_empty(&p_isle->buffers_list)) {
+		if (unlikely(!list_empty(&p_isle->buffers_list))) {
 			DP_NOTICE(p_hwfn, "Free isle is not empty\n");
 			INIT_LIST_HEAD(&p_isle->buffers_list);
 		}
@@ -447,13 +406,13 @@ void qed_ooo_add_new_buffer(struct qed_hwfn *p_hwfn,
 	struct qed_ooo_isle *p_isle = NULL;
 
 	p_isle = qed_ooo_seek_isle(p_hwfn, p_ooo_info, cid, ooo_isle);
-	if (!p_isle) {
+	if (unlikely(!p_isle)) {
 		DP_NOTICE(p_hwfn,
 			  "Isle %d is not found(cid %d)\n", ooo_isle, cid);
 		return;
 	}
 
-	if (buffer_side == QED_OOO_LEFT_BUF)
+	if (unlikely(buffer_side == QED_OOO_LEFT_BUF))
 		list_add(&p_buffer->list_entry, &p_isle->buffers_list);
 	else
 		list_add_tail(&p_buffer->list_entry, &p_isle->buffers_list);
@@ -462,26 +421,24 @@ void qed_ooo_add_new_buffer(struct qed_hwfn *p_hwfn,
 void qed_ooo_join_isles(struct qed_hwfn *p_hwfn,
 			struct qed_ooo_info *p_ooo_info, u32 cid, u8 left_isle)
 {
-	struct qed_ooo_archipelago *p_archipelago = NULL;
 	struct qed_ooo_isle *p_right_isle = NULL;
 	struct qed_ooo_isle *p_left_isle = NULL;
 
 	p_right_isle = qed_ooo_seek_isle(p_hwfn, p_ooo_info, cid,
 					 left_isle + 1);
-	if (!p_right_isle) {
+	if (unlikely(!p_right_isle)) {
 		DP_NOTICE(p_hwfn,
 			  "Right isle %d is not found(cid %d)\n",
 			  left_isle + 1, cid);
 		return;
 	}
 
-	p_archipelago = qed_ooo_seek_archipelago(p_hwfn, p_ooo_info, cid);
 	list_del(&p_right_isle->list_entry);
 	p_ooo_info->cur_isles_number--;
 	if (left_isle) {
 		p_left_isle = qed_ooo_seek_isle(p_hwfn, p_ooo_info, cid,
 						left_isle);
-		if (!p_left_isle) {
+		if (unlikely(!p_left_isle)) {
 			DP_NOTICE(p_hwfn,
 				  "Left isle %d is not found(cid %d)\n",
 				  left_isle, cid);

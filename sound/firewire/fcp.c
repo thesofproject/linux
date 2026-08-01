@@ -1,8 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Function Control Protocol (IEC 61883-1) helper functions
  *
  * Copyright (c) Clemens Ladisch <clemens@ladisch.de>
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 #include <linux/device.h>
@@ -240,13 +240,11 @@ int fcp_avc_transaction(struct fw_unit *unit,
 	t.response_match_bytes = response_match_bytes;
 	t.state = STATE_PENDING;
 	init_waitqueue_head(&t.wait);
+	t.deferrable = (*(const u8 *)command == 0x00 || *(const u8 *)command == 0x03);
 
-	if (*(const u8 *)command == 0x00 || *(const u8 *)command == 0x03)
-		t.deferrable = true;
-
-	spin_lock_irq(&transactions_lock);
-	list_add_tail(&t.list, &transactions);
-	spin_unlock_irq(&transactions_lock);
+	scoped_guard(spinlock_irq, &transactions_lock) {
+		list_add_tail(&t.list, &transactions);
+	}
 
 	for (;;) {
 		tcode = command_size == 4 ? TCODE_WRITE_QUADLET_REQUEST
@@ -282,9 +280,9 @@ deferred:
 		}
 	}
 
-	spin_lock_irq(&transactions_lock);
-	list_del(&t.list);
-	spin_unlock_irq(&transactions_lock);
+	scoped_guard(spinlock_irq, &transactions_lock) {
+		list_del(&t.list);
+	}
 
 	return ret;
 }
@@ -302,7 +300,7 @@ void fcp_bus_reset(struct fw_unit *unit)
 {
 	struct fcp_transaction *t;
 
-	spin_lock_irq(&transactions_lock);
+	guard(spinlock_irq)(&transactions_lock);
 	list_for_each_entry(t, &transactions, list) {
 		if (t->unit == unit &&
 		    (t->state == STATE_PENDING ||
@@ -311,7 +309,6 @@ void fcp_bus_reset(struct fw_unit *unit)
 			wake_up(&t->wait);
 		}
 	}
-	spin_unlock_irq(&transactions_lock);
 }
 EXPORT_SYMBOL(fcp_bus_reset);
 
@@ -343,12 +340,11 @@ static void fcp_response(struct fw_card *card, struct fw_request *request,
 			 void *data, size_t length, void *callback_data)
 {
 	struct fcp_transaction *t;
-	unsigned long flags;
 
 	if (length < 1 || (*(const u8 *)data & 0xf0) != CTS_AVC)
 		return;
 
-	spin_lock_irqsave(&transactions_lock, flags);
+	guard(spinlock_irqsave)(&transactions_lock);
 	list_for_each_entry(t, &transactions, list) {
 		struct fw_device *device = fw_parent_device(t->unit);
 		if (device->card != card ||
@@ -372,7 +368,6 @@ static void fcp_response(struct fw_card *card, struct fw_request *request,
 			wake_up(&t->wait);
 		}
 	}
-	spin_unlock_irqrestore(&transactions_lock, flags);
 }
 
 static struct fw_address_handler response_register_handler = {

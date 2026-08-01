@@ -929,7 +929,6 @@ struct esas2r_adapter {
 	struct list_head fw_event_list;
 	spinlock_t fw_event_lock;
 	u8 fw_events_off;                       /* if '1', then ignore events */
-	char fw_event_q_name[ESAS2R_KOBJ_NAME_LEN];
 	/*
 	 * intr_mode stores the interrupt mode currently being used by this
 	 * adapter. it is based on the interrupt_mode module parameter, but
@@ -965,11 +964,12 @@ struct esas2r_adapter {
 const char *esas2r_info(struct Scsi_Host *);
 int esas2r_write_params(struct esas2r_adapter *a, struct esas2r_request *rq,
 			struct esas2r_sas_nvram *data);
-int esas2r_ioctl_handler(void *hostdata, int cmd, void __user *arg);
-int esas2r_ioctl(struct scsi_device *dev, int cmd, void __user *arg);
+int esas2r_ioctl_handler(void *hostdata, unsigned int cmd, void __user *arg);
+int esas2r_ioctl(struct scsi_device *dev, unsigned int cmd, void __user *arg);
 u8 handle_hba_ioctl(struct esas2r_adapter *a,
 		    struct atto_ioctl *ioctl_hba);
-int esas2r_queuecommand(struct Scsi_Host *host, struct scsi_cmnd *cmd);
+enum scsi_qc_status esas2r_queuecommand(struct Scsi_Host *host,
+					struct scsi_cmnd *cmd);
 int esas2r_show_info(struct seq_file *m, struct Scsi_Host *sh);
 long esas2r_proc_ioctl(struct file *fp, unsigned int cmd, unsigned long arg);
 
@@ -996,8 +996,9 @@ void esas2r_adapter_tasklet(unsigned long context);
 irqreturn_t esas2r_interrupt(int irq, void *dev_id);
 irqreturn_t esas2r_msi_interrupt(int irq, void *dev_id);
 void esas2r_kickoff_timer(struct esas2r_adapter *a);
-int esas2r_suspend(struct pci_dev *pcid, pm_message_t state);
-int esas2r_resume(struct pci_dev *pcid);
+
+extern const struct dev_pm_ops esas2r_pm_ops;
+
 void esas2r_fw_event_off(struct esas2r_adapter *a);
 void esas2r_fw_event_on(struct esas2r_adapter *a);
 bool esas2r_nvram_write(struct esas2r_adapter *a, struct esas2r_request *rq,
@@ -1045,10 +1046,6 @@ void esas2r_build_mgt_req(struct esas2r_adapter *a,
 			  u32 length,
 			  void *data);
 void esas2r_build_ae_req(struct esas2r_adapter *a, struct esas2r_request *rq);
-void esas2r_build_cli_req(struct esas2r_adapter *a,
-			  struct esas2r_request *rq,
-			  u32 length,
-			  u32 cmd_rsp_len);
 void esas2r_build_ioctl_req(struct esas2r_adapter *a,
 			    struct esas2r_request *rq,
 			    u32 length,
@@ -1225,8 +1222,9 @@ static inline void esas2r_rq_init_request(struct esas2r_request *rq,
 
 	/* req_table entry should be NULL at this point - if not, halt */
 
-	if (a->req_table[LOWORD(vrq->scsi.handle)])
+	if (a->req_table[LOWORD(vrq->scsi.handle)]) {
 		esas2r_bugon();
+	}
 
 	/* fill in the table for this handle so we can get back to the
 	 * request.
@@ -1414,11 +1412,11 @@ static inline void esas2r_comp_list_drain(struct esas2r_adapter *a,
 }
 
 /* sysfs handlers */
-extern struct bin_attribute bin_attr_fw;
-extern struct bin_attribute bin_attr_fs;
-extern struct bin_attribute bin_attr_vda;
-extern struct bin_attribute bin_attr_hw;
-extern struct bin_attribute bin_attr_live_nvram;
-extern struct bin_attribute bin_attr_default_nvram;
+extern const struct bin_attribute bin_attr_fw;
+extern const struct bin_attribute bin_attr_fs;
+extern const struct bin_attribute bin_attr_vda;
+extern const struct bin_attribute bin_attr_hw;
+extern const struct bin_attribute bin_attr_live_nvram;
+extern const struct bin_attribute bin_attr_default_nvram;
 
 #endif /* ESAS2R_H */

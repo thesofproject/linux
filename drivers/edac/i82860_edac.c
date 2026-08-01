@@ -135,7 +135,6 @@ static void i82860_check(struct mem_ctl_info *mci)
 {
 	struct i82860_error_info info;
 
-	edac_dbg(1, "MC%d\n", mci->mc_idx);
 	i82860_get_error_info(mci, &info);
 	i82860_process_error_info(mci, &info, 1);
 }
@@ -288,11 +287,11 @@ static void i82860_remove_one(struct pci_dev *pdev)
 
 static const struct pci_device_id i82860_pci_tbl[] = {
 	{
-	 PCI_VEND_DEV(INTEL, 82860_0), PCI_ANY_ID, PCI_ANY_ID, 0, 0,
-	 I82860},
-	{
-	 0,
-	 }			/* 0 terminated list. */
+		PCI_VEND_DEV(INTEL, 82860_0),
+		.driver_data = I82860,
+	}, {
+		/* 0 terminated list. */
+	}
 };
 
 MODULE_DEVICE_TABLE(pci, i82860_pci_tbl);
@@ -356,8 +355,7 @@ module_init(i82860_init);
 module_exit(i82860_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Red Hat Inc. (http://www.redhat.com) "
-		"Ben Woodard <woodard@redhat.com>");
+MODULE_AUTHOR("Red Hat Inc. (http://www.redhat.com) Ben Woodard <woodard@redhat.com>");
 MODULE_DESCRIPTION("ECC support for Intel 82860 memory hub controllers");
 
 module_param(edac_op_state, int, 0444);

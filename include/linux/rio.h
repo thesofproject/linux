@@ -1,14 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * RapidIO interconnect services
  * (RapidIO Interconnect Specification, http://www.rapidio.org)
  *
  * Copyright 2005 MontaVista Software, Inc.
  * Matt Porter <mporter@kernel.crashing.org>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #ifndef LINUX_RIO_H
@@ -20,7 +16,7 @@
 #include <linux/errno.h>
 #include <linux/device.h>
 #include <linux/rio_regs.h>
-#include <linux/mod_devicetable.h>
+#include <linux/device-id/rio.h>
 #ifdef CONFIG_RAPIDIO_DMA_ENGINE
 #include <linux/dmaengine.h>
 #endif
@@ -82,7 +78,7 @@
 #define RIO_CTAG_RESRVD	0xfffe0000 /* Reserved */
 #define RIO_CTAG_UDEVID	0x0001ffff /* Unique device identifier */
 
-extern struct bus_type rio_bus_type;
+extern const struct bus_type rio_bus_type;
 extern struct class rio_mport_class;
 
 struct rio_mport;
@@ -104,7 +100,7 @@ struct rio_switch {
 	u32 port_ok;
 	struct rio_switch_ops *ops;
 	spinlock_t lock;
-	struct rio_dev *nextdev[0];
+	struct rio_dev *nextdev[];
 };
 
 /**
@@ -205,7 +201,7 @@ struct rio_dev {
 	u8 hopcount;
 	struct rio_dev *prev;
 	atomic_t state;
-	struct rio_switch rswitch[0];	/* RIO switch info */
+	struct rio_switch rswitch[];	/* RIO switch info */
 };
 
 #define rio_dev_g(n) list_entry(n, struct rio_dev, global_list)
@@ -469,7 +465,7 @@ struct rio_driver {
 	struct device_driver driver;
 };
 
-#define	to_rio_driver(drv) container_of(drv,struct rio_driver, driver)
+#define	to_rio_driver(drv) container_of_const(drv,struct rio_driver, driver)
 
 union rio_pw_msg {
 	struct {

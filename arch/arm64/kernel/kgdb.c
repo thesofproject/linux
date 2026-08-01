@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AArch64 KGDB support
  *
@@ -5,18 +6,6 @@
  *
  * Copyright (C) 2013 Cavium Inc.
  * Author: Vijaya Kumar K <vijaya.kumar@caviumnetworks.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/bug.h>
@@ -28,6 +17,7 @@
 
 #include <asm/debug-monitors.h>
 #include <asm/insn.h>
+#include <asm/text-patching.h>
 #include <asm/traps.h>
 
 struct dbg_reg_def_t dbg_reg_def[DBG_MAX_REG_NUM] = {
@@ -234,6 +224,8 @@ int kgdb_arch_handle_exception(int exception_vector, int signo,
 		 */
 		if (!kernel_active_single_step())
 			kernel_enable_single_step(linux_regs);
+		else
+			kernel_rewind_single_step(linux_regs);
 		err = 0;
 		break;
 	default:
@@ -242,59 +234,31 @@ int kgdb_arch_handle_exception(int exception_vector, int signo,
 	return err;
 }
 
-static int kgdb_brk_fn(struct pt_regs *regs, unsigned int esr)
+int kgdb_brk_handler(struct pt_regs *regs, unsigned long esr)
 {
 	kgdb_handle_exception(1, SIGTRAP, 0, regs);
-	return 0;
+	return DBG_HOOK_HANDLED;
 }
-NOKPROBE_SYMBOL(kgdb_brk_fn)
+NOKPROBE_SYMBOL(kgdb_brk_handler)
 
-static int kgdb_compiled_brk_fn(struct pt_regs *regs, unsigned int esr)
+int kgdb_compiled_brk_handler(struct pt_regs *regs, unsigned long esr)
 {
 	compiled_break = 1;
 	kgdb_handle_exception(1, SIGTRAP, 0, regs);
 
-	return 0;
+	return DBG_HOOK_HANDLED;
 }
-NOKPROBE_SYMBOL(kgdb_compiled_brk_fn);
+NOKPROBE_SYMBOL(kgdb_compiled_brk_handler);
 
-static int kgdb_step_brk_fn(struct pt_regs *regs, unsigned int esr)
+int kgdb_single_step_handler(struct pt_regs *regs, unsigned long esr)
 {
 	if (!kgdb_single_step)
 		return DBG_HOOK_ERROR;
 
-	kgdb_handle_exception(1, SIGTRAP, 0, regs);
-	return 0;
+	kgdb_handle_exception(0, SIGTRAP, 0, regs);
+	return DBG_HOOK_HANDLED;
 }
-NOKPROBE_SYMBOL(kgdb_step_brk_fn);
-
-static struct break_hook kgdb_brkpt_hook = {
-	.esr_mask	= 0xffffffff,
-	.esr_val	= (u32)ESR_ELx_VAL_BRK64(KGDB_DYN_DBG_BRK_IMM),
-	.fn		= kgdb_brk_fn
-};
-
-static struct break_hook kgdb_compiled_brkpt_hook = {
-	.esr_mask	= 0xffffffff,
-	.esr_val	= (u32)ESR_ELx_VAL_BRK64(KGDB_COMPILED_DBG_BRK_IMM),
-	.fn		= kgdb_compiled_brk_fn
-};
-
-static struct step_hook kgdb_step_hook = {
-	.fn		= kgdb_step_brk_fn
-};
-
-static void kgdb_call_nmi_hook(void *ignored)
-{
-	kgdb_nmicallback(raw_smp_processor_id(), get_irq_regs());
-}
-
-void kgdb_roundup_cpus(unsigned long flags)
-{
-	local_irq_enable();
-	smp_call_function(kgdb_call_nmi_hook, NULL, 0);
-	local_irq_disable();
-}
+NOKPROBE_SYMBOL(kgdb_single_step_handler);
 
 static int __kgdb_notify(struct die_args *args, unsigned long cmd)
 {
@@ -333,15 +297,7 @@ static struct notifier_block kgdb_notifier = {
  */
 int kgdb_arch_init(void)
 {
-	int ret = register_die_notifier(&kgdb_notifier);
-
-	if (ret != 0)
-		return ret;
-
-	register_break_hook(&kgdb_brkpt_hook);
-	register_break_hook(&kgdb_compiled_brkpt_hook);
-	register_step_hook(&kgdb_step_hook);
-	return 0;
+	return register_die_notifier(&kgdb_notifier);
 }
 
 /*
@@ -351,13 +307,10 @@ int kgdb_arch_init(void)
  */
 void kgdb_arch_exit(void)
 {
-	unregister_break_hook(&kgdb_brkpt_hook);
-	unregister_break_hook(&kgdb_compiled_brkpt_hook);
-	unregister_step_hook(&kgdb_step_hook);
 	unregister_die_notifier(&kgdb_notifier);
 }
 
-struct kgdb_arch arch_kgdb_ops;
+const struct kgdb_arch arch_kgdb_ops;
 
 int kgdb_arch_set_breakpoint(struct kgdb_bkpt *bpt)
 {

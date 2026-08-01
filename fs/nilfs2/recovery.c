@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
- * recovery.c - NILFS recovery logic
+ * NILFS recovery logic
  *
  * Copyright (C) 2005-2008 Nippon Telegraph and Telephone Corporation.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * Written by Ryusuke Konishi.
  */
@@ -60,7 +51,7 @@ static int nilfs_warn_segment_error(struct super_block *sb, int err)
 
 	switch (err) {
 	case NILFS_SEG_FAIL_IO:
-		nilfs_msg(sb, KERN_ERR, "I/O error reading segment");
+		nilfs_err(sb, "I/O error reading segment");
 		return -EIO;
 	case NILFS_SEG_FAIL_MAGIC:
 		msg = "Magic number mismatch";
@@ -81,10 +72,10 @@ static int nilfs_warn_segment_error(struct super_block *sb, int err)
 		msg = "No super root in the last segment";
 		break;
 	default:
-		nilfs_msg(sb, KERN_ERR, "unrecognized segment error %d", err);
+		nilfs_err(sb, "unrecognized segment error %d", err);
 		return -EINVAL;
 	}
-	nilfs_msg(sb, KERN_WARNING, "invalid segment: %s", msg);
+	nilfs_warn(sb, "invalid segment: %s", msg);
 	return -EINVAL;
 }
 
@@ -97,6 +88,8 @@ static int nilfs_warn_segment_error(struct super_block *sb, int err)
  * @check_bytes: number of bytes to be checked
  * @start: DBN of start block
  * @nblock: number of blocks to be checked
+ *
+ * Return: 0 on success, or %-EIO if an I/O error occurs.
  */
 static int nilfs_compute_checksum(struct the_nilfs *nilfs,
 				  struct buffer_head *bhs, u32 *sum,
@@ -135,6 +128,11 @@ static int nilfs_compute_checksum(struct the_nilfs *nilfs,
  * @sr_block: disk block number of the super root block
  * @pbh: address of a buffer_head pointer to return super root buffer
  * @check: CRC check flag
+ *
+ * Return: 0 on success, or one of the following negative error codes on
+ * failure:
+ * * %-EINVAL	- Super root block corrupted.
+ * * %-EIO	- I/O error.
  */
 int nilfs_read_super_root_block(struct the_nilfs *nilfs, sector_t sr_block,
 				struct buffer_head **pbh, int check)
@@ -185,6 +183,8 @@ int nilfs_read_super_root_block(struct the_nilfs *nilfs, sector_t sr_block,
  * @nilfs: nilfs object
  * @start_blocknr: start block number of the log
  * @sum: pointer to return segment summary structure
+ *
+ * Return: Buffer head pointer, or NULL if an I/O error occurs.
  */
 static struct buffer_head *
 nilfs_read_log_header(struct the_nilfs *nilfs, sector_t start_blocknr,
@@ -204,6 +204,13 @@ nilfs_read_log_header(struct the_nilfs *nilfs, sector_t start_blocknr,
  * @seg_seq: sequence number of segment
  * @bh_sum: buffer head of summary block
  * @sum: segment summary struct
+ *
+ * Return: 0 on success, or one of the following internal codes on failure:
+ * * %NILFS_SEG_FAIL_MAGIC	    - Magic number mismatch.
+ * * %NILFS_SEG_FAIL_SEQ	    - Sequence number mismatch.
+ * * %NIFLS_SEG_FAIL_CONSISTENCY    - Block count out of range.
+ * * %NILFS_SEG_FAIL_IO		    - I/O error.
+ * * %NILFS_SEG_FAIL_CHECKSUM_FULL  - Full log checksum verification failed.
  */
 static int nilfs_validate_log(struct the_nilfs *nilfs, u64 seg_seq,
 			      struct buffer_head *bh_sum,
@@ -247,6 +254,9 @@ out:
  * @pbh: the current buffer head on summary blocks [in, out]
  * @offset: the current byte offset on summary blocks [in, out]
  * @bytes: byte size of the item to be read
+ *
+ * Return: Kernel space address of current segment summary entry, or
+ * NULL if an I/O error occurs.
  */
 static void *nilfs_read_summary_info(struct the_nilfs *nilfs,
 				     struct buffer_head **pbh,
@@ -309,6 +319,11 @@ static void nilfs_skip_summary_info(struct the_nilfs *nilfs,
  * @start_blocknr: start block number of the log
  * @sum: log summary information
  * @head: list head to add nilfs_recovery_block struct
+ *
+ * Return: 0 on success, or one of the following negative error codes on
+ * failure:
+ * * %-EIO	- I/O error.
+ * * %-ENOMEM	- Insufficient memory available.
  */
 static int nilfs_scan_dsync_log(struct the_nilfs *nilfs, sector_t start_blocknr,
 				struct nilfs_segment_summary *sum,
@@ -355,7 +370,7 @@ static int nilfs_scan_dsync_log(struct the_nilfs *nilfs, sector_t start_blocknr,
 			if (unlikely(!binfo))
 				goto out;
 
-			rb = kmalloc(sizeof(*rb), GFP_NOFS);
+			rb = kmalloc_obj(*rb, GFP_NOFS);
 			if (unlikely(!rb)) {
 				err = -ENOMEM;
 				goto out;
@@ -399,7 +414,7 @@ struct nilfs_segment_entry {
 
 static int nilfs_segment_list_add(struct list_head *head, __u64 segnum)
 {
-	struct nilfs_segment_entry *ent = kmalloc(sizeof(*ent), GFP_NOFS);
+	struct nilfs_segment_entry *ent = kmalloc_obj(*ent, GFP_NOFS);
 
 	if (unlikely(!ent))
 		return -ENOMEM;
@@ -442,8 +457,17 @@ static int nilfs_prepare_segment_for_recovery(struct the_nilfs *nilfs,
 	 * The next segment is invalidated by this recovery.
 	 */
 	err = nilfs_sufile_free(sufile, segnum[1]);
-	if (unlikely(err))
+	if (unlikely(err)) {
+		if (err == -ENOENT) {
+			nilfs_err(sb,
+				  "checkpoint log inconsistency at block %llu (segment %llu): next segment %llu is unallocated",
+				  (unsigned long long)nilfs->ns_last_pseg,
+				  (unsigned long long)nilfs->ns_segnum,
+				  (unsigned long long)segnum[1]);
+			err = -EINVAL;
+		}
 		goto failed;
+	}
 
 	for (i = 1; i < 4; i++) {
 		err = nilfs_segment_list_add(head, segnum[i]);
@@ -481,18 +505,16 @@ static int nilfs_prepare_segment_for_recovery(struct the_nilfs *nilfs,
 
 static int nilfs_recovery_copy_block(struct the_nilfs *nilfs,
 				     struct nilfs_recovery_block *rb,
-				     struct page *page)
+				     loff_t pos, struct folio *folio)
 {
 	struct buffer_head *bh_org;
-	void *kaddr;
+	size_t from = offset_in_folio(folio, pos);
 
 	bh_org = __bread(nilfs->ns_bdev, rb->blocknr, nilfs->ns_blocksize);
 	if (unlikely(!bh_org))
 		return -EIO;
 
-	kaddr = kmap_atomic(page);
-	memcpy(kaddr + bh_offset(bh_org), bh_org->b_data, bh_org->b_size);
-	kunmap_atomic(kaddr);
+	memcpy_to_folio(folio, from, bh_org->b_data, bh_org->b_size);
 	brelse(bh_org);
 	return 0;
 }
@@ -506,7 +528,7 @@ static int nilfs_recover_dsync_blocks(struct the_nilfs *nilfs,
 	struct inode *inode;
 	struct nilfs_recovery_block *rb, *n;
 	unsigned int blocksize = nilfs->ns_blocksize;
-	struct page *page;
+	struct folio *folio;
 	loff_t pos;
 	int err = 0, err2 = 0;
 
@@ -520,7 +542,7 @@ static int nilfs_recover_dsync_blocks(struct the_nilfs *nilfs,
 
 		pos = rb->blkoff << inode->i_blkbits;
 		err = block_write_begin(inode->i_mapping, pos, blocksize,
-					0, &page, nilfs_get_block);
+					&folio, nilfs_get_block);
 		if (unlikely(err)) {
 			loff_t isize = inode->i_size;
 
@@ -530,32 +552,31 @@ static int nilfs_recover_dsync_blocks(struct the_nilfs *nilfs,
 			goto failed_inode;
 		}
 
-		err = nilfs_recovery_copy_block(nilfs, rb, page);
+		err = nilfs_recovery_copy_block(nilfs, rb, pos, folio);
 		if (unlikely(err))
-			goto failed_page;
+			goto failed_folio;
 
 		err = nilfs_set_file_dirty(inode, 1);
 		if (unlikely(err))
-			goto failed_page;
+			goto failed_folio;
 
-		block_write_end(NULL, inode->i_mapping, pos, blocksize,
-				blocksize, page, NULL);
+		block_write_end(pos, blocksize, blocksize, folio);
 
-		unlock_page(page);
-		put_page(page);
+		folio_unlock(folio);
+		folio_put(folio);
 
 		(*nr_salvaged_blocks)++;
 		goto next;
 
- failed_page:
-		unlock_page(page);
-		put_page(page);
+ failed_folio:
+		folio_unlock(folio);
+		folio_put(folio);
 
  failed_inode:
-		nilfs_msg(sb, KERN_WARNING,
-			  "error %d recovering data block (ino=%lu, block-offset=%llu)",
-			  err, (unsigned long)rb->ino,
-			  (unsigned long long)rb->blkoff);
+		nilfs_warn(sb,
+			   "error %d recovering data block (ino=%lu, block-offset=%llu)",
+			   err, (unsigned long)rb->ino,
+			   (unsigned long long)rb->blkoff);
 		if (!err2)
 			err2 = err;
  next:
@@ -571,7 +592,14 @@ static int nilfs_recover_dsync_blocks(struct the_nilfs *nilfs,
  * checkpoint
  * @nilfs: nilfs object
  * @sb: super block instance
+ * @root: NILFS root instance
  * @ri: pointer to a nilfs_recovery_info
+ *
+ * Return: 0 on success, or one of the following negative error codes on
+ * failure:
+ * * %-EINVAL	- Log format error.
+ * * %-EIO	- I/O error.
+ * * %-ENOMEM	- Insufficient memory available.
  */
 static int nilfs_do_roll_forward(struct the_nilfs *nilfs,
 				 struct super_block *sb,
@@ -635,7 +663,7 @@ static int nilfs_do_roll_forward(struct the_nilfs *nilfs,
 			    !(flags & NILFS_SS_SYNDT))
 				goto try_next_pseg;
 			state = RF_DSYNC_ST;
-			/* Fall through */
+			fallthrough;
 		case RF_DSYNC_ST:
 			if (!(flags & NILFS_SS_SYNDT))
 				goto confused;
@@ -678,8 +706,7 @@ static int nilfs_do_roll_forward(struct the_nilfs *nilfs,
 	}
 
 	if (nsalvaged_blocks) {
-		nilfs_msg(sb, KERN_INFO, "salvaged %lu blocks",
-			  nsalvaged_blocks);
+		nilfs_info(sb, "salvaged %lu blocks", nsalvaged_blocks);
 		ri->ri_need_recovery = NILFS_RECOVERY_ROLLFORWARD_DONE;
 	}
  out:
@@ -690,7 +717,7 @@ static int nilfs_do_roll_forward(struct the_nilfs *nilfs,
  confused:
 	err = -EINVAL;
  failed:
-	nilfs_msg(sb, KERN_ERR,
+	nilfs_err(sb,
 		  "error %d roll-forwarding partial segment at blocknr = %llu",
 		  err, (unsigned long long)pseg_start);
 	goto out;
@@ -707,14 +734,47 @@ static void nilfs_finish_roll_forward(struct the_nilfs *nilfs,
 		return;
 
 	bh = __getblk(nilfs->ns_bdev, ri->ri_lsegs_start, nilfs->ns_blocksize);
-	BUG_ON(!bh);
+	if (WARN_ON(!bh))
+		return;  /* should never happen */
+
+	lock_buffer(bh);
 	memset(bh->b_data, 0, bh->b_size);
+	set_buffer_uptodate(bh);
 	set_buffer_dirty(bh);
+	unlock_buffer(bh);
+
 	err = sync_dirty_buffer(bh);
 	if (unlikely(err))
-		nilfs_msg(nilfs->ns_sb, KERN_WARNING,
-			  "buffer sync write failed during post-cleaning of recovery.");
+		nilfs_warn(nilfs->ns_sb,
+			   "buffer sync write failed during post-cleaning of recovery.");
 	brelse(bh);
+}
+
+/**
+ * nilfs_abort_roll_forward - cleaning up after a failed rollforward recovery
+ * @nilfs: nilfs object
+ */
+static void nilfs_abort_roll_forward(struct the_nilfs *nilfs)
+{
+	struct nilfs_inode_info *ii, *n;
+	LIST_HEAD(head);
+
+	/* Abandon inodes that have read recovery data */
+	spin_lock(&nilfs->ns_inode_lock);
+	list_splice_init(&nilfs->ns_dirty_files, &head);
+	spin_unlock(&nilfs->ns_inode_lock);
+	if (list_empty(&head))
+		return;
+
+	set_nilfs_purging(nilfs);
+	list_for_each_entry_safe(ii, n, &head, i_dirty) {
+		spin_lock(&nilfs->ns_inode_lock);
+		list_del_init(&ii->i_dirty);
+		spin_unlock(&nilfs->ns_inode_lock);
+
+		iput(&ii->vfs_inode);
+	}
+	clear_nilfs_purging(nilfs);
 }
 
 /**
@@ -723,18 +783,13 @@ static void nilfs_finish_roll_forward(struct the_nilfs *nilfs,
  * @sb: super block instance
  * @ri: pointer to a nilfs_recovery_info struct to store search results.
  *
- * Return Value: On success, 0 is returned.  On error, one of the following
- * negative error code is returned.
- *
- * %-EINVAL - Inconsistent filesystem state.
- *
- * %-EIO - I/O error
- *
- * %-ENOSPC - No space left on device (only in a panic state).
- *
- * %-ERESTARTSYS - Interrupted.
- *
- * %-ENOMEM - Insufficient memory available.
+ * Return: 0 on success, or one of the following negative error codes on
+ * failure:
+ * * %-EINVAL		- Inconsistent filesystem state.
+ * * %-EIO		- I/O error.
+ * * %-ENOMEM		- Insufficient memory available.
+ * * %-ENOSPC		- No space left on device (only in a panic state).
+ * * %-ERESTARTSYS	- Interrupted.
  */
 int nilfs_salvage_orphan_logs(struct the_nilfs *nilfs,
 			      struct super_block *sb,
@@ -748,8 +803,7 @@ int nilfs_salvage_orphan_logs(struct the_nilfs *nilfs,
 
 	err = nilfs_attach_checkpoint(sb, ri->ri_cno, true, &root);
 	if (unlikely(err)) {
-		nilfs_msg(sb, KERN_ERR,
-			  "error %d loading the latest checkpoint", err);
+		nilfs_err(sb, "error %d loading the latest checkpoint", err);
 		return err;
 	}
 
@@ -760,8 +814,7 @@ int nilfs_salvage_orphan_logs(struct the_nilfs *nilfs,
 	if (ri->ri_need_recovery == NILFS_RECOVERY_ROLLFORWARD_DONE) {
 		err = nilfs_prepare_segment_for_recovery(nilfs, sb, ri);
 		if (unlikely(err)) {
-			nilfs_msg(sb, KERN_ERR,
-				  "error %d preparing segment for recovery",
+			nilfs_err(sb, "error %d preparing segment for recovery",
 				  err);
 			goto failed;
 		}
@@ -775,18 +828,21 @@ int nilfs_salvage_orphan_logs(struct the_nilfs *nilfs,
 		nilfs_detach_log_writer(sb);
 
 		if (unlikely(err)) {
-			nilfs_msg(sb, KERN_ERR,
-				  "error %d writing segment for recovery",
+			nilfs_err(sb, "error %d writing segment for recovery",
 				  err);
-			goto failed;
+			goto put_root;
 		}
 
 		nilfs_finish_roll_forward(nilfs, ri);
 	}
 
- failed:
+put_root:
 	nilfs_put_root(root);
 	return err;
+
+failed:
+	nilfs_abort_roll_forward(nilfs);
+	goto put_root;
 }
 
 /**
@@ -798,14 +854,11 @@ int nilfs_salvage_orphan_logs(struct the_nilfs *nilfs,
  * segment pointed by the superblock.  It sets up struct the_nilfs through
  * this search. It fills nilfs_recovery_info (ri) required for recovery.
  *
- * Return Value: On success, 0 is returned.  On error, one of the following
- * negative error code is returned.
- *
- * %-EINVAL - No valid segment found
- *
- * %-EIO - I/O error
- *
- * %-ENOMEM - Insufficient memory available.
+ * Return: 0 on success, or one of the following negative error codes on
+ * failure:
+ * * %-EINVAL	- No valid segment found.
+ * * %-EIO	- I/O error.
+ * * %-ENOMEM	- Insufficient memory available.
  */
 int nilfs_search_super_root(struct the_nilfs *nilfs,
 			    struct nilfs_recovery_info *ri)

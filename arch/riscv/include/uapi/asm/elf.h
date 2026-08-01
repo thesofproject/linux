@@ -9,8 +9,8 @@
  * (at your option) any later version.
  */
 
-#ifndef _UAPI_ASM_ELF_H
-#define _UAPI_ASM_ELF_H
+#ifndef _UAPI_ASM_RISCV_ELF_H
+#define _UAPI_ASM_RISCV_ELF_H
 
 #include <asm/ptrace.h>
 
@@ -19,10 +19,18 @@ typedef unsigned long elf_greg_t;
 typedef struct user_regs_struct elf_gregset_t;
 #define ELF_NGREG (sizeof(elf_gregset_t) / sizeof(elf_greg_t))
 
+/* We don't support f without d, or q.  */
+typedef __u64 elf_fpreg_t;
 typedef union __riscv_fp_state elf_fpregset_t;
+#define ELF_NFPREG (sizeof(struct __riscv_d_ext_state) / sizeof(elf_fpreg_t))
 
-#define ELF_RISCV_R_SYM(r_info) ((r_info) >> 32)
-#define ELF_RISCV_R_TYPE(r_info) ((r_info) & 0xffffffff)
+#if __riscv_xlen == 64
+#define ELF_RISCV_R_SYM(r_info)		ELF64_R_SYM(r_info)
+#define ELF_RISCV_R_TYPE(r_info)	ELF64_R_TYPE(r_info)
+#else
+#define ELF_RISCV_R_SYM(r_info)		ELF32_R_SYM(r_info)
+#define ELF_RISCV_R_TYPE(r_info)	ELF32_R_TYPE(r_info)
+#endif
 
 /*
  * RISC-V relocation types
@@ -41,6 +49,7 @@ typedef union __riscv_fp_state elf_fpregset_t;
 #define R_RISCV_TLS_DTPREL64	9
 #define R_RISCV_TLS_TPREL32	10
 #define R_RISCV_TLS_TPREL64	11
+#define R_RISCV_IRELATIVE	58
 
 /* Relocation types not used by the dynamic linker */
 #define R_RISCV_BRANCH		16
@@ -73,7 +82,6 @@ typedef union __riscv_fp_state elf_fpregset_t;
 #define R_RISCV_ALIGN		43
 #define R_RISCV_RVC_BRANCH	44
 #define R_RISCV_RVC_JUMP	45
-#define R_RISCV_LUI		46
 #define R_RISCV_GPREL_I		47
 #define R_RISCV_GPREL_S		48
 #define R_RISCV_TPREL_I		49
@@ -85,6 +93,9 @@ typedef union __riscv_fp_state elf_fpregset_t;
 #define R_RISCV_SET16		55
 #define R_RISCV_SET32		56
 #define R_RISCV_32_PCREL	57
+#define R_RISCV_PLT32		59
+#define R_RISCV_SET_ULEB128	60
+#define R_RISCV_SUB_ULEB128	61
 
 
-#endif /* _UAPI_ASM_ELF_H */
+#endif /* _UAPI_ASM_RISCV_ELF_H */

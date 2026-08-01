@@ -11,8 +11,11 @@
 
 #include <linux/types.h>
 #include <linux/list.h>
+#include <asm/asm-extable.h>
+#include <asm/machine.h>
 #include <asm/sclp.h>
 #include <asm/ebcdic.h>
+#include <asm/asm.h>
 
 /* maximum number of pages concerning our own memory management */
 #define MAX_KMEM_PAGES (sizeof(unsigned long) << 3)
@@ -63,6 +66,9 @@
 typedef unsigned int sclp_cmdw_t;
 
 #define SCLP_CMDW_READ_CPU_INFO		0x00010001
+#define SCLP_CMDW_READ_SCP_INFO		0x00020001
+#define SCLP_CMDW_READ_STORAGE_INFO	0x00040001
+#define SCLP_CMDW_READ_SCP_INFO_FORCED	0x00120001
 #define SCLP_CMDW_READ_EVENT_DATA	0x00770005
 #define SCLP_CMDW_WRITE_EVENT_DATA	0x00760005
 #define SCLP_CMDW_WRITE_EVENT_MASK	0x00780005
@@ -78,23 +84,7 @@ typedef unsigned int sclp_cmdw_t;
 
 #define GDS_KEY_SELFDEFTEXTMSG	0x31
 
-enum sclp_pm_event {
-	SCLP_PM_EVENT_FREEZE,
-	SCLP_PM_EVENT_THAW,
-	SCLP_PM_EVENT_RESTORE,
-};
-
-#define SCLP_PANIC_PRIO		1
-#define SCLP_PANIC_PRIO_CLIENT	0
-
 typedef u64 sccb_mask_t;
-
-struct sccb_header {
-	u16	length;
-	u8	function_code;
-	u8	control_mask[3];
-	u16	response_code;
-} __attribute__((packed));
 
 struct init_sccb {
 	struct sccb_header header;
@@ -153,8 +143,66 @@ struct read_cpu_info_sccb {
 	u16	offset_configured;
 	u16	nr_standby;
 	u16	offset_standby;
-	u8	reserved[4096 - 16];
+	/*
+	 * Without ext sccb, struct size is PAGE_SIZE.
+	 * With ext sccb, struct size is EXT_SCCB_READ_CPU.
+	 */
+	u8	reserved[];
 } __attribute__((packed, aligned(PAGE_SIZE)));
+
+struct read_info_sccb {
+	struct	sccb_header header;	/* 0-7 */
+	u16	rnmax;			/* 8-9 */
+	u8	rnsize;			/* 10 */
+	u8	_pad_11[16 - 11];	/* 11-15 */
+	u16	ncpurl;			/* 16-17 */
+	u16	cpuoff;			/* 18-19 */
+	u8	_pad_20[24 - 20];	/* 20-23 */
+	u8	loadparm[8];		/* 24-31 */
+	u8	_pad_32[42 - 32];	/* 32-41 */
+	u8	fac42;			/* 42 */
+	u8	fac43;			/* 43 */
+	u8	_pad_44[48 - 44];	/* 44-47 */
+	u64	facilities;		/* 48-55 */
+	u8	_pad_56[66 - 56];	/* 56-65 */
+	u8	fac66;			/* 66 */
+	u8	_pad_67[76 - 67];	/* 67-83 */
+	u32	ibc;			/* 76-79 */
+	u8	_pad80[84 - 80];	/* 80-83 */
+	u8	fac84;			/* 84 */
+	u8	fac85;			/* 85 */
+	u8	_pad_86[91 - 86];	/* 86-90 */
+	u8	fac91;			/* 91 */
+	u8	_pad_92[98 - 92];	/* 92-97 */
+	u8	fac98;			/* 98 */
+	u8	hamaxpow;		/* 99 */
+	u32	rnsize2;		/* 100-103 */
+	u64	rnmax2;			/* 104-111 */
+	u32	hsa_size;		/* 112-115 */
+	u8	fac116;			/* 116 */
+	u8	fac117;			/* 117 */
+	u8	fac118;			/* 118 */
+	u8	fac119;			/* 119 */
+	u16	hcpua;			/* 120-121 */
+	u8	_pad_122[124 - 122];	/* 122-123 */
+	u32	hmfai;			/* 124-127 */
+	u8	_pad_128[134 - 128];	/* 128-133 */
+	u8	byte_134;			/* 134 */
+	u8	cpudirq;		/* 135 */
+	u16	cbl;			/* 136-137 */
+	u8	byte_138;		/* 138 */
+	u8	byte_139;		/* 139 */
+	u8	_pad_140[EXT_SCCB_READ_SCP - 140];
+} __packed __aligned(PAGE_SIZE);
+
+struct read_storage_sccb {
+	struct sccb_header header;
+	u16 max_id;
+	u16 assigned;
+	u16 standby;
+	u16 :16;
+	u32 entries[];
+} __packed;
 
 static inline void sclp_fill_core_info(struct sclp_core_info *info,
 				       struct read_cpu_info_sccb *sccb)
@@ -174,7 +222,7 @@ static inline void sclp_fill_core_info(struct sclp_core_info *info,
 #define SCLP_HAS_CPU_INFO	(sclp.facilities & 0x0800000000000000ULL)
 #define SCLP_HAS_CPU_RECONFIG	(sclp.facilities & 0x0400000000000000ULL)
 #define SCLP_HAS_PCI_RECONFIG	(sclp.facilities & 0x0000000040000000ULL)
-
+#define SCLP_HAS_AP_RECONFIG	(sclp.facilities & 0x0000000100000000ULL)
 
 struct gds_subvector {
 	u8	length;
@@ -184,13 +232,6 @@ struct gds_subvector {
 struct gds_vector {
 	u16	length;
 	u16	gds_id;
-} __attribute__((packed));
-
-struct evbuf_header {
-	u16	length;
-	u8	type;
-	u8	flags;
-	u16	_reserved;
 } __attribute__((packed));
 
 struct sclp_req {
@@ -234,10 +275,6 @@ struct sclp_register {
 	void (*state_change_fn)(struct sclp_register *);
 	/* called for events in cp_receive_mask/sclp_receive_mask */
 	void (*receiver_fn)(struct evbuf_header *);
-	/* called for power management events */
-	void (*pm_event_fn)(struct sclp_register *, enum sclp_pm_event);
-	/* pm event posted flag */
-	int pm_event_posted;
 };
 
 /* externals from sclp.c */
@@ -250,9 +287,7 @@ int sclp_deactivate(void);
 int sclp_reactivate(void);
 int sclp_sync_request(sclp_cmdw_t command, void *sccb);
 int sclp_sync_request_timeout(sclp_cmdw_t command, void *sccb, int timeout);
-
 int sclp_sdias_init(void);
-void sclp_sdias_exit(void);
 
 enum {
 	sclp_init_state_uninitialized,
@@ -262,11 +297,9 @@ enum {
 
 extern int sclp_init_state;
 extern int sclp_console_pages;
-extern int sclp_console_drop;
+extern bool sclp_console_drop;
 extern unsigned long sclp_console_full;
 extern bool sclp_mask_compat_mode;
-
-extern char sclp_early_sccb[PAGE_SIZE];
 
 void sclp_early_wait_irq(void);
 int sclp_early_cmd(sclp_cmdw_t cmd, void *sccb);
@@ -275,25 +308,29 @@ unsigned int sclp_early_con_check_vt220(struct init_sccb *sccb);
 int sclp_early_set_event_mask(struct init_sccb *sccb,
 			      sccb_mask_t receive_mask,
 			      sccb_mask_t send_mask);
+struct read_info_sccb * __init sclp_early_get_info(void);
 
 /* useful inlines */
 
 /* Perform service call. Return 0 on success, non-zero otherwise. */
 static inline int sclp_service_call(sclp_cmdw_t command, void *sccb)
 {
-	int cc = 4; /* Initialize for program check handling */
+	int cc, exception;
 
-	asm volatile(
-		"0:	.insn	rre,0xb2200000,%1,%2\n"	 /* servc %1,%2 */
-		"1:	ipm	%0\n"
-		"	srl	%0,28\n"
+	exception = 1;
+	asm_inline volatile(
+		"0:	.insn	rre,0xb2200000,%[cmd],%[sccb]\n" /* servc */
+		"1:	lhi	%[exc],0\n"
 		"2:\n"
+		CC_IPM(cc)
 		EX_TABLE(0b, 2b)
 		EX_TABLE(1b, 2b)
-		: "+&d" (cc) : "d" (command), "a" ((unsigned long)sccb)
-		: "cc", "memory");
-	if (cc == 4)
+		: CC_OUT(cc, cc), [exc] "+d" (exception)
+		: [cmd] "d" (command), [sccb] "a" (__pa(sccb))
+		: CC_CLOBBER_LIST("memory"));
+	if (exception)
 		return -EINVAL;
+	cc = CC_TRANSFORM(cc);
 	if (cc == 3)
 		return -EIO;
 	if (cc == 2)
@@ -306,21 +343,21 @@ static inline int sclp_service_call(sclp_cmdw_t command, void *sccb)
 static inline unsigned char
 sclp_ascebc(unsigned char ch)
 {
-	return (MACHINE_IS_VM) ? _ascebc[ch] : _ascebc_500[ch];
+	return (machine_is_vm()) ? _ascebc[ch] : _ascebc_500[ch];
 }
 
 /* translate string from EBCDIC to ASCII */
 static inline void
-sclp_ebcasc_str(unsigned char *str, int nr)
+sclp_ebcasc_str(char *str, int nr)
 {
-	(MACHINE_IS_VM) ? EBCASC(str, nr) : EBCASC_500(str, nr);
+	(machine_is_vm()) ? EBCASC(str, nr) : EBCASC_500(str, nr);
 }
 
 /* translate string from ASCII to EBCDIC */
 static inline void
-sclp_ascebc_str(unsigned char *str, int nr)
+sclp_ascebc_str(char *str, int nr)
 {
-	(MACHINE_IS_VM) ? ASCEBC(str, nr) : ASCEBC_500(str, nr);
+	(machine_is_vm()) ? ASCEBC(str, nr) : ASCEBC_500(str, nr);
 }
 
 static inline struct gds_vector *

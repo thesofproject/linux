@@ -5,6 +5,7 @@
  * Copyright (c) 2003-2010 Cavium Networks
  */
 
+#include <linux/platform_device.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/cache.h>
@@ -23,30 +24,13 @@
 #include <net/xfrm.h>
 #endif /* CONFIG_XFRM */
 
-#include <asm/octeon/octeon.h>
-
+#include "octeon-ethernet.h"
 #include "ethernet-defines.h"
 #include "ethernet-mem.h"
 #include "ethernet-rx.h"
-#include "octeon-ethernet.h"
 #include "ethernet-util.h"
 
-#include <asm/octeon/cvmx-helper.h>
-#include <asm/octeon/cvmx-wqe.h>
-#include <asm/octeon/cvmx-fau.h>
-#include <asm/octeon/cvmx-pow.h>
-#include <asm/octeon/cvmx-pip.h>
-#include <asm/octeon/cvmx-scratch.h>
-
-#include <asm/octeon/cvmx-gmxx-defs.h>
-
 static atomic_t oct_rx_ready = ATOMIC_INIT(0);
-
-static struct oct_rx_group {
-	int irq;
-	int group;
-	struct napi_struct napi;
-} oct_rx_group[16];
 
 /**
  * cvm_oct_do_interrupt - interrupt handler.
@@ -71,7 +55,7 @@ static irqreturn_t cvm_oct_do_interrupt(int irq, void *napi_id)
  *
  * Returns Non-zero if the packet can be dropped, zero otherwise.
  */
-static inline int cvm_oct_check_rcv_error(cvmx_wqe_t *work)
+static inline int cvm_oct_check_rcv_error(struct cvmx_wqe *work)
 {
 	int port;
 
@@ -80,15 +64,17 @@ static inline int cvm_oct_check_rcv_error(cvmx_wqe_t *work)
 	else
 		port = work->word1.cn38xx.ipprt;
 
-	if ((work->word2.snoip.err_code == 10) && (work->word1.len <= 64)) {
+	if ((work->word2.snoip.err_code == 10) && (work->word1.len <= 64))
 		/*
 		 * Ignore length errors on min size packets. Some
 		 * equipment incorrectly pads packets to 64+4FCS
 		 * instead of 60+4FCS.  Note these packets still get
 		 * counted as frame errors.
 		 */
-	} else if (work->word2.snoip.err_code == 5 ||
-		   work->word2.snoip.err_code == 7) {
+		return 0;
+
+	if (work->word2.snoip.err_code == 5 ||
+	    work->word2.snoip.err_code == 7) {
 		/*
 		 * We received a packet with either an alignment error
 		 * or a FCS error. This may be signalling that we are
@@ -119,7 +105,10 @@ static inline int cvm_oct_check_rcv_error(cvmx_wqe_t *work)
 				/* Port received 0xd5 preamble */
 				work->packet_ptr.s.addr += i + 1;
 				work->word1.len -= i + 5;
-			} else if ((*ptr & 0xf) == 0xd) {
+				return 0;
+			}
+
+			if ((*ptr & 0xf) == 0xd) {
 				/* Port received 0xd preamble */
 				work->packet_ptr.s.addr += i;
 				work->word1.len -= i + 4;
@@ -129,24 +118,23 @@ static inline int cvm_oct_check_rcv_error(cvmx_wqe_t *work)
 					    ((*(ptr + 1) & 0xf) << 4);
 					ptr++;
 				}
-			} else {
-				printk_ratelimited("Port %d unknown preamble, packet dropped\n",
-						   port);
-				cvm_oct_free_work(work);
-				return 1;
+				return 0;
 			}
+
+			printk_ratelimited("Port %d unknown preamble, packet dropped\n",
+					   port);
+			cvm_oct_free_work(work);
+			return 1;
 		}
-	} else {
-		printk_ratelimited("Port %d receive error code %d, packet dropped\n",
-				   port, work->word2.snoip.err_code);
-		cvm_oct_free_work(work);
-		return 1;
 	}
 
-	return 0;
+	printk_ratelimited("Port %d receive error code %d, packet dropped\n",
+			   port, work->word2.snoip.err_code);
+	cvm_oct_free_work(work);
+	return 1;
 }
 
-static void copy_segments_to_skb(cvmx_wqe_t *work, struct sk_buff *skb)
+static void copy_segments_to_skb(struct cvmx_wqe *work, struct sk_buff *skb)
 {
 	int segments = work->word2.s.bufs;
 	union cvmx_buf_ptr segment_ptr = work->packet_ptr;
@@ -226,7 +214,7 @@ static int cvm_oct_poll(struct oct_rx_group *rx_group, int budget)
 		struct sk_buff *skb = NULL;
 		struct sk_buff **pskb = NULL;
 		int skb_in_hw;
-		cvmx_wqe_t *work;
+		struct cvmx_wqe *work;
 		int port;
 
 		if (USE_ASYNC_IOBDMA && did_work_request)
@@ -404,7 +392,7 @@ static int cvm_oct_poll(struct oct_rx_group *rx_group, int budget)
 		/* Restore the scratch area */
 		cvmx_scratch_write64(CVMX_SCR_SCRATCH, old_scratch);
 	}
-	cvm_oct_rx_refill_pool(0);
+	cvm_oct_rx_refill_pool(rx_group->pdev, 0);
 
 	return rx_count;
 }
@@ -441,24 +429,28 @@ static int cvm_oct_napi_poll(struct napi_struct *napi, int budget)
  */
 void cvm_oct_poll_controller(struct net_device *dev)
 {
+	struct platform_device *pdev = to_platform_device(dev->dev.parent);
+	struct octeon_ethernet_platform *plat = platform_get_drvdata(pdev);
 	int i;
 
 	if (!atomic_read(&oct_rx_ready))
 		return;
 
-	for (i = 0; i < ARRAY_SIZE(oct_rx_group); i++) {
+	for (i = 0; i < ARRAY_SIZE(plat->rx_group); i++) {
 		if (!(pow_receive_groups & BIT(i)))
 			continue;
 
-		cvm_oct_poll(&oct_rx_group[i], 16);
+		cvm_oct_poll(&plat->rx_group[i], 16);
 	}
 }
 #endif
 
-void cvm_oct_rx_initialize(void)
+void cvm_oct_rx_initialize(struct platform_device *pdev)
 {
 	int i;
 	struct net_device *dev_for_napi = NULL;
+	struct octeon_ethernet_platform *plat = platform_get_drvdata(pdev);
+	struct oct_rx_group *rx_group = plat->rx_group;
 
 	for (i = 0; i < TOTAL_NUMBER_OF_PORTS; i++) {
 		if (cvm_oct_device[i]) {
@@ -470,27 +462,28 @@ void cvm_oct_rx_initialize(void)
 	if (!dev_for_napi)
 		panic("No net_devices were allocated.");
 
-	for (i = 0; i < ARRAY_SIZE(oct_rx_group); i++) {
+	for (i = 0; i < ARRAY_SIZE(plat->rx_group); i++) {
 		int ret;
 
 		if (!(pow_receive_groups & BIT(i)))
 			continue;
 
-		netif_napi_add(dev_for_napi, &oct_rx_group[i].napi,
-			       cvm_oct_napi_poll, rx_napi_weight);
-		napi_enable(&oct_rx_group[i].napi);
+		netif_napi_add_weight(dev_for_napi, &rx_group[i].napi,
+				      cvm_oct_napi_poll, rx_napi_weight);
+		napi_enable(&rx_group[i].napi);
 
-		oct_rx_group[i].irq = OCTEON_IRQ_WORKQ0 + i;
-		oct_rx_group[i].group = i;
+		rx_group[i].irq = OCTEON_IRQ_WORKQ0 + i;
+		rx_group[i].group = i;
+		rx_group[i].pdev = pdev;
 
 		/* Register an IRQ handler to receive POW interrupts */
-		ret = request_irq(oct_rx_group[i].irq, cvm_oct_do_interrupt, 0,
-				  "Ethernet", &oct_rx_group[i].napi);
+		ret = request_irq(rx_group[i].irq, cvm_oct_do_interrupt, 0,
+				  "Ethernet", &rx_group[i].napi);
 		if (ret)
 			panic("Could not acquire Ethernet IRQ %d\n",
-			      oct_rx_group[i].irq);
+			      rx_group[i].irq);
 
-		disable_irq_nosync(oct_rx_group[i].irq);
+		disable_irq_nosync(rx_group[i].irq);
 
 		/* Enable POW interrupt when our port has at least one packet */
 		if (OCTEON_IS_MODEL(OCTEON_CN68XX)) {
@@ -522,16 +515,17 @@ void cvm_oct_rx_initialize(void)
 		/* Schedule NAPI now. This will indirectly enable the
 		 * interrupt.
 		 */
-		napi_schedule(&oct_rx_group[i].napi);
+		napi_schedule(&rx_group[i].napi);
 	}
 	atomic_inc(&oct_rx_ready);
 }
 
-void cvm_oct_rx_shutdown(void)
+void cvm_oct_rx_shutdown(struct platform_device *pdev)
 {
+	struct octeon_ethernet_platform *plat = platform_get_drvdata(pdev);
 	int i;
 
-	for (i = 0; i < ARRAY_SIZE(oct_rx_group); i++) {
+	for (i = 0; i < ARRAY_SIZE(plat->rx_group); i++) {
 		if (!(pow_receive_groups & BIT(i)))
 			continue;
 
@@ -542,8 +536,8 @@ void cvm_oct_rx_shutdown(void)
 			cvmx_write_csr(CVMX_POW_WQ_INT_THRX(i), 0);
 
 		/* Free the interrupt handler */
-		free_irq(oct_rx_group[i].irq, cvm_oct_device);
+		free_irq(plat->rx_group[i].irq, &plat->rx_group[i].napi);
 
-		netif_napi_del(&oct_rx_group[i].napi);
+		netif_napi_del(&plat->rx_group[i].napi);
 	}
 }

@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * DA9150 GPADC Driver
  *
  * Copyright (c) 2014 Dialog Semiconductor
  *
  * Author: Adam Thomson <Adam.Thomson.Opensource@diasemi.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -295,28 +291,12 @@ static const struct iio_chan_spec da9150_gpadc_channels[] = {
 };
 
 /* Default maps used by da9150-charger */
-static struct iio_map da9150_gpadc_default_maps[] = {
-	{
-		.consumer_dev_name = "da9150-charger",
-		.consumer_channel = "CHAN_IBUS",
-		.adc_channel_label = "IBUS",
-	},
-	{
-		.consumer_dev_name = "da9150-charger",
-		.consumer_channel = "CHAN_VBUS",
-		.adc_channel_label = "VBUS",
-	},
-	{
-		.consumer_dev_name = "da9150-charger",
-		.consumer_channel = "CHAN_TJUNC",
-		.adc_channel_label = "TJUNC_CORE",
-	},
-	{
-		.consumer_dev_name = "da9150-charger",
-		.consumer_channel = "CHAN_VBAT",
-		.adc_channel_label = "VBAT",
-	},
-	{},
+static const struct iio_map da9150_gpadc_default_maps[] = {
+	IIO_MAP("IBUS", "da9150-charger", "CHAN_IBUS"),
+	IIO_MAP("VBUS", "da9150-charger", "CHAN_VBUS"),
+	IIO_MAP("TJUNC_CORE", "da9150-charger", "CHAN_TJUNC"),
+	IIO_MAP("VBAT", "da9150-charger", "CHAN_VBAT"),
+	{ }
 };
 
 static int da9150_gpadc_probe(struct platform_device *pdev)
@@ -328,23 +308,19 @@ static int da9150_gpadc_probe(struct platform_device *pdev)
 	int irq, ret;
 
 	indio_dev = devm_iio_device_alloc(dev, sizeof(*gpadc));
-	if (!indio_dev) {
-		dev_err(&pdev->dev, "Failed to allocate IIO device\n");
+	if (!indio_dev)
 		return -ENOMEM;
-	}
+
 	gpadc = iio_priv(indio_dev);
 
-	platform_set_drvdata(pdev, indio_dev);
 	gpadc->da9150 = da9150;
 	gpadc->dev = dev;
 	mutex_init(&gpadc->lock);
 	init_completion(&gpadc->complete);
 
 	irq = platform_get_irq_byname(pdev, "GPADC");
-	if (irq < 0) {
-		dev_err(dev, "Failed to get IRQ: %d\n", irq);
+	if (irq < 0)
 		return irq;
-	}
 
 	ret = devm_request_threaded_irq(dev, irq, NULL, da9150_gpadc_irq,
 					IRQF_ONESHOT, "GPADC", gpadc);
@@ -353,42 +329,19 @@ static int da9150_gpadc_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = iio_map_array_register(indio_dev, da9150_gpadc_default_maps);
+	ret = devm_iio_map_array_register(&pdev->dev, indio_dev, da9150_gpadc_default_maps);
 	if (ret) {
 		dev_err(dev, "Failed to register IIO maps: %d\n", ret);
 		return ret;
 	}
 
 	indio_dev->name = dev_name(dev);
-	indio_dev->dev.parent = dev;
-	indio_dev->dev.of_node = pdev->dev.of_node;
 	indio_dev->info = &da9150_gpadc_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = da9150_gpadc_channels;
 	indio_dev->num_channels = ARRAY_SIZE(da9150_gpadc_channels);
 
-	ret = iio_device_register(indio_dev);
-	if (ret) {
-		dev_err(dev, "Failed to register IIO device: %d\n", ret);
-		goto iio_map_unreg;
-	}
-
-	return 0;
-
-iio_map_unreg:
-	iio_map_array_unregister(indio_dev);
-
-	return ret;
-}
-
-static int da9150_gpadc_remove(struct platform_device *pdev)
-{
-	struct iio_dev *indio_dev = platform_get_drvdata(pdev);
-
-	iio_device_unregister(indio_dev);
-	iio_map_array_unregister(indio_dev);
-
-	return 0;
+	return devm_iio_device_register(&pdev->dev, indio_dev);
 }
 
 static struct platform_driver da9150_gpadc_driver = {
@@ -396,7 +349,6 @@ static struct platform_driver da9150_gpadc_driver = {
 		.name = "da9150-gpadc",
 	},
 	.probe = da9150_gpadc_probe,
-	.remove = da9150_gpadc_remove,
 };
 
 module_platform_driver(da9150_gpadc_driver);

@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * net/core/fib_rules.c		Generic Routing Rules
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License as
- *	published by the Free Software Foundation, version 2.
  *
  * Authors:	Thomas Graf <tgraf@suug.ch>
  */
@@ -14,9 +11,24 @@
 #include <linux/list.h>
 #include <linux/module.h>
 #include <net/net_namespace.h>
+#include <net/inet_dscp.h>
 #include <net/sock.h>
 #include <net/fib_rules.h>
 #include <net/ip_tunnels.h>
+#include <linux/indirect_call_wrapper.h>
+
+#if defined(CONFIG_IPV6) && defined(CONFIG_IPV6_MULTIPLE_TABLES)
+#ifdef CONFIG_IP_MULTIPLE_TABLES
+#define INDIRECT_CALL_MT(f, f2, f1, ...) \
+	INDIRECT_CALL_INET(f, f2, f1, __VA_ARGS__)
+#else
+#define INDIRECT_CALL_MT(f, f2, f1, ...) INDIRECT_CALL_1(f, f2, __VA_ARGS__)
+#endif
+#elif defined(CONFIG_IP_MULTIPLE_TABLES)
+#define INDIRECT_CALL_MT(f, f2, f1, ...) INDIRECT_CALL_1(f, f1, __VA_ARGS__)
+#else
+#define INDIRECT_CALL_MT(f, f2, f1, ...) f(__VA_ARGS__)
+#endif
 
 static const struct fib_kuid_range fib_kuid_range_unset = {
 	KUIDT_INIT(0),
@@ -25,8 +37,8 @@ static const struct fib_kuid_range fib_kuid_range_unset = {
 
 bool fib_rule_matchall(const struct fib_rule *rule)
 {
-	if (rule->iifindex || rule->oifindex || rule->mark || rule->tun_id ||
-	    rule->flags)
+	if (READ_ONCE(rule->iifindex) || READ_ONCE(rule->oifindex) ||
+	    rule->mark || rule->tun_id || rule->flags)
 		return false;
 	if (rule->suppress_ifgroup != -1 || rule->suppress_prefixlen != -1)
 		return false;
@@ -42,11 +54,11 @@ bool fib_rule_matchall(const struct fib_rule *rule)
 EXPORT_SYMBOL_GPL(fib_rule_matchall);
 
 int fib_default_rule_add(struct fib_rules_ops *ops,
-			 u32 pref, u32 table, u32 flags)
+			 u32 pref, u32 table)
 {
 	struct fib_rule *r;
 
-	r = kzalloc(ops->rule_size, GFP_KERNEL);
+	r = kzalloc(ops->rule_size, GFP_KERNEL_ACCOUNT);
 	if (r == NULL)
 		return -ENOMEM;
 
@@ -54,7 +66,6 @@ int fib_default_rule_add(struct fib_rules_ops *ops,
 	r->action = FR_ACT_TO_TBL;
 	r->pref = pref;
 	r->table = table;
-	r->flags = flags;
 	r->proto = RTPROT_KERNEL;
 	r->fr_net = ops->fro_net;
 	r->uid_range = fib_kuid_range_unset;
@@ -62,7 +73,7 @@ int fib_default_rule_add(struct fib_rules_ops *ops,
 	r->suppress_prefixlen = -1;
 	r->suppress_ifgroup = -1;
 
-	/* The lock is not required here, the list in unreacheable
+	/* The lock is not required here, the list in unreachable
 	 * at the moment this function is called */
 	list_add_tail(&r->list, &ops->rules_list);
 	return 0;
@@ -90,7 +101,8 @@ static void notify_rule_change(int event, struct fib_rule *rule,
 			       struct fib_rules_ops *ops, struct nlmsghdr *nlh,
 			       u32 pid);
 
-static struct fib_rules_ops *lookup_rules_ops(struct net *net, int family)
+static struct fib_rules_ops *lookup_rules_ops(const struct net *net,
+					      int family)
 {
 	struct fib_rules_ops *ops;
 
@@ -245,16 +257,36 @@ static int nla_put_port_range(struct sk_buff *skb, int attrtype,
 	return nla_put(skb, attrtype, sizeof(*range), range);
 }
 
+static bool fib_rule_iif_match(const struct fib_rule *rule, int iifindex,
+			       const struct flowi *fl)
+{
+	u8 iif_is_l3_master = READ_ONCE(rule->iif_is_l3_master);
+
+	return iif_is_l3_master ? l3mdev_fib_rule_iif_match(fl, iifindex) :
+				  fl->flowi_iif == iifindex;
+}
+
+static bool fib_rule_oif_match(const struct fib_rule *rule, int oifindex,
+			       const struct flowi *fl)
+{
+	u8 oif_is_l3_master = READ_ONCE(rule->oif_is_l3_master);
+
+	return oif_is_l3_master ? l3mdev_fib_rule_oif_match(fl, oifindex) :
+				  fl->flowi_oif == oifindex;
+}
+
 static int fib_rule_match(struct fib_rule *rule, struct fib_rules_ops *ops,
 			  struct flowi *fl, int flags,
 			  struct fib_lookup_arg *arg)
 {
-	int ret = 0;
+	int iifindex, oifindex, ret = 0;
 
-	if (rule->iifindex && (rule->iifindex != fl->flowi_iif))
+	iifindex = READ_ONCE(rule->iifindex);
+	if (iifindex && !fib_rule_iif_match(rule, iifindex, fl))
 		goto out;
 
-	if (rule->oifindex && (rule->oifindex != fl->flowi_oif))
+	oifindex = READ_ONCE(rule->oifindex);
+	if (oifindex && !fib_rule_oif_match(rule, oifindex, fl))
 		goto out;
 
 	if ((rule->mark ^ fl->flowi_mark) & rule->mark_mask)
@@ -270,7 +302,10 @@ static int fib_rule_match(struct fib_rule *rule, struct fib_rules_ops *ops,
 	    uid_gt(fl->flowi_uid, rule->uid_range.end))
 		goto out;
 
-	ret = ops->match(rule, fl, flags);
+	ret = INDIRECT_CALL_MT(ops->match,
+			       fib6_rule_match,
+			       fib4_rule_match,
+			       rule, fl, flags);
 out:
 	return (rule->flags & FIB_RULE_INVERT) ? !ret : ret;
 }
@@ -301,14 +336,20 @@ jumped:
 		} else if (rule->action == FR_ACT_NOP)
 			continue;
 		else
-			err = ops->action(rule, fl, flags, arg);
+			err = INDIRECT_CALL_MT(ops->action,
+					       fib6_rule_action,
+					       fib4_rule_action,
+					       rule, fl, flags, arg);
 
-		if (!err && ops->suppress && ops->suppress(rule, arg))
+		if (!err && ops->suppress && INDIRECT_CALL_MT(ops->suppress,
+							      fib6_rule_suppress,
+							      fib4_rule_suppress,
+							      rule, flags, arg))
 			continue;
 
 		if (err != -EAGAIN) {
 			if ((arg->flags & FIB_LOOKUP_NOREF) ||
-			    likely(refcount_inc_not_zero(&rule->refcnt))) {
+			    likely(fib_rule_get_safe(rule))) {
 				arg->rule = rule;
 				goto out;
 			}
@@ -324,16 +365,18 @@ out:
 }
 EXPORT_SYMBOL_GPL(fib_rules_lookup);
 
-static int call_fib_rule_notifier(struct notifier_block *nb, struct net *net,
+static int call_fib_rule_notifier(struct notifier_block *nb,
 				  enum fib_event_type event_type,
-				  struct fib_rule *rule, int family)
+				  struct fib_rule *rule, int family,
+				  struct netlink_ext_ack *extack)
 {
 	struct fib_rule_notifier_info info = {
 		.info.family = family,
+		.info.extack = extack,
 		.rule = rule,
 	};
 
-	return call_fib_notifier(nb, net, event_type, &info.info);
+	return call_fib_notifier(nb, event_type, &info.info);
 }
 
 static int call_fib_rule_notifiers(struct net *net,
@@ -348,65 +391,390 @@ static int call_fib_rule_notifiers(struct net *net,
 		.rule = rule,
 	};
 
-	ops->fib_rules_seq++;
+	ASSERT_RTNL_NET(net);
+
+	/* Paired with READ_ONCE() in fib_rules_seq() */
+	WRITE_ONCE(ops->fib_rules_seq, ops->fib_rules_seq + 1);
 	return call_fib_notifiers(net, event_type, &info.info);
 }
 
 /* Called with rcu_read_lock() */
-int fib_rules_dump(struct net *net, struct notifier_block *nb, int family)
+int fib_rules_dump(struct net *net, struct notifier_block *nb, int family,
+		   struct netlink_ext_ack *extack)
 {
 	struct fib_rules_ops *ops;
 	struct fib_rule *rule;
+	int err = 0;
 
 	ops = lookup_rules_ops(net, family);
 	if (!ops)
 		return -EAFNOSUPPORT;
-	list_for_each_entry_rcu(rule, &ops->rules_list, list)
-		call_fib_rule_notifier(nb, net, FIB_EVENT_RULE_ADD, rule,
-				       family);
+	list_for_each_entry_rcu(rule, &ops->rules_list, list) {
+		if (!fib_rule_get_safe(rule))
+			continue;
+
+		err = call_fib_rule_notifier(nb, FIB_EVENT_RULE_ADD,
+					     rule, family, extack);
+		fib_rule_put(rule);
+		if (err)
+			break;
+	}
 	rules_ops_put(ops);
 
-	return 0;
+	return err;
 }
 EXPORT_SYMBOL_GPL(fib_rules_dump);
 
-unsigned int fib_rules_seq_read(struct net *net, int family)
+unsigned int fib_rules_seq_read(const struct net *net, int family)
 {
 	unsigned int fib_rules_seq;
 	struct fib_rules_ops *ops;
 
-	ASSERT_RTNL();
-
 	ops = lookup_rules_ops(net, family);
 	if (!ops)
 		return 0;
-	fib_rules_seq = ops->fib_rules_seq;
+	/* Paired with WRITE_ONCE() in call_fib_rule_notifiers() */
+	fib_rules_seq = READ_ONCE(ops->fib_rules_seq);
 	rules_ops_put(ops);
 
 	return fib_rules_seq;
 }
 EXPORT_SYMBOL_GPL(fib_rules_seq_read);
 
-static int validate_rulemsg(struct fib_rule_hdr *frh, struct nlattr **tb,
-			    struct fib_rules_ops *ops)
+static struct fib_rule *rule_find(struct fib_rules_ops *ops,
+				  struct fib_rule_hdr *frh,
+				  struct nlattr **tb,
+				  struct fib_rule *rule,
+				  bool user_priority)
 {
+	struct fib_rule *r;
+
+	list_for_each_entry(r, &ops->rules_list, list) {
+		if (rule->action && r->action != rule->action)
+			continue;
+
+		if (rule->table && r->table != rule->table)
+			continue;
+
+		if (user_priority && r->pref != rule->pref)
+			continue;
+
+		if (rule->iifname[0] &&
+		    memcmp(r->iifname, rule->iifname, IFNAMSIZ))
+			continue;
+
+		if (rule->oifname[0] &&
+		    memcmp(r->oifname, rule->oifname, IFNAMSIZ))
+			continue;
+
+		if (rule->mark && r->mark != rule->mark)
+			continue;
+
+		if (rule->suppress_ifgroup != -1 &&
+		    r->suppress_ifgroup != rule->suppress_ifgroup)
+			continue;
+
+		if (rule->suppress_prefixlen != -1 &&
+		    r->suppress_prefixlen != rule->suppress_prefixlen)
+			continue;
+
+		if (rule->mark_mask && r->mark_mask != rule->mark_mask)
+			continue;
+
+		if (rule->tun_id && r->tun_id != rule->tun_id)
+			continue;
+
+		if (rule->l3mdev && r->l3mdev != rule->l3mdev)
+			continue;
+
+		if (uid_range_set(&rule->uid_range) &&
+		    (!uid_eq(r->uid_range.start, rule->uid_range.start) ||
+		    !uid_eq(r->uid_range.end, rule->uid_range.end)))
+			continue;
+
+		if (rule->ip_proto && r->ip_proto != rule->ip_proto)
+			continue;
+
+		if (rule->proto && r->proto != rule->proto)
+			continue;
+
+		if (fib_rule_port_range_set(&rule->sport_range) &&
+		    !fib_rule_port_range_compare(&r->sport_range,
+						 &rule->sport_range))
+			continue;
+
+		if (rule->sport_mask && r->sport_mask != rule->sport_mask)
+			continue;
+
+		if (fib_rule_port_range_set(&rule->dport_range) &&
+		    !fib_rule_port_range_compare(&r->dport_range,
+						 &rule->dport_range))
+			continue;
+
+		if (rule->dport_mask && r->dport_mask != rule->dport_mask)
+			continue;
+
+		if (!ops->compare(r, frh, tb))
+			continue;
+		return r;
+	}
+
+	return NULL;
+}
+
+#ifdef CONFIG_NET_L3_MASTER_DEV
+static int fib_nl2rule_l3mdev(struct nlattr *nla, struct fib_rule *nlrule,
+			      struct netlink_ext_ack *extack)
+{
+	nlrule->l3mdev = nla_get_u8(nla);
+	if (nlrule->l3mdev != 1) {
+		NL_SET_ERR_MSG(extack, "Invalid l3mdev attribute");
+		return -1;
+	}
+
+	return 0;
+}
+#else
+static int fib_nl2rule_l3mdev(struct nlattr *nla, struct fib_rule *nlrule,
+			      struct netlink_ext_ack *extack)
+{
+	NL_SET_ERR_MSG(extack, "l3mdev support is not enabled in kernel");
+	return -1;
+}
+#endif
+
+static int fib_nl2rule_port_mask(const struct nlattr *mask_attr,
+				 const struct fib_rule_port_range *range,
+				 u16 *port_mask,
+				 struct netlink_ext_ack *extack)
+{
+	if (!fib_rule_port_range_valid(range)) {
+		NL_SET_ERR_MSG_ATTR(extack, mask_attr,
+				    "Cannot specify port mask without port value");
+		return -EINVAL;
+	}
+
+	if (fib_rule_port_is_range(range)) {
+		NL_SET_ERR_MSG_ATTR(extack, mask_attr,
+				    "Cannot specify port mask for port range");
+		return -EINVAL;
+	}
+
+	if (range->start & ~nla_get_u16(mask_attr)) {
+		NL_SET_ERR_MSG_ATTR(extack, mask_attr, "Invalid port mask");
+		return -EINVAL;
+	}
+
+	*port_mask = nla_get_u16(mask_attr);
+
+	return 0;
+}
+
+static int fib_nl2rule(struct net *net, struct nlmsghdr *nlh,
+		       struct netlink_ext_ack *extack,
+		       struct fib_rules_ops *ops,
+		       struct nlattr *tb[],
+		       struct fib_rule **rule,
+		       bool *user_priority)
+{
+	struct fib_rule_hdr *frh = nlmsg_data(nlh);
+	struct fib_rule *nlrule = NULL;
 	int err = -EINVAL;
 
 	if (frh->src_len)
-		if (tb[FRA_SRC] == NULL ||
+		if (!tb[FRA_SRC] ||
 		    frh->src_len > (ops->addr_size * 8) ||
-		    nla_len(tb[FRA_SRC]) != ops->addr_size)
+		    nla_len(tb[FRA_SRC]) != ops->addr_size) {
+			NL_SET_ERR_MSG(extack, "Invalid source address");
 			goto errout;
+	}
 
 	if (frh->dst_len)
-		if (tb[FRA_DST] == NULL ||
+		if (!tb[FRA_DST] ||
 		    frh->dst_len > (ops->addr_size * 8) ||
-		    nla_len(tb[FRA_DST]) != ops->addr_size)
+		    nla_len(tb[FRA_DST]) != ops->addr_size) {
+			NL_SET_ERR_MSG(extack, "Invalid dst address");
 			goto errout;
+	}
 
-	err = 0;
+	nlrule = kzalloc(ops->rule_size, GFP_KERNEL_ACCOUNT);
+	if (!nlrule) {
+		err = -ENOMEM;
+		goto errout;
+	}
+	refcount_set(&nlrule->refcnt, 1);
+	nlrule->fr_net = net;
+
+	if (tb[FRA_PRIORITY]) {
+		nlrule->pref = nla_get_u32(tb[FRA_PRIORITY]);
+		*user_priority = true;
+	}
+
+	nlrule->proto = nla_get_u8_default(tb[FRA_PROTOCOL], RTPROT_UNSPEC);
+
+	if (tb[FRA_IIFNAME]) {
+		nlrule->iifindex = -1;
+		nla_strscpy(nlrule->iifname, tb[FRA_IIFNAME], IFNAMSIZ);
+	}
+
+	if (tb[FRA_OIFNAME]) {
+		nlrule->oifindex = -1;
+		nla_strscpy(nlrule->oifname, tb[FRA_OIFNAME], IFNAMSIZ);
+	}
+
+	if (tb[FRA_FWMARK]) {
+		nlrule->mark = nla_get_u32(tb[FRA_FWMARK]);
+		if (nlrule->mark)
+			/* compatibility: if the mark value is non-zero all bits
+			 * are compared unless a mask is explicitly specified.
+			 */
+			nlrule->mark_mask = 0xFFFFFFFF;
+	}
+
+	if (tb[FRA_FWMASK])
+		nlrule->mark_mask = nla_get_u32(tb[FRA_FWMASK]);
+
+	if (tb[FRA_TUN_ID])
+		nlrule->tun_id = nla_get_be64(tb[FRA_TUN_ID]);
+
+	if (tb[FRA_L3MDEV] &&
+	    fib_nl2rule_l3mdev(tb[FRA_L3MDEV], nlrule, extack) < 0)
+		goto errout_free;
+
+	nlrule->action = frh->action;
+	nlrule->flags = frh->flags;
+	nlrule->table = frh_get_table(frh, tb);
+	if (tb[FRA_SUPPRESS_PREFIXLEN])
+		nlrule->suppress_prefixlen = nla_get_u32(tb[FRA_SUPPRESS_PREFIXLEN]);
+	else
+		nlrule->suppress_prefixlen = -1;
+
+	if (tb[FRA_SUPPRESS_IFGROUP])
+		nlrule->suppress_ifgroup = nla_get_u32(tb[FRA_SUPPRESS_IFGROUP]);
+	else
+		nlrule->suppress_ifgroup = -1;
+
+	if (tb[FRA_GOTO]) {
+		if (nlrule->action != FR_ACT_GOTO) {
+			NL_SET_ERR_MSG(extack, "Unexpected goto");
+			goto errout_free;
+		}
+
+		nlrule->target = nla_get_u32(tb[FRA_GOTO]);
+	} else if (nlrule->action == FR_ACT_GOTO) {
+		NL_SET_ERR_MSG(extack, "Missing goto target for action goto");
+		goto errout_free;
+	}
+
+	if (nlrule->l3mdev && nlrule->table) {
+		NL_SET_ERR_MSG(extack, "l3mdev and table are mutually exclusive");
+		goto errout_free;
+	}
+
+	if (tb[FRA_UID_RANGE]) {
+		if (current_user_ns() != net->user_ns) {
+			err = -EPERM;
+			NL_SET_ERR_MSG(extack, "No permission to set uid");
+			goto errout_free;
+		}
+
+		nlrule->uid_range = nla_get_kuid_range(tb);
+
+		if (!uid_range_set(&nlrule->uid_range) ||
+		    !uid_lte(nlrule->uid_range.start, nlrule->uid_range.end)) {
+			NL_SET_ERR_MSG(extack, "Invalid uid range");
+			goto errout_free;
+		}
+	} else {
+		nlrule->uid_range = fib_kuid_range_unset;
+	}
+
+	if (tb[FRA_IP_PROTO])
+		nlrule->ip_proto = nla_get_u8(tb[FRA_IP_PROTO]);
+
+	if (tb[FRA_SPORT_RANGE]) {
+		err = nla_get_port_range(tb[FRA_SPORT_RANGE],
+					 &nlrule->sport_range);
+		if (err) {
+			NL_SET_ERR_MSG(extack, "Invalid sport range");
+			goto errout_free;
+		}
+		if (!fib_rule_port_is_range(&nlrule->sport_range))
+			nlrule->sport_mask = U16_MAX;
+	}
+
+	if (tb[FRA_SPORT_MASK]) {
+		err = fib_nl2rule_port_mask(tb[FRA_SPORT_MASK],
+					    &nlrule->sport_range,
+					    &nlrule->sport_mask, extack);
+		if (err)
+			goto errout_free;
+	}
+
+	if (tb[FRA_DPORT_RANGE]) {
+		err = nla_get_port_range(tb[FRA_DPORT_RANGE],
+					 &nlrule->dport_range);
+		if (err) {
+			NL_SET_ERR_MSG(extack, "Invalid dport range");
+			goto errout_free;
+		}
+		if (!fib_rule_port_is_range(&nlrule->dport_range))
+			nlrule->dport_mask = U16_MAX;
+	}
+
+	if (tb[FRA_DPORT_MASK]) {
+		err = fib_nl2rule_port_mask(tb[FRA_DPORT_MASK],
+					    &nlrule->dport_range,
+					    &nlrule->dport_mask, extack);
+		if (err)
+			goto errout_free;
+	}
+
+	*rule = nlrule;
+
+	return 0;
+
+errout_free:
+	kfree(nlrule);
 errout:
 	return err;
+}
+
+static int fib_nl2rule_rtnl(struct fib_rule *nlrule,
+			    struct fib_rules_ops *ops,
+			    struct nlattr *tb[],
+			    struct netlink_ext_ack *extack)
+{
+	if (!tb[FRA_PRIORITY])
+		nlrule->pref = fib_default_rule_pref(ops);
+
+	/* Backward jumps are prohibited to avoid endless loops */
+	if (tb[FRA_GOTO] && nlrule->target <= nlrule->pref) {
+		NL_SET_ERR_MSG(extack, "Backward goto not supported");
+		return -EINVAL;
+	}
+
+	if (tb[FRA_IIFNAME]) {
+		struct net_device *dev;
+
+		dev = __dev_get_by_name(nlrule->fr_net, nlrule->iifname);
+		if (dev) {
+			nlrule->iifindex = dev->ifindex;
+			nlrule->iif_is_l3_master = netif_is_l3_master(dev);
+		}
+	}
+
+	if (tb[FRA_OIFNAME]) {
+		struct net_device *dev;
+
+		dev = __dev_get_by_name(nlrule->fr_net, nlrule->oifname);
+		if (dev) {
+			nlrule->oifindex = dev->ifindex;
+			nlrule->oif_is_l3_master = netif_is_l3_master(dev);
+		}
+	}
+
+	return 0;
 }
 
 static int rule_exists(struct fib_rules_ops *ops, struct fib_rule_hdr *frh,
@@ -433,13 +801,16 @@ static int rule_exists(struct fib_rules_ops *ops, struct fib_rule_hdr *frh,
 		if (r->mark != rule->mark)
 			continue;
 
+		if (r->suppress_ifgroup != rule->suppress_ifgroup)
+			continue;
+
+		if (r->suppress_prefixlen != rule->suppress_prefixlen)
+			continue;
+
 		if (r->mark_mask != rule->mark_mask)
 			continue;
 
 		if (r->tun_id != rule->tun_id)
-			continue;
-
-		if (r->fr_net != rule->fr_net)
 			continue;
 
 		if (r->l3mdev != rule->l3mdev)
@@ -452,12 +823,21 @@ static int rule_exists(struct fib_rules_ops *ops, struct fib_rule_hdr *frh,
 		if (r->ip_proto != rule->ip_proto)
 			continue;
 
+		if (r->proto != rule->proto)
+			continue;
+
 		if (!fib_rule_port_range_compare(&r->sport_range,
 						 &rule->sport_range))
 			continue;
 
+		if (r->sport_mask != rule->sport_mask)
+			continue;
+
 		if (!fib_rule_port_range_compare(&r->dport_range,
 						 &rule->dport_range))
+			continue;
+
+		if (r->dport_mask != rule->dport_mask)
 			continue;
 
 		if (!ops->compare(r, frh, tb))
@@ -467,159 +847,73 @@ static int rule_exists(struct fib_rules_ops *ops, struct fib_rule_hdr *frh,
 	return 0;
 }
 
-int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr *nlh,
-		   struct netlink_ext_ack *extack)
-{
-	struct net *net = sock_net(skb->sk);
-	struct fib_rule_hdr *frh = nlmsg_data(nlh);
-	struct fib_rules_ops *ops = NULL;
-	struct fib_rule *rule, *r, *last = NULL;
-	struct nlattr *tb[FRA_MAX+1];
-	int err = -EINVAL, unresolved = 0;
+static const struct nla_policy fib_rule_policy[FRA_MAX + 1] = {
+	[FRA_UNSPEC]	= { .strict_start_type = FRA_DPORT_RANGE + 1 },
+	[FRA_IIFNAME]	= { .type = NLA_STRING, .len = IFNAMSIZ - 1 },
+	[FRA_OIFNAME]	= { .type = NLA_STRING, .len = IFNAMSIZ - 1 },
+	[FRA_PRIORITY]	= { .type = NLA_U32 },
+	[FRA_FWMARK]	= { .type = NLA_U32 },
+	[FRA_FLOW]	= { .type = NLA_U32 },
+	[FRA_TUN_ID]	= { .type = NLA_U64 },
+	[FRA_FWMASK]	= { .type = NLA_U32 },
+	[FRA_TABLE]     = { .type = NLA_U32 },
+	[FRA_SUPPRESS_PREFIXLEN] = { .type = NLA_U32 },
+	[FRA_SUPPRESS_IFGROUP] = { .type = NLA_U32 },
+	[FRA_GOTO]	= { .type = NLA_U32 },
+	[FRA_L3MDEV]	= { .type = NLA_U8 },
+	[FRA_UID_RANGE]	= { .len = sizeof(struct fib_rule_uid_range) },
+	[FRA_PROTOCOL]  = { .type = NLA_U8 },
+	[FRA_IP_PROTO]  = { .type = NLA_U8 },
+	[FRA_SPORT_RANGE] = { .len = sizeof(struct fib_rule_port_range) },
+	[FRA_DPORT_RANGE] = { .len = sizeof(struct fib_rule_port_range) },
+	[FRA_DSCP]	= NLA_POLICY_MAX(NLA_U8, INET_DSCP_MASK >> 2),
+	[FRA_FLOWLABEL] = { .type = NLA_BE32 },
+	[FRA_FLOWLABEL_MASK] = { .type = NLA_BE32 },
+	[FRA_SPORT_MASK] = { .type = NLA_U16 },
+	[FRA_DPORT_MASK] = { .type = NLA_U16 },
+	[FRA_DSCP_MASK] = NLA_POLICY_MASK(NLA_U8, INET_DSCP_MASK >> 2),
+};
 
-	if (nlh->nlmsg_len < nlmsg_msg_size(sizeof(*frh)))
+int fib_newrule(struct net *net, struct sk_buff *skb, struct nlmsghdr *nlh,
+		struct netlink_ext_ack *extack, bool rtnl_held)
+{
+	struct fib_rule *rule = NULL, *r, *last = NULL;
+	int err = -EINVAL, unresolved = 0;
+	struct fib_rules_ops *ops = NULL;
+	struct nlattr *tb[FRA_MAX + 1];
+	bool user_priority = false;
+	struct fib_rule_hdr *frh;
+
+	frh = nlmsg_payload(nlh, sizeof(*frh));
+	if (!frh) {
+		NL_SET_ERR_MSG(extack, "Invalid msg length");
 		goto errout;
+	}
 
 	ops = lookup_rules_ops(net, frh->family);
-	if (ops == NULL) {
+	if (!ops) {
 		err = -EAFNOSUPPORT;
+		NL_SET_ERR_MSG(extack, "Rule family not supported");
 		goto errout;
 	}
 
-	err = nlmsg_parse(nlh, sizeof(*frh), tb, FRA_MAX, ops->policy, extack);
-	if (err < 0)
-		goto errout;
-
-	err = validate_rulemsg(frh, tb, ops);
-	if (err < 0)
-		goto errout;
-
-	rule = kzalloc(ops->rule_size, GFP_KERNEL);
-	if (rule == NULL) {
-		err = -ENOMEM;
+	err = nlmsg_parse_deprecated(nlh, sizeof(*frh), tb, FRA_MAX,
+				     fib_rule_policy, extack);
+	if (err < 0) {
+		NL_SET_ERR_MSG(extack, "Error parsing msg");
 		goto errout;
 	}
-	refcount_set(&rule->refcnt, 1);
-	rule->fr_net = net;
 
-	rule->pref = tb[FRA_PRIORITY] ? nla_get_u32(tb[FRA_PRIORITY])
-	                              : fib_default_rule_pref(ops);
+	err = fib_nl2rule(net, nlh, extack, ops, tb, &rule, &user_priority);
+	if (err)
+		goto errout;
 
-	rule->proto = tb[FRA_PROTOCOL] ?
-		nla_get_u8(tb[FRA_PROTOCOL]) : RTPROT_UNSPEC;
+	if (!rtnl_held)
+		rtnl_net_lock(net);
 
-	if (tb[FRA_IIFNAME]) {
-		struct net_device *dev;
-
-		rule->iifindex = -1;
-		nla_strlcpy(rule->iifname, tb[FRA_IIFNAME], IFNAMSIZ);
-		dev = __dev_get_by_name(net, rule->iifname);
-		if (dev)
-			rule->iifindex = dev->ifindex;
-	}
-
-	if (tb[FRA_OIFNAME]) {
-		struct net_device *dev;
-
-		rule->oifindex = -1;
-		nla_strlcpy(rule->oifname, tb[FRA_OIFNAME], IFNAMSIZ);
-		dev = __dev_get_by_name(net, rule->oifname);
-		if (dev)
-			rule->oifindex = dev->ifindex;
-	}
-
-	if (tb[FRA_FWMARK]) {
-		rule->mark = nla_get_u32(tb[FRA_FWMARK]);
-		if (rule->mark)
-			/* compatibility: if the mark value is non-zero all bits
-			 * are compared unless a mask is explicitly specified.
-			 */
-			rule->mark_mask = 0xFFFFFFFF;
-	}
-
-	if (tb[FRA_FWMASK])
-		rule->mark_mask = nla_get_u32(tb[FRA_FWMASK]);
-
-	if (tb[FRA_TUN_ID])
-		rule->tun_id = nla_get_be64(tb[FRA_TUN_ID]);
-
-	err = -EINVAL;
-	if (tb[FRA_L3MDEV]) {
-#ifdef CONFIG_NET_L3_MASTER_DEV
-		rule->l3mdev = nla_get_u8(tb[FRA_L3MDEV]);
-		if (rule->l3mdev != 1)
-#endif
-			goto errout_free;
-	}
-
-	rule->action = frh->action;
-	rule->flags = frh->flags;
-	rule->table = frh_get_table(frh, tb);
-	if (tb[FRA_SUPPRESS_PREFIXLEN])
-		rule->suppress_prefixlen = nla_get_u32(tb[FRA_SUPPRESS_PREFIXLEN]);
-	else
-		rule->suppress_prefixlen = -1;
-
-	if (tb[FRA_SUPPRESS_IFGROUP])
-		rule->suppress_ifgroup = nla_get_u32(tb[FRA_SUPPRESS_IFGROUP]);
-	else
-		rule->suppress_ifgroup = -1;
-
-	if (tb[FRA_GOTO]) {
-		if (rule->action != FR_ACT_GOTO)
-			goto errout_free;
-
-		rule->target = nla_get_u32(tb[FRA_GOTO]);
-		/* Backward jumps are prohibited to avoid endless loops */
-		if (rule->target <= rule->pref)
-			goto errout_free;
-
-		list_for_each_entry(r, &ops->rules_list, list) {
-			if (r->pref == rule->target) {
-				RCU_INIT_POINTER(rule->ctarget, r);
-				break;
-			}
-		}
-
-		if (rcu_dereference_protected(rule->ctarget, 1) == NULL)
-			unresolved = 1;
-	} else if (rule->action == FR_ACT_GOTO)
+	err = fib_nl2rule_rtnl(rule, ops, tb, extack);
+	if (err)
 		goto errout_free;
-
-	if (rule->l3mdev && rule->table)
-		goto errout_free;
-
-	if (tb[FRA_UID_RANGE]) {
-		if (current_user_ns() != net->user_ns) {
-			err = -EPERM;
-			goto errout_free;
-		}
-
-		rule->uid_range = nla_get_kuid_range(tb);
-
-		if (!uid_range_set(&rule->uid_range) ||
-		    !uid_lte(rule->uid_range.start, rule->uid_range.end))
-			goto errout_free;
-	} else {
-		rule->uid_range = fib_kuid_range_unset;
-	}
-
-	if (tb[FRA_IP_PROTO])
-		rule->ip_proto = nla_get_u8(tb[FRA_IP_PROTO]);
-
-	if (tb[FRA_SPORT_RANGE]) {
-		err = nla_get_port_range(tb[FRA_SPORT_RANGE],
-					 &rule->sport_range);
-		if (err)
-			goto errout_free;
-	}
-
-	if (tb[FRA_DPORT_RANGE]) {
-		err = nla_get_port_range(tb[FRA_DPORT_RANGE],
-					 &rule->dport_range);
-		if (err)
-			goto errout_free;
-	}
 
 	if ((nlh->nlmsg_flags & NLM_F_EXCL) &&
 	    rule_exists(ops, frh, tb, rule)) {
@@ -627,7 +921,7 @@ int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr *nlh,
 		goto errout_free;
 	}
 
-	err = ops->configure(rule, skb, frh, tb);
+	err = ops->configure(rule, skb, frh, tb, extack);
 	if (err < 0)
 		goto errout_free;
 
@@ -635,6 +929,16 @@ int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr *nlh,
 				      extack);
 	if (err < 0)
 		goto errout_free;
+
+	list_for_each_entry(r, &ops->rules_list, list) {
+		if (r->pref == rule->target) {
+			RCU_INIT_POINTER(rule->ctarget, r);
+			break;
+		}
+	}
+
+	if (rcu_dereference_protected(rule->ctarget, 1) == NULL)
+		unresolved = 1;
 
 	list_for_each_entry(r, &ops->rules_list, list) {
 		if (r->pref > rule->pref)
@@ -672,193 +976,151 @@ int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr *nlh,
 	if (rule->tun_id)
 		ip_tunnel_need_metadata();
 
+	fib_rule_get(rule);
+
+	if (!rtnl_held)
+		rtnl_net_unlock(net);
+
 	notify_rule_change(RTM_NEWRULE, rule, ops, nlh, NETLINK_CB(skb).portid);
+	fib_rule_put(rule);
 	flush_route_cache(ops);
 	rules_ops_put(ops);
 	return 0;
 
 errout_free:
+	if (!rtnl_held)
+		rtnl_net_unlock(net);
 	kfree(rule);
 errout:
 	rules_ops_put(ops);
 	return err;
 }
-EXPORT_SYMBOL_GPL(fib_nl_newrule);
+EXPORT_SYMBOL_GPL(fib_newrule);
 
-int fib_nl_delrule(struct sk_buff *skb, struct nlmsghdr *nlh,
-		   struct netlink_ext_ack *extack)
+static int fib_nl_newrule(struct sk_buff *skb, struct nlmsghdr *nlh,
+			  struct netlink_ext_ack *extack)
 {
-	struct net *net = sock_net(skb->sk);
-	struct fib_rule_hdr *frh = nlmsg_data(nlh);
-	struct fib_rule_port_range sprange = {0, 0};
-	struct fib_rule_port_range dprange = {0, 0};
+	return fib_newrule(sock_net(skb->sk), skb, nlh, extack, false);
+}
+
+int fib_delrule(struct net *net, struct sk_buff *skb, struct nlmsghdr *nlh,
+		struct netlink_ext_ack *extack, bool rtnl_held)
+{
+	struct fib_rule *rule = NULL, *nlrule = NULL;
 	struct fib_rules_ops *ops = NULL;
-	struct fib_rule *rule, *r;
 	struct nlattr *tb[FRA_MAX+1];
-	struct fib_kuid_range range;
+	bool user_priority = false;
+	struct fib_rule_hdr *frh;
 	int err = -EINVAL;
 
-	if (nlh->nlmsg_len < nlmsg_msg_size(sizeof(*frh)))
+	frh = nlmsg_payload(nlh, sizeof(*frh));
+	if (!frh) {
+		NL_SET_ERR_MSG(extack, "Invalid msg length");
 		goto errout;
+	}
 
 	ops = lookup_rules_ops(net, frh->family);
 	if (ops == NULL) {
 		err = -EAFNOSUPPORT;
+		NL_SET_ERR_MSG(extack, "Rule family not supported");
 		goto errout;
 	}
 
-	err = nlmsg_parse(nlh, sizeof(*frh), tb, FRA_MAX, ops->policy, extack);
-	if (err < 0)
+	err = nlmsg_parse_deprecated(nlh, sizeof(*frh), tb, FRA_MAX,
+				     fib_rule_policy, extack);
+	if (err < 0) {
+		NL_SET_ERR_MSG(extack, "Error parsing msg");
 		goto errout;
-
-	err = validate_rulemsg(frh, tb, ops);
-	if (err < 0)
-		goto errout;
-
-	if (tb[FRA_UID_RANGE]) {
-		range = nla_get_kuid_range(tb);
-		if (!uid_range_set(&range)) {
-			err = -EINVAL;
-			goto errout;
-		}
-	} else {
-		range = fib_kuid_range_unset;
 	}
 
-	if (tb[FRA_SPORT_RANGE]) {
-		err = nla_get_port_range(tb[FRA_SPORT_RANGE],
-					 &sprange);
+	err = fib_nl2rule(net, nlh, extack, ops, tb, &nlrule, &user_priority);
+	if (err)
+		goto errout;
+
+	if (!rtnl_held)
+		rtnl_net_lock(net);
+
+	err = fib_nl2rule_rtnl(nlrule, ops, tb, extack);
+	if (err)
+		goto errout_free;
+
+	rule = rule_find(ops, frh, tb, nlrule, user_priority);
+	if (!rule) {
+		err = -ENOENT;
+		goto errout_free;
+	}
+
+	if (rule->flags & FIB_RULE_PERMANENT) {
+		err = -EPERM;
+		goto errout_free;
+	}
+
+	if (ops->delete) {
+		err = ops->delete(rule);
 		if (err)
-			goto errout;
+			goto errout_free;
 	}
 
-	if (tb[FRA_DPORT_RANGE]) {
-		err = nla_get_port_range(tb[FRA_DPORT_RANGE],
-					 &dprange);
-		if (err)
-			goto errout;
+	if (rule->tun_id)
+		ip_tunnel_unneed_metadata();
+
+	list_del_rcu(&rule->list);
+
+	if (rule->action == FR_ACT_GOTO) {
+		ops->nr_goto_rules--;
+		if (rtnl_dereference(rule->ctarget) == NULL)
+			ops->unresolved_rules--;
 	}
 
-	list_for_each_entry(rule, &ops->rules_list, list) {
-		if (tb[FRA_PROTOCOL] &&
-		    (rule->proto != nla_get_u8(tb[FRA_PROTOCOL])))
-			continue;
+	/*
+	 * Check if this rule is a target to any of them. If so,
+	 * adjust to the next one with the same preference or
+	 * disable them. As this operation is eventually very
+	 * expensive, it is only performed if goto rules, except
+	 * current if it is goto rule, have actually been added.
+	 */
+	if (ops->nr_goto_rules > 0) {
+		struct fib_rule *n, *r;
 
-		if (frh->action && (frh->action != rule->action))
-			continue;
-
-		if (frh_get_table(frh, tb) &&
-		    (frh_get_table(frh, tb) != rule->table))
-			continue;
-
-		if (tb[FRA_PRIORITY] &&
-		    (rule->pref != nla_get_u32(tb[FRA_PRIORITY])))
-			continue;
-
-		if (tb[FRA_IIFNAME] &&
-		    nla_strcmp(tb[FRA_IIFNAME], rule->iifname))
-			continue;
-
-		if (tb[FRA_OIFNAME] &&
-		    nla_strcmp(tb[FRA_OIFNAME], rule->oifname))
-			continue;
-
-		if (tb[FRA_FWMARK] &&
-		    (rule->mark != nla_get_u32(tb[FRA_FWMARK])))
-			continue;
-
-		if (tb[FRA_FWMASK] &&
-		    (rule->mark_mask != nla_get_u32(tb[FRA_FWMASK])))
-			continue;
-
-		if (tb[FRA_TUN_ID] &&
-		    (rule->tun_id != nla_get_be64(tb[FRA_TUN_ID])))
-			continue;
-
-		if (tb[FRA_L3MDEV] &&
-		    (rule->l3mdev != nla_get_u8(tb[FRA_L3MDEV])))
-			continue;
-
-		if (uid_range_set(&range) &&
-		    (!uid_eq(rule->uid_range.start, range.start) ||
-		     !uid_eq(rule->uid_range.end, range.end)))
-			continue;
-
-		if (tb[FRA_IP_PROTO] &&
-		    (rule->ip_proto != nla_get_u8(tb[FRA_IP_PROTO])))
-			continue;
-
-		if (fib_rule_port_range_set(&sprange) &&
-		    !fib_rule_port_range_compare(&rule->sport_range, &sprange))
-			continue;
-
-		if (fib_rule_port_range_set(&dprange) &&
-		    !fib_rule_port_range_compare(&rule->dport_range, &dprange))
-			continue;
-
-		if (!ops->compare(rule, frh, tb))
-			continue;
-
-		if (rule->flags & FIB_RULE_PERMANENT) {
-			err = -EPERM;
-			goto errout;
+		n = list_next_entry(rule, list);
+		if (&n->list == &ops->rules_list || n->pref != rule->pref)
+			n = NULL;
+		list_for_each_entry(r, &ops->rules_list, list) {
+			if (rtnl_dereference(r->ctarget) != rule)
+				continue;
+			rcu_assign_pointer(r->ctarget, n);
+			if (!n)
+				ops->unresolved_rules++;
 		}
-
-		if (ops->delete) {
-			err = ops->delete(rule);
-			if (err)
-				goto errout;
-		}
-
-		if (rule->tun_id)
-			ip_tunnel_unneed_metadata();
-
-		list_del_rcu(&rule->list);
-
-		if (rule->action == FR_ACT_GOTO) {
-			ops->nr_goto_rules--;
-			if (rtnl_dereference(rule->ctarget) == NULL)
-				ops->unresolved_rules--;
-		}
-
-		/*
-		 * Check if this rule is a target to any of them. If so,
-		 * adjust to the next one with the same preference or
-		 * disable them. As this operation is eventually very
-		 * expensive, it is only performed if goto rules, except
-		 * current if it is goto rule, have actually been added.
-		 */
-		if (ops->nr_goto_rules > 0) {
-			struct fib_rule *n;
-
-			n = list_next_entry(rule, list);
-			if (&n->list == &ops->rules_list || n->pref != rule->pref)
-				n = NULL;
-			list_for_each_entry(r, &ops->rules_list, list) {
-				if (rtnl_dereference(r->ctarget) != rule)
-					continue;
-				rcu_assign_pointer(r->ctarget, n);
-				if (!n)
-					ops->unresolved_rules++;
-			}
-		}
-
-		call_fib_rule_notifiers(net, FIB_EVENT_RULE_DEL, rule, ops,
-					NULL);
-		notify_rule_change(RTM_DELRULE, rule, ops, nlh,
-				   NETLINK_CB(skb).portid);
-		fib_rule_put(rule);
-		flush_route_cache(ops);
-		rules_ops_put(ops);
-		return 0;
 	}
 
-	err = -ENOENT;
+	call_fib_rule_notifiers(net, FIB_EVENT_RULE_DEL, rule, ops, NULL);
+
+	if (!rtnl_held)
+		rtnl_net_unlock(net);
+
+	notify_rule_change(RTM_DELRULE, rule, ops, nlh, NETLINK_CB(skb).portid);
+	fib_rule_put(rule);
+	flush_route_cache(ops);
+	rules_ops_put(ops);
+	kfree(nlrule);
+	return 0;
+
+errout_free:
+	if (!rtnl_held)
+		rtnl_net_unlock(net);
+	kfree(nlrule);
 errout:
 	rules_ops_put(ops);
 	return err;
 }
-EXPORT_SYMBOL_GPL(fib_nl_delrule);
+EXPORT_SYMBOL_GPL(fib_delrule);
+
+static int fib_nl_delrule(struct sk_buff *skb, struct nlmsghdr *nlh,
+			  struct netlink_ext_ack *extack)
+{
+	return fib_delrule(sock_net(skb->sk), skb, nlh, extack, false);
+}
 
 static inline size_t fib_rule_nlmsg_size(struct fib_rules_ops *ops,
 					 struct fib_rule *rule)
@@ -877,7 +1139,9 @@ static inline size_t fib_rule_nlmsg_size(struct fib_rules_ops *ops,
 			 + nla_total_size(1) /* FRA_PROTOCOL */
 			 + nla_total_size(1) /* FRA_IP_PROTO */
 			 + nla_total_size(sizeof(struct fib_rule_port_range)) /* FRA_SPORT_RANGE */
-			 + nla_total_size(sizeof(struct fib_rule_port_range)); /* FRA_DPORT_RANGE */
+			 + nla_total_size(sizeof(struct fib_rule_port_range)) /* FRA_DPORT_RANGE */
+			 + nla_total_size(2) /* FRA_SPORT_MASK */
+			 + nla_total_size(2); /* FRA_DPORT_MASK */
 
 	if (ops->nlmsg_payload)
 		payload += ops->nlmsg_payload(rule);
@@ -898,7 +1162,7 @@ static int fib_nl_fill_rule(struct sk_buff *skb, struct fib_rule *rule,
 
 	frh = nlmsg_data(nlh);
 	frh->family = ops->family;
-	frh->table = rule->table;
+	frh->table = rule->table < 256 ? rule->table : RT_TABLE_COMPAT;
 	if (nla_put_u32(skb, FRA_TABLE, rule->table))
 		goto nla_put_failure;
 	if (nla_put_u32(skb, FRA_SUPPRESS_PREFIXLEN, rule->suppress_prefixlen))
@@ -918,14 +1182,14 @@ static int fib_nl_fill_rule(struct sk_buff *skb, struct fib_rule *rule,
 	if (rule->iifname[0]) {
 		if (nla_put_string(skb, FRA_IIFNAME, rule->iifname))
 			goto nla_put_failure;
-		if (rule->iifindex == -1)
+		if (READ_ONCE(rule->iifindex) == -1)
 			frh->flags |= FIB_RULE_IIF_DETACHED;
 	}
 
 	if (rule->oifname[0]) {
 		if (nla_put_string(skb, FRA_OIFNAME, rule->oifname))
 			goto nla_put_failure;
-		if (rule->oifindex == -1)
+		if (READ_ONCE(rule->oifindex) == -1)
 			frh->flags |= FIB_RULE_OIF_DETACHED;
 	}
 
@@ -945,8 +1209,12 @@ static int fib_nl_fill_rule(struct sk_buff *skb, struct fib_rule *rule,
 	     nla_put_uid_range(skb, &rule->uid_range)) ||
 	    (fib_rule_port_range_set(&rule->sport_range) &&
 	     nla_put_port_range(skb, FRA_SPORT_RANGE, &rule->sport_range)) ||
+	    (rule->sport_mask && nla_put_u16(skb, FRA_SPORT_MASK,
+					     rule->sport_mask)) ||
 	    (fib_rule_port_range_set(&rule->dport_range) &&
 	     nla_put_port_range(skb, FRA_DPORT_RANGE, &rule->dport_range)) ||
+	    (rule->dport_mask && nla_put_u16(skb, FRA_DPORT_MASK,
+					     rule->dport_mask)) ||
 	    (rule->ip_proto && nla_put_u8(skb, FRA_IP_PROTO, rule->ip_proto)))
 		goto nla_put_failure;
 
@@ -993,30 +1261,64 @@ skip:
 	return err;
 }
 
+static int fib_valid_dumprule_req(const struct nlmsghdr *nlh,
+				   struct netlink_ext_ack *extack)
+{
+	struct fib_rule_hdr *frh;
+
+	frh = nlmsg_payload(nlh, sizeof(*frh));
+	if (!frh) {
+		NL_SET_ERR_MSG(extack, "Invalid header for fib rule dump request");
+		return -EINVAL;
+	}
+
+	if (frh->dst_len || frh->src_len || frh->tos || frh->table ||
+	    frh->res1 || frh->res2 || frh->action || frh->flags) {
+		NL_SET_ERR_MSG(extack,
+			       "Invalid values in header for fib rule dump request");
+		return -EINVAL;
+	}
+
+	if (nlmsg_attrlen(nlh, sizeof(*frh))) {
+		NL_SET_ERR_MSG(extack, "Invalid data after header in fib rule dump request");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int fib_nl_dumprule(struct sk_buff *skb, struct netlink_callback *cb)
 {
+	const struct nlmsghdr *nlh = cb->nlh;
 	struct net *net = sock_net(skb->sk);
 	struct fib_rules_ops *ops;
-	int idx = 0, family;
+	int err, idx = 0, family;
 
-	family = rtnl_msg_family(cb->nlh);
+	if (cb->strict_check) {
+		err = fib_valid_dumprule_req(nlh, cb->extack);
+
+		if (err < 0)
+			return err;
+	}
+
+	family = rtnl_msg_family(nlh);
 	if (family != AF_UNSPEC) {
 		/* Protocol specific dump request */
 		ops = lookup_rules_ops(net, family);
 		if (ops == NULL)
 			return -EAFNOSUPPORT;
 
-		dump_rules(skb, cb, ops);
-
-		return skb->len;
+		return dump_rules(skb, cb, ops);
 	}
 
+	err = 0;
 	rcu_read_lock();
 	list_for_each_entry_rcu(ops, &net->rules_ops, list) {
 		if (idx < cb->args[0] || !try_module_get(ops->owner))
 			goto skip;
 
-		if (dump_rules(skb, cb, ops) < 0)
+		err = dump_rules(skb, cb, ops);
+		if (err < 0)
 			break;
 
 		cb->args[1] = 0;
@@ -1026,7 +1328,7 @@ skip:
 	rcu_read_unlock();
 	cb->args[0] = idx;
 
-	return skb->len;
+	return err;
 }
 
 static void notify_rule_change(int event, struct fib_rule *rule,
@@ -1035,7 +1337,7 @@ static void notify_rule_change(int event, struct fib_rule *rule,
 {
 	struct net *net;
 	struct sk_buff *skb;
-	int err = -ENOBUFS;
+	int err = -ENOMEM;
 
 	net = ops->fro_net;
 	skb = nlmsg_new(fib_rule_nlmsg_size(ops, rule), GFP_KERNEL);
@@ -1053,8 +1355,7 @@ static void notify_rule_change(int event, struct fib_rule *rule,
 	rtnl_notify(skb, net, pid, ops->nlgroup, nlh, GFP_KERNEL);
 	return;
 errout:
-	if (err < 0)
-		rtnl_set_sk_err(net, ops->nlgroup, err);
+	rtnl_set_sk_err(net, ops->nlgroup, err);
 }
 
 static void attach_rules(struct list_head *rules, struct net_device *dev)
@@ -1063,11 +1364,17 @@ static void attach_rules(struct list_head *rules, struct net_device *dev)
 
 	list_for_each_entry(rule, rules, list) {
 		if (rule->iifindex == -1 &&
-		    strcmp(dev->name, rule->iifname) == 0)
-			rule->iifindex = dev->ifindex;
+		    strcmp(dev->name, rule->iifname) == 0) {
+			WRITE_ONCE(rule->iifindex, dev->ifindex);
+			WRITE_ONCE(rule->iif_is_l3_master,
+				   netif_is_l3_master(dev));
+		}
 		if (rule->oifindex == -1 &&
-		    strcmp(dev->name, rule->oifname) == 0)
-			rule->oifindex = dev->ifindex;
+		    strcmp(dev->name, rule->oifname) == 0) {
+			WRITE_ONCE(rule->oifindex, dev->ifindex);
+			WRITE_ONCE(rule->oif_is_l3_master,
+				   netif_is_l3_master(dev));
+		}
 	}
 }
 
@@ -1076,10 +1383,14 @@ static void detach_rules(struct list_head *rules, struct net_device *dev)
 	struct fib_rule *rule;
 
 	list_for_each_entry(rule, rules, list) {
-		if (rule->iifindex == dev->ifindex)
-			rule->iifindex = -1;
-		if (rule->oifindex == dev->ifindex)
-			rule->oifindex = -1;
+		if (rule->iifindex == dev->ifindex) {
+			WRITE_ONCE(rule->iifindex, -1);
+			WRITE_ONCE(rule->iif_is_l3_master, false);
+		}
+		if (rule->oifindex == dev->ifindex) {
+			WRITE_ONCE(rule->oifindex, -1);
+			WRITE_ONCE(rule->oif_is_l3_master, false);
+		}
 	}
 }
 
@@ -1136,12 +1447,20 @@ static struct pernet_operations fib_rules_net_ops = {
 	.exit = fib_rules_net_exit,
 };
 
+static const struct rtnl_msg_handler fib_rules_rtnl_msg_handlers[] __initconst = {
+	{.msgtype = RTM_NEWRULE, .doit = fib_nl_newrule,
+	 .flags = RTNL_FLAG_DOIT_PERNET},
+	{.msgtype = RTM_DELRULE, .doit = fib_nl_delrule,
+	 .flags = RTNL_FLAG_DOIT_PERNET},
+	{.msgtype = RTM_GETRULE, .dumpit = fib_nl_dumprule,
+	 .flags = RTNL_FLAG_DUMP_UNLOCKED},
+};
+
 static int __init fib_rules_init(void)
 {
 	int err;
-	rtnl_register(PF_UNSPEC, RTM_NEWRULE, fib_nl_newrule, NULL, 0);
-	rtnl_register(PF_UNSPEC, RTM_DELRULE, fib_nl_delrule, NULL, 0);
-	rtnl_register(PF_UNSPEC, RTM_GETRULE, NULL, fib_nl_dumprule, 0);
+
+	rtnl_register_many(fib_rules_rtnl_msg_handlers);
 
 	err = register_pernet_subsys(&fib_rules_net_ops);
 	if (err < 0)
@@ -1156,9 +1475,7 @@ static int __init fib_rules_init(void)
 fail_unregister:
 	unregister_pernet_subsys(&fib_rules_net_ops);
 fail:
-	rtnl_unregister(PF_UNSPEC, RTM_NEWRULE);
-	rtnl_unregister(PF_UNSPEC, RTM_DELRULE);
-	rtnl_unregister(PF_UNSPEC, RTM_GETRULE);
+	rtnl_unregister_many(fib_rules_rtnl_msg_handlers);
 	return err;
 }
 

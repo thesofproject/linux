@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * wm8728.c  --  WM8728 ALSA SoC Audio driver
  *
  * Copyright 2008 Wolfson Microelectronics plc
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -20,7 +17,6 @@
 #include <linux/regmap.h>
 #include <linux/spi/spi.h>
 #include <linux/slab.h>
-#include <linux/of_device.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -72,10 +68,10 @@ static const struct snd_soc_dapm_route wm8728_intercon[] = {
 	{"VOUTR", NULL, "DAC"},
 };
 
-static int wm8728_mute(struct snd_soc_dai *dai, int mute)
+static int wm8728_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
-	u16 mute_reg = snd_soc_component_read32(component, WM8728_DACCTL);
+	u16 mute_reg = snd_soc_component_read(component, WM8728_DACCTL);
 
 	if (mute)
 		snd_soc_component_write(component, WM8728_DACCTL, mute_reg | 1);
@@ -90,7 +86,7 @@ static int wm8728_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *dai)
 {
 	struct snd_soc_component *component = dai->component;
-	u16 dac = snd_soc_component_read32(component, WM8728_DACCTL);
+	u16 dac = snd_soc_component_read(component, WM8728_DACCTL);
 
 	dac &= ~0x18;
 
@@ -116,7 +112,7 @@ static int wm8728_set_dai_fmt(struct snd_soc_dai *codec_dai,
 		unsigned int fmt)
 {
 	struct snd_soc_component *component = codec_dai->component;
-	u16 iface = snd_soc_component_read32(component, WM8728_IFCTL);
+	u16 iface = snd_soc_component_read(component, WM8728_IFCTL);
 
 	/* Currently only I2S is supported by the driver, though the
 	 * hardware is more flexible.
@@ -131,7 +127,7 @@ static int wm8728_set_dai_fmt(struct snd_soc_dai *codec_dai,
 
 	/* The hardware only support full slave mode */
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
 	default:
 		return -EINVAL;
@@ -164,15 +160,16 @@ static int wm8728_set_bias_level(struct snd_soc_component *component,
 				 enum snd_soc_bias_level level)
 {
 	struct wm8728_priv *wm8728 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	u16 reg;
 
 	switch (level) {
 	case SND_SOC_BIAS_ON:
 	case SND_SOC_BIAS_PREPARE:
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF) {
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_OFF) {
 			/* Power everything up... */
-			reg = snd_soc_component_read32(component, WM8728_DACCTL);
+			reg = snd_soc_component_read(component, WM8728_DACCTL);
 			snd_soc_component_write(component, WM8728_DACCTL, reg & ~0x4);
 
 			/* ..then sync in the register cache. */
@@ -181,7 +178,7 @@ static int wm8728_set_bias_level(struct snd_soc_component *component,
 		break;
 
 	case SND_SOC_BIAS_OFF:
-		reg = snd_soc_component_read32(component, WM8728_DACCTL);
+		reg = snd_soc_component_read(component, WM8728_DACCTL);
 		snd_soc_component_write(component, WM8728_DACCTL, reg | 0x4);
 		break;
 	}
@@ -195,8 +192,9 @@ static int wm8728_set_bias_level(struct snd_soc_component *component,
 
 static const struct snd_soc_dai_ops wm8728_dai_ops = {
 	.hw_params	= wm8728_hw_params,
-	.digital_mute	= wm8728_mute,
+	.mute_stream	= wm8728_mute,
 	.set_fmt	= wm8728_set_dai_fmt,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver wm8728_dai = {
@@ -223,7 +221,6 @@ static const struct snd_soc_component_driver soc_component_dev_wm8728 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct of_device_id wm8728_of_match[] = {
@@ -239,7 +236,7 @@ static const struct regmap_config wm8728_regmap = {
 
 	.reg_defaults = wm8728_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(wm8728_reg_defaults),
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 };
 
 #if defined(CONFIG_SPI_MASTER)
@@ -275,8 +272,7 @@ static struct spi_driver wm8728_spi_driver = {
 #endif /* CONFIG_SPI_MASTER */
 
 #if IS_ENABLED(CONFIG_I2C)
-static int wm8728_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+static int wm8728_i2c_probe(struct i2c_client *i2c)
 {
 	struct wm8728_priv *wm8728;
 	int ret;
@@ -299,7 +295,7 @@ static int wm8728_i2c_probe(struct i2c_client *i2c,
 }
 
 static const struct i2c_device_id wm8728_i2c_id[] = {
-	{ "wm8728", 0 },
+	{ .name = "wm8728" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, wm8728_i2c_id);
@@ -309,7 +305,7 @@ static struct i2c_driver wm8728_i2c_driver = {
 		.name = "wm8728",
 		.of_match_table = wm8728_of_match,
 	},
-	.probe =    wm8728_i2c_probe,
+	.probe = wm8728_i2c_probe,
 	.id_table = wm8728_i2c_id,
 };
 #endif

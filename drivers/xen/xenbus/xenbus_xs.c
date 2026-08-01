@@ -47,6 +47,9 @@
 #include <linux/rwsem.h>
 #include <linux/mutex.h>
 #include <asm/xen/hypervisor.h>
+#ifdef CONFIG_X86
+#include <asm/cpuid/api.h>
+#endif
 #include <xen/xenbus.h>
 #include <xen/xen.h>
 #include "xenbus.h"
@@ -105,10 +108,17 @@ static void xs_suspend_enter(void)
 
 static void xs_suspend_exit(void)
 {
+	xb_dev_generation_id++;
 	spin_lock(&xs_state_lock);
 	xs_suspend_active--;
 	spin_unlock(&xs_state_lock);
 	wake_up_all(&xs_state_enter_wq);
+}
+
+void xs_free_req(struct kref *kref)
+{
+	struct xb_req_data *req = container_of(kref, struct xb_req_data, kref);
+	kfree(req);
 }
 
 static uint32_t xs_request_enter(struct xb_req_data *req)
@@ -125,7 +135,7 @@ static uint32_t xs_request_enter(struct xb_req_data *req)
 		spin_lock(&xs_state_lock);
 	}
 
-	if (req->type == XS_TRANSACTION_START)
+	if (req->type == XS_TRANSACTION_START && !req->user_req)
 		xs_state_users++;
 	xs_state_users++;
 	rq_id = xs_request_id++;
@@ -140,7 +150,7 @@ void xs_request_exit(struct xb_req_data *req)
 	spin_lock(&xs_state_lock);
 	xs_state_users--;
 	if ((req->type == XS_TRANSACTION_START && req->msg.type == XS_ERROR) ||
-	    (req->type == XS_TRANSACTION_END &&
+	    (req->type == XS_TRANSACTION_END && !req->user_req &&
 	     !WARN_ON_ONCE(req->msg.type == XS_ERROR &&
 			   !strcmp(req->body, "ENOENT"))))
 		xs_state_users--;
@@ -190,8 +200,11 @@ static bool xenbus_ok(void)
 
 static bool test_reply(struct xb_req_data *req)
 {
-	if (req->state == xb_req_state_got_reply || !xenbus_ok())
+	if (req->state == xb_req_state_got_reply || !xenbus_ok()) {
+		/* read req->state before all other fields */
+		virt_rmb();
 		return true;
+	}
 
 	/* Make sure to reread req->state each time. */
 	barrier();
@@ -201,7 +214,7 @@ static bool test_reply(struct xb_req_data *req)
 
 static void *read_reply(struct xb_req_data *req)
 {
-	while (req->state != xb_req_state_got_reply) {
+	do {
 		wait_event(req->wq, test_reply(req));
 
 		if (!xenbus_ok())
@@ -215,7 +228,7 @@ static void *read_reply(struct xb_req_data *req)
 		if (req->err)
 			return ERR_PTR(req->err);
 
-	}
+	} while (req->state != xb_req_state_got_reply);
 
 	return req->body;
 }
@@ -232,6 +245,12 @@ static void xs_send(struct xb_req_data *req, struct xsd_sockmsg *msg)
 	/* Save the caller req_id and restore it later in the reply */
 	req->caller_req_id = req->msg.req_id;
 	req->msg.req_id = xs_request_enter(req);
+
+	/*
+	 * Take 2nd ref.  One for this thread, and the second for the
+	 * xenbus_thread.
+	 */
+	kref_get(&req->kref);
 
 	mutex_lock(&xb_write_mutex);
 	list_add_tail(&req->list, &xb_write_list);
@@ -257,8 +276,8 @@ static void *xs_wait_for_reply(struct xb_req_data *req, struct xsd_sockmsg *msg)
 	if (req->state == xb_req_state_queued ||
 	    req->state == xb_req_state_wait_reply)
 		req->state = xb_req_state_aborted;
-	else
-		kfree(req);
+
+	kref_put(&req->kref, xs_free_req);
 	mutex_unlock(&xb_write_mutex);
 
 	return ret;
@@ -286,6 +305,8 @@ int xenbus_dev_request_and_reply(struct xsd_sockmsg *msg, void *par)
 	req->num_vecs = 1;
 	req->cb = xenbus_dev_queue_reply;
 	req->par = par;
+	req->user_req = true;
+	kref_init(&req->kref);
 
 	xs_send(req, msg);
 
@@ -306,13 +327,15 @@ static void *xs_talkv(struct xenbus_transaction t,
 	unsigned int i;
 	int err;
 
-	req = kmalloc(sizeof(*req), GFP_NOIO | __GFP_HIGH);
+	req = kmalloc_obj(*req, GFP_NOIO | __GFP_HIGH);
 	if (!req)
 		return ERR_PTR(-ENOMEM);
 
 	req->vec = iovec;
 	req->num_vecs = num_vecs;
 	req->cb = xs_wake_up;
+	req->user_req = false;
+	kref_init(&req->kref);
 
 	msg.req_id = 0;
 	msg.tx_id = t.id;
@@ -387,12 +410,18 @@ static char *join(const char *dir, const char *name)
 		buffer = kasprintf(GFP_NOIO | __GFP_HIGH, "%s", dir);
 	else
 		buffer = kasprintf(GFP_NOIO | __GFP_HIGH, "%s/%s", dir, name);
-	return (!buffer) ? ERR_PTR(-ENOMEM) : buffer;
+	return buffer ?: ERR_PTR(-ENOMEM);
 }
 
-static char **split(char *strings, unsigned int len, unsigned int *num)
+static char **split_strings(char *strings, unsigned int len, unsigned int *num)
 {
 	char *p, **ret;
+
+	if (len && strings[len - 1]) {
+		pr_err_once("malformed XS_DIRECTORY reply\n");
+		kfree(strings);
+		return ERR_PTR(-EIO);
+	}
 
 	/* Count the strings. */
 	*num = count_strings(strings, len);
@@ -421,14 +450,14 @@ char **xenbus_directory(struct xenbus_transaction t,
 
 	path = join(dir, node);
 	if (IS_ERR(path))
-		return (char **)path;
+		return ERR_CAST(path);
 
 	strings = xs_single(t, XS_DIRECTORY, path, &len);
 	kfree(path);
 	if (IS_ERR(strings))
-		return (char **)strings;
+		return ERR_CAST(strings);
 
-	return split(strings, len, num);
+	return split_strings(strings, len, num);
 }
 EXPORT_SYMBOL_GPL(xenbus_directory);
 
@@ -459,7 +488,7 @@ void *xenbus_read(struct xenbus_transaction t,
 
 	path = join(dir, node);
 	if (IS_ERR(path))
-		return (void *)path;
+		return ERR_CAST(path);
 
 	ret = xs_single(t, XS_READ, path, len);
 	kfree(path);
@@ -491,23 +520,6 @@ int xenbus_write(struct xenbus_transaction t,
 	return ret;
 }
 EXPORT_SYMBOL_GPL(xenbus_write);
-
-/* Create a new directory. */
-int xenbus_mkdir(struct xenbus_transaction t,
-		 const char *dir, const char *node)
-{
-	char *path;
-	int ret;
-
-	path = join(dir, node);
-	if (IS_ERR(path))
-		return PTR_ERR(path);
-
-	ret = xs_error(xs_single(t, XS_MKDIR, path, NULL));
-	kfree(path);
-	return ret;
-}
-EXPORT_SYMBOL_GPL(xenbus_mkdir);
 
 /* Destroy a file or directory (directories must be empty). */
 int xenbus_rm(struct xenbus_transaction t, const char *dir, const char *node)
@@ -543,18 +555,12 @@ int xenbus_transaction_start(struct xenbus_transaction *t)
 EXPORT_SYMBOL_GPL(xenbus_transaction_start);
 
 /* End a transaction.
- * If abandon is true, transaction is discarded instead of committed.
+ * If abort is true, transaction is discarded instead of committed.
  */
-int xenbus_transaction_end(struct xenbus_transaction t, int abort)
+int xenbus_transaction_end(struct xenbus_transaction t, bool abort)
 {
-	char abortstr[2];
-
-	if (abort)
-		strcpy(abortstr, "F");
-	else
-		strcpy(abortstr, "T");
-
-	return xs_error(xs_single(t, XS_TRANSACTION_END, abortstr, NULL));
+	return xs_error(xs_single(t, XS_TRANSACTION_END, abort ? "F" : "T",
+				  NULL));
 }
 EXPORT_SYMBOL_GPL(xenbus_transaction_end);
 
@@ -699,9 +705,13 @@ int xs_watch_msg(struct xs_watch_event *event)
 
 	spin_lock(&watches_lock);
 	event->handle = find_watch(event->token);
-	if (event->handle != NULL) {
+	if (event->handle != NULL &&
+			(!event->handle->will_handle ||
+			 event->handle->will_handle(event->handle,
+				 event->path, event->token))) {
 		spin_lock(&watch_events_lock);
 		list_add_tail(&event->list, &watch_events);
+		event->handle->nr_pending++;
 		wake_up(&watch_events_waitq);
 		spin_unlock(&watch_events_lock);
 	} else
@@ -711,34 +721,11 @@ int xs_watch_msg(struct xs_watch_event *event)
 	return 0;
 }
 
-/*
- * Certain older XenBus toolstack cannot handle reading values that are
- * not populated. Some Xen 3.4 installation are incapable of doing this
- * so if we are running on anything older than 4 do not attempt to read
- * control/platform-feature-xs_reset_watches.
- */
-static bool xen_strict_xenbus_quirk(void)
-{
-#ifdef CONFIG_X86
-	uint32_t eax, ebx, ecx, edx, base;
-
-	base = xen_cpuid_base();
-	cpuid(base + 1, &eax, &ebx, &ecx, &edx);
-
-	if ((eax >> 16) < 4)
-		return true;
-#endif
-	return false;
-
-}
 static void xs_reset_watches(void)
 {
 	int err;
 
 	if (!xen_hvm_domain() || xen_initial_domain())
-		return;
-
-	if (xen_strict_xenbus_quirk())
 		return;
 
 	if (!xenbus_read_unsigned("control",
@@ -758,6 +745,8 @@ int register_xenbus_watch(struct xenbus_watch *watch)
 	int err;
 
 	sprintf(token, "%lX", (long)watch);
+
+	watch->nr_pending = 0;
 
 	down_read(&xs_watch_rwsem);
 
@@ -808,11 +797,14 @@ void unregister_xenbus_watch(struct xenbus_watch *watch)
 
 	/* Cancel pending watch events. */
 	spin_lock(&watch_events_lock);
-	list_for_each_entry_safe(event, tmp, &watch_events, list) {
-		if (event->handle != watch)
-			continue;
-		list_del(&event->list);
-		kfree(event);
+	if (watch->nr_pending) {
+		list_for_each_entry_safe(event, tmp, &watch_events, list) {
+			if (event->handle != watch)
+				continue;
+			list_del(&event->list);
+			kfree(event);
+		}
+		watch->nr_pending = 0;
 	}
 	spin_unlock(&watch_events_lock);
 
@@ -825,8 +817,8 @@ void xs_suspend(void)
 {
 	xs_suspend_enter();
 
-	down_write(&xs_watch_rwsem);
 	mutex_lock(&xs_response_mutex);
+	down_write(&xs_watch_rwsem);
 }
 
 void xs_resume(void)
@@ -851,15 +843,14 @@ void xs_resume(void)
 
 void xs_suspend_cancel(void)
 {
-	mutex_unlock(&xs_response_mutex);
 	up_write(&xs_watch_rwsem);
+	mutex_unlock(&xs_response_mutex);
 
 	xs_suspend_exit();
 }
 
 static int xenwatch_thread(void *unused)
 {
-	struct list_head *ent;
 	struct xs_watch_event *event;
 
 	xenwatch_pid = current->pid;
@@ -874,13 +865,15 @@ static int xenwatch_thread(void *unused)
 		mutex_lock(&xenwatch_mutex);
 
 		spin_lock(&watch_events_lock);
-		ent = watch_events.next;
-		if (ent != &watch_events)
-			list_del(ent);
+		event = list_first_entry_or_null(&watch_events,
+				struct xs_watch_event, list);
+		if (event) {
+			list_del(&event->list);
+			event->handle->nr_pending--;
+		}
 		spin_unlock(&watch_events_lock);
 
-		if (ent != &watch_events) {
-			event = list_entry(ent, struct xs_watch_event, list);
+		if (event) {
 			event->handle->callback(event->handle, event->path,
 						event->token);
 			kfree(event);

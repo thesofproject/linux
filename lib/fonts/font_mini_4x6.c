@@ -18,15 +18,15 @@
 s{((0x)?[0-9a-fA-F]+)(.*\[([\*\ ]{4})\])}{
 
 	($num,$pat,$bits) = ($1,$3,$4);
-	
+
 	$bits =~ s/([^\s0])|(.)/ defined($1) + 0 /ge;
-	
+
 	$num = ord(pack("B8", $bits));
 	$num |= $num >> 4;
 	$num = sprintf("0x%.2x", $num);
-	
+
 	#print "$num,$pat,$bits\n";
-	
+
 	$num . $pat;
 }ge;
 
@@ -39,12 +39,12 @@ __END__;
    MSBit to LSBit = left to right.
  */
 
-#include <linux/font.h>
+#include "font.h"
 
 #define FONTDATAMAX 1536
 
-static const unsigned char fontdata_mini_4x6[FONTDATAMAX] = {
-
+static const struct font_data fontdata_mini_4x6 = {
+	{ 0, 0, FONTDATAMAX, 0 }, {
 	/*{*/
 	  	/*   Char 0: ' '  */
 	0xee,	/*=  [*** ]       */
@@ -2145,14 +2145,15 @@ static const unsigned char fontdata_mini_4x6[FONTDATAMAX] = {
 	0xee,	/*=   [*** ]        */
 	0x00,	/*=   [    ]        */
 	/*}*/
-};
+} };
 
 const struct font_desc font_mini_4x6 = {
 	.idx	= MINI4x6_IDX,
 	.name	= "MINI4x6",
 	.width	= 4,
 	.height	= 6,
-	.data	= fontdata_mini_4x6,
+	.charcount = 256,
+	.data	= fontdata_mini_4x6.data,
 	.pref	= 3,
 };
 

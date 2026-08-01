@@ -232,7 +232,7 @@ static ssize_t lbs_threshold_read(uint16_t tlv_type, uint16_t event_mask,
 	if (!buf)
 		return -ENOMEM;
 
-	subscribed = kzalloc(sizeof(*subscribed), GFP_KERNEL);
+	subscribed = kzalloc_obj(*subscribed);
 	if (!subscribed) {
 		ret = -ENOMEM;
 		goto out_page;
@@ -288,7 +288,7 @@ static ssize_t lbs_threshold_write(uint16_t tlv_type, uint16_t event_mask,
 		ret = -EINVAL;
 		goto out_page;
 	}
-	events = kzalloc(sizeof(*events), GFP_KERNEL);
+	events = kzalloc_obj(*events);
 	if (!events) {
 		ret = -ENOMEM;
 		goto out_page;
@@ -708,8 +708,6 @@ void lbs_debugfs_init_one(struct lbs_private *priv, struct net_device *dev)
 		goto exit;
 
 	priv->debugfs_dir = debugfs_create_dir(dev->name, lbs_dir);
-	if (!priv->debugfs_dir)
-		goto exit;
 
 	for (i=0; i<ARRAY_SIZE(debugfs_files); i++) {
 		files = &debugfs_files[i];
@@ -721,8 +719,6 @@ void lbs_debugfs_init_one(struct lbs_private *priv, struct net_device *dev)
 	}
 
 	priv->events_dir = debugfs_create_dir("subscribed_events", priv->debugfs_dir);
-	if (!priv->events_dir)
-		goto exit;
 
 	for (i=0; i<ARRAY_SIZE(debugfs_events_files); i++) {
 		files = &debugfs_events_files[i];
@@ -734,8 +730,6 @@ void lbs_debugfs_init_one(struct lbs_private *priv, struct net_device *dev)
 	}
 
 	priv->regs_dir = debugfs_create_dir("registers", priv->debugfs_dir);
-	if (!priv->regs_dir)
-		goto exit;
 
 	for (i=0; i<ARRAY_SIZE(debugfs_regs_files); i++) {
 		files = &debugfs_regs_files[i];
@@ -780,7 +774,7 @@ void lbs_debugfs_remove_one(struct lbs_private *priv)
 
 #ifdef PROC_DEBUG
 
-#define item_size(n)	(FIELD_SIZEOF(struct lbs_private, n))
+#define item_size(n)	(sizeof_field(struct lbs_private, n))
 #define item_addr(n)	(offsetof(struct lbs_private, n))
 
 

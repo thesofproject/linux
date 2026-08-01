@@ -95,7 +95,8 @@ gk104_volt_pwm = {
 };
 
 int
-gk104_volt_new(struct nvkm_device *device, int index, struct nvkm_volt **pvolt)
+gk104_volt_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst,
+	       struct nvkm_volt **pvolt)
 {
 	const struct nvkm_volt_func *volt_func = &gk104_volt_gpio;
 	struct dcb_gpio_func gpio;
@@ -112,9 +113,9 @@ gk104_volt_new(struct nvkm_device *device, int index, struct nvkm_volt **pvolt)
 		volt_func = &gk104_volt_pwm;
 	}
 
-	if (!(volt = kzalloc(sizeof(*volt), GFP_KERNEL)))
+	if (!(volt = kzalloc_obj(*volt)))
 		return -ENOMEM;
-	nvkm_volt_ctor(volt_func, device, index, &volt->base);
+	nvkm_volt_ctor(volt_func, device, type, inst, &volt->base);
 	*pvolt = &volt->base;
 	volt->bios = bios;
 

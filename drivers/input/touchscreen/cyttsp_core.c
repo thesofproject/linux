@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Core Source for:
  * Cypress TrueTouch(TM) Standard Product (TTSP) touchscreen drivers.
@@ -9,33 +10,19 @@
  * Copyright (C) 2009, 2010, 2011 Cypress Semiconductor, Inc.
  * Copyright (C) 2012 Javier Martinez Canillas <javier@dowhile0.org>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2, and only version 2, as published by the
- * Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
- *
  * Contact Cypress Semiconductor at www.cypress.com <kev@cypress.com>
- *
  */
 
 #include <linux/delay.h>
+#include <linux/export.h>
 #include <linux/input.h>
 #include <linux/input/mt.h>
 #include <linux/input/touchscreen.h>
-#include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/slab.h>
 #include <linux/property.h>
 #include <linux/gpio/consumer.h>
+#include <linux/regulator/consumer.h>
 
 #include "cyttsp_core.h"
 
@@ -59,8 +46,15 @@
 #define CY_MAXZ				255
 #define CY_DELAY_DFLT			20 /* ms */
 #define CY_DELAY_MAX			500
-#define CY_ACT_DIST_DFLT		0xF8
+/* Active distance in pixels for a gesture to be reported */
+#define CY_ACT_DIST_DFLT		0xF8 /* pixels */
 #define CY_ACT_DIST_MASK		0x0F
+/* Active Power state scanning/processing refresh interval */
+#define CY_ACT_INTRVL_DFLT		0x00 /* ms */
+/* Low Power state scanning/processing refresh interval */
+#define CY_LP_INTRVL_DFLT		0x0A /* ms */
+/* touch timeout for the Active power */
+#define CY_TCH_TMOUT_DFLT		0xFF /* ms */
 #define CY_HNDSHK_BIT			0x80
 /* device mode bits */
 #define CY_OPERATE_MODE			0x00
@@ -243,16 +237,21 @@ static int cyttsp_set_sysinfo_regs(struct cyttsp *ts)
 static void cyttsp_hard_reset(struct cyttsp *ts)
 {
 	if (ts->reset_gpio) {
+		/*
+		 * According to the CY8CTMA340 datasheet page 21, the external
+		 * reset pulse width should be >= 1 ms. The datasheet does not
+		 * specify how long we have to wait after reset but a vendor
+		 * tree specifies 5 ms here.
+		 */
 		gpiod_set_value_cansleep(ts->reset_gpio, 1);
-		msleep(CY_DELAY_DFLT);
+		usleep_range(1000, 2000);
 		gpiod_set_value_cansleep(ts->reset_gpio, 0);
-		msleep(CY_DELAY_DFLT);
+		usleep_range(5000, 6000);
 	}
 }
 
 static int cyttsp_soft_reset(struct cyttsp *ts)
 {
-	unsigned long timeout;
 	int retval;
 
 	/* wait for interrupt to set ready completion */
@@ -262,12 +261,16 @@ static int cyttsp_soft_reset(struct cyttsp *ts)
 	enable_irq(ts->irq);
 
 	retval = ttsp_send_command(ts, CY_SOFT_RESET_MODE);
-	if (retval)
+	if (retval) {
+		dev_err(ts->dev, "failed to send soft reset\n");
 		goto out;
+	}
 
-	timeout = wait_for_completion_timeout(&ts->bl_ready,
-			msecs_to_jiffies(CY_DELAY_DFLT * CY_DELAY_MAX));
-	retval = timeout ? 0 : -EIO;
+	if (!wait_for_completion_timeout(&ts->bl_ready,
+			msecs_to_jiffies(CY_DELAY_DFLT * CY_DELAY_MAX))) {
+		dev_err(ts->dev, "timeout waiting for soft reset\n");
+		retval = -EIO;
+	}
 
 out:
 	ts->state = CY_IDLE_STATE;
@@ -354,7 +357,7 @@ static void cyttsp_report_tchdata(struct cyttsp *ts)
 			continue;
 
 		input_mt_slot(input, i);
-		input_mt_report_slot_state(input, MT_TOOL_FINGER, false);
+		input_mt_report_slot_inactive(input);
 	}
 
 	input_sync(input);
@@ -419,8 +422,10 @@ static int cyttsp_power_on(struct cyttsp *ts)
 	if (GET_BOOTLOADERMODE(ts->bl_data.bl_status) &&
 	    IS_VALID_APP(ts->bl_data.bl_status)) {
 		error = cyttsp_exit_bl_mode(ts);
-		if (error)
+		if (error) {
+			dev_err(ts->dev, "failed to exit bootloader mode\n");
 			return error;
+		}
 	}
 
 	if (GET_HSTMODE(ts->bl_data.bl_file) != CY_OPERATE_MODE ||
@@ -486,42 +491,37 @@ static int cyttsp_disable(struct cyttsp *ts)
 	return 0;
 }
 
-static int __maybe_unused cyttsp_suspend(struct device *dev)
+static int cyttsp_suspend(struct device *dev)
 {
 	struct cyttsp *ts = dev_get_drvdata(dev);
-	int retval = 0;
+	int error;
 
-	mutex_lock(&ts->input->mutex);
+	guard(mutex)(&ts->input->mutex);
 
-	if (ts->input->users) {
-		retval = cyttsp_disable(ts);
-		if (retval == 0)
-			ts->suspended = true;
+	if (input_device_enabled(ts->input)) {
+		error = cyttsp_disable(ts);
+		if (error)
+			return error;
 	}
 
-	mutex_unlock(&ts->input->mutex);
-
-	return retval;
-}
-
-static int __maybe_unused cyttsp_resume(struct device *dev)
-{
-	struct cyttsp *ts = dev_get_drvdata(dev);
-
-	mutex_lock(&ts->input->mutex);
-
-	if (ts->input->users)
-		cyttsp_enable(ts);
-
-	ts->suspended = false;
-
-	mutex_unlock(&ts->input->mutex);
-
+	ts->suspended = true;
 	return 0;
 }
 
-SIMPLE_DEV_PM_OPS(cyttsp_pm_ops, cyttsp_suspend, cyttsp_resume);
-EXPORT_SYMBOL_GPL(cyttsp_pm_ops);
+static int cyttsp_resume(struct device *dev)
+{
+	struct cyttsp *ts = dev_get_drvdata(dev);
+
+	guard(mutex)(&ts->input->mutex);
+
+	if (input_device_enabled(ts->input))
+		cyttsp_enable(ts);
+
+	ts->suspended = false;
+	return 0;
+}
+
+EXPORT_GPL_SIMPLE_DEV_PM_OPS(cyttsp_pm_ops, cyttsp_suspend, cyttsp_resume);
 
 static int cyttsp_open(struct input_dev *dev)
 {
@@ -614,6 +614,11 @@ static int cyttsp_parse_properties(struct cyttsp *ts)
 struct cyttsp *cyttsp_probe(const struct cyttsp_bus_ops *bus_ops,
 			    struct device *dev, int irq, size_t xfer_buf_size)
 {
+	/*
+	 * VCPIN is the analog voltage supply
+	 * VDD is the digital voltage supply
+	 */
+	static const char * const supplies[] = { "vcpin", "vdd" };
 	struct cyttsp *ts;
 	struct input_dev *input_dev;
 	int error;
@@ -631,6 +636,13 @@ struct cyttsp *cyttsp_probe(const struct cyttsp_bus_ops *bus_ops,
 	ts->bus_ops = bus_ops;
 	ts->irq = irq;
 
+	error = devm_regulator_bulk_get_enable(dev, ARRAY_SIZE(supplies),
+					       supplies);
+	if (error) {
+		dev_err(dev, "Failed to enable regulators: %d\n", error);
+		return ERR_PTR(error);
+	}
+
 	ts->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_LOW);
 	if (IS_ERR(ts->reset_gpio)) {
 		error = PTR_ERR(ts->reset_gpio);
@@ -643,10 +655,8 @@ struct cyttsp *cyttsp_probe(const struct cyttsp_bus_ops *bus_ops,
 		return ERR_PTR(error);
 
 	init_completion(&ts->bl_ready);
-	snprintf(ts->phys, sizeof(ts->phys), "%s/input0", dev_name(dev));
 
 	input_dev->name = "Cypress TTSP TouchScreen";
-	input_dev->phys = ts->phys;
 	input_dev->id.bustype = bus_ops->bustype;
 	input_dev->dev.parent = ts->dev;
 
@@ -657,24 +667,25 @@ struct cyttsp *cyttsp_probe(const struct cyttsp_bus_ops *bus_ops,
 
 	input_set_capability(input_dev, EV_ABS, ABS_MT_POSITION_X);
 	input_set_capability(input_dev, EV_ABS, ABS_MT_POSITION_Y);
+	/* One byte for width 0..255 so this is the limit */
+	input_set_abs_params(input_dev, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
+
 	touchscreen_parse_properties(input_dev, true, NULL);
 
-	error = input_mt_init_slots(input_dev, CY_MAX_ID, 0);
+	error = input_mt_init_slots(input_dev, CY_MAX_ID, INPUT_MT_DIRECT);
 	if (error) {
 		dev_err(dev, "Unable to init MT slots.\n");
 		return ERR_PTR(error);
 	}
 
 	error = devm_request_threaded_irq(dev, ts->irq, NULL, cyttsp_irq,
-					  IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
+					  IRQF_ONESHOT | IRQF_NO_AUTOEN,
 					  "cyttsp", ts);
 	if (error) {
 		dev_err(ts->dev, "failed to request IRQ %d, err: %d\n",
 			ts->irq, error);
 		return ERR_PTR(error);
 	}
-
-	disable_irq(ts->irq);
 
 	cyttsp_hard_reset(ts);
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Driver for buttons on GPIO lines not capable of generating interrupts
  *
@@ -9,17 +10,12 @@
  *
  *  also was based on: /drivers/input/keyboard/gpio_keys.c
  *	Copyright 2005 Phil Blundell
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/input.h>
-#include <linux/input-polldev.h>
 #include <linux/ioport.h>
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
@@ -37,20 +33,19 @@ struct gpio_keys_button_data {
 };
 
 struct gpio_keys_polled_dev {
-	struct input_polled_dev *poll_dev;
+	struct input_dev *input;
 	struct device *dev;
 	const struct gpio_keys_platform_data *pdata;
 	unsigned long rel_axis_seen[BITS_TO_LONGS(REL_CNT)];
 	unsigned long abs_axis_seen[BITS_TO_LONGS(ABS_CNT)];
-	struct gpio_keys_button_data data[0];
+	struct gpio_keys_button_data data[];
 };
 
-static void gpio_keys_button_event(struct input_polled_dev *dev,
+static void gpio_keys_button_event(struct input_dev *input,
 				   const struct gpio_keys_button *button,
 				   int state)
 {
-	struct gpio_keys_polled_dev *bdev = dev->private;
-	struct input_dev *input = dev->input;
+	struct gpio_keys_polled_dev *bdev = input_get_drvdata(input);
 	unsigned int type = button->type ?: EV_KEY;
 
 	if (type == EV_REL) {
@@ -69,7 +64,7 @@ static void gpio_keys_button_event(struct input_polled_dev *dev,
 	}
 }
 
-static void gpio_keys_polled_check_state(struct input_polled_dev *dev,
+static void gpio_keys_polled_check_state(struct input_dev *input,
 					 const struct gpio_keys_button *button,
 					 struct gpio_keys_button_data *bdata)
 {
@@ -77,10 +72,10 @@ static void gpio_keys_polled_check_state(struct input_polled_dev *dev,
 
 	state = gpiod_get_value_cansleep(bdata->gpiod);
 	if (state < 0) {
-		dev_err(dev->input->dev.parent,
+		dev_err(input->dev.parent,
 			"failed to get gpio state: %d\n", state);
 	} else {
-		gpio_keys_button_event(dev, button, state);
+		gpio_keys_button_event(input, button, state);
 
 		if (state != bdata->last_state) {
 			bdata->count = 0;
@@ -89,11 +84,10 @@ static void gpio_keys_polled_check_state(struct input_polled_dev *dev,
 	}
 }
 
-static void gpio_keys_polled_poll(struct input_polled_dev *dev)
+static void gpio_keys_polled_poll(struct input_dev *input)
 {
-	struct gpio_keys_polled_dev *bdev = dev->private;
+	struct gpio_keys_polled_dev *bdev = input_get_drvdata(input);
 	const struct gpio_keys_platform_data *pdata = bdev->pdata;
-	struct input_dev *input = dev->input;
 	int i;
 
 	memset(bdev->rel_axis_seen, 0, sizeof(bdev->rel_axis_seen));
@@ -104,10 +98,10 @@ static void gpio_keys_polled_poll(struct input_polled_dev *dev)
 
 		if (bdata->count < bdata->threshold) {
 			bdata->count++;
-			gpio_keys_button_event(dev, &pdata->buttons[i],
+			gpio_keys_button_event(input, &pdata->buttons[i],
 					       bdata->last_state);
 		} else {
-			gpio_keys_polled_check_state(dev, &pdata->buttons[i],
+			gpio_keys_polled_check_state(input, &pdata->buttons[i],
 						     bdata);
 		}
 	}
@@ -125,18 +119,20 @@ static void gpio_keys_polled_poll(struct input_polled_dev *dev)
 	input_sync(input);
 }
 
-static void gpio_keys_polled_open(struct input_polled_dev *dev)
+static int gpio_keys_polled_open(struct input_dev *input)
 {
-	struct gpio_keys_polled_dev *bdev = dev->private;
+	struct gpio_keys_polled_dev *bdev = input_get_drvdata(input);
 	const struct gpio_keys_platform_data *pdata = bdev->pdata;
 
 	if (pdata->enable)
 		pdata->enable(bdev->dev);
+
+	return 0;
 }
 
-static void gpio_keys_polled_close(struct input_polled_dev *dev)
+static void gpio_keys_polled_close(struct input_dev *input)
 {
-	struct gpio_keys_polled_dev *bdev = dev->private;
+	struct gpio_keys_polled_dev *bdev = input_get_drvdata(input);
 	const struct gpio_keys_platform_data *pdata = bdev->pdata;
 
 	if (pdata->disable)
@@ -148,7 +144,6 @@ gpio_keys_polled_get_devtree_pdata(struct device *dev)
 {
 	struct gpio_keys_platform_data *pdata;
 	struct gpio_keys_button *button;
-	struct fwnode_handle *child;
 	int nbuttons;
 
 	nbuttons = device_get_child_node_count(dev);
@@ -168,11 +163,12 @@ gpio_keys_polled_get_devtree_pdata(struct device *dev)
 	pdata->rep = device_property_present(dev, "autorepeat");
 	device_property_read_u32(dev, "poll-interval", &pdata->poll_interval);
 
-	device_for_each_child_node(dev, child) {
+	device_property_read_string(dev, "label", &pdata->name);
+
+	device_for_each_child_node_scoped(dev, child) {
 		if (fwnode_property_read_u32(child, "linux,code",
 					     &button->code)) {
 			dev_err(dev, "button without keycode\n");
-			fwnode_handle_put(child);
 			return ERR_PTR(-EINVAL);
 		}
 
@@ -233,9 +229,7 @@ static int gpio_keys_polled_probe(struct platform_device *pdev)
 	struct fwnode_handle *child = NULL;
 	const struct gpio_keys_platform_data *pdata = dev_get_platdata(dev);
 	struct gpio_keys_polled_dev *bdev;
-	struct input_polled_dev *poll_dev;
 	struct input_dev *input;
-	size_t size;
 	int error;
 	int i;
 
@@ -250,35 +244,31 @@ static int gpio_keys_polled_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	size = sizeof(struct gpio_keys_polled_dev) +
-			pdata->nbuttons * sizeof(struct gpio_keys_button_data);
-	bdev = devm_kzalloc(dev, size, GFP_KERNEL);
+	bdev = devm_kzalloc(dev, struct_size(bdev, data, pdata->nbuttons),
+			    GFP_KERNEL);
 	if (!bdev) {
 		dev_err(dev, "no memory for private data\n");
 		return -ENOMEM;
 	}
 
-	poll_dev = devm_input_allocate_polled_device(dev);
-	if (!poll_dev) {
-		dev_err(dev, "no memory for polled device\n");
+	input = devm_input_allocate_device(dev);
+	if (!input) {
+		dev_err(dev, "no memory for input device\n");
 		return -ENOMEM;
 	}
 
-	poll_dev->private = bdev;
-	poll_dev->poll = gpio_keys_polled_poll;
-	poll_dev->poll_interval = pdata->poll_interval;
-	poll_dev->open = gpio_keys_polled_open;
-	poll_dev->close = gpio_keys_polled_close;
+	input_set_drvdata(input, bdev);
 
-	input = poll_dev->input;
-
-	input->name = pdev->name;
+	input->name = pdata->name ?: pdev->name;
 	input->phys = DRV_NAME"/input0";
 
 	input->id.bustype = BUS_HOST;
 	input->id.vendor = 0x0001;
 	input->id.product = 0x0001;
 	input->id.version = 0x0100;
+
+	input->open = gpio_keys_polled_open;
+	input->close = gpio_keys_polled_close;
 
 	__set_bit(EV_KEY, input->evbit);
 	if (pdata->rep)
@@ -303,37 +293,25 @@ static int gpio_keys_polled_probe(struct platform_device *pdev)
 				return -EINVAL;
 			}
 
-			bdata->gpiod = devm_fwnode_get_gpiod_from_child(dev,
-								NULL, child,
-								GPIOD_IN,
-								button->desc);
+			bdata->gpiod = devm_fwnode_gpiod_get(dev, child,
+							     NULL, GPIOD_IN,
+							     button->desc);
 			if (IS_ERR(bdata->gpiod)) {
-				error = PTR_ERR(bdata->gpiod);
-				if (error != -EPROBE_DEFER)
-					dev_err(dev,
-						"failed to get gpio: %d\n",
-						error);
 				fwnode_handle_put(child);
-				return error;
+				return dev_err_probe(dev, PTR_ERR(bdata->gpiod),
+						     "failed to get gpio\n");
 			}
 		} else if (gpio_is_valid(button->gpio)) {
 			/*
 			 * Legacy GPIO number so request the GPIO here and
 			 * convert it to descriptor.
 			 */
-			unsigned flags = GPIOF_IN;
-
-			if (button->active_low)
-				flags |= GPIOF_ACTIVE_LOW;
-
-			error = devm_gpio_request_one(dev, button->gpio,
-					flags, button->desc ? : DRV_NAME);
-			if (error) {
-				dev_err(dev,
-					"unable to claim gpio %u, err=%d\n",
-					button->gpio, error);
-				return error;
-			}
+			error = devm_gpio_request_one(dev, button->gpio, GPIOF_IN,
+						      button->desc ? : DRV_NAME);
+			if (error)
+				return dev_err_probe(dev, error,
+						     "unable to claim gpio %u\n",
+						     button->gpio);
 
 			bdata->gpiod = gpio_to_desc(button->gpio);
 			if (!bdata->gpiod) {
@@ -342,6 +320,9 @@ static int gpio_keys_polled_probe(struct platform_device *pdev)
 					button->gpio);
 				return -EINVAL;
 			}
+
+			if (button->active_low ^ gpiod_is_active_low(bdata->gpiod))
+				gpiod_toggle_active_low(bdata->gpiod);
 		}
 
 		bdata->last_state = -1;
@@ -356,11 +337,19 @@ static int gpio_keys_polled_probe(struct platform_device *pdev)
 
 	fwnode_handle_put(child);
 
-	bdev->poll_dev = poll_dev;
+	bdev->input = input;
 	bdev->dev = dev;
 	bdev->pdata = pdata;
 
-	error = input_register_polled_device(poll_dev);
+	error = input_setup_polling(input, gpio_keys_polled_poll);
+	if (error) {
+		dev_err(dev, "unable to set up polling, err=%d\n", error);
+		return error;
+	}
+
+	input_set_poll_interval(input, pdata->poll_interval);
+
+	error = input_register_device(input);
 	if (error) {
 		dev_err(dev, "unable to register polled device, err=%d\n",
 			error);
@@ -369,7 +358,7 @@ static int gpio_keys_polled_probe(struct platform_device *pdev)
 
 	/* report initial state of the buttons */
 	for (i = 0; i < pdata->nbuttons; i++)
-		gpio_keys_polled_check_state(poll_dev, &pdata->buttons[i],
+		gpio_keys_polled_check_state(input, &pdata->buttons[i],
 					     &bdev->data[i]);
 
 	input_sync(input);

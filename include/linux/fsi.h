@@ -1,15 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* FSI device & driver interfaces
  *
  * Copyright (C) IBM Corporation 2016
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef LINUX_FSI_H
@@ -26,6 +18,16 @@ struct fsi_device {
 	uint32_t		addr;
 	uint32_t		size;
 };
+
+static inline void *fsi_get_drvdata(struct fsi_device *fsi_dev)
+{
+	return dev_get_drvdata(&fsi_dev->dev);
+}
+
+static inline void fsi_set_drvdata(struct fsi_device *fsi_dev, void *data)
+{
+	dev_set_drvdata(&fsi_dev->dev, data);
+}
 
 extern int fsi_device_read(struct fsi_device *dev, uint32_t addr,
 		void *val, size_t size);
@@ -47,12 +49,14 @@ struct fsi_device_id {
 	.engine_type = (t), .version = (v),
 
 struct fsi_driver {
+	int (*probe)(struct fsi_device *fsidev);
+	void (*remove)(struct fsi_device *fsidev);
 	struct device_driver		drv;
 	const struct fsi_device_id	*id_table;
 };
 
 #define to_fsi_dev(devp) container_of(devp, struct fsi_device, dev)
-#define to_fsi_drv(drvp) container_of(drvp, struct fsi_driver, drv)
+#define to_fsi_drv(drvp) container_of_const(drvp, struct fsi_driver, drv)
 
 extern int fsi_driver_register(struct fsi_driver *fsi_drv);
 extern void fsi_driver_unregister(struct fsi_driver *fsi_drv);
@@ -76,8 +80,17 @@ extern int fsi_slave_read(struct fsi_slave *slave, uint32_t addr,
 extern int fsi_slave_write(struct fsi_slave *slave, uint32_t addr,
 		const void *val, size_t size);
 
+extern const struct device_type fsi_cdev_type;
 
+enum fsi_dev_type {
+	fsi_dev_cfam,
+	fsi_dev_sbefifo,
+	fsi_dev_scom,
+	fsi_dev_occ
+};
 
-extern struct bus_type fsi_bus_type;
+extern int fsi_get_new_minor(struct fsi_device *fdev, enum fsi_dev_type type,
+			     dev_t *out_dev, int *out_index);
+extern void fsi_free_minor(dev_t dev);
 
 #endif /* LINUX_FSI_H */

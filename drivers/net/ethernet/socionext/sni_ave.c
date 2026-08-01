@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/**
+/*
  * sni_ave.c - Socionext UniPhier AVE ethernet driver
  * Copyright 2014 Panasonic Corporation
  * Copyright 2015-2017 Socionext Inc.
@@ -11,13 +11,16 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
+#include <linux/mfd/syscon.h>
 #include <linux/mii.h>
 #include <linux/module.h>
 #include <linux/netdevice.h>
+#include <linux/of.h>
 #include <linux/of_net.h>
 #include <linux/of_mdio.h>
-#include <linux/of_platform.h>
 #include <linux/phy.h>
+#include <linux/platform_device.h>
+#include <linux/regmap.h>
 #include <linux/reset.h>
 #include <linux/types.h>
 #include <linux/u64_stats_sync.h>
@@ -183,8 +186,8 @@
 				 NETIF_MSG_TX_ERR)
 
 /* Parameter for descriptor */
-#define AVE_NR_TXDESC		32	/* Tx descriptor */
-#define AVE_NR_RXDESC		64	/* Rx descriptor */
+#define AVE_NR_TXDESC		64	/* Tx descriptor */
+#define AVE_NR_RXDESC		256	/* Rx descriptor */
 
 #define AVE_DESC_OFS_CMDSTS	0
 #define AVE_DESC_OFS_ADDRL	4
@@ -192,12 +195,21 @@
 
 /* Parameter for ethernet frame */
 #define AVE_MAX_ETHFRAME	1518
+#define AVE_FRAME_HEADROOM	2
 
 /* Parameter for interrupt */
 #define AVE_INTM_COUNT		20
 #define AVE_FORCE_TXINTCNT	1
 
+/* SG */
+#define SG_ETPINMODE		0x540
+#define SG_ETPINMODE_EXTPHY	BIT(1)	/* for LD11 */
+#define SG_ETPINMODE_RMII(ins)	BIT(ins)
+
 #define IS_DESC_64BIT(p)	((p)->data->is_desc_64bit)
+
+#define AVE_MAX_CLKS		4
+#define AVE_MAX_RSTS		2
 
 enum desc_id {
 	AVE_DESCID_RX,
@@ -225,10 +237,6 @@ struct ave_desc_info {
 	struct ave_desc *desc;	/* skb info related descriptor */
 };
 
-struct ave_soc_data {
-	bool	is_desc_64bit;
-};
-
 struct ave_stats {
 	struct	u64_stats_sync	syncp;
 	u64	packets;
@@ -245,11 +253,17 @@ struct ave_private {
 	int			phy_id;
 	unsigned int		desc_size;
 	u32			msg_enable;
-	struct clk		*clk;
-	struct reset_control	*rst;
+	int			nclks;
+	struct clk		*clk[AVE_MAX_CLKS];
+	int			nrsts;
+	struct reset_control	*rst[AVE_MAX_RSTS];
 	phy_interface_t		phy_mode;
 	struct phy_device	*phydev;
 	struct mii_bus		*mdio;
+	struct regmap		*regmap;
+	unsigned int		pinmode_mask;
+	unsigned int		pinmode_val;
+	u32			wolopts;
 
 	/* stats */
 	struct ave_stats	stats_rx;
@@ -270,6 +284,14 @@ struct ave_private {
 	int pause_tx;
 
 	const struct ave_soc_data *data;
+};
+
+struct ave_soc_data {
+	bool	is_desc_64bit;
+	const char	*clock_names[AVE_MAX_CLKS];
+	const char	*reset_names[AVE_MAX_RSTS];
+	int	(*get_pinmode)(struct ave_private *priv,
+			       phy_interface_t phy_mode, u32 arg);
 };
 
 static u32 ave_desc_read(struct net_device *ndev, enum desc_id id, int entry,
@@ -374,8 +396,8 @@ static void ave_ethtool_get_drvinfo(struct net_device *ndev,
 {
 	struct device *dev = ndev->dev.parent;
 
-	strlcpy(info->driver, dev->driver->name, sizeof(info->driver));
-	strlcpy(info->bus_info, dev_name(dev), sizeof(info->bus_info));
+	strscpy(info->driver, dev->driver->name, sizeof(info->driver));
+	strscpy(info->bus_info, dev_name(dev), sizeof(info->bus_info));
 	ave_hw_read_version(ndev, info->fw_version, sizeof(info->fw_version));
 }
 
@@ -403,16 +425,22 @@ static void ave_ethtool_get_wol(struct net_device *ndev,
 		phy_ethtool_get_wol(ndev->phydev, wol);
 }
 
+static int __ave_ethtool_set_wol(struct net_device *ndev,
+				 struct ethtool_wolinfo *wol)
+{
+	if (!ndev->phydev ||
+	    (wol->wolopts & (WAKE_ARP | WAKE_MAGICSECURE)))
+		return -EOPNOTSUPP;
+
+	return phy_ethtool_set_wol(ndev->phydev, wol);
+}
+
 static int ave_ethtool_set_wol(struct net_device *ndev,
 			       struct ethtool_wolinfo *wol)
 {
 	int ret;
 
-	if (!ndev->phydev ||
-	    (wol->wolopts & (WAKE_ARP | WAKE_MAGICSECURE)))
-		return -EOPNOTSUPP;
-
-	ret = phy_ethtool_set_wol(ndev->phydev, wol);
+	ret = __ave_ethtool_set_wol(ndev, wol);
 	if (!ret)
 		device_set_wakeup_enable(&ndev->dev, !!wol->wolopts);
 
@@ -442,16 +470,7 @@ static int ave_ethtool_set_pauseparam(struct net_device *ndev,
 	priv->pause_rx   = pause->rx_pause;
 	priv->pause_tx   = pause->tx_pause;
 
-	phydev->advertising &= ~(ADVERTISED_Pause | ADVERTISED_Asym_Pause);
-	if (pause->rx_pause)
-		phydev->advertising |= ADVERTISED_Pause | ADVERTISED_Asym_Pause;
-	if (pause->tx_pause)
-		phydev->advertising ^= ADVERTISED_Asym_Pause;
-
-	if (pause->autoneg) {
-		if (netif_running(ndev))
-			phy_start_aneg(phydev);
-	}
+	phy_set_asym_pause(phydev, pause->rx_pause, pause->tx_pause);
 
 	return 0;
 }
@@ -566,12 +585,11 @@ static int ave_rxdesc_prepare(struct net_device *ndev, int entry)
 
 	skb = priv->rx.desc[entry].skbs;
 	if (!skb) {
-		skb = netdev_alloc_skb_ip_align(ndev,
-						AVE_MAX_ETHFRAME);
-		if (!skb) {
-			netdev_err(ndev, "can't allocate skb for Rx\n");
+		skb = netdev_alloc_skb(ndev, AVE_MAX_ETHFRAME);
+		if (!skb)
 			return -ENOMEM;
-		}
+		skb->data += AVE_FRAME_HEADROOM;
+		skb->tail += AVE_FRAME_HEADROOM;
 	}
 
 	/* set disable to cmdsts */
@@ -584,12 +602,12 @@ static int ave_rxdesc_prepare(struct net_device *ndev, int entry)
 	 * - Rx buffer begins with 2 byte headroom, and data will be put from
 	 *   (buffer + 2).
 	 * To satisfy this, specify the address to put back the buffer
-	 * pointer advanced by NET_IP_ALIGN by netdev_alloc_skb_ip_align(),
-	 * and expand the map size by NET_IP_ALIGN.
+	 * pointer advanced by AVE_FRAME_HEADROOM, and expand the map size
+	 * by AVE_FRAME_HEADROOM.
 	 */
 	ret = ave_dma_map(ndev, &priv->rx.desc[entry],
-			  skb->data - NET_IP_ALIGN,
-			  AVE_MAX_ETHFRAME + NET_IP_ALIGN,
+			  skb->data - AVE_FRAME_HEADROOM,
+			  AVE_MAX_ETHFRAME + AVE_FRAME_HEADROOM,
 			  DMA_FROM_DEVICE, &paddr);
 	if (ret) {
 		netdev_err(ndev, "can't map skb for Rx\n");
@@ -885,11 +903,11 @@ static void ave_rxfifo_reset(struct net_device *ndev)
 
 	/* assert reset */
 	writel(AVE_GRR_RXFFR, priv->base + AVE_GRR);
-	usleep_range(40, 50);
+	udelay(50);
 
 	/* negate reset */
 	writel(0, priv->base + AVE_GRR);
-	usleep_range(10, 20);
+	udelay(20);
 
 	/* negate interrupt status */
 	writel(AVE_GI_RXOVF, priv->base + AVE_GISR);
@@ -1106,11 +1124,8 @@ static void ave_phy_adjust_link(struct net_device *ndev)
 			rmt_adv |= LPA_PAUSE_CAP;
 		if (phydev->asym_pause)
 			rmt_adv |= LPA_PAUSE_ASYM;
-		if (phydev->advertising & ADVERTISED_Pause)
-			lcl_adv |= ADVERTISE_PAUSE_CAP;
-		if (phydev->advertising & ADVERTISED_Asym_Pause)
-			lcl_adv |= ADVERTISE_PAUSE_ASYM;
 
+		lcl_adv = linkmode_adv_to_lcl_adv_t(phydev->advertising);
 		cap = mii_resolve_flowctrl_fdx(lcl_adv, rmt_adv);
 		if (cap & FLOW_CTRL_TX)
 			txcr |= AVE_TXCR_FLOCTR;
@@ -1153,19 +1168,29 @@ static int ave_init(struct net_device *ndev)
 	struct device_node *np = dev->of_node;
 	struct device_node *mdio_np;
 	struct phy_device *phydev;
-	int ret;
+	int nc, nr, ret;
 
 	/* enable clk because of hw access until ndo_open */
-	ret = clk_prepare_enable(priv->clk);
-	if (ret) {
-		dev_err(dev, "can't enable clock\n");
-		return ret;
+	for (nc = 0; nc < priv->nclks; nc++) {
+		ret = clk_prepare_enable(priv->clk[nc]);
+		if (ret) {
+			dev_err(dev, "can't enable clock\n");
+			goto out_clk_disable;
+		}
 	}
-	ret = reset_control_deassert(priv->rst);
-	if (ret) {
-		dev_err(dev, "can't deassert reset\n");
-		goto out_clk_disable;
+
+	for (nr = 0; nr < priv->nrsts; nr++) {
+		ret = reset_control_deassert(priv->rst[nr]);
+		if (ret) {
+			dev_err(dev, "can't deassert reset\n");
+			goto out_reset_assert;
+		}
 	}
+
+	ret = regmap_update_bits(priv->regmap, SG_ETPINMODE,
+				 priv->pinmode_mask, priv->pinmode_val);
+	if (ret)
+		goto out_reset_assert;
 
 	ave_global_reset(ndev);
 
@@ -1191,14 +1216,19 @@ static int ave_init(struct net_device *ndev)
 
 	priv->phydev = phydev;
 
-	phy_ethtool_get_wol(phydev, &wol);
+	ave_ethtool_get_wol(ndev, &wol);
 	device_set_wakeup_capable(&ndev->dev, !!wol.supported);
 
-	if (!phy_interface_is_rgmii(phydev)) {
-		phydev->supported &= ~PHY_GBIT_FEATURES;
-		phydev->supported |= PHY_BASIC_FEATURES;
-	}
-	phydev->supported |= SUPPORTED_Pause | SUPPORTED_Asym_Pause;
+	/* set wol initial state disabled */
+	wol.wolopts = 0;
+	__ave_ethtool_set_wol(ndev, &wol);
+
+	if (!phy_interface_is_rgmii(phydev))
+		phy_set_max_speed(phydev, SPEED_100);
+
+	phy_support_asym_pause(phydev);
+
+	phydev->mac_managed_pm = true;
 
 	phy_attached_info(phydev);
 
@@ -1207,9 +1237,11 @@ static int ave_init(struct net_device *ndev)
 out_mdio_unregister:
 	mdiobus_unregister(priv->mdio);
 out_reset_assert:
-	reset_control_assert(priv->rst);
+	while (--nr >= 0)
+		reset_control_assert(priv->rst[nr]);
 out_clk_disable:
-	clk_disable_unprepare(priv->clk);
+	while (--nc >= 0)
+		clk_disable_unprepare(priv->clk[nc]);
 
 	return ret;
 }
@@ -1217,13 +1249,16 @@ out_clk_disable:
 static void ave_uninit(struct net_device *ndev)
 {
 	struct ave_private *priv = netdev_priv(ndev);
+	int i;
 
 	phy_disconnect(priv->phydev);
 	mdiobus_unregister(priv->mdio);
 
 	/* disable clk because of hw access after ndo_stop */
-	reset_control_assert(priv->rst);
-	clk_disable_unprepare(priv->clk);
+	for (i = 0; i < priv->nrsts; i++)
+		reset_control_assert(priv->rst[i]);
+	for (i = 0; i < priv->nclks; i++)
+		clk_disable_unprepare(priv->clk[i]);
 }
 
 static int ave_open(struct net_device *ndev)
@@ -1238,15 +1273,13 @@ static int ave_open(struct net_device *ndev)
 	if (ret)
 		return ret;
 
-	priv->tx.desc = kcalloc(priv->tx.ndesc, sizeof(*priv->tx.desc),
-				GFP_KERNEL);
+	priv->tx.desc = kzalloc_objs(*priv->tx.desc, priv->tx.ndesc);
 	if (!priv->tx.desc) {
 		ret = -ENOMEM;
 		goto out_free_irq;
 	}
 
-	priv->rx.desc = kcalloc(priv->rx.ndesc, sizeof(*priv->rx.desc),
-				GFP_KERNEL);
+	priv->rx.desc = kzalloc_objs(*priv->rx.desc, priv->rx.ndesc);
 	if (!priv->rx.desc) {
 		kfree(priv->tx.desc);
 		ret = -ENOMEM;
@@ -1360,7 +1393,7 @@ static int ave_stop(struct net_device *ndev)
 	return 0;
 }
 
-static int ave_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+static netdev_tx_t ave_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct ave_private *priv = netdev_priv(ndev);
 	u32 proc_idx, done_idx, ndesc, cmdsts;
@@ -1472,16 +1505,16 @@ static void ave_get_stats64(struct net_device *ndev,
 	unsigned int start;
 
 	do {
-		start = u64_stats_fetch_begin_irq(&priv->stats_rx.syncp);
+		start = u64_stats_fetch_begin(&priv->stats_rx.syncp);
 		stats->rx_packets = priv->stats_rx.packets;
 		stats->rx_bytes	  = priv->stats_rx.bytes;
-	} while (u64_stats_fetch_retry_irq(&priv->stats_rx.syncp, start));
+	} while (u64_stats_fetch_retry(&priv->stats_rx.syncp, start));
 
 	do {
-		start = u64_stats_fetch_begin_irq(&priv->stats_tx.syncp);
+		start = u64_stats_fetch_begin(&priv->stats_tx.syncp);
 		stats->tx_packets = priv->stats_tx.packets;
 		stats->tx_bytes	  = priv->stats_tx.bytes;
-	} while (u64_stats_fetch_retry_irq(&priv->stats_tx.syncp, start));
+	} while (u64_stats_fetch_retry(&priv->stats_tx.syncp, start));
 
 	stats->rx_errors      = priv->stats_rx.errors;
 	stats->tx_errors      = priv->stats_tx.errors;
@@ -1509,7 +1542,7 @@ static const struct net_device_ops ave_netdev_ops = {
 	.ndo_open		= ave_open,
 	.ndo_stop		= ave_stop,
 	.ndo_start_xmit		= ave_start_xmit,
-	.ndo_do_ioctl		= ave_ioctl,
+	.ndo_eth_ioctl		= ave_ioctl,
 	.ndo_set_rx_mode	= ave_set_rx_mode,
 	.ndo_get_stats64	= ave_get_stats64,
 	.ndo_set_mac_address	= ave_set_mac_address,
@@ -1520,15 +1553,15 @@ static int ave_probe(struct platform_device *pdev)
 	const struct ave_soc_data *data;
 	struct device *dev = &pdev->dev;
 	char buf[ETHTOOL_FWVERS_LEN];
+	struct of_phandle_args args;
 	phy_interface_t phy_mode;
 	struct ave_private *priv;
 	struct net_device *ndev;
 	struct device_node *np;
-	struct resource	*res;
-	const void *mac_addr;
 	void __iomem *base;
+	const char *name;
+	int i, irq, ret;
 	u64 dma_mask;
-	int irq, ret;
 	u32 ave_id;
 
 	data = of_device_get_match_data(dev);
@@ -1536,30 +1569,21 @@ static int ave_probe(struct platform_device *pdev)
 		return -EINVAL;
 
 	np = dev->of_node;
-	phy_mode = of_get_phy_mode(np);
-	if (phy_mode < 0) {
+	ret = of_get_phy_mode(np, &phy_mode);
+	if (ret) {
 		dev_err(dev, "phy-mode not found\n");
-		return -EINVAL;
-	}
-	if ((!phy_interface_mode_is_rgmii(phy_mode)) &&
-	    phy_mode != PHY_INTERFACE_MODE_RMII &&
-	    phy_mode != PHY_INTERFACE_MODE_MII) {
-		dev_err(dev, "phy-mode is invalid\n");
-		return -EINVAL;
+		return ret;
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(dev, "IRQ not found\n");
+	if (irq < 0)
 		return irq;
-	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(dev, res);
+	base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
-	ndev = alloc_etherdev(sizeof(struct ave_private));
+	ndev = devm_alloc_etherdev(dev, sizeof(struct ave_private));
 	if (!ndev) {
 		dev_err(dev, "can't allocate ethernet device\n");
 		return -ENOMEM;
@@ -1574,12 +1598,9 @@ static int ave_probe(struct platform_device *pdev)
 
 	ndev->max_mtu = AVE_MAX_ETHFRAME - (ETH_HLEN + ETH_FCS_LEN);
 
-	mac_addr = of_get_mac_address(np);
-	if (mac_addr)
-		ether_addr_copy(ndev->dev_addr, mac_addr);
-
-	/* if the mac address is invalid, use random mac address */
-	if (!is_valid_ether_addr(ndev->dev_addr)) {
+	ret = of_get_ethdev_address(np, ndev);
+	if (ret) {
+		/* if the mac address is invalid, use random mac address */
 		eth_hw_addr_random(ndev);
 		dev_warn(dev, "Using random MAC address: %pM\n",
 			 ndev->dev_addr);
@@ -1606,7 +1627,7 @@ static int ave_probe(struct platform_device *pdev)
 	}
 	ret = dma_set_mask(dev, dma_mask);
 	if (ret)
-		goto out_free_netdev;
+		return ret;
 
 	priv->tx.ndesc = AVE_NR_TXDESC;
 	priv->rx.ndesc = AVE_NR_RXDESC;
@@ -1614,23 +1635,48 @@ static int ave_probe(struct platform_device *pdev)
 	u64_stats_init(&priv->stats_tx.syncp);
 	u64_stats_init(&priv->stats_rx.syncp);
 
-	priv->clk = devm_clk_get(dev, NULL);
-	if (IS_ERR(priv->clk)) {
-		ret = PTR_ERR(priv->clk);
-		goto out_free_netdev;
+	for (i = 0; i < AVE_MAX_CLKS; i++) {
+		name = priv->data->clock_names[i];
+		if (!name)
+			break;
+		priv->clk[i] = devm_clk_get(dev, name);
+		if (IS_ERR(priv->clk[i]))
+			return PTR_ERR(priv->clk[i]);
+		priv->nclks++;
 	}
 
-	priv->rst = devm_reset_control_get_optional_shared(dev, NULL);
-	if (IS_ERR(priv->rst)) {
-		ret = PTR_ERR(priv->rst);
-		goto out_free_netdev;
+	for (i = 0; i < AVE_MAX_RSTS; i++) {
+		name = priv->data->reset_names[i];
+		if (!name)
+			break;
+		priv->rst[i] = devm_reset_control_get_shared(dev, name);
+		if (IS_ERR(priv->rst[i]))
+			return PTR_ERR(priv->rst[i]);
+		priv->nrsts++;
+	}
+
+	ret = of_parse_phandle_with_fixed_args(np,
+					       "socionext,syscon-phy-mode",
+					       1, 0, &args);
+	if (ret) {
+		dev_err(dev, "can't get syscon-phy-mode property\n");
+		return ret;
+	}
+	priv->regmap = syscon_node_to_regmap(args.np);
+	of_node_put(args.np);
+	if (IS_ERR(priv->regmap)) {
+		dev_err(dev, "can't map syscon-phy-mode\n");
+		return PTR_ERR(priv->regmap);
+	}
+	ret = priv->data->get_pinmode(priv, phy_mode, args.args[0]);
+	if (ret) {
+		dev_err(dev, "invalid phy-mode setting\n");
+		return ret;
 	}
 
 	priv->mdio = devm_mdiobus_alloc(dev);
-	if (!priv->mdio) {
-		ret = -ENOMEM;
-		goto out_free_netdev;
-	}
+	if (!priv->mdio)
+		return -ENOMEM;
 	priv->mdio->priv = ndev;
 	priv->mdio->parent = dev;
 	priv->mdio->read = ave_mdiobus_read;
@@ -1640,9 +1686,8 @@ static int ave_probe(struct platform_device *pdev)
 		 pdev->name, pdev->id);
 
 	/* Register as a NAPI supported driver */
-	netif_napi_add(ndev, &priv->napi_rx, ave_napi_poll_rx, priv->rx.ndesc);
-	netif_tx_napi_add(ndev, &priv->napi_tx, ave_napi_poll_tx,
-			  priv->tx.ndesc);
+	netif_napi_add(ndev, &priv->napi_rx, ave_napi_poll_rx);
+	netif_napi_add_tx(ndev, &priv->napi_tx, ave_napi_poll_tx);
 
 	platform_set_drvdata(pdev, ndev);
 
@@ -1666,13 +1711,11 @@ static int ave_probe(struct platform_device *pdev)
 out_del_napi:
 	netif_napi_del(&priv->napi_rx);
 	netif_napi_del(&priv->napi_tx);
-out_free_netdev:
-	free_netdev(ndev);
 
 	return ret;
 }
 
-static int ave_remove(struct platform_device *pdev)
+static void ave_remove(struct platform_device *pdev)
 {
 	struct net_device *ndev = platform_get_drvdata(pdev);
 	struct ave_private *priv = netdev_priv(ndev);
@@ -1680,29 +1723,220 @@ static int ave_remove(struct platform_device *pdev)
 	unregister_netdev(ndev);
 	netif_napi_del(&priv->napi_rx);
 	netif_napi_del(&priv->napi_tx);
-	free_netdev(ndev);
+}
+
+#ifdef CONFIG_PM_SLEEP
+static int ave_suspend(struct device *dev)
+{
+	struct ethtool_wolinfo wol = { .cmd = ETHTOOL_GWOL };
+	struct net_device *ndev = dev_get_drvdata(dev);
+	struct ave_private *priv = netdev_priv(ndev);
+	int ret = 0;
+
+	if (netif_running(ndev)) {
+		ret = ave_stop(ndev);
+		netif_device_detach(ndev);
+	}
+
+	ave_ethtool_get_wol(ndev, &wol);
+	priv->wolopts = wol.wolopts;
+
+	return ret;
+}
+
+static int ave_resume(struct device *dev)
+{
+	struct ethtool_wolinfo wol = { .cmd = ETHTOOL_GWOL };
+	struct net_device *ndev = dev_get_drvdata(dev);
+	struct ave_private *priv = netdev_priv(ndev);
+	int ret = 0;
+
+	ave_global_reset(ndev);
+
+	ret = phy_init_hw(ndev->phydev);
+	if (ret)
+		return ret;
+
+	ave_ethtool_get_wol(ndev, &wol);
+	wol.wolopts = priv->wolopts;
+	__ave_ethtool_set_wol(ndev, &wol);
+
+	if (netif_running(ndev)) {
+		ret = ave_open(ndev);
+		netif_device_attach(ndev);
+	}
+
+	return ret;
+}
+
+static SIMPLE_DEV_PM_OPS(ave_pm_ops, ave_suspend, ave_resume);
+#define AVE_PM_OPS	(&ave_pm_ops)
+#else
+#define AVE_PM_OPS	NULL
+#endif
+
+static int ave_pro4_get_pinmode(struct ave_private *priv,
+				phy_interface_t phy_mode, u32 arg)
+{
+	if (arg > 0)
+		return -EINVAL;
+
+	priv->pinmode_mask = SG_ETPINMODE_RMII(0);
+
+	switch (phy_mode) {
+	case PHY_INTERFACE_MODE_RMII:
+		priv->pinmode_val = SG_ETPINMODE_RMII(0);
+		break;
+	case PHY_INTERFACE_MODE_MII:
+	case PHY_INTERFACE_MODE_RGMII:
+	case PHY_INTERFACE_MODE_RGMII_ID:
+	case PHY_INTERFACE_MODE_RGMII_RXID:
+	case PHY_INTERFACE_MODE_RGMII_TXID:
+		priv->pinmode_val = 0;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int ave_ld11_get_pinmode(struct ave_private *priv,
+				phy_interface_t phy_mode, u32 arg)
+{
+	if (arg > 0)
+		return -EINVAL;
+
+	priv->pinmode_mask = SG_ETPINMODE_EXTPHY | SG_ETPINMODE_RMII(0);
+
+	switch (phy_mode) {
+	case PHY_INTERFACE_MODE_INTERNAL:
+		priv->pinmode_val = 0;
+		break;
+	case PHY_INTERFACE_MODE_RMII:
+		priv->pinmode_val = SG_ETPINMODE_EXTPHY | SG_ETPINMODE_RMII(0);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int ave_ld20_get_pinmode(struct ave_private *priv,
+				phy_interface_t phy_mode, u32 arg)
+{
+	if (arg > 0)
+		return -EINVAL;
+
+	priv->pinmode_mask = SG_ETPINMODE_RMII(0);
+
+	switch (phy_mode) {
+	case PHY_INTERFACE_MODE_RMII:
+		priv->pinmode_val = SG_ETPINMODE_RMII(0);
+		break;
+	case PHY_INTERFACE_MODE_RGMII:
+	case PHY_INTERFACE_MODE_RGMII_ID:
+	case PHY_INTERFACE_MODE_RGMII_RXID:
+	case PHY_INTERFACE_MODE_RGMII_TXID:
+		priv->pinmode_val = 0;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int ave_pxs3_get_pinmode(struct ave_private *priv,
+				phy_interface_t phy_mode, u32 arg)
+{
+	if (arg > 1)
+		return -EINVAL;
+
+	priv->pinmode_mask = SG_ETPINMODE_RMII(arg);
+
+	switch (phy_mode) {
+	case PHY_INTERFACE_MODE_RMII:
+		priv->pinmode_val = SG_ETPINMODE_RMII(arg);
+		break;
+	case PHY_INTERFACE_MODE_RGMII:
+	case PHY_INTERFACE_MODE_RGMII_ID:
+	case PHY_INTERFACE_MODE_RGMII_RXID:
+	case PHY_INTERFACE_MODE_RGMII_TXID:
+		priv->pinmode_val = 0;
+		break;
+	default:
+		return -EINVAL;
+	}
 
 	return 0;
 }
 
 static const struct ave_soc_data ave_pro4_data = {
 	.is_desc_64bit = false,
+	.clock_names = {
+		"gio", "ether", "ether-gb", "ether-phy",
+	},
+	.reset_names = {
+		"gio", "ether",
+	},
+	.get_pinmode = ave_pro4_get_pinmode,
 };
 
 static const struct ave_soc_data ave_pxs2_data = {
 	.is_desc_64bit = false,
+	.clock_names = {
+		"ether",
+	},
+	.reset_names = {
+		"ether",
+	},
+	.get_pinmode = ave_pro4_get_pinmode,
 };
 
 static const struct ave_soc_data ave_ld11_data = {
 	.is_desc_64bit = false,
+	.clock_names = {
+		"ether",
+	},
+	.reset_names = {
+		"ether",
+	},
+	.get_pinmode = ave_ld11_get_pinmode,
 };
 
 static const struct ave_soc_data ave_ld20_data = {
 	.is_desc_64bit = true,
+	.clock_names = {
+		"ether",
+	},
+	.reset_names = {
+		"ether",
+	},
+	.get_pinmode = ave_ld20_get_pinmode,
 };
 
 static const struct ave_soc_data ave_pxs3_data = {
 	.is_desc_64bit = false,
+	.clock_names = {
+		"ether",
+	},
+	.reset_names = {
+		"ether",
+	},
+	.get_pinmode = ave_pxs3_get_pinmode,
+};
+
+static const struct ave_soc_data ave_nx1_data = {
+	.is_desc_64bit = true,
+	.clock_names = {
+		"ether",
+	},
+	.reset_names = {
+		"ether",
+	},
+	.get_pinmode = ave_pxs3_get_pinmode,
 };
 
 static const struct of_device_id of_ave_match[] = {
@@ -1726,6 +1960,10 @@ static const struct of_device_id of_ave_match[] = {
 		.compatible = "socionext,uniphier-pxs3-ave4",
 		.data = &ave_pxs3_data,
 	},
+	{
+		.compatible = "socionext,uniphier-nx1-ave4",
+		.data = &ave_nx1_data,
+	},
 	{ /* Sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, of_ave_match);
@@ -1735,10 +1973,12 @@ static struct platform_driver ave_driver = {
 	.remove = ave_remove,
 	.driver	= {
 		.name = "ave",
+		.pm   = AVE_PM_OPS,
 		.of_match_table	= of_ave_match,
 	},
 };
 module_platform_driver(ave_driver);
 
+MODULE_AUTHOR("Kunihiko Hayashi <hayashi.kunihiko@socionext.com>");
 MODULE_DESCRIPTION("Socionext UniPhier AVE ethernet driver");
 MODULE_LICENSE("GPL v2");

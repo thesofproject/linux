@@ -1,22 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  FUJITSU Extended Socket Network Device driver
  *  Copyright (c) 2015 FUJITSU LIMITED
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, see <http://www.gnu.org/licenses/>.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
  */
 
 /* ethtool support for fjes */
@@ -36,7 +21,7 @@ struct fjes_stats {
 
 #define FJES_STAT(name, stat) { \
 	.stat_string = name, \
-	.sizeof_stat = FIELD_SIZEOF(struct fjes_adapter, stat), \
+	.sizeof_stat = sizeof_field(struct fjes_adapter, stat), \
 	.stat_offset = offsetof(struct fjes_adapter, stat) \
 }
 
@@ -102,49 +87,31 @@ static void fjes_get_strings(struct net_device *netdev,
 {
 	struct fjes_adapter *adapter = netdev_priv(netdev);
 	struct fjes_hw *hw = &adapter->hw;
-	u8 *p = data;
 	int i;
 
-	switch (stringset) {
-	case ETH_SS_STATS:
-		for (i = 0; i < ARRAY_SIZE(fjes_gstrings_stats); i++) {
-			memcpy(p, fjes_gstrings_stats[i].stat_string,
-			       ETH_GSTRING_LEN);
-			p += ETH_GSTRING_LEN;
-		}
-		for (i = 0; i < hw->max_epid; i++) {
-			if (i == hw->my_epid)
-				continue;
-			sprintf(p, "ep%u_com_regist_buf_exec", i);
-			p += ETH_GSTRING_LEN;
-			sprintf(p, "ep%u_com_unregist_buf_exec", i);
-			p += ETH_GSTRING_LEN;
-			sprintf(p, "ep%u_send_intr_rx", i);
-			p += ETH_GSTRING_LEN;
-			sprintf(p, "ep%u_send_intr_unshare", i);
-			p += ETH_GSTRING_LEN;
-			sprintf(p, "ep%u_send_intr_zoneupdate", i);
-			p += ETH_GSTRING_LEN;
-			sprintf(p, "ep%u_recv_intr_rx", i);
-			p += ETH_GSTRING_LEN;
-			sprintf(p, "ep%u_recv_intr_unshare", i);
-			p += ETH_GSTRING_LEN;
-			sprintf(p, "ep%u_recv_intr_stop", i);
-			p += ETH_GSTRING_LEN;
-			sprintf(p, "ep%u_recv_intr_zoneupdate", i);
-			p += ETH_GSTRING_LEN;
-			sprintf(p, "ep%u_tx_buffer_full", i);
-			p += ETH_GSTRING_LEN;
-			sprintf(p, "ep%u_tx_dropped_not_shared", i);
-			p += ETH_GSTRING_LEN;
-			sprintf(p, "ep%u_tx_dropped_ver_mismatch", i);
-			p += ETH_GSTRING_LEN;
-			sprintf(p, "ep%u_tx_dropped_buf_size_mismatch", i);
-			p += ETH_GSTRING_LEN;
-			sprintf(p, "ep%u_tx_dropped_vlanid_mismatch", i);
-			p += ETH_GSTRING_LEN;
-		}
-		break;
+	if (stringset != ETH_SS_STATS)
+		return;
+
+	for (i = 0; i < ARRAY_SIZE(fjes_gstrings_stats); i++)
+		ethtool_puts(&data, fjes_gstrings_stats[i].stat_string);
+
+	for (i = 0; i < hw->max_epid; i++) {
+		if (i == hw->my_epid)
+			continue;
+		ethtool_sprintf(&data, "ep%u_com_regist_buf_exec", i);
+		ethtool_sprintf(&data, "ep%u_com_unregist_buf_exec", i);
+		ethtool_sprintf(&data, "ep%u_send_intr_rx", i);
+		ethtool_sprintf(&data, "ep%u_send_intr_unshare", i);
+		ethtool_sprintf(&data, "ep%u_send_intr_zoneupdate", i);
+		ethtool_sprintf(&data, "ep%u_recv_intr_rx", i);
+		ethtool_sprintf(&data, "ep%u_recv_intr_unshare", i);
+		ethtool_sprintf(&data, "ep%u_recv_intr_stop", i);
+		ethtool_sprintf(&data, "ep%u_recv_intr_zoneupdate", i);
+		ethtool_sprintf(&data, "ep%u_tx_buffer_full", i);
+		ethtool_sprintf(&data, "ep%u_tx_dropped_not_shared", i);
+		ethtool_sprintf(&data, "ep%u_tx_dropped_ver_mismatch", i);
+		ethtool_sprintf(&data, "ep%u_tx_dropped_buf_size_mismatch", i);
+		ethtool_sprintf(&data, "ep%u_tx_dropped_vlanid_mismatch", i);
 	}
 }
 
@@ -166,11 +133,11 @@ static void fjes_get_drvinfo(struct net_device *netdev,
 
 	plat_dev = adapter->plat_dev;
 
-	strlcpy(drvinfo->driver, fjes_driver_name, sizeof(drvinfo->driver));
-	strlcpy(drvinfo->version, fjes_driver_version,
+	strscpy(drvinfo->driver, fjes_driver_name, sizeof(drvinfo->driver));
+	strscpy(drvinfo->version, fjes_driver_version,
 		sizeof(drvinfo->version));
 
-	strlcpy(drvinfo->fw_version, "none", sizeof(drvinfo->fw_version));
+	strscpy(drvinfo->fw_version, "none", sizeof(drvinfo->fw_version));
 	snprintf(drvinfo->bus_info, sizeof(drvinfo->bus_info),
 		 "platform:%s", plat_dev->name);
 }

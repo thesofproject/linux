@@ -1,18 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017 Icenowy Zheng <icenowy@aosc.io>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk-provider.h>
-#include <linux/of_address.h>
+#include <linux/io.h>
+#include <linux/module.h>
+#include <linux/platform_device.h>
+#include <linux/regmap.h>
 
 #include "ccu_common.h"
 #include "ccu_reset.h"
@@ -51,31 +46,43 @@ static struct ccu_nkmp pll_cpu_clk = {
  * the base (2x, 4x and 8x), and one variable divider (the one true
  * pll audio).
  *
- * We don't have any need for the variable divider for now, so we just
- * hardcode it to match with the clock names
+ * With sigma-delta modulation for fractional-N on the audio PLL,
+ * we have to use specific dividers. This means the variable divider
+ * can no longer be used, as the audio codec requests the exact clock
+ * rates we support through this mechanism. So we now hard code the
+ * variable divider to 1. This means the clock rates will no longer
+ * match the clock names.
  */
 #define SUN8I_R40_PLL_AUDIO_REG	0x008
 
-static SUNXI_CCU_NM_WITH_GATE_LOCK(pll_audio_base_clk, "pll-audio-base",
-				   "osc24M", 0x008,
-				   8, 7,	/* N */
-				   0, 5,	/* M */
-				   BIT(31),	/* gate */
-				   BIT(28),	/* lock */
-				   CLK_SET_RATE_UNGATE);
+static struct ccu_sdm_setting pll_audio_sdm_table[] = {
+	{ .rate = 22579200, .pattern = 0xc0010d84, .m = 8, .n = 7 },
+	{ .rate = 24576000, .pattern = 0xc000ac02, .m = 14, .n = 14 },
+};
 
-/* TODO: The result of N/M is required to be in [8, 25] range. */
-static SUNXI_CCU_NM_WITH_FRAC_GATE_LOCK(pll_video0_clk, "pll-video0",
-					"osc24M", 0x0010,
-					8, 7,		/* N */
-					0, 4,		/* M */
-					BIT(24),	/* frac enable */
-					BIT(25),	/* frac select */
-					270000000,	/* frac rate 0 */
-					297000000,	/* frac rate 1 */
-					BIT(31),	/* gate */
-					BIT(28),	/* lock */
-					CLK_SET_RATE_UNGATE);
+static SUNXI_CCU_NM_WITH_SDM_GATE_LOCK(pll_audio_base_clk, "pll-audio-base",
+				       "osc24M", 0x008,
+				       8, 7,	/* N */
+				       0, 5,	/* M */
+				       pll_audio_sdm_table, BIT(24),
+				       0x284, BIT(31),
+				       BIT(31),	/* gate */
+				       BIT(28),	/* lock */
+				       CLK_SET_RATE_UNGATE);
+
+static SUNXI_CCU_NM_WITH_FRAC_GATE_LOCK_MIN_MAX(pll_video0_clk, "pll-video0",
+						"osc24M", 0x0010,
+						192000000,  /* Minimum rate */
+						1008000000, /* Maximum rate */
+						8, 7,       /* N */
+						0, 4,       /* M */
+						BIT(24),    /* frac enable */
+						BIT(25),    /* frac select */
+						270000000,  /* frac rate 0 */
+						297000000,  /* frac rate 1 */
+						BIT(31),    /* gate */
+						BIT(28),    /* lock */
+						CLK_SET_RATE_UNGATE);
 
 /* TODO: The result of N/M is required to be in [8, 25] range. */
 static SUNXI_CCU_NM_WITH_FRAC_GATE_LOCK(pll_ve_clk, "pll-ve",
@@ -150,18 +157,19 @@ static struct ccu_nk pll_periph1_clk = {
 	},
 };
 
-/* TODO: The result of N/M is required to be in [8, 25] range. */
-static SUNXI_CCU_NM_WITH_FRAC_GATE_LOCK(pll_video1_clk, "pll-video1",
-					"osc24M", 0x030,
-					8, 7,		/* N */
-					0, 4,		/* M */
-					BIT(24),	/* frac enable */
-					BIT(25),	/* frac select */
-					270000000,	/* frac rate 0 */
-					297000000,	/* frac rate 1 */
-					BIT(31),	/* gate */
-					BIT(28),	/* lock */
-					CLK_SET_RATE_UNGATE);
+static SUNXI_CCU_NM_WITH_FRAC_GATE_LOCK_MIN_MAX(pll_video1_clk, "pll-video1",
+						"osc24M", 0x030,
+						192000000,  /* Minimum rate */
+						1008000000, /* Maximum rate */
+						8, 7,       /* N */
+						0, 4,       /* M */
+						BIT(24),    /* frac enable */
+						BIT(25),    /* frac select */
+						270000000,  /* frac rate 0 */
+						297000000,  /* frac rate 1 */
+						BIT(31),    /* gate */
+						BIT(28),    /* lock */
+						CLK_SET_RATE_UNGATE);
 
 static struct ccu_nkm pll_sata_clk = {
 	.enable		= BIT(31),
@@ -431,7 +439,7 @@ static SUNXI_CCU_GATE(bus_i2c2_clk,	"bus-i2c2",	"apb2",
 static SUNXI_CCU_GATE(bus_i2c3_clk,	"bus-i2c3",	"apb2",
 		      0x06c, BIT(3), 0);
 /*
- * In datasheet here's "Reserved", however the gate exists in BSP soucre
+ * In datasheet here's "Reserved", however the gate exists in BSP source
  * code.
  */
 static SUNXI_CCU_GATE(bus_can_clk,	"bus-can",	"apb2",
@@ -653,7 +661,8 @@ static SUNXI_CCU_GATE(dram_deinterlace_clk,	"dram-deinterlace",	"dram",
 
 static const char * const de_parents[] = { "pll-periph0-2x", "pll-de" };
 static SUNXI_CCU_M_WITH_MUX_GATE(de_clk, "de", de_parents,
-				 0x104, 0, 4, 24, 3, BIT(31), 0);
+				 0x104, 0, 4, 24, 3, BIT(31),
+				 CLK_SET_RATE_PARENT);
 static SUNXI_CCU_M_WITH_MUX_GATE(mp_clk, "mp", de_parents,
 				 0x108, 0, 4, 24, 3, BIT(31), 0);
 
@@ -665,9 +674,11 @@ static SUNXI_CCU_MUX_WITH_GATE(tcon_lcd0_clk, "tcon-lcd0", tcon_parents,
 static SUNXI_CCU_MUX_WITH_GATE(tcon_lcd1_clk, "tcon-lcd1", tcon_parents,
 			       0x114, 24, 3, BIT(31), CLK_SET_RATE_PARENT);
 static SUNXI_CCU_M_WITH_MUX_GATE(tcon_tv0_clk, "tcon-tv0", tcon_parents,
-				 0x118, 0, 4, 24, 3, BIT(31), 0);
+				 0x118, 0, 4, 24, 3, BIT(31),
+				 CLK_SET_RATE_PARENT);
 static SUNXI_CCU_M_WITH_MUX_GATE(tcon_tv1_clk, "tcon-tv1", tcon_parents,
-				 0x11c, 0, 4, 24, 3, BIT(31), 0);
+				 0x11c, 0, 4, 24, 3, BIT(31),
+				 CLK_SET_RATE_PARENT);
 
 static const char * const deinterlace_parents[] = { "pll-periph0",
 						    "pll-periph1" };
@@ -697,7 +708,8 @@ static SUNXI_CCU_GATE(avs_clk,		"avs",		"osc24M",
 
 static const char * const hdmi_parents[] = { "pll-video0", "pll-video1" };
 static SUNXI_CCU_M_WITH_MUX_GATE(hdmi_clk, "hdmi", hdmi_parents,
-				 0x150, 0, 4, 24, 2, BIT(31), 0);
+				 0x150, 0, 4, 24, 2, BIT(31),
+				 CLK_SET_RATE_PARENT);
 
 static SUNXI_CCU_GATE(hdmi_slow_clk,	"hdmi-slow",	"osc24M",
 		      0x154, BIT(31), 0);
@@ -761,7 +773,8 @@ static struct ccu_mp outa_clk = {
 		.reg		= 0x1f0,
 		.features	= CCU_FEATURE_FIXED_PREDIV,
 		.hw.init	= CLK_HW_INIT_PARENTS("outa", out_parents,
-						      &ccu_mp_ops, 0),
+						      &ccu_mp_ops,
+						      CLK_SET_RATE_PARENT),
 	}
 };
 
@@ -779,7 +792,8 @@ static struct ccu_mp outb_clk = {
 		.reg		= 0x1f4,
 		.features	= CCU_FEATURE_FIXED_PREDIV,
 		.hw.init	= CLK_HW_INIT_PARENTS("outb", out_parents,
-						      &ccu_mp_ops, 0),
+						      &ccu_mp_ops,
+						      CLK_SET_RATE_PARENT),
 	}
 };
 
@@ -944,25 +958,37 @@ static struct ccu_common *sun8i_r40_ccu_clks[] = {
 };
 
 /* Fixed Factor clocks */
-static CLK_FIXED_FACTOR(osc12M_clk, "osc12M", "osc24M", 2, 1, 0);
+static CLK_FIXED_FACTOR_FW_NAME(osc12M_clk, "osc12M", "hosc", 2, 1, 0);
 
-/* We hardcode the divider to 4 for now */
-static CLK_FIXED_FACTOR(pll_audio_clk, "pll-audio",
-			"pll-audio-base", 4, 1, CLK_SET_RATE_PARENT);
-static CLK_FIXED_FACTOR(pll_audio_2x_clk, "pll-audio-2x",
-			"pll-audio-base", 2, 1, CLK_SET_RATE_PARENT);
-static CLK_FIXED_FACTOR(pll_audio_4x_clk, "pll-audio-4x",
-			"pll-audio-base", 1, 1, CLK_SET_RATE_PARENT);
-static CLK_FIXED_FACTOR(pll_audio_8x_clk, "pll-audio-8x",
-			"pll-audio-base", 1, 2, CLK_SET_RATE_PARENT);
-static CLK_FIXED_FACTOR(pll_periph0_2x_clk, "pll-periph0-2x",
-			"pll-periph0", 1, 2, 0);
-static CLK_FIXED_FACTOR(pll_periph1_2x_clk, "pll-periph1-2x",
-			"pll-periph1", 1, 2, 0);
-static CLK_FIXED_FACTOR(pll_video0_2x_clk, "pll-video0-2x",
-			"pll-video0", 1, 2, 0);
-static CLK_FIXED_FACTOR(pll_video1_2x_clk, "pll-video1-2x",
-			"pll-video1", 1, 2, 0);
+static const struct clk_hw *clk_parent_pll_audio[] = {
+	&pll_audio_base_clk.common.hw
+};
+
+/* We hardcode the divider to 1 for now */
+static CLK_FIXED_FACTOR_HWS(pll_audio_clk, "pll-audio",
+			    clk_parent_pll_audio,
+			    1, 1, CLK_SET_RATE_PARENT);
+static CLK_FIXED_FACTOR_HWS(pll_audio_2x_clk, "pll-audio-2x",
+			    clk_parent_pll_audio,
+			    2, 1, CLK_SET_RATE_PARENT);
+static CLK_FIXED_FACTOR_HWS(pll_audio_4x_clk, "pll-audio-4x",
+			    clk_parent_pll_audio,
+			    1, 1, CLK_SET_RATE_PARENT);
+static CLK_FIXED_FACTOR_HWS(pll_audio_8x_clk, "pll-audio-8x",
+			    clk_parent_pll_audio,
+			    1, 2, CLK_SET_RATE_PARENT);
+static CLK_FIXED_FACTOR_HW(pll_periph0_2x_clk, "pll-periph0-2x",
+			   &pll_periph0_clk.common.hw,
+			   1, 2, 0);
+static CLK_FIXED_FACTOR_HW(pll_periph1_2x_clk, "pll-periph1-2x",
+			   &pll_periph1_clk.common.hw,
+			   1, 2, 0);
+static CLK_FIXED_FACTOR_HW(pll_video0_2x_clk, "pll-video0-2x",
+			   &pll_video0_clk.common.hw,
+			   1, 2, 0);
+static CLK_FIXED_FACTOR_HW(pll_video1_2x_clk, "pll-video1-2x",
+			   &pll_video1_clk.common.hw,
+			   1, 2, 0);
 
 static struct clk_hw_onecell_data sun8i_r40_hw_clks = {
 	.hws	= {
@@ -1136,7 +1162,7 @@ static struct clk_hw_onecell_data sun8i_r40_hw_clks = {
 	.num	= CLK_NUMBER,
 };
 
-static struct ccu_reset_map sun8i_r40_ccu_resets[] = {
+static const struct ccu_reset_map sun8i_r40_ccu_resets[] = {
 	[RST_USB_PHY0]		=  { 0x0cc, BIT(0) },
 	[RST_USB_PHY1]		=  { 0x0cc, BIT(1) },
 	[RST_USB_PHY2]		=  { 0x0cc, BIT(2) },
@@ -1250,22 +1276,51 @@ static struct ccu_mux_nb sun8i_r40_cpu_nb = {
 	.bypass_index	= 1, /* index of 24 MHz oscillator */
 };
 
-static void __init sun8i_r40_ccu_setup(struct device_node *node)
+/*
+ * Add a regmap for the GMAC driver (dwmac-sun8i) to access the
+ * GMAC configuration register.
+ * Only this register is allowed to be written, in order to
+ * prevent overriding critical clock configuration.
+ */
+
+#define SUN8I_R40_GMAC_CFG_REG 0x164
+static bool sun8i_r40_ccu_regmap_accessible_reg(struct device *dev,
+						unsigned int reg)
 {
+	if (reg == SUN8I_R40_GMAC_CFG_REG)
+		return true;
+	return false;
+}
+
+static const struct regmap_config sun8i_r40_ccu_regmap_config = {
+	.reg_bits	= 32,
+	.val_bits	= 32,
+	.reg_stride	= 4,
+	.max_register	= 0x320, /* PLL_LOCK_CTRL_REG */
+
+	/* other devices have no business accessing other registers */
+	.readable_reg	= sun8i_r40_ccu_regmap_accessible_reg,
+	.writeable_reg	= sun8i_r40_ccu_regmap_accessible_reg,
+};
+
+#define SUN8I_R40_SYS_32K_CLK_REG 0x310
+#define SUN8I_R40_SYS_32K_CLK_KEY (0x16AA << 16)
+
+static int sun8i_r40_ccu_probe(struct platform_device *pdev)
+{
+	struct regmap *regmap;
 	void __iomem *reg;
 	u32 val;
+	int ret;
 
-	reg = of_io_request_and_map(node, 0, of_node_full_name(node));
-	if (IS_ERR(reg)) {
-		pr_err("%s: Could not map the clock registers\n",
-		       of_node_full_name(node));
-		return;
-	}
+	reg = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(reg))
+		return PTR_ERR(reg);
 
-	/* Force the PLL-Audio-1x divider to 4 */
+	/* Force the PLL-Audio-1x divider to 1 */
 	val = readl(reg + SUN8I_R40_PLL_AUDIO_REG);
 	val &= ~GENMASK(19, 16);
-	writel(val | (3 << 16), reg + SUN8I_R40_PLL_AUDIO_REG);
+	writel(val | (0 << 16), reg + SUN8I_R40_PLL_AUDIO_REG);
 
 	/* Force PLL-MIPI to MIPI mode */
 	val = readl(reg + SUN8I_R40_PLL_MIPI_REG);
@@ -1277,7 +1332,22 @@ static void __init sun8i_r40_ccu_setup(struct device_node *node)
 	val &= ~GENMASK(25, 20);
 	writel(val, reg + SUN8I_R40_USB_CLK_REG);
 
-	sunxi_ccu_probe(node, reg, &sun8i_r40_ccu_desc);
+	/*
+	 * Force SYS 32k (otherwise known as LOSC throughout the CCU)
+	 * clock parent to LOSC output from RTC module instead of the
+	 * CCU's internal RC oscillator divided output.
+	 */
+	writel(SUN8I_R40_SYS_32K_CLK_KEY | BIT(8),
+	       reg + SUN8I_R40_SYS_32K_CLK_REG);
+
+	regmap = devm_regmap_init_mmio(&pdev->dev, reg,
+				       &sun8i_r40_ccu_regmap_config);
+	if (IS_ERR(regmap))
+		return PTR_ERR(regmap);
+
+	ret = devm_sunxi_ccu_probe(&pdev->dev, reg, &sun8i_r40_ccu_desc);
+	if (ret)
+		return ret;
 
 	/* Gate then ungate PLL CPU after any rate changes */
 	ccu_pll_notifier_register(&sun8i_r40_pll_cpu_nb);
@@ -1285,6 +1355,26 @@ static void __init sun8i_r40_ccu_setup(struct device_node *node)
 	/* Reparent CPU during PLL CPU rate changes */
 	ccu_mux_notifier_register(pll_cpu_clk.common.hw.clk,
 				  &sun8i_r40_cpu_nb);
+
+	return 0;
 }
-CLK_OF_DECLARE(sun8i_r40_ccu, "allwinner,sun8i-r40-ccu",
-	       sun8i_r40_ccu_setup);
+
+static const struct of_device_id sun8i_r40_ccu_ids[] = {
+	{ .compatible = "allwinner,sun8i-r40-ccu" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, sun8i_r40_ccu_ids);
+
+static struct platform_driver sun8i_r40_ccu_driver = {
+	.probe	= sun8i_r40_ccu_probe,
+	.driver	= {
+		.name	= "sun8i-r40-ccu",
+		.suppress_bind_attrs = true,
+		.of_match_table	= sun8i_r40_ccu_ids,
+	},
+};
+module_platform_driver(sun8i_r40_ccu_driver);
+
+MODULE_IMPORT_NS("SUNXI_CCU");
+MODULE_DESCRIPTION("Support for the Allwinner R40 CCU");
+MODULE_LICENSE("GPL");

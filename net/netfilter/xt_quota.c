@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * netfilter module to enforce network quotas
  *
@@ -49,7 +50,7 @@ static int quota_mt_check(const struct xt_mtchk_param *par)
 	if (q->flags & ~XT_QUOTA_MASK)
 		return -EINVAL;
 
-	q->master = kmalloc(sizeof(*q->master), GFP_KERNEL);
+	q->master = kmalloc_obj(*q->master);
 	if (q->master == NULL)
 		return -ENOMEM;
 

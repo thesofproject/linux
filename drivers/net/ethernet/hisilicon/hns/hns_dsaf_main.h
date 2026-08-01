@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (c) 2014-2015 Hisilicon Limited.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __HNS_DSAF_MAIN_H
@@ -44,28 +40,7 @@ struct hns_mac_cb;
 #define DSAF_ROCE_CREDIT_CHN	8
 #define DSAF_ROCE_CHAN_MODE	3
 
-enum dsaf_roce_port_mode {
-	DSAF_ROCE_6PORT_MODE,
-	DSAF_ROCE_4PORT_MODE,
-	DSAF_ROCE_2PORT_MODE,
-	DSAF_ROCE_CHAN_MODE_NUM,
-};
-
-enum dsaf_roce_port_num {
-	DSAF_ROCE_PORT_0,
-	DSAF_ROCE_PORT_1,
-	DSAF_ROCE_PORT_2,
-	DSAF_ROCE_PORT_3,
-	DSAF_ROCE_PORT_4,
-	DSAF_ROCE_PORT_5,
-};
-
-enum dsaf_roce_qos_sl {
-	DSAF_ROCE_SL_0,
-	DSAF_ROCE_SL_1,
-	DSAF_ROCE_SL_2,
-	DSAF_ROCE_SL_3,
-};
+#define HNS_MAX_WAIT_CNT 10000
 
 #define DSAF_STATS_READ(p, offset) (*((u64 *)((u8 *)(p) + (offset))))
 #define HNS_DSAF_IS_DEBUG(dev) ((dev)->dsaf_mode == DSAF_MODE_DISABLE_SP)
@@ -212,7 +187,7 @@ struct hnae_vf_cb {
 	u8 port_index;
 	struct hns_mac_cb *mac_cb;
 	struct dsaf_device *dsaf_dev;
-	struct hnae_handle  ae_handle; /* must be the last number */
+	struct hnae_handle  ae_handle; /* must be the last member */
 };
 
 struct dsaf_int_xge_src {
@@ -309,9 +284,6 @@ struct dsaf_misc_op {
 	void (*ge_srst)(struct dsaf_device *dsaf_dev, u32 port, bool dereset);
 	void (*ppe_srst)(struct dsaf_device *dsaf_dev, u32 port, bool dereset);
 	void (*ppe_comm_srst)(struct dsaf_device *dsaf_dev, bool dereset);
-	void (*hns_dsaf_srst_chns)(struct dsaf_device *dsaf_dev, u32 msk,
-				   bool dereset);
-	void (*hns_dsaf_roce_srst)(struct dsaf_device *dsaf_dev, bool dereset);
 
 	phy_interface_t (*get_phy_if)(struct hns_mac_cb *mac_cb);
 	int (*get_sfp_prsnt)(struct hns_mac_cb *mac_cb, int *sfp_prsnt);
@@ -444,7 +416,7 @@ void hns_dsaf_update_stats(struct dsaf_device *dsaf_dev, u32 inode_num);
 
 int hns_dsaf_get_sset_count(struct dsaf_device *dsaf_dev, int stringset);
 void hns_dsaf_get_stats(struct dsaf_device *ddev, u64 *data, int port);
-void hns_dsaf_get_strings(int stringset, u8 *data, int port,
+void hns_dsaf_get_strings(int stringset, u8 **data, int port,
 			  struct dsaf_device *dsaf_dev);
 
 void hns_dsaf_get_regs(struct dsaf_device *ddev, u32 port, void *data);
@@ -463,5 +435,6 @@ int hns_dsaf_rm_mac_addr(
 
 int hns_dsaf_clr_mac_mc_port(struct dsaf_device *dsaf_dev,
 			     u8 mac_id, u8 port_num);
+int hns_dsaf_wait_pkt_clean(struct dsaf_device *dsaf_dev, int port);
 
 #endif /* __HNS_DSAF_MAIN_H__ */

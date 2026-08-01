@@ -46,8 +46,8 @@ struct egpio_info {
 	uint              chained_irq;
 
 	/* egpio info */
-	struct egpio_chip *chip;
 	int               nchips;
+	struct egpio_chip chip[] __counted_by(nchips);
 };
 
 static inline void egpio_writew(u16 value, struct egpio_info *ei, int reg)
@@ -118,20 +118,6 @@ static void egpio_handler(struct irq_desc *desc)
 	}
 }
 
-int htc_egpio_get_wakeup_irq(struct device *dev)
-{
-	struct egpio_info *ei = dev_get_drvdata(dev);
-
-	/* Read current pins. */
-	u16 readval = egpio_readw(ei, ei->ack_register);
-	/* Ack/unmask interrupts. */
-	ack_irqs(ei);
-	/* Return first set pin. */
-	readval &= ei->irqs_enabled;
-	return ei->irq_start + ffs(readval) - 1;
-}
-EXPORT_SYMBOL(htc_egpio_get_wakeup_irq);
-
 static inline int egpio_pos(struct egpio_info *ei, int bit)
 {
 	return bit >> ei->reg_shift;
@@ -184,12 +170,11 @@ static int egpio_direction_input(struct gpio_chip *chip, unsigned offset)
  * Output pins
  */
 
-static void egpio_set(struct gpio_chip *chip, unsigned offset, int value)
+static int egpio_set(struct gpio_chip *chip, unsigned int offset, int value)
 {
 	unsigned long     flag;
 	struct egpio_chip *egpio;
 	struct egpio_info *ei;
-	unsigned          bit;
 	int               pos;
 	int               reg;
 	int               shift;
@@ -199,7 +184,6 @@ static void egpio_set(struct gpio_chip *chip, unsigned offset, int value)
 
 	egpio = gpiochip_get_data(chip);
 	ei    = dev_get_drvdata(egpio->dev);
-	bit   = egpio_bit(ei, offset);
 	pos   = egpio_pos(ei, offset);
 	reg   = egpio->reg_start + pos;
 	shift = pos << ei->reg_shift;
@@ -214,6 +198,8 @@ static void egpio_set(struct gpio_chip *chip, unsigned offset, int value)
 		egpio->cached_values &= ~(1 << offset);
 	egpio_writew((egpio->cached_values >> shift) & ei->reg_mask, ei, reg);
 	spin_unlock_irqrestore(&ei->lock, flag);
+
+	return 0;
 }
 
 static int egpio_direction_output(struct gpio_chip *chip,
@@ -222,12 +208,10 @@ static int egpio_direction_output(struct gpio_chip *chip,
 	struct egpio_chip *egpio;
 
 	egpio = gpiochip_get_data(chip);
-	if (test_bit(offset, &egpio->is_out)) {
-		egpio_set(chip, offset, value);
-		return 0;
-	} else {
-		return -EINVAL;
-	}
+	if (test_bit(offset, &egpio->is_out))
+		return egpio_set(chip, offset, value);
+
+	return -EINVAL;
 }
 
 static int egpio_get_direction(struct gpio_chip *chip, unsigned offset)
@@ -236,7 +220,10 @@ static int egpio_get_direction(struct gpio_chip *chip, unsigned offset)
 
 	egpio = gpiochip_get_data(chip);
 
-	return !test_bit(offset, &egpio->is_out);
+	if (test_bit(offset, &egpio->is_out))
+		return GPIO_LINE_DIRECTION_OUT;
+
+	return GPIO_LINE_DIRECTION_IN;
 }
 
 static void egpio_write_cache(struct egpio_info *ei)
@@ -284,35 +271,33 @@ static int __init egpio_probe(struct platform_device *pdev)
 	int               ret;
 
 	/* Initialize ei data structure. */
-	ei = devm_kzalloc(&pdev->dev, sizeof(*ei), GFP_KERNEL);
+	ei = devm_kzalloc(&pdev->dev, struct_size(ei, chip, pdata->num_chips), GFP_KERNEL);
 	if (!ei)
 		return -ENOMEM;
+
+	ei->nchips = pdata->num_chips;
 
 	spin_lock_init(&ei->lock);
 
 	/* Find chained irq */
-	ret = -EINVAL;
 	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (res)
 		ei->chained_irq = res->start;
 
 	/* Map egpio chip into virtual address space. */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res)
-		goto fail;
-	ei->base_addr = devm_ioremap_nocache(&pdev->dev, res->start,
-					     resource_size(res));
-	if (!ei->base_addr)
-		goto fail;
-	pr_debug("EGPIO phys=%08x virt=%p\n", (u32)res->start, ei->base_addr);
+	ei->base_addr = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(ei->base_addr))
+		return PTR_ERR(ei->base_addr);
 
 	if ((pdata->bus_width != 16) && (pdata->bus_width != 32))
-		goto fail;
+		return -EINVAL;
+
 	ei->bus_shift = fls(pdata->bus_width - 1) - 3;
 	pr_debug("bus_shift = %d\n", ei->bus_shift);
 
 	if ((pdata->reg_width != 8) && (pdata->reg_width != 16))
-		goto fail;
+		return -EINVAL;
+
 	ei->reg_shift = fls(pdata->reg_width - 1);
 	pr_debug("reg_shift = %d\n", ei->reg_shift);
 
@@ -320,21 +305,18 @@ static int __init egpio_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, ei);
 
-	ei->nchips = pdata->num_chips;
-	ei->chip = devm_kzalloc(&pdev->dev,
-				sizeof(struct egpio_chip) * ei->nchips,
-				GFP_KERNEL);
-	if (!ei->chip) {
-		ret = -ENOMEM;
-		goto fail;
-	}
 	for (i = 0; i < ei->nchips; i++) {
 		ei->chip[i].reg_start = pdata->chip[i].reg_start;
 		ei->chip[i].cached_values = pdata->chip[i].initial_values;
 		ei->chip[i].is_out = pdata->chip[i].direction;
 		ei->chip[i].dev = &(pdev->dev);
 		chip = &(ei->chip[i].chip);
-		chip->label           = "htc-egpio";
+		chip->label = devm_kasprintf(&pdev->dev, GFP_KERNEL,
+					     "htc-egpio-%d",
+					     i);
+		if (!chip->label)
+			return -ENOMEM;
+
 		chip->parent          = &pdev->dev;
 		chip->owner           = THIS_MODULE;
 		chip->get             = egpio_get;
@@ -345,7 +327,10 @@ static int __init egpio_probe(struct platform_device *pdev)
 		chip->base            = pdata->chip[i].gpio_base;
 		chip->ngpio           = pdata->chip[i].num_gpios;
 
-		gpiochip_add_data(chip, &ei->chip[i]);
+		ret = devm_gpiochip_add_data(&pdev->dev, chip, &ei->chip[i]);
+		if (ret)
+			return dev_err_probe(&pdev->dev, ret,
+					     "failed to register gpiochip %d\n", i);
 	}
 
 	/* Set initial pin values */
@@ -376,27 +361,22 @@ static int __init egpio_probe(struct platform_device *pdev)
 	}
 
 	return 0;
-
-fail:
-	printk(KERN_ERR "EGPIO failed to setup\n");
-	return ret;
 }
 
-#ifdef CONFIG_PM
-static int egpio_suspend(struct platform_device *pdev, pm_message_t state)
+static int egpio_suspend(struct device *dev)
 {
-	struct egpio_info *ei = platform_get_drvdata(pdev);
+	struct egpio_info *ei = dev_get_drvdata(dev);
 
-	if (ei->chained_irq && device_may_wakeup(&pdev->dev))
+	if (ei->chained_irq && device_may_wakeup(dev))
 		enable_irq_wake(ei->chained_irq);
 	return 0;
 }
 
-static int egpio_resume(struct platform_device *pdev)
+static int egpio_resume(struct device *dev)
 {
-	struct egpio_info *ei = platform_get_drvdata(pdev);
+	struct egpio_info *ei = dev_get_drvdata(dev);
 
-	if (ei->chained_irq && device_may_wakeup(&pdev->dev))
+	if (ei->chained_irq && device_may_wakeup(dev))
 		disable_irq_wake(ei->chained_irq);
 
 	/* Update registers from the cache, in case
@@ -404,19 +384,15 @@ static int egpio_resume(struct platform_device *pdev)
 	egpio_write_cache(ei);
 	return 0;
 }
-#else
-#define egpio_suspend NULL
-#define egpio_resume NULL
-#endif
 
+static DEFINE_SIMPLE_DEV_PM_OPS(egpio_pm_ops, egpio_suspend, egpio_resume);
 
 static struct platform_driver egpio_driver = {
 	.driver = {
 		.name = "htc-egpio",
 		.suppress_bind_attrs = true,
+		.pm = pm_sleep_ptr(&egpio_pm_ops),
 	},
-	.suspend      = egpio_suspend,
-	.resume       = egpio_resume,
 };
 
 static int __init egpio_init(void)

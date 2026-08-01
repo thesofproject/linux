@@ -1,25 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Freescale SCFG MSI(-X) support
  *
  * Copyright (C) 2016 Freescale Semiconductor.
  *
  * Author: Minghuan Lian <Minghuan.Lian@nxp.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/msi.h>
 #include <linux/interrupt.h>
+#include <linux/iommu.h>
 #include <linux/irq.h>
 #include <linux/irqchip/chained_irq.h>
+#include <linux/irqchip/irq-msi-lib.h>
 #include <linux/irqdomain.h>
 #include <linux/of_irq.h>
 #include <linux/of_pci.h>
-#include <linux/of_platform.h>
+#include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/spinlock.h>
 
 #define MSI_IRQS_PER_MSIR	32
@@ -48,7 +48,6 @@ struct ls_scfg_msi {
 	spinlock_t		lock;
 	struct platform_device	*pdev;
 	struct irq_domain	*parent;
-	struct irq_domain	*msi_domain;
 	void __iomem		*regs;
 	phys_addr_t		msiir_addr;
 	struct ls_scfg_msi_cfg	*cfg;
@@ -58,17 +57,18 @@ struct ls_scfg_msi {
 	unsigned long		*used;
 };
 
-static struct irq_chip ls_scfg_msi_irq_chip = {
-	.name = "MSI",
-	.irq_mask	= pci_msi_mask_irq,
-	.irq_unmask	= pci_msi_unmask_irq,
-};
+#define MPIC_MSI_FLAGS_REQUIRED (MSI_FLAG_USE_DEF_DOM_OPS | \
+				 MSI_FLAG_USE_DEF_CHIP_OPS)
+#define MPIC_MSI_FLAGS_SUPPORTED (MSI_FLAG_PCI_MSIX       | \
+				  MSI_GENERIC_FLAGS_MASK)
 
-static struct msi_domain_info ls_scfg_msi_domain_info = {
-	.flags	= (MSI_FLAG_USE_DEF_DOM_OPS |
-		   MSI_FLAG_USE_DEF_CHIP_OPS |
-		   MSI_FLAG_PCI_MSIX),
-	.chip	= &ls_scfg_msi_irq_chip,
+static const struct msi_parent_ops ls_scfg_msi_parent_ops = {
+	.required_flags		= MPIC_MSI_FLAGS_REQUIRED,
+	.supported_flags	= MPIC_MSI_FLAGS_SUPPORTED,
+	.bus_select_token	= DOMAIN_BUS_NEXUS,
+	.bus_select_mask	= MATCH_PCI_MSI,
+	.prefix			= "MSI-",
+	.init_dev_msi_info	= msi_lib_init_dev_msi_info,
 };
 
 static int msi_affinity_flag = 1;
@@ -88,12 +88,17 @@ static void ls_scfg_msi_compose_msg(struct irq_data *data, struct msi_msg *msg)
 {
 	struct ls_scfg_msi *msi_data = irq_data_get_irq_chip_data(data);
 
-	msg->address_hi = upper_32_bits(msi_data->msiir_addr);
-	msg->address_lo = lower_32_bits(msi_data->msiir_addr);
 	msg->data = data->hwirq;
 
-	if (msi_affinity_flag)
-		msg->data |= cpumask_first(data->common->affinity);
+	if (msi_affinity_flag) {
+		const struct cpumask *mask;
+
+		mask = irq_data_get_effective_affinity_mask(data);
+		msg->data |= cpumask_first(mask);
+	}
+
+	msi_msg_set_addr(irq_data_get_msi_desc(data), msg,
+			 msi_data->msiir_addr);
 }
 
 static int ls_scfg_msi_set_affinity(struct irq_data *irq_data,
@@ -118,7 +123,7 @@ static int ls_scfg_msi_set_affinity(struct irq_data *irq_data,
 		return -EINVAL;
 	}
 
-	cpumask_copy(irq_data->common->affinity, mask);
+	irq_data_update_effective_affinity(irq_data, cpumask_of(cpu));
 
 	return IRQ_SET_MASK_OK;
 }
@@ -134,6 +139,7 @@ static int ls_scfg_msi_domain_irq_alloc(struct irq_domain *domain,
 					unsigned int nr_irqs,
 					void *args)
 {
+	msi_alloc_info_t *info = args;
 	struct ls_scfg_msi *msi_data = domain->host_data;
 	int pos, err = 0;
 
@@ -147,6 +153,10 @@ static int ls_scfg_msi_domain_irq_alloc(struct irq_domain *domain,
 		err = -ENOSPC;
 	spin_unlock(&msi_data->lock);
 
+	if (err)
+		return err;
+
+	err = iommu_dma_prepare_msi(info->desc, msi_data->msiir_addr);
 	if (err)
 		return err;
 
@@ -176,6 +186,7 @@ static void ls_scfg_msi_domain_irq_free(struct irq_domain *domain,
 }
 
 static const struct irq_domain_ops ls_scfg_msi_domain_ops = {
+	.select	= msi_lib_irq_domain_select,
 	.alloc	= ls_scfg_msi_domain_irq_alloc,
 	.free	= ls_scfg_msi_domain_irq_free,
 };
@@ -185,7 +196,7 @@ static void ls_scfg_msi_irq_handler(struct irq_desc *desc)
 	struct ls_scfg_msir *msir = irq_desc_get_handler_data(desc);
 	struct ls_scfg_msi *msi_data = msir->msi_data;
 	unsigned long val;
-	int pos, size, virq, hwirq;
+	int pos, size, hwirq;
 
 	chained_irq_enter(irq_desc_get_chip(desc), desc);
 
@@ -197,9 +208,7 @@ static void ls_scfg_msi_irq_handler(struct irq_desc *desc)
 	for_each_set_bit_from(pos, &val, size) {
 		hwirq = ((msir->bit_end - pos) << msi_data->cfg->ibs_shift) |
 			msir->srs;
-		virq = irq_find_mapping(msi_data->parent, hwirq);
-		if (virq)
-			generic_handle_irq(virq);
+		generic_handle_domain_irq(msi_data->parent, hwirq);
 	}
 
 	chained_irq_exit(irq_desc_get_chip(desc), desc);
@@ -207,23 +216,16 @@ static void ls_scfg_msi_irq_handler(struct irq_desc *desc)
 
 static int ls_scfg_msi_domains_init(struct ls_scfg_msi *msi_data)
 {
-	/* Initialize MSI domain parent */
-	msi_data->parent = irq_domain_add_linear(NULL,
-						 msi_data->irqs_num,
-						 &ls_scfg_msi_domain_ops,
-						 msi_data);
-	if (!msi_data->parent) {
-		dev_err(&msi_data->pdev->dev, "failed to create IRQ domain\n");
-		return -ENOMEM;
-	}
+	struct irq_domain_info info = {
+		.fwnode		= of_fwnode_handle(msi_data->pdev->dev.of_node),
+		.ops		= &ls_scfg_msi_domain_ops,
+		.host_data	= msi_data,
+		.size		= msi_data->irqs_num,
+	};
 
-	msi_data->msi_domain = pci_msi_create_irq_domain(
-				of_node_to_fwnode(msi_data->pdev->dev.of_node),
-				&ls_scfg_msi_domain_info,
-				msi_data->parent);
-	if (!msi_data->msi_domain) {
+	msi_data->parent = msi_create_parent_irq_domain(&info, &ls_scfg_msi_parent_ops);
+	if (!msi_data->parent) {
 		dev_err(&msi_data->pdev->dev, "failed to create MSI domain\n");
-		irq_domain_remove(msi_data->parent);
 		return -ENOMEM;
 	}
 
@@ -327,23 +329,19 @@ MODULE_DEVICE_TABLE(of, ls_scfg_msi_id);
 
 static int ls_scfg_msi_probe(struct platform_device *pdev)
 {
-	const struct of_device_id *match;
 	struct ls_scfg_msi *msi_data;
 	struct resource *res;
 	int i, ret;
-
-	match = of_match_device(ls_scfg_msi_id, &pdev->dev);
-	if (!match)
-		return -ENODEV;
 
 	msi_data = devm_kzalloc(&pdev->dev, sizeof(*msi_data), GFP_KERNEL);
 	if (!msi_data)
 		return -ENOMEM;
 
-	msi_data->cfg = (struct ls_scfg_msi_cfg *) match->data;
+	msi_data->cfg = (struct ls_scfg_msi_cfg *)device_get_match_data(&pdev->dev);
+	if (!msi_data->cfg)
+		return -ENODEV;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	msi_data->regs = devm_ioremap_resource(&pdev->dev, res);
+	msi_data->regs = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(msi_data->regs)) {
 		dev_err(&pdev->dev, "failed to initialize 'regs'\n");
 		return PTR_ERR(msi_data->regs);
@@ -355,10 +353,7 @@ static int ls_scfg_msi_probe(struct platform_device *pdev)
 
 	msi_data->irqs_num = MSI_IRQS_PER_MSIR *
 			     (1 << msi_data->cfg->ibs_shift);
-	msi_data->used = devm_kcalloc(&pdev->dev,
-				    BITS_TO_LONGS(msi_data->irqs_num),
-				    sizeof(*msi_data->used),
-				    GFP_KERNEL);
+	msi_data->used = devm_bitmap_zalloc(&pdev->dev, msi_data->irqs_num, GFP_KERNEL);
 	if (!msi_data->used)
 		return -ENOMEM;
 	/*
@@ -397,7 +392,7 @@ static int ls_scfg_msi_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int ls_scfg_msi_remove(struct platform_device *pdev)
+static void ls_scfg_msi_remove(struct platform_device *pdev)
 {
 	struct ls_scfg_msi *msi_data = platform_get_drvdata(pdev);
 	int i;
@@ -405,25 +400,21 @@ static int ls_scfg_msi_remove(struct platform_device *pdev)
 	for (i = 0; i < msi_data->msir_num; i++)
 		ls_scfg_msi_teardown_hwirq(&msi_data->msir[i]);
 
-	irq_domain_remove(msi_data->msi_domain);
 	irq_domain_remove(msi_data->parent);
 
 	platform_set_drvdata(pdev, NULL);
-
-	return 0;
 }
 
 static struct platform_driver ls_scfg_msi_driver = {
 	.driver = {
-		.name = "ls-scfg-msi",
-		.of_match_table = ls_scfg_msi_id,
+		.name		= "ls-scfg-msi",
+		.of_match_table	= ls_scfg_msi_id,
 	},
-	.probe = ls_scfg_msi_probe,
-	.remove = ls_scfg_msi_remove,
+	.probe		= ls_scfg_msi_probe,
+	.remove		= ls_scfg_msi_remove,
 };
 
 module_platform_driver(ls_scfg_msi_driver);
 
 MODULE_AUTHOR("Minghuan Lian <Minghuan.Lian@nxp.com>");
 MODULE_DESCRIPTION("Freescale Layerscape SCFG MSI controller driver");
-MODULE_LICENSE("GPL v2");

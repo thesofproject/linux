@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2014 Freescale Semiconductor, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/clk-provider.h>
@@ -21,7 +18,7 @@
  *	gate clock
  *
  * The imx exclusive gate clock is a subclass of basic clk_gate
- * with an addtional mask to indicate which other gate bits in the same
+ * with an additional mask to indicate which other gate bits in the same
  * register is mutually exclusive to this gate clock.
  */
 struct clk_gate_exclusive {
@@ -58,18 +55,19 @@ static const struct clk_ops clk_gate_exclusive_ops = {
 	.is_enabled = clk_gate_exclusive_is_enabled,
 };
 
-struct clk *imx_clk_gate_exclusive(const char *name, const char *parent,
+struct clk_hw *imx_clk_hw_gate_exclusive(const char *name, const char *parent,
 	 void __iomem *reg, u8 shift, u32 exclusive_mask)
 {
 	struct clk_gate_exclusive *exgate;
 	struct clk_gate *gate;
-	struct clk *clk;
+	struct clk_hw *hw;
 	struct clk_init_data init;
+	int ret;
 
 	if (exclusive_mask == 0)
 		return ERR_PTR(-EINVAL);
 
-	exgate = kzalloc(sizeof(*exgate), GFP_KERNEL);
+	exgate = kzalloc_obj(*exgate);
 	if (!exgate)
 		return ERR_PTR(-ENOMEM);
 	gate = &exgate->gate;
@@ -86,9 +84,13 @@ struct clk *imx_clk_gate_exclusive(const char *name, const char *parent,
 	gate->hw.init = &init;
 	exgate->exclusive_mask = exclusive_mask;
 
-	clk = clk_register(NULL, &gate->hw);
-	if (IS_ERR(clk))
-		kfree(exgate);
+	hw = &gate->hw;
 
-	return clk;
+	ret = clk_hw_register(NULL, hw);
+	if (ret) {
+		kfree(gate);
+		return ERR_PTR(ret);
+	}
+
+	return hw;
 }

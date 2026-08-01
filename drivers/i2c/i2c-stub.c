@@ -1,21 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     i2c-stub.c - I2C/SMBus chip emulator
 
     Copyright (c) 2004 Mark M. Hoffman <mhoffman@lightlink.com>
     Copyright (C) 2007-2014 Jean Delvare <jdelvare@suse.de>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
 */
 
-#define DEBUG 1
 #define pr_fmt(fmt) "i2c-stub: " fmt
 
 #include <linux/errno.h>
@@ -223,6 +214,11 @@ static s32 stub_xfer(struct i2c_adapter *adap, u16 addr, unsigned short flags,
 		 * We ignore banks here, because banked chips don't use I2C
 		 * block transfers
 		 */
+		if (data->block[0] == 0 ||
+		    data->block[0] > I2C_SMBUS_BLOCK_MAX) {
+			ret = -EINVAL;
+			break;
+		}
 		if (data->block[0] > 256 - command)	/* Avoid overrun */
 			data->block[0] = 256 - command;
 		len = data->block[0];
@@ -317,7 +313,7 @@ static const struct i2c_algorithm smbus_algorithm = {
 
 static struct i2c_adapter stub_adapter = {
 	.owner		= THIS_MODULE,
-	.class		= I2C_CLASS_HWMON | I2C_CLASS_SPD,
+	.class		= I2C_CLASS_HWMON,
 	.algo		= &smbus_algorithm,
 	.name		= "SMBus stub driver",
 };
@@ -338,8 +334,9 @@ static int __init i2c_stub_allocate_banks(int i)
 		chip->bank_mask >>= 1;
 	}
 
-	chip->bank_words = kzalloc(chip->bank_mask * chip->bank_size *
-				   sizeof(u16), GFP_KERNEL);
+	chip->bank_words = kcalloc(chip->bank_mask * chip->bank_size,
+				   sizeof(u16),
+				   GFP_KERNEL);
 	if (!chip->bank_words)
 		return -ENOMEM;
 
@@ -380,8 +377,7 @@ static int __init i2c_stub_init(void)
 
 	/* Allocate memory for all chips at once */
 	stub_chips_nr = i;
-	stub_chips = kcalloc(stub_chips_nr, sizeof(struct stub_chip),
-			     GFP_KERNEL);
+	stub_chips = kzalloc_objs(struct stub_chip, stub_chips_nr);
 	if (!stub_chips)
 		return -ENOMEM;
 

@@ -61,23 +61,28 @@ static bool hpd_ack(struct irq_service *irq_service,
 	return true;
 }
 
-static const struct irq_source_info_funcs hpd_irq_info_funcs = {
+static struct irq_source_info_funcs hpd_irq_info_funcs  = {
 	.set = NULL,
 	.ack = hpd_ack
 };
 
-static const struct irq_source_info_funcs hpd_rx_irq_info_funcs = {
+static struct irq_source_info_funcs hpd_rx_irq_info_funcs = {
 	.set = NULL,
 	.ack = NULL
 };
 
-static const struct irq_source_info_funcs pflip_irq_info_funcs = {
+static struct irq_source_info_funcs pflip_irq_info_funcs = {
 	.set = NULL,
 	.ack = NULL
 };
 
-static const struct irq_source_info_funcs vblank_irq_info_funcs = {
+static struct irq_source_info_funcs vblank_irq_info_funcs = {
 	.set = dce110_vblank_set,
+	.ack = NULL
+};
+
+static struct irq_source_info_funcs vupdate_irq_info_funcs = {
+	.set = NULL,
 	.ack = NULL
 };
 
@@ -87,7 +92,7 @@ static const struct irq_source_info_funcs vblank_irq_info_funcs = {
 		.enable_mask = DC_HPD_INT_CONTROL__DC_HPD_INT_EN_MASK,\
 		.enable_value = {\
 			DC_HPD_INT_CONTROL__DC_HPD_INT_EN_MASK,\
-			~DC_HPD_INT_CONTROL__DC_HPD_INT_EN_MASK\
+			(uint32_t)~DC_HPD_INT_CONTROL__DC_HPD_INT_EN_MASK\
 		},\
 		.ack_reg = mmHPD ## reg_num ## _DC_HPD_INT_CONTROL,\
 		.ack_mask = DC_HPD_INT_CONTROL__DC_HPD_INT_ACK_MASK,\
@@ -102,7 +107,7 @@ static const struct irq_source_info_funcs vblank_irq_info_funcs = {
 		.enable_mask = DC_HPD_INT_CONTROL__DC_HPD_RX_INT_EN_MASK,\
 		.enable_value = {\
 			DC_HPD_INT_CONTROL__DC_HPD_RX_INT_EN_MASK,\
-			~DC_HPD_INT_CONTROL__DC_HPD_RX_INT_EN_MASK },\
+			(uint32_t)~DC_HPD_INT_CONTROL__DC_HPD_RX_INT_EN_MASK },\
 		.ack_reg = mmHPD ## reg_num ## _DC_HPD_INT_CONTROL,\
 		.ack_mask = DC_HPD_INT_CONTROL__DC_HPD_RX_INT_ACK_MASK,\
 		.ack_value = DC_HPD_INT_CONTROL__DC_HPD_RX_INT_ACK_MASK,\
@@ -116,7 +121,7 @@ static const struct irq_source_info_funcs vblank_irq_info_funcs = {
 		GRPH_INTERRUPT_CONTROL__GRPH_PFLIP_INT_MASK_MASK,\
 		.enable_value = {\
 			GRPH_INTERRUPT_CONTROL__GRPH_PFLIP_INT_MASK_MASK,\
-			~GRPH_INTERRUPT_CONTROL__GRPH_PFLIP_INT_MASK_MASK},\
+			(uint32_t)~GRPH_INTERRUPT_CONTROL__GRPH_PFLIP_INT_MASK_MASK},\
 		.ack_reg = mmDCP ## reg_num ## _GRPH_INTERRUPT_STATUS,\
 		.ack_mask = GRPH_INTERRUPT_STATUS__GRPH_PFLIP_INT_CLEAR_MASK,\
 		.ack_value = GRPH_INTERRUPT_STATUS__GRPH_PFLIP_INT_CLEAR_MASK,\
@@ -131,13 +136,13 @@ static const struct irq_source_info_funcs vblank_irq_info_funcs = {
 		CRTC_INTERRUPT_CONTROL__CRTC_V_UPDATE_INT_MSK_MASK,\
 		.enable_value = {\
 			CRTC_INTERRUPT_CONTROL__CRTC_V_UPDATE_INT_MSK_MASK,\
-			~CRTC_INTERRUPT_CONTROL__CRTC_V_UPDATE_INT_MSK_MASK},\
+			(uint32_t)~CRTC_INTERRUPT_CONTROL__CRTC_V_UPDATE_INT_MSK_MASK},\
 		.ack_reg = mmCRTC ## reg_num ## _CRTC_V_UPDATE_INT_STATUS,\
 		.ack_mask =\
 		CRTC_V_UPDATE_INT_STATUS__CRTC_V_UPDATE_INT_CLEAR_MASK,\
 		.ack_value =\
 		CRTC_V_UPDATE_INT_STATUS__CRTC_V_UPDATE_INT_CLEAR_MASK,\
-		.funcs = &vblank_irq_info_funcs\
+		.funcs = &vupdate_irq_info_funcs\
 	}
 
 #define vblank_int_entry(reg_num)\
@@ -147,7 +152,7 @@ static const struct irq_source_info_funcs vblank_irq_info_funcs = {
 		CRTC_VERTICAL_INTERRUPT0_CONTROL__CRTC_VERTICAL_INTERRUPT0_INT_ENABLE_MASK,\
 		.enable_value = {\
 			CRTC_VERTICAL_INTERRUPT0_CONTROL__CRTC_VERTICAL_INTERRUPT0_INT_ENABLE_MASK,\
-			~CRTC_VERTICAL_INTERRUPT0_CONTROL__CRTC_VERTICAL_INTERRUPT0_INT_ENABLE_MASK},\
+			(uint32_t)~CRTC_VERTICAL_INTERRUPT0_CONTROL__CRTC_VERTICAL_INTERRUPT0_INT_ENABLE_MASK},\
 		.ack_reg = mmCRTC ## reg_num ## _CRTC_VERTICAL_INTERRUPT0_CONTROL,\
 		.ack_mask =\
 		CRTC_VERTICAL_INTERRUPT0_CONTROL__CRTC_VERTICAL_INTERRUPT0_CLEAR_MASK,\
@@ -178,16 +183,19 @@ bool dal_irq_service_dummy_set(struct irq_service *irq_service,
 			       const struct irq_source_info *info,
 			       bool enable)
 {
-	DC_LOG_ERROR("%s: called for non-implemented irq source\n",
-		     __func__);
+	(void)enable;
+	DC_LOG_ERROR("%s: called for non-implemented irq source, src_id=%u, ext_id=%u\n",
+		     __func__, info->src_id, info->ext_id);
+
 	return false;
 }
 
 bool dal_irq_service_dummy_ack(struct irq_service *irq_service,
 			       const struct irq_source_info *info)
 {
-	DC_LOG_ERROR("%s: called for non-implemented irq source\n",
-		     __func__);
+	DC_LOG_ERROR("%s: called for non-implemented irq source, src_id=%u, ext_id=%u\n",
+		     __func__, info->src_id, info->ext_id);
+
 	return false;
 }
 
@@ -197,15 +205,19 @@ bool dce110_vblank_set(struct irq_service *irq_service,
 		       bool enable)
 {
 	struct dc_context *dc_ctx = irq_service->ctx;
-	struct dc *core_dc = irq_service->ctx->dc;
+	struct dc *dc = irq_service->ctx->dc;
 	enum dc_irq_source dal_irq_src =
 			dc_interrupt_to_irq_source(irq_service->ctx->dc,
 						   info->src_id,
 						   info->ext_id);
-	uint8_t pipe_offset = dal_irq_src - IRQ_TYPE_VBLANK;
+	unsigned int pipe_offset = dal_irq_src - IRQ_TYPE_VBLANK;
 
-	struct timing_generator *tg =
-			core_dc->current_state->res_ctx.pipe_ctx[pipe_offset].stream_res.tg;
+	struct timing_generator *tg;
+
+	if (pipe_offset >= MAX_PIPES)
+		return false;
+
+	tg = dc->current_state->res_ctx.pipe_ctx[pipe_offset].stream_res.tg;
 
 	if (enable) {
 		if (!tg || !tg->funcs->arm_vert_intr(tg, 2)) {
@@ -218,7 +230,7 @@ bool dce110_vblank_set(struct irq_service *irq_service,
 	return true;
 }
 
-static const struct irq_source_info_funcs dummy_irq_info_funcs = {
+static struct irq_source_info_funcs dummy_irq_info_funcs = {
 	.set = dal_irq_service_dummy_set,
 	.ack = dal_irq_service_dummy_ack
 };
@@ -317,6 +329,7 @@ enum dc_irq_source to_dal_irq_source_dce110(
 		uint32_t src_id,
 		uint32_t ext_id)
 {
+	(void)irq_service;
 	switch (src_id) {
 	case VISLANDS30_IV_SRCID_D1_VERTICAL_INTERRUPT0:
 		return DC_IRQ_SOURCE_VBLANK1;
@@ -396,7 +409,7 @@ static const struct irq_service_funcs irq_service_funcs_dce110 = {
 		.to_dal_irq_source = to_dal_irq_source_dce110
 };
 
-static void construct(struct irq_service *irq_service,
+static void dce110_irq_construct(struct irq_service *irq_service,
 		      struct irq_service_init_data *init_data)
 {
 	dal_irq_service_construct(irq_service, init_data);
@@ -408,12 +421,11 @@ static void construct(struct irq_service *irq_service,
 struct irq_service *
 dal_irq_service_dce110_create(struct irq_service_init_data *init_data)
 {
-	struct irq_service *irq_service = kzalloc(sizeof(*irq_service),
-						  GFP_KERNEL);
+	struct irq_service *irq_service = kzalloc_obj(*irq_service);
 
 	if (!irq_service)
 		return NULL;
 
-	construct(irq_service, init_data);
+	dce110_irq_construct(irq_service, init_data);
 	return irq_service;
 }

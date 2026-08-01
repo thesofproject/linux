@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * INET		An implementation of the TCP/IP protocol suite for the LINUX
  *		operating system.  INET is implemented using the BSD Socket
@@ -15,11 +16,6 @@
  *			Mark Evans, <evansmp@uhura.aston.ac.uk>
  *			Florian La Roche, <rzsfl@rz.uni-sb.de>
  *			Alan Cox, <gw4pts@gw4pts.ampr.org>
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  *	Changes
  *		Alan Cox		:	New arp/rebuild header
@@ -107,6 +103,9 @@ __be16 fddi_type_trans(struct sk_buff *skb, struct net_device *dev)
 	skb->dev = dev;
 	skb_reset_mac_header(skb);	/* point to frame control (FC) */
 
+	if (skb->len < FDDI_K_8022_HLEN)
+		return htons(0);
+
 	if(fddi->hdr.llc_8022_1.dsap==0xe0)
 	{
 		skb_pull(skb, FDDI_K_8022_HLEN-3);
@@ -114,6 +113,8 @@ __be16 fddi_type_trans(struct sk_buff *skb, struct net_device *dev)
 	}
 	else
 	{
+		if (skb->len < FDDI_K_SNAP_HLEN)
+			return htons(0);
 		skb_pull(skb, FDDI_K_SNAP_HLEN);		/* adjust for 21 byte header */
 		type=fddi->hdr.llc_snap.ethertype;
 	}
@@ -179,4 +180,5 @@ struct net_device *alloc_fddidev(int sizeof_priv)
 }
 EXPORT_SYMBOL(alloc_fddidev);
 
+MODULE_DESCRIPTION("Core routines for FDDI network devices");
 MODULE_LICENSE("GPL");

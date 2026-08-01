@@ -49,28 +49,13 @@ struct raid1_info {
 	sector_t	seq_start;
 };
 
-/*
- * memory pools need a pointer to the mddev, so they can force an unplug
- * when memory is tight, and a count of the number of drives that the
- * pool was allocated for, so they know how much to allocate and free.
- * mddev->raid_disks cannot be used, as it can change while a pool is active
- * These two datums are stored in a kmalloced struct.
- * The 'raid_disks' here is twice the raid_disks in r1conf.
- * This allows space for each 'real' device can have a replacement in the
- * second half of the array.
- */
-
-struct pool_info {
-	struct mddev *mddev;
-	int	raid_disks;
-};
-
 struct r1conf {
 	struct mddev		*mddev;
 	struct raid1_info	*mirrors;	/* twice 'raid_disks' to
 						 * allow for replacements.
 						 */
 	int			raid_disks;
+	int			nonrot_disks;
 
 	spinlock_t		device_lock;
 
@@ -87,7 +72,6 @@ struct r1conf {
 
 	/* queue pending writes to be submitted on unplug */
 	struct bio_list		pending_bio_list;
-	int			pending_count;
 
 	/* for use when syncing mirrors:
 	 * We don't allow both normal IO and resync/recovery IO at
@@ -109,19 +93,10 @@ struct r1conf {
 	 */
 	int			fullsync;
 
-	/* When the same as mddev->recovery_disabled we don't allow
-	 * recovery to be attempted as we expect a read error.
-	 */
-	int			recovery_disabled;
-
-	/* poolinfo contains information about the content of the
-	 * mempools - it changes when the array grows or shrinks
-	 */
-	struct pool_info	*poolinfo;
 	mempool_t		*r1bio_pool;
-	mempool_t		*r1buf_pool;
+	mempool_t		r1buf_pool;
 
-	struct bio_set		*bio_split;
+	struct bio_set		bio_split;
 
 	/* temporary buffer to synchronous IO when attempting to repair
 	 * a read error.
@@ -131,7 +106,7 @@ struct r1conf {
 	/* When taking over an array from a different personality, we store
 	 * the new thread here until we fully activate the array.
 	 */
-	struct md_thread	*thread;
+	struct md_thread __rcu	*thread;
 
 	/* Keep track of cluster resync window to send to other
 	 * nodes.
@@ -180,7 +155,7 @@ struct r1bio {
 	 * if the IO is in WRITE direction, then multiple bios are used.
 	 * We choose the number when they are allocated.
 	 */
-	struct bio		*bios[0];
+	struct bio		*bios[];
 	/* DO NOT PUT ANY NEW FIELDS HERE - bios array is contiguously alloced*/
 };
 
@@ -188,7 +163,6 @@ struct r1bio {
 enum r1bio_state {
 	R1BIO_Uptodate,
 	R1BIO_IsSync,
-	R1BIO_Degraded,
 	R1BIO_BehindIO,
 /* Set ReadError on bios that experience a readerror so that
  * raid1d knows what to do with them.
@@ -199,7 +173,9 @@ enum r1bio_state {
  * any write was successful.  Otherwise we call when
  * any write-behind write succeeds, otherwise we call
  * with failure when last write completes (and all failed).
- * Record that bi_end_io was called with this flag...
+ *
+ * And for bio_split errors, record that bi_end_io was called
+ * with this flag...
  */
 	R1BIO_Returned,
 /* If a write for this request means we can clear some

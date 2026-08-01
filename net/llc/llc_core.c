@@ -1,15 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * llc_core.c - Minimum needed routines for sap handling and module init/exit
  *
  * Copyright (c) 1997 by Procom Technology, Inc.
  * 		 2001-2003 by Arnaldo Carvalho de Melo <acme@conectiva.com.br>
- *
- * This program can be redistributed or modified under the terms of the
- * GNU General Public License as published by the Free Software Foundation.
- * This program is distributed without any warranty or implied warranty
- * of merchantability or fitness for a particular purpose.
- *
- * See the GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -32,7 +26,7 @@ static DEFINE_SPINLOCK(llc_sap_list_lock);
  */
 static struct llc_sap *llc_sap_alloc(void)
 {
-	struct llc_sap *sap = kzalloc(sizeof(*sap), GFP_ATOMIC);
+	struct llc_sap *sap = kzalloc_obj(*sap, GFP_ATOMIC);
 	int i;
 
 	if (sap) {
@@ -59,10 +53,10 @@ out:
 }
 
 /**
- *	llc_sap_find - searchs a SAP in station
+ *	llc_sap_find - searches a SAP in station
  *	@sap_value: sap to be found
  *
- *	Searchs for a sap in the sap list of the LLC's station upon the sap ID.
+ *	Searches for a sap in the sap list of the LLC's station upon the sap ID.
  *	If the sap is found it will be refcounted and the user will have to do
  *	a llc_sap_put after use.
  *	Returns the sap or %NULL if not found.
@@ -73,8 +67,8 @@ struct llc_sap *llc_sap_find(unsigned char sap_value)
 
 	rcu_read_lock_bh();
 	sap = __llc_sap_find(sap_value);
-	if (sap)
-		llc_sap_hold(sap);
+	if (!sap || !llc_sap_hold_safe(sap))
+		sap = NULL;
 	rcu_read_unlock_bh();
 	return sap;
 }
@@ -127,9 +121,7 @@ void llc_sap_close(struct llc_sap *sap)
 	list_del_rcu(&sap->node);
 	spin_unlock_bh(&llc_sap_list_lock);
 
-	synchronize_rcu();
-
-	kfree(sap);
+	kfree_rcu(sap, rcu);
 }
 
 static struct packet_type llc_packet_type __read_mostly = {
@@ -137,22 +129,15 @@ static struct packet_type llc_packet_type __read_mostly = {
 	.func = llc_rcv,
 };
 
-static struct packet_type llc_tr_packet_type __read_mostly = {
-	.type = cpu_to_be16(ETH_P_TR_802_2),
-	.func = llc_rcv,
-};
-
 static int __init llc_init(void)
 {
 	dev_add_pack(&llc_packet_type);
-	dev_add_pack(&llc_tr_packet_type);
 	return 0;
 }
 
 static void __exit llc_exit(void)
 {
 	dev_remove_pack(&llc_packet_type);
-	dev_remove_pack(&llc_tr_packet_type);
 }
 
 module_init(llc_init);

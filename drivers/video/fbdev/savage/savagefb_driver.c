@@ -41,6 +41,7 @@
  *
  */
 
+#include <linux/aperture.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -55,7 +56,6 @@
 
 #include <asm/io.h>
 #include <asm/irq.h>
-#include <asm/pgtable.h>
 
 #include "savagefb.h"
 
@@ -869,6 +869,9 @@ static int savagefb_check_var(struct fb_var_screeninfo   *var,
 
 	DBG("savagefb_check_var");
 
+	if (!var->pixclock)
+		return -EINVAL;
+
 	var->transp.offset = 0;
 	var->transp.length = 0;
 	switch (var->bits_per_pixel) {
@@ -1637,10 +1640,11 @@ static int savagefb_release(struct fb_info *info, int user)
 	return 0;
 }
 
-static struct fb_ops savagefb_ops = {
+static const struct fb_ops savagefb_ops = {
 	.owner          = THIS_MODULE,
 	.fb_open        = savagefb_open,
 	.fb_release     = savagefb_release,
+	__FB_DEFAULT_IOMEM_OPS_RDWR,
 	.fb_check_var   = savagefb_check_var,
 	.fb_set_par     = savagefb_set_par,
 	.fb_setcolreg   = savagefb_setcolreg,
@@ -1652,10 +1656,9 @@ static struct fb_ops savagefb_ops = {
 	.fb_imageblit   = savagefb_imageblit,
 	.fb_sync        = savagefb_sync,
 #else
-	.fb_fillrect    = cfb_fillrect,
-	.fb_copyarea    = cfb_copyarea,
-	.fb_imageblit   = cfb_imageblit,
+	__FB_DEFAULT_IOMEM_OPS_DRAW,
 #endif
+	__FB_DEFAULT_IOMEM_OPS_MMAP,
 };
 
 /* --------------------------------------------------------------------- */
@@ -1860,8 +1863,7 @@ static int savage_init_hw(struct savagefb_par *par)
 		vga_out8(0x3d4, 0x68, par);	/* memory control 1 */
 		if ((vga_in8(0x3d5, par) & 0xC0) == (0x01 << 6))
 			RamSavage4[1] = 8;
-
-		/*FALLTHROUGH*/
+		fallthrough;
 
 	case S3_SAVAGE2000:
 		videoRam = RamSavage4[(config1 & 0xE0) >> 5] * 1024;
@@ -1892,11 +1894,11 @@ static int savage_init_hw(struct savagefb_par *par)
 	vga_out8(0x3d4, 0x66, par);
 	cr66 = vga_in8(0x3d5, par);
 	vga_out8(0x3d5, cr66 | 0x02, par);
-	mdelay(10);
+	usleep_range(10000, 11000);
 
 	vga_out8(0x3d4, 0x66, par);
 	vga_out8(0x3d5, cr66 & ~0x02, par);	/* clear reset flag */
-	mdelay(10);
+	usleep_range(10000, 11000);
 
 
 	/*
@@ -1906,11 +1908,11 @@ static int savage_init_hw(struct savagefb_par *par)
 	vga_out8(0x3d4, 0x3f, par);
 	cr3f = vga_in8(0x3d5, par);
 	vga_out8(0x3d5, cr3f | 0x08, par);
-	mdelay(10);
+	usleep_range(10000, 11000);
 
 	vga_out8(0x3d4, 0x3f, par);
 	vga_out8(0x3d5, cr3f & ~0x08, par);	/* clear reset flags */
-	mdelay(10);
+	usleep_range(10000, 11000);
 
 	/* Savage ramdac speeds */
 	par->numClocks = 4;
@@ -2136,8 +2138,7 @@ static int savage_init_fb_info(struct fb_info *info, struct pci_dev *dev,
 	info->var.accel_flags = 0;
 
 	info->fbops          = &savagefb_ops;
-	info->flags          = FBINFO_DEFAULT |
-		               FBINFO_HWACCEL_YPAN |
+	info->flags          = FBINFO_HWACCEL_YPAN |
 		               FBINFO_HWACCEL_XPAN;
 
 	info->pseudo_palette = par->pseudo_palette;
@@ -2155,9 +2156,11 @@ static int savage_init_fb_info(struct fb_info *info, struct pci_dev *dev,
 
 		err = fb_alloc_cmap(&info->cmap, NR_PALETTE, 0);
 		if (!err)
-		info->flags |= FBINFO_HWACCEL_COPYAREA |
-	                       FBINFO_HWACCEL_FILLRECT |
-		               FBINFO_HWACCEL_IMAGEBLIT;
+			info->flags |= FBINFO_HWACCEL_COPYAREA |
+				       FBINFO_HWACCEL_FILLRECT |
+				       FBINFO_HWACCEL_IMAGEBLIT;
+		else
+			kfree(info->pixmap.addr);
 	}
 #endif
 	return err;
@@ -2170,10 +2173,15 @@ static int savagefb_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	struct fb_info *info;
 	struct savagefb_par *par;
 	u_int h_sync, v_sync;
+	unsigned char __maybe_unused *edid;
 	int err, lpitch;
 	int video_len;
 
 	DBG("savagefb_probe");
+
+	err = aperture_remove_conflicting_pci_devices(dev, "savagefb");
+	if (err)
+		return err;
 
 	info = framebuffer_alloc(sizeof(struct savagefb_par), &dev->dev);
 	if (!info)
@@ -2212,9 +2220,9 @@ static int savagefb_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	INIT_LIST_HEAD(&info->modelist);
 #if defined(CONFIG_FB_SAVAGE_I2C)
 	savagefb_create_i2c_busses(info);
-	savagefb_probe_i2c_connector(info, &par->edid);
-	fb_edid_to_monspecs(par->edid, &info->monspecs);
-	kfree(par->edid);
+	savagefb_probe_i2c_connector(info, &edid);
+	fb_edid_to_monspecs(edid, &info->monspecs);
+	kfree(edid);
 	fb_videomode_to_modelist(info->monspecs.modedb,
 				 info->monspecs.modedb_len,
 				 &info->modelist);
@@ -2268,7 +2276,10 @@ static int savagefb_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	if (info->var.xres_virtual > 0x1000)
 		info->var.xres_virtual = 0x1000;
 #endif
-	savagefb_check_var(&info->var, info);
+	err = savagefb_check_var(&info->var, info);
+	if (err)
+		goto failed;
+
 	savagefb_set_fix(info);
 
 	/*
@@ -2311,6 +2322,8 @@ static int savagefb_probe(struct pci_dev *dev, const struct pci_device_id *id)
  failed:
 #ifdef CONFIG_FB_SAVAGE_I2C
 	savagefb_delete_i2c_busses(info);
+	fb_destroy_modelist(&info->modelist);
+	fb_destroy_modedb(info->monspecs.modedb);
 #endif
 	fb_alloc_cmap(&info->cmap, 0, 0);
 	savage_unmap_video(info);
@@ -2333,14 +2346,7 @@ static void savagefb_remove(struct pci_dev *dev)
 	DBG("savagefb_remove");
 
 	if (info) {
-		/*
-		 * If unregister_framebuffer fails, then
-		 * we will be leaving hooks that could cause
-		 * oopsen laying around.
-		 */
-		if (unregister_framebuffer(info))
-			printk(KERN_WARNING "savagefb: danger danger! "
-			       "Oopsen imminent!\n");
+		unregister_framebuffer(info);
 
 #ifdef CONFIG_FB_SAVAGE_I2C
 		savagefb_delete_i2c_busses(info);
@@ -2354,9 +2360,9 @@ static void savagefb_remove(struct pci_dev *dev)
 	}
 }
 
-static int savagefb_suspend(struct pci_dev *dev, pm_message_t mesg)
+static int savagefb_suspend_late(struct device *dev, pm_message_t mesg)
 {
-	struct fb_info *info = pci_get_drvdata(dev);
+	struct fb_info *info = dev_get_drvdata(dev);
 	struct savagefb_par *par = info->par;
 
 	DBG("savagefb_suspend");
@@ -2364,7 +2370,7 @@ static int savagefb_suspend(struct pci_dev *dev, pm_message_t mesg)
 	if (mesg.event == PM_EVENT_PRETHAW)
 		mesg.event = PM_EVENT_FREEZE;
 	par->pm_state = mesg.event;
-	dev->dev.power.power_state = mesg;
+	dev->power.power_state = mesg;
 
 	/*
 	 * For PM_EVENT_FREEZE, do not power down so the console
@@ -2382,17 +2388,29 @@ static int savagefb_suspend(struct pci_dev *dev, pm_message_t mesg)
 	savagefb_blank(FB_BLANK_POWERDOWN, info);
 	savage_set_default_par(par, &par->save);
 	savage_disable_mmio(par);
-	pci_save_state(dev);
-	pci_disable_device(dev);
-	pci_set_power_state(dev, pci_choose_state(dev, mesg));
 	console_unlock();
 
 	return 0;
 }
 
-static int savagefb_resume(struct pci_dev* dev)
+static int __maybe_unused savagefb_suspend(struct device *dev)
 {
-	struct fb_info *info = pci_get_drvdata(dev);
+	return savagefb_suspend_late(dev, PMSG_SUSPEND);
+}
+
+static int __maybe_unused savagefb_hibernate(struct device *dev)
+{
+	return savagefb_suspend_late(dev, PMSG_HIBERNATE);
+}
+
+static int __maybe_unused savagefb_freeze(struct device *dev)
+{
+	return savagefb_suspend_late(dev, PMSG_FREEZE);
+}
+
+static int __maybe_unused savagefb_resume(struct device *dev)
+{
+	struct fb_info *info = dev_get_drvdata(dev);
 	struct savagefb_par *par = info->par;
 	int cur_state = par->pm_state;
 
@@ -2404,20 +2422,11 @@ static int savagefb_resume(struct pci_dev* dev)
 	 * The adapter was not powered down coming back from a
 	 * PM_EVENT_FREEZE.
 	 */
-	if (cur_state == PM_EVENT_FREEZE) {
-		pci_set_power_state(dev, PCI_D0);
+	if (cur_state == PM_EVENT_FREEZE)
 		return 0;
-	}
 
 	console_lock();
 
-	pci_set_power_state(dev, PCI_D0);
-	pci_restore_state(dev);
-
-	if (pci_enable_device(dev))
-		DBG("err");
-
-	pci_set_master(dev);
 	savage_enable_mmio(par);
 	savage_init_hw(par);
 	savagefb_set_par(info);
@@ -2428,78 +2437,90 @@ static int savagefb_resume(struct pci_dev* dev)
 	return 0;
 }
 
+static const struct dev_pm_ops savagefb_pm_ops = {
+#ifdef CONFIG_PM_SLEEP
+	.suspend	= savagefb_suspend,
+	.resume		= savagefb_resume,
+	.freeze		= savagefb_freeze,
+	.thaw		= savagefb_resume,
+	.poweroff	= savagefb_hibernate,
+	.restore	= savagefb_resume,
+#endif
+};
 
 static const struct pci_device_id savagefb_devices[] = {
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SUPSAV_MX128,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SUPERSAVAGE},
+	{
+		PCI_VDEVICE(S3, PCI_CHIP_SUPSAV_MX128),
+		.driver_data = FB_ACCEL_SUPERSAVAGE,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SUPSAV_MX64),
+		.driver_data = FB_ACCEL_SUPERSAVAGE,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SUPSAV_MX64C),
+		.driver_data = FB_ACCEL_SUPERSAVAGE,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SUPSAV_IX128SDR),
+		.driver_data = FB_ACCEL_SUPERSAVAGE,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SUPSAV_IX128DDR),
+		.driver_data = FB_ACCEL_SUPERSAVAGE,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SUPSAV_IX64SDR),
+		.driver_data = FB_ACCEL_SUPERSAVAGE,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SUPSAV_IX64DDR),
+		.driver_data = FB_ACCEL_SUPERSAVAGE,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SUPSAV_IXCSDR),
+		.driver_data = FB_ACCEL_SUPERSAVAGE,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SUPSAV_IXCDDR),
+		.driver_data = FB_ACCEL_SUPERSAVAGE,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SAVAGE4),
+		.driver_data = FB_ACCEL_SAVAGE4,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SAVAGE3D),
+		.driver_data = FB_ACCEL_SAVAGE3D,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SAVAGE3D_MV),
+		.driver_data = FB_ACCEL_SAVAGE3D_MV,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SAVAGE2000),
+		.driver_data = FB_ACCEL_SAVAGE2000,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SAVAGE_MX_MV),
+		.driver_data = FB_ACCEL_SAVAGE_MX_MV,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SAVAGE_MX),
+		.driver_data = FB_ACCEL_SAVAGE_MX,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SAVAGE_IX_MV),
+		.driver_data = FB_ACCEL_SAVAGE_IX_MV,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_SAVAGE_IX),
+		.driver_data = FB_ACCEL_SAVAGE_IX,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_PROSAVAGE_PM),
+		.driver_data = FB_ACCEL_PROSAVAGE_PM,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_PROSAVAGE_KM),
+		.driver_data = FB_ACCEL_PROSAVAGE_KM,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_S3TWISTER_P),
+		.driver_data = FB_ACCEL_S3TWISTER_P,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_S3TWISTER_K),
+		.driver_data = FB_ACCEL_S3TWISTER_K,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_PROSAVAGE_DDR),
+		.driver_data = FB_ACCEL_PROSAVAGE_DDR,
+	}, {
+		PCI_VDEVICE(S3, PCI_CHIP_PROSAVAGE_DDRK),
+		.driver_data = FB_ACCEL_PROSAVAGE_DDRK,
+	},
 
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SUPSAV_MX64,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SUPERSAVAGE},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SUPSAV_MX64C,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SUPERSAVAGE},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SUPSAV_IX128SDR,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SUPERSAVAGE},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SUPSAV_IX128DDR,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SUPERSAVAGE},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SUPSAV_IX64SDR,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SUPERSAVAGE},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SUPSAV_IX64DDR,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SUPERSAVAGE},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SUPSAV_IXCSDR,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SUPERSAVAGE},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SUPSAV_IXCDDR,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SUPERSAVAGE},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SAVAGE4,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SAVAGE4},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SAVAGE3D,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SAVAGE3D},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SAVAGE3D_MV,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SAVAGE3D_MV},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SAVAGE2000,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SAVAGE2000},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SAVAGE_MX_MV,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SAVAGE_MX_MV},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SAVAGE_MX,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SAVAGE_MX},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SAVAGE_IX_MV,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SAVAGE_IX_MV},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_SAVAGE_IX,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_SAVAGE_IX},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_PROSAVAGE_PM,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_PROSAVAGE_PM},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_PROSAVAGE_KM,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_PROSAVAGE_KM},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_S3TWISTER_P,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_S3TWISTER_P},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_S3TWISTER_K,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_S3TWISTER_K},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_PROSAVAGE_DDR,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_PROSAVAGE_DDR},
-
-	{PCI_VENDOR_ID_S3, PCI_CHIP_PROSAVAGE_DDRK,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, FB_ACCEL_PROSAVAGE_DDRK},
-
-	{0, 0, 0, 0, 0, 0, 0}
+	{ }
 };
 
 MODULE_DEVICE_TABLE(pci, savagefb_devices);
@@ -2508,8 +2529,7 @@ static struct pci_driver savagefb_driver = {
 	.name =     "savagefb",
 	.id_table = savagefb_devices,
 	.probe =    savagefb_probe,
-	.suspend =  savagefb_suspend,
-	.resume =   savagefb_resume,
+	.driver.pm = &savagefb_pm_ops,
 	.remove =   savagefb_remove,
 };
 
@@ -2544,6 +2564,9 @@ static int __init savagefb_init(void)
 	char *option;
 
 	DBG("savagefb_init");
+
+	if (fb_modesetting_disabled("savagefb"))
+		return -ENODEV;
 
 	if (fb_get_options("savagefb", &option))
 		return -ENODEV;

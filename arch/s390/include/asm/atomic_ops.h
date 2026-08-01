@@ -8,24 +8,74 @@
 #ifndef __ARCH_S390_ATOMIC_OPS__
 #define __ARCH_S390_ATOMIC_OPS__
 
-#ifdef CONFIG_HAVE_MARCH_Z196_FEATURES
+#include <linux/limits.h>
+#include <asm/march.h>
+#include <asm/asm.h>
+
+static __always_inline int __atomic_read(const int *ptr)
+{
+	int val;
+
+	asm volatile(
+		"	l	%[val],%[ptr]"
+		: [val] "=d" (val) : [ptr] "R" (*ptr));
+	return val;
+}
+
+static __always_inline void __atomic_set(int *ptr, int val)
+{
+	if (__builtin_constant_p(val) && val >= S16_MIN && val <= S16_MAX) {
+		asm volatile(
+			"	mvhi	%[ptr],%[val]"
+			: [ptr] "=Q" (*ptr) : [val] "K" (val));
+	} else {
+		asm volatile(
+			"	st	%[val],%[ptr]"
+			: [ptr] "=R" (*ptr) : [val] "d" (val));
+	}
+}
+
+static __always_inline long __atomic64_read(const long *ptr)
+{
+	long val;
+
+	asm volatile(
+		"	lg	%[val],%[ptr]"
+		: [val] "=d" (val) : [ptr] "RT" (*ptr));
+	return val;
+}
+
+static __always_inline void __atomic64_set(long *ptr, long val)
+{
+	if (__builtin_constant_p(val) && val >= S16_MIN && val <= S16_MAX) {
+		asm volatile(
+			"	mvghi	%[ptr],%[val]"
+			: [ptr] "=Q" (*ptr) : [val] "K" (val));
+	} else {
+		asm volatile(
+			"	stg	%[val],%[ptr]"
+			: [ptr] "=RT" (*ptr) : [val] "d" (val));
+	}
+}
+
+#ifdef MARCH_HAS_Z196_FEATURES
 
 #define __ATOMIC_OP(op_name, op_type, op_string, op_barrier)		\
-static inline op_type op_name(op_type val, op_type *ptr)		\
+static __always_inline op_type op_name(op_type val, op_type *ptr)	\
 {									\
 	op_type old;							\
 									\
 	asm volatile(							\
-		op_string "	%[old],%[val],%[ptr]\n"			\
+		op_string "	%[old],%[val],%[ptr]"			\
 		op_barrier						\
-		: [old] "=d" (old), [ptr] "+Q" (*ptr)			\
+		: [old] "=d" (old), [ptr] "+QS" (*ptr)			\
 		: [val] "d" (val) : "cc", "memory");			\
 	return old;							\
 }									\
 
 #define __ATOMIC_OPS(op_name, op_type, op_string)			\
-	__ATOMIC_OP(op_name, op_type, op_string, "\n")			\
-	__ATOMIC_OP(op_name##_barrier, op_type, op_string, "bcr 14,0\n")
+	__ATOMIC_OP(op_name, op_type, op_string, "")			\
+	__ATOMIC_OP(op_name##_barrier, op_type, op_string, "\nbcr 14,0")
 
 __ATOMIC_OPS(__atomic_add, int, "laa")
 __ATOMIC_OPS(__atomic_and, int, "lan")
@@ -41,17 +91,17 @@ __ATOMIC_OPS(__atomic64_xor, long, "laxg")
 #undef __ATOMIC_OP
 
 #define __ATOMIC_CONST_OP(op_name, op_type, op_string, op_barrier)	\
-static inline void op_name(op_type val, op_type *ptr)			\
+static __always_inline void op_name(op_type val, op_type *ptr)		\
 {									\
 	asm volatile(							\
-		op_string "	%[ptr],%[val]\n"			\
+		op_string "	%[ptr],%[val]"				\
 		op_barrier						\
-		: [ptr] "+Q" (*ptr) : [val] "i" (val) : "cc", "memory");\
+		: [ptr] "+QS" (*ptr) : [val] "i" (val) : "cc", "memory");\
 }
 
 #define __ATOMIC_CONST_OPS(op_name, op_type, op_string)			\
-	__ATOMIC_CONST_OP(op_name, op_type, op_string, "\n")		\
-	__ATOMIC_CONST_OP(op_name##_barrier, op_type, op_string, "bcr 14,0\n")
+	__ATOMIC_CONST_OP(op_name, op_type, op_string, "")		\
+	__ATOMIC_CONST_OP(op_name##_barrier, op_type, op_string, "\nbcr 14,0")
 
 __ATOMIC_CONST_OPS(__atomic_add_const, int, "asi")
 __ATOMIC_CONST_OPS(__atomic64_add_const, long, "agsi")
@@ -59,10 +109,10 @@ __ATOMIC_CONST_OPS(__atomic64_add_const, long, "agsi")
 #undef __ATOMIC_CONST_OPS
 #undef __ATOMIC_CONST_OP
 
-#else /* CONFIG_HAVE_MARCH_Z196_FEATURES */
+#else /* MARCH_HAS_Z196_FEATURES */
 
 #define __ATOMIC_OP(op_name, op_string)					\
-static inline int op_name(int val, int *ptr)				\
+static __always_inline int op_name(int val, int *ptr)			\
 {									\
 	int old, new;							\
 									\
@@ -88,7 +138,7 @@ __ATOMIC_OPS(__atomic_xor, "xr")
 #undef __ATOMIC_OPS
 
 #define __ATOMIC64_OP(op_name, op_string)				\
-static inline long op_name(long val, long *ptr)				\
+static __always_inline long op_name(long val, long *ptr)		\
 {									\
 	long old, new;							\
 									\
@@ -97,7 +147,7 @@ static inline long op_name(long val, long *ptr)				\
 		op_string "	%[new],%[val]\n"			\
 		"	csg	%[old],%[new],%[ptr]\n"			\
 		"	jl	0b"					\
-		: [old] "=d" (old), [new] "=&d" (new), [ptr] "+Q" (*ptr)\
+		: [old] "=d" (old), [new] "=&d" (new), [ptr] "+QS" (*ptr)\
 		: [val] "d" (val), "0" (*ptr) : "cc", "memory");	\
 	return old;							\
 }
@@ -113,31 +163,83 @@ __ATOMIC64_OPS(__atomic64_xor, "xgr")
 
 #undef __ATOMIC64_OPS
 
-#define __atomic_add_const(val, ptr)		__atomic_add(val, ptr)
-#define __atomic_add_const_barrier(val, ptr)	__atomic_add(val, ptr)
-#define __atomic64_add_const(val, ptr)		__atomic64_add(val, ptr)
-#define __atomic64_add_const_barrier(val, ptr)	__atomic64_add(val, ptr)
+#define __atomic_add_const(val, ptr)		((void)__atomic_add(val, ptr))
+#define __atomic_add_const_barrier(val, ptr)	((void)__atomic_add(val, ptr))
+#define __atomic64_add_const(val, ptr)		((void)__atomic64_add(val, ptr))
+#define __atomic64_add_const_barrier(val, ptr)	((void)__atomic64_add(val, ptr))
 
-#endif /* CONFIG_HAVE_MARCH_Z196_FEATURES */
+#endif /* MARCH_HAS_Z196_FEATURES */
 
-static inline int __atomic_cmpxchg(int *ptr, int old, int new)
-{
-	return __sync_val_compare_and_swap(ptr, old, new);
+#if defined(MARCH_HAS_Z196_FEATURES) && defined(__HAVE_ASM_FLAG_OUTPUTS__)
+
+#define __ATOMIC_TEST_OP(op_name, op_type, op_string, op_barrier)	\
+static __always_inline bool op_name(op_type val, op_type *ptr)		\
+{									\
+	op_type tmp;							\
+	int cc;								\
+									\
+	asm volatile(							\
+		op_string "	%[tmp],%[val],%[ptr]"			\
+		op_barrier						\
+		: "=@cc" (cc), [tmp] "=d" (tmp), [ptr] "+QS" (*ptr)	\
+		: [val] "d" (val)					\
+		: "memory");						\
+	return (cc == 0) || (cc == 2);					\
+}									\
+
+#define __ATOMIC_TEST_OPS(op_name, op_type, op_string)			\
+	__ATOMIC_TEST_OP(op_name, op_type, op_string, "")		\
+	__ATOMIC_TEST_OP(op_name##_barrier, op_type, op_string, "\nbcr 14,0")
+
+__ATOMIC_TEST_OPS(__atomic_add_and_test, int, "laal")
+__ATOMIC_TEST_OPS(__atomic64_add_and_test, long, "laalg")
+
+#undef __ATOMIC_TEST_OPS
+#undef __ATOMIC_TEST_OP
+
+#define __ATOMIC_CONST_TEST_OP(op_name, op_type, op_string, op_barrier)	\
+static __always_inline bool op_name(op_type val, op_type *ptr)		\
+{									\
+	int cc;								\
+									\
+	asm volatile(							\
+		op_string "	%[ptr],%[val]"				\
+		op_barrier						\
+		: "=@cc" (cc), [ptr] "+QS" (*ptr)			\
+		: [val] "i" (val)					\
+		: "memory");						\
+	return (cc == 0) || (cc == 2);					\
 }
 
-static inline int __atomic_cmpxchg_bool(int *ptr, int old, int new)
-{
-	return __sync_bool_compare_and_swap(ptr, old, new);
+#define __ATOMIC_CONST_TEST_OPS(op_name, op_type, op_string)		\
+	__ATOMIC_CONST_TEST_OP(op_name, op_type, op_string, "")		\
+	__ATOMIC_CONST_TEST_OP(op_name##_barrier, op_type, op_string, "\nbcr 14,0")
+
+__ATOMIC_CONST_TEST_OPS(__atomic_add_const_and_test, int, "alsi")
+__ATOMIC_CONST_TEST_OPS(__atomic64_add_const_and_test, long, "algsi")
+
+#undef __ATOMIC_CONST_TEST_OPS
+#undef __ATOMIC_CONST_TEST_OP
+
+#else /* defined(MARCH_HAS_Z196_FEATURES) && defined(__HAVE_ASM_FLAG_OUTPUTS__) */
+
+#define __ATOMIC_TEST_OP(op_name, op_func, op_type)			\
+static __always_inline bool op_name(op_type val, op_type *ptr)		\
+{									\
+	return op_func(val, ptr) == -val;				\
 }
 
-static inline long __atomic64_cmpxchg(long *ptr, long old, long new)
-{
-	return __sync_val_compare_and_swap(ptr, old, new);
-}
+__ATOMIC_TEST_OP(__atomic_add_and_test,			__atomic_add,		int)
+__ATOMIC_TEST_OP(__atomic_add_and_test_barrier,		__atomic_add_barrier,	int)
+__ATOMIC_TEST_OP(__atomic_add_const_and_test,		__atomic_add,		int)
+__ATOMIC_TEST_OP(__atomic_add_const_and_test_barrier,	__atomic_add_barrier,	int)
+__ATOMIC_TEST_OP(__atomic64_add_and_test,		__atomic64_add,		long)
+__ATOMIC_TEST_OP(__atomic64_add_and_test_barrier,	__atomic64_add_barrier, long)
+__ATOMIC_TEST_OP(__atomic64_add_const_and_test,		__atomic64_add,		long)
+__ATOMIC_TEST_OP(__atomic64_add_const_and_test_barrier,	__atomic64_add_barrier,	long)
 
-static inline long __atomic64_cmpxchg_bool(long *ptr, long old, long new)
-{
-	return __sync_bool_compare_and_swap(ptr, old, new);
-}
+#undef __ATOMIC_TEST_OP
+
+#endif /* defined(MARCH_HAS_Z196_FEATURES) && defined(__HAVE_ASM_FLAG_OUTPUTS__) */
 
 #endif /* __ARCH_S390_ATOMIC_OPS__  */

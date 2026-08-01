@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for Digigram VXpocket soundcards
  *
  * lowlevel routines for VXpocket soundcards
  *
  * Copyright (c) 2002 by Takashi Iwai <tiwai@suse.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/delay.h>
@@ -28,7 +15,7 @@
 #include "vxpocket.h"
 
 
-static int vxp_reg_offset[VX_REG_MAX] = {
+static const int vxp_reg_offset[VX_REG_MAX] = {
 	[VX_ICR]	= 0x00,		// ICR
 	[VX_CVR]	= 0x01,		// CVR
 	[VX_ISR]	= 0x02,		// ISR
@@ -97,7 +84,7 @@ static int vx_check_magic(struct vx_core *chip)
 			return 0;
 		msleep(10);
 	} while (time_after_eq(end_time, jiffies));
-	snd_printk(KERN_ERR "cannot find xilinx magic word (%x)\n", c);
+	dev_err(chip->card->dev, "cannot find xilinx magic word (%x)\n", c);
 	return -EIO;
 }
 
@@ -166,7 +153,6 @@ static int vxp_load_xilinx_binary(struct vx_core *_chip, const struct firmware *
 	vx_outb(chip, ICR, 0);
 
 	/* Wait for answer HF2 equal to 1 */
-	snd_printdd(KERN_DEBUG "check ISR_HF2\n");
 	if (vx_check_isr(_chip, ISR_HF2, ISR_HF2, 20) < 0)
 		goto _error;
 
@@ -183,7 +169,9 @@ static int vxp_load_xilinx_binary(struct vx_core *_chip, const struct firmware *
 			goto _error;
 		c = vx_inb(chip, RXL);
 		if (c != (int)data)
-			snd_printk(KERN_ERR "vxpocket: load xilinx mismatch at %d: 0x%x != 0x%x\n", i, c, (int)data);
+			dev_err(_chip->card->dev,
+				"vxpocket: load xilinx mismatch at %d: 0x%x != 0x%x\n",
+				i, c, (int)data);
         }
 
 	/* reset HF1 */
@@ -201,7 +189,8 @@ static int vxp_load_xilinx_binary(struct vx_core *_chip, const struct firmware *
 	c |= (int)vx_inb(chip, RXM) << 8;
 	c |= vx_inb(chip, RXL);
 
-	snd_printdd(KERN_DEBUG "xilinx: dsp size received 0x%x, orig 0x%zx\n", c, fw->size);
+	dev_dbg(_chip->card->dev,
+		"xilinx: dsp size received 0x%x, orig 0x%zx\n", c, fw->size);
 
 	vx_outb(chip, ICR, ICR_HF0);
 
@@ -250,9 +239,11 @@ static int vxp_load_dsp(struct vx_core *vx, int index, const struct firmware *fw
 	switch (index) {
 	case 0:
 		/* xilinx boot */
-		if ((err = vx_check_magic(vx)) < 0)
+		err = vx_check_magic(vx);
+		if (err < 0)
 			return err;
-		if ((err = snd_vx_load_boot_image(vx, fw)) < 0)
+		err = snd_vx_load_boot_image(vx, fw);
+		if (err < 0)
 			return err;
 		return 0;
 	case 1:
@@ -375,7 +366,7 @@ static void vxp_dma_write(struct vx_core *chip, struct snd_pcm_runtime *runtime,
 		length >>= 1; /* in 16bit words */
 		/* Transfer using pseudo-dma. */
 		for (; length > 0; length--) {
-			outw(cpu_to_le16(*addr), port);
+			outw(*addr, port);
 			addr++;
 		}
 		addr = (unsigned short *)runtime->dma_area;
@@ -385,7 +376,7 @@ static void vxp_dma_write(struct vx_core *chip, struct snd_pcm_runtime *runtime,
 	count >>= 1; /* in 16bit words */
 	/* Transfer using pseudo-dma. */
 	for (; count > 0; count--) {
-		outw(cpu_to_le16(*addr), port);
+		outw(*addr, port);
 		addr++;
 	}
 	vx_release_pseudo_dma(chip);
@@ -417,7 +408,7 @@ static void vxp_dma_read(struct vx_core *chip, struct snd_pcm_runtime *runtime,
 		length >>= 1; /* in 16bit words */
 		/* Transfer using pseudo-dma. */
 		for (; length > 0; length--)
-			*addr++ = le16_to_cpu(inw(port));
+			*addr++ = inw(port);
 		addr = (unsigned short *)runtime->dma_area;
 		pipe->hw_ptr = 0;
 	}
@@ -425,12 +416,12 @@ static void vxp_dma_read(struct vx_core *chip, struct snd_pcm_runtime *runtime,
 	count >>= 1; /* in 16bit words */
 	/* Transfer using pseudo-dma. */
 	for (; count > 1; count--)
-		*addr++ = le16_to_cpu(inw(port));
+		*addr++ = inw(port);
 	/* Disable DMA */
 	pchip->regDIALOG &= ~VXP_DLG_DMAREAD_SEL_MASK;
 	vx_outb(chip, DIALOG, pchip->regDIALOG);
 	/* Read the last word (16 bits) */
-	*addr = le16_to_cpu(inw(port));
+	*addr = inw(port);
 	/* Disable 16-bit accesses */
 	pchip->regDIALOG &= ~VXP_DLG_DMA16_SEL_MASK;
 	vx_outb(chip, DIALOG, pchip->regDIALOG);
@@ -472,7 +463,7 @@ void vx_set_mic_boost(struct vx_core *chip, int boost)
 	if (chip->chip_status & VX_STAT_IS_STALE)
 		return;
 
-	mutex_lock(&chip->lock);
+	guard(mutex)(&chip->lock);
 	if (pchip->regCDSP & P24_CDSP_MICS_SEL_MASK) {
 		if (boost) {
 			/* boost: 38 dB */
@@ -485,7 +476,6 @@ void vx_set_mic_boost(struct vx_core *chip, int boost)
                 }
 		vx_outb(chip, CDSP, pchip->regCDSP);
 	}
-	mutex_unlock(&chip->lock);
 }
 
 /*
@@ -514,12 +504,11 @@ void vx_set_mic_level(struct vx_core *chip, int level)
 	if (chip->chip_status & VX_STAT_IS_STALE)
 		return;
 
-	mutex_lock(&chip->lock);
+	guard(mutex)(&chip->lock);
 	if (pchip->regCDSP & VXP_CDSP_MIC_SEL_MASK) {
 		level = vx_compute_mic_level(level);
 		vx_outb(chip, MICRO, level);
 	}
-	mutex_unlock(&chip->lock);
 }
 
 
@@ -594,7 +583,7 @@ static void vxp_reset_board(struct vx_core *_chip, int cold_reset)
  * callbacks
  */
 /* exported */
-struct snd_vx_ops snd_vxpocket_ops = {
+const struct snd_vx_ops snd_vxpocket_ops = {
 	.in8 = vxp_inb,
 	.out8 = vxp_outb,
 	.test_and_ack = vxp_test_and_ack,

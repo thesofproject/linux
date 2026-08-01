@@ -104,13 +104,13 @@ nvkm_dma = {
 
 int
 nvkm_dma_new_(const struct nvkm_dma_func *func, struct nvkm_device *device,
-	      int index, struct nvkm_dma **pdma)
+	      enum nvkm_subdev_type type, int inst, struct nvkm_dma **pdma)
 {
 	struct nvkm_dma *dma;
 
-	if (!(dma = *pdma = kzalloc(sizeof(*dma), GFP_KERNEL)))
+	if (!(dma = *pdma = kzalloc_obj(*dma)))
 		return -ENOMEM;
 	dma->func = func;
 
-	return nvkm_engine_ctor(&nvkm_dma, device, index, true, &dma->engine);
+	return nvkm_engine_ctor(&nvkm_dma, device, type, inst, true, &dma->engine);
 }

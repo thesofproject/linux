@@ -1,27 +1,5 @@
-/******************************************************************************
- *
- * Copyright(c) 2009-2012  Realtek Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- * wlanfae <wlanfae@realtek.com>
- * Realtek Corporation, No. 2, Innovation Road II, Hsinchu Science Park,
- * Hsinchu 300, Taiwan.
- *
- * Larry Finger <Larry.Finger@lwfinger.net>
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright(c) 2009-2012  Realtek Corporation.*/
 
 #ifndef __RTL_PCI_H__
 #define __RTL_PCI_H__
@@ -65,18 +43,6 @@
 #define ATI_VENDOR_ID				0x1002
 #define ATI_DEVICE_ID				0x7914
 #define AMD_VENDOR_ID				0x1022
-
-#define PCI_MAX_BRIDGE_NUMBER			255
-#define PCI_MAX_DEVICES				32
-#define PCI_MAX_FUNCTION			8
-
-#define PCI_CONF_ADDRESS	0x0CF8	/*PCI Configuration Space Address */
-#define PCI_CONF_DATA		0x0CFC	/*PCI Configuration Space Data */
-
-#define PCI_CLASS_BRIDGE_DEV		0x06
-#define PCI_SUBCLASS_BR_PCI_TO_PCI	0x04
-#define PCI_CAPABILITY_ID_PCI_EXPRESS	0x10
-#define PCI_CAP_ID_EXP			0x10
 
 #define U1DONTCARE			0xFF
 #define U2DONTCARE			0xFFFF
@@ -133,11 +99,6 @@ enum pci_bridge_vendor {
 	PCI_BRIDGE_VENDOR_SIS,		/*0b'0000,1000*/
 	PCI_BRIDGE_VENDOR_UNKNOWN,	/*0b'0100,0000*/
 	PCI_BRIDGE_VENDOR_MAX,
-};
-
-struct rtl_pci_capabilities_header {
-	u8 capability_id;
-	u8 next;
 };
 
 /* In new TRX flow, Buffer_desc is new concept
@@ -217,7 +178,6 @@ struct rtl_pci {
 	u32 reg_bcn_ctrl_val;
 
 	 /*ASPM*/ u8 const_pci_aspm;
-	u8 const_amdpci_aspm;
 	u8 const_hwsw_rfoff_d3;
 	u8 const_support_pciaspm;
 	/*pci-e bridge */
@@ -255,13 +215,6 @@ struct mp_adapter {
 	u8 pcibridge_funcnum;
 
 	u8 pcibridge_vendor;
-	u16 pcibridge_vendorid;
-	u16 pcibridge_deviceid;
-
-	u8 num4bytes;
-
-	u8 pcibridge_pciehdr_offset;
-	u8 pcibridge_linkctrlreg;
 
 	bool amd_l1_patch;
 };

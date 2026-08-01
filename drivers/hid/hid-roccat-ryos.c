@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Roccat Ryos driver for Linux
  *
@@ -5,10 +6,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
 #include <linux/types.h>
@@ -31,8 +28,6 @@ struct ryos_report_special {
 	uint8_t data[4];
 } __packed;
 
-static struct class *ryos_class;
-
 ROCCAT_COMMON2_BIN_ATTRIBUTE_W(control, 0x04, 0x03);
 ROCCAT_COMMON2_BIN_ATTRIBUTE_RW(profile, 0x05, 0x03);
 ROCCAT_COMMON2_BIN_ATTRIBUTE_RW(keys_primary, 0x06, 0x7d);
@@ -52,7 +47,7 @@ ROCCAT_COMMON2_BIN_ATTRIBUTE_RW(stored_lights, 0x17, 0x0566);
 ROCCAT_COMMON2_BIN_ATTRIBUTE_W(custom_lights, 0x18, 0x14);
 ROCCAT_COMMON2_BIN_ATTRIBUTE_RW(light_macro, 0x19, 0x07d2);
 
-static struct bin_attribute *ryos_bin_attrs[] = {
+static const struct bin_attribute *const ryos_bin_attrs[] = {
 	&bin_attr_control,
 	&bin_attr_profile,
 	&bin_attr_keys_primary,
@@ -83,6 +78,11 @@ static const struct attribute_group *ryos_groups[] = {
 	NULL,
 };
 
+static const struct class ryos_class = {
+	.name = "ryos",
+	.dev_groups = ryos_groups,
+};
+
 static int ryos_init_specials(struct hid_device *hdev)
 {
 	struct usb_interface *intf = to_usb_interface(hdev->dev.parent);
@@ -96,7 +96,7 @@ static int ryos_init_specials(struct hid_device *hdev)
 		return 0;
 	}
 
-	ryos = kzalloc(sizeof(*ryos), GFP_KERNEL);
+	ryos = kzalloc_obj(*ryos);
 	if (!ryos) {
 		hid_err(hdev, "can't alloc device descriptor\n");
 		return -ENOMEM;
@@ -109,7 +109,7 @@ static int ryos_init_specials(struct hid_device *hdev)
 		goto exit_free;
 	}
 
-	retval = roccat_connect(ryos_class, hdev,
+	retval = roccat_connect(&ryos_class, hdev,
 			sizeof(struct ryos_report_special));
 	if (retval < 0) {
 		hid_err(hdev, "couldn't init char dev\n");
@@ -143,6 +143,9 @@ static int ryos_probe(struct hid_device *hdev,
 		const struct hid_device_id *id)
 {
 	int retval;
+
+	if (!hid_is_usb(hdev))
+		return -EINVAL;
 
 	retval = hid_parse(hdev);
 	if (retval) {
@@ -216,21 +219,20 @@ static int __init ryos_init(void)
 {
 	int retval;
 
-	ryos_class = class_create(THIS_MODULE, "ryos");
-	if (IS_ERR(ryos_class))
-		return PTR_ERR(ryos_class);
-	ryos_class->dev_groups = ryos_groups;
+	retval = class_register(&ryos_class);
+	if (retval)
+		return retval;
 
 	retval = hid_register_driver(&ryos_driver);
 	if (retval)
-		class_destroy(ryos_class);
+		class_unregister(&ryos_class);
 	return retval;
 }
 
 static void __exit ryos_exit(void)
 {
 	hid_unregister_driver(&ryos_driver);
-	class_destroy(ryos_class);
+	class_unregister(&ryos_class);
 }
 
 module_init(ryos_init);

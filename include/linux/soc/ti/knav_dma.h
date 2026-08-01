@@ -1,17 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2014 Texas Instruments Incorporated
  * Authors:	Sandeep Nair <sandeep_n@ti.com
  *		Cyril Chemparathy <cyril@ti.com
 		Santosh Shilimkar <santosh.shilimkar@ti.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef __SOC_TI_KEYSTONE_NAVIGATOR_DMA_H__
@@ -83,7 +75,7 @@ enum knav_dma_desc_type {
  * struct knav_dma_tx_cfg:	Tx channel configuration
  * @filt_einfo:			Filter extended packet info
  * @filt_pswords:		Filter PS words present
- * @knav_dma_tx_priority:	Tx channel scheduling priority
+ * @priority:			Tx channel scheduling priority
  */
 struct knav_dma_tx_cfg {
 	bool				filt_einfo;
@@ -95,13 +87,13 @@ struct knav_dma_tx_cfg {
  * struct knav_dma_rx_cfg:	Rx flow configuration
  * @einfo_present:		Extended packet info present
  * @psinfo_present:		PS words present
- * @knav_dma_rx_err_mode:	Error during buffer starvation
- * @knav_dma_desc_type:	Host or Monolithic desc
+ * @err_mode:			Error during buffer starvation
+ * @desc_type:			Host or Monolithic desc
  * @psinfo_at_sop:		PS word located at start of packet
  * @sop_offset:			Start of packet offset
  * @dst_q:			Destination queue for a given flow
  * @thresh:			Rx flow size threshold
- * @fdq[]:			Free desc Queue array
+ * @fdq:			Free desc Queue array
  * @sz_thresh0:			RX packet size threshold 0
  * @sz_thresh1:			RX packet size threshold 1
  * @sz_thresh2:			RX packet size threshold 2
@@ -123,7 +115,8 @@ struct knav_dma_rx_cfg {
 
 /**
  * struct knav_dma_cfg:	Pktdma channel configuration
- * @sl_cfg:			Slave configuration
+ * @direction:			DMA transfer mode and direction
+ * @u:				union containing @tx or @rx
  * @tx:				Tx channel configuration
  * @rx:				Rx flow configuration
  */
@@ -167,6 +160,8 @@ struct knav_dma_desc {
 void *knav_dma_open_channel(struct device *dev, const char *name,
 				struct knav_dma_cfg *config);
 void knav_dma_close_channel(void *channel);
+int knav_dma_get_flow(void *channel);
+bool knav_dma_device_ready(void);
 #else
 static inline void *knav_dma_open_channel(struct device *dev, const char *name,
 				struct knav_dma_cfg *config)
@@ -175,6 +170,16 @@ static inline void *knav_dma_open_channel(struct device *dev, const char *name,
 }
 static inline void knav_dma_close_channel(void *channel)
 {}
+
+static inline int knav_dma_get_flow(void *channel)
+{
+	return -EINVAL;
+}
+
+static inline bool knav_dma_device_ready(void)
+{
+	return false;
+}
 
 #endif
 

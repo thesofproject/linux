@@ -1,15 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * First generation of pinmux driver for Amlogic Meson SoCs
  *
  * Copyright (C) 2014 Beniamino Galvani <b.galvani@gmail.com>
  * Copyright (C) 2017 Jerome Brunet  <jbrunet@baylibre.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
 /* For this first generation of pinctrl driver every pinmux group can be
@@ -38,7 +32,7 @@
 static void meson8_pmx_disable_other_groups(struct meson_pinctrl *pc,
 					    unsigned int pin, int sel_group)
 {
-	struct meson_pmx_group *group;
+	const struct meson_pmx_group *group;
 	struct meson8_pmx_data *pmx_data;
 	int i, j;
 
@@ -63,8 +57,8 @@ static int meson8_pmx_set_mux(struct pinctrl_dev *pcdev, unsigned func_num,
 			      unsigned group_num)
 {
 	struct meson_pinctrl *pc = pinctrl_dev_get_drvdata(pcdev);
-	struct meson_pmx_func *func = &pc->data->funcs[func_num];
-	struct meson_pmx_group *group = &pc->data->groups[group_num];
+	const struct meson_pmx_func *func = &pc->data->funcs[func_num];
+	const struct meson_pmx_group *group = &pc->data->groups[group_num];
 	struct meson8_pmx_data *pmx_data =
 		(struct meson8_pmx_data *)group->data;
 	int i, ret = 0;
@@ -106,3 +100,6 @@ const struct pinmux_ops meson8_pmx_ops = {
 	.get_function_groups = meson_pmx_get_groups,
 	.gpio_request_enable = meson8_pmx_request_gpio,
 };
+EXPORT_SYMBOL_GPL(meson8_pmx_ops);
+MODULE_DESCRIPTION("Amlogic Meson SoCs first generation pinmux driver");
+MODULE_LICENSE("GPL v2");

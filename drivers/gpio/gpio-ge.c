@@ -1,29 +1,28 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for GE FPGA based GPIO
  *
  * Author: Martyn Welch <martyn.welch@ge.com>
  *
  * 2008 (c) GE Intelligent Platforms Embedded Systems, Inc.
- *
- * This file is licensed under the terms of the GNU General Public License
- * version 2.  This program is licensed "as is" without any warranty of any
- * kind, whether express or implied.
  */
 
-/* TODO
+/*
+ * TODO:
  *
- * Configuration of output modes (totem-pole/open-drain)
- * Interrupt configuration - interrupts are always generated the FPGA relies on
- * the I/O interrupt controllers mask to stop them propergating
+ * Configuration of output modes (totem-pole/open-drain).
+ * Interrupt configuration - interrupts are always generated, the FPGA relies
+ * on the I/O interrupt controllers mask to stop them from being propagated.
  */
 
-#include <linux/kernel.h>
-#include <linux/io.h>
-#include <linux/slab.h>
-#include <linux/of_device.h>
-#include <linux/of_address.h>
-#include <linux/module.h>
 #include <linux/gpio/driver.h>
+#include <linux/gpio/generic.h>
+#include <linux/io.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/platform_device.h>
+#include <linux/property.h>
+#include <linux/slab.h>
 
 #define GEF_GPIO_DIRECT		0x00
 #define GEF_GPIO_IN		0x04
@@ -52,50 +51,51 @@ MODULE_DEVICE_TABLE(of, gef_gpio_ids);
 
 static int __init gef_gpio_probe(struct platform_device *pdev)
 {
-	const struct of_device_id *of_id =
-		of_match_device(gef_gpio_ids, &pdev->dev);
+	struct gpio_generic_chip_config config;
+	struct device *dev = &pdev->dev;
+	struct gpio_generic_chip *chip;
 	struct gpio_chip *gc;
 	void __iomem *regs;
 	int ret;
 
-	gc = devm_kzalloc(&pdev->dev, sizeof(*gc), GFP_KERNEL);
-	if (!gc)
+	chip = devm_kzalloc(dev, sizeof(*chip), GFP_KERNEL);
+	if (!chip)
 		return -ENOMEM;
 
-	regs = of_iomap(pdev->dev.of_node, 0);
-	if (!regs)
-		return -ENOMEM;
+	regs = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(regs))
+		return PTR_ERR(regs);
 
-	ret = bgpio_init(gc, &pdev->dev, 4, regs + GEF_GPIO_IN,
-			 regs + GEF_GPIO_OUT, NULL, NULL,
-			 regs + GEF_GPIO_DIRECT, BGPIOF_BIG_ENDIAN_BYTE_ORDER);
-	if (ret) {
-		dev_err(&pdev->dev, "bgpio_init failed\n");
-		goto err0;
-	}
+	config = (struct gpio_generic_chip_config) {
+		.dev = dev,
+		.sz = 4,
+		.dat = regs + GEF_GPIO_IN,
+		.set = regs + GEF_GPIO_OUT,
+		.dirin = regs + GEF_GPIO_DIRECT,
+		.flags = GPIO_GENERIC_BIG_ENDIAN_BYTE_ORDER,
+	};
+
+	ret = gpio_generic_chip_init(chip, &config);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "failed to initialize the generic GPIO chip\n");
+
+	gc = &chip->gc;
 
 	/* Setup pointers to chip functions */
-	gc->label = devm_kasprintf(&pdev->dev, GFP_KERNEL, "%pOF", pdev->dev.of_node);
-	if (!gc->label) {
-		ret = -ENOMEM;
-		goto err0;
-	}
+	gc->label = devm_kasprintf(dev, GFP_KERNEL, "%pfw", dev_fwnode(dev));
+	if (!gc->label)
+		return -ENOMEM;
 
 	gc->base = -1;
-	gc->ngpio = (u16)(uintptr_t)of_id->data;
-	gc->of_gpio_n_cells = 2;
-	gc->of_node = pdev->dev.of_node;
+	gc->ngpio = (uintptr_t)device_get_match_data(dev);
 
 	/* This function adds a memory mapped GPIO chip */
-	ret = devm_gpiochip_add_data(&pdev->dev, gc, NULL);
+	ret = devm_gpiochip_add_data(dev, gc, NULL);
 	if (ret)
-		goto err0;
+		return dev_err_probe(dev, ret, "GPIO chip registration failed\n");
 
 	return 0;
-err0:
-	iounmap(regs);
-	pr_err("%pOF: GPIO chip registration failed\n", pdev->dev.of_node);
-	return ret;
 };
 
 static struct platform_driver gef_gpio_driver = {
@@ -107,5 +107,5 @@ static struct platform_driver gef_gpio_driver = {
 module_platform_driver_probe(gef_gpio_driver, gef_gpio_probe);
 
 MODULE_DESCRIPTION("GE I/O FPGA GPIO driver");
-MODULE_AUTHOR("Martyn Welch <martyn.welch@ge.com");
+MODULE_AUTHOR("Martyn Welch <martyn.welch@ge.com>");
 MODULE_LICENSE("GPL");

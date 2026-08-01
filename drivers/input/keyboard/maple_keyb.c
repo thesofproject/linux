@@ -1,23 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * SEGA Dreamcast keyboard driver
  * Based on drivers/usb/usbkbd.c
  * Copyright (c) YAEGASHI Takeshi, 2001
  * Porting to 2.6 Copyright (c) Adrian McMenamin, 2007 - 2009
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see the file COPYING, or write
- * to the Free Software Foundation, Inc.,
- * 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 #include <linux/kernel.h>
@@ -146,14 +132,11 @@ static void dc_kbd_callback(struct mapleq *mq)
 	 * We should always get the lock because the only
 	 * time it may be locked is if the driver is in the cleanup phase.
 	 */
-	if (likely(mutex_trylock(&maple_keyb_mutex))) {
-
+	scoped_guard(mutex_try, &maple_keyb_mutex) {
 		if (buf[1] == mapledev->function) {
 			memcpy(kbd->new, buf + 2, 8);
 			dc_scan_kbd(kbd);
 		}
-
-		mutex_unlock(&maple_keyb_mutex);
 	}
 }
 
@@ -168,7 +151,7 @@ static int probe_maple_kbd(struct device *dev)
 	mdev = to_maple_dev(dev);
 	mdrv = to_maple_driver(dev->driver);
 
-	kbd = kzalloc(sizeof(struct dc_kbd), GFP_KERNEL);
+	kbd = kzalloc_obj(*kbd);
 	if (!kbd) {
 		error = -ENOMEM;
 		goto fail;
@@ -182,6 +165,8 @@ static int probe_maple_kbd(struct device *dev)
 
 	kbd->dev = idev;
 	memcpy(kbd->keycode, dc_kbd_keycode, sizeof(kbd->keycode));
+
+	maple_set_drvdata(mdev, kbd);
 
 	idev->name = mdev->product_name;
 	idev->evbit[0] = BIT(EV_KEY) | BIT(EV_REP);
@@ -207,8 +192,6 @@ static int probe_maple_kbd(struct device *dev)
 
 	mdev->driver = mdrv;
 
-	maple_set_drvdata(mdev, kbd);
-
 	return error;
 
 fail_register:
@@ -225,14 +208,12 @@ static int remove_maple_kbd(struct device *dev)
 	struct maple_device *mdev = to_maple_dev(dev);
 	struct dc_kbd *kbd = maple_get_drvdata(mdev);
 
-	mutex_lock(&maple_keyb_mutex);
+	guard(mutex)(&maple_keyb_mutex);
 
 	input_unregister_device(kbd->dev);
 	kfree(kbd);
 
 	maple_set_drvdata(mdev, NULL);
-
-	mutex_unlock(&maple_keyb_mutex);
 	return 0;
 }
 

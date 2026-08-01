@@ -1,18 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014 STMicroelectronics
  *
  * Power off Restart driver, used in STMicroelectronics devices.
  *
  * Author: Christophe Kerello <christophe.kerello@st.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2, as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/mfd/syscon.h>
 #include <linux/reboot.h>
@@ -76,14 +72,11 @@ static const struct of_device_id st_reset_of_match[] = {
 static int st_reset_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
-	const struct of_device_id *match;
 	struct device *dev = &pdev->dev;
 
-	match = of_match_device(st_reset_of_match, dev);
-	if (!match)
+	st_restart_syscfg = (struct reset_syscfg *)of_device_get_match_data(dev);
+	if (!st_restart_syscfg)
 		return -ENODEV;
-
-	st_restart_syscfg = (struct reset_syscfg *)match->data;
 
 	st_restart_syscfg->regmap =
 		syscon_regmap_lookup_by_phandle(np, "st,syscfg");
@@ -103,12 +96,7 @@ static struct platform_driver st_reset_driver = {
 	},
 };
 
-static int __init st_reset_init(void)
-{
-	return platform_driver_register(&st_reset_driver);
-}
-
-device_initcall(st_reset_init);
+builtin_platform_driver(st_reset_driver);
 
 MODULE_AUTHOR("Christophe Kerello <christophe.kerello@st.com>");
 MODULE_DESCRIPTION("STMicroelectronics Power off Restart driver");

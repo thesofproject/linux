@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * twl6030-irq.c - TWL6030 irq support
  *
@@ -15,20 +16,6 @@
  * TWL6030 specific code and IRQ handling changes by
  * Jagadeesh Bhaskar Pakaravoor <j-pakaravoor@ti.com>
  * Balaji T K <balajitk@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/export.h>
@@ -269,80 +256,6 @@ int twl6030_interrupt_mask(u8 bit_mask, u8 offset)
 }
 EXPORT_SYMBOL(twl6030_interrupt_mask);
 
-int twl6030_mmc_card_detect_config(void)
-{
-	int ret;
-	u8 reg_val = 0;
-
-	/* Unmasking the Card detect Interrupt line for MMC1 from Phoenix */
-	twl6030_interrupt_unmask(TWL6030_MMCDETECT_INT_MASK,
-						REG_INT_MSK_LINE_B);
-	twl6030_interrupt_unmask(TWL6030_MMCDETECT_INT_MASK,
-						REG_INT_MSK_STS_B);
-	/*
-	 * Initially Configuring MMC_CTRL for receiving interrupts &
-	 * Card status on TWL6030 for MMC1
-	 */
-	ret = twl_i2c_read_u8(TWL6030_MODULE_ID0, &reg_val, TWL6030_MMCCTRL);
-	if (ret < 0) {
-		pr_err("twl6030: Failed to read MMCCTRL, error %d\n", ret);
-		return ret;
-	}
-	reg_val &= ~VMMC_AUTO_OFF;
-	reg_val |= SW_FC;
-	ret = twl_i2c_write_u8(TWL6030_MODULE_ID0, reg_val, TWL6030_MMCCTRL);
-	if (ret < 0) {
-		pr_err("twl6030: Failed to write MMCCTRL, error %d\n", ret);
-		return ret;
-	}
-
-	/* Configuring PullUp-PullDown register */
-	ret = twl_i2c_read_u8(TWL6030_MODULE_ID0, &reg_val,
-						TWL6030_CFG_INPUT_PUPD3);
-	if (ret < 0) {
-		pr_err("twl6030: Failed to read CFG_INPUT_PUPD3, error %d\n",
-									ret);
-		return ret;
-	}
-	reg_val &= ~(MMC_PU | MMC_PD);
-	ret = twl_i2c_write_u8(TWL6030_MODULE_ID0, reg_val,
-						TWL6030_CFG_INPUT_PUPD3);
-	if (ret < 0) {
-		pr_err("twl6030: Failed to write CFG_INPUT_PUPD3, error %d\n",
-									ret);
-		return ret;
-	}
-
-	return irq_find_mapping(twl6030_irq->irq_domain,
-				 MMCDETECT_INTR_OFFSET);
-}
-EXPORT_SYMBOL(twl6030_mmc_card_detect_config);
-
-int twl6030_mmc_card_detect(struct device *dev, int slot)
-{
-	int ret = -EIO;
-	u8 read_reg = 0;
-	struct platform_device *pdev = to_platform_device(dev);
-
-	if (pdev->id) {
-		/* TWL6030 provide's Card detect support for
-		 * only MMC1 controller.
-		 */
-		pr_err("Unknown MMC controller %d in %s\n", pdev->id, __func__);
-		return ret;
-	}
-	/*
-	 * BIT0 of MMC_CTRL on TWL6030 provides card status for MMC1
-	 * 0 - Card not present ,1 - Card present
-	 */
-	ret = twl_i2c_read_u8(TWL6030_MODULE_ID0, &read_reg,
-						TWL6030_MMCCTRL);
-	if (ret >= 0)
-		ret = read_reg & STS_MMC;
-	return ret;
-}
-EXPORT_SYMBOL(twl6030_mmc_card_detect);
-
 static int twl6030_irq_map(struct irq_domain *d, unsigned int virq,
 			      irq_hw_number_t hwirq)
 {
@@ -369,7 +282,7 @@ static const struct irq_domain_ops twl6030_irq_domain_ops = {
 	.xlate	= irq_domain_xlate_onetwocell,
 };
 
-static const struct of_device_id twl6030_of_match[] = {
+static const struct of_device_id twl6030_of_match[] __maybe_unused = {
 	{.compatible = "ti,twl6030", &twl6030_interrupt_mapping},
 	{.compatible = "ti,twl6032", &twl6032_interrupt_mapping},
 	{ },
@@ -377,7 +290,6 @@ static const struct of_device_id twl6030_of_match[] = {
 
 int twl6030_init_irq(struct device *dev, int irq_num)
 {
-	struct			device_node *node = dev->of_node;
 	int			nr_irqs;
 	int			status;
 	u8			mask[3];
@@ -392,10 +304,8 @@ int twl6030_init_irq(struct device *dev, int irq_num)
 	nr_irqs = TWL6030_NR_IRQS;
 
 	twl6030_irq = devm_kzalloc(dev, sizeof(*twl6030_irq), GFP_KERNEL);
-	if (!twl6030_irq) {
-		dev_err(dev, "twl6030_irq: Memory allocation failed\n");
+	if (!twl6030_irq)
 		return -ENOMEM;
-	}
 
 	mask[0] = 0xFF;
 	mask[1] = 0xFF;
@@ -426,9 +336,8 @@ int twl6030_init_irq(struct device *dev, int irq_num)
 	atomic_set(&twl6030_irq->wakeirqs, 0);
 	twl6030_irq->irq_mapping_tbl = of_id->data;
 
-	twl6030_irq->irq_domain =
-		irq_domain_add_linear(node, nr_irqs,
-				      &twl6030_irq_domain_ops, twl6030_irq);
+	twl6030_irq->irq_domain = irq_domain_create_linear(dev_fwnode(dev), nr_irqs,
+							   &twl6030_irq_domain_ops, twl6030_irq);
 	if (!twl6030_irq->irq_domain) {
 		dev_err(dev, "Can't add irq_domain\n");
 		return -ENOMEM;
@@ -453,7 +362,7 @@ fail_irq:
 	return status;
 }
 
-int twl6030_exit_irq(void)
+void twl6030_exit_irq(void)
 {
 	if (twl6030_irq && twl6030_irq->twl_irq) {
 		unregister_pm_notifier(&twl6030_irq->pm_nb);
@@ -468,6 +377,5 @@ int twl6030_exit_irq(void)
 		 * in this module.
 		 */
 	}
-	return 0;
 }
 

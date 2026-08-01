@@ -9,11 +9,17 @@
 //
 // Hash part based on omap-sham.c driver.
 
+#include <crypto/aes.h>
+#include <crypto/ctr.h>
+#include <crypto/internal/hash.h>
+#include <crypto/internal/skcipher.h>
+#include <crypto/md5.h>
+#include <crypto/scatterwalk.h>
+#include <crypto/sha1.h>
+#include <crypto/sha2.h>
 #include <linux/clk.h>
-#include <linux/crypto.h>
 #include <linux/dma-mapping.h>
 #include <linux/err.h>
-#include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -22,16 +28,9 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/scatterlist.h>
-
-#include <crypto/ctr.h>
-#include <crypto/aes.h>
-#include <crypto/algapi.h>
-#include <crypto/scatterwalk.h>
-
-#include <crypto/hash.h>
-#include <crypto/md5.h>
-#include <crypto/sha.h>
-#include <crypto/internal/hash.h>
+#include <linux/slab.h>
+#include <linux/spinlock.h>
+#include <linux/string.h>
 
 #define _SBF(s, v)			((v) << (s))
 
@@ -223,15 +222,13 @@
 /* HASH HW constants */
 #define BUFLEN			HASH_BLOCK_SIZE
 
-#define SSS_HASH_DMA_LEN_ALIGN	8
-#define SSS_HASH_DMA_ALIGN_MASK	(SSS_HASH_DMA_LEN_ALIGN - 1)
-
 #define SSS_HASH_QUEUE_LENGTH	10
 
 /**
  * struct samsung_aes_variant - platform specific SSS driver data
  * @aes_offset: AES register offset from SSS module's base.
  * @hash_offset: HASH register offset from SSS module's base.
+ * @clk_names: names of clocks needed to run SSS IP
  *
  * Specifies platform specific configuration of SSS module.
  * Note: A structure for driver specific platform data is used for future
@@ -240,6 +237,7 @@
 struct samsung_aes_variant {
 	unsigned int			aes_offset;
 	unsigned int			hash_offset;
+	const char			*clk_names[2];
 };
 
 struct s5p_aes_reqctx {
@@ -249,8 +247,8 @@ struct s5p_aes_reqctx {
 struct s5p_aes_ctx {
 	struct s5p_aes_dev		*dev;
 
-	uint8_t				aes_key[AES_MAX_KEY_SIZE];
-	uint8_t				nonce[CTR_RFC3686_NONCE_SIZE];
+	u8				aes_key[AES_MAX_KEY_SIZE];
+	u8				nonce[CTR_RFC3686_NONCE_SIZE];
 	int				keylen;
 };
 
@@ -258,6 +256,7 @@ struct s5p_aes_ctx {
  * struct s5p_aes_dev - Crypto device state container
  * @dev:	Associated device
  * @clk:	Clock for accessing hardware
+ * @pclk:	APB bus clock necessary to access the hardware
  * @ioaddr:	Mapped IO memory region
  * @aes_ioaddr:	Per-varian offset for AES block IO memory
  * @irq_fc:	Feed control interrupt line
@@ -296,11 +295,12 @@ struct s5p_aes_ctx {
 struct s5p_aes_dev {
 	struct device			*dev;
 	struct clk			*clk;
+	struct clk			*pclk;
 	void __iomem			*ioaddr;
 	void __iomem			*aes_ioaddr;
 	int				irq_fc;
 
-	struct ablkcipher_request	*req;
+	struct skcipher_request		*req;
 	struct s5p_aes_ctx		*ctx;
 	struct scatterlist		*sg_src;
 	struct scatterlist		*sg_dst;
@@ -339,13 +339,13 @@ struct s5p_aes_dev {
  * @engine:	Bits for selecting type of HASH in SSS block
  * @sg:		sg for DMA transfer
  * @sg_len:	Length of sg for DMA transfer
- * @sgl[]:	sg for joining buffer and req->src scatterlist
+ * @sgl:	sg for joining buffer and req->src scatterlist
  * @skip:	Skip offset in req->src for current op
  * @total:	Total number of bytes for current request
  * @finup:	Keep state for finup or final.
  * @error:	Keep track of error.
  * @bufcnt:	Number of bytes holded in buffer[]
- * @buffer[]:	For byte(s) from end of req->src in UPDATE op
+ * @buffer:	For byte(s) from end of req->src in UPDATE op
  */
 struct s5p_hash_reqctx {
 	struct s5p_aes_dev	*dd;
@@ -366,7 +366,7 @@ struct s5p_hash_reqctx {
 	bool			error;
 
 	u32			bufcnt;
-	u8			buffer[0];
+	u8			buffer[];
 };
 
 /**
@@ -384,11 +384,19 @@ struct s5p_hash_ctx {
 static const struct samsung_aes_variant s5p_aes_data = {
 	.aes_offset	= 0x4000,
 	.hash_offset	= 0x6000,
+	.clk_names	= { "secss", },
 };
 
 static const struct samsung_aes_variant exynos_aes_data = {
 	.aes_offset	= 0x200,
 	.hash_offset	= 0x400,
+	.clk_names	= { "secss", },
+};
+
+static const struct samsung_aes_variant exynos5433_slim_aes_data = {
+	.aes_offset	= 0x400,
+	.hash_offset	= 0x800,
+	.clk_names	= { "aclk", "pclk", },
 };
 
 static const struct of_device_id s5p_sss_dt_match[] = {
@@ -400,6 +408,10 @@ static const struct of_device_id s5p_sss_dt_match[] = {
 		.compatible = "samsung,exynos4210-secss",
 		.data = &exynos_aes_data,
 	},
+	{
+		.compatible = "samsung,exynos5433-slim-sss",
+		.data = &exynos5433_slim_aes_data,
+	},
 	{ },
 };
 MODULE_DEVICE_TABLE(of, s5p_sss_dt_match);
@@ -407,13 +419,9 @@ MODULE_DEVICE_TABLE(of, s5p_sss_dt_match);
 static inline const struct samsung_aes_variant *find_s5p_sss_version
 				   (const struct platform_device *pdev)
 {
-	if (IS_ENABLED(CONFIG_OF) && (pdev->dev.of_node)) {
-		const struct of_device_id *match;
+	if (IS_ENABLED(CONFIG_OF) && (pdev->dev.of_node))
+		return of_device_get_match_data(&pdev->dev);
 
-		match = of_match_node(s5p_sss_dt_match,
-					pdev->dev.of_node);
-		return (const struct samsung_aes_variant *)match->data;
-	}
 	return (const struct samsung_aes_variant *)
 			platform_get_device_id(pdev)->driver_data;
 }
@@ -441,43 +449,38 @@ static void s5p_free_sg_cpy(struct s5p_aes_dev *dev, struct scatterlist **sg)
 	if (!*sg)
 		return;
 
-	len = ALIGN(dev->req->nbytes, AES_BLOCK_SIZE);
+	len = ALIGN(dev->req->cryptlen, AES_BLOCK_SIZE);
 	free_pages((unsigned long)sg_virt(*sg), get_order(len));
 
 	kfree(*sg);
 	*sg = NULL;
 }
 
-static void s5p_sg_copy_buf(void *buf, struct scatterlist *sg,
-			    unsigned int nbytes, int out)
-{
-	struct scatter_walk walk;
-
-	if (!nbytes)
-		return;
-
-	scatterwalk_start(&walk, sg);
-	scatterwalk_copychunks(buf, &walk, nbytes, out);
-	scatterwalk_done(&walk, out, 0);
-}
-
 static void s5p_sg_done(struct s5p_aes_dev *dev)
 {
+	struct skcipher_request *req = dev->req;
+	struct s5p_aes_reqctx *reqctx = skcipher_request_ctx(req);
+
 	if (dev->sg_dst_cpy) {
 		dev_dbg(dev->dev,
 			"Copying %d bytes of output data back to original place\n",
-			dev->req->nbytes);
-		s5p_sg_copy_buf(sg_virt(dev->sg_dst_cpy), dev->req->dst,
-				dev->req->nbytes, 1);
+			dev->req->cryptlen);
+		memcpy_to_sglist(dev->req->dst, 0, sg_virt(dev->sg_dst_cpy),
+				 dev->req->cryptlen);
 	}
 	s5p_free_sg_cpy(dev, &dev->sg_src_cpy);
 	s5p_free_sg_cpy(dev, &dev->sg_dst_cpy);
+	if (reqctx->mode & FLAGS_AES_CBC)
+		memcpy_fromio(req->iv, dev->aes_ioaddr + SSS_REG_AES_IV_DATA(0), AES_BLOCK_SIZE);
+
+	else if (reqctx->mode & FLAGS_AES_CTR)
+		memcpy_fromio(req->iv, dev->aes_ioaddr + SSS_REG_AES_CNT_DATA(0), AES_BLOCK_SIZE);
 }
 
 /* Calls the completion. Cannot be called with dev->lock hold. */
-static void s5p_aes_complete(struct s5p_aes_dev *dev, int err)
+static void s5p_aes_complete(struct skcipher_request *req, int err)
 {
-	dev->req->base.complete(&dev->req->base, err);
+	skcipher_request_complete(req, err);
 }
 
 static void s5p_unset_outdata(struct s5p_aes_dev *dev)
@@ -491,16 +494,16 @@ static void s5p_unset_indata(struct s5p_aes_dev *dev)
 }
 
 static int s5p_make_sg_cpy(struct s5p_aes_dev *dev, struct scatterlist *src,
-			    struct scatterlist **dst)
+			   struct scatterlist **dst)
 {
 	void *pages;
 	int len;
 
-	*dst = kmalloc(sizeof(**dst), GFP_ATOMIC);
+	*dst = kmalloc_obj(**dst, GFP_ATOMIC);
 	if (!*dst)
 		return -ENOMEM;
 
-	len = ALIGN(dev->req->nbytes, AES_BLOCK_SIZE);
+	len = ALIGN(dev->req->cryptlen, AES_BLOCK_SIZE);
 	pages = (void *)__get_free_pages(GFP_ATOMIC, get_order(len));
 	if (!pages) {
 		kfree(*dst);
@@ -508,7 +511,7 @@ static int s5p_make_sg_cpy(struct s5p_aes_dev *dev, struct scatterlist *src,
 		return -ENOMEM;
 	}
 
-	s5p_sg_copy_buf(pages, src, dev->req->nbytes, 0);
+	memcpy_from_sglist(pages, src, 0, dev->req->cryptlen);
 
 	sg_init_table(*dst, 1);
 	sg_set_buf(*dst, pages, len);
@@ -518,46 +521,28 @@ static int s5p_make_sg_cpy(struct s5p_aes_dev *dev, struct scatterlist *src,
 
 static int s5p_set_outdata(struct s5p_aes_dev *dev, struct scatterlist *sg)
 {
-	int err;
+	if (!sg->length)
+		return -EINVAL;
 
-	if (!sg->length) {
-		err = -EINVAL;
-		goto exit;
-	}
-
-	err = dma_map_sg(dev->dev, sg, 1, DMA_FROM_DEVICE);
-	if (!err) {
-		err = -ENOMEM;
-		goto exit;
-	}
+	if (!dma_map_sg(dev->dev, sg, 1, DMA_FROM_DEVICE))
+		return -ENOMEM;
 
 	dev->sg_dst = sg;
-	err = 0;
 
-exit:
-	return err;
+	return 0;
 }
 
 static int s5p_set_indata(struct s5p_aes_dev *dev, struct scatterlist *sg)
 {
-	int err;
+	if (!sg->length)
+		return -EINVAL;
 
-	if (!sg->length) {
-		err = -EINVAL;
-		goto exit;
-	}
-
-	err = dma_map_sg(dev->dev, sg, 1, DMA_TO_DEVICE);
-	if (!err) {
-		err = -ENOMEM;
-		goto exit;
-	}
+	if (!dma_map_sg(dev->dev, sg, 1, DMA_TO_DEVICE))
+		return -ENOMEM;
 
 	dev->sg_src = sg;
-	err = 0;
 
-exit:
-	return err;
+	return 0;
 }
 
 /*
@@ -655,14 +640,14 @@ static irqreturn_t s5p_aes_interrupt(int irq, void *dev_id)
 {
 	struct platform_device *pdev = dev_id;
 	struct s5p_aes_dev *dev = platform_get_drvdata(pdev);
+	struct skcipher_request *req;
 	int err_dma_tx = 0;
 	int err_dma_rx = 0;
 	int err_dma_hx = 0;
 	bool tx_end = false;
 	bool hx_end = false;
 	unsigned long flags;
-	uint32_t status;
-	u32 st_bits;
+	u32 status, st_bits;
 	int err;
 
 	spin_lock_irqsave(&dev->lock, flags);
@@ -727,7 +712,7 @@ static irqreturn_t s5p_aes_interrupt(int irq, void *dev_id)
 
 		spin_unlock_irqrestore(&dev->lock, flags);
 
-		s5p_aes_complete(dev, 0);
+		s5p_aes_complete(dev->req, 0);
 		/* Device is still busy */
 		tasklet_schedule(&dev->tasklet);
 	} else {
@@ -752,11 +737,12 @@ static irqreturn_t s5p_aes_interrupt(int irq, void *dev_id)
 error:
 	s5p_sg_done(dev);
 	dev->busy = false;
+	req = dev->req;
 	if (err_dma_hx == 1)
 		s5p_set_dma_hashdata(dev, dev->hash_sg_iter);
 
 	spin_unlock_irqrestore(&dev->lock, flags);
-	s5p_aes_complete(dev, err);
+	s5p_aes_complete(req, err);
 
 hash_irq_end:
 	/*
@@ -1034,8 +1020,7 @@ static int s5p_hash_copy_sgs(struct s5p_hash_reqctx *ctx,
 	if (ctx->bufcnt)
 		memcpy(buf, ctx->dd->xmit_buf, ctx->bufcnt);
 
-	scatterwalk_map_and_copy(buf + ctx->bufcnt, sg, ctx->skip,
-				 new_len, 0);
+	memcpy_from_sglist(buf + ctx->bufcnt, sg, ctx->skip, new_len);
 	sg_init_table(ctx->sgl, 1);
 	sg_set_buf(ctx->sgl, buf, len);
 	ctx->sg = ctx->sgl;
@@ -1071,7 +1056,7 @@ static int s5p_hash_copy_sg_lists(struct s5p_hash_reqctx *ctx,
 	if (ctx->bufcnt)
 		n++;
 
-	ctx->sg = kmalloc_array(n, sizeof(*sg), GFP_KERNEL);
+	ctx->sg = kmalloc_objs(*sg, n);
 	if (!ctx->sg) {
 		ctx->error = true;
 		return -ENOMEM;
@@ -1119,7 +1104,7 @@ static int s5p_hash_copy_sg_lists(struct s5p_hash_reqctx *ctx,
  * s5p_hash_prepare_sgs() - prepare sg for processing
  * @ctx:	request context
  * @sg:		source scatterlist request
- * @nbytes:	number of bytes to process from sg
+ * @new_len:	number of bytes to process from sg
  * @final:	final flag
  *
  * Check two conditions: (1) if buffers in sg have len aligned data, and (2)
@@ -1228,8 +1213,7 @@ static int s5p_hash_prepare_request(struct ahash_request *req, bool update)
 		if (len > nbytes)
 			len = nbytes;
 
-		scatterwalk_map_and_copy(ctx->buffer + ctx->bufcnt, req->src,
-					 0, len, 0);
+		memcpy_from_sglist(ctx->buffer + ctx->bufcnt, req->src, 0, len);
 		ctx->bufcnt += len;
 		nbytes -= len;
 		ctx->skip = len;
@@ -1252,9 +1236,8 @@ static int s5p_hash_prepare_request(struct ahash_request *req, bool update)
 		hash_later = ctx->total - xmit_len;
 		/* copy hash_later bytes from end of req->src */
 		/* previous bytes are in xmit_buf, so no overwrite */
-		scatterwalk_map_and_copy(ctx->buffer, req->src,
-					 req->nbytes - hash_later,
-					 hash_later, 0);
+		memcpy_from_sglist(ctx->buffer, req->src,
+				   req->nbytes - hash_later, hash_later);
 	}
 
 	if (xmit_len > BUFLEN) {
@@ -1266,8 +1249,8 @@ static int s5p_hash_prepare_request(struct ahash_request *req, bool update)
 		/* have buffered data only */
 		if (unlikely(!ctx->bufcnt)) {
 			/* first update didn't fill up buffer */
-			scatterwalk_map_and_copy(ctx->dd->xmit_buf, req->src,
-						 0, xmit_len, 0);
+			memcpy_from_sglist(ctx->dd->xmit_buf, req->src,
+					   0, xmit_len);
 		}
 
 		sg_init_table(ctx->sgl, 1);
@@ -1350,7 +1333,7 @@ static void s5p_hash_finish_req(struct ahash_request *req, int err)
 	spin_unlock_irqrestore(&dd->hash_lock, flags);
 
 	if (req->base.complete)
-		req->base.complete(&req->base, err);
+		ahash_request_complete(req, err);
 }
 
 /**
@@ -1392,7 +1375,7 @@ retry:
 		return ret;
 
 	if (backlog)
-		backlog->complete(backlog, -EINPROGRESS);
+		crypto_request_complete(backlog, -EINPROGRESS);
 
 	req = ahash_request_cast(async_req);
 	dd->hash_req = req;
@@ -1505,45 +1488,13 @@ static int s5p_hash_update(struct ahash_request *req)
 		return 0;
 
 	if (ctx->bufcnt + req->nbytes <= BUFLEN) {
-		scatterwalk_map_and_copy(ctx->buffer + ctx->bufcnt, req->src,
-					 0, req->nbytes, 0);
+		memcpy_from_sglist(ctx->buffer + ctx->bufcnt, req->src,
+				   0, req->nbytes);
 		ctx->bufcnt += req->nbytes;
 		return 0;
 	}
 
 	return s5p_hash_enqueue(req, true); /* HASH_OP_UPDATE */
-}
-
-/**
- * s5p_hash_shash_digest() - calculate shash digest
- * @tfm:	crypto transformation
- * @flags:	tfm flags
- * @data:	input data
- * @len:	length of data
- * @out:	output buffer
- */
-static int s5p_hash_shash_digest(struct crypto_shash *tfm, u32 flags,
-				 const u8 *data, unsigned int len, u8 *out)
-{
-	SHASH_DESC_ON_STACK(shash, tfm);
-
-	shash->tfm = tfm;
-	shash->flags = flags & ~CRYPTO_TFM_REQ_MAY_SLEEP;
-
-	return crypto_shash_digest(shash, data, len, out);
-}
-
-/**
- * s5p_hash_final_shash() - calculate shash digest
- * @req:	AHASH request
- */
-static int s5p_hash_final_shash(struct ahash_request *req)
-{
-	struct s5p_hash_ctx *tctx = crypto_tfm_ctx(req->base.tfm);
-	struct s5p_hash_reqctx *ctx = ahash_request_ctx(req);
-
-	return s5p_hash_shash_digest(tctx->fallback, req->base.flags,
-				     ctx->buffer, ctx->bufcnt, req->result);
 }
 
 /**
@@ -1577,8 +1528,12 @@ static int s5p_hash_final(struct ahash_request *req)
 	if (ctx->error)
 		return -EINVAL; /* uncompleted hash is not needed */
 
-	if (!ctx->digcnt && ctx->bufcnt < BUFLEN)
-		return s5p_hash_final_shash(req);
+	if (!ctx->digcnt && ctx->bufcnt < BUFLEN) {
+		struct s5p_hash_ctx *tctx = crypto_tfm_ctx(req->base.tfm);
+
+		return crypto_shash_tfm_digest(tctx->fallback, ctx->buffer,
+					       ctx->bufcnt, req->result);
+	}
 
 	return s5p_hash_enqueue(req, false); /* HASH_OP_FINAL */
 }
@@ -1765,13 +1720,11 @@ static struct ahash_alg algs_sha1_md5_sha256[] = {
 		.cra_name		= "sha1",
 		.cra_driver_name	= "exynos-sha1",
 		.cra_priority		= 100,
-		.cra_flags		= CRYPTO_ALG_TYPE_AHASH |
-					  CRYPTO_ALG_KERN_DRIVER_ONLY |
+		.cra_flags		= CRYPTO_ALG_KERN_DRIVER_ONLY |
 					  CRYPTO_ALG_ASYNC |
 					  CRYPTO_ALG_NEED_FALLBACK,
 		.cra_blocksize		= HASH_BLOCK_SIZE,
 		.cra_ctxsize		= sizeof(struct s5p_hash_ctx),
-		.cra_alignmask		= SSS_HASH_DMA_ALIGN_MASK,
 		.cra_module		= THIS_MODULE,
 		.cra_init		= s5p_hash_cra_init,
 		.cra_exit		= s5p_hash_cra_exit,
@@ -1791,13 +1744,11 @@ static struct ahash_alg algs_sha1_md5_sha256[] = {
 		.cra_name		= "md5",
 		.cra_driver_name	= "exynos-md5",
 		.cra_priority		= 100,
-		.cra_flags		= CRYPTO_ALG_TYPE_AHASH |
-					  CRYPTO_ALG_KERN_DRIVER_ONLY |
+		.cra_flags		= CRYPTO_ALG_KERN_DRIVER_ONLY |
 					  CRYPTO_ALG_ASYNC |
 					  CRYPTO_ALG_NEED_FALLBACK,
 		.cra_blocksize		= HASH_BLOCK_SIZE,
 		.cra_ctxsize		= sizeof(struct s5p_hash_ctx),
-		.cra_alignmask		= SSS_HASH_DMA_ALIGN_MASK,
 		.cra_module		= THIS_MODULE,
 		.cra_init		= s5p_hash_cra_init,
 		.cra_exit		= s5p_hash_cra_exit,
@@ -1817,13 +1768,11 @@ static struct ahash_alg algs_sha1_md5_sha256[] = {
 		.cra_name		= "sha256",
 		.cra_driver_name	= "exynos-sha256",
 		.cra_priority		= 100,
-		.cra_flags		= CRYPTO_ALG_TYPE_AHASH |
-					  CRYPTO_ALG_KERN_DRIVER_ONLY |
+		.cra_flags		= CRYPTO_ALG_KERN_DRIVER_ONLY |
 					  CRYPTO_ALG_ASYNC |
 					  CRYPTO_ALG_NEED_FALLBACK,
 		.cra_blocksize		= HASH_BLOCK_SIZE,
 		.cra_ctxsize		= sizeof(struct s5p_hash_ctx),
-		.cra_alignmask		= SSS_HASH_DMA_ALIGN_MASK,
 		.cra_module		= THIS_MODULE,
 		.cra_init		= s5p_hash_cra_init,
 		.cra_exit		= s5p_hash_cra_exit,
@@ -1833,13 +1782,18 @@ static struct ahash_alg algs_sha1_md5_sha256[] = {
 };
 
 static void s5p_set_aes(struct s5p_aes_dev *dev,
-			const uint8_t *key, const uint8_t *iv,
+			const u8 *key, const u8 *iv, const u8 *ctr,
 			unsigned int keylen)
 {
 	void __iomem *keystart;
 
 	if (iv)
-		memcpy_toio(dev->aes_ioaddr + SSS_REG_AES_IV_DATA(0), iv, 0x10);
+		memcpy_toio(dev->aes_ioaddr + SSS_REG_AES_IV_DATA(0), iv,
+			    AES_BLOCK_SIZE);
+
+	if (ctr)
+		memcpy_toio(dev->aes_ioaddr + SSS_REG_AES_CNT_DATA(0), ctr,
+			    AES_BLOCK_SIZE);
 
 	if (keylen == AES_KEYSIZE_256)
 		keystart = dev->aes_ioaddr + SSS_REG_AES_KEY_DATA(0);
@@ -1863,7 +1817,7 @@ static bool s5p_is_sg_aligned(struct scatterlist *sg)
 }
 
 static int s5p_set_indata_start(struct s5p_aes_dev *dev,
-				struct ablkcipher_request *req)
+				struct skcipher_request *req)
 {
 	struct scatterlist *sg;
 	int err;
@@ -1890,7 +1844,7 @@ static int s5p_set_indata_start(struct s5p_aes_dev *dev,
 }
 
 static int s5p_set_outdata_start(struct s5p_aes_dev *dev,
-				struct ablkcipher_request *req)
+				 struct skcipher_request *req)
 {
 	struct scatterlist *sg;
 	int err;
@@ -1918,24 +1872,28 @@ static int s5p_set_outdata_start(struct s5p_aes_dev *dev,
 
 static void s5p_aes_crypt_start(struct s5p_aes_dev *dev, unsigned long mode)
 {
-	struct ablkcipher_request *req = dev->req;
-	uint32_t aes_control;
+	struct skcipher_request *req = dev->req;
+	u32 aes_control;
 	unsigned long flags;
 	int err;
-	u8 *iv;
+	u8 *iv, *ctr;
 
+	/* This sets bit [13:12] to 00, which selects 128-bit counter */
 	aes_control = SSS_AES_KEY_CHANGE_MODE;
 	if (mode & FLAGS_AES_DECRYPT)
 		aes_control |= SSS_AES_MODE_DECRYPT;
 
 	if ((mode & FLAGS_AES_MODE_MASK) == FLAGS_AES_CBC) {
 		aes_control |= SSS_AES_CHAIN_MODE_CBC;
-		iv = req->info;
+		iv = req->iv;
+		ctr = NULL;
 	} else if ((mode & FLAGS_AES_MODE_MASK) == FLAGS_AES_CTR) {
 		aes_control |= SSS_AES_CHAIN_MODE_CTR;
-		iv = req->info;
+		iv = NULL;
+		ctr = req->iv;
 	} else {
 		iv = NULL; /* AES_ECB */
+		ctr = NULL;
 	}
 
 	if (dev->ctx->keylen == AES_KEYSIZE_192)
@@ -1967,7 +1925,7 @@ static void s5p_aes_crypt_start(struct s5p_aes_dev *dev, unsigned long mode)
 		goto outdata_error;
 
 	SSS_AES_WRITE(dev, AES_CONTROL, aes_control);
-	s5p_set_aes(dev, dev->ctx->aes_key, iv, dev->ctx->keylen);
+	s5p_set_aes(dev, dev->ctx->aes_key, iv, ctr, dev->ctx->keylen);
 
 	s5p_set_dma_indata(dev,  dev->sg_src);
 	s5p_set_dma_outdata(dev, dev->sg_dst);
@@ -1986,7 +1944,7 @@ indata_error:
 	s5p_sg_done(dev);
 	dev->busy = false;
 	spin_unlock_irqrestore(&dev->lock, flags);
-	s5p_aes_complete(dev, err);
+	s5p_aes_complete(req, err);
 }
 
 static void s5p_tasklet_cb(unsigned long data)
@@ -2008,26 +1966,26 @@ static void s5p_tasklet_cb(unsigned long data)
 	spin_unlock_irqrestore(&dev->lock, flags);
 
 	if (backlog)
-		backlog->complete(backlog, -EINPROGRESS);
+		crypto_request_complete(backlog, -EINPROGRESS);
 
-	dev->req = ablkcipher_request_cast(async_req);
+	dev->req = skcipher_request_cast(async_req);
 	dev->ctx = crypto_tfm_ctx(dev->req->base.tfm);
-	reqctx   = ablkcipher_request_ctx(dev->req);
+	reqctx   = skcipher_request_ctx(dev->req);
 
 	s5p_aes_crypt_start(dev, reqctx->mode);
 }
 
 static int s5p_aes_handle_req(struct s5p_aes_dev *dev,
-			      struct ablkcipher_request *req)
+			      struct skcipher_request *req)
 {
 	unsigned long flags;
 	int err;
 
 	spin_lock_irqsave(&dev->lock, flags);
-	err = ablkcipher_enqueue_request(&dev->queue, req);
+	err = crypto_enqueue_request(&dev->queue, &req->base);
 	if (dev->busy) {
 		spin_unlock_irqrestore(&dev->lock, flags);
-		goto exit;
+		return err;
 	}
 	dev->busy = true;
 
@@ -2035,19 +1993,22 @@ static int s5p_aes_handle_req(struct s5p_aes_dev *dev,
 
 	tasklet_schedule(&dev->tasklet);
 
-exit:
 	return err;
 }
 
-static int s5p_aes_crypt(struct ablkcipher_request *req, unsigned long mode)
+static int s5p_aes_crypt(struct skcipher_request *req, unsigned long mode)
 {
-	struct crypto_ablkcipher *tfm = crypto_ablkcipher_reqtfm(req);
-	struct s5p_aes_reqctx *reqctx = ablkcipher_request_ctx(req);
-	struct s5p_aes_ctx *ctx = crypto_ablkcipher_ctx(tfm);
+	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(req);
+	struct s5p_aes_reqctx *reqctx = skcipher_request_ctx(req);
+	struct s5p_aes_ctx *ctx = crypto_skcipher_ctx(tfm);
 	struct s5p_aes_dev *dev = ctx->dev;
 
-	if (!IS_ALIGNED(req->nbytes, AES_BLOCK_SIZE)) {
-		dev_err(dev->dev, "request size is not exact amount of AES blocks\n");
+	if (!req->cryptlen)
+		return 0;
+
+	if (!IS_ALIGNED(req->cryptlen, AES_BLOCK_SIZE) &&
+			((mode & FLAGS_AES_MODE_MASK) != FLAGS_AES_CTR)) {
+		dev_dbg(dev->dev, "request size is not exact amount of AES blocks\n");
 		return -EINVAL;
 	}
 
@@ -2056,10 +2017,10 @@ static int s5p_aes_crypt(struct ablkcipher_request *req, unsigned long mode)
 	return s5p_aes_handle_req(dev, req);
 }
 
-static int s5p_aes_setkey(struct crypto_ablkcipher *cipher,
-			  const uint8_t *key, unsigned int keylen)
+static int s5p_aes_setkey(struct crypto_skcipher *cipher,
+			  const u8 *key, unsigned int keylen)
 {
-	struct crypto_tfm *tfm = crypto_ablkcipher_tfm(cipher);
+	struct crypto_tfm *tfm = crypto_skcipher_tfm(cipher);
 	struct s5p_aes_ctx *ctx = crypto_tfm_ctx(tfm);
 
 	if (keylen != AES_KEYSIZE_128 &&
@@ -2073,86 +2034,104 @@ static int s5p_aes_setkey(struct crypto_ablkcipher *cipher,
 	return 0;
 }
 
-static int s5p_aes_ecb_encrypt(struct ablkcipher_request *req)
+static int s5p_aes_ecb_encrypt(struct skcipher_request *req)
 {
 	return s5p_aes_crypt(req, 0);
 }
 
-static int s5p_aes_ecb_decrypt(struct ablkcipher_request *req)
+static int s5p_aes_ecb_decrypt(struct skcipher_request *req)
 {
 	return s5p_aes_crypt(req, FLAGS_AES_DECRYPT);
 }
 
-static int s5p_aes_cbc_encrypt(struct ablkcipher_request *req)
+static int s5p_aes_cbc_encrypt(struct skcipher_request *req)
 {
 	return s5p_aes_crypt(req, FLAGS_AES_CBC);
 }
 
-static int s5p_aes_cbc_decrypt(struct ablkcipher_request *req)
+static int s5p_aes_cbc_decrypt(struct skcipher_request *req)
 {
 	return s5p_aes_crypt(req, FLAGS_AES_DECRYPT | FLAGS_AES_CBC);
 }
 
-static int s5p_aes_cra_init(struct crypto_tfm *tfm)
+static int s5p_aes_ctr_crypt(struct skcipher_request *req)
 {
-	struct s5p_aes_ctx *ctx = crypto_tfm_ctx(tfm);
+	return s5p_aes_crypt(req, FLAGS_AES_CTR);
+}
+
+static int s5p_aes_init_tfm(struct crypto_skcipher *tfm)
+{
+	struct s5p_aes_ctx *ctx = crypto_skcipher_ctx(tfm);
 
 	ctx->dev = s5p_dev;
-	tfm->crt_ablkcipher.reqsize = sizeof(struct s5p_aes_reqctx);
+	crypto_skcipher_set_reqsize(tfm, sizeof(struct s5p_aes_reqctx));
 
 	return 0;
 }
 
-static struct crypto_alg algs[] = {
+static struct skcipher_alg algs[] = {
 	{
-		.cra_name		= "ecb(aes)",
-		.cra_driver_name	= "ecb-aes-s5p",
-		.cra_priority		= 100,
-		.cra_flags		= CRYPTO_ALG_TYPE_ABLKCIPHER |
-					  CRYPTO_ALG_ASYNC |
+		.base.cra_name		= "ecb(aes)",
+		.base.cra_driver_name	= "ecb-aes-s5p",
+		.base.cra_priority	= 100,
+		.base.cra_flags		= CRYPTO_ALG_ASYNC |
 					  CRYPTO_ALG_KERN_DRIVER_ONLY,
-		.cra_blocksize		= AES_BLOCK_SIZE,
-		.cra_ctxsize		= sizeof(struct s5p_aes_ctx),
-		.cra_alignmask		= 0x0f,
-		.cra_type		= &crypto_ablkcipher_type,
-		.cra_module		= THIS_MODULE,
-		.cra_init		= s5p_aes_cra_init,
-		.cra_u.ablkcipher = {
-			.min_keysize	= AES_MIN_KEY_SIZE,
-			.max_keysize	= AES_MAX_KEY_SIZE,
-			.setkey		= s5p_aes_setkey,
-			.encrypt	= s5p_aes_ecb_encrypt,
-			.decrypt	= s5p_aes_ecb_decrypt,
-		}
+		.base.cra_blocksize	= AES_BLOCK_SIZE,
+		.base.cra_ctxsize	= sizeof(struct s5p_aes_ctx),
+		.base.cra_alignmask	= 0x0f,
+		.base.cra_module	= THIS_MODULE,
+
+		.min_keysize		= AES_MIN_KEY_SIZE,
+		.max_keysize		= AES_MAX_KEY_SIZE,
+		.setkey			= s5p_aes_setkey,
+		.encrypt		= s5p_aes_ecb_encrypt,
+		.decrypt		= s5p_aes_ecb_decrypt,
+		.init			= s5p_aes_init_tfm,
 	},
 	{
-		.cra_name		= "cbc(aes)",
-		.cra_driver_name	= "cbc-aes-s5p",
-		.cra_priority		= 100,
-		.cra_flags		= CRYPTO_ALG_TYPE_ABLKCIPHER |
-					  CRYPTO_ALG_ASYNC |
+		.base.cra_name		= "cbc(aes)",
+		.base.cra_driver_name	= "cbc-aes-s5p",
+		.base.cra_priority	= 100,
+		.base.cra_flags		= CRYPTO_ALG_ASYNC |
 					  CRYPTO_ALG_KERN_DRIVER_ONLY,
-		.cra_blocksize		= AES_BLOCK_SIZE,
-		.cra_ctxsize		= sizeof(struct s5p_aes_ctx),
-		.cra_alignmask		= 0x0f,
-		.cra_type		= &crypto_ablkcipher_type,
-		.cra_module		= THIS_MODULE,
-		.cra_init		= s5p_aes_cra_init,
-		.cra_u.ablkcipher = {
-			.min_keysize	= AES_MIN_KEY_SIZE,
-			.max_keysize	= AES_MAX_KEY_SIZE,
-			.ivsize		= AES_BLOCK_SIZE,
-			.setkey		= s5p_aes_setkey,
-			.encrypt	= s5p_aes_cbc_encrypt,
-			.decrypt	= s5p_aes_cbc_decrypt,
-		}
+		.base.cra_blocksize	= AES_BLOCK_SIZE,
+		.base.cra_ctxsize	= sizeof(struct s5p_aes_ctx),
+		.base.cra_alignmask	= 0x0f,
+		.base.cra_module	= THIS_MODULE,
+
+		.min_keysize		= AES_MIN_KEY_SIZE,
+		.max_keysize		= AES_MAX_KEY_SIZE,
+		.ivsize			= AES_BLOCK_SIZE,
+		.setkey			= s5p_aes_setkey,
+		.encrypt		= s5p_aes_cbc_encrypt,
+		.decrypt		= s5p_aes_cbc_decrypt,
+		.init			= s5p_aes_init_tfm,
+	},
+	{
+		.base.cra_name		= "ctr(aes)",
+		.base.cra_driver_name	= "ctr-aes-s5p",
+		.base.cra_priority	= 100,
+		.base.cra_flags		= CRYPTO_ALG_ASYNC |
+					  CRYPTO_ALG_KERN_DRIVER_ONLY,
+		.base.cra_blocksize	= 1,
+		.base.cra_ctxsize	= sizeof(struct s5p_aes_ctx),
+		.base.cra_alignmask	= 0x0f,
+		.base.cra_module	= THIS_MODULE,
+
+		.min_keysize		= AES_MIN_KEY_SIZE,
+		.max_keysize		= AES_MAX_KEY_SIZE,
+		.ivsize			= AES_BLOCK_SIZE,
+		.setkey			= s5p_aes_setkey,
+		.encrypt		= s5p_aes_ctr_crypt,
+		.decrypt		= s5p_aes_ctr_crypt,
+		.init			= s5p_aes_init_tfm,
 	},
 };
 
 static int s5p_aes_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	int i, j, err = -ENODEV;
+	int i, err;
 	const struct samsung_aes_variant *variant;
 	struct s5p_aes_dev *pdata;
 	struct resource *res;
@@ -2167,6 +2146,8 @@ static int s5p_aes_probe(struct platform_device *pdev)
 
 	variant = find_s5p_sss_version(pdev);
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res)
+		return -EINVAL;
 
 	/*
 	 * Note: HASH and PRNG uses the same registers in secss, avoid
@@ -2182,28 +2163,48 @@ static int s5p_aes_probe(struct platform_device *pdev)
 	}
 
 	pdata->res = res;
-	pdata->ioaddr = devm_ioremap_resource(&pdev->dev, res);
+	pdata->ioaddr = devm_ioremap_resource(dev, res);
 	if (IS_ERR(pdata->ioaddr)) {
 		if (!pdata->use_hash)
 			return PTR_ERR(pdata->ioaddr);
 		/* try AES without HASH */
 		res->end -= 0x300;
 		pdata->use_hash = false;
-		pdata->ioaddr = devm_ioremap_resource(&pdev->dev, res);
+		pdata->ioaddr = devm_ioremap_resource(dev, res);
 		if (IS_ERR(pdata->ioaddr))
 			return PTR_ERR(pdata->ioaddr);
 	}
 
-	pdata->clk = devm_clk_get(dev, "secss");
-	if (IS_ERR(pdata->clk)) {
-		dev_err(dev, "failed to find secss clock source\n");
-		return -ENOENT;
-	}
+	pdata->clk = devm_clk_get(dev, variant->clk_names[0]);
+	if (IS_ERR(pdata->clk))
+		return dev_err_probe(dev, PTR_ERR(pdata->clk),
+				     "failed to find secss clock %s\n",
+				     variant->clk_names[0]);
 
 	err = clk_prepare_enable(pdata->clk);
 	if (err < 0) {
-		dev_err(dev, "Enabling SSS clk failed, err %d\n", err);
+		dev_err(dev, "Enabling clock %s failed, err %d\n",
+			variant->clk_names[0], err);
 		return err;
+	}
+
+	if (variant->clk_names[1]) {
+		pdata->pclk = devm_clk_get(dev, variant->clk_names[1]);
+		if (IS_ERR(pdata->pclk)) {
+			err = dev_err_probe(dev, PTR_ERR(pdata->pclk),
+					    "failed to find clock %s\n",
+					    variant->clk_names[1]);
+			goto err_clk;
+		}
+
+		err = clk_prepare_enable(pdata->pclk);
+		if (err < 0) {
+			dev_err(dev, "Enabling clock %s failed, err %d\n",
+				variant->clk_names[0], err);
+			goto err_clk;
+		}
+	} else {
+		pdata->pclk = NULL;
 	}
 
 	spin_lock_init(&pdata->lock);
@@ -2235,9 +2236,12 @@ static int s5p_aes_probe(struct platform_device *pdev)
 	crypto_init_queue(&pdata->queue, CRYPTO_QUEUE_LEN);
 
 	for (i = 0; i < ARRAY_SIZE(algs); i++) {
-		err = crypto_register_alg(&algs[i]);
-		if (err)
+		err = crypto_register_skcipher(&algs[i]);
+		if (err) {
+			dev_err(dev, "can't register '%s': %d\n",
+				algs[i].base.cra_name, err);
 			goto err_algs;
+		}
 	}
 
 	if (pdata->use_hash) {
@@ -2264,60 +2268,49 @@ static int s5p_aes_probe(struct platform_device *pdev)
 	return 0;
 
 err_hash:
-	for (j = hash_i - 1; j >= 0; j--)
-		crypto_unregister_ahash(&algs_sha1_md5_sha256[j]);
-
+	crypto_unregister_ahashes(algs_sha1_md5_sha256, hash_i);
 	tasklet_kill(&pdata->hash_tasklet);
 	res->end -= 0x300;
 
 err_algs:
-	if (i < ARRAY_SIZE(algs))
-		dev_err(dev, "can't register '%s': %d\n", algs[i].cra_name,
-			err);
-
-	for (j = 0; j < i; j++)
-		crypto_unregister_alg(&algs[j]);
-
+	crypto_unregister_skciphers(algs, i);
 	tasklet_kill(&pdata->tasklet);
 
 err_irq:
-	clk_disable_unprepare(pdata->clk);
+	clk_disable_unprepare(pdata->pclk);
 
+err_clk:
+	clk_disable_unprepare(pdata->clk);
 	s5p_dev = NULL;
 
 	return err;
 }
 
-static int s5p_aes_remove(struct platform_device *pdev)
+static void s5p_aes_remove(struct platform_device *pdev)
 {
 	struct s5p_aes_dev *pdata = platform_get_drvdata(pdev);
-	int i;
 
-	if (!pdata)
-		return -ENODEV;
-
-	for (i = 0; i < ARRAY_SIZE(algs); i++)
-		crypto_unregister_alg(&algs[i]);
+	crypto_unregister_skciphers(algs, ARRAY_SIZE(algs));
 
 	tasklet_kill(&pdata->tasklet);
 	if (pdata->use_hash) {
-		for (i = ARRAY_SIZE(algs_sha1_md5_sha256) - 1; i >= 0; i--)
-			crypto_unregister_ahash(&algs_sha1_md5_sha256[i]);
+		crypto_unregister_ahashes(algs_sha1_md5_sha256,
+					  ARRAY_SIZE(algs_sha1_md5_sha256));
 
 		pdata->res->end -= 0x300;
 		tasklet_kill(&pdata->hash_tasklet);
 		pdata->use_hash = false;
 	}
 
+	clk_disable_unprepare(pdata->pclk);
+
 	clk_disable_unprepare(pdata->clk);
 	s5p_dev = NULL;
-
-	return 0;
 }
 
 static struct platform_driver s5p_aes_crypto = {
 	.probe	= s5p_aes_probe,
-	.remove	= s5p_aes_remove,
+	.remove = s5p_aes_remove,
 	.driver	= {
 		.name	= "s5p-secss",
 		.of_match_table = s5p_sss_dt_match,

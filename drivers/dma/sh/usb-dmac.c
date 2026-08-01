@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Renesas USB DMA Controller Driver
  *
@@ -6,10 +7,6 @@
  * based on rcar-dmac.c
  * Copyright (C) 2014 Renesas Electronics Inc.
  * Author: Laurent Pinchart <laurent.pinchart@ideasonboard.com>
- *
- * This is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
  */
 
 #include <linux/delay.h>
@@ -60,7 +57,7 @@ struct usb_dmac_desc {
 	u32 residue;
 	struct list_head node;
 	dma_cookie_t done_cookie;
-	struct usb_dmac_sg sg[0];
+	struct usb_dmac_sg sg[] __counted_by(sg_allocated_len);
 };
 
 #define to_usb_dmac_desc(vd)	container_of(vd, struct usb_dmac_desc, vd)
@@ -269,7 +266,7 @@ static int usb_dmac_desc_alloc(struct usb_dmac_chan *chan, unsigned int sg_len,
 	struct usb_dmac_desc *desc;
 	unsigned long flags;
 
-	desc = kzalloc(sizeof(*desc) + sg_len * sizeof(desc->sg[0]), gfp);
+	desc = kzalloc_flex(*desc, sg, sg_len, gfp);
 	if (!desc)
 		return -ENOMEM;
 
@@ -304,7 +301,7 @@ static struct usb_dmac_desc *usb_dmac_desc_get(struct usb_dmac_chan *chan,
 	struct usb_dmac_desc *desc = NULL;
 	unsigned long flags;
 
-	/* Get a freed descritpor */
+	/* Get a freed descriptor */
 	spin_lock_irqsave(&chan->vc.lock, flags);
 	list_for_each_entry(desc, &chan->desc_freed, node) {
 		if (sg_len <= desc->sg_allocated_len) {
@@ -469,7 +466,7 @@ static int usb_dmac_chan_terminate_all(struct dma_chan *chan)
 
 static unsigned int usb_dmac_get_current_residue(struct usb_dmac_chan *chan,
 						 struct usb_dmac_desc *desc,
-						 int sg_index)
+						 unsigned int sg_index)
 {
 	struct usb_dmac_sg *sg = desc->sg + sg_index;
 	u32 mem_addr = sg->mem_addr & 0xffffffff;
@@ -589,6 +586,8 @@ static void usb_dmac_isr_transfer_end(struct usb_dmac_chan *chan)
 		desc->residue = usb_dmac_get_current_residue(chan, desc,
 							desc->sg_index - 1);
 		desc->done_cookie = desc->vd.tx.cookie;
+		desc->vd.tx_result.result = DMA_TRANS_NOERROR;
+		desc->vd.tx_result.residue = desc->residue;
 		vchan_cookie_complete(&desc->vd);
 
 		/* Restart the next transfer if this driver has a next desc */
@@ -639,9 +638,6 @@ static bool usb_dmac_chan_filter(struct dma_chan *chan, void *arg)
 	struct usb_dmac_chan *uchan = to_usb_dmac_chan(chan);
 	struct of_phandle_args *dma_spec = arg;
 
-	if (dma_spec->np != chan->device->dev->of_node)
-		return false;
-
 	/* USB-DMAC should be used with fixed usb controller's FIFO */
 	if (uchan->index != dma_spec->args[0])
 		return false;
@@ -662,7 +658,8 @@ static struct dma_chan *usb_dmac_of_xlate(struct of_phandle_args *dma_spec,
 	dma_cap_zero(mask);
 	dma_cap_set(DMA_SLAVE, mask);
 
-	chan = dma_request_channel(mask, usb_dmac_chan_filter, dma_spec);
+	chan = __dma_request_channel(&mask, usb_dmac_chan_filter, dma_spec,
+				     ofdma->of_node);
 	if (!chan)
 		return NULL;
 
@@ -673,7 +670,6 @@ static struct dma_chan *usb_dmac_of_xlate(struct of_phandle_args *dma_spec,
  * Power management
  */
 
-#ifdef CONFIG_PM
 static int usb_dmac_runtime_suspend(struct device *dev)
 {
 	struct usb_dmac *dmac = dev_get_drvdata(dev);
@@ -694,11 +690,11 @@ static int usb_dmac_runtime_resume(struct device *dev)
 
 	return usb_dmac_init(dmac);
 }
-#endif /* CONFIG_PM */
 
 static const struct dev_pm_ops usb_dmac_pm = {
-	SET_RUNTIME_PM_OPS(usb_dmac_runtime_suspend, usb_dmac_runtime_resume,
-			   NULL)
+	NOIRQ_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
+				  pm_runtime_force_resume)
+	RUNTIME_PM_OPS(usb_dmac_runtime_suspend, usb_dmac_runtime_resume, NULL)
 };
 
 /* -----------------------------------------------------------------------------
@@ -707,10 +703,10 @@ static const struct dev_pm_ops usb_dmac_pm = {
 
 static int usb_dmac_chan_probe(struct usb_dmac *dmac,
 			       struct usb_dmac_chan *uchan,
-			       unsigned int index)
+			       u8 index)
 {
 	struct platform_device *pdev = to_platform_device(dmac->dev);
-	char pdev_irqname[5];
+	char pdev_irqname[6];
 	char *irqname;
 	int ret;
 
@@ -718,12 +714,10 @@ static int usb_dmac_chan_probe(struct usb_dmac *dmac,
 	uchan->iomem = dmac->iomem + USB_DMAC_CHAN_OFFSET(index);
 
 	/* Request the channel interrupt. */
-	sprintf(pdev_irqname, "ch%u", index);
+	scnprintf(pdev_irqname, sizeof(pdev_irqname), "ch%u", index);
 	uchan->irq = platform_get_irq_byname(pdev, pdev_irqname);
-	if (uchan->irq < 0) {
-		dev_err(dmac->dev, "no IRQ specified for channel %u\n", index);
+	if (uchan->irq < 0)
 		return -ENODEV;
-	}
 
 	irqname = devm_kasprintf(dmac->dev, GFP_KERNEL, "%s:%u",
 				 dev_name(dmac->dev), index);
@@ -771,9 +765,8 @@ static int usb_dmac_probe(struct platform_device *pdev)
 	const enum dma_slave_buswidth widths = USB_DMAC_SLAVE_BUSWIDTH;
 	struct dma_device *engine;
 	struct usb_dmac *dmac;
-	struct resource *mem;
-	unsigned int i;
 	int ret;
+	u8 i;
 
 	dmac = devm_kzalloc(&pdev->dev, sizeof(*dmac), GFP_KERNEL);
 	if (!dmac)
@@ -792,8 +785,7 @@ static int usb_dmac_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	/* Request resources. */
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	dmac->iomem = devm_ioremap_resource(&pdev->dev, mem);
+	dmac->iomem = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(dmac->iomem))
 		return PTR_ERR(dmac->iomem);
 
@@ -858,8 +850,8 @@ static int usb_dmac_probe(struct platform_device *pdev)
 
 error:
 	of_dma_controller_free(pdev->dev.of_node);
-	pm_runtime_put(&pdev->dev);
 error_pm:
+	pm_runtime_put(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 	return ret;
 }
@@ -871,10 +863,10 @@ static void usb_dmac_chan_remove(struct usb_dmac *dmac,
 	devm_free_irq(dmac->dev, uchan->irq, uchan);
 }
 
-static int usb_dmac_remove(struct platform_device *pdev)
+static void usb_dmac_remove(struct platform_device *pdev)
 {
 	struct usb_dmac *dmac = platform_get_drvdata(pdev);
-	int i;
+	u8 i;
 
 	for (i = 0; i < dmac->n_channels; ++i)
 		usb_dmac_chan_remove(dmac, &dmac->channels[i]);
@@ -882,8 +874,6 @@ static int usb_dmac_remove(struct platform_device *pdev)
 	dma_async_device_unregister(&dmac->engine);
 
 	pm_runtime_disable(&pdev->dev);
-
-	return 0;
 }
 
 static void usb_dmac_shutdown(struct platform_device *pdev)
@@ -901,7 +891,7 @@ MODULE_DEVICE_TABLE(of, usb_dmac_of_ids);
 
 static struct platform_driver usb_dmac_driver = {
 	.driver		= {
-		.pm	= &usb_dmac_pm,
+		.pm	= pm_ptr(&usb_dmac_pm),
 		.name	= "usb-dmac",
 		.of_match_table = usb_dmac_of_ids,
 	},

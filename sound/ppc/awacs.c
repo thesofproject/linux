@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * PMac AWACS lowlevel functions
  *
  * Copyright (c) by Takashi Iwai <tiwai@suse.de>
  * code based on dmasound.c.
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 
@@ -24,6 +11,7 @@
 #include <asm/nvram.h>
 #include <linux/init.h>
 #include <linux/delay.h>
+#include <linux/of.h>
 #include <linux/slab.h>
 #include <sound/core.h>
 #include "pmac.h"
@@ -51,7 +39,7 @@ static void snd_pmac_screamer_wait(struct snd_pmac *chip)
 	while (!(in_le32(&chip->awacs->codec_stat) & MASK_VALID)) {
 		mdelay(1);
 		if (! --timeout) {
-			snd_printd("snd_pmac_screamer_wait timeout\n");
+			dev_dbg(chip->card->dev, "%s timeout\n", __func__);
 			break;
 		}
 	}
@@ -70,7 +58,7 @@ snd_pmac_awacs_write(struct snd_pmac *chip, int val)
 	out_le32(&chip->awacs->codec_ctrl, val | (chip->subframe << 22));
 	while (in_le32(&chip->awacs->codec_ctrl) & MASK_NEWECMD) {
 		if (! --timeout) {
-			snd_printd("snd_pmac_awacs_write timeout\n");
+			dev_dbg(chip->card->dev, "%s timeout\n", __func__);
 			break;
 		}
 	}
@@ -149,13 +137,11 @@ static int snd_pmac_awacs_get_volume(struct snd_kcontrol *kcontrol,
 	int reg = kcontrol->private_value & 0xff;
 	int lshift = (kcontrol->private_value >> 8) & 0xff;
 	int inverted = (kcontrol->private_value >> 16) & 1;
-	unsigned long flags;
 	int vol[2];
 
-	spin_lock_irqsave(&chip->reg_lock, flags);
+	guard(spinlock_irqsave)(&chip->reg_lock);
 	vol[0] = (chip->awacs_reg[reg] >> lshift) & 0xf;
 	vol[1] = chip->awacs_reg[reg] & 0xf;
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	if (inverted) {
 		vol[0] = 0x0f - vol[0];
 		vol[1] = 0x0f - vol[1];
@@ -173,7 +159,6 @@ static int snd_pmac_awacs_put_volume(struct snd_kcontrol *kcontrol,
 	int lshift = (kcontrol->private_value >> 8) & 0xff;
 	int inverted = (kcontrol->private_value >> 16) & 1;
 	int val, oldval;
-	unsigned long flags;
 	unsigned int vol[2];
 
 	vol[0] = ucontrol->value.integer.value[0];
@@ -186,14 +171,13 @@ static int snd_pmac_awacs_put_volume(struct snd_kcontrol *kcontrol,
 	}
 	vol[0] &= 0x0f;
 	vol[1] &= 0x0f;
-	spin_lock_irqsave(&chip->reg_lock, flags);
+	guard(spinlock_irqsave)(&chip->reg_lock);
 	oldval = chip->awacs_reg[reg];
 	val = oldval & ~(0xf | (0xf << lshift));
 	val |= vol[0] << lshift;
 	val |= vol[1];
 	if (oldval != val)
 		snd_pmac_awacs_write_reg(chip, reg, val);
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	return oldval != reg;
 }
 
@@ -216,11 +200,9 @@ static int snd_pmac_awacs_get_switch(struct snd_kcontrol *kcontrol,
 	int shift = (kcontrol->private_value >> 8) & 0xff;
 	int invert = (kcontrol->private_value >> 16) & 1;
 	int val;
-	unsigned long flags;
 
-	spin_lock_irqsave(&chip->reg_lock, flags);
+	guard(spinlock_irqsave)(&chip->reg_lock);
 	val = (chip->awacs_reg[reg] >> shift) & 1;
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	if (invert)
 		val = 1 - val;
 	ucontrol->value.integer.value[0] = val;
@@ -236,16 +218,14 @@ static int snd_pmac_awacs_put_switch(struct snd_kcontrol *kcontrol,
 	int invert = (kcontrol->private_value >> 16) & 1;
 	int mask = 1 << shift;
 	int val, changed;
-	unsigned long flags;
 
-	spin_lock_irqsave(&chip->reg_lock, flags);
+	guard(spinlock_irqsave)(&chip->reg_lock);
 	val = chip->awacs_reg[reg] & ~mask;
 	if (ucontrol->value.integer.value[0] != invert)
 		val |= mask;
 	changed = chip->awacs_reg[reg] != val;
 	if (changed)
 		snd_pmac_awacs_write_reg(chip, reg, val);
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	return changed;
 }
 
@@ -477,7 +457,7 @@ static int snd_pmac_awacs_put_master_amp(struct snd_kcontrol *kcontrol,
 #define AMP_CH_SPK	0
 #define AMP_CH_HD	1
 
-static struct snd_kcontrol_new snd_pmac_awacs_amp_vol[] = {
+static const struct snd_kcontrol_new snd_pmac_awacs_amp_vol[] = {
 	{ .iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	  .name = "Speaker Playback Volume",
 	  .info = snd_pmac_awacs_info_volume_amp,
@@ -553,14 +533,12 @@ static int snd_pmac_screamer_mic_boost_get(struct snd_kcontrol *kcontrol,
 {
 	struct snd_pmac *chip = snd_kcontrol_chip(kcontrol);
 	int val = 0;
-	unsigned long flags;
 
-	spin_lock_irqsave(&chip->reg_lock, flags);
+	guard(spinlock_irqsave)(&chip->reg_lock);
 	if (chip->awacs_reg[6] & MASK_MIC_BOOST)
 		val |= 2;
 	if (chip->awacs_reg[0] & MASK_GAINLINE)
 		val |= 1;
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	ucontrol->value.integer.value[0] = val;
 	return 0;
 }
@@ -571,9 +549,8 @@ static int snd_pmac_screamer_mic_boost_put(struct snd_kcontrol *kcontrol,
 	struct snd_pmac *chip = snd_kcontrol_chip(kcontrol);
 	int changed = 0;
 	int val0, val6;
-	unsigned long flags;
 
-	spin_lock_irqsave(&chip->reg_lock, flags);
+	guard(spinlock_irqsave)(&chip->reg_lock);
 	val0 = chip->awacs_reg[0] & ~MASK_GAINLINE;
 	val6 = chip->awacs_reg[6] & ~MASK_MIC_BOOST;
 	if (ucontrol->value.integer.value[0] & 1)
@@ -588,53 +565,52 @@ static int snd_pmac_screamer_mic_boost_put(struct snd_kcontrol *kcontrol,
 		snd_pmac_awacs_write_reg(chip, 6, val6);
 		changed = 1;
 	}
-	spin_unlock_irqrestore(&chip->reg_lock, flags);
 	return changed;
 }
 
 /*
  * lists of mixer elements
  */
-static struct snd_kcontrol_new snd_pmac_awacs_mixers[] = {
+static const struct snd_kcontrol_new snd_pmac_awacs_mixers[] = {
 	AWACS_SWITCH("Master Capture Switch", 1, SHIFT_LOOPTHRU, 0),
 	AWACS_VOLUME("Master Capture Volume", 0, 4, 0),
 /*	AWACS_SWITCH("Unknown Playback Switch", 6, SHIFT_PAROUT0, 0), */
 };
 
-static struct snd_kcontrol_new snd_pmac_screamer_mixers_beige[] = {
+static const struct snd_kcontrol_new snd_pmac_screamer_mixers_beige[] = {
 	AWACS_VOLUME("Master Playback Volume", 2, 6, 1),
 	AWACS_VOLUME("Play-through Playback Volume", 5, 6, 1),
 	AWACS_SWITCH("Line Capture Switch", 0, SHIFT_MUX_MIC, 0),
 	AWACS_SWITCH("CD Capture Switch", 0, SHIFT_MUX_LINE, 0),
 };
 
-static struct snd_kcontrol_new snd_pmac_screamer_mixers_lo[] = {
+static const struct snd_kcontrol_new snd_pmac_screamer_mixers_lo[] = {
 	AWACS_VOLUME("Line out Playback Volume", 2, 6, 1),
 };
 
-static struct snd_kcontrol_new snd_pmac_screamer_mixers_imac[] = {
+static const struct snd_kcontrol_new snd_pmac_screamer_mixers_imac[] = {
 	AWACS_VOLUME("Play-through Playback Volume", 5, 6, 1),
 	AWACS_SWITCH("CD Capture Switch", 0, SHIFT_MUX_CD, 0),
 };
 
-static struct snd_kcontrol_new snd_pmac_screamer_mixers_g4agp[] = {
+static const struct snd_kcontrol_new snd_pmac_screamer_mixers_g4agp[] = {
 	AWACS_VOLUME("Line out Playback Volume", 2, 6, 1),
 	AWACS_VOLUME("Master Playback Volume", 5, 6, 1),
 	AWACS_SWITCH("CD Capture Switch", 0, SHIFT_MUX_CD, 0),
 	AWACS_SWITCH("Line Capture Switch", 0, SHIFT_MUX_MIC, 0),
 };
 
-static struct snd_kcontrol_new snd_pmac_awacs_mixers_pmac7500[] = {
+static const struct snd_kcontrol_new snd_pmac_awacs_mixers_pmac7500[] = {
 	AWACS_VOLUME("Line out Playback Volume", 2, 6, 1),
 	AWACS_SWITCH("CD Capture Switch", 0, SHIFT_MUX_CD, 0),
 	AWACS_SWITCH("Line Capture Switch", 0, SHIFT_MUX_MIC, 0),
 };
 
-static struct snd_kcontrol_new snd_pmac_awacs_mixers_pmac5500[] = {
+static const struct snd_kcontrol_new snd_pmac_awacs_mixers_pmac5500[] = {
 	AWACS_VOLUME("Headphone Playback Volume", 2, 6, 1),
 };
 
-static struct snd_kcontrol_new snd_pmac_awacs_mixers_pmac[] = {
+static const struct snd_kcontrol_new snd_pmac_awacs_mixers_pmac[] = {
 	AWACS_VOLUME("Master Playback Volume", 2, 6, 1),
 	AWACS_SWITCH("CD Capture Switch", 0, SHIFT_MUX_CD, 0),
 };
@@ -642,34 +618,34 @@ static struct snd_kcontrol_new snd_pmac_awacs_mixers_pmac[] = {
 /* FIXME: is this correct order?
  * screamer (powerbook G3 pismo) seems to have different bits...
  */
-static struct snd_kcontrol_new snd_pmac_awacs_mixers2[] = {
+static const struct snd_kcontrol_new snd_pmac_awacs_mixers2[] = {
 	AWACS_SWITCH("Line Capture Switch", 0, SHIFT_MUX_LINE, 0),
 	AWACS_SWITCH("Mic Capture Switch", 0, SHIFT_MUX_MIC, 0),
 };
 
-static struct snd_kcontrol_new snd_pmac_screamer_mixers2[] = {
+static const struct snd_kcontrol_new snd_pmac_screamer_mixers2[] = {
 	AWACS_SWITCH("Line Capture Switch", 0, SHIFT_MUX_MIC, 0),
 	AWACS_SWITCH("Mic Capture Switch", 0, SHIFT_MUX_LINE, 0),
 };
 
-static struct snd_kcontrol_new snd_pmac_awacs_mixers2_pmac5500[] = {
+static const struct snd_kcontrol_new snd_pmac_awacs_mixers2_pmac5500[] = {
 	AWACS_SWITCH("CD Capture Switch", 0, SHIFT_MUX_CD, 0),
 };
 
-static struct snd_kcontrol_new snd_pmac_awacs_master_sw =
+static const struct snd_kcontrol_new snd_pmac_awacs_master_sw =
 AWACS_SWITCH("Master Playback Switch", 1, SHIFT_HDMUTE, 1);
 
-static struct snd_kcontrol_new snd_pmac_awacs_master_sw_imac =
+static const struct snd_kcontrol_new snd_pmac_awacs_master_sw_imac =
 AWACS_SWITCH("Line out Playback Switch", 1, SHIFT_HDMUTE, 1);
 
-static struct snd_kcontrol_new snd_pmac_awacs_master_sw_pmac5500 =
+static const struct snd_kcontrol_new snd_pmac_awacs_master_sw_pmac5500 =
 AWACS_SWITCH("Headphone Playback Switch", 1, SHIFT_HDMUTE, 1);
 
-static struct snd_kcontrol_new snd_pmac_awacs_mic_boost[] = {
+static const struct snd_kcontrol_new snd_pmac_awacs_mic_boost[] = {
 	AWACS_SWITCH("Mic Boost Capture Switch", 0, SHIFT_GAINLINE, 0),
 };
 
-static struct snd_kcontrol_new snd_pmac_screamer_mic_boost[] = {
+static const struct snd_kcontrol_new snd_pmac_screamer_mic_boost[] = {
 	{ .iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 	  .name = "Mic Boost Capture Volume",
 	  .info = snd_pmac_screamer_mic_boost_info,
@@ -678,34 +654,34 @@ static struct snd_kcontrol_new snd_pmac_screamer_mic_boost[] = {
 	},
 };
 
-static struct snd_kcontrol_new snd_pmac_awacs_mic_boost_pmac7500[] =
+static const struct snd_kcontrol_new snd_pmac_awacs_mic_boost_pmac7500[] =
 {
 	AWACS_SWITCH("Line Boost Capture Switch", 0, SHIFT_GAINLINE, 0),
 };
 
-static struct snd_kcontrol_new snd_pmac_screamer_mic_boost_beige[] =
+static const struct snd_kcontrol_new snd_pmac_screamer_mic_boost_beige[] =
 {
 	AWACS_SWITCH("Line Boost Capture Switch", 0, SHIFT_GAINLINE, 0),
 	AWACS_SWITCH("CD Boost Capture Switch", 6, SHIFT_MIC_BOOST, 0),
 };
 
-static struct snd_kcontrol_new snd_pmac_screamer_mic_boost_imac[] =
+static const struct snd_kcontrol_new snd_pmac_screamer_mic_boost_imac[] =
 {
 	AWACS_SWITCH("Line Boost Capture Switch", 0, SHIFT_GAINLINE, 0),
 	AWACS_SWITCH("Mic Boost Capture Switch", 6, SHIFT_MIC_BOOST, 0),
 };
 
-static struct snd_kcontrol_new snd_pmac_awacs_speaker_vol[] = {
+static const struct snd_kcontrol_new snd_pmac_awacs_speaker_vol[] = {
 	AWACS_VOLUME("Speaker Playback Volume", 4, 6, 1),
 };
 
-static struct snd_kcontrol_new snd_pmac_awacs_speaker_sw =
+static const struct snd_kcontrol_new snd_pmac_awacs_speaker_sw =
 AWACS_SWITCH("Speaker Playback Switch", 1, SHIFT_SPKMUTE, 1);
 
-static struct snd_kcontrol_new snd_pmac_awacs_speaker_sw_imac1 =
+static const struct snd_kcontrol_new snd_pmac_awacs_speaker_sw_imac1 =
 AWACS_SWITCH("Speaker Playback Switch", 1, SHIFT_PAROUT1, 1);
 
-static struct snd_kcontrol_new snd_pmac_awacs_speaker_sw_imac2 =
+static const struct snd_kcontrol_new snd_pmac_awacs_speaker_sw_imac2 =
 AWACS_SWITCH("Speaker Playback Switch", 1, SHIFT_PAROUT1, 0);
 
 
@@ -713,7 +689,7 @@ AWACS_SWITCH("Speaker Playback Switch", 1, SHIFT_PAROUT1, 0);
  * add new mixer elements to the card
  */
 static int build_mixers(struct snd_pmac *chip, int nums,
-			struct snd_kcontrol_new *mixers)
+			const struct snd_kcontrol_new *mixers)
 {
 	int i, err;
 
@@ -920,7 +896,7 @@ snd_pmac_awacs_init(struct snd_pmac *chip)
 	chip->revision = (in_le32(&chip->awacs->codec_stat) >> 12) & 0xf;
 #ifdef PMAC_AMP_AVAIL
 	if (chip->revision == 3 && chip->has_iic && CHECK_CUDA_AMP()) {
-		struct awacs_amp *amp = kzalloc(sizeof(*amp), GFP_KERNEL);
+		struct awacs_amp *amp = kzalloc_obj(*amp);
 		if (! amp)
 			return -ENOMEM;
 		chip->mixer_data = amp;
@@ -968,7 +944,7 @@ snd_pmac_awacs_init(struct snd_pmac *chip)
 	/*
 	 * build mixers
 	 */
-	strcpy(chip->card->mixername, "PowerMac AWACS");
+	strscpy(chip->card->mixername, "PowerMac AWACS");
 
 	err = build_mixers(chip, ARRAY_SIZE(snd_pmac_awacs_mixers),
 				snd_pmac_awacs_mixers);
@@ -1076,12 +1052,12 @@ snd_pmac_awacs_init(struct snd_pmac *chip)
 	if (pm5500 || imac || lombard) {
 		vmaster_sw = snd_ctl_make_virtual_master(
 			"Master Playback Switch", (unsigned int *) NULL);
-		err = snd_ctl_add_slave_uncached(vmaster_sw,
-						 chip->master_sw_ctl);
+		err = snd_ctl_add_follower_uncached(vmaster_sw,
+						    chip->master_sw_ctl);
 		if (err < 0)
 			return err;
-		err = snd_ctl_add_slave_uncached(vmaster_sw,
-						  chip->speaker_sw_ctl);
+		err = snd_ctl_add_follower_uncached(vmaster_sw,
+						    chip->speaker_sw_ctl);
 		if (err < 0)
 			return err;
 		err = snd_ctl_add(chip->card, vmaster_sw);
@@ -1089,10 +1065,10 @@ snd_pmac_awacs_init(struct snd_pmac *chip)
 			return err;
 		vmaster_vol = snd_ctl_make_virtual_master(
 			"Master Playback Volume", (unsigned int *) NULL);
-		err = snd_ctl_add_slave(vmaster_vol, master_vol);
+		err = snd_ctl_add_follower(vmaster_vol, master_vol);
 		if (err < 0)
 			return err;
-		err = snd_ctl_add_slave(vmaster_vol, speaker_vol);
+		err = snd_ctl_add_follower(vmaster_vol, speaker_vol);
 		if (err < 0)
 			return err;
 		err = snd_ctl_add(chip->card, vmaster_vol);

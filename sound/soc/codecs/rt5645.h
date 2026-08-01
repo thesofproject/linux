@@ -1,18 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * rt5645.h  --  RT5645 ALSA SoC audio driver
  *
  * Copyright 2013 Realtek Microelectronics
  * Author: Bard Liao <bardliao@realtek.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __RT5645_H__
 #define __RT5645_H__
-
-#include <sound/rt5645.h>
 
 /* Info */
 #define RT5645_RESET				0x00
@@ -123,6 +118,7 @@
 #define RT5645_A_JD_CTRL1			0x94
 #define RT5645_VAD_CTRL4			0x9d
 #define RT5645_CLSD_OUT_CTRL			0xa0
+#define RT5645_CLSD_OUT_CTRL1			0xa1
 /* Function - Digital */
 #define RT5645_ADC_EQ_CTRL1			0xae
 #define RT5645_ADC_EQ_CTRL2			0xaf
@@ -2016,6 +2012,12 @@
 #define RT5645_ZCD_HP_DIS			(0x0 << 15)
 #define RT5645_ZCD_HP_EN			(0x1 << 15)
 
+/* Buttons Inline Command Function 2 (0xe0) */
+#define RT5645_EN_4BTN_IL_MASK			(0x1 << 15)
+#define RT5645_EN_4BTN_IL_EN			(0x1 << 15)
+#define RT5645_RST_4BTN_IL_MASK			(0x1 << 14)
+#define RT5645_RST_4BTN_IL_RST			(0x0 << 14)
+#define RT5645_RST_4BTN_IL_NORM			(0x1 << 14)
 
 /* Codec Private Register definition */
 /* DAC ADC Digital Volume (0x00) */
@@ -2206,4 +2208,7 @@ int rt5645_sel_asrc_clk_src(struct snd_soc_component *component,
 int rt5645_set_jack_detect(struct snd_soc_component *component,
 	struct snd_soc_jack *hp_jack, struct snd_soc_jack *mic_jack,
 	struct snd_soc_jack *btn_jack);
+
+const char *rt5645_components(struct device *codec_dev);
+
 #endif /* __RT5645_H__ */

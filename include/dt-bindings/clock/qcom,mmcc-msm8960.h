@@ -1,14 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2013, The Linux Foundation. All rights reserved.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef _DT_BINDINGS_CLK_MSM_MMCC_8960_H
@@ -141,5 +133,7 @@
 #define VCAP_CLK					124
 #define VCAP_NPL_CLK					125
 #define PLL15						126
+#define DSI2_PIXEL_LVDS_SRC				127
+#define LVDS_CLK					128
 
 #endif

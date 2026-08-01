@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   Copyright (c) 2007 Daniel Mack
  *   friendly supported by NI.
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/device.h>
@@ -100,6 +87,7 @@ static int control_put(struct snd_kcontrol *kcontrol,
 	struct snd_usb_caiaqdev *cdev = caiaqdev(chip->card);
 	int pos = kcontrol->private_value;
 	int v = ucontrol->value.integer.value[0];
+	int ret;
 	unsigned char cmd;
 
 	switch (cdev->chip.usb_id) {
@@ -116,6 +104,10 @@ static int control_put(struct snd_kcontrol *kcontrol,
 
 	if (pos & CNT_INTVAL) {
 		int i = pos & ~CNT_INTVAL;
+		unsigned char old = cdev->control_state[i];
+
+		if (old == v)
+			return 0;
 
 		cdev->control_state[i] = v;
 
@@ -126,10 +118,11 @@ static int control_put(struct snd_kcontrol *kcontrol,
 			cdev->ep8_out_buf[0] = i;
 			cdev->ep8_out_buf[1] = v;
 
-			usb_bulk_msg(cdev->chip.dev,
-				     usb_sndbulkpipe(cdev->chip.dev, 8),
-				     cdev->ep8_out_buf, sizeof(cdev->ep8_out_buf),
-				     &actual_len, 200);
+			ret = usb_bulk_msg(cdev->chip.dev,
+					   usb_sndbulkpipe(cdev->chip.dev, 8),
+					   cdev->ep8_out_buf,
+					   sizeof(cdev->ep8_out_buf),
+					   &actual_len, 200);
 		} else if (cdev->chip.usb_id ==
 			USB_ID(USB_VID_NATIVEINSTRUMENTS, USB_PID_MASCHINECONTROLLER)) {
 
@@ -141,21 +134,36 @@ static int control_put(struct snd_kcontrol *kcontrol,
 				offset = MASCHINE_BANK_SIZE;
 			}
 
-			snd_usb_caiaq_send_command_bank(cdev, cmd, bank,
-					cdev->control_state + offset,
-					MASCHINE_BANK_SIZE);
+			ret = snd_usb_caiaq_send_command_bank(cdev, cmd, bank,
+							      cdev->control_state + offset,
+							      MASCHINE_BANK_SIZE);
 		} else {
-			snd_usb_caiaq_send_command(cdev, cmd,
-					cdev->control_state, sizeof(cdev->control_state));
+			ret = snd_usb_caiaq_send_command(cdev, cmd,
+							 cdev->control_state,
+							 sizeof(cdev->control_state));
+		}
+
+		if (ret < 0) {
+			cdev->control_state[i] = old;
+			return ret;
 		}
 	} else {
-		if (v)
-			cdev->control_state[pos / 8] |= 1 << (pos % 8);
-		else
-			cdev->control_state[pos / 8] &= ~(1 << (pos % 8));
+		int idx = pos / 8;
+		unsigned char mask = 1 << (pos % 8);
+		unsigned char old = cdev->control_state[idx];
+		unsigned char val = v ? (old | mask) : (old & ~mask);
 
-		snd_usb_caiaq_send_command(cdev, cmd,
-				cdev->control_state, sizeof(cdev->control_state));
+		if (old == val)
+			return 0;
+
+		cdev->control_state[idx] = val;
+		ret = snd_usb_caiaq_send_command(cdev, cmd,
+						 cdev->control_state,
+						 sizeof(cdev->control_state));
+		if (ret < 0) {
+			cdev->control_state[idx] = old;
+			return ret;
+		}
 	}
 
 	return 1;
@@ -176,14 +184,14 @@ struct caiaq_controller {
 	int index;
 };
 
-static struct caiaq_controller ak1_controller[] = {
+static const struct caiaq_controller ak1_controller[] = {
 	{ "LED left", 	2 },
 	{ "LED middle", 1 },
 	{ "LED right", 	0 },
 	{ "LED ring", 	3 }
 };
 
-static struct caiaq_controller rk2_controller[] = {
+static const struct caiaq_controller rk2_controller[] = {
 	{ "LED 1",		5  },
 	{ "LED 2",		4  },
 	{ "LED 3",		3  },
@@ -209,7 +217,7 @@ static struct caiaq_controller rk2_controller[] = {
 	{ "LED 7seg_3g",	23 }
 };
 
-static struct caiaq_controller rk3_controller[] = {
+static const struct caiaq_controller rk3_controller[] = {
 	{ "LED 7seg_1a",        0 + 0 },
 	{ "LED 7seg_1b",        0 + 1 },
 	{ "LED 7seg_1c",        0 + 2 },
@@ -257,7 +265,7 @@ static struct caiaq_controller rk3_controller[] = {
 	{ "LED pedal",		32 + 8 }
 };
 
-static struct caiaq_controller kore_controller[] = {
+static const struct caiaq_controller kore_controller[] = {
 	{ "LED F1",		8   | CNT_INTVAL },
 	{ "LED F2",		12  | CNT_INTVAL },
 	{ "LED F3",		0   | CNT_INTVAL },
@@ -291,7 +299,7 @@ static struct caiaq_controller kore_controller[] = {
 	{ "LED control",	26  | CNT_INTVAL }
 };
 
-static struct caiaq_controller a8dj_controller[] = {
+static const struct caiaq_controller a8dj_controller[] = {
 	{ "Current input mode",			0 | CNT_INTVAL 	},
 	{ "GND lift for TC Vinyl mode", 	24 + 0 		},
 	{ "GND lift for TC CD/Line mode", 	24 + 1 		},
@@ -299,11 +307,11 @@ static struct caiaq_controller a8dj_controller[] = {
 	{ "Software lock", 			40 		}
 };
 
-static struct caiaq_controller a4dj_controller[] = {
+static const struct caiaq_controller a4dj_controller[] = {
 	{ "Current input mode",	0 | CNT_INTVAL 	}
 };
 
-static struct caiaq_controller kontrolx1_controller[] = {
+static const struct caiaq_controller kontrolx1_controller[] = {
 	{ "LED FX A: ON",		7 | CNT_INTVAL	},
 	{ "LED FX A: 1",		6 | CNT_INTVAL	},
 	{ "LED FX A: 2",		5 | CNT_INTVAL	},
@@ -340,7 +348,7 @@ static struct caiaq_controller kontrolx1_controller[] = {
 	{ "LED Deck B: SYNC",		8  | CNT_INTVAL	},
 };
 
-static struct caiaq_controller kontrols4_controller[] = {
+static const struct caiaq_controller kontrols4_controller[] = {
 	{ "LED: Master: Quant",			10  | CNT_INTVAL },
 	{ "LED: Master: Headphone",		11  | CNT_INTVAL },
 	{ "LED: Master: Master",		12  | CNT_INTVAL },
@@ -513,7 +521,7 @@ static struct caiaq_controller kontrols4_controller[] = {
 	{ "LED: FX2: Mode",			133 | CNT_INTVAL },
 };
 
-static struct caiaq_controller maschine_controller[] = {
+static const struct caiaq_controller maschine_controller[] = {
 	{ "LED: Pad 1",				3  | CNT_INTVAL },
 	{ "LED: Pad 2",				2  | CNT_INTVAL },
 	{ "LED: Pad 3",				1  | CNT_INTVAL },
@@ -581,7 +589,7 @@ static struct caiaq_controller maschine_controller[] = {
 	{ "Backlight Display",			59 | CNT_INTVAL }
 };
 
-static int add_controls(struct caiaq_controller *c, int num,
+static int add_controls(const struct caiaq_controller *c, int num,
 			struct snd_usb_caiaqdev *cdev)
 {
 	int i, ret;
@@ -653,4 +661,3 @@ int snd_usb_caiaq_control_init(struct snd_usb_caiaqdev *cdev)
 
 	return ret;
 }
-

@@ -1,22 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   ALSA sequencer System services Client
  *   Copyright (c) 1998-1999 by Frank van de Pol <fvdpol@coil.demon.nl>
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/init.h>
@@ -64,12 +49,14 @@ static int sysclient = -1;
 /* port id numbers for this client */
 static int announce_port = -1;
 
+/* number of subscriptions to announce port */
+static int announce_subscribed;
 
 
 /* fill standard header data, source port & channel are filled in */
 static int setheader(struct snd_seq_event * ev, int client, int port)
 {
-	if (announce_port < 0)
+	if (announce_port < 0 || !announce_subscribed)
 		return -ENODEV;
 
 	memset(ev, 0, sizeof(struct snd_seq_event));
@@ -91,25 +78,27 @@ static int setheader(struct snd_seq_event * ev, int client, int port)
 
 
 /* entry points for broadcasting system events */
-void snd_seq_system_broadcast(int client, int port, int type)
+void snd_seq_system_broadcast(int client, int port, int type, bool atomic)
 {
 	struct snd_seq_event ev;
 	
 	if (setheader(&ev, client, port) < 0)
 		return;
 	ev.type = type;
-	snd_seq_kernel_client_dispatch(sysclient, &ev, 0, 0);
+	snd_seq_kernel_client_dispatch(sysclient, &ev, atomic, 0);
 }
+EXPORT_SYMBOL_GPL(snd_seq_system_broadcast);
 
 /* entry points for broadcasting system events */
-int snd_seq_system_notify(int client, int port, struct snd_seq_event *ev)
+int snd_seq_system_notify(int client, int port, struct snd_seq_event *ev,
+			  bool atomic)
 {
 	ev->flags = SNDRV_SEQ_EVENT_LENGTH_FIXED;
 	ev->source.client = sysclient;
 	ev->source.port = announce_port;
 	ev->dest.client = client;
 	ev->dest.port = port;
-	return snd_seq_kernel_client_dispatch(sysclient, ev, 0, 0);
+	return snd_seq_kernel_client_dispatch(sysclient, ev, atomic, 0);
 }
 
 /* call-back handler for timer events */
@@ -118,13 +107,30 @@ static int event_input_timer(struct snd_seq_event * ev, int direct, void *privat
 	return snd_seq_control_queue(ev, atomic, hop);
 }
 
+static int sys_announce_subscribe(void *private_data,
+				  struct snd_seq_port_subscribe *info)
+{
+	announce_subscribed++;
+	return 0;
+}
+
+static int sys_announce_unsubscribe(void *private_data,
+				    struct snd_seq_port_subscribe *info)
+{
+	if (snd_BUG_ON(!announce_subscribed))
+		return 0;
+	announce_subscribed--;
+	return 0;
+}
+
 /* register our internal client */
 int __init snd_seq_system_client_init(void)
 {
 	struct snd_seq_port_callback pcallbacks;
 	struct snd_seq_port_info *port;
+	int err;
 
-	port = kzalloc(sizeof(*port), GFP_KERNEL);
+	port = kzalloc_obj(*port);
 	if (!port)
 		return -ENOMEM;
 
@@ -134,9 +140,13 @@ int __init snd_seq_system_client_init(void)
 
 	/* register client */
 	sysclient = snd_seq_create_kernel_client(NULL, 0, "System");
+	if (sysclient < 0) {
+		kfree(port);
+		return sysclient;
+	}
 
 	/* register timer */
-	strcpy(port->name, "Timer");
+	strscpy(port->name, "Timer");
 	port->capability = SNDRV_SEQ_PORT_CAP_WRITE; /* accept queue control */
 	port->capability |= SNDRV_SEQ_PORT_CAP_READ|SNDRV_SEQ_PORT_CAP_SUBS_READ; /* for broadcast */
 	port->kernel = &pcallbacks;
@@ -144,26 +154,40 @@ int __init snd_seq_system_client_init(void)
 	port->flags = SNDRV_SEQ_PORT_FLG_GIVEN_PORT;
 	port->addr.client = sysclient;
 	port->addr.port = SNDRV_SEQ_PORT_SYSTEM_TIMER;
-	snd_seq_kernel_client_ctl(sysclient, SNDRV_SEQ_IOCTL_CREATE_PORT, port);
+	err = snd_seq_kernel_client_ctl(sysclient, SNDRV_SEQ_IOCTL_CREATE_PORT,
+					port);
+	if (err < 0)
+		goto error_port;
 
 	/* register announcement port */
-	strcpy(port->name, "Announce");
+	strscpy(port->name, "Announce");
 	port->capability = SNDRV_SEQ_PORT_CAP_READ|SNDRV_SEQ_PORT_CAP_SUBS_READ; /* for broadcast only */
-	port->kernel = NULL;
+	pcallbacks.event_input = NULL;
+	pcallbacks.subscribe = sys_announce_subscribe;
+	pcallbacks.unsubscribe = sys_announce_unsubscribe;
+	port->kernel = &pcallbacks;
 	port->type = 0;
 	port->flags = SNDRV_SEQ_PORT_FLG_GIVEN_PORT;
 	port->addr.client = sysclient;
 	port->addr.port = SNDRV_SEQ_PORT_SYSTEM_ANNOUNCE;
-	snd_seq_kernel_client_ctl(sysclient, SNDRV_SEQ_IOCTL_CREATE_PORT, port);
+	err = snd_seq_kernel_client_ctl(sysclient, SNDRV_SEQ_IOCTL_CREATE_PORT,
+					port);
+	if (err < 0)
+		goto error_port;
 	announce_port = port->addr.port;
 
 	kfree(port);
 	return 0;
+
+ error_port:
+	snd_seq_system_client_done();
+	kfree(port);
+	return err;
 }
 
 
 /* unregister our internal client */
-void __exit snd_seq_system_client_done(void)
+void snd_seq_system_client_done(void)
 {
 	int oldsysclient = sysclient;
 

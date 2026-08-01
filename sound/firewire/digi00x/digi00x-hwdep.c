@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * digi00x-hwdep.c - a part of driver for Digidesign Digi 002/003 family
  *
  * Copyright (c) 2014-2015 Takashi Sakamoto
- *
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 /*
@@ -64,18 +63,14 @@ static __poll_t hwdep_poll(struct snd_hwdep *hwdep, struct file *file,
 			       poll_table *wait)
 {
 	struct snd_dg00x *dg00x = hwdep->private_data;
-	__poll_t events;
 
 	poll_wait(file, &dg00x->hwdep_wait, wait);
 
-	spin_lock_irq(&dg00x->lock);
+	guard(spinlock_irq)(&dg00x->lock);
 	if (dg00x->dev_lock_changed || dg00x->msg)
-		events = EPOLLIN | EPOLLRDNORM;
+		return EPOLLIN | EPOLLRDNORM;
 	else
-		events = 0;
-	spin_unlock_irq(&dg00x->lock);
-
-	return events;
+		return 0;
 }
 
 static int hwdep_get_info(struct snd_dg00x *dg00x, void __user *arg)
@@ -88,7 +83,7 @@ static int hwdep_get_info(struct snd_dg00x *dg00x, void __user *arg)
 	info.card = dev->card->index;
 	*(__be32 *)&info.guid[0] = cpu_to_be32(dev->config_rom[3]);
 	*(__be32 *)&info.guid[4] = cpu_to_be32(dev->config_rom[4]);
-	strlcpy(info.device_name, dev_name(&dev->device),
+	strscpy(info.device_name, dev_name(&dev->device),
 		sizeof(info.device_name));
 
 	if (copy_to_user(arg, &info, sizeof(info)))
@@ -99,48 +94,35 @@ static int hwdep_get_info(struct snd_dg00x *dg00x, void __user *arg)
 
 static int hwdep_lock(struct snd_dg00x *dg00x)
 {
-	int err;
-
-	spin_lock_irq(&dg00x->lock);
+	guard(spinlock_irq)(&dg00x->lock);
 
 	if (dg00x->dev_lock_count == 0) {
 		dg00x->dev_lock_count = -1;
-		err = 0;
+		return 0;
 	} else {
-		err = -EBUSY;
+		return -EBUSY;
 	}
-
-	spin_unlock_irq(&dg00x->lock);
-
-	return err;
 }
 
 static int hwdep_unlock(struct snd_dg00x *dg00x)
 {
-	int err;
-
-	spin_lock_irq(&dg00x->lock);
+	guard(spinlock_irq)(&dg00x->lock);
 
 	if (dg00x->dev_lock_count == -1) {
 		dg00x->dev_lock_count = 0;
-		err = 0;
+		return 0;
 	} else {
-		err = -EBADFD;
+		return -EBADFD;
 	}
-
-	spin_unlock_irq(&dg00x->lock);
-
-	return err;
 }
 
 static int hwdep_release(struct snd_hwdep *hwdep, struct file *file)
 {
 	struct snd_dg00x *dg00x = hwdep->private_data;
 
-	spin_lock_irq(&dg00x->lock);
+	guard(spinlock_irq)(&dg00x->lock);
 	if (dg00x->dev_lock_count == -1)
 		dg00x->dev_lock_count = 0;
-	spin_unlock_irq(&dg00x->lock);
 
 	return 0;
 }
@@ -189,7 +171,7 @@ int snd_dg00x_create_hwdep_device(struct snd_dg00x *dg00x)
 	if (err < 0)
 		return err;
 
-	strcpy(hwdep->name, "Digi00x");
+	strscpy(hwdep->name, "Digi00x");
 	hwdep->iface = SNDRV_HWDEP_IFACE_FW_DIGI00X;
 	hwdep->ops = ops;
 	hwdep->private_data = dg00x;

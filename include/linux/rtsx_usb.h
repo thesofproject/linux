@@ -1,18 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* Driver for Realtek RTS5139 USB card reader
  *
  * Copyright(c) 2009-2013 Realtek Semiconductor Corp. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  * Author:
  *   Roger Tseng <rogerable@realtek.com>
@@ -22,6 +11,10 @@
 #define __RTSX_USB_H
 
 #include <linux/usb.h>
+
+#define DRV_NAME_RTSX_USB		"rtsx_usb"
+#define DRV_NAME_RTSX_USB_SDMMC		"rtsx_usb_sdmmc"
+#define DRV_NAME_RTSX_USB_MS		"rtsx_usb_ms"
 
 /* related module names */
 #define RTSX_USB_SD_CARD	0
@@ -65,8 +58,6 @@ struct rtsx_ucr {
 	struct usb_device	*pusb_dev;
 	struct usb_interface	*pusb_intf;
 	struct usb_sg_request	current_sg;
-	unsigned char		*iobuf;
-	dma_addr_t		iobuf_dma;
 
 	struct timer_list	sg_timer;
 	struct mutex		dev_mutex;
@@ -107,6 +98,17 @@ extern int rtsx_usb_card_exclusive_check(struct rtsx_ucr *ucr, int card);
 #define XD_CD		0x04
 #define CD_MASK		(SD_CD | MS_CD | XD_CD)
 #define SD_WP		0x08
+
+/* OCPCTL */
+#define MS_OCP_DETECT_EN		0x08
+#define	MS_OCP_INT_EN			0x04
+#define	MS_OCP_INT_CLR			0x02
+#define	MS_OCP_CLEAR			0x01
+
+/* OCPSTAT */
+#define MS_OCP_DETECT			0x80
+#define MS_OCP_NOW			0x02
+#define MS_OCP_EVER			0x01
 
 /* reader command field offset & parameters */
 #define READ_REG_CMD		0

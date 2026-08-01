@@ -25,19 +25,23 @@
  * Authors:
  *	Eric Anholt <eric@anholt.net>
  */
-#include <linux/module.h>
-#include <linux/i2c.h>
-#include <linux/slab.h>
+
 #include <linux/delay.h>
-#include <drm/drmP.h>
-#include <drm/drm_crtc.h>
-#include <drm/drm_edid.h>
-#include "psb_intel_drv.h"
-#include <drm/gma_drm.h>
-#include "psb_drv.h"
-#include "psb_intel_sdvo_regs.h"
-#include "psb_intel_reg.h"
+#include <linux/i2c.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/slab.h>
+
+#include <drm/drm_crtc.h>
+#include <drm/drm_crtc_helper.h>
+#include <drm/drm_edid.h>
+#include <drm/drm_modeset_helper_vtables.h>
+#include <drm/drm_print.h>
+
+#include "psb_drv.h"
+#include "psb_intel_drv.h"
+#include "psb_intel_reg.h"
+#include "psb_intel_sdvo_regs.h"
 
 #define SDVO_TMDS_MASK (SDVO_OUTPUT_TMDS0 | SDVO_OUTPUT_TMDS1)
 #define SDVO_RGB_MASK  (SDVO_OUTPUT_RGB0 | SDVO_OUTPUT_RGB1)
@@ -67,7 +71,7 @@ struct psb_intel_sdvo {
 	struct gma_encoder base;
 
 	struct i2c_adapter *i2c;
-	u8 slave_addr;
+	u8 target_addr;
 
 	struct i2c_adapter ddc;
 
@@ -124,12 +128,14 @@ struct psb_intel_sdvo {
 	bool is_lvds;
 
 	/**
-	 * This is sdvo fixed pannel mode pointer
+	 * This is sdvo fixed panel mode pointer
 	 */
 	struct drm_display_mode *sdvo_lvds_fixed_mode;
 
 	/* DDC bus used by this SDVO encoder */
 	uint8_t ddc_bus;
+
+	u8 pixel_multiplier;
 
 	/* Input timings for adjusted_mode */
 	struct psb_intel_sdvo_dtd input_dtd;
@@ -218,7 +224,7 @@ static bool
 psb_intel_sdvo_create_enhance_property(struct psb_intel_sdvo *psb_intel_sdvo,
 				   struct psb_intel_sdvo_connector *psb_intel_sdvo_connector);
 
-/**
+/*
  * Writes the SDVOB or SDVOC with the given value, but always writes both
  * SDVOB and SDVOC to work around apparent hardware issues (according to
  * comments in the BIOS).
@@ -254,13 +260,13 @@ static bool psb_intel_sdvo_read_byte(struct psb_intel_sdvo *psb_intel_sdvo, u8 a
 {
 	struct i2c_msg msgs[] = {
 		{
-			.addr = psb_intel_sdvo->slave_addr,
+			.addr = psb_intel_sdvo->target_addr,
 			.flags = 0,
 			.len = 1,
 			.buf = &addr,
 		},
 		{
-			.addr = psb_intel_sdvo->slave_addr,
+			.addr = psb_intel_sdvo->target_addr,
 			.flags = I2C_M_RD,
 			.len = 1,
 			.buf = ch,
@@ -397,26 +403,38 @@ static const struct _sdvo_cmd_name {
 #define IS_SDVOB(reg)	(reg == SDVOB)
 #define SDVO_NAME(svdo) (IS_SDVOB((svdo)->sdvo_reg) ? "SDVOB" : "SDVOC")
 
-static void psb_intel_sdvo_debug_write(struct psb_intel_sdvo *psb_intel_sdvo, u8 cmd,
-				   const void *args, int args_len)
+static void psb_intel_sdvo_debug_write(struct psb_intel_sdvo *psb_intel_sdvo,
+				       u8 cmd, const void *args, int args_len)
 {
-	int i;
+	struct drm_device *dev = psb_intel_sdvo->base.base.dev;
+	int i, pos = 0;
+	char buffer[73];
 
-	DRM_DEBUG_KMS("%s: W: %02X ",
-				SDVO_NAME(psb_intel_sdvo), cmd);
-	for (i = 0; i < args_len; i++)
-		DRM_DEBUG_KMS("%02X ", ((u8 *)args)[i]);
-	for (; i < 8; i++)
-		DRM_DEBUG_KMS("   ");
+#define BUF_PRINT(args...) \
+	pos += snprintf(buffer + pos, max_t(int, sizeof(buffer) - pos, 0), args)
+
+	for (i = 0; i < args_len; i++) {
+		BUF_PRINT("%02X ", ((u8 *)args)[i]);
+	}
+
+	for (; i < 8; i++) {
+		BUF_PRINT("   ");
+	}
+
 	for (i = 0; i < ARRAY_SIZE(sdvo_cmd_names); i++) {
 		if (cmd == sdvo_cmd_names[i].cmd) {
-			DRM_DEBUG_KMS("(%s)", sdvo_cmd_names[i].name);
+			BUF_PRINT("(%s)", sdvo_cmd_names[i].name);
 			break;
 		}
 	}
+
 	if (i == ARRAY_SIZE(sdvo_cmd_names))
-		DRM_DEBUG_KMS("(%02X)", cmd);
-	DRM_DEBUG_KMS("\n");
+		BUF_PRINT("(%02X)", cmd);
+
+	drm_WARN_ON(dev, pos >= sizeof(buffer) - 1);
+#undef BUF_PRINT
+
+	DRM_DEBUG_KMS("%s: W: %02X %s\n", SDVO_NAME(psb_intel_sdvo), cmd, buffer);
 }
 
 static const char *cmd_status_names[] = {
@@ -429,24 +447,31 @@ static const char *cmd_status_names[] = {
 	"Scaling not supported"
 };
 
+#define MAX_ARG_LEN 32
+
 static bool psb_intel_sdvo_write_cmd(struct psb_intel_sdvo *psb_intel_sdvo, u8 cmd,
 				 const void *args, int args_len)
 {
-	u8 buf[args_len*2 + 2], status;
-	struct i2c_msg msgs[args_len + 3];
+	u8 buf[MAX_ARG_LEN*2 + 2], status;
+	struct i2c_msg msgs[MAX_ARG_LEN + 3];
 	int i, ret;
+
+	if (args_len > MAX_ARG_LEN) {
+		DRM_ERROR("Need to increase arg length\n");
+		return false;
+	}
 
 	psb_intel_sdvo_debug_write(psb_intel_sdvo, cmd, args, args_len);
 
 	for (i = 0; i < args_len; i++) {
-		msgs[i].addr = psb_intel_sdvo->slave_addr;
+		msgs[i].addr = psb_intel_sdvo->target_addr;
 		msgs[i].flags = 0;
 		msgs[i].len = 2;
 		msgs[i].buf = buf + 2 *i;
 		buf[2*i + 0] = SDVO_I2C_ARG_0 - i;
 		buf[2*i + 1] = ((u8*)args)[i];
 	}
-	msgs[i].addr = psb_intel_sdvo->slave_addr;
+	msgs[i].addr = psb_intel_sdvo->target_addr;
 	msgs[i].flags = 0;
 	msgs[i].len = 2;
 	msgs[i].buf = buf + 2*i;
@@ -455,12 +480,12 @@ static bool psb_intel_sdvo_write_cmd(struct psb_intel_sdvo *psb_intel_sdvo, u8 c
 
 	/* the following two are to read the response */
 	status = SDVO_I2C_CMD_STATUS;
-	msgs[i+1].addr = psb_intel_sdvo->slave_addr;
+	msgs[i+1].addr = psb_intel_sdvo->target_addr;
 	msgs[i+1].flags = 0;
 	msgs[i+1].len = 1;
 	msgs[i+1].buf = &status;
 
-	msgs[i+2].addr = psb_intel_sdvo->slave_addr;
+	msgs[i+2].addr = psb_intel_sdvo->target_addr;
 	msgs[i+2].flags = I2C_M_RD;
 	msgs[i+2].len = 1;
 	msgs[i+2].buf = &status;
@@ -480,13 +505,13 @@ static bool psb_intel_sdvo_write_cmd(struct psb_intel_sdvo *psb_intel_sdvo, u8 c
 }
 
 static bool psb_intel_sdvo_read_response(struct psb_intel_sdvo *psb_intel_sdvo,
-				     void *response, int response_len)
+					 void *response, int response_len)
 {
+	struct drm_device *dev = psb_intel_sdvo->base.base.dev;
+	char buffer[73];
+	int i, pos = 0;
 	u8 retry = 5;
 	u8 status;
-	int i;
-
-	DRM_DEBUG_KMS("%s: R: ", SDVO_NAME(psb_intel_sdvo));
 
 	/*
 	 * The documentation states that all commands will be
@@ -510,10 +535,13 @@ static bool psb_intel_sdvo_read_response(struct psb_intel_sdvo *psb_intel_sdvo,
 			goto log_fail;
 	}
 
+#define BUF_PRINT(args...) \
+	pos += snprintf(buffer + pos, max_t(int, sizeof(buffer) - pos, 0), args)
+
 	if (status <= SDVO_CMD_STATUS_SCALING_NOT_SUPP)
-		DRM_DEBUG_KMS("(%s)", cmd_status_names[status]);
+		BUF_PRINT("(%s)", cmd_status_names[status]);
 	else
-		DRM_DEBUG_KMS("(??? %d)", status);
+		BUF_PRINT("(??? %d)", status);
 
 	if (status != SDVO_CMD_STATUS_SUCCESS)
 		goto log_fail;
@@ -524,13 +552,18 @@ static bool psb_intel_sdvo_read_response(struct psb_intel_sdvo *psb_intel_sdvo,
 					  SDVO_I2C_RETURN_0 + i,
 					  &((u8 *)response)[i]))
 			goto log_fail;
-		DRM_DEBUG_KMS(" %02X", ((u8 *)response)[i]);
+		BUF_PRINT(" %02X", ((u8 *)response)[i]);
 	}
-	DRM_DEBUG_KMS("\n");
+
+	drm_WARN_ON(dev, pos >= sizeof(buffer) - 1);
+#undef BUF_PRINT
+
+	DRM_DEBUG_KMS("%s: R: %s\n", SDVO_NAME(psb_intel_sdvo), buffer);
 	return true;
 
 log_fail:
-	DRM_DEBUG_KMS("... failed\n");
+	DRM_DEBUG_KMS("%s: R: ... failed %s\n",
+		      SDVO_NAME(psb_intel_sdvo), buffer);
 	return false;
 }
 
@@ -578,7 +611,7 @@ static bool psb_intel_sdvo_set_target_input(struct psb_intel_sdvo *psb_intel_sdv
 				    &targets, sizeof(targets));
 }
 
-/**
+/*
  * Return whether each input is trained.
  *
  * This function is making an assumption about the layout of the response,
@@ -856,36 +889,6 @@ static bool psb_intel_sdvo_set_avi_infoframe(struct psb_intel_sdvo *psb_intel_sd
 	DRM_INFO("HDMI is not supported yet");
 
 	return false;
-#if 0
-	struct dip_infoframe avi_if = {
-		.type = DIP_TYPE_AVI,
-		.ver = DIP_VERSION_AVI,
-		.len = DIP_LEN_AVI,
-	};
-	uint8_t tx_rate = SDVO_HBUF_TX_VSYNC;
-	uint8_t set_buf_index[2] = { 1, 0 };
-	uint64_t *data = (uint64_t *)&avi_if;
-	unsigned i;
-
-	intel_dip_infoframe_csum(&avi_if);
-
-	if (!psb_intel_sdvo_set_value(psb_intel_sdvo,
-				  SDVO_CMD_SET_HBUF_INDEX,
-				  set_buf_index, 2))
-		return false;
-
-	for (i = 0; i < sizeof(avi_if); i += 8) {
-		if (!psb_intel_sdvo_set_value(psb_intel_sdvo,
-					  SDVO_CMD_SET_HBUF_DATA,
-					  data, 8))
-			return false;
-		data++;
-	}
-
-	return psb_intel_sdvo_set_value(psb_intel_sdvo,
-				    SDVO_CMD_SET_HBUF_TXRATE,
-				    &tx_rate, 1);
-#endif
 }
 
 static bool psb_intel_sdvo_set_tv_format(struct psb_intel_sdvo *psb_intel_sdvo)
@@ -950,7 +953,6 @@ static bool psb_intel_sdvo_mode_fixup(struct drm_encoder *encoder,
 				  struct drm_display_mode *adjusted_mode)
 {
 	struct psb_intel_sdvo *psb_intel_sdvo = to_psb_intel_sdvo(encoder);
-	int multiplier;
 
 	/* We need to construct preferred input timings based on our
 	 * output timings.  To do that, we have to set the output
@@ -977,8 +979,9 @@ static bool psb_intel_sdvo_mode_fixup(struct drm_encoder *encoder,
 	/* Make the CRTC code factor in the SDVO pixel multiplier.  The
 	 * SDVO device will factor out the multiplier during mode_set.
 	 */
-	multiplier = psb_intel_sdvo_get_pixel_multiplier(adjusted_mode);
-	psb_intel_mode_set_pixel_multiplier(adjusted_mode, multiplier);
+	psb_intel_sdvo->pixel_multiplier =
+		psb_intel_sdvo_get_pixel_multiplier(adjusted_mode);
+	adjusted_mode->clock *= psb_intel_sdvo->pixel_multiplier;
 
 	return true;
 }
@@ -994,7 +997,6 @@ static void psb_intel_sdvo_mode_set(struct drm_encoder *encoder,
 	u32 sdvox;
 	struct psb_intel_sdvo_in_out_map in_out;
 	struct psb_intel_sdvo_dtd input_dtd;
-	int pixel_multiplier = psb_intel_mode_get_pixel_multiplier(adjusted_mode);
 	int rate;
 	int need_aux = IS_MRST(dev) ? 1 : 0;
 
@@ -1052,7 +1054,7 @@ static void psb_intel_sdvo_mode_set(struct drm_encoder *encoder,
 
 	(void) psb_intel_sdvo_set_input_timing(psb_intel_sdvo, &input_dtd);
 
-	switch (pixel_multiplier) {
+	switch (psb_intel_sdvo->pixel_multiplier) {
 	default:
 	case 1: rate = SDVO_CLOCK_RATE_MULT_1X; break;
 	case 2: rate = SDVO_CLOCK_RATE_MULT_2X; break;
@@ -1157,8 +1159,8 @@ static void psb_intel_sdvo_dpms(struct drm_encoder *encoder, int mode)
 	return;
 }
 
-static int psb_intel_sdvo_mode_valid(struct drm_connector *connector,
-				 struct drm_display_mode *mode)
+static enum drm_mode_status psb_intel_sdvo_mode_valid(struct drm_connector *connector,
+				 const struct drm_display_mode *mode)
 {
 	struct psb_intel_sdvo *psb_intel_sdvo = intel_attached_sdvo(connector);
 
@@ -1219,75 +1221,6 @@ static bool psb_intel_sdvo_get_capabilities(struct psb_intel_sdvo *psb_intel_sdv
 	return true;
 }
 
-/* No use! */
-#if 0
-struct drm_connector* psb_intel_sdvo_find(struct drm_device *dev, int sdvoB)
-{
-	struct drm_connector *connector = NULL;
-	struct psb_intel_sdvo *iout = NULL;
-	struct psb_intel_sdvo *sdvo;
-
-	/* find the sdvo connector */
-	list_for_each_entry(connector, &dev->mode_config.connector_list, head) {
-		iout = to_psb_intel_sdvo(connector);
-
-		if (iout->type != INTEL_OUTPUT_SDVO)
-			continue;
-
-		sdvo = iout->dev_priv;
-
-		if (sdvo->sdvo_reg == SDVOB && sdvoB)
-			return connector;
-
-		if (sdvo->sdvo_reg == SDVOC && !sdvoB)
-			return connector;
-
-	}
-
-	return NULL;
-}
-
-int psb_intel_sdvo_supports_hotplug(struct drm_connector *connector)
-{
-	u8 response[2];
-	u8 status;
-	struct psb_intel_sdvo *psb_intel_sdvo;
-	DRM_DEBUG_KMS("\n");
-
-	if (!connector)
-		return 0;
-
-	psb_intel_sdvo = to_psb_intel_sdvo(connector);
-
-	return psb_intel_sdvo_get_value(psb_intel_sdvo, SDVO_CMD_GET_HOT_PLUG_SUPPORT,
-				    &response, 2) && response[0];
-}
-
-void psb_intel_sdvo_set_hotplug(struct drm_connector *connector, int on)
-{
-	u8 response[2];
-	u8 status;
-	struct psb_intel_sdvo *psb_intel_sdvo = to_psb_intel_sdvo(connector);
-
-	psb_intel_sdvo_write_cmd(psb_intel_sdvo, SDVO_CMD_GET_ACTIVE_HOT_PLUG, NULL, 0);
-	psb_intel_sdvo_read_response(psb_intel_sdvo, &response, 2);
-
-	if (on) {
-		psb_intel_sdvo_write_cmd(psb_intel_sdvo, SDVO_CMD_GET_HOT_PLUG_SUPPORT, NULL, 0);
-		status = psb_intel_sdvo_read_response(psb_intel_sdvo, &response, 2);
-
-		psb_intel_sdvo_write_cmd(psb_intel_sdvo, SDVO_CMD_SET_ACTIVE_HOT_PLUG, &response, 2);
-	} else {
-		response[0] = 0;
-		response[1] = 0;
-		psb_intel_sdvo_write_cmd(psb_intel_sdvo, SDVO_CMD_SET_ACTIVE_HOT_PLUG, &response, 2);
-	}
-
-	psb_intel_sdvo_write_cmd(psb_intel_sdvo, SDVO_CMD_GET_ACTIVE_HOT_PLUG, NULL, 0);
-	psb_intel_sdvo_read_response(psb_intel_sdvo, &response, 2);
-}
-#endif
-
 static bool
 psb_intel_sdvo_multifunc_encoder(struct psb_intel_sdvo *psb_intel_sdvo)
 {
@@ -1307,7 +1240,7 @@ psb_intel_sdvo_get_edid(struct drm_connector *connector)
 static struct edid *
 psb_intel_sdvo_get_analog_edid(struct drm_connector *connector)
 {
-	struct drm_psb_private *dev_priv = connector->dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(connector->dev);
 
 	return drm_get_edid(connector,
 			    &dev_priv->gmbus[dev_priv->crt_ddc_pin].adapter);
@@ -1465,7 +1398,7 @@ static void psb_intel_sdvo_get_ddc_modes(struct drm_connector *connector)
 		bool connector_is_digital = !!IS_TMDS(psb_intel_sdvo_connector);
 
 		if (connector_is_digital == monitor_is_digital) {
-			drm_mode_connector_update_edid_property(connector, edid);
+			drm_connector_update_edid_property(connector, edid);
 			drm_add_edid_modes(connector, edid);
 		}
 
@@ -1576,7 +1509,7 @@ static void psb_intel_sdvo_get_tv_modes(struct drm_connector *connector)
 static void psb_intel_sdvo_get_lvds_modes(struct drm_connector *connector)
 {
 	struct psb_intel_sdvo *psb_intel_sdvo = intel_attached_sdvo(connector);
-	struct drm_psb_private *dev_priv = connector->dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(connector->dev);
 	struct drm_display_mode *newmode;
 
 	/*
@@ -1632,9 +1565,10 @@ static int psb_intel_sdvo_get_modes(struct drm_connector *connector)
 
 static void psb_intel_sdvo_destroy(struct drm_connector *connector)
 {
-	drm_connector_unregister(connector);
+	struct gma_connector *gma_connector = to_gma_connector(connector);
+
 	drm_connector_cleanup(connector);
-	kfree(connector);
+	kfree(gma_connector);
 }
 
 static bool psb_intel_sdvo_detect_hdmi_audio(struct drm_connector *connector)
@@ -1660,7 +1594,7 @@ psb_intel_sdvo_set_property(struct drm_connector *connector,
 {
 	struct psb_intel_sdvo *psb_intel_sdvo = intel_attached_sdvo(connector);
 	struct psb_intel_sdvo_connector *psb_intel_sdvo_connector = to_psb_intel_sdvo_connector(connector);
-	struct drm_psb_private *dev_priv = connector->dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(connector->dev);
 	uint16_t temp_value;
 	uint8_t cmd;
 	int ret;
@@ -1908,7 +1842,7 @@ psb_intel_sdvo_guess_ddc_bus(struct psb_intel_sdvo *sdvo)
 #endif
 }
 
-/**
+/*
  * Choose the appropriate DDC bus for control bus switch command for this
  * SDVO output based on the controlled output.
  *
@@ -1966,9 +1900,9 @@ psb_intel_sdvo_is_hdmi_connector(struct psb_intel_sdvo *psb_intel_sdvo, int devi
 }
 
 static u8
-psb_intel_sdvo_get_slave_addr(struct drm_device *dev, int sdvo_reg)
+psb_intel_sdvo_get_target_addr(struct drm_device *dev, int sdvo_reg)
 {
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct sdvo_device_mapping *my_mapping, *other_mapping;
 
 	if (IS_SDVOB(sdvo_reg)) {
@@ -1980,14 +1914,14 @@ psb_intel_sdvo_get_slave_addr(struct drm_device *dev, int sdvo_reg)
 	}
 
 	/* If the BIOS described our SDVO device, take advantage of it. */
-	if (my_mapping->slave_addr)
-		return my_mapping->slave_addr;
+	if (my_mapping->target_addr)
+		return my_mapping->target_addr;
 
 	/* If the BIOS only described a different SDVO device, use the
 	 * address that it isn't using.
 	 */
-	if (other_mapping->slave_addr) {
-		if (other_mapping->slave_addr == 0x70)
+	if (other_mapping->target_addr) {
+		if (other_mapping->target_addr == 0x70)
 			return 0x72;
 		else
 			return 0x70;
@@ -2022,7 +1956,6 @@ psb_intel_sdvo_connector_init(struct psb_intel_sdvo_connector *connector,
 	connector->base.restore = psb_intel_sdvo_restore;
 
 	gma_connector_attach_encoder(&connector->base, &encoder->base);
-	drm_connector_register(&connector->base.base);
 }
 
 static void
@@ -2044,7 +1977,7 @@ psb_intel_sdvo_dvi_init(struct psb_intel_sdvo *psb_intel_sdvo, int device)
 	struct gma_connector *intel_connector;
 	struct psb_intel_sdvo_connector *psb_intel_sdvo_connector;
 
-	psb_intel_sdvo_connector = kzalloc(sizeof(struct psb_intel_sdvo_connector), GFP_KERNEL);
+	psb_intel_sdvo_connector = kzalloc_obj(struct psb_intel_sdvo_connector);
 	if (!psb_intel_sdvo_connector)
 		return false;
 
@@ -2084,7 +2017,7 @@ psb_intel_sdvo_tv_init(struct psb_intel_sdvo *psb_intel_sdvo, int type)
 	struct gma_connector *intel_connector;
 	struct psb_intel_sdvo_connector *psb_intel_sdvo_connector;
 
-	psb_intel_sdvo_connector = kzalloc(sizeof(struct psb_intel_sdvo_connector), GFP_KERNEL);
+	psb_intel_sdvo_connector = kzalloc_obj(struct psb_intel_sdvo_connector);
 	if (!psb_intel_sdvo_connector)
 		return false;
 
@@ -2123,7 +2056,7 @@ psb_intel_sdvo_analog_init(struct psb_intel_sdvo *psb_intel_sdvo, int device)
 	struct gma_connector *intel_connector;
 	struct psb_intel_sdvo_connector *psb_intel_sdvo_connector;
 
-	psb_intel_sdvo_connector = kzalloc(sizeof(struct psb_intel_sdvo_connector), GFP_KERNEL);
+	psb_intel_sdvo_connector = kzalloc_obj(struct psb_intel_sdvo_connector);
 	if (!psb_intel_sdvo_connector)
 		return false;
 
@@ -2157,7 +2090,7 @@ psb_intel_sdvo_lvds_init(struct psb_intel_sdvo *psb_intel_sdvo, int device)
 	struct gma_connector *intel_connector;
 	struct psb_intel_sdvo_connector *psb_intel_sdvo_connector;
 
-	psb_intel_sdvo_connector = kzalloc(sizeof(struct psb_intel_sdvo_connector), GFP_KERNEL);
+	psb_intel_sdvo_connector = kzalloc_obj(struct psb_intel_sdvo_connector);
 	if (!psb_intel_sdvo_connector)
 		return false;
 
@@ -2281,7 +2214,7 @@ static bool psb_intel_sdvo_tv_create_property(struct psb_intel_sdvo *psb_intel_s
 
 	for (i = 0; i < psb_intel_sdvo_connector->format_supported_num; i++)
 		drm_property_add_enum(
-				psb_intel_sdvo_connector->tv_format, i,
+				psb_intel_sdvo_connector->tv_format,
 				i, tv_format_names[psb_intel_sdvo_connector->tv_format_supported[i]]);
 
 	psb_intel_sdvo->tv_format_index = psb_intel_sdvo_connector->tv_format_supported[0];
@@ -2494,9 +2427,8 @@ psb_intel_sdvo_init_ddc_proxy(struct psb_intel_sdvo *sdvo,
 			  struct drm_device *dev)
 {
 	sdvo->ddc.owner = THIS_MODULE;
-	sdvo->ddc.class = I2C_CLASS_DDC;
 	snprintf(sdvo->ddc.name, I2C_NAME_SIZE, "SDVO DDC proxy");
-	sdvo->ddc.dev.parent = &dev->pdev->dev;
+	sdvo->ddc.dev.parent = dev->dev;
 	sdvo->ddc.algo_data = sdvo;
 	sdvo->ddc.algo = &psb_intel_sdvo_ddc_proxy;
 
@@ -2505,17 +2437,17 @@ psb_intel_sdvo_init_ddc_proxy(struct psb_intel_sdvo *sdvo,
 
 bool psb_intel_sdvo_init(struct drm_device *dev, int sdvo_reg)
 {
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct gma_encoder *gma_encoder;
 	struct psb_intel_sdvo *psb_intel_sdvo;
 	int i;
 
-	psb_intel_sdvo = kzalloc(sizeof(struct psb_intel_sdvo), GFP_KERNEL);
+	psb_intel_sdvo = kzalloc_obj(struct psb_intel_sdvo);
 	if (!psb_intel_sdvo)
 		return false;
 
 	psb_intel_sdvo->sdvo_reg = sdvo_reg;
-	psb_intel_sdvo->slave_addr = psb_intel_sdvo_get_slave_addr(dev, sdvo_reg) >> 1;
+	psb_intel_sdvo->target_addr = psb_intel_sdvo_get_target_addr(dev, sdvo_reg) >> 1;
 	psb_intel_sdvo_select_i2c_bus(dev_priv, psb_intel_sdvo, sdvo_reg);
 	if (!psb_intel_sdvo_init_ddc_proxy(psb_intel_sdvo, dev)) {
 		kfree(psb_intel_sdvo);

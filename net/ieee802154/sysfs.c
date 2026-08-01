@@ -1,11 +1,5 @@
-/* This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+// SPDX-License-Identifier: GPL-2.0-only
+/*
  *
  * Authors:
  * Alexander Aring <aar@pengutronix.de>
@@ -99,7 +93,7 @@ static SIMPLE_DEV_PM_OPS(wpan_phy_pm_ops, wpan_phy_suspend, wpan_phy_resume);
 #define WPAN_PHY_PM_OPS NULL
 #endif
 
-struct class wpan_phy_class = {
+const struct class wpan_phy_class = {
 	.name = "ieee802154",
 	.dev_release = wpan_phy_release,
 	.dev_groups = pmib_groups,

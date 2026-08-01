@@ -260,7 +260,7 @@ gk104_ram_calc_gddr5(struct gk104_ram *ram, u32 freq)
 	ram_mask(fuc, 0x10f808, 0x40000000, 0x40000000);
 	ram_block(fuc);
 
-	if (nvkm_device_engine(ram->base.fb->subdev.device, NVKM_ENGINE_DISP))
+	if (ram->base.fb->subdev.device->disp)
 		ram_wr32(fuc, 0x62c000, 0x0f0f0000);
 
 	/* MR1: turn termination on early, for some reason.. */
@@ -661,7 +661,7 @@ gk104_ram_calc_gddr5(struct gk104_ram *ram, u32 freq)
 
 	ram_unblock(fuc);
 
-	if (nvkm_device_engine(ram->base.fb->subdev.device, NVKM_ENGINE_DISP))
+	if (ram->base.fb->subdev.device->disp)
 		ram_wr32(fuc, 0x62c000, 0x0f0f0f00);
 
 	if (next->bios.rammap_11_08_01)
@@ -711,7 +711,7 @@ gk104_ram_calc_sddr3(struct gk104_ram *ram, u32 freq)
 	ram_mask(fuc, 0x10f808, 0x40000000, 0x40000000);
 	ram_block(fuc);
 
-	if (nvkm_device_engine(ram->base.fb->subdev.device, NVKM_ENGINE_DISP))
+	if (ram->base.fb->subdev.device->disp)
 		ram_wr32(fuc, 0x62c000, 0x0f0f0000);
 
 	if (vc == 1 && ram_have(fuc, gpio2E)) {
@@ -943,7 +943,7 @@ gk104_ram_calc_sddr3(struct gk104_ram *ram, u32 freq)
 
 	ram_unblock(fuc);
 
-	if (nvkm_device_engine(ram->base.fb->subdev.device, NVKM_ENGINE_DISP))
+	if (ram->base.fb->subdev.device->disp)
 		ram_wr32(fuc, 0x62c000, 0x0f0f0f00);
 
 	if (next->bios.rammap_11_08_01)
@@ -1070,7 +1070,7 @@ gk104_ram_calc_xits(struct gk104_ram *ram, struct nvkm_ram_data *next)
 			nvkm_error(subdev, "unable to calc plls\n");
 			return -EINVAL;
 		}
-		nvkm_debug(subdev, "sucessfully calced PLLs for clock %i kHz"
+		nvkm_debug(subdev, "successfully calced PLLs for clock %i kHz"
 				" (refclock: %i kHz)\n", next->freq, ret);
 	} else {
 		/* calculate refpll coefficients */
@@ -1371,7 +1371,7 @@ gk104_ram_train_init(struct nvkm_ram *ram)
 	struct gk104_ram_train *train;
 	int ret, i;
 
-	if (!(train = kzalloc(sizeof(*train), GFP_KERNEL)))
+	if (!(train = kzalloc_obj(*train)))
 		return -ENOMEM;
 
 	for (i = 0; i < 0x100; i++) {
@@ -1446,7 +1446,7 @@ gk104_ram_ctor_data(struct gk104_ram *ram, u8 ramcfg, int i)
 	u32 data;
 	int ret;
 
-	if (!(cfg = kmalloc(sizeof(*cfg), GFP_KERNEL)))
+	if (!(cfg = kmalloc_obj(*cfg)))
 		return -ENOMEM;
 	p = &list_last_entry(&ram->cfg, typeof(*cfg), head)->bios;
 	n = &cfg->bios;
@@ -1530,7 +1530,7 @@ gk104_ram_new_(const struct nvkm_ram_func *func, struct nvkm_fb *fb,
 	u8  ramcfg = nvbios_ramcfg_index(subdev);
 	u32 tmp;
 
-	if (!(ram = kzalloc(sizeof(*ram), GFP_KERNEL)))
+	if (!(ram = kzalloc_obj(*ram)))
 		return -ENOMEM;
 	*pram = &ram->base;
 
@@ -1698,7 +1698,7 @@ gk104_ram_new_(const struct nvkm_ram_func *func, struct nvkm_fb *fb,
 
 static const struct nvkm_ram_func
 gk104_ram = {
-	.upper = 0x0200000000,
+	.upper = 0x0200000000ULL,
 	.probe_fbp = gf100_ram_probe_fbp,
 	.probe_fbp_amount = gf108_ram_probe_fbp_amount,
 	.probe_fbpa_amount = gf100_ram_probe_fbpa_amount,

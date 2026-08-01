@@ -1,35 +1,11 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause)
 /* QLogic qede NIC Driver
  * Copyright (c) 2015-2017  QLogic Corporation
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * OpenIB.org BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and /or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright (c) 2019-2020 Marvell International Ltd.
  */
+
 #include "qede_ptp.h"
+#define QEDE_PTP_TX_TIMEOUT (2 * HZ)
 
 struct qede_ptp {
 	const struct qed_eth_ptp_ops	*ops;
@@ -38,6 +14,7 @@ struct qede_ptp {
 	struct timecounter		tc;
 	struct ptp_clock		*clock;
 	struct work_struct		work;
+	unsigned long			ptp_tx_start;
 	struct qede_dev			*edev;
 	struct sk_buff			*tx_skb;
 
@@ -51,16 +28,19 @@ struct qede_ptp {
 };
 
 /**
- * qede_ptp_adjfreq
- * @ptp: the ptp clock structure
- * @ppb: parts per billion adjustment from base
+ * qede_ptp_adjfine() - Adjust the frequency of the PTP cycle counter.
  *
- * Adjust the frequency of the ptp cycle counter by the
- * indicated ppb from the base frequency.
+ * @info: The PTP clock info structure.
+ * @scaled_ppm: Scaled parts per million adjustment from base.
+ *
+ * Scaled parts per million is ppm with a 16-bit binary fractional field.
+ *
+ * Return: Zero on success, negative errno otherwise.
  */
-static int qede_ptp_adjfreq(struct ptp_clock_info *info, s32 ppb)
+static int qede_ptp_adjfine(struct ptp_clock_info *info, long scaled_ppm)
 {
 	struct qede_ptp *ptp = container_of(info, struct qede_ptp, clock_info);
+	s32 ppb = scaled_ppm_to_ppb(scaled_ppm);
 	struct qede_dev *edev = ptp->edev;
 	int rc;
 
@@ -70,7 +50,7 @@ static int qede_ptp_adjfreq(struct ptp_clock_info *info, s32 ppb)
 		rc = ptp->ops->adjfreq(edev->cdev, ppb);
 		spin_unlock_bh(&ptp->lock);
 	} else {
-		DP_ERR(edev, "PTP adjfreq called while interface is down\n");
+		DP_ERR(edev, "PTP adjfine called while interface is down\n");
 		rc = -EFAULT;
 	}
 	__qede_unlock(edev);
@@ -160,18 +140,30 @@ static void qede_ptp_task(struct work_struct *work)
 	struct qede_dev *edev;
 	struct qede_ptp *ptp;
 	u64 timestamp, ns;
+	bool timedout;
 	int rc;
 
 	ptp = container_of(work, struct qede_ptp, work);
 	edev = ptp->edev;
+	timedout = time_is_before_jiffies(ptp->ptp_tx_start +
+					  QEDE_PTP_TX_TIMEOUT);
 
 	/* Read Tx timestamp registers */
 	spin_lock_bh(&ptp->lock);
 	rc = ptp->ops->read_tx_ts(edev->cdev, &timestamp);
 	spin_unlock_bh(&ptp->lock);
 	if (rc) {
-		/* Reschedule to keep checking for a valid timestamp value */
-		schedule_work(&ptp->work);
+		if (unlikely(timedout)) {
+			DP_INFO(edev, "Tx timestamp is not recorded\n");
+			dev_kfree_skb_any(ptp->tx_skb);
+			ptp->tx_skb = NULL;
+			clear_bit_unlock(QEDE_FLAGS_PTP_TX_IN_PRORGESS,
+					 &edev->flags);
+			edev->ptp_skip_txts++;
+		} else {
+			/* Reschedule to keep checking for a valid TS value */
+			schedule_work(&ptp->work);
+		}
 		return;
 	}
 
@@ -189,7 +181,7 @@ static void qede_ptp_task(struct work_struct *work)
 }
 
 /* Read the PHC. This API is invoked with ptp_lock held. */
-static u64 qede_ptp_read_cc(const struct cyclecounter *cc)
+static u64 qede_ptp_read_cc(struct cyclecounter *cc)
 {
 	struct qede_dev *edev;
 	struct qede_ptp *ptp;
@@ -207,34 +199,27 @@ static u64 qede_ptp_read_cc(const struct cyclecounter *cc)
 	return phc_cycles;
 }
 
-static int qede_ptp_cfg_filters(struct qede_dev *edev)
+static void qede_ptp_cfg_filters(struct qede_dev *edev)
 {
 	enum qed_ptp_hwtstamp_tx_type tx_type = QED_PTP_HWTSTAMP_TX_ON;
 	enum qed_ptp_filter_type rx_filter = QED_PTP_FILTER_NONE;
 	struct qede_ptp *ptp = edev->ptp;
 
-	if (!ptp)
-		return -EIO;
-
 	if (!ptp->hw_ts_ioctl_called) {
 		DP_INFO(edev, "TS IOCTL not called\n");
-		return 0;
+		return;
 	}
 
 	switch (ptp->tx_type) {
 	case HWTSTAMP_TX_ON:
-		edev->flags |= QEDE_TX_TIMESTAMPING_EN;
+		set_bit(QEDE_FLAGS_TX_TIMESTAMPING_EN, &edev->flags);
 		tx_type = QED_PTP_HWTSTAMP_TX_ON;
 		break;
 
 	case HWTSTAMP_TX_OFF:
-		edev->flags &= ~QEDE_TX_TIMESTAMPING_EN;
+		clear_bit(QEDE_FLAGS_TX_TIMESTAMPING_EN, &edev->flags);
 		tx_type = QED_PTP_HWTSTAMP_TX_OFF;
 		break;
-
-	case HWTSTAMP_TX_ONESTEP_SYNC:
-		DP_ERR(edev, "One-step timestamping is not supported\n");
-		return -ERANGE;
 	}
 
 	spin_lock_bh(&ptp->lock);
@@ -293,64 +278,84 @@ static int qede_ptp_cfg_filters(struct qede_dev *edev)
 	ptp->ops->cfg_filters(edev->cdev, rx_filter, tx_type);
 
 	spin_unlock_bh(&ptp->lock);
+}
+
+int qede_hwtstamp_set(struct net_device *netdev,
+		      struct kernel_hwtstamp_config *config,
+		      struct netlink_ext_ack *extack)
+{
+	struct qede_dev *edev = netdev_priv(netdev);
+	struct qede_ptp *ptp;
+
+	if (!netif_running(netdev)) {
+		NL_SET_ERR_MSG_MOD(extack, "Device is down");
+		return -EAGAIN;
+	}
+
+	ptp = edev->ptp;
+	if (!ptp) {
+		NL_SET_ERR_MSG_MOD(extack, "HW timestamping is not supported");
+		return -EIO;
+	}
+
+	DP_VERBOSE(edev, QED_MSG_DEBUG,
+		   "HWTSTAMP SET: Requested tx_type = %d, requested rx_filters = %d\n",
+		   config->tx_type, config->rx_filter);
+
+	switch (config->tx_type) {
+	case HWTSTAMP_TX_ON:
+	case HWTSTAMP_TX_OFF:
+		break;
+	default:
+		NL_SET_ERR_MSG_MOD(extack,
+				   "One-step timestamping is not supported");
+		return -ERANGE;
+	}
+
+	ptp->hw_ts_ioctl_called = 1;
+	ptp->tx_type = config->tx_type;
+	ptp->rx_filter = config->rx_filter;
+
+	qede_ptp_cfg_filters(edev);
+
+	config->rx_filter = ptp->rx_filter;
 
 	return 0;
 }
 
-int qede_ptp_hw_ts(struct qede_dev *edev, struct ifreq *ifr)
+int qede_hwtstamp_get(struct net_device *netdev,
+		      struct kernel_hwtstamp_config *config)
 {
-	struct hwtstamp_config config;
+	struct qede_dev *edev = netdev_priv(netdev);
 	struct qede_ptp *ptp;
-	int rc;
 
 	ptp = edev->ptp;
 	if (!ptp)
 		return -EIO;
 
-	if (copy_from_user(&config, ifr->ifr_data, sizeof(config)))
-		return -EFAULT;
+	config->tx_type = ptp->tx_type;
+	config->rx_filter = ptp->rx_filter;
 
-	DP_VERBOSE(edev, QED_MSG_DEBUG,
-		   "HWTSTAMP IOCTL: Requested tx_type = %d, requested rx_filters = %d\n",
-		   config.tx_type, config.rx_filter);
-
-	if (config.flags) {
-		DP_ERR(edev, "config.flags is reserved for future use\n");
-		return -EINVAL;
-	}
-
-	ptp->hw_ts_ioctl_called = 1;
-	ptp->tx_type = config.tx_type;
-	ptp->rx_filter = config.rx_filter;
-
-	rc = qede_ptp_cfg_filters(edev);
-	if (rc)
-		return rc;
-
-	config.rx_filter = ptp->rx_filter;
-
-	return copy_to_user(ifr->ifr_data, &config,
-			    sizeof(config)) ? -EFAULT : 0;
+	return 0;
 }
 
-int qede_ptp_get_ts_info(struct qede_dev *edev, struct ethtool_ts_info *info)
+int qede_ptp_get_ts_info(struct qede_dev *edev, struct kernel_ethtool_ts_info *info)
 {
 	struct qede_ptp *ptp = edev->ptp;
 
-	if (!ptp)
-		return -EIO;
+	if (!ptp) {
+		info->so_timestamping = SOF_TIMESTAMPING_TX_SOFTWARE;
+
+		return 0;
+	}
 
 	info->so_timestamping = SOF_TIMESTAMPING_TX_SOFTWARE |
-				SOF_TIMESTAMPING_RX_SOFTWARE |
-				SOF_TIMESTAMPING_SOFTWARE |
 				SOF_TIMESTAMPING_TX_HARDWARE |
 				SOF_TIMESTAMPING_RX_HARDWARE |
 				SOF_TIMESTAMPING_RAW_HARDWARE;
 
 	if (ptp->clock)
 		info->phc_index = ptp_clock_index(ptp->clock);
-	else
-		info->phc_index = -1;
 
 	info->rx_filters = BIT(HWTSTAMP_FILTER_NONE) |
 			   BIT(HWTSTAMP_FILTER_PTP_V1_L4_EVENT) |
@@ -391,6 +396,7 @@ void qede_ptp_disable(struct qede_dev *edev)
 	if (ptp->tx_skb) {
 		dev_kfree_skb_any(ptp->tx_skb);
 		ptp->tx_skb = NULL;
+		clear_bit_unlock(QEDE_FLAGS_PTP_TX_IN_PRORGESS, &edev->flags);
 	}
 
 	/* Disable PTP in HW */
@@ -402,7 +408,7 @@ void qede_ptp_disable(struct qede_dev *edev)
 	edev->ptp = NULL;
 }
 
-static int qede_ptp_init(struct qede_dev *edev, bool init_tc)
+static int qede_ptp_init(struct qede_dev *edev)
 {
 	struct qede_ptp *ptp;
 	int rc;
@@ -423,30 +429,24 @@ static int qede_ptp_init(struct qede_dev *edev, bool init_tc)
 	/* Init work queue for Tx timestamping */
 	INIT_WORK(&ptp->work, qede_ptp_task);
 
-	/* Init cyclecounter and timecounter. This is done only in the first
-	 * load. If done in every load, PTP application will fail when doing
-	 * unload / load (e.g. MTU change) while it is running.
-	 */
-	if (init_tc) {
-		memset(&ptp->cc, 0, sizeof(ptp->cc));
-		ptp->cc.read = qede_ptp_read_cc;
-		ptp->cc.mask = CYCLECOUNTER_MASK(64);
-		ptp->cc.shift = 0;
-		ptp->cc.mult = 1;
+	/* Init cyclecounter and timecounter */
+	memset(&ptp->cc, 0, sizeof(ptp->cc));
+	ptp->cc.read = qede_ptp_read_cc;
+	ptp->cc.mask = CYCLECOUNTER_MASK(64);
+	ptp->cc.shift = 0;
+	ptp->cc.mult = 1;
 
-		timecounter_init(&ptp->tc, &ptp->cc,
-				 ktime_to_ns(ktime_get_real()));
-	}
+	timecounter_init(&ptp->tc, &ptp->cc, ktime_to_ns(ktime_get_real()));
 
-	return rc;
+	return 0;
 }
 
-int qede_ptp_enable(struct qede_dev *edev, bool init_tc)
+int qede_ptp_enable(struct qede_dev *edev)
 {
 	struct qede_ptp *ptp;
 	int rc;
 
-	ptp = kzalloc(sizeof(*ptp), GFP_KERNEL);
+	ptp = kzalloc_obj(*ptp);
 	if (!ptp) {
 		DP_INFO(edev, "Failed to allocate struct for PTP\n");
 		return -ENOMEM;
@@ -462,7 +462,7 @@ int qede_ptp_enable(struct qede_dev *edev, bool init_tc)
 
 	edev->ptp = ptp;
 
-	rc = qede_ptp_init(edev, init_tc);
+	rc = qede_ptp_init(edev);
 	if (rc)
 		goto err1;
 
@@ -476,7 +476,7 @@ int qede_ptp_enable(struct qede_dev *edev, bool init_tc)
 	ptp->clock_info.n_ext_ts = 0;
 	ptp->clock_info.n_per_out = 0;
 	ptp->clock_info.pps = 0;
-	ptp->clock_info.adjfreq = qede_ptp_adjfreq;
+	ptp->clock_info.adjfine = qede_ptp_adjfine;
 	ptp->clock_info.adjtime = qede_ptp_adjtime;
 	ptp->clock_info.gettime64 = qede_ptp_gettime;
 	ptp->clock_info.settime64 = qede_ptp_settime;
@@ -484,18 +484,17 @@ int qede_ptp_enable(struct qede_dev *edev, bool init_tc)
 
 	ptp->clock = ptp_clock_register(&ptp->clock_info, &edev->pdev->dev);
 	if (IS_ERR(ptp->clock)) {
-		rc = -EINVAL;
 		DP_ERR(edev, "PTP clock registration failed\n");
+		qede_ptp_disable(edev);
+		rc = -EINVAL;
 		goto err2;
 	}
 
 	return 0;
 
-err2:
-	qede_ptp_disable(edev);
-	ptp->clock = NULL;
 err1:
 	kfree(ptp);
+err2:
 	edev->ptp = NULL;
 
 	return rc;
@@ -509,19 +508,28 @@ void qede_ptp_tx_ts(struct qede_dev *edev, struct sk_buff *skb)
 	if (!ptp)
 		return;
 
-	if (test_and_set_bit_lock(QEDE_FLAGS_PTP_TX_IN_PRORGESS, &edev->flags))
+	if (test_and_set_bit_lock(QEDE_FLAGS_PTP_TX_IN_PRORGESS,
+				  &edev->flags)) {
+		DP_VERBOSE(edev, QED_MSG_DEBUG, "Timestamping in progress\n");
+		edev->ptp_skip_txts++;
 		return;
+	}
 
-	if (unlikely(!(edev->flags & QEDE_TX_TIMESTAMPING_EN))) {
-		DP_NOTICE(edev,
-			  "Tx timestamping was not enabled, this packet will not be timestamped\n");
+	if (unlikely(!test_bit(QEDE_FLAGS_TX_TIMESTAMPING_EN, &edev->flags))) {
+		DP_VERBOSE(edev, QED_MSG_DEBUG,
+			   "Tx timestamping was not enabled, this pkt will not be timestamped\n");
+		clear_bit_unlock(QEDE_FLAGS_PTP_TX_IN_PRORGESS, &edev->flags);
+		edev->ptp_skip_txts++;
 	} else if (unlikely(ptp->tx_skb)) {
-		DP_NOTICE(edev,
-			  "The device supports only a single outstanding packet to timestamp, this packet will not be timestamped\n");
+		DP_VERBOSE(edev, QED_MSG_DEBUG,
+			   "Device supports a single outstanding pkt to ts, It will not be ts\n");
+		clear_bit_unlock(QEDE_FLAGS_PTP_TX_IN_PRORGESS, &edev->flags);
+		edev->ptp_skip_txts++;
 	} else {
 		skb_shinfo(skb)->tx_flags |= SKBTX_IN_PROGRESS;
 		/* schedule check for Tx timestamp */
 		ptp->tx_skb = skb_get(skb);
+		ptp->ptp_tx_start = jiffies;
 		schedule_work(&ptp->work);
 	}
 }

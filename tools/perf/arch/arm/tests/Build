@@ -1,4 +1,5 @@
-libperf-y += regs_load.o
-libperf-y += dwarf-unwind.o
+perf-test-y += regs_load.o
+perf-test-y += dwarf-unwind.o
+perf-test-y += vectors-page.o
 
-libperf-y += arch-tests.o
+perf-test-y += arch-tests.o

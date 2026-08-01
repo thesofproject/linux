@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2006-2009 Red Hat, Inc.
  *
@@ -76,7 +77,7 @@ struct log_c {
 	 */
 	uint32_t integrated_flush;
 
-	mempool_t *flush_entry_pool;
+	mempool_t flush_entry_pool;
 };
 
 static struct kmem_cache *_flush_entry_cache;
@@ -123,7 +124,7 @@ retry:
 }
 
 static int build_constructor_string(struct dm_target *ti,
-				    unsigned argc, char **argv,
+				    unsigned int argc, char **argv,
 				    char **ctr_str)
 {
 	int i, str_size;
@@ -188,7 +189,7 @@ static void do_flush(struct work_struct *work)
  * to the userspace ctr function.
  */
 static int userspace_ctr(struct dm_dirty_log *log, struct dm_target *ti,
-			 unsigned argc, char **argv)
+			 unsigned int argc, char **argv)
 {
 	int r = 0;
 	int str_size;
@@ -204,7 +205,7 @@ static int userspace_ctr(struct dm_dirty_log *log, struct dm_target *ti,
 		return -EINVAL;
 	}
 
-	lc = kzalloc(sizeof(*lc), GFP_KERNEL);
+	lc = kzalloc_obj(*lc);
 	if (!lc) {
 		DMWARN("Unable to allocate userspace log context.");
 		return -ENOMEM;
@@ -223,7 +224,7 @@ static int userspace_ctr(struct dm_dirty_log *log, struct dm_target *ti,
 
 	lc->usr_argc = argc;
 
-	strncpy(lc->uuid, argv[0], DM_UUID_LEN);
+	strscpy(lc->uuid, argv[0], sizeof(lc->uuid));
 	argc--;
 	argv++;
 	spin_lock_init(&lc->flush_lock);
@@ -249,11 +250,10 @@ static int userspace_ctr(struct dm_dirty_log *log, struct dm_target *ti,
 		goto out;
 	}
 
-	lc->flush_entry_pool = mempool_create_slab_pool(FLUSH_ENTRY_POOL_SIZE,
-							_flush_entry_cache);
-	if (!lc->flush_entry_pool) {
+	r = mempool_init_slab_pool(&lc->flush_entry_pool, FLUSH_ENTRY_POOL_SIZE,
+				   _flush_entry_cache);
+	if (r) {
 		DMERR("Failed to create flush_entry_pool");
-		r = -ENOMEM;
 		goto out;
 	}
 
@@ -299,7 +299,8 @@ static int userspace_ctr(struct dm_dirty_log *log, struct dm_target *ti,
 	}
 
 	if (lc->integrated_flush) {
-		lc->dmlog_wq = alloc_workqueue("dmlogd", WQ_MEM_RECLAIM, 0);
+		lc->dmlog_wq = alloc_workqueue("dmlogd",
+					       WQ_MEM_RECLAIM | WQ_PERCPU, 0);
 		if (!lc->dmlog_wq) {
 			DMERR("couldn't start dmlogd");
 			r = -ENOMEM;
@@ -313,7 +314,7 @@ static int userspace_ctr(struct dm_dirty_log *log, struct dm_target *ti,
 out:
 	kfree(devices_rdata);
 	if (r) {
-		mempool_destroy(lc->flush_entry_pool);
+		mempool_exit(&lc->flush_entry_pool);
 		kfree(lc);
 		kfree(ctr_str);
 	} else {
@@ -342,12 +343,10 @@ static void userspace_dtr(struct dm_dirty_log *log)
 	if (lc->log_dev)
 		dm_put_device(lc->ti, lc->log_dev);
 
-	mempool_destroy(lc->flush_entry_pool);
+	mempool_exit(&lc->flush_entry_pool);
 
 	kfree(lc->usr_argv_str);
 	kfree(lc);
-
-	return;
 }
 
 static int userspace_presuspend(struct dm_dirty_log *log)
@@ -570,7 +569,7 @@ static int userspace_flush(struct dm_dirty_log *log)
 	int mark_list_is_empty;
 	int clear_list_is_empty;
 	struct dm_dirty_log_flush_entry *fe, *tmp_fe;
-	mempool_t *flush_entry_pool = lc->flush_entry_pool;
+	mempool_t *flush_entry_pool = &lc->flush_entry_pool;
 
 	spin_lock_irqsave(&lc->flush_lock, flags);
 	list_splice_init(&lc->mark_list, &mark_list);
@@ -653,7 +652,7 @@ static void userspace_mark_region(struct dm_dirty_log *log, region_t region)
 	struct dm_dirty_log_flush_entry *fe;
 
 	/* Wait for an allocation, but _never_ fail */
-	fe = mempool_alloc(lc->flush_entry_pool, GFP_NOIO);
+	fe = mempool_alloc(&lc->flush_entry_pool, GFP_NOIO);
 	BUG_ON(!fe);
 
 	spin_lock_irqsave(&lc->flush_lock, flags);
@@ -661,8 +660,6 @@ static void userspace_mark_region(struct dm_dirty_log *log, region_t region)
 	fe->region = region;
 	list_add(&fe->list, &lc->mark_list);
 	spin_unlock_irqrestore(&lc->flush_lock, flags);
-
-	return;
 }
 
 /*
@@ -687,7 +684,7 @@ static void userspace_clear_region(struct dm_dirty_log *log, region_t region)
 	 * to cause the region to be resync'ed when the
 	 * device is activated next time.
 	 */
-	fe = mempool_alloc(lc->flush_entry_pool, GFP_ATOMIC);
+	fe = mempool_alloc(&lc->flush_entry_pool, GFP_ATOMIC);
 	if (!fe) {
 		DMERR("Failed to allocate memory to clear region.");
 		return;
@@ -698,8 +695,6 @@ static void userspace_clear_region(struct dm_dirty_log *log, region_t region)
 	fe->region = region;
 	list_add(&fe->list, &lc->clear_list);
 	spin_unlock_irqrestore(&lc->flush_lock, flags);
-
-	return;
 }
 
 /*
@@ -756,7 +751,6 @@ static void userspace_set_region_sync(struct dm_dirty_log *log,
 	 * It would be nice to be able to report failures.
 	 * However, it is easy enough to detect and resolve.
 	 */
-	return;
 }
 
 /*
@@ -793,7 +787,7 @@ static region_t userspace_get_sync_count(struct dm_dirty_log *log)
  * Returns: amount of space consumed
  */
 static int userspace_status(struct dm_dirty_log *log, status_type_t status_type,
-			    char *result, unsigned maxlen)
+			    char *result, unsigned int maxlen)
 {
 	int r = 0;
 	char *table_args;
@@ -820,6 +814,9 @@ static int userspace_status(struct dm_dirty_log *log, status_type_t status_type,
 		if (lc->integrated_flush)
 			DMEMIT("integrated_flush ");
 		DMEMIT("%s ", table_args);
+		break;
+	case STATUSTYPE_IMA:
+		*result = '\0';
 		break;
 	}
 	return (r) ? 0 : (int)sz;
@@ -924,12 +921,11 @@ static void __exit userspace_dirty_log_exit(void)
 	kmem_cache_destroy(_flush_entry_cache);
 
 	DMINFO("version " DM_LOG_USERSPACE_VSN " unloaded");
-	return;
 }
 
 module_init(userspace_dirty_log_init);
 module_exit(userspace_dirty_log_exit);
 
 MODULE_DESCRIPTION(DM_NAME " userspace dirty log link");
-MODULE_AUTHOR("Jonathan Brassow <dm-devel@redhat.com>");
+MODULE_AUTHOR("Jonathan Brassow <dm-devel@lists.linux.dev>");
 MODULE_LICENSE("GPL");

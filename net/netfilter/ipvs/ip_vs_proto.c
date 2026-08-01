@@ -1,20 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * ip_vs_proto.c: transport protocol load balancing support for IPVS
  *
  * Authors:     Wensong Zhang <wensong@linuxvirtualserver.org>
  *              Julian Anastasov <ja@ssi.bg>
  *
- *              This program is free software; you can redistribute it and/or
- *              modify it under the terms of the GNU General Public License
- *              as published by the Free Software Foundation; either version
- *              2 of the License, or (at your option) any later version.
- *
  * Changes:
- *
  */
 
-#define KMSG_COMPONENT "IPVS"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "IPVS: " fmt
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -42,6 +36,11 @@
 
 static struct ip_vs_protocol *ip_vs_proto_table[IP_VS_PROTO_TAB_SIZE];
 
+/* States for conn templates: NONE or words separated with ",", max 15 chars */
+static const char *ip_vs_ctpl_state_name_table[IP_VS_CTPL_S_LAST] = {
+	[IP_VS_CTPL_S_NONE]			= "NONE",
+	[IP_VS_CTPL_S_ASSURED]			= "ASSURED",
+};
 
 /*
  *	register an ipvs protocol
@@ -67,7 +66,7 @@ register_ip_vs_proto_netns(struct netns_ipvs *ipvs, struct ip_vs_protocol *pp)
 {
 	unsigned int hash = IP_VS_PROTO_HASH(pp->protocol);
 	struct ip_vs_proto_data *pd =
-			kzalloc(sizeof(struct ip_vs_proto_data), GFP_KERNEL);
+			kzalloc_obj(struct ip_vs_proto_data);
 
 	if (!pd)
 		return -ENOMEM;
@@ -193,12 +192,20 @@ ip_vs_create_timeout_table(int *table, int size)
 }
 
 
-const char * ip_vs_state_name(__u16 proto, int state)
+const char *ip_vs_state_name(const struct ip_vs_conn *cp)
 {
-	struct ip_vs_protocol *pp = ip_vs_proto_get(proto);
+	unsigned int state = cp->state;
+	struct ip_vs_protocol *pp;
 
+	if (cp->flags & IP_VS_CONN_F_TEMPLATE) {
+
+		if (state >= IP_VS_CTPL_S_LAST)
+			return "ERR!";
+		return ip_vs_ctpl_state_name_table[state] ? : "?";
+	}
+	pp = ip_vs_proto_get(cp->protocol);
 	if (pp == NULL || pp->state_name == NULL)
-		return (IPPROTO_IP == proto) ? "NONE" : "ERR!";
+		return (cp->protocol == IPPROTO_IP) ? "NONE" : "ERR!";
 	return pp->state_name(state);
 }
 
@@ -332,7 +339,7 @@ void __net_exit ip_vs_protocol_net_cleanup(struct netns_ipvs *ipvs)
 
 int __init ip_vs_protocol_init(void)
 {
-	char protocols[64];
+	char protocols[64] = { 0 };
 #define REGISTER_PROTOCOL(p)			\
 	do {					\
 		register_ip_vs_protocol(p);	\
@@ -340,8 +347,6 @@ int __init ip_vs_protocol_init(void)
 		strcat(protocols, (p)->name);	\
 	} while (0)
 
-	protocols[0] = '\0';
-	protocols[2] = '\0';
 #ifdef CONFIG_IP_VS_PROTO_TCP
 	REGISTER_PROTOCOL(&ip_vs_protocol_tcp);
 #endif

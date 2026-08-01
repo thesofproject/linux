@@ -8,10 +8,11 @@
  *  for more details.
  */
 
+#include <linux/export.h>
 #include <linux/module.h>
 #include <linux/string.h>
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "c2p.h"
 #include "c2p_core.h"
@@ -153,4 +154,5 @@ void c2p_planar(void *dst, const void *src, u32 dx, u32 dy, u32 width,
 }
 EXPORT_SYMBOL_GPL(c2p_planar);
 
+MODULE_DESCRIPTION("Fast C2P (Chunky-to-Planar) Conversion");
 MODULE_LICENSE("GPL");

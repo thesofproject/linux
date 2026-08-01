@@ -1,25 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * ALSA timer back-end using hrtimer
  * Copyright (C) 2008 Takashi Iwai
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/init.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/hrtimer.h>
@@ -33,7 +20,7 @@ MODULE_LICENSE("GPL");
 MODULE_ALIAS("snd-timer-" __stringify(SNDRV_TIMER_GLOBAL_HRTIMER));
 
 #define NANO_SEC	1000000000UL	/* 10^9 in sec */
-static unsigned int resolution;
+static unsigned int resolution __ro_after_init;
 
 struct snd_hrtimer {
 	struct snd_timer *timer;
@@ -49,29 +36,27 @@ static enum hrtimer_restart snd_hrtimer_callback(struct hrtimer *hrt)
 	unsigned long ticks;
 	enum hrtimer_restart ret = HRTIMER_NORESTART;
 
-	spin_lock(&t->lock);
-	if (!t->running)
-		goto out; /* fast path */
-	stime->in_callback = true;
-	ticks = t->sticks;
-	spin_unlock(&t->lock);
+	scoped_guard(spinlock, &t->lock) {
+		if (!t->running)
+			return HRTIMER_NORESTART; /* fast path */
+		stime->in_callback = true;
+		ticks = t->sticks;
+	}
 
 	/* calculate the drift */
-	delta = ktime_sub(hrt->base->get_time(), hrtimer_get_expires(hrt));
+	delta = ktime_sub(hrtimer_cb_get_time(hrt), hrtimer_get_expires(hrt));
 	if (delta > 0)
 		ticks += ktime_divns(delta, ticks * resolution);
 
 	snd_timer_interrupt(stime->timer, ticks);
 
-	spin_lock(&t->lock);
+	guard(spinlock)(&t->lock);
 	if (t->running) {
 		hrtimer_add_expires_ns(hrt, t->sticks * resolution);
 		ret = HRTIMER_RESTART;
 	}
 
 	stime->in_callback = false;
- out:
-	spin_unlock(&t->lock);
 	return ret;
 }
 
@@ -79,12 +64,11 @@ static int snd_hrtimer_open(struct snd_timer *t)
 {
 	struct snd_hrtimer *stime;
 
-	stime = kzalloc(sizeof(*stime), GFP_KERNEL);
+	stime = kzalloc_obj(*stime);
 	if (!stime)
 		return -ENOMEM;
-	hrtimer_init(&stime->hrt, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	stime->timer = t;
-	stime->hrt.function = snd_hrtimer_callback;
+	hrtimer_setup(&stime->hrt, snd_hrtimer_callback, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	t->private_data = stime;
 	return 0;
 }
@@ -94,10 +78,10 @@ static int snd_hrtimer_close(struct snd_timer *t)
 	struct snd_hrtimer *stime = t->private_data;
 
 	if (stime) {
-		spin_lock_irq(&t->lock);
-		t->running = 0; /* just to be sure */
-		stime->in_callback = 1; /* skip start/stop */
-		spin_unlock_irq(&t->lock);
+		scoped_guard(spinlock_irq, &t->lock) {
+			t->running = 0; /* just to be sure */
+			stime->in_callback = 1; /* skip start/stop */
+		}
 
 		hrtimer_cancel(&stime->hrt);
 		kfree(stime);
@@ -128,7 +112,7 @@ static int snd_hrtimer_stop(struct snd_timer *t)
 }
 
 static const struct snd_timer_hardware hrtimer_hw __initconst = {
-	.flags =	SNDRV_TIMER_HW_AUTO | SNDRV_TIMER_HW_TASKLET,
+	.flags =	SNDRV_TIMER_HW_AUTO | SNDRV_TIMER_HW_WORK,
 	.open =		snd_hrtimer_open,
 	.close =	snd_hrtimer_close,
 	.start =	snd_hrtimer_start,
@@ -155,7 +139,7 @@ static int __init snd_hrtimer_init(void)
 		return err;
 
 	timer->module = THIS_MODULE;
-	strcpy(timer->name, "HR timer");
+	strscpy(timer->name, "HR timer");
 	timer->hw = hrtimer_hw;
 	timer->hw.resolution = resolution;
 	timer->hw.ticks = NANO_SEC / resolution;

@@ -1,20 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
-#include <linux/pinctrl/pinctrl.h>
 
 #include "pinctrl-msm.h"
 
@@ -224,18 +215,11 @@ DECLARE_QCA_GPIO_PINS(97);
 DECLARE_QCA_GPIO_PINS(98);
 DECLARE_QCA_GPIO_PINS(99);
 
-#define FUNCTION(fname)			                \
-	[qca_mux_##fname] = {		                \
-		.name = #fname,				\
-		.groups = fname##_groups,               \
-		.ngroups = ARRAY_SIZE(fname##_groups),	\
-	}
-
 #define PINGROUP(id, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13, f14) \
 	{					        \
-		.name = "gpio" #id,			\
-		.pins = gpio##id##_pins,		\
-		.npins = (unsigned)ARRAY_SIZE(gpio##id##_pins),	\
+		.grp = PINCTRL_PINGROUP("gpio" #id, 	\
+			gpio##id##_pins, 		\
+			ARRAY_SIZE(gpio##id##_pins)),	\
 		.funcs = (int[]){			\
 			qca_mux_gpio, /* gpio mode */	\
 			qca_mux_##f1,			\
@@ -258,10 +242,10 @@ DECLARE_QCA_GPIO_PINS(99);
 		.io_reg = 0x4 + 0x1000 * id,		\
 		.intr_cfg_reg = 0x8 + 0x1000 * id,	\
 		.intr_status_reg = 0xc + 0x1000 * id,	\
-		.intr_target_reg = 0x8 + 0x1000 * id,	\
 		.mux_bit = 2,			\
 		.pull_bit = 0,			\
 		.drv_bit = 6,			\
+		.od_bit = 12,			\
 		.oe_bit = 9,			\
 		.in_bit = 0,			\
 		.out_bit = 1,			\
@@ -485,51 +469,51 @@ static const char * const wifi1_groups[] = {
 	"gpio53", "gpio56", "gpio57", "gpio58", "gpio98",
 };
 
-static const struct msm_function ipq4019_functions[] = {
-	FUNCTION(aud_pin),
-	FUNCTION(audio_pwm),
-	FUNCTION(blsp_i2c0),
-	FUNCTION(blsp_i2c1),
-	FUNCTION(blsp_spi0),
-	FUNCTION(blsp_spi1),
-	FUNCTION(blsp_uart0),
-	FUNCTION(blsp_uart1),
-	FUNCTION(chip_rst),
-	FUNCTION(gpio),
-	FUNCTION(i2s_rx),
-	FUNCTION(i2s_spdif_in),
-	FUNCTION(i2s_spdif_out),
-	FUNCTION(i2s_td),
-	FUNCTION(i2s_tx),
-	FUNCTION(jtag),
-	FUNCTION(led0),
-	FUNCTION(led1),
-	FUNCTION(led2),
-	FUNCTION(led3),
-	FUNCTION(led4),
-	FUNCTION(led5),
-	FUNCTION(led6),
-	FUNCTION(led7),
-	FUNCTION(led8),
-	FUNCTION(led9),
-	FUNCTION(led10),
-	FUNCTION(led11),
-	FUNCTION(mdc),
-	FUNCTION(mdio),
-	FUNCTION(pcie),
-	FUNCTION(pmu),
-	FUNCTION(prng_rosc),
-	FUNCTION(qpic),
-	FUNCTION(rgmii),
-	FUNCTION(rmii),
-	FUNCTION(sdio),
-	FUNCTION(smart0),
-	FUNCTION(smart1),
-	FUNCTION(smart2),
-	FUNCTION(smart3),
-	FUNCTION(tm),
-	FUNCTION(wifi0),
-	FUNCTION(wifi1),
+static const struct pinfunction ipq4019_functions[] = {
+	QCA_PIN_FUNCTION(aud_pin),
+	QCA_PIN_FUNCTION(audio_pwm),
+	QCA_PIN_FUNCTION(blsp_i2c0),
+	QCA_PIN_FUNCTION(blsp_i2c1),
+	QCA_PIN_FUNCTION(blsp_spi0),
+	QCA_PIN_FUNCTION(blsp_spi1),
+	QCA_PIN_FUNCTION(blsp_uart0),
+	QCA_PIN_FUNCTION(blsp_uart1),
+	QCA_PIN_FUNCTION(chip_rst),
+	QCA_GPIO_PIN_FUNCTION(gpio),
+	QCA_PIN_FUNCTION(i2s_rx),
+	QCA_PIN_FUNCTION(i2s_spdif_in),
+	QCA_PIN_FUNCTION(i2s_spdif_out),
+	QCA_PIN_FUNCTION(i2s_td),
+	QCA_PIN_FUNCTION(i2s_tx),
+	QCA_PIN_FUNCTION(jtag),
+	QCA_PIN_FUNCTION(led0),
+	QCA_PIN_FUNCTION(led1),
+	QCA_PIN_FUNCTION(led2),
+	QCA_PIN_FUNCTION(led3),
+	QCA_PIN_FUNCTION(led4),
+	QCA_PIN_FUNCTION(led5),
+	QCA_PIN_FUNCTION(led6),
+	QCA_PIN_FUNCTION(led7),
+	QCA_PIN_FUNCTION(led8),
+	QCA_PIN_FUNCTION(led9),
+	QCA_PIN_FUNCTION(led10),
+	QCA_PIN_FUNCTION(led11),
+	QCA_PIN_FUNCTION(mdc),
+	QCA_PIN_FUNCTION(mdio),
+	QCA_PIN_FUNCTION(pcie),
+	QCA_PIN_FUNCTION(pmu),
+	QCA_PIN_FUNCTION(prng_rosc),
+	QCA_PIN_FUNCTION(qpic),
+	QCA_PIN_FUNCTION(rgmii),
+	QCA_PIN_FUNCTION(rmii),
+	QCA_PIN_FUNCTION(sdio),
+	QCA_PIN_FUNCTION(smart0),
+	QCA_PIN_FUNCTION(smart1),
+	QCA_PIN_FUNCTION(smart2),
+	QCA_PIN_FUNCTION(smart3),
+	QCA_PIN_FUNCTION(tm),
+	QCA_PIN_FUNCTION(wifi0),
+	QCA_PIN_FUNCTION(wifi1),
 };
 
 static const struct msm_pingroup ipq4019_groups[] = {
@@ -718,6 +702,7 @@ static const struct of_device_id ipq4019_pinctrl_of_match[] = {
 	{ .compatible = "qcom,ipq4019-pinctrl", },
 	{ },
 };
+MODULE_DEVICE_TABLE(of, ipq4019_pinctrl_of_match);
 
 static struct platform_driver ipq4019_pinctrl_driver = {
 	.driver = {
@@ -725,7 +710,6 @@ static struct platform_driver ipq4019_pinctrl_driver = {
 		.of_match_table = ipq4019_pinctrl_of_match,
 	},
 	.probe = ipq4019_pinctrl_probe,
-	.remove = msm_pinctrl_remove,
 };
 
 static int __init ipq4019_pinctrl_init(void)
@@ -742,4 +726,3 @@ module_exit(ipq4019_pinctrl_exit);
 
 MODULE_DESCRIPTION("Qualcomm ipq4019 pinctrl driver");
 MODULE_LICENSE("GPL v2");
-MODULE_DEVICE_TABLE(of, ipq4019_pinctrl_of_match);

@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	Copyright (c) 2001 Maciej W. Rozycki
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	as published by the Free Software Foundation; either version
- *	2 of the License, or (at your option) any later version.
  */
 
 #include <linux/init.h>
@@ -121,7 +117,7 @@ static int __init ms02nv_init_one(ulong addr)
 	int ret = -ENODEV;
 
 	/* The module decodes 8MiB of address space. */
-	mod_res = kzalloc(sizeof(*mod_res), GFP_KERNEL);
+	mod_res = kzalloc_obj(*mod_res);
 	if (!mod_res)
 		return -ENOMEM;
 
@@ -142,10 +138,10 @@ static int __init ms02nv_init_one(ulong addr)
 	}
 
 	ret = -ENOMEM;
-	mtd = kzalloc(sizeof(*mtd), GFP_KERNEL);
+	mtd = kzalloc_obj(*mtd);
 	if (!mtd)
 		goto err_out_mod_res_rel;
-	mp = kzalloc(sizeof(*mp), GFP_KERNEL);
+	mp = kzalloc_obj(*mp);
 	if (!mp)
 		goto err_out_mtd;
 
@@ -153,7 +149,7 @@ static int __init ms02nv_init_one(ulong addr)
 	mp->resource.module = mod_res;
 
 	/* Firmware's diagnostic NVRAM area. */
-	diag_res = kzalloc(sizeof(*diag_res), GFP_KERNEL);
+	diag_res = kzalloc_obj(*diag_res);
 	if (!diag_res)
 		goto err_out_mp;
 
@@ -166,7 +162,7 @@ static int __init ms02nv_init_one(ulong addr)
 	mp->resource.diag_ram = diag_res;
 
 	/* User-available general-purpose NVRAM area. */
-	user_res = kzalloc(sizeof(*user_res), GFP_KERNEL);
+	user_res = kzalloc_obj(*user_res);
 	if (!user_res)
 		goto err_out_diag_res;
 
@@ -179,7 +175,7 @@ static int __init ms02nv_init_one(ulong addr)
 	mp->resource.user_ram = user_res;
 
 	/* Control and status register. */
-	csr_res = kzalloc(sizeof(*csr_res), GFP_KERNEL);
+	csr_res = kzalloc_obj(*csr_res);
 	if (!csr_res)
 		goto err_out_user_res;
 
@@ -290,7 +286,6 @@ static int __init ms02nv_init(void)
 		break;
 	default:
 		return -ENODEV;
-		break;
 	}
 
 	for (i = 0; i < ARRAY_SIZE(ms02nv_addrs); i++)

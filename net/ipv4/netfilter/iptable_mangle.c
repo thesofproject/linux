@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This is the 1999 rewrite of IP Firewalling, aiming for kernel 2.3.x.
  *
  * Copyright (C) 1999 Paul `Rusty' Russell & Michael J. Neuling
  * Copyright (C) 2000-2004 Netfilter Core Team <coreteam@netfilter.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/module.h>
 #include <linux/netfilter_ipv4/ip_tables.h>
@@ -28,26 +25,23 @@ MODULE_DESCRIPTION("iptables mangle table");
 			    (1 << NF_INET_LOCAL_OUT) | \
 			    (1 << NF_INET_POST_ROUTING))
 
-static int __net_init iptable_mangle_table_init(struct net *net);
-
 static const struct xt_table packet_mangler = {
 	.name		= "mangle",
 	.valid_hooks	= MANGLE_VALID_HOOKS,
 	.me		= THIS_MODULE,
 	.af		= NFPROTO_IPV4,
 	.priority	= NF_IP_PRI_MANGLE,
-	.table_init	= iptable_mangle_table_init,
 };
 
 static unsigned int
-ipt_mangle_out(struct sk_buff *skb, const struct nf_hook_state *state)
+ipt_mangle_out(void *priv, struct sk_buff *skb, const struct nf_hook_state *state)
 {
-	unsigned int ret;
+	unsigned int ret, verdict;
 	const struct iphdr *iph;
-	u_int8_t tos;
 	__be32 saddr, daddr;
-	u_int32_t mark;
+	u32 mark;
 	int err;
+	u8 tos;
 
 	/* Save things which could affect route */
 	mark = skb->mark;
@@ -56,16 +50,17 @@ ipt_mangle_out(struct sk_buff *skb, const struct nf_hook_state *state)
 	daddr = iph->daddr;
 	tos = iph->tos;
 
-	ret = ipt_do_table(skb, state, state->net->ipv4.iptable_mangle);
+	ret = ipt_do_table(priv, skb, state);
+	verdict = ret & NF_VERDICT_MASK;
 	/* Reroute for ANY change. */
-	if (ret != NF_DROP && ret != NF_STOLEN) {
+	if (verdict != NF_DROP && verdict != NF_STOLEN) {
 		iph = ip_hdr(skb);
 
 		if (iph->saddr != saddr ||
 		    iph->daddr != daddr ||
 		    skb->mark != mark ||
 		    iph->tos != tos) {
-			err = ip_route_me_harder(state->net, skb, RTN_UNSPEC);
+			err = ip_route_me_harder(state->net, state->sk, skb, RTN_UNSPEC);
 			if (err < 0)
 				ret = NF_DROP_ERR(err);
 		}
@@ -81,37 +76,36 @@ iptable_mangle_hook(void *priv,
 		     const struct nf_hook_state *state)
 {
 	if (state->hook == NF_INET_LOCAL_OUT)
-		return ipt_mangle_out(skb, state);
-	return ipt_do_table(skb, state, state->net->ipv4.iptable_mangle);
+		return ipt_mangle_out(priv, skb, state);
+	return ipt_do_table(priv, skb, state);
 }
 
 static struct nf_hook_ops *mangle_ops __read_mostly;
-static int __net_init iptable_mangle_table_init(struct net *net)
+static int iptable_mangle_table_init(struct net *net)
 {
 	struct ipt_replace *repl;
 	int ret;
 
-	if (net->ipv4.iptable_mangle)
-		return 0;
-
 	repl = ipt_alloc_initial_table(&packet_mangler);
 	if (repl == NULL)
 		return -ENOMEM;
-	ret = ipt_register_table(net, &packet_mangler, repl, mangle_ops,
-				 &net->ipv4.iptable_mangle);
+	ret = ipt_register_table(net, &packet_mangler, repl, mangle_ops);
 	kfree(repl);
 	return ret;
 }
 
+static void __net_exit iptable_mangle_net_pre_exit(struct net *net)
+{
+	xt_unregister_table_pre_exit(net, NFPROTO_IPV4, "mangle");
+}
+
 static void __net_exit iptable_mangle_net_exit(struct net *net)
 {
-	if (!net->ipv4.iptable_mangle)
-		return;
-	ipt_unregister_table(net, net->ipv4.iptable_mangle, mangle_ops);
-	net->ipv4.iptable_mangle = NULL;
+	ipt_unregister_table_exit(net, "mangle");
 }
 
 static struct pernet_operations iptable_mangle_net_ops = {
+	.pre_exit = iptable_mangle_net_pre_exit,
 	.exit = iptable_mangle_net_exit,
 };
 
@@ -120,28 +114,29 @@ static int __init iptable_mangle_init(void)
 	int ret;
 
 	mangle_ops = xt_hook_ops_alloc(&packet_mangler, iptable_mangle_hook);
-	if (IS_ERR(mangle_ops)) {
-		ret = PTR_ERR(mangle_ops);
-		return ret;
-	}
+	if (IS_ERR(mangle_ops))
+		return PTR_ERR(mangle_ops);
 
 	ret = register_pernet_subsys(&iptable_mangle_net_ops);
+	if (ret < 0)
+		goto err_free;
+
+	ret = xt_register_template(&packet_mangler,
+				   iptable_mangle_table_init);
 	if (ret < 0) {
-		kfree(mangle_ops);
-		return ret;
-	}
-
-	ret = iptable_mangle_table_init(&init_net);
-	if (ret) {
 		unregister_pernet_subsys(&iptable_mangle_net_ops);
-		kfree(mangle_ops);
+		goto err_free;
 	}
 
+	return 0;
+err_free:
+	kfree(mangle_ops);
 	return ret;
 }
 
 static void __exit iptable_mangle_fini(void)
 {
+	xt_unregister_template(&packet_mangler);
 	unregister_pernet_subsys(&iptable_mangle_net_ops);
 	kfree(mangle_ops);
 }

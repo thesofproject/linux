@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (c) 2014-2015 Hisilicon Limited.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __HNS_ENET_H
@@ -48,7 +44,8 @@ struct hns_nic_ring_data {
 struct hns_nic_ops {
 	void (*fill_desc)(struct hnae_ring *ring, void *priv,
 			  int size, dma_addr_t dma, int frag_end,
-			  int buf_num, enum hns_desc_type type, int mtu);
+			  int buf_num, enum hns_desc_type type, int mtu,
+			  bool is_gso);
 	int (*maybe_stop_tx)(struct sk_buff **out_skb,
 			     int *bnum, struct hnae_ring *ring);
 	void (*get_rxd_bnum)(u32 bnum_flag, int *out_bnum);

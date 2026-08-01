@@ -1,18 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *  Driver for the NXP SAA7164 PCIe bridge
  *
  *  Copyright (c) 2010-2015 Steven Toth <stoth@kernellabs.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *
- *  GNU General Public License for more details.
  */
 
 /*
@@ -34,7 +24,7 @@
 	saa7164_bus..() : Manage a read/write memory ring buffer in the
 		|	: PCIe Address space.
 		|
-		|		saa7164_fw...()	: Load any frimware
+		|		saa7164_fw...()	: Load any firmware
 		|			|	: direct into the device
 		V			V
 	<- ----------------- PCIe address space -------------------- ->
@@ -190,11 +180,21 @@ struct saa7164_encoder_fh {
 	atomic_t v4l_reading;
 };
 
+static inline struct saa7164_encoder_fh *to_saa7164_encoder_fh(struct file *filp)
+{
+	return container_of(file_to_v4l2_fh(filp), struct saa7164_encoder_fh, fh);
+}
+
 struct saa7164_vbi_fh {
 	struct v4l2_fh fh;
 	struct saa7164_port *port;
 	atomic_t v4l_reading;
 };
+
+static inline struct saa7164_vbi_fh *to_saa7164_vbi_fh(struct file *filp)
+{
+	return container_of(file_to_v4l2_fh(filp), struct saa7164_vbi_fh, fh);
+}
 
 struct saa7164_histogram_bucket {
 	u32 val;
@@ -503,8 +503,6 @@ int saa7164_downloadfirmware(struct saa7164_dev *dev);
 /* saa7164-i2c.c                                               */
 extern int saa7164_i2c_register(struct saa7164_i2c *bus);
 extern int saa7164_i2c_unregister(struct saa7164_i2c *bus);
-extern void saa7164_call_i2c_clients(struct saa7164_i2c *bus,
-	unsigned int cmd, void *arg);
 
 /* ----------------------------------------------------------- */
 /* saa7164-bus.c                                               */
@@ -520,7 +518,6 @@ int saa7164_bus_get(struct saa7164_dev *dev, struct tmComResInfo* msg,
 int saa7164_cmd_send(struct saa7164_dev *dev,
 	u8 id, enum tmComResCmd command, u16 controlselector,
 	u16 size, void *buf);
-void saa7164_cmd_signal(struct saa7164_dev *dev, u8 seqno);
 int saa7164_irq_dequeue(struct saa7164_dev *dev);
 
 /* ----------------------------------------------------------- */
@@ -582,7 +579,6 @@ extern int saa7164_dvb_unregister(struct saa7164_port *port);
 extern struct saa7164_buffer *saa7164_buffer_alloc(
 	struct saa7164_port *port, u32 len);
 extern int saa7164_buffer_dealloc(struct saa7164_buffer *buf);
-extern void saa7164_buffer_display(struct saa7164_buffer *buf);
 extern int saa7164_buffer_activate(struct saa7164_buffer *buf, int i);
 extern int saa7164_buffer_cfg_port(struct saa7164_port *port);
 extern struct saa7164_user_buffer *saa7164_buffer_alloc_user(

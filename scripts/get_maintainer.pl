@@ -1,4 +1,6 @@
 #!/usr/bin/env perl
+# SPDX-License-Identifier: GPL-2.0
+#
 # (c) 2007, Joe Perches <joe@perches.com>
 #           created from checkpatch.pl
 #
@@ -7,8 +9,6 @@
 #
 # usage: perl scripts/get_maintainer.pl [OPTIONS] <patch>
 #        perl scripts/get_maintainer.pl [OPTIONS] -f <file>
-#
-# Licensed under the terms of the GNU GPL License version 2
 
 use warnings;
 use strict;
@@ -19,6 +19,9 @@ my $V = '0.26';
 use Getopt::Long qw(:config no_auto_abbrev);
 use Cwd;
 use File::Find;
+use File::Spec::Functions;
+use open qw(:std :encoding(UTF-8));
+use JSON::PP;
 
 my $cur_path = fastgetcwd() . '/';
 my $lk_path = "./";
@@ -26,7 +29,9 @@ my $email = 1;
 my $email_usename = 1;
 my $email_maintainer = 1;
 my $email_reviewer = 1;
+my $email_fixes = 1;
 my $email_list = 1;
+my $email_moderated_list = 1;
 my $email_subscriber_list = 0;
 my $email_git_penguin_chiefs = 0;
 my $email_git = 0;
@@ -46,25 +51,36 @@ my $output_multiline = 1;
 my $output_separator = ", ";
 my $output_roles = 0;
 my $output_rolestats = 1;
+my $output_substatus = undef;
 my $output_section_maxlen = 50;
 my $scm = 0;
+my $tree = 1;
 my $web = 0;
+my $bug = 0;
 my $subsystem = 0;
 my $status = 0;
 my $letters = "";
 my $keywords = 1;
+my $keywords_in_file = 0;
 my $sections = 0;
-my $file_emails = 0;
+my $email_file_emails = 0;
 my $from_filename = 0;
 my $pattern_depth = 0;
 my $self_test = undef;
 my $version = 0;
 my $help = 0;
+my $json = 0;
 my $find_maintainer_files = 0;
-
+my $maintainer_path;
 my $vcs_used = 0;
 
 my $exit = 0;
+
+my @files = ();
+my @fixes = ();			# If a patch description includes Fixes: lines
+my @range = ();
+my @keyword_tvi = ();
+my @file_emails = ();
 
 my %commit_author_hash;
 my %commit_signer_hash;
@@ -247,6 +263,8 @@ if (!GetOptions(
 		'r!' => \$email_reviewer,
 		'n!' => \$email_usename,
 		'l!' => \$email_list,
+		'fixes!' => \$email_fixes,
+		'moderated!' => \$email_moderated_list,
 		's!' => \$email_subscriber_list,
 		'multiline!' => \$output_multiline,
 		'roles!' => \$output_roles,
@@ -254,16 +272,22 @@ if (!GetOptions(
 		'separator=s' => \$output_separator,
 		'subsystem!' => \$subsystem,
 		'status!' => \$status,
+		'substatus!' => \$output_substatus,
 		'scm!' => \$scm,
+		'tree!' => \$tree,
 		'web!' => \$web,
+		'bug!' => \$bug,
 		'letters=s' => \$letters,
 		'pattern-depth=i' => \$pattern_depth,
 		'k|keywords!' => \$keywords,
+		'kf|keywords-in-file!' => \$keywords_in_file,
 		'sections!' => \$sections,
-		'fe|file-emails!' => \$file_emails,
+		'fe|file-emails!' => \$email_file_emails,
 		'f|file' => \$from_filename,
 		'find-maintainer-files' => \$find_maintainer_files,
+		'mpath|maintainer-path=s' => \$maintainer_path,
 		'self-test:s' => \$self_test,
+		'json!' => \$json,
 		'v|version' => \$version,
 		'h|help|usage' => \$help,
 		)) {
@@ -295,6 +319,10 @@ $output_multiline = 0 if ($output_separator ne ", ");
 $output_rolestats = 1 if ($interactive);
 $output_roles = 1 if ($output_rolestats);
 
+if (!defined $output_substatus) {
+    $output_substatus = $email && $output_roles && -t STDOUT;
+}
+
 if ($sections || $letters ne "") {
     $sections = 1;
     $email = 0;
@@ -303,12 +331,14 @@ if ($sections || $letters ne "") {
     $status = 0;
     $subsystem = 0;
     $web = 0;
+    $bug = 0;
     $keywords = 0;
+    $keywords_in_file = 0;
     $interactive = 0;
 } else {
-    my $selections = $email + $scm + $status + $subsystem + $web;
+    my $selections = $email + $scm + $status + $subsystem + $web + $bug;
     if ($selections == 0) {
-	die "$P:  Missing required option: email, scm, status, subsystem or web\n";
+	die "$P:  Missing required option: email, scm, status, subsystem, web or bug\n";
     }
 }
 
@@ -319,7 +349,7 @@ if ($email &&
     die "$P: Please select at least 1 email option\n";
 }
 
-if (!top_of_kernel_tree($lk_path)) {
+if ($tree && !top_of_kernel_tree($lk_path)) {
     die "$P: The current directory does not appear to be "
 	. "a linux kernel source tree.\n";
 }
@@ -348,8 +378,10 @@ sub read_maintainer_file {
 	    ##Filename pattern matching
 	    if ($type eq "F" || $type eq "X") {
 		$value =~ s@\.@\\\.@g;       ##Convert . to \.
+		$value =~ s/\*\*/\x00/g;     ##Convert ** to placeholder
 		$value =~ s/\*/\.\*/g;       ##Convert * to .*
 		$value =~ s/\?/\./g;         ##Convert ? to .
+		$value =~ s/\x00/(?:.*)/g;   ##Convert placeholder to (?:.*)
 		##if pattern is a directory and it lacks a trailing slash, add one
 		if ((-d $value)) {
 		    $value =~ s@([^/])$@$1/@;
@@ -384,26 +416,52 @@ sub find_ignore_git {
 read_all_maintainer_files();
 
 sub read_all_maintainer_files {
-    if (-d "${lk_path}MAINTAINERS") {
-        opendir(DIR, "${lk_path}MAINTAINERS") or die $!;
-        my @files = readdir(DIR);
-        closedir(DIR);
-        foreach my $file (@files) {
-            push(@mfiles, "${lk_path}MAINTAINERS/$file") if ($file !~ /^\./);
-        }
+    my $path = "${lk_path}MAINTAINERS";
+    if (defined $maintainer_path) {
+	$path = $maintainer_path;
+	# Perl Cookbook tilde expansion if necessary
+	$path =~ s@^~([^/]*)@ $1 ? (getpwnam($1))[7] : ( $ENV{HOME} || $ENV{LOGDIR} || (getpwuid($<))[7])@ex;
     }
 
-    if ($find_maintainer_files) {
-        find( { wanted => \&find_is_maintainer_file,
-                preprocess => \&find_ignore_git,
-                no_chdir => 1,
-        }, "${lk_path}");
+    if (-d $path) {
+	$path .= '/' if ($path !~ m@/$@);
+	if ($find_maintainer_files) {
+	    find( { wanted => \&find_is_maintainer_file,
+		    preprocess => \&find_ignore_git,
+		    no_chdir => 1,
+		}, "$path");
+	} else {
+	    opendir(DIR, "$path") or die $!;
+	    my @files = readdir(DIR);
+	    closedir(DIR);
+	    foreach my $file (@files) {
+		push(@mfiles, "$path$file") if ($file !~ /^\./);
+	    }
+	}
+    } elsif (-f "$path") {
+	push(@mfiles, "$path");
     } else {
-        push(@mfiles, "${lk_path}MAINTAINERS") if -f "${lk_path}MAINTAINERS";
+	die "$P: MAINTAINER file not found '$path'\n";
     }
-
+    die "$P: No MAINTAINER files found in '$path'\n" if (scalar(@mfiles) == 0);
     foreach my $file (@mfiles) {
-        read_maintainer_file("$file");
+	read_maintainer_file("$file");
+    }
+}
+
+sub maintainers_in_file {
+    my ($file) = @_;
+
+    return if ($file =~ m@\bMAINTAINERS$@);
+
+    if (-f $file && ($email_file_emails || $file =~ /\.yaml$/)) {
+	open(my $f, '<', $file)
+	    or die "$P: Can't open $file: $!\n";
+	my $text = do { local($/) ; <$f> };
+	close($f);
+
+	my @poss_addr = $text =~ m$[\p{L}\"\' \,\.\+-]*\s*[\,]*\s*[\(\<\{]{0,1}[A-Za-z0-9_\.\+-]+\@[A-Za-z0-9\.-]+\.[A-Za-z0-9]+[\)\>\}]{0,1}$g;
+	push(@file_emails, clean_file_emails(@poss_addr));
     }
 }
 
@@ -487,17 +545,13 @@ sub read_mailmap {
 
 ## use the filenames on the command line or find the filenames in the patchfiles
 
-my @files = ();
-my @range = ();
-my @keyword_tvi = ();
-my @file_emails = ();
-
 if (!@ARGV) {
     push(@ARGV, "&STDIN");
 }
 
 foreach my $file (@ARGV) {
     if ($file ne "&STDIN") {
+	$file = canonpath($file);
 	##if $file is a directory and it lacks a trailing slash, add one
 	if ((-d $file)) {
 	    $file =~ s@([^/])$@$1/@;
@@ -505,25 +559,22 @@ foreach my $file (@ARGV) {
 	    die "$P: file '${file}' not found\n";
 	}
     }
+    if ($from_filename && (vcs_exists() && !vcs_file_exists($file))) {
+	warn "$P: file '$file' not found in version control $!\n";
+    }
     if ($from_filename || ($file ne "&STDIN" && vcs_file_exists($file))) {
 	$file =~ s/^\Q${cur_path}\E//;	#strip any absolute path
 	$file =~ s/^\Q${lk_path}\E//;	#or the path to the lk tree
 	push(@files, $file);
-	if ($file ne "MAINTAINERS" && -f $file && ($keywords || $file_emails)) {
+	if ($file ne "MAINTAINERS" && -f $file && $keywords && $keywords_in_file) {
 	    open(my $f, '<', $file)
 		or die "$P: Can't open $file: $!\n";
 	    my $text = do { local($/) ; <$f> };
 	    close($f);
-	    if ($keywords) {
-		foreach my $line (keys %keyword_hash) {
-		    if ($text =~ m/$keyword_hash{$line}/x) {
-			push(@keyword_tvi, $line);
-		    }
+	    foreach my $line (keys %keyword_hash) {
+		if ($text =~ m/$keyword_hash{$line}/x) {
+		    push(@keyword_tvi, $line);
 		}
-	    }
-	    if ($file_emails) {
-		my @poss_addr = $text =~ m$[A-Za-zÀ-ÿ\"\' \,\.\+-]*\s*[\,]*\s*[\(\<\{]{0,1}[A-Za-z0-9_\.\+-]+\@[A-Za-z0-9\.-]+\.[A-Za-z0-9]+[\)\>\}]{0,1}$g;
-		push(@file_emails, clean_file_emails(@poss_addr));
 	    }
 	}
     } else {
@@ -542,7 +593,20 @@ foreach my $file (@ARGV) {
 
 	while (<$patch>) {
 	    my $patch_line = $_;
-	    if (m/^\+\+\+\s+(\S+)/ or m/^---\s+(\S+)/) {
+	    if (m/^ mode change [0-7]+ => [0-7]+ (\S+)\s*$/) {
+		my $filename = $1;
+		push(@files, $filename);
+	    } elsif (m/^rename (?:from|to) (\S+)\s*$/) {
+		my $filename = $1;
+		push(@files, $filename);
+	    } elsif (m/^diff --git a\/(\S+) b\/(\S+)\s*$/) {
+		my $filename1 = $1;
+		my $filename2 = $2;
+		push(@files, $filename1);
+		push(@files, $filename2);
+	    } elsif (m/^Fixes:\s+([0-9a-fA-F]{6,40})/) {
+		push(@fixes, $1) if ($email_fixes);
+	    } elsif (m/^\+\+\+\s+(\S+)/ or m/^---\s+(\S+)/) {
 		my $filename = $1;
 		$filename =~ s@^[^/]*/@@;
 		$filename =~ s@\n@@;
@@ -572,6 +636,7 @@ foreach my $file (@ARGV) {
 }
 
 @file_emails = uniq(@file_emails);
+@fixes = uniq(@fixes);
 
 my %email_hash_name;
 my %email_hash_address;
@@ -580,36 +645,56 @@ my %hash_list_to;
 my @list_to = ();
 my @scm = ();
 my @web = ();
+my @bug = ();
 my @subsystem = ();
 my @status = ();
+my @substatus = ();
 my %deduplicate_name_hash = ();
 my %deduplicate_address_hash = ();
 
 my @maintainers = get_maintainers();
 
-if (@maintainers) {
-    @maintainers = merge_email(@maintainers);
-    output(@maintainers);
-}
+@maintainers = merge_email(@maintainers) if (@maintainers);
+@scm = uniq(@scm) if ($scm);
+@substatus = uniq(@substatus) if ($output_substatus);
+@status = uniq(@status) if ($status);
+@subsystem = uniq(@subsystem) if ($subsystem);
+@web = uniq(@web) if ($web);
+@bug = uniq(@bug) if ($bug);
 
-if ($scm) {
-    @scm = uniq(@scm);
-    output(@scm);
-}
+if ($json) {
+    my @json_maintainers;
+    for my $m (@maintainers) {
+	my ($addr, $role);
+	if ($output_roles && $m =~ /^(.*?)\s+\((.+)\)\s*$/) {
+	    $addr = $1;
+	    $role = $2;
+	} else {
+	    $addr = $m;
+	}
+	my ($name, $email_addr) = parse_email($addr);
+	my %entry = (name => $name, email => $email_addr);
+	$entry{role} = $role if (defined $role && $role ne '');
+	push(@json_maintainers, \%entry);
+    }
 
-if ($status) {
-    @status = uniq(@status);
-    output(@status);
-}
+    my %result = (maintainers => \@json_maintainers);
+    $result{scm} = \@scm if ($scm);
+    $result{status} = \@status if ($status);
+    $result{subsystem} = \@subsystem if ($subsystem);
+    $result{web} = \@web if ($web);
+    $result{bug} = \@bug if ($bug);
 
-if ($subsystem) {
-    @subsystem = uniq(@subsystem);
-    output(@subsystem);
-}
-
-if ($web) {
-    @web = uniq(@web);
-    output(@web);
+    my $json_encoder = JSON::PP->new->canonical->utf8;
+    print($json_encoder->encode(\%result) . "\n");
+} else {
+    output(@maintainers) if (@maintainers);
+    output(@scm) if ($scm);
+    output(@substatus) if ($output_substatus);
+    output(@status) if ($status);
+    output(@subsystem) if ($subsystem);
+    output(@web) if ($web);
+    output(@bug) if ($bug);
 }
 
 exit($exit);
@@ -675,8 +760,10 @@ sub self_test {
 	if (($type eq "F" || $type eq "X") &&
 	    ($self_test eq "" || $self_test =~ /\bpatterns\b/)) {
 	    $value =~ s@\.@\\\.@g;       ##Convert . to \.
+	    $value =~ s/\*\*/\x00/g;     ##Convert ** to placeholder
 	    $value =~ s/\*/\.\*/g;       ##Convert * to .*
 	    $value =~ s/\?/\./g;         ##Convert ? to .
+	    $value =~ s/\x00/(?:.*)/g;   ##Convert placeholder to (?:.*)
 	    ##if pattern is a directory and it lacks a trailing slash, add one
 	    if ((-d $value)) {
 		$value =~ s@([^/])$@$1/@;
@@ -797,8 +884,10 @@ sub get_maintainers {
     @list_to = ();
     @scm = ();
     @web = ();
+    @bug = ();
     @subsystem = ();
     @status = ();
+    @substatus = ();
     %deduplicate_name_hash = ();
     %deduplicate_address_hash = ();
     if ($email_git_all_signature_types) {
@@ -848,7 +937,7 @@ sub get_maintainers {
 				my $value_pd = ($value =~ tr@/@@);
 				my $file_pd = ($file  =~ tr@/@@);
 				$value_pd++ if (substr($value,-1,1) ne "/");
-				$value_pd = -1 if ($value =~ /^\.\*/);
+				$value_pd = -1 if ($value =~ /^(\.\*|\(\?:\.\*\))/);
 				if ($value_pd >= $file_pd &&
 				    range_is_maintained($start, $end) &&
 				    range_has_maintainer($start, $end)) {
@@ -871,7 +960,7 @@ sub get_maintainers {
 	}
 
 	foreach my $line (sort {$hash{$b} <=> $hash{$a}} keys %hash) {
-	    add_categories($line);
+	    add_categories($line, "");
 	    if ($sections) {
 		my $i;
 		my $start = find_starting_index($line);
@@ -882,6 +971,7 @@ sub get_maintainers {
 			$line =~ s/([^\\])\.([^\*])/$1\?$2/g;
 			$line =~ s/([^\\])\.$/$1\?/g;	##Convert . back to ?
 			$line =~ s/\\\./\./g;       	##Convert \. to .
+			$line =~ s/\(\?:\.\*\)/\*\*/g;	##Convert (?:.*) to **
 			$line =~ s/\.\*/\*/g;       	##Convert .* to *
 		    }
 		    my $count = $line =~ s/^([A-Z]):/$1:\t/g;
@@ -892,12 +982,14 @@ sub get_maintainers {
 		print("\n");
 	    }
 	}
+
+	maintainers_in_file($file);
     }
 
     if ($keywords) {
 	@keyword_tvi = sort_and_uniq(@keyword_tvi);
 	foreach my $line (@keyword_tvi) {
-	    add_categories($line);
+	    add_categories($line, ":Keyword:$keyword_hash{$line}");
 	}
     }
 
@@ -907,8 +999,10 @@ sub get_maintainers {
 
     foreach my $file (@files) {
 	if ($email &&
-	    ($email_git || ($email_git_fallback &&
-			    !$exact_pattern_match_hash{$file}))) {
+	    ($email_git ||
+	     ($email_git_fallback &&
+	      $file !~ /MAINTAINERS$/ &&
+	      !$exact_pattern_match_hash{$file}))) {
 	    vcs_file_signoffs($file);
 	}
 	if ($email && $email_git_blame) {
@@ -931,12 +1025,17 @@ sub get_maintainers {
 	}
 
 	foreach my $email (@file_emails) {
+	    $email = mailmap_email($email);
 	    my ($name, $address) = parse_email($email);
 
 	    my $tmp_email = format_email($name, $address, $email_usename);
 	    push_email_address($tmp_email, '');
 	    add_role($tmp_email, 'in file');
 	}
+    }
+
+    foreach my $fix (@fixes) {
+	vcs_add_commit_signers($fix, "blamed_fixes");
     }
 
     my @to = ();
@@ -966,7 +1065,7 @@ sub file_match_pattern {
 	if ($file =~ m@^$pattern@) {
 	    my $s1 = ($file =~ tr@/@@);
 	    my $s2 = ($pattern =~ tr@/@@);
-	    if ($s1 == $s2) {
+	    if ($s1 == $s2 || $pattern =~ /\(\?:/) {
 		return 1;
 	    }
 	}
@@ -999,34 +1098,41 @@ MAINTAINER field selection options:
     --r => include reviewer(s) if any
     --n => include name 'Full Name <addr\@domain.tld>'
     --l => include list(s) if any
-    --s => include subscriber only list(s) if any
+    --moderated => include moderated lists(s) if any (default: true)
+    --s => include subscriber only list(s) if any (default: false)
     --remove-duplicates => minimize duplicate email names/addresses
-    --roles => show roles (status:subsystem, git-signer, list, etc...)
+    --roles => show roles (role:subsystem, git-signer, list, etc...)
     --rolestats => show roles and statistics (commits/total_commits, %)
+    --substatus => show subsystem status if not Maintained (default: match --roles when output is tty)"
     --file-emails => add email addresses found in -f file (default: 0 (off))
+    --fixes => for patches, add signatures of commits with 'Fixes: <commit>' (default: 1 (on))
   --scm => print SCM tree(s) if any
   --status => print status if any
   --subsystem => print subsystem name if any
   --web => print website(s) if any
+  --bug => print bug reporting info if any
 
 Output type options:
   --separator [, ] => separator for multiple entries on 1 line
     using --separator also sets --nomultiline if --separator is not [, ]
   --multiline => print 1 entry per line
+  --json => output results as JSON
 
 Other options:
   --pattern-depth => Number of pattern directory traversals (default: 0 (all))
   --keywords => scan patch for keywords (default: $keywords)
+  --keywords-in-file => scan file for keywords (default: $keywords_in_file)
   --sections => print all of the subsystem sections with pattern matches
   --letters => print all matching 'letter' types from all matching sections
   --mailmap => use .mailmap file (default: $email_use_mailmap)
+  --no-tree => run without a kernel tree
   --self-test => show potential issues with MAINTAINERS file content
   --version => show version
   --help => show this help information
 
 Default options:
-  [--email --nogit --git-fallback --m --r --n --l --multiline --pattern-depth=0
-   --remove-duplicates --rolestats]
+  [--email --tree --nogit --git-fallback --m --r --n --l --multiline
+   --pattern-depth=0 --remove-duplicates --rolestats --keywords]
 
 Notes:
   Using "-f directory" may give unexpected results:
@@ -1090,6 +1196,17 @@ sub top_of_kernel_tree {
     return 0;
 }
 
+sub escape_name {
+    my ($name) = @_;
+
+    if ($name =~ /[^\w \-]/ai) {  	 ##has "must quote" chars
+	$name =~ s/(?<!\\)"/\\"/g;       ##escape quotes
+	$name = "\"$name\"";
+    }
+
+    return $name;
+}
+
 sub parse_email {
     my ($formatted_email) = @_;
 
@@ -1107,12 +1224,8 @@ sub parse_email {
 
     $name =~ s/^\s+|\s+$//g;
     $name =~ s/^\"|\"$//g;
+    $name = escape_name($name);
     $address =~ s/^\s+|\s+$//g;
-
-    if ($name =~ /[^\w \-]/i) {  	 ##has "must quote" chars
-	$name =~ s/(?<!\\)"/\\"/g;       ##escape quotes
-	$name = "\"$name\"";
-    }
 
     return ($name, $address);
 }
@@ -1124,12 +1237,8 @@ sub format_email {
 
     $name =~ s/^\s+|\s+$//g;
     $name =~ s/^\"|\"$//g;
+    $name = escape_name($name);
     $address =~ s/^\s+|\s+$//g;
-
-    if ($name =~ /[^\w \-]/i) {          ##has "must quote" chars
-	$name =~ s/(?<!\\)"/\\"/g;       ##escape quotes
-	$name = "\"$name\"";
-    }
 
     if ($usename) {
 	if ("$name" eq "") {
@@ -1207,8 +1316,9 @@ sub get_maintainer_role {
     my $start = find_starting_index($index);
     my $end = find_ending_index($index);
 
-    my $role = "unknown";
+    my $role = "maintainer";
     my $subsystem = get_subsystem_name($index);
+    my $status = "unknown";
 
     for ($i = $start + 1; $i < $end; $i++) {
 	my $tv = $typevalue[$i];
@@ -1216,23 +1326,13 @@ sub get_maintainer_role {
 	    my $ptype = $1;
 	    my $pvalue = $2;
 	    if ($ptype eq "S") {
-		$role = $pvalue;
+		$status = $pvalue;
 	    }
 	}
     }
 
-    $role = lc($role);
-    if      ($role eq "supported") {
-	$role = "supporter";
-    } elsif ($role eq "maintained") {
-	$role = "maintainer";
-    } elsif ($role eq "odd fixes") {
-	$role = "odd fixer";
-    } elsif ($role eq "orphan") {
-	$role = "orphan minder";
-    } elsif ($role eq "obsolete") {
-	$role = "obsolete minder";
-    } elsif ($role eq "buried alive in reporters") {
+    $status = lc($status);
+    if ($status eq "buried alive in reporters") {
 	$role = "chief penguin";
     }
 
@@ -1252,13 +1352,15 @@ sub get_list_role {
 }
 
 sub add_categories {
-    my ($index) = @_;
+    my ($index, $suffix) = @_;
 
     my $i;
     my $start = find_starting_index($index);
     my $end = find_ending_index($index);
 
-    push(@subsystem, $typevalue[$start]);
+    my $subsystem = $typevalue[$start];
+    push(@subsystem, $subsystem);
+    my $status = "Unknown";
 
     for ($i = $start + 1; $i < $end; $i++) {
 	my $tv = $typevalue[$i];
@@ -1282,65 +1384,51 @@ sub add_categories {
 			if (!$hash_list_to{lc($list_address)}) {
 			    $hash_list_to{lc($list_address)} = 1;
 			    push(@list_to, [$list_address,
-					    "subscriber list${list_role}"]);
+					    "subscriber list${list_role}" . $suffix]);
 			}
 		    }
 		} else {
 		    if ($email_list) {
 			if (!$hash_list_to{lc($list_address)}) {
-			    $hash_list_to{lc($list_address)} = 1;
 			    if ($list_additional =~ m/moderated/) {
-				push(@list_to, [$list_address,
-						"moderated list${list_role}"]);
+				if ($email_moderated_list) {
+				    $hash_list_to{lc($list_address)} = 1;
+				    push(@list_to, [$list_address,
+						    "moderated list${list_role}" . $suffix]);
+				}
 			    } else {
+				$hash_list_to{lc($list_address)} = 1;
 				push(@list_to, [$list_address,
-						"open list${list_role}"]);
+						"open list${list_role}" . $suffix]);
 			    }
 			}
 		    }
 		}
 	    } elsif ($ptype eq "M") {
-		my ($name, $address) = parse_email($pvalue);
-		if ($name eq "") {
-		    if ($i > 0) {
-			my $tv = $typevalue[$i - 1];
-			if ($tv =~ m/^([A-Z]):\s*(.*)/) {
-			    if ($1 eq "P") {
-				$name = $2;
-				$pvalue = format_email($name, $address, $email_usename);
-			    }
-			}
-		    }
-		}
 		if ($email_maintainer) {
 		    my $role = get_maintainer_role($i);
-		    push_email_addresses($pvalue, $role);
+		    push_email_addresses($pvalue, $role . $suffix);
 		}
 	    } elsif ($ptype eq "R") {
-		my ($name, $address) = parse_email($pvalue);
-		if ($name eq "") {
-		    if ($i > 0) {
-			my $tv = $typevalue[$i - 1];
-			if ($tv =~ m/^([A-Z]):\s*(.*)/) {
-			    if ($1 eq "P") {
-				$name = $2;
-				$pvalue = format_email($name, $address, $email_usename);
-			    }
-			}
-		    }
-		}
 		if ($email_reviewer) {
-		    my $subsystem = get_subsystem_name($i);
-		    push_email_addresses($pvalue, "reviewer:$subsystem");
+		    my $subs = get_subsystem_name($i);
+		    push_email_addresses($pvalue, "reviewer:$subs" . $suffix);
 		}
 	    } elsif ($ptype eq "T") {
-		push(@scm, $pvalue);
+		push(@scm, $pvalue . $suffix);
 	    } elsif ($ptype eq "W") {
-		push(@web, $pvalue);
+		push(@web, $pvalue . $suffix);
+	    } elsif ($ptype eq "B") {
+		push(@bug, $pvalue . $suffix);
 	    } elsif ($ptype eq "S") {
-		push(@status, $pvalue);
+		push(@status, $pvalue . $suffix);
+		$status = $pvalue;
 	    }
 	}
+    }
+
+    if ($subsystem ne "THE REST" and $status ne "Maintained") {
+	push(@substatus, $subsystem . " status: " . $status . $suffix)
     }
 }
 
@@ -1680,7 +1768,7 @@ sub vcs_exists {
     %VCS_cmds = %VCS_cmds_hg;
     return 2 if eval $VCS_cmds{"available"};
     %VCS_cmds = ();
-    if (!$printed_novcs) {
+    if (!$printed_novcs && $email_git) {
 	warn("$P: No supported VCS found.  Add --nogit to options?\n");
 	warn("Using a git repository produces better results.\n");
 	warn("Try Linus Torvalds' latest git repository using:\n");
@@ -1697,6 +1785,32 @@ sub vcs_is_git {
 
 sub vcs_is_hg {
     return $vcs_used == 2;
+}
+
+sub vcs_add_commit_signers {
+    return if (!vcs_exists());
+
+    my ($commit, $desc) = @_;
+    my $commit_count = 0;
+    my $commit_authors_ref;
+    my $commit_signers_ref;
+    my $stats_ref;
+    my @commit_authors = ();
+    my @commit_signers = ();
+    my $cmd;
+
+    $cmd = $VCS_cmds{"find_commit_signers_cmd"};
+    $cmd =~ s/(\$\w+)/$1/eeg;	#substitute variables in $cmd
+
+    ($commit_count, $commit_signers_ref, $commit_authors_ref, $stats_ref) = vcs_find_signers($cmd, "");
+    @commit_authors = @{$commit_authors_ref} if defined $commit_authors_ref;
+    @commit_signers = @{$commit_signers_ref} if defined $commit_signers_ref;
+
+    foreach my $signer (@commit_signers) {
+	$signer = deduplicate_email($signer);
+    }
+
+    vcs_assign($desc, 1, @commit_signers);
 }
 
 sub interactive_get_maintainers {
@@ -1792,7 +1906,7 @@ tm toggle maintainers
 tg toggle git entries
 tl toggle open list entries
 ts toggle subscriber list entries
-f  emails in file       [$file_emails]
+f  emails in file       [$email_file_emails]
 k  keywords in file     [$keywords]
 r  remove duplicates    [$email_remove_duplicates]
 p# pattern match depth  [$pattern_depth]
@@ -1819,6 +1933,7 @@ EOT
 		$done = 1;
 		$output_rolestats = 0;
 		$output_roles = 0;
+		$output_substatus = 0;
 		last;
 	    } elsif ($nr =~ /^\d+$/ && $nr > 0 && $nr <= $count) {
 		$selected{$nr - 1} = !$selected{$nr - 1};
@@ -1917,7 +2032,7 @@ EOT
 		bool_invert(\$email_git_all_signature_types);
 		$rerun = 1;
 	    } elsif ($sel eq "f") {
-		bool_invert(\$file_emails);
+		bool_invert(\$email_file_emails);
 		$rerun = 1;
 	    } elsif ($sel eq "r") {
 		bool_invert(\$email_remove_duplicates);
@@ -2391,17 +2506,23 @@ sub clean_file_emails {
     foreach my $email (@file_emails) {
 	$email =~ s/[\(\<\{]{0,1}([A-Za-z0-9_\.\+-]+\@[A-Za-z0-9\.-]+)[\)\>\}]{0,1}/\<$1\>/g;
 	my ($name, $address) = parse_email($email);
-	if ($name eq '"[,\.]"') {
-	    $name = "";
-	}
 
-	my @nw = split(/[^A-Za-zÀ-ÿ\'\,\.\+-]/, $name);
+	# Strip quotes for easier processing, format_email will add them back
+	$name =~ s/^"(.*)"$/$1/;
+
+	# Split into name-like parts and remove stray punctuation particles
+	my @nw = split(/[^\p{L}\'\,\.\+-]/, $name);
+	@nw = grep(!/^[\'\,\.\+-]$/, @nw);
+
+	# Make a best effort to extract the name, and only the name, by taking
+	# only the last two names, or in the case of obvious initials, the last
+	# three names.
 	if (@nw > 2) {
 	    my $first = $nw[@nw - 3];
 	    my $middle = $nw[@nw - 2];
 	    my $last = $nw[@nw - 1];
 
-	    if (((length($first) == 1 && $first =~ m/[A-Za-z]/) ||
+	    if (((length($first) == 1 && $first =~ m/\p{L}/) ||
 		 (length($first) == 2 && substr($first, -1) eq ".")) ||
 		(length($middle) == 1 ||
 		 (length($middle) == 2 && substr($middle, -1) eq "."))) {
@@ -2409,18 +2530,16 @@ sub clean_file_emails {
 	    } else {
 		$name = "$middle $last";
 	    }
+	} else {
+	    $name = "@nw";
 	}
 
 	if (substr($name, -1) =~ /[,\.]/) {
 	    $name = substr($name, 0, length($name) - 1);
-	} elsif (substr($name, -2) =~ /[,\.]"/) {
-	    $name = substr($name, 0, length($name) - 2) . '"';
 	}
 
 	if (substr($name, 0, 1) =~ /[,\.]/) {
 	    $name = substr($name, 1, length($name) - 1);
-	} elsif (substr($name, 0, 2) =~ /"[,\.]/) {
-	    $name = '"' . substr($name, 2, length($name) - 2);
 	}
 
 	my $fmt_email = format_email($name, $address, $email_usename);

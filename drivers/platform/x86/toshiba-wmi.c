@@ -1,18 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * toshiba_wmi.c - Toshiba WMI Hotkey Driver
  *
  * Copyright (C) 2015 Azael Avalos <coproscefalo@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -42,26 +32,13 @@ static const struct key_entry toshiba_wmi_keymap[] __initconst = {
 	{ KE_END, 0 }
 };
 
-static void toshiba_wmi_notify(u32 value, void *context)
+static void toshiba_wmi_notify(union acpi_object *obj, void *context)
 {
-	struct acpi_buffer response = { ACPI_ALLOCATE_BUFFER, NULL };
-	union acpi_object *obj;
-	acpi_status status;
-
-	status = wmi_get_event_data(value, &response);
-	if (ACPI_FAILURE(status)) {
-		pr_err("Bad event status 0x%x\n", status);
-		return;
-	}
-
-	obj = (union acpi_object *)response.pointer;
 	if (!obj)
 		return;
 
 	/* TODO: Add proper checks once we have data */
 	pr_debug("Unknown event received, obj type %x\n", obj->type);
-
-	kfree(response.pointer);
 }
 
 static const struct dmi_system_id toshiba_wmi_dmi_table[] __initconst = {

@@ -30,7 +30,7 @@ static const struct hc_driver ehci_grlib_hc_driver = {
 	 * generic hardware linkage
 	 */
 	.irq			= ehci_irq,
-	.flags			= HCD_MEMORY | HCD_USB2 | HCD_BH,
+	.flags			= HCD_MEMORY | HCD_DMA | HCD_USB2 | HCD_BH,
 
 	/*
 	 * basic lifecycle operations
@@ -99,7 +99,7 @@ static int ehci_hcd_grlib_probe(struct platform_device *op)
 	hcd->rsrc_len = resource_size(&res);
 
 	irq = irq_of_parse_and_map(dn, 0);
-	if (irq == NO_IRQ) {
+	if (!irq) {
 		dev_err(&op->dev, "%s: irq_of_parse_and_map failed\n",
 			__FILE__);
 		rv = -EBUSY;
@@ -140,7 +140,7 @@ err_irq:
 }
 
 
-static int ehci_hcd_grlib_remove(struct platform_device *op)
+static void ehci_hcd_grlib_remove(struct platform_device *op)
 {
 	struct usb_hcd *hcd = platform_get_drvdata(op);
 
@@ -151,8 +151,6 @@ static int ehci_hcd_grlib_remove(struct platform_device *op)
 	irq_dispose_mapping(hcd->irq);
 
 	usb_put_hcd(hcd);
-
-	return 0;
 }
 
 

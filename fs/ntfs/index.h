@@ -1,23 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * index.h - Defines for NTFS kernel index handling.  Part of the Linux-NTFS
- *	     project.
+ * Defines for NTFS kernel index handling.
  *
  * Copyright (c) 2004 Anton Altaparmakov
- *
- * This program/include file is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as published
- * by the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program/include file is distributed in the hope that it will be
- * useful, but WITHOUT ANY WARRANTY; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program (in the main directory of the Linux-NTFS
- * distribution in the file COPYING); if not, write to the Free Software
- * Foundation,Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef _LINUX_NTFS_INDEX_H
@@ -25,24 +10,35 @@
 
 #include <linux/fs.h>
 
-#include "types.h"
-#include "layout.h"
-#include "inode.h"
 #include "attrib.h"
 #include "mft.h"
-#include "aops.h"
 
-/**
+#define  VCN_INDEX_ROOT_PARENT  ((s64)-2)
+
+#define MAX_PARENT_VCN	32
+
+/*
  * @idx_ni:	index inode containing the @entry described by this context
+ * @name:	Unicode name of the indexed attribute
+ *		(usually $I30 for directories)
+ * @name_len:	length of @name in Unicode characters
  * @entry:	index entry (points into @ir or @ia)
+ * @cr:		creation time of the entry (for sorting/validation)
  * @data:	index entry data (points into @entry)
  * @data_len:	length in bytes of @data
  * @is_in_root:	'true' if @entry is in @ir and 'false' if it is in @ia
  * @ir:		index root if @is_in_root and NULL otherwise
  * @actx:	attribute search context if @is_in_root and NULL otherwise
- * @base_ni:	base inode if @is_in_root and NULL otherwise
- * @ia:		index block if @is_in_root is 'false' and NULL otherwise
- * @page:	page if @is_in_root is 'false' and NULL otherwise
+ * @ib:		index block header (valid when @is_in_root is 'false')
+ * @ia_ni:	index allocation inode (extent inode) for @ia
+ * @parent_pos:	array of parent entry positions in the B-tree nodes
+ * @parent_vcn:	VCNs of parent index blocks in the B-tree traversal
+ * @pindex:	current depth (number of parent nodes) in the traversal
+ *		(maximum is MAX_PARENT_VCN)
+ * @ib_dirty:	true if the current index block (@ia/@ib) was modified
+ * @block_size:	size of index blocks in bytes (from $INDEX_ROOT or $Boot)
+ * @vcn_size_bits: log2(cluster size)
+ * @sync_write:	true if synchronous writeback is requested for this context
  *
  * @idx_ni is the index inode this context belongs to.
  *
@@ -67,82 +63,57 @@
  * When finished with the @entry and its @data, call ntfs_index_ctx_put() to
  * free the context and other associated resources.
  *
- * If the index entry was modified, call flush_dcache_index_entry_page()
- * immediately after the modification and either ntfs_index_entry_mark_dirty()
+ * If the index entry was modified, ntfs_index_entry_mark_dirty()
  * or ntfs_index_entry_write() before the call to ntfs_index_ctx_put() to
  * ensure that the changes are written to disk.
  */
-typedef struct {
-	ntfs_inode *idx_ni;
-	INDEX_ENTRY *entry;
+struct ntfs_index_context {
+	struct ntfs_inode *idx_ni;
+	__le16 *name;
+	u32 name_len;
+	struct index_entry *entry;
+	__le32 cr;
 	void *data;
 	u16 data_len;
 	bool is_in_root;
-	INDEX_ROOT *ir;
-	ntfs_attr_search_ctx *actx;
-	ntfs_inode *base_ni;
-	INDEX_ALLOCATION *ia;
-	struct page *page;
-} ntfs_index_context;
+	struct index_root *ir;
+	struct ntfs_attr_search_ctx *actx;
+	struct index_block *ib;
+	struct ntfs_inode *ia_ni;
+	int parent_pos[MAX_PARENT_VCN];
+	s64 parent_vcn[MAX_PARENT_VCN];
+	int pindex;
+	bool ib_dirty;
+	u32 block_size;
+	u8 vcn_size_bits;
+	bool sync_write;
+};
 
-extern ntfs_index_context *ntfs_index_ctx_get(ntfs_inode *idx_ni);
-extern void ntfs_index_ctx_put(ntfs_index_context *ictx);
+int ntfs_index_root_inconsistent(struct ntfs_volume *vol,
+				 const struct attr_record *a,
+				 const struct index_root *ir, u64 inum);
+int ntfs_index_block_inconsistent(struct ntfs_volume *vol,
+				  const struct index_block *ib,
+				  u32 block_size, s64 vcn,
+				  __le32 cr, u64 inum);
+int ntfs_index_entries_inconsistent(const struct ntfs_volume *vol,
+				    const struct index_header *ih,
+				    __le32 collation_rule, u64 inum);
+struct ntfs_index_context *ntfs_index_ctx_get(struct ntfs_inode *ni, __le16 *name,
+		u32 name_len);
+void ntfs_index_ctx_put(struct ntfs_index_context *ictx);
+int ntfs_index_lookup(const void *key, const u32 key_len,
+		struct ntfs_index_context *ictx);
 
-extern int ntfs_index_lookup(const void *key, const int key_len,
-		ntfs_index_context *ictx);
-
-#ifdef NTFS_RW
-
-/**
- * ntfs_index_entry_flush_dcache_page - flush_dcache_page() for index entries
- * @ictx:	ntfs index context describing the index entry
- *
- * Call flush_dcache_page() for the page in which an index entry resides.
- *
- * This must be called every time an index entry is modified, just after the
- * modification.
- *
- * If the index entry is in the index root attribute, simply flush the page
- * containing the mft record containing the index root attribute.
- *
- * If the index entry is in an index block belonging to the index allocation
- * attribute, simply flush the page cache page containing the index block.
- */
-static inline void ntfs_index_entry_flush_dcache_page(ntfs_index_context *ictx)
-{
-	if (ictx->is_in_root)
-		flush_dcache_mft_record_page(ictx->actx->ntfs_ino);
-	else
-		flush_dcache_page(ictx->page);
-}
-
-/**
- * ntfs_index_entry_mark_dirty - mark an index entry dirty
- * @ictx:	ntfs index context describing the index entry
- *
- * Mark the index entry described by the index entry context @ictx dirty.
- *
- * If the index entry is in the index root attribute, simply mark the mft
- * record containing the index root attribute dirty.  This ensures the mft
- * record, and hence the index root attribute, will be written out to disk
- * later.
- *
- * If the index entry is in an index block belonging to the index allocation
- * attribute, mark the buffers belonging to the index record as well as the
- * page cache page the index block is in dirty.  This automatically marks the
- * VFS inode of the ntfs index inode to which the index entry belongs dirty,
- * too (I_DIRTY_PAGES) and this in turn ensures the page buffers, and hence the
- * dirty index block, will be written out to disk later.
- */
-static inline void ntfs_index_entry_mark_dirty(ntfs_index_context *ictx)
-{
-	if (ictx->is_in_root)
-		mark_mft_record_dirty(ictx->actx->ntfs_ino);
-	else
-		mark_ntfs_record_dirty(ictx->page,
-				(u8*)ictx->ia - (u8*)page_address(ictx->page));
-}
-
-#endif /* NTFS_RW */
+void ntfs_index_entry_mark_dirty(struct ntfs_index_context *ictx);
+int ntfs_index_add_filename(struct ntfs_inode *ni, struct file_name_attr *fn, u64 mref);
+int ntfs_index_remove(struct ntfs_inode *ni, const void *key, const u32 keylen);
+struct ntfs_inode *ntfs_ia_open(struct ntfs_index_context *icx, struct ntfs_inode *ni);
+struct index_entry *ntfs_index_walk_down(struct index_entry *ie, struct ntfs_index_context *ictx);
+struct index_entry *ntfs_index_next(struct index_entry *ie, struct ntfs_index_context *ictx);
+int ntfs_index_rm(struct ntfs_index_context *icx);
+void ntfs_index_ctx_reinit(struct ntfs_index_context *icx);
+int ntfs_ie_add(struct ntfs_index_context *icx, struct index_entry *ie);
+int ntfs_icx_ib_sync_write(struct ntfs_index_context *icx);
 
 #endif /* _LINUX_NTFS_INDEX_H */

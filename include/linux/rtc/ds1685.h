@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Definitions for the registers, addresses, and platform data of the
  * DS1685/DS1687-series RTC chips.
@@ -7,7 +8,7 @@
  * include larger, battery-backed NV-SRAM, burst-mode access, and an RTC
  * write counter.
  *
- * Copyright (C) 2011-2014 Joshua Kinard <kumba@gentoo.org>.
+ * Copyright (C) 2011-2014 Joshua Kinard <linux@kumba.dev>.
  * Copyright (C) 2009 Matthias Fuchs <matthias.fuchs@esd-electronics.com>.
  *
  * References:
@@ -15,10 +16,6 @@
  *    DS17x85/DS17x87 3V/5V Real-Time Clocks, 19-5222, Rev 4/10.
  *    DS1689/DS1693 3V/5V Serialized Real-Time Clocks, Rev 112105.
  *    Application Note 90, Using the Multiplex Bus RTC Extended Features.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef _LINUX_RTC_DS1685_H_
@@ -45,16 +42,10 @@
 struct ds1685_priv {
 	struct rtc_device *dev;
 	void __iomem *regs;
+	void __iomem *data;
 	u32 regstep;
-	resource_size_t baseaddr;
-	size_t size;
-	spinlock_t lock;
-	struct work_struct work;
 	int irq_num;
 	bool bcd_mode;
-	bool no_irq;
-	bool uie_unsupported;
-	bool alloc_io_resources;
 	u8 (*read)(struct ds1685_priv *, int);
 	void (*write)(struct ds1685_priv *, int, u8);
 	void (*prepare_poweroff)(void);
@@ -79,12 +70,13 @@ struct ds1685_rtc_platform_data {
 	const bool bcd_mode;
 	const bool no_irq;
 	const bool uie_unsupported;
-	const bool alloc_io_resources;
-	u8 (*plat_read)(struct ds1685_priv *, int);
-	void (*plat_write)(struct ds1685_priv *, int, u8);
 	void (*plat_prepare_poweroff)(void);
 	void (*plat_wake_alarm)(void);
 	void (*plat_post_ram_clear)(void);
+	enum {
+		ds1685_reg_direct,
+		ds1685_reg_indirect
+	} access_type;
 };
 
 
@@ -332,7 +324,6 @@ struct ds1685_rtc_platform_data {
 #define RTC_SQW_2HZ		0x0f	/*  0    1   1   1   1  */
 #define RTC_SQW_0HZ		0x00	/*  0    0   0   0   0  */
 #define RTC_SQW_32768HZ		32768	/*  1    -   -   -   -  */
-#define RTC_MAX_USER_FREQ	8192
 
 
 /*

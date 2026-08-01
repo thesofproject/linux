@@ -24,9 +24,15 @@
  * Authors: Dave Airlie
  *          Alex Deucher
  */
-#include <drm/drmP.h>
+
+#include <linux/pci.h>
+
+#include <drm/drm_device.h>
+#include <drm/drm_edid.h>
 #include <drm/radeon_drm.h>
+
 #include "radeon.h"
+#include "radeon_legacy_encoders.h"
 #include "atom.h"
 
 #ifdef CONFIG_PPC_PMAC
@@ -35,11 +41,6 @@
 #include <asm/pmac_feature.h>
 #include <asm/prom.h>
 #endif /* CONFIG_PPC_PMAC */
-
-/* from radeon_legacy_encoder.c */
-extern void
-radeon_add_legacy_encoder(struct drm_device *dev, uint32_t encoder_enum,
-			  uint32_t supported_device);
 
 /* old legacy ATI BIOS routines */
 
@@ -369,46 +370,30 @@ static uint16_t combios_get_table_offset(struct drm_device *dev,
 bool radeon_combios_check_hardcoded_edid(struct radeon_device *rdev)
 {
 	int edid_info, size;
-	struct edid *edid;
+	const struct drm_edid *edid;
 	unsigned char *raw;
-	edid_info = combios_get_table_offset(rdev->ddev, COMBIOS_HARDCODED_EDID_TABLE);
+	edid_info = combios_get_table_offset(rdev_to_drm(rdev), COMBIOS_HARDCODED_EDID_TABLE);
 	if (!edid_info)
 		return false;
 
 	raw = rdev->bios + edid_info;
 	size = EDID_LENGTH * (raw[0x7e] + 1);
-	edid = kmalloc(size, GFP_KERNEL);
-	if (edid == NULL)
-		return false;
+	edid = drm_edid_alloc(raw, size);
 
-	memcpy((unsigned char *)edid, raw, size);
-
-	if (!drm_edid_is_valid(edid)) {
-		kfree(edid);
+	if (!drm_edid_valid(edid)) {
+		drm_edid_free(edid);
 		return false;
 	}
 
 	rdev->mode_info.bios_hardcoded_edid = edid;
-	rdev->mode_info.bios_hardcoded_edid_size = size;
 	return true;
 }
 
 /* this is used for atom LCDs as well */
-struct edid *
+const struct drm_edid *
 radeon_bios_get_hardcoded_edid(struct radeon_device *rdev)
 {
-	struct edid *edid;
-
-	if (rdev->mode_info.bios_hardcoded_edid) {
-		edid = kmalloc(rdev->mode_info.bios_hardcoded_edid_size, GFP_KERNEL);
-		if (edid) {
-			memcpy((unsigned char *)edid,
-			       (unsigned char *)rdev->mode_info.bios_hardcoded_edid,
-			       rdev->mode_info.bios_hardcoded_edid_size);
-			return edid;
-		}
-	}
-	return NULL;
+	return drm_edid_dup(rdev->mode_info.bios_hardcoded_edid);
 }
 
 static struct radeon_i2c_bus_rec combios_setup_i2c_bus(struct radeon_device *rdev,
@@ -641,7 +626,7 @@ static struct radeon_i2c_bus_rec combios_setup_i2c_bus(struct radeon_device *rde
 
 static struct radeon_i2c_bus_rec radeon_combios_get_i2c_info_from_table(struct radeon_device *rdev)
 {
-	struct drm_device *dev = rdev->ddev;
+	struct drm_device *dev = rdev_to_drm(rdev);
 	struct radeon_i2c_bus_rec i2c;
 	u16 offset;
 	u8 id, blocks, clk, data;
@@ -669,7 +654,7 @@ static struct radeon_i2c_bus_rec radeon_combios_get_i2c_info_from_table(struct r
 
 void radeon_combios_i2c_init(struct radeon_device *rdev)
 {
-	struct drm_device *dev = rdev->ddev;
+	struct drm_device *dev = rdev_to_drm(rdev);
 	struct radeon_i2c_bus_rec i2c;
 
 	/* actual hw pads
@@ -811,7 +796,7 @@ bool radeon_combios_get_clock_info(struct drm_device *dev)
 
 bool radeon_combios_sideport_present(struct radeon_device *rdev)
 {
-	struct drm_device *dev = rdev->ddev;
+	struct drm_device *dev = rdev_to_drm(rdev);
 	u16 igp_info;
 
 	/* sideport is AMD only */
@@ -863,11 +848,10 @@ struct radeon_encoder_primary_dac *radeon_combios_get_primary_dac_info(struct
 	struct radeon_device *rdev = dev->dev_private;
 	uint16_t dac_info;
 	uint8_t rev, bg, dac;
-	struct radeon_encoder_primary_dac *p_dac = NULL;
+	struct radeon_encoder_primary_dac *p_dac;
 	int found = 0;
 
-	p_dac = kzalloc(sizeof(struct radeon_encoder_primary_dac),
-			GFP_KERNEL);
+	p_dac = kzalloc_obj(struct radeon_encoder_primary_dac);
 
 	if (!p_dac)
 		return NULL;
@@ -894,13 +878,13 @@ struct radeon_encoder_primary_dac *radeon_combios_get_primary_dac_info(struct
 
 	/* quirks */
 	/* Radeon 7000 (RV100) */
-	if (((dev->pdev->device == 0x5159) &&
-	    (dev->pdev->subsystem_vendor == 0x174B) &&
-	    (dev->pdev->subsystem_device == 0x7c28)) ||
+	if (((rdev->pdev->device == 0x5159) &&
+	    (rdev->pdev->subsystem_vendor == 0x174B) &&
+	    (rdev->pdev->subsystem_device == 0x7c28)) ||
 	/* Radeon 9100 (R200) */
-	   ((dev->pdev->device == 0x514D) &&
-	    (dev->pdev->subsystem_vendor == 0x174B) &&
-	    (dev->pdev->subsystem_device == 0x7149))) {
+	   ((rdev->pdev->device == 0x514D) &&
+	    (rdev->pdev->subsystem_vendor == 0x174B) &&
+	    (rdev->pdev->subsystem_device == 0x7149))) {
 		/* vbios value is bad, use the default */
 		found = 0;
 	}
@@ -914,7 +898,7 @@ struct radeon_encoder_primary_dac *radeon_combios_get_primary_dac_info(struct
 enum radeon_tv_std
 radeon_combios_get_tv_info(struct radeon_device *rdev)
 {
-	struct drm_device *dev = rdev->ddev;
+	struct drm_device *dev = rdev_to_drm(rdev);
 	uint16_t tv_info;
 	enum radeon_tv_std tv_std = TV_STD_NTSC;
 
@@ -1014,10 +998,10 @@ struct radeon_encoder_tv_dac *radeon_combios_get_tv_dac_info(struct
 	struct radeon_device *rdev = dev->dev_private;
 	uint16_t dac_info;
 	uint8_t rev, bg, dac;
-	struct radeon_encoder_tv_dac *tv_dac = NULL;
+	struct radeon_encoder_tv_dac *tv_dac;
 	int found = 0;
 
-	tv_dac = kzalloc(sizeof(struct radeon_encoder_tv_dac), GFP_KERNEL);
+	tv_dac = kzalloc_obj(struct radeon_encoder_tv_dac);
 	if (!tv_dac)
 		return NULL;
 
@@ -1100,12 +1084,12 @@ static struct radeon_encoder_lvds *radeon_legacy_get_lvds_info_from_regs(struct
 									 radeon_device
 									 *rdev)
 {
-	struct radeon_encoder_lvds *lvds = NULL;
+	struct radeon_encoder_lvds *lvds;
 	uint32_t fp_vert_stretch, fp_horz_stretch;
 	uint32_t ppll_div_sel, ppll_val;
 	uint32_t lvds_ss_gen_cntl = RREG32(RADEON_LVDS_SS_GEN_CNTL);
 
-	lvds = kzalloc(sizeof(struct radeon_encoder_lvds), GFP_KERNEL);
+	lvds = kzalloc_obj(struct radeon_encoder_lvds);
 
 	if (!lvds)
 		return NULL;
@@ -1180,7 +1164,7 @@ struct radeon_encoder_lvds *radeon_combios_get_lvds_info(struct radeon_encoder
 	lcd_info = combios_get_table_offset(dev, COMBIOS_LCD_INFO_TABLE);
 
 	if (lcd_info) {
-		lvds = kzalloc(sizeof(struct radeon_encoder_lvds), GFP_KERNEL);
+		lvds = kzalloc_obj(struct radeon_encoder_lvds);
 
 		if (!lvds)
 			return NULL;
@@ -2221,20 +2205,21 @@ static bool radeon_apply_legacy_quirks(struct drm_device *dev,
 				       struct radeon_i2c_bus_rec *ddc_i2c,
 				       struct radeon_hpd *hpd)
 {
+	struct radeon_device *rdev = dev->dev_private;
 
 	/* Certain IBM chipset RN50s have a BIOS reporting two VGAs,
 	   one with VGA DDC and one with CRT2 DDC. - kill the CRT2 DDC one */
-	if (dev->pdev->device == 0x515e &&
-	    dev->pdev->subsystem_vendor == 0x1014) {
+	if (rdev->pdev->device == 0x515e &&
+	    rdev->pdev->subsystem_vendor == 0x1014) {
 		if (*legacy_connector == CONNECTOR_CRT_LEGACY &&
 		    ddc_i2c->mask_clk_reg == RADEON_GPIO_CRT2_DDC)
 			return false;
 	}
 
 	/* X300 card with extra non-existent DVI port */
-	if (dev->pdev->device == 0x5B60 &&
-	    dev->pdev->subsystem_vendor == 0x17af &&
-	    dev->pdev->subsystem_device == 0x201e && bios_index == 2) {
+	if (rdev->pdev->device == 0x5B60 &&
+	    rdev->pdev->subsystem_vendor == 0x17af &&
+	    rdev->pdev->subsystem_device == 0x201e && bios_index == 2) {
 		if (*legacy_connector == CONNECTOR_DVI_I_LEGACY)
 			return false;
 	}
@@ -2244,22 +2229,24 @@ static bool radeon_apply_legacy_quirks(struct drm_device *dev,
 
 static bool radeon_apply_legacy_tv_quirks(struct drm_device *dev)
 {
+	struct radeon_device *rdev = dev->dev_private;
+
 	/* Acer 5102 has non-existent TV port */
-	if (dev->pdev->device == 0x5975 &&
-	    dev->pdev->subsystem_vendor == 0x1025 &&
-	    dev->pdev->subsystem_device == 0x009f)
+	if (rdev->pdev->device == 0x5975 &&
+	    rdev->pdev->subsystem_vendor == 0x1025 &&
+	    rdev->pdev->subsystem_device == 0x009f)
 		return false;
 
 	/* HP dc5750 has non-existent TV port */
-	if (dev->pdev->device == 0x5974 &&
-	    dev->pdev->subsystem_vendor == 0x103c &&
-	    dev->pdev->subsystem_device == 0x280a)
+	if (rdev->pdev->device == 0x5974 &&
+	    rdev->pdev->subsystem_vendor == 0x103c &&
+	    rdev->pdev->subsystem_device == 0x280a)
 		return false;
 
 	/* MSI S270 has non-existent TV port */
-	if (dev->pdev->device == 0x5955 &&
-	    dev->pdev->subsystem_vendor == 0x1462 &&
-	    dev->pdev->subsystem_device == 0x0131)
+	if (rdev->pdev->device == 0x5955 &&
+	    rdev->pdev->subsystem_vendor == 0x1462 &&
+	    rdev->pdev->subsystem_device == 0x0131)
 		return false;
 
 	return true;
@@ -2413,9 +2400,9 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 				/* RV100 board with external TDMS bit mis-set.
 				 * Actually uses internal TMDS, clear the bit.
 				 */
-				if (dev->pdev->device == 0x5159 &&
-				    dev->pdev->subsystem_vendor == 0x1014 &&
-				    dev->pdev->subsystem_device == 0x029A) {
+				if (rdev->pdev->device == 0x5159 &&
+				    rdev->pdev->subsystem_vendor == 0x1014 &&
+				    rdev->pdev->subsystem_device == 0x029A) {
 					tmp &= ~(1 << 4);
 				}
 				if ((tmp >> 4) & 0x1) {
@@ -2633,22 +2620,22 @@ static const char *thermal_controller_names[] = {
 
 void radeon_combios_get_power_modes(struct radeon_device *rdev)
 {
-	struct drm_device *dev = rdev->ddev;
+	struct drm_device *dev = rdev_to_drm(rdev);
 	u16 offset, misc, misc2 = 0;
-	u8 rev, blocks, tmp;
+	u8 rev, tmp;
 	int state_index = 0;
 	struct radeon_i2c_bus_rec i2c_bus;
 
 	rdev->pm.default_power_state_index = -1;
 
 	/* allocate 2 power states */
-	rdev->pm.power_state = kzalloc(sizeof(struct radeon_power_state) * 2, GFP_KERNEL);
+	rdev->pm.power_state = kzalloc_objs(struct radeon_power_state, 2);
 	if (rdev->pm.power_state) {
 		/* allocate 1 clock mode per state */
 		rdev->pm.power_state[0].clock_info =
-			kzalloc(sizeof(struct radeon_pm_clock_info) * 1, GFP_KERNEL);
+			kzalloc_objs(struct radeon_pm_clock_info, 1);
 		rdev->pm.power_state[1].clock_info =
-			kzalloc(sizeof(struct radeon_pm_clock_info) * 1, GFP_KERNEL);
+			kzalloc_objs(struct radeon_pm_clock_info, 1);
 		if (!rdev->pm.power_state[0].clock_info ||
 		    !rdev->pm.power_state[1].clock_info)
 			goto pm_failed;
@@ -2696,25 +2683,25 @@ void radeon_combios_get_power_modes(struct radeon_device *rdev)
 				struct i2c_board_info info = { };
 				const char *name = thermal_controller_names[thermal_controller];
 				info.addr = i2c_addr >> 1;
-				strlcpy(info.type, name, sizeof(info.type));
-				i2c_new_device(&rdev->pm.i2c_bus->adapter, &info);
+				strscpy(info.type, name, sizeof(info.type));
+				i2c_new_client_device(&rdev->pm.i2c_bus->adapter, &info);
 			}
 		}
 	} else {
 		/* boards with a thermal chip, but no overdrive table */
 
 		/* Asus 9600xt has an f75375 on the monid bus */
-		if ((dev->pdev->device == 0x4152) &&
-		    (dev->pdev->subsystem_vendor == 0x1043) &&
-		    (dev->pdev->subsystem_device == 0xc002)) {
+		if ((rdev->pdev->device == 0x4152) &&
+		    (rdev->pdev->subsystem_vendor == 0x1043) &&
+		    (rdev->pdev->subsystem_device == 0xc002)) {
 			i2c_bus = combios_setup_i2c_bus(rdev, DDC_MONID, 0, 0);
 			rdev->pm.i2c_bus = radeon_i2c_lookup(rdev, &i2c_bus);
 			if (rdev->pm.i2c_bus) {
 				struct i2c_board_info info = { };
 				const char *name = "f75375";
 				info.addr = 0x28;
-				strlcpy(info.type, name, sizeof(info.type));
-				i2c_new_device(&rdev->pm.i2c_bus->adapter, &info);
+				strscpy(info.type, name, sizeof(info.type));
+				i2c_new_client_device(&rdev->pm.i2c_bus->adapter, &info);
 				DRM_INFO("Possible %s thermal controller at 0x%02x\n",
 					 name, info.addr);
 			}
@@ -2725,7 +2712,6 @@ void radeon_combios_get_power_modes(struct radeon_device *rdev)
 		offset = combios_get_table_offset(dev, COMBIOS_POWERPLAY_INFO_TABLE);
 		if (offset) {
 			rev = RBIOS8(offset);
-			blocks = RBIOS8(offset + 0x2);
 			/* power mode 0 tends to be the only valid one */
 			rdev->pm.power_state[state_index].num_clock_modes = 1;
 			rdev->pm.power_state[state_index].clock_info[0].mclk = RBIOS32(offset + 0x5 + 0x2);

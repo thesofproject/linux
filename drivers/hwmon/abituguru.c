@@ -1,19 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * abituguru.c Copyright (c) 2005-2006 Hans de Goede <hdegoede@redhat.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 /*
  * This driver supports the sensor part of the first and second revision of
@@ -1277,7 +1264,7 @@ static int abituguru_probe(struct platform_device *pdev)
 	 * El weirdo probe order, to keep the sysfs order identical to the
 	 * BIOS and window-appliction listing order.
 	 */
-	const u8 probe_order[ABIT_UGURU_MAX_BANK1_SENSORS] = {
+	static const u8 probe_order[ABIT_UGURU_MAX_BANK1_SENSORS] = {
 		0x00, 0x01, 0x03, 0x04, 0x0A, 0x08, 0x0E, 0x02,
 		0x09, 0x06, 0x05, 0x0B, 0x0F, 0x0D, 0x07, 0x0C };
 
@@ -1441,7 +1428,7 @@ abituguru_probe_error:
 	return res;
 }
 
-static int abituguru_remove(struct platform_device *pdev)
+static void abituguru_remove(struct platform_device *pdev)
 {
 	int i;
 	struct abituguru_data *data = platform_get_drvdata(pdev);
@@ -1452,8 +1439,6 @@ static int abituguru_remove(struct platform_device *pdev)
 	for (i = 0; i < ARRAY_SIZE(abituguru_sysfs_attr); i++)
 		device_remove_file(&pdev->dev,
 			&abituguru_sysfs_attr[i].dev_attr);
-
-	return 0;
 }
 
 static struct abituguru_data *abituguru_update_device(struct device *dev)
@@ -1517,7 +1502,6 @@ LEAVE_UPDATE:
 		return NULL;
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int abituguru_suspend(struct device *dev)
 {
 	struct abituguru_data *data = dev_get_drvdata(dev);
@@ -1539,16 +1523,12 @@ static int abituguru_resume(struct device *dev)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(abituguru_pm, abituguru_suspend, abituguru_resume);
-#define ABIT_UGURU_PM	(&abituguru_pm)
-#else
-#define ABIT_UGURU_PM	NULL
-#endif /* CONFIG_PM */
+static DEFINE_SIMPLE_DEV_PM_OPS(abituguru_pm, abituguru_suspend, abituguru_resume);
 
 static struct platform_driver abituguru_driver = {
 	.driver = {
 		.name	= ABIT_UGURU_NAME,
-		.pm	= ABIT_UGURU_PM,
+		.pm	= pm_sleep_ptr(&abituguru_pm),
 	},
 	.probe		= abituguru_probe,
 	.remove		= abituguru_remove,

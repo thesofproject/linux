@@ -1,19 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Key-agreement Protocol Primitives (KPP)
  *
  * Copyright (c) 2016, Intel Corporation
  * Authors: Salvatore Benedetto <salvatore.benedetto@intel.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
  */
 
 #ifndef _CRYPTO_KPP_
 #define _CRYPTO_KPP_
+
+#include <linux/atomic.h>
+#include <linux/container_of.h>
 #include <linux/crypto.h>
+#include <linux/slab.h>
 
 /**
  * struct kpp_request
@@ -42,9 +41,13 @@ struct kpp_request {
  * struct crypto_kpp - user-instantiated object which encapsulate
  * algorithms and core processing logic
  *
+ * @reqsize:		Request context size required by algorithm
+ *			implementation
  * @base:	Common crypto API algorithm data structure
  */
 struct crypto_kpp {
+	unsigned int reqsize;
+
 	struct crypto_tfm base;
 };
 
@@ -69,8 +72,6 @@ struct crypto_kpp {
  *			put in place here.
  * @exit:		Undo everything @init did.
  *
- * @reqsize:		Request context size required by algorithm
- *			implementation
  * @base:		Common crypto API algorithm data structure
  */
 struct kpp_alg {
@@ -84,7 +85,6 @@ struct kpp_alg {
 	int (*init)(struct crypto_kpp *tfm);
 	void (*exit)(struct crypto_kpp *tfm);
 
-	unsigned int reqsize;
 	struct crypto_alg base;
 };
 
@@ -109,6 +109,8 @@ struct kpp_alg {
  */
 struct crypto_kpp *crypto_alloc_kpp(const char *alg_name, u32 type, u32 mask);
 
+int crypto_has_kpp(const char *alg_name, u32 type, u32 mask);
+
 static inline struct crypto_tfm *crypto_kpp_tfm(struct crypto_kpp *tfm)
 {
 	return &tfm->base;
@@ -131,7 +133,7 @@ static inline struct kpp_alg *crypto_kpp_alg(struct crypto_kpp *tfm)
 
 static inline unsigned int crypto_kpp_reqsize(struct crypto_kpp *tfm)
 {
-	return crypto_kpp_alg(tfm)->reqsize;
+	return tfm->reqsize;
 }
 
 static inline void kpp_request_set_tfm(struct kpp_request *req,
@@ -159,6 +161,8 @@ static inline void crypto_kpp_set_flags(struct crypto_kpp *tfm, u32 flags)
  * crypto_free_kpp() - free KPP tfm handle
  *
  * @tfm: KPP tfm handle allocated with crypto_alloc_kpp()
+ *
+ * If @tfm is a NULL or error pointer, this function does nothing.
  */
 static inline void crypto_free_kpp(struct crypto_kpp *tfm)
 {
@@ -192,7 +196,7 @@ static inline struct kpp_request *kpp_request_alloc(struct crypto_kpp *tfm,
  */
 static inline void kpp_request_free(struct kpp_request *req)
 {
-	kzfree(req);
+	kfree_sensitive(req);
 }
 
 /**
@@ -286,9 +290,7 @@ struct kpp_secret {
 static inline int crypto_kpp_set_secret(struct crypto_kpp *tfm,
 					const void *buffer, unsigned int len)
 {
-	struct kpp_alg *alg = crypto_kpp_alg(tfm);
-
-	return alg->set_secret(tfm, buffer, len);
+	return crypto_kpp_alg(tfm)->set_secret(tfm, buffer, len);
 }
 
 /**
@@ -307,9 +309,8 @@ static inline int crypto_kpp_set_secret(struct crypto_kpp *tfm,
 static inline int crypto_kpp_generate_public_key(struct kpp_request *req)
 {
 	struct crypto_kpp *tfm = crypto_kpp_reqtfm(req);
-	struct kpp_alg *alg = crypto_kpp_alg(tfm);
 
-	return alg->generate_public_key(req);
+	return crypto_kpp_alg(tfm)->generate_public_key(req);
 }
 
 /**
@@ -325,9 +326,8 @@ static inline int crypto_kpp_generate_public_key(struct kpp_request *req)
 static inline int crypto_kpp_compute_shared_secret(struct kpp_request *req)
 {
 	struct crypto_kpp *tfm = crypto_kpp_reqtfm(req);
-	struct kpp_alg *alg = crypto_kpp_alg(tfm);
 
-	return alg->compute_shared_secret(req);
+	return crypto_kpp_alg(tfm)->compute_shared_secret(req);
 }
 
 /**

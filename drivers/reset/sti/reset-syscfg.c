@@ -1,27 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2013 STMicroelectronics Limited
  * Author: Stephen Gallimore <stephen.gallimore@st.com>
  *
  * Inspired by mach-imx/src.c
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/module.h>
 #include <linux/err.h>
 #include <linux/types.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/regmap.h>
 #include <linux/mfd/syscon.h>
 
 #include "reset-syscfg.h"
 
 /**
- * Reset channel regmap configuration
+ * struct syscfg_reset_channel - Reset channel regmap configuration
  *
  * @reset: regmap field for the channel's reset bit.
  * @ack: regmap field for the channel's ack bit (optional).
@@ -32,8 +29,9 @@ struct syscfg_reset_channel {
 };
 
 /**
- * A reset controller which groups together a set of related reset bits, which
- * may be located in different system configuration registers.
+ * struct syscfg_reset_controller - A reset controller which groups together
+ * a set of related reset bits, which may be located in different system
+ * configuration registers.
  *
  * @rst: base reset controller structure.
  * @active_low: are the resets in this controller active low, i.e. clearing
@@ -43,7 +41,7 @@ struct syscfg_reset_channel {
 struct syscfg_reset_controller {
 	struct reset_controller_dev rst;
 	bool active_low;
-	struct syscfg_reset_channel *channels;
+	struct syscfg_reset_channel channels[];
 };
 
 #define to_syscfg_reset_controller(_rst) \
@@ -67,22 +65,12 @@ static int syscfg_reset_program_hw(struct reset_controller_dev *rcdev,
 		return err;
 
 	if (ch->ack) {
-		unsigned long timeout = jiffies + msecs_to_jiffies(1000);
 		u32 ack_val;
 
-		while (true) {
-			err = regmap_field_read(ch->ack, &ack_val);
-			if (err)
-				return err;
-
-			if (ack_val == ctrl_val)
-				break;
-
-			if (time_after(jiffies, timeout))
-				return -ETIME;
-
-			cpu_relax();
-		}
+		err = regmap_field_read_poll_timeout(ch->ack, ack_val, (ack_val == ctrl_val),
+						     100, USEC_PER_SEC);
+		if (err)
+			return err;
 	}
 
 	return 0;
@@ -147,16 +135,11 @@ static int syscfg_reset_controller_register(struct device *dev,
 	struct syscfg_reset_controller *rc;
 	int i, err;
 
-	rc = devm_kzalloc(dev, sizeof(*rc), GFP_KERNEL);
+	rc = devm_kzalloc(dev, struct_size(rc, channels, data->nr_channels), GFP_KERNEL);
 	if (!rc)
 		return -ENOMEM;
 
-	rc->channels = devm_kcalloc(dev, data->nr_channels,
-				    sizeof(*rc->channels), GFP_KERNEL);
-	if (!rc->channels)
-		return -ENOMEM;
-
-	rc->rst.ops = &syscfg_reset_ops,
+	rc->rst.ops = &syscfg_reset_ops;
 	rc->rst.of_node = dev->of_node;
 	rc->rst.nr_resets = data->nr_channels;
 	rc->active_low = data->active_low;
@@ -196,14 +179,14 @@ static int syscfg_reset_controller_register(struct device *dev,
 int syscfg_reset_probe(struct platform_device *pdev)
 {
 	struct device *dev = pdev ? &pdev->dev : NULL;
-	const struct of_device_id *match;
+	const void *data;
 
 	if (!dev || !dev->driver)
 		return -ENODEV;
 
-	match = of_match_device(dev->driver->of_match_table, dev);
-	if (!match || !match->data)
+	data = device_get_match_data(&pdev->dev);
+	if (!data)
 		return -EINVAL;
 
-	return syscfg_reset_controller_register(dev, match->data);
+	return syscfg_reset_controller_register(dev, data);
 }

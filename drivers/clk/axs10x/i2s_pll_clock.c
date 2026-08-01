@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Synopsys AXS10X SDP I2S PLL clock driver
  *
  * Copyright (C) 2016 Synopsys
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #include <linux/platform_device.h>
@@ -13,6 +10,7 @@
 #include <linux/clk-provider.h>
 #include <linux/err.h>
 #include <linux/device.h>
+#include <linux/io.h>
 #include <linux/of_address.h>
 #include <linux/slab.h>
 #include <linux/of.h>
@@ -110,21 +108,21 @@ static unsigned long i2s_pll_recalc_rate(struct clk_hw *hw,
 	return ((parent_rate / idiv) * fbdiv) / odiv;
 }
 
-static long i2s_pll_round_rate(struct clk_hw *hw, unsigned long rate,
-			unsigned long *prate)
+static int i2s_pll_determine_rate(struct clk_hw *hw,
+				  struct clk_rate_request *req)
 {
 	struct i2s_pll_clk *clk = to_i2s_pll_clk(hw);
-	const struct i2s_pll_cfg *pll_cfg = i2s_pll_get_cfg(*prate);
+	const struct i2s_pll_cfg *pll_cfg = i2s_pll_get_cfg(req->best_parent_rate);
 	int i;
 
 	if (!pll_cfg) {
-		dev_err(clk->dev, "invalid parent rate=%ld\n", *prate);
+		dev_err(clk->dev, "invalid parent rate=%ld\n", req->best_parent_rate);
 		return -EINVAL;
 	}
 
 	for (i = 0; pll_cfg[i].rate != 0; i++)
-		if (pll_cfg[i].rate == rate)
-			return rate;
+		if (pll_cfg[i].rate == req->rate)
+			return 0;
 
 	return -EINVAL;
 }
@@ -158,7 +156,7 @@ static int i2s_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 
 static const struct clk_ops i2s_pll_ops = {
 	.recalc_rate = i2s_pll_recalc_rate,
-	.round_rate = i2s_pll_round_rate,
+	.determine_rate = i2s_pll_determine_rate,
 	.set_rate = i2s_pll_set_rate,
 };
 
@@ -171,14 +169,12 @@ static int i2s_pll_clk_probe(struct platform_device *pdev)
 	struct clk *clk;
 	struct i2s_pll_clk *pll_clk;
 	struct clk_init_data init;
-	struct resource *mem;
 
 	pll_clk = devm_kzalloc(dev, sizeof(*pll_clk), GFP_KERNEL);
 	if (!pll_clk)
 		return -ENOMEM;
 
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	pll_clk->base = devm_ioremap_resource(dev, mem);
+	pll_clk->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(pll_clk->base))
 		return PTR_ERR(pll_clk->base);
 
@@ -202,10 +198,9 @@ static int i2s_pll_clk_probe(struct platform_device *pdev)
 	return of_clk_add_provider(node, of_clk_src_simple_get, clk);
 }
 
-static int i2s_pll_clk_remove(struct platform_device *pdev)
+static void i2s_pll_clk_remove(struct platform_device *pdev)
 {
 	of_clk_del_provider(pdev->dev.of_node);
-	return 0;
 }
 
 static const struct of_device_id i2s_pll_clk_id[] = {

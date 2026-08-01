@@ -215,16 +215,15 @@ static bool setup_scaling_configuration(
 	return is_scaling_needed;
 }
 
-/**
-* Function:
-* void program_overscan
-*
-* Purpose: Programs overscan border
-* Input:   overscan
-*
-* Output:
-   void
-*/
+/*
+ * Function:
+ * void program_overscan
+ *
+ * Purpose: Programs overscan border
+ * Input:   overscan
+ *
+ * Output: void
+ */
 static void program_overscan(
 		struct dce_transform *xfm_dce,
 		const struct scaler_data *data)
@@ -235,7 +234,7 @@ static void program_overscan(
 	int overscan_right = data->h_active - data->recout.x - data->recout.width;
 	int overscan_bottom = data->v_active - data->recout.y - data->recout.height;
 
-	if (xfm_dce->base.ctx->dc->debug.surface_visual_confirm) {
+	if (xfm_dce->base.ctx->dc->debug.visual_confirm != VISUAL_CONFIRM_DISABLE) {
 		overscan_bottom += 2;
 		overscan_right += 2;
 	}
@@ -372,14 +371,17 @@ static void calculate_inits(
 	struct rect *luma_viewport,
 	struct rect *chroma_viewport)
 {
+	(void)xfm_dce;
+	(void)luma_viewport;
+	(void)chroma_viewport;
 	inits->h_int_scale_ratio_luma =
-		dal_fixed31_32_u2d19(data->ratios.horz) << 5;
+		dc_fixpt_u2d19(data->ratios.horz) << 5;
 	inits->v_int_scale_ratio_luma =
-		dal_fixed31_32_u2d19(data->ratios.vert) << 5;
+		dc_fixpt_u2d19(data->ratios.vert) << 5;
 	inits->h_int_scale_ratio_chroma =
-		dal_fixed31_32_u2d19(data->ratios.horz_c) << 5;
+		dc_fixpt_u2d19(data->ratios.horz_c) << 5;
 	inits->v_int_scale_ratio_chroma =
-		dal_fixed31_32_u2d19(data->ratios.vert_c) << 5;
+		dc_fixpt_u2d19(data->ratios.vert_c) << 5;
 
 	inits->h_init_luma.integer = 1;
 	inits->v_init_luma.integer = 1;
@@ -620,6 +622,8 @@ static void dce110_xfmv_set_gamut_remap(
 	struct transform *xfm,
 	const struct xfm_grph_csc_adjustment *adjust)
 {
+	(void)xfm;
+	(void)adjust;
 	/* DO NOTHING*/
 }
 
@@ -628,6 +632,7 @@ static void dce110_xfmv_set_pixel_storage_depth(
 	enum lb_pixel_depth depth,
 	const struct bit_depth_reduction_params *bit_depth_params)
 {
+	(void)bit_depth_params;
 	struct dce_transform *xfm_dce = TO_DCE_TRANSFORM(xfm);
 	int pixel_depth = 0;
 	int expan_mode = 0;
@@ -707,7 +712,8 @@ bool dce110_transform_v_construct(
 	xfm_dce->lb_pixel_depth_supported =
 			LB_PIXEL_DEPTH_18BPP |
 			LB_PIXEL_DEPTH_24BPP |
-			LB_PIXEL_DEPTH_30BPP;
+			LB_PIXEL_DEPTH_30BPP |
+			LB_PIXEL_DEPTH_36BPP;
 
 	xfm_dce->prescaler_on = true;
 	xfm_dce->lb_bits_per_entry = LB_BITS_PER_ENTRY;

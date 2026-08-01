@@ -32,7 +32,13 @@ Gets the currently used cpufreq policy.
 \fB\-g\fR \fB\-\-governors\fR
 Determines available cpufreq governors.
 .TP  
-\fB\-a\fR \fB\-\-related\-cpus\fR
+\fB\-b\fR \fB\-\-boost\fR
+Gets the current boost state support.
+.TP
+\fB\-z\fR \fB\-\-epp\fR
+Gets the current EPP (energy performance preference).
+.TP
+\fB\-r\fR \fB\-\-related\-cpus\fR
 Determines which CPUs run at the same hardware frequency.
 .TP  
 \fB\-a\fR \fB\-\-affected\-cpus\fR
@@ -53,6 +59,9 @@ human\-readable output for the \-f, \-w, \-s and \-y parameters.
 \fB\-n\fR \fB\-\-no-rounding\fR
 Output frequencies and latencies without rounding off values.
 .TP  
+\fB\-c\fR \fB\-\-performance\fR
+Get performances and frequencies capabilities of CPPC, by reading it from hardware (only available on the hardware with CPPC).
+.TP
 .SH "REMARKS"
 .LP 
 By default only values of core zero are displayed. How to display settings of

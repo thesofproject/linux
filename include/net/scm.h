@@ -5,9 +5,12 @@
 #include <linux/limits.h>
 #include <linux/net.h>
 #include <linux/cred.h>
+#include <linux/file.h>
 #include <linux/security.h>
 #include <linux/pid.h>
 #include <linux/nsproxy.h>
+#include <linux/sched/signal.h>
+#include <net/compat.h>
 
 /* Well, we should have at least one descriptor open
  * to accept passed FDs 8)
@@ -20,9 +23,20 @@ struct scm_creds {
 	kgid_t	gid;
 };
 
+#ifdef CONFIG_UNIX
+struct unix_edge;
+#endif
+
 struct scm_fp_list {
 	short			count;
+	short			count_unix;
 	short			max;
+#ifdef CONFIG_UNIX
+	bool			inflight;
+	bool			dead;
+	struct list_head	vertices;
+	struct unix_edge	*edges;
+#endif
 	struct user_struct	*user;
 	struct file		*fp[SCM_MAX_FD];
 };
@@ -55,7 +69,7 @@ static __inline__ void unix_get_peersec_dgram(struct socket *sock, struct scm_co
 static __inline__ void scm_set_cred(struct scm_cookie *scm,
 				    struct pid *pid, kuid_t uid, kgid_t gid)
 {
-	scm->pid  = get_pid(pid);
+	scm->pid = get_pid(pid);
 	scm->creds.pid = pid_vnr(pid);
 	scm->creds.uid = uid;
 	scm->creds.gid = gid;
@@ -64,7 +78,7 @@ static __inline__ void scm_set_cred(struct scm_cookie *scm,
 static __inline__ void scm_destroy_cred(struct scm_cookie *scm)
 {
 	put_pid(scm->pid);
-	scm->pid  = NULL;
+	scm->pid = NULL;
 }
 
 static __inline__ void scm_destroy(struct scm_cookie *scm)
@@ -88,57 +102,18 @@ static __inline__ int scm_send(struct socket *sock, struct msghdr *msg,
 	return __scm_send(sock, msg, scm);
 }
 
-#ifdef CONFIG_SECURITY_NETWORK
-static inline void scm_passec(struct socket *sock, struct msghdr *msg, struct scm_cookie *scm)
+void scm_recv(struct socket *sock, struct msghdr *msg,
+	      struct scm_cookie *scm, int flags);
+void scm_recv_unix(struct socket *sock, struct msghdr *msg,
+		   struct scm_cookie *scm, int flags);
+
+static inline int scm_recv_one_fd(struct file *f, int __user *ufd,
+				  unsigned int flags)
 {
-	char *secdata;
-	u32 seclen;
-	int err;
-
-	if (test_bit(SOCK_PASSSEC, &sock->flags)) {
-		err = security_secid_to_secctx(scm->secid, &secdata, &seclen);
-
-		if (!err) {
-			put_cmsg(msg, SOL_SOCKET, SCM_SECURITY, seclen, secdata);
-			security_release_secctx(secdata, seclen);
-		}
-	}
+	if (!ufd)
+		return -EFAULT;
+	return receive_fd(f, ufd, flags);
 }
-#else
-static inline void scm_passec(struct socket *sock, struct msghdr *msg, struct scm_cookie *scm)
-{ }
-#endif /* CONFIG_SECURITY_NETWORK */
-
-static __inline__ void scm_recv(struct socket *sock, struct msghdr *msg,
-				struct scm_cookie *scm, int flags)
-{
-	if (!msg->msg_control) {
-		if (test_bit(SOCK_PASSCRED, &sock->flags) || scm->fp)
-			msg->msg_flags |= MSG_CTRUNC;
-		scm_destroy(scm);
-		return;
-	}
-
-	if (test_bit(SOCK_PASSCRED, &sock->flags)) {
-		struct user_namespace *current_ns = current_user_ns();
-		struct ucred ucreds = {
-			.pid = scm->creds.pid,
-			.uid = from_kuid_munged(current_ns, scm->creds.uid),
-			.gid = from_kgid_munged(current_ns, scm->creds.gid),
-		};
-		put_cmsg(msg, SOL_SOCKET, SCM_CREDENTIALS, sizeof(ucreds), &ucreds);
-	}
-
-	scm_destroy_cred(scm);
-
-	scm_passec(sock, msg, scm);
-
-	if (!scm->fp)
-		return;
-	
-	scm_detach_fds(msg, scm);
-}
-
 
 #endif /* __LINUX_NET_SCM_H */
 

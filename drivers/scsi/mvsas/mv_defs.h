@@ -1,26 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Marvell 88SE64xx/88SE94xx const head file
  *
  * Copyright 2007 Red Hat, Inc.
  * Copyright 2008 Marvell. <kewei@marvell.com>
  * Copyright 2009-2011 Marvell. <yuxiangl@marvell.com>
- *
- * This file is licensed under GPLv2.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; version 2 of the
- * License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
- * USA
 */
 
 #ifndef _MV_DEFS_H_
@@ -56,6 +40,7 @@ enum driver_configuration {
 	MVS_ATA_CMD_SZ		= 96,	/* SATA command table buffer size */
 	MVS_OAF_SZ		= 64,	/* Open address frame buffer size */
 	MVS_QUEUE_SIZE		= 64,	/* Support Queue depth */
+	MVS_RSVD_SLOTS		= 4,
 	MVS_SOC_CAN_QUEUE	= MVS_SOC_SLOTS - 2,
 };
 
@@ -230,7 +215,7 @@ enum hw_register_bits {
 
 	/* MVS_Px_INT_STAT, MVS_Px_INT_MASK (per-phy events) */
 	PHYEV_DEC_ERR		= (1U << 24),	/* Phy Decoding Error */
-	PHYEV_DCDR_ERR		= (1U << 23),	/* STP Deocder Error */
+	PHYEV_DCDR_ERR		= (1U << 23),	/* STP Decoder Error */
 	PHYEV_CRC_ERR		= (1U << 22),	/* STP CRC Error */
 	PHYEV_UNASSOC_FIS	= (1U << 19),	/* unassociated FIS rx'd */
 	PHYEV_AN		= (1U << 18),	/* SATA async notification */
@@ -362,7 +347,7 @@ enum sas_cmd_port_registers {
 	CMD_SATA_PORT_MEM_CTL0	= 0x158, /* SATA Port Memory Control 0 */
 	CMD_SATA_PORT_MEM_CTL1	= 0x15c, /* SATA Port Memory Control 1 */
 	CMD_XOR_MEM_BIST_CTL	= 0x160, /* XOR Memory BIST Control */
-	CMD_XOR_MEM_BIST_STAT	= 0x164, /* XOR Memroy BIST Status */
+	CMD_XOR_MEM_BIST_STAT	= 0x164, /* XOR Memory BIST Status */
 	CMD_DMA_MEM_BIST_CTL	= 0x168, /* DMA Memory BIST Control */
 	CMD_DMA_MEM_BIST_STAT	= 0x16c, /* DMA Memory BIST Status */
 	CMD_PORT_MEM_BIST_CTL	= 0x170, /* Port Memory BIST Control */
@@ -502,9 +487,4 @@ enum datapres_field {
 	SENSE_DATA	= 2,
 };
 
-/* define task management IU */
-struct mvs_tmf_task{
-	u8 tmf;
-	u16 tag_of_task_to_be_managed;
-};
 #endif

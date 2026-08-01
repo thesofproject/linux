@@ -1,18 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2013 Tomasz Figa <tomasz.figa at gmail.com>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  * Common Clock Framework support for all S3C64xx SoCs.
-*/
+ */
 
 #include <linux/slab.h>
 #include <linux/clk-provider.h>
-#include <linux/of.h>
+#include <linux/clk/samsung.h>
 #include <linux/of_address.h>
-#include <linux/syscore_ops.h>
 
 #include <dt-bindings/clock/samsung,s3c64xx-clock.h>
 
@@ -59,10 +55,6 @@
 static void __iomem *reg_base;
 static bool is_s3c6400;
 
-#ifdef CONFIG_PM_SLEEP
-static struct samsung_clk_reg_dump *s3c64xx_save_common;
-static struct samsung_clk_reg_dump *s3c64xx_save_soc;
-
 /*
  * List of controller registers to be saved and restored during
  * a suspend/resume cycle.
@@ -88,60 +80,6 @@ static unsigned long s3c6410_clk_regs[] __initdata = {
 	CLK_SRC2,
 	MEM0_GATE,
 };
-
-static int s3c64xx_clk_suspend(void)
-{
-	samsung_clk_save(reg_base, s3c64xx_save_common,
-				ARRAY_SIZE(s3c64xx_clk_regs));
-
-	if (!is_s3c6400)
-		samsung_clk_save(reg_base, s3c64xx_save_soc,
-					ARRAY_SIZE(s3c6410_clk_regs));
-
-	return 0;
-}
-
-static void s3c64xx_clk_resume(void)
-{
-	samsung_clk_restore(reg_base, s3c64xx_save_common,
-				ARRAY_SIZE(s3c64xx_clk_regs));
-
-	if (!is_s3c6400)
-		samsung_clk_restore(reg_base, s3c64xx_save_soc,
-					ARRAY_SIZE(s3c6410_clk_regs));
-}
-
-static struct syscore_ops s3c64xx_clk_syscore_ops = {
-	.suspend = s3c64xx_clk_suspend,
-	.resume = s3c64xx_clk_resume,
-};
-
-static void __init s3c64xx_clk_sleep_init(void)
-{
-	s3c64xx_save_common = samsung_clk_alloc_reg_dump(s3c64xx_clk_regs,
-						ARRAY_SIZE(s3c64xx_clk_regs));
-	if (!s3c64xx_save_common)
-		goto err_warn;
-
-	if (!is_s3c6400) {
-		s3c64xx_save_soc = samsung_clk_alloc_reg_dump(s3c6410_clk_regs,
-						ARRAY_SIZE(s3c6410_clk_regs));
-		if (!s3c64xx_save_soc)
-			goto err_soc;
-	}
-
-	register_syscore_ops(&s3c64xx_clk_syscore_ops);
-	return;
-
-err_soc:
-	kfree(s3c64xx_save_common);
-err_warn:
-	pr_warn("%s: failed to allocate sleep save data, no sleep support!\n",
-		__func__);
-}
-#else
-static void __init s3c64xx_clk_sleep_init(void) {}
-#endif
 
 /* List of parent clocks common for all S3C64xx SoCs. */
 PNAME(spi_mmc_p)	= { "mout_epll", "dout_mpll", "fin_pll", "clk27m" };
@@ -455,6 +393,7 @@ void __init s3c64xx_clk_init(struct device_node *np, unsigned long xtal_f,
 			     void __iomem *base)
 {
 	struct samsung_clk_provider *ctx;
+	struct clk_hw **hws;
 
 	reg_base = base;
 	is_s3c6400 = s3c6400;
@@ -465,7 +404,8 @@ void __init s3c64xx_clk_init(struct device_node *np, unsigned long xtal_f,
 			panic("%s: failed to map registers\n", __func__);
 	}
 
-	ctx = samsung_clk_init(np, reg_base, NR_CLKS);
+	ctx = samsung_clk_init(NULL, reg_base, NR_CLKS);
+	hws = ctx->clk_data.hws;
 
 	/* Register external clocks. */
 	if (!np)
@@ -473,7 +413,7 @@ void __init s3c64xx_clk_init(struct device_node *np, unsigned long xtal_f,
 
 	/* Register PLLs. */
 	samsung_clk_register_pll(ctx, s3c64xx_pll_clks,
-				ARRAY_SIZE(s3c64xx_pll_clks), reg_base);
+				ARRAY_SIZE(s3c64xx_pll_clks));
 
 	/* Register common internal clocks. */
 	samsung_clk_register_fixed_rate(ctx, s3c64xx_fixed_rate_clks,
@@ -508,15 +448,22 @@ void __init s3c64xx_clk_init(struct device_node *np, unsigned long xtal_f,
 
 	samsung_clk_register_alias(ctx, s3c64xx_clock_aliases,
 					ARRAY_SIZE(s3c64xx_clock_aliases));
-	s3c64xx_clk_sleep_init();
+
+	samsung_clk_sleep_init(reg_base, NULL, s3c64xx_clk_regs,
+			       ARRAY_SIZE(s3c64xx_clk_regs));
+	if (!is_s3c6400)
+		samsung_clk_sleep_init(reg_base, NULL, s3c6410_clk_regs,
+				       ARRAY_SIZE(s3c6410_clk_regs));
 
 	samsung_clk_of_add_provider(np, ctx);
 
 	pr_info("%s clocks: apll = %lu, mpll = %lu\n"
 		"\tepll = %lu, arm_clk = %lu\n",
 		is_s3c6400 ? "S3C6400" : "S3C6410",
-		_get_rate("fout_apll"),	_get_rate("fout_mpll"),
-		_get_rate("fout_epll"), _get_rate("armclk"));
+		clk_hw_get_rate(hws[MOUT_APLL]),
+		clk_hw_get_rate(hws[MOUT_MPLL]),
+		clk_hw_get_rate(hws[MOUT_EPLL]),
+		clk_hw_get_rate(hws[ARMCLK]));
 }
 
 static void __init s3c6400_clk_init(struct device_node *np)

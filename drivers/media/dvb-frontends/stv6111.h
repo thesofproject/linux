@@ -1,3 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Driver for the ST STV6111 tuner
+ *
+ * Copyright (C) 2014 Digital Devices GmbH
+ */
+
 #ifndef _STV6111_H_
 #define _STV6111_H_
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * pata_pdc202xx_old.c 	- Promise PDC202xx PATA for new ATA layer
  *			  (C) 2005 Red Hat Inc
@@ -37,8 +38,6 @@ static int pdc2026x_cable_detect(struct ata_port *ap)
 static void pdc202xx_exec_command(struct ata_port *ap,
 				  const struct ata_taskfile *tf)
 {
-	DPRINTK("ata%u: cmd 0x%X\n", ap->print_id, tf->command);
-
 	iowrite8(tf->command, ap->ioaddr.command_addr);
 	ndelay(400);
 }
@@ -79,7 +78,7 @@ static void pdc202xx_configure_piomode(struct ata_port *ap, struct ata_device *a
 {
 	struct pci_dev *pdev = to_pci_dev(ap->host->dev);
 	int port = 0x60 + 8 * ap->port_no + 4 * adev->devno;
-	static u16 pio_timing[5] = {
+	static const u16 pio_timing[5] = {
 		0x0913, 0x050C , 0x0308, 0x0206, 0x0104
 	};
 	u8 r_ap, r_bp;
@@ -114,7 +113,7 @@ static void pdc202xx_set_piomode(struct ata_port *ap, struct ata_device *adev)
 }
 
 /**
- *	pdc202xx_configure_dmamode	-	set DMA mode in chip
+ *	pdc202xx_set_dmamode	-	set DMA mode in chip
  *	@ap: ATA interface
  *	@adev: ATA device
  *
@@ -213,7 +212,7 @@ static void pdc2026x_bmdma_start(struct ata_queued_cmd *qc)
 }
 
 /**
- *	pdc2026x_bmdma_end		-	DMA engine stop
+ *	pdc2026x_bmdma_stop		-	DMA engine stop
  *	@qc: ATA command
  *
  *	After a DMA completes we need to put the clock back to 33MHz for
@@ -290,7 +289,7 @@ static int pdc2026x_check_atapi_dma(struct ata_queued_cmd *qc)
 	return 1;
 }
 
-static struct scsi_host_template pdc202xx_sht = {
+static const struct scsi_host_template pdc202xx_sht = {
 	ATA_BMDMA_SHT(DRV_NAME),
 };
 
@@ -363,13 +362,12 @@ static int pdc202xx_init_one(struct pci_dev *dev, const struct pci_device_id *id
 }
 
 static const struct pci_device_id pdc202xx[] = {
-	{ PCI_VDEVICE(PROMISE, PCI_DEVICE_ID_PROMISE_20246), 0 },
-	{ PCI_VDEVICE(PROMISE, PCI_DEVICE_ID_PROMISE_20262), 1 },
-	{ PCI_VDEVICE(PROMISE, PCI_DEVICE_ID_PROMISE_20263), 1 },
-	{ PCI_VDEVICE(PROMISE, PCI_DEVICE_ID_PROMISE_20265), 2 },
-	{ PCI_VDEVICE(PROMISE, PCI_DEVICE_ID_PROMISE_20267), 2 },
-
-	{ },
+	{ PCI_VDEVICE(PROMISE, PCI_DEVICE_ID_PROMISE_20246), .driver_data = 0 },
+	{ PCI_VDEVICE(PROMISE, PCI_DEVICE_ID_PROMISE_20262), .driver_data = 1 },
+	{ PCI_VDEVICE(PROMISE, PCI_DEVICE_ID_PROMISE_20263), .driver_data = 1 },
+	{ PCI_VDEVICE(PROMISE, PCI_DEVICE_ID_PROMISE_20265), .driver_data = 2 },
+	{ PCI_VDEVICE(PROMISE, PCI_DEVICE_ID_PROMISE_20267), .driver_data = 2 },
+	{ }
 };
 
 static struct pci_driver pdc202xx_pci_driver = {

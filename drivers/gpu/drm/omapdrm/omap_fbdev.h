@@ -1,20 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * omap_fbdev.h -- OMAP DRM FBDEV Compatibility
  *
  * Copyright (C) 2011 Texas Instruments
  * Author: Rob Clark <rob@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #ifndef __OMAPDRM_FBDEV_H__
@@ -22,15 +11,18 @@
 
 struct drm_device;
 struct drm_fb_helper;
+struct drm_fb_helper_surface_size;
 
 #ifdef CONFIG_DRM_FBDEV_EMULATION
-void omap_fbdev_init(struct drm_device *dev);
-void omap_fbdev_fini(struct drm_device *dev);
+int omap_fbdev_driver_fbdev_probe(struct drm_fb_helper *helper,
+				  struct drm_fb_helper_surface_size *sizes);
+#define OMAP_FBDEV_DRIVER_OPS \
+	.fbdev_probe = omap_fbdev_driver_fbdev_probe
+void omap_fbdev_setup(struct drm_device *dev);
 #else
-static inline void omap_fbdev_init(struct drm_device *dev)
-{
-}
-static inline void omap_fbdev_fini(struct drm_device *dev)
+#define OMAP_FBDEV_DRIVER_OPS \
+	.fbdev_probe = NULL
+static inline void omap_fbdev_setup(struct drm_device *dev)
 {
 }
 #endif

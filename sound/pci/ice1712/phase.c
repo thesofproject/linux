@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   ALSA driver for ICEnsemble ICE1724 (Envy24)
  *
  *   Lowlevel functions for Terratec PHASE 22
  *
  *	Copyright (c) 2005 Misha Zhilin <misha@epiphan.com>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 /* PHASE 22 overview:
@@ -139,7 +125,7 @@ static int phase22_init(struct snd_ice1712 *ice)
 	}
 
 	/* Initialize analog chips */
-	ice->akm = kzalloc(sizeof(struct snd_akm4xxx), GFP_KERNEL);
+	ice->akm = kzalloc_obj(struct snd_akm4xxx);
 	ak = ice->akm;
 	if (!ak)
 		return -ENOMEM;
@@ -171,7 +157,7 @@ static int phase22_add_controls(struct snd_ice1712 *ice)
 	return 0;
 }
 
-static unsigned char phase22_eeprom[] = {
+static const unsigned char phase22_eeprom[] = {
 	[ICE_EEP2_SYSCONF]     = 0x28,  /* clock 512, mpu 401,
 					spdif-in/1xADC, 1xDACs */
 	[ICE_EEP2_ACLINK]      = 0x80,	/* I2S */
@@ -188,7 +174,7 @@ static unsigned char phase22_eeprom[] = {
 	[ICE_EEP2_GPIO_STATE2] = 0x00,
 };
 
-static unsigned char phase28_eeprom[] = {
+static const unsigned char phase28_eeprom[] = {
 	[ICE_EEP2_SYSCONF]     = 0x2b,  /* clock 512, mpu401,
 					spdif-in/1xADC, 4xDACs */
 	[ICE_EEP2_ACLINK]      = 0x80,	/* I2S */
@@ -301,10 +287,9 @@ static int wm_pcm_mute_get(struct snd_kcontrol *kcontrol,
 {
 	struct snd_ice1712 *ice = snd_kcontrol_chip(kcontrol);
 
-	mutex_lock(&ice->gpio_mutex);
+	guard(mutex)(&ice->gpio_mutex);
 	ucontrol->value.integer.value[0] = (wm_get(ice, WM_MUTE) & 0x10) ?
 						0 : 1;
-	mutex_unlock(&ice->gpio_mutex);
 	return 0;
 }
 
@@ -426,13 +411,13 @@ static int phase28_init(struct snd_ice1712 *ice)
 	ice->num_total_dacs = 8;
 	ice->num_total_adcs = 2;
 
-	spec = kzalloc(sizeof(*spec), GFP_KERNEL);
+	spec = kzalloc_obj(*spec);
 	if (!spec)
 		return -ENOMEM;
 	ice->spec = spec;
 
 	/* Initialize analog chips */
-	ice->akm = kzalloc(sizeof(struct snd_akm4xxx), GFP_KERNEL);
+	ice->akm = kzalloc_obj(struct snd_akm4xxx);
 	ak = ice->akm;
 	if (!ak)
 		return -ENOMEM;
@@ -652,11 +637,10 @@ static int wm_pcm_vol_get(struct snd_kcontrol *kcontrol,
 	struct snd_ice1712 *ice = snd_kcontrol_chip(kcontrol);
 	unsigned short val;
 
-	mutex_lock(&ice->gpio_mutex);
+	guard(mutex)(&ice->gpio_mutex);
 	val = wm_get(ice, WM_DAC_DIG_MASTER_ATTEN) & 0xff;
 	val = val > PCM_MIN ? (val - PCM_MIN) : 0;
 	ucontrol->value.integer.value[0] = val;
-	mutex_unlock(&ice->gpio_mutex);
 	return 0;
 }
 
@@ -759,7 +743,7 @@ static int phase28_oversampling_put(struct snd_kcontrol *kcontrol,
 static const DECLARE_TLV_DB_SCALE(db_scale_wm_dac, -12700, 100, 1);
 static const DECLARE_TLV_DB_SCALE(db_scale_wm_pcm, -6400, 50, 1);
 
-static struct snd_kcontrol_new phase28_dac_controls[] = {
+static const struct snd_kcontrol_new phase28_dac_controls[] = {
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "Master Playback Switch",
@@ -874,7 +858,7 @@ static struct snd_kcontrol_new phase28_dac_controls[] = {
 	}
 };
 
-static struct snd_kcontrol_new wm_controls[] = {
+static const struct snd_kcontrol_new wm_controls[] = {
 	{
 		.iface = SNDRV_CTL_ELEM_IFACE_MIXER,
 		.name = "PCM Playback Switch",

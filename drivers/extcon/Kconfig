@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 menuconfig EXTCON
 	tristate "External Connector Class (extcon) support"
 	help
@@ -20,21 +21,25 @@ config EXTCON_ADC_JACK
 	help
 	  Say Y here to enable extcon device driver based on ADC values.
 
-config EXTCON_ARIZONA
-	tristate "Wolfson Arizona EXTCON support"
-	depends on MFD_ARIZONA && INPUT && SND_SOC
-	help
-	  Say Y here to enable support for external accessory detection
-	  with Wolfson Arizona devices. These are audio CODECs with
-	  advanced audio accessory detection support.
-
 config EXTCON_AXP288
 	tristate "X-Power AXP288 EXTCON support"
-	depends on MFD_AXP20X && USB_SUPPORT && X86
+	depends on MFD_AXP20X && USB_SUPPORT && X86 && ACPI && IOSF_MBI
 	select USB_ROLE_SWITCH
 	help
 	  Say Y here to enable support for USB peripheral detection
 	  and USB MUX switching by X-Power AXP288 PMIC.
+
+config EXTCON_FSA9480
+	tristate "FSA9480 EXTCON Support"
+	depends on INPUT && I2C
+	select IRQ_DOMAIN
+	select REGMAP_I2C
+	help
+	  If you say yes here you get support for the Fairchild Semiconductor
+	  FSA9480 microUSB switch and accessory detector chip. The FSA9480 is a USB
+	  port accessory detector and switch. The FSA9480 is fully controlled using
+	  I2C and enables USB data, stereo and mono audio, video, microphone
+	  and UART data to use a common connector port.
 
 config EXTCON_GPIO
 	tristate "GPIO extcon support"
@@ -56,9 +61,30 @@ config EXTCON_INTEL_INT3496
 config EXTCON_INTEL_CHT_WC
 	tristate "Intel Cherrytrail Whiskey Cove PMIC extcon driver"
 	depends on INTEL_SOC_PMIC_CHTWC
+	depends on USB_SUPPORT
+	depends on POWER_SUPPLY
+	select USB_ROLE_SWITCH
 	help
 	  Say Y here to enable extcon support for charger detection / control
 	  on the Intel Cherrytrail Whiskey Cove PMIC.
+
+config EXTCON_INTEL_MRFLD
+	tristate "Intel Merrifield Basin Cove PMIC extcon driver"
+	depends on INTEL_SOC_PMIC_MRFLD
+	help
+	  Say Y here to enable extcon support for charger detection / control
+	  on the Intel Merrifield Basin Cove PMIC.
+
+config EXTCON_LC824206XA
+	tristate "LC824206XA extcon Support"
+	depends on I2C
+	depends on POWER_SUPPLY
+	help
+	  Say Y here to enable support for the ON Semiconductor LC824206XA
+	  microUSB switch and accessory detector chip. The LC824206XA is a USB
+	  port accessory detector and switch. The LC824206XA is fully controlled
+	  using I2C and enables USB data, stereo and mono audio, video,
+	  microphone and UART data to use a common connector port.
 
 config EXTCON_MAX14577
 	tristate "Maxim MAX14577/77836 EXTCON Support"
@@ -101,11 +127,25 @@ config EXTCON_MAX77843
 
 config EXTCON_MAX8997
 	tristate "Maxim MAX8997 EXTCON Support"
-	depends on MFD_MAX8997 && IRQ_DOMAIN
+	depends on MFD_MAX8997
+	select IRQ_DOMAIN
 	help
 	  If you say yes here you get support for the MUIC device of
 	  Maxim MAX8997 PMIC. The MAX8997 MUIC is a USB port accessory
 	  detector and switch.
+
+config EXTCON_MAX14526
+	tristate "Maxim MAX14526 EXTCON Support"
+	depends on I2C
+	select IRQ_DOMAIN
+	select REGMAP_I2C
+	help
+	  If you say yes here you get support for the Maxim MAX14526
+	  MUIC device. The MAX14526 MUIC is a USB port accessory
+	  detector and switch. The MAX14526 is designed to simplify
+	  interface requirements on portable devices by multiplexing
+	  common inputs (USB, UART, Microphone, Stereo Audio and
+	  Composite Video) on a single micro/mini USB connector.
 
 config EXTCON_PALMAS
 	tristate "Palmas USB EXTCON support"
@@ -113,6 +153,16 @@ config EXTCON_PALMAS
 	help
 	  Say Y here to enable support for USB peripheral and USB host
 	  detection by palmas usb.
+
+config EXTCON_PTN5150
+	tristate "NXP PTN5150 CC LOGIC USB EXTCON support"
+	depends on I2C && (GPIOLIB || COMPILE_TEST)
+	depends on USB_ROLE_SWITCH || !USB_ROLE_SWITCH
+	depends on TYPEC || !TYPEC
+	select REGMAP_I2C
+	help
+	  Say Y here to enable support for USB peripheral and USB host
+	  detection by NXP PTN5150 CC (Configuration Channel) logic chip.
 
 config EXTCON_QCOM_SPMI_MISC
 	tristate "Qualcomm USB extcon support"
@@ -134,7 +184,7 @@ config EXTCON_RT8973A
 	  from abnormal high input voltage (up to 28V).
 
 config EXTCON_SM5502
-	tristate "Silicon Mitus SM5502 EXTCON support"
+	tristate "Silicon Mitus SM5502/SM5504/SM5703 EXTCON support"
 	depends on I2C
 	select IRQ_DOMAIN
 	select REGMAP_I2C
@@ -153,9 +203,29 @@ config EXTCON_USB_GPIO
 
 config EXTCON_USBC_CROS_EC
 	tristate "ChromeOS Embedded Controller EXTCON support"
-	depends on MFD_CROS_EC
+	depends on CROS_EC
 	help
 	  Say Y here to enable USB Type C cable detection extcon support when
 	  using Chrome OS EC based USB Type-C ports.
+
+config EXTCON_USBC_TUSB320
+	tristate "TI TUSB320 USB-C extcon support"
+	depends on I2C && TYPEC
+	select REGMAP_I2C
+	depends on USB_ROLE_SWITCH || !USB_ROLE_SWITCH
+	help
+	  Say Y here to enable support for USB Type C cable detection extcon
+	  support using a TUSB320.
+
+config EXTCON_RTK_TYPE_C
+	tristate "Realtek RTD SoC extcon Type-C Driver"
+	depends on ARCH_REALTEK || COMPILE_TEST
+	depends on TYPEC
+	select USB_COMMON
+	help
+	  Say Y here to enable extcon support for USB Type C cable detection
+	  when using the Realtek RTD SoC USB Type-C port.
+	  The DHC (Digital Home Hub) RTD series SoC contains a type c module.
+	  This driver will detect the status of the type-c port.
 
 endif

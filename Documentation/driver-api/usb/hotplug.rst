@@ -5,7 +5,7 @@ Linux Hotplugging
 =================
 
 
-In hotpluggable busses like USB (and Cardbus PCI), end-users plug devices
+In hotpluggable buses like USB (and Cardbus PCI), end-users plug devices
 into the bus with power on.  In most cases, users expect the devices to become
 immediately usable.  That means the system must do many things, including:
 
@@ -122,7 +122,7 @@ and their quirks, might have a MODULE_DEVICE_TABLE like this::
 Most USB device drivers should pass these tables to the USB subsystem as
 well as to the module management subsystem.  Not all, though: some driver
 frameworks connect using interfaces layered over USB, and so they won't
-need such a struct :c:type:`usb_driver`.
+need such a struct usb_driver.
 
 Drivers that connect directly to the USB subsystem should be declared
 something like this::

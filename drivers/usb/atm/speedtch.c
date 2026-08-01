@@ -13,6 +13,7 @@
 #include <linux/device.h>
 #include <linux/errno.h>
 #include <linux/firmware.h>
+#include <linux/hex.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -559,8 +560,9 @@ static void speedtch_check_status(struct work_struct *work)
 
 static void speedtch_status_poll(struct timer_list *t)
 {
-	struct speedtch_instance_data *instance = from_timer(instance, t,
-						             status_check_timer);
+	struct speedtch_instance_data *instance = timer_container_of(instance,
+								     t,
+								     status_check_timer);
 
 	schedule_work(&instance->status_check_work);
 
@@ -573,8 +575,9 @@ static void speedtch_status_poll(struct timer_list *t)
 
 static void speedtch_resubmit_int(struct timer_list *t)
 {
-	struct speedtch_instance_data *instance = from_timer(instance, t,
-							     resubmit_timer);
+	struct speedtch_instance_data *instance = timer_container_of(instance,
+								     t,
+								     resubmit_timer);
 	struct urb *int_urb = instance->int_urb;
 	int ret;
 
@@ -612,7 +615,7 @@ static void speedtch_handle_int(struct urb *int_urb)
 	}
 
 	if ((count == 6) && !memcmp(up_int, instance->int_data, 6)) {
-		del_timer(&instance->status_check_timer);
+		timer_delete(&instance->status_check_timer);
 		atm_info(usbatm, "DSL line goes up\n");
 	} else if ((count == 6) && !memcmp(down_int, instance->int_data, 6)) {
 		atm_info(usbatm, "DSL line goes down\n");
@@ -688,7 +691,7 @@ static void speedtch_atm_stop(struct usbatm_data *usbatm, struct atm_dev *atm_de
 
 	atm_dbg(usbatm, "%s entered\n", __func__);
 
-	del_timer_sync(&instance->status_check_timer);
+	timer_delete_sync(&instance->status_check_timer);
 
 	/*
 	 * Since resubmit_timer and int_urb can schedule themselves and
@@ -697,14 +700,14 @@ static void speedtch_atm_stop(struct usbatm_data *usbatm, struct atm_dev *atm_de
 	instance->int_urb = NULL; /* signal shutdown */
 	mb();
 	usb_kill_urb(int_urb);
-	del_timer_sync(&instance->resubmit_timer);
+	timer_delete_sync(&instance->resubmit_timer);
 	/*
 	 * At this point, speedtch_handle_int and speedtch_resubmit_int
 	 * can run or be running, but instance->int_urb == NULL means that
 	 * they will not reschedule
 	 */
 	usb_kill_urb(int_urb);
-	del_timer_sync(&instance->resubmit_timer);
+	timer_delete_sync(&instance->resubmit_timer);
 	usb_free_urb(int_urb);
 
 	flush_work(&instance->status_check_work);
@@ -801,7 +804,7 @@ static int speedtch_bind(struct usbatm_data *usbatm,
 		}
 	}
 
-	instance = kzalloc(sizeof(*instance), GFP_KERNEL);
+	instance = kzalloc_obj(*instance);
 
 	if (!instance) {
 		ret = -ENOMEM;

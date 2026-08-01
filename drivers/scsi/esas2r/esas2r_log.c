@@ -75,7 +75,7 @@ static char event_buffer[EVENT_LOG_BUFF_SIZE];
 /* A lock to protect the shared buffer used for formatting messages. */
 static DEFINE_SPINLOCK(event_buffer_lock);
 
-/**
+/*
  * translates an esas2r-defined logging event level to a kernel logging level.
  *
  * @param [in] level the esas2r-defined logging event level to translate
@@ -101,7 +101,7 @@ static const char *translate_esas2r_event_level_to_kernel(const long level)
 	}
 }
 
-/**
+/*
  * the master logging function.  this function will format the message as
  * outlined by the formatting string, the input device information and the
  * substitution arguments and output the resulting string to the system log.
@@ -113,10 +113,9 @@ static const char *translate_esas2r_event_level_to_kernel(const long level)
  *
  * @return 0 on success, or -1 if an error occurred.
  */
-static int esas2r_log_master(const long level,
-			     const struct device *dev,
-			     const char *format,
-			     va_list args)
+static __printf(3, 0)
+int esas2r_log_master(const long level, const struct device *dev,
+		      const char *format, va_list args)
 {
 	if (level <= event_log_level) {
 		unsigned long flags = 0;
@@ -170,7 +169,7 @@ static int esas2r_log_master(const long level,
 	return 0;
 }
 
-/**
+/*
  * formats and logs a message to the system log.
  *
  * @param [in] level  the event level of the message
@@ -193,7 +192,7 @@ int esas2r_log(const long level, const char *format, ...)
 	return retval;
 }
 
-/**
+/*
  * formats and logs a message to the system log.  this message will include
  * device information.
  *
@@ -221,7 +220,7 @@ int esas2r_log_dev(const long level,
 	return retval;
 }
 
-/**
+/*
  * formats and logs a message to the system log.  this message will include
  * device information.
  *

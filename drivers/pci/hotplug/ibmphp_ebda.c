@@ -57,7 +57,7 @@ static int ebda_rio_table(void);
 
 static struct ebda_hpc_list * __init alloc_ebda_hpc_list(void)
 {
-	return kzalloc(sizeof(struct ebda_hpc_list), GFP_KERNEL);
+	return kzalloc_obj(struct ebda_hpc_list);
 }
 
 static struct controller *alloc_ebda_hpc(u32 slot_count, u32 bus_count)
@@ -66,16 +66,16 @@ static struct controller *alloc_ebda_hpc(u32 slot_count, u32 bus_count)
 	struct ebda_hpc_slot *slots;
 	struct ebda_hpc_bus *buses;
 
-	controller = kzalloc(sizeof(struct controller), GFP_KERNEL);
+	controller = kzalloc_obj(struct controller);
 	if (!controller)
 		goto error;
 
-	slots = kcalloc(slot_count, sizeof(struct ebda_hpc_slot), GFP_KERNEL);
+	slots = kzalloc_objs(struct ebda_hpc_slot, slot_count);
 	if (!slots)
 		goto error_contr;
 	controller->slots = slots;
 
-	buses = kcalloc(bus_count, sizeof(struct ebda_hpc_bus), GFP_KERNEL);
+	buses = kzalloc_objs(struct ebda_hpc_bus, bus_count);
 	if (!buses)
 		goto error_slots;
 	controller->buses = buses;
@@ -98,12 +98,12 @@ static void free_ebda_hpc(struct controller *controller)
 
 static struct ebda_rsrc_list * __init alloc_ebda_rsrc_list(void)
 {
-	return kzalloc(sizeof(struct ebda_rsrc_list), GFP_KERNEL);
+	return kzalloc_obj(struct ebda_rsrc_list);
 }
 
 static struct ebda_pci_rsrc *alloc_ebda_pci_rsrc(void)
 {
-	return kzalloc(sizeof(struct ebda_pci_rsrc), GFP_KERNEL);
+	return kzalloc_obj(struct ebda_pci_rsrc);
 }
 
 static void __init print_bus_info(void)
@@ -352,7 +352,7 @@ int __init ibmphp_access_ebda(void)
 			debug("now enter io table ---\n");
 			debug("rio blk id: %x\n", blk_id);
 
-			rio_table_ptr = kzalloc(sizeof(struct rio_table_hdr), GFP_KERNEL);
+			rio_table_ptr = kzalloc_obj(struct rio_table_hdr);
 			if (!rio_table_ptr) {
 				rc = -ENOMEM;
 				goto out;
@@ -408,7 +408,7 @@ static int __init ebda_rio_table(void)
 
 	// we do concern about rio details
 	for (i = 0; i < rio_table_ptr->riodev_count; i++) {
-		rio_detail_ptr = kzalloc(sizeof(struct rio_detail), GFP_KERNEL);
+		rio_detail_ptr = kzalloc_obj(struct rio_detail);
 		if (!rio_detail_ptr)
 			return -ENOMEM;
 		rio_detail_ptr->rio_node_id = readb(io_mem + offset);
@@ -461,7 +461,7 @@ static int __init combine_wpg_for_chassis(void)
 	list_for_each_entry(rio_detail_ptr, &rio_vg_head, rio_detail_list) {
 		opt_rio_ptr = search_opt_vg(rio_detail_ptr->chassis_num);
 		if (!opt_rio_ptr) {
-			opt_rio_ptr = kzalloc(sizeof(struct opt_rio), GFP_KERNEL);
+			opt_rio_ptr = kzalloc_obj(struct opt_rio);
 			if (!opt_rio_ptr)
 				return -ENOMEM;
 			opt_rio_ptr->rio_type = rio_detail_ptr->rio_type;
@@ -499,7 +499,7 @@ static int combine_wpg_for_expansion(void)
 	list_for_each_entry(rio_detail_ptr, &rio_lo_head, rio_detail_list) {
 		opt_rio_lo_ptr = search_opt_lo(rio_detail_ptr->chassis_num);
 		if (!opt_rio_lo_ptr) {
-			opt_rio_lo_ptr = kzalloc(sizeof(struct opt_rio_lo), GFP_KERNEL);
+			opt_rio_lo_ptr = kzalloc_obj(struct opt_rio_lo);
 			if (!opt_rio_lo_ptr)
 				return -ENOMEM;
 			opt_rio_lo_ptr->rio_type = rio_detail_ptr->rio_type;
@@ -666,56 +666,9 @@ static int fillslotinfo(struct hotplug_slot *hotplug_slot)
 	struct slot *slot;
 	int rc = 0;
 
-	if (!hotplug_slot || !hotplug_slot->private)
-		return -EINVAL;
-
-	slot = hotplug_slot->private;
+	slot = to_slot(hotplug_slot);
 	rc = ibmphp_hpc_readslot(slot, READ_ALLSTAT, NULL);
-	if (rc)
-		return rc;
-
-	// power - enabled:1  not:0
-	hotplug_slot->info->power_status = SLOT_POWER(slot->status);
-
-	// attention - off:0, on:1, blinking:2
-	hotplug_slot->info->attention_status = SLOT_ATTN(slot->status, slot->ext_status);
-
-	// latch - open:1 closed:0
-	hotplug_slot->info->latch_status = SLOT_LATCH(slot->status);
-
-	// pci board - present:1 not:0
-	if (SLOT_PRESENT(slot->status))
-		hotplug_slot->info->adapter_status = 1;
-	else
-		hotplug_slot->info->adapter_status = 0;
-/*
-	if (slot->bus_on->supported_bus_mode
-		&& (slot->bus_on->supported_speed == BUS_SPEED_66))
-		hotplug_slot->info->max_bus_speed_status = BUS_SPEED_66PCIX;
-	else
-		hotplug_slot->info->max_bus_speed_status = slot->bus_on->supported_speed;
-*/
-
 	return rc;
-}
-
-static void release_slot(struct hotplug_slot *hotplug_slot)
-{
-	struct slot *slot;
-
-	if (!hotplug_slot || !hotplug_slot->private)
-		return;
-
-	slot = hotplug_slot->private;
-	kfree(slot->hotplug_slot->info);
-	kfree(slot->hotplug_slot);
-	slot->ctrl = NULL;
-	slot->bus_on = NULL;
-
-	/* we don't want to actually remove the resources, since free_resources will do just that */
-	ibmphp_unconfigure_card(&slot, -1);
-
-	kfree(slot);
 }
 
 static struct pci_driver ibmphp_driver;
@@ -731,7 +684,6 @@ static int __init ebda_rsrc_controller(void)
 	u8 ctlr_id, temp, bus_index;
 	u16 ctlr, slot, bus;
 	u16 slot_num, bus_num, index;
-	struct hotplug_slot *hp_slot_ptr;
 	struct controller *hpc_ptr;
 	struct ebda_hpc_bus *bus_ptr;
 	struct ebda_hpc_slot *slot_ptr;
@@ -762,8 +714,7 @@ static int __init ebda_rsrc_controller(void)
 		/* init hpc structure */
 		hpc_ptr = alloc_ebda_hpc(slot_num, bus_num);
 		if (!hpc_ptr) {
-			rc = -ENOMEM;
-			goto error_no_hpc;
+			return -ENOMEM;
 		}
 		hpc_ptr->ctlr_id = ctlr_id;
 		hpc_ptr->ctlr_relative_id = ctlr;
@@ -787,10 +738,10 @@ static int __init ebda_rsrc_controller(void)
 
 			bus_info_ptr2 = ibmphp_find_same_bus_num(slot_ptr->slot_bus_num);
 			if (!bus_info_ptr2) {
-				bus_info_ptr1 = kzalloc(sizeof(struct bus_info), GFP_KERNEL);
+				bus_info_ptr1 = kzalloc_obj(struct bus_info);
 				if (!bus_info_ptr1) {
 					rc = -ENOMEM;
-					goto error_no_hp_slot;
+					goto error_no_slot;
 				}
 				bus_info_ptr1->slot_min = slot_ptr->slot_num;
 				bus_info_ptr1->slot_max = slot_ptr->slot_num;
@@ -861,7 +812,7 @@ static int __init ebda_rsrc_controller(void)
 						     (hpc_ptr->u.isa_ctlr.io_end - hpc_ptr->u.isa_ctlr.io_start + 1),
 						     "ibmphp")) {
 					rc = -ENODEV;
-					goto error_no_hp_slot;
+					goto error_no_slot;
 				}
 				hpc_ptr->irq = readb(io_mem + addr + 4);
 				addr += 5;
@@ -876,7 +827,7 @@ static int __init ebda_rsrc_controller(void)
 				break;
 			default:
 				rc = -ENODEV;
-				goto error_no_hp_slot;
+				goto error_no_slot;
 		}
 
 		//reorganize chassis' linked list
@@ -889,20 +840,7 @@ static int __init ebda_rsrc_controller(void)
 
 		// register slots with hpc core as well as create linked list of ibm slot
 		for (index = 0; index < hpc_ptr->slot_count; index++) {
-
-			hp_slot_ptr = kzalloc(sizeof(*hp_slot_ptr), GFP_KERNEL);
-			if (!hp_slot_ptr) {
-				rc = -ENOMEM;
-				goto error_no_hp_slot;
-			}
-
-			hp_slot_ptr->info = kzalloc(sizeof(struct hotplug_slot_info), GFP_KERNEL);
-			if (!hp_slot_ptr->info) {
-				rc = -ENOMEM;
-				goto error_no_hp_info;
-			}
-
-			tmp_slot = kzalloc(sizeof(*tmp_slot), GFP_KERNEL);
+			tmp_slot = kzalloc_obj(*tmp_slot);
 			if (!tmp_slot) {
 				rc = -ENOMEM;
 				goto error_no_slot;
@@ -928,7 +866,6 @@ static int __init ebda_rsrc_controller(void)
 
 			bus_info_ptr1 = ibmphp_find_same_bus_num(hpc_ptr->slots[index].slot_bus_num);
 			if (!bus_info_ptr1) {
-				kfree(tmp_slot);
 				rc = -ENODEV;
 				goto error;
 			}
@@ -938,23 +875,19 @@ static int __init ebda_rsrc_controller(void)
 
 			tmp_slot->ctlr_index = hpc_ptr->slots[index].ctl_index;
 			tmp_slot->number = hpc_ptr->slots[index].slot_num;
-			tmp_slot->hotplug_slot = hp_slot_ptr;
 
-			hp_slot_ptr->private = tmp_slot;
-			hp_slot_ptr->release = release_slot;
-
-			rc = fillslotinfo(hp_slot_ptr);
+			rc = fillslotinfo(&tmp_slot->hotplug_slot);
 			if (rc)
 				goto error;
 
-			rc = ibmphp_init_devno((struct slot **) &hp_slot_ptr->private);
+			rc = ibmphp_init_devno(&tmp_slot);
 			if (rc)
 				goto error;
-			hp_slot_ptr->ops = &ibmphp_hotplug_slot_ops;
+			tmp_slot->hotplug_slot.ops = &ibmphp_hotplug_slot_ops;
 
 			// end of registering ibm slot with hotplug core
 
-			list_add(&((struct slot *)(hp_slot_ptr->private))->ibm_slot_list, &ibmphp_slot_head);
+			list_add(&tmp_slot->ibm_slot_list, &ibmphp_slot_head);
 		}
 
 		print_bus_info();
@@ -964,7 +897,7 @@ static int __init ebda_rsrc_controller(void)
 
 	list_for_each_entry(tmp_slot, &ibmphp_slot_head, ibm_slot_list) {
 		snprintf(name, SLOT_NAME_SIZE, "%s", create_file_name(tmp_slot));
-		pci_hp_register(tmp_slot->hotplug_slot,
+		pci_hp_register(&tmp_slot->hotplug_slot,
 			pci_find_bus(0, tmp_slot->bus), tmp_slot->device, name);
 	}
 
@@ -973,15 +906,9 @@ static int __init ebda_rsrc_controller(void)
 	return 0;
 
 error:
-	kfree(hp_slot_ptr->private);
+	kfree(tmp_slot);
 error_no_slot:
-	kfree(hp_slot_ptr->info);
-error_no_hp_info:
-	kfree(hp_slot_ptr);
-error_no_hp_slot:
 	free_ebda_hpc(hpc_ptr);
-error_no_hpc:
-	iounmap(io_mem);
 	return rc;
 }
 

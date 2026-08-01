@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel Low Power Subsystem PWM controller driver
  *
@@ -7,18 +8,18 @@
  * Author: Chang Rebecca Swee Fun <rebecca.swee.fun.chang@intel.com>
  * Author: Chew Chiau Ee <chiau.ee.chew@intel.com>
  * Author: Alan Cox <alan@linux.intel.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
+#define DEFAULT_SYMBOL_NAMESPACE "PWM_LPSS"
+
+#include <linux/bits.h>
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/pwm.h>
 #include <linux/time.h>
 
 #include "pwm-lpss.h"
@@ -27,20 +28,48 @@
 #define PWM_ENABLE			BIT(31)
 #define PWM_SW_UPDATE			BIT(30)
 #define PWM_BASE_UNIT_SHIFT		8
-#define PWM_ON_TIME_DIV_MASK		0x000000ff
+#define PWM_ON_TIME_DIV_MASK		GENMASK(7, 0)
 
 /* Size of each PWM register space if multiple */
 #define PWM_SIZE			0x400
 
-struct pwm_lpss_chip {
-	struct pwm_chip chip;
-	void __iomem *regs;
-	const struct pwm_lpss_boardinfo *info;
+/* BayTrail */
+const struct pwm_lpss_boardinfo pwm_lpss_byt_info = {
+	.clk_rate = 25000000,
+	.npwm = 1,
+	.base_unit_bits = 16,
 };
+EXPORT_SYMBOL_GPL(pwm_lpss_byt_info);
+
+/* Braswell */
+const struct pwm_lpss_boardinfo pwm_lpss_bsw_info = {
+	.clk_rate = 19200000,
+	.npwm = 1,
+	.base_unit_bits = 16,
+	.other_devices_aml_touches_pwm_regs = true,
+};
+EXPORT_SYMBOL_GPL(pwm_lpss_bsw_info);
+
+/* Broxton */
+const struct pwm_lpss_boardinfo pwm_lpss_bxt_info = {
+	.clk_rate = 19200000,
+	.npwm = 4,
+	.base_unit_bits = 22,
+	.bypass = true,
+};
+EXPORT_SYMBOL_GPL(pwm_lpss_bxt_info);
+
+/* Tangier */
+const struct pwm_lpss_boardinfo pwm_lpss_tng_info = {
+	.clk_rate = 19200000,
+	.npwm = 4,
+	.base_unit_bits = 22,
+};
+EXPORT_SYMBOL_GPL(pwm_lpss_tng_info);
 
 static inline struct pwm_lpss_chip *to_lpwm(struct pwm_chip *chip)
 {
-	return container_of(chip, struct pwm_lpss_chip, chip);
+	return pwmchip_get_drvdata(chip);
 }
 
 static inline u32 pwm_lpss_read(const struct pwm_device *pwm)
@@ -78,14 +107,19 @@ static int pwm_lpss_wait_for_update(struct pwm_device *pwm)
 	 */
 	err = readl_poll_timeout(addr, val, !(val & PWM_SW_UPDATE), 40, ms);
 	if (err)
-		dev_err(pwm->chip->dev, "PWM_SW_UPDATE was not cleared\n");
+		dev_err(pwmchip_parent(pwm->chip), "PWM_SW_UPDATE was not cleared\n");
 
 	return err;
 }
 
 static inline int pwm_lpss_is_updating(struct pwm_device *pwm)
 {
-	return (pwm_lpss_read(pwm) & PWM_SW_UPDATE) ? -EBUSY : 0;
+	if (pwm_lpss_read(pwm) & PWM_SW_UPDATE) {
+		dev_err(pwmchip_parent(pwm->chip), "PWM_SW_UPDATE is still set, skipping update\n");
+		return -EBUSY;
+	}
+
+	return 0;
 }
 
 static void pwm_lpss_prepare(struct pwm_lpss_chip *lpwm, struct pwm_device *pwm,
@@ -102,10 +136,12 @@ static void pwm_lpss_prepare(struct pwm_lpss_chip *lpwm, struct pwm_device *pwm,
 	 * The equation is:
 	 * base_unit = round(base_unit_range * freq / c)
 	 */
-	base_unit_range = BIT(lpwm->info->base_unit_bits) - 1;
+	base_unit_range = BIT(lpwm->info->base_unit_bits);
 	freq *= base_unit_range;
 
 	base_unit = DIV_ROUND_CLOSEST_ULL(freq, c);
+	/* base_unit must not be 0 and we also want to avoid overflowing it */
+	base_unit = clamp_val(base_unit, 1, base_unit_range - 1);
 
 	on_time_div = 255ULL * duty_ns;
 	do_div(on_time_div, period_ns);
@@ -113,11 +149,12 @@ static void pwm_lpss_prepare(struct pwm_lpss_chip *lpwm, struct pwm_device *pwm,
 
 	ctrl = pwm_lpss_read(pwm);
 	ctrl &= ~PWM_ON_TIME_DIV_MASK;
-	ctrl &= ~(base_unit_range << PWM_BASE_UNIT_SHIFT);
-	base_unit &= base_unit_range;
+	ctrl &= ~((base_unit_range - 1) << PWM_BASE_UNIT_SHIFT);
 	ctrl |= (u32) base_unit << PWM_BASE_UNIT_SHIFT;
 	ctrl |= on_time_div;
+
 	pwm_lpss_write(pwm, ctrl);
+	pwm_lpss_write(pwm, ctrl | PWM_SW_UPDATE);
 }
 
 static inline void pwm_lpss_cond_enable(struct pwm_device *pwm, bool cond)
@@ -126,91 +163,130 @@ static inline void pwm_lpss_cond_enable(struct pwm_device *pwm, bool cond)
 		pwm_lpss_write(pwm, pwm_lpss_read(pwm) | PWM_ENABLE);
 }
 
+static int pwm_lpss_prepare_enable(struct pwm_lpss_chip *lpwm,
+				   struct pwm_device *pwm,
+				   const struct pwm_state *state)
+{
+	int ret;
+
+	ret = pwm_lpss_is_updating(pwm);
+	if (ret)
+		return ret;
+
+	pwm_lpss_prepare(lpwm, pwm, state->duty_cycle, state->period);
+	pwm_lpss_cond_enable(pwm, lpwm->info->bypass == false);
+	ret = pwm_lpss_wait_for_update(pwm);
+	if (ret)
+		return ret;
+
+	pwm_lpss_cond_enable(pwm, lpwm->info->bypass == true);
+	return 0;
+}
+
 static int pwm_lpss_apply(struct pwm_chip *chip, struct pwm_device *pwm,
-			  struct pwm_state *state)
+			  const struct pwm_state *state)
 {
 	struct pwm_lpss_chip *lpwm = to_lpwm(chip);
-	int ret;
+	int ret = 0;
 
 	if (state->enabled) {
 		if (!pwm_is_enabled(pwm)) {
-			pm_runtime_get_sync(chip->dev);
-			ret = pwm_lpss_is_updating(pwm);
-			if (ret) {
-				pm_runtime_put(chip->dev);
-				return ret;
-			}
-			pwm_lpss_prepare(lpwm, pwm, state->duty_cycle, state->period);
-			pwm_lpss_write(pwm, pwm_lpss_read(pwm) | PWM_SW_UPDATE);
-			pwm_lpss_cond_enable(pwm, lpwm->info->bypass == false);
-			ret = pwm_lpss_wait_for_update(pwm);
-			if (ret) {
-				pm_runtime_put(chip->dev);
-				return ret;
-			}
-			pwm_lpss_cond_enable(pwm, lpwm->info->bypass == true);
-		} else {
-			ret = pwm_lpss_is_updating(pwm);
+			pm_runtime_get_sync(pwmchip_parent(chip));
+			ret = pwm_lpss_prepare_enable(lpwm, pwm, state);
 			if (ret)
-				return ret;
-			pwm_lpss_prepare(lpwm, pwm, state->duty_cycle, state->period);
-			pwm_lpss_write(pwm, pwm_lpss_read(pwm) | PWM_SW_UPDATE);
-			return pwm_lpss_wait_for_update(pwm);
+				pm_runtime_put(pwmchip_parent(chip));
+		} else {
+			ret = pwm_lpss_prepare_enable(lpwm, pwm, state);
 		}
 	} else if (pwm_is_enabled(pwm)) {
 		pwm_lpss_write(pwm, pwm_lpss_read(pwm) & ~PWM_ENABLE);
-		pm_runtime_put(chip->dev);
+		pm_runtime_put(pwmchip_parent(chip));
 	}
+
+	return ret;
+}
+
+static int pwm_lpss_get_state(struct pwm_chip *chip, struct pwm_device *pwm,
+			      struct pwm_state *state)
+{
+	struct pwm_lpss_chip *lpwm = to_lpwm(chip);
+	unsigned long base_unit_range;
+	unsigned long long base_unit, freq, on_time_div;
+	u32 ctrl;
+
+	pm_runtime_get_sync(pwmchip_parent(chip));
+
+	base_unit_range = BIT(lpwm->info->base_unit_bits);
+
+	ctrl = pwm_lpss_read(pwm);
+	on_time_div = 255 - (ctrl & PWM_ON_TIME_DIV_MASK);
+	base_unit = (ctrl >> PWM_BASE_UNIT_SHIFT) & (base_unit_range - 1);
+
+	freq = base_unit * lpwm->info->clk_rate;
+	do_div(freq, base_unit_range);
+	if (freq == 0)
+		state->period = NSEC_PER_SEC;
+	else
+		state->period = NSEC_PER_SEC / (unsigned long)freq;
+
+	on_time_div *= state->period;
+	do_div(on_time_div, 255);
+	state->duty_cycle = on_time_div;
+
+	state->polarity = PWM_POLARITY_NORMAL;
+	state->enabled = !!(ctrl & PWM_ENABLE);
+
+	pm_runtime_put(pwmchip_parent(chip));
 
 	return 0;
 }
 
 static const struct pwm_ops pwm_lpss_ops = {
 	.apply = pwm_lpss_apply,
-	.owner = THIS_MODULE,
+	.get_state = pwm_lpss_get_state,
 };
 
-struct pwm_lpss_chip *pwm_lpss_probe(struct device *dev, struct resource *r,
+struct pwm_chip *devm_pwm_lpss_probe(struct device *dev, void __iomem *base,
 				     const struct pwm_lpss_boardinfo *info)
 {
 	struct pwm_lpss_chip *lpwm;
+	struct pwm_chip *chip;
 	unsigned long c;
-	int ret;
+	int i, ret;
+	u32 ctrl;
 
-	lpwm = devm_kzalloc(dev, sizeof(*lpwm), GFP_KERNEL);
-	if (!lpwm)
-		return ERR_PTR(-ENOMEM);
+	if (WARN_ON(info->npwm > LPSS_MAX_PWMS))
+		return ERR_PTR(-ENODEV);
 
-	lpwm->regs = devm_ioremap_resource(dev, r);
-	if (IS_ERR(lpwm->regs))
-		return ERR_CAST(lpwm->regs);
+	chip = devm_pwmchip_alloc(dev, info->npwm, sizeof(*lpwm));
+	if (IS_ERR(chip))
+		return chip;
+	lpwm = to_lpwm(chip);
 
+	lpwm->regs = base;
 	lpwm->info = info;
 
 	c = lpwm->info->clk_rate;
 	if (!c)
 		return ERR_PTR(-EINVAL);
 
-	lpwm->chip.dev = dev;
-	lpwm->chip.ops = &pwm_lpss_ops;
-	lpwm->chip.base = -1;
-	lpwm->chip.npwm = info->npwm;
+	chip->ops = &pwm_lpss_ops;
 
-	ret = pwmchip_add(&lpwm->chip);
+	ret = devm_pwmchip_add(dev, chip);
 	if (ret) {
 		dev_err(dev, "failed to add PWM chip: %d\n", ret);
 		return ERR_PTR(ret);
 	}
 
-	return lpwm;
-}
-EXPORT_SYMBOL_GPL(pwm_lpss_probe);
+	for (i = 0; i < lpwm->info->npwm; i++) {
+		ctrl = pwm_lpss_read(&chip->pwms[i]);
+		if (ctrl & PWM_ENABLE)
+			pm_runtime_get(dev);
+	}
 
-int pwm_lpss_remove(struct pwm_lpss_chip *lpwm)
-{
-	return pwmchip_remove(&lpwm->chip);
+	return chip;
 }
-EXPORT_SYMBOL_GPL(pwm_lpss_remove);
+EXPORT_SYMBOL_GPL(devm_pwm_lpss_probe);
 
 MODULE_DESCRIPTION("PWM driver for Intel LPSS");
 MODULE_AUTHOR("Mika Westerberg <mika.westerberg@linux.intel.com>");

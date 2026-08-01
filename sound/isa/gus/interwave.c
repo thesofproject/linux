@@ -1,25 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for AMD InterWave soundcard
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
  *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  *   1999/07/22		Erik Inge Bolso <knan@mo.himolde.no>
  *			* mixer group handlers
- *
  */
 
 #include <linux/init.h>
@@ -43,14 +28,8 @@ MODULE_AUTHOR("Jaroslav Kysela <perex@perex.cz>");
 MODULE_LICENSE("GPL");
 #ifndef SNDRV_STB
 MODULE_DESCRIPTION("AMD InterWave");
-MODULE_SUPPORTED_DEVICE("{{Gravis,UltraSound Plug & Play},"
-		"{STB,SoundRage32},"
-		"{MED,MED3210},"
-		"{Dynasonix,Dynasonix Pro},"
-		"{Panasonic,PCA761AW}}");
 #else
 MODULE_DESCRIPTION("AMD InterWave STB with TEA6330T");
-MODULE_SUPPORTED_DEVICE("{{AMD,InterWave STB with TEA6330T}}");
 #endif
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
@@ -73,11 +52,9 @@ static int pcm_channels[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 2};
 static int effect[SNDRV_CARDS];
 
 #ifdef SNDRV_STB
-#define PFX "interwave-stb: "
 #define INTERWAVE_DRIVER	"snd_interwave_stb"
 #define INTERWAVE_PNP_DRIVER	"interwave-stb"
 #else
-#define PFX "interwave: "
 #define INTERWAVE_DRIVER	"snd_interwave"
 #define INTERWAVE_PNP_DRIVER	"interwave"
 #endif
@@ -119,6 +96,7 @@ struct snd_interwave {
 	struct snd_gus_card *gus;
 	struct snd_wss *wss;
 #ifdef SNDRV_STB
+	struct snd_i2c_bus *i2c_bus;
 	struct resource *i2c_res;
 #endif
 	unsigned short gus_status_reg;
@@ -133,8 +111,8 @@ struct snd_interwave {
 
 
 #ifdef CONFIG_PNP
-static int isa_registered;
-static int pnp_registered;
+static int isa_registered __ro_after_init;
+static int pnp_registered __ro_after_init;
 
 static const struct pnp_card_device_id snd_interwave_pnpids[] = {
 #ifndef SNDRV_STB
@@ -169,7 +147,7 @@ static void snd_interwave_i2c_setlines(struct snd_i2c_bus *bus, int ctrl, int da
 	unsigned long port = bus->private_value;
 
 #if 0
-	printk(KERN_DEBUG "i2c_setlines - 0x%lx <- %i,%i\n", port, ctrl, data);
+	dev_dbg(bus->card->dev, "i2c_setlines - 0x%lx <- %i,%i\n", port, ctrl, data);
 #endif
 	outb((data << 1) | ctrl, port);
 	udelay(10);
@@ -182,7 +160,7 @@ static int snd_interwave_i2c_getclockline(struct snd_i2c_bus *bus)
 
 	res = inb(port) & 1;
 #if 0
-	printk(KERN_DEBUG "i2c_getclockline - 0x%lx -> %i\n", port, res);
+	dev_dbg(bus->card->dev, "i2c_getclockline - 0x%lx -> %i\n", port, res);
 #endif
 	return res;
 }
@@ -196,7 +174,7 @@ static int snd_interwave_i2c_getdataline(struct snd_i2c_bus *bus, int ack)
 		udelay(10);
 	res = (inb(port) & 2) >> 1;
 #if 0
-	printk(KERN_DEBUG "i2c_getdataline - 0x%lx -> %i\n", port, res);
+	dev_dbg(bus->card->dev, "i2c_getdataline - 0x%lx -> %i\n", port, res);
 #endif
 	return res;
 }
@@ -225,24 +203,29 @@ static int snd_interwave_detect_stb(struct snd_interwave *iwcard,
 			port = 0x360;
 		}
 		while (port <= 0x380) {
-			if ((iwcard->i2c_res = request_region(port, 1, "InterWave (I2C bus)")) != NULL)
+			iwcard->i2c_res = devm_request_region(card->dev, port, 1,
+							      "InterWave (I2C bus)");
+			if (iwcard->i2c_res)
 				break;
 			port += 0x10;
 		}
 	} else {
-		iwcard->i2c_res = request_region(port, 1, "InterWave (I2C bus)");
+		iwcard->i2c_res = devm_request_region(card->dev, port, 1,
+						      "InterWave (I2C bus)");
 	}
 	if (iwcard->i2c_res == NULL) {
-		snd_printk(KERN_ERR "interwave: can't grab i2c bus port\n");
+		dev_err(card->dev, "interwave: can't grab i2c bus port\n");
 		return -ENODEV;
 	}
 
 	sprintf(name, "InterWave-%i", card->number);
-	if ((err = snd_i2c_bus_create(card, name, NULL, &bus)) < 0)
+	err = snd_i2c_bus_create(card, name, NULL, &bus);
+	if (err < 0)
 		return err;
 	bus->private_value = port;
 	bus->hw_ops.bit = &snd_interwave_i2c_bit_ops;
-	if ((err = snd_tea6330t_detect(bus, 0)) < 0)
+	err = snd_tea6330t_detect(bus, 0);
+	if (err < 0)
 		return err;
 	*rbus = bus;
 	return 0;
@@ -257,34 +240,38 @@ static int snd_interwave_detect(struct snd_interwave *iwcard,
 #endif
 				          )
 {
-	unsigned long flags;
 	unsigned char rev1, rev2;
 	int d;
 
 	snd_gf1_i_write8(gus, SNDRV_GF1_GB_RESET, 0);	/* reset GF1 */
-	if (((d = snd_gf1_i_look8(gus, SNDRV_GF1_GB_RESET)) & 0x07) != 0) {
-		snd_printdd("[0x%lx] check 1 failed - 0x%x\n", gus->gf1.port, d);
+	d = snd_gf1_i_look8(gus, SNDRV_GF1_GB_RESET);
+	if ((d & 0x07) != 0) {
+		dev_dbg(gus->card->dev, "[0x%lx] check 1 failed - 0x%x\n", gus->gf1.port, d);
 		return -ENODEV;
 	}
 	udelay(160);
 	snd_gf1_i_write8(gus, SNDRV_GF1_GB_RESET, 1);	/* release reset */
 	udelay(160);
-	if (((d = snd_gf1_i_look8(gus, SNDRV_GF1_GB_RESET)) & 0x07) != 1) {
-		snd_printdd("[0x%lx] check 2 failed - 0x%x\n", gus->gf1.port, d);
+	d = snd_gf1_i_look8(gus, SNDRV_GF1_GB_RESET);
+	if ((d & 0x07) != 1) {
+		dev_dbg(gus->card->dev, "[0x%lx] check 2 failed - 0x%x\n", gus->gf1.port, d);
 		return -ENODEV;
 	}
-	spin_lock_irqsave(&gus->reg_lock, flags);
-	rev1 = snd_gf1_look8(gus, SNDRV_GF1_GB_VERSION_NUMBER);
-	snd_gf1_write8(gus, SNDRV_GF1_GB_VERSION_NUMBER, ~rev1);
-	rev2 = snd_gf1_look8(gus, SNDRV_GF1_GB_VERSION_NUMBER);
-	snd_gf1_write8(gus, SNDRV_GF1_GB_VERSION_NUMBER, rev1);
-	spin_unlock_irqrestore(&gus->reg_lock, flags);
-	snd_printdd("[0x%lx] InterWave check - rev1=0x%x, rev2=0x%x\n", gus->gf1.port, rev1, rev2);
+	scoped_guard(spinlock_irqsave, &gus->reg_lock) {
+		rev1 = snd_gf1_look8(gus, SNDRV_GF1_GB_VERSION_NUMBER);
+		snd_gf1_write8(gus, SNDRV_GF1_GB_VERSION_NUMBER, ~rev1);
+		rev2 = snd_gf1_look8(gus, SNDRV_GF1_GB_VERSION_NUMBER);
+		snd_gf1_write8(gus, SNDRV_GF1_GB_VERSION_NUMBER, rev1);
+	}
+	dev_dbg(gus->card->dev,
+		"[0x%lx] InterWave check - rev1=0x%x, rev2=0x%x\n",
+		gus->gf1.port, rev1, rev2);
 	if ((rev1 & 0xf0) == (rev2 & 0xf0) &&
 	    (rev1 & 0x0f) != (rev2 & 0x0f)) {
-		snd_printdd("[0x%lx] InterWave check - passed\n", gus->gf1.port);
+		dev_dbg(gus->card->dev,
+			"[0x%lx] InterWave check - passed\n", gus->gf1.port);
 		gus->interwave = 1;
-		strcpy(gus->card->shortname, "AMD InterWave");
+		strscpy(gus->card->shortname, "AMD InterWave");
 		gus->revision = rev1 >> 4;
 #ifndef SNDRV_STB
 		return 0;	/* ok.. We have an InterWave board */
@@ -292,7 +279,7 @@ static int snd_interwave_detect(struct snd_interwave *iwcard,
 		return snd_interwave_detect_stb(iwcard, gus, dev, rbus);
 #endif
 	}
-	snd_printdd("[0x%lx] InterWave check - failed\n", gus->gf1.port);
+	dev_dbg(gus->card->dev, "[0x%lx] InterWave check - failed\n", gus->gf1.port);
 	return -ENODEV;
 }
 
@@ -341,7 +328,7 @@ static void snd_interwave_bank_sizes(struct snd_gus_card *gus, int *sizes)
 			snd_gf1_poke(gus, local, d);
 			snd_gf1_poke(gus, local + 1, d + 1);
 #if 0
-			printk(KERN_DEBUG "d = 0x%x, local = 0x%x, "
+			dev_dbg(gus->card->dev, "d = 0x%x, local = 0x%x, "
 			       "local + 1 = 0x%x, idx << 22 = 0x%x\n",
 			       d,
 			       snd_gf1_peek(gus, local),
@@ -356,7 +343,7 @@ static void snd_interwave_bank_sizes(struct snd_gus_card *gus, int *sizes)
 		}
 	}
 #if 0
-	printk(KERN_DEBUG "sizes: %i %i %i %i\n",
+	dev_dbg(gus->card->dev, "sizes: %i %i %i %i\n",
 	       sizes[0], sizes[1], sizes[2], sizes[3]);
 #endif
 }
@@ -377,18 +364,30 @@ struct rom_hdr {
 	/* 511 */ unsigned char csum;
 };
 
+static const unsigned int snd_interwave_memory_configs[] = {
+	0x00000001, 0x00000101, 0x01010101, 0x00000401,
+	0x04040401, 0x00040101, 0x04040101, 0x00000004,
+	0x00000404, 0x04040404, 0x00000010, 0x00001010,
+	0x10101010
+};
+
+static int snd_interwave_find_memory_config(unsigned int lmct)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(snd_interwave_memory_configs); i++) {
+		if (lmct == snd_interwave_memory_configs[i])
+			return i;
+	}
+
+	return -EINVAL;
+}
+
 static void snd_interwave_detect_memory(struct snd_gus_card *gus)
 {
-	static unsigned int lmc[13] =
-	{
-		0x00000001, 0x00000101, 0x01010101, 0x00000401,
-		0x04040401, 0x00040101, 0x04040101, 0x00000004,
-		0x00000404, 0x04040404, 0x00000010, 0x00001010,
-		0x10101010
-	};
-
 	int bank_pos, pages;
 	unsigned int i, lmct;
+	int lmc_cfg;
 	int psizes[4];
 	unsigned char iwave[8];
 	unsigned char csum;
@@ -411,19 +410,22 @@ static void snd_interwave_detect_memory(struct snd_gus_card *gus)
 		lmct = (psizes[3] << 24) | (psizes[2] << 16) |
 		    (psizes[1] << 8) | psizes[0];
 #if 0
-		printk(KERN_DEBUG "lmct = 0x%08x\n", lmct);
+		dev_dbg(gus->card->dev, "lmct = 0x%08x\n", lmct);
 #endif
-		for (i = 0; i < ARRAY_SIZE(lmc); i++)
-			if (lmct == lmc[i]) {
+		lmc_cfg = snd_interwave_find_memory_config(lmct);
+		if (lmc_cfg >= 0) {
 #if 0
-				printk(KERN_DEBUG "found !!! %i\n", i);
+			dev_dbg(gus->card->dev, "found !!! %i\n", lmc_cfg);
 #endif
-				snd_gf1_write16(gus, SNDRV_GF1_GW_MEMORY_CONFIG, (snd_gf1_look16(gus, SNDRV_GF1_GW_MEMORY_CONFIG) & 0xfff0) | i);
-				snd_interwave_bank_sizes(gus, psizes);
-				break;
-			}
-		if (i >= ARRAY_SIZE(lmc) && !gus->gf1.enh_mode)
-			 snd_gf1_write16(gus, SNDRV_GF1_GW_MEMORY_CONFIG, (snd_gf1_look16(gus, SNDRV_GF1_GW_MEMORY_CONFIG) & 0xfff0) | 2);
+			snd_gf1_write16(gus, SNDRV_GF1_GW_MEMORY_CONFIG,
+					(snd_gf1_look16(gus, SNDRV_GF1_GW_MEMORY_CONFIG) & 0xfff0) |
+					lmc_cfg);
+			snd_interwave_bank_sizes(gus, psizes);
+		} else if (!gus->gf1.enh_mode) {
+			snd_gf1_write16(gus, SNDRV_GF1_GW_MEMORY_CONFIG,
+					(snd_gf1_look16(gus, SNDRV_GF1_GW_MEMORY_CONFIG) & 0xfff0) |
+					2);
+		}
 		for (i = 0; i < 4; i++) {
 			gus->gf1.mem_alloc.banks_8[i].address =
 			    gus->gf1.mem_alloc.banks_16[i].address = i << 22;
@@ -468,29 +470,31 @@ static void snd_interwave_detect_memory(struct snd_gus_card *gus)
 		snd_interwave_reset(gus);
 }
 
-static void snd_interwave_init(int dev, struct snd_gus_card *gus)
+static void __snd_interwave_restore_regs(struct snd_gus_card *gus)
 {
-	unsigned long flags;
-
-	/* ok.. some InterWave specific initialization */
-	spin_lock_irqsave(&gus->reg_lock, flags);
-	snd_gf1_write8(gus, SNDRV_GF1_GB_SOUND_BLASTER_CONTROL, 0x00);
 	snd_gf1_write8(gus, SNDRV_GF1_GB_COMPATIBILITY, 0x1f);
 	snd_gf1_write8(gus, SNDRV_GF1_GB_DECODE_CONTROL, 0x49);
 	snd_gf1_write8(gus, SNDRV_GF1_GB_VERSION_NUMBER, 0x11);
 	snd_gf1_write8(gus, SNDRV_GF1_GB_MPU401_CONTROL_A, 0x00);
 	snd_gf1_write8(gus, SNDRV_GF1_GB_MPU401_CONTROL_B, 0x30);
 	snd_gf1_write8(gus, SNDRV_GF1_GB_EMULATION_IRQ, 0x00);
-	spin_unlock_irqrestore(&gus->reg_lock, flags);
+}
+
+static void snd_interwave_init(int dev, struct snd_gus_card *gus)
+{
+	/* Probe-time setup also clears the timer control register. */
+	scoped_guard(spinlock_irqsave, &gus->reg_lock) {
+		snd_gf1_write8(gus, SNDRV_GF1_GB_SOUND_BLASTER_CONTROL, 0x00);
+		__snd_interwave_restore_regs(gus);
+	}
 	gus->equal_irq = 1;
 	gus->codec_flag = 1;
 	gus->interwave = 1;
 	gus->max_flag = 1;
 	gus->joystick_dac = joystick_dac[dev];
-
 }
 
-static struct snd_kcontrol_new snd_interwave_controls[] = {
+static const struct snd_kcontrol_new snd_interwave_controls[] = {
 WSS_DOUBLE("Master Playback Switch", 0,
 		CS4231_LINE_LEFT_OUTPUT, CS4231_LINE_RIGHT_OUTPUT, 7, 7, 1, 1),
 WSS_DOUBLE("Master Playback Volume", 0,
@@ -513,38 +517,46 @@ static int snd_interwave_mixer(struct snd_wss *chip)
 	id1.iface = id2.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
 #if 0
 	/* remove mono microphone controls */
-	strcpy(id1.name, "Mic Playback Switch");
-	if ((err = snd_ctl_remove_id(card, &id1)) < 0)
+	strscpy(id1.name, "Mic Playback Switch");
+	err = snd_ctl_remove_id(card, &id1);
+	if (err < 0)
 		return err;
-	strcpy(id1.name, "Mic Playback Volume");
-	if ((err = snd_ctl_remove_id(card, &id1)) < 0)
+	strscpy(id1.name, "Mic Playback Volume");
+	err = snd_ctl_remove_id(card, &id1);
+	if (err < 0)
 		return err;
 #endif
 	/* add new master and mic controls */
-	for (idx = 0; idx < ARRAY_SIZE(snd_interwave_controls); idx++)
-		if ((err = snd_ctl_add(card, snd_ctl_new1(&snd_interwave_controls[idx], chip))) < 0)
+	for (idx = 0; idx < ARRAY_SIZE(snd_interwave_controls); idx++) {
+		err = snd_ctl_add(card, snd_ctl_new1(&snd_interwave_controls[idx], chip));
+		if (err < 0)
 			return err;
+	}
 	snd_wss_out(chip, CS4231_LINE_LEFT_OUTPUT, 0x9f);
 	snd_wss_out(chip, CS4231_LINE_RIGHT_OUTPUT, 0x9f);
 	snd_wss_out(chip, CS4231_LEFT_MIC_INPUT, 0x9f);
 	snd_wss_out(chip, CS4231_RIGHT_MIC_INPUT, 0x9f);
 	/* reassign AUXA to SYNTHESIZER */
-	strcpy(id1.name, "Aux Playback Switch");
-	strcpy(id2.name, "Synth Playback Switch");
-	if ((err = snd_ctl_rename_id(card, &id1, &id2)) < 0)
+	strscpy(id1.name, "Aux Playback Switch");
+	strscpy(id2.name, "Synth Playback Switch");
+	err = snd_ctl_rename_id(card, &id1, &id2);
+	if (err < 0)
 		return err;
-	strcpy(id1.name, "Aux Playback Volume");
-	strcpy(id2.name, "Synth Playback Volume");
-	if ((err = snd_ctl_rename_id(card, &id1, &id2)) < 0)
+	strscpy(id1.name, "Aux Playback Volume");
+	strscpy(id2.name, "Synth Playback Volume");
+	err = snd_ctl_rename_id(card, &id1, &id2);
+	if (err < 0)
 		return err;
 	/* reassign AUXB to CD */
-	strcpy(id1.name, "Aux Playback Switch"); id1.index = 1;
-	strcpy(id2.name, "CD Playback Switch");
-	if ((err = snd_ctl_rename_id(card, &id1, &id2)) < 0)
+	strscpy(id1.name, "Aux Playback Switch"); id1.index = 1;
+	strscpy(id2.name, "CD Playback Switch");
+	err = snd_ctl_rename_id(card, &id1, &id2);
+	if (err < 0)
 		return err;
-	strcpy(id1.name, "Aux Playback Volume");
-	strcpy(id2.name, "CD Playback Volume");
-	if ((err = snd_ctl_rename_id(card, &id1, &id2)) < 0)
+	strscpy(id1.name, "Aux Playback Volume");
+	strscpy(id2.name, "CD Playback Volume");
+	err = snd_ctl_rename_id(card, &id1, &id2);
+	if (err < 0)
 		return err;
 	return 0;
 }
@@ -572,12 +584,12 @@ static int snd_interwave_pnp(int dev, struct snd_interwave *iwcard,
 
 	err = pnp_activate_dev(pdev);
 	if (err < 0) {
-		snd_printk(KERN_ERR "InterWave PnP configure failure (out of resources?)\n");
+		dev_err(&pdev->dev, "InterWave PnP configure failure (out of resources?)\n");
 		return err;
 	}
 	if (pnp_port_start(pdev, 0) + 0x100 != pnp_port_start(pdev, 1) ||
 	    pnp_port_start(pdev, 0) + 0x10c != pnp_port_start(pdev, 2)) {
-		snd_printk(KERN_ERR "PnP configure failure (wrong ports)\n");
+		dev_err(&pdev->dev, "PnP configure failure (wrong ports)\n");
 		return -ENOENT;
 	}
 	port[dev] = pnp_port_start(pdev, 0);
@@ -585,39 +597,30 @@ static int snd_interwave_pnp(int dev, struct snd_interwave *iwcard,
 	if (dma2[dev] >= 0)
 		dma2[dev] = pnp_dma(pdev, 1);
 	irq[dev] = pnp_irq(pdev, 0);
-	snd_printdd("isapnp IW: sb port=0x%llx, gf1 port=0x%llx, codec port=0x%llx\n",
-			(unsigned long long)pnp_port_start(pdev, 0),
-			(unsigned long long)pnp_port_start(pdev, 1),
-			(unsigned long long)pnp_port_start(pdev, 2));
-	snd_printdd("isapnp IW: dma1=%i, dma2=%i, irq=%i\n", dma1[dev], dma2[dev], irq[dev]);
+	dev_dbg(&pdev->dev,
+		"isapnp IW: sb port=0x%llx, gf1 port=0x%llx, codec port=0x%llx\n",
+		(unsigned long long)pnp_port_start(pdev, 0),
+		(unsigned long long)pnp_port_start(pdev, 1),
+		(unsigned long long)pnp_port_start(pdev, 2));
+	dev_dbg(&pdev->dev,
+		"isapnp IW: dma1=%i, dma2=%i, irq=%i\n",
+		dma1[dev], dma2[dev], irq[dev]);
 #ifdef SNDRV_STB
 	/* Tone Control initialization */
 	pdev = iwcard->devtc;
 
 	err = pnp_activate_dev(pdev);
 	if (err < 0) {
-		snd_printk(KERN_ERR "InterWave ToneControl PnP configure failure (out of resources?)\n");
+		dev_err(&pdev->dev,
+			"InterWave ToneControl PnP configure failure (out of resources?)\n");
 		return err;
 	}
 	port_tc[dev] = pnp_port_start(pdev, 0);
-	snd_printdd("isapnp IW: tone control port=0x%lx\n", port_tc[dev]);
+	dev_dbg(&pdev->dev, "isapnp IW: tone control port=0x%lx\n", port_tc[dev]);
 #endif
 	return 0;
 }
 #endif /* CONFIG_PNP */
-
-static void snd_interwave_free(struct snd_card *card)
-{
-	struct snd_interwave *iwcard = card->private_data;
-
-	if (iwcard == NULL)
-		return;
-#ifdef SNDRV_STB
-	release_and_free_resource(iwcard->i2c_res);
-#endif
-	if (iwcard->irq >= 0)
-		free_irq(iwcard->irq, (void *)iwcard);
-}
 
 static int snd_interwave_card_new(struct device *pdev, int dev,
 				  struct snd_card **cardp)
@@ -626,24 +629,30 @@ static int snd_interwave_card_new(struct device *pdev, int dev,
 	struct snd_interwave *iwcard;
 	int err;
 
-	err = snd_card_new(pdev, index[dev], id[dev], THIS_MODULE,
-			   sizeof(struct snd_interwave), &card);
+	err = snd_devm_card_new(pdev, index[dev], id[dev], THIS_MODULE,
+				sizeof(struct snd_interwave), &card);
 	if (err < 0)
 		return err;
 	iwcard = card->private_data;
 	iwcard->card = card;
 	iwcard->irq = -1;
-	card->private_free = snd_interwave_free;
 	*cardp = card;
 	return 0;
 }
 
-static int snd_interwave_probe(struct snd_card *card, int dev)
+static int snd_interwave_probe_gus(struct snd_card *card, int dev,
+				   struct snd_gus_card **gusp)
+{
+	return snd_gus_create(card, port[dev], -irq[dev], dma1[dev], dma2[dev],
+			      0, 32, pcm_channels[dev], effect[dev], gusp);
+}
+
+static int snd_interwave_probe(struct snd_card *card, int dev,
+			       struct snd_gus_card *gus)
 {
 	int xirq, xdma1, xdma2;
 	struct snd_interwave *iwcard = card->private_data;
 	struct snd_wss *wss;
-	struct snd_gus_card *gus;
 #ifdef SNDRV_STB
 	struct snd_i2c_bus *i2c_bus;
 #endif
@@ -654,18 +663,12 @@ static int snd_interwave_probe(struct snd_card *card, int dev)
 	xdma1 = dma1[dev];
 	xdma2 = dma2[dev];
 
-	if ((err = snd_gus_create(card,
-				  port[dev],
-				  -xirq, xdma1, xdma2,
-				  0, 32,
-				  pcm_channels[dev], effect[dev], &gus)) < 0)
-		return err;
-
-	if ((err = snd_interwave_detect(iwcard, gus, dev
+	err = snd_interwave_detect(iwcard, gus, dev
 #ifdef SNDRV_STB
-            , &i2c_bus
+				   , &i2c_bus
 #endif
-	    )) < 0)
+				   );
+	if (err < 0)
 		return err;
 
 	iwcard->gus_status_reg = gus->gf1.reg_irqstat;
@@ -673,15 +676,17 @@ static int snd_interwave_probe(struct snd_card *card, int dev)
 
 	snd_interwave_init(dev, gus);
 	snd_interwave_detect_memory(gus);
-	if ((err = snd_gus_initialize(gus)) < 0)
+	err = snd_gus_initialize(gus);
+	if (err < 0)
 		return err;
 
-	if (request_irq(xirq, snd_interwave_interrupt, 0,
-			"InterWave", iwcard)) {
-		snd_printk(KERN_ERR PFX "unable to grab IRQ %d\n", xirq);
+	if (devm_request_irq(card->dev, xirq, snd_interwave_interrupt, 0,
+			     "InterWave", iwcard)) {
+		dev_err(card->dev, "unable to grab IRQ %d\n", xirq);
 		return -EBUSY;
 	}
 	iwcard->irq = xirq;
+	card->sync_irq = iwcard->irq;
 
 	err = snd_wss_create(card,
 			     gus->gf1.port + 0x10c, -1, xirq,
@@ -725,22 +730,27 @@ static int snd_interwave_probe(struct snd_card *card, int dev)
 		memset(&id1, 0, sizeof(id1));
 		memset(&id2, 0, sizeof(id2));
 		id1.iface = id2.iface = SNDRV_CTL_ELEM_IFACE_MIXER;
-		strcpy(id1.name, "Master Playback Switch");
-		strcpy(id2.name, id1.name);
+		strscpy(id1.name, "Master Playback Switch");
+		strscpy(id2.name, id1.name);
 		id2.index = 1;
-		if ((err = snd_ctl_rename_id(card, &id1, &id2)) < 0)
+		err = snd_ctl_rename_id(card, &id1, &id2);
+		if (err < 0)
 			return err;
-		strcpy(id1.name, "Master Playback Volume");
-		strcpy(id2.name, id1.name);
-		if ((err = snd_ctl_rename_id(card, &id1, &id2)) < 0)
+		strscpy(id1.name, "Master Playback Volume");
+		strscpy(id2.name, id1.name);
+		err = snd_ctl_rename_id(card, &id1, &id2);
+		if (err < 0)
 			return err;
-		if ((err = snd_tea6330t_update_mixer(card, i2c_bus, 0, 1)) < 0)
+		err = snd_tea6330t_update_mixer(card, i2c_bus, 0, 1);
+		if (err < 0)
 			return err;
+		iwcard->i2c_bus = i2c_bus;
 	}
 #endif
 
 	gus->uart_enable = midi[dev];
-	if ((err = snd_gf1_rawmidi_new(gus, 0)) < 0)
+	err = snd_gf1_rawmidi_new(gus, 0);
+	if (err < 0)
 		return err;
 
 #ifndef SNDRV_STB
@@ -750,8 +760,8 @@ static int snd_interwave_probe(struct snd_card *card, int dev)
 #else
 	str = "InterWave STB";
 #endif
-	strcpy(card->driver, str);
-	strcpy(card->shortname, str);
+	strscpy(card->driver, str);
+	strscpy(card->shortname, str);
 	sprintf(card->longname, "%s at 0x%lx, irq %i, dma %d",
 		str,
 		gus->gf1.port,
@@ -766,23 +776,6 @@ static int snd_interwave_probe(struct snd_card *card, int dev)
 	
 	iwcard->wss = wss;
 	iwcard->gus = gus;
-	return 0;
-}
-
-static int snd_interwave_isa_probe1(int dev, struct device *devptr)
-{
-	struct snd_card *card;
-	int err;
-
-	err = snd_interwave_card_new(devptr, dev, &card);
-	if (err < 0)
-		return err;
-
-	if ((err = snd_interwave_probe(card, dev)) < 0) {
-		snd_card_free(card);
-		return err;
-	}
-	dev_set_drvdata(devptr, card);
 	return 0;
 }
 
@@ -801,55 +794,152 @@ static int snd_interwave_isa_match(struct device *pdev,
 static int snd_interwave_isa_probe(struct device *pdev,
 				   unsigned int dev)
 {
+	struct snd_card *card;
+	struct snd_gus_card *gus;
 	int err;
-	static int possible_irqs[] = {5, 11, 12, 9, 7, 15, 3, -1};
-	static int possible_dmas[] = {0, 1, 3, 5, 6, 7, -1};
+	static const int possible_irqs[] = {5, 11, 12, 9, 7, 15, 3, -1};
+	static const int possible_dmas[] = {0, 1, 3, 5, 6, 7, -1};
 
 	if (irq[dev] == SNDRV_AUTO_IRQ) {
-		if ((irq[dev] = snd_legacy_find_free_irq(possible_irqs)) < 0) {
-			snd_printk(KERN_ERR PFX "unable to find a free IRQ\n");
+		irq[dev] = snd_legacy_find_free_irq(possible_irqs);
+		if (irq[dev] < 0) {
+			dev_err(pdev, "unable to find a free IRQ\n");
 			return -EBUSY;
 		}
 	}
 	if (dma1[dev] == SNDRV_AUTO_DMA) {
-		if ((dma1[dev] = snd_legacy_find_free_dma(possible_dmas)) < 0) {
-			snd_printk(KERN_ERR PFX "unable to find a free DMA1\n");
+		dma1[dev] = snd_legacy_find_free_dma(possible_dmas);
+		if (dma1[dev] < 0) {
+			dev_err(pdev, "unable to find a free DMA1\n");
 			return -EBUSY;
 		}
 	}
 	if (dma2[dev] == SNDRV_AUTO_DMA) {
-		if ((dma2[dev] = snd_legacy_find_free_dma(possible_dmas)) < 0) {
-			snd_printk(KERN_ERR PFX "unable to find a free DMA2\n");
+		dma2[dev] = snd_legacy_find_free_dma(possible_dmas);
+		if (dma2[dev] < 0) {
+			dev_err(pdev, "unable to find a free DMA2\n");
 			return -EBUSY;
 		}
 	}
 
+	err = snd_interwave_card_new(pdev, dev, &card);
+	if (err < 0)
+		return err;
+
 	if (port[dev] != SNDRV_AUTO_PORT)
-		return snd_interwave_isa_probe1(dev, pdev);
+		err = snd_interwave_probe_gus(card, dev, &gus);
 	else {
-		static long possible_ports[] = {0x210, 0x220, 0x230, 0x240, 0x250, 0x260};
+		static const long possible_ports[] = {0x210, 0x220, 0x230, 0x240, 0x250, 0x260};
 		int i;
 		for (i = 0; i < ARRAY_SIZE(possible_ports); i++) {
 			port[dev] = possible_ports[i];
-			err = snd_interwave_isa_probe1(dev, pdev);
+			err = snd_interwave_probe_gus(card, dev, &gus);
 			if (! err)
 				return 0;
 		}
+	}
+	if (err < 0)
 		return err;
+
+	err = snd_interwave_probe(card, dev, gus);
+	if (err < 0)
+		return err;
+
+	dev_set_drvdata(pdev, card);
+	return 0;
+}
+
+#ifdef CONFIG_PM
+static void snd_interwave_restore_regs(struct snd_gus_card *gus)
+{
+	scoped_guard(spinlock_irqsave, &gus->reg_lock)
+		__snd_interwave_restore_regs(gus);
+}
+
+static void snd_interwave_restore_memory(struct snd_gus_card *gus)
+{
+	unsigned short mem_cfg;
+	unsigned int lmct = 0;
+	int i, lmc_cfg;
+
+	if (!gus->gf1.memory)
+		return;
+
+	for (i = 0; i < 4; i++)
+		lmct |= (gus->gf1.mem_alloc.banks_16[i].size >> 18) << (i * 8);
+
+	lmc_cfg = snd_interwave_find_memory_config(lmct);
+	if (lmc_cfg < 0) {
+		if (!gus->gf1.enh_mode) {
+			lmc_cfg = 2;
+		} else {
+			dev_warn(gus->card->dev,
+				 "cannot restore InterWave memory layout 0x%08x\n",
+				 lmct);
+			return;
+		}
+	}
+
+	scoped_guard(spinlock_irqsave, &gus->reg_lock) {
+		mem_cfg = snd_gf1_look16(gus, SNDRV_GF1_GW_MEMORY_CONFIG);
+		mem_cfg = (mem_cfg & 0xfff0) | lmc_cfg;
+		mem_cfg = (mem_cfg & 0xff1f) | (4 << 5);
+		snd_gf1_write16(gus, SNDRV_GF1_GW_MEMORY_CONFIG, mem_cfg);
 	}
 }
 
-static int snd_interwave_isa_remove(struct device *devptr, unsigned int dev)
+static int snd_interwave_card_suspend(struct snd_card *card)
 {
-	snd_card_free(dev_get_drvdata(devptr));
+	struct snd_interwave *iwcard = card->private_data;
+
+	iwcard->wss->suspend(iwcard->wss);
+	return snd_gus_suspend(iwcard->gus);
+}
+
+static int snd_interwave_card_resume(struct snd_card *card)
+{
+	struct snd_interwave *iwcard = card->private_data;
+	int err;
+
+	err = snd_gus_resume(iwcard->gus);
+	if (err < 0)
+		return err;
+
+	snd_interwave_restore_regs(iwcard->gus);
+	snd_interwave_restore_memory(iwcard->gus);
+	iwcard->wss->resume(iwcard->wss);
+#ifdef SNDRV_STB
+	if (iwcard->i2c_bus) {
+		err = snd_tea6330t_restore_mixer(iwcard->i2c_bus);
+		if (err < 0)
+			dev_warn(card->dev,
+				 "failed to restore TEA6330T mixer state: %d\n",
+				 err);
+	}
+#endif
+
 	return 0;
 }
+
+static int snd_interwave_isa_suspend(struct device *pdev, unsigned int dev,
+				     pm_message_t state)
+{
+	return snd_interwave_card_suspend(dev_get_drvdata(pdev));
+}
+
+static int snd_interwave_isa_resume(struct device *pdev, unsigned int dev)
+{
+	return snd_interwave_card_resume(dev_get_drvdata(pdev));
+}
+#endif
 
 static struct isa_driver snd_interwave_driver = {
 	.match		= snd_interwave_isa_match,
 	.probe		= snd_interwave_isa_probe,
-	.remove		= snd_interwave_isa_remove,
-	/* FIXME: suspend,resume */
+#ifdef CONFIG_PM
+	.suspend	= snd_interwave_isa_suspend,
+	.resume		= snd_interwave_isa_resume,
+#endif
 	.driver		= {
 		.name	= INTERWAVE_DRIVER
 	},
@@ -861,6 +951,7 @@ static int snd_interwave_pnp_detect(struct pnp_card_link *pcard,
 {
 	static int dev;
 	struct snd_card *card;
+	struct snd_gus_card *gus;
 	int res;
 
 	for ( ; dev < SNDRV_CARDS; dev++) {
@@ -874,32 +965,42 @@ static int snd_interwave_pnp_detect(struct pnp_card_link *pcard,
 	if (res < 0)
 		return res;
 
-	if ((res = snd_interwave_pnp(dev, card->private_data, pcard, pid)) < 0) {
-		snd_card_free(card);
+	res = snd_interwave_pnp(dev, card->private_data, pcard, pid);
+	if (res < 0)
 		return res;
-	}
-	if ((res = snd_interwave_probe(card, dev)) < 0) {
-		snd_card_free(card);
+	res = snd_interwave_probe_gus(card, dev, &gus);
+	if (res < 0)
 		return res;
-	}
+	res = snd_interwave_probe(card, dev, gus);
+	if (res < 0)
+		return res;
 	pnp_set_card_drvdata(pcard, card);
 	dev++;
 	return 0;
 }
 
-static void snd_interwave_pnp_remove(struct pnp_card_link *pcard)
+#ifdef CONFIG_PM
+static int snd_interwave_pnpc_suspend(struct pnp_card_link *pcard,
+				      pm_message_t state)
 {
-	snd_card_free(pnp_get_card_drvdata(pcard));
-	pnp_set_card_drvdata(pcard, NULL);
+	return snd_interwave_card_suspend(pnp_get_card_drvdata(pcard));
 }
+
+static int snd_interwave_pnpc_resume(struct pnp_card_link *pcard)
+{
+	return snd_interwave_card_resume(pnp_get_card_drvdata(pcard));
+}
+#endif
 
 static struct pnp_card_driver interwave_pnpc_driver = {
 	.flags = PNP_DRIVER_RES_DISABLE,
 	.name = INTERWAVE_PNP_DRIVER,
 	.id_table = snd_interwave_pnpids,
 	.probe = snd_interwave_pnp_detect,
-	.remove = snd_interwave_pnp_remove,
-	/* FIXME: suspend,resume */
+#ifdef CONFIG_PM
+	.suspend	= snd_interwave_pnpc_suspend,
+	.resume		= snd_interwave_pnpc_resume,
+#endif
 };
 
 #endif /* CONFIG_PNP */

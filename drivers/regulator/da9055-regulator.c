@@ -1,21 +1,14 @@
-/*
-* Regulator driver for DA9055 PMIC
-*
-* Copyright(c) 2012 Dialog Semiconductor Ltd.
-*
-* Author: David Dajun Chen <dchen@diasemi.com>
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation; either version 2 of the License, or
-* (at your option) any later version.
-*
-*/
+// SPDX-License-Identifier: GPL-2.0+
+//
+// Regulator driver for DA9055 PMIC
+//
+// Copyright(c) 2012 Dialog Semiconductor Ltd.
+//
+// Author: David Dajun Chen <dchen@diasemi.com>
 
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/err.h>
-#include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/driver.h>
@@ -48,7 +41,9 @@
 #define DA9055_ID_LDO6		7
 
 /* DA9055 BUCK current limit */
-static const int da9055_current_limits[] = { 500000, 600000, 700000, 800000 };
+static const unsigned int da9055_current_limits[] = {
+	500000, 600000, 700000, 800000
+};
 
 struct da9055_conf_reg {
 	int reg;
@@ -78,7 +73,7 @@ struct da9055_regulator_info {
 
 struct da9055_regulator {
 	struct da9055 *da9055;
-	struct da9055_regulator_info *info;
+	const struct da9055_regulator_info *info;
 	struct regulator_dev *rdev;
 	enum gpio_select reg_rselect;
 };
@@ -86,7 +81,7 @@ struct da9055_regulator {
 static unsigned int da9055_buck_get_mode(struct regulator_dev *rdev)
 {
 	struct da9055_regulator *regulator = rdev_get_drvdata(rdev);
-	struct da9055_regulator_info *info = regulator->info;
+	const struct da9055_regulator_info *info = regulator->info;
 	int ret, mode = 0;
 
 	ret = da9055_reg_read(regulator->da9055, info->mode.reg);
@@ -112,7 +107,7 @@ static int da9055_buck_set_mode(struct regulator_dev *rdev,
 					unsigned int mode)
 {
 	struct da9055_regulator *regulator = rdev_get_drvdata(rdev);
-	struct da9055_regulator_info *info = regulator->info;
+	const struct da9055_regulator_info *info = regulator->info;
 	int val = 0;
 
 	switch (mode) {
@@ -134,7 +129,7 @@ static int da9055_buck_set_mode(struct regulator_dev *rdev,
 static unsigned int da9055_ldo_get_mode(struct regulator_dev *rdev)
 {
 	struct da9055_regulator *regulator = rdev_get_drvdata(rdev);
-	struct da9055_regulator_info *info = regulator->info;
+	const struct da9055_regulator_info *info = regulator->info;
 	int ret;
 
 	ret = da9055_reg_read(regulator->da9055, info->volt.reg_b);
@@ -150,7 +145,7 @@ static unsigned int da9055_ldo_get_mode(struct regulator_dev *rdev)
 static int da9055_ldo_set_mode(struct regulator_dev *rdev, unsigned int mode)
 {
 	struct da9055_regulator *regulator = rdev_get_drvdata(rdev);
-	struct da9055_regulator_info *info = regulator->info;
+	const struct da9055_regulator_info *info = regulator->info;
 	struct da9055_volt_reg volt = info->volt;
 	int val = 0;
 
@@ -169,43 +164,10 @@ static int da9055_ldo_set_mode(struct regulator_dev *rdev, unsigned int mode)
 				 val << volt.sl_shift);
 }
 
-static int da9055_buck_get_current_limit(struct regulator_dev *rdev)
-{
-	struct da9055_regulator *regulator = rdev_get_drvdata(rdev);
-	struct da9055_regulator_info *info = regulator->info;
-	int ret;
-
-	ret = da9055_reg_read(regulator->da9055, DA9055_REG_BUCK_LIM);
-	if (ret < 0)
-		return ret;
-
-	ret &= info->mode.mask;
-	return da9055_current_limits[ret >> info->mode.shift];
-}
-
-static int da9055_buck_set_current_limit(struct regulator_dev *rdev, int min_uA,
-					 int max_uA)
-{
-	struct da9055_regulator *regulator = rdev_get_drvdata(rdev);
-	struct da9055_regulator_info *info = regulator->info;
-	int i;
-
-	for (i = ARRAY_SIZE(da9055_current_limits) - 1; i >= 0; i--) {
-		if ((min_uA <= da9055_current_limits[i]) &&
-		    (da9055_current_limits[i] <= max_uA))
-			return da9055_reg_update(regulator->da9055,
-						 DA9055_REG_BUCK_LIM,
-						 info->mode.mask,
-						 i << info->mode.shift);
-	}
-
-	return -EINVAL;
-}
-
 static int da9055_regulator_get_voltage_sel(struct regulator_dev *rdev)
 {
 	struct da9055_regulator *regulator = rdev_get_drvdata(rdev);
-	struct da9055_regulator_info *info = regulator->info;
+	const struct da9055_regulator_info *info = regulator->info;
 	struct da9055_volt_reg volt = info->volt;
 	int ret, sel;
 
@@ -237,7 +199,7 @@ static int da9055_regulator_set_voltage_sel(struct regulator_dev *rdev,
 					    unsigned int selector)
 {
 	struct da9055_regulator *regulator = rdev_get_drvdata(rdev);
-	struct da9055_regulator_info *info = regulator->info;
+	const struct da9055_regulator_info *info = regulator->info;
 	int ret;
 
 	/*
@@ -280,7 +242,7 @@ static int da9055_regulator_set_suspend_voltage(struct regulator_dev *rdev,
 						int uV)
 {
 	struct da9055_regulator *regulator = rdev_get_drvdata(rdev);
-	struct da9055_regulator_info *info = regulator->info;
+	const struct da9055_regulator_info *info = regulator->info;
 	int ret;
 
 	/* Select register set B for suspend voltage ramping. */
@@ -302,7 +264,7 @@ static int da9055_regulator_set_suspend_voltage(struct regulator_dev *rdev,
 static int da9055_suspend_enable(struct regulator_dev *rdev)
 {
 	struct da9055_regulator *regulator = rdev_get_drvdata(rdev);
-	struct da9055_regulator_info *info = regulator->info;
+	const struct da9055_regulator_info *info = regulator->info;
 
 	/* Select register set B for voltage ramping. */
 	if (regulator->reg_rselect == NO_GPIO)
@@ -315,7 +277,7 @@ static int da9055_suspend_enable(struct regulator_dev *rdev)
 static int da9055_suspend_disable(struct regulator_dev *rdev)
 {
 	struct da9055_regulator *regulator = rdev_get_drvdata(rdev);
-	struct da9055_regulator_info *info = regulator->info;
+	const struct da9055_regulator_info *info = regulator->info;
 
 	/* Diselect register set B. */
 	if (regulator->reg_rselect == NO_GPIO)
@@ -329,8 +291,8 @@ static const struct regulator_ops da9055_buck_ops = {
 	.get_mode = da9055_buck_get_mode,
 	.set_mode = da9055_buck_set_mode,
 
-	.get_current_limit = da9055_buck_get_current_limit,
-	.set_current_limit = da9055_buck_set_current_limit,
+	.get_current_limit = regulator_get_current_limit_regmap,
+	.set_current_limit = regulator_set_current_limit_regmap,
 
 	.get_voltage_sel = da9055_regulator_get_voltage_sel,
 	.set_voltage_sel = da9055_regulator_set_voltage_sel,
@@ -369,6 +331,8 @@ static const struct regulator_ops da9055_ldo_ops = {
 {\
 	.reg_desc = {\
 		.name = #_id,\
+		.of_match = of_match_ptr(#_id),\
+		.regulators_node = of_match_ptr("regulators"),\
 		.ops = &da9055_ldo_ops,\
 		.type = REGULATOR_VOLTAGE,\
 		.id = DA9055_ID_##_id,\
@@ -397,6 +361,8 @@ static const struct regulator_ops da9055_ldo_ops = {
 {\
 	.reg_desc = {\
 		.name = #_id,\
+		.of_match = of_match_ptr(#_id),\
+		.regulators_node = of_match_ptr("regulators"),\
 		.ops = &da9055_buck_ops,\
 		.type = REGULATOR_VOLTAGE,\
 		.id = DA9055_ID_##_id,\
@@ -407,6 +373,10 @@ static const struct regulator_ops da9055_ldo_ops = {
 		.uV_step = (step) * 1000,\
 		.linear_min_sel = (voffset),\
 		.owner = THIS_MODULE,\
+		.curr_table = da9055_current_limits,\
+		.n_current_limits = ARRAY_SIZE(da9055_current_limits),\
+		.csel_reg = DA9055_REG_BUCK_LIM,\
+		.csel_mask = (mbits),\
 	},\
 	.conf = {\
 		.reg = DA9055_REG_BCORE_CONT + DA9055_ID_##_id, \
@@ -426,7 +396,7 @@ static const struct regulator_ops da9055_ldo_ops = {
 	},\
 }
 
-static struct da9055_regulator_info da9055_regulator_info[] = {
+static const struct da9055_regulator_info da9055_regulator_info[] = {
 	DA9055_BUCK(BUCK1, 25, 725, 2075, 6, 9, 0xc, 2),
 	DA9055_BUCK(BUCK2, 25, 925, 2500, 6, 0, 3, 0),
 	DA9055_LDO(LDO1, 50, 900, 3300, 6, 2),
@@ -442,32 +412,35 @@ static struct da9055_regulator_info da9055_regulator_info[] = {
  * GPIO can control regulator state and/or select the regulator register
  * set A/B for voltage ramping.
  */
-static int da9055_gpio_init(struct da9055_regulator *regulator,
+static int da9055_gpio_init(struct device *dev,
+			    struct da9055_regulator *regulator,
 			    struct regulator_config *config,
 			    struct da9055_pdata *pdata, int id)
 {
-	struct da9055_regulator_info *info = regulator->info;
+	const struct da9055_regulator_info *info = regulator->info;
+	struct gpio_desc *ren;
+	struct gpio_desc *ena;
+	struct gpio_desc *rsel;
 	int ret = 0;
 
-	if (!pdata)
-		return 0;
+	/* Look for "regulator-enable-gpios" GPIOs in the regulator node */
+	ren = devm_gpiod_get_optional(dev, "regulator-enable", GPIOD_IN);
+	if (IS_ERR(ren))
+		return PTR_ERR(ren);
 
-	if (pdata->gpio_ren && pdata->gpio_ren[id]) {
-		char name[18];
-		int gpio_mux = pdata->gpio_ren[id];
+	if (ren) {
+		/* This GPIO is not optional at this point */
+		ena = devm_gpiod_get(dev, "enable", GPIOD_OUT_HIGH);
+		if (IS_ERR(ena))
+			return PTR_ERR(ena);
 
-		config->ena_gpiod = pdata->ena_gpiods[id];
-		config->ena_gpio_invert = 1;
+		config->ena_gpiod = ena;
 
 		/*
 		 * GPI pin is muxed with regulator to control the
 		 * regulator state.
 		 */
-		sprintf(name, "DA9055 GPI %d", gpio_mux);
-		ret = devm_gpio_request_one(config->dev, gpio_mux, GPIOF_DIR_IN,
-					    name);
-		if (ret < 0)
-			goto err;
+		gpiod_set_consumer_name(ren, "DA9055 ren GPI");
 
 		/*
 		 * Let the regulator know that its state is controlled
@@ -478,24 +451,22 @@ static int da9055_gpio_init(struct da9055_regulator *regulator,
 					pdata->reg_ren[id]
 					<< DA9055_E_GPI_SHIFT);
 		if (ret < 0)
-			goto err;
+			return ret;
 	}
 
-	if (pdata->gpio_rsel && pdata->gpio_rsel[id]) {
-		char name[18];
-		int gpio_mux = pdata->gpio_rsel[id];
+	/* Look for "regulator-select-gpios" GPIOs in the regulator node */
+	rsel = devm_gpiod_get_optional(dev, "regulator-select", GPIOD_IN);
+	if (IS_ERR(rsel))
+		return PTR_ERR(rsel);
 
+	if (rsel) {
 		regulator->reg_rselect = pdata->reg_rsel[id];
 
 		/*
 		 * GPI pin is muxed with regulator to select the
 		 * regulator register set A/B for voltage ramping.
 		 */
-		sprintf(name, "DA9055 GPI %d", gpio_mux);
-		ret = devm_gpio_request_one(config->dev, gpio_mux, GPIOF_DIR_IN,
-					    name);
-		if (ret < 0)
-			goto err;
+		gpiod_set_consumer_name(rsel, "DA9055 rsel GPI");
 
 		/*
 		 * Let the regulator know that its register set A/B
@@ -507,7 +478,6 @@ static int da9055_gpio_init(struct da9055_regulator *regulator,
 					<< DA9055_V_GPI_SHIFT);
 	}
 
-err:
 	return ret;
 }
 
@@ -521,9 +491,9 @@ static irqreturn_t da9055_ldo5_6_oc_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static inline struct da9055_regulator_info *find_regulator_info(int id)
+static inline const struct da9055_regulator_info *find_regulator_info(int id)
 {
-	struct da9055_regulator_info *info;
+	const struct da9055_regulator_info *info;
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(da9055_regulator_info); i++) {
@@ -534,59 +504,6 @@ static inline struct da9055_regulator_info *find_regulator_info(int id)
 
 	return NULL;
 }
-
-#ifdef CONFIG_OF
-static struct of_regulator_match da9055_reg_matches[] = {
-	{ .name = "BUCK1", },
-	{ .name = "BUCK2", },
-	{ .name = "LDO1", },
-	{ .name = "LDO2", },
-	{ .name = "LDO3", },
-	{ .name = "LDO4", },
-	{ .name = "LDO5", },
-	{ .name = "LDO6", },
-};
-
-static int da9055_regulator_dt_init(struct platform_device *pdev,
-				    struct da9055_regulator *regulator,
-				    struct regulator_config *config,
-				    int regid)
-{
-	struct device_node *nproot, *np;
-	int ret;
-
-	nproot = of_node_get(pdev->dev.parent->of_node);
-	if (!nproot)
-		return -ENODEV;
-
-	np = of_get_child_by_name(nproot, "regulators");
-	if (!np)
-		return -ENODEV;
-
-	ret = of_regulator_match(&pdev->dev, np, &da9055_reg_matches[regid], 1);
-	of_node_put(nproot);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Error matching regulator: %d\n", ret);
-		return ret;
-	}
-
-	config->init_data = da9055_reg_matches[regid].init_data;
-	config->of_node = da9055_reg_matches[regid].of_node;
-
-	if (!config->of_node)
-		return -ENODEV;
-
-	return 0;
-}
-#else
-static inline int da9055_regulator_dt_init(struct platform_device *pdev,
-				       struct da9055_regulator *regulator,
-				       struct regulator_config *config,
-				       int regid)
-{
-	return -ENODEV;
-}
-#endif /* CONFIG_OF */
 
 static int da9055_regulator_probe(struct platform_device *pdev)
 {
@@ -608,20 +525,14 @@ static int da9055_regulator_probe(struct platform_device *pdev)
 	}
 
 	regulator->da9055 = da9055;
-	config.dev = &pdev->dev;
+	config.dev = da9055->dev;
 	config.driver_data = regulator;
 	config.regmap = da9055->regmap;
 
-	if (pdata && pdata->regulators) {
+	if (pdata)
 		config.init_data = pdata->regulators[pdev->id];
-	} else {
-		ret = da9055_regulator_dt_init(pdev, regulator, &config,
-					       pdev->id);
-		if (ret < 0)
-			return ret;
-	}
 
-	ret = da9055_gpio_init(regulator, &config, pdata, pdev->id);
+	ret = da9055_gpio_init(&pdev->dev, regulator, &config, pdata, pdev->id);
 	if (ret < 0)
 		return ret;
 
@@ -665,6 +576,7 @@ static struct platform_driver da9055_regulator_driver = {
 	.probe = da9055_regulator_probe,
 	.driver = {
 		.name = "da9055-regulator",
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	},
 };
 

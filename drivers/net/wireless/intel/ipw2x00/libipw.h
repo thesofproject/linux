@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Merged with mainline ieee80211.h in Aug 2004.  Original ieee802_11
  * remains copyright by the original authors
@@ -13,11 +14,6 @@
  * <jketreno@linux.intel.com>
  * Copyright (c) 2004-2005, Intel Corporation
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation. See README and COPYING for
- * more details.
- *
  * API Version History
  * 1.0.x -- Initial version
  * 1.1.x -- Added radiotap, QoS, TIM, libipw_geo APIs,
@@ -29,8 +25,6 @@
 #include <linux/kernel.h>	/* ARRAY_SIZE */
 #include <linux/wireless.h>
 #include <linux/ieee80211.h>
-
-#include <net/lib80211.h>
 #include <net/cfg80211.h>
 
 #define LIBIPW_VERSION "git-1.1.13"
@@ -64,8 +58,7 @@
 extern u32 libipw_debug_level;
 #define LIBIPW_DEBUG(level, fmt, args...) \
 do { if (libipw_debug_level & (level)) \
-  printk(KERN_DEBUG "libipw: %c %s " fmt, \
-         in_interrupt() ? 'I' : 'U', __func__ , ## args); } while (0)
+  printk(KERN_DEBUG "libipw: %s " fmt, __func__ , ## args); } while (0)
 #else
 #define LIBIPW_DEBUG(level, fmt, args...) do {} while (0)
 #endif				/* CONFIG_LIBIPW_DEBUG */
@@ -338,7 +331,7 @@ struct libipw_hdr_1addr {
 	__le16 frame_ctl;
 	__le16 duration_id;
 	u8 addr1[ETH_ALEN];
-	u8 payload[0];
+	u8 payload[];
 } __packed;
 
 struct libipw_hdr_2addr {
@@ -346,18 +339,23 @@ struct libipw_hdr_2addr {
 	__le16 duration_id;
 	u8 addr1[ETH_ALEN];
 	u8 addr2[ETH_ALEN];
-	u8 payload[0];
+	u8 payload[];
 } __packed;
 
 struct libipw_hdr_3addr {
-	__le16 frame_ctl;
-	__le16 duration_id;
-	u8 addr1[ETH_ALEN];
-	u8 addr2[ETH_ALEN];
-	u8 addr3[ETH_ALEN];
-	__le16 seq_ctl;
-	u8 payload[0];
+	/* New members MUST be added within the __struct_group() macro below. */
+	__struct_group(libipw_hdr_3addr_hdr, hdr, __packed,
+		__le16 frame_ctl;
+		__le16 duration_id;
+		u8 addr1[ETH_ALEN];
+		u8 addr2[ETH_ALEN];
+		u8 addr3[ETH_ALEN];
+		__le16 seq_ctl;
+	);
+	u8 payload[];
 } __packed;
+static_assert(offsetof(struct libipw_hdr_3addr, payload) == sizeof(struct libipw_hdr_3addr_hdr),
+	      "struct member likely outside of __struct_group()");
 
 struct libipw_hdr_4addr {
 	__le16 frame_ctl;
@@ -367,7 +365,7 @@ struct libipw_hdr_4addr {
 	u8 addr3[ETH_ALEN];
 	__le16 seq_ctl;
 	u8 addr4[ETH_ALEN];
-	u8 payload[0];
+	u8 payload[];
 } __packed;
 
 struct libipw_hdr_3addrqos {
@@ -384,7 +382,7 @@ struct libipw_hdr_3addrqos {
 struct libipw_info_element {
 	u8 id;
 	u8 len;
-	u8 data[0];
+	u8 data[];
 } __packed;
 
 /*
@@ -405,12 +403,12 @@ struct libipw_info_element {
 */
 
 struct libipw_auth {
-	struct libipw_hdr_3addr header;
+	struct libipw_hdr_3addr_hdr header;
 	__le16 algorithm;
 	__le16 transaction;
 	__le16 status;
 	/* challenge */
-	struct libipw_info_element info_element[0];
+	u8 variable[];
 } __packed;
 
 struct libipw_channel_switch {
@@ -422,13 +420,12 @@ struct libipw_channel_switch {
 } __packed;
 
 struct libipw_action {
-	struct libipw_hdr_3addr header;
+	struct libipw_hdr_3addr_hdr header;
 	u8 category;
 	u8 action;
 	union {
 		struct libipw_action_exchange {
 			u8 token;
-			struct libipw_info_element info_element[0];
 		} exchange;
 		struct libipw_channel_switch channel_switch;
 
@@ -436,7 +433,7 @@ struct libipw_action {
 } __packed;
 
 struct libipw_disassoc {
-	struct libipw_hdr_3addr header;
+	struct libipw_hdr_3addr_hdr header;
 	__le16 reason;
 } __packed;
 
@@ -444,47 +441,39 @@ struct libipw_disassoc {
 #define libipw_deauth libipw_disassoc
 
 struct libipw_probe_request {
-	struct libipw_hdr_3addr header;
+	struct libipw_hdr_3addr_hdr header;
 	/* SSID, supported rates */
-	struct libipw_info_element info_element[0];
+	u8 variable[];
 } __packed;
 
 struct libipw_probe_response {
-	struct libipw_hdr_3addr header;
+	struct libipw_hdr_3addr_hdr header;
 	__le32 time_stamp[2];
 	__le16 beacon_interval;
 	__le16 capability;
 	/* SSID, supported rates, FH params, DS params,
 	 * CF params, IBSS params, TIM (if beacon), RSN */
-	struct libipw_info_element info_element[0];
+	u8 variable[];
 } __packed;
 
 /* Alias beacon for probe_response */
 #define libipw_beacon libipw_probe_response
 
-struct libipw_assoc_request {
-	struct libipw_hdr_3addr header;
-	__le16 capability;
-	__le16 listen_interval;
-	/* SSID, supported rates, RSN */
-	struct libipw_info_element info_element[0];
-} __packed;
-
 struct libipw_reassoc_request {
-	struct libipw_hdr_3addr header;
+	struct libipw_hdr_3addr_hdr header;
 	__le16 capability;
 	__le16 listen_interval;
 	u8 current_ap[ETH_ALEN];
-	struct libipw_info_element info_element[0];
+	u8 variable[];
 } __packed;
 
 struct libipw_assoc_response {
-	struct libipw_hdr_3addr header;
+	struct libipw_hdr_3addr_hdr header;
 	__le16 capability;
 	__le16 status;
 	__le16 aid;
 	/* supported rates */
-	struct libipw_info_element info_element[0];
+	u8 variable[];
 } __packed;
 
 struct libipw_txb {
@@ -494,7 +483,7 @@ struct libipw_txb {
 	u8 reserved;
 	u16 frag_size;
 	u16 payload_size;
-	struct sk_buff *fragments[0];
+	struct sk_buff *fragments[] __counted_by(nr_frags);
 };
 
 /* SWEEP TABLE ENTRIES NUMBER */
@@ -593,13 +582,6 @@ struct libipw_channel_map {
 	u8 channel;
 	u8 map;
 } __packed;
-
-struct libipw_ibss_dfs {
-	struct libipw_info_element ie;
-	u8 owner[ETH_ALEN];
-	u8 recovery_interval;
-	struct libipw_channel_map channel_map[0];
-};
 
 struct libipw_csa {
 	u8 mode;
@@ -715,6 +697,76 @@ struct libipw_geo {
 	struct libipw_channel a[LIBIPW_52GHZ_CHANNELS];
 };
 
+#define NUM_WEP_KEYS	4
+
+enum {
+	IEEE80211_CRYPTO_TKIP_COUNTERMEASURES = (1 << 0),
+};
+
+struct module;
+
+struct libipw_crypto_ops {
+	const char *name;
+	struct list_head list;
+
+	/* init new crypto context (e.g., allocate private data space,
+	 * select IV, etc.); returns NULL on failure or pointer to allocated
+	 * private data on success */
+	void *(*init) (int keyidx);
+
+	/* deinitialize crypto context and free allocated private data */
+	void (*deinit) (void *priv);
+
+	/* encrypt/decrypt return < 0 on error or >= 0 on success. The return
+	 * value from decrypt_mpdu is passed as the keyidx value for
+	 * decrypt_msdu. skb must have enough head and tail room for the
+	 * encryption; if not, error will be returned; these functions are
+	 * called for all MPDUs (i.e., fragments).
+	 */
+	int (*encrypt_mpdu) (struct sk_buff * skb, int hdr_len, void *priv);
+	int (*decrypt_mpdu) (struct sk_buff * skb, int hdr_len, void *priv);
+
+	/* These functions are called for full MSDUs, i.e. full frames.
+	 * These can be NULL if full MSDU operations are not needed. */
+	int (*encrypt_msdu) (struct sk_buff * skb, int hdr_len, void *priv);
+	int (*decrypt_msdu) (struct sk_buff * skb, int keyidx, int hdr_len,
+			     void *priv);
+
+	int (*set_key) (void *key, int len, u8 * seq, void *priv);
+	int (*get_key) (void *key, int len, u8 * seq, void *priv);
+
+	/* procfs handler for printing out key information and possible
+	 * statistics */
+	void (*print_stats) (struct seq_file *m, void *priv);
+
+	/* Crypto specific flag get/set for configuration settings */
+	unsigned long (*get_flags) (void *priv);
+	unsigned long (*set_flags) (unsigned long flags, void *priv);
+
+	/* maximum number of bytes added by encryption; encrypt buf is
+	 * allocated with extra_prefix_len bytes, copy of in_buf, and
+	 * extra_postfix_len; encrypt need not use all this space, but
+	 * the result must start at the beginning of the buffer and correct
+	 * length must be returned */
+	int extra_mpdu_prefix_len, extra_mpdu_postfix_len;
+	int extra_msdu_prefix_len, extra_msdu_postfix_len;
+
+	struct module *owner;
+};
+
+struct libipw_crypt_info {
+	char *name;
+	/* Most clients will already have a lock,
+	   so just point to that. */
+	spinlock_t *lock;
+
+	struct libipw_crypt_data *crypt[NUM_WEP_KEYS];
+	int tx_keyidx;		/* default TX key index (crypt[tx_keyidx]) */
+	struct list_head crypt_deinit_list;
+	struct timer_list crypt_deinit_timer;
+	int crypt_quiesced;
+};
+
 struct libipw_device {
 	struct net_device *dev;
 	struct wireless_dev wdev;
@@ -736,6 +788,7 @@ struct libipw_device {
 
 	int iw_mode;		/* operating mode (IW_MODE_*) */
 	struct iw_spy_data spy_data;	/* iwspy support */
+	bool spy_enabled;
 
 	spinlock_t lock;
 
@@ -767,7 +820,7 @@ struct libipw_device {
 	size_t wpa_ie_len;
 	u8 *wpa_ie;
 
-	struct lib80211_crypt_info crypt_info;
+	struct libipw_crypt_info crypt_info;
 
 	int bcrx_sta_key;	/* use individual keys to override default keys even
 				 * with RX of broad/multicast frames */
@@ -834,7 +887,7 @@ struct libipw_device {
 
 	/* This must be the last item so that it points to the data
 	 * allocated beyond this structure by alloc_libipw */
-	u8 priv[0];
+	u8 priv[];
 };
 
 #define IEEE_A            (1<<0)
@@ -958,8 +1011,6 @@ netdev_tx_t libipw_xmit(struct sk_buff *skb, struct net_device *dev);
 void libipw_txb_free(struct libipw_txb *);
 
 /* libipw_rx.c */
-void libipw_rx_any(struct libipw_device *ieee, struct sk_buff *skb,
-		   struct libipw_rx_stats *stats);
 int libipw_rx(struct libipw_device *ieee, struct sk_buff *skb,
 	      struct libipw_rx_stats *rx_stats);
 /* make sure to set stats->len */
@@ -1003,5 +1054,44 @@ static inline int libipw_get_scans(struct libipw_device *ieee)
 {
 	return ieee->scans;
 }
+
+struct libipw_crypt_data {
+	struct list_head list;	/* delayed deletion list */
+	const struct libipw_crypto_ops *ops;
+	void *priv;
+	atomic_t refcnt;
+};
+
+int libipw_crypt_info_init(struct libipw_crypt_info *info, char *name,
+			   spinlock_t *lock);
+void libipw_crypt_info_free(struct libipw_crypt_info *info);
+int libipw_register_crypto_ops(const struct libipw_crypto_ops *ops);
+int libipw_unregister_crypto_ops(const struct libipw_crypto_ops *ops);
+const struct libipw_crypto_ops *libipw_get_crypto_ops(const char *name);
+void libipw_crypt_delayed_deinit(struct libipw_crypt_info *info,
+				 struct libipw_crypt_data **crypt);
+
+/* must be called in the listed order */
+int libipw_crypto_init(void);
+int libipw_crypto_ccmp_init(void);
+int libipw_crypto_tkip_init(void);
+int libipw_crypto_wep_init(void);
+
+void libipw_crypto_wep_exit(void);
+void libipw_crypto_tkip_exit(void);
+void libipw_crypto_ccmp_exit(void);
+void libipw_crypto_exit(void);
+
+
+int ipw_wx_set_spy(struct net_device *dev, struct iw_request_info *info,
+		   union iwreq_data *wrqu, char *extra);
+int ipw_wx_get_spy(struct net_device *dev, struct iw_request_info *info,
+		   union iwreq_data *wrqu, char *extra);
+int ipw_wx_set_thrspy(struct net_device *dev, struct iw_request_info *info,
+		      union iwreq_data *wrqu, char *extra);
+int ipw_wx_get_thrspy(struct net_device *dev, struct iw_request_info *info,
+		      union iwreq_data *wrqu, char *extra);
+void libipw_spy_update(struct net_device *dev, unsigned char *address,
+		       struct iw_quality *wstats);
 
 #endif				/* LIBIPW_H */

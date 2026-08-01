@@ -1,17 +1,11 @@
-/*
- * Copyright (C) 2015 - 2016 Samsung Electronics Co., Ltd.
- *
- * Authors: Inha Song <ideal.song@samsung.com>
- *          Sylwester Nawrocki <s.nawrocki@samsung.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// Copyright (C) 2015 - 2016 Samsung Electronics Co., Ltd.
+//
+// Authors: Inha Song <ideal.song@samsung.com>
+//          Sylwester Nawrocki <s.nawrocki@samsung.com>
 
 #include <linux/clk.h>
-#include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -97,8 +91,8 @@ static int tm2_stop_sysclk(struct snd_soc_card *card)
 static int tm2_aif1_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component = rtd->codec_dai->component;
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_component *component = snd_soc_rtd_to_codec(rtd, 0)->component;
 	struct tm2_machine_priv *priv = snd_soc_card_get_drvdata(rtd->card);
 
 	switch (params_rate(params)) {
@@ -131,15 +125,15 @@ static int tm2_aif1_hw_params(struct snd_pcm_substream *substream,
 	return tm2_start_sysclk(rtd->card);
 }
 
-static struct snd_soc_ops tm2_aif1_ops = {
+static const struct snd_soc_ops tm2_aif1_ops = {
 	.hw_params = tm2_aif1_hw_params,
 };
 
 static int tm2_aif2_hw_params(struct snd_pcm_substream *substream,
 				struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component = rtd->codec_dai->component;
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_component *component = snd_soc_rtd_to_codec(rtd, 0)->component;
 	unsigned int asyncclk_rate;
 	int ret;
 
@@ -192,8 +186,8 @@ static int tm2_aif2_hw_params(struct snd_pcm_substream *substream,
 
 static int tm2_aif2_hw_free(struct snd_pcm_substream *substream)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_component *component = rtd->codec_dai->component;
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_component *component = snd_soc_rtd_to_codec(rtd, 0)->component;
 	int ret;
 
 	/* disable FLL2 */
@@ -205,7 +199,7 @@ static int tm2_aif2_hw_free(struct snd_pcm_substream *substream)
 	return ret;
 }
 
-static struct snd_soc_ops tm2_aif2_ops = {
+static const struct snd_soc_ops tm2_aif2_ops = {
 	.hw_params = tm2_aif2_hw_params,
 	.hw_free = tm2_aif2_hw_free,
 };
@@ -213,8 +207,8 @@ static struct snd_soc_ops tm2_aif2_ops = {
 static int tm2_hdmi_hw_params(struct snd_pcm_substream *substream,
 			      struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	unsigned int bfs;
 	int bitwidth, ret;
 
@@ -259,14 +253,14 @@ static int tm2_hdmi_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static struct snd_soc_ops tm2_hdmi_ops = {
+static const struct snd_soc_ops tm2_hdmi_ops = {
 	.hw_params = tm2_hdmi_hw_params,
 };
 
 static int tm2_mic_bias(struct snd_soc_dapm_widget *w,
 				struct snd_kcontrol *kcontrol, int event)
 {
-	struct snd_soc_card *card = w->dapm->card;
+	struct snd_soc_card *card = snd_soc_dapm_to_card(w->dapm);
 	struct tm2_machine_priv *priv = snd_soc_card_get_drvdata(card);
 
 	switch (event) {
@@ -285,16 +279,17 @@ static int tm2_set_bias_level(struct snd_soc_card *card,
 				struct snd_soc_dapm_context *dapm,
 				enum snd_soc_bias_level level)
 {
+	struct snd_soc_dapm_context *card_dapm = snd_soc_card_to_dapm(card);
 	struct snd_soc_pcm_runtime *rtd;
 
-	rtd = snd_soc_get_pcm_runtime(card, card->dai_link[0].name);
+	rtd = snd_soc_get_pcm_runtime(card, &card->dai_link[0]);
 
-	if (dapm->dev != rtd->codec_dai->dev)
+	if (snd_soc_dapm_to_dev(dapm) != snd_soc_rtd_to_codec(rtd, 0)->dev)
 		return 0;
 
 	switch (level) {
 	case SND_SOC_BIAS_STANDBY:
-		if (card->dapm.bias_level == SND_SOC_BIAS_OFF)
+		if (snd_soc_dapm_get_bias_level(card_dapm) == SND_SOC_BIAS_OFF)
 			tm2_start_sysclk(card);
 		break;
 	case SND_SOC_BIAS_OFF:
@@ -312,7 +307,6 @@ static struct snd_soc_aux_dev tm2_speaker_amp_dev;
 static int tm2_late_probe(struct snd_soc_card *card)
 {
 	struct tm2_machine_priv *priv = snd_soc_card_get_drvdata(card);
-	struct snd_soc_dai_link_component dlc = { 0 };
 	unsigned int ch_map[] = { 0, 1 };
 	struct snd_soc_dai *amp_pdm_dai;
 	struct snd_soc_pcm_runtime *rtd;
@@ -320,9 +314,9 @@ static int tm2_late_probe(struct snd_soc_card *card)
 	struct snd_soc_dai *aif2_dai;
 	int ret;
 
-	rtd = snd_soc_get_pcm_runtime(card, card->dai_link[TM2_DAI_AIF1].name);
-	aif1_dai = rtd->codec_dai;
-	priv->component = rtd->codec_dai->component;
+	rtd = snd_soc_get_pcm_runtime(card, &card->dai_link[TM2_DAI_AIF1]);
+	aif1_dai = snd_soc_rtd_to_codec(rtd, 0);
+	priv->component = snd_soc_rtd_to_codec(rtd, 0)->component;
 
 	ret = snd_soc_dai_set_sysclk(aif1_dai, ARIZONA_CLK_SYSCLK, 0, 0);
 	if (ret < 0) {
@@ -330,8 +324,8 @@ static int tm2_late_probe(struct snd_soc_card *card)
 		return ret;
 	}
 
-	rtd = snd_soc_get_pcm_runtime(card, card->dai_link[TM2_DAI_AIF2].name);
-	aif2_dai = rtd->codec_dai;
+	rtd = snd_soc_get_pcm_runtime(card, &card->dai_link[TM2_DAI_AIF2]);
+	aif2_dai = snd_soc_rtd_to_codec(rtd, 0);
 
 	ret = snd_soc_dai_set_sysclk(aif2_dai, ARIZONA_CLK_ASYNCCLK, 0, 0);
 	if (ret < 0) {
@@ -339,8 +333,7 @@ static int tm2_late_probe(struct snd_soc_card *card)
 		return ret;
 	}
 
-	dlc.of_node = tm2_speaker_amp_dev.codec_of_node;
-	amp_pdm_dai = snd_soc_find_dai(&dlc);
+	amp_pdm_dai = snd_soc_find_dai(&tm2_speaker_amp_dev.dlc);
 	if (!amp_pdm_dai)
 		return -ENODEV;
 
@@ -432,38 +425,56 @@ static struct snd_soc_dai_driver tm2_ext_dai[] = {
 	},
 };
 
+SND_SOC_DAILINK_DEFS(aif1,
+	DAILINK_COMP_ARRAY(COMP_CPU(SAMSUNG_I2S_DAI)),
+	DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "wm5110-aif1")),
+	DAILINK_COMP_ARRAY(COMP_EMPTY()));
+
+SND_SOC_DAILINK_DEFS(voice,
+	DAILINK_COMP_ARRAY(COMP_CPU(SAMSUNG_I2S_DAI)),
+	DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "wm5110-aif2")),
+	DAILINK_COMP_ARRAY(COMP_EMPTY()));
+
+SND_SOC_DAILINK_DEFS(bt,
+	DAILINK_COMP_ARRAY(COMP_CPU(SAMSUNG_I2S_DAI)),
+	DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "wm5110-aif3")),
+	DAILINK_COMP_ARRAY(COMP_EMPTY()));
+
+SND_SOC_DAILINK_DEFS(hdmi,
+	DAILINK_COMP_ARRAY(COMP_EMPTY()),
+	DAILINK_COMP_ARRAY(COMP_EMPTY()),
+	DAILINK_COMP_ARRAY(COMP_EMPTY()));
+
 static struct snd_soc_dai_link tm2_dai_links[] = {
 	{
 		.name		= "WM5110 AIF1",
 		.stream_name	= "HiFi Primary",
-		.cpu_dai_name   = SAMSUNG_I2S_DAI,
-		.codec_dai_name = "wm5110-aif1",
 		.ops		= &tm2_aif1_ops,
 		.dai_fmt	= SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-				  SND_SOC_DAIFMT_CBM_CFM,
+				  SND_SOC_DAIFMT_CBP_CFP,
+		SND_SOC_DAILINK_REG(aif1),
 	}, {
 		.name		= "WM5110 Voice",
 		.stream_name	= "Voice call",
-		.cpu_dai_name   = SAMSUNG_I2S_DAI,
-		.codec_dai_name = "wm5110-aif2",
 		.ops		= &tm2_aif2_ops,
 		.dai_fmt	= SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-				  SND_SOC_DAIFMT_CBM_CFM,
+				  SND_SOC_DAIFMT_CBP_CFP,
 		.ignore_suspend = 1,
+		SND_SOC_DAILINK_REG(voice),
 	}, {
 		.name		= "WM5110 BT",
 		.stream_name	= "Bluetooth",
-		.cpu_dai_name   = SAMSUNG_I2S_DAI,
-		.codec_dai_name = "wm5110-aif3",
 		.dai_fmt	= SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-				  SND_SOC_DAIFMT_CBM_CFM,
+				  SND_SOC_DAIFMT_CBP_CFP,
 		.ignore_suspend = 1,
+		SND_SOC_DAILINK_REG(bt),
 	}, {
 		.name		= "HDMI",
 		.stream_name	= "i2s1",
 		.ops		= &tm2_hdmi_ops,
 		.dai_fmt	= SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-				  SND_SOC_DAIFMT_CBS_CFS,
+				  SND_SOC_DAIFMT_CBC_CFC,
+		SND_SOC_DAILINK_REG(hdmi),
 	}
 };
 
@@ -490,7 +501,7 @@ static int tm2_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct snd_soc_card *card = &tm2_card;
 	struct tm2_machine_priv *priv;
-	struct of_phandle_args args;
+	struct snd_soc_dai_link *dai_link;
 	int num_codecs, ret, i;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
@@ -512,15 +523,19 @@ static int tm2_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	ret = snd_soc_of_parse_audio_routing(card, "samsung,audio-routing");
+	ret = snd_soc_of_parse_audio_routing(card, "audio-routing");
 	if (ret < 0) {
-		dev_err(dev, "Audio routing is not specified or invalid\n");
-		return ret;
+		/* Backwards compatible way */
+		ret = snd_soc_of_parse_audio_routing(card, "samsung,audio-routing");
+		if (ret < 0) {
+			dev_err(dev, "Audio routing is not specified or invalid\n");
+			return ret;
+		}
 	}
 
-	card->aux_dev[0].codec_of_node = of_parse_phandle(dev->of_node,
+	card->aux_dev[0].dlc.of_node = of_parse_phandle(dev->of_node,
 							"audio-amplifier", 0);
-	if (!card->aux_dev[0].codec_of_node) {
+	if (!card->aux_dev[0].dlc.of_node) {
 		dev_err(dev, "audio-amplifier property invalid or missing\n");
 		return -EINVAL;
 	}
@@ -541,7 +556,7 @@ static int tm2_probe(struct platform_device *pdev)
 
 		ret = of_parse_phandle_with_args(dev->of_node, "i2s-controller",
 						 cells_name, i, &args);
-		if (!args.np) {
+		if (ret) {
 			dev_err(dev, "i2s-controller property parse error: %d\n", i);
 			ret = -EINVAL;
 			goto dai_node_put;
@@ -558,21 +573,23 @@ static int tm2_probe(struct platform_device *pdev)
 	}
 
 	/* Initialize WM5110 - I2S and HDMI - I2S1 DAI links */
-	for (i = 0; i < card->num_links; i++) {
+	for_each_card_prelinks(card, i, dai_link) {
 		unsigned int dai_index = 0; /* WM5110 */
 
-		card->dai_link[i].cpu_name = NULL;
-		card->dai_link[i].platform_name = NULL;
+		dai_link->cpus->name = NULL;
+		dai_link->platforms->name = NULL;
 
 		if (num_codecs > 1 && i == card->num_links - 1)
 			dai_index = 1; /* HDMI */
 
-		card->dai_link[i].codec_of_node = codec_dai_node[dai_index];
-		card->dai_link[i].cpu_of_node = cpu_dai_node[dai_index];
-		card->dai_link[i].platform_of_node = cpu_dai_node[dai_index];
+		dai_link->codecs->of_node = codec_dai_node[dai_index];
+		dai_link->cpus->of_node = cpu_dai_node[dai_index];
+		dai_link->platforms->of_node = cpu_dai_node[dai_index];
 	}
 
 	if (num_codecs > 1) {
+		struct of_phandle_args args;
+
 		/* HDMI DAI link (I2S1) */
 		i = card->num_links - 1;
 
@@ -583,7 +600,7 @@ static int tm2_probe(struct platform_device *pdev)
 			goto dai_node_put;
 		}
 
-		ret = snd_soc_get_dai_name(&args, &card->dai_link[i].codec_dai_name);
+		ret = snd_soc_get_dai_name(&args, &card->dai_link[i].codecs->dai_name);
 		if (ret) {
 			dev_err(dev, "Unable to get codec_dai_name\n");
 			goto dai_node_put;
@@ -599,7 +616,7 @@ static int tm2_probe(struct platform_device *pdev)
 
 	ret = devm_snd_soc_register_card(dev, card);
 	if (ret < 0) {
-		dev_err(dev, "Failed to register card: %d\n", ret);
+		dev_err_probe(dev, ret, "Failed to register card\n");
 		goto dai_node_put;
 	}
 
@@ -609,7 +626,7 @@ dai_node_put:
 		of_node_put(cpu_dai_node[i]);
 	}
 
-	of_node_put(card->aux_dev[0].codec_of_node);
+	of_node_put(card->aux_dev[0].dlc.of_node);
 
 	return ret;
 }

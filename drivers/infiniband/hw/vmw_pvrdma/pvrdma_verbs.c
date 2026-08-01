@@ -50,6 +50,7 @@
 #include <rdma/ib_smi.h>
 #include <rdma/ib_user_verbs.h>
 #include <rdma/vmw_pvrdma-abi.h>
+#include <rdma/uverbs_ioctl.h>
 
 #include "pvrdma.h"
 
@@ -66,11 +67,11 @@ int pvrdma_query_device(struct ib_device *ibdev,
 			struct ib_udata *uhw)
 {
 	struct pvrdma_dev *dev = to_vdev(ibdev);
+	int err;
 
-	if (uhw->inlen || uhw->outlen)
-		return -EINVAL;
-
-	memset(props, 0, sizeof(*props));
+	err = ib_is_udata_in_empty(uhw);
+	if (err)
+		return err;
 
 	props->fw_ver = dev->dsr->caps.fw_ver;
 	props->sys_image_guid = dev->dsr->caps.sys_image_guid;
@@ -82,7 +83,8 @@ int pvrdma_query_device(struct ib_device *ibdev,
 	props->max_qp = dev->dsr->caps.max_qp;
 	props->max_qp_wr = dev->dsr->caps.max_qp_wr;
 	props->device_cap_flags = dev->dsr->caps.device_cap_flags;
-	props->max_sge = dev->dsr->caps.max_sge;
+	props->max_send_sge = dev->dsr->caps.max_sge;
+	props->max_recv_sge = dev->dsr->caps.max_sge;
 	props->max_sge_rd = PVRDMA_GET_CAP(dev, dev->dsr->caps.max_sge,
 					   dev->dsr->caps.max_sge_rd);
 	props->max_srq = dev->dsr->caps.max_srq;
@@ -114,7 +116,7 @@ int pvrdma_query_device(struct ib_device *ibdev,
 	props->device_cap_flags |= IB_DEVICE_PORT_ACTIVE_EVENT |
 				   IB_DEVICE_RC_RNR_NAK_GEN;
 
-	return 0;
+	return ib_respond_empty_udata(uhw);
 }
 
 /**
@@ -125,7 +127,7 @@ int pvrdma_query_device(struct ib_device *ibdev,
  *
  * @return: 0 on success, otherwise negative errno
  */
-int pvrdma_query_port(struct ib_device *ibdev, u8 port,
+int pvrdma_query_port(struct ib_device *ibdev, u32 port,
 		      struct ib_port_attr *props)
 {
 	struct pvrdma_dev *dev = to_vdev(ibdev);
@@ -154,7 +156,8 @@ int pvrdma_query_port(struct ib_device *ibdev, u8 port,
 	props->gid_tbl_len = resp->attrs.gid_tbl_len;
 	props->port_cap_flags =
 		pvrdma_port_cap_flags_to_ib(resp->attrs.port_cap_flags);
-	props->port_cap_flags |= IB_PORT_CM_SUP | IB_PORT_IP_BASED_GIDS;
+	props->port_cap_flags |= IB_PORT_CM_SUP;
+	props->ip_gids = true;
 	props->max_msg_sz = resp->attrs.max_msg_sz;
 	props->bad_pkey_cntr = resp->attrs.bad_pkey_cntr;
 	props->qkey_viol_cntr = resp->attrs.qkey_viol_cntr;
@@ -182,7 +185,7 @@ int pvrdma_query_port(struct ib_device *ibdev, u8 port,
  *
  * @return: 0 on success, otherwise negative errno
  */
-int pvrdma_query_gid(struct ib_device *ibdev, u8 port, int index,
+int pvrdma_query_gid(struct ib_device *ibdev, u32 port, int index,
 		     union ib_gid *gid)
 {
 	struct pvrdma_dev *dev = to_vdev(ibdev);
@@ -204,7 +207,7 @@ int pvrdma_query_gid(struct ib_device *ibdev, u8 port, int index,
  *
  * @return: 0 on success, otherwise negative errno
  */
-int pvrdma_query_pkey(struct ib_device *ibdev, u8 port, u16 index,
+int pvrdma_query_pkey(struct ib_device *ibdev, u32 port, u16 index,
 		      u16 *pkey)
 {
 	int err = 0;
@@ -231,37 +234,9 @@ int pvrdma_query_pkey(struct ib_device *ibdev, u8 port, u16 index,
 }
 
 enum rdma_link_layer pvrdma_port_link_layer(struct ib_device *ibdev,
-					    u8 port)
+					    u32 port)
 {
 	return IB_LINK_LAYER_ETHERNET;
-}
-
-int pvrdma_modify_device(struct ib_device *ibdev, int mask,
-			 struct ib_device_modify *props)
-{
-	unsigned long flags;
-
-	if (mask & ~(IB_DEVICE_MODIFY_SYS_IMAGE_GUID |
-		     IB_DEVICE_MODIFY_NODE_DESC)) {
-		dev_warn(&to_vdev(ibdev)->pdev->dev,
-			 "unsupported device modify mask %#x\n", mask);
-		return -EOPNOTSUPP;
-	}
-
-	if (mask & IB_DEVICE_MODIFY_NODE_DESC) {
-		spin_lock_irqsave(&to_vdev(ibdev)->desc_lock, flags);
-		memcpy(ibdev->node_desc, props->node_desc, 64);
-		spin_unlock_irqrestore(&to_vdev(ibdev)->desc_lock, flags);
-	}
-
-	if (mask & IB_DEVICE_MODIFY_SYS_IMAGE_GUID) {
-		mutex_lock(&to_vdev(ibdev)->port_mutex);
-		to_vdev(ibdev)->sys_image_guid =
-			cpu_to_be64(props->sys_image_guid);
-		mutex_unlock(&to_vdev(ibdev)->port_mutex);
-	}
-
-	return 0;
 }
 
 /**
@@ -273,7 +248,7 @@ int pvrdma_modify_device(struct ib_device *ibdev, int mask,
  *
  * @return: 0 on success, otherwise negative errno
  */
-int pvrdma_modify_port(struct ib_device *ibdev, u8 port, int mask,
+int pvrdma_modify_port(struct ib_device *ibdev, u32 port, int mask,
 		       struct ib_port_modify *props)
 {
 	struct ib_port_attr attr;
@@ -304,47 +279,42 @@ out:
 
 /**
  * pvrdma_alloc_ucontext - allocate ucontext
- * @ibdev: the IB device
+ * @uctx: the uverbs countext
  * @udata: user data
  *
- * @return: the ib_ucontext pointer on success, otherwise errno.
+ * @return:  zero on success, otherwise errno.
  */
-struct ib_ucontext *pvrdma_alloc_ucontext(struct ib_device *ibdev,
-					  struct ib_udata *udata)
+int pvrdma_alloc_ucontext(struct ib_ucontext *uctx, struct ib_udata *udata)
 {
+	struct ib_device *ibdev = uctx->device;
 	struct pvrdma_dev *vdev = to_vdev(ibdev);
-	struct pvrdma_ucontext *context;
-	union pvrdma_cmd_req req;
-	union pvrdma_cmd_resp rsp;
+	struct pvrdma_ucontext *context = to_vucontext(uctx);
+	union pvrdma_cmd_req req = {};
+	union pvrdma_cmd_resp rsp = {};
 	struct pvrdma_cmd_create_uc *cmd = &req.create_uc;
 	struct pvrdma_cmd_create_uc_resp *resp = &rsp.create_uc_resp;
-	struct pvrdma_alloc_ucontext_resp uresp = {0};
+	struct pvrdma_alloc_ucontext_resp uresp = {};
 	int ret;
-	void *ptr;
 
 	if (!vdev->ib_active)
-		return ERR_PTR(-EAGAIN);
-
-	context = kmalloc(sizeof(*context), GFP_KERNEL);
-	if (!context)
-		return ERR_PTR(-ENOMEM);
+		return -EAGAIN;
 
 	context->dev = vdev;
 	ret = pvrdma_uar_alloc(vdev, &context->uar);
-	if (ret) {
-		kfree(context);
-		return ERR_PTR(-ENOMEM);
-	}
+	if (ret)
+		return -ENOMEM;
 
 	/* get ctx_handle from host */
-	memset(cmd, 0, sizeof(*cmd));
-	cmd->pfn = context->uar.pfn;
+	if (vdev->dsr_version < PVRDMA_PPN64_VERSION)
+		cmd->pfn = context->uar.pfn;
+	else
+		cmd->pfn64 = context->uar.pfn;
+
 	cmd->hdr.cmd = PVRDMA_CMD_CREATE_UC;
 	ret = pvrdma_cmd_post(vdev, &req, &rsp, PVRDMA_CMD_CREATE_UC_RESP);
 	if (ret < 0) {
 		dev_warn(&vdev->pdev->dev,
 			 "could not create ucontext, error: %d\n", ret);
-		ptr = ERR_PTR(ret);
 		goto err;
 	}
 
@@ -352,36 +322,31 @@ struct ib_ucontext *pvrdma_alloc_ucontext(struct ib_device *ibdev,
 
 	/* copy back to user */
 	uresp.qp_tab_size = vdev->dsr->caps.max_qp;
-	ret = ib_copy_to_udata(udata, &uresp, sizeof(uresp));
+	ret = ib_respond_udata(udata, uresp);
 	if (ret) {
-		pvrdma_uar_free(vdev, &context->uar);
-		context->ibucontext.device = ibdev;
+		/* pvrdma_dealloc_ucontext() also frees the UAR */
 		pvrdma_dealloc_ucontext(&context->ibucontext);
-		return ERR_PTR(-EFAULT);
+		return ret;
 	}
 
-	return &context->ibucontext;
+	return 0;
 
 err:
 	pvrdma_uar_free(vdev, &context->uar);
-	kfree(context);
-	return ptr;
+	return ret;
 }
 
 /**
  * pvrdma_dealloc_ucontext - deallocate ucontext
  * @ibcontext: the ucontext
- *
- * @return: 0 on success, otherwise errno.
  */
-int pvrdma_dealloc_ucontext(struct ib_ucontext *ibcontext)
+void pvrdma_dealloc_ucontext(struct ib_ucontext *ibcontext)
 {
 	struct pvrdma_ucontext *context = to_vucontext(ibcontext);
-	union pvrdma_cmd_req req;
+	union pvrdma_cmd_req req = {};
 	struct pvrdma_cmd_destroy_uc *cmd = &req.destroy_uc;
 	int ret;
 
-	memset(cmd, 0, sizeof(*cmd));
 	cmd->hdr.cmd = PVRDMA_CMD_DESTROY_UC;
 	cmd->ctx_handle = context->ctx_handle;
 
@@ -392,9 +357,6 @@ int pvrdma_dealloc_ucontext(struct ib_ucontext *ibcontext)
 
 	/* Free the UAR even if the device command failed */
 	pvrdma_uar_free(to_vdev(ibcontext->device), &context->uar);
-	kfree(context);
-
-	return ret;
 }
 
 /**
@@ -420,7 +382,7 @@ int pvrdma_mmap(struct ib_ucontext *ibcontext, struct vm_area_struct *vma)
 	}
 
 	/* Map UAR to kernel space, VM_LOCKED? */
-	vma->vm_flags |= VM_DONTCOPY | VM_DONTEXPAND;
+	vm_flags_set(vma, VM_DONTCOPY | VM_DONTEXPAND);
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 	if (io_remap_pfn_range(vma, start, context->uar.pfn, size,
 			       vma->vm_page_prot))
@@ -431,86 +393,74 @@ int pvrdma_mmap(struct ib_ucontext *ibcontext, struct vm_area_struct *vma)
 
 /**
  * pvrdma_alloc_pd - allocate protection domain
- * @ibdev: the IB device
- * @context: user context
+ * @ibpd: PD pointer
  * @udata: user data
  *
  * @return: the ib_pd protection domain pointer on success, otherwise errno.
  */
-struct ib_pd *pvrdma_alloc_pd(struct ib_device *ibdev,
-			      struct ib_ucontext *context,
-			      struct ib_udata *udata)
+int pvrdma_alloc_pd(struct ib_pd *ibpd, struct ib_udata *udata)
 {
-	struct pvrdma_pd *pd;
+	struct ib_device *ibdev = ibpd->device;
+	struct pvrdma_pd *pd = to_vpd(ibpd);
 	struct pvrdma_dev *dev = to_vdev(ibdev);
-	union pvrdma_cmd_req req;
-	union pvrdma_cmd_resp rsp;
+	union pvrdma_cmd_req req = {};
+	union pvrdma_cmd_resp rsp = {};
 	struct pvrdma_cmd_create_pd *cmd = &req.create_pd;
 	struct pvrdma_cmd_create_pd_resp *resp = &rsp.create_pd_resp;
 	struct pvrdma_alloc_pd_resp pd_resp = {0};
 	int ret;
-	void *ptr;
+	struct pvrdma_ucontext *context = rdma_udata_to_drv_context(
+		udata, struct pvrdma_ucontext, ibucontext);
 
 	/* Check allowed max pds */
 	if (!atomic_add_unless(&dev->num_pds, 1, dev->dsr->caps.max_pd))
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 
-	pd = kmalloc(sizeof(*pd), GFP_KERNEL);
-	if (!pd) {
-		ptr = ERR_PTR(-ENOMEM);
-		goto err;
-	}
-
-	memset(cmd, 0, sizeof(*cmd));
 	cmd->hdr.cmd = PVRDMA_CMD_CREATE_PD;
-	cmd->ctx_handle = (context) ? to_vucontext(context)->ctx_handle : 0;
+	cmd->ctx_handle = context ? context->ctx_handle : 0;
 	ret = pvrdma_cmd_post(dev, &req, &rsp, PVRDMA_CMD_CREATE_PD_RESP);
 	if (ret < 0) {
 		dev_warn(&dev->pdev->dev,
 			 "failed to allocate protection domain, error: %d\n",
 			 ret);
-		ptr = ERR_PTR(ret);
-		goto freepd;
+		goto err;
 	}
 
-	pd->privileged = !context;
+	pd->privileged = !udata;
 	pd->pd_handle = resp->pd_handle;
 	pd->pdn = resp->pd_handle;
 	pd_resp.pdn = resp->pd_handle;
 
-	if (context) {
-		if (ib_copy_to_udata(udata, &pd_resp, sizeof(pd_resp))) {
-			dev_warn(&dev->pdev->dev,
-				 "failed to copy back protection domain\n");
-			pvrdma_dealloc_pd(&pd->ibpd);
-			return ERR_PTR(-EFAULT);
+	if (udata) {
+		ret = ib_respond_udata(udata, pd_resp);
+		if (ret) {
+			pvrdma_dealloc_pd(&pd->ibpd, udata);
+			return ret;
 		}
 	}
 
 	/* u32 pd handle */
-	return &pd->ibpd;
+	return 0;
 
-freepd:
-	kfree(pd);
 err:
 	atomic_dec(&dev->num_pds);
-	return ptr;
+	return ret;
 }
 
 /**
  * pvrdma_dealloc_pd - deallocate protection domain
  * @pd: the protection domain to be released
+ * @udata: user data or null for kernel object
  *
- * @return: 0 on success, otherwise errno.
+ * @return: Always 0
  */
-int pvrdma_dealloc_pd(struct ib_pd *pd)
+int pvrdma_dealloc_pd(struct ib_pd *pd, struct ib_udata *udata)
 {
 	struct pvrdma_dev *dev = to_vdev(pd->device);
-	union pvrdma_cmd_req req;
+	union pvrdma_cmd_req req = {};
 	struct pvrdma_cmd_destroy_pd *cmd = &req.destroy_pd;
 	int ret;
 
-	memset(cmd, 0, sizeof(*cmd));
 	cmd->hdr.cmd = PVRDMA_CMD_DESTROY_PD;
 	cmd->pd_handle = to_vpd(pd)->pd_handle;
 
@@ -520,46 +470,39 @@ int pvrdma_dealloc_pd(struct ib_pd *pd)
 			 "could not dealloc protection domain, error: %d\n",
 			 ret);
 
-	kfree(to_vpd(pd));
 	atomic_dec(&dev->num_pds);
-
 	return 0;
 }
 
 /**
  * pvrdma_create_ah - create an address handle
- * @pd: the protection domain
- * @ah_attr: the attributes of the AH
- * @udata: user data blob
+ * @ibah: the IB address handle
+ * @init_attr: the attributes of the AH
+ * @udata: pointer to user data
  *
- * @return: the ib_ah pointer on success, otherwise errno.
+ * @return: 0 on success, otherwise errno.
  */
-struct ib_ah *pvrdma_create_ah(struct ib_pd *pd, struct rdma_ah_attr *ah_attr,
-			       struct ib_udata *udata)
+int pvrdma_create_ah(struct ib_ah *ibah, struct rdma_ah_init_attr *init_attr,
+		     struct ib_udata *udata)
 {
-	struct pvrdma_dev *dev = to_vdev(pd->device);
-	struct pvrdma_ah *ah;
+	struct rdma_ah_attr *ah_attr = init_attr->ah_attr;
+	struct pvrdma_dev *dev = to_vdev(ibah->device);
+	struct pvrdma_ah *ah = to_vah(ibah);
 	const struct ib_global_route *grh;
-	u8 port_num = rdma_ah_get_port_num(ah_attr);
+	u32 port_num = rdma_ah_get_port_num(ah_attr);
 
 	if (!(rdma_ah_get_ah_flags(ah_attr) & IB_AH_GRH))
-		return ERR_PTR(-EINVAL);
+		return -EINVAL;
 
 	grh = rdma_ah_read_grh(ah_attr);
 	if ((ah_attr->type != RDMA_AH_ATTR_TYPE_ROCE)  ||
 	    rdma_is_multicast_addr((struct in6_addr *)grh->dgid.raw))
-		return ERR_PTR(-EINVAL);
+		return -EINVAL;
 
 	if (!atomic_add_unless(&dev->num_ahs, 1, dev->dsr->caps.max_ah))
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 
-	ah = kzalloc(sizeof(*ah), GFP_KERNEL);
-	if (!ah) {
-		atomic_dec(&dev->num_ahs);
-		return ERR_PTR(-ENOMEM);
-	}
-
-	ah->av.port_pd = to_vpd(pd)->pd_handle | (port_num << 24);
+	ah->av.port_pd = to_vpd(ibah->pd)->pd_handle | (port_num << 24);
 	ah->av.src_path_bits = rdma_ah_get_path_bits(ah_attr);
 	ah->av.src_path_bits |= 0x80;
 	ah->av.gid_index = grh->sgid_index;
@@ -569,25 +512,19 @@ struct ib_ah *pvrdma_create_ah(struct ib_pd *pd, struct rdma_ah_attr *ah_attr,
 	memcpy(ah->av.dgid, grh->dgid.raw, 16);
 	memcpy(ah->av.dmac, ah_attr->roce.dmac, ETH_ALEN);
 
-	ah->ibah.device = pd->device;
-	ah->ibah.pd = pd;
-	ah->ibah.uobject = NULL;
-
-	return &ah->ibah;
+	return 0;
 }
 
 /**
  * pvrdma_destroy_ah - destroy an address handle
  * @ah: the address handle to destroyed
+ * @flags: destroy address handle flags (see enum rdma_destroy_ah_flags)
  *
- * @return: 0 on success.
  */
-int pvrdma_destroy_ah(struct ib_ah *ah)
+int pvrdma_destroy_ah(struct ib_ah *ah, u32 flags)
 {
 	struct pvrdma_dev *dev = to_vdev(ah->device);
 
-	kfree(to_vah(ah));
 	atomic_dec(&dev->num_ahs);
-
 	return 0;
 }

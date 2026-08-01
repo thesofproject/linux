@@ -1,12 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Integer base 2 logarithm calculation
  *
  * Copyright (C) 2006 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #ifndef _LINUX_LOG2_H
@@ -22,7 +18,7 @@
  * - the arch is not required to handle n==0 if implementing the fallback
  */
 #ifndef CONFIG_ARCH_HAS_ILOG2_U32
-static inline __attribute__((const))
+static __always_inline __attribute__((const))
 int __ilog2_u32(u32 n)
 {
 	return fls(n) - 1;
@@ -30,7 +26,7 @@ int __ilog2_u32(u32 n)
 #endif
 
 #ifndef CONFIG_ARCH_HAS_ILOG2_U64
-static inline __attribute__((const))
+static __always_inline __attribute__((const))
 int __ilog2_u64(u64 n)
 {
 	return fls64(n) - 1;
@@ -45,10 +41,10 @@ int __ilog2_u64(u64 n)
  * *not* considered a power of two.
  * Return: true if @n is a power of 2, otherwise false.
  */
-static inline __attribute__((const))
+static __always_inline __attribute__((const))
 bool is_power_of_2(unsigned long n)
 {
-	return (n != 0 && ((n & (n - 1)) == 0));
+	return n - 1 < (n ^ (n - 1));
 }
 
 /**
@@ -72,16 +68,13 @@ unsigned long __rounddown_pow_of_two(unsigned long n)
 }
 
 /**
- * ilog2 - log base 2 of 32-bit or a 64-bit unsigned value
+ * const_ilog2 - log base 2 of 32-bit or a 64-bit constant unsigned value
  * @n: parameter
  *
- * constant-capable log of base 2 calculation
- * - this can be used to initialise global variables from constant data, hence
- * the massive ternary operator construction
- *
- * selects the appropriately-sized optimised version depending on sizeof(n)
+ * Use this where sparse expects a true constant expression, e.g. for array
+ * indices.
  */
-#define ilog2(n)				\
+#define const_ilog2(n)				\
 (						\
 	__builtin_constant_p(n) ? (		\
 		(n) < 2 ? 0 :			\
@@ -147,10 +140,27 @@ unsigned long __rounddown_pow_of_two(unsigned long n)
 		(n) & (1ULL <<  4) ?  4 :	\
 		(n) & (1ULL <<  3) ?  3 :	\
 		(n) & (1ULL <<  2) ?  2 :	\
-		1 ) :				\
-	(sizeof(n) <= 4) ?			\
-	__ilog2_u32(n) :			\
-	__ilog2_u64(n)				\
+		1) :				\
+	-1)
+
+/**
+ * ilog2 - log base 2 of 32-bit or a 64-bit unsigned value
+ * @n: parameter
+ *
+ * constant-capable log of base 2 calculation
+ * - this can be used to initialise global variables from constant data, hence
+ * the massive ternary operator construction
+ *
+ * selects the appropriately-sized optimised version depending on sizeof(n)
+ */
+#define ilog2(n) \
+( \
+	__builtin_constant_p(n) ?	\
+	((n) < 2 ? 0 :			\
+	 63 - __builtin_clzll(n)) :	\
+	(sizeof(n) <= 4) ?		\
+	__ilog2_u32(n) :		\
+	__ilog2_u64(n)			\
  )
 
 /**
@@ -164,7 +174,7 @@ unsigned long __rounddown_pow_of_two(unsigned long n)
 #define roundup_pow_of_two(n)			\
 (						\
 	__builtin_constant_p(n) ? (		\
-		(n == 1) ? 1 :			\
+		((n) == 1) ? 1 :		\
 		(1UL << (ilog2((n) - 1) + 1))	\
 				   ) :		\
 	__roundup_pow_of_two(n)			\
@@ -211,4 +221,52 @@ int __order_base_2(unsigned long n)
 		ilog2((n) - 1) + 1) :		\
 	__order_base_2(n)			\
 )
+
+static inline __attribute__((const))
+int __bits_per(unsigned long n)
+{
+	if (n < 2)
+		return 1;
+	if (is_power_of_2(n))
+		return order_base_2(n) + 1;
+	return order_base_2(n);
+}
+
+/**
+ * bits_per - calculate the number of bits required for the argument
+ * @n: parameter
+ *
+ * This is constant-capable and can be used for compile time
+ * initializations, e.g bitfields.
+ *
+ * The first few values calculated by this routine:
+ * bf(0) = 1
+ * bf(1) = 1
+ * bf(2) = 2
+ * bf(3) = 2
+ * bf(4) = 3
+ * ... and so on.
+ */
+#define bits_per(n)				\
+(						\
+	__builtin_constant_p(n) ? (		\
+		((n) == 0 || (n) == 1)		\
+			? 1 : ilog2(n) + 1	\
+	) :					\
+	__bits_per(n)				\
+)
+
+/**
+ * max_pow_of_two_factor - return highest power-of-2 factor
+ * @n: parameter
+ *
+ * find highest power-of-2 which is evenly divisible into n.
+ * 0 is returned for n == 0 or 1.
+ */
+static inline __attribute__((const))
+unsigned int max_pow_of_two_factor(unsigned int n)
+{
+	return n & -n;
+}
+
 #endif /* _LINUX_LOG2_H */

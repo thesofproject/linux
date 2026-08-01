@@ -5,10 +5,6 @@
  * Copyright (C) 2015 Samsung Electronics
  *
  * Author: jh1009.sung@samsung.com
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation.
  */
 
 #include <linux/err.h>
@@ -107,31 +103,12 @@ static void _stop_streaming(struct vb2_queue *vq)
 	spin_unlock_irqrestore(&ctx->slock, flags);
 }
 
-static void _dmxdev_lock(struct vb2_queue *vq)
-{
-	struct dvb_vb2_ctx *ctx = vb2_get_drv_priv(vq);
-
-	mutex_lock(&ctx->mutex);
-	dprintk(3, "[%s]\n", ctx->name);
-}
-
-static void _dmxdev_unlock(struct vb2_queue *vq)
-{
-	struct dvb_vb2_ctx *ctx = vb2_get_drv_priv(vq);
-
-	if (mutex_is_locked(&ctx->mutex))
-		mutex_unlock(&ctx->mutex);
-	dprintk(3, "[%s]\n", ctx->name);
-}
-
 static const struct vb2_ops dvb_vb2_qops = {
 	.queue_setup		= _queue_setup,
 	.buf_prepare		= _buffer_prepare,
 	.buf_queue		= _buffer_queue,
 	.start_streaming	= _start_streaming,
 	.stop_streaming		= _stop_streaming,
-	.wait_prepare		= _dmxdev_unlock,
-	.wait_finish		= _dmxdev_lock,
 };
 
 static void _fill_dmx_buffer(struct vb2_buffer *vb, void *pb)
@@ -146,8 +123,7 @@ static void _fill_dmx_buffer(struct vb2_buffer *vb, void *pb)
 	dprintk(3, "[%s]\n", ctx->name);
 }
 
-static int _fill_vb2_buffer(struct vb2_buffer *vb,
-			    const void *pb, struct vb2_plane *planes)
+static int _fill_vb2_buffer(struct vb2_buffer *vb, struct vb2_plane *planes)
 {
 	struct dvb_vb2_ctx *ctx = vb2_get_drv_priv(vb->vb2_queue);
 
@@ -163,40 +139,38 @@ static const struct vb2_buf_ops dvb_vb2_buf_ops = {
 };
 
 /*
- * Videobuf operations
+ * vb2 operations
  */
-int dvb_vb2_init(struct dvb_vb2_ctx *ctx, const char *name, int nonblocking)
+int dvb_vb2_init(struct dvb_vb2_ctx *ctx, const char *name,
+		 struct mutex *mutex, int nonblocking)
 {
 	struct vb2_queue *q = &ctx->vb_q;
 	int ret;
 
 	memset(ctx, 0, sizeof(struct dvb_vb2_ctx));
 	q->type = DVB_BUF_TYPE_CAPTURE;
-	/**capture type*/
-	q->is_output = 0;
 	/**only mmap is supported currently*/
 	q->io_modes = VB2_MMAP;
 	q->drv_priv = ctx;
 	q->buf_struct_size = sizeof(struct dvb_buffer);
-	q->min_buffers_needed = 1;
+	q->min_queued_buffers = 1;
 	q->ops = &dvb_vb2_qops;
 	q->mem_ops = &vb2_vmalloc_memops;
 	q->buf_ops = &dvb_vb2_buf_ops;
-	q->num_buffers = 0;
+	q->lock = mutex;
+	spin_lock_init(&ctx->slock);
+	INIT_LIST_HEAD(&ctx->dvb_q);
+
+	strscpy(ctx->name, name, DVB_VB2_NAME_MAX);
+	ctx->nonblocking = nonblocking;
+	ctx->state = DVB_VB2_STATE_INIT;
+
 	ret = vb2_core_queue_init(q);
 	if (ret) {
 		ctx->state = DVB_VB2_STATE_NONE;
 		dprintk(1, "[%s] errno=%d\n", ctx->name, ret);
 		return ret;
 	}
-
-	mutex_init(&ctx->mutex);
-	spin_lock_init(&ctx->slock);
-	INIT_LIST_HEAD(&ctx->dvb_q);
-
-	strlcpy(ctx->name, name, DVB_VB2_NAME_MAX);
-	ctx->nonblocking = nonblocking;
-	ctx->state = DVB_VB2_STATE_INIT;
 
 	dprintk(3, "[%s]\n", ctx->name);
 
@@ -257,7 +231,8 @@ int dvb_vb2_is_streaming(struct dvb_vb2_ctx *ctx)
 
 int dvb_vb2_fill_buffer(struct dvb_vb2_ctx *ctx,
 			const unsigned char *src, int len,
-			enum dmx_buffer_flags *buffer_flags)
+			enum dmx_buffer_flags *buffer_flags,
+			bool flush)
 {
 	unsigned long flags = 0;
 	void *vbuf = NULL;
@@ -314,7 +289,7 @@ int dvb_vb2_fill_buffer(struct dvb_vb2_ctx *ctx,
 		}
 	}
 
-	if (ctx->nonblocking && ctx->buf) {
+	if (flush && ctx->buf) {
 		vb2_set_plane_payload(&ctx->buf->vb, 0, ll);
 		vb2_buffer_done(&ctx->buf->vb, VB2_BUF_STATE_DONE);
 		list_del(&ctx->buf->list);
@@ -343,7 +318,7 @@ int dvb_vb2_reqbufs(struct dvb_vb2_ctx *ctx, struct dmx_requestbuffers *req)
 
 	ctx->buf_siz = req->size;
 	ctx->buf_cnt = req->count;
-	ret = vb2_core_reqbufs(&ctx->vb_q, VB2_MEMORY_MMAP, &req->count);
+	ret = vb2_core_reqbufs(&ctx->vb_q, VB2_MEMORY_MMAP, 0, &req->count);
 	if (ret) {
 		ctx->state = DVB_VB2_STATE_NONE;
 		dprintk(1, "[%s] count=%d size=%d errno=%d\n", ctx->name,
@@ -359,7 +334,14 @@ int dvb_vb2_reqbufs(struct dvb_vb2_ctx *ctx, struct dmx_requestbuffers *req)
 
 int dvb_vb2_querybuf(struct dvb_vb2_ctx *ctx, struct dmx_buffer *b)
 {
-	vb2_core_querybuf(&ctx->vb_q, b->index, b);
+	struct vb2_queue *q = &ctx->vb_q;
+	struct vb2_buffer *vb2 = vb2_get_buffer(q, b->index);
+
+	if (!vb2) {
+		dprintk(1, "[%s] invalid buffer index\n", ctx->name);
+		return -EINVAL;
+	}
+	vb2_core_querybuf(&ctx->vb_q, vb2, b);
 	dprintk(3, "[%s] index=%d\n", ctx->name, b->index);
 	return 0;
 }
@@ -367,9 +349,15 @@ int dvb_vb2_querybuf(struct dvb_vb2_ctx *ctx, struct dmx_buffer *b)
 int dvb_vb2_expbuf(struct dvb_vb2_ctx *ctx, struct dmx_exportbuffer *exp)
 {
 	struct vb2_queue *q = &ctx->vb_q;
+	struct vb2_buffer *vb2 = vb2_get_buffer(q, exp->index);
 	int ret;
 
-	ret = vb2_core_expbuf(&ctx->vb_q, &exp->fd, q->type, exp->index,
+	if (!vb2) {
+		dprintk(1, "[%s] invalid buffer index\n", ctx->name);
+		return -EINVAL;
+	}
+
+	ret = vb2_core_expbuf(&ctx->vb_q, &exp->fd, q->type, vb2,
 			      0, exp->flags);
 	if (ret) {
 		dprintk(1, "[%s] index=%d errno=%d\n", ctx->name,
@@ -383,9 +371,15 @@ int dvb_vb2_expbuf(struct dvb_vb2_ctx *ctx, struct dmx_exportbuffer *exp)
 
 int dvb_vb2_qbuf(struct dvb_vb2_ctx *ctx, struct dmx_buffer *b)
 {
+	struct vb2_queue *q = &ctx->vb_q;
+	struct vb2_buffer *vb2 = vb2_get_buffer(q, b->index);
 	int ret;
 
-	ret = vb2_core_qbuf(&ctx->vb_q, b->index, b);
+	if (!vb2) {
+		dprintk(1, "[%s] invalid buffer index\n", ctx->name);
+		return -EINVAL;
+	}
+	ret = vb2_core_qbuf(&ctx->vb_q, vb2, b, NULL);
 	if (ret) {
 		dprintk(1, "[%s] index=%d errno=%d\n", ctx->name,
 			b->index, ret);

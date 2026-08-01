@@ -368,7 +368,7 @@ csio_mb_port(struct csio_hw *hw, struct csio_mb *mbp, uint32_t tmo,
 			FW_CMD_LEN16_V(sizeof(*cmdp) / 16));
 
 	if (fw_caps == FW_CAPS16)
-		cmdp->u.l1cfg.rcap = cpu_to_be32(fc);
+		cmdp->u.l1cfg.rcap = cpu_to_be32(fwcaps32_to_caps16(fc));
 	else
 		cmdp->u.l1cfg32.rcap32 = cpu_to_be32(fc);
 }
@@ -395,8 +395,8 @@ csio_mb_process_read_port_rsp(struct csio_hw *hw, struct csio_mb *mbp,
 			*pcaps = fwcaps16_to_caps32(ntohs(rsp->u.info.pcap));
 			*acaps = fwcaps16_to_caps32(ntohs(rsp->u.info.acap));
 		} else {
-			*pcaps = ntohs(rsp->u.info32.pcaps32);
-			*acaps = ntohs(rsp->u.info32.acaps32);
+			*pcaps = be32_to_cpu(rsp->u.info32.pcaps32);
+			*acaps = be32_to_cpu(rsp->u.info32.acaps32);
 		}
 	}
 }
@@ -1210,7 +1210,7 @@ csio_mb_issue(struct csio_hw *hw, struct csio_mb *mbp)
 		   !csio_is_hw_intr_enabled(hw)) {
 		csio_err(hw, "Cannot issue mailbox in interrupt mode 0x%x\n",
 			 *((uint8_t *)mbp->mb));
-			goto error_out;
+		goto error_out;
 	}
 
 	if (mbm->mcurrent != NULL) {
@@ -1619,7 +1619,7 @@ csio_mb_cancel_all(struct csio_hw *hw, struct list_head *cbfn_q)
 		mbp = mbm->mcurrent;
 
 		/* Stop mailbox completion timer */
-		del_timer_sync(&mbm->timer);
+		timer_delete_sync(&mbm->timer);
 
 		/* Add completion to tail of cbfn queue */
 		list_add_tail(&mbp->list, cbfn_q);
@@ -1682,7 +1682,7 @@ csio_mbm_init(struct csio_mbm *mbm, struct csio_hw *hw,
 void
 csio_mbm_exit(struct csio_mbm *mbm)
 {
-	del_timer_sync(&mbm->timer);
+	timer_delete_sync(&mbm->timer);
 
 	CSIO_DB_ASSERT(mbm->mcurrent == NULL);
 	CSIO_DB_ASSERT(list_empty(&mbm->req_q));

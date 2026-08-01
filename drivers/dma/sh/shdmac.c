@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Renesas SuperH DMA Engine support
  *
@@ -7,11 +8,6 @@
  * Copyright (C) 2009 Nobuhiro Iwamatsu <iwamatsu.nobuhiro@renesas.com>
  * Copyright (C) 2009 Renesas Solutions, Inc. All rights reserved.
  * Copyright (C) 2007 Freescale Semiconductor, Inc. All rights reserved.
- *
- * This is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  *
  * - DMA of SuperH does not have Hardware DMA chain mode.
  * - MAX DMA size is 16MB.
@@ -27,7 +23,6 @@
 #include <linux/module.h>
 #include <linux/notifier.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/rculist.h>
@@ -305,25 +300,34 @@ static bool sh_dmae_channel_busy(struct shdma_chan *schan)
 	return dmae_is_busy(sh_chan);
 }
 
-static void sh_dmae_setup_xfer(struct shdma_chan *schan,
-			       int slave_id)
+static int sh_dmae_setup_xfer(struct shdma_chan *schan, int slave_id)
 {
 	struct sh_dmae_chan *sh_chan = container_of(schan, struct sh_dmae_chan,
 						    shdma_chan);
 
+	int ret = 0;
 	if (slave_id >= 0) {
 		const struct sh_dmae_slave_config *cfg =
 			sh_chan->config;
 
-		dmae_set_dmars(sh_chan, cfg->mid_rid);
-		dmae_set_chcr(sh_chan, cfg->chcr);
+		ret = dmae_set_dmars(sh_chan, cfg->mid_rid);
+		if (ret < 0)
+			goto END;
+
+		ret = dmae_set_chcr(sh_chan, cfg->chcr);
+		if (ret < 0)
+			goto END;
+
 	} else {
 		dmae_init(sh_chan);
 	}
+
+END:
+	return ret;
 }
 
 /*
- * Find a slave channel configuration from the contoller list by either a slave
+ * Find a slave channel configuration from the controller list by either a slave
  * ID in the non-DT case, or by a MID/RID value in the DT case
  */
 static const struct sh_dmae_slave_config *dmae_find_slave(
@@ -443,7 +447,6 @@ static bool sh_dmae_reset(struct sh_dmae_device *shdev)
 	return ret;
 }
 
-#if defined(CONFIG_CPU_SH4) || defined(CONFIG_ARCH_SHMOBILE)
 static irqreturn_t sh_dmae_err(int irq, void *data)
 {
 	struct sh_dmae_device *shdev = data;
@@ -454,7 +457,6 @@ static irqreturn_t sh_dmae_err(int irq, void *data)
 	sh_dmae_reset(shdev);
 	return IRQ_HANDLED;
 }
-#endif
 
 static bool sh_dmae_desc_completed(struct shdma_chan *schan,
 				   struct shdma_desc *sdesc)
@@ -671,12 +673,6 @@ static const struct shdma_ops sh_dmae_shdma_ops = {
 	.get_partial = sh_dmae_get_partial,
 };
 
-static const struct of_device_id sh_dmae_of_match[] = {
-	{.compatible = "renesas,shdma-r8a73a4", .data = r8a73a4_shdma_devid,},
-	{}
-};
-MODULE_DEVICE_TABLE(of, sh_dmae_of_match);
-
 static int sh_dmae_probe(struct platform_device *pdev)
 {
 	const enum dma_slave_buswidth widths =
@@ -686,14 +682,11 @@ static int sh_dmae_probe(struct platform_device *pdev)
 	const struct sh_dmae_pdata *pdata;
 	unsigned long chan_flag[SH_DMAE_MAX_CHANNELS] = {};
 	int chan_irq[SH_DMAE_MAX_CHANNELS];
-#if defined(CONFIG_CPU_SH4) || defined(CONFIG_ARCH_SHMOBILE)
 	unsigned long irqflags = 0;
-	int errirq;
-#endif
-	int err, i, irq_cnt = 0, irqres = 0, irq_cap = 0;
+	int err, errirq, i, irq_cnt = 0, irqres = 0, irq_cap = 0;
 	struct sh_dmae_device *shdev;
 	struct dma_device *dma_dev;
-	struct resource *chan, *dmars, *errirq_res, *chanirq_res;
+	struct resource *dmars, *errirq_res, *chanirq_res;
 
 	if (pdev->dev.of_node)
 		pdata = of_device_get_match_data(&pdev->dev);
@@ -704,7 +697,6 @@ static int sh_dmae_probe(struct platform_device *pdev)
 	if (!pdata || !pdata->channel_num)
 		return -ENODEV;
 
-	chan = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	/* DMARS area is optional */
 	dmars = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 	/*
@@ -724,7 +716,7 @@ static int sh_dmae_probe(struct platform_device *pdev)
 	 *    requested with the IRQF_SHARED flag
 	 */
 	errirq_res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
-	if (!chan || !errirq_res)
+	if (!errirq_res)
 		return -ENODEV;
 
 	shdev = devm_kzalloc(&pdev->dev, sizeof(struct sh_dmae_device),
@@ -734,7 +726,7 @@ static int sh_dmae_probe(struct platform_device *pdev)
 
 	dma_dev = &shdev->shdma_dev.dma_dev;
 
-	shdev->chan_reg = devm_ioremap_resource(&pdev->dev, chan);
+	shdev->chan_reg = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(shdev->chan_reg))
 		return PTR_ERR(shdev->chan_reg);
 	if (dmars) {
@@ -792,32 +784,31 @@ static int sh_dmae_probe(struct platform_device *pdev)
 	if (err)
 		goto rst_err;
 
-#if defined(CONFIG_CPU_SH4) || defined(CONFIG_ARCH_SHMOBILE)
-	chanirq_res = platform_get_resource(pdev, IORESOURCE_IRQ, 1);
+	if (IS_ENABLED(CONFIG_CPU_SH4) || IS_ENABLED(CONFIG_ARCH_RENESAS)) {
+		chanirq_res = platform_get_resource(pdev, IORESOURCE_IRQ, 1);
 
-	if (!chanirq_res)
+		if (!chanirq_res)
+			chanirq_res = errirq_res;
+		else
+			irqres++;
+
+		if (chanirq_res == errirq_res ||
+		    (errirq_res->flags & IORESOURCE_BITS) == IORESOURCE_IRQ_SHAREABLE)
+			irqflags = IRQF_SHARED;
+
+		errirq = errirq_res->start;
+
+		err = devm_request_irq(&pdev->dev, errirq, sh_dmae_err,
+				       irqflags, "DMAC Address Error", shdev);
+		if (err) {
+			dev_err(&pdev->dev,
+				"DMA failed requesting irq #%d, error %d\n",
+				errirq, err);
+			goto eirq_err;
+		}
+	} else {
 		chanirq_res = errirq_res;
-	else
-		irqres++;
-
-	if (chanirq_res == errirq_res ||
-	    (errirq_res->flags & IORESOURCE_BITS) == IORESOURCE_IRQ_SHAREABLE)
-		irqflags = IRQF_SHARED;
-
-	errirq = errirq_res->start;
-
-	err = devm_request_irq(&pdev->dev, errirq, sh_dmae_err, irqflags,
-			       "DMAC Address Error", shdev);
-	if (err) {
-		dev_err(&pdev->dev,
-			"DMA failed requesting irq #%d, error %d\n",
-			errirq, err);
-		goto eirq_err;
 	}
-
-#else
-	chanirq_res = errirq_res;
-#endif /* CONFIG_CPU_SH4 || CONFIG_ARCH_SHMOBILE */
 
 	if (chanirq_res->start == chanirq_res->end &&
 	    !platform_get_resource(pdev, IORESOURCE_IRQ, 1)) {
@@ -884,9 +875,7 @@ edmadevreg:
 chan_probe_err:
 	sh_dmae_chan_remove(shdev);
 
-#if defined(CONFIG_CPU_SH4) || defined(CONFIG_ARCH_SHMOBILE)
 eirq_err:
-#endif
 rst_err:
 	spin_lock_irq(&sh_dmae_lock);
 	list_del_rcu(&shdev->node);
@@ -902,7 +891,7 @@ eshdma:
 	return err;
 }
 
-static int sh_dmae_remove(struct platform_device *pdev)
+static void sh_dmae_remove(struct platform_device *pdev)
 {
 	struct sh_dmae_device *shdev = platform_get_drvdata(pdev);
 	struct dma_device *dma_dev = &shdev->shdma_dev.dma_dev;
@@ -919,15 +908,12 @@ static int sh_dmae_remove(struct platform_device *pdev)
 	shdma_cleanup(&shdev->shdma_dev);
 
 	synchronize_rcu();
-
-	return 0;
 }
 
 static struct platform_driver sh_dmae_driver = {
 	.driver		= {
 		.pm	= &sh_dmae_pm,
 		.name	= SH_DMAE_DRV_NAME,
-		.of_match_table = sh_dmae_of_match,
 	},
 	.remove		= sh_dmae_remove,
 };

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2008, 2010 Davide Rizzo <elpa.rizzo@gmail.com>
  *
@@ -5,16 +6,6 @@
  * It reports up to three temperatures (its own plus up to two external ones).
  * Complete datasheet can be obtained from National's website at:
  *   http://www.national.com/ds.cgi/LM/LM95241.pdf
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/bitops.h>
@@ -24,7 +15,6 @@
 #include <linux/jiffies.h>
 #include <linux/hwmon.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 #include <linux/slab.h>
 
 #define DEVNAME "lm95241"
@@ -84,10 +74,9 @@ static const u8 lm95241_reg_address[] = {
 /* Client data (each client gets its own) */
 struct lm95241_data {
 	struct i2c_client *client;
-	struct mutex update_lock;
 	unsigned long last_updated;	/* in jiffies */
 	unsigned long interval;		/* in milli-seconds */
-	char valid;		/* zero until following fields are valid */
+	bool valid;		/* false until following fields are valid */
 	/* registers values */
 	u8 temp[ARRAY_SIZE(lm95241_reg_address)];
 	u8 status, config, model, trutherm;
@@ -111,8 +100,6 @@ static struct lm95241_data *lm95241_update_device(struct device *dev)
 	struct lm95241_data *data = dev_get_drvdata(dev);
 	struct i2c_client *client = data->client;
 
-	mutex_lock(&data->update_lock);
-
 	if (time_after(jiffies, data->last_updated
 		       + msecs_to_jiffies(data->interval)) ||
 	    !data->valid) {
@@ -127,11 +114,8 @@ static struct lm95241_data *lm95241_update_device(struct device *dev)
 		data->status = i2c_smbus_read_byte_data(client,
 							LM95241_REG_R_STATUS);
 		data->last_updated = jiffies;
-		data->valid = 1;
+		data->valid = true;
 	}
-
-	mutex_unlock(&data->update_lock);
-
 	return data;
 }
 
@@ -213,8 +197,6 @@ static int lm95241_write_chip(struct device *dev, u32 attr, int channel,
 	u8 config;
 	int ret;
 
-	mutex_lock(&data->update_lock);
-
 	switch (attr) {
 	case hwmon_chip_update_interval:
 		config = data->config & ~CFG_CRMASK;
@@ -240,7 +222,6 @@ static int lm95241_write_chip(struct device *dev, u32 attr, int channel,
 		ret = -EOPNOTSUPP;
 		break;
 	}
-	mutex_unlock(&data->update_lock);
 	return ret;
 }
 
@@ -250,8 +231,6 @@ static int lm95241_write_temp(struct device *dev, u32 attr, int channel,
 	struct lm95241_data *data = dev_get_drvdata(dev);
 	struct i2c_client *client = data->client;
 	int ret;
-
-	mutex_lock(&data->update_lock);
 
 	switch (attr) {
 	case hwmon_temp_min:
@@ -266,7 +245,7 @@ static int lm95241_write_temp(struct device *dev, u32 attr, int channel,
 			else
 				data->config &= ~R2DF_MASK;
 		}
-		data->valid = 0;
+		data->valid = false;
 		ret = i2c_smbus_write_byte_data(client, LM95241_REG_RW_CONFIG,
 						data->config);
 		break;
@@ -282,7 +261,7 @@ static int lm95241_write_temp(struct device *dev, u32 attr, int channel,
 			else
 				data->config &= ~R2DF_MASK;
 		}
-		data->valid = 0;
+		data->valid = false;
 		ret = i2c_smbus_write_byte_data(client, LM95241_REG_RW_CONFIG,
 						data->config);
 		break;
@@ -322,9 +301,6 @@ static int lm95241_write_temp(struct device *dev, u32 attr, int channel,
 		ret = -EOPNOTSUPP;
 		break;
 	}
-
-	mutex_unlock(&data->update_lock);
-
 	return ret;
 }
 
@@ -349,19 +325,19 @@ static umode_t lm95241_is_visible(const void *data,
 	case hwmon_chip:
 		switch (attr) {
 		case hwmon_chip_update_interval:
-			return S_IRUGO | S_IWUSR;
+			return 0644;
 		}
 		break;
 	case hwmon_temp:
 		switch (attr) {
 		case hwmon_temp_input:
-			return S_IRUGO;
+			return 0444;
 		case hwmon_temp_fault:
-			return S_IRUGO;
+			return 0444;
 		case hwmon_temp_min:
 		case hwmon_temp_max:
 		case hwmon_temp_type:
-			return S_IRUGO | S_IWUSR;
+			return 0644;
 		}
 		break;
 	default:
@@ -398,7 +374,7 @@ static int lm95241_detect(struct i2c_client *new_client,
 	}
 
 	/* Fill the i2c board info */
-	strlcpy(info->type, name, I2C_NAME_SIZE);
+	strscpy(info->type, name, I2C_NAME_SIZE);
 	return 0;
 }
 
@@ -418,33 +394,15 @@ static void lm95241_init_client(struct i2c_client *client,
 				  data->model);
 }
 
-static const u32 lm95241_chip_config[] = {
-	HWMON_C_UPDATE_INTERVAL,
-	0
-};
-
-static const struct hwmon_channel_info lm95241_chip = {
-	.type = hwmon_chip,
-	.config = lm95241_chip_config,
-};
-
-static const u32 lm95241_temp_config[] = {
-	HWMON_T_INPUT,
-	HWMON_T_INPUT | HWMON_T_MAX | HWMON_T_MIN | HWMON_T_TYPE |
-		HWMON_T_FAULT,
-	HWMON_T_INPUT | HWMON_T_MAX | HWMON_T_MIN | HWMON_T_TYPE |
-		HWMON_T_FAULT,
-	0
-};
-
-static const struct hwmon_channel_info lm95241_temp = {
-	.type = hwmon_temp,
-	.config = lm95241_temp_config,
-};
-
-static const struct hwmon_channel_info *lm95241_info[] = {
-	&lm95241_chip,
-	&lm95241_temp,
+static const struct hwmon_channel_info * const lm95241_info[] = {
+	HWMON_CHANNEL_INFO(chip,
+			   HWMON_C_UPDATE_INTERVAL),
+	HWMON_CHANNEL_INFO(temp,
+			   HWMON_T_INPUT,
+			   HWMON_T_INPUT | HWMON_T_MAX | HWMON_T_MIN |
+			   HWMON_T_TYPE | HWMON_T_FAULT,
+			   HWMON_T_INPUT | HWMON_T_MAX | HWMON_T_MIN |
+			   HWMON_T_TYPE | HWMON_T_FAULT),
 	NULL
 };
 
@@ -459,8 +417,7 @@ static const struct hwmon_chip_info lm95241_chip_info = {
 	.info = lm95241_info,
 };
 
-static int lm95241_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int lm95241_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct lm95241_data *data;
@@ -471,7 +428,6 @@ static int lm95241_probe(struct i2c_client *client,
 		return -ENOMEM;
 
 	data->client = client;
-	mutex_init(&data->update_lock);
 
 	/* Initialize the LM95241 chip */
 	lm95241_init_client(client, data);
@@ -485,8 +441,8 @@ static int lm95241_probe(struct i2c_client *client,
 
 /* Driver data (common to all clients) */
 static const struct i2c_device_id lm95241_id[] = {
-	{ "lm95231", 0 },
-	{ "lm95241", 0 },
+	{ .name = "lm95231" },
+	{ .name = "lm95241" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, lm95241_id);

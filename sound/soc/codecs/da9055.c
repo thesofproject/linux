@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * DA9055 ALSA Soc codec driver
  *
@@ -6,11 +7,6 @@
  * Tested on (Samsung SMDK6410 board + DA9055 EVB) using I2S and I2C
  * Written by David Chen <david.chen@diasemi.com> and
  * Ashish Chavan <ashish.chavan@kpitcummins.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
  */
 
 #include <linux/delay.h>
@@ -19,7 +15,6 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
@@ -465,12 +460,12 @@ static int da9055_get_alc_data(struct snd_soc_component *component, u8 reg_val)
 		/* Select middle 8 bits for read back from data register */
 		snd_soc_component_write(component, DA9055_ALC_CIC_OP_LVL_CTRL,
 			      reg_val | DA9055_ALC_DATA_MIDDLE);
-		mid_data = snd_soc_component_read32(component, DA9055_ALC_CIC_OP_LVL_DATA);
+		mid_data = snd_soc_component_read(component, DA9055_ALC_CIC_OP_LVL_DATA);
 
 		/* Select top 8 bits for read back from data register */
 		snd_soc_component_write(component, DA9055_ALC_CIC_OP_LVL_CTRL,
 			      reg_val | DA9055_ALC_DATA_TOP);
-		top_data = snd_soc_component_read32(component, DA9055_ALC_CIC_OP_LVL_DATA);
+		top_data = snd_soc_component_read(component, DA9055_ALC_CIC_OP_LVL_DATA);
 
 		sum += ((mid_data << 8) | (top_data << 16));
 	}
@@ -481,7 +476,7 @@ static int da9055_get_alc_data(struct snd_soc_component *component, u8 reg_val)
 static int da9055_put_alc_sw(struct snd_kcontrol *kcontrol,
 			     struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	u8 reg_val, adc_left, adc_right, mic_left, mic_right;
 	int avg_left_data, avg_right_data, offset_l, offset_r;
 
@@ -492,8 +487,8 @@ static int da9055_put_alc_sw(struct snd_kcontrol *kcontrol,
 		 */
 
 		/* Save current values from Mic control registers */
-		mic_left = snd_soc_component_read32(component, DA9055_MIC_L_CTRL);
-		mic_right = snd_soc_component_read32(component, DA9055_MIC_R_CTRL);
+		mic_left = snd_soc_component_read(component, DA9055_MIC_L_CTRL);
+		mic_right = snd_soc_component_read(component, DA9055_MIC_R_CTRL);
 
 		/* Mute Mic PGA Left and Right */
 		snd_soc_component_update_bits(component, DA9055_MIC_L_CTRL,
@@ -502,8 +497,8 @@ static int da9055_put_alc_sw(struct snd_kcontrol *kcontrol,
 				    DA9055_MIC_R_MUTE_EN, DA9055_MIC_R_MUTE_EN);
 
 		/* Save current values from ADC control registers */
-		adc_left = snd_soc_component_read32(component, DA9055_ADC_L_CTRL);
-		adc_right = snd_soc_component_read32(component, DA9055_ADC_R_CTRL);
+		adc_left = snd_soc_component_read(component, DA9055_ADC_L_CTRL);
+		adc_right = snd_soc_component_read(component, DA9055_ADC_R_CTRL);
 
 		/* Enable ADC Left and Right */
 		snd_soc_component_update_bits(component, DA9055_ADC_L_CTRL,
@@ -1041,9 +1036,9 @@ static bool da9055_volatile_register(struct device *dev,
 	case DA9055_HP_R_GAIN_STATUS:
 	case DA9055_LINE_GAIN_STATUS:
 	case DA9055_ALC_CIC_OP_LVL_DATA:
-		return 1;
+		return true;
 	default:
-		return 0;
+		return false;
 	}
 }
 
@@ -1165,12 +1160,12 @@ static int da9055_set_dai_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 	u8 aif_clk_mode, aif_ctrl, mode;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		/* DA9055 in I2S Master Mode */
 		mode = 1;
 		aif_clk_mode = DA9055_AIF_CLK_EN_MASTER_MODE;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		/* DA9055 in I2S Slave Mode */
 		mode = 0;
 		aif_clk_mode = DA9055_AIF_CLK_EN_SLAVE_MODE;
@@ -1180,7 +1175,7 @@ static int da9055_set_dai_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 	}
 
 	/* Don't allow change of mode if PLL is enabled */
-	if ((snd_soc_component_read32(component, DA9055_PLL_CTRL) & DA9055_PLL_EN) &&
+	if ((snd_soc_component_read(component, DA9055_PLL_CTRL) & DA9055_PLL_EN) &&
 	    (da9055->master != mode))
 		return -EINVAL;
 
@@ -1215,7 +1210,7 @@ static int da9055_set_dai_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 	return 0;
 }
 
-static int da9055_mute(struct snd_soc_dai *dai, int mute)
+static int da9055_mute(struct snd_soc_dai *dai, int mute, int direction)
 {
 	struct snd_soc_component *component = dai->component;
 
@@ -1328,7 +1323,8 @@ static const struct snd_soc_dai_ops da9055_dai_ops = {
 	.set_fmt	= da9055_set_dai_fmt,
 	.set_sysclk	= da9055_set_dai_sysclk,
 	.set_pll	= da9055_set_dai_pll,
-	.digital_mute	= da9055_mute,
+	.mute_stream	= da9055_mute,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver da9055_dai = {
@@ -1350,18 +1346,20 @@ static struct snd_soc_dai_driver da9055_dai = {
 		.formats = DA9055_FORMATS,
 	},
 	.ops = &da9055_dai_ops,
-	.symmetric_rates = 1,
+	.symmetric_rate = 1,
 };
 
 static int da9055_set_bias_level(struct snd_soc_component *component,
 				 enum snd_soc_bias_level level)
 {
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
+
 	switch (level) {
 	case SND_SOC_BIAS_ON:
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF) {
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_OFF) {
 			/* Enable VMID reference & master bias */
 			snd_soc_component_update_bits(component, DA9055_REFERENCES,
 					    DA9055_VMID_EN | DA9055_BIAS_EN,
@@ -1463,7 +1461,6 @@ static const struct snd_soc_component_driver soc_component_dev_da9055 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config da9055_regmap_config = {
@@ -1476,8 +1473,7 @@ static const struct regmap_config da9055_regmap_config = {
 	.cache_type = REGCACHE_RBTREE,
 };
 
-static int da9055_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+static int da9055_i2c_probe(struct i2c_client *i2c)
 {
 	struct da9055_priv *da9055;
 	struct da9055_platform_data *pdata = dev_get_platdata(&i2c->dev);
@@ -1517,16 +1513,18 @@ static int da9055_i2c_probe(struct i2c_client *i2c,
  * and PMIC, which must be different to operate together.
  */
 static const struct i2c_device_id da9055_i2c_id[] = {
-	{ "da9055-codec", 0 },
+	{ .name = "da9055-codec" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, da9055_i2c_id);
 
+#ifdef CONFIG_OF
 static const struct of_device_id da9055_of_match[] = {
 	{ .compatible = "dlg,da9055-codec", },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, da9055_of_match);
+#endif
 
 /* I2C codec control layer */
 static struct i2c_driver da9055_i2c_driver = {

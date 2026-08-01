@@ -1,19 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * timberdale.c timberdale FPGA MFD driver
  * Copyright (c) 2009 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 /* Supports:
@@ -23,22 +11,19 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/msi.h>
 #include <linux/mfd/core.h>
+#include <linux/property.h>
 #include <linux/slab.h>
 
-#include <linux/timb_gpio.h>
-
 #include <linux/i2c.h>
-#include <linux/i2c-ocores.h>
-#include <linux/i2c-xiic.h>
+#include <linux/platform_data/i2c-ocores.h>
+#include <linux/platform_data/i2c-xiic.h>
 
 #include <linux/spi/spi.h>
 #include <linux/spi/xilinx_spi.h>
 #include <linux/spi/max7301.h>
 #include <linux/spi/mc33880.h>
 
-#include <linux/platform_data/tsc2007.h>
 #include <linux/platform_data/media/timb_radio.h>
 #include <linux/platform_data/media/timb_video.h>
 
@@ -49,6 +34,10 @@
 #include "timberdale.h"
 
 #define DRIVER_NAME "timberdale"
+
+#define GPIO_NR_PINS	16
+#define GPIO_BASE	0
+#define IRQ_BASE	200
 
 struct timberdale_device {
 	resource_size_t		ctl_mapbase;
@@ -62,16 +51,21 @@ struct timberdale_device {
 
 /*--------------------------------------------------------------------------*/
 
-static struct tsc2007_platform_data timberdale_tsc2007_platform_data = {
-	.model = 2003,
-	.x_plate_ohms = 100
+static const struct property_entry timberdale_tsc2007_properties[] = {
+	PROPERTY_ENTRY_U32("ti,x-plate-ohms", 100),
+	{ }
+};
+
+static const struct software_node timberdale_tsc2007_node = {
+	.name = "tsc2007",
+	.properties = timberdale_tsc2007_properties,
 };
 
 static struct i2c_board_info timberdale_i2c_board_info[] = {
 	{
 		I2C_BOARD_INFO("tsc2007", 0x48),
-		.platform_data = &timberdale_tsc2007_platform_data,
-		.irq = IRQ_TIMBERDALE_TSC_INT
+		.irq = IRQ_TIMBERDALE_TSC_INT,
+		.swnode = &timberdale_tsc2007_node,
 	},
 };
 
@@ -182,11 +176,16 @@ static const struct resource timberdale_eth_resources[] = {
 	},
 };
 
-static struct timbgpio_platform_data
-	timberdale_gpio_platform_data = {
-	.gpio_base = 0,
-	.nr_pins = GPIO_NR_PINS,
-	.irq_base = 200,
+static const struct property_entry timberdale_gpio_properties[] = {
+	PROPERTY_ENTRY_U32("ngpios", GPIO_NR_PINS),
+	PROPERTY_ENTRY_U32("gpio-base", GPIO_BASE),
+	PROPERTY_ENTRY_U32("irq-base", IRQ_BASE),
+	{ }
+};
+
+static const struct software_node timberdale_gpio_swnode = {
+	.name = "timb-gpio",
+	.properties = timberdale_gpio_properties,
 };
 
 static const struct resource timberdale_gpio_resources[] = {
@@ -398,8 +397,7 @@ static const struct mfd_cell timberdale_cells_bar0_cfg0[] = {
 		.name = "timb-gpio",
 		.num_resources = ARRAY_SIZE(timberdale_gpio_resources),
 		.resources = timberdale_gpio_resources,
-		.platform_data = &timberdale_gpio_platform_data,
-		.pdata_size = sizeof(timberdale_gpio_platform_data),
+		.swnode = &timberdale_gpio_swnode,
 	},
 	{
 		.name = "timb-video",
@@ -460,8 +458,7 @@ static const struct mfd_cell timberdale_cells_bar0_cfg1[] = {
 		.name = "timb-gpio",
 		.num_resources = ARRAY_SIZE(timberdale_gpio_resources),
 		.resources = timberdale_gpio_resources,
-		.platform_data = &timberdale_gpio_platform_data,
-		.pdata_size = sizeof(timberdale_gpio_platform_data),
+		.swnode = &timberdale_gpio_swnode,
 	},
 	{
 		.name = "timb-mlogicore",
@@ -522,8 +519,7 @@ static const struct mfd_cell timberdale_cells_bar0_cfg2[] = {
 		.name = "timb-gpio",
 		.num_resources = ARRAY_SIZE(timberdale_gpio_resources),
 		.resources = timberdale_gpio_resources,
-		.platform_data = &timberdale_gpio_platform_data,
-		.pdata_size = sizeof(timberdale_gpio_platform_data),
+		.swnode = &timberdale_gpio_swnode,
 	},
 	{
 		.name = "timb-video",
@@ -572,8 +568,7 @@ static const struct mfd_cell timberdale_cells_bar0_cfg3[] = {
 		.name = "timb-gpio",
 		.num_resources = ARRAY_SIZE(timberdale_gpio_resources),
 		.resources = timberdale_gpio_resources,
-		.platform_data = &timberdale_gpio_platform_data,
-		.pdata_size = sizeof(timberdale_gpio_platform_data),
+		.swnode = &timberdale_gpio_swnode,
 	},
 	{
 		.name = "timb-video",
@@ -635,17 +630,16 @@ static const struct mfd_cell timberdale_cells_bar2[] = {
 	},
 };
 
-static ssize_t show_fw_ver(struct device *dev, struct device_attribute *attr,
-	char *buf)
+static ssize_t fw_ver_show(struct device *dev,
+			   struct device_attribute *attr, char *buf)
 {
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct timberdale_device *priv = pci_get_drvdata(pdev);
+	struct timberdale_device *priv = dev_get_drvdata(dev);
 
 	return sprintf(buf, "%d.%d.%d\n", priv->fw.major, priv->fw.minor,
 		priv->fw.config);
 }
 
-static DEVICE_ATTR(fw_ver, S_IRUGO, show_fw_ver, NULL);
+static DEVICE_ATTR_RO(fw_ver);
 
 /*--------------------------------------------------------------------------*/
 
@@ -658,7 +652,7 @@ static int timb_probe(struct pci_dev *dev,
 	struct msix_entry *msix_entries = NULL;
 	u8 ip_setup;
 
-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kzalloc_obj(*priv);
 	if (!priv)
 		return -ENOMEM;
 
@@ -707,8 +701,7 @@ static int timb_probe(struct pci_dev *dev,
 		goto err_config;
 	}
 
-	msix_entries = kzalloc(TIMBERDALE_NR_IRQS * sizeof(*msix_entries),
-		GFP_KERNEL);
+	msix_entries = kzalloc_objs(*msix_entries, TIMBERDALE_NR_IRQS);
 	if (!msix_entries)
 		goto err_config;
 
@@ -777,9 +770,8 @@ static int timb_probe(struct pci_dev *dev,
 			&dev->resource[0], msix_entries[0].vector, NULL);
 		break;
 	default:
-		dev_err(&dev->dev, "Uknown IP setup: %d.%d.%d\n",
+		dev_err(&dev->dev, "Unknown IP setup: %d.%d.%d\n",
 			priv->fw.major, priv->fw.minor, ip_setup);
-		err = -ENODEV;
 		goto err_mfd;
 	}
 
@@ -868,4 +860,5 @@ module_pci_driver(timberdale_pci_driver);
 
 MODULE_AUTHOR("Mocean Laboratories <info@mocean-labs.com>");
 MODULE_VERSION(DRV_VERSION);
+MODULE_DESCRIPTION("Timberdale FPGA MFD driver");
 MODULE_LICENSE("GPL v2");

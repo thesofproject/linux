@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  i2c-versatile.c
  *
  *  Copyright (C) 2006 ARM Ltd.
  *  written by Russell King, Deep Blue Solutions Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -67,22 +64,20 @@ static const struct i2c_algo_bit_data i2c_versatile_algo = {
 static int i2c_versatile_probe(struct platform_device *dev)
 {
 	struct i2c_versatile *i2c;
-	struct resource *r;
 	int ret;
 
 	i2c = devm_kzalloc(&dev->dev, sizeof(struct i2c_versatile), GFP_KERNEL);
 	if (!i2c)
 		return -ENOMEM;
 
-	r = platform_get_resource(dev, IORESOURCE_MEM, 0);
-	i2c->base = devm_ioremap_resource(&dev->dev, r);
+	i2c->base = devm_platform_get_and_ioremap_resource(dev, 0, NULL);
 	if (IS_ERR(i2c->base))
 		return PTR_ERR(i2c->base);
 
 	writel(SCL | SDA, i2c->base + I2C_CONTROLS);
 
 	i2c->adap.owner = THIS_MODULE;
-	strlcpy(i2c->adap.name, "Versatile I2C adapter", sizeof(i2c->adap.name));
+	strscpy(i2c->adap.name, "Versatile I2C adapter", sizeof(i2c->adap.name));
 	i2c->adap.algo_data = &i2c->algo;
 	i2c->adap.dev.parent = &dev->dev;
 	i2c->adap.dev.of_node = dev->dev.of_node;
@@ -99,12 +94,11 @@ static int i2c_versatile_probe(struct platform_device *dev)
 	return 0;
 }
 
-static int i2c_versatile_remove(struct platform_device *dev)
+static void i2c_versatile_remove(struct platform_device *dev)
 {
 	struct i2c_versatile *i2c = platform_get_drvdata(dev);
 
 	i2c_del_adapter(&i2c->adap);
-	return 0;
 }
 
 static const struct of_device_id i2c_versatile_match[] = {

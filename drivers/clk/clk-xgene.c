@@ -1,27 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * clk-xgene.c - AppliedMicro X-Gene Clock Interface
  *
  * Copyright (c) 2013, Applied Micro Circuits Corporation
  * Author: Loc Ho <lho@apm.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
- *
  */
 #include <linux/module.h>
 #include <linux/spinlock.h>
+#include <linux/string_choices.h>
 #include <linux/io.h>
 #include <linux/of.h>
 #include <linux/clkdev.h>
@@ -145,7 +131,7 @@ static struct clk *xgene_register_clk_pll(struct device *dev,
 	struct clk_init_data init;
 
 	/* allocate the APM clock structure */
-	apmclk = kzalloc(sizeof(*apmclk), GFP_KERNEL);
+	apmclk = kzalloc_obj(*apmclk);
 	if (!apmclk)
 		return ERR_PTR(-ENOMEM);
 
@@ -202,6 +188,8 @@ static void xgene_pllclk_init(struct device_node *np, enum xgene_pll_type pll_ty
 		of_clk_add_provider(np, of_clk_src_simple_get, clk);
 		clk_register_clkdev(clk, clk_name, NULL);
 		pr_debug("Add %s clock PLL\n", clk_name);
+	} else {
+		iounmap(reg);
 	}
 }
 
@@ -221,17 +209,16 @@ static void xgene_pcppllclk_init(struct device_node *np)
  * @hw:		handle between common and hardware-specific interfaces
  * @reg:	register containing the fractional scale multiplier (scaler)
  * @shift:	shift to the unit bit field
+ * @mask:	mask to the unit bit field
  * @denom:	1/denominator unit
  * @lock:	register lock
- * Flags:
- * XGENE_CLK_PMD_SCALE_INVERTED - By default the scaler is the value read
+ * @flags: XGENE_CLK_PMD_SCALE_INVERTED - By default the scaler is the value read
  *	from the register plus one. For example,
  *		0 for (0 + 1) / denom,
  *		1 for (1 + 1) / denom and etc.
  *	If this flag is set, it is
  *		0 for (denom - 0) / denom,
  *		1 for (denom - 1) / denom and etc.
- *
  */
 struct xgene_clk_pmd {
 	struct clk_hw	hw;
@@ -262,7 +249,7 @@ static unsigned long xgene_clk_pmd_recalc_rate(struct clk_hw *hw,
 	else
 		__acquire(fd->lock);
 
-	val = clk_readl(fd->reg);
+	val = readl(fd->reg);
 
 	if (fd->lock)
 		spin_unlock_irqrestore(fd->lock, flags);
@@ -286,23 +273,28 @@ static unsigned long xgene_clk_pmd_recalc_rate(struct clk_hw *hw,
 	return ret;
 }
 
-static long xgene_clk_pmd_round_rate(struct clk_hw *hw, unsigned long rate,
-				     unsigned long *parent_rate)
+static int xgene_clk_pmd_determine_rate(struct clk_hw *hw,
+					struct clk_rate_request *req)
 {
 	struct xgene_clk_pmd *fd = to_xgene_clk_pmd(hw);
 	u64 ret, scale;
 
-	if (!rate || rate >= *parent_rate)
-		return *parent_rate;
+	if (!req->rate || req->rate >= req->best_parent_rate) {
+		req->rate = req->best_parent_rate;
+
+		return 0;
+	}
 
 	/* freq = parent_rate * scaler / denom */
-	ret = rate * fd->denom;
-	scale = DIV_ROUND_UP_ULL(ret, *parent_rate);
+	ret = req->rate * fd->denom;
+	scale = DIV_ROUND_UP_ULL(ret, req->best_parent_rate);
 
-	ret = (u64)*parent_rate * scale;
+	ret = (u64)req->best_parent_rate * scale;
 	do_div(ret, fd->denom);
 
-	return ret;
+	req->rate = ret;
+
+	return 0;
 }
 
 static int xgene_clk_pmd_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -333,10 +325,10 @@ static int xgene_clk_pmd_set_rate(struct clk_hw *hw, unsigned long rate,
 	else
 		__acquire(fd->lock);
 
-	val = clk_readl(fd->reg);
+	val = readl(fd->reg);
 	val &= ~fd->mask;
 	val |= (scale << fd->shift);
-	clk_writel(val, fd->reg);
+	writel(val, fd->reg);
 
 	if (fd->lock)
 		spin_unlock_irqrestore(fd->lock, flags);
@@ -348,7 +340,7 @@ static int xgene_clk_pmd_set_rate(struct clk_hw *hw, unsigned long rate,
 
 static const struct clk_ops xgene_clk_pmd_ops = {
 	.recalc_rate = xgene_clk_pmd_recalc_rate,
-	.round_rate = xgene_clk_pmd_round_rate,
+	.determine_rate = xgene_clk_pmd_determine_rate,
 	.set_rate = xgene_clk_pmd_set_rate,
 };
 
@@ -362,7 +354,7 @@ xgene_register_clk_pmd(struct device *dev,
 	struct clk_init_data init;
 	struct clk *clk;
 
-	fd = kzalloc(sizeof(*fd), GFP_KERNEL);
+	fd = kzalloc_obj(*fd);
 	if (!fd)
 		return ERR_PTR(-ENOMEM);
 
@@ -536,12 +528,11 @@ static int xgene_clk_is_enabled(struct clk_hw *hw)
 		data = xgene_clk_read(pclk->param.csr_reg +
 					pclk->param.reg_clk_offset);
 		pr_debug("%s clock is %s\n", clk_hw_get_name(hw),
-			data & pclk->param.reg_clk_mask ? "enabled" :
-							"disabled");
+			str_enabled_disabled(data & pclk->param.reg_clk_mask));
+	} else {
+		return 1;
 	}
 
-	if (!pclk->param.csr_reg)
-		return 1;
 	return data & pclk->param.reg_clk_mask ? 1 : 0;
 }
 
@@ -609,23 +600,25 @@ static int xgene_clk_set_rate(struct clk_hw *hw, unsigned long rate,
 	return parent_rate / divider_save;
 }
 
-static long xgene_clk_round_rate(struct clk_hw *hw, unsigned long rate,
-				unsigned long *prate)
+static int xgene_clk_determine_rate(struct clk_hw *hw,
+				    struct clk_rate_request *req)
 {
 	struct xgene_clk *pclk = to_xgene_clk(hw);
-	unsigned long parent_rate = *prate;
+	unsigned long parent_rate = req->best_parent_rate;
 	u32 divider;
 
 	if (pclk->param.divider_reg) {
 		/* Let's compute the divider */
-		if (rate > parent_rate)
-			rate = parent_rate;
-		divider = parent_rate / rate;   /* Rounded down */
+		if (req->rate > parent_rate)
+			req->rate = parent_rate;
+		divider = parent_rate / req->rate;   /* Rounded down */
 	} else {
 		divider = 1;
 	}
 
-	return parent_rate / divider;
+	req->rate = parent_rate / divider;
+
+	return 0;
 }
 
 static const struct clk_ops xgene_clk_ops = {
@@ -634,7 +627,7 @@ static const struct clk_ops xgene_clk_ops = {
 	.is_enabled = xgene_clk_is_enabled,
 	.recalc_rate = xgene_clk_recalc_rate,
 	.set_rate = xgene_clk_set_rate,
-	.round_rate = xgene_clk_round_rate,
+	.determine_rate = xgene_clk_determine_rate,
 };
 
 static struct clk *xgene_register_clk(struct device *dev,
@@ -647,7 +640,7 @@ static struct clk *xgene_register_clk(struct device *dev,
 	int rc;
 
 	/* allocate the APM clock structure */
-	apmclk = kzalloc(sizeof(*apmclk), GFP_KERNEL);
+	apmclk = kzalloc_obj(*apmclk);
 	if (!apmclk)
 		return ERR_PTR(-ENOMEM);
 

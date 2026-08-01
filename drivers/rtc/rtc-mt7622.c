@@ -1,24 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for MediaTek SoC based RTC
  *
  * Copyright (C) 2017 Sean Wang <sean.wang@mediatek.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
 #include <linux/interrupt.h>
+#include <linux/io.h>
 #include <linux/module.h>
-#include <linux/of_address.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/rtc.h>
 
@@ -312,7 +302,6 @@ MODULE_DEVICE_TABLE(of, mtk_rtc_match);
 static int mtk_rtc_probe(struct platform_device *pdev)
 {
 	struct mtk_rtc *hw;
-	struct resource *res;
 	int ret;
 
 	hw = devm_kzalloc(&pdev->dev, sizeof(*hw), GFP_KERNEL);
@@ -321,8 +310,7 @@ static int mtk_rtc_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, hw);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	hw->base = devm_ioremap_resource(&pdev->dev, res);
+	hw->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(hw->base))
 		return PTR_ERR(hw->base);
 
@@ -338,7 +326,6 @@ static int mtk_rtc_probe(struct platform_device *pdev)
 
 	hw->irq = platform_get_irq(pdev, 0);
 	if (hw->irq < 0) {
-		dev_err(&pdev->dev, "No IRQ resource\n");
 		ret = hw->irq;
 		goto err;
 	}
@@ -369,13 +356,11 @@ err:
 	return ret;
 }
 
-static int mtk_rtc_remove(struct platform_device *pdev)
+static void mtk_rtc_remove(struct platform_device *pdev)
 {
 	struct mtk_rtc *hw = platform_get_drvdata(pdev);
 
 	clk_disable_unprepare(hw->clk);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -408,7 +393,7 @@ static SIMPLE_DEV_PM_OPS(mtk_rtc_pm_ops, mtk_rtc_suspend, mtk_rtc_resume);
 
 static struct platform_driver mtk_rtc_driver = {
 	.probe	= mtk_rtc_probe,
-	.remove	= mtk_rtc_remove,
+	.remove = mtk_rtc_remove,
 	.driver = {
 		.name = MTK_RTC_DEV,
 		.of_match_table = mtk_rtc_match,

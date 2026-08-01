@@ -59,7 +59,16 @@ __ib_get_agent_port(const struct ib_device *device, int port_num)
 	struct ib_agent_port_private *entry;
 
 	list_for_each_entry(entry, &ib_agent_port_list, port_list) {
-		if (entry->agent[1]->device == device &&
+		/* Need to check both agent[0] and agent[1], as an agent port
+		 * may only have one of them
+		 */
+		if (entry->agent[0] &&
+		    entry->agent[0]->device == device &&
+		    entry->agent[0]->port_num == port_num)
+			return entry;
+
+		if (entry->agent[1] &&
+		    entry->agent[1]->device == device &&
 		    entry->agent[1]->port_num == port_num)
 			return entry;
 	}
@@ -101,8 +110,7 @@ void agent_send_response(const struct ib_mad_hdr *mad_hdr, const struct ib_grh *
 	agent = port_priv->agent[qpn];
 	ah = ib_create_ah_from_wc(agent->qp->pd, wc, grh, port_num);
 	if (IS_ERR(ah)) {
-		dev_err(&device->dev, "ib_create_ah_from_wc error %ld\n",
-			PTR_ERR(ah));
+		dev_err(&device->dev, "ib_create_ah_from_wc error %pe\n", ah);
 		return;
 	}
 
@@ -137,13 +145,13 @@ void agent_send_response(const struct ib_mad_hdr *mad_hdr, const struct ib_grh *
 err2:
 	ib_free_send_mad(send_buf);
 err1:
-	rdma_destroy_ah(ah);
+	rdma_destroy_ah(ah, RDMA_DESTROY_AH_SLEEPABLE);
 }
 
 static void agent_send_handler(struct ib_mad_agent *mad_agent,
 			       struct ib_mad_send_wc *mad_send_wc)
 {
-	rdma_destroy_ah(mad_send_wc->send_buf->ah);
+	rdma_destroy_ah(mad_send_wc->send_buf->ah, RDMA_DESTROY_AH_SLEEPABLE);
 	ib_free_send_mad(mad_send_wc->send_buf);
 }
 
@@ -154,7 +162,7 @@ int ib_agent_port_open(struct ib_device *device, int port_num)
 	int ret;
 
 	/* Create new device info */
-	port_priv = kzalloc(sizeof *port_priv, GFP_KERNEL);
+	port_priv = kzalloc_obj(*port_priv);
 	if (!port_priv) {
 		ret = -ENOMEM;
 		goto error1;
@@ -172,14 +180,16 @@ int ib_agent_port_open(struct ib_device *device, int port_num)
 		}
 	}
 
-	/* Obtain send only MAD agent for GSI QP */
-	port_priv->agent[1] = ib_register_mad_agent(device, port_num,
-						    IB_QPT_GSI, NULL, 0,
-						    &agent_send_handler,
-						    NULL, NULL, 0);
-	if (IS_ERR(port_priv->agent[1])) {
-		ret = PTR_ERR(port_priv->agent[1]);
-		goto error3;
+	if (rdma_cap_ib_cm(device, port_num)) {
+		/* Obtain send only MAD agent for GSI QP */
+		port_priv->agent[1] = ib_register_mad_agent(device, port_num,
+							    IB_QPT_GSI, NULL, 0,
+							    &agent_send_handler,
+							    NULL, NULL, 0);
+		if (IS_ERR(port_priv->agent[1])) {
+			ret = PTR_ERR(port_priv->agent[1]);
+			goto error3;
+		}
 	}
 
 	spin_lock_irqsave(&ib_agent_port_list_lock, flags);
@@ -212,7 +222,8 @@ int ib_agent_port_close(struct ib_device *device, int port_num)
 	list_del(&port_priv->port_list);
 	spin_unlock_irqrestore(&ib_agent_port_list_lock, flags);
 
-	ib_unregister_mad_agent(port_priv->agent[1]);
+	if (port_priv->agent[1])
+		ib_unregister_mad_agent(port_priv->agent[1]);
 	if (port_priv->agent[0])
 		ib_unregister_mad_agent(port_priv->agent[0]);
 

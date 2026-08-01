@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Inject a hwpoison memory failure on a arbitrary pfn */
 #include <linux/module.h>
 #include <linux/debugfs.h>
@@ -6,7 +7,95 @@
 #include <linux/swap.h>
 #include <linux/pagemap.h>
 #include <linux/hugetlb.h>
+#include <linux/page-flags.h>
+#include <linux/memcontrol.h>
 #include "internal.h"
+
+static u32 hwpoison_filter_enable;
+static u32 hwpoison_filter_dev_major = ~0U;
+static u32 hwpoison_filter_dev_minor = ~0U;
+static u64 hwpoison_filter_flags_mask;
+static u64 hwpoison_filter_flags_value;
+
+static int hwpoison_filter_dev(struct page *p)
+{
+	struct folio *folio = page_folio(p);
+	struct address_space *mapping;
+	dev_t dev;
+
+	if (hwpoison_filter_dev_major == ~0U &&
+	    hwpoison_filter_dev_minor == ~0U)
+		return 0;
+
+	mapping = folio_mapping(folio);
+	if (mapping == NULL || mapping->host == NULL)
+		return -EINVAL;
+
+	dev = mapping->host->i_sb->s_dev;
+	if (hwpoison_filter_dev_major != ~0U &&
+	    hwpoison_filter_dev_major != MAJOR(dev))
+		return -EINVAL;
+	if (hwpoison_filter_dev_minor != ~0U &&
+	    hwpoison_filter_dev_minor != MINOR(dev))
+		return -EINVAL;
+
+	return 0;
+}
+
+static int hwpoison_filter_flags(struct page *p)
+{
+	if (!hwpoison_filter_flags_mask)
+		return 0;
+
+	if ((stable_page_flags(p) & hwpoison_filter_flags_mask) ==
+				    hwpoison_filter_flags_value)
+		return 0;
+	else
+		return -EINVAL;
+}
+
+/*
+ * This allows stress tests to limit test scope to a collection of tasks
+ * by putting them under some memcg. This prevents killing unrelated/important
+ * processes such as /sbin/init. Note that the target task may share clean
+ * pages with init (eg. libc text), which is harmless. If the target task
+ * share _dirty_ pages with another task B, the test scheme must make sure B
+ * is also included in the memcg. At last, due to race conditions this filter
+ * can only guarantee that the page either belongs to the memcg tasks, or is
+ * a freed page.
+ */
+#ifdef CONFIG_MEMCG
+static u64 hwpoison_filter_memcg;
+static int hwpoison_filter_task(struct page *p)
+{
+	if (!hwpoison_filter_memcg)
+		return 0;
+
+	if (page_cgroup_ino(p) != hwpoison_filter_memcg)
+		return -EINVAL;
+
+	return 0;
+}
+#else
+static int hwpoison_filter_task(struct page *p) { return 0; }
+#endif
+
+static int hwpoison_filter(struct page *p)
+{
+	if (!hwpoison_filter_enable)
+		return 0;
+
+	if (hwpoison_filter_dev(p))
+		return -EINVAL;
+
+	if (hwpoison_filter_flags(p))
+		return -EINVAL;
+
+	if (hwpoison_filter_task(p))
+		return -EINVAL;
+
+	return 0;
+}
 
 static struct dentry *hwpoison_dir;
 
@@ -14,7 +103,7 @@ static int hwpoison_inject(void *data, u64 val)
 {
 	unsigned long pfn = val;
 	struct page *p;
-	struct page *hpage;
+	struct folio *folio;
 	int err;
 
 	if (!capable(CAP_SYS_ADMIN))
@@ -24,38 +113,32 @@ static int hwpoison_inject(void *data, u64 val)
 		return -ENXIO;
 
 	p = pfn_to_page(pfn);
-	hpage = compound_head(p);
-	/*
-	 * This implies unable to support free buddy pages.
-	 */
-	if (!get_hwpoison_page(p))
-		return 0;
+	folio = page_folio(p);
 
 	if (!hwpoison_filter_enable)
 		goto inject;
 
-	shake_page(hpage, 0);
+	shake_folio(folio);
 	/*
-	 * This implies unable to support non-LRU pages.
+	 * This implies unable to support non-LRU pages except free page.
 	 */
-	if (!PageLRU(hpage) && !PageHuge(p))
-		goto put_out;
+	if (!folio_test_lru(folio) && !folio_test_hugetlb(folio) &&
+	    !is_free_buddy_page(p))
+		return 0;
 
 	/*
-	 * do a racy check with elevated page count, to make sure PG_hwpoison
-	 * will only be set for the targeted owner (or on a free page).
+	 * do a racy check to make sure PG_hwpoison will only be set for
+	 * the targeted owner (or on a free page).
 	 * memory_failure() will redo the check reliably inside page lock.
 	 */
-	err = hwpoison_filter(hpage);
+	err = hwpoison_filter(&folio->page);
 	if (err)
-		goto put_out;
+		return 0;
 
 inject:
 	pr_info("Injecting memory failure at pfn %#lx\n", pfn);
-	return memory_failure(pfn, MF_COUNT_INCREASED);
-put_out:
-	put_hwpoison_page(p);
-	return 0;
+	err = memory_failure(pfn, MF_SW_SIMULATED);
+	return (err == -EOPNOTSUPP) ? 0 : err;
 }
 
 static int hwpoison_unpoison(void *data, u64 val)
@@ -66,75 +149,57 @@ static int hwpoison_unpoison(void *data, u64 val)
 	return unpoison_memory(val);
 }
 
-DEFINE_SIMPLE_ATTRIBUTE(hwpoison_fops, NULL, hwpoison_inject, "%lli\n");
-DEFINE_SIMPLE_ATTRIBUTE(unpoison_fops, NULL, hwpoison_unpoison, "%lli\n");
+DEFINE_DEBUGFS_ATTRIBUTE(hwpoison_fops, NULL, hwpoison_inject, "%lli\n");
+DEFINE_DEBUGFS_ATTRIBUTE(unpoison_fops, NULL, hwpoison_unpoison, "%lli\n");
 
-static void pfn_inject_exit(void)
+static void __exit pfn_inject_exit(void)
 {
+	hwpoison_filter_enable = 0;
+	hwpoison_filter_unregister();
 	debugfs_remove_recursive(hwpoison_dir);
 }
 
-static int pfn_inject_init(void)
+static int __init pfn_inject_init(void)
 {
-	struct dentry *dentry;
-
 	hwpoison_dir = debugfs_create_dir("hwpoison", NULL);
-	if (hwpoison_dir == NULL)
-		return -ENOMEM;
 
 	/*
 	 * Note that the below poison/unpoison interfaces do not involve
 	 * hardware status change, hence do not require hardware support.
 	 * They are mainly for testing hwpoison in software level.
 	 */
-	dentry = debugfs_create_file("corrupt-pfn", 0200, hwpoison_dir,
-					  NULL, &hwpoison_fops);
-	if (!dentry)
-		goto fail;
+	debugfs_create_file("corrupt-pfn", 0200, hwpoison_dir, NULL,
+			    &hwpoison_fops);
 
-	dentry = debugfs_create_file("unpoison-pfn", 0200, hwpoison_dir,
-				     NULL, &unpoison_fops);
-	if (!dentry)
-		goto fail;
+	debugfs_create_file("unpoison-pfn", 0200, hwpoison_dir, NULL,
+			    &unpoison_fops);
 
-	dentry = debugfs_create_u32("corrupt-filter-enable", 0600,
-				    hwpoison_dir, &hwpoison_filter_enable);
-	if (!dentry)
-		goto fail;
+	debugfs_create_u32("corrupt-filter-enable", 0600, hwpoison_dir,
+			   &hwpoison_filter_enable);
 
-	dentry = debugfs_create_u32("corrupt-filter-dev-major", 0600,
-				    hwpoison_dir, &hwpoison_filter_dev_major);
-	if (!dentry)
-		goto fail;
+	debugfs_create_u32("corrupt-filter-dev-major", 0600, hwpoison_dir,
+			   &hwpoison_filter_dev_major);
 
-	dentry = debugfs_create_u32("corrupt-filter-dev-minor", 0600,
-				    hwpoison_dir, &hwpoison_filter_dev_minor);
-	if (!dentry)
-		goto fail;
+	debugfs_create_u32("corrupt-filter-dev-minor", 0600, hwpoison_dir,
+			   &hwpoison_filter_dev_minor);
 
-	dentry = debugfs_create_u64("corrupt-filter-flags-mask", 0600,
-				    hwpoison_dir, &hwpoison_filter_flags_mask);
-	if (!dentry)
-		goto fail;
+	debugfs_create_u64("corrupt-filter-flags-mask", 0600, hwpoison_dir,
+			   &hwpoison_filter_flags_mask);
 
-	dentry = debugfs_create_u64("corrupt-filter-flags-value", 0600,
-				    hwpoison_dir, &hwpoison_filter_flags_value);
-	if (!dentry)
-		goto fail;
+	debugfs_create_u64("corrupt-filter-flags-value", 0600, hwpoison_dir,
+			   &hwpoison_filter_flags_value);
 
 #ifdef CONFIG_MEMCG
-	dentry = debugfs_create_u64("corrupt-filter-memcg", 0600,
-				    hwpoison_dir, &hwpoison_filter_memcg);
-	if (!dentry)
-		goto fail;
+	debugfs_create_u64("corrupt-filter-memcg", 0600, hwpoison_dir,
+			   &hwpoison_filter_memcg);
 #endif
 
+	hwpoison_filter_register(hwpoison_filter);
+
 	return 0;
-fail:
-	pfn_inject_exit();
-	return -ENOMEM;
 }
 
 module_init(pfn_inject_init);
 module_exit(pfn_inject_exit);
+MODULE_DESCRIPTION("HWPoison pages injector");
 MODULE_LICENSE("GPL");

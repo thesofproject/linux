@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * wm2000.c  --  WM2000 ALSA Soc Audio driver
  *
  * Copyright 2008-2011 Wolfson Microelectronics PLC.
  *
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * The download image for the WM2000 will be requested as
  * 'wm2000_anc.bin' by default (overridable via platform data) at
@@ -88,19 +85,6 @@ static int wm2000_write(struct i2c_client *i2c, unsigned int reg,
 	return regmap_write(wm2000->regmap, reg, value);
 }
 
-static unsigned int wm2000_read(struct i2c_client *i2c, unsigned int r)
-{
-	struct wm2000_priv *wm2000 = i2c_get_clientdata(i2c);
-	unsigned int val;
-	int ret;
-
-	ret = regmap_read(wm2000->regmap, r, &val);
-	if (ret < 0)
-		return -1;
-
-	return val;
-}
-
 static void wm2000_reset(struct wm2000_priv *wm2000)
 {
 	struct i2c_client *i2c = wm2000->i2c;
@@ -115,14 +99,15 @@ static void wm2000_reset(struct wm2000_priv *wm2000)
 static int wm2000_poll_bit(struct i2c_client *i2c,
 			   unsigned int reg, u8 mask)
 {
+	struct wm2000_priv *wm2000 = i2c_get_clientdata(i2c);
 	int timeout = 4000;
-	int val;
+	unsigned int val;
 
-	val = wm2000_read(i2c, reg);
+	regmap_read(wm2000->regmap, reg, &val);
 
 	while (!(val & mask) && --timeout) {
 		msleep(1);
-		val = wm2000_read(i2c, reg);
+		regmap_read(wm2000->regmap, reg, &val);
 	}
 
 	if (timeout == 0)
@@ -135,6 +120,7 @@ static int wm2000_power_up(struct i2c_client *i2c, int analogue)
 {
 	struct wm2000_priv *wm2000 = dev_get_drvdata(&i2c->dev);
 	unsigned long rate;
+	unsigned int val;
 	int ret;
 
 	if (WARN_ON(wm2000->anc_mode != ANC_OFF))
@@ -213,12 +199,17 @@ static int wm2000_power_up(struct i2c_client *i2c, int analogue)
 			     WM2000_MODE_THERMAL_ENABLE);
 	}
 
-	ret = wm2000_read(i2c, WM2000_REG_SPEECH_CLARITY);
+	ret = regmap_read(wm2000->regmap, WM2000_REG_SPEECH_CLARITY, &val);
+	if (ret != 0) {
+		dev_err(&i2c->dev, "Unable to read Speech Clarity: %d\n", ret);
+		regulator_bulk_disable(WM2000_NUM_SUPPLIES, wm2000->supplies);
+		return ret;
+	}
 	if (wm2000->speech_clarity)
-		ret |= WM2000_SPEECH_CLARITY;
+		val |= WM2000_SPEECH_CLARITY;
 	else
-		ret &= ~WM2000_SPEECH_CLARITY;
-	wm2000_write(i2c, WM2000_REG_SPEECH_CLARITY, ret);
+		val &= ~WM2000_SPEECH_CLARITY;
+	wm2000_write(i2c, WM2000_REG_SPEECH_CLARITY, val);
 
 	wm2000_write(i2c, WM2000_REG_SYS_START0, 0x33);
 	wm2000_write(i2c, WM2000_REG_SYS_START1, 0x02);
@@ -545,7 +536,7 @@ static int wm2000_anc_transition(struct wm2000_priv *wm2000,
 {
 	struct i2c_client *i2c = wm2000->i2c;
 	int i, j;
-	int ret;
+	int ret = 0;
 
 	if (wm2000->anc_mode == mode)
 		return 0;
@@ -575,13 +566,13 @@ static int wm2000_anc_transition(struct wm2000_priv *wm2000,
 		ret = anc_transitions[i].step[j](i2c,
 						 anc_transitions[i].analogue);
 		if (ret != 0)
-			return ret;
+			break;
 	}
 
 	if (anc_transitions[i].dest == ANC_OFF)
 		clk_disable_unprepare(wm2000->mclk);
 
-	return 0;
+	return ret;
 }
 
 static int wm2000_anc_set_mode(struct wm2000_priv *wm2000)
@@ -607,7 +598,7 @@ static int wm2000_anc_set_mode(struct wm2000_priv *wm2000)
 static int wm2000_anc_mode_get(struct snd_kcontrol *kcontrol,
 			       struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct wm2000_priv *wm2000 = dev_get_drvdata(component->dev);
 
 	ucontrol->value.integer.value[0] = wm2000->anc_active;
@@ -618,7 +609,7 @@ static int wm2000_anc_mode_get(struct snd_kcontrol *kcontrol,
 static int wm2000_anc_mode_put(struct snd_kcontrol *kcontrol,
 			       struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct wm2000_priv *wm2000 = dev_get_drvdata(component->dev);
 	unsigned int anc_active = ucontrol->value.integer.value[0];
 	int ret;
@@ -640,7 +631,7 @@ static int wm2000_anc_mode_put(struct snd_kcontrol *kcontrol,
 static int wm2000_speaker_get(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct wm2000_priv *wm2000 = dev_get_drvdata(component->dev);
 
 	ucontrol->value.integer.value[0] = wm2000->spk_ena;
@@ -651,7 +642,7 @@ static int wm2000_speaker_get(struct snd_kcontrol *kcontrol,
 static int wm2000_speaker_put(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct wm2000_priv *wm2000 = dev_get_drvdata(component->dev);
 	unsigned int val = ucontrol->value.integer.value[0];
 	int ret;
@@ -812,19 +803,16 @@ static const struct snd_soc_component_driver soc_component_dev_wm2000 = {
 	.num_dapm_routes	= ARRAY_SIZE(wm2000_audio_map),
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
-	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
-static int wm2000_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *i2c_id)
+static int wm2000_i2c_probe(struct i2c_client *i2c)
 {
 	struct wm2000_priv *wm2000;
 	struct wm2000_platform_data *pdata;
 	const char *filename;
 	const struct firmware *fw = NULL;
 	int ret, i;
-	int reg;
+	unsigned int reg;
 	u16 id;
 
 	wm2000 = devm_kzalloc(&i2c->dev, sizeof(*wm2000), GFP_KERNEL);
@@ -860,9 +848,17 @@ static int wm2000_i2c_probe(struct i2c_client *i2c,
 	}
 
 	/* Verify that this is a WM2000 */
-	reg = wm2000_read(i2c, WM2000_REG_ID1);
+	ret = regmap_read(wm2000->regmap, WM2000_REG_ID1, &reg);
+	if (ret != 0) {
+		dev_err(&i2c->dev, "Unable to read ID1: %d\n", ret);
+		return ret;
+	}
 	id = reg << 8;
-	reg = wm2000_read(i2c, WM2000_REG_ID2);
+	ret = regmap_read(wm2000->regmap, WM2000_REG_ID2, &reg);
+	if (ret != 0) {
+		dev_err(&i2c->dev, "Unable to read ID2: %d\n", ret);
+		return ret;
+	}
 	id |= reg & 0xff;
 
 	if (id != 0x2000) {
@@ -871,7 +867,11 @@ static int wm2000_i2c_probe(struct i2c_client *i2c,
 		goto err_supplies;
 	}
 
-	reg = wm2000_read(i2c, WM2000_REG_REVISON);
+	ret = regmap_read(wm2000->regmap, WM2000_REG_REVISON, &reg);
+	if (ret != 0) {
+		dev_err(&i2c->dev, "Unable to read Revision: %d\n", ret);
+		return ret;
+	}
 	dev_info(&i2c->dev, "revision %c\n", reg + 'A');
 
 	wm2000->mclk = devm_clk_get(&i2c->dev, "MCLK");
@@ -929,7 +929,7 @@ out:
 }
 
 static const struct i2c_device_id wm2000_i2c_id[] = {
-	{ "wm2000", 0 },
+	{ .name = "wm2000" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, wm2000_i2c_id);

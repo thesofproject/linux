@@ -12,6 +12,7 @@
 struct _snd_wavefront_midi;
 struct _snd_wavefront_card;
 struct _snd_wavefront;
+struct snd_wss;
 
 typedef struct _snd_wavefront_midi snd_wavefront_midi_t;
 typedef struct _snd_wavefront_card snd_wavefront_card_t;
@@ -46,6 +47,8 @@ extern void   snd_wavefront_midi_enable_virtual (snd_wavefront_card_t *);
 extern void   snd_wavefront_midi_disable_virtual (snd_wavefront_card_t *);
 extern void   snd_wavefront_midi_interrupt (snd_wavefront_card_t *);
 extern int    snd_wavefront_midi_start (snd_wavefront_card_t *);
+void snd_wavefront_midi_suspend(snd_wavefront_card_t *card);
+void snd_wavefront_midi_resume(snd_wavefront_card_t *card);
 
 struct _snd_wavefront {
 	unsigned long    irq;   /* "you were one, one of the few ..." */
@@ -93,6 +96,7 @@ struct _snd_wavefront {
 	int samples_used;                  /* how many */
 	char interrupts_are_midi;          /* h/w MPU interrupts enabled ? */
 	char rom_samples_rdonly;           /* can we write on ROM samples */
+	char midi_in_to_synth;             /* route external MIDI to synth */
 	spinlock_t irq_lock;
 	wait_queue_head_t interrupt_sleeper; 
 	snd_wavefront_midi_t midi;         /* ICS2115 MIDI interface */
@@ -101,6 +105,7 @@ struct _snd_wavefront {
 
 struct _snd_wavefront_card {
 	snd_wavefront_t wavefront;
+	struct snd_wss *chip;
 #ifdef CONFIG_PNP
 	struct pnp_dev *wss;
 	struct pnp_dev *ctrl;
@@ -110,12 +115,10 @@ struct _snd_wavefront_card {
 };
 
 extern void snd_wavefront_internal_interrupt (snd_wavefront_card_t *card);
-extern int  snd_wavefront_detect_irq (snd_wavefront_t *dev) ;
-extern int  snd_wavefront_check_irq (snd_wavefront_t *dev, int irq);
-extern int  snd_wavefront_restart (snd_wavefront_t *dev);
+void snd_wavefront_cache_firmware(snd_wavefront_t *dev);
 extern int  snd_wavefront_start (snd_wavefront_t *dev);
 extern int  snd_wavefront_detect (snd_wavefront_card_t *card);
-extern int  snd_wavefront_config_midi (snd_wavefront_t *dev) ;
+int snd_wavefront_resume_synth(snd_wavefront_card_t *card);
 extern int  snd_wavefront_cmd (snd_wavefront_t *, int, unsigned char *,
 			       unsigned char *);
 
@@ -136,9 +139,5 @@ extern int  snd_wavefront_fx_ioctl  (struct snd_hwdep *,
 				     unsigned long arg);
 extern int snd_wavefront_fx_open    (struct snd_hwdep *, struct file *);
 extern int snd_wavefront_fx_release (struct snd_hwdep *, struct file *);
-
-/* prefix in all snd_printk() delivered messages */
-
-#define LOGNAME "WaveFront: "
 
 #endif  /* __SOUND_SND_WAVEFRONT_H__ */

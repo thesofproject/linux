@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  PWM vibrator driver
  *
@@ -8,17 +9,13 @@
  *
  *  Based on PWM beeper driver:
  *  Copyright (C) 2010, Lars-Peter Clausen <lars@metafoo.de>
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under  the terms of the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the License, or (at your
- *  option) any later version.
  */
 
+#include <linux/gpio/consumer.h>
 #include <linux/input.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/property.h>
 #include <linux/pwm.h>
@@ -27,6 +24,7 @@
 
 struct pwm_vibrator {
 	struct input_dev *input;
+	struct gpio_desc *enable_gpio;
 	struct pwm_device *pwm;
 	struct pwm_device *pwm_dir;
 	struct regulator *vcc;
@@ -34,6 +32,7 @@ struct pwm_vibrator {
 	struct work_struct play_work;
 	u16 level;
 	u32 direction_duty_cycle;
+	bool vcc_on;
 };
 
 static int pwm_vibrator_start(struct pwm_vibrator *vibrator)
@@ -42,19 +41,24 @@ static int pwm_vibrator_start(struct pwm_vibrator *vibrator)
 	struct pwm_state state;
 	int err;
 
-	err = regulator_enable(vibrator->vcc);
-	if (err) {
-		dev_err(pdev, "failed to enable regulator: %d", err);
-		return err;
+	if (!vibrator->vcc_on) {
+		err = regulator_enable(vibrator->vcc);
+		if (err) {
+			dev_err(pdev, "failed to enable regulator: %d\n", err);
+			return err;
+		}
+		vibrator->vcc_on = true;
 	}
+
+	gpiod_set_value_cansleep(vibrator->enable_gpio, 1);
 
 	pwm_get_state(vibrator->pwm, &state);
 	pwm_set_relative_duty_cycle(&state, vibrator->level, 0xffff);
 	state.enabled = true;
 
-	err = pwm_apply_state(vibrator->pwm, &state);
+	err = pwm_apply_might_sleep(vibrator->pwm, &state);
 	if (err) {
-		dev_err(pdev, "failed to apply pwm state: %d", err);
+		dev_err(pdev, "failed to apply pwm state: %d\n", err);
 		return err;
 	}
 
@@ -63,9 +67,9 @@ static int pwm_vibrator_start(struct pwm_vibrator *vibrator)
 		state.duty_cycle = vibrator->direction_duty_cycle;
 		state.enabled = true;
 
-		err = pwm_apply_state(vibrator->pwm_dir, &state);
+		err = pwm_apply_might_sleep(vibrator->pwm_dir, &state);
 		if (err) {
-			dev_err(pdev, "failed to apply dir-pwm state: %d", err);
+			dev_err(pdev, "failed to apply dir-pwm state: %d\n", err);
 			pwm_disable(vibrator->pwm);
 			return err;
 		}
@@ -76,11 +80,16 @@ static int pwm_vibrator_start(struct pwm_vibrator *vibrator)
 
 static void pwm_vibrator_stop(struct pwm_vibrator *vibrator)
 {
-	regulator_disable(vibrator->vcc);
-
 	if (vibrator->pwm_dir)
 		pwm_disable(vibrator->pwm_dir);
 	pwm_disable(vibrator->pwm);
+
+	gpiod_set_value_cansleep(vibrator->enable_gpio, 0);
+
+	if (vibrator->vcc_on) {
+		regulator_disable(vibrator->vcc);
+		vibrator->vcc_on = false;
+	}
 }
 
 static void pwm_vibrator_play_work(struct work_struct *work)
@@ -131,31 +140,29 @@ static int pwm_vibrator_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	vibrator->vcc = devm_regulator_get(&pdev->dev, "vcc");
-	err = PTR_ERR_OR_ZERO(vibrator->vcc);
-	if (err) {
-		if (err != -EPROBE_DEFER)
-			dev_err(&pdev->dev, "Failed to request regulator: %d",
-				err);
-		return err;
-	}
+	if (IS_ERR(vibrator->vcc))
+		return dev_err_probe(&pdev->dev, PTR_ERR(vibrator->vcc),
+				     "Failed to request regulator\n");
+
+	vibrator->enable_gpio = devm_gpiod_get_optional(&pdev->dev, "enable",
+							GPIOD_OUT_LOW);
+	if (IS_ERR(vibrator->enable_gpio))
+		return dev_err_probe(&pdev->dev, PTR_ERR(vibrator->enable_gpio),
+				     "Failed to request enable gpio\n");
 
 	vibrator->pwm = devm_pwm_get(&pdev->dev, "enable");
-	err = PTR_ERR_OR_ZERO(vibrator->pwm);
-	if (err) {
-		if (err != -EPROBE_DEFER)
-			dev_err(&pdev->dev, "Failed to request main pwm: %d",
-				err);
-		return err;
-	}
+	if (IS_ERR(vibrator->pwm))
+		return dev_err_probe(&pdev->dev, PTR_ERR(vibrator->pwm),
+				     "Failed to request main pwm\n");
 
 	INIT_WORK(&vibrator->play_work, pwm_vibrator_play_work);
 
 	/* Sync up PWM state and ensure it is off. */
 	pwm_init_state(vibrator->pwm, &state);
 	state.enabled = false;
-	err = pwm_apply_state(vibrator->pwm, &state);
+	err = pwm_apply_might_sleep(vibrator->pwm, &state);
 	if (err) {
-		dev_err(&pdev->dev, "failed to apply initial PWM state: %d",
+		dev_err(&pdev->dev, "failed to apply initial PWM state: %d\n",
 			err);
 		return err;
 	}
@@ -167,9 +174,9 @@ static int pwm_vibrator_probe(struct platform_device *pdev)
 		/* Sync up PWM state and ensure it is off. */
 		pwm_init_state(vibrator->pwm_dir, &state);
 		state.enabled = false;
-		err = pwm_apply_state(vibrator->pwm_dir, &state);
+		err = pwm_apply_might_sleep(vibrator->pwm_dir, &state);
 		if (err) {
-			dev_err(&pdev->dev, "failed to apply initial PWM state: %d",
+			dev_err(&pdev->dev, "failed to apply initial PWM state: %d\n",
 				err);
 			return err;
 		}
@@ -186,8 +193,8 @@ static int pwm_vibrator_probe(struct platform_device *pdev)
 		break;
 
 	default:
-		dev_err(&pdev->dev, "Failed to request direction pwm: %d", err);
-		/* Fall through */
+		dev_err(&pdev->dev, "Failed to request direction pwm: %d\n", err);
+		fallthrough;
 
 	case -EPROBE_DEFER:
 		return err;
@@ -204,13 +211,13 @@ static int pwm_vibrator_probe(struct platform_device *pdev)
 	err = input_ff_create_memless(vibrator->input, NULL,
 				      pwm_vibrator_play_effect);
 	if (err) {
-		dev_err(&pdev->dev, "Couldn't create FF dev: %d", err);
+		dev_err(&pdev->dev, "Couldn't create FF dev: %d\n", err);
 		return err;
 	}
 
 	err = input_register_device(vibrator->input);
 	if (err) {
-		dev_err(&pdev->dev, "Couldn't register input dev: %d", err);
+		dev_err(&pdev->dev, "Couldn't register input dev: %d\n", err);
 		return err;
 	}
 
@@ -219,7 +226,7 @@ static int pwm_vibrator_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int __maybe_unused pwm_vibrator_suspend(struct device *dev)
+static int pwm_vibrator_suspend(struct device *dev)
 {
 	struct pwm_vibrator *vibrator = dev_get_drvdata(dev);
 
@@ -230,7 +237,7 @@ static int __maybe_unused pwm_vibrator_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused pwm_vibrator_resume(struct device *dev)
+static int pwm_vibrator_resume(struct device *dev)
 {
 	struct pwm_vibrator *vibrator = dev_get_drvdata(dev);
 
@@ -240,8 +247,8 @@ static int __maybe_unused pwm_vibrator_resume(struct device *dev)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(pwm_vibrator_pm_ops,
-			 pwm_vibrator_suspend, pwm_vibrator_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(pwm_vibrator_pm_ops,
+				pwm_vibrator_suspend, pwm_vibrator_resume);
 
 #ifdef CONFIG_OF
 static const struct of_device_id pwm_vibra_dt_match_table[] = {
@@ -255,7 +262,7 @@ static struct platform_driver pwm_vibrator_driver = {
 	.probe	= pwm_vibrator_probe,
 	.driver	= {
 		.name	= "pwm-vibrator",
-		.pm	= &pwm_vibrator_pm_ops,
+		.pm	= pm_sleep_ptr(&pwm_vibrator_pm_ops),
 		.of_match_table = of_match_ptr(pwm_vibra_dt_match_table),
 	},
 };

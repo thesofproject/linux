@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2013 Altera Corporation
  * Copyright (C) 2011 Tobias Klauser <tklauser@distanz.ch>
@@ -6,24 +7,11 @@
  * based on irq.c from m68k which is:
  *
  * Copyright (C) 2007 Greg Ungerer <gerg@snapgear.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
  */
 
 #include <linux/init.h>
 #include <linux/interrupt.h>
+#include <linux/irqdomain.h>
 #include <linux/of.h>
 
 static u32 ienable;
@@ -31,11 +19,9 @@ static u32 ienable;
 asmlinkage void do_IRQ(int hwirq, struct pt_regs *regs)
 {
 	struct pt_regs *oldregs = set_irq_regs(regs);
-	int irq;
 
 	irq_enter();
-	irq = irq_find_mapping(NULL, hwirq);
-	generic_handle_irq(irq);
+	generic_handle_domain_irq(NULL, hwirq);
 	irq_exit();
 
 	set_irq_regs(oldregs);
@@ -83,10 +69,11 @@ void __init init_IRQ(void)
 
 	BUG_ON(!node);
 
-	domain = irq_domain_add_linear(node, NIOS2_CPU_NR_IRQS, &irq_ops, NULL);
+	domain = irq_domain_create_linear(of_fwnode_handle(node),
+					  NIOS2_CPU_NR_IRQS, &irq_ops, NULL);
 	BUG_ON(!domain);
 
-	irq_set_default_host(domain);
+	irq_set_default_domain(domain);
 	of_node_put(node);
 	/* Load the initial ienable value */
 	ienable = RDCTL(CTL_IENABLE);

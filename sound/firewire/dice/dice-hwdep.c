@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * dice_hwdep.c - a part of driver for DICE based devices
  *
  * Copyright (c) Clemens Ladisch <clemens@ladisch.de>
  * Copyright (c) 2014 Takashi Sakamoto <o-takashi@sakamocchi.jp>
- *
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 #include "dice.h"
@@ -56,18 +55,14 @@ static __poll_t hwdep_poll(struct snd_hwdep *hwdep, struct file *file,
 			       poll_table *wait)
 {
 	struct snd_dice *dice = hwdep->private_data;
-	__poll_t events;
 
 	poll_wait(file, &dice->hwdep_wait, wait);
 
-	spin_lock_irq(&dice->lock);
+	guard(spinlock_irq)(&dice->lock);
 	if (dice->dev_lock_changed || dice->notification_bits != 0)
-		events = EPOLLIN | EPOLLRDNORM;
+		return EPOLLIN | EPOLLRDNORM;
 	else
-		events = 0;
-	spin_unlock_irq(&dice->lock);
-
-	return events;
+		return 0;
 }
 
 static int hwdep_get_info(struct snd_dice *dice, void __user *arg)
@@ -80,7 +75,7 @@ static int hwdep_get_info(struct snd_dice *dice, void __user *arg)
 	info.card = dev->card->index;
 	*(__be32 *)&info.guid[0] = cpu_to_be32(dev->config_rom[3]);
 	*(__be32 *)&info.guid[4] = cpu_to_be32(dev->config_rom[4]);
-	strlcpy(info.device_name, dev_name(&dev->device),
+	strscpy(info.device_name, dev_name(&dev->device),
 		sizeof(info.device_name));
 
 	if (copy_to_user(arg, &info, sizeof(info)))
@@ -91,48 +86,35 @@ static int hwdep_get_info(struct snd_dice *dice, void __user *arg)
 
 static int hwdep_lock(struct snd_dice *dice)
 {
-	int err;
-
-	spin_lock_irq(&dice->lock);
+	guard(spinlock_irq)(&dice->lock);
 
 	if (dice->dev_lock_count == 0) {
 		dice->dev_lock_count = -1;
-		err = 0;
+		return 0;
 	} else {
-		err = -EBUSY;
+		return -EBUSY;
 	}
-
-	spin_unlock_irq(&dice->lock);
-
-	return err;
 }
 
 static int hwdep_unlock(struct snd_dice *dice)
 {
-	int err;
-
-	spin_lock_irq(&dice->lock);
+	guard(spinlock_irq)(&dice->lock);
 
 	if (dice->dev_lock_count == -1) {
 		dice->dev_lock_count = 0;
-		err = 0;
+		return 0;
 	} else {
-		err = -EBADFD;
+		return -EBADFD;
 	}
-
-	spin_unlock_irq(&dice->lock);
-
-	return err;
 }
 
 static int hwdep_release(struct snd_hwdep *hwdep, struct file *file)
 {
 	struct snd_dice *dice = hwdep->private_data;
 
-	spin_lock_irq(&dice->lock);
+	guard(spinlock_irq)(&dice->lock);
 	if (dice->dev_lock_count == -1)
 		dice->dev_lock_count = 0;
-	spin_unlock_irq(&dice->lock);
 
 	return 0;
 }
@@ -180,7 +162,7 @@ int snd_dice_create_hwdep(struct snd_dice *dice)
 	err = snd_hwdep_new(dice->card, "DICE", 0, &hwdep);
 	if (err < 0)
 		return err;
-	strcpy(hwdep->name, "DICE");
+	strscpy(hwdep->name, "DICE");
 	hwdep->iface = SNDRV_HWDEP_IFACE_FW_DICE;
 	hwdep->ops = ops;
 	hwdep->private_data = dice;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* chmc.c: Driver for UltraSPARC-III memory controller.
  *
  * Copyright (C) 2001, 2007, 2008 David S. Miller (davem@davemloft.net)
@@ -14,7 +15,8 @@
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
+#include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include <asm/spitfire.h>
 #include <asm/chmctrl.h>
 #include <asm/cpudata.h>
@@ -28,7 +30,7 @@
 #define PFX DRV_MODULE_NAME	": "
 #define DRV_MODULE_VERSION	"0.2"
 
-MODULE_AUTHOR("David S. Miller (davem@davemloft.net)");
+MODULE_AUTHOR("David S. Miller <davem@davemloft.net>");
 MODULE_DESCRIPTION("UltraSPARC-III memory controller driver");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(DRV_MODULE_VERSION);
@@ -415,7 +417,7 @@ static int jbusmc_probe(struct platform_device *op)
 	num_mem_regs = len / sizeof(*mem_regs);
 
 	err = -ENOMEM;
-	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	p = kzalloc_obj(*p);
 	if (!p) {
 		printk(KERN_ERR PFX "Cannot allocate struct jbusmc.\n");
 		goto out;
@@ -464,8 +466,8 @@ static int jbusmc_probe(struct platform_device *op)
 
 	mc_list_add(&p->list);
 
-	printk(KERN_INFO PFX "UltraSPARC-IIIi memory controller at %s\n",
-	       op->dev.of_node->full_name);
+	printk(KERN_INFO PFX "UltraSPARC-IIIi memory controller at %pOF\n",
+	       op->dev.of_node);
 
 	dev_set_drvdata(&op->dev, p);
 
@@ -716,7 +718,7 @@ static int chmc_probe(struct platform_device *op)
 	}
 
 	err = -ENOMEM;
-	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	p = kzalloc_obj(*p);
 	if (!p) {
 		printk(KERN_ERR PFX "Could not allocate struct chmc.\n");
 		goto out;
@@ -747,8 +749,8 @@ static int chmc_probe(struct platform_device *op)
 
 	mc_list_add(&p->list);
 
-	printk(KERN_INFO PFX "UltraSPARC-III memory controller at %s [%s]\n",
-	       dp->full_name,
+	printk(KERN_INFO PFX "UltraSPARC-III memory controller at %pOF [%s]\n",
+	       dp,
 	       (p->layout_size ? "ACTIVE" : "INACTIVE"));
 
 	dev_set_drvdata(&op->dev, p);
@@ -786,7 +788,7 @@ static void jbusmc_destroy(struct platform_device *op, struct jbusmc *p)
 	kfree(p);
 }
 
-static int us3mc_remove(struct platform_device *op)
+static void us3mc_remove(struct platform_device *op)
 {
 	void *p = dev_get_drvdata(&op->dev);
 
@@ -796,7 +798,6 @@ static int us3mc_remove(struct platform_device *op)
 		else if (mc_type == MC_TYPE_JBUS)
 			jbusmc_destroy(op, p);
 	}
-	return 0;
 }
 
 static const struct of_device_id us3mc_match[] = {

@@ -272,7 +272,7 @@ int ath6kl_read_fwlogs(struct ath6kl *ar)
 {
 	struct ath6kl_dbglog_hdr debug_hdr;
 	struct ath6kl_dbglog_buf debug_buf;
-	u32 address, length, dropped, firstbuf, debug_hdr_addr;
+	u32 address, length, firstbuf, debug_hdr_addr;
 	int ret, loop;
 	u8 *buf;
 
@@ -303,7 +303,6 @@ int ath6kl_read_fwlogs(struct ath6kl *ar)
 	address = TARG_VTOP(ar->target_type,
 			    le32_to_cpu(debug_hdr.dbuf_addr));
 	firstbuf = address;
-	dropped = le32_to_cpu(debug_hdr.dropped);
 	ret = ath6kl_diag_read(ar, address, &debug_buf, sizeof(debug_buf));
 	if (ret)
 		goto out;
@@ -390,6 +389,7 @@ void ath6kl_connect_ap_mode_bss(struct ath6kl_vif *vif, u16 channel)
 		if (!ik->valid || ik->key_type != WAPI_CRYPT)
 			break;
 		/* for WAPI, we need to set the delayed group key, continue: */
+		fallthrough;
 	case WPA_PSK_AUTH:
 	case WPA2_PSK_AUTH:
 	case (WPA_PSK_AUTH | WPA2_PSK_AUTH):
@@ -426,9 +426,12 @@ void ath6kl_connect_ap_mode_sta(struct ath6kl_vif *vif, u16 aid, u8 *mac_addr,
 {
 	u8 *ies = NULL, *wpa_ie = NULL, *pos;
 	size_t ies_len = 0;
-	struct station_info sinfo;
+	struct station_info *sinfo;
 
 	ath6kl_dbg(ATH6KL_DBG_TRC, "new station %pM aid=%d\n", mac_addr, aid);
+
+	if (aid < 1 || aid > AP_MAX_NUM_STA)
+		return;
 
 	if (assoc_req_len > sizeof(struct ieee80211_hdr_3addr)) {
 		struct ieee80211_mgmt *mgmt =
@@ -482,21 +485,25 @@ void ath6kl_connect_ap_mode_sta(struct ath6kl_vif *vif, u16 aid, u8 *mac_addr,
 			   keymgmt, ucipher, auth, apsd_info);
 
 	/* send event to application */
-	memset(&sinfo, 0, sizeof(sinfo));
+	sinfo = kzalloc_obj(*sinfo);
+	if (!sinfo)
+		return;
 
 	/* TODO: sinfo.generation */
 
-	sinfo.assoc_req_ies = ies;
-	sinfo.assoc_req_ies_len = ies_len;
+	sinfo->assoc_req_ies = ies;
+	sinfo->assoc_req_ies_len = ies_len;
 
-	cfg80211_new_sta(vif->ndev, mac_addr, &sinfo, GFP_KERNEL);
+	cfg80211_new_sta(&vif->wdev, mac_addr, sinfo, GFP_KERNEL);
 
 	netif_wake_queue(vif->ndev);
+
+	kfree(sinfo);
 }
 
 void disconnect_timer_handler(struct timer_list *t)
 {
-	struct ath6kl_vif *vif = from_timer(vif, t, disconnect_timer);
+	struct ath6kl_vif *vif = timer_container_of(vif, t, disconnect_timer);
 
 	ath6kl_init_profile_info(vif);
 	ath6kl_disconnect(vif);
@@ -576,7 +583,7 @@ static int ath6kl_commit_ch_switch(struct ath6kl_vif *vif, u16 channel)
 	switch (vif->nw_type) {
 	case AP_NETWORK:
 		/*
-		 * reconfigure any saved RSN IE capabilites in the beacon /
+		 * reconfigure any saved RSN IE capabilities in the beacon /
 		 * probe response to stay in sync with the supplicant.
 		 */
 		if (vif->rsn_capab &&
@@ -635,7 +642,7 @@ void ath6kl_connect_event(struct ath6kl_vif *vif, u16 channel, u8 *bssid,
 	memcpy(vif->bssid, bssid, sizeof(vif->bssid));
 	vif->bss_ch = channel;
 
-	if ((vif->nw_type == INFRA_NETWORK)) {
+	if (vif->nw_type == INFRA_NETWORK) {
 		ath6kl_wmi_listeninterval_cmd(ar->wmi, vif->fw_vif_idx,
 					      vif->listen_intvl_t, 0);
 		ath6kl_check_ch_switch(ar, channel);
@@ -845,14 +852,14 @@ void ath6kl_tgt_stats_event(struct ath6kl_vif *vif, u8 *ptr, u32 len)
 
 void ath6kl_wakeup_event(void *dev)
 {
-	struct ath6kl *ar = (struct ath6kl *) dev;
+	struct ath6kl *ar = dev;
 
 	wake_up(&ar->event_wq);
 }
 
 void ath6kl_txpwr_rx_evt(void *devt, u8 tx_pwr)
 {
-	struct ath6kl *ar = (struct ath6kl *) devt;
+	struct ath6kl *ar = devt;
 
 	ar->tx_pwr = tx_pwr;
 	wake_up(&ar->event_wq);
@@ -1004,7 +1011,7 @@ void ath6kl_disconnect_event(struct ath6kl_vif *vif, u8 reason, u8 *bssid,
 
 		if (!is_broadcast_ether_addr(bssid)) {
 			/* send event to application */
-			cfg80211_del_sta(vif->ndev, bssid, GFP_KERNEL);
+			cfg80211_del_sta(&vif->wdev, bssid, GFP_KERNEL);
 		}
 
 		if (memcmp(vif->ndev->dev_addr, bssid, ETH_ALEN) == 0) {
@@ -1020,7 +1027,7 @@ void ath6kl_disconnect_event(struct ath6kl_vif *vif, u8 reason, u8 *bssid,
 
 	aggr_reset_state(vif->aggr_cntxt->aggr_conn);
 
-	del_timer(&vif->disconnect_timer);
+	timer_delete(&vif->disconnect_timer);
 
 	ath6kl_dbg(ATH6KL_DBG_WLAN_CFG, "disconnect reason is %d\n", reason);
 
@@ -1242,8 +1249,8 @@ static void ath6kl_set_multicast_list(struct net_device *ndev)
 		}
 
 		if (!found) {
-			mc_filter = kzalloc(sizeof(struct ath6kl_mc_filter),
-					    GFP_ATOMIC);
+			mc_filter = kzalloc_obj(struct ath6kl_mc_filter,
+						GFP_ATOMIC);
 			if (!mc_filter) {
 				WARN_ON(1);
 				goto out;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * LCD Lowlevel Control Abstraction
  *
@@ -14,80 +15,59 @@
 #include <linux/notifier.h>
 #include <linux/ctype.h>
 #include <linux/err.h>
-#include <linux/fb.h>
 #include <linux/slab.h>
 
-#if defined(CONFIG_FB) || (defined(CONFIG_FB_MODULE) && \
-			   defined(CONFIG_LCD_CLASS_DEVICE_MODULE))
-/* This callback gets called when something important happens inside a
- * framebuffer driver. We're looking if that important event is blanking,
- * and if it is, we're switching lcd power as well ...
- */
-static int fb_notifier_callback(struct notifier_block *self,
-				 unsigned long event, void *data)
+static DEFINE_MUTEX(lcd_dev_list_mutex);
+static LIST_HEAD(lcd_dev_list);
+
+static void lcd_notify_blank(struct lcd_device *ld, struct device *display_dev,
+			     int power)
+{
+	guard(mutex)(&ld->ops_lock);
+
+	if (!ld->ops || !ld->ops->set_power)
+		return;
+	if (ld->ops->controls_device && !ld->ops->controls_device(ld, display_dev))
+		return;
+
+	ld->ops->set_power(ld, power);
+}
+
+void lcd_notify_blank_all(struct device *display_dev, int power)
 {
 	struct lcd_device *ld;
-	struct fb_event *evdata = data;
 
-	/* If we aren't interested in this event, skip it immediately ... */
-	switch (event) {
-	case FB_EVENT_BLANK:
-	case FB_EVENT_MODE_CHANGE:
-	case FB_EVENT_MODE_CHANGE_ALL:
-	case FB_EARLY_EVENT_BLANK:
-	case FB_R_EARLY_EVENT_BLANK:
-		break;
-	default:
-		return 0;
-	}
+	guard(mutex)(&lcd_dev_list_mutex);
 
-	ld = container_of(self, struct lcd_device, fb_notif);
-	if (!ld->ops)
-		return 0;
-
-	mutex_lock(&ld->ops_lock);
-	if (!ld->ops->check_fb || ld->ops->check_fb(ld, evdata->info)) {
-		if (event == FB_EVENT_BLANK) {
-			if (ld->ops->set_power)
-				ld->ops->set_power(ld, *(int *)evdata->data);
-		} else if (event == FB_EARLY_EVENT_BLANK) {
-			if (ld->ops->early_set_power)
-				ld->ops->early_set_power(ld,
-						*(int *)evdata->data);
-		} else if (event == FB_R_EARLY_EVENT_BLANK) {
-			if (ld->ops->r_early_set_power)
-				ld->ops->r_early_set_power(ld,
-						*(int *)evdata->data);
-		} else {
-			if (ld->ops->set_mode)
-				ld->ops->set_mode(ld, evdata->data);
-		}
-	}
-	mutex_unlock(&ld->ops_lock);
-	return 0;
+	list_for_each_entry(ld, &lcd_dev_list, entry)
+		lcd_notify_blank(ld, display_dev, power);
 }
+EXPORT_SYMBOL(lcd_notify_blank_all);
 
-static int lcd_register_fb(struct lcd_device *ld)
+static void lcd_notify_mode_change(struct lcd_device *ld, struct device *display_dev,
+				   unsigned int width, unsigned int height)
 {
-	memset(&ld->fb_notif, 0, sizeof(ld->fb_notif));
-	ld->fb_notif.notifier_call = fb_notifier_callback;
-	return fb_register_client(&ld->fb_notif);
+	guard(mutex)(&ld->ops_lock);
+
+	if (!ld->ops || !ld->ops->set_mode)
+		return;
+	if (ld->ops->controls_device && !ld->ops->controls_device(ld, display_dev))
+		return;
+
+	ld->ops->set_mode(ld, width, height);
 }
 
-static void lcd_unregister_fb(struct lcd_device *ld)
+void lcd_notify_mode_change_all(struct device *display_dev,
+				unsigned int width, unsigned int height)
 {
-	fb_unregister_client(&ld->fb_notif);
-}
-#else
-static int lcd_register_fb(struct lcd_device *ld)
-{
-	return 0;
-}
+	struct lcd_device *ld;
 
-static inline void lcd_unregister_fb(struct lcd_device *ld)
-{
+	guard(mutex)(&lcd_dev_list_mutex);
+
+	list_for_each_entry(ld, &lcd_dev_list, entry)
+		lcd_notify_mode_change(ld, display_dev, width, height);
 }
-#endif /* CONFIG_FB */
+EXPORT_SYMBOL(lcd_notify_mode_change_all);
 
 static ssize_t lcd_power_show(struct device *dev, struct device_attribute *attr,
 		char *buf)
@@ -178,8 +158,6 @@ static ssize_t max_contrast_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(max_contrast);
 
-static struct class *lcd_class;
-
 static void lcd_device_release(struct device *dev)
 {
 	struct lcd_device *ld = to_lcd_device(dev);
@@ -194,10 +172,16 @@ static struct attribute *lcd_device_attrs[] = {
 };
 ATTRIBUTE_GROUPS(lcd_device);
 
+static const struct class lcd_class = {
+	.name = "lcd",
+	.dev_groups = lcd_device_groups,
+};
+
 /**
  * lcd_device_register - register a new object of lcd_device class.
  * @name: the name of the new object(must be the same as the name of the
  *   respective framebuffer device).
+ * @parent: pointer to the parent's struct device .
  * @devdata: an optional pointer to be stored in the device. The
  *   methods may retrieve it by using lcd_get_data(ld).
  * @ops: the lcd operations structure.
@@ -206,21 +190,21 @@ ATTRIBUTE_GROUPS(lcd_device);
  * or a pointer to the newly allocated device.
  */
 struct lcd_device *lcd_device_register(const char *name, struct device *parent,
-		void *devdata, struct lcd_ops *ops)
+		void *devdata, const struct lcd_ops *ops)
 {
 	struct lcd_device *new_ld;
 	int rc;
 
 	pr_debug("lcd_device_register: name=%s\n", name);
 
-	new_ld = kzalloc(sizeof(struct lcd_device), GFP_KERNEL);
+	new_ld = kzalloc_obj(struct lcd_device);
 	if (!new_ld)
 		return ERR_PTR(-ENOMEM);
 
 	mutex_init(&new_ld->ops_lock);
 	mutex_init(&new_ld->update_lock);
 
-	new_ld->dev.class = lcd_class;
+	new_ld->dev.class = &lcd_class;
 	new_ld->dev.parent = parent;
 	new_ld->dev.release = lcd_device_release;
 	dev_set_name(&new_ld->dev, "%s", name);
@@ -234,11 +218,8 @@ struct lcd_device *lcd_device_register(const char *name, struct device *parent,
 		return ERR_PTR(rc);
 	}
 
-	rc = lcd_register_fb(new_ld);
-	if (rc) {
-		device_unregister(&new_ld->dev);
-		return ERR_PTR(rc);
-	}
+	guard(mutex)(&lcd_dev_list_mutex);
+	list_add(&new_ld->entry, &lcd_dev_list);
 
 	return new_ld;
 }
@@ -255,10 +236,12 @@ void lcd_device_unregister(struct lcd_device *ld)
 	if (!ld)
 		return;
 
+	guard(mutex)(&lcd_dev_list_mutex);
+	list_del(&ld->entry);
+
 	mutex_lock(&ld->ops_lock);
 	ld->ops = NULL;
 	mutex_unlock(&ld->ops_lock);
-	lcd_unregister_fb(ld);
 
 	device_unregister(&ld->dev);
 }
@@ -294,7 +277,7 @@ static int devm_lcd_device_match(struct device *dev, void *res, void *data)
  */
 struct lcd_device *devm_lcd_device_register(struct device *dev,
 		const char *name, struct device *parent,
-		void *devdata, struct lcd_ops *ops)
+		void *devdata, const struct lcd_ops *ops)
 {
 	struct lcd_device **ptr, *lcd;
 
@@ -336,19 +319,19 @@ EXPORT_SYMBOL(devm_lcd_device_unregister);
 
 static void __exit lcd_class_exit(void)
 {
-	class_destroy(lcd_class);
+	class_unregister(&lcd_class);
 }
 
 static int __init lcd_class_init(void)
 {
-	lcd_class = class_create(THIS_MODULE, "lcd");
-	if (IS_ERR(lcd_class)) {
-		pr_warn("Unable to create backlight class; errno = %ld\n",
-			PTR_ERR(lcd_class));
-		return PTR_ERR(lcd_class);
+	int ret;
+
+	ret = class_register(&lcd_class);
+	if (ret) {
+		pr_warn("Unable to create backlight class; errno = %d\n", ret);
+		return ret;
 	}
 
-	lcd_class->dev_groups = lcd_device_groups;
 	return 0;
 }
 

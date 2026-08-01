@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * arch/sh/kernel/vsyscall/vsyscall.c
  *
@@ -5,10 +6,6 @@
  *
  * vDSO randomization
  * Copyright(C) 2005-2006, Red Hat, Inc., Ingo Molnar
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/mm.h>
 #include <linux/kernel.h>
@@ -17,6 +14,7 @@
 #include <linux/module.h>
 #include <linux/elf.h>
 #include <linux/sched.h>
+#include <linux/sysctl.h>
 #include <linux/err.h>
 
 /*
@@ -33,12 +31,28 @@ static int __init vdso_setup(char *s)
 }
 __setup("vdso=", vdso_setup);
 
+static const struct ctl_table vdso_table[] = {
+	{
+		.procname	= "vdso_enabled",
+		.data		= &vdso_enabled,
+		.maxlen		= sizeof(vdso_enabled),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+};
+
 /*
  * These symbols are defined by vsyscall.o to mark the bounds
  * of the ELF DSO images included therein.
  */
 extern const char vsyscall_trapa_start, vsyscall_trapa_end;
 static struct page *syscall_pages[1];
+static struct vm_special_mapping vdso_mapping = {
+	.name = "[vdso]",
+	.pages = syscall_pages,
+};
 
 int __init vsyscall_init(void)
 {
@@ -57,14 +71,23 @@ int __init vsyscall_init(void)
 	return 0;
 }
 
+static int __init vm_sysctl_init(void)
+{
+       register_sysctl_init("vm", vdso_table);
+       return 0;
+}
+
+fs_initcall(vm_sysctl_init);
+
 /* Setup a VMA at program startup for the vsyscall page */
 int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 {
 	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma;
 	unsigned long addr;
 	int ret;
 
-	if (down_write_killable(&mm->mmap_sem))
+	if (mmap_write_lock_killable(mm))
 		return -EINTR;
 
 	addr = get_unmapped_area(NULL, 0, PAGE_SIZE, 0, 0);
@@ -73,17 +96,20 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 		goto up_fail;
 	}
 
-	ret = install_special_mapping(mm, addr, PAGE_SIZE,
+	vdso_mapping.pages = syscall_pages;
+	vma = _install_special_mapping(mm, addr, PAGE_SIZE,
 				      VM_READ | VM_EXEC |
 				      VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC,
-				      syscall_pages);
-	if (unlikely(ret))
+				      &vdso_mapping);
+	ret = PTR_ERR(vma);
+	if (IS_ERR(vma))
 		goto up_fail;
 
 	current->mm->context.vdso = (void *)addr;
+	ret = 0;
 
 up_fail:
-	up_write(&mm->mmap_sem);
+	mmap_write_unlock(mm);
 	return ret;
 }
 

@@ -27,7 +27,7 @@
  * Authors:
  *    Christian König <deathsimple@vodafone.de>
  */
-#include <drm/drmP.h>
+
 #include "radeon.h"
 #include "radeon_trace.h"
 
@@ -36,11 +36,11 @@ int radeon_semaphore_create(struct radeon_device *rdev,
 {
 	int r;
 
-	*semaphore = kmalloc(sizeof(struct radeon_semaphore), GFP_KERNEL);
+	*semaphore = kmalloc_obj(struct radeon_semaphore);
 	if (*semaphore == NULL) {
 		return -ENOMEM;
 	}
-	r = radeon_sa_bo_new(rdev, &rdev->ring_tmp_bo,
+	r = radeon_sa_bo_new(&rdev->ring_tmp_bo,
 			     &(*semaphore)->sa_bo, 8, 8);
 	if (r) {
 		kfree(*semaphore);
@@ -100,7 +100,7 @@ void radeon_semaphore_free(struct radeon_device *rdev,
 		dev_err(rdev->dev, "semaphore %p has more waiters than signalers,"
 			" hardware lockup imminent!\n", *semaphore);
 	}
-	radeon_sa_bo_free(rdev, &(*semaphore)->sa_bo, fence);
+	radeon_sa_bo_free(&(*semaphore)->sa_bo, fence);
 	kfree(*semaphore);
 	*semaphore = NULL;
 }

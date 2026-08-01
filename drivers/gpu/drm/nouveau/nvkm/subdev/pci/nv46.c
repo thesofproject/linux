@@ -38,14 +38,13 @@ nv46_pci_msi_rearm(struct nvkm_pci *pci)
 
 static const struct nvkm_pci_func
 nv46_pci_func = {
-	.rd32 = nv40_pci_rd32,
-	.wr08 = nv40_pci_wr08,
-	.wr32 = nv40_pci_wr32,
+	.cfg = { .addr = 0x088000, .size = 0x1000 },
 	.msi_rearm = nv46_pci_msi_rearm,
 };
 
 int
-nv46_pci_new(struct nvkm_device *device, int index, struct nvkm_pci **ppci)
+nv46_pci_new(struct nvkm_device *device, enum nvkm_subdev_type type, int inst,
+	     struct nvkm_pci **ppci)
 {
-	return nvkm_pci_new_(&nv46_pci_func, device, index, ppci);
+	return nvkm_pci_new_(&nv46_pci_func, device, type, inst, ppci);
 }

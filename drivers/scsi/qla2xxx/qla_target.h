@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *  Copyright (C) 2004 - 2010 Vladislav Bolkhovitin <vst@vlnb.net>
  *  Copyright (C) 2004 - 2005 Leonid Stoljar
@@ -9,16 +10,6 @@
  *  Copyright (C) 2010-2011 Nicholas A. Bellinger <nab@kernel.org>
  *
  *  Additional file for the target driver support.
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2
- *  of the License, or (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *  GNU General Public License for more details.
  */
 /*
  * This is the global def file that is useful for including from the
@@ -29,6 +20,7 @@
 #define __QLA_TARGET_H
 
 #include "qla_def.h"
+#include "qla_dsd.h"
 
 /*
  * Must be changed on any change in any initiator visible interfaces or
@@ -124,7 +116,6 @@
 	(min(1270, ((ql) > 0) ? (QLA_TGT_DATASEGS_PER_CMD_24XX + \
 		QLA_TGT_DATASEGS_PER_CONT_24XX*((ql) - 1)) : 0))
 #endif
-#endif
 
 #define GET_TARGET_ID(ha, iocb) ((HAS_EXTENDED_IDS(ha))			\
 			 ? le16_to_cpu((iocb)->u.isp2x.target.extended)	\
@@ -143,37 +134,37 @@ struct nack_to_isp {
 	uint8_t	 entry_status;		    /* Entry Status. */
 	union {
 		struct {
-			uint32_t sys_define_2; /* System defined. */
+			__le32	sys_define_2; /* System defined. */
 			target_id_t target;
 			uint8_t	 target_id;
 			uint8_t	 reserved_1;
-			uint16_t flags;
-			uint16_t resp_code;
-			uint16_t status;
-			uint16_t task_flags;
-			uint16_t seq_id;
-			uint16_t srr_rx_id;
-			uint32_t srr_rel_offs;
-			uint16_t srr_ui;
-			uint16_t srr_flags;
-			uint16_t srr_reject_code;
+			__le16	flags;
+			__le16	resp_code;
+			__le16	status;
+			__le16	task_flags;
+			__le16	seq_id;
+			__le16	srr_rx_id;
+			__le32	srr_rel_offs;
+			__le16	srr_ui;
+			__le16	srr_flags;
+			__le16	srr_reject_code;
 			uint8_t  srr_reject_vendor_uniq;
 			uint8_t  srr_reject_code_expl;
 			uint8_t  reserved_2[24];
 		} isp2x;
 		struct {
 			uint32_t handle;
-			uint16_t nport_handle;
+			__le16	nport_handle;
 			uint16_t reserved_1;
-			uint16_t flags;
-			uint16_t srr_rx_id;
-			uint16_t status;
+			__le16	flags;
+			__le16	srr_rx_id;
+			__le16	status;
 			uint8_t  status_subcode;
 			uint8_t  fw_handle;
-			uint32_t exchange_address;
-			uint32_t srr_rel_offs;
-			uint16_t srr_ui;
-			uint16_t srr_flags;
+			__le32	exchange_address;
+			__le32	srr_rel_offs;
+			__le16	srr_ui;
+			__le16	srr_flags;
 			uint8_t  reserved_4[19];
 			uint8_t  vp_index;
 			uint8_t  srr_reject_vendor_uniq;
@@ -183,8 +174,9 @@ struct nack_to_isp {
 		} isp24;
 	} u;
 	uint8_t  reserved[2];
-	uint16_t ox_id;
+	__le16	ox_id;
 } __packed;
+#define NOTIFY_ACK_FLAGS_FCSP		BIT_5
 #define NOTIFY_ACK_FLAGS_TERMINATE	BIT_3
 #define NOTIFY_ACK_SRR_FLAGS_ACCEPT	0
 #define NOTIFY_ACK_SRR_FLAGS_REJECT	1
@@ -192,6 +184,7 @@ struct nack_to_isp {
 #define NOTIFY_ACK_SRR_REJECT_REASON_UNABLE_TO_PERFORM	0x9
 
 #define NOTIFY_ACK_SRR_FLAGS_REJECT_EXPL_NO_EXPL		0
+#define NOTIFY_ACK_SRR_FLAGS_REJECT_EXPL_INVALID_OX_ID_RX_ID	0x17
 #define NOTIFY_ACK_SRR_FLAGS_REJECT_EXPL_UNABLE_TO_SUPPLY_DATA	0x2a
 
 #define NOTIFY_ACK_SUCCESS      0x01
@@ -214,22 +207,17 @@ struct ctio_to_2xxx {
 	uint8_t	 entry_status;		/* Entry Status. */
 	uint32_t handle;		/* System defined handle */
 	target_id_t target;
-	uint16_t rx_id;
-	uint16_t flags;
-	uint16_t status;
-	uint16_t timeout;		/* 0 = 30 seconds, 0xFFFF = disable */
-	uint16_t dseg_count;		/* Data segment count. */
-	uint32_t relative_offset;
-	uint32_t residual;
-	uint16_t reserved_1[3];
-	uint16_t scsi_status;
-	uint32_t transfer_length;
-	uint32_t dseg_0_address;	/* Data segment 0 address. */
-	uint32_t dseg_0_length;		/* Data segment 0 length. */
-	uint32_t dseg_1_address;	/* Data segment 1 address. */
-	uint32_t dseg_1_length;		/* Data segment 1 length. */
-	uint32_t dseg_2_address;	/* Data segment 2 address. */
-	uint32_t dseg_2_length;		/* Data segment 2 length. */
+	__le16	rx_id;
+	__le16	flags;
+	__le16	status;
+	__le16	timeout;		/* 0 = 30 seconds, 0xFFFF = disable */
+	__le16	dseg_count;		/* Data segment count. */
+	__le32	relative_offset;
+	__le32	residual;
+	__le16	reserved_1[3];
+	__le16	scsi_status;
+	__le32	transfer_length;
+	struct dsd32 dsd[3];
 } __packed;
 #define ATIO_PATH_INVALID       0x07
 #define ATIO_CANT_PROV_CAP      0x16
@@ -252,17 +240,22 @@ struct ctio_to_2xxx {
 #define CTIO_PORT_LOGGED_OUT		0x29
 #define CTIO_PORT_CONF_CHANGED		0x2A
 #define CTIO_SRR_RECEIVED		0x45
+#define CTIO_FAST_AUTH_ERR		0x63
+#define CTIO_FAST_INCOMP_PAD_LEN	0x65
+#define CTIO_FAST_INVALID_REQ		0x66
+#define CTIO_FAST_SPI_ERR		0x67
 #endif
 
 #ifndef CTIO_RET_TYPE
 #define CTIO_RET_TYPE	0x17		/* CTIO return entry */
 #define ATIO_TYPE7 0x06 /* Accept target I/O entry for 24xx */
+#endif
 
 struct fcp_hdr {
 	uint8_t  r_ctl;
-	uint8_t  d_id[3];
+	be_id_t  d_id;
 	uint8_t  cs_ctl;
-	uint8_t  s_id[3];
+	be_id_t  s_id;
 	uint8_t  type;
 	uint8_t  f_ctl[3];
 	uint8_t  seq_id;
@@ -270,23 +263,23 @@ struct fcp_hdr {
 	uint16_t seq_cnt;
 	__be16   ox_id;
 	uint16_t rx_id;
-	uint32_t parameter;
-} __packed;
+	__le32	parameter;
+};
 
 struct fcp_hdr_le {
-	uint8_t  d_id[3];
+	le_id_t  d_id;
 	uint8_t  r_ctl;
-	uint8_t  s_id[3];
+	le_id_t  s_id;
 	uint8_t  cs_ctl;
 	uint8_t  f_ctl[3];
 	uint8_t  type;
-	uint16_t seq_cnt;
+	__le16	seq_cnt;
 	uint8_t  df_ctl;
 	uint8_t  seq_id;
-	uint16_t rx_id;
-	uint16_t ox_id;
-	uint32_t parameter;
-} __packed;
+	__le16	rx_id;
+	__le16	ox_id;
+	__le32	parameter;
+};
 
 #define F_CTL_EXCH_CONTEXT_RESP	BIT_23
 #define F_CTL_SEQ_CONTEXT_RESIP	BIT_22
@@ -319,7 +312,7 @@ struct atio7_fcp_cmnd {
 	 * BUILD_BUG_ON in qlt_init().
 	 */
 	uint8_t  add_cdb[4];
-	/* uint32_t data_length; */
+	/* __le32	data_length; */
 } __packed;
 
 /*
@@ -329,31 +322,31 @@ struct atio7_fcp_cmnd {
 struct atio_from_isp {
 	union {
 		struct {
-			uint16_t entry_hdr;
+			__le16	entry_hdr;
 			uint8_t  sys_define;   /* System defined. */
 			uint8_t  entry_status; /* Entry Status.   */
-			uint32_t sys_define_2; /* System defined. */
+			__le32	sys_define_2; /* System defined. */
 			target_id_t target;
-			uint16_t rx_id;
-			uint16_t flags;
-			uint16_t status;
+			__le16	rx_id;
+			__le16	flags;
+			__le16	status;
 			uint8_t  command_ref;
 			uint8_t  task_codes;
 			uint8_t  task_flags;
 			uint8_t  execution_codes;
 			uint8_t  cdb[MAX_CMDSZ];
-			uint32_t data_length;
-			uint16_t lun;
+			__le32	data_length;
+			__le16	lun;
 			uint8_t  initiator_port_name[WWN_SIZE]; /* on qla23xx */
-			uint16_t reserved_32[6];
-			uint16_t ox_id;
+			__le16	reserved_32[6];
+			__le16	ox_id;
 		} isp2x;
 		struct {
-			uint16_t entry_hdr;
+			__le16	entry_hdr;
 			uint8_t  fcp_cmnd_len_low;
 			uint8_t  fcp_cmnd_len_high:4;
 			uint8_t  attr:4;
-			uint32_t exchange_addr;
+			__le32	exchange_addr;
 #define ATIO_EXCHANGE_ADDRESS_UNKNOWN	0xFFFFFFFF
 			struct fcp_hdr fcp_hdr;
 			struct atio7_fcp_cmnd fcp_cmnd;
@@ -365,7 +358,7 @@ struct atio_from_isp {
 #define FCP_CMD_LENGTH_MASK 0x0fff
 #define FCP_CMD_LENGTH_MIN  0x38
 			uint8_t  data[56];
-			uint32_t signature;
+			__le32	signature;
 #define ATIO_PROCESSED 0xDEADDEAD		/* Signature */
 		} raw;
 	} u;
@@ -374,8 +367,8 @@ struct atio_from_isp {
 static inline int fcpcmd_is_corrupted(struct atio *atio)
 {
 	if (atio->entry_type == ATIO_TYPE7 &&
-	    (le16_to_cpu(atio->attr_n_length & FCP_CMD_LENGTH_MASK) <
-	    FCP_CMD_LENGTH_MIN))
+	    ((le16_to_cpu(atio->attr_n_length) & FCP_CMD_LENGTH_MASK) <
+	     FCP_CMD_LENGTH_MIN))
 		return 1;
 	else
 		return 0;
@@ -392,8 +385,7 @@ static inline int get_datalen_for_atio(struct atio_from_isp *atio)
 {
 	int len = atio->u.isp24.fcp_cmnd.add_cdb_len;
 
-	return (be32_to_cpu(get_unaligned((uint32_t *)
-	    &atio->u.isp24.fcp_cmnd.add_cdb[len * 4])));
+	return get_unaligned_be32(&atio->u.isp24.fcp_cmnd.add_cdb[len * 4]);
 }
 
 #define CTIO_TYPE7 0x12 /* Continue target I/O entry (for 24xx) */
@@ -409,39 +401,45 @@ struct ctio7_to_24xx {
 	uint8_t	 sys_define;		    /* System defined. */
 	uint8_t	 entry_status;		    /* Entry Status. */
 	uint32_t handle;		    /* System defined handle */
-	uint16_t nport_handle;
+	__le16	nport_handle;
 #define CTIO7_NHANDLE_UNRECOGNIZED	0xFFFF
-	uint16_t timeout;
-	uint16_t dseg_count;		    /* Data segment count. */
+	__le16	timeout;
+	__le16	dseg_count;		    /* Data segment count. */
 	uint8_t  vp_index;
 	uint8_t  add_flags;
-	uint8_t  initiator_id[3];
+	le_id_t  initiator_id;
 	uint8_t  reserved;
-	uint32_t exchange_addr;
+	__le32	exchange_addr;
 	union {
 		struct {
-			uint16_t reserved1;
+			__le16	reserved1;
 			__le16 flags;
-			uint32_t residual;
+			union {
+				__le32	residual;
+				struct {
+					uint8_t rsvd1;
+					uint8_t edif_flags;
+#define EF_EN_EDIF	BIT_0
+#define EF_NEW_SA	BIT_1
+					uint16_t rsvd2;
+				};
+			};
 			__le16 ox_id;
-			uint16_t scsi_status;
-			uint32_t relative_offset;
-			uint32_t reserved2;
-			uint32_t transfer_length;
-			uint32_t reserved3;
-			/* Data segment 0 address. */
-			uint32_t dseg_0_address[2];
-			/* Data segment 0 length. */
-			uint32_t dseg_0_length;
+			__le16	scsi_status;
+			__le32	relative_offset;
+			__le32	reserved2;
+			__le32	transfer_length;
+			__le32	reserved3;
+			struct dsd64 dsd;
 		} status0;
 		struct {
-			uint16_t sense_length;
+			__le16	sense_length;
 			__le16 flags;
-			uint32_t residual;
+			__le32	residual;
 			__le16 ox_id;
-			uint16_t scsi_status;
-			uint16_t response_len;
-			uint16_t reserved;
+			__le16	scsi_status;
+			__le16	response_len;
+			__le16	reserved;
 			uint8_t sense_data[24];
 		} status1;
 	} u;
@@ -457,18 +455,18 @@ struct ctio7_from_24xx {
 	uint8_t	 sys_define;		    /* System defined. */
 	uint8_t	 entry_status;		    /* Entry Status. */
 	uint32_t handle;		    /* System defined handle */
-	uint16_t status;
-	uint16_t timeout;
-	uint16_t dseg_count;		    /* Data segment count. */
+	__le16	status;
+	__le16	timeout;
+	__le16	dseg_count;		    /* Data segment count. */
 	uint8_t  vp_index;
 	uint8_t  reserved1[5];
-	uint32_t exchange_address;
-	uint16_t reserved2;
-	uint16_t flags;
-	uint32_t residual;
-	uint16_t ox_id;
-	uint16_t reserved3;
-	uint32_t relative_offset;
+	__le32	exchange_address;
+	__le16	edif_sa_index;
+	__le16	flags;
+	__le32	residual;
+	__le16	ox_id;
+	__le16	reserved3;
+	__le32	relative_offset;
 	uint8_t  reserved4[24];
 } __packed;
 
@@ -506,30 +504,30 @@ struct ctio_crc2_to_fw {
 	uint8_t entry_status;		/* Entry Status. */
 
 	uint32_t handle;		/* System handle. */
-	uint16_t nport_handle;		/* N_PORT handle. */
+	__le16	nport_handle;		/* N_PORT handle. */
 	__le16 timeout;		/* Command timeout. */
 
-	uint16_t dseg_count;		/* Data segment count. */
+	__le16	dseg_count;		/* Data segment count. */
 	uint8_t  vp_index;
 	uint8_t  add_flags;		/* additional flags */
 #define CTIO_CRC2_AF_DIF_DSD_ENA BIT_3
 
-	uint8_t  initiator_id[3];	/* initiator ID */
+	le_id_t  initiator_id;		/* initiator ID */
 	uint8_t  reserved1;
-	uint32_t exchange_addr;		/* rcv exchange address */
-	uint16_t reserved2;
+	__le32	exchange_addr;		/* rcv exchange address */
+	__le16	reserved2;
 	__le16 flags;			/* refer to CTIO7 flags values */
-	uint32_t residual;
+	__le32	residual;
 	__le16 ox_id;
-	uint16_t scsi_status;
+	__le16	scsi_status;
 	__le32 relative_offset;
-	uint32_t reserved5;
+	__le32	reserved5;
 	__le32 transfer_length;		/* total fc transfer length */
-	uint32_t reserved6;
-	__le32 crc_context_address[2];/* Data segment address. */
-	uint16_t crc_context_len;	/* Data segment length. */
-	uint16_t reserved_1;		/* MUST be set to 0. */
-} __packed;
+	__le32	reserved6;
+	__le64	 crc_context_address __packed; /* Data segment address. */
+	__le16	crc_context_len;	/* Data segment length. */
+	__le16	reserved_1;		/* MUST be set to 0. */
+};
 
 /* CTIO Type CRC_x Status IOCB */
 struct ctio_crc_from_fw {
@@ -539,20 +537,20 @@ struct ctio_crc_from_fw {
 	uint8_t entry_status;		/* Entry Status. */
 
 	uint32_t handle;		/* System handle. */
-	uint16_t status;
-	uint16_t timeout;		/* Command timeout. */
-	uint16_t dseg_count;		/* Data segment count. */
-	uint32_t reserved1;
-	uint16_t state_flags;
+	__le16	status;
+	__le16	timeout;		/* Command timeout. */
+	__le16	dseg_count;		/* Data segment count. */
+	__le32	reserved1;
+	__le16	state_flags;
 #define CTIO_CRC_SF_DIF_CHOPPED BIT_4
 
-	uint32_t exchange_address;	/* rcv exchange address */
-	uint16_t reserved2;
-	uint16_t flags;
-	uint32_t resid_xfer_length;
-	uint16_t ox_id;
+	__le32	exchange_address;	/* rcv exchange address */
+	__le16	reserved2;
+	__le16	flags;
+	__le32	resid_xfer_length;
+	__le16	ox_id;
 	uint8_t  reserved3[12];
-	uint16_t runt_guard;		/* reported runt blk guard */
+	__le16	runt_guard;		/* reported runt blk guard */
 	uint8_t  actual_dif[8];
 	uint8_t  expected_dif[8];
 } __packed;
@@ -575,29 +573,29 @@ struct abts_recv_from_24xx {
 	uint8_t	 sys_define;		    /* System defined. */
 	uint8_t	 entry_status;		    /* Entry Status. */
 	uint8_t  reserved_1[6];
-	uint16_t nport_handle;
+	__le16	nport_handle;
 	uint8_t  reserved_2[2];
 	uint8_t  vp_index;
 	uint8_t  reserved_3:4;
 	uint8_t  sof_type:4;
-	uint32_t exchange_address;
+	__le32	exchange_address;
 	struct fcp_hdr_le fcp_hdr_le;
 	uint8_t  reserved_4[16];
-	uint32_t exchange_addr_to_abort;
+	__le32	exchange_addr_to_abort;
 } __packed;
 
 #define ABTS_PARAM_ABORT_SEQ		BIT_0
 
 struct ba_acc_le {
-	uint16_t reserved;
+	__le16	reserved;
 	uint8_t  seq_id_last;
 	uint8_t  seq_id_valid;
 #define SEQ_ID_VALID	0x80
 #define SEQ_ID_INVALID	0x00
-	uint16_t rx_id;
-	uint16_t ox_id;
-	uint16_t high_seq_cnt;
-	uint16_t low_seq_cnt;
+	__le16	rx_id;
+	__le16	ox_id;
+	__le16	high_seq_cnt;
+	__le16	low_seq_cnt;
 } __packed;
 
 struct ba_rjt_le {
@@ -621,21 +619,21 @@ struct abts_resp_to_24xx {
 	uint8_t	 sys_define;		    /* System defined. */
 	uint8_t	 entry_status;		    /* Entry Status. */
 	uint32_t handle;
-	uint16_t reserved_1;
-	uint16_t nport_handle;
-	uint16_t control_flags;
+	__le16	reserved_1;
+	__le16	nport_handle;
+	__le16	control_flags;
 #define ABTS_CONTR_FLG_TERM_EXCHG	BIT_0
 	uint8_t  vp_index;
 	uint8_t  reserved_3:4;
 	uint8_t  sof_type:4;
-	uint32_t exchange_address;
+	__le32	exchange_address;
 	struct fcp_hdr_le fcp_hdr_le;
 	union {
 		struct ba_acc_le ba_acct;
 		struct ba_rjt_le ba_rjt;
 	} __packed payload;
-	uint32_t reserved_4;
-	uint32_t exchange_addr_to_abort;
+	__le32	reserved_4;
+	__le32	exchange_addr_to_abort;
 } __packed;
 
 /*
@@ -651,21 +649,21 @@ struct abts_resp_from_24xx_fw {
 	uint8_t	 sys_define;		    /* System defined. */
 	uint8_t	 entry_status;		    /* Entry Status. */
 	uint32_t handle;
-	uint16_t compl_status;
+	__le16	compl_status;
 #define ABTS_RESP_COMPL_SUCCESS		0
 #define ABTS_RESP_COMPL_SUBCODE_ERROR	0x31
-	uint16_t nport_handle;
-	uint16_t reserved_1;
+	__le16	nport_handle;
+	__le16	reserved_1;
 	uint8_t  reserved_2;
 	uint8_t  reserved_3:4;
 	uint8_t  sof_type:4;
-	uint32_t exchange_address;
+	__le32	exchange_address;
 	struct fcp_hdr_le fcp_hdr_le;
 	uint8_t reserved_4[8];
-	uint32_t error_subcode1;
+	__le32	error_subcode1;
 #define ABTS_RESP_SUBCODE_ERR_ABORTED_EXCH_NOT_TERM	0x1E
-	uint32_t error_subcode2;
-	uint32_t exchange_addr_to_abort;
+	__le32	error_subcode2;
+	__le32	exchange_addr_to_abort;
 } __packed;
 
 /********************************************************************\
@@ -682,12 +680,16 @@ struct qla_tgt_cmd;
  * target module (tcm_qla2xxx).
  */
 struct qla_tgt_func_tmpl {
-
+	struct qla_tgt_cmd *(*find_cmd_by_tag)(struct fc_port *, uint64_t);
 	int (*handle_cmd)(struct scsi_qla_host *, struct qla_tgt_cmd *,
 			unsigned char *, uint32_t, int, int, int);
 	void (*handle_data)(struct qla_tgt_cmd *);
 	int (*handle_tmr)(struct qla_tgt_mgmt_cmd *, u64, uint16_t,
 			uint32_t);
+	struct qla_tgt_cmd *(*get_cmd)(struct fc_port *);
+	int (*get_cmd_ref)(struct qla_tgt_cmd *cmd);
+	void (*put_cmd_ref)(struct qla_tgt_cmd *cmd);
+	void (*rel_cmd)(struct qla_tgt_cmd *);
 	void (*free_cmd)(struct qla_tgt_cmd *);
 	void (*free_mcmd)(struct qla_tgt_mgmt_cmd *);
 	void (*free_session)(struct fc_port *);
@@ -698,7 +700,7 @@ struct qla_tgt_func_tmpl {
 	struct fc_port *(*find_sess_by_loop_id)(struct scsi_qla_host *,
 						const uint16_t);
 	struct fc_port *(*find_sess_by_s_id)(struct scsi_qla_host *,
-						const uint8_t *);
+					     const be_id_t);
 	void (*clear_nacl_from_fcport_map)(struct fc_port *);
 	void (*put_sess)(struct fc_port *);
 	void (*shutdown_sess)(struct fc_port *);
@@ -755,6 +757,7 @@ int qla2x00_wait_for_hba_online(struct scsi_qla_host *);
 #define QLA_TGT_STATE_NEED_DATA		1 /* target needs data to continue */
 #define QLA_TGT_STATE_DATA_IN		2 /* Data arrived + target processing */
 #define QLA_TGT_STATE_PROCESSED		3 /* target done processing */
+#define QLA_TGT_STATE_DONE		4 /* cmd being freed */
 
 /* ATIO task_codes field */
 #define ATIO_SIMPLE_QUEUE           0
@@ -770,14 +773,6 @@ int qla2x00_wait_for_hba_online(struct scsi_qla_host *);
 #define	FC_TM_FCP_DATA_MISMATCH     3
 #define	FC_TM_REJECT                4
 #define FC_TM_FAILED                5
-
-#if (BITS_PER_LONG > 32) || defined(CONFIG_HIGHMEM64G)
-#define pci_dma_lo32(a) (a & 0xffffffff)
-#define pci_dma_hi32(a) ((((a) >> 16)>>16) & 0xffffffff)
-#else
-#define pci_dma_lo32(a) (a & 0xffffffff)
-#define pci_dma_hi32(a) 0
-#endif
 
 #define QLA_TGT_SENSE_VALID(sense)  ((sense != NULL) && \
 				(((const uint8_t *)(sense))[0] & 0x70) == 0x70)
@@ -822,9 +817,6 @@ struct qla_tgt {
 	/* Count of sessions refering qla_tgt. Protected by hardware_lock. */
 	int sess_count;
 
-	/* Protected by hardware_lock */
-	struct list_head del_sess_list;
-
 	spinlock_t sess_work_lock;
 	struct list_head sess_works_list;
 	struct work_struct sess_work;
@@ -834,18 +826,26 @@ struct qla_tgt {
 	int notify_ack_expected;
 	int abts_resp_expected;
 	int modify_lun_expected;
+
+	spinlock_t srr_lock;
+	struct list_head srr_list;
+	struct work_struct srr_work;
+
 	atomic_t tgt_global_resets_count;
+
 	struct list_head tgt_list_entry;
 };
 
 struct qla_tgt_sess_op {
 	struct scsi_qla_host *vha;
 	uint32_t chip_reset;
-	struct atio_from_isp atio;
 	struct work_struct work;
 	struct list_head cmd_list;
 	bool aborted;
 	struct rsp_que *rsp;
+
+	struct atio_from_isp atio;
+	/* DO NOT ADD ANYTHING ELSE HERE - atio must be last member */
 };
 
 enum trace_flags {
@@ -863,13 +863,14 @@ enum trace_flags {
 	TRC_CTIO_ERR = BIT_11,
 	TRC_CTIO_DONE = BIT_12,
 	TRC_CTIO_ABORTED =  BIT_13,
-	TRC_CTIO_STRANGE= BIT_14,
+	TRC_CTIO_STRANGE = BIT_14,
 	TRC_CMD_DONE = BIT_15,
 	TRC_CMD_CHK_STOP = BIT_16,
 	TRC_CMD_FREE = BIT_17,
 	TRC_DATA_IN = BIT_18,
 	TRC_ABORT = BIT_19,
 	TRC_DIF_ERR = BIT_20,
+	TRC_SRR_IMM = BIT_21,
 };
 
 struct qla_tgt_cmd {
@@ -879,6 +880,7 @@ struct qla_tgt_cmd {
 	uint8_t cmd_type;
 	uint8_t pad[7];
 	struct se_cmd se_cmd;
+	struct list_head sess_cmd_list;
 	struct fc_port *sess;
 	struct qla_qpair *qpair;
 	uint32_t reset_count;
@@ -887,20 +889,36 @@ struct qla_tgt_cmd {
 	/* Sense buffer that will be mapped into outgoing status */
 	unsigned char sense_buffer[TRANSPORT_SENSE_BUFFER];
 
-	spinlock_t cmd_lock;
-	/* to save extra sess dereferences */
 	unsigned int conf_compl_supported:1;
 	unsigned int sg_mapped:1;
+
+	/* Call qlt_free_sg() if set. */
 	unsigned int free_sg:1;
+
 	unsigned int write_data_transferred:1;
+
+	/* Set if the SCSI status was sent successfully. */
+	unsigned int rsp_sent:1;
+
 	unsigned int q_full:1;
 	unsigned int term_exchg:1;
 	unsigned int cmd_sent_to_fw:1;
 	unsigned int cmd_in_wq:1;
-	unsigned int aborted:1;
-	unsigned int data_work:1;
-	unsigned int data_work_free:1;
+	unsigned int edif:1;
 
+	/* Set if a SRR was rejected. */
+	unsigned int srr_failed:1;
+
+	/* Set if the exchange has been terminated. */
+	unsigned int sent_term_exchg:1;
+
+	/*
+	 * Set if sent_term_exchg is set, or if the cmd was aborted by a TMR,
+	 * or if some other error prevents normal processing of the command.
+	 */
+	unsigned int aborted:1;
+
+	struct qla_tgt_srr *srr;
 	struct scatterlist *sg;	/* cmd data buffer SG vector */
 	int sg_cnt;		/* SG segments count */
 	int bufflen;		/* cmd buffer length */
@@ -908,6 +926,7 @@ struct qla_tgt_cmd {
 	u64 unpacked_lun;
 	enum dma_data_direction dma_data_direction;
 
+	uint16_t ctio_flags;
 	uint16_t vp_idx;
 	uint16_t loop_id;	/* to save extra sess dereferences */
 	struct qla_tgt *tgt;	/* to save extra sess dereferences */
@@ -932,8 +951,20 @@ struct qla_tgt_cmd {
 	struct crc_context *ctx;
 	uint8_t		*cdb;
 	uint64_t	lba;
+	int		cdb_len;
 	uint16_t	a_guard, e_guard, a_app_tag, e_app_tag;
 	uint32_t	a_ref_tag, e_ref_tag;
+#define DIF_BUNDL_DMA_VALID 1
+	uint16_t prot_flags;
+
+	unsigned long jiffies_at_term_exchg;
+
+	/*
+	 * jiffies64 when qlt_rdy_to_xfer() or qlt_xmit_response() first
+	 * called, or 0 when not in those states.  Used to limit the number of
+	 * SRR retries.
+	 */
+	uint64_t jiffies_at_hw_st_entry;
 
 	uint64_t jiffies_at_alloc;
 	uint64_t jiffies_at_free;
@@ -945,7 +976,6 @@ struct qla_tgt_sess_work_param {
 	struct list_head sess_works_list_entry;
 
 #define QLA_TGT_SESS_WORK_ABORT	1
-#define QLA_TGT_SESS_WORK_TM	2
 	int type;
 
 	union {
@@ -956,16 +986,23 @@ struct qla_tgt_sess_work_param {
 };
 
 struct qla_tgt_mgmt_cmd {
+	uint8_t cmd_type;
+	uint8_t pad[3];
 	uint16_t tmr_func;
 	uint8_t fc_tm_rsp;
+	uint8_t abort_io_attr;
 	struct fc_port *sess;
 	struct qla_qpair *qpair;
 	struct scsi_qla_host *vha;
 	struct se_cmd se_cmd;
 	struct work_struct free_work;
 	unsigned int flags;
+#define QLA24XX_MGMT_SEND_NACK	BIT_0
+#define QLA24XX_MGMT_ABORT_IO_ATTR_VALID BIT_1
+#define QLA24XX_MGMT_LLD_OWNED	BIT_2
 	uint32_t reset_count;
-#define QLA24XX_MGMT_SEND_NACK	1
+	struct work_struct work;
+	uint64_t unpacked_lun;
 	union {
 		struct atio_from_isp atio;
 		struct imm_ntfy_from_isp imm_ntfy;
@@ -991,6 +1028,45 @@ struct qla_tgt_prm {
 	uint16_t tot_dsds;
 };
 
+/*
+ * SRR (Sequence Retransmission Request) - resend or re-receive some or all
+ * data or status to recover from a transient I/O error.
+ */
+struct qla_tgt_srr {
+	/*
+	 * Copy of immediate notify SRR message received from hw; valid only if
+	 * imm_ntfy_recvd is true.
+	 */
+	struct imm_ntfy_from_isp imm_ntfy;
+
+	struct list_head srr_list_entry;
+
+	/* The command affected by this SRR, or NULL if not yet determined. */
+	struct qla_tgt_cmd *cmd;
+
+	/* Used to detect if the HBA has been reset since receiving the SRR. */
+	uint32_t reset_count;
+
+	/*
+	 * The hardware sends two messages for each SRR - an immediate notify
+	 * and a CTIO with CTIO_SRR_RECEIVED status.  These keep track of which
+	 * messages have been received.  The SRR can be processed once both of
+	 * these are true.
+	 */
+	bool imm_ntfy_recvd;
+	bool ctio_recvd;
+
+	/*
+	 * This is set to true if the affected command was aborted (cmd may be
+	 * set to NULL), in which case the immediate notify exchange also needs
+	 * to be aborted.
+	 */
+	bool aborted;
+
+	/* This is set to true to force the SRR to be rejected. */
+	bool reject;
+};
+
 /* Check for Switch reserved address */
 #define IS_SW_RESV_ADDR(_s_id) \
 	((_s_id.b.domain == 0xff) && ((_s_id.b.area & 0xf0) == 0xf0))
@@ -1012,10 +1088,8 @@ extern int qlt_lport_register(void *, u64, u64, u64,
 extern void qlt_lport_deregister(struct scsi_qla_host *);
 extern void qlt_unreg_sess(struct fc_port *);
 extern void qlt_fc_port_added(struct scsi_qla_host *, fc_port_t *);
-extern void qlt_fc_port_deleted(struct scsi_qla_host *, fc_port_t *, int);
 extern int __init qlt_init(void);
 extern void qlt_exit(void);
-extern void qlt_update_vp_map(struct scsi_qla_host *, int);
 extern void qlt_free_session_done(struct work_struct *);
 /*
  * This macro is used during early initializations when host->active_mode
@@ -1040,22 +1114,25 @@ static inline bool qla_dual_mode_enabled(struct scsi_qla_host *ha)
 	return (ha->host->active_mode == MODE_DUAL);
 }
 
-static inline uint32_t sid_to_key(const uint8_t *s_id)
+static inline uint32_t sid_to_key(const be_id_t s_id)
 {
-	uint32_t key;
-
-	key = (((unsigned long)s_id[0] << 16) |
-	       ((unsigned long)s_id[1] << 8) |
-	       (unsigned long)s_id[2]);
-	return key;
+	return s_id.domain << 16 |
+		s_id.area << 8 |
+		s_id.al_pa;
 }
 
-static inline void sid_to_portid(const uint8_t *s_id, port_id_t *p)
+/*
+ * Free the scatterlist allocated by qlt_set_data_offset().  Call this only if
+ * cmd->free_sg is set.
+ */
+static inline void qlt_free_sg(struct qla_tgt_cmd *cmd)
 {
-	memset(p, 0, sizeof(*p));
-	p->b.domain = s_id[0];
-	p->b.area = s_id[1];
-	p->b.al_pa = s_id[2];
+	/*
+	 * The scatterlist may be chained to the original scatterlist, but we
+	 * only need to free the first segment here since that is the only part
+	 * allocated by qlt_set_data_offset().
+	 */
+	kfree(cmd->sg);
 }
 
 /*
@@ -1066,9 +1143,14 @@ extern void qlt_response_pkt_all_vps(struct scsi_qla_host *, struct rsp_que *,
 extern int qlt_rdy_to_xfer(struct qla_tgt_cmd *);
 extern int qlt_xmit_response(struct qla_tgt_cmd *, int, uint8_t);
 extern int qlt_abort_cmd(struct qla_tgt_cmd *);
+void qlt_srr_abort(struct qla_tgt_cmd *cmd, bool reject);
+void qlt_send_term_exchange(struct qla_qpair *qpair,
+	struct qla_tgt_cmd *cmd, struct atio_from_isp *atio, int ha_locked);
 extern void qlt_xmit_tm_rsp(struct qla_tgt_mgmt_cmd *);
+void qlt_free_ul_mcmd(struct qla_hw_data *ha, struct qla_tgt_mgmt_cmd *mcmd);
 extern void qlt_free_mcmd(struct qla_tgt_mgmt_cmd *);
 extern void qlt_free_cmd(struct qla_tgt_cmd *cmd);
+extern void qlt_unmap_sg(struct scsi_qla_host *vha, struct qla_tgt_cmd *cmd);
 extern void qlt_async_event(uint16_t, struct scsi_qla_host *, uint16_t *);
 extern void qlt_enable_vha(struct scsi_qla_host *);
 extern void qlt_vport_create(struct scsi_qla_host *, struct qla_hw_data *);
@@ -1084,8 +1166,7 @@ extern void qlt_81xx_config_nvram_stage2(struct scsi_qla_host *,
 	struct init_cb_81xx *);
 extern void qlt_81xx_config_nvram_stage1(struct scsi_qla_host *,
 	struct nvram_81xx *);
-extern int qlt_24xx_process_response_error(struct scsi_qla_host *,
-	struct sts_entry_24xx *);
+void qlt_config_nvram_with_fw_version(struct scsi_qla_host *vha);
 extern void qlt_modify_vp_config(struct scsi_qla_host *,
 	struct vp_config_entry_24xx *);
 extern void qlt_probe_one_stage1(struct scsi_qla_host *, struct qla_hw_data *);
@@ -1094,14 +1175,10 @@ extern void qlt_mem_free(struct qla_hw_data *);
 extern int qlt_stop_phase1(struct qla_tgt *);
 extern void qlt_stop_phase2(struct qla_tgt *);
 extern irqreturn_t qla83xx_msix_atio_q(int, void *);
-extern void qlt_83xx_iospace_config(struct qla_hw_data *);
-extern int qlt_free_qfull_cmds(struct qla_qpair *);
 extern void qlt_logo_completion_handler(fc_port_t *, int);
 extern void qlt_do_generation_tick(struct scsi_qla_host *, int *);
 
 void qlt_send_resp_ctio(struct qla_qpair *, struct qla_tgt_cmd *, uint8_t,
     uint8_t, uint8_t, uint8_t);
-extern void qlt_abort_cmd_on_host_reset(struct scsi_qla_host *,
-    struct qla_tgt_cmd *);
 
 #endif /* __QLA_TARGET_H */

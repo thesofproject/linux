@@ -1,14 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2013 Freescale Semiconductor, Inc.
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
  */
 
+#include <linux/bits.h>
 #include <linux/clk-provider.h>
 #include <linux/err.h>
 #include <linux/io.h>
@@ -22,7 +17,7 @@
  * @fixup: a hook to fixup the write value
  *
  * The imx fixup multiplexer clock is a subclass of basic clk_mux
- * with an addtional fixup hook.
+ * with an additional fixup hook.
  */
 struct clk_fixup_mux {
 	struct clk_mux mux;
@@ -48,7 +43,7 @@ static int clk_fixup_mux_set_parent(struct clk_hw *hw, u8 index)
 {
 	struct clk_fixup_mux *fixup_mux = to_clk_fixup_mux(hw);
 	struct clk_mux *mux = to_clk_mux(hw);
-	unsigned long flags = 0;
+	unsigned long flags;
 	u32 val;
 
 	spin_lock_irqsave(mux->lock, flags);
@@ -65,22 +60,24 @@ static int clk_fixup_mux_set_parent(struct clk_hw *hw, u8 index)
 }
 
 static const struct clk_ops clk_fixup_mux_ops = {
+	.determine_rate = clk_hw_determine_rate_no_reparent,
 	.get_parent = clk_fixup_mux_get_parent,
 	.set_parent = clk_fixup_mux_set_parent,
 };
 
-struct clk *imx_clk_fixup_mux(const char *name, void __iomem *reg,
-			      u8 shift, u8 width, const char **parents,
+struct clk_hw *imx_clk_hw_fixup_mux(const char *name, void __iomem *reg,
+			      u8 shift, u8 width, const char * const *parents,
 			      int num_parents, void (*fixup)(u32 *val))
 {
 	struct clk_fixup_mux *fixup_mux;
-	struct clk *clk;
+	struct clk_hw *hw;
 	struct clk_init_data init;
+	int ret;
 
 	if (!fixup)
 		return ERR_PTR(-EINVAL);
 
-	fixup_mux = kzalloc(sizeof(*fixup_mux), GFP_KERNEL);
+	fixup_mux = kzalloc_obj(*fixup_mux);
 	if (!fixup_mux)
 		return ERR_PTR(-ENOMEM);
 
@@ -98,9 +95,13 @@ struct clk *imx_clk_fixup_mux(const char *name, void __iomem *reg,
 	fixup_mux->ops = &clk_mux_ops;
 	fixup_mux->fixup = fixup;
 
-	clk = clk_register(NULL, &fixup_mux->mux.hw);
-	if (IS_ERR(clk))
-		kfree(fixup_mux);
+	hw = &fixup_mux->mux.hw;
 
-	return clk;
+	ret = clk_hw_register(NULL, hw);
+	if (ret) {
+		kfree(fixup_mux);
+		return ERR_PTR(ret);
+	}
+
+	return hw;
 }

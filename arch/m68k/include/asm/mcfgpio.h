@@ -1,24 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Coldfire generic GPIO support.
  *
  * (C) Copyright 2009, Steven King <sfking@fdwdc.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef mcfgpio_h
 #define mcfgpio_h
-
-#ifdef CONFIG_GPIOLIB
-#include <asm-generic/gpio.h>
-#else
 
 int __mcfgpio_get_value(unsigned gpio);
 void __mcfgpio_set_value(unsigned gpio, int value);
@@ -26,6 +14,10 @@ int __mcfgpio_direction_input(unsigned gpio);
 int __mcfgpio_direction_output(unsigned gpio, int value);
 int __mcfgpio_request(unsigned gpio);
 void __mcfgpio_free(unsigned gpio);
+
+#ifdef CONFIG_GPIOLIB
+#include <linux/gpio.h>
+#else
 
 /* our alternate 'gpiolib' functions */
 static inline int __gpio_get_value(unsigned gpio)
@@ -40,14 +32,6 @@ static inline void __gpio_set_value(unsigned gpio, int value)
 {
 	if (gpio < MCFGPIO_PIN_MAX)
 		__mcfgpio_set_value(gpio, value);
-}
-
-static inline int __gpio_cansleep(unsigned gpio)
-{
-	if (gpio < MCFGPIO_PIN_MAX)
-		return 0;
-	else
-		return -EINVAL;
 }
 
 static inline int __gpio_to_irq(unsigned gpio)
@@ -111,8 +95,8 @@ static inline void gpio_free(unsigned gpio)
 
 #define MCFGPIO_PORTTYPE		u8
 #define MCFGPIO_PORTSIZE		8
-#define mcfgpio_read(port)		__raw_readb(port)
-#define mcfgpio_write(data, port)	__raw_writeb(data, port)
+#define mcfgpio_read(port)		mcf_read8(port)
+#define mcfgpio_write(data, port)	mcf_write8(data, port)
 
 #elif defined(CONFIG_M5307) || defined(CONFIG_M5407) || defined(CONFIG_M5272)
 
@@ -120,8 +104,8 @@ static inline void gpio_free(unsigned gpio)
 
 #define MCFGPIO_PORTTYPE		u16
 #define MCFGPIO_PORTSIZE		16
-#define mcfgpio_read(port)		__raw_readw(port)
-#define mcfgpio_write(data, port)	__raw_writew(data, port)
+#define mcfgpio_read(port)		mcf_read16(port)
+#define mcfgpio_write(data, port)	mcf_write16(data, port)
 
 #elif defined(CONFIG_M5249) || defined(CONFIG_M525x)
 
@@ -129,8 +113,8 @@ static inline void gpio_free(unsigned gpio)
 
 #define MCFGPIO_PORTTYPE		u32
 #define MCFGPIO_PORTSIZE		32
-#define mcfgpio_read(port)		__raw_readl(port)
-#define mcfgpio_write(data, port)	__raw_writel(data, port)
+#define mcfgpio_read(port)		mcf_read32(port)
+#define mcfgpio_write(data, port)	mcf_write32(data, port)
 
 #endif
 
@@ -152,7 +136,7 @@ static inline void gpio_free(unsigned gpio)
  * read-modify-write as well as those controlled by the EPORT and GPIO modules.
  */
 #define MCFGPIO_SCR_START		40
-#elif defined(CONFIGM5441x)
+#elif defined(CONFIG_M5441x)
 /* The m5441x EPORT doesn't have its own GPIO port, uses PORT C */
 #define MCFGPIO_SCR_START		0
 #else

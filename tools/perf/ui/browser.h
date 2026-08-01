@@ -4,6 +4,7 @@
 
 #include <linux/types.h>
 #include <stdarg.h>
+#include <sys/types.h>
 
 #define HE_COLORSET_TOP		50
 #define HE_COLORSET_MEDIUM	51
@@ -20,8 +21,9 @@ struct ui_browser {
 	u8	      extra_title_lines;
 	int	      current_color;
 	void	      *priv;
-	const char    *title;
+	char	      *title;
 	char	      *helpline;
+	const char    *no_samples_msg;
 	void 	      (*refresh_dimensions)(struct ui_browser *browser);
 	unsigned int  (*refresh)(struct ui_browser *browser);
 	void	      (*write)(struct ui_browser *browser, void *entry, int row);
@@ -49,7 +51,7 @@ void ui_browser__write_graph(struct ui_browser *browser, int graph);
 void __ui_browser__line_arrow(struct ui_browser *browser, unsigned int column,
 			      u64 start, u64 end);
 void ui_browser__mark_fused(struct ui_browser *browser, unsigned int column,
-			    unsigned int row, bool arrow_down);
+			    unsigned int row, int diff, bool arrow_down);
 void __ui_browser__show_title(struct ui_browser *browser, const char *title);
 void ui_browser__show_title(struct ui_browser *browser, const char *title);
 int ui_browser__show(struct ui_browser *browser, const char *title,
@@ -64,12 +66,13 @@ void __ui_browser__vline(struct ui_browser *browser, unsigned int column,
 
 int ui_browser__warning(struct ui_browser *browser, int timeout,
 			const char *format, ...);
+int ui_browser__warn_unhandled_hotkey(struct ui_browser *browser, int key, int timeout, const char *help);
 int ui_browser__help_window(struct ui_browser *browser, const char *text);
 bool ui_browser__dialog_yesno(struct ui_browser *browser, const char *text);
 int ui_browser__input_window(const char *title, const char *text, char *input,
 			     const char *exit_msg, int delay_sec);
-struct perf_env;
-int tui__header_window(struct perf_env *env);
+struct perf_session;
+int tui__header_window(struct perf_session *session);
 
 void ui_browser__argv_seek(struct ui_browser *browser, off_t offset, int whence);
 unsigned int ui_browser__argv_refresh(struct ui_browser *browser);

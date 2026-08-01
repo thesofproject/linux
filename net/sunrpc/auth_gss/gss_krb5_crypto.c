@@ -34,600 +34,21 @@
  * WARRANTIES OF MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-#include <crypto/algapi.h>
-#include <crypto/hash.h>
-#include <crypto/skcipher.h>
 #include <linux/err.h>
 #include <linux/types.h>
 #include <linux/mm.h>
 #include <linux/scatterlist.h>
 #include <linux/highmem.h>
 #include <linux/pagemap.h>
-#include <linux/random.h>
 #include <linux/sunrpc/gss_krb5.h>
 #include <linux/sunrpc/xdr.h>
+
+#include "gss_krb5_internal.h"
 
 #if IS_ENABLED(CONFIG_SUNRPC_DEBUG)
 # define RPCDBG_FACILITY        RPCDBG_AUTH
 #endif
 
-u32
-krb5_encrypt(
-	struct crypto_skcipher *tfm,
-	void * iv,
-	void * in,
-	void * out,
-	int length)
-{
-	u32 ret = -EINVAL;
-	struct scatterlist sg[1];
-	u8 local_iv[GSS_KRB5_MAX_BLOCKSIZE] = {0};
-	SKCIPHER_REQUEST_ON_STACK(req, tfm);
-
-	if (length % crypto_skcipher_blocksize(tfm) != 0)
-		goto out;
-
-	if (crypto_skcipher_ivsize(tfm) > GSS_KRB5_MAX_BLOCKSIZE) {
-		dprintk("RPC:       gss_k5encrypt: tfm iv size too large %d\n",
-			crypto_skcipher_ivsize(tfm));
-		goto out;
-	}
-
-	if (iv)
-		memcpy(local_iv, iv, crypto_skcipher_ivsize(tfm));
-
-	memcpy(out, in, length);
-	sg_init_one(sg, out, length);
-
-	skcipher_request_set_tfm(req, tfm);
-	skcipher_request_set_callback(req, 0, NULL, NULL);
-	skcipher_request_set_crypt(req, sg, sg, length, local_iv);
-
-	ret = crypto_skcipher_encrypt(req);
-	skcipher_request_zero(req);
-out:
-	dprintk("RPC:       krb5_encrypt returns %d\n", ret);
-	return ret;
-}
-
-u32
-krb5_decrypt(
-     struct crypto_skcipher *tfm,
-     void * iv,
-     void * in,
-     void * out,
-     int length)
-{
-	u32 ret = -EINVAL;
-	struct scatterlist sg[1];
-	u8 local_iv[GSS_KRB5_MAX_BLOCKSIZE] = {0};
-	SKCIPHER_REQUEST_ON_STACK(req, tfm);
-
-	if (length % crypto_skcipher_blocksize(tfm) != 0)
-		goto out;
-
-	if (crypto_skcipher_ivsize(tfm) > GSS_KRB5_MAX_BLOCKSIZE) {
-		dprintk("RPC:       gss_k5decrypt: tfm iv size too large %d\n",
-			crypto_skcipher_ivsize(tfm));
-		goto out;
-	}
-	if (iv)
-		memcpy(local_iv,iv, crypto_skcipher_ivsize(tfm));
-
-	memcpy(out, in, length);
-	sg_init_one(sg, out, length);
-
-	skcipher_request_set_tfm(req, tfm);
-	skcipher_request_set_callback(req, 0, NULL, NULL);
-	skcipher_request_set_crypt(req, sg, sg, length, local_iv);
-
-	ret = crypto_skcipher_decrypt(req);
-	skcipher_request_zero(req);
-out:
-	dprintk("RPC:       gss_k5decrypt returns %d\n",ret);
-	return ret;
-}
-
-static int
-checksummer(struct scatterlist *sg, void *data)
-{
-	struct ahash_request *req = data;
-
-	ahash_request_set_crypt(req, sg, NULL, sg->length);
-
-	return crypto_ahash_update(req);
-}
-
-static int
-arcfour_hmac_md5_usage_to_salt(unsigned int usage, u8 salt[4])
-{
-	unsigned int ms_usage;
-
-	switch (usage) {
-	case KG_USAGE_SIGN:
-		ms_usage = 15;
-		break;
-	case KG_USAGE_SEAL:
-		ms_usage = 13;
-		break;
-	default:
-		return -EINVAL;
-	}
-	salt[0] = (ms_usage >> 0) & 0xff;
-	salt[1] = (ms_usage >> 8) & 0xff;
-	salt[2] = (ms_usage >> 16) & 0xff;
-	salt[3] = (ms_usage >> 24) & 0xff;
-
-	return 0;
-}
-
-static u32
-make_checksum_hmac_md5(struct krb5_ctx *kctx, char *header, int hdrlen,
-		       struct xdr_buf *body, int body_offset, u8 *cksumkey,
-		       unsigned int usage, struct xdr_netobj *cksumout)
-{
-	struct scatterlist              sg[1];
-	int err = -1;
-	u8 *checksumdata;
-	u8 rc4salt[4];
-	struct crypto_ahash *md5;
-	struct crypto_ahash *hmac_md5;
-	struct ahash_request *req;
-
-	if (cksumkey == NULL)
-		return GSS_S_FAILURE;
-
-	if (cksumout->len < kctx->gk5e->cksumlength) {
-		dprintk("%s: checksum buffer length, %u, too small for %s\n",
-			__func__, cksumout->len, kctx->gk5e->name);
-		return GSS_S_FAILURE;
-	}
-
-	if (arcfour_hmac_md5_usage_to_salt(usage, rc4salt)) {
-		dprintk("%s: invalid usage value %u\n", __func__, usage);
-		return GSS_S_FAILURE;
-	}
-
-	checksumdata = kmalloc(GSS_KRB5_MAX_CKSUM_LEN, GFP_NOFS);
-	if (!checksumdata)
-		return GSS_S_FAILURE;
-
-	md5 = crypto_alloc_ahash("md5", 0, CRYPTO_ALG_ASYNC);
-	if (IS_ERR(md5))
-		goto out_free_cksum;
-
-	hmac_md5 = crypto_alloc_ahash(kctx->gk5e->cksum_name, 0,
-				      CRYPTO_ALG_ASYNC);
-	if (IS_ERR(hmac_md5))
-		goto out_free_md5;
-
-	req = ahash_request_alloc(md5, GFP_NOFS);
-	if (!req)
-		goto out_free_hmac_md5;
-
-	ahash_request_set_callback(req, CRYPTO_TFM_REQ_MAY_SLEEP, NULL, NULL);
-
-	err = crypto_ahash_init(req);
-	if (err)
-		goto out;
-	sg_init_one(sg, rc4salt, 4);
-	ahash_request_set_crypt(req, sg, NULL, 4);
-	err = crypto_ahash_update(req);
-	if (err)
-		goto out;
-
-	sg_init_one(sg, header, hdrlen);
-	ahash_request_set_crypt(req, sg, NULL, hdrlen);
-	err = crypto_ahash_update(req);
-	if (err)
-		goto out;
-	err = xdr_process_buf(body, body_offset, body->len - body_offset,
-			      checksummer, req);
-	if (err)
-		goto out;
-	ahash_request_set_crypt(req, NULL, checksumdata, 0);
-	err = crypto_ahash_final(req);
-	if (err)
-		goto out;
-
-	ahash_request_free(req);
-	req = ahash_request_alloc(hmac_md5, GFP_NOFS);
-	if (!req)
-		goto out_free_hmac_md5;
-
-	ahash_request_set_callback(req, CRYPTO_TFM_REQ_MAY_SLEEP, NULL, NULL);
-
-	err = crypto_ahash_setkey(hmac_md5, cksumkey, kctx->gk5e->keylength);
-	if (err)
-		goto out;
-
-	sg_init_one(sg, checksumdata, crypto_ahash_digestsize(md5));
-	ahash_request_set_crypt(req, sg, checksumdata,
-				crypto_ahash_digestsize(md5));
-	err = crypto_ahash_digest(req);
-	if (err)
-		goto out;
-
-	memcpy(cksumout->data, checksumdata, kctx->gk5e->cksumlength);
-	cksumout->len = kctx->gk5e->cksumlength;
-out:
-	ahash_request_free(req);
-out_free_hmac_md5:
-	crypto_free_ahash(hmac_md5);
-out_free_md5:
-	crypto_free_ahash(md5);
-out_free_cksum:
-	kfree(checksumdata);
-	return err ? GSS_S_FAILURE : 0;
-}
-
-/*
- * checksum the plaintext data and hdrlen bytes of the token header
- * The checksum is performed over the first 8 bytes of the
- * gss token header and then over the data body
- */
-u32
-make_checksum(struct krb5_ctx *kctx, char *header, int hdrlen,
-	      struct xdr_buf *body, int body_offset, u8 *cksumkey,
-	      unsigned int usage, struct xdr_netobj *cksumout)
-{
-	struct crypto_ahash *tfm;
-	struct ahash_request *req;
-	struct scatterlist              sg[1];
-	int err = -1;
-	u8 *checksumdata;
-	unsigned int checksumlen;
-
-	if (kctx->gk5e->ctype == CKSUMTYPE_HMAC_MD5_ARCFOUR)
-		return make_checksum_hmac_md5(kctx, header, hdrlen,
-					      body, body_offset,
-					      cksumkey, usage, cksumout);
-
-	if (cksumout->len < kctx->gk5e->cksumlength) {
-		dprintk("%s: checksum buffer length, %u, too small for %s\n",
-			__func__, cksumout->len, kctx->gk5e->name);
-		return GSS_S_FAILURE;
-	}
-
-	checksumdata = kmalloc(GSS_KRB5_MAX_CKSUM_LEN, GFP_NOFS);
-	if (checksumdata == NULL)
-		return GSS_S_FAILURE;
-
-	tfm = crypto_alloc_ahash(kctx->gk5e->cksum_name, 0, CRYPTO_ALG_ASYNC);
-	if (IS_ERR(tfm))
-		goto out_free_cksum;
-
-	req = ahash_request_alloc(tfm, GFP_NOFS);
-	if (!req)
-		goto out_free_ahash;
-
-	ahash_request_set_callback(req, CRYPTO_TFM_REQ_MAY_SLEEP, NULL, NULL);
-
-	checksumlen = crypto_ahash_digestsize(tfm);
-
-	if (cksumkey != NULL) {
-		err = crypto_ahash_setkey(tfm, cksumkey,
-					  kctx->gk5e->keylength);
-		if (err)
-			goto out;
-	}
-
-	err = crypto_ahash_init(req);
-	if (err)
-		goto out;
-	sg_init_one(sg, header, hdrlen);
-	ahash_request_set_crypt(req, sg, NULL, hdrlen);
-	err = crypto_ahash_update(req);
-	if (err)
-		goto out;
-	err = xdr_process_buf(body, body_offset, body->len - body_offset,
-			      checksummer, req);
-	if (err)
-		goto out;
-	ahash_request_set_crypt(req, NULL, checksumdata, 0);
-	err = crypto_ahash_final(req);
-	if (err)
-		goto out;
-
-	switch (kctx->gk5e->ctype) {
-	case CKSUMTYPE_RSA_MD5:
-		err = kctx->gk5e->encrypt(kctx->seq, NULL, checksumdata,
-					  checksumdata, checksumlen);
-		if (err)
-			goto out;
-		memcpy(cksumout->data,
-		       checksumdata + checksumlen - kctx->gk5e->cksumlength,
-		       kctx->gk5e->cksumlength);
-		break;
-	case CKSUMTYPE_HMAC_SHA1_DES3:
-		memcpy(cksumout->data, checksumdata, kctx->gk5e->cksumlength);
-		break;
-	default:
-		BUG();
-		break;
-	}
-	cksumout->len = kctx->gk5e->cksumlength;
-out:
-	ahash_request_free(req);
-out_free_ahash:
-	crypto_free_ahash(tfm);
-out_free_cksum:
-	kfree(checksumdata);
-	return err ? GSS_S_FAILURE : 0;
-}
-
-/*
- * checksum the plaintext data and hdrlen bytes of the token header
- * Per rfc4121, sec. 4.2.4, the checksum is performed over the data
- * body then over the first 16 octets of the MIC token
- * Inclusion of the header data in the calculation of the
- * checksum is optional.
- */
-u32
-make_checksum_v2(struct krb5_ctx *kctx, char *header, int hdrlen,
-		 struct xdr_buf *body, int body_offset, u8 *cksumkey,
-		 unsigned int usage, struct xdr_netobj *cksumout)
-{
-	struct crypto_ahash *tfm;
-	struct ahash_request *req;
-	struct scatterlist sg[1];
-	int err = -1;
-	u8 *checksumdata;
-	unsigned int checksumlen;
-
-	if (kctx->gk5e->keyed_cksum == 0) {
-		dprintk("%s: expected keyed hash for %s\n",
-			__func__, kctx->gk5e->name);
-		return GSS_S_FAILURE;
-	}
-	if (cksumkey == NULL) {
-		dprintk("%s: no key supplied for %s\n",
-			__func__, kctx->gk5e->name);
-		return GSS_S_FAILURE;
-	}
-
-	checksumdata = kmalloc(GSS_KRB5_MAX_CKSUM_LEN, GFP_NOFS);
-	if (!checksumdata)
-		return GSS_S_FAILURE;
-
-	tfm = crypto_alloc_ahash(kctx->gk5e->cksum_name, 0, CRYPTO_ALG_ASYNC);
-	if (IS_ERR(tfm))
-		goto out_free_cksum;
-	checksumlen = crypto_ahash_digestsize(tfm);
-
-	req = ahash_request_alloc(tfm, GFP_NOFS);
-	if (!req)
-		goto out_free_ahash;
-
-	ahash_request_set_callback(req, CRYPTO_TFM_REQ_MAY_SLEEP, NULL, NULL);
-
-	err = crypto_ahash_setkey(tfm, cksumkey, kctx->gk5e->keylength);
-	if (err)
-		goto out;
-
-	err = crypto_ahash_init(req);
-	if (err)
-		goto out;
-	err = xdr_process_buf(body, body_offset, body->len - body_offset,
-			      checksummer, req);
-	if (err)
-		goto out;
-	if (header != NULL) {
-		sg_init_one(sg, header, hdrlen);
-		ahash_request_set_crypt(req, sg, NULL, hdrlen);
-		err = crypto_ahash_update(req);
-		if (err)
-			goto out;
-	}
-	ahash_request_set_crypt(req, NULL, checksumdata, 0);
-	err = crypto_ahash_final(req);
-	if (err)
-		goto out;
-
-	cksumout->len = kctx->gk5e->cksumlength;
-
-	switch (kctx->gk5e->ctype) {
-	case CKSUMTYPE_HMAC_SHA1_96_AES128:
-	case CKSUMTYPE_HMAC_SHA1_96_AES256:
-		/* note that this truncates the hash */
-		memcpy(cksumout->data, checksumdata, kctx->gk5e->cksumlength);
-		break;
-	default:
-		BUG();
-		break;
-	}
-out:
-	ahash_request_free(req);
-out_free_ahash:
-	crypto_free_ahash(tfm);
-out_free_cksum:
-	kfree(checksumdata);
-	return err ? GSS_S_FAILURE : 0;
-}
-
-struct encryptor_desc {
-	u8 iv[GSS_KRB5_MAX_BLOCKSIZE];
-	struct skcipher_request *req;
-	int pos;
-	struct xdr_buf *outbuf;
-	struct page **pages;
-	struct scatterlist infrags[4];
-	struct scatterlist outfrags[4];
-	int fragno;
-	int fraglen;
-};
-
-static int
-encryptor(struct scatterlist *sg, void *data)
-{
-	struct encryptor_desc *desc = data;
-	struct xdr_buf *outbuf = desc->outbuf;
-	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(desc->req);
-	struct page *in_page;
-	int thislen = desc->fraglen + sg->length;
-	int fraglen, ret;
-	int page_pos;
-
-	/* Worst case is 4 fragments: head, end of page 1, start
-	 * of page 2, tail.  Anything more is a bug. */
-	BUG_ON(desc->fragno > 3);
-
-	page_pos = desc->pos - outbuf->head[0].iov_len;
-	if (page_pos >= 0 && page_pos < outbuf->page_len) {
-		/* pages are not in place: */
-		int i = (page_pos + outbuf->page_base) >> PAGE_SHIFT;
-		in_page = desc->pages[i];
-	} else {
-		in_page = sg_page(sg);
-	}
-	sg_set_page(&desc->infrags[desc->fragno], in_page, sg->length,
-		    sg->offset);
-	sg_set_page(&desc->outfrags[desc->fragno], sg_page(sg), sg->length,
-		    sg->offset);
-	desc->fragno++;
-	desc->fraglen += sg->length;
-	desc->pos += sg->length;
-
-	fraglen = thislen & (crypto_skcipher_blocksize(tfm) - 1);
-	thislen -= fraglen;
-
-	if (thislen == 0)
-		return 0;
-
-	sg_mark_end(&desc->infrags[desc->fragno - 1]);
-	sg_mark_end(&desc->outfrags[desc->fragno - 1]);
-
-	skcipher_request_set_crypt(desc->req, desc->infrags, desc->outfrags,
-				   thislen, desc->iv);
-
-	ret = crypto_skcipher_encrypt(desc->req);
-	if (ret)
-		return ret;
-
-	sg_init_table(desc->infrags, 4);
-	sg_init_table(desc->outfrags, 4);
-
-	if (fraglen) {
-		sg_set_page(&desc->outfrags[0], sg_page(sg), fraglen,
-				sg->offset + sg->length - fraglen);
-		desc->infrags[0] = desc->outfrags[0];
-		sg_assign_page(&desc->infrags[0], in_page);
-		desc->fragno = 1;
-		desc->fraglen = fraglen;
-	} else {
-		desc->fragno = 0;
-		desc->fraglen = 0;
-	}
-	return 0;
-}
-
-int
-gss_encrypt_xdr_buf(struct crypto_skcipher *tfm, struct xdr_buf *buf,
-		    int offset, struct page **pages)
-{
-	int ret;
-	struct encryptor_desc desc;
-	SKCIPHER_REQUEST_ON_STACK(req, tfm);
-
-	BUG_ON((buf->len - offset) % crypto_skcipher_blocksize(tfm) != 0);
-
-	skcipher_request_set_tfm(req, tfm);
-	skcipher_request_set_callback(req, 0, NULL, NULL);
-
-	memset(desc.iv, 0, sizeof(desc.iv));
-	desc.req = req;
-	desc.pos = offset;
-	desc.outbuf = buf;
-	desc.pages = pages;
-	desc.fragno = 0;
-	desc.fraglen = 0;
-
-	sg_init_table(desc.infrags, 4);
-	sg_init_table(desc.outfrags, 4);
-
-	ret = xdr_process_buf(buf, offset, buf->len - offset, encryptor, &desc);
-	skcipher_request_zero(req);
-	return ret;
-}
-
-struct decryptor_desc {
-	u8 iv[GSS_KRB5_MAX_BLOCKSIZE];
-	struct skcipher_request *req;
-	struct scatterlist frags[4];
-	int fragno;
-	int fraglen;
-};
-
-static int
-decryptor(struct scatterlist *sg, void *data)
-{
-	struct decryptor_desc *desc = data;
-	int thislen = desc->fraglen + sg->length;
-	struct crypto_skcipher *tfm = crypto_skcipher_reqtfm(desc->req);
-	int fraglen, ret;
-
-	/* Worst case is 4 fragments: head, end of page 1, start
-	 * of page 2, tail.  Anything more is a bug. */
-	BUG_ON(desc->fragno > 3);
-	sg_set_page(&desc->frags[desc->fragno], sg_page(sg), sg->length,
-		    sg->offset);
-	desc->fragno++;
-	desc->fraglen += sg->length;
-
-	fraglen = thislen & (crypto_skcipher_blocksize(tfm) - 1);
-	thislen -= fraglen;
-
-	if (thislen == 0)
-		return 0;
-
-	sg_mark_end(&desc->frags[desc->fragno - 1]);
-
-	skcipher_request_set_crypt(desc->req, desc->frags, desc->frags,
-				   thislen, desc->iv);
-
-	ret = crypto_skcipher_decrypt(desc->req);
-	if (ret)
-		return ret;
-
-	sg_init_table(desc->frags, 4);
-
-	if (fraglen) {
-		sg_set_page(&desc->frags[0], sg_page(sg), fraglen,
-				sg->offset + sg->length - fraglen);
-		desc->fragno = 1;
-		desc->fraglen = fraglen;
-	} else {
-		desc->fragno = 0;
-		desc->fraglen = 0;
-	}
-	return 0;
-}
-
-int
-gss_decrypt_xdr_buf(struct crypto_skcipher *tfm, struct xdr_buf *buf,
-		    int offset)
-{
-	int ret;
-	struct decryptor_desc desc;
-	SKCIPHER_REQUEST_ON_STACK(req, tfm);
-
-	/* XXXJBF: */
-	BUG_ON((buf->len - offset) % crypto_skcipher_blocksize(tfm) != 0);
-
-	skcipher_request_set_tfm(req, tfm);
-	skcipher_request_set_callback(req, 0, NULL, NULL);
-
-	memset(desc.iv, 0, sizeof(desc.iv));
-	desc.req = req;
-	desc.fragno = 0;
-	desc.fraglen = 0;
-
-	sg_init_table(desc.frags, 4);
-
-	ret = xdr_process_buf(buf, offset, buf->len - offset, decryptor, &desc);
-	skcipher_request_zero(req);
-	return ret;
-}
 
 /*
  * This function makes the assumption that it was ultimately called
@@ -640,7 +61,7 @@ gss_decrypt_xdr_buf(struct crypto_skcipher *tfm, struct xdr_buf *buf,
  *
  * Even with that guarantee, this function may be called more than
  * once in the processing of gss_wrap().  The best we can do is
- * verify at compile-time (see GSS_KRB5_SLACK_CHECK) that the
+ * verify at compile-time (see GSS_KRB5_MAX_SLACK_NEEDED) that the
  * largest expected shift will fit within RPC_MAX_AUTH_SIZE.
  * At run-time we can verify that a single invocation of this
  * function doesn't attempt to use more the RPC_MAX_AUTH_SIZE.
@@ -654,7 +75,6 @@ xdr_extend_head(struct xdr_buf *buf, unsigned int base, unsigned int shiftlen)
 	if (shiftlen == 0)
 		return 0;
 
-	BUILD_BUG_ON(GSS_KRB5_MAX_SLACK_NEEDED > RPC_MAX_AUTH_SIZE);
 	BUG_ON(shiftlen > RPC_MAX_AUTH_SIZE);
 
 	p = buf->head[0].iov_base + base;
@@ -667,414 +87,235 @@ xdr_extend_head(struct xdr_buf *buf, unsigned int base, unsigned int shiftlen)
 	return 0;
 }
 
-static u32
-gss_krb5_cts_crypt(struct crypto_skcipher *cipher, struct xdr_buf *buf,
-		   u32 offset, u8 *iv, struct page **pages, int encrypt)
-{
-	u32 ret;
-	struct scatterlist sg[1];
-	SKCIPHER_REQUEST_ON_STACK(req, cipher);
-	u8 *data;
-	struct page **save_pages;
-	u32 len = buf->len - offset;
 
-	if (len > GSS_KRB5_MAX_BLOCKSIZE * 2) {
-		WARN_ON(0);
-		return -ENOMEM;
-	}
-	data = kmalloc(GSS_KRB5_MAX_BLOCKSIZE * 2, GFP_NOFS);
-	if (!data)
-		return -ENOMEM;
-
-	/*
-	 * For encryption, we want to read from the cleartext
-	 * page cache pages, and write the encrypted data to
-	 * the supplied xdr_buf pages.
-	 */
-	save_pages = buf->pages;
-	if (encrypt)
-		buf->pages = pages;
-
-	ret = read_bytes_from_xdr_buf(buf, offset, data, len);
-	buf->pages = save_pages;
-	if (ret)
-		goto out;
-
-	sg_init_one(sg, data, len);
-
-	skcipher_request_set_tfm(req, cipher);
-	skcipher_request_set_callback(req, 0, NULL, NULL);
-	skcipher_request_set_crypt(req, sg, sg, len, iv);
-
-	if (encrypt)
-		ret = crypto_skcipher_encrypt(req);
-	else
-		ret = crypto_skcipher_decrypt(req);
-
-	skcipher_request_zero(req);
-
-	if (ret)
-		goto out;
-
-	ret = write_bytes_to_xdr_buf(buf, offset, data, len);
-
-out:
-	kfree(data);
-	return ret;
-}
-
+/**
+ * gss_krb5_aead_encrypt - Encrypt a wrap token using crypto/krb5
+ * @kctx: Kerberos context
+ * @offset: byte offset of the GSS token header in @buf
+ * @buf: OUT: send buffer
+ * @pages: plaintext payload pages (page cache data)
+ *
+ * The xdr_buf setup mirrors the original per-enctype encrypt
+ * functions, but the CBC-CTS encryption and HMAC are replaced
+ * by a single AEAD operation through the crypto/krb5 library.
+ *
+ * Return values:
+ *   %GSS_S_COMPLETE: Encryption successful
+ *   %GSS_S_FAILURE: Encryption failed
+ */
 u32
-gss_krb5_aes_encrypt(struct krb5_ctx *kctx, u32 offset,
-		     struct xdr_buf *buf, struct page **pages)
+gss_krb5_aead_encrypt(struct krb5_ctx *kctx, u32 offset,
+		      struct xdr_buf *buf, struct page **pages)
 {
-	u32 err;
-	struct xdr_netobj hmac;
-	u8 *cksumkey;
-	u8 *ecptr;
-	struct crypto_skcipher *cipher, *aux_cipher;
-	int blocksize;
-	struct page **save_pages;
-	int nblocks, nbytes;
-	struct encryptor_desc desc;
-	u32 cbcbytes;
-	unsigned int usage;
+	const struct krb5_enctype *krb5 = kctx->krb5e;
+	struct crypto_aead *aead = kctx->initiate ?
+		kctx->initiator_enc_aead : kctx->acceptor_enc_aead;
+	unsigned int conflen = krb5->conf_len;
+	unsigned int cksum_len = krb5->cksum_len;
+	unsigned int sec_offset, sec_len, data_len;
+	struct scatterlist sg[XDR_BUF_TO_SG_NENTS];
+	struct scatterlist *sg_overflow = NULL;
+	ssize_t ret;
+	int nsg;
 
-	if (kctx->initiate) {
-		cipher = kctx->initiator_enc;
-		aux_cipher = kctx->initiator_enc_aux;
-		cksumkey = kctx->initiator_integ;
-		usage = KG_USAGE_INITIATOR_SEAL;
-	} else {
-		cipher = kctx->acceptor_enc;
-		aux_cipher = kctx->acceptor_enc_aux;
-		cksumkey = kctx->acceptor_integ;
-		usage = KG_USAGE_ACCEPTOR_SEAL;
-	}
-	blocksize = crypto_skcipher_blocksize(cipher);
-
-	/* hide the gss token header and insert the confounder */
-	offset += GSS_KRB5_TOK_HDR_LEN;
-	if (xdr_extend_head(buf, offset, kctx->gk5e->conflen))
+	/* Insert space for the confounder */
+	if (xdr_extend_head(buf, offset + GSS_KRB5_TOK_HDR_LEN, conflen))
 		return GSS_S_FAILURE;
-	gss_krb5_make_confounder(buf->head[0].iov_base + offset, kctx->gk5e->conflen);
-	offset -= GSS_KRB5_TOK_HDR_LEN;
 
-	if (buf->tail[0].iov_base != NULL) {
-		ecptr = buf->tail[0].iov_base + buf->tail[0].iov_len;
-	} else {
+	/* Ensure a tail segment exists */
+	if (buf->tail[0].iov_base == NULL) {
 		buf->tail[0].iov_base = buf->head[0].iov_base
-							+ buf->head[0].iov_len;
+						+ buf->head[0].iov_len;
 		buf->tail[0].iov_len = 0;
-		ecptr = buf->tail[0].iov_base;
 	}
 
-	/* copy plaintext gss token header after filler (if any) */
-	memcpy(ecptr, buf->head[0].iov_base + offset, GSS_KRB5_TOK_HDR_LEN);
+	/* Append a copy of the plaintext GSS token header (RFC 4121 Sec 4.2.4) */
+	memcpy(buf->tail[0].iov_base + buf->tail[0].iov_len,
+	       buf->head[0].iov_base + offset, GSS_KRB5_TOK_HDR_LEN);
 	buf->tail[0].iov_len += GSS_KRB5_TOK_HDR_LEN;
 	buf->len += GSS_KRB5_TOK_HDR_LEN;
 
-	/* Do the HMAC */
-	hmac.len = GSS_KRB5_MAX_CKSUM_LEN;
-	hmac.data = buf->tail[0].iov_base + buf->tail[0].iov_len;
+	/* Reserve space for the integrity checksum */
+	buf->tail[0].iov_len += cksum_len;
+	buf->len += cksum_len;
 
 	/*
-	 * When we are called, pages points to the real page cache
-	 * data -- which we can't go and encrypt!  buf->pages points
-	 * to scratch pages which we are going to send off to the
-	 * client/server.  Swap in the plaintext pages to calculate
-	 * the hmac.
+	 * The AEAD operates in-place, but on the client send path the
+	 * plaintext payload lives in page cache pages that must not be
+	 * modified.  Copy the payload into the scratch output pages
+	 * first.  On the server send path @pages and buf->pages are
+	 * the same array, and no copy is needed.
+	 *
+	 * Both arrays share buf->page_base, so the same index and
+	 * intra-page offset address corresponding data in each.
 	 */
-	save_pages = buf->pages;
-	buf->pages = pages;
+	if (pages != buf->pages) {
+		unsigned int poff = buf->page_base;
+		unsigned int plen = buf->page_len;
+		unsigned int i = poff >> PAGE_SHIFT;
+		unsigned int off = offset_in_page(poff);
 
-	err = make_checksum_v2(kctx, NULL, 0, buf,
-			       offset + GSS_KRB5_TOK_HDR_LEN,
-			       cksumkey, usage, &hmac);
-	buf->pages = save_pages;
-	if (err)
+		while (plen) {
+			unsigned int n = min_t(unsigned int, plen,
+					       PAGE_SIZE - off);
+			memcpy_page(buf->pages[i], off, pages[i], off, n);
+			plen -= n;
+			i++;
+			off = 0;
+		}
+	}
+
+	/* Build scatterlist covering the secured region */
+	sec_offset = offset + GSS_KRB5_TOK_HDR_LEN;
+	sec_len = buf->len - sec_offset;
+	data_len = sec_len - conflen - cksum_len;
+
+	nsg = xdr_buf_to_sg_alloc(buf, sec_offset, sec_len,
+				  sg, ARRAY_SIZE(sg),
+				  &sg_overflow, GFP_NOFS);
+	if (nsg < 0)
 		return GSS_S_FAILURE;
 
-	nbytes = buf->len - offset - GSS_KRB5_TOK_HDR_LEN;
-	nblocks = (nbytes + blocksize - 1) / blocksize;
-	cbcbytes = 0;
-	if (nblocks > 2)
-		cbcbytes = (nblocks - 2) * blocksize;
+	ret = crypto_krb5_encrypt(krb5, aead, sg, nsg, sec_len,
+				  conflen, data_len, false);
+	kfree(sg_overflow);
+	if (ret < 0)
+		return GSS_S_FAILURE;
 
-	memset(desc.iv, 0, sizeof(desc.iv));
-
-	if (cbcbytes) {
-		SKCIPHER_REQUEST_ON_STACK(req, aux_cipher);
-
-		desc.pos = offset + GSS_KRB5_TOK_HDR_LEN;
-		desc.fragno = 0;
-		desc.fraglen = 0;
-		desc.pages = pages;
-		desc.outbuf = buf;
-		desc.req = req;
-
-		skcipher_request_set_tfm(req, aux_cipher);
-		skcipher_request_set_callback(req, 0, NULL, NULL);
-
-		sg_init_table(desc.infrags, 4);
-		sg_init_table(desc.outfrags, 4);
-
-		err = xdr_process_buf(buf, offset + GSS_KRB5_TOK_HDR_LEN,
-				      cbcbytes, encryptor, &desc);
-		skcipher_request_zero(req);
-		if (err)
-			goto out_err;
-	}
-
-	/* Make sure IV carries forward from any CBC results. */
-	err = gss_krb5_cts_crypt(cipher, buf,
-				 offset + GSS_KRB5_TOK_HDR_LEN + cbcbytes,
-				 desc.iv, pages, 1);
-	if (err) {
-		err = GSS_S_FAILURE;
-		goto out_err;
-	}
-
-	/* Now update buf to account for HMAC */
-	buf->tail[0].iov_len += kctx->gk5e->cksumlength;
-	buf->len += kctx->gk5e->cksumlength;
-
-out_err:
-	if (err)
-		err = GSS_S_FAILURE;
-	return err;
+	return GSS_S_COMPLETE;
 }
 
+/**
+ * gss_krb5_aead_decrypt - Decrypt a wrap token using crypto/krb5
+ * @kctx: Kerberos context
+ * @offset: byte offset of the GSS token header in @buf
+ * @len: total length of the GSS token
+ * @buf: ciphertext buffer, decrypted in-place
+ * @headskip: OUT: confounder length, in octets
+ * @tailskip: OUT: checksum length, in octets
+ *
+ * Return values:
+ *   %GSS_S_COMPLETE: Decryption and integrity verification succeeded
+ *   %GSS_S_BAD_SIG: Integrity checksum did not match
+ *   %GSS_S_DEFECTIVE_TOKEN: Token is malformed or truncated
+ *   %GSS_S_FAILURE: Decryption failed
+ */
 u32
-gss_krb5_aes_decrypt(struct krb5_ctx *kctx, u32 offset, struct xdr_buf *buf,
-		     u32 *headskip, u32 *tailskip)
+gss_krb5_aead_decrypt(struct krb5_ctx *kctx, u32 offset, u32 len,
+		      struct xdr_buf *buf, u32 *headskip, u32 *tailskip)
 {
-	struct xdr_buf subbuf;
-	u32 ret = 0;
-	u8 *cksum_key;
-	struct crypto_skcipher *cipher, *aux_cipher;
-	struct xdr_netobj our_hmac_obj;
-	u8 our_hmac[GSS_KRB5_MAX_CKSUM_LEN];
-	u8 pkt_hmac[GSS_KRB5_MAX_CKSUM_LEN];
-	int nblocks, blocksize, cbcbytes;
-	struct decryptor_desc desc;
-	unsigned int usage;
+	const struct krb5_enctype *krb5 = kctx->krb5e;
+	struct crypto_aead *aead = kctx->initiate ?
+		kctx->acceptor_enc_aead : kctx->initiator_enc_aead;
+	unsigned int sec_offset, sec_len;
+	size_t data_offset, data_len;
+	struct scatterlist sg[XDR_BUF_TO_SG_NENTS];
+	struct scatterlist *sg_overflow = NULL;
+	int nsg, ret;
 
-	if (kctx->initiate) {
-		cipher = kctx->acceptor_enc;
-		aux_cipher = kctx->acceptor_enc_aux;
-		cksum_key = kctx->acceptor_integ;
-		usage = KG_USAGE_ACCEPTOR_SEAL;
+	/* Secured region starts after the GSS token header */
+	sec_offset = offset + GSS_KRB5_TOK_HDR_LEN;
+	if (len < sec_offset)
+		return GSS_S_DEFECTIVE_TOKEN;
+	sec_len = len - sec_offset;
+
+	nsg = xdr_buf_to_sg_alloc(buf, sec_offset, sec_len,
+				  sg, ARRAY_SIZE(sg),
+				  &sg_overflow, GFP_NOFS);
+	if (nsg < 0)
+		return GSS_S_FAILURE;
+
+	data_offset = 0;
+	data_len = sec_len;
+	ret = crypto_krb5_decrypt(krb5, aead, sg, nsg,
+				  &data_offset, &data_len);
+	kfree(sg_overflow);
+	if (ret < 0)
+		return gss_krb5_errno_to_status(ret);
+
+	*headskip = data_offset;
+	*tailskip = sec_len - data_offset - data_len;
+	return GSS_S_COMPLETE;
+}
+
+/**
+ * gss_krb5_mic_build_sg - Build scatterlist for MIC token operations
+ * @body: xdr_buf containing the message body
+ * @cksum: pointer to checksum area in the token buffer
+ * @cksum_len: length of checksum area
+ * @hdr: pointer to GSS token header
+ * @sg_head: caller-provided scatterlist array; if more than
+ *	XDR_BUF_TO_SG_NENTS entries are needed, an overflow
+ *	scatterlist is allocated and chained automatically
+ * @sg_overflow: OUT: overflow scatterlist, caller must kfree
+ *
+ * Per RFC 4121 Section 4.2.4, MIC token checksums cover the
+ * message body followed by the token header. The checksum
+ * output or received checksum occupies the first scatterlist
+ * entry.  This layout cannot be constructed by
+ * xdr_buf_to_sg_alloc() because the checksum area and the GSS
+ * header lie outside the xdr_buf.
+ *
+ * Returns the number of scatterlist entries on success, or a
+ * negative errno on failure.
+ */
+int gss_krb5_mic_build_sg(const struct xdr_buf *body,
+			  void *cksum, unsigned int cksum_len,
+			  void *hdr,
+			  struct scatterlist *sg_head,
+			  struct scatterlist **sg_overflow)
+{
+	struct scatterlist *entry;
+	int body_max, body_nsg, nsg;
+
+	*sg_overflow = NULL;
+
+	body_max = 2;
+	if (body->page_len)
+		body_max += DIV_ROUND_UP(body->page_len +
+					 offset_in_page(body->page_base),
+					 PAGE_SIZE);
+	nsg = 1 + body_max + 1;
+	if (nsg <= XDR_BUF_TO_SG_NENTS) {
+		sg_init_table(sg_head, nsg);
 	} else {
-		cipher = kctx->initiator_enc;
-		aux_cipher = kctx->initiator_enc_aux;
-		cksum_key = kctx->initiator_integ;
-		usage = KG_USAGE_INITIATOR_SEAL;
-	}
-	blocksize = crypto_skcipher_blocksize(cipher);
+		unsigned int overflow_nents =
+			nsg - XDR_BUF_TO_SG_NENTS + 1;
 
+		*sg_overflow = kmalloc_array(overflow_nents,
+					     sizeof(**sg_overflow),
+					     GFP_NOFS);
+		if (!*sg_overflow)
+			return -ENOMEM;
 
-	/* create a segment skipping the header and leaving out the checksum */
-	xdr_buf_subsegment(buf, &subbuf, offset + GSS_KRB5_TOK_HDR_LEN,
-				    (buf->len - offset - GSS_KRB5_TOK_HDR_LEN -
-				     kctx->gk5e->cksumlength));
-
-	nblocks = (subbuf.len + blocksize - 1) / blocksize;
-
-	cbcbytes = 0;
-	if (nblocks > 2)
-		cbcbytes = (nblocks - 2) * blocksize;
-
-	memset(desc.iv, 0, sizeof(desc.iv));
-
-	if (cbcbytes) {
-		SKCIPHER_REQUEST_ON_STACK(req, aux_cipher);
-
-		desc.fragno = 0;
-		desc.fraglen = 0;
-		desc.req = req;
-
-		skcipher_request_set_tfm(req, aux_cipher);
-		skcipher_request_set_callback(req, 0, NULL, NULL);
-
-		sg_init_table(desc.frags, 4);
-
-		ret = xdr_process_buf(&subbuf, 0, cbcbytes, decryptor, &desc);
-		skcipher_request_zero(req);
-		if (ret)
-			goto out_err;
+		sg_init_table(sg_head, XDR_BUF_TO_SG_NENTS);
+		sg_init_table(*sg_overflow, overflow_nents);
+		sg_chain(sg_head, XDR_BUF_TO_SG_NENTS, *sg_overflow);
 	}
 
-	/* Make sure IV carries forward from any CBC results. */
-	ret = gss_krb5_cts_crypt(cipher, &subbuf, cbcbytes, desc.iv, NULL, 0);
-	if (ret)
+	sg_set_buf(&sg_head[0], cksum, cksum_len);
+	body_nsg = xdr_buf_to_sg(body, 0, body->len,
+				 sg_next(&sg_head[0]), body_max);
+	if (body_nsg < 0)
 		goto out_err;
 
-
-	/* Calculate our hmac over the plaintext data */
-	our_hmac_obj.len = sizeof(our_hmac);
-	our_hmac_obj.data = our_hmac;
-
-	ret = make_checksum_v2(kctx, NULL, 0, &subbuf, 0,
-			       cksum_key, usage, &our_hmac_obj);
-	if (ret)
-		goto out_err;
-
-	/* Get the packet's hmac value */
-	ret = read_bytes_from_xdr_buf(buf, buf->len - kctx->gk5e->cksumlength,
-				      pkt_hmac, kctx->gk5e->cksumlength);
-	if (ret)
-		goto out_err;
-
-	if (crypto_memneq(pkt_hmac, our_hmac, kctx->gk5e->cksumlength) != 0) {
-		ret = GSS_S_BAD_SIG;
-		goto out_err;
+	/*
+	 * xdr_buf_to_sg marks the last body entry as end-of-list;
+	 * clear it so the trailing header entry is reachable.
+	 */
+	if (body_nsg > 0) {
+		entry = sg_last(sg_next(&sg_head[0]), body_nsg);
+		sg_unmark_end(entry);
+		entry = sg_next(entry);
+	} else {
+		entry = sg_next(&sg_head[0]);
 	}
-	*headskip = kctx->gk5e->conflen;
-	*tailskip = kctx->gk5e->cksumlength;
-out_err:
-	if (ret && ret != GSS_S_BAD_SIG)
-		ret = GSS_S_FAILURE;
-	return ret;
-}
-
-/*
- * Compute Kseq given the initial session key and the checksum.
- * Set the key of the given cipher.
- */
-int
-krb5_rc4_setup_seq_key(struct krb5_ctx *kctx, struct crypto_skcipher *cipher,
-		       unsigned char *cksum)
-{
-	struct crypto_shash *hmac;
-	struct shash_desc *desc;
-	u8 Kseq[GSS_KRB5_MAX_KEYLEN];
-	u32 zeroconstant = 0;
-	int err;
-
-	dprintk("%s: entered\n", __func__);
-
-	hmac = crypto_alloc_shash(kctx->gk5e->cksum_name, 0, 0);
-	if (IS_ERR(hmac)) {
-		dprintk("%s: error %ld, allocating hash '%s'\n",
-			__func__, PTR_ERR(hmac), kctx->gk5e->cksum_name);
-		return PTR_ERR(hmac);
-	}
-
-	desc = kmalloc(sizeof(*desc) + crypto_shash_descsize(hmac),
-		       GFP_NOFS);
-	if (!desc) {
-		dprintk("%s: failed to allocate shash descriptor for '%s'\n",
-			__func__, kctx->gk5e->cksum_name);
-		crypto_free_shash(hmac);
-		return -ENOMEM;
-	}
-
-	desc->tfm = hmac;
-	desc->flags = 0;
-
-	/* Compute intermediate Kseq from session key */
-	err = crypto_shash_setkey(hmac, kctx->Ksess, kctx->gk5e->keylength);
-	if (err)
-		goto out_err;
-
-	err = crypto_shash_digest(desc, (u8 *)&zeroconstant, 4, Kseq);
-	if (err)
-		goto out_err;
-
-	/* Compute final Kseq from the checksum and intermediate Kseq */
-	err = crypto_shash_setkey(hmac, Kseq, kctx->gk5e->keylength);
-	if (err)
-		goto out_err;
-
-	err = crypto_shash_digest(desc, cksum, 8, Kseq);
-	if (err)
-		goto out_err;
-
-	err = crypto_skcipher_setkey(cipher, Kseq, kctx->gk5e->keylength);
-	if (err)
-		goto out_err;
-
-	err = 0;
+	sg_set_buf(entry, hdr, GSS_KRB5_TOK_HDR_LEN);
+	sg_mark_end(entry);
+	return 1 + body_nsg + 1;
 
 out_err:
-	kzfree(desc);
-	crypto_free_shash(hmac);
-	dprintk("%s: returning %d\n", __func__, err);
-	return err;
+	kfree(*sg_overflow);
+	*sg_overflow = NULL;
+	return body_nsg;
 }
-
-/*
- * Compute Kcrypt given the initial session key and the plaintext seqnum.
- * Set the key of cipher kctx->enc.
- */
-int
-krb5_rc4_setup_enc_key(struct krb5_ctx *kctx, struct crypto_skcipher *cipher,
-		       s32 seqnum)
-{
-	struct crypto_shash *hmac;
-	struct shash_desc *desc;
-	u8 Kcrypt[GSS_KRB5_MAX_KEYLEN];
-	u8 zeroconstant[4] = {0};
-	u8 seqnumarray[4];
-	int err, i;
-
-	dprintk("%s: entered, seqnum %u\n", __func__, seqnum);
-
-	hmac = crypto_alloc_shash(kctx->gk5e->cksum_name, 0, 0);
-	if (IS_ERR(hmac)) {
-		dprintk("%s: error %ld, allocating hash '%s'\n",
-			__func__, PTR_ERR(hmac), kctx->gk5e->cksum_name);
-		return PTR_ERR(hmac);
-	}
-
-	desc = kmalloc(sizeof(*desc) + crypto_shash_descsize(hmac),
-		       GFP_NOFS);
-	if (!desc) {
-		dprintk("%s: failed to allocate shash descriptor for '%s'\n",
-			__func__, kctx->gk5e->cksum_name);
-		crypto_free_shash(hmac);
-		return -ENOMEM;
-	}
-
-	desc->tfm = hmac;
-	desc->flags = 0;
-
-	/* Compute intermediate Kcrypt from session key */
-	for (i = 0; i < kctx->gk5e->keylength; i++)
-		Kcrypt[i] = kctx->Ksess[i] ^ 0xf0;
-
-	err = crypto_shash_setkey(hmac, Kcrypt, kctx->gk5e->keylength);
-	if (err)
-		goto out_err;
-
-	err = crypto_shash_digest(desc, zeroconstant, 4, Kcrypt);
-	if (err)
-		goto out_err;
-
-	/* Compute final Kcrypt from the seqnum and intermediate Kcrypt */
-	err = crypto_shash_setkey(hmac, Kcrypt, kctx->gk5e->keylength);
-	if (err)
-		goto out_err;
-
-	seqnumarray[0] = (unsigned char) ((seqnum >> 24) & 0xff);
-	seqnumarray[1] = (unsigned char) ((seqnum >> 16) & 0xff);
-	seqnumarray[2] = (unsigned char) ((seqnum >> 8) & 0xff);
-	seqnumarray[3] = (unsigned char) ((seqnum >> 0) & 0xff);
-
-	err = crypto_shash_digest(desc, seqnumarray, 4, Kcrypt);
-	if (err)
-		goto out_err;
-
-	err = crypto_skcipher_setkey(cipher, Kcrypt, kctx->gk5e->keylength);
-	if (err)
-		goto out_err;
-
-	err = 0;
-
-out_err:
-	kzfree(desc);
-	crypto_free_shash(hmac);
-	dprintk("%s: returning %d\n", __func__, err);
-	return err;
-}
-

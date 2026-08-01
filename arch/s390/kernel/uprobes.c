@@ -8,11 +8,9 @@
 
 #include <linux/uaccess.h>
 #include <linux/uprobes.h>
-#include <linux/compat.h>
 #include <linux/kdebug.h>
 #include <linux/sched/task_stack.h>
 
-#include <asm/switch_to.h>
 #include <asm/facility.h>
 #include <asm/kprobes.h>
 #include <asm/dis.h>
@@ -30,9 +28,9 @@ int arch_uprobe_pre_xol(struct arch_uprobe *auprobe, struct pt_regs *regs)
 {
 	if (psw_bits(regs->psw).eaba == PSW_BITS_AMODE_24BIT)
 		return -EINVAL;
-	if (!is_compat_task() && psw_bits(regs->psw).eaba == PSW_BITS_AMODE_31BIT)
+	if (psw_bits(regs->psw).eaba == PSW_BITS_AMODE_31BIT)
 		return -EINVAL;
-	clear_pt_regs_flag(regs, PIF_PER_TRAP);
+	clear_thread_flag(TIF_PER_TRAP);
 	auprobe->saved_per = psw_bits(regs->psw).per;
 	auprobe->saved_int_code = regs->int_code;
 	regs->int_code = UPROBE_TRAP_NR;
@@ -103,7 +101,7 @@ int arch_uprobe_post_xol(struct arch_uprobe *auprobe, struct pt_regs *regs)
 		/* fix per address */
 		current->thread.per_event.address = utask->vaddr;
 		/* trigger per event */
-		set_pt_regs_flag(regs, PIF_PER_TRAP);
+		set_thread_flag(TIF_PER_TRAP);
 	}
 	return 0;
 }
@@ -126,6 +124,7 @@ int arch_uprobe_exception_notify(struct notifier_block *self, unsigned long val,
 	case DIE_SSTEP:
 		if (uprobe_post_sstep_notifier(regs))
 			return NOTIFY_STOP;
+		break;
 	default:
 		break;
 	}
@@ -161,11 +160,6 @@ bool arch_uretprobe_is_alive(struct return_instance *ret, enum rp_check ctx,
 
 /* Instruction Emulation */
 
-static void adjust_psw_addr(psw_t *psw, unsigned long len)
-{
-	psw->addr = __rewind_psw(*psw, -len);
-}
-
 #define EMU_ILLEGAL_OP		1
 #define EMU_SPECIFICATION	2
 #define EMU_ADDRESSING		3
@@ -176,9 +170,7 @@ static void adjust_psw_addr(psw_t *psw, unsigned long len)
 	__typeof__(*(ptr)) input;			\
 	int __rc = 0;					\
 							\
-	if (!test_facility(34))				\
-		__rc = EMU_ILLEGAL_OP;			\
-	else if ((u64 __force)ptr & mask)		\
+	if ((u64 __force)ptr & mask)			\
 		__rc = EMU_SPECIFICATION;		\
 	else if (get_user(input, ptr))			\
 		__rc = EMU_ADDRESSING;			\
@@ -193,9 +185,7 @@ static void adjust_psw_addr(psw_t *psw, unsigned long len)
 	__typeof__(ptr) __ptr = (ptr);			\
 	int __rc = 0;					\
 							\
-	if (!test_facility(34))				\
-		__rc = EMU_ILLEGAL_OP;			\
-	else if ((u64 __force)__ptr & mask)		\
+	if ((u64 __force)__ptr & mask)			\
 		__rc = EMU_SPECIFICATION;		\
 	else if (put_user(*(input), __ptr))		\
 		__rc = EMU_ADDRESSING;			\
@@ -212,9 +202,7 @@ static void adjust_psw_addr(psw_t *psw, unsigned long len)
 	__typeof__(*(ptr)) input;			\
 	int __rc = 0;					\
 							\
-	if (!test_facility(34))				\
-		__rc = EMU_ILLEGAL_OP;			\
-	else if ((u64 __force)ptr & mask)		\
+	if ((u64 __force)ptr & mask)			\
 		__rc = EMU_SPECIFICATION;		\
 	else if (get_user(input, ptr))			\
 		__rc = EMU_ADDRESSING;			\
@@ -259,7 +247,7 @@ static void sim_stor_event(struct pt_regs *regs, void *addr, int len)
 		return;
 	current->thread.per_event.address = regs->psw.addr;
 	current->thread.per_event.cause = PER_EVENT_STORE >> 16;
-	set_pt_regs_flag(regs, PIF_PER_TRAP);
+	set_thread_flag(TIF_PER_TRAP);
 }
 
 /*
@@ -326,10 +314,6 @@ static void handle_insn_ril(struct arch_uprobe *auprobe, struct pt_regs *regs)
 		break;
 	case 0xc6:
 		switch (insn->opc1) {
-		case 0x02: /* pfdrl */
-			if (!test_facility(34))
-				rc = EMU_ILLEGAL_OP;
-			break;
 		case 0x04: /* cghrl */
 			rc = emu_cmp_ril(regs, (s16 __user *)uptr, &rx->s64);
 			break;
@@ -363,7 +347,7 @@ static void handle_insn_ril(struct arch_uprobe *auprobe, struct pt_regs *regs)
 		}
 		break;
 	}
-	adjust_psw_addr(&regs->psw, ilen);
+	regs->psw.addr = __forward_psw(regs->psw, ilen);
 	switch (rc) {
 	case EMU_ILLEGAL_OP:
 		regs->int_code = ilen << 16 | 0x0001;
@@ -383,8 +367,7 @@ static void handle_insn_ril(struct arch_uprobe *auprobe, struct pt_regs *regs)
 bool arch_uprobe_skip_sstep(struct arch_uprobe *auprobe, struct pt_regs *regs)
 {
 	if ((psw_bits(regs->psw).eaba == PSW_BITS_AMODE_24BIT) ||
-	    ((psw_bits(regs->psw).eaba == PSW_BITS_AMODE_31BIT) &&
-	     !is_compat_task())) {
+	    (psw_bits(regs->psw).eaba == PSW_BITS_AMODE_31BIT)) {
 		regs->psw.addr = __rewind_psw(regs->psw, UPROBE_SWBP_INSN_SIZE);
 		do_report_trap(regs, SIGILL, ILL_ILLADR, NULL);
 		return true;

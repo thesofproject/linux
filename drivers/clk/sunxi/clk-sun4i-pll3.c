@@ -1,20 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2015 Maxime Ripard
  *
  * Maxime Ripard <maxime.ripard@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/slab.h>
@@ -45,7 +37,7 @@ static void __init sun4i_a10_pll3_setup(struct device_node *node)
 		return;
 	}
 
-	gate = kzalloc(sizeof(*gate), GFP_KERNEL);
+	gate = kzalloc_obj(*gate);
 	if (!gate)
 		goto err_unmap;
 
@@ -53,7 +45,7 @@ static void __init sun4i_a10_pll3_setup(struct device_node *node)
 	gate->bit_idx = SUN4I_A10_PLL3_GATE_BIT;
 	gate->lock = &sun4i_a10_pll3_lock;
 
-	mult = kzalloc(sizeof(*mult), GFP_KERNEL);
+	mult = kzalloc_obj(*mult);
 	if (!mult)
 		goto err_free_gate;
 

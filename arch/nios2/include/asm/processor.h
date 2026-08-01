@@ -36,13 +36,7 @@
 /* Kuser helpers is mapped to this user space address */
 #define KUSER_BASE		0x1000
 #define KUSER_SIZE		(PAGE_SIZE)
-#ifndef __ASSEMBLY__
-
-/*
- * Default implementation of macro that returns current
- * instruction pointer ("program counter").
- */
-#define current_text_addr() ({ __label__ _l; _l: &&_l; })
+#ifndef __ASSEMBLER__
 
 # define TASK_SIZE		0x7FFF0000UL
 # define TASK_UNMAPPED_BASE	(PAGE_ALIGN(TASK_SIZE / 3))
@@ -56,9 +50,6 @@ struct thread_struct {
 	unsigned long kpsr;
 };
 
-#define INIT_MMAP \
-	{ &init_mm, (0), (0), __pgprot(0x0), VM_READ | VM_WRITE | VM_EXEC }
-
 # define INIT_THREAD {			\
 	.kregs	= NULL,			\
 	.ksp	= 0,			\
@@ -70,12 +61,7 @@ extern void start_thread(struct pt_regs *regs, unsigned long pc,
 
 struct task_struct;
 
-/* Free all resources held by a thread. */
-static inline void release_thread(struct task_struct *dead_task)
-{
-}
-
-extern unsigned long get_wchan(struct task_struct *p);
+extern unsigned long __get_wchan(struct task_struct *p);
 
 #define task_pt_regs(p) \
 	((struct pt_regs *)(THREAD_SIZE + task_stack_page(p)) - 1)
@@ -86,6 +72,6 @@ extern unsigned long get_wchan(struct task_struct *p);
 
 #define cpu_relax()	barrier()
 
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 
 #endif /* _ASM_NIOS2_PROCESSOR_H */

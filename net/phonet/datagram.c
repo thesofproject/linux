@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * File: datagram.c
  *
@@ -7,20 +8,6 @@
  *
  * Authors: Sakari Ailus <sakari.ailus@nokia.com>
  *          Rémi Denis-Courmont
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
  */
 
 #include <linux/kernel.h>
@@ -41,24 +28,21 @@ static void pn_sock_close(struct sock *sk, long timeout)
 	sk_common_release(sk);
 }
 
-static int pn_ioctl(struct sock *sk, int cmd, unsigned long arg)
+static int pn_ioctl(struct sock *sk, int cmd, int *karg)
 {
 	struct sk_buff *skb;
-	int answ;
 
 	switch (cmd) {
 	case SIOCINQ:
-		lock_sock(sk);
+		spin_lock_bh(&sk->sk_receive_queue.lock);
 		skb = skb_peek(&sk->sk_receive_queue);
-		answ = skb ? skb->len : 0;
-		release_sock(sk);
-		return put_user(answ, (int __user *)arg);
+		*karg = skb ? skb->len : 0;
+		spin_unlock_bh(&sk->sk_receive_queue.lock);
+		return 0;
 
 	case SIOCPNADDRESOURCE:
 	case SIOCPNDELRESOURCE: {
-			u32 res;
-			if (get_user(res, (u32 __user *)arg))
-				return -EFAULT;
+			u32 res = *karg;
 			if (res >= 256)
 				return -EINVAL;
 			if (cmd == SIOCPNADDRESOURCE)
@@ -125,7 +109,7 @@ static int pn_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 }
 
 static int pn_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
-		      int noblock, int flags, int *addr_len)
+		      int flags)
 {
 	struct sk_buff *skb = NULL;
 	struct sockaddr_pn sa;
@@ -136,7 +120,7 @@ static int pn_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 			MSG_CMSG_COMPAT))
 		goto out_nofree;
 
-	skb = skb_recv_datagram(sk, flags, noblock, &rval);
+	skb = skb_recv_datagram(sk, flags, &rval);
 	if (skb == NULL)
 		goto out_nofree;
 
@@ -159,7 +143,7 @@ static int pn_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	if (msg->msg_name != NULL) {
 		__sockaddr_check_size(sizeof(sa));
 		memcpy(msg->msg_name, &sa, sizeof(sa));
-		*addr_len = sizeof(sa);
+		msg->msg_namelen = sizeof(sa);
 	}
 
 out:

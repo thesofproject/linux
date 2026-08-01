@@ -1,20 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Synopsys HSDK SDP Generic PLL clock driver
  *
  * Copyright (C) 2017 Synopsys
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #include <linux/clk-provider.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/err.h>
+#include <linux/io.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
@@ -52,35 +49,38 @@ struct hsdk_pll_cfg {
 	u32 fbdiv;
 	u32 odiv;
 	u32 band;
+	u32 bypass;
 };
 
 static const struct hsdk_pll_cfg asdt_pll_cfg[] = {
-	{ 100000000,  0, 11, 3, 0 },
-	{ 133000000,  0, 15, 3, 0 },
-	{ 200000000,  1, 47, 3, 0 },
-	{ 233000000,  1, 27, 2, 0 },
-	{ 300000000,  1, 35, 2, 0 },
-	{ 333000000,  1, 39, 2, 0 },
-	{ 400000000,  1, 47, 2, 0 },
-	{ 500000000,  0, 14, 1, 0 },
-	{ 600000000,  0, 17, 1, 0 },
-	{ 700000000,  0, 20, 1, 0 },
-	{ 800000000,  0, 23, 1, 0 },
-	{ 900000000,  1, 26, 0, 0 },
-	{ 1000000000, 1, 29, 0, 0 },
-	{ 1100000000, 1, 32, 0, 0 },
-	{ 1200000000, 1, 35, 0, 0 },
-	{ 1300000000, 1, 38, 0, 0 },
-	{ 1400000000, 1, 41, 0, 0 },
-	{ 1500000000, 1, 44, 0, 0 },
-	{ 1600000000, 1, 47, 0, 0 },
+	{ 100000000,  0, 11, 3, 0, 0 },
+	{ 133000000,  0, 15, 3, 0, 0 },
+	{ 200000000,  1, 47, 3, 0, 0 },
+	{ 233000000,  1, 27, 2, 0, 0 },
+	{ 300000000,  1, 35, 2, 0, 0 },
+	{ 333000000,  1, 39, 2, 0, 0 },
+	{ 400000000,  1, 47, 2, 0, 0 },
+	{ 500000000,  0, 14, 1, 0, 0 },
+	{ 600000000,  0, 17, 1, 0, 0 },
+	{ 700000000,  0, 20, 1, 0, 0 },
+	{ 800000000,  0, 23, 1, 0, 0 },
+	{ 900000000,  1, 26, 0, 0, 0 },
+	{ 1000000000, 1, 29, 0, 0, 0 },
+	{ 1100000000, 1, 32, 0, 0, 0 },
+	{ 1200000000, 1, 35, 0, 0, 0 },
+	{ 1300000000, 1, 38, 0, 0, 0 },
+	{ 1400000000, 1, 41, 0, 0, 0 },
+	{ 1500000000, 1, 44, 0, 0, 0 },
+	{ 1600000000, 1, 47, 0, 0, 0 },
 	{}
 };
 
 static const struct hsdk_pll_cfg hdmi_pll_cfg[] = {
-	{ 297000000,  0, 21, 2, 0 },
-	{ 540000000,  0, 19, 1, 0 },
-	{ 594000000,  0, 21, 1, 0 },
+	{ 27000000,   0, 0,  0, 0, 1 },
+	{ 148500000,  0, 21, 3, 0, 0 },
+	{ 297000000,  0, 21, 2, 0, 0 },
+	{ 540000000,  0, 19, 1, 0, 0 },
+	{ 594000000,  0, 21, 1, 0, 0 },
 	{}
 };
 
@@ -133,11 +133,16 @@ static inline void hsdk_pll_set_cfg(struct hsdk_pll_clk *clk,
 {
 	u32 val = 0;
 
-	/* Powerdown and Bypass bits should be cleared */
-	val |= cfg->idiv << CGU_PLL_CTRL_IDIV_SHIFT;
-	val |= cfg->fbdiv << CGU_PLL_CTRL_FBDIV_SHIFT;
-	val |= cfg->odiv << CGU_PLL_CTRL_ODIV_SHIFT;
-	val |= cfg->band << CGU_PLL_CTRL_BAND_SHIFT;
+	if (cfg->bypass) {
+		val = hsdk_pll_read(clk, CGU_PLL_CTRL);
+		val |= CGU_PLL_CTRL_BYPASS;
+	} else {
+		/* Powerdown and Bypass bits should be cleared */
+		val |= cfg->idiv << CGU_PLL_CTRL_IDIV_SHIFT;
+		val |= cfg->fbdiv << CGU_PLL_CTRL_FBDIV_SHIFT;
+		val |= cfg->odiv << CGU_PLL_CTRL_ODIV_SHIFT;
+		val |= cfg->band << CGU_PLL_CTRL_BAND_SHIFT;
+	}
 
 	dev_dbg(clk->dev, "write configuration: %#x\n", val);
 
@@ -171,13 +176,13 @@ static unsigned long hsdk_pll_recalc_rate(struct clk_hw *hw,
 
 	dev_dbg(clk->dev, "current configuration: %#x\n", val);
 
-	/* Check if PLL is disabled */
-	if (val & CGU_PLL_CTRL_PD)
-		return 0;
-
 	/* Check if PLL is bypassed */
 	if (val & CGU_PLL_CTRL_BYPASS)
 		return parent_rate;
+
+	/* Check if PLL is disabled */
+	if (val & CGU_PLL_CTRL_PD)
+		return 0;
 
 	/* input divider = reg.idiv + 1 */
 	idiv = 1 + ((val & CGU_PLL_CTRL_IDIV_MASK) >> CGU_PLL_CTRL_IDIV_SHIFT);
@@ -192,8 +197,8 @@ static unsigned long hsdk_pll_recalc_rate(struct clk_hw *hw,
 	return rate;
 }
 
-static long hsdk_pll_round_rate(struct clk_hw *hw, unsigned long rate,
-				unsigned long *prate)
+static int hsdk_pll_determine_rate(struct clk_hw *hw,
+				   struct clk_rate_request *req)
 {
 	int i;
 	unsigned long best_rate;
@@ -206,13 +211,15 @@ static long hsdk_pll_round_rate(struct clk_hw *hw, unsigned long rate,
 	best_rate = pll_cfg[0].rate;
 
 	for (i = 1; pll_cfg[i].rate != 0; i++) {
-		if (abs(rate - pll_cfg[i].rate) < abs(rate - best_rate))
+		if (abs(req->rate - pll_cfg[i].rate) < abs(req->rate - best_rate))
 			best_rate = pll_cfg[i].rate;
 	}
 
 	dev_dbg(clk->dev, "chosen best rate: %lu\n", best_rate);
 
-	return best_rate;
+	req->rate = best_rate;
+
+	return 0;
 }
 
 static int hsdk_pll_comm_update_rate(struct hsdk_pll_clk *clk,
@@ -260,7 +267,7 @@ static int hsdk_pll_core_update_rate(struct hsdk_pll_clk *clk,
 		return -EINVAL;
 
 	/*
-	 * Program divider to div-by-1 if we succesfuly set core clock below
+	 * Program divider to div-by-1 if we successfully set core clock below
 	 * 500MHz threshold.
 	 */
 	if (rate <= CORE_IF_CLK_THRESHOLD_HZ)
@@ -291,14 +298,13 @@ static int hsdk_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 
 static const struct clk_ops hsdk_pll_ops = {
 	.recalc_rate = hsdk_pll_recalc_rate,
-	.round_rate = hsdk_pll_round_rate,
+	.determine_rate = hsdk_pll_determine_rate,
 	.set_rate = hsdk_pll_set_rate,
 };
 
 static int hsdk_pll_clk_probe(struct platform_device *pdev)
 {
 	int ret;
-	struct resource *mem;
 	const char *parent_name;
 	unsigned int num_parents;
 	struct hsdk_pll_clk *pll_clk;
@@ -309,8 +315,7 @@ static int hsdk_pll_clk_probe(struct platform_device *pdev)
 	if (!pll_clk)
 		return -ENOMEM;
 
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	pll_clk->regs = devm_ioremap_resource(dev, mem);
+	pll_clk->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(pll_clk->regs))
 		return PTR_ERR(pll_clk->regs);
 
@@ -340,14 +345,8 @@ static int hsdk_pll_clk_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	return of_clk_add_hw_provider(dev->of_node, of_clk_hw_simple_get,
-			&pll_clk->hw);
-}
-
-static int hsdk_pll_clk_remove(struct platform_device *pdev)
-{
-	of_clk_del_provider(pdev->dev.of_node);
-	return 0;
+	return devm_of_clk_add_hw_provider(dev, of_clk_hw_simple_get,
+					   &pll_clk->hw);
 }
 
 static void __init of_hsdk_pll_clk_setup(struct device_node *node)
@@ -358,7 +357,7 @@ static void __init of_hsdk_pll_clk_setup(struct device_node *node)
 	struct hsdk_pll_clk *pll_clk;
 	struct clk_init_data init = { };
 
-	pll_clk = kzalloc(sizeof(*pll_clk), GFP_KERNEL);
+	pll_clk = kzalloc_obj(*pll_clk);
 	if (!pll_clk)
 		return;
 
@@ -390,13 +389,13 @@ static void __init of_hsdk_pll_clk_setup(struct device_node *node)
 
 	ret = clk_hw_register(NULL, &pll_clk->hw);
 	if (ret) {
-		pr_err("failed to register %s clock\n", node->name);
+		pr_err("failed to register %pOFn clock\n", node);
 		goto err_unmap_spec_regs;
 	}
 
 	ret = of_clk_add_hw_provider(node, of_clk_hw_simple_get, &pll_clk->hw);
 	if (ret) {
-		pr_err("failed to add hw provider for %s clock\n", node->name);
+		pr_err("failed to add hw provider for %pOFn clock\n", node);
 		goto err_unmap_spec_regs;
 	}
 
@@ -426,6 +425,5 @@ static struct platform_driver hsdk_pll_clk_driver = {
 		.of_match_table = hsdk_pll_clk_id,
 	},
 	.probe = hsdk_pll_clk_probe,
-	.remove = hsdk_pll_clk_remove,
 };
 builtin_platform_driver(hsdk_pll_clk_driver);

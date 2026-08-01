@@ -1,13 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * kernel/time/timer_list.c
- *
  * List pending timers
  *
  * Copyright(C) 2006, Red Hat, Inc., Ingo Molnar
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/proc_fs.h>
@@ -28,8 +23,6 @@ struct timer_list_iter {
 	u64 now;
 };
 
-typedef void (*print_fn_t)(struct seq_file *m, unsigned int *classes);
-
 /*
  * This allows printing both to /proc/timer_list and
  * to the console (on SysRq-Q):
@@ -49,25 +42,12 @@ static void SEQ_printf(struct seq_file *m, const char *fmt, ...)
 	va_end(args);
 }
 
-static void print_name_offset(struct seq_file *m, void *sym)
-{
-	char symname[KSYM_NAME_LEN];
-
-	if (lookup_symbol_name((unsigned long)sym, symname) < 0)
-		SEQ_printf(m, "<%pK>", sym);
-	else
-		SEQ_printf(m, "%s", symname);
-}
-
 static void
 print_timer(struct seq_file *m, struct hrtimer *taddr, struct hrtimer *timer,
 	    int idx, u64 now)
 {
-	SEQ_printf(m, " #%d: ", idx);
-	print_name_offset(m, taddr);
-	SEQ_printf(m, ", ");
-	print_name_offset(m, timer->function);
-	SEQ_printf(m, ", S:%02x", timer->state);
+	SEQ_printf(m, " #%d: <%p>, %ps", idx, taddr, ACCESS_PRIVATE(timer, function));
+	SEQ_printf(m, ", S:%02x", timer->is_queued);
 	SEQ_printf(m, "\n");
 	SEQ_printf(m, " # expires at %Lu-%Lu nsecs [in %Ld to %Ld nsecs]\n",
 		(unsigned long long)ktime_to_ns(hrtimer_get_softexpires(timer)),
@@ -76,13 +56,11 @@ print_timer(struct seq_file *m, struct hrtimer *taddr, struct hrtimer *timer,
 		(long long)(ktime_to_ns(hrtimer_get_expires(timer)) - now));
 }
 
-static void
-print_active_timers(struct seq_file *m, struct hrtimer_clock_base *base,
-		    u64 now)
+static void print_active_timers(struct seq_file *m, struct hrtimer_clock_base *base, u64 now)
 {
+	struct timerqueue_linked_node *curr;
 	struct hrtimer *timer, tmp;
 	unsigned long next = 0, i;
-	struct timerqueue_node *curr;
 	unsigned long flags;
 
 next_one:
@@ -92,13 +70,13 @@ next_one:
 
 	raw_spin_lock_irqsave(&base->cpu_base->lock, flags);
 
-	curr = timerqueue_getnext(&base->active);
+	curr = timerqueue_linked_first(&base->active);
 	/*
 	 * Crude but we have to do this O(N*N) thing, because
 	 * we have to unlock the base when printing:
 	 */
 	while (curr && i < next) {
-		curr = timerqueue_iterate_next(curr);
+		curr = timerqueue_linked_next(curr);
 		i++;
 	}
 
@@ -118,17 +96,13 @@ next_one:
 static void
 print_base(struct seq_file *m, struct hrtimer_clock_base *base, u64 now)
 {
-	SEQ_printf(m, "  .base:       %pK\n", base);
+	SEQ_printf(m, "  .base:       %p\n", base);
 	SEQ_printf(m, "  .index:      %d\n", base->index);
 
 	SEQ_printf(m, "  .resolution: %u nsecs\n", hrtimer_resolution);
-
-	SEQ_printf(m,   "  .get_time:   ");
-	print_name_offset(m, base->get_time);
-	SEQ_printf(m,   "\n");
 #ifdef CONFIG_HIGH_RES_TIMERS
-	SEQ_printf(m, "  .offset:     %Lu nsecs\n",
-		   (unsigned long long) ktime_to_ns(base->offset));
+	SEQ_printf(m, "  .offset:     %Ld nsecs\n",
+		   (long long) base->offset);
 #endif
 	SEQ_printf(m,   "active timers:\n");
 	print_active_timers(m, base, now + ktime_to_ns(base->offset));
@@ -169,19 +143,19 @@ static void print_cpu(struct seq_file *m, int cpu, u64 now)
 # define P_ns(x) \
 	SEQ_printf(m, "  .%-15s: %Lu nsecs\n", #x, \
 		   (unsigned long long)(ktime_to_ns(ts->x)))
+# define P_flag(x, f)			    \
+	SEQ_printf(m, "  .%-15s: %d\n", #x, !!(ts->flags & (f)))
+
 	{
 		struct tick_sched *ts = tick_get_tick_sched(cpu);
-		P(nohz_mode);
+		P_flag(nohz, TS_FLAG_NOHZ);
+		P_flag(highres, TS_FLAG_HIGHRES);
 		P_ns(last_tick);
-		P(tick_stopped);
-		P(idle_jiffies);
+		P_flag(tick_stopped, TS_FLAG_STOPPED);
 		P(idle_calls);
 		P(idle_sleeps);
 		P_ns(idle_entrytime);
 		P_ns(idle_waketime);
-		P_ns(idle_exittime);
-		P_ns(idle_sleeptime);
-		P_ns(iowait_sleeptime);
 		P(last_jiffies);
 		P(next_timer);
 		P_ns(idle_expires);
@@ -225,44 +199,39 @@ print_tickdevice(struct seq_file *m, struct tick_device *td, int cpu)
 	SEQ_printf(m, " next_event:     %Ld nsecs\n",
 		   (unsigned long long) ktime_to_ns(dev->next_event));
 
-	SEQ_printf(m, " set_next_event: ");
-	print_name_offset(m, dev->set_next_event);
-	SEQ_printf(m, "\n");
+	SEQ_printf(m, " set_next_event: %ps\n", dev->set_next_event);
 
-	if (dev->set_state_shutdown) {
-		SEQ_printf(m, " shutdown: ");
-		print_name_offset(m, dev->set_state_shutdown);
-		SEQ_printf(m, "\n");
-	}
+	if (dev->set_state_shutdown)
+		SEQ_printf(m, " shutdown:       %ps\n",
+			dev->set_state_shutdown);
 
-	if (dev->set_state_periodic) {
-		SEQ_printf(m, " periodic: ");
-		print_name_offset(m, dev->set_state_periodic);
-		SEQ_printf(m, "\n");
-	}
+	if (dev->set_state_periodic)
+		SEQ_printf(m, " periodic:       %ps\n",
+			dev->set_state_periodic);
 
-	if (dev->set_state_oneshot) {
-		SEQ_printf(m, " oneshot:  ");
-		print_name_offset(m, dev->set_state_oneshot);
-		SEQ_printf(m, "\n");
-	}
+	if (dev->set_state_oneshot)
+		SEQ_printf(m, " oneshot:        %ps\n",
+			dev->set_state_oneshot);
 
-	if (dev->set_state_oneshot_stopped) {
-		SEQ_printf(m, " oneshot stopped: ");
-		print_name_offset(m, dev->set_state_oneshot_stopped);
-		SEQ_printf(m, "\n");
-	}
+	if (dev->set_state_oneshot_stopped)
+		SEQ_printf(m, " oneshot stopped: %ps\n",
+			dev->set_state_oneshot_stopped);
 
-	if (dev->tick_resume) {
-		SEQ_printf(m, " resume:   ");
-		print_name_offset(m, dev->tick_resume);
-		SEQ_printf(m, "\n");
-	}
+	if (dev->tick_resume)
+		SEQ_printf(m, " resume:         %ps\n",
+			dev->tick_resume);
 
-	SEQ_printf(m, " event_handler:  ");
-	print_name_offset(m, dev->event_handler);
+	SEQ_printf(m, " event_handler:  %ps\n", dev->event_handler);
 	SEQ_printf(m, "\n");
 	SEQ_printf(m, " retries:        %lu\n", dev->retries);
+
+#ifdef CONFIG_GENERIC_CLOCKEVENTS_BROADCAST
+	if (cpu >= 0) {
+		const struct clock_event_device *wd = tick_get_wakeup_device(cpu);
+
+		SEQ_printf(m, "Wakeup Device: %s\n", wd ? wd->name : "<NULL>");
+	}
+#endif
 	SEQ_printf(m, "\n");
 }
 
@@ -283,27 +252,10 @@ static void timer_list_show_tickdevices_header(struct seq_file *m)
 
 static inline void timer_list_header(struct seq_file *m, u64 now)
 {
-	SEQ_printf(m, "Timer List Version: v0.8\n");
+	SEQ_printf(m, "Timer List Version: v0.11\n");
 	SEQ_printf(m, "HRTIMER_MAX_CLOCK_BASES: %d\n", HRTIMER_MAX_CLOCK_BASES);
 	SEQ_printf(m, "now at %Ld nsecs\n", (unsigned long long)now);
 	SEQ_printf(m, "\n");
-}
-
-static int timer_list_show(struct seq_file *m, void *v)
-{
-	struct timer_list_iter *iter = v;
-
-	if (iter->cpu == -1 && !iter->second_pass)
-		timer_list_header(m, iter->now);
-	else if (!iter->second_pass)
-		print_cpu(m, iter->cpu, iter->now);
-#ifdef CONFIG_GENERIC_CLOCKEVENTS
-	else if (iter->cpu == -1 && iter->second_pass)
-		timer_list_show_tickdevices_header(m);
-	else
-		print_tickdevice(m, tick_get_device(iter->cpu), iter->cpu);
-#endif
-	return 0;
 }
 
 void sysrq_timer_list_show(void)
@@ -322,6 +274,24 @@ void sysrq_timer_list_show(void)
 		print_tickdevice(NULL, tick_get_device(cpu), cpu);
 #endif
 	return;
+}
+
+#ifdef CONFIG_PROC_FS
+static int timer_list_show(struct seq_file *m, void *v)
+{
+	struct timer_list_iter *iter = v;
+
+	if (iter->cpu == -1 && !iter->second_pass)
+		timer_list_header(m, iter->now);
+	else if (!iter->second_pass)
+		print_cpu(m, iter->cpu, iter->now);
+#ifdef CONFIG_GENERIC_CLOCKEVENTS
+	else if (iter->cpu == -1 && iter->second_pass)
+		timer_list_show_tickdevices_header(m);
+	else
+		print_tickdevice(m, tick_get_device(iter->cpu), iter->cpu);
+#endif
+	return 0;
 }
 
 static void *move_iter(struct timer_list_iter *iter, loff_t offset)
@@ -372,26 +342,15 @@ static const struct seq_operations timer_list_sops = {
 	.show = timer_list_show,
 };
 
-static int timer_list_open(struct inode *inode, struct file *filp)
-{
-	return seq_open_private(filp, &timer_list_sops,
-			sizeof(struct timer_list_iter));
-}
-
-static const struct file_operations timer_list_fops = {
-	.open		= timer_list_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= seq_release_private,
-};
-
 static int __init init_timer_list_procfs(void)
 {
 	struct proc_dir_entry *pe;
 
-	pe = proc_create("timer_list", 0400, NULL, &timer_list_fops);
+	pe = proc_create_seq_private("timer_list", 0400, NULL, &timer_list_sops,
+			sizeof(struct timer_list_iter), NULL);
 	if (!pe)
 		return -ENOMEM;
 	return 0;
 }
 __initcall(init_timer_list_procfs);
+#endif

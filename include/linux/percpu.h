@@ -2,13 +2,15 @@
 #ifndef __LINUX_PERCPU_H
 #define __LINUX_PERCPU_H
 
-#include <linux/mmdebug.h>
-#include <linux/preempt.h>
-#include <linux/smp.h>
-#include <linux/cpumask.h>
-#include <linux/printk.h>
-#include <linux/pfn.h>
+#include <linux/alloc_tag.h>
+#include <linux/cleanup.h>
+#include <linux/compiler_types.h>
 #include <linux/init.h>
+#include <linux/mmdebug.h>
+#include <linux/pfn.h>
+#include <linux/preempt.h>
+#include <linux/sched.h>
+#include <linux/smp.h>
 
 #include <asm/percpu.h>
 
@@ -26,30 +28,33 @@
 #define PCPU_MIN_ALLOC_SHIFT		2
 #define PCPU_MIN_ALLOC_SIZE		(1 << PCPU_MIN_ALLOC_SHIFT)
 
-/* number of bits per page, used to trigger a scan if blocks are > PAGE_SIZE */
-#define PCPU_BITS_PER_PAGE		(PAGE_SIZE >> PCPU_MIN_ALLOC_SHIFT)
-
 /*
- * This determines the size of each metadata block.  There are several subtle
- * constraints around this constant.  The reserved region must be a multiple of
- * PCPU_BITMAP_BLOCK_SIZE.  Additionally, PCPU_BITMAP_BLOCK_SIZE must be a
- * multiple of PAGE_SIZE or PAGE_SIZE must be a multiple of
- * PCPU_BITMAP_BLOCK_SIZE to align with the populated page map. The unit_size
- * also has to be a multiple of PCPU_BITMAP_BLOCK_SIZE to ensure full blocks.
+ * The PCPU_BITMAP_BLOCK_SIZE must be the same size as PAGE_SIZE as the
+ * updating of hints is used to manage the nr_empty_pop_pages in both
+ * the chunk and globally.
  */
 #define PCPU_BITMAP_BLOCK_SIZE		PAGE_SIZE
 #define PCPU_BITMAP_BLOCK_BITS		(PCPU_BITMAP_BLOCK_SIZE >>	\
 					 PCPU_MIN_ALLOC_SHIFT)
 
+#ifdef CONFIG_KMALLOC_PARTITION_CACHES
+# if defined(CONFIG_LOCKDEP) && !defined(CONFIG_PAGE_SIZE_4KB)
+# define PERCPU_DYNAMIC_SIZE_SHIFT      13
+# else
+# define PERCPU_DYNAMIC_SIZE_SHIFT      12
+#endif /* LOCKDEP and PAGE_SIZE > 4KiB */
+#else
+#define PERCPU_DYNAMIC_SIZE_SHIFT      10
+#endif
+
 /*
  * Percpu allocator can serve percpu allocations before slab is
  * initialized which allows slab to depend on the percpu allocator.
- * The following two parameters decide how much resource to
- * preallocate for this.  Keep PERCPU_DYNAMIC_RESERVE equal to or
- * larger than PERCPU_DYNAMIC_EARLY_SIZE.
+ * The following parameter decide how much resource to preallocate
+ * for this.  Keep PERCPU_DYNAMIC_RESERVE equal to or larger than
+ * PERCPU_DYNAMIC_EARLY_SIZE.
  */
-#define PERCPU_DYNAMIC_EARLY_SLOTS	128
-#define PERCPU_DYNAMIC_EARLY_SIZE	(12 << 10)
+#define PERCPU_DYNAMIC_EARLY_SIZE	(20 << PERCPU_DYNAMIC_SIZE_SHIFT)
 
 /*
  * PERCPU_DYNAMIC_RESERVE indicates the amount of free area to piggy
@@ -63,9 +68,9 @@
  * intelligent way to determine this would be nice.
  */
 #if BITS_PER_LONG > 32
-#define PERCPU_DYNAMIC_RESERVE		(28 << 10)
+#define PERCPU_DYNAMIC_RESERVE		(28 << PERCPU_DYNAMIC_SIZE_SHIFT)
 #else
-#define PERCPU_DYNAMIC_RESERVE		(20 << 10)
+#define PERCPU_DYNAMIC_RESERVE		(20 << PERCPU_DYNAMIC_SIZE_SHIFT)
 #endif
 
 extern void *pcpu_base_addr;
@@ -101,35 +106,27 @@ extern const char * const pcpu_fc_names[PCPU_FC_NR];
 
 extern enum pcpu_fc pcpu_chosen_fc;
 
-typedef void * (*pcpu_fc_alloc_fn_t)(unsigned int cpu, size_t size,
-				     size_t align);
-typedef void (*pcpu_fc_free_fn_t)(void *ptr, size_t size);
-typedef void (*pcpu_fc_populate_pte_fn_t)(unsigned long addr);
+typedef int (pcpu_fc_cpu_to_node_fn_t)(int cpu);
 typedef int (pcpu_fc_cpu_distance_fn_t)(unsigned int from, unsigned int to);
 
 extern struct pcpu_alloc_info * __init pcpu_alloc_alloc_info(int nr_groups,
 							     int nr_units);
 extern void __init pcpu_free_alloc_info(struct pcpu_alloc_info *ai);
 
-extern int __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
+extern void __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
 					 void *base_addr);
 
-#ifdef CONFIG_NEED_PER_CPU_EMBED_FIRST_CHUNK
 extern int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 				size_t atom_size,
 				pcpu_fc_cpu_distance_fn_t cpu_distance_fn,
-				pcpu_fc_alloc_fn_t alloc_fn,
-				pcpu_fc_free_fn_t free_fn);
-#endif
+				pcpu_fc_cpu_to_node_fn_t cpu_to_nd_fn);
 
 #ifdef CONFIG_NEED_PER_CPU_PAGE_FIRST_CHUNK
+void __init pcpu_populate_pte(unsigned long addr);
 extern int __init pcpu_page_first_chunk(size_t reserved_size,
-				pcpu_fc_alloc_fn_t alloc_fn,
-				pcpu_fc_free_fn_t free_fn,
-				pcpu_fc_populate_pte_fn_t populate_pte_fn);
+				pcpu_fc_cpu_to_node_fn_t cpu_to_nd_fn);
 #endif
 
-extern void __percpu *__alloc_reserved_percpu(size_t size, size_t align);
 extern bool __is_kernel_percpu_address(unsigned long addr, unsigned long *can_addr);
 extern bool is_kernel_percpu_address(unsigned long addr);
 
@@ -137,10 +134,15 @@ extern bool is_kernel_percpu_address(unsigned long addr);
 extern void __init setup_per_cpu_areas(void);
 #endif
 
-extern void __percpu *__alloc_percpu_gfp(size_t size, size_t align, gfp_t gfp);
-extern void __percpu *__alloc_percpu(size_t size, size_t align);
-extern void free_percpu(void __percpu *__pdata);
-extern phys_addr_t per_cpu_ptr_to_phys(void *addr);
+extern void __percpu *pcpu_alloc_noprof(size_t size, size_t align, bool reserved,
+				   gfp_t gfp) __alloc_size(1);
+
+#define __alloc_percpu_gfp(_size, _align, _gfp)				\
+	alloc_hooks(pcpu_alloc_noprof(_size, _align, false, _gfp))
+#define __alloc_percpu(_size, _align)					\
+	alloc_hooks(pcpu_alloc_noprof(_size, _align, false, GFP_KERNEL))
+#define __alloc_reserved_percpu(_size, _align)				\
+	alloc_hooks(pcpu_alloc_noprof(_size, _align, true, GFP_KERNEL))
 
 #define alloc_percpu_gfp(type, gfp)					\
 	(typeof(type) __percpu *)__alloc_percpu_gfp(sizeof(type),	\
@@ -148,5 +150,16 @@ extern phys_addr_t per_cpu_ptr_to_phys(void *addr);
 #define alloc_percpu(type)						\
 	(typeof(type) __percpu *)__alloc_percpu(sizeof(type),		\
 						__alignof__(type))
+#define alloc_percpu_noprof(type)					\
+	((typeof(type) __percpu *)pcpu_alloc_noprof(sizeof(type),	\
+					__alignof__(type), false, GFP_KERNEL))
+
+extern void free_percpu(void __percpu *__pdata);
+
+DEFINE_FREE(free_percpu, void __percpu *, free_percpu(_T))
+
+extern phys_addr_t per_cpu_ptr_to_phys(void *addr);
+
+extern unsigned long pcpu_nr_pages(void);
 
 #endif /* __LINUX_PERCPU_H */

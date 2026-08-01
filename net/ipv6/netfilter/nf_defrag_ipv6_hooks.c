@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* (C) 1999-2001 Paul `Rusty' Russell
  * (C) 2002-2004 Netfilter Core Team <coreteam@netfilter.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/types.h>
@@ -13,9 +10,9 @@
 #include <linux/module.h>
 #include <linux/skbuff.h>
 #include <linux/icmp.h>
+#include <linux/rcupdate.h>
 #include <linux/sysctl.h>
-#include <net/ipv6.h>
-#include <net/inet_frag.h>
+#include <net/ipv6_frag.h>
 
 #include <linux/netfilter_ipv6.h>
 #include <linux/netfilter_bridge.h>
@@ -23,7 +20,6 @@
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_helper.h>
 #include <net/netfilter/nf_conntrack_l4proto.h>
-#include <net/netfilter/nf_conntrack_l3proto.h>
 #include <net/netfilter/nf_conntrack_core.h>
 #include <net/netfilter/ipv6/nf_conntrack_ipv6.h>
 #endif
@@ -94,12 +90,18 @@ static const struct nf_hook_ops ipv6_defrag_ops[] = {
 
 static void __net_exit defrag6_net_exit(struct net *net)
 {
-	if (net->nf.defrag_ipv6) {
+	if (net->nf.defrag_ipv6_users) {
 		nf_unregister_net_hooks(net, ipv6_defrag_ops,
 					ARRAY_SIZE(ipv6_defrag_ops));
-		net->nf.defrag_ipv6 = false;
+		net->nf.defrag_ipv6_users = 0;
 	}
 }
+
+static const struct nf_defrag_hook defrag_hook = {
+	.owner = THIS_MODULE,
+	.enable = nf_defrag_ipv6_enable,
+	.disable = nf_defrag_ipv6_disable,
+};
 
 static struct pernet_operations defrag6_net_ops = {
 	.exit = defrag6_net_exit,
@@ -119,6 +121,9 @@ static int __init nf_defrag_init(void)
 		pr_err("nf_defrag_ipv6: can't register pernet ops\n");
 		goto cleanup_frag6;
 	}
+
+	rcu_assign_pointer(nf_defrag_v6_hook, &defrag_hook);
+
 	return ret;
 
 cleanup_frag6:
@@ -129,6 +134,7 @@ cleanup_frag6:
 
 static void __exit nf_defrag_fini(void)
 {
+	rcu_assign_pointer(nf_defrag_v6_hook, NULL);
 	unregister_pernet_subsys(&defrag6_net_ops);
 	nf_ct_frag6_cleanup();
 }
@@ -137,19 +143,21 @@ int nf_defrag_ipv6_enable(struct net *net)
 {
 	int err = 0;
 
-	might_sleep();
-
-	if (net->nf.defrag_ipv6)
-		return 0;
-
 	mutex_lock(&defrag6_mutex);
-	if (net->nf.defrag_ipv6)
+	if (net->nf.defrag_ipv6_users == UINT_MAX) {
+		err = -EOVERFLOW;
 		goto out_unlock;
+	}
+
+	if (net->nf.defrag_ipv6_users) {
+		net->nf.defrag_ipv6_users++;
+		goto out_unlock;
+	}
 
 	err = nf_register_net_hooks(net, ipv6_defrag_ops,
 				    ARRAY_SIZE(ipv6_defrag_ops));
 	if (err == 0)
-		net->nf.defrag_ipv6 = true;
+		net->nf.defrag_ipv6_users = 1;
 
  out_unlock:
 	mutex_unlock(&defrag6_mutex);
@@ -157,7 +165,21 @@ int nf_defrag_ipv6_enable(struct net *net)
 }
 EXPORT_SYMBOL_GPL(nf_defrag_ipv6_enable);
 
+void nf_defrag_ipv6_disable(struct net *net)
+{
+	mutex_lock(&defrag6_mutex);
+	if (net->nf.defrag_ipv6_users) {
+		net->nf.defrag_ipv6_users--;
+		if (net->nf.defrag_ipv6_users == 0)
+			nf_unregister_net_hooks(net, ipv6_defrag_ops,
+						ARRAY_SIZE(ipv6_defrag_ops));
+	}
+	mutex_unlock(&defrag6_mutex);
+}
+EXPORT_SYMBOL_GPL(nf_defrag_ipv6_disable);
+
 module_init(nf_defrag_init);
 module_exit(nf_defrag_fini);
 
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("IPv6 defragmentation support");

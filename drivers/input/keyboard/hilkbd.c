@@ -1,18 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/hil/hilkbd.c
  *
  *  Copyright (C) 1998 Philip Blundell <philb@gnu.org>
- *  Copyright (C) 1999 Matthew Wilcox <willy@bofh.ai>
+ *  Copyright (C) 1999 Matthew Wilcox <willy@infradead.org>
  *  Copyright (C) 1999-2007 Helge Deller <deller@gmx.de>
  *
  *  Very basic HP Human Interface Loop (HIL) driver.
  *  This driver handles the keyboard on HP300 (m68k) and on some
  *  HP700 (parisc) series machines.
- *
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License version 2.  See the file COPYING in the main directory of this
- * archive for more details.
  */
 
 #include <linux/pci_ids.h>
@@ -57,8 +53,8 @@ MODULE_LICENSE("GPL v2");
  #define HIL_DATA		0x1
  #define HIL_CMD		0x3
  #define HIL_IRQ		2
- #define hil_readb(p)		readb(p)
- #define hil_writeb(v,p)	writeb((v),(p))
+ #define hil_readb(p)		readb((const volatile void __iomem *)(p))
+ #define hil_writeb(v, p)	writeb((v), (volatile void __iomem *)(p))
 
 #else
 #error "HIL is not supported on this platform"
@@ -184,9 +180,8 @@ static irqreturn_t hil_interrupt(int irq, void *handle)
 /* send a command to the HIL */
 static void hil_do(unsigned char cmd, unsigned char *data, unsigned int len)
 {
-	unsigned long flags;
+	guard(spinlock_irqsave)(&hil_dev.lock);
 
-	spin_lock_irqsave(&hil_dev.lock, flags);
 	while (hil_busy())
 		/* wait */;
 	hil_command(cmd);
@@ -195,7 +190,6 @@ static void hil_do(unsigned char cmd, unsigned char *data, unsigned int len)
 			/* wait */;
 		hil_write_data(*(data++));
 	}
-	spin_unlock_irqrestore(&hil_dev.lock, flags);
 }
 
 
@@ -320,11 +314,9 @@ static int __init hil_probe_chip(struct parisc_device *dev)
 	return hil_keyb_init();
 }
 
-static int __exit hil_remove_chip(struct parisc_device *dev)
+static void __exit hil_remove_chip(struct parisc_device *dev)
 {
 	hil_keyb_exit();
-
-	return 0;
 }
 
 static const struct parisc_device_id hil_tbl[] __initconst = {

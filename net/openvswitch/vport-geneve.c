@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2014 Nicira, Inc.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -93,13 +89,16 @@ static struct vport *geneve_tnl_create(const struct vport_parms *parms)
 		return ERR_CAST(dev);
 	}
 
-	err = dev_change_flags(dev, dev->flags | IFF_UP);
+	err = dev_change_flags(dev, dev->flags | IFF_UP, NULL);
 	if (err < 0) {
-		rtnl_delete_link(dev);
+		rtnl_delete_link(dev, 0, NULL);
 		rtnl_unlock();
 		ovs_vport_free(vport);
 		goto error;
 	}
+
+	vport->dev = dev;
+	netdev_hold(vport->dev, &vport->dev_tracker, GFP_KERNEL);
 
 	rtnl_unlock();
 	return vport;
@@ -115,7 +114,7 @@ static struct vport *geneve_create(const struct vport_parms *parms)
 	if (IS_ERR(vport))
 		return vport;
 
-	return ovs_netdev_link(vport, parms->name);
+	return ovs_netdev_link(vport, true);
 }
 
 static struct vport_ops ovs_geneve_vport_ops = {

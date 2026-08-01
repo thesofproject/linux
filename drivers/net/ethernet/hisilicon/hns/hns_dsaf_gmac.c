@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2014-2015 Hisilicon Limited.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/delay.h>
@@ -67,11 +63,14 @@ static void hns_gmac_enable(void *mac_drv, enum mac_commom_mode mode)
 	struct mac_driver *drv = (struct mac_driver *)mac_drv;
 
 	/*enable GE rX/tX */
-	if ((mode == MAC_COMM_MODE_TX) || (mode == MAC_COMM_MODE_RX_AND_TX))
+	if (mode == MAC_COMM_MODE_TX || mode == MAC_COMM_MODE_RX_AND_TX)
 		dsaf_set_dev_bit(drv, GMAC_PORT_EN_REG, GMAC_PORT_TX_EN_B, 1);
 
-	if ((mode == MAC_COMM_MODE_RX) || (mode == MAC_COMM_MODE_RX_AND_TX))
+	if (mode == MAC_COMM_MODE_RX || mode == MAC_COMM_MODE_RX_AND_TX) {
+		/* enable rx pcs */
+		dsaf_set_dev_bit(drv, GMAC_PCS_RX_EN_REG, 0, 0);
 		dsaf_set_dev_bit(drv, GMAC_PORT_EN_REG, GMAC_PORT_RX_EN_B, 1);
+	}
 }
 
 static void hns_gmac_disable(void *mac_drv, enum mac_commom_mode mode)
@@ -79,11 +78,14 @@ static void hns_gmac_disable(void *mac_drv, enum mac_commom_mode mode)
 	struct mac_driver *drv = (struct mac_driver *)mac_drv;
 
 	/*disable GE rX/tX */
-	if ((mode == MAC_COMM_MODE_TX) || (mode == MAC_COMM_MODE_RX_AND_TX))
+	if (mode == MAC_COMM_MODE_TX || mode == MAC_COMM_MODE_RX_AND_TX)
 		dsaf_set_dev_bit(drv, GMAC_PORT_EN_REG, GMAC_PORT_TX_EN_B, 0);
 
-	if ((mode == MAC_COMM_MODE_RX) || (mode == MAC_COMM_MODE_RX_AND_TX))
+	if (mode == MAC_COMM_MODE_RX || mode == MAC_COMM_MODE_RX_AND_TX) {
+		/* disable rx pcs */
+		dsaf_set_dev_bit(drv, GMAC_PCS_RX_EN_REG, 0, 1);
 		dsaf_set_dev_bit(drv, GMAC_PORT_EN_REG, GMAC_PORT_RX_EN_B, 0);
+	}
 }
 
 /* hns_gmac_get_en - get port enable
@@ -128,14 +130,6 @@ static void hns_gmac_get_tx_auto_pause_frames(void *mac_drv, u16 *newval)
 				     GMAC_FC_TX_TIMER_M, GMAC_FC_TX_TIMER_S);
 }
 
-static void hns_gmac_set_rx_auto_pause_frames(void *mac_drv, u32 newval)
-{
-	struct mac_driver *drv = (struct mac_driver *)mac_drv;
-
-	dsaf_set_dev_bit(drv, GMAC_PAUSE_EN_REG,
-			 GMAC_PAUSE_EN_RX_FDFC_B, !!newval);
-}
-
 static void hns_gmac_config_max_frame_length(void *mac_drv, u16 newval)
 {
 	struct mac_driver *drv = (struct mac_driver *)mac_drv;
@@ -175,14 +169,6 @@ static void hns_gmac_tx_loop_pkt_dis(void *mac_drv)
 	dsaf_set_bit(tx_loop_pkt_pri, GMAC_TX_LOOP_PKT_EN_B, 1);
 	dsaf_set_bit(tx_loop_pkt_pri, GMAC_TX_LOOP_PKT_HIG_PRI_B, 0);
 	dsaf_write_dev(drv, GMAC_TX_LOOP_PKT_PRI_REG, tx_loop_pkt_pri);
-}
-
-static void hns_gmac_set_duplex_type(void *mac_drv, u8 newval)
-{
-	struct mac_driver *drv = (struct mac_driver *)mac_drv;
-
-	dsaf_set_dev_bit(drv, GMAC_DUPLEX_TYPE_REG,
-			 GMAC_DUPLEX_TYPE_B, !!newval);
 }
 
 static void hns_gmac_get_duplex_type(void *mac_drv,
@@ -257,6 +243,16 @@ static void hns_gmac_get_pausefrm_cfg(void *mac_drv, u32 *rx_pause_en,
 	*tx_pause_en = dsaf_get_bit(pause_en, GMAC_PAUSE_EN_TX_FDFC_B);
 }
 
+static bool hns_gmac_need_adjust_link(void *mac_drv, enum mac_speed speed,
+				      int duplex)
+{
+	struct mac_driver *drv = (struct mac_driver *)mac_drv;
+	struct hns_mac_cb *mac_cb = drv->mac_cb;
+
+	return (mac_cb->speed != speed) ||
+		(mac_cb->half_duplex == duplex);
+}
+
 static int hns_gmac_adjust_link(void *mac_drv, enum mac_speed speed,
 				u32 full_duplex)
 {
@@ -309,6 +305,30 @@ static void hns_gmac_set_promisc(void *mac_drv, u8 en)
 		hns_gmac_set_uc_match(mac_drv, en);
 }
 
+static int hns_gmac_wait_fifo_clean(void *mac_drv)
+{
+	struct mac_driver *drv = (struct mac_driver *)mac_drv;
+	int wait_cnt;
+	u32 val;
+
+	wait_cnt = 0;
+	while (wait_cnt++ < HNS_MAX_WAIT_CNT) {
+		val = dsaf_read_dev(drv, GMAC_FIFO_STATE_REG);
+		/* bit5~bit0 is not send complete pkts */
+		if ((val & 0x3f) == 0)
+			break;
+		usleep_range(100, 200);
+	}
+
+	if (wait_cnt >= HNS_MAX_WAIT_CNT) {
+		dev_err(drv->dev,
+			"hns ge %d fifo was not idle.\n", drv->mac_id);
+		return -EBUSY;
+	}
+
+	return 0;
+}
+
 static void hns_gmac_init(void *mac_drv)
 {
 	u32 port;
@@ -339,7 +359,7 @@ static void hns_gmac_init(void *mac_drv)
 			   GMAC_TX_WATER_LINE_SHIFT, 8);
 }
 
-void hns_gmac_update_stats(void *mac_drv)
+static void hns_gmac_update_stats(void *mac_drv)
 {
 	struct mac_hw_stats *hw_stats = NULL;
 	struct mac_driver *drv = (struct mac_driver *)mac_drv;
@@ -430,7 +450,7 @@ void hns_gmac_update_stats(void *mac_drv)
 		+= dsaf_read_dev(drv, GMAC_TX_PAUSE_FRAMES_REG);
 }
 
-static void hns_gmac_set_mac_addr(void *mac_drv, char *mac_addr)
+static void hns_gmac_set_mac_addr(void *mac_drv, const char *mac_addr)
 {
 	struct mac_driver *drv = (struct mac_driver *)mac_drv;
 
@@ -649,19 +669,15 @@ static void hns_gmac_get_stats(void *mac_drv, u64 *data)
 	}
 }
 
-static void hns_gmac_get_strings(u32 stringset, u8 *data)
+static void hns_gmac_get_strings(u32 stringset, u8 **data)
 {
-	char *buff = (char *)data;
 	u32 i;
 
 	if (stringset != ETH_SS_STATS)
 		return;
 
-	for (i = 0; i < ARRAY_SIZE(g_gmac_stats_string); i++) {
-		snprintf(buff, ETH_GSTRING_LEN, "%s",
-			 g_gmac_stats_string[i].desc);
-		buff = buff + ETH_GSTRING_LEN;
-	}
+	for (i = 0; i < ARRAY_SIZE(g_gmac_stats_string); i++)
+		ethtool_puts(data, g_gmac_stats_string[i].desc);
 }
 
 static int hns_gmac_get_sset_count(int stringset)
@@ -690,6 +706,7 @@ void *hns_gmac_config(struct hns_mac_cb *mac_cb, struct mac_params *mac_param)
 	mac_drv->mac_disable = hns_gmac_disable;
 	mac_drv->mac_free = hns_gmac_free;
 	mac_drv->adjust_link = hns_gmac_adjust_link;
+	mac_drv->need_adjust_link = hns_gmac_need_adjust_link;
 	mac_drv->set_tx_auto_pause_frames = hns_gmac_set_tx_auto_pause_frames;
 	mac_drv->config_max_frame_length = hns_gmac_config_max_frame_length;
 	mac_drv->mac_pausefrm_cfg = hns_gmac_pause_frm_cfg;
@@ -704,8 +721,6 @@ void *hns_gmac_config(struct hns_mac_cb *mac_cb, struct mac_params *mac_param)
 	mac_drv->set_an_mode = hns_gmac_config_an_mode;
 	mac_drv->config_loopback = hns_gmac_config_loopback;
 	mac_drv->config_pad_and_crc = hns_gmac_config_pad_and_crc;
-	mac_drv->config_half_duplex = hns_gmac_set_duplex_type;
-	mac_drv->set_rx_ignore_pause_frames = hns_gmac_set_rx_auto_pause_frames;
 	mac_drv->get_info = hns_gmac_get_info;
 	mac_drv->autoneg_stat = hns_gmac_autoneg_stat;
 	mac_drv->get_pause_enable = hns_gmac_get_pausefrm_cfg;
@@ -717,6 +732,7 @@ void *hns_gmac_config(struct hns_mac_cb *mac_cb, struct mac_params *mac_param)
 	mac_drv->get_strings = hns_gmac_get_strings;
 	mac_drv->update_stats = hns_gmac_update_stats;
 	mac_drv->set_promiscuous = hns_gmac_set_promisc;
+	mac_drv->wait_fifo_clean = hns_gmac_wait_fifo_clean;
 
 	return (void *)mac_drv;
 }

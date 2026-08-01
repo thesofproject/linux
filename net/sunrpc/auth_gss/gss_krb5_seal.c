@@ -61,40 +61,15 @@
 #include <linux/types.h>
 #include <linux/jiffies.h>
 #include <linux/sunrpc/gss_krb5.h>
-#include <linux/random.h>
-#include <linux/crypto.h>
+#include <linux/atomic.h>
+#include <linux/scatterlist.h>
+#include <linux/slab.h>
+
+#include "gss_krb5_internal.h"
 
 #if IS_ENABLED(CONFIG_SUNRPC_DEBUG)
 # define RPCDBG_FACILITY        RPCDBG_AUTH
 #endif
-
-DEFINE_SPINLOCK(krb5_seq_lock);
-
-static void *
-setup_token(struct krb5_ctx *ctx, struct xdr_netobj *token)
-{
-	u16 *ptr;
-	void *krb5_hdr;
-	int body_size = GSS_KRB5_TOK_HDR_LEN + ctx->gk5e->cksumlength;
-
-	token->len = g_token_size(&ctx->mech_used, body_size);
-
-	ptr = (u16 *)token->data;
-	g_make_token_header(&ctx->mech_used, body_size, (unsigned char **)&ptr);
-
-	/* ptr now at start of header described in rfc 1964, section 1.2.1: */
-	krb5_hdr = ptr;
-	*ptr++ = KG_TOK_MIC_MSG;
-	/*
-	 * signalg is stored as if it were converted from LE to host endian, even
-	 * though it's an opaque pair of bytes according to the RFC.
-	 */
-	*ptr++ = (__force u16)cpu_to_le16(ctx->gk5e->signalg);
-	*ptr++ = SEAL_ALG_NONE;
-	*ptr = 0xffff;
-
-	return krb5_hdr;
-}
 
 static void *
 setup_token_v2(struct krb5_ctx *ctx, struct xdr_netobj *token)
@@ -103,14 +78,16 @@ setup_token_v2(struct krb5_ctx *ctx, struct xdr_netobj *token)
 	void *krb5_hdr;
 	u8 *p, flags = 0x00;
 
-	if ((ctx->flags & KRB5_CTX_FLAG_INITIATOR) == 0)
-		flags |= 0x01;
+	if (!ctx->initiate)
+		flags |= KG2_TOKEN_FLAG_SENTBYACCEPTOR;
 	if (ctx->flags & KRB5_CTX_FLAG_ACCEPTOR_SUBKEY)
-		flags |= 0x04;
+		flags |= KG2_TOKEN_FLAG_ACCEPTORSUBKEY;
 
 	/* Per rfc 4121, sec 4.2.6.1, there is no header,
-	 * just start the token */
-	krb5_hdr = ptr = (u16 *)token->data;
+	 * just start the token.
+	 */
+	krb5_hdr = (u16 *)token->data;
+	ptr = krb5_hdr;
 
 	*ptr++ = KG2_TOK_MIC;
 	p = (u8 *)ptr;
@@ -120,64 +97,25 @@ setup_token_v2(struct krb5_ctx *ctx, struct xdr_netobj *token)
 	*ptr++ = 0xffff;
 	*ptr = 0xffff;
 
-	token->len = GSS_KRB5_TOK_HDR_LEN + ctx->gk5e->cksumlength;
+	token->len = GSS_KRB5_TOK_HDR_LEN + ctx->krb5e->cksum_len;
 	return krb5_hdr;
 }
 
-static u32
-gss_get_mic_v1(struct krb5_ctx *ctx, struct xdr_buf *text,
-		struct xdr_netobj *token)
+u32
+gss_krb5_get_mic_v2(struct krb5_ctx *ctx, struct xdr_buf *text,
+		    struct xdr_netobj *token)
 {
-	char			cksumdata[GSS_KRB5_MAX_CKSUM_LEN];
-	struct xdr_netobj	md5cksum = {.len = sizeof(cksumdata),
-					    .data = cksumdata};
-	void			*ptr;
-	s32			now;
-	u32			seq_send;
-	u8			*cksumkey;
-
-	dprintk("RPC:       %s\n", __func__);
-	BUG_ON(ctx == NULL);
-
-	now = get_seconds();
-
-	ptr = setup_token(ctx, token);
-
-	if (ctx->gk5e->keyed_cksum)
-		cksumkey = ctx->cksum;
-	else
-		cksumkey = NULL;
-
-	if (make_checksum(ctx, ptr, 8, text, 0, cksumkey,
-			  KG_USAGE_SIGN, &md5cksum))
-		return GSS_S_FAILURE;
-
-	memcpy(ptr + GSS_KRB5_TOK_HDR_LEN, md5cksum.data, md5cksum.len);
-
-	spin_lock(&krb5_seq_lock);
-	seq_send = ctx->seq_send++;
-	spin_unlock(&krb5_seq_lock);
-
-	if (krb5_make_seq_num(ctx, ctx->seq, ctx->initiate ? 0 : 0xff,
-			      seq_send, ptr + GSS_KRB5_TOK_HDR_LEN, ptr + 8))
-		return GSS_S_FAILURE;
-
-	return (ctx->endtime < now) ? GSS_S_CONTEXT_EXPIRED : GSS_S_COMPLETE;
-}
-
-static u32
-gss_get_mic_v2(struct krb5_ctx *ctx, struct xdr_buf *text,
-		struct xdr_netobj *token)
-{
-	char cksumdata[GSS_KRB5_MAX_CKSUM_LEN];
-	struct xdr_netobj cksumobj = { .len = sizeof(cksumdata),
-				       .data = cksumdata};
-	void *krb5_hdr;
-	s32 now;
-	u64 seq_send;
-	u8 *cksumkey;
-	unsigned int cksum_usage;
+	const struct krb5_enctype *krb5 = ctx->krb5e;
+	struct crypto_shash *shash = ctx->initiate ?
+		ctx->initiator_sign_shash : ctx->acceptor_sign_shash;
+	unsigned int cksum_len = krb5->cksum_len;
+	struct scatterlist sg_head[XDR_BUF_TO_SG_NENTS];
+	struct scatterlist *sg_overflow;
 	__be64 seq_send_be64;
+	void *krb5_hdr;
+	time64_t now;
+	ssize_t ret;
+	int nsg;
 
 	dprintk("RPC:       %s\n", __func__);
 
@@ -185,48 +123,30 @@ gss_get_mic_v2(struct krb5_ctx *ctx, struct xdr_buf *text,
 
 	/* Set up the sequence number. Now 64-bits in clear
 	 * text and w/o direction indicator */
-	spin_lock(&krb5_seq_lock);
-	seq_send = ctx->seq_send64++;
-	spin_unlock(&krb5_seq_lock);
-
-	seq_send_be64 = cpu_to_be64(seq_send);
+	seq_send_be64 = cpu_to_be64(atomic64_fetch_inc(&ctx->seq_send64));
 	memcpy(krb5_hdr + 8, (char *) &seq_send_be64, 8);
 
-	if (ctx->initiate) {
-		cksumkey = ctx->initiator_sign;
-		cksum_usage = KG_USAGE_INITIATOR_SIGN;
-	} else {
-		cksumkey = ctx->acceptor_sign;
-		cksum_usage = KG_USAGE_ACCEPTOR_SIGN;
-	}
-
-	if (make_checksum_v2(ctx, krb5_hdr, GSS_KRB5_TOK_HDR_LEN,
-			     text, 0, cksumkey, cksum_usage, &cksumobj))
+	/*
+	 * The checksum is written directly into the token buffer.
+	 * This is safe: crypto_krb5_get_mic uses shash (software
+	 * hash), so the scatterlist is never DMA-mapped.
+	 */
+	nsg = gss_krb5_mic_build_sg(text,
+				    krb5_hdr + GSS_KRB5_TOK_HDR_LEN,
+				    cksum_len, krb5_hdr,
+				    sg_head, &sg_overflow);
+	if (nsg < 0)
 		return GSS_S_FAILURE;
 
-	memcpy(krb5_hdr + GSS_KRB5_TOK_HDR_LEN, cksumobj.data, cksumobj.len);
+	ret = crypto_krb5_get_mic(krb5, shash, NULL, sg_head, nsg,
+				  cksum_len + text->len +
+					GSS_KRB5_TOK_HDR_LEN,
+				  cksum_len,
+				  text->len + GSS_KRB5_TOK_HDR_LEN);
+	kfree(sg_overflow);
+	if (ret < 0)
+		return GSS_S_FAILURE;
 
-	now = get_seconds();
-
+	now = ktime_get_real_seconds();
 	return (ctx->endtime < now) ? GSS_S_CONTEXT_EXPIRED : GSS_S_COMPLETE;
 }
-
-u32
-gss_get_mic_kerberos(struct gss_ctx *gss_ctx, struct xdr_buf *text,
-		     struct xdr_netobj *token)
-{
-	struct krb5_ctx		*ctx = gss_ctx->internal_ctx_id;
-
-	switch (ctx->enctype) {
-	default:
-		BUG();
-	case ENCTYPE_DES_CBC_RAW:
-	case ENCTYPE_DES3_CBC_RAW:
-	case ENCTYPE_ARCFOUR_HMAC:
-		return gss_get_mic_v1(ctx, text, token);
-	case ENCTYPE_AES128_CTS_HMAC_SHA1_96:
-	case ENCTYPE_AES256_CTS_HMAC_SHA1_96:
-		return gss_get_mic_v2(ctx, text, token);
-	}
-}
-

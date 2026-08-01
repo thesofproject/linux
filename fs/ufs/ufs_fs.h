@@ -226,10 +226,10 @@ typedef __u16 __bitwise __fs16;
  *     inode number to cylinder group number.
  *     inode number to file system block address.
  */
-#define	ufs_inotocg(x)		((x) / uspi->s_ipg)
-#define	ufs_inotocgoff(x)	((x) % uspi->s_ipg)
+#define	ufs_inotocg(x)		((unsigned int)(x) / uspi->s_ipg)
+#define	ufs_inotocgoff(x)	((unsigned int)(x) % uspi->s_ipg)
 #define	ufs_inotofsba(x)	(((u64)ufs_cgimin(ufs_inotocg(x))) + ufs_inotocgoff(x) / uspi->s_inopf)
-#define	ufs_inotofsbo(x)	((x) % uspi->s_inopf)
+#define	ufs_inotofsbo(x)	((unsigned int)(x) % uspi->s_inopf)
 
 /*
  * Compute the cylinder and rotational position of a cyl block addr.
@@ -775,12 +775,8 @@ struct ufs_sb_private_info {
 
 	__u32	s_fpbmask;	/* fragments per block mask */
 	__u32	s_apb;		/* address per block */
-	__u32	s_2apb;		/* address per block^2 */
-	__u32	s_3apb;		/* address per block^3 */
 	__u32	s_apbmask;	/* address per block mask */
 	__u32	s_apbshift;	/* address per block shift */
-	__u32	s_2apbshift;	/* address per block shift * 2 */
-	__u32	s_3apbshift;	/* address per block shift * 3 */
 	__u32	s_nspfshift;	/* number of sector per fragment shift */
 	__u32	s_nspb;		/* number of sector per block */
 	__u32	s_inopf;	/* inodes per fragment */

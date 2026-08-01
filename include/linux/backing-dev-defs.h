@@ -12,6 +12,7 @@
 #include <linux/timer.h>
 #include <linux/workqueue.h>
 #include <linux/kref.h>
+#include <linux/refcount.h>
 
 struct page;
 struct device;
@@ -22,24 +23,18 @@ struct dentry;
  */
 enum wb_state {
 	WB_registered,		/* bdi_register() was done */
-	WB_shutting_down,	/* wb_shutdown() in progress */
 	WB_writeback_running,	/* Writeback is in progress */
 	WB_has_dirty_io,	/* Dirty inodes on ->b_{dirty|io|more_io} */
 	WB_start_all,		/* nr_pages == 0 (all) work pending */
+	WB_start_dontcache,	/* dontcache writeback pending */
 };
-
-enum wb_congested_state {
-	WB_async_congested,	/* The async (write) queue is getting full */
-	WB_sync_congested,	/* The sync queue is getting full */
-};
-
-typedef int (congested_fn)(void *, int);
 
 enum wb_stat_item {
 	WB_RECLAIMABLE,
 	WB_WRITEBACK,
 	WB_DIRTIED,
 	WB_WRITTEN,
+	WB_DONTCACHE_DIRTY,
 	NR_WB_STAT_ITEMS
 };
 
@@ -53,8 +48,6 @@ enum wb_reason {
 	WB_REASON_VMSCAN,
 	WB_REASON_SYNC,
 	WB_REASON_PERIODIC,
-	WB_REASON_LAPTOP_TIMER,
-	WB_REASON_FREE_MORE_MEM,
 	WB_REASON_FS_FREE_SPACE,
 	/*
 	 * There is no bdi forker thread any more and works are done
@@ -63,29 +56,33 @@ enum wb_reason {
 	 * so it has a mismatch name.
 	 */
 	WB_REASON_FORKER_THREAD,
+	WB_REASON_FOREIGN_FLUSH,
+	WB_REASON_DONTCACHE,
 
 	WB_REASON_MAX,
 };
 
-/*
- * For cgroup writeback, multiple wb's may map to the same blkcg.  Those
- * wb's can operate mostly independently but should share the congested
- * state.  To facilitate such sharing, the congested state is tracked using
- * the following struct which is created on demand, indexed by blkcg ID on
- * its bdi, and refcounted.
- */
-struct bdi_writeback_congested {
-	unsigned long state;		/* WB_[a]sync_congested flags */
-	atomic_t refcnt;		/* nr of attached wb's and blkg */
-
-#ifdef CONFIG_CGROUP_WRITEBACK
-	struct backing_dev_info *__bdi;	/* the associated bdi, set to NULL
-					 * on bdi unregistration. For memcg-wb
-					 * internal use only! */
-	int blkcg_id;			/* ID of the associated blkcg */
-	struct rb_node rb_node;		/* on bdi->cgwb_congestion_tree */
-#endif
+struct wb_completion {
+	atomic_t		cnt;
+	wait_queue_head_t	*waitq;
+	unsigned long progress_stamp;	/* The jiffies when slow progress is detected */
+	unsigned long wait_start;	/* The jiffies when waiting for the writeback work to finish */
 };
+
+#define __WB_COMPLETION_INIT(_waitq)	\
+	(struct wb_completion){ .cnt = ATOMIC_INIT(1), .waitq = (_waitq) }
+
+/*
+ * If one wants to wait for one or more wb_writeback_works, each work's
+ * ->done should be set to a wb_completion defined using the following
+ * macro.  Once all work items are issued with wb_queue_work(), the caller
+ * can wait for the completion of all using wb_wait_for_completion().  Work
+ * items which are waited upon aren't freed automatically on completion.
+ */
+#define WB_COMPLETION_INIT(bdi)		__WB_COMPLETION_INIT(&(bdi)->wb_waitq)
+
+#define DEFINE_WB_COMPLETION(cmpl, bdi)	\
+	struct wb_completion cmpl = WB_COMPLETION_INIT(bdi)
 
 /*
  * Each wb (bdi_writeback) can perform writeback operations, is measured
@@ -105,6 +102,9 @@ struct bdi_writeback_congested {
  * change as blkcg is disabled and enabled higher up in the hierarchy, a wb
  * is tested for blkcg after lookup and removed from index on mismatch so
  * that a new wb for the combination can be created.
+ *
+ * Each bdi_writeback that is not embedded into the backing_dev_info must hold
+ * a reference to the parent backing_dev_info.  See cgwb_create() for details.
  */
 struct bdi_writeback {
 	struct backing_dev_info *bdi;	/* our parent bdi */
@@ -118,9 +118,8 @@ struct bdi_writeback {
 	struct list_head b_dirty_time;	/* time stamps are dirty */
 	spinlock_t list_lock;		/* protects the b_* lists */
 
+	atomic_t writeback_inodes;	/* number of inodes under writeback */
 	struct percpu_counter stat[NR_WB_STAT_ITEMS];
-
-	struct bdi_writeback_congested *congested;
 
 	unsigned long bw_time_stamp;	/* last time write bw is updated */
 	unsigned long dirtied_stamp;
@@ -144,8 +143,7 @@ struct bdi_writeback {
 	spinlock_t work_lock;		/* protects work_list & dwork scheduling */
 	struct list_head work_list;
 	struct delayed_work dwork;	/* work item used for writeback */
-
-	unsigned long dirty_sleep;	/* last wait */
+	struct delayed_work bw_dwork;	/* work item used for bandwidth estimate */
 
 	struct list_head bdi_node;	/* anchored at bdi->wb_list */
 
@@ -156,6 +154,12 @@ struct bdi_writeback {
 	struct cgroup_subsys_state *blkcg_css; /* and blkcg */
 	struct list_head memcg_node;	/* anchored at memcg->cgwb_list */
 	struct list_head blkcg_node;	/* anchored at blkcg->cgwb_list */
+	struct list_head b_attached;	/* attached inodes, protected by list_lock */
+	struct list_head offline_node;	/* anchored at offline_cgwbs */
+	struct work_struct switch_work;	/* work used to perform inode switching
+					 * to this wb */
+	struct llist_head switch_wbs_ctxs;	/* queued contexts for
+						 * writeback switching */
 
 	union {
 		struct work_struct release_work;
@@ -165,13 +169,13 @@ struct bdi_writeback {
 };
 
 struct backing_dev_info {
+	u64 id;
+	struct rb_node rb_node; /* keyed by ->id */
 	struct list_head bdi_list;
-	unsigned long ra_pages;	/* max readahead in PAGE_SIZE units */
-	unsigned long io_pages;	/* max allowed IO size */
-	congested_fn *congested_fn; /* Function pointer if device is md/dm */
-	void *congested_data;	/* Pointer to aux data for congested func */
+	/* max readahead in PAGE_SIZE units */
+	unsigned long __data_racy ra_pages;
 
-	const char *name;
+	unsigned long io_pages;	/* max allowed IO size */
 
 	struct kref refcnt;	/* Reference counter for the structure */
 	unsigned int capabilities; /* Device capabilities */
@@ -183,45 +187,29 @@ struct backing_dev_info {
 	 * any dirty wbs, which is depended upon by bdi_has_dirty().
 	 */
 	atomic_long_t tot_write_bandwidth;
+	/*
+	 * Jiffies when last process was dirty throttled on this bdi. Used by
+	 * blk-wbt.
+	 */
+	unsigned long last_bdp_sleep;
 
 	struct bdi_writeback wb;  /* the root writeback info for this bdi */
 	struct list_head wb_list; /* list of all wbs */
 #ifdef CONFIG_CGROUP_WRITEBACK
 	struct radix_tree_root cgwb_tree; /* radix tree of active cgroup wbs */
-	struct rb_root cgwb_congested_tree; /* their congested states */
-#else
-	struct bdi_writeback_congested *wb_congested;
+	struct mutex cgwb_release_mutex;  /* protect shutdown of wb structs */
+	struct rw_semaphore wb_switch_rwsem; /* no cgwb switch while syncing */
 #endif
 	wait_queue_head_t wb_waitq;
 
 	struct device *dev;
+	char dev_name[64];
 	struct device *owner;
-
-	struct timer_list laptop_mode_wb_timer;
 
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debug_dir;
-	struct dentry *debug_stats;
 #endif
 };
-
-enum {
-	BLK_RW_ASYNC	= 0,
-	BLK_RW_SYNC	= 1,
-};
-
-void clear_wb_congested(struct bdi_writeback_congested *congested, int sync);
-void set_wb_congested(struct bdi_writeback_congested *congested, int sync);
-
-static inline void clear_bdi_congested(struct backing_dev_info *bdi, int sync)
-{
-	clear_wb_congested(bdi->wb.congested, sync);
-}
-
-static inline void set_bdi_congested(struct backing_dev_info *bdi, int sync)
-{
-	set_wb_congested(bdi->wb.congested, sync);
-}
 
 struct wb_lock_cookie {
 	bool locked;
@@ -252,13 +240,31 @@ static inline void wb_get(struct bdi_writeback *wb)
 }
 
 /**
+ * wb_put_many - decrement a wb's refcount
+ * @wb: bdi_writeback to put
+ * @nr: number of references to put
+ */
+static inline void wb_put_many(struct bdi_writeback *wb, unsigned long nr)
+{
+	if (WARN_ON_ONCE(!wb->bdi)) {
+		/*
+		 * A driver bug might cause a file to be removed before bdi was
+		 * initialized.
+		 */
+		return;
+	}
+
+	if (wb != &wb->bdi->wb)
+		percpu_ref_put_many(&wb->refcnt, nr);
+}
+
+/**
  * wb_put - decrement a wb's refcount
  * @wb: bdi_writeback to put
  */
 static inline void wb_put(struct bdi_writeback *wb)
 {
-	if (wb != &wb->bdi->wb)
-		percpu_ref_put(&wb->refcnt);
+	wb_put_many(wb, 1);
 }
 
 /**
@@ -284,6 +290,10 @@ static inline void wb_get(struct bdi_writeback *wb)
 }
 
 static inline void wb_put(struct bdi_writeback *wb)
+{
+}
+
+static inline void wb_put_many(struct bdi_writeback *wb, unsigned long nr)
 {
 }
 

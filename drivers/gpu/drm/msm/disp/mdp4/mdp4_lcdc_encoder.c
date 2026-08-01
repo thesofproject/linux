@@ -1,33 +1,23 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
  * Author: Vinay Simha <vinaysimha@inforcecomputing.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <linux/delay.h>
+
 #include <drm/drm_crtc.h>
-#include <drm/drm_crtc_helper.h>
+#include <drm/drm_probe_helper.h>
 
 #include "mdp4_kms.h"
 
 struct mdp4_lcdc_encoder {
 	struct drm_encoder base;
-	struct device_node *panel_node;
 	struct drm_panel *panel;
 	struct clk *lcdc_clk;
 	unsigned long int pixclock;
-	struct regulator *regs[3];
+	struct regulator_bulk_data regs[3];
 	bool enabled;
 	uint32_t bsc;
 };
@@ -38,59 +28,6 @@ static struct mdp4_kms *get_kms(struct drm_encoder *encoder)
 	struct msm_drm_private *priv = encoder->dev->dev_private;
 	return to_mdp4_kms(to_mdp_kms(priv->kms));
 }
-
-#ifdef DOWNSTREAM_CONFIG_MSM_BUS_SCALING
-#include <mach/board.h>
-static void bs_init(struct mdp4_lcdc_encoder *mdp4_lcdc_encoder)
-{
-	struct drm_device *dev = mdp4_lcdc_encoder->base.dev;
-	struct lcdc_platform_data *lcdc_pdata = mdp4_find_pdata("lvds.0");
-
-	if (!lcdc_pdata) {
-		dev_err(dev->dev, "could not find lvds pdata\n");
-		return;
-	}
-
-	if (lcdc_pdata->bus_scale_table) {
-		mdp4_lcdc_encoder->bsc = msm_bus_scale_register_client(
-				lcdc_pdata->bus_scale_table);
-		DBG("lvds : bus scale client: %08x", mdp4_lcdc_encoder->bsc);
-	}
-}
-
-static void bs_fini(struct mdp4_lcdc_encoder *mdp4_lcdc_encoder)
-{
-	if (mdp4_lcdc_encoder->bsc) {
-		msm_bus_scale_unregister_client(mdp4_lcdc_encoder->bsc);
-		mdp4_lcdc_encoder->bsc = 0;
-	}
-}
-
-static void bs_set(struct mdp4_lcdc_encoder *mdp4_lcdc_encoder, int idx)
-{
-	if (mdp4_lcdc_encoder->bsc) {
-		DBG("set bus scaling: %d", idx);
-		msm_bus_scale_client_update_request(mdp4_lcdc_encoder->bsc, idx);
-	}
-}
-#else
-static void bs_init(struct mdp4_lcdc_encoder *mdp4_lcdc_encoder) {}
-static void bs_fini(struct mdp4_lcdc_encoder *mdp4_lcdc_encoder) {}
-static void bs_set(struct mdp4_lcdc_encoder *mdp4_lcdc_encoder, int idx) {}
-#endif
-
-static void mdp4_lcdc_encoder_destroy(struct drm_encoder *encoder)
-{
-	struct mdp4_lcdc_encoder *mdp4_lcdc_encoder =
-			to_mdp4_lcdc_encoder(encoder);
-	bs_fini(mdp4_lcdc_encoder);
-	drm_encoder_cleanup(encoder);
-	kfree(mdp4_lcdc_encoder);
-}
-
-static const struct drm_encoder_funcs mdp4_lcdc_encoder_funcs = {
-	.destroy = mdp4_lcdc_encoder_destroy,
-};
 
 /* this should probably be a helper: */
 static struct drm_connector *get_connector(struct drm_encoder *encoder)
@@ -224,7 +161,7 @@ static void setup_phy(struct drm_encoder *encoder)
 		break;
 
 	default:
-		dev_err(dev->dev, "unknown bpp: %d\n", bpp);
+		DRM_DEV_ERROR(dev->dev, "unknown bpp: %d\n", bpp);
 		return;
 	}
 
@@ -241,7 +178,7 @@ static void setup_phy(struct drm_encoder *encoder)
 				MDP4_LCDC_LVDS_INTF_CTL_CH1_CLK_LANE_EN;
 		break;
 	default:
-		dev_err(dev->dev, "unknown # of channels: %d\n", nchan);
+		DRM_DEV_ERROR(dev->dev, "unknown # of channels: %d\n", nchan);
 		return;
 	}
 
@@ -273,14 +210,7 @@ static void mdp4_lcdc_encoder_mode_set(struct drm_encoder *encoder,
 
 	mode = adjusted_mode;
 
-	DBG("set mode: %d:\"%s\" %d %d %d %d %d %d %d %d %d %d 0x%x 0x%x",
-			mode->base.id, mode->name,
-			mode->vrefresh, mode->clock,
-			mode->hdisplay, mode->hsync_start,
-			mode->hsync_end, mode->htotal,
-			mode->vdisplay, mode->vsync_start,
-			mode->vsync_end, mode->vtotal,
-			mode->type, mode->flags);
+	DBG("set mode: " DRM_MODE_FMT, DRM_MODE_ARG(mode));
 
 	mdp4_lcdc_encoder->pixclock = mode->clock * 1000;
 
@@ -328,23 +258,14 @@ static void mdp4_lcdc_encoder_mode_set(struct drm_encoder *encoder,
 
 static void mdp4_lcdc_encoder_disable(struct drm_encoder *encoder)
 {
-	struct drm_device *dev = encoder->dev;
 	struct mdp4_lcdc_encoder *mdp4_lcdc_encoder =
 			to_mdp4_lcdc_encoder(encoder);
 	struct mdp4_kms *mdp4_kms = get_kms(encoder);
-	struct drm_panel *panel;
-	int i, ret;
 
 	if (WARN_ON(!mdp4_lcdc_encoder->enabled))
 		return;
 
 	mdp4_write(mdp4_kms, REG_MDP4_LCDC_ENABLE, 0);
-
-	panel = of_drm_find_panel(mdp4_lcdc_encoder->panel_node);
-	if (panel) {
-		drm_panel_disable(panel);
-		drm_panel_unprepare(panel);
-	}
 
 	/*
 	 * Wait for a vsync so we know the ENABLE=0 latched before
@@ -358,13 +279,8 @@ static void mdp4_lcdc_encoder_disable(struct drm_encoder *encoder)
 
 	clk_disable_unprepare(mdp4_lcdc_encoder->lcdc_clk);
 
-	for (i = 0; i < ARRAY_SIZE(mdp4_lcdc_encoder->regs); i++) {
-		ret = regulator_disable(mdp4_lcdc_encoder->regs[i]);
-		if (ret)
-			dev_err(dev->dev, "failed to disable regulator: %d\n", ret);
-	}
-
-	bs_set(mdp4_lcdc_encoder, 0);
+	regulator_bulk_disable(ARRAY_SIZE(mdp4_lcdc_encoder->regs),
+			       mdp4_lcdc_encoder->regs);
 
 	mdp4_lcdc_encoder->enabled = false;
 }
@@ -376,44 +292,39 @@ static void mdp4_lcdc_encoder_enable(struct drm_encoder *encoder)
 			to_mdp4_lcdc_encoder(encoder);
 	unsigned long pc = mdp4_lcdc_encoder->pixclock;
 	struct mdp4_kms *mdp4_kms = get_kms(encoder);
-	struct drm_panel *panel;
-	int i, ret;
+	uint32_t config;
+	int ret;
 
 	if (WARN_ON(mdp4_lcdc_encoder->enabled))
 		return;
 
 	/* TODO: hard-coded for 18bpp: */
-	mdp4_crtc_set_config(encoder->crtc,
-			MDP4_DMA_CONFIG_R_BPC(BPC6) |
-			MDP4_DMA_CONFIG_G_BPC(BPC6) |
-			MDP4_DMA_CONFIG_B_BPC(BPC6) |
-			MDP4_DMA_CONFIG_PACK_ALIGN_MSB |
-			MDP4_DMA_CONFIG_PACK(0x21) |
-			MDP4_DMA_CONFIG_DEFLKR_EN |
-			MDP4_DMA_CONFIG_DITHER_EN);
+	config =
+		MDP4_DMA_CONFIG_R_BPC(BPC6) |
+		MDP4_DMA_CONFIG_G_BPC(BPC6) |
+		MDP4_DMA_CONFIG_B_BPC(BPC6) |
+		MDP4_DMA_CONFIG_PACK(0x21) |
+		MDP4_DMA_CONFIG_DEFLKR_EN |
+		MDP4_DMA_CONFIG_DITHER_EN;
+
+	if (!of_property_read_bool(dev->dev->of_node, "qcom,lcdc-align-lsb"))
+		config |= MDP4_DMA_CONFIG_PACK_ALIGN_MSB;
+
+	mdp4_crtc_set_config(encoder->crtc, config);
 	mdp4_crtc_set_intf(encoder->crtc, INTF_LCDC_DTV, 0);
 
-	bs_set(mdp4_lcdc_encoder, 1);
-
-	for (i = 0; i < ARRAY_SIZE(mdp4_lcdc_encoder->regs); i++) {
-		ret = regulator_enable(mdp4_lcdc_encoder->regs[i]);
-		if (ret)
-			dev_err(dev->dev, "failed to enable regulator: %d\n", ret);
-	}
+	ret = regulator_bulk_enable(ARRAY_SIZE(mdp4_lcdc_encoder->regs),
+				    mdp4_lcdc_encoder->regs);
+	if (ret)
+		DRM_DEV_ERROR(dev->dev, "failed to enable regulators: %d\n", ret);
 
 	DBG("setting lcdc_clk=%lu", pc);
 	ret = clk_set_rate(mdp4_lcdc_encoder->lcdc_clk, pc);
 	if (ret)
-		dev_err(dev->dev, "failed to configure lcdc_clk: %d\n", ret);
+		DRM_DEV_ERROR(dev->dev, "failed to configure lcdc_clk: %d\n", ret);
 	ret = clk_prepare_enable(mdp4_lcdc_encoder->lcdc_clk);
 	if (ret)
-		dev_err(dev->dev, "failed to enable lcdc_clk: %d\n", ret);
-
-	panel = of_drm_find_panel(mdp4_lcdc_encoder->panel_node);
-	if (panel) {
-		drm_panel_prepare(panel);
-		drm_panel_enable(panel);
-	}
+		DRM_DEV_ERROR(dev->dev, "failed to enable lcdc_clk: %d\n", ret);
 
 	setup_phy(encoder);
 
@@ -422,82 +333,64 @@ static void mdp4_lcdc_encoder_enable(struct drm_encoder *encoder)
 	mdp4_lcdc_encoder->enabled = true;
 }
 
+static enum drm_mode_status
+mdp4_lcdc_encoder_mode_valid(struct drm_encoder *encoder,
+		const struct drm_display_mode *mode)
+{
+	struct mdp4_lcdc_encoder *mdp4_lcdc_encoder =
+			to_mdp4_lcdc_encoder(encoder);
+	long actual, requested;
+
+	requested = 1000 * mode->clock;
+	actual = clk_round_rate(mdp4_lcdc_encoder->lcdc_clk, requested);
+
+	DBG("requested=%ld, actual=%ld", requested, actual);
+
+	if (actual != requested)
+		return MODE_CLOCK_RANGE;
+
+	return MODE_OK;
+}
+
 static const struct drm_encoder_helper_funcs mdp4_lcdc_encoder_helper_funcs = {
 	.mode_set = mdp4_lcdc_encoder_mode_set,
 	.disable = mdp4_lcdc_encoder_disable,
 	.enable = mdp4_lcdc_encoder_enable,
+	.mode_valid = mdp4_lcdc_encoder_mode_valid,
 };
 
-long mdp4_lcdc_round_pixclk(struct drm_encoder *encoder, unsigned long rate)
-{
-	struct mdp4_lcdc_encoder *mdp4_lcdc_encoder =
-			to_mdp4_lcdc_encoder(encoder);
-	return clk_round_rate(mdp4_lcdc_encoder->lcdc_clk, rate);
-}
-
 /* initialize encoder */
-struct drm_encoder *mdp4_lcdc_encoder_init(struct drm_device *dev,
-		struct device_node *panel_node)
+struct drm_encoder *mdp4_lcdc_encoder_init(struct drm_device *dev)
 {
-	struct drm_encoder *encoder = NULL;
+	struct drm_encoder *encoder;
 	struct mdp4_lcdc_encoder *mdp4_lcdc_encoder;
-	struct regulator *reg;
 	int ret;
 
-	mdp4_lcdc_encoder = kzalloc(sizeof(*mdp4_lcdc_encoder), GFP_KERNEL);
-	if (!mdp4_lcdc_encoder) {
-		ret = -ENOMEM;
-		goto fail;
-	}
-
-	mdp4_lcdc_encoder->panel_node = panel_node;
+	mdp4_lcdc_encoder = drmm_encoder_alloc(dev, struct mdp4_lcdc_encoder, base,
+					       NULL, DRM_MODE_ENCODER_LVDS, NULL);
+	if (IS_ERR(mdp4_lcdc_encoder))
+		return ERR_CAST(mdp4_lcdc_encoder);
 
 	encoder = &mdp4_lcdc_encoder->base;
 
-	drm_encoder_init(dev, encoder, &mdp4_lcdc_encoder_funcs,
-			 DRM_MODE_ENCODER_LVDS, NULL);
 	drm_encoder_helper_add(encoder, &mdp4_lcdc_encoder_helper_funcs);
 
-	/* TODO: do we need different pll in other cases? */
-	mdp4_lcdc_encoder->lcdc_clk = mpd4_lvds_pll_init(dev);
+	mdp4_lcdc_encoder->lcdc_clk = mdp4_get_lcdc_clock(dev);
 	if (IS_ERR(mdp4_lcdc_encoder->lcdc_clk)) {
-		dev_err(dev->dev, "failed to get lvds_clk\n");
-		ret = PTR_ERR(mdp4_lcdc_encoder->lcdc_clk);
-		goto fail;
+		DRM_DEV_ERROR(dev->dev, "failed to get lvds_clk\n");
+		return ERR_CAST(mdp4_lcdc_encoder->lcdc_clk);
 	}
 
 	/* TODO: different regulators in other cases? */
-	reg = devm_regulator_get(dev->dev, "lvds-vccs-3p3v");
-	if (IS_ERR(reg)) {
-		ret = PTR_ERR(reg);
-		dev_err(dev->dev, "failed to get lvds-vccs-3p3v: %d\n", ret);
-		goto fail;
-	}
-	mdp4_lcdc_encoder->regs[0] = reg;
+	mdp4_lcdc_encoder->regs[0].supply = "lvds-vccs-3p3v";
+	mdp4_lcdc_encoder->regs[1].supply = "lvds-pll-vdda";
+	mdp4_lcdc_encoder->regs[2].supply = "lvds-vdda";
 
-	reg = devm_regulator_get(dev->dev, "lvds-pll-vdda");
-	if (IS_ERR(reg)) {
-		ret = PTR_ERR(reg);
-		dev_err(dev->dev, "failed to get lvds-pll-vdda: %d\n", ret);
-		goto fail;
-	}
-	mdp4_lcdc_encoder->regs[1] = reg;
-
-	reg = devm_regulator_get(dev->dev, "lvds-vdda");
-	if (IS_ERR(reg)) {
-		ret = PTR_ERR(reg);
-		dev_err(dev->dev, "failed to get lvds-vdda: %d\n", ret);
-		goto fail;
-	}
-	mdp4_lcdc_encoder->regs[2] = reg;
-
-	bs_init(mdp4_lcdc_encoder);
+	ret = devm_regulator_bulk_get(dev->dev,
+				      ARRAY_SIZE(mdp4_lcdc_encoder->regs),
+				      mdp4_lcdc_encoder->regs);
+	if (ret)
+		return ERR_PTR(ret);
 
 	return encoder;
-
-fail:
-	if (encoder)
-		mdp4_lcdc_encoder_destroy(encoder);
-
-	return ERR_PTR(ret);
 }

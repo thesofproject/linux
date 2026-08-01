@@ -1,9 +1,6 @@
-/**
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
  * Copyright (C) 2008, Creative Technology Ltd. All Rights Reserved.
- *
- * This source file is released under GPL v2 license (no other versions).
- * See the COPYING file included in the main directory of this source
- * distribution for the license terms and conditions.
  *
  * @File	ctamixer.h
  *
@@ -13,7 +10,6 @@
  *
  * @Author	Liu Chun
  * @Date 	May 21 2008
- *
  */
 
 #ifndef CTAMIXER_H
@@ -47,8 +43,8 @@ struct sum_mgr {
 };
 
 /* Constructor and destructor of daio resource manager */
-int sum_mgr_create(struct hw *hw, struct sum_mgr **rsum_mgr);
-int sum_mgr_destroy(struct sum_mgr *sum_mgr);
+int sum_mgr_create(struct hw *hw, void **ptr);
+int sum_mgr_destroy(void *ptr);
 
 /* Define the descriptor of a amixer resource */
 struct amixer_rsc_ops;
@@ -93,7 +89,7 @@ struct amixer_mgr {
 };
 
 /* Constructor and destructor of amixer resource manager */
-int amixer_mgr_create(struct hw *hw, struct amixer_mgr **ramixer_mgr);
-int amixer_mgr_destroy(struct amixer_mgr *amixer_mgr);
+int amixer_mgr_create(struct hw *hw, void **ramixer_mgr);
+int amixer_mgr_destroy(void *amixer_mgr);
 
 #endif /* CTAMIXER_H */

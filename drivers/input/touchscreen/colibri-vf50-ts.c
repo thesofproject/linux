@@ -1,19 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Toradex Colibri VF50 Touchscreen driver
  *
  * Copyright 2015 Toradex AG
  *
  * Originally authored by Stefan Agner for 3.0 kernel
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/delay.h>
 #include <linux/err.h>
-#include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/iio/consumer.h>
 #include <linux/iio/types.h>
@@ -244,14 +239,10 @@ static void vf50_ts_close(struct input_dev *dev_input)
 static int vf50_ts_get_gpiod(struct device *dev, struct gpio_desc **gpio_d,
 			     const char *con_id, enum gpiod_flags flags)
 {
-	int error;
-
 	*gpio_d = devm_gpiod_get(dev, con_id, flags);
-	if (IS_ERR(*gpio_d)) {
-		error = PTR_ERR(*gpio_d);
-		dev_err(dev, "Could not get gpio_%s %d\n", con_id, error);
-		return error;
-	}
+	if (IS_ERR(*gpio_d))
+		return dev_err_probe(dev, PTR_ERR(*gpio_d),
+				     "Could not get gpio_%s\n", con_id);
 
 	return 0;
 }

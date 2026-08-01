@@ -1,14 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * INET		An implementation of the TCP/IP protocol suite for the LINUX
  *		operating system.  INET is implemented using the  BSD Socket
  *		interface as the means of communication with the user level.
  *
  *		Definitions for the TCP protocol sk_state field.
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  */
 #ifndef _LINUX_TCP_STATES_H
 #define _LINUX_TCP_STATES_H
@@ -26,6 +22,7 @@ enum {
 	TCP_LISTEN,
 	TCP_CLOSING,	/* Now a valid state */
 	TCP_NEW_SYN_RECV,
+	TCP_BOUND_INACTIVE, /* Pseudo-state for inet_diag */
 
 	TCP_MAX_STATES	/* Leave at the end! */
 };
@@ -47,6 +44,7 @@ enum {
 	TCPF_LISTEN	 = (1 << TCP_LISTEN),
 	TCPF_CLOSING	 = (1 << TCP_CLOSING),
 	TCPF_NEW_SYN_RECV = (1 << TCP_NEW_SYN_RECV),
+	TCPF_BOUND_INACTIVE = (1 << TCP_BOUND_INACTIVE),
 };
 
 #endif	/* _LINUX_TCP_STATES_H */

@@ -1,22 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* GD ROM driver for the SEGA Dreamcast
  * copyright Adrian McMenamin, 2007
  * With thanks to Marcus Comstedt and Nathan Keynes
  * for work in reversing PIO and DMA
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -29,14 +15,12 @@
 #include <linux/slab.h>
 #include <linux/dma-mapping.h>
 #include <linux/cdrom.h>
-#include <linux/genhd.h>
 #include <linux/bio.h>
-#include <linux/blkdev.h>
+#include <linux/blk-mq.h>
 #include <linux/interrupt.h>
 #include <linux/device.h>
 #include <linux/mutex.h>
 #include <linux/wait.h>
-#include <linux/workqueue.h>
 #include <linux/platform_device.h>
 #include <scsi/scsi.h>
 #include <asm/io.h>
@@ -102,11 +86,6 @@ static int gdrom_major;
 static DECLARE_WAIT_QUEUE_HEAD(command_queue);
 static DECLARE_WAIT_QUEUE_HEAD(request_queue);
 
-static DEFINE_SPINLOCK(gdrom_lock);
-static void gdrom_readdisk_dma(struct work_struct *work);
-static DECLARE_WORK(work, gdrom_readdisk_dma);
-static LIST_HEAD(gdrom_deferred);
-
 struct gdromtoc {
 	unsigned int entry[99];
 	unsigned int first, last;
@@ -122,6 +101,7 @@ static struct gdrom_unit {
 	char disk_type;
 	struct gdromtoc *toc;
 	struct request_queue *gdrom_rq;
+	struct blk_mq_tag_set tag_set;
 } gd;
 
 struct gdrom_id {
@@ -247,7 +227,7 @@ static char gdrom_execute_diagnostic(void)
 static int gdrom_preparedisk_cmd(void)
 {
 	struct packet_command *spin_command;
-	spin_command = kzalloc(sizeof(struct packet_command), GFP_KERNEL);
+	spin_command = kzalloc_obj(struct packet_command);
 	if (!spin_command)
 		return -ENOMEM;
 	spin_command->cmd[0] = 0x70;
@@ -281,7 +261,7 @@ static int gdrom_readtoc_cmd(struct gdromtoc *toc, int session)
 	struct packet_command *toc_command;
 	int err = 0;
 
-	toc_command = kzalloc(sizeof(struct packet_command), GFP_KERNEL);
+	toc_command = kzalloc_obj(struct packet_command);
 	if (!toc_command)
 		return -ENOMEM;
 	tocsize = sizeof(struct gdromtoc);
@@ -332,15 +312,15 @@ static int get_entry_track(int track)
 static int gdrom_get_last_session(struct cdrom_device_info *cd_info,
 	struct cdrom_multisession *ms_info)
 {
-	int fentry, lentry, track, data, tocuse, err;
+	int fentry, lentry, track, data, err;
+
 	if (!gd.toc)
 		return -ENOMEM;
-	tocuse = 1;
+
 	/* Check if GD-ROM */
 	err = gdrom_readtoc_cmd(gd.toc, 1);
 	/* Not a GD-ROM so check if standard CD-ROM */
 	if (err) {
-		tocuse = 0;
 		err = gdrom_readtoc_cmd(gd.toc, 0);
 		if (err) {
 			pr_info("Could not get CD table of contents\n");
@@ -435,7 +415,7 @@ static int gdrom_getsense(short *bufstring)
 	int sense_key;
 	int err = -EIO;
 
-	sense_command = kzalloc(sizeof(struct packet_command), GFP_KERNEL);
+	sense_command = kzalloc_obj(struct packet_command);
 	if (!sense_command)
 		return -ENOMEM;
 	sense_command->cmd[0] = 0x13;
@@ -494,22 +474,22 @@ static const struct cdrom_device_ops gdrom_ops = {
 				  CDC_RESET | CDC_DRIVE_STATUS | CDC_CD_R,
 };
 
-static int gdrom_bdops_open(struct block_device *bdev, fmode_t mode)
+static int gdrom_bdops_open(struct gendisk *disk, blk_mode_t mode)
 {
 	int ret;
 
-	check_disk_change(bdev);
+	disk_check_media_change(disk);
 
 	mutex_lock(&gdrom_mutex);
-	ret = cdrom_open(gd.cd_info, bdev, mode);
+	ret = cdrom_open(gd.cd_info, mode);
 	mutex_unlock(&gdrom_mutex);
 	return ret;
 }
 
-static void gdrom_bdops_release(struct gendisk *disk, fmode_t mode)
+static void gdrom_bdops_release(struct gendisk *disk)
 {
 	mutex_lock(&gdrom_mutex);
-	cdrom_release(gd.cd_info, mode);
+	cdrom_release(gd.cd_info);
 	mutex_unlock(&gdrom_mutex);
 }
 
@@ -519,13 +499,13 @@ static unsigned int gdrom_bdops_check_events(struct gendisk *disk,
 	return cdrom_check_events(gd.cd_info, clearing);
 }
 
-static int gdrom_bdops_ioctl(struct block_device *bdev, fmode_t mode,
+static int gdrom_bdops_ioctl(struct block_device *bdev, blk_mode_t mode,
 	unsigned cmd, unsigned long arg)
 {
 	int ret;
 
 	mutex_lock(&gdrom_mutex);
-	ret = cdrom_ioctl(gd.cd_info, bdev, mode, cmd, arg);
+	ret = cdrom_ioctl(gd.cd_info, bdev, cmd, arg);
 	mutex_unlock(&gdrom_mutex);
 
 	return ret;
@@ -537,6 +517,9 @@ static const struct block_device_operations gdrom_bdops = {
 	.release		= gdrom_bdops_release,
 	.check_events		= gdrom_bdops_check_events,
 	.ioctl			= gdrom_bdops_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl		= blkdev_compat_ptr_ioctl,
+#endif
 };
 
 static irqreturn_t gdrom_command_interrupt(int irq, void *dev_id)
@@ -584,103 +567,84 @@ static int gdrom_set_interrupt_handlers(void)
  * 9 -> sectors >> 8
  * 10 -> sectors
  */
-static void gdrom_readdisk_dma(struct work_struct *work)
+static blk_status_t gdrom_readdisk_dma(struct request *req)
 {
 	int block, block_cnt;
 	blk_status_t err;
 	struct packet_command *read_command;
-	struct list_head *elem, *next;
-	struct request *req;
 	unsigned long timeout;
 
-	if (list_empty(&gdrom_deferred))
-		return;
-	read_command = kzalloc(sizeof(struct packet_command), GFP_KERNEL);
+	read_command = kzalloc_obj(struct packet_command);
 	if (!read_command)
-		return; /* get more memory later? */
+		return BLK_STS_RESOURCE;
+
 	read_command->cmd[0] = 0x30;
 	read_command->cmd[1] = 0x20;
-	spin_lock(&gdrom_lock);
-	list_for_each_safe(elem, next, &gdrom_deferred) {
-		req = list_entry(elem, struct request, queuelist);
-		spin_unlock(&gdrom_lock);
-		block = blk_rq_pos(req)/GD_TO_BLK + GD_SESSION_OFFSET;
-		block_cnt = blk_rq_sectors(req)/GD_TO_BLK;
-		__raw_writel(virt_to_phys(bio_data(req->bio)), GDROM_DMA_STARTADDR_REG);
-		__raw_writel(block_cnt * GDROM_HARD_SECTOR, GDROM_DMA_LENGTH_REG);
-		__raw_writel(1, GDROM_DMA_DIRECTION_REG);
-		__raw_writel(1, GDROM_DMA_ENABLE_REG);
-		read_command->cmd[2] = (block >> 16) & 0xFF;
-		read_command->cmd[3] = (block >> 8) & 0xFF;
-		read_command->cmd[4] = block & 0xFF;
-		read_command->cmd[8] = (block_cnt >> 16) & 0xFF;
-		read_command->cmd[9] = (block_cnt >> 8) & 0xFF;
-		read_command->cmd[10] = block_cnt & 0xFF;
-		/* set for DMA */
-		__raw_writeb(1, GDROM_ERROR_REG);
-		/* other registers */
-		__raw_writeb(0, GDROM_SECNUM_REG);
-		__raw_writeb(0, GDROM_BCL_REG);
-		__raw_writeb(0, GDROM_BCH_REG);
-		__raw_writeb(0, GDROM_DSEL_REG);
-		__raw_writeb(0, GDROM_INTSEC_REG);
-		/* Wait for registers to reset after any previous activity */
-		timeout = jiffies + HZ / 2;
-		while (gdrom_is_busy() && time_before(jiffies, timeout))
-			cpu_relax();
-		__raw_writeb(GDROM_COM_PACKET, GDROM_STATUSCOMMAND_REG);
-		timeout = jiffies + HZ / 2;
-		/* Wait for packet command to finish */
-		while (gdrom_is_busy() && time_before(jiffies, timeout))
-			cpu_relax();
-		gd.pending = 1;
-		gd.transfer = 1;
-		outsw(GDROM_DATA_REG, &read_command->cmd, 6);
-		timeout = jiffies + HZ / 2;
-		/* Wait for any pending DMA to finish */
-		while (__raw_readb(GDROM_DMA_STATUS_REG) &&
-			time_before(jiffies, timeout))
-			cpu_relax();
-		/* start transfer */
-		__raw_writeb(1, GDROM_DMA_STATUS_REG);
-		wait_event_interruptible_timeout(request_queue,
-			gd.transfer == 0, GDROM_DEFAULT_TIMEOUT);
-		err = gd.transfer ? BLK_STS_IOERR : BLK_STS_OK;
-		gd.transfer = 0;
-		gd.pending = 0;
-		/* now seek to take the request spinlock
-		* before handling ending the request */
-		spin_lock(&gdrom_lock);
-		list_del_init(&req->queuelist);
-		__blk_end_request_all(req, err);
-	}
-	spin_unlock(&gdrom_lock);
+	block = blk_rq_pos(req)/GD_TO_BLK + GD_SESSION_OFFSET;
+	block_cnt = blk_rq_sectors(req)/GD_TO_BLK;
+	__raw_writel(page_to_phys(bio_page(req->bio)) + bio_offset(req->bio),
+			GDROM_DMA_STARTADDR_REG);
+	__raw_writel(block_cnt * GDROM_HARD_SECTOR, GDROM_DMA_LENGTH_REG);
+	__raw_writel(1, GDROM_DMA_DIRECTION_REG);
+	__raw_writel(1, GDROM_DMA_ENABLE_REG);
+	read_command->cmd[2] = (block >> 16) & 0xFF;
+	read_command->cmd[3] = (block >> 8) & 0xFF;
+	read_command->cmd[4] = block & 0xFF;
+	read_command->cmd[8] = (block_cnt >> 16) & 0xFF;
+	read_command->cmd[9] = (block_cnt >> 8) & 0xFF;
+	read_command->cmd[10] = block_cnt & 0xFF;
+	/* set for DMA */
+	__raw_writeb(1, GDROM_ERROR_REG);
+	/* other registers */
+	__raw_writeb(0, GDROM_SECNUM_REG);
+	__raw_writeb(0, GDROM_BCL_REG);
+	__raw_writeb(0, GDROM_BCH_REG);
+	__raw_writeb(0, GDROM_DSEL_REG);
+	__raw_writeb(0, GDROM_INTSEC_REG);
+	/* Wait for registers to reset after any previous activity */
+	timeout = jiffies + HZ / 2;
+	while (gdrom_is_busy() && time_before(jiffies, timeout))
+		cpu_relax();
+	__raw_writeb(GDROM_COM_PACKET, GDROM_STATUSCOMMAND_REG);
+	timeout = jiffies + HZ / 2;
+	/* Wait for packet command to finish */
+	while (gdrom_is_busy() && time_before(jiffies, timeout))
+		cpu_relax();
+	gd.pending = 1;
+	gd.transfer = 1;
+	outsw(GDROM_DATA_REG, &read_command->cmd, 6);
+	timeout = jiffies + HZ / 2;
+	/* Wait for any pending DMA to finish */
+	while (__raw_readb(GDROM_DMA_STATUS_REG) &&
+		time_before(jiffies, timeout))
+		cpu_relax();
+	/* start transfer */
+	__raw_writeb(1, GDROM_DMA_STATUS_REG);
+	wait_event_interruptible_timeout(request_queue,
+		gd.transfer == 0, GDROM_DEFAULT_TIMEOUT);
+	err = gd.transfer ? BLK_STS_IOERR : BLK_STS_OK;
+	gd.transfer = 0;
+	gd.pending = 0;
+
+	blk_mq_end_request(req, err);
 	kfree(read_command);
+	return BLK_STS_OK;
 }
 
-static void gdrom_request(struct request_queue *rq)
+static blk_status_t gdrom_queue_rq(struct blk_mq_hw_ctx *hctx,
+				   const struct blk_mq_queue_data *bd)
 {
-	struct request *req;
+	blk_mq_start_request(bd->rq);
 
-	while ((req = blk_fetch_request(rq)) != NULL) {
-		switch (req_op(req)) {
-		case REQ_OP_READ:
-			/*
-			 * Add to list of deferred work and then schedule
-			 * workqueue.
-			 */
-			list_add_tail(&req->queuelist, &gdrom_deferred);
-			schedule_work(&work);
-			break;
-		case REQ_OP_WRITE:
-			pr_notice("Read only device - write request ignored\n");
-			__blk_end_request_all(req, BLK_STS_IOERR);
-			break;
-		default:
-			printk(KERN_DEBUG "gdrom: Non-fs request ignored\n");
-			__blk_end_request_all(req, BLK_STS_IOERR);
-			break;
-		}
+	switch (req_op(bd->rq)) {
+	case REQ_OP_READ:
+		return gdrom_readdisk_dma(bd->rq);
+	case REQ_OP_WRITE:
+		pr_notice("Read only device - write request ignored\n");
+		return BLK_STS_IOERR;
+	default:
+		printk(KERN_DEBUG "gdrom: Non-fs request ignored\n");
+		return BLK_STS_IOERR;
 	}
 }
 
@@ -692,7 +656,7 @@ static int gdrom_outputversion(void)
 	int err = -ENOMEM;
 
 	/* query device ID */
-	id = kzalloc(sizeof(struct gdrom_id), GFP_KERNEL);
+	id = kzalloc_obj(struct gdrom_id);
 	if (!id)
 		return err;
 	gdrom_identifydevice(id);
@@ -754,19 +718,19 @@ static void probe_gdrom_setupdisk(void)
 	gd.disk->major = gdrom_major;
 	gd.disk->first_minor = 1;
 	gd.disk->minors = 1;
+	gd.disk->flags |= GENHD_FL_NO_PART;
 	strcpy(gd.disk->disk_name, GDROM_DEV_NAME);
 }
 
 static int probe_gdrom_setupqueue(void)
 {
-	blk_queue_logical_block_size(gd.gdrom_rq, GDROM_HARD_SECTOR);
-	/* using DMA so memory will need to be contiguous */
-	blk_queue_max_segments(gd.gdrom_rq, 1);
-	/* set a large max size to get most from DMA */
-	blk_queue_max_segment_size(gd.gdrom_rq, 0x40000);
 	gd.disk->queue = gd.gdrom_rq;
 	return gdrom_init_dma_mode();
 }
+
+static const struct blk_mq_ops gdrom_mq_ops = {
+	.queue_rq	= gdrom_queue_rq,
+};
 
 /*
  * register this as a block device and as compliant with the
@@ -774,10 +738,25 @@ static int probe_gdrom_setupqueue(void)
  */
 static int probe_gdrom(struct platform_device *devptr)
 {
+	struct queue_limits lim = {
+		.logical_block_size		= GDROM_HARD_SECTOR,
+		/* using DMA so memory will need to be contiguous */
+		.max_segments			= 1,
+		/* set a large max size to get most from DMA */
+		.max_segment_size		= 0x40000,
+		.features			= BLK_FEAT_ROTATIONAL,
+	};
 	int err;
+
+	/*
+	 * Ensure our "one" device is initialized properly in case of previous
+	 * usages of it
+	 */
+	memset(&gd, 0, sizeof(gd));
+
 	/* Start the device */
 	if (gdrom_execute_diagnostic() != 1) {
-		pr_warning("ATA Probe for GDROM failed\n");
+		pr_warn("ATA Probe for GDROM failed\n");
 		return -ENODEV;
 	}
 	/* Print out firmware ID */
@@ -790,75 +769,80 @@ static int probe_gdrom(struct platform_device *devptr)
 	pr_info("Registered with major number %d\n",
 		gdrom_major);
 	/* Specify basic properties of drive */
-	gd.cd_info = kzalloc(sizeof(struct cdrom_device_info), GFP_KERNEL);
+	gd.cd_info = kzalloc_obj(struct cdrom_device_info);
 	if (!gd.cd_info) {
 		err = -ENOMEM;
 		goto probe_fail_no_mem;
 	}
 	probe_gdrom_setupcd();
-	gd.disk = alloc_disk(1);
-	if (!gd.disk) {
-		err = -ENODEV;
-		goto probe_fail_no_disk;
+
+	err = blk_mq_alloc_sq_tag_set(&gd.tag_set, &gdrom_mq_ops, 1,
+				BLK_MQ_F_BLOCKING);
+	if (err)
+		goto probe_fail_free_cd_info;
+
+	gd.disk = blk_mq_alloc_disk(&gd.tag_set, &lim, NULL);
+	if (IS_ERR(gd.disk)) {
+		err = PTR_ERR(gd.disk);
+		goto probe_fail_free_tag_set;
 	}
+	gd.gdrom_rq = gd.disk->queue;
 	probe_gdrom_setupdisk();
-	if (register_cdrom(gd.cd_info)) {
+	if (register_cdrom(gd.disk, gd.cd_info)) {
 		err = -ENODEV;
-		goto probe_fail_cdrom_register;
+		goto probe_fail_cleanup_disk;
 	}
 	gd.disk->fops = &gdrom_bdops;
+	gd.disk->events = DISK_EVENT_MEDIA_CHANGE;
 	/* latch on to the interrupt */
 	err = gdrom_set_interrupt_handlers();
 	if (err)
-		goto probe_fail_cmdirq_register;
-	gd.gdrom_rq = blk_init_queue(gdrom_request, &gdrom_lock);
-	if (!gd.gdrom_rq) {
-		err = -ENOMEM;
-		goto probe_fail_requestq;
-	}
-	blk_queue_bounce_limit(gd.gdrom_rq, BLK_BOUNCE_HIGH);
+		goto probe_fail_cleanup_disk;
 
 	err = probe_gdrom_setupqueue();
 	if (err)
-		goto probe_fail_toc;
+		goto probe_fail_free_irqs;
 
-	gd.toc = kzalloc(sizeof(struct gdromtoc), GFP_KERNEL);
+	gd.toc = kzalloc_obj(struct gdromtoc);
 	if (!gd.toc) {
 		err = -ENOMEM;
-		goto probe_fail_toc;
+		goto probe_fail_free_irqs;
 	}
-	add_disk(gd.disk);
+	err = add_disk(gd.disk);
+	if (err)
+		goto probe_fail_add_disk;
+
 	return 0;
 
-probe_fail_toc:
-	blk_cleanup_queue(gd.gdrom_rq);
-probe_fail_requestq:
+probe_fail_add_disk:
+	kfree(gd.toc);
+probe_fail_free_irqs:
 	free_irq(HW_EVENT_GDROM_DMA, &gd);
 	free_irq(HW_EVENT_GDROM_CMD, &gd);
-probe_fail_cmdirq_register:
-probe_fail_cdrom_register:
-	del_gendisk(gd.disk);
-probe_fail_no_disk:
+probe_fail_cleanup_disk:
+	put_disk(gd.disk);
+probe_fail_free_tag_set:
+	blk_mq_free_tag_set(&gd.tag_set);
+probe_fail_free_cd_info:
 	kfree(gd.cd_info);
 probe_fail_no_mem:
 	unregister_blkdev(gdrom_major, GDROM_DEV_NAME);
 	gdrom_major = 0;
-	pr_warning("Probe failed - error is 0x%X\n", err);
+	pr_warn("Probe failed - error is 0x%X\n", err);
 	return err;
 }
 
-static int remove_gdrom(struct platform_device *devptr)
+static void remove_gdrom(struct platform_device *devptr)
 {
-	flush_work(&work);
-	blk_cleanup_queue(gd.gdrom_rq);
+	blk_mq_free_tag_set(&gd.tag_set);
 	free_irq(HW_EVENT_GDROM_CMD, &gd);
 	free_irq(HW_EVENT_GDROM_DMA, &gd);
 	del_gendisk(gd.disk);
 	if (gdrom_major)
 		unregister_blkdev(gdrom_major, GDROM_DEV_NAME);
 	unregister_cdrom(gd.cd_info);
-
-	return 0;
+	kfree(gd.cd_info);
+	kfree(gd.toc);
 }
 
 static struct platform_driver gdrom_driver = {
@@ -872,7 +856,7 @@ static struct platform_driver gdrom_driver = {
 static int __init init_gdrom(void)
 {
 	int rc;
-	gd.toc = NULL;
+
 	rc = platform_driver_register(&gdrom_driver);
 	if (rc)
 		return rc;
@@ -888,7 +872,6 @@ static void __exit exit_gdrom(void)
 {
 	platform_device_unregister(pd);
 	platform_driver_unregister(&gdrom_driver);
-	kfree(gd.toc);
 }
 
 module_init(init_gdrom);

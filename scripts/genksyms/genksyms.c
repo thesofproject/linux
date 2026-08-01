@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Generate kernel symbol version hashes.
    Copyright 1996, 1997 Linux International.
 
@@ -7,45 +8,31 @@
    This file was part of the Linux modutils 2.4.22: moved back into the
    kernel sources by Rusty Russell/Kai Germaschewski.
 
-   This program is free software; you can redistribute it and/or modify it
-   under the terms of the GNU General Public License as published by the
-   Free Software Foundation; either version 2 of the License, or (at your
-   option) any later version.
-
-   This program is distributed in the hope that it will be useful, but
-   WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-   General Public License for more details.
-
-   You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software Foundation,
-   Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  */
+ */
 
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <assert.h>
 #include <stdarg.h>
-#ifdef __GNU_LIBRARY__
 #include <getopt.h>
-#endif				/* __GNU_LIBRARY__ */
+
+#include <hashtable.h>
 
 #include "genksyms.h"
 /*----------------------------------------------------------------------*/
 
-#define HASH_BUCKETS  4096
-
-static struct symbol *symtab[HASH_BUCKETS];
+static HASHTABLE_DEFINE(symbol_hashtable, 1U << 12);
 static FILE *debugfile;
 
 int cur_line = 1;
-char *cur_filename, *source_file;
+char *cur_filename;
 int in_source_file;
 
 static int flag_debug, flag_dump_defs, flag_reference, flag_dump_types,
-	   flag_preserve, flag_warnings, flag_rel_crcs;
-static const char *mod_prefix = "";
+	   flag_preserve, flag_warnings;
 
 static int errors;
 static int nsyms;
@@ -74,7 +61,7 @@ static void print_type_name(enum symbol_type type, const char *name);
 
 /*----------------------------------------------------------------------*/
 
-static const unsigned int crctab32[] = {
+static const uint32_t crctab32[] = {
 	0x00000000U, 0x77073096U, 0xee0e612cU, 0x990951baU, 0x076dc419U,
 	0x706af48fU, 0xe963a535U, 0x9e6495a3U, 0x0edb8832U, 0x79dcb8a4U,
 	0xe0d5e91eU, 0x97d2d988U, 0x09b64c2bU, 0x7eb17cbdU, 0xe7b82d07U,
@@ -129,19 +116,19 @@ static const unsigned int crctab32[] = {
 	0x2d02ef8dU
 };
 
-static unsigned long partial_crc32_one(unsigned char c, unsigned long crc)
+static uint32_t partial_crc32_one(uint8_t c, uint32_t crc)
 {
 	return crctab32[(crc ^ c) & 0xff] ^ (crc >> 8);
 }
 
-static unsigned long partial_crc32(const char *s, unsigned long crc)
+static uint32_t partial_crc32(const char *s, uint32_t crc)
 {
 	while (*s)
 		crc = partial_crc32_one(*s++, crc);
 	return crc;
 }
 
-static unsigned long crc32(const char *s)
+static uint32_t crc32(const char *s)
 {
 	return partial_crc32(s, 0xffffffff) ^ 0xffffffff;
 }
@@ -165,14 +152,14 @@ static enum symbol_type map_to_ns(enum symbol_type t)
 
 struct symbol *find_symbol(const char *name, enum symbol_type ns, int exact)
 {
-	unsigned long h = crc32(name) % HASH_BUCKETS;
 	struct symbol *sym;
 
-	for (sym = symtab[h]; sym; sym = sym->hash_next)
+	hash_for_each_possible(symbol_hashtable, sym, hnode, crc32(name)) {
 		if (map_to_ns(sym->type) == map_to_ns(ns) &&
 		    strcmp(name, sym->name) == 0 &&
 		    sym->is_declared)
 			break;
+	}
 
 	if (exact && sym && sym->type != ns)
 		return NULL;
@@ -194,13 +181,9 @@ static int is_unknown_symbol(struct symbol *sym)
 			strcmp(defn->string, "{") == 0);
 }
 
-static struct symbol *__add_symbol(const char *name, enum symbol_type type,
-			    struct string_list *defn, int is_extern,
-			    int is_reference)
+static struct string_list *process_enum(const char *name, enum symbol_type type,
+					struct string_list *defn)
 {
-	unsigned long h;
-	struct symbol *sym;
-	enum symbol_status status = STATUS_UNCHANGED;
 	/* The parser adds symbols in the order their declaration completes,
 	 * so it is safe to store the value of the previous enum constant in
 	 * a static variable.
@@ -229,7 +212,7 @@ static struct symbol *__add_symbol(const char *name, enum symbol_type type,
 				defn = mk_node(buf);
 			}
 		}
-	} else if (type == SYM_ENUM) {
+	} else {
 		free_list(last_enum_expr, NULL);
 		last_enum_expr = NULL;
 		enum_counter = 0;
@@ -238,64 +221,73 @@ static struct symbol *__add_symbol(const char *name, enum symbol_type type,
 			return NULL;
 	}
 
-	h = crc32(name) % HASH_BUCKETS;
-	for (sym = symtab[h]; sym; sym = sym->hash_next) {
-		if (map_to_ns(sym->type) == map_to_ns(type) &&
-		    strcmp(name, sym->name) == 0) {
-			if (is_reference)
-				/* fall through */ ;
-			else if (sym->type == type &&
-				 equal_list(sym->defn, defn)) {
-				if (!sym->is_declared && sym->is_override) {
-					print_location();
-					print_type_name(type, name);
-					fprintf(stderr, " modversion is "
-						"unchanged\n");
-				}
-				sym->is_declared = 1;
-				return sym;
-			} else if (!sym->is_declared) {
-				if (sym->is_override && flag_preserve) {
-					print_location();
-					fprintf(stderr, "ignoring ");
-					print_type_name(type, name);
-					fprintf(stderr, " modversion change\n");
-					sym->is_declared = 1;
-					return sym;
-				} else {
-					status = is_unknown_symbol(sym) ?
-						STATUS_DEFINED : STATUS_MODIFIED;
-				}
-			} else {
-				error_with_pos("redefinition of %s", name);
-				return sym;
+	return defn;
+}
+
+static struct symbol *__add_symbol(const char *name, enum symbol_type type,
+			    struct string_list *defn, int is_extern,
+			    int is_reference)
+{
+	unsigned long h;
+	struct symbol *sym;
+	enum symbol_status status = STATUS_UNCHANGED;
+
+	if ((type == SYM_ENUM_CONST || type == SYM_ENUM) && !is_reference) {
+		defn = process_enum(name, type, defn);
+		if (defn == NULL)
+			return NULL;
+	}
+
+	h = crc32(name);
+	hash_for_each_possible(symbol_hashtable, sym, hnode, h) {
+		if (map_to_ns(sym->type) != map_to_ns(type) ||
+		    strcmp(name, sym->name))
+			continue;
+
+		if (is_reference) {
+			break;
+		} else if (sym->type == type && equal_list(sym->defn, defn)) {
+			if (!sym->is_declared && sym->is_override) {
+				print_location();
+				print_type_name(type, name);
+				fprintf(stderr, " modversion is unchanged\n");
 			}
+			sym->is_declared = 1;
+		} else if (sym->is_declared) {
+			error_with_pos("redefinition of %s", name);
+		} else if (sym->is_override && flag_preserve) {
+			print_location();
+			fprintf(stderr, "ignoring ");
+			print_type_name(type, name);
+			fprintf(stderr, " modversion change\n");
+			sym->is_declared = 1;
+		} else {
+			status = is_unknown_symbol(sym) ?
+					STATUS_DEFINED : STATUS_MODIFIED;
 			break;
 		}
+		free_list(defn, NULL);
+		return sym;
 	}
 
 	if (sym) {
-		struct symbol **psym;
+		hash_del(&sym->hnode);
 
-		for (psym = &symtab[h]; *psym; psym = &(*psym)->hash_next) {
-			if (*psym == sym) {
-				*psym = sym->hash_next;
-				break;
-			}
-		}
+		free_list(sym->defn, NULL);
+		free(sym->name);
+		free(sym);
 		--nsyms;
 	}
 
 	sym = xmalloc(sizeof(*sym));
-	sym->name = name;
+	sym->name = xstrdup(name);
 	sym->type = type;
 	sym->defn = defn;
 	sym->expansion_trail = NULL;
 	sym->visited = NULL;
 	sym->is_extern = is_extern;
 
-	sym->hash_next = symtab[h];
-	symtab[h] = sym;
+	hash_add(symbol_hashtable, &sym->hnode, h);
 
 	sym->is_declared = !is_reference;
 	sym->status = status;
@@ -494,7 +486,7 @@ static void read_reference(FILE *f)
 			defn = def;
 			def = read_node(f);
 		}
-		subsym = add_reference_symbol(xstrdup(sym->string), sym->tag,
+		subsym = add_reference_symbol(sym->string, sym->tag,
 					      defn, is_extern);
 		subsym->is_override = is_override;
 		free_node(sym);
@@ -539,7 +531,7 @@ static void print_list(FILE * f, struct string_list *list)
 	}
 }
 
-static unsigned long expand_and_crc_sym(struct symbol *sym, unsigned long crc)
+static uint32_t expand_and_crc_sym(struct symbol *sym, uint32_t crc)
 {
 	struct string_list *list = sym->defn;
 	struct string_list **e, **b;
@@ -646,58 +638,55 @@ static unsigned long expand_and_crc_sym(struct symbol *sym, unsigned long crc)
 void export_symbol(const char *name)
 {
 	struct symbol *sym;
+	uint32_t crc;
+	int has_changed = 0;
 
 	sym = find_symbol(name, SYM_NORMAL, 0);
-	if (!sym)
+	if (!sym) {
 		error_with_pos("export undefined symbol %s", name);
-	else {
-		unsigned long crc;
-		int has_changed = 0;
-
-		if (flag_dump_defs)
-			fprintf(debugfile, "Export %s == <", name);
-
-		expansion_trail = (struct symbol *)-1L;
-
-		sym->expansion_trail = expansion_trail;
-		expansion_trail = sym;
-		crc = expand_and_crc_sym(sym, 0xffffffff) ^ 0xffffffff;
-
-		sym = expansion_trail;
-		while (sym != (struct symbol *)-1L) {
-			struct symbol *n = sym->expansion_trail;
-
-			if (sym->status != STATUS_UNCHANGED) {
-				if (!has_changed) {
-					print_location();
-					fprintf(stderr, "%s: %s: modversion "
-						"changed because of changes "
-						"in ", flag_preserve ? "error" :
-						       "warning", name);
-				} else
-					fprintf(stderr, ", ");
-				print_type_name(sym->type, sym->name);
-				if (sym->status == STATUS_DEFINED)
-					fprintf(stderr, " (became defined)");
-				has_changed = 1;
-				if (flag_preserve)
-					errors++;
-			}
-			sym->expansion_trail = 0;
-			sym = n;
-		}
-		if (has_changed)
-			fprintf(stderr, "\n");
-
-		if (flag_dump_defs)
-			fputs(">\n", debugfile);
-
-		/* Used as a linker script. */
-		printf(!flag_rel_crcs ? "%s__crc_%s = 0x%08lx;\n" :
-		       "SECTIONS { .rodata : ALIGN(4) { "
-		       "%s__crc_%s = .; LONG(0x%08lx); } }\n",
-		       mod_prefix, name, crc);
+		return;
 	}
+
+	if (flag_dump_defs)
+		fprintf(debugfile, "Export %s == <", name);
+
+	expansion_trail = (struct symbol *)-1L;
+
+	sym->expansion_trail = expansion_trail;
+	expansion_trail = sym;
+	crc = expand_and_crc_sym(sym, 0xffffffff) ^ 0xffffffff;
+
+	sym = expansion_trail;
+	while (sym != (struct symbol *)-1L) {
+		struct symbol *n = sym->expansion_trail;
+
+		if (sym->status != STATUS_UNCHANGED) {
+			if (!has_changed) {
+				print_location();
+				fprintf(stderr,
+					"%s: %s: modversion changed because of changes in ",
+					flag_preserve ? "error" : "warning",
+					name);
+			} else {
+				fprintf(stderr, ", ");
+			}
+			print_type_name(sym->type, sym->name);
+			if (sym->status == STATUS_DEFINED)
+				fprintf(stderr, " (became defined)");
+			has_changed = 1;
+			if (flag_preserve)
+				errors++;
+		}
+		sym->expansion_trail = 0;
+		sym = n;
+	}
+	if (has_changed)
+		fprintf(stderr, "\n");
+
+	if (flag_dump_defs)
+		fputs(">\n", debugfile);
+
+	printf("#SYMVER %s 0x%08lx\n", name, (unsigned long)crc);
 }
 
 /*----------------------------------------------------------------------*/
@@ -734,8 +723,6 @@ void error_with_pos(const char *fmt, ...)
 static void genksyms_usage(void)
 {
 	fputs("Usage:\n" "genksyms [-adDTwqhVR] > /path/to/.tmp_obj.ver\n" "\n"
-#ifdef __GNU_LIBRARY__
-	      "  -s, --symbol-prefix   Select symbol prefix\n"
 	      "  -d, --debug           Increment the debug level (repeatable)\n"
 	      "  -D, --dump            Dump expanded symbol defs (for debugging only)\n"
 	      "  -r, --reference file  Read reference symbols from a file\n"
@@ -745,20 +732,6 @@ static void genksyms_usage(void)
 	      "  -q, --quiet           Disable warnings (default)\n"
 	      "  -h, --help            Print this message\n"
 	      "  -V, --version         Print the release version\n"
-	      "  -R, --relative-crc    Emit section relative symbol CRCs\n"
-#else				/* __GNU_LIBRARY__ */
-	      "  -s                    Select symbol prefix\n"
-	      "  -d                    Increment the debug level (repeatable)\n"
-	      "  -D                    Dump expanded symbol defs (for debugging only)\n"
-	      "  -r file               Read reference symbols from a file\n"
-	      "  -T file               Dump expanded types into file\n"
-	      "  -p                    Preserve reference modversions or fail\n"
-	      "  -w                    Enable warnings\n"
-	      "  -q                    Disable warnings (default)\n"
-	      "  -h                    Print this message\n"
-	      "  -V                    Print the release version\n"
-	      "  -R                    Emit section relative symbol CRCs\n"
-#endif				/* __GNU_LIBRARY__ */
 	      , stderr);
 }
 
@@ -767,9 +740,7 @@ int main(int argc, char **argv)
 	FILE *dumpfile = NULL, *ref_file = NULL;
 	int o;
 
-#ifdef __GNU_LIBRARY__
 	struct option long_opts[] = {
-		{"symbol-prefix", 1, 0, 's'},
 		{"debug", 0, 0, 'd'},
 		{"warnings", 0, 0, 'w'},
 		{"quiet", 0, 0, 'q'},
@@ -779,19 +750,12 @@ int main(int argc, char **argv)
 		{"preserve", 0, 0, 'p'},
 		{"version", 0, 0, 'V'},
 		{"help", 0, 0, 'h'},
-		{"relative-crc", 0, 0, 'R'},
 		{0, 0, 0, 0}
 	};
 
-	while ((o = getopt_long(argc, argv, "s:dwqVDr:T:phR",
+	while ((o = getopt_long(argc, argv, "dwqVDr:T:ph",
 				&long_opts[0], NULL)) != EOF)
-#else				/* __GNU_LIBRARY__ */
-	while ((o = getopt(argc, argv, "s:dwqVDr:T:phR")) != EOF)
-#endif				/* __GNU_LIBRARY__ */
 		switch (o) {
-		case 's':
-			mod_prefix = optarg;
-			break;
 		case 'd':
 			flag_debug++;
 			break;
@@ -829,9 +793,6 @@ int main(int argc, char **argv)
 		case 'h':
 			genksyms_usage();
 			return 0;
-		case 'R':
-			flag_rel_crcs = 1;
-			break;
 		default:
 			genksyms_usage();
 			return 1;
@@ -877,9 +838,9 @@ int main(int argc, char **argv)
 	}
 
 	if (flag_debug) {
-		fprintf(debugfile, "Hash table occupancy %d/%d = %g\n",
-			nsyms, HASH_BUCKETS,
-			(double)nsyms / (double)HASH_BUCKETS);
+		fprintf(debugfile, "Hash table occupancy %d/%zd = %g\n",
+			nsyms, HASH_SIZE(symbol_hashtable),
+			(double)nsyms / HASH_SIZE(symbol_hashtable));
 	}
 
 	if (dumpfile)

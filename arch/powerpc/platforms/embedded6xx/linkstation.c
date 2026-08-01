@@ -13,9 +13,9 @@
 #include <linux/kernel.h>
 #include <linux/initrd.h>
 #include <linux/of_platform.h>
+#include <linux/seq_file.h>
 
 #include <asm/time.h>
-#include <asm/prom.h>
 #include <asm/mpic.h>
 #include <asm/pci-bridge.h>
 
@@ -64,14 +64,17 @@ static int __init linkstation_add_bridge(struct device_node *dev)
 
 static void __init linkstation_setup_arch(void)
 {
+	printk(KERN_INFO "BUFFALO Network Attached Storage Series\n");
+	printk(KERN_INFO "(C) 2002-2005 BUFFALO INC.\n");
+}
+
+static void __init linkstation_setup_pci(void)
+{
 	struct device_node *np;
 
 	/* Lookup PCI host bridges */
 	for_each_compatible_node(np, "pci", "mpc10x-pci")
 		linkstation_add_bridge(np);
-
-	printk(KERN_INFO "BUFFALO Network Attached Storage Series\n");
-	printk(KERN_INFO "(C) 2002-2005 BUFFALO INC.\n");
 }
 
 /*
@@ -96,9 +99,6 @@ static void __init linkstation_init_IRQ(void)
 
 	mpic_init(mpic);
 }
-
-extern void avr_uart_configure(void);
-extern void avr_uart_send(const char);
 
 static void __noreturn linkstation_restart(char *cmd)
 {
@@ -141,9 +141,6 @@ static void linkstation_show_cpuinfo(struct seq_file *m)
 
 static int __init linkstation_probe(void)
 {
-	if (!of_machine_is_compatible("linkstation"))
-		return 0;
-
 	pm_power_off = linkstation_power_off;
 
 	return 1;
@@ -151,12 +148,13 @@ static int __init linkstation_probe(void)
 
 define_machine(linkstation){
 	.name 			= "Buffalo Linkstation",
+	.compatible		= "linkstation",
 	.probe 			= linkstation_probe,
 	.setup_arch 		= linkstation_setup_arch,
+	.discover_phbs		= linkstation_setup_pci,
 	.init_IRQ 		= linkstation_init_IRQ,
 	.show_cpuinfo 		= linkstation_show_cpuinfo,
 	.get_irq 		= mpic_get_irq,
 	.restart 		= linkstation_restart,
 	.halt	 		= linkstation_halt,
-	.calibrate_decr 	= generic_calibrate_decr,
 };

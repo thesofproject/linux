@@ -9,17 +9,19 @@
 #include <linux/nsproxy.h>
 #include <linux/ns_common.h>
 #include <linux/refcount.h>
-#include <linux/rhashtable.h>
+#include <linux/rhashtable-types.h>
+#include <linux/sysctl.h>
+#include <linux/percpu_counter.h>
 
 struct user_namespace;
 
 struct ipc_ids {
 	int in_use;
 	unsigned short seq;
-	bool tables_initialized;
 	struct rw_semaphore rwsem;
 	struct idr ipcs_idr;
-	int max_id;
+	int max_idx;
+	int last_idx;	/* For wrap around detection */
 #ifdef CONFIG_CHECKPOINT_RESTORE
 	int next_id;
 #endif
@@ -27,7 +29,6 @@ struct ipc_ids {
 };
 
 struct ipc_namespace {
-	refcount_t	count;
 	struct ipc_ids	ids[3];
 
 	int		sem_ctls[4];
@@ -36,8 +37,8 @@ struct ipc_namespace {
 	unsigned int	msg_ctlmax;
 	unsigned int	msg_ctlmnb;
 	unsigned int	msg_ctlmni;
-	atomic_t	msg_bytes;
-	atomic_t	msg_hdrs;
+	struct percpu_counter percpu_msg_bytes;
+	struct percpu_counter percpu_msg_hdrs;
 
 	size_t		shm_ctlmax;
 	size_t		shm_ctlall;
@@ -64,9 +65,17 @@ struct ipc_namespace {
 	unsigned int    mq_msg_default;
 	unsigned int    mq_msgsize_default;
 
+	struct ctl_table_set	mq_set;
+	struct ctl_table_header	*mq_sysctls;
+
+	struct ctl_table_set	ipc_set;
+	struct ctl_table_header	*ipc_sysctls;
+
 	/* user_ns which owns the ipc ns */
 	struct user_namespace *user_ns;
 	struct ucounts *ucounts;
+
+	struct llist_node mnt_llist;
 
 	struct ns_common ns;
 } __randomize_layout;
@@ -120,19 +129,34 @@ static inline int mq_init_ns(struct ipc_namespace *ns) { return 0; }
 #endif
 
 #if defined(CONFIG_IPC_NS)
-extern struct ipc_namespace *copy_ipcs(unsigned long flags,
+static inline struct ipc_namespace *to_ipc_ns(struct ns_common *ns)
+{
+	return container_of(ns, struct ipc_namespace, ns);
+}
+
+extern struct ipc_namespace *copy_ipcs(u64 flags,
 	struct user_namespace *user_ns, struct ipc_namespace *ns);
 
 static inline struct ipc_namespace *get_ipc_ns(struct ipc_namespace *ns)
 {
 	if (ns)
-		refcount_inc(&ns->count);
+		ns_ref_inc(ns);
 	return ns;
+}
+
+static inline struct ipc_namespace *get_ipc_ns_not_zero(struct ipc_namespace *ns)
+{
+	if (ns) {
+		if (ns_ref_get(ns))
+			return ns;
+	}
+
+	return NULL;
 }
 
 extern void put_ipc_ns(struct ipc_namespace *ns);
 #else
-static inline struct ipc_namespace *copy_ipcs(unsigned long flags,
+static inline struct ipc_namespace *copy_ipcs(u64 flags,
 	struct user_namespace *user_ns, struct ipc_namespace *ns)
 {
 	if (flags & CLONE_NEWIPC)
@@ -146,6 +170,11 @@ static inline struct ipc_namespace *get_ipc_ns(struct ipc_namespace *ns)
 	return ns;
 }
 
+static inline struct ipc_namespace *get_ipc_ns_not_zero(struct ipc_namespace *ns)
+{
+	return ns;
+}
+
 static inline void put_ipc_ns(struct ipc_namespace *ns)
 {
 }
@@ -153,15 +182,37 @@ static inline void put_ipc_ns(struct ipc_namespace *ns)
 
 #ifdef CONFIG_POSIX_MQUEUE_SYSCTL
 
-struct ctl_table_header;
-extern struct ctl_table_header *mq_register_sysctl_table(void);
+void retire_mq_sysctls(struct ipc_namespace *ns);
+bool setup_mq_sysctls(struct ipc_namespace *ns);
 
 #else /* CONFIG_POSIX_MQUEUE_SYSCTL */
 
-static inline struct ctl_table_header *mq_register_sysctl_table(void)
+static inline void retire_mq_sysctls(struct ipc_namespace *ns)
 {
-	return NULL;
+}
+
+static inline bool setup_mq_sysctls(struct ipc_namespace *ns)
+{
+	return true;
 }
 
 #endif /* CONFIG_POSIX_MQUEUE_SYSCTL */
+
+#ifdef CONFIG_SYSVIPC_SYSCTL
+
+bool setup_ipc_sysctls(struct ipc_namespace *ns);
+void retire_ipc_sysctls(struct ipc_namespace *ns);
+
+#else /* CONFIG_SYSVIPC_SYSCTL */
+
+static inline void retire_ipc_sysctls(struct ipc_namespace *ns)
+{
+}
+
+static inline bool setup_ipc_sysctls(struct ipc_namespace *ns)
+{
+	return true;
+}
+
+#endif /* CONFIG_SYSVIPC_SYSCTL */
 #endif

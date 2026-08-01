@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * VMware VMCI Driver
  *
  * Copyright (C) 2012 VMware, Inc. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation version 2 and no later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
- * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
  */
 
 #include <linux/vmw_vmci_defs.h>
@@ -79,7 +71,7 @@ static int dg_create_handle(u32 resource_id,
 
 	handle = vmci_make_handle(context_id, resource_id);
 
-	entry = kmalloc(sizeof(*entry), GFP_KERNEL);
+	entry = kmalloc_obj(*entry);
 	if (!entry) {
 		pr_warn("Failed allocating memory for datagram entry\n");
 		return VMCI_ERROR_NO_MEM;
@@ -232,8 +224,8 @@ static int dg_dispatch_as_host(u32 context_id, struct vmci_datagram *dg)
 				return VMCI_ERROR_NO_MEM;
 			}
 
-			dg_info = kmalloc(sizeof(*dg_info) +
-				    (size_t) dg->payload_size, GFP_ATOMIC);
+			dg_info = kmalloc_flex(*dg_info, msg_payload,
+					       dg->payload_size, GFP_ATOMIC);
 			if (!dg_info) {
 				atomic_dec(&delayed_dg_host_queue_size);
 				vmci_resource_put(resource);
@@ -242,7 +234,8 @@ static int dg_dispatch_as_host(u32 context_id, struct vmci_datagram *dg)
 
 			dg_info->in_dg_host_queue = true;
 			dg_info->entry = dst_entry;
-			memcpy(&dg_info->msg, dg, dg_size);
+			dg_info->msg = *dg;
+			memcpy(&dg_info->msg_payload, dg + 1, dg->payload_size);
 
 			INIT_WORK(&dg_info->work, dg_delayed_dispatch);
 			schedule_work(&dg_info->work);
@@ -385,7 +378,8 @@ int vmci_datagram_invoke_guest_handler(struct vmci_datagram *dg)
 
 		dg_info->in_dg_host_queue = false;
 		dg_info->entry = dst_entry;
-		memcpy(&dg_info->msg, dg, VMCI_DG_SIZE(dg));
+		dg_info->msg = *dg;
+		memcpy(&dg_info->msg_payload, dg + 1, dg->payload_size);
 
 		INIT_WORK(&dg_info->work, dg_delayed_dispatch);
 		schedule_work(&dg_info->work);

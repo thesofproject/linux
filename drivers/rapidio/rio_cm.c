@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * rio_cm - RapidIO Channelized Messaging Driver
  *
  * Copyright 2013-2016 Integrated Device Technology, Inc.
  * Copyright (c) 2015, Prodrive Technologies
  * Copyright (c) 2015, RapidIO Trade Association
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
- * THIS PROGRAM IS DISTRIBUTED IN THE HOPE THAT IT WILL BE USEFUL,
- * BUT WITHOUT ANY WARRANTY; WITHOUT EVEN THE IMPLIED WARRANTY OF
- * MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.  SEE THE
- * GNU GENERAL PUBLIC LICENSE FOR MORE DETAILS.
  */
 
 #include <linux/module.h>
@@ -207,12 +198,6 @@ struct cm_peer {
 	struct rio_dev *rdev;
 };
 
-struct rio_cm_work {
-	struct work_struct work;
-	struct cm_dev *cm;
-	void *data;
-};
-
 struct conn_req {
 	struct list_head node;
 	u32 destid;	/* requester destID */
@@ -242,7 +227,9 @@ static DEFINE_IDR(ch_idr);
 static LIST_HEAD(cm_dev_list);
 static DECLARE_RWSEM(rdev_sem);
 
-static struct class *dev_class;
+static const struct class dev_class = {
+	.name = DRV_NAME,
+};
 static unsigned int dev_major;
 static unsigned int dev_minor_base;
 static dev_t dev_number;
@@ -402,7 +389,7 @@ static int riocm_req_handler(struct cm_dev *cm, void *req_data)
 		return -EINVAL;
 	}
 
-	req = kzalloc(sizeof(*req), GFP_KERNEL);
+	req = kzalloc_obj(*req);
 	if (!req) {
 		riocm_put_channel(ch);
 		return -ENOMEM;
@@ -715,7 +702,7 @@ static int riocm_queue_req(struct cm_dev *cm, struct rio_dev *rdev,
 	unsigned long flags;
 	struct tx_req *treq;
 
-	treq = kzalloc(sizeof(*treq), GFP_KERNEL);
+	treq = kzalloc_obj(*treq);
 	if (treq == NULL)
 		return -ENOMEM;
 
@@ -795,6 +782,9 @@ static int riocm_ch_send(u16 ch_id, void *buf, int len)
 
 	if (buf == NULL || ch_id == 0 || len == 0 || len > RIO_MAX_MSG_SIZE)
 		return -EINVAL;
+
+	if (len < sizeof(struct rio_ch_chan_hdr))
+		return -EINVAL;		/* insufficient data from user */
 
 	ch = riocm_get_channel(ch_id);
 	if (!ch) {
@@ -975,7 +965,7 @@ static int riocm_ch_connect(u16 loc_ch, struct cm_dev *cm,
 	 * Send connect request to the remote RapidIO device
 	 */
 
-	hdr = kzalloc(sizeof(*hdr), GFP_KERNEL);
+	hdr = kzalloc_obj(*hdr);
 	if (hdr == NULL) {
 		ret = -ENOMEM;
 		goto conn_done;
@@ -1032,7 +1022,7 @@ static int riocm_send_ack(struct rio_channel *ch)
 	struct rio_ch_chan_hdr *hdr;
 	int ret;
 
-	hdr = kzalloc(sizeof(*hdr), GFP_KERNEL);
+	hdr = kzalloc_obj(*hdr);
 	if (hdr == NULL)
 		return -ENOMEM;
 
@@ -1215,7 +1205,9 @@ static int riocm_ch_listen(u16 ch_id)
 	riocm_debug(CHOP, "(ch_%d)", ch_id);
 
 	ch = riocm_get_channel(ch_id);
-	if (!ch || !riocm_cmp_exch(ch, RIO_CM_CHAN_BOUND, RIO_CM_LISTEN))
+	if (!ch)
+		return -EINVAL;
+	if (!riocm_cmp_exch(ch, RIO_CM_CHAN_BOUND, RIO_CM_LISTEN))
 		ret = -EINVAL;
 	riocm_put_channel(ch);
 	return ret;
@@ -1291,7 +1283,7 @@ static struct rio_channel *riocm_ch_alloc(u16 ch_num)
 	int start, end;
 	struct rio_channel *ch;
 
-	ch = kzalloc(sizeof(*ch), GFP_KERNEL);
+	ch = kzalloc_obj(*ch);
 	if (!ch)
 		return ERR_PTR(-ENOMEM);
 
@@ -1404,7 +1396,7 @@ static int riocm_send_close(struct rio_channel *ch)
 	 * Send CH_CLOSE notification to the remote RapidIO device
 	 */
 
-	hdr = kzalloc(sizeof(*hdr), GFP_KERNEL);
+	hdr = kzalloc_obj(*hdr);
 	if (hdr == NULL)
 		return -ENOMEM;
 
@@ -1960,7 +1952,7 @@ static int riocm_add_dev(struct device *dev, struct subsys_interface *sif)
 
 	riocm_debug(RDEV, "(%s)", rio_name(rdev));
 
-	peer = kmalloc(sizeof(*peer), GFP_KERNEL);
+	peer = kmalloc_obj(*peer);
 	if (!peer)
 		return -ENOMEM;
 
@@ -2079,7 +2071,7 @@ static int riocm_cdev_add(dev_t devno)
 		return ret;
 	}
 
-	riocm_cdev.dev = device_create(dev_class, NULL, devno, NULL, DEV_NAME);
+	riocm_cdev.dev = device_create(&dev_class, NULL, devno, NULL, DEV_NAME);
 	if (IS_ERR(riocm_cdev.dev)) {
 		cdev_del(&riocm_cdev.cdev);
 		return PTR_ERR(riocm_cdev.dev);
@@ -2094,13 +2086,11 @@ static int riocm_cdev_add(dev_t devno)
 /*
  * riocm_add_mport - add new local mport device into channel management core
  * @dev: device object associated with mport
- * @class_intf: class interface
  *
  * When a new mport device is added, CM immediately reserves inbound and
  * outbound RapidIO mailboxes that will be used.
  */
-static int riocm_add_mport(struct device *dev,
-			   struct class_interface *class_intf)
+static int riocm_add_mport(struct device *dev)
 {
 	int rc;
 	int i;
@@ -2109,7 +2099,7 @@ static int riocm_add_mport(struct device *dev,
 
 	riocm_debug(MPORT, "add mport %s", mport->name);
 
-	cm = kzalloc(sizeof(*cm), GFP_KERNEL);
+	cm = kzalloc_obj(*cm);
 	if (!cm)
 		return -ENOMEM;
 
@@ -2134,6 +2124,14 @@ static int riocm_add_mport(struct device *dev,
 		return -ENODEV;
 	}
 
+	cm->rx_wq = create_workqueue(DRV_NAME "/rxq");
+	if (!cm->rx_wq) {
+		rio_release_inb_mbox(mport, cmbox);
+		rio_release_outb_mbox(mport, cmbox);
+		kfree(cm);
+		return -ENOMEM;
+	}
+
 	/*
 	 * Allocate and register inbound messaging buffers to be ready
 	 * to receive channel and system management requests
@@ -2144,7 +2142,6 @@ static int riocm_add_mport(struct device *dev,
 	cm->rx_slots = RIOCM_RX_RING_SIZE;
 	mutex_init(&cm->rx_lock);
 	riocm_rx_fill(cm, RIOCM_RX_RING_SIZE);
-	cm->rx_wq = create_workqueue(DRV_NAME "/rxq");
 	INIT_WORK(&cm->rx_work, rio_ibmsg_handler);
 
 	cm->tx_slot = 0;
@@ -2166,14 +2163,12 @@ static int riocm_add_mport(struct device *dev,
 /*
  * riocm_remove_mport - remove local mport device from channel management core
  * @dev: device object associated with mport
- * @class_intf: class interface
  *
  * Removes a local mport device from the list of registered devices that provide
  * channel management services. Returns an error if the specified mport is not
  * registered with the CM core.
  */
-static void riocm_remove_mport(struct device *dev,
-			       struct class_interface *class_intf)
+static void riocm_remove_mport(struct device *dev)
 {
 	struct rio_mport *mport = to_rio_mport(dev);
 	struct cm_dev *cm;
@@ -2297,15 +2292,15 @@ static int __init riocm_init(void)
 	int ret;
 
 	/* Create device class needed by udev */
-	dev_class = class_create(THIS_MODULE, DRV_NAME);
-	if (IS_ERR(dev_class)) {
+	ret = class_register(&dev_class);
+	if (ret) {
 		riocm_error("Cannot create " DRV_NAME " class");
-		return PTR_ERR(dev_class);
+		return ret;
 	}
 
 	ret = alloc_chrdev_region(&dev_number, 0, 1, DRV_NAME);
 	if (ret) {
-		class_destroy(dev_class);
+		class_unregister(&dev_class);
 		return ret;
 	}
 
@@ -2353,7 +2348,7 @@ err_cl:
 	class_interface_unregister(&rio_mport_interface);
 err_reg:
 	unregister_chrdev_region(dev_number, 1);
-	class_destroy(dev_class);
+	class_unregister(&dev_class);
 	return ret;
 }
 
@@ -2368,7 +2363,7 @@ static void __exit riocm_exit(void)
 	device_unregister(riocm_cdev.dev);
 	cdev_del(&(riocm_cdev.cdev));
 
-	class_destroy(dev_class);
+	class_unregister(&dev_class);
 	unregister_chrdev_region(dev_number, 1);
 }
 

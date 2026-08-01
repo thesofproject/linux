@@ -15,12 +15,10 @@
  */
 
 #include <linux/signal.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
-#include <linux/of_platform.h>
-
-#include <asm/prom.h>
-
+#include <linux/platform_device.h>
 
 static int
 ohci_ppc_of_start(struct usb_hcd *hcd)
@@ -50,7 +48,7 @@ static const struct hc_driver ohci_ppc_of_hc_driver = {
 	 * generic hardware linkage
 	 */
 	.irq =			ohci_irq,
-	.flags =		HCD_USB11 | HCD_MEMORY,
+	.flags =		HCD_USB11 | HCD_DMA | HCD_MEMORY,
 
 	/*
 	 * basic lifecycle operations
@@ -123,7 +121,7 @@ static int ohci_hcd_ppc_of_probe(struct platform_device *op)
 	}
 
 	irq = irq_of_parse_and_map(dn, 0);
-	if (irq == NO_IRQ) {
+	if (!irq) {
 		dev_err(&op->dev, "%s: irq_of_parse_and_map failed\n",
 			__FILE__);
 		rv = -EBUSY;
@@ -169,6 +167,7 @@ static int ohci_hcd_ppc_of_probe(struct platform_device *op)
 				release_mem_region(res.start, 0x4);
 		} else
 			pr_debug("%s: cannot get ehci offset from fdt\n", __FILE__);
+		of_node_put(np);
 	}
 
 	irq_dispose_mapping(irq);
@@ -178,7 +177,7 @@ err_rmr:
 	return rv;
 }
 
-static int ohci_hcd_ppc_of_remove(struct platform_device *op)
+static void ohci_hcd_ppc_of_remove(struct platform_device *op)
 {
 	struct usb_hcd *hcd = platform_get_drvdata(op);
 
@@ -189,8 +188,6 @@ static int ohci_hcd_ppc_of_remove(struct platform_device *op)
 	irq_dispose_mapping(hcd->irq);
 
 	usb_put_hcd(hcd);
-
-	return 0;
 }
 
 static const struct of_device_id ohci_hcd_ppc_of_match[] = {
@@ -205,10 +202,6 @@ static const struct of_device_id ohci_hcd_ppc_of_match[] = {
 	},
 #endif
 #ifdef CONFIG_USB_OHCI_HCD_PPC_OF_LE
-	{
-		.name = "usb",
-		.compatible = "ohci-littledian",
-	},
 	{
 		.name = "usb",
 		.compatible = "ohci-le",

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * This file is part of wl1271
  *
@@ -5,21 +6,6 @@
  * Copyright (C) 2008-2009 Nokia Corporation
  *
  * Contact: Luciano Coelho <luciano.coelho@nokia.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #ifndef __WLCORE_I_H__
@@ -165,6 +151,9 @@ struct wl_fw_status {
 		 */
 		u8 *tx_lnk_free_pkts;
 
+		/* PN16 of last TKIP/AES seq-num per HLID */
+		__le16 *tx_lnk_sec_pn16;
+
 		/* Cumulative counter of released Voice memory blocks */
 		u8 tx_voice_released_blks;
 
@@ -226,6 +215,7 @@ struct wl1271_ap_key {
 	u8 hlid;
 	u32 tx_seq_32;
 	u16 tx_seq_16;
+	bool is_pairwise;
 };
 
 enum wl12xx_flags {
@@ -233,7 +223,6 @@ enum wl12xx_flags {
 	WL1271_FLAG_TX_QUEUE_STOPPED,
 	WL1271_FLAG_TX_PENDING,
 	WL1271_FLAG_IN_ELP,
-	WL1271_FLAG_ELP_REQUESTED,
 	WL1271_FLAG_IRQ_RUNNING,
 	WL1271_FLAG_FW_TX_BUSY,
 	WL1271_FLAG_DUMMY_PACKET_PENDING,
@@ -273,6 +262,7 @@ struct wl1271_link {
 	/* accounting for allocated / freed packets in FW */
 	u8 allocated_pkts;
 	u8 prev_freed_pkts;
+	u16 prev_sec_pn16;
 
 	u8 addr[ETH_ALEN];
 
@@ -338,6 +328,7 @@ struct wl12xx_rx_filter {
 
 struct wl1271_station {
 	u8 hlid;
+	bool fw_added;
 	bool in_connection;
 
 	/*
@@ -348,6 +339,11 @@ struct wl1271_station {
 	 */
 	u64 total_freed_pkts;
 };
+
+static inline struct wl1271_station *wl1271_station(struct ieee80211_sta *sta)
+{
+	return (struct wl1271_station *)sta->drv_priv;
+}
 
 struct wl12xx_vif {
 	struct wl1271 *wl;

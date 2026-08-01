@@ -101,10 +101,11 @@ Following is the Bus API to register the SoundWire Bus:
 
 .. code-block:: c
 
-	int sdw_add_bus_master(struct sdw_bus *bus)
+	int sdw_bus_master_add(struct sdw_bus *bus,
+				struct device *parent,
+				struct fwnode_handle)
 	{
-		if (!bus->dev)
-			return -ENODEV;
+		sdw_master_device_add(bus, parent, fwnode);
 
 		mutex_init(&bus->lock);
 		INIT_LIST_HEAD(&bus->slaves);
@@ -182,14 +183,6 @@ and also provides callback in Slave ops for Slave driver to implement own
 function that provides capabilities information. Bus needs to know a set of
 Slave capabilities to program Slave registers and to control the Bus
 reconfigurations.
-
-Future enhancements to be done
-==============================
-
- (1) Bulk Register Access (BRA) transfers.
-
-
- (2) Multiple data lane support.
 
 Links
 =====

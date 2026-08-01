@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Freescale MXS I2C bus driver
  *
@@ -7,12 +8,6 @@
  * based on a (non-working) driver which was:
  *
  * Copyright (C) 2009-2010 Freescale Semiconductor, Inc. All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #include <linux/slab.h>
@@ -27,9 +22,9 @@
 #include <linux/io.h>
 #include <linux/stmp_device.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmaengine.h>
+#include <linux/dma/mxs-dma.h>
 
 #define DRIVER_NAME "mxs-i2c"
 
@@ -113,6 +108,14 @@ enum mxs_i2c_devtype {
  * @cmd_complete: completion object for transaction wait
  * @cmd_err: error code for last transaction
  * @adapter: i2c subsystem adapter node
+ * @timing0: I2C TIMING0 register value
+ * @timing1: I2C TIMING1 register value
+ * @timing2: I2C TIMING2 register value
+ * @dmach: DMA channel
+ * @pio_data: PIO data for DMA
+ * @addr_data: address data for DMA
+ * @sg_io: scatterlist for I/O
+ * @dma_read: flag indicating DMA read
  */
 struct mxs_i2c_dev {
 	struct device *dev;
@@ -175,14 +178,15 @@ static void mxs_i2c_dma_irq_callback(void *param)
 }
 
 static int mxs_i2c_dma_setup_xfer(struct i2c_adapter *adap,
-			struct i2c_msg *msg, uint32_t flags)
+			struct i2c_msg *msg, u8 *buf, uint32_t flags)
 {
 	struct dma_async_tx_descriptor *desc;
 	struct mxs_i2c_dev *i2c = i2c_get_adapdata(adap);
 
+	i2c->addr_data = i2c_8bit_addr_from_msg(msg);
+
 	if (msg->flags & I2C_M_RD) {
 		i2c->dma_read = true;
-		i2c->addr_data = (msg->addr << 1) | I2C_SMBUS_READ;
 
 		/*
 		 * SELECT command.
@@ -204,7 +208,8 @@ static int mxs_i2c_dma_setup_xfer(struct i2c_adapter *adap,
 		dma_map_sg(i2c->dev, &i2c->sg_io[0], 1, DMA_TO_DEVICE);
 		desc = dmaengine_prep_slave_sg(i2c->dmach, &i2c->sg_io[0], 1,
 					DMA_MEM_TO_DEV,
-					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+					DMA_PREP_INTERRUPT |
+					MXS_DMA_CTRL_WAIT4END);
 		if (!desc) {
 			dev_err(i2c->dev,
 				"Failed to get DMA data write descriptor.\n");
@@ -228,11 +233,12 @@ static int mxs_i2c_dma_setup_xfer(struct i2c_adapter *adap,
 		}
 
 		/* Queue the DMA data transfer. */
-		sg_init_one(&i2c->sg_io[1], msg->buf, msg->len);
+		sg_init_one(&i2c->sg_io[1], buf, msg->len);
 		dma_map_sg(i2c->dev, &i2c->sg_io[1], 1, DMA_FROM_DEVICE);
 		desc = dmaengine_prep_slave_sg(i2c->dmach, &i2c->sg_io[1], 1,
 					DMA_DEV_TO_MEM,
-					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+					DMA_PREP_INTERRUPT |
+					MXS_DMA_CTRL_WAIT4END);
 		if (!desc) {
 			dev_err(i2c->dev,
 				"Failed to get DMA data write descriptor.\n");
@@ -240,7 +246,6 @@ static int mxs_i2c_dma_setup_xfer(struct i2c_adapter *adap,
 		}
 	} else {
 		i2c->dma_read = false;
-		i2c->addr_data = (msg->addr << 1) | I2C_SMBUS_WRITE;
 
 		/*
 		 * WRITE command.
@@ -261,11 +266,12 @@ static int mxs_i2c_dma_setup_xfer(struct i2c_adapter *adap,
 		/* Queue the DMA data transfer. */
 		sg_init_table(i2c->sg_io, 2);
 		sg_set_buf(&i2c->sg_io[0], &i2c->addr_data, 1);
-		sg_set_buf(&i2c->sg_io[1], msg->buf, msg->len);
+		sg_set_buf(&i2c->sg_io[1], buf, msg->len);
 		dma_map_sg(i2c->dev, i2c->sg_io, 2, DMA_TO_DEVICE);
 		desc = dmaengine_prep_slave_sg(i2c->dmach, i2c->sg_io, 2,
 					DMA_MEM_TO_DEV,
-					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+					DMA_PREP_INTERRUPT |
+					MXS_DMA_CTRL_WAIT4END);
 		if (!desc) {
 			dev_err(i2c->dev,
 				"Failed to get DMA data write descriptor.\n");
@@ -291,14 +297,14 @@ read_init_dma_fail:
 select_init_dma_fail:
 	dma_unmap_sg(i2c->dev, &i2c->sg_io[0], 1, DMA_TO_DEVICE);
 select_init_pio_fail:
-	dmaengine_terminate_all(i2c->dmach);
+	dmaengine_terminate_sync(i2c->dmach);
 	return -EINVAL;
 
 /* Write failpath. */
 write_init_dma_fail:
 	dma_unmap_sg(i2c->dev, i2c->sg_io, 2, DMA_TO_DEVICE);
 write_init_pio_fail:
-	dmaengine_terminate_all(i2c->dmach);
+	dmaengine_terminate_sync(i2c->dmach);
 	return -EINVAL;
 }
 
@@ -371,7 +377,7 @@ static int mxs_i2c_pio_setup_xfer(struct i2c_adapter *adap,
 			struct i2c_msg *msg, uint32_t flags)
 {
 	struct mxs_i2c_dev *i2c = i2c_get_adapdata(adap);
-	uint32_t addr_data = msg->addr << 1;
+	uint32_t addr_data = i2c_8bit_addr_from_msg(msg);
 	uint32_t data = 0;
 	int i, ret, xlen = 0, xmit = 0;
 	uint32_t start;
@@ -411,8 +417,6 @@ static int mxs_i2c_pio_setup_xfer(struct i2c_adapter *adap,
 		 */
 		BUG_ON(msg->len > 4);
 
-		addr_data |= I2C_SMBUS_READ;
-
 		/* SELECT command. */
 		mxs_i2c_pio_trigger_write_cmd(i2c, MXS_CMD_I2C_SELECT,
 					      addr_data);
@@ -450,7 +454,6 @@ static int mxs_i2c_pio_setup_xfer(struct i2c_adapter *adap,
 		 * fast enough. It is possible to transfer arbitrary amount
 		 * of data using PIO write.
 		 */
-		addr_data |= I2C_SMBUS_WRITE;
 
 		/*
 		 * The LSB of data buffer is the first byte blasted across
@@ -567,6 +570,7 @@ static int mxs_i2c_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg,
 	struct mxs_i2c_dev *i2c = i2c_get_adapdata(adap);
 	int ret;
 	int flags;
+	u8 *dma_buf;
 	int use_pio = 0;
 	unsigned long time_left;
 
@@ -574,9 +578,6 @@ static int mxs_i2c_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg,
 
 	dev_dbg(i2c->dev, "addr: 0x%04x, len: %d, flags: 0x%x, stop: %d\n",
 		msg->addr, msg->len, msg->flags, stop);
-
-	if (msg->len == 0)
-		return -EINVAL;
 
 	/*
 	 * The MX28 I2C IP block can only do PIO READ for transfer of to up
@@ -595,13 +596,20 @@ static int mxs_i2c_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg,
 		if (ret && (ret != -ENXIO))
 			mxs_i2c_reset(i2c);
 	} else {
+		dma_buf = i2c_get_dma_safe_msg_buf(msg, 1);
+		if (!dma_buf)
+			return -ENOMEM;
+
 		reinit_completion(&i2c->cmd_complete);
-		ret = mxs_i2c_dma_setup_xfer(adap, msg, flags);
-		if (ret)
+		ret = mxs_i2c_dma_setup_xfer(adap, msg, dma_buf, flags);
+		if (ret) {
+			i2c_put_dma_safe_msg_buf(dma_buf, msg, false);
 			return ret;
+		}
 
 		time_left = wait_for_completion_timeout(&i2c->cmd_complete,
 						msecs_to_jiffies(1000));
+		i2c_put_dma_safe_msg_buf(dma_buf, msg, true);
 		if (!time_left)
 			goto timeout;
 
@@ -687,8 +695,12 @@ static irqreturn_t mxs_i2c_isr(int this_irq, void *dev_id)
 }
 
 static const struct i2c_algorithm mxs_i2c_algo = {
-	.master_xfer = mxs_i2c_xfer,
+	.xfer = mxs_i2c_xfer,
 	.functionality = mxs_i2c_func,
+};
+
+static const struct i2c_adapter_quirks mxs_i2c_quirks = {
+	.flags = I2C_AQ_NO_ZERO_LEN,
 };
 
 static void mxs_i2c_derive_timing(struct mxs_i2c_dev *i2c, uint32_t speed)
@@ -738,7 +750,7 @@ static void mxs_i2c_derive_timing(struct mxs_i2c_dev *i2c, uint32_t speed)
 	 * This is compensated for by subtracting the respective constants
 	 * from the values written to the timing registers.
 	 */
-	if (speed > 100000) {
+	if (speed > I2C_MAX_STANDARD_MODE_FREQ) {
 		/* fast mode */
 		low_count = DIV_ROUND_CLOSEST(divider * 13, (13 + 6));
 		high_count = DIV_ROUND_CLOSEST(divider * 6, (13 + 6));
@@ -776,7 +788,7 @@ static int mxs_i2c_get_ofdata(struct mxs_i2c_dev *i2c)
 	ret = of_property_read_u32(node, "clock-frequency", &speed);
 	if (ret) {
 		dev_warn(dev, "No I2C speed selected, using 100kHz\n");
-		speed = 100000;
+		speed = I2C_MAX_STANDARD_MODE_FREQ;
 	}
 
 	mxs_i2c_derive_timing(i2c, speed);
@@ -784,45 +796,27 @@ static int mxs_i2c_get_ofdata(struct mxs_i2c_dev *i2c)
 	return 0;
 }
 
-static const struct platform_device_id mxs_i2c_devtype[] = {
-	{
-		.name = "imx23-i2c",
-		.driver_data = MXS_I2C_V1,
-	}, {
-		.name = "imx28-i2c",
-		.driver_data = MXS_I2C_V2,
-	}, { /* sentinel */ }
-};
-MODULE_DEVICE_TABLE(platform, mxs_i2c_devtype);
-
 static const struct of_device_id mxs_i2c_dt_ids[] = {
-	{ .compatible = "fsl,imx23-i2c", .data = &mxs_i2c_devtype[0], },
-	{ .compatible = "fsl,imx28-i2c", .data = &mxs_i2c_devtype[1], },
+	{ .compatible = "fsl,imx23-i2c", .data = (void *)MXS_I2C_V1, },
+	{ .compatible = "fsl,imx28-i2c", .data = (void *)MXS_I2C_V2, },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, mxs_i2c_dt_ids);
 
 static int mxs_i2c_probe(struct platform_device *pdev)
 {
-	const struct of_device_id *of_id =
-				of_match_device(mxs_i2c_dt_ids, &pdev->dev);
 	struct device *dev = &pdev->dev;
 	struct mxs_i2c_dev *i2c;
 	struct i2c_adapter *adap;
-	struct resource *res;
 	int err, irq;
 
 	i2c = devm_kzalloc(dev, sizeof(*i2c), GFP_KERNEL);
 	if (!i2c)
 		return -ENOMEM;
 
-	if (of_id) {
-		const struct platform_device_id *device_id = of_id->data;
-		i2c->dev_type = device_id->driver_data;
-	}
+	i2c->dev_type = (uintptr_t)of_device_get_match_data(&pdev->dev);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	i2c->regs = devm_ioremap_resource(&pdev->dev, res);
+	i2c->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(i2c->regs))
 		return PTR_ERR(i2c->regs);
 
@@ -845,10 +839,10 @@ static int mxs_i2c_probe(struct platform_device *pdev)
 	}
 
 	/* Setup the DMA */
-	i2c->dmach = dma_request_slave_channel(dev, "rx-tx");
-	if (!i2c->dmach) {
-		dev_err(dev, "Failed to request dma\n");
-		return -ENODEV;
+	i2c->dmach = dma_request_chan(dev, "rx-tx");
+	if (IS_ERR(i2c->dmach)) {
+		return dev_err_probe(dev, PTR_ERR(i2c->dmach),
+				     "Failed to request dma\n");
 	}
 
 	platform_set_drvdata(pdev, i2c);
@@ -859,9 +853,10 @@ static int mxs_i2c_probe(struct platform_device *pdev)
 		return err;
 
 	adap = &i2c->adapter;
-	strlcpy(adap->name, "MXS I2C adapter", sizeof(adap->name));
+	strscpy(adap->name, "MXS I2C adapter", sizeof(adap->name));
 	adap->owner = THIS_MODULE;
 	adap->algo = &mxs_i2c_algo;
+	adap->quirks = &mxs_i2c_quirks;
 	adap->dev.parent = dev;
 	adap->nr = pdev->id;
 	adap->dev.of_node = pdev->dev.of_node;
@@ -876,7 +871,7 @@ static int mxs_i2c_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int mxs_i2c_remove(struct platform_device *pdev)
+static void mxs_i2c_remove(struct platform_device *pdev)
 {
 	struct mxs_i2c_dev *i2c = platform_get_drvdata(pdev);
 
@@ -886,8 +881,6 @@ static int mxs_i2c_remove(struct platform_device *pdev)
 		dma_release_channel(i2c->dmach);
 
 	writel(MXS_I2C_CTRL0_SFTRST, i2c->regs + MXS_I2C_CTRL0_SET);
-
-	return 0;
 }
 
 static struct platform_driver mxs_i2c_driver = {

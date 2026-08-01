@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2005-2006 Micronas USA Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License (Version 2) as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -284,51 +276,31 @@ static int vidioc_querycap(struct file *file, void  *priv,
 {
 	struct go7007 *go = video_drvdata(file);
 
-	strlcpy(cap->driver, "go7007", sizeof(cap->driver));
-	strlcpy(cap->card, go->name, sizeof(cap->card));
-	strlcpy(cap->bus_info, go->bus_info, sizeof(cap->bus_info));
-
-	cap->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE |
-				V4L2_CAP_STREAMING;
-
-	if (go->board_info->num_aud_inputs)
-		cap->device_caps |= V4L2_CAP_AUDIO;
-	if (go->board_info->flags & GO7007_BOARD_HAS_TUNER)
-		cap->device_caps |= V4L2_CAP_TUNER;
-	cap->capabilities = cap->device_caps | V4L2_CAP_DEVICE_CAPS;
+	strscpy(cap->driver, "go7007", sizeof(cap->driver));
+	strscpy(cap->card, go->name, sizeof(cap->card));
+	strscpy(cap->bus_info, go->bus_info, sizeof(cap->bus_info));
 	return 0;
 }
 
 static int vidioc_enum_fmt_vid_cap(struct file *file, void  *priv,
 					struct v4l2_fmtdesc *fmt)
 {
-	char *desc = NULL;
-
 	switch (fmt->index) {
 	case 0:
 		fmt->pixelformat = V4L2_PIX_FMT_MJPEG;
-		desc = "Motion JPEG";
 		break;
 	case 1:
 		fmt->pixelformat = V4L2_PIX_FMT_MPEG1;
-		desc = "MPEG-1 ES";
 		break;
 	case 2:
 		fmt->pixelformat = V4L2_PIX_FMT_MPEG2;
-		desc = "MPEG-2 ES";
 		break;
 	case 3:
 		fmt->pixelformat = V4L2_PIX_FMT_MPEG4;
-		desc = "MPEG-4 ES";
 		break;
 	default:
 		return -EINVAL;
 	}
-	fmt->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	fmt->flags = V4L2_FMT_FLAG_COMPRESSED;
-
-	strncpy(fmt->description, desc, sizeof(fmt->description));
-
 	return 0;
 }
 
@@ -432,16 +404,13 @@ static int go7007_start_streaming(struct vb2_queue *q, unsigned int count)
 	go->next_seq = 0;
 	go->active_buf = NULL;
 	go->modet_event_status = 0;
-	q->streaming = 1;
 	if (go7007_start_encoder(go) < 0)
 		ret = -EIO;
 	else
 		ret = 0;
 	mutex_unlock(&go->hw_lock);
-	if (ret) {
-		q->streaming = 0;
+	if (ret)
 		return ret;
-	}
 	call_all(&go->v4l2_dev, video, s_stream, 1);
 	v4l2_ctrl_grab(go->mpeg_video_gop_size, true);
 	v4l2_ctrl_grab(go->mpeg_video_gop_closure, true);
@@ -458,7 +427,6 @@ static void go7007_stop_streaming(struct vb2_queue *q)
 	struct go7007 *go = vb2_get_drv_priv(q);
 	unsigned long flags;
 
-	q->streaming = 0;
 	go7007_stream_stop(go);
 	mutex_lock(&go->hw_lock);
 	go7007_reset_encoder(go);
@@ -484,8 +452,6 @@ static const struct vb2_ops go7007_video_qops = {
 	.buf_finish     = go7007_buf_finish,
 	.start_streaming = go7007_start_streaming,
 	.stop_streaming = go7007_stop_streaming,
-	.wait_prepare   = vb2_ops_wait_prepare,
-	.wait_finish    = vb2_ops_wait_finish,
 };
 
 static int vidioc_g_parm(struct file *filp, void *priv,
@@ -634,8 +600,8 @@ static int vidioc_enum_input(struct file *file, void *priv,
 	if (inp->index >= go->board_info->num_inputs)
 		return -EINVAL;
 
-	strncpy(inp->name, go->board_info->inputs[inp->index].name,
-			sizeof(inp->name));
+	strscpy(inp->name, go->board_info->inputs[inp->index].name,
+		sizeof(inp->name));
 
 	/* If this board has a tuner, it will be the first input */
 	if ((go->board_info->flags & GO7007_BOARD_HAS_TUNER) &&
@@ -673,7 +639,7 @@ static int vidioc_enumaudio(struct file *file, void *fh, struct v4l2_audio *a)
 
 	if (a->index >= go->board_info->num_aud_inputs)
 		return -EINVAL;
-	strlcpy(a->name, go->board_info->aud_inputs[a->index].name,
+	strscpy(a->name, go->board_info->aud_inputs[a->index].name,
 		sizeof(a->name));
 	a->capability = V4L2_AUDCAP_STEREO;
 	return 0;
@@ -684,7 +650,7 @@ static int vidioc_g_audio(struct file *file, void *fh, struct v4l2_audio *a)
 	struct go7007 *go = video_drvdata(file);
 
 	a->index = go->aud_input;
-	strlcpy(a->name, go->board_info->aud_inputs[go->aud_input].name,
+	strscpy(a->name, go->board_info->aud_inputs[go->aud_input].name,
 		sizeof(a->name));
 	a->capability = V4L2_AUDCAP_STEREO;
 	return 0;
@@ -742,7 +708,7 @@ static int vidioc_g_tuner(struct file *file, void *priv,
 	if (t->index != 0)
 		return -EINVAL;
 
-	strlcpy(t->name, "Tuner", sizeof(t->name));
+	strscpy(t->name, "Tuner", sizeof(t->name));
 	return call_all(&go->v4l2_dev, tuner, g_tuner, t);
 }
 
@@ -1122,6 +1088,12 @@ int go7007_v4l2_init(struct go7007 *go)
 	*vdev = go7007_template;
 	vdev->lock = &go->serialize_lock;
 	vdev->queue = &go->vidq;
+	vdev->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE |
+			    V4L2_CAP_STREAMING;
+	if (go->board_info->num_aud_inputs)
+		vdev->device_caps |= V4L2_CAP_AUDIO;
+	if (go->board_info->flags & GO7007_BOARD_HAS_TUNER)
+		vdev->device_caps |= V4L2_CAP_TUNER;
 	video_set_drvdata(vdev, go);
 	vdev->v4l2_dev = &go->v4l2_dev;
 	if (!v4l2_device_has_op(&go->v4l2_dev, 0, video, querystd))
@@ -1160,7 +1132,7 @@ int go7007_v4l2_init(struct go7007 *go)
 	go7007_s_input(go);
 	if (go->board_info->sensor_flags & GO7007_SENSOR_TV)
 		go7007_s_std(go);
-	rv = video_register_device(vdev, VFL_TYPE_GRABBER, -1);
+	rv = video_register_device(vdev, VFL_TYPE_VIDEO, -1);
 	if (rv < 0)
 		return rv;
 	dev_info(go->dev, "registered device %s [v4l2]\n",

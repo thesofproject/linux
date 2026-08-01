@@ -18,13 +18,14 @@
 // Added saa7115 support by Kevin Thayer <nufan_wfk at yahoo.com>
 // (2/17/2003)
 //
-// VBI support (2004) and cleanups (2005) by Hans Verkuil <hverkuil@xs4all.nl>
+// VBI support (2004) and cleanups (2005) by Hans Verkuil <hverkuil@kernel.org>
 //
 // Copyright (c) 2005-2006 Mauro Carvalho Chehab <mchehab@kernel.org>
 //	SAA7111, SAA7113 and SAA7118 support
 
 #include "saa711x_regs.h"
 
+#include <linux/bitops.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -59,10 +60,16 @@ enum saa711x_model {
 	SAA7118,
 };
 
+enum saa711x_pads {
+	SAA711X_PAD_IF_INPUT,
+	SAA711X_PAD_VID_OUT,
+	SAA711X_NUM_PADS
+};
+
 struct saa711x_state {
 	struct v4l2_subdev sd;
 #ifdef CONFIG_MEDIA_CONTROLLER
-	struct media_pad pads[DEMOD_NUM_PADS];
+	struct media_pad pads[SAA711X_NUM_PADS];
 #endif
 	struct v4l2_ctrl_handler hdl;
 
@@ -658,15 +665,6 @@ static const unsigned char saa7115_init_misc[] = {
 	0x00, 0x00
 };
 
-static int saa711x_odd_parity(u8 c)
-{
-	c ^= (c >> 4);
-	c ^= (c >> 2);
-	c ^= (c >> 1);
-
-	return c & 1;
-}
-
 static int saa711x_decode_vps(u8 *dst, u8 *p)
 {
 	static const u8 biphase_tbl[] = {
@@ -1123,7 +1121,7 @@ static void saa711x_set_lcr(struct v4l2_subdev *sd, struct v4l2_sliced_vbi_forma
 
 static int saa711x_g_sliced_fmt(struct v4l2_subdev *sd, struct v4l2_sliced_vbi_format *sliced)
 {
-	static u16 lcr2vbi[] = {
+	static const u16 lcr2vbi[] = {
 		0, V4L2_SLICED_TELETEXT_B, 0,	/* 1 */
 		0, V4L2_SLICED_CAPTION_525,	/* 4 */
 		V4L2_SLICED_WSS_625, 0,		/* 5 */
@@ -1161,7 +1159,7 @@ static int saa711x_s_sliced_fmt(struct v4l2_subdev *sd, struct v4l2_sliced_vbi_f
 }
 
 static int saa711x_set_fmt(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
+		struct v4l2_subdev_state *sd_state,
 		struct v4l2_subdev_format *format)
 {
 	struct v4l2_mbus_framefmt *fmt = &format->format;
@@ -1221,7 +1219,7 @@ static int saa711x_decode_vbi_line(struct v4l2_subdev *sd, struct v4l2_decode_vb
 		vbi->type = V4L2_SLICED_TELETEXT_B;
 		break;
 	case 4:
-		if (!saa711x_odd_parity(p[0]) || !saa711x_odd_parity(p[1]))
+		if (!parity8(p[0]) || !parity8(p[1]))
 			return 0;
 		vbi->type = V4L2_SLICED_CAPTION_525;
 		break;
@@ -1760,12 +1758,12 @@ static int saa711x_detect_chip(struct i2c_client *client,
 		 * exists. However, tests on a device labeled as:
 		 * "GM7113C 1145" returned "10" on all 16 chip
 		 * version (reg 0x00) reads. So, we need to also
-		 * accept at least verion 0. For now, let's just
+		 * accept at least version 0. For now, let's just
 		 * assume that a device that returns "0000" for
 		 * the lower nibble is a gm7113c.
 		 */
 
-		strlcpy(name, "gm7113c", CHIP_VER_SIZE);
+		strscpy(name, "gm7113c", CHIP_VER_SIZE);
 
 		if (!autodetect && strcmp(name, id->name))
 			return -EINVAL;
@@ -1779,7 +1777,7 @@ static int saa711x_detect_chip(struct i2c_client *client,
 
 	/* Check if it is a CJC7113 */
 	if (!memcmp(name, "1111111111111111", CHIP_VER_SIZE)) {
-		strlcpy(name, "cjc7113", CHIP_VER_SIZE);
+		strscpy(name, "cjc7113", CHIP_VER_SIZE);
 
 		if (!autodetect && strcmp(name, id->name))
 			return -EINVAL;
@@ -1798,9 +1796,9 @@ static int saa711x_detect_chip(struct i2c_client *client,
 	return -ENODEV;
 }
 
-static int saa711x_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int saa711x_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct saa711x_state *state;
 	struct v4l2_subdev *sd;
 	struct v4l2_ctrl_handler *hdl;
@@ -1825,7 +1823,7 @@ static int saa711x_probe(struct i2c_client *client,
 	if (ident < 0)
 		return ident;
 
-	strlcpy(client->name, name, sizeof(client->name));
+	strscpy(client->name, name, sizeof(client->name));
 
 	state = devm_kzalloc(&client->dev, sizeof(*state), GFP_KERNEL);
 	if (state == NULL)
@@ -1834,13 +1832,15 @@ static int saa711x_probe(struct i2c_client *client,
 	v4l2_i2c_subdev_init(sd, client, &saa711x_ops);
 
 #if defined(CONFIG_MEDIA_CONTROLLER)
-	state->pads[DEMOD_PAD_IF_INPUT].flags = MEDIA_PAD_FL_SINK;
-	state->pads[DEMOD_PAD_VID_OUT].flags = MEDIA_PAD_FL_SOURCE;
-	state->pads[DEMOD_PAD_VBI_OUT].flags = MEDIA_PAD_FL_SOURCE;
+	state->pads[SAA711X_PAD_IF_INPUT].flags = MEDIA_PAD_FL_SINK;
+	state->pads[SAA711X_PAD_IF_INPUT].sig_type = PAD_SIGNAL_ANALOG;
+	state->pads[SAA711X_PAD_VID_OUT].flags = MEDIA_PAD_FL_SOURCE;
+	state->pads[SAA711X_PAD_VID_OUT].sig_type = PAD_SIGNAL_DV;
 
 	sd->entity.function = MEDIA_ENT_F_ATV_DECODER;
 
-	ret = media_entity_pads_init(&sd->entity, DEMOD_NUM_PADS, state->pads);
+	ret = media_entity_pads_init(&sd->entity, SAA711X_NUM_PADS,
+				     state->pads);
 	if (ret < 0)
 		return ret;
 #endif
@@ -1919,23 +1919,22 @@ static int saa711x_probe(struct i2c_client *client,
 
 /* ----------------------------------------------------------------------- */
 
-static int saa711x_remove(struct i2c_client *client)
+static void saa711x_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 
 	v4l2_device_unregister_subdev(sd);
 	v4l2_ctrl_handler_free(sd->ctrl_handler);
-	return 0;
 }
 
 static const struct i2c_device_id saa711x_id[] = {
-	{ "saa7115_auto", 1 }, /* autodetect */
-	{ "saa7111", 0 },
-	{ "saa7113", 0 },
-	{ "saa7114", 0 },
-	{ "saa7115", 0 },
-	{ "saa7118", 0 },
-	{ "gm7113c", 0 },
+	{ .name = "saa7115_auto", .driver_data = 1 }, /* autodetect */
+	{ .name = "saa7111", .driver_data = 0 },
+	{ .name = "saa7113", .driver_data = 0 },
+	{ .name = "saa7114", .driver_data = 0 },
+	{ .name = "saa7115", .driver_data = 0 },
+	{ .name = "saa7118", .driver_data = 0 },
+	{ .name = "gm7113c", .driver_data = 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, saa711x_id);

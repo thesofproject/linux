@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * APEI Error Record Serialization Table debug support
  *
@@ -8,15 +9,6 @@
  *
  * Copyright 2010 Intel Corp.
  *   Author: Huang Ying <ying.huang@intel.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -68,9 +60,8 @@ static long erst_dbg_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case APEI_ERST_CLEAR_RECORD:
-		rc = copy_from_user(&record_id, (void __user *)arg,
-				    sizeof(record_id));
-		if (rc)
+		if (copy_from_user(&record_id, (void __user *)arg,
+				   sizeof(record_id)))
 			return -EFAULT;
 		return erst_clear(record_id);
 	case APEI_ERST_GET_RECORD_COUNT:
@@ -119,16 +110,16 @@ retry_next:
 		goto out;
 	}
 retry:
-	rc = len = erst_read(id, erst_dbg_buf, erst_dbg_buf_len);
+	rc = len = erst_read_record(id, erst_dbg_buf, erst_dbg_buf_len,
+			erst_dbg_buf_len, NULL);
 	/* The record may be cleared by others, try read next record */
 	if (rc == -ENOENT)
 		goto retry_next;
 	if (rc < 0)
 		goto out;
 	if (len > ERST_DBG_RECORD_LEN_MAX) {
-		pr_warning(ERST_DBG_PFX
-			   "Record (ID: 0x%llx) length is too long: %zd\n",
-			   id, len);
+		pr_warn(ERST_DBG_PFX
+			"Record (ID: 0x%llx) length is too long: %zd\n", id, len);
 		rc = -EIO;
 		goto out;
 	}
@@ -183,8 +174,7 @@ static ssize_t erst_dbg_write(struct file *filp, const char __user *ubuf,
 		erst_dbg_buf = p;
 		erst_dbg_buf_len = usize;
 	}
-	rc = copy_from_user(erst_dbg_buf, ubuf, usize);
-	if (rc) {
+	if (copy_from_user(erst_dbg_buf, ubuf, usize)) {
 		rc = -EFAULT;
 		goto out;
 	}
@@ -207,7 +197,6 @@ static const struct file_operations erst_dbg_ops = {
 	.read		= erst_dbg_read,
 	.write		= erst_dbg_write,
 	.unlocked_ioctl	= erst_dbg_ioctl,
-	.llseek		= no_llseek,
 };
 
 static struct miscdevice erst_dbg_dev = {

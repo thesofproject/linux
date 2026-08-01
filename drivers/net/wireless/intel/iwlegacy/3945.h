@@ -1,22 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /******************************************************************************
  *
  * Copyright(c) 2003 - 2011 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
  *
  * Contact Information:
  *  Intel Linux Wireless <ilw@linux.intel.com>
@@ -87,9 +72,6 @@ struct il3945_rs_sta {
 	u8 start_rate;
 	struct timer_list rate_scale_flush;
 	struct il3945_rate_scale_data win[RATE_COUNT_3945];
-#ifdef CONFIG_MAC80211_DEBUGFS
-	struct dentry *rs_sta_dbgfs_stats_table_file;
-#endif
 
 	/* used to be in sta_info */
 	int last_txrate_idx;
@@ -141,13 +123,15 @@ enum il3945_antenna {
 #define IEEE80211_FRAME_LEN             (IEEE80211_DATA_LEN + IEEE80211_HLEN)
 
 struct il3945_frame {
+	struct list_head list;
+
+	/* Must be last as it ends in a flexible-array member. */
 	union {
 		struct ieee80211_hdr frame;
 		struct il3945_tx_beacon_cmd beacon;
 		u8 raw[IEEE80211_FRAME_LEN];
 		u8 cmd[360];
 	} u;
-	struct list_head list;
 };
 
 #define SUP_RATE_11A_MAX_NUM_CHANNELS  8
@@ -175,8 +159,10 @@ struct il3945_ibss_seq {
 };
 
 #define IL_RX_HDR(x) ((struct il3945_rx_frame_hdr *)(\
-		       x->u.rx_frame.stats.payload + \
-		       x->u.rx_frame.stats.phy_count))
+		      container_of(&x->u.rx_frame.stats, \
+				   struct il3945_rx_frame_stats, \
+				   hdr)->payload + \
+		      x->u.rx_frame.stats.phy_count))
 #define IL_RX_END(x) ((struct il3945_rx_frame_end *)(\
 		       IL_RX_HDR(x)->payload + \
 		       le16_to_cpu(IL_RX_HDR(x)->len)))
@@ -189,7 +175,6 @@ struct il3945_ibss_seq {
  * for use by iwl-*.c
  *
  *****************************************************************************/
-int il3945_calc_db_from_ratio(int sig_ratio);
 void il3945_rx_replenish(void *data);
 void il3945_rx_queue_reset(struct il_priv *il, struct il_rx_queue *rxq);
 unsigned int il3945_fill_beacon_frame(struct il_priv *il,

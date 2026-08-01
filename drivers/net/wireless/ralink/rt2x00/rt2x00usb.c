@@ -1,20 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 	Copyright (C) 2010 Willow Garage <http://www.willowgarage.com>
 	Copyright (C) 2004 - 2010 Ivo van Doorn <IvDoorn@gmail.com>
 	<http://rt2x00.serialmonkey.com>
 
-	This program is free software; you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; either version 2 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 /*
@@ -30,6 +19,25 @@
 
 #include "rt2x00.h"
 #include "rt2x00usb.h"
+
+static bool rt2x00usb_check_usb_error(struct rt2x00_dev *rt2x00dev, int status)
+{
+	if (status == -ENODEV || status == -ENOENT)
+		return true;
+
+	if (!test_bit(DEVICE_STATE_STARTED, &rt2x00dev->flags))
+		return false;
+
+	if (status == -EPROTO || status == -ETIMEDOUT)
+		rt2x00dev->num_proto_errs++;
+	else
+		rt2x00dev->num_proto_errs = 0;
+
+	if (rt2x00dev->num_proto_errs > 3)
+		return true;
+
+	return false;
+}
 
 /*
  * Interfacing with the HW.
@@ -57,7 +65,7 @@ int rt2x00usb_vendor_request(struct rt2x00_dev *rt2x00dev,
 		if (status >= 0)
 			return 0;
 
-		if (status == -ENODEV || status == -ENOENT) {
+		if (rt2x00usb_check_usb_error(rt2x00dev, status)) {
 			/* Device has disappeared. */
 			clear_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags);
 			break;
@@ -109,12 +117,12 @@ int rt2x00usb_vendor_request_buff(struct rt2x00_dev *rt2x00dev,
 				  const u16 buffer_length)
 {
 	int status = 0;
-	unsigned char *tb;
+	u8 *tb;
 	u16 off, len, bsize;
 
 	mutex_lock(&rt2x00dev->csr_mutex);
 
-	tb  = (char *)buffer;
+	tb  = (u8 *)buffer;
 	off = offset;
 	len = buffer_length;
 	while (len && !status) {
@@ -188,7 +196,7 @@ void rt2x00usb_register_read_async(struct rt2x00_dev *rt2x00dev,
 	struct urb *urb;
 	struct rt2x00_async_read_data *rd;
 
-	rd = kmalloc(sizeof(*rd), GFP_ATOMIC);
+	rd = kmalloc_obj(*rd, GFP_ATOMIC);
 	if (!rd)
 		return;
 
@@ -207,7 +215,7 @@ void rt2x00usb_register_read_async(struct rt2x00_dev *rt2x00dev,
 	rd->cr.wLength = cpu_to_le16(sizeof(u32));
 
 	usb_fill_control_urb(urb, usb_dev, usb_rcvctrlpipe(usb_dev, 0),
-			     (unsigned char *)(&rd->cr), &rd->reg, sizeof(rd->reg),
+			     (u8 *)(&rd->cr), &rd->reg, sizeof(rd->reg),
 			     rt2x00usb_register_read_async_cb, rd);
 	usb_anchor_urb(urb, rt2x00dev->anchor);
 	if (usb_submit_urb(urb, GFP_ATOMIC) < 0) {
@@ -321,7 +329,7 @@ static bool rt2x00usb_kick_tx_entry(struct queue_entry *entry, void *data)
 
 	status = usb_submit_urb(entry_priv->urb, GFP_ATOMIC);
 	if (status) {
-		if (status == -ENODEV || status == -ENOENT)
+		if (rt2x00usb_check_usb_error(rt2x00dev, status))
 			clear_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags);
 		set_bit(ENTRY_DATA_IO_FAILED, &entry->flags);
 		rt2x00lib_dmadone(entry);
@@ -344,8 +352,7 @@ static void rt2x00usb_work_rxdone(struct work_struct *work)
 	while (!rt2x00queue_empty(rt2x00dev->rx)) {
 		entry = rt2x00queue_get_entry(rt2x00dev->rx, Q_INDEX_DONE);
 
-		if (test_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags) ||
-		    !test_bit(ENTRY_DATA_STATUS_PENDING, &entry->flags))
+		if (test_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags))
 			break;
 
 		/*
@@ -367,13 +374,8 @@ static void rt2x00usb_interrupt_rxdone(struct urb *urb)
 	struct queue_entry *entry = (struct queue_entry *)urb->context;
 	struct rt2x00_dev *rt2x00dev = entry->queue->rt2x00dev;
 
-	if (!test_and_clear_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags))
+	if (!test_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags))
 		return;
-
-	/*
-	 * Report the frame as DMA done
-	 */
-	rt2x00lib_dmadone(entry);
 
 	/*
 	 * Check if the received data is simply too small
@@ -384,8 +386,12 @@ static void rt2x00usb_interrupt_rxdone(struct urb *urb)
 		set_bit(ENTRY_DATA_IO_FAILED, &entry->flags);
 
 	/*
-	 * Schedule the delayed work for reading the RX status
-	 * from the device.
+	 * Report the frame as DMA done
+	 */
+	rt2x00lib_dmadone(entry);
+
+	/*
+	 * Schedule the delayed work for processing RX data
 	 */
 	queue_work(rt2x00dev->workqueue, &rt2x00dev->rxdone_work);
 }
@@ -397,8 +403,7 @@ static bool rt2x00usb_kick_rx_entry(struct queue_entry *entry, void *data)
 	struct queue_entry_priv_usb *entry_priv = entry->priv_data;
 	int status;
 
-	if (test_and_set_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags) ||
-	    test_bit(ENTRY_DATA_STATUS_PENDING, &entry->flags))
+	if (test_and_set_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags))
 		return false;
 
 	rt2x00lib_dmastart(entry);
@@ -410,7 +415,7 @@ static bool rt2x00usb_kick_rx_entry(struct queue_entry *entry, void *data)
 
 	status = usb_submit_urb(entry_priv->urb, GFP_ATOMIC);
 	if (status) {
-		if (status == -ENODEV || status == -ENOENT)
+		if (rt2x00usb_check_usb_error(rt2x00dev, status))
 			clear_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags);
 		set_bit(ENTRY_DATA_IO_FAILED, &entry->flags);
 		rt2x00lib_dmadone(entry);
@@ -520,7 +525,7 @@ EXPORT_SYMBOL_GPL(rt2x00usb_flush_queue);
 
 static void rt2x00usb_watchdog_tx_dma(struct data_queue *queue)
 {
-	rt2x00_warn(queue->rt2x00dev, "TX queue %d DMA timed out, invoke forced forced reset\n",
+	rt2x00_warn(queue->rt2x00dev, "TX queue %d DMA timed out, invoke forced reset\n",
 		    queue->qid);
 
 	rt2x00queue_stop_queue(queue);
@@ -581,10 +586,10 @@ static void rt2x00usb_assign_endpoint(struct data_queue *queue,
 
 	if (queue->qid == QID_RX) {
 		pipe = usb_rcvbulkpipe(usb_dev, queue->usb_endpoint);
-		queue->usb_maxpacket = usb_maxpacket(usb_dev, pipe, 0);
+		queue->usb_maxpacket = usb_maxpacket(usb_dev, pipe);
 	} else {
 		pipe = usb_sndbulkpipe(usb_dev, queue->usb_endpoint);
-		queue->usb_maxpacket = usb_maxpacket(usb_dev, pipe, 1);
+		queue->usb_maxpacket = usb_maxpacket(usb_dev, pipe);
 	}
 
 	if (!queue->usb_maxpacket)
@@ -797,14 +802,12 @@ int rt2x00usb_probe(struct usb_interface *usb_intf,
 	struct rt2x00_dev *rt2x00dev;
 	int retval;
 
-	usb_dev = usb_get_dev(usb_dev);
 	usb_reset_device(usb_dev);
 
-	hw = ieee80211_alloc_hw(sizeof(struct rt2x00_dev), ops->hw);
+	hw = ieee80211_alloc_hw(struct_size(rt2x00dev, anchor, 1), ops->hw);
 	if (!hw) {
 		rt2x00_probe_err("Failed to allocate hardware\n");
-		retval = -ENOMEM;
-		goto exit_put_device;
+		return -ENOMEM;
 	}
 
 	usb_set_intfdata(usb_intf, hw);
@@ -818,20 +821,11 @@ int rt2x00usb_probe(struct usb_interface *usb_intf,
 
 	INIT_WORK(&rt2x00dev->rxdone_work, rt2x00usb_work_rxdone);
 	INIT_WORK(&rt2x00dev->txdone_work, rt2x00usb_work_txdone);
-	hrtimer_init(&rt2x00dev->txstatus_timer, CLOCK_MONOTONIC,
-		     HRTIMER_MODE_REL);
 
 	retval = rt2x00usb_alloc_reg(rt2x00dev);
 	if (retval)
 		goto exit_free_device;
 
-	rt2x00dev->anchor = devm_kmalloc(&usb_dev->dev,
-					sizeof(struct usb_anchor),
-					GFP_KERNEL);
-	if (!rt2x00dev->anchor) {
-		retval = -ENOMEM;
-		goto exit_free_reg;
-	}
 	init_usb_anchor(rt2x00dev->anchor);
 
 	retval = rt2x00lib_probe_dev(rt2x00dev);
@@ -842,16 +836,10 @@ int rt2x00usb_probe(struct usb_interface *usb_intf,
 
 exit_free_anchor:
 	usb_kill_anchored_urbs(rt2x00dev->anchor);
-
-exit_free_reg:
 	rt2x00usb_free_reg(rt2x00dev);
 
 exit_free_device:
 	ieee80211_free_hw(hw);
-
-exit_put_device:
-	usb_put_dev(usb_dev);
-
 	usb_set_intfdata(usb_intf, NULL);
 
 	return retval;
@@ -870,11 +858,7 @@ void rt2x00usb_disconnect(struct usb_interface *usb_intf)
 	rt2x00usb_free_reg(rt2x00dev);
 	ieee80211_free_hw(hw);
 
-	/*
-	 * Free the USB device data.
-	 */
 	usb_set_intfdata(usb_intf, NULL);
-	usb_put_dev(interface_to_usbdev(usb_intf));
 }
 EXPORT_SYMBOL_GPL(rt2x00usb_disconnect);
 
@@ -884,7 +868,7 @@ int rt2x00usb_suspend(struct usb_interface *usb_intf, pm_message_t state)
 	struct ieee80211_hw *hw = usb_get_intfdata(usb_intf);
 	struct rt2x00_dev *rt2x00dev = hw->priv;
 
-	return rt2x00lib_suspend(rt2x00dev, state);
+	return rt2x00lib_suspend(rt2x00dev);
 }
 EXPORT_SYMBOL_GPL(rt2x00usb_suspend);
 

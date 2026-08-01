@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/arch/arm/mach-pxa/mfp-pxa2xx.c
  *
@@ -7,10 +8,6 @@
  *  functions, this is by concept samilar to the MFP configuration
  *  on PXA3xx,  what's more important, the low power pin state and
  *  wakeup detection are also supported by the same framework.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  */
 #include <linux/gpio.h>
 #include <linux/gpio-pxa.h>
@@ -19,9 +16,11 @@
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/syscore_ops.h>
+#include <linux/soc/pxa/cpu.h>
 
-#include <mach/pxa2xx-regs.h>
+#include "pxa2xx-regs.h"
 #include "mfp-pxa2xx.h"
+#include "mfp-pxa27x.h"
 
 #include "generic.h"
 
@@ -228,11 +227,7 @@ static void __init pxa25x_mfp_init(void)
 	int i;
 
 	/* running before pxa_gpio_probe() */
-#ifdef CONFIG_CPU_PXA26x
-	pxa_last_gpio = 89;
-#else
 	pxa_last_gpio = 84;
-#endif
 	for (i = 0; i <= pxa_last_gpio; i++)
 		gpio_desc[i].valid = 1;
 
@@ -351,7 +346,7 @@ static unsigned long saved_gpdr[4];
 static unsigned long saved_gplr[4];
 static unsigned long saved_pgsr[4];
 
-static int pxa2xx_mfp_suspend(void)
+static int pxa2xx_mfp_suspend(void *data)
 {
 	int i;
 
@@ -390,7 +385,7 @@ static int pxa2xx_mfp_suspend(void)
 	return 0;
 }
 
-static void pxa2xx_mfp_resume(void)
+static void pxa2xx_mfp_resume(void *data)
 {
 	int i;
 
@@ -409,9 +404,13 @@ static void pxa2xx_mfp_resume(void)
 #define pxa2xx_mfp_resume	NULL
 #endif
 
-struct syscore_ops pxa2xx_mfp_syscore_ops = {
+static const struct syscore_ops pxa2xx_mfp_syscore_ops = {
 	.suspend	= pxa2xx_mfp_suspend,
 	.resume		= pxa2xx_mfp_resume,
+};
+
+struct syscore pxa2xx_mfp_syscore = {
+	.ops = &pxa2xx_mfp_syscore_ops,
 };
 
 static int __init pxa2xx_mfp_init(void)

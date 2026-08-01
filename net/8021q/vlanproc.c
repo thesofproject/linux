@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /******************************************************************************
  * vlanproc.c	VLAN Module. /proc filesystem interface.
  *
@@ -9,10 +10,6 @@
  *
  * Copyright:	(c) 1998 Ben Greear
  *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  * ============================================================================
  * Jan 20, 1998        Ben Greear     Initial Version
  *****************************************************************************/
@@ -73,35 +70,6 @@ static const struct seq_operations vlan_seq_ops = {
 	.show = vlan_seq_show,
 };
 
-static int vlan_seq_open(struct inode *inode, struct file *file)
-{
-	return seq_open_net(inode, file, &vlan_seq_ops,
-			sizeof(struct seq_net_private));
-}
-
-static const struct file_operations vlan_fops = {
-	.open    = vlan_seq_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release_net,
-};
-
-/*
- *	/proc/net/vlan/<device> file and inode operations
- */
-
-static int vlandev_seq_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, vlandev_seq_show, PDE_DATA(inode));
-}
-
-static const struct file_operations vlandev_fops = {
-	.open    = vlandev_seq_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = single_release,
-};
-
 /*
  * Proc filesystem directory entries.
  */
@@ -148,8 +116,9 @@ int __net_init vlan_proc_init(struct net *net)
 	if (!vn->proc_vlan_dir)
 		goto err;
 
-	vn->proc_vlan_conf = proc_create(name_conf, S_IFREG | 0600,
-					 vn->proc_vlan_dir, &vlan_fops);
+	vn->proc_vlan_conf = proc_create_net(name_conf, S_IFREG | 0600,
+			vn->proc_vlan_dir, &vlan_seq_ops,
+			sizeof(struct seq_net_private));
 	if (!vn->proc_vlan_conf)
 		goto err;
 	return 0;
@@ -171,9 +140,8 @@ int vlan_proc_add_dev(struct net_device *vlandev)
 
 	if (!strcmp(vlandev->name, name_conf))
 		return -EINVAL;
-	vlan->dent =
-		proc_create_data(vlandev->name, S_IFREG | 0600,
-				 vn->proc_vlan_dir, &vlandev_fops, vlandev);
+	vlan->dent = proc_create_single_data(vlandev->name, S_IFREG | 0600,
+			vn->proc_vlan_dir, vlandev_seq_show, vlandev);
 	if (!vlan->dent)
 		return -ENOBUFS;
 	return 0;
@@ -195,48 +163,34 @@ void vlan_proc_rem_dev(struct net_device *vlandev)
  * The following few functions build the content of /proc/net/vlan/config
  */
 
-/* start read of /proc/net/vlan/config */
+static void *vlan_seq_from_index(struct seq_file *seq, loff_t *pos)
+{
+	unsigned long ifindex = *pos;
+	struct net_device *dev;
+
+	for_each_netdev_dump(seq_file_net(seq), dev, ifindex) {
+		if (!is_vlan_dev(dev))
+			continue;
+		*pos = dev->ifindex;
+		return dev;
+	}
+	return NULL;
+}
+
 static void *vlan_seq_start(struct seq_file *seq, loff_t *pos)
 	__acquires(rcu)
 {
-	struct net_device *dev;
-	struct net *net = seq_file_net(seq);
-	loff_t i = 1;
-
 	rcu_read_lock();
 	if (*pos == 0)
 		return SEQ_START_TOKEN;
 
-	for_each_netdev_rcu(net, dev) {
-		if (!is_vlan_dev(dev))
-			continue;
-
-		if (i++ == *pos)
-			return dev;
-	}
-
-	return  NULL;
+	return vlan_seq_from_index(seq, pos);
 }
 
 static void *vlan_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 {
-	struct net_device *dev;
-	struct net *net = seq_file_net(seq);
-
 	++*pos;
-
-	dev = v;
-	if (v == SEQ_START_TOKEN)
-		dev = net_device_entry(&net->dev_base_head);
-
-	for_each_netdev_continue_rcu(net, dev) {
-		if (!is_vlan_dev(dev))
-			continue;
-
-		return dev;
-	}
-
-	return NULL;
+	return vlan_seq_from_index(seq, pos);
 }
 
 static void vlan_seq_stop(struct seq_file *seq, void *v)
@@ -284,9 +238,9 @@ static int vlandev_seq_show(struct seq_file *seq, void *offset)
 
 	stats = dev_get_stats(vlandev, &temp);
 	seq_printf(seq,
-		   "%s  VID: %d	 REORDER_HDR: %i  dev->priv_flags: %hx\n",
+		   "%s  VID: %d	 REORDER_HDR: %i  dev->priv_flags: %x\n",
 		   vlandev->name, vlan->vlan_id,
-		   (int)(vlan->flags & 1), vlandev->priv_flags);
+		   (int)(vlan->flags & 1), (u32)vlandev->priv_flags);
 
 	seq_printf(seq, fmt64, "total frames received", stats->rx_packets);
 	seq_printf(seq, fmt64, "total bytes received", stats->rx_bytes);
@@ -308,15 +262,19 @@ static int vlandev_seq_show(struct seq_file *seq, void *offset)
 		   vlan->ingress_priority_map[7]);
 
 	seq_printf(seq, " EGRESS priority mappings: ");
+	rcu_read_lock();
 	for (i = 0; i < 16; i++) {
-		const struct vlan_priority_tci_mapping *mp
-			= vlan->egress_priority_map[i];
+		const struct vlan_priority_tci_mapping *mp =
+			rcu_dereference(vlan->egress_priority_map[i]);
 		while (mp) {
-			seq_printf(seq, "%u:%hu ",
-				   mp->priority, ((mp->vlan_qos >> 13) & 0x7));
-			mp = mp->next;
+			u16 vlan_qos = READ_ONCE(mp->vlan_qos);
+
+			seq_printf(seq, "%u:%d ",
+				   mp->priority, ((vlan_qos >> 13) & 0x7));
+			mp = rcu_dereference(mp->next);
 		}
 	}
+	rcu_read_unlock();
 	seq_puts(seq, "\n");
 
 	return 0;

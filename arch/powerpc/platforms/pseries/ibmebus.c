@@ -40,19 +40,23 @@
 #include <linux/export.h>
 #include <linux/console.h>
 #include <linux/kobject.h>
-#include <linux/dma-mapping.h>
+#include <linux/dma-map-ops.h>
 #include <linux/interrupt.h>
+#include <linux/irqdomain.h>
 #include <linux/of.h>
 #include <linux/slab.h>
 #include <linux/stat.h>
+#include <linux/sysfs.h>
 #include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include <asm/ibmebus.h>
+#include <asm/machdep.h>
 
 static struct device ibmebus_bus_device = { /* fake "parent" device */
 	.init_name = "ibmebus",
 };
 
-struct bus_type ibmebus_bus_type;
+const struct bus_type ibmebus_bus_type;
 
 /* These devices will automatically be added to the bus during init */
 static const struct of_device_id ibmebus_matches[] __initconst = {
@@ -83,17 +87,18 @@ static void ibmebus_free_coherent(struct device *dev,
 	kfree(vaddr);
 }
 
-static dma_addr_t ibmebus_map_page(struct device *dev,
-				   struct page *page,
-				   unsigned long offset,
+static dma_addr_t ibmebus_map_phys(struct device *dev, phys_addr_t phys,
 				   size_t size,
 				   enum dma_data_direction direction,
 				   unsigned long attrs)
 {
-	return (dma_addr_t)(page_address(page) + offset);
+	if (attrs & DMA_ATTR_MMIO)
+		return DMA_MAPPING_ERROR;
+
+	return (dma_addr_t)(phys_to_virt(phys));
 }
 
-static void ibmebus_unmap_page(struct device *dev,
+static void ibmebus_unmap_phys(struct device *dev,
 			       dma_addr_t dma_addr,
 			       size_t size,
 			       enum dma_data_direction direction,
@@ -143,17 +148,21 @@ static const struct dma_map_ops ibmebus_dma_ops = {
 	.unmap_sg           = ibmebus_unmap_sg,
 	.dma_supported      = ibmebus_dma_supported,
 	.get_required_mask  = ibmebus_dma_get_required_mask,
-	.map_page           = ibmebus_map_page,
-	.unmap_page         = ibmebus_unmap_page,
+	.map_phys           = ibmebus_map_phys,
+	.unmap_phys         = ibmebus_unmap_phys,
 };
 
-static int ibmebus_match_path(struct device *dev, void *data)
+static int ibmebus_match_path(struct device *dev, const void *data)
 {
 	struct device_node *dn = to_platform_device(dev)->dev.of_node;
-	return (of_find_node_by_path(data) == dn);
+	struct device_node *tn = of_find_node_by_path(data);
+
+	of_node_put(tn);
+
+	return (tn == dn);
 }
 
-static int ibmebus_match_node(struct device *dev, void *data)
+static int ibmebus_match_node(struct device *dev, const void *data)
 {
 	return to_platform_device(dev)->dev.of_node == data;
 }
@@ -261,8 +270,7 @@ static char *ibmebus_chomp(const char *in, size_t count)
 	return out;
 }
 
-static ssize_t ibmebus_store_probe(struct bus_type *bus,
-				   const char *buf, size_t count)
+static ssize_t probe_store(const struct bus_type *bus, const char *buf, size_t count)
 {
 	struct device_node *dn = NULL;
 	struct device *dev;
@@ -298,10 +306,9 @@ out:
 		return rc;
 	return count;
 }
-static BUS_ATTR(probe, 0200, NULL, ibmebus_store_probe);
+static BUS_ATTR_WO(probe);
 
-static ssize_t ibmebus_store_remove(struct bus_type *bus,
-				    const char *buf, size_t count)
+static ssize_t remove_store(const struct bus_type *bus, const char *buf, size_t count)
 {
 	struct device *dev;
 	char *path;
@@ -325,7 +332,7 @@ static ssize_t ibmebus_store_remove(struct bus_type *bus,
 		return -ENODEV;
 	}
 }
-static BUS_ATTR(remove, 0200, NULL, ibmebus_store_remove);
+static BUS_ATTR_WO(remove);
 
 static struct attribute *ibmbus_bus_attrs[] = {
 	&bus_attr_probe.attr,
@@ -334,7 +341,7 @@ static struct attribute *ibmbus_bus_attrs[] = {
 };
 ATTRIBUTE_GROUPS(ibmbus_bus);
 
-static int ibmebus_bus_bus_match(struct device *dev, struct device_driver *drv)
+static int ibmebus_bus_bus_match(struct device *dev, const struct device_driver *drv)
 {
 	const struct of_device_id *matches = drv->of_match_table;
 
@@ -356,24 +363,23 @@ static int ibmebus_bus_device_probe(struct device *dev)
 	if (!drv->probe)
 		return error;
 
-	of_dev_get(of_dev);
+	get_device(dev);
 
 	if (of_driver_match_device(dev, dev->driver))
 		error = drv->probe(of_dev);
 	if (error)
-		of_dev_put(of_dev);
+		put_device(dev);
 
 	return error;
 }
 
-static int ibmebus_bus_device_remove(struct device *dev)
+static void ibmebus_bus_device_remove(struct device *dev)
 {
 	struct platform_device *of_dev = to_platform_device(dev);
 	struct platform_driver *drv = to_platform_driver(dev->driver);
 
 	if (dev->driver && drv->remove)
 		drv->remove(of_dev);
-	return 0;
 }
 
 static void ibmebus_bus_device_shutdown(struct device *dev)
@@ -394,7 +400,7 @@ static ssize_t devspec_show(struct device *dev,
 	struct platform_device *ofdev;
 
 	ofdev = to_platform_device(dev);
-	return sprintf(buf, "%pOF\n", ofdev->dev.of_node);
+	return sysfs_emit(buf, "%pOF\n", ofdev->dev.of_node);
 }
 static DEVICE_ATTR_RO(devspec);
 
@@ -404,7 +410,7 @@ static ssize_t name_show(struct device *dev,
 	struct platform_device *ofdev;
 
 	ofdev = to_platform_device(dev);
-	return sprintf(buf, "%s\n", ofdev->dev.of_node->name);
+	return sysfs_emit(buf, "%pOFn\n", ofdev->dev.of_node);
 }
 static DEVICE_ATTR_RO(name);
 
@@ -423,9 +429,14 @@ static struct attribute *ibmebus_bus_device_attrs[] = {
 };
 ATTRIBUTE_GROUPS(ibmebus_bus_device);
 
-struct bus_type ibmebus_bus_type = {
+static int ibmebus_bus_modalias(const struct device *dev, struct kobj_uevent_env *env)
+{
+	return of_device_uevent_modalias(dev, env);
+}
+
+const struct bus_type ibmebus_bus_type = {
 	.name      = "ibmebus",
-	.uevent    = of_device_uevent_modalias,
+	.uevent    = ibmebus_bus_modalias,
 	.bus_groups = ibmbus_bus_groups,
 	.match     = ibmebus_bus_bus_match,
 	.probe     = ibmebus_bus_device_probe,
@@ -452,6 +463,7 @@ static int __init ibmebus_bus_init(void)
 	if (err) {
 		printk(KERN_WARNING "%s: device_register returned %i\n",
 		       __func__, err);
+		put_device(&ibmebus_bus_device);
 		bus_unregister(&ibmebus_bus_type);
 
 		return err;
@@ -466,4 +478,4 @@ static int __init ibmebus_bus_init(void)
 
 	return 0;
 }
-postcore_initcall(ibmebus_bus_init);
+machine_postcore_initcall(pseries, ibmebus_bus_init);

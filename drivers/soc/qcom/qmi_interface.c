@@ -12,6 +12,7 @@
 #include <linux/string.h>
 #include <net/sock.h>
 #include <linux/workqueue.h>
+#include <trace/events/sock.h>
 #include <linux/soc/qcom/qmi.h>
 
 static struct socket *qmi_sock_create(struct qmi_handle *qmi,
@@ -43,7 +44,7 @@ static void qmi_recv_new_server(struct qmi_handle *qmi,
 	if (!node && !port)
 		return;
 
-	svc = kzalloc(sizeof(*svc), GFP_KERNEL);
+	svc = kzalloc_obj(*svc);
 	if (!svc)
 		return;
 
@@ -96,7 +97,7 @@ static void qmi_recv_del_server(struct qmi_handle *qmi,
  * @node:	id of the dying node
  *
  * Signals the client that all previously registered services on this node are
- * now gone and then calls the bye callback to allow the client client further
+ * now gone and then calls the bye callback to allow the client further
  * cleaning up resources associated with this remote.
  */
 static void qmi_recv_bye(struct qmi_handle *qmi,
@@ -194,8 +195,8 @@ static void qmi_send_new_lookup(struct qmi_handle *qmi, struct qmi_service *svc)
  * qmi_add_lookup() - register a new lookup with the name service
  * @qmi:	qmi handle
  * @service:	service id of the request
- * @instance:	instance id of the request
  * @version:	version number of the request
+ * @instance:	instance id of the request
  *
  * Registering a lookup query with the name server will cause the name server
  * to send NEW_SERVER and DEL_SERVER control messages to this socket as
@@ -208,7 +209,7 @@ int qmi_add_lookup(struct qmi_handle *qmi, unsigned int service,
 {
 	struct qmi_service *svc;
 
-	svc = kzalloc(sizeof(*svc), GFP_KERNEL);
+	svc = kzalloc_obj(*svc);
 	if (!svc)
 		return -ENOMEM;
 
@@ -222,7 +223,7 @@ int qmi_add_lookup(struct qmi_handle *qmi, unsigned int service,
 
 	return 0;
 }
-EXPORT_SYMBOL(qmi_add_lookup);
+EXPORT_SYMBOL_GPL(qmi_add_lookup);
 
 static void qmi_send_new_server(struct qmi_handle *qmi, struct qmi_service *svc)
 {
@@ -272,7 +273,7 @@ int qmi_add_server(struct qmi_handle *qmi, unsigned int service,
 {
 	struct qmi_service *svc;
 
-	svc = kzalloc(sizeof(*svc), GFP_KERNEL);
+	svc = kzalloc_obj(*svc);
 	if (!svc)
 		return -ENOMEM;
 
@@ -286,7 +287,7 @@ int qmi_add_server(struct qmi_handle *qmi, unsigned int service,
 
 	return 0;
 }
-EXPORT_SYMBOL(qmi_add_server);
+EXPORT_SYMBOL_GPL(qmi_add_server);
 
 /**
  * qmi_txn_init() - allocate transaction id within the given QMI handle
@@ -305,7 +306,7 @@ EXPORT_SYMBOL(qmi_add_server);
  * Return: Transaction id on success, negative errno on failure.
  */
 int qmi_txn_init(struct qmi_handle *qmi, struct qmi_txn *txn,
-		 struct qmi_elem_info *ei, void *c_struct)
+		 const struct qmi_elem_info *ei, void *c_struct)
 {
 	int ret;
 
@@ -318,7 +319,7 @@ int qmi_txn_init(struct qmi_handle *qmi, struct qmi_txn *txn,
 	txn->dest = c_struct;
 
 	mutex_lock(&qmi->txn_lock);
-	ret = idr_alloc_cyclic(&qmi->txns, txn, 0, INT_MAX, GFP_KERNEL);
+	ret = idr_alloc_cyclic(&qmi->txns, txn, 0, U16_MAX, GFP_KERNEL);
 	if (ret < 0)
 		pr_err("failed to allocate transaction id\n");
 
@@ -327,7 +328,7 @@ int qmi_txn_init(struct qmi_handle *qmi, struct qmi_txn *txn,
 
 	return ret;
 }
-EXPORT_SYMBOL(qmi_txn_init);
+EXPORT_SYMBOL_GPL(qmi_txn_init);
 
 /**
  * qmi_txn_wait() - wait for a response on a transaction
@@ -345,8 +346,7 @@ int qmi_txn_wait(struct qmi_txn *txn, unsigned long timeout)
 	struct qmi_handle *qmi = txn->qmi;
 	int ret;
 
-	ret = wait_for_completion_interruptible_timeout(&txn->completion,
-							timeout);
+	ret = wait_for_completion_timeout(&txn->completion, timeout);
 
 	mutex_lock(&qmi->txn_lock);
 	mutex_lock(&txn->lock);
@@ -354,14 +354,12 @@ int qmi_txn_wait(struct qmi_txn *txn, unsigned long timeout)
 	mutex_unlock(&txn->lock);
 	mutex_unlock(&qmi->txn_lock);
 
-	if (ret < 0)
-		return ret;
-	else if (ret == 0)
+	if (ret == 0)
 		return -ETIMEDOUT;
 	else
 		return txn->result;
 }
-EXPORT_SYMBOL(qmi_txn_wait);
+EXPORT_SYMBOL_GPL(qmi_txn_wait);
 
 /**
  * qmi_txn_cancel() - cancel an ongoing transaction
@@ -377,7 +375,7 @@ void qmi_txn_cancel(struct qmi_txn *txn)
 	mutex_unlock(&txn->lock);
 	mutex_unlock(&qmi->txn_lock);
 }
-EXPORT_SYMBOL(qmi_txn_cancel);
+EXPORT_SYMBOL_GPL(qmi_txn_cancel);
 
 /**
  * qmi_invoke_handler() - find and invoke a handler for a message
@@ -402,7 +400,7 @@ static void qmi_invoke_handler(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
 
 	for (handler = qmi->handlers; handler->fn; handler++) {
 		if (handler->type == hdr->type &&
-		    handler->msg_id == hdr->msg_id)
+		    handler->msg_id == le16_to_cpu(hdr->msg_id))
 			break;
 	}
 
@@ -490,7 +488,7 @@ static void qmi_handle_message(struct qmi_handle *qmi,
 	/* If this is a response, find the matching transaction handle */
 	if (hdr->type == QMI_RESPONSE) {
 		mutex_lock(&qmi->txn_lock);
-		txn = idr_find(&qmi->txns, hdr->txn_id);
+		txn = idr_find(&qmi->txns, le16_to_cpu(hdr->txn_id));
 
 		/* Ignore unexpected responses */
 		if (!txn) {
@@ -516,7 +514,7 @@ static void qmi_handle_message(struct qmi_handle *qmi,
 	} else {
 		/* Create a txn based on the txn_id of the incoming message */
 		memset(&tmp_txn, 0, sizeof(tmp_txn));
-		tmp_txn.id = hdr->txn_id;
+		tmp_txn.id = le16_to_cpu(hdr->txn_id);
 
 		qmi_invoke_handler(qmi, sq, &tmp_txn, buf, len);
 	}
@@ -571,6 +569,8 @@ static void qmi_data_ready_work(struct work_struct *work)
 static void qmi_data_ready(struct sock *sk)
 {
 	struct qmi_handle *qmi = sk->sk_user_data;
+
+	trace_sk_data_ready(sk);
 
 	/*
 	 * This will be NULL if we receive data while being in
@@ -639,17 +639,18 @@ int qmi_handle_init(struct qmi_handle *qmi, size_t recv_buf_size,
 	if (ops)
 		qmi->ops = *ops;
 
+	/* Make room for the header */
+	recv_buf_size += sizeof(struct qmi_header);
+	/* Must also be sufficient to hold a control packet */
 	if (recv_buf_size < sizeof(struct qrtr_ctrl_pkt))
 		recv_buf_size = sizeof(struct qrtr_ctrl_pkt);
-	else
-		recv_buf_size += sizeof(struct qmi_header);
 
 	qmi->recv_buf_size = recv_buf_size;
 	qmi->recv_buf = kzalloc(recv_buf_size, GFP_KERNEL);
 	if (!qmi->recv_buf)
 		return -ENOMEM;
 
-	qmi->wq = alloc_workqueue("qmi_msg_handler", WQ_UNBOUND, 1);
+	qmi->wq = alloc_ordered_workqueue("qmi_msg_handler", 0);
 	if (!qmi->wq) {
 		ret = -ENOMEM;
 		goto err_free_recv_buf;
@@ -657,8 +658,12 @@ int qmi_handle_init(struct qmi_handle *qmi, size_t recv_buf_size,
 
 	qmi->sock = qmi_sock_create(qmi, &qmi->sq);
 	if (IS_ERR(qmi->sock)) {
-		pr_err("failed to create QMI socket\n");
-		ret = PTR_ERR(qmi->sock);
+		if (PTR_ERR(qmi->sock) == -EAFNOSUPPORT) {
+			ret = -EPROBE_DEFER;
+		} else {
+			pr_err("failed to create QMI socket\n");
+			ret = PTR_ERR(qmi->sock);
+		}
 		goto err_destroy_wq;
 	}
 
@@ -671,7 +676,7 @@ err_free_recv_buf:
 
 	return ret;
 }
-EXPORT_SYMBOL(qmi_handle_init);
+EXPORT_SYMBOL_GPL(qmi_handle_init);
 
 /**
  * qmi_handle_release() - release the QMI client handle
@@ -712,7 +717,7 @@ void qmi_handle_release(struct qmi_handle *qmi)
 		kfree(svc);
 	}
 }
-EXPORT_SYMBOL(qmi_handle_release);
+EXPORT_SYMBOL_GPL(qmi_handle_release);
 
 /**
  * qmi_send_message() - send a QMI message
@@ -734,7 +739,8 @@ EXPORT_SYMBOL(qmi_handle_release);
 static ssize_t qmi_send_message(struct qmi_handle *qmi,
 				struct sockaddr_qrtr *sq, struct qmi_txn *txn,
 				int type, int msg_id, size_t len,
-				struct qmi_elem_info *ei, const void *c_struct)
+				const struct qmi_elem_info *ei,
+				const void *c_struct)
 {
 	struct msghdr msghdr = {};
 	struct kvec iv;
@@ -785,12 +791,12 @@ static ssize_t qmi_send_message(struct qmi_handle *qmi,
  */
 ssize_t qmi_send_request(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
 			 struct qmi_txn *txn, int msg_id, size_t len,
-			 struct qmi_elem_info *ei, const void *c_struct)
+			 const struct qmi_elem_info *ei, const void *c_struct)
 {
 	return qmi_send_message(qmi, sq, txn, QMI_REQUEST, msg_id, len, ei,
 				c_struct);
 }
-EXPORT_SYMBOL(qmi_send_request);
+EXPORT_SYMBOL_GPL(qmi_send_request);
 
 /**
  * qmi_send_response() - send a response QMI message
@@ -806,12 +812,12 @@ EXPORT_SYMBOL(qmi_send_request);
  */
 ssize_t qmi_send_response(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
 			  struct qmi_txn *txn, int msg_id, size_t len,
-			  struct qmi_elem_info *ei, const void *c_struct)
+			  const struct qmi_elem_info *ei, const void *c_struct)
 {
 	return qmi_send_message(qmi, sq, txn, QMI_RESPONSE, msg_id, len, ei,
 				c_struct);
 }
-EXPORT_SYMBOL(qmi_send_response);
+EXPORT_SYMBOL_GPL(qmi_send_response);
 
 /**
  * qmi_send_indication() - send an indication QMI message
@@ -825,7 +831,8 @@ EXPORT_SYMBOL(qmi_send_response);
  * Return: 0 on success, negative errno on failure.
  */
 ssize_t qmi_send_indication(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
-			    int msg_id, size_t len, struct qmi_elem_info *ei,
+			    int msg_id, size_t len,
+			    const struct qmi_elem_info *ei,
 			    const void *c_struct)
 {
 	struct qmi_txn txn;
@@ -844,4 +851,4 @@ ssize_t qmi_send_indication(struct qmi_handle *qmi, struct sockaddr_qrtr *sq,
 
 	return rval;
 }
-EXPORT_SYMBOL(qmi_send_indication);
+EXPORT_SYMBOL_GPL(qmi_send_indication);

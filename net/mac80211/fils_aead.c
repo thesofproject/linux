@@ -1,19 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * FILS AEAD for (Re)Association Request/Response frames
  * Copyright 2016, Qualcomm Atheros, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
-#include <crypto/aes.h>
-#include <crypto/algapi.h>
-#include <crypto/hash.h>
+#include <crypto/aes-cbc-macs.h>
 #include <crypto/skcipher.h>
+#include <crypto/utils.h>
 
 #include "ieee80211_i.h"
-#include "aes_cmac.h"
 #include "fils_aead.h"
 
 static void gf_mulx(u8 *pad)
@@ -25,31 +20,35 @@ static void gf_mulx(u8 *pad)
 	put_unaligned_be64((b << 1) ^ ((a >> 63) ? 0x87 : 0), pad + 8);
 }
 
-static int aes_s2v(struct crypto_shash *tfm,
+static int aes_s2v(const u8 *in_key, size_t key_len,
 		   size_t num_elem, const u8 *addr[], size_t len[], u8 *v)
 {
 	u8 d[AES_BLOCK_SIZE], tmp[AES_BLOCK_SIZE] = {};
-	SHASH_DESC_ON_STACK(desc, tfm);
+	struct aes_cmac_key key;
+	struct aes_cmac_ctx ctx;
 	size_t i;
+	int res;
 
-	desc->tfm = tfm;
+	res = aes_cmac_preparekey(&key, in_key, key_len);
+	if (res)
+		return res;
 
 	/* D = AES-CMAC(K, <zero>) */
-	crypto_shash_digest(desc, tmp, AES_BLOCK_SIZE, d);
+	aes_cmac(&key, tmp, AES_BLOCK_SIZE, d);
 
 	for (i = 0; i < num_elem - 1; i++) {
 		/* D = dbl(D) xor AES_CMAC(K, Si) */
 		gf_mulx(d); /* dbl */
-		crypto_shash_digest(desc, addr[i], len[i], tmp);
+		aes_cmac(&key, addr[i], len[i], tmp);
 		crypto_xor(d, tmp, AES_BLOCK_SIZE);
 	}
 
-	crypto_shash_init(desc);
+	aes_cmac_init(&ctx, &key);
 
 	if (len[i] >= AES_BLOCK_SIZE) {
 		/* len(Sn) >= 128 */
 		/* T = Sn xorend D */
-		crypto_shash_update(desc, addr[i], len[i] - AES_BLOCK_SIZE);
+		aes_cmac_update(&ctx, addr[i], len[i] - AES_BLOCK_SIZE);
 		crypto_xor(d, addr[i] + len[i] - AES_BLOCK_SIZE,
 			   AES_BLOCK_SIZE);
 	} else {
@@ -60,8 +59,10 @@ static int aes_s2v(struct crypto_shash *tfm,
 		d[len[i]] ^= 0x80;
 	}
 	/* V = AES-CMAC(K, T) */
-	crypto_shash_finup(desc, d, AES_BLOCK_SIZE, v);
+	aes_cmac_update(&ctx, d, AES_BLOCK_SIZE);
+	aes_cmac_final(&ctx, v);
 
+	memzero_explicit(&key, sizeof(key));
 	return 0;
 }
 
@@ -72,7 +73,6 @@ static int aes_siv_encrypt(const u8 *key, size_t key_len,
 			   size_t len[], u8 *out)
 {
 	u8 v[AES_BLOCK_SIZE];
-	struct crypto_shash *tfm;
 	struct crypto_skcipher *tfm2;
 	struct skcipher_request *req;
 	int res;
@@ -86,15 +86,7 @@ static int aes_siv_encrypt(const u8 *key, size_t key_len,
 	num_elem++;
 
 	/* S2V */
-
-	tfm = crypto_alloc_shash("cmac(aes)", 0, 0);
-	if (IS_ERR(tfm))
-		return PTR_ERR(tfm);
-	/* K1 for S2V */
-	res = crypto_shash_setkey(tfm, key, key_len);
-	if (!res)
-		res = aes_s2v(tfm, num_elem, addr, len, v);
-	crypto_free_shash(tfm);
+	res = aes_s2v(key /* K1 */, key_len, num_elem, addr, len, v);
 	if (res)
 		return res;
 
@@ -149,7 +141,6 @@ static int aes_siv_decrypt(const u8 *key, size_t key_len,
 			   size_t num_elem, const u8 *addr[], size_t len[],
 			   u8 *out)
 {
-	struct crypto_shash *tfm;
 	struct crypto_skcipher *tfm2;
 	struct skcipher_request *req;
 	struct scatterlist src[1], dst[1];
@@ -201,15 +192,7 @@ static int aes_siv_decrypt(const u8 *key, size_t key_len,
 		return res;
 
 	/* S2V */
-
-	tfm = crypto_alloc_shash("cmac(aes)", 0, 0);
-	if (IS_ERR(tfm))
-		return PTR_ERR(tfm);
-	/* K1 for S2V */
-	res = crypto_shash_setkey(tfm, key, key_len);
-	if (!res)
-		res = aes_s2v(tfm, num_elem, addr, len, check);
-	crypto_free_shash(tfm);
+	res = aes_s2v(key /* K1 */, key_len, num_elem, addr, len, check);
 	if (res)
 		return res;
 	if (memcmp(check, frame_iv, AES_BLOCK_SIZE) != 0)
@@ -222,7 +205,8 @@ int fils_encrypt_assoc_req(struct sk_buff *skb,
 {
 	struct ieee80211_mgmt *mgmt = (void *)skb->data;
 	u8 *capab, *ies, *encr;
-	const u8 *addr[5 + 1], *session;
+	const u8 *addr[5 + 1];
+	const struct element *session;
 	size_t len[5 + 1];
 	size_t crypt_len;
 
@@ -234,12 +218,12 @@ int fils_encrypt_assoc_req(struct sk_buff *skb,
 		ies = mgmt->u.assoc_req.variable;
 	}
 
-	session = cfg80211_find_ext_ie(WLAN_EID_EXT_FILS_SESSION,
-				       ies, skb->data + skb->len - ies);
-	if (!session || session[1] != 1 + 8)
+	session = cfg80211_find_ext_elem(WLAN_EID_EXT_FILS_SESSION,
+					 ies, skb->data + skb->len - ies);
+	if (!session || session->datalen != 1 + 8)
 		return -EINVAL;
 	/* encrypt after FILS Session element */
-	encr = (u8 *)session + 2 + 1 + 8;
+	encr = (u8 *)session->data + 1 + 8;
 
 	/* AES-SIV AAD vectors */
 
@@ -273,7 +257,8 @@ int fils_decrypt_assoc_resp(struct ieee80211_sub_if_data *sdata,
 {
 	struct ieee80211_mgmt *mgmt = (void *)frame;
 	u8 *capab, *ies, *encr;
-	const u8 *addr[5 + 1], *session;
+	const u8 *addr[5 + 1];
+	const struct element *session;
 	size_t len[5 + 1];
 	int res;
 	size_t crypt_len;
@@ -283,16 +268,16 @@ int fils_decrypt_assoc_resp(struct ieee80211_sub_if_data *sdata,
 
 	capab = (u8 *)&mgmt->u.assoc_resp.capab_info;
 	ies = mgmt->u.assoc_resp.variable;
-	session = cfg80211_find_ext_ie(WLAN_EID_EXT_FILS_SESSION,
-				       ies, frame + *frame_len - ies);
-	if (!session || session[1] != 1 + 8) {
+	session = cfg80211_find_ext_elem(WLAN_EID_EXT_FILS_SESSION,
+					 ies, frame + *frame_len - ies);
+	if (!session || session->datalen != 1 + 8) {
 		mlme_dbg(sdata,
 			 "No (valid) FILS Session element in (Re)Association Response frame from %pM",
 			 mgmt->sa);
 		return -EINVAL;
 	}
 	/* decrypt after FILS Session element */
-	encr = (u8 *)session + 2 + 1 + 8;
+	encr = (u8 *)session->data + 1 + 8;
 
 	/* AES-SIV AAD vectors */
 

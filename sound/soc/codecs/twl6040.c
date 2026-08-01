@@ -1,22 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ALSA SoC TWL6040 codec driver
  *
  * Author:	 Misael Lopez Cruz <x0052729@ti.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #include <linux/module.h>
@@ -148,7 +134,7 @@ static bool twl6040_can_write_to_chip(struct snd_soc_component *component,
 	case TWL6040_REG_HFRCTL:
 		return priv->dl2_unmuted;
 	default:
-		return 1;
+		return true;
 	}
 }
 
@@ -337,7 +323,7 @@ static irqreturn_t twl6040_audio_handler(int irq, void *data)
 static int twl6040_soc_dapm_put_vibra_enum(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_dapm_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_soc_dapm_kcontrol_to_component(kcontrol);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	unsigned int val;
 
@@ -486,7 +472,7 @@ static SOC_ENUM_SINGLE_EXT_DECL(twl6040_power_mode_enum,
 static int twl6040_headset_power_get_enum(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct twl6040_data *priv = snd_soc_component_get_drvdata(component);
 
 	ucontrol->value.enumerated.item[0] = priv->hs_power_mode;
@@ -497,7 +483,7 @@ static int twl6040_headset_power_get_enum(struct snd_kcontrol *kcontrol,
 static int twl6040_headset_power_put_enum(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct twl6040_data *priv = snd_soc_component_get_drvdata(component);
 	int high_perf = ucontrol->value.enumerated.item[0];
 	int ret = 0;
@@ -514,7 +500,7 @@ static int twl6040_headset_power_put_enum(struct snd_kcontrol *kcontrol,
 static int twl6040_pll_get_enum(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct twl6040_data *priv = snd_soc_component_get_drvdata(component);
 
 	ucontrol->value.enumerated.item[0] = priv->pll_power_mode;
@@ -525,7 +511,7 @@ static int twl6040_pll_get_enum(struct snd_kcontrol *kcontrol,
 static int twl6040_pll_put_enum(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct twl6040_data *priv = snd_soc_component_get_drvdata(component);
 
 	priv->pll_power_mode = ucontrol->value.enumerated.item[0];
@@ -535,7 +521,7 @@ static int twl6040_pll_put_enum(struct snd_kcontrol *kcontrol,
 
 int twl6040_get_dl1_gain(struct snd_soc_component *component)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 
 	if (snd_soc_dapm_get_pin_status(dapm, "EP"))
 		return -1; /* -1dB */
@@ -1011,7 +997,7 @@ static void twl6040_mute_path(struct snd_soc_component *component, enum twl6040_
 	}
 }
 
-static int twl6040_digital_mute(struct snd_soc_dai *dai, int mute)
+static int twl6040_mute_stream(struct snd_soc_dai *dai, int mute, int direction)
 {
 	switch (dai->id) {
 	case TWL6040_DAI_LEGACY:
@@ -1034,7 +1020,8 @@ static const struct snd_soc_dai_ops twl6040_dai_ops = {
 	.hw_params	= twl6040_hw_params,
 	.prepare	= twl6040_prepare,
 	.set_sysclk	= twl6040_set_dai_sysclk,
-	.digital_mute	= twl6040_digital_mute,
+	.mute_stream	= twl6040_mute_stream,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver twl6040_dai[] = {
@@ -1110,6 +1097,7 @@ static struct snd_soc_dai_driver twl6040_dai[] = {
 static int twl6040_probe(struct snd_soc_component *component)
 {
 	struct twl6040_data *priv;
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	struct platform_device *pdev = to_platform_device(component->dev);
 	int ret = 0;
 
@@ -1122,10 +1110,8 @@ static int twl6040_probe(struct snd_soc_component *component)
 	priv->component = component;
 
 	priv->plug_irq = platform_get_irq(pdev, 0);
-	if (priv->plug_irq < 0) {
-		dev_err(component->dev, "invalid irq: %d\n", priv->plug_irq);
+	if (priv->plug_irq < 0)
 		return priv->plug_irq;
-	}
 
 	INIT_DELAYED_WORK(&priv->hs_jack.work, twl6040_accessory_work);
 
@@ -1140,7 +1126,7 @@ static int twl6040_probe(struct snd_soc_component *component)
 		return ret;
 	}
 
-	snd_soc_component_force_bias_level(component, SND_SOC_BIAS_STANDBY);
+	snd_soc_dapm_force_bias_level(dapm, SND_SOC_BIAS_STANDBY);
 	twl6040_init_chip(component);
 
 	return 0;
@@ -1168,7 +1154,6 @@ static const struct snd_soc_component_driver soc_component_dev_twl6040 = {
 	.suspend_bias_off	= 1,
 	.idle_bias_on		= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static int twl6040_codec_probe(struct platform_device *pdev)

@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2011-2012 Synopsys (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * vineetg : May 2011
  *  -Adapted (from .26 to .35)
  *  -original contribution by Tim.yao@amlogic.com
- *
  */
 
 #include <linux/types.h>
@@ -16,6 +12,7 @@
 #include <linux/ptrace.h>
 #include <linux/uaccess.h>
 #include <asm/disasm.h>
+#include "unaligned.h"
 
 #ifdef CONFIG_CPU_BIG_ENDIAN
 #define BE		1
@@ -203,7 +200,6 @@ int misaligned_fixup(unsigned long address, struct pt_regs *regs,
 		     struct callee_regs *cregs)
 {
 	struct disasm_state state;
-	char buf[TASK_COMM_LEN];
 
 	/* handle user mode only and only if enabled by sysadmin */
 	if (!user_mode(regs) || !unaligned_enabled)
@@ -215,11 +211,11 @@ int misaligned_fixup(unsigned long address, struct pt_regs *regs,
 			     " performance significantly\n. To enable further"
 			     " logging of such instances, please \n"
 			     " echo 0 > /proc/sys/kernel/ignore-unaligned-usertrap\n",
-			     get_task_comm(buf, current), task_pid_nr(current));
+			     current->comm, task_pid_nr(current));
 	} else {
 		/* Add rate limiting if it gets down to it */
 		pr_warn("%s(%d): unaligned access to/from 0x%lx by PC: 0x%lx\n",
-			get_task_comm(buf, current), task_pid_nr(current),
+			current->comm, task_pid_nr(current),
 			address, regs->ret);
 
 	}
@@ -241,7 +237,7 @@ int misaligned_fixup(unsigned long address, struct pt_regs *regs,
 	if (state.fault)
 		goto fault;
 
-	/* clear any remanants of delay slot */
+	/* clear any remnants of delay slot */
 	if (delay_mode(regs)) {
 		regs->ret = regs->bta & ~1U;
 		regs->status32 &= ~STATUS_DE_MASK;

@@ -1,21 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 	Copyright (C) 2010 Willow Garage <http://www.willowgarage.com>
 	Copyright (C) 2004 - 2010 Ivo van Doorn <IvDoorn@gmail.com>
 	Copyright (C) 2004 - 2009 Gertjan van Wingerde <gwingerde@gmail.com>
 	<http://rt2x00.serialmonkey.com>
 
-	This program is free software; you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; either version 2 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 /*
@@ -56,7 +45,7 @@ struct sk_buff *rt2x00queue_alloc_rxskb(struct queue_entry *entry, gfp_t gfp)
 
 	/*
 	 * For IV/EIV/ICV assembly we must make sure there is
-	 * at least 8 bytes bytes available in headroom for IV/EIV
+	 * at least 8 bytes available in headroom for IV/EIV
 	 * and 8 bytes for ICV data as tailroon.
 	 */
 	if (rt2x00_has_cap_hw_crypto(rt2x00dev)) {
@@ -113,6 +102,7 @@ int rt2x00queue_map_txskb(struct queue_entry *entry)
 		return -ENOMEM;
 
 	skbdesc->flags |= SKBDESC_DMA_MAPPED_TX;
+	rt2x00lib_dmadone(entry);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(rt2x00queue_map_txskb);
@@ -200,15 +190,18 @@ static void rt2x00queue_create_tx_descriptor_seq(struct rt2x00_dev *rt2x00dev,
 	if (!rt2x00_has_cap_flag(rt2x00dev, REQUIRE_SW_SEQNO)) {
 		/*
 		 * rt2800 has a H/W (or F/W) bug, device incorrectly increase
-		 * seqno on retransmited data (non-QOS) frames. To workaround
-		 * the problem let's generate seqno in software if QOS is
-		 * disabled.
+		 * seqno on retransmitted data (non-QOS) and management frames.
+		 * To workaround the problem let's generate seqno in software.
+		 * Except for beacons which are transmitted periodically by H/W
+		 * hence hardware has to assign seqno for them.
 		 */
-		if (test_bit(CONFIG_QOS_DISABLED, &rt2x00dev->flags))
-			__clear_bit(ENTRY_TXD_GENERATE_SEQ, &txdesc->flags);
-		else
+	    	if (ieee80211_is_beacon(hdr->frame_control)) {
+			__set_bit(ENTRY_TXD_GENERATE_SEQ, &txdesc->flags);
 			/* H/W will generate sequence number */
 			return;
+		}
+
+		__clear_bit(ENTRY_TXD_GENERATE_SEQ, &txdesc->flags);
 	}
 
 	/*
@@ -310,7 +303,7 @@ static void rt2x00queue_create_tx_descriptor_ht(struct rt2x00_dev *rt2x00dev,
 	if (sta) {
 		sta_priv = sta_to_rt2x00_sta(sta);
 		txdesc->u.ht.wcid = sta_priv->wcid;
-		density = sta->ht_cap.ampdu_density;
+		density = sta->deflink.ht_cap.ampdu_density;
 	}
 
 	/*
@@ -325,7 +318,7 @@ static void rt2x00queue_create_tx_descriptor_ht(struct rt2x00_dev *rt2x00dev,
 		 * when using more then one tx stream (>MCS7).
 		 */
 		if (sta && txdesc->u.ht.mcs > 7 &&
-		    sta->smps_mode == IEEE80211_SMPS_DYNAMIC)
+		    sta->deflink.smps_mode == IEEE80211_SMPS_DYNAMIC)
 			__set_bit(ENTRY_TXD_HT_MIMO_PS, &txdesc->flags);
 	} else {
 		txdesc->u.ht.mcs = rt2x00_get_rate_mcs(hwrate->mcs);
@@ -372,16 +365,15 @@ static void rt2x00queue_create_tx_descriptor_ht(struct rt2x00_dev *rt2x00dev,
 
 	/*
 	 * Determine IFS values
-	 * - Use TXOP_BACKOFF for probe and management frames except beacons
+	 * - Use TXOP_BACKOFF for management frames except beacons
 	 * - Use TXOP_SIFS for fragment bursts
 	 * - Use TXOP_HTTXOP for everything else
 	 *
 	 * Note: rt2800 devices won't use CTS protection (if used)
 	 * for frames not transmitted with TXOP_HTTXOP
 	 */
-	if ((ieee80211_is_mgmt(hdr->frame_control) &&
-	     !ieee80211_is_beacon(hdr->frame_control)) ||
-	    (tx_info->flags & IEEE80211_TX_CTL_RATE_CTRL_PROBE))
+	if (ieee80211_is_mgmt(hdr->frame_control) &&
+	    !ieee80211_is_beacon(hdr->frame_control))
 		txdesc->u.ht.txop = TXOP_BACKOFF;
 	else if (!(tx_info->flags & IEEE80211_TX_CTL_FIRST_FRAGMENT))
 		txdesc->u.ht.txop = TXOP_SIFS;
@@ -424,9 +416,6 @@ static void rt2x00queue_create_tx_descriptor(struct rt2x00_dev *rt2x00dev,
 			__set_bit(ENTRY_TXD_RTS_FRAME, &txdesc->flags);
 		else
 			__set_bit(ENTRY_TXD_CTS_FRAME, &txdesc->flags);
-		if (tx_info->control.rts_cts_rate_idx >= 0)
-			rate =
-			    ieee80211_get_rts_cts_rate(rt2x00dev->hw, tx_info);
 	}
 
 	/*
@@ -454,8 +443,9 @@ static void rt2x00queue_create_tx_descriptor(struct rt2x00_dev *rt2x00dev,
 	 * Beacons and probe responses require the tsf timestamp
 	 * to be inserted into the frame.
 	 */
-	if (ieee80211_is_beacon(hdr->frame_control) ||
-	    ieee80211_is_probe_resp(hdr->frame_control))
+	if ((ieee80211_is_beacon(hdr->frame_control) ||
+	     ieee80211_is_probe_resp(hdr->frame_control)) &&
+	    !(tx_info->flags & IEEE80211_TX_CTL_INJECTED))
 		__set_bit(ENTRY_TXD_REQ_TIMESTAMP, &txdesc->flags);
 
 	if ((tx_info->flags & IEEE80211_TX_CTL_FIRST_FRAGMENT) &&
@@ -574,7 +564,7 @@ static void rt2x00queue_bar_check(struct queue_entry *entry)
 	if (likely(!ieee80211_is_back_req(bar->frame_control)))
 		return;
 
-	bar_entry = kmalloc(sizeof(*bar_entry), GFP_ATOMIC);
+	bar_entry = kmalloc_obj(*bar_entry, GFP_ATOMIC);
 
 	/*
 	 * If the alloc fails we still send the BAR out but just don't track
@@ -671,7 +661,7 @@ int rt2x00queue_write_tx_frame(struct data_queue *queue, struct sk_buff *skb,
 	spin_lock(&queue->tx_lock);
 
 	if (unlikely(rt2x00queue_full(queue))) {
-		rt2x00_err(queue->rt2x00dev, "Dropping frame due to full tx queue %d\n",
+		rt2x00_dbg(queue->rt2x00dev, "Dropping frame due to full tx queue %d\n",
 			   queue->qid);
 		ret = -ENOBUFS;
 		goto out;
@@ -765,7 +755,7 @@ int rt2x00queue_update_beacon(struct rt2x00_dev *rt2x00dev,
 	 */
 	rt2x00queue_free_skb(intf->beacon);
 
-	intf->beacon->skb = ieee80211_beacon_get(rt2x00dev->hw, vif);
+	intf->beacon->skb = ieee80211_beacon_get(rt2x00dev->hw, vif, 0);
 	if (!intf->beacon->skb)
 		return -ENOMEM;
 
@@ -949,6 +939,7 @@ void rt2x00queue_unpause_queue(struct data_queue *queue)
 		 * receive frames.
 		 */
 		queue->rt2x00dev->ops->lib->kick_queue(queue);
+		break;
 	default:
 		break;
 	}
@@ -1000,6 +991,8 @@ void rt2x00queue_flush_queue(struct data_queue *queue, bool drop)
 		(queue->qid == QID_AC_BE) ||
 		(queue->qid == QID_AC_BK);
 
+	if (rt2x00queue_empty(queue))
+		return;
 
 	/*
 	 * If we are not supposed to drop any pending
@@ -1251,7 +1244,7 @@ int rt2x00queue_allocate(struct rt2x00_dev *rt2x00dev)
 	 */
 	rt2x00dev->data_queues = 2 + rt2x00dev->ops->tx_queues + req_atim;
 
-	queue = kcalloc(rt2x00dev->data_queues, sizeof(*queue), GFP_KERNEL);
+	queue = kzalloc_objs(*queue, rt2x00dev->data_queues);
 	if (!queue)
 		return -ENOMEM;
 

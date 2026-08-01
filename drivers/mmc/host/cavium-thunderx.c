@@ -14,6 +14,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include <linux/pci.h>
 #include "cavium.h"
 
@@ -71,13 +72,15 @@ static int thunder_mmc_probe(struct pci_dev *pdev,
 	if (ret)
 		return ret;
 
-	ret = pci_request_regions(pdev, KBUILD_MODNAME);
+	ret = pcim_request_all_regions(pdev, KBUILD_MODNAME);
 	if (ret)
 		return ret;
 
 	host->base = pcim_iomap(pdev, 0, pci_resource_len(pdev, 0));
-	if (!host->base)
-		return -EINVAL;
+	if (!host->base) {
+		ret = -EINVAL;
+		goto error;
+	}
 
 	/* On ThunderX these are identical */
 	host->dma_base = host->base;
@@ -86,12 +89,14 @@ static int thunder_mmc_probe(struct pci_dev *pdev,
 	host->reg_off_dma = 0x160;
 
 	host->clk = devm_clk_get(dev, NULL);
-	if (IS_ERR(host->clk))
-		return PTR_ERR(host->clk);
+	if (IS_ERR(host->clk)) {
+		ret = PTR_ERR(host->clk);
+		goto error;
+	}
 
 	ret = clk_prepare_enable(host->clk);
 	if (ret)
-		return ret;
+		goto error;
 	host->sys_freq = clk_get_rate(host->clk);
 
 	spin_lock_init(&host->irq_handler_lock);
@@ -138,8 +143,10 @@ static int thunder_mmc_probe(struct pci_dev *pdev,
 				continue;
 
 			ret = cvm_mmc_of_slot_probe(&host->slot_pdev[i]->dev, host);
-			if (ret)
+			if (ret) {
+				of_node_put(child_node);
 				goto error;
+			}
 		}
 		i++;
 	}
@@ -181,6 +188,7 @@ static const struct pci_device_id thunder_mmc_id_table[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_CAVIUM, 0xa010) },
 	{ 0, }  /* end of table */
 };
+MODULE_DEVICE_TABLE(pci, thunder_mmc_id_table);
 
 static struct pci_driver thunder_mmc_driver = {
 	.name = KBUILD_MODNAME,
@@ -194,4 +202,3 @@ module_pci_driver(thunder_mmc_driver);
 MODULE_AUTHOR("Cavium Inc.");
 MODULE_DESCRIPTION("Cavium ThunderX eMMC Driver");
 MODULE_LICENSE("GPL");
-MODULE_DEVICE_TABLE(pci, thunder_mmc_id_table);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  RouterBoard 500 specific prom routines
  *
@@ -6,22 +7,6 @@
  *  Copyright (C) 2007, Gabor Juhos <juhosg@openwrt.org>
  *			Felix Fietkau <nbd@openwrt.org>
  *			Florian Fainelli <florian@openwrt.org>
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2
- *  of the License, or (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the
- *  Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- *  Boston, MA  02110-1301, USA.
- *
  */
 
 #include <linux/init.h>
@@ -29,9 +14,8 @@
 #include <linux/export.h>
 #include <linux/string.h>
 #include <linux/console.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/ioport.h>
-#include <linux/blkdev.h>
 
 #include <asm/bootinfo.h>
 #include <asm/mach-rc32434/ddr.h>
@@ -49,11 +33,6 @@ static struct resource ddr_reg[] = {
 	}
 };
 
-void __init prom_free_prom_memory(void)
-{
-	/* No prom memory to free */
-}
-
 static inline int match_tag(char *arg, const char *tag)
 {
 	return strncmp(arg, tag, strlen(tag)) == 0;
@@ -67,13 +46,14 @@ static inline unsigned long tag2ul(char *arg, const char *tag)
 	return simple_strtoul(num, 0, 10);
 }
 
-void __init prom_setup_cmdline(void)
+static void __init prom_setup_cmdline(void)
 {
 	static char cmd_line[COMMAND_LINE_SIZE] __initdata;
 	char *cp, *board;
 	int prom_argc;
 	char **prom_argv;
 	int i;
+	size_t len;
 
 	prom_argc = fw_arg0;
 	prom_argv = (char **) fw_arg1;
@@ -103,20 +83,20 @@ void __init prom_setup_cmdline(void)
 				mips_machtype = MACH_MIKROTIK_RB532;
 		}
 
-		strcpy(cp, prom_argv[i]);
-		cp += strlen(prom_argv[i]);
+		len = strlen(prom_argv[i]);
+		memcpy(cp, prom_argv[i], len + 1);
+		cp += len;
 	}
 	*(cp++) = ' ';
 
-	i = strlen(arcs_cmdline);
-	if (i > 0) {
+	len = strlen(arcs_cmdline);
+	if (len > 0) {
 		*(cp++) = ' ';
-		strcpy(cp, arcs_cmdline);
-		cp += strlen(arcs_cmdline);
+		memcpy(cp, arcs_cmdline, len + 1);
+		cp += len;
 	}
 	cmd_line[COMMAND_LINE_SIZE - 1] = '\0';
-
-	strcpy(arcs_cmdline, cmd_line);
+	strscpy(arcs_cmdline, cmd_line);
 }
 
 void __init prom_init(void)
@@ -125,7 +105,7 @@ void __init prom_init(void)
 	phys_addr_t memsize;
 	phys_addr_t ddrbase;
 
-	ddr = ioremap_nocache(ddr_reg[0].start,
+	ddr = ioremap(ddr_reg[0].start,
 			ddr_reg[0].end - ddr_reg[0].start);
 
 	if (!ddr) {
@@ -141,5 +121,5 @@ void __init prom_init(void)
 
 	/* give all RAM to boot allocator,
 	 * except for the first 0x400 and the last 0x200 bytes */
-	add_memory_region(ddrbase + 0x400, memsize - 0x600, BOOT_MEM_RAM);
+	memblock_add(ddrbase + 0x400, memsize - 0x600);
 }

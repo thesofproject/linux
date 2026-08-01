@@ -2,11 +2,22 @@
 SELinux
 =======
 
+Information about the SELinux kernel subsystem can be found at the
+following links:
+
+	https://git.kernel.org/pub/scm/linux/kernel/git/pcmoore/selinux.git/tree/README.md
+
+	https://github.com/selinuxproject/selinux-kernel/wiki
+
+Information about the SELinux userspace can be found at:
+
+	https://github.com/SELinuxProject/selinux/wiki
+
 If you want to use SELinux, chances are you will want
 to use the distro-provided policies, or install the
 latest reference policy release from
 
-	http://oss.tresys.com/projects/refpolicy
+	https://github.com/SELinuxProject/refpolicy
 
 However, if you want to install a dummy policy for
 testing, you can do using ``mdp`` provided under

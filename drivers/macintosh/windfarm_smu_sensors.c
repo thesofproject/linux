@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Windfarm PowerMac thermal control. SMU based sensors
  *
  * (c) Copyright 2005 Benjamin Herrenschmidt, IBM Corp.
  *                    <benh@kernel.crashing.org>
- *
- * Released under the term of the GNU GPL v2.
  */
 
 #include <linux/types.h>
@@ -15,7 +14,8 @@
 #include <linux/init.h>
 #include <linux/wait.h>
 #include <linux/completion.h>
-#include <asm/prom.h>
+#include <linux/of.h>
+
 #include <asm/machdep.h>
 #include <asm/io.h>
 #include <asm/sections.h>
@@ -197,15 +197,14 @@ static const struct wf_sensor_ops smu_slotspow_ops = {
 static struct smu_ad_sensor *smu_ads_create(struct device_node *node)
 {
 	struct smu_ad_sensor *ads;
-	const char *c, *l;
+	const char *l;
 	const u32 *v;
 
-	ads = kmalloc(sizeof(struct smu_ad_sensor), GFP_KERNEL);
+	ads = kmalloc_obj(struct smu_ad_sensor);
 	if (ads == NULL)
 		return NULL;
-	c = of_get_property(node, "device_type", NULL);
 	l = of_get_property(node, "location", NULL);
-	if (c == NULL || l == NULL)
+	if (l == NULL)
 		goto fail;
 
 	/* We currently pick the sensors based on the OF name and location
@@ -215,7 +214,7 @@ static struct smu_ad_sensor *smu_ads_create(struct device_node *node)
 	 * the names and locations consistents so I'll stick with the names
 	 * and locations for now.
 	 */
-	if (!strcmp(c, "temp-sensor") &&
+	if (of_node_is_type(node, "temp-sensor") &&
 	    !strcmp(l, "CPU T-Diode")) {
 		ads->sens.ops = &smu_cputemp_ops;
 		ads->sens.name = "cpu-temp";
@@ -224,7 +223,7 @@ static struct smu_ad_sensor *smu_ads_create(struct device_node *node)
 			    SMU_SDB_CPUDIODE_ID);
 			goto fail;
 		}
-	} else if (!strcmp(c, "current-sensor") &&
+	} else if (of_node_is_type(node, "current-sensor") &&
 		   !strcmp(l, "CPU Current")) {
 		ads->sens.ops = &smu_cpuamp_ops;
 		ads->sens.name = "cpu-current";
@@ -233,7 +232,7 @@ static struct smu_ad_sensor *smu_ads_create(struct device_node *node)
 			    SMU_SDB_CPUVCP_ID);
 			goto fail;
 		}
-	} else if (!strcmp(c, "voltage-sensor") &&
+	} else if (of_node_is_type(node, "voltage-sensor") &&
 		   !strcmp(l, "CPU Voltage")) {
 		ads->sens.ops = &smu_cpuvolt_ops;
 		ads->sens.name = "cpu-voltage";
@@ -242,7 +241,7 @@ static struct smu_ad_sensor *smu_ads_create(struct device_node *node)
 			    SMU_SDB_CPUVCP_ID);
 			goto fail;
 		}
-	} else if (!strcmp(c, "power-sensor") &&
+	} else if (of_node_is_type(node, "power-sensor") &&
 		   !strcmp(l, "Slots Power")) {
 		ads->sens.ops = &smu_slotspow_ops;
 		ads->sens.name = "slots-power";
@@ -275,8 +274,8 @@ struct smu_cpu_power_sensor {
 	struct list_head	link;
 	struct wf_sensor	*volts;
 	struct wf_sensor	*amps;
-	int			fake_volts : 1;
-	int			quadratic : 1;
+	unsigned int		fake_volts : 1;
+	unsigned int		quadratic : 1;
 	struct wf_sensor	sens;
 };
 #define to_smu_cpu_power(c) container_of(c, struct smu_cpu_power_sensor, sens)
@@ -339,7 +338,7 @@ smu_cpu_power_create(struct wf_sensor *volts, struct wf_sensor *amps)
 {
 	struct smu_cpu_power_sensor *pow;
 
-	pow = kmalloc(sizeof(struct smu_cpu_power_sensor), GFP_KERNEL);
+	pow = kmalloc_obj(struct smu_cpu_power_sensor);
 	if (pow == NULL)
 		return NULL;
 	pow->sens.ops = &smu_cpu_power_ops;
@@ -423,9 +422,8 @@ static int __init smu_sensors_init(void)
 		return -ENODEV;
 
 	/* Look for sensors subdir */
-	for (sensors = NULL;
-	     (sensors = of_get_next_child(smu, sensors)) != NULL;)
-		if (!strcmp(sensors->name, "sensors"))
+	for_each_child_of_node(smu, sensors)
+		if (of_node_name_eq(sensors, "sensors"))
 			break;
 
 	of_node_put(smu);

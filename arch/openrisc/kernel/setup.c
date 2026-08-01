@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * OpenRISC setup.c
  *
@@ -8,11 +9,6 @@
  * Modifications for the OpenRISC architecture:
  * Copyright (C) 2003 Matjaz Breskvar <phoenix@bsemi.com>
  * Copyright (C) 2010-2011 Jonas Bonn <jonas@southpole.se>
- *
- *      This program is free software; you can redistribute it and/or
- *      modify it under the terms of the GNU General Public License
- *      as published by the Free Software Foundation; either version
- *      2 of the License, or (at your option) any later version.
  *
  * This file handles the architecture-dependent parts of initialization
  */
@@ -30,18 +26,15 @@
 #include <linux/delay.h>
 #include <linux/console.h>
 #include <linux/init.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/seq_file.h>
 #include <linux/serial.h>
 #include <linux/initrd.h>
 #include <linux/of_fdt.h>
 #include <linux/of.h>
-#include <linux/memblock.h>
 #include <linux/device.h>
 
 #include <asm/sections.h>
-#include <asm/segment.h>
-#include <asm/pgtable.h>
 #include <asm/types.h>
 #include <asm/setup.h>
 #include <asm/io.h>
@@ -55,17 +48,12 @@ static void __init setup_memory(void)
 	unsigned long ram_start_pfn;
 	unsigned long ram_end_pfn;
 	phys_addr_t memory_start, memory_end;
-	struct memblock_region *region;
 
 	memory_end = memory_start = 0;
 
 	/* Find main memory where is the kernel, we assume its the only one */
-	for_each_memblock(memory, region) {
-		memory_start = region->base;
-		memory_end = region->base + region->size;
-		printk(KERN_INFO "%s: Memory: 0x%x-0x%x\n", __func__,
-		       memory_start, memory_end);
-	}
+	memory_start = memblock_start_of_DRAM();
+	memory_end = memblock_end_of_DRAM();
 
 	if (!memory_end) {
 		panic("No memory!");
@@ -86,6 +74,16 @@ static void __init setup_memory(void)
 	 * RAM usable.
 	 */
 	memblock_reserve(__pa(_stext), _end - _stext);
+
+#ifdef CONFIG_BLK_DEV_INITRD
+	/* Then reserve the initrd, if any */
+	if (initrd_start && (initrd_end > initrd_start)) {
+		unsigned long aligned_start = ALIGN_DOWN(initrd_start, PAGE_SIZE);
+		unsigned long aligned_end = ALIGN(initrd_end, PAGE_SIZE);
+
+		memblock_reserve(__pa(aligned_start), aligned_end - aligned_start);
+	}
+#endif /* CONFIG_BLK_DEV_INITRD */
 
 	early_init_fdt_reserve_self();
 	early_init_fdt_scan_reserved_mem();
@@ -115,21 +113,6 @@ static void print_cpuinfo(void)
 		return;
 	}
 
-	if (upr & SPR_UPR_DCP)
-		printk(KERN_INFO
-		       "-- dcache: %4d bytes total, %2d bytes/line, %d way(s)\n",
-		       cpuinfo->dcache_size, cpuinfo->dcache_block_size,
-		       cpuinfo->dcache_ways);
-	else
-		printk(KERN_INFO "-- dcache disabled\n");
-	if (upr & SPR_UPR_ICP)
-		printk(KERN_INFO
-		       "-- icache: %4d bytes total, %2d bytes/line, %d way(s)\n",
-		       cpuinfo->icache_size, cpuinfo->icache_block_size,
-		       cpuinfo->icache_ways);
-	else
-		printk(KERN_INFO "-- icache disabled\n");
-
 	if (upr & SPR_UPR_DMP)
 		printk(KERN_INFO "-- dmmu: %4d entries, %lu way(s)\n",
 		       1 << ((mfspr(SPR_DMMUCFGR) & SPR_DMMUCFGR_NTS) >> 2),
@@ -154,47 +137,15 @@ static void print_cpuinfo(void)
 		printk(KERN_INFO "-- custom unit(s)\n");
 }
 
-static struct device_node *setup_find_cpu_node(int cpu)
-{
-	u32 hwid;
-	struct device_node *cpun;
-	struct device_node *cpus = of_find_node_by_path("/cpus");
-
-	for_each_available_child_of_node(cpus, cpun) {
-		if (of_property_read_u32(cpun, "reg", &hwid))
-			continue;
-		if (hwid == cpu)
-			return cpun;
-	}
-
-	return NULL;
-}
-
 void __init setup_cpuinfo(void)
 {
 	struct device_node *cpu;
-	unsigned long iccfgr, dccfgr;
-	unsigned long cache_set_size;
 	int cpu_id = smp_processor_id();
 	struct cpuinfo_or1k *cpuinfo = &cpuinfo_or1k[cpu_id];
 
-	cpu = setup_find_cpu_node(cpu_id);
+	cpu = of_get_cpu_node(cpu_id, NULL);
 	if (!cpu)
 		panic("Couldn't find CPU%d in device tree...\n", cpu_id);
-
-	iccfgr = mfspr(SPR_ICCFGR);
-	cpuinfo->icache_ways = 1 << (iccfgr & SPR_ICCFGR_NCW);
-	cache_set_size = 1 << ((iccfgr & SPR_ICCFGR_NCS) >> 3);
-	cpuinfo->icache_block_size = 16 << ((iccfgr & SPR_ICCFGR_CBS) >> 7);
-	cpuinfo->icache_size =
-	    cache_set_size * cpuinfo->icache_ways * cpuinfo->icache_block_size;
-
-	dccfgr = mfspr(SPR_DCCFGR);
-	cpuinfo->dcache_ways = 1 << (dccfgr & SPR_DCCFGR_NCW);
-	cache_set_size = 1 << ((dccfgr & SPR_DCCFGR_NCS) >> 3);
-	cpuinfo->dcache_block_size = 16 << ((dccfgr & SPR_DCCFGR_CBS) >> 7);
-	cpuinfo->dcache_size =
-	    cache_set_size * cpuinfo->dcache_ways * cpuinfo->dcache_block_size;
 
 	if (of_property_read_u32(cpu, "clock-frequency",
 				 &cpuinfo->clock_frequency)) {
@@ -212,7 +163,8 @@ void __init setup_cpuinfo(void)
 }
 
 /**
- * or32_early_setup
+ * or1k_early_setup
+ * @fdt: pointer to the start of the device tree in memory or NULL
  *
  * Handles the pointer to the device tree that this kernel is to use
  * for establishing the available platform devices.
@@ -220,7 +172,7 @@ void __init setup_cpuinfo(void)
  * Falls back on built-in device tree in case null pointer is passed.
  */
 
-void __init or32_early_setup(void *fdt)
+void __init or1k_early_setup(void *fdt)
 {
 	if (fdt)
 		pr_info("FDT at %p\n", fdt);
@@ -246,21 +198,6 @@ static inline unsigned long extract_value(unsigned long reg, unsigned long mask)
 	return mask & reg;
 }
 
-void __init detect_unit_config(unsigned long upr, unsigned long mask,
-			       char *text, void (*func) (void))
-{
-	if (text != NULL)
-		printk("%s", text);
-
-	if (upr & mask) {
-		if (func != NULL)
-			func();
-		else
-			printk("present\n");
-	} else
-		printk("not present\n");
-}
-
 /*
  * calibrate_delay
  *
@@ -272,7 +209,7 @@ void __init detect_unit_config(unsigned long upr, unsigned long mask,
 void calibrate_delay(void)
 {
 	const int *val;
-	struct device_node *cpu = setup_find_cpu_node(smp_processor_id());
+	struct device_node *cpu = of_get_cpu_node(smp_processor_id(), NULL);
 
 	val = of_get_property(cpu, "clock-frequency", NULL);
 	if (!val)
@@ -281,10 +218,15 @@ void calibrate_delay(void)
 	pr_cont("%lu.%02lu BogoMIPS (lpj=%lu)\n",
 		loops_per_jiffy / (500000 / HZ),
 		(loops_per_jiffy / (5000 / HZ)) % 100, loops_per_jiffy);
+
+	of_node_put(cpu);
 }
 
 void __init setup_arch(char **cmdline_p)
 {
+	/* setup memblock allocator */
+	setup_memory();
+
 	unflatten_and_copy_device_tree();
 
 	setup_cpuinfo();
@@ -294,31 +236,24 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 	/* process 1's initial memory region is the kernel code/data */
-	init_mm.start_code = (unsigned long)_stext;
-	init_mm.end_code = (unsigned long)_etext;
-	init_mm.end_data = (unsigned long)_edata;
-	init_mm.brk = (unsigned long)_end;
+	setup_initial_init_mm(_stext, _etext, _edata, _end);
 
 #ifdef CONFIG_BLK_DEV_INITRD
-	initrd_start = (unsigned long)&__initrd_start;
-	initrd_end = (unsigned long)&__initrd_end;
 	if (initrd_start == initrd_end) {
+		printk(KERN_INFO "Initial ramdisk not found\n");
 		initrd_start = 0;
 		initrd_end = 0;
+	} else {
+		printk(KERN_INFO "Initial ramdisk at: 0x%p (%lu bytes)\n",
+		       (void *)(initrd_start), initrd_end - initrd_start);
+		initrd_below_start_ok = 1;
 	}
-	initrd_below_start_ok = 1;
 #endif
-
-	/* setup memblock allocator */
-	setup_memory();
+	/* perform jump_table sorting before paging_init locks down read only memory */
+	jump_label_init();
 
 	/* paging_init() sets up the MMU and marks all pages as reserved */
 	paging_init();
-
-#if defined(CONFIG_VT) && defined(CONFIG_DUMMY_CONSOLE)
-	if (!conswitchp)
-		conswitchp = &dummy_con;
-#endif
 
 	*cmdline_p = boot_command_line;
 
@@ -330,14 +265,14 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	unsigned int vr, cpucfgr;
 	unsigned int avr;
 	unsigned int version;
+#ifdef CONFIG_SMP
 	struct cpuinfo_or1k *cpuinfo = v;
+	seq_printf(m, "processor\t\t: %d\n", cpuinfo->coreid);
+#endif
 
 	vr = mfspr(SPR_VR);
 	cpucfgr = mfspr(SPR_CPUCFGR);
 
-#ifdef CONFIG_SMP
-	seq_printf(m, "processor\t\t: %d\n", cpuinfo->coreid);
-#endif
 	if (vr & SPR_VR_UVRP) {
 		vr = mfspr(SPR_VR2);
 		version = vr & SPR_VR2_VER;
@@ -356,14 +291,6 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 		seq_printf(m, "revision\t\t: %d\n", vr & SPR_VR_REV);
 	}
 	seq_printf(m, "frequency\t\t: %ld\n", loops_per_jiffy * HZ);
-	seq_printf(m, "dcache size\t\t: %d bytes\n", cpuinfo->dcache_size);
-	seq_printf(m, "dcache block size\t: %d bytes\n",
-		   cpuinfo->dcache_block_size);
-	seq_printf(m, "dcache ways\t\t: %d\n", cpuinfo->dcache_ways);
-	seq_printf(m, "icache size\t\t: %d bytes\n", cpuinfo->icache_size);
-	seq_printf(m, "icache block size\t: %d bytes\n",
-		   cpuinfo->icache_block_size);
-	seq_printf(m, "icache ways\t\t: %d\n", cpuinfo->icache_ways);
 	seq_printf(m, "immu\t\t\t: %d entries, %lu ways\n",
 		   1 << ((mfspr(SPR_DMMUCFGR) & SPR_DMMUCFGR_NTS) >> 2),
 		   1 + (mfspr(SPR_DMMUCFGR) & SPR_DMMUCFGR_NTW));

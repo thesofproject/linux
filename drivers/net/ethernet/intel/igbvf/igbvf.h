@@ -1,29 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/*******************************************************************************
-
-  Intel(R) 82576 Virtual Function Linux driver
-  Copyright(c) 2009 - 2012 Intel Corporation.
-
-  This program is free software; you can redistribute it and/or modify it
-  under the terms and conditions of the GNU General Public License,
-  version 2, as published by the Free Software Foundation.
-
-  This program is distributed in the hope it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  You should have received a copy of the GNU General Public License along with
-  this program; if not, see <http://www.gnu.org/licenses/>.
-
-  The full GNU General Public License is included in this distribution in
-  the file called "COPYING".
-
-  Contact Information:
-  e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
-  Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
-
-*******************************************************************************/
+/* Copyright(c) 2009 - 2018 Intel Corporation. */
 
 /* Linux PRO/1000 Ethernet Driver main header file */
 
@@ -63,11 +39,11 @@ enum latency_range {
 /* Tx/Rx descriptor defines */
 #define IGBVF_DEFAULT_TXD	256
 #define IGBVF_MAX_TXD		4096
-#define IGBVF_MIN_TXD		80
+#define IGBVF_MIN_TXD		64
 
 #define IGBVF_DEFAULT_RXD	256
 #define IGBVF_MAX_RXD		4096
-#define IGBVF_MIN_RXD		80
+#define IGBVF_MIN_RXD		64
 
 #define IGBVF_MIN_ITR_USECS	10 /* 100000 irq/sec */
 #define IGBVF_MAX_ITR_USECS	10000 /* 100    irq/sec */
@@ -178,7 +154,6 @@ struct igbvf_ring {
 /* board specific private data structure */
 struct igbvf_adapter {
 	struct timer_list watchdog_timer;
-	struct timer_list blink_timer;
 
 	struct work_struct reset_task;
 	struct work_struct watchdog_task;
@@ -186,14 +161,9 @@ struct igbvf_adapter {
 	const struct igbvf_info *ei;
 
 	unsigned long active_vlans[BITS_TO_LONGS(VLAN_N_VID)];
-	u32 bd_number;
 	u32 rx_buffer_len;
-	u32 polling_interval;
-	u16 mng_vlan_id;
 	u16 link_speed;
 	u16 link_duplex;
-
-	spinlock_t tx_queue_lock; /* prevent concurrent tail updates */
 
 	/* track device up/down/testing state */
 	unsigned long state;
@@ -209,9 +179,6 @@ struct igbvf_adapter {
 	unsigned int restart_queue;
 	u32 txd_cmd;
 
-	u32 tx_int_delay;
-	u32 tx_abs_int_delay;
-
 	unsigned int total_tx_bytes;
 	unsigned int total_tx_packets;
 	unsigned int total_rx_bytes;
@@ -219,23 +186,15 @@ struct igbvf_adapter {
 
 	/* Tx stats */
 	u32 tx_timeout_count;
-	u32 tx_fifo_head;
-	u32 tx_head_addr;
-	u32 tx_fifo_size;
-	u32 tx_dma_failed;
 
 	/* Rx */
 	struct igbvf_ring *rx_ring;
-
-	u32 rx_int_delay;
-	u32 rx_abs_int_delay;
 
 	/* Rx stats */
 	u64 hw_csum_err;
 	u64 hw_csum_good;
 	u64 rx_hdr_split;
 	u32 alloc_rx_buff_failed;
-	u32 rx_dma_failed;
 
 	unsigned int rx_ps_hdr_size;
 	u32 max_frame_size;
@@ -244,37 +203,24 @@ struct igbvf_adapter {
 	/* OS defined structs */
 	struct net_device *netdev;
 	struct pci_dev *pdev;
-	spinlock_t stats_lock; /* prevent concurrent stats updates */
 
 	/* structs defined in e1000_hw.h */
 	struct e1000_hw hw;
 
 	/* The VF counters don't clear on read so we have to get a base
 	 * count on driver start up and always subtract that base on
-	 * on the first update, thus the flag..
+	 * the first update, thus the flag..
 	 */
 	struct e1000_vf_stats stats;
 	u64 zero_base;
 
-	struct igbvf_ring test_tx_ring;
-	struct igbvf_ring test_rx_ring;
-	u32 test_icr;
-
 	u32 msg_enable;
 	struct msix_entry *msix_entries;
-	int int_mode;
 	u32 eims_enable_mask;
 	u32 eims_other;
-	u32 int_counter0;
-	u32 int_counter1;
 
-	u32 eeprom_wol;
 	u32 wol;
 	u32 pba;
-
-	bool fc_autoneg;
-
-	unsigned long led_status;
 
 	unsigned int flags;
 	unsigned long last_reset;
@@ -305,9 +251,7 @@ enum igbvf_state_t {
 };
 
 extern char igbvf_driver_name[];
-extern const char igbvf_driver_version[];
 
-void igbvf_check_options(struct igbvf_adapter *);
 void igbvf_set_ethtool_ops(struct net_device *);
 
 int igbvf_up(struct igbvf_adapter *);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * ds1621.c - Part of lm_sensors, Linux kernel modules for hardware
  *	      monitoring
@@ -18,20 +19,6 @@
  * Since the DS1621 was the first chipset supported by this driver,
  * most comments will refer to this chipset, but are actually general
  * and concern all supported chipsets, unless mentioned otherwise.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #include <linux/module.h>
@@ -122,7 +109,7 @@ static const u8 DS1621_REG_TEMP[3] = {
 struct ds1621_data {
 	struct i2c_client *client;
 	struct mutex update_lock;
-	char valid;			/* !=0 if following fields are valid */
+	bool valid;			/* true if following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
 	enum chips kind;		/* device type */
 
@@ -226,7 +213,7 @@ static struct ds1621_data *ds1621_update_client(struct device *dev)
 						  new_conf);
 
 		data->last_updated = jiffies;
-		data->valid = 1;
+		data->valid = true;
 	}
 
 	mutex_unlock(&data->update_lock);
@@ -234,7 +221,7 @@ static struct ds1621_data *ds1621_update_client(struct device *dev)
 	return data;
 }
 
-static ssize_t show_temp(struct device *dev, struct device_attribute *da,
+static ssize_t temp_show(struct device *dev, struct device_attribute *da,
 			 char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
@@ -243,8 +230,8 @@ static ssize_t show_temp(struct device *dev, struct device_attribute *da,
 		       DS1621_TEMP_FROM_REG(data->temp[attr->index]));
 }
 
-static ssize_t set_temp(struct device *dev, struct device_attribute *da,
-			const char *buf, size_t count)
+static ssize_t temp_store(struct device *dev, struct device_attribute *da,
+			  const char *buf, size_t count)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
 	struct ds1621_data *data = dev_get_drvdata(dev);
@@ -270,7 +257,7 @@ static ssize_t alarms_show(struct device *dev, struct device_attribute *da,
 	return sprintf(buf, "%d\n", ALARMS_FROM_REG(data->conf));
 }
 
-static ssize_t show_alarm(struct device *dev, struct device_attribute *da,
+static ssize_t alarm_show(struct device *dev, struct device_attribute *da,
 			  char *buf)
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
@@ -282,7 +269,7 @@ static ssize_t update_interval_show(struct device *dev,
 				    struct device_attribute *da, char *buf)
 {
 	struct ds1621_data *data = dev_get_drvdata(dev);
-	return scnprintf(buf, PAGE_SIZE, "%hu\n", data->update_interval);
+	return sysfs_emit(buf, "%hu\n", data->update_interval);
 }
 
 static ssize_t update_interval_store(struct device *dev,
@@ -319,13 +306,11 @@ static ssize_t update_interval_store(struct device *dev,
 static DEVICE_ATTR_RO(alarms);
 static DEVICE_ATTR_RW(update_interval);
 
-static SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO, show_temp, NULL, 0);
-static SENSOR_DEVICE_ATTR(temp1_min, S_IWUSR | S_IRUGO, show_temp, set_temp, 1);
-static SENSOR_DEVICE_ATTR(temp1_max, S_IWUSR | S_IRUGO, show_temp, set_temp, 2);
-static SENSOR_DEVICE_ATTR(temp1_min_alarm, S_IRUGO, show_alarm, NULL,
-		DS1621_ALARM_TEMP_LOW);
-static SENSOR_DEVICE_ATTR(temp1_max_alarm, S_IRUGO, show_alarm, NULL,
-		DS1621_ALARM_TEMP_HIGH);
+static SENSOR_DEVICE_ATTR_RO(temp1_input, temp, 0);
+static SENSOR_DEVICE_ATTR_RW(temp1_min, temp, 1);
+static SENSOR_DEVICE_ATTR_RW(temp1_max, temp, 2);
+static SENSOR_DEVICE_ATTR_RO(temp1_min_alarm, alarm, DS1621_ALARM_TEMP_LOW);
+static SENSOR_DEVICE_ATTR_RO(temp1_max_alarm, alarm, DS1621_ALARM_TEMP_HIGH);
 
 static struct attribute *ds1621_attributes[] = {
 	&sensor_dev_attr_temp1_input.dev_attr.attr,
@@ -341,7 +326,7 @@ static struct attribute *ds1621_attributes[] = {
 static umode_t ds1621_attribute_visible(struct kobject *kobj,
 					struct attribute *attr, int index)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct ds1621_data *data = dev_get_drvdata(dev);
 
 	if (attr == &dev_attr_update_interval.attr)
@@ -357,8 +342,7 @@ static const struct attribute_group ds1621_group = {
 };
 __ATTRIBUTE_GROUPS(ds1621);
 
-static int ds1621_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int ds1621_probe(struct i2c_client *client)
 {
 	struct ds1621_data *data;
 	struct device *hwmon_dev;
@@ -370,7 +354,7 @@ static int ds1621_probe(struct i2c_client *client,
 
 	mutex_init(&data->update_lock);
 
-	data->kind = id->driver_data;
+	data->kind = (uintptr_t)i2c_get_match_data(client);
 	data->client = client;
 
 	/* Initialize the DS1621 chip */
@@ -383,18 +367,17 @@ static int ds1621_probe(struct i2c_client *client,
 }
 
 static const struct i2c_device_id ds1621_id[] = {
-	{ "ds1621", ds1621 },
-	{ "ds1625", ds1625 },
-	{ "ds1631", ds1631 },
-	{ "ds1721", ds1721 },
-	{ "ds1731", ds1731 },
+	{ .name = "ds1621", .driver_data = ds1621 },
+	{ .name = "ds1625", .driver_data = ds1625 },
+	{ .name = "ds1631", .driver_data = ds1631 },
+	{ .name = "ds1721", .driver_data = ds1721 },
+	{ .name = "ds1731", .driver_data = ds1731 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ds1621_id);
 
 /* This is the driver that will be inserted */
 static struct i2c_driver ds1621_driver = {
-	.class		= I2C_CLASS_HWMON,
 	.driver = {
 		.name	= "ds1621",
 	},

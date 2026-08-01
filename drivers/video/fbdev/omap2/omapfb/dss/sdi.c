@@ -1,20 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/drivers/video/omap2/dss/sdi.c
  *
  * Copyright (C) 2009 Nokia Corporation
  * Author: Tomi Valkeinen <tomi.valkeinen@nokia.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #define DSS_SUBSYS_NAME "SDI"
@@ -23,10 +12,10 @@
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/regulator/consumer.h>
-#include <linux/export.h>
 #include <linux/platform_device.h>
 #include <linux/string.h>
 #include <linux/of.h>
+#include <linux/of_graph.h>
 #include <linux/component.h>
 
 #include <video/omapfb_dss.h>
@@ -386,17 +375,16 @@ static int sdi_probe(struct platform_device *pdev)
 	return component_add(&pdev->dev, &sdi_component_ops);
 }
 
-static int sdi_remove(struct platform_device *pdev)
+static void sdi_remove(struct platform_device *pdev)
 {
 	component_del(&pdev->dev, &sdi_component_ops);
-	return 0;
 }
 
 static struct platform_driver omap_sdi_driver = {
 	.probe		= sdi_probe,
-	.remove         = sdi_remove,
-	.driver         = {
-		.name   = "omapdss_sdi",
+	.remove		= sdi_remove,
+	.driver		= {
+		.name	= "omapdss_sdi",
 		.suppress_bind_attrs = true,
 	},
 };
@@ -417,7 +405,7 @@ int sdi_init_port(struct platform_device *pdev, struct device_node *port)
 	u32 datapairs;
 	int r;
 
-	ep = omapdss_of_get_next_endpoint(port, NULL);
+	ep = of_graph_get_next_port_endpoint(port, NULL);
 	if (!ep)
 		return 0;
 

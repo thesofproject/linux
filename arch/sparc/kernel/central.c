@@ -10,7 +10,7 @@
 #include <linux/export.h>
 #include <linux/string.h>
 #include <linux/init.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 
 #include <asm/fhc.h>
@@ -55,7 +55,7 @@ static int clock_board_calc_nslots(struct clock_board *p)
 			else
 				return 5;
 		}
-		/* Fallthrough */
+		fallthrough;
 	default:
 		return 4;
 	}
@@ -63,7 +63,7 @@ static int clock_board_calc_nslots(struct clock_board *p)
 
 static int clock_board_probe(struct platform_device *op)
 {
-	struct clock_board *p = kzalloc(sizeof(*p), GFP_KERNEL);
+	struct clock_board *p = kzalloc_obj(*p);
 	int err = -ENOMEM;
 
 	if (!p) {
@@ -159,7 +159,7 @@ static struct platform_driver clock_board_driver = {
 
 static int fhc_probe(struct platform_device *op)
 {
-	struct fhc *p = kzalloc(sizeof(*p), GFP_KERNEL);
+	struct fhc *p = kzalloc_obj(*p);
 	int err = -ENOMEM;
 	u32 reg;
 
@@ -168,7 +168,7 @@ static int fhc_probe(struct platform_device *op)
 		goto out;
 	}
 
-	if (!strcmp(op->dev.of_node->parent->name, "central"))
+	if (of_node_name_eq(op->dev.of_node->parent, "central"))
 		p->central = true;
 
 	p->pregs = of_ioremap(&op->resource[0], 0,

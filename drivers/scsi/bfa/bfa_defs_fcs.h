@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
  * Copyright (c) 2014- QLogic Corporation.
@@ -5,15 +6,6 @@
  * www.qlogic.com
  *
  * Linux driver for QLogic BR-series Fibre Channel Host Bus Adapter.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License (GPL) Version 2 as
- * published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
 #ifndef __BFA_DEFS_FCS_H__
@@ -130,28 +122,6 @@ enum bfa_lport_offline_reason {
 	 *    fabric */
 	BFA_LPORT_OFFLINE_FAB_NORESOURCES,
 	BFA_LPORT_OFFLINE_FAB_LOGOUT,
-};
-
-/*
- * FCS lport info.
- */
-struct bfa_lport_info_s {
-	u8	 port_type;	/* bfa_lport_type_t : physical or
-	 * virtual */
-	u8	 port_state;	/* one of bfa_lport_state values */
-	u8	 offline_reason;	/* one of bfa_lport_offline_reason_t
-	 * values */
-	wwn_t	   port_wwn;
-	wwn_t	   node_wwn;
-
-	/*
-	 * following 4 feilds are valid for Physical Ports only
-	 */
-	u32	max_vports_supp;	/* Max supported vports */
-	u32	num_vports_inuse;	/* Num of in use vports */
-	u32	max_rports_supp;	/* Max supported rports */
-	u32	num_rports_inuse;	/* Num of doscovered rports */
-
 };
 
 /*

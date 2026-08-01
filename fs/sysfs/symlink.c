@@ -6,7 +6,7 @@
  * Copyright (c) 2007 SUSE Linux Products GmbH
  * Copyright (c) 2007 Tejun Heo <teheo@suse.de>
  *
- * Please see Documentation/filesystems/sysfs.txt for more information.
+ * Please see Documentation/filesystems/sysfs.rst for more information.
  */
 
 #include <linux/fs.h>
@@ -23,7 +23,8 @@ static int sysfs_do_create_link_sd(struct kernfs_node *parent,
 {
 	struct kernfs_node *kn, *target = NULL;
 
-	BUG_ON(!name || !parent);
+	if (WARN_ON(!name || !parent))
+		return -EINVAL;
 
 	/*
 	 * We don't own @target_kobj and it may be removed at any time.
@@ -120,7 +121,7 @@ EXPORT_SYMBOL_GPL(sysfs_create_link_nowarn);
 void sysfs_delete_link(struct kobject *kobj, struct kobject *targ,
 			const char *name)
 {
-	const void *ns = NULL;
+	const struct ns_common *ns = NULL;
 
 	/*
 	 * We don't own @target and it may be removed at any time.
@@ -163,10 +164,11 @@ EXPORT_SYMBOL_GPL(sysfs_remove_link);
  *	A helper function for the common rename symlink idiom.
  */
 int sysfs_rename_link_ns(struct kobject *kobj, struct kobject *targ,
-			 const char *old, const char *new, const void *new_ns)
+			 const char *old, const char *new,
+			 const struct ns_common *new_ns)
 {
 	struct kernfs_node *parent, *kn = NULL;
-	const void *old_ns = NULL;
+	const struct ns_common *old_ns = NULL;
 	int result;
 
 	if (!kobj)

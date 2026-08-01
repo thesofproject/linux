@@ -1,9 +1,6 @@
-/**
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
  * Copyright (C) 2008, Creative Technology Ltd. All Rights Reserved.
- *
- * This source file is released under GPL v2 license (no other versions).
- * See the COPYING file included in the main directory of this source
- * distribution for the license terms and conditions.
  *
  * @File	cthardware.h
  *
@@ -12,7 +9,6 @@
  *
  * @Author	Liu Chun
  * @Date 	May 13 2008
- *
  */
 
 #ifndef CTHARDWARE_H
@@ -30,8 +26,9 @@ enum CHIPTYP {
 
 enum CTCARDS {
 	/* 20k1 models */
+	CTSB046X,
+	CT20K1_MODEL_FIRST = CTSB046X,
 	CTSB055X,
-	CT20K1_MODEL_FIRST = CTSB055X,
 	CTSB073X,
 	CTUAA,
 	CT20K1_UNKNOWN,
@@ -41,6 +38,7 @@ enum CTCARDS {
 	CTHENDRIX,
 	CTSB0880,
 	CTSB1270,
+	CTOK0010,
 	CT20K2_UNKNOWN,
 	NUM_CTCARDS		/* This should always be the last */
 };
@@ -65,6 +63,7 @@ struct card_conf {
 struct capabilities {
 	unsigned int digit_io_switch:1;
 	unsigned int dedicated_mic:1;
+	unsigned int dedicated_rca:1;
 	unsigned int output_switch:1;
 	unsigned int mic_source_switch:1;
 };
@@ -170,7 +169,7 @@ struct hw {
 	int (*daio_mgr_dsb_dai)(void *blk, unsigned int idx);
 	int (*daio_mgr_enb_dao)(void *blk, unsigned int idx);
 	int (*daio_mgr_dsb_dao)(void *blk, unsigned int idx);
-	int (*daio_mgr_dao_init)(void *blk, unsigned int idx,
+	int (*daio_mgr_dao_init)(struct hw *hw, void *blk, unsigned int idx,
 						unsigned int conf);
 	int (*daio_mgr_set_imaparc)(void *blk, unsigned int slot);
 	int (*daio_mgr_set_imapnxt)(void *blk, unsigned int next);

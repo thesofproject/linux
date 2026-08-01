@@ -11,21 +11,21 @@
 
 #include <linux/const.h>
 
-#define PAGE_SHIFT   12
-#define PAGE_SIZE    (_AC(1, UL) << PAGE_SHIFT)
-#define PAGE_MASK    (~(PAGE_SIZE-1))
+#include <vdso/page.h>
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #define clear_page(page)	 memset((void *)(page), 0, PAGE_SIZE)
 #define copy_page(to,from) 	memcpy((void *)(to), (void *)(from), PAGE_SIZE)
 #define clear_user_page(addr, vaddr, page)	\
 	do { 	clear_page(addr);		\
 		sparc_flush_page_to_ram(page);	\
+		(void)(vaddr);			\
 	} while (0)
 #define copy_user_page(to, from, vaddr, page)	\
 	do {	copy_page(to, from);		\
 		sparc_flush_page_to_ram(page);	\
+		(void)(vaddr);			\
 	} while (0)
 
 /* The following structure is used to hold the physical
@@ -54,7 +54,7 @@ extern struct sparc_phys_banks sp_banks[SPARC_PHYS_BANKS+1];
  */
 typedef struct { unsigned long pte; } pte_t;
 typedef struct { unsigned long iopte; } iopte_t;
-typedef struct { unsigned long pmdv[16]; } pmd_t;
+typedef struct { unsigned long pmd; } pmd_t;
 typedef struct { unsigned long pgd; } pgd_t;
 typedef struct { unsigned long ctxd; } ctxd_t;
 typedef struct { unsigned long pgprot; } pgprot_t;
@@ -62,7 +62,7 @@ typedef struct { unsigned long iopgprot; } iopgprot_t;
 
 #define pte_val(x)	((x).pte)
 #define iopte_val(x)	((x).iopte)
-#define pmd_val(x)      ((x).pmdv[0])
+#define pmd_val(x)      ((x).pmd)
 #define pgd_val(x)	((x).pgd)
 #define ctxd_val(x)	((x).ctxd)
 #define pgprot_val(x)	((x).pgprot)
@@ -82,7 +82,7 @@ typedef struct { unsigned long iopgprot; } iopgprot_t;
  */
 typedef unsigned long pte_t;
 typedef unsigned long iopte_t;
-typedef struct { unsigned long pmdv[16]; } pmd_t;
+typedef unsigned long pmd_t;
 typedef unsigned long pgd_t;
 typedef unsigned long ctxd_t;
 typedef unsigned long pgprot_t;
@@ -90,14 +90,14 @@ typedef unsigned long iopgprot_t;
 
 #define pte_val(x)	(x)
 #define iopte_val(x)	(x)
-#define pmd_val(x)      ((x).pmdv[0])
+#define pmd_val(x)      (x)
 #define pgd_val(x)	(x)
 #define ctxd_val(x)	(x)
 #define pgprot_val(x)	(x)
 #define iopgprot_val(x)	(x)
 
 #define __pte(x)	(x)
-#define __pmd(x)	((pmd_t) { { (x) }, })
+#define __pmd(x)	(x)
 #define __iopte(x)	(x)
 #define __pgd(x)	(x)
 #define __ctxd(x)	(x)
@@ -106,18 +106,18 @@ typedef unsigned long iopgprot_t;
 
 #endif
 
-typedef struct page *pgtable_t;
+typedef pte_t *pgtable_t;
 
 #define TASK_UNMAPPED_BASE	0x50000000
 
-#else /* !(__ASSEMBLY__) */
+#else /* !(__ASSEMBLER__) */
 
 #define __pgprot(x)	(x)
 
-#endif /* !(__ASSEMBLY__) */
+#endif /* !(__ASSEMBLER__) */
 
 #define PAGE_OFFSET	0xf0000000
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 extern unsigned long phys_base;
 extern unsigned long pfn_base;
 #endif
@@ -130,11 +130,7 @@ extern unsigned long pfn_base;
 #define ARCH_PFN_OFFSET		(pfn_base)
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
 
-#define pfn_valid(pfn)		(((pfn) >= (pfn_base)) && (((pfn)-(pfn_base)) < max_mapnr))
 #define virt_addr_valid(kaddr)	((((unsigned long)(kaddr)-PAGE_OFFSET)>>PAGE_SHIFT) < max_mapnr)
-
-#define VM_DATA_DEFAULT_FLAGS	(VM_READ | VM_WRITE | VM_EXEC | \
-				 VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC)
 
 #include <asm-generic/memory_model.h>
 #include <asm-generic/getorder.h>

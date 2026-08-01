@@ -1,22 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.0+
 /*
  *  Rate conversion Plug-In
  *  Copyright (c) 1999 by Jaroslav Kysela <perex@perex.cz>
- *
- *
- *   This library is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU Library General Public License as
- *   published by the Free Software Foundation; either version 2 of
- *   the License, or (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU Library General Public License for more details.
- *
- *   You should have received a copy of the GNU Library General Public
- *   License along with this library; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
   
 #include <linux/time.h>
@@ -47,7 +32,7 @@ struct rate_priv {
 	unsigned int pos;
 	rate_f func;
 	snd_pcm_sframes_t old_src_frames, old_dst_frames;
-	struct rate_channel channels[0];
+	struct rate_channel channels[];
 };
 
 static void rate_init(struct snd_pcm_plugin *plugin)
@@ -193,7 +178,7 @@ static snd_pcm_sframes_t rate_src_frames(struct snd_pcm_plugin *plugin, snd_pcm_
 	if (plugin->src_format.rate < plugin->dst_format.rate) {
 		res = (((frames * data->pitch) + (BITS/2)) >> SHIFT);
 	} else {
-		res = (((frames << SHIFT) + (data->pitch / 2)) / data->pitch);		
+		res = DIV_ROUND_CLOSEST(frames << SHIFT, data->pitch);
 	}
 	if (data->old_src_frames > 0) {
 		snd_pcm_sframes_t frames1 = frames, res1 = data->old_dst_frames;
@@ -224,7 +209,7 @@ static snd_pcm_sframes_t rate_dst_frames(struct snd_pcm_plugin *plugin, snd_pcm_
 		return 0;
 	data = (struct rate_priv *)plugin->extra_data;
 	if (plugin->src_format.rate < plugin->dst_format.rate) {
-		res = (((frames << SHIFT) + (data->pitch / 2)) / data->pitch);
+		res = DIV_ROUND_CLOSEST(frames << SHIFT, data->pitch);
 	} else {
 		res = (((frames * data->pitch) + (BITS/2)) >> SHIFT);
 	}
@@ -294,7 +279,7 @@ static int rate_action(struct snd_pcm_plugin *plugin,
 	default:
 		break;
 	}
-	return 0;	/* silenty ignore other actions */
+	return 0;	/* silently ignore other actions */
 }
 
 int snd_pcm_plugin_build_rate(struct snd_pcm_substream *plug,
@@ -323,8 +308,8 @@ int snd_pcm_plugin_build_rate(struct snd_pcm_substream *plug,
 
 	err = snd_pcm_plugin_build(plug, "rate conversion",
 				   src_format, dst_format,
-				   sizeof(struct rate_priv) +
-				   src_format->channels * sizeof(struct rate_channel),
+				   struct_size(data, channels,
+					       src_format->channels),
 				   &plugin);
 	if (err < 0)
 		return err;

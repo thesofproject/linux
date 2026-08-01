@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * ATI Mach64 Register Definitions
  *
@@ -5,11 +6,6 @@
  *  written with much help from Jon Howell
  *
  * Updated for 3D RAGE PRO and 3D RAGE Mobility by Geert Uytterhoeven
- *	
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 /*
@@ -938,9 +934,6 @@
 #define MEM_BNDRY_EN		0x00040000
 
 #define ONE_MB			0x100000
-/* ATI PCI constants */
-#define PCI_ATI_VENDOR_ID	0x1002
-
 
 /* CNFG_CHIP_ID register constants */
 #define CFG_CHIP_TYPE		0x0000FFFF

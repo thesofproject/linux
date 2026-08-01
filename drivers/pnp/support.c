@@ -9,6 +9,7 @@
 
 #include <linux/module.h>
 #include <linux/ctype.h>
+#include <linux/hex.h>
 #include <linux/pnp.h>
 #include "base.h"
 
@@ -30,7 +31,6 @@ int pnp_is_active(struct pnp_dev *dev)
 	else
 		return 1;
 }
-
 EXPORT_SYMBOL(pnp_is_active);
 
 /*

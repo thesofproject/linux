@@ -2,22 +2,74 @@
 
 #include <linux/spinlock.h>
 #include <linux/percpu.h>
+#include <linux/kallsyms.h>
+#include <linux/kcore.h>
+#include <linux/pgtable.h>
 
 #include <asm/cpu_entry_area.h>
-#include <asm/pgtable.h>
 #include <asm/fixmap.h>
 #include <asm/desc.h>
+#include <asm/kasan.h>
+#include <asm/setup.h>
 
 static DEFINE_PER_CPU_PAGE_ALIGNED(struct entry_stack_page, entry_stack_storage);
 
 #ifdef CONFIG_X86_64
-static DEFINE_PER_CPU_PAGE_ALIGNED(char, exception_stacks
-	[(N_EXCEPTION_STACKS - 1) * EXCEPTION_STKSZ + DEBUG_STKSZ]);
+static DEFINE_PER_CPU_PAGE_ALIGNED(struct exception_stacks, exception_stacks);
+DEFINE_PER_CPU(struct cea_exception_stacks*, cea_exception_stacks);
+
+static DEFINE_PER_CPU_READ_MOSTLY(unsigned long, _cea_offset);
+
+static __always_inline unsigned int cea_offset(unsigned int cpu)
+{
+	return per_cpu(_cea_offset, cpu);
+}
+
+static __init void init_cea_offsets(void)
+{
+	unsigned int max_cea;
+	unsigned int i, j;
+
+	if (!kaslr_enabled()) {
+		for_each_possible_cpu(i)
+			per_cpu(_cea_offset, i) = i;
+		return;
+	}
+
+	max_cea = (CPU_ENTRY_AREA_MAP_SIZE - PAGE_SIZE) / CPU_ENTRY_AREA_SIZE;
+
+	/* O(sodding terrible) */
+	for_each_possible_cpu(i) {
+		unsigned int cea;
+
+again:
+		cea = get_random_u32_below(max_cea);
+
+		for_each_possible_cpu(j) {
+			if (cea_offset(j) == cea)
+				goto again;
+
+			if (i == j)
+				break;
+		}
+
+		per_cpu(_cea_offset, i) = cea;
+	}
+}
+#else /* !X86_64 */
+DECLARE_PER_CPU_PAGE_ALIGNED(struct doublefault_stack, doublefault_stack);
+
+static __always_inline unsigned int cea_offset(unsigned int cpu)
+{
+	return cpu;
+}
+static inline void init_cea_offsets(void) { }
 #endif
 
-struct cpu_entry_area *get_cpu_entry_area(int cpu)
+/* Is called from entry code, so must be noinstr */
+noinstr struct cpu_entry_area *get_cpu_entry_area(int cpu)
 {
-	unsigned long va = CPU_ENTRY_AREA_PER_CPU + cpu * CPU_ENTRY_AREA_SIZE;
+	unsigned long va = CPU_ENTRY_AREA_PER_CPU + cea_offset(cpu) * CPU_ENTRY_AREA_SIZE;
 	BUILD_BUG_ON(sizeof(struct cpu_entry_area) % PAGE_SIZE != 0);
 
 	return (struct cpu_entry_area *) va;
@@ -50,10 +102,10 @@ cea_map_percpu_pages(void *cea_vaddr, void *ptr, int pages, pgprot_t prot)
 		cea_set_pte(cea_vaddr, per_cpu_ptr_to_phys(ptr), prot);
 }
 
-static void percpu_setup_debug_store(int cpu)
+static void __init percpu_setup_debug_store(unsigned int cpu)
 {
 #ifdef CONFIG_CPU_SUP_INTEL
-	int npages;
+	unsigned int npages;
 	void *cea;
 
 	if (boot_cpu_data.x86_vendor != X86_VENDOR_INTEL)
@@ -76,35 +128,77 @@ static void percpu_setup_debug_store(int cpu)
 #endif
 }
 
-/* Setup the fixmap mappings only once per-processor */
-static void __init setup_cpu_entry_area(int cpu)
-{
 #ifdef CONFIG_X86_64
-	extern char _entry_trampoline[];
 
+#define cea_map_stack(name) do {					\
+	npages = sizeof(estacks->name## _stack) / PAGE_SIZE;		\
+	cea_map_percpu_pages(cea->estacks.name## _stack,		\
+			estacks->name## _stack, npages, PAGE_KERNEL);	\
+	} while (0)
+
+static void __init percpu_setup_exception_stacks(unsigned int cpu)
+{
+	struct exception_stacks *estacks = per_cpu_ptr(&exception_stacks, cpu);
+	struct cpu_entry_area *cea = get_cpu_entry_area(cpu);
+	unsigned int npages;
+
+	BUILD_BUG_ON(sizeof(exception_stacks) % PAGE_SIZE != 0);
+
+	per_cpu(cea_exception_stacks, cpu) = &cea->estacks;
+
+	/*
+	 * The exceptions stack mappings in the per cpu area are protected
+	 * by guard pages so each stack must be mapped separately. DB2 is
+	 * not mapped; it just exists to catch triple nesting of #DB.
+	 */
+	cea_map_stack(DF);
+	cea_map_stack(NMI);
+	cea_map_stack(DB);
+	cea_map_stack(MCE);
+
+	if (IS_ENABLED(CONFIG_AMD_MEM_ENCRYPT)) {
+		if (cc_platform_has(CC_ATTR_GUEST_STATE_ENCRYPT)) {
+			cea_map_stack(VC);
+			cea_map_stack(VC2);
+		}
+	}
+}
+#else
+static void __init percpu_setup_exception_stacks(unsigned int cpu)
+{
+	struct cpu_entry_area *cea = get_cpu_entry_area(cpu);
+
+	cea_map_percpu_pages(&cea->doublefault_stack,
+			     &per_cpu(doublefault_stack, cpu), 1, PAGE_KERNEL);
+}
+#endif
+
+/* Setup the fixmap mappings only once per-processor */
+static void __init setup_cpu_entry_area(unsigned int cpu)
+{
+	struct cpu_entry_area *cea = get_cpu_entry_area(cpu);
+#ifdef CONFIG_X86_64
 	/* On 64-bit systems, we use a read-only fixmap GDT and TSS. */
 	pgprot_t gdt_prot = PAGE_KERNEL_RO;
 	pgprot_t tss_prot = PAGE_KERNEL_RO;
 #else
 	/*
-	 * On native 32-bit systems, the GDT cannot be read-only because
+	 * On 32-bit systems, the GDT cannot be read-only because
 	 * our double fault handler uses a task gate, and entering through
 	 * a task gate needs to change an available TSS to busy.  If the
 	 * GDT is read-only, that will triple fault.  The TSS cannot be
 	 * read-only because the CPU writes to it on task switches.
-	 *
-	 * On Xen PV, the GDT must be read-only because the hypervisor
-	 * requires it.
 	 */
-	pgprot_t gdt_prot = boot_cpu_has(X86_FEATURE_XENPV) ?
-		PAGE_KERNEL_RO : PAGE_KERNEL;
+	pgprot_t gdt_prot = PAGE_KERNEL;
 	pgprot_t tss_prot = PAGE_KERNEL;
 #endif
 
-	cea_set_pte(&get_cpu_entry_area(cpu)->gdt, get_cpu_gdt_paddr(cpu),
-		    gdt_prot);
+	kasan_populate_shadow_for_vaddr(cea, CPU_ENTRY_AREA_SIZE,
+					early_cpu_to_node(cpu));
 
-	cea_map_percpu_pages(&get_cpu_entry_area(cpu)->entry_stack_page,
+	cea_set_pte(&cea->gdt, get_cpu_gdt_paddr(cpu), gdt_prot);
+
+	cea_map_percpu_pages(&cea->entry_stack_page,
 			     per_cpu_ptr(&entry_stack_storage, cpu), 1,
 			     PAGE_KERNEL);
 
@@ -128,25 +222,23 @@ static void __init setup_cpu_entry_area(int cpu)
 	BUILD_BUG_ON((offsetof(struct tss_struct, x86_tss) ^
 		      offsetofend(struct tss_struct, x86_tss)) & PAGE_MASK);
 	BUILD_BUG_ON(sizeof(struct tss_struct) % PAGE_SIZE != 0);
-	cea_map_percpu_pages(&get_cpu_entry_area(cpu)->tss,
-			     &per_cpu(cpu_tss_rw, cpu),
+	/*
+	 * VMX changes the host TR limit to 0x67 after a VM exit. This is
+	 * okay, since 0x67 covers the size of struct x86_hw_tss. Make sure
+	 * that this is correct.
+	 */
+	BUILD_BUG_ON(offsetof(struct tss_struct, x86_tss) != 0);
+	BUILD_BUG_ON(sizeof(struct x86_hw_tss) != 0x68);
+
+	cea_map_percpu_pages(&cea->tss, &per_cpu(cpu_tss_rw, cpu),
 			     sizeof(struct tss_struct) / PAGE_SIZE, tss_prot);
 
 #ifdef CONFIG_X86_32
-	per_cpu(cpu_entry_area, cpu) = get_cpu_entry_area(cpu);
+	per_cpu(cpu_entry_area, cpu) = cea;
 #endif
 
-#ifdef CONFIG_X86_64
-	BUILD_BUG_ON(sizeof(exception_stacks) % PAGE_SIZE != 0);
-	BUILD_BUG_ON(sizeof(exception_stacks) !=
-		     sizeof(((struct cpu_entry_area *)0)->exception_stacks));
-	cea_map_percpu_pages(&get_cpu_entry_area(cpu)->exception_stacks,
-			     &per_cpu(exception_stacks, cpu),
-			     sizeof(exception_stacks) / PAGE_SIZE, PAGE_KERNEL);
+	percpu_setup_exception_stacks(cpu);
 
-	cea_set_pte(&get_cpu_entry_area(cpu)->entry_trampoline,
-		     __pa_symbol(_entry_trampoline), PAGE_KERNEL_RX);
-#endif
 	percpu_setup_debug_store(cpu);
 }
 
@@ -155,7 +247,8 @@ static __init void setup_cpu_entry_area_ptes(void)
 #ifdef CONFIG_X86_32
 	unsigned long start, end;
 
-	BUILD_BUG_ON(CPU_ENTRY_AREA_PAGES * PAGE_SIZE < CPU_ENTRY_AREA_MAP_SIZE);
+	/* The +1 is for the readonly IDT: */
+	BUILD_BUG_ON((CPU_ENTRY_AREA_PAGES+1)*PAGE_SIZE != CPU_ENTRY_AREA_MAP_SIZE);
 	BUG_ON(CPU_ENTRY_AREA_BASE & ~PMD_MASK);
 
 	start = CPU_ENTRY_AREA_BASE;
@@ -170,6 +263,8 @@ static __init void setup_cpu_entry_area_ptes(void)
 void __init setup_cpu_entry_areas(void)
 {
 	unsigned int cpu;
+
+	init_cea_offsets();
 
 	setup_cpu_entry_area_ptes();
 

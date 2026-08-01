@@ -1,19 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ARM DynamIQ Shared Unit (DSU) PMU driver
  *
  * Copyright (C) ARM Limited, 2017.
  *
  * Based on ARM CCI-PMU, ARMv8 PMU-v3 drivers.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
  */
 
 #define PMUNAME		"arm_dsu"
 #define DRVNAME		PMUNAME "_pmu"
 #define pr_fmt(fmt)	DRVNAME ": " fmt
 
+#include <linux/acpi.h>
 #include <linux/bitmap.h>
 #include <linux/bitops.h>
 #include <linux/bug.h>
@@ -22,7 +20,7 @@
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/perf_event.h>
 #include <linux/platform_device.h>
 #include <linux/spinlock.h>
@@ -68,13 +66,6 @@
  */
 #define DSU_PMU_IDX_CYCLE_COUNTER	31
 
-/* All event counters are 32bit, with a 64bit Cycle counter */
-#define DSU_PMU_COUNTER_WIDTH(idx)	\
-	(((idx) == DSU_PMU_IDX_CYCLE_COUNTER) ? 64 : 32)
-
-#define DSU_PMU_COUNTER_MASK(idx)	\
-	GENMASK_ULL((DSU_PMU_COUNTER_WIDTH((idx)) - 1), 0)
-
 #define DSU_EXT_ATTR(_name, _func, _config)		\
 	(&((struct dev_ext_attribute[]) {				\
 		{							\
@@ -87,7 +78,7 @@
 	DSU_EXT_ATTR(_name, dsu_pmu_sysfs_event_show, (unsigned long)_config)
 
 #define DSU_FORMAT_ATTR(_name, _config)		\
-	DSU_EXT_ATTR(_name, dsu_pmu_sysfs_format_show, (char *)_config)
+	DSU_EXT_ATTR(_name, device_show_string, _config)
 
 #define DSU_CPUMASK_ATTR(_name, _config)	\
 	DSU_EXT_ATTR(_name, dsu_pmu_cpumask_show, (unsigned long)_config)
@@ -109,6 +100,8 @@ struct dsu_hw_events {
  * @num_counters	: Number of event counters implemented by the PMU,
  *			  excluding the cycle counter.
  * @irq			: Interrupt line for counter overflow.
+ * @has_32b_pmevcntr	: Are the non-cycle counters only 32-bit?
+ * @has_pmccntr		: Do we even have a dedicated cycle counter?
  * @cpmceid_bitmap	: Bitmap for the availability of architected common
  *			  events (event_code < 0x40).
  */
@@ -122,6 +115,8 @@ struct dsu_pmu {
 	struct hlist_node		cpuhp_node;
 	s8				num_counters;
 	int				irq;
+	bool				has_32b_pmevcntr;
+	bool				has_pmccntr;
 	DECLARE_BITMAP(cpmceid_bitmap, DSU_PMU_MAX_COMMON_EVENTS);
 };
 
@@ -138,17 +133,7 @@ static ssize_t dsu_pmu_sysfs_event_show(struct device *dev,
 {
 	struct dev_ext_attribute *eattr = container_of(attr,
 					struct dev_ext_attribute, attr);
-	return snprintf(buf, PAGE_SIZE, "event=0x%lx\n",
-					 (unsigned long)eattr->var);
-}
-
-static ssize_t dsu_pmu_sysfs_format_show(struct device *dev,
-					 struct device_attribute *attr,
-					 char *buf)
-{
-	struct dev_ext_attribute *eattr = container_of(attr,
-					struct dev_ext_attribute, attr);
-	return snprintf(buf, PAGE_SIZE, "%s\n", (char *)eattr->var);
+	return sysfs_emit(buf, "event=0x%lx\n", (unsigned long)eattr->var);
 }
 
 static ssize_t dsu_pmu_cpumask_show(struct device *dev,
@@ -233,15 +218,6 @@ static const struct attribute_group *dsu_pmu_attr_groups[] = {
 	NULL,
 };
 
-static int dsu_pmu_get_online_cpu_any_but(struct dsu_pmu *dsu_pmu, int cpu)
-{
-	struct cpumask online_supported;
-
-	cpumask_and(&online_supported,
-			 &dsu_pmu->associated_cpus, cpu_online_mask);
-	return cpumask_any_but(&online_supported, cpu);
-}
-
 static inline bool dsu_pmu_counter_valid(struct dsu_pmu *dsu_pmu, u32 idx)
 {
 	return (idx < dsu_pmu->num_counters) ||
@@ -307,10 +283,9 @@ static int dsu_pmu_get_event_idx(struct dsu_hw_events *hw_events,
 	struct dsu_pmu *dsu_pmu = to_dsu_pmu(event->pmu);
 	unsigned long *used_mask = hw_events->used_mask;
 
-	if (evtype == DSU_PMU_EVT_CYCLES) {
-		if (test_and_set_bit(DSU_PMU_IDX_CYCLE_COUNTER, used_mask))
-			return -EAGAIN;
-		return DSU_PMU_IDX_CYCLE_COUNTER;
+	if (evtype == DSU_PMU_EVT_CYCLES && dsu_pmu->has_pmccntr) {
+		if (!test_and_set_bit(DSU_PMU_IDX_CYCLE_COUNTER, used_mask))
+			return DSU_PMU_IDX_CYCLE_COUNTER;
 	}
 
 	idx = find_first_zero_bit(used_mask, dsu_pmu->num_counters);
@@ -349,6 +324,11 @@ static inline void dsu_pmu_set_event(struct dsu_pmu *dsu_pmu,
 	raw_spin_unlock_irqrestore(&dsu_pmu->pmu_lock, flags);
 }
 
+static u64 dsu_pmu_counter_mask(struct hw_perf_event *hw)
+{
+	return (hw->flags && hw->idx != DSU_PMU_IDX_CYCLE_COUNTER) ? U32_MAX : U64_MAX;
+}
+
 static void dsu_pmu_event_update(struct perf_event *event)
 {
 	struct hw_perf_event *hwc = &event->hw;
@@ -360,7 +340,7 @@ static void dsu_pmu_event_update(struct perf_event *event)
 		new_count = dsu_pmu_read_counter(event);
 	} while (local64_cmpxchg(&hwc->prev_count, prev_count, new_count) !=
 			prev_count);
-	delta = (new_count - prev_count) & DSU_PMU_COUNTER_MASK(hwc->idx);
+	delta = (new_count - prev_count) & dsu_pmu_counter_mask(hwc);
 	local64_add(delta, &event->count);
 }
 
@@ -374,7 +354,7 @@ static inline u32 dsu_pmu_get_reset_overflow(void)
 	return __dsu_pmu_get_reset_overflow();
 }
 
-/**
+/*
  * dsu_pmu_set_event_period: Set the period for the counter.
  *
  * All DSU PMU event counters, except the cycle counter are 32bit
@@ -383,8 +363,7 @@ static inline u32 dsu_pmu_get_reset_overflow(void)
  */
 static void dsu_pmu_set_event_period(struct perf_event *event)
 {
-	int idx = event->hw.idx;
-	u64 val = DSU_PMU_COUNTER_MASK(idx) >> 1;
+	u64 val = dsu_pmu_counter_mask(&event->hw) >> 1;
 
 	local64_set(&event->hw.prev_count, val);
 	dsu_pmu_write_counter(event, val);
@@ -562,13 +541,7 @@ static int dsu_pmu_event_init(struct perf_event *event)
 		return -EINVAL;
 	}
 
-	if (has_branch_stack(event) ||
-	    event->attr.exclude_user ||
-	    event->attr.exclude_kernel ||
-	    event->attr.exclude_hv ||
-	    event->attr.exclude_idle ||
-	    event->attr.exclude_host ||
-	    event->attr.exclude_guest) {
+	if (has_branch_stack(event)) {
 		dev_dbg(dsu_pmu->pmu.dev, "Can't support filtering\n");
 		return -EINVAL;
 	}
@@ -591,6 +564,7 @@ static int dsu_pmu_event_init(struct perf_event *event)
 		return -EINVAL;
 
 	event->hw.config_base = event->attr.config;
+	event->hw.flags = dsu_pmu->has_32b_pmevcntr;
 	return 0;
 }
 
@@ -611,19 +585,20 @@ static struct dsu_pmu *dsu_pmu_alloc(struct platform_device *pdev)
 	return dsu_pmu;
 }
 
-/**
- * dsu_pmu_dt_get_cpus: Get the list of CPUs in the cluster.
+/*
+ * dsu_pmu_dt_get_cpus: Get the list of CPUs in the cluster
+ * from device tree.
  */
-static int dsu_pmu_dt_get_cpus(struct device_node *dev, cpumask_t *mask)
+static int dsu_pmu_dt_get_cpus(struct device *dev, cpumask_t *mask)
 {
 	int i = 0, n, cpu;
 	struct device_node *cpu_node;
 
-	n = of_count_phandle_with_args(dev, "cpus", NULL);
+	n = of_count_phandle_with_args(dev->of_node, "cpus", NULL);
 	if (n <= 0)
 		return -ENODEV;
 	for (; i < n; i++) {
-		cpu_node = of_parse_phandle(dev, "cpus", i);
+		cpu_node = of_parse_phandle(dev->of_node, "cpus", i);
 		if (!cpu_node)
 			break;
 		cpu = of_cpu_node_to_id(cpu_node);
@@ -637,6 +612,36 @@ static int dsu_pmu_dt_get_cpus(struct device_node *dev, cpumask_t *mask)
 			continue;
 		cpumask_set_cpu(cpu, mask);
 	}
+	return 0;
+}
+
+/*
+ * dsu_pmu_acpi_get_cpus: Get the list of CPUs in the cluster
+ * from ACPI.
+ */
+static int dsu_pmu_acpi_get_cpus(struct device *dev, cpumask_t *mask)
+{
+#ifdef CONFIG_ACPI
+	struct acpi_device *parent_adev = acpi_dev_parent(ACPI_COMPANION(dev));
+	int cpu;
+
+	/*
+	 * A dsu pmu node is inside a cluster parent node along with cpu nodes.
+	 * We need to find out all cpus that have the same parent with this pmu.
+	 */
+	for_each_possible_cpu(cpu) {
+		struct acpi_device *acpi_dev;
+		struct device *cpu_dev = get_cpu_device(cpu);
+
+		if (!cpu_dev)
+			continue;
+
+		acpi_dev = ACPI_COMPANION(cpu_dev);
+		if (acpi_dev && acpi_dev_parent(acpi_dev) == parent_adev)
+			cpumask_set_cpu(cpu, mask);
+	}
+#endif
+
 	return 0;
 }
 
@@ -660,12 +665,20 @@ static void dsu_pmu_probe_pmu(struct dsu_pmu *dsu_pmu)
 	cpmceid[1] = __dsu_pmu_read_pmceid(1);
 	bitmap_from_arr32(dsu_pmu->cpmceid_bitmap, cpmceid,
 			  DSU_PMU_MAX_COMMON_EVENTS);
+	/* Newer DSUs have 64-bit counters */
+	__dsu_pmu_write_counter(0, U64_MAX);
+	if (__dsu_pmu_read_counter(0) != U64_MAX)
+		dsu_pmu->has_32b_pmevcntr = true;
+	/* On even newer DSUs, PMCCNTR is RAZ/WI */
+	__dsu_pmu_write_pmccntr(U64_MAX);
+	if (__dsu_pmu_read_pmccntr() == U64_MAX)
+		dsu_pmu->has_pmccntr = true;
 }
 
 static void dsu_pmu_set_active_cpu(int cpu, struct dsu_pmu *dsu_pmu)
 {
 	cpumask_set_cpu(cpu, &dsu_pmu->active_cpu);
-	if (irq_set_affinity_hint(dsu_pmu->irq, &dsu_pmu->active_cpu))
+	if (irq_set_affinity(dsu_pmu->irq, &dsu_pmu->active_cpu))
 		pr_warn("Failed to set irq affinity to %d\n", cpu);
 }
 
@@ -685,6 +698,7 @@ static int dsu_pmu_device_probe(struct platform_device *pdev)
 {
 	int irq, rc;
 	struct dsu_pmu *dsu_pmu;
+	struct fwnode_handle *fwnode = dev_fwnode(&pdev->dev);
 	char *name;
 	static atomic_t pmu_idx = ATOMIC_INIT(-1);
 
@@ -692,17 +706,21 @@ static int dsu_pmu_device_probe(struct platform_device *pdev)
 	if (IS_ERR(dsu_pmu))
 		return PTR_ERR(dsu_pmu);
 
-	rc = dsu_pmu_dt_get_cpus(pdev->dev.of_node, &dsu_pmu->associated_cpus);
+	if (is_of_node(fwnode))
+		rc = dsu_pmu_dt_get_cpus(&pdev->dev, &dsu_pmu->associated_cpus);
+	else if (is_acpi_device_node(fwnode))
+		rc = dsu_pmu_acpi_get_cpus(&pdev->dev, &dsu_pmu->associated_cpus);
+	else
+		return -ENOENT;
+
 	if (rc) {
 		dev_warn(&pdev->dev, "Failed to parse the CPUs\n");
 		return rc;
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_warn(&pdev->dev, "Failed to find IRQ\n");
+	if (irq < 0)
 		return -EINVAL;
-	}
 
 	name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "%s_%d",
 				PMUNAME, atomic_inc_return(&pmu_idx));
@@ -724,6 +742,7 @@ static int dsu_pmu_device_probe(struct platform_device *pdev)
 
 	dsu_pmu->pmu = (struct pmu) {
 		.task_ctx_nr	= perf_invalid_context,
+		.parent		= &pdev->dev,
 		.module		= THIS_MODULE,
 		.pmu_enable	= dsu_pmu_enable,
 		.pmu_disable	= dsu_pmu_disable,
@@ -735,38 +754,46 @@ static int dsu_pmu_device_probe(struct platform_device *pdev)
 		.read		= dsu_pmu_read,
 
 		.attr_groups	= dsu_pmu_attr_groups,
+		.capabilities	= PERF_PMU_CAP_NO_EXCLUDE,
 	};
 
 	rc = perf_pmu_register(&dsu_pmu->pmu, name, -1);
 	if (rc) {
 		cpuhp_state_remove_instance(dsu_pmu_cpuhp_state,
 						 &dsu_pmu->cpuhp_node);
-		irq_set_affinity_hint(dsu_pmu->irq, NULL);
 	}
 
 	return rc;
 }
 
-static int dsu_pmu_device_remove(struct platform_device *pdev)
+static void dsu_pmu_device_remove(struct platform_device *pdev)
 {
 	struct dsu_pmu *dsu_pmu = platform_get_drvdata(pdev);
 
 	perf_pmu_unregister(&dsu_pmu->pmu);
 	cpuhp_state_remove_instance(dsu_pmu_cpuhp_state, &dsu_pmu->cpuhp_node);
-	irq_set_affinity_hint(dsu_pmu->irq, NULL);
-
-	return 0;
 }
 
 static const struct of_device_id dsu_pmu_of_match[] = {
 	{ .compatible = "arm,dsu-pmu", },
 	{},
 };
+MODULE_DEVICE_TABLE(of, dsu_pmu_of_match);
+
+#ifdef CONFIG_ACPI
+static const struct acpi_device_id dsu_pmu_acpi_match[] = {
+	{ "ARMHD500", 0},
+	{},
+};
+MODULE_DEVICE_TABLE(acpi, dsu_pmu_acpi_match);
+#endif
 
 static struct platform_driver dsu_pmu_driver = {
 	.driver = {
 		.name	= DRVNAME,
 		.of_match_table = of_match_ptr(dsu_pmu_of_match),
+		.acpi_match_table = ACPI_PTR(dsu_pmu_acpi_match),
+		.suppress_bind_attrs = true,
 	},
 	.probe = dsu_pmu_device_probe,
 	.remove = dsu_pmu_device_remove,
@@ -792,19 +819,19 @@ static int dsu_pmu_cpu_online(unsigned int cpu, struct hlist_node *node)
 
 static int dsu_pmu_cpu_teardown(unsigned int cpu, struct hlist_node *node)
 {
-	int dst;
-	struct dsu_pmu *dsu_pmu = hlist_entry_safe(node, struct dsu_pmu,
-						   cpuhp_node);
+	struct dsu_pmu *dsu_pmu;
+	unsigned int dst;
+
+	dsu_pmu = hlist_entry_safe(node, struct dsu_pmu, cpuhp_node);
 
 	if (!cpumask_test_and_clear_cpu(cpu, &dsu_pmu->active_cpu))
 		return 0;
 
-	dst = dsu_pmu_get_online_cpu_any_but(dsu_pmu, cpu);
+	dst = cpumask_any_and_but(&dsu_pmu->associated_cpus,
+				  cpu_online_mask, cpu);
 	/* If there are no active CPUs in the DSU, leave IRQ disabled */
-	if (dst >= nr_cpu_ids) {
-		irq_set_affinity_hint(dsu_pmu->irq, NULL);
+	if (dst >= nr_cpu_ids)
 		return 0;
-	}
 
 	perf_pmu_migrate_context(&dsu_pmu->pmu, cpu, dst);
 	dsu_pmu_set_active_cpu(dst, dsu_pmu);
@@ -823,7 +850,11 @@ static int __init dsu_pmu_init(void)
 	if (ret < 0)
 		return ret;
 	dsu_pmu_cpuhp_state = ret;
-	return platform_driver_register(&dsu_pmu_driver);
+	ret = platform_driver_register(&dsu_pmu_driver);
+	if (ret)
+		cpuhp_remove_multi_state(dsu_pmu_cpuhp_state);
+
+	return ret;
 }
 
 static void __exit dsu_pmu_exit(void)
@@ -835,7 +866,6 @@ static void __exit dsu_pmu_exit(void)
 module_init(dsu_pmu_init);
 module_exit(dsu_pmu_exit);
 
-MODULE_DEVICE_TABLE(of, dsu_pmu_of_match);
 MODULE_DESCRIPTION("Perf driver for ARM DynamIQ Shared Unit");
 MODULE_AUTHOR("Suzuki K Poulose <suzuki.poulose@arm.com>");
 MODULE_LICENSE("GPL v2");

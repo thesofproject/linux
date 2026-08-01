@@ -1,34 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * runlist.h - Defines for runlist handling in NTFS Linux kernel driver.
- *	       Part of the Linux-NTFS project.
+ * Defines for runlist handling in NTFS Linux kernel driver.
  *
  * Copyright (c) 2001-2005 Anton Altaparmakov
  * Copyright (c) 2002 Richard Russon
- *
- * This program/include file is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as published
- * by the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program/include file is distributed in the hope that it will be
- * useful, but WITHOUT ANY WARRANTY; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program (in the main directory of the Linux-NTFS
- * distribution in the file COPYING); if not, write to the Free Software
- * Foundation,Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Copyright (c) 2025 LG Electronics Co., Ltd.
  */
 
 #ifndef _LINUX_NTFS_RUNLIST_H
 #define _LINUX_NTFS_RUNLIST_H
 
-#include "types.h"
-#include "layout.h"
 #include "volume.h"
 
-/**
+/*
  * runlist_element - in memory vcn to lcn mapping array element
  * @vcn:	starting vcn of the current array element
  * @lcn:	starting lcn of the current array element
@@ -38,65 +22,76 @@
  *
  * When lcn == -1 this means that the count vcns starting at vcn are not
  * physically allocated (i.e. this is a hole / data is sparse).
+ *
+ * In memory vcn to lcn mapping structure element.
+ * @vcn: vcn = Starting virtual cluster number.
+ * @lcn: lcn = Starting logical cluster number.
+ * @length: Run length in clusters.
  */
-typedef struct {	/* In memory vcn to lcn mapping structure element. */
-	VCN vcn;	/* vcn = Starting virtual cluster number. */
-	LCN lcn;	/* lcn = Starting logical cluster number. */
-	s64 length;	/* Run length in clusters. */
-} runlist_element;
+struct runlist_element {
+	s64 vcn;
+	s64 lcn;
+	s64 length;
+};
 
-/**
+/*
  * runlist - in memory vcn to lcn mapping array including a read/write lock
  * @rl:		pointer to an array of runlist elements
  * @lock:	read/write spinlock for serializing access to @rl
- *
+ * @rl_hint:	hint/cache pointing to the last accessed runlist element
  */
-typedef struct {
-	runlist_element *rl;
+struct runlist {
+	struct runlist_element *rl;
 	struct rw_semaphore lock;
-} runlist;
+	size_t count;
+	int rl_hint;
+};
 
-static inline void ntfs_init_runlist(runlist *rl)
+static inline void ntfs_init_runlist(struct runlist *rl)
 {
 	rl->rl = NULL;
 	init_rwsem(&rl->lock);
+	rl->count = 0;
+	rl->rl_hint = -1;
 }
 
-typedef enum {
-	LCN_HOLE		= -1,	/* Keep this as highest value or die! */
-	LCN_RL_NOT_MAPPED	= -2,
-	LCN_ENOENT		= -3,
-	LCN_ENOMEM		= -4,
-	LCN_EIO			= -5,
-} LCN_SPECIAL_VALUES;
+enum {
+	LCN_DELALLOC		= -1,
+	LCN_HOLE		= -2,
+	LCN_RL_NOT_MAPPED	= -3,
+	LCN_ENOENT		= -4,
+	LCN_ENOMEM		= -5,
+	LCN_EIO			= -6,
+	LCN_EINVAL		= -7,
+};
 
-extern runlist_element *ntfs_runlists_merge(runlist_element *drl,
-		runlist_element *srl);
-
-extern runlist_element *ntfs_mapping_pairs_decompress(const ntfs_volume *vol,
-		const ATTR_RECORD *attr, runlist_element *old_rl);
-
-extern LCN ntfs_rl_vcn_to_lcn(const runlist_element *rl, const VCN vcn);
-
-#ifdef NTFS_RW
-
-extern runlist_element *ntfs_rl_find_vcn_nolock(runlist_element *rl,
-		const VCN vcn);
-
-extern int ntfs_get_size_for_mapping_pairs(const ntfs_volume *vol,
-		const runlist_element *rl, const VCN first_vcn,
-		const VCN last_vcn);
-
-extern int ntfs_mapping_pairs_build(const ntfs_volume *vol, s8 *dst,
-		const int dst_len, const runlist_element *rl,
-		const VCN first_vcn, const VCN last_vcn, VCN *const stop_vcn);
-
-extern int ntfs_rl_truncate_nolock(const ntfs_volume *vol,
-		runlist *const runlist, const s64 new_length);
-
-int ntfs_rl_punch_nolock(const ntfs_volume *vol, runlist *const runlist,
-		const VCN start, const s64 length);
-
-#endif /* NTFS_RW */
-
+struct runlist_element *ntfs_runlists_merge(struct runlist *d_runlist,
+		struct runlist_element *srl, size_t s_rl_count,
+		size_t *new_rl_count);
+struct runlist_element *ntfs_mapping_pairs_decompress(const struct ntfs_volume *vol,
+		const struct attr_record *attr, struct runlist *old_runlist,
+		size_t *new_rl_count);
+s64 ntfs_rl_vcn_to_lcn(const struct runlist_element *rl, const s64 vcn);
+struct runlist_element *ntfs_rl_find_vcn_nolock(struct runlist_element *rl, const s64 vcn);
+int ntfs_get_size_for_mapping_pairs(const struct ntfs_volume *vol,
+		const struct runlist_element *rl, const s64 first_vcn,
+		const s64 last_vcn, int max_mp_size);
+int ntfs_mapping_pairs_build(const struct ntfs_volume *vol, s8 *dst,
+		const int dst_len, const struct runlist_element *rl,
+		const s64 first_vcn, const s64 last_vcn, s64 *const stop_vcn,
+		struct runlist_element **stop_rl, unsigned int *de_cluster_count);
+int ntfs_rl_truncate_nolock(const struct ntfs_volume *vol,
+		struct runlist *const runlist, const s64 new_length);
+int ntfs_rl_sparse(struct runlist_element *rl);
+s64 ntfs_rl_get_compressed_size(struct ntfs_volume *vol, struct runlist_element *rl);
+struct runlist_element *ntfs_rl_insert_range(struct runlist_element *dst_rl, int dst_cnt,
+		struct runlist_element *src_rl, int src_cnt, size_t *new_cnt);
+struct runlist_element *ntfs_rl_punch_hole(struct runlist_element *dst_rl, int dst_cnt,
+		s64 start_vcn, s64 len, struct runlist_element **punch_rl,
+		size_t *new_rl_cnt);
+struct runlist_element *ntfs_rl_collapse_range(struct runlist_element *dst_rl, int dst_cnt,
+		s64 start_vcn, s64 len, struct runlist_element **punch_rl,
+		size_t *new_rl_cnt);
+struct runlist_element *ntfs_rl_realloc(struct runlist_element *rl, int old_size,
+		int new_size);
 #endif /* _LINUX_NTFS_RUNLIST_H */

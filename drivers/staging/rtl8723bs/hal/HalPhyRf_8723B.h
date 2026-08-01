@@ -1,15 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2011 Realtek Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
  *
  ******************************************************************************/
 
@@ -23,19 +15,11 @@
 #define AVG_THERMAL_NUM_8723B		4
 #define	RF_T_METER_8723B					0x42	/*  */
 
-
-void ConfigureTxpowerTrack_8723B(PTXPWRTRACK_CFG	pConfig);
-
-void DoIQK_8723B(
-	PDM_ODM_T pDM_Odm,
-	u8 DeltaThermalIndex,
-	u8 ThermalValue,
-	u8 Threshold
-);
+void ConfigureTxpowerTrack_8723B(struct txpwrtrack_cfg *pConfig);
 
 void ODM_TxPwrTrackSetPwr_8723B(
-	PDM_ODM_T pDM_Odm,
-	PWRTRACK_METHOD Method,
+	struct dm_odm_t *pDM_Odm,
+	enum pwrtrack_method Method,
 	u8 RFPath,
 	u8 ChannelMappedIndex
 );
@@ -49,18 +33,17 @@ void PHY_IQCalibrate_8723B(
 	u8 RF_Path
 );
 
-void ODM_SetIQCbyRFpath(PDM_ODM_T pDM_Odm, u32 RFpath);
+void ODM_SetIQCbyRFpath(struct dm_odm_t *pDM_Odm, u32 RFpath);
 
 /*  */
 /*  LC calibrate */
 /*  */
-void PHY_LCCalibrate_8723B(PDM_ODM_T pDM_Odm);
+void PHY_LCCalibrate_8723B(struct dm_odm_t *pDM_Odm);
 
 /*  */
 /*  AP calibrate */
 /*  */
 void PHY_DigitalPredistortion_8723B(struct adapter *padapter);
-
 
 void _PHY_SaveADDARegisters_8723B(
 	struct adapter *padapter,

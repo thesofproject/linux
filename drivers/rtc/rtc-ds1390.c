@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * rtc-ds1390.c -- driver for the Dallas/Maxim DS1390/93/94 SPI RTC
  *
  * Copyright (C) 2008 Mercury IMC Ltd
  * Written by Mark Jackson <mpfj@mimc.co.uk>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * NOTE: Currently this driver only supports the bare minimum for read
  * and write the RTC. The extra features provided by the chip family
@@ -137,7 +134,7 @@ static int ds1390_read_time(struct device *dev, struct rtc_time *dt)
 	chip->txrx_buf[0] = DS1390_REG_SECONDS;
 
 	/* do the i/o */
-	status = spi_write_then_read(spi, chip->txrx_buf, 1, chip->txrx_buf, 8);
+	status = spi_write_then_read(spi, chip->txrx_buf, 1, chip->txrx_buf, 7);
 	if (status != 0)
 		return status;
 
@@ -216,11 +213,17 @@ static int ds1390_probe(struct spi_device *spi)
 	return res;
 }
 
-static const struct of_device_id ds1390_of_match[] = {
+static const struct of_device_id ds1390_of_match[] __maybe_unused = {
 	{ .compatible = "dallas,ds1390" },
 	{}
 };
 MODULE_DEVICE_TABLE(of, ds1390_of_match);
+
+static const struct spi_device_id ds1390_spi_ids[] = {
+	{ .name = "ds1390" },
+	{}
+};
+MODULE_DEVICE_TABLE(spi, ds1390_spi_ids);
 
 static struct spi_driver ds1390_driver = {
 	.driver = {
@@ -228,6 +231,7 @@ static struct spi_driver ds1390_driver = {
 		.of_match_table = of_match_ptr(ds1390_of_match),
 	},
 	.probe	= ds1390_probe,
+	.id_table = ds1390_spi_ids,
 };
 
 module_spi_driver(ds1390_driver);

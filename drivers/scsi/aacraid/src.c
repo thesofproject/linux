@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	Adaptec AAC series RAID controller driver
  *	(c) Copyright 2001 Red Hat Inc.
@@ -9,25 +10,10 @@
  *               2010-2015 PMC-Sierra, Inc. (aacraid@pmc-sierra.com)
  *		 2016-2017 Microsemi Corp. (aacraid@microsemi.com)
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; see the file COPYING.  If not, write to
- * the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
- *
  * Module Name:
  *  src.c
  *
  * Abstract: Hardware Device Interface for PMC SRC based controllers
- *
  */
 
 #include <linux/kernel.h>
@@ -106,7 +92,7 @@ static irqreturn_t aac_src_intr_message(int irq, void *dev_id)
 			spin_lock_irqsave(&dev->sync_fib->event_lock, sflags);
 			if (dev->sync_fib->flags & FIB_CONTEXT_FLAG_WAIT) {
 				dev->management_fib_count--;
-				up(&dev->sync_fib->event_wait);
+				complete(&dev->sync_fib->event_wait);
 			}
 			spin_unlock_irqrestore(&dev->sync_fib->event_lock,
 						sflags);
@@ -205,7 +191,16 @@ static void aac_src_enable_interrupt_message(struct aac_dev *dev)
  *	@dev: Adapter
  *	@command: Command to execute
  *	@p1: first parameter
- *	@ret: adapter status
+ *	@p2: second parameter
+ *	@p3: third parameter
+ *	@p4: forth parameter
+ *	@p5: fifth parameter
+ *	@p6: sixth parameter
+ *	@status: adapter status
+ *	@r1: first return value
+ *	@r2: second return valu
+ *	@r3: third return value
+ *	@r4: forth return value
  *
  *	This routine will send a synchronous command to the adapter and wait
  *	for its	completion.
@@ -409,15 +404,17 @@ static void aac_src_start_adapter(struct aac_dev *dev)
 
 	init = dev->init;
 	if (dev->comm_interface == AAC_COMM_MESSAGE_TYPE3) {
-		init->r8.host_elapsed_seconds = cpu_to_le32(get_seconds());
+		init->r8.host_elapsed_seconds =
+			cpu_to_le32(ktime_get_real_seconds());
 		src_sync_cmd(dev, INIT_STRUCT_BASE_ADDRESS,
 			lower_32_bits(dev->init_pa),
 			upper_32_bits(dev->init_pa),
 			sizeof(struct _r8) +
-			(AAC_MAX_HRRQ - 1) * sizeof(struct _rrq),
+			AAC_MAX_HRRQ * sizeof(struct _rrq),
 			0, 0, 0, NULL, NULL, NULL, NULL, NULL);
 	} else {
-		init->r7.host_elapsed_seconds = cpu_to_le32(get_seconds());
+		init->r7.host_elapsed_seconds =
+			cpu_to_le32(ktime_get_real_seconds());
 		// We can only use a 32 bit address here
 		src_sync_cmd(dev, INIT_STRUCT_BASE_ADDRESS,
 			(u32)(ulong)dev->init_pa, 0, 0, 0, 0, 0,
@@ -614,6 +611,7 @@ static int aac_src_deliver_message(struct fib *fib)
 
 /**
  *	aac_src_ioremap
+ *	@dev: device ioremap
  *	@size: mapping resize request
  *
  */
@@ -644,6 +642,7 @@ static int aac_src_ioremap(struct aac_dev *dev, u32 size)
 
 /**
  *  aac_srcv_ioremap
+ *	@dev: device ioremap
  *	@size: mapping resize request
  *
  */
@@ -745,10 +744,20 @@ static bool aac_is_ctrl_up_and_running(struct aac_dev *dev)
 	return ctrl_up;
 }
 
+static void aac_src_drop_io(struct aac_dev *dev)
+{
+	if (!dev->soft_reset_support)
+		return;
+
+	aac_adapter_sync_cmd(dev, DROP_IO,
+			0, 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL, NULL);
+}
+
 static void aac_notify_fw_of_iop_reset(struct aac_dev *dev)
 {
 	aac_adapter_sync_cmd(dev, IOP_RESET_ALWAYS, 0, 0, 0, 0, 0, 0, NULL,
 						NULL, NULL, NULL, NULL);
+	aac_src_drop_io(dev);
 }
 
 static void aac_send_iop_reset(struct aac_dev *dev)
@@ -1155,7 +1164,7 @@ out:
 		dev_err(&dev->pdev->dev, "%s: %s status = %d", __func__,
 			state_str[state], rc);
 
-return rc;
+	return rc;
 }
 /**
  *  aac_srcv_init	-	initialize an SRCv card

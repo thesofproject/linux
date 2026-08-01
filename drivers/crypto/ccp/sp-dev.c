@@ -1,15 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AMD Secure Processor driver
  *
- * Copyright (C) 2017 Advanced Micro Devices, Inc.
+ * Copyright (C) 2017-2018 Advanced Micro Devices, Inc.
  *
  * Author: Tom Lendacky <thomas.lendacky@amd.com>
  * Author: Gary R Hook <gary.hook@amd.com>
  * Author: Brijesh Singh <brijesh.singh@amd.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -22,6 +19,7 @@
 #include <linux/types.h>
 #include <linux/ccp.h>
 
+#include "sev-dev.h"
 #include "ccp-dev.h"
 #include "sp-dev.h"
 
@@ -214,15 +212,10 @@ void sp_destroy(struct sp_device *sp)
 	sp_del_device(sp);
 }
 
-#ifdef CONFIG_PM
-int sp_suspend(struct sp_device *sp, pm_message_t state)
+int sp_suspend(struct sp_device *sp)
 {
-	int ret;
-
 	if (sp->dev_vdata->ccp_vdata) {
-		ret = ccp_dev_suspend(sp, state);
-		if (ret)
-			return ret;
+		ccp_dev_suspend(sp);
 	}
 
 	return 0;
@@ -230,17 +223,24 @@ int sp_suspend(struct sp_device *sp, pm_message_t state)
 
 int sp_resume(struct sp_device *sp)
 {
-	int ret;
-
 	if (sp->dev_vdata->ccp_vdata) {
-		ret = ccp_dev_resume(sp);
-		if (ret)
-			return ret;
+		ccp_dev_resume(sp);
 	}
 
 	return 0;
 }
-#endif
+
+int sp_restore(struct sp_device *sp)
+{
+	if (sp->psp_data) {
+		int ret = psp_restore(sp);
+
+		if (ret)
+			return ret;
+	}
+
+	return sp_resume(sp);
+}
 
 struct sp_device *sp_get_psp_master_device(void)
 {
@@ -266,7 +266,11 @@ unlock:
 static int __init sp_mod_init(void)
 {
 #ifdef CONFIG_X86
+	static bool initialized;
 	int ret;
+
+	if (initialized)
+		return 0;
 
 	ret = sp_pci_init();
 	if (ret)
@@ -275,6 +279,8 @@ static int __init sp_mod_init(void)
 #ifdef CONFIG_CRYPTO_DEV_SP_PSP
 	psp_pci_init();
 #endif
+
+	initialized = true;
 
 	return 0;
 #endif
@@ -291,6 +297,13 @@ static int __init sp_mod_init(void)
 
 	return -ENODEV;
 }
+
+#if IS_BUILTIN(CONFIG_KVM_AMD) && IS_ENABLED(CONFIG_KVM_AMD_SEV)
+int __init sev_module_init(void)
+{
+	return sp_mod_init();
+}
+#endif
 
 static void __exit sp_mod_exit(void)
 {

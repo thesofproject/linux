@@ -1,28 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright 2013 Emilio López
  *
  * Emilio López <emilio@elopez.com.ar>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 #include <linux/of_address.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
 #include "clk-factors.h"
 
-/**
+/*
  * sun4i_a10_get_mod0_factors() - calculates m, n factors for MOD0-style clocks
  * MOD0 rate is calculated as follows
  * rate = (parent_rate >> p) / (m + 1);
@@ -96,14 +88,12 @@ CLK_OF_DECLARE_DRIVER(sun4i_a10_mod0, "allwinner,sun4i-a10-mod0-clk",
 static int sun4i_a10_mod0_clk_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
-	struct resource *r;
 	void __iomem *reg;
 
 	if (!np)
 		return -ENODEV;
 
-	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	reg = devm_ioremap_resource(&pdev->dev, r);
+	reg = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(reg))
 		return PTR_ERR(reg);
 
@@ -140,8 +130,8 @@ static void __init sun9i_a80_mod0_setup(struct device_node *node)
 
 	reg = of_io_request_and_map(node, 0, of_node_full_name(node));
 	if (IS_ERR(reg)) {
-		pr_err("Could not get registers for mod0-clk: %s\n",
-		       node->name);
+		pr_err("Could not get registers for mod0-clk: %pOFn\n",
+		       node);
 		return;
 	}
 
@@ -306,15 +296,15 @@ static void __init sunxi_mmc_setup(struct device_node *node,
 
 	reg = of_io_request_and_map(node, 0, of_node_full_name(node));
 	if (IS_ERR(reg)) {
-		pr_err("Couldn't map the %s clock registers\n", node->name);
+		pr_err("Couldn't map the %pOFn clock registers\n", node);
 		return;
 	}
 
-	clk_data = kmalloc(sizeof(*clk_data), GFP_KERNEL);
+	clk_data = kmalloc_obj(*clk_data);
 	if (!clk_data)
 		return;
 
-	clk_data->clks = kcalloc(3, sizeof(*clk_data->clks), GFP_KERNEL);
+	clk_data->clks = kzalloc_objs(*clk_data->clks, 3);
 	if (!clk_data->clks)
 		goto err_free_data;
 
@@ -333,7 +323,7 @@ static void __init sunxi_mmc_setup(struct device_node *node,
 		};
 		struct mmc_phase *phase;
 
-		phase = kmalloc(sizeof(*phase), GFP_KERNEL);
+		phase = kmalloc_obj(*phase);
 		if (!phase)
 			continue;
 

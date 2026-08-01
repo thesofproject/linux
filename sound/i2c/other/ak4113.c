@@ -1,24 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Routines for control of the AK4113 via I2C/4-wire serial interface
  *  IEC958 (S/PDIF) receiver by Asahi Kasei
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
  *  Copyright (c) by Pavel Hofman <pavel.hofman@ivitera.com>
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/slab.h>
@@ -75,11 +60,11 @@ int snd_ak4113_create(struct snd_card *card, ak4113_read_t *read,
 	struct ak4113 *chip;
 	int err;
 	unsigned char reg;
-	static struct snd_device_ops ops = {
+	static const struct snd_device_ops ops = {
 		.dev_free =     snd_ak4113_dev_free,
 	};
 
-	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
+	chip = kzalloc_obj(*chip);
 	if (chip == NULL)
 		return -ENOMEM;
 	spin_lock_init(&chip->lock);
@@ -142,9 +127,9 @@ void snd_ak4113_reinit(struct ak4113 *chip)
 {
 	if (atomic_inc_return(&chip->wq_processing) == 1)
 		cancel_delayed_work_sync(&chip->work);
-	mutex_lock(&chip->reinit_mutex);
-	ak4113_init_regs(chip);
-	mutex_unlock(&chip->reinit_mutex);
+	scoped_guard(mutex, &chip->reinit_mutex) {
+		ak4113_init_regs(chip);
+	}
 	/* bring up statistics / event queing */
 	if (atomic_dec_and_test(&chip->wq_processing))
 		schedule_delayed_work(&chip->work, HZ / 10);
@@ -200,11 +185,10 @@ static int snd_ak4113_in_error_get(struct snd_kcontrol *kcontrol,
 {
 	struct ak4113 *chip = snd_kcontrol_chip(kcontrol);
 
-	spin_lock_irq(&chip->lock);
+	guard(spinlock_irq)(&chip->lock);
 	ucontrol->value.integer.value[0] =
 		chip->errors[kcontrol->private_value];
 	chip->errors[kcontrol->private_value] = 0;
-	spin_unlock_irq(&chip->lock);
 	return 0;
 }
 
@@ -250,14 +234,13 @@ static int snd_ak4113_rx_put(struct snd_kcontrol *kcontrol,
 	int change;
 	u8 old_val;
 
-	spin_lock_irq(&chip->lock);
+	guard(spinlock_irq)(&chip->lock);
 	old_val = chip->regmap[AK4113_REG_IO1];
 	change = ucontrol->value.integer.value[0] != AK4113_IPS(old_val);
 	if (change)
 		reg_write(chip, AK4113_REG_IO1,
 				(old_val & (~AK4113_IPS(0xff))) |
 				(AK4113_IPS(ucontrol->value.integer.value[0])));
-	spin_unlock_irq(&chip->lock);
 	return change;
 }
 
@@ -364,7 +347,7 @@ static int snd_ak4113_spdif_qget(struct snd_kcontrol *kcontrol,
 }
 
 /* Don't forget to change AK4113_CONTROLS define!!! */
-static struct snd_kcontrol_new snd_ak4113_iec958_controls[] = {
+static const struct snd_kcontrol_new snd_ak4113_iec958_controls[] = {
 {
 	.iface =	SNDRV_CTL_ELEM_IFACE_PCM,
 	.name =		"IEC958 Parity Errors",
@@ -492,9 +475,8 @@ static void snd_ak4113_proc_regs_read(struct snd_info_entry *entry,
 
 static void snd_ak4113_proc_init(struct ak4113 *ak4113)
 {
-	struct snd_info_entry *entry;
-	if (!snd_card_proc_new(ak4113->card, "ak4113", &entry))
-		snd_info_set_text_ops(entry, ak4113, snd_ak4113_proc_regs_read);
+	snd_card_ro_proc_new(ak4113->card, "ak4113", ak4113,
+			     snd_ak4113_proc_regs_read);
 }
 
 int snd_ak4113_build(struct ak4113 *ak4113,
@@ -548,27 +530,27 @@ int snd_ak4113_check_rate_and_errors(struct ak4113 *ak4113, unsigned int flags)
 		goto __rate;
 	rcs0 = reg_read(ak4113, AK4113_REG_RCS0);
 	rcs2 = reg_read(ak4113, AK4113_REG_RCS2);
-	spin_lock_irqsave(&ak4113->lock, _flags);
-	if (rcs0 & AK4113_PAR)
-		ak4113->errors[AK4113_PARITY_ERRORS]++;
-	if (rcs0 & AK4113_V)
-		ak4113->errors[AK4113_V_BIT_ERRORS]++;
-	if (rcs2 & AK4113_CCRC)
-		ak4113->errors[AK4113_CCRC_ERRORS]++;
-	if (rcs2 & AK4113_QCRC)
-		ak4113->errors[AK4113_QCRC_ERRORS]++;
-	c0 = (ak4113->rcs0 & (AK4113_QINT | AK4113_CINT | AK4113_STC |
-				AK4113_AUDION | AK4113_AUTO | AK4113_UNLCK)) ^
-		(rcs0 & (AK4113_QINT | AK4113_CINT | AK4113_STC |
-			 AK4113_AUDION | AK4113_AUTO | AK4113_UNLCK));
-	c1 = (ak4113->rcs1 & (AK4113_DTSCD | AK4113_NPCM | AK4113_PEM |
-				AK4113_DAT | 0xf0)) ^
-		(rcs1 & (AK4113_DTSCD | AK4113_NPCM | AK4113_PEM |
-			 AK4113_DAT | 0xf0));
-	ak4113->rcs0 = rcs0 & ~(AK4113_QINT | AK4113_CINT | AK4113_STC);
-	ak4113->rcs1 = rcs1;
-	ak4113->rcs2 = rcs2;
-	spin_unlock_irqrestore(&ak4113->lock, _flags);
+	scoped_guard(spinlock_irqsave, &ak4113->lock) {
+		if (rcs0 & AK4113_PAR)
+			ak4113->errors[AK4113_PARITY_ERRORS]++;
+		if (rcs0 & AK4113_V)
+			ak4113->errors[AK4113_V_BIT_ERRORS]++;
+		if (rcs2 & AK4113_CCRC)
+			ak4113->errors[AK4113_CCRC_ERRORS]++;
+		if (rcs2 & AK4113_QCRC)
+			ak4113->errors[AK4113_QCRC_ERRORS]++;
+		c0 = (ak4113->rcs0 & (AK4113_QINT | AK4113_CINT | AK4113_STC |
+				      AK4113_AUDION | AK4113_AUTO | AK4113_UNLCK)) ^
+			(rcs0 & (AK4113_QINT | AK4113_CINT | AK4113_STC |
+				 AK4113_AUDION | AK4113_AUTO | AK4113_UNLCK));
+		c1 = (ak4113->rcs1 & (AK4113_DTSCD | AK4113_NPCM | AK4113_PEM |
+				      AK4113_DAT | 0xf0)) ^
+			(rcs1 & (AK4113_DTSCD | AK4113_NPCM | AK4113_PEM |
+				 AK4113_DAT | 0xf0));
+		ak4113->rcs0 = rcs0 & ~(AK4113_QINT | AK4113_CINT | AK4113_STC);
+		ak4113->rcs1 = rcs1;
+		ak4113->rcs2 = rcs2;
+	}
 
 	if (rcs0 & AK4113_PAR)
 		snd_ctl_notify(ak4113->card, SNDRV_CTL_EVENT_MASK_VALUE,
@@ -615,8 +597,6 @@ __rate:
 			(runtime->rate != res)) {
 		snd_pcm_stream_lock_irqsave(ak4113->substream, _flags);
 		if (snd_pcm_running(ak4113->substream)) {
-			/*printk(KERN_DEBUG "rate changed (%i <- %i)\n",
-			 * runtime->rate, res); */
 			snd_pcm_stop(ak4113->substream,
 					SNDRV_PCM_STATE_DRAINING);
 			wake_up(&runtime->sleep);

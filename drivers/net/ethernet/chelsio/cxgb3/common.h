@@ -36,6 +36,7 @@
 #include <linux/types.h>
 #include <linux/ctype.h>
 #include <linux/delay.h>
+#include <linux/hex.h>
 #include <linux/netdevice.h>
 #include <linux/ethtool.h>
 #include <linux/mdio.h>
@@ -676,8 +677,6 @@ void t3_link_changed(struct adapter *adapter, int port_id);
 void t3_link_fault(struct adapter *adapter, int port_id);
 int t3_link_start(struct cphy *phy, struct cmac *mac, struct link_config *lc);
 const struct adapter_info *t3_get_adapter_info(unsigned int board_id);
-int t3_seeprom_read(struct adapter *adapter, u32 addr, __le32 *data);
-int t3_seeprom_write(struct adapter *adapter, u32 addr, __le32 data);
 int t3_seeprom_wp(struct adapter *adapter, int enable);
 int t3_get_tp_version(struct adapter *adapter, u32 *vers);
 int t3_check_tpsram_version(struct adapter *adapter);
@@ -710,7 +709,7 @@ int t3_mac_enable(struct cmac *mac, int which);
 int t3_mac_disable(struct cmac *mac, int which);
 int t3_mac_set_mtu(struct cmac *mac, unsigned int mtu);
 int t3_mac_set_rx_mode(struct cmac *mac, struct net_device *dev);
-int t3_mac_set_address(struct cmac *mac, unsigned int idx, u8 addr[6]);
+int t3_mac_set_address(struct cmac *mac, unsigned int idx, const u8 addr[6]);
 int t3_mac_set_num_ucast(struct cmac *mac, int n);
 const struct mac_stats *t3_mac_update_stats(struct cmac *mac);
 int t3_mac_set_speed_duplex_fc(struct cmac *mac, int speed, int duplex, int fc);
@@ -770,4 +769,6 @@ int t3_xaui_direct_phy_prep(struct cphy *phy, struct adapter *adapter,
 			    int phy_addr, const struct mdio_ops *mdio_ops);
 int t3_aq100x_phy_prep(struct cphy *phy, struct adapter *adapter,
 			    int phy_addr, const struct mdio_ops *mdio_ops);
+
+extern struct workqueue_struct *cxgb3_wq;
 #endif				/* __CHELSIO_COMMON_H */

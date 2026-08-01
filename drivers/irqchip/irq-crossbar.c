@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  drivers/irqchip/irq-crossbar.c
  *
  *  Copyright (C) 2013 Texas Instruments Incorporated - http://www.ti.com
  *  Author: Sricharan R <r.sricharan@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 #include <linux/err.h>
 #include <linux/io.h>
@@ -162,11 +158,17 @@ static void crossbar_domain_free(struct irq_domain *domain, unsigned int virq,
 	for (i = 0; i < nr_irqs; i++) {
 		struct irq_data *d = irq_domain_get_irq_data(domain, virq + i);
 
+		/*
+		 * irq_map[] is indexed by GIC SPI number. The parent domain's
+		 * hwirq contains the GIC interrupt number (GIC SPI +
+		 * GIC_IRQ_START).
+		 */
+		cb->irq_map[d->parent_data->hwirq - GIC_IRQ_START] = IRQ_FREE;
+		cb->write(d->parent_data->hwirq - GIC_IRQ_START, cb->safe_map);
 		irq_domain_reset_irq_data(d);
-		cb->irq_map[d->hwirq] = IRQ_FREE;
-		cb->write(d->hwirq, cb->safe_map);
 	}
 	raw_spin_unlock(&cb->lock);
+	irq_domain_free_irqs_parent(domain, virq, nr_irqs);
 }
 
 static int crossbar_domain_translate(struct irq_domain *d,
@@ -203,7 +205,7 @@ static int __init crossbar_of_init(struct device_node *node)
 	const __be32 *irqsr;
 	int ret = -ENOMEM;
 
-	cb = kzalloc(sizeof(*cb), GFP_KERNEL);
+	cb = kzalloc_obj(*cb);
 
 	if (!cb)
 		return ret;
@@ -272,7 +274,7 @@ static int __init crossbar_of_init(struct device_node *node)
 	}
 
 
-	cb->register_offsets = kcalloc(max, sizeof(int), GFP_KERNEL);
+	cb->register_offsets = kzalloc_objs(int, max);
 	if (!cb->register_offsets)
 		goto err_irq_map;
 
@@ -355,10 +357,8 @@ static int __init irqcrossbar_init(struct device_node *node,
 	if (err)
 		return err;
 
-	domain = irq_domain_add_hierarchy(parent_domain, 0,
-					  cb->max_crossbar_sources,
-					  node, &crossbar_domain_ops,
-					  NULL);
+	domain = irq_domain_create_hierarchy(parent_domain, 0, cb->max_crossbar_sources,
+					     of_fwnode_handle(node), &crossbar_domain_ops, NULL);
 	if (!domain) {
 		pr_err("%pOF: failed to allocated domain\n", node);
 		return -ENOMEM;

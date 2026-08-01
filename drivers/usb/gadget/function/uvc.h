@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0+
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  *	uvc_gadget.h  --  USB Video Class Gadget driver
  *
@@ -9,51 +9,27 @@
 #ifndef _UVC_GADGET_H_
 #define _UVC_GADGET_H_
 
-#include <linux/ioctl.h>
-#include <linux/types.h>
-#include <linux/usb/ch9.h>
+#include <linux/list.h>
+#include <linux/mutex.h>
+#include <linux/spinlock.h>
+#include <linux/usb/composite.h>
+#include <linux/videodev2.h>
+#include <linux/wait.h>
 
-#define UVC_EVENT_FIRST			(V4L2_EVENT_PRIVATE_START + 0)
-#define UVC_EVENT_CONNECT		(V4L2_EVENT_PRIVATE_START + 0)
-#define UVC_EVENT_DISCONNECT		(V4L2_EVENT_PRIVATE_START + 1)
-#define UVC_EVENT_STREAMON		(V4L2_EVENT_PRIVATE_START + 2)
-#define UVC_EVENT_STREAMOFF		(V4L2_EVENT_PRIVATE_START + 3)
-#define UVC_EVENT_SETUP			(V4L2_EVENT_PRIVATE_START + 4)
-#define UVC_EVENT_DATA			(V4L2_EVENT_PRIVATE_START + 5)
-#define UVC_EVENT_LAST			(V4L2_EVENT_PRIVATE_START + 5)
+#include <media/v4l2-device.h>
+#include <media/v4l2-dev.h>
+#include <media/v4l2-fh.h>
 
-struct uvc_request_data {
-	__s32 length;
-	__u8 data[60];
-};
+#include "uvc_queue.h"
 
-struct uvc_event {
-	union {
-		enum usb_device_speed speed;
-		struct usb_ctrlrequest req;
-		struct uvc_request_data data;
-	};
-};
-
-#define UVCIOC_SEND_RESPONSE		_IOW('U', 1, struct uvc_request_data)
-
-#define UVC_INTF_CONTROL		0
-#define UVC_INTF_STREAMING		1
+struct usb_ep;
+struct usb_request;
+struct uvc_descriptor_header;
+struct uvc_device;
 
 /* ------------------------------------------------------------------------
  * Debugging, printing and logging
  */
-
-#ifdef __KERNEL__
-
-#include <linux/usb.h>	/* For usb_endpoint_* */
-#include <linux/usb/composite.h>
-#include <linux/usb/gadget.h>
-#include <linux/videodev2.h>
-#include <media/v4l2-fh.h>
-#include <media/v4l2-device.h>
-
-#include "uvc_queue.h"
 
 #define UVC_TRACE_PROBE				(1 << 0)
 #define UVC_TRACE_DESCR				(1 << 1)
@@ -77,29 +53,53 @@ extern unsigned int uvc_gadget_trace_param;
 			printk(KERN_DEBUG "uvcvideo: " msg); \
 	} while (0)
 
-#define uvc_warn_once(dev, warn, msg...) \
-	do { \
-		if (!test_and_set_bit(warn, &dev->warnings)) \
-			printk(KERN_INFO "uvcvideo: " msg); \
-	} while (0)
-
-#define uvc_printk(level, msg...) \
-	printk(level "uvcvideo: " msg)
+#define uvcg_dbg(f, fmt, args...) \
+	dev_dbg(&(f)->config->cdev->gadget->dev, "%s: " fmt, (f)->name, ##args)
+#define uvcg_info(f, fmt, args...) \
+	dev_info(&(f)->config->cdev->gadget->dev, "%s: " fmt, (f)->name, ##args)
+#define uvcg_warn(f, fmt, args...) \
+	dev_warn(&(f)->config->cdev->gadget->dev, "%s: " fmt, (f)->name, ##args)
+#define uvcg_err(f, fmt, args...) \
+	dev_err(&(f)->config->cdev->gadget->dev, "%s: " fmt, (f)->name, ##args)
 
 /* ------------------------------------------------------------------------
  * Driver specific constants
  */
 
-#define UVC_NUM_REQUESTS			4
 #define UVC_MAX_REQUEST_SIZE			64
 #define UVC_MAX_EVENTS				4
+
+#define UVCG_REQUEST_HEADER_LEN			12
+
+#define UVCG_REQ_MAX_INT_COUNT			16
+#define UVCG_REQ_MAX_ZERO_COUNT			(2 * UVCG_REQ_MAX_INT_COUNT)
+
+#define UVCG_STREAMING_MIN_BUFFERS		2
 
 /* ------------------------------------------------------------------------
  * Structures
  */
+struct uvc_request {
+	struct usb_request *req;
+	u8 *req_buffer;
+	struct uvc_video *video;
+	struct sg_table sgt;
+	u8 header[UVCG_REQUEST_HEADER_LEN];
+	struct uvc_buffer *last_buf;
+	struct list_head list;
+};
 
 struct uvc_video {
+	struct uvc_device *uvc;
 	struct usb_ep *ep;
+
+	struct work_struct pump;
+	struct workqueue_struct *async_wq;
+
+	struct kthread_worker   *kworker;
+	struct kthread_work     hw_submit;
+
+	atomic_t queued;
 
 	/* Frame parameters */
 	u8 bpp;
@@ -107,14 +107,30 @@ struct uvc_video {
 	unsigned int width;
 	unsigned int height;
 	unsigned int imagesize;
+	unsigned int interval;	/* in 100ns units */
 	struct mutex mutex;	/* protects frame parameters */
 
+	unsigned int uvc_num_requests;
+
+	unsigned int reqs_per_frame;
+
 	/* Requests */
+	bool is_enabled; /* tracks whether video stream is enabled */
 	unsigned int req_size;
-	struct usb_request *req[UVC_NUM_REQUESTS];
-	__u8 *req_buffer[UVC_NUM_REQUESTS];
+	unsigned int max_req_size;
+	struct list_head ureqs; /* all uvc_requests allocated by uvc_video */
+
+	/* USB requests that the video pump thread can encode into */
 	struct list_head req_free;
+
+	/*
+	 * USB requests video pump thread has already encoded into. These are
+	 * ready to be queued to the endpoint.
+	 */
+	struct list_head req_ready;
 	spinlock_t req_lock;
+
+	unsigned int req_int_count;
 
 	void (*encode) (struct usb_request *req, struct uvc_video *video,
 			struct uvc_buffer *buf);
@@ -139,6 +155,13 @@ struct uvc_device {
 	enum uvc_state state;
 	struct usb_function func;
 	struct uvc_video video;
+	struct completion *vdev_release_done;
+	struct mutex lock;	/* protects func_unbound and func_connected */
+	bool func_unbound;
+	bool func_connected;
+	wait_queue_head_t func_connected_queue;
+
+	struct uvcg_streaming_header *header;
 
 	/* Descriptors */
 	struct {
@@ -147,12 +170,14 @@ struct uvc_device {
 		const struct uvc_descriptor_header * const *fs_streaming;
 		const struct uvc_descriptor_header * const *hs_streaming;
 		const struct uvc_descriptor_header * const *ss_streaming;
+		struct list_head *extension_units;
 	} desc;
 
 	unsigned int control_intf;
-	struct usb_ep *control_ep;
+	struct usb_ep *interrupt_ep;
 	struct usb_request *control_req;
 	void *control_buf;
+	bool enable_interrupt_ep;
 
 	unsigned int streaming_intf;
 
@@ -169,22 +194,23 @@ static inline struct uvc_device *to_uvc(struct usb_function *f)
 struct uvc_file_handle {
 	struct v4l2_fh vfh;
 	struct uvc_video *device;
+	bool is_uvc_app_handle;
 };
 
 #define to_uvc_file_handle(handle) \
 	container_of(handle, struct uvc_file_handle, vfh)
 
+static inline struct uvc_file_handle *file_to_uvc_file_handle(struct file *filp)
+{
+	return container_of(file_to_v4l2_fh(filp), struct uvc_file_handle, vfh);
+}
+
 /* ------------------------------------------------------------------------
  * Functions
  */
 
-extern void uvc_function_setup_continue(struct uvc_device *uvc);
-extern void uvc_endpoint_stream(struct uvc_device *dev);
-
+extern void uvc_function_setup_continue(struct uvc_device *uvc, int disable_ep);
 extern void uvc_function_connect(struct uvc_device *uvc);
 extern void uvc_function_disconnect(struct uvc_device *uvc);
 
-#endif /* __KERNEL__ */
-
 #endif /* _UVC_GADGET_H_ */
-

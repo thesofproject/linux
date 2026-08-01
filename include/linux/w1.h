@@ -1,15 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (c) 2004 Evgeniy Polyakov <zbr@ioremap.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef __LINUX_W1_H
@@ -94,7 +85,8 @@ typedef void (*w1_slave_found_callback)(struct w1_master *, u64);
  *
  * @data: the first parameter in all the functions below
  *
- * @read_bit: Sample the line level @return the level read (0 or 1)
+ * @read_bit: Sample the line level
+ * @return the level read (0 or 1)
  *
  * @write_bit: Sets the line level
  *
@@ -104,7 +96,7 @@ typedef void (*w1_slave_found_callback)(struct w1_master *, u64);
  * touch_bit(1) = write-1 / read cycle
  * @return the bit read (0 or 1)
  *
- * @read_byte: Reads a bytes. Same as 8 touch_bit(1) calls.
+ * @read_byte: Reads a byte. Same as 8 touch_bit(1) calls.
  * @return the byte read
  *
  * @write_byte: Writes a byte. Same as 8 touch_bit(x) calls.
@@ -123,9 +115,12 @@ typedef void (*w1_slave_found_callback)(struct w1_master *, u64);
  * @set_pullup: Put out a strong pull-up pulse of the specified duration.
  * @return -1=Error, 0=completed
  *
- * @search: Really nice hardware can handles the different types of ROM search
+ * @search: Really nice hardware can handle the different types of ROM search
  * w1_master* is passed to the slave found callback.
  * u8 is search_type, W1_SEARCH or W1_ALARM_SEARCH
+ *
+ * @dev_id: Optional device id string, which w1 slaves could use for
+ * creating names, which then give a connection to the w1 master
  *
  * Note: read_bit and write_bit are very low level functions and should only
  * be used with hardware that doesn't really support 1-wire operations,
@@ -159,6 +154,8 @@ struct w1_bus_master {
 
 	void		(*search)(void *, struct w1_master *,
 		u8, w1_slave_found_callback);
+
+	char		*dev_id;
 };
 
 /**
@@ -266,13 +263,16 @@ struct w1_family_ops {
  * @family_entry:	family linked list
  * @fid:		8 bit family identifier
  * @fops:		operations for this family
+ * @of_match_table: open firmware match table
  * @refcnt:		reference counter
  */
 struct w1_family {
 	struct list_head	family_entry;
 	u8			fid;
 
-	struct w1_family_ops	*fops;
+	const struct w1_family_ops *fops;
+
+	const struct of_device_id *of_match_table;
 
 	atomic_t		refcnt;
 };
@@ -281,7 +281,7 @@ int w1_register_family(struct w1_family *family);
 void w1_unregister_family(struct w1_family *family);
 
 /**
- * module_w1_driver() - Helper macro for registering a 1-Wire families
+ * module_w1_family() - Helper macro for registering a 1-Wire families
  * @__w1_family: w1_family struct
  *
  * Helper macro for 1-Wire families which do not do anything special in module

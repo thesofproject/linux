@@ -16,6 +16,7 @@
 #include <linux/init.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/jiffies.h>
 
 #include <asm/swift.h> /* for cache flushing. */
@@ -352,7 +353,7 @@ int __init pcic_probe(void)
 	pbm = &pcic->pbm;
 	pbm->prom_node = node;
 	prom_getstring(node, "name", namebuf, 63);  namebuf[63] = 0;
-	strcpy(pbm->prom_name, namebuf);
+	strscpy(pbm->prom_name, namebuf);
 
 	{
 		extern int pcic_nmi_trap_patch[4];
@@ -465,7 +466,7 @@ static int pdev_to_pnode(struct linux_pbm_info *pbm, struct pci_dev *pdev)
 
 static inline struct pcidev_cookie *pci_devcookie_alloc(void)
 {
-	return kmalloc(sizeof(struct pcidev_cookie), GFP_ATOMIC);
+	return kmalloc_obj(struct pcidev_cookie, GFP_ATOMIC);
 }
 
 static void pcic_map_pci_device(struct linux_pcic *pcic,
@@ -477,7 +478,7 @@ static void pcic_map_pci_device(struct linux_pcic *pcic,
 	int j;
 
 	if (node == 0 || node == -1) {
-		strcpy(namebuf, "???");
+		strscpy(namebuf, "???");
 	} else {
 		prom_getstring(node, "name", namebuf, 63); namebuf[63] = 0;
 	}
@@ -518,10 +519,10 @@ static void pcic_map_pci_device(struct linux_pcic *pcic,
 				 * board in a PCI slot. We must remap it
 				 * under 64K but it is not done yet. XXX
 				 */
-				printk("PCIC: Skipping I/O space at 0x%lx, "
-				    "this will Oops if a driver attaches "
-				    "device '%s' at %02x:%02x)\n", address,
-				    namebuf, dev->bus->number, dev->devfn);
+				pci_info(dev, "PCIC: Skipping I/O space at "
+					 "0x%lx, this will Oops if a driver "
+					 "attaches device '%s'\n", address,
+					 namebuf);
 			}
 		}
 	}
@@ -536,7 +537,7 @@ pcic_fill_irq(struct linux_pcic *pcic, struct pci_dev *dev, int node)
 	char namebuf[64];
 
 	if (node == 0 || node == -1) {
-		strcpy(namebuf, "???");
+		strscpy(namebuf, "???");
 	} else {
 		prom_getstring(node, "name", namebuf, sizeof(namebuf));
 	}
@@ -551,8 +552,8 @@ pcic_fill_irq(struct linux_pcic *pcic, struct pci_dev *dev, int node)
 		p++;
 	}
 	if (i >= pcic->pcic_imdim) {
-		printk("PCIC: device %s devfn %02x:%02x not found in %d\n",
-		    namebuf, dev->bus->number, dev->devfn, pcic->pcic_imdim);
+		pci_info(dev, "PCIC: device %s not found in %d\n", namebuf,
+			 pcic->pcic_imdim);
 		dev->irq = 0;
 		return;
 	}
@@ -565,7 +566,7 @@ pcic_fill_irq(struct linux_pcic *pcic, struct pci_dev *dev, int node)
 		ivec = readw(pcic->pcic_regs+PCI_INT_SELECT_HI);
 		real_irq = ivec >> ((i-4) << 2) & 0xF;
 	} else {					/* Corrupted map */
-		printk("PCIC: BAD PIN %d\n", i); for (;;) {}
+		pci_info(dev, "PCIC: BAD PIN %d\n", i); for (;;) {}
 	}
 /* P3 */ /* printk("PCIC: device %s pin %d ivec 0x%x irq %x\n", namebuf, i, ivec, dev->irq); */
 
@@ -574,10 +575,10 @@ pcic_fill_irq(struct linux_pcic *pcic, struct pci_dev *dev, int node)
 	 */
 	if (real_irq == 0 || p->force) {
 		if (p->irq == 0 || p->irq >= 15) {	/* Corrupted map */
-			printk("PCIC: BAD IRQ %d\n", p->irq); for (;;) {}
+			pci_info(dev, "PCIC: BAD IRQ %d\n", p->irq); for (;;) {}
 		}
-		printk("PCIC: setting irq %d at pin %d for device %02x:%02x\n",
-		    p->irq, p->pin, dev->bus->number, dev->devfn);
+		pci_info(dev, "PCIC: setting irq %d at pin %d\n", p->irq,
+			 p->pin);
 		real_irq = p->irq;
 
 		i = p->pin;
@@ -602,15 +603,13 @@ pcic_fill_irq(struct linux_pcic *pcic, struct pci_dev *dev, int node)
 void pcibios_fixup_bus(struct pci_bus *bus)
 {
 	struct pci_dev *dev;
-	int i, has_io, has_mem;
-	unsigned int cmd = 0;
 	struct linux_pcic *pcic;
 	/* struct linux_pbm_info* pbm = &pcic->pbm; */
 	int node;
 	struct pcidev_cookie *pcp;
 
 	if (!pcic0_up) {
-		printk("pcibios_fixup_bus: no PCIC\n");
+		pci_info(bus, "pcibios_fixup_bus: no PCIC\n");
 		return;
 	}
 	pcic = &pcic0;
@@ -619,44 +618,12 @@ void pcibios_fixup_bus(struct pci_bus *bus)
 	 * Next crud is an equivalent of pbm = pcic_bus_to_pbm(bus);
 	 */
 	if (bus->number != 0) {
-		printk("pcibios_fixup_bus: nonzero bus 0x%x\n", bus->number);
+		pci_info(bus, "pcibios_fixup_bus: nonzero bus 0x%x\n",
+			 bus->number);
 		return;
 	}
 
 	list_for_each_entry(dev, &bus->devices, bus_list) {
-
-		/*
-		 * Comment from i386 branch:
-		 *     There are buggy BIOSes that forget to enable I/O and memory
-		 *     access to PCI devices. We try to fix this, but we need to
-		 *     be sure that the BIOS didn't forget to assign an address
-		 *     to the device. [mj]
-		 * OBP is a case of such BIOS :-)
-		 */
-		has_io = has_mem = 0;
-		for(i=0; i<6; i++) {
-			unsigned long f = dev->resource[i].flags;
-			if (f & IORESOURCE_IO) {
-				has_io = 1;
-			} else if (f & IORESOURCE_MEM)
-				has_mem = 1;
-		}
-		pcic_read_config(dev->bus, dev->devfn, PCI_COMMAND, 2, &cmd);
-		if (has_io && !(cmd & PCI_COMMAND_IO)) {
-			printk("PCIC: Enabling I/O for device %02x:%02x\n",
-				dev->bus->number, dev->devfn);
-			cmd |= PCI_COMMAND_IO;
-			pcic_write_config(dev->bus, dev->devfn,
-			    PCI_COMMAND, 2, cmd);
-		}
-		if (has_mem && !(cmd & PCI_COMMAND_MEMORY)) {
-			printk("PCIC: Enabling memory for device %02x:%02x\n",
-				dev->bus->number, dev->devfn);
-			cmd |= PCI_COMMAND_MEMORY;
-			pcic_write_config(dev->bus, dev->devfn,
-			    PCI_COMMAND, 2, cmd);
-		}
-
 		node = pdev_to_pnode(&pcic->pbm, dev);
 		if(node == 0)
 			node = -1;
@@ -747,17 +714,11 @@ static void watchdog_reset() {
 }
 #endif
 
-int pcibios_enable_device(struct pci_dev *pdev, int mask)
-{
-	return 0;
-}
-
 /*
  * NMI
  */
 void pcic_nmi(unsigned int pend, struct pt_regs *regs)
 {
-
 	pend = swab32(pend);
 
 	if (!pcic_speculative || (pend & PCI_SYS_INT_PENDING_PIO) == 0) {

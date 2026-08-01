@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Greybus operations
  *
@@ -53,13 +53,6 @@ int gb_audio_manager_remove(int id);
  * Returns zero on success, or a negative value on error.
  */
 void gb_audio_manager_remove_all(void);
-
-/*
- * Retrieves a gb_audio_manager_module_descriptor for the specified id.
- * Returns the gb_audio_manager_module_descriptor structure,
- * or NULL if there is no module with the specified ID.
- */
-struct gb_audio_manager_module *gb_audio_manager_get_module(int id);
 
 /*
  * Decreases the refcount of the module, obtained by the get function.

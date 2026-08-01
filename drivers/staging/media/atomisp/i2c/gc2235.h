@@ -1,20 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Support for GalaxyCore GC2235 2M camera sensor.
  *
  * Copyright (c) 2014 Intel Corporation. All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.
- *
  */
 
 #ifndef __GC2235_H__
@@ -33,14 +21,16 @@
 
 #include "../include/linux/atomisp_platform.h"
 
+/*
+ * FIXME: non-preview resolutions are currently broken
+ */
+#define ENABLE_NON_PREVIEW     0
+
 /* Defines for register writes and register array processing */
 #define I2C_MSG_LENGTH		0x2
 #define I2C_RETRY_COUNT		5
 
 #define GC2235_FOCAL_LENGTH_NUM	278	/*2.78mm*/
-#define GC2235_FOCAL_LENGTH_DEM	100
-#define GC2235_F_NUMBER_DEFAULT_NUM	26
-#define GC2235_F_NUMBER_DEM	10
 
 #define MAX_FMTS		1
 
@@ -71,9 +61,6 @@
 #define GC2235_COARSE_INTG_TIME_MIN 1
 #define GC2235_COARSE_INTG_TIME_MAX_MARGIN 6
 
-/*
- * GC2235 System control registers
- */
 /*
  * GC2235 System control registers
  */
@@ -131,9 +118,6 @@ struct gc2235_resolution {
 	u32 skip_frames;
 	u16 pixels_per_line;
 	u16 lines_per_frame;
-	u8 bin_factor_x;
-	u8 bin_factor_y;
-	u8 bin_mode;
 	bool used;
 };
 
@@ -152,11 +136,9 @@ struct gc2235_device {
 	struct v4l2_mbus_framefmt format;
 	struct mutex input_lock;
 	struct v4l2_ctrl_handler ctrl_handler;
+	struct gc2235_resolution *res;
 
 	struct camera_sensor_platform_data *platform_data;
-	int vt_pix_clk_freq_mhz;
-	int fmt_idx;
-	u8 res;
 	u8 type;
 };
 
@@ -169,7 +151,7 @@ enum gc2235_tok_type {
 	GC2235_TOK_MASK = 0xfff0
 };
 
-/**
+/*
  * struct gc2235_reg - MI sensor  register format
  * @type: type of the register
  * @reg: 8-bit offset to register
@@ -197,22 +179,22 @@ struct gc2235_write_ctrl {
 	struct gc2235_write_buffer buffer;
 };
 
-static struct gc2235_reg const gc2235_stream_on[] = {
+static const struct gc2235_reg gc2235_stream_on[] = {
 	{ GC2235_8BIT, 0xfe, 0x03}, /* switch to P3 */
 	{ GC2235_8BIT, 0x10, 0x91}, /* start mipi */
 	{ GC2235_8BIT, 0xfe, 0x00}, /* switch to P0 */
 	{ GC2235_TOK_TERM, 0, 0 }
 };
 
-static struct gc2235_reg const gc2235_stream_off[] = {
+static const struct gc2235_reg gc2235_stream_off[] = {
 	{ GC2235_8BIT, 0xfe, 0x03}, /* switch to P3 */
 	{ GC2235_8BIT, 0x10, 0x01}, /* stop mipi */
 	{ GC2235_8BIT, 0xfe, 0x00}, /* switch to P0 */
 	{ GC2235_TOK_TERM, 0, 0 }
 };
 
-static struct gc2235_reg const gc2235_init_settings[] = {
-	/* Sysytem */
+static const struct gc2235_reg gc2235_init_settings[] = {
+	/* System */
 	{ GC2235_8BIT, 0xfe, 0x80 },
 	{ GC2235_8BIT, 0xfe, 0x80 },
 	{ GC2235_8BIT, 0xfe, 0x80 },
@@ -281,10 +263,12 @@ static struct gc2235_reg const gc2235_init_settings[] = {
 	{ GC2235_8BIT, 0xfe, 0x00 }, /* switch to P0 */
 	{ GC2235_TOK_TERM, 0, 0 }
 };
+
 /*
  * Register settings for various resolution
  */
-static struct gc2235_reg const gc2235_1296_736_30fps[] = {
+#if ENABLE_NON_PREVIEW
+static const struct gc2235_reg gc2235_1296_736_30fps[] = {
 	{ GC2235_8BIT, 0x8b, 0xa0 },
 	{ GC2235_8BIT, 0x8c, 0x02 },
 
@@ -337,7 +321,7 @@ static struct gc2235_reg const gc2235_1296_736_30fps[] = {
 	{ GC2235_TOK_TERM, 0, 0 }
 };
 
-static struct gc2235_reg const gc2235_960_640_30fps[] = {
+static const struct gc2235_reg gc2235_960_640_30fps[] = {
 	{ GC2235_8BIT, 0x8b, 0xa0 },
 	{ GC2235_8BIT, 0x8c, 0x02 },
 
@@ -387,8 +371,9 @@ static struct gc2235_reg const gc2235_960_640_30fps[] = {
 	{ GC2235_8BIT, 0xfe, 0x00 }, /* switch to P0 */
 	{ GC2235_TOK_TERM, 0, 0 }
 };
+#endif
 
-static struct gc2235_reg const gc2235_1600_900_30fps[] = {
+static const struct gc2235_reg gc2235_1600_900_30fps[] = {
 	{ GC2235_8BIT, 0x8b, 0xa0 },
 	{ GC2235_8BIT, 0x8c, 0x02 },
 
@@ -433,7 +418,7 @@ static struct gc2235_reg const gc2235_1600_900_30fps[] = {
 	{ GC2235_TOK_TERM, 0, 0 }
 };
 
-static struct gc2235_reg const gc2235_1616_1082_30fps[] = {
+static const struct gc2235_reg gc2235_1616_1082_30fps[] = {
 	{ GC2235_8BIT, 0x8b, 0xa0 },
 	{ GC2235_8BIT, 0x8c, 0x02 },
 
@@ -478,7 +463,7 @@ static struct gc2235_reg const gc2235_1616_1082_30fps[] = {
 	{ GC2235_TOK_TERM, 0, 0 }
 };
 
-static struct gc2235_reg const gc2235_1616_1216_30fps[] = {
+static const struct gc2235_reg gc2235_1616_1216_30fps[] = {
 	{ GC2235_8BIT, 0x8b, 0xa0 },
 	{ GC2235_8BIT, 0x8c, 0x02 },
 
@@ -523,7 +508,6 @@ static struct gc2235_reg const gc2235_1616_1216_30fps[] = {
 };
 
 static struct gc2235_resolution gc2235_res_preview[] = {
-
 	{
 		.desc = "gc2235_1600_900_30fps",
 		.width = 1600,
@@ -533,9 +517,6 @@ static struct gc2235_resolution gc2235_res_preview[] = {
 		.used = 0,
 		.pixels_per_line = 2132,
 		.lines_per_frame = 1068,
-		.bin_factor_x = 0,
-		.bin_factor_y = 0,
-		.bin_mode = 0,
 		.skip_frames = 3,
 		.regs = gc2235_1600_900_30fps,
 	},
@@ -549,9 +530,6 @@ static struct gc2235_resolution gc2235_res_preview[] = {
 		.used = 0,
 		.pixels_per_line = 2132,
 		.lines_per_frame = 1368,
-		.bin_factor_x = 0,
-		.bin_factor_y = 0,
-		.bin_mode = 0,
 		.skip_frames = 3,
 		.regs = gc2235_1616_1082_30fps,
 	},
@@ -564,21 +542,19 @@ static struct gc2235_resolution gc2235_res_preview[] = {
 		.used = 0,
 		.pixels_per_line = 2132,
 		.lines_per_frame = 1368,
-		.bin_factor_x = 0,
-		.bin_factor_y = 0,
-		.bin_mode = 0,
 		.skip_frames = 3,
 		.regs = gc2235_1616_1216_30fps,
 	},
 
 };
+
 #define N_RES_PREVIEW (ARRAY_SIZE(gc2235_res_preview))
 
 /*
  * Disable non-preview configurations until the configuration selection is
  * improved.
  */
-#if 0
+#if ENABLE_NON_PREVIEW
 static struct gc2235_resolution gc2235_res_still[] = {
 	{
 		.desc = "gc2235_1600_900_30fps",
@@ -589,9 +565,6 @@ static struct gc2235_resolution gc2235_res_still[] = {
 		.used = 0,
 		.pixels_per_line = 2132,
 		.lines_per_frame = 1068,
-		.bin_factor_x = 0,
-		.bin_factor_y = 0,
-		.bin_mode = 0,
 		.skip_frames = 3,
 		.regs = gc2235_1600_900_30fps,
 	},
@@ -604,9 +577,6 @@ static struct gc2235_resolution gc2235_res_still[] = {
 		.used = 0,
 		.pixels_per_line = 2132,
 		.lines_per_frame = 1368,
-		.bin_factor_x = 0,
-		.bin_factor_y = 0,
-		.bin_mode = 0,
 		.skip_frames = 3,
 		.regs = gc2235_1616_1082_30fps,
 	},
@@ -619,14 +589,12 @@ static struct gc2235_resolution gc2235_res_still[] = {
 		.used = 0,
 		.pixels_per_line = 2132,
 		.lines_per_frame = 1368,
-		.bin_factor_x = 0,
-		.bin_factor_y = 0,
-		.bin_mode = 0,
 		.skip_frames = 3,
 		.regs = gc2235_1616_1216_30fps,
 	},
 
 };
+
 #define N_RES_STILL (ARRAY_SIZE(gc2235_res_still))
 
 static struct gc2235_resolution gc2235_res_video[] = {
@@ -639,9 +607,6 @@ static struct gc2235_resolution gc2235_res_video[] = {
 		.used = 0,
 		.pixels_per_line = 1828,
 		.lines_per_frame = 888,
-		.bin_factor_x = 0,
-		.bin_factor_y = 0,
-		.bin_mode = 0,
 		.skip_frames = 3,
 		.regs = gc2235_1296_736_30fps,
 	},
@@ -654,14 +619,12 @@ static struct gc2235_resolution gc2235_res_video[] = {
 		.used = 0,
 		.pixels_per_line = 1492,
 		.lines_per_frame = 792,
-		.bin_factor_x = 0,
-		.bin_factor_y = 0,
-		.bin_mode = 0,
 		.skip_frames = 3,
 		.regs = gc2235_960_640_30fps,
 	},
 
 };
+
 #define N_RES_VIDEO (ARRAY_SIZE(gc2235_res_video))
 #endif
 

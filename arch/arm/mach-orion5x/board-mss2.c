@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Maxtor Shared Storage II Board Setup
  *
  * Maintainer: Sylver Bruneau <sylver.bruneau@googlemail.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -14,7 +10,7 @@
 #include <linux/platform_device.h>
 #include <linux/pci.h>
 #include <linux/irq.h>
-#include <asm/mach-types.h>
+#include <linux/of.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/pci.h>
 #include "orion5x.h"
@@ -51,7 +47,7 @@ static struct hw_pci mss2_pci __initdata = {
 
 static int __init mss2_pci_init(void)
 {
-	if (machine_is_mss2())
+	if (of_machine_is_compatible("maxtor,shared-storage-2"))
 		pci_common_init(&mss2_pci);
 
 	return 0;
@@ -86,5 +82,5 @@ static void mss2_power_off(void)
 void __init mss2_init(void)
 {
 	/* register mss2 specific power-off method */
-	pm_power_off = mss2_power_off;
+	register_platform_power_off(mss2_power_off);
 }

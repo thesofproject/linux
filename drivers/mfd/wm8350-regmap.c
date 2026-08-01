@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * wm8350-regmap.c  --  Wolfson Microelectronics WM8350 register map
  *
@@ -5,11 +6,6 @@
  * status of the WM8350 registers since they are rather large.
  *
  * Copyright 2007, 2008 Wolfson Microelectronics PLC.
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
  */
 
 #include <linux/mfd/wm8350/core.h>
@@ -329,7 +325,7 @@ const struct regmap_config wm8350_regmap = {
 	.reg_bits = 8,
 	.val_bits = 16,
 
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 
 	.max_register = WM8350_MAX_REGISTER,
 	.readable_reg = wm8350_readable,

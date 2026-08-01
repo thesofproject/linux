@@ -1,8 +1,8 @@
 #ifndef __LINUX_SPINLOCK_TYPES_UP_H
 #define __LINUX_SPINLOCK_TYPES_UP_H
 
-#ifndef __LINUX_SPINLOCK_TYPES_H
-# error "please don't include this file directly"
+#ifndef __LINUX_SPINLOCK_TYPES_RAW_H
+# error "Please do not include this file directly."
 #endif
 
 /*

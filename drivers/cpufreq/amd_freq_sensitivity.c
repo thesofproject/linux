@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * amd_freq_sensitivity.c: AMD frequency sensitivity feedback powersave bias
  *                         for the ondemand governor.
@@ -5,10 +6,6 @@
  * Copyright (C) 2013 Advanced Micro Devices, Inc.
  *
  * Author: Jacob Shin <jacob.shin@amd.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -17,10 +14,10 @@
 #include <linux/pci.h>
 #include <linux/percpu-defs.h>
 #include <linux/init.h>
-#include <linux/mod_devicetable.h>
 
 #include <asm/msr.h>
 #include <asm/cpufeature.h>
+#include <asm/cpu_device_id.h>
 
 #include "cpufreq_ondemand.h"
 
@@ -53,10 +50,8 @@ static unsigned int amd_powersave_bias_target(struct cpufreq_policy *policy,
 	if (!policy->freq_table)
 		return freq_next;
 
-	rdmsr_on_cpu(policy->cpu, MSR_AMD64_FREQ_SENSITIVITY_ACTUAL,
-		&actual.l, &actual.h);
-	rdmsr_on_cpu(policy->cpu, MSR_AMD64_FREQ_SENSITIVITY_REFERENCE,
-		&reference.l, &reference.h);
+	rdmsrq_on_cpu(policy->cpu, MSR_AMD64_FREQ_SENSITIVITY_ACTUAL, &actual.q);
+	rdmsrq_on_cpu(policy->cpu, MSR_AMD64_FREQ_SENSITIVITY_REFERENCE, &reference.q);
 	actual.h &= 0x00ffffff;
 	reference.h &= 0x00ffffff;
 
@@ -93,7 +88,8 @@ static unsigned int amd_powersave_bias_target(struct cpufreq_policy *policy,
 			unsigned int index;
 
 			index = cpufreq_table_find_index_h(policy,
-							   policy->cur - 1);
+							   policy->cur - 1,
+							   relation & CPUFREQ_RELATION_E);
 			freq_next = policy->freq_table[index].frequency;
 		}
 
@@ -111,19 +107,26 @@ static int __init amd_freq_sensitivity_init(void)
 {
 	u64 val;
 	struct pci_dev *pcidev;
+	unsigned int pci_vendor;
 
-	if (boot_cpu_data.x86_vendor != X86_VENDOR_AMD)
+	if (boot_cpu_data.x86_vendor == X86_VENDOR_AMD)
+		pci_vendor = PCI_VENDOR_ID_AMD;
+	else if (boot_cpu_data.x86_vendor == X86_VENDOR_HYGON)
+		pci_vendor = PCI_VENDOR_ID_HYGON;
+	else
 		return -ENODEV;
 
-	pcidev = pci_get_device(PCI_VENDOR_ID_AMD,
+	pcidev = pci_get_device(pci_vendor,
 			PCI_DEVICE_ID_AMD_KERNCZ_SMBUS, NULL);
 
 	if (!pcidev) {
-		if (!static_cpu_has(X86_FEATURE_PROC_FEEDBACK))
+		if (!boot_cpu_has(X86_FEATURE_PROC_FEEDBACK))
 			return -ENODEV;
+	} else {
+		pci_dev_put(pcidev);
 	}
 
-	if (rdmsrl_safe(MSR_AMD64_FREQ_SENSITIVITY_ACTUAL, &val))
+	if (rdmsrq_safe(MSR_AMD64_FREQ_SENSITIVITY_ACTUAL, &val))
 		return -ENODEV;
 
 	if (!(val >> CLASS_CODE_SHIFT))
@@ -141,8 +144,8 @@ static void __exit amd_freq_sensitivity_exit(void)
 }
 module_exit(amd_freq_sensitivity_exit);
 
-static const struct x86_cpu_id amd_freq_sensitivity_ids[] = {
-	X86_FEATURE_MATCH(X86_FEATURE_PROC_FEEDBACK),
+static const struct x86_cpu_id __maybe_unused amd_freq_sensitivity_ids[] = {
+	X86_MATCH_FEATURE(X86_FEATURE_PROC_FEEDBACK, NULL),
 	{}
 };
 MODULE_DEVICE_TABLE(x86cpu, amd_freq_sensitivity_ids);

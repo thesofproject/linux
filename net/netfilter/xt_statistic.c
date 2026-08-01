@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2006 Patrick McHardy <kaber@trash.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Based on ipt_random and ipt_nth by Fabrice MARIE <fabrice@netfilter.org>.
  */
@@ -37,7 +34,7 @@ statistic_mt(const struct sk_buff *skb, struct xt_action_param *par)
 
 	switch (info->mode) {
 	case XT_STATISTIC_MODE_RANDOM:
-		if ((prandom_u32() & 0x7FFFFFFF) < info->u.random.probability)
+		if ((get_random_u32() & 0x7FFFFFFF) < info->u.random.probability)
 			ret = !ret;
 		break;
 	case XT_STATISTIC_MODE_NTH:
@@ -61,7 +58,7 @@ static int statistic_mt_check(const struct xt_mtchk_param *par)
 	    info->flags & ~XT_STATISTIC_MASK)
 		return -EINVAL;
 
-	info->master = kzalloc(sizeof(*info->master), GFP_KERNEL);
+	info->master = kzalloc_obj(*info->master);
 	if (info->master == NULL)
 		return -ENOMEM;
 	atomic_set(&info->master->count, info->u.nth.count);

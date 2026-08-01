@@ -8,9 +8,11 @@
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <linux/errno.h>
+#include <linux/regset.h>
 #define __FRAME_OFFSETS
 #include <asm/ptrace.h>
 #include <linux/uaccess.h>
+#include <registers.h>
 #include <asm/ptrace-abi.h>
 
 /*
@@ -52,14 +54,6 @@ static const int reg_offsets[] =
 
 int putreg(struct task_struct *child, int regno, unsigned long value)
 {
-#ifdef TIF_IA32
-	/*
-	 * Some code in the 64bit emulation may not be 64bit clean.
-	 * Don't take any chances.
-	 */
-	if (test_tsk_thread_flag(child, TIF_IA32))
-		value &= 0xffffffff;
-#endif
 	switch (regno) {
 	case R8:
 	case R9:
@@ -137,10 +131,7 @@ int poke_user(struct task_struct *child, long addr, long data)
 unsigned long getreg(struct task_struct *child, int regno)
 {
 	unsigned long mask = ~0UL;
-#ifdef TIF_IA32
-	if (test_tsk_thread_flag(child, TIF_IA32))
-		mask = 0xffffffff;
-#endif
+
 	switch (regno) {
 	case R8:
 	case R9:
@@ -198,62 +189,6 @@ int peek_user(struct task_struct *child, long addr, long data)
 	return put_user(tmp, (unsigned long *) data);
 }
 
-/* XXX Mostly copied from sys-i386 */
-int is_syscall(unsigned long addr)
-{
-	unsigned short instr;
-	int n;
-
-	n = copy_from_user(&instr, (void __user *) addr, sizeof(instr));
-	if (n) {
-		/*
-		 * access_process_vm() grants access to vsyscall and stub,
-		 * while copy_from_user doesn't. Maybe access_process_vm is
-		 * slow, but that doesn't matter, since it will be called only
-		 * in case of singlestepping, if copy_from_user failed.
-		 */
-		n = access_process_vm(current, addr, &instr, sizeof(instr),
-				FOLL_FORCE);
-		if (n != sizeof(instr)) {
-			printk("is_syscall : failed to read instruction from "
-			       "0x%lx\n", addr);
-			return 1;
-		}
-	}
-	/* sysenter */
-	return instr == 0x050f;
-}
-
-static int get_fpregs(struct user_i387_struct __user *buf, struct task_struct *child)
-{
-	int err, n, cpu = ((struct thread_info *) child->stack)->cpu;
-	struct user_i387_struct fpregs;
-
-	err = save_i387_registers(userspace_pid[cpu],
-				  (unsigned long *) &fpregs);
-	if (err)
-		return err;
-
-	n = copy_to_user(buf, &fpregs, sizeof(fpregs));
-	if (n > 0)
-		return -EFAULT;
-
-	return n;
-}
-
-static int set_fpregs(struct user_i387_struct __user *buf, struct task_struct *child)
-{
-	int n, cpu = ((struct thread_info *) child->stack)->cpu;
-	struct user_i387_struct fpregs;
-
-	n = copy_from_user(&fpregs, buf, sizeof(fpregs));
-	if (n > 0)
-		return -EFAULT;
-
-	return restore_i387_registers(userspace_pid[cpu],
-				      (unsigned long *) &fpregs);
-}
-
 long subarch_ptrace(struct task_struct *child, long request,
 		    unsigned long addr, unsigned long data)
 {
@@ -262,11 +197,15 @@ long subarch_ptrace(struct task_struct *child, long request,
 
 	switch (request) {
 	case PTRACE_GETFPREGS: /* Get the child FPU state. */
-		ret = get_fpregs(datap, child);
-		break;
+		return copy_regset_to_user(child, task_user_regset_view(child),
+					   REGSET_FP,
+					   0, sizeof(struct user_i387_struct),
+					   datap);
 	case PTRACE_SETFPREGS: /* Set the child FPU state. */
-		ret = set_fpregs(datap, child);
-		break;
+		return copy_regset_from_user(child, task_user_regset_view(child),
+					     REGSET_FP,
+					     0, sizeof(struct user_i387_struct),
+					     datap);
 	case PTRACE_ARCH_PRCTL:
 		/* XXX Calls ptrace on the host - needs some SMP thinking */
 		ret = arch_prctl(child, data, (void __user *) addr);

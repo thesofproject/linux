@@ -1,24 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Cryptographic API.
  *
  * Support for OMAP AES HW ACCELERATOR defines
  *
  * Copyright (c) 2015 Texas Instruments Incorporated
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
- *
  */
 #ifndef __OMAP_AES_H__
 #define __OMAP_AES_H__
 
-#include <crypto/engine.h>
+#include <crypto/aes.h>
 
 #define DST_MAXBURST			4
 #define DMA_MIN				(DST_MAXBURST * sizeof(u32))
-
-#define _calc_walked(inout) (dd->inout##_walk.offset - dd->inout##_sg->offset)
 
 /*
  * OMAP TRM gives bitfields as start:end, where start is the higher bit
@@ -83,7 +77,6 @@
 
 #define FLAGS_INIT		BIT(5)
 #define FLAGS_FAST		BIT(6)
-#define FLAGS_BUSY		BIT(7)
 
 #define FLAGS_IN_DATA_ST_SHIFT	8
 #define FLAGS_OUT_DATA_ST_SHIFT	10
@@ -97,12 +90,15 @@ struct omap_aes_gcm_result {
 };
 
 struct omap_aes_ctx {
-	struct crypto_engine_ctx enginectx;
 	int		keylen;
 	u32		key[AES_KEYSIZE_256 / sizeof(u32)];
 	u8		nonce[4];
 	struct crypto_skcipher	*fallback;
-	struct crypto_skcipher	*ctr;
+};
+
+struct omap_aes_gcm_ctx {
+	struct omap_aes_ctx	octx;
+	struct aes_enckey	akey;
 };
 
 struct omap_aes_reqctx {
@@ -110,21 +106,22 @@ struct omap_aes_reqctx {
 	unsigned long mode;
 	u8 iv[AES_BLOCK_SIZE];
 	u32 auth_tag[AES_BLOCK_SIZE / sizeof(u32)];
+	struct skcipher_request fallback_req;	// keep at the end
 };
 
 #define OMAP_AES_QUEUE_LENGTH	1
 #define OMAP_AES_CACHE_SIZE	0
 
 struct omap_aes_algs_info {
-	struct crypto_alg	*algs_list;
-	unsigned int		size;
-	unsigned int		registered;
+	struct skcipher_engine_alg	*algs_list;
+	unsigned int			size;
+	unsigned int			registered;
 };
 
 struct omap_aes_aead_algs {
-	struct aead_alg	*algs_list;
-	unsigned int	size;
-	unsigned int	registered;
+	struct aead_engine_alg		*algs_list;
+	unsigned int			size;
+	unsigned int			registered;
 };
 
 struct omap_aes_pdata {
@@ -162,11 +159,11 @@ struct omap_aes_dev {
 	unsigned long		flags;
 	int			err;
 
-	struct tasklet_struct	done_task;
+	struct work_struct	done_task;
 	struct aead_queue	aead_queue;
 	spinlock_t		lock;
 
-	struct ablkcipher_request	*req;
+	struct skcipher_request		*req;
 	struct aead_request		*aead_req;
 	struct crypto_engine		*engine;
 
@@ -187,8 +184,8 @@ struct omap_aes_dev {
 	struct scatterlist		out_sgl;
 	struct scatterlist		*orig_out;
 
-	struct scatter_walk		in_walk;
-	struct scatter_walk		out_walk;
+	unsigned int		in_sg_offset;
+	unsigned int		out_sg_offset;
 	struct dma_chan		*dma_lch_in;
 	struct dma_chan		*dma_lch_out;
 	int			in_sg_len;
@@ -206,12 +203,17 @@ int omap_aes_4106gcm_setkey(struct crypto_aead *tfm, const u8 *key,
 			    unsigned int keylen);
 int omap_aes_gcm_encrypt(struct aead_request *req);
 int omap_aes_gcm_decrypt(struct aead_request *req);
+int omap_aes_gcm_setauthsize(struct crypto_aead *tfm, unsigned int authsize);
 int omap_aes_4106gcm_encrypt(struct aead_request *req);
 int omap_aes_4106gcm_decrypt(struct aead_request *req);
+int omap_aes_4106gcm_setauthsize(struct crypto_aead *parent,
+				 unsigned int authsize);
+int omap_aes_gcm_cra_init(struct crypto_aead *tfm);
 int omap_aes_write_ctrl(struct omap_aes_dev *dd);
 int omap_aes_crypt_dma_start(struct omap_aes_dev *dd);
 int omap_aes_crypt_dma_stop(struct omap_aes_dev *dd);
 void omap_aes_gcm_dma_out_callback(void *data);
 void omap_aes_clear_copy_flags(struct omap_aes_dev *dd);
+int omap_aes_gcm_crypt_req(struct crypto_engine *engine, void *areq);
 
 #endif

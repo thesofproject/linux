@@ -110,6 +110,19 @@ nvkm_i2c_bus_init(struct nvkm_i2c_bus *bus)
 	BUS_TRACE(bus, "init");
 	if (bus->func->init)
 		bus->func->init(bus);
+
+	mutex_lock(&bus->mutex);
+	bus->enabled = true;
+	mutex_unlock(&bus->mutex);
+}
+
+void
+nvkm_i2c_bus_fini(struct nvkm_i2c_bus *bus)
+{
+	BUS_TRACE(bus, "fini");
+	mutex_lock(&bus->mutex);
+	bus->enabled = false;
+	mutex_unlock(&bus->mutex);
 }
 
 void
@@ -126,9 +139,15 @@ nvkm_i2c_bus_acquire(struct nvkm_i2c_bus *bus)
 {
 	struct nvkm_i2c_pad *pad = bus->pad;
 	int ret;
+
 	BUS_TRACE(bus, "acquire");
 	mutex_lock(&bus->mutex);
-	ret = nvkm_i2c_pad_acquire(pad, NVKM_I2C_PAD_I2C);
+
+	if (bus->enabled)
+		ret = nvkm_i2c_pad_acquire(pad, NVKM_I2C_PAD_I2C);
+	else
+		ret = -EIO;
+
 	if (ret)
 		mutex_unlock(&bus->mutex);
 	return ret;
@@ -213,7 +232,7 @@ nvkm_i2c_bus_ctor(const struct nvkm_i2c_bus_func *func,
 
 	if ( bus->func->drive_scl &&
 	    !nvkm_boolopt(device->cfgopt, "NvI2C", internal)) {
-		if (!(bit = kzalloc(sizeof(*bit), GFP_KERNEL)))
+		if (!(bit = kzalloc_obj(*bit)))
 			return -ENOMEM;
 		bit->udelay = 10;
 		bit->timeout = usecs_to_jiffies(2200);
@@ -239,7 +258,7 @@ nvkm_i2c_bus_new_(const struct nvkm_i2c_bus_func *func,
 		  struct nvkm_i2c_pad *pad, int id,
 		  struct nvkm_i2c_bus **pbus)
 {
-	if (!(*pbus = kzalloc(sizeof(**pbus), GFP_KERNEL)))
+	if (!(*pbus = kzalloc_obj(**pbus)))
 		return -ENOMEM;
 	return nvkm_i2c_bus_ctor(func, pad, id, *pbus);
 }

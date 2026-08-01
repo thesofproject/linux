@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*******************************************************************************
  * Filename:  target_core_hba.c
  *
@@ -6,20 +7,6 @@
  * (c) Copyright 2003-2013 Datera, Inc.
  *
  * Nicholas A. Bellinger <nab@kernel.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  *
  ******************************************************************************/
 
@@ -52,7 +39,7 @@ int transport_backend_register(const struct target_backend_ops *ops)
 {
 	struct target_backend *tb, *old;
 
-	tb = kzalloc(sizeof(*tb), GFP_KERNEL);
+	tb = kzalloc_obj(*tb);
 	if (!tb)
 		return -ENOMEM;
 	tb->ops = ops;
@@ -124,7 +111,7 @@ core_alloc_hba(const char *plugin_name, u32 plugin_dep_id, u32 hba_flags)
 	struct se_hba *hba;
 	int ret = 0;
 
-	hba = kzalloc(sizeof(*hba), GFP_KERNEL);
+	hba = kzalloc_obj(*hba);
 	if (!hba) {
 		pr_err("Unable to allocate struct se_hba\n");
 		return ERR_PTR(-ENOMEM);

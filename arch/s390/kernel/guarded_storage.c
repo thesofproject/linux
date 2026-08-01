@@ -4,6 +4,7 @@
  * Author(s): Martin Schwidefsky <schwidefsky@de.ibm.com>
  */
 
+#include <linux/cpufeature.h>
 #include <linux/kernel.h>
 #include <linux/syscalls.h>
 #include <linux/signal.h>
@@ -23,12 +24,12 @@ static int gs_enable(void)
 	struct gs_cb *gs_cb;
 
 	if (!current->thread.gs_cb) {
-		gs_cb = kzalloc(sizeof(*gs_cb), GFP_KERNEL);
+		gs_cb = kzalloc_obj(*gs_cb);
 		if (!gs_cb)
 			return -ENOMEM;
 		gs_cb->gsd = 25;
 		preempt_disable();
-		__ctl_set_bit(2, 4);
+		local_ctl_set_bit(2, CR2_GUARDED_STORAGE_BIT);
 		load_gs_cb(gs_cb);
 		current->thread.gs_cb = gs_cb;
 		preempt_enable();
@@ -42,7 +43,7 @@ static int gs_disable(void)
 		preempt_disable();
 		kfree(current->thread.gs_cb);
 		current->thread.gs_cb = NULL;
-		__ctl_clear_bit(2, 4);
+		local_ctl_clear_bit(2, CR2_GUARDED_STORAGE_BIT);
 		preempt_enable();
 	}
 	return 0;
@@ -54,7 +55,7 @@ static int gs_set_bc_cb(struct gs_cb __user *u_gs_cb)
 
 	gs_cb = current->thread.gs_bc_cb;
 	if (!gs_cb) {
-		gs_cb = kzalloc(sizeof(*gs_cb), GFP_KERNEL);
+		gs_cb = kzalloc_obj(*gs_cb);
 		if (!gs_cb)
 			return -ENOMEM;
 		current->thread.gs_bc_cb = gs_cb;
@@ -84,7 +85,7 @@ void gs_load_bc_cb(struct pt_regs *regs)
 	if (gs_cb) {
 		kfree(current->thread.gs_cb);
 		current->thread.gs_bc_cb = NULL;
-		__ctl_set_bit(2, 4);
+		local_ctl_set_bit(2, CR2_GUARDED_STORAGE_BIT);
 		load_gs_cb(gs_cb);
 		current->thread.gs_cb = gs_cb;
 	}
@@ -109,7 +110,7 @@ static int gs_broadcast(void)
 SYSCALL_DEFINE2(s390_guarded_storage, int, command,
 		struct gs_cb __user *, gs_cb)
 {
-	if (!MACHINE_HAS_GS)
+	if (!cpu_has_gs())
 		return -EOPNOTSUPP;
 	switch (command) {
 	case GS_ENABLE:

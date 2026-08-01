@@ -25,6 +25,7 @@
 #define OCTEON_VF_ACTIVE		0x1
 #define OCTEON_VF_FLR_REQUEST		0x2
 #define OCTEON_PF_CHANGED_VF_MACADDR	0x4
+#define OCTEON_GET_VF_STATS		0x8
 
 /*Macro for Read acknowldgement*/
 #define OCTEON_PFVFACK			0xffffffffffffffffULL
@@ -56,7 +57,10 @@ union octeon_mbox_message {
 	} s;
 };
 
-typedef void (*octeon_mbox_callback_t)(void *, void *, void *);
+struct octeon_mbox_cmd;
+
+typedef void (*octeon_mbox_callback_t)(struct octeon_device *,
+				       struct octeon_mbox_cmd *, void *);
 
 struct octeon_mbox_cmd {
 	union octeon_mbox_message msg;
@@ -107,9 +111,15 @@ struct octeon_mbox {
 
 };
 
+struct oct_vf_stats_ctx {
+	atomic_t status;
+	struct oct_vf_stats *stats;
+};
+
 int octeon_mbox_read(struct octeon_mbox *mbox);
 int octeon_mbox_write(struct octeon_device *oct,
 		      struct octeon_mbox_cmd *mbox_cmd);
 int octeon_mbox_process_message(struct octeon_mbox *mbox);
+int octeon_mbox_cancel(struct octeon_device *oct, int q_no);
 
 #endif

@@ -48,6 +48,9 @@ struct if_usb_card {
 	struct urb *rx_urb, *tx_urb;
 	struct lbs_private *priv;
 
+	struct usb_anchor rx_submitted;
+	struct usb_anchor tx_submitted;
+
 	struct sk_buff *rx_skb;
 
 	uint8_t ep_in;
@@ -91,7 +94,7 @@ struct fwheader {
 struct fwdata {
 	struct fwheader hdr;
 	__le32 seqnum;
-	uint8_t data[0];
+	uint8_t data[];
 };
 
 /* fwsyncheader */

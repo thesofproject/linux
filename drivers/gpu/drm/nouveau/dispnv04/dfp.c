@@ -24,8 +24,8 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#include <drm/drmP.h>
-#include <drm/drm_crtc_helper.h>
+#include <drm/drm_fourcc.h>
+#include <drm/drm_modeset_helper_vtables.h>
 
 #include "nouveau_drv.h"
 #include "nouveau_reg.h"
@@ -35,7 +35,7 @@
 #include "hw.h"
 #include "nvreg.h"
 
-#include <drm/i2c/sil164.h>
+#include <dispnv04/i2c/sil164.h>
 
 #include <subdev/i2c.h>
 
@@ -171,7 +171,7 @@ static struct drm_encoder *get_tmds_slave(struct drm_encoder *encoder)
 	list_for_each_entry(slave, &dev->mode_config.encoder_list, head) {
 		struct dcb_output *slave_dcb = nouveau_encoder(slave)->dcb;
 
-		if (slave_dcb->type == DCB_OUTPUT_TMDS && get_slave_funcs(slave) &&
+		if (slave_dcb->type == DCB_OUTPUT_TMDS && get_encoder_i2c_funcs(slave) &&
 		    slave_dcb->tmdsconf.slave_addr == dcb->tmdsconf.slave_addr)
 			return slave;
 	}
@@ -184,7 +184,8 @@ static bool nv04_dfp_mode_fixup(struct drm_encoder *encoder,
 				struct drm_display_mode *adjusted_mode)
 {
 	struct nouveau_encoder *nv_encoder = nouveau_encoder(encoder);
-	struct nouveau_connector *nv_connector = nouveau_encoder_connector_get(nv_encoder);
+	struct nouveau_connector *nv_connector =
+		nv04_encoder_get_connector(nv_encoder);
 
 	if (!nv_connector->native_mode ||
 	    nv_connector->scaling_mode == DRM_MODE_SCALE_NONE ||
@@ -472,13 +473,14 @@ static void nv04_dfp_commit(struct drm_encoder *encoder)
 	/* Init external transmitters */
 	slave_encoder = get_tmds_slave(encoder);
 	if (slave_encoder)
-		get_slave_funcs(slave_encoder)->mode_set(
-			slave_encoder, &nv_encoder->mode, &nv_encoder->mode);
+		get_encoder_i2c_funcs(slave_encoder)->mode_set(slave_encoder,
+							       &nv_encoder->mode,
+							       &nv_encoder->mode);
 
 	helper->dpms(encoder, DRM_MODE_DPMS_ON);
 
 	NV_DEBUG(drm, "Output %s is running on CRTC %d using output %c\n",
-		 nouveau_encoder_connector_get(nv_encoder)->base.name,
+		 nv04_encoder_get_connector(nv_encoder)->base.name,
 		 nv_crtc->index, '@' + ffs(nv_encoder->dcb->or));
 }
 
@@ -487,12 +489,13 @@ static void nv04_dfp_update_backlight(struct drm_encoder *encoder, int mode)
 #ifdef __powerpc__
 	struct drm_device *dev = encoder->dev;
 	struct nvif_object *device = &nouveau_drm(dev)->client.device.object;
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
 
 	/* BIOS scripts usually take care of the backlight, thanks
 	 * Apple for your consistency.
 	 */
-	if (dev->pdev->device == 0x0174 || dev->pdev->device == 0x0179 ||
-	    dev->pdev->device == 0x0189 || dev->pdev->device == 0x0329) {
+	if (pdev->device == 0x0174 || pdev->device == 0x0179 ||
+	    pdev->device == 0x0189 || pdev->device == 0x0329) {
 		if (mode == DRM_MODE_DPMS_ON) {
 			nvif_mask(device, NV_PBUS_DEBUG_DUALHEAD_CTL, 1 << 31, 1 << 31);
 			nvif_mask(device, NV_PCRTC_GPIO_EXT, 3, 1);
@@ -591,7 +594,7 @@ static void nv04_dfp_restore(struct drm_encoder *encoder)
 
 	if (nv_encoder->dcb->type == DCB_OUTPUT_LVDS) {
 		struct nouveau_connector *connector =
-			nouveau_encoder_connector_get(nv_encoder);
+			nv04_encoder_get_connector(nv_encoder);
 
 		if (connector && connector->native_mode)
 			call_lvds_script(dev, nv_encoder->dcb, head,
@@ -612,8 +615,8 @@ static void nv04_dfp_destroy(struct drm_encoder *encoder)
 {
 	struct nouveau_encoder *nv_encoder = nouveau_encoder(encoder);
 
-	if (get_slave_funcs(encoder))
-		get_slave_funcs(encoder)->destroy(encoder);
+	if (get_encoder_i2c_funcs(encoder))
+		get_encoder_i2c_funcs(encoder)->destroy(encoder);
 
 	drm_encoder_cleanup(encoder);
 	kfree(nv_encoder);
@@ -624,7 +627,7 @@ static void nv04_tmds_slave_init(struct drm_encoder *encoder)
 	struct drm_device *dev = encoder->dev;
 	struct dcb_output *dcb = nouveau_encoder(encoder)->dcb;
 	struct nouveau_drm *drm = nouveau_drm(dev);
-	struct nvkm_i2c *i2c = nvxx_i2c(&drm->client.device);
+	struct nvkm_i2c *i2c = nvxx_i2c(drm);
 	struct nvkm_i2c_bus *bus = nvkm_i2c_bus_find(i2c, NVKM_I2C_BUS_PRI);
 	struct nvkm_i2c_bus_probe info[] = {
 		{
@@ -647,8 +650,8 @@ static void nv04_tmds_slave_init(struct drm_encoder *encoder)
 	if (type < 0)
 		return;
 
-	drm_i2c_encoder_init(dev, to_encoder_slave(encoder),
-			     &bus->i2c, &info[type].dev);
+	nouveau_i2c_encoder_init(dev, to_encoder_i2c(encoder),
+				 &bus->i2c, &info[type].dev);
 }
 
 static const struct drm_encoder_helper_funcs nv04_lvds_helper_funcs = {
@@ -694,7 +697,7 @@ nv04_dfp_create(struct drm_connector *connector, struct dcb_output *entry)
 		return -EINVAL;
 	}
 
-	nv_encoder = kzalloc(sizeof(*nv_encoder), GFP_KERNEL);
+	nv_encoder = kzalloc_obj(*nv_encoder);
 	if (!nv_encoder)
 		return -ENOMEM;
 
@@ -716,6 +719,6 @@ nv04_dfp_create(struct drm_connector *connector, struct dcb_output *entry)
 	    entry->location != DCB_LOC_ON_CHIP)
 		nv04_tmds_slave_init(encoder);
 
-	drm_mode_connector_attach_encoder(connector, encoder);
+	drm_connector_attach_encoder(connector, encoder);
 	return 0;
 }

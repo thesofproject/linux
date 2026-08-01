@@ -7,11 +7,15 @@
  */
 
 #include <linux/component.h>
+#include <linux/io.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/reset.h>
 
-#include <drm/drmP.h>
+#include <drm/drm_device.h>
+#include <drm/drm_print.h>
+#include <drm/drm_vblank.h>
 
 #include "sti_compositor.h"
 #include "sti_crtc.h"
@@ -39,8 +43,8 @@ static const struct sti_compositor_data stih407_compositor_data = {
 	},
 };
 
-int sti_compositor_debugfs_init(struct sti_compositor *compo,
-				struct drm_minor *minor)
+void sti_compositor_debugfs_init(struct sti_compositor *compo,
+				 struct drm_minor *minor)
 {
 	unsigned int i;
 
@@ -51,8 +55,6 @@ int sti_compositor_debugfs_init(struct sti_compositor *compo,
 	for (i = 0; i < STI_MAX_MIXER; i++)
 		if (compo->mixer[i])
 			sti_mixer_debugfs_init(compo->mixer[i], minor);
-
-	return 0;
 }
 
 static int sti_compositor_bind(struct device *dev,
@@ -144,8 +146,6 @@ static int sti_compositor_bind(struct device *dev,
 	}
 
 	drm_vblank_init(drm_dev, crtc_id);
-	/* Allow usage of vblank without having to call drm_irq_install */
-	drm_dev->irq_enabled = 1;
 
 	return 0;
 }
@@ -177,7 +177,6 @@ static int sti_compositor_probe(struct platform_device *pdev)
 	struct device_node *np = dev->of_node;
 	struct device_node *vtg_np;
 	struct sti_compositor *compo;
-	struct resource *res;
 	unsigned int i;
 
 	compo = devm_kzalloc(dev, sizeof(*compo), GFP_KERNEL);
@@ -194,17 +193,10 @@ static int sti_compositor_probe(struct platform_device *pdev)
 
 	memcpy(&compo->data, of_match_node(compositor_of_match, np)->data,
 	       sizeof(struct sti_compositor_data));
-
-	/* Get Memory ressources */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (res == NULL) {
-		DRM_ERROR("Get memory resource failed\n");
-		return -ENXIO;
-	}
-	compo->regs = devm_ioremap(dev, res->start, resource_size(res));
-	if (compo->regs == NULL) {
+	compo->regs = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(compo->regs)) {
 		DRM_ERROR("Register mapping failed\n");
-		return -ENXIO;
+		return PTR_ERR(compo->regs);
 	}
 
 	/* Get clock resources */
@@ -258,10 +250,9 @@ static int sti_compositor_probe(struct platform_device *pdev)
 	return component_add(&pdev->dev, &sti_compositor_ops);
 }
 
-static int sti_compositor_remove(struct platform_device *pdev)
+static void sti_compositor_remove(struct platform_device *pdev)
 {
 	component_del(&pdev->dev, &sti_compositor_ops);
-	return 0;
 }
 
 struct platform_driver sti_compositor_driver = {

@@ -18,9 +18,10 @@
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
+#include <linux/units.h>
 
 #define WAIT_PCLK(n, rate)	\
-	ndelay(DIV_ROUND_UP(DIV_ROUND_UP(1000000000, rate), n) + 10)
+	ndelay(DIV_ROUND_UP(DIV_ROUND_UP(HZ_PER_GHZ, rate), n) + 10)
 
 /* I2C register address definitions */
 #define SYNQUACER_I2C_REG_BSR		(0x00 << 2) // Bus Status
@@ -67,10 +68,10 @@
 
 /* STANDARD MODE frequency */
 #define SYNQUACER_I2C_CLK_MASTER_STD(rate)			\
-	DIV_ROUND_UP(DIV_ROUND_UP((rate), 100000) - 2, 2)
+	DIV_ROUND_UP(DIV_ROUND_UP((rate), I2C_MAX_STANDARD_MODE_FREQ) - 2, 2)
 /* FAST MODE frequency */
 #define SYNQUACER_I2C_CLK_MASTER_FAST(rate)			\
-	DIV_ROUND_UP((DIV_ROUND_UP((rate), 400000) - 2) * 2, 3)
+	DIV_ROUND_UP((DIV_ROUND_UP((rate), I2C_MAX_FAST_MODE_FREQ) - 2) * 2, 3)
 
 /* (clkrate <= 18000000) */
 /* calculate the value of CS bits in CCR register on standard mode */
@@ -138,14 +139,11 @@ struct synquacer_i2c {
 	int			irq;
 	struct device		*dev;
 	void __iomem		*base;
-	struct clk		*pclk;
 	u32			pclkrate;
 	u32			speed_khz;
 	u32			timeout_ms;
 	enum i2c_state		state;
 	struct i2c_adapter	adapter;
-
-	bool			is_suspended;
 };
 
 static inline int is_lastmsg(struct synquacer_i2c *i2c)
@@ -313,11 +311,8 @@ static int synquacer_i2c_doxfer(struct synquacer_i2c *i2c,
 				struct i2c_msg *msgs, int num)
 {
 	unsigned char bsr;
-	unsigned long timeout;
+	unsigned long time_left;
 	int ret;
-
-	if (i2c->is_suspended)
-		return -EBUSY;
 
 	synquacer_i2c_hw_init(i2c);
 	bsr = readb(i2c->base + SYNQUACER_I2C_REG_BSR);
@@ -340,9 +335,9 @@ static int synquacer_i2c_doxfer(struct synquacer_i2c *i2c,
 		return ret;
 	}
 
-	timeout = wait_for_completion_timeout(&i2c->completion,
-					msecs_to_jiffies(i2c->timeout_ms));
-	if (timeout == 0) {
+	time_left = wait_for_completion_timeout(&i2c->completion,
+						msecs_to_jiffies(i2c->timeout_ms));
+	if (time_left == 0) {
 		dev_dbg(i2c->dev, "timeout\n");
 		return -EAGAIN;
 	}
@@ -356,7 +351,7 @@ static int synquacer_i2c_doxfer(struct synquacer_i2c *i2c,
 	/* wait 2 clock periods to ensure the stop has been through the bus */
 	udelay(DIV_ROUND_UP(2 * 1000, i2c->speed_khz));
 
-	return 0;
+	return ret;
 }
 
 static irqreturn_t synquacer_i2c_isr(int irq, void *dev_id)
@@ -403,8 +398,7 @@ static irqreturn_t synquacer_i2c_isr(int irq, void *dev_id)
 
 		if (i2c->state == STATE_READ)
 			goto prepare_read;
-
-		/* fallthru */
+		fallthrough;
 
 	case STATE_WRITE:
 		if (bsr & SYNQUACER_I2C_BSR_LRB) {
@@ -509,7 +503,7 @@ static int synquacer_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 
 	dev_dbg(i2c->dev, "calculated timeout %d ms\n", i2c->timeout_ms);
 
-	for (retry = 0; retry < adap->retries; retry++) {
+	for (retry = 0; retry <= adap->retries; retry++) {
 		ret = synquacer_i2c_doxfer(i2c, msgs, num);
 		if (ret != -EAGAIN)
 			return ret;
@@ -527,11 +521,11 @@ static u32 synquacer_i2c_functionality(struct i2c_adapter *adap)
 }
 
 static const struct i2c_algorithm synquacer_i2c_algo = {
-	.master_xfer	= synquacer_i2c_xfer,
-	.functionality	= synquacer_i2c_functionality,
+	.xfer = synquacer_i2c_xfer,
+	.functionality = synquacer_i2c_functionality,
 };
 
-static struct i2c_adapter synquacer_i2c_ops = {
+static const struct i2c_adapter synquacer_i2c_ops = {
 	.owner		= THIS_MODULE,
 	.name		= "synquacer_i2c-adapter",
 	.algo		= &synquacer_i2c_algo,
@@ -541,7 +535,7 @@ static struct i2c_adapter synquacer_i2c_ops = {
 static int synquacer_i2c_probe(struct platform_device *pdev)
 {
 	struct synquacer_i2c *i2c;
-	struct resource *r;
+	struct clk *pclk;
 	u32 bus_speed;
 	int ret;
 
@@ -557,55 +551,44 @@ static int synquacer_i2c_probe(struct platform_device *pdev)
 	device_property_read_u32(&pdev->dev, "socionext,pclk-rate",
 				 &i2c->pclkrate);
 
-	i2c->pclk = devm_clk_get(&pdev->dev, "pclk");
-	if (IS_ERR(i2c->pclk) && PTR_ERR(i2c->pclk) == -EPROBE_DEFER)
-		return -EPROBE_DEFER;
-	if (!IS_ERR_OR_NULL(i2c->pclk)) {
-		dev_dbg(&pdev->dev, "clock source %p\n", i2c->pclk);
+	pclk = devm_clk_get_optional_enabled(&pdev->dev, "pclk");
+	if (IS_ERR(pclk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(pclk),
+				     "failed to get and enable clock\n");
 
-		ret = clk_prepare_enable(i2c->pclk);
-		if (ret) {
-			dev_err(&pdev->dev, "failed to enable clock (%d)\n",
-				ret);
-			return ret;
-		}
-		i2c->pclkrate = clk_get_rate(i2c->pclk);
-	}
+	if (pclk)
+		i2c->pclkrate = clk_get_rate(pclk);
 
 	if (i2c->pclkrate < SYNQUACER_I2C_MIN_CLK_RATE ||
-	    i2c->pclkrate > SYNQUACER_I2C_MAX_CLK_RATE) {
-		dev_err(&pdev->dev, "PCLK missing or out of range (%d)\n",
-			i2c->pclkrate);
-		return -EINVAL;
-	}
+	    i2c->pclkrate > SYNQUACER_I2C_MAX_CLK_RATE)
+		return dev_err_probe(&pdev->dev, -EINVAL,
+				     "PCLK missing or out of range (%d)\n",
+				     i2c->pclkrate);
 
-	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	i2c->base = devm_ioremap_resource(&pdev->dev, r);
+	i2c->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(i2c->base))
 		return PTR_ERR(i2c->base);
 
 	i2c->irq = platform_get_irq(pdev, 0);
-	if (i2c->irq < 0) {
-		dev_err(&pdev->dev, "no IRQ resource found\n");
-		return -ENODEV;
-	}
+	if (i2c->irq < 0)
+		return i2c->irq;
 
 	ret = devm_request_irq(&pdev->dev, i2c->irq, synquacer_i2c_isr,
 			       0, dev_name(&pdev->dev), i2c);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "cannot claim IRQ %d\n", i2c->irq);
-		return ret;
-	}
+	if (ret < 0)
+		return dev_err_probe(&pdev->dev, ret, "cannot claim IRQ %d\n", i2c->irq);
 
 	i2c->state = STATE_IDLE;
 	i2c->dev = &pdev->dev;
 	i2c->adapter = synquacer_i2c_ops;
 	i2c_set_adapdata(&i2c->adapter, i2c);
 	i2c->adapter.dev.parent = &pdev->dev;
+	i2c->adapter.dev.of_node = pdev->dev.of_node;
+	ACPI_COMPANION_SET(&i2c->adapter.dev, ACPI_COMPANION(&pdev->dev));
 	i2c->adapter.nr = pdev->id;
 	init_completion(&i2c->completion);
 
-	if (bus_speed < 400000)
+	if (bus_speed < I2C_MAX_FAST_MODE_FREQ)
 		i2c->speed_khz = SYNQUACER_I2C_SPEED_SM;
 	else
 		i2c->speed_khz = SYNQUACER_I2C_SPEED_FM;
@@ -613,10 +596,8 @@ static int synquacer_i2c_probe(struct platform_device *pdev)
 	synquacer_i2c_hw_init(i2c);
 
 	ret = i2c_add_numbered_adapter(&i2c->adapter);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to add bus to i2c core\n");
-		return ret;
-	}
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret, "failed to add bus to i2c core\n");
 
 	platform_set_drvdata(pdev, i2c);
 
@@ -626,18 +607,14 @@ static int synquacer_i2c_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int synquacer_i2c_remove(struct platform_device *pdev)
+static void synquacer_i2c_remove(struct platform_device *pdev)
 {
 	struct synquacer_i2c *i2c = platform_get_drvdata(pdev);
 
 	i2c_del_adapter(&i2c->adapter);
-	if (!IS_ERR(i2c->pclk))
-		clk_disable_unprepare(i2c->pclk);
-
-	return 0;
 };
 
-static const struct of_device_id synquacer_i2c_dt_ids[] = {
+static const struct of_device_id synquacer_i2c_dt_ids[] __maybe_unused = {
 	{ .compatible = "socionext,synquacer-i2c" },
 	{ /* sentinel */ }
 };
@@ -653,7 +630,7 @@ MODULE_DEVICE_TABLE(acpi, synquacer_i2c_acpi_ids);
 
 static struct platform_driver synquacer_i2c_driver = {
 	.probe	= synquacer_i2c_probe,
-	.remove	= synquacer_i2c_remove,
+	.remove = synquacer_i2c_remove,
 	.driver	= {
 		.name = "synquacer_i2c",
 		.of_match_table = of_match_ptr(synquacer_i2c_dt_ids),

@@ -70,6 +70,7 @@ static void event_handler(struct work_struct *work)
 	while ((ud = get_event()) != NULL) {
 		usbip_dbg_eh("pending event %lx\n", ud->event);
 
+		mutex_lock(&ud->sysfs_lock);
 		/*
 		 * NOTE: shutdown must come first.
 		 * Shutdown the device.
@@ -90,6 +91,7 @@ static void event_handler(struct work_struct *work)
 			ud->eh_ops.unusable(ud);
 			unset_event(ud, USBIP_EH_UNUSABLE);
 		}
+		mutex_unlock(&ud->sysfs_lock);
 
 		wake_up(&ud->eh_waitq);
 	}
@@ -135,7 +137,6 @@ int usbip_init_eh(void)
 
 void usbip_finish_eh(void)
 {
-	flush_workqueue(usbip_queue);
 	destroy_workqueue(usbip_queue);
 	usbip_queue = NULL;
 }
@@ -157,7 +158,7 @@ void usbip_event_add(struct usbip_device *ud, unsigned long event)
 			goto out;
 	}
 
-	ue = kmalloc(sizeof(struct usbip_event), GFP_ATOMIC);
+	ue = kmalloc_obj(struct usbip_event, GFP_ATOMIC);
 	if (ue == NULL)
 		goto out;
 

@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * A hwmon driver for ACPI 4.0 power meters
  * Copyright (C) 2009 IBM
  *
  * Author: Darrick J. Wong <darrick.wong@oracle.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/module.h>
@@ -31,9 +18,9 @@
 #include <linux/time.h>
 #include <linux/err.h>
 #include <linux/acpi.h>
+#include <linux/platform_device.h>
 
 #define ACPI_POWER_METER_NAME		"power_meter"
-ACPI_MODULE_NAME(ACPI_POWER_METER_NAME);
 #define ACPI_POWER_METER_DEVICE_NAME	"Power Meter"
 #define ACPI_POWER_METER_CLASS		"pwr_meter_resource"
 
@@ -45,6 +32,7 @@ ACPI_MODULE_NAME(ACPI_POWER_METER_NAME);
 #define POWER_METER_CAN_NOTIFY	(1 << 3)
 #define POWER_METER_IS_BATTERY	(1 << 8)
 #define UNKNOWN_HYSTERESIS	0xFFFFFFFF
+#define UNKNOWN_POWER		0xFFFFFFFF
 
 #define METER_NOTIFY_CONFIG	0x80
 #define METER_NOTIFY_TRIP	0x81
@@ -59,6 +47,8 @@ ACPI_MODULE_NAME(ACPI_POWER_METER_NAME);
 
 static int cap_in_hardware;
 static bool force_cap_on;
+
+static DEFINE_MUTEX(acpi_notify_lock);
 
 static int can_cap_in_hardware(void)
 {
@@ -97,25 +87,15 @@ struct acpi_power_meter_resource {
 	u64		power;
 	u64		cap;
 	u64		avg_interval;
+	bool		power_alarm;
 	int			sensors_valid;
 	unsigned long		sensors_last_updated;
-	struct sensor_device_attribute	sensors[NUM_SENSORS];
-	int			num_sensors;
+#define POWER_METER_TRIP_AVERAGE_MIN_IDX	0
+#define POWER_METER_TRIP_AVERAGE_MAX_IDX	1
 	s64			trip[2];
 	int			num_domain_devices;
 	struct acpi_device	**domain_devices;
 	struct kobject		*holders_dir;
-};
-
-struct sensor_template {
-	char *label;
-	ssize_t (*show)(struct device *dev,
-			struct device_attribute *devattr,
-			char *buf);
-	ssize_t (*set)(struct device *dev,
-		       struct device_attribute *devattr,
-		       const char *buf, size_t count);
-	int index;
 };
 
 /* Averaging interval */
@@ -127,67 +107,13 @@ static int update_avg_interval(struct acpi_power_meter_resource *resource)
 	status = acpi_evaluate_integer(resource->acpi_dev->handle, "_GAI",
 				       NULL, &data);
 	if (ACPI_FAILURE(status)) {
-		ACPI_EXCEPTION((AE_INFO, status, "Evaluating _GAI"));
+		acpi_evaluation_failure_warn(resource->acpi_dev->handle, "_GAI",
+					     status);
 		return -ENODEV;
 	}
 
 	resource->avg_interval = data;
 	return 0;
-}
-
-static ssize_t show_avg_interval(struct device *dev,
-				 struct device_attribute *devattr,
-				 char *buf)
-{
-	struct acpi_device *acpi_dev = to_acpi_device(dev);
-	struct acpi_power_meter_resource *resource = acpi_dev->driver_data;
-
-	mutex_lock(&resource->lock);
-	update_avg_interval(resource);
-	mutex_unlock(&resource->lock);
-
-	return sprintf(buf, "%llu\n", resource->avg_interval);
-}
-
-static ssize_t set_avg_interval(struct device *dev,
-				struct device_attribute *devattr,
-				const char *buf, size_t count)
-{
-	struct acpi_device *acpi_dev = to_acpi_device(dev);
-	struct acpi_power_meter_resource *resource = acpi_dev->driver_data;
-	union acpi_object arg0 = { ACPI_TYPE_INTEGER };
-	struct acpi_object_list args = { 1, &arg0 };
-	int res;
-	unsigned long temp;
-	unsigned long long data;
-	acpi_status status;
-
-	res = kstrtoul(buf, 10, &temp);
-	if (res)
-		return res;
-
-	if (temp > resource->caps.max_avg_interval ||
-	    temp < resource->caps.min_avg_interval)
-		return -EINVAL;
-	arg0.integer.value = temp;
-
-	mutex_lock(&resource->lock);
-	status = acpi_evaluate_integer(resource->acpi_dev->handle, "_PAI",
-				       &args, &data);
-	if (!ACPI_FAILURE(status))
-		resource->avg_interval = temp;
-	mutex_unlock(&resource->lock);
-
-	if (ACPI_FAILURE(status)) {
-		ACPI_EXCEPTION((AE_INFO, status, "Evaluating _PAI"));
-		return -EINVAL;
-	}
-
-	/* _PAI returns 0 on success, nonzero otherwise */
-	if (data)
-		return -EINVAL;
-
-	return count;
 }
 
 /* Cap functions */
@@ -199,66 +125,13 @@ static int update_cap(struct acpi_power_meter_resource *resource)
 	status = acpi_evaluate_integer(resource->acpi_dev->handle, "_GHL",
 				       NULL, &data);
 	if (ACPI_FAILURE(status)) {
-		ACPI_EXCEPTION((AE_INFO, status, "Evaluating _GHL"));
+		acpi_evaluation_failure_warn(resource->acpi_dev->handle, "_GHL",
+					     status);
 		return -ENODEV;
 	}
 
 	resource->cap = data;
 	return 0;
-}
-
-static ssize_t show_cap(struct device *dev,
-			struct device_attribute *devattr,
-			char *buf)
-{
-	struct acpi_device *acpi_dev = to_acpi_device(dev);
-	struct acpi_power_meter_resource *resource = acpi_dev->driver_data;
-
-	mutex_lock(&resource->lock);
-	update_cap(resource);
-	mutex_unlock(&resource->lock);
-
-	return sprintf(buf, "%llu\n", resource->cap * 1000);
-}
-
-static ssize_t set_cap(struct device *dev, struct device_attribute *devattr,
-		       const char *buf, size_t count)
-{
-	struct acpi_device *acpi_dev = to_acpi_device(dev);
-	struct acpi_power_meter_resource *resource = acpi_dev->driver_data;
-	union acpi_object arg0 = { ACPI_TYPE_INTEGER };
-	struct acpi_object_list args = { 1, &arg0 };
-	int res;
-	unsigned long temp;
-	unsigned long long data;
-	acpi_status status;
-
-	res = kstrtoul(buf, 10, &temp);
-	if (res)
-		return res;
-
-	temp = DIV_ROUND_CLOSEST(temp, 1000);
-	if (temp > resource->caps.max_cap || temp < resource->caps.min_cap)
-		return -EINVAL;
-	arg0.integer.value = temp;
-
-	mutex_lock(&resource->lock);
-	status = acpi_evaluate_integer(resource->acpi_dev->handle, "_SHL",
-				       &args, &data);
-	if (!ACPI_FAILURE(status))
-		resource->cap = temp;
-	mutex_unlock(&resource->lock);
-
-	if (ACPI_FAILURE(status)) {
-		ACPI_EXCEPTION((AE_INFO, status, "Evaluating _SHL"));
-		return -EINVAL;
-	}
-
-	/* _SHL returns 0 on success, nonzero otherwise */
-	if (data)
-		return -EINVAL;
-
-	return count;
 }
 
 /* Power meter trip points */
@@ -283,7 +156,8 @@ static int set_acpi_trip(struct acpi_power_meter_resource *resource)
 	status = acpi_evaluate_integer(resource->acpi_dev->handle, "_PTP",
 				       &args, &data);
 	if (ACPI_FAILURE(status)) {
-		ACPI_EXCEPTION((AE_INFO, status, "Evaluating _PTP"));
+		acpi_evaluation_failure_warn(resource->acpi_dev->handle, "_PTP",
+					     status);
 		return -EINVAL;
 	}
 
@@ -292,32 +166,6 @@ static int set_acpi_trip(struct acpi_power_meter_resource *resource)
 		return -EINVAL;
 
 	return 0;
-}
-
-static ssize_t set_trip(struct device *dev, struct device_attribute *devattr,
-			const char *buf, size_t count)
-{
-	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
-	struct acpi_device *acpi_dev = to_acpi_device(dev);
-	struct acpi_power_meter_resource *resource = acpi_dev->driver_data;
-	int res;
-	unsigned long temp;
-
-	res = kstrtoul(buf, 10, &temp);
-	if (res)
-		return res;
-
-	temp = DIV_ROUND_CLOSEST(temp, 1000);
-
-	mutex_lock(&resource->lock);
-	resource->trip[attr->index - 7] = temp;
-	res = set_acpi_trip(resource);
-	mutex_unlock(&resource->lock);
-
-	if (res)
-		return res;
-
-	return count;
 }
 
 /* Power meter */
@@ -335,7 +183,8 @@ static int update_meter(struct acpi_power_meter_resource *resource)
 	status = acpi_evaluate_integer(resource->acpi_dev->handle, "_PMM",
 				       NULL, &data);
 	if (ACPI_FAILURE(status)) {
-		ACPI_EXCEPTION((AE_INFO, status, "Evaluating _PMM"));
+		acpi_evaluation_failure_warn(resource->acpi_dev->handle, "_PMM",
+					     status);
 		return -ENODEV;
 	}
 
@@ -344,186 +193,6 @@ static int update_meter(struct acpi_power_meter_resource *resource)
 	resource->sensors_last_updated = jiffies;
 	return 0;
 }
-
-static ssize_t show_power(struct device *dev,
-			  struct device_attribute *devattr,
-			  char *buf)
-{
-	struct acpi_device *acpi_dev = to_acpi_device(dev);
-	struct acpi_power_meter_resource *resource = acpi_dev->driver_data;
-
-	mutex_lock(&resource->lock);
-	update_meter(resource);
-	mutex_unlock(&resource->lock);
-
-	return sprintf(buf, "%llu\n", resource->power * 1000);
-}
-
-/* Miscellaneous */
-static ssize_t show_str(struct device *dev,
-			struct device_attribute *devattr,
-			char *buf)
-{
-	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
-	struct acpi_device *acpi_dev = to_acpi_device(dev);
-	struct acpi_power_meter_resource *resource = acpi_dev->driver_data;
-	acpi_string val;
-
-	switch (attr->index) {
-	case 0:
-		val = resource->model_number;
-		break;
-	case 1:
-		val = resource->serial_number;
-		break;
-	case 2:
-		val = resource->oem_info;
-		break;
-	default:
-		WARN(1, "Implementation error: unexpected attribute index %d\n",
-		     attr->index);
-		val = "";
-		break;
-	}
-
-	return sprintf(buf, "%s\n", val);
-}
-
-static ssize_t show_val(struct device *dev,
-			struct device_attribute *devattr,
-			char *buf)
-{
-	struct sensor_device_attribute *attr = to_sensor_dev_attr(devattr);
-	struct acpi_device *acpi_dev = to_acpi_device(dev);
-	struct acpi_power_meter_resource *resource = acpi_dev->driver_data;
-	u64 val = 0;
-
-	switch (attr->index) {
-	case 0:
-		val = resource->caps.min_avg_interval;
-		break;
-	case 1:
-		val = resource->caps.max_avg_interval;
-		break;
-	case 2:
-		val = resource->caps.min_cap * 1000;
-		break;
-	case 3:
-		val = resource->caps.max_cap * 1000;
-		break;
-	case 4:
-		if (resource->caps.hysteresis == UNKNOWN_HYSTERESIS)
-			return sprintf(buf, "unknown\n");
-
-		val = resource->caps.hysteresis * 1000;
-		break;
-	case 5:
-		if (resource->caps.flags & POWER_METER_IS_BATTERY)
-			val = 1;
-		else
-			val = 0;
-		break;
-	case 6:
-		if (resource->power > resource->cap)
-			val = 1;
-		else
-			val = 0;
-		break;
-	case 7:
-	case 8:
-		if (resource->trip[attr->index - 7] < 0)
-			return sprintf(buf, "unknown\n");
-
-		val = resource->trip[attr->index - 7] * 1000;
-		break;
-	default:
-		WARN(1, "Implementation error: unexpected attribute index %d\n",
-		     attr->index);
-		break;
-	}
-
-	return sprintf(buf, "%llu\n", val);
-}
-
-static ssize_t show_accuracy(struct device *dev,
-			     struct device_attribute *devattr,
-			     char *buf)
-{
-	struct acpi_device *acpi_dev = to_acpi_device(dev);
-	struct acpi_power_meter_resource *resource = acpi_dev->driver_data;
-	unsigned int acc = resource->caps.accuracy;
-
-	return sprintf(buf, "%u.%u%%\n", acc / 1000, acc % 1000);
-}
-
-static ssize_t show_name(struct device *dev,
-			 struct device_attribute *devattr,
-			 char *buf)
-{
-	return sprintf(buf, "%s\n", ACPI_POWER_METER_NAME);
-}
-
-#define RO_SENSOR_TEMPLATE(_label, _show, _index)	\
-	{						\
-		.label = _label,			\
-		.show  = _show,				\
-		.index = _index,			\
-	}
-
-#define RW_SENSOR_TEMPLATE(_label, _show, _set, _index)	\
-	{						\
-		.label = _label,			\
-		.show  = _show,				\
-		.set   = _set,				\
-		.index = _index,			\
-	}
-
-/* Sensor descriptions.  If you add a sensor, update NUM_SENSORS above! */
-static struct sensor_template meter_attrs[] = {
-	RO_SENSOR_TEMPLATE(POWER_AVERAGE_NAME, show_power, 0),
-	RO_SENSOR_TEMPLATE("power1_accuracy", show_accuracy, 0),
-	RO_SENSOR_TEMPLATE("power1_average_interval_min", show_val, 0),
-	RO_SENSOR_TEMPLATE("power1_average_interval_max", show_val, 1),
-	RO_SENSOR_TEMPLATE("power1_is_battery", show_val, 5),
-	RW_SENSOR_TEMPLATE(POWER_AVG_INTERVAL_NAME, show_avg_interval,
-		set_avg_interval, 0),
-	{},
-};
-
-static struct sensor_template misc_cap_attrs[] = {
-	RO_SENSOR_TEMPLATE("power1_cap_min", show_val, 2),
-	RO_SENSOR_TEMPLATE("power1_cap_max", show_val, 3),
-	RO_SENSOR_TEMPLATE("power1_cap_hyst", show_val, 4),
-	RO_SENSOR_TEMPLATE(POWER_ALARM_NAME, show_val, 6),
-	{},
-};
-
-static struct sensor_template ro_cap_attrs[] = {
-	RO_SENSOR_TEMPLATE(POWER_CAP_NAME, show_cap, 0),
-	{},
-};
-
-static struct sensor_template rw_cap_attrs[] = {
-	RW_SENSOR_TEMPLATE(POWER_CAP_NAME, show_cap, set_cap, 0),
-	{},
-};
-
-static struct sensor_template trip_attrs[] = {
-	RW_SENSOR_TEMPLATE("power1_average_min", show_val, set_trip, 7),
-	RW_SENSOR_TEMPLATE("power1_average_max", show_val, set_trip, 8),
-	{},
-};
-
-static struct sensor_template misc_attrs[] = {
-	RO_SENSOR_TEMPLATE("name", show_name, 0),
-	RO_SENSOR_TEMPLATE("power1_model_number", show_str, 0),
-	RO_SENSOR_TEMPLATE("power1_oem_info", show_str, 2),
-	RO_SENSOR_TEMPLATE("power1_serial_number", show_str, 1),
-	{},
-};
-
-#undef RO_SENSOR_TEMPLATE
-#undef RW_SENSOR_TEMPLATE
 
 /* Read power domain data */
 static void remove_domain_devices(struct acpi_power_meter_resource *resource)
@@ -535,12 +204,13 @@ static void remove_domain_devices(struct acpi_power_meter_resource *resource)
 
 	for (i = 0; i < resource->num_domain_devices; i++) {
 		struct acpi_device *obj = resource->domain_devices[i];
+
 		if (!obj)
 			continue;
 
 		sysfs_remove_link(resource->holders_dir,
 				  kobject_name(&obj->dev.kobj));
-		put_device(&obj->dev);
+		acpi_dev_put(obj);
 	}
 
 	kfree(resource->domain_devices);
@@ -559,7 +229,8 @@ static int read_domain_devices(struct acpi_power_meter_resource *resource)
 	status = acpi_evaluate_object(resource->acpi_dev->handle, "_PMD", NULL,
 				      &buffer);
 	if (ACPI_FAILURE(status)) {
-		ACPI_EXCEPTION((AE_INFO, status, "Evaluating _PMD"));
+		acpi_evaluation_failure_warn(resource->acpi_dev->handle, "_PMD",
+					     status);
 		return -ENODEV;
 	}
 
@@ -575,15 +246,15 @@ static int read_domain_devices(struct acpi_power_meter_resource *resource)
 	if (!pss->package.count)
 		goto end;
 
-	resource->domain_devices = kzalloc(sizeof(struct acpi_device *) *
-					   pss->package.count, GFP_KERNEL);
+	resource->domain_devices = kzalloc_objs(struct acpi_device *,
+						pss->package.count);
 	if (!resource->domain_devices) {
 		res = -ENOMEM;
 		goto end;
 	}
 
 	resource->holders_dir = kobject_create_and_add("measures",
-					&resource->acpi_dev->dev.kobj);
+						       &resource->acpi_dev->dev.kobj);
 	if (!resource->holders_dir) {
 		res = -ENOMEM;
 		goto exit_free;
@@ -593,25 +264,22 @@ static int read_domain_devices(struct acpi_power_meter_resource *resource)
 
 	for (i = 0; i < pss->package.count; i++) {
 		struct acpi_device *obj;
-		union acpi_object *element = &(pss->package.elements[i]);
+		union acpi_object *element = &pss->package.elements[i];
 
 		/* Refuse non-references */
 		if (element->type != ACPI_TYPE_LOCAL_REFERENCE)
 			continue;
 
 		/* Create a symlink to domain objects */
-		resource->domain_devices[i] = NULL;
-		if (acpi_bus_get_device(element->reference.handle,
-					&resource->domain_devices[i]))
+		obj = acpi_get_acpi_dev(element->reference.handle);
+		resource->domain_devices[i] = obj;
+		if (!obj)
 			continue;
 
-		obj = resource->domain_devices[i];
-		get_device(&obj->dev);
-
 		res = sysfs_create_link(resource->holders_dir, &obj->dev.kobj,
-				      kobject_name(&obj->dev.kobj));
+					kobject_name(&obj->dev.kobj));
 		if (res) {
-			put_device(&obj->dev);
+			acpi_dev_put(obj);
 			resource->domain_devices[i] = NULL;
 		}
 	}
@@ -626,107 +294,433 @@ end:
 	return res;
 }
 
-/* Registration and deregistration */
-static int register_attrs(struct acpi_power_meter_resource *resource,
-			  struct sensor_template *attrs)
+static int set_trip(struct acpi_power_meter_resource *resource, u16 trip_idx,
+		    unsigned long trip)
 {
-	struct device *dev = &resource->acpi_dev->dev;
-	struct sensor_device_attribute *sensors =
-		&resource->sensors[resource->num_sensors];
-	int res = 0;
+	unsigned long trip_bk;
+	int ret;
 
-	while (attrs->label) {
-		sensors->dev_attr.attr.name = attrs->label;
-		sensors->dev_attr.attr.mode = S_IRUGO;
-		sensors->dev_attr.show = attrs->show;
-		sensors->index = attrs->index;
+	trip = DIV_ROUND_CLOSEST(trip, 1000);
+	trip_bk = resource->trip[trip_idx];
 
-		if (attrs->set) {
-			sensors->dev_attr.attr.mode |= S_IWUSR;
-			sensors->dev_attr.store = attrs->set;
-		}
-
-		sysfs_attr_init(&sensors->dev_attr.attr);
-		res = device_create_file(dev, &sensors->dev_attr);
-		if (res) {
-			sensors->dev_attr.attr.name = NULL;
-			goto error;
-		}
-		sensors++;
-		resource->num_sensors++;
-		attrs++;
+	resource->trip[trip_idx] = trip;
+	ret = set_acpi_trip(resource);
+	if (ret) {
+		dev_err(&resource->acpi_dev->dev, "set %s failed.\n",
+			(trip_idx == POWER_METER_TRIP_AVERAGE_MIN_IDX) ?
+			 "power1_average_min" : "power1_average_max");
+		resource->trip[trip_idx] = trip_bk;
 	}
 
-error:
-	return res;
+	return ret;
 }
 
-static void remove_attrs(struct acpi_power_meter_resource *resource)
+static int set_cap(struct acpi_power_meter_resource *resource,
+		   unsigned long cap)
 {
-	int i;
+	union acpi_object arg0 = { ACPI_TYPE_INTEGER };
+	struct acpi_object_list args = { 1, &arg0 };
+	unsigned long long data;
+	acpi_status status;
 
-	for (i = 0; i < resource->num_sensors; i++) {
-		if (!resource->sensors[i].dev_attr.attr.name)
-			continue;
-		device_remove_file(&resource->acpi_dev->dev,
-				   &resource->sensors[i].dev_attr);
+	cap = DIV_ROUND_CLOSEST(cap, 1000);
+	if (cap > resource->caps.max_cap || cap < resource->caps.min_cap)
+		return -EINVAL;
+
+	arg0.integer.value = cap;
+	status = acpi_evaluate_integer(resource->acpi_dev->handle, "_SHL",
+				       &args, &data);
+	if (ACPI_FAILURE(status)) {
+		acpi_evaluation_failure_warn(resource->acpi_dev->handle, "_SHL",
+					     status);
+		return -EINVAL;
 	}
+	resource->cap = cap;
 
-	remove_domain_devices(resource);
+	/* _SHL returns 0 on success, nonzero otherwise */
+	if (data)
+		return -EINVAL;
 
-	resource->num_sensors = 0;
+	return 0;
 }
 
-static int setup_attrs(struct acpi_power_meter_resource *resource)
+static int set_avg_interval(struct acpi_power_meter_resource *resource,
+			    unsigned long val)
 {
-	int res = 0;
+	union acpi_object arg0 = { ACPI_TYPE_INTEGER };
+	struct acpi_object_list args = { 1, &arg0 };
+	unsigned long long data;
+	acpi_status status;
 
-	res = read_domain_devices(resource);
-	if (res)
-		return res;
+	if (val > resource->caps.max_avg_interval ||
+	    val < resource->caps.min_avg_interval)
+		return -EINVAL;
 
-	if (resource->caps.flags & POWER_METER_CAN_MEASURE) {
-		res = register_attrs(resource, meter_attrs);
-		if (res)
-			goto error;
+	arg0.integer.value = val;
+	status = acpi_evaluate_integer(resource->acpi_dev->handle, "_PAI",
+				       &args, &data);
+	if (ACPI_FAILURE(status)) {
+		acpi_evaluation_failure_warn(resource->acpi_dev->handle, "_PAI",
+					     status);
+		return -EINVAL;
+	}
+	resource->avg_interval = val;
+
+	/* _PAI returns 0 on success, nonzero otherwise */
+	if (data)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int get_power_alarm_state(struct acpi_power_meter_resource *resource,
+				 long *val)
+{
+	int ret;
+
+	ret = update_meter(resource);
+	if (ret)
+		return ret;
+
+	/* need to update cap if not to support the notification. */
+	if (!(resource->caps.flags & POWER_METER_CAN_NOTIFY)) {
+		ret = update_cap(resource);
+		if (ret)
+			return ret;
+		resource->power_alarm = resource->power > resource->cap;
+		*val = resource->power_alarm;
+	} else {
+		*val = resource->power_alarm || resource->power > resource->cap;
+		resource->power_alarm = resource->power > resource->cap;
 	}
 
-	if (resource->caps.flags & POWER_METER_CAN_CAP) {
-		if (!can_cap_in_hardware()) {
-			dev_err(&resource->acpi_dev->dev,
-				"Ignoring unsafe software power cap!\n");
-			goto skip_unsafe_cap;
+	return 0;
+}
+
+static umode_t power_meter_is_visible(const void *data,
+				      enum hwmon_sensor_types type,
+				      u32 attr, int channel)
+{
+	const struct acpi_power_meter_resource *res = data;
+
+	if (type != hwmon_power)
+		return 0;
+
+	switch (attr) {
+	case hwmon_power_average:
+	case hwmon_power_average_interval_min:
+	case hwmon_power_average_interval_max:
+		if (res->caps.flags & POWER_METER_CAN_MEASURE)
+			return 0444;
+		break;
+	case hwmon_power_average_interval:
+		if (res->caps.flags & POWER_METER_CAN_MEASURE)
+			return 0644;
+		break;
+	case hwmon_power_cap_min:
+	case hwmon_power_cap_max:
+	case hwmon_power_alarm:
+		if (res->caps.flags & POWER_METER_CAN_CAP && can_cap_in_hardware())
+			return 0444;
+		break;
+	case hwmon_power_cap:
+		if (res->caps.flags & POWER_METER_CAN_CAP && can_cap_in_hardware()) {
+			if (res->caps.configurable_cap)
+				return 0644;
+			else
+				return 0444;
 		}
-
-		if (resource->caps.configurable_cap)
-			res = register_attrs(resource, rw_cap_attrs);
-		else
-			res = register_attrs(resource, ro_cap_attrs);
-
-		if (res)
-			goto error;
-
-		res = register_attrs(resource, misc_cap_attrs);
-		if (res)
-			goto error;
+		break;
+	default:
+		break;
 	}
 
-skip_unsafe_cap:
-	if (resource->caps.flags & POWER_METER_CAN_TRIP) {
-		res = register_attrs(resource, trip_attrs);
-		if (res)
-			goto error;
-	}
-
-	res = register_attrs(resource, misc_attrs);
-	if (res)
-		goto error;
-
-	return res;
-error:
-	remove_attrs(resource);
-	return res;
+	return 0;
 }
+
+static int power_meter_read(struct device *dev, enum hwmon_sensor_types type,
+			    u32 attr, int channel, long *val)
+{
+	struct acpi_power_meter_resource *res = dev_get_drvdata(dev);
+	int ret = 0;
+
+	if (type != hwmon_power)
+		return -EINVAL;
+
+	guard(mutex)(&res->lock);
+
+	switch (attr) {
+	case hwmon_power_average:
+		ret = update_meter(res);
+		if (ret)
+			return ret;
+		if (res->power == UNKNOWN_POWER)
+			return -ENODATA;
+		*val = res->power * 1000;
+		break;
+	case hwmon_power_average_interval_min:
+		*val = res->caps.min_avg_interval;
+		break;
+	case hwmon_power_average_interval_max:
+		*val = res->caps.max_avg_interval;
+		break;
+	case hwmon_power_average_interval:
+		ret = update_avg_interval(res);
+		if (ret)
+			return ret;
+		*val = (res)->avg_interval;
+		break;
+	case hwmon_power_cap_min:
+		*val = res->caps.min_cap * 1000;
+		break;
+	case hwmon_power_cap_max:
+		*val = res->caps.max_cap * 1000;
+		break;
+	case hwmon_power_alarm:
+		ret = get_power_alarm_state(res, val);
+		if (ret)
+			return ret;
+		break;
+	case hwmon_power_cap:
+		ret = update_cap(res);
+		if (ret)
+			return ret;
+		*val = res->cap * 1000;
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static int power_meter_write(struct device *dev, enum hwmon_sensor_types type,
+			     u32 attr, int channel, long val)
+{
+	struct acpi_power_meter_resource *res = dev_get_drvdata(dev);
+	int ret;
+
+	if (type != hwmon_power)
+		return -EINVAL;
+
+	guard(mutex)(&res->lock);
+	switch (attr) {
+	case hwmon_power_cap:
+		ret = set_cap(res, val);
+		break;
+	case hwmon_power_average_interval:
+		ret = set_avg_interval(res, val);
+		break;
+	default:
+		ret = -EOPNOTSUPP;
+	}
+
+	return ret;
+}
+
+static const struct hwmon_channel_info * const power_meter_info[] = {
+	HWMON_CHANNEL_INFO(power, HWMON_P_AVERAGE |
+		HWMON_P_AVERAGE_INTERVAL | HWMON_P_AVERAGE_INTERVAL_MIN |
+		HWMON_P_AVERAGE_INTERVAL_MAX | HWMON_P_CAP | HWMON_P_CAP_MIN |
+		HWMON_P_CAP_MAX | HWMON_P_ALARM),
+	NULL
+};
+
+static const struct hwmon_ops power_meter_ops = {
+	.is_visible = power_meter_is_visible,
+	.read = power_meter_read,
+	.write = power_meter_write,
+};
+
+static const struct hwmon_chip_info power_meter_chip_info = {
+	.ops = &power_meter_ops,
+	.info = power_meter_info,
+};
+
+static ssize_t power1_average_max_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct acpi_power_meter_resource *res = dev_get_drvdata(dev);
+	unsigned long trip;
+	int ret;
+
+	ret = kstrtoul(buf, 10, &trip);
+	if (ret)
+		return ret;
+
+	mutex_lock(&res->lock);
+	ret = set_trip(res, POWER_METER_TRIP_AVERAGE_MAX_IDX, trip);
+	mutex_unlock(&res->lock);
+
+	return ret == 0 ? count : ret;
+}
+
+static ssize_t power1_average_min_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct acpi_power_meter_resource *res = dev_get_drvdata(dev);
+	unsigned long trip;
+	int ret;
+
+	ret = kstrtoul(buf, 10, &trip);
+	if (ret)
+		return ret;
+
+	mutex_lock(&res->lock);
+	ret = set_trip(res, POWER_METER_TRIP_AVERAGE_MIN_IDX, trip);
+	mutex_unlock(&res->lock);
+
+	return ret == 0 ? count : ret;
+}
+
+static ssize_t power1_average_min_show(struct device *dev,
+				       struct device_attribute *attr, char *buf)
+{
+	struct acpi_power_meter_resource *res = dev_get_drvdata(dev);
+
+	if (res->trip[POWER_METER_TRIP_AVERAGE_MIN_IDX] < 0)
+		return sysfs_emit(buf, "unknown\n");
+
+	return sysfs_emit(buf, "%lld\n",
+			  res->trip[POWER_METER_TRIP_AVERAGE_MIN_IDX] * 1000);
+}
+
+static ssize_t power1_average_max_show(struct device *dev,
+				       struct device_attribute *attr, char *buf)
+{
+	struct acpi_power_meter_resource *res = dev_get_drvdata(dev);
+
+	if (res->trip[POWER_METER_TRIP_AVERAGE_MAX_IDX] < 0)
+		return sysfs_emit(buf, "unknown\n");
+
+	return sysfs_emit(buf, "%lld\n",
+			  res->trip[POWER_METER_TRIP_AVERAGE_MAX_IDX] * 1000);
+}
+
+static ssize_t power1_cap_hyst_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct acpi_power_meter_resource *res = dev_get_drvdata(dev);
+
+	if (res->caps.hysteresis == UNKNOWN_HYSTERESIS)
+		return sysfs_emit(buf, "unknown\n");
+
+	return sysfs_emit(buf, "%llu\n", res->caps.hysteresis * 1000);
+}
+
+static ssize_t power1_accuracy_show(struct device *dev,
+				    struct device_attribute *attr,
+				    char *buf)
+{
+	struct acpi_power_meter_resource *res = dev_get_drvdata(dev);
+	unsigned int acc = res->caps.accuracy;
+
+	return sysfs_emit(buf, "%u.%u%%\n", acc / 1000, acc % 1000);
+}
+
+static ssize_t power1_is_battery_show(struct device *dev,
+				      struct device_attribute *attr,
+				      char *buf)
+{
+	struct acpi_power_meter_resource *res = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%u\n",
+			  res->caps.flags & POWER_METER_IS_BATTERY ? 1 : 0);
+}
+
+static ssize_t power1_model_number_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	struct acpi_power_meter_resource *res = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%s\n", res->model_number);
+}
+
+static ssize_t power1_oem_info_show(struct device *dev,
+				    struct device_attribute *attr,
+				    char *buf)
+{
+	struct acpi_power_meter_resource *res = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%s\n", res->oem_info);
+}
+
+static ssize_t power1_serial_number_show(struct device *dev,
+					 struct device_attribute *attr,
+					 char *buf)
+{
+	struct acpi_power_meter_resource *res = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%s\n", res->serial_number);
+}
+
+/* depend on POWER_METER_CAN_TRIP */
+static DEVICE_ATTR_RW(power1_average_max);
+static DEVICE_ATTR_RW(power1_average_min);
+
+/* depend on POWER_METER_CAN_CAP */
+static DEVICE_ATTR_RO(power1_cap_hyst);
+
+/* depend on POWER_METER_CAN_MEASURE */
+static DEVICE_ATTR_RO(power1_accuracy);
+static DEVICE_ATTR_RO(power1_is_battery);
+
+static DEVICE_ATTR_RO(power1_model_number);
+static DEVICE_ATTR_RO(power1_oem_info);
+static DEVICE_ATTR_RO(power1_serial_number);
+
+static umode_t power_extra_is_visible(struct kobject *kobj,
+				      struct attribute *attr, int idx)
+{
+	struct device *dev = kobj_to_dev(kobj);
+	struct acpi_power_meter_resource *res = dev_get_drvdata(dev);
+
+	if (attr == &dev_attr_power1_is_battery.attr ||
+	    attr == &dev_attr_power1_accuracy.attr) {
+		if ((res->caps.flags & POWER_METER_CAN_MEASURE) == 0)
+			return 0;
+	}
+
+	if (attr == &dev_attr_power1_cap_hyst.attr) {
+		if ((res->caps.flags & POWER_METER_CAN_CAP) == 0) {
+			return 0;
+		} else if (!can_cap_in_hardware()) {
+			dev_warn(&res->acpi_dev->dev,
+				 "Ignoring unsafe software power cap!\n");
+			return 0;
+		}
+	}
+
+	if (attr == &dev_attr_power1_average_max.attr ||
+	    attr == &dev_attr_power1_average_min.attr) {
+		if ((res->caps.flags & POWER_METER_CAN_TRIP) == 0)
+			return 0;
+	}
+
+	return attr->mode;
+}
+
+static struct attribute *power_extra_attrs[] = {
+	&dev_attr_power1_average_max.attr,
+	&dev_attr_power1_average_min.attr,
+	&dev_attr_power1_cap_hyst.attr,
+	&dev_attr_power1_accuracy.attr,
+	&dev_attr_power1_is_battery.attr,
+	&dev_attr_power1_model_number.attr,
+	&dev_attr_power1_oem_info.attr,
+	&dev_attr_power1_serial_number.attr,
+	NULL
+};
+
+static const struct attribute_group power_extra_group = {
+	.attrs = power_extra_attrs,
+	.is_visible = power_extra_is_visible,
+};
+
+__ATTRIBUTE_GROUPS(power_extra);
 
 static void free_capabilities(struct acpi_power_meter_resource *resource)
 {
@@ -734,8 +728,10 @@ static void free_capabilities(struct acpi_power_meter_resource *resource)
 	int i;
 
 	str = &resource->model_number;
-	for (i = 0; i < 3; i++, str++)
+	for (i = 0; i < 3; i++, str++) {
 		kfree(*str);
+		*str = NULL;
+	}
 }
 
 static int read_capabilities(struct acpi_power_meter_resource *resource)
@@ -752,7 +748,8 @@ static int read_capabilities(struct acpi_power_meter_resource *resource)
 	status = acpi_evaluate_object(resource->acpi_dev->handle, "_PMC", NULL,
 				      &buffer);
 	if (ACPI_FAILURE(status)) {
-		ACPI_EXCEPTION((AE_INFO, status, "Evaluating _PMC"));
+		acpi_evaluation_failure_warn(resource->acpi_dev->handle, "_PMC",
+					     status);
 		return -ENODEV;
 	}
 
@@ -772,7 +769,9 @@ static int read_capabilities(struct acpi_power_meter_resource *resource)
 
 	status = acpi_extract_package(pss, &format, &state);
 	if (ACPI_FAILURE(status)) {
-		ACPI_EXCEPTION((AE_INFO, status, "Invalid data"));
+		dev_err(&resource->acpi_dev->dev, ACPI_POWER_METER_NAME
+			"_PMC package parsing failed: %s\n",
+			acpi_format_exception(status));
 		res = -EFAULT;
 		goto end;
 	}
@@ -789,160 +788,199 @@ static int read_capabilities(struct acpi_power_meter_resource *resource)
 	str = &resource->model_number;
 
 	for (i = 11; i < 14; i++) {
-		union acpi_object *element = &(pss->package.elements[i]);
+		union acpi_object *element = &pss->package.elements[i];
 
 		if (element->type != ACPI_TYPE_STRING) {
 			res = -EINVAL;
 			goto error;
 		}
 
-		*str = kzalloc(sizeof(u8) * (element->string.length + 1),
-			       GFP_KERNEL);
+		*str = kmemdup_nul(element->string.pointer, element->string.length,
+				   GFP_KERNEL);
 		if (!*str) {
 			res = -ENOMEM;
 			goto error;
 		}
 
-		strncpy(*str, element->string.pointer, element->string.length);
 		str++;
 	}
 
 	dev_info(&resource->acpi_dev->dev, "Found ACPI power meter.\n");
 	goto end;
 error:
-	str = &resource->model_number;
-	for (i = 0; i < 3; i++, str++)
-		kfree(*str);
+	free_capabilities(resource);
 end:
 	kfree(buffer.pointer);
 	return res;
 }
 
 /* Handle ACPI event notifications */
-static void acpi_power_meter_notify(struct acpi_device *device, u32 event)
+static void acpi_power_meter_notify(acpi_handle handle, u32 event, void *data)
 {
-	struct acpi_power_meter_resource *resource;
+	struct device *dev = data;
+	struct acpi_power_meter_resource *resource = dev_get_drvdata(dev);
 	int res;
 
-	if (!device || !acpi_driver_data(device))
-		return;
+	guard(mutex)(&acpi_notify_lock);
 
-	resource = acpi_driver_data(device);
-
-	mutex_lock(&resource->lock);
 	switch (event) {
 	case METER_NOTIFY_CONFIG:
+		if (!IS_ERR(resource->hwmon_dev))
+			hwmon_device_unregister(resource->hwmon_dev);
+
+		mutex_lock(&resource->lock);
+
 		free_capabilities(resource);
+		remove_domain_devices(resource);
 		res = read_capabilities(resource);
 		if (res)
-			break;
+			dev_err_once(dev, "read capabilities failed.\n");
+		res = read_domain_devices(resource);
+		if (res && res != -ENODEV)
+			dev_err_once(dev, "read domain devices failed.\n");
 
-		remove_attrs(resource);
-		setup_attrs(resource);
+		mutex_unlock(&resource->lock);
+
+		resource->hwmon_dev =
+			hwmon_device_register_with_info(dev,
+							ACPI_POWER_METER_NAME,
+							resource,
+							&power_meter_chip_info,
+							power_extra_groups);
+		if (IS_ERR(resource->hwmon_dev))
+			dev_err_once(dev, "register hwmon device failed.\n");
+
 		break;
 	case METER_NOTIFY_TRIP:
-		sysfs_notify(&device->dev.kobj, NULL, POWER_AVERAGE_NAME);
-		update_meter(resource);
+		sysfs_notify(&dev->kobj, NULL, POWER_AVERAGE_NAME);
 		break;
 	case METER_NOTIFY_CAP:
-		sysfs_notify(&device->dev.kobj, NULL, POWER_CAP_NAME);
-		update_cap(resource);
+		mutex_lock(&resource->lock);
+		res = update_cap(resource);
+		if (res)
+			dev_err_once(dev, "update cap failed when capping value is changed.\n");
+		mutex_unlock(&resource->lock);
+		sysfs_notify(&dev->kobj, NULL, POWER_CAP_NAME);
 		break;
 	case METER_NOTIFY_INTERVAL:
-		sysfs_notify(&device->dev.kobj, NULL, POWER_AVG_INTERVAL_NAME);
-		update_avg_interval(resource);
+		sysfs_notify(&dev->kobj, NULL, POWER_AVG_INTERVAL_NAME);
 		break;
 	case METER_NOTIFY_CAPPING:
-		sysfs_notify(&device->dev.kobj, NULL, POWER_ALARM_NAME);
-		dev_info(&device->dev, "Capping in progress.\n");
+		mutex_lock(&resource->lock);
+		resource->power_alarm = true;
+		mutex_unlock(&resource->lock);
+		sysfs_notify(&dev->kobj, NULL, POWER_ALARM_NAME);
+		dev_info(dev, "Capping in progress.\n");
 		break;
 	default:
 		WARN(1, "Unexpected event %d\n", event);
 		break;
 	}
-	mutex_unlock(&resource->lock);
 
 	acpi_bus_generate_netlink_event(ACPI_POWER_METER_CLASS,
-					dev_name(&device->dev), event, 0);
+					dev_name(&resource->acpi_dev->dev),
+					event, 0);
 }
 
-static int acpi_power_meter_add(struct acpi_device *device)
+static int acpi_power_meter_probe(struct platform_device *pdev)
 {
-	int res;
 	struct acpi_power_meter_resource *resource;
+	struct acpi_device *device;
+	int res;
 
+	device = ACPI_COMPANION(&pdev->dev);
 	if (!device)
-		return -EINVAL;
+		return -ENODEV;
 
-	resource = kzalloc(sizeof(struct acpi_power_meter_resource),
-			   GFP_KERNEL);
+	resource = kzalloc_obj(*resource);
 	if (!resource)
 		return -ENOMEM;
 
 	resource->sensors_valid = 0;
 	resource->acpi_dev = device;
 	mutex_init(&resource->lock);
-	strcpy(acpi_device_name(device), ACPI_POWER_METER_DEVICE_NAME);
-	strcpy(acpi_device_class(device), ACPI_POWER_METER_CLASS);
-	device->driver_data = resource;
+	strscpy(acpi_device_name(device), ACPI_POWER_METER_DEVICE_NAME);
+	strscpy(acpi_device_class(device), ACPI_POWER_METER_CLASS);
 
-	free_capabilities(resource);
+	platform_set_drvdata(pdev, resource);
+
+#if IS_REACHABLE(CONFIG_ACPI_IPMI)
+	/*
+	 * On Dell systems several methods of acpi_power_meter access
+	 * variables in IPMI region, so wait until IPMI space handler is
+	 * installed by acpi_ipmi and also wait until SMI is selected to make
+	 * the space handler fully functional.
+	 */
+	if (dmi_match(DMI_SYS_VENDOR, "Dell Inc.")) {
+		struct acpi_device *ipi_device = acpi_dev_get_first_match_dev("IPI0001", NULL, -1);
+
+		if (ipi_device && acpi_wait_for_acpi_ipmi())
+			dev_warn(&pdev->dev, "Waiting for ACPI IPMI timeout");
+		acpi_dev_put(ipi_device);
+	}
+#endif
+
 	res = read_capabilities(resource);
 	if (res)
 		goto exit_free;
 
-	resource->trip[0] = resource->trip[1] = -1;
+	resource->trip[0] = -1;
+	resource->trip[1] = -1;
 
-	res = setup_attrs(resource);
-	if (res)
-		goto exit_free;
+	/* _PMD method is optional. */
+	res = read_domain_devices(resource);
+	if (res && res != -ENODEV)
+		goto exit_free_capability;
 
-	resource->hwmon_dev = hwmon_device_register(&device->dev);
+	resource->hwmon_dev =
+		hwmon_device_register_with_info(&pdev->dev,
+						ACPI_POWER_METER_NAME, resource,
+						&power_meter_chip_info,
+						power_extra_groups);
 	if (IS_ERR(resource->hwmon_dev)) {
 		res = PTR_ERR(resource->hwmon_dev);
 		goto exit_remove;
 	}
 
+	res = acpi_dev_install_notify_handler(device, ACPI_DEVICE_NOTIFY,
+					      acpi_power_meter_notify, &pdev->dev);
+	if (res)
+		goto exit_hwmon;
+
 	res = 0;
 	goto exit;
 
+exit_hwmon:
+	hwmon_device_unregister(resource->hwmon_dev);
 exit_remove:
-	remove_attrs(resource);
+	remove_domain_devices(resource);
+exit_free_capability:
+	free_capabilities(resource);
 exit_free:
 	kfree(resource);
 exit:
 	return res;
 }
 
-static int acpi_power_meter_remove(struct acpi_device *device)
+static void acpi_power_meter_remove(struct platform_device *pdev)
 {
-	struct acpi_power_meter_resource *resource;
+	struct acpi_power_meter_resource *resource = platform_get_drvdata(pdev);
 
-	if (!device || !acpi_driver_data(device))
-		return -EINVAL;
+	acpi_dev_remove_notify_handler(resource->acpi_dev, ACPI_DEVICE_NOTIFY,
+				       acpi_power_meter_notify);
 
-	resource = acpi_driver_data(device);
-	hwmon_device_unregister(resource->hwmon_dev);
+	if (!IS_ERR(resource->hwmon_dev))
+		hwmon_device_unregister(resource->hwmon_dev);
 
+	remove_domain_devices(resource);
 	free_capabilities(resource);
-	remove_attrs(resource);
 
 	kfree(resource);
-	return 0;
 }
-
-#ifdef CONFIG_PM_SLEEP
 
 static int acpi_power_meter_resume(struct device *dev)
 {
-	struct acpi_power_meter_resource *resource;
-
-	if (!dev)
-		return -EINVAL;
-
-	resource = acpi_driver_data(to_acpi_device(dev));
-	if (!resource)
-		return -EINVAL;
+	struct acpi_power_meter_resource *resource = dev_get_drvdata(dev);
 
 	free_capabilities(resource);
 	read_capabilities(resource);
@@ -950,20 +988,17 @@ static int acpi_power_meter_resume(struct device *dev)
 	return 0;
 }
 
-#endif /* CONFIG_PM_SLEEP */
+static DEFINE_SIMPLE_DEV_PM_OPS(acpi_power_meter_pm, NULL,
+				acpi_power_meter_resume);
 
-static SIMPLE_DEV_PM_OPS(acpi_power_meter_pm, NULL, acpi_power_meter_resume);
-
-static struct acpi_driver acpi_power_meter_driver = {
-	.name = "power_meter",
-	.class = ACPI_POWER_METER_CLASS,
-	.ids = power_meter_ids,
-	.ops = {
-		.add = acpi_power_meter_add,
-		.remove = acpi_power_meter_remove,
-		.notify = acpi_power_meter_notify,
-		},
-	.drv.pm = &acpi_power_meter_pm,
+static struct platform_driver acpi_power_meter_driver = {
+	.probe = acpi_power_meter_probe,
+	.remove = acpi_power_meter_remove,
+	.driver = {
+		.name = "acpi-power-meter",
+		.acpi_match_table = power_meter_ids,
+		.pm = &acpi_power_meter_pm,
+	},
 };
 
 /* Module init/exit routines */
@@ -992,7 +1027,7 @@ static int __init acpi_power_meter_init(void)
 
 	dmi_check_system(pm_dmi_table);
 
-	result = acpi_bus_register_driver(&acpi_power_meter_driver);
+	result = platform_driver_register(&acpi_power_meter_driver);
 	if (result < 0)
 		return result;
 
@@ -1001,7 +1036,7 @@ static int __init acpi_power_meter_init(void)
 
 static void __exit acpi_power_meter_exit(void)
 {
-	acpi_bus_unregister_driver(&acpi_power_meter_driver);
+	platform_driver_unregister(&acpi_power_meter_driver);
 }
 
 MODULE_AUTHOR("Darrick J. Wong <darrick.wong@oracle.com>");

@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2016 Google, Inc
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 or later as
- * published by the Free Software Foundation.
  */
 
 #include <linux/clk.h>
@@ -15,8 +12,7 @@
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
-#include <linux/of_platform.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/reset.h>
@@ -162,13 +158,15 @@
  * 11: reserved.
  */
 #define M_TACH_MODE 0x02 /* 10b */
-#define M_TACH_UNIT 0x0210
+#define M_TACH_UNIT 0x0420
 #define INIT_FAN_CTRL 0xFF
 
 /* How long we sleep in us while waiting for an RPM result. */
 #define ASPEED_RPM_STATUS_SLEEP_USEC	500
 
 #define MAX_CDEV_NAME_LEN 16
+
+#define MAX_ASPEED_FAN_TACH_CHANNELS 16
 
 struct aspeed_cooling_device {
 	char name[16];
@@ -185,7 +183,7 @@ struct aspeed_pwm_tacho_data {
 	struct reset_control *rst;
 	unsigned long clk_freq;
 	bool pwm_present[8];
-	bool fan_tach_present[16];
+	bool fan_tach_present[MAX_ASPEED_FAN_TACH_CHANNELS];
 	u8 type_pwm_clock_unit[3];
 	u8 type_pwm_clock_division_h[3];
 	u8 type_pwm_clock_division_l[3];
@@ -194,9 +192,11 @@ struct aspeed_pwm_tacho_data {
 	u16 type_fan_tach_unit[3];
 	u8 pwm_port_type[8];
 	u8 pwm_port_fan_ctrl[8];
-	u8 fan_tach_ch_source[16];
+	u8 fan_tach_ch_source[MAX_ASPEED_FAN_TACH_CHANNELS];
 	struct aspeed_cooling_device *cdev[8];
 	const struct attribute_group *groups[3];
+	/* protects access to shared ASPEED_PTCR_RESULT */
+	struct mutex tach_lock;
 };
 
 enum type { TYPEM, TYPEN, TYPEO };
@@ -531,6 +531,8 @@ static int aspeed_get_fan_tach_ch_rpm(struct aspeed_pwm_tacho_data *priv,
 	u8 fan_tach_ch_source, type, mode, both;
 	int ret;
 
+	mutex_lock(&priv->tach_lock);
+
 	regmap_write(priv->regmap, ASPEED_PTCR_TRIGGER, 0);
 	regmap_write(priv->regmap, ASPEED_PTCR_TRIGGER, 0x1 << fan_tach_ch);
 
@@ -547,6 +549,8 @@ static int aspeed_get_fan_tach_ch_rpm(struct aspeed_pwm_tacho_data *priv,
 		(val & RESULT_STATUS_MASK),
 		ASPEED_RPM_STATUS_SLEEP_USEC,
 		usec);
+
+	mutex_unlock(&priv->tach_lock);
 
 	/* return -ETIMEDOUT if we didn't get an answer. */
 	if (ret)
@@ -570,8 +574,8 @@ static int aspeed_get_fan_tach_ch_rpm(struct aspeed_pwm_tacho_data *priv,
 	return (clk_source * 60) / (2 * raw_data * tach_div);
 }
 
-static ssize_t set_pwm(struct device *dev, struct device_attribute *attr,
-		       const char *buf, size_t count)
+static ssize_t pwm_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
 {
 	struct sensor_device_attribute *sensor_attr = to_sensor_dev_attr(attr);
 	int index = sensor_attr->index;
@@ -595,7 +599,7 @@ static ssize_t set_pwm(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 
-static ssize_t show_pwm(struct device *dev, struct device_attribute *attr,
+static ssize_t pwm_show(struct device *dev, struct device_attribute *attr,
 			char *buf)
 {
 	struct sensor_device_attribute *sensor_attr = to_sensor_dev_attr(attr);
@@ -605,7 +609,7 @@ static ssize_t show_pwm(struct device *dev, struct device_attribute *attr,
 	return sprintf(buf, "%u\n", priv->pwm_port_fan_ctrl[index]);
 }
 
-static ssize_t show_rpm(struct device *dev, struct device_attribute *attr,
+static ssize_t rpm_show(struct device *dev, struct device_attribute *attr,
 			char *buf)
 {
 	struct sensor_device_attribute *sensor_attr = to_sensor_dev_attr(attr);
@@ -623,7 +627,7 @@ static ssize_t show_rpm(struct device *dev, struct device_attribute *attr,
 static umode_t pwm_is_visible(struct kobject *kobj,
 			      struct attribute *a, int index)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct aspeed_pwm_tacho_data *priv = dev_get_drvdata(dev);
 
 	if (!priv->pwm_present[index])
@@ -634,7 +638,7 @@ static umode_t pwm_is_visible(struct kobject *kobj,
 static umode_t fan_dev_is_visible(struct kobject *kobj,
 				  struct attribute *a, int index)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct aspeed_pwm_tacho_data *priv = dev_get_drvdata(dev);
 
 	if (!priv->fan_tach_present[index])
@@ -642,22 +646,14 @@ static umode_t fan_dev_is_visible(struct kobject *kobj,
 	return a->mode;
 }
 
-static SENSOR_DEVICE_ATTR(pwm1, 0644,
-			show_pwm, set_pwm, 0);
-static SENSOR_DEVICE_ATTR(pwm2, 0644,
-			show_pwm, set_pwm, 1);
-static SENSOR_DEVICE_ATTR(pwm3, 0644,
-			show_pwm, set_pwm, 2);
-static SENSOR_DEVICE_ATTR(pwm4, 0644,
-			show_pwm, set_pwm, 3);
-static SENSOR_DEVICE_ATTR(pwm5, 0644,
-			show_pwm, set_pwm, 4);
-static SENSOR_DEVICE_ATTR(pwm6, 0644,
-			show_pwm, set_pwm, 5);
-static SENSOR_DEVICE_ATTR(pwm7, 0644,
-			show_pwm, set_pwm, 6);
-static SENSOR_DEVICE_ATTR(pwm8, 0644,
-			show_pwm, set_pwm, 7);
+static SENSOR_DEVICE_ATTR_RW(pwm1, pwm, 0);
+static SENSOR_DEVICE_ATTR_RW(pwm2, pwm, 1);
+static SENSOR_DEVICE_ATTR_RW(pwm3, pwm, 2);
+static SENSOR_DEVICE_ATTR_RW(pwm4, pwm, 3);
+static SENSOR_DEVICE_ATTR_RW(pwm5, pwm, 4);
+static SENSOR_DEVICE_ATTR_RW(pwm6, pwm, 5);
+static SENSOR_DEVICE_ATTR_RW(pwm7, pwm, 6);
+static SENSOR_DEVICE_ATTR_RW(pwm8, pwm, 7);
 static struct attribute *pwm_dev_attrs[] = {
 	&sensor_dev_attr_pwm1.dev_attr.attr,
 	&sensor_dev_attr_pwm2.dev_attr.attr,
@@ -675,38 +671,22 @@ static const struct attribute_group pwm_dev_group = {
 	.is_visible = pwm_is_visible,
 };
 
-static SENSOR_DEVICE_ATTR(fan1_input, 0444,
-		show_rpm, NULL, 0);
-static SENSOR_DEVICE_ATTR(fan2_input, 0444,
-		show_rpm, NULL, 1);
-static SENSOR_DEVICE_ATTR(fan3_input, 0444,
-		show_rpm, NULL, 2);
-static SENSOR_DEVICE_ATTR(fan4_input, 0444,
-		show_rpm, NULL, 3);
-static SENSOR_DEVICE_ATTR(fan5_input, 0444,
-		show_rpm, NULL, 4);
-static SENSOR_DEVICE_ATTR(fan6_input, 0444,
-		show_rpm, NULL, 5);
-static SENSOR_DEVICE_ATTR(fan7_input, 0444,
-		show_rpm, NULL, 6);
-static SENSOR_DEVICE_ATTR(fan8_input, 0444,
-		show_rpm, NULL, 7);
-static SENSOR_DEVICE_ATTR(fan9_input, 0444,
-		show_rpm, NULL, 8);
-static SENSOR_DEVICE_ATTR(fan10_input, 0444,
-		show_rpm, NULL, 9);
-static SENSOR_DEVICE_ATTR(fan11_input, 0444,
-		show_rpm, NULL, 10);
-static SENSOR_DEVICE_ATTR(fan12_input, 0444,
-		show_rpm, NULL, 11);
-static SENSOR_DEVICE_ATTR(fan13_input, 0444,
-		show_rpm, NULL, 12);
-static SENSOR_DEVICE_ATTR(fan14_input, 0444,
-		show_rpm, NULL, 13);
-static SENSOR_DEVICE_ATTR(fan15_input, 0444,
-		show_rpm, NULL, 14);
-static SENSOR_DEVICE_ATTR(fan16_input, 0444,
-		show_rpm, NULL, 15);
+static SENSOR_DEVICE_ATTR_RO(fan1_input, rpm, 0);
+static SENSOR_DEVICE_ATTR_RO(fan2_input, rpm, 1);
+static SENSOR_DEVICE_ATTR_RO(fan3_input, rpm, 2);
+static SENSOR_DEVICE_ATTR_RO(fan4_input, rpm, 3);
+static SENSOR_DEVICE_ATTR_RO(fan5_input, rpm, 4);
+static SENSOR_DEVICE_ATTR_RO(fan6_input, rpm, 5);
+static SENSOR_DEVICE_ATTR_RO(fan7_input, rpm, 6);
+static SENSOR_DEVICE_ATTR_RO(fan8_input, rpm, 7);
+static SENSOR_DEVICE_ATTR_RO(fan9_input, rpm, 8);
+static SENSOR_DEVICE_ATTR_RO(fan10_input, rpm, 9);
+static SENSOR_DEVICE_ATTR_RO(fan11_input, rpm, 10);
+static SENSOR_DEVICE_ATTR_RO(fan12_input, rpm, 11);
+static SENSOR_DEVICE_ATTR_RO(fan13_input, rpm, 12);
+static SENSOR_DEVICE_ATTR_RO(fan14_input, rpm, 13);
+static SENSOR_DEVICE_ATTR_RO(fan15_input, rpm, 14);
+static SENSOR_DEVICE_ATTR_RO(fan16_input, rpm, 15);
 static struct attribute *fan_dev_attrs[] = {
 	&sensor_dev_attr_fan1_input.dev_attr.attr,
 	&sensor_dev_attr_fan2_input.dev_attr.attr,
@@ -765,20 +745,27 @@ static void aspeed_create_pwm_port(struct aspeed_pwm_tacho_data *priv,
 	aspeed_set_pwm_port_fan_ctrl(priv, pwm_port, INIT_FAN_CTRL);
 }
 
-static void aspeed_create_fan_tach_channel(struct aspeed_pwm_tacho_data *priv,
-					   u8 *fan_tach_ch,
-					   int count,
-					   u8 pwm_source)
+static int aspeed_create_fan_tach_channel(struct device *dev,
+					  struct aspeed_pwm_tacho_data *priv,
+					  u8 *fan_tach_ch,
+					  int count,
+					  u8 pwm_source)
 {
 	u8 val, index;
 
 	for (val = 0; val < count; val++) {
 		index = fan_tach_ch[val];
+		if (index >= MAX_ASPEED_FAN_TACH_CHANNELS) {
+			dev_err(dev, "Invalid Fan Tach input channel %u\n.", index);
+			return -EINVAL;
+		}
 		aspeed_set_fan_tach_ch_enable(priv->regmap, index, true);
 		priv->fan_tach_present[index] = true;
 		priv->fan_tach_ch_source[index] = pwm_source;
 		aspeed_set_fan_tach_ch_source(priv->regmap, index, pwm_source);
 	}
+
+	return 0;
 }
 
 static int
@@ -852,12 +839,11 @@ static int aspeed_create_pwm_cooling(struct device *dev,
 		dev_err(dev, "Property 'cooling-levels' cannot be read.\n");
 		return ret;
 	}
-	snprintf(cdev->name, MAX_CDEV_NAME_LEN, "%s%d", child->name, pwm_port);
+	snprintf(cdev->name, MAX_CDEV_NAME_LEN, "%pOFn%d", child, pwm_port);
 
-	cdev->tcdev = thermal_of_cooling_device_register(child,
-							 cdev->name,
-							 cdev,
-							 &aspeed_pwm_cool_ops);
+	cdev->tcdev = devm_thermal_of_child_cooling_device_register(dev, child,
+								    cdev->name, cdev,
+								    &aspeed_pwm_cool_ops);
 	if (IS_ERR(cdev->tcdev))
 		return PTR_ERR(cdev->tcdev);
 
@@ -880,6 +866,8 @@ static int aspeed_create_fan(struct device *dev,
 	ret = of_property_read_u32(child, "reg", &pwm_port);
 	if (ret)
 		return ret;
+	if (pwm_port >= ARRAY_SIZE(pwm_port_params))
+		return -EINVAL;
 	aspeed_create_pwm_port(priv, (u8)pwm_port);
 
 	ret = of_property_count_u8_elems(child, "cooling-levels");
@@ -894,7 +882,7 @@ static int aspeed_create_fan(struct device *dev,
 	count = of_property_count_u8_elems(child, "aspeed,fan-tach-ch");
 	if (count < 1)
 		return -EINVAL;
-	fan_tach_ch = devm_kzalloc(dev, sizeof(*fan_tach_ch) * count,
+	fan_tach_ch = devm_kcalloc(dev, count, sizeof(*fan_tach_ch),
 				   GFP_KERNEL);
 	if (!fan_tach_ch)
 		return -ENOMEM;
@@ -902,7 +890,10 @@ static int aspeed_create_fan(struct device *dev,
 					fan_tach_ch, count);
 	if (ret)
 		return ret;
-	aspeed_create_fan_tach_channel(priv, fan_tach_ch, count, pwm_port);
+
+	ret = aspeed_create_fan_tach_channel(dev, priv, fan_tach_ch, count, pwm_port);
+	if (ret)
+		return ret;
 
 	return 0;
 }
@@ -917,25 +908,21 @@ static void aspeed_pwm_tacho_remove(void *data)
 static int aspeed_pwm_tacho_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct device_node *np, *child;
+	struct device_node *np;
 	struct aspeed_pwm_tacho_data *priv;
 	void __iomem *regs;
-	struct resource *res;
 	struct device *hwmon;
 	struct clk *clk;
 	int ret;
 
 	np = dev->of_node;
-
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res)
-		return -ENOENT;
-	regs = devm_ioremap_resource(dev, res);
+	regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(regs))
 		return PTR_ERR(regs);
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
+	mutex_init(&priv->tach_lock);
 	priv->regmap = devm_regmap_init(dev, NULL, (__force void *)regs,
 			&aspeed_pwm_tacho_regmap_config);
 	if (IS_ERR(priv->regmap))
@@ -965,12 +952,10 @@ static int aspeed_pwm_tacho_probe(struct platform_device *pdev)
 
 	aspeed_create_type(priv);
 
-	for_each_child_of_node(np, child) {
+	for_each_child_of_node_scoped(np, child) {
 		ret = aspeed_create_fan(dev, child, priv);
-		if (ret) {
-			of_node_put(child);
+		if (ret)
 			return ret;
-		}
 	}
 
 	priv->groups[0] = &pwm_dev_group;

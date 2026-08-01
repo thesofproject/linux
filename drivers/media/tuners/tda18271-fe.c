@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     tda18271-fe.c - driver for the Philips / NXP TDA18271 silicon tuner
 
     Copyright (C) 2007, 2008 Michael Krufky <mkrufky@linuxtv.org>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
 #include "tda18271-priv.h"
@@ -48,7 +36,7 @@ static int tda18271_toggle_output(struct dvb_frontend *fe, int standby)
 	if (tda_fail(ret))
 		goto fail;
 
-	tda_dbg("%s mode: xtal oscillator %s, slave tuner loop thru %s\n",
+	tda_dbg("%s mode: xtal oscillator %s, slave tuner loop through %s\n",
 		standby ? "standby" : "active",
 		priv->output_opt & TDA18271_OUTPUT_XT_OFF ? "off" : "on",
 		priv->output_opt & TDA18271_OUTPUT_LT_OFF ? "off" : "on");
@@ -291,7 +279,9 @@ static int tda18271c2_rf_tracking_filters_correction(struct dvb_frontend *fe,
 	if (approx > 255)
 		approx = 255;
 
-	tda18271_lookup_map(fe, RF_CAL_DC_OVER_DT, &freq, &dc_over_dt);
+	ret = tda18271_lookup_map(fe, RF_CAL_DC_OVER_DT, &freq, &dc_over_dt);
+	if (tda_fail(ret))
+		goto fail;
 
 	/* calculate temperature compensation */
 	rfcal_comp = dc_over_dt * (s32)(tm_current - priv->tm_rfcal) / 1000;
@@ -482,7 +472,6 @@ static int tda18271_powerscan(struct dvb_frontend *fe,
 	/* algorithm initialization */
 	sgn = 1;
 	*freq_out = *freq_in;
-	bcal = 0;
 	count = 0;
 	wait = false;
 
@@ -960,7 +949,7 @@ static int tda18271_set_params(struct dvb_frontend *fe)
 		break;
 	case SYS_DVBC_ANNEX_B:
 		bw = 6000000;
-		/* fall through */
+		fallthrough;
 	case SYS_DVBC_ANNEX_A:
 	case SYS_DVBC_ANNEX_C:
 		if (bw <= 6000000) {
@@ -1240,9 +1229,9 @@ static int tda18271_set_config(struct dvb_frontend *fe, void *priv_cfg)
 static const struct dvb_tuner_ops tda18271_tuner_ops = {
 	.info = {
 		.name = "NXP TDA18271HD",
-		.frequency_min  =  45000000,
-		.frequency_max  = 864000000,
-		.frequency_step =     62500
+		.frequency_min_hz  =  45 * MHz,
+		.frequency_max_hz  = 864 * MHz,
+		.frequency_step_hz = 62500
 	},
 	.init              = tda18271_init,
 	.sleep             = tda18271_sleep,

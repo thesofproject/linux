@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2007 Google, Inc.
  * Copyright (C) 2012 Intel, Inc.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/module.h>
@@ -26,6 +17,7 @@
 #include <linux/interrupt.h>
 #include <linux/ioport.h>
 #include <linux/platform_device.h>
+#include <linux/acpi.h>
 
 enum {
 	FB_GET_WIDTH        = 0x00,
@@ -124,6 +116,7 @@ static int goldfish_fb_check_var(struct fb_var_screeninfo *var,
 static int goldfish_fb_set_par(struct fb_info *info)
 {
 	struct goldfish_fb *fb = container_of(info, struct goldfish_fb, fb);
+
 	if (fb->rotation != fb->fb.var.rotate) {
 		info->fix.line_length = info->var.xres * 2;
 		fb->rotation = fb->fb.var.rotate;
@@ -145,16 +138,19 @@ static int goldfish_fb_pan_display(struct fb_var_screeninfo *var,
 	writel(fb->fb.fix.smem_start + fb->fb.var.xres * 2 * var->yoffset,
 						fb->reg_base + FB_SET_BASE);
 	spin_unlock_irqrestore(&fb->lock, irq_flags);
-	wait_event_timeout(fb->wait,
-			fb->base_update_count != base_update_count, HZ / 15);
-	if (fb->base_update_count == base_update_count)
-		pr_err("goldfish_fb_pan_display: timeout waiting for base update\n");
+	if (!wait_event_timeout(fb->wait,
+				fb->base_update_count != base_update_count,
+				HZ / 15)) {
+		pr_err("%s: timeout waiting for base update\n", __func__);
+		return -ETIMEDOUT;
+	}
 	return 0;
 }
 
 static int goldfish_fb_blank(int blank, struct fb_info *info)
 {
 	struct goldfish_fb *fb = container_of(info, struct goldfish_fb, fb);
+
 	switch (blank) {
 	case FB_BLANK_NORMAL:
 		writel(1, fb->reg_base + FB_SET_BLANK);
@@ -166,29 +162,26 @@ static int goldfish_fb_blank(int blank, struct fb_info *info)
 	return 0;
 }
 
-static struct fb_ops goldfish_fb_ops = {
+static const struct fb_ops goldfish_fb_ops = {
 	.owner          = THIS_MODULE,
+	FB_DEFAULT_IOMEM_OPS,
 	.fb_check_var   = goldfish_fb_check_var,
 	.fb_set_par     = goldfish_fb_set_par,
 	.fb_setcolreg   = goldfish_fb_setcolreg,
 	.fb_pan_display = goldfish_fb_pan_display,
 	.fb_blank	= goldfish_fb_blank,
-	.fb_fillrect    = cfb_fillrect,
-	.fb_copyarea    = cfb_copyarea,
-	.fb_imageblit   = cfb_imageblit,
 };
 
 
 static int goldfish_fb_probe(struct platform_device *pdev)
 {
 	int ret;
-	struct resource *r;
 	struct goldfish_fb *fb;
 	size_t framesize;
 	u32 width, height;
 	dma_addr_t fbpaddr;
 
-	fb = kzalloc(sizeof(*fb), GFP_KERNEL);
+	fb = kzalloc_obj(*fb);
 	if (fb == NULL) {
 		ret = -ENOMEM;
 		goto err_fb_alloc_failed;
@@ -197,20 +190,15 @@ static int goldfish_fb_probe(struct platform_device *pdev)
 	init_waitqueue_head(&fb->wait);
 	platform_set_drvdata(pdev, fb);
 
-	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (r == NULL) {
-		ret = -ENODEV;
-		goto err_no_io_base;
-	}
-	fb->reg_base = ioremap(r->start, PAGE_SIZE);
-	if (fb->reg_base == NULL) {
-		ret = -ENOMEM;
+	fb->reg_base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(fb->reg_base)) {
+		ret = PTR_ERR(fb->reg_base);
 		goto err_no_io_base;
 	}
 
 	fb->irq = platform_get_irq(pdev, 0);
-	if (fb->irq <= 0) {
-		ret = -ENODEV;
+	if (fb->irq < 0) {
+		ret = fb->irq;
 		goto err_no_irq;
 	}
 
@@ -218,7 +206,6 @@ static int goldfish_fb_probe(struct platform_device *pdev)
 	height = readl(fb->reg_base + FB_GET_HEIGHT);
 
 	fb->fb.fbops		= &goldfish_fb_ops;
-	fb->fb.flags		= FBINFO_FLAG_DEFAULT;
 	fb->fb.pseudo_palette	= fb->cmap;
 	fb->fb.fix.type		= FB_TYPE_PACKED_PIXELS;
 	fb->fb.fix.visual = FB_VISUAL_TRUECOLOR;
@@ -234,7 +221,7 @@ static int goldfish_fb_probe(struct platform_device *pdev)
 	fb->fb.var.activate	= FB_ACTIVATE_NOW;
 	fb->fb.var.height	= readl(fb->reg_base + FB_GET_PHYS_HEIGHT);
 	fb->fb.var.width	= readl(fb->reg_base + FB_GET_PHYS_WIDTH);
-	fb->fb.var.pixclock	= 10000;
+	fb->fb.var.pixclock	= 0;
 
 	fb->fb.var.red.offset = 11;
 	fb->fb.var.red.length = 5;
@@ -266,7 +253,9 @@ static int goldfish_fb_probe(struct platform_device *pdev)
 		goto err_request_irq_failed;
 
 	writel(FB_INT_BASE_UPDATE_DONE, fb->reg_base + FB_INT_ENABLE);
-	goldfish_fb_pan_display(&fb->fb.var, &fb->fb); /* updates base */
+	ret = goldfish_fb_pan_display(&fb->fb.var, &fb->fb); /* updates base */
+	if (ret)
+		goto err_pan_display_failed;
 
 	ret = register_framebuffer(&fb->fb);
 	if (ret)
@@ -274,6 +263,7 @@ static int goldfish_fb_probe(struct platform_device *pdev)
 	return 0;
 
 err_register_framebuffer_failed:
+err_pan_display_failed:
 	free_irq(fb->irq, fb);
 err_request_irq_failed:
 err_fb_set_var_failed:
@@ -282,14 +272,13 @@ err_fb_set_var_failed:
 				fb->fb.fix.smem_start);
 err_alloc_screen_base_failed:
 err_no_irq:
-	iounmap(fb->reg_base);
 err_no_io_base:
 	kfree(fb);
 err_fb_alloc_failed:
 	return ret;
 }
 
-static int goldfish_fb_remove(struct platform_device *pdev)
+static void goldfish_fb_remove(struct platform_device *pdev)
 {
 	size_t framesize;
 	struct goldfish_fb *fb = platform_get_drvdata(pdev);
@@ -300,8 +289,7 @@ static int goldfish_fb_remove(struct platform_device *pdev)
 
 	dma_free_coherent(&pdev->dev, framesize, (void *)fb->fb.screen_base,
 						fb->fb.fix.smem_start);
-	iounmap(fb->reg_base);
-	return 0;
+	kfree(fb);
 }
 
 static const struct of_device_id goldfish_fb_of_match[] = {
@@ -310,15 +298,25 @@ static const struct of_device_id goldfish_fb_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, goldfish_fb_of_match);
 
+#ifdef CONFIG_ACPI
+static const struct acpi_device_id goldfish_fb_acpi_match[] = {
+	{ "GFSH0004", 0 },
+	{ },
+};
+MODULE_DEVICE_TABLE(acpi, goldfish_fb_acpi_match);
+#endif
+
 static struct platform_driver goldfish_fb_driver = {
 	.probe		= goldfish_fb_probe,
 	.remove		= goldfish_fb_remove,
 	.driver = {
 		.name = "goldfish_fb",
 		.of_match_table = goldfish_fb_of_match,
+		.acpi_match_table = ACPI_PTR(goldfish_fb_acpi_match),
 	}
 };
 
 module_platform_driver(goldfish_fb_driver);
 
+MODULE_DESCRIPTION("Goldfish Virtual Platform Framebuffer driver");
 MODULE_LICENSE("GPL v2");

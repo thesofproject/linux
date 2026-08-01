@@ -14,6 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#include <linux/export.h>
 #include "common.h"
 
 static ssize_t read_file_modal_eeprom(struct file *file, char __user *user_buf,
@@ -144,6 +145,8 @@ static ssize_t read_file_recv(struct file *file, char __user *user_buf,
 	RXS_ERR("BEACONS", rx_beacons);
 	RXS_ERR("FRAGS", rx_frags);
 	RXS_ERR("SPECTRAL", rx_spectral);
+	RXS_ERR("SPECTRAL SMPL GOOD", rx_spectral_sample_good);
+	RXS_ERR("SPECTRAL SMPL ERR", rx_spectral_sample_err);
 
 	RXS_ERR("CRC ERR", crc_err);
 	RXS_ERR("DECRYPT CRC ERR", decrypt_crc_err);
@@ -187,7 +190,7 @@ static ssize_t read_file_phy_err(struct file *file, char __user *user_buf,
 {
 #define PHY_ERR(s, p) \
 	len += scnprintf(buf + len, size - len, "%22s : %10u\n", s, \
-			 rxstats->phy_err_stats[p]);
+			 rxstats->phy_err_stats[p])
 
 	struct ath_rx_stats *rxstats = file->private_data;
 	char *buf;

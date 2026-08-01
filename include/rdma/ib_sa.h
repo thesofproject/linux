@@ -1,35 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB */
 /*
  * Copyright (c) 2004 Topspin Communications.  All rights reserved.
  * Copyright (c) 2005 Voltaire, Inc.  All rights reserved.
  * Copyright (c) 2006 Intel Corporation.  All rights reserved.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * OpenIB.org BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
 
 #ifndef IB_SA_H
@@ -172,12 +145,7 @@ struct sa_path_rec_ib {
  */
 struct sa_path_rec_roce {
 	bool	route_resolved;
-	u8           dmac[ETH_ALEN];
-	/* ignored in IB */
-	int	     ifindex;
-	/* ignored in IB */
-	struct net  *net;
-
+	u8	dmac[ETH_ALEN];
 };
 
 struct sa_path_rec_opa {
@@ -218,6 +186,21 @@ struct sa_path_rec {
 		struct sa_path_rec_opa opa;
 	};
 	enum sa_path_rec_type rec_type;
+	u32 flags;
+};
+
+struct sa_service_rec {
+	__be64 id;
+	__u8 gid[16];
+	__be16 pkey;
+	__u8 reserved[2];
+	__be32 lease;
+	__u8 key[16];
+	__u8 name[64];
+	__u8 data_8[16];
+	__be16 data_16[8];
+	__be32 data_32[4];
+	__be64 data_64[2];
 };
 
 static inline enum ib_gid_type
@@ -398,20 +381,6 @@ struct ib_sa_mcmember_rec {
 
 #define IB_DEFAULT_SERVICE_LEASE 	0xFFFFFFFF
 
-struct ib_sa_service_rec {
-	u64		id;
-	union ib_gid	gid;
-	__be16 		pkey;
-	/* reserved */
-	u32		lease;
-	u8		key[16];
-	u8		name[64];
-	u8		data8[16];
-	u16		data16[8];
-	u32		data32[4];
-	u64		data64[2];
-};
-
 #define IB_SA_GUIDINFO_REC_LID		IB_SA_COMP_MASK(0)
 #define IB_SA_GUIDINFO_REC_BLOCK_NUM	IB_SA_COMP_MASK(1)
 #define IB_SA_GUIDINFO_REC_RES1		IB_SA_COMP_MASK(2)
@@ -454,28 +423,24 @@ struct ib_sa_query;
 
 void ib_sa_cancel_query(int id, struct ib_sa_query *query);
 
-int ib_sa_path_rec_get(struct ib_sa_client *client,
-		       struct ib_device *device, u8 port_num,
-		       struct sa_path_rec *rec,
-		       ib_sa_comp_mask comp_mask,
-		       int timeout_ms, gfp_t gfp_mask,
-		       void (*callback)(int status,
-					struct sa_path_rec *resp,
-					void *context),
-		       void *context,
-		       struct ib_sa_query **query);
+int ib_sa_path_rec_get(struct ib_sa_client *client, struct ib_device *device,
+		       u32 port_num, struct sa_path_rec *rec,
+		       ib_sa_comp_mask comp_mask, unsigned long timeout_ms,
+		       gfp_t gfp_mask,
+		       void (*callback)(int status, struct sa_path_rec *resp,
+					unsigned int num_prs, void *context),
+		       void *context, struct ib_sa_query **query);
 
-int ib_sa_service_rec_query(struct ib_sa_client *client,
-			 struct ib_device *device, u8 port_num,
-			 u8 method,
-			 struct ib_sa_service_rec *rec,
-			 ib_sa_comp_mask comp_mask,
-			 int timeout_ms, gfp_t gfp_mask,
-			 void (*callback)(int status,
-					  struct ib_sa_service_rec *resp,
-					  void *context),
-			 void *context,
-			 struct ib_sa_query **sa_query);
+int ib_sa_service_rec_get(struct ib_sa_client *client,
+			  struct ib_device *device, u32 port_num,
+			  struct sa_service_rec *rec,
+			  ib_sa_comp_mask comp_mask,
+			  unsigned long timeout_ms, gfp_t gfp_mask,
+			  void (*callback)(int status,
+					   struct sa_service_rec *resp,
+					   unsigned int num_services,
+					   void *context),
+			  void *context, struct ib_sa_query **sa_query);
 
 struct ib_sa_multicast {
 	struct ib_sa_mcmember_rec rec;
@@ -514,7 +479,8 @@ struct ib_sa_multicast {
  *   group, and the user must rejoin the group to continue using it.
  */
 struct ib_sa_multicast *ib_sa_join_multicast(struct ib_sa_client *client,
-					     struct ib_device *device, u8 port_num,
+					     struct ib_device *device,
+					     u32 port_num,
 					     struct ib_sa_mcmember_rec *rec,
 					     ib_sa_comp_mask comp_mask, gfp_t gfp_mask,
 					     int (*callback)(int status,
@@ -543,32 +509,41 @@ void ib_sa_free_multicast(struct ib_sa_multicast *multicast);
  * @mgid: MGID of multicast group.
  * @rec: Location to copy SA multicast member record.
  */
-int ib_sa_get_mcmember_rec(struct ib_device *device, u8 port_num,
+int ib_sa_get_mcmember_rec(struct ib_device *device, u32 port_num,
 			   union ib_gid *mgid, struct ib_sa_mcmember_rec *rec);
 
 /**
  * ib_init_ah_from_mcmember - Initialize address handle attributes based on
  * an SA multicast member record.
  */
-int ib_init_ah_from_mcmember(struct ib_device *device, u8 port_num,
+int ib_init_ah_from_mcmember(struct ib_device *device, u32 port_num,
 			     struct ib_sa_mcmember_rec *rec,
 			     struct net_device *ndev,
 			     enum ib_gid_type gid_type,
 			     struct rdma_ah_attr *ah_attr);
 
-/**
- * ib_init_ah_attr_from_path - Initialize address handle attributes based on
- *   an SA path record.
- */
-int ib_init_ah_attr_from_path(struct ib_device *device, u8 port_num,
+int ib_init_ah_attr_from_path(struct ib_device *device, u32 port_num,
 			      struct sa_path_rec *rec,
-			      struct rdma_ah_attr *ah_attr);
+			      struct rdma_ah_attr *ah_attr,
+			      const struct ib_gid_attr *sgid_attr);
 
 /**
  * ib_sa_pack_path - Conert a path record from struct ib_sa_path_rec
  * to IB MAD wire format.
  */
 void ib_sa_pack_path(struct sa_path_rec *rec, void *attribute);
+
+/**
+ * ib_sa_pack_service - Convert a service record from struct ib_sa_service_rec
+ * to IB MAD wire format.
+ */
+void ib_sa_pack_service(struct sa_service_rec *rec, void *attribute);
+
+/**
+ * ib_sa_unpack_service - Convert a service record from MAD format to struct
+ * ib_sa_service_rec.
+ */
+void ib_sa_unpack_service(void *attribute, struct sa_service_rec *rec);
 
 /**
  * ib_sa_unpack_path - Convert a path record from MAD format to struct
@@ -578,19 +553,14 @@ void ib_sa_unpack_path(void *attribute, struct sa_path_rec *rec);
 
 /* Support GuidInfoRecord */
 int ib_sa_guid_info_rec_query(struct ib_sa_client *client,
-			      struct ib_device *device, u8 port_num,
+			      struct ib_device *device, u32 port_num,
 			      struct ib_sa_guidinfo_rec *rec,
 			      ib_sa_comp_mask comp_mask, u8 method,
-			      int timeout_ms, gfp_t gfp_mask,
+			      unsigned long timeout_ms, gfp_t gfp_mask,
 			      void (*callback)(int status,
 					       struct ib_sa_guidinfo_rec *resp,
 					       void *context),
-			      void *context,
-			      struct ib_sa_query **sa_query);
-
-bool ib_sa_sendonly_fullmem_support(struct ib_sa_client *client,
-				    struct ib_device *device,
-				    u8 port_num);
+			      void *context, struct ib_sa_query **sa_query);
 
 static inline bool sa_path_is_roce(struct sa_path_rec *rec)
 {
@@ -667,45 +637,10 @@ static inline void sa_path_set_dmac_zero(struct sa_path_rec *rec)
 		eth_zero_addr(rec->roce.dmac);
 }
 
-static inline void sa_path_set_ifindex(struct sa_path_rec *rec, int ifindex)
-{
-	if (sa_path_is_roce(rec))
-		rec->roce.ifindex = ifindex;
-}
-
-static inline void sa_path_set_ndev(struct sa_path_rec *rec, struct net *net)
-{
-	if (sa_path_is_roce(rec))
-		rec->roce.net = net;
-}
-
 static inline u8 *sa_path_get_dmac(struct sa_path_rec *rec)
 {
 	if (sa_path_is_roce(rec))
 		return rec->roce.dmac;
 	return NULL;
 }
-
-static inline int sa_path_get_ifindex(struct sa_path_rec *rec)
-{
-	if (sa_path_is_roce(rec))
-		return rec->roce.ifindex;
-	return 0;
-}
-
-static inline struct net *sa_path_get_ndev(struct sa_path_rec *rec)
-{
-	if (sa_path_is_roce(rec))
-		return rec->roce.net;
-	return NULL;
-}
-
-static inline struct net_device *ib_get_ndev_from_path(struct sa_path_rec *rec)
-{
-	return sa_path_get_ndev(rec) ?
-		dev_get_by_index(sa_path_get_ndev(rec),
-				 sa_path_get_ifindex(rec))
-		: NULL;
-}
-
 #endif /* IB_SA_H */

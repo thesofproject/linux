@@ -149,7 +149,7 @@ static struct usb_composite_driver gfs_driver = {
 	.name		= DRIVER_NAME,
 	.dev		= &gfs_dev_desc,
 	.strings	= gfs_dev_strings,
-	.max_speed	= USB_SPEED_HIGH,
+	.max_speed	= USB_SPEED_SUPER,
 	.bind		= gfs_bind,
 	.unbind		= gfs_unbind,
 };
@@ -180,8 +180,6 @@ static int __init gfs_init(void)
 	int i;
 	int ret = 0;
 
-	ENTER();
-
 	if (func_num < 2) {
 		gfs_single_func = true;
 		func_num = 1;
@@ -190,7 +188,7 @@ static int __init gfs_init(void)
 	/*
 	 * Allocate in one chunk for easier maintenance
 	 */
-	f_ffs[0] = kcalloc(func_num * N_CONF, sizeof(*f_ffs), GFP_KERNEL);
+	f_ffs[0] = kzalloc_objs(*f_ffs[0], func_num * N_CONF);
 	if (!f_ffs[0]) {
 		ret = -ENOMEM;
 		goto no_func;
@@ -198,7 +196,7 @@ static int __init gfs_init(void)
 	for (i = 1; i < N_CONF; ++i)
 		f_ffs[i] = f_ffs[0] + i * func_num;
 
-	fi_ffs = kcalloc(func_num, sizeof(*fi_ffs), GFP_KERNEL);
+	fi_ffs = kzalloc_objs(*fi_ffs, func_num);
 	if (!fi_ffs) {
 		ret = -ENOMEM;
 		goto no_func;
@@ -241,8 +239,6 @@ module_init(gfs_init);
 static void __exit gfs_exit(void)
 {
 	int i;
-
-	ENTER();
 
 	if (gfs_registered)
 		usb_composite_unregister(&gfs_driver);
@@ -315,8 +311,6 @@ static int gfs_bind(struct usb_composite_dev *cdev)
 	struct net_device *net;
 #endif
 	int ret, i;
-
-	ENTER();
 
 	if (missing_funcs)
 		return -ENODEV;
@@ -395,8 +389,10 @@ static int gfs_bind(struct usb_composite_dev *cdev)
 		struct usb_descriptor_header *usb_desc;
 
 		usb_desc = usb_otg_descriptor_alloc(cdev->gadget);
-		if (!usb_desc)
+		if (!usb_desc) {
+			ret = -ENOMEM;
 			goto error_rndis;
+		}
 		usb_otg_descriptor_init(cdev->gadget, usb_desc);
 		gfs_otg_desc[0] = usb_desc;
 		gfs_otg_desc[1] = NULL;
@@ -444,9 +440,6 @@ error:
 static int gfs_unbind(struct usb_composite_dev *cdev)
 {
 	int i;
-
-	ENTER();
-
 
 #ifdef CONFIG_USB_FUNCTIONFS_RNDIS
 	usb_put_function(f_rndis);

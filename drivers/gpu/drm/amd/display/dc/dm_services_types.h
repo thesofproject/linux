@@ -29,37 +29,14 @@
 #include "os_types.h"
 #include "dc_types.h"
 
-struct pp_smu_funcs_rv;
+struct pp_smu_funcs;
 
 struct dm_pp_clock_range {
 	int min_khz;
 	int max_khz;
 };
 
-enum dm_pp_clocks_state {
-	DM_PP_CLOCKS_STATE_INVALID,
-	DM_PP_CLOCKS_STATE_ULTRA_LOW,
-	DM_PP_CLOCKS_STATE_LOW,
-	DM_PP_CLOCKS_STATE_NOMINAL,
-	DM_PP_CLOCKS_STATE_PERFORMANCE,
-
-	/* Starting from DCE11, Max 8 levels of DPM state supported. */
-	DM_PP_CLOCKS_DPM_STATE_LEVEL_INVALID = DM_PP_CLOCKS_STATE_INVALID,
-	DM_PP_CLOCKS_DPM_STATE_LEVEL_0,
-	DM_PP_CLOCKS_DPM_STATE_LEVEL_1,
-	DM_PP_CLOCKS_DPM_STATE_LEVEL_2,
-	/* to be backward compatible */
-	DM_PP_CLOCKS_DPM_STATE_LEVEL_3,
-	DM_PP_CLOCKS_DPM_STATE_LEVEL_4,
-	DM_PP_CLOCKS_DPM_STATE_LEVEL_5,
-	DM_PP_CLOCKS_DPM_STATE_LEVEL_6,
-	DM_PP_CLOCKS_DPM_STATE_LEVEL_7,
-
-	DM_PP_CLOCKS_MAX_STATES
-};
-
 struct dm_pp_gpu_clock_range {
-	enum dm_pp_clocks_state clock_state;
 	struct dm_pp_clock_range sclk;
 	struct dm_pp_clock_range mclk;
 	struct dm_pp_clock_range eclk;
@@ -82,9 +59,17 @@ enum dm_pp_clock_type {
 #define DC_DECODE_PP_CLOCK_TYPE(clk_type) \
 	(clk_type) == DM_PP_CLOCK_TYPE_DISPLAY_CLK ? "Display" : \
 	(clk_type) == DM_PP_CLOCK_TYPE_ENGINE_CLK ? "Engine" : \
-	(clk_type) == DM_PP_CLOCK_TYPE_MEMORY_CLK ? "Memory" : "Invalid"
+	(clk_type) == DM_PP_CLOCK_TYPE_MEMORY_CLK ? "Memory" : \
+	(clk_type) == DM_PP_CLOCK_TYPE_DCFCLK ? "DCF" : \
+	(clk_type) == DM_PP_CLOCK_TYPE_DCEFCLK ? "DCEF" : \
+	(clk_type) == DM_PP_CLOCK_TYPE_SOCCLK ? "SoC" : \
+	(clk_type) == DM_PP_CLOCK_TYPE_PIXELCLK ? "Pixel" : \
+	(clk_type) == DM_PP_CLOCK_TYPE_DISPLAYPHYCLK ? "Display PHY" : \
+	(clk_type) == DM_PP_CLOCK_TYPE_DPPCLK ? "DPP" : \
+	(clk_type) == DM_PP_CLOCK_TYPE_FCLK ? "F" : \
+	"Invalid"
 
-#define DM_PP_MAX_CLOCK_LEVELS 8
+#define DM_PP_MAX_CLOCK_LEVELS 16
 
 struct dm_pp_clock_levels {
 	uint32_t num_levels;
@@ -119,7 +104,7 @@ struct dm_pp_single_disp_config {
 	uint32_t src_height;
 	uint32_t src_width;
 	uint32_t v_refresh;
-	uint32_t sym_clock; /* HDMI only */
+	uint32_t pixel_clock; /* Pixel clock in KHz (for HDMI only: normalized) */
 	struct dc_link_settings link_settings; /* DP only */
 };
 
@@ -137,7 +122,7 @@ struct dm_pp_clock_range_for_wm_set {
 	enum dm_pp_wm_set_id wm_set_id;
 	uint32_t wm_min_eng_clk_in_khz;
 	uint32_t wm_max_eng_clk_in_khz;
-	uint32_t wm_min_memg_clk_in_khz;
+	uint32_t wm_min_mem_clk_in_khz;
 	uint32_t wm_max_mem_clk_in_khz;
 };
 
@@ -150,7 +135,7 @@ struct dm_pp_clock_range_for_dmif_wm_set_soc15 {
 	enum dm_pp_wm_set_id wm_set_id;
 	uint32_t wm_min_dcfclk_clk_in_khz;
 	uint32_t wm_max_dcfclk_clk_in_khz;
-	uint32_t wm_min_memg_clk_in_khz;
+	uint32_t wm_min_mem_clk_in_khz;
 	uint32_t wm_max_mem_clk_in_khz;
 };
 
@@ -158,7 +143,7 @@ struct dm_pp_clock_range_for_mcif_wm_set_soc15 {
 	enum dm_pp_wm_set_id wm_set_id;
 	uint32_t wm_min_socclk_clk_in_khz;
 	uint32_t wm_max_socclk_clk_in_khz;
-	uint32_t wm_min_memg_clk_in_khz;
+	uint32_t wm_min_mem_clk_in_khz;
 	uint32_t wm_max_mem_clk_in_khz;
 };
 
@@ -208,22 +193,21 @@ struct dm_bl_data_point {
 		/* Brightness level as effective value in range 0-255,
 		 * corresponding to above percentage
 		 */
-		uint8_t signalLevel;
+		uint8_t signal_level;
 };
 
 /* Total size of the structure should not exceed 256 bytes */
+#define BL_DATA_POINTS 99
 struct dm_acpi_atif_backlight_caps {
-
-
 	uint16_t size; /* Bytes 0-1 (2 bytes) */
 	uint16_t flags; /* Byted 2-3 (2 bytes) */
-	uint8_t  errorCode; /* Byte 4 */
-	uint8_t  acLevelPercentage; /* Byte 5 */
-	uint8_t  dcLevelPercentage; /* Byte 6 */
-	uint8_t  minInputSignal; /* Byte 7 */
-	uint8_t  maxInputSignal; /* Byte 8 */
-	uint8_t  numOfDataPoints; /* Byte 9 */
-	struct dm_bl_data_point dataPoints[99]; /* Bytes 10-207 (198 bytes)*/
+	uint8_t  error_code; /* Byte 4 */
+	uint8_t  ac_level_percentage; /* Byte 5 */
+	uint8_t  dc_level_percentage; /* Byte 6 */
+	uint8_t  min_input_signal; /* Byte 7 */
+	uint8_t  max_input_signal; /* Byte 8 */
+	uint8_t  num_data_points; /* Byte 9 */
+	struct dm_bl_data_point data_points[BL_DATA_POINTS]; /* Bytes 10-207 (198 bytes)*/
 };
 
 enum dm_acpi_display_type {
@@ -239,10 +223,6 @@ enum dm_acpi_display_type {
 	AcpiDisplayType_DFP6 = 12
 };
 
-struct dm_pp_power_level_change_request {
-	enum dm_pp_clocks_state power_level;
-};
-
 struct dm_pp_clock_for_voltage_req {
 	enum dm_pp_clock_type clk_type;
 	uint32_t clocks_in_khz;
@@ -251,15 +231,45 @@ struct dm_pp_clock_for_voltage_req {
 struct dm_pp_static_clock_info {
 	uint32_t max_sclk_khz;
 	uint32_t max_mclk_khz;
-
-	/* max possible display block clocks state */
-	enum dm_pp_clocks_state max_clocks_state;
 };
 
 struct dtn_min_clk_info {
 	uint32_t disp_clk_khz;
 	uint32_t min_engine_clock_khz;
 	uint32_t min_memory_clock_khz;
+};
+
+enum dm_dmub_wait_type {
+	DM_DMUB_WAIT_TYPE_NO_WAIT,
+	DM_DMUB_WAIT_TYPE_WAIT,
+	DM_DMUB_WAIT_TYPE_WAIT_WITH_REPLY,
+};
+
+enum dm_acpi_transition_link_type {
+	hdmi_tmds,
+	hdmi_frl,
+	dp_8b_10b,
+	dp_128b_132b,
+	none
+};
+
+struct dm_process_phy_transition_init_params {
+	uint32_t phy_id;
+	uint8_t action;
+	uint32_t sym_clock_10khz;
+	enum signal_type signal;
+	enum dc_lane_count display_port_lanes_count;
+	enum dc_link_rate display_port_link_rate;
+	uint32_t transition_bitmask;
+	uint8_t hdmi_frl_num_lanes;
+	enum hdmi_frl_link_rate hdmi_frl_link_rate;
+};
+
+struct dm_process_phy_transition_input_params {
+	uint32_t phy_id;
+	uint32_t transition_id;
+	uint32_t phy_configuration;
+	uint32_t data_rate;
 };
 
 #endif

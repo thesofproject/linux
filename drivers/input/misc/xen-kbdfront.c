@@ -51,7 +51,7 @@ module_param_array(ptr_size, int, NULL, 0444);
 MODULE_PARM_DESC(ptr_size,
 	"Pointing device width, height in pixels (default 800,600)");
 
-static int xenkbd_remove(struct xenbus_device *);
+static void xenkbd_remove(struct xenbus_device *);
 static int xenkbd_connect_backend(struct xenbus_device *, struct xenkbd_info *);
 static void xenkbd_disconnect_backend(struct xenkbd_info *);
 
@@ -63,6 +63,9 @@ static void xenkbd_disconnect_backend(struct xenkbd_info *);
 static void xenkbd_handle_motion_event(struct xenkbd_info *info,
 				       struct xenkbd_motion *motion)
 {
+	if (unlikely(!info->ptr))
+		return;
+
 	input_report_rel(info->ptr, REL_X, motion->rel_x);
 	input_report_rel(info->ptr, REL_Y, motion->rel_y);
 	if (motion->rel_z)
@@ -73,6 +76,9 @@ static void xenkbd_handle_motion_event(struct xenkbd_info *info,
 static void xenkbd_handle_position_event(struct xenkbd_info *info,
 					 struct xenkbd_position *pos)
 {
+	if (unlikely(!info->ptr))
+		return;
+
 	input_report_abs(info->ptr, ABS_X, pos->abs_x);
 	input_report_abs(info->ptr, ABS_Y, pos->abs_y);
 	if (pos->rel_z)
@@ -97,6 +103,9 @@ static void xenkbd_handle_key_event(struct xenkbd_info *info,
 		return;
 	}
 
+	if (unlikely(!dev))
+		return;
+
 	input_event(dev, EV_KEY, key->keycode, value);
 	input_sync(dev);
 }
@@ -115,7 +124,7 @@ static void xenkbd_handle_mt_event(struct xenkbd_info *info,
 	switch (mtouch->event_type) {
 	case XENKBD_MT_EV_DOWN:
 		input_mt_report_slot_state(info->mtouch, MT_TOOL_FINGER, true);
-		/* fall through */
+		fallthrough;
 
 	case XENKBD_MT_EV_MOTION:
 		input_report_abs(info->mtouch, ABS_MT_POSITION_X,
@@ -137,7 +146,7 @@ static void xenkbd_handle_mt_event(struct xenkbd_info *info,
 		break;
 
 	case XENKBD_MT_EV_UP:
-		input_mt_report_slot_state(info->mtouch, MT_TOOL_FINGER, false);
+		input_mt_report_slot_inactive(info->mtouch);
 		break;
 
 	case XENKBD_MT_EV_SYN:
@@ -192,11 +201,11 @@ static int xenkbd_probe(struct xenbus_device *dev,
 				  const struct xenbus_device_id *id)
 {
 	int ret, i;
-	unsigned int abs, touch;
+	bool with_mtouch, with_kbd, with_ptr;
 	struct xenkbd_info *info;
 	struct input_dev *kbd, *ptr, *mtouch;
 
-	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	info = kzalloc_obj(*info);
 	if (!info) {
 		xenbus_dev_fatal(dev, -ENOMEM, "allocating info structure");
 		return -ENOMEM;
@@ -211,106 +220,127 @@ static int xenkbd_probe(struct xenbus_device *dev,
 	if (!info->page)
 		goto error_nomem;
 
-	/* Set input abs params to match backend screen res */
-	abs = xenbus_read_unsigned(dev->otherend,
-				   XENKBD_FIELD_FEAT_ABS_POINTER, 0);
-	ptr_size[KPARAM_X] = xenbus_read_unsigned(dev->otherend,
-						  XENKBD_FIELD_WIDTH,
-						  ptr_size[KPARAM_X]);
-	ptr_size[KPARAM_Y] = xenbus_read_unsigned(dev->otherend,
-						  XENKBD_FIELD_HEIGHT,
-						  ptr_size[KPARAM_Y]);
-	if (abs) {
-		ret = xenbus_write(XBT_NIL, dev->nodename,
-				   XENKBD_FIELD_REQ_ABS_POINTER, "1");
-		if (ret) {
-			pr_warn("xenkbd: can't request abs-pointer\n");
-			abs = 0;
-		}
-	}
+	/*
+	 * The below are reverse logic, e.g. if the feature is set, then
+	 * do not expose the corresponding virtual device.
+	 */
+	with_kbd = !xenbus_read_unsigned(dev->otherend,
+					 XENKBD_FIELD_FEAT_DSBL_KEYBRD, 0);
 
-	touch = xenbus_read_unsigned(dev->nodename,
-				     XENKBD_FIELD_FEAT_MTOUCH, 0);
-	if (touch) {
+	with_ptr = !xenbus_read_unsigned(dev->otherend,
+					 XENKBD_FIELD_FEAT_DSBL_POINTER, 0);
+
+	/* Direct logic: if set, then create multi-touch device. */
+	with_mtouch = xenbus_read_unsigned(dev->otherend,
+					   XENKBD_FIELD_FEAT_MTOUCH, 0);
+	if (with_mtouch) {
 		ret = xenbus_write(XBT_NIL, dev->nodename,
 				   XENKBD_FIELD_REQ_MTOUCH, "1");
 		if (ret) {
 			pr_warn("xenkbd: can't request multi-touch");
-			touch = 0;
+			with_mtouch = 0;
 		}
 	}
 
 	/* keyboard */
-	kbd = input_allocate_device();
-	if (!kbd)
-		goto error_nomem;
-	kbd->name = "Xen Virtual Keyboard";
-	kbd->phys = info->phys;
-	kbd->id.bustype = BUS_PCI;
-	kbd->id.vendor = 0x5853;
-	kbd->id.product = 0xffff;
+	if (with_kbd) {
+		kbd = input_allocate_device();
+		if (!kbd)
+			goto error_nomem;
+		kbd->name = "Xen Virtual Keyboard";
+		kbd->phys = info->phys;
+		kbd->id.bustype = BUS_PCI;
+		kbd->id.vendor = 0x5853;
+		kbd->id.product = 0xffff;
 
-	__set_bit(EV_KEY, kbd->evbit);
-	for (i = KEY_ESC; i < KEY_UNKNOWN; i++)
-		__set_bit(i, kbd->keybit);
-	for (i = KEY_OK; i < KEY_MAX; i++)
-		__set_bit(i, kbd->keybit);
+		__set_bit(EV_KEY, kbd->evbit);
+		for (i = KEY_ESC; i < KEY_UNKNOWN; i++)
+			__set_bit(i, kbd->keybit);
+		for (i = KEY_OK; i < KEY_MAX; i++)
+			__set_bit(i, kbd->keybit);
 
-	ret = input_register_device(kbd);
-	if (ret) {
-		input_free_device(kbd);
-		xenbus_dev_fatal(dev, ret, "input_register_device(kbd)");
-		goto error;
+		ret = input_register_device(kbd);
+		if (ret) {
+			input_free_device(kbd);
+			xenbus_dev_fatal(dev, ret,
+					 "input_register_device(kbd)");
+			goto error;
+		}
+		info->kbd = kbd;
 	}
-	info->kbd = kbd;
 
 	/* pointing device */
-	ptr = input_allocate_device();
-	if (!ptr)
-		goto error_nomem;
-	ptr->name = "Xen Virtual Pointer";
-	ptr->phys = info->phys;
-	ptr->id.bustype = BUS_PCI;
-	ptr->id.vendor = 0x5853;
-	ptr->id.product = 0xfffe;
+	if (with_ptr) {
+		unsigned int abs;
 
-	if (abs) {
-		__set_bit(EV_ABS, ptr->evbit);
-		input_set_abs_params(ptr, ABS_X, 0, ptr_size[KPARAM_X], 0, 0);
-		input_set_abs_params(ptr, ABS_Y, 0, ptr_size[KPARAM_Y], 0, 0);
-	} else {
-		input_set_capability(ptr, EV_REL, REL_X);
-		input_set_capability(ptr, EV_REL, REL_Y);
+		/* Set input abs params to match backend screen res */
+		abs = xenbus_read_unsigned(dev->otherend,
+					   XENKBD_FIELD_FEAT_ABS_POINTER, 0);
+		ptr_size[KPARAM_X] = xenbus_read_unsigned(dev->otherend,
+							  XENKBD_FIELD_WIDTH,
+							  ptr_size[KPARAM_X]);
+		ptr_size[KPARAM_Y] = xenbus_read_unsigned(dev->otherend,
+							  XENKBD_FIELD_HEIGHT,
+							  ptr_size[KPARAM_Y]);
+		if (abs) {
+			ret = xenbus_write(XBT_NIL, dev->nodename,
+					   XENKBD_FIELD_REQ_ABS_POINTER, "1");
+			if (ret) {
+				pr_warn("xenkbd: can't request abs-pointer\n");
+				abs = 0;
+			}
+		}
+
+		ptr = input_allocate_device();
+		if (!ptr)
+			goto error_nomem;
+		ptr->name = "Xen Virtual Pointer";
+		ptr->phys = info->phys;
+		ptr->id.bustype = BUS_PCI;
+		ptr->id.vendor = 0x5853;
+		ptr->id.product = 0xfffe;
+
+		if (abs) {
+			__set_bit(EV_ABS, ptr->evbit);
+			input_set_abs_params(ptr, ABS_X, 0,
+					     ptr_size[KPARAM_X], 0, 0);
+			input_set_abs_params(ptr, ABS_Y, 0,
+					     ptr_size[KPARAM_Y], 0, 0);
+		} else {
+			input_set_capability(ptr, EV_REL, REL_X);
+			input_set_capability(ptr, EV_REL, REL_Y);
+		}
+		input_set_capability(ptr, EV_REL, REL_WHEEL);
+
+		__set_bit(EV_KEY, ptr->evbit);
+		for (i = BTN_LEFT; i <= BTN_TASK; i++)
+			__set_bit(i, ptr->keybit);
+
+		ret = input_register_device(ptr);
+		if (ret) {
+			input_free_device(ptr);
+			xenbus_dev_fatal(dev, ret,
+					 "input_register_device(ptr)");
+			goto error;
+		}
+		info->ptr = ptr;
 	}
-	input_set_capability(ptr, EV_REL, REL_WHEEL);
-
-	__set_bit(EV_KEY, ptr->evbit);
-	for (i = BTN_LEFT; i <= BTN_TASK; i++)
-		__set_bit(i, ptr->keybit);
-
-	ret = input_register_device(ptr);
-	if (ret) {
-		input_free_device(ptr);
-		xenbus_dev_fatal(dev, ret, "input_register_device(ptr)");
-		goto error;
-	}
-	info->ptr = ptr;
 
 	/* multi-touch device */
-	if (touch) {
+	if (with_mtouch) {
 		int num_cont, width, height;
 
 		mtouch = input_allocate_device();
 		if (!mtouch)
 			goto error_nomem;
 
-		num_cont = xenbus_read_unsigned(info->xbdev->nodename,
+		num_cont = xenbus_read_unsigned(info->xbdev->otherend,
 						XENKBD_FIELD_MT_NUM_CONTACTS,
 						1);
-		width = xenbus_read_unsigned(info->xbdev->nodename,
+		width = xenbus_read_unsigned(info->xbdev->otherend,
 					     XENKBD_FIELD_MT_WIDTH,
 					     XENFB_WIDTH);
-		height = xenbus_read_unsigned(info->xbdev->nodename,
+		height = xenbus_read_unsigned(info->xbdev->otherend,
 					      XENKBD_FIELD_MT_HEIGHT,
 					      XENFB_HEIGHT);
 
@@ -346,6 +376,11 @@ static int xenkbd_probe(struct xenbus_device *dev,
 		info->mtouch = mtouch;
 	}
 
+	if (!(with_kbd || with_ptr || with_mtouch)) {
+		ret = -ENXIO;
+		goto error;
+	}
+
 	ret = xenkbd_connect_backend(dev, info);
 	if (ret < 0)
 		goto error;
@@ -369,7 +404,7 @@ static int xenkbd_resume(struct xenbus_device *dev)
 	return xenkbd_connect_backend(dev, info);
 }
 
-static int xenkbd_remove(struct xenbus_device *dev)
+static void xenkbd_remove(struct xenbus_device *dev)
 {
 	struct xenkbd_info *info = dev_get_drvdata(&dev->dev);
 
@@ -382,7 +417,6 @@ static int xenkbd_remove(struct xenbus_device *dev)
 		input_unregister_device(info->mtouch);
 	free_page((unsigned long)info->page);
 	kfree(info);
-	return 0;
 }
 
 static int xenkbd_connect_backend(struct xenbus_device *dev,
@@ -446,7 +480,7 @@ static int xenkbd_connect_backend(struct xenbus_device *dev,
  error_evtchan:
 	xenbus_free_evtchn(dev, evtchn);
  error_grant:
-	gnttab_end_foreign_access(info->gref, 0, 0UL);
+	gnttab_end_foreign_access(info->gref, NULL);
 	info->gref = -1;
 	return ret;
 }
@@ -457,7 +491,7 @@ static void xenkbd_disconnect_backend(struct xenkbd_info *info)
 		unbind_from_irqhandler(info->irq, info);
 	info->irq = -1;
 	if (info->gref >= 0)
-		gnttab_end_foreign_access(info->gref, 0, 0UL);
+		gnttab_end_foreign_access(info->gref, NULL);
 	info->gref = -1;
 }
 
@@ -489,7 +523,7 @@ static void xenkbd_backend_changed(struct xenbus_device *dev,
 	case XenbusStateClosed:
 		if (dev->state == XenbusStateClosed)
 			break;
-		/* Missed the backend's CLOSING state -- fallthrough */
+		fallthrough;	/* Missed the backend's CLOSING state */
 	case XenbusStateClosing:
 		xenbus_frontend_closed(dev);
 		break;
@@ -507,6 +541,7 @@ static struct xenbus_driver xenkbd_driver = {
 	.remove = xenkbd_remove,
 	.resume = xenkbd_resume,
 	.otherend_changed = xenkbd_backend_changed,
+	.not_essential = true,
 };
 
 static int __init xenkbd_init(void)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Force feedback support for Linux input subsystem
  *
@@ -5,27 +6,13 @@
  *  Copyright (c) 2006 Dmitry Torokhov <dtor@mail.ru>
  */
 
-/*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- */
-
 /* #define DEBUG */
 
+#include <linux/export.h>
 #include <linux/input.h>
-#include <linux/module.h>
+#include <linux/limits.h>
 #include <linux/mutex.h>
+#include <linux/overflow.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 
@@ -79,7 +66,7 @@ static int compat_effect(struct ff_device *ff, struct ff_effect *effect)
 		effect->type = FF_PERIODIC;
 		effect->u.periodic.waveform = FF_SINE;
 		effect->u.periodic.period = 50;
-		effect->u.periodic.magnitude = max(magnitude, 0x7fff);
+		effect->u.periodic.magnitude = magnitude;
 		effect->u.periodic.offset = 0;
 		effect->u.periodic.phase = 0;
 		effect->u.periodic.envelope.attack_length = 0;
@@ -106,7 +93,7 @@ int input_ff_upload(struct input_dev *dev, struct ff_effect *effect,
 {
 	struct ff_device *ff = dev->ff;
 	struct ff_effect *old;
-	int ret = 0;
+	int error;
 	int id;
 
 	if (!test_bit(EV_FF, dev->evbit))
@@ -127,22 +114,20 @@ int input_ff_upload(struct input_dev *dev, struct ff_effect *effect,
 	}
 
 	if (!test_bit(effect->type, ff->ffbit)) {
-		ret = compat_effect(ff, effect);
-		if (ret)
-			return ret;
+		error = compat_effect(ff, effect);
+		if (error)
+			return error;
 	}
 
-	mutex_lock(&ff->mutex);
+	guard(mutex)(&ff->mutex);
 
 	if (effect->id == -1) {
 		for (id = 0; id < ff->max_effects; id++)
 			if (!ff->effect_owners[id])
 				break;
 
-		if (id >= ff->max_effects) {
-			ret = -ENOSPC;
-			goto out;
-		}
+		if (id >= ff->max_effects)
+			return -ENOSPC;
 
 		effect->id = id;
 		old = NULL;
@@ -150,30 +135,26 @@ int input_ff_upload(struct input_dev *dev, struct ff_effect *effect,
 	} else {
 		id = effect->id;
 
-		ret = check_effect_access(ff, id, file);
-		if (ret)
-			goto out;
+		error = check_effect_access(ff, id, file);
+		if (error)
+			return error;
 
 		old = &ff->effects[id];
 
-		if (!check_effects_compatible(effect, old)) {
-			ret = -EINVAL;
-			goto out;
-		}
+		if (!check_effects_compatible(effect, old))
+			return -EINVAL;
 	}
 
-	ret = ff->upload(dev, effect, old);
-	if (ret)
-		goto out;
+	error = ff->upload(dev, effect, old);
+	if (error)
+		return error;
 
-	spin_lock_irq(&dev->event_lock);
-	ff->effects[id] = *effect;
-	ff->effect_owners[id] = file;
-	spin_unlock_irq(&dev->event_lock);
+	scoped_guard(spinlock_irq, &dev->event_lock) {
+		ff->effects[id] = *effect;
+		ff->effect_owners[id] = file;
+	}
 
- out:
-	mutex_unlock(&ff->mutex);
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(input_ff_upload);
 
@@ -191,17 +172,16 @@ static int erase_effect(struct input_dev *dev, int effect_id,
 	if (error)
 		return error;
 
-	spin_lock_irq(&dev->event_lock);
-	ff->playback(dev, effect_id, 0);
-	ff->effect_owners[effect_id] = NULL;
-	spin_unlock_irq(&dev->event_lock);
+	scoped_guard(spinlock_irq, &dev->event_lock) {
+		ff->playback(dev, effect_id, 0);
+		ff->effect_owners[effect_id] = NULL;
+	}
 
 	if (ff->erase) {
 		error = ff->erase(dev, effect_id);
 		if (error) {
-			spin_lock_irq(&dev->event_lock);
-			ff->effect_owners[effect_id] = file;
-			spin_unlock_irq(&dev->event_lock);
+			scoped_guard(spinlock_irq, &dev->event_lock)
+				ff->effect_owners[effect_id] = file;
 
 			return error;
 		}
@@ -223,16 +203,12 @@ static int erase_effect(struct input_dev *dev, int effect_id,
 int input_ff_erase(struct input_dev *dev, int effect_id, struct file *file)
 {
 	struct ff_device *ff = dev->ff;
-	int ret;
 
 	if (!test_bit(EV_FF, dev->evbit))
 		return -ENOSYS;
 
-	mutex_lock(&ff->mutex);
-	ret = erase_effect(dev, effect_id, file);
-	mutex_unlock(&ff->mutex);
-
-	return ret;
+	guard(mutex)(&ff->mutex);
+	return erase_effect(dev, effect_id, file);
 }
 EXPORT_SYMBOL_GPL(input_ff_erase);
 
@@ -252,12 +228,10 @@ int input_ff_flush(struct input_dev *dev, struct file *file)
 
 	dev_dbg(&dev->dev, "flushing now\n");
 
-	mutex_lock(&ff->mutex);
+	guard(mutex)(&ff->mutex);
 
 	for (i = 0; i < ff->max_effects; i++)
 		erase_effect(dev, i, file);
-
-	mutex_unlock(&ff->mutex);
 
 	return 0;
 }
@@ -316,8 +290,6 @@ EXPORT_SYMBOL_GPL(input_ff_event);
  */
 int input_ff_create(struct input_dev *dev, unsigned int max_effects)
 {
-	struct ff_device *ff;
-	size_t ff_dev_size;
 	int i;
 
 	if (!max_effects) {
@@ -330,26 +302,18 @@ int input_ff_create(struct input_dev *dev, unsigned int max_effects)
 		return -EINVAL;
 	}
 
-	ff_dev_size = sizeof(struct ff_device) +
-				max_effects * sizeof(struct file *);
-	if (ff_dev_size < max_effects) /* overflow */
-		return -EINVAL;
-
-	ff = kzalloc(ff_dev_size, GFP_KERNEL);
+	struct ff_device *ff __free(kfree) =
+		kzalloc_flex(*ff, effect_owners, max_effects);
 	if (!ff)
 		return -ENOMEM;
 
-	ff->effects = kcalloc(max_effects, sizeof(struct ff_effect),
-			      GFP_KERNEL);
-	if (!ff->effects) {
-		kfree(ff);
+	ff->effects = kzalloc_objs(*ff->effects, max_effects);
+	if (!ff->effects)
 		return -ENOMEM;
-	}
 
 	ff->max_effects = max_effects;
 	mutex_init(&ff->mutex);
 
-	dev->ff = ff;
 	dev->flush = input_ff_flush;
 	dev->event = input_ff_event;
 	__set_bit(EV_FF, dev->evbit);
@@ -361,6 +325,8 @@ int input_ff_create(struct input_dev *dev, unsigned int max_effects)
 	/* we can emulate RUMBLE with periodic effects */
 	if (test_bit(FF_PERIODIC, ff->ffbit))
 		__set_bit(FF_RUMBLE, dev->ffbit);
+
+	dev->ff = no_free_ptr(ff);
 
 	return 0;
 }

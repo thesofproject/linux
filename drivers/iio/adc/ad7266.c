@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AD7266/65 SPI ADC driver
  *
  * Copyright 2012 Analog Devices Inc.
- *
- * Licensed under the GPL-2.
  */
 
 #include <linux/device.h>
@@ -12,7 +11,7 @@
 #include <linux/spi/spi.h>
 #include <linux/regulator/consumer.h>
 #include <linux/err.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 
 #include <linux/interrupt.h>
@@ -24,9 +23,10 @@
 
 #include <linux/platform_data/ad7266.h>
 
+#define AD7266_INTERNAL_REF_MV	2500
+
 struct ad7266_state {
 	struct spi_device	*spi;
-	struct regulator	*reg;
 	unsigned long		vref_mv;
 
 	struct spi_transfer	single_xfer[3];
@@ -35,18 +35,18 @@ struct ad7266_state {
 	enum ad7266_range	range;
 	enum ad7266_mode	mode;
 	bool			fixed_addr;
-	struct gpio		gpios[3];
+	struct gpio_desc	*gpios[3];
 
 	/*
-	 * DMA (thus cache coherency maintenance) requires the
+	 * DMA (thus cache coherency maintenance) may require the
 	 * transfer buffers to live in their own cache lines.
 	 * The buffer needs to be large enough to hold two samples (4 bytes) and
 	 * the naturally aligned timestamp (8 bytes).
 	 */
 	struct {
 		__be16 sample[2];
-		s64 timestamp;
-	} data ____cacheline_aligned;
+		aligned_s64 timestamp;
+	} data __aligned(IIO_DMA_MINALIGN);
 };
 
 static int ad7266_wakeup(struct ad7266_state *st)
@@ -75,8 +75,6 @@ static int ad7266_postdisable(struct iio_dev *indio_dev)
 
 static const struct iio_buffer_setup_ops iio_triggered_buffer_setup_ops = {
 	.preenable = &ad7266_preenable,
-	.postenable = &iio_triggered_buffer_postenable,
-	.predisable = &iio_triggered_buffer_predisable,
 	.postdisable = &ad7266_postdisable,
 };
 
@@ -88,10 +86,9 @@ static irqreturn_t ad7266_trigger_handler(int irq, void *p)
 	int ret;
 
 	ret = spi_read(st->spi, st->data.sample, 4);
-	if (ret == 0) {
-		iio_push_to_buffers_with_timestamp(indio_dev, &st->data,
-			    pf->timestamp);
-	}
+	if (ret == 0)
+		iio_push_to_buffers_with_ts(indio_dev, &st->data, sizeof(st->data),
+					    pf->timestamp);
 
 	iio_trigger_notify_done(indio_dev->trig);
 
@@ -118,14 +115,15 @@ static void ad7266_select_input(struct ad7266_state *st, unsigned int nr)
 	}
 
 	for (i = 0; i < 3; ++i)
-		gpio_set_value(st->gpios[i].gpio, (bool)(nr & BIT(i)));
+		gpiod_set_value(st->gpios[i], (bool)(nr & BIT(i)));
 }
 
 static int ad7266_update_scan_mode(struct iio_dev *indio_dev,
 	const unsigned long *scan_mask)
 {
 	struct ad7266_state *st = iio_priv(indio_dev);
-	unsigned int nr = find_first_bit(scan_mask, indio_dev->masklength);
+	unsigned int nr = find_first_bit(scan_mask,
+					 iio_get_masklength(indio_dev));
 
 	ad7266_select_input(st, nr);
 
@@ -154,15 +152,17 @@ static int ad7266_read_raw(struct iio_dev *indio_dev,
 
 	switch (m) {
 	case IIO_CHAN_INFO_RAW:
-		ret = iio_device_claim_direct_mode(indio_dev);
-		if (ret)
-			return ret;
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
 		ret = ad7266_read_single(st, val, chan->address);
-		iio_device_release_direct_mode(indio_dev);
+		iio_device_release_direct(indio_dev);
 
+		if (ret < 0)
+			return ret;
 		*val = (*val >> 2) & 0xfff;
 		if (chan->scan_type.sign == 's')
-			*val = sign_extend32(*val, 11);
+			*val = sign_extend32(*val,
+					     chan->scan_type.realbits - 1);
 
 		return IIO_VAL_INT;
 	case IIO_CHAN_INFO_SCALE:
@@ -373,16 +373,15 @@ static void ad7266_init_channels(struct iio_dev *indio_dev)
 	indio_dev->channels = chan_info->channels;
 	indio_dev->num_channels = chan_info->num_channels;
 	indio_dev->available_scan_masks = chan_info->scan_masks;
-	indio_dev->masklength = chan_info->num_channels - 1;
 }
 
 static const char * const ad7266_gpio_labels[] = {
-	"AD0", "AD1", "AD2",
+	"ad0", "ad1", "ad2",
 };
 
 static int ad7266_probe(struct spi_device *spi)
 {
-	struct ad7266_platform_data *pdata = spi->dev.platform_data;
+	const struct ad7266_platform_data *pdata = dev_get_platdata(&spi->dev);
 	struct iio_dev *indio_dev;
 	struct ad7266_state *st;
 	unsigned int i;
@@ -394,24 +393,11 @@ static int ad7266_probe(struct spi_device *spi)
 
 	st = iio_priv(indio_dev);
 
-	st->reg = devm_regulator_get_optional(&spi->dev, "vref");
-	if (!IS_ERR(st->reg)) {
-		ret = regulator_enable(st->reg);
-		if (ret)
-			return ret;
+	ret = devm_regulator_get_enable_read_voltage(&spi->dev, "vref");
+	if (ret < 0 && ret != -ENODEV)
+		return ret;
 
-		ret = regulator_get_voltage(st->reg);
-		if (ret < 0)
-			goto error_disable_reg;
-
-		st->vref_mv = ret / 1000;
-	} else {
-		/* Any other error indicates that the regulator does exist */
-		if (PTR_ERR(st->reg) != -ENODEV)
-			return PTR_ERR(st->reg);
-		/* Use internal reference */
-		st->vref_mv = 2500;
-	}
+	st->vref_mv = ret == -ENODEV ? AD7266_INTERNAL_REF_MV : ret / 1000;
 
 	if (pdata) {
 		st->fixed_addr = pdata->fixed_addr;
@@ -420,14 +406,12 @@ static int ad7266_probe(struct spi_device *spi)
 
 		if (!st->fixed_addr) {
 			for (i = 0; i < ARRAY_SIZE(st->gpios); ++i) {
-				st->gpios[i].gpio = pdata->addr_gpios[i];
-				st->gpios[i].flags = GPIOF_OUT_INIT_LOW;
-				st->gpios[i].label = ad7266_gpio_labels[i];
+				st->gpios[i] = devm_gpiod_get(&spi->dev,
+						      ad7266_gpio_labels[i],
+						      GPIOD_OUT_LOW);
+				if (IS_ERR(st->gpios[i]))
+					return PTR_ERR(st->gpios[i]);
 			}
-			ret = gpio_request_array(st->gpios,
-				ARRAY_SIZE(st->gpios));
-			if (ret)
-				goto error_disable_reg;
 		}
 	} else {
 		st->fixed_addr = true;
@@ -435,11 +419,8 @@ static int ad7266_probe(struct spi_device *spi)
 		st->mode = AD7266_MODE_DIFF;
 	}
 
-	spi_set_drvdata(spi, indio_dev);
 	st->spi = spi;
 
-	indio_dev->dev.parent = &spi->dev;
-	indio_dev->dev.of_node = spi->dev.of_node;
 	indio_dev->name = spi_get_device_id(spi)->name;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->info = &ad7266_info;
@@ -463,47 +444,17 @@ static int ad7266_probe(struct spi_device *spi)
 	spi_message_add_tail(&st->single_xfer[1], &st->single_msg);
 	spi_message_add_tail(&st->single_xfer[2], &st->single_msg);
 
-	ret = iio_triggered_buffer_setup(indio_dev, &iio_pollfunc_store_time,
+	ret = devm_iio_triggered_buffer_setup(&spi->dev, indio_dev, &iio_pollfunc_store_time,
 		&ad7266_trigger_handler, &iio_triggered_buffer_setup_ops);
 	if (ret)
-		goto error_free_gpios;
+		return ret;
 
-	ret = iio_device_register(indio_dev);
-	if (ret)
-		goto error_buffer_cleanup;
-
-	return 0;
-
-error_buffer_cleanup:
-	iio_triggered_buffer_cleanup(indio_dev);
-error_free_gpios:
-	if (!st->fixed_addr)
-		gpio_free_array(st->gpios, ARRAY_SIZE(st->gpios));
-error_disable_reg:
-	if (!IS_ERR(st->reg))
-		regulator_disable(st->reg);
-
-	return ret;
-}
-
-static int ad7266_remove(struct spi_device *spi)
-{
-	struct iio_dev *indio_dev = spi_get_drvdata(spi);
-	struct ad7266_state *st = iio_priv(indio_dev);
-
-	iio_device_unregister(indio_dev);
-	iio_triggered_buffer_cleanup(indio_dev);
-	if (!st->fixed_addr)
-		gpio_free_array(st->gpios, ARRAY_SIZE(st->gpios));
-	if (!IS_ERR(st->reg))
-		regulator_disable(st->reg);
-
-	return 0;
+	return devm_iio_device_register(&spi->dev, indio_dev);
 }
 
 static const struct spi_device_id ad7266_id[] = {
-	{"ad7265", 0},
-	{"ad7266", 0},
+	{ "ad7265", 0 },
+	{ "ad7266", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(spi, ad7266_id);
@@ -513,7 +464,6 @@ static struct spi_driver ad7266_driver = {
 		.name	= "ad7266",
 	},
 	.probe		= ad7266_probe,
-	.remove		= ad7266_remove,
 	.id_table	= ad7266_id,
 };
 module_spi_driver(ad7266_driver);

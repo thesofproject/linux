@@ -1,20 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright 2015-2017 Google, Inc
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef __LINUX_USB_PD_H
 #define __LINUX_USB_PD_H
 
+#include <linux/bitfield.h>
+#include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/usb/typec.h>
 
@@ -41,7 +34,10 @@ enum pd_ctrl_msg_type {
 	PD_CTRL_FR_SWAP = 19,
 	PD_CTRL_GET_PPS_STATUS = 20,
 	PD_CTRL_GET_COUNTRY_CODES = 21,
-	/* 22-31 Reserved */
+	PD_CTRL_GET_SINK_CAP_EXT = 22,
+	/* 23 Reserved */
+	PD_CTRL_GET_REVISION = 24,
+	/* 25-31 Reserved */
 };
 
 enum pd_data_msg_type {
@@ -53,7 +49,10 @@ enum pd_data_msg_type {
 	PD_DATA_BATT_STATUS = 5,
 	PD_DATA_ALERT = 6,
 	PD_DATA_GET_COUNTRY_INFO = 7,
-	/* 8-14 Reserved */
+	PD_DATA_ENTER_USB = 8,
+	/* 9-11 Reserved */
+	PD_DATA_REVISION = 12,
+	/* 13-14 Reserved */
 	PD_DATA_VENDOR_DEF = 15,
 	/* 16-31 Reserved */
 };
@@ -74,7 +73,8 @@ enum pd_ext_msg_type {
 	PD_EXT_PPS_STATUS = 12,
 	PD_EXT_COUNTRY_INFO = 13,
 	PD_EXT_COUNTRY_CODES = 14,
-	/* 15-31 Reserved */
+	PD_EXT_SINK_CAP_EXT = 15,
+	/* 16-31 Reserved */
 };
 
 #define PD_REV10	0x0
@@ -103,8 +103,8 @@ enum pd_ext_msg_type {
 	 (((cnt) & PD_HEADER_CNT_MASK) << PD_HEADER_CNT_SHIFT) |	\
 	 ((ext_hdr) ? PD_HEADER_EXT_HDR : 0))
 
-#define PD_HEADER_LE(type, pwr, data, id, cnt) \
-	cpu_to_le16(PD_HEADER((type), (pwr), (data), PD_REV20, (id), (cnt), (0)))
+#define PD_HEADER_LE(type, pwr, data, rev, id, cnt) \
+	cpu_to_le16(PD_HEADER((type), (pwr), (data), (rev), (id), (cnt), (0)))
 
 static inline unsigned int pd_header_cnt(u16 header)
 {
@@ -207,6 +207,72 @@ struct pd_message {
 	};
 } __packed;
 
+/*
+ * count_chunked_data_objs - Helper to calculate number of Data Objects on a 4
+ *   byte boundary.
+ * @size: Size of data block for extended message. Should *not* include extended
+ *   header size.
+ */
+static inline u8 count_chunked_data_objs(u32 size)
+{
+	size += offsetof(struct pd_chunked_ext_message_data, data);
+	return ((size / 4) + (size % 4 ? 1 : 0));
+}
+
+/* Sink Caps Extended Data Block Version */
+#define SKEDB_VER_1_0				1
+
+/* Sink Caps Extended Sink Modes */
+#define SINK_MODE_PPS		BIT(0)
+#define SINK_MODE_VBUS		BIT(1)
+#define SINK_MODE_AC_SUPPLY	BIT(2)
+#define SINK_MODE_BATT		BIT(3)
+#define SINK_MODE_BATT_UL	BIT(4) /* Unlimited battery power supply */
+#define SINK_MODE_AVS		BIT(5)
+
+/**
+ * struct sink_caps_ext_msg - Sink extended capability PD message
+ * @vid: Vendor ID
+ * @pid: Product ID
+ * @xid: Value assigned by USB-IF for product
+ * @fw: Firmware version
+ * @hw: Hardware version
+ * @skedb_ver: Sink Caps Extended Data Block (SKEDB) Version
+ * @load_step: Indicates the load step slew rate.
+ * @load_char: Sink overload characteristics
+ * @compliance: Types of sources the sink has been tested & certified on
+ * @touch_temp: Indicates the IEC standard to which the touch temperature
+ *              conforms to (if applicable).
+ * @batt_info: Indicates number batteries and hot swappable ports
+ * @modes: Charging caps & power sources supported
+ * @spr_min_pdp: Sink Minimum PDP for SPR mode
+ * @spr_op_pdp: Sink Operational PDP for SPR mode
+ * @spr_max_pdp: Sink Maximum PDP for SPR mode
+ * @epr_min_pdp: Sink Minimum PDP for EPR mode
+ * @epr_op_pdp: Sink Operational PDP for EPR mode
+ * @epr_max_pdp: Sink Maximum PDP for EPR mode
+ */
+struct sink_caps_ext_msg {
+	__le16 vid;
+	__le16 pid;
+	__le32 xid;
+	u8 fw;
+	u8 hw;
+	u8 skedb_ver;
+	u8 load_step;
+	__le16 load_char;
+	u8 compliance;
+	u8 touch_temp;
+	u8 batt_info;
+	u8 modes;
+	u8 spr_min_pdp;
+	u8 spr_op_pdp;
+	u8 spr_max_pdp;
+	u8 epr_min_pdp;
+	u8 epr_op_pdp;
+	u8 epr_max_pdp;
+} __packed;
+
 /* PDO: Power Data Object */
 #define PDO_MAX_OBJECTS		7
 
@@ -226,14 +292,18 @@ enum pd_pdo_type {
 #define PDO_CURR_MASK		0x3ff
 #define PDO_PWR_MASK		0x3ff
 
-#define PDO_FIXED_DUAL_ROLE	BIT(29)	/* Power role swap supported */
-#define PDO_FIXED_SUSPEND	BIT(28) /* USB Suspend supported (Source) */
-#define PDO_FIXED_HIGHER_CAP	BIT(28) /* Requires more than vSafe5V (Sink) */
-#define PDO_FIXED_EXTPOWER	BIT(27) /* Externally powered */
-#define PDO_FIXED_USB_COMM	BIT(26) /* USB communications capable */
-#define PDO_FIXED_DATA_SWAP	BIT(25) /* Data role swap supported */
-#define PDO_FIXED_VOLT_SHIFT	10	/* 50mV units */
-#define PDO_FIXED_CURR_SHIFT	0	/* 10mA units */
+#define PDO_FIXED_DUAL_ROLE		BIT(29)	/* Power role swap supported */
+#define PDO_FIXED_SUSPEND		BIT(28) /* USB Suspend supported (Source) */
+#define PDO_FIXED_HIGHER_CAP		BIT(28) /* Requires more than vSafe5V (Sink) */
+#define PDO_FIXED_EXTPOWER		BIT(27) /* Externally powered */
+#define PDO_FIXED_USB_COMM		BIT(26) /* USB communications capable */
+#define PDO_FIXED_DATA_SWAP		BIT(25) /* Data role swap supported */
+#define PDO_FIXED_UNCHUNK_EXT		BIT(24) /* Unchunked Extended Message supported (Source) */
+#define PDO_FIXED_FRS_CURR_MASK		(BIT(24) | BIT(23)) /* FR_Swap Current (Sink) */
+#define PDO_FIXED_FRS_CURR_SHIFT	23
+#define PDO_FIXED_PEAK_CURR_SHIFT	20
+#define PDO_FIXED_VOLT_SHIFT		10	/* 50mV units */
+#define PDO_FIXED_CURR_SHIFT		0	/* 10mA units */
 
 #define PDO_FIXED_VOLT(mv)	((((mv) / 50) & PDO_VOLT_MASK) << PDO_FIXED_VOLT_SHIFT)
 #define PDO_FIXED_CURR(ma)	((((ma) / 10) & PDO_CURR_MASK) << PDO_FIXED_CURR_SHIFT)
@@ -270,9 +340,11 @@ enum pd_pdo_type {
 
 enum pd_apdo_type {
 	APDO_TYPE_PPS = 0,
+	APDO_TYPE_EPR_AVS = 1,
+	APDO_TYPE_SPR_AVS = 2,
 };
 
-#define PDO_APDO_TYPE_SHIFT	28	/* Only valid value currently is 0x0 - PPS */
+#define PDO_APDO_TYPE_SHIFT	28
 #define PDO_APDO_TYPE_MASK	0x3
 
 #define PDO_APDO_TYPE(t)	((t) << PDO_APDO_TYPE_SHIFT)
@@ -296,6 +368,61 @@ enum pd_apdo_type {
 	PDO_PPS_APDO_MIN_VOLT(min_mv) | PDO_PPS_APDO_MAX_VOLT(max_mv) |	\
 	PDO_PPS_APDO_MAX_CURR(max_ma))
 
+/*
+ * Applicable only to EPR AVS APDO source cap as per
+ * Table 6.15 EPR Adjustable Voltage Supply APDO – Source
+ */
+#define PDO_EPR_AVS_APDO_PEAK_CURRENT	GENMASK(27, 26)
+
+/*
+ * Applicable to both EPR AVS APDO source and sink cap as per
+ * Table 6.15 EPR Adjustable Voltage Supply APDO – Source
+ * Table 6.22 EPR Adjustable Voltage Supply APDO – Sink
+ */
+#define PDO_EPR_AVS_APDO_MAX_VOLT	GENMASK(25, 17)	/* 100mV unit */
+#define PDO_EPR_AVS_APDO_MIN_VOLT	GENMASK(15, 8)	/* 100mV unit */
+#define PDO_EPR_AVS_APDO_PDP		GENMASK(7, 0) /* 1W unit */
+
+/*
+ * Applicable only SPR AVS APDO source cap as per
+ * Table 6.14 SPR Adjustable Voltage Supply APDO – Source
+ */
+#define PDO_SPR_AVS_APDO_PEAK_CURRENT		GENMASK(27, 26)
+
+/*
+ * Applicable to both SPR AVS APDO source and sink cap as per
+ * Table 6.14 SPR Adjustable Voltage Supply APDO – Source
+ * Table 6.21 SPR Adjustable Voltage Supply APDO – Sink
+ */
+#define PDO_SPR_AVS_APDO_9V_TO_15V_MAX_CURR	GENMASK(19, 10)	/* 10mA unit */
+#define PDO_SPR_AVS_APDO_15V_TO_20V_MAX_CURR	GENMASK(9, 0)	/* 10mA unit */
+
+/* SPR AVS has two different current ranges 9V - 15V, 15V - 20V */
+#define SPR_AVS_TIER1_MIN_VOLT_MV              9000
+#define SPR_AVS_TIER1_MAX_VOLT_MV              15000
+#define SPR_AVS_TIER2_MAX_VOLT_MV              20000
+
+#define SPR_AVS_AVS_SMALL_STEP_V	1
+/* vAvsStep - 100mv */
+#define SPR_AVS_VOLT_MV_STEP		100
+/* SPR AVS RDO Operating Current is in 50mA step */
+#define RDO_SPR_AVS_CURR_MA_STEP	50
+/* SPR AVS RDO Output voltage is in 25mV step */
+#define RDO_SPR_AVS_OUT_VOLT_MV_STEP	25
+
+#define RDO_SPR_AVS_VOLT	GENMASK(20, 9)
+#define RDO_SPR_AVS_CURR	GENMASK(6, 0)
+
+#define RDO_SPR_AVS_OUT_VOLT(mv)					\
+	FIELD_PREP(RDO_SPR_AVS_VOLT, ((mv) / RDO_SPR_AVS_OUT_VOLT_MV_STEP))
+
+#define RDO_SPR_AVS_OP_CURR(ma)						\
+	FIELD_PREP(RDO_SPR_AVS_CURR, ((ma) / RDO_SPR_AVS_CURR_MA_STEP))
+
+#define RDO_AVS(idx, out_mv, op_ma, flags)				\
+	(RDO_OBJ(idx) | (flags) |					\
+	 RDO_SPR_AVS_OUT_VOLT(out_mv) | RDO_SPR_AVS_OP_CURR(op_ma))
+
 static inline enum pd_pdo_type pdo_type(u32 pdo)
 {
 	return (pdo >> PDO_TYPE_SHIFT) & PDO_TYPE_MASK;
@@ -304,6 +431,11 @@ static inline enum pd_pdo_type pdo_type(u32 pdo)
 static inline unsigned int pdo_fixed_voltage(u32 pdo)
 {
 	return ((pdo >> PDO_FIXED_VOLT_SHIFT) & PDO_VOLT_MASK) * 50;
+}
+
+static inline unsigned int pdo_fixed_current(u32 pdo)
+{
+	return ((pdo >> PDO_FIXED_CURR_SHIFT) & PDO_CURR_MASK) * 10;
 }
 
 static inline unsigned int pdo_min_voltage(u32 pdo)
@@ -347,6 +479,41 @@ static inline unsigned int pdo_pps_apdo_max_current(u32 pdo)
 {
 	return ((pdo >> PDO_PPS_APDO_MAX_CURR_SHIFT) &
 		PDO_PPS_APDO_CURR_MASK) * 50;
+}
+
+static inline unsigned int pdo_epr_avs_apdo_src_peak_current(u32 pdo)
+{
+	return FIELD_GET(PDO_EPR_AVS_APDO_PEAK_CURRENT, pdo);
+}
+
+static inline unsigned int pdo_epr_avs_apdo_min_voltage_mv(u32 pdo)
+{
+	return FIELD_GET(PDO_EPR_AVS_APDO_MIN_VOLT, pdo) * 100;
+}
+
+static inline unsigned int pdo_epr_avs_apdo_max_voltage_mv(u32 pdo)
+{
+	return FIELD_GET(PDO_EPR_AVS_APDO_MIN_VOLT, pdo) * 100;
+}
+
+static inline unsigned int pdo_epr_avs_apdo_pdp_w(u32 pdo)
+{
+	return FIELD_GET(PDO_EPR_AVS_APDO_PDP, pdo);
+}
+
+static inline unsigned int pdo_spr_avs_apdo_src_peak_current(u32 pdo)
+{
+	return FIELD_GET(PDO_SPR_AVS_APDO_PEAK_CURRENT, pdo);
+}
+
+static inline unsigned int pdo_spr_avs_apdo_9v_to_15v_max_current_ma(u32 pdo)
+{
+	return FIELD_GET(PDO_SPR_AVS_APDO_9V_TO_15V_MAX_CURR, pdo) * 10;
+}
+
+static inline unsigned int pdo_spr_avs_apdo_15v_to_20v_max_current_ma(u32 pdo)
+{
+	return FIELD_GET(PDO_SPR_AVS_APDO_15V_TO_20V_MAX_CURR, pdo) * 10;
 }
 
 /* RDO: Request Data Object */
@@ -426,20 +593,66 @@ static inline unsigned int rdo_max_power(u32 rdo)
 	return ((rdo >> RDO_BATT_MAX_PWR_SHIFT) & RDO_PWR_MASK) * 250;
 }
 
+/* Enter_USB Data Object */
+#define EUDO_USB_MODE_MASK		GENMASK(30, 28)
+#define EUDO_USB_MODE_SHIFT		28
+#define   EUDO_USB_MODE_USB2		0
+#define   EUDO_USB_MODE_USB3		1
+#define   EUDO_USB_MODE_USB4		2
+#define EUDO_USB4_DRD			BIT(26)
+#define EUDO_USB3_DRD			BIT(25)
+#define EUDO_CABLE_SPEED_MASK		GENMASK(23, 21)
+#define EUDO_CABLE_SPEED_SHIFT		21
+#define   EUDO_CABLE_SPEED_USB2		0
+#define   EUDO_CABLE_SPEED_USB3_GEN1	1
+#define   EUDO_CABLE_SPEED_USB4_GEN2	2
+#define   EUDO_CABLE_SPEED_USB4_GEN3	3
+#define EUDO_CABLE_TYPE_MASK		GENMASK(20, 19)
+#define EUDO_CABLE_TYPE_SHIFT		19
+#define   EUDO_CABLE_TYPE_PASSIVE	0
+#define   EUDO_CABLE_TYPE_RE_TIMER	1
+#define   EUDO_CABLE_TYPE_RE_DRIVER	2
+#define   EUDO_CABLE_TYPE_OPTICAL	3
+#define EUDO_CABLE_CURRENT_MASK		GENMASK(18, 17)
+#define EUDO_CABLE_CURRENT_SHIFT	17
+#define   EUDO_CABLE_CURRENT_NOTSUPP	0
+#define   EUDO_CABLE_CURRENT_3A		2
+#define   EUDO_CABLE_CURRENT_5A		3
+#define EUDO_PCIE_SUPPORT		BIT(16)
+#define EUDO_DP_SUPPORT			BIT(15)
+#define EUDO_TBT_SUPPORT		BIT(14)
+#define EUDO_HOST_PRESENT		BIT(13)
+
+/*
+ * Request Message Data Object (PD Revision 3.1+ only)
+ * --------
+ * <31:28> :: Revision Major
+ * <27:24> :: Revision Minor
+ * <23:20> :: Version Major
+ * <19:16> :: Version Minor
+ * <15:0>  :: Reserved, Shall be set to zero
+ */
+
+#define RMDO(rev_maj, rev_min, ver_maj, ver_min)			\
+	(((rev_maj) & 0xf) << 28 | ((rev_min) & 0xf) << 24 |		\
+	 ((ver_maj) & 0xf) << 20 | ((ver_min) & 0xf) << 16)
+
 /* USB PD timers and counters */
 #define PD_T_NO_RESPONSE	5000	/* 4.5 - 5.5 seconds */
 #define PD_T_DB_DETECT		10000	/* 10 - 15 seconds */
 #define PD_T_SEND_SOURCE_CAP	150	/* 100 - 200 ms */
 #define PD_T_SENDER_RESPONSE	60	/* 24 - 30 ms, relaxed */
+#define PD_T_RECEIVER_RESPONSE	15	/* 15ms max */
 #define PD_T_SOURCE_ACTIVITY	45
 #define PD_T_SINK_ACTIVITY	135
-#define PD_T_SINK_WAIT_CAP	240
+#define PD_T_SINK_WAIT_CAP	310	/* 310 - 620 ms */
 #define PD_T_PS_TRANSITION	500
 #define PD_T_SRC_TRANSITION	35
 #define PD_T_DRP_SNK		40
 #define PD_T_DRP_SRC		30
 #define PD_T_PS_SOURCE_OFF	920
 #define PD_T_PS_SOURCE_ON	480
+#define PD_T_PS_SOURCE_ON_PRS	450	/* 390 - 480ms */
 #define PD_T_PS_HARD_RESET	30
 #define PD_T_SRC_RECOVER	760
 #define PD_T_SRC_RECOVER_MAX	1000
@@ -448,16 +661,67 @@ static inline unsigned int rdo_max_power(u32 rdo)
 #define PD_T_VCONN_SOURCE_ON	100
 #define PD_T_SINK_REQUEST	100	/* 100 ms minimum */
 #define PD_T_ERROR_RECOVERY	100	/* minimum 25 is insufficient */
-#define PD_T_SRCSWAPSTDBY      625     /* Maximum of 650ms */
-#define PD_T_NEWSRC            250     /* Maximum of 275ms */
+#define PD_T_SRCSWAPSTDBY	625	/* Maximum of 650ms */
+#define PD_T_NEWSRC		250	/* Maximum of 275ms */
+#define PD_T_SWAP_SRC_START	20	/* Minimum of 20ms */
+#define PD_T_BIST_CONT_MODE	50	/* 30 - 60 ms */
+#define PD_T_SINK_TX		16	/* 16 - 20 ms */
+#define PD_T_CHUNK_NOT_SUPP	42	/* 40 - 50 ms */
+#define PD_T_VCONN_STABLE	50
 
 #define PD_T_DRP_TRY		100	/* 75 - 150 ms */
 #define PD_T_DRP_TRYWAIT	600	/* 400 - 800 ms */
 
 #define PD_T_CC_DEBOUNCE	200	/* 100 - 200 ms */
 #define PD_T_PD_DEBOUNCE	20	/* 10 - 20 ms */
+#define PD_T_TRY_CC_DEBOUNCE	15	/* 10 - 20 ms */
 
 #define PD_N_CAPS_COUNT		(PD_T_NO_RESPONSE / PD_T_SEND_SOURCE_CAP)
 #define PD_N_HARD_RESET_COUNT	2
+
+#define PD_P_SNK_STDBY_MW	2500	/* 2500 mW */
+
+#define PD_I_SNK_STBY_MA		500	/* 500 mA */
+
+#define PD_T_AVS_SRC_TRANS_SMALL	50	/* 50 ms */
+#define PD_T_AVS_SRC_TRANS_LARGE	700	/* 700 ms */
+
+#if IS_ENABLED(CONFIG_TYPEC)
+
+struct usb_power_delivery;
+
+/**
+ * usb_power_delivery_desc - USB Power Delivery Descriptor
+ * @revision: USB Power Delivery Specification Revision
+ * @version: USB Power Delivery Specicication Version - optional
+ */
+struct usb_power_delivery_desc {
+	u16 revision;
+	u16 version;
+};
+
+/**
+ * usb_power_delivery_capabilities_desc - Description of USB Power Delivery Capabilities Message
+ * @pdo: The Power Data Objects in the Capability Message
+ * @role: Power role of the capabilities
+ */
+struct usb_power_delivery_capabilities_desc {
+	u32 pdo[PDO_MAX_OBJECTS];
+	enum typec_role role;
+};
+
+struct usb_power_delivery_capabilities *
+usb_power_delivery_register_capabilities(struct usb_power_delivery *pd,
+					 struct usb_power_delivery_capabilities_desc *desc);
+void usb_power_delivery_unregister_capabilities(struct usb_power_delivery_capabilities *cap);
+
+struct usb_power_delivery *usb_power_delivery_register(struct device *parent,
+						       struct usb_power_delivery_desc *desc);
+void usb_power_delivery_unregister(struct usb_power_delivery *pd);
+
+int usb_power_delivery_link_device(struct usb_power_delivery *pd, struct device *dev);
+void usb_power_delivery_unlink_device(struct usb_power_delivery *pd, struct device *dev);
+
+#endif /* CONFIG_TYPEC */
 
 #endif /* __LINUX_USB_PD_H */

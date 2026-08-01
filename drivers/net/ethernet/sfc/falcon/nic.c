@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /****************************************************************************
  * Driver for Solarflare network controllers and boards
  * Copyright 2005-2006 Fen Systems Ltd.
  * Copyright 2006-2013 Solarflare Communications Inc.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation, incorporated herein by reference.
  */
 
 #include <linux/bitops.h>
@@ -33,8 +30,8 @@
 int ef4_nic_alloc_buffer(struct ef4_nic *efx, struct ef4_buffer *buffer,
 			 unsigned int len, gfp_t gfp_flags)
 {
-	buffer->addr = dma_zalloc_coherent(&efx->pci_dev->dev, len,
-					   &buffer->dma_addr, gfp_flags);
+	buffer->addr = dma_alloc_coherent(&efx->pci_dev->dev, len,
+					  &buffer->dma_addr, gfp_flags);
 	if (!buffer->addr)
 		return -ENOMEM;
 	buffer->len = len;
@@ -447,18 +444,15 @@ void ef4_nic_get_regs(struct ef4_nic *efx, void *buf)
  * bits in the first @count bits of @mask for which a name is defined.
  */
 size_t ef4_nic_describe_stats(const struct ef4_hw_stat_desc *desc, size_t count,
-			      const unsigned long *mask, u8 *names)
+			      const unsigned long *mask, u8 **names)
 {
 	size_t visible = 0;
 	size_t index;
 
 	for_each_set_bit(index, mask, count) {
 		if (desc[index].name) {
-			if (names) {
-				strlcpy(names, desc[index].name,
-					ETH_GSTRING_LEN);
-				names += ETH_GSTRING_LEN;
-			}
+			if (names)
+				ethtool_puts(names, desc[index].name);
 			++visible;
 		}
 	}
@@ -513,15 +507,4 @@ void ef4_nic_update_stats(const struct ef4_hw_stat_desc *desc, size_t count,
 				stats[index] = val;
 		}
 	}
-}
-
-void ef4_nic_fix_nodesc_drop_stat(struct ef4_nic *efx, u64 *rx_nodesc_drops)
-{
-	/* if down, or this is the first update after coming up */
-	if (!(efx->net_dev->flags & IFF_UP) || !efx->rx_nodesc_drops_prev_state)
-		efx->rx_nodesc_drops_while_down +=
-			*rx_nodesc_drops - efx->rx_nodesc_drops_total;
-	efx->rx_nodesc_drops_total = *rx_nodesc_drops;
-	efx->rx_nodesc_drops_prev_state = !!(efx->net_dev->flags & IFF_UP);
-	*rx_nodesc_drops -= efx->rx_nodesc_drops_while_down;
 }

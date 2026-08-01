@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2011-12 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/interrupt.h>
@@ -116,8 +112,9 @@ init_onchip_IRQ(struct device_node *intc, struct device_node *parent)
 	if (parent)
 		panic("DeviceTree incore intc not a root irq controller\n");
 
-	root_domain = irq_domain_add_linear(intc, NR_CPU_IRQS,
-					    &arc_intc_domain_ops, NULL);
+	root_domain = irq_domain_create_linear(of_fwnode_handle(intc),
+					       NR_CPU_IRQS,
+					       &arc_intc_domain_ops, NULL);
 	if (!root_domain)
 		panic("root irq domain not avail\n");
 
@@ -125,7 +122,7 @@ init_onchip_IRQ(struct device_node *intc, struct device_node *parent)
 	 * Needed for primary domain lookup to succeed
 	 * This is a primary irqchip, and can never have a parent
 	 */
-	irq_set_default_host(root_domain);
+	irq_set_default_domain(root_domain);
 
 	return 0;
 }
@@ -146,7 +143,7 @@ IRQCHIP_DECLARE(arc_intc, "snps,arc700-intc", init_onchip_IRQ);
  *    Time hard-ISR, timer_interrupt( ) calls spin_unlock_irq several times.
  *    Here local_irq_enable( ) shd not re-enable lower priority interrupts
  * -If called from soft-ISR, it must re-enable all interrupts
- *    soft ISR are low prioity jobs which can be very slow, thus all IRQs
+ *    soft ISR are low priority jobs which can be very slow, thus all IRQs
  *    must be enabled while they run.
  *    Now hardware context wise we may still be in L2 ISR (not done rtie)
  *    still we must re-enable both L1 and L2 IRQs

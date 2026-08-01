@@ -54,8 +54,8 @@
 #include <asm/xen/hypervisor.h>
 
 static struct mc_info g_mi;
-static struct mcinfo_logical_cpu *g_physinfo;
-static uint32_t ncpus;
+static struct mcinfo_logical_cpu *g_physinfo __ro_after_init;
+static uint32_t ncpus __ro_after_init;
 
 static DEFINE_MUTEX(mcelog_lock);
 
@@ -165,9 +165,7 @@ static long xen_mce_chrdev_ioctl(struct file *f, unsigned int cmd,
 	case MCE_GETCLEAR_FLAGS: {
 		unsigned flags;
 
-		do {
-			flags = xen_mcelog.flags;
-		} while (cmpxchg(&xen_mcelog.flags, flags, 0) != flags);
+		flags = xchg(&xen_mcelog.flags, 0);
 
 		return put_user(flags, p);
 	}
@@ -182,10 +180,9 @@ static const struct file_operations xen_mce_chrdev_ops = {
 	.read			= xen_mce_chrdev_read,
 	.poll			= xen_mce_chrdev_poll,
 	.unlocked_ioctl		= xen_mce_chrdev_ioctl,
-	.llseek			= no_llseek,
 };
 
-static struct miscdevice xen_mce_chrdev_device = {
+static struct miscdevice xen_mce_chrdev_device __ro_after_init = {
 	MISC_MCELOG_MINOR,
 	"mcelog",
 	&xen_mce_chrdev_ops,
@@ -222,7 +219,7 @@ static int convert_log(struct mc_info *mi)
 	struct mcinfo_global *mc_global;
 	struct mcinfo_bank *mc_bank;
 	struct xen_mce m;
-	uint32_t i;
+	unsigned int i, j;
 
 	mic = NULL;
 	x86_mcinfo_lookup(&mic, mi, MC_TYPE_GLOBAL);
@@ -248,7 +245,17 @@ static int convert_log(struct mc_info *mi)
 	m.socketid = g_physinfo[i].mc_chipid;
 	m.cpu = m.extcpu = g_physinfo[i].mc_cpunr;
 	m.cpuvendor = (__u8)g_physinfo[i].mc_vendor;
-	m.mcgcap = g_physinfo[i].mc_msrvalues[__MC_MSR_MCGCAP].value;
+	for (j = 0; j < g_physinfo[i].mc_nmsrvals; ++j)
+		switch (g_physinfo[i].mc_msrvalues[j].reg) {
+		case MSR_IA32_MCG_CAP:
+			m.mcgcap = g_physinfo[i].mc_msrvalues[j].value;
+			break;
+
+		case MSR_PPIN:
+		case MSR_AMD_PPIN:
+			m.ppin = g_physinfo[i].mc_msrvalues[j].value;
+			break;
+		}
 
 	mic = NULL;
 	x86_mcinfo_lookup(&mic, mi, MC_TYPE_BANK);
@@ -288,7 +295,6 @@ static int mc_queue_handle(uint32_t flags)
 	int ret = 0;
 
 	mc_op.cmd = XEN_MC_fetch;
-	mc_op.interface_version = XEN_MCA_INTERFACE_VERSION;
 	set_xen_guest_handle(mc_op.u.mc_fetch.data, &g_mi);
 	do {
 		mc_op.u.mc_fetch.flags = flags;
@@ -358,7 +364,6 @@ static int bind_virq_for_mce(void)
 
 	/* Fetch physical CPU Numbers */
 	mc_op.cmd = XEN_MC_physcpuinfo;
-	mc_op.interface_version = XEN_MCA_INTERFACE_VERSION;
 	set_xen_guest_handle(mc_op.u.mc_physcpuinfo.info, g_physinfo);
 	ret = HYPERVISOR_mca(&mc_op);
 	if (ret) {
@@ -368,8 +373,7 @@ static int bind_virq_for_mce(void)
 
 	/* Fetch each CPU Physical Info for later reference*/
 	ncpus = mc_op.u.mc_physcpuinfo.ncpus;
-	g_physinfo = kcalloc(ncpus, sizeof(struct mcinfo_logical_cpu),
-			     GFP_KERNEL);
+	g_physinfo = kzalloc_objs(struct mcinfo_logical_cpu, ncpus);
 	if (!g_physinfo)
 		return -ENOMEM;
 	set_xen_guest_handle(mc_op.u.mc_physcpuinfo.info, g_physinfo);

@@ -6,7 +6,7 @@
  *	Copyright (C) 1999 - 2004
  *	    Greg Kroah-Hartman (greg@kroah.com)
  *
- * See Documentation/usb/usb-serial.txt for more information on using this
+ * See Documentation/usb/usb-serial.rst for more information on using this
  * driver
  *
  */
@@ -15,12 +15,8 @@
 #include <linux/errno.h>
 #include <linux/slab.h>
 #include <linux/tty.h>
-#include <linux/tty_driver.h>
-#include <linux/tty_flip.h>
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/spinlock.h>
-#include <linux/uaccess.h>
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
 #include <linux/usb/cdc.h>
@@ -161,7 +157,6 @@ MODULE_DEVICE_TABLE(usb, id_table_combined);
    and Palm 4.0 devices */
 static struct usb_serial_driver handspring_device = {
 	.driver = {
-		.owner =	THIS_MODULE,
 		.name =		"visor",
 	},
 	.description =		"Handspring Visor / Palm OS",
@@ -180,7 +175,6 @@ static struct usb_serial_driver handspring_device = {
 /* All of the device info needed for the Clie UX50, TH55 Palm 5.0 devices */
 static struct usb_serial_driver clie_5_device = {
 	.driver = {
-		.owner =	THIS_MODULE,
 		.name =		"clie_5",
 	},
 	.description =		"Sony Clie 5.0",
@@ -200,7 +194,6 @@ static struct usb_serial_driver clie_5_device = {
 /* device info for the Sony Clie OS version 3.5 */
 static struct usb_serial_driver clie_3_5_device = {
 	.driver = {
-		.owner =	THIS_MODULE,
 		.name =		"clie_3.5",
 	},
 	.description =		"Sony Clie 3.5",

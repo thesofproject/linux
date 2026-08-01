@@ -1,12 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * O(1) TX queue with built-in allocator for ST-Ericsson CW1200 drivers
  *
  * Copyright (c) 2010, ST-Ericsson
  * Author: Dmitry Tarnyagin <dmitry.tarnyagin@lockless.no>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef CW1200_QUEUE_H_INCLUDED
@@ -88,7 +85,6 @@ int cw1200_queue_get(struct cw1200_queue *queue,
 		     struct ieee80211_tx_info **tx_info,
 		     const struct cw1200_txpriv **txpriv);
 int cw1200_queue_requeue(struct cw1200_queue *queue, u32 packet_id);
-int cw1200_queue_requeue_all(struct cw1200_queue *queue);
 int cw1200_queue_remove(struct cw1200_queue *queue,
 			u32 packet_id);
 int cw1200_queue_get_skb(struct cw1200_queue *queue, u32 packet_id,

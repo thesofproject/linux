@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) Sistina Software, Inc.  1997-2003 All rights reserved.
  * Copyright (C) 2004-2006 Red Hat, Inc.  All rights reserved.
- *
- * This copyrighted material is made available to anyone wishing to use,
- * modify, copy, or redistribute it subject to the terms and conditions
- * of the GNU General Public License version 2.
  */
 
 #ifndef __UTIL_DOT_H__
@@ -39,46 +36,54 @@ do { \
 } while (0)
 
 
-int gfs2_assert_withdraw_i(struct gfs2_sbd *sdp, char *assertion,
-			   const char *function, char *file, unsigned int line);
+void gfs2_assert_withdraw_i(struct gfs2_sbd *sdp, char *assertion,
+			    const char *function, char *file, unsigned int line);
 
 #define gfs2_assert_withdraw(sdp, assertion) \
-((likely(assertion)) ? 0 : gfs2_assert_withdraw_i((sdp), #assertion, \
-					__func__, __FILE__, __LINE__))
+	({ \
+		bool _bool = (assertion); \
+		if (unlikely(!_bool)) \
+			gfs2_assert_withdraw_i((sdp), #assertion, \
+					__func__, __FILE__, __LINE__); \
+		!_bool; \
+	})
 
-
-int gfs2_assert_warn_i(struct gfs2_sbd *sdp, char *assertion,
-		       const char *function, char *file, unsigned int line);
+void gfs2_assert_warn_i(struct gfs2_sbd *sdp, char *assertion,
+			const char *function, char *file, unsigned int line);
 
 #define gfs2_assert_warn(sdp, assertion) \
-((likely(assertion)) ? 0 : gfs2_assert_warn_i((sdp), #assertion, \
-					__func__, __FILE__, __LINE__))
+	({ \
+		bool _bool = (assertion); \
+		if (unlikely(!_bool)) \
+			gfs2_assert_warn_i((sdp), #assertion, \
+					__func__, __FILE__, __LINE__); \
+		!_bool; \
+	})
 
-
-int gfs2_consist_i(struct gfs2_sbd *sdp, int cluster_wide,
-		   const char *function, char *file, unsigned int line);
+void gfs2_consist_i(struct gfs2_sbd *sdp,
+		    const char *function, char *file, unsigned int line);
 
 #define gfs2_consist(sdp) \
-gfs2_consist_i((sdp), 0, __func__, __FILE__, __LINE__)
+gfs2_consist_i((sdp), __func__, __FILE__, __LINE__)
 
 
-int gfs2_consist_inode_i(struct gfs2_inode *ip, int cluster_wide,
-			 const char *function, char *file, unsigned int line);
+void gfs2_consist_inode_i(struct gfs2_inode *ip,
+			  const char *function, char *file, unsigned int line);
 
 #define gfs2_consist_inode(ip) \
-gfs2_consist_inode_i((ip), 0, __func__, __FILE__, __LINE__)
+gfs2_consist_inode_i((ip), __func__, __FILE__, __LINE__)
 
 
-int gfs2_consist_rgrpd_i(struct gfs2_rgrpd *rgd, int cluster_wide,
-			 const char *function, char *file, unsigned int line);
+void gfs2_consist_rgrpd_i(struct gfs2_rgrpd *rgd,
+			  const char *function, char *file, unsigned int line);
 
 #define gfs2_consist_rgrpd(rgd) \
-gfs2_consist_rgrpd_i((rgd), 0, __func__, __FILE__, __LINE__)
+gfs2_consist_rgrpd_i((rgd), __func__, __FILE__, __LINE__)
 
 
-int gfs2_meta_check_ii(struct gfs2_sbd *sdp, struct buffer_head *bh,
-		       const char *type, const char *function,
-		       char *file, unsigned int line);
+void gfs2_meta_check_ii(struct gfs2_sbd *sdp, struct buffer_head *bh,
+			const char *function,
+			char *file, unsigned int line);
 
 static inline int gfs2_meta_check(struct gfs2_sbd *sdp,
 				    struct buffer_head *bh)
@@ -86,17 +91,17 @@ static inline int gfs2_meta_check(struct gfs2_sbd *sdp,
 	struct gfs2_meta_header *mh = (struct gfs2_meta_header *)bh->b_data;
 	u32 magic = be32_to_cpu(mh->mh_magic);
 	if (unlikely(magic != GFS2_MAGIC)) {
-		pr_err("Magic number missing at %llu\n",
+		fs_err(sdp, "Magic number missing at %llu\n",
 		       (unsigned long long)bh->b_blocknr);
 		return -EIO;
 	}
 	return 0;
 }
 
-int gfs2_metatype_check_ii(struct gfs2_sbd *sdp, struct buffer_head *bh,
-			   u16 type, u16 t,
-			   const char *function,
-			   char *file, unsigned int line);
+void gfs2_metatype_check_ii(struct gfs2_sbd *sdp, struct buffer_head *bh,
+			    u16 type, u16 t,
+			    const char *function,
+			    char *file, unsigned int line);
 
 static inline int gfs2_metatype_check_i(struct gfs2_sbd *sdp,
 					struct buffer_head *bh,
@@ -107,12 +112,16 @@ static inline int gfs2_metatype_check_i(struct gfs2_sbd *sdp,
 	struct gfs2_meta_header *mh = (struct gfs2_meta_header *)bh->b_data;
 	u32 magic = be32_to_cpu(mh->mh_magic);
 	u16 t = be32_to_cpu(mh->mh_type);
-	if (unlikely(magic != GFS2_MAGIC))
-		return gfs2_meta_check_ii(sdp, bh, "magic number", function,
-					  file, line);
-        if (unlikely(t != type))
-		return gfs2_metatype_check_ii(sdp, bh, type, t, function,
-					      file, line);
+	if (unlikely(magic != GFS2_MAGIC)) {
+		gfs2_meta_check_ii(sdp, bh, function,
+				   file, line);
+		return -EIO;
+	}
+        if (unlikely(t != type)) {
+		gfs2_metatype_check_ii(sdp, bh, type, t, function,
+				       file, line);
+		return -EIO;
+	}
 	return 0;
 }
 
@@ -129,18 +138,23 @@ static inline void gfs2_metatype_set(struct buffer_head *bh, u16 type,
 }
 
 
-int gfs2_io_error_i(struct gfs2_sbd *sdp, const char *function,
-		    char *file, unsigned int line);
+void gfs2_io_error_i(struct gfs2_sbd *sdp, const char *function,
+		     char *file, unsigned int line);
+
+int check_journal_clean(struct gfs2_sbd *sdp, struct gfs2_jdesc *jd,
+		        bool verbose);
+int gfs2_freeze_lock_shared(struct gfs2_sbd *sdp);
+void gfs2_freeze_unlock(struct gfs2_sbd *sdp);
 
 #define gfs2_io_error(sdp) \
-gfs2_io_error_i((sdp), __func__, __FILE__, __LINE__);
+gfs2_io_error_i((sdp), __func__, __FILE__, __LINE__)
 
 
-int gfs2_io_error_bh_i(struct gfs2_sbd *sdp, struct buffer_head *bh,
-		       const char *function, char *file, unsigned int line);
+void gfs2_io_error_bh_i(struct gfs2_sbd *sdp, struct buffer_head *bh,
+			const char *function, char *file, unsigned int line);
 
 #define gfs2_io_error_bh(sdp, bh) \
-gfs2_io_error_bh_i((sdp), (bh), __func__, __FILE__, __LINE__);
+gfs2_io_error_bh_i((sdp), (bh), __func__, __FILE__, __LINE__)
 
 
 extern struct kmem_cache *gfs2_glock_cachep;
@@ -150,6 +164,7 @@ extern struct kmem_cache *gfs2_bufdata_cachep;
 extern struct kmem_cache *gfs2_rgrpd_cachep;
 extern struct kmem_cache *gfs2_quotad_cachep;
 extern struct kmem_cache *gfs2_qadata_cachep;
+extern struct kmem_cache *gfs2_trans_cachep;
 extern mempool_t *gfs2_page_pool;
 extern struct workqueue_struct *gfs2_control_wq;
 
@@ -163,10 +178,22 @@ static inline unsigned int gfs2_tune_get_i(struct gfs2_tune *gt,
 	return x;
 }
 
+/**
+ * gfs2_withdrawn - test whether the file system is withdrawn
+ * @sdp: the superblock
+ */
+static inline bool gfs2_withdrawn(struct gfs2_sbd *sdp)
+{
+	return unlikely(test_bit(SDF_WITHDRAWN, &sdp->sd_flags));
+}
+
 #define gfs2_tune_get(sdp, field) \
 gfs2_tune_get_i(&(sdp)->sd_tune, &(sdp)->sd_tune.field)
 
 __printf(2, 3)
-int gfs2_lm_withdraw(struct gfs2_sbd *sdp, const char *fmt, ...);
+void gfs2_lm(struct gfs2_sbd *sdp, const char *fmt, ...);
+
+void gfs2_withdraw_func(struct work_struct *work);
+void gfs2_withdraw(struct gfs2_sbd *sdp);
 
 #endif /* __UTIL_DOT_H__ */

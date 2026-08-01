@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *
  *		SNMP MIB entries for the IP subsystem.
@@ -8,12 +9,6 @@
  *		be silly as SNMP is a pain in the backside in places). We do
  *		however need to collect the MIB statistics and export them
  *		out of /proc (eventually)
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  */
  
 #ifndef _SNMP_H
@@ -39,11 +34,6 @@ struct snmp_mib {
 #define SNMP_MIB_ITEM(_name,_entry)	{	\
 	.name = _name,				\
 	.entry = _entry,			\
-}
-
-#define SNMP_MIB_SENTINEL {	\
-	.name = NULL,		\
-	.entry = 0,		\
 }
 
 /*
@@ -116,6 +106,12 @@ struct linux_xfrm_mib {
 	unsigned long	mibs[LINUX_MIB_XFRMMAX];
 };
 
+/* Linux TLS */
+#define LINUX_MIB_TLSMAX	__LINUX_MIB_TLSMAX
+struct linux_tls_mib {
+	unsigned long	mibs[LINUX_MIB_TLSMAX];
+};
+
 #define DEFINE_SNMP_STAT(type, name)	\
 	__typeof__(type) __percpu *name
 #define DEFINE_SNMP_STAT_ATOMIC(type, name)	\
@@ -158,7 +154,7 @@ struct linux_xfrm_mib {
 
 #define __SNMP_ADD_STATS64(mib, field, addend) 				\
 	do {								\
-		__typeof__(*mib) *ptr = raw_cpu_ptr(mib);		\
+		TYPEOF_UNQUAL(*mib) *ptr = raw_cpu_ptr(mib);		\
 		u64_stats_update_begin(&ptr->syncp);			\
 		ptr->mibs[field] += addend;				\
 		u64_stats_update_end(&ptr->syncp);			\
@@ -175,8 +171,7 @@ struct linux_xfrm_mib {
 #define SNMP_INC_STATS64(mib, field) SNMP_ADD_STATS64(mib, field, 1)
 #define __SNMP_UPD_PO_STATS64(mib, basefield, addend)			\
 	do {								\
-		__typeof__(*mib) *ptr;				\
-		ptr = raw_cpu_ptr((mib));				\
+		TYPEOF_UNQUAL(*mib) *ptr = raw_cpu_ptr(mib);		\
 		u64_stats_update_begin(&ptr->syncp);			\
 		ptr->mibs[basefield##PKTS]++;				\
 		ptr->mibs[basefield##OCTETS] += addend;			\

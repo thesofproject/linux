@@ -106,13 +106,6 @@ static int init_display(struct fbtft_par *par)
 	return 0;
 }
 
-static void set_addr_win(struct fbtft_par *par, int xs, int ys, int xe, int ye)
-{
-	write_reg(par, MIPI_DCS_SET_COLUMN_ADDRESS, 0x00, xs, 0x00, xe);
-	write_reg(par, MIPI_DCS_SET_PAGE_ADDRESS, 0x00, ys, 0x00, ye);
-	write_reg(par, MIPI_DCS_WRITE_MEMORY_START);
-}
-
 static int set_var(struct fbtft_par *par)
 {
 	/* MADCTL - Memory data access control */
@@ -151,7 +144,7 @@ static int set_var(struct fbtft_par *par)
 #define CURVE(num, idx)  curves[(num) * par->gamma.num_values + (idx)]
 static int set_gamma(struct fbtft_par *par, u32 *curves)
 {
-	unsigned long mask[] = {
+	static const unsigned long mask[] = {
 		0x0f, 0x0f, 0x1f, 0x0f, 0x0f, 0x0f, 0x1f, 0x07, 0x07, 0x07,
 		0x07, 0x07, 0x07, 0x03, 0x03, 0x0f, 0x0f, 0x1f, 0x0f, 0x0f,
 		0x0f, 0x1f, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x00, 0x00,
@@ -207,7 +200,6 @@ static struct fbtft_display display = {
 	.gamma = DEFAULT_GAMMA,
 	.fbtftops = {
 		.init_display = init_display,
-		.set_addr_win = set_addr_win,
 		.set_var = set_var,
 		.set_gamma = set_gamma,
 	},

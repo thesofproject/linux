@@ -1,14 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *      uvc_debugfs.c --  USB Video Class driver - Debugging support
  *
  *      Copyright (C) 2011
  *          Laurent Pinchart (laurent.pinchart@ideasonboard.com)
- *
- *      This program is free software; you can redistribute it and/or modify
- *      it under the terms of the GNU General Public License as published by
- *      the Free Software Foundation; either version 2 of the License, or
- *      (at your option) any later version.
- *
  */
 
 #include <linux/module.h>
@@ -34,7 +29,7 @@ static int uvc_debugfs_stats_open(struct inode *inode, struct file *file)
 	struct uvc_streaming *stream = inode->i_private;
 	struct uvc_debugfs_buffer *buf;
 
-	buf = kmalloc(sizeof(*buf), GFP_KERNEL);
+	buf = kmalloc_obj(*buf);
 	if (buf == NULL)
 		return -ENOMEM;
 
@@ -64,7 +59,6 @@ static int uvc_debugfs_stats_release(struct inode *inode, struct file *file)
 static const struct file_operations uvc_debugfs_stats_fops = {
 	.owner = THIS_MODULE,
 	.open = uvc_debugfs_stats_open,
-	.llseek = no_llseek,
 	.read = uvc_debugfs_stats_read,
 	.release = uvc_debugfs_stats_release,
 };
@@ -78,56 +72,33 @@ static struct dentry *uvc_debugfs_root_dir;
 void uvc_debugfs_init_stream(struct uvc_streaming *stream)
 {
 	struct usb_device *udev = stream->dev->udev;
-	struct dentry *dent;
-	char dir_name[32];
+	char dir_name[33];
 
 	if (uvc_debugfs_root_dir == NULL)
 		return;
 
-	sprintf(dir_name, "%u-%u", udev->bus->busnum, udev->devnum);
+	snprintf(dir_name, sizeof(dir_name), "%u-%u-%u", udev->bus->busnum,
+		 udev->devnum, stream->intfnum);
 
-	dent = debugfs_create_dir(dir_name, uvc_debugfs_root_dir);
-	if (IS_ERR_OR_NULL(dent)) {
-		uvc_printk(KERN_INFO, "Unable to create debugfs %s "
-			   "directory.\n", dir_name);
-		return;
-	}
+	stream->debugfs_dir = debugfs_create_dir(dir_name,
+						 uvc_debugfs_root_dir);
 
-	stream->debugfs_dir = dent;
-
-	dent = debugfs_create_file("stats", 0444, stream->debugfs_dir,
-				   stream, &uvc_debugfs_stats_fops);
-	if (IS_ERR_OR_NULL(dent)) {
-		uvc_printk(KERN_INFO, "Unable to create debugfs stats file.\n");
-		uvc_debugfs_cleanup_stream(stream);
-		return;
-	}
+	debugfs_create_file("stats", 0444, stream->debugfs_dir, stream,
+			    &uvc_debugfs_stats_fops);
 }
 
 void uvc_debugfs_cleanup_stream(struct uvc_streaming *stream)
 {
-	if (stream->debugfs_dir == NULL)
-		return;
-
 	debugfs_remove_recursive(stream->debugfs_dir);
 	stream->debugfs_dir = NULL;
 }
 
 void uvc_debugfs_init(void)
 {
-	struct dentry *dir;
-
-	dir = debugfs_create_dir("uvcvideo", usb_debug_root);
-	if (IS_ERR_OR_NULL(dir)) {
-		uvc_printk(KERN_INFO, "Unable to create debugfs directory\n");
-		return;
-	}
-
-	uvc_debugfs_root_dir = dir;
+	uvc_debugfs_root_dir = debugfs_create_dir("uvcvideo", usb_debug_root);
 }
 
 void uvc_debugfs_cleanup(void)
 {
-	if (uvc_debugfs_root_dir != NULL)
-		debugfs_remove_recursive(uvc_debugfs_root_dir);
+	debugfs_remove_recursive(uvc_debugfs_root_dir);
 }

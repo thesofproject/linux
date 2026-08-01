@@ -1,64 +1,11 @@
-/******************************************************************************
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * The full GNU General Public License is included in this distribution
- * in the file called COPYING.
- *
- * Contact Information:
- *  Intel Linux Wireless <linuxwifi@intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- * BSD LICENSE
- *
- * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *****************************************************************************/
-
+/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
+/*
+ * Copyright (C) 2012-2014, 2018-2025 Intel Corporation
+ * Copyright (C) 2016-2017 Intel Deutschland GmbH
+ */
 #ifndef __iwl_fw_api_tx_h__
 #define __iwl_fw_api_tx_h__
+#include <linux/ieee80211.h>
 
 /**
  * enum iwl_tx_flags - bitmasks for tx_flags in TX command
@@ -73,6 +20,7 @@
  * @TX_CMD_FLG_VHT_NDPA: mark frame is NDPA for VHT beamformer sequence
  * @TX_CMD_FLG_HT_NDPA: mark frame is NDPA for HT beamformer sequence
  * @TX_CMD_FLG_CSI_FDBK2HOST: mark to send feedback to host (only if good CRC)
+ * @TX_CMD_FLG_BT_PRIO_MASK: BT priority value
  * @TX_CMD_FLG_BT_PRIO_POS: the position of the BT priority (bit 11 is ignored
  *	on old firmwares).
  * @TX_CMD_FLG_BT_DIS: disable BT priority for this frame
@@ -104,6 +52,7 @@ enum iwl_tx_flags {
 	TX_CMD_FLG_HT_NDPA		= BIT(9),
 	TX_CMD_FLG_CSI_FDBK2HOST	= BIT(10),
 	TX_CMD_FLG_BT_PRIO_POS		= 11,
+	TX_CMD_FLG_BT_PRIO_MASK		= BIT(11) | BIT(12),
 	TX_CMD_FLG_BT_DIS		= BIT(12),
 	TX_CMD_FLG_SEQ_CTL		= BIT(13),
 	TX_CMD_FLG_MORE_FRAG		= BIT(14),
@@ -127,11 +76,17 @@ enum iwl_tx_flags {
  *	to a secured STA
  * @IWL_TX_FLAGS_HIGH_PRI: high priority frame (like EAPOL) - can affect rate
  *	selection, retry limits and BT kill
+ * @IWL_TX_FLAGS_RTS: firmware used an RTS
+ * @IWL_TX_FLAGS_CTS: firmware used CTS-to-self
  */
 enum iwl_tx_cmd_flags {
 	IWL_TX_FLAGS_CMD_RATE		= BIT(0),
 	IWL_TX_FLAGS_ENCRYPT_DIS	= BIT(1),
 	IWL_TX_FLAGS_HIGH_PRI		= BIT(2),
+	/* Use these flags only from
+	 * TX_FLAGS_BITS_API_S_VER_4 and above */
+	IWL_TX_FLAGS_RTS		= BIT(3),
+	IWL_TX_FLAGS_CTS		= BIT(4),
 }; /* TX_FLAGS_BITS_API_S_VER_3 */
 
 /**
@@ -184,7 +139,7 @@ enum iwl_tx_cmd_sec_ctrl {
 /*
  * TID for non QoS frames - to be written in tid_tspec
  */
-#define IWL_TID_NON_QOS	IWL_MAX_TID_COUNT
+#define IWL_TID_NON_QOS	0
 
 /*
  * Limits on the retransmissions - to be written in {data,rts}_retry_limit
@@ -196,7 +151,7 @@ enum iwl_tx_cmd_sec_ctrl {
 #define IWL_LOW_RETRY_LIMIT			7
 
 /**
- * enum iwl_tx_offload_assist_flags_pos -  set %iwl_tx_cmd offload_assist values
+ * enum iwl_tx_offload_assist_flags_pos -  set %iwl_tx_cmd_v6 offload_assist values
  * @TX_CMD_OFFLD_IP_HDR: offset to start of IP header (in words)
  *	from mac header end. For normal case it is 4 words for SNAP.
  *	note: tx_cmd, mac header and pad are not counted in the offset.
@@ -226,17 +181,17 @@ enum iwl_tx_offload_assist_flags_pos {
 
 /* TODO: complete documentation for try_cnt and btkill_cnt */
 /**
- * struct iwl_tx_cmd - TX command struct to FW
- * ( TX_CMD = 0x1c )
+ * struct iwl_tx_cmd_v6_params - parameters of the TX
+ *
  * @len: in bytes of the payload, see below for details
  * @offload_assist: TX offload configuration
- * @tx_flags: combination of TX_CMD_FLG_*
+ * @tx_flags: combination of TX_CMD_FLG_*, see &enum iwl_tx_flags
  * @scratch: scratch buffer used by the device
  * @rate_n_flags: rate for *all* Tx attempts, if TX_CMD_FLG_STA_RATE_MSK is
  *	cleared. Combination of RATE_MCS_*
  * @sta_id: index of destination station in FW station table
  * @sec_ctl: security control, TX_CMD_SEC_*
- * @initial_rate_index: index into the the rate table for initial TX attempt.
+ * @initial_rate_index: index into the rate table for initial TX attempt.
  *	Applied if TX_CMD_FLG_STA_RATE_MSK is set, normally 0 for data frames.
  * @reserved2: reserved
  * @key: security key
@@ -250,8 +205,6 @@ enum iwl_tx_offload_assist_flags_pos {
  * @tid_tspec: TID/tspec
  * @pm_frame_timeout: PM TX frame timeout
  * @reserved4: reserved
- * @payload: payload (same as @hdr)
- * @hdr: 802.11 header (same as @payload)
  *
  * The byte count (both len and next_frame_len) includes MAC header
  * (24/26/30/32 bytes)
@@ -262,11 +215,8 @@ enum iwl_tx_offload_assist_flags_pos {
  * It does not include post-MAC padding, i.e.,
  * MIC (CCM) 8 bytes, ICV (WEP/TKIP/CKIP) 4 bytes, CRC 4 bytes.
  * Range of len: 14-2342 bytes.
- *
- * After the struct fields the MAC header is placed, plus any padding,
- * and then the actial payload.
  */
-struct iwl_tx_cmd {
+struct iwl_tx_cmd_v6_params {
 	__le16 len;
 	__le16 offload_assist;
 	__le32 tx_flags;
@@ -290,8 +240,20 @@ struct iwl_tx_cmd {
 	u8 tid_tspec;
 	__le16 pm_frame_timeout;
 	__le16 reserved4;
-	u8 payload[0];
-	struct ieee80211_hdr hdr[0];
+} __packed; /* TX_CMD_API_S_VER_6 */
+
+/**
+ * struct iwl_tx_cmd_v6 - TX command struct to FW
+ * ( TX_CMD = 0x1c )
+ * @params: parameters of the TX, see &struct iwl_tx_cmd_v6_tx_params
+ * @hdr: 802.11 header
+ *
+ * After &params, the MAC header is placed, plus any padding,
+ * and then the actual payload.
+ */
+struct iwl_tx_cmd_v6 {
+	struct iwl_tx_cmd_v6_params params;
+	struct ieee80211_hdr hdr[];
 } __packed; /* TX_CMD_API_S_VER_6 */
 
 struct iwl_dram_sec_info {
@@ -301,7 +263,7 @@ struct iwl_dram_sec_info {
 } __packed; /* DRAM_SEC_INFO_API_S_VER_1 */
 
 /**
- * struct iwl_tx_cmd_gen2 - TX command struct to FW for 22000 devices
+ * struct iwl_tx_cmd_v9 - TX command struct to FW for 22000 devices
  * ( TX_CMD = 0x1c )
  * @len: in bytes of the payload, see below for details
  * @offload_assist: TX offload configuration
@@ -311,14 +273,39 @@ struct iwl_dram_sec_info {
  *	cleared. Combination of RATE_MCS_*
  * @hdr: 802.11 header
  */
-struct iwl_tx_cmd_gen2 {
+struct iwl_tx_cmd_v9 {
 	__le16 len;
 	__le16 offload_assist;
 	__le32 flags;
 	struct iwl_dram_sec_info dram_info;
 	__le32 rate_n_flags;
-	struct ieee80211_hdr hdr[0];
-} __packed; /* TX_CMD_API_S_VER_7 */
+	struct ieee80211_hdr hdr[];
+} __packed; /* TX_CMD_API_S_VER_7,
+	       TX_CMD_API_S_VER_9 */
+
+/**
+ * struct iwl_tx_cmd - TX command struct to FW for AX210+ devices
+ * ( TX_CMD = 0x1c )
+ * @len: in bytes of the payload, see below for details
+ * @flags: combination of &enum iwl_tx_cmd_flags
+ * @offload_assist: TX offload configuration
+ * @dram_info: FW internal DRAM storage
+ * @rate_n_flags: rate for *all* Tx attempts, if TX_CMD_FLG_STA_RATE_MSK is
+ *	cleared. Combination of RATE_MCS_*; format depends on version
+ * @reserved: reserved
+ * @hdr: 802.11 header
+ */
+struct iwl_tx_cmd {
+	__le16 len;
+	__le16 flags;
+	__le32 offload_assist;
+	struct iwl_dram_sec_info dram_info;
+	__le32 rate_n_flags;
+	u8 reserved[8];
+	struct ieee80211_hdr hdr[];
+} __packed; /* TX_CMD_API_S_VER_10,
+	     * TX_CMD_API_S_VER_11
+	     */
 
 /*
  * TX response related data
@@ -501,11 +488,11 @@ struct agg_tx_status {
 #define TX_RES_RATE_TABLE_COL_GET(_f) (((_f) & TX_RES_RATE_TABLE_COLOR_MSK) >>\
 				       TX_RES_RATE_TABLE_COLOR_POS)
 
-#define IWL_MVM_TX_RES_GET_TID(_ra_tid) ((_ra_tid) & 0x0f)
-#define IWL_MVM_TX_RES_GET_RA(_ra_tid) ((_ra_tid) >> 4)
+#define IWL_TX_RES_GET_TID(_ra_tid) ((_ra_tid) & 0x0f)
+#define IWL_TX_RES_GET_RA(_ra_tid) ((_ra_tid) >> 4)
 
 /**
- * struct iwl_mvm_tx_resp_v3 - notifies that fw is TXing a packet
+ * struct iwl_tx_resp_v3 - notifies that fw is TXing a packet
  * ( REPLY_TX = 0x1c )
  * @frame_count: 1 no aggregation, >1 aggregation
  * @bt_kill_count: num of times blocked by bluetooth (unused for agg)
@@ -536,7 +523,7 @@ struct agg_tx_status {
  * After the array of statuses comes the SSN of the SCD. Look at
  * %iwl_mvm_get_scd_ssn for more details.
  */
-struct iwl_mvm_tx_resp_v3 {
+struct iwl_tx_resp_v3 {
 	u8 frame_count;
 	u8 bt_kill_count;
 	u8 failure_rts;
@@ -562,14 +549,14 @@ struct iwl_mvm_tx_resp_v3 {
 } __packed; /* TX_RSP_API_S_VER_3 */
 
 /**
- * struct iwl_mvm_tx_resp - notifies that fw is TXing a packet
+ * struct iwl_tx_resp - notifies that fw is TXing a packet
  * ( REPLY_TX = 0x1c )
  * @frame_count: 1 no aggregation, >1 aggregation
  * @bt_kill_count: num of times blocked by bluetooth (unused for agg)
  * @failure_rts: num of failures due to unsuccessful RTS
  * @failure_frame: num failures due to no ACK (unused for agg)
  * @initial_rate: for non-agg: rate of the successful Tx. For agg: rate of the
- *	Tx of all the batch. RATE_MCS_*
+ *	Tx of all the batch. RATE_MCS_*; format depends on command version
  * @wireless_media_time: for non-agg: RTS + CTS + frame tx attempts time + ACK.
  *	for agg: RTS + CTS + aggregation tx time + block-ack time.
  *	in usec.
@@ -594,7 +581,7 @@ struct iwl_mvm_tx_resp_v3 {
  * After the array of statuses comes the SSN of the SCD. Look at
  * %iwl_mvm_get_scd_ssn for more details.
  */
-struct iwl_mvm_tx_resp {
+struct iwl_tx_resp {
 	u8 frame_count;
 	u8 bt_kill_count;
 	u8 failure_rts;
@@ -619,7 +606,11 @@ struct iwl_mvm_tx_resp {
 	__le16 tx_queue;
 	__le16 reserved2;
 	struct agg_tx_status status;
-} __packed; /* TX_RSP_API_S_VER_6 */
+} __packed; /* TX_RSP_API_S_VER_6,
+	     * TX_RSP_API_S_VER_7,
+	     * TX_RSP_API_S_VER_8,
+	     * TX_RSP_API_S_VER_9
+	     */
 
 /**
  * struct iwl_mvm_ba_notif - notifies about reception of BA
@@ -656,14 +647,14 @@ struct iwl_mvm_ba_notif {
 } __packed;
 
 /**
- * struct iwl_mvm_compressed_ba_tfd - progress of a TFD queue
+ * struct iwl_compressed_ba_tfd - progress of a TFD queue
  * @q_num: TFD queue number
  * @tfd_index: Index of first un-acked frame in the  TFD queue
  * @scd_queue: For debug only - the physical queue the TFD queue is bound to
  * @tid: TID of the queue (0-7)
  * @reserved: reserved for alignment
  */
-struct iwl_mvm_compressed_ba_tfd {
+struct iwl_compressed_ba_tfd {
 	__le16 q_num;
 	__le16 tfd_index;
 	u8 scd_queue;
@@ -672,12 +663,12 @@ struct iwl_mvm_compressed_ba_tfd {
 } __packed; /* COMPRESSED_BA_TFD_API_S_VER_1 */
 
 /**
- * struct iwl_mvm_compressed_ba_ratid - progress of a RA TID queue
+ * struct iwl_compressed_ba_ratid - progress of a RA TID queue
  * @q_num: RA TID queue number
  * @tid: TID of the queue
  * @ssn: BA window current SSN
  */
-struct iwl_mvm_compressed_ba_ratid {
+struct iwl_compressed_ba_ratid {
 	u8 q_num;
 	u8 tid;
 	__le16 ssn;
@@ -703,7 +694,7 @@ enum iwl_mvm_ba_resp_flags {
 };
 
 /**
- * struct iwl_mvm_compressed_ba_notif - notifies about reception of BA
+ * struct iwl_compressed_ba_notif - notifies about reception of BA
  * ( BA_NOTIF = 0xc5 )
  * @flags: status flag, see the &iwl_mvm_ba_resp_flags
  * @sta_id: Index of recipient (BA-sending) station in fw's station table
@@ -716,17 +707,19 @@ enum iwl_mvm_ba_resp_flags {
  * @query_frame_cnt: SCD query frame count
  * @txed: number of frames sent in the aggregation (all-TIDs)
  * @done: number of frames that were Acked by the BA (all-TIDs)
+ * @rts_retry_cnt: RTS retry count
  * @reserved: reserved (for alignment)
  * @wireless_time: Wireless-media time
- * @tx_rate: the rate the aggregation was sent at
+ * @tx_rate: the rate the aggregation was sent at. Format depends on command
+ *	version.
  * @tfd_cnt: number of TFD-Q elements
  * @ra_tid_cnt: number of RATID-Q elements
- * @tfd: array of TFD queue status updates. See &iwl_mvm_compressed_ba_tfd
- *	for details.
+ * @tfd: array of TFD queue status updates. See &iwl_compressed_ba_tfd
+ *	for details. Length in @tfd_cnt.
  * @ra_tid: array of RA-TID queue status updates. For debug purposes only. See
- *	&iwl_mvm_compressed_ba_ratid for more details.
+ *	&iwl_compressed_ba_ratid for more details. Length in @ra_tid_cnt.
  */
-struct iwl_mvm_compressed_ba_notif {
+struct iwl_compressed_ba_notif {
 	__le32 flags;
 	u8 sta_id;
 	u8 reduced_txp;
@@ -736,14 +729,19 @@ struct iwl_mvm_compressed_ba_notif {
 	__le16 query_frame_cnt;
 	__le16 txed;
 	__le16 done;
-	__le16 reserved;
+	u8 rts_retry_cnt;
+	u8 reserved;
 	__le32 wireless_time;
 	__le32 tx_rate;
 	__le16 tfd_cnt;
 	__le16 ra_tid_cnt;
-	struct iwl_mvm_compressed_ba_tfd tfd[1];
-	struct iwl_mvm_compressed_ba_ratid ra_tid[0];
-} __packed; /* COMPRESSED_BA_RES_API_S_VER_4 */
+	union {
+		DECLARE_FLEX_ARRAY(struct iwl_compressed_ba_ratid, ra_tid);
+		DECLARE_FLEX_ARRAY(struct iwl_compressed_ba_tfd, tfd);
+	};
+} __packed; /* COMPRESSED_BA_RES_API_S_VER_4,
+	       COMPRESSED_BA_RES_API_S_VER_6,
+	       COMPRESSED_BA_RES_API_S_VER_7 */
 
 /**
  * struct iwl_mac_beacon_cmd_v6 - beacon template command
@@ -755,11 +753,11 @@ struct iwl_mvm_compressed_ba_notif {
  * @frame: the template of the beacon frame
  */
 struct iwl_mac_beacon_cmd_v6 {
-	struct iwl_tx_cmd tx;
+	struct iwl_tx_cmd_v6_params tx;
 	__le32 template_id;
 	__le32 tim_idx;
 	__le32 tim_size;
-	struct ieee80211_hdr frame[0];
+	struct ieee80211_hdr frame[];
 } __packed; /* BEACON_TEMPLATE_CMD_API_S_VER_6 */
 
 /**
@@ -774,20 +772,29 @@ struct iwl_mac_beacon_cmd_v6 {
  * @frame: the template of the beacon frame
  */
 struct iwl_mac_beacon_cmd_v7 {
-	struct iwl_tx_cmd tx;
+	struct iwl_tx_cmd_v6_params tx;
 	__le32 template_id;
 	__le32 tim_idx;
 	__le32 tim_size;
 	__le32 ecsa_offset;
 	__le32 csa_offset;
-	struct ieee80211_hdr frame[0];
+	struct ieee80211_hdr frame[];
 } __packed; /* BEACON_TEMPLATE_CMD_API_S_VER_7 */
 
+/* Bit flags for BEACON_TEMPLATE_CMD_API until version 10 */
+enum iwl_mac_beacon_flags_v1 {
+	IWL_MAC_BEACON_CCK_V1	= BIT(8),
+	IWL_MAC_BEACON_ANT_A_V1 = BIT(9),
+	IWL_MAC_BEACON_ANT_B_V1 = BIT(10),
+	IWL_MAC_BEACON_FILS_V1	= BIT(12),
+};
+
+/* Bit flags for BEACON_TEMPLATE_CMD_API version 11 and above */
 enum iwl_mac_beacon_flags {
-	IWL_MAC_BEACON_CCK	= BIT(8),
-	IWL_MAC_BEACON_ANT_A	= BIT(9),
-	IWL_MAC_BEACON_ANT_B	= BIT(10),
-	IWL_MAC_BEACON_ANT_C	= BIT(11),
+	IWL_MAC_BEACON_CCK	= BIT(5),
+	IWL_MAC_BEACON_ANT_A	= BIT(6),
+	IWL_MAC_BEACON_ANT_B	= BIT(7),
+	IWL_MAC_BEACON_FILS	= BIT(8),
 };
 
 /**
@@ -795,10 +802,12 @@ enum iwl_mac_beacon_flags {
  * @byte_cnt: byte count of the beacon frame.
  * @flags: least significant byte for rate code. The most significant byte
  *	is &enum iwl_mac_beacon_flags.
+ * @short_ssid: Short SSID
  * @reserved: reserved
- * @template_id: currently equal to the mac context id of the coresponding mac.
+ * @link_id: the firmware id of the link that will use this beacon
  * @tim_idx: the offset of the tim IE in the beacon
- * @tim_size: the length of the tim IE
+ * @tim_size: the length of the tim IE (version < 14)
+ * @btwt_offset: offset to the broadcast TWT IE if present (version >= 14)
  * @ecsa_offset: offset to the ECSA IE if present
  * @csa_offset: offset to the CSA IE if present
  * @frame: the template of the beacon frame
@@ -806,38 +815,61 @@ enum iwl_mac_beacon_flags {
 struct iwl_mac_beacon_cmd {
 	__le16 byte_cnt;
 	__le16 flags;
-	__le64 reserved;
-	__le32 template_id;
+	__le32 short_ssid;
+	__le32 reserved;
+	__le32 link_id;
 	__le32 tim_idx;
-	__le32 tim_size;
+	union {
+		__le32 tim_size;
+		__le32 btwt_offset;
+	};
 	__le32 ecsa_offset;
 	__le32 csa_offset;
-	struct ieee80211_hdr frame[0];
-} __packed; /* BEACON_TEMPLATE_CMD_API_S_VER_9 */
+	struct ieee80211_hdr frame[];
+} __packed; /* BEACON_TEMPLATE_CMD_API_S_VER_10,
+	     * BEACON_TEMPLATE_CMD_API_S_VER_11,
+	     * BEACON_TEMPLATE_CMD_API_S_VER_12,
+	     * BEACON_TEMPLATE_CMD_API_S_VER_13,
+	     * BEACON_TEMPLATE_CMD_API_S_VER_14
+	     */
 
 struct iwl_beacon_notif {
-	struct iwl_mvm_tx_resp beacon_notify_hdr;
+	struct iwl_tx_resp beacon_notify_hdr;
 	__le64 tsf;
 	__le32 ibss_mgr_status;
 } __packed;
 
 /**
- * struct iwl_extended_beacon_notif - notifies about beacon transmission
+ * struct iwl_extended_beacon_notif_v5 - notifies about beacon transmission
  * @beacon_notify_hdr: tx response command associated with the beacon
  * @tsf: last beacon tsf
  * @ibss_mgr_status: whether IBSS is manager
  * @gp2: last beacon time in gp2
  */
-struct iwl_extended_beacon_notif {
-	struct iwl_mvm_tx_resp beacon_notify_hdr;
+struct iwl_extended_beacon_notif_v5 {
+	struct iwl_tx_resp beacon_notify_hdr;
 	__le64 tsf;
 	__le32 ibss_mgr_status;
 	__le32 gp2;
 } __packed; /* BEACON_NTFY_API_S_VER_5 */
 
 /**
+ * struct iwl_extended_beacon_notif - notifies about beacon transmission
+ * @status: the status of the Tx response of the beacon
+ * @tsf: last beacon tsf
+ * @ibss_mgr_status: whether IBSS is manager
+ * @gp2: last beacon time in gp2
+ */
+struct iwl_extended_beacon_notif {
+	__le32 status;
+	__le64 tsf;
+	__le32 ibss_mgr_status;
+	__le32 gp2;
+} __packed; /* BEACON_NTFY_API_S_VER_6_ */
+
+/**
  * enum iwl_dump_control - dump (flush) control flags
- * @DUMP_TX_FIFO_FLUSH: Dump MSDUs until the the FIFO is empty
+ * @DUMP_TX_FIFO_FLUSH: Dump MSDUs until the FIFO is empty
  *	and the TFD queues are empty.
  */
 enum iwl_dump_control {
@@ -845,7 +877,7 @@ enum iwl_dump_control {
 };
 
 /**
- * struct iwl_tx_path_flush_cmd -- queue/FIFO flush command
+ * struct iwl_tx_path_flush_cmd_v1 -- queue/FIFO flush command
  * @queues_ctl: bitmap of queues to flush
  * @flush_ctl: control flags
  * @reserved: reserved
@@ -867,6 +899,34 @@ struct iwl_tx_path_flush_cmd {
 	__le16 tid_mask;
 	__le16 reserved;
 } __packed; /* TX_PATH_FLUSH_CMD_API_S_VER_2 */
+
+#define IWL_TX_FLUSH_QUEUE_RSP 16
+
+/**
+ * struct iwl_flush_queue_info - virtual flush queue info
+ * @tid: the tid to flush
+ * @queue_num: virtual queue id
+ * @read_before_flush: read pointer before flush
+ * @read_after_flush: read pointer after flush
+ */
+struct iwl_flush_queue_info {
+	__le16 tid;
+	__le16 queue_num;
+	__le16 read_before_flush;
+	__le16 read_after_flush;
+} __packed; /* TFDQ_FLUSH_INFO_API_S_VER_1 */
+
+/**
+ * struct iwl_tx_path_flush_cmd_rsp -- queue/FIFO flush command response
+ * @sta_id: the station for which the queue was flushed
+ * @num_flushed_queues: number of queues in queues array
+ * @queues: all flushed queues
+ */
+struct iwl_tx_path_flush_cmd_rsp {
+	__le16 sta_id;
+	__le16 num_flushed_queues;
+	struct iwl_flush_queue_info queues[IWL_TX_FLUSH_QUEUE_RSP];
+} __packed; /* TX_PATH_FLUSH_CMD_RSP_API_S_VER_1 */
 
 /* Available options for the SCD_QUEUE_CFG HCMD */
 enum iwl_scd_cfg_actions {
@@ -903,7 +963,7 @@ struct iwl_scd_txq_cfg_cmd {
 } __packed; /* SCD_QUEUE_CFG_CMD_API_S_VER_1 */
 
 /**
- * struct iwl_scd_txq_cfg_rsp
+ * struct iwl_scd_txq_cfg_rsp - scheduler TXQ configuration response
  * @token: taken from the command
  * @sta_id: station id from the command
  * @tid: tid from the command

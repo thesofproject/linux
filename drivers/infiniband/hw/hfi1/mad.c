@@ -1,48 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright(c) 2015-2017 Intel Corporation.
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * BSD LICENSE
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  - Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  - Neither the name of Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
+ * Copyright(c) 2015-2018 Intel Corporation.
  */
 
 #include <linux/net.h>
@@ -54,7 +12,6 @@
 #include "mad.h"
 #include "trace.h"
 #include "qp.h"
-#include "vnic.h"
 
 /* the reset value from the FM is supposed to be 0xffff, handle both */
 #define OPA_LINK_WIDTH_RESET_OLD 0x0fff
@@ -108,7 +65,7 @@ static u16 hfi1_lookup_pkey_value(struct hfi1_ibport *ibp, int pkey_idx)
 	return 0;
 }
 
-void hfi1_event_pkey_change(struct hfi1_devdata *dd, u8 port)
+void hfi1_event_pkey_change(struct hfi1_devdata *dd, u32 port)
 {
 	struct ib_event event;
 
@@ -297,7 +254,7 @@ static struct ib_ah *hfi1_create_qp0_ah(struct hfi1_ibport *ibp, u32 dlid)
 	struct rvt_qp *qp0;
 	struct hfi1_pportdata *ppd = ppd_from_ibp(ibp);
 	struct hfi1_devdata *dd = dd_from_ppd(ppd);
-	u8 port_num = ppd->port;
+	u32 port_num = ppd->port;
 
 	memset(&attr, 0, sizeof(attr));
 	attr.type = rdma_ah_find_type(&dd->verbs_dev.rdi.ibdev, port_num);
@@ -305,7 +262,7 @@ static struct ib_ah *hfi1_create_qp0_ah(struct hfi1_ibport *ibp, u32 dlid)
 	rcu_read_lock();
 	qp0 = rcu_dereference(ibp->rvp.qp[0]);
 	if (qp0)
-		ah = rdma_create_ah(qp0->ibqp.pd, &attr);
+		ah = rdma_create_ah(qp0->ibqp.pd, &attr, 0);
 	rcu_read_unlock();
 	return ah;
 }
@@ -411,7 +368,7 @@ static void send_trap(struct hfi1_ibport *ibp, struct trap_node *trap)
 
 void hfi1_handle_trap_timer(struct timer_list *t)
 {
-	struct hfi1_ibport *ibp = from_timer(ibp, t, rvp.trap_timer);
+	struct hfi1_ibport *ibp = timer_container_of(ibp, t, rvp.trap_timer);
 	struct trap_node *trap = NULL;
 	unsigned long flags;
 	int i;
@@ -432,7 +389,7 @@ static struct trap_node *create_trap_node(u8 type, __be16 trap_num, u32 lid)
 {
 	struct trap_node *trap;
 
-	trap = kzalloc(sizeof(*trap), GFP_ATOMIC);
+	trap = kzalloc_obj(*trap, GFP_ATOMIC);
 	if (!trap)
 		return NULL;
 
@@ -515,7 +472,7 @@ static void bad_mkey(struct hfi1_ibport *ibp, struct ib_mad_hdr *mad,
 /*
  * Send a Port Capability Mask Changed trap (ch. 14.3.11).
  */
-void hfi1_cap_mask_chg(struct rvt_dev_info *rdi, u8 port_num)
+void hfi1_cap_mask_chg(struct rvt_dev_info *rdi, u32 port_num)
 {
 	struct trap_node *trap;
 	struct hfi1_ibdev *verbs_dev = dev_from_rdi(rdi);
@@ -581,7 +538,7 @@ void hfi1_node_desc_chg(struct hfi1_ibport *ibp)
 
 static int __subn_get_opa_nodedesc(struct opa_smp *smp, u32 am,
 				   u8 *data, struct ib_device *ibdev,
-				   u8 port, u32 *resp_len, u32 max_len)
+				   u32 port, u32 *resp_len, u32 max_len)
 {
 	struct opa_node_description *nd;
 
@@ -601,12 +558,12 @@ static int __subn_get_opa_nodedesc(struct opa_smp *smp, u32 am,
 }
 
 static int __subn_get_opa_nodeinfo(struct opa_smp *smp, u32 am, u8 *data,
-				   struct ib_device *ibdev, u8 port,
+				   struct ib_device *ibdev, u32 port,
 				   u32 *resp_len, u32 max_len)
 {
 	struct opa_node_info *ni;
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
-	unsigned pidx = port - 1; /* IB number port from 1, hw from 0 */
+	u32 pidx = port - 1; /* IB number port from 1, hw from 0 */
 
 	ni = (struct opa_node_info *)data;
 
@@ -641,11 +598,11 @@ static int __subn_get_opa_nodeinfo(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int subn_get_nodeinfo(struct ib_smp *smp, struct ib_device *ibdev,
-			     u8 port)
+			     u32 port)
 {
 	struct ib_node_info *nip = (struct ib_node_info *)&smp->data;
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
-	unsigned pidx = port - 1; /* IB number port from 1, hw from 0 */
+	u32 pidx = port - 1; /* IB number port from 1, hw from 0 */
 
 	/* GUID 0 is illegal */
 	if (smp->attr_mod || pidx >= dd->num_pports ||
@@ -721,7 +678,7 @@ static int check_mkey(struct hfi1_ibport *ibp, struct ib_mad_hdr *mad,
 			/* Bad mkey not a violation below level 2 */
 			if (ibp->rvp.mkeyprot < 2)
 				break;
-			/* fall through */
+			fallthrough;
 		case IB_MGMT_METHOD_SET:
 		case IB_MGMT_METHOD_TRAP_REPRESS:
 			if (ibp->rvp.mkey_violations != 0xFFFF)
@@ -794,7 +751,7 @@ void read_ltp_rtt(struct hfi1_devdata *dd)
 }
 
 static int __subn_get_opa_portinfo(struct opa_smp *smp, u32 am, u8 *data,
-				   struct ib_device *ibdev, u8 port,
+				   struct ib_device *ibdev, u32 port,
 				   u32 *resp_len, u32 max_len)
 {
 	int i;
@@ -1009,7 +966,7 @@ static int __subn_get_opa_portinfo(struct opa_smp *smp, u32 am, u8 *data,
  * @port: the IB port number
  * @pkeys: the pkey table is placed here
  */
-static int get_pkeys(struct hfi1_devdata *dd, u8 port, u16 *pkeys)
+static int get_pkeys(struct hfi1_devdata *dd, u32 port, u16 *pkeys)
 {
 	struct hfi1_pportdata *ppd = dd->pport + port - 1;
 
@@ -1019,7 +976,7 @@ static int get_pkeys(struct hfi1_devdata *dd, u8 port, u16 *pkeys)
 }
 
 static int __subn_get_opa_pkeytable(struct opa_smp *smp, u32 am, u8 *data,
-				    struct ib_device *ibdev, u8 port,
+				    struct ib_device *ibdev, u32 port,
 				    u32 *resp_len, u32 max_len)
 {
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
@@ -1202,8 +1159,8 @@ static int port_states_transition_allowed(struct hfi1_pportdata *ppd,
 	if (ret == HFI_TRANSITION_DISALLOWED ||
 	    ret == HFI_TRANSITION_UNDEFINED) {
 		pr_warn("invalid logical state transition %s -> %s\n",
-			opa_lstate_name(logical_old),
-			opa_lstate_name(logical_new));
+			ib_port_state_to_str(logical_old),
+			ib_port_state_to_str(logical_new));
 		return ret;
 	}
 
@@ -1238,7 +1195,7 @@ static int port_states_transition_allowed(struct hfi1_pportdata *ppd,
 }
 
 static int set_port_states(struct hfi1_pportdata *ppd, struct opa_smp *smp,
-			   u32 logical_state, u32 phys_state)
+			   u32 logical_state, u32 phys_state, int local_mad)
 {
 	struct hfi1_devdata *dd = ppd->dd;
 	u32 link_state;
@@ -1272,7 +1229,7 @@ static int set_port_states(struct hfi1_pportdata *ppd, struct opa_smp *smp,
 	case IB_PORT_NOP:
 		if (phys_state == IB_PORTPHYSSTATE_NOP)
 			break;
-		/* FALLTHROUGH */
+		fallthrough;
 	case IB_PORT_DOWN:
 		if (phys_state == IB_PORTPHYSSTATE_NOP) {
 			link_state = HLS_DN_DOWNDEF;
@@ -1314,7 +1271,7 @@ static int set_port_states(struct hfi1_pportdata *ppd, struct opa_smp *smp,
 		 * Don't send a reply if the response would be sent
 		 * through the disabled port.
 		 */
-		if (link_state == HLS_DN_DISABLE && smp->hop_cnt)
+		if (link_state == HLS_DN_DISABLE && !local_mad)
 			return IB_MAD_RESULT_SUCCESS | IB_MAD_RESULT_CONSUMED;
 		break;
 	case IB_PORT_ARMED:
@@ -1341,7 +1298,7 @@ static int set_port_states(struct hfi1_pportdata *ppd, struct opa_smp *smp,
 	return 0;
 }
 
-/**
+/*
  * subn_set_opa_portinfo - set port information
  * @smp: the incoming SM packet
  * @ibdev: the infiniband device
@@ -1349,8 +1306,8 @@ static int set_port_states(struct hfi1_pportdata *ppd, struct opa_smp *smp,
  *
  */
 static int __subn_set_opa_portinfo(struct opa_smp *smp, u32 am, u8 *data,
-				   struct ib_device *ibdev, u8 port,
-				   u32 *resp_len, u32 max_len)
+				   struct ib_device *ibdev, u32 port,
+				   u32 *resp_len, u32 max_len, int local_mad)
 {
 	struct opa_port_info *pi = (struct opa_port_info *)data;
 	struct ib_event event;
@@ -1634,7 +1591,7 @@ static int __subn_set_opa_portinfo(struct opa_smp *smp, u32 am, u8 *data,
 	 */
 
 	if (!invalid) {
-		ret = set_port_states(ppd, smp, ls_new, ps_new);
+		ret = set_port_states(ppd, smp, ls_new, ps_new, local_mad);
 		if (ret)
 			return ret;
 	}
@@ -1667,7 +1624,7 @@ get_only:
  * @port: the IB port number
  * @pkeys: the PKEY table
  */
-static int set_pkeys(struct hfi1_devdata *dd, u8 port, u16 *pkeys)
+static int set_pkeys(struct hfi1_devdata *dd, u32 port, u16 *pkeys)
 {
 	struct hfi1_pportdata *ppd;
 	int i;
@@ -1718,7 +1675,7 @@ static int set_pkeys(struct hfi1_devdata *dd, u8 port, u16 *pkeys)
 }
 
 static int __subn_set_opa_pkeytable(struct opa_smp *smp, u32 am, u8 *data,
-				    struct ib_device *ibdev, u8 port,
+				    struct ib_device *ibdev, u32 port,
 				    u32 *resp_len, u32 max_len)
 {
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
@@ -1732,7 +1689,7 @@ static int __subn_set_opa_pkeytable(struct opa_smp *smp, u32 am, u8 *data,
 	u32 size = 0;
 
 	if (n_blocks_sent == 0) {
-		pr_warn("OPA Get PKey AM Invalid : P = %d; B = 0x%x; N = 0x%x\n",
+		pr_warn("OPA Get PKey AM Invalid : P = %u; B = 0x%x; N = 0x%x\n",
 			port, start_block, n_blocks_sent);
 		smp->status |= IB_SMP_INVALID_FIELD;
 		return reply((struct ib_mad_hdr *)smp);
@@ -1825,7 +1782,7 @@ static int get_sc2vlt_tables(struct hfi1_devdata *dd, void *data)
 }
 
 static int __subn_get_opa_sl_to_sc(struct opa_smp *smp, u32 am, u8 *data,
-				   struct ib_device *ibdev, u8 port,
+				   struct ib_device *ibdev, u32 port,
 				   u32 *resp_len, u32 max_len)
 {
 	struct hfi1_ibport *ibp = to_iport(ibdev, port);
@@ -1848,7 +1805,7 @@ static int __subn_get_opa_sl_to_sc(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_set_opa_sl_to_sc(struct opa_smp *smp, u32 am, u8 *data,
-				   struct ib_device *ibdev, u8 port,
+				   struct ib_device *ibdev, u32 port,
 				   u32 *resp_len, u32 max_len)
 {
 	struct hfi1_ibport *ibp = to_iport(ibdev, port);
@@ -1877,7 +1834,7 @@ static int __subn_set_opa_sl_to_sc(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_get_opa_sc_to_sl(struct opa_smp *smp, u32 am, u8 *data,
-				   struct ib_device *ibdev, u8 port,
+				   struct ib_device *ibdev, u32 port,
 				   u32 *resp_len, u32 max_len)
 {
 	struct hfi1_ibport *ibp = to_iport(ibdev, port);
@@ -1900,7 +1857,7 @@ static int __subn_get_opa_sc_to_sl(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_set_opa_sc_to_sl(struct opa_smp *smp, u32 am, u8 *data,
-				   struct ib_device *ibdev, u8 port,
+				   struct ib_device *ibdev, u32 port,
 				   u32 *resp_len, u32 max_len)
 {
 	struct hfi1_ibport *ibp = to_iport(ibdev, port);
@@ -1921,7 +1878,7 @@ static int __subn_set_opa_sc_to_sl(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_get_opa_sc_to_vlt(struct opa_smp *smp, u32 am, u8 *data,
-				    struct ib_device *ibdev, u8 port,
+				    struct ib_device *ibdev, u32 port,
 				    u32 *resp_len, u32 max_len)
 {
 	u32 n_blocks = OPA_AM_NBLK(am);
@@ -1943,7 +1900,7 @@ static int __subn_get_opa_sc_to_vlt(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_set_opa_sc_to_vlt(struct opa_smp *smp, u32 am, u8 *data,
-				    struct ib_device *ibdev, u8 port,
+				    struct ib_device *ibdev, u32 port,
 				    u32 *resp_len, u32 max_len)
 {
 	u32 n_blocks = OPA_AM_NBLK(am);
@@ -1985,7 +1942,7 @@ static int __subn_set_opa_sc_to_vlt(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_get_opa_sc_to_vlnt(struct opa_smp *smp, u32 am, u8 *data,
-				     struct ib_device *ibdev, u8 port,
+				     struct ib_device *ibdev, u32 port,
 				     u32 *resp_len, u32 max_len)
 {
 	u32 n_blocks = OPA_AM_NPORT(am);
@@ -2010,7 +1967,7 @@ static int __subn_get_opa_sc_to_vlnt(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_set_opa_sc_to_vlnt(struct opa_smp *smp, u32 am, u8 *data,
-				     struct ib_device *ibdev, u8 port,
+				     struct ib_device *ibdev, u32 port,
 				     u32 *resp_len, u32 max_len)
 {
 	u32 n_blocks = OPA_AM_NPORT(am);
@@ -2042,7 +1999,7 @@ static int __subn_set_opa_sc_to_vlnt(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_get_opa_psi(struct opa_smp *smp, u32 am, u8 *data,
-			      struct ib_device *ibdev, u8 port,
+			      struct ib_device *ibdev, u32 port,
 			      u32 *resp_len, u32 max_len)
 {
 	u32 nports = OPA_AM_NPORT(am);
@@ -2084,8 +2041,8 @@ static int __subn_get_opa_psi(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_set_opa_psi(struct opa_smp *smp, u32 am, u8 *data,
-			      struct ib_device *ibdev, u8 port,
-			      u32 *resp_len, u32 max_len)
+			      struct ib_device *ibdev, u32 port,
+			      u32 *resp_len, u32 max_len, int local_mad)
 {
 	u32 nports = OPA_AM_NPORT(am);
 	u32 start_of_sm_config = OPA_AM_START_SM_CFG(am);
@@ -2122,7 +2079,7 @@ static int __subn_set_opa_psi(struct opa_smp *smp, u32 am, u8 *data,
 	}
 
 	if (!invalid) {
-		ret = set_port_states(ppd, smp, ls_new, ps_new);
+		ret = set_port_states(ppd, smp, ls_new, ps_new, local_mad);
 		if (ret)
 			return ret;
 	}
@@ -2132,7 +2089,7 @@ static int __subn_set_opa_psi(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_get_opa_cable_info(struct opa_smp *smp, u32 am, u8 *data,
-				     struct ib_device *ibdev, u8 port,
+				     struct ib_device *ibdev, u32 port,
 				     u32 *resp_len, u32 max_len)
 {
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
@@ -2184,7 +2141,7 @@ static int __subn_get_opa_cable_info(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_get_opa_bct(struct opa_smp *smp, u32 am, u8 *data,
-			      struct ib_device *ibdev, u8 port, u32 *resp_len,
+			      struct ib_device *ibdev, u32 port, u32 *resp_len,
 			      u32 max_len)
 {
 	u32 num_ports = OPA_AM_NPORT(am);
@@ -2208,7 +2165,7 @@ static int __subn_get_opa_bct(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_set_opa_bct(struct opa_smp *smp, u32 am, u8 *data,
-			      struct ib_device *ibdev, u8 port, u32 *resp_len,
+			      struct ib_device *ibdev, u32 port, u32 *resp_len,
 			      u32 max_len)
 {
 	u32 num_ports = OPA_AM_NPORT(am);
@@ -2232,7 +2189,7 @@ static int __subn_set_opa_bct(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_get_opa_vl_arb(struct opa_smp *smp, u32 am, u8 *data,
-				 struct ib_device *ibdev, u8 port,
+				 struct ib_device *ibdev, u32 port,
 				 u32 *resp_len, u32 max_len)
 {
 	struct hfi1_pportdata *ppd = ppd_from_ibp(to_iport(ibdev, port));
@@ -2274,7 +2231,7 @@ static int __subn_get_opa_vl_arb(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_set_opa_vl_arb(struct opa_smp *smp, u32 am, u8 *data,
-				 struct ib_device *ibdev, u8 port,
+				 struct ib_device *ibdev, u32 port,
 				 u32 *resp_len, u32 max_len)
 {
 	struct hfi1_pportdata *ppd = ppd_from_ibp(to_iport(ibdev, port));
@@ -2300,7 +2257,6 @@ static int __subn_set_opa_vl_arb(struct opa_smp *smp, u32 am, u8 *data,
 	 * can be changed from the default values
 	 */
 	case OPA_VLARB_PREEMPT_ELEMENTS:
-		/* FALLTHROUGH */
 	case OPA_VLARB_PREEMPT_MATRIX:
 		smp->status |= IB_SMP_UNSUP_METH_ATTR;
 		break;
@@ -2326,7 +2282,7 @@ struct opa_port_status_req {
 	__be32 vl_select_mask;
 };
 
-#define VL_MASK_ALL		0x000080ff
+#define VL_MASK_ALL		0x00000000000080ffUL
 
 struct opa_port_status_rsp {
 	__u8 port_num;
@@ -2381,7 +2337,7 @@ struct opa_port_status_rsp {
 		__be64 port_vl_rcv_bubble;
 		__be64 port_vl_mark_fecn;
 		__be64 port_vl_xmit_discards;
-	} vls[0]; /* real array size defined by # bits set in vl_select_mask */
+	} vls[]; /* real array size defined by # bits set in vl_select_mask */
 };
 
 enum counter_selects {
@@ -2423,7 +2379,7 @@ struct opa_aggregate {
 	__be16 attr_id;
 	__be16 err_reqlength;	/* 1 bit, 8 res, 7 bit */
 	__be32 attr_mod;
-	u8 data[0];
+	u8 data[];
 };
 
 #define MSK_LLI 0x000000f0
@@ -2480,9 +2436,9 @@ struct opa_port_data_counters_msg {
 			__be64 port_vl_xmit_wait_data;
 			__be64 port_vl_rcv_bubble;
 			__be64 port_vl_mark_fecn;
-		} vls[0];
+		} vls[];
 		/* array size defined by #bits set in vl_select_mask*/
-	} port[1]; /* array size defined by  #ports in attribute modifier */
+	} port;
 };
 
 struct opa_port_error_counters64_msg {
@@ -2513,9 +2469,9 @@ struct opa_port_error_counters64_msg {
 		u8 reserved3[7];
 		struct _vls_ectrs {
 			__be64 port_vl_xmit_discards;
-		} vls[0];
+		} vls[];
 		/* array size defined by #bits set in vl_select_mask */
-	} port[1]; /* array size defined by #ports in attribute modifier */
+	} port;
 };
 
 struct opa_port_error_info_msg {
@@ -2586,7 +2542,7 @@ struct opa_port_error_info_msg {
 			u8 error_info;
 		} __packed fm_config_ei;
 		__u32 reserved9;
-	} port[1]; /* actual array size defined by #ports in attr modifier */
+	} port;
 };
 
 /* opa_port_error_info_msg error_info_select_mask bit definitions */
@@ -2625,15 +2581,14 @@ static int pma_get_opa_classportinfo(struct opa_pma_mad *pmp,
 }
 
 static void a0_portstatus(struct hfi1_pportdata *ppd,
-			  struct opa_port_status_rsp *rsp, u32 vl_select_mask)
+			  struct opa_port_status_rsp *rsp)
 {
 	if (!is_bx(ppd->dd)) {
 		unsigned long vl;
 		u64 sum_vl_xmit_wait = 0;
-		u32 vl_all_mask = VL_MASK_ALL;
+		unsigned long vl_all_mask = VL_MASK_ALL;
 
-		for_each_set_bit(vl, (unsigned long *)&(vl_all_mask),
-				 8 * sizeof(vl_all_mask)) {
+		for_each_set_bit(vl, &vl_all_mask, BITS_PER_LONG) {
 			u64 tmp = sum_vl_xmit_wait +
 				  read_port_cntr(ppd, C_TX_WAIT_VL,
 						 idx_from_vl(vl));
@@ -2724,18 +2679,18 @@ u64 get_xmit_wait_counters(struct hfi1_pportdata *ppd,
 
 static int pma_get_opa_portstatus(struct opa_pma_mad *pmp,
 				  struct ib_device *ibdev,
-				  u8 port, u32 *resp_len)
+				  u32 port, u32 *resp_len)
 {
 	struct opa_port_status_req *req =
 		(struct opa_port_status_req *)pmp->data;
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
 	struct opa_port_status_rsp *rsp;
-	u32 vl_select_mask = be32_to_cpu(req->vl_select_mask);
+	unsigned long vl_select_mask = be32_to_cpu(req->vl_select_mask);
 	unsigned long vl;
 	size_t response_data_size;
 	u32 nports = be32_to_cpu(pmp->mad_hdr.attr_mod) >> 24;
-	u8 port_num = req->port_num;
-	u8 num_vls = hweight32(vl_select_mask);
+	u32 port_num = req->port_num;
+	u8 num_vls = hweight64(vl_select_mask);
 	struct _vls_pctrs *vlinfo;
 	struct hfi1_ibport *ibp = to_iport(ibdev, port);
 	struct hfi1_pportdata *ppd = ppd_from_ibp(ibp);
@@ -2744,8 +2699,7 @@ static int pma_get_opa_portstatus(struct opa_pma_mad *pmp,
 	u16 link_width;
 	u16 link_speed;
 
-	response_data_size = sizeof(struct opa_port_status_rsp) +
-				num_vls * sizeof(struct _vls_pctrs);
+	response_data_size = struct_size(rsp, vls, num_vls);
 	if (response_data_size > sizeof(pmp->data)) {
 		pmp->mad_hdr.status |= OPA_PM_STATUS_REQUEST_TOO_LARGE;
 		return reply((struct ib_mad_hdr *)pmp);
@@ -2771,7 +2725,7 @@ static int pma_get_opa_portstatus(struct opa_pma_mad *pmp,
 
 	hfi1_read_link_quality(dd, &rsp->link_quality_indicator);
 
-	rsp->vl_select_mask = cpu_to_be32(vl_select_mask);
+	rsp->vl_select_mask = cpu_to_be32((u32)vl_select_mask);
 	rsp->port_xmit_data = cpu_to_be64(read_dev_cntr(dd, C_DC_XMIT_FLITS,
 					  CNTR_INVALID_VL));
 	rsp->port_rcv_data = cpu_to_be64(read_dev_cntr(dd, C_DC_RCV_FLITS,
@@ -2842,8 +2796,7 @@ static int pma_get_opa_portstatus(struct opa_pma_mad *pmp,
 	 * So in the for_each_set_bit() loop below, we don't need
 	 * any additional checks for vl.
 	 */
-	for_each_set_bit(vl, (unsigned long *)&(vl_select_mask),
-			 8 * sizeof(vl_select_mask)) {
+	for_each_set_bit(vl, &vl_select_mask, BITS_PER_LONG) {
 		memset(vlinfo, 0, sizeof(*vlinfo));
 
 		tmp = read_dev_cntr(dd, C_DC_RX_FLIT_VL, idx_from_vl(vl));
@@ -2884,7 +2837,7 @@ static int pma_get_opa_portstatus(struct opa_pma_mad *pmp,
 		vfi++;
 	}
 
-	a0_portstatus(ppd, rsp, vl_select_mask);
+	a0_portstatus(ppd, rsp);
 
 	if (resp_len)
 		*resp_len += response_data_size;
@@ -2892,7 +2845,7 @@ static int pma_get_opa_portstatus(struct opa_pma_mad *pmp,
 	return reply((struct ib_mad_hdr *)pmp);
 }
 
-static u64 get_error_counter_summary(struct ib_device *ibdev, u8 port,
+static u64 get_error_counter_summary(struct ib_device *ibdev, u32 port,
 				     u8 res_lli, u8 res_ler)
 {
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
@@ -2931,16 +2884,14 @@ static u64 get_error_counter_summary(struct ib_device *ibdev, u8 port,
 	return error_counter_summary;
 }
 
-static void a0_datacounters(struct hfi1_pportdata *ppd, struct _port_dctrs *rsp,
-			    u32 vl_select_mask)
+static void a0_datacounters(struct hfi1_pportdata *ppd, struct _port_dctrs *rsp)
 {
 	if (!is_bx(ppd->dd)) {
 		unsigned long vl;
 		u64 sum_vl_xmit_wait = 0;
-		u32 vl_all_mask = VL_MASK_ALL;
+		unsigned long vl_all_mask = VL_MASK_ALL;
 
-		for_each_set_bit(vl, (unsigned long *)&(vl_all_mask),
-				 8 * sizeof(vl_all_mask)) {
+		for_each_set_bit(vl, &vl_all_mask, BITS_PER_LONG) {
 			u64 tmp = sum_vl_xmit_wait +
 				  read_port_cntr(ppd, C_TX_WAIT_VL,
 						 idx_from_vl(vl));
@@ -2979,7 +2930,7 @@ static void pma_get_opa_port_dctrs(struct ib_device *ibdev,
 
 static int pma_get_opa_datacounters(struct opa_pma_mad *pmp,
 				    struct ib_device *ibdev,
-				    u8 port, u32 *resp_len)
+				    u32 port, u32 *resp_len)
 {
 	struct opa_port_data_counters_msg *req =
 		(struct opa_port_data_counters_msg *)pmp->data;
@@ -2993,9 +2944,9 @@ static int pma_get_opa_datacounters(struct opa_pma_mad *pmp,
 	u8 lq, num_vls;
 	u8 res_lli, res_ler;
 	u64 port_mask;
-	u8 port_num;
+	u32 port_num;
 	unsigned long vl;
-	u32 vl_select_mask;
+	unsigned long vl_select_mask;
 	int vfi;
 	u16 link_width;
 	u16 link_speed;
@@ -3014,8 +2965,7 @@ static int pma_get_opa_datacounters(struct opa_pma_mad *pmp,
 	}
 
 	/* Sanity check */
-	response_data_size = sizeof(struct opa_port_data_counters_msg) +
-				num_vls * sizeof(struct _vls_dctrs);
+	response_data_size = struct_size(req, port.vls, num_vls);
 
 	if (response_data_size > sizeof(pmp->data)) {
 		pmp->mad_hdr.status |= IB_SMP_INVALID_FIELD;
@@ -3035,7 +2985,7 @@ static int pma_get_opa_datacounters(struct opa_pma_mad *pmp,
 		return reply((struct ib_mad_hdr *)pmp);
 	}
 
-	rsp = &req->port[0];
+	rsp = &req->port;
 	memset(rsp, 0, sizeof(*rsp));
 
 	rsp->port_number = port;
@@ -3073,8 +3023,7 @@ static int pma_get_opa_datacounters(struct opa_pma_mad *pmp,
 	 * So in the for_each_set_bit() loop below, we don't need
 	 * any additional checks for vl.
 	 */
-	for_each_set_bit(vl, (unsigned long *)&(vl_select_mask),
-			 8 * sizeof(req->vl_select_mask)) {
+	for_each_set_bit(vl, &vl_select_mask, BITS_PER_LONG) {
 		memset(vlinfo, 0, sizeof(*vlinfo));
 
 		rsp->vls[vfi].port_vl_xmit_data =
@@ -3122,7 +3071,7 @@ static int pma_get_opa_datacounters(struct opa_pma_mad *pmp,
 		vfi++;
 	}
 
-	a0_datacounters(ppd, rsp, vl_select_mask);
+	a0_datacounters(ppd, rsp);
 
 	if (resp_len)
 		*resp_len += response_data_size;
@@ -3131,7 +3080,7 @@ static int pma_get_opa_datacounters(struct opa_pma_mad *pmp,
 }
 
 static int pma_get_ib_portcounters_ext(struct ib_pma_mad *pmp,
-				       struct ib_device *ibdev, u8 port)
+				       struct ib_device *ibdev, u32 port)
 {
 	struct ib_pma_portcounters_ext *p = (struct ib_pma_portcounters_ext *)
 						pmp->data;
@@ -3159,7 +3108,7 @@ bail:
 }
 
 static void pma_get_opa_port_ectrs(struct ib_device *ibdev,
-				   struct _port_ectrs *rsp, u8 port)
+				   struct _port_ectrs *rsp, u32 port)
 {
 	u64 tmp, tmp2;
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
@@ -3202,11 +3151,11 @@ static void pma_get_opa_port_ectrs(struct ib_device *ibdev,
 
 static int pma_get_opa_porterrors(struct opa_pma_mad *pmp,
 				  struct ib_device *ibdev,
-				  u8 port, u32 *resp_len)
+				  u32 port, u32 *resp_len)
 {
 	size_t response_data_size;
 	struct _port_ectrs *rsp;
-	u8 port_num;
+	u32 port_num;
 	struct opa_port_error_counters64_msg *req;
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
 	u32 num_ports;
@@ -3217,7 +3166,7 @@ static int pma_get_opa_porterrors(struct opa_pma_mad *pmp,
 	struct _vls_ectrs *vlinfo;
 	unsigned long vl;
 	u64 port_mask, tmp;
-	u32 vl_select_mask;
+	unsigned long vl_select_mask;
 	int vfi;
 
 	req = (struct opa_port_error_counters64_msg *)pmp->data;
@@ -3232,8 +3181,7 @@ static int pma_get_opa_porterrors(struct opa_pma_mad *pmp,
 		return reply((struct ib_mad_hdr *)pmp);
 	}
 
-	response_data_size = sizeof(struct opa_port_error_counters64_msg) +
-				num_vls * sizeof(struct _vls_ectrs);
+	response_data_size = struct_size(req, port.vls, num_vls);
 
 	if (response_data_size > sizeof(pmp->data)) {
 		pmp->mad_hdr.status |= IB_SMP_INVALID_FIELD;
@@ -3252,7 +3200,7 @@ static int pma_get_opa_porterrors(struct opa_pma_mad *pmp,
 		return reply((struct ib_mad_hdr *)pmp);
 	}
 
-	rsp = &req->port[0];
+	rsp = &req->port;
 
 	ibp = to_iport(ibdev, port_num);
 	ppd = ppd_from_ibp(ibp);
@@ -3276,8 +3224,7 @@ static int pma_get_opa_porterrors(struct opa_pma_mad *pmp,
 	vlinfo = &rsp->vls[0];
 	vfi = 0;
 	vl_select_mask = be32_to_cpu(req->vl_select_mask);
-	for_each_set_bit(vl, (unsigned long *)&(vl_select_mask),
-			 8 * sizeof(req->vl_select_mask)) {
+	for_each_set_bit(vl, &vl_select_mask, BITS_PER_LONG) {
 		memset(vlinfo, 0, sizeof(*vlinfo));
 		rsp->vls[vfi].port_vl_xmit_discards =
 			cpu_to_be64(read_port_cntr(ppd, C_SW_XMIT_DSCD_VL,
@@ -3293,7 +3240,7 @@ static int pma_get_opa_porterrors(struct opa_pma_mad *pmp,
 }
 
 static int pma_get_ib_portcounters(struct ib_pma_mad *pmp,
-				   struct ib_device *ibdev, u8 port)
+				   struct ib_device *ibdev, u32 port)
 {
 	struct ib_pma_portcounters *p = (struct ib_pma_portcounters *)
 		pmp->data;
@@ -3379,7 +3326,7 @@ bail:
 
 static int pma_get_opa_errorinfo(struct opa_pma_mad *pmp,
 				 struct ib_device *ibdev,
-				 u8 port, u32 *resp_len)
+				 u32 port, u32 *resp_len)
 {
 	size_t response_data_size;
 	struct _port_ei *rsp;
@@ -3387,12 +3334,12 @@ static int pma_get_opa_errorinfo(struct opa_pma_mad *pmp,
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
 	u64 port_mask;
 	u32 num_ports;
-	u8 port_num;
+	u32 port_num;
 	u8 num_pslm;
 	u64 reg;
 
 	req = (struct opa_port_error_info_msg *)pmp->data;
-	rsp = &req->port[0];
+	rsp = &req->port;
 
 	num_ports = OPA_AM_NPORT(be32_to_cpu(pmp->mad_hdr.attr_mod));
 	num_pslm = hweight64(be64_to_cpu(req->port_select_mask[3]));
@@ -3424,6 +3371,7 @@ static int pma_get_opa_errorinfo(struct opa_pma_mad *pmp,
 		pmp->mad_hdr.status |= IB_SMP_INVALID_FIELD;
 		return reply((struct ib_mad_hdr *)pmp);
 	}
+	rsp->port_number = port;
 
 	/* PortRcvErrorInfo */
 	rsp->port_rcv_ei.status_and_code =
@@ -3477,7 +3425,7 @@ static int pma_get_opa_errorinfo(struct opa_pma_mad *pmp,
 
 static int pma_set_opa_portstatus(struct opa_pma_mad *pmp,
 				  struct ib_device *ibdev,
-				  u8 port, u32 *resp_len)
+				  u32 port, u32 *resp_len)
 {
 	struct opa_clear_port_status *req =
 		(struct opa_clear_port_status *)pmp->data;
@@ -3487,7 +3435,7 @@ static int pma_set_opa_portstatus(struct opa_pma_mad *pmp,
 	u32 nports = be32_to_cpu(pmp->mad_hdr.attr_mod) >> 24;
 	u64 portn = be64_to_cpu(req->port_select_mask[3]);
 	u32 counter_select = be32_to_cpu(req->counter_select_mask);
-	u32 vl_select_mask = VL_MASK_ALL; /* clear all per-vl cnts */
+	unsigned long vl_select_mask = VL_MASK_ALL; /* clear all per-vl cnts */
 	unsigned long vl;
 
 	if ((nports != 1) || (portn != 1 << port)) {
@@ -3581,8 +3529,7 @@ static int pma_set_opa_portstatus(struct opa_pma_mad *pmp,
 	if (counter_select & CS_UNCORRECTABLE_ERRORS)
 		write_dev_cntr(dd, C_DC_UNC_ERR, CNTR_INVALID_VL, 0);
 
-	for_each_set_bit(vl, (unsigned long *)&(vl_select_mask),
-			 8 * sizeof(vl_select_mask)) {
+	for_each_set_bit(vl, &vl_select_mask, BITS_PER_LONG) {
 		if (counter_select & CS_PORT_XMIT_DATA)
 			write_port_cntr(ppd, C_TX_FLIT_VL, idx_from_vl(vl), 0);
 
@@ -3630,19 +3577,19 @@ static int pma_set_opa_portstatus(struct opa_pma_mad *pmp,
 
 static int pma_set_opa_errorinfo(struct opa_pma_mad *pmp,
 				 struct ib_device *ibdev,
-				 u8 port, u32 *resp_len)
+				 u32 port, u32 *resp_len)
 {
 	struct _port_ei *rsp;
 	struct opa_port_error_info_msg *req;
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
 	u64 port_mask;
 	u32 num_ports;
-	u8 port_num;
+	u32 port_num;
 	u8 num_pslm;
 	u32 error_info_select;
 
 	req = (struct opa_port_error_info_msg *)pmp->data;
-	rsp = &req->port[0];
+	rsp = &req->port;
 
 	num_ports = OPA_AM_NPORT(be32_to_cpu(pmp->mad_hdr.attr_mod));
 	num_pslm = hweight64(be64_to_cpu(req->port_select_mask[3]));
@@ -3712,7 +3659,7 @@ struct opa_congestion_info_attr {
 } __packed;
 
 static int __subn_get_opa_cong_info(struct opa_smp *smp, u32 am, u8 *data,
-				    struct ib_device *ibdev, u8 port,
+				    struct ib_device *ibdev, u32 port,
 				    u32 *resp_len, u32 max_len)
 {
 	struct opa_congestion_info_attr *p =
@@ -3737,7 +3684,7 @@ static int __subn_get_opa_cong_info(struct opa_smp *smp, u32 am, u8 *data,
 
 static int __subn_get_opa_cong_setting(struct opa_smp *smp, u32 am,
 				       u8 *data, struct ib_device *ibdev,
-				       u8 port, u32 *resp_len, u32 max_len)
+				       u32 port, u32 *resp_len, u32 max_len)
 {
 	int i;
 	struct opa_congestion_setting_attr *p =
@@ -3788,7 +3735,7 @@ static void apply_cc_state(struct hfi1_pportdata *ppd)
 {
 	struct cc_state *old_cc_state, *new_cc_state;
 
-	new_cc_state = kzalloc(sizeof(*new_cc_state), GFP_KERNEL);
+	new_cc_state = kzalloc_obj(*new_cc_state);
 	if (!new_cc_state)
 		return;
 
@@ -3829,7 +3776,7 @@ static void apply_cc_state(struct hfi1_pportdata *ppd)
 }
 
 static int __subn_set_opa_cong_setting(struct opa_smp *smp, u32 am, u8 *data,
-				       struct ib_device *ibdev, u8 port,
+				       struct ib_device *ibdev, u32 port,
 				       u32 *resp_len, u32 max_len)
 {
 	struct opa_congestion_setting_attr *p =
@@ -3870,7 +3817,7 @@ static int __subn_set_opa_cong_setting(struct opa_smp *smp, u32 am, u8 *data,
 
 static int __subn_get_opa_hfi1_cong_log(struct opa_smp *smp, u32 am,
 					u8 *data, struct ib_device *ibdev,
-					u8 port, u32 *resp_len, u32 max_len)
+					u32 port, u32 *resp_len, u32 max_len)
 {
 	struct hfi1_ibport *ibp = to_iport(ibdev, port);
 	struct hfi1_pportdata *ppd = ppd_from_ibp(ibp);
@@ -3935,7 +3882,7 @@ static int __subn_get_opa_hfi1_cong_log(struct opa_smp *smp, u32 am,
 }
 
 static int __subn_get_opa_cc_table(struct opa_smp *smp, u32 am, u8 *data,
-				   struct ib_device *ibdev, u8 port,
+				   struct ib_device *ibdev, u32 port,
 				   u32 *resp_len, u32 max_len)
 {
 	struct ib_cc_table_attr *cc_table_attr =
@@ -3987,7 +3934,7 @@ static int __subn_get_opa_cc_table(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_set_opa_cc_table(struct opa_smp *smp, u32 am, u8 *data,
-				   struct ib_device *ibdev, u8 port,
+				   struct ib_device *ibdev, u32 port,
 				   u32 *resp_len, u32 max_len)
 {
 	struct ib_cc_table_attr *p = (struct ib_cc_table_attr *)data;
@@ -4046,7 +3993,7 @@ struct opa_led_info {
 #define OPA_LED_MASK	BIT(OPA_LED_SHIFT)
 
 static int __subn_get_opa_led_info(struct opa_smp *smp, u32 am, u8 *data,
-				   struct ib_device *ibdev, u8 port,
+				   struct ib_device *ibdev, u32 port,
 				   u32 *resp_len, u32 max_len)
 {
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
@@ -4076,7 +4023,7 @@ static int __subn_get_opa_led_info(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int __subn_set_opa_led_info(struct opa_smp *smp, u32 am, u8 *data,
-				   struct ib_device *ibdev, u8 port,
+				   struct ib_device *ibdev, u32 port,
 				   u32 *resp_len, u32 max_len)
 {
 	struct hfi1_devdata *dd = dd_from_ibdev(ibdev);
@@ -4099,7 +4046,7 @@ static int __subn_set_opa_led_info(struct opa_smp *smp, u32 am, u8 *data,
 }
 
 static int subn_get_opa_sma(__be16 attr_id, struct opa_smp *smp, u32 am,
-			    u8 *data, struct ib_device *ibdev, u8 port,
+			    u8 *data, struct ib_device *ibdev, u32 port,
 			    u32 *resp_len, u32 max_len)
 {
 	int ret;
@@ -4179,7 +4126,7 @@ static int subn_get_opa_sma(__be16 attr_id, struct opa_smp *smp, u32 am,
 			return IB_MAD_RESULT_SUCCESS | IB_MAD_RESULT_CONSUMED;
 		if (ibp->rvp.port_cap_flags & IB_PORT_SM)
 			return IB_MAD_RESULT_SUCCESS;
-		/* FALLTHROUGH */
+		fallthrough;
 	default:
 		smp->status |= IB_SMP_UNSUP_METH_ATTR;
 		ret = reply((struct ib_mad_hdr *)smp);
@@ -4189,8 +4136,8 @@ static int subn_get_opa_sma(__be16 attr_id, struct opa_smp *smp, u32 am,
 }
 
 static int subn_set_opa_sma(__be16 attr_id, struct opa_smp *smp, u32 am,
-			    u8 *data, struct ib_device *ibdev, u8 port,
-			    u32 *resp_len, u32 max_len)
+			    u8 *data, struct ib_device *ibdev, u32 port,
+			    u32 *resp_len, u32 max_len, int local_mad)
 {
 	int ret;
 	struct hfi1_ibport *ibp = to_iport(ibdev, port);
@@ -4198,7 +4145,7 @@ static int subn_set_opa_sma(__be16 attr_id, struct opa_smp *smp, u32 am,
 	switch (attr_id) {
 	case IB_SMP_ATTR_PORT_INFO:
 		ret = __subn_set_opa_portinfo(smp, am, data, ibdev, port,
-					      resp_len, max_len);
+					      resp_len, max_len, local_mad);
 		break;
 	case IB_SMP_ATTR_PKEY_TABLE:
 		ret = __subn_set_opa_pkeytable(smp, am, data, ibdev, port,
@@ -4222,7 +4169,7 @@ static int subn_set_opa_sma(__be16 attr_id, struct opa_smp *smp, u32 am,
 		break;
 	case OPA_ATTRIB_ID_PORT_STATE_INFO:
 		ret = __subn_set_opa_psi(smp, am, data, ibdev, port,
-					 resp_len, max_len);
+					 resp_len, max_len, local_mad);
 		break;
 	case OPA_ATTRIB_ID_BUFFER_CONTROL_TABLE:
 		ret = __subn_set_opa_bct(smp, am, data, ibdev, port,
@@ -4249,7 +4196,7 @@ static int subn_set_opa_sma(__be16 attr_id, struct opa_smp *smp, u32 am,
 			return IB_MAD_RESULT_SUCCESS | IB_MAD_RESULT_CONSUMED;
 		if (ibp->rvp.port_cap_flags & IB_PORT_SM)
 			return IB_MAD_RESULT_SUCCESS;
-		/* FALLTHROUGH */
+		fallthrough;
 	default:
 		smp->status |= IB_SMP_UNSUP_METH_ATTR;
 		ret = reply((struct ib_mad_hdr *)smp);
@@ -4264,7 +4211,7 @@ static inline void set_aggr_error(struct opa_aggregate *ag)
 }
 
 static int subn_get_opa_aggregate(struct opa_smp *smp,
-				  struct ib_device *ibdev, u8 port,
+				  struct ib_device *ibdev, u32 port,
 				  u32 *resp_len)
 {
 	int i;
@@ -4313,8 +4260,8 @@ static int subn_get_opa_aggregate(struct opa_smp *smp,
 }
 
 static int subn_set_opa_aggregate(struct opa_smp *smp,
-				  struct ib_device *ibdev, u8 port,
-				  u32 *resp_len)
+				  struct ib_device *ibdev, u32 port,
+				  u32 *resp_len, int local_mad)
 {
 	int i;
 	u32 num_attr = be32_to_cpu(smp->attr_mod) & 0x000000ff;
@@ -4344,7 +4291,9 @@ static int subn_set_opa_aggregate(struct opa_smp *smp,
 		}
 
 		(void)subn_set_opa_sma(agg->attr_id, smp, am, agg->data,
-				       ibdev, port, NULL, (u32)agg_data_len);
+				       ibdev, port, NULL, (u32)agg_data_len,
+				       local_mad);
+
 		if (smp->status & IB_SMP_INVALID_FIELD)
 			break;
 		if (smp->status & ~IB_SMP_DIRECTION) {
@@ -4517,9 +4466,9 @@ static int hfi1_pkey_validation_pma(struct hfi1_ibport *ibp,
 }
 
 static int process_subn_opa(struct ib_device *ibdev, int mad_flags,
-			    u8 port, const struct opa_mad *in_mad,
+			    u32 port, const struct opa_mad *in_mad,
 			    struct opa_mad *out_mad,
-			    u32 *resp_len)
+			    u32 *resp_len, int local_mad)
 {
 	struct opa_smp *smp = (struct opa_smp *)out_mad;
 	struct hfi1_ibport *ibp = to_iport(ibdev, port);
@@ -4588,11 +4537,11 @@ static int process_subn_opa(struct ib_device *ibdev, int mad_flags,
 		default:
 			ret = subn_set_opa_sma(attr_id, smp, am, data,
 					       ibdev, port, resp_len,
-					       data_size);
+					       data_size, local_mad);
 			break;
 		case OPA_ATTRIB_ID_AGGREGATE:
 			ret = subn_set_opa_aggregate(smp, ibdev, port,
-						     resp_len);
+						     resp_len, local_mad);
 			break;
 		}
 		break;
@@ -4622,7 +4571,7 @@ static int process_subn_opa(struct ib_device *ibdev, int mad_flags,
 }
 
 static int process_subn(struct ib_device *ibdev, int mad_flags,
-			u8 port, const struct ib_mad *in_mad,
+			u32 port, const struct ib_mad *in_mad,
 			struct ib_mad *out_mad)
 {
 	struct ib_smp *smp = (struct ib_smp *)out_mad;
@@ -4680,7 +4629,7 @@ static int process_subn(struct ib_device *ibdev, int mad_flags,
 	return ret;
 }
 
-static int process_perf(struct ib_device *ibdev, u8 port,
+static int process_perf(struct ib_device *ibdev, u32 port,
 			const struct ib_mad *in_mad,
 			struct ib_mad *out_mad)
 {
@@ -4742,7 +4691,7 @@ static int process_perf(struct ib_device *ibdev, u8 port,
 	return ret;
 }
 
-static int process_perf_opa(struct ib_device *ibdev, u8 port,
+static int process_perf_opa(struct ib_device *ibdev, u32 port,
 			    const struct opa_mad *in_mad,
 			    struct opa_mad *out_mad, u32 *resp_len)
 {
@@ -4824,7 +4773,7 @@ static int process_perf_opa(struct ib_device *ibdev, u8 port,
 }
 
 static int hfi1_process_opa_mad(struct ib_device *ibdev, int mad_flags,
-				u8 port, const struct ib_wc *in_wc,
+				u32 port, const struct ib_wc *in_wc,
 				const struct ib_grh *in_grh,
 				const struct opa_mad *in_mad,
 				struct opa_mad *out_mad, size_t *out_mad_size,
@@ -4832,7 +4781,8 @@ static int hfi1_process_opa_mad(struct ib_device *ibdev, int mad_flags,
 {
 	int ret;
 	int pkey_idx;
-	u32 resp_len = 0;
+	int local_mad = 0;
+	u32 resp_len = in_wc->byte_len - sizeof(*in_grh);
 	struct hfi1_ibport *ibp = to_iport(ibdev, port);
 
 	pkey_idx = hfi1_lookup_pkey_idx(ibp, LIM_MGMT_P_KEY);
@@ -4846,13 +4796,14 @@ static int hfi1_process_opa_mad(struct ib_device *ibdev, int mad_flags,
 	switch (in_mad->mad_hdr.mgmt_class) {
 	case IB_MGMT_CLASS_SUBN_DIRECTED_ROUTE:
 	case IB_MGMT_CLASS_SUBN_LID_ROUTED:
-		if (is_local_mad(ibp, in_mad, in_wc)) {
+		local_mad = is_local_mad(ibp, in_mad, in_wc);
+		if (local_mad) {
 			ret = opa_local_smp_check(ibp, in_wc);
 			if (ret)
 				return IB_MAD_RESULT_FAILURE;
 		}
 		ret = process_subn_opa(ibdev, mad_flags, port, in_mad,
-				       out_mad, &resp_len);
+				       out_mad, &resp_len, local_mad);
 		goto bail;
 	case IB_MGMT_CLASS_PERF_MGMT:
 		ret = hfi1_pkey_validation_pma(ibp, in_mad, in_wc);
@@ -4875,7 +4826,7 @@ bail:
 	return ret;
 }
 
-static int hfi1_process_ib_mad(struct ib_device *ibdev, int mad_flags, u8 port,
+static int hfi1_process_ib_mad(struct ib_device *ibdev, int mad_flags, u32 port,
 			       const struct ib_wc *in_wc,
 			       const struct ib_grh *in_grh,
 			       const struct ib_mad *in_mad,
@@ -4908,6 +4859,8 @@ static int hfi1_process_ib_mad(struct ib_device *ibdev, int mad_flags, u8 port,
  * @in_grh: the global route header for this packet
  * @in_mad: the incoming MAD
  * @out_mad: any outgoing MAD reply
+ * @out_mad_size: size of the outgoing MAD reply
+ * @out_mad_pkey_index: used to apss back the packet key index
  *
  * Returns IB_MAD_RESULT_SUCCESS if this is a MAD that we are not
  * interested in processing.
@@ -4918,18 +4871,13 @@ static int hfi1_process_ib_mad(struct ib_device *ibdev, int mad_flags, u8 port,
  *
  * This is called by the ib_mad module.
  */
-int hfi1_process_mad(struct ib_device *ibdev, int mad_flags, u8 port,
+int hfi1_process_mad(struct ib_device *ibdev, int mad_flags, u32 port,
 		     const struct ib_wc *in_wc, const struct ib_grh *in_grh,
-		     const struct ib_mad_hdr *in_mad, size_t in_mad_size,
-		     struct ib_mad_hdr *out_mad, size_t *out_mad_size,
-		     u16 *out_mad_pkey_index)
+		     const struct ib_mad *in_mad, struct ib_mad *out_mad,
+		     size_t *out_mad_size, u16 *out_mad_pkey_index)
 {
-	switch (in_mad->base_version) {
+	switch (in_mad->mad_hdr.base_version) {
 	case OPA_MGMT_BASE_VERSION:
-		if (unlikely(in_mad_size != sizeof(struct opa_mad))) {
-			dev_err(ibdev->dev.parent, "invalid in_mad_size\n");
-			return IB_MAD_RESULT_FAILURE;
-		}
 		return hfi1_process_opa_mad(ibdev, mad_flags, port,
 					    in_wc, in_grh,
 					    (struct opa_mad *)in_mad,
@@ -4937,10 +4885,8 @@ int hfi1_process_mad(struct ib_device *ibdev, int mad_flags, u8 port,
 					    out_mad_size,
 					    out_mad_pkey_index);
 	case IB_MGMT_BASE_VERSION:
-		return hfi1_process_ib_mad(ibdev, mad_flags, port,
-					  in_wc, in_grh,
-					  (const struct ib_mad *)in_mad,
-					  (struct ib_mad *)out_mad);
+		return hfi1_process_ib_mad(ibdev, mad_flags, port, in_wc,
+					   in_grh, in_mad, out_mad);
 	default:
 		break;
 	}

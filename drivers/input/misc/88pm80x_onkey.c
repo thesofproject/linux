@@ -1,22 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Marvell 88PM80x ONKEY driver
  *
  * Copyright (C) 2012 Marvell International Ltd.
  * Haojian Zhuang <haojian.zhuang@marvell.com>
  * Qiao Zhou <zhouqiao@marvell.com>
- *
- * This file is subject to the terms and conditions of the GNU General
- * Public License. See the file "COPYING" in the main directory of this
- * archive for more details.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include <linux/kernel.h>
@@ -69,7 +57,7 @@ static int pm80x_onkey_probe(struct platform_device *pdev)
 	struct pm80x_onkey_info *info;
 	int err;
 
-	info = kzalloc(sizeof(struct pm80x_onkey_info), GFP_KERNEL);
+	info = kzalloc_obj(*info);
 	if (!info)
 		return -ENOMEM;
 
@@ -77,7 +65,6 @@ static int pm80x_onkey_probe(struct platform_device *pdev)
 
 	info->irq = platform_get_irq(pdev, 0);
 	if (info->irq < 0) {
-		dev_err(&pdev->dev, "No IRQ resource!\n");
 		err = -EINVAL;
 		goto out;
 	}
@@ -139,14 +126,13 @@ out:
 	return err;
 }
 
-static int pm80x_onkey_remove(struct platform_device *pdev)
+static void pm80x_onkey_remove(struct platform_device *pdev)
 {
 	struct pm80x_onkey_info *info = platform_get_drvdata(pdev);
 
 	pm80x_free_irq(info->pm80x, info->irq, info);
 	input_unregister_device(info->idev);
 	kfree(info);
-	return 0;
 }
 
 static struct platform_driver pm80x_onkey_driver = {

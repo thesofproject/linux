@@ -18,6 +18,7 @@
 #include <linux/extcon-provider.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/string_choices.h>
 #include <linux/usb/otg.h>
 #include <linux/mfd/retu.h>
 #include <linux/usb/gadget.h>
@@ -63,7 +64,7 @@ static ssize_t vbus_show(struct device *device,
 			       struct device_attribute *attr, char *buf)
 {
 	struct tahvo_usb *tu = dev_get_drvdata(device);
-	return sprintf(buf, "%s\n", tu->vbus_state ? "on" : "off");
+	return sprintf(buf, "%s\n", str_on_off(tu->vbus_state));
 }
 static DEVICE_ATTR_RO(vbus);
 
@@ -194,8 +195,6 @@ static int tahvo_usb_set_host(struct usb_otg *otg, struct usb_bus *host)
 	struct tahvo_usb *tu = container_of(otg->usb_phy, struct tahvo_usb,
 					    phy);
 
-	dev_dbg(&tu->pt_dev->dev, "%s %p\n", __func__, host);
-
 	mutex_lock(&tu->serialize);
 
 	if (host == NULL) {
@@ -223,8 +222,6 @@ static int tahvo_usb_set_peripheral(struct usb_otg *otg,
 {
 	struct tahvo_usb *tu = container_of(otg->usb_phy, struct tahvo_usb,
 					    phy);
-
-	dev_dbg(&tu->pt_dev->dev, "%s %p\n", __func__, gadget);
 
 	mutex_lock(&tu->serialize);
 
@@ -312,15 +309,12 @@ static ssize_t otg_mode_store(struct device *device,
 }
 static DEVICE_ATTR_RW(otg_mode);
 
-static struct attribute *tahvo_attributes[] = {
+static struct attribute *tahvo_attrs[] = {
 	&dev_attr_vbus.attr,
 	&dev_attr_otg_mode.attr,
 	NULL
 };
-
-static const struct attribute_group tahvo_attr_group = {
-	.attrs = tahvo_attributes,
-};
+ATTRIBUTE_GROUPS(tahvo);
 
 static int tahvo_usb_probe(struct platform_device *pdev)
 {
@@ -396,7 +390,9 @@ static int tahvo_usb_probe(struct platform_device *pdev)
 
 	dev_set_drvdata(&pdev->dev, tu);
 
-	tu->irq = platform_get_irq(pdev, 0);
+	tu->irq = ret = platform_get_irq(pdev, 0);
+	if (ret < 0)
+		goto err_remove_phy;
 	ret = request_threaded_irq(tu->irq, NULL, tahvo_usb_vbus_interrupt,
 				   IRQF_ONESHOT,
 				   "tahvo-vbus", tu);
@@ -406,17 +402,8 @@ static int tahvo_usb_probe(struct platform_device *pdev)
 		goto err_remove_phy;
 	}
 
-	/* Attributes */
-	ret = sysfs_create_group(&pdev->dev.kobj, &tahvo_attr_group);
-	if (ret) {
-		dev_err(&pdev->dev, "cannot create sysfs group: %d\n", ret);
-		goto err_free_irq;
-	}
-
 	return 0;
 
-err_free_irq:
-	free_irq(tu->irq, tu);
 err_remove_phy:
 	usb_remove_phy(&tu->phy);
 err_disable_clk:
@@ -426,17 +413,14 @@ err_disable_clk:
 	return ret;
 }
 
-static int tahvo_usb_remove(struct platform_device *pdev)
+static void tahvo_usb_remove(struct platform_device *pdev)
 {
 	struct tahvo_usb *tu = platform_get_drvdata(pdev);
 
-	sysfs_remove_group(&pdev->dev.kobj, &tahvo_attr_group);
 	free_irq(tu->irq, tu);
 	usb_remove_phy(&tu->phy);
 	if (!IS_ERR(tu->ick))
 		clk_disable(tu->ick);
-
-	return 0;
 }
 
 static struct platform_driver tahvo_usb_driver = {
@@ -444,6 +428,7 @@ static struct platform_driver tahvo_usb_driver = {
 	.remove		= tahvo_usb_remove,
 	.driver		= {
 		.name	= "tahvo-usb",
+		.dev_groups = tahvo_groups,
 	},
 };
 module_platform_driver(tahvo_usb_driver);

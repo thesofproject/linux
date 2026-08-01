@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/pnp.h>
 
 #include <asm/setup.h>
 #include <asm/bios_ebda.h>
@@ -33,9 +34,14 @@ void __init x86_early_init_platform_quirks(void)
 		x86_platform.set_legacy_features();
 }
 
+bool __init x86_pnpbios_disabled(void)
+{
+	return x86_platform.legacy.devices.pnpbios == 0;
+}
+
 #if defined(CONFIG_PNPBIOS)
 bool __init arch_pnpbios_disabled(void)
 {
-	return x86_platform.legacy.devices.pnpbios == 0;
+	return x86_pnpbios_disabled();
 }
 #endif

@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #define pr_fmt(fmt) "%s: " fmt, __func__
@@ -70,20 +62,21 @@
 #define PM8XXX_NR_IRQS		256
 #define PM8821_NR_IRQS		112
 
+struct pm_irq_data {
+	int num_irqs;
+	struct irq_chip *irq_chip;
+	irq_handler_t irq_handler;
+};
+
 struct pm_irq_chip {
 	struct regmap		*regmap;
 	spinlock_t		pm_irq_lock;
 	struct irq_domain	*irqdomain;
-	unsigned int		num_irqs;
 	unsigned int		num_blocks;
 	unsigned int		num_masters;
-	u8			config[0];
-};
-
-struct pm_irq_data {
-	int num_irqs;
-	const struct irq_domain_ops  *irq_domain_ops;
-	void (*irq_handler)(struct irq_desc *desc);
+	const struct pm_irq_data *pm_irq_data;
+	/* MUST BE AT THE END OF THIS STRUCT */
+	u8			config[];
 };
 
 static int pm8xxx_read_block_irq(struct pm_irq_chip *chip, unsigned int bp,
@@ -110,8 +103,9 @@ static int
 pm8xxx_config_irq(struct pm_irq_chip *chip, unsigned int bp, unsigned int cp)
 {
 	int	rc;
+	unsigned long flags;
 
-	spin_lock(&chip->pm_irq_lock);
+	spin_lock_irqsave(&chip->pm_irq_lock, flags);
 	rc = regmap_write(chip->regmap, SSBI_REG_ADDR_IRQ_BLK_SEL, bp);
 	if (rc) {
 		pr_err("Failed Selecting Block %d rc=%d\n", bp, rc);
@@ -123,13 +117,13 @@ pm8xxx_config_irq(struct pm_irq_chip *chip, unsigned int bp, unsigned int cp)
 	if (rc)
 		pr_err("Failed Configuring IRQ rc=%d\n", rc);
 bail:
-	spin_unlock(&chip->pm_irq_lock);
+	spin_unlock_irqrestore(&chip->pm_irq_lock, flags);
 	return rc;
 }
 
 static int pm8xxx_irq_block_handler(struct pm_irq_chip *chip, int block)
 {
-	int pmirq, irq, i, ret = 0;
+	int pmirq, i, ret = 0;
 	unsigned int bits;
 
 	ret = pm8xxx_read_block_irq(chip, block, &bits);
@@ -146,8 +140,7 @@ static int pm8xxx_irq_block_handler(struct pm_irq_chip *chip, int block)
 	for (i = 0; i < 8; i++) {
 		if (bits & (1 << i)) {
 			pmirq = block * 8 + i;
-			irq = irq_find_mapping(chip->irqdomain, pmirq);
-			generic_handle_irq(irq);
+			generic_handle_domain_irq(chip->irqdomain, pmirq);
 		}
 	}
 	return 0;
@@ -177,19 +170,16 @@ static int pm8xxx_irq_master_handler(struct pm_irq_chip *chip, int master)
 	return ret;
 }
 
-static void pm8xxx_irq_handler(struct irq_desc *desc)
+static irqreturn_t pm8xxx_irq_handler(int irq, void *data)
 {
-	struct pm_irq_chip *chip = irq_desc_get_handler_data(desc);
-	struct irq_chip *irq_chip = irq_desc_get_chip(desc);
+	struct pm_irq_chip *chip = data;
 	unsigned int root;
 	int	i, ret, masters = 0;
-
-	chained_irq_enter(irq_chip, desc);
 
 	ret = regmap_read(chip->regmap, SSBI_REG_ADDR_IRQ_ROOT, &root);
 	if (ret) {
 		pr_err("Can't read root status ret=%d\n", ret);
-		return;
+		return IRQ_NONE;
 	}
 
 	/* on pm8xxx series masters start from bit 1 of the root */
@@ -200,13 +190,13 @@ static void pm8xxx_irq_handler(struct irq_desc *desc)
 		if (masters & (1 << i))
 			pm8xxx_irq_master_handler(chip, i);
 
-	chained_irq_exit(irq_chip, desc);
+	return IRQ_HANDLED;
 }
 
 static void pm8821_irq_block_handler(struct pm_irq_chip *chip,
 				     int master, int block)
 {
-	int pmirq, irq, i, ret;
+	int pmirq, i, ret;
 	unsigned int bits;
 
 	ret = regmap_read(chip->regmap,
@@ -223,8 +213,7 @@ static void pm8821_irq_block_handler(struct pm_irq_chip *chip,
 	for (i = 0; i < 8; i++) {
 		if (bits & BIT(i)) {
 			pmirq = block * 8 + i;
-			irq = irq_find_mapping(chip->irqdomain, pmirq);
-			generic_handle_irq(irq);
+			generic_handle_domain_irq(chip->irqdomain, pmirq);
 		}
 	}
 }
@@ -239,19 +228,17 @@ static inline void pm8821_irq_master_handler(struct pm_irq_chip *chip,
 			pm8821_irq_block_handler(chip, master, block);
 }
 
-static void pm8821_irq_handler(struct irq_desc *desc)
+static irqreturn_t pm8821_irq_handler(int irq, void *data)
 {
-	struct pm_irq_chip *chip = irq_desc_get_handler_data(desc);
-	struct irq_chip *irq_chip = irq_desc_get_chip(desc);
+	struct pm_irq_chip *chip = data;
 	unsigned int master;
 	int ret;
 
-	chained_irq_enter(irq_chip, desc);
 	ret = regmap_read(chip->regmap,
 			  PM8821_SSBI_REG_ADDR_IRQ_MASTER0, &master);
 	if (ret) {
 		pr_err("Failed to read master 0 ret=%d\n", ret);
-		goto done;
+		return IRQ_NONE;
 	}
 
 	/* bits 1 through 7 marks the first 7 blocks in master 0 */
@@ -260,19 +247,18 @@ static void pm8821_irq_handler(struct irq_desc *desc)
 
 	/* bit 0 marks if master 1 contains any bits */
 	if (!(master & BIT(0)))
-		goto done;
+		return IRQ_NONE;
 
 	ret = regmap_read(chip->regmap,
 			  PM8821_SSBI_REG_ADDR_IRQ_MASTER1, &master);
 	if (ret) {
 		pr_err("Failed to read master 1 ret=%d\n", ret);
-		goto done;
+		return IRQ_NONE;
 	}
 
 	pm8821_irq_master_handler(chip, 1, master);
 
-done:
-	chained_irq_exit(irq_chip, desc);
+	return IRQ_HANDLED;
 }
 
 static void pm8xxx_irq_mask_ack(struct irq_data *d)
@@ -336,6 +322,7 @@ static int pm8xxx_irq_get_irqchip_state(struct irq_data *d,
 	struct pm_irq_chip *chip = irq_data_get_irq_chip_data(d);
 	unsigned int pmirq = irqd_to_hwirq(d);
 	unsigned int bits;
+	unsigned long flags;
 	int irq_bit;
 	u8 block;
 	int rc;
@@ -346,7 +333,7 @@ static int pm8xxx_irq_get_irqchip_state(struct irq_data *d,
 	block = pmirq / 8;
 	irq_bit = pmirq % 8;
 
-	spin_lock(&chip->pm_irq_lock);
+	spin_lock_irqsave(&chip->pm_irq_lock, flags);
 	rc = regmap_write(chip->regmap, SSBI_REG_ADDR_IRQ_BLK_SEL, block);
 	if (rc) {
 		pr_err("Failed Selecting Block %d rc=%d\n", block, rc);
@@ -361,7 +348,7 @@ static int pm8xxx_irq_get_irqchip_state(struct irq_data *d,
 
 	*state = !!(bits & BIT(irq_bit));
 bail:
-	spin_unlock(&chip->pm_irq_lock);
+	spin_unlock_irqrestore(&chip->pm_irq_lock, flags);
 
 	return rc;
 }
@@ -375,21 +362,38 @@ static struct irq_chip pm8xxx_irq_chip = {
 	.flags		= IRQCHIP_MASK_ON_SUSPEND | IRQCHIP_SKIP_SET_WAKE,
 };
 
-static int pm8xxx_irq_domain_map(struct irq_domain *d, unsigned int irq,
-				   irq_hw_number_t hwirq)
+static void pm8xxx_irq_domain_map(struct pm_irq_chip *chip,
+				  struct irq_domain *domain, unsigned int irq,
+				  irq_hw_number_t hwirq, unsigned int type)
 {
-	struct pm_irq_chip *chip = d->host_data;
-
-	irq_set_chip_and_handler(irq, &pm8xxx_irq_chip, handle_level_irq);
-	irq_set_chip_data(irq, chip);
+	irq_domain_set_info(domain, irq, hwirq, chip->pm_irq_data->irq_chip,
+			    chip, handle_level_irq, NULL, NULL);
 	irq_set_noprobe(irq);
+}
+
+static int pm8xxx_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
+				   unsigned int nr_irqs, void *data)
+{
+	struct pm_irq_chip *chip = domain->host_data;
+	struct irq_fwspec *fwspec = data;
+	irq_hw_number_t hwirq;
+	unsigned int type;
+	int ret, i;
+
+	ret = irq_domain_translate_twocell(domain, fwspec, &hwirq, &type);
+	if (ret)
+		return ret;
+
+	for (i = 0; i < nr_irqs; i++)
+		pm8xxx_irq_domain_map(chip, domain, virq + i, hwirq + i, type);
 
 	return 0;
 }
 
 static const struct irq_domain_ops pm8xxx_irq_domain_ops = {
-	.xlate = irq_domain_xlate_twocell,
-	.map = pm8xxx_irq_domain_map,
+	.alloc = pm8xxx_irq_domain_alloc,
+	.free = irq_domain_free_irqs_common,
+	.translate = irq_domain_translate_twocell,
 };
 
 static void pm8821_irq_mask_ack(struct irq_data *d)
@@ -473,23 +477,6 @@ static struct irq_chip pm8821_irq_chip = {
 	.flags		= IRQCHIP_MASK_ON_SUSPEND | IRQCHIP_SKIP_SET_WAKE,
 };
 
-static int pm8821_irq_domain_map(struct irq_domain *d, unsigned int irq,
-				   irq_hw_number_t hwirq)
-{
-	struct pm_irq_chip *chip = d->host_data;
-
-	irq_set_chip_and_handler(irq, &pm8821_irq_chip, handle_level_irq);
-	irq_set_chip_data(irq, chip);
-	irq_set_noprobe(irq);
-
-	return 0;
-}
-
-static const struct irq_domain_ops pm8821_irq_domain_ops = {
-	.xlate = irq_domain_xlate_twocell,
-	.map = pm8821_irq_domain_map,
-};
-
 static const struct regmap_config ssbi_regmap_config = {
 	.reg_bits = 16,
 	.val_bits = 8,
@@ -501,18 +488,17 @@ static const struct regmap_config ssbi_regmap_config = {
 
 static const struct pm_irq_data pm8xxx_data = {
 	.num_irqs = PM8XXX_NR_IRQS,
-	.irq_domain_ops = &pm8xxx_irq_domain_ops,
+	.irq_chip = &pm8xxx_irq_chip,
 	.irq_handler = pm8xxx_irq_handler,
 };
 
 static const struct pm_irq_data pm8821_data = {
 	.num_irqs = PM8821_NR_IRQS,
-	.irq_domain_ops = &pm8821_irq_domain_ops,
+	.irq_chip = &pm8821_irq_chip,
 	.irq_handler = pm8821_irq_handler,
 };
 
 static const struct of_device_id pm8xxx_id_table[] = {
-	{ .compatible = "qcom,pm8018", .data = &pm8xxx_data},
 	{ .compatible = "qcom,pm8058", .data = &pm8xxx_data},
 	{ .compatible = "qcom,pm8821", .data = &pm8821_data},
 	{ .compatible = "qcom,pm8921", .data = &pm8xxx_data},
@@ -526,7 +512,6 @@ static int pm8xxx_probe(struct platform_device *pdev)
 	struct regmap *regmap;
 	int irq, rc;
 	unsigned int val;
-	u32 rev;
 	struct pm_irq_chip *chip;
 
 	data = of_device_get_match_data(&pdev->dev);
@@ -551,7 +536,6 @@ static int pm8xxx_probe(struct platform_device *pdev)
 		return rc;
 	}
 	pr_info("PMIC revision 1: %02X\n", val);
-	rev = val;
 
 	/* Read PMIC chip revision 2 */
 	rc = regmap_read(regmap, REG_HWREV_2, &val);
@@ -561,56 +545,44 @@ static int pm8xxx_probe(struct platform_device *pdev)
 		return rc;
 	}
 	pr_info("PMIC revision 2: %02X\n", val);
-	rev |= val << BITS_PER_BYTE;
 
-	chip = devm_kzalloc(&pdev->dev, sizeof(*chip) +
-			    sizeof(chip->config[0]) * data->num_irqs,
+	chip = devm_kzalloc(&pdev->dev,
+			    struct_size(chip, config, data->num_irqs),
 			    GFP_KERNEL);
 	if (!chip)
 		return -ENOMEM;
 
 	platform_set_drvdata(pdev, chip);
 	chip->regmap = regmap;
-	chip->num_irqs = data->num_irqs;
-	chip->num_blocks = DIV_ROUND_UP(chip->num_irqs, 8);
+	chip->num_blocks = DIV_ROUND_UP(data->num_irqs, 8);
 	chip->num_masters = DIV_ROUND_UP(chip->num_blocks, 8);
+	chip->pm_irq_data = data;
 	spin_lock_init(&chip->pm_irq_lock);
 
-	chip->irqdomain = irq_domain_add_linear(pdev->dev.of_node,
-						data->num_irqs,
-						data->irq_domain_ops,
-						chip);
+	chip->irqdomain = irq_domain_create_linear(dev_fwnode(&pdev->dev), data->num_irqs,
+						   &pm8xxx_irq_domain_ops, chip);
 	if (!chip->irqdomain)
 		return -ENODEV;
 
-	irq_set_chained_handler_and_data(irq, data->irq_handler, chip);
+	rc = devm_request_irq(&pdev->dev, irq, data->irq_handler, 0, dev_name(&pdev->dev), chip);
+	if (rc)
+		return rc;
+
 	irq_set_irq_wake(irq, 1);
 
 	rc = of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
-	if (rc) {
-		irq_set_chained_handler_and_data(irq, NULL, NULL);
+	if (rc)
 		irq_domain_remove(chip->irqdomain);
-	}
 
 	return rc;
 }
 
-static int pm8xxx_remove_child(struct device *dev, void *unused)
+static void pm8xxx_remove(struct platform_device *pdev)
 {
-	platform_device_unregister(to_platform_device(dev));
-	return 0;
-}
-
-static int pm8xxx_remove(struct platform_device *pdev)
-{
-	int irq = platform_get_irq(pdev, 0);
 	struct pm_irq_chip *chip = platform_get_drvdata(pdev);
 
-	device_for_each_child(&pdev->dev, NULL, pm8xxx_remove_child);
-	irq_set_chained_handler_and_data(irq, NULL, NULL);
+	of_platform_depopulate(&pdev->dev);
 	irq_domain_remove(chip->irqdomain);
-
-	return 0;
 }
 
 static struct platform_driver pm8xxx_driver = {

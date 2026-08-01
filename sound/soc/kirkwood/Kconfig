@@ -1,7 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "Kirkwood"
+
 config SND_KIRKWOOD_SOC
 	tristate "SoC Audio for the Marvell Kirkwood and Dove chips"
 	depends on ARCH_DOVE || ARCH_MVEBU || COMPILE_TEST
-	depends on HAS_DMA
 	help
 	  Say Y or M if you want to add support for codecs attached to
 	  the Kirkwood I2S interface. You will also need to select the
@@ -16,3 +18,4 @@ config SND_KIRKWOOD_SOC_ARMADA370_DB
 	  Say Y if you want to add support for SoC audio on
 	  the Armada 370 Development Board.
 
+endmenu

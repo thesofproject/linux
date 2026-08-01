@@ -171,7 +171,6 @@ nv50_ram_timing_read(struct nv50_ram *ram, u32 *timing)
 		break;
 	default:
 		return -ENOSYS;
-		break;
 	}
 
 	T(WR) = ((timing[1] >> 24) & 0xff) - 1 - T(CWL);
@@ -588,7 +587,7 @@ nv50_ram_new(struct nvkm_fb *fb, struct nvkm_ram **pram)
 	struct nv50_ram *ram;
 	int ret, i;
 
-	if (!(ram = kzalloc(sizeof(*ram), GFP_KERNEL)))
+	if (!(ram = kzalloc_obj(*ram)))
 		return -ENOMEM;
 	*pram = &ram->base;
 

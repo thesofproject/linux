@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * GS1662 device registration.
  *
  * Copyright (C) 2015-2016 Nexvision
  * Author: Charles-Antoine Couret <charles-antoine.couret@nexvision.fr>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -57,14 +53,6 @@ struct gs {
 struct gs_reg_fmt {
 	u16 reg_value;
 	struct v4l2_dv_timings format;
-};
-
-struct gs_reg_fmt_custom {
-	u16 reg_value;
-	__u32 width;
-	__u32 height;
-	__u64 pixelclock;
-	__u32 interlaced;
 };
 
 static const struct spi_device_id gs_id[] = {
@@ -151,11 +139,17 @@ static int gs_read_register(struct spi_device *spi, u16 addr, u16 *value)
 		{
 			.tx_buf = &buf_addr,
 			.len = 2,
-			.delay_usecs = 1,
+			.delay = {
+				.value = 1,
+				.unit = SPI_DELAY_UNIT_USECS
+			},
 		}, {
 			.rx_buf = &buf_value,
 			.len = 2,
-			.delay_usecs = 1,
+			.delay = {
+				.value = 1,
+				.unit = SPI_DELAY_UNIT_USECS
+			},
 		},
 	};
 
@@ -179,11 +173,17 @@ static int gs_write_register(struct spi_device *spi, u16 addr, u16 value)
 		{
 			.tx_buf = &buf_addr,
 			.len = 2,
-			.delay_usecs = 1,
+			.delay = {
+				.value = 1,
+				.unit = SPI_DELAY_UNIT_USECS
+			},
 		}, {
 			.tx_buf = &buf_value,
 			.len = 2,
-			.delay_usecs = 1,
+			.delay = {
+				.value = 1,
+				.unit = SPI_DELAY_UNIT_USECS
+			},
 		},
 	};
 
@@ -251,11 +251,14 @@ static inline struct gs *to_gs(struct v4l2_subdev *sd)
 	return container_of(sd, struct gs, sd);
 }
 
-static int gs_s_dv_timings(struct v4l2_subdev *sd,
-		    struct v4l2_dv_timings *timings)
+static int gs_s_dv_timings(struct v4l2_subdev *sd, unsigned int pad,
+			   struct v4l2_dv_timings *timings)
 {
 	struct gs *gs = to_gs(sd);
 	int reg_value;
+
+	if (pad != 0)
+		return -EINVAL;
 
 	reg_value = get_register_timings(timings);
 	if (reg_value == 0x0)
@@ -265,22 +268,28 @@ static int gs_s_dv_timings(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int gs_g_dv_timings(struct v4l2_subdev *sd,
-		    struct v4l2_dv_timings *timings)
+static int gs_g_dv_timings(struct v4l2_subdev *sd, unsigned int pad,
+			   struct v4l2_dv_timings *timings)
 {
 	struct gs *gs = to_gs(sd);
+
+	if (pad != 0)
+		return -EINVAL;
 
 	*timings = gs->current_timings;
 	return 0;
 }
 
-static int gs_query_dv_timings(struct v4l2_subdev *sd,
-			struct v4l2_dv_timings *timings)
+static int gs_query_dv_timings(struct v4l2_subdev *sd, unsigned int pad,
+			       struct v4l2_dv_timings *timings)
 {
 	struct gs *gs = to_gs(sd);
 	struct v4l2_dv_timings fmt;
 	u16 reg_value, i;
 	int ret;
+
+	if (pad != 0)
+		return -EINVAL;
 
 	if (gs->enabled)
 		return -EBUSY;
@@ -402,14 +411,14 @@ static const struct v4l2_subdev_core_ops gs_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops gs_video_ops = {
-	.s_dv_timings = gs_s_dv_timings,
-	.g_dv_timings = gs_g_dv_timings,
 	.s_stream = gs_s_stream,
 	.g_input_status = gs_g_input_status,
-	.query_dv_timings = gs_query_dv_timings,
 };
 
 static const struct v4l2_subdev_pad_ops gs_pad_ops = {
+	.s_dv_timings = gs_s_dv_timings,
+	.g_dv_timings = gs_g_dv_timings,
+	.query_dv_timings = gs_query_dv_timings,
 	.enum_dv_timings = gs_enum_dv_timings,
 	.dv_timings_cap = gs_dv_timings_cap,
 };
@@ -450,13 +459,11 @@ static int gs_probe(struct spi_device *spi)
 	return ret;
 }
 
-static int gs_remove(struct spi_device *spi)
+static void gs_remove(struct spi_device *spi)
 {
 	struct v4l2_subdev *sd = spi_get_drvdata(spi);
 
 	v4l2_device_unregister_subdev(sd);
-
-	return 0;
 }
 
 static struct spi_driver gs_driver = {

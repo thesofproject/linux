@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Cryptographic API.
  *
@@ -5,10 +6,6 @@
  *
  * Copyright (c) 2012 Eukréa Electromatique - ATMEL
  * Author: Nicolas Royer <nicolas@eukrea.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
  *
  * Some ideas are from omap-sham.c drivers.
  */
@@ -24,24 +21,25 @@
 #include <linux/platform_device.h>
 
 #include <linux/device.h>
+#include <linux/dmaengine.h>
 #include <linux/init.h>
 #include <linux/errno.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/scatterlist.h>
 #include <linux/dma-mapping.h>
-#include <linux/of_device.h>
 #include <linux/delay.h>
 #include <linux/crypto.h>
-#include <linux/cryptohash.h>
 #include <crypto/scatterwalk.h>
 #include <crypto/algapi.h>
-#include <crypto/sha.h>
+#include <crypto/sha1.h>
+#include <crypto/sha2.h>
 #include <crypto/hash.h>
 #include <crypto/internal/hash.h>
-#include <linux/platform_data/crypto-atmel.h>
 #include "atmel-sha-regs.h"
 #include "atmel-authenc.h"
+
+#define ATMEL_SHA_PRIORITY	300
 
 /* SHA flags */
 #define SHA_FLAGS_BUSY			BIT(0)
@@ -137,7 +135,6 @@ struct atmel_sha_dev {
 	void __iomem		*io_base;
 
 	spinlock_t		lock;
-	int			err;
 	struct tasklet_struct	done_task;
 	struct tasklet_struct	queue_task;
 
@@ -294,7 +291,7 @@ static inline int atmel_sha_complete(struct atmel_sha_dev *dd, int err)
 	clk_disable(dd->iclk);
 
 	if ((dd->is_async || dd->force_complete) && req->base.complete)
-		req->base.complete(&req->base, err);
+		ahash_request_complete(req, err);
 
 	/* handle new request */
 	tasklet_schedule(&dd->queue_task);
@@ -307,12 +304,12 @@ static size_t atmel_sha_append_sg(struct atmel_sha_reqctx *ctx)
 	size_t count;
 
 	while ((ctx->bufcnt < ctx->buflen) && ctx->total) {
-		count = min(ctx->sg->length - ctx->offset, ctx->total);
-		count = min(count, ctx->buflen - ctx->bufcnt);
+		count = min3(ctx->sg->length - ctx->offset, ctx->total,
+			     ctx->buflen - ctx->bufcnt);
 
-		if (count <= 0) {
+		if (count == 0) {
 			/*
-			* Check if count <= 0 because the buffer is full or
+			* Check if count == 0 because the buffer is full or
 			* because the sg length is 0. In the latest case,
 			* check if there is another sg in the list, a 0 length
 			* sg doesn't necessarily mean the end of the sg list.
@@ -363,7 +360,7 @@ static size_t atmel_sha_append_sg(struct atmel_sha_reqctx *ctx)
 static void atmel_sha_fill_padding(struct atmel_sha_reqctx *ctx, int length)
 {
 	unsigned int index, padlen;
-	u64 bits[2];
+	__be64 bits[2];
 	u64 size[2];
 
 	size[0] = ctx->digcnt[0];
@@ -406,20 +403,13 @@ static void atmel_sha_fill_padding(struct atmel_sha_reqctx *ctx, int length)
 
 static struct atmel_sha_dev *atmel_sha_find_dev(struct atmel_sha_ctx *tctx)
 {
-	struct atmel_sha_dev *dd = NULL;
-	struct atmel_sha_dev *tmp;
+	struct atmel_sha_dev *dd;
 
 	spin_lock_bh(&atmel_sha.lock);
-	if (!tctx->dd) {
-		list_for_each_entry(tmp, &atmel_sha.dev_list, list) {
-			dd = tmp;
-			break;
-		}
-		tctx->dd = dd;
-	} else {
-		dd = tctx->dd;
-	}
-
+	if (!tctx->dd)
+		tctx->dd = list_first_entry_or_null(&atmel_sha.dev_list,
+						    struct atmel_sha_dev, list);
+	dd = tctx->dd;
 	spin_unlock_bh(&atmel_sha.lock);
 
 	return dd;
@@ -436,7 +426,7 @@ static int atmel_sha_init(struct ahash_request *req)
 
 	ctx->flags = 0;
 
-	dev_dbg(dd->dev, "init: digest size: %d\n",
+	dev_dbg(dd->dev, "init: digest size: %u\n",
 		crypto_ahash_digestsize(tfm));
 
 	switch (crypto_ahash_digestsize(tfm)) {
@@ -462,7 +452,6 @@ static int atmel_sha_init(struct ahash_request *req)
 		break;
 	default:
 		return -EINVAL;
-		break;
 	}
 
 	ctx->bufcnt = 0;
@@ -854,7 +843,7 @@ static int atmel_sha_update_dma_start(struct atmel_sha_dev *dd)
 								0, final);
 }
 
-static int atmel_sha_update_dma_stop(struct atmel_sha_dev *dd)
+static void atmel_sha_update_dma_stop(struct atmel_sha_dev *dd)
 {
 	struct atmel_sha_reqctx *ctx = ahash_request_ctx(dd->req);
 
@@ -873,8 +862,6 @@ static int atmel_sha_update_dma_stop(struct atmel_sha_dev *dd)
 		dma_unmap_single(dd->dev, ctx->dma_addr, ctx->buflen +
 						ctx->block_size, DMA_TO_DEVICE);
 	}
-
-	return 0;
 }
 
 static int atmel_sha_update_req(struct atmel_sha_dev *dd)
@@ -1028,7 +1015,6 @@ static int atmel_sha_hw_init(struct atmel_sha_dev *dd)
 	if (!(SHA_FLAGS_INIT & dd->flags)) {
 		atmel_sha_write(dd, SHA_CR, SHA_CR_SWRST);
 		dd->flags |= SHA_FLAGS_INIT;
-		dd->err = 0;
 	}
 
 	return 0;
@@ -1039,9 +1025,13 @@ static inline unsigned int atmel_sha_get_version(struct atmel_sha_dev *dd)
 	return atmel_sha_read(dd, SHA_HW_VERSION) & 0x00000fff;
 }
 
-static void atmel_sha_hw_version_init(struct atmel_sha_dev *dd)
+static int atmel_sha_hw_version_init(struct atmel_sha_dev *dd)
 {
-	atmel_sha_hw_init(dd);
+	int err;
+
+	err = atmel_sha_hw_init(dd);
+	if (err)
+		return err;
 
 	dd->hw_version = atmel_sha_get_version(dd);
 
@@ -1049,6 +1039,8 @@ static void atmel_sha_hw_version_init(struct atmel_sha_dev *dd)
 			"version: 0x%x\n", dd->hw_version);
 
 	clk_disable(dd->iclk);
+
+	return 0;
 }
 
 static int atmel_sha_handle_queue(struct atmel_sha_dev *dd,
@@ -1080,7 +1072,7 @@ static int atmel_sha_handle_queue(struct atmel_sha_dev *dd,
 		return ret;
 
 	if (backlog)
-		backlog->complete(backlog, -EINPROGRESS);
+		crypto_request_complete(backlog, -EINPROGRESS);
 
 	ctx = crypto_tfm_ctx(async_req->tfm);
 
@@ -1102,7 +1094,7 @@ static int atmel_sha_start(struct atmel_sha_dev *dd)
 	struct atmel_sha_reqctx *ctx = ahash_request_ctx(req);
 	int err;
 
-	dev_dbg(dd->dev, "handling new req, op: %lu, nbytes: %d\n",
+	dev_dbg(dd->dev, "handling new req, op: %lu, nbytes: %u\n",
 						ctx->op, req->nbytes);
 
 	err = atmel_sha_hw_init(dd);
@@ -1251,130 +1243,65 @@ static int atmel_sha_cra_init(struct crypto_tfm *tfm)
 	return 0;
 }
 
+static void atmel_sha_alg_init(struct ahash_alg *alg)
+{
+	alg->halg.base.cra_priority = ATMEL_SHA_PRIORITY;
+	alg->halg.base.cra_flags = CRYPTO_ALG_ASYNC |
+				   CRYPTO_ALG_KERN_DRIVER_ONLY;
+	alg->halg.base.cra_ctxsize = sizeof(struct atmel_sha_ctx);
+	alg->halg.base.cra_module = THIS_MODULE;
+	alg->halg.base.cra_init = atmel_sha_cra_init;
+
+	alg->halg.statesize = sizeof(struct atmel_sha_reqctx);
+
+	alg->init = atmel_sha_init;
+	alg->update = atmel_sha_update;
+	alg->final = atmel_sha_final;
+	alg->finup = atmel_sha_finup;
+	alg->digest = atmel_sha_digest;
+	alg->export = atmel_sha_export;
+	alg->import = atmel_sha_import;
+}
+
 static struct ahash_alg sha_1_256_algs[] = {
 {
-	.init		= atmel_sha_init,
-	.update		= atmel_sha_update,
-	.final		= atmel_sha_final,
-	.finup		= atmel_sha_finup,
-	.digest		= atmel_sha_digest,
-	.export		= atmel_sha_export,
-	.import		= atmel_sha_import,
-	.halg = {
-		.digestsize	= SHA1_DIGEST_SIZE,
-		.statesize	= sizeof(struct atmel_sha_reqctx),
-		.base	= {
-			.cra_name		= "sha1",
-			.cra_driver_name	= "atmel-sha1",
-			.cra_priority		= 100,
-			.cra_flags		= CRYPTO_ALG_ASYNC,
-			.cra_blocksize		= SHA1_BLOCK_SIZE,
-			.cra_ctxsize		= sizeof(struct atmel_sha_ctx),
-			.cra_alignmask		= 0,
-			.cra_module		= THIS_MODULE,
-			.cra_init		= atmel_sha_cra_init,
-		}
-	}
+	.halg.base.cra_name		= "sha1",
+	.halg.base.cra_driver_name	= "atmel-sha1",
+	.halg.base.cra_blocksize	= SHA1_BLOCK_SIZE,
+
+	.halg.digestsize = SHA1_DIGEST_SIZE,
 },
 {
-	.init		= atmel_sha_init,
-	.update		= atmel_sha_update,
-	.final		= atmel_sha_final,
-	.finup		= atmel_sha_finup,
-	.digest		= atmel_sha_digest,
-	.export		= atmel_sha_export,
-	.import		= atmel_sha_import,
-	.halg = {
-		.digestsize	= SHA256_DIGEST_SIZE,
-		.statesize	= sizeof(struct atmel_sha_reqctx),
-		.base	= {
-			.cra_name		= "sha256",
-			.cra_driver_name	= "atmel-sha256",
-			.cra_priority		= 100,
-			.cra_flags		= CRYPTO_ALG_ASYNC,
-			.cra_blocksize		= SHA256_BLOCK_SIZE,
-			.cra_ctxsize		= sizeof(struct atmel_sha_ctx),
-			.cra_alignmask		= 0,
-			.cra_module		= THIS_MODULE,
-			.cra_init		= atmel_sha_cra_init,
-		}
-	}
+	.halg.base.cra_name		= "sha256",
+	.halg.base.cra_driver_name	= "atmel-sha256",
+	.halg.base.cra_blocksize	= SHA256_BLOCK_SIZE,
+
+	.halg.digestsize = SHA256_DIGEST_SIZE,
 },
 };
 
 static struct ahash_alg sha_224_alg = {
-	.init		= atmel_sha_init,
-	.update		= atmel_sha_update,
-	.final		= atmel_sha_final,
-	.finup		= atmel_sha_finup,
-	.digest		= atmel_sha_digest,
-	.export		= atmel_sha_export,
-	.import		= atmel_sha_import,
-	.halg = {
-		.digestsize	= SHA224_DIGEST_SIZE,
-		.statesize	= sizeof(struct atmel_sha_reqctx),
-		.base	= {
-			.cra_name		= "sha224",
-			.cra_driver_name	= "atmel-sha224",
-			.cra_priority		= 100,
-			.cra_flags		= CRYPTO_ALG_ASYNC,
-			.cra_blocksize		= SHA224_BLOCK_SIZE,
-			.cra_ctxsize		= sizeof(struct atmel_sha_ctx),
-			.cra_alignmask		= 0,
-			.cra_module		= THIS_MODULE,
-			.cra_init		= atmel_sha_cra_init,
-		}
-	}
+	.halg.base.cra_name		= "sha224",
+	.halg.base.cra_driver_name	= "atmel-sha224",
+	.halg.base.cra_blocksize	= SHA224_BLOCK_SIZE,
+
+	.halg.digestsize = SHA224_DIGEST_SIZE,
 };
 
 static struct ahash_alg sha_384_512_algs[] = {
 {
-	.init		= atmel_sha_init,
-	.update		= atmel_sha_update,
-	.final		= atmel_sha_final,
-	.finup		= atmel_sha_finup,
-	.digest		= atmel_sha_digest,
-	.export		= atmel_sha_export,
-	.import		= atmel_sha_import,
-	.halg = {
-		.digestsize	= SHA384_DIGEST_SIZE,
-		.statesize	= sizeof(struct atmel_sha_reqctx),
-		.base	= {
-			.cra_name		= "sha384",
-			.cra_driver_name	= "atmel-sha384",
-			.cra_priority		= 100,
-			.cra_flags		= CRYPTO_ALG_ASYNC,
-			.cra_blocksize		= SHA384_BLOCK_SIZE,
-			.cra_ctxsize		= sizeof(struct atmel_sha_ctx),
-			.cra_alignmask		= 0x3,
-			.cra_module		= THIS_MODULE,
-			.cra_init		= atmel_sha_cra_init,
-		}
-	}
+	.halg.base.cra_name		= "sha384",
+	.halg.base.cra_driver_name	= "atmel-sha384",
+	.halg.base.cra_blocksize	= SHA384_BLOCK_SIZE,
+
+	.halg.digestsize = SHA384_DIGEST_SIZE,
 },
 {
-	.init		= atmel_sha_init,
-	.update		= atmel_sha_update,
-	.final		= atmel_sha_final,
-	.finup		= atmel_sha_finup,
-	.digest		= atmel_sha_digest,
-	.export		= atmel_sha_export,
-	.import		= atmel_sha_import,
-	.halg = {
-		.digestsize	= SHA512_DIGEST_SIZE,
-		.statesize	= sizeof(struct atmel_sha_reqctx),
-		.base	= {
-			.cra_name		= "sha512",
-			.cra_driver_name	= "atmel-sha512",
-			.cra_priority		= 100,
-			.cra_flags		= CRYPTO_ALG_ASYNC,
-			.cra_blocksize		= SHA512_BLOCK_SIZE,
-			.cra_ctxsize		= sizeof(struct atmel_sha_ctx),
-			.cra_alignmask		= 0x3,
-			.cra_module		= THIS_MODULE,
-			.cra_init		= atmel_sha_cra_init,
-		}
-	}
+	.halg.base.cra_name		= "sha512",
+	.halg.base.cra_driver_name	= "atmel-sha512",
+	.halg.base.cra_blocksize	= SHA512_BLOCK_SIZE,
+
+	.halg.digestsize = SHA512_DIGEST_SIZE,
 },
 };
 
@@ -1398,10 +1325,6 @@ static int atmel_sha_done(struct atmel_sha_dev *dd)
 		if (SHA_FLAGS_DMA_ACTIVE & dd->flags) {
 			dd->flags &= ~SHA_FLAGS_DMA_ACTIVE;
 			atmel_sha_update_dma_stop(dd);
-			if (dd->err) {
-				err = dd->err;
-				goto finish;
-			}
 		}
 		if (SHA_FLAGS_OUTPUT_READY & dd->flags) {
 			/* hash or semi-hash ready */
@@ -1496,7 +1419,6 @@ static void atmel_sha_dma_callback2(void *data)
 	struct scatterlist *sg;
 	int nents;
 
-	dmaengine_terminate_all(dma->chan);
 	dma_unmap_sg(dd->dev, dma->sg, dma->nents, DMA_TO_DEVICE);
 
 	sg = dma->sg;
@@ -1801,8 +1723,7 @@ static int atmel_sha_hmac_setup(struct atmel_sha_dev *dd,
 		return atmel_sha_hmac_prehash_key(dd, key, keylen);
 
 	/* Prepare ipad. */
-	memcpy((u8 *)hmac->ipad, key, keylen);
-	memset((u8 *)hmac->ipad + keylen, 0, bs - keylen);
+	memcpy_and_pad(hmac->ipad, bs, key, keylen, 0);
 	return atmel_sha_hmac_compute_ipad_hash(dd);
 }
 
@@ -1839,7 +1760,8 @@ static int atmel_sha_hmac_compute_ipad_hash(struct atmel_sha_dev *dd)
 	size_t bs = ctx->block_size;
 	size_t i, num_words = bs / sizeof(u32);
 
-	memcpy(hmac->opad, hmac->ipad, bs);
+	unsafe_memcpy(hmac->opad, hmac->ipad, bs,
+		      "fortified memcpy causes -Wrestrict warning");
 	for (i = 0; i < num_words; ++i) {
 		hmac->ipad[i] ^= 0x36363636;
 		hmac->opad[i] ^= 0x5c5c5c5c;
@@ -1921,12 +1843,7 @@ static int atmel_sha_hmac_setkey(struct crypto_ahash *tfm, const u8 *key,
 {
 	struct atmel_sha_hmac_ctx *hmac = crypto_ahash_ctx(tfm);
 
-	if (atmel_sha_hmac_key_set(&hmac->hkey, key, keylen)) {
-		crypto_ahash_set_flags(tfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
-		return -EINVAL;
-	}
-
-	return 0;
+	return atmel_sha_hmac_key_set(&hmac->hkey, key, keylen);
 }
 
 static int atmel_sha_hmac_init(struct ahash_request *req)
@@ -2022,14 +1939,32 @@ static int atmel_sha_hmac_digest2(struct atmel_sha_dev *dd)
 	struct atmel_sha_reqctx *ctx = ahash_request_ctx(req);
 	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
 	struct atmel_sha_hmac_ctx *hmac = crypto_ahash_ctx(tfm);
+	struct scatterlist *sgbuf;
 	size_t hs = ctx->hash_size;
 	size_t i, num_words = hs / sizeof(u32);
 	bool use_dma = false;
 	u32 mr;
 
 	/* Special case for empty message. */
-	if (!req->nbytes)
-		return atmel_sha_complete(dd, -EINVAL); // TODO:
+	if (!req->nbytes) {
+		req->nbytes = 0;
+		ctx->bufcnt = 0;
+		ctx->digcnt[0] = 0;
+		ctx->digcnt[1] = 0;
+		switch (ctx->flags & SHA_FLAGS_ALGO_MASK) {
+		case SHA_FLAGS_SHA1:
+		case SHA_FLAGS_SHA224:
+		case SHA_FLAGS_SHA256:
+			atmel_sha_fill_padding(ctx, 64);
+			break;
+
+		case SHA_FLAGS_SHA384:
+		case SHA_FLAGS_SHA512:
+			atmel_sha_fill_padding(ctx, 128);
+			break;
+		}
+		sg_init_one(&dd->tmp, ctx->buffer, ctx->bufcnt);
+	}
 
 	/* Check DMA threshold and alignment. */
 	if (req->nbytes > ATMEL_SHA_DMA_THRESHOLD &&
@@ -2059,12 +1994,20 @@ static int atmel_sha_hmac_digest2(struct atmel_sha_dev *dd)
 
 	atmel_sha_write(dd, SHA_CR, SHA_CR_FIRST);
 
+	/* Special case for empty message. */
+	if (!req->nbytes) {
+		sgbuf = &dd->tmp;
+		req->nbytes = ctx->bufcnt;
+	} else {
+		sgbuf = req->src;
+	}
+
 	/* Process data. */
 	if (use_dma)
-		return atmel_sha_dma_start(dd, req->src, req->nbytes,
+		return atmel_sha_dma_start(dd, sgbuf, req->nbytes,
 					   atmel_sha_hmac_final_done);
 
-	return atmel_sha_cpu_start(dd, req->src, req->nbytes, false, true,
+	return atmel_sha_cpu_start(dd, sgbuf, req->nbytes, false, true,
 				   atmel_sha_hmac_final_done);
 }
 
@@ -2087,135 +2030,66 @@ static void atmel_sha_hmac_cra_exit(struct crypto_tfm *tfm)
 	atmel_sha_hmac_key_release(&hmac->hkey);
 }
 
+static void atmel_sha_hmac_alg_init(struct ahash_alg *alg)
+{
+	alg->halg.base.cra_priority = ATMEL_SHA_PRIORITY;
+	alg->halg.base.cra_flags = CRYPTO_ALG_ASYNC |
+				   CRYPTO_ALG_KERN_DRIVER_ONLY;
+	alg->halg.base.cra_ctxsize = sizeof(struct atmel_sha_hmac_ctx);
+	alg->halg.base.cra_module = THIS_MODULE;
+	alg->halg.base.cra_init	= atmel_sha_hmac_cra_init;
+	alg->halg.base.cra_exit	= atmel_sha_hmac_cra_exit;
+
+	alg->halg.statesize = sizeof(struct atmel_sha_reqctx);
+
+	alg->init = atmel_sha_hmac_init;
+	alg->update = atmel_sha_update;
+	alg->final = atmel_sha_final;
+	alg->digest = atmel_sha_hmac_digest;
+	alg->setkey = atmel_sha_hmac_setkey;
+	alg->export = atmel_sha_export;
+	alg->import = atmel_sha_import;
+}
+
 static struct ahash_alg sha_hmac_algs[] = {
 {
-	.init		= atmel_sha_hmac_init,
-	.update		= atmel_sha_update,
-	.final		= atmel_sha_final,
-	.digest		= atmel_sha_hmac_digest,
-	.setkey		= atmel_sha_hmac_setkey,
-	.export		= atmel_sha_export,
-	.import		= atmel_sha_import,
-	.halg = {
-		.digestsize	= SHA1_DIGEST_SIZE,
-		.statesize	= sizeof(struct atmel_sha_reqctx),
-		.base	= {
-			.cra_name		= "hmac(sha1)",
-			.cra_driver_name	= "atmel-hmac-sha1",
-			.cra_priority		= 100,
-			.cra_flags		= CRYPTO_ALG_ASYNC,
-			.cra_blocksize		= SHA1_BLOCK_SIZE,
-			.cra_ctxsize		= sizeof(struct atmel_sha_hmac_ctx),
-			.cra_alignmask		= 0,
-			.cra_module		= THIS_MODULE,
-			.cra_init		= atmel_sha_hmac_cra_init,
-			.cra_exit		= atmel_sha_hmac_cra_exit,
-		}
-	}
+	.halg.base.cra_name		= "hmac(sha1)",
+	.halg.base.cra_driver_name	= "atmel-hmac-sha1",
+	.halg.base.cra_blocksize	= SHA1_BLOCK_SIZE,
+
+	.halg.digestsize = SHA1_DIGEST_SIZE,
 },
 {
-	.init		= atmel_sha_hmac_init,
-	.update		= atmel_sha_update,
-	.final		= atmel_sha_final,
-	.digest		= atmel_sha_hmac_digest,
-	.setkey		= atmel_sha_hmac_setkey,
-	.export		= atmel_sha_export,
-	.import		= atmel_sha_import,
-	.halg = {
-		.digestsize	= SHA224_DIGEST_SIZE,
-		.statesize	= sizeof(struct atmel_sha_reqctx),
-		.base	= {
-			.cra_name		= "hmac(sha224)",
-			.cra_driver_name	= "atmel-hmac-sha224",
-			.cra_priority		= 100,
-			.cra_flags		= CRYPTO_ALG_ASYNC,
-			.cra_blocksize		= SHA224_BLOCK_SIZE,
-			.cra_ctxsize		= sizeof(struct atmel_sha_hmac_ctx),
-			.cra_alignmask		= 0,
-			.cra_module		= THIS_MODULE,
-			.cra_init		= atmel_sha_hmac_cra_init,
-			.cra_exit		= atmel_sha_hmac_cra_exit,
-		}
-	}
+	.halg.base.cra_name		= "hmac(sha224)",
+	.halg.base.cra_driver_name	= "atmel-hmac-sha224",
+	.halg.base.cra_blocksize	= SHA224_BLOCK_SIZE,
+
+	.halg.digestsize = SHA224_DIGEST_SIZE,
 },
 {
-	.init		= atmel_sha_hmac_init,
-	.update		= atmel_sha_update,
-	.final		= atmel_sha_final,
-	.digest		= atmel_sha_hmac_digest,
-	.setkey		= atmel_sha_hmac_setkey,
-	.export		= atmel_sha_export,
-	.import		= atmel_sha_import,
-	.halg = {
-		.digestsize	= SHA256_DIGEST_SIZE,
-		.statesize	= sizeof(struct atmel_sha_reqctx),
-		.base	= {
-			.cra_name		= "hmac(sha256)",
-			.cra_driver_name	= "atmel-hmac-sha256",
-			.cra_priority		= 100,
-			.cra_flags		= CRYPTO_ALG_ASYNC,
-			.cra_blocksize		= SHA256_BLOCK_SIZE,
-			.cra_ctxsize		= sizeof(struct atmel_sha_hmac_ctx),
-			.cra_alignmask		= 0,
-			.cra_module		= THIS_MODULE,
-			.cra_init		= atmel_sha_hmac_cra_init,
-			.cra_exit		= atmel_sha_hmac_cra_exit,
-		}
-	}
+	.halg.base.cra_name		= "hmac(sha256)",
+	.halg.base.cra_driver_name	= "atmel-hmac-sha256",
+	.halg.base.cra_blocksize	= SHA256_BLOCK_SIZE,
+
+	.halg.digestsize = SHA256_DIGEST_SIZE,
 },
 {
-	.init		= atmel_sha_hmac_init,
-	.update		= atmel_sha_update,
-	.final		= atmel_sha_final,
-	.digest		= atmel_sha_hmac_digest,
-	.setkey		= atmel_sha_hmac_setkey,
-	.export		= atmel_sha_export,
-	.import		= atmel_sha_import,
-	.halg = {
-		.digestsize	= SHA384_DIGEST_SIZE,
-		.statesize	= sizeof(struct atmel_sha_reqctx),
-		.base	= {
-			.cra_name		= "hmac(sha384)",
-			.cra_driver_name	= "atmel-hmac-sha384",
-			.cra_priority		= 100,
-			.cra_flags		= CRYPTO_ALG_ASYNC,
-			.cra_blocksize		= SHA384_BLOCK_SIZE,
-			.cra_ctxsize		= sizeof(struct atmel_sha_hmac_ctx),
-			.cra_alignmask		= 0,
-			.cra_module		= THIS_MODULE,
-			.cra_init		= atmel_sha_hmac_cra_init,
-			.cra_exit		= atmel_sha_hmac_cra_exit,
-		}
-	}
+	.halg.base.cra_name		= "hmac(sha384)",
+	.halg.base.cra_driver_name	= "atmel-hmac-sha384",
+	.halg.base.cra_blocksize	= SHA384_BLOCK_SIZE,
+
+	.halg.digestsize = SHA384_DIGEST_SIZE,
 },
 {
-	.init		= atmel_sha_hmac_init,
-	.update		= atmel_sha_update,
-	.final		= atmel_sha_final,
-	.digest		= atmel_sha_hmac_digest,
-	.setkey		= atmel_sha_hmac_setkey,
-	.export		= atmel_sha_export,
-	.import		= atmel_sha_import,
-	.halg = {
-		.digestsize	= SHA512_DIGEST_SIZE,
-		.statesize	= sizeof(struct atmel_sha_reqctx),
-		.base	= {
-			.cra_name		= "hmac(sha512)",
-			.cra_driver_name	= "atmel-hmac-sha512",
-			.cra_priority		= 100,
-			.cra_flags		= CRYPTO_ALG_ASYNC,
-			.cra_blocksize		= SHA512_BLOCK_SIZE,
-			.cra_ctxsize		= sizeof(struct atmel_sha_hmac_ctx),
-			.cra_alignmask		= 0,
-			.cra_module		= THIS_MODULE,
-			.cra_init		= atmel_sha_hmac_cra_init,
-			.cra_exit		= atmel_sha_hmac_cra_exit,
-		}
-	}
+	.halg.base.cra_name		= "hmac(sha512)",
+	.halg.base.cra_driver_name	= "atmel-hmac-sha512",
+	.halg.base.cra_blocksize	= SHA512_BLOCK_SIZE,
+
+	.halg.digestsize = SHA512_DIGEST_SIZE,
 },
 };
 
-#ifdef CONFIG_CRYPTO_DEV_ATMEL_AUTHENC
+#if IS_ENABLED(CONFIG_CRYPTO_DEV_ATMEL_AUTHENC)
 /* authenc functions */
 
 static int atmel_sha_authenc_init2(struct atmel_sha_dev *dd);
@@ -2243,10 +2117,9 @@ struct atmel_sha_authenc_reqctx {
 	unsigned int		digestlen;
 };
 
-static void atmel_sha_authenc_complete(struct crypto_async_request *areq,
-				       int err)
+static void atmel_sha_authenc_complete(void *data, int err)
 {
-	struct ahash_request *req = areq->data;
+	struct ahash_request *req = data;
 	struct atmel_sha_authenc_reqctx *authctx  = ahash_request_ctx(req);
 
 	authctx->cb(authctx->aes_dev, err, authctx->base.dd->is_async);
@@ -2316,9 +2189,7 @@ struct atmel_sha_authenc_ctx *atmel_sha_authenc_spawn(unsigned long mode)
 		goto error;
 	}
 
-	tfm = crypto_alloc_ahash(name,
-				 CRYPTO_ALG_TYPE_AHASH,
-				 CRYPTO_ALG_TYPE_AHASH_MASK);
+	tfm = crypto_alloc_ahash(name, 0, 0);
 	if (IS_ERR(tfm)) {
 		err = PTR_ERR(tfm);
 		goto error;
@@ -2327,7 +2198,7 @@ struct atmel_sha_authenc_ctx *atmel_sha_authenc_spawn(unsigned long mode)
 	tctx->start = atmel_sha_authenc_start;
 	tctx->flags = mode;
 
-	auth = kzalloc(sizeof(*auth), GFP_KERNEL);
+	auth = kzalloc_obj(*auth);
 	if (!auth) {
 		err = -ENOMEM;
 		goto err_free_ahash;
@@ -2352,18 +2223,13 @@ void atmel_sha_authenc_free(struct atmel_sha_authenc_ctx *auth)
 EXPORT_SYMBOL_GPL(atmel_sha_authenc_free);
 
 int atmel_sha_authenc_setkey(struct atmel_sha_authenc_ctx *auth,
-			     const u8 *key, unsigned int keylen,
-			     u32 *flags)
+			     const u8 *key, unsigned int keylen, u32 flags)
 {
 	struct crypto_ahash *tfm = auth->tfm;
-	int err;
 
 	crypto_ahash_clear_flags(tfm, CRYPTO_TFM_REQ_MASK);
-	crypto_ahash_set_flags(tfm, *flags & CRYPTO_TFM_REQ_MASK);
-	err = crypto_ahash_setkey(tfm, key, keylen);
-	*flags = crypto_ahash_get_flags(tfm);
-
-	return err;
+	crypto_ahash_set_flags(tfm, flags & CRYPTO_TFM_REQ_MASK);
+	return crypto_ahash_setkey(tfm, key, keylen);
 }
 EXPORT_SYMBOL_GPL(atmel_sha_authenc_setkey);
 
@@ -2543,35 +2409,35 @@ EXPORT_SYMBOL_GPL(atmel_sha_authenc_abort);
 
 static void atmel_sha_unregister_algs(struct atmel_sha_dev *dd)
 {
-	int i;
-
 	if (dd->caps.has_hmac)
-		for (i = 0; i < ARRAY_SIZE(sha_hmac_algs); i++)
-			crypto_unregister_ahash(&sha_hmac_algs[i]);
+		crypto_unregister_ahashes(sha_hmac_algs,
+					  ARRAY_SIZE(sha_hmac_algs));
 
-	for (i = 0; i < ARRAY_SIZE(sha_1_256_algs); i++)
-		crypto_unregister_ahash(&sha_1_256_algs[i]);
+	crypto_unregister_ahashes(sha_1_256_algs, ARRAY_SIZE(sha_1_256_algs));
 
 	if (dd->caps.has_sha224)
 		crypto_unregister_ahash(&sha_224_alg);
 
-	if (dd->caps.has_sha_384_512) {
-		for (i = 0; i < ARRAY_SIZE(sha_384_512_algs); i++)
-			crypto_unregister_ahash(&sha_384_512_algs[i]);
-	}
+	if (dd->caps.has_sha_384_512)
+		crypto_unregister_ahashes(sha_384_512_algs,
+					  ARRAY_SIZE(sha_384_512_algs));
 }
 
 static int atmel_sha_register_algs(struct atmel_sha_dev *dd)
 {
-	int err, i, j;
+	int err, i;
 
 	for (i = 0; i < ARRAY_SIZE(sha_1_256_algs); i++) {
+		atmel_sha_alg_init(&sha_1_256_algs[i]);
+
 		err = crypto_register_ahash(&sha_1_256_algs[i]);
 		if (err)
 			goto err_sha_1_256_algs;
 	}
 
 	if (dd->caps.has_sha224) {
+		atmel_sha_alg_init(&sha_224_alg);
+
 		err = crypto_register_ahash(&sha_224_alg);
 		if (err)
 			goto err_sha_224_algs;
@@ -2579,6 +2445,8 @@ static int atmel_sha_register_algs(struct atmel_sha_dev *dd)
 
 	if (dd->caps.has_sha_384_512) {
 		for (i = 0; i < ARRAY_SIZE(sha_384_512_algs); i++) {
+			atmel_sha_alg_init(&sha_384_512_algs[i]);
+
 			err = crypto_register_ahash(&sha_384_512_algs[i]);
 			if (err)
 				goto err_sha_384_512_algs;
@@ -2587,6 +2455,8 @@ static int atmel_sha_register_algs(struct atmel_sha_dev *dd)
 
 	if (dd->caps.has_hmac) {
 		for (i = 0; i < ARRAY_SIZE(sha_hmac_algs); i++) {
+			atmel_sha_hmac_alg_init(&sha_hmac_algs[i]);
+
 			err = crypto_register_ahash(&sha_hmac_algs[i]);
 			if (err)
 				goto err_sha_hmac_algs;
@@ -2597,51 +2467,27 @@ static int atmel_sha_register_algs(struct atmel_sha_dev *dd)
 
 	/*i = ARRAY_SIZE(sha_hmac_algs);*/
 err_sha_hmac_algs:
-	for (j = 0; j < i; j++)
-		crypto_unregister_ahash(&sha_hmac_algs[j]);
+	crypto_unregister_ahashes(sha_hmac_algs, i);
 	i = ARRAY_SIZE(sha_384_512_algs);
 err_sha_384_512_algs:
-	for (j = 0; j < i; j++)
-		crypto_unregister_ahash(&sha_384_512_algs[j]);
+	crypto_unregister_ahashes(sha_384_512_algs, i);
 	crypto_unregister_ahash(&sha_224_alg);
 err_sha_224_algs:
 	i = ARRAY_SIZE(sha_1_256_algs);
 err_sha_1_256_algs:
-	for (j = 0; j < i; j++)
-		crypto_unregister_ahash(&sha_1_256_algs[j]);
+	crypto_unregister_ahashes(sha_1_256_algs, i);
 
 	return err;
 }
 
-static bool atmel_sha_filter(struct dma_chan *chan, void *slave)
+static int atmel_sha_dma_init(struct atmel_sha_dev *dd)
 {
-	struct at_dma_slave	*sl = slave;
-
-	if (sl && sl->dma_dev == chan->device->dev) {
-		chan->private = sl;
-		return true;
-	} else {
-		return false;
-	}
-}
-
-static int atmel_sha_dma_init(struct atmel_sha_dev *dd,
-				struct crypto_platform_data *pdata)
-{
-	dma_cap_mask_t mask_in;
-
-	/* Try to grab DMA channel */
-	dma_cap_zero(mask_in);
-	dma_cap_set(DMA_SLAVE, mask_in);
-
-	dd->dma_lch_in.chan = dma_request_slave_channel_compat(mask_in,
-			atmel_sha_filter, &pdata->dma_slave->rxdata, dd->dev, "tx");
-	if (!dd->dma_lch_in.chan) {
-		dev_warn(dd->dev, "no DMA channel available\n");
-		return -ENODEV;
+	dd->dma_lch_in.chan = dma_request_chan(dd->dev, "tx");
+	if (IS_ERR(dd->dma_lch_in.chan)) {
+		return dev_err_probe(dd->dev, PTR_ERR(dd->dma_lch_in.chan),
+			"DMA channel is not available\n");
 	}
 
-	dd->dma_lch_in.dma_conf.direction = DMA_MEM_TO_DEV;
 	dd->dma_lch_in.dma_conf.dst_addr = dd->phys_base +
 		SHA_REG_DIN(0);
 	dd->dma_lch_in.dma_conf.src_maxburst = 1;
@@ -2672,6 +2518,9 @@ static void atmel_sha_get_cap(struct atmel_sha_dev *dd)
 
 	/* keep only major version number */
 	switch (dd->hw_version & 0xff0) {
+	case 0x800:
+	case 0x700:
+	case 0x600:
 	case 0x510:
 		dd->caps.has_dma = 1;
 		dd->caps.has_dualbuff = 1;
@@ -2707,7 +2556,6 @@ static void atmel_sha_get_cap(struct atmel_sha_dev *dd)
 	}
 }
 
-#if defined(CONFIG_OF)
 static const struct of_device_id atmel_sha_dt_ids[] = {
 	{ .compatible = "atmel,at91sam9g46-sha" },
 	{ /* sentinel */ }
@@ -2715,48 +2563,16 @@ static const struct of_device_id atmel_sha_dt_ids[] = {
 
 MODULE_DEVICE_TABLE(of, atmel_sha_dt_ids);
 
-static struct crypto_platform_data *atmel_sha_of_init(struct platform_device *pdev)
-{
-	struct device_node *np = pdev->dev.of_node;
-	struct crypto_platform_data *pdata;
-
-	if (!np) {
-		dev_err(&pdev->dev, "device node not found\n");
-		return ERR_PTR(-EINVAL);
-	}
-
-	pdata = devm_kzalloc(&pdev->dev, sizeof(*pdata), GFP_KERNEL);
-	if (!pdata)
-		return ERR_PTR(-ENOMEM);
-
-	pdata->dma_slave = devm_kzalloc(&pdev->dev,
-					sizeof(*(pdata->dma_slave)),
-					GFP_KERNEL);
-	if (!pdata->dma_slave)
-		return ERR_PTR(-ENOMEM);
-
-	return pdata;
-}
-#else /* CONFIG_OF */
-static inline struct crypto_platform_data *atmel_sha_of_init(struct platform_device *dev)
-{
-	return ERR_PTR(-EINVAL);
-}
-#endif
-
 static int atmel_sha_probe(struct platform_device *pdev)
 {
 	struct atmel_sha_dev *sha_dd;
-	struct crypto_platform_data	*pdata;
 	struct device *dev = &pdev->dev;
 	struct resource *sha_res;
 	int err;
 
 	sha_dd = devm_kzalloc(&pdev->dev, sizeof(*sha_dd), GFP_KERNEL);
-	if (sha_dd == NULL) {
-		err = -ENOMEM;
-		goto sha_dd_err;
-	}
+	if (!sha_dd)
+		return -ENOMEM;
 
 	sha_dd->dev = dev;
 
@@ -2772,70 +2588,45 @@ static int atmel_sha_probe(struct platform_device *pdev)
 
 	crypto_init_queue(&sha_dd->queue, ATMEL_SHA_QUEUE_LENGTH);
 
-	/* Get the base address */
-	sha_res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!sha_res) {
-		dev_err(dev, "no MEM resource info\n");
-		err = -ENODEV;
-		goto res_err;
+	sha_dd->io_base = devm_platform_get_and_ioremap_resource(pdev, 0, &sha_res);
+	if (IS_ERR(sha_dd->io_base)) {
+		err = PTR_ERR(sha_dd->io_base);
+		goto err_tasklet_kill;
 	}
 	sha_dd->phys_base = sha_res->start;
 
 	/* Get the IRQ */
 	sha_dd->irq = platform_get_irq(pdev,  0);
 	if (sha_dd->irq < 0) {
-		dev_err(dev, "no IRQ resource info\n");
 		err = sha_dd->irq;
-		goto res_err;
+		goto err_tasklet_kill;
 	}
 
 	err = devm_request_irq(&pdev->dev, sha_dd->irq, atmel_sha_irq,
 			       IRQF_SHARED, "atmel-sha", sha_dd);
 	if (err) {
 		dev_err(dev, "unable to request sha irq.\n");
-		goto res_err;
+		goto err_tasklet_kill;
 	}
 
 	/* Initializing the clock */
-	sha_dd->iclk = devm_clk_get(&pdev->dev, "sha_clk");
+	sha_dd->iclk = devm_clk_get_prepared(&pdev->dev, "sha_clk");
 	if (IS_ERR(sha_dd->iclk)) {
 		dev_err(dev, "clock initialization failed.\n");
 		err = PTR_ERR(sha_dd->iclk);
-		goto res_err;
+		goto err_tasklet_kill;
 	}
 
-	sha_dd->io_base = devm_ioremap_resource(&pdev->dev, sha_res);
-	if (IS_ERR(sha_dd->io_base)) {
-		dev_err(dev, "can't ioremap\n");
-		err = PTR_ERR(sha_dd->io_base);
-		goto res_err;
-	}
-
-	err = clk_prepare(sha_dd->iclk);
+	err = atmel_sha_hw_version_init(sha_dd);
 	if (err)
-		goto res_err;
-
-	atmel_sha_hw_version_init(sha_dd);
+		goto err_tasklet_kill;
 
 	atmel_sha_get_cap(sha_dd);
 
 	if (sha_dd->caps.has_dma) {
-		pdata = pdev->dev.platform_data;
-		if (!pdata) {
-			pdata = atmel_sha_of_init(pdev);
-			if (IS_ERR(pdata)) {
-				dev_err(&pdev->dev, "platform data not available\n");
-				err = PTR_ERR(pdata);
-				goto iclk_unprepare;
-			}
-		}
-		if (!pdata->dma_slave) {
-			err = -ENXIO;
-			goto iclk_unprepare;
-		}
-		err = atmel_sha_dma_init(sha_dd, pdata);
+		err = atmel_sha_dma_init(sha_dd);
 		if (err)
-			goto err_sha_dma;
+			goto err_tasklet_kill;
 
 		dev_info(dev, "using %s for DMA transfers\n",
 				dma_chan_name(sha_dd->dma_lch_in.chan));
@@ -2861,25 +2652,17 @@ err_algs:
 	spin_unlock(&atmel_sha.lock);
 	if (sha_dd->caps.has_dma)
 		atmel_sha_dma_cleanup(sha_dd);
-err_sha_dma:
-iclk_unprepare:
-	clk_unprepare(sha_dd->iclk);
-res_err:
+err_tasklet_kill:
 	tasklet_kill(&sha_dd->queue_task);
 	tasklet_kill(&sha_dd->done_task);
-sha_dd_err:
-	dev_err(dev, "initialization failed.\n");
 
 	return err;
 }
 
-static int atmel_sha_remove(struct platform_device *pdev)
+static void atmel_sha_remove(struct platform_device *pdev)
 {
-	struct atmel_sha_dev *sha_dd;
+	struct atmel_sha_dev *sha_dd = platform_get_drvdata(pdev);
 
-	sha_dd = platform_get_drvdata(pdev);
-	if (!sha_dd)
-		return -ENODEV;
 	spin_lock(&atmel_sha.lock);
 	list_del(&sha_dd->list);
 	spin_unlock(&atmel_sha.lock);
@@ -2891,10 +2674,6 @@ static int atmel_sha_remove(struct platform_device *pdev)
 
 	if (sha_dd->caps.has_dma)
 		atmel_sha_dma_cleanup(sha_dd);
-
-	clk_unprepare(sha_dd->iclk);
-
-	return 0;
 }
 
 static struct platform_driver atmel_sha_driver = {
@@ -2902,7 +2681,7 @@ static struct platform_driver atmel_sha_driver = {
 	.remove		= atmel_sha_remove,
 	.driver		= {
 		.name	= "atmel_sha",
-		.of_match_table	= of_match_ptr(atmel_sha_dt_ids),
+		.of_match_table	= atmel_sha_dt_ids,
 	},
 };
 

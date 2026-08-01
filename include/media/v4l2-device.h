@@ -1,21 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
     V4L2 device support header.
 
-    Copyright (C) 2008  Hans Verkuil <hverkuil@xs4all.nl>
+    Copyright (C) 2008  Hans Verkuil <hverkuil@kernel.org>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef _V4L2_DEVICE_H
@@ -25,15 +13,13 @@
 #include <media/v4l2-subdev.h>
 #include <media/v4l2-dev.h>
 
-#define V4L2_DEVICE_NAME_SIZE (20 + 16)
-
 struct v4l2_ctrl_handler;
 
 /**
  * struct v4l2_device - main struct to for V4L2 device drivers
  *
  * @dev: pointer to struct device.
- * @mdev: pointer to struct media_device
+ * @mdev: pointer to struct media_device, may be NULL.
  * @subdevs: used to keep track of the registered subdevs
  * @lock: lock this struct; can be used by the driver as well
  *	if this struct is embedded into a larger struct.
@@ -58,12 +44,10 @@ struct v4l2_ctrl_handler;
  */
 struct v4l2_device {
 	struct device *dev;
-#if defined(CONFIG_MEDIA_CONTROLLER)
 	struct media_device *mdev;
-#endif
 	struct list_head subdevs;
 	spinlock_t lock;
-	char name[V4L2_DEVICE_NAME_SIZE];
+	char name[36];
 	void (*notify)(struct v4l2_subdev *sd,
 			unsigned int notification, void *arg);
 	struct v4l2_ctrl_handler *ctrl_handler;
@@ -86,7 +70,7 @@ static inline void v4l2_device_get(struct v4l2_device *v4l2_dev)
 }
 
 /**
- * v4l2_device_put - putss a V4L2 device reference
+ * v4l2_device_put - puts a V4L2 device reference
  *
  * @v4l2_dev: pointer to struct &v4l2_device
  *
@@ -172,8 +156,11 @@ void v4l2_device_unregister(struct v4l2_device *v4l2_dev);
  * An error is returned if the module is no longer loaded on any attempts
  * to register it.
  */
-int __must_check v4l2_device_register_subdev(struct v4l2_device *v4l2_dev,
-					     struct v4l2_subdev *sd);
+#define v4l2_device_register_subdev(v4l2_dev, sd) \
+	__v4l2_device_register_subdev(v4l2_dev, sd, THIS_MODULE)
+int __must_check __v4l2_device_register_subdev(struct v4l2_device *v4l2_dev,
+					       struct v4l2_subdev *sd,
+					       struct module *module);
 
 /**
  * v4l2_device_unregister_subdev - Unregisters a subdev with a v4l2 device.
@@ -188,14 +175,56 @@ int __must_check v4l2_device_register_subdev(struct v4l2_device *v4l2_dev,
 void v4l2_device_unregister_subdev(struct v4l2_subdev *sd);
 
 /**
- * v4l2_device_register_subdev_nodes - Registers device nodes for all subdevs
- *	of the v4l2 device that are marked with
- *	the %V4L2_SUBDEV_FL_HAS_DEVNODE flag.
+ * __v4l2_device_register_subdev_nodes - Registers device nodes for
+ *      all subdevs of the v4l2 device that are marked with the
+ *      %V4L2_SUBDEV_FL_HAS_DEVNODE flag.
+ *
+ * @v4l2_dev: pointer to struct v4l2_device
+ * @read_only: subdevices read-only flag. True to register the subdevices
+ *	device nodes in read-only mode, false to allow full access to the
+ *	subdevice userspace API.
+ */
+int __must_check
+__v4l2_device_register_subdev_nodes(struct v4l2_device *v4l2_dev,
+				    bool read_only);
+
+/**
+ * v4l2_device_register_subdev_nodes - Registers subdevices device nodes with
+ *	unrestricted access to the subdevice userspace operations
+ *
+ * Internally calls __v4l2_device_register_subdev_nodes(). See its documentation
+ * for more details.
  *
  * @v4l2_dev: pointer to struct v4l2_device
  */
-int __must_check
-v4l2_device_register_subdev_nodes(struct v4l2_device *v4l2_dev);
+static inline int __must_check
+v4l2_device_register_subdev_nodes(struct v4l2_device *v4l2_dev)
+{
+#if defined(CONFIG_VIDEO_V4L2_SUBDEV_API)
+	return __v4l2_device_register_subdev_nodes(v4l2_dev, false);
+#else
+	return 0;
+#endif
+}
+
+/**
+ * v4l2_device_register_ro_subdev_nodes - Registers subdevices device nodes
+ *	in read-only mode
+ *
+ * Internally calls __v4l2_device_register_subdev_nodes(). See its documentation
+ * for more details.
+ *
+ * @v4l2_dev: pointer to struct v4l2_device
+ */
+static inline int __must_check
+v4l2_device_register_ro_subdev_nodes(struct v4l2_device *v4l2_dev)
+{
+#if defined(CONFIG_VIDEO_V4L2_SUBDEV_API)
+	return __v4l2_device_register_subdev_nodes(v4l2_dev, true);
+#else
+	return 0;
+#endif
+}
 
 /**
  * v4l2_subdev_notify - Sends a notification to v4l2_device.
@@ -211,6 +240,17 @@ static inline void v4l2_subdev_notify(struct v4l2_subdev *sd,
 {
 	if (sd && sd->v4l2_dev && sd->v4l2_dev->notify)
 		sd->v4l2_dev->notify(sd, notification, arg);
+}
+
+/**
+ * v4l2_device_supports_requests - Test if requests are supported.
+ *
+ * @v4l2_dev: pointer to struct v4l2_device
+ */
+static inline bool v4l2_device_supports_requests(struct v4l2_device *v4l2_dev)
+{
+	return v4l2_dev->mdev && v4l2_dev->mdev->ops &&
+	       v4l2_dev->mdev->ops->req_queue;
 }
 
 /* Helper macros to iterate over all subdevs. */
@@ -243,7 +283,7 @@ static inline void v4l2_subdev_notify(struct v4l2_subdev *sd,
  * @f: operation function that will be called if @cond matches.
  *	The operation functions are defined in groups, according to
  *	each element at &struct v4l2_subdev_ops.
- * @args...: arguments for @f.
+ * @args: arguments for @f.
  *
  * Ignore any errors.
  *
@@ -268,7 +308,7 @@ static inline void v4l2_subdev_notify(struct v4l2_subdev *sd,
  * @f: operation function that will be called if @cond matches.
  *	The operation functions are defined in groups, according to
  *	each element at &struct v4l2_subdev_ops.
- * @args...: arguments for @f.
+ * @args: arguments for @f.
  *
  * Ignore any errors.
  *
@@ -296,7 +336,7 @@ static inline void v4l2_subdev_notify(struct v4l2_subdev *sd,
  * @f: operation function that will be called if @cond matches.
  *	The operation functions are defined in groups, according to
  *	each element at &struct v4l2_subdev_ops.
- * @args...: arguments for @f.
+ * @args: arguments for @f.
  *
  * Return:
  *
@@ -331,7 +371,7 @@ static inline void v4l2_subdev_notify(struct v4l2_subdev *sd,
  * @f: operation function that will be called if @cond matches.
  *	The operation functions are defined in groups, according to
  *	each element at &struct v4l2_subdev_ops.
- * @args...: arguments for @f.
+ * @args: arguments for @f.
  *
  * Return:
  *
@@ -362,7 +402,7 @@ static inline void v4l2_subdev_notify(struct v4l2_subdev *sd,
  * @f: operation function that will be called if @cond matches.
  *	The operation functions are defined in groups, according to
  *	each element at &struct v4l2_subdev_ops.
- * @args...: arguments for @f.
+ * @args: arguments for @f.
  *
  * Ignore any errors.
  *
@@ -374,7 +414,7 @@ static inline void v4l2_subdev_notify(struct v4l2_subdev *sd,
 		struct v4l2_subdev *__sd;				\
 									\
 		__v4l2_device_call_subdevs_p(v4l2_dev, __sd,		\
-			!(grpid) || __sd->grp_id == (grpid), o, f ,	\
+			(grpid) == 0 || __sd->grp_id == (grpid), o, f ,	\
 			##args);					\
 	} while (0)
 
@@ -391,7 +431,7 @@ static inline void v4l2_subdev_notify(struct v4l2_subdev *sd,
  * @f: operation function that will be called if @cond matches.
  *	The operation functions are defined in groups, according to
  *	each element at &struct v4l2_subdev_ops.
- * @args...: arguments for @f.
+ * @args: arguments for @f.
  *
  * Return:
  *
@@ -406,7 +446,7 @@ static inline void v4l2_subdev_notify(struct v4l2_subdev *sd,
 ({									\
 	struct v4l2_subdev *__sd;					\
 	__v4l2_device_call_subdevs_until_err_p(v4l2_dev, __sd,		\
-			!(grpid) || __sd->grp_id == (grpid), o, f ,	\
+			(grpid) == 0 || __sd->grp_id == (grpid), o, f ,	\
 			##args);					\
 })
 
@@ -422,7 +462,7 @@ static inline void v4l2_subdev_notify(struct v4l2_subdev *sd,
  * @f: operation function that will be called if @cond matches.
  *	The operation functions are defined in groups, according to
  *	each element at &struct v4l2_subdev_ops.
- * @args...: arguments for @f.
+ * @args: arguments for @f.
  *
  * Ignore any errors.
  *
@@ -434,8 +474,8 @@ static inline void v4l2_subdev_notify(struct v4l2_subdev *sd,
 		struct v4l2_subdev *__sd;				\
 									\
 		__v4l2_device_call_subdevs_p(v4l2_dev, __sd,		\
-			!(grpmsk) || (__sd->grp_id & (grpmsk)), o, f ,	\
-			##args);					\
+			(grpmsk) == 0 || (__sd->grp_id & (grpmsk)), o,	\
+			f , ##args);					\
 	} while (0)
 
 /**
@@ -450,7 +490,7 @@ static inline void v4l2_subdev_notify(struct v4l2_subdev *sd,
  * @f: operation function that will be called if @cond matches.
  *	The operation functions are defined in groups, according to
  *	each element at &struct v4l2_subdev_ops.
- * @args...: arguments for @f.
+ * @args: arguments for @f.
  *
  * Return:
  *
@@ -465,8 +505,8 @@ static inline void v4l2_subdev_notify(struct v4l2_subdev *sd,
 ({									\
 	struct v4l2_subdev *__sd;					\
 	__v4l2_device_call_subdevs_until_err_p(v4l2_dev, __sd,		\
-			!(grpmsk) || (__sd->grp_id & (grpmsk)), o, f ,	\
-			##args);					\
+			(grpmsk) == 0 || (__sd->grp_id & (grpmsk)), o,	\
+			f , ##args);					\
 })
 
 

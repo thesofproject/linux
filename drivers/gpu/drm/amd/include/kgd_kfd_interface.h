@@ -31,34 +31,31 @@
 #include <linux/types.h>
 #include <linux/bitmap.h>
 #include <linux/dma-fence.h>
+#include "amdgpu_irq.h"
+#include "amdgpu_gfx.h"
+#include "amdgpu_ptl.h"
 
 struct pci_dev;
-
-#define KFD_INTERFACE_VERSION 2
-#define KGD_MAX_QUEUES 128
+struct amdgpu_device;
 
 struct kfd_dev;
-struct kgd_dev;
-
 struct kgd_mem;
 
 enum kfd_preempt_type {
 	KFD_PREEMPT_TYPE_WAVEFRONT_DRAIN = 0,
 	KFD_PREEMPT_TYPE_WAVEFRONT_RESET,
+	KFD_PREEMPT_TYPE_WAVEFRONT_SAVE
 };
 
-struct kfd_cu_info {
-	uint32_t num_shader_engines;
-	uint32_t num_shader_arrays_per_engine;
-	uint32_t num_cu_per_sh;
-	uint32_t cu_active_number;
-	uint32_t cu_ao_mask;
-	uint32_t simd_per_cu;
-	uint32_t max_waves_per_simd;
-	uint32_t wave_front_size;
-	uint32_t max_scratch_slots_per_cu;
-	uint32_t lds_size;
-	uint32_t cu_bitmap[4][4];
+struct kfd_vm_fault_info {
+	uint64_t	page_addr;
+	uint32_t	vmid;
+	uint32_t	mc_id;
+	uint32_t	status;
+	bool		prot_valid;
+	bool		prot_read;
+	bool		prot_write;
+	bool		prot_exec;
 };
 
 /* For getting GPU local memory information from KGD */
@@ -75,16 +72,36 @@ enum kgd_memory_pool {
 	KGD_POOL_FRAMEBUFFER = 3,
 };
 
-enum kgd_engine_type {
-	KGD_ENGINE_PFP = 1,
-	KGD_ENGINE_ME,
-	KGD_ENGINE_CE,
-	KGD_ENGINE_MEC1,
-	KGD_ENGINE_MEC2,
-	KGD_ENGINE_RLC,
-	KGD_ENGINE_SDMA1,
-	KGD_ENGINE_SDMA2,
-	KGD_ENGINE_MAX
+struct kfd_cu_occupancy {
+	u32 wave_cnt;
+	u32 doorbell_off;
+};
+
+/**
+ * enum kfd_sched_policy
+ *
+ * @KFD_SCHED_POLICY_HWS: H/W scheduling policy known as command processor (cp)
+ * scheduling. In this scheduling mode we're using the firmware code to
+ * schedule the user mode queues and kernel queues such as HIQ and DIQ.
+ * the HIQ queue is used as a special queue that dispatches the configuration
+ * to the cp and the user mode queues list that are currently running.
+ * the DIQ queue is a debugging queue that dispatches debugging commands to the
+ * firmware.
+ * in this scheduling mode user mode queues over subscription feature is
+ * enabled.
+ *
+ * @KFD_SCHED_POLICY_HWS_NO_OVERSUBSCRIPTION: The same as above but the over
+ * subscription feature disabled.
+ *
+ * @KFD_SCHED_POLICY_NO_HWS: no H/W scheduling policy is a mode which directly
+ * set the command processor registers and sets the queues "manually". This
+ * mode is used *ONLY* for debugging proposes.
+ *
+ */
+enum kfd_sched_policy {
+	KFD_SCHED_POLICY_HWS = 0,
+	KFD_SCHED_POLICY_HWS_NO_OVERSUBSCRIPTION,
+	KFD_SCHED_POLICY_NO_HWS
 };
 
 struct kgd2kfd_shared_resources {
@@ -98,7 +115,19 @@ struct kgd2kfd_shared_resources {
 	uint32_t num_queue_per_pipe;
 
 	/* Bit n == 1 means Queue n is available for KFD */
-	DECLARE_BITMAP(queue_bitmap, KGD_MAX_QUEUES);
+	DECLARE_BITMAP(cp_queue_bitmap, AMDGPU_MAX_QUEUES);
+
+	/* SDMA doorbell assignments (SOC15 and later chips only). Only
+	 * specific doorbells are routed to each SDMA engine. Others
+	 * are routed to IH and VCN. They are not usable by the CP.
+	 */
+	uint32_t *sdma_doorbell_idx;
+
+	/* From SOC15 onward, the doorbell index range not usable for CP
+	 * queues.
+	 */
+	uint32_t non_cp_doorbells_start;
+	uint32_t non_cp_doorbells_end;
 
 	/* Base address of doorbell aperture. */
 	phys_addr_t doorbell_physical_address;
@@ -114,6 +143,8 @@ struct kgd2kfd_shared_resources {
 
 	/* Minor device number of the render node */
 	int drm_render_minor;
+
+	bool enable_mes;
 };
 
 struct tile_config {
@@ -127,43 +158,10 @@ struct tile_config {
 	uint32_t num_ranks;
 };
 
-
-/*
- * Allocation flag domains
- * NOTE: This must match the corresponding definitions in kfd_ioctl.h.
- */
-#define ALLOC_MEM_FLAGS_VRAM		(1 << 0)
-#define ALLOC_MEM_FLAGS_GTT		(1 << 1)
-#define ALLOC_MEM_FLAGS_USERPTR		(1 << 2) /* TODO */
-#define ALLOC_MEM_FLAGS_DOORBELL	(1 << 3) /* TODO */
-
-/*
- * Allocation flags attributes/access options.
- * NOTE: This must match the corresponding definitions in kfd_ioctl.h.
- */
-#define ALLOC_MEM_FLAGS_WRITABLE	(1 << 31)
-#define ALLOC_MEM_FLAGS_EXECUTABLE	(1 << 30)
-#define ALLOC_MEM_FLAGS_PUBLIC		(1 << 29)
-#define ALLOC_MEM_FLAGS_NO_SUBSTITUTE	(1 << 28) /* TODO */
-#define ALLOC_MEM_FLAGS_AQL_QUEUE_MEM	(1 << 27)
-#define ALLOC_MEM_FLAGS_COHERENT	(1 << 26) /* For GFXv9 or later */
+#define KFD_MAX_NUM_OF_QUEUES_PER_DEVICE_DEFAULT 4096
 
 /**
  * struct kfd2kgd_calls
- *
- * @init_gtt_mem_allocation: Allocate a buffer on the gart aperture.
- * The buffer can be used for mqds, hpds, kernel queue, fence and runlists
- *
- * @free_gtt_mem: Frees a buffer that was allocated on the gart aperture
- *
- * @get_local_mem_info: Retrieves information about GPU local memory
- *
- * @get_gpu_clock_counter: Retrieves GPU clock counter
- *
- * @get_max_engine_clock_in_mhz: Retrieves maximum GPU clock in MHz
- *
- * @alloc_pasid: Allocate a PASID
- * @free_pasid: Free a PASID
  *
  * @program_sh_mem_settings: A function that should initiate the memory
  * properties such as main aperture memory type (cache / non cached) and
@@ -172,8 +170,6 @@ struct tile_config {
  *
  * @set_pasid_vmid_mapping: Exposes pasid/vmid pair to the H/W for no cp
  * scheduling mode. Only used for no cp scheduling mode.
- *
- * @init_pipeline: Initialized the compute pipelines.
  *
  * @hqd_load: Loads the mqd structure to a H/W hqd slot. used only for no cp
  * sceduling mode.
@@ -196,214 +192,153 @@ struct tile_config {
  * @hqd_sdma_destroy: Destructs and preempts the SDMA queue assigned to that
  * SDMA hqd slot.
  *
- * @get_fw_version: Returns FW versions from the header
- *
  * @set_scratch_backing_va: Sets VA for scratch backing memory of a VMID.
  * Only used for no cp scheduling mode
  *
- * @get_tile_config: Returns GPU-specific tiling mode information
- *
- * @get_cu_info: Retrieves activated cu info
- *
- * @get_vram_usage: Returns current VRAM usage
- *
- * @create_process_vm: Create a VM address space for a given process and GPU
- *
- * @destroy_process_vm: Destroy a VM
- *
- * @get_process_page_dir: Get physical address of a VM page directory
- *
  * @set_vm_context_page_table_base: Program page table base for a VMID
- *
- * @alloc_memory_of_gpu: Allocate GPUVM memory
- *
- * @free_memory_of_gpu: Free GPUVM memory
- *
- * @map_memory_to_gpu: Map GPUVM memory into a specific VM address
- * space. Allocates and updates page tables and page directories as
- * needed. This function may return before all page table updates have
- * completed. This allows multiple map operations (on multiple GPUs)
- * to happen concurrently. Use sync_memory to synchronize with all
- * pending updates.
- *
- * @unmap_memor_to_gpu: Unmap GPUVM memory from a specific VM address space
- *
- * @sync_memory: Wait for pending page table updates to complete
- *
- * @map_gtt_bo_to_kernel: Map a GTT BO for kernel access
- * Pins the BO, maps it to kernel address space. Such BOs are never evicted.
- * The kernel virtual address remains valid until the BO is freed.
- *
- * @restore_process_bos: Restore all BOs that belong to the
- * process. This is intended for restoring memory mappings after a TTM
- * eviction.
  *
  * @invalidate_tlbs: Invalidate TLBs for a specific PASID
  *
  * @invalidate_tlbs_vmid: Invalidate TLBs for a specific VMID
  *
- * @submit_ib: Submits an IB to the engine specified by inserting the
- * IB to the corresponding ring (ring type). The IB is executed with the
- * specified VMID in a user mode context.
+ * @read_vmid_from_vmfault_reg: On Hawaii the VMID is not set in the
+ * IH ring entry. This function allows the KFD ISR to get the VMID
+ * from the fault status register as early as possible.
+ *
+ * @get_cu_occupancy: Function pointer that returns to caller the number
+ * of wave fronts that are in flight for all of the queues of a process
+ * as identified by its pasid. It is important to note that the value
+ * returned by this function is a snapshot of current moment and cannot
+ * guarantee any minimum for the number of waves in-flight. This function
+ * is defined for devices that belong to GFX9 and later GFX families. Care
+ * must be taken in calling this function as it is not defined for devices
+ * that belong to GFX8 and below GFX families.
  *
  * This structure contains function pointers to services that the kgd driver
  * provides to amdkfd driver.
  *
  */
 struct kfd2kgd_calls {
-	int (*init_gtt_mem_allocation)(struct kgd_dev *kgd, size_t size,
-					void **mem_obj, uint64_t *gpu_addr,
-					void **cpu_ptr);
-
-	void (*free_gtt_mem)(struct kgd_dev *kgd, void *mem_obj);
-
-	void (*get_local_mem_info)(struct kgd_dev *kgd,
-			struct kfd_local_mem_info *mem_info);
-	uint64_t (*get_gpu_clock_counter)(struct kgd_dev *kgd);
-
-	uint32_t (*get_max_engine_clock_in_mhz)(struct kgd_dev *kgd);
-
-	int (*alloc_pasid)(unsigned int bits);
-	void (*free_pasid)(unsigned int pasid);
-
 	/* Register access functions */
-	void (*program_sh_mem_settings)(struct kgd_dev *kgd, uint32_t vmid,
+	void (*program_sh_mem_settings)(struct amdgpu_device *adev, uint32_t vmid,
 			uint32_t sh_mem_config,	uint32_t sh_mem_ape1_base,
-			uint32_t sh_mem_ape1_limit, uint32_t sh_mem_bases);
+			uint32_t sh_mem_ape1_limit, uint32_t sh_mem_bases,
+			uint32_t inst);
 
-	int (*set_pasid_vmid_mapping)(struct kgd_dev *kgd, unsigned int pasid,
-					unsigned int vmid);
+	int (*set_pasid_vmid_mapping)(struct amdgpu_device *adev, u32 pasid,
+					unsigned int vmid, uint32_t inst);
 
-	int (*init_pipeline)(struct kgd_dev *kgd, uint32_t pipe_id,
-				uint32_t hpd_size, uint64_t hpd_gpu_addr);
+	int (*init_interrupts)(struct amdgpu_device *adev, uint32_t pipe_id,
+			uint32_t inst);
 
-	int (*init_interrupts)(struct kgd_dev *kgd, uint32_t pipe_id);
-
-	int (*hqd_load)(struct kgd_dev *kgd, void *mqd, uint32_t pipe_id,
+	int (*hqd_load)(struct amdgpu_device *adev, void *mqd, uint32_t pipe_id,
 			uint32_t queue_id, uint32_t __user *wptr,
 			uint32_t wptr_shift, uint32_t wptr_mask,
-			struct mm_struct *mm);
+			struct mm_struct *mm, uint32_t inst);
 
-	int (*hqd_sdma_load)(struct kgd_dev *kgd, void *mqd,
+	int (*hiq_mqd_load)(struct amdgpu_device *adev, void *mqd,
+			    uint32_t pipe_id, uint32_t queue_id,
+			    uint32_t doorbell_off, uint32_t inst);
+
+	int (*hqd_sdma_load)(struct amdgpu_device *adev, void *mqd,
 			     uint32_t __user *wptr, struct mm_struct *mm);
 
-	int (*hqd_dump)(struct kgd_dev *kgd,
+	int (*hqd_dump)(struct amdgpu_device *adev,
 			uint32_t pipe_id, uint32_t queue_id,
-			uint32_t (**dump)[2], uint32_t *n_regs);
+			uint32_t (**dump)[2], uint32_t *n_regs, uint32_t inst);
 
-	int (*hqd_sdma_dump)(struct kgd_dev *kgd,
+	int (*hqd_sdma_dump)(struct amdgpu_device *adev,
 			     uint32_t engine_id, uint32_t queue_id,
 			     uint32_t (**dump)[2], uint32_t *n_regs);
 
-	bool (*hqd_is_occupied)(struct kgd_dev *kgd, uint64_t queue_address,
-				uint32_t pipe_id, uint32_t queue_id);
+	bool (*hqd_is_occupied)(struct amdgpu_device *adev,
+				uint64_t queue_address, uint32_t pipe_id,
+				uint32_t queue_id, uint32_t inst);
 
-	int (*hqd_destroy)(struct kgd_dev *kgd, void *mqd, uint32_t reset_type,
+	int (*hqd_destroy)(struct amdgpu_device *adev, void *mqd,
+				enum kfd_preempt_type reset_type,
 				unsigned int timeout, uint32_t pipe_id,
-				uint32_t queue_id);
+				uint32_t queue_id, uint32_t inst);
 
-	bool (*hqd_sdma_is_occupied)(struct kgd_dev *kgd, void *mqd);
+	bool (*hqd_sdma_is_occupied)(struct amdgpu_device *adev, void *mqd);
 
-	int (*hqd_sdma_destroy)(struct kgd_dev *kgd, void *mqd,
+	int (*hqd_sdma_destroy)(struct amdgpu_device *adev, void *mqd,
 				unsigned int timeout);
 
-	int (*address_watch_disable)(struct kgd_dev *kgd);
-	int (*address_watch_execute)(struct kgd_dev *kgd,
-					unsigned int watch_point_id,
-					uint32_t cntl_val,
-					uint32_t addr_hi,
-					uint32_t addr_lo);
-	int (*wave_control_execute)(struct kgd_dev *kgd,
+	int (*wave_control_execute)(struct amdgpu_device *adev,
 					uint32_t gfx_index_val,
-					uint32_t sq_cmd);
-	uint32_t (*address_watch_get_offset)(struct kgd_dev *kgd,
-					unsigned int watch_point_id,
-					unsigned int reg_offset);
-	bool (*get_atc_vmid_pasid_mapping_valid)(
-					struct kgd_dev *kgd,
-					uint8_t vmid);
-	uint16_t (*get_atc_vmid_pasid_mapping_pasid)(
-					struct kgd_dev *kgd,
-					uint8_t vmid);
+					uint32_t sq_cmd, uint32_t inst);
+	bool (*get_atc_vmid_pasid_mapping_info)(struct amdgpu_device *adev,
+					uint8_t vmid,
+					uint16_t *p_pasid);
 
-	uint16_t (*get_fw_version)(struct kgd_dev *kgd,
-				enum kgd_engine_type type);
-	void (*set_scratch_backing_va)(struct kgd_dev *kgd,
+	/* No longer needed from GFXv9 onward. The scratch base address is
+	 * passed to the shader by the CP. It's the user mode driver's
+	 * responsibility.
+	 */
+	void (*set_scratch_backing_va)(struct amdgpu_device *adev,
 				uint64_t va, uint32_t vmid);
-	int (*get_tile_config)(struct kgd_dev *kgd, struct tile_config *config);
 
-	void (*get_cu_info)(struct kgd_dev *kgd,
-			struct kfd_cu_info *cu_info);
-	uint64_t (*get_vram_usage)(struct kgd_dev *kgd);
+	void (*set_vm_context_page_table_base)(struct amdgpu_device *adev,
+			uint32_t vmid, uint64_t page_table_base);
+	uint32_t (*read_vmid_from_vmfault_reg)(struct amdgpu_device *adev);
 
-	int (*create_process_vm)(struct kgd_dev *kgd, void **vm,
-			void **process_info, struct dma_fence **ef);
-	int (*acquire_process_vm)(struct kgd_dev *kgd, struct file *filp,
-			void **vm, void **process_info, struct dma_fence **ef);
-	void (*destroy_process_vm)(struct kgd_dev *kgd, void *vm);
-	uint32_t (*get_process_page_dir)(void *vm);
-	void (*set_vm_context_page_table_base)(struct kgd_dev *kgd,
-			uint32_t vmid, uint32_t page_table_base);
-	int (*alloc_memory_of_gpu)(struct kgd_dev *kgd, uint64_t va,
-			uint64_t size, void *vm,
-			struct kgd_mem **mem, uint64_t *offset,
-			uint32_t flags);
-	int (*free_memory_of_gpu)(struct kgd_dev *kgd, struct kgd_mem *mem);
-	int (*map_memory_to_gpu)(struct kgd_dev *kgd, struct kgd_mem *mem,
-			void *vm);
-	int (*unmap_memory_to_gpu)(struct kgd_dev *kgd, struct kgd_mem *mem,
-			void *vm);
-	int (*sync_memory)(struct kgd_dev *kgd, struct kgd_mem *mem, bool intr);
-	int (*map_gtt_bo_to_kernel)(struct kgd_dev *kgd, struct kgd_mem *mem,
-			void **kptr, uint64_t *size);
-	int (*restore_process_bos)(void *process_info, struct dma_fence **ef);
-
-	int (*invalidate_tlbs)(struct kgd_dev *kgd, uint16_t pasid);
-	int (*invalidate_tlbs_vmid)(struct kgd_dev *kgd, uint16_t vmid);
-
-	int (*submit_ib)(struct kgd_dev *kgd, enum kgd_engine_type engine,
-			uint32_t vmid, uint64_t gpu_addr,
-			uint32_t *ib_cmd, uint32_t ib_len);
+	uint32_t (*enable_debug_trap)(struct amdgpu_device *adev,
+					bool restore_dbg_registers,
+					uint32_t vmid);
+	uint32_t (*disable_debug_trap)(struct amdgpu_device *adev,
+					bool keep_trap_enabled,
+					uint32_t vmid);
+	int (*validate_trap_override_request)(struct amdgpu_device *adev,
+					uint32_t trap_override,
+					uint32_t *trap_mask_supported);
+	uint32_t (*set_wave_launch_trap_override)(struct amdgpu_device *adev,
+					     uint32_t vmid,
+					     uint32_t trap_override,
+					     uint32_t trap_mask_bits,
+					     uint32_t trap_mask_request,
+					     uint32_t *trap_mask_prev,
+					     uint32_t kfd_dbg_trap_cntl_prev);
+	uint32_t (*set_wave_launch_mode)(struct amdgpu_device *adev,
+					uint8_t wave_launch_mode,
+					uint32_t vmid);
+	uint32_t (*set_address_watch)(struct amdgpu_device *adev,
+					uint64_t watch_address,
+					uint32_t watch_address_mask,
+					uint32_t watch_id,
+					uint32_t watch_mode,
+					uint32_t debug_vmid,
+					uint32_t inst);
+	uint32_t (*clear_address_watch)(struct amdgpu_device *adev,
+			uint32_t watch_id);
+	void (*get_iq_wait_times)(struct amdgpu_device *adev,
+			uint32_t *wait_times,
+			uint32_t inst);
+	void (*build_dequeue_wait_counts_packet_info)(struct amdgpu_device *adev,
+			uint32_t wait_times,
+			uint32_t sch_wave,
+			uint32_t que_sleep,
+			uint32_t *reg_offset,
+			uint32_t *reg_data);
+	void (*get_cu_occupancy)(struct amdgpu_device *adev,
+				 struct kfd_cu_occupancy *cu_occupancy,
+				 int *max_waves_per_cu, uint32_t inst);
+	void (*program_trap_handler_settings)(struct amdgpu_device *adev,
+			uint32_t vmid, uint64_t tba_addr, uint64_t tma_addr,
+			uint32_t inst);
+	uint64_t (*hqd_get_pq_addr)(struct amdgpu_device *adev,
+				    uint32_t pipe_id, uint32_t queue_id,
+				    uint32_t inst);
+	uint64_t (*hqd_reset)(struct amdgpu_device *adev,
+			      uint32_t pipe_id, uint32_t queue_id,
+			      uint32_t inst, unsigned int utimeout);
+	uint32_t (*hqd_sdma_get_doorbell)(struct amdgpu_device *adev,
+					  int engine, int queue);
+	uint32_t (*ptl_ctrl)(struct amdgpu_device *adev,
+			     uint32_t cmd,
+			     uint32_t *ptl_state,
+			     enum amdgpu_ptl_fmt *fmt1,
+			     enum amdgpu_ptl_fmt *fmt2);
 };
-
-/**
- * struct kgd2kfd_calls
- *
- * @exit: Notifies amdkfd that kgd module is unloaded
- *
- * @probe: Notifies amdkfd about a probe done on a device in the kgd driver.
- *
- * @device_init: Initialize the newly probed device (if it is a device that
- * amdkfd supports)
- *
- * @device_exit: Notifies amdkfd about a removal of a kgd device
- *
- * @suspend: Notifies amdkfd about a suspend action done to a kgd device
- *
- * @resume: Notifies amdkfd about a resume action done to a kgd device
- *
- * @schedule_evict_and_restore_process: Schedules work queue that will prepare
- * for safe eviction of KFD BOs that belong to the specified process.
- *
- * This structure contains function callback pointers so the kgd driver
- * will notify to the amdkfd about certain status changes.
- *
- */
-struct kgd2kfd_calls {
-	void (*exit)(void);
-	struct kfd_dev* (*probe)(struct kgd_dev *kgd, struct pci_dev *pdev,
-		const struct kfd2kgd_calls *f2g);
-	bool (*device_init)(struct kfd_dev *kfd,
-			const struct kgd2kfd_shared_resources *gpu_resources);
-	void (*device_exit)(struct kfd_dev *kfd);
-	void (*interrupt)(struct kfd_dev *kfd, const void *ih_ring_entry);
-	void (*suspend)(struct kfd_dev *kfd);
-	int (*resume)(struct kfd_dev *kfd);
-	int (*schedule_evict_and_restore_process)(struct mm_struct *mm,
-			struct dma_fence *fence);
-};
-
-int kgd2kfd_init(unsigned interface_version,
-		const struct kgd2kfd_calls **g2f);
 
 #endif	/* KGD_KFD_INTERFACE_H_INCLUDED */

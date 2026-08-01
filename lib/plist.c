@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * lib/plist.c
  *
@@ -9,12 +10,10 @@
  * 2001-2005 (c) MontaVista Software, Inc.
  * Daniel Walker <dwalker@mvista.com>
  *
- * (C) 2005 Thomas Gleixner <tglx@linutronix.de>
+ * (C) 2005 Linutronix GmbH, Thomas Gleixner <tglx@kernel.org>
  *
  * Simplifications of the original code by
  * Oleg Nesterov <oleg@tv-sign.ru>
- *
- * Licensed under the FSF's GNU Public License v2 or later.
  *
  * Based on simple lists (include/linux/list.h).
  *
@@ -26,7 +25,7 @@
 #include <linux/bug.h>
 #include <linux/plist.h>
 
-#ifdef CONFIG_DEBUG_PI_LIST
+#ifdef CONFIG_DEBUG_PLIST
 
 static struct plist_head test_head;
 
@@ -73,7 +72,7 @@ static void plist_check_head(struct plist_head *head)
  */
 void plist_add(struct plist_node *node, struct plist_head *head)
 {
-	struct plist_node *first, *iter, *prev = NULL;
+	struct plist_node *first, *iter, *prev = NULL, *last, *reverse_iter;
 	struct list_head *node_next = &head->node_list;
 
 	plist_check_head(head);
@@ -84,15 +83,25 @@ void plist_add(struct plist_node *node, struct plist_head *head)
 		goto ins_node;
 
 	first = iter = plist_first(head);
+	last = reverse_iter = list_entry(first->prio_list.prev, struct plist_node, prio_list);
 
 	do {
 		if (node->prio < iter->prio) {
 			node_next = &iter->node_list;
 			break;
+		} else if (node->prio >= reverse_iter->prio) {
+			prev = reverse_iter;
+			iter = list_entry(reverse_iter->prio_list.next,
+				struct plist_node, prio_list);
+			if (likely(reverse_iter != last))
+				node_next = &iter->node_list;
+			break;
 		}
 
 		prev = iter;
 		iter = list_entry(iter->prio_list.next,
+				struct plist_node, prio_list);
+		reverse_iter = list_entry(reverse_iter->prio_list.prev,
 				struct plist_node, prio_list);
 	} while (iter != first);
 
@@ -162,18 +171,30 @@ void plist_requeue(struct plist_node *node, struct plist_head *head)
 
 	plist_del(node, head);
 
+	/*
+	 * After plist_del(), iter is the replacement of the node.  If the node
+	 * was on prio_list, take shortcut to find node_next instead of looping.
+	 */
+	if (!list_empty(&iter->prio_list)) {
+		iter = list_entry(iter->prio_list.next, struct plist_node,
+				  prio_list);
+		node_next = &iter->node_list;
+		goto queue;
+	}
+
 	plist_for_each_continue(iter, head) {
 		if (node->prio != iter->prio) {
 			node_next = &iter->node_list;
 			break;
 		}
 	}
+queue:
 	list_add_tail(&node->node_list, node_next);
 
 	plist_check_head(head);
 }
 
-#ifdef CONFIG_DEBUG_PI_LIST
+#ifdef CONFIG_DEBUG_PLIST
 #include <linux/sched.h>
 #include <linux/sched/clock.h>
 #include <linux/module.h>
@@ -256,6 +277,32 @@ static int  __init plist_test(void)
 	}
 
 	printk(KERN_DEBUG "end plist test\n");
+
+	/* Worst case test for plist_add() */
+	unsigned int test_data[241];
+
+	for (i = 0; i < ARRAY_SIZE(test_data); i++)
+		test_data[i] = i;
+
+	ktime_t start, end, time_elapsed = 0;
+
+	plist_head_init(&test_head);
+
+	for (i = 0; i < ARRAY_SIZE(test_node); i++) {
+		plist_node_init(test_node + i, 0);
+		test_node[i].prio = test_data[i];
+	}
+
+	for (i = 0; i < ARRAY_SIZE(test_node); i++) {
+		if (plist_node_empty(test_node + i)) {
+			start = ktime_get();
+			plist_add(test_node + i, &test_head);
+			end = ktime_get();
+			time_elapsed += (end - start);
+		}
+	}
+
+	pr_debug("plist_add worst case test time elapsed %lld\n", time_elapsed);
 	return 0;
 }
 

@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Map driver for Intel XScale PXA2xx platforms.
  *
  * Author:	Nicolas Pitre
  * Copyright:	(C) 2001 MontaVista Software Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -19,8 +16,6 @@
 #include <linux/mtd/partitions.h>
 
 #include <asm/io.h>
-#include <mach/hardware.h>
-
 #include <asm/mach/flash.h>
 
 #define CACHELINESIZE	32
@@ -56,7 +51,7 @@ static int pxa2xx_flash_probe(struct platform_device *pdev)
 	if (!res)
 		return -ENODEV;
 
-	info = kzalloc(sizeof(struct pxa2xx_flash_info), GFP_KERNEL);
+	info = kzalloc_obj(struct pxa2xx_flash_info);
 	if (!info)
 		return -ENOMEM;
 
@@ -69,10 +64,10 @@ static int pxa2xx_flash_probe(struct platform_device *pdev)
 	if (!info->map.virt) {
 		printk(KERN_WARNING "Failed to ioremap %s\n",
 		       info->map.name);
+		kfree(info);
 		return -ENOMEM;
 	}
-	info->map.cached =
-		ioremap_cached(info->map.phys, info->map.size);
+	info->map.cached = ioremap_cache(info->map.phys, info->map.size);
 	if (!info->map.cached)
 		printk(KERN_WARNING "Failed to ioremap cached %s\n",
 		       info->map.name);
@@ -91,6 +86,7 @@ static int pxa2xx_flash_probe(struct platform_device *pdev)
 		iounmap((void *)info->map.virt);
 		if (info->map.cached)
 			iounmap(info->map.cached);
+		kfree(info);
 		return -EIO;
 	}
 	info->mtd->dev.parent = &pdev->dev;
@@ -102,7 +98,7 @@ static int pxa2xx_flash_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int pxa2xx_flash_remove(struct platform_device *dev)
+static void pxa2xx_flash_remove(struct platform_device *dev)
 {
 	struct pxa2xx_flash_info *info = platform_get_drvdata(dev);
 
@@ -113,7 +109,6 @@ static int pxa2xx_flash_remove(struct platform_device *dev)
 	if (info->map.cached)
 		iounmap(info->map.cached);
 	kfree(info);
-	return 0;
 }
 
 #ifdef CONFIG_PM

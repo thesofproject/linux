@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2005-2014 Brocade Communications Systems, Inc.
  * Copyright (c) 2014- QLogic Corporation.
@@ -5,15 +6,6 @@
  * www.qlogic.com
  *
  * Linux driver for QLogic BR-series Fibre Channel Host Bus Adapter.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License (GPL) Version 2 as
- * published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
 /*
@@ -38,7 +30,6 @@
 #include <linux/vmalloc.h>
 #include <linux/workqueue.h>
 #include <linux/bitops.h>
-#include <linux/aer.h>
 #include <scsi/scsi.h>
 #include <scsi/scsi_host.h>
 #include <scsi/scsi_tcq.h>
@@ -184,11 +175,27 @@ union bfad_tmp_buf {
 	wwn_t		wwn[BFA_FCS_MAX_LPORTS];
 };
 
+/* BFAD state machine events */
+enum bfad_sm_event {
+	BFAD_E_CREATE			= 1,
+	BFAD_E_KTHREAD_CREATE_FAILED	= 2,
+	BFAD_E_INIT			= 3,
+	BFAD_E_INIT_SUCCESS		= 4,
+	BFAD_E_HAL_INIT_FAILED		= 5,
+	BFAD_E_INIT_FAILED		= 6,
+	BFAD_E_FCS_EXIT_COMP		= 7,
+	BFAD_E_EXIT_COMP		= 8,
+	BFAD_E_STOP			= 9
+};
+
+struct bfad_s;
+typedef void (*bfad_sm_t)(struct bfad_s *, enum bfad_sm_event);
+
 /*
  * BFAD (PCI function) data structure
  */
 struct bfad_s {
-	bfa_sm_t	sm;	/* state machine */
+	bfad_sm_t	sm;	/* state machine */
 	struct list_head list_entry;
 	struct bfa_s	bfa;
 	struct bfa_fcs_s bfa_fcs;
@@ -233,19 +240,6 @@ struct bfad_s {
 	struct bfa_aen_entry_s	aen_list[BFA_AEN_MAX_ENTRY];
 	spinlock_t		bfad_aen_spinlock;
 	struct list_head	vport_list;
-};
-
-/* BFAD state machine events */
-enum bfad_sm_event {
-	BFAD_E_CREATE			= 1,
-	BFAD_E_KTHREAD_CREATE_FAILED	= 2,
-	BFAD_E_INIT			= 3,
-	BFAD_E_INIT_SUCCESS		= 4,
-	BFAD_E_HAL_INIT_FAILED		= 5,
-	BFAD_E_INIT_FAILED		= 6,
-	BFAD_E_FCS_EXIT_COMP		= 7,
-	BFAD_E_EXIT_COMP		= 8,
-	BFAD_E_STOP			= 9
 };
 
 /*
@@ -318,7 +312,6 @@ void		bfad_bfa_tmo(struct timer_list *t);
 void		bfad_init_timer(struct bfad_s *bfad);
 int		bfad_pci_init(struct pci_dev *pdev, struct bfad_s *bfad);
 void		bfad_pci_uninit(struct pci_dev *pdev, struct bfad_s *bfad);
-void		bfad_drv_uninit(struct bfad_s *bfad);
 int		bfad_worker(void *ptr);
 void		bfad_debugfs_init(struct bfad_port_s *port);
 void		bfad_debugfs_exit(struct bfad_port_s *port);

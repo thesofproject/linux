@@ -32,9 +32,9 @@
 #undef CONFIG_CPU_HAS_PREFETCH
 #endif
 
+#include <linux/export.h>
 #include <asm/asm.h>
 #include <asm/asm-offsets.h>
-#include <asm/export.h>
 #include <asm/regdef.h>
 
 #define dst a0
@@ -116,7 +116,7 @@
 	.if \mode == LEGACY_MODE;				\
 9:		insn reg, addr;					\
 		.section __ex_table,"a";			\
-		PTR	9b, handler;				\
+		PTR_WD	9b, handler;				\
 		.previous;					\
 	/* This is assembled in EVA mode */			\
 	.else;							\
@@ -125,7 +125,7 @@
 		    ((\to == USEROP) && (type == ST_INSN));	\
 9:			__BUILD_EVA_INSN(insn##e, reg, addr);	\
 			.section __ex_table,"a";		\
-			PTR	9b, handler;			\
+			PTR_WD	9b, handler;			\
 			.previous;				\
 		.else;						\
 			/*					\
@@ -204,9 +204,10 @@
 #define LOADB(reg, addr, handler)	EXC(lb, LD_INSN, reg, addr, handler)
 #define STOREB(reg, addr, handler)	EXC(sb, ST_INSN, reg, addr, handler)
 
-#define _PREF(hint, addr, type)						\
+#ifdef CONFIG_CPU_HAS_PREFETCH
+# define _PREF(hint, addr, type)					\
 	.if \mode == LEGACY_MODE;					\
-		PREF(hint, addr);					\
+		kernel_pref(hint, addr);				\
 	.else;								\
 		.if ((\from == USEROP) && (type == SRC_PREFETCH)) ||	\
 		    ((\to == USEROP) && (type == DST_PREFETCH));	\
@@ -218,12 +219,15 @@
 			 * used later on. Therefore use $v1.		\
 			 */						\
 			.set at=v1;					\
-			PREFE(hint, addr);				\
+			user_pref(hint, addr);				\
 			.set noat;					\
 		.else;							\
-			PREF(hint, addr);				\
+			kernel_pref(hint, addr);			\
 		.endif;							\
 	.endif
+#else
+# define _PREF(hint, addr, type)
+#endif
 
 #define PREFS(hint, addr) _PREF(hint, addr, SRC_PREFETCH)
 #define PREFD(hint, addr) _PREF(hint, addr, DST_PREFETCH)
@@ -270,7 +274,6 @@
 	/* initialize __memcpy if this the first time we execute this macro */
 	.ifnotdef __memcpy
 	.set __memcpy, 1
-	.hidden __memcpy /* make sure it does not leak */
 	.endif
 
 	/*
@@ -297,14 +300,14 @@
 	 and	t0, src, ADDRMASK
 	PREFS(	0, 2*32(src) )
 	PREFD(	1, 2*32(dst) )
-#ifndef CONFIG_CPU_MIPSR6
+#ifndef CONFIG_CPU_NO_LOAD_STORE_LR
 	bnez	t1, .Ldst_unaligned\@
 	 nop
 	bnez	t0, .Lsrc_unaligned_dst_aligned\@
-#else
+#else /* CONFIG_CPU_NO_LOAD_STORE_LR */
 	or	t0, t0, t1
 	bnez	t0, .Lcopy_unaligned_bytes\@
-#endif
+#endif /* CONFIG_CPU_NO_LOAD_STORE_LR */
 	/*
 	 * use delay slot for fall-through
 	 * src and dst are aligned; need to compute rem
@@ -385,7 +388,7 @@
 	bne	rem, len, 1b
 	.set	noreorder
 
-#ifndef CONFIG_CPU_MIPSR6
+#ifndef CONFIG_CPU_NO_LOAD_STORE_LR
 	/*
 	 * src and dst are aligned, need to copy rem bytes (rem < NBYTES)
 	 * A loop would do only a byte at a time with possible branch
@@ -487,7 +490,7 @@
 	bne	len, rem, 1b
 	.set	noreorder
 
-#endif /* !CONFIG_CPU_MIPSR6 */
+#endif /* !CONFIG_CPU_NO_LOAD_STORE_LR */
 .Lcopy_bytes_checklen\@:
 	beqz	len, .Ldone\@
 	 nop
@@ -516,7 +519,7 @@
 	jr	ra
 	 nop
 
-#ifdef CONFIG_CPU_MIPSR6
+#ifdef CONFIG_CPU_NO_LOAD_STORE_LR
 .Lcopy_unaligned_bytes\@:
 1:
 	COPY_BYTE(0)
@@ -530,11 +533,10 @@
 	ADD	src, src, 8
 	b	1b
 	 ADD	dst, dst, 8
-#endif /* CONFIG_CPU_MIPSR6 */
+#endif /* CONFIG_CPU_NO_LOAD_STORE_LR */
 	.if __memcpy == 1
 	END(memcpy)
 	.set __memcpy, 0
-	.hidden __memcpy
 	.endif
 
 .Ll_exc_copy\@:
@@ -594,6 +596,7 @@ SEXC(1)
 	 nop
 	.endm
 
+#ifndef CONFIG_HAVE_PLAT_MEMCPY
 	.align	5
 LEAF(memmove)
 EXPORT_SYMBOL(memmove)
@@ -656,10 +659,16 @@ LEAF(memcpy)					/* a0=dst a1=src a2=len */
 EXPORT_SYMBOL(memcpy)
 	move	v0, dst				/* return value */
 .L__memcpy:
-FEXPORT(__copy_user)
-EXPORT_SYMBOL(__copy_user)
+#ifndef CONFIG_EVA
+FEXPORT(__raw_copy_from_user)
+EXPORT_SYMBOL(__raw_copy_from_user)
+FEXPORT(__raw_copy_to_user)
+EXPORT_SYMBOL(__raw_copy_to_user)
+#endif
 	/* Legacy Mode, user <-> user */
 	__BUILD_COPY_USER LEGACY_MODE USEROP USEROP
+
+#endif
 
 #ifdef CONFIG_EVA
 
@@ -674,10 +683,10 @@ EXPORT_SYMBOL(__copy_user)
  * __copy_from_user (EVA)
  */
 
-LEAF(__copy_from_user_eva)
-EXPORT_SYMBOL(__copy_from_user_eva)
+LEAF(__raw_copy_from_user)
+EXPORT_SYMBOL(__raw_copy_from_user)
 	__BUILD_COPY_USER EVA_MODE USEROP KERNELOP
-END(__copy_from_user_eva)
+END(__raw_copy_from_user)
 
 
 
@@ -685,18 +694,9 @@ END(__copy_from_user_eva)
  * __copy_to_user (EVA)
  */
 
-LEAF(__copy_to_user_eva)
-EXPORT_SYMBOL(__copy_to_user_eva)
+LEAF(__raw_copy_to_user)
+EXPORT_SYMBOL(__raw_copy_to_user)
 __BUILD_COPY_USER EVA_MODE KERNELOP USEROP
-END(__copy_to_user_eva)
-
-/*
- * __copy_in_user (EVA)
- */
-
-LEAF(__copy_in_user_eva)
-EXPORT_SYMBOL(__copy_in_user_eva)
-__BUILD_COPY_USER EVA_MODE USEROP USEROP
-END(__copy_in_user_eva)
+END(__raw_copy_to_user)
 
 #endif

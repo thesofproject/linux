@@ -70,7 +70,7 @@ static struct usnic_uiom_interval_node*
 usnic_uiom_interval_node_alloc(long int start, long int last, int ref_cnt,
 				int flags)
 {
-	struct usnic_uiom_interval_node *interval = kzalloc(sizeof(*interval),
+	struct usnic_uiom_interval_node *interval = kzalloc_obj(*interval,
 								GFP_ATOMIC);
 	if (!interval)
 		return NULL;
@@ -83,7 +83,8 @@ usnic_uiom_interval_node_alloc(long int start, long int last, int ref_cnt,
 	return interval;
 }
 
-static int interval_cmp(void *priv, struct list_head *a, struct list_head *b)
+static int interval_cmp(void *priv, const struct list_head *a,
+			const struct list_head *b)
 {
 	struct usnic_uiom_interval_node *node_a, *node_b;
 

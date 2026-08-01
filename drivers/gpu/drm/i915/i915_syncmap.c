@@ -75,13 +75,10 @@ struct i915_syncmap {
 	unsigned int height;
 	unsigned int bitmap;
 	struct i915_syncmap *parent;
-	/*
-	 * Following this header is an array of either seqno or child pointers:
-	 * union {
-	 *	u32 seqno[KSYNCMAP];
-	 *	struct i915_syncmap *child[KSYNCMAP];
-	 * };
-	 */
+	union {
+		DECLARE_FLEX_ARRAY(u32, seqno);
+		DECLARE_FLEX_ARRAY(struct i915_syncmap *, child);
+	};
 };
 
 /**
@@ -92,20 +89,20 @@ void i915_syncmap_init(struct i915_syncmap **root)
 {
 	BUILD_BUG_ON_NOT_POWER_OF_2(KSYNCMAP);
 	BUILD_BUG_ON_NOT_POWER_OF_2(SHIFT);
-	BUILD_BUG_ON(KSYNCMAP > BITS_PER_BYTE * sizeof((*root)->bitmap));
+	BUILD_BUG_ON(KSYNCMAP > BITS_PER_TYPE((*root)->bitmap));
 	*root = NULL;
 }
 
 static inline u32 *__sync_seqno(struct i915_syncmap *p)
 {
 	GEM_BUG_ON(p->height);
-	return (u32 *)(p + 1);
+	return p->seqno;
 }
 
 static inline struct i915_syncmap **__sync_child(struct i915_syncmap *p)
 {
 	GEM_BUG_ON(!p->height);
-	return (struct i915_syncmap **)(p + 1);
+	return p->child;
 }
 
 static inline unsigned int
@@ -200,7 +197,7 @@ __sync_alloc_leaf(struct i915_syncmap *parent, u64 id)
 {
 	struct i915_syncmap *p;
 
-	p = kmalloc(sizeof(*p) + KSYNCMAP * sizeof(u32), GFP_KERNEL);
+	p = kmalloc_flex(*p, seqno, KSYNCMAP);
 	if (unlikely(!p))
 		return NULL;
 
@@ -282,8 +279,7 @@ static noinline int __sync_set(struct i915_syncmap **root, u64 id, u32 seqno)
 			unsigned int above;
 
 			/* Insert a join above the current layer */
-			next = kzalloc(sizeof(*next) + KSYNCMAP * sizeof(next),
-				       GFP_KERNEL);
+			next = kzalloc_flex(*next, child, KSYNCMAP);
 			if (unlikely(!next))
 				return -ENOMEM;
 

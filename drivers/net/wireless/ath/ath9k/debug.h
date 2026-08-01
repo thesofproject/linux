@@ -25,20 +25,21 @@ struct ath_buf;
 struct fft_sample_tlv;
 
 #ifdef CONFIG_ATH9K_DEBUGFS
-#define TX_STAT_INC(q, c) sc->debug.stats.txstats[q].c++
-#define RX_STAT_INC(c) (sc->debug.stats.rxstats.c++)
-#define RESET_STAT_INC(sc, type) sc->debug.stats.reset[type]++
-#define ANT_STAT_INC(i, c) sc->debug.stats.ant_stats[i].c++
-#define ANT_LNA_INC(i, c) sc->debug.stats.ant_stats[i].lna_recv_cnt[c]++;
+#define TX_STAT_INC(sc, q, c)	 do { (sc)->debug.stats.txstats[q].c++; } while (0)
+#define RX_STAT_INC(sc, c)	 do { (sc)->debug.stats.rxstats.c++; } while (0)
+#define RESET_STAT_INC(sc, type) do { (sc)->debug.stats.reset[type]++; } while (0)
+#define ANT_STAT_INC(sc, i, c)	 do { (sc)->debug.stats.ant_stats[i].c++; } while (0)
+#define ANT_LNA_INC(sc, i, c)	 do { (sc)->debug.stats.ant_stats[i].lna_recv_cnt[c]++; } while (0)
 #else
-#define TX_STAT_INC(q, c) do { } while (0)
-#define RX_STAT_INC(c)
-#define RESET_STAT_INC(sc, type) do { } while (0)
-#define ANT_STAT_INC(i, c) do { } while (0)
-#define ANT_LNA_INC(i, c) do { } while (0)
+#define TX_STAT_INC(sc, q, c)	 do { (void)(sc); } while (0)
+#define RX_STAT_INC(sc, c)	 do { (void)(sc); } while (0)
+#define RESET_STAT_INC(sc, type) do { (void)(sc); } while (0)
+#define ANT_STAT_INC(sc, i, c)	 do { (void)(sc); } while (0)
+#define ANT_LNA_INC(sc, i, c)	 do { (void)(sc); } while (0)
 #endif
 
 enum ath_reset_type {
+	RESET_TYPE_USER,
 	RESET_TYPE_BB_HANG,
 	RESET_TYPE_BB_WATCHDOG,
 	RESET_TYPE_FATAL_INT,
@@ -52,6 +53,7 @@ enum ath_reset_type {
 	RESET_TYPE_CALIBRATION,
 	RESET_TX_DMA_ERROR,
 	RESET_RX_DMA_ERROR,
+	RESET_TYPE_RX_INACTIVE,
 	__RESET_TYPE_MAX
 };
 
@@ -140,11 +142,12 @@ struct ath_interrupt_stats {
 /**
  * struct ath_tx_stats - Statistics about TX
  * @tx_pkts_all:  No. of total frames transmitted, including ones that
-	may have had errors.
+ *	may have had errors.
  * @tx_bytes_all:  No. of total bytes transmitted, including ones that
-	may have had errors.
+ *	may have had errors.
  * @queued: Total MPDUs (non-aggr) queued
  * @completed: Total MPDUs (non-aggr) completed
+ * @xretries: Total MPDUs with xretries
  * @a_aggr: Total no. of aggregates queued
  * @a_queued_hw: Total AMPDUs queued to hardware
  * @a_completed: Total AMPDUs completed
@@ -152,14 +155,14 @@ struct ath_interrupt_stats {
  * @a_xretries: No. of AMPDUs dropped due to xretries
  * @txerr_filtered: No. of frames with TXERR_FILT flag set.
  * @fifo_underrun: FIFO underrun occurrences
-	Valid only for:
-		- non-aggregate condition.
-		- first packet of aggregate.
+ *	Valid only for:
+ *		- non-aggregate condition.
+ *		- first packet of aggregate.
  * @xtxop: No. of frames filtered because of TXOP limit
  * @timer_exp: Transmit timer expiry
  * @desc_cfg_err: Descriptor configuration errors
- * @data_urn: TX data underrun errors
- * @delim_urn: TX delimiter underrun errors
+ * @data_underrun: TX data underrun errors
+ * @delim_underrun: TX delimiter underrun errors
  * @puttxbuf: Number of times hardware was given txbuf to write.
  * @txstart:  Number of times hardware was told to start tx.
  * @txprocdesc:  Number of times tx descriptor was processed
@@ -319,18 +322,10 @@ ath9k_debug_sync_cause(struct ath_softc *sc, u32 sync_cause)
 void ath_debug_rate_stats(struct ath_softc *sc,
 			  struct ath_rx_status *rs,
 			  struct sk_buff *skb);
-void ath_debug_airtime(struct ath_softc *sc,
-		       struct ath_node *an,
-		       u32 rx, u32 tx);
 #else
 static inline void ath_debug_rate_stats(struct ath_softc *sc,
 					struct ath_rx_status *rs,
 					struct sk_buff *skb)
-{
-}
-static inline void ath_debug_airtime(struct ath_softc *sc,
-			      struct ath_node *an,
-			      u32 rx, u32 tx)
 {
 }
 #endif /* CONFIG_ATH9K_STATION_STATISTICS */

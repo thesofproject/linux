@@ -1,32 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Copyright (C) 2004 Richard Purdie
  *  Copyright (C) 2008 Dmitry Baryshkov
  *
  *  Based on Sharp's NAND driver sharp_sl.c
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
-#include <linux/genhd.h>
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/rawnand.h>
-#include <linux/mtd/nand_ecc.h>
 #include <linux/mtd/partitions.h>
 #include <linux/mtd/sharpsl.h>
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
-
-#include <asm/io.h>
-#include <mach/hardware.h>
-#include <asm/mach-types.h>
+#include <linux/io.h>
 
 struct sharpsl_nand {
+	struct nand_controller	controller;
 	struct nand_chip	chip;
 
 	void __iomem		*io;
@@ -62,11 +54,10 @@ static inline struct sharpsl_nand *mtd_to_sharpsl(struct mtd_info *mtd)
  *	NAND_ALE: bit 2 -> bit 2
  *
  */
-static void sharpsl_nand_hwcontrol(struct mtd_info *mtd, int cmd,
+static void sharpsl_nand_hwcontrol(struct nand_chip *chip, int cmd,
 				   unsigned int ctrl)
 {
-	struct sharpsl_nand *sharpsl = mtd_to_sharpsl(mtd);
-	struct nand_chip *chip = mtd_to_nand(mtd);
+	struct sharpsl_nand *sharpsl = mtd_to_sharpsl(nand_to_mtd(chip));
 
 	if (ctrl & NAND_CTRL_CHANGE) {
 		unsigned char bits = ctrl & 0x07;
@@ -79,29 +70,49 @@ static void sharpsl_nand_hwcontrol(struct mtd_info *mtd, int cmd,
 	}
 
 	if (cmd != NAND_CMD_NONE)
-		writeb(cmd, chip->IO_ADDR_W);
+		writeb(cmd, chip->legacy.IO_ADDR_W);
 }
 
-static int sharpsl_nand_dev_ready(struct mtd_info *mtd)
+static int sharpsl_nand_dev_ready(struct nand_chip *chip)
 {
-	struct sharpsl_nand *sharpsl = mtd_to_sharpsl(mtd);
+	struct sharpsl_nand *sharpsl = mtd_to_sharpsl(nand_to_mtd(chip));
 	return !((readb(sharpsl->io + FLASHCTL) & FLRYBY) == 0);
 }
 
-static void sharpsl_nand_enable_hwecc(struct mtd_info *mtd, int mode)
+static void sharpsl_nand_enable_hwecc(struct nand_chip *chip, int mode)
 {
-	struct sharpsl_nand *sharpsl = mtd_to_sharpsl(mtd);
+	struct sharpsl_nand *sharpsl = mtd_to_sharpsl(nand_to_mtd(chip));
 	writeb(0, sharpsl->io + ECCCLRR);
 }
 
-static int sharpsl_nand_calculate_ecc(struct mtd_info *mtd, const u_char * dat, u_char * ecc_code)
+static int sharpsl_nand_calculate_ecc(struct nand_chip *chip,
+				      const u_char * dat, u_char * ecc_code)
 {
-	struct sharpsl_nand *sharpsl = mtd_to_sharpsl(mtd);
+	struct sharpsl_nand *sharpsl = mtd_to_sharpsl(nand_to_mtd(chip));
 	ecc_code[0] = ~readb(sharpsl->io + ECCLPUB);
 	ecc_code[1] = ~readb(sharpsl->io + ECCLPLB);
 	ecc_code[2] = (~readb(sharpsl->io + ECCCP) << 2) | 0x03;
 	return readb(sharpsl->io + ECCCNTR) != 0;
 }
+
+static int sharpsl_attach_chip(struct nand_chip *chip)
+{
+	if (chip->ecc.engine_type != NAND_ECC_ENGINE_TYPE_ON_HOST)
+		return 0;
+
+	chip->ecc.size = 256;
+	chip->ecc.bytes = 3;
+	chip->ecc.strength = 1;
+	chip->ecc.hwctl = sharpsl_nand_enable_hwecc;
+	chip->ecc.calculate = sharpsl_nand_calculate_ecc;
+	chip->ecc.correct = rawnand_sw_hamming_correct;
+
+	return 0;
+}
+
+static const struct nand_controller_ops sharpsl_ops = {
+	.attach_chip = sharpsl_attach_chip,
+};
 
 /*
  * Main initialization routine
@@ -121,7 +132,7 @@ static int sharpsl_nand_probe(struct platform_device *pdev)
 	}
 
 	/* Allocate memory for MTD device structure and private data */
-	sharpsl = kzalloc(sizeof(struct sharpsl_nand), GFP_KERNEL);
+	sharpsl = kzalloc_obj(struct sharpsl_nand);
 	if (!sharpsl)
 		return -ENOMEM;
 
@@ -143,6 +154,10 @@ static int sharpsl_nand_probe(struct platform_device *pdev)
 	/* Get pointer to private data */
 	this = (struct nand_chip *)(&sharpsl->chip);
 
+	nand_controller_init(&sharpsl->controller);
+	sharpsl->controller.ops = &sharpsl_ops;
+	this->controller = &sharpsl->controller;
+
 	/* Link the private data with the MTD structure */
 	mtd = nand_to_mtd(this);
 	mtd->dev.parent = &pdev->dev;
@@ -156,25 +171,17 @@ static int sharpsl_nand_probe(struct platform_device *pdev)
 	writeb(readb(sharpsl->io + FLASHCTL) | FLWP, sharpsl->io + FLASHCTL);
 
 	/* Set address of NAND IO lines */
-	this->IO_ADDR_R = sharpsl->io + FLASHIO;
-	this->IO_ADDR_W = sharpsl->io + FLASHIO;
+	this->legacy.IO_ADDR_R = sharpsl->io + FLASHIO;
+	this->legacy.IO_ADDR_W = sharpsl->io + FLASHIO;
 	/* Set address of hardware control function */
-	this->cmd_ctrl = sharpsl_nand_hwcontrol;
-	this->dev_ready = sharpsl_nand_dev_ready;
+	this->legacy.cmd_ctrl = sharpsl_nand_hwcontrol;
+	this->legacy.dev_ready = sharpsl_nand_dev_ready;
 	/* 15 us command delay time */
-	this->chip_delay = 15;
-	/* set eccmode using hardware ECC */
-	this->ecc.mode = NAND_ECC_HW;
-	this->ecc.size = 256;
-	this->ecc.bytes = 3;
-	this->ecc.strength = 1;
+	this->legacy.chip_delay = 15;
 	this->badblock_pattern = data->badblock_pattern;
-	this->ecc.hwctl = sharpsl_nand_enable_hwecc;
-	this->ecc.calculate = sharpsl_nand_calculate_ecc;
-	this->ecc.correct = nand_correct_data;
 
 	/* Scan to find existence of the device */
-	err = nand_scan(mtd, 1);
+	err = nand_scan(this, 1);
 	if (err)
 		goto err_scan;
 
@@ -190,7 +197,7 @@ static int sharpsl_nand_probe(struct platform_device *pdev)
 	return 0;
 
 err_add:
-	nand_release(mtd);
+	nand_cleanup(this);
 
 err_scan:
 	iounmap(sharpsl->io);
@@ -203,19 +210,23 @@ err_get_res:
 /*
  * Clean up routine
  */
-static int sharpsl_nand_remove(struct platform_device *pdev)
+static void sharpsl_nand_remove(struct platform_device *pdev)
 {
 	struct sharpsl_nand *sharpsl = platform_get_drvdata(pdev);
+	struct nand_chip *chip = &sharpsl->chip;
+	int ret;
 
-	/* Release resources, unregister device */
-	nand_release(nand_to_mtd(&sharpsl->chip));
+	/* Unregister device */
+	ret = mtd_device_unregister(nand_to_mtd(chip));
+	WARN_ON(ret);
+
+	/* Release resources */
+	nand_cleanup(chip);
 
 	iounmap(sharpsl->io);
 
-	/* Free the MTD device structure */
+	/* Free the driver's structure */
 	kfree(sharpsl);
-
-	return 0;
 }
 
 static struct platform_driver sharpsl_nand_driver = {

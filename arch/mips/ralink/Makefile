@@ -1,6 +1,4 @@
-# This program is free software; you can redistribute it and/or modify it
-# under the terms of the GNU General Public License version 2 as published
-# by the Free Software Foundation.#
+# SPDX-License-Identifier: GPL-2.0-only
 # Makefile for the Ralink common stuff
 #
 # Copyright (C) 2009-2011 Gabor Juhos <juhosg@openwrt.org>
@@ -11,8 +9,6 @@ obj-y := prom.o of.o reset.o
 ifndef CONFIG_MIPS_GIC
 	obj-y += clk.o timer.o
 endif
-
-obj-$(CONFIG_CLKEVT_RT3352) += cevt-rt3352.o
 
 obj-$(CONFIG_RALINK_ILL_ACC) += ill_acc.o
 

@@ -1,31 +1,46 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2016 Oracle.  All Rights Reserved.
- *
  * Author: Darrick J. Wong <darrick.wong@oracle.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it would be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write the Free Software Foundation,
- * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 #ifndef __XFS_REFCOUNT_H__
 #define __XFS_REFCOUNT_H__
 
+struct xfs_trans;
+struct xfs_mount;
+struct xfs_perag;
+struct xfs_btree_cur;
+struct xfs_bmbt_irec;
+struct xfs_refcount_irec;
+struct xfs_rtgroup;
+
 extern int xfs_refcount_lookup_le(struct xfs_btree_cur *cur,
-		xfs_agblock_t bno, int *stat);
+		enum xfs_refc_domain domain, xfs_agblock_t bno, int *stat);
 extern int xfs_refcount_lookup_ge(struct xfs_btree_cur *cur,
-		xfs_agblock_t bno, int *stat);
+		enum xfs_refc_domain domain, xfs_agblock_t bno, int *stat);
+extern int xfs_refcount_lookup_eq(struct xfs_btree_cur *cur,
+		enum xfs_refc_domain domain, xfs_agblock_t bno, int *stat);
 extern int xfs_refcount_get_rec(struct xfs_btree_cur *cur,
 		struct xfs_refcount_irec *irec, int *stat);
+
+static inline uint32_t
+xfs_refcount_encode_startblock(
+	xfs_agblock_t		startblock,
+	enum xfs_refc_domain	domain)
+{
+	uint32_t		start;
+
+	/*
+	 * low level btree operations need to handle the generic btree range
+	 * query functions (which set rc_domain == -1U), so we check that the
+	 * domain is /not/ shared.
+	 */
+	start = startblock & ~XFS_REFC_COWFLAG;
+	if (domain != XFS_REFC_DOMAIN_SHARED)
+		start |= XFS_REFC_COWFLAG;
+
+	return start;
+}
 
 enum xfs_refcount_intent_type {
 	XFS_REFCOUNT_INCREASE = 1,
@@ -34,38 +49,52 @@ enum xfs_refcount_intent_type {
 	XFS_REFCOUNT_FREE_COW,
 };
 
+#define XFS_REFCOUNT_INTENT_STRINGS \
+	{ XFS_REFCOUNT_INCREASE,	"incr" }, \
+	{ XFS_REFCOUNT_DECREASE,	"decr" }, \
+	{ XFS_REFCOUNT_ALLOC_COW,	"alloc_cow" }, \
+	{ XFS_REFCOUNT_FREE_COW,	"free_cow" }
+
 struct xfs_refcount_intent {
 	struct list_head			ri_list;
+	struct xfs_group			*ri_group;
 	enum xfs_refcount_intent_type		ri_type;
-	xfs_fsblock_t				ri_startblock;
 	xfs_extlen_t				ri_blockcount;
+	xfs_fsblock_t				ri_startblock;
+	bool					ri_realtime;
 };
 
-extern int xfs_refcount_increase_extent(struct xfs_mount *mp,
-		struct xfs_defer_ops *dfops, struct xfs_bmbt_irec *irec);
-extern int xfs_refcount_decrease_extent(struct xfs_mount *mp,
-		struct xfs_defer_ops *dfops, struct xfs_bmbt_irec *irec);
+/* Check that the refcount is appropriate for the record domain. */
+static inline bool
+xfs_refcount_check_domain(
+	const struct xfs_refcount_irec	*irec)
+{
+	if (irec->rc_domain == XFS_REFC_DOMAIN_COW && irec->rc_refcount != 1)
+		return false;
+	if (irec->rc_domain == XFS_REFC_DOMAIN_SHARED && irec->rc_refcount < 2)
+		return false;
+	return true;
+}
 
-extern void xfs_refcount_finish_one_cleanup(struct xfs_trans *tp,
-		struct xfs_btree_cur *rcur, int error);
-extern int xfs_refcount_finish_one(struct xfs_trans *tp,
-		struct xfs_defer_ops *dfops, enum xfs_refcount_intent_type type,
-		xfs_fsblock_t startblock, xfs_extlen_t blockcount,
-		xfs_fsblock_t *new_fsb, xfs_extlen_t *new_len,
-		struct xfs_btree_cur **pcur);
+void xfs_refcount_increase_extent(struct xfs_trans *tp, bool isrt,
+		struct xfs_bmbt_irec *irec);
+void xfs_refcount_decrease_extent(struct xfs_trans *tp, bool isrt,
+		struct xfs_bmbt_irec *irec);
+
+int xfs_refcount_finish_one(struct xfs_trans *tp,
+		struct xfs_refcount_intent *ri, struct xfs_btree_cur **pcur);
+int xfs_rtrefcount_finish_one(struct xfs_trans *tp,
+		struct xfs_refcount_intent *ri, struct xfs_btree_cur **pcur);
 
 extern int xfs_refcount_find_shared(struct xfs_btree_cur *cur,
 		xfs_agblock_t agbno, xfs_extlen_t aglen, xfs_agblock_t *fbno,
 		xfs_extlen_t *flen, bool find_end_of_shared);
 
-extern int xfs_refcount_alloc_cow_extent(struct xfs_mount *mp,
-		struct xfs_defer_ops *dfops, xfs_fsblock_t fsb,
-		xfs_extlen_t len);
-extern int xfs_refcount_free_cow_extent(struct xfs_mount *mp,
-		struct xfs_defer_ops *dfops, xfs_fsblock_t fsb,
-		xfs_extlen_t len);
-extern int xfs_refcount_recover_cow_leftovers(struct xfs_mount *mp,
-		xfs_agnumber_t agno);
+void xfs_refcount_alloc_cow_extent(struct xfs_trans *tp, bool isrt,
+		xfs_fsblock_t fsb, xfs_extlen_t len);
+void xfs_refcount_free_cow_extent(struct xfs_trans *tp, bool isrt,
+		xfs_fsblock_t fsb, xfs_extlen_t len);
+int xfs_refcount_recover_cow_leftovers(struct xfs_group *xg);
 
 /*
  * While we're adjusting the refcounts records of an extent, we have
@@ -75,15 +104,43 @@ extern int xfs_refcount_recover_cow_leftovers(struct xfs_mount *mp,
  * log (plus any key updates) so we'll conservatively assume 32 bytes
  * per record.  We must also leave space for btree splits on both ends
  * of the range and space for the CUD and a new CUI.
+ *
+ * Each EFI that we attach to the transaction is assumed to consume ~32 bytes.
+ * This is a low estimate for an EFI tracking a single extent (16 bytes for the
+ * EFI header, 16 for the extent, and 12 for the xlog op header), but the
+ * estimate is acceptable if there's more than one extent being freed.
+ * In the worst case of freeing every other block during a refcount decrease
+ * operation, we amortize the space used for one EFI log item across 16
+ * extents.
  */
 #define XFS_REFCOUNT_ITEM_OVERHEAD	32
 
-static inline xfs_fileoff_t xfs_refcount_max_unmap(int log_res)
-{
-	return (log_res * 3 / 4) / XFS_REFCOUNT_ITEM_OVERHEAD;
-}
+extern int xfs_refcount_has_records(struct xfs_btree_cur *cur,
+		enum xfs_refc_domain domain, xfs_agblock_t bno,
+		xfs_extlen_t len, enum xbtree_recpacking *outcome);
+union xfs_btree_rec;
+extern void xfs_refcount_btrec_to_irec(const union xfs_btree_rec *rec,
+		struct xfs_refcount_irec *irec);
+xfs_failaddr_t xfs_refcount_check_irec(struct xfs_perag *pag,
+		const struct xfs_refcount_irec *irec);
+xfs_failaddr_t xfs_rtrefcount_check_irec(struct xfs_rtgroup *rtg,
+		const struct xfs_refcount_irec *irec);
+extern int xfs_refcount_insert(struct xfs_btree_cur *cur,
+		struct xfs_refcount_irec *irec, int *stat);
 
-extern int xfs_refcount_has_record(struct xfs_btree_cur *cur,
-		xfs_agblock_t bno, xfs_extlen_t len, bool *exists);
+extern struct kmem_cache	*xfs_refcount_intent_cache;
+
+int __init xfs_refcount_intent_init_cache(void);
+void xfs_refcount_intent_destroy_cache(void);
+
+typedef int (*xfs_refcount_query_range_fn)(
+	struct xfs_btree_cur		*cur,
+	const struct xfs_refcount_irec	*rec,
+	void				*priv);
+
+int xfs_refcount_query_range(struct xfs_btree_cur *cur,
+		const struct xfs_refcount_irec *low_rec,
+		const struct xfs_refcount_irec *high_rec,
+		xfs_refcount_query_range_fn fn, void *priv);
 
 #endif	/* __XFS_REFCOUNT_H__ */

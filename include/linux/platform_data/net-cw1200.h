@@ -1,8 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) ST-Ericsson SA 2011
  *
  * Author: Dmitry Tarnyagin <dmitry.tarnyagin@stericsson.com>
- * License terms: GNU General Public License (GPL) version 2
  */
 
 #ifndef CW1200_PLAT_H_INCLUDED
@@ -14,8 +14,6 @@ struct cw1200_platform_data_spi {
 
 	/* All others are optional */
 	bool have_5ghz;
-	int reset;                     /* GPIO to RSTn signal (0 disables) */
-	int powerup;                   /* GPIO to POWERUP signal (0 disables) */
 	int (*power_ctrl)(const struct cw1200_platform_data_spi *pdata,
 			  bool enable); /* Control 3v3 / 1v8 supply */
 	int (*clk_ctrl)(const struct cw1200_platform_data_spi *pdata,
@@ -30,8 +28,6 @@ struct cw1200_platform_data_sdio {
 	/* All others are optional */
 	bool have_5ghz;
 	bool no_nptb;       /* SDIO hardware does not support non-power-of-2-blocksizes */
-	int reset;          /* GPIO to RSTn signal (0 disables) */
-	int powerup;        /* GPIO to POWERUP signal (0 disables) */
 	int irq;            /* IRQ line or 0 to use SDIO IRQ */
 	int (*power_ctrl)(const struct cw1200_platform_data_sdio *pdata,
 			  bool enable); /* Control 3v3 / 1v8 supply */

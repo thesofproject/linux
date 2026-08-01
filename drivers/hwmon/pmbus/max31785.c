@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2017 IBM Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
+#include <linux/delay.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -21,23 +18,72 @@ enum max31785_regs {
 
 #define MAX31785			0x3030
 #define MAX31785A			0x3040
+#define MAX31785B			0x3061
 
 #define MFR_FAN_CONFIG_DUAL_TACH	BIT(12)
 
 #define MAX31785_NR_PAGES		23
 #define MAX31785_NR_FAN_PAGES		6
+#define MAX31785_WAIT_DELAY_US		250
 
-static int max31785_read_byte_data(struct i2c_client *client, int page,
-				   int reg)
+struct max31785_data {
+	ktime_t access;			/* Chip access time */
+	struct pmbus_driver_info info;
+};
+
+/*
+ * MAX31785 Driver Workaround
+ *
+ * The MAX31785 fan controller occasionally exhibits communication issues.
+ * These issues are not indicated by the device itself, except for occasional
+ * NACK responses during master transactions. No error bits are set in STATUS_BYTE.
+ *
+ * Keep minimal local delay handling for raw pre-probe SMBus accesses.
+ * Normal PMBus-mediated accesses use pmbus_driver_info.access_delay instead.
+ */
+static inline void max31785_wait(const struct max31785_data *data)
 {
-	if (page < MAX31785_NR_PAGES)
-		return -ENODATA;
+	s64 delta = ktime_us_delta(ktime_get(), data->access);
 
+	if (delta < MAX31785_WAIT_DELAY_US)
+		usleep_range(MAX31785_WAIT_DELAY_US - delta,
+			     MAX31785_WAIT_DELAY_US);
+}
+
+static int max31785_i2c_write_byte_data(struct i2c_client *client,
+					struct max31785_data *data,
+					int command, u8 value)
+{
+	int rc;
+
+	max31785_wait(data);
+	rc = i2c_smbus_write_byte_data(client, command, value);
+	data->access = ktime_get();
+	return rc;
+}
+
+static int max31785_i2c_read_word_data(struct i2c_client *client,
+				       struct max31785_data *data,
+				       int command)
+{
+	int rc;
+
+	max31785_wait(data);
+	rc = i2c_smbus_read_word_data(client, command);
+	data->access = ktime_get();
+	return rc;
+}
+
+static int max31785_read_byte_data(struct i2c_client *client, int page, int reg)
+{
 	switch (reg) {
 	case PMBUS_VOUT_MODE:
 		return -ENOTSUPP;
 	case PMBUS_FAN_CONFIG_12:
-		return pmbus_read_byte_data(client, page - MAX31785_NR_PAGES,
+		if (page < MAX31785_NR_PAGES)
+			return -ENODATA;
+		return pmbus_read_byte_data(client,
+					    page - MAX31785_NR_PAGES,
 					    reg);
 	}
 
@@ -76,18 +122,32 @@ static int max31785_read_long_data(struct i2c_client *client, int page,
 
 	cmdbuf[0] = reg;
 
-	rc = pmbus_set_page(client, page);
+	rc = pmbus_set_page(client, page, 0xff);
 	if (rc < 0)
 		return rc;
 
+	/*
+	 * Ensure the raw transfer is properly spaced from the
+	 * preceding PMBus transaction.
+	 */
+	pmbus_wait(client);
+
 	rc = i2c_transfer(client->adapter, msg, ARRAY_SIZE(msg));
-	if (rc < 0)
-		return rc;
+
+	/*
+	 * Update PMBus core timing state for the raw transfer, even on error.
+	 * Pass 0 as the operation mask since this is a raw read, intentionally
+	 * neither PMBUS_OP_WRITE nor PMBUS_OP_PAGE_CHANGE.
+	 */
+	pmbus_update_ts(client, 0);
+
+	if (rc != ARRAY_SIZE(msg))
+		return rc < 0 ? rc : -EIO;
 
 	*data = (rspbuf[0] << (0 * 8)) | (rspbuf[1] << (1 * 8)) |
 		(rspbuf[2] << (2 * 8)) | (rspbuf[3] << (3 * 8));
 
-	return rc;
+	return 0;
 }
 
 static int max31785_get_pwm(struct i2c_client *client, int page)
@@ -114,7 +174,7 @@ static int max31785_get_pwm_mode(struct i2c_client *client, int page)
 	if (config < 0)
 		return config;
 
-	command = pmbus_read_word_data(client, page, PMBUS_FAN_COMMAND_1);
+	command = pmbus_read_word_data(client, page, 0xff, PMBUS_FAN_COMMAND_1);
 	if (command < 0)
 		return command;
 
@@ -130,7 +190,7 @@ static int max31785_get_pwm_mode(struct i2c_client *client, int page)
 }
 
 static int max31785_read_word_data(struct i2c_client *client, int page,
-				   int reg)
+				   int phase, int reg)
 {
 	u32 val;
 	int rv;
@@ -192,7 +252,7 @@ static inline u32 max31785_scale_pwm(u32 sensor_val)
 }
 
 static int max31785_pwm_enable(struct i2c_client *client, int page,
-				    u16 word)
+			       u16 word)
 {
 	int config = 0;
 	int rate;
@@ -220,7 +280,8 @@ static int max31785_pwm_enable(struct i2c_client *client, int page,
 		return -EINVAL;
 	}
 
-	return pmbus_update_fan(client, page, 0, config, PB_FAN_1_RPM, rate);
+	return pmbus_update_fan(client, page, 0, config,
+			       PB_FAN_1_RPM, rate);
 }
 
 static int max31785_write_word_data(struct i2c_client *client, int page,
@@ -228,8 +289,9 @@ static int max31785_write_word_data(struct i2c_client *client, int page,
 {
 	switch (reg) {
 	case PMBUS_VIRT_PWM_1:
-		return pmbus_update_fan(client, page, 0, 0, PB_FAN_1_RPM,
-					max31785_scale_pwm(word));
+		return pmbus_update_fan(client, page, 0, 0,
+				       PB_FAN_1_RPM,
+				       max31785_scale_pwm(word));
 	case PMBUS_VIRT_PWM_ENABLE_1:
 		return max31785_pwm_enable(client, page, word);
 	default:
@@ -248,8 +310,6 @@ static int max31785_write_word_data(struct i2c_client *client, int page,
 #define MAX31785_VOUT_FUNCS \
 	(PMBUS_HAVE_VOUT | PMBUS_HAVE_STATUS_VOUT)
 
-#define MAX37185_NUM_FAN_PAGES 6
-
 static const struct pmbus_driver_info max31785_info = {
 	.pages = MAX31785_NR_PAGES,
 
@@ -257,6 +317,7 @@ static const struct pmbus_driver_info max31785_info = {
 	.read_byte_data = max31785_read_byte_data,
 	.read_word_data = max31785_read_word_data,
 	.write_byte = max31785_write_byte,
+	.access_delay = MAX31785_WAIT_DELAY_US,
 
 	/* RPM */
 	.format[PSC_FAN] = direct,
@@ -304,81 +365,92 @@ static const struct pmbus_driver_info max31785_info = {
 };
 
 static int max31785_configure_dual_tach(struct i2c_client *client,
-					struct pmbus_driver_info *info)
+					struct max31785_data *data)
 {
+	struct pmbus_driver_info *info = &data->info;
 	int ret;
 	int i;
 
 	for (i = 0; i < MAX31785_NR_FAN_PAGES; i++) {
-		ret = i2c_smbus_write_byte_data(client, PMBUS_PAGE, i);
+		ret = max31785_i2c_write_byte_data(client, data,
+						   PMBUS_PAGE, i);
 		if (ret < 0)
 			return ret;
 
-		ret = i2c_smbus_read_word_data(client, MFR_FAN_CONFIG);
+		ret = max31785_i2c_read_word_data(client, data,
+						  MFR_FAN_CONFIG);
 		if (ret < 0)
 			return ret;
 
 		if (ret & MFR_FAN_CONFIG_DUAL_TACH) {
-			int virtual = MAX31785_NR_PAGES + i;
+			int vpage = MAX31785_NR_PAGES + i;
 
-			info->pages = virtual + 1;
-			info->func[virtual] |= PMBUS_HAVE_FAN12;
-			info->func[virtual] |= PMBUS_PAGE_VIRTUAL;
+			info->pages = vpage + 1;
+			info->func[vpage] |= PMBUS_HAVE_FAN12;
+			info->func[vpage] |= PMBUS_PAGE_VIRTUAL;
 		}
 	}
 
 	return 0;
 }
 
-static int max31785_probe(struct i2c_client *client,
-			  const struct i2c_device_id *id)
+static int max31785_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct pmbus_driver_info *info;
+	struct max31785_data *data;
 	bool dual_tach = false;
-	s64 ret;
+	int ret;
 
 	if (!i2c_check_functionality(client->adapter,
 				     I2C_FUNC_SMBUS_BYTE_DATA |
 				     I2C_FUNC_SMBUS_WORD_DATA))
 		return -ENODEV;
 
-	info = devm_kzalloc(dev, sizeof(struct pmbus_driver_info), GFP_KERNEL);
-	if (!info)
+	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
+	if (!data)
 		return -ENOMEM;
 
+	data->access = ktime_get();
+	info = &data->info;
 	*info = max31785_info;
 
-	ret = i2c_smbus_write_byte_data(client, PMBUS_PAGE, 255);
+	ret = max31785_i2c_write_byte_data(client, data,
+					   PMBUS_PAGE, 0xff);
 	if (ret < 0)
 		return ret;
 
-	ret = i2c_smbus_read_word_data(client, MFR_REVISION);
+	ret = max31785_i2c_read_word_data(client, data, MFR_REVISION);
 	if (ret < 0)
 		return ret;
 
-	if (ret == MAX31785A) {
+	if (ret == MAX31785A || ret == MAX31785B) {
 		dual_tach = true;
 	} else if (ret == MAX31785) {
-		if (!strcmp("max31785a", id->name))
-			dev_warn(dev, "Expected max3175a, found max31785: cannot provide secondary tachometer readings\n");
+		if (!strcmp("max31785a", client->name) ||
+		    !strcmp("max31785b", client->name))
+			dev_warn(dev, "Expected max31785a/b, found max31785: cannot provide secondary tachometer readings\n");
 	} else {
+		dev_err(dev, "Unrecognized MAX31785 revision: %x\n", ret);
 		return -ENODEV;
 	}
 
 	if (dual_tach) {
-		ret = max31785_configure_dual_tach(client, info);
+		ret = max31785_configure_dual_tach(client, data);
 		if (ret < 0)
 			return ret;
 	}
 
-	return pmbus_do_probe(client, id, info);
+	max31785_wait(data);
+
+	return pmbus_do_probe(client, info);
 }
 
 static const struct i2c_device_id max31785_id[] = {
-	{ "max31785", 0 },
-	{ "max31785a", 0 },
-	{ },
+	{ .name = "max31785" },
+	{ .name = "max31785a" },
+	{ .name = "max31785b" },
+	{ }
 };
 
 MODULE_DEVICE_TABLE(i2c, max31785_id);
@@ -386,6 +458,7 @@ MODULE_DEVICE_TABLE(i2c, max31785_id);
 static const struct of_device_id max31785_of_match[] = {
 	{ .compatible = "maxim,max31785" },
 	{ .compatible = "maxim,max31785a" },
+	{ .compatible = "maxim,max31785b" },
 	{ },
 };
 
@@ -397,7 +470,6 @@ static struct i2c_driver max31785_driver = {
 		.of_match_table = max31785_of_match,
 	},
 	.probe = max31785_probe,
-	.remove = pmbus_do_remove,
 	.id_table = max31785_id,
 };
 
@@ -406,3 +478,4 @@ module_i2c_driver(max31785_driver);
 MODULE_AUTHOR("Andrew Jeffery <andrew@aj.id.au>");
 MODULE_DESCRIPTION("PMBus driver for the Maxim MAX31785");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS("PMBUS");

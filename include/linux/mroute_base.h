@@ -2,15 +2,17 @@
 #define __LINUX_MROUTE_BASE_H
 
 #include <linux/netdevice.h>
-#include <linux/rhashtable.h>
+#include <linux/rhashtable-types.h>
 #include <linux/spinlock.h>
 #include <net/net_namespace.h>
 #include <net/sock.h>
 #include <net/fib_notifier.h>
+#include <net/ip_fib.h>
 
 /**
  * struct vif_device - interface representor for multicast routing
  * @dev: network device being used
+ * @dev_tracker: refcount tracker for @dev reference
  * @bytes_in: statistic; bytes ingressing
  * @bytes_out: statistic; bytes egresing
  * @pkt_in: statistic; packets ingressing
@@ -24,7 +26,8 @@
  * @remote: Remote address for tunnels
  */
 struct vif_device {
-	struct net_device *dev;
+	struct net_device __rcu *dev;
+	netdevice_tracker dev_tracker;
 	unsigned long bytes_in, bytes_out;
 	unsigned long pkt_in, pkt_out;
 	unsigned long rate_limit;
@@ -46,46 +49,47 @@ struct vif_entry_notifier_info {
 };
 
 static inline int mr_call_vif_notifier(struct notifier_block *nb,
-				       struct net *net,
 				       unsigned short family,
 				       enum fib_event_type event_type,
 				       struct vif_device *vif,
-				       unsigned short vif_index, u32 tb_id)
+				       struct net_device *vif_dev,
+				       unsigned short vif_index, u32 tb_id,
+				       struct netlink_ext_ack *extack)
 {
 	struct vif_entry_notifier_info info = {
 		.info = {
 			.family = family,
-			.net = net,
+			.extack = extack,
 		},
-		.dev = vif->dev,
+		.dev = vif_dev,
 		.vif_index = vif_index,
 		.vif_flags = vif->flags,
 		.tb_id = tb_id,
 	};
 
-	return call_fib_notifier(nb, net, event_type, &info.info);
+	return call_fib_notifier(nb, event_type, &info.info);
 }
 
 static inline int mr_call_vif_notifiers(struct net *net,
 					unsigned short family,
 					enum fib_event_type event_type,
 					struct vif_device *vif,
+					struct net_device *vif_dev,
 					unsigned short vif_index, u32 tb_id,
-					unsigned int *ipmr_seq)
+					atomic_t *ipmr_seq)
 {
 	struct vif_entry_notifier_info info = {
 		.info = {
 			.family = family,
-			.net = net,
 		},
-		.dev = vif->dev,
+		.dev = vif_dev,
 		.vif_index = vif_index,
 		.vif_flags = vif->flags,
 		.tb_id = tb_id,
 	};
 
 	ASSERT_RTNL();
-	(*ipmr_seq)++;
+	atomic_inc(ipmr_seq);
 	return call_fib_notifiers(net, event_type, &info.info);
 }
 
@@ -96,7 +100,8 @@ static inline int mr_call_vif_notifiers(struct net *net,
 #define MAXVIFS	32
 #endif
 
-#define VIF_EXISTS(_mrt, _idx) (!!((_mrt)->vif_table[_idx].dev))
+/* Note: This helper is deprecated. */
+#define VIF_EXISTS(_mrt, _idx) (!!rcu_access_pointer((_mrt)->vif_table[_idx].dev))
 
 /* mfc_flags:
  * MFC_STATIC - the entry was added statically (not by a routing daemon)
@@ -141,9 +146,9 @@ struct mr_mfc {
 			unsigned long last_assert;
 			int minvif;
 			int maxvif;
-			unsigned long bytes;
-			unsigned long pkt;
-			unsigned long wrong_if;
+			atomic_long_t bytes;
+			atomic_long_t pkt;
+			atomic_long_t wrong_if;
 			unsigned long lastuse;
 			unsigned char ttls[MAXVIFS];
 			refcount_t refcount;
@@ -172,40 +177,38 @@ struct mfc_entry_notifier_info {
 };
 
 static inline int mr_call_mfc_notifier(struct notifier_block *nb,
-				       struct net *net,
 				       unsigned short family,
 				       enum fib_event_type event_type,
-				       struct mr_mfc *mfc, u32 tb_id)
+				       struct mr_mfc *mfc, u32 tb_id,
+				       struct netlink_ext_ack *extack)
 {
 	struct mfc_entry_notifier_info info = {
 		.info = {
 			.family = family,
-			.net = net,
+			.extack = extack,
 		},
 		.mfc = mfc,
 		.tb_id = tb_id
 	};
 
-	return call_fib_notifier(nb, net, event_type, &info.info);
+	return call_fib_notifier(nb, event_type, &info.info);
 }
 
 static inline int mr_call_mfc_notifiers(struct net *net,
 					unsigned short family,
 					enum fib_event_type event_type,
 					struct mr_mfc *mfc, u32 tb_id,
-					unsigned int *ipmr_seq)
+					atomic_t *ipmr_seq)
 {
 	struct mfc_entry_notifier_info info = {
 		.info = {
 			.family = family,
-			.net = net,
 		},
 		.mfc = mfc,
 		.tb_id = tb_id
 	};
 
-	ASSERT_RTNL();
-	(*ipmr_seq)++;
+	atomic_inc(ipmr_seq);
 	return call_fib_notifiers(net, event_type, &info.info);
 }
 
@@ -223,6 +226,7 @@ struct mr_table_ops {
 
 /**
  * struct mr_table - a multicast routing table
+ * @work: used for table destruction
  * @list: entry within a list of multicast routing tables
  * @net: net where this table belongs
  * @ops: protocol specific operations
@@ -240,6 +244,7 @@ struct mr_table_ops {
  * @mroute_reg_vif_num: PIM-device vif index
  */
 struct mr_table {
+	struct rcu_work		work;
 	struct list_head	list;
 	possible_net_t		net;
 	struct mr_table_ops	ops;
@@ -251,11 +256,17 @@ struct mr_table {
 	struct rhltable		mfc_hash;
 	struct list_head	mfc_cache_list;
 	int			maxvif;
-	atomic_t		cache_resolve_queue_len;
+	u32			cache_resolve_queue_len;
 	bool			mroute_do_assert;
 	bool			mroute_do_pim;
+	bool			mroute_do_wrvifwhole;
 	int			mroute_reg_vif_num;
 };
+
+static inline bool mr_can_free_table(struct net *net)
+{
+	return !check_net(net) || !net_initialized(net);
+}
 
 #ifdef CONFIG_IP_MROUTE_COMMON
 void vif_device_init(struct vif_device *v,
@@ -265,6 +276,7 @@ void vif_device_init(struct vif_device *v,
 		     unsigned short flags,
 		     unsigned short get_iflink_mask);
 
+void mr_table_free(struct mr_table *mrt);
 struct mr_table *
 mr_table_alloc(struct net *net, u32 id,
 	       struct mr_table_ops *ops,
@@ -282,6 +294,12 @@ void *mr_mfc_find_any(struct mr_table *mrt, int vifi, void *hasharg);
 
 int mr_fill_mroute(struct mr_table *mrt, struct sk_buff *skb,
 		   struct mr_mfc *c, struct rtmsg *rtm);
+int mr_table_dump(struct mr_table *mrt, struct sk_buff *skb,
+		  struct netlink_callback *cb,
+		  int (*fill)(struct mr_table *mrt, struct sk_buff *skb,
+			      u32 portid, u32 seq, struct mr_mfc *c,
+			      int cmd, int flags),
+		  spinlock_t *lock, struct fib_dump_filter *filter);
 int mr_rtm_dumproute(struct sk_buff *skb, struct netlink_callback *cb,
 		     struct mr_table *(*iter)(struct net *net,
 					      struct mr_table *mrt),
@@ -289,14 +307,15 @@ int mr_rtm_dumproute(struct sk_buff *skb, struct netlink_callback *cb,
 				 struct sk_buff *skb,
 				 u32 portid, u32 seq, struct mr_mfc *c,
 				 int cmd, int flags),
-		     spinlock_t *lock);
+		     spinlock_t *lock, struct fib_dump_filter *filter);
 
 int mr_dump(struct net *net, struct notifier_block *nb, unsigned short family,
 	    int (*rules_dump)(struct net *net,
-			      struct notifier_block *nb),
+			      struct notifier_block *nb,
+			      struct netlink_ext_ack *extack),
 	    struct mr_table *(*mr_iter)(struct net *net,
 					struct mr_table *mrt),
-	    rwlock_t *mrt_lock);
+	    struct netlink_ext_ack *extack);
 #else
 static inline void vif_device_init(struct vif_device *v,
 				   struct net_device *dev,
@@ -305,16 +324,6 @@ static inline void vif_device_init(struct vif_device *v,
 				   unsigned short flags,
 				   unsigned short get_iflink_mask)
 {
-}
-
-static inline void *
-mr_table_alloc(struct net *net, u32 id,
-	       struct mr_table_ops *ops,
-	       void (*expire_func)(struct timer_list *t),
-	       void (*table_set)(struct mr_table *mrt,
-				 struct net *net))
-{
-	return NULL;
 }
 
 static inline void *mr_mfc_find_parent(struct mr_table *mrt,
@@ -349,7 +358,7 @@ mr_rtm_dumproute(struct sk_buff *skb, struct netlink_callback *cb,
 			     struct sk_buff *skb,
 			     u32 portid, u32 seq, struct mr_mfc *c,
 			     int cmd, int flags),
-		 spinlock_t *lock)
+		 spinlock_t *lock, struct fib_dump_filter *filter)
 {
 	return -EINVAL;
 }
@@ -357,10 +366,11 @@ mr_rtm_dumproute(struct sk_buff *skb, struct netlink_callback *cb,
 static inline int mr_dump(struct net *net, struct notifier_block *nb,
 			  unsigned short family,
 			  int (*rules_dump)(struct net *net,
-					    struct notifier_block *nb),
+					    struct notifier_block *nb,
+					    struct netlink_ext_ack *extack),
 			  struct mr_table *(*mr_iter)(struct net *net,
 						      struct mr_table *mrt),
-			  rwlock_t *mrt_lock)
+			  struct netlink_ext_ack *extack)
 {
 	return -EINVAL;
 }

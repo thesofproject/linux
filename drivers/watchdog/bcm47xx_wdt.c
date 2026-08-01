@@ -105,7 +105,7 @@ static const struct watchdog_ops bcm47xx_wdt_hard_ops = {
 
 static void bcm47xx_wdt_soft_timer_tick(struct timer_list *t)
 {
-	struct bcm47xx_wdt *wdt = from_timer(wdt, t, soft_timer);
+	struct bcm47xx_wdt *wdt = timer_container_of(wdt, t, soft_timer);
 	u32 next_tick = min(wdt->wdd.timeout * 1000, wdt->max_timer_ms);
 
 	if (!atomic_dec_and_test(&wdt->soft_ticks)) {
@@ -139,7 +139,7 @@ static int bcm47xx_wdt_soft_stop(struct watchdog_device *wdd)
 {
 	struct bcm47xx_wdt *wdt = bcm47xx_wdt_get(wdd);
 
-	del_timer_sync(&wdt->soft_timer);
+	timer_delete_sync(&wdt->soft_timer);
 	wdt->timer_set(wdt, 0);
 
 	return 0;
@@ -202,7 +202,7 @@ static int bcm47xx_wdt_probe(struct platform_device *pdev)
 	watchdog_set_restart_priority(&wdt->wdd, 64);
 	watchdog_stop_on_reboot(&wdt->wdd);
 
-	ret = watchdog_register_device(&wdt->wdd);
+	ret = devm_watchdog_register_device(&pdev->dev, &wdt->wdd);
 	if (ret)
 		goto err_timer;
 
@@ -213,18 +213,9 @@ static int bcm47xx_wdt_probe(struct platform_device *pdev)
 
 err_timer:
 	if (soft)
-		del_timer_sync(&wdt->soft_timer);
+		timer_delete_sync(&wdt->soft_timer);
 
 	return ret;
-}
-
-static int bcm47xx_wdt_remove(struct platform_device *pdev)
-{
-	struct bcm47xx_wdt *wdt = dev_get_platdata(&pdev->dev);
-
-	watchdog_unregister_device(&wdt->wdd);
-
-	return 0;
 }
 
 static struct platform_driver bcm47xx_wdt_driver = {
@@ -232,7 +223,6 @@ static struct platform_driver bcm47xx_wdt_driver = {
 		.name	= "bcm47xx-wdt",
 	},
 	.probe		= bcm47xx_wdt_probe,
-	.remove		= bcm47xx_wdt_remove,
 };
 
 module_platform_driver(bcm47xx_wdt_driver);

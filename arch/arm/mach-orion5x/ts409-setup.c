@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * QNAP TS-409 Board Setup
  *
@@ -5,13 +6,9 @@
  *
  * Copyright (C) 2008  Sylver Bruneau <sylver.bruneau@gmail.com>
  * Copyright (C) 2008  Martin Michlmayr <tbm@cyrius.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 #include <linux/gpio.h>
+#include <linux/gpio/machine.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
@@ -172,20 +169,27 @@ static struct i2c_board_info __initdata qnap_ts409_i2c_rtc = {
 static struct gpio_led ts409_led_pins[] = {
 	{
 		.name		= "ts409:red:sata1",
-		.gpio		= 4,
-		.active_low	= 1,
 	}, {
 		.name		= "ts409:red:sata2",
-		.gpio		= 5,
-		.active_low	= 1,
 	}, {
 		.name		= "ts409:red:sata3",
-		.gpio		= 6,
-		.active_low	= 1,
 	}, {
 		.name		= "ts409:red:sata4",
-		.gpio		= 7,
-		.active_low	= 1,
+	},
+};
+
+static struct gpiod_lookup_table ts409_leds_gpio_table = {
+	.dev_id = "leds-gpio",
+	.table = {
+		GPIO_LOOKUP_IDX("orion_gpio0", 4, NULL,
+				0, GPIO_ACTIVE_LOW),
+		GPIO_LOOKUP_IDX("orion_gpio0", 5, NULL,
+				1, GPIO_ACTIVE_LOW),
+		GPIO_LOOKUP_IDX("orion_gpio0", 6, NULL,
+				2, GPIO_ACTIVE_LOW),
+		GPIO_LOOKUP_IDX("orion_gpio0", 7, NULL,
+				3, GPIO_ACTIVE_LOW),
+		{ },
 	},
 };
 
@@ -304,10 +308,11 @@ static void __init qnap_ts409_init(void)
 	if (qnap_ts409_i2c_rtc.irq == 0)
 		pr_warn("qnap_ts409_init: failed to get RTC IRQ\n");
 	i2c_register_board_info(0, &qnap_ts409_i2c_rtc, 1);
+	gpiod_add_lookup_table(&ts409_leds_gpio_table);
 	platform_device_register(&ts409_leds);
 
 	/* register tsx09 specific power-off method */
-	pm_power_off = qnap_tsx09_power_off;
+	register_platform_power_off(qnap_tsx09_power_off);
 }
 
 MACHINE_START(TS409, "QNAP TS-409")

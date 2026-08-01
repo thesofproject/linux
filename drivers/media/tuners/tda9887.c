@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/i2c.h>
@@ -706,4 +707,5 @@ struct dvb_frontend *tda9887_attach(struct dvb_frontend *fe,
 }
 EXPORT_SYMBOL_GPL(tda9887_attach);
 
+MODULE_DESCRIPTION("NXP TDA9885/6/7 analog IF demodulator driver");
 MODULE_LICENSE("GPL");

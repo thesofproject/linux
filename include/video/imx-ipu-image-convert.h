@@ -1,17 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2012-2016 Mentor Graphics Inc.
  *
  * i.MX Queued image conversion support, with tiling and rotation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
- * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
  */
 #ifndef __IMX_IPU_IMAGE_CONVERT_H__
 #define __IMX_IPU_IMAGE_CONVERT_H__
@@ -36,31 +27,19 @@ struct ipu_image_convert_run {
 
 	int status;
 
+	/* private: */
 	/* internal to image converter, callers don't touch */
 	struct list_head list;
 };
 
 /**
- * ipu_image_convert_cb_t - conversion callback function prototype
+ * typedef ipu_image_convert_cb_t - conversion callback function prototype
  *
  * @run:	the completed conversion run pointer
  * @ctx:	a private context pointer for the callback
  */
 typedef void (*ipu_image_convert_cb_t)(struct ipu_image_convert_run *run,
 				       void *ctx);
-
-/**
- * ipu_image_convert_enum_format() - enumerate the image converter's
- *	supported input and output pixel formats.
- *
- * @index:	pixel format index
- * @fourcc:	v4l2 fourcc for this index
- *
- * Returns 0 with a valid index and fills in v4l2 fourcc, -EINVAL otherwise.
- *
- * In V4L2, drivers can call ipu_image_enum_format() in .enum_fmt.
- */
-int ipu_image_convert_enum_format(int index, u32 *fourcc);
 
 /**
  * ipu_image_convert_adjust() - adjust input/output images to IPU restrictions.
@@ -82,7 +61,7 @@ void ipu_image_convert_adjust(struct ipu_image *in, struct ipu_image *out,
  * @out:	output image format
  * @rot_mode:	rotation mode
  *
- * Returns 0 if the formats and rotation mode meet IPU restrictions,
+ * Returns: 0 if the formats and rotation mode meet IPU restrictions,
  * -EINVAL otherwise.
  */
 int ipu_image_convert_verify(struct ipu_image *in, struct ipu_image *out,
@@ -99,11 +78,11 @@ int ipu_image_convert_verify(struct ipu_image *in, struct ipu_image *out,
  * @complete:	run completion callback
  * @complete_context:	a context pointer for the completion callback
  *
- * Returns an opaque conversion context pointer on success, error pointer
+ * In V4L2, drivers should call ipu_image_convert_prepare() at streamon.
+ *
+ * Returns: an opaque conversion context pointer on success, error pointer
  * on failure. The input/output formats and rotation mode must already meet
  * IPU retrictions.
- *
- * In V4L2, drivers should call ipu_image_convert_prepare() at streamon.
  */
 struct ipu_image_convert_ctx *
 ipu_image_convert_prepare(struct ipu_soc *ipu, enum ipu_ic_task ic_task,
@@ -144,6 +123,8 @@ void ipu_image_convert_unprepare(struct ipu_image_convert_ctx *ctx);
  * In V4L2, drivers should call ipu_image_convert_queue() while
  * streaming to queue the conversion of a received input buffer.
  * For example mem2mem devices this would be called in .device_run.
+ *
+ * Returns: 0 on success or -errno on error.
  */
 int ipu_image_convert_queue(struct ipu_image_convert_run *run);
 
@@ -177,6 +158,9 @@ void ipu_image_convert_abort(struct ipu_image_convert_ctx *ctx);
  * On successful return the caller can queue more run requests if needed, using
  * the prepared context in run->ctx. The caller is responsible for unpreparing
  * the context when no more conversion requests are needed.
+ *
+ * Returns: pointer to the created &struct ipu_image_convert_run that has
+ * been queued on success; an ERR_PTR(errno) on error.
  */
 struct ipu_image_convert_run *
 ipu_image_convert(struct ipu_soc *ipu, enum ipu_ic_task ic_task,
@@ -184,24 +168,5 @@ ipu_image_convert(struct ipu_soc *ipu, enum ipu_ic_task ic_task,
 		  enum ipu_rotate_mode rot_mode,
 		  ipu_image_convert_cb_t complete,
 		  void *complete_context);
-
-/**
- * ipu_image_convert_sync() - synchronous single image conversion request
- *
- * @ipu:	the IPU handle to use for the conversion
- * @ic_task:	the IC task to use for the conversion
- * @in:		input image format
- * @out:	output image format
- * @rot_mode:	rotation mode
- *
- * Carry out a single image conversion. Returns when the conversion
- * completes. The input/output formats and rotation mode must already
- * meet IPU retrictions. The created context is automatically unprepared
- * and the run freed on return.
- */
-int ipu_image_convert_sync(struct ipu_soc *ipu, enum ipu_ic_task ic_task,
-			   struct ipu_image *in, struct ipu_image *out,
-			   enum ipu_rotate_mode rot_mode);
-
 
 #endif /* __IMX_IPU_IMAGE_CONVERT_H__ */

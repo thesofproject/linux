@@ -1,14 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * I2C multiplexer
  *
  * Copyright (c) 2008-2009 Rodolfo Giometti <giometti@linux.it>
  * Copyright (c) 2008-2009 Eurotech S.p.A. <info@eurotech.it>
  *
- * This module supports the PCA954x and PCA954x series of I2C multiplexer/switch
+ * This module supports the PCA954x and PCA984x series of I2C multiplexer/switch
  * chips made by NXP Semiconductors.
  * This includes the:
  *	 PCA9540, PCA9542, PCA9543, PCA9544, PCA9545, PCA9546, PCA9547,
  *	 PCA9548, PCA9846, PCA9847, PCA9848 and PCA9849.
+ *
+ * It's also compatible to Maxims MAX735x I2C switch chips, which are controlled
+ * as the NXP PCA9548 and the MAX736x chips that act like the PCA9544.
+ *
+ * This includes the:
+ *	 MAX7356, MAX7357, MAX7358, MAX7367, MAX7368 and MAX7369
  *
  * These chips are all controlled via the I2C bus itself, and all have a
  * single 8-bit register. The upstream "parent" bus fans out to two,
@@ -29,32 +36,49 @@
  *	i2c-virtual_cb.c from Brian Kuschak <bkuschak@yahoo.com>
  * and
  *	pca9540.c from Jean Delvare <jdelvare@suse.de>.
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #include <linux/device.h>
+#include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/i2c-mux.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/module.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
-#include <linux/of_irq.h>
-#include <linux/platform_data/pca954x.h>
 #include <linux/pm.h>
+#include <linux/property.h>
+#include <linux/regulator/consumer.h>
+#include <linux/reset.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
+#include <dt-bindings/mux/mux.h>
 
 #define PCA954X_MAX_NCHANS 8
 
 #define PCA954X_IRQ_OFFSET 4
 
+/*
+ * MAX7357's configuration register is writeable after POR, but
+ * can be locked by setting the basic mode bit. MAX7358 configuration
+ * register is locked by default and needs to be unlocked first.
+ * The configuration register holds the following settings:
+ */
+#define MAX7357_CONF_INT_ENABLE			BIT(0)
+#define MAX7357_CONF_FLUSH_OUT			BIT(1)
+#define MAX7357_CONF_RELEASE_INT		BIT(2)
+#define MAX7357_CONF_DISCON_SINGLE_CHAN		BIT(4)
+#define MAX7357_CONF_PRECONNECT_TEST		BIT(7)
+
+#define MAX7357_POR_DEFAULT_CONF		MAX7357_CONF_INT_ENABLE
+
 enum pca_type {
+	max_7356,
+	max_7357,
+	max_7358,
+	max_7367,
+	max_7368,
+	max_7369,
 	pca_9540,
 	pca_9542,
 	pca_9543,
@@ -84,16 +108,63 @@ struct pca954x {
 	const struct chip_desc *chip;
 
 	u8 last_chan;		/* last register value */
-	u8 deselect;
+	/* MUX_IDLE_AS_IS, MUX_IDLE_DISCONNECT or >= 0 for channel */
+	s32 idle_state;
+
 	struct i2c_client *client;
 
 	struct irq_domain *irq;
 	unsigned int irq_mask;
 	raw_spinlock_t lock;
+	struct regulator *supply;
+
+	struct gpio_desc *reset_gpio;
+	struct reset_control *reset_cont;
 };
 
-/* Provide specs for the PCA954x types we know about */
+/* Provide specs for the MAX735x, PCA954x and PCA984x types we know about */
 static const struct chip_desc chips[] = {
+	[max_7356] = {
+		.nchans = 8,
+		.muxtype = pca954x_isswi,
+		.id = { .manufacturer_id = I2C_DEVICE_ID_NONE },
+	},
+	[max_7357] = {
+		.nchans = 8,
+		.muxtype = pca954x_isswi,
+		.id = { .manufacturer_id = I2C_DEVICE_ID_NONE },
+		/*
+		 * No interrupt controller support. The interrupt
+		 * provides information about stuck channels.
+		 */
+	},
+	[max_7358] = {
+		.nchans = 8,
+		.muxtype = pca954x_isswi,
+		.id = { .manufacturer_id = I2C_DEVICE_ID_NONE },
+		/*
+		 * No interrupt controller support. The interrupt
+		 * provides information about stuck channels.
+		 */
+	},
+	[max_7367] = {
+		.nchans = 4,
+		.muxtype = pca954x_isswi,
+		.has_irq = 1,
+		.id = { .manufacturer_id = I2C_DEVICE_ID_NONE },
+	},
+	[max_7368] = {
+		.nchans = 4,
+		.muxtype = pca954x_isswi,
+		.id = { .manufacturer_id = I2C_DEVICE_ID_NONE },
+	},
+	[max_7369] = {
+		.nchans = 4,
+		.enable = 0x4,
+		.muxtype = pca954x_ismux,
+		.has_irq = 1,
+		.id = { .manufacturer_id = I2C_DEVICE_ID_NONE },
+	},
 	[pca_9540] = {
 		.nchans = 2,
 		.enable = 0x4,
@@ -179,24 +250,35 @@ static const struct chip_desc chips[] = {
 };
 
 static const struct i2c_device_id pca954x_id[] = {
-	{ "pca9540", pca_9540 },
-	{ "pca9542", pca_9542 },
-	{ "pca9543", pca_9543 },
-	{ "pca9544", pca_9544 },
-	{ "pca9545", pca_9545 },
-	{ "pca9546", pca_9546 },
-	{ "pca9547", pca_9547 },
-	{ "pca9548", pca_9548 },
-	{ "pca9846", pca_9846 },
-	{ "pca9847", pca_9847 },
-	{ "pca9848", pca_9848 },
-	{ "pca9849", pca_9849 },
+	{ .name = "max7356", .driver_data = max_7356 },
+	{ .name = "max7357", .driver_data = max_7357 },
+	{ .name = "max7358", .driver_data = max_7358 },
+	{ .name = "max7367", .driver_data = max_7367 },
+	{ .name = "max7368", .driver_data = max_7368 },
+	{ .name = "max7369", .driver_data = max_7369 },
+	{ .name = "pca9540", .driver_data = pca_9540 },
+	{ .name = "pca9542", .driver_data = pca_9542 },
+	{ .name = "pca9543", .driver_data = pca_9543 },
+	{ .name = "pca9544", .driver_data = pca_9544 },
+	{ .name = "pca9545", .driver_data = pca_9545 },
+	{ .name = "pca9546", .driver_data = pca_9546 },
+	{ .name = "pca9547", .driver_data = pca_9547 },
+	{ .name = "pca9548", .driver_data = pca_9548 },
+	{ .name = "pca9846", .driver_data = pca_9846 },
+	{ .name = "pca9847", .driver_data = pca_9847 },
+	{ .name = "pca9848", .driver_data = pca_9848 },
+	{ .name = "pca9849", .driver_data = pca_9849 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, pca954x_id);
 
-#ifdef CONFIG_OF
 static const struct of_device_id pca954x_of_match[] = {
+	{ .compatible = "maxim,max7356", .data = &chips[max_7356] },
+	{ .compatible = "maxim,max7357", .data = &chips[max_7357] },
+	{ .compatible = "maxim,max7358", .data = &chips[max_7358] },
+	{ .compatible = "maxim,max7367", .data = &chips[max_7367] },
+	{ .compatible = "maxim,max7368", .data = &chips[max_7368] },
+	{ .compatible = "maxim,max7369", .data = &chips[max_7369] },
 	{ .compatible = "nxp,pca9540", .data = &chips[pca_9540] },
 	{ .compatible = "nxp,pca9542", .data = &chips[pca_9542] },
 	{ .compatible = "nxp,pca9543", .data = &chips[pca_9543] },
@@ -212,53 +294,36 @@ static const struct of_device_id pca954x_of_match[] = {
 	{}
 };
 MODULE_DEVICE_TABLE(of, pca954x_of_match);
-#endif
 
 /* Write to mux register. Don't use i2c_transfer()/i2c_smbus_xfer()
    for this as they will try to lock adapter a second time */
 static int pca954x_reg_write(struct i2c_adapter *adap,
 			     struct i2c_client *client, u8 val)
 {
-	int ret = -ENODEV;
+	union i2c_smbus_data dummy;
 
-	if (adap->algo->master_xfer) {
-		struct i2c_msg msg;
-		char buf[1];
+	return __i2c_smbus_xfer(adap, client->addr, client->flags,
+				I2C_SMBUS_WRITE, val,
+				I2C_SMBUS_BYTE, &dummy);
+}
 
-		msg.addr = client->addr;
-		msg.flags = 0;
-		msg.len = 1;
-		buf[0] = val;
-		msg.buf = buf;
-		ret = __i2c_transfer(adap, &msg, 1);
-
-		if (ret >= 0 && ret != 1)
-			ret = -EREMOTEIO;
-	} else {
-		union i2c_smbus_data data;
-		ret = adap->algo->smbus_xfer(adap, client->addr,
-					     client->flags,
-					     I2C_SMBUS_WRITE,
-					     val, I2C_SMBUS_BYTE, &data);
-	}
-
-	return ret;
+static u8 pca954x_regval(struct pca954x *data, u8 chan)
+{
+	/* We make switches look like muxes, not sure how to be smarter. */
+	if (data->chip->muxtype == pca954x_ismux)
+		return chan | data->chip->enable;
+	else
+		return 1 << chan;
 }
 
 static int pca954x_select_chan(struct i2c_mux_core *muxc, u32 chan)
 {
 	struct pca954x *data = i2c_mux_priv(muxc);
 	struct i2c_client *client = data->client;
-	const struct chip_desc *chip = data->chip;
 	u8 regval;
 	int ret = 0;
 
-	/* we make switches look like muxes, not sure how to be smarter */
-	if (chip->muxtype == pca954x_ismux)
-		regval = chan | chip->enable;
-	else
-		regval = 1 << chan;
-
+	regval = pca954x_regval(data, chan);
 	/* Only select the channel if its different from the last channel */
 	if (data->last_chan != regval) {
 		ret = pca954x_reg_write(muxc->parent, client, regval);
@@ -272,33 +337,86 @@ static int pca954x_deselect_mux(struct i2c_mux_core *muxc, u32 chan)
 {
 	struct pca954x *data = i2c_mux_priv(muxc);
 	struct i2c_client *client = data->client;
+	s32 idle_state;
 
-	if (!(data->deselect & (1 << chan)))
-		return 0;
+	idle_state = READ_ONCE(data->idle_state);
+	if (idle_state >= 0)
+		/* Set the mux back to a predetermined channel */
+		return pca954x_select_chan(muxc, idle_state);
 
-	/* Deselect active channel */
-	data->last_chan = 0;
-	return pca954x_reg_write(muxc->parent, client, data->last_chan);
+	if (idle_state == MUX_IDLE_DISCONNECT) {
+		/* Deselect active channel */
+		data->last_chan = 0;
+		return pca954x_reg_write(muxc->parent, client,
+					 data->last_chan);
+	}
+
+	/* otherwise leave as-is */
+
+	return 0;
 }
+
+static ssize_t idle_state_show(struct device *dev,
+				    struct device_attribute *attr,
+				    char *buf)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct i2c_mux_core *muxc = i2c_get_clientdata(client);
+	struct pca954x *data = i2c_mux_priv(muxc);
+
+	return sprintf(buf, "%d\n", READ_ONCE(data->idle_state));
+}
+
+static ssize_t idle_state_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct i2c_mux_core *muxc = i2c_get_clientdata(client);
+	struct pca954x *data = i2c_mux_priv(muxc);
+	int val;
+	int ret;
+
+	ret = kstrtoint(buf, 0, &val);
+	if (ret < 0)
+		return ret;
+
+	if (val != MUX_IDLE_AS_IS && val != MUX_IDLE_DISCONNECT &&
+	    (val < 0 || val >= data->chip->nchans))
+		return -EINVAL;
+
+	i2c_lock_bus(muxc->parent, I2C_LOCK_SEGMENT);
+
+	WRITE_ONCE(data->idle_state, val);
+	/*
+	 * Set the mux into a state consistent with the new
+	 * idle_state.
+	 */
+	if (data->last_chan || val != MUX_IDLE_DISCONNECT)
+		ret = pca954x_deselect_mux(muxc, 0);
+
+	i2c_unlock_bus(muxc->parent, I2C_LOCK_SEGMENT);
+
+	return ret < 0 ? ret : count;
+}
+
+static DEVICE_ATTR_RW(idle_state);
 
 static irqreturn_t pca954x_irq_handler(int irq, void *dev_id)
 {
 	struct pca954x *data = dev_id;
-	unsigned int child_irq;
-	int ret, i, handled = 0;
+	unsigned long pending;
+	int ret, i;
 
 	ret = i2c_smbus_read_byte(data->client);
 	if (ret < 0)
 		return IRQ_NONE;
 
-	for (i = 0; i < data->chip->nchans; i++) {
-		if (ret & BIT(PCA954X_IRQ_OFFSET + i)) {
-			child_irq = irq_linear_revmap(data->irq, i);
-			handle_nested_irq(child_irq);
-			handled++;
-		}
-	}
-	return handled ? IRQ_HANDLED : IRQ_NONE;
+	pending = (ret >> PCA954X_IRQ_OFFSET) & (BIT(data->chip->nchans) - 1);
+	for_each_set_bit(i, &pending, data->chip->nchans)
+		handle_nested_irq(irq_find_mapping(data->irq, i));
+
+	return IRQ_RETVAL(pending);
 }
 
 static int pca954x_irq_set_type(struct irq_data *idata, unsigned int type)
@@ -324,9 +442,8 @@ static int pca954x_irq_setup(struct i2c_mux_core *muxc)
 
 	raw_spin_lock_init(&data->lock);
 
-	data->irq = irq_domain_add_linear(client->dev.of_node,
-					  data->chip->nchans,
-					  &irq_domain_simple_ops, data);
+	data->irq = irq_domain_create_linear(dev_fwnode(&client->dev), data->chip->nchans,
+					     &irq_domain_simple_ops, data);
 	if (!data->irq)
 		return -ENODEV;
 
@@ -349,6 +466,8 @@ static void pca954x_cleanup(struct i2c_mux_core *muxc)
 	struct pca954x *data = i2c_mux_priv(muxc);
 	int c, irq;
 
+	regulator_disable(data->supply);
+
 	if (data->irq) {
 		for (c = 0; c < data->chip->nchans; c++) {
 			irq = irq_find_mapping(data->irq, c);
@@ -359,28 +478,95 @@ static void pca954x_cleanup(struct i2c_mux_core *muxc)
 	i2c_mux_del_adapters(muxc);
 }
 
+static int pca954x_init(struct i2c_client *client, struct pca954x *data)
+{
+	int ret;
+
+	if (data->idle_state >= 0)
+		data->last_chan = pca954x_regval(data, data->idle_state);
+	else
+		data->last_chan = 0; /* Disconnect multiplexer */
+
+	if (device_is_compatible(&client->dev, "maxim,max7357")) {
+		if (i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_WRITE_BYTE_DATA)) {
+			u8 conf = MAX7357_POR_DEFAULT_CONF;
+			/*
+			 * The interrupt signal is shared with the reset pin. Release the
+			 * interrupt after 1.6 seconds to allow using the pin as reset.
+			 */
+			conf |= MAX7357_CONF_RELEASE_INT;
+
+			if (device_property_read_bool(&client->dev, "maxim,isolate-stuck-channel"))
+				conf |= MAX7357_CONF_DISCON_SINGLE_CHAN;
+			if (device_property_read_bool(&client->dev,
+						      "maxim,send-flush-out-sequence"))
+				conf |= MAX7357_CONF_FLUSH_OUT;
+			if (device_property_read_bool(&client->dev,
+						      "maxim,preconnection-wiggle-test-enable"))
+				conf |= MAX7357_CONF_PRECONNECT_TEST;
+
+			ret = i2c_smbus_write_byte_data(client, data->last_chan, conf);
+		} else {
+			dev_warn(&client->dev, "Write byte data not supported."
+				 "Cannot enable enhanced mode features\n");
+			ret = i2c_smbus_write_byte(client, data->last_chan);
+		}
+	} else {
+		ret = i2c_smbus_write_byte(client, data->last_chan);
+	}
+
+	if (ret < 0)
+		data->last_chan = 0;
+
+	return ret;
+}
+
+static int pca954x_get_reset(struct device *dev, struct pca954x *data)
+{
+	data->reset_cont = devm_reset_control_get_optional_shared(dev, NULL);
+	if (IS_ERR(data->reset_cont))
+		return dev_err_probe(dev, PTR_ERR(data->reset_cont),
+				     "Failed to get reset\n");
+	else if (data->reset_cont)
+		return 0;
+
+	/*
+	 * fallback to legacy reset-gpios
+	 */
+	data->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(data->reset_gpio)) {
+		return dev_err_probe(dev, PTR_ERR(data->reset_gpio),
+				     "Failed to get reset gpio");
+	}
+
+	return 0;
+}
+
+static void pca954x_reset_deassert(struct pca954x *data)
+{
+	if (data->reset_cont)
+		reset_control_deassert(data->reset_cont);
+	else
+		gpiod_set_value_cansleep(data->reset_gpio, 0);
+}
+
 /*
  * I2C init/probing/exit functions
  */
-static int pca954x_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int pca954x_probe(struct i2c_client *client)
 {
-	struct i2c_adapter *adap = to_i2c_adapter(client->dev.parent);
-	struct pca954x_platform_data *pdata = dev_get_platdata(&client->dev);
-	struct device_node *of_node = client->dev.of_node;
-	bool idle_disconnect_dt;
-	struct gpio_desc *gpio;
-	int num, force, class;
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
+	struct i2c_adapter *adap = client->adapter;
+	struct device *dev = &client->dev;
 	struct i2c_mux_core *muxc;
 	struct pca954x *data;
-	const struct of_device_id *match;
+	int num;
 	int ret;
 
 	if (!i2c_check_functionality(adap, I2C_FUNC_SMBUS_BYTE))
 		return -ENODEV;
 
-	muxc = i2c_mux_alloc(adap, &client->dev,
-			     PCA954X_MAX_NCHANS, sizeof(*data), 0,
+	muxc = i2c_mux_alloc(adap, dev, PCA954X_MAX_NCHANS, sizeof(*data), 0,
 			     pca954x_select_chan, pca954x_deselect_mux);
 	if (!muxc)
 		return -ENOMEM;
@@ -389,15 +575,29 @@ static int pca954x_probe(struct i2c_client *client,
 	i2c_set_clientdata(client, muxc);
 	data->client = client;
 
-	/* Get the mux out of reset if a reset GPIO is specified. */
-	gpio = devm_gpiod_get_optional(&client->dev, "reset", GPIOD_OUT_LOW);
-	if (IS_ERR(gpio))
-		return PTR_ERR(gpio);
+	data->supply = devm_regulator_get(dev, "vdd");
+	if (IS_ERR(data->supply))
+		return dev_err_probe(dev, PTR_ERR(data->supply),
+				"Failed to request regulator\n");
 
-	match = of_match_device(of_match_ptr(pca954x_of_match), &client->dev);
-	if (match)
-		data->chip = of_device_get_match_data(&client->dev);
-	else
+	ret = regulator_enable(data->supply);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "Failed to enable vdd supply\n");
+
+	ret = pca954x_get_reset(dev, data);
+	if (ret)
+		goto fail_cleanup;
+
+	if (data->reset_cont || data->reset_gpio) {
+		udelay(1);
+		pca954x_reset_deassert(data);
+		/* Give the chip some time to recover. */
+		udelay(1);
+	}
+
+	data->chip = device_get_match_data(dev);
+	if (!data->chip)
 		data->chip = &chips[id->driver_data];
 
 	if (data->chip->id.manufacturer_id != I2C_DEVICE_ID_NONE) {
@@ -405,32 +605,37 @@ static int pca954x_probe(struct i2c_client *client,
 
 		ret = i2c_get_device_id(client, &id);
 		if (ret && ret != -EOPNOTSUPP)
-			return ret;
+			goto fail_cleanup;
 
 		if (!ret &&
 		    (id.manufacturer_id != data->chip->id.manufacturer_id ||
 		     id.part_id != data->chip->id.part_id)) {
-			dev_warn(&client->dev,
-				 "unexpected device id %03x-%03x-%x\n",
+			dev_warn(dev, "unexpected device id %03x-%03x-%x\n",
 				 id.manufacturer_id, id.part_id,
 				 id.die_revision);
-			return -ENODEV;
+			ret = -ENODEV;
+			goto fail_cleanup;
 		}
 	}
 
-	/* Write the mux register at addr to verify
-	 * that the mux is in fact present. This also
-	 * initializes the mux to disconnected state.
-	 */
-	if (i2c_smbus_write_byte(client, 0) < 0) {
-		dev_warn(&client->dev, "probe failed\n");
-		return -ENODEV;
+	data->idle_state = MUX_IDLE_AS_IS;
+	if (device_property_read_u32(dev, "idle-state", &data->idle_state)) {
+		if (device_property_read_bool(dev, "i2c-mux-idle-disconnect"))
+			data->idle_state = MUX_IDLE_DISCONNECT;
 	}
 
-	data->last_chan = 0;		   /* force the first selection */
-
-	idle_disconnect_dt = of_node &&
-		of_property_read_bool(of_node, "i2c-mux-idle-disconnect");
+	/*
+	 * Write the mux register at addr to verify
+	 * that the mux is in fact present. This also
+	 * initializes the mux to a channel
+	 * or disconnected state.
+	 */
+	ret = pca954x_init(client, data);
+	if (ret < 0) {
+		dev_warn(dev, "probe failed\n");
+		ret = -ENODEV;
+		goto fail_cleanup;
+	}
 
 	ret = pca954x_irq_setup(muxc);
 	if (ret)
@@ -438,30 +643,13 @@ static int pca954x_probe(struct i2c_client *client,
 
 	/* Now create an adapter for each channel */
 	for (num = 0; num < data->chip->nchans; num++) {
-		bool idle_disconnect_pd = false;
-
-		force = 0;			  /* dynamic adap number */
-		class = 0;			  /* no class by default */
-		if (pdata) {
-			if (num < pdata->num_modes) {
-				/* force static number */
-				force = pdata->modes[num].adap_id;
-				class = pdata->modes[num].class;
-			} else
-				/* discard unconfigured channels */
-				break;
-			idle_disconnect_pd = pdata->modes[num].deselect_on_exit;
-		}
-		data->deselect |= (idle_disconnect_pd ||
-				   idle_disconnect_dt) << num;
-
-		ret = i2c_mux_add_adapter(muxc, force, num, class);
+		ret = i2c_mux_add_adapter(muxc, 0, num);
 		if (ret)
 			goto fail_cleanup;
 	}
 
 	if (data->irq) {
-		ret = devm_request_threaded_irq(&client->dev, data->client->irq,
+		ret = devm_request_threaded_irq(dev, data->client->irq,
 						NULL, pca954x_irq_handler,
 						IRQF_ONESHOT | IRQF_SHARED,
 						"pca954x", data);
@@ -469,8 +657,13 @@ static int pca954x_probe(struct i2c_client *client,
 			goto fail_cleanup;
 	}
 
-	dev_info(&client->dev,
-		 "registered %d multiplexed busses for I2C %s %s\n",
+	/*
+	 * The attr probably isn't going to be needed in most cases,
+	 * so don't fail completely on error.
+	 */
+	device_create_file(dev, &dev_attr_idle_state);
+
+	dev_info(dev, "registered %d multiplexed busses for I2C %s %s\n",
 		 num, data->chip->muxtype == pca954x_ismux
 				? "mux" : "switch", client->name);
 
@@ -481,33 +674,36 @@ fail_cleanup:
 	return ret;
 }
 
-static int pca954x_remove(struct i2c_client *client)
+static void pca954x_remove(struct i2c_client *client)
 {
 	struct i2c_mux_core *muxc = i2c_get_clientdata(client);
 
+	device_remove_file(&client->dev, &dev_attr_idle_state);
+
 	pca954x_cleanup(muxc);
-	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
 static int pca954x_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct i2c_mux_core *muxc = i2c_get_clientdata(client);
 	struct pca954x *data = i2c_mux_priv(muxc);
+	int ret;
 
-	data->last_chan = 0;
-	return i2c_smbus_write_byte(client, 0);
+	ret = pca954x_init(client, data);
+	if (ret < 0)
+		dev_err(&client->dev, "failed to verify mux presence\n");
+
+	return ret;
 }
-#endif
 
-static SIMPLE_DEV_PM_OPS(pca954x_pm, NULL, pca954x_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(pca954x_pm, NULL, pca954x_resume);
 
 static struct i2c_driver pca954x_driver = {
 	.driver		= {
 		.name	= "pca954x",
-		.pm	= &pca954x_pm,
-		.of_match_table = of_match_ptr(pca954x_of_match),
+		.pm	= pm_sleep_ptr(&pca954x_pm),
+		.of_match_table = pca954x_of_match,
 	},
 	.probe		= pca954x_probe,
 	.remove		= pca954x_remove,

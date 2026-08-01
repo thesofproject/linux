@@ -1,21 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * PPS API kernel header
  *
  * Copyright (C) 2009   Rodolfo Giometti <giometti@linux.it>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #ifndef LINUX_PPS_KERNEL_H
@@ -65,12 +52,12 @@ struct pps_device {
 	int current_mode;			/* PPS mode at event time */
 
 	unsigned int last_ev;			/* last PPS event id */
+	unsigned int last_fetched_ev;		/* last fetched PPS event id */
 	wait_queue_head_t queue;		/* PPS event queue */
 
 	unsigned int id;			/* PPS source unique ID */
 	void const *lookup_cookie;		/* For pps_lookup_dev() only */
-	struct cdev cdev;
-	struct device *dev;
+	struct device dev;
 	struct fasync_struct *async_queue;	/* fasync method */
 	spinlock_t lock;
 };
@@ -112,12 +99,14 @@ static inline void timespec_to_pps_ktime(struct pps_ktime *kt,
 
 static inline void pps_get_ts(struct pps_event_time *ts)
 {
+#ifdef CONFIG_NTP_PPS
 	struct system_time_snapshot snap;
 
-	ktime_get_snapshot(&snap);
-	ts->ts_real = ktime_to_timespec64(snap.real);
-#ifdef CONFIG_NTP_PPS
-	ts->ts_raw = ktime_to_timespec64(snap.raw);
+	ktime_get_snapshot_id(CLOCK_REALTIME, &snap);
+	ts->ts_real = ktime_to_timespec64(snap.systime);
+	ts->ts_raw = ktime_to_timespec64(snap.monoraw);
+#else
+	ktime_get_real_ts64(&ts->ts_real);
 #endif
 }
 

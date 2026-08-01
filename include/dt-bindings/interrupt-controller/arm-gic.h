@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-2.0 OR MIT */
 /*
  * This header provides constants for the ARM GIC.
  */
@@ -12,6 +12,8 @@
 
 #define GIC_SPI 0
 #define GIC_PPI 1
+#define GIC_ESPI 2
+#define GIC_EPPI 3
 
 /*
  * Interrupt specifier cell 2.

@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TI LP8788 MFD - buck regulator driver
  *
  * Copyright 2012 Texas Instruments
  *
  * Author: Milo(Woogyom) Kim <milo.kim@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/module.h>
@@ -17,7 +13,7 @@
 #include <linux/platform_device.h>
 #include <linux/regulator/driver.h>
 #include <linux/mfd/lp8788.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 
 /* register address */
 #define LP8788_EN_BUCK			0x0C
@@ -73,8 +69,8 @@
 #define BUCK_FPWM_SHIFT(x)		(x)
 
 enum lp8788_dvs_state {
-	DVS_LOW  = GPIOF_OUT_INIT_LOW,
-	DVS_HIGH = GPIOF_OUT_INIT_HIGH,
+	DVS_LOW  = 0,
+	DVS_HIGH = 1,
 };
 
 enum lp8788_dvs_mode {
@@ -93,14 +89,14 @@ struct lp8788_buck {
 	struct lp8788 *lp;
 	struct regulator_dev *regulator;
 	void *dvs;
+	struct gpio_desc *gpio1;
+	struct gpio_desc *gpio2; /* Only used on BUCK2 */
 };
 
-/* BUCK 1 ~ 4 voltage table */
-static const int lp8788_buck_vtbl[] = {
-	 500000,  800000,  850000,  900000,  950000, 1000000, 1050000, 1100000,
-	1150000, 1200000, 1250000, 1300000, 1350000, 1400000, 1450000, 1500000,
-	1550000, 1600000, 1650000, 1700000, 1750000, 1800000, 1850000, 1900000,
-	1950000, 2000000,
+/* BUCK 1 ~ 4 voltage ranges */
+static const struct linear_range buck_volt_ranges[] = {
+	REGULATOR_LINEAR_RANGE(500000, 0, 0, 0),
+	REGULATOR_LINEAR_RANGE(800000, 1, 25, 50000),
 };
 
 static void lp8788_buck1_set_dvs(struct lp8788_buck *buck)
@@ -112,8 +108,7 @@ static void lp8788_buck1_set_dvs(struct lp8788_buck *buck)
 		return;
 
 	pinstate = dvs->vsel == DVS_SEL_V0 ? DVS_LOW : DVS_HIGH;
-	if (gpio_is_valid(dvs->gpio))
-		gpio_set_value(dvs->gpio, pinstate);
+	gpiod_set_value(buck->gpio1, pinstate);
 }
 
 static void lp8788_buck2_set_dvs(struct lp8788_buck *buck)
@@ -145,11 +140,8 @@ static void lp8788_buck2_set_dvs(struct lp8788_buck *buck)
 		return;
 	}
 
-	if (gpio_is_valid(dvs->gpio[0]))
-		gpio_set_value(dvs->gpio[0], pin1);
-
-	if (gpio_is_valid(dvs->gpio[1]))
-		gpio_set_value(dvs->gpio[1], pin2);
+	gpiod_set_value(buck->gpio1, pin1);
+	gpiod_set_value(buck->gpio2, pin2);
 }
 
 static void lp8788_set_dvs(struct lp8788_buck *buck, enum lp8788_buck_id id)
@@ -208,19 +200,13 @@ static u8 lp8788_select_buck_vout_addr(struct lp8788_buck *buck,
 					enum lp8788_buck_id id)
 {
 	enum lp8788_dvs_mode mode = lp8788_get_buck_dvs_ctrl_mode(buck, id);
-	struct lp8788_buck1_dvs *b1_dvs;
-	struct lp8788_buck2_dvs *b2_dvs;
 	u8 val, idx, addr;
 	int pin1, pin2;
 
 	switch (id) {
 	case BUCK1:
 		if (mode == EXTPIN) {
-			b1_dvs = (struct lp8788_buck1_dvs *)buck->dvs;
-			if (!b1_dvs)
-				goto err;
-
-			idx = gpio_get_value(b1_dvs->gpio) ? 1 : 0;
+			idx = gpiod_get_value(buck->gpio1);
 		} else {
 			lp8788_read_byte(buck->lp, LP8788_BUCK_DVS_SEL, &val);
 			idx = (val & LP8788_BUCK1_DVS_M) >> LP8788_BUCK1_DVS_S;
@@ -229,12 +215,8 @@ static u8 lp8788_select_buck_vout_addr(struct lp8788_buck *buck,
 		break;
 	case BUCK2:
 		if (mode == EXTPIN) {
-			b2_dvs = (struct lp8788_buck2_dvs *)buck->dvs;
-			if (!b2_dvs)
-				goto err;
-
-			pin1 = gpio_get_value(b2_dvs->gpio[0]);
-			pin2 = gpio_get_value(b2_dvs->gpio[1]);
+			pin1 = gpiod_get_value(buck->gpio1);
+			pin2 = gpiod_get_value(buck->gpio2);
 
 			if (pin1 == PIN_LOW && pin2 == PIN_LOW)
 				idx = 0;
@@ -345,8 +327,8 @@ static unsigned int lp8788_buck_get_mode(struct regulator_dev *rdev)
 }
 
 static const struct regulator_ops lp8788_buck12_ops = {
-	.list_voltage = regulator_list_voltage_table,
-	.map_voltage = regulator_map_voltage_ascend,
+	.list_voltage = regulator_list_voltage_linear_range,
+	.map_voltage = regulator_map_voltage_linear_range,
 	.set_voltage_sel = lp8788_buck12_set_voltage_sel,
 	.get_voltage_sel = lp8788_buck12_get_voltage_sel,
 	.enable = regulator_enable_regmap,
@@ -358,8 +340,8 @@ static const struct regulator_ops lp8788_buck12_ops = {
 };
 
 static const struct regulator_ops lp8788_buck34_ops = {
-	.list_voltage = regulator_list_voltage_table,
-	.map_voltage = regulator_map_voltage_ascend,
+	.list_voltage = regulator_list_voltage_linear_range,
+	.map_voltage = regulator_map_voltage_linear_range,
 	.set_voltage_sel = regulator_set_voltage_sel_regmap,
 	.get_voltage_sel = regulator_get_voltage_sel_regmap,
 	.enable = regulator_enable_regmap,
@@ -370,13 +352,14 @@ static const struct regulator_ops lp8788_buck34_ops = {
 	.get_mode = lp8788_buck_get_mode,
 };
 
-static struct regulator_desc lp8788_buck_desc[] = {
+static const struct regulator_desc lp8788_buck_desc[] = {
 	{
 		.name = "buck1",
 		.id = BUCK1,
 		.ops = &lp8788_buck12_ops,
-		.n_voltages = ARRAY_SIZE(lp8788_buck_vtbl),
-		.volt_table = lp8788_buck_vtbl,
+		.n_voltages = 26,
+		.linear_ranges = buck_volt_ranges,
+		.n_linear_ranges = ARRAY_SIZE(buck_volt_ranges),
 		.type = REGULATOR_VOLTAGE,
 		.owner = THIS_MODULE,
 		.enable_reg = LP8788_EN_BUCK,
@@ -386,8 +369,9 @@ static struct regulator_desc lp8788_buck_desc[] = {
 		.name = "buck2",
 		.id = BUCK2,
 		.ops = &lp8788_buck12_ops,
-		.n_voltages = ARRAY_SIZE(lp8788_buck_vtbl),
-		.volt_table = lp8788_buck_vtbl,
+		.n_voltages = 26,
+		.linear_ranges = buck_volt_ranges,
+		.n_linear_ranges = ARRAY_SIZE(buck_volt_ranges),
 		.type = REGULATOR_VOLTAGE,
 		.owner = THIS_MODULE,
 		.enable_reg = LP8788_EN_BUCK,
@@ -397,8 +381,9 @@ static struct regulator_desc lp8788_buck_desc[] = {
 		.name = "buck3",
 		.id = BUCK3,
 		.ops = &lp8788_buck34_ops,
-		.n_voltages = ARRAY_SIZE(lp8788_buck_vtbl),
-		.volt_table = lp8788_buck_vtbl,
+		.n_voltages = 26,
+		.linear_ranges = buck_volt_ranges,
+		.n_linear_ranges = ARRAY_SIZE(buck_volt_ranges),
 		.type = REGULATOR_VOLTAGE,
 		.owner = THIS_MODULE,
 		.vsel_reg = LP8788_BUCK3_VOUT,
@@ -410,8 +395,9 @@ static struct regulator_desc lp8788_buck_desc[] = {
 		.name = "buck4",
 		.id = BUCK4,
 		.ops = &lp8788_buck34_ops,
-		.n_voltages = ARRAY_SIZE(lp8788_buck_vtbl),
-		.volt_table = lp8788_buck_vtbl,
+		.n_voltages = 26,
+		.linear_ranges = buck_volt_ranges,
+		.n_linear_ranges = ARRAY_SIZE(buck_volt_ranges),
 		.type = REGULATOR_VOLTAGE,
 		.owner = THIS_MODULE,
 		.vsel_reg = LP8788_BUCK4_VOUT,
@@ -426,28 +412,28 @@ static int lp8788_dvs_gpio_request(struct platform_device *pdev,
 				enum lp8788_buck_id id)
 {
 	struct lp8788_platform_data *pdata = buck->lp->pdata;
-	char *b1_name = "LP8788_B1_DVS";
-	char *b2_name[] = { "LP8788_B2_DVS1", "LP8788_B2_DVS2" };
-	int i, gpio, ret;
+	struct device *dev = &pdev->dev;
 
 	switch (id) {
 	case BUCK1:
-		gpio = pdata->buck1_dvs->gpio;
-		ret = devm_gpio_request_one(&pdev->dev, gpio, DVS_LOW,
-					    b1_name);
-		if (ret)
-			return ret;
+		buck->gpio1 = devm_gpiod_get(dev, "dvs", GPIOD_OUT_LOW);
+		if (IS_ERR(buck->gpio1))
+			return PTR_ERR(buck->gpio1);
+		gpiod_set_consumer_name(buck->gpio1, "LP8788_B1_DVS");
 
 		buck->dvs = pdata->buck1_dvs;
 		break;
 	case BUCK2:
-		for (i = 0; i < LP8788_NUM_BUCK2_DVS; i++) {
-			gpio = pdata->buck2_dvs->gpio[i];
-			ret = devm_gpio_request_one(&pdev->dev, gpio,
-						    DVS_LOW, b2_name[i]);
-			if (ret)
-				return ret;
-		}
+		buck->gpio1 = devm_gpiod_get_index(dev, "dvs", 0, GPIOD_OUT_LOW);
+		if (IS_ERR(buck->gpio1))
+			return PTR_ERR(buck->gpio1);
+		gpiod_set_consumer_name(buck->gpio1, "LP8788_B2_DVS1");
+
+		buck->gpio2 = devm_gpiod_get_index(dev, "dvs", 1, GPIOD_OUT_LOW);
+		if (IS_ERR(buck->gpio2))
+			return PTR_ERR(buck->gpio2);
+		gpiod_set_consumer_name(buck->gpio2, "LP8788_B2_DVS2");
+
 		buck->dvs = pdata->buck2_dvs;
 		break;
 	default:
@@ -533,6 +519,7 @@ static struct platform_driver lp8788_buck_driver = {
 	.probe = lp8788_buck_probe,
 	.driver = {
 		.name = LP8788_DEV_BUCK,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	},
 };
 

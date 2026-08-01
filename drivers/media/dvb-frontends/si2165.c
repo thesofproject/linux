@@ -1,20 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for Silicon Labs Si2161 DVB-T and Si2165 DVB-C/-T Demodulator
  *
  *  Copyright (C) 2013-2017 Matthias Schwarzott <zzam@gentoo.org>
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
  *  References:
- *  http://www.silabs.com/Support%20Documents/TechnicalDocs/Si2165-short.pdf
+ *  https://www.silabs.com/Support%20Documents/TechnicalDocs/Si2165-short.pdf
  */
 
 #include <linux/delay.h>
@@ -28,7 +19,7 @@
 #include <linux/regmap.h>
 
 #include <media/dvb_frontend.h>
-#include <media/dvb_math.h>
+#include <linux/int_log.h>
 #include "si2165_priv.h"
 #include "si2165.h"
 
@@ -275,18 +266,20 @@ static u32 si2165_get_fe_clk(struct si2165_state *state)
 
 static int si2165_wait_init_done(struct si2165_state *state)
 {
-	int ret = -EINVAL;
+	int ret;
 	u8 val = 0;
 	int i;
 
 	for (i = 0; i < 3; ++i) {
-		si2165_readreg8(state, REG_INIT_DONE, &val);
+		ret = si2165_readreg8(state, REG_INIT_DONE, &val);
+		if (ret < 0)
+			return ret;
 		if (val == 0x01)
 			return 0;
 		usleep_range(1000, 50000);
 	}
 	dev_err(&state->client->dev, "init_done was not set\n");
-	return ret;
+	return -EINVAL;
 }
 
 static int si2165_upload_firmware_block(struct si2165_state *state,
@@ -520,10 +513,8 @@ static int si2165_upload_firmware(struct si2165_state *state)
 	ret = 0;
 	state->firmware_loaded = true;
 error:
-	if (fw) {
-		release_firmware(fw);
-		fw = NULL;
-	}
+	release_firmware(fw);
+	fw = NULL;
 
 	return ret;
 }
@@ -1120,7 +1111,7 @@ static const struct dvb_frontend_ops si2165_ops = {
 		.symbol_rate_min = 1000000,
 		.symbol_rate_max = 7200000,
 		/* For DVB-T */
-		.frequency_stepsize = 166667,
+		.frequency_stepsize_hz = 166667,
 		.caps = FE_CAN_FEC_1_2 |
 			FE_CAN_FEC_2_3 |
 			FE_CAN_FEC_3_4 |
@@ -1151,8 +1142,7 @@ static const struct dvb_frontend_ops si2165_ops = {
 	.read_ber          = si2165_read_ber,
 };
 
-static int si2165_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int si2165_probe(struct i2c_client *client)
 {
 	struct si2165_state *state = NULL;
 	struct si2165_platform_data *pdata = client->dev.platform_data;
@@ -1168,7 +1158,7 @@ static int si2165_probe(struct i2c_client *client,
 	};
 
 	/* allocate memory for the internal state */
-	state = kzalloc(sizeof(*state), GFP_KERNEL);
+	state = kzalloc_obj(*state);
 	if (!state) {
 		ret = -ENOMEM;
 		goto error;
@@ -1281,25 +1271,23 @@ error:
 	return ret;
 }
 
-static int si2165_remove(struct i2c_client *client)
+static void si2165_remove(struct i2c_client *client)
 {
 	struct si2165_state *state = i2c_get_clientdata(client);
 
 	dev_dbg(&client->dev, "\n");
 
 	kfree(state);
-	return 0;
 }
 
 static const struct i2c_device_id si2165_id_table[] = {
-	{"si2165", 0},
-	{}
+	{ .name = "si2165" },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, si2165_id_table);
 
 static struct i2c_driver si2165_driver = {
 	.driver = {
-		.owner	= THIS_MODULE,
 		.name	= "si2165",
 	},
 	.probe		= si2165_probe,

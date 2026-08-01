@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Driver for Sound Core PDAudioCF soundcard
  *
  * Copyright (c) 2003 by Jaroslav Kysela <perex@perex.cz>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <sound/core.h>
@@ -40,7 +27,7 @@ irqreturn_t pdacf_interrupt(int irq, void *dev)
 	stat = inw(chip->port + PDAUDIOCF_REG_ISR);
 	if (stat & (PDAUDIOCF_IRQLVL|PDAUDIOCF_IRQOVR)) {
 		if (stat & PDAUDIOCF_IRQOVR)	/* should never happen */
-			snd_printk(KERN_ERR "PDAUDIOCF SRAM buffer overrun detected!\n");
+			dev_err(chip->card->dev, "PDAUDIOCF SRAM buffer overrun detected!\n");
 		if (chip->pcm_substream)
 			wake_thread = true;
 		if (!(stat & PDAUDIOCF_IRQAKM))
@@ -270,7 +257,6 @@ irqreturn_t pdacf_threaded_irq(int irq, void *dev)
 
 	rdp = inw(chip->port + PDAUDIOCF_REG_RDP);
 	wdp = inw(chip->port + PDAUDIOCF_REG_WDP);
-	/* printk(KERN_DEBUG "TASKLET: rdp = %x, wdp = %x\n", rdp, wdp); */
 	size = wdp - rdp;
 	if (size < 0)
 		size += 0x10000;

@@ -1,81 +1,74 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2002-2005 Roman Zippel <zippel@linux-m68k.org>
  * Copyright (C) 2002-2005 Sam Ravnborg <sam@ravnborg.org>
- *
- * Released under the terms of the GNU GPL v2.0.
  */
 
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <hash.h>
+#include <hashtable.h>
+#include <xalloc.h>
 #include "lkc.h"
 
+/* hash table of all parsed Kconfig files */
+static HASHTABLE_DEFINE(file_hashtable, 1U << 11);
+
+struct file {
+	struct hlist_node node;
+	struct {
+		const char *name;
+		int lineno;
+	} parent;
+	char name[];
+};
+
+static void die_duplicated_include(struct file *file,
+				   const char *parent, int lineno)
+{
+	fprintf(stderr,
+		"%s:%d: error: repeated inclusion of %s\n"
+		"%s:%d: note: location of first inclusion of %s\n",
+		parent, lineno, file->name,
+		file->parent.name, file->parent.lineno, file->name);
+	exit(1);
+}
+
 /* file already present in list? If not add it */
-struct file *file_lookup(const char *name)
+const char *file_lookup(const char *name,
+			const char *parent_name, int parent_lineno)
 {
+	const char *parent = NULL;
 	struct file *file;
-	char *file_name = sym_expand_string_value(name);
+	size_t len;
+	int hash = hash_str(name);
 
-	for (file = file_list; file; file = file->next) {
+	if (parent_name)
+		parent = file_lookup(parent_name, NULL, 0);
+
+	hash_for_each_possible(file_hashtable, file, node, hash)
 		if (!strcmp(name, file->name)) {
-			free(file_name);
-			return file;
+			if (!parent_name)
+				return file->name;
+			die_duplicated_include(file, parent, parent_lineno);
 		}
-	}
 
-	file = xmalloc(sizeof(*file));
+	len = strlen(name);
+	file = xmalloc(sizeof(*file) + len + 1);
 	memset(file, 0, sizeof(*file));
-	file->name = file_name;
-	file->next = file_list;
-	file_list = file;
-	return file;
+	memcpy(file->name, name, len);
+	file->name[len] = '\0';
+	file->parent.name = parent;
+	file->parent.lineno = parent_lineno;
+
+	hash_add(file_hashtable, &file->node, hash);
+
+	str_printf(&autoconf_cmd, "\t%s \\\n", name);
+
+	return file->name;
 }
-
-/* write a dependency file as used by kbuild to track dependencies */
-int file_write_dep(const char *name)
-{
-	struct symbol *sym, *env_sym;
-	struct expr *e;
-	struct file *file;
-	FILE *out;
-
-	if (!name)
-		name = ".kconfig.d";
-	out = fopen("..config.tmp", "w");
-	if (!out)
-		return 1;
-	fprintf(out, "deps_config := \\\n");
-	for (file = file_list; file; file = file->next) {
-		if (file->next)
-			fprintf(out, "\t%s \\\n", file->name);
-		else
-			fprintf(out, "\t%s\n", file->name);
-	}
-	fprintf(out, "\n%s: \\\n"
-		     "\t$(deps_config)\n\n", conf_get_autoconfig_name());
-
-	expr_list_for_each_sym(sym_env_list, e, sym) {
-		struct property *prop;
-		const char *value;
-
-		prop = sym_get_env_prop(sym);
-		env_sym = prop_get_symbol(prop);
-		if (!env_sym)
-			continue;
-		value = getenv(env_sym->name);
-		if (!value)
-			value = "";
-		fprintf(out, "ifneq \"$(%s)\" \"%s\"\n", env_sym->name, value);
-		fprintf(out, "%s: FORCE\n", conf_get_autoconfig_name());
-		fprintf(out, "endif\n");
-	}
-
-	fprintf(out, "\n$(deps_config): ;\n");
-	fclose(out);
-	rename("..config.tmp", name);
-	return 0;
-}
-
 
 /* Allocate initial growable string */
 struct gstr str_new(void)
@@ -91,8 +84,7 @@ struct gstr str_new(void)
 /* Free storage for growable string */
 void str_free(struct gstr *gs)
 {
-	if (gs->s)
-		free(gs->s);
+	free(gs->s);
 	gs->s = NULL;
 	gs->len = 0;
 }
@@ -123,45 +115,7 @@ void str_printf(struct gstr *gs, const char *fmt, ...)
 }
 
 /* Retrieve value of growable string */
-const char *str_get(struct gstr *gs)
+char *str_get(const struct gstr *gs)
 {
 	return gs->s;
-}
-
-void *xmalloc(size_t size)
-{
-	void *p = malloc(size);
-	if (p)
-		return p;
-	fprintf(stderr, "Out of memory.\n");
-	exit(1);
-}
-
-void *xcalloc(size_t nmemb, size_t size)
-{
-	void *p = calloc(nmemb, size);
-	if (p)
-		return p;
-	fprintf(stderr, "Out of memory.\n");
-	exit(1);
-}
-
-void *xrealloc(void *p, size_t size)
-{
-	p = realloc(p, size);
-	if (p)
-		return p;
-	fprintf(stderr, "Out of memory.\n");
-	exit(1);
-}
-
-char *xstrdup(const char *s)
-{
-	char *p;
-
-	p = strdup(s);
-	if (p)
-		return p;
-	fprintf(stderr, "Out of memory.\n");
-	exit(1);
 }

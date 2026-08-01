@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * LED Flash class interface
  *
  * Copyright (C) 2015 Samsung Electronics Co., Ltd.
  * Author: Jacek Anaszewski <j.anaszewski@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/device.h>
@@ -15,7 +12,6 @@
 #include <linux/leds.h>
 #include <linux/module.h>
 #include <linux/slab.h>
-#include "leds.h"
 
 #define has_flash_op(fled_cdev, op)				\
 	(fled_cdev && fled_cdev->ops->op)
@@ -95,14 +91,12 @@ static ssize_t flash_strobe_store(struct device *dev,
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
 	struct led_classdev_flash *fled_cdev = lcdev_to_flcdev(led_cdev);
 	unsigned long state;
-	ssize_t ret = -EINVAL;
+	ssize_t ret = -EBUSY;
 
 	mutex_lock(&led_cdev->led_access);
 
-	if (led_sysfs_is_disabled(led_cdev)) {
-		ret = -EBUSY;
+	if (led_sysfs_is_disabled(led_cdev))
 		goto unlock;
-	}
 
 	ret = kstrtoul(buf, 10, &state);
 	if (ret)
@@ -212,7 +206,7 @@ static ssize_t flash_fault_show(struct device *dev,
 		mask <<= 1;
 	}
 
-	return sprintf(buf, "%s\n", buf);
+	return strlen(strcat(buf, "\n"));
 }
 static DEVICE_ATTR_RO(flash_fault);
 
@@ -285,8 +279,9 @@ static void led_flash_init_sysfs_groups(struct led_classdev_flash *fled_cdev)
 	led_cdev->groups = flash_groups;
 }
 
-int led_classdev_flash_register(struct device *parent,
-				struct led_classdev_flash *fled_cdev)
+int led_classdev_flash_register_ext(struct device *parent,
+				    struct led_classdev_flash *fled_cdev,
+				    struct led_init_data *init_data)
 {
 	struct led_classdev *led_cdev;
 	const struct led_flash_ops *ops;
@@ -312,13 +307,13 @@ int led_classdev_flash_register(struct device *parent,
 	}
 
 	/* Register led class device */
-	ret = led_classdev_register(parent, led_cdev);
+	ret = led_classdev_register_ext(parent, led_cdev, init_data);
 	if (ret < 0)
 		return ret;
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(led_classdev_flash_register);
+EXPORT_SYMBOL_GPL(led_classdev_flash_register_ext);
 
 void led_classdev_flash_unregister(struct led_classdev_flash *fled_cdev)
 {
@@ -328,6 +323,56 @@ void led_classdev_flash_unregister(struct led_classdev_flash *fled_cdev)
 	led_classdev_unregister(&fled_cdev->led_cdev);
 }
 EXPORT_SYMBOL_GPL(led_classdev_flash_unregister);
+
+static void devm_led_classdev_flash_release(struct device *dev, void *res)
+{
+	led_classdev_flash_unregister(*(struct led_classdev_flash **)res);
+}
+
+int devm_led_classdev_flash_register_ext(struct device *parent,
+				     struct led_classdev_flash *fled_cdev,
+				     struct led_init_data *init_data)
+{
+	struct led_classdev_flash **dr;
+	int ret;
+
+	dr = devres_alloc(devm_led_classdev_flash_release, sizeof(*dr),
+			  GFP_KERNEL);
+	if (!dr)
+		return -ENOMEM;
+
+	ret = led_classdev_flash_register_ext(parent, fled_cdev, init_data);
+	if (ret) {
+		devres_free(dr);
+		return ret;
+	}
+
+	*dr = fled_cdev;
+	devres_add(parent, dr);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(devm_led_classdev_flash_register_ext);
+
+static int devm_led_classdev_flash_match(struct device *dev,
+					      void *res, void *data)
+{
+	struct led_classdev_flash **p = res;
+
+	if (WARN_ON(!p || !*p))
+		return 0;
+
+	return *p == data;
+}
+
+void devm_led_classdev_flash_unregister(struct device *dev,
+					struct led_classdev_flash *fled_cdev)
+{
+	WARN_ON(devres_release(dev,
+			       devm_led_classdev_flash_release,
+			       devm_led_classdev_flash_match, fled_cdev));
+}
+EXPORT_SYMBOL_GPL(devm_led_classdev_flash_unregister);
 
 static void led_clamp_align(struct led_flash_setting *s)
 {
@@ -394,6 +439,21 @@ int led_update_flash_brightness(struct led_classdev_flash *fled_cdev)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(led_update_flash_brightness);
+
+int led_set_flash_duration(struct led_classdev_flash *fled_cdev, u32 duration)
+{
+	struct led_classdev *led_cdev = &fled_cdev->led_cdev;
+	struct led_flash_setting *s = &fled_cdev->duration;
+
+	s->val = duration;
+	led_clamp_align(s);
+
+	if (!(led_cdev->flags & LED_SUSPENDED))
+		return call_flash_op(fled_cdev, duration_set, s->val);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(led_set_flash_duration);
 
 MODULE_AUTHOR("Jacek Anaszewski <j.anaszewski@samsung.com>");
 MODULE_DESCRIPTION("LED Flash class interface");

@@ -1,18 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ACPI support for PNP bus type
  *
  * Copyright (C) 2014, Intel Corporation
  * Authors: Zhang Rui <rui.zhang@intel.com>
  *          Rafael J. Wysocki <rafael.j.wysocki@intel.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/acpi.h>
 #include <linux/module.h>
 #include <linux/ctype.h>
+
+#include "internal.h"
 
 static const struct acpi_device_id acpi_pnp_device_ids[] = {
 	/* pata_isapnp */
@@ -121,20 +120,11 @@ static const struct acpi_device_id acpi_pnp_device_ids[] = {
 	{"IBM0071"},
 	/* smsc-ircc2 */
 	{"SMCf010"},
-	/* sb1000 */
-	{"GIC1000"},
 	/* parport_pc */
 	{"PNP0400"},		/* Standard LPT Printer Port */
 	{"PNP0401"},		/* ECP Printer Port */
 	/* apple-gmux */
 	{"APP000B"},
-	/* system */
-	{"PNP0c02"},		/* General ID for reserving resources */
-	{"PNP0c01"},		/* memory controller */
-	/* rtc_cmos */
-	{"PNP0b00"},
-	{"PNP0b01"},
-	{"PNP0b02"},
 	/* c6xdigio */
 	{"PNP0400"},		/* Standard LPT Printer Port */
 	{"PNP0401"},		/* ECP Printer Port */
@@ -157,8 +147,6 @@ static const struct acpi_device_id acpi_pnp_device_ids[] = {
 	{"BRI0A49"},		/* Boca Complete Ofc Communicator 14.4 Data-FAX */
 	{"BRI1400"},		/* Boca Research 33,600 ACF Modem */
 	{"BRI3400"},		/* Boca 33.6 Kbps Internal FD34FSVD */
-	{"BRI0A49"},		/* Boca 33.6 Kbps Internal FD34FSVD */
-	{"BDP3336"},		/* Best Data Products Inc. Smart One 336F PnP Modem */
 	{"CPI4050"},		/* Computer Peripherals Inc. EuroViVa CommCenter-33.6 SP PnP */
 	{"CTL3001"},		/* Creative Labs Phone Blaster 28.8 DSVD PnP Voice */
 	{"CTL3011"},		/* Creative Labs Modem Blaster 28.8 DSVD PnP Voice */
@@ -320,6 +308,9 @@ static bool matching_id(const char *idstr, const char *list_id)
 {
 	int i;
 
+	if (strlen(idstr) != strlen(list_id))
+		return false;
+
 	if (memcmp(idstr, list_id, 3))
 		return false;
 
@@ -351,7 +342,7 @@ static bool acpi_pnp_match(const char *idstr, const struct acpi_device_id **matc
 static int acpi_pnp_attach(struct acpi_device *adev,
 			   const struct acpi_device_id *id)
 {
-	return 1;
+	return true;
 }
 
 static struct acpi_scan_handler acpi_pnp_handler = {
@@ -360,25 +351,9 @@ static struct acpi_scan_handler acpi_pnp_handler = {
 	.attach = acpi_pnp_attach,
 };
 
-/*
- * For CMOS RTC devices, the PNP ACPI scan handler does not work, because
- * there is a CMOS RTC ACPI scan handler installed already, so we need to
- * check those devices and enumerate them to the PNP bus directly.
- */
-static int is_cmos_rtc_device(struct acpi_device *adev)
-{
-	static const struct acpi_device_id ids[] = {
-		{ "PNP0B00" },
-		{ "PNP0B01" },
-		{ "PNP0B02" },
-		{""},
-	};
-	return !acpi_match_device_ids(adev, ids);
-}
-
 bool acpi_is_pnp_device(struct acpi_device *adev)
 {
-	return adev->handler == &acpi_pnp_handler || is_cmos_rtc_device(adev);
+	return adev->handler == &acpi_pnp_handler;
 }
 EXPORT_SYMBOL_GPL(acpi_is_pnp_device);
 

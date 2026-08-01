@@ -1,23 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2015 Prevas A/S
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/device.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
-#include <linux/sysfs.h>
 #include <linux/spi/spi.h>
 #include <linux/regulator/consumer.h>
 #include <linux/err.h>
 #include <linux/module.h>
-#include <linux/of.h>
 
 #include <linux/iio/iio.h>
-#include <linux/iio/sysfs.h>
+#include <linux/iio/buffer.h>
+#include <linux/iio/trigger_consumer.h>
+#include <linux/iio/triggered_buffer.h>
 
 #define ADS8688_CMD_REG(x)		(x << 8)
 #define ADS8688_CMD_REG_NOOP		0x00
@@ -38,6 +35,7 @@
 
 #define ADS8688_VREF_MV			4096
 #define ADS8688_REALBITS		16
+#define ADS8688_MAX_CHANNELS		8
 
 /*
  * enum ads8688_range - ADS8688 reference voltage range
@@ -64,13 +62,13 @@ struct ads8688_state {
 	struct mutex			lock;
 	const struct ads8688_chip_info	*chip_info;
 	struct spi_device		*spi;
-	struct regulator		*reg;
 	unsigned int			vref_mv;
+	int				scale_avail[3][2];
 	enum ads8688_range		range[8];
 	union {
 		__be32 d32;
 		u8 d8[4];
-	} data[2] ____cacheline_aligned;
+	} data[2] __aligned(IIO_DMA_MINALIGN);
 };
 
 enum ads8688_id {
@@ -114,37 +112,9 @@ static const struct ads8688_ranges ads8688_range_def[5] = {
 	}
 };
 
-static ssize_t ads8688_show_scales(struct device *dev,
-				   struct device_attribute *attr, char *buf)
-{
-	struct ads8688_state *st = iio_priv(dev_to_iio_dev(dev));
-
-	return sprintf(buf, "0.%09u 0.%09u 0.%09u\n",
-		       ads8688_range_def[0].scale * st->vref_mv,
-		       ads8688_range_def[1].scale * st->vref_mv,
-		       ads8688_range_def[2].scale * st->vref_mv);
-}
-
-static ssize_t ads8688_show_offsets(struct device *dev,
-				    struct device_attribute *attr, char *buf)
-{
-	return sprintf(buf, "%d %d\n", ads8688_range_def[0].offset,
-		       ads8688_range_def[3].offset);
-}
-
-static IIO_DEVICE_ATTR(in_voltage_scale_available, S_IRUGO,
-		       ads8688_show_scales, NULL, 0);
-static IIO_DEVICE_ATTR(in_voltage_offset_available, S_IRUGO,
-		       ads8688_show_offsets, NULL, 0);
-
-static struct attribute *ads8688_attributes[] = {
-	&iio_dev_attr_in_voltage_scale_available.dev_attr.attr,
-	&iio_dev_attr_in_voltage_offset_available.dev_attr.attr,
-	NULL,
-};
-
-static const struct attribute_group ads8688_attribute_group = {
-	.attrs = ads8688_attributes,
+static const int ads8688_offset_avail[] = {
+	-(1 << (ADS8688_REALBITS - 1)),
+	0
 };
 
 #define ADS8688_CHAN(index)					\
@@ -155,6 +125,16 @@ static const struct attribute_group ads8688_attribute_group = {
 	.info_mask_separate = BIT(IIO_CHAN_INFO_RAW)		\
 			      | BIT(IIO_CHAN_INFO_SCALE)	\
 			      | BIT(IIO_CHAN_INFO_OFFSET),	\
+	.info_mask_shared_by_type_available =			\
+			      BIT(IIO_CHAN_INFO_SCALE)		\
+			      | BIT(IIO_CHAN_INFO_OFFSET),	\
+	.scan_index = index,					\
+	.scan_type = {						\
+		.sign = 'u',					\
+		.realbits = 16,					\
+		.storagebits = 16,				\
+		.endianness = IIO_BE,				\
+	},							\
 }
 
 static const struct iio_chan_spec ads8684_channels[] = {
@@ -273,12 +253,10 @@ static int ads8688_write_reg_range(struct iio_dev *indio_dev,
 				   enum ads8688_range range)
 {
 	unsigned int tmp;
-	int ret;
 
 	tmp = ADS8688_PROG_REG_RANGE_CH(chan->channel);
-	ret = ads8688_prog_write(indio_dev, tmp, range);
 
-	return ret;
+	return ads8688_prog_write(indio_dev, tmp, range);
 }
 
 static int ads8688_write_raw(struct iio_dev *indio_dev,
@@ -364,12 +342,56 @@ static int ads8688_write_raw_get_fmt(struct iio_dev *indio_dev,
 	return -EINVAL;
 }
 
+static int ads8688_read_avail(struct iio_dev *indio_dev,
+			      struct iio_chan_spec const *chan,
+			      const int **vals, int *type, int *length,
+			      long mask)
+{
+	struct ads8688_state *st = iio_priv(indio_dev);
+
+	switch (mask) {
+	case IIO_CHAN_INFO_SCALE:
+		*vals = (const int *)st->scale_avail;
+		*type = IIO_VAL_INT_PLUS_NANO;
+		*length = ARRAY_SIZE(st->scale_avail) * 2;
+		return IIO_AVAIL_LIST;
+	case IIO_CHAN_INFO_OFFSET:
+		*vals = ads8688_offset_avail;
+		*type = IIO_VAL_INT;
+		*length = ARRAY_SIZE(ads8688_offset_avail);
+		return IIO_AVAIL_LIST;
+	default:
+		return -EINVAL;
+	}
+}
+
 static const struct iio_info ads8688_info = {
 	.read_raw = &ads8688_read_raw,
+	.read_avail = &ads8688_read_avail,
 	.write_raw = &ads8688_write_raw,
 	.write_raw_get_fmt = &ads8688_write_raw_get_fmt,
-	.attrs = &ads8688_attribute_group,
 };
+
+static irqreturn_t ads8688_trigger_handler(int irq, void *p)
+{
+	struct iio_poll_func *pf = p;
+	struct iio_dev *indio_dev = pf->indio_dev;
+	/* Ensure naturally aligned timestamp */
+	u16 buffer[ADS8688_MAX_CHANNELS + sizeof(s64)/sizeof(u16)] __aligned(8) = { };
+	int i, j = 0;
+
+	iio_for_each_active_channel(indio_dev, i) {
+		buffer[j] = ads8688_read(indio_dev, i);
+		j++;
+	}
+
+	iio_push_to_buffers_with_ts(indio_dev, buffer, sizeof(buffer),
+				    iio_get_time_ns(indio_dev));
+
+	iio_trigger_notify_done(indio_dev->trig);
+
+	return IRQ_HANDLED;
+}
 
 static const struct ads8688_chip_info ads8688_chip_info_tbl[] = {
 	[ID_ADS8684] = {
@@ -394,33 +416,24 @@ static int ads8688_probe(struct spi_device *spi)
 
 	st = iio_priv(indio_dev);
 
-	st->reg = devm_regulator_get_optional(&spi->dev, "vref");
-	if (!IS_ERR(st->reg)) {
-		ret = regulator_enable(st->reg);
-		if (ret)
-			return ret;
+	ret = devm_regulator_get_enable_read_voltage(&spi->dev, "vref");
+	if (ret < 0 && ret != -ENODEV)
+		return ret;
 
-		ret = regulator_get_voltage(st->reg);
-		if (ret < 0)
-			goto error_out;
+	st->vref_mv = ret == -ENODEV ? ADS8688_VREF_MV : ret / 1000;
 
-		st->vref_mv = ret / 1000;
-	} else {
-		/* Use internal reference */
-		st->vref_mv = ADS8688_VREF_MV;
+	for (unsigned int i = 0; i < ARRAY_SIZE(st->scale_avail); i++) {
+		st->scale_avail[i][0] = 0;
+		st->scale_avail[i][1] = ads8688_range_def[i].scale * st->vref_mv;
 	}
 
 	st->chip_info =	&ads8688_chip_info_tbl[spi_get_device_id(spi)->driver_data];
 
 	spi->mode = SPI_MODE_1;
 
-	spi_set_drvdata(spi, indio_dev);
-
 	st->spi = spi;
 
 	indio_dev->name = spi_get_device_id(spi)->name;
-	indio_dev->dev.parent = &spi->dev;
-	indio_dev->dev.of_node = spi->dev.of_node;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 	indio_dev->channels = st->chip_info->channels;
 	indio_dev->num_channels = st->chip_info->num_channels;
@@ -430,36 +443,19 @@ static int ads8688_probe(struct spi_device *spi)
 
 	mutex_init(&st->lock);
 
-	ret = iio_device_register(indio_dev);
-	if (ret)
-		goto error_out;
+	ret = devm_iio_triggered_buffer_setup(&spi->dev, indio_dev, NULL,
+					      ads8688_trigger_handler, NULL);
+	if (ret < 0)
+		return dev_err_probe(&spi->dev, ret,
+				     "iio triggered buffer setup failed\n");
 
-	return 0;
-
-error_out:
-	if (!IS_ERR(st->reg))
-		regulator_disable(st->reg);
-
-	return ret;
-}
-
-static int ads8688_remove(struct spi_device *spi)
-{
-	struct iio_dev *indio_dev = spi_get_drvdata(spi);
-	struct ads8688_state *st = iio_priv(indio_dev);
-
-	iio_device_unregister(indio_dev);
-
-	if (!IS_ERR(st->reg))
-		regulator_disable(st->reg);
-
-	return 0;
+	return devm_iio_device_register(&spi->dev, indio_dev);
 }
 
 static const struct spi_device_id ads8688_id[] = {
-	{"ads8684", ID_ADS8684},
-	{"ads8688", ID_ADS8688},
-	{}
+	{ "ads8684", ID_ADS8684 },
+	{ "ads8688", ID_ADS8688 },
+	{ }
 };
 MODULE_DEVICE_TABLE(spi, ads8688_id);
 
@@ -473,13 +469,13 @@ MODULE_DEVICE_TABLE(of, ads8688_of_match);
 static struct spi_driver ads8688_driver = {
 	.driver = {
 		.name	= "ads8688",
+		.of_match_table = ads8688_of_match,
 	},
 	.probe		= ads8688_probe,
-	.remove		= ads8688_remove,
 	.id_table	= ads8688_id,
 };
 module_spi_driver(ads8688_driver);
 
-MODULE_AUTHOR("Sean Nyekjaer <sean.nyekjaer@prevas.dk>");
+MODULE_AUTHOR("Sean Nyekjaer <sean@geanix.dk>");
 MODULE_DESCRIPTION("Texas Instruments ADS8688 driver");
 MODULE_LICENSE("GPL v2");

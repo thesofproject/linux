@@ -12,13 +12,13 @@
  * Kevin Chea
  */
 
+#include <linux/bits.h>
 #include <linux/interrupt.h>
 #include <linux/irqdomain.h>
 #include <linux/irq.h>
 #include <linux/irqchip.h>
+#include <linux/irqchip/xtensa-pic.h>
 #include <linux/of.h>
-
-unsigned int cached_irq_mask;
 
 /*
  * Device Tree IRQ specifier translation function which works with one or
@@ -43,43 +43,39 @@ static const struct irq_domain_ops xtensa_irq_domain_ops = {
 
 static void xtensa_irq_mask(struct irq_data *d)
 {
-	cached_irq_mask &= ~(1 << d->hwirq);
-	set_sr(cached_irq_mask, intenable);
+	u32 irq_mask;
+
+	irq_mask = xtensa_get_sr(intenable);
+	irq_mask &= ~BIT(d->hwirq);
+	xtensa_set_sr(irq_mask, intenable);
 }
 
 static void xtensa_irq_unmask(struct irq_data *d)
 {
-	cached_irq_mask |= 1 << d->hwirq;
-	set_sr(cached_irq_mask, intenable);
-}
+	u32 irq_mask;
 
-static void xtensa_irq_enable(struct irq_data *d)
-{
-	variant_irq_enable(d->hwirq);
-	xtensa_irq_unmask(d);
-}
-
-static void xtensa_irq_disable(struct irq_data *d)
-{
-	xtensa_irq_mask(d);
-	variant_irq_disable(d->hwirq);
+	irq_mask = xtensa_get_sr(intenable);
+	irq_mask |= BIT(d->hwirq);
+	xtensa_set_sr(irq_mask, intenable);
 }
 
 static void xtensa_irq_ack(struct irq_data *d)
 {
-	set_sr(1 << d->hwirq, intclear);
+	xtensa_set_sr(BIT(d->hwirq), intclear);
 }
 
 static int xtensa_irq_retrigger(struct irq_data *d)
 {
-	set_sr(1 << d->hwirq, intset);
+	unsigned int mask = BIT(d->hwirq);
+
+	if (WARN_ON(mask & ~XCHAL_INTTYPE_MASK_SOFTWARE))
+		return 0;
+	xtensa_set_sr(mask, intset);
 	return 1;
 }
 
 static struct irq_chip xtensa_irq_chip = {
 	.name		= "xtensa",
-	.irq_enable	= xtensa_irq_enable,
-	.irq_disable	= xtensa_irq_disable,
 	.irq_mask	= xtensa_irq_mask,
 	.irq_unmask	= xtensa_irq_unmask,
 	.irq_ack	= xtensa_irq_ack,
@@ -89,9 +85,9 @@ static struct irq_chip xtensa_irq_chip = {
 int __init xtensa_pic_init_legacy(struct device_node *interrupt_parent)
 {
 	struct irq_domain *root_domain =
-		irq_domain_add_legacy(NULL, NR_IRQS - 1, 1, 0,
+		irq_domain_create_legacy(NULL, NR_IRQS - 1, 1, 0,
 				&xtensa_irq_domain_ops, &xtensa_irq_chip);
-	irq_set_default_host(root_domain);
+	irq_set_default_domain(root_domain);
 	return 0;
 }
 
@@ -99,9 +95,9 @@ static int __init xtensa_pic_init(struct device_node *np,
 		struct device_node *interrupt_parent)
 {
 	struct irq_domain *root_domain =
-		irq_domain_add_linear(np, NR_IRQS, &xtensa_irq_domain_ops,
+		irq_domain_create_linear(of_fwnode_handle(np), NR_IRQS, &xtensa_irq_domain_ops,
 				&xtensa_irq_chip);
-	irq_set_default_host(root_domain);
+	irq_set_default_domain(root_domain);
 	return 0;
 }
 IRQCHIP_DECLARE(xtensa_irq_chip, "cdns,xtensa-pic", xtensa_pic_init);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *    Support for Legend Silicon GB20600 (a.k.a DMB-TH) demodulator
  *    LGS8913, LGS8GL5, LGS8G75
@@ -6,17 +7,6 @@
  *    Copyright (C) 2007-2009 David T.L. Wong <davidtlwong@gmail.com>
  *    Copyright (C) 2008 Sirius International (Hong Kong) Limited
  *    Timothy Lee <timothy.lee@siriushk.com> (for initial work on LGS8GL5)
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2 of the License, or
- *    (at your option) any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
- *
  */
 
 #include <asm/div64.h>
@@ -985,9 +975,9 @@ static const struct dvb_frontend_ops lgs8gxx_ops = {
 	.delsys = { SYS_DTMB },
 	.info = {
 		.name = "Legend Silicon LGS8913/LGS8GXX DMB-TH",
-		.frequency_min = 474000000,
-		.frequency_max = 858000000,
-		.frequency_stepsize = 10000,
+		.frequency_min_hz = 474 * MHz,
+		.frequency_max_hz = 858 * MHz,
+		.frequency_stepsize_hz = 10 * kHz,
 		.caps =
 			FE_CAN_FEC_AUTO |
 			FE_CAN_QAM_AUTO |
@@ -1022,7 +1012,7 @@ struct dvb_frontend *lgs8gxx_attach(const struct lgs8gxx_config *config,
 	if (config == NULL || i2c == NULL)
 		return NULL;
 
-	priv = kzalloc(sizeof(struct lgs8gxx_state), GFP_KERNEL);
+	priv = kzalloc_obj(struct lgs8gxx_state);
 	if (priv == NULL)
 		goto error_out;
 
@@ -1053,7 +1043,7 @@ error_out:
 	return NULL;
 
 }
-EXPORT_SYMBOL(lgs8gxx_attach);
+EXPORT_SYMBOL_GPL(lgs8gxx_attach);
 
 MODULE_DESCRIPTION("Legend Silicon LGS8913/LGS8GXX DMB-TH demodulator driver");
 MODULE_AUTHOR("David T. L. Wong <davidtlwong@gmail.com>");

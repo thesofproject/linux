@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * fireworks_hwdep.c - a part of driver for Fireworks based devices
  *
  * Copyright (c) 2013-2014 Takashi Sakamoto
- *
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 /*
@@ -35,6 +34,7 @@ hwdep_read_resp_buf(struct snd_efw *efw, char __user *buf, long remained,
 	type = SNDRV_FIREWIRE_EVENT_EFW_RESPONSE;
 	if (copy_to_user(buf, &type, sizeof(type)))
 		return -EFAULT;
+	count += sizeof(type);
 	remained -= sizeof(type);
 	buf += sizeof(type);
 
@@ -103,12 +103,10 @@ hwdep_read_locked(struct snd_efw *efw, char __user *buf, long count,
 		.lock_status.type = SNDRV_FIREWIRE_EVENT_LOCK_STATUS,
 	};
 
-	spin_lock_irq(&efw->lock);
-
-	event.lock_status.status = (efw->dev_lock_count > 0);
-	efw->dev_lock_changed = false;
-
-	spin_unlock_irq(&efw->lock);
+	scoped_guard(spinlock_irq, &efw->lock) {
+		event.lock_status.status = (efw->dev_lock_count > 0);
+		efw->dev_lock_changed = false;
+	}
 
 	count = min_t(long, count, sizeof(event.lock_status));
 
@@ -192,13 +190,11 @@ hwdep_poll(struct snd_hwdep *hwdep, struct file *file, poll_table *wait)
 
 	poll_wait(file, &efw->hwdep_wait, wait);
 
-	spin_lock_irq(&efw->lock);
+	guard(spinlock_irq)(&efw->lock);
 	if (efw->dev_lock_changed || efw->pull_ptr != efw->push_ptr)
 		events = EPOLLIN | EPOLLRDNORM;
 	else
 		events = 0;
-	spin_unlock_irq(&efw->lock);
-
 	return events | EPOLLOUT;
 }
 
@@ -213,7 +209,7 @@ hwdep_get_info(struct snd_efw *efw, void __user *arg)
 	info.card = dev->card->index;
 	*(__be32 *)&info.guid[0] = cpu_to_be32(dev->config_rom[3]);
 	*(__be32 *)&info.guid[4] = cpu_to_be32(dev->config_rom[4]);
-	strlcpy(info.device_name, dev_name(&dev->device),
+	strscpy(info.device_name, dev_name(&dev->device),
 		sizeof(info.device_name));
 
 	if (copy_to_user(arg, &info, sizeof(info)))
@@ -225,39 +221,27 @@ hwdep_get_info(struct snd_efw *efw, void __user *arg)
 static int
 hwdep_lock(struct snd_efw *efw)
 {
-	int err;
-
-	spin_lock_irq(&efw->lock);
+	guard(spinlock_irq)(&efw->lock);
 
 	if (efw->dev_lock_count == 0) {
 		efw->dev_lock_count = -1;
-		err = 0;
+		return 0;
 	} else {
-		err = -EBUSY;
+		return -EBUSY;
 	}
-
-	spin_unlock_irq(&efw->lock);
-
-	return err;
 }
 
 static int
 hwdep_unlock(struct snd_efw *efw)
 {
-	int err;
-
-	spin_lock_irq(&efw->lock);
+	guard(spinlock_irq)(&efw->lock);
 
 	if (efw->dev_lock_count == -1) {
 		efw->dev_lock_count = 0;
-		err = 0;
+		return 0;
 	} else {
-		err = -EBADFD;
+		return -EBADFD;
 	}
-
-	spin_unlock_irq(&efw->lock);
-
-	return err;
 }
 
 static int
@@ -265,10 +249,9 @@ hwdep_release(struct snd_hwdep *hwdep, struct file *file)
 {
 	struct snd_efw *efw = hwdep->private_data;
 
-	spin_lock_irq(&efw->lock);
+	guard(spinlock_irq)(&efw->lock);
 	if (efw->dev_lock_count == -1)
 		efw->dev_lock_count = 0;
-	spin_unlock_irq(&efw->lock);
 
 	return 0;
 }
@@ -319,7 +302,7 @@ int snd_efw_create_hwdep_device(struct snd_efw *efw)
 	err = snd_hwdep_new(efw->card, "Fireworks", 0, &hwdep);
 	if (err < 0)
 		goto end;
-	strcpy(hwdep->name, "Fireworks");
+	strscpy(hwdep->name, "Fireworks");
 	hwdep->iface = SNDRV_HWDEP_IFACE_FW_FIREWORKS;
 	hwdep->ops = ops;
 	hwdep->private_data = efw;

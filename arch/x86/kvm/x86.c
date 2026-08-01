@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Kernel-based Virtual Machine driver for Linux
  *
@@ -13,22 +14,25 @@
  *   Yaniv Kamay  <yaniv@qumranet.com>
  *   Amit Shah    <amit.shah@qumranet.com>
  *   Ben-Ami Yassour <benami@il.ibm.com>
- *
- * This work is licensed under the terms of the GNU GPL, version 2.  See
- * the COPYING file in the top-level directory.
- *
  */
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/kvm_host.h>
 #include "irq.h"
+#include "ioapic.h"
 #include "mmu.h"
 #include "i8254.h"
 #include "tss.h"
-#include "kvm_cache_regs.h"
+#include "regs.h"
+#include "kvm_emulate.h"
+#include "mmu/page_track.h"
 #include "x86.h"
 #include "cpuid.h"
 #include "pmu.h"
 #include "hyperv.h"
+#include "lapic.h"
+#include "xen.h"
+#include "smm.h"
 
 #include <linux/clocksource.h>
 #include <linux/interrupt.h>
@@ -40,7 +44,6 @@
 #include <linux/mman.h>
 #include <linux/highmem.h>
 #include <linux/iommu.h>
-#include <linux/intel-iommu.h>
 #include <linux/cpufreq.h>
 #include <linux/user-return-notifier.h>
 #include <linux/srcu.h>
@@ -54,32 +57,56 @@
 #include <linux/kvm_irqfd.h>
 #include <linux/irqbypass.h>
 #include <linux/sched/stat.h>
+#include <linux/sched/isolation.h>
 #include <linux/mem_encrypt.h>
+#include <linux/suspend.h>
+#include <linux/smp.h>
 
+#include <trace/events/ipi.h>
 #include <trace/events/kvm.h>
 
 #include <asm/debugreg.h>
 #include <asm/msr.h>
 #include <asm/desc.h>
 #include <asm/mce.h>
+#include <asm/pkru.h>
 #include <linux/kernel_stat.h>
-#include <asm/fpu/internal.h> /* Ugh! */
+#include <asm/fpu/api.h>
+#include <asm/fpu/xcr.h>
+#include <asm/fpu/xstate.h>
 #include <asm/pvclock.h>
 #include <asm/div64.h>
 #include <asm/irq_remapping.h>
 #include <asm/mshyperv.h>
 #include <asm/hypervisor.h>
+#include <asm/tlbflush.h>
+#include <asm/intel_pt.h>
+#include <asm/emulate_prefix.h>
+#include <asm/sgx.h>
+#include <asm/virt.h>
+
+#include <clocksource/hyperv_timer.h>
 
 #define CREATE_TRACE_POINTS
 #include "trace.h"
 
 #define MAX_IO_MSRS 256
-#define KVM_MAX_MCE_BANKS 32
-u64 __read_mostly kvm_mce_cap_supported = MCG_CTL_P | MCG_SER_P;
-EXPORT_SYMBOL_GPL(kvm_mce_cap_supported);
+
+/*
+ * Note, kvm_caps fields should *never* have default values, all fields must be
+ * recomputed from scratch during vendor module load, e.g. to account for a
+ * vendor module being reloaded with different module parameters.
+ */
+struct kvm_caps kvm_caps __read_mostly;
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_caps);
+
+struct kvm_host_values kvm_host __read_mostly;
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_host);
+
+#define  ERR_PTR_USR(e)  ((void __user *)ERR_PTR(e))
 
 #define emul_to_vcpu(ctxt) \
-	container_of(ctxt, struct kvm_vcpu, arch.emulate_ctxt)
+	((struct kvm_vcpu *)(ctxt)->vcpu)
 
 /* EFER defaults:
  * - enable syscall per default because its emulated by KVM
@@ -92,261 +119,589 @@ u64 __read_mostly efer_reserved_bits = ~((u64)(EFER_SCE | EFER_LME | EFER_LMA));
 static u64 __read_mostly efer_reserved_bits = ~((u64)EFER_SCE);
 #endif
 
-#define VM_STAT(x) offsetof(struct kvm, stat.x), KVM_STAT_VM
-#define VCPU_STAT(x) offsetof(struct kvm_vcpu, stat.x), KVM_STAT_VCPU
+#define KVM_EXIT_HYPERCALL_VALID_MASK (1 << KVM_HC_MAP_GPA_RANGE)
 
-#define KVM_X2APIC_API_VALID_FLAGS (KVM_X2APIC_API_USE_32BIT_IDS | \
-                                    KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK)
+#define KVM_CAP_PMU_VALID_MASK KVM_PMU_CAP_DISABLE
 
-static void update_cr8_intercept(struct kvm_vcpu *vcpu);
+#define KVM_X2APIC_API_VALID_FLAGS (KVM_X2APIC_API_USE_32BIT_IDS		| \
+				    KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK	| \
+				    KVM_X2APIC_ENABLE_SUPPRESS_EOI_BROADCAST	| \
+				    KVM_X2APIC_DISABLE_SUPPRESS_EOI_BROADCAST)
+
 static void process_nmi(struct kvm_vcpu *vcpu);
-static void enter_smm(struct kvm_vcpu *vcpu);
 static void __kvm_set_rflags(struct kvm_vcpu *vcpu, unsigned long rflags);
 static void store_regs(struct kvm_vcpu *vcpu);
 static int sync_regs(struct kvm_vcpu *vcpu);
 
-struct kvm_x86_ops *kvm_x86_ops __read_mostly;
-EXPORT_SYMBOL_GPL(kvm_x86_ops);
+static int __set_sregs2(struct kvm_vcpu *vcpu, struct kvm_sregs2 *sregs2);
+static void __get_sregs2(struct kvm_vcpu *vcpu, struct kvm_sregs2 *sregs2);
+
+static DEFINE_MUTEX(vendor_module_lock);
+static void kvm_load_guest_fpu(struct kvm_vcpu *vcpu);
+static void kvm_put_guest_fpu(struct kvm_vcpu *vcpu);
+
+struct kvm_x86_ops kvm_x86_ops __read_mostly;
+
+#define KVM_X86_OP(func)					     \
+	DEFINE_STATIC_CALL_NULL(kvm_x86_##func,			     \
+				*(((struct kvm_x86_ops *)0)->func));
+#define KVM_X86_OP_OPTIONAL KVM_X86_OP
+#define KVM_X86_OP_OPTIONAL_RET0 KVM_X86_OP
+#include <asm/kvm-x86-ops.h>
+EXPORT_STATIC_CALL_GPL(kvm_x86_get_cs_db_l_bits);
+EXPORT_STATIC_CALL_GPL(kvm_x86_cache_reg);
+EXPORT_STATIC_CALL_GPL(kvm_x86_get_cpl);
 
 static bool __read_mostly ignore_msrs = 0;
-module_param(ignore_msrs, bool, S_IRUGO | S_IWUSR);
+module_param(ignore_msrs, bool, 0644);
 
-static bool __read_mostly report_ignored_msrs = true;
-module_param(report_ignored_msrs, bool, S_IRUGO | S_IWUSR);
+bool __read_mostly report_ignored_msrs = true;
+module_param(report_ignored_msrs, bool, 0644);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(report_ignored_msrs);
 
 unsigned int min_timer_period_us = 200;
-module_param(min_timer_period_us, uint, S_IRUGO | S_IWUSR);
-
-static bool __read_mostly kvmclock_periodic_sync = true;
-module_param(kvmclock_periodic_sync, bool, S_IRUGO);
-
-bool __read_mostly kvm_has_tsc_control;
-EXPORT_SYMBOL_GPL(kvm_has_tsc_control);
-u32  __read_mostly kvm_max_guest_tsc_khz;
-EXPORT_SYMBOL_GPL(kvm_max_guest_tsc_khz);
-u8   __read_mostly kvm_tsc_scaling_ratio_frac_bits;
-EXPORT_SYMBOL_GPL(kvm_tsc_scaling_ratio_frac_bits);
-u64  __read_mostly kvm_max_tsc_scaling_ratio;
-EXPORT_SYMBOL_GPL(kvm_max_tsc_scaling_ratio);
-u64 __read_mostly kvm_default_tsc_scaling_ratio;
-EXPORT_SYMBOL_GPL(kvm_default_tsc_scaling_ratio);
+module_param(min_timer_period_us, uint, 0644);
 
 /* tsc tolerance in parts per million - default to 1/2 of the NTP threshold */
 static u32 __read_mostly tsc_tolerance_ppm = 250;
-module_param(tsc_tolerance_ppm, uint, S_IRUGO | S_IWUSR);
-
-/* lapic timer advance (tscdeadline mode only) in nanoseconds */
-unsigned int __read_mostly lapic_timer_advance_ns = 0;
-module_param(lapic_timer_advance_ns, uint, S_IRUGO | S_IWUSR);
-
-static bool __read_mostly vector_hashing = true;
-module_param(vector_hashing, bool, S_IRUGO);
+module_param(tsc_tolerance_ppm, uint, 0644);
 
 bool __read_mostly enable_vmware_backdoor = false;
-module_param(enable_vmware_backdoor, bool, S_IRUGO);
-EXPORT_SYMBOL_GPL(enable_vmware_backdoor);
+module_param(enable_vmware_backdoor, bool, 0444);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(enable_vmware_backdoor);
 
-static bool __read_mostly force_emulation_prefix = false;
-module_param(force_emulation_prefix, bool, S_IRUGO);
+/*
+ * Flags to manipulate forced emulation behavior (any non-zero value will
+ * enable forced emulation).
+ */
+#define KVM_FEP_CLEAR_RFLAGS_RF	BIT(1)
+static int __read_mostly force_emulation_prefix;
+module_param(force_emulation_prefix, int, 0644);
 
-#define KVM_NR_SHARED_MSRS 16
+int __read_mostly pi_inject_timer = -1;
+module_param(pi_inject_timer, bint, 0644);
 
-struct kvm_shared_msrs_global {
-	int nr;
-	u32 msrs[KVM_NR_SHARED_MSRS];
-};
+bool __read_mostly eager_page_split = true;
+module_param(eager_page_split, bool, 0644);
 
-struct kvm_shared_msrs {
+/* Enable/disable SMT_RSB bug mitigation */
+static bool __read_mostly mitigate_smt_rsb;
+module_param(mitigate_smt_rsb, bool, 0444);
+
+/*
+ * Restoring the host value for MSRs that are only consumed when running in
+ * usermode, e.g. SYSCALL MSRs and TSC_AUX, can be deferred until the CPU
+ * returns to userspace, i.e. the kernel can run with the guest's value.
+ */
+#define KVM_MAX_NR_USER_RETURN_MSRS 16
+
+struct kvm_user_return_msrs {
 	struct user_return_notifier urn;
 	bool registered;
-	struct kvm_shared_msr_values {
+	struct kvm_user_return_msr_values {
 		u64 host;
 		u64 curr;
-	} values[KVM_NR_SHARED_MSRS];
+	} values[KVM_MAX_NR_USER_RETURN_MSRS];
 };
 
-static struct kvm_shared_msrs_global __read_mostly shared_msrs_global;
-static struct kvm_shared_msrs __percpu *shared_msrs;
+u32 __read_mostly kvm_nr_uret_msrs;
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_nr_uret_msrs);
+static u32 __read_mostly kvm_uret_msrs_list[KVM_MAX_NR_USER_RETURN_MSRS];
+static DEFINE_PER_CPU(struct kvm_user_return_msrs, user_return_msrs);
 
-struct kvm_stats_debugfs_item debugfs_entries[] = {
-	{ "pf_fixed", VCPU_STAT(pf_fixed) },
-	{ "pf_guest", VCPU_STAT(pf_guest) },
-	{ "tlb_flush", VCPU_STAT(tlb_flush) },
-	{ "invlpg", VCPU_STAT(invlpg) },
-	{ "exits", VCPU_STAT(exits) },
-	{ "io_exits", VCPU_STAT(io_exits) },
-	{ "mmio_exits", VCPU_STAT(mmio_exits) },
-	{ "signal_exits", VCPU_STAT(signal_exits) },
-	{ "irq_window", VCPU_STAT(irq_window_exits) },
-	{ "nmi_window", VCPU_STAT(nmi_window_exits) },
-	{ "halt_exits", VCPU_STAT(halt_exits) },
-	{ "halt_successful_poll", VCPU_STAT(halt_successful_poll) },
-	{ "halt_attempted_poll", VCPU_STAT(halt_attempted_poll) },
-	{ "halt_poll_invalid", VCPU_STAT(halt_poll_invalid) },
-	{ "halt_wakeup", VCPU_STAT(halt_wakeup) },
-	{ "hypercalls", VCPU_STAT(hypercalls) },
-	{ "request_irq", VCPU_STAT(request_irq_exits) },
-	{ "irq_exits", VCPU_STAT(irq_exits) },
-	{ "host_state_reload", VCPU_STAT(host_state_reload) },
-	{ "fpu_reload", VCPU_STAT(fpu_reload) },
-	{ "insn_emulation", VCPU_STAT(insn_emulation) },
-	{ "insn_emulation_fail", VCPU_STAT(insn_emulation_fail) },
-	{ "irq_injections", VCPU_STAT(irq_injections) },
-	{ "nmi_injections", VCPU_STAT(nmi_injections) },
-	{ "req_event", VCPU_STAT(req_event) },
-	{ "mmu_shadow_zapped", VM_STAT(mmu_shadow_zapped) },
-	{ "mmu_pte_write", VM_STAT(mmu_pte_write) },
-	{ "mmu_pte_updated", VM_STAT(mmu_pte_updated) },
-	{ "mmu_pde_zapped", VM_STAT(mmu_pde_zapped) },
-	{ "mmu_flooded", VM_STAT(mmu_flooded) },
-	{ "mmu_recycled", VM_STAT(mmu_recycled) },
-	{ "mmu_cache_miss", VM_STAT(mmu_cache_miss) },
-	{ "mmu_unsync", VM_STAT(mmu_unsync) },
-	{ "remote_tlb_flush", VM_STAT(remote_tlb_flush) },
-	{ "largepages", VM_STAT(lpages) },
-	{ "max_mmu_page_hash_collisions",
-		VM_STAT(max_mmu_page_hash_collisions) },
-	{ NULL }
+#define KVM_SUPPORTED_XCR0     (XFEATURE_MASK_FP | XFEATURE_MASK_SSE \
+				| XFEATURE_MASK_YMM | XFEATURE_MASK_BNDREGS \
+				| XFEATURE_MASK_BNDCSR | XFEATURE_MASK_AVX512 \
+				| XFEATURE_MASK_PKRU | XFEATURE_MASK_XTILE)
+
+#define XFEATURE_MASK_CET_ALL	(XFEATURE_MASK_CET_USER | XFEATURE_MASK_CET_KERNEL)
+/*
+ * Note, KVM supports exposing PT to the guest, but does not support context
+ * switching PT via XSTATE (KVM's PT virtualization relies on perf; swapping
+ * PT via guest XSTATE would clobber perf state), i.e. KVM doesn't support
+ * IA32_XSS[bit 8] (guests can/must use RDMSR/WRMSR to save/restore PT MSRs).
+ */
+#define KVM_SUPPORTED_XSS	(XFEATURE_MASK_CET_ALL)
+
+bool __read_mostly allow_smaller_maxphyaddr = 0;
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(allow_smaller_maxphyaddr);
+
+bool __read_mostly enable_apicv = true;
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(enable_apicv);
+
+bool __read_mostly enable_ipiv = true;
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(enable_ipiv);
+
+bool __read_mostly enable_device_posted_irqs = true;
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(enable_device_posted_irqs);
+
+const struct kvm_stats_desc kvm_vm_stats_desc[] = {
+	KVM_GENERIC_VM_STATS(),
+	STATS_DESC_COUNTER(VM, mmu_shadow_zapped),
+	STATS_DESC_COUNTER(VM, mmu_pte_write),
+	STATS_DESC_COUNTER(VM, mmu_pde_zapped),
+	STATS_DESC_COUNTER(VM, mmu_flooded),
+	STATS_DESC_COUNTER(VM, mmu_recycled),
+	STATS_DESC_COUNTER(VM, mmu_cache_miss),
+	STATS_DESC_ICOUNTER(VM, mmu_unsync),
+	STATS_DESC_ICOUNTER(VM, mmu_shadow_pages),
+	STATS_DESC_ICOUNTER(VM, pages_4k),
+	STATS_DESC_ICOUNTER(VM, pages_2m),
+	STATS_DESC_ICOUNTER(VM, pages_1g),
+	STATS_DESC_ICOUNTER(VM, nx_lpage_splits),
+	STATS_DESC_PCOUNTER(VM, max_mmu_rmap_size),
+	STATS_DESC_PCOUNTER(VM, max_mmu_page_hash_collisions)
 };
 
-u64 __read_mostly host_xcr0;
+const struct kvm_stats_header kvm_vm_stats_header = {
+	.name_size = KVM_STATS_NAME_SIZE,
+	.num_desc = ARRAY_SIZE(kvm_vm_stats_desc),
+	.id_offset = sizeof(struct kvm_stats_header),
+	.desc_offset = sizeof(struct kvm_stats_header) + KVM_STATS_NAME_SIZE,
+	.data_offset = sizeof(struct kvm_stats_header) + KVM_STATS_NAME_SIZE +
+		       sizeof(kvm_vm_stats_desc),
+};
+
+const struct kvm_stats_desc kvm_vcpu_stats_desc[] = {
+	KVM_GENERIC_VCPU_STATS(),
+	STATS_DESC_COUNTER(VCPU, pf_taken),
+	STATS_DESC_COUNTER(VCPU, pf_fixed),
+	STATS_DESC_COUNTER(VCPU, pf_emulate),
+	STATS_DESC_COUNTER(VCPU, pf_spurious),
+	STATS_DESC_COUNTER(VCPU, pf_fast),
+	STATS_DESC_COUNTER(VCPU, pf_mmio_spte_created),
+	STATS_DESC_COUNTER(VCPU, pf_guest),
+	STATS_DESC_COUNTER(VCPU, tlb_flush),
+	STATS_DESC_COUNTER(VCPU, invlpg),
+	STATS_DESC_COUNTER(VCPU, exits),
+	STATS_DESC_COUNTER(VCPU, io_exits),
+	STATS_DESC_COUNTER(VCPU, mmio_exits),
+	STATS_DESC_COUNTER(VCPU, signal_exits),
+	STATS_DESC_COUNTER(VCPU, irq_window_exits),
+	STATS_DESC_COUNTER(VCPU, nmi_window_exits),
+	STATS_DESC_COUNTER(VCPU, l1d_flush),
+	STATS_DESC_COUNTER(VCPU, halt_exits),
+	STATS_DESC_COUNTER(VCPU, request_irq_exits),
+	STATS_DESC_COUNTER(VCPU, irq_exits),
+	STATS_DESC_COUNTER(VCPU, host_state_reload),
+	STATS_DESC_COUNTER(VCPU, fpu_reload),
+	STATS_DESC_COUNTER(VCPU, insn_emulation),
+	STATS_DESC_COUNTER(VCPU, insn_emulation_fail),
+	STATS_DESC_COUNTER(VCPU, hypercalls),
+	STATS_DESC_COUNTER(VCPU, irq_injections),
+	STATS_DESC_COUNTER(VCPU, nmi_injections),
+	STATS_DESC_COUNTER(VCPU, req_event),
+	STATS_DESC_COUNTER(VCPU, nested_run),
+	STATS_DESC_COUNTER(VCPU, directed_yield_attempted),
+	STATS_DESC_COUNTER(VCPU, directed_yield_successful),
+	STATS_DESC_COUNTER(VCPU, preemption_reported),
+	STATS_DESC_COUNTER(VCPU, preemption_other),
+	STATS_DESC_IBOOLEAN(VCPU, guest_mode),
+	STATS_DESC_COUNTER(VCPU, notify_window_exits),
+};
+
+const struct kvm_stats_header kvm_vcpu_stats_header = {
+	.name_size = KVM_STATS_NAME_SIZE,
+	.num_desc = ARRAY_SIZE(kvm_vcpu_stats_desc),
+	.id_offset = sizeof(struct kvm_stats_header),
+	.desc_offset = sizeof(struct kvm_stats_header) + KVM_STATS_NAME_SIZE,
+	.data_offset = sizeof(struct kvm_stats_header) + KVM_STATS_NAME_SIZE +
+		       sizeof(kvm_vcpu_stats_desc),
+};
+
+static struct kmem_cache *x86_emulator_cache;
+
+/*
+ * The three MSR lists(msrs_to_save, emulated_msrs, msr_based_features) track
+ * the set of MSRs that KVM exposes to userspace through KVM_GET_MSRS,
+ * KVM_SET_MSRS, and KVM_GET_MSR_INDEX_LIST.  msrs_to_save holds MSRs that
+ * require host support, i.e. should be probed via RDMSR.  emulated_msrs holds
+ * MSRs that KVM emulates without strictly requiring host support.
+ * msr_based_features holds MSRs that enumerate features, i.e. are effectively
+ * CPUID leafs.  Note, msr_based_features isn't mutually exclusive with
+ * msrs_to_save and emulated_msrs.
+ */
+
+static const u32 msrs_to_save_base[] = {
+	MSR_IA32_SYSENTER_CS, MSR_IA32_SYSENTER_ESP, MSR_IA32_SYSENTER_EIP,
+	MSR_STAR,
+#ifdef CONFIG_X86_64
+	MSR_CSTAR, MSR_KERNEL_GS_BASE, MSR_SYSCALL_MASK, MSR_LSTAR,
+#endif
+	MSR_IA32_TSC, MSR_IA32_CR_PAT, MSR_VM_HSAVE_PA,
+	MSR_IA32_FEAT_CTL, MSR_IA32_BNDCFGS, MSR_TSC_AUX,
+	MSR_IA32_SPEC_CTRL, MSR_IA32_TSX_CTRL,
+	MSR_IA32_RTIT_CTL, MSR_IA32_RTIT_STATUS, MSR_IA32_RTIT_CR3_MATCH,
+	MSR_IA32_RTIT_OUTPUT_BASE, MSR_IA32_RTIT_OUTPUT_MASK,
+	MSR_IA32_RTIT_ADDR0_A, MSR_IA32_RTIT_ADDR0_B,
+	MSR_IA32_RTIT_ADDR1_A, MSR_IA32_RTIT_ADDR1_B,
+	MSR_IA32_RTIT_ADDR2_A, MSR_IA32_RTIT_ADDR2_B,
+	MSR_IA32_RTIT_ADDR3_A, MSR_IA32_RTIT_ADDR3_B,
+	MSR_IA32_UMWAIT_CONTROL,
+
+	MSR_IA32_XFD, MSR_IA32_XFD_ERR, MSR_IA32_XSS,
+
+	MSR_IA32_U_CET, MSR_IA32_S_CET,
+	MSR_IA32_PL0_SSP, MSR_IA32_PL1_SSP, MSR_IA32_PL2_SSP,
+	MSR_IA32_PL3_SSP, MSR_IA32_INT_SSP_TAB,
+	MSR_IA32_DEBUGCTLMSR,
+	MSR_IA32_LASTBRANCHFROMIP, MSR_IA32_LASTBRANCHTOIP,
+	MSR_IA32_LASTINTFROMIP, MSR_IA32_LASTINTTOIP,
+};
+
+static const u32 msrs_to_save_pmu[] = {
+	MSR_ARCH_PERFMON_FIXED_CTR0, MSR_ARCH_PERFMON_FIXED_CTR1,
+	MSR_ARCH_PERFMON_FIXED_CTR0 + 2,
+	MSR_CORE_PERF_FIXED_CTR_CTRL, MSR_CORE_PERF_GLOBAL_STATUS,
+	MSR_CORE_PERF_GLOBAL_CTRL,
+	MSR_IA32_PEBS_ENABLE, MSR_IA32_DS_AREA, MSR_PEBS_DATA_CFG,
+
+	/* This part of MSRs should match KVM_MAX_NR_INTEL_GP_COUNTERS. */
+	MSR_ARCH_PERFMON_PERFCTR0, MSR_ARCH_PERFMON_PERFCTR1,
+	MSR_ARCH_PERFMON_PERFCTR0 + 2, MSR_ARCH_PERFMON_PERFCTR0 + 3,
+	MSR_ARCH_PERFMON_PERFCTR0 + 4, MSR_ARCH_PERFMON_PERFCTR0 + 5,
+	MSR_ARCH_PERFMON_PERFCTR0 + 6, MSR_ARCH_PERFMON_PERFCTR0 + 7,
+	MSR_ARCH_PERFMON_EVENTSEL0, MSR_ARCH_PERFMON_EVENTSEL1,
+	MSR_ARCH_PERFMON_EVENTSEL0 + 2, MSR_ARCH_PERFMON_EVENTSEL0 + 3,
+	MSR_ARCH_PERFMON_EVENTSEL0 + 4, MSR_ARCH_PERFMON_EVENTSEL0 + 5,
+	MSR_ARCH_PERFMON_EVENTSEL0 + 6, MSR_ARCH_PERFMON_EVENTSEL0 + 7,
+
+	MSR_K7_EVNTSEL0, MSR_K7_EVNTSEL1, MSR_K7_EVNTSEL2, MSR_K7_EVNTSEL3,
+	MSR_K7_PERFCTR0, MSR_K7_PERFCTR1, MSR_K7_PERFCTR2, MSR_K7_PERFCTR3,
+
+	/* This part of MSRs should match KVM_MAX_NR_AMD_GP_COUNTERS. */
+	MSR_F15H_PERF_CTL0, MSR_F15H_PERF_CTL1, MSR_F15H_PERF_CTL2,
+	MSR_F15H_PERF_CTL3, MSR_F15H_PERF_CTL4, MSR_F15H_PERF_CTL5,
+	MSR_F15H_PERF_CTR0, MSR_F15H_PERF_CTR1, MSR_F15H_PERF_CTR2,
+	MSR_F15H_PERF_CTR3, MSR_F15H_PERF_CTR4, MSR_F15H_PERF_CTR5,
+
+	MSR_AMD64_PERF_CNTR_GLOBAL_CTL,
+	MSR_AMD64_PERF_CNTR_GLOBAL_STATUS,
+	MSR_AMD64_PERF_CNTR_GLOBAL_STATUS_CLR,
+	MSR_AMD64_PERF_CNTR_GLOBAL_STATUS_SET,
+};
+
+static u32 msrs_to_save[ARRAY_SIZE(msrs_to_save_base) +
+			ARRAY_SIZE(msrs_to_save_pmu)];
+static unsigned num_msrs_to_save;
+
+static const u32 emulated_msrs_all[] = {
+	MSR_KVM_SYSTEM_TIME, MSR_KVM_WALL_CLOCK,
+	MSR_KVM_SYSTEM_TIME_NEW, MSR_KVM_WALL_CLOCK_NEW,
+
+#ifdef CONFIG_KVM_HYPERV
+	HV_X64_MSR_GUEST_OS_ID, HV_X64_MSR_HYPERCALL,
+	HV_X64_MSR_TIME_REF_COUNT, HV_X64_MSR_REFERENCE_TSC,
+	HV_X64_MSR_TSC_FREQUENCY, HV_X64_MSR_APIC_FREQUENCY,
+	HV_X64_MSR_CRASH_P0, HV_X64_MSR_CRASH_P1, HV_X64_MSR_CRASH_P2,
+	HV_X64_MSR_CRASH_P3, HV_X64_MSR_CRASH_P4, HV_X64_MSR_CRASH_CTL,
+	HV_X64_MSR_RESET,
+	HV_X64_MSR_VP_INDEX,
+	HV_X64_MSR_VP_RUNTIME,
+	HV_X64_MSR_SCONTROL,
+	HV_X64_MSR_STIMER0_CONFIG,
+	HV_X64_MSR_VP_ASSIST_PAGE,
+	HV_X64_MSR_REENLIGHTENMENT_CONTROL, HV_X64_MSR_TSC_EMULATION_CONTROL,
+	HV_X64_MSR_TSC_EMULATION_STATUS, HV_X64_MSR_TSC_INVARIANT_CONTROL,
+	HV_X64_MSR_SYNDBG_OPTIONS,
+	HV_X64_MSR_SYNDBG_CONTROL, HV_X64_MSR_SYNDBG_STATUS,
+	HV_X64_MSR_SYNDBG_SEND_BUFFER, HV_X64_MSR_SYNDBG_RECV_BUFFER,
+	HV_X64_MSR_SYNDBG_PENDING_BUFFER,
+#endif
+
+	MSR_KVM_ASYNC_PF_EN, MSR_KVM_STEAL_TIME,
+	MSR_KVM_PV_EOI_EN, MSR_KVM_ASYNC_PF_INT, MSR_KVM_ASYNC_PF_ACK,
+
+	MSR_IA32_TSC_ADJUST,
+	MSR_IA32_TSC_DEADLINE,
+	MSR_IA32_ARCH_CAPABILITIES,
+	MSR_IA32_PERF_CAPABILITIES,
+	MSR_IA32_MISC_ENABLE,
+	MSR_IA32_MCG_STATUS,
+	MSR_IA32_MCG_CTL,
+	MSR_IA32_MCG_EXT_CTL,
+	MSR_IA32_SMBASE,
+	MSR_SMI_COUNT,
+	MSR_PLATFORM_INFO,
+	MSR_MISC_FEATURES_ENABLES,
+	MSR_AMD64_VIRT_SPEC_CTRL,
+	MSR_AMD64_TSC_RATIO,
+	MSR_IA32_POWER_CTL,
+	MSR_IA32_UCODE_REV,
+
+	/*
+	 * KVM always supports the "true" VMX control MSRs, even if the host
+	 * does not.  The VMX MSRs as a whole are considered "emulated" as KVM
+	 * doesn't strictly require them to exist in the host (ignoring that
+	 * KVM would refuse to load in the first place if the core set of MSRs
+	 * aren't supported).
+	 */
+	MSR_IA32_VMX_BASIC,
+	MSR_IA32_VMX_TRUE_PINBASED_CTLS,
+	MSR_IA32_VMX_TRUE_PROCBASED_CTLS,
+	MSR_IA32_VMX_TRUE_EXIT_CTLS,
+	MSR_IA32_VMX_TRUE_ENTRY_CTLS,
+	MSR_IA32_VMX_MISC,
+	MSR_IA32_VMX_CR0_FIXED0,
+	MSR_IA32_VMX_CR4_FIXED0,
+	MSR_IA32_VMX_VMCS_ENUM,
+	MSR_IA32_VMX_PROCBASED_CTLS2,
+	MSR_IA32_VMX_EPT_VPID_CAP,
+	MSR_IA32_VMX_VMFUNC,
+
+	MSR_K7_HWCR,
+	MSR_KVM_POLL_CONTROL,
+};
+
+static u32 emulated_msrs[ARRAY_SIZE(emulated_msrs_all)];
+static unsigned num_emulated_msrs;
+
+/*
+ * List of MSRs that control the existence of MSR-based features, i.e. MSRs
+ * that are effectively CPUID leafs.  VMX MSRs are also included in the set of
+ * feature MSRs, but are handled separately to allow expedited lookups.
+ */
+static const u32 msr_based_features_all_except_vmx[] = {
+	MSR_AMD64_DE_CFG,
+	MSR_IA32_UCODE_REV,
+	MSR_IA32_ARCH_CAPABILITIES,
+	MSR_IA32_PERF_CAPABILITIES,
+	MSR_PLATFORM_INFO,
+};
+
+static u32 msr_based_features[ARRAY_SIZE(msr_based_features_all_except_vmx) +
+			      (KVM_LAST_EMULATED_VMX_MSR - KVM_FIRST_EMULATED_VMX_MSR + 1)];
+static unsigned int num_msr_based_features;
+
+/*
+ * All feature MSRs except uCode revID, which tracks the currently loaded uCode
+ * patch, are immutable once the vCPU model is defined.
+ */
+static bool kvm_is_immutable_feature_msr(u32 msr)
+{
+	int i;
+
+	if (msr >= KVM_FIRST_EMULATED_VMX_MSR && msr <= KVM_LAST_EMULATED_VMX_MSR)
+		return true;
+
+	for (i = 0; i < ARRAY_SIZE(msr_based_features_all_except_vmx); i++) {
+		if (msr == msr_based_features_all_except_vmx[i])
+			return msr != MSR_IA32_UCODE_REV;
+	}
+
+	return false;
+}
+
+static bool kvm_is_advertised_msr(u32 msr_index)
+{
+	unsigned int i;
+
+	for (i = 0; i < num_msrs_to_save; i++) {
+		if (msrs_to_save[i] == msr_index)
+			return true;
+	}
+
+	for (i = 0; i < num_emulated_msrs; i++) {
+		if (emulated_msrs[i] == msr_index)
+			return true;
+	}
+
+	return false;
+}
+
+typedef int (*msr_access_t)(struct kvm_vcpu *vcpu, u32 index, u64 *data,
+			    bool host_initiated);
+
+static __always_inline int kvm_do_msr_access(struct kvm_vcpu *vcpu, u32 msr,
+					     u64 *data, bool host_initiated,
+					     enum kvm_msr_access rw,
+					     msr_access_t msr_access_fn)
+{
+	const char *op = rw == MSR_TYPE_W ? "wrmsr" : "rdmsr";
+	int ret;
+
+	BUILD_BUG_ON(rw != MSR_TYPE_R && rw != MSR_TYPE_W);
+
+	/*
+	 * Zero the data on read failures to avoid leaking stack data to the
+	 * guest and/or userspace, e.g. if the failure is ignored below.
+	 */
+	ret = msr_access_fn(vcpu, msr, data, host_initiated);
+	if (ret && rw == MSR_TYPE_R)
+		*data = 0;
+
+	if (ret != KVM_MSR_RET_UNSUPPORTED)
+		return ret;
+
+	/*
+	 * Userspace is allowed to read MSRs, and write '0' to MSRs, that KVM
+	 * advertises to userspace, even if an MSR isn't fully supported.
+	 * Simply check that @data is '0', which covers both the write '0' case
+	 * and all reads (in which case @data is zeroed on failure; see above).
+	 */
+	if (host_initiated && !*data && kvm_is_advertised_msr(msr))
+		return 0;
+
+	if (!ignore_msrs) {
+		kvm_debug_ratelimited("unhandled %s: 0x%x data 0x%llx\n",
+				      op, msr, *data);
+		return ret;
+	}
+
+	if (report_ignored_msrs)
+		kvm_pr_unimpl("ignored %s: 0x%x data 0x%llx\n", op, msr, *data);
+
+	return 0;
+}
+
+static struct kmem_cache *kvm_alloc_emulator_cache(void)
+{
+	unsigned int useroffset = offsetof(struct x86_emulate_ctxt, src);
+	unsigned int size = sizeof(struct x86_emulate_ctxt);
+
+	return kmem_cache_create_usercopy("x86_emulator", size,
+					  __alignof__(struct x86_emulate_ctxt),
+					  SLAB_ACCOUNT, useroffset,
+					  size - useroffset, NULL);
+}
 
 static int emulator_fix_hypercall(struct x86_emulate_ctxt *ctxt);
 
-static inline void kvm_async_pf_hash_reset(struct kvm_vcpu *vcpu)
+static void kvm_destroy_user_return_msrs(void)
 {
-	int i;
-	for (i = 0; i < roundup_pow_of_two(ASYNC_PF_PER_VCPU); i++)
-		vcpu->arch.apf.gfns[i] = ~0;
+	int cpu;
+
+	for_each_possible_cpu(cpu)
+		WARN_ON_ONCE(per_cpu(user_return_msrs, cpu).registered);
+
+	kvm_nr_uret_msrs = 0;
 }
 
 static void kvm_on_user_return(struct user_return_notifier *urn)
 {
 	unsigned slot;
-	struct kvm_shared_msrs *locals
-		= container_of(urn, struct kvm_shared_msrs, urn);
-	struct kvm_shared_msr_values *values;
-	unsigned long flags;
+	struct kvm_user_return_msrs *msrs
+		= container_of(urn, struct kvm_user_return_msrs, urn);
+	struct kvm_user_return_msr_values *values;
 
-	/*
-	 * Disabling irqs at this point since the following code could be
-	 * interrupted and executed through kvm_arch_hardware_disable()
-	 */
-	local_irq_save(flags);
-	if (locals->registered) {
-		locals->registered = false;
-		user_return_notifier_unregister(urn);
-	}
-	local_irq_restore(flags);
-	for (slot = 0; slot < shared_msrs_global.nr; ++slot) {
-		values = &locals->values[slot];
+	msrs->registered = false;
+	user_return_notifier_unregister(urn);
+
+	for (slot = 0; slot < kvm_nr_uret_msrs; ++slot) {
+		values = &msrs->values[slot];
 		if (values->host != values->curr) {
-			wrmsrl(shared_msrs_global.msrs[slot], values->host);
+			wrmsrq(kvm_uret_msrs_list[slot], values->host);
 			values->curr = values->host;
 		}
 	}
 }
 
-static void shared_msr_update(unsigned slot, u32 msr)
+static int kvm_probe_user_return_msr(u32 msr)
 {
-	u64 value;
-	unsigned int cpu = smp_processor_id();
-	struct kvm_shared_msrs *smsr = per_cpu_ptr(shared_msrs, cpu);
+	u64 val;
+	int ret;
 
-	/* only read, and nobody should modify it at this time,
-	 * so don't need lock */
-	if (slot >= shared_msrs_global.nr) {
-		printk(KERN_ERR "kvm: invalid MSR slot!");
-		return;
+	preempt_disable();
+	ret = rdmsrq_safe(msr, &val);
+	if (ret)
+		goto out;
+	ret = wrmsrq_safe(msr, val);
+out:
+	preempt_enable();
+	return ret;
+}
+
+int kvm_add_user_return_msr(u32 msr)
+{
+	BUG_ON(kvm_nr_uret_msrs >= KVM_MAX_NR_USER_RETURN_MSRS);
+
+	if (kvm_probe_user_return_msr(msr))
+		return -1;
+
+	kvm_uret_msrs_list[kvm_nr_uret_msrs] = msr;
+	return kvm_nr_uret_msrs++;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_add_user_return_msr);
+
+int kvm_find_user_return_msr(u32 msr)
+{
+	int i;
+
+	for (i = 0; i < kvm_nr_uret_msrs; ++i) {
+		if (kvm_uret_msrs_list[i] == msr)
+			return i;
 	}
-	rdmsrl_safe(msr, &value);
-	smsr->values[slot].host = value;
-	smsr->values[slot].curr = value;
+	return -1;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_find_user_return_msr);
+
+static void kvm_user_return_msr_cpu_online(void)
+{
+	struct kvm_user_return_msrs *msrs = this_cpu_ptr(&user_return_msrs);
+	u64 value;
+	int i;
+
+	for (i = 0; i < kvm_nr_uret_msrs; ++i) {
+		rdmsrq_safe(kvm_uret_msrs_list[i], &value);
+		msrs->values[i].host = value;
+		msrs->values[i].curr = value;
+	}
 }
 
-void kvm_define_shared_msr(unsigned slot, u32 msr)
+static void kvm_user_return_register_notifier(struct kvm_user_return_msrs *msrs)
 {
-	BUG_ON(slot >= KVM_NR_SHARED_MSRS);
-	shared_msrs_global.msrs[slot] = msr;
-	if (slot >= shared_msrs_global.nr)
-		shared_msrs_global.nr = slot + 1;
-}
-EXPORT_SYMBOL_GPL(kvm_define_shared_msr);
-
-static void kvm_shared_msr_cpu_online(void)
-{
-	unsigned i;
-
-	for (i = 0; i < shared_msrs_global.nr; ++i)
-		shared_msr_update(i, shared_msrs_global.msrs[i]);
+	if (!msrs->registered) {
+		msrs->urn.on_user_return = kvm_on_user_return;
+		user_return_notifier_register(&msrs->urn);
+		msrs->registered = true;
+	}
 }
 
-int kvm_set_shared_msr(unsigned slot, u64 value, u64 mask)
+int kvm_set_user_return_msr(unsigned slot, u64 value, u64 mask)
 {
-	unsigned int cpu = smp_processor_id();
-	struct kvm_shared_msrs *smsr = per_cpu_ptr(shared_msrs, cpu);
+	struct kvm_user_return_msrs *msrs = this_cpu_ptr(&user_return_msrs);
 	int err;
 
-	if (((value ^ smsr->values[slot].curr) & mask) == 0)
+	value = (value & mask) | (msrs->values[slot].host & ~mask);
+	if (value == msrs->values[slot].curr)
 		return 0;
-	smsr->values[slot].curr = value;
-	err = wrmsrl_safe(shared_msrs_global.msrs[slot], value);
+	err = wrmsrq_safe(kvm_uret_msrs_list[slot], value);
 	if (err)
 		return 1;
 
-	if (!smsr->registered) {
-		smsr->urn.on_user_return = kvm_on_user_return;
-		user_return_notifier_register(&smsr->urn);
-		smsr->registered = true;
-	}
+	msrs->values[slot].curr = value;
+	kvm_user_return_register_notifier(msrs);
 	return 0;
 }
-EXPORT_SYMBOL_GPL(kvm_set_shared_msr);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_set_user_return_msr);
+
+u64 kvm_get_user_return_msr(unsigned int slot)
+{
+	return this_cpu_ptr(&user_return_msrs)->values[slot].curr;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_get_user_return_msr);
 
 static void drop_user_return_notifiers(void)
 {
-	unsigned int cpu = smp_processor_id();
-	struct kvm_shared_msrs *smsr = per_cpu_ptr(shared_msrs, cpu);
+	struct kvm_user_return_msrs *msrs = this_cpu_ptr(&user_return_msrs);
 
-	if (smsr->registered)
-		kvm_on_user_return(&smsr->urn);
+	if (msrs->registered)
+		kvm_on_user_return(&msrs->urn);
 }
 
-u64 kvm_get_apic_base(struct kvm_vcpu *vcpu)
-{
-	return vcpu->arch.apic_base;
-}
-EXPORT_SYMBOL_GPL(kvm_get_apic_base);
-
-int kvm_set_apic_base(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
-{
-	u64 old_state = vcpu->arch.apic_base &
-		(MSR_IA32_APICBASE_ENABLE | X2APIC_ENABLE);
-	u64 new_state = msr_info->data &
-		(MSR_IA32_APICBASE_ENABLE | X2APIC_ENABLE);
-	u64 reserved_bits = ((~0ULL) << cpuid_maxphyaddr(vcpu)) | 0x2ff |
-		(guest_cpuid_has(vcpu, X86_FEATURE_X2APIC) ? 0 : X2APIC_ENABLE);
-
-	if ((msr_info->data & reserved_bits) || new_state == X2APIC_ENABLE)
-		return 1;
-	if (!msr_info->host_initiated &&
-	    ((new_state == MSR_IA32_APICBASE_ENABLE &&
-	      old_state == (MSR_IA32_APICBASE_ENABLE | X2APIC_ENABLE)) ||
-	     (new_state == (MSR_IA32_APICBASE_ENABLE | X2APIC_ENABLE) &&
-	      old_state == 0)))
-		return 1;
-
-	kvm_lapic_set_base(vcpu, msr_info->data);
-	return 0;
-}
-EXPORT_SYMBOL_GPL(kvm_set_apic_base);
-
-asmlinkage __visible void kvm_spurious_fault(void)
+/*
+ * Handle a fault on a hardware virtualization (VMX or SVM) instruction.
+ *
+ * Hardware virtualization extension instructions may fault if a reboot turns
+ * off virtualization while processes are running.  Usually after catching the
+ * fault we just panic; during reboot instead the instruction is ignored.
+ */
+noinstr void kvm_spurious_fault(void)
 {
 	/* Fault while not rebooting.  We want the trace. */
-	BUG();
+	BUG_ON(!virt_rebooting);
 }
-EXPORT_SYMBOL_GPL(kvm_spurious_fault);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_spurious_fault);
 
 #define EXCPT_BENIGN		0
 #define EXCPT_CONTRIBUTORY	1
@@ -373,6 +728,7 @@ static int exception_class(int vector)
 #define EXCPT_TRAP		1
 #define EXCPT_ABORT		2
 #define EXCPT_INTERRUPT		3
+#define EXCPT_DB		4
 
 static int exception_type(int vector)
 {
@@ -383,8 +739,14 @@ static int exception_type(int vector)
 
 	mask = 1 << vector;
 
-	/* #DB is trap, as instruction watchpoints are handled elsewhere */
-	if (mask & ((1 << DB_VECTOR) | (1 << BP_VECTOR) | (1 << OF_VECTOR)))
+	/*
+	 * #DBs can be trap-like or fault-like, the caller must check other CPU
+	 * state, e.g. DR6, to determine whether a #DB is a trap or fault.
+	 */
+	if (mask & (1 << DB_VECTOR))
+		return EXCPT_DB;
+
+	if (mask & ((1 << BP_VECTOR) | (1 << OF_VECTOR)))
 		return EXCPT_TRAP;
 
 	if (mask & ((1 << DF_VECTOR) | (1 << MC_VECTOR)))
@@ -394,42 +756,108 @@ static int exception_type(int vector)
 	return EXCPT_FAULT;
 }
 
-static void kvm_multiple_exception(struct kvm_vcpu *vcpu,
-		unsigned nr, bool has_error, u32 error_code,
-		bool reinject)
+void kvm_deliver_exception_payload(struct kvm_vcpu *vcpu,
+				   struct kvm_queued_exception *ex)
+{
+	if (!ex->has_payload)
+		return;
+
+	switch (ex->vector) {
+	case DB_VECTOR:
+		/*
+		 * "Certain debug exceptions may clear bit 0-3.  The
+		 * remaining contents of the DR6 register are never
+		 * cleared by the processor".
+		 */
+		vcpu->arch.dr6 &= ~DR_TRAP_BITS;
+		/*
+		 * In order to reflect the #DB exception payload in guest
+		 * dr6, three components need to be considered: active low
+		 * bit, FIXED_1 bits and active high bits (e.g. DR6_BD,
+		 * DR6_BS and DR6_BT)
+		 * DR6_ACTIVE_LOW contains the FIXED_1 and active low bits.
+		 * In the target guest dr6:
+		 * FIXED_1 bits should always be set.
+		 * Active low bits should be cleared if 1-setting in payload.
+		 * Active high bits should be set if 1-setting in payload.
+		 *
+		 * Note, the payload is compatible with the pending debug
+		 * exceptions/exit qualification under VMX, that active_low bits
+		 * are active high in payload.
+		 * So they need to be flipped for DR6.
+		 */
+		vcpu->arch.dr6 |= DR6_ACTIVE_LOW;
+		vcpu->arch.dr6 |= ex->payload;
+		vcpu->arch.dr6 ^= ex->payload & DR6_ACTIVE_LOW;
+
+		/*
+		 * The #DB payload is defined as compatible with the 'pending
+		 * debug exceptions' field under VMX, not DR6. While bit 12 is
+		 * defined in the 'pending debug exceptions' field (enabled
+		 * breakpoint), it is reserved and must be zero in DR6.
+		 */
+		vcpu->arch.dr6 &= ~BIT(12);
+		break;
+	case PF_VECTOR:
+		vcpu->arch.cr2 = ex->payload;
+		break;
+	}
+
+	ex->has_payload = false;
+	ex->payload = 0;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_deliver_exception_payload);
+
+static void kvm_queue_exception_vmexit(struct kvm_vcpu *vcpu, unsigned int vector,
+				       bool has_error_code, u32 error_code,
+				       bool has_payload, unsigned long payload)
+{
+	struct kvm_queued_exception *ex = &vcpu->arch.exception_vmexit;
+
+	ex->vector = vector;
+	ex->injected = false;
+	ex->pending = true;
+	ex->has_error_code = has_error_code;
+	ex->error_code = error_code;
+	ex->has_payload = has_payload;
+	ex->payload = payload;
+}
+
+static void kvm_multiple_exception(struct kvm_vcpu *vcpu, unsigned int nr,
+				   bool has_error, u32 error_code,
+				   bool has_payload, unsigned long payload)
 {
 	u32 prev_nr;
 	int class1, class2;
 
 	kvm_make_request(KVM_REQ_EVENT, vcpu);
 
+	/*
+	 * If the exception is destined for L2, morph it to a VM-Exit if L1
+	 * wants to intercept the exception.
+	 */
+	if (is_guest_mode(vcpu) &&
+	    kvm_x86_ops.nested_ops->is_exception_vmexit(vcpu, nr, error_code)) {
+		kvm_queue_exception_vmexit(vcpu, nr, has_error, error_code,
+					   has_payload, payload);
+		return;
+	}
+
 	if (!vcpu->arch.exception.pending && !vcpu->arch.exception.injected) {
 	queue:
-		if (has_error && !is_protmode(vcpu))
-			has_error = false;
-		if (reinject) {
-			/*
-			 * On vmentry, vcpu->arch.exception.pending is only
-			 * true if an event injection was blocked by
-			 * nested_run_pending.  In that case, however,
-			 * vcpu_enter_guest requests an immediate exit,
-			 * and the guest shouldn't proceed far enough to
-			 * need reinjection.
-			 */
-			WARN_ON_ONCE(vcpu->arch.exception.pending);
-			vcpu->arch.exception.injected = true;
-		} else {
-			vcpu->arch.exception.pending = true;
-			vcpu->arch.exception.injected = false;
-		}
+		vcpu->arch.exception.pending = true;
+		vcpu->arch.exception.injected = false;
+
 		vcpu->arch.exception.has_error_code = has_error;
-		vcpu->arch.exception.nr = nr;
+		vcpu->arch.exception.vector = nr;
 		vcpu->arch.exception.error_code = error_code;
+		vcpu->arch.exception.has_payload = has_payload;
+		vcpu->arch.exception.payload = payload;
 		return;
 	}
 
 	/* to check exception */
-	prev_nr = vcpu->arch.exception.nr;
+	prev_nr = vcpu->arch.exception.vector;
 	if (prev_nr == DF_VECTOR) {
 		/* triple fault -> shutdown */
 		kvm_make_request(KVM_REQ_TRIPLE_FAULT, vcpu);
@@ -437,36 +865,72 @@ static void kvm_multiple_exception(struct kvm_vcpu *vcpu,
 	}
 	class1 = exception_class(prev_nr);
 	class2 = exception_class(nr);
-	if ((class1 == EXCPT_CONTRIBUTORY && class2 == EXCPT_CONTRIBUTORY)
-		|| (class1 == EXCPT_PF && class2 != EXCPT_BENIGN)) {
+	if ((class1 == EXCPT_CONTRIBUTORY && class2 == EXCPT_CONTRIBUTORY) ||
+	    (class1 == EXCPT_PF && class2 != EXCPT_BENIGN)) {
 		/*
-		 * Generate double fault per SDM Table 5-5.  Set
-		 * exception.pending = true so that the double fault
-		 * can trigger a nested vmexit.
+		 * Synthesize #DF.  Clear the previously injected or pending
+		 * exception so as not to incorrectly trigger shutdown.
 		 */
-		vcpu->arch.exception.pending = true;
 		vcpu->arch.exception.injected = false;
-		vcpu->arch.exception.has_error_code = true;
-		vcpu->arch.exception.nr = DF_VECTOR;
-		vcpu->arch.exception.error_code = 0;
-	} else
+		vcpu->arch.exception.pending = false;
+
+		kvm_queue_exception_e(vcpu, DF_VECTOR, 0);
+	} else {
 		/* replace previous exception with a new one in a hope
 		   that instruction re-execution will regenerate lost
 		   exception */
 		goto queue;
+	}
 }
 
 void kvm_queue_exception(struct kvm_vcpu *vcpu, unsigned nr)
 {
-	kvm_multiple_exception(vcpu, nr, false, 0, false);
+	kvm_multiple_exception(vcpu, nr, false, 0, false, 0);
 }
-EXPORT_SYMBOL_GPL(kvm_queue_exception);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_queue_exception);
 
-void kvm_requeue_exception(struct kvm_vcpu *vcpu, unsigned nr)
+
+void kvm_queue_exception_p(struct kvm_vcpu *vcpu, unsigned nr,
+			   unsigned long payload)
 {
-	kvm_multiple_exception(vcpu, nr, false, 0, true);
+	kvm_multiple_exception(vcpu, nr, false, 0, true, payload);
 }
-EXPORT_SYMBOL_GPL(kvm_requeue_exception);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_queue_exception_p);
+
+static void kvm_queue_exception_e_p(struct kvm_vcpu *vcpu, unsigned nr,
+				    u32 error_code, unsigned long payload)
+{
+	kvm_multiple_exception(vcpu, nr, true, error_code, true, payload);
+}
+
+void kvm_requeue_exception(struct kvm_vcpu *vcpu, unsigned int nr,
+			   bool has_error_code, u32 error_code)
+{
+
+	/*
+	 * On VM-Entry, an exception can be pending if and only if event
+	 * injection was blocked by nested_run_pending.  In that case, however,
+	 * vcpu_enter_guest() requests an immediate exit, and the guest
+	 * shouldn't proceed far enough to need reinjection.
+	 */
+	WARN_ON_ONCE(kvm_is_exception_pending(vcpu));
+
+	/*
+	 * Do not check for interception when injecting an event for L2, as the
+	 * exception was checked for intercept when it was original queued, and
+	 * re-checking is incorrect if _L1_ injected the exception, in which
+	 * case it's exempt from interception.
+	 */
+	kvm_make_request(KVM_REQ_EVENT, vcpu);
+
+	vcpu->arch.exception.injected = true;
+	vcpu->arch.exception.has_error_code = has_error_code;
+	vcpu->arch.exception.vector = nr;
+	vcpu->arch.exception.error_code = error_code;
+	vcpu->arch.exception.has_payload = false;
+	vcpu->arch.exception.payload = 0;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_requeue_exception);
 
 int kvm_complete_insn_gp(struct kvm_vcpu *vcpu, int err)
 {
@@ -477,257 +941,297 @@ int kvm_complete_insn_gp(struct kvm_vcpu *vcpu, int err)
 
 	return 1;
 }
-EXPORT_SYMBOL_GPL(kvm_complete_insn_gp);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_complete_insn_gp);
 
-void kvm_inject_page_fault(struct kvm_vcpu *vcpu, struct x86_exception *fault)
+static int complete_emulated_insn_gp(struct kvm_vcpu *vcpu, int err)
+{
+	if (err) {
+		kvm_inject_gp(vcpu, 0);
+		return 1;
+	}
+
+	return kvm_emulate_instruction(vcpu, EMULTYPE_NO_DECODE | EMULTYPE_SKIP |
+				       EMULTYPE_COMPLETE_USER_EXIT);
+}
+
+void kvm_inject_page_fault(struct kvm_vcpu *vcpu, struct x86_exception *fault,
+			   bool from_hardware)
 {
 	++vcpu->stat.pf_guest;
-	vcpu->arch.exception.nested_apf =
-		is_guest_mode(vcpu) && fault->async_page_fault;
-	if (vcpu->arch.exception.nested_apf)
-		vcpu->arch.apf.nested_apf_token = fault->address;
-	else
-		vcpu->arch.cr2 = fault->address;
-	kvm_queue_exception_e(vcpu, PF_VECTOR, fault->error_code);
-}
-EXPORT_SYMBOL_GPL(kvm_inject_page_fault);
 
-static bool kvm_propagate_fault(struct kvm_vcpu *vcpu, struct x86_exception *fault)
+	/*
+	 * Async #PF in L2 is always forwarded to L1 as a VM-Exit regardless of
+	 * whether or not L1 wants to intercept "regular" #PF.
+	 */
+	if (is_guest_mode(vcpu) && fault->async_page_fault)
+		kvm_queue_exception_vmexit(vcpu, PF_VECTOR,
+					   true, fault->error_code,
+					   true, fault->address);
+	else
+		kvm_queue_exception_e_p(vcpu, PF_VECTOR, fault->error_code,
+					fault->address);
+}
+
+void __kvm_inject_emulated_page_fault(struct kvm_vcpu *vcpu,
+				      struct x86_exception *fault,
+				      bool from_hardware)
 {
-	if (mmu_is_nested(vcpu) && !fault->nested_page_fault)
-		vcpu->arch.nested_mmu.inject_page_fault(vcpu, fault);
-	else
-		vcpu->arch.mmu.inject_page_fault(vcpu, fault);
+	struct kvm_mmu *fault_mmu;
+	WARN_ON_ONCE(fault->vector != PF_VECTOR);
 
-	return fault->nested_page_fault;
+	fault_mmu = fault->nested_page_fault ? vcpu->arch.mmu :
+					       vcpu->arch.walk_mmu;
+
+	/*
+	 * Invalidate the TLB entry for the faulting address, if it exists,
+	 * else the access will fault indefinitely (and to emulate hardware).
+	 */
+	if ((fault->error_code & PFERR_PRESENT_MASK) &&
+	    !(fault->error_code & PFERR_RSVD_MASK))
+		kvm_mmu_invalidate_addr(vcpu, fault_mmu, fault->address,
+					KVM_MMU_ROOT_CURRENT);
+
+	fault_mmu->inject_page_fault(vcpu, fault, from_hardware);
 }
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(__kvm_inject_emulated_page_fault);
 
 void kvm_inject_nmi(struct kvm_vcpu *vcpu)
 {
 	atomic_inc(&vcpu->arch.nmi_queued);
 	kvm_make_request(KVM_REQ_NMI, vcpu);
 }
-EXPORT_SYMBOL_GPL(kvm_inject_nmi);
 
 void kvm_queue_exception_e(struct kvm_vcpu *vcpu, unsigned nr, u32 error_code)
 {
-	kvm_multiple_exception(vcpu, nr, true, error_code, false);
+	kvm_multiple_exception(vcpu, nr, true, error_code, false, 0);
 }
-EXPORT_SYMBOL_GPL(kvm_queue_exception_e);
-
-void kvm_requeue_exception_e(struct kvm_vcpu *vcpu, unsigned nr, u32 error_code)
-{
-	kvm_multiple_exception(vcpu, nr, true, error_code, true);
-}
-EXPORT_SYMBOL_GPL(kvm_requeue_exception_e);
-
-/*
- * Checks if cpl <= required_cpl; if true, return true.  Otherwise queue
- * a #GP and return false.
- */
-bool kvm_require_cpl(struct kvm_vcpu *vcpu, int required_cpl)
-{
-	if (kvm_x86_ops->get_cpl(vcpu) <= required_cpl)
-		return true;
-	kvm_queue_exception_e(vcpu, GP_VECTOR, 0);
-	return false;
-}
-EXPORT_SYMBOL_GPL(kvm_require_cpl);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_queue_exception_e);
 
 bool kvm_require_dr(struct kvm_vcpu *vcpu, int dr)
 {
-	if ((dr != 4 && dr != 5) || !kvm_read_cr4_bits(vcpu, X86_CR4_DE))
+	if ((dr != 4 && dr != 5) || !kvm_is_cr4_bit_set(vcpu, X86_CR4_DE))
 		return true;
 
 	kvm_queue_exception(vcpu, UD_VECTOR);
 	return false;
 }
-EXPORT_SYMBOL_GPL(kvm_require_dr);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_require_dr);
 
-/*
- * This function will be used to read from the physical memory of the currently
- * running guest. The difference to kvm_vcpu_read_guest_page is that this function
- * can read from guest physical or from the guest's guest physical memory.
- */
-int kvm_read_guest_page_mmu(struct kvm_vcpu *vcpu, struct kvm_mmu *mmu,
-			    gfn_t ngfn, void *data, int offset, int len,
-			    u32 access)
+static inline u64 pdptr_rsvd_bits(struct kvm_vcpu *vcpu)
 {
-	struct x86_exception exception;
-	gfn_t real_gfn;
-	gpa_t ngpa;
-
-	ngpa     = gfn_to_gpa(ngfn);
-	real_gfn = mmu->translate_gpa(vcpu, ngpa, access, &exception);
-	if (real_gfn == UNMAPPED_GVA)
-		return -EFAULT;
-
-	real_gfn = gpa_to_gfn(real_gfn);
-
-	return kvm_vcpu_read_guest_page(vcpu, real_gfn, data, offset, len);
-}
-EXPORT_SYMBOL_GPL(kvm_read_guest_page_mmu);
-
-static int kvm_read_nested_guest_page(struct kvm_vcpu *vcpu, gfn_t gfn,
-			       void *data, int offset, int len, u32 access)
-{
-	return kvm_read_guest_page_mmu(vcpu, vcpu->arch.walk_mmu, gfn,
-				       data, offset, len, access);
+	return vcpu->arch.reserved_gpa_bits | rsvd_bits(5, 8) | rsvd_bits(1, 2);
 }
 
 /*
- * Load the pae pdptrs.  Return true is they are all valid.
+ * Load the pae pdptrs.  Return 1 if they are all valid, 0 otherwise.
  */
-int load_pdptrs(struct kvm_vcpu *vcpu, struct kvm_mmu *mmu, unsigned long cr3)
+int load_pdptrs(struct kvm_vcpu *vcpu, unsigned long cr3)
 {
+	struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
 	gfn_t pdpt_gfn = cr3 >> PAGE_SHIFT;
-	unsigned offset = ((cr3 & (PAGE_SIZE-1)) >> 5) << 2;
+	gpa_t real_gpa;
 	int i;
 	int ret;
-	u64 pdpte[ARRAY_SIZE(mmu->pdptrs)];
+	u64 pdpte[ARRAY_SIZE(vcpu->arch.pdptrs)];
 
-	ret = kvm_read_guest_page_mmu(vcpu, mmu, pdpt_gfn, pdpte,
-				      offset * sizeof(u64), sizeof(pdpte),
-				      PFERR_USER_MASK|PFERR_WRITE_MASK);
-	if (ret < 0) {
-		ret = 0;
-		goto out;
-	}
+	/*
+	 * If the MMU is nested, CR3 holds an L2 GPA and needs to be translated
+	 * to an L1 GPA.
+	 */
+	real_gpa = kvm_translate_gpa(vcpu, mmu, gfn_to_gpa(pdpt_gfn),
+				     PFERR_USER_MASK | PFERR_WRITE_MASK |
+				     PFERR_GUEST_PAGE_MASK, NULL, 0);
+	if (real_gpa == INVALID_GPA)
+		return 0;
+
+	/* Note the offset, PDPTRs are 32 byte aligned when using PAE paging. */
+	ret = kvm_vcpu_read_guest_page(vcpu, gpa_to_gfn(real_gpa), pdpte,
+				       cr3 & GENMASK(11, 5), sizeof(pdpte));
+	if (ret < 0)
+		return 0;
+
 	for (i = 0; i < ARRAY_SIZE(pdpte); ++i) {
 		if ((pdpte[i] & PT_PRESENT_MASK) &&
-		    (pdpte[i] &
-		     vcpu->arch.mmu.guest_rsvd_check.rsvd_bits_mask[0][2])) {
-			ret = 0;
-			goto out;
+		    (pdpte[i] & pdptr_rsvd_bits(vcpu))) {
+			return 0;
 		}
 	}
-	ret = 1;
 
-	memcpy(mmu->pdptrs, pdpte, sizeof(mmu->pdptrs));
-	__set_bit(VCPU_EXREG_PDPTR,
-		  (unsigned long *)&vcpu->arch.regs_avail);
-	__set_bit(VCPU_EXREG_PDPTR,
-		  (unsigned long *)&vcpu->arch.regs_dirty);
-out:
+	/*
+	 * Marking VCPU_REG_PDPTR dirty doesn't work for !tdp_enabled.
+	 * Shadow page roots need to be reconstructed instead.
+	 */
+	if (!tdp_enabled && memcmp(vcpu->arch.pdptrs, pdpte, sizeof(vcpu->arch.pdptrs)))
+		kvm_mmu_free_roots(vcpu->kvm, mmu, KVM_MMU_ROOT_CURRENT);
 
-	return ret;
+	memcpy(vcpu->arch.pdptrs, pdpte, sizeof(vcpu->arch.pdptrs));
+	kvm_register_mark_dirty(vcpu, VCPU_REG_PDPTR);
+	kvm_make_request(KVM_REQ_LOAD_MMU_PGD, vcpu);
+	vcpu->arch.pdptrs_from_userspace = false;
+
+	return 1;
 }
-EXPORT_SYMBOL_GPL(load_pdptrs);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(load_pdptrs);
 
-bool pdptrs_changed(struct kvm_vcpu *vcpu)
+static bool kvm_is_valid_cr0(struct kvm_vcpu *vcpu, unsigned long cr0)
 {
-	u64 pdpte[ARRAY_SIZE(vcpu->arch.walk_mmu->pdptrs)];
-	bool changed = true;
-	int offset;
-	gfn_t gfn;
-	int r;
+#ifdef CONFIG_X86_64
+	if (cr0 & 0xffffffff00000000UL)
+		return false;
+#endif
 
-	if (is_long_mode(vcpu) || !is_pae(vcpu))
+	if ((cr0 & X86_CR0_NW) && !(cr0 & X86_CR0_CD))
 		return false;
 
-	if (!test_bit(VCPU_EXREG_PDPTR,
-		      (unsigned long *)&vcpu->arch.regs_avail))
-		return true;
+	if ((cr0 & X86_CR0_PG) && !(cr0 & X86_CR0_PE))
+		return false;
 
-	gfn = (kvm_read_cr3(vcpu) & 0xffffffe0ul) >> PAGE_SHIFT;
-	offset = (kvm_read_cr3(vcpu) & 0xffffffe0ul) & (PAGE_SIZE - 1);
-	r = kvm_read_nested_guest_page(vcpu, gfn, pdpte, offset, sizeof(pdpte),
-				       PFERR_USER_MASK | PFERR_WRITE_MASK);
-	if (r < 0)
-		goto out;
-	changed = memcmp(pdpte, vcpu->arch.walk_mmu->pdptrs, sizeof(pdpte)) != 0;
-out:
-
-	return changed;
+	return kvm_x86_call(is_valid_cr0)(vcpu, cr0);
 }
-EXPORT_SYMBOL_GPL(pdptrs_changed);
+
+void kvm_post_set_cr0(struct kvm_vcpu *vcpu, unsigned long old_cr0, unsigned long cr0)
+{
+	/*
+	 * CR0.WP is incorporated into the MMU role, but only for non-nested,
+	 * indirect shadow MMUs.  If paging is disabled, no updates are needed
+	 * as there are no permission bits to emulate.  If TDP is enabled, the
+	 * MMU's metadata needs to be updated, e.g. so that emulating guest
+	 * translations does the right thing, but there's no need to unload the
+	 * root as CR0.WP doesn't affect SPTEs.
+	 */
+	if ((cr0 ^ old_cr0) == X86_CR0_WP) {
+		if (!(cr0 & X86_CR0_PG))
+			return;
+
+		if (tdp_enabled) {
+			kvm_init_mmu(vcpu);
+			return;
+		}
+	}
+
+	if ((cr0 ^ old_cr0) & X86_CR0_PG) {
+		/*
+		 * Clearing CR0.PG is defined to flush the TLB from the guest's
+		 * perspective.
+		 */
+		if (!(cr0 & X86_CR0_PG))
+			kvm_make_request(KVM_REQ_TLB_FLUSH_GUEST, vcpu);
+		/*
+		 * Check for async #PF completion events when enabling paging,
+		 * as the vCPU may have previously encountered async #PFs (it's
+		 * entirely legal for the guest to toggle paging on/off without
+		 * waiting for the async #PF queue to drain).
+		 */
+		else if (kvm_pv_async_pf_enabled(vcpu))
+			kvm_make_request(KVM_REQ_APF_READY, vcpu);
+	}
+
+	if ((cr0 ^ old_cr0) & KVM_MMU_CR0_ROLE_BITS)
+		kvm_mmu_reset_context(vcpu);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_post_set_cr0);
 
 int kvm_set_cr0(struct kvm_vcpu *vcpu, unsigned long cr0)
 {
 	unsigned long old_cr0 = kvm_read_cr0(vcpu);
-	unsigned long update_bits = X86_CR0_PG | X86_CR0_WP;
+
+	if (!kvm_is_valid_cr0(vcpu, cr0))
+		return 1;
 
 	cr0 |= X86_CR0_ET;
 
-#ifdef CONFIG_X86_64
-	if (cr0 & 0xffffffff00000000UL)
-		return 1;
-#endif
-
+	/* Write to CR0 reserved bits are ignored, even on Intel. */
 	cr0 &= ~CR0_RESERVED_BITS;
 
-	if ((cr0 & X86_CR0_NW) && !(cr0 & X86_CR0_CD))
-		return 1;
-
-	if ((cr0 & X86_CR0_PG) && !(cr0 & X86_CR0_PE))
-		return 1;
-
-	if (!is_paging(vcpu) && (cr0 & X86_CR0_PG)) {
 #ifdef CONFIG_X86_64
-		if ((vcpu->arch.efer & EFER_LME)) {
-			int cs_db, cs_l;
+	if ((vcpu->arch.efer & EFER_LME) && !is_paging(vcpu) &&
+	    (cr0 & X86_CR0_PG)) {
+		int cs_db, cs_l;
 
-			if (!is_pae(vcpu))
-				return 1;
-			kvm_x86_ops->get_cs_db_l_bits(vcpu, &cs_db, &cs_l);
-			if (cs_l)
-				return 1;
-		} else
-#endif
-		if (is_pae(vcpu) && !load_pdptrs(vcpu, vcpu->arch.walk_mmu,
-						 kvm_read_cr3(vcpu)))
+		if (!is_pae(vcpu))
+			return 1;
+		kvm_x86_call(get_cs_db_l_bits)(vcpu, &cs_db, &cs_l);
+		if (cs_l)
 			return 1;
 	}
-
-	if (!(cr0 & X86_CR0_PG) && kvm_read_cr4_bits(vcpu, X86_CR4_PCIDE))
+#endif
+	if (!(vcpu->arch.efer & EFER_LME) && (cr0 & X86_CR0_PG) &&
+	    is_pae(vcpu) && ((cr0 ^ old_cr0) & X86_CR0_PDPTR_BITS) &&
+	    !load_pdptrs(vcpu, kvm_read_cr3(vcpu)))
 		return 1;
 
-	kvm_x86_ops->set_cr0(vcpu, cr0);
+	if (!(cr0 & X86_CR0_PG) &&
+	    (is_64_bit_mode(vcpu) || kvm_is_cr4_bit_set(vcpu, X86_CR4_PCIDE)))
+		return 1;
 
-	if ((cr0 ^ old_cr0) & X86_CR0_PG) {
-		kvm_clear_async_pf_completion_queue(vcpu);
-		kvm_async_pf_hash_reset(vcpu);
-	}
+	if (!(cr0 & X86_CR0_WP) && kvm_is_cr4_bit_set(vcpu, X86_CR4_CET))
+		return 1;
 
-	if ((cr0 ^ old_cr0) & update_bits)
-		kvm_mmu_reset_context(vcpu);
+	kvm_x86_call(set_cr0)(vcpu, cr0);
 
-	if (((cr0 ^ old_cr0) & X86_CR0_CD) &&
-	    kvm_arch_has_noncoherent_dma(vcpu->kvm) &&
-	    !kvm_check_has_quirk(vcpu->kvm, KVM_X86_QUIRK_CD_NW_CLEARED))
-		kvm_zap_gfn_range(vcpu->kvm, 0, ~0ULL);
+	kvm_post_set_cr0(vcpu, old_cr0, cr0);
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(kvm_set_cr0);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_set_cr0);
 
 void kvm_lmsw(struct kvm_vcpu *vcpu, unsigned long msw)
 {
 	(void)kvm_set_cr0(vcpu, kvm_read_cr0_bits(vcpu, ~0x0eul) | (msw & 0x0f));
 }
-EXPORT_SYMBOL_GPL(kvm_lmsw);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_lmsw);
 
-static void kvm_load_guest_xcr0(struct kvm_vcpu *vcpu)
+static void kvm_load_xfeatures(struct kvm_vcpu *vcpu, bool load_guest)
 {
-	if (kvm_read_cr4_bits(vcpu, X86_CR4_OSXSAVE) &&
-			!vcpu->guest_xcr0_loaded) {
-		/* kvm_set_xcr() also depends on this */
-		if (vcpu->arch.xcr0 != host_xcr0)
-			xsetbv(XCR_XFEATURE_ENABLED_MASK, vcpu->arch.xcr0);
-		vcpu->guest_xcr0_loaded = 1;
+	if (vcpu->arch.guest_state_protected)
+		return;
+
+	if (!kvm_is_cr4_bit_set(vcpu, X86_CR4_OSXSAVE))
+		return;
+
+	if (vcpu->arch.xcr0 != kvm_host.xcr0)
+		xsetbv(XCR_XFEATURE_ENABLED_MASK,
+		       load_guest ? vcpu->arch.xcr0 : kvm_host.xcr0);
+
+	if (guest_cpu_cap_has(vcpu, X86_FEATURE_XSAVES) &&
+	    vcpu->arch.ia32_xss != kvm_host.xss)
+		wrmsrq(MSR_IA32_XSS, load_guest ? vcpu->arch.ia32_xss : kvm_host.xss);
+}
+
+static void kvm_load_guest_pkru(struct kvm_vcpu *vcpu)
+{
+	if (vcpu->arch.guest_state_protected)
+		return;
+
+	if (cpu_feature_enabled(X86_FEATURE_PKU) &&
+	    vcpu->arch.pkru != vcpu->arch.host_pkru &&
+	    ((vcpu->arch.xcr0 & XFEATURE_MASK_PKRU) ||
+	     kvm_is_cr4_bit_set(vcpu, X86_CR4_PKE)))
+		wrpkru(vcpu->arch.pkru);
+}
+
+static void kvm_load_host_pkru(struct kvm_vcpu *vcpu)
+{
+	if (vcpu->arch.guest_state_protected)
+		return;
+
+	if (cpu_feature_enabled(X86_FEATURE_PKU) &&
+	    ((vcpu->arch.xcr0 & XFEATURE_MASK_PKRU) ||
+	     kvm_is_cr4_bit_set(vcpu, X86_CR4_PKE))) {
+		vcpu->arch.pkru = rdpkru();
+		if (vcpu->arch.pkru != vcpu->arch.host_pkru)
+			wrpkru(vcpu->arch.host_pkru);
 	}
 }
 
-static void kvm_put_guest_xcr0(struct kvm_vcpu *vcpu)
+#ifdef CONFIG_X86_64
+static inline u64 kvm_guest_supported_xfd(struct kvm_vcpu *vcpu)
 {
-	if (vcpu->guest_xcr0_loaded) {
-		if (vcpu->arch.xcr0 != host_xcr0)
-			xsetbv(XCR_XFEATURE_ENABLED_MASK, host_xcr0);
-		vcpu->guest_xcr0_loaded = 0;
-	}
+	return vcpu->arch.guest_supported_xcr0 & XFEATURE_MASK_USER_DYNAMIC;
 }
+#endif
 
-static int __kvm_set_xcr(struct kvm_vcpu *vcpu, u32 index, u64 xcr)
+int __kvm_set_xcr(struct kvm_vcpu *vcpu, u32 index, u64 xcr)
 {
 	u64 xcr0 = xcr;
 	u64 old_xcr0 = vcpu->arch.xcr0;
@@ -744,7 +1248,7 @@ static int __kvm_set_xcr(struct kvm_vcpu *vcpu, u32 index, u64 xcr)
 	/*
 	 * Do not allow the guest to set bits that we do not support
 	 * saving.  However, xcr0 bit 0 is always set, even if the
-	 * emulated CPU does not support XSAVE (see fx_init).
+	 * emulated CPU does not support XSAVE (see kvm_vcpu_reset()).
 	 */
 	valid_bits = vcpu->arch.guest_supported_xcr0 | XFEATURE_MASK_FP;
 	if (xcr0 & ~valid_bits)
@@ -760,114 +1264,205 @@ static int __kvm_set_xcr(struct kvm_vcpu *vcpu, u32 index, u64 xcr)
 		if ((xcr0 & XFEATURE_MASK_AVX512) != XFEATURE_MASK_AVX512)
 			return 1;
 	}
+
+	if ((xcr0 & XFEATURE_MASK_XTILE) &&
+	    ((xcr0 & XFEATURE_MASK_XTILE) != XFEATURE_MASK_XTILE))
+		return 1;
+
 	vcpu->arch.xcr0 = xcr0;
 
 	if ((xcr0 ^ old_xcr0) & XFEATURE_MASK_EXTEND)
-		kvm_update_cpuid(vcpu);
+		vcpu->arch.cpuid_dynamic_bits_dirty = true;
 	return 0;
 }
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(__kvm_set_xcr);
 
-int kvm_set_xcr(struct kvm_vcpu *vcpu, u32 index, u64 xcr)
+int kvm_emulate_xsetbv(struct kvm_vcpu *vcpu)
 {
-	if (kvm_x86_ops->get_cpl(vcpu) != 0 ||
-	    __kvm_set_xcr(vcpu, index, xcr)) {
+	/* Note, #UD due to CR4.OSXSAVE=0 has priority over the intercept. */
+	if (kvm_x86_call(get_cpl)(vcpu) != 0 ||
+	    __kvm_set_xcr(vcpu, kvm_ecx_read(vcpu), kvm_read_edx_eax(vcpu))) {
 		kvm_inject_gp(vcpu, 0);
 		return 1;
 	}
-	return 0;
+
+	return kvm_skip_emulated_instruction(vcpu);
 }
-EXPORT_SYMBOL_GPL(kvm_set_xcr);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_xsetbv);
+
+static bool kvm_is_valid_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
+{
+	return __kvm_is_valid_cr4(vcpu, cr4) &&
+	       kvm_x86_call(is_valid_cr4)(vcpu, cr4);
+}
+
+void kvm_post_set_cr4(struct kvm_vcpu *vcpu, unsigned long old_cr4, unsigned long cr4)
+{
+	if ((cr4 ^ old_cr4) & KVM_MMU_CR4_ROLE_BITS)
+		kvm_mmu_reset_context(vcpu);
+
+	/*
+	 * If CR4.PCIDE is changed 0 -> 1, there is no need to flush the TLB
+	 * according to the SDM; however, stale prev_roots could be reused
+	 * incorrectly in the future after a MOV to CR3 with NOFLUSH=1, so we
+	 * free them all.  This is *not* a superset of KVM_REQ_TLB_FLUSH_GUEST
+	 * or KVM_REQ_TLB_FLUSH_CURRENT, because the hardware TLB is not flushed,
+	 * so fall through.
+	 */
+	if (!tdp_enabled &&
+	    (cr4 & X86_CR4_PCIDE) && !(old_cr4 & X86_CR4_PCIDE))
+		kvm_mmu_unload(vcpu);
+
+	/*
+	 * The TLB has to be flushed for all PCIDs if any of the following
+	 * (architecturally required) changes happen:
+	 * - CR4.PCIDE is changed from 1 to 0
+	 * - CR4.PGE is toggled
+	 *
+	 * This is a superset of KVM_REQ_TLB_FLUSH_CURRENT.
+	 */
+	if (((cr4 ^ old_cr4) & X86_CR4_PGE) ||
+	    (!(cr4 & X86_CR4_PCIDE) && (old_cr4 & X86_CR4_PCIDE)))
+		kvm_make_request(KVM_REQ_TLB_FLUSH_GUEST, vcpu);
+
+	/*
+	 * The TLB has to be flushed for the current PCID if any of the
+	 * following (architecturally required) changes happen:
+	 * - CR4.SMEP is changed from 0 to 1
+	 * - CR4.PAE is toggled
+	 */
+	else if (((cr4 ^ old_cr4) & X86_CR4_PAE) ||
+		 ((cr4 & X86_CR4_SMEP) && !(old_cr4 & X86_CR4_SMEP)))
+		kvm_make_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu);
+
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_post_set_cr4);
 
 int kvm_set_cr4(struct kvm_vcpu *vcpu, unsigned long cr4)
 {
 	unsigned long old_cr4 = kvm_read_cr4(vcpu);
-	unsigned long pdptr_bits = X86_CR4_PGE | X86_CR4_PSE | X86_CR4_PAE |
-				   X86_CR4_SMEP | X86_CR4_SMAP | X86_CR4_PKE;
 
-	if (cr4 & CR4_RESERVED_BITS)
-		return 1;
-
-	if (!guest_cpuid_has(vcpu, X86_FEATURE_XSAVE) && (cr4 & X86_CR4_OSXSAVE))
-		return 1;
-
-	if (!guest_cpuid_has(vcpu, X86_FEATURE_SMEP) && (cr4 & X86_CR4_SMEP))
-		return 1;
-
-	if (!guest_cpuid_has(vcpu, X86_FEATURE_SMAP) && (cr4 & X86_CR4_SMAP))
-		return 1;
-
-	if (!guest_cpuid_has(vcpu, X86_FEATURE_FSGSBASE) && (cr4 & X86_CR4_FSGSBASE))
-		return 1;
-
-	if (!guest_cpuid_has(vcpu, X86_FEATURE_PKU) && (cr4 & X86_CR4_PKE))
-		return 1;
-
-	if (!guest_cpuid_has(vcpu, X86_FEATURE_LA57) && (cr4 & X86_CR4_LA57))
-		return 1;
-
-	if (!guest_cpuid_has(vcpu, X86_FEATURE_UMIP) && (cr4 & X86_CR4_UMIP))
+	if (!kvm_is_valid_cr4(vcpu, cr4))
 		return 1;
 
 	if (is_long_mode(vcpu)) {
 		if (!(cr4 & X86_CR4_PAE))
 			return 1;
+		if ((cr4 ^ old_cr4) & X86_CR4_LA57)
+			return 1;
 	} else if (is_paging(vcpu) && (cr4 & X86_CR4_PAE)
-		   && ((cr4 ^ old_cr4) & pdptr_bits)
-		   && !load_pdptrs(vcpu, vcpu->arch.walk_mmu,
-				   kvm_read_cr3(vcpu)))
+		   && ((cr4 ^ old_cr4) & X86_CR4_PDPTR_BITS)
+		   && !load_pdptrs(vcpu, kvm_read_cr3(vcpu)))
 		return 1;
 
 	if ((cr4 & X86_CR4_PCIDE) && !(old_cr4 & X86_CR4_PCIDE)) {
-		if (!guest_cpuid_has(vcpu, X86_FEATURE_PCID))
-			return 1;
-
 		/* PCID can not be enabled when cr3[11:0]!=000H or EFER.LMA=0 */
 		if ((kvm_read_cr3(vcpu) & X86_CR3_PCID_MASK) || !is_long_mode(vcpu))
 			return 1;
 	}
 
-	if (kvm_x86_ops->set_cr4(vcpu, cr4))
+	if ((cr4 & X86_CR4_CET) && !kvm_is_cr0_bit_set(vcpu, X86_CR0_WP))
 		return 1;
 
-	if (((cr4 ^ old_cr4) & pdptr_bits) ||
-	    (!(cr4 & X86_CR4_PCIDE) && (old_cr4 & X86_CR4_PCIDE)))
-		kvm_mmu_reset_context(vcpu);
+	kvm_x86_call(set_cr4)(vcpu, cr4);
 
-	if ((cr4 ^ old_cr4) & (X86_CR4_OSXSAVE | X86_CR4_PKE))
-		kvm_update_cpuid(vcpu);
+	kvm_post_set_cr4(vcpu, old_cr4, cr4);
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(kvm_set_cr4);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_set_cr4);
+
+static void kvm_invalidate_pcid(struct kvm_vcpu *vcpu, unsigned long pcid)
+{
+	struct kvm_mmu *mmu = vcpu->arch.mmu;
+	unsigned long roots_to_free = 0;
+	int i;
+
+	/*
+	 * MOV CR3 and INVPCID are usually not intercepted when using TDP, but
+	 * this is reachable when running EPT=1 and unrestricted_guest=0,  and
+	 * also via the emulator.  KVM's TDP page tables are not in the scope of
+	 * the invalidation, but the guest's TLB entries need to be flushed as
+	 * the CPU may have cached entries in its TLB for the target PCID.
+	 */
+	if (unlikely(tdp_enabled)) {
+		kvm_make_request(KVM_REQ_TLB_FLUSH_GUEST, vcpu);
+		return;
+	}
+
+	/*
+	 * If neither the current CR3 nor any of the prev_roots use the given
+	 * PCID, then nothing needs to be done here because a resync will
+	 * happen anyway before switching to any other CR3.
+	 */
+	if (kvm_get_active_pcid(vcpu) == pcid) {
+		kvm_make_request(KVM_REQ_MMU_SYNC, vcpu);
+		kvm_make_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu);
+	}
+
+	/*
+	 * If PCID is disabled, there is no need to free prev_roots even if the
+	 * PCIDs for them are also 0, because MOV to CR3 always flushes the TLB
+	 * with PCIDE=0.
+	 */
+	if (!kvm_is_cr4_bit_set(vcpu, X86_CR4_PCIDE))
+		return;
+
+	for (i = 0; i < KVM_MMU_NUM_PREV_ROOTS; i++)
+		if (kvm_get_pcid(vcpu, mmu->prev_roots[i].pgd) == pcid)
+			roots_to_free |= KVM_MMU_ROOT_PREVIOUS(i);
+
+	kvm_mmu_free_roots(vcpu->kvm, mmu, roots_to_free);
+}
 
 int kvm_set_cr3(struct kvm_vcpu *vcpu, unsigned long cr3)
 {
+	bool skip_tlb_flush = false;
+	unsigned long pcid = 0;
 #ifdef CONFIG_X86_64
-	bool pcid_enabled = kvm_read_cr4_bits(vcpu, X86_CR4_PCIDE);
-
-	if (pcid_enabled)
-		cr3 &= ~CR3_PCID_INVD;
+	if (kvm_is_cr4_bit_set(vcpu, X86_CR4_PCIDE)) {
+		skip_tlb_flush = cr3 & X86_CR3_PCID_NOFLUSH;
+		cr3 &= ~X86_CR3_PCID_NOFLUSH;
+		pcid = cr3 & X86_CR3_PCID_MASK;
+	}
 #endif
 
-	if (cr3 == kvm_read_cr3(vcpu) && !pdptrs_changed(vcpu)) {
-		kvm_mmu_sync_roots(vcpu);
-		kvm_make_request(KVM_REQ_TLB_FLUSH, vcpu);
-		return 0;
-	}
+	/* PDPTRs are always reloaded for PAE paging. */
+	if (cr3 == kvm_read_cr3(vcpu) && !is_pae_paging(vcpu))
+		goto handle_tlb_flush;
 
-	if (is_long_mode(vcpu) &&
-	    (cr3 & rsvd_bits(cpuid_maxphyaddr(vcpu), 62)))
+	/*
+	 * Do not condition the GPA check on long mode, this helper is used to
+	 * stuff CR3, e.g. for RSM emulation, and there is no guarantee that
+	 * the current vCPU mode is accurate.
+	 */
+	if (!kvm_vcpu_is_legal_cr3(vcpu, cr3))
 		return 1;
-	else if (is_pae(vcpu) && is_paging(vcpu) &&
-		   !load_pdptrs(vcpu, vcpu->arch.walk_mmu, cr3))
+
+	if (is_pae_paging(vcpu) && !load_pdptrs(vcpu, cr3))
 		return 1;
+
+	if (cr3 != kvm_read_cr3(vcpu))
+		kvm_mmu_new_pgd(vcpu, cr3);
 
 	vcpu->arch.cr3 = cr3;
-	__set_bit(VCPU_EXREG_CR3, (ulong *)&vcpu->arch.regs_avail);
-	kvm_mmu_new_cr3(vcpu);
+	kvm_register_mark_dirty(vcpu, VCPU_REG_CR3);
+	/* Do not call post_set_cr3, we do not get here for confidential guests.  */
+
+handle_tlb_flush:
+	/*
+	 * A load of CR3 that flushes the TLB flushes only the current PCID,
+	 * even if PCID is disabled, in which case PCID=0 is flushed.  It's a
+	 * moot point in the end because _disabling_ PCID will flush all PCIDs,
+	 * and it's impossible to use a non-zero PCID when PCID is disabled,
+	 * i.e. only PCID=0 can be relevant.
+	 */
+	if (!skip_tlb_flush)
+		kvm_invalidate_pcid(vcpu, pcid);
+
 	return 0;
 }
-EXPORT_SYMBOL_GPL(kvm_set_cr3);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_set_cr3);
 
 int kvm_set_cr8(struct kvm_vcpu *vcpu, unsigned long cr8)
 {
@@ -879,7 +1474,7 @@ int kvm_set_cr8(struct kvm_vcpu *vcpu, unsigned long cr8)
 		vcpu->arch.cr8 = cr8;
 	return 0;
 }
-EXPORT_SYMBOL_GPL(kvm_set_cr8);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_set_cr8);
 
 unsigned long kvm_get_cr8(struct kvm_vcpu *vcpu)
 {
@@ -888,7 +1483,7 @@ unsigned long kvm_get_cr8(struct kvm_vcpu *vcpu)
 	else
 		return vcpu->arch.cr8;
 }
-EXPORT_SYMBOL_GPL(kvm_get_cr8);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_get_cr8);
 
 static void kvm_update_dr0123(struct kvm_vcpu *vcpu)
 {
@@ -897,17 +1492,10 @@ static void kvm_update_dr0123(struct kvm_vcpu *vcpu)
 	if (!(vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP)) {
 		for (i = 0; i < KVM_NR_DB_REGS; i++)
 			vcpu->arch.eff_db[i] = vcpu->arch.db[i];
-		vcpu->arch.switch_db_regs |= KVM_DEBUGREG_RELOAD;
 	}
 }
 
-static void kvm_update_dr6(struct kvm_vcpu *vcpu)
-{
-	if (!(vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP))
-		kvm_x86_ops->set_dr6(vcpu, vcpu->arch.dr6);
-}
-
-static void kvm_update_dr7(struct kvm_vcpu *vcpu)
+void kvm_update_dr7(struct kvm_vcpu *vcpu)
 {
 	unsigned long dr7;
 
@@ -915,42 +1503,45 @@ static void kvm_update_dr7(struct kvm_vcpu *vcpu)
 		dr7 = vcpu->arch.guest_debug_dr7;
 	else
 		dr7 = vcpu->arch.dr7;
-	kvm_x86_ops->set_dr7(vcpu, dr7);
+	kvm_x86_call(set_dr7)(vcpu, dr7);
 	vcpu->arch.switch_db_regs &= ~KVM_DEBUGREG_BP_ENABLED;
 	if (dr7 & DR7_BP_EN_MASK)
 		vcpu->arch.switch_db_regs |= KVM_DEBUGREG_BP_ENABLED;
 }
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_update_dr7);
 
 static u64 kvm_dr6_fixed(struct kvm_vcpu *vcpu)
 {
 	u64 fixed = DR6_FIXED_1;
 
-	if (!guest_cpuid_has(vcpu, X86_FEATURE_RTM))
+	if (!guest_cpu_cap_has(vcpu, X86_FEATURE_RTM))
 		fixed |= DR6_RTM;
+
+	if (!guest_cpu_cap_has(vcpu, X86_FEATURE_BUS_LOCK_DETECT))
+		fixed |= DR6_BUS_LOCK;
 	return fixed;
 }
 
-static int __kvm_set_dr(struct kvm_vcpu *vcpu, int dr, unsigned long val)
+int kvm_set_dr(struct kvm_vcpu *vcpu, int dr, unsigned long val)
 {
+	size_t size = ARRAY_SIZE(vcpu->arch.db);
+
 	switch (dr) {
 	case 0 ... 3:
-		vcpu->arch.db[dr] = val;
+		vcpu->arch.db[array_index_nospec(dr, size)] = val;
 		if (!(vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP))
 			vcpu->arch.eff_db[dr] = val;
 		break;
 	case 4:
-		/* fall through */
 	case 6:
-		if (val & 0xffffffff00000000ULL)
-			return -1; /* #GP */
+		if (!kvm_dr6_valid(val))
+			return 1; /* #GP */
 		vcpu->arch.dr6 = (val & DR6_VOLATILE) | kvm_dr6_fixed(vcpu);
-		kvm_update_dr6(vcpu);
 		break;
 	case 5:
-		/* fall through */
 	default: /* 7 */
-		if (val & 0xffffffff00000000ULL)
-			return -1; /* #GP */
+		if (!kvm_dr7_valid(val))
+			return 1; /* #GP */
 		vcpu->arch.dr7 = (val & DR7_VOLATILE) | DR7_FIXED_1;
 		kvm_update_dr7(vcpu);
 		break;
@@ -958,206 +1549,221 @@ static int __kvm_set_dr(struct kvm_vcpu *vcpu, int dr, unsigned long val)
 
 	return 0;
 }
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_set_dr);
 
-int kvm_set_dr(struct kvm_vcpu *vcpu, int dr, unsigned long val)
+unsigned long kvm_get_dr(struct kvm_vcpu *vcpu, int dr)
 {
-	if (__kvm_set_dr(vcpu, dr, val)) {
+	size_t size = ARRAY_SIZE(vcpu->arch.db);
+
+	switch (dr) {
+	case 0 ... 3:
+		return vcpu->arch.db[array_index_nospec(dr, size)];
+	case 4:
+	case 6:
+		return vcpu->arch.dr6;
+	case 5:
+	default: /* 7 */
+		return vcpu->arch.dr7;
+	}
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_get_dr);
+
+static unsigned long kvm_get_effective_dr7(struct kvm_vcpu *vcpu)
+{
+	if (vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP)
+		return vcpu->arch.guest_debug_dr7;
+
+	return vcpu->arch.dr7;
+}
+
+int kvm_emulate_rdpmc(struct kvm_vcpu *vcpu)
+{
+	u32 pmc = kvm_ecx_read(vcpu);
+	u64 data;
+
+	if (kvm_pmu_rdpmc(vcpu, pmc, &data)) {
 		kvm_inject_gp(vcpu, 0);
 		return 1;
 	}
-	return 0;
-}
-EXPORT_SYMBOL_GPL(kvm_set_dr);
 
-int kvm_get_dr(struct kvm_vcpu *vcpu, int dr, unsigned long *val)
+	kvm_eax_write(vcpu, data);
+	kvm_edx_write(vcpu, data >> 32);
+	return kvm_skip_emulated_instruction(vcpu);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_rdpmc);
+
+/*
+ * Some IA32_ARCH_CAPABILITIES bits have dependencies on MSRs that KVM
+ * does not yet virtualize. These include:
+ *   10 - MISC_PACKAGE_CTRLS
+ *   11 - ENERGY_FILTERING_CTL
+ *   12 - DOITM
+ *   18 - FB_CLEAR_CTRL
+ *   21 - XAPIC_DISABLE_STATUS
+ *   23 - OVERCLOCKING_STATUS
+ */
+
+#define KVM_SUPPORTED_ARCH_CAP \
+	(ARCH_CAP_RDCL_NO | ARCH_CAP_IBRS_ALL | ARCH_CAP_RSBA | \
+	 ARCH_CAP_SKIP_VMENTRY_L1DFLUSH | ARCH_CAP_SSB_NO | ARCH_CAP_MDS_NO | \
+	 ARCH_CAP_PSCHANGE_MC_NO | ARCH_CAP_TSX_CTRL_MSR | ARCH_CAP_TAA_NO | \
+	 ARCH_CAP_SBDR_SSDP_NO | ARCH_CAP_FBSDP_NO | ARCH_CAP_PSDP_NO | \
+	 ARCH_CAP_FB_CLEAR | ARCH_CAP_RRSBA | ARCH_CAP_PBRSB_NO | ARCH_CAP_GDS_NO | \
+	 ARCH_CAP_RFDS_NO | ARCH_CAP_RFDS_CLEAR | ARCH_CAP_BHI_NO | ARCH_CAP_ITS_NO)
+
+static u64 kvm_get_arch_capabilities(void)
 {
-	switch (dr) {
-	case 0 ... 3:
-		*val = vcpu->arch.db[dr];
-		break;
-	case 4:
-		/* fall through */
-	case 6:
-		if (vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP)
-			*val = vcpu->arch.dr6;
-		else
-			*val = kvm_x86_ops->get_dr6(vcpu);
-		break;
-	case 5:
-		/* fall through */
-	default: /* 7 */
-		*val = vcpu->arch.dr7;
-		break;
+	u64 data = kvm_host.arch_capabilities & KVM_SUPPORTED_ARCH_CAP;
+
+	/*
+	 * If nx_huge_pages is enabled, KVM's shadow paging will ensure that
+	 * the nested hypervisor runs with NX huge pages.  If it is not,
+	 * L1 is anyway vulnerable to ITLB_MULTIHIT exploits from other
+	 * L1 guests, so it need not worry about its own (L2) guests.
+	 */
+	data |= ARCH_CAP_PSCHANGE_MC_NO;
+
+	/*
+	 * If we're doing cache flushes (either "always" or "cond")
+	 * we will do one whenever the guest does a vmlaunch/vmresume.
+	 * If an outer hypervisor is doing the cache flush for us
+	 * (ARCH_CAP_SKIP_VMENTRY_L1DFLUSH), we can safely pass that
+	 * capability to the guest too, and if EPT is disabled we're not
+	 * vulnerable.  Overall, only VMENTER_L1D_FLUSH_NEVER will
+	 * require a nested hypervisor to do a flush of its own.
+	 */
+	if (l1tf_vmx_mitigation != VMENTER_L1D_FLUSH_NEVER)
+		data |= ARCH_CAP_SKIP_VMENTRY_L1DFLUSH;
+
+	if (!boot_cpu_has_bug(X86_BUG_CPU_MELTDOWN))
+		data |= ARCH_CAP_RDCL_NO;
+	if (!boot_cpu_has_bug(X86_BUG_SPEC_STORE_BYPASS))
+		data |= ARCH_CAP_SSB_NO;
+	if (!boot_cpu_has_bug(X86_BUG_MDS))
+		data |= ARCH_CAP_MDS_NO;
+	if (!boot_cpu_has_bug(X86_BUG_RFDS))
+		data |= ARCH_CAP_RFDS_NO;
+	if (!boot_cpu_has_bug(X86_BUG_ITS))
+		data |= ARCH_CAP_ITS_NO;
+
+	if (!boot_cpu_has(X86_FEATURE_RTM)) {
+		/*
+		 * If RTM=0 because the kernel has disabled TSX, the host might
+		 * have TAA_NO or TSX_CTRL.  Clear TAA_NO (the guest sees RTM=0
+		 * and therefore knows that there cannot be TAA) but keep
+		 * TSX_CTRL: some buggy userspaces leave it set on tsx=on hosts,
+		 * and we want to allow migrating those guests to tsx=off hosts.
+		 */
+		data &= ~ARCH_CAP_TAA_NO;
+	} else if (!boot_cpu_has_bug(X86_BUG_TAA)) {
+		data |= ARCH_CAP_TAA_NO;
+	} else {
+		/*
+		 * Nothing to do here; we emulate TSX_CTRL if present on the
+		 * host so the guest can choose between disabling TSX or
+		 * using VERW to clear CPU buffers.
+		 */
 	}
-	return 0;
+
+	if (!boot_cpu_has_bug(X86_BUG_GDS) || gds_ucode_mitigated())
+		data |= ARCH_CAP_GDS_NO;
+
+	return data;
 }
-EXPORT_SYMBOL_GPL(kvm_get_dr);
 
-bool kvm_rdpmc(struct kvm_vcpu *vcpu)
+static int kvm_get_feature_msr(struct kvm_vcpu *vcpu, u32 index, u64 *data,
+			       bool host_initiated)
 {
-	u32 ecx = kvm_register_read(vcpu, VCPU_REGS_RCX);
-	u64 data;
-	int err;
+	WARN_ON_ONCE(!host_initiated);
 
-	err = kvm_pmu_rdpmc(vcpu, ecx, &data);
-	if (err)
-		return err;
-	kvm_register_write(vcpu, VCPU_REGS_RAX, (u32)data);
-	kvm_register_write(vcpu, VCPU_REGS_RDX, data >> 32);
-	return err;
-}
-EXPORT_SYMBOL_GPL(kvm_rdpmc);
-
-/*
- * List of msr numbers which we expose to userspace through KVM_GET_MSRS
- * and KVM_SET_MSRS, and KVM_GET_MSR_INDEX_LIST.
- *
- * This list is modified at module load time to reflect the
- * capabilities of the host cpu. This capabilities test skips MSRs that are
- * kvm-specific. Those are put in emulated_msrs; filtering of emulated_msrs
- * may depend on host virtualization features rather than host cpu features.
- */
-
-static u32 msrs_to_save[] = {
-	MSR_IA32_SYSENTER_CS, MSR_IA32_SYSENTER_ESP, MSR_IA32_SYSENTER_EIP,
-	MSR_STAR,
-#ifdef CONFIG_X86_64
-	MSR_CSTAR, MSR_KERNEL_GS_BASE, MSR_SYSCALL_MASK, MSR_LSTAR,
-#endif
-	MSR_IA32_TSC, MSR_IA32_CR_PAT, MSR_VM_HSAVE_PA,
-	MSR_IA32_FEATURE_CONTROL, MSR_IA32_BNDCFGS, MSR_TSC_AUX,
-	MSR_IA32_SPEC_CTRL, MSR_IA32_ARCH_CAPABILITIES
-};
-
-static unsigned num_msrs_to_save;
-
-static u32 emulated_msrs[] = {
-	MSR_KVM_SYSTEM_TIME, MSR_KVM_WALL_CLOCK,
-	MSR_KVM_SYSTEM_TIME_NEW, MSR_KVM_WALL_CLOCK_NEW,
-	HV_X64_MSR_GUEST_OS_ID, HV_X64_MSR_HYPERCALL,
-	HV_X64_MSR_TIME_REF_COUNT, HV_X64_MSR_REFERENCE_TSC,
-	HV_X64_MSR_TSC_FREQUENCY, HV_X64_MSR_APIC_FREQUENCY,
-	HV_X64_MSR_CRASH_P0, HV_X64_MSR_CRASH_P1, HV_X64_MSR_CRASH_P2,
-	HV_X64_MSR_CRASH_P3, HV_X64_MSR_CRASH_P4, HV_X64_MSR_CRASH_CTL,
-	HV_X64_MSR_RESET,
-	HV_X64_MSR_VP_INDEX,
-	HV_X64_MSR_VP_RUNTIME,
-	HV_X64_MSR_SCONTROL,
-	HV_X64_MSR_STIMER0_CONFIG,
-	HV_X64_MSR_VP_ASSIST_PAGE,
-	HV_X64_MSR_REENLIGHTENMENT_CONTROL, HV_X64_MSR_TSC_EMULATION_CONTROL,
-	HV_X64_MSR_TSC_EMULATION_STATUS,
-
-	MSR_KVM_ASYNC_PF_EN, MSR_KVM_STEAL_TIME,
-	MSR_KVM_PV_EOI_EN,
-
-	MSR_IA32_TSC_ADJUST,
-	MSR_IA32_TSCDEADLINE,
-	MSR_IA32_MISC_ENABLE,
-	MSR_IA32_MCG_STATUS,
-	MSR_IA32_MCG_CTL,
-	MSR_IA32_MCG_EXT_CTL,
-	MSR_IA32_SMBASE,
-	MSR_SMI_COUNT,
-	MSR_PLATFORM_INFO,
-	MSR_MISC_FEATURES_ENABLES,
-	MSR_AMD64_VIRT_SPEC_CTRL,
-};
-
-static unsigned num_emulated_msrs;
-
-/*
- * List of msr numbers which are used to expose MSR-based features that
- * can be used by a hypervisor to validate requested CPU features.
- */
-static u32 msr_based_features[] = {
-	MSR_IA32_VMX_BASIC,
-	MSR_IA32_VMX_TRUE_PINBASED_CTLS,
-	MSR_IA32_VMX_PINBASED_CTLS,
-	MSR_IA32_VMX_TRUE_PROCBASED_CTLS,
-	MSR_IA32_VMX_PROCBASED_CTLS,
-	MSR_IA32_VMX_TRUE_EXIT_CTLS,
-	MSR_IA32_VMX_EXIT_CTLS,
-	MSR_IA32_VMX_TRUE_ENTRY_CTLS,
-	MSR_IA32_VMX_ENTRY_CTLS,
-	MSR_IA32_VMX_MISC,
-	MSR_IA32_VMX_CR0_FIXED0,
-	MSR_IA32_VMX_CR0_FIXED1,
-	MSR_IA32_VMX_CR4_FIXED0,
-	MSR_IA32_VMX_CR4_FIXED1,
-	MSR_IA32_VMX_VMCS_ENUM,
-	MSR_IA32_VMX_PROCBASED_CTLS2,
-	MSR_IA32_VMX_EPT_VPID_CAP,
-	MSR_IA32_VMX_VMFUNC,
-
-	MSR_F10H_DECFG,
-	MSR_IA32_UCODE_REV,
-};
-
-static unsigned int num_msr_based_features;
-
-static int kvm_get_msr_feature(struct kvm_msr_entry *msr)
-{
-	switch (msr->index) {
+	switch (index) {
+	case MSR_IA32_ARCH_CAPABILITIES:
+		*data = kvm_get_arch_capabilities();
+		break;
+	case MSR_IA32_PERF_CAPABILITIES:
+		*data = kvm_caps.supported_perf_cap;
+		break;
+	case MSR_PLATFORM_INFO:
+		*data = MSR_PLATFORM_INFO_CPUID_FAULT;
+		break;
 	case MSR_IA32_UCODE_REV:
-		rdmsrl(msr->index, msr->data);
+		rdmsrq_safe(index, data);
 		break;
 	default:
-		if (kvm_x86_ops->get_msr_feature(msr))
-			return 1;
+		return kvm_x86_call(get_feature_msr)(index, data);
 	}
 	return 0;
 }
 
-static int do_get_msr_feature(struct kvm_vcpu *vcpu, unsigned index, u64 *data)
+static int do_get_feature_msr(struct kvm_vcpu *vcpu, unsigned index, u64 *data)
 {
-	struct kvm_msr_entry msr;
-	int r;
-
-	msr.index = index;
-	r = kvm_get_msr_feature(&msr);
-	if (r)
-		return r;
-
-	*data = msr.data;
-
-	return 0;
+	return kvm_do_msr_access(vcpu, index, data, true, MSR_TYPE_R,
+				 kvm_get_feature_msr);
 }
 
+static bool __kvm_valid_efer(struct kvm_vcpu *vcpu, u64 efer)
+{
+	if (efer & EFER_AUTOIBRS && !guest_cpu_cap_has(vcpu, X86_FEATURE_AUTOIBRS))
+		return false;
+
+	if (efer & EFER_FFXSR && !guest_cpu_cap_has(vcpu, X86_FEATURE_FXSR_OPT))
+		return false;
+
+	if (efer & EFER_SVME && !guest_cpu_cap_has(vcpu, X86_FEATURE_SVM))
+		return false;
+
+	if (efer & (EFER_LME | EFER_LMA) &&
+	    !guest_cpu_cap_has(vcpu, X86_FEATURE_LM))
+		return false;
+
+	if (efer & EFER_NX && !guest_cpu_cap_has(vcpu, X86_FEATURE_NX))
+		return false;
+
+	return true;
+
+}
 bool kvm_valid_efer(struct kvm_vcpu *vcpu, u64 efer)
 {
 	if (efer & efer_reserved_bits)
 		return false;
 
-	if (efer & EFER_FFXSR && !guest_cpuid_has(vcpu, X86_FEATURE_FXSR_OPT))
-			return false;
-
-	if (efer & EFER_SVME && !guest_cpuid_has(vcpu, X86_FEATURE_SVM))
-			return false;
-
-	return true;
+	return __kvm_valid_efer(vcpu, efer);
 }
-EXPORT_SYMBOL_GPL(kvm_valid_efer);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_valid_efer);
 
-static int set_efer(struct kvm_vcpu *vcpu, u64 efer)
+static int set_efer(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 {
 	u64 old_efer = vcpu->arch.efer;
+	u64 efer = msr_info->data;
+	int r;
 
-	if (!kvm_valid_efer(vcpu, efer))
+	if (efer & efer_reserved_bits)
 		return 1;
 
-	if (is_paging(vcpu)
-	    && (vcpu->arch.efer & EFER_LME) != (efer & EFER_LME))
-		return 1;
+	if (!msr_info->host_initiated) {
+		if (!__kvm_valid_efer(vcpu, efer))
+			return 1;
+
+		if (is_paging(vcpu) &&
+		    (vcpu->arch.efer & EFER_LME) != (efer & EFER_LME))
+			return 1;
+	}
 
 	efer &= ~EFER_LMA;
 	efer |= vcpu->arch.efer & EFER_LMA;
 
-	kvm_x86_ops->set_efer(vcpu, efer);
+	r = kvm_x86_call(set_efer)(vcpu, efer);
+	if (r) {
+		WARN_ON(r > 0);
+		return r;
+	}
 
-	/* Update reserved bits */
-	if ((efer ^ old_efer) & EFER_NX)
+	if ((efer ^ old_efer) & KVM_MMU_EFER_ROLE_BITS)
 		kvm_mmu_reset_context(vcpu);
+
+	if (!static_cpu_has(X86_FEATURE_XSAVES) &&
+	    (efer & EFER_SVME))
+		kvm_hv_xsaves_xsavec_maybe_warn(vcpu);
 
 	return 0;
 }
@@ -1166,22 +1772,69 @@ void kvm_enable_efer_bits(u64 mask)
 {
        efer_reserved_bits &= ~mask;
 }
-EXPORT_SYMBOL_GPL(kvm_enable_efer_bits);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_enable_efer_bits);
+
+bool kvm_msr_allowed(struct kvm_vcpu *vcpu, u32 index, u32 type)
+{
+	struct kvm_x86_msr_filter *msr_filter;
+	struct msr_bitmap_range *ranges;
+	struct kvm *kvm = vcpu->kvm;
+	bool allowed;
+	int idx;
+	u32 i;
+
+	/* x2APIC MSRs do not support filtering. */
+	if (index >= 0x800 && index <= 0x8ff)
+		return true;
+
+	idx = srcu_read_lock(&kvm->srcu);
+
+	msr_filter = srcu_dereference(kvm->arch.msr_filter, &kvm->srcu);
+	if (!msr_filter) {
+		allowed = true;
+		goto out;
+	}
+
+	allowed = msr_filter->default_allow;
+	ranges = msr_filter->ranges;
+
+	for (i = 0; i < msr_filter->count; i++) {
+		u32 start = ranges[i].base;
+		u32 end = start + ranges[i].nmsrs;
+		u32 flags = ranges[i].flags;
+		unsigned long *bitmap = ranges[i].bitmap;
+
+		if ((index >= start) && (index < end) && (flags & type)) {
+			allowed = test_bit(index - start, bitmap);
+			break;
+		}
+	}
+
+out:
+	srcu_read_unlock(&kvm->srcu, idx);
+
+	return allowed;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_msr_allowed);
 
 /*
- * Writes msr value into into the appropriate "register".
+ * Write @data into the MSR specified by @index.  Select MSR specific fault
+ * checks are bypassed if @host_initiated is %true.
  * Returns 0 on success, non-0 otherwise.
  * Assumes vcpu_load() was already called.
  */
-int kvm_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr)
+static int __kvm_set_msr(struct kvm_vcpu *vcpu, u32 index, u64 data,
+			 bool host_initiated)
 {
-	switch (msr->index) {
+	struct msr_data msr;
+
+	switch (index) {
 	case MSR_FS_BASE:
 	case MSR_GS_BASE:
 	case MSR_KERNEL_GS_BASE:
 	case MSR_CSTAR:
 	case MSR_LSTAR:
-		if (is_noncanonical_address(msr->data, vcpu))
+		if (is_noncanonical_msr_address(data, vcpu))
 			return 1;
 		break;
 	case MSR_IA32_SYSENTER_EIP:
@@ -1198,54 +1851,491 @@ int kvm_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr)
 		 * value, and that something deterministic happens if the guest
 		 * invokes 64-bit SYSENTER.
 		 */
-		msr->data = get_canonical(msr->data, vcpu_virt_addr_bits(vcpu));
+		data = __canonical_address(data, max_host_virt_addr_bits());
+		break;
+	case MSR_TSC_AUX:
+		if (!kvm_is_supported_user_return_msr(MSR_TSC_AUX))
+			return 1;
+
+		if (!host_initiated &&
+		    !guest_cpu_cap_has(vcpu, X86_FEATURE_RDTSCP) &&
+		    !guest_cpu_cap_has(vcpu, X86_FEATURE_RDPID))
+			return 1;
+
+		/*
+		 * Per Intel's SDM, bits 63:32 are reserved, but AMD's APM has
+		 * incomplete and conflicting architectural behavior.  Current
+		 * AMD CPUs completely ignore bits 63:32, i.e. they aren't
+		 * reserved and always read as zeros.  Enforce Intel's reserved
+		 * bits check if the guest CPU is Intel compatible, otherwise
+		 * clear the bits.  This ensures cross-vendor migration will
+		 * provide consistent behavior for the guest.
+		 */
+		if (guest_cpuid_is_intel_compatible(vcpu) && (data >> 32) != 0)
+			return 1;
+
+		data = (u32)data;
+		break;
+	case MSR_IA32_U_CET:
+	case MSR_IA32_S_CET:
+		if (!guest_cpu_cap_has(vcpu, X86_FEATURE_SHSTK) &&
+		    !guest_cpu_cap_has(vcpu, X86_FEATURE_IBT))
+			return KVM_MSR_RET_UNSUPPORTED;
+		if (!kvm_is_valid_u_s_cet(vcpu, data))
+			return 1;
+		break;
+	case MSR_KVM_INTERNAL_GUEST_SSP:
+		if (!host_initiated)
+			return 1;
+		fallthrough;
+		/*
+		 * Note that the MSR emulation here is flawed when a vCPU
+		 * doesn't support the Intel 64 architecture. The expected
+		 * architectural behavior in this case is that the upper 32
+		 * bits do not exist and should always read '0'. However,
+		 * because the actual hardware on which the virtual CPU is
+		 * running does support Intel 64, XRSTORS/XSAVES in the
+		 * guest could observe behavior that violates the
+		 * architecture. Intercepting XRSTORS/XSAVES for this
+		 * special case isn't deemed worthwhile.
+		 */
+	case MSR_IA32_PL0_SSP ... MSR_IA32_INT_SSP_TAB:
+		if (!guest_cpu_cap_has(vcpu, X86_FEATURE_SHSTK))
+			return KVM_MSR_RET_UNSUPPORTED;
+		/*
+		 * MSR_IA32_INT_SSP_TAB is not present on processors that do
+		 * not support Intel 64 architecture.
+		 */
+		if (index == MSR_IA32_INT_SSP_TAB && !guest_cpu_cap_has(vcpu, X86_FEATURE_LM))
+			return KVM_MSR_RET_UNSUPPORTED;
+		if (is_noncanonical_msr_address(data, vcpu))
+			return 1;
+		/* All SSP MSRs except MSR_IA32_INT_SSP_TAB must be 4-byte aligned */
+		if (index != MSR_IA32_INT_SSP_TAB && !IS_ALIGNED(data, 4))
+			return 1;
+		break;
 	}
-	return kvm_x86_ops->set_msr(vcpu, msr);
+
+	msr.data = data;
+	msr.index = index;
+	msr.host_initiated = host_initiated;
+
+	return kvm_x86_call(set_msr)(vcpu, &msr);
 }
-EXPORT_SYMBOL_GPL(kvm_set_msr);
+
+static int _kvm_set_msr(struct kvm_vcpu *vcpu, u32 index, u64 *data,
+			bool host_initiated)
+{
+	return __kvm_set_msr(vcpu, index, *data, host_initiated);
+}
+
+static int kvm_set_msr_ignored_check(struct kvm_vcpu *vcpu,
+				     u32 index, u64 data, bool host_initiated)
+{
+	return kvm_do_msr_access(vcpu, index, &data, host_initiated, MSR_TYPE_W,
+				 _kvm_set_msr);
+}
+
+/*
+ * Read the MSR specified by @index into @data.  Select MSR specific fault
+ * checks are bypassed if @host_initiated is %true.
+ * Returns 0 on success, non-0 otherwise.
+ * Assumes vcpu_load() was already called.
+ */
+static int __kvm_get_msr(struct kvm_vcpu *vcpu, u32 index, u64 *data,
+			 bool host_initiated)
+{
+	struct msr_data msr;
+	int ret;
+
+	switch (index) {
+	case MSR_TSC_AUX:
+		if (!kvm_is_supported_user_return_msr(MSR_TSC_AUX))
+			return 1;
+
+		if (!host_initiated &&
+		    !guest_cpu_cap_has(vcpu, X86_FEATURE_RDTSCP) &&
+		    !guest_cpu_cap_has(vcpu, X86_FEATURE_RDPID))
+			return 1;
+		break;
+	case MSR_IA32_U_CET:
+	case MSR_IA32_S_CET:
+		if (!guest_cpu_cap_has(vcpu, X86_FEATURE_SHSTK) &&
+		    !guest_cpu_cap_has(vcpu, X86_FEATURE_IBT))
+			return KVM_MSR_RET_UNSUPPORTED;
+		break;
+	case MSR_KVM_INTERNAL_GUEST_SSP:
+		if (!host_initiated)
+			return 1;
+		fallthrough;
+	case MSR_IA32_PL0_SSP ... MSR_IA32_INT_SSP_TAB:
+		if (!guest_cpu_cap_has(vcpu, X86_FEATURE_SHSTK))
+			return KVM_MSR_RET_UNSUPPORTED;
+		break;
+	}
+
+	msr.index = index;
+	msr.host_initiated = host_initiated;
+
+	ret = kvm_x86_call(get_msr)(vcpu, &msr);
+	if (!ret)
+		*data = msr.data;
+	return ret;
+}
+
+int kvm_msr_write(struct kvm_vcpu *vcpu, u32 index, u64 data)
+{
+	return __kvm_set_msr(vcpu, index, data, true);
+}
+
+int kvm_msr_read(struct kvm_vcpu *vcpu, u32 index, u64 *data)
+{
+	return __kvm_get_msr(vcpu, index, data, true);
+}
+
+static int kvm_get_msr_ignored_check(struct kvm_vcpu *vcpu,
+				     u32 index, u64 *data, bool host_initiated)
+{
+	return kvm_do_msr_access(vcpu, index, data, host_initiated, MSR_TYPE_R,
+				 __kvm_get_msr);
+}
+
+int __kvm_emulate_msr_read(struct kvm_vcpu *vcpu, u32 index, u64 *data)
+{
+	return kvm_get_msr_ignored_check(vcpu, index, data, false);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(__kvm_emulate_msr_read);
+
+int __kvm_emulate_msr_write(struct kvm_vcpu *vcpu, u32 index, u64 data)
+{
+	return kvm_set_msr_ignored_check(vcpu, index, data, false);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(__kvm_emulate_msr_write);
+
+int kvm_emulate_msr_read(struct kvm_vcpu *vcpu, u32 index, u64 *data)
+{
+	if (!kvm_msr_allowed(vcpu, index, KVM_MSR_FILTER_READ))
+		return KVM_MSR_RET_FILTERED;
+
+	return __kvm_emulate_msr_read(vcpu, index, data);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_msr_read);
+
+int kvm_emulate_msr_write(struct kvm_vcpu *vcpu, u32 index, u64 data)
+{
+	if (!kvm_msr_allowed(vcpu, index, KVM_MSR_FILTER_WRITE))
+		return KVM_MSR_RET_FILTERED;
+
+	return __kvm_emulate_msr_write(vcpu, index, data);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_msr_write);
+
+
+static void complete_userspace_rdmsr(struct kvm_vcpu *vcpu)
+{
+	if (!vcpu->run->msr.error) {
+		kvm_eax_write(vcpu, vcpu->run->msr.data);
+		kvm_edx_write(vcpu, vcpu->run->msr.data >> 32);
+	}
+}
+
+static int complete_emulated_msr_access(struct kvm_vcpu *vcpu)
+{
+	return complete_emulated_insn_gp(vcpu, vcpu->run->msr.error);
+}
+
+static int complete_emulated_rdmsr(struct kvm_vcpu *vcpu)
+{
+	complete_userspace_rdmsr(vcpu);
+	return complete_emulated_msr_access(vcpu);
+}
+
+static int complete_fast_msr_access(struct kvm_vcpu *vcpu)
+{
+	return kvm_x86_call(complete_emulated_msr)(vcpu, vcpu->run->msr.error);
+}
+
+static int complete_fast_rdmsr(struct kvm_vcpu *vcpu)
+{
+	complete_userspace_rdmsr(vcpu);
+	return complete_fast_msr_access(vcpu);
+}
+
+static int complete_fast_rdmsr_imm(struct kvm_vcpu *vcpu)
+{
+	if (!vcpu->run->msr.error)
+		kvm_register_write(vcpu, vcpu->arch.cui_rdmsr_imm_reg,
+				   vcpu->run->msr.data);
+
+	return complete_fast_msr_access(vcpu);
+}
+
+static u64 kvm_msr_reason(int r)
+{
+	switch (r) {
+	case KVM_MSR_RET_UNSUPPORTED:
+		return KVM_MSR_EXIT_REASON_UNKNOWN;
+	case KVM_MSR_RET_FILTERED:
+		return KVM_MSR_EXIT_REASON_FILTER;
+	default:
+		return KVM_MSR_EXIT_REASON_INVAL;
+	}
+}
+
+static int kvm_msr_user_space(struct kvm_vcpu *vcpu, u32 index,
+			      u32 exit_reason, u64 data,
+			      int (*completion)(struct kvm_vcpu *vcpu),
+			      int r)
+{
+	u64 msr_reason = kvm_msr_reason(r);
+
+	/* Check if the user wanted to know about this MSR fault */
+	if (!(vcpu->kvm->arch.user_space_msr_mask & msr_reason))
+		return 0;
+
+	vcpu->run->exit_reason = exit_reason;
+	vcpu->run->msr.error = 0;
+	memset(vcpu->run->msr.pad, 0, sizeof(vcpu->run->msr.pad));
+	vcpu->run->msr.reason = msr_reason;
+	vcpu->run->msr.index = index;
+	vcpu->run->msr.data = data;
+	vcpu->arch.complete_userspace_io = completion;
+
+	return 1;
+}
+
+static int __kvm_emulate_rdmsr(struct kvm_vcpu *vcpu, u32 msr, int reg,
+			       int (*complete_rdmsr)(struct kvm_vcpu *))
+{
+	u64 data;
+	int r;
+
+	r = kvm_emulate_msr_read(vcpu, msr, &data);
+
+	if (!r) {
+		trace_kvm_msr_read(msr, data);
+
+		if (reg < 0) {
+			kvm_eax_write(vcpu, data);
+			kvm_edx_write(vcpu, data >> 32);
+		} else {
+			kvm_register_write(vcpu, reg, data);
+		}
+	} else {
+		/* MSR read failed? See if we should ask user space */
+		if (kvm_msr_user_space(vcpu, msr, KVM_EXIT_X86_RDMSR, 0,
+				       complete_rdmsr, r))
+			return 0;
+		trace_kvm_msr_read_ex(msr);
+	}
+
+	return kvm_x86_call(complete_emulated_msr)(vcpu, r);
+}
+
+int kvm_emulate_rdmsr(struct kvm_vcpu *vcpu)
+{
+	return __kvm_emulate_rdmsr(vcpu, kvm_ecx_read(vcpu), -1,
+				   complete_fast_rdmsr);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_rdmsr);
+
+int kvm_emulate_rdmsr_imm(struct kvm_vcpu *vcpu, u32 msr, int reg)
+{
+	vcpu->arch.cui_rdmsr_imm_reg = reg;
+
+	return __kvm_emulate_rdmsr(vcpu, msr, reg, complete_fast_rdmsr_imm);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_rdmsr_imm);
+
+static int __kvm_emulate_wrmsr(struct kvm_vcpu *vcpu, u32 msr, u64 data)
+{
+	int r;
+
+	r = kvm_emulate_msr_write(vcpu, msr, data);
+	if (!r) {
+		trace_kvm_msr_write(msr, data);
+	} else {
+		/* MSR write failed? See if we should ask user space */
+		if (kvm_msr_user_space(vcpu, msr, KVM_EXIT_X86_WRMSR, data,
+				       complete_fast_msr_access, r))
+			return 0;
+		/* Signal all other negative errors to userspace */
+		if (r < 0)
+			return r;
+		trace_kvm_msr_write_ex(msr, data);
+	}
+
+	return kvm_x86_call(complete_emulated_msr)(vcpu, r);
+}
+
+int kvm_emulate_wrmsr(struct kvm_vcpu *vcpu)
+{
+	return __kvm_emulate_wrmsr(vcpu, kvm_ecx_read(vcpu),
+				   kvm_read_edx_eax(vcpu));
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_wrmsr);
+
+int kvm_emulate_wrmsr_imm(struct kvm_vcpu *vcpu, u32 msr, int reg)
+{
+	return __kvm_emulate_wrmsr(vcpu, msr, kvm_register_read(vcpu, reg));
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_wrmsr_imm);
+
+int kvm_emulate_as_nop(struct kvm_vcpu *vcpu)
+{
+	return kvm_skip_emulated_instruction(vcpu);
+}
+
+int kvm_emulate_invd(struct kvm_vcpu *vcpu)
+{
+	/* Treat an INVD instruction as a NOP and just skip it. */
+	return kvm_emulate_as_nop(vcpu);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_invd);
+
+fastpath_t handle_fastpath_invd(struct kvm_vcpu *vcpu)
+{
+	if (!kvm_pmu_is_fastpath_emulation_allowed(vcpu))
+		return EXIT_FASTPATH_NONE;
+
+	if (!kvm_emulate_invd(vcpu))
+		return EXIT_FASTPATH_EXIT_USERSPACE;
+
+	return EXIT_FASTPATH_REENTER_GUEST;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(handle_fastpath_invd);
+
+int kvm_handle_invalid_op(struct kvm_vcpu *vcpu)
+{
+	kvm_queue_exception(vcpu, UD_VECTOR);
+	return 1;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_handle_invalid_op);
+
+
+static int kvm_emulate_monitor_mwait(struct kvm_vcpu *vcpu, const char *insn)
+{
+	bool enabled;
+
+	if (kvm_check_has_quirk(vcpu->kvm, KVM_X86_QUIRK_MWAIT_NEVER_UD_FAULTS))
+		goto emulate_as_nop;
+
+	if (kvm_check_has_quirk(vcpu->kvm, KVM_X86_QUIRK_MISC_ENABLE_NO_MWAIT))
+		enabled = guest_cpu_cap_has(vcpu, X86_FEATURE_MWAIT);
+	else
+		enabled = vcpu->arch.ia32_misc_enable_msr & MSR_IA32_MISC_ENABLE_MWAIT;
+
+	if (!enabled)
+		return kvm_handle_invalid_op(vcpu);
+
+emulate_as_nop:
+	pr_warn_once("%s instruction emulated as NOP!\n", insn);
+	return kvm_emulate_as_nop(vcpu);
+}
+int kvm_emulate_mwait(struct kvm_vcpu *vcpu)
+{
+	return kvm_emulate_monitor_mwait(vcpu, "MWAIT");
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_mwait);
+
+int kvm_emulate_monitor(struct kvm_vcpu *vcpu)
+{
+	return kvm_emulate_monitor_mwait(vcpu, "MONITOR");
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_monitor);
+
+static inline bool kvm_vcpu_exit_request(struct kvm_vcpu *vcpu)
+{
+	xfer_to_guest_mode_prepare();
+
+	return READ_ONCE(vcpu->mode) == EXITING_GUEST_MODE ||
+	       kvm_request_pending(vcpu) || xfer_to_guest_mode_work_pending();
+}
+
+static fastpath_t __handle_fastpath_wrmsr(struct kvm_vcpu *vcpu, u32 msr, u64 data)
+{
+	if (!kvm_pmu_is_fastpath_emulation_allowed(vcpu))
+		return EXIT_FASTPATH_NONE;
+
+	switch (msr) {
+	case APIC_BASE_MSR + (APIC_ICR >> 4):
+		if (!lapic_in_kernel(vcpu) || !apic_x2apic_mode(vcpu->arch.apic) ||
+		    kvm_x2apic_icr_write_fast(vcpu->arch.apic, data))
+			return EXIT_FASTPATH_NONE;
+		break;
+	case MSR_IA32_TSC_DEADLINE:
+		kvm_set_lapic_tscdeadline_msr(vcpu, data);
+		break;
+	default:
+		return EXIT_FASTPATH_NONE;
+	}
+
+	trace_kvm_msr_write(msr, data);
+
+	if (!kvm_skip_emulated_instruction(vcpu))
+		return EXIT_FASTPATH_EXIT_USERSPACE;
+
+	return EXIT_FASTPATH_REENTER_GUEST;
+}
+
+fastpath_t handle_fastpath_wrmsr(struct kvm_vcpu *vcpu)
+{
+	return __handle_fastpath_wrmsr(vcpu, kvm_ecx_read(vcpu),
+				       kvm_read_edx_eax(vcpu));
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(handle_fastpath_wrmsr);
+
+fastpath_t handle_fastpath_wrmsr_imm(struct kvm_vcpu *vcpu, u32 msr, int reg)
+{
+	return __handle_fastpath_wrmsr(vcpu, msr, kvm_register_read(vcpu, reg));
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(handle_fastpath_wrmsr_imm);
 
 /*
  * Adapt set_msr() to msr_io()'s calling convention
  */
 static int do_get_msr(struct kvm_vcpu *vcpu, unsigned index, u64 *data)
 {
-	struct msr_data msr;
-	int r;
-
-	msr.index = index;
-	msr.host_initiated = true;
-	r = kvm_get_msr(vcpu, &msr);
-	if (r)
-		return r;
-
-	*data = msr.data;
-	return 0;
+	return kvm_get_msr_ignored_check(vcpu, index, data, true);
 }
 
 static int do_set_msr(struct kvm_vcpu *vcpu, unsigned index, u64 *data)
 {
-	struct msr_data msr;
+	u64 val;
 
-	msr.data = *data;
-	msr.index = index;
-	msr.host_initiated = true;
-	return kvm_set_msr(vcpu, &msr);
+	/*
+	 * Reject writes to immutable feature MSRs if the vCPU model is frozen,
+	 * as KVM doesn't support modifying the guest vCPU model on the fly,
+	 * e.g. changing the VMX capabilities MSRs while L2 is active is
+	 * nonsensical.  Allow writes of the same value, e.g. so that userspace
+	 * can blindly stuff all MSRs when emulating RESET.
+	 */
+	if (!kvm_can_set_cpuid_and_feature_msrs(vcpu) &&
+	    kvm_is_immutable_feature_msr(index) &&
+	    (do_get_msr(vcpu, index, &val) || *data != val))
+		return -EINVAL;
+
+	return kvm_set_msr_ignored_check(vcpu, index, *data, true);
 }
 
 #ifdef CONFIG_X86_64
+struct pvclock_clock {
+	int vclock_mode;
+	u64 cycle_last;
+	u64 mask;
+	u32 mult;
+	u32 shift;
+	u64 base_cycles;
+	u64 offset;
+};
+
 struct pvclock_gtod_data {
 	seqcount_t	seq;
 
-	struct { /* extract of a clocksource struct */
-		int vclock_mode;
-		u64	cycle_last;
-		u64	mask;
-		u32	mult;
-		u32	shift;
-	} clock;
+	struct pvclock_clock clock; /* extract of a clocksource struct */
+	struct pvclock_clock raw_clock; /* extract of a clocksource struct */
 
-	u64		boot_ns;
-	u64		nsec_base;
+	ktime_t		offs_boot;
 	u64		wall_time_sec;
 };
 
@@ -1254,44 +2344,53 @@ static struct pvclock_gtod_data pvclock_gtod_data;
 static void update_pvclock_gtod(struct timekeeper *tk)
 {
 	struct pvclock_gtod_data *vdata = &pvclock_gtod_data;
-	u64 boot_ns;
-
-	boot_ns = ktime_to_ns(ktime_add(tk->tkr_mono.base, tk->offs_boot));
 
 	write_seqcount_begin(&vdata->seq);
 
 	/* copy pvclock gtod data */
-	vdata->clock.vclock_mode	= tk->tkr_mono.clock->archdata.vclock_mode;
+	vdata->clock.vclock_mode	= tk->tkr_mono.clock->vdso_clock_mode;
 	vdata->clock.cycle_last		= tk->tkr_mono.cycle_last;
 	vdata->clock.mask		= tk->tkr_mono.mask;
 	vdata->clock.mult		= tk->tkr_mono.mult;
 	vdata->clock.shift		= tk->tkr_mono.shift;
+	vdata->clock.base_cycles	= tk->tkr_mono.xtime_nsec;
+	vdata->clock.offset		= tk->tkr_mono.base;
 
-	vdata->boot_ns			= boot_ns;
-	vdata->nsec_base		= tk->tkr_mono.xtime_nsec;
+	vdata->raw_clock.vclock_mode	= tk->tkr_raw.clock->vdso_clock_mode;
+	vdata->raw_clock.cycle_last	= tk->tkr_raw.cycle_last;
+	vdata->raw_clock.mask		= tk->tkr_raw.mask;
+	vdata->raw_clock.mult		= tk->tkr_raw.mult;
+	vdata->raw_clock.shift		= tk->tkr_raw.shift;
+	vdata->raw_clock.base_cycles	= tk->tkr_raw.xtime_nsec;
+	vdata->raw_clock.offset		= tk->tkr_raw.base;
 
 	vdata->wall_time_sec            = tk->xtime_sec;
 
+	vdata->offs_boot		= tk->offs_boot;
+
 	write_seqcount_end(&vdata->seq);
+}
+
+static s64 get_kvmclock_base_ns(void)
+{
+	/* Count up from boot time, but with the frequency of the raw clock.  */
+	return ktime_to_ns(ktime_add(ktime_get_raw(), pvclock_gtod_data.offs_boot));
+}
+#else
+static s64 get_kvmclock_base_ns(void)
+{
+	/* Master clock not used, so we can just use CLOCK_BOOTTIME.  */
+	return ktime_get_boottime_ns();
 }
 #endif
 
-void kvm_set_pending_timer(struct kvm_vcpu *vcpu)
-{
-	/*
-	 * Note: KVM_REQ_PENDING_TIMER is implicitly checked in
-	 * vcpu_enter_guest.  This function is only called from
-	 * the physical CPU that is running vcpu.
-	 */
-	kvm_make_request(KVM_REQ_PENDING_TIMER, vcpu);
-}
-
-static void kvm_write_wall_clock(struct kvm *kvm, gpa_t wall_clock)
+static void kvm_write_wall_clock(struct kvm *kvm, gpa_t wall_clock, int sec_hi_ofs)
 {
 	int version;
 	int r;
 	struct pvclock_wall_clock wc;
-	struct timespec64 boot;
+	u32 wc_sec_hi;
+	u64 wall_nsec;
 
 	if (!wall_clock)
 		return;
@@ -1308,26 +2407,47 @@ static void kvm_write_wall_clock(struct kvm *kvm, gpa_t wall_clock)
 	if (kvm_write_guest(kvm, wall_clock, &version, sizeof(version)))
 		return;
 
-	/*
-	 * The guest calculates current wall clock time by adding
-	 * system time (updated by kvm_guest_time_update below) to the
-	 * wall clock specified here.  guest system time equals host
-	 * system time for us, thus we must fill in host boot time here.
-	 */
-	getboottime64(&boot);
+	wall_nsec = kvm_get_wall_clock_epoch(kvm);
 
-	if (kvm->arch.kvmclock_offset) {
-		struct timespec64 ts = ns_to_timespec64(kvm->arch.kvmclock_offset);
-		boot = timespec64_sub(boot, ts);
-	}
-	wc.sec = (u32)boot.tv_sec; /* overflow in 2106 guest time */
-	wc.nsec = boot.tv_nsec;
+	wc.nsec = do_div(wall_nsec, NSEC_PER_SEC);
+	wc.sec = (u32)wall_nsec; /* overflow in 2106 guest time */
 	wc.version = version;
 
 	kvm_write_guest(kvm, wall_clock, &wc, sizeof(wc));
 
+	if (sec_hi_ofs) {
+		wc_sec_hi = wall_nsec >> 32;
+		kvm_write_guest(kvm, wall_clock + sec_hi_ofs,
+				&wc_sec_hi, sizeof(wc_sec_hi));
+	}
+
 	version++;
 	kvm_write_guest(kvm, wall_clock, &version, sizeof(version));
+}
+
+static void kvm_write_system_time(struct kvm_vcpu *vcpu, gpa_t system_time,
+				  bool old_msr, bool host_initiated)
+{
+	struct kvm_arch *ka = &vcpu->kvm->arch;
+
+	if (vcpu->vcpu_id == 0 && !host_initiated) {
+		if (ka->boot_vcpu_runs_old_kvmclock != old_msr)
+			kvm_make_request(KVM_REQ_MASTERCLOCK_UPDATE, vcpu);
+
+		ka->boot_vcpu_runs_old_kvmclock = old_msr;
+	}
+
+	vcpu->arch.time = system_time;
+	kvm_make_request(KVM_REQ_GLOBAL_CLOCK_UPDATE, vcpu);
+
+	/* we verify if the enable bit is set... */
+	if (system_time & 1)
+		kvm_gpc_activate(&vcpu->arch.pv_time, system_time & ~1ULL,
+				 sizeof(struct pvclock_vcpu_time_info));
+	else
+		kvm_gpc_deactivate(&vcpu->arch.pv_time);
+
+	return;
 }
 
 static uint32_t div_frac(uint32_t dividend, uint32_t divisor)
@@ -1362,9 +2482,6 @@ static void kvm_get_time_scale(uint64_t scaled_hz, uint64_t base_hz,
 
 	*pshift = shift;
 	*pmultiplier = div_frac(scaled64, tps32);
-
-	pr_debug("%s: base_hz %llu => %llu, shift %d, mul %u\n",
-		 __func__, base_hz, scaled_hz, shift, *pmultiplier);
 }
 
 #ifdef CONFIG_X86_64
@@ -1381,39 +2498,41 @@ static u32 adjust_tsc_khz(u32 khz, s32 ppm)
 	return v;
 }
 
+static void kvm_vcpu_write_tsc_multiplier(struct kvm_vcpu *vcpu, u64 l1_multiplier);
+
 static int set_tsc_khz(struct kvm_vcpu *vcpu, u32 user_tsc_khz, bool scale)
 {
 	u64 ratio;
 
 	/* Guest TSC same frequency as host TSC? */
 	if (!scale) {
-		vcpu->arch.tsc_scaling_ratio = kvm_default_tsc_scaling_ratio;
+		kvm_vcpu_write_tsc_multiplier(vcpu, kvm_caps.default_tsc_scaling_ratio);
 		return 0;
 	}
 
 	/* TSC scaling supported? */
-	if (!kvm_has_tsc_control) {
+	if (!kvm_caps.has_tsc_control) {
 		if (user_tsc_khz > tsc_khz) {
 			vcpu->arch.tsc_catchup = 1;
 			vcpu->arch.tsc_always_catchup = 1;
 			return 0;
 		} else {
-			WARN(1, "user requested TSC rate below hardware speed\n");
+			pr_warn_ratelimited("user requested TSC rate below hardware speed\n");
 			return -1;
 		}
 	}
 
 	/* TSC scaling required  - calculate ratio */
-	ratio = mul_u64_u32_div(1ULL << kvm_tsc_scaling_ratio_frac_bits,
+	ratio = mul_u64_u32_div(1ULL << kvm_caps.tsc_scaling_ratio_frac_bits,
 				user_tsc_khz, tsc_khz);
 
-	if (ratio == 0 || ratio >= kvm_max_tsc_scaling_ratio) {
-		WARN_ONCE(1, "Invalid TSC scaling ratio - virtual-tsc-khz=%u\n",
-			  user_tsc_khz);
+	if (ratio == 0 || ratio >= kvm_caps.max_tsc_scaling_ratio) {
+		pr_warn_ratelimited("Invalid TSC scaling ratio - virtual-tsc-khz=%u\n",
+			            user_tsc_khz);
 		return -1;
 	}
 
-	vcpu->arch.tsc_scaling_ratio = ratio;
+	kvm_vcpu_write_tsc_multiplier(vcpu, ratio);
 	return 0;
 }
 
@@ -1425,7 +2544,7 @@ static int kvm_set_tsc_khz(struct kvm_vcpu *vcpu, u32 user_tsc_khz)
 	/* tsc_khz can be zero if TSC calibration fails */
 	if (user_tsc_khz == 0) {
 		/* set tsc_scaling_ratio to a safe value */
-		vcpu->arch.tsc_scaling_ratio = kvm_default_tsc_scaling_ratio;
+		kvm_vcpu_write_tsc_multiplier(vcpu, kvm_caps.default_tsc_scaling_ratio);
 		return -1;
 	}
 
@@ -1444,7 +2563,8 @@ static int kvm_set_tsc_khz(struct kvm_vcpu *vcpu, u32 user_tsc_khz)
 	thresh_lo = adjust_tsc_khz(tsc_khz, -tsc_tolerance_ppm);
 	thresh_hi = adjust_tsc_khz(tsc_khz, tsc_tolerance_ppm);
 	if (user_tsc_khz < thresh_lo || user_tsc_khz > thresh_hi) {
-		pr_debug("kvm: requested TSC rate %u falls outside tolerance [%u,%u]\n", user_tsc_khz, thresh_lo, thresh_hi);
+		pr_debug("requested TSC rate %u falls outside tolerance [%u,%u]\n",
+			 user_tsc_khz, thresh_lo, thresh_hi);
 		use_scaling = 1;
 	}
 	return set_tsc_khz(vcpu, user_tsc_khz, use_scaling);
@@ -1459,43 +2579,42 @@ static u64 compute_guest_tsc(struct kvm_vcpu *vcpu, s64 kernel_ns)
 	return tsc;
 }
 
-static inline int gtod_is_based_on_tsc(int mode)
+#ifdef CONFIG_X86_64
+static inline bool gtod_is_based_on_tsc(int mode)
 {
-	return mode == VCLOCK_TSC || mode == VCLOCK_HVCLOCK;
+	return mode == VDSO_CLOCKMODE_TSC || mode == VDSO_CLOCKMODE_HVCLOCK;
 }
+#endif
 
-static void kvm_track_tsc_matching(struct kvm_vcpu *vcpu)
+static void kvm_track_tsc_matching(struct kvm_vcpu *vcpu, bool new_generation)
 {
 #ifdef CONFIG_X86_64
-	bool vcpus_matched;
 	struct kvm_arch *ka = &vcpu->kvm->arch;
 	struct pvclock_gtod_data *gtod = &pvclock_gtod_data;
 
-	vcpus_matched = (ka->nr_vcpus_matched_tsc + 1 ==
-			 atomic_read(&vcpu->kvm->online_vcpus));
+	/*
+	 * To use the masterclock, the host clocksource must be based on TSC
+	 * and all vCPUs must have matching TSCs.  Note, the count for matching
+	 * vCPUs doesn't include the reference vCPU, hence "+1".
+	 */
+	bool use_master_clock = (ka->nr_vcpus_matched_tsc + 1 ==
+				 atomic_read(&vcpu->kvm->online_vcpus)) &&
+				gtod_is_based_on_tsc(gtod->clock.vclock_mode);
 
 	/*
-	 * Once the masterclock is enabled, always perform request in
-	 * order to update it.
-	 *
-	 * In order to enable masterclock, the host clocksource must be TSC
-	 * and the vcpus need to have matched TSCs.  When that happens,
-	 * perform request to enable masterclock.
+	 * Request a masterclock update if the masterclock needs to be toggled
+	 * on/off, or when starting a new generation and the masterclock is
+	 * enabled (compute_guest_tsc() requires the masterclock snapshot to be
+	 * taken _after_ the new generation is created).
 	 */
-	if (ka->use_master_clock ||
-	    (gtod_is_based_on_tsc(gtod->clock.vclock_mode) && vcpus_matched))
+	if ((ka->use_master_clock && new_generation) ||
+	    (ka->use_master_clock != use_master_clock))
 		kvm_make_request(KVM_REQ_MASTERCLOCK_UPDATE, vcpu);
 
 	trace_kvm_track_tsc(vcpu->vcpu_id, ka->nr_vcpus_matched_tsc,
 			    atomic_read(&vcpu->kvm->online_vcpus),
 		            ka->use_master_clock, gtod->clock.vclock_mode);
 #endif
-}
-
-static void update_ia32_tsc_adjust_msr(struct kvm_vcpu *vcpu, s64 offset)
-{
-	u64 curr_offset = kvm_x86_ops->read_l1_tsc_offset(vcpu);
-	vcpu->arch.ia32_tsc_adjust_msr += offset - curr_offset;
 }
 
 /*
@@ -1506,46 +2625,105 @@ static void update_ia32_tsc_adjust_msr(struct kvm_vcpu *vcpu, s64 offset)
  * (frac) represent the fractional part, ie. ratio represents a fixed
  * point number (mult + frac * 2^(-N)).
  *
- * N equals to kvm_tsc_scaling_ratio_frac_bits.
+ * N equals to kvm_caps.tsc_scaling_ratio_frac_bits.
  */
 static inline u64 __scale_tsc(u64 ratio, u64 tsc)
 {
-	return mul_u64_u64_shr(tsc, ratio, kvm_tsc_scaling_ratio_frac_bits);
+	return mul_u64_u64_shr(tsc, ratio, kvm_caps.tsc_scaling_ratio_frac_bits);
 }
 
-u64 kvm_scale_tsc(struct kvm_vcpu *vcpu, u64 tsc)
+u64 kvm_scale_tsc(u64 tsc, u64 ratio)
 {
 	u64 _tsc = tsc;
-	u64 ratio = vcpu->arch.tsc_scaling_ratio;
 
-	if (ratio != kvm_default_tsc_scaling_ratio)
+	if (ratio != kvm_caps.default_tsc_scaling_ratio)
 		_tsc = __scale_tsc(ratio, tsc);
 
 	return _tsc;
 }
-EXPORT_SYMBOL_GPL(kvm_scale_tsc);
 
-static u64 kvm_compute_tsc_offset(struct kvm_vcpu *vcpu, u64 target_tsc)
+static u64 kvm_compute_l1_tsc_offset(struct kvm_vcpu *vcpu, u64 target_tsc)
 {
 	u64 tsc;
 
-	tsc = kvm_scale_tsc(vcpu, rdtsc());
+	tsc = kvm_scale_tsc(rdtsc(), vcpu->arch.l1_tsc_scaling_ratio);
 
 	return target_tsc - tsc;
 }
 
 u64 kvm_read_l1_tsc(struct kvm_vcpu *vcpu, u64 host_tsc)
 {
-	u64 tsc_offset = kvm_x86_ops->read_l1_tsc_offset(vcpu);
-
-	return tsc_offset + kvm_scale_tsc(vcpu, host_tsc);
+	return vcpu->arch.l1_tsc_offset +
+		kvm_scale_tsc(host_tsc, vcpu->arch.l1_tsc_scaling_ratio);
 }
-EXPORT_SYMBOL_GPL(kvm_read_l1_tsc);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_read_l1_tsc);
 
-static void kvm_vcpu_write_tsc_offset(struct kvm_vcpu *vcpu, u64 offset)
+u64 kvm_calc_nested_tsc_offset(u64 l1_offset, u64 l2_offset, u64 l2_multiplier)
 {
-	kvm_x86_ops->write_tsc_offset(vcpu, offset);
-	vcpu->arch.tsc_offset = offset;
+	u64 nested_offset;
+
+	if (l2_multiplier == kvm_caps.default_tsc_scaling_ratio)
+		nested_offset = l1_offset;
+	else
+		nested_offset = mul_s64_u64_shr((s64) l1_offset, l2_multiplier,
+						kvm_caps.tsc_scaling_ratio_frac_bits);
+
+	nested_offset += l2_offset;
+	return nested_offset;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_calc_nested_tsc_offset);
+
+u64 kvm_calc_nested_tsc_multiplier(u64 l1_multiplier, u64 l2_multiplier)
+{
+	if (l2_multiplier != kvm_caps.default_tsc_scaling_ratio)
+		return mul_u64_u64_shr(l1_multiplier, l2_multiplier,
+				       kvm_caps.tsc_scaling_ratio_frac_bits);
+
+	return l1_multiplier;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_calc_nested_tsc_multiplier);
+
+static void kvm_vcpu_write_tsc_offset(struct kvm_vcpu *vcpu, u64 l1_offset)
+{
+	if (vcpu->arch.guest_tsc_protected)
+		return;
+
+	trace_kvm_write_tsc_offset(vcpu->vcpu_id,
+				   vcpu->arch.l1_tsc_offset,
+				   l1_offset);
+
+	vcpu->arch.l1_tsc_offset = l1_offset;
+
+	/*
+	 * If we are here because L1 chose not to trap WRMSR to TSC then
+	 * according to the spec this should set L1's TSC (as opposed to
+	 * setting L1's offset for L2).
+	 */
+	if (is_guest_mode(vcpu))
+		vcpu->arch.tsc_offset = kvm_calc_nested_tsc_offset(
+			l1_offset,
+			kvm_x86_call(get_l2_tsc_offset)(vcpu),
+			kvm_x86_call(get_l2_tsc_multiplier)(vcpu));
+	else
+		vcpu->arch.tsc_offset = l1_offset;
+
+	kvm_x86_call(write_tsc_offset)(vcpu);
+}
+
+static void kvm_vcpu_write_tsc_multiplier(struct kvm_vcpu *vcpu, u64 l1_multiplier)
+{
+	vcpu->arch.l1_tsc_scaling_ratio = l1_multiplier;
+
+	/* Userspace is changing the multiplier while L2 is active */
+	if (is_guest_mode(vcpu))
+		vcpu->arch.tsc_scaling_ratio = kvm_calc_nested_tsc_multiplier(
+			l1_multiplier,
+			kvm_x86_call(get_l2_tsc_multiplier)(vcpu));
+	else
+		vcpu->arch.tsc_scaling_ratio = l1_multiplier;
+
+	if (kvm_caps.has_tsc_control)
+		kvm_x86_call(write_tsc_multiplier)(vcpu);
 }
 
 static inline bool kvm_check_tsc_unstable(void)
@@ -1555,69 +2733,44 @@ static inline bool kvm_check_tsc_unstable(void)
 	 * TSC is marked unstable when we're running on Hyper-V,
 	 * 'TSC page' clocksource is good.
 	 */
-	if (pvclock_gtod_data.clock.vclock_mode == VCLOCK_HVCLOCK)
+	if (pvclock_gtod_data.clock.vclock_mode == VDSO_CLOCKMODE_HVCLOCK)
 		return false;
 #endif
 	return check_tsc_unstable();
 }
 
-void kvm_write_tsc(struct kvm_vcpu *vcpu, struct msr_data *msr)
+/*
+ * Infers attempts to synchronize the guest's tsc from host writes. Sets the
+ * offset for the vcpu and tracks the TSC matching generation that the vcpu
+ * participates in.
+ */
+static void __kvm_synchronize_tsc(struct kvm_vcpu *vcpu, u64 offset, u64 tsc,
+				  u64 ns, bool matched, bool user_set_tsc)
 {
 	struct kvm *kvm = vcpu->kvm;
-	u64 offset, ns, elapsed;
-	unsigned long flags;
-	bool matched;
-	bool already_matched;
-	u64 data = msr->data;
-	bool synchronizing = false;
 
-	raw_spin_lock_irqsave(&kvm->arch.tsc_write_lock, flags);
-	offset = kvm_compute_tsc_offset(vcpu, data);
-	ns = ktime_get_boot_ns();
-	elapsed = ns - kvm->arch.last_tsc_nsec;
+	lockdep_assert_held(&kvm->arch.tsc_write_lock);
 
-	if (vcpu->arch.virtual_tsc_khz) {
-		if (data == 0 && msr->host_initiated) {
-			/*
-			 * detection of vcpu initialization -- need to sync
-			 * with other vCPUs. This particularly helps to keep
-			 * kvm_clock stable after CPU hotplug
-			 */
-			synchronizing = true;
-		} else {
-			u64 tsc_exp = kvm->arch.last_tsc_write +
-						nsec_to_cycles(vcpu, elapsed);
-			u64 tsc_hz = vcpu->arch.virtual_tsc_khz * 1000LL;
-			/*
-			 * Special case: TSC write with a small delta (1 second)
-			 * of virtual cycle time against real time is
-			 * interpreted as an attempt to synchronize the CPU.
-			 */
-			synchronizing = data < tsc_exp + tsc_hz &&
-					data + tsc_hz > tsc_exp;
-		}
-	}
+	if (vcpu->arch.guest_tsc_protected)
+		return;
+
+	if (user_set_tsc)
+		vcpu->kvm->arch.user_set_tsc = true;
 
 	/*
-	 * For a reliable TSC, we can match TSC offsets, and for an unstable
-	 * TSC, we add elapsed time in this computation.  We could let the
-	 * compensation code attempt to catch up if we fall behind, but
-	 * it's better to try to match offsets from the beginning.
-         */
-	if (synchronizing &&
-	    vcpu->arch.virtual_tsc_khz == kvm->arch.last_tsc_khz) {
-		if (!kvm_check_tsc_unstable()) {
-			offset = kvm->arch.cur_tsc_offset;
-			pr_debug("kvm: matched tsc offset for %llu\n", data);
-		} else {
-			u64 delta = nsec_to_cycles(vcpu, elapsed);
-			data += delta;
-			offset = kvm_compute_tsc_offset(vcpu, data);
-			pr_debug("kvm: adjusted tsc offset by %llu\n", delta);
-		}
-		matched = true;
-		already_matched = (vcpu->arch.this_tsc_generation == kvm->arch.cur_tsc_generation);
-	} else {
+	 * We also track th most recent recorded KHZ, write and time to
+	 * allow the matching interval to be extended at each write.
+	 */
+	kvm->arch.last_tsc_nsec = ns;
+	kvm->arch.last_tsc_write = tsc;
+	kvm->arch.last_tsc_khz = vcpu->arch.virtual_tsc_khz;
+	kvm->arch.last_tsc_offset = offset;
+
+	vcpu->arch.last_guest_tsc = tsc;
+
+	kvm_vcpu_write_tsc_offset(vcpu, offset);
+
+	if (!matched) {
 		/*
 		 * We split periods of matched TSC writes into generations.
 		 * For each generation, we track the original measured
@@ -1629,58 +2782,102 @@ void kvm_write_tsc(struct kvm_vcpu *vcpu, struct msr_data *msr)
 		 */
 		kvm->arch.cur_tsc_generation++;
 		kvm->arch.cur_tsc_nsec = ns;
-		kvm->arch.cur_tsc_write = data;
+		kvm->arch.cur_tsc_write = tsc;
 		kvm->arch.cur_tsc_offset = offset;
-		matched = false;
-		pr_debug("kvm: new tsc generation %llu, clock %llu\n",
-			 kvm->arch.cur_tsc_generation, data);
+		kvm->arch.nr_vcpus_matched_tsc = 0;
+	} else if (vcpu->arch.this_tsc_generation != kvm->arch.cur_tsc_generation) {
+		kvm->arch.nr_vcpus_matched_tsc++;
 	}
-
-	/*
-	 * We also track th most recent recorded KHZ, write and time to
-	 * allow the matching interval to be extended at each write.
-	 */
-	kvm->arch.last_tsc_nsec = ns;
-	kvm->arch.last_tsc_write = data;
-	kvm->arch.last_tsc_khz = vcpu->arch.virtual_tsc_khz;
-
-	vcpu->arch.last_guest_tsc = data;
 
 	/* Keep track of which generation this VCPU has synchronized to */
 	vcpu->arch.this_tsc_generation = kvm->arch.cur_tsc_generation;
 	vcpu->arch.this_tsc_nsec = kvm->arch.cur_tsc_nsec;
 	vcpu->arch.this_tsc_write = kvm->arch.cur_tsc_write;
 
-	if (!msr->host_initiated && guest_cpuid_has(vcpu, X86_FEATURE_TSC_ADJUST))
-		update_ia32_tsc_adjust_msr(vcpu, offset);
-
-	kvm_vcpu_write_tsc_offset(vcpu, offset);
-	raw_spin_unlock_irqrestore(&kvm->arch.tsc_write_lock, flags);
-
-	spin_lock(&kvm->arch.pvclock_gtod_sync_lock);
-	if (!matched) {
-		kvm->arch.nr_vcpus_matched_tsc = 0;
-	} else if (!already_matched) {
-		kvm->arch.nr_vcpus_matched_tsc++;
-	}
-
-	kvm_track_tsc_matching(vcpu);
-	spin_unlock(&kvm->arch.pvclock_gtod_sync_lock);
+	kvm_track_tsc_matching(vcpu, !matched);
 }
 
-EXPORT_SYMBOL_GPL(kvm_write_tsc);
+static void kvm_synchronize_tsc(struct kvm_vcpu *vcpu, u64 *user_value)
+{
+	u64 data = user_value ? *user_value : 0;
+	struct kvm *kvm = vcpu->kvm;
+	u64 offset, ns, elapsed;
+	unsigned long flags;
+	bool matched = false;
+	bool synchronizing = false;
+
+	raw_spin_lock_irqsave(&kvm->arch.tsc_write_lock, flags);
+	offset = kvm_compute_l1_tsc_offset(vcpu, data);
+	ns = get_kvmclock_base_ns();
+	elapsed = ns - kvm->arch.last_tsc_nsec;
+
+	if (vcpu->arch.virtual_tsc_khz) {
+		if (data == 0) {
+			/*
+			 * Force synchronization when creating a vCPU, or when
+			 * userspace explicitly writes a zero value.
+			 */
+			synchronizing = true;
+		} else if (kvm->arch.user_set_tsc) {
+			u64 tsc_exp = kvm->arch.last_tsc_write +
+						nsec_to_cycles(vcpu, elapsed);
+			u64 tsc_hz = vcpu->arch.virtual_tsc_khz * 1000LL;
+			/*
+			 * Here lies UAPI baggage: when a user-initiated TSC write has
+			 * a small delta (1 second) of virtual cycle time against the
+			 * previously set vCPU, we assume that they were intended to be
+			 * in sync and the delta was only due to the racy nature of the
+			 * legacy API.
+			 *
+			 * This trick falls down when restoring a guest which genuinely
+			 * has been running for less time than the 1 second of imprecision
+			 * which we allow for in the legacy API. In this case, the first
+			 * value written by userspace (on any vCPU) should not be subject
+			 * to this 'correction' to make it sync up with values that only
+			 * come from the kernel's default vCPU creation. Make the 1-second
+			 * slop hack only trigger if the user_set_tsc flag is already set.
+			 */
+			synchronizing = data < tsc_exp + tsc_hz &&
+					data + tsc_hz > tsc_exp;
+		}
+	}
+
+
+	/*
+	 * For a reliable TSC, we can match TSC offsets, and for an unstable
+	 * TSC, we add elapsed time in this computation.  We could let the
+	 * compensation code attempt to catch up if we fall behind, but
+	 * it's better to try to match offsets from the beginning.
+         */
+	if (synchronizing &&
+	    vcpu->arch.virtual_tsc_khz == kvm->arch.last_tsc_khz) {
+		if (!kvm_check_tsc_unstable()) {
+			offset = kvm->arch.cur_tsc_offset;
+		} else {
+			u64 delta = nsec_to_cycles(vcpu, elapsed);
+			data += delta;
+			offset = kvm_compute_l1_tsc_offset(vcpu, data);
+		}
+		matched = true;
+	}
+
+	__kvm_synchronize_tsc(vcpu, offset, data, ns, matched, !!user_value);
+	raw_spin_unlock_irqrestore(&kvm->arch.tsc_write_lock, flags);
+}
 
 static inline void adjust_tsc_offset_guest(struct kvm_vcpu *vcpu,
 					   s64 adjustment)
 {
-	kvm_vcpu_write_tsc_offset(vcpu, vcpu->arch.tsc_offset + adjustment);
+	u64 tsc_offset = vcpu->arch.l1_tsc_offset;
+	kvm_vcpu_write_tsc_offset(vcpu, tsc_offset + adjustment);
 }
 
 static inline void adjust_tsc_offset_host(struct kvm_vcpu *vcpu, s64 adjustment)
 {
-	if (vcpu->arch.tsc_scaling_ratio != kvm_default_tsc_scaling_ratio)
+	if (vcpu->arch.l1_tsc_scaling_ratio != kvm_caps.default_tsc_scaling_ratio)
 		WARN_ON(adjustment < 0);
-	adjustment = kvm_scale_tsc(vcpu, (u64) adjustment);
+	adjustment = kvm_scale_tsc((u64) adjustment,
+				   vcpu->arch.l1_tsc_scaling_ratio);
 	adjust_tsc_offset_guest(vcpu, adjustment);
 }
 
@@ -1706,43 +2903,46 @@ static u64 read_tsc(void)
 	return last;
 }
 
-static inline u64 vgettsc(u64 *tsc_timestamp, int *mode)
+static inline u64 vgettsc(struct pvclock_clock *clock, u64 *tsc_timestamp,
+			  int *mode)
 {
-	long v;
-	struct pvclock_gtod_data *gtod = &pvclock_gtod_data;
 	u64 tsc_pg_val;
+	long v;
 
-	switch (gtod->clock.vclock_mode) {
-	case VCLOCK_HVCLOCK:
-		tsc_pg_val = hv_read_tsc_page_tsc(hv_get_tsc_page(),
-						  tsc_timestamp);
-		if (tsc_pg_val != U64_MAX) {
+	switch (clock->vclock_mode) {
+	case VDSO_CLOCKMODE_HVCLOCK:
+		if (hv_read_tsc_page_tsc(hv_get_tsc_page(),
+					 tsc_timestamp, &tsc_pg_val)) {
 			/* TSC page valid */
-			*mode = VCLOCK_HVCLOCK;
-			v = (tsc_pg_val - gtod->clock.cycle_last) &
-				gtod->clock.mask;
+			*mode = VDSO_CLOCKMODE_HVCLOCK;
+			v = (tsc_pg_val - clock->cycle_last) &
+				clock->mask;
 		} else {
 			/* TSC page invalid */
-			*mode = VCLOCK_NONE;
+			*mode = VDSO_CLOCKMODE_NONE;
 		}
 		break;
-	case VCLOCK_TSC:
-		*mode = VCLOCK_TSC;
+	case VDSO_CLOCKMODE_TSC:
+		*mode = VDSO_CLOCKMODE_TSC;
 		*tsc_timestamp = read_tsc();
-		v = (*tsc_timestamp - gtod->clock.cycle_last) &
-			gtod->clock.mask;
+		v = (*tsc_timestamp - clock->cycle_last) &
+			clock->mask;
 		break;
 	default:
-		*mode = VCLOCK_NONE;
+		*mode = VDSO_CLOCKMODE_NONE;
 	}
 
-	if (*mode == VCLOCK_NONE)
+	if (*mode == VDSO_CLOCKMODE_NONE)
 		*tsc_timestamp = v = 0;
 
-	return v * gtod->clock.mult;
+	return v * clock->mult;
 }
 
-static int do_monotonic_boot(s64 *t, u64 *tsc_timestamp)
+/*
+ * As with get_kvmclock_base_ns(), this counts from boot time, at the
+ * frequency of CLOCK_MONOTONIC_RAW (hence adding gtos->offs_boot).
+ */
+static int do_kvmclock_base(s64 *t, u64 *tsc_timestamp)
 {
 	struct pvclock_gtod_data *gtod = &pvclock_gtod_data;
 	unsigned long seq;
@@ -1751,17 +2951,40 @@ static int do_monotonic_boot(s64 *t, u64 *tsc_timestamp)
 
 	do {
 		seq = read_seqcount_begin(&gtod->seq);
-		ns = gtod->nsec_base;
-		ns += vgettsc(tsc_timestamp, &mode);
-		ns >>= gtod->clock.shift;
-		ns += gtod->boot_ns;
+		ns = gtod->raw_clock.base_cycles;
+		ns += vgettsc(&gtod->raw_clock, tsc_timestamp, &mode);
+		ns >>= gtod->raw_clock.shift;
+		ns += ktime_to_ns(ktime_add(gtod->raw_clock.offset, gtod->offs_boot));
 	} while (unlikely(read_seqcount_retry(&gtod->seq, seq)));
 	*t = ns;
 
 	return mode;
 }
 
-static int do_realtime(struct timespec *ts, u64 *tsc_timestamp)
+/*
+ * This calculates CLOCK_MONOTONIC at the time of the TSC snapshot, with
+ * no boot time offset.
+ */
+static int do_monotonic(s64 *t, u64 *tsc_timestamp)
+{
+	struct pvclock_gtod_data *gtod = &pvclock_gtod_data;
+	unsigned long seq;
+	int mode;
+	u64 ns;
+
+	do {
+		seq = read_seqcount_begin(&gtod->seq);
+		ns = gtod->clock.base_cycles;
+		ns += vgettsc(&gtod->clock, tsc_timestamp, &mode);
+		ns >>= gtod->clock.shift;
+		ns += ktime_to_ns(gtod->clock.offset);
+	} while (unlikely(read_seqcount_retry(&gtod->seq, seq)));
+	*t = ns;
+
+	return mode;
+}
+
+static int do_realtime(struct timespec64 *ts, u64 *tsc_timestamp)
 {
 	struct pvclock_gtod_data *gtod = &pvclock_gtod_data;
 	unsigned long seq;
@@ -1771,8 +2994,8 @@ static int do_realtime(struct timespec *ts, u64 *tsc_timestamp)
 	do {
 		seq = read_seqcount_begin(&gtod->seq);
 		ts->tv_sec = gtod->wall_time_sec;
-		ns = gtod->nsec_base;
-		ns += vgettsc(tsc_timestamp, &mode);
+		ns = gtod->clock.base_cycles;
+		ns += vgettsc(&gtod->clock, tsc_timestamp, &mode);
 		ns >>= gtod->clock.shift;
 	} while (unlikely(read_seqcount_retry(&gtod->seq, seq)));
 
@@ -1782,19 +3005,43 @@ static int do_realtime(struct timespec *ts, u64 *tsc_timestamp)
 	return mode;
 }
 
-/* returns true if host is using TSC based clocksource */
+/*
+ * Calculates the kvmclock_base_ns (CLOCK_MONOTONIC_RAW + boot time) and
+ * reports the TSC value from which it do so. Returns true if host is
+ * using TSC based clocksource.
+ */
 static bool kvm_get_time_and_clockread(s64 *kernel_ns, u64 *tsc_timestamp)
 {
 	/* checked again under seqlock below */
 	if (!gtod_is_based_on_tsc(pvclock_gtod_data.clock.vclock_mode))
 		return false;
 
-	return gtod_is_based_on_tsc(do_monotonic_boot(kernel_ns,
-						      tsc_timestamp));
+	return gtod_is_based_on_tsc(do_kvmclock_base(kernel_ns,
+						     tsc_timestamp));
 }
 
-/* returns true if host is using TSC based clocksource */
-static bool kvm_get_walltime_and_clockread(struct timespec *ts,
+/*
+ * Calculates CLOCK_MONOTONIC and reports the TSC value from which it did
+ * so. Returns true if host is using TSC based clocksource.
+ */
+bool kvm_get_monotonic_and_clockread(s64 *kernel_ns, u64 *tsc_timestamp)
+{
+	/* checked again under seqlock below */
+	if (!gtod_is_based_on_tsc(pvclock_gtod_data.clock.vclock_mode))
+		return false;
+
+	return gtod_is_based_on_tsc(do_monotonic(kernel_ns,
+						 tsc_timestamp));
+}
+
+/*
+ * Calculates CLOCK_REALTIME and reports the TSC value from which it did
+ * so. Returns true if host is using TSC based clocksource.
+ *
+ * DO NOT USE this for anything related to migration. You want CLOCK_TAI
+ * for that.
+ */
+static bool kvm_get_walltime_and_clockread(struct timespec64 *ts,
 					   u64 *tsc_timestamp)
 {
 	/* checked again under seqlock below */
@@ -1853,6 +3100,7 @@ static void pvclock_update_vm_gtod_copy(struct kvm *kvm)
 	int vclock_mode;
 	bool host_tsc_clocksource, vcpus_matched;
 
+	lockdep_assert_held(&kvm->arch.tsc_write_lock);
 	vcpus_matched = (ka->nr_vcpus_matched_tsc + 1 ==
 			atomic_read(&kvm->online_vcpus));
 
@@ -1877,131 +3125,177 @@ static void pvclock_update_vm_gtod_copy(struct kvm *kvm)
 #endif
 }
 
-void kvm_make_mclock_inprogress_request(struct kvm *kvm)
+static void kvm_make_mclock_inprogress_request(struct kvm *kvm)
 {
 	kvm_make_all_cpus_request(kvm, KVM_REQ_MCLOCK_INPROGRESS);
 }
 
-static void kvm_gen_update_masterclock(struct kvm *kvm)
+static void __kvm_start_pvclock_update(struct kvm *kvm)
 {
-#ifdef CONFIG_X86_64
-	int i;
-	struct kvm_vcpu *vcpu;
-	struct kvm_arch *ka = &kvm->arch;
+	raw_spin_lock_irq(&kvm->arch.tsc_write_lock);
+	write_seqcount_begin(&kvm->arch.pvclock_sc);
+}
 
-	spin_lock(&ka->pvclock_gtod_sync_lock);
+static void kvm_start_pvclock_update(struct kvm *kvm)
+{
 	kvm_make_mclock_inprogress_request(kvm);
-	/* no guest entries from this point */
-	pvclock_update_vm_gtod_copy(kvm);
 
+	/* no guest entries from this point */
+	__kvm_start_pvclock_update(kvm);
+}
+
+static void kvm_end_pvclock_update(struct kvm *kvm)
+{
+	struct kvm_arch *ka = &kvm->arch;
+	struct kvm_vcpu *vcpu;
+	unsigned long i;
+
+	write_seqcount_end(&ka->pvclock_sc);
+	raw_spin_unlock_irq(&ka->tsc_write_lock);
 	kvm_for_each_vcpu(i, vcpu, kvm)
 		kvm_make_request(KVM_REQ_CLOCK_UPDATE, vcpu);
 
 	/* guest entries allowed */
 	kvm_for_each_vcpu(i, vcpu, kvm)
 		kvm_clear_request(KVM_REQ_MCLOCK_INPROGRESS, vcpu);
-
-	spin_unlock(&ka->pvclock_gtod_sync_lock);
-#endif
 }
 
-u64 get_kvmclock_ns(struct kvm *kvm)
+static void kvm_update_masterclock(struct kvm *kvm)
+{
+	kvm_hv_request_tsc_page_update(kvm);
+	kvm_start_pvclock_update(kvm);
+	pvclock_update_vm_gtod_copy(kvm);
+	kvm_end_pvclock_update(kvm);
+}
+
+/*
+ * Use the kernel's tsc_khz directly if the TSC is constant, otherwise use KVM's
+ * per-CPU value (which may be zero if a CPU is going offline).  Note, tsc_khz
+ * can change during boot even if the TSC is constant, as it's possible for KVM
+ * to be loaded before TSC calibration completes.  Ideally, KVM would get a
+ * notification when calibration completes, but practically speaking calibration
+ * will complete before userspace is alive enough to create VMs.
+ */
+static unsigned long get_cpu_tsc_khz(void)
+{
+	if (static_cpu_has(X86_FEATURE_CONSTANT_TSC))
+		return tsc_khz;
+	else
+		return __this_cpu_read(cpu_tsc_khz);
+}
+
+/* Called within read_seqcount_begin/retry for kvm->pvclock_sc.  */
+static void __get_kvmclock(struct kvm *kvm, struct kvm_clock_data *data)
 {
 	struct kvm_arch *ka = &kvm->arch;
 	struct pvclock_vcpu_time_info hv_clock;
-	u64 ret;
-
-	spin_lock(&ka->pvclock_gtod_sync_lock);
-	if (!ka->use_master_clock) {
-		spin_unlock(&ka->pvclock_gtod_sync_lock);
-		return ktime_get_boot_ns() + ka->kvmclock_offset;
-	}
-
-	hv_clock.tsc_timestamp = ka->master_cycle_now;
-	hv_clock.system_time = ka->master_kernel_ns + ka->kvmclock_offset;
-	spin_unlock(&ka->pvclock_gtod_sync_lock);
 
 	/* both __this_cpu_read() and rdtsc() should be on the same cpu */
 	get_cpu();
 
-	if (__this_cpu_read(cpu_tsc_khz)) {
-		kvm_get_time_scale(NSEC_PER_SEC, __this_cpu_read(cpu_tsc_khz) * 1000LL,
+	data->flags = 0;
+	if (ka->use_master_clock &&
+	    (static_cpu_has(X86_FEATURE_CONSTANT_TSC) || __this_cpu_read(cpu_tsc_khz))) {
+#ifdef CONFIG_X86_64
+		struct timespec64 ts;
+
+		if (kvm_get_walltime_and_clockread(&ts, &data->host_tsc)) {
+			data->realtime = ts.tv_nsec + NSEC_PER_SEC * ts.tv_sec;
+			data->flags |= KVM_CLOCK_REALTIME | KVM_CLOCK_HOST_TSC;
+		} else
+#endif
+		data->host_tsc = rdtsc();
+
+		data->flags |= KVM_CLOCK_TSC_STABLE;
+		hv_clock.tsc_timestamp = ka->master_cycle_now;
+		hv_clock.system_time = ka->master_kernel_ns + ka->kvmclock_offset;
+		kvm_get_time_scale(NSEC_PER_SEC, get_cpu_tsc_khz() * 1000LL,
 				   &hv_clock.tsc_shift,
 				   &hv_clock.tsc_to_system_mul);
-		ret = __pvclock_read_cycles(&hv_clock, rdtsc());
-	} else
-		ret = ktime_get_boot_ns() + ka->kvmclock_offset;
+		data->clock = __pvclock_read_cycles(&hv_clock, data->host_tsc);
+	} else {
+		data->clock = get_kvmclock_base_ns() + ka->kvmclock_offset;
+	}
 
 	put_cpu();
-
-	return ret;
 }
 
-static void kvm_setup_pvclock_page(struct kvm_vcpu *v)
+static void get_kvmclock(struct kvm *kvm, struct kvm_clock_data *data)
 {
-	struct kvm_vcpu_arch *vcpu = &v->arch;
-	struct pvclock_vcpu_time_info guest_hv_clock;
+	struct kvm_arch *ka = &kvm->arch;
+	unsigned seq;
 
-	if (unlikely(kvm_read_guest_cached(v->kvm, &vcpu->pv_time,
-		&guest_hv_clock, sizeof(guest_hv_clock))))
-		return;
+	do {
+		seq = read_seqcount_begin(&ka->pvclock_sc);
+		__get_kvmclock(kvm, data);
+	} while (read_seqcount_retry(&ka->pvclock_sc, seq));
+}
 
-	/* This VCPU is paused, but it's legal for a guest to read another
+u64 get_kvmclock_ns(struct kvm *kvm)
+{
+	struct kvm_clock_data data;
+
+	get_kvmclock(kvm, &data);
+	return data.clock;
+}
+
+static void kvm_setup_guest_pvclock(struct pvclock_vcpu_time_info *ref_hv_clock,
+				    struct kvm_vcpu *vcpu,
+				    struct gfn_to_pfn_cache *gpc,
+				    unsigned int offset)
+{
+	struct pvclock_vcpu_time_info *guest_hv_clock;
+	struct pvclock_vcpu_time_info hv_clock;
+	unsigned long flags;
+
+	memcpy(&hv_clock, ref_hv_clock, sizeof(hv_clock));
+
+	read_lock_irqsave(&gpc->lock, flags);
+	while (!kvm_gpc_check(gpc, offset + sizeof(*guest_hv_clock))) {
+		read_unlock_irqrestore(&gpc->lock, flags);
+
+		if (kvm_gpc_refresh(gpc, offset + sizeof(*guest_hv_clock)))
+			return;
+
+		read_lock_irqsave(&gpc->lock, flags);
+	}
+
+	guest_hv_clock = (void *)(gpc->khva + offset);
+
+	/*
+	 * This VCPU is paused, but it's legal for a guest to read another
 	 * VCPU's kvmclock, so we really have to follow the specification where
 	 * it says that version is odd if data is being modified, and even after
 	 * it is consistent.
-	 *
-	 * Version field updates must be kept separate.  This is because
-	 * kvm_write_guest_cached might use a "rep movs" instruction, and
-	 * writes within a string instruction are weakly ordered.  So there
-	 * are three writes overall.
-	 *
-	 * As a small optimization, only write the version field in the first
-	 * and third write.  The vcpu->pv_time cache is still valid, because the
-	 * version field is the first in the struct.
 	 */
-	BUILD_BUG_ON(offsetof(struct pvclock_vcpu_time_info, version) != 0);
 
-	if (guest_hv_clock.version & 1)
-		++guest_hv_clock.version;  /* first time write, random junk */
-
-	vcpu->hv_clock.version = guest_hv_clock.version + 1;
-	kvm_write_guest_cached(v->kvm, &vcpu->pv_time,
-				&vcpu->hv_clock,
-				sizeof(vcpu->hv_clock.version));
-
+	guest_hv_clock->version = hv_clock.version = (guest_hv_clock->version + 1) | 1;
 	smp_wmb();
 
 	/* retain PVCLOCK_GUEST_STOPPED if set in guest copy */
-	vcpu->hv_clock.flags |= (guest_hv_clock.flags & PVCLOCK_GUEST_STOPPED);
+	hv_clock.flags |= (guest_hv_clock->flags & PVCLOCK_GUEST_STOPPED);
 
-	if (vcpu->pvclock_set_guest_stopped_request) {
-		vcpu->hv_clock.flags |= PVCLOCK_GUEST_STOPPED;
-		vcpu->pvclock_set_guest_stopped_request = false;
-	}
-
-	trace_kvm_pvclock_update(v->vcpu_id, &vcpu->hv_clock);
-
-	kvm_write_guest_cached(v->kvm, &vcpu->pv_time,
-				&vcpu->hv_clock,
-				sizeof(vcpu->hv_clock));
+	memcpy(guest_hv_clock, &hv_clock, sizeof(*guest_hv_clock));
 
 	smp_wmb();
 
-	vcpu->hv_clock.version++;
-	kvm_write_guest_cached(v->kvm, &vcpu->pv_time,
-				&vcpu->hv_clock,
-				sizeof(vcpu->hv_clock.version));
+	guest_hv_clock->version = ++hv_clock.version;
+
+	kvm_gpc_mark_dirty_in_slot(gpc);
+	read_unlock_irqrestore(&gpc->lock, flags);
+
+	trace_kvm_pvclock_update(vcpu->vcpu_id, &hv_clock);
 }
 
-static int kvm_guest_time_update(struct kvm_vcpu *v)
+int kvm_guest_time_update(struct kvm_vcpu *v)
 {
+	struct pvclock_vcpu_time_info hv_clock = {};
 	unsigned long flags, tgt_tsc_khz;
+	unsigned seq;
 	struct kvm_vcpu_arch *vcpu = &v->arch;
 	struct kvm_arch *ka = &v->kvm->arch;
 	s64 kernel_ns;
 	u64 tsc_timestamp, host_tsc;
-	u8 pvclock_flags;
 	bool use_master_clock;
 
 	kernel_ns = 0;
@@ -2011,17 +3305,18 @@ static int kvm_guest_time_update(struct kvm_vcpu *v)
 	 * If the host uses TSC clock, then passthrough TSC as stable
 	 * to the guest.
 	 */
-	spin_lock(&ka->pvclock_gtod_sync_lock);
-	use_master_clock = ka->use_master_clock;
-	if (use_master_clock) {
-		host_tsc = ka->master_cycle_now;
-		kernel_ns = ka->master_kernel_ns;
-	}
-	spin_unlock(&ka->pvclock_gtod_sync_lock);
+	do {
+		seq = read_seqcount_begin(&ka->pvclock_sc);
+		use_master_clock = ka->use_master_clock;
+		if (use_master_clock) {
+			host_tsc = ka->master_cycle_now;
+			kernel_ns = ka->master_kernel_ns;
+		}
+	} while (read_seqcount_retry(&ka->pvclock_sc, seq));
 
 	/* Keep irq disabled to prevent changes to the clock */
 	local_irq_save(flags);
-	tgt_tsc_khz = __this_cpu_read(cpu_tsc_khz);
+	tgt_tsc_khz = get_cpu_tsc_khz();
 	if (unlikely(tgt_tsc_khz == 0)) {
 		local_irq_restore(flags);
 		kvm_make_request(KVM_REQ_CLOCK_UPDATE, v);
@@ -2029,7 +3324,7 @@ static int kvm_guest_time_update(struct kvm_vcpu *v)
 	}
 	if (!use_master_clock) {
 		host_tsc = rdtsc();
-		kernel_ns = ktime_get_boot_ns();
+		kernel_ns = get_kvmclock_base_ns();
 	}
 
 	tsc_timestamp = kvm_read_l1_tsc(v, host_tsc);
@@ -2056,58 +3351,158 @@ static int kvm_guest_time_update(struct kvm_vcpu *v)
 
 	/* With all the info we got, fill in the values */
 
-	if (kvm_has_tsc_control)
-		tgt_tsc_khz = kvm_scale_tsc(v, tgt_tsc_khz);
+	if (kvm_caps.has_tsc_control) {
+		tgt_tsc_khz = kvm_scale_tsc(tgt_tsc_khz,
+					    v->arch.l1_tsc_scaling_ratio);
+		tgt_tsc_khz = tgt_tsc_khz ? : 1;
+	}
 
 	if (unlikely(vcpu->hw_tsc_khz != tgt_tsc_khz)) {
 		kvm_get_time_scale(NSEC_PER_SEC, tgt_tsc_khz * 1000LL,
-				   &vcpu->hv_clock.tsc_shift,
-				   &vcpu->hv_clock.tsc_to_system_mul);
+				   &vcpu->pvclock_tsc_shift,
+				   &vcpu->pvclock_tsc_mul);
 		vcpu->hw_tsc_khz = tgt_tsc_khz;
 	}
 
-	vcpu->hv_clock.tsc_timestamp = tsc_timestamp;
-	vcpu->hv_clock.system_time = kernel_ns + v->kvm->arch.kvmclock_offset;
+	hv_clock.tsc_shift = vcpu->pvclock_tsc_shift;
+	hv_clock.tsc_to_system_mul = vcpu->pvclock_tsc_mul;
+	hv_clock.tsc_timestamp = tsc_timestamp;
+	hv_clock.system_time = kernel_ns + v->kvm->arch.kvmclock_offset;
 	vcpu->last_guest_tsc = tsc_timestamp;
 
 	/* If the host uses TSC clocksource, then it is stable */
-	pvclock_flags = 0;
+	hv_clock.flags = 0;
 	if (use_master_clock)
-		pvclock_flags |= PVCLOCK_TSC_STABLE_BIT;
+		hv_clock.flags |= PVCLOCK_TSC_STABLE_BIT;
 
-	vcpu->hv_clock.flags = pvclock_flags;
+	if (vcpu->pv_time.active) {
+		/*
+		 * GUEST_STOPPED is only supported by kvmclock, and KVM's
+		 * historic behavior is to only process the request if kvmclock
+		 * is active/enabled.
+		 */
+		if (vcpu->pvclock_set_guest_stopped_request) {
+			hv_clock.flags |= PVCLOCK_GUEST_STOPPED;
+			vcpu->pvclock_set_guest_stopped_request = false;
+		}
+		kvm_setup_guest_pvclock(&hv_clock, v, &vcpu->pv_time, 0);
 
-	if (vcpu->pv_time_enabled)
-		kvm_setup_pvclock_page(v);
-	if (v == kvm_get_vcpu(v->kvm, 0))
-		kvm_hv_setup_tsc_page(v->kvm, &vcpu->hv_clock);
+		hv_clock.flags &= ~PVCLOCK_GUEST_STOPPED;
+	}
+
+	kvm_hv_setup_tsc_page(v->kvm, &hv_clock);
+
+#ifdef CONFIG_KVM_XEN
+	/*
+	 * For Xen guests we may need to override PVCLOCK_TSC_STABLE_BIT as unless
+	 * explicitly told to use TSC as its clocksource Xen will not set this bit.
+	 * This default behaviour led to bugs in some guest kernels which cause
+	 * problems if they observe PVCLOCK_TSC_STABLE_BIT in the pvclock flags.
+	 *
+	 * Note!  Clear TSC_STABLE only for Xen clocks, i.e. the order matters!
+	 */
+	if (ka->xen.hvm_config.flags & KVM_XEN_HVM_CONFIG_PVCLOCK_TSC_UNSTABLE)
+		hv_clock.flags &= ~PVCLOCK_TSC_STABLE_BIT;
+
+	if (vcpu->xen.vcpu_info_cache.active)
+		kvm_setup_guest_pvclock(&hv_clock, v, &vcpu->xen.vcpu_info_cache,
+					offsetof(struct compat_vcpu_info, time));
+	if (vcpu->xen.vcpu_time_info_cache.active)
+		kvm_setup_guest_pvclock(&hv_clock, v, &vcpu->xen.vcpu_time_info_cache, 0);
+#endif
 	return 0;
+}
+
+/*
+ * The pvclock_wall_clock ABI tells the guest the wall clock time at
+ * which it started (i.e. its epoch, when its kvmclock was zero).
+ *
+ * In fact those clocks are subtly different; wall clock frequency is
+ * adjusted by NTP and has leap seconds, while the kvmclock is a
+ * simple function of the TSC without any such adjustment.
+ *
+ * Perhaps the ABI should have exposed CLOCK_TAI and a ratio between
+ * that and kvmclock, but even that would be subject to change over
+ * time.
+ *
+ * Attempt to calculate the epoch at a given moment using the *same*
+ * TSC reading via kvm_get_walltime_and_clockread() to obtain both
+ * wallclock and kvmclock times, and subtracting one from the other.
+ *
+ * Fall back to using their values at slightly different moments by
+ * calling ktime_get_real_ns() and get_kvmclock_ns() separately.
+ */
+uint64_t kvm_get_wall_clock_epoch(struct kvm *kvm)
+{
+#ifdef CONFIG_X86_64
+	struct pvclock_vcpu_time_info hv_clock;
+	struct kvm_arch *ka = &kvm->arch;
+	unsigned long seq, local_tsc_khz;
+	struct timespec64 ts;
+	uint64_t host_tsc;
+
+	do {
+		seq = read_seqcount_begin(&ka->pvclock_sc);
+
+		local_tsc_khz = 0;
+		if (!ka->use_master_clock)
+			break;
+
+		/*
+		 * The TSC read and the call to get_cpu_tsc_khz() must happen
+		 * on the same CPU.
+		 */
+		get_cpu();
+
+		local_tsc_khz = get_cpu_tsc_khz();
+
+		if (local_tsc_khz &&
+		    !kvm_get_walltime_and_clockread(&ts, &host_tsc))
+			local_tsc_khz = 0; /* Fall back to old method */
+
+		put_cpu();
+
+		/*
+		 * These values must be snapshotted within the seqcount loop.
+		 * After that, it's just mathematics which can happen on any
+		 * CPU at any time.
+		 */
+		hv_clock.tsc_timestamp = ka->master_cycle_now;
+		hv_clock.system_time = ka->master_kernel_ns + ka->kvmclock_offset;
+
+	} while (read_seqcount_retry(&ka->pvclock_sc, seq));
+
+	/*
+	 * If the conditions were right, and obtaining the wallclock+TSC was
+	 * successful, calculate the KVM clock at the corresponding time and
+	 * subtract one from the other to get the guest's epoch in nanoseconds
+	 * since 1970-01-01.
+	 */
+	if (local_tsc_khz) {
+		kvm_get_time_scale(NSEC_PER_SEC, local_tsc_khz * NSEC_PER_USEC,
+				   &hv_clock.tsc_shift,
+				   &hv_clock.tsc_to_system_mul);
+		return ts.tv_nsec + NSEC_PER_SEC * ts.tv_sec -
+			__pvclock_read_cycles(&hv_clock, host_tsc);
+	}
+#endif
+	return ktime_get_real_ns() - get_kvmclock_ns(kvm);
 }
 
 /*
  * kvmclock updates which are isolated to a given vcpu, such as
  * vcpu->cpu migration, should not allow system_timestamp from
- * the rest of the vcpus to remain static. Otherwise ntp frequency
- * correction applies to one vcpu's system_timestamp but not
- * the others.
+ * the rest of the vcpus to remain static.
  *
  * So in those cases, request a kvmclock update for all vcpus.
- * We need to rate-limit these requests though, as they can
- * considerably slow guests that have a large number of vcpus.
- * The time for a remote vcpu to update its kvmclock is bound
- * by the delay we use to rate-limit the updates.
+ * The worst case for a remote vcpu to update its kvmclock
+ * is then bounded by maximum nohz sleep latency.
  */
-
-#define KVMCLOCK_UPDATE_DELAY msecs_to_jiffies(100)
-
-static void kvmclock_update_fn(struct work_struct *work)
+static void kvm_gen_kvmclock_update(struct kvm_vcpu *v)
 {
-	int i;
-	struct delayed_work *dwork = to_delayed_work(work);
-	struct kvm_arch *ka = container_of(dwork, struct kvm_arch,
-					   kvmclock_update_work);
-	struct kvm *kvm = container_of(ka, struct kvm, arch);
+	unsigned long i;
 	struct kvm_vcpu *vcpu;
+	struct kvm *kvm = v->kvm;
 
 	kvm_for_each_vcpu(i, vcpu, kvm) {
 		kvm_make_request(KVM_REQ_CLOCK_UPDATE, vcpu);
@@ -2115,30 +3510,26 @@ static void kvmclock_update_fn(struct work_struct *work)
 	}
 }
 
-static void kvm_gen_kvmclock_update(struct kvm_vcpu *v)
+/* These helpers are safe iff @msr is known to be an MCx bank MSR. */
+static bool is_mci_control_msr(u32 msr)
 {
-	struct kvm *kvm = v->kvm;
-
-	kvm_make_request(KVM_REQ_CLOCK_UPDATE, v);
-	schedule_delayed_work(&kvm->arch.kvmclock_update_work,
-					KVMCLOCK_UPDATE_DELAY);
+	return (msr & 3) == 0;
+}
+static bool is_mci_status_msr(u32 msr)
+{
+	return (msr & 3) == 1;
 }
 
-#define KVMCLOCK_SYNC_PERIOD (300 * HZ)
-
-static void kvmclock_sync_fn(struct work_struct *work)
+/*
+ * On AMD, HWCR[McStatusWrEn] controls whether setting MCi_STATUS results in #GP.
+ */
+static bool can_set_mci_status(struct kvm_vcpu *vcpu)
 {
-	struct delayed_work *dwork = to_delayed_work(work);
-	struct kvm_arch *ka = container_of(dwork, struct kvm_arch,
-					   kvmclock_sync_work);
-	struct kvm *kvm = container_of(ka, struct kvm, arch);
+	/* McStatusWrEn enabled? */
+	if (guest_cpuid_is_amd_compatible(vcpu))
+		return !!(vcpu->arch.msr_hwcr & BIT_ULL(18));
 
-	if (!kvmclock_periodic_sync)
-		return;
-
-	schedule_delayed_work(&kvm->arch.kvmclock_update_work, 0);
-	schedule_delayed_work(&kvm->arch.kvmclock_sync_work,
-					KVMCLOCK_SYNC_PERIOD);
+	return false;
 }
 
 static int set_msr_mce(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
@@ -2147,155 +3538,356 @@ static int set_msr_mce(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	unsigned bank_num = mcg_cap & 0xff;
 	u32 msr = msr_info->index;
 	u64 data = msr_info->data;
+	u32 offset, last_msr;
 
 	switch (msr) {
 	case MSR_IA32_MCG_STATUS:
 		vcpu->arch.mcg_status = data;
 		break;
 	case MSR_IA32_MCG_CTL:
-		if (!(mcg_cap & MCG_CTL_P))
+		if (!(mcg_cap & MCG_CTL_P) &&
+		    (data || !msr_info->host_initiated))
 			return 1;
 		if (data != 0 && data != ~(u64)0)
-			return -1;
+			return 1;
 		vcpu->arch.mcg_ctl = data;
 		break;
+	case MSR_IA32_MC0_CTL2 ... MSR_IA32_MCx_CTL2(KVM_MAX_MCE_BANKS) - 1:
+		last_msr = MSR_IA32_MCx_CTL2(bank_num) - 1;
+		if (msr > last_msr)
+			return 1;
+
+		if (!(mcg_cap & MCG_CMCI_P) && (data || !msr_info->host_initiated))
+			return 1;
+		/* An attempt to write a 1 to a reserved bit raises #GP */
+		if (data & ~(MCI_CTL2_CMCI_EN | MCI_CTL2_CMCI_THRESHOLD_MASK))
+			return 1;
+		offset = array_index_nospec(msr - MSR_IA32_MC0_CTL2,
+					    last_msr + 1 - MSR_IA32_MC0_CTL2);
+		vcpu->arch.mci_ctl2_banks[offset] = data;
+		break;
+	case MSR_IA32_MC0_CTL ... MSR_IA32_MCx_CTL(KVM_MAX_MCE_BANKS) - 1:
+		last_msr = MSR_IA32_MCx_CTL(bank_num) - 1;
+		if (msr > last_msr)
+			return 1;
+
+		/*
+		 * Only 0 or all 1s can be written to IA32_MCi_CTL, all other
+		 * values are architecturally undefined.  But, some Linux
+		 * kernels clear bit 10 in bank 4 to workaround a BIOS/GART TLB
+		 * issue on AMD K8s, allow bit 10 to be clear when setting all
+		 * other bits in order to avoid an uncaught #GP in the guest.
+		 *
+		 * UNIXWARE clears bit 0 of MC1_CTL to ignore correctable,
+		 * single-bit ECC data errors.
+		 */
+		if (is_mci_control_msr(msr) &&
+		    data != 0 && (data | (1 << 10) | 1) != ~(u64)0)
+			return 1;
+
+		/*
+		 * All CPUs allow writing 0 to MCi_STATUS MSRs to clear the MSR.
+		 * AMD-based CPUs allow non-zero values, but if and only if
+		 * HWCR[McStatusWrEn] is set.
+		 */
+		if (!msr_info->host_initiated && is_mci_status_msr(msr) &&
+		    data != 0 && !can_set_mci_status(vcpu))
+			return 1;
+
+		offset = array_index_nospec(msr - MSR_IA32_MC0_CTL,
+					    last_msr + 1 - MSR_IA32_MC0_CTL);
+		vcpu->arch.mce_banks[offset] = data;
+		break;
 	default:
-		if (msr >= MSR_IA32_MC0_CTL &&
-		    msr < MSR_IA32_MCx_CTL(bank_num)) {
-			u32 offset = msr - MSR_IA32_MC0_CTL;
-			/* only 0 or all 1s can be written to IA32_MCi_CTL
-			 * some Linux kernels though clear bit 10 in bank 4 to
-			 * workaround a BIOS/GART TBL issue on AMD K8s, ignore
-			 * this to avoid an uncatched #GP in the guest
-			 */
-			if ((offset & 0x3) == 0 &&
-			    data != 0 && (data | (1 << 10)) != ~(u64)0)
-				return -1;
-			if (!msr_info->host_initiated &&
-				(offset & 0x3) == 1 && data != 0)
-				return -1;
-			vcpu->arch.mce_banks[offset] = data;
-			break;
-		}
 		return 1;
 	}
 	return 0;
-}
-
-static int xen_hvm_config(struct kvm_vcpu *vcpu, u64 data)
-{
-	struct kvm *kvm = vcpu->kvm;
-	int lm = is_long_mode(vcpu);
-	u8 *blob_addr = lm ? (u8 *)(long)kvm->arch.xen_hvm_config.blob_addr_64
-		: (u8 *)(long)kvm->arch.xen_hvm_config.blob_addr_32;
-	u8 blob_size = lm ? kvm->arch.xen_hvm_config.blob_size_64
-		: kvm->arch.xen_hvm_config.blob_size_32;
-	u32 page_num = data & ~PAGE_MASK;
-	u64 page_addr = data & PAGE_MASK;
-	u8 *page;
-	int r;
-
-	r = -E2BIG;
-	if (page_num >= blob_size)
-		goto out;
-	r = -ENOMEM;
-	page = memdup_user(blob_addr + (page_num * PAGE_SIZE), PAGE_SIZE);
-	if (IS_ERR(page)) {
-		r = PTR_ERR(page);
-		goto out;
-	}
-	if (kvm_vcpu_write_guest(vcpu, page_addr, page, PAGE_SIZE))
-		goto out_free;
-	r = 0;
-out_free:
-	kfree(page);
-out:
-	return r;
 }
 
 static int kvm_pv_enable_async_pf(struct kvm_vcpu *vcpu, u64 data)
 {
 	gpa_t gpa = data & ~0x3f;
 
-	/* Bits 3:5 are reserved, Should be zero */
-	if (data & 0x38)
+	/* Bits 4:5 are reserved, Should be zero */
+	if (data & 0x30)
 		return 1;
 
-	vcpu->arch.apf.msr_val = data;
+	if (!guest_pv_has(vcpu, KVM_FEATURE_ASYNC_PF_VMEXIT) &&
+	    (data & KVM_ASYNC_PF_DELIVERY_AS_PF_VMEXIT))
+		return 1;
 
-	if (!(data & KVM_ASYNC_PF_ENABLED)) {
+	if (!guest_pv_has(vcpu, KVM_FEATURE_ASYNC_PF_INT) &&
+	    (data & KVM_ASYNC_PF_DELIVERY_AS_INT))
+		return 1;
+
+	if (!lapic_in_kernel(vcpu))
+		return data ? 1 : 0;
+
+	if (__kvm_pv_async_pf_enabled(data) &&
+	    kvm_gfn_to_hva_cache_init(vcpu->kvm, &vcpu->arch.apf.data, gpa,
+				      sizeof(u64)))
+		return 1;
+
+	vcpu->arch.apf.msr_en_val = data;
+
+	if (__kvm_pv_async_pf_enabled(data)) {
+		kvm_async_pf_wakeup_all(vcpu);
+	} else {
 		kvm_clear_async_pf_completion_queue(vcpu);
 		kvm_async_pf_hash_reset(vcpu);
-		return 0;
 	}
+	return 0;
+}
 
-	if (kvm_gfn_to_hva_cache_init(vcpu->kvm, &vcpu->arch.apf.data, gpa,
-					sizeof(u32)))
+static int kvm_pv_enable_async_pf_int(struct kvm_vcpu *vcpu, u64 data)
+{
+	/* Bits 8-63 are reserved */
+	if (data >> 8)
 		return 1;
 
-	vcpu->arch.apf.send_user_only = !(data & KVM_ASYNC_PF_SEND_ALWAYS);
-	vcpu->arch.apf.delivery_as_pf_vmexit = data & KVM_ASYNC_PF_DELIVERY_AS_PF_VMEXIT;
-	kvm_async_pf_wakeup_all(vcpu);
+	if (!lapic_in_kernel(vcpu))
+		return 1;
+
+	vcpu->arch.apf.msr_int_val = data;
+
+	vcpu->arch.apf.vec = data & KVM_ASYNC_PF_VEC_MASK;
+
 	return 0;
 }
 
 static void kvmclock_reset(struct kvm_vcpu *vcpu)
 {
-	vcpu->arch.pv_time_enabled = false;
+	kvm_gpc_deactivate(&vcpu->arch.pv_time);
+	vcpu->arch.time = 0;
 }
 
-static void kvm_vcpu_flush_tlb(struct kvm_vcpu *vcpu, bool invalidate_gpa)
+static void kvm_vcpu_flush_tlb_all(struct kvm_vcpu *vcpu)
 {
 	++vcpu->stat.tlb_flush;
-	kvm_x86_ops->tlb_flush(vcpu, invalidate_gpa);
+	kvm_x86_call(flush_tlb_all)(vcpu);
+
+	/* Flushing all ASIDs flushes the current ASID... */
+	kvm_clear_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu);
 }
+
+static void kvm_vcpu_flush_tlb_guest(struct kvm_vcpu *vcpu)
+{
+	++vcpu->stat.tlb_flush;
+
+	if (!tdp_enabled) {
+		/*
+		 * A TLB flush on behalf of the guest is equivalent to
+		 * INVPCID(all), toggling CR4.PGE, etc., which requires
+		 * a forced sync of the shadow page tables.  Ensure all the
+		 * roots are synced and the guest TLB in hardware is clean.
+		 */
+		kvm_mmu_sync_roots(vcpu);
+		kvm_mmu_sync_prev_roots(vcpu);
+	}
+
+	kvm_x86_call(flush_tlb_guest)(vcpu);
+
+	/*
+	 * Flushing all "guest" TLB is always a superset of Hyper-V's fine
+	 * grained flushing.
+	 */
+	kvm_hv_vcpu_purge_flush_tlb(vcpu);
+}
+
+
+static inline void kvm_vcpu_flush_tlb_current(struct kvm_vcpu *vcpu)
+{
+	++vcpu->stat.tlb_flush;
+	kvm_x86_call(flush_tlb_current)(vcpu);
+}
+
+/*
+ * Service "local" TLB flush requests, which are specific to the current MMU
+ * context.  In addition to the generic event handling in vcpu_enter_guest(),
+ * TLB flushes that are targeted at an MMU context also need to be serviced
+ * prior before nested VM-Enter/VM-Exit.
+ */
+void kvm_service_local_tlb_flush_requests(struct kvm_vcpu *vcpu)
+{
+	if (kvm_check_request(KVM_REQ_TLB_FLUSH_CURRENT, vcpu))
+		kvm_vcpu_flush_tlb_current(vcpu);
+
+	if (kvm_check_request(KVM_REQ_TLB_FLUSH_GUEST, vcpu))
+		kvm_vcpu_flush_tlb_guest(vcpu);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_service_local_tlb_flush_requests);
 
 static void record_steal_time(struct kvm_vcpu *vcpu)
 {
+	struct gfn_to_hva_cache *ghc = &vcpu->arch.st.cache;
+	struct kvm_steal_time __user *st;
+	struct kvm_memslots *slots;
+	gpa_t gpa = vcpu->arch.st.msr_val & KVM_STEAL_VALID_BITS;
+	u64 steal;
+	u32 version;
+
+	if (kvm_xen_msr_enabled(vcpu->kvm)) {
+		kvm_xen_runstate_set_running(vcpu);
+		return;
+	}
+
 	if (!(vcpu->arch.st.msr_val & KVM_MSR_ENABLED))
 		return;
 
-	if (unlikely(kvm_read_guest_cached(vcpu->kvm, &vcpu->arch.st.stime,
-		&vcpu->arch.st.steal, sizeof(struct kvm_steal_time))))
+	if (WARN_ON_ONCE(current->mm != vcpu->kvm->mm))
 		return;
 
+	slots = kvm_memslots(vcpu->kvm);
+
+	if (unlikely(slots->generation != ghc->generation ||
+		     gpa != ghc->gpa ||
+		     kvm_is_error_hva(ghc->hva) || !ghc->memslot)) {
+		/* We rely on the fact that it fits in a single page. */
+		BUILD_BUG_ON((sizeof(*st) - 1) & KVM_STEAL_VALID_BITS);
+
+		if (kvm_gfn_to_hva_cache_init(vcpu->kvm, ghc, gpa, sizeof(*st)) ||
+		    kvm_is_error_hva(ghc->hva) || !ghc->memslot)
+			return;
+	}
+
+	st = (struct kvm_steal_time __user *)ghc->hva;
 	/*
 	 * Doing a TLB flush here, on the guest's behalf, can avoid
 	 * expensive IPIs.
 	 */
-	if (xchg(&vcpu->arch.st.steal.preempted, 0) & KVM_VCPU_FLUSH_TLB)
-		kvm_vcpu_flush_tlb(vcpu, false);
+	if (guest_pv_has(vcpu, KVM_FEATURE_PV_TLB_FLUSH)) {
+		u8 st_preempted = 0;
+		int err = -EFAULT;
 
-	if (vcpu->arch.st.steal.version & 1)
-		vcpu->arch.st.steal.version += 1;  /* first time write, random junk */
+		if (!user_access_begin(st, sizeof(*st)))
+			return;
 
-	vcpu->arch.st.steal.version += 1;
+		asm volatile("1: xchgb %0, %2\n"
+			     "xor %1, %1\n"
+			     "2:\n"
+			     _ASM_EXTABLE_UA(1b, 2b)
+			     : "+q" (st_preempted),
+			       "+&r" (err),
+			       "+m" (st->preempted));
+		if (err)
+			goto out;
 
-	kvm_write_guest_cached(vcpu->kvm, &vcpu->arch.st.stime,
-		&vcpu->arch.st.steal, sizeof(struct kvm_steal_time));
+		user_access_end();
+
+		vcpu->arch.st.preempted = 0;
+
+		trace_kvm_pv_tlb_flush(vcpu->vcpu_id,
+				       st_preempted & KVM_VCPU_FLUSH_TLB);
+		if (st_preempted & KVM_VCPU_FLUSH_TLB)
+			kvm_vcpu_flush_tlb_guest(vcpu);
+
+		if (!user_access_begin(st, sizeof(*st)))
+			goto dirty;
+	} else {
+		if (!user_access_begin(st, sizeof(*st)))
+			return;
+
+		unsafe_put_user(0, &st->preempted, out);
+		vcpu->arch.st.preempted = 0;
+	}
+
+	unsafe_get_user(version, &st->version, out);
+	if (version & 1)
+		version += 1;  /* first time write, random junk */
+
+	version += 1;
+	unsafe_put_user(version, &st->version, out);
 
 	smp_wmb();
 
-	vcpu->arch.st.steal.steal += current->sched_info.run_delay -
+	unsafe_get_user(steal, &st->steal, out);
+	steal += current->sched_info.run_delay -
 		vcpu->arch.st.last_steal;
 	vcpu->arch.st.last_steal = current->sched_info.run_delay;
+	unsafe_put_user(steal, &st->steal, out);
 
-	kvm_write_guest_cached(vcpu->kvm, &vcpu->arch.st.stime,
-		&vcpu->arch.st.steal, sizeof(struct kvm_steal_time));
+	version += 1;
+	unsafe_put_user(version, &st->version, out);
 
-	smp_wmb();
+ out:
+	user_access_end();
+ dirty:
+	mark_page_dirty_in_slot(vcpu->kvm, ghc->memslot, gpa_to_gfn(ghc->gpa));
+}
 
-	vcpu->arch.st.steal.version += 1;
+/*
+ * Returns true if the MSR in question is managed via XSTATE, i.e. is context
+ * switched with the rest of guest FPU state.
+ *
+ * Note, S_CET is _not_ saved/restored via XSAVES/XRSTORS.
+ */
+static bool is_xstate_managed_msr(struct kvm_vcpu *vcpu, u32 msr)
+{
+	if (!vcpu)
+		return false;
 
-	kvm_write_guest_cached(vcpu->kvm, &vcpu->arch.st.stime,
-		&vcpu->arch.st.steal, sizeof(struct kvm_steal_time));
+	switch (msr) {
+	case MSR_IA32_U_CET:
+		return guest_cpu_cap_has(vcpu, X86_FEATURE_SHSTK) ||
+		       guest_cpu_cap_has(vcpu, X86_FEATURE_IBT);
+	case MSR_IA32_PL0_SSP ... MSR_IA32_PL3_SSP:
+		return guest_cpu_cap_has(vcpu, X86_FEATURE_SHSTK);
+	default:
+		return false;
+	}
+}
+
+/*
+ * Lock (and if necessary, re-load) the guest FPU, i.e. XSTATE, and access an
+ * MSR that is managed via XSTATE.  Note, the caller is responsible for doing
+ * the initial FPU load, this helper only ensures that guest state is resident
+ * in hardware (the kernel can load its FPU state in IRQ context).
+ *
+ * Note, loading guest values for U_CET and PL[0-3]_SSP while executing in the
+ * kernel is safe, as U_CET is specific to userspace, and PL[0-3]_SSP are only
+ * consumed when transitioning to lower privilege levels, i.e. are effectively
+ * only consumed by userspace as well.
+ */
+static __always_inline void kvm_access_xstate_msr(struct kvm_vcpu *vcpu,
+						  struct msr_data *msr_info,
+						  int access)
+{
+	BUILD_BUG_ON(access != MSR_TYPE_R && access != MSR_TYPE_W);
+
+	KVM_BUG_ON(!is_xstate_managed_msr(vcpu, msr_info->index), vcpu->kvm);
+	KVM_BUG_ON(!vcpu->arch.guest_fpu.fpstate->in_use, vcpu->kvm);
+
+	kvm_fpu_get();
+	if (access == MSR_TYPE_R)
+		rdmsrq(msr_info->index, msr_info->data);
+	else
+		wrmsrq(msr_info->index, msr_info->data);
+	kvm_fpu_put();
+}
+
+static void kvm_set_xstate_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
+{
+	kvm_access_xstate_msr(vcpu, msr_info, MSR_TYPE_W);
+}
+
+static void kvm_get_xstate_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
+{
+	kvm_access_xstate_msr(vcpu, msr_info, MSR_TYPE_R);
 }
 
 int kvm_set_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 {
-	bool pr = false;
 	u32 msr = msr_info->index;
 	u64 data = msr_info->data;
+
+	/*
+	 * Do not allow host-initiated writes to trigger the Xen hypercall
+	 * page setup; it could incur locking paths which are not expected
+	 * if userspace sets the MSR in an unusual location.
+	 */
+	if (kvm_xen_is_hypercall_page_msr(vcpu->kvm, msr) &&
+	    !msr_info->host_initiated)
+		return kvm_xen_write_hypercall_page(vcpu, data);
 
 	switch (msr) {
 	case MSR_AMD64_NB_CFG:
@@ -2304,72 +3896,192 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	case MSR_AMD64_PATCH_LOADER:
 	case MSR_AMD64_BU_CFG2:
 	case MSR_AMD64_DC_CFG:
+	case MSR_AMD64_TW_CFG:
+	case MSR_F15H_EX_CFG:
 		break;
 
 	case MSR_IA32_UCODE_REV:
 		if (msr_info->host_initiated)
 			vcpu->arch.microcode_version = data;
 		break;
+	case MSR_IA32_ARCH_CAPABILITIES:
+		if (!msr_info->host_initiated ||
+		    !guest_cpu_cap_has(vcpu, X86_FEATURE_ARCH_CAPABILITIES))
+			return KVM_MSR_RET_UNSUPPORTED;
+		vcpu->arch.arch_capabilities = data;
+		break;
+	case MSR_IA32_PERF_CAPABILITIES:
+		if (!msr_info->host_initiated ||
+		    !guest_cpu_cap_has(vcpu, X86_FEATURE_PDCM))
+			return KVM_MSR_RET_UNSUPPORTED;
+
+		if (data & ~kvm_caps.supported_perf_cap)
+			return 1;
+
+		/*
+		 * Note, this is not just a performance optimization!  KVM
+		 * disallows changing feature MSRs after the vCPU has run; PMU
+		 * refresh will bug the VM if called after the vCPU has run.
+		 */
+		if (vcpu->arch.perf_capabilities == data)
+			break;
+
+		vcpu->arch.perf_capabilities = data;
+		kvm_pmu_refresh(vcpu);
+		kvm_make_request(KVM_REQ_RECALC_INTERCEPTS, vcpu);
+		break;
+	case MSR_IA32_PRED_CMD: {
+		u64 reserved_bits = ~(PRED_CMD_IBPB | PRED_CMD_SBPB);
+
+		if (!msr_info->host_initiated) {
+			if ((!guest_has_pred_cmd_msr(vcpu)))
+				return 1;
+
+			if (!guest_cpu_cap_has(vcpu, X86_FEATURE_SPEC_CTRL) &&
+			    !guest_cpu_cap_has(vcpu, X86_FEATURE_AMD_IBPB))
+				reserved_bits |= PRED_CMD_IBPB;
+
+			if (!guest_cpu_cap_has(vcpu, X86_FEATURE_SBPB))
+				reserved_bits |= PRED_CMD_SBPB;
+		}
+
+		if (!boot_cpu_has(X86_FEATURE_IBPB))
+			reserved_bits |= PRED_CMD_IBPB;
+
+		if (!boot_cpu_has(X86_FEATURE_SBPB))
+			reserved_bits |= PRED_CMD_SBPB;
+
+		if (data & reserved_bits)
+			return 1;
+
+		if (!data)
+			break;
+
+		wrmsrq(MSR_IA32_PRED_CMD, data);
+		break;
+	}
+	case MSR_IA32_FLUSH_CMD:
+		if (!msr_info->host_initiated &&
+		    !guest_cpu_cap_has(vcpu, X86_FEATURE_FLUSH_L1D))
+			return 1;
+
+		if (!boot_cpu_has(X86_FEATURE_FLUSH_L1D) || (data & ~L1D_FLUSH))
+			return 1;
+		if (!data)
+			break;
+
+		wrmsrq(MSR_IA32_FLUSH_CMD, L1D_FLUSH);
+		break;
 	case MSR_EFER:
-		return set_efer(vcpu, data);
-	case MSR_K7_HWCR:
+		return set_efer(vcpu, msr_info);
+	case MSR_K7_HWCR: {
+		/*
+		 * Allow McStatusWrEn and TscFreqSel. (Linux guests from v3.2
+		 * through at least v6.6 whine if TscFreqSel is clear,
+		 * depending on F/M/S.
+		 */
+		u64 valid = BIT_ULL(18) | BIT_ULL(24);
+
 		data &= ~(u64)0x40;	/* ignore flush filter disable */
 		data &= ~(u64)0x100;	/* ignore ignne emulation enable */
 		data &= ~(u64)0x8;	/* ignore TLB cache disable */
-		data &= ~(u64)0x40000;  /* ignore Mc status write enable */
-		if (data != 0) {
-			vcpu_unimpl(vcpu, "unimplemented HWCR wrmsr: 0x%llx\n",
-				    data);
+
+		if (guest_cpu_cap_has(vcpu, X86_FEATURE_GP_ON_USER_CPUID))
+			valid |= MSR_K7_HWCR_CPUID_USER_DIS;
+
+		if (data & ~valid) {
+			kvm_pr_unimpl_wrmsr(vcpu, msr, data);
 			return 1;
 		}
+		vcpu->arch.msr_hwcr = data;
 		break;
+	}
 	case MSR_FAM10H_MMIO_CONF_BASE:
 		if (data != 0) {
-			vcpu_unimpl(vcpu, "unimplemented MMIO_CONF_BASE wrmsr: "
-				    "0x%llx\n", data);
+			kvm_pr_unimpl_wrmsr(vcpu, msr, data);
 			return 1;
 		}
 		break;
-	case MSR_IA32_DEBUGCTLMSR:
-		if (!data) {
-			/* We support the non-activated case already */
-			break;
-		} else if (data & ~(DEBUGCTLMSR_LBR | DEBUGCTLMSR_BTF)) {
-			/* Values other than LBR and BTF are vendor-specific,
-			   thus reserved and should throw a #GP */
+	case MSR_IA32_CR_PAT:
+		if (!kvm_pat_valid(data))
 			return 1;
-		}
-		vcpu_unimpl(vcpu, "%s: MSR_IA32_DEBUGCTLMSR 0x%llx, nop\n",
-			    __func__, data);
+
+		vcpu->arch.pat = data;
 		break;
-	case 0x200 ... 0x2ff:
+	case MTRRphysBase_MSR(0) ... MSR_MTRRfix4K_F8000:
+	case MSR_MTRRdefType:
 		return kvm_mtrr_set_msr(vcpu, msr, data);
 	case MSR_IA32_APICBASE:
-		return kvm_set_apic_base(vcpu, msr_info);
-	case APIC_BASE_MSR ... APIC_BASE_MSR + 0x3ff:
+		return kvm_apic_set_base(vcpu, data, msr_info->host_initiated);
+	case APIC_BASE_MSR ... APIC_BASE_MSR + 0xff:
 		return kvm_x2apic_msr_write(vcpu, msr, data);
-	case MSR_IA32_TSCDEADLINE:
+	case MSR_IA32_TSC_DEADLINE:
 		kvm_set_lapic_tscdeadline_msr(vcpu, data);
 		break;
 	case MSR_IA32_TSC_ADJUST:
-		if (guest_cpuid_has(vcpu, X86_FEATURE_TSC_ADJUST)) {
+		if (guest_cpu_cap_has(vcpu, X86_FEATURE_TSC_ADJUST)) {
 			if (!msr_info->host_initiated) {
 				s64 adj = data - vcpu->arch.ia32_tsc_adjust_msr;
 				adjust_tsc_offset_guest(vcpu, adj);
+				/* Before back to guest, tsc_timestamp must be adjusted
+				 * as well, otherwise guest's percpu pvclock time could jump.
+				 */
+				kvm_make_request(KVM_REQ_CLOCK_UPDATE, vcpu);
 			}
 			vcpu->arch.ia32_tsc_adjust_msr = data;
 		}
 		break;
-	case MSR_IA32_MISC_ENABLE:
-		vcpu->arch.ia32_misc_enable_msr = data;
+	case MSR_IA32_MISC_ENABLE: {
+		u64 old_val = vcpu->arch.ia32_misc_enable_msr;
+
+		if (!msr_info->host_initiated) {
+			/* RO bits */
+			if ((old_val ^ data) & MSR_IA32_MISC_ENABLE_PMU_RO_MASK)
+				return 1;
+
+			/* R bits, i.e. writes are ignored, but don't fault. */
+			data = data & ~MSR_IA32_MISC_ENABLE_EMON;
+			data |= old_val & MSR_IA32_MISC_ENABLE_EMON;
+		}
+
+		if (!kvm_check_has_quirk(vcpu->kvm, KVM_X86_QUIRK_MISC_ENABLE_NO_MWAIT) &&
+		    ((old_val ^ data)  & MSR_IA32_MISC_ENABLE_MWAIT)) {
+			if (!guest_cpu_cap_has(vcpu, X86_FEATURE_XMM3))
+				return 1;
+			vcpu->arch.ia32_misc_enable_msr = data;
+			vcpu->arch.cpuid_dynamic_bits_dirty = true;
+		} else {
+			vcpu->arch.ia32_misc_enable_msr = data;
+		}
 		break;
+	}
 	case MSR_IA32_SMBASE:
-		if (!msr_info->host_initiated)
+		if (!IS_ENABLED(CONFIG_KVM_SMM) || !msr_info->host_initiated)
 			return 1;
 		vcpu->arch.smbase = data;
 		break;
+	case MSR_IA32_POWER_CTL:
+		vcpu->arch.msr_ia32_power_ctl = data;
+		break;
 	case MSR_IA32_TSC:
-		kvm_write_tsc(vcpu, msr_info);
+		if (msr_info->host_initiated) {
+			kvm_synchronize_tsc(vcpu, &data);
+		} else if (!vcpu->arch.guest_tsc_protected) {
+			u64 adj = kvm_compute_l1_tsc_offset(vcpu, data) - vcpu->arch.l1_tsc_offset;
+			adjust_tsc_offset_guest(vcpu, adj);
+			vcpu->arch.ia32_tsc_adjust_msr += adj;
+		}
+		break;
+	case MSR_IA32_XSS:
+		if (!guest_cpuid_has(vcpu, X86_FEATURE_XSAVES))
+			return KVM_MSR_RET_UNSUPPORTED;
+
+		if (data & ~vcpu->arch.guest_supported_xss)
+			return 1;
+		if (vcpu->arch.ia32_xss == data)
+			break;
+		vcpu->arch.ia32_xss = data;
+		vcpu->arch.cpuid_dynamic_bits_dirty = true;
 		break;
 	case MSR_SMI_COUNT:
 		if (!msr_info->host_initiated)
@@ -2377,56 +4089,66 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		vcpu->arch.smi_count = data;
 		break;
 	case MSR_KVM_WALL_CLOCK_NEW:
-	case MSR_KVM_WALL_CLOCK:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_CLOCKSOURCE2))
+			return KVM_MSR_RET_UNSUPPORTED;
+
 		vcpu->kvm->arch.wall_clock = data;
-		kvm_write_wall_clock(vcpu->kvm, data);
+		kvm_write_wall_clock(vcpu->kvm, data, 0);
+		break;
+	case MSR_KVM_WALL_CLOCK:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_CLOCKSOURCE))
+			return KVM_MSR_RET_UNSUPPORTED;
+
+		vcpu->kvm->arch.wall_clock = data;
+		kvm_write_wall_clock(vcpu->kvm, data, 0);
 		break;
 	case MSR_KVM_SYSTEM_TIME_NEW:
-	case MSR_KVM_SYSTEM_TIME: {
-		struct kvm_arch *ka = &vcpu->kvm->arch;
+		if (!guest_pv_has(vcpu, KVM_FEATURE_CLOCKSOURCE2))
+			return KVM_MSR_RET_UNSUPPORTED;
 
-		kvmclock_reset(vcpu);
-
-		if (vcpu->vcpu_id == 0 && !msr_info->host_initiated) {
-			bool tmp = (msr == MSR_KVM_SYSTEM_TIME);
-
-			if (ka->boot_vcpu_runs_old_kvmclock != tmp)
-				kvm_make_request(KVM_REQ_MASTERCLOCK_UPDATE, vcpu);
-
-			ka->boot_vcpu_runs_old_kvmclock = tmp;
-		}
-
-		vcpu->arch.time = data;
-		kvm_make_request(KVM_REQ_GLOBAL_CLOCK_UPDATE, vcpu);
-
-		/* we verify if the enable bit is set... */
-		if (!(data & 1))
-			break;
-
-		if (kvm_gfn_to_hva_cache_init(vcpu->kvm,
-		     &vcpu->arch.pv_time, data & ~1ULL,
-		     sizeof(struct pvclock_vcpu_time_info)))
-			vcpu->arch.pv_time_enabled = false;
-		else
-			vcpu->arch.pv_time_enabled = true;
-
+		kvm_write_system_time(vcpu, data, false, msr_info->host_initiated);
 		break;
-	}
+	case MSR_KVM_SYSTEM_TIME:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_CLOCKSOURCE))
+			return KVM_MSR_RET_UNSUPPORTED;
+
+		kvm_write_system_time(vcpu, data, true,  msr_info->host_initiated);
+		break;
 	case MSR_KVM_ASYNC_PF_EN:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_ASYNC_PF))
+			return KVM_MSR_RET_UNSUPPORTED;
+
 		if (kvm_pv_enable_async_pf(vcpu, data))
 			return 1;
 		break;
+	case MSR_KVM_ASYNC_PF_INT:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_ASYNC_PF_INT))
+			return KVM_MSR_RET_UNSUPPORTED;
+
+		if (kvm_pv_enable_async_pf_int(vcpu, data))
+			return 1;
+		break;
+	case MSR_KVM_ASYNC_PF_ACK:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_ASYNC_PF_INT))
+			return KVM_MSR_RET_UNSUPPORTED;
+		if (data & 0x1) {
+			/*
+			 * Pairs with the smp_mb__after_atomic() in
+			 * kvm_arch_async_page_present_queued().
+			 */
+			smp_store_mb(vcpu->arch.apf.pageready_pending, false);
+
+			kvm_check_async_pf_completion(vcpu);
+		}
+		break;
 	case MSR_KVM_STEAL_TIME:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_STEAL_TIME))
+			return KVM_MSR_RET_UNSUPPORTED;
 
 		if (unlikely(!sched_info_on()))
 			return 1;
 
 		if (data & KVM_STEAL_RESERVED_MASK)
-			return 1;
-
-		if (kvm_gfn_to_hva_cache_init(vcpu->kvm, &vcpu->arch.st.stime,
-						data & KVM_STEAL_VALID_BITS,
-						sizeof(struct kvm_steal_time)))
 			return 1;
 
 		vcpu->arch.st.msr_val = data;
@@ -2438,26 +4160,39 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 
 		break;
 	case MSR_KVM_PV_EOI_EN:
-		if (kvm_lapic_enable_pv_eoi(vcpu, data))
+		if (!guest_pv_has(vcpu, KVM_FEATURE_PV_EOI))
+			return KVM_MSR_RET_UNSUPPORTED;
+
+		if (kvm_lapic_set_pv_eoi(vcpu, data, sizeof(u8)))
 			return 1;
+		break;
+
+	case MSR_KVM_POLL_CONTROL:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_POLL_CONTROL))
+			return KVM_MSR_RET_UNSUPPORTED;
+
+		/* only enable bit supported */
+		if (data & (-1ULL << 1))
+			return 1;
+
+		vcpu->arch.msr_kvm_poll_control = data;
 		break;
 
 	case MSR_IA32_MCG_CTL:
 	case MSR_IA32_MCG_STATUS:
 	case MSR_IA32_MC0_CTL ... MSR_IA32_MCx_CTL(KVM_MAX_MCE_BANKS) - 1:
+	case MSR_IA32_MC0_CTL2 ... MSR_IA32_MCx_CTL2(KVM_MAX_MCE_BANKS) - 1:
 		return set_msr_mce(vcpu, msr_info);
 
 	case MSR_K7_PERFCTR0 ... MSR_K7_PERFCTR3:
 	case MSR_P6_PERFCTR0 ... MSR_P6_PERFCTR1:
-		pr = true; /* fall through */
 	case MSR_K7_EVNTSEL0 ... MSR_K7_EVNTSEL3:
 	case MSR_P6_EVNTSEL0 ... MSR_P6_EVNTSEL1:
 		if (kvm_pmu_is_valid_msr(vcpu, msr))
 			return kvm_pmu_set_msr(vcpu, msr_info);
 
-		if (pr || data != 0)
-			vcpu_unimpl(vcpu, "disabled perfctr wrmsr: "
-				    "0x%x data 0x%llx\n", msr, data);
+		if (data)
+			kvm_pr_unimpl_wrmsr(vcpu, msr, data);
 		break;
 	case MSR_K7_CLK_CTL:
 		/*
@@ -2469,86 +4204,90 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		 * the need to ignore the workaround.
 		 */
 		break;
+#ifdef CONFIG_KVM_HYPERV
 	case HV_X64_MSR_GUEST_OS_ID ... HV_X64_MSR_SINT15:
+	case HV_X64_MSR_SYNDBG_CONTROL ... HV_X64_MSR_SYNDBG_PENDING_BUFFER:
+	case HV_X64_MSR_SYNDBG_OPTIONS:
 	case HV_X64_MSR_CRASH_P0 ... HV_X64_MSR_CRASH_P4:
 	case HV_X64_MSR_CRASH_CTL:
 	case HV_X64_MSR_STIMER0_CONFIG ... HV_X64_MSR_STIMER3_COUNT:
 	case HV_X64_MSR_REENLIGHTENMENT_CONTROL:
 	case HV_X64_MSR_TSC_EMULATION_CONTROL:
 	case HV_X64_MSR_TSC_EMULATION_STATUS:
+	case HV_X64_MSR_TSC_INVARIANT_CONTROL:
 		return kvm_hv_set_msr_common(vcpu, msr, data,
 					     msr_info->host_initiated);
+#endif
 	case MSR_IA32_BBL_CR_CTL3:
 		/* Drop writes to this legacy MSR -- see rdmsr
 		 * counterpart for further detail.
 		 */
-		if (report_ignored_msrs)
-			vcpu_unimpl(vcpu, "ignored wrmsr: 0x%x data 0x%llx\n",
-				msr, data);
+		kvm_pr_unimpl_wrmsr(vcpu, msr, data);
 		break;
 	case MSR_AMD64_OSVW_ID_LENGTH:
-		if (!guest_cpuid_has(vcpu, X86_FEATURE_OSVW))
+		if (!guest_cpu_cap_has(vcpu, X86_FEATURE_OSVW))
 			return 1;
 		vcpu->arch.osvw.length = data;
 		break;
 	case MSR_AMD64_OSVW_STATUS:
-		if (!guest_cpuid_has(vcpu, X86_FEATURE_OSVW))
+		if (!guest_cpu_cap_has(vcpu, X86_FEATURE_OSVW))
 			return 1;
 		vcpu->arch.osvw.status = data;
 		break;
 	case MSR_PLATFORM_INFO:
-		if (!msr_info->host_initiated ||
-		    data & ~MSR_PLATFORM_INFO_CPUID_FAULT ||
-		    (!(data & MSR_PLATFORM_INFO_CPUID_FAULT) &&
-		     cpuid_fault_enabled(vcpu)))
+		if (!msr_info->host_initiated)
 			return 1;
 		vcpu->arch.msr_platform_info = data;
 		break;
 	case MSR_MISC_FEATURES_ENABLES:
 		if (data & ~MSR_MISC_FEATURES_ENABLES_CPUID_FAULT ||
 		    (data & MSR_MISC_FEATURES_ENABLES_CPUID_FAULT &&
-		     !supports_cpuid_fault(vcpu)))
+		     !(vcpu->arch.msr_platform_info & MSR_PLATFORM_INFO_CPUID_FAULT)))
 			return 1;
 		vcpu->arch.msr_misc_features_enables = data;
 		break;
+#ifdef CONFIG_X86_64
+	case MSR_IA32_XFD:
+		if (!msr_info->host_initiated &&
+		    !guest_cpu_cap_has(vcpu, X86_FEATURE_XFD))
+			return 1;
+
+		if (data & ~kvm_guest_supported_xfd(vcpu))
+			return 1;
+
+		fpu_update_guest_xfd(&vcpu->arch.guest_fpu, data);
+		break;
+	case MSR_IA32_XFD_ERR:
+		if (!msr_info->host_initiated &&
+		    !guest_cpu_cap_has(vcpu, X86_FEATURE_XFD))
+			return 1;
+
+		if (data & ~kvm_guest_supported_xfd(vcpu))
+			return 1;
+
+		vcpu->arch.guest_fpu.xfd_err = data;
+		break;
+#endif
+	case MSR_IA32_U_CET:
+	case MSR_IA32_PL0_SSP ... MSR_IA32_PL3_SSP:
+		kvm_set_xstate_msr(vcpu, msr_info);
+		break;
 	default:
-		if (msr && (msr == vcpu->kvm->arch.xen_hvm_config.msr))
-			return xen_hvm_config(vcpu, data);
 		if (kvm_pmu_is_valid_msr(vcpu, msr))
 			return kvm_pmu_set_msr(vcpu, msr_info);
-		if (!ignore_msrs) {
-			vcpu_debug_ratelimited(vcpu, "unhandled wrmsr: 0x%x data 0x%llx\n",
-				    msr, data);
-			return 1;
-		} else {
-			if (report_ignored_msrs)
-				vcpu_unimpl(vcpu,
-					"ignored wrmsr: 0x%x data 0x%llx\n",
-					msr, data);
-			break;
-		}
+
+		return KVM_MSR_RET_UNSUPPORTED;
 	}
 	return 0;
 }
-EXPORT_SYMBOL_GPL(kvm_set_msr_common);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_set_msr_common);
 
-
-/*
- * Reads an msr value (of 'msr_index') into 'pdata'.
- * Returns 0 on success, non-0 otherwise.
- * Assumes vcpu_load() was already called.
- */
-int kvm_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr)
-{
-	return kvm_x86_ops->get_msr(vcpu, msr);
-}
-EXPORT_SYMBOL_GPL(kvm_get_msr);
-
-static int get_msr_mce(struct kvm_vcpu *vcpu, u32 msr, u64 *pdata)
+static int get_msr_mce(struct kvm_vcpu *vcpu, u32 msr, u64 *pdata, bool host)
 {
 	u64 data;
 	u64 mcg_cap = vcpu->arch.mcg_cap;
 	unsigned bank_num = mcg_cap & 0xff;
+	u32 offset, last_msr;
 
 	switch (msr) {
 	case MSR_IA32_P5_MC_ADDR:
@@ -2559,20 +4298,34 @@ static int get_msr_mce(struct kvm_vcpu *vcpu, u32 msr, u64 *pdata)
 		data = vcpu->arch.mcg_cap;
 		break;
 	case MSR_IA32_MCG_CTL:
-		if (!(mcg_cap & MCG_CTL_P))
+		if (!(mcg_cap & MCG_CTL_P) && !host)
 			return 1;
 		data = vcpu->arch.mcg_ctl;
 		break;
 	case MSR_IA32_MCG_STATUS:
 		data = vcpu->arch.mcg_status;
 		break;
+	case MSR_IA32_MC0_CTL2 ... MSR_IA32_MCx_CTL2(KVM_MAX_MCE_BANKS) - 1:
+		last_msr = MSR_IA32_MCx_CTL2(bank_num) - 1;
+		if (msr > last_msr)
+			return 1;
+
+		if (!(mcg_cap & MCG_CMCI_P) && !host)
+			return 1;
+		offset = array_index_nospec(msr - MSR_IA32_MC0_CTL2,
+					    last_msr + 1 - MSR_IA32_MC0_CTL2);
+		data = vcpu->arch.mci_ctl2_banks[offset];
+		break;
+	case MSR_IA32_MC0_CTL ... MSR_IA32_MCx_CTL(KVM_MAX_MCE_BANKS) - 1:
+		last_msr = MSR_IA32_MCx_CTL(bank_num) - 1;
+		if (msr > last_msr)
+			return 1;
+
+		offset = array_index_nospec(msr - MSR_IA32_MC0_CTL,
+					    last_msr + 1 - MSR_IA32_MC0_CTL);
+		data = vcpu->arch.mce_banks[offset];
+		break;
 	default:
-		if (msr >= MSR_IA32_MC0_CTL &&
-		    msr < MSR_IA32_MCx_CTL(bank_num)) {
-			u32 offset = msr - MSR_IA32_MC0_CTL;
-			data = vcpu->arch.mce_banks[offset];
-			break;
-		}
 		return 1;
 	}
 	*pdata = data;
@@ -2584,15 +4337,13 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	switch (msr_info->index) {
 	case MSR_IA32_PLATFORM_ID:
 	case MSR_IA32_EBL_CR_POWERON:
-	case MSR_IA32_DEBUGCTLMSR:
 	case MSR_IA32_LASTBRANCHFROMIP:
 	case MSR_IA32_LASTBRANCHTOIP:
 	case MSR_IA32_LASTINTFROMIP:
 	case MSR_IA32_LASTINTTOIP:
-	case MSR_K8_SYSCFG:
+	case MSR_AMD64_SYSCFG:
 	case MSR_K8_TSEG_ADDR:
 	case MSR_K8_TSEG_MASK:
-	case MSR_K7_HWCR:
 	case MSR_VM_HSAVE_PA:
 	case MSR_K8_INT_PENDING_MSG:
 	case MSR_AMD64_NB_CFG:
@@ -2600,25 +4351,74 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	case MSR_AMD64_BU_CFG2:
 	case MSR_IA32_PERF_CTL:
 	case MSR_AMD64_DC_CFG:
+	case MSR_AMD64_TW_CFG:
+	case MSR_F15H_EX_CFG:
+	/*
+	 * Intel Sandy Bridge CPUs must support the RAPL (running average power
+	 * limit) MSRs. Just return 0, as we do not want to expose the host
+	 * data here. Do not conditionalize this on CPUID, as KVM does not do
+	 * so for existing CPU-specific MSRs.
+	 */
+	case MSR_RAPL_POWER_UNIT:
+	case MSR_PP0_ENERGY_STATUS:	/* Power plane 0 (core) */
+	case MSR_PP1_ENERGY_STATUS:	/* Power plane 1 (graphics uncore) */
+	case MSR_PKG_ENERGY_STATUS:	/* Total package */
+	case MSR_DRAM_ENERGY_STATUS:	/* DRAM controller */
 		msr_info->data = 0;
 		break;
-	case MSR_F15H_PERF_CTL0 ... MSR_F15H_PERF_CTR5:
 	case MSR_K7_EVNTSEL0 ... MSR_K7_EVNTSEL3:
 	case MSR_K7_PERFCTR0 ... MSR_K7_PERFCTR3:
 	case MSR_P6_PERFCTR0 ... MSR_P6_PERFCTR1:
 	case MSR_P6_EVNTSEL0 ... MSR_P6_EVNTSEL1:
 		if (kvm_pmu_is_valid_msr(vcpu, msr_info->index))
-			return kvm_pmu_get_msr(vcpu, msr_info->index, &msr_info->data);
+			return kvm_pmu_get_msr(vcpu, msr_info);
 		msr_info->data = 0;
 		break;
 	case MSR_IA32_UCODE_REV:
 		msr_info->data = vcpu->arch.microcode_version;
 		break;
-	case MSR_IA32_TSC:
-		msr_info->data = kvm_scale_tsc(vcpu, rdtsc()) + vcpu->arch.tsc_offset;
+	case MSR_IA32_ARCH_CAPABILITIES:
+		if (!guest_cpu_cap_has(vcpu, X86_FEATURE_ARCH_CAPABILITIES))
+			return KVM_MSR_RET_UNSUPPORTED;
+		msr_info->data = vcpu->arch.arch_capabilities;
+		break;
+	case MSR_IA32_PERF_CAPABILITIES:
+		if (!guest_cpu_cap_has(vcpu, X86_FEATURE_PDCM))
+			return KVM_MSR_RET_UNSUPPORTED;
+		msr_info->data = vcpu->arch.perf_capabilities;
+		break;
+	case MSR_IA32_POWER_CTL:
+		msr_info->data = vcpu->arch.msr_ia32_power_ctl;
+		break;
+	case MSR_IA32_TSC: {
+		/*
+		 * Intel SDM states that MSR_IA32_TSC read adds the TSC offset
+		 * even when not intercepted. AMD manual doesn't explicitly
+		 * state this but appears to behave the same.
+		 *
+		 * On userspace reads and writes, however, we unconditionally
+		 * return L1's TSC value to ensure backwards-compatible
+		 * behavior for migration.
+		 */
+		u64 offset, ratio;
+
+		if (msr_info->host_initiated) {
+			offset = vcpu->arch.l1_tsc_offset;
+			ratio = vcpu->arch.l1_tsc_scaling_ratio;
+		} else {
+			offset = vcpu->arch.tsc_offset;
+			ratio = vcpu->arch.tsc_scaling_ratio;
+		}
+
+		msr_info->data = kvm_scale_tsc(rdtsc(), ratio) + offset;
+		break;
+	}
+	case MSR_IA32_CR_PAT:
+		msr_info->data = vcpu->arch.pat;
 		break;
 	case MSR_MTRRcap:
-	case 0x200 ... 0x2ff:
+	case MTRRphysBase_MSR(0) ... MSR_MTRRfix4K_F8000:
+	case MSR_MTRRdefType:
 		return kvm_mtrr_get_msr(vcpu, msr_info->index, &msr_info->data);
 	case 0xcd: /* fsb frequency */
 		msr_info->data = 3;
@@ -2638,12 +4438,11 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		msr_info->data = 1 << 24;
 		break;
 	case MSR_IA32_APICBASE:
-		msr_info->data = kvm_get_apic_base(vcpu);
+		msr_info->data = vcpu->arch.apic_base;
 		break;
-	case APIC_BASE_MSR ... APIC_BASE_MSR + 0x3ff:
+	case APIC_BASE_MSR ... APIC_BASE_MSR + 0xff:
 		return kvm_x2apic_msr_read(vcpu, msr_info->index, &msr_info->data);
-		break;
-	case MSR_IA32_TSCDEADLINE:
+	case MSR_IA32_TSC_DEADLINE:
 		msr_info->data = kvm_get_lapic_tscdeadline_msr(vcpu);
 		break;
 	case MSR_IA32_TSC_ADJUST:
@@ -2653,7 +4452,7 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		msr_info->data = vcpu->arch.ia32_misc_enable_msr;
 		break;
 	case MSR_IA32_SMBASE:
-		if (!msr_info->host_initiated)
+		if (!IS_ENABLED(CONFIG_KVM_SMM) || !msr_info->host_initiated)
 			return 1;
 		msr_info->data = vcpu->arch.smbase;
 		break;
@@ -2670,21 +4469,64 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		msr_info->data = vcpu->arch.efer;
 		break;
 	case MSR_KVM_WALL_CLOCK:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_CLOCKSOURCE))
+			return KVM_MSR_RET_UNSUPPORTED;
+
+		msr_info->data = vcpu->kvm->arch.wall_clock;
+		break;
 	case MSR_KVM_WALL_CLOCK_NEW:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_CLOCKSOURCE2))
+			return KVM_MSR_RET_UNSUPPORTED;
+
 		msr_info->data = vcpu->kvm->arch.wall_clock;
 		break;
 	case MSR_KVM_SYSTEM_TIME:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_CLOCKSOURCE))
+			return KVM_MSR_RET_UNSUPPORTED;
+
+		msr_info->data = vcpu->arch.time;
+		break;
 	case MSR_KVM_SYSTEM_TIME_NEW:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_CLOCKSOURCE2))
+			return KVM_MSR_RET_UNSUPPORTED;
+
 		msr_info->data = vcpu->arch.time;
 		break;
 	case MSR_KVM_ASYNC_PF_EN:
-		msr_info->data = vcpu->arch.apf.msr_val;
+		if (!guest_pv_has(vcpu, KVM_FEATURE_ASYNC_PF))
+			return KVM_MSR_RET_UNSUPPORTED;
+
+		msr_info->data = vcpu->arch.apf.msr_en_val;
+		break;
+	case MSR_KVM_ASYNC_PF_INT:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_ASYNC_PF_INT))
+			return KVM_MSR_RET_UNSUPPORTED;
+
+		msr_info->data = vcpu->arch.apf.msr_int_val;
+		break;
+	case MSR_KVM_ASYNC_PF_ACK:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_ASYNC_PF_INT))
+			return KVM_MSR_RET_UNSUPPORTED;
+
+		msr_info->data = 0;
 		break;
 	case MSR_KVM_STEAL_TIME:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_STEAL_TIME))
+			return KVM_MSR_RET_UNSUPPORTED;
+
 		msr_info->data = vcpu->arch.st.msr_val;
 		break;
 	case MSR_KVM_PV_EOI_EN:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_PV_EOI))
+			return KVM_MSR_RET_UNSUPPORTED;
+
 		msr_info->data = vcpu->arch.pv_eoi.msr_val;
+		break;
+	case MSR_KVM_POLL_CONTROL:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_POLL_CONTROL))
+			return KVM_MSR_RET_UNSUPPORTED;
+
+		msr_info->data = vcpu->arch.msr_kvm_poll_control;
 		break;
 	case MSR_IA32_P5_MC_ADDR:
 	case MSR_IA32_P5_MC_TYPE:
@@ -2692,7 +4534,15 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	case MSR_IA32_MCG_CTL:
 	case MSR_IA32_MCG_STATUS:
 	case MSR_IA32_MC0_CTL ... MSR_IA32_MCx_CTL(KVM_MAX_MCE_BANKS) - 1:
-		return get_msr_mce(vcpu, msr_info->index, &msr_info->data);
+	case MSR_IA32_MC0_CTL2 ... MSR_IA32_MCx_CTL2(KVM_MAX_MCE_BANKS) - 1:
+		return get_msr_mce(vcpu, msr_info->index, &msr_info->data,
+				   msr_info->host_initiated);
+	case MSR_IA32_XSS:
+		if (!msr_info->host_initiated &&
+		    !guest_cpuid_has(vcpu, X86_FEATURE_XSAVES))
+			return 1;
+		msr_info->data = vcpu->arch.ia32_xss;
+		break;
 	case MSR_K7_CLK_CTL:
 		/*
 		 * Provide expected ramp-up count for K7. All other
@@ -2705,16 +4555,21 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		 */
 		msr_info->data = 0x20000000;
 		break;
+#ifdef CONFIG_KVM_HYPERV
 	case HV_X64_MSR_GUEST_OS_ID ... HV_X64_MSR_SINT15:
+	case HV_X64_MSR_SYNDBG_CONTROL ... HV_X64_MSR_SYNDBG_PENDING_BUFFER:
+	case HV_X64_MSR_SYNDBG_OPTIONS:
 	case HV_X64_MSR_CRASH_P0 ... HV_X64_MSR_CRASH_P4:
 	case HV_X64_MSR_CRASH_CTL:
 	case HV_X64_MSR_STIMER0_CONFIG ... HV_X64_MSR_STIMER3_COUNT:
 	case HV_X64_MSR_REENLIGHTENMENT_CONTROL:
 	case HV_X64_MSR_TSC_EMULATION_CONTROL:
 	case HV_X64_MSR_TSC_EMULATION_STATUS:
+	case HV_X64_MSR_TSC_INVARIANT_CONTROL:
 		return kvm_hv_get_msr_common(vcpu,
-					     msr_info->index, &msr_info->data);
-		break;
+					     msr_info->index, &msr_info->data,
+					     msr_info->host_initiated);
+#endif
 	case MSR_IA32_BBL_CR_CTL3:
 		/* This legacy MSR exists but isn't fully documented in current
 		 * silicon.  It is however accessed by winxp in very narrow
@@ -2729,39 +4584,56 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		msr_info->data = 0xbe702111;
 		break;
 	case MSR_AMD64_OSVW_ID_LENGTH:
-		if (!guest_cpuid_has(vcpu, X86_FEATURE_OSVW))
+		if (!guest_cpu_cap_has(vcpu, X86_FEATURE_OSVW))
 			return 1;
 		msr_info->data = vcpu->arch.osvw.length;
 		break;
 	case MSR_AMD64_OSVW_STATUS:
-		if (!guest_cpuid_has(vcpu, X86_FEATURE_OSVW))
+		if (!guest_cpu_cap_has(vcpu, X86_FEATURE_OSVW))
 			return 1;
 		msr_info->data = vcpu->arch.osvw.status;
 		break;
 	case MSR_PLATFORM_INFO:
+		if (!msr_info->host_initiated &&
+		    !vcpu->kvm->arch.guest_can_read_msr_platform_info)
+			return 1;
 		msr_info->data = vcpu->arch.msr_platform_info;
 		break;
 	case MSR_MISC_FEATURES_ENABLES:
 		msr_info->data = vcpu->arch.msr_misc_features_enables;
 		break;
+	case MSR_K7_HWCR:
+		msr_info->data = vcpu->arch.msr_hwcr;
+		break;
+#ifdef CONFIG_X86_64
+	case MSR_IA32_XFD:
+		if (!msr_info->host_initiated &&
+		    !guest_cpu_cap_has(vcpu, X86_FEATURE_XFD))
+			return 1;
+
+		msr_info->data = vcpu->arch.guest_fpu.fpstate->xfd;
+		break;
+	case MSR_IA32_XFD_ERR:
+		if (!msr_info->host_initiated &&
+		    !guest_cpu_cap_has(vcpu, X86_FEATURE_XFD))
+			return 1;
+
+		msr_info->data = vcpu->arch.guest_fpu.xfd_err;
+		break;
+#endif
+	case MSR_IA32_U_CET:
+	case MSR_IA32_PL0_SSP ... MSR_IA32_PL3_SSP:
+		kvm_get_xstate_msr(vcpu, msr_info);
+		break;
 	default:
 		if (kvm_pmu_is_valid_msr(vcpu, msr_info->index))
-			return kvm_pmu_get_msr(vcpu, msr_info->index, &msr_info->data);
-		if (!ignore_msrs) {
-			vcpu_debug_ratelimited(vcpu, "unhandled rdmsr: 0x%x\n",
-					       msr_info->index);
-			return 1;
-		} else {
-			if (report_ignored_msrs)
-				vcpu_unimpl(vcpu, "ignored rdmsr: 0x%x\n",
-					msr_info->index);
-			msr_info->data = 0;
-		}
-		break;
+			return kvm_pmu_get_msr(vcpu, msr_info);
+
+		return KVM_MSR_RET_UNSUPPORTED;
 	}
 	return 0;
 }
-EXPORT_SYMBOL_GPL(kvm_get_msr_common);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_get_msr_common);
 
 /*
  * Read or write a bunch of msrs. All parameters are kernel addresses.
@@ -2773,11 +4645,25 @@ static int __msr_io(struct kvm_vcpu *vcpu, struct kvm_msrs *msrs,
 		    int (*do_msr)(struct kvm_vcpu *vcpu,
 				  unsigned index, u64 *data))
 {
+	bool fpu_loaded = false;
 	int i;
 
-	for (i = 0; i < msrs->nmsrs; ++i)
+	for (i = 0; i < msrs->nmsrs; ++i) {
+		/*
+		 * If userspace is accessing one or more XSTATE-managed MSRs,
+		 * temporarily load the guest's FPU state so that the guest's
+		 * MSR value(s) is resident in hardware and thus can be accessed
+		 * via RDMSR/WRMSR.
+		 */
+		if (!fpu_loaded && is_xstate_managed_msr(vcpu, entries[i].index)) {
+			kvm_load_guest_fpu(vcpu);
+			fpu_loaded = true;
+		}
 		if (do_msr(vcpu, entries[i].index, &entries[i].data))
 			break;
+	}
+	if (fpu_loaded)
+		kvm_put_guest_fpu(vcpu);
 
 	return i;
 }
@@ -2794,11 +4680,11 @@ static int msr_io(struct kvm_vcpu *vcpu, struct kvm_msrs __user *user_msrs,
 {
 	struct kvm_msrs msrs;
 	struct kvm_msr_entry *entries;
-	int r, n;
 	unsigned size;
+	int r;
 
 	r = -EFAULT;
-	if (copy_from_user(&msrs, user_msrs, sizeof msrs))
+	if (copy_from_user(&msrs, user_msrs, sizeof(msrs)))
 		goto out;
 
 	r = -E2BIG;
@@ -2812,17 +4698,11 @@ static int msr_io(struct kvm_vcpu *vcpu, struct kvm_msrs __user *user_msrs,
 		goto out;
 	}
 
-	r = n = __msr_io(vcpu, &msrs, entries, do_msr);
-	if (r < 0)
-		goto out_free;
+	r = __msr_io(vcpu, &msrs, entries, do_msr);
 
-	r = -EFAULT;
 	if (writeback && copy_to_user(user_msrs->entries, entries, size))
-		goto out_free;
+		r = -EFAULT;
 
-	r = n;
-
-out_free:
 	kfree(entries);
 out:
 	return r;
@@ -2833,6 +4713,56 @@ static inline bool kvm_can_mwait_in_guest(void)
 	return boot_cpu_has(X86_FEATURE_MWAIT) &&
 		!boot_cpu_has_bug(X86_BUG_MONITOR) &&
 		boot_cpu_has(X86_FEATURE_ARAT);
+}
+
+static u64 kvm_get_allowed_disable_exits(void)
+{
+	u64 r = KVM_X86_DISABLE_EXITS_PAUSE;
+
+	if (boot_cpu_has(X86_FEATURE_APERFMPERF))
+		r |= KVM_X86_DISABLE_EXITS_APERFMPERF;
+
+	if (!mitigate_smt_rsb) {
+		r |= KVM_X86_DISABLE_EXITS_HLT |
+			KVM_X86_DISABLE_EXITS_CSTATE;
+
+		if (kvm_can_mwait_in_guest())
+			r |= KVM_X86_DISABLE_EXITS_MWAIT;
+	}
+	return r;
+}
+
+#ifdef CONFIG_KVM_HYPERV
+static int kvm_ioctl_get_supported_hv_cpuid(struct kvm_vcpu *vcpu,
+					    struct kvm_cpuid2 __user *cpuid_arg)
+{
+	struct kvm_cpuid2 cpuid;
+	int r;
+
+	r = -EFAULT;
+	if (copy_from_user(&cpuid, cpuid_arg, sizeof(cpuid)))
+		return r;
+
+	r = kvm_get_hv_cpuid(vcpu, &cpuid, cpuid_arg->entries);
+	if (r)
+		return r;
+
+	r = -EFAULT;
+	if (copy_to_user(cpuid_arg, &cpuid, sizeof(cpuid)))
+		return r;
+
+	return 0;
+}
+#endif
+
+static bool kvm_is_vm_type_supported(unsigned long type)
+{
+	return type < 32 && (kvm_caps.supported_vm_types & BIT(type));
+}
+
+static inline u64 kvm_sync_valid_fields(struct kvm *kvm)
+{
+	return kvm && kvm->arch.has_protected_state ? 0 : KVM_SYNC_X86_VALID_FIELDS;
 }
 
 int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
@@ -2847,58 +4777,117 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 	case KVM_CAP_EXT_CPUID:
 	case KVM_CAP_EXT_EMUL_CPUID:
 	case KVM_CAP_CLOCKSOURCE:
+#ifdef CONFIG_KVM_IOAPIC
 	case KVM_CAP_PIT:
+	case KVM_CAP_PIT2:
+	case KVM_CAP_PIT_STATE2:
+	case KVM_CAP_REINJECT_CONTROL:
+#endif
 	case KVM_CAP_NOP_IO_DELAY:
 	case KVM_CAP_MP_STATE:
-	case KVM_CAP_SYNC_MMU:
 	case KVM_CAP_USER_NMI:
-	case KVM_CAP_REINJECT_CONTROL:
 	case KVM_CAP_IRQ_INJECT_STATUS:
 	case KVM_CAP_IOEVENTFD:
 	case KVM_CAP_IOEVENTFD_NO_LENGTH:
-	case KVM_CAP_PIT2:
-	case KVM_CAP_PIT_STATE2:
+
 	case KVM_CAP_SET_IDENTITY_MAP_ADDR:
-	case KVM_CAP_XEN_HVM:
 	case KVM_CAP_VCPU_EVENTS:
+#ifdef CONFIG_KVM_HYPERV
 	case KVM_CAP_HYPERV:
 	case KVM_CAP_HYPERV_VAPIC:
 	case KVM_CAP_HYPERV_SPIN:
+	case KVM_CAP_HYPERV_TIME:
 	case KVM_CAP_HYPERV_SYNIC:
 	case KVM_CAP_HYPERV_SYNIC2:
 	case KVM_CAP_HYPERV_VP_INDEX:
 	case KVM_CAP_HYPERV_EVENTFD:
+	case KVM_CAP_HYPERV_TLBFLUSH:
+	case KVM_CAP_HYPERV_SEND_IPI:
+	case KVM_CAP_HYPERV_CPUID:
+	case KVM_CAP_HYPERV_ENFORCE_CPUID:
+	case KVM_CAP_SYS_HYPERV_CPUID:
+#endif
 	case KVM_CAP_PCI_SEGMENT:
 	case KVM_CAP_DEBUGREGS:
 	case KVM_CAP_X86_ROBUST_SINGLESTEP:
 	case KVM_CAP_XSAVE:
 	case KVM_CAP_ASYNC_PF:
+	case KVM_CAP_ASYNC_PF_INT:
 	case KVM_CAP_GET_TSC_KHZ:
 	case KVM_CAP_KVMCLOCK_CTRL:
-	case KVM_CAP_READONLY_MEM:
-	case KVM_CAP_HYPERV_TIME:
 	case KVM_CAP_IOAPIC_POLARITY_IGNORED:
 	case KVM_CAP_TSC_DEADLINE_TIMER:
-	case KVM_CAP_ENABLE_CAP_VM:
 	case KVM_CAP_DISABLE_QUIRKS:
 	case KVM_CAP_SET_BOOT_CPU_ID:
  	case KVM_CAP_SPLIT_IRQCHIP:
 	case KVM_CAP_IMMEDIATE_EXIT:
+	case KVM_CAP_PMU_EVENT_FILTER:
+	case KVM_CAP_PMU_EVENT_MASKED_EVENTS:
 	case KVM_CAP_GET_MSR_FEATURES:
+	case KVM_CAP_MSR_PLATFORM_INFO:
+	case KVM_CAP_EXCEPTION_PAYLOAD:
+	case KVM_CAP_X86_TRIPLE_FAULT_EVENT:
+	case KVM_CAP_SET_GUEST_DEBUG:
+	case KVM_CAP_LAST_CPU:
+	case KVM_CAP_X86_USER_SPACE_MSR:
+	case KVM_CAP_X86_MSR_FILTER:
+	case KVM_CAP_ENFORCE_PV_FEATURE_CPUID:
+#ifdef CONFIG_X86_SGX_KVM
+	case KVM_CAP_SGX_ATTRIBUTE:
+#endif
+	case KVM_CAP_VM_COPY_ENC_CONTEXT_FROM:
+	case KVM_CAP_VM_MOVE_ENC_CONTEXT_FROM:
+	case KVM_CAP_SREGS2:
+	case KVM_CAP_EXIT_ON_EMULATION_FAILURE:
+	case KVM_CAP_VCPU_ATTRIBUTES:
+	case KVM_CAP_SYS_ATTRIBUTES:
+	case KVM_CAP_VAPIC:
+	case KVM_CAP_ENABLE_CAP:
+	case KVM_CAP_VM_DISABLE_NX_HUGE_PAGES:
+	case KVM_CAP_IRQFD_RESAMPLE:
+	case KVM_CAP_MEMORY_FAULT_INFO:
+	case KVM_CAP_X86_GUEST_MODE:
+	case KVM_CAP_ONE_REG:
 		r = 1;
 		break;
+	case KVM_CAP_PRE_FAULT_MEMORY:
+		r = tdp_enabled;
+		break;
+	case KVM_CAP_X86_APIC_BUS_CYCLES_NS:
+		r = kvm ? kvm->arch.apic_bus_cycle_ns : APIC_BUS_CYCLE_NS_DEFAULT;
+		break;
+	case KVM_CAP_EXIT_HYPERCALL:
+		r = KVM_EXIT_HYPERCALL_VALID_MASK;
+		break;
+	case KVM_CAP_SET_GUEST_DEBUG2:
+		return KVM_GUESTDBG_VALID_MASK;
+#ifdef CONFIG_KVM_XEN
+	case KVM_CAP_XEN_HVM:
+		r = KVM_XEN_HVM_CONFIG_HYPERCALL_MSR |
+		    KVM_XEN_HVM_CONFIG_INTERCEPT_HCALL |
+		    KVM_XEN_HVM_CONFIG_SHARED_INFO |
+		    KVM_XEN_HVM_CONFIG_EVTCHN_2LEVEL |
+		    KVM_XEN_HVM_CONFIG_EVTCHN_SEND |
+		    KVM_XEN_HVM_CONFIG_PVCLOCK_TSC_UNSTABLE |
+		    KVM_XEN_HVM_CONFIG_SHARED_INFO_HVA;
+		if (sched_info_on())
+			r |= KVM_XEN_HVM_CONFIG_RUNSTATE |
+			     KVM_XEN_HVM_CONFIG_RUNSTATE_UPDATE_FLAG;
+		break;
+#endif
 	case KVM_CAP_SYNC_REGS:
-		r = KVM_SYNC_X86_VALID_FIELDS;
+		r = kvm_sync_valid_fields(kvm);
 		break;
 	case KVM_CAP_ADJUST_CLOCK:
-		r = KVM_CLOCK_TSC_STABLE;
+		r = KVM_CLOCK_VALID_FLAGS;
 		break;
 	case KVM_CAP_X86_DISABLE_EXITS:
-		r |=  KVM_X86_DISABLE_EXITS_HTL | KVM_X86_DISABLE_EXITS_PAUSE;
-		if(kvm_can_mwait_in_guest())
-			r |= KVM_X86_DISABLE_EXITS_MWAIT;
+		r = kvm_get_allowed_disable_exits();
 		break;
 	case KVM_CAP_X86_SMM:
+		if (!IS_ENABLED(CONFIG_KVM_SMM))
+			break;
+
 		/* SMBASE is usually relocated above 1M on modern chipsets,
 		 * and SMM handlers might indeed rely on 4G segment limits,
 		 * so do not report SMM to be available if real mode is
@@ -2907,19 +4896,18 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 		 * fringe case that is not enabled except via specific settings
 		 * of the module parameters.
 		 */
-		r = kvm_x86_ops->has_emulated_msr(MSR_IA32_SMBASE);
-		break;
-	case KVM_CAP_VAPIC:
-		r = !kvm_x86_ops->cpu_has_accelerated_tpr();
+		r = kvm_x86_call(has_emulated_msr)(kvm, MSR_IA32_SMBASE);
 		break;
 	case KVM_CAP_NR_VCPUS:
-		r = KVM_SOFT_MAX_VCPUS;
+		r = min_t(unsigned int, num_online_cpus(), KVM_MAX_VCPUS);
 		break;
 	case KVM_CAP_MAX_VCPUS:
 		r = KVM_MAX_VCPUS;
+		if (kvm)
+			r = kvm->max_vcpus;
 		break;
-	case KVM_CAP_NR_MEMSLOTS:
-		r = KVM_USER_MEM_SLOTS;
+	case KVM_CAP_MAX_VCPU_ID:
+		r = KVM_MAX_VCPU_IDS;
 		break;
 	case KVM_CAP_PV_MMU:	/* obsolete */
 		r = 0;
@@ -2931,16 +4919,104 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 		r = boot_cpu_has(X86_FEATURE_XSAVE);
 		break;
 	case KVM_CAP_TSC_CONTROL:
-		r = kvm_has_tsc_control;
+	case KVM_CAP_VM_TSC_CONTROL:
+		r = kvm_caps.has_tsc_control;
 		break;
 	case KVM_CAP_X2APIC_API:
 		r = KVM_X2APIC_API_VALID_FLAGS;
+		if (kvm && !irqchip_split(kvm))
+			r &= ~KVM_X2APIC_ENABLE_SUPPRESS_EOI_BROADCAST;
+		break;
+	case KVM_CAP_NESTED_STATE:
+		r = kvm_x86_ops.nested_ops->get_state ?
+			kvm_x86_ops.nested_ops->get_state(NULL, NULL, 0) : 0;
+		break;
+#ifdef CONFIG_KVM_HYPERV
+	case KVM_CAP_HYPERV_DIRECT_TLBFLUSH:
+		r = kvm_x86_ops.enable_l2_tlb_flush != NULL;
+		break;
+	case KVM_CAP_HYPERV_ENLIGHTENED_VMCS:
+		r = kvm_x86_ops.nested_ops->enable_evmcs != NULL;
+		break;
+#endif
+	case KVM_CAP_SMALLER_MAXPHYADDR:
+		r = (int) allow_smaller_maxphyaddr;
+		break;
+	case KVM_CAP_STEAL_TIME:
+		r = sched_info_on();
+		break;
+	case KVM_CAP_X86_BUS_LOCK_EXIT:
+		if (kvm_caps.has_bus_lock_exit)
+			r = KVM_BUS_LOCK_DETECTION_OFF |
+			    KVM_BUS_LOCK_DETECTION_EXIT;
+		else
+			r = 0;
+		break;
+	case KVM_CAP_XSAVE2: {
+		r = xstate_required_size(kvm_get_filtered_xcr0(), false);
+		if (r < sizeof(struct kvm_xsave))
+			r = sizeof(struct kvm_xsave);
+		break;
+	}
+	case KVM_CAP_PMU_CAPABILITY:
+		r = enable_pmu ? KVM_CAP_PMU_VALID_MASK : 0;
+		break;
+	case KVM_CAP_DISABLE_QUIRKS2:
+		r = kvm_caps.supported_quirks;
+		break;
+	case KVM_CAP_X86_NOTIFY_VMEXIT:
+		r = kvm_caps.has_notify_vmexit;
+		break;
+	case KVM_CAP_VM_TYPES:
+		r = kvm_caps.supported_vm_types;
+		break;
+	case KVM_CAP_READONLY_MEM:
+		r = kvm ? kvm_arch_has_readonly_mem(kvm) : 1;
 		break;
 	default:
 		break;
 	}
 	return r;
+}
 
+static int __kvm_x86_dev_get_attr(struct kvm_device_attr *attr, u64 *val)
+{
+	if (attr->group) {
+		if (kvm_x86_ops.dev_get_attr)
+			return kvm_x86_call(dev_get_attr)(attr->group, attr->attr, val);
+		return -ENXIO;
+	}
+
+	switch (attr->attr) {
+	case KVM_X86_XCOMP_GUEST_SUPP:
+		*val = kvm_caps.supported_xcr0;
+		return 0;
+	default:
+		return -ENXIO;
+	}
+}
+
+static int kvm_x86_dev_get_attr(struct kvm_device_attr *attr)
+{
+	u64 __user *uaddr = u64_to_user_ptr(attr->addr);
+	int r;
+	u64 val;
+
+	r = __kvm_x86_dev_get_attr(attr, &val);
+	if (r < 0)
+		return r;
+
+	if (put_user(val, uaddr))
+		return -EFAULT;
+
+	return 0;
+}
+
+static int kvm_x86_dev_has_attr(struct kvm_device_attr *attr)
+{
+	u64 val;
+
+	return __kvm_x86_dev_get_attr(attr, &val);
 }
 
 long kvm_arch_dev_ioctl(struct file *filp,
@@ -2956,11 +5032,11 @@ long kvm_arch_dev_ioctl(struct file *filp,
 		unsigned n;
 
 		r = -EFAULT;
-		if (copy_from_user(&msr_list, user_msr_list, sizeof msr_list))
+		if (copy_from_user(&msr_list, user_msr_list, sizeof(msr_list)))
 			goto out;
 		n = msr_list.nmsrs;
 		msr_list.nmsrs = num_msrs_to_save + num_emulated_msrs;
-		if (copy_to_user(user_msr_list, &msr_list, sizeof msr_list))
+		if (copy_to_user(user_msr_list, &msr_list, sizeof(msr_list)))
 			goto out;
 		r = -E2BIG;
 		if (n < msr_list.nmsrs)
@@ -2982,7 +5058,7 @@ long kvm_arch_dev_ioctl(struct file *filp,
 		struct kvm_cpuid2 cpuid;
 
 		r = -EFAULT;
-		if (copy_from_user(&cpuid, cpuid_arg, sizeof cpuid))
+		if (copy_from_user(&cpuid, cpuid_arg, sizeof(cpuid)))
 			goto out;
 
 		r = kvm_dev_ioctl_get_cpuid(&cpuid, cpuid_arg->entries,
@@ -2991,15 +5067,15 @@ long kvm_arch_dev_ioctl(struct file *filp,
 			goto out;
 
 		r = -EFAULT;
-		if (copy_to_user(cpuid_arg, &cpuid, sizeof cpuid))
+		if (copy_to_user(cpuid_arg, &cpuid, sizeof(cpuid)))
 			goto out;
 		r = 0;
 		break;
 	}
-	case KVM_X86_GET_MCE_CAP_SUPPORTED: {
+	case KVM_X86_GET_MCE_CAP_SUPPORTED:
 		r = -EFAULT;
-		if (copy_to_user(argp, &kvm_mce_cap_supported,
-				 sizeof(kvm_mce_cap_supported)))
+		if (copy_to_user(argp, &kvm_caps.supported_mce_cap,
+				 sizeof(kvm_caps.supported_mce_cap)))
 			goto out;
 		r = 0;
 		break;
@@ -3026,19 +5102,35 @@ long kvm_arch_dev_ioctl(struct file *filp,
 		break;
 	}
 	case KVM_GET_MSRS:
-		r = msr_io(NULL, argp, do_get_msr_feature, 1);
+		r = msr_io(NULL, argp, do_get_feature_msr, 1);
+		break;
+#ifdef CONFIG_KVM_HYPERV
+	case KVM_GET_SUPPORTED_HV_CPUID:
+		r = kvm_ioctl_get_supported_hv_cpuid(NULL, argp);
+		break;
+#endif
+	case KVM_GET_DEVICE_ATTR: {
+		struct kvm_device_attr attr;
+		r = -EFAULT;
+		if (copy_from_user(&attr, (void __user *)arg, sizeof(attr)))
+			break;
+		r = kvm_x86_dev_get_attr(&attr);
+		break;
+	}
+	case KVM_HAS_DEVICE_ATTR: {
+		struct kvm_device_attr attr;
+		r = -EFAULT;
+		if (copy_from_user(&attr, (void __user *)arg, sizeof(attr)))
+			break;
+		r = kvm_x86_dev_has_attr(&attr);
 		break;
 	}
 	default:
 		r = -EINVAL;
+		break;
 	}
 out:
 	return r;
-}
-
-static void wbinvd_ipi(void *garbage)
-{
-	wbinvd();
 }
 
 static bool need_emulate_wbinvd(struct kvm_vcpu *vcpu)
@@ -3046,18 +5138,44 @@ static bool need_emulate_wbinvd(struct kvm_vcpu *vcpu)
 	return kvm_arch_has_noncoherent_dma(vcpu->kvm);
 }
 
+static DEFINE_PER_CPU(struct kvm_vcpu *, last_vcpu);
+
 void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 {
-	/* Address WBINVD may be executed by guest */
-	if (need_emulate_wbinvd(vcpu)) {
-		if (kvm_x86_ops->has_wbinvd_exit())
-			cpumask_set_cpu(cpu, vcpu->arch.wbinvd_dirty_mask);
-		else if (vcpu->cpu != -1 && vcpu->cpu != cpu)
-			smp_call_function_single(vcpu->cpu,
-					wbinvd_ipi, NULL, 1);
+	struct kvm_pmu *pmu = vcpu_to_pmu(vcpu);
+
+	kvm_request_l1tf_flush_l1d();
+
+	if (vcpu->scheduled_out && pmu->version && pmu->event_count) {
+		pmu->need_cleanup = true;
+		kvm_make_request(KVM_REQ_PMU, vcpu);
 	}
 
-	kvm_x86_ops->vcpu_load(vcpu, cpu);
+	/* Address WBINVD may be executed by guest */
+	if (need_emulate_wbinvd(vcpu)) {
+		if (kvm_x86_call(has_wbinvd_exit)())
+			cpumask_set_cpu(cpu, vcpu->arch.wbinvd_dirty_mask);
+		else if (vcpu->cpu != -1 && vcpu->cpu != cpu)
+			wbinvd_on_cpu(vcpu->cpu);
+	}
+
+	kvm_x86_call(vcpu_load)(vcpu, cpu);
+
+	if (vcpu != per_cpu(last_vcpu, cpu)) {
+		/*
+		 * Flush the branch predictor when switching vCPUs on the same
+		 * physical CPU, as each vCPU needs its own branch prediction
+		 * domain.  No IBPB is needed when switching between L1 and L2
+		 * on the same vCPU unless IBRS is advertised to the vCPU; that
+		 * is handled on the nested VM-Exit path.
+		 */
+		if (static_branch_likely(&switch_vcpu_ibpb))
+			indirect_branch_prediction_barrier();
+		per_cpu(last_vcpu, cpu) = vcpu;
+	}
+
+	/* Save host pkru register if supported */
+	vcpu->arch.host_pkru = read_pkru();
 
 	/* Apply any externally detected TSC adjustments (due to suspend) */
 	if (unlikely(vcpu->arch.tsc_offset_adjustment)) {
@@ -3073,10 +5191,11 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 			mark_tsc_unstable("KVM discovered backwards TSC");
 
 		if (kvm_check_tsc_unstable()) {
-			u64 offset = kvm_compute_tsc_offset(vcpu,
+			u64 offset = kvm_compute_l1_tsc_offset(vcpu,
 						vcpu->arch.last_guest_tsc);
 			kvm_vcpu_write_tsc_offset(vcpu, offset);
-			vcpu->arch.tsc_catchup = 1;
+			if (!vcpu->arch.guest_tsc_protected)
+				vcpu->arch.tsc_catchup = 1;
 		}
 
 		if (kvm_lapic_hv_timer_in_use(vcpu))
@@ -3086,8 +5205,13 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 		 * On a host with synchronized TSC, there is no need to update
 		 * kvmclock on vcpu->cpu migration
 		 */
-		if (!vcpu->kvm->arch.use_master_clock || vcpu->cpu == -1)
-			kvm_make_request(KVM_REQ_GLOBAL_CLOCK_UPDATE, vcpu);
+		if (!vcpu->kvm->arch.use_master_clock || vcpu->cpu == -1) {
+			if (__ratelimit(&vcpu->kvm->arch.kvmclock_update_rs))
+				kvm_make_request(KVM_REQ_GLOBAL_CLOCK_UPDATE, vcpu);
+			else
+				kvm_make_request(KVM_REQ_CLOCK_UPDATE, vcpu);
+		}
+
 		if (vcpu->cpu != cpu)
 			kvm_make_request(KVM_REQ_MIGRATE_TIMER, vcpu);
 		vcpu->cpu = cpu;
@@ -3098,56 +5222,87 @@ void kvm_arch_vcpu_load(struct kvm_vcpu *vcpu, int cpu)
 
 static void kvm_steal_time_set_preempted(struct kvm_vcpu *vcpu)
 {
+	struct gfn_to_hva_cache *ghc = &vcpu->arch.st.cache;
+	struct kvm_steal_time __user *st;
+	struct kvm_memslots *slots;
+	static const u8 preempted = KVM_VCPU_PREEMPTED;
+	gpa_t gpa = vcpu->arch.st.msr_val & KVM_STEAL_VALID_BITS;
+
+	/*
+	 * The vCPU can be marked preempted if and only if the VM-Exit was on
+	 * an instruction boundary and will not trigger guest emulation of any
+	 * kind (see vcpu_run).  Vendor specific code controls (conservatively)
+	 * when this is true, for example allowing the vCPU to be marked
+	 * preempted if and only if the VM-Exit was due to a host interrupt.
+	 */
+	if (!vcpu->arch.at_instruction_boundary) {
+		vcpu->stat.preemption_other++;
+		return;
+	}
+
+	vcpu->stat.preemption_reported++;
 	if (!(vcpu->arch.st.msr_val & KVM_MSR_ENABLED))
 		return;
 
-	vcpu->arch.st.steal.preempted = KVM_VCPU_PREEMPTED;
+	if (vcpu->arch.st.preempted)
+		return;
 
-	kvm_write_guest_offset_cached(vcpu->kvm, &vcpu->arch.st.stime,
-			&vcpu->arch.st.steal.preempted,
-			offsetof(struct kvm_steal_time, preempted),
-			sizeof(vcpu->arch.st.steal.preempted));
+	/* This happens on process exit */
+	if (unlikely(current->mm != vcpu->kvm->mm))
+		return;
+
+	slots = kvm_memslots(vcpu->kvm);
+
+	if (unlikely(slots->generation != ghc->generation ||
+		     gpa != ghc->gpa ||
+		     kvm_is_error_hva(ghc->hva) || !ghc->memslot))
+		return;
+
+	st = (struct kvm_steal_time __user *)ghc->hva;
+	BUILD_BUG_ON(sizeof(st->preempted) != sizeof(preempted));
+
+	if (!copy_to_user_nofault(&st->preempted, &preempted, sizeof(preempted)))
+		vcpu->arch.st.preempted = KVM_VCPU_PREEMPTED;
+
+	mark_page_dirty_in_slot(vcpu->kvm, ghc->memslot, gpa_to_gfn(ghc->gpa));
 }
 
 void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu)
 {
 	int idx;
 
-	if (vcpu->preempted)
-		vcpu->arch.preempted_in_kernel = !kvm_x86_ops->get_cpl(vcpu);
+	if (vcpu->preempted) {
+		/*
+		 * Assume protected guests are in-kernel.  Inefficient yielding
+		 * due to false positives is preferable to never yielding due
+		 * to false negatives.
+		 */
+		vcpu->arch.preempted_in_kernel = vcpu->arch.guest_state_protected ||
+						 !kvm_x86_call(get_cpl_no_cache)(vcpu);
 
-	/*
-	 * Disable page faults because we're in atomic context here.
-	 * kvm_write_guest_offset_cached() would call might_fault()
-	 * that relies on pagefault_disable() to tell if there's a
-	 * bug. NOTE: the write to guest memory may not go through if
-	 * during postcopy live migration or if there's heavy guest
-	 * paging.
-	 */
-	pagefault_disable();
-	/*
-	 * kvm_memslots() will be called by
-	 * kvm_write_guest_offset_cached() so take the srcu lock.
-	 */
-	idx = srcu_read_lock(&vcpu->kvm->srcu);
-	kvm_steal_time_set_preempted(vcpu);
-	srcu_read_unlock(&vcpu->kvm->srcu, idx);
-	pagefault_enable();
-	kvm_x86_ops->vcpu_put(vcpu);
+		/*
+		 * Take the srcu lock as memslots will be accessed to check the gfn
+		 * cache generation against the memslots generation.
+		 */
+		idx = srcu_read_lock(&vcpu->kvm->srcu);
+		if (kvm_xen_msr_enabled(vcpu->kvm))
+			kvm_xen_runstate_set_preempted(vcpu);
+		else
+			kvm_steal_time_set_preempted(vcpu);
+		srcu_read_unlock(&vcpu->kvm->srcu, idx);
+	}
+
+	kvm_x86_call(vcpu_put)(vcpu);
 	vcpu->arch.last_host_tsc = rdtsc();
-	/*
-	 * If userspace has set any breakpoints or watchpoints, dr6 is restored
-	 * on every vmexit, but if not, we might have a stale dr6 from the
-	 * guest. do_debug expects dr6 to be cleared after it runs, do the same.
-	 */
-	set_debugreg(0, 6);
 }
 
 static int kvm_vcpu_ioctl_get_lapic(struct kvm_vcpu *vcpu,
 				    struct kvm_lapic_state *s)
 {
-	if (vcpu->arch.apicv_active)
-		kvm_x86_ops->sync_pir_to_irr(vcpu);
+	if (vcpu->arch.apic->guest_apic_protected)
+		return -EINVAL;
+
+	kvm_x86_call(sync_pir_to_irr)(vcpu);
 
 	return kvm_apic_get_state(vcpu, s);
 }
@@ -3157,32 +5312,45 @@ static int kvm_vcpu_ioctl_set_lapic(struct kvm_vcpu *vcpu,
 {
 	int r;
 
+	if (vcpu->arch.apic->guest_apic_protected)
+		return -EINVAL;
+
 	r = kvm_apic_set_state(vcpu, s);
 	if (r)
 		return r;
-	update_cr8_intercept(vcpu);
 
 	return 0;
 }
 
 static int kvm_cpu_accept_dm_intr(struct kvm_vcpu *vcpu)
 {
+	/*
+	 * We can accept userspace's request for interrupt injection
+	 * as long as we have a place to store the interrupt number.
+	 * The actual injection will happen when the CPU is able to
+	 * deliver the interrupt.
+	 */
+	if (kvm_cpu_has_extint(vcpu))
+		return false;
+
+	/* Acknowledging ExtINT does not happen if LINT0 is masked.  */
 	return (!lapic_in_kernel(vcpu) ||
 		kvm_apic_accept_pic_intr(vcpu));
 }
 
-/*
- * if userspace requested an interrupt window, check that the
- * interrupt window is open.
- *
- * No need to exit to userspace if we already have an interrupt queued.
- */
 static int kvm_vcpu_ready_for_interrupt_injection(struct kvm_vcpu *vcpu)
 {
-	return kvm_arch_interrupt_allowed(vcpu) &&
-		!kvm_cpu_has_interrupt(vcpu) &&
+	/*
+	 * Do not cause an interrupt window exit if an exception
+	 * is pending or an event needs reinjection; userspace
+	 * might want to inject the interrupt manually using KVM_SET_REGS
+	 * or KVM_SET_SREGS.  For that to work, we must be at an
+	 * instruction boundary and with no events half-injected.
+	 */
+	return (kvm_arch_interrupt_allowed(vcpu) &&
+		kvm_cpu_accept_dm_intr(vcpu) &&
 		!kvm_event_needs_reinjection(vcpu) &&
-		kvm_cpu_accept_dm_intr(vcpu);
+		!kvm_is_exception_pending(vcpu));
 }
 
 static int kvm_vcpu_ioctl_interrupt(struct kvm_vcpu *vcpu,
@@ -3219,13 +5387,6 @@ static int kvm_vcpu_ioctl_nmi(struct kvm_vcpu *vcpu)
 	return 0;
 }
 
-static int kvm_vcpu_ioctl_smi(struct kvm_vcpu *vcpu)
-{
-	kvm_make_request(KVM_REQ_SMI, vcpu);
-
-	return 0;
-}
-
 static int vcpu_ioctl_tpr_access_reporting(struct kvm_vcpu *vcpu,
 					   struct kvm_tpr_access_ctl *tac)
 {
@@ -3242,23 +5403,63 @@ static int kvm_vcpu_ioctl_x86_setup_mce(struct kvm_vcpu *vcpu,
 	unsigned bank_num = mcg_cap & 0xff, bank;
 
 	r = -EINVAL;
-	if (!bank_num || bank_num >= KVM_MAX_MCE_BANKS)
+	if (!bank_num || bank_num > KVM_MAX_MCE_BANKS)
 		goto out;
-	if (mcg_cap & ~(kvm_mce_cap_supported | 0xff | 0xff0000))
+	if (mcg_cap & ~(kvm_caps.supported_mce_cap | 0xff | 0xff0000))
 		goto out;
 	r = 0;
 	vcpu->arch.mcg_cap = mcg_cap;
 	/* Init IA32_MCG_CTL to all 1s */
 	if (mcg_cap & MCG_CTL_P)
 		vcpu->arch.mcg_ctl = ~(u64)0;
-	/* Init IA32_MCi_CTL to all 1s */
-	for (bank = 0; bank < bank_num; bank++)
+	/* Init IA32_MCi_CTL to all 1s, IA32_MCi_CTL2 to all 0s */
+	for (bank = 0; bank < bank_num; bank++) {
 		vcpu->arch.mce_banks[bank*4] = ~(u64)0;
+		if (mcg_cap & MCG_CMCI_P)
+			vcpu->arch.mci_ctl2_banks[bank] = 0;
+	}
 
-	if (kvm_x86_ops->setup_mce)
-		kvm_x86_ops->setup_mce(vcpu);
+	kvm_apic_after_set_mcg_cap(vcpu);
+
+	kvm_x86_call(setup_mce)(vcpu);
 out:
 	return r;
+}
+
+/*
+ * Validate this is an UCNA (uncorrectable no action) error by checking the
+ * MCG_STATUS and MCi_STATUS registers:
+ * - none of the bits for Machine Check Exceptions are set
+ * - both the VAL (valid) and UC (uncorrectable) bits are set
+ * MCI_STATUS_PCC - Processor Context Corrupted
+ * MCI_STATUS_S - Signaled as a Machine Check Exception
+ * MCI_STATUS_AR - Software recoverable Action Required
+ */
+static bool is_ucna(struct kvm_x86_mce *mce)
+{
+	return	!mce->mcg_status &&
+		!(mce->status & (MCI_STATUS_PCC | MCI_STATUS_S | MCI_STATUS_AR)) &&
+		(mce->status & MCI_STATUS_VAL) &&
+		(mce->status & MCI_STATUS_UC);
+}
+
+static int kvm_vcpu_x86_set_ucna(struct kvm_vcpu *vcpu, struct kvm_x86_mce *mce, u64* banks)
+{
+	u64 mcg_cap = vcpu->arch.mcg_cap;
+
+	banks[1] = mce->status;
+	banks[2] = mce->addr;
+	banks[3] = mce->misc;
+	vcpu->arch.mcg_status = mce->mcg_status;
+
+	if (!(mcg_cap & MCG_CMCI_P) ||
+	    !(vcpu->arch.mci_ctl2_banks[mce->bank] & MCI_CTL2_CMCI_EN))
+		return 0;
+
+	if (lapic_in_kernel(vcpu))
+		kvm_apic_local_deliver(vcpu->arch.apic, APIC_LVTCMCI);
+
+	return 0;
 }
 
 static int kvm_vcpu_ioctl_x86_set_mce(struct kvm_vcpu *vcpu,
@@ -3270,6 +5471,12 @@ static int kvm_vcpu_ioctl_x86_set_mce(struct kvm_vcpu *vcpu,
 
 	if (mce->bank >= bank_num || !(mce->status & MCI_STATUS_VAL))
 		return -EINVAL;
+
+	banks += array_index_nospec(4 * mce->bank, 4 * bank_num);
+
+	if (is_ucna(mce))
+		return kvm_vcpu_x86_set_ucna(vcpu, mce, banks);
+
 	/*
 	 * if IA32_MCG_CTL is not all 1s, the uncorrected error
 	 * reporting is disabled
@@ -3277,7 +5484,6 @@ static int kvm_vcpu_ioctl_x86_set_mce(struct kvm_vcpu *vcpu,
 	if ((mce->status & MCI_STATUS_UC) && (mcg_cap & MCG_CTL_P) &&
 	    vcpu->arch.mcg_ctl != ~(u64)0)
 		return 0;
-	banks += 4 * mce->bank;
 	/*
 	 * if IA32_MCi_CTL is not all 1s, the uncorrected error
 	 * reporting is disabled for the bank
@@ -3286,7 +5492,7 @@ static int kvm_vcpu_ioctl_x86_set_mce(struct kvm_vcpu *vcpu,
 		return 0;
 	if (mce->status & MCI_STATUS_UC) {
 		if ((vcpu->arch.mcg_status & MCG_STATUS_MCIP) ||
-		    !kvm_read_cr4_bits(vcpu, X86_CR4_MCE)) {
+		    !kvm_is_cr4_bit_set(vcpu, X86_CR4_MCE)) {
 			kvm_make_request(KVM_REQ_TRIPLE_FAULT, vcpu);
 			return 0;
 		}
@@ -3309,50 +5515,113 @@ static int kvm_vcpu_ioctl_x86_set_mce(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
+static struct kvm_queued_exception *kvm_get_exception_to_save(struct kvm_vcpu *vcpu)
+{
+	/*
+	 * KVM's ABI only allows for one exception to be migrated.  Luckily,
+	 * the only time there can be two queued exceptions is if there's a
+	 * non-exiting _injected_ exception, and a pending exiting exception.
+	 * In that case, ignore the VM-Exiting exception as it's an extension
+	 * of the injected exception.
+	 */
+	if (vcpu->arch.exception_vmexit.pending &&
+	    !vcpu->arch.exception.pending &&
+	    !vcpu->arch.exception.injected)
+		return &vcpu->arch.exception_vmexit;
+
+	return &vcpu->arch.exception;
+}
+
+static void kvm_handle_exception_payload_quirk(struct kvm_vcpu *vcpu)
+{
+	struct kvm_queued_exception *ex = kvm_get_exception_to_save(vcpu);
+
+	/*
+	 * If KVM_CAP_EXCEPTION_PAYLOAD is disabled, then (prematurely) deliver
+	 * the pending exception payload when userspace saves *any* vCPU state
+	 * that interacts with exception payloads to avoid breaking userspace.
+	 *
+	 * Architecturally, KVM must not deliver an exception payload until the
+	 * exception is actually injected, e.g. to avoid losing pending #DB
+	 * information (which VMX tracks in the VMCS), and to avoid clobbering
+	 * state if the exception is never injected for whatever reason.  But
+	 * if KVM_CAP_EXCEPTION_PAYLOAD isn't enabled, then userspace may or
+	 * may not propagate the payload across save+restore, and so KVM can't
+	 * safely defer delivery of the payload.
+	 */
+	if (!vcpu->kvm->arch.exception_payload_enabled &&
+	    ex->pending && ex->has_payload)
+		kvm_deliver_exception_payload(vcpu, ex);
+}
+
 static void kvm_vcpu_ioctl_x86_get_vcpu_events(struct kvm_vcpu *vcpu,
 					       struct kvm_vcpu_events *events)
 {
+	struct kvm_queued_exception *ex = kvm_get_exception_to_save(vcpu);
+
 	process_nmi(vcpu);
+
+#ifdef CONFIG_KVM_SMM
+	if (kvm_check_request(KVM_REQ_SMI, vcpu))
+		process_smi(vcpu);
+#endif
+
+	kvm_handle_exception_payload_quirk(vcpu);
+
+	memset(events, 0, sizeof(*events));
+
 	/*
-	 * FIXME: pass injected and pending separately.  This is only
-	 * needed for nested virtualization, whose state cannot be
-	 * migrated yet.  For now we can combine them.
+	 * The API doesn't provide the instruction length for software
+	 * exceptions, so don't report them. As long as the guest RIP
+	 * isn't advanced, we should expect to encounter the exception
+	 * again.
 	 */
-	events->exception.injected =
-		(vcpu->arch.exception.pending ||
-		 vcpu->arch.exception.injected) &&
-		!kvm_exception_is_soft(vcpu->arch.exception.nr);
-	events->exception.nr = vcpu->arch.exception.nr;
-	events->exception.has_error_code = vcpu->arch.exception.has_error_code;
-	events->exception.pad = 0;
-	events->exception.error_code = vcpu->arch.exception.error_code;
+	if (!kvm_exception_is_soft(ex->vector)) {
+		events->exception.injected = ex->injected;
+		events->exception.pending = ex->pending;
+		/*
+		 * For ABI compatibility, deliberately conflate
+		 * pending and injected exceptions when
+		 * KVM_CAP_EXCEPTION_PAYLOAD isn't enabled.
+		 */
+		if (!vcpu->kvm->arch.exception_payload_enabled)
+			events->exception.injected |= ex->pending;
+	}
+	events->exception.nr = ex->vector;
+	events->exception.has_error_code = ex->has_error_code;
+	events->exception.error_code = ex->error_code;
+	events->exception_has_payload = ex->has_payload;
+	events->exception_payload = ex->payload;
 
 	events->interrupt.injected =
 		vcpu->arch.interrupt.injected && !vcpu->arch.interrupt.soft;
 	events->interrupt.nr = vcpu->arch.interrupt.nr;
-	events->interrupt.soft = 0;
-	events->interrupt.shadow = kvm_x86_ops->get_interrupt_shadow(vcpu);
+	events->interrupt.shadow = kvm_x86_call(get_interrupt_shadow)(vcpu);
 
 	events->nmi.injected = vcpu->arch.nmi_injected;
-	events->nmi.pending = vcpu->arch.nmi_pending != 0;
-	events->nmi.masked = kvm_x86_ops->get_nmi_mask(vcpu);
-	events->nmi.pad = 0;
+	events->nmi.pending = kvm_get_nr_pending_nmis(vcpu);
+	events->nmi.masked = kvm_x86_call(get_nmi_mask)(vcpu);
 
-	events->sipi_vector = 0; /* never valid when reporting to user space */
+	/* events->sipi_vector is never valid when reporting to user space */
 
+#ifdef CONFIG_KVM_SMM
 	events->smi.smm = is_smm(vcpu);
 	events->smi.pending = vcpu->arch.smi_pending;
 	events->smi.smm_inside_nmi =
 		!!(vcpu->arch.hflags & HF_SMM_INSIDE_NMI_MASK);
+#endif
 	events->smi.latched_init = kvm_lapic_latched_init(vcpu);
 
 	events->flags = (KVM_VCPUEVENT_VALID_NMI_PENDING
 			 | KVM_VCPUEVENT_VALID_SHADOW
 			 | KVM_VCPUEVENT_VALID_SMM);
-	memset(&events->reserved, 0, sizeof(events->reserved));
+	if (vcpu->kvm->arch.exception_payload_enabled)
+		events->flags |= KVM_VCPUEVENT_VALID_PAYLOAD;
+	if (vcpu->kvm->arch.triple_fault_event) {
+		events->triple_fault.pending = kvm_test_request(KVM_REQ_TRIPLE_FAULT, vcpu);
+		events->flags |= KVM_VCPUEVENT_VALID_TRIPLE_FAULT;
+	}
 }
-
-static void kvm_set_hflags(struct kvm_vcpu *vcpu, unsigned emul_flags);
 
 static int kvm_vcpu_ioctl_x86_set_vcpu_events(struct kvm_vcpu *vcpu,
 					      struct kvm_vcpu_events *events)
@@ -3360,50 +5629,75 @@ static int kvm_vcpu_ioctl_x86_set_vcpu_events(struct kvm_vcpu *vcpu,
 	if (events->flags & ~(KVM_VCPUEVENT_VALID_NMI_PENDING
 			      | KVM_VCPUEVENT_VALID_SIPI_VECTOR
 			      | KVM_VCPUEVENT_VALID_SHADOW
-			      | KVM_VCPUEVENT_VALID_SMM))
+			      | KVM_VCPUEVENT_VALID_SMM
+			      | KVM_VCPUEVENT_VALID_PAYLOAD
+			      | KVM_VCPUEVENT_VALID_TRIPLE_FAULT))
 		return -EINVAL;
 
-	if (events->exception.injected &&
-	    (events->exception.nr > 31 || events->exception.nr == NMI_VECTOR ||
-	     is_guest_mode(vcpu)))
-		return -EINVAL;
+	if (events->flags & KVM_VCPUEVENT_VALID_PAYLOAD) {
+		if (!vcpu->kvm->arch.exception_payload_enabled)
+			return -EINVAL;
+		if (events->exception.pending)
+			events->exception.injected = 0;
+		else
+			events->exception_has_payload = 0;
+	} else {
+		events->exception.pending = 0;
+		events->exception_has_payload = 0;
+	}
 
-	/* INITs are latched while in SMM */
-	if (events->flags & KVM_VCPUEVENT_VALID_SMM &&
-	    (events->smi.smm || events->smi.pending) &&
-	    vcpu->arch.mp_state == KVM_MP_STATE_INIT_RECEIVED)
+	if ((events->exception.injected || events->exception.pending) &&
+	    (events->exception.nr > 31 || events->exception.nr == NMI_VECTOR))
 		return -EINVAL;
 
 	process_nmi(vcpu);
-	vcpu->arch.exception.injected = false;
-	vcpu->arch.exception.pending = events->exception.injected;
-	vcpu->arch.exception.nr = events->exception.nr;
+
+	/*
+	 * Flag that userspace is stuffing an exception, the next KVM_RUN will
+	 * morph the exception to a VM-Exit if appropriate.  Do this only for
+	 * pending exceptions, already-injected exceptions are not subject to
+	 * intercpetion.  Note, userspace that conflates pending and injected
+	 * is hosed, and will incorrectly convert an injected exception into a
+	 * pending exception, which in turn may cause a spurious VM-Exit.
+	 */
+	vcpu->arch.exception_from_userspace = events->exception.pending;
+
+	vcpu->arch.exception_vmexit.pending = false;
+
+	vcpu->arch.exception.injected = events->exception.injected;
+	vcpu->arch.exception.pending = events->exception.pending;
+	vcpu->arch.exception.vector = events->exception.nr;
 	vcpu->arch.exception.has_error_code = events->exception.has_error_code;
 	vcpu->arch.exception.error_code = events->exception.error_code;
+	vcpu->arch.exception.has_payload = events->exception_has_payload;
+	vcpu->arch.exception.payload = events->exception_payload;
 
 	vcpu->arch.interrupt.injected = events->interrupt.injected;
 	vcpu->arch.interrupt.nr = events->interrupt.nr;
 	vcpu->arch.interrupt.soft = events->interrupt.soft;
 	if (events->flags & KVM_VCPUEVENT_VALID_SHADOW)
-		kvm_x86_ops->set_interrupt_shadow(vcpu,
-						  events->interrupt.shadow);
+		kvm_x86_call(set_interrupt_shadow)(vcpu,
+						   events->interrupt.shadow);
 
 	vcpu->arch.nmi_injected = events->nmi.injected;
-	if (events->flags & KVM_VCPUEVENT_VALID_NMI_PENDING)
-		vcpu->arch.nmi_pending = events->nmi.pending;
-	kvm_x86_ops->set_nmi_mask(vcpu, events->nmi.masked);
+	if (events->flags & KVM_VCPUEVENT_VALID_NMI_PENDING) {
+		vcpu->arch.nmi_pending = 0;
+		atomic_set(&vcpu->arch.nmi_queued, events->nmi.pending);
+		if (events->nmi.pending)
+			kvm_make_request(KVM_REQ_NMI, vcpu);
+	}
+	kvm_x86_call(set_nmi_mask)(vcpu, events->nmi.masked);
 
 	if (events->flags & KVM_VCPUEVENT_VALID_SIPI_VECTOR &&
 	    lapic_in_kernel(vcpu))
 		vcpu->arch.apic->sipi_vector = events->sipi_vector;
 
 	if (events->flags & KVM_VCPUEVENT_VALID_SMM) {
-		u32 hflags = vcpu->arch.hflags;
-		if (events->smi.smm)
-			hflags |= HF_SMM_MASK;
-		else
-			hflags &= ~HF_SMM_MASK;
-		kvm_set_hflags(vcpu, hflags);
+#ifdef CONFIG_KVM_SMM
+		if (!!(vcpu->arch.hflags & HF_SMM_MASK) != events->smi.smm) {
+			kvm_leave_nested(vcpu);
+			kvm_smm_changed(vcpu, events->smi.smm);
+		}
 
 		vcpu->arch.smi_pending = events->smi.pending;
 
@@ -3412,13 +5706,29 @@ static int kvm_vcpu_ioctl_x86_set_vcpu_events(struct kvm_vcpu *vcpu,
 				vcpu->arch.hflags |= HF_SMM_INSIDE_NMI_MASK;
 			else
 				vcpu->arch.hflags &= ~HF_SMM_INSIDE_NMI_MASK;
-			if (lapic_in_kernel(vcpu)) {
-				if (events->smi.latched_init)
-					set_bit(KVM_APIC_INIT, &vcpu->arch.apic->pending_events);
-				else
-					clear_bit(KVM_APIC_INIT, &vcpu->arch.apic->pending_events);
-			}
 		}
+
+#else
+		if (events->smi.smm || events->smi.pending ||
+		    events->smi.smm_inside_nmi)
+			return -EINVAL;
+#endif
+
+		if (lapic_in_kernel(vcpu)) {
+			if (events->smi.latched_init)
+				set_bit(KVM_APIC_INIT, &vcpu->arch.apic->pending_events);
+			else
+				clear_bit(KVM_APIC_INIT, &vcpu->arch.apic->pending_events);
+		}
+	}
+
+	if (events->flags & KVM_VCPUEVENT_VALID_TRIPLE_FAULT) {
+		if (!vcpu->kvm->arch.triple_fault_event)
+			return -EINVAL;
+		if (events->triple_fault.pending)
+			kvm_make_request(KVM_REQ_TRIPLE_FAULT, vcpu);
+		else
+			kvm_clear_request(KVM_REQ_TRIPLE_FAULT, vcpu);
 	}
 
 	kvm_make_request(KVM_REQ_EVENT, vcpu);
@@ -3426,188 +5736,138 @@ static int kvm_vcpu_ioctl_x86_set_vcpu_events(struct kvm_vcpu *vcpu,
 	return 0;
 }
 
-static void kvm_vcpu_ioctl_x86_get_debugregs(struct kvm_vcpu *vcpu,
-					     struct kvm_debugregs *dbgregs)
+static int kvm_vcpu_ioctl_x86_get_debugregs(struct kvm_vcpu *vcpu,
+					    struct kvm_debugregs *dbgregs)
 {
-	unsigned long val;
+	unsigned int i;
 
-	memcpy(dbgregs->db, vcpu->arch.db, sizeof(vcpu->arch.db));
-	kvm_get_dr(vcpu, 6, &val);
-	dbgregs->dr6 = val;
+	if (vcpu->kvm->arch.has_protected_state &&
+	    vcpu->arch.guest_state_protected)
+		return -EINVAL;
+
+	kvm_handle_exception_payload_quirk(vcpu);
+
+	memset(dbgregs, 0, sizeof(*dbgregs));
+
+	BUILD_BUG_ON(ARRAY_SIZE(vcpu->arch.db) != ARRAY_SIZE(dbgregs->db));
+	for (i = 0; i < ARRAY_SIZE(vcpu->arch.db); i++)
+		dbgregs->db[i] = vcpu->arch.db[i];
+
+	dbgregs->dr6 = vcpu->arch.dr6;
 	dbgregs->dr7 = vcpu->arch.dr7;
-	dbgregs->flags = 0;
-	memset(&dbgregs->reserved, 0, sizeof(dbgregs->reserved));
+	return 0;
 }
 
 static int kvm_vcpu_ioctl_x86_set_debugregs(struct kvm_vcpu *vcpu,
 					    struct kvm_debugregs *dbgregs)
 {
+	unsigned int i;
+
+	if (vcpu->kvm->arch.has_protected_state &&
+	    vcpu->arch.guest_state_protected)
+		return -EINVAL;
+
 	if (dbgregs->flags)
 		return -EINVAL;
 
-	if (dbgregs->dr6 & ~0xffffffffull)
+	if (!kvm_dr6_valid(dbgregs->dr6))
 		return -EINVAL;
-	if (dbgregs->dr7 & ~0xffffffffull)
+	if (!kvm_dr7_valid(dbgregs->dr7))
 		return -EINVAL;
 
-	memcpy(vcpu->arch.db, dbgregs->db, sizeof(vcpu->arch.db));
+	for (i = 0; i < ARRAY_SIZE(vcpu->arch.db); i++)
+		vcpu->arch.db[i] = dbgregs->db[i];
+
 	kvm_update_dr0123(vcpu);
 	vcpu->arch.dr6 = dbgregs->dr6;
-	kvm_update_dr6(vcpu);
 	vcpu->arch.dr7 = dbgregs->dr7;
 	kvm_update_dr7(vcpu);
 
 	return 0;
 }
 
-#define XSTATE_COMPACTION_ENABLED (1ULL << 63)
 
-static void fill_xsave(u8 *dest, struct kvm_vcpu *vcpu)
+static int kvm_vcpu_ioctl_x86_get_xsave2(struct kvm_vcpu *vcpu,
+					 u8 *state, unsigned int size)
 {
-	struct xregs_state *xsave = &vcpu->arch.guest_fpu.state.xsave;
-	u64 xstate_bv = xsave->header.xfeatures;
-	u64 valid;
-
 	/*
-	 * Copy legacy XSAVE area, to avoid complications with CPUID
-	 * leaves 0 and 1 in the loop below.
+	 * Only copy state for features that are enabled for the guest.  The
+	 * state itself isn't problematic, but setting bits in the header for
+	 * features that are supported in *this* host but not exposed to the
+	 * guest can result in KVM_SET_XSAVE failing when live migrating to a
+	 * compatible host without the features that are NOT exposed to the
+	 * guest.
+	 *
+	 * FP+SSE can always be saved/restored via KVM_{G,S}ET_XSAVE, even if
+	 * XSAVE/XCRO are not exposed to the guest, and even if XSAVE isn't
+	 * supported by the host.
 	 */
-	memcpy(dest, xsave, XSAVE_HDR_OFFSET);
+	u64 supported_xcr0 = vcpu->arch.guest_supported_xcr0 |
+			     XFEATURE_MASK_FPSSE;
 
-	/* Set XSTATE_BV */
-	xstate_bv &= vcpu->arch.guest_supported_xcr0 | XFEATURE_MASK_FPSSE;
-	*(u64 *)(dest + XSAVE_HDR_OFFSET) = xstate_bv;
+	if (fpstate_is_confidential(&vcpu->arch.guest_fpu))
+		return vcpu->kvm->arch.has_protected_state ? -EINVAL : 0;
 
-	/*
-	 * Copy each region from the possibly compacted offset to the
-	 * non-compacted offset.
-	 */
-	valid = xstate_bv & ~XFEATURE_MASK_FPSSE;
-	while (valid) {
-		u64 feature = valid & -valid;
-		int index = fls64(feature) - 1;
-		void *src = get_xsave_addr(xsave, feature);
-
-		if (src) {
-			u32 size, offset, ecx, edx;
-			cpuid_count(XSTATE_CPUID, index,
-				    &size, &offset, &ecx, &edx);
-			if (feature == XFEATURE_MASK_PKRU)
-				memcpy(dest + offset, &vcpu->arch.pkru,
-				       sizeof(vcpu->arch.pkru));
-			else
-				memcpy(dest + offset, src, size);
-
-		}
-
-		valid -= feature;
-	}
+	fpu_copy_guest_fpstate_to_uabi(&vcpu->arch.guest_fpu, state, size,
+				       supported_xcr0, vcpu->arch.pkru);
+	return 0;
 }
 
-static void load_xsave(struct kvm_vcpu *vcpu, u8 *src)
+static int kvm_vcpu_ioctl_x86_get_xsave(struct kvm_vcpu *vcpu,
+					struct kvm_xsave *guest_xsave)
 {
-	struct xregs_state *xsave = &vcpu->arch.guest_fpu.state.xsave;
-	u64 xstate_bv = *(u64 *)(src + XSAVE_HDR_OFFSET);
-	u64 valid;
-
-	/*
-	 * Copy legacy XSAVE area, to avoid complications with CPUID
-	 * leaves 0 and 1 in the loop below.
-	 */
-	memcpy(xsave, src, XSAVE_HDR_OFFSET);
-
-	/* Set XSTATE_BV and possibly XCOMP_BV.  */
-	xsave->header.xfeatures = xstate_bv;
-	if (boot_cpu_has(X86_FEATURE_XSAVES))
-		xsave->header.xcomp_bv = host_xcr0 | XSTATE_COMPACTION_ENABLED;
-
-	/*
-	 * Copy each region from the non-compacted offset to the
-	 * possibly compacted offset.
-	 */
-	valid = xstate_bv & ~XFEATURE_MASK_FPSSE;
-	while (valid) {
-		u64 feature = valid & -valid;
-		int index = fls64(feature) - 1;
-		void *dest = get_xsave_addr(xsave, feature);
-
-		if (dest) {
-			u32 size, offset, ecx, edx;
-			cpuid_count(XSTATE_CPUID, index,
-				    &size, &offset, &ecx, &edx);
-			if (feature == XFEATURE_MASK_PKRU)
-				memcpy(&vcpu->arch.pkru, src + offset,
-				       sizeof(vcpu->arch.pkru));
-			else
-				memcpy(dest, src + offset, size);
-		}
-
-		valid -= feature;
-	}
+	return kvm_vcpu_ioctl_x86_get_xsave2(vcpu, (void *)guest_xsave->region,
+					     sizeof(guest_xsave->region));
 }
-
-static void kvm_vcpu_ioctl_x86_get_xsave(struct kvm_vcpu *vcpu,
-					 struct kvm_xsave *guest_xsave)
-{
-	if (boot_cpu_has(X86_FEATURE_XSAVE)) {
-		memset(guest_xsave, 0, sizeof(struct kvm_xsave));
-		fill_xsave((u8 *) guest_xsave->region, vcpu);
-	} else {
-		memcpy(guest_xsave->region,
-			&vcpu->arch.guest_fpu.state.fxsave,
-			sizeof(struct fxregs_state));
-		*(u64 *)&guest_xsave->region[XSAVE_HDR_OFFSET / sizeof(u32)] =
-			XFEATURE_MASK_FPSSE;
-	}
-}
-
-#define XSAVE_MXCSR_OFFSET 24
 
 static int kvm_vcpu_ioctl_x86_set_xsave(struct kvm_vcpu *vcpu,
 					struct kvm_xsave *guest_xsave)
 {
-	u64 xstate_bv =
-		*(u64 *)&guest_xsave->region[XSAVE_HDR_OFFSET / sizeof(u32)];
-	u32 mxcsr = *(u32 *)&guest_xsave->region[XSAVE_MXCSR_OFFSET / sizeof(u32)];
+	union fpregs_state *xstate = (union fpregs_state *)guest_xsave->region;
 
-	if (boot_cpu_has(X86_FEATURE_XSAVE)) {
-		/*
-		 * Here we allow setting states that are not present in
-		 * CPUID leaf 0xD, index 0, EDX:EAX.  This is for compatibility
-		 * with old userspace.
-		 */
-		if (xstate_bv & ~kvm_supported_xcr0() ||
-			mxcsr & ~mxcsr_feature_mask)
-			return -EINVAL;
-		load_xsave(vcpu, (u8 *)guest_xsave->region);
-	} else {
-		if (xstate_bv & ~XFEATURE_MASK_FPSSE ||
-			mxcsr & ~mxcsr_feature_mask)
-			return -EINVAL;
-		memcpy(&vcpu->arch.guest_fpu.state.fxsave,
-			guest_xsave->region, sizeof(struct fxregs_state));
-	}
-	return 0;
+	if (fpstate_is_confidential(&vcpu->arch.guest_fpu))
+		return vcpu->kvm->arch.has_protected_state ? -EINVAL : 0;
+
+	/*
+	 * For backwards compatibility, do not expect disabled features to be in
+	 * their initial state.  XSTATE_BV[i] must still be cleared whenever
+	 * XFD[i]=1, or XRSTOR would cause a #NM.
+	 */
+	xstate->xsave.header.xfeatures &= ~vcpu->arch.guest_fpu.fpstate->xfd;
+
+	return fpu_copy_uabi_to_guest_fpstate(&vcpu->arch.guest_fpu,
+					      guest_xsave->region,
+					      kvm_caps.supported_xcr0,
+					      &vcpu->arch.pkru);
 }
 
-static void kvm_vcpu_ioctl_x86_get_xcrs(struct kvm_vcpu *vcpu,
-					struct kvm_xcrs *guest_xcrs)
+static int kvm_vcpu_ioctl_x86_get_xcrs(struct kvm_vcpu *vcpu,
+				       struct kvm_xcrs *guest_xcrs)
 {
+	if (vcpu->kvm->arch.has_protected_state &&
+	    vcpu->arch.guest_state_protected)
+		return -EINVAL;
+
 	if (!boot_cpu_has(X86_FEATURE_XSAVE)) {
 		guest_xcrs->nr_xcrs = 0;
-		return;
+		return 0;
 	}
 
 	guest_xcrs->nr_xcrs = 1;
 	guest_xcrs->flags = 0;
 	guest_xcrs->xcrs[0].xcr = XCR_XFEATURE_ENABLED_MASK;
 	guest_xcrs->xcrs[0].value = vcpu->arch.xcr0;
+	return 0;
 }
 
 static int kvm_vcpu_ioctl_x86_set_xcrs(struct kvm_vcpu *vcpu,
 				       struct kvm_xcrs *guest_xcrs)
 {
 	int i, r = 0;
+
+	if (vcpu->kvm->arch.has_protected_state &&
+	    vcpu->arch.guest_state_protected)
+		return -EINVAL;
 
 	if (!boot_cpu_has(X86_FEATURE_XSAVE))
 		return -EINVAL;
@@ -3635,11 +5895,114 @@ static int kvm_vcpu_ioctl_x86_set_xcrs(struct kvm_vcpu *vcpu,
  */
 static int kvm_set_guest_paused(struct kvm_vcpu *vcpu)
 {
-	if (!vcpu->arch.pv_time_enabled)
+	if (!vcpu->arch.pv_time.active)
 		return -EINVAL;
 	vcpu->arch.pvclock_set_guest_stopped_request = true;
 	kvm_make_request(KVM_REQ_CLOCK_UPDATE, vcpu);
 	return 0;
+}
+
+static int kvm_arch_tsc_has_attr(struct kvm_vcpu *vcpu,
+				 struct kvm_device_attr *attr)
+{
+	int r;
+
+	switch (attr->attr) {
+	case KVM_VCPU_TSC_OFFSET:
+		r = 0;
+		break;
+	default:
+		r = -ENXIO;
+	}
+
+	return r;
+}
+
+static int kvm_arch_tsc_get_attr(struct kvm_vcpu *vcpu,
+				 struct kvm_device_attr *attr)
+{
+	u64 __user *uaddr = u64_to_user_ptr(attr->addr);
+	int r;
+
+	switch (attr->attr) {
+	case KVM_VCPU_TSC_OFFSET:
+		r = -EFAULT;
+		if (put_user(vcpu->arch.l1_tsc_offset, uaddr))
+			break;
+		r = 0;
+		break;
+	default:
+		r = -ENXIO;
+	}
+
+	return r;
+}
+
+static int kvm_arch_tsc_set_attr(struct kvm_vcpu *vcpu,
+				 struct kvm_device_attr *attr)
+{
+	u64 __user *uaddr = u64_to_user_ptr(attr->addr);
+	struct kvm *kvm = vcpu->kvm;
+	int r;
+
+	switch (attr->attr) {
+	case KVM_VCPU_TSC_OFFSET: {
+		u64 offset, tsc, ns;
+		unsigned long flags;
+		bool matched;
+
+		r = -EFAULT;
+		if (get_user(offset, uaddr))
+			break;
+
+		raw_spin_lock_irqsave(&kvm->arch.tsc_write_lock, flags);
+
+		matched = (vcpu->arch.virtual_tsc_khz &&
+			   kvm->arch.last_tsc_khz == vcpu->arch.virtual_tsc_khz &&
+			   kvm->arch.last_tsc_offset == offset);
+
+		tsc = kvm_scale_tsc(rdtsc(), vcpu->arch.l1_tsc_scaling_ratio) + offset;
+		ns = get_kvmclock_base_ns();
+
+		__kvm_synchronize_tsc(vcpu, offset, tsc, ns, matched, true);
+		raw_spin_unlock_irqrestore(&kvm->arch.tsc_write_lock, flags);
+
+		r = 0;
+		break;
+	}
+	default:
+		r = -ENXIO;
+	}
+
+	return r;
+}
+
+static int kvm_vcpu_ioctl_device_attr(struct kvm_vcpu *vcpu,
+				      unsigned int ioctl,
+				      void __user *argp)
+{
+	struct kvm_device_attr attr;
+	int r;
+
+	if (copy_from_user(&attr, argp, sizeof(attr)))
+		return -EFAULT;
+
+	if (attr.group != KVM_VCPU_TSC_CTRL)
+		return -ENXIO;
+
+	switch (ioctl) {
+	case KVM_HAS_DEVICE_ATTR:
+		r = kvm_arch_tsc_has_attr(vcpu, &attr);
+		break;
+	case KVM_GET_DEVICE_ATTR:
+		r = kvm_arch_tsc_get_attr(vcpu, &attr);
+		break;
+	case KVM_SET_DEVICE_ATTR:
+		r = kvm_arch_tsc_set_attr(vcpu, &attr);
+		break;
+	}
+
+	return r;
 }
 
 static int kvm_vcpu_ioctl_enable_cap(struct kvm_vcpu *vcpu,
@@ -3649,17 +6012,178 @@ static int kvm_vcpu_ioctl_enable_cap(struct kvm_vcpu *vcpu,
 		return -EINVAL;
 
 	switch (cap->cap) {
+#ifdef CONFIG_KVM_HYPERV
 	case KVM_CAP_HYPERV_SYNIC2:
 		if (cap->args[0])
 			return -EINVAL;
+		fallthrough;
+
 	case KVM_CAP_HYPERV_SYNIC:
 		if (!irqchip_in_kernel(vcpu->kvm))
 			return -EINVAL;
 		return kvm_hv_activate_synic(vcpu, cap->cap ==
 					     KVM_CAP_HYPERV_SYNIC2);
+	case KVM_CAP_HYPERV_ENLIGHTENED_VMCS:
+		{
+			int r;
+			uint16_t vmcs_version;
+			void __user *user_ptr;
+
+			if (!kvm_x86_ops.nested_ops->enable_evmcs)
+				return -ENOTTY;
+			r = kvm_x86_ops.nested_ops->enable_evmcs(vcpu, &vmcs_version);
+			if (!r) {
+				user_ptr = (void __user *)(uintptr_t)cap->args[0];
+				if (copy_to_user(user_ptr, &vmcs_version,
+						 sizeof(vmcs_version)))
+					r = -EFAULT;
+			}
+			return r;
+		}
+	case KVM_CAP_HYPERV_DIRECT_TLBFLUSH:
+		if (!kvm_x86_ops.enable_l2_tlb_flush)
+			return -ENOTTY;
+
+		return kvm_x86_call(enable_l2_tlb_flush)(vcpu);
+
+	case KVM_CAP_HYPERV_ENFORCE_CPUID:
+		return kvm_hv_set_enforce_cpuid(vcpu, cap->args[0]);
+#endif
+
+	case KVM_CAP_ENFORCE_PV_FEATURE_CPUID:
+		vcpu->arch.pv_cpuid.enforce = cap->args[0];
+		return 0;
 	default:
 		return -EINVAL;
 	}
+}
+
+struct kvm_x86_reg_id {
+	__u32 index;
+	__u8  type;
+	__u8  rsvd1;
+	__u8  rsvd2:4;
+	__u8  size:4;
+	__u8  x86;
+};
+
+static int kvm_translate_kvm_reg(struct kvm_vcpu *vcpu,
+				 struct kvm_x86_reg_id *reg)
+{
+	switch (reg->index) {
+	case KVM_REG_GUEST_SSP:
+		/*
+		 * FIXME: If host-initiated accesses are ever exempted from
+		 * ignore_msrs (in kvm_do_msr_access()), drop this manual check
+		 * and rely on KVM's standard checks to reject accesses to regs
+		 * that don't exist.
+		 */
+		if (!guest_cpu_cap_has(vcpu, X86_FEATURE_SHSTK))
+			return -EINVAL;
+
+		reg->type = KVM_X86_REG_TYPE_MSR;
+		reg->index = MSR_KVM_INTERNAL_GUEST_SSP;
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static int kvm_get_one_msr(struct kvm_vcpu *vcpu, u32 msr, u64 __user *user_val)
+{
+	u64 val;
+
+	if (do_get_msr(vcpu, msr, &val))
+		return -EINVAL;
+
+	if (put_user(val, user_val))
+		return -EFAULT;
+
+	return 0;
+}
+
+static int kvm_set_one_msr(struct kvm_vcpu *vcpu, u32 msr, u64 __user *user_val)
+{
+	u64 val;
+
+	if (get_user(val, user_val))
+		return -EFAULT;
+
+	if (do_set_msr(vcpu, msr, &val))
+		return -EINVAL;
+
+	return 0;
+}
+
+static int kvm_get_set_one_reg(struct kvm_vcpu *vcpu, unsigned int ioctl,
+			       void __user *argp)
+{
+	struct kvm_one_reg one_reg;
+	struct kvm_x86_reg_id *reg;
+	u64 __user *user_val;
+	bool load_fpu;
+	int r;
+
+	if (copy_from_user(&one_reg, argp, sizeof(one_reg)))
+		return -EFAULT;
+
+	if ((one_reg.id & KVM_REG_ARCH_MASK) != KVM_REG_X86)
+		return -EINVAL;
+
+	reg = (struct kvm_x86_reg_id *)&one_reg.id;
+	if (reg->rsvd1 || reg->rsvd2)
+		return -EINVAL;
+
+	if (reg->type == KVM_X86_REG_TYPE_KVM) {
+		r = kvm_translate_kvm_reg(vcpu, reg);
+		if (r)
+			return r;
+	}
+
+	if (reg->type != KVM_X86_REG_TYPE_MSR)
+		return -EINVAL;
+
+	if ((one_reg.id & KVM_REG_SIZE_MASK) != KVM_REG_SIZE_U64)
+		return -EINVAL;
+
+	guard(srcu)(&vcpu->kvm->srcu);
+
+	load_fpu = is_xstate_managed_msr(vcpu, reg->index);
+	if (load_fpu)
+		kvm_load_guest_fpu(vcpu);
+
+	user_val = u64_to_user_ptr(one_reg.addr);
+	if (ioctl == KVM_GET_ONE_REG)
+		r = kvm_get_one_msr(vcpu, reg->index, user_val);
+	else
+		r = kvm_set_one_msr(vcpu, reg->index, user_val);
+
+	if (load_fpu)
+		kvm_put_guest_fpu(vcpu);
+	return r;
+}
+
+static int kvm_get_reg_list(struct kvm_vcpu *vcpu,
+			    struct kvm_reg_list __user *user_list)
+{
+	u64 nr_regs = guest_cpu_cap_has(vcpu, X86_FEATURE_SHSTK) ? 1 : 0;
+	u64 user_nr_regs;
+
+	if (get_user(user_nr_regs, &user_list->n))
+		return -EFAULT;
+
+	if (put_user(nr_regs, &user_list->n))
+		return -EFAULT;
+
+	if (user_nr_regs < nr_regs)
+		return -E2BIG;
+
+	if (nr_regs &&
+	    put_user(KVM_X86_REG_KVM(KVM_REG_GUEST_SSP), &user_list->reg[0]))
+		return -EFAULT;
+
+	return 0;
 }
 
 long kvm_arch_vcpu_ioctl(struct file *filp,
@@ -3669,6 +6193,7 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 	void __user *argp = (void __user *)arg;
 	int r;
 	union {
+		struct kvm_sregs2 *sregs2;
 		struct kvm_lapic_state *lapic;
 		struct kvm_xsave *xsave;
 		struct kvm_xcrs *xcrs;
@@ -3683,7 +6208,7 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		r = -EINVAL;
 		if (!lapic_in_kernel(vcpu))
 			goto out;
-		u.lapic = kzalloc(sizeof(struct kvm_lapic_state), GFP_KERNEL);
+		u.lapic = kzalloc_obj(struct kvm_lapic_state);
 
 		r = -ENOMEM;
 		if (!u.lapic)
@@ -3714,7 +6239,7 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		struct kvm_interrupt irq;
 
 		r = -EFAULT;
-		if (copy_from_user(&irq, argp, sizeof irq))
+		if (copy_from_user(&irq, argp, sizeof(irq)))
 			goto out;
 		r = kvm_vcpu_ioctl_interrupt(vcpu, &irq);
 		break;
@@ -3724,7 +6249,7 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		break;
 	}
 	case KVM_SMI: {
-		r = kvm_vcpu_ioctl_smi(vcpu);
+		r = kvm_inject_smi(vcpu);
 		break;
 	}
 	case KVM_SET_CPUID: {
@@ -3732,7 +6257,7 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		struct kvm_cpuid cpuid;
 
 		r = -EFAULT;
-		if (copy_from_user(&cpuid, cpuid_arg, sizeof cpuid))
+		if (copy_from_user(&cpuid, cpuid_arg, sizeof(cpuid)))
 			goto out;
 		r = kvm_vcpu_ioctl_set_cpuid(vcpu, &cpuid, cpuid_arg->entries);
 		break;
@@ -3742,7 +6267,7 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		struct kvm_cpuid2 cpuid;
 
 		r = -EFAULT;
-		if (copy_from_user(&cpuid, cpuid_arg, sizeof cpuid))
+		if (copy_from_user(&cpuid, cpuid_arg, sizeof(cpuid)))
 			goto out;
 		r = kvm_vcpu_ioctl_set_cpuid2(vcpu, &cpuid,
 					      cpuid_arg->entries);
@@ -3753,14 +6278,14 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		struct kvm_cpuid2 cpuid;
 
 		r = -EFAULT;
-		if (copy_from_user(&cpuid, cpuid_arg, sizeof cpuid))
+		if (copy_from_user(&cpuid, cpuid_arg, sizeof(cpuid)))
 			goto out;
 		r = kvm_vcpu_ioctl_get_cpuid2(vcpu, &cpuid,
 					      cpuid_arg->entries);
 		if (r)
 			goto out;
 		r = -EFAULT;
-		if (copy_to_user(cpuid_arg, &cpuid, sizeof cpuid))
+		if (copy_to_user(cpuid_arg, &cpuid, sizeof(cpuid)))
 			goto out;
 		r = 0;
 		break;
@@ -3777,17 +6302,24 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		srcu_read_unlock(&vcpu->kvm->srcu, idx);
 		break;
 	}
+	case KVM_GET_ONE_REG:
+	case KVM_SET_ONE_REG:
+		r = kvm_get_set_one_reg(vcpu, ioctl, argp);
+		break;
+	case KVM_GET_REG_LIST:
+		r = kvm_get_reg_list(vcpu, argp);
+		break;
 	case KVM_TPR_ACCESS_REPORTING: {
 		struct kvm_tpr_access_ctl tac;
 
 		r = -EFAULT;
-		if (copy_from_user(&tac, argp, sizeof tac))
+		if (copy_from_user(&tac, argp, sizeof(tac)))
 			goto out;
 		r = vcpu_ioctl_tpr_access_reporting(vcpu, &tac);
 		if (r)
 			goto out;
 		r = -EFAULT;
-		if (copy_to_user(argp, &tac, sizeof tac))
+		if (copy_to_user(argp, &tac, sizeof(tac)))
 			goto out;
 		r = 0;
 		break;
@@ -3800,7 +6332,7 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		if (!lapic_in_kernel(vcpu))
 			goto out;
 		r = -EFAULT;
-		if (copy_from_user(&va, argp, sizeof va))
+		if (copy_from_user(&va, argp, sizeof(va)))
 			goto out;
 		idx = srcu_read_lock(&vcpu->kvm->srcu);
 		r = kvm_lapic_set_vapic_addr(vcpu, va.vapic_addr);
@@ -3811,7 +6343,7 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		u64 mcg_cap;
 
 		r = -EFAULT;
-		if (copy_from_user(&mcg_cap, argp, sizeof mcg_cap))
+		if (copy_from_user(&mcg_cap, argp, sizeof(mcg_cap)))
 			goto out;
 		r = kvm_vcpu_ioctl_x86_setup_mce(vcpu, mcg_cap);
 		break;
@@ -3820,7 +6352,7 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		struct kvm_x86_mce mce;
 
 		r = -EFAULT;
-		if (copy_from_user(&mce, argp, sizeof mce))
+		if (copy_from_user(&mce, argp, sizeof(mce)))
 			goto out;
 		r = kvm_vcpu_ioctl_x86_set_mce(vcpu, &mce);
 		break;
@@ -3843,13 +6375,17 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		if (copy_from_user(&events, argp, sizeof(struct kvm_vcpu_events)))
 			break;
 
+		kvm_vcpu_srcu_read_lock(vcpu);
 		r = kvm_vcpu_ioctl_x86_set_vcpu_events(vcpu, &events);
+		kvm_vcpu_srcu_read_unlock(vcpu);
 		break;
 	}
 	case KVM_GET_DEBUGREGS: {
 		struct kvm_debugregs dbgregs;
 
-		kvm_vcpu_ioctl_x86_get_debugregs(vcpu, &dbgregs);
+		r = kvm_vcpu_ioctl_x86_get_debugregs(vcpu, &dbgregs);
+		if (r < 0)
+			break;
 
 		r = -EFAULT;
 		if (copy_to_user(argp, &dbgregs,
@@ -3870,12 +6406,18 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		break;
 	}
 	case KVM_GET_XSAVE: {
-		u.xsave = kzalloc(sizeof(struct kvm_xsave), GFP_KERNEL);
+		r = -EINVAL;
+		if (vcpu->arch.guest_fpu.uabi_size > sizeof(struct kvm_xsave))
+			break;
+
+		u.xsave = kzalloc_obj(struct kvm_xsave);
 		r = -ENOMEM;
 		if (!u.xsave)
 			break;
 
-		kvm_vcpu_ioctl_x86_get_xsave(vcpu, u.xsave);
+		r = kvm_vcpu_ioctl_x86_get_xsave(vcpu, u.xsave);
+		if (r < 0)
+			break;
 
 		r = -EFAULT;
 		if (copy_to_user(argp, u.xsave, sizeof(struct kvm_xsave)))
@@ -3884,7 +6426,9 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		break;
 	}
 	case KVM_SET_XSAVE: {
-		u.xsave = memdup_user(argp, sizeof(*u.xsave));
+		int size = vcpu->arch.guest_fpu.uabi_size;
+
+		u.xsave = memdup_user(argp, size);
 		if (IS_ERR(u.xsave)) {
 			r = PTR_ERR(u.xsave);
 			goto out_nofree;
@@ -3893,13 +6437,36 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		r = kvm_vcpu_ioctl_x86_set_xsave(vcpu, u.xsave);
 		break;
 	}
+
+	case KVM_GET_XSAVE2: {
+		int size = vcpu->arch.guest_fpu.uabi_size;
+
+		u.xsave = kzalloc(size, GFP_KERNEL);
+		r = -ENOMEM;
+		if (!u.xsave)
+			break;
+
+		r = kvm_vcpu_ioctl_x86_get_xsave2(vcpu, u.buffer, size);
+		if (r < 0)
+			break;
+
+		r = -EFAULT;
+		if (copy_to_user(argp, u.xsave, size))
+			break;
+
+		r = 0;
+		break;
+	}
+
 	case KVM_GET_XCRS: {
-		u.xcrs = kzalloc(sizeof(struct kvm_xcrs), GFP_KERNEL);
+		u.xcrs = kzalloc_obj(struct kvm_xcrs);
 		r = -ENOMEM;
 		if (!u.xcrs)
 			break;
 
-		kvm_vcpu_ioctl_x86_get_xcrs(vcpu, u.xcrs);
+		r = kvm_vcpu_ioctl_x86_get_xcrs(vcpu, u.xcrs);
+		if (r < 0)
+			break;
 
 		r = -EFAULT;
 		if (copy_to_user(argp, u.xcrs,
@@ -3922,9 +6489,14 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		u32 user_tsc_khz;
 
 		r = -EINVAL;
+
+		if (vcpu->arch.guest_tsc_protected)
+			goto out;
+
 		user_tsc_khz = (u32)arg;
 
-		if (user_tsc_khz >= kvm_max_guest_tsc_khz)
+		if (kvm_caps.has_tsc_control &&
+		    user_tsc_khz >= kvm_caps.max_guest_tsc_khz)
 			goto out;
 
 		if (user_tsc_khz == 0)
@@ -3952,6 +6524,138 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
 		r = kvm_vcpu_ioctl_enable_cap(vcpu, &cap);
 		break;
 	}
+	case KVM_GET_NESTED_STATE: {
+		struct kvm_nested_state __user *user_kvm_nested_state = argp;
+		u32 user_data_size;
+
+		r = -EINVAL;
+		if (!kvm_x86_ops.nested_ops->get_state)
+			break;
+
+		BUILD_BUG_ON(sizeof(user_data_size) != sizeof(user_kvm_nested_state->size));
+		r = -EFAULT;
+		if (get_user(user_data_size, &user_kvm_nested_state->size))
+			break;
+
+		r = kvm_x86_ops.nested_ops->get_state(vcpu, user_kvm_nested_state,
+						     user_data_size);
+		if (r < 0)
+			break;
+
+		if (r > user_data_size) {
+			if (put_user(r, &user_kvm_nested_state->size))
+				r = -EFAULT;
+			else
+				r = -E2BIG;
+			break;
+		}
+
+		r = 0;
+		break;
+	}
+	case KVM_SET_NESTED_STATE: {
+		struct kvm_nested_state __user *user_kvm_nested_state = argp;
+		struct kvm_nested_state kvm_state;
+		int idx;
+
+		r = -EINVAL;
+		if (!kvm_x86_ops.nested_ops->set_state)
+			break;
+
+		r = -EFAULT;
+		if (copy_from_user(&kvm_state, user_kvm_nested_state, sizeof(kvm_state)))
+			break;
+
+		r = -EINVAL;
+		if (kvm_state.size < sizeof(kvm_state))
+			break;
+
+		if (kvm_state.flags &
+		    ~(KVM_STATE_NESTED_RUN_PENDING | KVM_STATE_NESTED_GUEST_MODE
+		      | KVM_STATE_NESTED_EVMCS | KVM_STATE_NESTED_MTF_PENDING
+		      | KVM_STATE_NESTED_GIF_SET))
+			break;
+
+		/* nested_run_pending implies guest_mode.  */
+		if ((kvm_state.flags & KVM_STATE_NESTED_RUN_PENDING)
+		    && !(kvm_state.flags & KVM_STATE_NESTED_GUEST_MODE))
+			break;
+
+		idx = srcu_read_lock(&vcpu->kvm->srcu);
+		r = kvm_x86_ops.nested_ops->set_state(vcpu, user_kvm_nested_state, &kvm_state);
+		srcu_read_unlock(&vcpu->kvm->srcu, idx);
+		break;
+	}
+#ifdef CONFIG_KVM_HYPERV
+	case KVM_GET_SUPPORTED_HV_CPUID:
+		r = kvm_ioctl_get_supported_hv_cpuid(vcpu, argp);
+		break;
+#endif
+#ifdef CONFIG_KVM_XEN
+	case KVM_XEN_VCPU_GET_ATTR: {
+		struct kvm_xen_vcpu_attr xva;
+
+		r = -EFAULT;
+		if (copy_from_user(&xva, argp, sizeof(xva)))
+			goto out;
+		r = kvm_xen_vcpu_get_attr(vcpu, &xva);
+		if (!r && copy_to_user(argp, &xva, sizeof(xva)))
+			r = -EFAULT;
+		break;
+	}
+	case KVM_XEN_VCPU_SET_ATTR: {
+		struct kvm_xen_vcpu_attr xva;
+
+		r = -EFAULT;
+		if (copy_from_user(&xva, argp, sizeof(xva)))
+			goto out;
+		r = kvm_xen_vcpu_set_attr(vcpu, &xva);
+		break;
+	}
+#endif
+	case KVM_GET_SREGS2: {
+		r = -EINVAL;
+		if (vcpu->kvm->arch.has_protected_state &&
+		    vcpu->arch.guest_state_protected)
+			goto out;
+
+		u.sregs2 = kzalloc_obj(struct kvm_sregs2);
+		r = -ENOMEM;
+		if (!u.sregs2)
+			goto out;
+		__get_sregs2(vcpu, u.sregs2);
+		r = -EFAULT;
+		if (copy_to_user(argp, u.sregs2, sizeof(struct kvm_sregs2)))
+			goto out;
+		r = 0;
+		break;
+	}
+	case KVM_SET_SREGS2: {
+		r = -EINVAL;
+		if (vcpu->kvm->arch.has_protected_state &&
+		    vcpu->arch.guest_state_protected)
+			goto out;
+
+		u.sregs2 = memdup_user(argp, sizeof(struct kvm_sregs2));
+		if (IS_ERR(u.sregs2)) {
+			r = PTR_ERR(u.sregs2);
+			u.sregs2 = NULL;
+			goto out;
+		}
+		r = __set_sregs2(vcpu, u.sregs2);
+		break;
+	}
+	case KVM_HAS_DEVICE_ATTR:
+	case KVM_GET_DEVICE_ATTR:
+	case KVM_SET_DEVICE_ATTR:
+		r = kvm_vcpu_ioctl_device_attr(vcpu, ioctl, argp);
+		break;
+	case KVM_MEMORY_ENCRYPT_OP:
+		r = -ENOTTY;
+		if (!kvm_x86_ops.vcpu_mem_enc_ioctl)
+			goto out;
+		r = kvm_x86_ops.vcpu_mem_enc_ioctl(vcpu, argp);
+		break;
 	default:
 		r = -EINVAL;
 	}
@@ -3962,7 +6666,7 @@ out_nofree:
 	return r;
 }
 
-int kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf)
+vm_fault_t kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf)
 {
 	return VM_FAULT_SIGBUS;
 }
@@ -3973,18 +6677,18 @@ static int kvm_vm_ioctl_set_tss_addr(struct kvm *kvm, unsigned long addr)
 
 	if (addr > (unsigned int)(-3 * PAGE_SIZE))
 		return -EINVAL;
-	ret = kvm_x86_ops->set_tss_addr(kvm, addr);
+	ret = kvm_x86_call(set_tss_addr)(kvm, addr);
 	return ret;
 }
 
 static int kvm_vm_ioctl_set_identity_map_addr(struct kvm *kvm,
 					      u64 ident_addr)
 {
-	return kvm_x86_ops->set_identity_map_addr(kvm, ident_addr);
+	return kvm_x86_call(set_identity_map_addr)(kvm, ident_addr);
 }
 
 static int kvm_vm_ioctl_set_nr_mmu_pages(struct kvm *kvm,
-					  u32 kvm_nr_mmu_pages)
+					 unsigned long kvm_nr_mmu_pages)
 {
 	if (kvm_nr_mmu_pages < KVM_MIN_ALLOC_MMU_PAGES)
 		return -EINVAL;
@@ -3998,203 +6702,27 @@ static int kvm_vm_ioctl_set_nr_mmu_pages(struct kvm *kvm,
 	return 0;
 }
 
-static int kvm_vm_ioctl_get_nr_mmu_pages(struct kvm *kvm)
+void kvm_arch_sync_dirty_log(struct kvm *kvm, struct kvm_memory_slot *memslot)
 {
-	return kvm->arch.n_max_mmu_pages;
-}
-
-static int kvm_vm_ioctl_get_irqchip(struct kvm *kvm, struct kvm_irqchip *chip)
-{
-	struct kvm_pic *pic = kvm->arch.vpic;
-	int r;
-
-	r = 0;
-	switch (chip->chip_id) {
-	case KVM_IRQCHIP_PIC_MASTER:
-		memcpy(&chip->chip.pic, &pic->pics[0],
-			sizeof(struct kvm_pic_state));
-		break;
-	case KVM_IRQCHIP_PIC_SLAVE:
-		memcpy(&chip->chip.pic, &pic->pics[1],
-			sizeof(struct kvm_pic_state));
-		break;
-	case KVM_IRQCHIP_IOAPIC:
-		kvm_get_ioapic(kvm, &chip->chip.ioapic);
-		break;
-	default:
-		r = -EINVAL;
-		break;
-	}
-	return r;
-}
-
-static int kvm_vm_ioctl_set_irqchip(struct kvm *kvm, struct kvm_irqchip *chip)
-{
-	struct kvm_pic *pic = kvm->arch.vpic;
-	int r;
-
-	r = 0;
-	switch (chip->chip_id) {
-	case KVM_IRQCHIP_PIC_MASTER:
-		spin_lock(&pic->lock);
-		memcpy(&pic->pics[0], &chip->chip.pic,
-			sizeof(struct kvm_pic_state));
-		spin_unlock(&pic->lock);
-		break;
-	case KVM_IRQCHIP_PIC_SLAVE:
-		spin_lock(&pic->lock);
-		memcpy(&pic->pics[1], &chip->chip.pic,
-			sizeof(struct kvm_pic_state));
-		spin_unlock(&pic->lock);
-		break;
-	case KVM_IRQCHIP_IOAPIC:
-		kvm_set_ioapic(kvm, &chip->chip.ioapic);
-		break;
-	default:
-		r = -EINVAL;
-		break;
-	}
-	kvm_pic_update_irq(pic);
-	return r;
-}
-
-static int kvm_vm_ioctl_get_pit(struct kvm *kvm, struct kvm_pit_state *ps)
-{
-	struct kvm_kpit_state *kps = &kvm->arch.vpit->pit_state;
-
-	BUILD_BUG_ON(sizeof(*ps) != sizeof(kps->channels));
-
-	mutex_lock(&kps->lock);
-	memcpy(ps, &kps->channels, sizeof(*ps));
-	mutex_unlock(&kps->lock);
-	return 0;
-}
-
-static int kvm_vm_ioctl_set_pit(struct kvm *kvm, struct kvm_pit_state *ps)
-{
-	int i;
-	struct kvm_pit *pit = kvm->arch.vpit;
-
-	mutex_lock(&pit->pit_state.lock);
-	memcpy(&pit->pit_state.channels, ps, sizeof(*ps));
-	for (i = 0; i < 3; i++)
-		kvm_pit_load_count(pit, i, ps->channels[i].count, 0);
-	mutex_unlock(&pit->pit_state.lock);
-	return 0;
-}
-
-static int kvm_vm_ioctl_get_pit2(struct kvm *kvm, struct kvm_pit_state2 *ps)
-{
-	mutex_lock(&kvm->arch.vpit->pit_state.lock);
-	memcpy(ps->channels, &kvm->arch.vpit->pit_state.channels,
-		sizeof(ps->channels));
-	ps->flags = kvm->arch.vpit->pit_state.flags;
-	mutex_unlock(&kvm->arch.vpit->pit_state.lock);
-	memset(&ps->reserved, 0, sizeof(ps->reserved));
-	return 0;
-}
-
-static int kvm_vm_ioctl_set_pit2(struct kvm *kvm, struct kvm_pit_state2 *ps)
-{
-	int start = 0;
-	int i;
-	u32 prev_legacy, cur_legacy;
-	struct kvm_pit *pit = kvm->arch.vpit;
-
-	mutex_lock(&pit->pit_state.lock);
-	prev_legacy = pit->pit_state.flags & KVM_PIT_FLAGS_HPET_LEGACY;
-	cur_legacy = ps->flags & KVM_PIT_FLAGS_HPET_LEGACY;
-	if (!prev_legacy && cur_legacy)
-		start = 1;
-	memcpy(&pit->pit_state.channels, &ps->channels,
-	       sizeof(pit->pit_state.channels));
-	pit->pit_state.flags = ps->flags;
-	for (i = 0; i < 3; i++)
-		kvm_pit_load_count(pit, i, pit->pit_state.channels[i].count,
-				   start && i == 0);
-	mutex_unlock(&pit->pit_state.lock);
-	return 0;
-}
-
-static int kvm_vm_ioctl_reinject(struct kvm *kvm,
-				 struct kvm_reinject_control *control)
-{
-	struct kvm_pit *pit = kvm->arch.vpit;
-
-	if (!pit)
-		return -ENXIO;
-
-	/* pit->pit_state.lock was overloaded to prevent userspace from getting
-	 * an inconsistent state after running multiple KVM_REINJECT_CONTROL
-	 * ioctls in parallel.  Use a separate lock if that ioctl isn't rare.
-	 */
-	mutex_lock(&pit->pit_state.lock);
-	kvm_pit_set_reinject(pit, control->pit_reinject);
-	mutex_unlock(&pit->pit_state.lock);
-
-	return 0;
-}
-
-/**
- * kvm_vm_ioctl_get_dirty_log - get and clear the log of dirty pages in a slot
- * @kvm: kvm instance
- * @log: slot id and address to which we copy the log
- *
- * Steps 1-4 below provide general overview of dirty page logging. See
- * kvm_get_dirty_log_protect() function description for additional details.
- *
- * We call kvm_get_dirty_log_protect() to handle steps 1-3, upon return we
- * always flush the TLB (step 4) even if previous step failed  and the dirty
- * bitmap may be corrupt. Regardless of previous outcome the KVM logging API
- * does not preclude user space subsequent dirty log read. Flushing TLB ensures
- * writes will be marked dirty for next log read.
- *
- *   1. Take a snapshot of the bit and clear it if needed.
- *   2. Write protect the corresponding page.
- *   3. Copy the snapshot to the userspace.
- *   4. Flush TLB's if needed.
- */
-int kvm_vm_ioctl_get_dirty_log(struct kvm *kvm, struct kvm_dirty_log *log)
-{
-	bool is_dirty = false;
-	int r;
-
-	mutex_lock(&kvm->slots_lock);
 
 	/*
-	 * Flush potentially hardware-cached dirty pages to dirty_bitmap.
+	 * Flush all CPUs' dirty log buffers to the  dirty_bitmap.  Called
+	 * before reporting dirty_bitmap to userspace.  KVM flushes the buffers
+	 * on all VM-Exits, thus we only need to kick running vCPUs to force a
+	 * VM-Exit.
 	 */
-	if (kvm_x86_ops->flush_log_dirty)
-		kvm_x86_ops->flush_log_dirty(kvm);
+	struct kvm_vcpu *vcpu;
+	unsigned long i;
 
-	r = kvm_get_dirty_log_protect(kvm, log, &is_dirty);
+	if (!kvm->arch.cpu_dirty_log_size)
+		return;
 
-	/*
-	 * All the TLBs can be flushed out of mmu lock, see the comments in
-	 * kvm_mmu_slot_remove_write_access().
-	 */
-	lockdep_assert_held(&kvm->slots_lock);
-	if (is_dirty)
-		kvm_flush_remote_tlbs(kvm);
-
-	mutex_unlock(&kvm->slots_lock);
-	return r;
+	kvm_for_each_vcpu(i, vcpu, kvm)
+		kvm_vcpu_kick(vcpu);
 }
 
-int kvm_vm_ioctl_irq_line(struct kvm *kvm, struct kvm_irq_level *irq_event,
-			bool line_status)
-{
-	if (!irqchip_in_kernel(kvm))
-		return -ENXIO;
-
-	irq_event->status = kvm_set_irq(kvm, KVM_USERSPACE_IRQ_SOURCE_ID,
-					irq_event->irq, irq_event->level,
-					line_status);
-	return 0;
-}
-
-static int kvm_vm_ioctl_enable_cap(struct kvm *kvm,
-				   struct kvm_enable_cap *cap)
+int kvm_vm_ioctl_enable_cap(struct kvm *kvm,
+			    struct kvm_enable_cap *cap)
 {
 	int r;
 
@@ -4202,27 +6730,30 @@ static int kvm_vm_ioctl_enable_cap(struct kvm *kvm,
 		return -EINVAL;
 
 	switch (cap->cap) {
+	case KVM_CAP_DISABLE_QUIRKS2:
+		r = -EINVAL;
+		if (cap->args[0] & ~kvm_caps.supported_quirks)
+			break;
+		fallthrough;
 	case KVM_CAP_DISABLE_QUIRKS:
-		kvm->arch.disabled_quirks = cap->args[0];
+		kvm->arch.disabled_quirks |= cap->args[0] & kvm_caps.supported_quirks;
 		r = 0;
 		break;
 	case KVM_CAP_SPLIT_IRQCHIP: {
 		mutex_lock(&kvm->lock);
 		r = -EINVAL;
-		if (cap->args[0] > MAX_NR_RESERVED_IOAPIC_PINS)
+		if (cap->args[0] > KVM_MAX_IRQ_ROUTES)
 			goto split_irqchip_unlock;
 		r = -EEXIST;
 		if (irqchip_in_kernel(kvm))
 			goto split_irqchip_unlock;
 		if (kvm->created_vcpus)
 			goto split_irqchip_unlock;
-		r = kvm_setup_empty_irq_routing(kvm);
-		if (r)
-			goto split_irqchip_unlock;
 		/* Pairs with irqchip_in_kernel. */
 		smp_wmb();
 		kvm->arch.irqchip_mode = KVM_IRQCHIP_SPLIT;
 		kvm->arch.nr_reserved_ioapic_pins = cap->args[0];
+		kvm_clear_apicv_inhibit(kvm, APICV_INHIBIT_REASON_ABSENT);
 		r = 0;
 split_irqchip_unlock:
 		mutex_unlock(&kvm->lock);
@@ -4233,27 +6764,229 @@ split_irqchip_unlock:
 		if (cap->args[0] & ~KVM_X2APIC_API_VALID_FLAGS)
 			break;
 
+		if ((cap->args[0] & KVM_X2APIC_ENABLE_SUPPRESS_EOI_BROADCAST) &&
+		    (cap->args[0] & KVM_X2APIC_DISABLE_SUPPRESS_EOI_BROADCAST))
+			break;
+
+		if ((cap->args[0] & KVM_X2APIC_ENABLE_SUPPRESS_EOI_BROADCAST) &&
+		    !irqchip_split(kvm))
+			break;
+
 		if (cap->args[0] & KVM_X2APIC_API_USE_32BIT_IDS)
 			kvm->arch.x2apic_format = true;
 		if (cap->args[0] & KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK)
 			kvm->arch.x2apic_broadcast_quirk_disabled = true;
 
+		if (cap->args[0] & KVM_X2APIC_ENABLE_SUPPRESS_EOI_BROADCAST)
+			kvm->arch.suppress_eoi_broadcast_mode = KVM_SUPPRESS_EOI_BROADCAST_ENABLED;
+		if (cap->args[0] & KVM_X2APIC_DISABLE_SUPPRESS_EOI_BROADCAST)
+			kvm->arch.suppress_eoi_broadcast_mode = KVM_SUPPRESS_EOI_BROADCAST_DISABLED;
+
 		r = 0;
 		break;
 	case KVM_CAP_X86_DISABLE_EXITS:
 		r = -EINVAL;
-		if (cap->args[0] & ~KVM_X86_DISABLE_VALID_EXITS)
+		if (cap->args[0] & ~kvm_get_allowed_disable_exits())
 			break;
 
-		if ((cap->args[0] & KVM_X86_DISABLE_EXITS_MWAIT) &&
-			kvm_can_mwait_in_guest())
-			kvm->arch.mwait_in_guest = true;
-		if (cap->args[0] & KVM_X86_DISABLE_EXITS_HTL)
-			kvm->arch.hlt_in_guest = true;
-		if (cap->args[0] & KVM_X86_DISABLE_EXITS_PAUSE)
-			kvm->arch.pause_in_guest = true;
+		mutex_lock(&kvm->lock);
+		if (kvm->created_vcpus)
+			goto disable_exits_unlock;
+
+#define SMT_RSB_MSG "This processor is affected by the Cross-Thread Return Predictions vulnerability. " \
+		    "KVM_CAP_X86_DISABLE_EXITS should only be used with SMT disabled or trusted guests."
+
+		if (!mitigate_smt_rsb && boot_cpu_has_bug(X86_BUG_SMT_RSB) &&
+		    cpu_smt_possible() &&
+		    (cap->args[0] & ~(KVM_X86_DISABLE_EXITS_PAUSE |
+				      KVM_X86_DISABLE_EXITS_APERFMPERF)))
+			pr_warn_once(SMT_RSB_MSG);
+
+		kvm_disable_exits(kvm, cap->args[0]);
+		r = 0;
+disable_exits_unlock:
+		mutex_unlock(&kvm->lock);
+		break;
+	case KVM_CAP_MSR_PLATFORM_INFO:
+		kvm->arch.guest_can_read_msr_platform_info = cap->args[0];
 		r = 0;
 		break;
+	case KVM_CAP_EXCEPTION_PAYLOAD:
+		kvm->arch.exception_payload_enabled = cap->args[0];
+		r = 0;
+		break;
+	case KVM_CAP_X86_TRIPLE_FAULT_EVENT:
+		kvm->arch.triple_fault_event = cap->args[0];
+		r = 0;
+		break;
+	case KVM_CAP_X86_USER_SPACE_MSR:
+		r = -EINVAL;
+		if (cap->args[0] & ~KVM_MSR_EXIT_REASON_VALID_MASK)
+			break;
+		kvm->arch.user_space_msr_mask = cap->args[0];
+		r = 0;
+		break;
+	case KVM_CAP_X86_BUS_LOCK_EXIT:
+		r = -EINVAL;
+		if (cap->args[0] & ~KVM_BUS_LOCK_DETECTION_VALID_MODE)
+			break;
+
+		if ((cap->args[0] & KVM_BUS_LOCK_DETECTION_OFF) &&
+		    (cap->args[0] & KVM_BUS_LOCK_DETECTION_EXIT))
+			break;
+
+		if (kvm_caps.has_bus_lock_exit &&
+		    cap->args[0] & KVM_BUS_LOCK_DETECTION_EXIT)
+			kvm->arch.bus_lock_detection_enabled = true;
+		r = 0;
+		break;
+#ifdef CONFIG_X86_SGX_KVM
+	case KVM_CAP_SGX_ATTRIBUTE: {
+		unsigned long allowed_attributes = 0;
+
+		r = sgx_set_attribute(&allowed_attributes, cap->args[0]);
+		if (r)
+			break;
+
+		/* KVM only supports the PROVISIONKEY privileged attribute. */
+		if ((allowed_attributes & SGX_ATTR_PROVISIONKEY) &&
+		    !(allowed_attributes & ~SGX_ATTR_PROVISIONKEY))
+			kvm->arch.sgx_provisioning_allowed = true;
+		else
+			r = -EINVAL;
+		break;
+	}
+#endif
+	case KVM_CAP_VM_COPY_ENC_CONTEXT_FROM:
+		r = -EINVAL;
+		if (!kvm_x86_ops.vm_copy_enc_context_from)
+			break;
+
+		r = kvm_x86_call(vm_copy_enc_context_from)(kvm, cap->args[0]);
+		break;
+	case KVM_CAP_VM_MOVE_ENC_CONTEXT_FROM:
+		r = -EINVAL;
+		if (!kvm_x86_ops.vm_move_enc_context_from)
+			break;
+
+		r = kvm_x86_call(vm_move_enc_context_from)(kvm, cap->args[0]);
+		break;
+	case KVM_CAP_EXIT_HYPERCALL:
+		if (cap->args[0] & ~KVM_EXIT_HYPERCALL_VALID_MASK) {
+			r = -EINVAL;
+			break;
+		}
+		kvm->arch.hypercall_exit_enabled = cap->args[0];
+		r = 0;
+		break;
+	case KVM_CAP_EXIT_ON_EMULATION_FAILURE:
+		r = -EINVAL;
+		if (cap->args[0] & ~1)
+			break;
+		kvm->arch.exit_on_emulation_error = cap->args[0];
+		r = 0;
+		break;
+	case KVM_CAP_PMU_CAPABILITY:
+		r = -EINVAL;
+		if (!enable_pmu || (cap->args[0] & ~KVM_CAP_PMU_VALID_MASK))
+			break;
+
+		if (kvm->arch.has_protected_pmu &&
+		    cap->args[0] != KVM_PMU_CAP_DISABLE)
+			break;
+
+		mutex_lock(&kvm->lock);
+		if (!kvm->created_vcpus && !kvm->arch.created_mediated_pmu) {
+			kvm->arch.enable_pmu = !(cap->args[0] & KVM_PMU_CAP_DISABLE);
+			r = 0;
+		}
+		mutex_unlock(&kvm->lock);
+		break;
+	case KVM_CAP_MAX_VCPU_ID:
+		r = -EINVAL;
+		if (cap->args[0] > KVM_MAX_VCPU_IDS)
+			break;
+
+		mutex_lock(&kvm->lock);
+		if (kvm->arch.bsp_vcpu_id > cap->args[0]) {
+			;
+		} else if (kvm->arch.max_vcpu_ids == cap->args[0]) {
+			r = 0;
+		} else if (!kvm->arch.max_vcpu_ids) {
+			kvm->arch.max_vcpu_ids = cap->args[0];
+			r = 0;
+		}
+		mutex_unlock(&kvm->lock);
+		break;
+	case KVM_CAP_X86_NOTIFY_VMEXIT:
+		r = -EINVAL;
+		if ((u32)cap->args[0] & ~KVM_X86_NOTIFY_VMEXIT_VALID_BITS)
+			break;
+		if (!kvm_caps.has_notify_vmexit)
+			break;
+		if (!((u32)cap->args[0] & KVM_X86_NOTIFY_VMEXIT_ENABLED))
+			break;
+		mutex_lock(&kvm->lock);
+		if (!kvm->created_vcpus) {
+			kvm->arch.notify_window = cap->args[0] >> 32;
+			kvm->arch.notify_vmexit_flags = (u32)cap->args[0];
+			r = 0;
+		}
+		mutex_unlock(&kvm->lock);
+		break;
+	case KVM_CAP_VM_DISABLE_NX_HUGE_PAGES:
+		r = -EINVAL;
+
+		/*
+		 * Since the risk of disabling NX hugepages is a guest crashing
+		 * the system, ensure the userspace process has permission to
+		 * reboot the system.
+		 *
+		 * Note that unlike the reboot() syscall, the process must have
+		 * this capability in the root namespace because exposing
+		 * /dev/kvm into a container does not limit the scope of the
+		 * iTLB multihit bug to that container. In other words,
+		 * this must use capable(), not ns_capable().
+		 */
+		if (!capable(CAP_SYS_BOOT)) {
+			r = -EPERM;
+			break;
+		}
+
+		if (cap->args[0])
+			break;
+
+		mutex_lock(&kvm->lock);
+		if (!kvm->created_vcpus) {
+			kvm->arch.disable_nx_huge_pages = true;
+			r = 0;
+		}
+		mutex_unlock(&kvm->lock);
+		break;
+	case KVM_CAP_X86_APIC_BUS_CYCLES_NS: {
+		u64 bus_cycle_ns = cap->args[0];
+		u64 unused;
+
+		/*
+		 * Guard against overflow in tmict_to_ns(). 128 is the highest
+		 * divide value that can be programmed in APIC_TDCR.
+		 */
+		r = -EINVAL;
+		if (!bus_cycle_ns ||
+		    check_mul_overflow((u64)U32_MAX * 128, bus_cycle_ns, &unused))
+			break;
+
+		r = 0;
+		mutex_lock(&kvm->lock);
+		if (!irqchip_in_kernel(kvm))
+			r = -ENXIO;
+		else if (kvm->created_vcpus)
+			r = -EINVAL;
+		else
+			kvm->arch.apic_bus_cycle_ns = bus_cycle_ns;
+		mutex_unlock(&kvm->lock);
+		break;
+	}
 	default:
 		r = -EINVAL;
 		break;
@@ -4261,15 +6994,277 @@ split_irqchip_unlock:
 	return r;
 }
 
-long kvm_arch_vm_ioctl(struct file *filp,
-		       unsigned int ioctl, unsigned long arg)
+static struct kvm_x86_msr_filter *kvm_alloc_msr_filter(bool default_allow)
+{
+	struct kvm_x86_msr_filter *msr_filter;
+
+	msr_filter = kzalloc_obj(*msr_filter, GFP_KERNEL_ACCOUNT);
+	if (!msr_filter)
+		return NULL;
+
+	msr_filter->default_allow = default_allow;
+	return msr_filter;
+}
+
+static void kvm_free_msr_filter(struct kvm_x86_msr_filter *msr_filter)
+{
+	u32 i;
+
+	if (!msr_filter)
+		return;
+
+	for (i = 0; i < msr_filter->count; i++)
+		kfree(msr_filter->ranges[i].bitmap);
+
+	kfree(msr_filter);
+}
+
+static int kvm_add_msr_filter(struct kvm_x86_msr_filter *msr_filter,
+			      struct kvm_msr_filter_range *user_range)
+{
+	unsigned long *bitmap;
+	size_t bitmap_size;
+
+	if (!user_range->nmsrs)
+		return 0;
+
+	if (user_range->flags & ~KVM_MSR_FILTER_RANGE_VALID_MASK)
+		return -EINVAL;
+
+	if (!user_range->flags)
+		return -EINVAL;
+
+	bitmap_size = BITS_TO_LONGS(user_range->nmsrs) * sizeof(long);
+	if (!bitmap_size || bitmap_size > KVM_MSR_FILTER_MAX_BITMAP_SIZE)
+		return -EINVAL;
+
+	bitmap = memdup_user((__user u8*)user_range->bitmap, bitmap_size);
+	if (IS_ERR(bitmap))
+		return PTR_ERR(bitmap);
+
+	msr_filter->ranges[msr_filter->count] = (struct msr_bitmap_range) {
+		.flags = user_range->flags,
+		.base = user_range->base,
+		.nmsrs = user_range->nmsrs,
+		.bitmap = bitmap,
+	};
+
+	msr_filter->count++;
+	return 0;
+}
+
+static int kvm_vm_ioctl_set_msr_filter(struct kvm *kvm,
+				       struct kvm_msr_filter *filter)
+{
+	struct kvm_x86_msr_filter *new_filter, *old_filter;
+	bool default_allow;
+	bool empty = true;
+	int r;
+	u32 i;
+
+	if (filter->flags & ~KVM_MSR_FILTER_VALID_MASK)
+		return -EINVAL;
+
+	for (i = 0; i < ARRAY_SIZE(filter->ranges); i++)
+		empty &= !filter->ranges[i].nmsrs;
+
+	default_allow = !(filter->flags & KVM_MSR_FILTER_DEFAULT_DENY);
+	if (empty && !default_allow)
+		return -EINVAL;
+
+	new_filter = kvm_alloc_msr_filter(default_allow);
+	if (!new_filter)
+		return -ENOMEM;
+
+	for (i = 0; i < ARRAY_SIZE(filter->ranges); i++) {
+		r = kvm_add_msr_filter(new_filter, &filter->ranges[i]);
+		if (r) {
+			kvm_free_msr_filter(new_filter);
+			return r;
+		}
+	}
+
+	mutex_lock(&kvm->lock);
+	old_filter = rcu_replace_pointer(kvm->arch.msr_filter, new_filter,
+					 mutex_is_locked(&kvm->lock));
+	mutex_unlock(&kvm->lock);
+	synchronize_srcu(&kvm->srcu);
+
+	kvm_free_msr_filter(old_filter);
+
+	/*
+	 * Recalc MSR intercepts as userspace may want to intercept accesses to
+	 * MSRs that KVM would otherwise pass through to the guest.
+	 */
+	kvm_make_all_cpus_request(kvm, KVM_REQ_RECALC_INTERCEPTS);
+
+	return 0;
+}
+
+#ifdef CONFIG_KVM_COMPAT
+/* for KVM_X86_SET_MSR_FILTER */
+struct kvm_msr_filter_range_compat {
+	__u32 flags;
+	__u32 nmsrs;
+	__u32 base;
+	__u32 bitmap;
+};
+
+struct kvm_msr_filter_compat {
+	__u32 flags;
+	struct kvm_msr_filter_range_compat ranges[KVM_MSR_FILTER_MAX_RANGES];
+};
+
+#define KVM_X86_SET_MSR_FILTER_COMPAT _IOW(KVMIO, 0xc6, struct kvm_msr_filter_compat)
+
+long kvm_arch_vm_compat_ioctl(struct file *filp, unsigned int ioctl,
+			      unsigned long arg)
+{
+	void __user *argp = (void __user *)arg;
+	struct kvm *kvm = filp->private_data;
+	long r = -ENOTTY;
+
+	switch (ioctl) {
+	case KVM_X86_SET_MSR_FILTER_COMPAT: {
+		struct kvm_msr_filter __user *user_msr_filter = argp;
+		struct kvm_msr_filter_compat filter_compat;
+		struct kvm_msr_filter filter;
+		int i;
+
+		if (copy_from_user(&filter_compat, user_msr_filter,
+				   sizeof(filter_compat)))
+			return -EFAULT;
+
+		filter.flags = filter_compat.flags;
+		for (i = 0; i < ARRAY_SIZE(filter.ranges); i++) {
+			struct kvm_msr_filter_range_compat *cr;
+
+			cr = &filter_compat.ranges[i];
+			filter.ranges[i] = (struct kvm_msr_filter_range) {
+				.flags = cr->flags,
+				.nmsrs = cr->nmsrs,
+				.base = cr->base,
+				.bitmap = (__u8 *)(ulong)cr->bitmap,
+			};
+		}
+
+		r = kvm_vm_ioctl_set_msr_filter(kvm, &filter);
+		break;
+	}
+	}
+
+	return r;
+}
+#endif
+
+#ifdef CONFIG_HAVE_KVM_PM_NOTIFIER
+static int kvm_arch_suspend_notifier(struct kvm *kvm)
+{
+	struct kvm_vcpu *vcpu;
+	unsigned long i;
+
+	/*
+	 * Ignore the return, marking the guest paused only "fails" if the vCPU
+	 * isn't using kvmclock; continuing on is correct and desirable.
+	 */
+	kvm_for_each_vcpu(i, vcpu, kvm)
+		(void)kvm_set_guest_paused(vcpu);
+
+	return NOTIFY_DONE;
+}
+
+int kvm_arch_pm_notifier(struct kvm *kvm, unsigned long state)
+{
+	switch (state) {
+	case PM_HIBERNATION_PREPARE:
+	case PM_SUSPEND_PREPARE:
+		return kvm_arch_suspend_notifier(kvm);
+	}
+
+	return NOTIFY_DONE;
+}
+#endif /* CONFIG_HAVE_KVM_PM_NOTIFIER */
+
+static int kvm_vm_ioctl_get_clock(struct kvm *kvm, void __user *argp)
+{
+	struct kvm_clock_data data = { 0 };
+
+	get_kvmclock(kvm, &data);
+	if (copy_to_user(argp, &data, sizeof(data)))
+		return -EFAULT;
+
+	return 0;
+}
+
+static int kvm_vm_ioctl_set_clock(struct kvm *kvm, void __user *argp)
+{
+	struct kvm_arch *ka = &kvm->arch;
+	struct kvm_clock_data data;
+	u64 now_raw_ns;
+
+	if (copy_from_user(&data, argp, sizeof(data)))
+		return -EFAULT;
+
+	/*
+	 * Only KVM_CLOCK_REALTIME is used, but allow passing the
+	 * result of KVM_GET_CLOCK back to KVM_SET_CLOCK.
+	 */
+	if (data.flags & ~KVM_CLOCK_VALID_FLAGS)
+		return -EINVAL;
+
+	kvm_hv_request_tsc_page_update(kvm);
+	kvm_start_pvclock_update(kvm);
+	pvclock_update_vm_gtod_copy(kvm);
+
+	/*
+	 * This pairs with kvm_guest_time_update(): when masterclock is
+	 * in use, we use master_kernel_ns + kvmclock_offset to set
+	 * unsigned 'system_time' so if we use get_kvmclock_ns() (which
+	 * is slightly ahead) here we risk going negative on unsigned
+	 * 'system_time' when 'data.clock' is very small.
+	 */
+	if (data.flags & KVM_CLOCK_REALTIME) {
+		u64 now_real_ns = ktime_get_real_ns();
+
+		/*
+		 * Avoid stepping the kvmclock backwards.
+		 */
+		if (now_real_ns > data.realtime)
+			data.clock += now_real_ns - data.realtime;
+	}
+
+	if (ka->use_master_clock)
+		now_raw_ns = ka->master_kernel_ns;
+	else
+		now_raw_ns = get_kvmclock_base_ns();
+	ka->kvmclock_offset = data.clock - now_raw_ns;
+	kvm_end_pvclock_update(kvm);
+	return 0;
+}
+
+long kvm_arch_vcpu_unlocked_ioctl(struct file *filp, unsigned int ioctl,
+				  unsigned long arg)
+{
+	struct kvm_vcpu *vcpu = filp->private_data;
+	void __user *argp = (void __user *)arg;
+
+	if (ioctl == KVM_MEMORY_ENCRYPT_OP &&
+	    kvm_x86_ops.vcpu_mem_enc_unlocked_ioctl)
+		return kvm_x86_call(vcpu_mem_enc_unlocked_ioctl)(vcpu, argp);
+
+	return -ENOIOCTLCMD;
+}
+
+int kvm_arch_vm_ioctl(struct file *filp, unsigned int ioctl, unsigned long arg)
 {
 	struct kvm *kvm = filp->private_data;
 	void __user *argp = (void __user *)arg;
 	int r = -ENOTTY;
+
+#ifdef CONFIG_KVM_IOAPIC
 	/*
 	 * This union makes it completely explicit to gcc-3.x
-	 * that these two variables' stack usage should be
+	 * that these three variables' stack usage should be
 	 * combined, not added together.
 	 */
 	union {
@@ -4277,6 +7272,7 @@ long kvm_arch_vm_ioctl(struct file *filp,
 		struct kvm_pit_state2 ps2;
 		struct kvm_pit_config pit_config;
 	} u;
+#endif
 
 	switch (ioctl) {
 	case KVM_SET_TSS_ADDR:
@@ -4290,7 +7286,7 @@ long kvm_arch_vm_ioctl(struct file *filp,
 		if (kvm->created_vcpus)
 			goto set_identity_unlock;
 		r = -EFAULT;
-		if (copy_from_user(&ident_addr, argp, sizeof ident_addr))
+		if (copy_from_user(&ident_addr, argp, sizeof(ident_addr)))
 			goto set_identity_unlock;
 		r = kvm_vm_ioctl_set_identity_map_addr(kvm, ident_addr);
 set_identity_unlock:
@@ -4300,14 +7296,21 @@ set_identity_unlock:
 	case KVM_SET_NR_MMU_PAGES:
 		r = kvm_vm_ioctl_set_nr_mmu_pages(kvm, arg);
 		break;
-	case KVM_GET_NR_MMU_PAGES:
-		r = kvm_vm_ioctl_get_nr_mmu_pages(kvm);
-		break;
+#ifdef CONFIG_KVM_IOAPIC
 	case KVM_CREATE_IRQCHIP: {
 		mutex_lock(&kvm->lock);
 
 		r = -EEXIST;
 		if (irqchip_in_kernel(kvm))
+			goto create_irqchip_unlock;
+
+		/*
+		 * Disallow an in-kernel I/O APIC if the VM has protected EOIs,
+		 * i.e. if KVM can't intercept EOIs and thus can't properly
+		 * emulate level-triggered interrupts.
+		 */
+		r = -ENOTTY;
+		if (kvm->arch.has_protected_eoi)
 			goto create_irqchip_unlock;
 
 		r = -EINVAL;
@@ -4324,7 +7327,7 @@ set_identity_unlock:
 			goto create_irqchip_unlock;
 		}
 
-		r = kvm_setup_default_irq_routing(kvm);
+		r = kvm_setup_default_ioapic_and_pic_routing(kvm);
 		if (r) {
 			kvm_ioapic_destroy(kvm);
 			kvm_pic_destroy(kvm);
@@ -4333,6 +7336,7 @@ set_identity_unlock:
 		/* Write kvm->irq_routing before enabling irqchip_in_kernel. */
 		smp_wmb();
 		kvm->arch.irqchip_mode = KVM_IRQCHIP_KERNEL;
+		kvm_clear_apicv_inhibit(kvm, APICV_INHIBIT_REASON_ABSENT);
 	create_irqchip_unlock:
 		mutex_unlock(&kvm->lock);
 		break;
@@ -4349,6 +7353,9 @@ set_identity_unlock:
 		mutex_lock(&kvm->lock);
 		r = -EEXIST;
 		if (kvm->arch.vpit)
+			goto create_pit_unlock;
+		r = -ENOENT;
+		if (!pic_in_kernel(kvm))
 			goto create_pit_unlock;
 		r = -ENOMEM;
 		kvm->arch.vpit = kvm_create_pit(kvm, u.pit_config.flags);
@@ -4368,13 +7375,13 @@ set_identity_unlock:
 		}
 
 		r = -ENXIO;
-		if (!irqchip_kernel(kvm))
+		if (!irqchip_full(kvm))
 			goto get_irqchip_out;
 		r = kvm_vm_ioctl_get_irqchip(kvm, chip);
 		if (r)
 			goto get_irqchip_out;
 		r = -EFAULT;
-		if (copy_to_user(argp, chip, sizeof *chip))
+		if (copy_to_user(argp, chip, sizeof(*chip)))
 			goto get_irqchip_out;
 		r = 0;
 	get_irqchip_out:
@@ -4392,12 +7399,9 @@ set_identity_unlock:
 		}
 
 		r = -ENXIO;
-		if (!irqchip_kernel(kvm))
+		if (!irqchip_full(kvm))
 			goto set_irqchip_out;
 		r = kvm_vm_ioctl_set_irqchip(kvm, chip);
-		if (r)
-			goto set_irqchip_out;
-		r = 0;
 	set_irqchip_out:
 		kfree(chip);
 		break;
@@ -4420,12 +7424,15 @@ set_identity_unlock:
 	}
 	case KVM_SET_PIT: {
 		r = -EFAULT;
-		if (copy_from_user(&u.ps, argp, sizeof u.ps))
+		if (copy_from_user(&u.ps, argp, sizeof(u.ps)))
 			goto out;
+		mutex_lock(&kvm->lock);
 		r = -ENXIO;
 		if (!kvm->arch.vpit)
-			goto out;
+			goto set_pit_out;
 		r = kvm_vm_ioctl_set_pit(kvm, &u.ps);
+set_pit_out:
+		mutex_unlock(&kvm->lock);
 		break;
 	}
 	case KVM_GET_PIT2: {
@@ -4445,10 +7452,13 @@ set_identity_unlock:
 		r = -EFAULT;
 		if (copy_from_user(&u.ps2, argp, sizeof(u.ps2)))
 			goto out;
+		mutex_lock(&kvm->lock);
 		r = -ENXIO;
 		if (!kvm->arch.vpit)
-			goto out;
+			goto set_pit2_out;
 		r = kvm_vm_ioctl_set_pit2(kvm, &u.ps2);
+set_pit2_out:
+		mutex_unlock(&kvm->lock);
 		break;
 	}
 	case KVM_REINJECT_CONTROL: {
@@ -4456,84 +7466,102 @@ set_identity_unlock:
 		r =  -EFAULT;
 		if (copy_from_user(&control, argp, sizeof(control)))
 			goto out;
+		r = -ENXIO;
+		if (!kvm->arch.vpit)
+			goto out;
 		r = kvm_vm_ioctl_reinject(kvm, &control);
 		break;
 	}
+#endif
 	case KVM_SET_BOOT_CPU_ID:
 		r = 0;
 		mutex_lock(&kvm->lock);
 		if (kvm->created_vcpus)
 			r = -EBUSY;
+		else if (arg > KVM_MAX_VCPU_IDS ||
+			 (kvm->arch.max_vcpu_ids && arg > kvm->arch.max_vcpu_ids))
+			r = -EINVAL;
 		else
 			kvm->arch.bsp_vcpu_id = arg;
 		mutex_unlock(&kvm->lock);
 		break;
+#ifdef CONFIG_KVM_XEN
 	case KVM_XEN_HVM_CONFIG: {
 		struct kvm_xen_hvm_config xhc;
 		r = -EFAULT;
 		if (copy_from_user(&xhc, argp, sizeof(xhc)))
 			goto out;
+		r = kvm_xen_hvm_config(kvm, &xhc);
+		break;
+	}
+	case KVM_XEN_HVM_GET_ATTR: {
+		struct kvm_xen_hvm_attr xha;
+
+		r = -EFAULT;
+		if (copy_from_user(&xha, argp, sizeof(xha)))
+			goto out;
+		r = kvm_xen_hvm_get_attr(kvm, &xha);
+		if (!r && copy_to_user(argp, &xha, sizeof(xha)))
+			r = -EFAULT;
+		break;
+	}
+	case KVM_XEN_HVM_SET_ATTR: {
+		struct kvm_xen_hvm_attr xha;
+
+		r = -EFAULT;
+		if (copy_from_user(&xha, argp, sizeof(xha)))
+			goto out;
+		r = kvm_xen_hvm_set_attr(kvm, &xha);
+		break;
+	}
+	case KVM_XEN_HVM_EVTCHN_SEND: {
+		struct kvm_irq_routing_xen_evtchn uxe;
+
+		r = -EFAULT;
+		if (copy_from_user(&uxe, argp, sizeof(uxe)))
+			goto out;
+		r = kvm_xen_hvm_evtchn_send(kvm, &uxe);
+		break;
+	}
+#endif
+	case KVM_SET_CLOCK:
+		r = kvm_vm_ioctl_set_clock(kvm, argp);
+		break;
+	case KVM_GET_CLOCK:
+		r = kvm_vm_ioctl_get_clock(kvm, argp);
+		break;
+	case KVM_SET_TSC_KHZ: {
+		u32 user_tsc_khz;
+
 		r = -EINVAL;
-		if (xhc.flags)
+		user_tsc_khz = (u32)arg;
+
+		if (kvm_caps.has_tsc_control &&
+		    user_tsc_khz >= kvm_caps.max_guest_tsc_khz)
 			goto out;
-		memcpy(&kvm->arch.xen_hvm_config, &xhc, sizeof(xhc));
-		r = 0;
-		break;
+
+		if (user_tsc_khz == 0)
+			user_tsc_khz = tsc_khz;
+
+		mutex_lock(&kvm->lock);
+		if (!kvm->created_vcpus) {
+			WRITE_ONCE(kvm->arch.default_tsc_khz, user_tsc_khz);
+			r = 0;
+		}
+		mutex_unlock(&kvm->lock);
+		goto out;
 	}
-	case KVM_SET_CLOCK: {
-		struct kvm_clock_data user_ns;
-		u64 now_ns;
-
-		r = -EFAULT;
-		if (copy_from_user(&user_ns, argp, sizeof(user_ns)))
-			goto out;
-
-		r = -EINVAL;
-		if (user_ns.flags)
-			goto out;
-
-		r = 0;
-		/*
-		 * TODO: userspace has to take care of races with VCPU_RUN, so
-		 * kvm_gen_update_masterclock() can be cut down to locked
-		 * pvclock_update_vm_gtod_copy().
-		 */
-		kvm_gen_update_masterclock(kvm);
-		now_ns = get_kvmclock_ns(kvm);
-		kvm->arch.kvmclock_offset += user_ns.clock - now_ns;
-		kvm_make_all_cpus_request(kvm, KVM_REQ_CLOCK_UPDATE);
-		break;
+	case KVM_GET_TSC_KHZ: {
+		r = READ_ONCE(kvm->arch.default_tsc_khz);
+		goto out;
 	}
-	case KVM_GET_CLOCK: {
-		struct kvm_clock_data user_ns;
-		u64 now_ns;
-
-		now_ns = get_kvmclock_ns(kvm);
-		user_ns.clock = now_ns;
-		user_ns.flags = kvm->arch.use_master_clock ? KVM_CLOCK_TSC_STABLE : 0;
-		memset(&user_ns.pad, 0, sizeof(user_ns.pad));
-
-		r = -EFAULT;
-		if (copy_to_user(argp, &user_ns, sizeof(user_ns)))
-			goto out;
-		r = 0;
-		break;
-	}
-	case KVM_ENABLE_CAP: {
-		struct kvm_enable_cap cap;
-
-		r = -EFAULT;
-		if (copy_from_user(&cap, argp, sizeof(cap)))
-			goto out;
-		r = kvm_vm_ioctl_enable_cap(kvm, &cap);
-		break;
-	}
-	case KVM_MEMORY_ENCRYPT_OP: {
+	case KVM_MEMORY_ENCRYPT_OP:
 		r = -ENOTTY;
-		if (kvm_x86_ops->mem_enc_op)
-			r = kvm_x86_ops->mem_enc_op(kvm, argp);
+		if (!kvm_x86_ops.mem_enc_ioctl)
+			goto out;
+
+		r = kvm_x86_call(mem_enc_ioctl)(kvm, argp);
 		break;
-	}
 	case KVM_MEMORY_ENCRYPT_REG_REGION: {
 		struct kvm_enc_region region;
 
@@ -4542,8 +7570,10 @@ set_identity_unlock:
 			goto out;
 
 		r = -ENOTTY;
-		if (kvm_x86_ops->mem_enc_reg_region)
-			r = kvm_x86_ops->mem_enc_reg_region(kvm, &region);
+		if (!kvm_x86_ops.mem_enc_register_region)
+			goto out;
+
+		r = kvm_x86_call(mem_enc_register_region)(kvm, &region);
 		break;
 	}
 	case KVM_MEMORY_ENCRYPT_UNREG_REGION: {
@@ -4554,10 +7584,13 @@ set_identity_unlock:
 			goto out;
 
 		r = -ENOTTY;
-		if (kvm_x86_ops->mem_enc_unreg_region)
-			r = kvm_x86_ops->mem_enc_unreg_region(kvm, &region);
+		if (!kvm_x86_ops.mem_enc_unregister_region)
+			goto out;
+
+		r = kvm_x86_call(mem_enc_unregister_region)(kvm, &region);
 		break;
 	}
+#ifdef CONFIG_KVM_HYPERV
 	case KVM_HYPERV_EVENTFD: {
 		struct kvm_hyperv_eventfd hvevfd;
 
@@ -4567,6 +7600,20 @@ set_identity_unlock:
 		r = kvm_vm_ioctl_hv_eventfd(kvm, &hvevfd);
 		break;
 	}
+#endif
+	case KVM_SET_PMU_EVENT_FILTER:
+		r = kvm_vm_ioctl_set_pmu_event_filter(kvm, argp);
+		break;
+	case KVM_X86_SET_MSR_FILTER: {
+		struct kvm_msr_filter __user *user_msr_filter = argp;
+		struct kvm_msr_filter filter;
+
+		if (copy_from_user(&filter, user_msr_filter, sizeof(filter)))
+			return -EFAULT;
+
+		r = kvm_vm_ioctl_set_msr_filter(kvm, &filter);
+		break;
+	}
 	default:
 		r = -ENOTTY;
 	}
@@ -4574,67 +7621,165 @@ out:
 	return r;
 }
 
-static void kvm_init_msr_list(void)
+static void kvm_probe_feature_msr(u32 msr_index)
+{
+	u64 data;
+
+	if (kvm_get_feature_msr(NULL, msr_index, &data, true))
+		return;
+
+	msr_based_features[num_msr_based_features++] = msr_index;
+}
+
+static void kvm_probe_msr_to_save(u32 msr_index)
 {
 	u32 dummy[2];
-	unsigned i, j;
 
-	for (i = j = 0; i < ARRAY_SIZE(msrs_to_save); i++) {
-		if (rdmsr_safe(msrs_to_save[i], &dummy[0], &dummy[1]) < 0)
+	if (rdmsr_safe(msr_index, &dummy[0], &dummy[1]))
+		return;
+
+	/*
+	 * Even MSRs that are valid in the host may not be exposed to guests in
+	 * some cases.
+	 */
+	switch (msr_index) {
+	case MSR_IA32_BNDCFGS:
+		if (!kvm_mpx_supported())
+			return;
+		break;
+	case MSR_TSC_AUX:
+		if (!kvm_cpu_cap_has(X86_FEATURE_RDTSCP) &&
+		    !kvm_cpu_cap_has(X86_FEATURE_RDPID))
+			return;
+		break;
+	case MSR_IA32_UMWAIT_CONTROL:
+		if (!kvm_cpu_cap_has(X86_FEATURE_WAITPKG))
+			return;
+		break;
+	case MSR_IA32_RTIT_CTL:
+	case MSR_IA32_RTIT_STATUS:
+		if (!kvm_cpu_cap_has(X86_FEATURE_INTEL_PT))
+			return;
+		break;
+	case MSR_IA32_RTIT_CR3_MATCH:
+		if (!kvm_cpu_cap_has(X86_FEATURE_INTEL_PT) ||
+		    !intel_pt_validate_hw_cap(PT_CAP_cr3_filtering))
+			return;
+		break;
+	case MSR_IA32_RTIT_OUTPUT_BASE:
+	case MSR_IA32_RTIT_OUTPUT_MASK:
+		if (!kvm_cpu_cap_has(X86_FEATURE_INTEL_PT) ||
+		    (!intel_pt_validate_hw_cap(PT_CAP_topa_output) &&
+		     !intel_pt_validate_hw_cap(PT_CAP_single_range_output)))
+			return;
+		break;
+	case MSR_IA32_RTIT_ADDR0_A ... MSR_IA32_RTIT_ADDR3_B:
+		if (!kvm_cpu_cap_has(X86_FEATURE_INTEL_PT) ||
+		    (msr_index - MSR_IA32_RTIT_ADDR0_A >=
+		     intel_pt_validate_hw_cap(PT_CAP_num_address_ranges) * 2))
+			return;
+		break;
+	case MSR_ARCH_PERFMON_PERFCTR0 ...
+	     MSR_ARCH_PERFMON_PERFCTR0 + KVM_MAX_NR_GP_COUNTERS - 1:
+		if (msr_index - MSR_ARCH_PERFMON_PERFCTR0 >=
+		    kvm_pmu_cap.num_counters_gp)
+			return;
+		break;
+	case MSR_ARCH_PERFMON_EVENTSEL0 ...
+	     MSR_ARCH_PERFMON_EVENTSEL0 + KVM_MAX_NR_GP_COUNTERS - 1:
+		if (msr_index - MSR_ARCH_PERFMON_EVENTSEL0 >=
+		    kvm_pmu_cap.num_counters_gp)
+			return;
+		break;
+	case MSR_ARCH_PERFMON_FIXED_CTR0 ...
+	     MSR_ARCH_PERFMON_FIXED_CTR0 + KVM_MAX_NR_FIXED_COUNTERS - 1:
+		if (msr_index - MSR_ARCH_PERFMON_FIXED_CTR0 >=
+		    kvm_pmu_cap.num_counters_fixed)
+			return;
+		break;
+	case MSR_AMD64_PERF_CNTR_GLOBAL_CTL:
+	case MSR_AMD64_PERF_CNTR_GLOBAL_STATUS:
+	case MSR_AMD64_PERF_CNTR_GLOBAL_STATUS_CLR:
+	case MSR_AMD64_PERF_CNTR_GLOBAL_STATUS_SET:
+		if (!kvm_cpu_cap_has(X86_FEATURE_PERFMON_V2))
+			return;
+		break;
+	case MSR_IA32_XFD:
+	case MSR_IA32_XFD_ERR:
+		if (!kvm_cpu_cap_has(X86_FEATURE_XFD))
+			return;
+		break;
+	case MSR_IA32_TSX_CTRL:
+		if (!(kvm_get_arch_capabilities() & ARCH_CAP_TSX_CTRL_MSR))
+			return;
+		break;
+	case MSR_IA32_XSS:
+		if (!kvm_caps.supported_xss)
+			return;
+		break;
+	case MSR_IA32_U_CET:
+	case MSR_IA32_S_CET:
+		if (!kvm_cpu_cap_has(X86_FEATURE_SHSTK) &&
+		    !kvm_cpu_cap_has(X86_FEATURE_IBT))
+			return;
+		break;
+	case MSR_IA32_INT_SSP_TAB:
+		if (!kvm_cpu_cap_has(X86_FEATURE_LM))
+			return;
+		fallthrough;
+	case MSR_IA32_PL0_SSP ... MSR_IA32_PL3_SSP:
+		if (!kvm_cpu_cap_has(X86_FEATURE_SHSTK))
+			return;
+		break;
+	default:
+		break;
+	}
+
+	msrs_to_save[num_msrs_to_save++] = msr_index;
+}
+
+static void kvm_init_msr_lists(void)
+{
+	unsigned i;
+
+	BUILD_BUG_ON_MSG(KVM_MAX_NR_FIXED_COUNTERS != 3,
+			 "Please update the fixed PMCs in msrs_to_save_pmu[]");
+
+	num_msrs_to_save = 0;
+	num_emulated_msrs = 0;
+	num_msr_based_features = 0;
+
+	for (i = 0; i < ARRAY_SIZE(msrs_to_save_base); i++)
+		kvm_probe_msr_to_save(msrs_to_save_base[i]);
+
+	if (enable_pmu) {
+		for (i = 0; i < ARRAY_SIZE(msrs_to_save_pmu); i++)
+			kvm_probe_msr_to_save(msrs_to_save_pmu[i]);
+	}
+
+	for (i = 0; i < ARRAY_SIZE(emulated_msrs_all); i++) {
+		if (!kvm_x86_call(has_emulated_msr)(NULL,
+						    emulated_msrs_all[i]))
 			continue;
 
-		/*
-		 * Even MSRs that are valid in the host may not be exposed
-		 * to the guests in some cases.
-		 */
-		switch (msrs_to_save[i]) {
-		case MSR_IA32_BNDCFGS:
-			if (!kvm_x86_ops->mpx_supported())
-				continue;
-			break;
-		case MSR_TSC_AUX:
-			if (!kvm_x86_ops->rdtscp_supported())
-				continue;
-			break;
-		default:
-			break;
-		}
-
-		if (j < i)
-			msrs_to_save[j] = msrs_to_save[i];
-		j++;
+		emulated_msrs[num_emulated_msrs++] = emulated_msrs_all[i];
 	}
-	num_msrs_to_save = j;
 
-	for (i = j = 0; i < ARRAY_SIZE(emulated_msrs); i++) {
-		if (!kvm_x86_ops->has_emulated_msr(emulated_msrs[i]))
-			continue;
+	for (i = KVM_FIRST_EMULATED_VMX_MSR; i <= KVM_LAST_EMULATED_VMX_MSR; i++)
+		kvm_probe_feature_msr(i);
 
-		if (j < i)
-			emulated_msrs[j] = emulated_msrs[i];
-		j++;
-	}
-	num_emulated_msrs = j;
-
-	for (i = j = 0; i < ARRAY_SIZE(msr_based_features); i++) {
-		struct kvm_msr_entry msr;
-
-		msr.index = msr_based_features[i];
-		if (kvm_get_msr_feature(&msr))
-			continue;
-
-		if (j < i)
-			msr_based_features[j] = msr_based_features[i];
-		j++;
-	}
-	num_msr_based_features = j;
+	for (i = 0; i < ARRAY_SIZE(msr_based_features_all_except_vmx); i++)
+		kvm_probe_feature_msr(msr_based_features_all_except_vmx[i]);
 }
 
 static int vcpu_mmio_write(struct kvm_vcpu *vcpu, gpa_t addr, int len,
-			   const void *v)
+			   void *__v)
 {
+	const void *v = __v;
 	int handled = 0;
 	int n;
+
+	trace_kvm_mmio(KVM_TRACE_MMIO_WRITE, len, addr, __v);
 
 	do {
 		n = min(len, 8);
@@ -4670,80 +7815,69 @@ static int vcpu_mmio_read(struct kvm_vcpu *vcpu, gpa_t addr, int len, void *v)
 		v += n;
 	} while (len);
 
+	if (len)
+		trace_kvm_mmio(KVM_TRACE_MMIO_READ_UNSATISFIED, len, addr, NULL);
+
 	return handled;
 }
 
-static void kvm_set_segment(struct kvm_vcpu *vcpu,
-			struct kvm_segment *var, int seg)
+void kvm_set_segment(struct kvm_vcpu *vcpu,
+		     struct kvm_segment *var, int seg)
 {
-	kvm_x86_ops->set_segment(vcpu, var, seg);
+	kvm_x86_call(set_segment)(vcpu, var, seg);
 }
 
 void kvm_get_segment(struct kvm_vcpu *vcpu,
 		     struct kvm_segment *var, int seg)
 {
-	kvm_x86_ops->get_segment(vcpu, var, seg);
-}
-
-gpa_t translate_nested_gpa(struct kvm_vcpu *vcpu, gpa_t gpa, u32 access,
-			   struct x86_exception *exception)
-{
-	gpa_t t_gpa;
-
-	BUG_ON(!mmu_is_nested(vcpu));
-
-	/* NPT walks are always user-walks */
-	access |= PFERR_USER_MASK;
-	t_gpa  = vcpu->arch.mmu.gva_to_gpa(vcpu, gpa, access, exception);
-
-	return t_gpa;
+	kvm_x86_call(get_segment)(vcpu, var, seg);
 }
 
 gpa_t kvm_mmu_gva_to_gpa_read(struct kvm_vcpu *vcpu, gva_t gva,
 			      struct x86_exception *exception)
 {
-	u32 access = (kvm_x86_ops->get_cpl(vcpu) == 3) ? PFERR_USER_MASK : 0;
-	return vcpu->arch.walk_mmu->gva_to_gpa(vcpu, gva, access, exception);
-}
+	struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
 
- gpa_t kvm_mmu_gva_to_gpa_fetch(struct kvm_vcpu *vcpu, gva_t gva,
-				struct x86_exception *exception)
-{
-	u32 access = (kvm_x86_ops->get_cpl(vcpu) == 3) ? PFERR_USER_MASK : 0;
-	access |= PFERR_FETCH_MASK;
-	return vcpu->arch.walk_mmu->gva_to_gpa(vcpu, gva, access, exception);
+	u64 access = (kvm_x86_call(get_cpl)(vcpu) == 3) ? PFERR_USER_MASK : 0;
+	return mmu->gva_to_gpa(vcpu, mmu, gva, access, exception);
 }
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_mmu_gva_to_gpa_read);
 
 gpa_t kvm_mmu_gva_to_gpa_write(struct kvm_vcpu *vcpu, gva_t gva,
 			       struct x86_exception *exception)
 {
-	u32 access = (kvm_x86_ops->get_cpl(vcpu) == 3) ? PFERR_USER_MASK : 0;
+	struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
+
+	u64 access = (kvm_x86_call(get_cpl)(vcpu) == 3) ? PFERR_USER_MASK : 0;
 	access |= PFERR_WRITE_MASK;
-	return vcpu->arch.walk_mmu->gva_to_gpa(vcpu, gva, access, exception);
+	return mmu->gva_to_gpa(vcpu, mmu, gva, access, exception);
 }
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_mmu_gva_to_gpa_write);
 
 /* uses this to access any guest's mapped memory without checking CPL */
 gpa_t kvm_mmu_gva_to_gpa_system(struct kvm_vcpu *vcpu, gva_t gva,
 				struct x86_exception *exception)
 {
-	return vcpu->arch.walk_mmu->gva_to_gpa(vcpu, gva, 0, exception);
+	struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
+
+	return mmu->gva_to_gpa(vcpu, mmu, gva, 0, exception);
 }
 
 static int kvm_read_guest_virt_helper(gva_t addr, void *val, unsigned int bytes,
-				      struct kvm_vcpu *vcpu, u32 access,
+				      struct kvm_vcpu *vcpu, u64 access,
 				      struct x86_exception *exception)
 {
+	struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
 	void *data = val;
 	int r = X86EMUL_CONTINUE;
 
 	while (bytes) {
-		gpa_t gpa = vcpu->arch.walk_mmu->gva_to_gpa(vcpu, addr, access,
-							    exception);
+		gpa_t gpa = mmu->gva_to_gpa(vcpu, mmu, addr, access, exception);
 		unsigned offset = addr & (PAGE_SIZE-1);
 		unsigned toread = min(bytes, (unsigned)PAGE_SIZE - offset);
 		int ret;
 
-		if (gpa == UNMAPPED_GVA)
+		if (gpa == INVALID_GPA)
 			return X86EMUL_PROPAGATE_FAULT;
 		ret = kvm_vcpu_read_guest_page(vcpu, gpa >> PAGE_SHIFT, data,
 					       offset, toread);
@@ -4766,14 +7900,15 @@ static int kvm_fetch_guest_virt(struct x86_emulate_ctxt *ctxt,
 				struct x86_exception *exception)
 {
 	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
-	u32 access = (kvm_x86_ops->get_cpl(vcpu) == 3) ? PFERR_USER_MASK : 0;
+	struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
+	u64 access = (kvm_x86_call(get_cpl)(vcpu) == 3) ? PFERR_USER_MASK : 0;
 	unsigned offset;
 	int ret;
 
 	/* Inline kvm_read_guest_virt_helper for speed.  */
-	gpa_t gpa = vcpu->arch.walk_mmu->gva_to_gpa(vcpu, addr, access|PFERR_FETCH_MASK,
-						    exception);
-	if (unlikely(gpa == UNMAPPED_GVA))
+	gpa_t gpa = mmu->gva_to_gpa(vcpu, mmu, addr, access|PFERR_FETCH_MASK,
+				    exception);
+	if (unlikely(gpa == INVALID_GPA))
 		return X86EMUL_PROPAGATE_FAULT;
 
 	offset = addr & (PAGE_SIZE-1);
@@ -4787,53 +7922,54 @@ static int kvm_fetch_guest_virt(struct x86_emulate_ctxt *ctxt,
 	return X86EMUL_CONTINUE;
 }
 
-int kvm_read_guest_virt(struct x86_emulate_ctxt *ctxt,
+int kvm_read_guest_virt(struct kvm_vcpu *vcpu,
 			       gva_t addr, void *val, unsigned int bytes,
 			       struct x86_exception *exception)
 {
-	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
-	u32 access = (kvm_x86_ops->get_cpl(vcpu) == 3) ? PFERR_USER_MASK : 0;
+	u64 access = (kvm_x86_call(get_cpl)(vcpu) == 3) ? PFERR_USER_MASK : 0;
 
+	/*
+	 * FIXME: this should call handle_emulation_failure if X86EMUL_IO_NEEDED
+	 * is returned, but our callers are not ready for that and they blindly
+	 * call kvm_inject_page_fault.  Ensure that they at least do not leak
+	 * uninitialized kernel stack memory into cr2 and error code.
+	 */
+	memset(exception, 0, sizeof(*exception));
 	return kvm_read_guest_virt_helper(addr, val, bytes, vcpu, access,
 					  exception);
 }
-EXPORT_SYMBOL_GPL(kvm_read_guest_virt);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_read_guest_virt);
 
-static int kvm_read_guest_virt_system(struct x86_emulate_ctxt *ctxt,
-				      gva_t addr, void *val, unsigned int bytes,
+static int emulator_read_std(struct x86_emulate_ctxt *ctxt,
+			     gva_t addr, void *val, unsigned int bytes,
+			     struct x86_exception *exception, bool system)
+{
+	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
+	u64 access = 0;
+
+	if (system)
+		access |= PFERR_IMPLICIT_ACCESS;
+	else if (kvm_x86_call(get_cpl)(vcpu) == 3)
+		access |= PFERR_USER_MASK;
+
+	return kvm_read_guest_virt_helper(addr, val, bytes, vcpu, access, exception);
+}
+
+static int kvm_write_guest_virt_helper(gva_t addr, void *val, unsigned int bytes,
+				      struct kvm_vcpu *vcpu, u64 access,
 				      struct x86_exception *exception)
 {
-	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
-	return kvm_read_guest_virt_helper(addr, val, bytes, vcpu, 0, exception);
-}
-
-static int kvm_read_guest_phys_system(struct x86_emulate_ctxt *ctxt,
-		unsigned long addr, void *val, unsigned int bytes)
-{
-	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
-	int r = kvm_vcpu_read_guest(vcpu, addr, val, bytes);
-
-	return r < 0 ? X86EMUL_IO_NEEDED : X86EMUL_CONTINUE;
-}
-
-int kvm_write_guest_virt_system(struct x86_emulate_ctxt *ctxt,
-				       gva_t addr, void *val,
-				       unsigned int bytes,
-				       struct x86_exception *exception)
-{
-	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
+	struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
 	void *data = val;
 	int r = X86EMUL_CONTINUE;
 
 	while (bytes) {
-		gpa_t gpa =  vcpu->arch.walk_mmu->gva_to_gpa(vcpu, addr,
-							     PFERR_WRITE_MASK,
-							     exception);
+		gpa_t gpa = mmu->gva_to_gpa(vcpu, mmu, addr, access, exception);
 		unsigned offset = addr & (PAGE_SIZE-1);
 		unsigned towrite = min(bytes, (unsigned)PAGE_SIZE - offset);
 		int ret;
 
-		if (gpa == UNMAPPED_GVA)
+		if (gpa == INVALID_GPA)
 			return X86EMUL_PROPAGATE_FAULT;
 		ret = kvm_vcpu_write_guest(vcpu, gpa, data, towrite);
 		if (ret < 0) {
@@ -4848,31 +7984,67 @@ int kvm_write_guest_virt_system(struct x86_emulate_ctxt *ctxt,
 out:
 	return r;
 }
-EXPORT_SYMBOL_GPL(kvm_write_guest_virt_system);
+
+static int emulator_write_std(struct x86_emulate_ctxt *ctxt, gva_t addr, void *val,
+			      unsigned int bytes, struct x86_exception *exception,
+			      bool system)
+{
+	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
+	u64 access = PFERR_WRITE_MASK;
+
+	if (system)
+		access |= PFERR_IMPLICIT_ACCESS;
+	else if (kvm_x86_call(get_cpl)(vcpu) == 3)
+		access |= PFERR_USER_MASK;
+
+	return kvm_write_guest_virt_helper(addr, val, bytes, vcpu,
+					   access, exception);
+}
+
+int kvm_write_guest_virt_system(struct kvm_vcpu *vcpu, gva_t addr, void *val,
+				unsigned int bytes, struct x86_exception *exception)
+{
+	/* kvm_write_guest_virt_system can pull in tons of pages. */
+	kvm_request_l1tf_flush_l1d();
+
+	return kvm_write_guest_virt_helper(addr, val, bytes, vcpu,
+					   PFERR_WRITE_MASK, exception);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_write_guest_virt_system);
+
+static int kvm_check_emulate_insn(struct kvm_vcpu *vcpu, int emul_type,
+				  void *insn, int insn_len)
+{
+	return kvm_x86_call(check_emulate_instruction)(vcpu, emul_type,
+						       insn, insn_len);
+}
 
 int handle_ud(struct kvm_vcpu *vcpu)
 {
+	static const char kvm_emulate_prefix[] = { __KVM_EMULATE_PREFIX };
+	int fep_flags = READ_ONCE(force_emulation_prefix);
 	int emul_type = EMULTYPE_TRAP_UD;
-	enum emulation_result er;
 	char sig[5]; /* ud2; .ascii "kvm" */
 	struct x86_exception e;
+	int r;
 
-	if (force_emulation_prefix &&
-	    kvm_read_guest_virt(&vcpu->arch.emulate_ctxt,
-				kvm_get_linear_rip(vcpu), sig, sizeof(sig), &e) == 0 &&
-	    memcmp(sig, "\xf\xbkvm", sizeof(sig)) == 0) {
+	r = kvm_check_emulate_insn(vcpu, emul_type, NULL, 0);
+	if (r != X86EMUL_CONTINUE)
+		return 1;
+
+	if (fep_flags &&
+	    kvm_read_guest_virt(vcpu, kvm_get_linear_rip(vcpu),
+				sig, sizeof(sig), &e) == 0 &&
+	    memcmp(sig, kvm_emulate_prefix, sizeof(sig)) == 0) {
+		if (fep_flags & KVM_FEP_CLEAR_RFLAGS_RF)
+			kvm_set_rflags(vcpu, kvm_get_rflags(vcpu) & ~X86_EFLAGS_RF);
 		kvm_rip_write(vcpu, kvm_rip_read(vcpu) + sizeof(sig));
-		emul_type = 0;
+		emul_type = EMULTYPE_TRAP_UD_FORCED;
 	}
 
-	er = emulate_instruction(vcpu, emul_type);
-	if (er == EMULATE_USER_EXIT)
-		return 0;
-	if (er != EMULATE_DONE)
-		kvm_queue_exception(vcpu, UD_VECTOR);
-	return 1;
+	return kvm_emulate_instruction(vcpu, emul_type);
 }
-EXPORT_SYMBOL_GPL(handle_ud);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(handle_ud);
 
 static int vcpu_is_mmio_gpa(struct kvm_vcpu *vcpu, unsigned long gva,
 			    gpa_t gpa, bool write)
@@ -4893,33 +8065,48 @@ static int vcpu_mmio_gva_to_gpa(struct kvm_vcpu *vcpu, unsigned long gva,
 				gpa_t *gpa, struct x86_exception *exception,
 				bool write)
 {
-	u32 access = ((kvm_x86_ops->get_cpl(vcpu) == 3) ? PFERR_USER_MASK : 0)
-		| (write ? PFERR_WRITE_MASK : 0);
+	struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
+	u64 access = ((kvm_x86_call(get_cpl)(vcpu) == 3) ? PFERR_USER_MASK : 0)
+		     | (write ? PFERR_WRITE_MASK : 0);
 
 	/*
 	 * currently PKRU is only applied to ept enabled guest so
 	 * there is no pkey in EPT page table for L1 guest or EPT
 	 * shadow page table for L2 guest.
 	 */
-	if (vcpu_match_mmio_gva(vcpu, gva)
-	    && !permission_fault(vcpu, vcpu->arch.walk_mmu,
-				 vcpu->arch.access, 0, access)) {
+	if (vcpu_match_mmio_gva(vcpu, gva) && (!is_paging(vcpu) ||
+	    !permission_fault(vcpu, vcpu->arch.walk_mmu,
+			      vcpu->arch.mmio_access, 0, access))) {
 		*gpa = vcpu->arch.mmio_gfn << PAGE_SHIFT |
 					(gva & (PAGE_SIZE - 1));
 		trace_vcpu_match_mmio(gva, *gpa, write, false);
 		return 1;
 	}
 
-	*gpa = vcpu->arch.walk_mmu->gva_to_gpa(vcpu, gva, access, exception);
+	*gpa = mmu->gva_to_gpa(vcpu, mmu, gva, access, exception);
 
-	if (*gpa == UNMAPPED_GVA)
+	if (*gpa == INVALID_GPA)
 		return -1;
 
 	return vcpu_is_mmio_gpa(vcpu, gva, *gpa, write);
 }
 
-int emulator_write_phys(struct kvm_vcpu *vcpu, gpa_t gpa,
-			const void *val, int bytes)
+struct read_write_emulator_ops {
+	int (*read_write_guest)(struct kvm_vcpu *vcpu, gpa_t gpa,
+				void *val, int bytes);
+	int (*read_write_mmio)(struct kvm_vcpu *vcpu, gpa_t gpa,
+			       int bytes, void *val);
+	bool write;
+};
+
+static int emulator_read_guest(struct kvm_vcpu *vcpu, gpa_t gpa,
+			       void *val, int bytes)
+{
+	return !kvm_vcpu_read_guest(vcpu, gpa, val, bytes);
+}
+
+static int emulator_write_guest(struct kvm_vcpu *vcpu, gpa_t gpa,
+				void *val, int bytes)
 {
 	int ret;
 
@@ -4929,78 +8116,6 @@ int emulator_write_phys(struct kvm_vcpu *vcpu, gpa_t gpa,
 	kvm_page_track_write(vcpu, gpa, val, bytes);
 	return 1;
 }
-
-struct read_write_emulator_ops {
-	int (*read_write_prepare)(struct kvm_vcpu *vcpu, void *val,
-				  int bytes);
-	int (*read_write_emulate)(struct kvm_vcpu *vcpu, gpa_t gpa,
-				  void *val, int bytes);
-	int (*read_write_mmio)(struct kvm_vcpu *vcpu, gpa_t gpa,
-			       int bytes, void *val);
-	int (*read_write_exit_mmio)(struct kvm_vcpu *vcpu, gpa_t gpa,
-				    void *val, int bytes);
-	bool write;
-};
-
-static int read_prepare(struct kvm_vcpu *vcpu, void *val, int bytes)
-{
-	if (vcpu->mmio_read_completed) {
-		trace_kvm_mmio(KVM_TRACE_MMIO_READ, bytes,
-			       vcpu->mmio_fragments[0].gpa, val);
-		vcpu->mmio_read_completed = 0;
-		return 1;
-	}
-
-	return 0;
-}
-
-static int read_emulate(struct kvm_vcpu *vcpu, gpa_t gpa,
-			void *val, int bytes)
-{
-	return !kvm_vcpu_read_guest(vcpu, gpa, val, bytes);
-}
-
-static int write_emulate(struct kvm_vcpu *vcpu, gpa_t gpa,
-			 void *val, int bytes)
-{
-	return emulator_write_phys(vcpu, gpa, val, bytes);
-}
-
-static int write_mmio(struct kvm_vcpu *vcpu, gpa_t gpa, int bytes, void *val)
-{
-	trace_kvm_mmio(KVM_TRACE_MMIO_WRITE, bytes, gpa, val);
-	return vcpu_mmio_write(vcpu, gpa, bytes, val);
-}
-
-static int read_exit_mmio(struct kvm_vcpu *vcpu, gpa_t gpa,
-			  void *val, int bytes)
-{
-	trace_kvm_mmio(KVM_TRACE_MMIO_READ_UNSATISFIED, bytes, gpa, NULL);
-	return X86EMUL_IO_NEEDED;
-}
-
-static int write_exit_mmio(struct kvm_vcpu *vcpu, gpa_t gpa,
-			   void *val, int bytes)
-{
-	struct kvm_mmio_fragment *frag = &vcpu->mmio_fragments[0];
-
-	memcpy(vcpu->run->mmio.data, frag->data, min(8u, frag->len));
-	return X86EMUL_CONTINUE;
-}
-
-static const struct read_write_emulator_ops read_emultor = {
-	.read_write_prepare = read_prepare,
-	.read_write_emulate = read_emulate,
-	.read_write_mmio = vcpu_mmio_read,
-	.read_write_exit_mmio = read_exit_mmio,
-};
-
-static const struct read_write_emulator_ops write_emultor = {
-	.read_write_emulate = write_emulate,
-	.read_write_mmio = write_mmio,
-	.read_write_exit_mmio = write_exit_mmio,
-	.write = true,
-};
 
 static int emulator_read_write_onepage(unsigned long addr, void *val,
 				       unsigned int bytes,
@@ -5012,7 +8127,7 @@ static int emulator_read_write_onepage(unsigned long addr, void *val,
 	int handled, ret;
 	bool write = ops->write;
 	struct kvm_mmio_fragment *frag;
-	struct x86_emulate_ctxt *ctxt = &vcpu->arch.emulate_ctxt;
+	struct x86_emulate_ctxt *ctxt = vcpu->arch.emulate_ctxt;
 
 	/*
 	 * If the exit was due to a NPF we may already have a GPA.
@@ -5021,10 +8136,9 @@ static int emulator_read_write_onepage(unsigned long addr, void *val,
 	 * operation using rep will only have the initial GPA from the NPF
 	 * occurred.
 	 */
-	if (vcpu->arch.gpa_available &&
-	    emulator_can_use_gpa(ctxt) &&
-	    (addr & ~PAGE_MASK) == (vcpu->arch.gpa_val & ~PAGE_MASK)) {
-		gpa = vcpu->arch.gpa_val;
+	if (ctxt->gpa_available && emulator_can_use_gpa(ctxt) &&
+	    (addr & ~PAGE_MASK) == (ctxt->gpa_val & ~PAGE_MASK)) {
+		gpa = ctxt->gpa_val;
 		ret = vcpu_is_mmio_gpa(vcpu, addr, gpa, write);
 	} else {
 		ret = vcpu_mmio_gva_to_gpa(vcpu, addr, &gpa, exception, write);
@@ -5032,11 +8146,22 @@ static int emulator_read_write_onepage(unsigned long addr, void *val,
 			return X86EMUL_PROPAGATE_FAULT;
 	}
 
-	if (!ret && ops->read_write_emulate(vcpu, gpa, val, bytes))
+	/*
+	 * If the memory is not _known_ to be emulated MMIO, attempt to access
+	 * guest memory.  If accessing guest memory fails, e.g. because there's
+	 * no memslot, then handle the access as MMIO.  Note, treating the
+	 * access as emulated MMIO is technically wrong if there is a memslot,
+	 * i.e. if accessing host user memory failed, but this has been KVM's
+	 * historical ABI for decades.
+	 */
+	if (!ret && ops->read_write_guest(vcpu, gpa, val, bytes))
 		return X86EMUL_CONTINUE;
 
 	/*
-	 * Is this MMIO handled locally?
+	 * Attempt to handle emulated MMIO within the kernel, e.g. for accesses
+	 * to an in-kernel local or I/O APIC, or to an ioeventfd range attached
+	 * to MMIO bus.  If the access isn't fully resolved, insert an MMIO
+	 * fragment with the relevant details.
 	 */
 	handled = ops->read_write_mmio(vcpu, gpa, bytes, val);
 	if (handled == bytes)
@@ -5049,8 +8174,21 @@ static int emulator_read_write_onepage(unsigned long addr, void *val,
 	WARN_ON(vcpu->mmio_nr_fragments >= KVM_MAX_MMIO_FRAGMENTS);
 	frag = &vcpu->mmio_fragments[vcpu->mmio_nr_fragments++];
 	frag->gpa = gpa;
-	frag->data = val;
+	if (write && bytes <= 8u) {
+		frag->val = 0;
+		frag->data = &frag->val;
+		memcpy(&frag->val, val, bytes);
+	} else {
+		frag->data = val;
+	}
 	frag->len = bytes;
+
+	/*
+	 * Continue emulating, even though KVM needs to (eventually) do an MMIO
+	 * exit to userspace.  If the access splits multiple pages, then KVM
+	 * needs to exit to userspace only after emulating both parts of the
+	 * access.
+	 */
 	return X86EMUL_CONTINUE;
 }
 
@@ -5061,12 +8199,33 @@ static int emulator_read_write(struct x86_emulate_ctxt *ctxt,
 			const struct read_write_emulator_ops *ops)
 {
 	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
-	gpa_t gpa;
 	int rc;
 
-	if (ops->read_write_prepare &&
-		  ops->read_write_prepare(vcpu, val, bytes))
+	if (WARN_ON_ONCE((bytes > 8u || !ops->write) && object_is_on_stack(val)))
+		return X86EMUL_UNHANDLEABLE;
+
+	/*
+	 * If the read was already completed via a userspace MMIO exit, there's
+	 * nothing left to do except trace the MMIO read.  When completing MMIO
+	 * reads, KVM re-emulates the instruction to propagate the value into
+	 * the correct destination, e.g. into the correct register, but the
+	 * value itself has already been copied to the read cache.
+	 *
+	 * Note!  This is *tightly* coupled to read_emulated() satisfying reads
+	 * from the emulator's mem_read cache, so that the MMIO fragment data
+	 * is copied to the correct chunk of the correct operand.
+	 */
+	if (!ops->write && vcpu->mmio_read_completed) {
+		/*
+		 * For simplicity, trace the entire MMIO read in one shot, even
+		 * though the GPA might be incorrect if there are two fragments
+		 * that aren't contiguous in the GPA space.
+		 */
+		trace_kvm_mmio(KVM_TRACE_MMIO_READ, bytes,
+			       vcpu->mmio_fragments[0].gpa, val);
+		vcpu->mmio_read_completed = 0;
 		return X86EMUL_CONTINUE;
+	}
 
 	vcpu->mmio_nr_fragments = 0;
 
@@ -5093,19 +8252,23 @@ static int emulator_read_write(struct x86_emulate_ctxt *ctxt,
 		return rc;
 
 	if (!vcpu->mmio_nr_fragments)
-		return rc;
-
-	gpa = vcpu->mmio_fragments[0].gpa;
+		return X86EMUL_CONTINUE;
 
 	vcpu->mmio_needed = 1;
 	vcpu->mmio_cur_fragment = 0;
+	vcpu->mmio_is_write = ops->write;
 
-	vcpu->run->mmio.len = min(8u, vcpu->mmio_fragments[0].len);
-	vcpu->run->mmio.is_write = vcpu->mmio_is_write = ops->write;
-	vcpu->run->exit_reason = KVM_EXIT_MMIO;
-	vcpu->run->mmio.phys_addr = gpa;
+	kvm_prepare_emulated_mmio_exit(vcpu, &vcpu->mmio_fragments[0]);
 
-	return ops->read_write_exit_mmio(vcpu, gpa, val, bytes);
+	/*
+	 * For MMIO reads, stop emulating and immediately exit to userspace, as
+	 * KVM needs the value to correctly emulate the instruction.  For MMIO
+	 * writes, continue emulating as the write to MMIO is a side effect for
+	 * all intents and purposes.  KVM will still exit to userspace, but
+	 * after completing emulation (see the check on vcpu->mmio_needed in
+	 * x86_emulate_instruction()).
+	 */
+	return ops->write ? X86EMUL_CONTINUE : X86EMUL_IO_NEEDED;
 }
 
 static int emulator_read_emulated(struct x86_emulate_ctxt *ctxt,
@@ -5114,8 +8277,13 @@ static int emulator_read_emulated(struct x86_emulate_ctxt *ctxt,
 				  unsigned int bytes,
 				  struct x86_exception *exception)
 {
-	return emulator_read_write(ctxt, addr, val, bytes,
-				   exception, &read_emultor);
+	static const struct read_write_emulator_ops ops = {
+		.read_write_guest = emulator_read_guest,
+		.read_write_mmio = vcpu_mmio_read,
+		.write = false,
+	};
+
+	return emulator_read_write(ctxt, addr, val, bytes, exception, &ops);
 }
 
 static int emulator_write_emulated(struct x86_emulate_ctxt *ctxt,
@@ -5124,19 +8292,17 @@ static int emulator_write_emulated(struct x86_emulate_ctxt *ctxt,
 			    unsigned int bytes,
 			    struct x86_exception *exception)
 {
-	return emulator_read_write(ctxt, addr, (void *)val, bytes,
-				   exception, &write_emultor);
+	static const struct read_write_emulator_ops ops = {
+		.read_write_guest = emulator_write_guest,
+		.read_write_mmio = vcpu_mmio_write,
+		.write = true,
+	};
+
+	return emulator_read_write(ctxt, addr, (void *)val, bytes, exception, &ops);
 }
 
-#define CMPXCHG_TYPE(t, ptr, old, new) \
-	(cmpxchg((t *)(ptr), *(t *)(old), *(t *)(new)) == *(t *)(old))
-
-#ifdef CONFIG_X86_64
-#  define CMPXCHG64(ptr, old, new) CMPXCHG_TYPE(u64, ptr, old, new)
-#else
-#  define CMPXCHG64(ptr, old, new) \
-	(cmpxchg64((u64 *)(ptr), *(u64 *)(old), *(u64 *)(new)) == *(u64 *)(old))
-#endif
+#define emulator_try_cmpxchg_user(t, ptr, old, new) \
+	(__try_cmpxchg_user((t __user *)(ptr), (t *)(old), *(t *)(new), efault ## t))
 
 static int emulator_cmpxchg_emulated(struct x86_emulate_ctxt *ctxt,
 				     unsigned long addr,
@@ -5146,10 +8312,10 @@ static int emulator_cmpxchg_emulated(struct x86_emulate_ctxt *ctxt,
 				     struct x86_exception *exception)
 {
 	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
+	u64 page_line_mask;
+	unsigned long hva;
 	gpa_t gpa;
-	struct page *page;
-	char *kaddr;
-	bool exchanged;
+	int r;
 
 	/* guests cmpxchg8b have to be emulated atomically */
 	if (bytes > 8 || (bytes & (bytes - 1)))
@@ -5157,84 +8323,111 @@ static int emulator_cmpxchg_emulated(struct x86_emulate_ctxt *ctxt,
 
 	gpa = kvm_mmu_gva_to_gpa_write(vcpu, addr, NULL);
 
-	if (gpa == UNMAPPED_GVA ||
+	if (gpa == INVALID_GPA ||
 	    (gpa & PAGE_MASK) == APIC_DEFAULT_PHYS_BASE)
 		goto emul_write;
 
-	if (((gpa + bytes - 1) & PAGE_MASK) != (gpa & PAGE_MASK))
+	/*
+	 * Emulate the atomic as a straight write to avoid #AC if SLD is
+	 * enabled in the host and the access splits a cache line.
+	 */
+	if (boot_cpu_has(X86_FEATURE_SPLIT_LOCK_DETECT))
+		page_line_mask = ~(cache_line_size() - 1);
+	else
+		page_line_mask = PAGE_MASK;
+
+	if (((gpa + bytes - 1) & page_line_mask) != (gpa & page_line_mask))
 		goto emul_write;
 
-	page = kvm_vcpu_gfn_to_page(vcpu, gpa >> PAGE_SHIFT);
-	if (is_error_page(page))
+	hva = kvm_vcpu_gfn_to_hva(vcpu, gpa_to_gfn(gpa));
+	if (kvm_is_error_hva(hva))
 		goto emul_write;
 
-	kaddr = kmap_atomic(page);
-	kaddr += offset_in_page(gpa);
+	hva += offset_in_page(gpa);
+
 	switch (bytes) {
 	case 1:
-		exchanged = CMPXCHG_TYPE(u8, kaddr, old, new);
+		r = emulator_try_cmpxchg_user(u8, hva, old, new);
 		break;
 	case 2:
-		exchanged = CMPXCHG_TYPE(u16, kaddr, old, new);
+		r = emulator_try_cmpxchg_user(u16, hva, old, new);
 		break;
 	case 4:
-		exchanged = CMPXCHG_TYPE(u32, kaddr, old, new);
+		r = emulator_try_cmpxchg_user(u32, hva, old, new);
 		break;
 	case 8:
-		exchanged = CMPXCHG64(kaddr, old, new);
+		r = emulator_try_cmpxchg_user(u64, hva, old, new);
 		break;
 	default:
 		BUG();
 	}
-	kunmap_atomic(kaddr);
-	kvm_release_page_dirty(page);
 
-	if (!exchanged)
+	if (r < 0)
+		return X86EMUL_UNHANDLEABLE;
+
+	/*
+	 * Mark the page dirty _before_ checking whether or not the CMPXCHG was
+	 * successful, as the old value is written back on failure.  Note, for
+	 * live migration, this is unnecessarily conservative as CMPXCHG writes
+	 * back the original value and the access is atomic, but KVM's ABI is
+	 * that all writes are dirty logged, regardless of the value written.
+	 */
+	kvm_vcpu_mark_page_dirty(vcpu, gpa_to_gfn(gpa));
+
+	if (r)
 		return X86EMUL_CMPXCHG_FAILED;
 
-	kvm_vcpu_mark_page_dirty(vcpu, gpa >> PAGE_SHIFT);
 	kvm_page_track_write(vcpu, gpa, new, bytes);
 
 	return X86EMUL_CONTINUE;
 
 emul_write:
-	printk_once(KERN_WARNING "kvm: emulating exchange as write\n");
+	pr_warn_once("emulating exchange as write\n");
 
 	return emulator_write_emulated(ctxt, addr, new, bytes, exception);
 }
 
-static int kernel_pio(struct kvm_vcpu *vcpu, void *pd)
-{
-	int r = 0, i;
-
-	for (i = 0; i < vcpu->arch.pio.count; i++) {
-		if (vcpu->arch.pio.in)
-			r = kvm_io_bus_read(vcpu, KVM_PIO_BUS, vcpu->arch.pio.port,
-					    vcpu->arch.pio.size, pd);
-		else
-			r = kvm_io_bus_write(vcpu, KVM_PIO_BUS,
-					     vcpu->arch.pio.port, vcpu->arch.pio.size,
-					     pd);
-		if (r)
-			break;
-		pd += vcpu->arch.pio.size;
-	}
-	return r;
-}
-
 static int emulator_pio_in_out(struct kvm_vcpu *vcpu, int size,
-			       unsigned short port, void *val,
+			       unsigned short port, void *data,
 			       unsigned int count, bool in)
 {
+	unsigned i;
+	int r;
+
+	WARN_ON_ONCE(vcpu->arch.pio.count);
+	for (i = 0; i < count; i++) {
+		if (in)
+			r = kvm_io_bus_read(vcpu, KVM_PIO_BUS, port, size, data);
+		else
+			r = kvm_io_bus_write(vcpu, KVM_PIO_BUS, port, size, data);
+
+		if (r) {
+			if (i == 0)
+				goto userspace_io;
+
+			/*
+			 * Userspace must have unregistered the device while PIO
+			 * was running.  Drop writes / read as 0.
+			 */
+			if (in)
+				memset(data, 0, size * (count - i));
+			break;
+		}
+
+		data += size;
+	}
+	return 1;
+
+userspace_io:
 	vcpu->arch.pio.port = port;
 	vcpu->arch.pio.in = in;
-	vcpu->arch.pio.count  = count;
+	vcpu->arch.pio.count = count;
 	vcpu->arch.pio.size = size;
 
-	if (!kernel_pio(vcpu, vcpu->arch.pio_data)) {
-		vcpu->arch.pio.count = 0;
-		return 1;
-	}
+	if (in)
+		memset(vcpu->arch.pio_data, 0, size * count);
+	else
+		memcpy(vcpu->arch.pio_data, data, size * count);
 
 	vcpu->run->exit_reason = KVM_EXIT_IO;
 	vcpu->run->io.direction = in ? KVM_EXIT_IO_IN : KVM_EXIT_IO_OUT;
@@ -5242,8 +8435,26 @@ static int emulator_pio_in_out(struct kvm_vcpu *vcpu, int size,
 	vcpu->run->io.data_offset = KVM_PIO_PAGE_OFFSET * PAGE_SIZE;
 	vcpu->run->io.count = count;
 	vcpu->run->io.port = port;
-
 	return 0;
+}
+
+static int emulator_pio_in(struct kvm_vcpu *vcpu, int size,
+      			   unsigned short port, void *val, unsigned int count)
+{
+	int r = emulator_pio_in_out(vcpu, size, port, val, count, true);
+	if (r)
+		trace_kvm_pio(KVM_PIO_IN, port, size, count, val);
+
+	return r;
+}
+
+static void complete_emulator_pio_in(struct kvm_vcpu *vcpu, void *val)
+{
+	int size = vcpu->arch.pio.size;
+	unsigned int count = vcpu->arch.pio.count;
+	memcpy(val, vcpu->arch.pio_data, size * count);
+	trace_kvm_pio(KVM_PIO_IN, vcpu->arch.pio.port, size, count, vcpu->arch.pio_data);
+	vcpu->arch.pio.count = 0;
 }
 
 static int emulator_pio_in_emulated(struct x86_emulate_ctxt *ctxt,
@@ -5251,39 +8462,39 @@ static int emulator_pio_in_emulated(struct x86_emulate_ctxt *ctxt,
 				    unsigned int count)
 {
 	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
-	int ret;
-
-	if (vcpu->arch.pio.count)
-		goto data_avail;
-
-	memset(vcpu->arch.pio_data, 0, size * count);
-
-	ret = emulator_pio_in_out(vcpu, size, port, val, count, true);
-	if (ret) {
-data_avail:
-		memcpy(val, vcpu->arch.pio_data, size * count);
-		trace_kvm_pio(KVM_PIO_IN, port, size, count, vcpu->arch.pio_data);
-		vcpu->arch.pio.count = 0;
+	if (vcpu->arch.pio.count) {
+		/*
+		 * Complete a previous iteration that required userspace I/O.
+		 * Note, @count isn't guaranteed to match pio.count as userspace
+		 * can modify ECX before rerunning the vCPU.  Ignore any such
+		 * shenanigans as KVM doesn't support modifying the rep count,
+		 * and the emulator ensures @count doesn't overflow the buffer.
+		 */
+		complete_emulator_pio_in(vcpu, val);
 		return 1;
 	}
 
-	return 0;
+	return emulator_pio_in(vcpu, size, port, val, count);
+}
+
+static int emulator_pio_out(struct kvm_vcpu *vcpu, int size,
+			    unsigned short port, const void *val,
+			    unsigned int count)
+{
+	trace_kvm_pio(KVM_PIO_OUT, port, size, count, val);
+	return emulator_pio_in_out(vcpu, size, port, (void *)val, count, false);
 }
 
 static int emulator_pio_out_emulated(struct x86_emulate_ctxt *ctxt,
 				     int size, unsigned short port,
 				     const void *val, unsigned int count)
 {
-	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
-
-	memcpy(vcpu->arch.pio_data, val, size * count);
-	trace_kvm_pio(KVM_PIO_OUT, port, size, count, vcpu->arch.pio_data);
-	return emulator_pio_in_out(vcpu, size, port, (void *)val, count, false);
+	return emulator_pio_out(emul_to_vcpu(ctxt), size, port, val, count);
 }
 
 static unsigned long get_segment_base(struct kvm_vcpu *vcpu, int seg)
 {
-	return kvm_x86_ops->get_segment_base(vcpu, seg);
+	return kvm_x86_call(get_segment_base)(vcpu, seg);
 }
 
 static void emulator_invlpg(struct x86_emulate_ctxt *ctxt, ulong address)
@@ -5296,12 +8507,11 @@ static int kvm_emulate_wbinvd_noskip(struct kvm_vcpu *vcpu)
 	if (!need_emulate_wbinvd(vcpu))
 		return X86EMUL_CONTINUE;
 
-	if (kvm_x86_ops->has_wbinvd_exit()) {
+	if (kvm_x86_call(has_wbinvd_exit)()) {
 		int cpu = get_cpu();
 
 		cpumask_set_cpu(cpu, vcpu->arch.wbinvd_dirty_mask);
-		smp_call_function_many(vcpu->arch.wbinvd_dirty_mask,
-				wbinvd_ipi, NULL, 1);
+		wbinvd_on_cpus_mask(vcpu->arch.wbinvd_dirty_mask);
 		put_cpu();
 		cpumask_clear(vcpu->arch.wbinvd_dirty_mask);
 	} else
@@ -5314,7 +8524,7 @@ int kvm_emulate_wbinvd(struct kvm_vcpu *vcpu)
 	kvm_emulate_wbinvd_noskip(vcpu);
 	return kvm_skip_emulated_instruction(vcpu);
 }
-EXPORT_SYMBOL_GPL(kvm_emulate_wbinvd);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_wbinvd);
 
 
 
@@ -5323,17 +8533,21 @@ static void emulator_wbinvd(struct x86_emulate_ctxt *ctxt)
 	kvm_emulate_wbinvd_noskip(emul_to_vcpu(ctxt));
 }
 
-static int emulator_get_dr(struct x86_emulate_ctxt *ctxt, int dr,
-			   unsigned long *dest)
+static unsigned long emulator_get_effective_dr7(struct x86_emulate_ctxt *ctxt)
 {
-	return kvm_get_dr(emul_to_vcpu(ctxt), dr, dest);
+	return kvm_get_effective_dr7(emul_to_vcpu(ctxt));
+}
+
+static unsigned long emulator_get_dr(struct x86_emulate_ctxt *ctxt, int dr)
+{
+	return kvm_get_dr(emul_to_vcpu(ctxt), dr);
 }
 
 static int emulator_set_dr(struct x86_emulate_ctxt *ctxt, int dr,
 			   unsigned long value)
 {
 
-	return __kvm_set_dr(emul_to_vcpu(ctxt), dr, value);
+	return kvm_set_dr(emul_to_vcpu(ctxt), dr, value);
 }
 
 static u64 mk_cr_64(u64 curr_cr, u32 new_val)
@@ -5401,27 +8615,27 @@ static int emulator_set_cr(struct x86_emulate_ctxt *ctxt, int cr, ulong val)
 
 static int emulator_get_cpl(struct x86_emulate_ctxt *ctxt)
 {
-	return kvm_x86_ops->get_cpl(emul_to_vcpu(ctxt));
+	return kvm_x86_call(get_cpl)(emul_to_vcpu(ctxt));
 }
 
 static void emulator_get_gdt(struct x86_emulate_ctxt *ctxt, struct desc_ptr *dt)
 {
-	kvm_x86_ops->get_gdt(emul_to_vcpu(ctxt), dt);
+	kvm_x86_call(get_gdt)(emul_to_vcpu(ctxt), dt);
 }
 
 static void emulator_get_idt(struct x86_emulate_ctxt *ctxt, struct desc_ptr *dt)
 {
-	kvm_x86_ops->get_idt(emul_to_vcpu(ctxt), dt);
+	kvm_x86_call(get_idt)(emul_to_vcpu(ctxt), dt);
 }
 
 static void emulator_set_gdt(struct x86_emulate_ctxt *ctxt, struct desc_ptr *dt)
 {
-	kvm_x86_ops->set_gdt(emul_to_vcpu(ctxt), dt);
+	kvm_x86_call(set_gdt)(emul_to_vcpu(ctxt), dt);
 }
 
 static void emulator_set_idt(struct x86_emulate_ctxt *ctxt, struct desc_ptr *dt)
 {
-	kvm_x86_ops->set_idt(emul_to_vcpu(ctxt), dt);
+	kvm_x86_call(set_idt)(emul_to_vcpu(ctxt), dt);
 }
 
 static unsigned long emulator_get_cached_segment_base(
@@ -5496,51 +8710,70 @@ static void emulator_set_segment(struct x86_emulate_ctxt *ctxt, u16 selector,
 	return;
 }
 
+static int emulator_get_msr_with_filter(struct x86_emulate_ctxt *ctxt,
+					u32 msr_index, u64 *pdata)
+{
+	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
+	int r;
+
+	r = kvm_emulate_msr_read(vcpu, msr_index, pdata);
+	if (r < 0)
+		return X86EMUL_UNHANDLEABLE;
+
+	if (r) {
+		if (kvm_msr_user_space(vcpu, msr_index, KVM_EXIT_X86_RDMSR, 0,
+				       complete_emulated_rdmsr, r))
+			return X86EMUL_IO_NEEDED;
+
+		trace_kvm_msr_read_ex(msr_index);
+		return X86EMUL_PROPAGATE_FAULT;
+	}
+
+	trace_kvm_msr_read(msr_index, *pdata);
+	return X86EMUL_CONTINUE;
+}
+
+static int emulator_set_msr_with_filter(struct x86_emulate_ctxt *ctxt,
+					u32 msr_index, u64 data)
+{
+	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
+	int r;
+
+	r = kvm_emulate_msr_write(vcpu, msr_index, data);
+	if (r < 0)
+		return X86EMUL_UNHANDLEABLE;
+
+	if (r) {
+		if (kvm_msr_user_space(vcpu, msr_index, KVM_EXIT_X86_WRMSR, data,
+				       complete_emulated_msr_access, r))
+			return X86EMUL_IO_NEEDED;
+
+		trace_kvm_msr_write_ex(msr_index, data);
+		return X86EMUL_PROPAGATE_FAULT;
+	}
+
+	trace_kvm_msr_write(msr_index, data);
+	return X86EMUL_CONTINUE;
+}
+
 static int emulator_get_msr(struct x86_emulate_ctxt *ctxt,
 			    u32 msr_index, u64 *pdata)
 {
-	struct msr_data msr;
-	int r;
+	/*
+	 * Treat emulator accesses to the current shadow stack pointer as host-
+	 * initiated, as they aren't true MSR accesses (SSP is a "just a reg"),
+	 * and this API is used only for implicit accesses, i.e. not RDMSR, and
+	 * so the index is fully KVM-controlled.
+	 */
+	if (unlikely(msr_index == MSR_KVM_INTERNAL_GUEST_SSP))
+		return kvm_msr_read(emul_to_vcpu(ctxt), msr_index, pdata);
 
-	msr.index = msr_index;
-	msr.host_initiated = false;
-	r = kvm_get_msr(emul_to_vcpu(ctxt), &msr);
-	if (r)
-		return r;
-
-	*pdata = msr.data;
-	return 0;
+	return __kvm_emulate_msr_read(emul_to_vcpu(ctxt), msr_index, pdata);
 }
 
-static int emulator_set_msr(struct x86_emulate_ctxt *ctxt,
-			    u32 msr_index, u64 data)
+static int emulator_check_rdpmc_early(struct x86_emulate_ctxt *ctxt, u32 pmc)
 {
-	struct msr_data msr;
-
-	msr.data = data;
-	msr.index = msr_index;
-	msr.host_initiated = false;
-	return kvm_set_msr(emul_to_vcpu(ctxt), &msr);
-}
-
-static u64 emulator_get_smbase(struct x86_emulate_ctxt *ctxt)
-{
-	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
-
-	return vcpu->arch.smbase;
-}
-
-static void emulator_set_smbase(struct x86_emulate_ctxt *ctxt, u64 smbase)
-{
-	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
-
-	vcpu->arch.smbase = smbase;
-}
-
-static int emulator_check_pmc(struct x86_emulate_ctxt *ctxt,
-			      u32 pmc)
-{
-	return kvm_pmu_is_valid_msr_idx(emul_to_vcpu(ctxt), pmc);
+	return kvm_pmu_check_rdpmc_early(emul_to_vcpu(ctxt), pmc);
 }
 
 static int emulator_read_pmc(struct x86_emulate_ctxt *ctxt,
@@ -5558,51 +8791,123 @@ static int emulator_intercept(struct x86_emulate_ctxt *ctxt,
 			      struct x86_instruction_info *info,
 			      enum x86_intercept_stage stage)
 {
-	return kvm_x86_ops->check_intercept(emul_to_vcpu(ctxt), info, stage);
+	return kvm_x86_call(check_intercept)(emul_to_vcpu(ctxt), info, stage,
+					     &ctxt->exception);
+}
+
+static bool emulator_is_cpuid_allowed(struct x86_emulate_ctxt *ctxt)
+{
+	return kvm_is_cpuid_allowed(emul_to_vcpu(ctxt));
 }
 
 static bool emulator_get_cpuid(struct x86_emulate_ctxt *ctxt,
-			u32 *eax, u32 *ebx, u32 *ecx, u32 *edx, bool check_limit)
+			      u32 *eax, u32 *ebx, u32 *ecx, u32 *edx,
+			      bool exact_only)
 {
-	return kvm_cpuid(emul_to_vcpu(ctxt), eax, ebx, ecx, edx, check_limit);
+	return kvm_cpuid(emul_to_vcpu(ctxt), eax, ebx, ecx, edx, exact_only);
+}
+
+static bool emulator_guest_has_movbe(struct x86_emulate_ctxt *ctxt)
+{
+	return guest_cpu_cap_has(emul_to_vcpu(ctxt), X86_FEATURE_MOVBE);
+}
+
+static bool emulator_guest_has_fxsr(struct x86_emulate_ctxt *ctxt)
+{
+	return guest_cpu_cap_has(emul_to_vcpu(ctxt), X86_FEATURE_FXSR);
+}
+
+static bool emulator_guest_has_rdpid(struct x86_emulate_ctxt *ctxt)
+{
+	return guest_cpu_cap_has(emul_to_vcpu(ctxt), X86_FEATURE_RDPID);
+}
+
+static bool emulator_guest_cpuid_is_intel_compatible(struct x86_emulate_ctxt *ctxt)
+{
+	return guest_cpuid_is_intel_compatible(emul_to_vcpu(ctxt));
 }
 
 static ulong emulator_read_gpr(struct x86_emulate_ctxt *ctxt, unsigned reg)
 {
-	return kvm_register_read(emul_to_vcpu(ctxt), reg);
+	return kvm_register_read_raw(emul_to_vcpu(ctxt), reg);
 }
 
 static void emulator_write_gpr(struct x86_emulate_ctxt *ctxt, unsigned reg, ulong val)
 {
-	kvm_register_write(emul_to_vcpu(ctxt), reg, val);
+	kvm_register_write_raw(emul_to_vcpu(ctxt), reg, val);
 }
 
 static void emulator_set_nmi_mask(struct x86_emulate_ctxt *ctxt, bool masked)
 {
-	kvm_x86_ops->set_nmi_mask(emul_to_vcpu(ctxt), masked);
+	kvm_x86_call(set_nmi_mask)(emul_to_vcpu(ctxt), masked);
 }
 
-static unsigned emulator_get_hflags(struct x86_emulate_ctxt *ctxt)
+static bool emulator_is_smm(struct x86_emulate_ctxt *ctxt)
 {
-	return emul_to_vcpu(ctxt)->arch.hflags;
+	return is_smm(emul_to_vcpu(ctxt));
 }
 
-static void emulator_set_hflags(struct x86_emulate_ctxt *ctxt, unsigned emul_flags)
+#ifndef CONFIG_KVM_SMM
+static int emulator_leave_smm(struct x86_emulate_ctxt *ctxt)
 {
-	kvm_set_hflags(emul_to_vcpu(ctxt), emul_flags);
+	WARN_ON_ONCE(1);
+	return X86EMUL_UNHANDLEABLE;
+}
+#endif
+
+static void emulator_triple_fault(struct x86_emulate_ctxt *ctxt)
+{
+	kvm_make_request(KVM_REQ_TRIPLE_FAULT, emul_to_vcpu(ctxt));
 }
 
-static int emulator_pre_leave_smm(struct x86_emulate_ctxt *ctxt, u64 smbase)
+static int emulator_get_xcr(struct x86_emulate_ctxt *ctxt, u32 index, u64 *xcr)
 {
-	return kvm_x86_ops->pre_leave_smm(emul_to_vcpu(ctxt), smbase);
+	if (index != XCR_XFEATURE_ENABLED_MASK)
+		return 1;
+	*xcr = emul_to_vcpu(ctxt)->arch.xcr0;
+	return 0;
+}
+
+static int emulator_set_xcr(struct x86_emulate_ctxt *ctxt, u32 index, u64 xcr)
+{
+	return __kvm_set_xcr(emul_to_vcpu(ctxt), index, xcr);
+}
+
+static void emulator_vm_bugged(struct x86_emulate_ctxt *ctxt)
+{
+	struct kvm *kvm = emul_to_vcpu(ctxt)->kvm;
+
+	if (!kvm->vm_bugged)
+		kvm_vm_bugged(kvm);
+}
+
+static gva_t emulator_get_untagged_addr(struct x86_emulate_ctxt *ctxt,
+					gva_t addr, unsigned int flags)
+{
+	if (!kvm_x86_ops.get_untagged_addr)
+		return addr;
+
+	return kvm_x86_call(get_untagged_addr)(emul_to_vcpu(ctxt),
+					       addr, flags);
+}
+
+static bool emulator_is_canonical_addr(struct x86_emulate_ctxt *ctxt,
+				       gva_t addr, unsigned int flags)
+{
+	return !is_noncanonical_address(addr, emul_to_vcpu(ctxt), flags);
+}
+
+static bool emulator_page_address_valid(struct x86_emulate_ctxt *ctxt, gpa_t gpa)
+{
+	return page_address_valid(emul_to_vcpu(ctxt), gpa);
 }
 
 static const struct x86_emulate_ops emulate_ops = {
+	.vm_bugged           = emulator_vm_bugged,
 	.read_gpr            = emulator_read_gpr,
 	.write_gpr           = emulator_write_gpr,
-	.read_std            = kvm_read_guest_virt_system,
-	.write_std           = kvm_write_guest_virt_system,
-	.read_phys           = kvm_read_guest_phys_system,
+	.read_std            = emulator_read_std,
+	.write_std           = emulator_write_std,
 	.fetch               = kvm_fetch_guest_virt,
 	.read_emulated       = emulator_read_emulated,
 	.write_emulated      = emulator_write_emulated,
@@ -5620,28 +8925,38 @@ static const struct x86_emulate_ops emulate_ops = {
 	.get_cr              = emulator_get_cr,
 	.set_cr              = emulator_set_cr,
 	.cpl                 = emulator_get_cpl,
+	.get_effective_dr7   = emulator_get_effective_dr7,
 	.get_dr              = emulator_get_dr,
 	.set_dr              = emulator_set_dr,
-	.get_smbase          = emulator_get_smbase,
-	.set_smbase          = emulator_set_smbase,
-	.set_msr             = emulator_set_msr,
+	.set_msr_with_filter = emulator_set_msr_with_filter,
+	.get_msr_with_filter = emulator_get_msr_with_filter,
 	.get_msr             = emulator_get_msr,
-	.check_pmc	     = emulator_check_pmc,
+	.check_rdpmc_early   = emulator_check_rdpmc_early,
 	.read_pmc            = emulator_read_pmc,
 	.halt                = emulator_halt,
 	.wbinvd              = emulator_wbinvd,
 	.fix_hypercall       = emulator_fix_hypercall,
 	.intercept           = emulator_intercept,
+	.is_cpuid_allowed    = emulator_is_cpuid_allowed,
 	.get_cpuid           = emulator_get_cpuid,
+	.guest_has_movbe     = emulator_guest_has_movbe,
+	.guest_has_fxsr      = emulator_guest_has_fxsr,
+	.guest_has_rdpid     = emulator_guest_has_rdpid,
+	.guest_cpuid_is_intel_compatible = emulator_guest_cpuid_is_intel_compatible,
 	.set_nmi_mask        = emulator_set_nmi_mask,
-	.get_hflags          = emulator_get_hflags,
-	.set_hflags          = emulator_set_hflags,
-	.pre_leave_smm       = emulator_pre_leave_smm,
+	.is_smm              = emulator_is_smm,
+	.leave_smm           = emulator_leave_smm,
+	.triple_fault        = emulator_triple_fault,
+	.get_xcr             = emulator_get_xcr,
+	.set_xcr             = emulator_set_xcr,
+	.get_untagged_addr   = emulator_get_untagged_addr,
+	.is_canonical_addr   = emulator_is_canonical_addr,
+	.page_address_valid  = emulator_page_address_valid,
 };
 
 static void toggle_interruptibility(struct kvm_vcpu *vcpu, u32 mask)
 {
-	u32 int_shadow = kvm_x86_ops->get_interrupt_shadow(vcpu);
+	u32 int_shadow = kvm_x86_call(get_interrupt_shadow)(vcpu);
 	/*
 	 * an sti; sti; sequence only disable interrupts for the first
 	 * instruction. So, if the last instruction, be it emulated or
@@ -5652,33 +8967,69 @@ static void toggle_interruptibility(struct kvm_vcpu *vcpu, u32 mask)
 	if (int_shadow & mask)
 		mask = 0;
 	if (unlikely(int_shadow || mask)) {
-		kvm_x86_ops->set_interrupt_shadow(vcpu, mask);
+		kvm_x86_call(set_interrupt_shadow)(vcpu, mask);
 		if (!mask)
 			kvm_make_request(KVM_REQ_EVENT, vcpu);
 	}
 }
 
-static bool inject_emulated_exception(struct kvm_vcpu *vcpu)
+static int kvm_inject_emulated_db(struct kvm_vcpu *vcpu, unsigned long dr6)
 {
-	struct x86_emulate_ctxt *ctxt = &vcpu->arch.emulate_ctxt;
-	if (ctxt->exception.vector == PF_VECTOR)
-		return kvm_propagate_fault(vcpu, &ctxt->exception);
+	struct kvm_run *kvm_run = vcpu->run;
 
-	if (ctxt->exception.error_code_valid)
-		kvm_queue_exception_e(vcpu, ctxt->exception.vector,
-				      ctxt->exception.error_code);
+	if (vcpu->guest_debug & (KVM_GUESTDBG_USE_HW_BP | KVM_GUESTDBG_SINGLESTEP)) {
+		kvm_run->debug.arch.dr6 = dr6 | DR6_ACTIVE_LOW;
+		kvm_run->debug.arch.pc = kvm_get_linear_rip(vcpu);
+		kvm_run->debug.arch.exception = DB_VECTOR;
+		kvm_run->exit_reason = KVM_EXIT_DEBUG;
+		return 0;
+	}
+
+	kvm_queue_exception_p(vcpu, DB_VECTOR, dr6);
+	return 1;
+}
+
+static int inject_emulated_exception(struct kvm_vcpu *vcpu)
+{
+	struct x86_exception *ex = &vcpu->arch.emulate_ctxt->exception;
+
+	if (ex->vector == DB_VECTOR)
+		return kvm_inject_emulated_db(vcpu, ex->dr6);
+
+	if (ex->vector == PF_VECTOR)
+		kvm_inject_emulated_page_fault(vcpu, ex);
+	else if (ex->error_code_valid)
+		kvm_queue_exception_e(vcpu, ex->vector, ex->error_code);
 	else
-		kvm_queue_exception(vcpu, ctxt->exception.vector);
-	return false;
+		kvm_queue_exception(vcpu, ex->vector);
+	return 1;
+}
+
+static struct x86_emulate_ctxt *alloc_emulate_ctxt(struct kvm_vcpu *vcpu)
+{
+	struct x86_emulate_ctxt *ctxt;
+
+	ctxt = kmem_cache_zalloc(x86_emulator_cache, GFP_KERNEL_ACCOUNT);
+	if (!ctxt) {
+		pr_err("failed to allocate vcpu's emulator\n");
+		return NULL;
+	}
+
+	ctxt->vcpu = vcpu;
+	ctxt->ops = &emulate_ops;
+	vcpu->arch.emulate_ctxt = ctxt;
+
+	return ctxt;
 }
 
 static void init_emulate_ctxt(struct kvm_vcpu *vcpu)
 {
-	struct x86_emulate_ctxt *ctxt = &vcpu->arch.emulate_ctxt;
+	struct x86_emulate_ctxt *ctxt = vcpu->arch.emulate_ctxt;
 	int cs_db, cs_l;
 
-	kvm_x86_ops->get_cs_db_l_bits(vcpu, &cs_db, &cs_l);
+	kvm_x86_call(get_cs_db_l_bits)(vcpu, &cs_db, &cs_l);
 
+	ctxt->gpa_available = false;
 	ctxt->eflags = kvm_get_rflags(vcpu);
 	ctxt->tf = (ctxt->eflags & X86_EFLAGS_TF) != 0;
 
@@ -5688,17 +9039,19 @@ static void init_emulate_ctxt(struct kvm_vcpu *vcpu)
 		     (cs_l && is_long_mode(vcpu))	? X86EMUL_MODE_PROT64 :
 		     cs_db				? X86EMUL_MODE_PROT32 :
 							  X86EMUL_MODE_PROT16;
-	BUILD_BUG_ON(HF_GUEST_MASK != X86EMUL_GUEST_MASK);
-	BUILD_BUG_ON(HF_SMM_MASK != X86EMUL_SMM_MASK);
-	BUILD_BUG_ON(HF_SMM_INSIDE_NMI_MASK != X86EMUL_SMM_INSIDE_NMI_MASK);
+	ctxt->interruptibility = 0;
+	ctxt->have_exception = false;
+	ctxt->exception.vector = -1;
+	ctxt->exception.payload = 0;
+	ctxt->perm_ok = false;
 
 	init_decode_cache(ctxt);
 	vcpu->arch.emulate_regs_need_sync_from_vcpu = false;
 }
 
-int kvm_inject_realmode_interrupt(struct kvm_vcpu *vcpu, int irq, int inc_eip)
+void kvm_inject_realmode_interrupt(struct kvm_vcpu *vcpu, int irq, int inc_eip)
 {
-	struct x86_emulate_ctxt *ctxt = &vcpu->arch.emulate_ctxt;
+	struct x86_emulate_ctxt *ctxt = vcpu->arch.emulate_ctxt;
 	int ret;
 
 	init_emulate_ctxt(vcpu);
@@ -5708,179 +9061,189 @@ int kvm_inject_realmode_interrupt(struct kvm_vcpu *vcpu, int irq, int inc_eip)
 	ctxt->_eip = ctxt->eip + inc_eip;
 	ret = emulate_int_real(ctxt, irq);
 
-	if (ret != X86EMUL_CONTINUE)
-		return EMULATE_FAIL;
-
-	ctxt->eip = ctxt->_eip;
-	kvm_rip_write(vcpu, ctxt->eip);
-	kvm_set_rflags(vcpu, ctxt->eflags);
-
-	return EMULATE_DONE;
+	if (ret != X86EMUL_CONTINUE) {
+		kvm_make_request(KVM_REQ_TRIPLE_FAULT, vcpu);
+	} else {
+		ctxt->eip = ctxt->_eip;
+		kvm_rip_write(vcpu, ctxt->eip);
+		kvm_set_rflags(vcpu, ctxt->eflags);
+	}
 }
-EXPORT_SYMBOL_GPL(kvm_inject_realmode_interrupt);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_inject_realmode_interrupt);
+
+static void prepare_emulation_failure_exit(struct kvm_vcpu *vcpu, u64 *data,
+					   u8 ndata, u8 *insn_bytes, u8 insn_size)
+{
+	struct kvm_run *run = vcpu->run;
+	u64 info[5];
+	u8 info_start;
+
+	/*
+	 * Zero the whole array used to retrieve the exit info, as casting to
+	 * u32 for select entries will leave some chunks uninitialized.
+	 */
+	memset(&info, 0, sizeof(info));
+
+	kvm_x86_call(get_exit_info)(vcpu, (u32 *)&info[0], &info[1], &info[2],
+				    (u32 *)&info[3], (u32 *)&info[4]);
+
+	run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
+	run->emulation_failure.suberror = KVM_INTERNAL_ERROR_EMULATION;
+
+	/*
+	 * There's currently space for 13 entries, but 5 are used for the exit
+	 * reason and info.  Restrict to 4 to reduce the maintenance burden
+	 * when expanding kvm_run.emulation_failure in the future.
+	 */
+	if (WARN_ON_ONCE(ndata > 4))
+		ndata = 4;
+
+	/* Always include the flags as a 'data' entry. */
+	info_start = 1;
+	run->emulation_failure.flags = 0;
+
+	if (insn_size) {
+		BUILD_BUG_ON((sizeof(run->emulation_failure.insn_size) +
+			      sizeof(run->emulation_failure.insn_bytes) != 16));
+		info_start += 2;
+		run->emulation_failure.flags |=
+			KVM_INTERNAL_ERROR_EMULATION_FLAG_INSTRUCTION_BYTES;
+		run->emulation_failure.insn_size = insn_size;
+		memset(run->emulation_failure.insn_bytes, 0x90,
+		       sizeof(run->emulation_failure.insn_bytes));
+		memcpy(run->emulation_failure.insn_bytes, insn_bytes, insn_size);
+	}
+
+	memcpy(&run->internal.data[info_start], info, sizeof(info));
+	memcpy(&run->internal.data[info_start + ARRAY_SIZE(info)], data,
+	       ndata * sizeof(data[0]));
+
+	run->emulation_failure.ndata = info_start + ARRAY_SIZE(info) + ndata;
+}
+
+static void prepare_emulation_ctxt_failure_exit(struct kvm_vcpu *vcpu)
+{
+	struct x86_emulate_ctxt *ctxt = vcpu->arch.emulate_ctxt;
+
+	prepare_emulation_failure_exit(vcpu, NULL, 0, ctxt->fetch.data,
+				       ctxt->fetch.end - ctxt->fetch.data);
+}
+
+void __kvm_prepare_emulation_failure_exit(struct kvm_vcpu *vcpu, u64 *data,
+					  u8 ndata)
+{
+	prepare_emulation_failure_exit(vcpu, data, ndata, NULL, 0);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(__kvm_prepare_emulation_failure_exit);
+
+void kvm_prepare_emulation_failure_exit(struct kvm_vcpu *vcpu)
+{
+	__kvm_prepare_emulation_failure_exit(vcpu, NULL, 0);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_prepare_emulation_failure_exit);
+
+void kvm_prepare_event_vectoring_exit(struct kvm_vcpu *vcpu, gpa_t gpa)
+{
+	u32 reason, intr_info, error_code;
+	struct kvm_run *run = vcpu->run;
+	u64 info1, info2;
+	int ndata = 0;
+
+	kvm_x86_call(get_exit_info)(vcpu, &reason, &info1, &info2,
+				    &intr_info, &error_code);
+
+	run->internal.data[ndata++] = info2;
+	run->internal.data[ndata++] = reason;
+	run->internal.data[ndata++] = info1;
+	run->internal.data[ndata++] = gpa;
+	run->internal.data[ndata++] = vcpu->arch.last_vmentry_cpu;
+
+	run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
+	run->internal.suberror = KVM_INTERNAL_ERROR_DELIVERY_EV;
+	run->internal.ndata = ndata;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_prepare_event_vectoring_exit);
+
+void kvm_prepare_unexpected_reason_exit(struct kvm_vcpu *vcpu, u64 exit_reason)
+{
+	vcpu_unimpl(vcpu, "unexpected exit reason 0x%llx\n", exit_reason);
+
+	vcpu->run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
+	vcpu->run->internal.suberror = KVM_INTERNAL_ERROR_UNEXPECTED_EXIT_REASON;
+	vcpu->run->internal.ndata = 2;
+	vcpu->run->internal.data[0] = exit_reason;
+	vcpu->run->internal.data[1] = vcpu->arch.last_vmentry_cpu;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_prepare_unexpected_reason_exit);
 
 static int handle_emulation_failure(struct kvm_vcpu *vcpu, int emulation_type)
 {
-	int r = EMULATE_DONE;
+	struct kvm *kvm = vcpu->kvm;
 
 	++vcpu->stat.insn_emulation_fail;
 	trace_kvm_emulate_insn_failed(vcpu);
 
-	if (emulation_type & EMULTYPE_NO_UD_ON_FAIL)
-		return EMULATE_FAIL;
+	if (emulation_type & EMULTYPE_VMWARE_GP) {
+		kvm_queue_exception_e(vcpu, GP_VECTOR, 0);
+		return 1;
+	}
 
-	if (!is_guest_mode(vcpu) && kvm_x86_ops->get_cpl(vcpu) == 0) {
-		vcpu->run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
-		vcpu->run->internal.suberror = KVM_INTERNAL_ERROR_EMULATION;
-		vcpu->run->internal.ndata = 0;
-		r = EMULATE_USER_EXIT;
+	if (kvm->arch.exit_on_emulation_error ||
+	    (emulation_type & EMULTYPE_SKIP)) {
+		prepare_emulation_ctxt_failure_exit(vcpu);
+		return 0;
 	}
 
 	kvm_queue_exception(vcpu, UD_VECTOR);
 
-	return r;
-}
-
-static bool reexecute_instruction(struct kvm_vcpu *vcpu, gva_t cr2,
-				  bool write_fault_to_shadow_pgtable,
-				  int emulation_type)
-{
-	gpa_t gpa = cr2;
-	kvm_pfn_t pfn;
-
-	if (emulation_type & EMULTYPE_NO_REEXECUTE)
-		return false;
-
-	if (!vcpu->arch.mmu.direct_map) {
-		/*
-		 * Write permission should be allowed since only
-		 * write access need to be emulated.
-		 */
-		gpa = kvm_mmu_gva_to_gpa_write(vcpu, cr2, NULL);
-
-		/*
-		 * If the mapping is invalid in guest, let cpu retry
-		 * it to generate fault.
-		 */
-		if (gpa == UNMAPPED_GVA)
-			return true;
+	if (!is_guest_mode(vcpu) && kvm_x86_call(get_cpl)(vcpu) == 0) {
+		prepare_emulation_ctxt_failure_exit(vcpu);
+		return 0;
 	}
 
-	/*
-	 * Do not retry the unhandleable instruction if it faults on the
-	 * readonly host memory, otherwise it will goto a infinite loop:
-	 * retry instruction -> write #PF -> emulation fail -> retry
-	 * instruction -> ...
-	 */
-	pfn = gfn_to_pfn(vcpu->kvm, gpa_to_gfn(gpa));
-
-	/*
-	 * If the instruction failed on the error pfn, it can not be fixed,
-	 * report the error to userspace.
-	 */
-	if (is_error_noslot_pfn(pfn))
-		return false;
-
-	kvm_release_pfn_clean(pfn);
-
-	/* The instructions are well-emulated on direct mmu. */
-	if (vcpu->arch.mmu.direct_map) {
-		unsigned int indirect_shadow_pages;
-
-		spin_lock(&vcpu->kvm->mmu_lock);
-		indirect_shadow_pages = vcpu->kvm->arch.indirect_shadow_pages;
-		spin_unlock(&vcpu->kvm->mmu_lock);
-
-		if (indirect_shadow_pages)
-			kvm_mmu_unprotect_page(vcpu->kvm, gpa_to_gfn(gpa));
-
-		return true;
-	}
-
-	/*
-	 * if emulation was due to access to shadowed page table
-	 * and it failed try to unshadow page and re-enter the
-	 * guest to let CPU execute the instruction.
-	 */
-	kvm_mmu_unprotect_page(vcpu->kvm, gpa_to_gfn(gpa));
-
-	/*
-	 * If the access faults on its page table, it can not
-	 * be fixed by unprotecting shadow page and it should
-	 * be reported to userspace.
-	 */
-	return !write_fault_to_shadow_pgtable;
+	return 1;
 }
 
-static bool retry_instruction(struct x86_emulate_ctxt *ctxt,
-			      unsigned long cr2,  int emulation_type)
+static bool kvm_unprotect_and_retry_on_failure(struct kvm_vcpu *vcpu,
+					       gpa_t cr2_or_gpa,
+					       int emulation_type)
 {
-	struct kvm_vcpu *vcpu = emul_to_vcpu(ctxt);
-	unsigned long last_retry_eip, last_retry_addr, gpa = cr2;
-
-	last_retry_eip = vcpu->arch.last_retry_eip;
-	last_retry_addr = vcpu->arch.last_retry_addr;
+	if (!(emulation_type & EMULTYPE_ALLOW_RETRY_PF))
+		return false;
 
 	/*
-	 * If the emulation is caused by #PF and it is non-page_table
-	 * writing instruction, it means the VM-EXIT is caused by shadow
-	 * page protected, we can zap the shadow page and retry this
-	 * instruction directly.
-	 *
-	 * Note: if the guest uses a non-page-table modifying instruction
-	 * on the PDE that points to the instruction, then we will unmap
-	 * the instruction and go to an infinite loop. So, we cache the
-	 * last retried eip and the last fault address, if we meet the eip
-	 * and the address again, we can break out of the potential infinite
-	 * loop.
+	 * If the failed instruction faulted on an access to page tables that
+	 * are used to translate any part of the instruction, KVM can't resolve
+	 * the issue by unprotecting the gfn, as zapping the shadow page will
+	 * result in the instruction taking a !PRESENT page fault and thus put
+	 * the vCPU into an infinite loop of page faults.  E.g. KVM will create
+	 * a SPTE and write-protect the gfn to resolve the !PRESENT fault, and
+	 * then zap the SPTE to unprotect the gfn, and then do it all over
+	 * again.  Report the error to userspace.
 	 */
-	vcpu->arch.last_retry_eip = vcpu->arch.last_retry_addr = 0;
-
-	if (!(emulation_type & EMULTYPE_RETRY))
+	if (emulation_type & EMULTYPE_WRITE_PF_TO_SP)
 		return false;
 
-	if (x86_page_table_writing_insn(ctxt))
-		return false;
+	/*
+	 * If emulation may have been triggered by a write to a shadowed page
+	 * table, unprotect the gfn (zap any relevant SPTEs) and re-enter the
+	 * guest to let the CPU re-execute the instruction in the hope that the
+	 * CPU can cleanly execute the instruction that KVM failed to emulate.
+	 */
+	__kvm_mmu_unprotect_gfn_and_retry(vcpu, cr2_or_gpa, true);
 
-	if (ctxt->eip == last_retry_eip && last_retry_addr == cr2)
-		return false;
-
-	vcpu->arch.last_retry_eip = ctxt->eip;
-	vcpu->arch.last_retry_addr = cr2;
-
-	if (!vcpu->arch.mmu.direct_map)
-		gpa = kvm_mmu_gva_to_gpa_write(vcpu, cr2, NULL);
-
-	kvm_mmu_unprotect_page(vcpu->kvm, gpa_to_gfn(gpa));
-
+	/*
+	 * Retry even if _this_ vCPU didn't unprotect the gfn, as it's possible
+	 * all SPTEs were already zapped by a different task.  The alternative
+	 * is to report the error to userspace and likely terminate the guest,
+	 * and the last_retry_{eip,addr} checks will prevent retrying the page
+	 * fault indefinitely, i.e. there's nothing to lose by retrying.
+	 */
 	return true;
 }
 
 static int complete_emulated_mmio(struct kvm_vcpu *vcpu);
 static int complete_emulated_pio(struct kvm_vcpu *vcpu);
-
-static void kvm_smm_changed(struct kvm_vcpu *vcpu)
-{
-	if (!(vcpu->arch.hflags & HF_SMM_MASK)) {
-		/* This is a good place to trace that we are exiting SMM.  */
-		trace_kvm_enter_smm(vcpu->vcpu_id, vcpu->arch.smbase, false);
-
-		/* Process a latched INIT or SMI, if any.  */
-		kvm_make_request(KVM_REQ_EVENT, vcpu);
-	}
-
-	kvm_mmu_reset_context(vcpu);
-}
-
-static void kvm_set_hflags(struct kvm_vcpu *vcpu, unsigned emul_flags)
-{
-	unsigned changed = vcpu->arch.hflags ^ emul_flags;
-
-	vcpu->arch.hflags = emul_flags;
-
-	if (changed & HF_SMM_MASK)
-		kvm_smm_changed(vcpu);
-}
 
 static int kvm_vcpu_check_hw_bp(unsigned long addr, u32 type, u32 dr7,
 				unsigned long *db)
@@ -5897,34 +9260,16 @@ static int kvm_vcpu_check_hw_bp(unsigned long addr, u32 type, u32 dr7,
 	return dr6;
 }
 
-static void kvm_vcpu_do_singlestep(struct kvm_vcpu *vcpu, int *r)
-{
-	struct kvm_run *kvm_run = vcpu->run;
-
-	if (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP) {
-		kvm_run->debug.arch.dr6 = DR6_BS | DR6_FIXED_1 | DR6_RTM;
-		kvm_run->debug.arch.pc = vcpu->arch.singlestep_rip;
-		kvm_run->debug.arch.exception = DB_VECTOR;
-		kvm_run->exit_reason = KVM_EXIT_DEBUG;
-		*r = EMULATE_USER_EXIT;
-	} else {
-		/*
-		 * "Certain debug exceptions may clear bit 0-3.  The
-		 * remaining contents of the DR6 register are never
-		 * cleared by the processor".
-		 */
-		vcpu->arch.dr6 &= ~15;
-		vcpu->arch.dr6 |= DR6_BS | DR6_RTM;
-		kvm_queue_exception(vcpu, DB_VECTOR);
-	}
-}
-
 int kvm_skip_emulated_instruction(struct kvm_vcpu *vcpu)
 {
-	unsigned long rflags = kvm_x86_ops->get_rflags(vcpu);
-	int r = EMULATE_DONE;
+	unsigned long rflags = kvm_x86_call(get_rflags)(vcpu);
+	int r;
 
-	kvm_x86_ops->skip_emulated_instruction(vcpu);
+	r = kvm_x86_call(skip_emulated_instruction)(vcpu);
+	if (unlikely(!r))
+		return 0;
+
+	kvm_pmu_instruction_retired(vcpu);
 
 	/*
 	 * rflags is the old, "raw" value of the flags.  The new value has
@@ -5935,43 +9280,62 @@ int kvm_skip_emulated_instruction(struct kvm_vcpu *vcpu)
 	 * that sets the TF flag".
 	 */
 	if (unlikely(rflags & X86_EFLAGS_TF))
-		kvm_vcpu_do_singlestep(vcpu, &r);
-	return r == EMULATE_DONE;
+		r = kvm_inject_emulated_db(vcpu, DR6_BS);
+	return r;
 }
-EXPORT_SYMBOL_GPL(kvm_skip_emulated_instruction);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_skip_emulated_instruction);
 
-static bool kvm_vcpu_check_breakpoint(struct kvm_vcpu *vcpu, int *r)
+static bool kvm_is_code_breakpoint_inhibited(struct kvm_vcpu *vcpu)
 {
-	if (unlikely(vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP) &&
-	    (vcpu->arch.guest_debug_dr7 & DR7_BP_EN_MASK)) {
-		struct kvm_run *kvm_run = vcpu->run;
+	if (vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP)
+		return false;
+
+	if (kvm_get_rflags(vcpu) & X86_EFLAGS_RF)
+		return true;
+
+	/*
+	 * Intel compatible CPUs inhibit code #DBs when MOV/POP SS blocking is
+	 * active, but AMD compatible CPUs do not.
+	 */
+	if (!guest_cpuid_is_intel_compatible(vcpu))
+		return false;
+
+	return kvm_x86_call(get_interrupt_shadow)(vcpu) & KVM_X86_SHADOW_INT_MOV_SS;
+}
+
+static bool kvm_vcpu_check_code_breakpoint(struct kvm_vcpu *vcpu,
+					   int emulation_type, int *r)
+{
+	unsigned long dr7 = kvm_get_effective_dr7(vcpu);
+
+	WARN_ON_ONCE(emulation_type & EMULTYPE_NO_DECODE);
+
+	/*
+	 * Do not check for code breakpoints if hardware has already done the
+	 * checks, as inferred from the emulation type.  On NO_DECODE and SKIP,
+	 * the instruction has passed all exception checks, and all intercepted
+	 * exceptions that trigger emulation have lower priority than code
+	 * breakpoints, i.e. the fact that the intercepted exception occurred
+	 * means any code breakpoints have already been serviced.
+	 *
+	 * Note, KVM needs to check for code #DBs on EMULTYPE_TRAP_UD_FORCED as
+	 * hardware has checked the RIP of the magic prefix, but not the RIP of
+	 * the instruction being emulated.  The intent of forced emulation is
+	 * to behave as if KVM intercepted the instruction without an exception
+	 * and without a prefix.
+	 */
+	if (emulation_type & (EMULTYPE_NO_DECODE | EMULTYPE_SKIP |
+			      EMULTYPE_TRAP_UD | EMULTYPE_VMWARE_GP | EMULTYPE_PF))
+		return false;
+
+	if (unlikely(dr7 & DR7_BP_EN_MASK) &&
+	    !kvm_is_code_breakpoint_inhibited(vcpu)) {
 		unsigned long eip = kvm_get_linear_rip(vcpu);
-		u32 dr6 = kvm_vcpu_check_hw_bp(eip, 0,
-					   vcpu->arch.guest_debug_dr7,
-					   vcpu->arch.eff_db);
+		u32 dr6 = kvm_vcpu_check_hw_bp(eip, 0, dr7,
+					       vcpu->arch.eff_db);
 
-		if (dr6 != 0) {
-			kvm_run->debug.arch.dr6 = dr6 | DR6_FIXED_1 | DR6_RTM;
-			kvm_run->debug.arch.pc = eip;
-			kvm_run->debug.arch.exception = DB_VECTOR;
-			kvm_run->exit_reason = KVM_EXIT_DEBUG;
-			*r = EMULATE_USER_EXIT;
-			return true;
-		}
-	}
-
-	if (unlikely(vcpu->arch.dr7 & DR7_BP_EN_MASK) &&
-	    !(kvm_get_rflags(vcpu) & X86_EFLAGS_RF)) {
-		unsigned long eip = kvm_get_linear_rip(vcpu);
-		u32 dr6 = kvm_vcpu_check_hw_bp(eip, 0,
-					   vcpu->arch.dr7,
-					   vcpu->arch.db);
-
-		if (dr6 != 0) {
-			vcpu->arch.dr6 &= ~15;
-			vcpu->arch.dr6 |= dr6 | DR6_RTM;
-			kvm_queue_exception(vcpu, DB_VECTOR);
-			*r = EMULATE_DONE;
+		if (dr6) {
+			*r = kvm_inject_emulated_db(vcpu, dr6);
 			return true;
 		}
 	}
@@ -6010,75 +9374,162 @@ static bool is_vmware_backdoor_opcode(struct x86_emulate_ctxt *ctxt)
 	return false;
 }
 
-int x86_emulate_instruction(struct kvm_vcpu *vcpu,
-			    unsigned long cr2,
-			    int emulation_type,
-			    void *insn,
-			    int insn_len)
+static bool is_soft_int_instruction(struct x86_emulate_ctxt *ctxt,
+				    int emulation_type)
+{
+	u8 vector = EMULTYPE_GET_SOFT_INT_VECTOR(emulation_type);
+
+	switch (ctxt->b) {
+	case 0xcc:
+		return vector == BP_VECTOR;
+	case 0xcd:
+		return vector == ctxt->src.val;
+	case 0xce:
+		return vector == OF_VECTOR;
+	default:
+		return false;
+	}
+}
+
+/*
+ * Decode an instruction for emulation.  The caller is responsible for handling
+ * code breakpoints.  Note, manually detecting code breakpoints is unnecessary
+ * (and wrong) when emulating on an intercepted fault-like exception[*], as
+ * code breakpoints have higher priority and thus have already been done by
+ * hardware.
+ *
+ * [*] Except #MC, which is higher priority, but KVM should never emulate in
+ *     response to a machine check.
+ */
+int x86_decode_emulated_instruction(struct kvm_vcpu *vcpu, int emulation_type,
+				    void *insn, int insn_len)
+{
+	struct x86_emulate_ctxt *ctxt = vcpu->arch.emulate_ctxt;
+	int r;
+
+	init_emulate_ctxt(vcpu);
+
+	r = x86_decode_insn(ctxt, insn, insn_len, emulation_type);
+
+	trace_kvm_emulate_insn_start(vcpu);
+	++vcpu->stat.insn_emulation;
+
+	return r;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(x86_decode_emulated_instruction);
+
+int x86_emulate_instruction(struct kvm_vcpu *vcpu, gpa_t cr2_or_gpa,
+			    int emulation_type, void *insn, int insn_len)
 {
 	int r;
-	struct x86_emulate_ctxt *ctxt = &vcpu->arch.emulate_ctxt;
+	struct x86_emulate_ctxt *ctxt = vcpu->arch.emulate_ctxt;
 	bool writeback = true;
-	bool write_fault_to_spt = vcpu->arch.write_fault_to_shadow_pgtable;
 
-	/*
-	 * Clear write_fault_to_shadow_pgtable here to ensure it is
-	 * never reused.
-	 */
-	vcpu->arch.write_fault_to_shadow_pgtable = false;
-	kvm_clear_exception_queue(vcpu);
+	if ((emulation_type & EMULTYPE_ALLOW_RETRY_PF) &&
+	    (WARN_ON_ONCE(is_guest_mode(vcpu)) ||
+	     WARN_ON_ONCE(!(emulation_type & EMULTYPE_PF))))
+		emulation_type &= ~EMULTYPE_ALLOW_RETRY_PF;
+
+	r = kvm_check_emulate_insn(vcpu, emulation_type, insn, insn_len);
+	if (r != X86EMUL_CONTINUE) {
+		if (r == X86EMUL_RETRY_INSTR || r == X86EMUL_PROPAGATE_FAULT)
+			return 1;
+
+		if (kvm_unprotect_and_retry_on_failure(vcpu, cr2_or_gpa,
+						       emulation_type))
+			return 1;
+
+		if (r == X86EMUL_UNHANDLEABLE_VECTORING) {
+			kvm_prepare_event_vectoring_exit(vcpu, cr2_or_gpa);
+			return 0;
+		}
+
+		WARN_ON_ONCE(r != X86EMUL_UNHANDLEABLE);
+		return handle_emulation_failure(vcpu, emulation_type);
+	}
+
+	kvm_request_l1tf_flush_l1d();
 
 	if (!(emulation_type & EMULTYPE_NO_DECODE)) {
-		init_emulate_ctxt(vcpu);
+		kvm_clear_exception_queue(vcpu);
 
 		/*
-		 * We will reenter on the same instruction since
-		 * we do not set complete_userspace_io.  This does not
-		 * handle watchpoints yet, those would be handled in
-		 * the emulate_ops.
+		 * Return immediately if RIP hits a code breakpoint, such #DBs
+		 * are fault-like and are higher priority than any faults on
+		 * the code fetch itself.
 		 */
-		if (!(emulation_type & EMULTYPE_SKIP) &&
-		    kvm_vcpu_check_breakpoint(vcpu, &r))
+		if (kvm_vcpu_check_code_breakpoint(vcpu, emulation_type, &r))
 			return r;
 
-		ctxt->interruptibility = 0;
-		ctxt->have_exception = false;
-		ctxt->exception.vector = -1;
-		ctxt->perm_ok = false;
-
-		ctxt->ud = emulation_type & EMULTYPE_TRAP_UD;
-
-		r = x86_decode_insn(ctxt, insn, insn_len);
-
-		trace_kvm_emulate_insn_start(vcpu);
-		++vcpu->stat.insn_emulation;
+		r = x86_decode_emulated_instruction(vcpu, emulation_type,
+						    insn, insn_len);
 		if (r != EMULATION_OK)  {
-			if (emulation_type & EMULTYPE_TRAP_UD)
-				return EMULATE_FAIL;
-			if (reexecute_instruction(vcpu, cr2, write_fault_to_spt,
-						emulation_type))
-				return EMULATE_DONE;
-			if (ctxt->have_exception && inject_emulated_exception(vcpu))
-				return EMULATE_DONE;
-			if (emulation_type & EMULTYPE_SKIP)
-				return EMULATE_FAIL;
+			if ((emulation_type & EMULTYPE_TRAP_UD) ||
+			    (emulation_type & EMULTYPE_TRAP_UD_FORCED)) {
+				kvm_queue_exception(vcpu, UD_VECTOR);
+				return 1;
+			}
+			if (kvm_unprotect_and_retry_on_failure(vcpu, cr2_or_gpa,
+							       emulation_type))
+				return 1;
+
+			if (ctxt->have_exception &&
+			    !(emulation_type & EMULTYPE_SKIP)) {
+				/*
+				 * #UD should result in just EMULATION_FAILED, and trap-like
+				 * exception should not be encountered during decode.
+				 */
+				WARN_ON_ONCE(ctxt->exception.vector == UD_VECTOR ||
+					     exception_type(ctxt->exception.vector) == EXCPT_TRAP);
+				return inject_emulated_exception(vcpu);
+			}
 			return handle_emulation_failure(vcpu, emulation_type);
 		}
 	}
 
-	if ((emulation_type & EMULTYPE_VMWARE) &&
-	    !is_vmware_backdoor_opcode(ctxt))
-		return EMULATE_FAIL;
-
-	if (emulation_type & EMULTYPE_SKIP) {
-		kvm_rip_write(vcpu, ctxt->_eip);
-		if (ctxt->eflags & X86_EFLAGS_RF)
-			kvm_set_rflags(vcpu, ctxt->eflags & ~X86_EFLAGS_RF);
-		return EMULATE_DONE;
+	if ((emulation_type & EMULTYPE_VMWARE_GP) &&
+	    !is_vmware_backdoor_opcode(ctxt)) {
+		kvm_queue_exception_e(vcpu, GP_VECTOR, 0);
+		return 1;
 	}
 
-	if (retry_instruction(ctxt, cr2, emulation_type))
-		return EMULATE_DONE;
+	/*
+	 * EMULTYPE_SKIP without EMULTYPE_COMPLETE_USER_EXIT is intended for
+	 * use *only* by vendor callbacks for kvm_skip_emulated_instruction().
+	 * The caller is responsible for updating interruptibility state and
+	 * injecting single-step #DBs.
+	 */
+	if (emulation_type & EMULTYPE_SKIP) {
+		if (emulation_type & EMULTYPE_SKIP_SOFT_INT &&
+		    !is_soft_int_instruction(ctxt, emulation_type))
+			return 0;
+
+		if (ctxt->mode != X86EMUL_MODE_PROT64)
+			ctxt->eip = (u32)ctxt->_eip;
+		else
+			ctxt->eip = ctxt->_eip;
+
+		if (emulation_type & EMULTYPE_COMPLETE_USER_EXIT) {
+			r = 1;
+			goto writeback;
+		}
+
+		kvm_rip_write(vcpu, ctxt->eip);
+		if (ctxt->eflags & X86_EFLAGS_RF)
+			kvm_set_rflags(vcpu, ctxt->eflags & ~X86_EFLAGS_RF);
+		return 1;
+	}
+
+	/*
+	 * If emulation was caused by a write-protection #PF on a non-page_table
+	 * writing instruction, try to unprotect the gfn, i.e. zap shadow pages,
+	 * and retry the instruction, as the vCPU is likely no longer using the
+	 * gfn as a page table.
+	 */
+	if ((emulation_type & EMULTYPE_ALLOW_RETRY_PF) &&
+	    !x86_page_table_writing_insn(ctxt) &&
+	    kvm_mmu_unprotect_gfn_and_retry(vcpu, cr2_or_gpa))
+		return 1;
 
 	/* this is needed for vmware backdoor interface to work since it
 	   changes registers values  during IO operation */
@@ -6088,26 +9539,44 @@ int x86_emulate_instruction(struct kvm_vcpu *vcpu,
 	}
 
 restart:
-	/* Save the faulting GPA (cr2) in the address field */
-	ctxt->exception.address = cr2;
+	if (emulation_type & EMULTYPE_PF) {
+		/* Save the faulting GPA (cr2) in the address field */
+		ctxt->exception.address = cr2_or_gpa;
 
-	r = x86_emulate_insn(ctxt);
+		/* With shadow page tables, cr2 contains a GVA or nGPA. */
+		if (vcpu->arch.mmu->root_role.direct) {
+			ctxt->gpa_available = true;
+			ctxt->gpa_val = cr2_or_gpa;
+		}
+	} else {
+		/* Sanitize the address out of an abundance of paranoia. */
+		ctxt->exception.address = 0;
+	}
+
+	/*
+	 * Check L1's instruction intercepts when emulating instructions for
+	 * L2, unless KVM is re-emulating a previously decoded instruction,
+	 * e.g. to complete userspace I/O, in which case KVM has already
+	 * checked the intercepts.
+	 */
+	r = x86_emulate_insn(ctxt, is_guest_mode(vcpu) &&
+				   !(emulation_type & EMULTYPE_NO_DECODE));
 
 	if (r == EMULATION_INTERCEPTED)
-		return EMULATE_DONE;
+		return 1;
 
 	if (r == EMULATION_FAILED) {
-		if (reexecute_instruction(vcpu, cr2, write_fault_to_spt,
-					emulation_type))
-			return EMULATE_DONE;
+		if (kvm_unprotect_and_retry_on_failure(vcpu, cr2_or_gpa,
+						       emulation_type))
+			return 1;
 
 		return handle_emulation_failure(vcpu, emulation_type);
 	}
 
 	if (ctxt->have_exception) {
-		r = EMULATE_DONE;
-		if (inject_emulated_exception(vcpu))
-			return r;
+		WARN_ON_ONCE(vcpu->mmio_needed && !vcpu->mmio_is_write);
+		vcpu->mmio_needed = false;
+		r = inject_emulated_exception(vcpu);
 	} else if (vcpu->arch.pio.count) {
 		if (!vcpu->arch.pio.in) {
 			/* FIXME: return into emulator if single-stepping.  */
@@ -6116,28 +9585,44 @@ restart:
 			writeback = false;
 			vcpu->arch.complete_userspace_io = complete_emulated_pio;
 		}
-		r = EMULATE_USER_EXIT;
+		r = 0;
 	} else if (vcpu->mmio_needed) {
+		++vcpu->stat.mmio_exits;
+
 		if (!vcpu->mmio_is_write)
 			writeback = false;
-		r = EMULATE_USER_EXIT;
+		r = 0;
 		vcpu->arch.complete_userspace_io = complete_emulated_mmio;
+	} else if (vcpu->arch.complete_userspace_io) {
+		writeback = false;
+		r = 0;
 	} else if (r == EMULATION_RESTART)
 		goto restart;
 	else
-		r = EMULATE_DONE;
+		r = 1;
 
+writeback:
 	if (writeback) {
-		unsigned long rflags = kvm_x86_ops->get_rflags(vcpu);
+		unsigned long rflags = kvm_x86_call(get_rflags)(vcpu);
 		toggle_interruptibility(vcpu, ctxt->interruptibility);
 		vcpu->arch.emulate_regs_need_sync_to_vcpu = false;
-		kvm_rip_write(vcpu, ctxt->eip);
-		if (r == EMULATE_DONE &&
-		    (ctxt->tf || (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP)))
-			kvm_vcpu_do_singlestep(vcpu, &r);
+
+		/*
+		 * Note, EXCPT_DB is assumed to be fault-like as the emulator
+		 * only supports code breakpoints and general detect #DB, both
+		 * of which are fault-like.
+		 */
 		if (!ctxt->have_exception ||
-		    exception_type(ctxt->exception.vector) == EXCPT_TRAP)
+		    exception_type(ctxt->exception.vector) == EXCPT_TRAP) {
+			kvm_pmu_instruction_retired(vcpu);
+			if (ctxt->is_branch)
+				kvm_pmu_branch_retired(vcpu);
+			kvm_rip_write(vcpu, ctxt->eip);
+			if (r && (ctxt->tf || (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP)))
+				r = kvm_inject_emulated_db(vcpu, DR6_BS);
+			kvm_x86_call(update_emulated_instruction)(vcpu);
 			__kvm_set_rflags(vcpu, ctxt->eflags);
+		}
 
 		/*
 		 * For STI, interrupts are shadowed; so KVM_REQ_EVENT will
@@ -6152,17 +9637,59 @@ restart:
 
 	return r;
 }
-EXPORT_SYMBOL_GPL(x86_emulate_instruction);
+
+int kvm_emulate_instruction(struct kvm_vcpu *vcpu, int emulation_type)
+{
+	return x86_emulate_instruction(vcpu, 0, emulation_type, NULL, 0);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_instruction);
+
+int kvm_emulate_instruction_from_buffer(struct kvm_vcpu *vcpu,
+					void *insn, int insn_len)
+{
+	return x86_emulate_instruction(vcpu, 0, 0, insn, insn_len);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_instruction_from_buffer);
+
+static int complete_fast_pio_out_port_0x7e(struct kvm_vcpu *vcpu)
+{
+	vcpu->arch.pio.count = 0;
+	return 1;
+}
+
+static int complete_fast_pio_out(struct kvm_vcpu *vcpu)
+{
+	vcpu->arch.pio.count = 0;
+
+	if (unlikely(!kvm_is_linear_rip(vcpu, vcpu->arch.cui_linear_rip)))
+		return 1;
+
+	return kvm_skip_emulated_instruction(vcpu);
+}
 
 static int kvm_fast_pio_out(struct kvm_vcpu *vcpu, int size,
 			    unsigned short port)
 {
-	unsigned long val = kvm_register_read(vcpu, VCPU_REGS_RAX);
-	int ret = emulator_pio_out_emulated(&vcpu->arch.emulate_ctxt,
-					    size, port, &val, 1);
-	/* do not return to emulator after return from userspace */
-	vcpu->arch.pio.count = 0;
-	return ret;
+	unsigned long val = kvm_rax_read_raw(vcpu);
+	int ret = emulator_pio_out(vcpu, size, port, &val, 1);
+
+	if (ret)
+		return ret;
+
+	/*
+	 * Workaround userspace that relies on old KVM behavior of %rip being
+	 * incremented prior to exiting to userspace to handle "OUT 0x7e".
+	 */
+	if (port == 0x7e &&
+	    kvm_check_has_quirk(vcpu->kvm, KVM_X86_QUIRK_OUT_7E_INC_RIP)) {
+		vcpu->arch.complete_userspace_io =
+			complete_fast_pio_out_port_0x7e;
+		kvm_skip_emulated_instruction(vcpu);
+	} else {
+		vcpu->arch.cui_linear_rip = kvm_get_linear_rip(vcpu);
+		vcpu->arch.complete_userspace_io = complete_fast_pio_out;
+	}
+	return 0;
 }
 
 static int complete_fast_pio_in(struct kvm_vcpu *vcpu)
@@ -6170,21 +9697,21 @@ static int complete_fast_pio_in(struct kvm_vcpu *vcpu)
 	unsigned long val;
 
 	/* We should only ever be called with arch.pio.count equal to 1 */
-	BUG_ON(vcpu->arch.pio.count != 1);
+	if (KVM_BUG_ON(vcpu->arch.pio.count != 1, vcpu->kvm))
+		return -EIO;
+
+	if (unlikely(!kvm_is_linear_rip(vcpu, vcpu->arch.cui_linear_rip))) {
+		vcpu->arch.pio.count = 0;
+		return 1;
+	}
 
 	/* For size less than 4 we merge, else we zero extend */
-	val = (vcpu->arch.pio.size < 4) ? kvm_register_read(vcpu, VCPU_REGS_RAX)
-					: 0;
+	val = (vcpu->arch.pio.size < 4) ? kvm_rax_read_raw(vcpu) : 0;
 
-	/*
-	 * Since vcpu->arch.pio.count == 1 let emulator_pio_in_emulated perform
-	 * the copy and tracing
-	 */
-	emulator_pio_in_emulated(&vcpu->arch.emulate_ctxt, vcpu->arch.pio.size,
-				 vcpu->arch.pio.port, &val, 1);
-	kvm_register_write(vcpu, VCPU_REGS_RAX, val);
+	complete_emulator_pio_in(vcpu, &val);
+	kvm_rax_write_raw(vcpu, val);
 
-	return 1;
+	return kvm_skip_emulated_instruction(vcpu);
 }
 
 static int kvm_fast_pio_in(struct kvm_vcpu *vcpu, int size,
@@ -6194,15 +9721,15 @@ static int kvm_fast_pio_in(struct kvm_vcpu *vcpu, int size,
 	int ret;
 
 	/* For size less than 4 we merge, else we zero extend */
-	val = (size < 4) ? kvm_register_read(vcpu, VCPU_REGS_RAX) : 0;
+	val = (size < 4) ? kvm_rax_read_raw(vcpu) : 0;
 
-	ret = emulator_pio_in_emulated(&vcpu->arch.emulate_ctxt, size, port,
-				       &val, 1);
+	ret = emulator_pio_in(vcpu, size, port, &val, 1);
 	if (ret) {
-		kvm_register_write(vcpu, VCPU_REGS_RAX, val);
+		kvm_rax_write_raw(vcpu, val);
 		return ret;
 	}
 
+	vcpu->arch.cui_linear_rip = kvm_get_linear_rip(vcpu);
 	vcpu->arch.complete_userspace_io = complete_fast_pio_in;
 
 	return 0;
@@ -6210,18 +9737,15 @@ static int kvm_fast_pio_in(struct kvm_vcpu *vcpu, int size,
 
 int kvm_fast_pio(struct kvm_vcpu *vcpu, int size, unsigned short port, int in)
 {
-	int ret = kvm_skip_emulated_instruction(vcpu);
+	int ret;
 
-	/*
-	 * TODO: we might be squashing a KVM_GUESTDBG_SINGLESTEP-triggered
-	 * KVM_EXIT_DEBUG here.
-	 */
 	if (in)
-		return kvm_fast_pio_in(vcpu, size, port) && ret;
+		ret = kvm_fast_pio_in(vcpu, size, port);
 	else
-		return kvm_fast_pio_out(vcpu, size, port) && ret;
+		ret = kvm_fast_pio_out(vcpu, size, port);
+	return ret && kvm_skip_emulated_instruction(vcpu);
 }
-EXPORT_SYMBOL_GPL(kvm_fast_pio);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_fast_pio);
 
 static int kvmclock_cpu_down_prep(unsigned int cpu)
 {
@@ -6232,11 +9756,13 @@ static int kvmclock_cpu_down_prep(unsigned int cpu)
 static void tsc_khz_changed(void *data)
 {
 	struct cpufreq_freqs *freq = data;
-	unsigned long khz = 0;
+	unsigned long khz;
+
+	WARN_ON_ONCE(boot_cpu_has(X86_FEATURE_CONSTANT_TSC));
 
 	if (data)
 		khz = freq->new;
-	else if (!boot_cpu_has(X86_FEATURE_CONSTANT_TSC))
+	else
 		khz = cpufreq_quick_get(raw_smp_processor_id());
 	if (!khz)
 		khz = tsc_khz;
@@ -6247,46 +9773,38 @@ static void tsc_khz_changed(void *data)
 static void kvm_hyperv_tsc_notifier(void)
 {
 	struct kvm *kvm;
-	struct kvm_vcpu *vcpu;
 	int cpu;
 
-	spin_lock(&kvm_lock);
+	mutex_lock(&kvm_lock);
 	list_for_each_entry(kvm, &vm_list, vm_list)
 		kvm_make_mclock_inprogress_request(kvm);
 
+	/* no guest entries from this point */
 	hyperv_stop_tsc_emulation();
 
 	/* TSC frequency always matches when on Hyper-V */
-	for_each_present_cpu(cpu)
-		per_cpu(cpu_tsc_khz, cpu) = tsc_khz;
-	kvm_max_guest_tsc_khz = tsc_khz;
+	if (!boot_cpu_has(X86_FEATURE_CONSTANT_TSC)) {
+		for_each_present_cpu(cpu)
+			per_cpu(cpu_tsc_khz, cpu) = tsc_khz;
+	}
+	kvm_caps.max_guest_tsc_khz = tsc_khz;
 
 	list_for_each_entry(kvm, &vm_list, vm_list) {
-		struct kvm_arch *ka = &kvm->arch;
-
-		spin_lock(&ka->pvclock_gtod_sync_lock);
-
+		__kvm_start_pvclock_update(kvm);
 		pvclock_update_vm_gtod_copy(kvm);
-
-		kvm_for_each_vcpu(cpu, vcpu, kvm)
-			kvm_make_request(KVM_REQ_CLOCK_UPDATE, vcpu);
-
-		kvm_for_each_vcpu(cpu, vcpu, kvm)
-			kvm_clear_request(KVM_REQ_MCLOCK_INPROGRESS, vcpu);
-
-		spin_unlock(&ka->pvclock_gtod_sync_lock);
+		kvm_end_pvclock_update(kvm);
 	}
-	spin_unlock(&kvm_lock);
+
+	mutex_unlock(&kvm_lock);
 }
 #endif
 
-static int kvmclock_cpufreq_notifier(struct notifier_block *nb, unsigned long val,
-				     void *data)
+static void __kvmclock_cpufreq_notifier(struct cpufreq_freqs *freq, int cpu)
 {
-	struct cpufreq_freqs *freq = data;
 	struct kvm *kvm;
 	struct kvm_vcpu *vcpu;
-	int i, send_ipi = 0;
+	int send_ipi = 0;
+	unsigned long i;
 
 	/*
 	 * We allow guests to temporarily run on slowing clocks,
@@ -6327,24 +9845,19 @@ static int kvmclock_cpufreq_notifier(struct notifier_block *nb, unsigned long va
 	 *
 	 */
 
-	if (val == CPUFREQ_PRECHANGE && freq->old > freq->new)
-		return 0;
-	if (val == CPUFREQ_POSTCHANGE && freq->old < freq->new)
-		return 0;
+	smp_call_function_single(cpu, tsc_khz_changed, freq, 1);
 
-	smp_call_function_single(freq->cpu, tsc_khz_changed, freq, 1);
-
-	spin_lock(&kvm_lock);
+	mutex_lock(&kvm_lock);
 	list_for_each_entry(kvm, &vm_list, vm_list) {
 		kvm_for_each_vcpu(i, vcpu, kvm) {
-			if (vcpu->cpu != freq->cpu)
+			if (vcpu->cpu != cpu)
 				continue;
 			kvm_make_request(KVM_REQ_CLOCK_UPDATE, vcpu);
-			if (vcpu->cpu != smp_processor_id())
+			if (vcpu->cpu != raw_smp_processor_id())
 				send_ipi = 1;
 		}
 	}
-	spin_unlock(&kvm_lock);
+	mutex_unlock(&kvm_lock);
 
 	if (freq->old < freq->new && send_ipi) {
 		/*
@@ -6359,8 +9872,24 @@ static int kvmclock_cpufreq_notifier(struct notifier_block *nb, unsigned long va
 		 * guest context is entered kvmclock will be updated,
 		 * so the guest will not see stale values.
 		 */
-		smp_call_function_single(freq->cpu, tsc_khz_changed, freq, 1);
+		smp_call_function_single(cpu, tsc_khz_changed, freq, 1);
 	}
+}
+
+static int kvmclock_cpufreq_notifier(struct notifier_block *nb, unsigned long val,
+				     void *data)
+{
+	struct cpufreq_freqs *freq = data;
+	int cpu;
+
+	if (val == CPUFREQ_PRECHANGE && freq->old > freq->new)
+		return 0;
+	if (val == CPUFREQ_POSTCHANGE && freq->old < freq->new)
+		return 0;
+
+	for_each_cpu(cpu, freq->policy->cpus)
+		__kvmclock_cpufreq_notifier(freq, cpu);
+
 	return 0;
 }
 
@@ -6376,107 +9905,58 @@ static int kvmclock_cpu_online(unsigned int cpu)
 
 static void kvm_timer_init(void)
 {
-	max_tsc_khz = tsc_khz;
-
 	if (!boot_cpu_has(X86_FEATURE_CONSTANT_TSC)) {
-#ifdef CONFIG_CPU_FREQ
-		struct cpufreq_policy policy;
-		int cpu;
+		max_tsc_khz = tsc_khz;
 
-		memset(&policy, 0, sizeof(policy));
-		cpu = get_cpu();
-		cpufreq_get_policy(&policy, cpu);
-		if (policy.cpuinfo.max_freq)
-			max_tsc_khz = policy.cpuinfo.max_freq;
-		put_cpu();
-#endif
+		if (IS_ENABLED(CONFIG_CPU_FREQ)) {
+			struct cpufreq_policy *policy;
+			int cpu;
+
+			cpu = get_cpu();
+			policy = cpufreq_cpu_get(cpu);
+			if (policy) {
+				if (policy->cpuinfo.max_freq)
+					max_tsc_khz = policy->cpuinfo.max_freq;
+				cpufreq_cpu_put(policy);
+			}
+			put_cpu();
+		}
 		cpufreq_register_notifier(&kvmclock_cpufreq_notifier_block,
 					  CPUFREQ_TRANSITION_NOTIFIER);
+
+		cpuhp_setup_state(CPUHP_AP_X86_KVM_CLK_ONLINE, "x86/kvm/clk:online",
+				  kvmclock_cpu_online, kvmclock_cpu_down_prep);
 	}
-	pr_debug("kvm: max_tsc_khz = %ld\n", max_tsc_khz);
-
-	cpuhp_setup_state(CPUHP_AP_X86_KVM_CLK_ONLINE, "x86/kvm/clk:online",
-			  kvmclock_cpu_online, kvmclock_cpu_down_prep);
-}
-
-DEFINE_PER_CPU(struct kvm_vcpu *, current_vcpu);
-EXPORT_PER_CPU_SYMBOL_GPL(current_vcpu);
-
-int kvm_is_in_guest(void)
-{
-	return __this_cpu_read(current_vcpu) != NULL;
-}
-
-static int kvm_is_user_mode(void)
-{
-	int user_mode = 3;
-
-	if (__this_cpu_read(current_vcpu))
-		user_mode = kvm_x86_ops->get_cpl(__this_cpu_read(current_vcpu));
-
-	return user_mode != 0;
-}
-
-static unsigned long kvm_get_guest_ip(void)
-{
-	unsigned long ip = 0;
-
-	if (__this_cpu_read(current_vcpu))
-		ip = kvm_rip_read(__this_cpu_read(current_vcpu));
-
-	return ip;
-}
-
-static struct perf_guest_info_callbacks kvm_guest_cbs = {
-	.is_in_guest		= kvm_is_in_guest,
-	.is_user_mode		= kvm_is_user_mode,
-	.get_guest_ip		= kvm_get_guest_ip,
-};
-
-static void kvm_set_mmio_spte_mask(void)
-{
-	u64 mask;
-	int maxphyaddr = boot_cpu_data.x86_phys_bits;
-
-	/*
-	 * Set the reserved bits and the present bit of an paging-structure
-	 * entry to generate page fault with PFER.RSV = 1.
-	 */
-	 /* Mask the reserved physical address bits. */
-	mask = rsvd_bits(maxphyaddr, 51);
-
-	/* Set the present bit. */
-	mask |= 1ull;
-
-#ifdef CONFIG_X86_64
-	/*
-	 * If reserved bit is not supported, clear the present bit to disable
-	 * mmio page fault.
-	 */
-	if (maxphyaddr == 52)
-		mask &= ~1ull;
-#endif
-
-	kvm_mmu_set_mmio_spte_mask(mask, mask);
 }
 
 #ifdef CONFIG_X86_64
 static void pvclock_gtod_update_fn(struct work_struct *work)
 {
 	struct kvm *kvm;
-
 	struct kvm_vcpu *vcpu;
-	int i;
+	unsigned long i;
 
-	spin_lock(&kvm_lock);
+	mutex_lock(&kvm_lock);
 	list_for_each_entry(kvm, &vm_list, vm_list)
 		kvm_for_each_vcpu(i, vcpu, kvm)
 			kvm_make_request(KVM_REQ_MASTERCLOCK_UPDATE, vcpu);
 	atomic_set(&kvm_guest_has_master_clock, 0);
-	spin_unlock(&kvm_lock);
+	mutex_unlock(&kvm_lock);
 }
 
 static DECLARE_WORK(pvclock_gtod_work, pvclock_gtod_update_fn);
+
+/*
+ * Indirection to move queue_work() out of the tk_core.seq write held
+ * region to prevent possible deadlocks against time accessors which
+ * are invoked with work related locks held.
+ */
+static void pvclock_irq_work_fn(struct irq_work *w)
+{
+	queue_work(system_long_wq, &pvclock_gtod_work);
+}
+
+static DEFINE_IRQ_WORK(pvclock_irq_work, pvclock_irq_work_fn);
 
 /*
  * Notification about pvclock gtod data update.
@@ -6489,13 +9969,14 @@ static int pvclock_gtod_notify(struct notifier_block *nb, unsigned long unused,
 
 	update_pvclock_gtod(tk);
 
-	/* disable master clock if host does not trust, or does not
-	 * use, TSC based clocksource.
+	/*
+	 * Disable master clock if host does not trust, or does not use,
+	 * TSC based clocksource. Delegate queue_work() to irq_work as
+	 * this is invoked with tk_core.seq write held.
 	 */
 	if (!gtod_is_based_on_tsc(gtod->clock.vclock_mode) &&
 	    atomic_read(&kvm_guest_has_master_clock) != 0)
-		queue_work(system_long_wq, &pvclock_gtod_work);
-
+		irq_work_queue(&pvclock_irq_work);
 	return 0;
 }
 
@@ -6504,54 +9985,193 @@ static struct notifier_block pvclock_gtod_notifier = {
 };
 #endif
 
-int kvm_arch_init(void *opaque)
+void kvm_setup_xss_caps(void)
 {
-	int r;
-	struct kvm_x86_ops *ops = opaque;
+	if (!kvm_cpu_cap_has(X86_FEATURE_XSAVES))
+		kvm_caps.supported_xss = 0;
 
-	if (kvm_x86_ops) {
-		printk(KERN_ERR "kvm: already loaded the other module\n");
-		r = -EEXIST;
-		goto out;
+	if (!kvm_cpu_cap_has(X86_FEATURE_SHSTK) &&
+	    !kvm_cpu_cap_has(X86_FEATURE_IBT))
+		kvm_caps.supported_xss &= ~XFEATURE_MASK_CET_ALL;
+
+	if ((kvm_caps.supported_xss & XFEATURE_MASK_CET_ALL) != XFEATURE_MASK_CET_ALL) {
+		kvm_cpu_cap_clear(X86_FEATURE_SHSTK);
+		kvm_cpu_cap_clear(X86_FEATURE_IBT);
+		kvm_caps.supported_xss &= ~XFEATURE_MASK_CET_ALL;
+	}
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_setup_xss_caps);
+
+static void kvm_setup_efer_caps(void)
+{
+	if (kvm_cpu_cap_has(X86_FEATURE_NX))
+		kvm_enable_efer_bits(EFER_NX);
+
+	if (kvm_cpu_cap_has(X86_FEATURE_FXSR_OPT))
+		kvm_enable_efer_bits(EFER_FFXSR);
+
+	if (kvm_cpu_cap_has(X86_FEATURE_AUTOIBRS))
+		kvm_enable_efer_bits(EFER_AUTOIBRS);
+}
+
+static inline void kvm_ops_update(struct kvm_x86_init_ops *ops)
+{
+	memcpy(&kvm_x86_ops, ops->runtime_ops, sizeof(kvm_x86_ops));
+
+#define __KVM_X86_OP(func) \
+	static_call_update(kvm_x86_##func, kvm_x86_ops.func);
+#define KVM_X86_OP(func) \
+	WARN_ON(!kvm_x86_ops.func); __KVM_X86_OP(func)
+#define KVM_X86_OP_OPTIONAL __KVM_X86_OP
+#define KVM_X86_OP_OPTIONAL_RET0(func) \
+	static_call_update(kvm_x86_##func, (void *)kvm_x86_ops.func ? : \
+					   (void *)__static_call_return0);
+#include <asm/kvm-x86-ops.h>
+#undef __KVM_X86_OP
+
+	kvm_pmu_ops_update(ops->pmu_ops);
+}
+
+static int kvm_x86_check_processor_compatibility(void)
+{
+	int cpu = smp_processor_id();
+	struct cpuinfo_x86 *c = &cpu_data(cpu);
+
+	/*
+	 * Compatibility checks are done when loading KVM and when enabling
+	 * hardware, e.g. during CPU hotplug, to ensure all online CPUs are
+	 * compatible, i.e. KVM should never perform a compatibility check on
+	 * an offline CPU.
+	 */
+	WARN_ON(!cpu_online(cpu));
+
+	if (__cr4_reserved_bits(cpu_has, c) !=
+	    __cr4_reserved_bits(cpu_has, &boot_cpu_data))
+		return -EIO;
+
+	return kvm_x86_call(check_processor_compatibility)();
+}
+
+static void kvm_x86_check_cpu_compat(void *ret)
+{
+	*(int *)ret = kvm_x86_check_processor_compatibility();
+}
+
+int kvm_x86_vendor_init(struct kvm_x86_init_ops *ops)
+{
+	u64 host_pat;
+	int r, cpu;
+
+	guard(mutex)(&vendor_module_lock);
+
+	if (kvm_x86_ops.enable_virtualization_cpu) {
+		pr_err("already loaded vendor module '%s'\n", kvm_x86_ops.name);
+		return -EEXIST;
 	}
 
-	if (!ops->cpu_has_kvm_support()) {
-		printk(KERN_ERR "kvm: no hardware support\n");
-		r = -EOPNOTSUPP;
-		goto out;
-	}
-	if (ops->disabled_by_bios()) {
-		printk(KERN_ERR "kvm: disabled by bios\n");
-		r = -EOPNOTSUPP;
-		goto out;
-	}
-
-	r = -ENOMEM;
-	shared_msrs = alloc_percpu(struct kvm_shared_msrs);
-	if (!shared_msrs) {
-		printk(KERN_ERR "kvm: failed to allocate percpu kvm_shared_msrs\n");
-		goto out;
+	/*
+	 * KVM explicitly assumes that the guest has an FPU and
+	 * FXSAVE/FXRSTOR. For example, the KVM_GET_FPU explicitly casts the
+	 * vCPU's FPU state as a fxregs_state struct.
+	 */
+	if (!boot_cpu_has(X86_FEATURE_FPU) || !boot_cpu_has(X86_FEATURE_FXSR)) {
+		pr_err("inadequate fpu\n");
+		return -EOPNOTSUPP;
 	}
 
-	r = kvm_mmu_module_init();
+	if (IS_ENABLED(CONFIG_PREEMPT_RT) && !boot_cpu_has(X86_FEATURE_CONSTANT_TSC)) {
+		pr_err("RT requires X86_FEATURE_CONSTANT_TSC\n");
+		return -EOPNOTSUPP;
+	}
+
+	/*
+	 * KVM assumes that PAT entry '0' encodes WB memtype and simply zeroes
+	 * the PAT bits in SPTEs.  Bail if PAT[0] is programmed to something
+	 * other than WB.  Note, EPT doesn't utilize the PAT, but don't bother
+	 * with an exception.  PAT[0] is set to WB on RESET and also by the
+	 * kernel, i.e. failure indicates a kernel bug or broken firmware.
+	 */
+	if (rdmsrq_safe(MSR_IA32_CR_PAT, &host_pat) ||
+	    (host_pat & GENMASK(2, 0)) != 6) {
+		pr_err("host PAT[0] is not WB\n");
+		return -EIO;
+	}
+
+	if (boot_cpu_has(X86_FEATURE_SHSTK) || boot_cpu_has(X86_FEATURE_IBT)) {
+		rdmsrq(MSR_IA32_S_CET, kvm_host.s_cet);
+		/*
+		 * Linux doesn't yet support supervisor shadow stacks (SSS), so
+		 * KVM doesn't save/restore the associated MSRs, i.e. KVM may
+		 * clobber the host values.  Yell and refuse to load if SSS is
+		 * unexpectedly enabled, e.g. to avoid crashing the host.
+		 */
+		if (WARN_ON_ONCE(kvm_host.s_cet & CET_SHSTK_EN))
+			return -EIO;
+	}
+
+	memset(&kvm_caps, 0, sizeof(kvm_caps));
+
+	x86_emulator_cache = kvm_alloc_emulator_cache();
+	if (!x86_emulator_cache) {
+		pr_err("failed to allocate cache for x86 emulator\n");
+		return -ENOMEM;
+	}
+
+	r = kvm_mmu_vendor_module_init();
 	if (r)
-		goto out_free_percpu;
+		goto out_free_x86_emulator_cache;
 
-	kvm_set_mmio_spte_mask();
+	kvm_caps.supported_vm_types = BIT(KVM_X86_DEFAULT_VM);
+	kvm_caps.supported_mce_cap = MCG_CTL_P | MCG_SER_P;
 
-	kvm_x86_ops = ops;
+	if (boot_cpu_has(X86_FEATURE_XSAVE)) {
+		kvm_host.xcr0 = xgetbv(XCR_XFEATURE_ENABLED_MASK);
+		kvm_caps.supported_xcr0 = kvm_host.xcr0 & KVM_SUPPORTED_XCR0;
+	}
 
-	kvm_mmu_set_mask_ptes(PT_USER_MASK, PT_ACCESSED_MASK,
-			PT_DIRTY_MASK, PT64_NX_MASK, 0,
-			PT_PRESENT_MASK, 0, sme_me_mask);
+	if (boot_cpu_has(X86_FEATURE_XSAVES)) {
+		rdmsrq(MSR_IA32_XSS, kvm_host.xss);
+		kvm_caps.supported_xss = kvm_host.xss & KVM_SUPPORTED_XSS;
+	}
+
+	kvm_caps.supported_quirks = KVM_X86_VALID_QUIRKS;
+	kvm_caps.inapplicable_quirks = KVM_X86_CONDITIONAL_QUIRKS;
+
+	rdmsrq_safe(MSR_EFER, &kvm_host.efer);
+
+	kvm_init_pmu_capability(ops->pmu_ops);
+
+	if (boot_cpu_has(X86_FEATURE_ARCH_CAPABILITIES))
+		rdmsrq(MSR_IA32_ARCH_CAPABILITIES, kvm_host.arch_capabilities);
+
+	WARN_ON_ONCE(kvm_nr_uret_msrs);
+
+	r = ops->hardware_setup();
+	if (r != 0)
+		goto out_mmu_exit;
+
+	kvm_setup_efer_caps();
+
+	enable_device_posted_irqs &= enable_apicv &&
+				     irq_remapping_cap(IRQ_POSTING_CAP);
+
+	kvm_ops_update(ops);
+
+	for_each_online_cpu(cpu) {
+		smp_call_function_single(cpu, kvm_x86_check_cpu_compat, &r, 1);
+		if (r < 0)
+			goto out_unwind_ops;
+	}
+
+	/*
+	 * Point of no return!  DO NOT add error paths below this point unless
+	 * absolutely necessary, as most operations from this point forward
+	 * require unwinding.
+	 */
 	kvm_timer_init();
 
-	perf_register_guest_info_callbacks(&kvm_guest_cbs);
-
-	if (boot_cpu_has(X86_FEATURE_XSAVE))
-		host_xcr0 = xgetbv(XCR_XFEATURE_ENABLED_MASK);
-
-	kvm_lapic_init();
+	if (pi_inject_timer == -1)
+		pi_inject_timer = housekeeping_enabled(HK_TYPE_TIMER);
 #ifdef CONFIG_X86_64
 	pvclock_gtod_register_notifier(&pvclock_gtod_notifier);
 
@@ -6559,78 +10179,104 @@ int kvm_arch_init(void *opaque)
 		set_hv_tscchange_cb(kvm_hyperv_tsc_notifier);
 #endif
 
+	__kvm_register_perf_callbacks(ops->handle_intel_pt_intr,
+				      enable_mediated_pmu ? kvm_handle_guest_mediated_pmi : NULL);
+
+	if (IS_ENABLED(CONFIG_KVM_SW_PROTECTED_VM) && tdp_mmu_enabled)
+		kvm_caps.supported_vm_types |= BIT(KVM_X86_SW_PROTECTED_VM);
+
+	/* KVM always ignores guest PAT for shadow paging.  */
+	if (!tdp_enabled)
+		kvm_caps.supported_quirks &= ~KVM_X86_QUIRK_IGNORE_GUEST_PAT;
+
+	if (kvm_caps.has_tsc_control) {
+		/*
+		 * Make sure the user can only configure tsc_khz values that
+		 * fit into a signed integer.
+		 * A min value is not calculated because it will always
+		 * be 1 on all machines.
+		 */
+		u64 max = min(0x7fffffffULL,
+			      __scale_tsc(kvm_caps.max_tsc_scaling_ratio, tsc_khz));
+		kvm_caps.max_guest_tsc_khz = max;
+	}
+	kvm_caps.default_tsc_scaling_ratio = 1ULL << kvm_caps.tsc_scaling_ratio_frac_bits;
+	kvm_init_msr_lists();
 	return 0;
 
-out_free_percpu:
-	free_percpu(shared_msrs);
-out:
+out_unwind_ops:
+	kvm_x86_ops.enable_virtualization_cpu = NULL;
+	kvm_x86_call(hardware_unsetup)();
+out_mmu_exit:
+	kvm_destroy_user_return_msrs();
+	kvm_mmu_vendor_module_exit();
+out_free_x86_emulator_cache:
+	kmem_cache_destroy(x86_emulator_cache);
 	return r;
 }
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_x86_vendor_init);
 
-void kvm_arch_exit(void)
+void kvm_x86_vendor_exit(void)
 {
+	kvm_unregister_perf_callbacks();
+
 #ifdef CONFIG_X86_64
 	if (hypervisor_is_type(X86_HYPER_MS_HYPERV))
 		clear_hv_tscchange_cb();
 #endif
 	kvm_lapic_exit();
-	perf_unregister_guest_info_callbacks(&kvm_guest_cbs);
 
-	if (!boot_cpu_has(X86_FEATURE_CONSTANT_TSC))
+	if (!boot_cpu_has(X86_FEATURE_CONSTANT_TSC)) {
 		cpufreq_unregister_notifier(&kvmclock_cpufreq_notifier_block,
 					    CPUFREQ_TRANSITION_NOTIFIER);
-	cpuhp_remove_state_nocalls(CPUHP_AP_X86_KVM_CLK_ONLINE);
+		cpuhp_remove_state_nocalls(CPUHP_AP_X86_KVM_CLK_ONLINE);
+	}
 #ifdef CONFIG_X86_64
 	pvclock_gtod_unregister_notifier(&pvclock_gtod_notifier);
+	irq_work_sync(&pvclock_irq_work);
+	cancel_work_sync(&pvclock_gtod_work);
 #endif
-	kvm_x86_ops = NULL;
-	kvm_mmu_module_exit();
-	free_percpu(shared_msrs);
+	kvm_x86_call(hardware_unsetup)();
+	kvm_destroy_user_return_msrs();
+	kvm_mmu_vendor_module_exit();
+	kmem_cache_destroy(x86_emulator_cache);
+#ifdef CONFIG_KVM_XEN
+	static_key_deferred_flush(&kvm_xen_enabled);
+	WARN_ON(static_branch_unlikely(&kvm_xen_enabled.key));
+#endif
+	mutex_lock(&vendor_module_lock);
+	kvm_x86_ops.enable_virtualization_cpu = NULL;
+	mutex_unlock(&vendor_module_lock);
 }
-
-int kvm_vcpu_halt(struct kvm_vcpu *vcpu)
-{
-	++vcpu->stat.halt_exits;
-	if (lapic_in_kernel(vcpu)) {
-		vcpu->arch.mp_state = KVM_MP_STATE_HALTED;
-		return 1;
-	} else {
-		vcpu->run->exit_reason = KVM_EXIT_HLT;
-		return 0;
-	}
-}
-EXPORT_SYMBOL_GPL(kvm_vcpu_halt);
-
-int kvm_emulate_halt(struct kvm_vcpu *vcpu)
-{
-	int ret = kvm_skip_emulated_instruction(vcpu);
-	/*
-	 * TODO: we might be squashing a GUESTDBG_SINGLESTEP-triggered
-	 * KVM_EXIT_DEBUG here.
-	 */
-	return kvm_vcpu_halt(vcpu) && ret;
-}
-EXPORT_SYMBOL_GPL(kvm_emulate_halt);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_x86_vendor_exit);
 
 #ifdef CONFIG_X86_64
 static int kvm_pv_clock_pairing(struct kvm_vcpu *vcpu, gpa_t paddr,
 			        unsigned long clock_type)
 {
 	struct kvm_clock_pairing clock_pairing;
-	struct timespec ts;
+	struct timespec64 ts;
 	u64 cycle;
 	int ret;
 
 	if (clock_type != KVM_CLOCK_PAIRING_WALLCLOCK)
 		return -KVM_EOPNOTSUPP;
 
-	if (kvm_get_walltime_and_clockread(&ts, &cycle) == false)
+	/*
+	 * When tsc is in permanent catchup mode guests won't be able to use
+	 * pvclock_read_retry loop to get consistent view of pvclock
+	 */
+	if (vcpu->arch.tsc_always_catchup)
+		return -KVM_EOPNOTSUPP;
+
+	if (!kvm_get_walltime_and_clockread(&ts, &cycle))
 		return -KVM_EOPNOTSUPP;
 
 	clock_pairing.sec = ts.tv_sec;
 	clock_pairing.nsec = ts.tv_nsec;
 	clock_pairing.tsc = kvm_read_l1_tsc(vcpu, cycle);
 	clock_pairing.flags = 0;
+	memset(&clock_pairing.pad, 0, sizeof(clock_pairing.pad));
 
 	ret = 0;
 	if (kvm_write_guest(vcpu->kvm, paddr, &clock_pairing,
@@ -6646,62 +10292,151 @@ static int kvm_pv_clock_pairing(struct kvm_vcpu *vcpu, gpa_t paddr,
  *
  * @apicid - apicid of vcpu to be kicked.
  */
-static void kvm_pv_kick_cpu_op(struct kvm *kvm, unsigned long flags, int apicid)
+static void kvm_pv_kick_cpu_op(struct kvm *kvm, int apicid)
 {
-	struct kvm_lapic_irq lapic_irq;
+	/*
+	 * All other fields are unused for APIC_DM_REMRD, but may be consumed by
+	 * common code, e.g. for tracing. Defer initialization to the compiler.
+	 */
+	struct kvm_lapic_irq lapic_irq = {
+		.delivery_mode = APIC_DM_REMRD,
+		.dest_mode = APIC_DEST_PHYSICAL,
+		.shorthand = APIC_DEST_NOSHORT,
+		.dest_id = apicid,
+	};
 
-	lapic_irq.shorthand = 0;
-	lapic_irq.dest_mode = 0;
-	lapic_irq.level = 0;
-	lapic_irq.dest_id = apicid;
-	lapic_irq.msi_redir_hint = false;
-
-	lapic_irq.delivery_mode = APIC_DM_REMRD;
-	kvm_irq_delivery_to_apic(kvm, NULL, &lapic_irq, NULL);
+	kvm_irq_delivery_to_apic(kvm, NULL, &lapic_irq);
 }
 
-void kvm_vcpu_deactivate_apicv(struct kvm_vcpu *vcpu)
+bool kvm_apicv_activated(struct kvm *kvm)
 {
-	vcpu->arch.apicv_active = false;
-	kvm_x86_ops->refresh_apicv_exec_ctrl(vcpu);
+	return (READ_ONCE(kvm->arch.apicv_inhibit_reasons) == 0);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_apicv_activated);
+
+bool kvm_vcpu_apicv_activated(struct kvm_vcpu *vcpu)
+{
+	ulong vm_reasons = READ_ONCE(vcpu->kvm->arch.apicv_inhibit_reasons);
+	ulong vcpu_reasons =
+			kvm_x86_call(vcpu_get_apicv_inhibit_reasons)(vcpu);
+
+	return (vm_reasons | vcpu_reasons) == 0;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_vcpu_apicv_activated);
+
+static void set_or_clear_apicv_inhibit(unsigned long *inhibits,
+				       enum kvm_apicv_inhibit reason, bool set)
+{
+	const struct trace_print_flags apicv_inhibits[] = { APICV_INHIBIT_REASONS };
+
+	BUILD_BUG_ON(ARRAY_SIZE(apicv_inhibits) != NR_APICV_INHIBIT_REASONS);
+
+	if (set)
+		__set_bit(reason, inhibits);
+	else
+		__clear_bit(reason, inhibits);
+
+	trace_kvm_apicv_inhibit_changed(reason, set, *inhibits);
 }
 
-int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
+static void kvm_apicv_init(struct kvm *kvm)
 {
-	unsigned long nr, a0, a1, a2, a3, ret;
-	int op_64_bit;
+	enum kvm_apicv_inhibit reason = enable_apicv ? APICV_INHIBIT_REASON_ABSENT :
+						       APICV_INHIBIT_REASON_DISABLED;
 
-	if (kvm_hv_hypercall_enabled(vcpu->kvm))
-		return kvm_hv_hypercall(vcpu);
+	set_or_clear_apicv_inhibit(&kvm->arch.apicv_inhibit_reasons, reason, true);
 
-	nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
-	a0 = kvm_register_read(vcpu, VCPU_REGS_RBX);
-	a1 = kvm_register_read(vcpu, VCPU_REGS_RCX);
-	a2 = kvm_register_read(vcpu, VCPU_REGS_RDX);
-	a3 = kvm_register_read(vcpu, VCPU_REGS_RSI);
+	init_rwsem(&kvm->arch.apicv_update_lock);
+}
+
+static void kvm_sched_yield(struct kvm_vcpu *vcpu, unsigned long dest_id)
+{
+	struct kvm_vcpu *target = NULL;
+	struct kvm_apic_map *map;
+
+	vcpu->stat.directed_yield_attempted++;
+
+	if (single_task_running())
+		goto no_yield;
+
+	rcu_read_lock();
+	map = rcu_dereference(vcpu->kvm->arch.apic_map);
+
+	if (likely(map) && dest_id <= map->max_apic_id) {
+		dest_id = array_index_nospec(dest_id, map->max_apic_id + 1);
+		if (map->phys_map[dest_id])
+			target = map->phys_map[dest_id]->vcpu;
+	}
+
+	rcu_read_unlock();
+
+	if (!target || !READ_ONCE(target->ready))
+		goto no_yield;
+
+	/* Ignore requests to yield to self */
+	if (vcpu == target)
+		goto no_yield;
+
+	if (kvm_vcpu_yield_to(target) <= 0)
+		goto no_yield;
+
+	vcpu->stat.directed_yield_successful++;
+
+no_yield:
+	return;
+}
+
+static int complete_hypercall_exit(struct kvm_vcpu *vcpu)
+{
+	u64 ret = vcpu->run->hypercall.ret;
+
+	if (!is_64_bit_hypercall(vcpu))
+		ret = (u32)ret;
+	kvm_rax_write_raw(vcpu, ret);
+	return kvm_skip_emulated_instruction(vcpu);
+}
+
+int ____kvm_emulate_hypercall(struct kvm_vcpu *vcpu, int cpl,
+			      int (*complete_hypercall)(struct kvm_vcpu *))
+{
+	int op_64_bit = is_64_bit_hypercall(vcpu);
+	unsigned long ret, nr, a0, a1, a2, a3;
+
+	++vcpu->stat.hypercalls;
+
+	if (op_64_bit) {
+		nr = kvm_rax_read_raw(vcpu);
+		a0 = kvm_rbx_read_raw(vcpu);
+		a1 = kvm_rcx_read_raw(vcpu);
+		a2 = kvm_rdx_read_raw(vcpu);
+		a3 = kvm_rsi_read_raw(vcpu);
+	} else {
+		nr = kvm_eax_read(vcpu);
+		a0 = kvm_ebx_read(vcpu);
+		a1 = kvm_ecx_read(vcpu);
+		a2 = kvm_edx_read(vcpu);
+		a3 = kvm_esi_read(vcpu);
+	}
 
 	trace_kvm_hypercall(nr, a0, a1, a2, a3);
 
-	op_64_bit = is_64_bit_mode(vcpu);
-	if (!op_64_bit) {
-		nr &= 0xFFFFFFFF;
-		a0 &= 0xFFFFFFFF;
-		a1 &= 0xFFFFFFFF;
-		a2 &= 0xFFFFFFFF;
-		a3 &= 0xFFFFFFFF;
-	}
-
-	if (kvm_x86_ops->get_cpl(vcpu) != 0) {
+	if (cpl) {
 		ret = -KVM_EPERM;
 		goto out;
 	}
+
+	ret = -KVM_ENOSYS;
 
 	switch (nr) {
 	case KVM_HC_VAPIC_POLL_IRQ:
 		ret = 0;
 		break;
 	case KVM_HC_KICK_CPU:
-		kvm_pv_kick_cpu_op(vcpu->kvm, a0, a1);
+		if (!guest_pv_has(vcpu, KVM_FEATURE_PV_UNHALT))
+			break;
+
+		kvm_pv_kick_cpu_op(vcpu->kvm, a1);
+		kvm_sched_yield(vcpu, a1);
 		ret = 0;
 		break;
 #ifdef CONFIG_X86_64
@@ -6709,19 +10444,75 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 		ret = kvm_pv_clock_pairing(vcpu, a0, a1);
 		break;
 #endif
+	case KVM_HC_SEND_IPI:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_PV_SEND_IPI))
+			break;
+
+		ret = kvm_pv_send_ipi(vcpu->kvm, a0, a1, a2, a3, op_64_bit);
+		break;
+	case KVM_HC_SCHED_YIELD:
+		if (!guest_pv_has(vcpu, KVM_FEATURE_PV_SCHED_YIELD))
+			break;
+
+		kvm_sched_yield(vcpu, a0);
+		ret = 0;
+		break;
+	case KVM_HC_MAP_GPA_RANGE: {
+		u64 gpa = a0, npages = a1, attrs = a2;
+
+		ret = -KVM_ENOSYS;
+		if (!user_exit_on_hypercall(vcpu->kvm, KVM_HC_MAP_GPA_RANGE))
+			break;
+
+		if (!PAGE_ALIGNED(gpa) || !npages ||
+		    gpa_to_gfn(gpa) + npages <= gpa_to_gfn(gpa)) {
+			ret = -KVM_EINVAL;
+			break;
+		}
+
+		vcpu->run->exit_reason        = KVM_EXIT_HYPERCALL;
+		vcpu->run->hypercall.nr       = KVM_HC_MAP_GPA_RANGE;
+		/*
+		 * In principle this should have been -KVM_ENOSYS, but userspace (QEMU <=9.2)
+		 * assumed that vcpu->run->hypercall.ret is never changed by KVM and thus that
+		 * it was always zero on KVM_EXIT_HYPERCALL.  Since KVM is now overwriting
+		 * vcpu->run->hypercall.ret, ensuring that it is zero to not break QEMU.
+		 */
+		vcpu->run->hypercall.ret = 0;
+		vcpu->run->hypercall.args[0]  = gpa;
+		vcpu->run->hypercall.args[1]  = npages;
+		vcpu->run->hypercall.args[2]  = attrs;
+		vcpu->run->hypercall.flags    = 0;
+		if (op_64_bit)
+			vcpu->run->hypercall.flags |= KVM_EXIT_HYPERCALL_LONG_MODE;
+
+		WARN_ON_ONCE(vcpu->run->hypercall.flags & KVM_EXIT_HYPERCALL_MBZ);
+		vcpu->arch.complete_userspace_io = complete_hypercall;
+		return 0;
+	}
 	default:
 		ret = -KVM_ENOSYS;
 		break;
 	}
-out:
-	if (!op_64_bit)
-		ret = (u32)ret;
-	kvm_register_write(vcpu, VCPU_REGS_RAX, ret);
 
-	++vcpu->stat.hypercalls;
-	return kvm_skip_emulated_instruction(vcpu);
+out:
+	vcpu->run->hypercall.ret = ret;
+	return 1;
 }
-EXPORT_SYMBOL_GPL(kvm_emulate_hypercall);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(____kvm_emulate_hypercall);
+
+int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
+{
+	if (kvm_xen_hypercall_enabled(vcpu->kvm))
+		return kvm_xen_hypercall(vcpu);
+
+	if (kvm_hv_hypercall_enabled(vcpu))
+		return kvm_hv_hypercall(vcpu);
+
+	return __kvm_emulate_hypercall(vcpu, kvm_x86_call(get_cpl)(vcpu),
+				       complete_hypercall_exit);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_hypercall);
 
 static int emulator_fix_hypercall(struct x86_emulate_ctxt *ctxt)
 {
@@ -6729,7 +10520,18 @@ static int emulator_fix_hypercall(struct x86_emulate_ctxt *ctxt)
 	char instruction[3];
 	unsigned long rip = kvm_rip_read(vcpu);
 
-	kvm_x86_ops->patch_hypercall(vcpu, instruction);
+	/*
+	 * If the quirk is disabled, synthesize a #UD and let the guest pick up
+	 * the pieces.
+	 */
+	if (!kvm_check_has_quirk(vcpu->kvm, KVM_X86_QUIRK_FIX_HYPERCALL_INSN)) {
+		ctxt->exception.error_code_valid = false;
+		ctxt->exception.vector = UD_VECTOR;
+		ctxt->have_exception = true;
+		return X86EMUL_PROPAGATE_FAULT;
+	}
+
+	kvm_x86_call(patch_hypercall)(vcpu, instruction);
 
 	return emulator_write_emulated(ctxt, rip, instruction, 3,
 		&ctxt->exception);
@@ -6741,399 +10543,347 @@ static int dm_request_for_irq_injection(struct kvm_vcpu *vcpu)
 		likely(!pic_in_kernel(vcpu->kvm));
 }
 
+/* Called within kvm->srcu read side.  */
 static void post_kvm_run_save(struct kvm_vcpu *vcpu)
 {
 	struct kvm_run *kvm_run = vcpu->run;
 
-	kvm_run->if_flag = (kvm_get_rflags(vcpu) & X86_EFLAGS_IF) != 0;
-	kvm_run->flags = is_smm(vcpu) ? KVM_RUN_X86_SMM : 0;
+	kvm_run->if_flag = kvm_x86_call(get_if_flag)(vcpu);
 	kvm_run->cr8 = kvm_get_cr8(vcpu);
-	kvm_run->apic_base = kvm_get_apic_base(vcpu);
+	kvm_run->apic_base = vcpu->arch.apic_base;
+
 	kvm_run->ready_for_interrupt_injection =
 		pic_in_kernel(vcpu->kvm) ||
 		kvm_vcpu_ready_for_interrupt_injection(vcpu);
+
+	if (is_smm(vcpu))
+		kvm_run->flags |= KVM_RUN_X86_SMM;
+	if (is_guest_mode(vcpu))
+		kvm_run->flags |= KVM_RUN_X86_GUEST_MODE;
 }
 
-static void update_cr8_intercept(struct kvm_vcpu *vcpu)
+int kvm_check_nested_events(struct kvm_vcpu *vcpu)
 {
-	int max_irr, tpr;
+	if (kvm_test_request(KVM_REQ_TRIPLE_FAULT, vcpu)) {
+		kvm_x86_ops.nested_ops->triple_fault(vcpu);
+		return 1;
+	}
 
-	if (!kvm_x86_ops->update_cr8_intercept)
-		return;
-
-	if (!lapic_in_kernel(vcpu))
-		return;
-
-	if (vcpu->arch.apicv_active)
-		return;
-
-	if (!vcpu->arch.apic->vapic_addr)
-		max_irr = kvm_lapic_find_highest_irr(vcpu);
-	else
-		max_irr = -1;
-
-	if (max_irr != -1)
-		max_irr >>= 4;
-
-	tpr = kvm_lapic_get_cr8(vcpu);
-
-	kvm_x86_ops->update_cr8_intercept(vcpu, tpr, max_irr);
+	return kvm_x86_ops.nested_ops->check_events(vcpu);
 }
 
-static int inject_pending_event(struct kvm_vcpu *vcpu, bool req_int_win)
+static void kvm_inject_exception(struct kvm_vcpu *vcpu)
 {
+	/*
+	 * Suppress the error code if the vCPU is in Real Mode, as Real Mode
+	 * exceptions don't report error codes.  The presence of an error code
+	 * is carried with the exception and only stripped when the exception
+	 * is injected as intercepted #PF VM-Exits for AMD's Paged Real Mode do
+	 * report an error code despite the CPU being in Real Mode.
+	 */
+	vcpu->arch.exception.has_error_code &= is_protmode(vcpu);
+
+	trace_kvm_inj_exception(vcpu->arch.exception.vector,
+				vcpu->arch.exception.has_error_code,
+				vcpu->arch.exception.error_code,
+				vcpu->arch.exception.injected);
+
+	kvm_x86_call(inject_exception)(vcpu);
+}
+
+/*
+ * Check for any event (interrupt or exception) that is ready to be injected,
+ * and if there is at least one event, inject the event with the highest
+ * priority.  This handles both "pending" events, i.e. events that have never
+ * been injected into the guest, and "injected" events, i.e. events that were
+ * injected as part of a previous VM-Enter, but weren't successfully delivered
+ * and need to be re-injected.
+ *
+ * Note, this is not guaranteed to be invoked on a guest instruction boundary,
+ * i.e. doesn't guarantee that there's an event window in the guest.  KVM must
+ * be able to inject exceptions in the "middle" of an instruction, and so must
+ * also be able to re-inject NMIs and IRQs in the middle of an instruction.
+ * I.e. for exceptions and re-injected events, NOT invoking this on instruction
+ * boundaries is necessary and correct.
+ *
+ * For simplicity, KVM uses a single path to inject all events (except events
+ * that are injected directly from L1 to L2) and doesn't explicitly track
+ * instruction boundaries for asynchronous events.  However, because VM-Exits
+ * that can occur during instruction execution typically result in KVM skipping
+ * the instruction or injecting an exception, e.g. instruction and exception
+ * intercepts, and because pending exceptions have higher priority than pending
+ * interrupts, KVM still honors instruction boundaries in most scenarios.
+ *
+ * But, if a VM-Exit occurs during instruction execution, and KVM does NOT skip
+ * the instruction or inject an exception, then KVM can incorrecty inject a new
+ * asynchronous event if the event became pending after the CPU fetched the
+ * instruction (in the guest).  E.g. if a page fault (#PF, #NPF, EPT violation)
+ * occurs and is resolved by KVM, a coincident NMI, SMI, IRQ, etc... can be
+ * injected on the restarted instruction instead of being deferred until the
+ * instruction completes.
+ *
+ * In practice, this virtualization hole is unlikely to be observed by the
+ * guest, and even less likely to cause functional problems.  To detect the
+ * hole, the guest would have to trigger an event on a side effect of an early
+ * phase of instruction execution, e.g. on the instruction fetch from memory.
+ * And for it to be a functional problem, the guest would need to depend on the
+ * ordering between that side effect, the instruction completing, _and_ the
+ * delivery of the asynchronous event.
+ */
+static int kvm_check_and_inject_events(struct kvm_vcpu *vcpu,
+				       bool *req_immediate_exit)
+{
+	bool can_inject;
 	int r;
 
-	/* try to reinject previous events if any */
+	/*
+	 * Process nested events first, as nested VM-Exit supersedes event
+	 * re-injection.  If there's an event queued for re-injection, it will
+	 * be saved into the appropriate vmc{b,s}12 fields on nested VM-Exit.
+	 */
+	if (is_guest_mode(vcpu))
+		r = kvm_check_nested_events(vcpu);
+	else
+		r = 0;
 
+	/*
+	 * Re-inject exceptions and events *especially* if immediate entry+exit
+	 * to/from L2 is needed, as any event that has already been injected
+	 * into L2 needs to complete its lifecycle before injecting a new event.
+	 *
+	 * Don't re-inject an NMI or interrupt if there is a pending exception.
+	 * This collision arises if an exception occurred while vectoring the
+	 * injected event, KVM intercepted said exception, and KVM ultimately
+	 * determined the fault belongs to the guest and queues the exception
+	 * for injection back into the guest.
+	 *
+	 * "Injected" interrupts can also collide with pending exceptions if
+	 * userspace ignores the "ready for injection" flag and blindly queues
+	 * an interrupt.  In that case, prioritizing the exception is correct,
+	 * as the exception "occurred" before the exit to userspace.  Trap-like
+	 * exceptions, e.g. most #DBs, have higher priority than interrupts.
+	 * And while fault-like exceptions, e.g. #GP and #PF, are the lowest
+	 * priority, they're only generated (pended) during instruction
+	 * execution, and interrupts are recognized at instruction boundaries.
+	 * Thus a pending fault-like exception means the fault occurred on the
+	 * *previous* instruction and must be serviced prior to recognizing any
+	 * new events in order to fully complete the previous instruction.
+	 */
 	if (vcpu->arch.exception.injected)
-		kvm_x86_ops->queue_exception(vcpu);
-	/*
-	 * Do not inject an NMI or interrupt if there is a pending
-	 * exception.  Exceptions and interrupts are recognized at
-	 * instruction boundaries, i.e. the start of an instruction.
-	 * Trap-like exceptions, e.g. #DB, have higher priority than
-	 * NMIs and interrupts, i.e. traps are recognized before an
-	 * NMI/interrupt that's pending on the same instruction.
-	 * Fault-like exceptions, e.g. #GP and #PF, are the lowest
-	 * priority, but are only generated (pended) during instruction
-	 * execution, i.e. a pending fault-like exception means the
-	 * fault occurred on the *previous* instruction and must be
-	 * serviced prior to recognizing any new events in order to
-	 * fully complete the previous instruction.
-	 */
-	else if (!vcpu->arch.exception.pending) {
-		if (vcpu->arch.nmi_injected)
-			kvm_x86_ops->set_nmi(vcpu);
-		else if (vcpu->arch.interrupt.injected)
-			kvm_x86_ops->set_irq(vcpu);
-	}
+		kvm_inject_exception(vcpu);
+	else if (kvm_is_exception_pending(vcpu))
+		; /* see above */
+	else if (vcpu->arch.nmi_injected)
+		kvm_x86_call(inject_nmi)(vcpu);
+	else if (vcpu->arch.interrupt.injected)
+		kvm_x86_call(inject_irq)(vcpu, true);
 
 	/*
-	 * Call check_nested_events() even if we reinjected a previous event
-	 * in order for caller to determine if it should require immediate-exit
-	 * from L2 to L1 due to pending L1 events which require exit
-	 * from L2 to L1.
+	 * Exceptions that morph to VM-Exits are handled above, and pending
+	 * exceptions on top of injected exceptions that do not VM-Exit should
+	 * either morph to #DF or, sadly, override the injected exception.
 	 */
-	if (is_guest_mode(vcpu) && kvm_x86_ops->check_nested_events) {
-		r = kvm_x86_ops->check_nested_events(vcpu, req_int_win);
-		if (r != 0)
-			return r;
-	}
+	WARN_ON_ONCE(vcpu->arch.exception.injected &&
+		     vcpu->arch.exception.pending);
 
-	/* try to inject new event if pending */
+	/*
+	 * Bail if immediate entry+exit to/from the guest is needed to complete
+	 * nested VM-Enter or event re-injection so that a different pending
+	 * event can be serviced (or if KVM needs to exit to userspace).
+	 *
+	 * Otherwise, continue processing events even if VM-Exit occurred.  The
+	 * VM-Exit will have cleared exceptions that were meant for L2, but
+	 * there may now be events that can be injected into L1.
+	 */
+	if (r < 0)
+		goto out;
+
+	/*
+	 * A pending exception VM-Exit should either result in nested VM-Exit
+	 * or force an immediate re-entry and exit to/from L2, and exception
+	 * VM-Exits cannot be injected (flag should _never_ be set).
+	 */
+	WARN_ON_ONCE(vcpu->arch.exception_vmexit.injected ||
+		     vcpu->arch.exception_vmexit.pending);
+
+	/*
+	 * New events, other than exceptions, cannot be injected if KVM needs
+	 * to re-inject a previous event.  See above comments on re-injecting
+	 * for why pending exceptions get priority.
+	 */
+	can_inject = !kvm_event_needs_reinjection(vcpu);
+
 	if (vcpu->arch.exception.pending) {
-		trace_kvm_inj_exception(vcpu->arch.exception.nr,
-					vcpu->arch.exception.has_error_code,
-					vcpu->arch.exception.error_code);
-
-		WARN_ON_ONCE(vcpu->arch.exception.injected);
-		vcpu->arch.exception.pending = false;
-		vcpu->arch.exception.injected = true;
-
-		if (exception_type(vcpu->arch.exception.nr) == EXCPT_FAULT)
+		/*
+		 * Fault-class exceptions, except #DBs, set RF=1 in the RFLAGS
+		 * value pushed on the stack.  Trap-like exception and all #DBs
+		 * leave RF as-is (KVM follows Intel's behavior in this regard;
+		 * AMD states that code breakpoint #DBs excplitly clear RF=0).
+		 *
+		 * Note, most versions of Intel's SDM and AMD's APM incorrectly
+		 * describe the behavior of General Detect #DBs, which are
+		 * fault-like.  They do _not_ set RF, a la code breakpoints.
+		 */
+		if (exception_type(vcpu->arch.exception.vector) == EXCPT_FAULT)
 			__kvm_set_rflags(vcpu, kvm_get_rflags(vcpu) |
 					     X86_EFLAGS_RF);
 
-		if (vcpu->arch.exception.nr == DB_VECTOR &&
-		    (vcpu->arch.dr7 & DR7_GD)) {
+		if (vcpu->arch.exception.vector == DB_VECTOR &&
+		    vcpu->arch.dr7 & DR7_GD) {
 			vcpu->arch.dr7 &= ~DR7_GD;
 			kvm_update_dr7(vcpu);
 		}
 
-		kvm_x86_ops->queue_exception(vcpu);
+		kvm_inject_exception(vcpu);
+
+		vcpu->arch.exception.pending = false;
+		vcpu->arch.exception.injected = true;
+
+		can_inject = false;
 	}
 
-	/* Don't consider new event if we re-injected an event */
-	if (kvm_event_needs_reinjection(vcpu))
+	/* Don't inject interrupts if the user asked to avoid doing so */
+	if (vcpu->guest_debug & KVM_GUESTDBG_BLOCKIRQ)
 		return 0;
 
-	if (vcpu->arch.smi_pending && !is_smm(vcpu) &&
-	    kvm_x86_ops->smi_allowed(vcpu)) {
-		vcpu->arch.smi_pending = false;
-		++vcpu->arch.smi_count;
-		enter_smm(vcpu);
-	} else if (vcpu->arch.nmi_pending && kvm_x86_ops->nmi_allowed(vcpu)) {
-		--vcpu->arch.nmi_pending;
-		vcpu->arch.nmi_injected = true;
-		kvm_x86_ops->set_nmi(vcpu);
-	} else if (kvm_cpu_has_injectable_intr(vcpu)) {
-		/*
-		 * Because interrupts can be injected asynchronously, we are
-		 * calling check_nested_events again here to avoid a race condition.
-		 * See https://lkml.org/lkml/2014/7/2/60 for discussion about this
-		 * proposal and current concerns.  Perhaps we should be setting
-		 * KVM_REQ_EVENT only on certain events and not unconditionally?
-		 */
-		if (is_guest_mode(vcpu) && kvm_x86_ops->check_nested_events) {
-			r = kvm_x86_ops->check_nested_events(vcpu, req_int_win);
-			if (r != 0)
-				return r;
+	/*
+	 * Finally, inject interrupt events.  If an event cannot be injected
+	 * due to architectural conditions (e.g. IF=0) a window-open exit
+	 * will re-request KVM_REQ_EVENT.  Sometimes however an event is pending
+	 * and can architecturally be injected, but we cannot do it right now:
+	 * an interrupt could have arrived just now and we have to inject it
+	 * as a vmexit, or there could already an event in the queue, which is
+	 * indicated by can_inject.  In that case we request an immediate exit
+	 * in order to make progress and get back here for another iteration.
+	 * The kvm_x86_ops hooks communicate this by returning -EBUSY.
+	 */
+#ifdef CONFIG_KVM_SMM
+	if (vcpu->arch.smi_pending) {
+		r = can_inject ? kvm_x86_call(smi_allowed)(vcpu, true) :
+				 -EBUSY;
+		if (r < 0)
+			goto out;
+		if (r) {
+			vcpu->arch.smi_pending = false;
+			++vcpu->arch.smi_count;
+			enter_smm(vcpu);
+			can_inject = false;
+		} else
+			kvm_x86_call(enable_smi_window)(vcpu);
+	}
+#endif
+
+	if (vcpu->arch.nmi_pending) {
+		r = can_inject ? kvm_x86_call(nmi_allowed)(vcpu, true) :
+				 -EBUSY;
+		if (r < 0)
+			goto out;
+		if (r) {
+			--vcpu->arch.nmi_pending;
+			vcpu->arch.nmi_injected = true;
+			kvm_x86_call(inject_nmi)(vcpu);
+			can_inject = false;
+			WARN_ON(kvm_x86_call(nmi_allowed)(vcpu, true) < 0);
 		}
-		if (kvm_x86_ops->interrupt_allowed(vcpu)) {
-			kvm_queue_interrupt(vcpu, kvm_cpu_get_interrupt(vcpu),
-					    false);
-			kvm_x86_ops->set_irq(vcpu);
-		}
+		if (vcpu->arch.nmi_pending)
+			kvm_x86_call(enable_nmi_window)(vcpu);
 	}
 
+	if (kvm_cpu_has_injectable_intr(vcpu)) {
+		r = can_inject ? kvm_x86_call(interrupt_allowed)(vcpu, true) :
+				 -EBUSY;
+		if (r < 0)
+			goto out;
+		if (r) {
+			int irq = kvm_cpu_get_interrupt(vcpu);
+
+			if (!WARN_ON_ONCE(irq == -1)) {
+				kvm_queue_interrupt(vcpu, irq, false);
+				kvm_x86_call(inject_irq)(vcpu, false);
+				WARN_ON(kvm_x86_call(interrupt_allowed)(vcpu, true) < 0);
+			}
+		}
+		if (kvm_cpu_has_injectable_intr(vcpu))
+			kvm_x86_call(enable_irq_window)(vcpu);
+	}
+
+	if (is_guest_mode(vcpu) &&
+	    kvm_x86_ops.nested_ops->has_events &&
+	    kvm_x86_ops.nested_ops->has_events(vcpu, true))
+		*req_immediate_exit = true;
+
+	/*
+	 * KVM must never queue a new exception while injecting an event; KVM
+	 * is done emulating and should only propagate the to-be-injected event
+	 * to the VMCS/VMCB.  Queueing a new exception can put the vCPU into an
+	 * infinite loop as KVM will bail from VM-Enter to inject the pending
+	 * exception and start the cycle all over.
+	 *
+	 * Exempt triple faults as they have special handling and won't put the
+	 * vCPU into an infinite loop.  Triple fault can be queued when running
+	 * VMX without unrestricted guest, as that requires KVM to emulate Real
+	 * Mode events (see kvm_inject_realmode_interrupt()).
+	 */
+	WARN_ON_ONCE(vcpu->arch.exception.pending ||
+		     vcpu->arch.exception_vmexit.pending);
 	return 0;
+
+out:
+	if (r == -EBUSY) {
+		*req_immediate_exit = true;
+		r = 0;
+	}
+	return r;
 }
 
 static void process_nmi(struct kvm_vcpu *vcpu)
 {
-	unsigned limit = 2;
+	unsigned int limit;
 
 	/*
-	 * x86 is limited to one NMI running, and one NMI pending after it.
-	 * If an NMI is already in progress, limit further NMIs to just one.
-	 * Otherwise, allow two (and we'll inject the first one immediately).
+	 * x86 is limited to one NMI pending, but because KVM can't react to
+	 * incoming NMIs as quickly as bare metal, e.g. if the vCPU is
+	 * scheduled out, KVM needs to play nice with two queued NMIs showing
+	 * up at the same time.  To handle this scenario, allow two NMIs to be
+	 * (temporarily) pending so long as NMIs are not blocked and KVM is not
+	 * waiting for a previous NMI injection to complete (which effectively
+	 * blocks NMIs).  KVM will immediately inject one of the two NMIs, and
+	 * will request an NMI window to handle the second NMI.
 	 */
-	if (kvm_x86_ops->get_nmi_mask(vcpu) || vcpu->arch.nmi_injected)
+	if (kvm_x86_call(get_nmi_mask)(vcpu) || vcpu->arch.nmi_injected)
 		limit = 1;
+	else
+		limit = 2;
+
+	/*
+	 * Adjust the limit to account for pending virtual NMIs, which aren't
+	 * tracked in vcpu->arch.nmi_pending.
+	 */
+	if (kvm_x86_call(is_vnmi_pending)(vcpu))
+		limit--;
 
 	vcpu->arch.nmi_pending += atomic_xchg(&vcpu->arch.nmi_queued, 0);
 	vcpu->arch.nmi_pending = min(vcpu->arch.nmi_pending, limit);
-	kvm_make_request(KVM_REQ_EVENT, vcpu);
+
+	if (vcpu->arch.nmi_pending &&
+	    (kvm_x86_call(set_vnmi_pending)(vcpu)))
+		vcpu->arch.nmi_pending--;
+
+	if (vcpu->arch.nmi_pending)
+		kvm_make_request(KVM_REQ_EVENT, vcpu);
 }
 
-static u32 enter_smm_get_segment_flags(struct kvm_segment *seg)
+/* Return total number of NMIs pending injection to the VM */
+int kvm_get_nr_pending_nmis(struct kvm_vcpu *vcpu)
 {
-	u32 flags = 0;
-	flags |= seg->g       << 23;
-	flags |= seg->db      << 22;
-	flags |= seg->l       << 21;
-	flags |= seg->avl     << 20;
-	flags |= seg->present << 15;
-	flags |= seg->dpl     << 13;
-	flags |= seg->s       << 12;
-	flags |= seg->type    << 8;
-	return flags;
+	return vcpu->arch.nmi_pending +
+	       kvm_x86_call(is_vnmi_pending)(vcpu);
 }
 
-static void enter_smm_save_seg_32(struct kvm_vcpu *vcpu, char *buf, int n)
+void kvm_make_scan_ioapic_request_mask(struct kvm *kvm,
+				       unsigned long *vcpu_bitmap)
 {
-	struct kvm_segment seg;
-	int offset;
-
-	kvm_get_segment(vcpu, &seg, n);
-	put_smstate(u32, buf, 0x7fa8 + n * 4, seg.selector);
-
-	if (n < 3)
-		offset = 0x7f84 + n * 12;
-	else
-		offset = 0x7f2c + (n - 3) * 12;
-
-	put_smstate(u32, buf, offset + 8, seg.base);
-	put_smstate(u32, buf, offset + 4, seg.limit);
-	put_smstate(u32, buf, offset, enter_smm_get_segment_flags(&seg));
-}
-
-#ifdef CONFIG_X86_64
-static void enter_smm_save_seg_64(struct kvm_vcpu *vcpu, char *buf, int n)
-{
-	struct kvm_segment seg;
-	int offset;
-	u16 flags;
-
-	kvm_get_segment(vcpu, &seg, n);
-	offset = 0x7e00 + n * 16;
-
-	flags = enter_smm_get_segment_flags(&seg) >> 8;
-	put_smstate(u16, buf, offset, seg.selector);
-	put_smstate(u16, buf, offset + 2, flags);
-	put_smstate(u32, buf, offset + 4, seg.limit);
-	put_smstate(u64, buf, offset + 8, seg.base);
-}
-#endif
-
-static void enter_smm_save_state_32(struct kvm_vcpu *vcpu, char *buf)
-{
-	struct desc_ptr dt;
-	struct kvm_segment seg;
-	unsigned long val;
-	int i;
-
-	put_smstate(u32, buf, 0x7ffc, kvm_read_cr0(vcpu));
-	put_smstate(u32, buf, 0x7ff8, kvm_read_cr3(vcpu));
-	put_smstate(u32, buf, 0x7ff4, kvm_get_rflags(vcpu));
-	put_smstate(u32, buf, 0x7ff0, kvm_rip_read(vcpu));
-
-	for (i = 0; i < 8; i++)
-		put_smstate(u32, buf, 0x7fd0 + i * 4, kvm_register_read(vcpu, i));
-
-	kvm_get_dr(vcpu, 6, &val);
-	put_smstate(u32, buf, 0x7fcc, (u32)val);
-	kvm_get_dr(vcpu, 7, &val);
-	put_smstate(u32, buf, 0x7fc8, (u32)val);
-
-	kvm_get_segment(vcpu, &seg, VCPU_SREG_TR);
-	put_smstate(u32, buf, 0x7fc4, seg.selector);
-	put_smstate(u32, buf, 0x7f64, seg.base);
-	put_smstate(u32, buf, 0x7f60, seg.limit);
-	put_smstate(u32, buf, 0x7f5c, enter_smm_get_segment_flags(&seg));
-
-	kvm_get_segment(vcpu, &seg, VCPU_SREG_LDTR);
-	put_smstate(u32, buf, 0x7fc0, seg.selector);
-	put_smstate(u32, buf, 0x7f80, seg.base);
-	put_smstate(u32, buf, 0x7f7c, seg.limit);
-	put_smstate(u32, buf, 0x7f78, enter_smm_get_segment_flags(&seg));
-
-	kvm_x86_ops->get_gdt(vcpu, &dt);
-	put_smstate(u32, buf, 0x7f74, dt.address);
-	put_smstate(u32, buf, 0x7f70, dt.size);
-
-	kvm_x86_ops->get_idt(vcpu, &dt);
-	put_smstate(u32, buf, 0x7f58, dt.address);
-	put_smstate(u32, buf, 0x7f54, dt.size);
-
-	for (i = 0; i < 6; i++)
-		enter_smm_save_seg_32(vcpu, buf, i);
-
-	put_smstate(u32, buf, 0x7f14, kvm_read_cr4(vcpu));
-
-	/* revision id */
-	put_smstate(u32, buf, 0x7efc, 0x00020000);
-	put_smstate(u32, buf, 0x7ef8, vcpu->arch.smbase);
-}
-
-static void enter_smm_save_state_64(struct kvm_vcpu *vcpu, char *buf)
-{
-#ifdef CONFIG_X86_64
-	struct desc_ptr dt;
-	struct kvm_segment seg;
-	unsigned long val;
-	int i;
-
-	for (i = 0; i < 16; i++)
-		put_smstate(u64, buf, 0x7ff8 - i * 8, kvm_register_read(vcpu, i));
-
-	put_smstate(u64, buf, 0x7f78, kvm_rip_read(vcpu));
-	put_smstate(u32, buf, 0x7f70, kvm_get_rflags(vcpu));
-
-	kvm_get_dr(vcpu, 6, &val);
-	put_smstate(u64, buf, 0x7f68, val);
-	kvm_get_dr(vcpu, 7, &val);
-	put_smstate(u64, buf, 0x7f60, val);
-
-	put_smstate(u64, buf, 0x7f58, kvm_read_cr0(vcpu));
-	put_smstate(u64, buf, 0x7f50, kvm_read_cr3(vcpu));
-	put_smstate(u64, buf, 0x7f48, kvm_read_cr4(vcpu));
-
-	put_smstate(u32, buf, 0x7f00, vcpu->arch.smbase);
-
-	/* revision id */
-	put_smstate(u32, buf, 0x7efc, 0x00020064);
-
-	put_smstate(u64, buf, 0x7ed0, vcpu->arch.efer);
-
-	kvm_get_segment(vcpu, &seg, VCPU_SREG_TR);
-	put_smstate(u16, buf, 0x7e90, seg.selector);
-	put_smstate(u16, buf, 0x7e92, enter_smm_get_segment_flags(&seg) >> 8);
-	put_smstate(u32, buf, 0x7e94, seg.limit);
-	put_smstate(u64, buf, 0x7e98, seg.base);
-
-	kvm_x86_ops->get_idt(vcpu, &dt);
-	put_smstate(u32, buf, 0x7e84, dt.size);
-	put_smstate(u64, buf, 0x7e88, dt.address);
-
-	kvm_get_segment(vcpu, &seg, VCPU_SREG_LDTR);
-	put_smstate(u16, buf, 0x7e70, seg.selector);
-	put_smstate(u16, buf, 0x7e72, enter_smm_get_segment_flags(&seg) >> 8);
-	put_smstate(u32, buf, 0x7e74, seg.limit);
-	put_smstate(u64, buf, 0x7e78, seg.base);
-
-	kvm_x86_ops->get_gdt(vcpu, &dt);
-	put_smstate(u32, buf, 0x7e64, dt.size);
-	put_smstate(u64, buf, 0x7e68, dt.address);
-
-	for (i = 0; i < 6; i++)
-		enter_smm_save_seg_64(vcpu, buf, i);
-#else
-	WARN_ON_ONCE(1);
-#endif
-}
-
-static void enter_smm(struct kvm_vcpu *vcpu)
-{
-	struct kvm_segment cs, ds;
-	struct desc_ptr dt;
-	char buf[512];
-	u32 cr0;
-
-	trace_kvm_enter_smm(vcpu->vcpu_id, vcpu->arch.smbase, true);
-	memset(buf, 0, 512);
-	if (guest_cpuid_has(vcpu, X86_FEATURE_LM))
-		enter_smm_save_state_64(vcpu, buf);
-	else
-		enter_smm_save_state_32(vcpu, buf);
-
-	/*
-	 * Give pre_enter_smm() a chance to make ISA-specific changes to the
-	 * vCPU state (e.g. leave guest mode) after we've saved the state into
-	 * the SMM state-save area.
-	 */
-	kvm_x86_ops->pre_enter_smm(vcpu, buf);
-
-	vcpu->arch.hflags |= HF_SMM_MASK;
-	kvm_vcpu_write_guest(vcpu, vcpu->arch.smbase + 0xfe00, buf, sizeof(buf));
-
-	if (kvm_x86_ops->get_nmi_mask(vcpu))
-		vcpu->arch.hflags |= HF_SMM_INSIDE_NMI_MASK;
-	else
-		kvm_x86_ops->set_nmi_mask(vcpu, true);
-
-	kvm_set_rflags(vcpu, X86_EFLAGS_FIXED);
-	kvm_rip_write(vcpu, 0x8000);
-
-	cr0 = vcpu->arch.cr0 & ~(X86_CR0_PE | X86_CR0_EM | X86_CR0_TS | X86_CR0_PG);
-	kvm_x86_ops->set_cr0(vcpu, cr0);
-	vcpu->arch.cr0 = cr0;
-
-	kvm_x86_ops->set_cr4(vcpu, 0);
-
-	/* Undocumented: IDT limit is set to zero on entry to SMM.  */
-	dt.address = dt.size = 0;
-	kvm_x86_ops->set_idt(vcpu, &dt);
-
-	__kvm_set_dr(vcpu, 7, DR7_FIXED_1);
-
-	cs.selector = (vcpu->arch.smbase >> 4) & 0xffff;
-	cs.base = vcpu->arch.smbase;
-
-	ds.selector = 0;
-	ds.base = 0;
-
-	cs.limit    = ds.limit = 0xffffffff;
-	cs.type     = ds.type = 0x3;
-	cs.dpl      = ds.dpl = 0;
-	cs.db       = ds.db = 0;
-	cs.s        = ds.s = 1;
-	cs.l        = ds.l = 0;
-	cs.g        = ds.g = 1;
-	cs.avl      = ds.avl = 0;
-	cs.present  = ds.present = 1;
-	cs.unusable = ds.unusable = 0;
-	cs.padding  = ds.padding = 0;
-
-	kvm_set_segment(vcpu, &cs, VCPU_SREG_CS);
-	kvm_set_segment(vcpu, &ds, VCPU_SREG_DS);
-	kvm_set_segment(vcpu, &ds, VCPU_SREG_ES);
-	kvm_set_segment(vcpu, &ds, VCPU_SREG_FS);
-	kvm_set_segment(vcpu, &ds, VCPU_SREG_GS);
-	kvm_set_segment(vcpu, &ds, VCPU_SREG_SS);
-
-	if (guest_cpuid_has(vcpu, X86_FEATURE_LM))
-		kvm_x86_ops->set_efer(vcpu, 0);
-
-	kvm_update_cpuid(vcpu);
-	kvm_mmu_reset_context(vcpu);
-}
-
-static void process_smi(struct kvm_vcpu *vcpu)
-{
-	vcpu->arch.smi_pending = true;
-	kvm_make_request(KVM_REQ_EVENT, vcpu);
+	kvm_make_vcpus_request_mask(kvm, KVM_REQ_SCAN_IOAPIC, vcpu_bitmap);
 }
 
 void kvm_make_scan_ioapic_request(struct kvm *kvm)
@@ -7141,20 +10891,178 @@ void kvm_make_scan_ioapic_request(struct kvm *kvm)
 	kvm_make_all_cpus_request(kvm, KVM_REQ_SCAN_IOAPIC);
 }
 
+void __kvm_vcpu_update_apicv(struct kvm_vcpu *vcpu)
+{
+	struct kvm_lapic *apic = vcpu->arch.apic;
+	bool activate;
+
+	if (!lapic_in_kernel(vcpu))
+		return;
+
+	down_read(&vcpu->kvm->arch.apicv_update_lock);
+	preempt_disable();
+
+	/* Do not activate APICV when APIC is disabled */
+	activate = kvm_vcpu_apicv_activated(vcpu) &&
+		   (kvm_get_apic_mode(vcpu) != LAPIC_MODE_DISABLED);
+
+	if (apic->apicv_active == activate)
+		goto out;
+
+	apic->apicv_active = activate;
+	kvm_apic_update_apicv(vcpu);
+	kvm_x86_call(refresh_apicv_exec_ctrl)(vcpu);
+
+	/*
+	 * When APICv gets disabled, we may still have injected interrupts
+	 * pending. At the same time, KVM_REQ_EVENT may not be set as APICv was
+	 * still active when the interrupt got accepted. Make sure
+	 * kvm_check_and_inject_events() is called to check for that.
+	 */
+	if (!apic->apicv_active)
+		kvm_make_request(KVM_REQ_EVENT, vcpu);
+
+out:
+	preempt_enable();
+	up_read(&vcpu->kvm->arch.apicv_update_lock);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(__kvm_vcpu_update_apicv);
+
+static void kvm_vcpu_update_apicv(struct kvm_vcpu *vcpu)
+{
+	if (!lapic_in_kernel(vcpu))
+		return;
+
+	/*
+	 * Due to sharing page tables across vCPUs, the xAPIC memslot must be
+	 * deleted if any vCPU has xAPIC virtualization and x2APIC enabled, but
+	 * and hardware doesn't support x2APIC virtualization.  E.g. some AMD
+	 * CPUs support AVIC but not x2APIC.  KVM still allows enabling AVIC in
+	 * this case so that KVM can use the AVIC doorbell to inject interrupts
+	 * to running vCPUs, but KVM must not create SPTEs for the APIC base as
+	 * the vCPU would incorrectly be able to access the vAPIC page via MMIO
+	 * despite being in x2APIC mode.  For simplicity, inhibiting the APIC
+	 * access page is sticky.
+	 */
+	if (apic_x2apic_mode(vcpu->arch.apic) &&
+	    kvm_x86_ops.allow_apicv_in_x2apic_without_x2apic_virtualization)
+		kvm_inhibit_apic_access_page(vcpu);
+
+	__kvm_vcpu_update_apicv(vcpu);
+}
+
+void __kvm_set_or_clear_apicv_inhibit(struct kvm *kvm,
+				      enum kvm_apicv_inhibit reason, bool set)
+{
+	unsigned long old, new;
+
+	lockdep_assert_held_write(&kvm->arch.apicv_update_lock);
+
+	if (!(kvm_x86_ops.required_apicv_inhibits & BIT(reason)))
+		return;
+
+	old = new = kvm->arch.apicv_inhibit_reasons;
+
+	if (reason != APICV_INHIBIT_REASON_IRQWIN)
+		set_or_clear_apicv_inhibit(&new, reason, set);
+
+	set_or_clear_apicv_inhibit(&new, APICV_INHIBIT_REASON_IRQWIN,
+				   atomic_read(&kvm->arch.apicv_nr_irq_window_req));
+
+	if (!!old != !!new) {
+		/*
+		 * Kick all vCPUs before setting apicv_inhibit_reasons to avoid
+		 * false positives in the sanity check WARN in vcpu_enter_guest().
+		 * This task will wait for all vCPUs to ack the kick IRQ before
+		 * updating apicv_inhibit_reasons, and all other vCPUs will
+		 * block on acquiring apicv_update_lock so that vCPUs can't
+		 * redo vcpu_enter_guest() without seeing the new inhibit state.
+		 *
+		 * Note, holding apicv_update_lock and taking it in the read
+		 * side (handling the request) also prevents other vCPUs from
+		 * servicing the request with a stale apicv_inhibit_reasons.
+		 */
+		kvm_make_all_cpus_request(kvm, KVM_REQ_APICV_UPDATE);
+		kvm->arch.apicv_inhibit_reasons = new;
+		if (new) {
+			unsigned long gfn = gpa_to_gfn(APIC_DEFAULT_PHYS_BASE);
+			int idx = srcu_read_lock(&kvm->srcu);
+
+			kvm_zap_gfn_range(kvm, gfn, gfn+1);
+			srcu_read_unlock(&kvm->srcu, idx);
+		}
+	} else {
+		kvm->arch.apicv_inhibit_reasons = new;
+	}
+}
+
+void kvm_set_or_clear_apicv_inhibit(struct kvm *kvm,
+				    enum kvm_apicv_inhibit reason, bool set)
+{
+	if (!enable_apicv)
+		return;
+
+	down_write(&kvm->arch.apicv_update_lock);
+	__kvm_set_or_clear_apicv_inhibit(kvm, reason, set);
+	up_write(&kvm->arch.apicv_update_lock);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_set_or_clear_apicv_inhibit);
+
+void kvm_inc_or_dec_irq_window_inhibit(struct kvm *kvm, bool inc)
+{
+	int add = inc ? 1 : -1;
+
+	if (!enable_apicv)
+		return;
+
+	/*
+	 * IRQ windows are requested either because of ExtINT injections, or
+	 * because APICv is already disabled/inhibited for another reason.
+	 * While ExtINT injections are rare and should not happen while the
+	 * vCPU is running its actual workload, it's worth avoiding thrashing
+	 * if the IRQ window is being requested because APICv is already
+	 * inhibited.  So, toggle the actual inhibit (which requires taking
+	 * the lock for write) if and only if there's no other inhibit.
+	 * kvm_set_or_clear_apicv_inhibit() always evaluates the IRQ window
+	 * count; thus the IRQ window inhibit call _will_ be lazily updated on
+	 * the next call, if it ever happens.
+	 */
+	if (READ_ONCE(kvm->arch.apicv_inhibit_reasons) & ~BIT(APICV_INHIBIT_REASON_IRQWIN)) {
+		guard(rwsem_read)(&kvm->arch.apicv_update_lock);
+		if (READ_ONCE(kvm->arch.apicv_inhibit_reasons) & ~BIT(APICV_INHIBIT_REASON_IRQWIN)) {
+			atomic_add(add, &kvm->arch.apicv_nr_irq_window_req);
+			return;
+		}
+	}
+
+	/*
+	 * Strictly speaking, the lock is only needed if going 0->1 or 1->0,
+	 * a la atomic_dec_and_mutex_lock.  However, ExtINTs are rare and
+	 * only target a single CPU, so that is the common case; do not
+	 * bother eliding the down_write()/up_write() pair.
+	 */
+	guard(rwsem_write)(&kvm->arch.apicv_update_lock);
+	if (atomic_add_return(add, &kvm->arch.apicv_nr_irq_window_req) == inc)
+		__kvm_set_or_clear_apicv_inhibit(kvm, APICV_INHIBIT_REASON_IRQWIN, inc);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_inc_or_dec_irq_window_inhibit);
+
 static void vcpu_scan_ioapic(struct kvm_vcpu *vcpu)
 {
-	if (!kvm_apic_hw_enabled(vcpu->arch.apic))
+	if (!kvm_apic_present(vcpu))
 		return;
 
 	bitmap_zero(vcpu->arch.ioapic_handled_vectors, 256);
+	vcpu->arch.highest_stale_pending_ioapic_eoi = -1;
+
+	kvm_x86_call(sync_pir_to_irr)(vcpu);
 
 	if (irqchip_split(vcpu->kvm))
 		kvm_scan_ioapic_routes(vcpu, vcpu->arch.ioapic_handled_vectors);
-	else {
-		if (vcpu->arch.apicv_active)
-			kvm_x86_ops->sync_pir_to_irr(vcpu);
+#ifdef CONFIG_KVM_IOAPIC
+	else if (ioapic_in_kernel(vcpu->kvm))
 		kvm_ioapic_scan_entry(vcpu, vcpu->arch.ioapic_handled_vectors);
-	}
+#endif
 
 	if (is_guest_mode(vcpu))
 		vcpu->arch.load_eoi_exitmap_pending = true;
@@ -7164,54 +11072,39 @@ static void vcpu_scan_ioapic(struct kvm_vcpu *vcpu)
 
 static void vcpu_load_eoi_exitmap(struct kvm_vcpu *vcpu)
 {
-	u64 eoi_exit_bitmap[4];
-
 	if (!kvm_apic_hw_enabled(vcpu->arch.apic))
 		return;
 
-	bitmap_or((ulong *)eoi_exit_bitmap, vcpu->arch.ioapic_handled_vectors,
-		  vcpu_to_synic(vcpu)->vec_bitmap, 256);
-	kvm_x86_ops->load_eoi_exitmap(vcpu, eoi_exit_bitmap);
+#ifdef CONFIG_KVM_HYPERV
+	if (to_hv_vcpu(vcpu)) {
+		u64 eoi_exit_bitmap[4];
+
+		bitmap_or((ulong *)eoi_exit_bitmap,
+			  vcpu->arch.ioapic_handled_vectors,
+			  to_hv_synic(vcpu)->vec_bitmap, 256);
+		kvm_x86_call(load_eoi_exitmap)(vcpu, eoi_exit_bitmap);
+		return;
+	}
+#endif
+	kvm_x86_call(load_eoi_exitmap)(
+		vcpu, (u64 *)vcpu->arch.ioapic_handled_vectors);
 }
 
-void kvm_arch_mmu_notifier_invalidate_range(struct kvm *kvm,
-		unsigned long start, unsigned long end)
+void kvm_arch_guest_memory_reclaimed(struct kvm *kvm)
 {
-	unsigned long apic_address;
-
-	/*
-	 * The physical address of apic access page is stored in the VMCS.
-	 * Update it when it becomes invalid.
-	 */
-	apic_address = gfn_to_hva(kvm, APIC_DEFAULT_PHYS_BASE >> PAGE_SHIFT);
-	if (start <= apic_address && apic_address < end)
-		kvm_make_all_cpus_request(kvm, KVM_REQ_APIC_PAGE_RELOAD);
+	kvm_x86_call(guest_memory_reclaimed)(kvm);
 }
 
-void kvm_vcpu_reload_apic_access_page(struct kvm_vcpu *vcpu)
+static void kvm_vcpu_reload_apic_access_page(struct kvm_vcpu *vcpu)
 {
-	struct page *page = NULL;
-
 	if (!lapic_in_kernel(vcpu))
 		return;
 
-	if (!kvm_x86_ops->set_apic_access_page_addr)
-		return;
-
-	page = gfn_to_page(vcpu->kvm, APIC_DEFAULT_PHYS_BASE >> PAGE_SHIFT);
-	if (is_error_page(page))
-		return;
-	kvm_x86_ops->set_apic_access_page_addr(vcpu, page_to_phys(page));
-
-	/*
-	 * Do not pin apic access page in memory, the MMU notifier
-	 * will call us again if it is migrated or swapped out.
-	 */
-	put_page(page);
+	kvm_x86_call(set_apic_access_page_addr)(vcpu);
 }
-EXPORT_SYMBOL_GPL(kvm_vcpu_reload_apic_access_page);
 
 /*
+ * Called within kvm->srcu read side.
  * Returns 1 to let vcpu_run() continue the guest execution loop without
  * exiting to the userspace.  Otherwise, the value will be returned to the
  * userspace.
@@ -7222,16 +11115,34 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	bool req_int_win =
 		dm_request_for_irq_injection(vcpu) &&
 		kvm_cpu_accept_dm_intr(vcpu);
+	fastpath_t exit_fastpath;
+	u64 run_flags, debug_ctl;
 
 	bool req_immediate_exit = false;
 
 	if (kvm_request_pending(vcpu)) {
-		if (kvm_check_request(KVM_REQ_MMU_RELOAD, vcpu))
-			kvm_mmu_unload(vcpu);
+		if (kvm_check_request(KVM_REQ_VM_DEAD, vcpu)) {
+			r = -EIO;
+			goto out;
+		}
+
+		if (kvm_dirty_ring_check_request(vcpu)) {
+			r = 0;
+			goto out;
+		}
+
+		if (kvm_check_request(KVM_REQ_GET_NESTED_STATE_PAGES, vcpu)) {
+			if (unlikely(!kvm_x86_ops.nested_ops->get_nested_state_pages(vcpu))) {
+				r = 0;
+				goto out;
+			}
+		}
+		if (kvm_check_request(KVM_REQ_MMU_FREE_OBSOLETE_ROOTS, vcpu))
+			kvm_mmu_free_obsolete_roots(vcpu);
 		if (kvm_check_request(KVM_REQ_MIGRATE_TIMER, vcpu))
 			__kvm_migrate_timers(vcpu);
 		if (kvm_check_request(KVM_REQ_MASTERCLOCK_UPDATE, vcpu))
-			kvm_gen_update_masterclock(vcpu->kvm);
+			kvm_update_masterclock(vcpu->kvm);
 		if (kvm_check_request(KVM_REQ_GLOBAL_CLOCK_UPDATE, vcpu))
 			kvm_gen_kvmclock_update(vcpu);
 		if (kvm_check_request(KVM_REQ_CLOCK_UPDATE, vcpu)) {
@@ -7241,18 +11152,46 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		}
 		if (kvm_check_request(KVM_REQ_MMU_SYNC, vcpu))
 			kvm_mmu_sync_roots(vcpu);
+		if (kvm_check_request(KVM_REQ_LOAD_MMU_PGD, vcpu))
+			kvm_mmu_load_pgd(vcpu);
+
+		/*
+		 * Note, the order matters here, as flushing "all" TLB entries
+		 * also flushes the "current" TLB entries, i.e. servicing the
+		 * flush "all" will clear any request to flush "current".
+		 */
 		if (kvm_check_request(KVM_REQ_TLB_FLUSH, vcpu))
-			kvm_vcpu_flush_tlb(vcpu, true);
+			kvm_vcpu_flush_tlb_all(vcpu);
+
+		kvm_service_local_tlb_flush_requests(vcpu);
+
+		/*
+		 * Fall back to a "full" guest flush if Hyper-V's precise
+		 * flushing fails.  Note, Hyper-V's flushing is per-vCPU, but
+		 * the flushes are considered "remote" and not "local" because
+		 * the requests can be initiated from other vCPUs.
+		 */
+#ifdef CONFIG_KVM_HYPERV
+		if (kvm_check_request(KVM_REQ_HV_TLB_FLUSH, vcpu) &&
+		    kvm_hv_vcpu_flush_tlb(vcpu))
+			kvm_vcpu_flush_tlb_guest(vcpu);
+#endif
+
 		if (kvm_check_request(KVM_REQ_REPORT_TPR_ACCESS, vcpu)) {
 			vcpu->run->exit_reason = KVM_EXIT_TPR_ACCESS;
 			r = 0;
 			goto out;
 		}
-		if (kvm_check_request(KVM_REQ_TRIPLE_FAULT, vcpu)) {
-			vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
-			vcpu->mmio_needed = 0;
-			r = 0;
-			goto out;
+		if (kvm_test_request(KVM_REQ_TRIPLE_FAULT, vcpu)) {
+			if (is_guest_mode(vcpu))
+				kvm_x86_ops.nested_ops->triple_fault(vcpu);
+
+			if (kvm_check_request(KVM_REQ_TRIPLE_FAULT, vcpu)) {
+				vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
+				vcpu->mmio_needed = 0;
+				r = 0;
+				goto out;
+			}
 		}
 		if (kvm_check_request(KVM_REQ_APF_HALT, vcpu)) {
 			/* Page is swapped out. Do synthetic halt */
@@ -7262,14 +11201,16 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		}
 		if (kvm_check_request(KVM_REQ_STEAL_UPDATE, vcpu))
 			record_steal_time(vcpu);
-		if (kvm_check_request(KVM_REQ_SMI, vcpu))
-			process_smi(vcpu);
-		if (kvm_check_request(KVM_REQ_NMI, vcpu))
-			process_nmi(vcpu);
 		if (kvm_check_request(KVM_REQ_PMU, vcpu))
 			kvm_pmu_handle_event(vcpu);
 		if (kvm_check_request(KVM_REQ_PMI, vcpu))
 			kvm_pmu_deliver_pmi(vcpu);
+#ifdef CONFIG_KVM_SMM
+		if (kvm_check_request(KVM_REQ_SMI, vcpu))
+			process_smi(vcpu);
+#endif
+		if (kvm_check_request(KVM_REQ_NMI, vcpu))
+			process_nmi(vcpu);
 		if (kvm_check_request(KVM_REQ_IOAPIC_EOI_EXIT, vcpu)) {
 			BUG_ON(vcpu->arch.pending_ioapic_eoi > 255);
 			if (test_bit(vcpu->arch.pending_ioapic_eoi,
@@ -7287,21 +11228,26 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 			vcpu_load_eoi_exitmap(vcpu);
 		if (kvm_check_request(KVM_REQ_APIC_PAGE_RELOAD, vcpu))
 			kvm_vcpu_reload_apic_access_page(vcpu);
+#ifdef CONFIG_KVM_HYPERV
 		if (kvm_check_request(KVM_REQ_HV_CRASH, vcpu)) {
 			vcpu->run->exit_reason = KVM_EXIT_SYSTEM_EVENT;
 			vcpu->run->system_event.type = KVM_SYSTEM_EVENT_CRASH;
+			vcpu->run->system_event.ndata = 0;
 			r = 0;
 			goto out;
 		}
 		if (kvm_check_request(KVM_REQ_HV_RESET, vcpu)) {
 			vcpu->run->exit_reason = KVM_EXIT_SYSTEM_EVENT;
 			vcpu->run->system_event.type = KVM_SYSTEM_EVENT_RESET;
+			vcpu->run->system_event.ndata = 0;
 			r = 0;
 			goto out;
 		}
 		if (kvm_check_request(KVM_REQ_HV_EXIT, vcpu)) {
+			struct kvm_vcpu_hv *hv_vcpu = to_hv_vcpu(vcpu);
+
 			vcpu->run->exit_reason = KVM_EXIT_HYPERV;
-			vcpu->run->hyperv = vcpu->arch.hyperv.exit;
+			vcpu->run->hyperv = hv_vcpu->exit;
 			r = 0;
 			goto out;
 		}
@@ -7313,45 +11259,50 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		 */
 		if (kvm_check_request(KVM_REQ_HV_STIMER, vcpu))
 			kvm_hv_process_stimers(vcpu);
+#endif
+		if (kvm_check_request(KVM_REQ_APICV_UPDATE, vcpu))
+			kvm_vcpu_update_apicv(vcpu);
+		if (kvm_check_request(KVM_REQ_APF_READY, vcpu))
+			kvm_check_async_pf_completion(vcpu);
+
+		if (kvm_check_request(KVM_REQ_RECALC_INTERCEPTS, vcpu))
+			kvm_x86_call(recalc_intercepts)(vcpu);
+
+		if (kvm_check_request(KVM_REQ_UPDATE_CPU_DIRTY_LOGGING, vcpu))
+			kvm_x86_call(update_cpu_dirty_logging)(vcpu);
+
+		if (kvm_check_request(KVM_REQ_UPDATE_PROTECTED_GUEST_STATE, vcpu)) {
+			kvm_vcpu_reset(vcpu, true);
+			if (vcpu->arch.mp_state != KVM_MP_STATE_RUNNABLE) {
+				r = 1;
+				goto out;
+			}
+		}
 	}
 
-	if (kvm_check_request(KVM_REQ_EVENT, vcpu) || req_int_win) {
+	if (kvm_check_request(KVM_REQ_EVENT, vcpu) || req_int_win ||
+	    kvm_xen_has_interrupt(vcpu)) {
 		++vcpu->stat.req_event;
-		kvm_apic_accept_events(vcpu);
+		r = kvm_apic_accept_events(vcpu);
+		if (r < 0) {
+			r = 0;
+			goto out;
+		}
 		if (vcpu->arch.mp_state == KVM_MP_STATE_INIT_RECEIVED) {
 			r = 1;
 			goto out;
 		}
 
-		if (inject_pending_event(vcpu, req_int_win) != 0)
-			req_immediate_exit = true;
-		else {
-			/* Enable SMI/NMI/IRQ window open exits if needed.
-			 *
-			 * SMIs have three cases:
-			 * 1) They can be nested, and then there is nothing to
-			 *    do here because RSM will cause a vmexit anyway.
-			 * 2) There is an ISA-specific reason why SMI cannot be
-			 *    injected, and the moment when this changes can be
-			 *    intercepted.
-			 * 3) Or the SMI can be pending because
-			 *    inject_pending_event has completed the injection
-			 *    of an IRQ or NMI from the previous vmexit, and
-			 *    then we request an immediate exit to inject the
-			 *    SMI.
-			 */
-			if (vcpu->arch.smi_pending && !is_smm(vcpu))
-				if (!kvm_x86_ops->enable_smi_window(vcpu))
-					req_immediate_exit = true;
-			if (vcpu->arch.nmi_pending)
-				kvm_x86_ops->enable_nmi_window(vcpu);
-			if (kvm_cpu_has_injectable_intr(vcpu) || req_int_win)
-				kvm_x86_ops->enable_irq_window(vcpu);
-			WARN_ON(vcpu->arch.exception.pending);
+		r = kvm_check_and_inject_events(vcpu, &req_immediate_exit);
+		if (r < 0) {
+			r = 0;
+			goto out;
 		}
+		if (req_int_win)
+			kvm_x86_call(enable_irq_window)(vcpu);
 
 		if (kvm_lapic_enabled(vcpu)) {
-			update_cr8_intercept(vcpu);
+			kvm_lapic_update_cr8_intercept(vcpu);
 			kvm_lapic_sync_to_vapic(vcpu);
 		}
 	}
@@ -7363,7 +11314,7 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 
 	preempt_disable();
 
-	kvm_x86_ops->prepare_guest_switch(vcpu);
+	kvm_x86_call(prepare_switch_to_guest)(vcpu);
 
 	/*
 	 * Disable IRQs before setting IN_GUEST_MODE.  Posted interrupt
@@ -7371,15 +11322,17 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	 * result in virtual interrupt delivery.
 	 */
 	local_irq_disable();
-	vcpu->mode = IN_GUEST_MODE;
 
-	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx);
+	/* Store vcpu->apicv_active before vcpu->mode.  */
+	smp_store_release(&vcpu->mode, IN_GUEST_MODE);
+
+	kvm_vcpu_srcu_read_unlock(vcpu);
 
 	/*
 	 * 1) We should set ->mode before checking ->requests.  Please see
 	 * the comment in kvm_vcpu_exiting_guest_mode().
 	 *
-	 * 2) For APICv, we should set ->mode before checking PIR.ON.  This
+	 * 2) For APICv, we should set ->mode before checking PID.ON. This
 	 * pairs with the memory barrier implicit in pi_test_and_set_on
 	 * (see vmx_deliver_posted_interrupt).
 	 *
@@ -7390,46 +11343,107 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	smp_mb__after_srcu_read_unlock();
 
 	/*
-	 * This handles the case where a posted interrupt was
-	 * notified with kvm_vcpu_kick.
+	 * Process pending posted interrupts to handle the case where the
+	 * notification IRQ arrived in the host, or was never sent (because the
+	 * target vCPU wasn't running).  Do this regardless of the vCPU's APICv
+	 * status, KVM doesn't update assigned devices when APICv is inhibited,
+	 * i.e. they can post interrupts even if APICv is temporarily disabled.
 	 */
-	if (kvm_lapic_enabled(vcpu) && vcpu->arch.apicv_active)
-		kvm_x86_ops->sync_pir_to_irr(vcpu);
+	if (kvm_lapic_enabled(vcpu))
+		kvm_x86_call(sync_pir_to_irr)(vcpu);
 
-	if (vcpu->mode == EXITING_GUEST_MODE || kvm_request_pending(vcpu)
-	    || need_resched() || signal_pending(current)) {
+	if (kvm_vcpu_exit_request(vcpu)) {
 		vcpu->mode = OUTSIDE_GUEST_MODE;
 		smp_wmb();
 		local_irq_enable();
 		preempt_enable();
-		vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
+		kvm_vcpu_srcu_read_lock(vcpu);
 		r = 1;
 		goto cancel_injection;
 	}
 
-	kvm_load_guest_xcr0(vcpu);
-
+	run_flags = 0;
 	if (req_immediate_exit) {
+		run_flags |= KVM_RUN_FORCE_IMMEDIATE_EXIT;
 		kvm_make_request(KVM_REQ_EVENT, vcpu);
-		smp_send_reschedule(vcpu->cpu);
 	}
 
-	trace_kvm_entry(vcpu->vcpu_id);
-	if (lapic_timer_advance_ns)
-		wait_lapic_expire(vcpu);
-	guest_enter_irqoff();
+	fpregs_assert_state_consistent();
+	if (test_thread_flag(TIF_NEED_FPU_LOAD))
+		switch_fpu_return();
 
-	if (unlikely(vcpu->arch.switch_db_regs)) {
-		set_debugreg(0, 7);
+	if (vcpu->arch.guest_fpu.xfd_err)
+		wrmsrq(MSR_IA32_XFD_ERR, vcpu->arch.guest_fpu.xfd_err);
+
+	kvm_load_xfeatures(vcpu, true);
+
+	if (unlikely(vcpu->arch.switch_db_regs &&
+		     !(vcpu->arch.switch_db_regs & KVM_DEBUGREG_AUTO_SWITCH))) {
+		set_debugreg(DR7_FIXED_1, 7);
 		set_debugreg(vcpu->arch.eff_db[0], 0);
 		set_debugreg(vcpu->arch.eff_db[1], 1);
 		set_debugreg(vcpu->arch.eff_db[2], 2);
 		set_debugreg(vcpu->arch.eff_db[3], 3);
-		set_debugreg(vcpu->arch.dr6, 6);
-		vcpu->arch.switch_db_regs &= ~KVM_DEBUGREG_RELOAD;
+		/* When KVM_DEBUGREG_WONT_EXIT, dr6 is accessible in guest. */
+		if (unlikely(vcpu->arch.switch_db_regs & KVM_DEBUGREG_WONT_EXIT))
+			run_flags |= KVM_RUN_LOAD_GUEST_DR6;
+	} else if (unlikely(hw_breakpoint_active())) {
+		set_debugreg(DR7_FIXED_1, 7);
 	}
 
-	kvm_x86_ops->run(vcpu);
+	/*
+	 * Refresh the host DEBUGCTL snapshot after disabling IRQs, as DEBUGCTL
+	 * can be modified in IRQ context, e.g. via SMP function calls.  Inform
+	 * vendor code if any host-owned bits were changed, e.g. so that the
+	 * value loaded into hardware while running the guest can be updated.
+	 */
+	debug_ctl = get_debugctlmsr();
+	if ((debug_ctl ^ vcpu->arch.host_debugctl) & kvm_x86_ops.HOST_OWNED_DEBUGCTL &&
+	    !vcpu->arch.guest_state_protected)
+		run_flags |= KVM_RUN_LOAD_DEBUGCTL;
+	vcpu->arch.host_debugctl = debug_ctl;
+
+	kvm_mediated_pmu_load(vcpu);
+
+	guest_timing_enter_irqoff();
+
+	/*
+	 * Swap PKRU with hardware breakpoints disabled to minimize the number
+	 * of flows where non-KVM code can run with guest state loaded.
+	 */
+	kvm_load_guest_pkru(vcpu);
+
+	for (;;) {
+		/*
+		 * Assert that vCPU vs. VM APICv state is consistent.  An APICv
+		 * update must kick and wait for all vCPUs before toggling the
+		 * per-VM state, and responding vCPUs must wait for the update
+		 * to complete before servicing KVM_REQ_APICV_UPDATE.
+		 */
+		WARN_ON_ONCE((kvm_vcpu_apicv_activated(vcpu) != kvm_vcpu_apicv_active(vcpu)) &&
+			     (kvm_get_apic_mode(vcpu) != LAPIC_MODE_DISABLED));
+
+		exit_fastpath = kvm_x86_call(vcpu_run)(vcpu, run_flags);
+		if (likely(exit_fastpath != EXIT_FASTPATH_REENTER_GUEST))
+			break;
+
+		if (kvm_lapic_enabled(vcpu))
+			kvm_x86_call(sync_pir_to_irr)(vcpu);
+
+		if (unlikely(kvm_vcpu_exit_request(vcpu))) {
+			exit_fastpath = EXIT_FASTPATH_EXIT_HANDLED;
+			break;
+		}
+
+		run_flags = 0;
+
+		/* Note, VM-Exits that go down the "slow" path are accounted below. */
+		++vcpu->stat.exits;
+	}
+
+	kvm_load_host_pkru(vcpu);
+
+	kvm_mediated_pmu_put(vcpu);
 
 	/*
 	 * Do this here before restoring debug registers on the host.  And
@@ -7439,11 +11453,10 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	 */
 	if (unlikely(vcpu->arch.switch_db_regs & KVM_DEBUGREG_WONT_EXIT)) {
 		WARN_ON(vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP);
-		kvm_x86_ops->sync_dirty_debug_regs(vcpu);
+		WARN_ON(vcpu->arch.switch_db_regs & KVM_DEBUGREG_AUTO_SWITCH);
+		kvm_x86_call(sync_dirty_debug_regs)(vcpu);
 		kvm_update_dr0123(vcpu);
-		kvm_update_dr6(vcpu);
 		kvm_update_dr7(vcpu);
-		vcpu->arch.switch_db_regs &= ~KVM_DEBUGREG_RELOAD;
 	}
 
 	/*
@@ -7456,30 +11469,74 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	if (hw_breakpoint_active())
 		hw_breakpoint_restore();
 
+	vcpu->arch.last_vmentry_cpu = vcpu->cpu;
 	vcpu->arch.last_guest_tsc = kvm_read_l1_tsc(vcpu, rdtsc());
 
 	vcpu->mode = OUTSIDE_GUEST_MODE;
 	smp_wmb();
 
-	kvm_put_guest_xcr0(vcpu);
+	kvm_load_xfeatures(vcpu, false);
 
-	kvm_before_interrupt(vcpu);
-	kvm_x86_ops->handle_external_intr(vcpu);
+	/*
+	 * Sync xfd before calling handle_exit_irqoff() which may
+	 * rely on the fact that guest_fpu::xfd is up-to-date (e.g.
+	 * in #NM irqoff handler).
+	 */
+	if (vcpu->arch.xfd_no_write_intercept)
+		fpu_sync_guest_vmexit_xfd_state();
+
+	kvm_x86_call(handle_exit_irqoff)(vcpu);
+
+	if (vcpu->arch.guest_fpu.xfd_err)
+		wrmsrq(MSR_IA32_XFD_ERR, 0);
+
+	/*
+	 * Mark this CPU as needing a branch predictor flush before running
+	 * userspace. Must be done before enabling preemption to ensure it gets
+	 * set for the CPU that actually ran the guest, and not the CPU that it
+	 * may migrate to.
+	 */
+	if (cpu_feature_enabled(X86_FEATURE_IBPB_EXIT_TO_USER))
+		this_cpu_write(x86_ibpb_exit_to_user, true);
+
+	/*
+	 * Consume any pending interrupts, including the possible source of
+	 * VM-Exit on SVM and any ticks that occur between VM-Exit and now.
+	 * An instruction is required after local_irq_enable() to fully unblock
+	 * interrupts on processors that implement an interrupt shadow, the
+	 * stat.exits increment will do nicely.
+	 */
+	kvm_before_interrupt(vcpu, KVM_HANDLING_IRQ);
+	local_irq_enable();
+	++vcpu->stat.exits;
+	local_irq_disable();
 	kvm_after_interrupt(vcpu);
 
-	++vcpu->stat.exits;
-
-	guest_exit_irqoff();
+	/*
+	 * Wait until after servicing IRQs to account guest time so that any
+	 * ticks that occurred while running the guest are properly accounted
+	 * to the guest.  Waiting until IRQs are enabled degrades the accuracy
+	 * of accounting via context tracking, but the loss of accuracy is
+	 * acceptable for all known use cases.
+	 */
+	guest_timing_exit_irqoff();
 
 	local_irq_enable();
 	preempt_enable();
 
-	vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
+	kvm_vcpu_srcu_read_lock(vcpu);
+
+	/*
+	 * Call this to ensure WC buffers in guest are evicted after each VM
+	 * Exit, so that the evicted WC writes can be snooped across all cpus
+	 */
+	smp_mb__after_srcu_read_lock();
 
 	/*
 	 * Profile KVM exit RIPs:
 	 */
-	if (unlikely(prof_on == KVM_PROFILING)) {
+	if (unlikely(prof_on == KVM_PROFILING &&
+		     !vcpu->arch.guest_state_protected)) {
 		unsigned long rip = kvm_rip_read(vcpu);
 		profile_hit(KVM_PROFILING, (void *)rip);
 	}
@@ -7490,78 +11547,175 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 	if (vcpu->arch.apic_attention)
 		kvm_lapic_sync_from_vapic(vcpu);
 
-	vcpu->arch.gpa_available = false;
-	r = kvm_x86_ops->handle_exit(vcpu);
+	r = kvm_x86_call(handle_exit)(vcpu, exit_fastpath);
 	return r;
 
 cancel_injection:
-	kvm_x86_ops->cancel_injection(vcpu);
+	if (req_immediate_exit)
+		kvm_make_request(KVM_REQ_EVENT, vcpu);
+	kvm_x86_call(cancel_injection)(vcpu);
 	if (unlikely(vcpu->arch.apic_attention))
 		kvm_lapic_sync_from_vapic(vcpu);
 out:
 	return r;
 }
 
-static inline int vcpu_block(struct kvm *kvm, struct kvm_vcpu *vcpu)
+static bool kvm_vcpu_running(struct kvm_vcpu *vcpu)
 {
-	if (!kvm_arch_vcpu_runnable(vcpu) &&
-	    (!kvm_x86_ops->pre_block || kvm_x86_ops->pre_block(vcpu) == 0)) {
-		srcu_read_unlock(&kvm->srcu, vcpu->srcu_idx);
-		kvm_vcpu_block(vcpu);
-		vcpu->srcu_idx = srcu_read_lock(&kvm->srcu);
+	return (vcpu->arch.mp_state == KVM_MP_STATE_RUNNABLE &&
+		!vcpu->arch.apf.halted);
+}
 
-		if (kvm_x86_ops->post_block)
-			kvm_x86_ops->post_block(vcpu);
+bool kvm_vcpu_has_events(struct kvm_vcpu *vcpu)
+{
+	if (!list_empty_careful(&vcpu->async_pf.done))
+		return true;
 
-		if (!kvm_check_request(KVM_REQ_UNHALT, vcpu))
+	if (kvm_apic_has_pending_init_or_sipi(vcpu) &&
+	    kvm_apic_init_sipi_allowed(vcpu))
+		return true;
+
+	if (kvm_is_exception_pending(vcpu))
+		return true;
+
+	if (kvm_test_request(KVM_REQ_NMI, vcpu) ||
+	    (vcpu->arch.nmi_pending &&
+	     kvm_x86_call(nmi_allowed)(vcpu, false)))
+		return true;
+
+#ifdef CONFIG_KVM_SMM
+	if (kvm_test_request(KVM_REQ_SMI, vcpu) ||
+	    (vcpu->arch.smi_pending &&
+	     kvm_x86_call(smi_allowed)(vcpu, false)))
+		return true;
+#endif
+
+	if (kvm_test_request(KVM_REQ_PMI, vcpu))
+		return true;
+
+	if (kvm_test_request(KVM_REQ_UPDATE_PROTECTED_GUEST_STATE, vcpu))
+		return true;
+
+	if (kvm_arch_interrupt_allowed(vcpu) && kvm_cpu_has_interrupt(vcpu))
+		return true;
+
+	if (kvm_hv_has_stimer_pending(vcpu))
+		return true;
+
+	if (is_guest_mode(vcpu) &&
+	    kvm_x86_ops.nested_ops->has_events &&
+	    kvm_x86_ops.nested_ops->has_events(vcpu, false))
+		return true;
+
+	if (kvm_xen_has_pending_events(vcpu))
+		return true;
+
+	return false;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_vcpu_has_events);
+
+int kvm_arch_vcpu_runnable(struct kvm_vcpu *vcpu)
+{
+	return kvm_vcpu_running(vcpu) || vcpu->arch.pv.pv_unhalted ||
+	       kvm_vcpu_has_events(vcpu);
+}
+
+/* Called within kvm->srcu read side.  */
+static inline int vcpu_block(struct kvm_vcpu *vcpu)
+{
+	bool hv_timer;
+
+	if (!kvm_arch_vcpu_runnable(vcpu)) {
+		/*
+		 * Switch to the software timer before halt-polling/blocking as
+		 * the guest's timer may be a break event for the vCPU, and the
+		 * hypervisor timer runs only when the CPU is in guest mode.
+		 * Switch before halt-polling so that KVM recognizes an expired
+		 * timer before blocking.
+		 */
+		hv_timer = kvm_lapic_hv_timer_in_use(vcpu);
+		if (hv_timer)
+			kvm_lapic_switch_to_sw_timer(vcpu);
+
+		kvm_vcpu_srcu_read_unlock(vcpu);
+		if (vcpu->arch.mp_state == KVM_MP_STATE_HALTED)
+			kvm_vcpu_halt(vcpu);
+		else
+			kvm_vcpu_block(vcpu);
+		kvm_vcpu_srcu_read_lock(vcpu);
+
+		if (hv_timer)
+			kvm_lapic_switch_to_hv_timer(vcpu);
+
+		/*
+		 * If the vCPU is not runnable, a signal or another host event
+		 * of some kind is pending; service it without changing the
+		 * vCPU's activity state.
+		 */
+		if (!kvm_arch_vcpu_runnable(vcpu))
 			return 1;
 	}
 
-	kvm_apic_accept_events(vcpu);
+	/*
+	 * Evaluate nested events before exiting the halted state.  This allows
+	 * the halt state to be recorded properly in the VMCS12's activity
+	 * state field (AMD does not have a similar field and a VM-Exit always
+	 * causes a spurious wakeup from HLT).
+	 */
+	if (is_guest_mode(vcpu)) {
+		int r = kvm_check_nested_events(vcpu);
+
+		if (r < 0 && r != -EBUSY)
+			return 0;
+	}
+
+	if (kvm_apic_accept_events(vcpu) < 0)
+		return 0;
 	switch(vcpu->arch.mp_state) {
 	case KVM_MP_STATE_HALTED:
-		vcpu->arch.pv.pv_unhalted = false;
-		vcpu->arch.mp_state =
-			KVM_MP_STATE_RUNNABLE;
+	case KVM_MP_STATE_AP_RESET_HOLD:
+		kvm_set_mp_state(vcpu, KVM_MP_STATE_RUNNABLE);
+		fallthrough;
 	case KVM_MP_STATE_RUNNABLE:
 		vcpu->arch.apf.halted = false;
 		break;
 	case KVM_MP_STATE_INIT_RECEIVED:
 		break;
 	default:
-		return -EINTR;
+		WARN_ON_ONCE(1);
 		break;
 	}
 	return 1;
 }
 
-static inline bool kvm_vcpu_running(struct kvm_vcpu *vcpu)
-{
-	if (is_guest_mode(vcpu) && kvm_x86_ops->check_nested_events)
-		kvm_x86_ops->check_nested_events(vcpu, false);
-
-	return (vcpu->arch.mp_state == KVM_MP_STATE_RUNNABLE &&
-		!vcpu->arch.apf.halted);
-}
-
+/* Called within kvm->srcu read side.  */
 static int vcpu_run(struct kvm_vcpu *vcpu)
 {
 	int r;
-	struct kvm *kvm = vcpu->kvm;
 
-	vcpu->srcu_idx = srcu_read_lock(&kvm->srcu);
+	vcpu->run->exit_reason = KVM_EXIT_UNKNOWN;
 
 	for (;;) {
+		/*
+		 * If another guest vCPU requests a PV TLB flush in the middle
+		 * of instruction emulation, the rest of the emulation could
+		 * use a stale page translation. Assume that any code after
+		 * this point can start executing an instruction.
+		 */
+		vcpu->arch.at_instruction_boundary = false;
 		if (kvm_vcpu_running(vcpu)) {
 			r = vcpu_enter_guest(vcpu);
 		} else {
-			r = vcpu_block(kvm, vcpu);
+			r = vcpu_block(vcpu);
 		}
 
 		if (r <= 0)
 			break;
 
-		kvm_clear_request(KVM_REQ_PENDING_TIMER, vcpu);
+		kvm_clear_request(KVM_REQ_UNBLOCK, vcpu);
+		if (kvm_xen_has_pending_events(vcpu))
+			kvm_xen_inject_pending_events(vcpu);
+
 		if (kvm_cpu_has_pending_timer(vcpu))
 			kvm_inject_pending_timer_irqs(vcpu);
 
@@ -7573,40 +11727,115 @@ static int vcpu_run(struct kvm_vcpu *vcpu)
 			break;
 		}
 
-		kvm_check_async_pf_completion(vcpu);
-
-		if (signal_pending(current)) {
-			r = -EINTR;
-			vcpu->run->exit_reason = KVM_EXIT_INTR;
-			++vcpu->stat.signal_exits;
-			break;
-		}
-		if (need_resched()) {
-			srcu_read_unlock(&kvm->srcu, vcpu->srcu_idx);
-			cond_resched();
-			vcpu->srcu_idx = srcu_read_lock(&kvm->srcu);
+		if (__xfer_to_guest_mode_work_pending()) {
+			kvm_vcpu_srcu_read_unlock(vcpu);
+			r = kvm_xfer_to_guest_mode_handle_work(vcpu);
+			kvm_vcpu_srcu_read_lock(vcpu);
+			if (r)
+				return r;
 		}
 	}
-
-	srcu_read_unlock(&kvm->srcu, vcpu->srcu_idx);
 
 	return r;
 }
 
+static int __kvm_emulate_halt(struct kvm_vcpu *vcpu, int state, int reason)
+{
+	/*
+	 * The vCPU has halted, e.g. executed HLT.  Update the run state if the
+	 * local APIC is in-kernel, the run loop will detect the non-runnable
+	 * state and halt the vCPU.  Exit to userspace if the local APIC is
+	 * managed by userspace, in which case userspace is responsible for
+	 * handling wake events.
+	 */
+	++vcpu->stat.halt_exits;
+	if (lapic_in_kernel(vcpu)) {
+		if (kvm_vcpu_has_events(vcpu) || vcpu->arch.pv.pv_unhalted)
+			state = KVM_MP_STATE_RUNNABLE;
+		kvm_set_mp_state(vcpu, state);
+		return 1;
+	} else {
+		vcpu->run->exit_reason = reason;
+		return 0;
+	}
+}
+
+int kvm_emulate_halt_noskip(struct kvm_vcpu *vcpu)
+{
+	return __kvm_emulate_halt(vcpu, KVM_MP_STATE_HALTED, KVM_EXIT_HLT);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_halt_noskip);
+
+int kvm_emulate_halt(struct kvm_vcpu *vcpu)
+{
+	int ret = kvm_skip_emulated_instruction(vcpu);
+	/*
+	 * TODO: we might be squashing a GUESTDBG_SINGLESTEP-triggered
+	 * KVM_EXIT_DEBUG here.
+	 */
+	return kvm_emulate_halt_noskip(vcpu) && ret;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_halt);
+
+fastpath_t handle_fastpath_hlt(struct kvm_vcpu *vcpu)
+{
+	if (!kvm_pmu_is_fastpath_emulation_allowed(vcpu))
+		return EXIT_FASTPATH_NONE;
+
+	if (!kvm_emulate_halt(vcpu))
+		return EXIT_FASTPATH_EXIT_USERSPACE;
+
+	if (kvm_vcpu_running(vcpu))
+		return EXIT_FASTPATH_REENTER_GUEST;
+
+	return EXIT_FASTPATH_EXIT_HANDLED;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(handle_fastpath_hlt);
+
+int kvm_emulate_ap_reset_hold(struct kvm_vcpu *vcpu)
+{
+	int ret = kvm_skip_emulated_instruction(vcpu);
+
+	return __kvm_emulate_halt(vcpu, KVM_MP_STATE_AP_RESET_HOLD,
+					KVM_EXIT_AP_RESET_HOLD) && ret;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_emulate_ap_reset_hold);
+
+bool kvm_arch_dy_has_pending_interrupt(struct kvm_vcpu *vcpu)
+{
+	return kvm_vcpu_apicv_active(vcpu) &&
+	       kvm_x86_call(dy_apicv_has_pending_interrupt)(vcpu);
+}
+
+bool kvm_arch_vcpu_preempted_in_kernel(struct kvm_vcpu *vcpu)
+{
+	return vcpu->arch.preempted_in_kernel;
+}
+
+bool kvm_arch_dy_runnable(struct kvm_vcpu *vcpu)
+{
+	if (READ_ONCE(vcpu->arch.pv.pv_unhalted))
+		return true;
+
+	if (kvm_test_request(KVM_REQ_NMI, vcpu) ||
+#ifdef CONFIG_KVM_SMM
+		kvm_test_request(KVM_REQ_SMI, vcpu) ||
+#endif
+		 kvm_test_request(KVM_REQ_EVENT, vcpu))
+		return true;
+
+	return kvm_arch_dy_has_pending_interrupt(vcpu);
+}
+
 static inline int complete_emulated_io(struct kvm_vcpu *vcpu)
 {
-	int r;
-	vcpu->srcu_idx = srcu_read_lock(&vcpu->kvm->srcu);
-	r = emulate_instruction(vcpu, EMULTYPE_NO_DECODE);
-	srcu_read_unlock(&vcpu->kvm->srcu, vcpu->srcu_idx);
-	if (r != EMULATE_DONE)
-		return 0;
-	return 1;
+	return kvm_emulate_instruction(vcpu, EMULTYPE_NO_DECODE);
 }
 
 static int complete_emulated_pio(struct kvm_vcpu *vcpu)
 {
-	BUG_ON(!vcpu->arch.pio.count);
+	if (KVM_BUG_ON(!vcpu->arch.pio.count, vcpu->kvm))
+		return -EIO;
 
 	return complete_emulated_io(vcpu);
 }
@@ -7635,7 +11864,8 @@ static int complete_emulated_mmio(struct kvm_vcpu *vcpu)
 	struct kvm_mmio_fragment *frag;
 	unsigned len;
 
-	BUG_ON(!vcpu->mmio_needed);
+	if (KVM_BUG_ON(!vcpu->mmio_needed, vcpu->kvm))
+		return -EIO;
 
 	/* Complete previous fragment */
 	frag = &vcpu->mmio_fragments[vcpu->mmio_cur_fragment];
@@ -7648,6 +11878,9 @@ static int complete_emulated_mmio(struct kvm_vcpu *vcpu)
 		frag++;
 		vcpu->mmio_cur_fragment++;
 	} else {
+		if (WARN_ON_ONCE(frag->data == &frag->val))
+			return -EIO;
+
 		/* Go forward to the next mmio piece. */
 		frag->data += len;
 		frag->gpa += len;
@@ -7664,47 +11897,120 @@ static int complete_emulated_mmio(struct kvm_vcpu *vcpu)
 		return complete_emulated_io(vcpu);
 	}
 
-	run->exit_reason = KVM_EXIT_MMIO;
-	run->mmio.phys_addr = frag->gpa;
-	if (vcpu->mmio_is_write)
-		memcpy(run->mmio.data, frag->data, min(8u, frag->len));
-	run->mmio.len = min(8u, frag->len);
-	run->mmio.is_write = vcpu->mmio_is_write;
+	kvm_prepare_emulated_mmio_exit(vcpu, frag);
 	vcpu->arch.complete_userspace_io = complete_emulated_mmio;
 	return 0;
 }
 
-int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
+/* Swap (qemu) user FPU context for the guest FPU context. */
+static void kvm_load_guest_fpu(struct kvm_vcpu *vcpu)
 {
+	if (KVM_BUG_ON(vcpu->arch.guest_fpu.fpstate->in_use, vcpu->kvm))
+		return;
+
+	/* Exclude PKRU, it's restored separately immediately after VM-Exit. */
+	fpu_swap_kvm_fpstate(&vcpu->arch.guest_fpu, true);
+	trace_kvm_fpu(1);
+}
+
+/* When vcpu_run ends, restore user space FPU context. */
+static void kvm_put_guest_fpu(struct kvm_vcpu *vcpu)
+{
+	if (KVM_BUG_ON(!vcpu->arch.guest_fpu.fpstate->in_use, vcpu->kvm))
+		return;
+
+	fpu_swap_kvm_fpstate(&vcpu->arch.guest_fpu, false);
+	++vcpu->stat.fpu_reload;
+	trace_kvm_fpu(0);
+}
+
+static int kvm_x86_vcpu_pre_run(struct kvm_vcpu *vcpu)
+{
+	/*
+	 * Userspace may have modified vCPU state, mark nested_run_pending as
+	 * "untrusted" to avoid triggering false-positive WARNs.
+	 */
+	if (vcpu->arch.nested_run_pending == KVM_NESTED_RUN_PENDING)
+		vcpu->arch.nested_run_pending = KVM_NESTED_RUN_PENDING_UNTRUSTED;
+
+	/*
+	 * SIPI_RECEIVED is obsolete; KVM leaves the vCPU in Wait-For-SIPI and
+	 * tracks the pending SIPI separately.  SIPI_RECEIVED is still accepted
+	 * by KVM_SET_VCPU_EVENTS for backwards compatibility, but should be
+	 * converted to INIT_RECEIVED.
+	 */
+	if (WARN_ON_ONCE(vcpu->arch.mp_state == KVM_MP_STATE_SIPI_RECEIVED))
+		return -EINVAL;
+
+	/*
+	 * Disallow running the vCPU if userspace forced it into an impossible
+	 * MP_STATE, e.g. if the vCPU is in WFS but SIPI is blocked.
+	 */
+	if (vcpu->arch.mp_state == KVM_MP_STATE_INIT_RECEIVED &&
+	    !kvm_apic_init_sipi_allowed(vcpu))
+		return -EINVAL;
+
+	return kvm_x86_call(vcpu_pre_run)(vcpu);
+}
+
+int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
+{
+	struct kvm_queued_exception *ex = &vcpu->arch.exception;
+	struct kvm_run *kvm_run = vcpu->run;
+	u64 sync_valid_fields;
 	int r;
+
+	r = kvm_mmu_post_init_vm(vcpu->kvm);
+	if (r)
+		return r;
 
 	vcpu_load(vcpu);
 	kvm_sigset_activate(vcpu);
+	kvm_run->flags = 0;
 	kvm_load_guest_fpu(vcpu);
 
+	kvm_vcpu_srcu_read_lock(vcpu);
 	if (unlikely(vcpu->arch.mp_state == KVM_MP_STATE_UNINITIALIZED)) {
-		if (kvm_run->immediate_exit) {
+		if (!vcpu->wants_to_run) {
 			r = -EINTR;
 			goto out;
 		}
+
+		/*
+		 * Don't bother switching APIC timer emulation from the
+		 * hypervisor timer to the software timer, the only way for the
+		 * APIC timer to be active is if userspace stuffed vCPU state,
+		 * i.e. put the vCPU into a nonsensical state.  Only an INIT
+		 * will transition the vCPU out of UNINITIALIZED (without more
+		 * state stuffing from userspace), which will reset the local
+		 * APIC and thus cancel the timer or drop the IRQ (if the timer
+		 * already expired).
+		 */
+		kvm_vcpu_srcu_read_unlock(vcpu);
 		kvm_vcpu_block(vcpu);
-		kvm_apic_accept_events(vcpu);
-		kvm_clear_request(KVM_REQ_UNHALT, vcpu);
+		kvm_vcpu_srcu_read_lock(vcpu);
+
+		if (kvm_apic_accept_events(vcpu) < 0) {
+			r = 0;
+			goto out;
+		}
 		r = -EAGAIN;
 		if (signal_pending(current)) {
 			r = -EINTR;
-			vcpu->run->exit_reason = KVM_EXIT_INTR;
+			kvm_run->exit_reason = KVM_EXIT_INTR;
 			++vcpu->stat.signal_exits;
 		}
 		goto out;
 	}
 
-	if (vcpu->run->kvm_valid_regs & ~KVM_SYNC_X86_VALID_FIELDS) {
+	sync_valid_fields = kvm_sync_valid_fields(vcpu->kvm);
+	if ((kvm_run->kvm_valid_regs & ~sync_valid_fields) ||
+	    (kvm_run->kvm_dirty_regs & ~sync_valid_fields)) {
 		r = -EINVAL;
 		goto out;
 	}
 
-	if (vcpu->run->kvm_dirty_regs) {
+	if (kvm_run->kvm_dirty_regs) {
 		r = sync_regs(vcpu);
 		if (r != 0)
 			goto out;
@@ -7718,27 +12024,51 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *kvm_run)
 		}
 	}
 
+	/*
+	 * If userspace set a pending exception and L2 is active, convert it to
+	 * a pending VM-Exit if L1 wants to intercept the exception.
+	 */
+	if (vcpu->arch.exception_from_userspace && is_guest_mode(vcpu) &&
+	    kvm_x86_ops.nested_ops->is_exception_vmexit(vcpu, ex->vector,
+							ex->error_code)) {
+		kvm_queue_exception_vmexit(vcpu, ex->vector,
+					   ex->has_error_code, ex->error_code,
+					   ex->has_payload, ex->payload);
+		ex->injected = false;
+		ex->pending = false;
+	}
+	vcpu->arch.exception_from_userspace = false;
+
 	if (unlikely(vcpu->arch.complete_userspace_io)) {
 		int (*cui)(struct kvm_vcpu *) = vcpu->arch.complete_userspace_io;
 		vcpu->arch.complete_userspace_io = NULL;
 		r = cui(vcpu);
 		if (r <= 0)
 			goto out;
-	} else
-		WARN_ON(vcpu->arch.pio.count || vcpu->mmio_needed);
+	} else {
+		WARN_ON_ONCE(vcpu->arch.pio.count);
+		WARN_ON_ONCE(vcpu->mmio_needed);
+	}
 
-	if (kvm_run->immediate_exit)
+	if (!vcpu->wants_to_run) {
 		r = -EINTR;
-	else
-		r = vcpu_run(vcpu);
+		goto out;
+	}
+
+	r = kvm_x86_vcpu_pre_run(vcpu);
+	if (r <= 0)
+		goto out;
+
+	r = vcpu_run(vcpu);
 
 out:
 	kvm_put_guest_fpu(vcpu);
-	if (vcpu->run->kvm_valid_regs)
+	if (kvm_run->kvm_valid_regs && likely(!vcpu->arch.guest_state_protected))
 		store_regs(vcpu);
 	post_kvm_run_save(vcpu);
-	kvm_sigset_deactivate(vcpu);
+	kvm_vcpu_srcu_read_unlock(vcpu);
 
+	kvm_sigset_deactivate(vcpu);
 	vcpu_put(vcpu);
 	return r;
 }
@@ -7753,26 +12083,26 @@ static void __get_regs(struct kvm_vcpu *vcpu, struct kvm_regs *regs)
 		 * that usually, but some bad designed PV devices (vmware
 		 * backdoor interface) need this to work
 		 */
-		emulator_writeback_register_cache(&vcpu->arch.emulate_ctxt);
+		emulator_writeback_register_cache(vcpu->arch.emulate_ctxt);
 		vcpu->arch.emulate_regs_need_sync_to_vcpu = false;
 	}
-	regs->rax = kvm_register_read(vcpu, VCPU_REGS_RAX);
-	regs->rbx = kvm_register_read(vcpu, VCPU_REGS_RBX);
-	regs->rcx = kvm_register_read(vcpu, VCPU_REGS_RCX);
-	regs->rdx = kvm_register_read(vcpu, VCPU_REGS_RDX);
-	regs->rsi = kvm_register_read(vcpu, VCPU_REGS_RSI);
-	regs->rdi = kvm_register_read(vcpu, VCPU_REGS_RDI);
-	regs->rsp = kvm_register_read(vcpu, VCPU_REGS_RSP);
-	regs->rbp = kvm_register_read(vcpu, VCPU_REGS_RBP);
+	regs->rax = kvm_rax_read_raw(vcpu);
+	regs->rbx = kvm_rbx_read_raw(vcpu);
+	regs->rcx = kvm_rcx_read_raw(vcpu);
+	regs->rdx = kvm_rdx_read_raw(vcpu);
+	regs->rsi = kvm_rsi_read_raw(vcpu);
+	regs->rdi = kvm_rdi_read_raw(vcpu);
+	regs->rsp = kvm_rsp_read(vcpu);
+	regs->rbp = kvm_rbp_read_raw(vcpu);
 #ifdef CONFIG_X86_64
-	regs->r8 = kvm_register_read(vcpu, VCPU_REGS_R8);
-	regs->r9 = kvm_register_read(vcpu, VCPU_REGS_R9);
-	regs->r10 = kvm_register_read(vcpu, VCPU_REGS_R10);
-	regs->r11 = kvm_register_read(vcpu, VCPU_REGS_R11);
-	regs->r12 = kvm_register_read(vcpu, VCPU_REGS_R12);
-	regs->r13 = kvm_register_read(vcpu, VCPU_REGS_R13);
-	regs->r14 = kvm_register_read(vcpu, VCPU_REGS_R14);
-	regs->r15 = kvm_register_read(vcpu, VCPU_REGS_R15);
+	regs->r8 = kvm_r8_read_raw(vcpu);
+	regs->r9 = kvm_r9_read_raw(vcpu);
+	regs->r10 = kvm_r10_read_raw(vcpu);
+	regs->r11 = kvm_r11_read_raw(vcpu);
+	regs->r12 = kvm_r12_read_raw(vcpu);
+	regs->r13 = kvm_r13_read_raw(vcpu);
+	regs->r14 = kvm_r14_read_raw(vcpu);
+	regs->r15 = kvm_r15_read_raw(vcpu);
 #endif
 
 	regs->rip = kvm_rip_read(vcpu);
@@ -7781,6 +12111,10 @@ static void __get_regs(struct kvm_vcpu *vcpu, struct kvm_regs *regs)
 
 int kvm_arch_vcpu_ioctl_get_regs(struct kvm_vcpu *vcpu, struct kvm_regs *regs)
 {
+	if (vcpu->kvm->arch.has_protected_state &&
+	    vcpu->arch.guest_state_protected)
+		return -EINVAL;
+
 	vcpu_load(vcpu);
 	__get_regs(vcpu, regs);
 	vcpu_put(vcpu);
@@ -7792,54 +12126,54 @@ static void __set_regs(struct kvm_vcpu *vcpu, struct kvm_regs *regs)
 	vcpu->arch.emulate_regs_need_sync_from_vcpu = true;
 	vcpu->arch.emulate_regs_need_sync_to_vcpu = false;
 
-	kvm_register_write(vcpu, VCPU_REGS_RAX, regs->rax);
-	kvm_register_write(vcpu, VCPU_REGS_RBX, regs->rbx);
-	kvm_register_write(vcpu, VCPU_REGS_RCX, regs->rcx);
-	kvm_register_write(vcpu, VCPU_REGS_RDX, regs->rdx);
-	kvm_register_write(vcpu, VCPU_REGS_RSI, regs->rsi);
-	kvm_register_write(vcpu, VCPU_REGS_RDI, regs->rdi);
-	kvm_register_write(vcpu, VCPU_REGS_RSP, regs->rsp);
-	kvm_register_write(vcpu, VCPU_REGS_RBP, regs->rbp);
+	kvm_rax_write_raw(vcpu, regs->rax);
+	kvm_rbx_write_raw(vcpu, regs->rbx);
+	kvm_rcx_write_raw(vcpu, regs->rcx);
+	kvm_rdx_write_raw(vcpu, regs->rdx);
+	kvm_rsi_write_raw(vcpu, regs->rsi);
+	kvm_rdi_write_raw(vcpu, regs->rdi);
+	kvm_rsp_write(vcpu, regs->rsp);
+	kvm_rbp_write_raw(vcpu, regs->rbp);
 #ifdef CONFIG_X86_64
-	kvm_register_write(vcpu, VCPU_REGS_R8, regs->r8);
-	kvm_register_write(vcpu, VCPU_REGS_R9, regs->r9);
-	kvm_register_write(vcpu, VCPU_REGS_R10, regs->r10);
-	kvm_register_write(vcpu, VCPU_REGS_R11, regs->r11);
-	kvm_register_write(vcpu, VCPU_REGS_R12, regs->r12);
-	kvm_register_write(vcpu, VCPU_REGS_R13, regs->r13);
-	kvm_register_write(vcpu, VCPU_REGS_R14, regs->r14);
-	kvm_register_write(vcpu, VCPU_REGS_R15, regs->r15);
+	kvm_r8_write_raw(vcpu, regs->r8);
+	kvm_r9_write_raw(vcpu, regs->r9);
+	kvm_r10_write_raw(vcpu, regs->r10);
+	kvm_r11_write_raw(vcpu, regs->r11);
+	kvm_r12_write_raw(vcpu, regs->r12);
+	kvm_r13_write_raw(vcpu, regs->r13);
+	kvm_r14_write_raw(vcpu, regs->r14);
+	kvm_r15_write_raw(vcpu, regs->r15);
 #endif
 
 	kvm_rip_write(vcpu, regs->rip);
 	kvm_set_rflags(vcpu, regs->rflags | X86_EFLAGS_FIXED);
 
 	vcpu->arch.exception.pending = false;
+	vcpu->arch.exception_vmexit.pending = false;
 
 	kvm_make_request(KVM_REQ_EVENT, vcpu);
 }
 
 int kvm_arch_vcpu_ioctl_set_regs(struct kvm_vcpu *vcpu, struct kvm_regs *regs)
 {
+	if (vcpu->kvm->arch.has_protected_state &&
+	    vcpu->arch.guest_state_protected)
+		return -EINVAL;
+
 	vcpu_load(vcpu);
 	__set_regs(vcpu, regs);
 	vcpu_put(vcpu);
 	return 0;
 }
 
-void kvm_get_cs_db_l_bits(struct kvm_vcpu *vcpu, int *db, int *l)
-{
-	struct kvm_segment cs;
-
-	kvm_get_segment(vcpu, &cs, VCPU_SREG_CS);
-	*db = cs.db;
-	*l = cs.l;
-}
-EXPORT_SYMBOL_GPL(kvm_get_cs_db_l_bits);
-
-static void __get_sregs(struct kvm_vcpu *vcpu, struct kvm_sregs *sregs)
+static void __get_sregs_common(struct kvm_vcpu *vcpu, struct kvm_sregs *sregs)
 {
 	struct desc_ptr dt;
+
+	if (vcpu->arch.guest_state_protected)
+		goto skip_protected_regs;
+
+	kvm_handle_exception_payload_quirk(vcpu);
 
 	kvm_get_segment(vcpu, &sregs->cs, VCPU_SREG_CS);
 	kvm_get_segment(vcpu, &sregs->ds, VCPU_SREG_DS);
@@ -7851,31 +12185,61 @@ static void __get_sregs(struct kvm_vcpu *vcpu, struct kvm_sregs *sregs)
 	kvm_get_segment(vcpu, &sregs->tr, VCPU_SREG_TR);
 	kvm_get_segment(vcpu, &sregs->ldt, VCPU_SREG_LDTR);
 
-	kvm_x86_ops->get_idt(vcpu, &dt);
+	kvm_x86_call(get_idt)(vcpu, &dt);
 	sregs->idt.limit = dt.size;
 	sregs->idt.base = dt.address;
-	kvm_x86_ops->get_gdt(vcpu, &dt);
+	kvm_x86_call(get_gdt)(vcpu, &dt);
 	sregs->gdt.limit = dt.size;
 	sregs->gdt.base = dt.address;
 
-	sregs->cr0 = kvm_read_cr0(vcpu);
 	sregs->cr2 = vcpu->arch.cr2;
 	sregs->cr3 = kvm_read_cr3(vcpu);
+
+skip_protected_regs:
+	sregs->cr0 = kvm_read_cr0(vcpu);
 	sregs->cr4 = kvm_read_cr4(vcpu);
 	sregs->cr8 = kvm_get_cr8(vcpu);
 	sregs->efer = vcpu->arch.efer;
-	sregs->apic_base = kvm_get_apic_base(vcpu);
+	sregs->apic_base = vcpu->arch.apic_base;
+}
 
-	memset(sregs->interrupt_bitmap, 0, sizeof sregs->interrupt_bitmap);
+static void __get_sregs(struct kvm_vcpu *vcpu, struct kvm_sregs *sregs)
+{
+	__get_sregs_common(vcpu, sregs);
+
+	if (vcpu->arch.guest_state_protected)
+		return;
 
 	if (vcpu->arch.interrupt.injected && !vcpu->arch.interrupt.soft)
 		set_bit(vcpu->arch.interrupt.nr,
 			(unsigned long *)sregs->interrupt_bitmap);
 }
 
+static void __get_sregs2(struct kvm_vcpu *vcpu, struct kvm_sregs2 *sregs2)
+{
+	int i;
+
+	__get_sregs_common(vcpu, (struct kvm_sregs *)sregs2);
+
+	if (vcpu->arch.guest_state_protected)
+		return;
+
+	if (is_pae_paging(vcpu)) {
+		kvm_vcpu_srcu_read_lock(vcpu);
+		for (i = 0 ; i < 4 ; i++)
+			sregs2->pdptrs[i] = kvm_pdptr_read(vcpu, i);
+		sregs2->flags |= KVM_SREGS2_FLAGS_PDPTRS_VALID;
+		kvm_vcpu_srcu_read_unlock(vcpu);
+	}
+}
+
 int kvm_arch_vcpu_ioctl_get_sregs(struct kvm_vcpu *vcpu,
 				  struct kvm_sregs *sregs)
 {
+	if (vcpu->kvm->arch.has_protected_state &&
+	    vcpu->arch.guest_state_protected)
+		return -EINVAL;
+
 	vcpu_load(vcpu);
 	__get_sregs(vcpu, sregs);
 	vcpu_put(vcpu);
@@ -7885,17 +12249,27 @@ int kvm_arch_vcpu_ioctl_get_sregs(struct kvm_vcpu *vcpu,
 int kvm_arch_vcpu_ioctl_get_mpstate(struct kvm_vcpu *vcpu,
 				    struct kvm_mp_state *mp_state)
 {
-	vcpu_load(vcpu);
+	int r;
 
-	kvm_apic_accept_events(vcpu);
-	if (vcpu->arch.mp_state == KVM_MP_STATE_HALTED &&
-					vcpu->arch.pv.pv_unhalted)
+	vcpu_load(vcpu);
+	kvm_vcpu_srcu_read_lock(vcpu);
+
+	r = kvm_apic_accept_events(vcpu);
+	if (r < 0)
+		goto out;
+	r = 0;
+
+	if ((vcpu->arch.mp_state == KVM_MP_STATE_HALTED ||
+	     vcpu->arch.mp_state == KVM_MP_STATE_AP_RESET_HOLD) &&
+	    vcpu->arch.pv.pv_unhalted)
 		mp_state->mp_state = KVM_MP_STATE_RUNNABLE;
 	else
 		mp_state->mp_state = vcpu->arch.mp_state;
 
+out:
+	kvm_vcpu_srcu_read_unlock(vcpu);
 	vcpu_put(vcpu);
-	return 0;
+	return r;
 }
 
 int kvm_arch_vcpu_ioctl_set_mpstate(struct kvm_vcpu *vcpu,
@@ -7905,21 +12279,34 @@ int kvm_arch_vcpu_ioctl_set_mpstate(struct kvm_vcpu *vcpu,
 
 	vcpu_load(vcpu);
 
-	if (!lapic_in_kernel(vcpu) &&
-	    mp_state->mp_state != KVM_MP_STATE_RUNNABLE)
-		goto out;
+	switch (mp_state->mp_state) {
+	case KVM_MP_STATE_UNINITIALIZED:
+	case KVM_MP_STATE_HALTED:
+	case KVM_MP_STATE_AP_RESET_HOLD:
+	case KVM_MP_STATE_INIT_RECEIVED:
+	case KVM_MP_STATE_SIPI_RECEIVED:
+		if (!lapic_in_kernel(vcpu))
+			goto out;
+		break;
 
-	/* INITs are latched while in SMM */
-	if ((is_smm(vcpu) || vcpu->arch.smi_pending) &&
-	    (mp_state->mp_state == KVM_MP_STATE_SIPI_RECEIVED ||
-	     mp_state->mp_state == KVM_MP_STATE_INIT_RECEIVED))
-		goto out;
+	case KVM_MP_STATE_RUNNABLE:
+		break;
 
+	default:
+		goto out;
+	}
+
+	/*
+	 * SIPI_RECEIVED is obsolete and no longer used internally; KVM instead
+	 * leaves the vCPU in INIT_RECIEVED (Wait-For-SIPI) and pends the SIPI.
+	 * Translate SIPI_RECEIVED as appropriate for backwards compatibility.
+	 */
 	if (mp_state->mp_state == KVM_MP_STATE_SIPI_RECEIVED) {
-		vcpu->arch.mp_state = KVM_MP_STATE_INIT_RECEIVED;
+		mp_state->mp_state = KVM_MP_STATE_INIT_RECEIVED;
 		set_bit(KVM_APIC_SIPI, &vcpu->arch.apic->pending_events);
-	} else
-		vcpu->arch.mp_state = mp_state->mp_state;
+	}
+
+	kvm_set_mp_state(vcpu, mp_state->mp_state);
 	kvm_make_request(KVM_REQ_EVENT, vcpu);
 
 	ret = 0;
@@ -7931,25 +12318,54 @@ out:
 int kvm_task_switch(struct kvm_vcpu *vcpu, u16 tss_selector, int idt_index,
 		    int reason, bool has_error_code, u32 error_code)
 {
-	struct x86_emulate_ctxt *ctxt = &vcpu->arch.emulate_ctxt;
+	struct x86_emulate_ctxt *ctxt = vcpu->arch.emulate_ctxt;
 	int ret;
+
+	if (kvm_is_cr4_bit_set(vcpu, X86_CR4_CET)) {
+		u64 u_cet, s_cet;
+
+		/*
+		 * Check both User and Supervisor on task switches as inter-
+		 * privilege level task switches are impacted by CET at both
+		 * the current privilege level and the new privilege level, and
+		 * that information is not known at this time.  The expectation
+		 * is that the guest won't require emulation of task switches
+		 * while using IBT or Shadow Stacks.
+		 */
+		if (__kvm_emulate_msr_read(vcpu, MSR_IA32_U_CET, &u_cet) ||
+		    __kvm_emulate_msr_read(vcpu, MSR_IA32_S_CET, &s_cet))
+			goto unhandled_task_switch;
+
+		if ((u_cet | s_cet) & (CET_ENDBR_EN | CET_SHSTK_EN))
+			goto unhandled_task_switch;
+	}
 
 	init_emulate_ctxt(vcpu);
 
 	ret = emulator_task_switch(ctxt, tss_selector, idt_index, reason,
 				   has_error_code, error_code);
 
-	if (ret)
-		return EMULATE_FAIL;
+	/*
+	 * Report an error userspace if MMIO is needed, as KVM doesn't support
+	 * MMIO during a task switch (or any other complex operation).
+	 */
+	if (ret || vcpu->mmio_needed)
+		goto unhandled_task_switch;
 
 	kvm_rip_write(vcpu, ctxt->eip);
 	kvm_set_rflags(vcpu, ctxt->eflags);
-	kvm_make_request(KVM_REQ_EVENT, vcpu);
-	return EMULATE_DONE;
-}
-EXPORT_SYMBOL_GPL(kvm_task_switch);
+	return 1;
 
-static int kvm_valid_sregs(struct kvm_vcpu *vcpu, struct kvm_sregs *sregs)
+unhandled_task_switch:
+	vcpu->mmio_needed = false;
+	vcpu->run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
+	vcpu->run->internal.suberror = KVM_INTERNAL_ERROR_EMULATION;
+	vcpu->run->internal.ndata = 0;
+	return 0;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_task_switch);
+
+static bool kvm_is_valid_sregs(struct kvm_vcpu *vcpu, struct kvm_sregs *sregs)
 {
 	if ((sregs->efer & EFER_LME) && (sregs->cr0 & X86_CR0_PG)) {
 		/*
@@ -7957,86 +12373,67 @@ static int kvm_valid_sregs(struct kvm_vcpu *vcpu, struct kvm_sregs *sregs)
 		 * 64-bit mode (though maybe in a 32-bit code segment).
 		 * CR4.PAE and EFER.LMA must be set.
 		 */
-		if (!(sregs->cr4 & X86_CR4_PAE)
-		    || !(sregs->efer & EFER_LMA))
-			return -EINVAL;
+		if (!(sregs->cr4 & X86_CR4_PAE) || !(sregs->efer & EFER_LMA))
+			return false;
+		if (!kvm_vcpu_is_legal_cr3(vcpu, sregs->cr3))
+			return false;
 	} else {
 		/*
 		 * Not in 64-bit mode: EFER.LMA is clear and the code
 		 * segment cannot be 64-bit.
 		 */
 		if (sregs->efer & EFER_LMA || sregs->cs.l)
-			return -EINVAL;
+			return false;
 	}
 
-	return 0;
+	return kvm_is_valid_cr4(vcpu, sregs->cr4) &&
+	       kvm_is_valid_cr0(vcpu, sregs->cr0);
 }
 
-static int __set_sregs(struct kvm_vcpu *vcpu, struct kvm_sregs *sregs)
+static int __set_sregs_common(struct kvm_vcpu *vcpu, struct kvm_sregs *sregs,
+		int *mmu_reset_needed, bool update_pdptrs)
 {
-	struct msr_data apic_base_msr;
-	int mmu_reset_needed = 0;
-	int cpuid_update_needed = 0;
-	int pending_vec, max_bits, idx;
+	int idx;
 	struct desc_ptr dt;
-	int ret = -EINVAL;
 
-	if (!guest_cpuid_has(vcpu, X86_FEATURE_XSAVE) &&
-			(sregs->cr4 & X86_CR4_OSXSAVE))
-		goto out;
+	if (!kvm_is_valid_sregs(vcpu, sregs))
+		return -EINVAL;
 
-	if (kvm_valid_sregs(vcpu, sregs))
-		goto out;
+	if (kvm_apic_set_base(vcpu, sregs->apic_base, true))
+		return -EINVAL;
 
-	apic_base_msr.data = sregs->apic_base;
-	apic_base_msr.host_initiated = true;
-	if (kvm_set_apic_base(vcpu, &apic_base_msr))
-		goto out;
+	if (vcpu->arch.guest_state_protected)
+		return 0;
 
 	dt.size = sregs->idt.limit;
 	dt.address = sregs->idt.base;
-	kvm_x86_ops->set_idt(vcpu, &dt);
+	kvm_x86_call(set_idt)(vcpu, &dt);
 	dt.size = sregs->gdt.limit;
 	dt.address = sregs->gdt.base;
-	kvm_x86_ops->set_gdt(vcpu, &dt);
+	kvm_x86_call(set_gdt)(vcpu, &dt);
 
 	vcpu->arch.cr2 = sregs->cr2;
-	mmu_reset_needed |= kvm_read_cr3(vcpu) != sregs->cr3;
+	*mmu_reset_needed |= kvm_read_cr3(vcpu) != sregs->cr3;
 	vcpu->arch.cr3 = sregs->cr3;
-	__set_bit(VCPU_EXREG_CR3, (ulong *)&vcpu->arch.regs_avail);
+	kvm_register_mark_dirty(vcpu, VCPU_REG_CR3);
+	kvm_x86_call(post_set_cr3)(vcpu, sregs->cr3);
 
-	kvm_set_cr8(vcpu, sregs->cr8);
+	*mmu_reset_needed |= vcpu->arch.efer != sregs->efer;
+	kvm_x86_call(set_efer)(vcpu, sregs->efer);
 
-	mmu_reset_needed |= vcpu->arch.efer != sregs->efer;
-	kvm_x86_ops->set_efer(vcpu, sregs->efer);
+	*mmu_reset_needed |= kvm_read_cr0(vcpu) != sregs->cr0;
+	kvm_x86_call(set_cr0)(vcpu, sregs->cr0);
 
-	mmu_reset_needed |= kvm_read_cr0(vcpu) != sregs->cr0;
-	kvm_x86_ops->set_cr0(vcpu, sregs->cr0);
-	vcpu->arch.cr0 = sregs->cr0;
+	*mmu_reset_needed |= kvm_read_cr4(vcpu) != sregs->cr4;
+	kvm_x86_call(set_cr4)(vcpu, sregs->cr4);
 
-	mmu_reset_needed |= kvm_read_cr4(vcpu) != sregs->cr4;
-	cpuid_update_needed |= ((kvm_read_cr4(vcpu) ^ sregs->cr4) &
-				(X86_CR4_OSXSAVE | X86_CR4_PKE));
-	kvm_x86_ops->set_cr4(vcpu, sregs->cr4);
-	if (cpuid_update_needed)
-		kvm_update_cpuid(vcpu);
-
-	idx = srcu_read_lock(&vcpu->kvm->srcu);
-	if (!is_long_mode(vcpu) && is_pae(vcpu)) {
-		load_pdptrs(vcpu, vcpu->arch.walk_mmu, kvm_read_cr3(vcpu));
-		mmu_reset_needed = 1;
-	}
-	srcu_read_unlock(&vcpu->kvm->srcu, idx);
-
-	if (mmu_reset_needed)
-		kvm_mmu_reset_context(vcpu);
-
-	max_bits = KVM_NR_INTERRUPTS;
-	pending_vec = find_first_bit(
-		(const unsigned long *)sregs->interrupt_bitmap, max_bits);
-	if (pending_vec < max_bits) {
-		kvm_queue_interrupt(vcpu, pending_vec, false);
-		pr_debug("Set back pending irq %d\n", pending_vec);
+	if (update_pdptrs) {
+		idx = srcu_read_lock(&vcpu->kvm->srcu);
+		if (is_pae_paging(vcpu)) {
+			load_pdptrs(vcpu, kvm_read_cr3(vcpu));
+			*mmu_reset_needed = 1;
+		}
+		srcu_read_unlock(&vcpu->kvm->srcu, idx);
 	}
 
 	kvm_set_segment(vcpu, &sregs->cs, VCPU_SREG_CS);
@@ -8049,19 +12446,75 @@ static int __set_sregs(struct kvm_vcpu *vcpu, struct kvm_sregs *sregs)
 	kvm_set_segment(vcpu, &sregs->tr, VCPU_SREG_TR);
 	kvm_set_segment(vcpu, &sregs->ldt, VCPU_SREG_LDTR);
 
-	update_cr8_intercept(vcpu);
+	kvm_set_cr8(vcpu, sregs->cr8);
 
 	/* Older userspace won't unhalt the vcpu on reset. */
 	if (kvm_vcpu_is_bsp(vcpu) && kvm_rip_read(vcpu) == 0xfff0 &&
 	    sregs->cs.selector == 0xf000 && sregs->cs.base == 0xffff0000 &&
 	    !is_protmode(vcpu))
-		vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
+		kvm_set_mp_state(vcpu, KVM_MP_STATE_RUNNABLE);
 
-	kvm_make_request(KVM_REQ_EVENT, vcpu);
+	return 0;
+}
 
-	ret = 0;
-out:
-	return ret;
+static int __set_sregs(struct kvm_vcpu *vcpu, struct kvm_sregs *sregs)
+{
+	int pending_vec, max_bits;
+	int mmu_reset_needed = 0;
+	int ret = __set_sregs_common(vcpu, sregs, &mmu_reset_needed, true);
+
+	if (ret)
+		return ret;
+
+	if (mmu_reset_needed) {
+		kvm_mmu_reset_context(vcpu);
+		kvm_make_request(KVM_REQ_TLB_FLUSH_GUEST, vcpu);
+	}
+
+	max_bits = KVM_NR_INTERRUPTS;
+	pending_vec = find_first_bit(
+		(const unsigned long *)sregs->interrupt_bitmap, max_bits);
+
+	if (pending_vec < max_bits) {
+		kvm_queue_interrupt(vcpu, pending_vec, false);
+		pr_debug("Set back pending irq %d\n", pending_vec);
+		kvm_make_request(KVM_REQ_EVENT, vcpu);
+	}
+	return 0;
+}
+
+static int __set_sregs2(struct kvm_vcpu *vcpu, struct kvm_sregs2 *sregs2)
+{
+	int mmu_reset_needed = 0;
+	bool valid_pdptrs = sregs2->flags & KVM_SREGS2_FLAGS_PDPTRS_VALID;
+	bool pae = (sregs2->cr0 & X86_CR0_PG) && (sregs2->cr4 & X86_CR4_PAE) &&
+		!(sregs2->efer & EFER_LMA);
+	int i, ret;
+
+	if (sregs2->flags & ~KVM_SREGS2_FLAGS_PDPTRS_VALID)
+		return -EINVAL;
+
+	if (valid_pdptrs && (!pae || vcpu->arch.guest_state_protected))
+		return -EINVAL;
+
+	ret = __set_sregs_common(vcpu, (struct kvm_sregs *)sregs2,
+				 &mmu_reset_needed, !valid_pdptrs);
+	if (ret)
+		return ret;
+
+	if (valid_pdptrs) {
+		for (i = 0; i < 4 ; i++)
+			kvm_pdptr_write(vcpu, i, sregs2->pdptrs[i]);
+
+		kvm_register_mark_dirty(vcpu, VCPU_REG_PDPTR);
+		mmu_reset_needed = 1;
+		vcpu->arch.pdptrs_from_userspace = true;
+	}
+	if (mmu_reset_needed) {
+		kvm_mmu_reset_context(vcpu);
+		kvm_make_request(KVM_REQ_TLB_FLUSH_GUEST, vcpu);
+	}
+	return 0;
 }
 
 int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu *vcpu,
@@ -8069,10 +12522,35 @@ int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu *vcpu,
 {
 	int ret;
 
+	if (vcpu->kvm->arch.has_protected_state &&
+	    vcpu->arch.guest_state_protected)
+		return -EINVAL;
+
 	vcpu_load(vcpu);
 	ret = __set_sregs(vcpu, sregs);
 	vcpu_put(vcpu);
 	return ret;
+}
+
+static void kvm_arch_vcpu_guestdbg_update_apicv_inhibit(struct kvm *kvm)
+{
+	bool set = false;
+	struct kvm_vcpu *vcpu;
+	unsigned long i;
+
+	if (!enable_apicv)
+		return;
+
+	down_write(&kvm->arch.apicv_update_lock);
+
+	kvm_for_each_vcpu(i, vcpu, kvm) {
+		if (vcpu->guest_debug & KVM_GUESTDBG_BLOCKIRQ) {
+			set = true;
+			break;
+		}
+	}
+	__kvm_set_or_clear_apicv_inhibit(kvm, APICV_INHIBIT_REASON_BLOCKIRQ, set);
+	up_write(&kvm->arch.apicv_update_lock);
 }
 
 int kvm_arch_vcpu_ioctl_set_guest_debug(struct kvm_vcpu *vcpu,
@@ -8081,11 +12559,14 @@ int kvm_arch_vcpu_ioctl_set_guest_debug(struct kvm_vcpu *vcpu,
 	unsigned long rflags;
 	int i, r;
 
+	if (vcpu->arch.guest_state_protected)
+		return -EINVAL;
+
 	vcpu_load(vcpu);
 
 	if (dbg->control & (KVM_GUESTDBG_INJECT_DB | KVM_GUESTDBG_INJECT_BP)) {
 		r = -EBUSY;
-		if (vcpu->arch.exception.pending)
+		if (kvm_is_exception_pending(vcpu) || vcpu->arch.exception.injected)
 			goto out;
 		if (dbg->control & KVM_GUESTDBG_INJECT_DB)
 			kvm_queue_exception(vcpu, DB_VECTOR);
@@ -8114,8 +12595,7 @@ int kvm_arch_vcpu_ioctl_set_guest_debug(struct kvm_vcpu *vcpu,
 	kvm_update_dr7(vcpu);
 
 	if (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP)
-		vcpu->arch.singlestep_rip = kvm_rip_read(vcpu) +
-			get_segment_base(vcpu, VCPU_SREG_CS);
+		vcpu->arch.singlestep_rip = kvm_get_linear_rip(vcpu);
 
 	/*
 	 * Trigger an rflags update that will inject or remove the trace
@@ -8123,7 +12603,9 @@ int kvm_arch_vcpu_ioctl_set_guest_debug(struct kvm_vcpu *vcpu,
 	 */
 	kvm_set_rflags(vcpu, rflags);
 
-	kvm_x86_ops->update_bp_intercept(vcpu);
+	kvm_x86_call(update_exception_bitmap)(vcpu);
+
+	kvm_arch_vcpu_guestdbg_update_apicv_inhibit(vcpu->kvm);
 
 	r = 0;
 
@@ -8148,7 +12630,7 @@ int kvm_arch_vcpu_ioctl_translate(struct kvm_vcpu *vcpu,
 	gpa = kvm_mmu_gva_to_gpa_system(vcpu, vaddr, NULL);
 	srcu_read_unlock(&vcpu->kvm->srcu, idx);
 	tr->physical_address = gpa;
-	tr->valid = gpa != UNMAPPED_GVA;
+	tr->valid = gpa != INVALID_GPA;
 	tr->writeable = 1;
 	tr->usermode = 0;
 
@@ -8160,9 +12642,12 @@ int kvm_arch_vcpu_ioctl_get_fpu(struct kvm_vcpu *vcpu, struct kvm_fpu *fpu)
 {
 	struct fxregs_state *fxsave;
 
+	if (fpstate_is_confidential(&vcpu->arch.guest_fpu))
+		return vcpu->kvm->arch.has_protected_state ? -EINVAL : 0;
+
 	vcpu_load(vcpu);
 
-	fxsave = &vcpu->arch.guest_fpu.state.fxsave;
+	fxsave = &vcpu->arch.guest_fpu.fpstate->regs.fxsave;
 	memcpy(fpu->fpr, fxsave->st_space, 128);
 	fpu->fcw = fxsave->cwd;
 	fpu->fsw = fxsave->swd;
@@ -8170,7 +12655,7 @@ int kvm_arch_vcpu_ioctl_get_fpu(struct kvm_vcpu *vcpu, struct kvm_fpu *fpu)
 	fpu->last_opcode = fxsave->fop;
 	fpu->last_ip = fxsave->rip;
 	fpu->last_dp = fxsave->rdp;
-	memcpy(fpu->xmm, fxsave->xmm_space, sizeof fxsave->xmm_space);
+	memcpy(fpu->xmm, fxsave->xmm_space, sizeof(fxsave->xmm_space));
 
 	vcpu_put(vcpu);
 	return 0;
@@ -8180,9 +12665,12 @@ int kvm_arch_vcpu_ioctl_set_fpu(struct kvm_vcpu *vcpu, struct kvm_fpu *fpu)
 {
 	struct fxregs_state *fxsave;
 
+	if (fpstate_is_confidential(&vcpu->arch.guest_fpu))
+		return vcpu->kvm->arch.has_protected_state ? -EINVAL : 0;
+
 	vcpu_load(vcpu);
 
-	fxsave = &vcpu->arch.guest_fpu.state.fxsave;
+	fxsave = &vcpu->arch.guest_fpu.fpstate->regs.fxsave;
 
 	memcpy(fxsave->st_space, fpu->fpr, 128);
 	fxsave->cwd = fpu->fcw;
@@ -8191,7 +12679,7 @@ int kvm_arch_vcpu_ioctl_set_fpu(struct kvm_vcpu *vcpu, struct kvm_fpu *fpu)
 	fxsave->fop = fpu->last_opcode;
 	fxsave->rip = fpu->last_ip;
 	fxsave->rdp = fpu->last_dp;
-	memcpy(fxsave->xmm_space, fpu->xmm, sizeof fxsave->xmm_space);
+	memcpy(fxsave->xmm_space, fpu->xmm, sizeof(fxsave->xmm_space));
 
 	vcpu_put(vcpu);
 	return 0;
@@ -8214,140 +12702,291 @@ static void store_regs(struct kvm_vcpu *vcpu)
 
 static int sync_regs(struct kvm_vcpu *vcpu)
 {
-	if (vcpu->run->kvm_dirty_regs & ~KVM_SYNC_X86_VALID_FIELDS)
-		return -EINVAL;
-
 	if (vcpu->run->kvm_dirty_regs & KVM_SYNC_X86_REGS) {
 		__set_regs(vcpu, &vcpu->run->s.regs.regs);
 		vcpu->run->kvm_dirty_regs &= ~KVM_SYNC_X86_REGS;
 	}
+
 	if (vcpu->run->kvm_dirty_regs & KVM_SYNC_X86_SREGS) {
-		if (__set_sregs(vcpu, &vcpu->run->s.regs.sregs))
+		struct kvm_sregs sregs = vcpu->run->s.regs.sregs;
+
+		if (__set_sregs(vcpu, &sregs))
 			return -EINVAL;
+
 		vcpu->run->kvm_dirty_regs &= ~KVM_SYNC_X86_SREGS;
 	}
+
 	if (vcpu->run->kvm_dirty_regs & KVM_SYNC_X86_EVENTS) {
-		if (kvm_vcpu_ioctl_x86_set_vcpu_events(
-				vcpu, &vcpu->run->s.regs.events))
+		struct kvm_vcpu_events events = vcpu->run->s.regs.events;
+
+		if (kvm_vcpu_ioctl_x86_set_vcpu_events(vcpu, &events))
 			return -EINVAL;
+
 		vcpu->run->kvm_dirty_regs &= ~KVM_SYNC_X86_EVENTS;
 	}
 
 	return 0;
 }
 
-static void fx_init(struct kvm_vcpu *vcpu)
+#define PERF_MEDIATED_PMU_MSG \
+	"Failed to enable mediated vPMU, try disabling system wide perf events and nmi_watchdog.\n"
+
+int kvm_arch_vcpu_precreate(struct kvm *kvm, unsigned int id)
 {
-	fpstate_init(&vcpu->arch.guest_fpu.state);
-	if (boot_cpu_has(X86_FEATURE_XSAVES))
-		vcpu->arch.guest_fpu.state.xsave.header.xcomp_bv =
-			host_xcr0 | XSTATE_COMPACTION_ENABLED;
+	int r;
+
+	if (kvm_check_tsc_unstable() && kvm->created_vcpus)
+		pr_warn_once("SMP vm created on host with unstable TSC; "
+			     "guest TSC will not be reliable\n");
+
+	if (!kvm->arch.max_vcpu_ids)
+		kvm->arch.max_vcpu_ids = KVM_MAX_VCPU_IDS;
+
+	if (id >= kvm->arch.max_vcpu_ids)
+		return -EINVAL;
 
 	/*
-	 * Ensure guest xcr0 is valid for loading
+	 * Note, any actions done by .vcpu_create() must be idempotent with
+	 * respect to creating multiple vCPUs, and therefore are not undone if
+	 * creating a vCPU fails (including failure during pre-create).
 	 */
-	vcpu->arch.xcr0 = XFEATURE_MASK_FP;
+	r = kvm_x86_call(vcpu_precreate)(kvm);
+	if (r)
+		return r;
 
-	vcpu->arch.cr0 |= X86_CR0_ET;
+	if (enable_mediated_pmu && kvm->arch.enable_pmu &&
+	    !kvm->arch.created_mediated_pmu) {
+		if (irqchip_in_kernel(kvm)) {
+			r = perf_create_mediated_pmu();
+			if (r) {
+				pr_warn_ratelimited(PERF_MEDIATED_PMU_MSG);
+				return r;
+			}
+			kvm->arch.created_mediated_pmu = true;
+		} else {
+			kvm->arch.enable_pmu = false;
+		}
+	}
+	return 0;
 }
 
-/* Swap (qemu) user FPU context for the guest FPU context. */
-void kvm_load_guest_fpu(struct kvm_vcpu *vcpu)
+int kvm_arch_vcpu_create(struct kvm_vcpu *vcpu)
 {
-	preempt_disable();
-	copy_fpregs_to_fpstate(&vcpu->arch.user_fpu);
-	/* PKRU is separately restored in kvm_x86_ops->run.  */
-	__copy_kernel_to_fpregs(&vcpu->arch.guest_fpu.state,
-				~XFEATURE_MASK_PKRU);
-	preempt_enable();
-	trace_kvm_fpu(1);
-}
+	struct page *page;
+	int r;
 
-/* When vcpu_run ends, restore user space FPU context. */
-void kvm_put_guest_fpu(struct kvm_vcpu *vcpu)
-{
-	preempt_disable();
-	copy_fpregs_to_fpstate(&vcpu->arch.guest_fpu);
-	copy_kernel_to_fpregs(&vcpu->arch.user_fpu.state);
-	preempt_enable();
-	++vcpu->stat.fpu_reload;
-	trace_kvm_fpu(0);
-}
+	vcpu->arch.last_vmentry_cpu = -1;
+	bitmap_fill(vcpu->arch.regs_avail, NR_VCPU_TOTAL_REGS);
+	bitmap_fill(vcpu->arch.regs_dirty, NR_VCPU_TOTAL_REGS);
 
-void kvm_arch_vcpu_free(struct kvm_vcpu *vcpu)
-{
-	void *wbinvd_dirty_mask = vcpu->arch.wbinvd_dirty_mask;
+	kvm_gpc_init(&vcpu->arch.pv_time, vcpu->kvm);
 
-	kvmclock_reset(vcpu);
+	if (!irqchip_in_kernel(vcpu->kvm) || kvm_vcpu_is_reset_bsp(vcpu))
+		kvm_set_mp_state(vcpu, KVM_MP_STATE_RUNNABLE);
+	else
+		kvm_set_mp_state(vcpu, KVM_MP_STATE_UNINITIALIZED);
 
-	kvm_x86_ops->vcpu_free(vcpu);
-	free_cpumask_var(wbinvd_dirty_mask);
-}
+	r = kvm_mmu_create(vcpu);
+	if (r < 0)
+		return r;
 
-struct kvm_vcpu *kvm_arch_vcpu_create(struct kvm *kvm,
-						unsigned int id)
-{
-	struct kvm_vcpu *vcpu;
+	r = kvm_create_lapic(vcpu);
+	if (r < 0)
+		goto fail_mmu_destroy;
 
-	if (kvm_check_tsc_unstable() && atomic_read(&kvm->online_vcpus) != 0)
-		printk_once(KERN_WARNING
-		"kvm: SMP vm created on host with unstable TSC; "
-		"guest TSC will not be reliable\n");
+	r = -ENOMEM;
 
-	vcpu = kvm_x86_ops->vcpu_create(kvm, id);
+	page = alloc_page(GFP_KERNEL_ACCOUNT | __GFP_ZERO);
+	if (!page)
+		goto fail_free_lapic;
+	vcpu->arch.pio_data = page_address(page);
 
-	return vcpu;
-}
+	vcpu->arch.mce_banks = kcalloc(KVM_MAX_MCE_BANKS * 4, sizeof(u64),
+				       GFP_KERNEL_ACCOUNT);
+	vcpu->arch.mci_ctl2_banks = kcalloc(KVM_MAX_MCE_BANKS, sizeof(u64),
+					    GFP_KERNEL_ACCOUNT);
+	if (!vcpu->arch.mce_banks || !vcpu->arch.mci_ctl2_banks)
+		goto fail_free_mce_banks;
+	vcpu->arch.mcg_cap = KVM_MAX_MCE_BANKS;
 
-int kvm_arch_vcpu_setup(struct kvm_vcpu *vcpu)
-{
-	kvm_vcpu_mtrr_init(vcpu);
+	if (!zalloc_cpumask_var(&vcpu->arch.wbinvd_dirty_mask,
+				GFP_KERNEL_ACCOUNT))
+		goto fail_free_mce_banks;
+
+	if (!alloc_emulate_ctxt(vcpu))
+		goto free_wbinvd_dirty_mask;
+
+	if (!fpu_alloc_guest_fpstate(&vcpu->arch.guest_fpu)) {
+		pr_err("failed to allocate vcpu's fpu\n");
+		goto free_emulate_ctxt;
+	}
+
+	kvm_async_pf_hash_reset(vcpu);
+
+	if (kvm_check_has_quirk(vcpu->kvm, KVM_X86_QUIRK_STUFF_FEATURE_MSRS)) {
+		vcpu->arch.arch_capabilities = kvm_get_arch_capabilities();
+		vcpu->arch.msr_platform_info = MSR_PLATFORM_INFO_CPUID_FAULT;
+		vcpu->arch.perf_capabilities = kvm_caps.supported_perf_cap;
+	}
+	kvm_pmu_init(vcpu);
+
+	vcpu->arch.pending_external_vector = -1;
+	vcpu->arch.preempted_in_kernel = false;
+
+#if IS_ENABLED(CONFIG_HYPERV)
+	vcpu->arch.hv_root_tdp = INVALID_PAGE;
+#endif
+
+	r = kvm_x86_call(vcpu_create)(vcpu);
+	if (r)
+		goto free_guest_fpu;
+
+	kvm_xen_init_vcpu(vcpu);
 	vcpu_load(vcpu);
+	kvm_vcpu_after_set_cpuid(vcpu);
+	kvm_set_tsc_khz(vcpu, vcpu->kvm->arch.default_tsc_khz);
 	kvm_vcpu_reset(vcpu, false);
-	kvm_mmu_setup(vcpu);
+	kvm_init_mmu(vcpu);
 	vcpu_put(vcpu);
 	return 0;
+
+free_guest_fpu:
+	fpu_free_guest_fpstate(&vcpu->arch.guest_fpu);
+free_emulate_ctxt:
+	kmem_cache_free(x86_emulator_cache, vcpu->arch.emulate_ctxt);
+free_wbinvd_dirty_mask:
+	free_cpumask_var(vcpu->arch.wbinvd_dirty_mask);
+fail_free_mce_banks:
+	kfree(vcpu->arch.mce_banks);
+	kfree(vcpu->arch.mci_ctl2_banks);
+	free_page((unsigned long)vcpu->arch.pio_data);
+fail_free_lapic:
+	kvm_free_lapic(vcpu);
+fail_mmu_destroy:
+	kvm_mmu_destroy(vcpu);
+	return r;
 }
 
 void kvm_arch_vcpu_postcreate(struct kvm_vcpu *vcpu)
 {
-	struct msr_data msr;
-	struct kvm *kvm = vcpu->kvm;
-
-	kvm_hv_vcpu_postcreate(vcpu);
-
 	if (mutex_lock_killable(&vcpu->mutex))
 		return;
 	vcpu_load(vcpu);
-	msr.data = 0x0;
-	msr.index = MSR_IA32_TSC;
-	msr.host_initiated = true;
-	kvm_write_tsc(vcpu, &msr);
+	kvm_synchronize_tsc(vcpu, NULL);
 	vcpu_put(vcpu);
+
+	/* poll control enabled by default */
+	vcpu->arch.msr_kvm_poll_control = 1;
+
 	mutex_unlock(&vcpu->mutex);
-
-	if (!kvmclock_periodic_sync)
-		return;
-
-	schedule_delayed_work(&kvm->arch.kvmclock_sync_work,
-					KVMCLOCK_SYNC_PERIOD);
 }
 
 void kvm_arch_vcpu_destroy(struct kvm_vcpu *vcpu)
 {
-	vcpu->arch.apf.msr_val = 0;
+	int idx, cpu;
 
-	vcpu_load(vcpu);
+	kvm_clear_async_pf_completion_queue(vcpu);
 	kvm_mmu_unload(vcpu);
-	vcpu_put(vcpu);
 
-	kvm_x86_ops->vcpu_free(vcpu);
+	kvmclock_reset(vcpu);
+
+	for_each_possible_cpu(cpu)
+		cmpxchg(per_cpu_ptr(&last_vcpu, cpu), vcpu, NULL);
+
+	kvm_x86_call(vcpu_free)(vcpu);
+
+	kmem_cache_free(x86_emulator_cache, vcpu->arch.emulate_ctxt);
+	free_cpumask_var(vcpu->arch.wbinvd_dirty_mask);
+	fpu_free_guest_fpstate(&vcpu->arch.guest_fpu);
+
+	kvm_xen_destroy_vcpu(vcpu);
+	kvm_hv_vcpu_uninit(vcpu);
+	kvm_pmu_destroy(vcpu);
+	kfree(vcpu->arch.mce_banks);
+	kfree(vcpu->arch.mci_ctl2_banks);
+	kvm_free_lapic(vcpu);
+	idx = srcu_read_lock(&vcpu->kvm->srcu);
+	kvm_mmu_destroy(vcpu);
+	srcu_read_unlock(&vcpu->kvm->srcu, idx);
+	free_page((unsigned long)vcpu->arch.pio_data);
+	kvfree(vcpu->arch.cpuid_entries);
+}
+
+static void kvm_xstate_reset(struct kvm_vcpu *vcpu, bool init_event)
+{
+	struct fpstate *fpstate = vcpu->arch.guest_fpu.fpstate;
+	u64 xfeatures_mask;
+	bool fpu_in_use;
+	int i;
+
+	/*
+	 * Guest FPU state is zero allocated and so doesn't need to be manually
+	 * cleared on RESET, i.e. during vCPU creation.
+	 */
+	if (!init_event || !fpstate)
+		return;
+
+	/*
+	 * On INIT, only select XSTATE components are zeroed, most components
+	 * are unchanged.  Currently, the only components that are zeroed and
+	 * supported by KVM are MPX and CET related.
+	 */
+	xfeatures_mask = (kvm_caps.supported_xcr0 | kvm_caps.supported_xss) &
+			 (XFEATURE_MASK_BNDREGS | XFEATURE_MASK_BNDCSR |
+			  XFEATURE_MASK_CET_ALL);
+	if (!xfeatures_mask)
+		return;
+
+	BUILD_BUG_ON(sizeof(xfeatures_mask) * BITS_PER_BYTE <= XFEATURE_MAX);
+
+	/*
+	 * Unload guest FPU state (if necessary) before zeroing XSTATE fields
+	 * as the kernel can only modify the state when its resident in memory,
+	 * i.e. when it's not loaded into hardware.
+	 *
+	 * WARN if the vCPU's desire to run, i.e. whether or not its in KVM_RUN,
+	 * doesn't match the loaded/in-use state of the FPU, as KVM_RUN is the
+	 * only path that can trigger INIT emulation _and_ loads FPU state, and
+	 * KVM_RUN should _always_ load FPU state.
+	 */
+	WARN_ON_ONCE(vcpu->wants_to_run != fpstate->in_use);
+	fpu_in_use = fpstate->in_use;
+	if (fpu_in_use)
+		kvm_put_guest_fpu(vcpu);
+	for_each_set_bit(i, (unsigned long *)&xfeatures_mask, XFEATURE_MAX)
+		fpstate_clear_xstate_component(fpstate, i);
+	if (fpu_in_use)
+		kvm_load_guest_fpu(vcpu);
 }
 
 void kvm_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
 {
+	struct kvm_cpuid_entry2 *cpuid_0x1;
+	unsigned long old_cr0 = kvm_read_cr0(vcpu);
+	unsigned long new_cr0;
+
+	/*
+	 * Several of the "set" flows, e.g. ->set_cr0(), read other registers
+	 * to handle side effects.  RESET emulation hits those flows and relies
+	 * on emulated/virtualized registers, including those that are loaded
+	 * into hardware, to be zeroed at vCPU creation.  Use CRs as a sentinel
+	 * to detect improper or missing initialization.
+	 */
+	WARN_ON_ONCE(!init_event &&
+		     (old_cr0 || kvm_read_cr3(vcpu) || kvm_read_cr4(vcpu)));
+
+	/*
+	 * SVM doesn't unconditionally VM-Exit on INIT and SHUTDOWN, thus it's
+	 * possible to INIT the vCPU while L2 is active.  Force the vCPU back
+	 * into L1 as EFER.SVME is cleared on INIT (along with all other EFER
+	 * bits), i.e. virtualization is disabled.
+	 */
+	if (is_guest_mode(vcpu))
+		kvm_leave_nested(vcpu);
+
 	kvm_lapic_reset(vcpu, init_event);
 
+	WARN_ON_ONCE(is_guest_mode(vcpu) || is_smm(vcpu));
 	vcpu->arch.hflags = 0;
 
 	vcpu->arch.smi_pending = 0;
@@ -8357,19 +12996,18 @@ void kvm_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
 	vcpu->arch.nmi_injected = false;
 	kvm_clear_interrupt_queue(vcpu);
 	kvm_clear_exception_queue(vcpu);
-	vcpu->arch.exception.pending = false;
 
 	memset(vcpu->arch.db, 0, sizeof(vcpu->arch.db));
 	kvm_update_dr0123(vcpu);
-	vcpu->arch.dr6 = DR6_INIT;
-	kvm_update_dr6(vcpu);
+	vcpu->arch.dr6 = DR6_ACTIVE_LOW;
 	vcpu->arch.dr7 = DR7_FIXED_1;
 	kvm_update_dr7(vcpu);
 
 	vcpu->arch.cr2 = 0;
 
 	kvm_make_request(KVM_REQ_EVENT, vcpu);
-	vcpu->arch.apf.msr_val = 0;
+	vcpu->arch.apf.msr_en_val = 0;
+	vcpu->arch.apf.msr_int_val = 0;
 	vcpu->arch.st.msr_val = 0;
 
 	kvmclock_reset(vcpu);
@@ -8378,45 +13016,85 @@ void kvm_vcpu_reset(struct kvm_vcpu *vcpu, bool init_event)
 	kvm_async_pf_hash_reset(vcpu);
 	vcpu->arch.apf.halted = false;
 
-	if (kvm_mpx_supported()) {
-		void *mpx_state_buffer;
-
-		/*
-		 * To avoid have the INIT path from kvm_apic_has_events() that be
-		 * called with loaded FPU and does not let userspace fix the state.
-		 */
-		if (init_event)
-			kvm_put_guest_fpu(vcpu);
-		mpx_state_buffer = get_xsave_addr(&vcpu->arch.guest_fpu.state.xsave,
-					XFEATURE_MASK_BNDREGS);
-		if (mpx_state_buffer)
-			memset(mpx_state_buffer, 0, sizeof(struct mpx_bndreg_state));
-		mpx_state_buffer = get_xsave_addr(&vcpu->arch.guest_fpu.state.xsave,
-					XFEATURE_MASK_BNDCSR);
-		if (mpx_state_buffer)
-			memset(mpx_state_buffer, 0, sizeof(struct mpx_bndcsr));
-		if (init_event)
-			kvm_load_guest_fpu(vcpu);
-	}
+	kvm_xstate_reset(vcpu, init_event);
 
 	if (!init_event) {
-		kvm_pmu_reset(vcpu);
 		vcpu->arch.smbase = 0x30000;
 
-		vcpu->arch.msr_platform_info = MSR_PLATFORM_INFO_CPUID_FAULT;
-		vcpu->arch.msr_misc_features_enables = 0;
+		vcpu->arch.pat = MSR_IA32_CR_PAT_DEFAULT;
 
-		vcpu->arch.xcr0 = XFEATURE_MASK_FP;
+		vcpu->arch.msr_misc_features_enables = 0;
+		vcpu->arch.ia32_misc_enable_msr = MSR_IA32_MISC_ENABLE_PEBS_UNAVAIL |
+						  MSR_IA32_MISC_ENABLE_BTS_UNAVAIL;
+
+		__kvm_set_xcr(vcpu, 0, XFEATURE_MASK_FP);
+		kvm_msr_write(vcpu, MSR_IA32_XSS, 0);
 	}
 
+	/* All GPRs except RDX (handled below) are zeroed on RESET/INIT. */
 	memset(vcpu->arch.regs, 0, sizeof(vcpu->arch.regs));
-	vcpu->arch.regs_avail = ~0;
-	vcpu->arch.regs_dirty = ~0;
+	kvm_register_mark_dirty(vcpu, VCPU_REGS_RSP);
 
-	vcpu->arch.ia32_xss = 0;
+	/*
+	 * Fall back to KVM's default Family/Model/Stepping of 0x600 (P6/Athlon)
+	 * if no CPUID match is found.  Note, it's impossible to get a match at
+	 * RESET since KVM emulates RESET before exposing the vCPU to userspace,
+	 * i.e. it's impossible for kvm_find_cpuid_entry() to find a valid entry
+	 * on RESET.  But, go through the motions in case that's ever remedied.
+	 */
+	cpuid_0x1 = kvm_find_cpuid_entry(vcpu, 1);
+	kvm_edx_write(vcpu, cpuid_0x1 ? cpuid_0x1->eax : 0x600);
 
-	kvm_x86_ops->vcpu_reset(vcpu, init_event);
+	kvm_x86_call(vcpu_reset)(vcpu, init_event);
+
+	kvm_set_rflags(vcpu, X86_EFLAGS_FIXED);
+	kvm_rip_write(vcpu, 0xfff0);
+
+	vcpu->arch.cr3 = 0;
+	kvm_register_mark_dirty(vcpu, VCPU_REG_CR3);
+
+	/*
+	 * CR0.CD/NW are set on RESET, preserved on INIT.  Note, some versions
+	 * of Intel's SDM list CD/NW as being set on INIT, but they contradict
+	 * (or qualify) that with a footnote stating that CD/NW are preserved.
+	 */
+	new_cr0 = X86_CR0_ET;
+	if (init_event)
+		new_cr0 |= (old_cr0 & (X86_CR0_NW | X86_CR0_CD));
+	else
+		new_cr0 |= X86_CR0_NW | X86_CR0_CD;
+
+	kvm_x86_call(set_cr0)(vcpu, new_cr0);
+	kvm_x86_call(set_cr4)(vcpu, 0);
+	kvm_x86_call(set_efer)(vcpu, 0);
+	kvm_x86_call(update_exception_bitmap)(vcpu);
+
+	/*
+	 * On the standard CR0/CR4/EFER modification paths, there are several
+	 * complex conditions determining whether the MMU has to be reset and/or
+	 * which PCIDs have to be flushed.  However, CR0.WP and the paging-related
+	 * bits in CR4 and EFER are irrelevant if CR0.PG was '0'; and a reset+flush
+	 * is needed anyway if CR0.PG was '1' (which can only happen for INIT, as
+	 * CR0 will be '0' prior to RESET).  So we only need to check CR0.PG here.
+	 */
+	if (old_cr0 & X86_CR0_PG) {
+		kvm_make_request(KVM_REQ_TLB_FLUSH_GUEST, vcpu);
+		kvm_mmu_reset_context(vcpu);
+	}
+
+	/*
+	 * Intel's SDM states that all TLB entries are flushed on INIT.  AMD's
+	 * APM states the TLBs are untouched by INIT, but it also states that
+	 * the TLBs are flushed on "External initialization of the processor."
+	 * Flush the guest TLB regardless of vendor, there is no meaningful
+	 * benefit in relying on the guest to flush the TLB immediately after
+	 * INIT.  A spurious TLB flush is benign and likely negligible from a
+	 * performance perspective.
+	 */
+	if (init_event)
+		kvm_make_request(KVM_REQ_TLB_FLUSH_GUEST, vcpu);
 }
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_vcpu_reset);
 
 void kvm_vcpu_deliver_sipi_vector(struct kvm_vcpu *vcpu, u8 vector)
 {
@@ -8428,19 +13106,35 @@ void kvm_vcpu_deliver_sipi_vector(struct kvm_vcpu *vcpu, u8 vector)
 	kvm_set_segment(vcpu, &cs, VCPU_SREG_CS);
 	kvm_rip_write(vcpu, 0);
 }
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_vcpu_deliver_sipi_vector);
 
-int kvm_arch_hardware_enable(void)
+void kvm_arch_enable_virtualization(void)
+{
+	x86_virt_register_emergency_callback(kvm_x86_ops.emergency_disable_virtualization_cpu);
+}
+
+void kvm_arch_disable_virtualization(void)
+{
+	x86_virt_unregister_emergency_callback(kvm_x86_ops.emergency_disable_virtualization_cpu);
+}
+
+int kvm_arch_enable_virtualization_cpu(void)
 {
 	struct kvm *kvm;
 	struct kvm_vcpu *vcpu;
-	int i;
+	unsigned long i;
 	int ret;
 	u64 local_tsc;
 	u64 max_tsc = 0;
 	bool stable, backwards_tsc = false;
 
-	kvm_shared_msr_cpu_online();
-	ret = kvm_x86_ops->hardware_enable();
+	kvm_user_return_msr_cpu_online();
+
+	ret = kvm_x86_check_processor_compatibility();
+	if (ret)
+		return ret;
+
+	ret = kvm_x86_call(enable_virtualization_cpu)();
 	if (ret != 0)
 		return ret;
 
@@ -8466,7 +13160,7 @@ int kvm_arch_hardware_enable(void)
 	 * before any KVM threads can be running.  Unfortunately, we can't
 	 * bring the TSCs fully up to date with real time, as we aren't yet far
 	 * enough into CPU bringup that we know how much real time has actually
-	 * elapsed; our helper function, ktime_get_boot_ns() will be using boot
+	 * elapsed; our helper function, ktime_get_boottime_ns() will be using boot
 	 * variables that haven't been updated yet.
 	 *
 	 * So we simply find the maximum observed TSC above, then record the
@@ -8520,247 +13214,177 @@ int kvm_arch_hardware_enable(void)
 	return 0;
 }
 
-void kvm_arch_hardware_disable(void)
+void kvm_arch_shutdown(void)
 {
-	kvm_x86_ops->hardware_disable();
-	drop_user_return_notifiers();
+	/*
+	 * Set virt_rebooting to indicate that KVM has asynchronously disabled
+	 * hardware virtualization, i.e. that errors and/or exceptions on SVM
+	 * and VMX instructions are expected and should be ignored.
+	 */
+	virt_rebooting = true;
+
+	/*
+	 * Ensure virt_rebooting is visible before IPIs are sent to other CPUs
+	 * to disable virtualization.  Effectively pairs with the reception of
+	 * the IPI (virt_rebooting is read in task/exception context, but only
+	 * _needs_ to be read as %true after the IPI function callback disables
+	 * virtualization).
+	 */
+	smp_wmb();
 }
 
-int kvm_arch_hardware_setup(void)
+void kvm_arch_disable_virtualization_cpu(void)
 {
-	int r;
+	kvm_x86_call(disable_virtualization_cpu)();
 
-	r = kvm_x86_ops->hardware_setup();
-	if (r != 0)
-		return r;
-
-	if (kvm_has_tsc_control) {
-		/*
-		 * Make sure the user can only configure tsc_khz values that
-		 * fit into a signed integer.
-		 * A min value is not calculated needed because it will always
-		 * be 1 on all machines.
-		 */
-		u64 max = min(0x7fffffffULL,
-			      __scale_tsc(kvm_max_tsc_scaling_ratio, tsc_khz));
-		kvm_max_guest_tsc_khz = max;
-
-		kvm_default_tsc_scaling_ratio = 1ULL << kvm_tsc_scaling_ratio_frac_bits;
-	}
-
-	kvm_init_msr_list();
-	return 0;
-}
-
-void kvm_arch_hardware_unsetup(void)
-{
-	kvm_x86_ops->hardware_unsetup();
-}
-
-void kvm_arch_check_processor_compat(void *rtn)
-{
-	kvm_x86_ops->check_processor_compatibility(rtn);
+	/*
+	 * Leave the user-return notifiers as-is when disabling virtualization
+	 * for reboot, i.e. when disabling via IPI function call, and instead
+	 * pin kvm.ko (if it's a module) to defend against use-after-free (in
+	 * the *very* unlikely scenario module unload is racing with reboot).
+	 * On a forced reboot, tasks aren't frozen before shutdown, and so KVM
+	 * could be actively modifying user-return MSR state when the IPI to
+	 * disable virtualization arrives.  Handle the extreme edge case here
+	 * instead of trying to account for it in the normal flows.
+	 */
+	if (in_task() || WARN_ON_ONCE(!virt_rebooting))
+		drop_user_return_notifiers();
+	else
+		__module_get(THIS_MODULE);
 }
 
 bool kvm_vcpu_is_reset_bsp(struct kvm_vcpu *vcpu)
 {
 	return vcpu->kvm->arch.bsp_vcpu_id == vcpu->vcpu_id;
 }
-EXPORT_SYMBOL_GPL(kvm_vcpu_is_reset_bsp);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_vcpu_is_reset_bsp);
 
 bool kvm_vcpu_is_bsp(struct kvm_vcpu *vcpu)
 {
 	return (vcpu->arch.apic_base & MSR_IA32_APICBASE_BSP) != 0;
 }
 
-struct static_key kvm_no_apic_vcpu __read_mostly;
-EXPORT_SYMBOL_GPL(kvm_no_apic_vcpu);
-
-int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
+void kvm_arch_free_vm(struct kvm *kvm)
 {
-	struct page *page;
-	int r;
-
-	vcpu->arch.apicv_active = kvm_x86_ops->get_enable_apicv(vcpu);
-	vcpu->arch.emulate_ctxt.ops = &emulate_ops;
-	if (!irqchip_in_kernel(vcpu->kvm) || kvm_vcpu_is_reset_bsp(vcpu))
-		vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
-	else
-		vcpu->arch.mp_state = KVM_MP_STATE_UNINITIALIZED;
-
-	page = alloc_page(GFP_KERNEL | __GFP_ZERO);
-	if (!page) {
-		r = -ENOMEM;
-		goto fail;
-	}
-	vcpu->arch.pio_data = page_address(page);
-
-	kvm_set_tsc_khz(vcpu, max_tsc_khz);
-
-	r = kvm_mmu_create(vcpu);
-	if (r < 0)
-		goto fail_free_pio_data;
-
-	if (irqchip_in_kernel(vcpu->kvm)) {
-		r = kvm_create_lapic(vcpu);
-		if (r < 0)
-			goto fail_mmu_destroy;
-	} else
-		static_key_slow_inc(&kvm_no_apic_vcpu);
-
-	vcpu->arch.mce_banks = kzalloc(KVM_MAX_MCE_BANKS * sizeof(u64) * 4,
-				       GFP_KERNEL);
-	if (!vcpu->arch.mce_banks) {
-		r = -ENOMEM;
-		goto fail_free_lapic;
-	}
-	vcpu->arch.mcg_cap = KVM_MAX_MCE_BANKS;
-
-	if (!zalloc_cpumask_var(&vcpu->arch.wbinvd_dirty_mask, GFP_KERNEL)) {
-		r = -ENOMEM;
-		goto fail_free_mce_banks;
-	}
-
-	fx_init(vcpu);
-
-	vcpu->arch.guest_xstate_size = XSAVE_HDR_SIZE + XSAVE_HDR_OFFSET;
-
-	vcpu->arch.maxphyaddr = cpuid_query_maxphyaddr(vcpu);
-
-	vcpu->arch.pat = MSR_IA32_CR_PAT_DEFAULT;
-
-	kvm_async_pf_hash_reset(vcpu);
-	kvm_pmu_init(vcpu);
-
-	vcpu->arch.pending_external_vector = -1;
-	vcpu->arch.preempted_in_kernel = false;
-
-	kvm_hv_vcpu_init(vcpu);
-
-	return 0;
-
-fail_free_mce_banks:
-	kfree(vcpu->arch.mce_banks);
-fail_free_lapic:
-	kvm_free_lapic(vcpu);
-fail_mmu_destroy:
-	kvm_mmu_destroy(vcpu);
-fail_free_pio_data:
-	free_page((unsigned long)vcpu->arch.pio_data);
-fail:
-	return r;
+#if IS_ENABLED(CONFIG_HYPERV)
+	kfree(kvm->arch.hv_pa_pg);
+#endif
+	__kvm_arch_free_vm(kvm);
 }
 
-void kvm_arch_vcpu_uninit(struct kvm_vcpu *vcpu)
-{
-	int idx;
-
-	kvm_hv_vcpu_uninit(vcpu);
-	kvm_pmu_destroy(vcpu);
-	kfree(vcpu->arch.mce_banks);
-	kvm_free_lapic(vcpu);
-	idx = srcu_read_lock(&vcpu->kvm->srcu);
-	kvm_mmu_destroy(vcpu);
-	srcu_read_unlock(&vcpu->kvm->srcu, idx);
-	free_page((unsigned long)vcpu->arch.pio_data);
-	if (!lapic_in_kernel(vcpu))
-		static_key_slow_dec(&kvm_no_apic_vcpu);
-}
-
-void kvm_arch_sched_in(struct kvm_vcpu *vcpu, int cpu)
-{
-	kvm_x86_ops->sched_in(vcpu, cpu);
-}
 
 int kvm_arch_init_vm(struct kvm *kvm, unsigned long type)
 {
-	if (type)
+	int ret;
+	unsigned long flags;
+
+	if (!kvm_is_vm_type_supported(type))
 		return -EINVAL;
 
-	INIT_HLIST_HEAD(&kvm->arch.mask_notifier_list);
-	INIT_LIST_HEAD(&kvm->arch.active_mmu_pages);
-	INIT_LIST_HEAD(&kvm->arch.zapped_obsolete_pages);
-	INIT_LIST_HEAD(&kvm->arch.assigned_dev_head);
-	atomic_set(&kvm->arch.noncoherent_dma_count, 0);
+	kvm->arch.vm_type = type;
+	kvm->arch.has_private_mem =
+		(type == KVM_X86_SW_PROTECTED_VM);
+	/* Decided by the vendor code for other VM types.  */
+	kvm->arch.pre_fault_allowed =
+		type == KVM_X86_DEFAULT_VM || type == KVM_X86_SW_PROTECTED_VM;
+	kvm->arch.disabled_quirks = kvm_caps.inapplicable_quirks & kvm_caps.supported_quirks;
 
-	/* Reserve bit 0 of irq_sources_bitmap for userspace irq source */
-	set_bit(KVM_USERSPACE_IRQ_SOURCE_ID, &kvm->arch.irq_sources_bitmap);
-	/* Reserve bit 1 of irq_sources_bitmap for irqfd-resampler */
-	set_bit(KVM_IRQFD_RESAMPLE_IRQ_SOURCE_ID,
-		&kvm->arch.irq_sources_bitmap);
+	ret = kvm_page_track_init(kvm);
+	if (ret)
+		goto out;
+
+	ret = kvm_mmu_init_vm(kvm);
+	if (ret)
+		goto out_cleanup_page_track;
+
+	ret = kvm_x86_call(vm_init)(kvm);
+	if (ret)
+		goto out_uninit_mmu;
+
+	atomic_set(&kvm->arch.noncoherent_dma_count, 0);
 
 	raw_spin_lock_init(&kvm->arch.tsc_write_lock);
 	mutex_init(&kvm->arch.apic_map_lock);
-	spin_lock_init(&kvm->arch.pvclock_gtod_sync_lock);
+	seqcount_raw_spinlock_init(&kvm->arch.pvclock_sc, &kvm->arch.tsc_write_lock);
+	ratelimit_state_init(&kvm->arch.kvmclock_update_rs, HZ, 10);
+	ratelimit_set_flags(&kvm->arch.kvmclock_update_rs, RATELIMIT_MSG_ON_RELEASE);
+	kvm->arch.kvmclock_offset = -get_kvmclock_base_ns();
 
-	kvm->arch.kvmclock_offset = -ktime_get_boot_ns();
+	raw_spin_lock_irqsave(&kvm->arch.tsc_write_lock, flags);
 	pvclock_update_vm_gtod_copy(kvm);
+	raw_spin_unlock_irqrestore(&kvm->arch.tsc_write_lock, flags);
 
-	INIT_DELAYED_WORK(&kvm->arch.kvmclock_update_work, kvmclock_update_fn);
-	INIT_DELAYED_WORK(&kvm->arch.kvmclock_sync_work, kvmclock_sync_fn);
+	kvm->arch.default_tsc_khz = max_tsc_khz ? : tsc_khz;
+	kvm->arch.apic_bus_cycle_ns = APIC_BUS_CYCLE_NS_DEFAULT;
+	kvm->arch.guest_can_read_msr_platform_info = true;
+	kvm->arch.enable_pmu = enable_pmu && !kvm->arch.has_protected_pmu;
 
+#if IS_ENABLED(CONFIG_HYPERV)
+	spin_lock_init(&kvm->arch.hv_root_tdp_lock);
+	kvm->arch.hv_root_tdp = INVALID_PAGE;
+#endif
+
+	kvm_apicv_init(kvm);
 	kvm_hv_init_vm(kvm);
-	kvm_page_track_init(kvm);
-	kvm_mmu_init_vm(kvm);
+	kvm_xen_init_vm(kvm);
 
-	if (kvm_x86_ops->vm_init)
-		return kvm_x86_ops->vm_init(kvm);
-
-	return 0;
-}
-
-static void kvm_unload_vcpu_mmu(struct kvm_vcpu *vcpu)
-{
-	vcpu_load(vcpu);
-	kvm_mmu_unload(vcpu);
-	vcpu_put(vcpu);
-}
-
-static void kvm_free_vcpus(struct kvm *kvm)
-{
-	unsigned int i;
-	struct kvm_vcpu *vcpu;
-
-	/*
-	 * Unpin any mmu pages first.
-	 */
-	kvm_for_each_vcpu(i, vcpu, kvm) {
-		kvm_clear_async_pf_completion_queue(vcpu);
-		kvm_unload_vcpu_mmu(vcpu);
+	if (ignore_msrs && !report_ignored_msrs) {
+		pr_warn_once("Running KVM with ignore_msrs=1 and report_ignored_msrs=0 is not a\n"
+			     "a supported configuration.  Lying to the guest about the existence of MSRs\n"
+			     "may cause the guest operating system to hang or produce errors.  If a guest\n"
+			     "does not run without ignore_msrs=1, please report it to kvm@vger.kernel.org.\n");
 	}
-	kvm_for_each_vcpu(i, vcpu, kvm)
-		kvm_arch_vcpu_free(vcpu);
 
-	mutex_lock(&kvm->lock);
-	for (i = 0; i < atomic_read(&kvm->online_vcpus); i++)
-		kvm->vcpus[i] = NULL;
+	once_init(&kvm->arch.nx_once);
+	return 0;
 
-	atomic_set(&kvm->online_vcpus, 0);
-	mutex_unlock(&kvm->lock);
+out_uninit_mmu:
+	kvm_mmu_uninit_vm(kvm);
+out_cleanup_page_track:
+	kvm_page_track_cleanup(kvm);
+out:
+	return ret;
 }
 
-void kvm_arch_sync_events(struct kvm *kvm)
-{
-	cancel_delayed_work_sync(&kvm->arch.kvmclock_sync_work);
-	cancel_delayed_work_sync(&kvm->arch.kvmclock_update_work);
-	kvm_free_pit(kvm);
-}
-
-int __x86_set_memory_region(struct kvm *kvm, int id, gpa_t gpa, u32 size)
+/**
+ * __x86_set_memory_region: Setup KVM internal memory slot
+ *
+ * @kvm: the kvm pointer to the VM.
+ * @id: the slot ID to setup.
+ * @gpa: the GPA to install the slot (unused when @size == 0).
+ * @size: the size of the slot. Set to zero to uninstall a slot.
+ *
+ * This function helps to setup a KVM internal memory slot.  Specify
+ * @size > 0 to install a new slot, while @size == 0 to uninstall a
+ * slot.  The return code can be one of the following:
+ *
+ *   HVA:           on success (uninstall will return a bogus HVA)
+ *   -errno:        on error
+ *
+ * The caller should always use IS_ERR() to check the return value
+ * before use.  Note, the KVM internal memory slots are guaranteed to
+ * remain valid and unchanged until the VM is destroyed, i.e., the
+ * GPA->HVA translation will not change.  However, the HVA is a user
+ * address, i.e. its accessibility is not guaranteed, and must be
+ * accessed via __copy_{to,from}_user().
+ */
+void __user * __x86_set_memory_region(struct kvm *kvm, int id, gpa_t gpa,
+				      u32 size)
 {
 	int i, r;
-	unsigned long hva;
+	unsigned long hva, old_npages;
 	struct kvm_memslots *slots = kvm_memslots(kvm);
-	struct kvm_memory_slot *slot, old;
+	struct kvm_memory_slot *slot;
 
-	/* Called with kvm->slots_lock held.  */
+	lockdep_assert_held(&kvm->slots_lock);
+
 	if (WARN_ON(id >= KVM_MEM_SLOTS_NUM))
-		return -EINVAL;
+		return ERR_PTR_USR(-EINVAL);
 
 	slot = id_to_memslot(slots, id);
 	if (size) {
-		if (slot->npages)
-			return -EEXIST;
+		if (slot && slot->npages)
+			return ERR_PTR_USR(-EEXIST);
 
 		/*
 		 * MAP_SHARED to prevent internal slot pages from being moved
@@ -8768,116 +13392,165 @@ int __x86_set_memory_region(struct kvm *kvm, int id, gpa_t gpa, u32 size)
 		 */
 		hva = vm_mmap(NULL, 0, size, PROT_READ | PROT_WRITE,
 			      MAP_SHARED | MAP_ANONYMOUS, 0);
-		if (IS_ERR((void *)hva))
-			return PTR_ERR((void *)hva);
+		if (IS_ERR_VALUE(hva))
+			return (void __user *)hva;
 	} else {
-		if (!slot->npages)
-			return 0;
+		if (!slot || !slot->npages)
+			return NULL;
 
-		hva = 0;
+		old_npages = slot->npages;
+		hva = slot->userspace_addr;
 	}
 
-	old = *slot;
-	for (i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
-		struct kvm_userspace_memory_region m;
+	for (i = 0; i < kvm_arch_nr_memslot_as_ids(kvm); i++) {
+		struct kvm_userspace_memory_region2 m;
 
 		m.slot = id | (i << 16);
 		m.flags = 0;
 		m.guest_phys_addr = gpa;
 		m.userspace_addr = hva;
 		m.memory_size = size;
-		r = __kvm_set_memory_region(kvm, &m);
+		r = kvm_set_internal_memslot(kvm, &m);
 		if (r < 0)
-			return r;
+			return ERR_PTR_USR(r);
 	}
 
 	if (!size)
-		vm_munmap(old.userspace_addr, old.npages * PAGE_SIZE);
+		vm_munmap(hva, old_npages * PAGE_SIZE);
 
-	return 0;
+	return (void __user *)hva;
 }
-EXPORT_SYMBOL_GPL(__x86_set_memory_region);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(__x86_set_memory_region);
 
-int x86_set_memory_region(struct kvm *kvm, int id, gpa_t gpa, u32 size)
+void kvm_arch_pre_destroy_vm(struct kvm *kvm)
 {
-	int r;
+	/*
+	 * Stop all background workers and kthreads before destroying vCPUs, as
+	 * iterating over vCPUs in a different task while vCPUs are being freed
+	 * is unsafe, i.e. will lead to use-after-free.  The PIT also needs to
+	 * be stopped before IRQ routing is freed.
+	 *
+	 * Do NOT free the in-kernel PIC or I/O APIC here (but as above, make
+	 * sure to flush any background work), as KVM expects interrupt routing
+	 * structures to be valid until vCPUs are destroyed.
+	 */
+#ifdef CONFIG_KVM_IOAPIC
+	kvm_free_pit(kvm);
+	if (kvm->arch.vioapic)
+		cancel_delayed_work_sync(&kvm->arch.vioapic->eoi_inject);
+#endif
 
-	mutex_lock(&kvm->slots_lock);
-	r = __x86_set_memory_region(kvm, id, gpa, size);
-	mutex_unlock(&kvm->slots_lock);
-
-	return r;
+	kvm_mmu_pre_destroy_vm(kvm);
+	kvm_x86_call(vm_pre_destroy)(kvm);
 }
-EXPORT_SYMBOL_GPL(x86_set_memory_region);
 
 void kvm_arch_destroy_vm(struct kvm *kvm)
 {
 	if (current->mm == kvm->mm) {
 		/*
 		 * Free memory regions allocated on behalf of userspace,
-		 * unless the the memory map has changed due to process exit
+		 * unless the memory map has changed due to process exit
 		 * or fd copying.
 		 */
-		x86_set_memory_region(kvm, APIC_ACCESS_PAGE_PRIVATE_MEMSLOT, 0, 0);
-		x86_set_memory_region(kvm, IDENTITY_PAGETABLE_PRIVATE_MEMSLOT, 0, 0);
-		x86_set_memory_region(kvm, TSS_PRIVATE_MEMSLOT, 0, 0);
+		mutex_lock(&kvm->slots_lock);
+		__x86_set_memory_region(kvm, APIC_ACCESS_PAGE_PRIVATE_MEMSLOT,
+					0, 0);
+		__x86_set_memory_region(kvm, IDENTITY_PAGETABLE_PRIVATE_MEMSLOT,
+					0, 0);
+		__x86_set_memory_region(kvm, TSS_PRIVATE_MEMSLOT, 0, 0);
+		mutex_unlock(&kvm->slots_lock);
 	}
-	if (kvm_x86_ops->vm_destroy)
-		kvm_x86_ops->vm_destroy(kvm);
+	if (kvm->arch.created_mediated_pmu)
+		perf_release_mediated_pmu();
+	kvm_destroy_vcpus(kvm);
+	kvm_free_msr_filter(srcu_dereference_check(kvm->arch.msr_filter, &kvm->srcu, 1));
+#ifdef CONFIG_KVM_IOAPIC
 	kvm_pic_destroy(kvm);
 	kvm_ioapic_destroy(kvm);
-	kvm_free_vcpus(kvm);
+#endif
 	kvfree(rcu_dereference_check(kvm->arch.apic_map, 1));
+	kfree(srcu_dereference_check(kvm->arch.pmu_event_filter, &kvm->srcu, 1));
 	kvm_mmu_uninit_vm(kvm);
 	kvm_page_track_cleanup(kvm);
+	kvm_xen_destroy_vm(kvm);
 	kvm_hv_destroy_vm(kvm);
+	kvm_x86_call(vm_destroy)(kvm);
 }
 
-void kvm_arch_free_memslot(struct kvm *kvm, struct kvm_memory_slot *free,
-			   struct kvm_memory_slot *dont)
+static void memslot_rmap_free(struct kvm_memory_slot *slot)
 {
 	int i;
 
 	for (i = 0; i < KVM_NR_PAGE_SIZES; ++i) {
-		if (!dont || free->arch.rmap[i] != dont->arch.rmap[i]) {
-			kvfree(free->arch.rmap[i]);
-			free->arch.rmap[i] = NULL;
-		}
-		if (i == 0)
+		vfree(slot->arch.rmap[i]);
+		slot->arch.rmap[i] = NULL;
+	}
+}
+
+void kvm_arch_free_memslot(struct kvm *kvm, struct kvm_memory_slot *slot)
+{
+	int i;
+
+	memslot_rmap_free(slot);
+
+	for (i = 1; i < KVM_NR_PAGE_SIZES; ++i) {
+		vfree(slot->arch.lpage_info[i - 1]);
+		slot->arch.lpage_info[i - 1] = NULL;
+	}
+
+	kvm_page_track_free_memslot(slot);
+}
+
+int memslot_rmap_alloc(struct kvm_memory_slot *slot, unsigned long npages)
+{
+	const int sz = sizeof(*slot->arch.rmap[0]);
+	int i;
+
+	for (i = 0; i < KVM_NR_PAGE_SIZES; ++i) {
+		int level = i + 1;
+		int lpages = __kvm_mmu_slot_lpages(slot, npages, level);
+
+		if (slot->arch.rmap[i])
 			continue;
 
-		if (!dont || free->arch.lpage_info[i - 1] !=
-			     dont->arch.lpage_info[i - 1]) {
-			kvfree(free->arch.lpage_info[i - 1]);
-			free->arch.lpage_info[i - 1] = NULL;
+		slot->arch.rmap[i] = __vcalloc(lpages, sz, GFP_KERNEL_ACCOUNT);
+		if (!slot->arch.rmap[i]) {
+			memslot_rmap_free(slot);
+			return -ENOMEM;
 		}
 	}
 
-	kvm_page_track_free_memslot(free, dont);
+	return 0;
 }
 
-int kvm_arch_create_memslot(struct kvm *kvm, struct kvm_memory_slot *slot,
-			    unsigned long npages)
+static int kvm_alloc_memslot_metadata(struct kvm *kvm,
+				      struct kvm_memory_slot *slot)
 {
-	int i;
+	unsigned long npages = slot->npages;
+	int i, r;
 
-	for (i = 0; i < KVM_NR_PAGE_SIZES; ++i) {
+	/*
+	 * Clear out the previous array pointers for the KVM_MR_MOVE case.  The
+	 * old arrays will be freed by kvm_set_memory_region() if installing
+	 * the new memslot is successful.
+	 */
+	memset(&slot->arch, 0, sizeof(slot->arch));
+
+	if (kvm_memslots_have_rmaps(kvm)) {
+		r = memslot_rmap_alloc(slot, npages);
+		if (r)
+			return r;
+	}
+
+	for (i = 1; i < KVM_NR_PAGE_SIZES; ++i) {
 		struct kvm_lpage_info *linfo;
 		unsigned long ugfn;
 		int lpages;
 		int level = i + 1;
 
-		lpages = gfn_to_index(slot->base_gfn + npages - 1,
-				      slot->base_gfn, level) + 1;
+		lpages = __kvm_mmu_slot_lpages(slot, npages, level);
 
-		slot->arch.rmap[i] =
-			kvzalloc(lpages * sizeof(*slot->arch.rmap[i]), GFP_KERNEL);
-		if (!slot->arch.rmap[i])
-			goto out_free;
-		if (i == 0)
-			continue;
-
-		linfo = kvzalloc(lpages * sizeof(*linfo), GFP_KERNEL);
+		linfo = __vcalloc(lpages, sizeof(*linfo), GFP_KERNEL_ACCOUNT);
 		if (!linfo)
 			goto out_free;
 
@@ -8890,11 +13563,9 @@ int kvm_arch_create_memslot(struct kvm *kvm, struct kvm_memory_slot *slot,
 		ugfn = slot->userspace_addr >> PAGE_SHIFT;
 		/*
 		 * If the gfn and userspace address are not aligned wrt each
-		 * other, or if explicitly asked to, disable large page
-		 * support for this slot
+		 * other, disable large page support for this slot.
 		 */
-		if ((slot->base_gfn ^ ugfn) & (KVM_PAGES_PER_HPAGE(level) - 1) ||
-		    !kvm_largepages_enabled()) {
+		if ((slot->base_gfn ^ ugfn) & (KVM_PAGES_PER_HPAGE(level) - 1)) {
 			unsigned long j;
 
 			for (j = 0; j < lpages; ++j)
@@ -8902,188 +13573,243 @@ int kvm_arch_create_memslot(struct kvm *kvm, struct kvm_memory_slot *slot,
 		}
 	}
 
-	if (kvm_page_track_create_memslot(slot, npages))
+#ifdef CONFIG_KVM_GENERIC_MEMORY_ATTRIBUTES
+	kvm_mmu_init_memslot_memory_attributes(kvm, slot);
+#endif
+
+	if (kvm_page_track_create_memslot(kvm, slot, npages))
 		goto out_free;
 
 	return 0;
 
 out_free:
-	for (i = 0; i < KVM_NR_PAGE_SIZES; ++i) {
-		kvfree(slot->arch.rmap[i]);
-		slot->arch.rmap[i] = NULL;
-		if (i == 0)
-			continue;
+	memslot_rmap_free(slot);
 
-		kvfree(slot->arch.lpage_info[i - 1]);
+	for (i = 1; i < KVM_NR_PAGE_SIZES; ++i) {
+		vfree(slot->arch.lpage_info[i - 1]);
 		slot->arch.lpage_info[i - 1] = NULL;
 	}
 	return -ENOMEM;
 }
 
-void kvm_arch_memslots_updated(struct kvm *kvm, struct kvm_memslots *slots)
+void kvm_arch_memslots_updated(struct kvm *kvm, u64 gen)
 {
+	struct kvm_vcpu *vcpu;
+	unsigned long i;
+
 	/*
 	 * memslots->generation has been incremented.
 	 * mmio generation may have reached its maximum value.
 	 */
-	kvm_mmu_invalidate_mmio_sptes(kvm, slots);
+	kvm_mmu_invalidate_mmio_sptes(kvm, gen);
+
+	/* Force re-initialization of steal_time cache */
+	kvm_for_each_vcpu(i, vcpu, kvm)
+		kvm_vcpu_kick(vcpu);
 }
 
 int kvm_arch_prepare_memory_region(struct kvm *kvm,
-				struct kvm_memory_slot *memslot,
-				const struct kvm_userspace_memory_region *mem,
-				enum kvm_mr_change change)
+				   const struct kvm_memory_slot *old,
+				   struct kvm_memory_slot *new,
+				   enum kvm_mr_change change)
 {
+	/*
+	 * KVM doesn't support moving memslots when there are external page
+	 * trackers attached to the VM, i.e. if KVMGT is in use.
+	 */
+	if (change == KVM_MR_MOVE && kvm_page_track_has_external_user(kvm))
+		return -EINVAL;
+
+	if (change == KVM_MR_CREATE || change == KVM_MR_MOVE) {
+		if ((new->base_gfn + new->npages - 1) > kvm_mmu_max_gfn())
+			return -EINVAL;
+
+		if (kvm_is_gfn_alias(kvm, new->base_gfn + new->npages - 1))
+			return -EINVAL;
+
+		return kvm_alloc_memslot_metadata(kvm, new);
+	}
+
+	if (change == KVM_MR_FLAGS_ONLY)
+		memcpy(&new->arch, &old->arch, sizeof(old->arch));
+	else if (WARN_ON_ONCE(change != KVM_MR_DELETE))
+		return -EIO;
+
 	return 0;
 }
 
-static void kvm_mmu_slot_apply_flags(struct kvm *kvm,
-				     struct kvm_memory_slot *new)
+
+static void kvm_mmu_update_cpu_dirty_logging(struct kvm *kvm, bool enable)
 {
-	/* Still write protect RO slot */
-	if (new->flags & KVM_MEM_READONLY) {
-		kvm_mmu_slot_remove_write_access(kvm, new);
+	int nr_slots;
+
+	if (!kvm->arch.cpu_dirty_log_size)
 		return;
-	}
+
+	nr_slots = atomic_read(&kvm->nr_memslots_dirty_logging);
+	if ((enable && nr_slots == 1) || !nr_slots)
+		kvm_make_all_cpus_request(kvm, KVM_REQ_UPDATE_CPU_DIRTY_LOGGING);
+}
+
+static void kvm_mmu_slot_apply_flags(struct kvm *kvm,
+				     struct kvm_memory_slot *old,
+				     const struct kvm_memory_slot *new,
+				     enum kvm_mr_change change)
+{
+	u32 old_flags = old ? old->flags : 0;
+	u32 new_flags = new ? new->flags : 0;
+	bool log_dirty_pages = new_flags & KVM_MEM_LOG_DIRTY_PAGES;
 
 	/*
-	 * Call kvm_x86_ops dirty logging hooks when they are valid.
-	 *
-	 * kvm_x86_ops->slot_disable_log_dirty is called when:
-	 *
-	 *  - KVM_MR_CREATE with dirty logging is disabled
-	 *  - KVM_MR_FLAGS_ONLY with dirty logging is disabled in new flag
-	 *
-	 * The reason is, in case of PML, we need to set D-bit for any slots
-	 * with dirty logging disabled in order to eliminate unnecessary GPA
-	 * logging in PML buffer (and potential PML buffer full VMEXT). This
-	 * guarantees leaving PML enabled during guest's lifetime won't have
-	 * any additonal overhead from PML when guest is running with dirty
-	 * logging disabled for memory slots.
-	 *
-	 * kvm_x86_ops->slot_enable_log_dirty is called when switching new slot
-	 * to dirty logging mode.
-	 *
-	 * If kvm_x86_ops dirty logging hooks are invalid, use write protect.
-	 *
-	 * In case of write protect:
-	 *
-	 * Write protect all pages for dirty logging.
-	 *
-	 * All the sptes including the large sptes which point to this
-	 * slot are set to readonly. We can not create any new large
-	 * spte on this slot until the end of the logging.
-	 *
-	 * See the comments in fast_page_fault().
+	 * Update CPU dirty logging if dirty logging is being toggled.  This
+	 * applies to all operations.
 	 */
-	if (new->flags & KVM_MEM_LOG_DIRTY_PAGES) {
-		if (kvm_x86_ops->slot_enable_log_dirty)
-			kvm_x86_ops->slot_enable_log_dirty(kvm, new);
-		else
-			kvm_mmu_slot_remove_write_access(kvm, new);
+	if ((old_flags ^ new_flags) & KVM_MEM_LOG_DIRTY_PAGES)
+		kvm_mmu_update_cpu_dirty_logging(kvm, log_dirty_pages);
+
+	/*
+	 * Nothing more to do for RO slots (which can't be dirtied and can't be
+	 * made writable) or CREATE/MOVE/DELETE of a slot.
+	 *
+	 * For a memslot with dirty logging disabled:
+	 * CREATE:      No dirty mappings will already exist.
+	 * MOVE/DELETE: The old mappings will already have been cleaned up by
+	 *		kvm_arch_flush_shadow_memslot()
+	 *
+	 * For a memslot with dirty logging enabled:
+	 * CREATE:      No shadow pages exist, thus nothing to write-protect
+	 *		and no dirty bits to clear.
+	 * MOVE/DELETE: The old mappings will already have been cleaned up by
+	 *		kvm_arch_flush_shadow_memslot().
+	 */
+	if ((change != KVM_MR_FLAGS_ONLY) || (new_flags & KVM_MEM_READONLY))
+		return;
+
+	/*
+	 * READONLY and non-flags changes were filtered out above, and the only
+	 * other flag is LOG_DIRTY_PAGES, i.e. something is wrong if dirty
+	 * logging isn't being toggled on or off.
+	 */
+	if (WARN_ON_ONCE(!((old_flags ^ new_flags) & KVM_MEM_LOG_DIRTY_PAGES)))
+		return;
+
+	if (!log_dirty_pages) {
+		/*
+		 * Recover huge page mappings in the slot now that dirty logging
+		 * is disabled, i.e. now that KVM does not have to track guest
+		 * writes at 4KiB granularity.
+		 *
+		 * Dirty logging might be disabled by userspace if an ongoing VM
+		 * live migration is cancelled and the VM must continue running
+		 * on the source.
+		 */
+		kvm_mmu_recover_huge_pages(kvm, new);
 	} else {
-		if (kvm_x86_ops->slot_disable_log_dirty)
-			kvm_x86_ops->slot_disable_log_dirty(kvm, new);
+		/*
+		 * Initially-all-set does not require write protecting any page,
+		 * because they're all assumed to be dirty.
+		 */
+		if (kvm_dirty_log_manual_protect_and_init_set(kvm))
+			return;
+
+		if (READ_ONCE(eager_page_split))
+			kvm_mmu_slot_try_split_huge_pages(kvm, new, PG_LEVEL_4K);
+
+		if (kvm->arch.cpu_dirty_log_size) {
+			kvm_mmu_slot_leaf_clear_dirty(kvm, new);
+			kvm_mmu_slot_remove_write_access(kvm, new, PG_LEVEL_2M);
+		} else {
+			kvm_mmu_slot_remove_write_access(kvm, new, PG_LEVEL_4K);
+		}
+
+		/*
+		 * Unconditionally flush the TLBs after enabling dirty logging.
+		 * A flush is almost always going to be necessary (see below),
+		 * and unconditionally flushing allows the helpers to omit
+		 * the subtly complex checks when removing write access.
+		 *
+		 * Do the flush outside of mmu_lock to reduce the amount of
+		 * time mmu_lock is held.  Flushing after dropping mmu_lock is
+		 * safe as KVM only needs to guarantee the slot is fully
+		 * write-protected before returning to userspace, i.e. before
+		 * userspace can consume the dirty status.
+		 *
+		 * Flushing outside of mmu_lock requires KVM to be careful when
+		 * making decisions based on writable status of an SPTE, e.g. a
+		 * !writable SPTE doesn't guarantee a CPU can't perform writes.
+		 *
+		 * Specifically, KVM also write-protects guest page tables to
+		 * monitor changes when using shadow paging, and must guarantee
+		 * no CPUs can write to those page before mmu_lock is dropped.
+		 * Because CPUs may have stale TLB entries at this point, a
+		 * !writable SPTE doesn't guarantee CPUs can't perform writes.
+		 *
+		 * KVM also allows making SPTES writable outside of mmu_lock,
+		 * e.g. to allow dirty logging without taking mmu_lock.
+		 *
+		 * To handle these scenarios, KVM uses a separate software-only
+		 * bit (MMU-writable) to track if a SPTE is !writable due to
+		 * a guest page table being write-protected (KVM clears the
+		 * MMU-writable flag when write-protecting for shadow paging).
+		 *
+		 * The use of MMU-writable is also the primary motivation for
+		 * the unconditional flush.  Because KVM must guarantee that a
+		 * CPU doesn't contain stale, writable TLB entries for a
+		 * !MMU-writable SPTE, KVM must flush if it encounters any
+		 * MMU-writable SPTE regardless of whether the actual hardware
+		 * writable bit was set.  I.e. KVM is almost guaranteed to need
+		 * to flush, while unconditionally flushing allows the "remove
+		 * write access" helpers to ignore MMU-writable entirely.
+		 *
+		 * See is_writable_pte() for more details (the case involving
+		 * access-tracked SPTEs is particularly relevant).
+		 */
+		kvm_flush_remote_tlbs_memslot(kvm, new);
 	}
 }
 
 void kvm_arch_commit_memory_region(struct kvm *kvm,
-				const struct kvm_userspace_memory_region *mem,
-				const struct kvm_memory_slot *old,
+				struct kvm_memory_slot *old,
 				const struct kvm_memory_slot *new,
 				enum kvm_mr_change change)
 {
-	int nr_mmu_pages = 0;
+	if (change == KVM_MR_DELETE)
+		kvm_page_track_delete_slot(kvm, old);
 
-	if (!kvm->arch.n_requested_mmu_pages)
-		nr_mmu_pages = kvm_mmu_calculate_mmu_pages(kvm);
+	if (!kvm->arch.n_requested_mmu_pages &&
+	    (change == KVM_MR_CREATE || change == KVM_MR_DELETE)) {
+		unsigned long nr_mmu_pages;
 
-	if (nr_mmu_pages)
+		nr_mmu_pages = kvm->nr_memslot_pages / KVM_MEMSLOT_PAGES_TO_MMU_PAGES_RATIO;
+		nr_mmu_pages = max(nr_mmu_pages, KVM_MIN_ALLOC_MMU_PAGES);
 		kvm_mmu_change_mmu_pages(kvm, nr_mmu_pages);
+	}
 
-	/*
-	 * Dirty logging tracks sptes in 4k granularity, meaning that large
-	 * sptes have to be split.  If live migration is successful, the guest
-	 * in the source machine will be destroyed and large sptes will be
-	 * created in the destination. However, if the guest continues to run
-	 * in the source machine (for example if live migration fails), small
-	 * sptes will remain around and cause bad performance.
-	 *
-	 * Scan sptes if dirty logging has been stopped, dropping those
-	 * which can be collapsed into a single large-page spte.  Later
-	 * page faults will create the large-page sptes.
-	 */
-	if ((change != KVM_MR_DELETE) &&
-		(old->flags & KVM_MEM_LOG_DIRTY_PAGES) &&
-		!(new->flags & KVM_MEM_LOG_DIRTY_PAGES))
-		kvm_mmu_zap_collapsible_sptes(kvm, new);
+	kvm_mmu_slot_apply_flags(kvm, old, new, change);
 
-	/*
-	 * Set up write protection and/or dirty logging for the new slot.
-	 *
-	 * For KVM_MR_DELETE and KVM_MR_MOVE, the shadow pages of old slot have
-	 * been zapped so no dirty logging staff is needed for old slot. For
-	 * KVM_MR_FLAGS_ONLY, the old slot is essentially the same one as the
-	 * new and it's also covered when dealing with the new slot.
-	 *
-	 * FIXME: const-ify all uses of struct kvm_memory_slot.
-	 */
-	if (change != KVM_MR_DELETE)
-		kvm_mmu_slot_apply_flags(kvm, (struct kvm_memory_slot *) new);
-}
-
-void kvm_arch_flush_shadow_all(struct kvm *kvm)
-{
-	kvm_mmu_invalidate_zap_all_pages(kvm);
-}
-
-void kvm_arch_flush_shadow_memslot(struct kvm *kvm,
-				   struct kvm_memory_slot *slot)
-{
-	kvm_page_track_flush_slot(kvm, slot);
-}
-
-static inline bool kvm_vcpu_has_events(struct kvm_vcpu *vcpu)
-{
-	if (!list_empty_careful(&vcpu->async_pf.done))
-		return true;
-
-	if (kvm_apic_has_events(vcpu))
-		return true;
-
-	if (vcpu->arch.pv.pv_unhalted)
-		return true;
-
-	if (vcpu->arch.exception.pending)
-		return true;
-
-	if (kvm_test_request(KVM_REQ_NMI, vcpu) ||
-	    (vcpu->arch.nmi_pending &&
-	     kvm_x86_ops->nmi_allowed(vcpu)))
-		return true;
-
-	if (kvm_test_request(KVM_REQ_SMI, vcpu) ||
-	    (vcpu->arch.smi_pending && !is_smm(vcpu)))
-		return true;
-
-	if (kvm_arch_interrupt_allowed(vcpu) &&
-	    kvm_cpu_has_interrupt(vcpu))
-		return true;
-
-	if (kvm_hv_has_stimer_pending(vcpu))
-		return true;
-
-	return false;
-}
-
-int kvm_arch_vcpu_runnable(struct kvm_vcpu *vcpu)
-{
-	return kvm_vcpu_running(vcpu) || kvm_vcpu_has_events(vcpu);
+	/* Free the arrays associated with the old memslot. */
+	if (change == KVM_MR_MOVE)
+		kvm_arch_free_memslot(kvm, old);
 }
 
 bool kvm_arch_vcpu_in_kernel(struct kvm_vcpu *vcpu)
 {
-	return vcpu->arch.preempted_in_kernel;
+	WARN_ON_ONCE(!kvm_arch_pmi_in_guest(vcpu));
+
+	if (vcpu->arch.guest_state_protected)
+		return true;
+
+	return kvm_x86_call(get_cpl)(vcpu) == 0;
+}
+
+unsigned long kvm_arch_vcpu_get_ip(struct kvm_vcpu *vcpu)
+{
+	WARN_ON_ONCE(!kvm_arch_pmi_in_guest(vcpu));
+
+	if (vcpu->arch.guest_state_protected)
+		return 0;
+
+	return kvm_rip_read(vcpu);
 }
 
 int kvm_arch_vcpu_should_kick(struct kvm_vcpu *vcpu)
@@ -9093,41 +13819,45 @@ int kvm_arch_vcpu_should_kick(struct kvm_vcpu *vcpu)
 
 int kvm_arch_interrupt_allowed(struct kvm_vcpu *vcpu)
 {
-	return kvm_x86_ops->interrupt_allowed(vcpu);
+	return kvm_x86_call(interrupt_allowed)(vcpu, false);
 }
 
 unsigned long kvm_get_linear_rip(struct kvm_vcpu *vcpu)
 {
+	/* Can't read the RIP when guest state is protected, just return 0 */
+	if (vcpu->arch.guest_state_protected)
+		return 0;
+
 	if (is_64_bit_mode(vcpu))
 		return kvm_rip_read(vcpu);
 	return (u32)(get_segment_base(vcpu, VCPU_SREG_CS) +
 		     kvm_rip_read(vcpu));
 }
-EXPORT_SYMBOL_GPL(kvm_get_linear_rip);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_get_linear_rip);
 
 bool kvm_is_linear_rip(struct kvm_vcpu *vcpu, unsigned long linear_rip)
 {
 	return kvm_get_linear_rip(vcpu) == linear_rip;
 }
-EXPORT_SYMBOL_GPL(kvm_is_linear_rip);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_is_linear_rip);
 
 unsigned long kvm_get_rflags(struct kvm_vcpu *vcpu)
 {
 	unsigned long rflags;
 
-	rflags = kvm_x86_ops->get_rflags(vcpu);
+	rflags = kvm_x86_call(get_rflags)(vcpu);
 	if (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP)
 		rflags &= ~X86_EFLAGS_TF;
 	return rflags;
 }
-EXPORT_SYMBOL_GPL(kvm_get_rflags);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_get_rflags);
 
 static void __kvm_set_rflags(struct kvm_vcpu *vcpu, unsigned long rflags)
 {
 	if (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP &&
 	    kvm_is_linear_rip(vcpu, vcpu->arch.singlestep_rip))
 		rflags |= X86_EFLAGS_TF;
-	kvm_x86_ops->set_rflags(vcpu, rflags);
+	kvm_x86_call(set_rflags)(vcpu, rflags);
 }
 
 void kvm_set_rflags(struct kvm_vcpu *vcpu, unsigned long rflags)
@@ -9135,35 +13865,18 @@ void kvm_set_rflags(struct kvm_vcpu *vcpu, unsigned long rflags)
 	__kvm_set_rflags(vcpu, rflags);
 	kvm_make_request(KVM_REQ_EVENT, vcpu);
 }
-EXPORT_SYMBOL_GPL(kvm_set_rflags);
-
-void kvm_arch_async_page_ready(struct kvm_vcpu *vcpu, struct kvm_async_pf *work)
-{
-	int r;
-
-	if ((vcpu->arch.mmu.direct_map != work->arch.direct_map) ||
-	      work->wakeup_all)
-		return;
-
-	r = kvm_mmu_reload(vcpu);
-	if (unlikely(r))
-		return;
-
-	if (!vcpu->arch.mmu.direct_map &&
-	      work->arch.cr3 != vcpu->arch.mmu.get_cr3(vcpu))
-		return;
-
-	vcpu->arch.mmu.page_fault(vcpu, work->gva, 0, true);
-}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_set_rflags);
 
 static inline u32 kvm_async_pf_hash_fn(gfn_t gfn)
 {
+	BUILD_BUG_ON(!is_power_of_2(ASYNC_PF_PER_VCPU));
+
 	return hash_32(gfn & 0xffffffff, order_base_2(ASYNC_PF_PER_VCPU));
 }
 
 static inline u32 kvm_async_pf_next_probe(u32 key)
 {
-	return (key + 1) & (roundup_pow_of_two(ASYNC_PF_PER_VCPU) - 1);
+	return (key + 1) & (ASYNC_PF_PER_VCPU - 1);
 }
 
 static void kvm_add_async_pf_gfn(struct kvm_vcpu *vcpu, gfn_t gfn)
@@ -9181,7 +13894,7 @@ static u32 kvm_async_pf_gfn_slot(struct kvm_vcpu *vcpu, gfn_t gfn)
 	int i;
 	u32 key = kvm_async_pf_hash_fn(gfn);
 
-	for (i = 0; i < roundup_pow_of_two(ASYNC_PF_PER_VCPU) &&
+	for (i = 0; i < ASYNC_PF_PER_VCPU &&
 		     (vcpu->arch.apf.gfns[key] != gfn &&
 		      vcpu->arch.apf.gfns[key] != ~0); i++)
 		key = kvm_async_pf_next_probe(key);
@@ -9199,6 +13912,10 @@ static void kvm_del_async_pf_gfn(struct kvm_vcpu *vcpu, gfn_t gfn)
 	u32 i, j, k;
 
 	i = j = kvm_async_pf_gfn_slot(vcpu, gfn);
+
+	if (WARN_ON_ONCE(vcpu->arch.apf.gfns[i] != gfn))
+		return;
+
 	while (true) {
 		vcpu->arch.apf.gfns[i] = ~0;
 		do {
@@ -9217,194 +13934,589 @@ static void kvm_del_async_pf_gfn(struct kvm_vcpu *vcpu, gfn_t gfn)
 	}
 }
 
-static int apf_put_user(struct kvm_vcpu *vcpu, u32 val)
+static inline int apf_put_user_notpresent(struct kvm_vcpu *vcpu)
 {
+	u32 reason = KVM_PV_REASON_PAGE_NOT_PRESENT;
 
-	return kvm_write_guest_cached(vcpu->kvm, &vcpu->arch.apf.data, &val,
-				      sizeof(val));
+	return kvm_write_guest_cached(vcpu->kvm, &vcpu->arch.apf.data, &reason,
+				      sizeof(reason));
 }
 
-static int apf_get_user(struct kvm_vcpu *vcpu, u32 *val)
+static inline int apf_put_user_ready(struct kvm_vcpu *vcpu, u32 token)
 {
+	unsigned int offset = offsetof(struct kvm_vcpu_pv_apf_data, token);
 
-	return kvm_read_guest_cached(vcpu->kvm, &vcpu->arch.apf.data, val,
-				      sizeof(u32));
+	return kvm_write_guest_offset_cached(vcpu->kvm, &vcpu->arch.apf.data,
+					     &token, offset, sizeof(token));
 }
 
-void kvm_arch_async_page_not_present(struct kvm_vcpu *vcpu,
+static inline bool apf_pageready_slot_free(struct kvm_vcpu *vcpu)
+{
+	unsigned int offset = offsetof(struct kvm_vcpu_pv_apf_data, token);
+	u32 val;
+
+	if (kvm_read_guest_offset_cached(vcpu->kvm, &vcpu->arch.apf.data,
+					 &val, offset, sizeof(val)))
+		return false;
+
+	return !val;
+}
+
+static bool kvm_can_deliver_async_pf(struct kvm_vcpu *vcpu)
+{
+
+	if (!kvm_pv_async_pf_enabled(vcpu))
+		return false;
+
+	if (!(vcpu->arch.apf.msr_en_val & KVM_ASYNC_PF_SEND_ALWAYS) &&
+	    (vcpu->arch.guest_state_protected || !kvm_x86_call(get_cpl)(vcpu)))
+		return false;
+
+	if (is_guest_mode(vcpu)) {
+		/*
+		 * L1 needs to opt into the special #PF vmexits that are
+		 * used to deliver async page faults.
+		 */
+		return vcpu->arch.apf.msr_en_val & KVM_ASYNC_PF_DELIVERY_AS_PF_VMEXIT;
+	} else {
+		/*
+		 * Play it safe in case the guest temporarily disables paging.
+		 * The real mode IDT in particular is unlikely to have a #PF
+		 * exception setup.
+		 */
+		return is_paging(vcpu);
+	}
+}
+
+bool kvm_can_do_async_pf(struct kvm_vcpu *vcpu)
+{
+	if (unlikely(!lapic_in_kernel(vcpu) ||
+		     kvm_event_needs_reinjection(vcpu) ||
+		     kvm_is_exception_pending(vcpu)))
+		return false;
+
+	if (kvm_hlt_in_guest(vcpu->kvm) && !kvm_can_deliver_async_pf(vcpu))
+		return false;
+
+	/*
+	 * If interrupts are off we cannot even use an artificial
+	 * halt state.
+	 */
+	return kvm_arch_interrupt_allowed(vcpu);
+}
+
+bool kvm_arch_async_page_not_present(struct kvm_vcpu *vcpu,
 				     struct kvm_async_pf *work)
 {
 	struct x86_exception fault;
 
-	trace_kvm_async_pf_not_present(work->arch.token, work->gva);
+	trace_kvm_async_pf_not_present(work->arch.token, work->cr2_or_gpa);
 	kvm_add_async_pf_gfn(vcpu, work->arch.gfn);
 
-	if (!(vcpu->arch.apf.msr_val & KVM_ASYNC_PF_ENABLED) ||
-	    (vcpu->arch.apf.send_user_only &&
-	     kvm_x86_ops->get_cpl(vcpu) == 0))
-		kvm_make_request(KVM_REQ_APF_HALT, vcpu);
-	else if (!apf_put_user(vcpu, KVM_PV_REASON_PAGE_NOT_PRESENT)) {
+	if (kvm_can_deliver_async_pf(vcpu) &&
+	    !apf_put_user_notpresent(vcpu)) {
 		fault.vector = PF_VECTOR;
 		fault.error_code_valid = true;
 		fault.error_code = 0;
 		fault.nested_page_fault = false;
 		fault.address = work->arch.token;
 		fault.async_page_fault = true;
-		kvm_inject_page_fault(vcpu, &fault);
+		kvm_inject_page_fault(vcpu, &fault, false);
+		return true;
+	} else {
+		/*
+		 * It is not possible to deliver a paravirtualized asynchronous
+		 * page fault, but putting the guest in an artificial halt state
+		 * can be beneficial nevertheless: if an interrupt arrives, we
+		 * can deliver it timely and perhaps the guest will schedule
+		 * another process.  When the instruction that triggered a page
+		 * fault is retried, hopefully the page will be ready in the host.
+		 */
+		kvm_make_request(KVM_REQ_APF_HALT, vcpu);
+		return false;
 	}
 }
 
 void kvm_arch_async_page_present(struct kvm_vcpu *vcpu,
 				 struct kvm_async_pf *work)
 {
-	struct x86_exception fault;
-	u32 val;
+	struct kvm_lapic_irq irq = {
+		.delivery_mode = APIC_DM_FIXED,
+		.vector = vcpu->arch.apf.vec
+	};
 
 	if (work->wakeup_all)
 		work->arch.token = ~0; /* broadcast wakeup */
 	else
 		kvm_del_async_pf_gfn(vcpu, work->arch.gfn);
-	trace_kvm_async_pf_ready(work->arch.token, work->gva);
+	trace_kvm_async_pf_ready(work->arch.token, work->cr2_or_gpa);
 
-	if (vcpu->arch.apf.msr_val & KVM_ASYNC_PF_ENABLED &&
-	    !apf_get_user(vcpu, &val)) {
-		if (val == KVM_PV_REASON_PAGE_NOT_PRESENT &&
-		    vcpu->arch.exception.pending &&
-		    vcpu->arch.exception.nr == PF_VECTOR &&
-		    !apf_put_user(vcpu, 0)) {
-			vcpu->arch.exception.injected = false;
-			vcpu->arch.exception.pending = false;
-			vcpu->arch.exception.nr = 0;
-			vcpu->arch.exception.has_error_code = false;
-			vcpu->arch.exception.error_code = 0;
-		} else if (!apf_put_user(vcpu, KVM_PV_REASON_PAGE_READY)) {
-			fault.vector = PF_VECTOR;
-			fault.error_code_valid = true;
-			fault.error_code = 0;
-			fault.nested_page_fault = false;
-			fault.address = work->arch.token;
-			fault.async_page_fault = true;
-			kvm_inject_page_fault(vcpu, &fault);
-		}
+	if ((work->wakeup_all || work->notpresent_injected) &&
+	    kvm_pv_async_pf_enabled(vcpu) &&
+	    !apf_put_user_ready(vcpu, work->arch.token)) {
+		WRITE_ONCE(vcpu->arch.apf.pageready_pending, true);
+		kvm_apic_set_irq(vcpu, &irq, NULL);
 	}
+
 	vcpu->arch.apf.halted = false;
-	vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
+	kvm_set_mp_state(vcpu, KVM_MP_STATE_RUNNABLE);
 }
 
-bool kvm_arch_can_inject_async_page_present(struct kvm_vcpu *vcpu)
+void kvm_arch_async_page_present_queued(struct kvm_vcpu *vcpu)
 {
-	if (!(vcpu->arch.apf.msr_val & KVM_ASYNC_PF_ENABLED))
+	kvm_make_request(KVM_REQ_APF_READY, vcpu);
+
+	/* Pairs with smp_store_mb() in kvm_set_msr_common(). */
+	smp_mb__after_atomic();
+
+	if (!READ_ONCE(vcpu->arch.apf.pageready_pending))
+		kvm_vcpu_kick(vcpu);
+}
+
+bool kvm_arch_can_dequeue_async_page_present(struct kvm_vcpu *vcpu)
+{
+	if (!kvm_pv_async_pf_enabled(vcpu))
 		return true;
 	else
-		return kvm_can_do_async_pf(vcpu);
+		return kvm_lapic_enabled(vcpu) && apf_pageready_slot_free(vcpu);
 }
 
-void kvm_arch_start_assignment(struct kvm *kvm)
+static void kvm_noncoherent_dma_assignment_start_or_stop(struct kvm *kvm)
 {
-	atomic_inc(&kvm->arch.assigned_device_count);
+	/*
+	 * Non-coherent DMA assignment and de-assignment may affect whether or
+	 * not KVM honors guest PAT, and thus may cause changes in EPT SPTEs
+	 * due to toggling the "ignore PAT" bit.  Zap all SPTEs when the first
+	 * (or last) non-coherent device is (un)registered to so that new SPTEs
+	 * with the correct "ignore guest PAT" setting are created.
+	 *
+	 * If KVM always honors guest PAT, however, there is nothing to do.
+	 */
+	if (kvm_check_has_quirk(kvm, KVM_X86_QUIRK_IGNORE_GUEST_PAT))
+		kvm_zap_gfn_range(kvm, gpa_to_gfn(0), gpa_to_gfn(~0ULL));
 }
-EXPORT_SYMBOL_GPL(kvm_arch_start_assignment);
-
-void kvm_arch_end_assignment(struct kvm *kvm)
-{
-	atomic_dec(&kvm->arch.assigned_device_count);
-}
-EXPORT_SYMBOL_GPL(kvm_arch_end_assignment);
-
-bool kvm_arch_has_assigned_device(struct kvm *kvm)
-{
-	return atomic_read(&kvm->arch.assigned_device_count);
-}
-EXPORT_SYMBOL_GPL(kvm_arch_has_assigned_device);
 
 void kvm_arch_register_noncoherent_dma(struct kvm *kvm)
 {
-	atomic_inc(&kvm->arch.noncoherent_dma_count);
+	if (atomic_inc_return(&kvm->arch.noncoherent_dma_count) == 1)
+		kvm_noncoherent_dma_assignment_start_or_stop(kvm);
 }
-EXPORT_SYMBOL_GPL(kvm_arch_register_noncoherent_dma);
 
 void kvm_arch_unregister_noncoherent_dma(struct kvm *kvm)
 {
-	atomic_dec(&kvm->arch.noncoherent_dma_count);
+	if (!atomic_dec_return(&kvm->arch.noncoherent_dma_count))
+		kvm_noncoherent_dma_assignment_start_or_stop(kvm);
 }
-EXPORT_SYMBOL_GPL(kvm_arch_unregister_noncoherent_dma);
 
 bool kvm_arch_has_noncoherent_dma(struct kvm *kvm)
 {
 	return atomic_read(&kvm->arch.noncoherent_dma_count);
 }
-EXPORT_SYMBOL_GPL(kvm_arch_has_noncoherent_dma);
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_arch_has_noncoherent_dma);
 
-bool kvm_arch_has_irq_bypass(void)
+bool kvm_arch_no_poll(struct kvm_vcpu *vcpu)
 {
-	return kvm_x86_ops->update_pi_irte != NULL;
+	return (vcpu->arch.msr_kvm_poll_control & 1) == 0;
 }
 
-int kvm_arch_irq_bypass_add_producer(struct irq_bypass_consumer *cons,
-				      struct irq_bypass_producer *prod)
+#ifdef CONFIG_KVM_GUEST_MEMFD
+/*
+ * KVM doesn't yet support initializing guest_memfd memory as shared for VMs
+ * with private memory (the private vs. shared tracking needs to be moved into
+ * guest_memfd).
+ */
+bool kvm_arch_supports_gmem_init_shared(struct kvm *kvm)
 {
-	struct kvm_kernel_irqfd *irqfd =
-		container_of(cons, struct kvm_kernel_irqfd, consumer);
-
-	irqfd->producer = prod;
-
-	return kvm_x86_ops->update_pi_irte(irqfd->kvm,
-					   prod->irq, irqfd->gsi, 1);
+	return !kvm_arch_has_private_mem(kvm);
 }
 
-void kvm_arch_irq_bypass_del_producer(struct irq_bypass_consumer *cons,
-				      struct irq_bypass_producer *prod)
+#ifdef CONFIG_HAVE_KVM_ARCH_GMEM_PREPARE
+int kvm_arch_gmem_prepare(struct kvm *kvm, gfn_t gfn, kvm_pfn_t pfn, int max_order)
 {
-	int ret;
-	struct kvm_kernel_irqfd *irqfd =
-		container_of(cons, struct kvm_kernel_irqfd, consumer);
+	return kvm_x86_call(gmem_prepare)(kvm, pfn, gfn, max_order);
+}
+#endif
 
-	WARN_ON(irqfd->producer != prod);
-	irqfd->producer = NULL;
+#ifdef CONFIG_HAVE_KVM_ARCH_GMEM_INVALIDATE
+void kvm_arch_gmem_invalidate(kvm_pfn_t start, kvm_pfn_t end)
+{
+	kvm_x86_call(gmem_invalidate)(start, end);
+}
+#endif
+#endif
+
+int kvm_spec_ctrl_test_value(u64 value)
+{
+	/*
+	 * test that setting IA32_SPEC_CTRL to given value
+	 * is allowed by the host processor
+	 */
+
+	u64 saved_value;
+	unsigned long flags;
+	int ret = 0;
+
+	local_irq_save(flags);
+
+	if (rdmsrq_safe(MSR_IA32_SPEC_CTRL, &saved_value))
+		ret = 1;
+	else if (wrmsrq_safe(MSR_IA32_SPEC_CTRL, value))
+		ret = 1;
+	else
+		wrmsrq(MSR_IA32_SPEC_CTRL, saved_value);
+
+	local_irq_restore(flags);
+
+	return ret;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_spec_ctrl_test_value);
+
+void kvm_fixup_and_inject_pf_error(struct kvm_vcpu *vcpu, gva_t gva, u16 error_code)
+{
+	struct kvm_mmu *mmu = vcpu->arch.walk_mmu;
+	struct x86_exception fault;
+	u64 access = error_code &
+		(PFERR_WRITE_MASK | PFERR_FETCH_MASK | PFERR_USER_MASK);
+
+	if (!(error_code & PFERR_PRESENT_MASK) ||
+	    mmu->gva_to_gpa(vcpu, mmu, gva, access, &fault) != INVALID_GPA) {
+		/*
+		 * If vcpu->arch.walk_mmu->gva_to_gpa succeeded, the page
+		 * tables probably do not match the TLB.  Just proceed
+		 * with the error code that the processor gave.
+		 */
+		fault.vector = PF_VECTOR;
+		fault.error_code_valid = true;
+		fault.error_code = error_code;
+		fault.nested_page_fault = false;
+		fault.address = gva;
+		fault.async_page_fault = false;
+	}
+	vcpu->arch.walk_mmu->inject_page_fault(vcpu, &fault, true);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_fixup_and_inject_pf_error);
+
+/*
+ * Handles kvm_read/write_guest_virt*() result and either injects #PF or returns
+ * KVM_EXIT_INTERNAL_ERROR for cases not currently handled by KVM. Return value
+ * indicates whether exit to userspace is needed.
+ */
+int kvm_handle_memory_failure(struct kvm_vcpu *vcpu, int r,
+			      struct x86_exception *e)
+{
+	if (r == X86EMUL_PROPAGATE_FAULT) {
+		if (KVM_BUG_ON(!e, vcpu->kvm))
+			return -EIO;
+
+		kvm_inject_emulated_page_fault(vcpu, e);
+		return 1;
+	}
 
 	/*
-	 * When producer of consumer is unregistered, we change back to
-	 * remapped mode, so we can re-use the current implementation
-	 * when the irq is masked/disabled or the consumer side (KVM
-	 * int this case doesn't want to receive the interrupts.
-	*/
-	ret = kvm_x86_ops->update_pi_irte(irqfd->kvm, prod->irq, irqfd->gsi, 0);
-	if (ret)
-		printk(KERN_INFO "irq bypass consumer (token %p) unregistration"
-		       " fails: %d\n", irqfd->consumer.token, ret);
+	 * In case kvm_read/write_guest_virt*() failed with X86EMUL_IO_NEEDED
+	 * while handling a VMX instruction KVM could've handled the request
+	 * correctly by exiting to userspace and performing I/O but there
+	 * doesn't seem to be a real use-case behind such requests, just return
+	 * KVM_EXIT_INTERNAL_ERROR for now.
+	 */
+	kvm_prepare_emulation_failure_exit(vcpu);
+
+	return 0;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_handle_memory_failure);
+
+int kvm_handle_invpcid(struct kvm_vcpu *vcpu, unsigned long type, gva_t gva)
+{
+	bool pcid_enabled;
+	struct x86_exception e;
+	struct {
+		u64 pcid;
+		u64 gla;
+	} operand;
+	int r;
+
+	r = kvm_read_guest_virt(vcpu, gva, &operand, sizeof(operand), &e);
+	if (r != X86EMUL_CONTINUE)
+		return kvm_handle_memory_failure(vcpu, r, &e);
+
+	if (operand.pcid >> 12 != 0) {
+		kvm_inject_gp(vcpu, 0);
+		return 1;
+	}
+
+	if (WARN_ON_ONCE(tdp_enabled))
+		return 0;
+
+	pcid_enabled = kvm_is_cr4_bit_set(vcpu, X86_CR4_PCIDE);
+
+	switch (type) {
+	case INVPCID_TYPE_INDIV_ADDR:
+		/*
+		 * LAM doesn't apply to addresses that are inputs to TLB
+		 * invalidation.
+		 */
+		if ((!pcid_enabled && (operand.pcid != 0)) ||
+		    is_noncanonical_invlpg_address(operand.gla, vcpu)) {
+			kvm_inject_gp(vcpu, 0);
+			return 1;
+		}
+		kvm_mmu_invpcid_gva(vcpu, operand.gla, operand.pcid);
+		return kvm_skip_emulated_instruction(vcpu);
+
+	case INVPCID_TYPE_SINGLE_CTXT:
+		if (!pcid_enabled && (operand.pcid != 0)) {
+			kvm_inject_gp(vcpu, 0);
+			return 1;
+		}
+
+		/*
+		 * When ERAPS is supported, invalidating a specific PCID clears
+		 * the RAP (Return Address Predicator).
+		 */
+		if (guest_cpu_cap_has(vcpu, X86_FEATURE_ERAPS))
+			kvm_register_mark_dirty(vcpu, VCPU_REG_ERAPS);
+
+		kvm_invalidate_pcid(vcpu, operand.pcid);
+		return kvm_skip_emulated_instruction(vcpu);
+
+	case INVPCID_TYPE_ALL_NON_GLOBAL:
+		/*
+		 * Currently, KVM doesn't mark global entries in the shadow
+		 * page tables, so a non-global flush just degenerates to a
+		 * global flush. If needed, we could optimize this later by
+		 * keeping track of global entries in shadow page tables.
+		 */
+
+		fallthrough;
+	case INVPCID_TYPE_ALL_INCL_GLOBAL:
+		/*
+		 * Don't bother marking VCPU_REG_ERAPS dirty, SVM will take
+		 * care of doing so when emulating the full guest TLB flush
+		 * (the RAP is cleared on all implicit TLB flushes).
+		 */
+		kvm_make_request(KVM_REQ_TLB_FLUSH_GUEST, vcpu);
+		return kvm_skip_emulated_instruction(vcpu);
+
+	default:
+		kvm_inject_gp(vcpu, 0);
+		return 1;
+	}
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_handle_invpcid);
+
+static int complete_sev_es_emulated_mmio(struct kvm_vcpu *vcpu)
+{
+	struct kvm_run *run = vcpu->run;
+	struct kvm_mmio_fragment *frag;
+	unsigned int len;
+
+	if (KVM_BUG_ON(!vcpu->mmio_needed, vcpu->kvm))
+		return -EIO;
+
+	/* Complete previous fragment */
+	frag = &vcpu->mmio_fragments[vcpu->mmio_cur_fragment];
+	len = min(8u, frag->len);
+	if (!vcpu->mmio_is_write)
+		memcpy(frag->data, run->mmio.data, len);
+
+	if (frag->len <= 8) {
+		/* Switch to the next fragment. */
+		frag++;
+		vcpu->mmio_cur_fragment++;
+	} else {
+		/* Go forward to the next mmio piece. */
+		frag->data += len;
+		frag->gpa += len;
+		frag->len -= len;
+	}
+
+	if (vcpu->mmio_cur_fragment >= vcpu->mmio_nr_fragments) {
+		vcpu->mmio_needed = 0;
+
+		/*
+		 * All done, as frag->data always points at the GHCB scratch
+		 * area and VMGEXIT is trap-like (RIP is advanced by hardware).
+		 */
+		return 1;
+	}
+
+	// More MMIO is needed
+	kvm_prepare_emulated_mmio_exit(vcpu, frag);
+	vcpu->arch.complete_userspace_io = complete_sev_es_emulated_mmio;
+	return 0;
 }
 
-int kvm_arch_update_irqfd_routing(struct kvm *kvm, unsigned int host_irq,
-				   uint32_t guest_irq, bool set)
+int kvm_sev_es_mmio(struct kvm_vcpu *vcpu, bool is_write, gpa_t gpa,
+		    unsigned int bytes, void *data)
 {
-	if (!kvm_x86_ops->update_pi_irte)
+	struct kvm_mmio_fragment *frag;
+	int handled;
+
+	if (!data || WARN_ON_ONCE(object_is_on_stack(data)))
 		return -EINVAL;
 
-	return kvm_x86_ops->update_pi_irte(kvm, host_irq, guest_irq, set);
-}
+	if (is_write)
+		handled = vcpu_mmio_write(vcpu, gpa, bytes, data);
+	else
+		handled = vcpu_mmio_read(vcpu, gpa, bytes, data);
+	if (handled == bytes)
+		return 1;
 
-bool kvm_vector_hashing_enabled(void)
+	bytes -= handled;
+	gpa += handled;
+	data += handled;
+
+	/*
+	 * TODO: Determine whether or not userspace plays nice with MMIO
+	 *       requests that split a page boundary.
+	 */
+	frag = vcpu->mmio_fragments;
+	frag->len = bytes;
+	frag->gpa = gpa;
+	frag->data = data;
+
+	vcpu->mmio_needed = 1;
+	vcpu->mmio_cur_fragment = 0;
+	vcpu->mmio_nr_fragments = 1;
+	vcpu->mmio_is_write = is_write;
+
+	kvm_prepare_emulated_mmio_exit(vcpu, frag);
+	vcpu->arch.complete_userspace_io = complete_sev_es_emulated_mmio;
+	return 0;
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_sev_es_mmio);
+
+static void advance_sev_es_emulated_pio(struct kvm_vcpu *vcpu, unsigned count, int size)
 {
-	return vector_hashing;
+	vcpu->arch.sev_pio_count -= count;
+	vcpu->arch.sev_pio_data += count * size;
 }
-EXPORT_SYMBOL_GPL(kvm_vector_hashing_enabled);
 
+static int kvm_sev_es_outs(struct kvm_vcpu *vcpu, unsigned int size,
+			   unsigned int port);
+
+static int complete_sev_es_emulated_outs(struct kvm_vcpu *vcpu)
+{
+	int size = vcpu->arch.pio.size;
+	int port = vcpu->arch.pio.port;
+
+	vcpu->arch.pio.count = 0;
+	if (vcpu->arch.sev_pio_count)
+		return kvm_sev_es_outs(vcpu, size, port);
+	return 1;
+}
+
+static int kvm_sev_es_outs(struct kvm_vcpu *vcpu, unsigned int size,
+			   unsigned int port)
+{
+	for (;;) {
+		unsigned int count =
+			min_t(unsigned int, PAGE_SIZE / size, vcpu->arch.sev_pio_count);
+		int ret = emulator_pio_out(vcpu, size, port, vcpu->arch.sev_pio_data, count);
+
+		/* memcpy done already by emulator_pio_out.  */
+		advance_sev_es_emulated_pio(vcpu, count, size);
+		if (!ret)
+			break;
+
+		/* Emulation done by the kernel.  */
+		if (!vcpu->arch.sev_pio_count)
+			return 1;
+	}
+
+	vcpu->arch.complete_userspace_io = complete_sev_es_emulated_outs;
+	return 0;
+}
+
+static int kvm_sev_es_ins(struct kvm_vcpu *vcpu, unsigned int size,
+			  unsigned int port);
+
+static int complete_sev_es_emulated_ins(struct kvm_vcpu *vcpu)
+{
+	unsigned count = vcpu->arch.pio.count;
+	int size = vcpu->arch.pio.size;
+	int port = vcpu->arch.pio.port;
+
+	complete_emulator_pio_in(vcpu, vcpu->arch.sev_pio_data);
+	advance_sev_es_emulated_pio(vcpu, count, size);
+	if (vcpu->arch.sev_pio_count)
+		return kvm_sev_es_ins(vcpu, size, port);
+	return 1;
+}
+
+static int kvm_sev_es_ins(struct kvm_vcpu *vcpu, unsigned int size,
+			  unsigned int port)
+{
+	for (;;) {
+		unsigned int count =
+			min_t(unsigned int, PAGE_SIZE / size, vcpu->arch.sev_pio_count);
+		if (!emulator_pio_in(vcpu, size, port, vcpu->arch.sev_pio_data, count))
+			break;
+
+		/* Emulation done by the kernel.  */
+		advance_sev_es_emulated_pio(vcpu, count, size);
+		if (!vcpu->arch.sev_pio_count)
+			return 1;
+	}
+
+	vcpu->arch.complete_userspace_io = complete_sev_es_emulated_ins;
+	return 0;
+}
+
+int kvm_sev_es_string_io(struct kvm_vcpu *vcpu, unsigned int size,
+			 unsigned int port, void *data,  unsigned int count,
+			 int in)
+{
+	vcpu->arch.sev_pio_data = data;
+	vcpu->arch.sev_pio_count = count;
+	return in ? kvm_sev_es_ins(vcpu, size, port)
+		  : kvm_sev_es_outs(vcpu, size, port);
+}
+EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_sev_es_string_io);
+
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_entry);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_exit);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_mmio);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_fast_mmio);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_inj_virq);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_page_fault);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_msr);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_cr);
-EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_nested_vmrun);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_nested_vmenter);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_nested_vmexit);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_nested_vmexit_inject);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_nested_intr_vmexit);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_nested_vmenter_failed);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_invlpga);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_skinit);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_nested_intercepts);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_write_tsc_offset);
-EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_ple_window);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_ple_window_update);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_pml_full);
-EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_pi_irte_update);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_avic_unaccelerated_access);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_avic_incomplete_ipi);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_avic_ga_log);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_avic_kick_vcpu_slowpath);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_avic_doorbell);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_apicv_accept_irq);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_vmgexit_enter);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_vmgexit_exit);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_vmgexit_msr_protocol_enter);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_vmgexit_msr_protocol_exit);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_rmp_fault);
+
+static int __init kvm_x86_init(void)
+{
+	kvm_init_xstate_sizes();
+
+	kvm_mmu_x86_module_init();
+	mitigate_smt_rsb &= boot_cpu_has_bug(X86_BUG_SMT_RSB) && cpu_smt_possible();
+	return 0;
+}
+module_init(kvm_x86_init);
+
+static void __exit kvm_x86_exit(void)
+{
+	WARN_ON_ONCE(static_branch_unlikely(&kvm_has_noapic_vcpu));
+}
+module_exit(kvm_x86_exit);

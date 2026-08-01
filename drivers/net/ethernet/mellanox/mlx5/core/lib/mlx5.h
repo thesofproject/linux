@@ -33,11 +33,45 @@
 #ifndef __LIB_MLX5_H__
 #define __LIB_MLX5_H__
 
+#include "mlx5_core.h"
+
 void mlx5_init_reserved_gids(struct mlx5_core_dev *dev);
 void mlx5_cleanup_reserved_gids(struct mlx5_core_dev *dev);
 int  mlx5_core_reserve_gids(struct mlx5_core_dev *dev, unsigned int count);
 void mlx5_core_unreserve_gids(struct mlx5_core_dev *dev, unsigned int count);
 int  mlx5_core_reserved_gid_alloc(struct mlx5_core_dev *dev, int *gid_index);
 void mlx5_core_reserved_gid_free(struct mlx5_core_dev *dev, int gid_index);
+int mlx5_crdump_enable(struct mlx5_core_dev *dev);
+void mlx5_crdump_disable(struct mlx5_core_dev *dev);
+int mlx5_crdump_collect(struct mlx5_core_dev *dev, u32 *cr_data);
 
+static inline struct net_device *mlx5_uplink_netdev_get(struct mlx5_core_dev *mdev)
+{
+	struct mlx5e_resources *mlx5e_res = &mdev->mlx5e_res;
+	struct net_device *netdev;
+
+	mutex_lock(&mlx5e_res->uplink_netdev_lock);
+	netdev = mlx5e_res->uplink_netdev;
+	netdev_hold(netdev, &mlx5e_res->tracker, GFP_KERNEL);
+	mutex_unlock(&mlx5e_res->uplink_netdev_lock);
+	return netdev;
+}
+
+static inline void mlx5_uplink_netdev_put(struct mlx5_core_dev *mdev,
+					  struct net_device *netdev)
+{
+	netdev_put(netdev, &mdev->mlx5e_res.tracker);
+}
+
+struct mlx5_sd;
+
+static inline struct mlx5_sd *mlx5_get_sd(struct mlx5_core_dev *dev)
+{
+	return dev->sd;
+}
+
+static inline void mlx5_set_sd(struct mlx5_core_dev *dev, struct mlx5_sd *sd)
+{
+	dev->sd = sd;
+}
 #endif

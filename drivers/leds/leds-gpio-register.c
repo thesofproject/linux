@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2011 Pengutronix
  * Uwe Kleine-Koenig <u.kleine-koenig@pengutronix.de>
- *
- * This program is free software; you can redistribute it and/or modify it under
- * the terms of the GNU General Public License version 2 as published by the
- * Free Software Foundation.
  */
 #include <linux/err.h>
 #include <linux/leds.h>
@@ -13,6 +10,7 @@
 
 /**
  * gpio_led_register_device - register a gpio-led device
+ * @id: platform ID
  * @pdata: the platform data used for the new device
  *
  * Makes a copy of pdata and pdata->leds and registers a new leds-gpio device

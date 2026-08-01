@@ -1,23 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Intel(R) Ethernet Switch Host Interface Driver
- * Copyright(c) 2013 - 2017 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- */
+/* Copyright(c) 2013 - 2019 Intel Corporation. */
 
 #ifndef _FM10K_H_
 #define _FM10K_H_
@@ -59,7 +41,7 @@ struct fm10k_l2_accel {
 	u16 count;
 	u16 dglort;
 	struct rcu_head rcu;
-	struct net_device *macvlan[0];
+	struct net_device *macvlan[];
 };
 
 enum fm10k_ring_state_t {
@@ -195,14 +177,10 @@ static inline struct netdev_queue *txring_txq(const struct fm10k_ring *ring)
 #define MIN_Q_VECTORS	1
 enum fm10k_non_q_vectors {
 	FM10K_MBX_VECTOR,
-#define NON_Q_VECTORS_VF NON_Q_VECTORS_PF
-	NON_Q_VECTORS_PF
+	NON_Q_VECTORS
 };
 
-#define NON_Q_VECTORS(hw)	(((hw)->mac.type == fm10k_mac_pf) ? \
-						NON_Q_VECTORS_PF : \
-						NON_Q_VECTORS_VF)
-#define MIN_MSIX_COUNT(hw)	(MIN_Q_VECTORS + NON_Q_VECTORS(hw))
+#define MIN_MSIX_COUNT(hw)	(MIN_Q_VECTORS + NON_Q_VECTORS)
 
 struct fm10k_q_vector {
 	struct fm10k_intfc *interface;
@@ -211,16 +189,17 @@ struct fm10k_q_vector {
 	struct fm10k_ring_container rx, tx;
 
 	struct napi_struct napi;
+	struct rcu_head rcu;	/* to avoid race with update stats on free */
+
 	cpumask_t affinity_mask;
 	char name[IFNAMSIZ + 9];
 
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *dbg_q_vector;
 #endif /* CONFIG_DEBUG_FS */
-	struct rcu_head rcu;	/* to avoid race with update stats on free */
 
 	/* for dynamic allocation of rings associated with this q_vector */
-	struct fm10k_ring ring[0] ____cacheline_internodealigned_in_smp;
+	struct fm10k_ring ring[] ____cacheline_internodealigned_in_smp;
 };
 
 enum fm10k_ring_f_enum {
@@ -240,13 +219,7 @@ struct fm10k_iov_data {
 	unsigned int		num_vfs;
 	unsigned int		next_vf_mbx;
 	struct rcu_head		rcu;
-	struct fm10k_vf_info	vf_info[0];
-};
-
-struct fm10k_udp_port {
-	struct list_head	list;
-	sa_family_t		sa_family;
-	__be16			port;
+	struct fm10k_vf_info	vf_info[];
 };
 
 enum fm10k_macvlan_request_type {
@@ -392,8 +365,8 @@ struct fm10k_intfc {
 	u32 rssrk[FM10K_RSSRK_SIZE];
 
 	/* UDP encapsulation port tracking information */
-	struct list_head vxlan_port;
-	struct list_head geneve_port;
+	__be16 vxlan_port;
+	__be16 geneve_port;
 
 	/* MAC/VLAN update queue */
 	struct list_head macvlan_requests;
@@ -498,7 +471,6 @@ struct fm10k_cb {
 
 /* main */
 extern char fm10k_driver_name[];
-extern const char fm10k_driver_version[];
 int fm10k_init_queueing_scheme(struct fm10k_intfc *interface);
 void fm10k_clear_queueing_scheme(struct fm10k_intfc *interface);
 __be16 fm10k_tx_encap_offload(struct sk_buff *skb);
@@ -522,9 +494,6 @@ void fm10k_update_stats(struct fm10k_intfc *interface);
 void fm10k_service_event_schedule(struct fm10k_intfc *interface);
 void fm10k_macvlan_schedule(struct fm10k_intfc *interface);
 void fm10k_update_rx_drop_en(struct fm10k_intfc *interface);
-#ifdef CONFIG_NET_POLL_CONTROLLER
-void fm10k_netpoll(struct net_device *netdev);
-#endif
 
 /* Netdev */
 struct net_device *fm10k_alloc_netdev(const struct fm10k_info *info);
@@ -559,6 +528,7 @@ void fm10k_iov_suspend(struct pci_dev *pdev);
 int fm10k_iov_resume(struct pci_dev *pdev);
 void fm10k_iov_disable(struct pci_dev *pdev);
 int fm10k_iov_configure(struct pci_dev *pdev, int num_vfs);
+void fm10k_iov_update_stats(struct fm10k_intfc *interface);
 s32 fm10k_iov_update_pvid(struct fm10k_intfc *interface, u16 glort, u16 pvid);
 int fm10k_ndo_set_vf_mac(struct net_device *netdev, int vf_idx, u8 *mac);
 int fm10k_ndo_set_vf_vlan(struct net_device *netdev,
@@ -567,6 +537,8 @@ int fm10k_ndo_set_vf_bw(struct net_device *netdev, int vf_idx,
 			int __always_unused min_rate, int max_rate);
 int fm10k_ndo_get_vf_config(struct net_device *netdev,
 			    int vf_idx, struct ifla_vf_info *ivi);
+int fm10k_ndo_get_vf_stats(struct net_device *netdev,
+			   int vf_idx, struct ifla_vf_stats *stats);
 
 /* DebugFS */
 #ifdef CONFIG_DEBUG_FS

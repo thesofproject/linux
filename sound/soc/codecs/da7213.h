@@ -1,13 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * da7213.h - DA7213 ASoC Codec Driver
  *
  * Copyright (c) 2013 Dialog Semiconductor
  *
  * Author: Adam Thomson <Adam.Thomson.Opensource@diasemi.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * Author: David Rau <David.Rau.opensource@dm.renesas.com>
  */
 
 #ifndef _DA7213_H
@@ -15,6 +13,7 @@
 
 #include <linux/clk.h>
 #include <linux/regmap.h>
+#include <linux/regulator/consumer.h>
 #include <sound/da7213.h>
 
 /*
@@ -137,13 +136,24 @@
 #define DA7213_DAC_NG_ON_THRESHOLD	0xB1
 #define DA7213_DAC_NG_CTRL		0xB2
 
+#define DA7213_TONE_GEN_CFG1		0xB4
+#define DA7213_TONE_GEN_CFG2		0xB5
+#define DA7213_TONE_GEN_CYCLES		0xB6
+#define DA7213_TONE_GEN_FREQ1_L		0xB7
+#define DA7213_TONE_GEN_FREQ1_U		0xB8
+#define DA7213_TONE_GEN_FREQ2_L		0xB9
+#define DA7213_TONE_GEN_FREQ2_U		0xBA
+#define DA7213_TONE_GEN_ON_PER		0xBB
+#define DA7213_TONE_GEN_OFF_PER		0xBC
 
 /*
  * Bit fields
  */
 
+#define DA7213_SWITCH_EN_MAX		0x1
+
 /* DA7213_PLL_STATUS = 0x03 */
-#define DA7219_PLL_SRM_LOCK					(0x1 << 1)
+#define DA7213_PLL_SRM_LOCK					(0x1 << 1)
 
 /* DA7213_SR = 0x22 */
 #define DA7213_SR_8000						(0x1 << 0)
@@ -181,7 +191,9 @@
 #define DA7213_DAI_BCLKS_PER_WCLK_256				(0x3 << 0)
 #define DA7213_DAI_BCLKS_PER_WCLK_MASK				(0x3 << 0)
 #define DA7213_DAI_CLK_POL_INV					(0x1 << 2)
+#define DA7213_DAI_CLK_POL_MASK					(0x1 << 2)
 #define DA7213_DAI_WCLK_POL_INV					(0x1 << 3)
+#define DA7213_DAI_WCLK_POL_MASK				(0x1 << 3)
 #define DA7213_DAI_CLK_EN_MASK					(0x1 << 7)
 
 /* DA7213_DAI_CTRL = 0x29 */
@@ -195,6 +207,8 @@
 #define DA7213_DAI_WORD_LENGTH_S24_LE				(0x2 << 2)
 #define DA7213_DAI_WORD_LENGTH_S32_LE				(0x3 << 2)
 #define DA7213_DAI_WORD_LENGTH_MASK				(0x3 << 2)
+#define DA7213_DAI_MONO_MODE_EN					(0x1 << 4)
+#define DA7213_DAI_MONO_MODE_MASK				(0x1 << 4)
 #define DA7213_DAI_EN_SHIFT					7
 
 /* DA7213_DIG_ROUTING_DAI = 0x21 */
@@ -482,6 +496,55 @@
 #define DA7213_DAC_NG_EN_SHIFT					7
 #define DA7213_DAC_NG_EN_MAX					0x1
 
+/* DA7213_TONE_GEN_CFG1 = 0xB4 */
+#define DA7213_DTMF_REG_SHIFT		0
+#define DA7213_DTMF_REG_MASK		(0xF << 0)
+#define DA7213_DTMF_REG_MAX		16
+#define DA7213_DTMF_EN_SHIFT		4
+#define DA7213_DTMF_EN_MASK		(0x1 << 4)
+#define DA7213_START_STOPN_SHIFT	7
+#define DA7213_START_STOPN_MASK		(0x1 << 7)
+
+/* DA7213_TONE_GEN_CFG2 = 0xB5 */
+#define DA7213_SWG_SEL_SHIFT		0
+#define DA7213_SWG_SEL_MASK		(0x3 << 0)
+#define DA7213_SWG_SEL_MAX		4
+#define DA7213_SWG_SEL_SRAMP		(0x3 << 0)
+#define DA7213_TONE_GEN_GAIN_SHIFT	4
+#define DA7213_TONE_GEN_GAIN_MASK	(0xF << 4)
+#define DA7213_TONE_GEN_GAIN_MAX	0xF
+#define DA7213_TONE_GEN_GAIN_MINUS_9DB	(0x3 << 4)
+#define DA7213_TONE_GEN_GAIN_MINUS_15DB	(0x5 << 4)
+
+/* DA7213_TONE_GEN_CYCLES = 0xB6 */
+#define DA7213_BEEP_CYCLES_SHIFT	0
+#define DA7213_BEEP_CYCLES_MASK		(0x7 << 0)
+
+/* DA7213_TONE_GEN_FREQ1_L = 0xB7 */
+#define DA7213_FREQ1_L_SHIFT	0
+#define DA7213_FREQ1_L_MASK	(0xFF << 0)
+#define DA7213_FREQ_MAX		0xFFFF
+
+/* DA7213_TONE_GEN_FREQ1_U = 0xB8 */
+#define DA7213_FREQ1_U_SHIFT	0
+#define DA7213_FREQ1_U_MASK	(0xFF << 0)
+
+/* DA7213_TONE_GEN_FREQ2_L = 0xB9 */
+#define DA7213_FREQ2_L_SHIFT	0
+#define DA7213_FREQ2_L_MASK	(0xFF << 0)
+
+/* DA7213_TONE_GEN_FREQ2_U = 0xBA */
+#define DA7213_FREQ2_U_SHIFT	0
+#define DA7213_FREQ2_U_MASK	(0xFF << 0)
+
+/* DA7213_TONE_GEN_ON_PER = 0xBB */
+#define DA7213_BEEP_ON_PER_SHIFT	0
+#define DA7213_BEEP_ON_PER_MASK		(0x3F << 0)
+#define DA7213_BEEP_ON_OFF_MAX		0x3F
+
+/* DA7213_TONE_GEN_OFF_PER = 0xBC */
+#define DA7213_BEEP_OFF_PER_SHIFT	0
+#define DA7213_BEEP_OFF_PER_MASK	(0x3F << 0)
 
 /*
  * General defines
@@ -522,16 +585,30 @@ enum da7213_sys_clk {
 	DA7213_SYSCLK_PLL_32KHZ
 };
 
+/* Regulators */
+enum da7213_supplies {
+	DA7213_SUPPLY_VDDA = 0,
+	DA7213_SUPPLY_VDDIO,
+	DA7213_NUM_SUPPLIES,
+};
+
 /* Codec private data */
 struct da7213_priv {
 	struct regmap *regmap;
+	struct device *dev;
+	struct mutex ctrl_lock;
+	struct regulator_bulk_data supplies[DA7213_NUM_SUPPLIES];
 	struct clk *mclk;
 	unsigned int mclk_rate;
+	unsigned int out_rate;
+	unsigned int fin_min_rate;
 	int clk_src;
 	bool master;
 	bool alc_calib_auto;
 	bool alc_en;
+	bool fixed_clk_auto_pll;
 	struct da7213_platform_data *pdata;
+	int fmt;
 };
 
 #endif /* _DA7213_H */

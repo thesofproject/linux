@@ -1,10 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *	w1_ds28e17.c - w1 family 19 (DS28E17) driver
  *
  * Copyright (c) 2016 Jan Kandziora <jjj@gmx.de>
- *
- * This source code is licensed under the GNU General Public License,
- * Version 2. See the file COPYING for more details.
  */
 
 #include <linux/crc16.h>
@@ -33,12 +31,12 @@ MODULE_ALIAS("w1-family-" __stringify(W1_FAMILY_DS28E17));
 
 /* Default I2C speed to be set when a DS28E17 is detected. */
 static int i2c_speed = 100;
-module_param_named(speed, i2c_speed, int, (S_IRUSR | S_IWUSR));
+module_param_named(speed, i2c_speed, int, 0600);
 MODULE_PARM_DESC(speed, "Default I2C speed to be set when a DS28E17 is detected");
 
 /* Default I2C stretch value to be set when a DS28E17 is detected. */
 static char i2c_stretch = 1;
-module_param_named(stretch, i2c_stretch, byte, (S_IRUSR | S_IWUSR));
+module_param_named(stretch, i2c_stretch, byte, 0600);
 MODULE_PARM_DESC(stretch, "Default I2C stretch value to be set when a DS28E17 is detected");
 
 /* DS28E17 device command codes. */
@@ -61,7 +59,7 @@ MODULE_PARM_DESC(stretch, "Default I2C stretch value to be set when a DS28E17 is
 /*
  * Maximum number of I2C bytes to transfer within one CRC16 protected onewire
  * command.
- * */
+ */
 #define W1_F19_WRITE_DATA_LIMIT 255
 
 /* Maximum number of I2C bytes to read with one onewire command. */
@@ -585,7 +583,7 @@ static ssize_t speed_show(struct device *dev, struct device_attribute *attr,
 		return result;
 
 	/* Return current speed value. */
-	return sprintf(buf, "%d\n", result);
+	return sysfs_emit(buf, "%d\n", result);
 }
 
 static ssize_t speed_store(struct device *dev, struct device_attribute *attr,
@@ -635,7 +633,7 @@ static ssize_t stretch_show(struct device *dev, struct device_attribute *attr,
 	struct w1_f19_data *data = sl->family_data;
 
 	/* Return current stretch value. */
-	return sprintf(buf, "%d\n", data->stretch);
+	return sysfs_emit(buf, "%d\n", data->stretch);
 }
 
 static ssize_t stretch_store(struct device *dev, struct device_attribute *attr,
@@ -721,8 +719,8 @@ static int w1_f19_add_slave(struct w1_slave *sl)
 	data->adapter.owner      = THIS_MODULE;
 	data->adapter.algo       = &w1_f19_i2c_algorithm;
 	data->adapter.algo_data  = sl;
-	strcpy(data->adapter.name, "w1-");
-	strcat(data->adapter.name, sl->name);
+	scnprintf(data->adapter.name, sizeof(data->adapter.name), "w1-%s",
+		  sl->name);
 	data->adapter.dev.parent = &sl->dev;
 	data->adapter.quirks     = &w1_f19_i2c_adapter_quirks;
 
@@ -743,7 +741,7 @@ static void w1_f19_remove_slave(struct w1_slave *sl)
 
 
 /* Declarations within the w1 subsystem. */
-static struct w1_family_ops w1_f19_fops = {
+static const struct w1_family_ops w1_f19_fops = {
 	.add_slave = w1_f19_add_slave,
 	.remove_slave = w1_f19_remove_slave,
 	.groups = w1_f19_groups,
@@ -754,18 +752,4 @@ static struct w1_family w1_family_19 = {
 	.fops = &w1_f19_fops,
 };
 
-
-/* Module init and remove functions. */
-static int __init w1_f19_init(void)
-{
-	return w1_register_family(&w1_family_19);
-}
-
-static void __exit w1_f19_fini(void)
-{
-	w1_unregister_family(&w1_family_19);
-}
-
-module_init(w1_f19_init);
-module_exit(w1_f19_fini);
-
+module_w1_family(w1_family_19);

@@ -9,7 +9,7 @@
  */
 
 #include <linux/compiler.h>
-#include <linux/uaccess.h>
+#include <linux/in6.h>
 #include <asm/byteorder.h>
 
 /**
@@ -129,26 +129,12 @@ static inline __sum16 csum_tcpudp_magic(__be32 saddr, __be32 daddr,
  */
 extern __wsum csum_partial(const void *buff, int len, __wsum sum);
 
-#define  _HAVE_ARCH_COPY_AND_CSUM_FROM_USER 1
-#define HAVE_CSUM_COPY_USER 1
-
-
 /* Do not call this directly. Use the wrappers below */
-extern __visible __wsum csum_partial_copy_generic(const void *src, const void *dst,
-					int len, __wsum sum,
-					int *src_err_ptr, int *dst_err_ptr);
+extern __visible __wsum csum_partial_copy_generic(const void *src, void *dst, int len);
 
-
-extern __wsum csum_partial_copy_from_user(const void __user *src, void *dst,
-					  int len, __wsum isum, int *errp);
-extern __wsum csum_partial_copy_to_user(const void *src, void __user *dst,
-					int len, __wsum isum, int *errp);
-extern __wsum csum_partial_copy_nocheck(const void *src, void *dst,
-					int len, __wsum sum);
-
-/* Old names. To be removed. */
-#define csum_and_copy_to_user csum_partial_copy_to_user
-#define csum_and_copy_from_user csum_partial_copy_from_user
+extern __wsum csum_and_copy_from_user(const void __user *src, void *dst, int len);
+extern __wsum csum_and_copy_to_user(const void *src, void __user *dst, int len);
+extern __wsum csum_partial_copy_nocheck(const void *src, void *dst, int len);
 
 /**
  * ip_compute_csum - Compute an 16bit IP checksum.
@@ -159,6 +145,17 @@ extern __wsum csum_partial_copy_nocheck(const void *src, void *dst,
  * Ready to fill in.
  */
 extern __sum16 ip_compute_csum(const void *buff, int len);
+
+static inline unsigned add32_with_carry(unsigned a, unsigned b)
+{
+	asm("addl %2,%0\n\t"
+	    "adcl $0,%0"
+	    : "=r" (a)
+	    : "0" (a), "rm" (b));
+	return a;
+}
+
+#define _HAVE_ARCH_IPV6_CSUM 1
 
 /**
  * csum_ipv6_magic - Compute checksum of an IPv6 pseudo header.
@@ -173,20 +170,29 @@ extern __sum16 ip_compute_csum(const void *buff, int len);
  * Returns the unfolded 32bit checksum.
  */
 
-struct in6_addr;
-
-#define _HAVE_ARCH_IPV6_CSUM 1
-extern __sum16
-csum_ipv6_magic(const struct in6_addr *saddr, const struct in6_addr *daddr,
-		__u32 len, __u8 proto, __wsum sum);
-
-static inline unsigned add32_with_carry(unsigned a, unsigned b)
+static inline __sum16 csum_ipv6_magic(
+	const struct in6_addr *_saddr, const struct in6_addr *_daddr,
+	__u32 len, __u8 proto, __wsum sum)
 {
-	asm("addl %2,%0\n\t"
-	    "adcl $0,%0"
-	    : "=r" (a)
-	    : "0" (a), "rm" (b));
-	return a;
+	const unsigned long *saddr = (const unsigned long *)_saddr;
+	const unsigned long *daddr = (const unsigned long *)_daddr;
+	__u64 sum64;
+
+	sum64 = (__force __u64)htonl(len) + (__force __u64)htons(proto) +
+		(__force __u64)sum;
+
+	asm("	addq %1,%[sum64]\n"
+	    "	adcq %2,%[sum64]\n"
+	    "	adcq %3,%[sum64]\n"
+	    "	adcq %4,%[sum64]\n"
+	    "	adcq $0,%[sum64]\n"
+
+	    : [sum64] "+r" (sum64)
+	    : "m" (saddr[0]), "m" (saddr[1]),
+	      "m" (daddr[0]), "m" (daddr[1]));
+
+	return csum_fold(
+	       (__force __wsum)add32_with_carry(sum64 & 0xffffffff, sum64>>32));
 }
 
 #define HAVE_ARCH_CSUM_ADD

@@ -4,9 +4,6 @@
 
 #include <linux/configfs.h>
 
-int check_user_usb_string(const char *name,
-		struct usb_gadget_strings *stringtab_dev);
-
 #define GS_STRINGS_W(__struct, __name)	\
 static ssize_t __struct##_##__name##_store(struct config_item *item, \
 		const char *page, size_t len)		\
@@ -33,11 +30,11 @@ static ssize_t __struct##_##__name##_show(struct config_item *item, char *page) 
 	CONFIGFS_ATTR(struct_name##_, _name)
 
 #define USB_CONFIG_STRING_RW_OPS(struct_in)				\
-static struct configfs_item_operations struct_in##_langid_item_ops = {	\
+static const struct configfs_item_operations struct_in##_langid_item_ops = {	\
 	.release                = struct_in##_attr_release,		\
 };									\
 									\
-static struct config_item_type struct_in##_langid_type = {		\
+static const struct config_item_type struct_in##_langid_type = {	\
 	.ct_item_ops	= &struct_in##_langid_item_ops,			\
 	.ct_attrs	= struct_in##_langid_attrs,			\
 	.ct_owner	= THIS_MODULE,					\
@@ -89,12 +86,12 @@ static void struct_in##_strings_drop(					\
 	config_item_put(item);						\
 }									\
 									\
-static struct configfs_group_operations struct_in##_strings_ops = {	\
+static const struct configfs_group_operations struct_in##_strings_ops = {	\
 	.make_group     = &struct_in##_strings_make,			\
 	.drop_item      = &struct_in##_strings_drop,			\
 };									\
 									\
-static struct config_item_type struct_in##_strings_type = {		\
+static const struct config_item_type struct_in##_strings_type = {	\
 	.ct_group_ops   = &struct_in##_strings_ops,			\
 	.ct_owner       = THIS_MODULE,					\
 }

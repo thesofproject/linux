@@ -1,20 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * DVB USB Linux driver for Afatech AF9015 DVB-T USB2.0 receiver
  *
  * Copyright (C) 2007 Antti Palosaari <crope@iki.fi>
  *
  * Thanks to Afatech who kindly provided information.
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2 of the License, or
- *    (at your option) any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
- *
  */
 
 #include "af9015.h"
@@ -53,7 +43,7 @@ static int af9015_ctrl_msg(struct dvb_usb_device *d, struct req_t *req)
 	case READ_I2C:
 		write = 0;
 		state->buf[2] |= 0x01; /* set I2C direction */
-		/* fall through */
+		fallthrough;
 	case WRITE_I2C:
 		state->buf[0] = READ_WRITE_I2C;
 		break;
@@ -61,6 +51,7 @@ static int af9015_ctrl_msg(struct dvb_usb_device *d, struct req_t *req)
 		if (((req->addr & 0xff00) == 0xff00) ||
 		    ((req->addr & 0xff00) == 0xae00))
 			state->buf[0] = WRITE_VIRTUAL_MEMORY;
+		break;
 	case WRITE_VIRTUAL_MEMORY:
 	case COPY_FIRMWARE:
 	case DOWNLOAD_FIRMWARE:
@@ -269,7 +260,7 @@ static u32 af9015_i2c_func(struct i2c_adapter *adapter)
 	return I2C_FUNC_I2C;
 }
 
-static struct i2c_algorithm af9015_i2c_algo = {
+static const struct i2c_algorithm af9015_i2c_algo = {
 	.master_xfer = af9015_i2c_xfer,
 	.functionality = af9015_i2c_func,
 };
@@ -1174,7 +1165,7 @@ static int af9015_rc_query(struct dvb_usb_device *d)
 	/* If any of these are non-zero, assume invalid data */
 	if (buf[1] || buf[2] || buf[3]) {
 		dev_dbg(&intf->dev, "invalid data\n");
-		return ret;
+		return 0;
 	}
 
 	/* Check for repeat of previous code */
@@ -1183,7 +1174,7 @@ static int af9015_rc_query(struct dvb_usb_device *d)
 		dev_dbg(&intf->dev, "key repeated\n");
 		rc_repeat(d->rc_dev);
 		state->rc_repeat = buf[6];
-		return ret;
+		return 0;
 	}
 
 	/* Only process key if canary killed */

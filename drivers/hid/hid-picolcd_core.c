@@ -1,20 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /***************************************************************************
  *   Copyright (C) 2010-2012 by Bruno Prémont <bonbons@linux-vserver.org>  *
  *                                                                         *
  *   Based on Logitech G13 driver (v0.4)                                   *
  *     Copyright (C) 2009 by Rick L. Vinyard, Jr. <rvinyard@cs.nmsu.edu>   *
  *                                                                         *
- *   This program is free software: you can redistribute it and/or modify  *
- *   it under the terms of the GNU General Public License as published by  *
- *   the Free Software Foundation, version 2 of the License.               *
- *                                                                         *
- *   This driver is distributed in the hope that it will be useful, but    *
- *   WITHOUT ANY WARRANTY; without even the implied warranty of            *
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU      *
- *   General Public License for more details.                              *
- *                                                                         *
- *   You should have received a copy of the GNU General Public License     *
- *   along with this software. If not see <http://www.gnu.org/licenses/>.  *
  ***************************************************************************/
 
 #include <linux/hid.h>
@@ -28,6 +18,7 @@
 #include <linux/completion.h>
 #include <linux/uaccess.h>
 #include <linux/module.h>
+#include <linux/string.h>
 
 #include "hid-picolcd.h"
 
@@ -81,13 +72,14 @@ struct picolcd_pending *picolcd_send_and_wait(struct hid_device *hdev,
 	struct picolcd_pending *work;
 	struct hid_report *report = picolcd_out_report(report_id, hdev);
 	unsigned long flags;
-	int i, j, k;
+	int i, j;
+	unsigned int k;
 
 	if (!report || !data)
 		return NULL;
 	if (data->status & PICOLCD_FAILED)
 		return NULL;
-	work = kzalloc(sizeof(*work), GFP_KERNEL);
+	work = kzalloc_obj(*work);
 	if (!work)
 		return NULL;
 
@@ -265,9 +257,9 @@ static ssize_t picolcd_operation_mode_show(struct device *dev,
 	struct picolcd_data *data = dev_get_drvdata(dev);
 
 	if (data->status & PICOLCD_BOOTLOADER)
-		return snprintf(buf, PAGE_SIZE, "[bootloader] lcd\n");
+		return sysfs_emit(buf, "[bootloader] lcd\n");
 	else
-		return snprintf(buf, PAGE_SIZE, "bootloader [lcd]\n");
+		return sysfs_emit(buf, "bootloader [lcd]\n");
 }
 
 static ssize_t picolcd_operation_mode_store(struct device *dev,
@@ -275,27 +267,20 @@ static ssize_t picolcd_operation_mode_store(struct device *dev,
 {
 	struct picolcd_data *data = dev_get_drvdata(dev);
 	struct hid_report *report = NULL;
-	size_t cnt = count;
 	int timeout = data->opmode_delay;
 	unsigned long flags;
 
-	if (cnt >= 3 && strncmp("lcd", buf, 3) == 0) {
+	if (sysfs_streq(buf, "lcd")) {
 		if (data->status & PICOLCD_BOOTLOADER)
 			report = picolcd_out_report(REPORT_EXIT_FLASHER, data->hdev);
-		buf += 3;
-		cnt -= 3;
-	} else if (cnt >= 10 && strncmp("bootloader", buf, 10) == 0) {
+	} else if (sysfs_streq(buf, "bootloader")) {
 		if (!(data->status & PICOLCD_BOOTLOADER))
 			report = picolcd_out_report(REPORT_EXIT_KEYBOARD, data->hdev);
-		buf += 10;
-		cnt -= 10;
-	}
-	if (!report || report->maxfield != 1)
+	} else {
 		return -EINVAL;
+	}
 
-	while (cnt > 0 && (buf[cnt-1] == '\n' || buf[cnt-1] == '\r'))
-		cnt--;
-	if (cnt != 0)
+	if (!report || report->maxfield != 1)
 		return -EINVAL;
 
 	spin_lock_irqsave(&data->lock, flags);
@@ -317,7 +302,7 @@ static ssize_t picolcd_operation_mode_delay_show(struct device *dev,
 {
 	struct picolcd_data *data = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%hu\n", data->opmode_delay);
+	return sysfs_emit(buf, "%hu\n", data->opmode_delay);
 }
 
 static ssize_t picolcd_operation_mode_delay_store(struct device *dev,
@@ -345,7 +330,6 @@ static int picolcd_raw_event(struct hid_device *hdev,
 {
 	struct picolcd_data *data = hid_get_drvdata(hdev);
 	unsigned long flags;
-	int ret = 0;
 
 	if (!data)
 		return 1;
@@ -358,9 +342,9 @@ static int picolcd_raw_event(struct hid_device *hdev,
 
 	if (report->id == REPORT_KEY_STATE) {
 		if (data->input_keys)
-			ret = picolcd_raw_keypad(data, report, raw_data+1, size-1);
+			picolcd_raw_keypad(data, report, raw_data+1, size-1);
 	} else if (report->id == REPORT_IR_DATA) {
-		ret = picolcd_raw_cir(data, report, raw_data+1, size-1);
+		picolcd_raw_cir(data, report, raw_data+1, size-1);
 	} else {
 		spin_lock_irqsave(&data->lock, flags);
 		/*
@@ -380,7 +364,6 @@ static int picolcd_raw_event(struct hid_device *hdev,
 	return 1;
 }
 
-#ifdef CONFIG_PM
 static int picolcd_suspend(struct hid_device *hdev, pm_message_t message)
 {
 	if (PMSG_IS_AUTO(message))
@@ -418,7 +401,6 @@ static int picolcd_reset_resume(struct hid_device *hdev)
 	picolcd_leds_set(hid_get_drvdata(hdev));
 	return 0;
 }
-#endif
 
 /* initialize keypad input device */
 static int picolcd_init_keys(struct picolcd_data *data,
@@ -491,11 +473,6 @@ static int picolcd_probe_lcd(struct hid_device *hdev, struct picolcd_data *data)
 	if (error)
 		goto err;
 
-	/* Set up the framebuffer device */
-	error = picolcd_init_framebuffer(data);
-	if (error)
-		goto err;
-
 	/* Setup lcd class device */
 	error = picolcd_init_lcd(data, picolcd_out_report(REPORT_CONTRAST, hdev));
 	if (error)
@@ -503,6 +480,11 @@ static int picolcd_probe_lcd(struct hid_device *hdev, struct picolcd_data *data)
 
 	/* Setup backlight class device */
 	error = picolcd_init_backlight(data, picolcd_out_report(REPORT_BRIGHTNESS, hdev));
+	if (error)
+		goto err;
+
+	/* Set up the framebuffer device */
+	error = picolcd_init_framebuffer(data);
 	if (error)
 		goto err;
 
@@ -519,9 +501,9 @@ static int picolcd_probe_lcd(struct hid_device *hdev, struct picolcd_data *data)
 	return 0;
 err:
 	picolcd_exit_leds(data);
+	picolcd_exit_framebuffer(data);
 	picolcd_exit_backlight(data);
 	picolcd_exit_lcd(data);
-	picolcd_exit_framebuffer(data);
 	picolcd_exit_cir(data);
 	picolcd_exit_keys(data);
 	return error;
@@ -547,11 +529,10 @@ static int picolcd_probe(struct hid_device *hdev,
 	 * Let's allocate the picolcd data structure, set some reasonable
 	 * defaults, and associate it with the device
 	 */
-	data = kzalloc(sizeof(struct picolcd_data), GFP_KERNEL);
+	data = kzalloc_obj(struct picolcd_data);
 	if (data == NULL) {
 		hid_err(hdev, "can't allocate space for Minibox PicoLCD device data\n");
-		error = -ENOMEM;
-		goto err_no_cleanup;
+		return -ENOMEM;
 	}
 
 	spin_lock_init(&data->lock);
@@ -613,9 +594,6 @@ err_cleanup_hid_hw:
 	hid_hw_stop(hdev);
 err_cleanup_data:
 	kfree(data);
-err_no_cleanup:
-	hid_set_drvdata(hdev, NULL);
-
 	return error;
 }
 
@@ -644,14 +622,13 @@ static void picolcd_remove(struct hid_device *hdev)
 	/* Cleanup LED */
 	picolcd_exit_leds(data);
 	/* Clean up the framebuffer */
+	picolcd_exit_framebuffer(data);
 	picolcd_exit_backlight(data);
 	picolcd_exit_lcd(data);
-	picolcd_exit_framebuffer(data);
 	/* Cleanup input */
 	picolcd_exit_cir(data);
 	picolcd_exit_keys(data);
 
-	hid_set_drvdata(hdev, NULL);
 	mutex_destroy(&data->mutex);
 	/* Finally, clean up the picolcd data itself */
 	kfree(data);
@@ -670,11 +647,9 @@ static struct hid_driver picolcd_driver = {
 	.probe =         picolcd_probe,
 	.remove =        picolcd_remove,
 	.raw_event =     picolcd_raw_event,
-#ifdef CONFIG_PM
-	.suspend =       picolcd_suspend,
-	.resume =        picolcd_resume,
-	.reset_resume =  picolcd_reset_resume,
-#endif
+	.suspend =       pm_ptr(picolcd_suspend),
+	.resume =        pm_ptr(picolcd_resume),
+	.reset_resume =  pm_ptr(picolcd_reset_resume),
 };
 module_hid_driver(picolcd_driver);
 

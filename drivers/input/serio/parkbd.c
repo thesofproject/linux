@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Parallel port to Keyboard port adapter driver for Linux
  *
  *  Copyright (c) 1999-2004 Vojtech Pavlik
  */
 
-/*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- */
 
 /*
  * To connect an AT or XT keyboard to the parallel port, a fairly simple adapter
@@ -169,11 +165,11 @@ static struct serio *parkbd_allocate_serio(void)
 {
 	struct serio *serio;
 
-	serio = kzalloc(sizeof(struct serio), GFP_KERNEL);
+	serio = kzalloc_obj(*serio);
 	if (serio) {
 		serio->id.type = parkbd_mode;
-		serio->write = parkbd_write,
-		strlcpy(serio->name, "PARKBD AT/XT keyboard adapter", sizeof(serio->name));
+		serio->write = parkbd_write;
+		strscpy(serio->name, "PARKBD AT/XT keyboard adapter", sizeof(serio->name));
 		snprintf(serio->phys, sizeof(serio->phys), "%s/serio0", parkbd_dev->port->name);
 	}
 
@@ -222,18 +218,5 @@ static struct parport_driver parkbd_parport_driver = {
 	.name = "parkbd",
 	.match_port = parkbd_attach,
 	.detach = parkbd_detach,
-	.devmodel = true,
 };
-
-static int __init parkbd_init(void)
-{
-	return parport_register_driver(&parkbd_parport_driver);
-}
-
-static void __exit parkbd_exit(void)
-{
-	parport_unregister_driver(&parkbd_parport_driver);
-}
-
-module_init(parkbd_init);
-module_exit(parkbd_exit);
+module_parport_driver(parkbd_parport_driver);

@@ -1,8 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *         Copyright (c) 2007 by Silicon Motion, Inc. (SMI)
- *
- *  All rights are reserved. Reproduction or in part is prohibited
- *  without the written consent of the copyright owner.
  *
  *  swi2c.c --- SM750/SM718 DDK
  *  This file contains the source code for I2C using software
@@ -29,7 +27,7 @@
  *
  * I.e. the SCL may only be changed in section 1. and section 3. while
  * the SDA may only be changed in section 2. and section 4. The table
- * below gives the changes for these 2 lines in the varios sections.
+ * below gives the changes for these 2 lines in the various sections.
  *
  * Section changes Table:
  * ======================

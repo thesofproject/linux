@@ -11,12 +11,12 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/logic_pio.h>
-#include <linux/mfd/core.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/pci.h>
+#include <linux/platform_device.h>
+#include <linux/serial_8250.h>
 #include <linux/slab.h>
 
 #define DRV_NAME "hisi-lpc"
@@ -74,7 +74,7 @@ struct hisi_lpc_dev {
 /* About 10us. This is specific for single IO operations, such as inb */
 #define LPC_PEROP_WAITCNT	100
 
-static int wait_lpc_idle(unsigned char *mbase, unsigned int waitcnt)
+static int wait_lpc_idle(void __iomem *mbase, unsigned int waitcnt)
 {
 	u32 status;
 
@@ -85,7 +85,7 @@ static int wait_lpc_idle(unsigned char *mbase, unsigned int waitcnt)
 		ndelay(LPC_NSEC_PERWAIT);
 	} while (--waitcnt);
 
-	return -ETIME;
+	return -ETIMEDOUT;
 }
 
 /*
@@ -209,7 +209,7 @@ static u32 hisi_lpc_comm_in(void *hostdata, unsigned long pio, size_t dwidth)
 	struct hisi_lpc_dev *lpcdev = hostdata;
 	struct lpc_cycle_para iopara;
 	unsigned long addr;
-	u32 rd_data = 0;
+	__le32 rd_data = 0;
 	int ret;
 
 	if (!lpcdev || !dwidth || dwidth > LPC_MAX_DWIDTH)
@@ -244,13 +244,12 @@ static void hisi_lpc_comm_out(void *hostdata, unsigned long pio,
 	struct lpc_cycle_para iopara;
 	const unsigned char *buf;
 	unsigned long addr;
+	__le32 _val = cpu_to_le32(val);
 
 	if (!lpcdev || !dwidth || dwidth > LPC_MAX_DWIDTH)
 		return;
 
-	val = cpu_to_le32(val);
-
-	buf = (const unsigned char *)&val;
+	buf = (const unsigned char *)&_val;
 	addr = hisi_lpc_pio_to_addr(lpcdev, pio);
 
 	iopara.opflags = FG_INCRADDR_LPC;
@@ -341,15 +340,6 @@ static const struct logic_pio_host_ops hisi_lpc_ops = {
 };
 
 #ifdef CONFIG_ACPI
-#define MFD_CHILD_NAME_PREFIX DRV_NAME"-"
-#define MFD_CHILD_NAME_LEN (ACPI_ID_LEN + sizeof(MFD_CHILD_NAME_PREFIX) - 1)
-
-struct hisi_lpc_mfd_cell {
-	struct mfd_cell_acpi_match acpi_match;
-	char name[MFD_CHILD_NAME_LEN];
-	char pnpid[ACPI_ID_LEN];
-};
-
 static int hisi_lpc_acpi_xlat_io_res(struct acpi_device *adev,
 				     struct acpi_device *host,
 				     struct resource *res)
@@ -357,7 +347,7 @@ static int hisi_lpc_acpi_xlat_io_res(struct acpi_device *adev,
 	unsigned long sys_port;
 	resource_size_t len = resource_size(res);
 
-	sys_port = logic_pio_trans_hwaddr(&host->fwnode, res->start, len);
+	sys_port = logic_pio_trans_hwaddr(acpi_fwnode_handle(host), res->start, len);
 	if (sys_port == ~0UL)
 		return -EFAULT;
 
@@ -368,8 +358,28 @@ static int hisi_lpc_acpi_xlat_io_res(struct acpi_device *adev,
 }
 
 /*
- * hisi_lpc_acpi_set_io_res - set the resources for a child's MFD
- * @child: the device node to be updated the I/O resource
+ * Released firmware describes the IO port max address as 0x3fff, which is
+ * the max host bus address. Fixup to a proper range. This will probably
+ * never be fixed in firmware.
+ */
+static void hisi_lpc_acpi_fixup_child_resource(struct device *hostdev,
+					       struct resource *r)
+{
+	if (r->end != 0x3fff)
+		return;
+
+	if (r->start == 0xe4)
+		r->end = 0xe4 + 0x04 - 1;
+	else if (r->start == 0x2f8)
+		r->end = 0x2f8 + 0x08 - 1;
+	else
+		dev_warn(hostdev, "unrecognised resource %pR to fixup, ignoring\n",
+			 r);
+}
+
+/*
+ * hisi_lpc_acpi_set_io_res - set the resources for a child
+ * @adev: ACPI companion of the device node to be updated the I/O resource
  * @hostdev: the device node associated with host controller
  * @res: double pointer to be set to the address of translated resources
  * @num_res: pointer to variable to hold the number of translated resources
@@ -380,31 +390,24 @@ static int hisi_lpc_acpi_xlat_io_res(struct acpi_device *adev,
  * host-relative address resource.  This function will return the translated
  * logical PIO addresses for each child devices resources.
  */
-static int hisi_lpc_acpi_set_io_res(struct device *child,
+static int hisi_lpc_acpi_set_io_res(struct acpi_device *adev,
 				    struct device *hostdev,
 				    const struct resource **res, int *num_res)
 {
-	struct acpi_device *adev;
-	struct acpi_device *host;
+	struct acpi_device *host = to_acpi_device(adev->dev.parent);
 	struct resource_entry *rentry;
 	LIST_HEAD(resource_list);
 	struct resource *resources;
 	int count;
 	int i;
 
-	if (!child || !hostdev)
-		return -EINVAL;
-
-	host = to_acpi_device(hostdev);
-	adev = to_acpi_device(child);
-
 	if (!adev->status.present) {
-		dev_dbg(child, "device is not present\n");
+		dev_dbg(&adev->dev, "device is not present\n");
 		return -EIO;
 	}
 
 	if (acpi_device_enumerated(adev)) {
-		dev_dbg(child, "has been enumerated\n");
+		dev_dbg(&adev->dev, "has been enumerated\n");
 		return -EIO;
 	}
 
@@ -415,7 +418,7 @@ static int hisi_lpc_acpi_set_io_res(struct device *child,
 	 */
 	count = acpi_dev_get_resources(adev, &resource_list, NULL, NULL);
 	if (count <= 0) {
-		dev_dbg(child, "failed to get resources\n");
+		dev_dbg(&adev->dev, "failed to get resources\n");
 		return count ? count : -EIO;
 	}
 
@@ -428,8 +431,11 @@ static int hisi_lpc_acpi_set_io_res(struct device *child,
 		return -ENOMEM;
 	}
 	count = 0;
-	list_for_each_entry(rentry, &resource_list, node)
-		resources[count++] = *rentry->res;
+	list_for_each_entry(rentry, &resource_list, node) {
+		resources[count] = *rentry->res;
+		hisi_lpc_acpi_fixup_child_resource(hostdev, &resources[count]);
+		count++;
+	}
 
 	acpi_dev_free_resource_list(&resource_list);
 
@@ -441,7 +447,7 @@ static int hisi_lpc_acpi_set_io_res(struct device *child,
 			continue;
 		ret = hisi_lpc_acpi_xlat_io_res(adev, host, &resources[i]);
 		if (ret) {
-			dev_err(child, "translate IO range %pR failed (%d)\n",
+			dev_err(&adev->dev, "translate IO range %pR failed (%d)\n",
 				&resources[i], ret);
 			return ret;
 		}
@@ -452,88 +458,141 @@ static int hisi_lpc_acpi_set_io_res(struct device *child,
 	return 0;
 }
 
+static int hisi_lpc_acpi_remove_subdev(struct device *dev, void *unused)
+{
+	platform_device_unregister(to_platform_device(dev));
+	return 0;
+}
+
+static int hisi_lpc_acpi_clear_enumerated(struct acpi_device *adev, void *not_used)
+{
+	acpi_device_clear_enumerated(adev);
+	return 0;
+}
+
+struct hisi_lpc_acpi_cell {
+	const char *hid;
+	const struct platform_device_info *pdevinfo;
+};
+
+static void hisi_lpc_acpi_remove(struct device *hostdev)
+{
+	device_for_each_child(hostdev, NULL, hisi_lpc_acpi_remove_subdev);
+	acpi_dev_for_each_child(ACPI_COMPANION(hostdev),
+				hisi_lpc_acpi_clear_enumerated, NULL);
+}
+
+static int hisi_lpc_acpi_add_child(struct acpi_device *child, void *data)
+{
+	const char *hid = acpi_device_hid(child);
+	struct device *hostdev = data;
+	const struct hisi_lpc_acpi_cell *cell;
+	struct platform_device *pdev;
+	const struct resource *res;
+	bool found = false;
+	int num_res;
+	int ret;
+
+	ret = hisi_lpc_acpi_set_io_res(child, hostdev, &res, &num_res);
+	if (ret) {
+		dev_warn(hostdev, "set resource fail (%d)\n", ret);
+		return ret;
+	}
+
+	cell = (struct hisi_lpc_acpi_cell []){
+		/* ipmi */
+		{
+			.hid = "IPI0001",
+			.pdevinfo = (struct platform_device_info []) {
+				{
+					.parent = hostdev,
+					.fwnode = acpi_fwnode_handle(child),
+					.name = "hisi-lpc-ipmi",
+					.id = PLATFORM_DEVID_AUTO,
+					.res = res,
+					.num_res = num_res,
+				},
+			},
+		},
+		/* 8250-compatible uart */
+		{
+			.hid = "HISI1031",
+			.pdevinfo = (struct platform_device_info []) {
+				{
+					.parent = hostdev,
+					.fwnode = acpi_fwnode_handle(child),
+					.name = "serial8250",
+					.id = PLATFORM_DEVID_AUTO,
+					.res = res,
+					.num_res = num_res,
+					.data = (struct plat_serial8250_port []) {
+						{
+							.iobase = res->start,
+							.uartclk = 1843200,
+							.iotype = UPIO_PORT,
+							.flags = UPF_BOOT_AUTOCONF,
+						},
+						{}
+					},
+					.size_data =  2 * sizeof(struct plat_serial8250_port),
+				},
+			},
+		},
+		{}
+	};
+
+	for (; cell && cell->hid; cell++) {
+		if (!strcmp(cell->hid, hid)) {
+			found = true;
+			break;
+		}
+	}
+
+	if (!found) {
+		dev_warn(hostdev,
+			 "could not find cell for child device (%s), discarding\n",
+			 hid);
+		return 0;
+	}
+
+	pdev = platform_device_register_full(cell->pdevinfo);
+	if (IS_ERR(pdev))
+		return PTR_ERR(pdev);
+
+	acpi_device_set_enumerated(child);
+	return 0;
+}
+
 /*
  * hisi_lpc_acpi_probe - probe children for ACPI FW
  * @hostdev: LPC host device pointer
  *
  * Returns 0 when successful, and a negative value for failure.
  *
- * Scan all child devices and create a per-device MFD with
- * logical PIO translated IO resources.
+ * Create a platform device per child, fixing up the resources
+ * from bus addresses to Logical PIO addresses.
+ *
  */
 static int hisi_lpc_acpi_probe(struct device *hostdev)
 {
-	struct acpi_device *adev = ACPI_COMPANION(hostdev);
-	struct hisi_lpc_mfd_cell *hisi_lpc_mfd_cells;
-	struct mfd_cell *mfd_cells;
-	struct acpi_device *child;
-	int size, ret, count = 0, cell_num = 0;
+	int ret;
 
-	list_for_each_entry(child, &adev->children, node)
-		cell_num++;
-
-	/* allocate the mfd cell and companion ACPI info, one per child */
-	size = sizeof(*mfd_cells) + sizeof(*hisi_lpc_mfd_cells);
-	mfd_cells = devm_kcalloc(hostdev, cell_num, size, GFP_KERNEL);
-	if (!mfd_cells)
-		return -ENOMEM;
-
-	hisi_lpc_mfd_cells = (struct hisi_lpc_mfd_cell *)&mfd_cells[cell_num];
 	/* Only consider the children of the host */
-	list_for_each_entry(child, &adev->children, node) {
-		struct mfd_cell *mfd_cell = &mfd_cells[count];
-		struct hisi_lpc_mfd_cell *hisi_lpc_mfd_cell =
-					&hisi_lpc_mfd_cells[count];
-		struct mfd_cell_acpi_match *acpi_match =
-					&hisi_lpc_mfd_cell->acpi_match;
-		char *name = hisi_lpc_mfd_cell[count].name;
-		char *pnpid = hisi_lpc_mfd_cell[count].pnpid;
-		struct mfd_cell_acpi_match match = {
-			.pnpid = pnpid,
-		};
+	ret = acpi_dev_for_each_child(ACPI_COMPANION(hostdev),
+				      hisi_lpc_acpi_add_child, hostdev);
+	if (ret)
+		hisi_lpc_acpi_remove(hostdev);
 
-		/*
-		 * For any instances of this host controller (Hip06 and Hip07
-		 * are the only chipsets), we would not have multiple slaves
-		 * with the same HID. And in any system we would have just one
-		 * controller active. So don't worrry about MFD name clashes.
-		 */
-		snprintf(name, MFD_CHILD_NAME_LEN, MFD_CHILD_NAME_PREFIX"%s",
-			 acpi_device_hid(child));
-		snprintf(pnpid, ACPI_ID_LEN, "%s", acpi_device_hid(child));
-
-		memcpy(acpi_match, &match, sizeof(*acpi_match));
-		mfd_cell->name = name;
-		mfd_cell->acpi_match = acpi_match;
-
-		ret = hisi_lpc_acpi_set_io_res(&child->dev, &adev->dev,
-					       &mfd_cell->resources,
-					       &mfd_cell->num_resources);
-		if (ret) {
-			dev_warn(&child->dev, "set resource fail (%d)\n", ret);
-			return ret;
-		}
-		count++;
-	}
-
-	ret = mfd_add_devices(hostdev, PLATFORM_DEVID_NONE,
-			      mfd_cells, cell_num, NULL, 0, NULL);
-	if (ret) {
-		dev_err(hostdev, "failed to add mfd cells (%d)\n", ret);
-		return ret;
-	}
-
-	return 0;
+	return ret;
 }
-
-static const struct acpi_device_id hisi_lpc_acpi_match[] = {
-	{"HISI0191"},
-	{}
-};
 #else
 static int hisi_lpc_acpi_probe(struct device *dev)
 {
 	return -ENODEV;
+}
+
+static void hisi_lpc_acpi_remove(struct device *hostdev)
+{
 }
 #endif // CONFIG_ACPI
 
@@ -547,11 +606,9 @@ static int hisi_lpc_acpi_probe(struct device *dev)
 static int hisi_lpc_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct acpi_device *acpi_device = ACPI_COMPANION(dev);
 	struct logic_pio_hwaddr *range;
 	struct hisi_lpc_dev *lpcdev;
 	resource_size_t io_end;
-	struct resource *res;
 	int ret;
 
 	lpcdev = devm_kzalloc(dev, sizeof(*lpcdev), GFP_KERNEL);
@@ -560,8 +617,7 @@ static int hisi_lpc_probe(struct platform_device *pdev)
 
 	spin_lock_init(&lpcdev->cycle_lock);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	lpcdev->membase = devm_ioremap_resource(dev, res);
+	lpcdev->membase = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(lpcdev->membase))
 		return PTR_ERR(lpcdev->membase);
 
@@ -569,27 +625,30 @@ static int hisi_lpc_probe(struct platform_device *pdev)
 	if (!range)
 		return -ENOMEM;
 
-	range->fwnode = dev->fwnode;
+	range->fwnode = dev_fwnode(dev);
 	range->flags = LOGIC_PIO_INDIRECT;
 	range->size = PIO_INDIRECT_SIZE;
+	range->hostdata = lpcdev;
+	range->ops = &hisi_lpc_ops;
+	lpcdev->io_host = range;
 
 	ret = logic_pio_register_range(range);
 	if (ret) {
 		dev_err(dev, "register IO range failed (%d)!\n", ret);
 		return ret;
 	}
-	lpcdev->io_host = range;
 
 	/* register the LPC host PIO resources */
-	if (acpi_device)
+	if (is_acpi_device_node(range->fwnode))
 		ret = hisi_lpc_acpi_probe(dev);
 	else
 		ret = of_platform_populate(dev->of_node, NULL, NULL, dev);
-	if (ret)
+	if (ret) {
+		logic_pio_unregister_range(range);
 		return ret;
+	}
 
-	lpcdev->io_host->hostdata = lpcdev;
-	lpcdev->io_host->ops = &hisi_lpc_ops;
+	dev_set_drvdata(dev, lpcdev);
 
 	io_end = lpcdev->io_host->io_start + lpcdev->io_host->size;
 	dev_info(dev, "registered range [%pa - %pa]\n",
@@ -598,9 +657,28 @@ static int hisi_lpc_probe(struct platform_device *pdev)
 	return ret;
 }
 
+static void hisi_lpc_remove(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct hisi_lpc_dev *lpcdev = dev_get_drvdata(dev);
+	struct logic_pio_hwaddr *range = lpcdev->io_host;
+
+	if (is_acpi_device_node(range->fwnode))
+		hisi_lpc_acpi_remove(dev);
+	else
+		of_platform_depopulate(dev);
+
+	logic_pio_unregister_range(range);
+}
+
 static const struct of_device_id hisi_lpc_of_match[] = {
 	{ .compatible = "hisilicon,hip06-lpc", },
 	{ .compatible = "hisilicon,hip07-lpc", },
+	{}
+};
+
+static const struct acpi_device_id hisi_lpc_acpi_match[] = {
+	{"HISI0191"},
 	{}
 };
 
@@ -608,8 +686,9 @@ static struct platform_driver hisi_lpc_driver = {
 	.driver = {
 		.name           = DRV_NAME,
 		.of_match_table = hisi_lpc_of_match,
-		.acpi_match_table = ACPI_PTR(hisi_lpc_acpi_match),
+		.acpi_match_table = hisi_lpc_acpi_match,
 	},
 	.probe = hisi_lpc_probe,
+	.remove = hisi_lpc_remove,
 };
 builtin_platform_driver(hisi_lpc_driver);

@@ -38,6 +38,8 @@ enum {
 	ND_OPT_RDNSS = 25,		/* RFC5006 */
 	ND_OPT_DNSSL = 31,		/* RFC6106 */
 	ND_OPT_6CO = 34,		/* RFC6775 */
+	ND_OPT_CAPTIVE_PORTAL = 37,	/* RFC7710 */
+	ND_OPT_PREF64 = 38,		/* RFC8781 */
 	__ND_OPT_MAX
 };
 
@@ -56,15 +58,6 @@ enum {
 
 #include <net/neighbour.h>
 
-/* Set to 3 to get tracing... */
-#define ND_DEBUG 1
-
-#define ND_PRINTK(val, level, fmt, ...)				\
-do {								\
-	if (val <= ND_DEBUG)					\
-		net_##level##_ratelimited(fmt, ##__VA_ARGS__);	\
-} while (0)
-
 struct ctl_table;
 struct inet6_dev;
 struct net_device;
@@ -77,12 +70,12 @@ extern struct neigh_table nd_tbl;
 struct nd_msg {
         struct icmp6hdr	icmph;
         struct in6_addr	target;
-	__u8		opt[0];
+	__u8		opt[];
 };
 
 struct rs_msg {
 	struct icmp6hdr	icmph;
-	__u8		opt[0];
+	__u8		opt[];
 };
 
 struct ra_msg {
@@ -95,7 +88,7 @@ struct rd_msg {
 	struct icmp6hdr icmph;
 	struct in6_addr	target;
 	struct in6_addr	dest;
-	__u8		opt[0];
+	__u8		opt[];
 };
 
 struct nd_opt_hdr {
@@ -133,7 +126,7 @@ struct ndisc_options *ndisc_parse_options(const struct net_device *dev,
 					  u8 *opt, int opt_len,
 					  struct ndisc_options *ndopts);
 
-void __ndisc_fill_addr_option(struct sk_buff *skb, int type, void *data,
+void __ndisc_fill_addr_option(struct sk_buff *skb, int type, const void *data,
 			      int data_len, int pad);
 
 #define NDISC_OPS_REDIRECT_DATA_SPACE	2
@@ -142,11 +135,6 @@ void __ndisc_fill_addr_option(struct sk_buff *skb, int type, void *data,
  * This structure defines the hooks for IPv6 neighbour discovery.
  * The following hooks can be defined; unless noted otherwise, they are
  * optional and can be filled with a null pointer.
- *
- * int (*is_useropt)(u8 nd_opt_type):
- *     This function is called when IPv6 decide RA userspace options. if
- *     this function returns 1 then the option given by nd_opt_type will
- *     be handled as userspace option additional to the IPv6 options.
  *
  * int (*parse_options)(const struct net_device *dev,
  *			struct nd_opt_hdr *nd_opt,
@@ -196,7 +184,6 @@ void __ndisc_fill_addr_option(struct sk_buff *skb, int type, void *data,
  *     addresses. E.g. 802.15.4 6LoWPAN.
  */
 struct ndisc_ops {
-	int	(*is_useropt)(u8 nd_opt_type);
 	int	(*parse_options)(const struct net_device *dev,
 				 struct nd_opt_hdr *nd_opt,
 				 struct ndisc_options *ndopts);
@@ -220,15 +207,6 @@ struct ndisc_ops {
 };
 
 #if IS_ENABLED(CONFIG_IPV6)
-static inline int ndisc_ops_is_useropt(const struct net_device *dev,
-				       u8 nd_opt_type)
-{
-	if (dev->ndisc_ops && dev->ndisc_ops->is_useropt)
-		return dev->ndisc_ops->is_useropt(nd_opt_type);
-	else
-		return 0;
-}
-
 static inline int ndisc_ops_parse_options(const struct net_device *dev,
 					  struct nd_opt_hdr *nd_opt,
 					  struct ndisc_options *ndopts)
@@ -383,11 +361,11 @@ static inline struct neighbour *__ipv6_neigh_lookup(struct net_device *dev, cons
 {
 	struct neighbour *n;
 
-	rcu_read_lock_bh();
+	rcu_read_lock();
 	n = __ipv6_neigh_lookup_noref(dev, pkey);
 	if (n && !refcount_inc_not_zero(&n->refcnt))
 		n = NULL;
-	rcu_read_unlock_bh();
+	rcu_read_unlock();
 
 	return n;
 }
@@ -397,16 +375,26 @@ static inline void __ipv6_confirm_neigh(struct net_device *dev,
 {
 	struct neighbour *n;
 
-	rcu_read_lock_bh();
+	rcu_read_lock();
 	n = __ipv6_neigh_lookup_noref(dev, pkey);
-	if (n) {
-		unsigned long now = jiffies;
+	neigh_confirm(n);
+	rcu_read_unlock();
+}
 
-		/* avoid dirtying neighbour */
-		if (n->confirmed != now)
-			n->confirmed = now;
-	}
-	rcu_read_unlock_bh();
+static inline struct neighbour *ip_neigh_gw6(struct net_device *dev,
+					     const void *addr)
+{
+#if IS_ENABLED(CONFIG_IPV6)
+	struct neighbour *neigh;
+
+	neigh = __ipv6_neigh_lookup_noref(dev, addr);
+	if (unlikely(!neigh))
+		neigh = __neigh_create(&nd_tbl, addr, dev, false);
+
+	return neigh;
+#else
+	return ERR_PTR(-EAFNOSUPPORT);
+#endif
 }
 
 int ndisc_init(void);
@@ -415,14 +403,20 @@ int ndisc_late_init(void);
 void ndisc_late_cleanup(void);
 void ndisc_cleanup(void);
 
-int ndisc_rcv(struct sk_buff *skb);
+enum skb_drop_reason ndisc_rcv(struct sk_buff *skb);
 
+struct sk_buff *ndisc_ns_create(struct net_device *dev, const struct in6_addr *solicit,
+				const struct in6_addr *saddr, u64 nonce);
 void ndisc_send_ns(struct net_device *dev, const struct in6_addr *solicit,
 		   const struct in6_addr *daddr, const struct in6_addr *saddr,
 		   u64 nonce);
 
+void ndisc_send_skb(struct sk_buff *skb, const struct in6_addr *daddr,
+		    const struct in6_addr *saddr);
+
 void ndisc_send_rs(struct net_device *dev,
 		   const struct in6_addr *saddr, const struct in6_addr *daddr);
+
 void ndisc_send_na(struct net_device *dev, const struct in6_addr *daddr,
 		   const struct in6_addr *solicited_addr,
 		   bool router, bool solicited, bool override, bool inc_opt);
@@ -445,17 +439,14 @@ int igmp6_late_init(void);
 void igmp6_cleanup(void);
 void igmp6_late_cleanup(void);
 
-int igmp6_event_query(struct sk_buff *skb);
+void igmp6_event_query(struct sk_buff *skb);
 
-int igmp6_event_report(struct sk_buff *skb);
+void igmp6_event_report(struct sk_buff *skb);
 
 
 #ifdef CONFIG_SYSCTL
-int ndisc_ifinfo_sysctl_change(struct ctl_table *ctl, int write,
-			       void __user *buffer, size_t *lenp, loff_t *ppos);
-int ndisc_ifinfo_sysctl_strategy(struct ctl_table *ctl,
-				 void __user *oldval, size_t __user *oldlenp,
-				 void __user *newval, size_t newlen);
+int ndisc_ifinfo_sysctl_change(const struct ctl_table *ctl, int write,
+			       void *buffer, size_t *lenp, loff_t *ppos);
 #endif
 
 void inet6_ifinfo_notify(int event, struct inet6_dev *idev);

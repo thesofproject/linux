@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Descending-priority-sorted double-linked list
  *
@@ -7,12 +8,10 @@
  * 2001-2005 (c) MontaVista Software, Inc.
  * Daniel Walker <dwalker@mvista.com>
  *
- * (C) 2005 Thomas Gleixner <tglx@linutronix.de>
+ * (C) 2005 Linutronix GmbH, Thomas Gleixner <tglx@kernel.org>
  *
  * Simplifications of the original code by
  * Oleg Nesterov <oleg@tv-sign.ru>
- *
- * Licensed under the FSF's GNU Public License v2 or later.
  *
  * Based on simple lists (include/linux/list.h).
  *
@@ -70,23 +69,15 @@
  * is lowest priority.
  *
  * No locking is done, up to the caller.
- *
  */
 #ifndef _LINUX_PLIST_H_
 #define _LINUX_PLIST_H_
 
-#include <linux/kernel.h>
+#include <linux/container_of.h>
 #include <linux/list.h>
+#include <linux/plist_types.h>
 
-struct plist_head {
-	struct list_head node_list;
-};
-
-struct plist_node {
-	int			prio;
-	struct list_head	prio_list;
-	struct list_head	node_list;
-};
+#include <asm/bug.h>
 
 /**
  * PLIST_HEAD_INIT - static struct plist_head initializer
@@ -231,7 +222,7 @@ static inline int plist_node_empty(const struct plist_node *node)
  * @type:	the type of the struct this is embedded in
  * @member:	the name of the list_head within the struct
  */
-#ifdef CONFIG_DEBUG_PI_LIST
+#ifdef CONFIG_DEBUG_PLIST
 # define plist_first_entry(head, type, member)	\
 ({ \
 	WARN_ON(plist_head_empty(head)); \
@@ -248,7 +239,7 @@ static inline int plist_node_empty(const struct plist_node *node)
  * @type:	the type of the struct this is embedded in
  * @member:	the name of the list_head within the struct
  */
-#ifdef CONFIG_DEBUG_PI_LIST
+#ifdef CONFIG_DEBUG_PLIST
 # define plist_last_entry(head, type, member)	\
 ({ \
 	WARN_ON(plist_head_empty(head)); \

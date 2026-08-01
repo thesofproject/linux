@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 menuconfig IP_SET
 	tristate "IP set support"
 	depends on INET && NETFILTER
@@ -29,7 +30,7 @@ config IP_SET_BITMAP_IP
 	depends on IP_SET
 	help
 	  This option adds the bitmap:ip set type support, by which one
-	  can store IPv4 addresses (or network addresse) from a range.
+	  can store IPv4 addresses (or network addresses) from a range.
 
 	  To compile it as a module, choose M here.  If unsure, say N.
 
@@ -173,5 +174,14 @@ config IP_SET_LIST_SET
 	  an ordered union of the member sets.
 
 	  To compile it as a module, choose M here.  If unsure, say N.
+
+config GCOV_PROFILE_IPSET
+	bool "Enable GCOV profiling for ipset"
+	depends on GCOV_KERNEL
+	help
+	  Enable GCOV profiling for ipset to check which functions/lines
+	  are executed.
+
+	  If unsure, say N.
 
 endif # IP_SET

@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: LGPL-2.1
+#include "trace/beauty/beauty.h"
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -20,13 +22,15 @@
 #define S_IXUGO         (S_IXUSR|S_IXGRP|S_IXOTH)
 #endif
 
-static size_t syscall_arg__scnprintf_mode_t(char *bf, size_t size, struct syscall_arg *arg)
+size_t syscall_arg__scnprintf_mode_t(char *bf, size_t size, struct syscall_arg *arg)
 {
+	bool show_prefix = arg->show_string_prefix;
+	const char *prefix = "S_";
 	int printed = 0, mode = arg->val;
 
 #define	P_MODE(n) \
 	if ((mode & S_##n) == S_##n) { \
-		printed += scnprintf(bf + printed, size - printed, "%s%s", printed ? "|" : "", #n); \
+		printed += scnprintf(bf + printed, size - printed, "%s%s%s", printed ? "|" : "", show_prefix ? prefix : "", #n); \
 		mode &= ~S_##n; \
 	}
 
@@ -65,5 +69,3 @@ static size_t syscall_arg__scnprintf_mode_t(char *bf, size_t size, struct syscal
 
 	return printed;
 }
-
-#define SCA_MODE_T syscall_arg__scnprintf_mode_t

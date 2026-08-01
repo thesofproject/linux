@@ -9,11 +9,63 @@
 
 #include "../mount.h"
 
-struct fsnotify_iter_info {
-	struct fsnotify_mark *inode_mark;
-	struct fsnotify_mark *vfsmount_mark;
-	int srcu_idx;
-};
+/*
+ * fsnotify_connp_t is what we embed in objects which connector can be attached
+ * to.
+ */
+typedef struct fsnotify_mark_connector __rcu *fsnotify_connp_t;
+
+static inline struct inode *fsnotify_conn_inode(
+				struct fsnotify_mark_connector *conn)
+{
+	return conn->obj;
+}
+
+static inline struct mount *fsnotify_conn_mount(
+				struct fsnotify_mark_connector *conn)
+{
+	return real_mount(conn->obj);
+}
+
+static inline struct super_block *fsnotify_conn_sb(
+				struct fsnotify_mark_connector *conn)
+{
+	return conn->obj;
+}
+
+static inline struct mnt_namespace *fsnotify_conn_mntns(
+				struct fsnotify_mark_connector *conn)
+{
+	return conn->obj;
+}
+
+static inline struct super_block *fsnotify_object_sb(void *obj,
+			enum fsnotify_obj_type obj_type)
+{
+	switch (obj_type) {
+	case FSNOTIFY_OBJ_TYPE_INODE:
+		return ((struct inode *)obj)->i_sb;
+	case FSNOTIFY_OBJ_TYPE_VFSMOUNT:
+		return ((struct vfsmount *)obj)->mnt_sb;
+	case FSNOTIFY_OBJ_TYPE_SB:
+		return (struct super_block *)obj;
+	default:
+		return NULL;
+	}
+}
+
+static inline struct super_block *fsnotify_connector_sb(
+				struct fsnotify_mark_connector *conn)
+{
+	return fsnotify_object_sb(conn->obj, conn->type);
+}
+
+static inline fsnotify_connp_t *fsnotify_sb_marks(struct super_block *sb)
+{
+	struct fsnotify_sb_info *sbinfo = fsnotify_sb_info(sb);
+
+	return sbinfo ? &sbinfo->sb_marks : NULL;
+}
 
 /* destroy all events sitting in this groups notification queue */
 extern void fsnotify_flush_notify(struct fsnotify_group *group);
@@ -25,8 +77,11 @@ extern struct srcu_struct fsnotify_mark_srcu;
 extern int fsnotify_compare_groups(struct fsnotify_group *a,
 				   struct fsnotify_group *b);
 
-/* Destroy all marks connected via given connector */
-extern void fsnotify_destroy_marks(struct fsnotify_mark_connector __rcu **connp);
+/* Destroy all inode marks for given superblock */
+void fsnotify_unmount_inodes(struct fsnotify_sb_info *sbinfo);
+
+/* Destroy all marks attached to an object via connector */
+extern void fsnotify_destroy_marks(fsnotify_connp_t *connp);
 /* run the list of all marks associated with inode and destroy them */
 static inline void fsnotify_clear_marks_by_inode(struct inode *inode)
 {
@@ -37,17 +92,23 @@ static inline void fsnotify_clear_marks_by_mount(struct vfsmount *mnt)
 {
 	fsnotify_destroy_marks(&real_mount(mnt)->mnt_fsnotify_marks);
 }
-/* Wait until all marks queued for destruction are destroyed */
-extern void fsnotify_wait_marks_destroyed(void);
+/* run the list of all marks associated with sb and destroy them */
+static inline void fsnotify_clear_marks_by_sb(struct super_block *sb)
+{
+	fsnotify_destroy_marks(fsnotify_sb_marks(sb));
+}
+
+static inline void fsnotify_clear_marks_by_mntns(struct mnt_namespace *mntns)
+{
+	fsnotify_destroy_marks(&mntns->n_fsnotify_marks);
+}
 
 /*
  * update the dentry->d_flags of all of inode's children to indicate if inode cares
  * about events that happen to its children.
  */
-extern void __fsnotify_update_child_dentry_flags(struct inode *inode);
+extern void fsnotify_set_children_dentry_flags(struct inode *inode);
 
-/* allocate and destroy and event holder to attach events to notification/access queues */
-extern struct fsnotify_event_holder *fsnotify_alloc_event_holder(void);
-extern void fsnotify_destroy_event_holder(struct fsnotify_event_holder *holder);
+void fsnotify_init_connector_caches(void);
 
 #endif	/* __FS_NOTIFY_FSNOTIFY_H_ */

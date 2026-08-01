@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Marvell 88E6xxx Switch Global 2 Registers support
  *
@@ -5,11 +6,6 @@
  *
  * Copyright (c) 2016-2017 Savoir-faire Linux Inc.
  *	Vivien Didelot <vivien.didelot@savoirfairelinux.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/bitfield.h>
@@ -30,14 +26,11 @@ int mv88e6xxx_g2_write(struct mv88e6xxx_chip *chip, int reg, u16 val)
 	return mv88e6xxx_write(chip, chip->info->global2_addr, reg, val);
 }
 
-int mv88e6xxx_g2_update(struct mv88e6xxx_chip *chip, int reg, u16 update)
+int mv88e6xxx_g2_wait_bit(struct mv88e6xxx_chip *chip, int reg, int
+			  bit, int val)
 {
-	return mv88e6xxx_update(chip, chip->info->global2_addr, reg, update);
-}
-
-int mv88e6xxx_g2_wait(struct mv88e6xxx_chip *chip, int reg, u16 mask)
-{
-	return mv88e6xxx_wait(chip, chip->info->global2_addr, reg, mask);
+	return mv88e6xxx_wait_bit(chip, chip->info->global2_addr, reg,
+				  bit, val);
 }
 
 /* Offset 0x00: Interrupt Source Register */
@@ -119,62 +112,45 @@ int mv88e6352_g2_mgmt_rsvd2cpu(struct mv88e6xxx_chip *chip)
 
 /* Offset 0x06: Device Mapping Table register */
 
-static int mv88e6xxx_g2_device_mapping_write(struct mv88e6xxx_chip *chip,
-					     int target, int port)
+int mv88e6xxx_g2_device_mapping_write(struct mv88e6xxx_chip *chip, int target,
+				      int port)
 {
-	u16 val = (target << 8) | (port & 0xf);
+	u16 val = (target << 8) | (port & 0x1f);
+	/* Modern chips use 5 bits to define a device mapping port,
+	 * but bit 4 is reserved on older chips, so it is safe to use.
+	 */
 
-	return mv88e6xxx_g2_update(chip, MV88E6XXX_G2_DEVICE_MAPPING, val);
-}
-
-static int mv88e6xxx_g2_set_device_mapping(struct mv88e6xxx_chip *chip)
-{
-	int target, port;
-	int err;
-
-	/* Initialize the routing port to the 32 possible target devices */
-	for (target = 0; target < 32; ++target) {
-		port = 0xf;
-
-		if (target < DSA_MAX_SWITCHES) {
-			port = chip->ds->rtable[target];
-			if (port == DSA_RTABLE_NONE)
-				port = 0xf;
-		}
-
-		err = mv88e6xxx_g2_device_mapping_write(chip, target, port);
-		if (err)
-			break;
-	}
-
-	return err;
+	return mv88e6xxx_g2_write(chip, MV88E6XXX_G2_DEVICE_MAPPING,
+				  MV88E6XXX_G2_DEVICE_MAPPING_UPDATE | val);
 }
 
 /* Offset 0x07: Trunk Mask Table register */
 
-static int mv88e6xxx_g2_trunk_mask_write(struct mv88e6xxx_chip *chip, int num,
-					 bool hash, u16 mask)
+int mv88e6xxx_g2_trunk_mask_write(struct mv88e6xxx_chip *chip, int num,
+				  bool hash, u16 mask)
 {
 	u16 val = (num << 12) | (mask & mv88e6xxx_port_mask(chip));
 
 	if (hash)
 		val |= MV88E6XXX_G2_TRUNK_MASK_HASH;
 
-	return mv88e6xxx_g2_update(chip, MV88E6XXX_G2_TRUNK_MASK, val);
+	return mv88e6xxx_g2_write(chip, MV88E6XXX_G2_TRUNK_MASK,
+				  MV88E6XXX_G2_TRUNK_MASK_UPDATE | val);
 }
 
 /* Offset 0x08: Trunk Mapping Table register */
 
-static int mv88e6xxx_g2_trunk_mapping_write(struct mv88e6xxx_chip *chip, int id,
-					    u16 map)
+int mv88e6xxx_g2_trunk_mapping_write(struct mv88e6xxx_chip *chip, int id,
+				     u16 map)
 {
 	const u16 port_mask = BIT(mv88e6xxx_num_ports(chip)) - 1;
 	u16 val = (id << 11) | (map & port_mask);
 
-	return mv88e6xxx_g2_update(chip, MV88E6XXX_G2_TRUNK_MAPPING, val);
+	return mv88e6xxx_g2_write(chip, MV88E6XXX_G2_TRUNK_MAPPING,
+				  MV88E6XXX_G2_TRUNK_MAPPING_UPDATE | val);
 }
 
-static int mv88e6xxx_g2_clear_trunk(struct mv88e6xxx_chip *chip)
+int mv88e6xxx_g2_trunk_clear(struct mv88e6xxx_chip *chip)
 {
 	const u16 port_mask = BIT(mv88e6xxx_num_ports(chip)) - 1;
 	int i, err;
@@ -202,8 +178,9 @@ static int mv88e6xxx_g2_clear_trunk(struct mv88e6xxx_chip *chip)
 
 static int mv88e6xxx_g2_irl_wait(struct mv88e6xxx_chip *chip)
 {
-	return mv88e6xxx_g2_wait(chip, MV88E6XXX_G2_IRL_CMD,
-				 MV88E6XXX_G2_IRL_CMD_BUSY);
+	int bit = __bf_shf(MV88E6XXX_G2_IRL_CMD_BUSY);
+
+	return mv88e6xxx_g2_wait_bit(chip, MV88E6XXX_G2_IRL_CMD, bit, 0);
 }
 
 static int mv88e6xxx_g2_irl_op(struct mv88e6xxx_chip *chip, u16 op, int port,
@@ -238,8 +215,9 @@ int mv88e6390_g2_irl_init_all(struct mv88e6xxx_chip *chip, int port)
 
 static int mv88e6xxx_g2_pvt_op_wait(struct mv88e6xxx_chip *chip)
 {
-	return mv88e6xxx_g2_wait(chip, MV88E6XXX_G2_PVT_ADDR,
-				 MV88E6XXX_G2_PVT_ADDR_BUSY);
+	int bit = __bf_shf(MV88E6XXX_G2_PVT_ADDR_BUSY);
+
+	return mv88e6xxx_g2_wait_bit(chip, MV88E6XXX_G2_PVT_ADDR, bit, 0);
 }
 
 static int mv88e6xxx_g2_pvt_op(struct mv88e6xxx_chip *chip, int src_dev,
@@ -259,6 +237,23 @@ static int mv88e6xxx_g2_pvt_op(struct mv88e6xxx_chip *chip, int src_dev,
 		return err;
 
 	return mv88e6xxx_g2_pvt_op_wait(chip);
+}
+
+int mv88e6xxx_g2_pvt_read(struct mv88e6xxx_chip *chip, int src_dev,
+			  int src_port, u16 *data)
+{
+	int err;
+
+	err = mv88e6xxx_g2_pvt_op_wait(chip);
+	if (err)
+		return err;
+
+	err = mv88e6xxx_g2_pvt_op(chip, src_dev, src_port,
+				  MV88E6XXX_G2_PVT_ADDR_OP_READ);
+	if (err)
+		return err;
+
+	return mv88e6xxx_g2_read(chip, MV88E6XXX_G2_PVT_DATA, data);
 }
 
 int mv88e6xxx_g2_pvt_write(struct mv88e6xxx_chip *chip, int src_dev,
@@ -285,7 +280,8 @@ static int mv88e6xxx_g2_switch_mac_write(struct mv88e6xxx_chip *chip,
 {
 	u16 val = (pointer << 8) | data;
 
-	return mv88e6xxx_g2_update(chip, MV88E6XXX_G2_SWITCH_MAC, val);
+	return mv88e6xxx_g2_write(chip, MV88E6XXX_G2_SWITCH_MAC,
+				  MV88E6XXX_G2_SWITCH_MAC_UPDATE | val);
 }
 
 int mv88e6xxx_g2_set_switch_mac(struct mv88e6xxx_chip *chip, u8 *addr)
@@ -301,6 +297,19 @@ int mv88e6xxx_g2_set_switch_mac(struct mv88e6xxx_chip *chip, u8 *addr)
 	return err;
 }
 
+/* Offset 0x0E: ATU Statistics */
+
+int mv88e6xxx_g2_atu_stats_set(struct mv88e6xxx_chip *chip, u16 kind, u16 bin)
+{
+	return mv88e6xxx_g2_write(chip, MV88E6XXX_G2_ATU_STATS,
+				  kind | bin);
+}
+
+int mv88e6xxx_g2_atu_stats_get(struct mv88e6xxx_chip *chip, u16 *stats)
+{
+	return mv88e6xxx_g2_read(chip, MV88E6XXX_G2_ATU_STATS, stats);
+}
+
 /* Offset 0x0F: Priority Override Table */
 
 static int mv88e6xxx_g2_pot_write(struct mv88e6xxx_chip *chip, int pointer,
@@ -308,7 +317,8 @@ static int mv88e6xxx_g2_pot_write(struct mv88e6xxx_chip *chip, int pointer,
 {
 	u16 val = (pointer << 8) | (data & 0x7);
 
-	return mv88e6xxx_g2_update(chip, MV88E6XXX_G2_PRIO_OVERRIDE, val);
+	return mv88e6xxx_g2_write(chip, MV88E6XXX_G2_PRIO_OVERRIDE,
+				  MV88E6XXX_G2_PRIO_OVERRIDE_UPDATE | val);
 }
 
 int mv88e6xxx_g2_pot_clear(struct mv88e6xxx_chip *chip)
@@ -330,11 +340,18 @@ int mv88e6xxx_g2_pot_clear(struct mv88e6xxx_chip *chip)
  * Offset 0x15: EEPROM Addr (for 8-bit data access)
  */
 
-static int mv88e6xxx_g2_eeprom_wait(struct mv88e6xxx_chip *chip)
+int mv88e6xxx_g2_eeprom_wait(struct mv88e6xxx_chip *chip)
 {
-	return mv88e6xxx_g2_wait(chip, MV88E6XXX_G2_EEPROM_CMD,
-				 MV88E6XXX_G2_EEPROM_CMD_BUSY |
-				 MV88E6XXX_G2_EEPROM_CMD_RUNNING);
+	int bit = __bf_shf(MV88E6XXX_G2_EEPROM_CMD_BUSY);
+	int err;
+
+	err = mv88e6xxx_g2_wait_bit(chip, MV88E6XXX_G2_EEPROM_CMD, bit, 0);
+	if (err)
+		return err;
+
+	bit = __bf_shf(MV88E6XXX_G2_EEPROM_CMD_RUNNING);
+
+	return mv88e6xxx_g2_wait_bit(chip, MV88E6XXX_G2_EEPROM_CMD, bit, 0);
 }
 
 static int mv88e6xxx_g2_eeprom_cmd(struct mv88e6xxx_chip *chip, u16 cmd)
@@ -596,8 +613,9 @@ int mv88e6xxx_g2_set_eeprom16(struct mv88e6xxx_chip *chip,
 
 static int mv88e6xxx_g2_smi_phy_wait(struct mv88e6xxx_chip *chip)
 {
-	return mv88e6xxx_g2_wait(chip, MV88E6XXX_G2_SMI_PHY_CMD,
-				 MV88E6XXX_G2_SMI_PHY_CMD_BUSY);
+	int bit = __bf_shf(MV88E6XXX_G2_SMI_PHY_CMD_BUSY);
+
+	return mv88e6xxx_g2_wait_bit(chip, MV88E6XXX_G2_SMI_PHY_CMD, bit, 0);
 }
 
 static int mv88e6xxx_g2_smi_phy_cmd(struct mv88e6xxx_chip *chip, u16 cmd)
@@ -721,20 +739,18 @@ static int mv88e6xxx_g2_smi_phy_read_data_c45(struct mv88e6xxx_chip *chip,
 	return mv88e6xxx_g2_read(chip, MV88E6XXX_G2_SMI_PHY_DATA, data);
 }
 
-static int mv88e6xxx_g2_smi_phy_read_c45(struct mv88e6xxx_chip *chip,
-					 bool external, int port, int reg,
-					 u16 *data)
+static int _mv88e6xxx_g2_smi_phy_read_c45(struct mv88e6xxx_chip *chip,
+					  bool external, int port, int devad,
+					  int reg, u16 *data)
 {
-	int dev = (reg >> 16) & 0x1f;
-	int addr = reg & 0xffff;
 	int err;
 
-	err = mv88e6xxx_g2_smi_phy_write_addr_c45(chip, external, port, dev,
-						  addr);
+	err = mv88e6xxx_g2_smi_phy_write_addr_c45(chip, external, port, devad,
+						  reg);
 	if (err)
 		return err;
 
-	return mv88e6xxx_g2_smi_phy_read_data_c45(chip, external, port, dev,
+	return mv88e6xxx_g2_smi_phy_read_data_c45(chip, external, port, devad,
 						  data);
 }
 
@@ -753,49 +769,63 @@ static int mv88e6xxx_g2_smi_phy_write_data_c45(struct mv88e6xxx_chip *chip,
 	return mv88e6xxx_g2_smi_phy_access_c45(chip, external, op, port, dev);
 }
 
-static int mv88e6xxx_g2_smi_phy_write_c45(struct mv88e6xxx_chip *chip,
-					  bool external, int port, int reg,
-					  u16 data)
+static int _mv88e6xxx_g2_smi_phy_write_c45(struct mv88e6xxx_chip *chip,
+					   bool external, int port, int devad,
+					   int reg, u16 data)
 {
-	int dev = (reg >> 16) & 0x1f;
-	int addr = reg & 0xffff;
 	int err;
 
-	err = mv88e6xxx_g2_smi_phy_write_addr_c45(chip, external, port, dev,
-						  addr);
+	err = mv88e6xxx_g2_smi_phy_write_addr_c45(chip, external, port, devad,
+						  reg);
 	if (err)
 		return err;
 
-	return mv88e6xxx_g2_smi_phy_write_data_c45(chip, external, port, dev,
+	return mv88e6xxx_g2_smi_phy_write_data_c45(chip, external, port, devad,
 						   data);
 }
 
-int mv88e6xxx_g2_smi_phy_read(struct mv88e6xxx_chip *chip, struct mii_bus *bus,
-			      int addr, int reg, u16 *val)
+int mv88e6xxx_g2_smi_phy_read_c22(struct mv88e6xxx_chip *chip,
+				  struct mii_bus *bus,
+				  int addr, int reg, u16 *val)
 {
 	struct mv88e6xxx_mdio_bus *mdio_bus = bus->priv;
 	bool external = mdio_bus->external;
-
-	if (reg & MII_ADDR_C45)
-		return mv88e6xxx_g2_smi_phy_read_c45(chip, external, addr, reg,
-						     val);
 
 	return mv88e6xxx_g2_smi_phy_read_data_c22(chip, external, addr, reg,
 						  val);
 }
 
-int mv88e6xxx_g2_smi_phy_write(struct mv88e6xxx_chip *chip, struct mii_bus *bus,
-			       int addr, int reg, u16 val)
+int mv88e6xxx_g2_smi_phy_read_c45(struct mv88e6xxx_chip *chip,
+				  struct mii_bus *bus, int addr, int devad,
+				  int reg, u16 *val)
 {
 	struct mv88e6xxx_mdio_bus *mdio_bus = bus->priv;
 	bool external = mdio_bus->external;
 
-	if (reg & MII_ADDR_C45)
-		return mv88e6xxx_g2_smi_phy_write_c45(chip, external, addr, reg,
-						      val);
+	return _mv88e6xxx_g2_smi_phy_read_c45(chip, external, addr, devad, reg,
+					      val);
+}
+
+int mv88e6xxx_g2_smi_phy_write_c22(struct mv88e6xxx_chip *chip,
+				   struct mii_bus *bus, int addr, int reg,
+				   u16 val)
+{
+	struct mv88e6xxx_mdio_bus *mdio_bus = bus->priv;
+	bool external = mdio_bus->external;
 
 	return mv88e6xxx_g2_smi_phy_write_data_c22(chip, external, addr, reg,
 						   val);
+}
+
+int mv88e6xxx_g2_smi_phy_write_c45(struct mv88e6xxx_chip *chip,
+				   struct mii_bus *bus, int addr, int devad,
+				   int reg, u16 val)
+{
+	struct mv88e6xxx_mdio_bus *mdio_bus = bus->priv;
+	bool external = mdio_bus->external;
+
+	return _mv88e6xxx_g2_smi_phy_write_c45(chip, external, addr, devad, reg,
+					       val);
 }
 
 /* Offset 0x1B: Watchdog Control */
@@ -836,31 +866,57 @@ const struct mv88e6xxx_irq_ops mv88e6097_watchdog_ops = {
 	.irq_free = mv88e6097_watchdog_free,
 };
 
+static void mv88e6250_watchdog_free(struct mv88e6xxx_chip *chip)
+{
+	u16 reg;
+
+	mv88e6xxx_g2_read(chip, MV88E6250_G2_WDOG_CTL, &reg);
+
+	reg &= ~(MV88E6250_G2_WDOG_CTL_EGRESS_ENABLE |
+		 MV88E6250_G2_WDOG_CTL_QC_ENABLE);
+
+	mv88e6xxx_g2_write(chip, MV88E6250_G2_WDOG_CTL, reg);
+}
+
+static int mv88e6250_watchdog_setup(struct mv88e6xxx_chip *chip)
+{
+	return mv88e6xxx_g2_write(chip, MV88E6250_G2_WDOG_CTL,
+				  MV88E6250_G2_WDOG_CTL_EGRESS_ENABLE |
+				  MV88E6250_G2_WDOG_CTL_QC_ENABLE |
+				  MV88E6250_G2_WDOG_CTL_SWRESET);
+}
+
+const struct mv88e6xxx_irq_ops mv88e6250_watchdog_ops = {
+	.irq_action = mv88e6097_watchdog_action,
+	.irq_setup = mv88e6250_watchdog_setup,
+	.irq_free = mv88e6250_watchdog_free,
+};
+
 static int mv88e6390_watchdog_setup(struct mv88e6xxx_chip *chip)
 {
-	return mv88e6xxx_g2_update(chip, MV88E6390_G2_WDOG_CTL,
-				   MV88E6390_G2_WDOG_CTL_PTR_INT_ENABLE |
-				   MV88E6390_G2_WDOG_CTL_CUT_THROUGH |
-				   MV88E6390_G2_WDOG_CTL_QUEUE_CONTROLLER |
-				   MV88E6390_G2_WDOG_CTL_EGRESS |
-				   MV88E6390_G2_WDOG_CTL_FORCE_IRQ);
+	return mv88e6xxx_g2_write(chip, MV88E6390_G2_WDOG_CTL,
+				  MV88E6390_G2_WDOG_CTL_UPDATE |
+				  MV88E6390_G2_WDOG_CTL_PTR_INT_ENABLE |
+				  MV88E6390_G2_WDOG_CTL_CUT_THROUGH |
+				  MV88E6390_G2_WDOG_CTL_QUEUE_CONTROLLER |
+				  MV88E6390_G2_WDOG_CTL_EGRESS |
+				  MV88E6390_G2_WDOG_CTL_FORCE_IRQ);
 }
 
 static int mv88e6390_watchdog_action(struct mv88e6xxx_chip *chip, int irq)
 {
-	int err;
 	u16 reg;
 
 	mv88e6xxx_g2_write(chip, MV88E6390_G2_WDOG_CTL,
 			   MV88E6390_G2_WDOG_CTL_PTR_EVENT);
-	err = mv88e6xxx_g2_read(chip, MV88E6390_G2_WDOG_CTL, &reg);
+	mv88e6xxx_g2_read(chip, MV88E6390_G2_WDOG_CTL, &reg);
 
 	dev_info(chip->dev, "Watchdog event: 0x%04x",
 		 reg & MV88E6390_G2_WDOG_CTL_DATA_MASK);
 
 	mv88e6xxx_g2_write(chip, MV88E6390_G2_WDOG_CTL,
 			   MV88E6390_G2_WDOG_CTL_PTR_HISTORY);
-	err = mv88e6xxx_g2_read(chip, MV88E6390_G2_WDOG_CTL, &reg);
+	mv88e6xxx_g2_read(chip, MV88E6390_G2_WDOG_CTL, &reg);
 
 	dev_info(chip->dev, "Watchdog history: 0x%04x",
 		 reg & MV88E6390_G2_WDOG_CTL_DATA_MASK);
@@ -876,12 +932,33 @@ static int mv88e6390_watchdog_action(struct mv88e6xxx_chip *chip, int irq)
 
 static void mv88e6390_watchdog_free(struct mv88e6xxx_chip *chip)
 {
-	mv88e6xxx_g2_update(chip, MV88E6390_G2_WDOG_CTL,
-			    MV88E6390_G2_WDOG_CTL_PTR_INT_ENABLE);
+	mv88e6xxx_g2_write(chip, MV88E6390_G2_WDOG_CTL,
+			   MV88E6390_G2_WDOG_CTL_UPDATE |
+			   MV88E6390_G2_WDOG_CTL_PTR_INT_ENABLE);
 }
 
 const struct mv88e6xxx_irq_ops mv88e6390_watchdog_ops = {
 	.irq_action = mv88e6390_watchdog_action,
+	.irq_setup = mv88e6390_watchdog_setup,
+	.irq_free = mv88e6390_watchdog_free,
+};
+
+static int mv88e6393x_watchdog_action(struct mv88e6xxx_chip *chip, int irq)
+{
+	mv88e6390_watchdog_action(chip, irq);
+
+	/* Fix for clearing the force WD event bit.
+	 * Unreleased erratum on mv88e6393x.
+	 */
+	mv88e6xxx_g2_write(chip, MV88E6390_G2_WDOG_CTL,
+			   MV88E6390_G2_WDOG_CTL_UPDATE |
+			   MV88E6390_G2_WDOG_CTL_PTR_EVENT);
+
+	return IRQ_HANDLED;
+}
+
+const struct mv88e6xxx_irq_ops mv88e6393x_watchdog_ops = {
+	.irq_action = mv88e6393x_watchdog_action,
 	.irq_setup = mv88e6390_watchdog_setup,
 	.irq_free = mv88e6390_watchdog_free,
 };
@@ -891,20 +968,20 @@ static irqreturn_t mv88e6xxx_g2_watchdog_thread_fn(int irq, void *dev_id)
 	struct mv88e6xxx_chip *chip = dev_id;
 	irqreturn_t ret = IRQ_NONE;
 
-	mutex_lock(&chip->reg_lock);
+	mv88e6xxx_reg_lock(chip);
 	if (chip->info->ops->watchdog_ops->irq_action)
 		ret = chip->info->ops->watchdog_ops->irq_action(chip, irq);
-	mutex_unlock(&chip->reg_lock);
+	mv88e6xxx_reg_unlock(chip);
 
 	return ret;
 }
 
 static void mv88e6xxx_g2_watchdog_free(struct mv88e6xxx_chip *chip)
 {
-	mutex_lock(&chip->reg_lock);
+	mv88e6xxx_reg_lock(chip);
 	if (chip->info->ops->watchdog_ops->irq_free)
 		chip->info->ops->watchdog_ops->irq_free(chip);
-	mutex_unlock(&chip->reg_lock);
+	mv88e6xxx_reg_unlock(chip);
 
 	free_irq(chip->watchdog_irq, chip);
 	irq_dispose_mapping(chip->watchdog_irq);
@@ -919,17 +996,20 @@ static int mv88e6xxx_g2_watchdog_setup(struct mv88e6xxx_chip *chip)
 	if (chip->watchdog_irq < 0)
 		return chip->watchdog_irq;
 
+	snprintf(chip->watchdog_irq_name, sizeof(chip->watchdog_irq_name),
+		 "mv88e6xxx-%s-watchdog", dev_name(chip->dev));
+
 	err = request_threaded_irq(chip->watchdog_irq, NULL,
 				   mv88e6xxx_g2_watchdog_thread_fn,
 				   IRQF_ONESHOT | IRQF_TRIGGER_FALLING,
-				   "mv88e6xxx-watchdog", chip);
+				   chip->watchdog_irq_name, chip);
 	if (err)
 		return err;
 
-	mutex_lock(&chip->reg_lock);
+	mv88e6xxx_reg_lock(chip);
 	if (chip->info->ops->watchdog_ops->irq_setup)
 		err = chip->info->ops->watchdog_ops->irq_setup(chip);
-	mutex_unlock(&chip->reg_lock);
+	mv88e6xxx_reg_unlock(chip);
 
 	return err;
 }
@@ -984,9 +1064,9 @@ static irqreturn_t mv88e6xxx_g2_irq_thread_fn(int irq, void *dev_id)
 	int err;
 	u16 reg;
 
-	mutex_lock(&chip->reg_lock);
+	mv88e6xxx_reg_lock(chip);
 	err = mv88e6xxx_g2_int_source(chip, &reg);
-	mutex_unlock(&chip->reg_lock);
+	mv88e6xxx_reg_unlock(chip);
 	if (err)
 		goto out;
 
@@ -1005,7 +1085,7 @@ static void mv88e6xxx_g2_irq_bus_lock(struct irq_data *d)
 {
 	struct mv88e6xxx_chip *chip = irq_data_get_irq_chip_data(d);
 
-	mutex_lock(&chip->reg_lock);
+	mv88e6xxx_reg_lock(chip);
 }
 
 static void mv88e6xxx_g2_irq_bus_sync_unlock(struct irq_data *d)
@@ -1017,7 +1097,7 @@ static void mv88e6xxx_g2_irq_bus_sync_unlock(struct irq_data *d)
 	if (err)
 		dev_err(chip->dev, "failed to mask interrupts\n");
 
-	mutex_unlock(&chip->reg_lock);
+	mv88e6xxx_reg_unlock(chip);
 }
 
 static const struct irq_chip mv88e6xxx_g2_irq_chip = {
@@ -1067,11 +1147,15 @@ int mv88e6xxx_g2_irq_setup(struct mv88e6xxx_chip *chip)
 {
 	int err, irq, virq;
 
-	if (!chip->dev->of_node)
-		return -EINVAL;
+	chip->g2_irq.masked = ~0;
+	mv88e6xxx_reg_lock(chip);
+	err = mv88e6xxx_g2_int_mask(chip, ~chip->g2_irq.masked);
+	mv88e6xxx_reg_unlock(chip);
+	if (err)
+		return err;
 
-	chip->g2_irq.domain = irq_domain_add_simple(
-		chip->dev->of_node, 16, 0, &mv88e6xxx_g2_irq_domain_ops, chip);
+	chip->g2_irq.domain = irq_domain_create_simple(dev_fwnode(chip->dev), 16, 0,
+						       &mv88e6xxx_g2_irq_domain_ops, chip);
 	if (!chip->g2_irq.domain)
 		return -ENOMEM;
 
@@ -1079,7 +1163,6 @@ int mv88e6xxx_g2_irq_setup(struct mv88e6xxx_chip *chip)
 		irq_create_mapping(chip->g2_irq.domain, irq);
 
 	chip->g2_irq.chip = mv88e6xxx_g2_irq_chip;
-	chip->g2_irq.masked = ~0;
 
 	chip->device_irq = irq_find_mapping(chip->g1_irq.domain,
 					    MV88E6XXX_G1_STS_IRQ_DEVICE);
@@ -1088,9 +1171,12 @@ int mv88e6xxx_g2_irq_setup(struct mv88e6xxx_chip *chip)
 		goto out;
 	}
 
+	snprintf(chip->device_irq_name, sizeof(chip->device_irq_name),
+		 "mv88e6xxx-%s-g2", dev_name(chip->dev));
+
 	err = request_threaded_irq(chip->device_irq, NULL,
 				   mv88e6xxx_g2_irq_thread_fn,
-				   IRQF_ONESHOT, "mv88e6xxx-g2", chip);
+				   IRQF_ONESHOT, chip->device_irq_name, chip);
 	if (err)
 		goto out;
 
@@ -1110,59 +1196,22 @@ out:
 int mv88e6xxx_g2_irq_mdio_setup(struct mv88e6xxx_chip *chip,
 				struct mii_bus *bus)
 {
-	int phy, irq, err, err_phy;
+	int phy_start = chip->info->internal_phys_offset;
+	int phy_end = chip->info->internal_phys_offset +
+		      chip->info->num_internal_phys;
+	int phy, irq;
 
-	for (phy = 0; phy < chip->info->num_internal_phys; phy++) {
+	for (phy = phy_start; phy < phy_end; phy++) {
 		irq = irq_find_mapping(chip->g2_irq.domain, phy);
-		if (irq < 0) {
-			err = irq;
-			goto out;
-		}
+		if (irq < 0)
+			return irq;
+
 		bus->irq[chip->info->phy_base_addr + phy] = irq;
 	}
 	return 0;
-out:
-	err_phy = phy;
-
-	for (phy = 0; phy < err_phy; phy++)
-		irq_dispose_mapping(bus->irq[phy]);
-
-	return err;
 }
 
 void mv88e6xxx_g2_irq_mdio_free(struct mv88e6xxx_chip *chip,
 				struct mii_bus *bus)
 {
-	int phy;
-
-	for (phy = 0; phy < chip->info->num_internal_phys; phy++)
-		irq_dispose_mapping(bus->irq[phy]);
-}
-
-int mv88e6xxx_g2_setup(struct mv88e6xxx_chip *chip)
-{
-	u16 reg;
-	int err;
-
-	/* Ignore removed tag data on doubly tagged packets, disable
-	 * flow control messages, force flow control priority to the
-	 * highest, and send all special multicast frames to the CPU
-	 * port at the highest priority.
-	 */
-	reg = MV88E6XXX_G2_SWITCH_MGMT_FORCE_FLOW_CTL_PRI | (0x7 << 4);
-	err = mv88e6xxx_g2_write(chip, MV88E6XXX_G2_SWITCH_MGMT, reg);
-	if (err)
-		return err;
-
-	/* Program the DSA routing table. */
-	err = mv88e6xxx_g2_set_device_mapping(chip);
-	if (err)
-		return err;
-
-	/* Clear all trunk masks and mapping. */
-	err = mv88e6xxx_g2_clear_trunk(chip);
-	if (err)
-		return err;
-
-	return 0;
 }

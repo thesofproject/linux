@@ -1,25 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 	Mantis PCI bridge driver
 
 	Copyright (C) Manu Abraham (abraham.manu@gmail.com)
 
-	This program is free software; you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; either version 2 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
 #include <linux/module.h>
-#include <linux/moduleparam.h>
 #include <linux/kernel.h>
 #include <linux/pci.h>
 #include <linux/slab.h>
@@ -82,10 +69,8 @@ static irqreturn_t mantis_irq_handler(int irq, void *dev_id)
 	struct mantis_ca *ca;
 
 	mantis = (struct mantis_pci *) dev_id;
-	if (unlikely(mantis == NULL)) {
-		dprintk(MANTIS_ERROR, 1, "Mantis == NULL");
+	if (unlikely(!mantis))
 		return IRQ_NONE;
-	}
 	ca = mantis->mantis_ca;
 
 	stat = mmread(MANTIS_INT_STAT);
@@ -140,7 +125,7 @@ static irqreturn_t mantis_irq_handler(int irq, void *dev_id)
 	if (stat & MANTIS_INT_RISCI) {
 		dprintk(MANTIS_DEBUG, 0, "<%s>", label[8]);
 		mantis->busy_block = (stat & MANTIS_INT_RISCSTAT) >> 28;
-		tasklet_schedule(&mantis->tasklet);
+		queue_work(system_bh_wq, &mantis->bh_work);
 	}
 	if (stat & MANTIS_INT_I2CDONE) {
 		dprintk(MANTIS_DEBUG, 0, "<%s>", label[9]);
@@ -173,7 +158,7 @@ static int mantis_pci_probe(struct pci_dev *pdev,
 	struct mantis_hwconfig *config;
 	int err;
 
-	mantis = kzalloc(sizeof(*mantis), GFP_KERNEL);
+	mantis = kzalloc_obj(*mantis);
 	if (!mantis)
 		return -ENOMEM;
 

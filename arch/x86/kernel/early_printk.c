@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/console.h>
 #include <linux/kernel.h>
+#include <linux/kexec.h>
 #include <linux/init.h>
 #include <linux/string.h>
 #include <linux/screen_info.h>
@@ -8,6 +9,7 @@
 #include <linux/pci_regs.h>
 #include <linux/pci_ids.h>
 #include <linux/errno.h>
+#include <linux/pgtable.h>
 #include <asm/io.h>
 #include <asm/processor.h>
 #include <asm/fcntl.h>
@@ -15,13 +17,10 @@
 #include <xen/hvc-console.h>
 #include <asm/pci-direct.h>
 #include <asm/fixmap.h>
-#include <asm/intel-mid.h>
-#include <asm/pgtable.h>
 #include <linux/usb/ehci_def.h>
 #include <linux/usb/xhci-dbgp.h>
-#include <linux/efi.h>
-#include <asm/efi.h>
 #include <asm/pci_x86.h>
+#include <linux/static_call.h>
 
 /* Simple VGA output */
 #define VGABASE		(__ISA_IO_base + 0xb8000)
@@ -97,26 +96,28 @@ static unsigned long early_serial_base = 0x3f8;  /* ttyS0 */
 #define DLL             0       /*  Divisor Latch Low         */
 #define DLH             1       /*  Divisor latch High        */
 
-static unsigned int io_serial_in(unsigned long addr, int offset)
+static __noendbr unsigned int io_serial_in(unsigned long addr, int offset)
 {
 	return inb(addr + offset);
 }
+ANNOTATE_NOENDBR_SYM(io_serial_in);
 
-static void io_serial_out(unsigned long addr, int offset, int value)
+static __noendbr void io_serial_out(unsigned long addr, int offset, int value)
 {
 	outb(value, addr + offset);
 }
+ANNOTATE_NOENDBR_SYM(io_serial_out);
 
-static unsigned int (*serial_in)(unsigned long addr, int offset) = io_serial_in;
-static void (*serial_out)(unsigned long addr, int offset, int value) = io_serial_out;
+DEFINE_STATIC_CALL(serial_in, io_serial_in);
+DEFINE_STATIC_CALL(serial_out, io_serial_out);
 
 static int early_serial_putc(unsigned char ch)
 {
 	unsigned timeout = 0xffff;
 
-	while ((serial_in(early_serial_base, LSR) & XMTRDY) == 0 && --timeout)
+	while ((static_call(serial_in)(early_serial_base, LSR) & XMTRDY) == 0 && --timeout)
 		cpu_relax();
-	serial_out(early_serial_base, TXR, ch);
+	static_call(serial_out)(early_serial_base, TXR, ch);
 	return timeout ? 0 : -1;
 }
 
@@ -134,16 +135,21 @@ static __init void early_serial_hw_init(unsigned divisor)
 {
 	unsigned char c;
 
-	serial_out(early_serial_base, LCR, 0x3);	/* 8n1 */
-	serial_out(early_serial_base, IER, 0);	/* no interrupt */
-	serial_out(early_serial_base, FCR, 0);	/* no fifo */
-	serial_out(early_serial_base, MCR, 0x3);	/* DTR + RTS */
+	static_call(serial_out)(early_serial_base, LCR, 0x3);	/* 8n1 */
+	static_call(serial_out)(early_serial_base, IER, 0);	/* no interrupt */
+	static_call(serial_out)(early_serial_base, FCR, 0);	/* no fifo */
+	static_call(serial_out)(early_serial_base, MCR, 0x3);	/* DTR + RTS */
 
-	c = serial_in(early_serial_base, LCR);
-	serial_out(early_serial_base, LCR, c | DLAB);
-	serial_out(early_serial_base, DLL, divisor & 0xff);
-	serial_out(early_serial_base, DLH, (divisor >> 8) & 0xff);
-	serial_out(early_serial_base, LCR, c & ~DLAB);
+	c = static_call(serial_in)(early_serial_base, LCR);
+	static_call(serial_out)(early_serial_base, LCR, c | DLAB);
+	static_call(serial_out)(early_serial_base, DLL, divisor & 0xff);
+	static_call(serial_out)(early_serial_base, DLH, (divisor >> 8) & 0xff);
+	static_call(serial_out)(early_serial_base, LCR, c & ~DLAB);
+
+#if defined(CONFIG_KEXEC_CORE) && defined(CONFIG_X86_64)
+	if (static_call_query(serial_in) == io_serial_in)
+		kexec_debug_8250_port = early_serial_base;
+#endif
 }
 
 #define DEFAULT_BAUD 9600
@@ -186,35 +192,72 @@ static __init void early_serial_init(char *s)
 	/* Convert from baud to divisor value */
 	divisor = 115200 / baud;
 
-	/* These will always be IO based ports */
-	serial_in = io_serial_in;
-	serial_out = io_serial_out;
-
 	/* Set up the HW */
 	early_serial_hw_init(divisor);
 }
 
-#ifdef CONFIG_PCI
-static void mem32_serial_out(unsigned long addr, int offset, int value)
+static __noendbr void mem32_serial_out(unsigned long addr, int offset, int value)
 {
 	u32 __iomem *vaddr = (u32 __iomem *)addr;
 	/* shift implied by pointer type */
 	writel(value, vaddr + offset);
 }
+ANNOTATE_NOENDBR_SYM(mem32_serial_out);
 
-static unsigned int mem32_serial_in(unsigned long addr, int offset)
+static __noendbr unsigned int mem32_serial_in(unsigned long addr, int offset)
 {
 	u32 __iomem *vaddr = (u32 __iomem *)addr;
 	/* shift implied by pointer type */
 	return readl(vaddr + offset);
 }
+ANNOTATE_NOENDBR_SYM(mem32_serial_in);
 
+/*
+ * early_mmio_serial_init() - Initialize MMIO-based early serial console.
+ * @s: MMIO-based serial specification.
+ */
+static __init void early_mmio_serial_init(char *s)
+{
+	unsigned long baudrate;
+	unsigned long membase;
+	char *e;
+
+	if (*s == ',')
+		s++;
+
+	if (!strncmp(s, "0x", 2)) {
+		/* NB: only 32-bit addresses are supported. */
+		membase = simple_strtoul(s, &e, 16);
+		early_serial_base = (unsigned long)early_ioremap(membase, PAGE_SIZE);
+
+		static_call_update(serial_in, mem32_serial_in);
+		static_call_update(serial_out, mem32_serial_out);
+
+		s += strcspn(s, ",");
+		if (*s == ',')
+			s++;
+	}
+
+	if (!strncmp(s, "nocfg", 5)) {
+		baudrate = 0;
+	} else {
+		baudrate = simple_strtoul(s, &e, 0);
+		if (baudrate == 0 || s == e)
+			baudrate = DEFAULT_BAUD;
+	}
+
+	if (baudrate)
+		early_serial_hw_init(115200 / baudrate);
+}
+
+#ifdef CONFIG_PCI
 /*
  * early_pci_serial_init()
  *
  * This function is invoked when the early_printk param starts with "pciserial"
- * The rest of the param should be ",B:D.F,baud" where B, D & F describe the
- * location of a PCI device that must be a UART device.
+ * The rest of the param should be "[force],B:D.F,baud", where B, D & F describe
+ * the location of a PCI device that must be a UART device. "force" is optional
+ * and overrides the use of an UART device with a wrong PCI class code.
  */
 static __init void early_pci_serial_init(char *s)
 {
@@ -224,17 +267,23 @@ static __init void early_pci_serial_init(char *s)
 	u32 classcode, bar0;
 	u16 cmdreg;
 	char *e;
+	int force = 0;
 
-
-	/*
-	 * First, part the param to get the BDF values
-	 */
 	if (*s == ',')
 		++s;
 
 	if (*s == 0)
 		return;
 
+	/* Force the use of an UART device with wrong class code */
+	if (!strncmp(s, "force,", 6)) {
+		force = 1;
+		s += 6;
+	}
+
+	/*
+	 * Part the param to get the BDF values
+	 */
 	bus = (u8)simple_strtoul(s, &e, 16);
 	s = e;
 	if (*s != ':')
@@ -253,43 +302,46 @@ static __init void early_pci_serial_init(char *s)
 		s++;
 
 	/*
-	 * Second, find the device from the BDF
+	 * Find the device from the BDF
 	 */
 	cmdreg = read_pci_config(bus, slot, func, PCI_COMMAND);
 	classcode = read_pci_config(bus, slot, func, PCI_CLASS_REVISION);
 	bar0 = read_pci_config(bus, slot, func, PCI_BASE_ADDRESS_0);
 
 	/*
-	 * Verify it is a UART type device
+	 * Verify it is a 16550-UART type device
 	 */
 	if (((classcode >> 16 != PCI_CLASS_COMMUNICATION_MODEM) &&
 	     (classcode >> 16 != PCI_CLASS_COMMUNICATION_SERIAL)) ||
-	   (((classcode >> 8) & 0xff) != 0x02)) /* 16550 I/F at BAR0 */
-		return;
+	    (((classcode >> 8) & 0xff) != PCI_SERIAL_16550_COMPATIBLE)) {
+		if (!force)
+			return;
+	}
 
 	/*
 	 * Determine if it is IO or memory mapped
 	 */
-	if (bar0 & 0x01) {
+	if ((bar0 & PCI_BASE_ADDRESS_SPACE) == PCI_BASE_ADDRESS_SPACE_IO) {
 		/* it is IO mapped */
-		serial_in = io_serial_in;
-		serial_out = io_serial_out;
-		early_serial_base = bar0&0xfffffffc;
+		early_serial_base = bar0 & PCI_BASE_ADDRESS_IO_MASK;
 		write_pci_config(bus, slot, func, PCI_COMMAND,
-						cmdreg|PCI_COMMAND_IO);
+				 cmdreg|PCI_COMMAND_IO);
 	} else {
 		/* It is memory mapped - assume 32-bit alignment */
-		serial_in = mem32_serial_in;
-		serial_out = mem32_serial_out;
+		static_call_update(serial_in, mem32_serial_in);
+		static_call_update(serial_out, mem32_serial_out);
 		/* WARNING! assuming the address is always in the first 4G */
 		early_serial_base =
-			(unsigned long)early_ioremap(bar0 & 0xfffffff0, 0x10);
+			(unsigned long)early_ioremap(bar0 & PCI_BASE_ADDRESS_MEM_MASK, 0x10);
+#if defined(CONFIG_KEXEC_CORE) && defined(CONFIG_X86_64)
+		kexec_debug_8250_mmio32 = bar0 & PCI_BASE_ADDRESS_MEM_MASK;
+#endif
 		write_pci_config(bus, slot, func, PCI_COMMAND,
-						cmdreg|PCI_COMMAND_MEMORY);
+				 cmdreg|PCI_COMMAND_MEMORY);
 	}
 
 	/*
-	 * Lastly, initialize the hardware
+	 * Initialize the hardware
 	 */
 	if (*s) {
 		if (strcmp(s, "nocfg") == 0)
@@ -346,6 +398,11 @@ static int __init setup_early_printk(char *buf)
 	keep = (strstr(buf, "keep") != NULL);
 
 	while (*buf != '\0') {
+		if (!strncmp(buf, "mmio32", 6)) {
+			buf += 6;
+			early_mmio_serial_init(buf);
+			early_console_register(&early_serial_console, keep);
+		}
 		if (!strncmp(buf, "serial", 6)) {
 			buf += 6;
 			early_serial_init(buf);
@@ -359,9 +416,9 @@ static int __init setup_early_printk(char *buf)
 		}
 #ifdef CONFIG_PCI
 		if (!strncmp(buf, "pciserial", 9)) {
-			early_pci_serial_init(buf + 9);
+			buf += 9; /* Keep from match the above "pciserial" */
+			early_pci_serial_init(buf);
 			early_console_register(&early_serial_console, keep);
-			buf += 9; /* Keep from match the above "serial" */
 		}
 #endif
 		if (!strncmp(buf, "vga", 3) &&
@@ -379,13 +436,9 @@ static int __init setup_early_printk(char *buf)
 		if (!strncmp(buf, "xen", 3))
 			early_console_register(&xenboot_console, keep);
 #endif
-#ifdef CONFIG_EARLY_PRINTK_EFI
-		if (!strncmp(buf, "efi", 3))
-			early_console_register(&early_efi_console, keep);
-#endif
 #ifdef CONFIG_EARLY_PRINTK_USB_XDBC
 		if (!strncmp(buf, "xdbc", 4))
-			early_xdbc_parse_parameter(buf + 4);
+			early_xdbc_parse_parameter(buf + 4, keep);
 #endif
 
 		buf++;

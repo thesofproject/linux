@@ -27,7 +27,6 @@
 #define MAX_NR_FUNC	256	/* max nr of strings assigned to keys */
 
 #define KT_LATIN	0	/* we depend on this being zero */
-#define KT_LETTER	11	/* symbol that can be acted upon by CapsLock */
 #define KT_FN		1
 #define KT_SPEC		2
 #define KT_PAD		3
@@ -38,9 +37,11 @@
 #define KT_META		8
 #define KT_ASCII	9
 #define KT_LOCK		10
+#define KT_LETTER	11	/* symbol that can be acted upon by CapsLock */
 #define KT_SLOCK	12
 #define KT_DEAD2	13
 #define KT_BRL		14
+#define KT_CSI		15	/* CSI sequences with modifier support */
 
 #define K(t,v)		(((t)<<8)|(v))
 #define KTYP(x)		((x) >> 8)
@@ -357,8 +358,29 @@
 #define K_DTILDE	K(KT_DEAD,3)
 #define K_DDIERE	K(KT_DEAD,4)
 #define K_DCEDIL	K(KT_DEAD,5)
+#define K_DMACRON	K(KT_DEAD,6)
+#define K_DBREVE	K(KT_DEAD,7)
+#define K_DABDOT	K(KT_DEAD,8)
+#define K_DABRING	K(KT_DEAD,9)
+#define K_DDBACUTE	K(KT_DEAD,10)
+#define K_DCARON	K(KT_DEAD,11)
+#define K_DOGONEK	K(KT_DEAD,12)
+#define K_DIOTA		K(KT_DEAD,13)
+#define K_DVOICED	K(KT_DEAD,14)
+#define K_DSEMVOICED	K(KT_DEAD,15)
+#define K_DBEDOT	K(KT_DEAD,16)
+#define K_DHOOK		K(KT_DEAD,17)
+#define K_DHORN		K(KT_DEAD,18)
+#define K_DSTROKE	K(KT_DEAD,19)
+#define K_DABCOMMA	K(KT_DEAD,20)
+#define K_DABREVCOMMA	K(KT_DEAD,21)
+#define K_DDBGRAVE	K(KT_DEAD,22)
+#define K_DINVBREVE	K(KT_DEAD,23)
+#define K_DBECOMMA	K(KT_DEAD,24)
+#define K_DCURRENCY	K(KT_DEAD,25)
+#define K_DGREEK	K(KT_DEAD,26)
 
-#define NR_DEAD		6
+#define NR_DEAD		27
 
 #define K_DOWN		K(KT_CUR,0)
 #define K_LEFT		K(KT_CUR,1)
@@ -439,6 +461,34 @@
 #define K_BRL_DOT10     K(KT_BRL, 10)
 
 #define NR_BRL		11
+
+/* KT_CSI keys: value is the CSI parameter number for ESC [ <value> ~ */
+#define K_CSI_HOME	K(KT_CSI, 1)	/* ESC [ 1 ~ */
+#define K_CSI_INSERT	K(KT_CSI, 2)	/* ESC [ 2 ~ */
+#define K_CSI_DELETE	K(KT_CSI, 3)	/* ESC [ 3 ~ */
+#define K_CSI_END	K(KT_CSI, 4)	/* ESC [ 4 ~ */
+#define K_CSI_PGUP	K(KT_CSI, 5)	/* ESC [ 5 ~ */
+#define K_CSI_PGDN	K(KT_CSI, 6)	/* ESC [ 6 ~ */
+#define K_CSI_F1	K(KT_CSI, 11)	/* ESC [ 11 ~ */
+#define K_CSI_F2	K(KT_CSI, 12)	/* ESC [ 12 ~ */
+#define K_CSI_F3	K(KT_CSI, 13)	/* ESC [ 13 ~ */
+#define K_CSI_F4	K(KT_CSI, 14)	/* ESC [ 14 ~ */
+#define K_CSI_F5	K(KT_CSI, 15)	/* ESC [ 15 ~ */
+#define K_CSI_F6	K(KT_CSI, 17)	/* ESC [ 17 ~ */
+#define K_CSI_F7	K(KT_CSI, 18)	/* ESC [ 18 ~ */
+#define K_CSI_F8	K(KT_CSI, 19)	/* ESC [ 19 ~ */
+#define K_CSI_F9	K(KT_CSI, 20)	/* ESC [ 20 ~ */
+#define K_CSI_F10	K(KT_CSI, 21)	/* ESC [ 21 ~ */
+#define K_CSI_F11	K(KT_CSI, 23)	/* ESC [ 23 ~ */
+#define K_CSI_F12	K(KT_CSI, 24)	/* ESC [ 24 ~ */
+#define K_CSI_F13	K(KT_CSI, 25)	/* ESC [ 25 ~ */
+#define K_CSI_F14	K(KT_CSI, 26)	/* ESC [ 26 ~ */
+#define K_CSI_F15	K(KT_CSI, 28)	/* ESC [ 28 ~ */
+#define K_CSI_F16	K(KT_CSI, 29)	/* ESC [ 29 ~ */
+#define K_CSI_F17	K(KT_CSI, 31)	/* ESC [ 31 ~ */
+#define K_CSI_F18	K(KT_CSI, 32)	/* ESC [ 32 ~ */
+#define K_CSI_F19	K(KT_CSI, 33)	/* ESC [ 33 ~ */
+#define K_CSI_F20	K(KT_CSI, 34)	/* ESC [ 34 ~ */
 
 #define MAX_DIACR	256
 #endif /* _UAPI__LINUX_KEYBOARD_H */

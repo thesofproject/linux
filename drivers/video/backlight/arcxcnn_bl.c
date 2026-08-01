@@ -1,20 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Backlight driver for ArcticSand ARC_X_C_0N_0N Devices
  *
  * Copyright 2016 ArcticSand, Inc.
  * Author : Brian Dodge <bdodge@arcticsand.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/backlight.h>
@@ -141,11 +130,8 @@ static int arcxcnn_set_brightness(struct arcxcnn *lp, u32 brightness)
 static int arcxcnn_bl_update_status(struct backlight_device *bl)
 {
 	struct arcxcnn *lp = bl_get_data(bl);
-	u32 brightness = bl->props.brightness;
+	u32 brightness = backlight_get_brightness(bl);
 	int ret;
-
-	if (bl->props.state & (BL_CORE_SUSPENDED | BL_CORE_FBBLANK))
-		brightness = 0;
 
 	ret = arcxcnn_set_brightness(lp, brightness);
 	if (ret)
@@ -252,7 +238,7 @@ static void arcxcnn_parse_dt(struct arcxcnn *lp)
 	}
 }
 
-static int arcxcnn_probe(struct i2c_client *cl, const struct i2c_device_id *id)
+static int arcxcnn_probe(struct i2c_client *cl)
 {
 	struct arcxcnn *lp;
 	int ret;
@@ -373,7 +359,7 @@ probe_err:
 	return ret;
 }
 
-static int arcxcnn_remove(struct i2c_client *cl)
+static void arcxcnn_remove(struct i2c_client *cl)
 {
 	struct arcxcnn *lp = i2c_get_clientdata(cl);
 
@@ -387,8 +373,6 @@ static int arcxcnn_remove(struct i2c_client *cl)
 	lp->bl->props.brightness = 0;
 
 	backlight_update_status(lp->bl);
-
-	return 0;
 }
 
 static const struct of_device_id arcxcnn_dt_ids[] = {
@@ -398,7 +382,7 @@ static const struct of_device_id arcxcnn_dt_ids[] = {
 MODULE_DEVICE_TABLE(of, arcxcnn_dt_ids);
 
 static const struct i2c_device_id arcxcnn_ids[] = {
-	{"arc2c0608", ARC2C0608},
+	{ .name = "arc2c0608", .driver_data = ARC2C0608 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, arcxcnn_ids);
@@ -406,7 +390,7 @@ MODULE_DEVICE_TABLE(i2c, arcxcnn_ids);
 static struct i2c_driver arcxcnn_driver = {
 	.driver = {
 		.name = "arcxcnn_bl",
-		.of_match_table = of_match_ptr(arcxcnn_dt_ids),
+		.of_match_table = arcxcnn_dt_ids,
 	},
 	.probe = arcxcnn_probe,
 	.remove = arcxcnn_remove,

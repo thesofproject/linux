@@ -1,27 +1,6 @@
-/******************************************************************************
- *
- * Copyright(c) 2009-2012  Realtek Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- * wlanfae <wlanfae@realtek.com>
- * Realtek Corporation, No. 2, Innovation Road II, Hsinchu Science Park,
- * Hsinchu 300, Taiwan.
- *
- * Larry Finger <Larry.Finger@lwfinger.net>
- *
- *****************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright(c) 2009-2012  Realtek Corporation.*/
+
 #ifndef	__HALBTC_OUT_SRC_H__
 #define __HALBTC_OUT_SRC_H__
 
@@ -700,7 +679,7 @@ struct btc_coexist {
 	bool auto_report_2ant;
 	bool dbg_mode_1ant;
 	bool dbg_mode_2ant;
-	bool initilized;
+	bool initialized;
 	bool stop_coex_dm;
 	bool manual_control;
 	struct btc_statistics statistics;
@@ -784,20 +763,9 @@ void exhalbtc_mediastatus_notify(struct btc_coexist *btcoexist,
 void exhalbtc_special_packet_notify(struct btc_coexist *btcoexist, u8 pkt_type);
 void exhalbtc_bt_info_notify(struct btc_coexist *btcoexist, u8 *tmp_buf,
 			     u8 length);
-void exhalbtc_rf_status_notify(struct btc_coexist *btcoexist, u8 type);
-void exhalbtc_stack_operation_notify(struct btc_coexist *btcoexist, u8 type);
 void exhalbtc_halt_notify(struct btc_coexist *btcoexist);
 void exhalbtc_pnp_notify(struct btc_coexist *btcoexist, u8 pnp_state);
-void exhalbtc_coex_dm_switch(struct btc_coexist *btcoexist);
 void exhalbtc_periodical(struct btc_coexist *btcoexist);
-void exhalbtc_dbg_control(struct btc_coexist *btcoexist, u8 code, u8 len,
-			  u8 *data);
-void exhalbtc_antenna_detection(struct btc_coexist *btcoexist, u32 cent_freq,
-				u32 offset, u32 span, u32 seconds);
-void exhalbtc_stack_update_profile_info(void);
-void exhalbtc_set_hci_version(struct btc_coexist *btcoexist, u16 hci_version);
-void exhalbtc_set_bt_patch_version(struct btc_coexist *btcoexist,
-				   u16 bt_hci_version, u16 bt_patch_version);
 void exhalbtc_update_min_bt_rssi(struct btc_coexist *btcoexist, s8 bt_rssi);
 void exhalbtc_set_bt_exist(struct btc_coexist *btcoexist, bool bt_exist);
 void exhalbtc_set_chip_type(struct btc_coexist *btcoexist, u8 chip_type);

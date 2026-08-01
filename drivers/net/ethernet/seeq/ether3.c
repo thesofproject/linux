@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/acorn/net/ether3.c
  *
  *  Copyright (C) 1995-2000 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * SEEQ nq8005 ethernet driver for Acorn/ANT Ether3 card
  *  for Acorn machines
@@ -77,11 +74,12 @@ static void	ether3_setmulticastlist(struct net_device *dev);
 static int	ether3_rx(struct net_device *dev, unsigned int maxcnt);
 static void	ether3_tx(struct net_device *dev);
 static int	ether3_open (struct net_device *dev);
-static int	ether3_sendpacket (struct sk_buff *skb, struct net_device *dev);
+static netdev_tx_t	ether3_sendpacket(struct sk_buff *skb,
+					  struct net_device *dev);
 static irqreturn_t ether3_interrupt (int irq, void *dev_id);
 static int	ether3_close (struct net_device *dev);
 static void	ether3_setmulticastlist (struct net_device *dev);
-static void	ether3_timeout(struct net_device *dev);
+static void	ether3_timeout(struct net_device *dev, unsigned int txqueue);
 
 #define BUS_16		2
 #define BUS_8		1
@@ -172,7 +170,7 @@ ether3_setbuffer(struct net_device *dev, buffer_rw_t read, int start)
  */
 static void ether3_ledoff(struct timer_list *t)
 {
-	struct dev_priv *private = from_timer(private, t, timer);
+	struct dev_priv *private = timer_container_of(private, t, timer);
 	struct net_device *dev = private->dev;
 
 	ether3_outw(priv(dev)->regs.config2 |= CFG2_CTRLO, REG_CONFIG2);
@@ -183,7 +181,7 @@ static void ether3_ledoff(struct timer_list *t)
  */
 static inline void ether3_ledon(struct net_device *dev)
 {
-	del_timer(&priv(dev)->timer);
+	timer_delete(&priv(dev)->timer);
 	priv(dev)->timer.expires = jiffies + HZ / 50; /* leave on for 1/50th second */
 	add_timer(&priv(dev)->timer);
 	if (priv(dev)->regs.config2 & CFG2_CTRLO)
@@ -452,11 +450,11 @@ static void ether3_setmulticastlist(struct net_device *dev)
 	ether3_outw(priv(dev)->regs.config1 | CFG1_LOCBUFMEM, REG_CONFIG1);
 }
 
-static void ether3_timeout(struct net_device *dev)
+static void ether3_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	unsigned long flags;
 
-	del_timer(&priv(dev)->timer);
+	timer_delete(&priv(dev)->timer);
 
 	local_irq_save(flags);
 	printk(KERN_ERR "%s: transmit timed out, network cable problem?\n", dev->name);
@@ -481,7 +479,7 @@ static void ether3_timeout(struct net_device *dev)
 /*
  * Transmit a packet
  */
-static int
+static netdev_tx_t
 ether3_sendpacket(struct sk_buff *skb, struct net_device *dev)
 {
 	unsigned long flags;
@@ -612,17 +610,14 @@ static int ether3_rx(struct net_device *dev, unsigned int maxcnt)
 		ether3_readbuffer(dev, addrs+2, 12);
 
 if (next_ptr < RX_START || next_ptr >= RX_END) {
- int i;
  printk("%s: bad next pointer @%04X: ", dev->name, priv(dev)->rx_head);
  printk("%02X %02X %02X %02X ", next_ptr >> 8, next_ptr & 255, status & 255, status >> 8);
- for (i = 2; i < 14; i++)
-   printk("%02X ", addrs[i]);
- printk("\n");
+ printk("%pM %pM\n", addrs + 2, addrs + 8);
  next_ptr = priv(dev)->rx_head;
  break;
 }
 		/*
- 		 * ignore our own packets...
+		 * ignore our own packets...
 	 	 */
 		if (!(*(unsigned long *)&dev->dev_addr[0] ^ *(unsigned long *)&addrs[2+6]) &&
 		    !(*(unsigned short *)&dev->dev_addr[4] ^ *(unsigned short *)&addrs[2+10])) {
@@ -677,7 +672,7 @@ done:
 	 */
 	if (!(ether3_inw(REG_STATUS) & STAT_RXON)) {
 		dev->stats.rx_dropped++;
-    		ether3_outw(next_ptr, REG_RECVPTR);
+		ether3_outw(next_ptr, REG_RECVPTR);
 		ether3_outw(priv(dev)->regs.command | CMD_RXON, REG_COMMAND);
 	}
 
@@ -695,11 +690,11 @@ static void ether3_tx(struct net_device *dev)
 	do {
 	    	unsigned long status;
 
-    		/*
+		/*
 	    	 * Read the packet header
-    		 */
+		 */
 	    	ether3_setbuffer(dev, buffer_read, tx_tail * 0x600);
-    		status = ether3_readlong(dev);
+		status = ether3_readlong(dev);
 
 		/*
 		 * Check to see if this packet has been transmitted
@@ -754,6 +749,7 @@ ether3_probe(struct expansion_card *ec, const struct ecard_id *id)
 	const struct ether3_data *data = id->data;
 	struct net_device *dev;
 	int bus_type, ret;
+	u8 addr[ETH_ALEN];
 
 	ether3_banner();
 
@@ -781,7 +777,8 @@ ether3_probe(struct expansion_card *ec, const struct ecard_id *id)
 	priv(dev)->seeq = priv(dev)->base + data->base_offset;
 	dev->irq = ec->irq;
 
-	ether3_addr(dev->dev_addr, ec);
+	ether3_addr(addr, ec);
+	eth_hw_addr_set(dev, addr);
 
 	priv(dev)->dev = dev;
 	timer_setup(&priv(dev)->timer, ether3_ledoff, 0);
@@ -850,9 +847,11 @@ static void ether3_remove(struct expansion_card *ec)
 {
 	struct net_device *dev = ecard_get_drvdata(ec);
 
+	ether3_outw(priv(dev)->regs.config2 |= CFG2_CTRLO, REG_CONFIG2);
 	ecard_set_drvdata(ec, NULL);
 
 	unregister_netdev(dev);
+	timer_delete_sync(&priv(dev)->timer);
 	free_netdev(dev);
 	ecard_release_resources(ec);
 }

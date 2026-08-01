@@ -1,18 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for Zarlink ZL10039 DVB-S tuner
  *
  *  Copyright 2007 Jan D. Louw <jd.louw@mweb.co.za>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *
- *  GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -264,7 +254,7 @@ struct dvb_frontend *zl10039_attach(struct dvb_frontend *fe,
 	struct zl10039_state *state = NULL;
 
 	dprintk("%s\n", __func__);
-	state = kmalloc(sizeof(struct zl10039_state), GFP_KERNEL);
+	state = kmalloc_obj(struct zl10039_state);
 	if (state == NULL)
 		goto error;
 
@@ -288,8 +278,9 @@ struct dvb_frontend *zl10039_attach(struct dvb_frontend *fe,
 	state->id = state->id & 0x0f;
 	switch (state->id) {
 	case ID_ZL10039:
-		strcpy(fe->ops.tuner_ops.info.name,
-			"Zarlink ZL10039 DVB-S tuner");
+		strscpy(fe->ops.tuner_ops.info.name,
+			"Zarlink ZL10039 DVB-S tuner",
+			sizeof(fe->ops.tuner_ops.info.name));
 		break;
 	default:
 		dprintk("Chip ID=%x does not match a known type\n", state->id);
@@ -304,7 +295,7 @@ error:
 	kfree(state);
 	return NULL;
 }
-EXPORT_SYMBOL(zl10039_attach);
+EXPORT_SYMBOL_GPL(zl10039_attach);
 
 module_param(debug, int, 0644);
 MODULE_PARM_DESC(debug, "Turn on/off frontend debugging (default:off).");

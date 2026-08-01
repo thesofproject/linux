@@ -1,24 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Intel PRO/1000 Linux driver
- * Copyright(c) 1999 - 2015 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * Linux NICS <linux.nics@intel.com>
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- */
+/* Copyright(c) 1999 - 2018 Intel Corporation. */
 
 /* 80003ES2LAN Gigabit Ethernet Controller (Copper)
  * 80003ES2LAN Gigabit Ethernet Controller (Serdes)
@@ -111,8 +92,7 @@ static s32 e1000_init_nvm_params_80003es2lan(struct e1000_hw *hw)
 
 	nvm->type = e1000_nvm_eeprom_spi;
 
-	size = (u16)((eecd & E1000_EECD_SIZE_EX_MASK) >>
-		     E1000_EECD_SIZE_EX_SHIFT);
+	size = (u16)FIELD_GET(E1000_EECD_SIZE_EX_MASK, eecd);
 
 	/* Added to a constant, "size" becomes the left-shift value
 	 * for setting word_size.
@@ -699,7 +679,7 @@ static s32 e1000_reset_hw_80003es2lan(struct e1000_hw *hw)
 	ew32(TCTL, E1000_TCTL_PSP);
 	e1e_flush();
 
-	usleep_range(10000, 20000);
+	usleep_range(10000, 11000);
 
 	ctrl = er32(CTRL);
 
@@ -715,11 +695,16 @@ static s32 e1000_reset_hw_80003es2lan(struct e1000_hw *hw)
 	ret_val =
 	    e1000_read_kmrn_reg_80003es2lan(hw, E1000_KMRNCTRLSTA_INBAND_PARAM,
 					    &kum_reg_data);
-	if (ret_val)
-		return ret_val;
-	kum_reg_data |= E1000_KMRNCTRLSTA_IBIST_DISABLE;
-	e1000_write_kmrn_reg_80003es2lan(hw, E1000_KMRNCTRLSTA_INBAND_PARAM,
-					 kum_reg_data);
+	if (!ret_val) {
+		kum_reg_data |= E1000_KMRNCTRLSTA_IBIST_DISABLE;
+		ret_val = e1000_write_kmrn_reg_80003es2lan(hw,
+						 E1000_KMRNCTRLSTA_INBAND_PARAM,
+						 kum_reg_data);
+		if (ret_val)
+			e_dbg("Error disabling far-end loopback\n");
+	} else {
+		e_dbg("Error disabling far-end loopback\n");
+	}
 
 	ret_val = e1000e_get_auto_rd_done(hw);
 	if (ret_val)
@@ -773,11 +758,19 @@ static s32 e1000_init_hw_80003es2lan(struct e1000_hw *hw)
 		return ret_val;
 
 	/* Disable IBIST slave mode (far-end loopback) */
-	e1000_read_kmrn_reg_80003es2lan(hw, E1000_KMRNCTRLSTA_INBAND_PARAM,
-					&kum_reg_data);
-	kum_reg_data |= E1000_KMRNCTRLSTA_IBIST_DISABLE;
-	e1000_write_kmrn_reg_80003es2lan(hw, E1000_KMRNCTRLSTA_INBAND_PARAM,
-					 kum_reg_data);
+	ret_val =
+	    e1000_read_kmrn_reg_80003es2lan(hw, E1000_KMRNCTRLSTA_INBAND_PARAM,
+					    &kum_reg_data);
+	if (!ret_val) {
+		kum_reg_data |= E1000_KMRNCTRLSTA_IBIST_DISABLE;
+		ret_val = e1000_write_kmrn_reg_80003es2lan(hw,
+						 E1000_KMRNCTRLSTA_INBAND_PARAM,
+						 kum_reg_data);
+		if (ret_val)
+			e_dbg("Error disabling far-end loopback\n");
+	} else {
+		e_dbg("Error disabling far-end loopback\n");
+	}
 
 	/* Set the transmit descriptor write-back policy */
 	reg_data = er32(TXDCTL(0));
@@ -1041,17 +1034,18 @@ static s32 e1000_setup_copper_link_80003es2lan(struct e1000_hw *hw)
 	 * iteration and increase the max iterations when
 	 * polling the phy; this fixes erroneous timeouts at 10Mbps.
 	 */
-	ret_val = e1000_write_kmrn_reg_80003es2lan(hw, GG82563_REG(0x34, 4),
-						   0xFFFF);
+	/* these next three accesses were always meant to use page 0x34 using
+	 * GG82563_REG(0x34, N) but never did, so we've just corrected the call
+	 * to not drop bits
+	 */
+	ret_val = e1000_write_kmrn_reg_80003es2lan(hw, 4, 0xFFFF);
 	if (ret_val)
 		return ret_val;
-	ret_val = e1000_read_kmrn_reg_80003es2lan(hw, GG82563_REG(0x34, 9),
-						  &reg_data);
+	ret_val = e1000_read_kmrn_reg_80003es2lan(hw, 9, &reg_data);
 	if (ret_val)
 		return ret_val;
 	reg_data |= 0x3F;
-	ret_val = e1000_write_kmrn_reg_80003es2lan(hw, GG82563_REG(0x34, 9),
-						   reg_data);
+	ret_val = e1000_write_kmrn_reg_80003es2lan(hw, 9, reg_data);
 	if (ret_val)
 		return ret_val;
 	ret_val =
@@ -1078,7 +1072,6 @@ static s32 e1000_setup_copper_link_80003es2lan(struct e1000_hw *hw)
 /**
  *  e1000_cfg_on_link_up_80003es2lan - es2 link configuration after link-up
  *  @hw: pointer to the HW structure
- *  @duplex: current duplex setting
  *
  *  Configure the KMRN interface by applying last minute quirks for
  *  10/100 operation.
@@ -1216,8 +1209,8 @@ static s32 e1000_read_kmrn_reg_80003es2lan(struct e1000_hw *hw, u32 offset,
 	if (ret_val)
 		return ret_val;
 
-	kmrnctrlsta = ((offset << E1000_KMRNCTRLSTA_OFFSET_SHIFT) &
-		       E1000_KMRNCTRLSTA_OFFSET) | E1000_KMRNCTRLSTA_REN;
+	kmrnctrlsta = FIELD_PREP(E1000_KMRNCTRLSTA_OFFSET, offset) |
+		      E1000_KMRNCTRLSTA_REN;
 	ew32(KMRNCTRLSTA, kmrnctrlsta);
 	e1e_flush();
 
@@ -1251,8 +1244,7 @@ static s32 e1000_write_kmrn_reg_80003es2lan(struct e1000_hw *hw, u32 offset,
 	if (ret_val)
 		return ret_val;
 
-	kmrnctrlsta = ((offset << E1000_KMRNCTRLSTA_OFFSET_SHIFT) &
-		       E1000_KMRNCTRLSTA_OFFSET) | data;
+	kmrnctrlsta = FIELD_PREP(E1000_KMRNCTRLSTA_OFFSET, offset) | data;
 	ew32(KMRNCTRLSTA, kmrnctrlsta);
 	e1e_flush();
 

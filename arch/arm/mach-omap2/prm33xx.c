@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AM33XX PRM functions
  *
- * Copyright (C) 2011-2012 Texas Instruments Incorporated - http://www.ti.com/
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Copyright (C) 2011-2012 Texas Instruments Incorporated - https://www.ti.com/
  */
 
 #include <linux/kernel.h>
@@ -18,14 +10,11 @@
 #include <linux/errno.h>
 #include <linux/err.h>
 #include <linux/io.h>
+#include <linux/reboot.h>
 
 #include "powerdomain.h"
 #include "prm33xx.h"
 #include "prm-regbits-33xx.h"
-
-#define AM33XX_PRM_RSTCTRL_OFFSET		0x0000
-
-#define AM33XX_RST_GLOBAL_WARM_SW_MASK		(1 << 0)
 
 /* Read a register in a PRM instance */
 static u32 am33xx_prm_read_reg(s16 inst, u16 idx)
@@ -330,16 +319,54 @@ static int am33xx_check_vcvp(void)
  *
  * Immediately reboots the device through warm reset.
  */
-static void am33xx_prm_global_warm_sw_reset(void)
+static void am33xx_prm_global_sw_reset(void)
 {
-	am33xx_prm_rmw_reg_bits(AM33XX_RST_GLOBAL_WARM_SW_MASK,
-				AM33XX_RST_GLOBAL_WARM_SW_MASK,
+	/*
+	 * Historically AM33xx performed warm reset for all requested reboot_mode.
+	 * Keep this behaviour unchanged for all except newly added REBOOT_COLD.
+	 */
+	u32 mask = AM33XX_RST_GLOBAL_WARM_SW_MASK;
+
+	if (prm_reboot_mode == REBOOT_COLD)
+		mask = AM33XX_RST_GLOBAL_COLD_SW_MASK;
+
+	am33xx_prm_rmw_reg_bits(mask,
+				mask,
 				AM33XX_PRM_DEVICE_MOD,
 				AM33XX_PRM_RSTCTRL_OFFSET);
 
 	/* OCP barrier */
 	(void)am33xx_prm_read_reg(AM33XX_PRM_DEVICE_MOD,
 				  AM33XX_PRM_RSTCTRL_OFFSET);
+}
+
+static void am33xx_pwrdm_save_context(struct powerdomain *pwrdm)
+{
+	pwrdm->context = am33xx_prm_read_reg(pwrdm->prcm_offs,
+						pwrdm->pwrstctrl_offs);
+	/*
+	 * Do not save LOWPOWERSTATECHANGE, writing a 1 indicates a request,
+	 * reading back a 1 indicates a request in progress.
+	 */
+	pwrdm->context &= ~AM33XX_LOWPOWERSTATECHANGE_MASK;
+}
+
+static void am33xx_pwrdm_restore_context(struct powerdomain *pwrdm)
+{
+	int st, ctrl;
+
+	st = am33xx_prm_read_reg(pwrdm->prcm_offs,
+				 pwrdm->pwrstst_offs);
+
+	am33xx_prm_write_reg(pwrdm->context, pwrdm->prcm_offs,
+			     pwrdm->pwrstctrl_offs);
+
+	/* Make sure we only wait for a transition if there is one */
+	st &= OMAP_POWERSTATEST_MASK;
+	ctrl = OMAP_POWERSTATEST_MASK & pwrdm->context;
+
+	if (st != ctrl)
+		am33xx_pwrdm_wait_transition(pwrdm);
 }
 
 struct pwrdm_ops am33xx_pwrdm_operations = {
@@ -357,13 +384,15 @@ struct pwrdm_ops am33xx_pwrdm_operations = {
 	.pwrdm_set_mem_retst		= am33xx_pwrdm_set_mem_retst,
 	.pwrdm_wait_transition		= am33xx_pwrdm_wait_transition,
 	.pwrdm_has_voltdm		= am33xx_check_vcvp,
+	.pwrdm_save_context		= am33xx_pwrdm_save_context,
+	.pwrdm_restore_context		= am33xx_pwrdm_restore_context,
 };
 
 static struct prm_ll_data am33xx_prm_ll_data = {
 	.assert_hardreset		= am33xx_prm_assert_hardreset,
 	.deassert_hardreset		= am33xx_prm_deassert_hardreset,
 	.is_hardreset_asserted		= am33xx_prm_is_hardreset_asserted,
-	.reset_system			= am33xx_prm_global_warm_sw_reset,
+	.reset_system			= am33xx_prm_global_sw_reset,
 };
 
 int __init am33xx_prm_init(const struct omap_prcm_init_data *data)

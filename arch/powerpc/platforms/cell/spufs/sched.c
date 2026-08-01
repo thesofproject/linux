@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* sched.c - SPU scheduler.
  *
  * Copyright (C) IBM 2005
  * Author: Mark Nutter <mnutter@us.ibm.com>
  *
  * 2006-03-31	NUMA domains added.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2, or (at your option)
- * any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #undef DEBUG
@@ -85,7 +72,7 @@ static struct timer_list spuloadavg_timer;
 #define DEF_SPU_TIMESLICE	(100 * HZ / (1000 * SPUSCHED_TICK))
 
 #define SCALE_PRIO(x, prio) \
-	max(x * (MAX_PRIO - prio) / (MAX_USER_PRIO / 2), MIN_SPU_TIMESLICE)
+	max(x * (MAX_PRIO - prio) / (NICE_WIDTH / 2), MIN_SPU_TIMESLICE)
 
 /*
  * scale user-nice values [ -20 ... 0 ... 19 ] to time slice values:
@@ -141,7 +128,7 @@ void __spu_update_sched_info(struct spu_context *ctx)
 	 * runqueue. The context will be rescheduled on the proper node
 	 * if it is timesliced or preempted.
 	 */
-	cpumask_copy(&ctx->cpus_allowed, &current->cpus_allowed);
+	cpumask_copy(&ctx->cpus_allowed, current->cpus_ptr);
 
 	/* Save the current cpu id for spu interrupt routing. */
 	ctx->last_ran = raw_smp_processor_id();
@@ -194,9 +181,6 @@ void do_notify_spus_active(void)
 
 	/*
 	 * Wake up the active spu_contexts.
-	 *
-	 * When the awakened processes see their "notify_active" flag is set,
-	 * they will call spu_switch_notify().
 	 */
 	for_each_online_node(node) {
 		struct spu *spu;
@@ -252,7 +236,6 @@ static void spu_bind_context(struct spu *spu, struct spu_context *ctx)
 	spu_switch_log_notify(spu, ctx, SWITCH_LOG_START, 0);
 	spu_restore(&ctx->csa, spu);
 	spu->timestamp = jiffies;
-	spu_switch_notify(spu, ctx);
 	ctx->state = SPU_STATE_RUNNABLE;
 
 	spuctx_switch_state(ctx, SPU_UTIL_USER);
@@ -357,8 +340,7 @@ static struct spu *aff_ref_location(struct spu_context *ctx, int mem_aff,
 static void aff_set_ref_point_location(struct spu_gang *gang)
 {
 	int mem_aff, gs, lowest_offset;
-	struct spu_context *ctx;
-	struct spu *tmp;
+	struct spu_context *tmp, *ctx;
 
 	mem_aff = gang->aff_ref_ctx->flags & SPU_CREATE_AFFINITY_MEM;
 	lowest_offset = 0;
@@ -453,7 +435,6 @@ static void spu_unbind_context(struct spu *spu, struct spu_context *ctx)
 		 */
 		atomic_dec_if_positive(&ctx->gang->aff_sched_count);
 
-	spu_switch_notify(spu, NULL);
 	spu_unmap_mappings(ctx);
 	spu_save(&ctx->csa, spu);
 	spu_switch_log_notify(spu, ctx, SWITCH_LOG_STOP, 0);
@@ -527,7 +508,7 @@ static void __spu_del_from_rq(struct spu_context *ctx)
 
 	if (!list_empty(&ctx->rq)) {
 		if (!--spu_prio->nr_waiting)
-			del_timer(&spusched_timer);
+			timer_delete(&spusched_timer);
 		list_del_init(&ctx->rq);
 
 		if (list_empty(&spu_prio->runq[prio]))
@@ -887,7 +868,7 @@ static int __spu_deactivate(struct spu_context *ctx, int force, int max_prio)
 }
 
 /**
- * spu_deactivate - unbind a context from it's physical spu
+ * spu_deactivate - unbind a context from its physical spu
  * @ctx:	spu context to unbind
  *
  * Unbind @ctx from the physical spu it is running on and schedule
@@ -987,9 +968,9 @@ static void spu_calc_load(void)
 	unsigned long active_tasks; /* fixed-point */
 
 	active_tasks = count_active_contexts() * FIXED_1;
-	CALC_LOAD(spu_avenrun[0], EXP_1, active_tasks);
-	CALC_LOAD(spu_avenrun[1], EXP_5, active_tasks);
-	CALC_LOAD(spu_avenrun[2], EXP_15, active_tasks);
+	spu_avenrun[0] = calc_load(spu_avenrun[0], EXP_1, active_tasks);
+	spu_avenrun[1] = calc_load(spu_avenrun[1], EXP_5, active_tasks);
+	spu_avenrun[2] = calc_load(spu_avenrun[2], EXP_15, active_tasks);
 }
 
 static void spusched_wake(struct timer_list *unused)
@@ -1071,9 +1052,7 @@ void spuctx_switch_state(struct spu_context *ctx,
 	}
 }
 
-#define LOAD_INT(x) ((x) >> FSHIFT)
-#define LOAD_FRAC(x) LOAD_INT(((x) & (FIXED_1-1)) * 100)
-
+#ifdef CONFIG_PROC_FS
 static int show_spu_loadavg(struct seq_file *s, void *private)
 {
 	int a, b, c;
@@ -1096,25 +1075,14 @@ static int show_spu_loadavg(struct seq_file *s, void *private)
 		idr_get_cursor(&task_active_pid_ns(current)->idr) - 1);
 	return 0;
 }
-
-static int spu_loadavg_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, show_spu_loadavg, NULL);
-}
-
-static const struct file_operations spu_loadavg_fops = {
-	.open		= spu_loadavg_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
+#endif
 
 int __init spu_sched_init(void)
 {
 	struct proc_dir_entry *entry;
 	int err = -ENOMEM, i;
 
-	spu_prio = kzalloc(sizeof(struct spu_prio_array), GFP_KERNEL);
+	spu_prio = kzalloc_obj(struct spu_prio_array);
 	if (!spu_prio)
 		goto out;
 
@@ -1135,7 +1103,7 @@ int __init spu_sched_init(void)
 
 	mod_timer(&spuloadavg_timer, 0);
 
-	entry = proc_create("spu_loadavg", 0, NULL, &spu_loadavg_fops);
+	entry = proc_create_single("spu_loadavg", 0, NULL, show_spu_loadavg);
 	if (!entry)
 		goto out_stop_kthread;
 
@@ -1158,8 +1126,8 @@ void spu_sched_exit(void)
 
 	remove_proc_entry("spu_loadavg", NULL);
 
-	del_timer_sync(&spusched_timer);
-	del_timer_sync(&spuloadavg_timer);
+	timer_delete_sync(&spusched_timer);
+	timer_delete_sync(&spuloadavg_timer);
 	kthread_stop(spusched_task);
 
 	for (node = 0; node < MAX_NUMNODES; node++) {

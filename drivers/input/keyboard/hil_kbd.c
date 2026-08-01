@@ -447,7 +447,7 @@ static int hil_dev_connect(struct serio *serio, struct serio_driver *drv)
 	uint8_t did, *idd;
 	int error;
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	input_dev = input_allocate_device();
 	if (!dev || !input_dev) {
 		error = -ENOMEM;
@@ -512,6 +512,7 @@ static int hil_dev_connect(struct serio *serio, struct serio_driver *drv)
 		    HIL_IDD_NUM_AXES_PER_SET(*idd)) {
 			printk(KERN_INFO PREFIX
 				"combo devices are not supported.\n");
+			error = -EINVAL;
 			goto bail1;
 		}
 

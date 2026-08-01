@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  * Copyright (c) 2003 Gerd Knorr
  * Copyright (c) 2003 Pavel Machek
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -93,7 +84,7 @@ static void ir_enltv_handle_key(struct bttv *btv)
 	data = ir_extract_bits(gpio, ir->mask_keycode);
 
 	/* Check if it is keyup */
-	keyup = (gpio & ir->mask_keyup) ? 1 << 31 : 0;
+	keyup = (gpio & ir->mask_keyup) ? 1UL << 31 : 0;
 
 	if ((ir->last_gpio & 0x7f) != data) {
 		dprintk("gpio=0x%x code=%d | %s\n",
@@ -104,7 +95,7 @@ static void ir_enltv_handle_key(struct bttv *btv)
 		if (keyup)
 			rc_keyup(ir->dev);
 	} else {
-		if ((ir->last_gpio & 1 << 31) == keyup)
+		if ((ir->last_gpio & 1UL << 31) == keyup)
 			return;
 
 		dprintk("(cnt) gpio=0x%x code=%d | %s\n",
@@ -135,7 +126,7 @@ void bttv_input_irq(struct bttv *btv)
 
 static void bttv_input_timer(struct timer_list *t)
 {
-	struct bttv_ir *ir = from_timer(ir, t, timer);
+	struct bttv_ir *ir = timer_container_of(ir, t, timer);
 	struct bttv *btv = ir->btv;
 
 	if (btv->c.type == BTTV_BOARD_ENLTV_FM_2)
@@ -191,7 +182,7 @@ static u32 bttv_rc5_decode(unsigned int code)
 
 static void bttv_rc5_timer_end(struct timer_list *t)
 {
-	struct bttv_ir *ir = from_timer(ir, t, timer);
+	struct bttv_ir *ir = timer_container_of(ir, t, timer);
 	ktime_t tv;
 	u32 gap, rc5, scancode;
 	u8 toggle, command, system;
@@ -313,12 +304,12 @@ static void bttv_ir_start(struct bttv_ir *ir)
 static void bttv_ir_stop(struct bttv *btv)
 {
 	if (btv->remote->polling)
-		del_timer_sync(&btv->remote->timer);
+		timer_delete_sync(&btv->remote->timer);
 
 	if (btv->remote->rc5_gpio) {
 		u32 gpio;
 
-		del_timer_sync(&btv->remote->timer);
+		timer_delete_sync(&btv->remote->timer);
 
 		gpio = bttv_gpio_read(&btv->c);
 		bttv_gpio_write(&btv->c, gpio & ~(1 << 4));
@@ -370,7 +361,7 @@ static int get_key_pv951(struct IR_i2c *ir, enum rc_proto *protocol,
 /* Instantiate the I2C IR receiver device, if present */
 void init_bttv_i2c_ir(struct bttv *btv)
 {
-	const unsigned short addr_list[] = {
+	static const unsigned short addr_list[] = {
 		0x1a, 0x18, 0x64, 0x30, 0x71,
 		I2C_CLIENT_END
 	};
@@ -382,7 +373,7 @@ void init_bttv_i2c_ir(struct bttv *btv)
 
 	memset(&info, 0, sizeof(struct i2c_board_info));
 	memset(&btv->init_data, 0, sizeof(btv->init_data));
-	strlcpy(info.type, "ir_video", I2C_NAME_SIZE);
+	strscpy(info.type, "ir_video", I2C_NAME_SIZE);
 
 	switch (btv->c.type) {
 	case BTTV_BOARD_PV951:
@@ -395,7 +386,7 @@ void init_bttv_i2c_ir(struct bttv *btv)
 
 	if (btv->init_data.name) {
 		info.platform_data = &btv->init_data;
-		i2c_dev = i2c_new_device(&btv->c.i2c_adap, &info);
+		i2c_dev = i2c_new_client_device(&btv->c.i2c_adap, &info);
 	} else {
 		/*
 		 * The external IR receiver is at i2c address 0x34 (0x35 for
@@ -405,9 +396,9 @@ void init_bttv_i2c_ir(struct bttv *btv)
 		 * internal.
 		 * That's why we probe 0x1a (~0x34) first. CB
 		 */
-		i2c_dev = i2c_new_probed_device(&btv->c.i2c_adap, &info, addr_list, NULL);
+		i2c_dev = i2c_new_scanned_device(&btv->c.i2c_adap, &info, addr_list, NULL);
 	}
-	if (NULL == i2c_dev)
+	if (IS_ERR(i2c_dev))
 		return;
 
 #if defined(CONFIG_MODULES) && defined(MODULE)
@@ -425,7 +416,7 @@ int bttv_input_init(struct bttv *btv)
 	if (!btv->has_remote)
 		return -ENODEV;
 
-	ir = kzalloc(sizeof(*ir),GFP_KERNEL);
+	ir = kzalloc_obj(*ir);
 	rc = rc_allocate_device(RC_DRIVER_SCANCODE);
 	if (!ir || !rc)
 		goto err_out_free;
@@ -581,8 +572,9 @@ void bttv_input_fini(struct bttv *btv)
 	if (btv->remote == NULL)
 		return;
 
-	bttv_ir_stop(btv);
 	rc_unregister_device(btv->remote->dev);
+	bttv_ir_stop(btv);
+	rc_free_device(btv->remote->dev);
 	kfree(btv->remote);
 	btv->remote = NULL;
 }

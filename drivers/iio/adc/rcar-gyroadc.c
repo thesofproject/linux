@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Renesas R-Car GyroADC driver
  *
  * Copyright 2016 Marek Vasut <marek.vasut@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -171,18 +162,11 @@ static const struct iio_chan_spec rcar_gyroadc_iio_channels_3[] = {
 static int rcar_gyroadc_set_power(struct rcar_gyroadc *priv, bool on)
 {
 	struct device *dev = priv->dev;
-	int ret;
 
-	if (on) {
-		ret = pm_runtime_get_sync(dev);
-		if (ret < 0)
-			pm_runtime_put_noidle(dev);
-	} else {
-		pm_runtime_mark_last_busy(dev);
-		ret = pm_runtime_put_autosuspend(dev);
-	}
+	if (on)
+		return pm_runtime_resume_and_get(dev);
 
-	return ret;
+	return pm_runtime_put_autosuspend(dev);
 }
 
 static int rcar_gyroadc_read_raw(struct iio_dev *indio_dev,
@@ -213,13 +197,12 @@ static int rcar_gyroadc_read_raw(struct iio_dev *indio_dev,
 		if (!consumer)
 			return -EINVAL;
 
-		ret = iio_device_claim_direct_mode(indio_dev);
-		if (ret)
-			return ret;
+		if (!iio_device_claim_direct(indio_dev))
+			return -EBUSY;
 
 		ret = rcar_gyroadc_set_power(priv, true);
 		if (ret < 0) {
-			iio_device_release_direct_mode(indio_dev);
+			iio_device_release_direct(indio_dev);
 			return ret;
 		}
 
@@ -227,7 +210,7 @@ static int rcar_gyroadc_read_raw(struct iio_dev *indio_dev,
 		*val &= BIT(priv->sample_width) - 1;
 
 		ret = rcar_gyroadc_set_power(priv, false);
-		iio_device_release_direct_mode(indio_dev);
+		iio_device_release_direct(indio_dev);
 		if (ret < 0)
 			return ret;
 
@@ -297,7 +280,7 @@ static const struct of_device_id rcar_gyroadc_match[] = {
 
 MODULE_DEVICE_TABLE(of, rcar_gyroadc_match);
 
-static const struct of_device_id rcar_gyroadc_child_match[] = {
+static const struct of_device_id rcar_gyroadc_child_match[] __maybe_unused = {
 	/* Mode 1 ADCs */
 	{
 		.compatible	= "fujitsu,mb88101a",
@@ -322,7 +305,7 @@ static const struct of_device_id rcar_gyroadc_child_match[] = {
 		.compatible	= "maxim,max11100",
 		.data		= (void *)RCAR_GYROADC_MODE_SELECT_3_MAX1162,
 	},
-	{ /* sentinel */ }
+	{ }
 };
 
 static int rcar_gyroadc_parse_subdevs(struct iio_dev *indio_dev)
@@ -332,7 +315,6 @@ static int rcar_gyroadc_parse_subdevs(struct iio_dev *indio_dev)
 	struct rcar_gyroadc *priv = iio_priv(indio_dev);
 	struct device *dev = priv->dev;
 	struct device_node *np = dev->of_node;
-	struct device_node *child;
 	struct regulator *vref;
 	unsigned int reg;
 	unsigned int adcmode = -1, childmode;
@@ -340,11 +322,11 @@ static int rcar_gyroadc_parse_subdevs(struct iio_dev *indio_dev)
 	unsigned int num_channels;
 	int ret, first = 1;
 
-	for_each_child_of_node(np, child) {
+	for_each_available_child_of_node_scoped(np, child) {
 		of_id = of_match_node(rcar_gyroadc_child_match, child);
 		if (!of_id) {
-			dev_err(dev, "Ignoring unsupported ADC \"%s\".",
-				child->name);
+			dev_err(dev, "Ignoring unsupported ADC \"%pOFn\".",
+				child);
 			continue;
 		}
 
@@ -381,17 +363,17 @@ static int rcar_gyroadc_parse_subdevs(struct iio_dev *indio_dev)
 			ret = of_property_read_u32(child, "reg", &reg);
 			if (ret) {
 				dev_err(dev,
-					"Failed to get child reg property of ADC \"%s\".\n",
-					child->name);
+					"Failed to get child reg property of ADC \"%pOFn\".\n",
+					child);
 				return ret;
 			}
 
 			/* Channel number is too high. */
 			if (reg >= num_channels) {
 				dev_err(dev,
-					"Only %i channels supported with %s, but reg = <%i>.\n",
-					num_channels, child->name, reg);
-				return ret;
+					"Only %i channels supported with %pOFn, but reg = <%i>.\n",
+					num_channels, child, reg);
+				return -EINVAL;
 			}
 		}
 
@@ -400,7 +382,7 @@ static int rcar_gyroadc_parse_subdevs(struct iio_dev *indio_dev)
 			dev_err(dev,
 				"Channel %i uses different ADC mode than the rest.\n",
 				reg);
-			return ret;
+			return -EINVAL;
 		}
 
 		/* Channel is valid, grab the regulator. */
@@ -434,8 +416,9 @@ static int rcar_gyroadc_parse_subdevs(struct iio_dev *indio_dev)
 		 * attached to the GyroADC at a time, so if we found it,
 		 * we can stop parsing here.
 		 */
-		if (childmode == RCAR_GYROADC_MODE_SELECT_1_MB88101A)
+		if (childmode == RCAR_GYROADC_MODE_SELECT_1_MB88101A) {
 			break;
+		}
 	}
 
 	if (first) {
@@ -490,30 +473,23 @@ static int rcar_gyroadc_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct rcar_gyroadc *priv;
 	struct iio_dev *indio_dev;
-	struct resource *mem;
 	int ret;
 
 	indio_dev = devm_iio_device_alloc(dev, sizeof(*priv));
-	if (!indio_dev) {
-		dev_err(dev, "Failed to allocate IIO device.\n");
+	if (!indio_dev)
 		return -ENOMEM;
-	}
 
 	priv = iio_priv(indio_dev);
 	priv->dev = dev;
 
-	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->regs = devm_ioremap_resource(dev, mem);
+	priv->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(priv->regs))
 		return PTR_ERR(priv->regs);
 
 	priv->clk = devm_clk_get(dev, "fck");
-	if (IS_ERR(priv->clk)) {
-		ret = PTR_ERR(priv->clk);
-		if (ret != -EPROBE_DEFER)
-			dev_err(dev, "Failed to get IF clock (ret=%i)\n", ret);
-		return ret;
-	}
+	if (IS_ERR(priv->clk))
+		return dev_err_probe(dev, PTR_ERR(priv->clk),
+				     "Failed to get IF clock\n");
 
 	ret = rcar_gyroadc_parse_subdevs(indio_dev);
 	if (ret)
@@ -523,14 +499,11 @@ static int rcar_gyroadc_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	priv->model = (enum rcar_gyroadc_model)
-		of_device_get_match_data(&pdev->dev);
+	priv->model = (uintptr_t)of_device_get_match_data(&pdev->dev);
 
 	platform_set_drvdata(pdev, indio_dev);
 
 	indio_dev->name = DRIVER_NAME;
-	indio_dev->dev.parent = dev;
-	indio_dev->dev.of_node = pdev->dev.of_node;
 	indio_dev->info = &rcar_gyroadc_iio_info;
 	indio_dev->modes = INDIO_DIRECT_MODE;
 
@@ -544,7 +517,10 @@ static int rcar_gyroadc_probe(struct platform_device *pdev)
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_enable(dev);
 
-	pm_runtime_get_sync(dev);
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret)
+		goto err_power_up;
+
 	rcar_gyroadc_hw_init(priv);
 	rcar_gyroadc_hw_start(priv);
 
@@ -561,6 +537,7 @@ static int rcar_gyroadc_probe(struct platform_device *pdev)
 err_iio_device_register:
 	rcar_gyroadc_hw_stop(priv);
 	pm_runtime_put_sync(dev);
+err_power_up:
 	pm_runtime_disable(dev);
 	pm_runtime_set_suspended(dev);
 	clk_disable_unprepare(priv->clk);
@@ -570,7 +547,7 @@ err_clk_if_enable:
 	return ret;
 }
 
-static int rcar_gyroadc_remove(struct platform_device *pdev)
+static void rcar_gyroadc_remove(struct platform_device *pdev)
 {
 	struct iio_dev *indio_dev = platform_get_drvdata(pdev);
 	struct rcar_gyroadc *priv = iio_priv(indio_dev);
@@ -584,11 +561,8 @@ static int rcar_gyroadc_remove(struct platform_device *pdev)
 	pm_runtime_set_suspended(dev);
 	clk_disable_unprepare(priv->clk);
 	rcar_gyroadc_deinit_supplies(indio_dev);
-
-	return 0;
 }
 
-#if defined(CONFIG_PM)
 static int rcar_gyroadc_suspend(struct device *dev)
 {
 	struct iio_dev *indio_dev = dev_get_drvdata(dev);
@@ -608,10 +582,9 @@ static int rcar_gyroadc_resume(struct device *dev)
 
 	return 0;
 }
-#endif
 
 static const struct dev_pm_ops rcar_gyroadc_pm_ops = {
-	SET_RUNTIME_PM_OPS(rcar_gyroadc_suspend, rcar_gyroadc_resume, NULL)
+	RUNTIME_PM_OPS(rcar_gyroadc_suspend, rcar_gyroadc_resume, NULL)
 };
 
 static struct platform_driver rcar_gyroadc_driver = {
@@ -620,7 +593,7 @@ static struct platform_driver rcar_gyroadc_driver = {
 	.driver         = {
 		.name		= DRIVER_NAME,
 		.of_match_table	= rcar_gyroadc_match,
-		.pm		= &rcar_gyroadc_pm_ops,
+		.pm		= pm_ptr(&rcar_gyroadc_pm_ops),
 	},
 };
 

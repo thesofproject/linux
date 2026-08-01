@@ -37,6 +37,7 @@
 #include <linux/mm_types.h>
 #include <linux/init.h>
 #include <linux/capability.h>
+#include <linux/memory_hotplug.h>
 
 #include <xen/xen.h>
 #include <xen/interface/xen.h>
@@ -44,10 +45,15 @@
 #include <xen/xenbus.h>
 #include <xen/features.h>
 #include <xen/page.h>
+#include <xen/mem-reservation.h>
 
 #define PAGES2KB(_p) ((_p)<<(PAGE_SHIFT-10))
 
 #define BALLOON_CLASS_NAME "xen_memory"
+
+#ifdef CONFIG_MEMORY_HOTPLUG
+u64 xen_saved_max_mem_size = 0;
+#endif
 
 static struct device balloon_dev;
 
@@ -62,6 +68,12 @@ static void watch_target(struct xenbus_watch *watch,
 	static bool watch_fired;
 	static long target_diff;
 
+#ifdef CONFIG_MEMORY_HOTPLUG
+	/* The balloon driver will take care of adding memory now. */
+	if (xen_saved_max_mem_size)
+		max_mem_size = xen_saved_max_mem_size;
+#endif
+
 	err = xenbus_scanf(XBT_NIL, "memory", "target", "%llu", &new_target);
 	if (err != 1) {
 		/* This is ok (for domain0 at least) - so just return */
@@ -75,13 +87,16 @@ static void watch_target(struct xenbus_watch *watch,
 
 	if (!watch_fired) {
 		watch_fired = true;
-		err = xenbus_scanf(XBT_NIL, "memory", "static-max", "%llu",
-				   &static_max);
-		if (err != 1)
-			static_max = new_target;
-		else
+
+		if ((xenbus_scanf(XBT_NIL, "memory", "static-max",
+				  "%llu", &static_max) == 1) ||
+		    (xenbus_scanf(XBT_NIL, "memory", "memory_static_max",
+				  "%llu", &static_max) == 1))
 			static_max >>= PAGE_SHIFT - 10;
-		target_diff = xen_pv_domain() ? 0
+		else
+			static_max = balloon_stats.current_pages;
+
+		target_diff = (xen_pv_domain() || xen_initial_domain()) ? 0
 				: static_max - balloon_stats.target_pages;
 	}
 
@@ -114,20 +129,18 @@ void xen_balloon_init(void)
 {
 	register_balloon(&balloon_dev);
 
-	register_xen_selfballooning(&balloon_dev);
-
 	register_xenstore_notifier(&xenstore_notifier);
 }
 EXPORT_SYMBOL_GPL(xen_balloon_init);
 
 #define BALLOON_SHOW(name, format, args...)				\
-	static ssize_t show_##name(struct device *dev,			\
+	static ssize_t name##_show(struct device *dev,			\
 				   struct device_attribute *attr,	\
 				   char *buf)				\
 	{								\
-		return sprintf(buf, format, ##args);			\
+		return sysfs_emit(buf, format, ##args);			\
 	}								\
-	static DEVICE_ATTR(name, S_IRUGO, show_##name, NULL)
+	static DEVICE_ATTR_RO(name)
 
 BALLOON_SHOW(current_kb, "%lu\n", PAGES2KB(balloon_stats.current_pages));
 BALLOON_SHOW(low_kb, "%lu\n", PAGES2KB(balloon_stats.balloon_low));
@@ -137,17 +150,17 @@ static DEVICE_ULONG_ATTR(schedule_delay, 0444, balloon_stats.schedule_delay);
 static DEVICE_ULONG_ATTR(max_schedule_delay, 0644, balloon_stats.max_schedule_delay);
 static DEVICE_ULONG_ATTR(retry_count, 0444, balloon_stats.retry_count);
 static DEVICE_ULONG_ATTR(max_retry_count, 0644, balloon_stats.max_retry_count);
+static DEVICE_BOOL_ATTR(scrub_pages, 0644, xen_scrub_pages);
 
-static ssize_t show_target_kb(struct device *dev, struct device_attribute *attr,
+static ssize_t target_kb_show(struct device *dev, struct device_attribute *attr,
 			      char *buf)
 {
-	return sprintf(buf, "%lu\n", PAGES2KB(balloon_stats.target_pages));
+	return sysfs_emit(buf, "%lu\n", PAGES2KB(balloon_stats.target_pages));
 }
 
-static ssize_t store_target_kb(struct device *dev,
+static ssize_t target_kb_store(struct device *dev,
 			       struct device_attribute *attr,
-			       const char *buf,
-			       size_t count)
+			       const char *buf, size_t count)
 {
 	char *endchar;
 	unsigned long long target_bytes;
@@ -162,22 +175,19 @@ static ssize_t store_target_kb(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(target_kb, S_IRUGO | S_IWUSR,
-		   show_target_kb, store_target_kb);
+static DEVICE_ATTR_RW(target_kb);
 
-
-static ssize_t show_target(struct device *dev, struct device_attribute *attr,
-			      char *buf)
+static ssize_t target_show(struct device *dev, struct device_attribute *attr,
+			   char *buf)
 {
-	return sprintf(buf, "%llu\n",
+	return sysfs_emit(buf, "%llu\n",
 		       (unsigned long long)balloon_stats.target_pages
 		       << PAGE_SHIFT);
 }
 
-static ssize_t store_target(struct device *dev,
+static ssize_t target_store(struct device *dev,
 			    struct device_attribute *attr,
-			    const char *buf,
-			    size_t count)
+			    const char *buf, size_t count)
 {
 	char *endchar;
 	unsigned long long target_bytes;
@@ -192,9 +202,7 @@ static ssize_t store_target(struct device *dev,
 	return count;
 }
 
-static DEVICE_ATTR(target, S_IRUGO | S_IWUSR,
-		   show_target, store_target);
-
+static DEVICE_ATTR_RW(target);
 
 static struct attribute *balloon_attrs[] = {
 	&dev_attr_target_kb.attr,
@@ -203,6 +211,7 @@ static struct attribute *balloon_attrs[] = {
 	&dev_attr_max_schedule_delay.attr.attr,
 	&dev_attr_retry_count.attr.attr,
 	&dev_attr_max_retry_count.attr.attr,
+	&dev_attr_scrub_pages.attr.attr,
 	NULL
 };
 
@@ -228,7 +237,7 @@ static const struct attribute_group *balloon_groups[] = {
 	NULL
 };
 
-static struct bus_type balloon_subsys = {
+static const struct bus_type balloon_subsys = {
 	.name = BALLOON_CLASS_NAME,
 	.dev_name = BALLOON_CLASS_NAME,
 };

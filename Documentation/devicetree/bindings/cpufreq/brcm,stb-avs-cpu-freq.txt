@@ -16,7 +16,7 @@ has been processed. See [2] for more information on the brcm,l2-intc node.
 firmware. On some SoCs, this firmware supports DFS and DVFS in addition to
 Adaptive Voltage Scaling.
 
-[2] Documentation/devicetree/bindings/interrupt-controller/brcm,l2-intc.txt
+[2] Documentation/devicetree/bindings/interrupt-controller/brcm,l2-intc.yaml
 
 
 Node brcm,avs-cpu-data-mem
@@ -29,8 +29,6 @@ Required properties:
 - reg: Specifies base physical address and size of the registers.
 - interrupts: The interrupt that the AVS CPU will use to interrupt the host
               when a command completed.
-- interrupt-parent: The interrupt controller the above interrupt is routed
-                    through.
 - interrupt-names: The name of the interrupt used to interrupt the host.
 
 Optional properties:

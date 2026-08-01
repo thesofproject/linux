@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  inode.c - securityfs
  *
  *  Copyright (C) 2005 Greg Kroah-Hartman <gregkh@suse.de>
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License version
- *	2 as published by the Free Software Foundation.
  *
  *  Based on fs/debugfs/inode.c which had the following copyright notice:
  *    Copyright (C) 2004 Greg Kroah-Hartman <greg@kroah.com>
@@ -13,8 +10,10 @@
  */
 
 /* #define DEBUG */
-#include <linux/module.h>
+#include <linux/sysfs.h>
+#include <linux/kobject.h>
 #include <linux/fs.h>
+#include <linux/fs_context.h>
 #include <linux/mount.h>
 #include <linux/pagemap.h>
 #include <linux/init.h>
@@ -23,23 +22,24 @@
 #include <linux/lsm_hooks.h>
 #include <linux/magic.h>
 
+#include "lsm.h"
+
 static struct vfsmount *mount;
 static int mount_count;
 
-static void securityfs_evict_inode(struct inode *inode)
+static void securityfs_free_inode(struct inode *inode)
 {
-	truncate_inode_pages_final(&inode->i_data);
-	clear_inode(inode);
 	if (S_ISLNK(inode->i_mode))
-		kfree(inode->i_link);
+		kfree_const(inode->i_link);
+	free_inode_nonrcu(inode);
 }
 
 static const struct super_operations securityfs_super_operations = {
 	.statfs		= simple_statfs,
-	.evict_inode	= securityfs_evict_inode,
+	.free_inode	= securityfs_free_inode,
 };
 
-static int fill_super(struct super_block *sb, void *data, int silent)
+static int securityfs_fill_super(struct super_block *sb, struct fs_context *fc)
 {
 	static const struct tree_descr files[] = {{""}};
 	int error;
@@ -53,18 +53,26 @@ static int fill_super(struct super_block *sb, void *data, int silent)
 	return 0;
 }
 
-static struct dentry *get_sb(struct file_system_type *fs_type,
-		  int flags, const char *dev_name,
-		  void *data)
+static int securityfs_get_tree(struct fs_context *fc)
 {
-	return mount_single(fs_type, flags, data, fill_super);
+	return get_tree_single(fc, securityfs_fill_super);
+}
+
+static const struct fs_context_operations securityfs_context_ops = {
+	.get_tree	= securityfs_get_tree,
+};
+
+static int securityfs_init_fs_context(struct fs_context *fc)
+{
+	fc->ops = &securityfs_context_ops;
+	return 0;
 }
 
 static struct file_system_type fs_type = {
 	.owner =	THIS_MODULE,
 	.name =		"securityfs",
-	.mount =	get_sb,
-	.kill_sb =	kill_litter_super,
+	.init_fs_context = securityfs_init_fs_context,
+	.kill_sb =	kill_anon_super,
 };
 
 /**
@@ -106,40 +114,37 @@ static struct dentry *securityfs_create_dentry(const char *name, umode_t mode,
 	struct dentry *dentry;
 	struct inode *dir, *inode;
 	int error;
+	bool pinned = false;
 
 	if (!(mode & S_IFMT))
 		mode = (mode & S_IALLUGO) | S_IFREG;
 
 	pr_debug("securityfs: creating file '%s'\n",name);
 
-	error = simple_pin_fs(&fs_type, &mount, &mount_count);
-	if (error)
-		return ERR_PTR(error);
-
-	if (!parent)
+	if (!parent) {
+		error = simple_pin_fs(&fs_type, &mount, &mount_count);
+		if (error)
+			return ERR_PTR(error);
+		pinned = true;
 		parent = mount->mnt_root;
+	}
+
+	inode = new_inode(parent->d_sb);
+	if (unlikely(!inode)) {
+		dentry = ERR_PTR(-ENOMEM);
+		goto out;
+	}
 
 	dir = d_inode(parent);
 
-	inode_lock(dir);
-	dentry = lookup_one_len(name, parent, strlen(name));
-	if (IS_ERR(dentry))
+	dentry = simple_start_creating(parent, name);
+	if (IS_ERR(dentry)) {
+		iput(inode);
 		goto out;
-
-	if (d_really_is_positive(dentry)) {
-		error = -EEXIST;
-		goto out1;
 	}
-
-	inode = new_inode(dir->i_sb);
-	if (!inode) {
-		error = -ENOMEM;
-		goto out1;
-	}
-
 	inode->i_ino = get_next_ino();
 	inode->i_mode = mode;
-	inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+	simple_inode_init_ts(inode);
 	inode->i_private = data;
 	if (S_ISDIR(mode)) {
 		inode->i_op = &simple_dir_inode_operations;
@@ -152,17 +157,13 @@ static struct dentry *securityfs_create_dentry(const char *name, umode_t mode,
 	} else {
 		inode->i_fop = fops;
 	}
-	d_instantiate(dentry, inode);
-	dget(dentry);
-	inode_unlock(dir);
-	return dentry;
+	d_make_persistent(dentry, inode);
+	simple_done_creating(dentry);
+	return dentry; // borrowed
 
-out1:
-	dput(dentry);
-	dentry = ERR_PTR(error);
 out:
-	inode_unlock(dir);
-	simple_release_fs(&mount, &mount_count);
+	if (pinned)
+		simple_release_fs(&mount, &mount_count);
 	return dentry;
 }
 
@@ -257,21 +258,27 @@ struct dentry *securityfs_create_symlink(const char *name,
 					 const struct inode_operations *iops)
 {
 	struct dentry *dent;
-	char *link = NULL;
+	const char *link = NULL;
 
 	if (target) {
-		link = kstrdup(target, GFP_KERNEL);
+		link = kstrdup_const(target, GFP_KERNEL);
 		if (!link)
 			return ERR_PTR(-ENOMEM);
 	}
 	dent = securityfs_create_dentry(name, S_IFLNK | 0444, parent,
-					link, NULL, iops);
+					(void *)link, NULL, iops);
 	if (IS_ERR(dent))
-		kfree(link);
+		kfree_const(link);
 
 	return dent;
 }
 EXPORT_SYMBOL_GPL(securityfs_create_symlink);
+
+static void remove_one(struct dentry *victim)
+{
+	if (victim->d_parent == victim->d_sb->s_root)
+		simple_release_fs(&mount, &mount_count);
+}
 
 /**
  * securityfs_remove - removes a file or directory from the securityfs filesystem
@@ -285,35 +292,65 @@ EXPORT_SYMBOL_GPL(securityfs_create_symlink);
  * This function is required to be called in order for the file to be
  * removed. No automatic cleanup of files will happen when a module is
  * removed; you are responsible here.
+ *
+ * AV: when applied to directory it will take all children out; no need to call
+ * it for descendents if ancestor is getting killed.
  */
 void securityfs_remove(struct dentry *dentry)
 {
-	struct inode *dir;
-
-	if (!dentry || IS_ERR(dentry))
+	if (IS_ERR_OR_NULL(dentry))
 		return;
 
-	dir = d_inode(dentry->d_parent);
-	inode_lock(dir);
-	if (simple_positive(dentry)) {
-		if (d_is_dir(dentry))
-			simple_rmdir(dir, dentry);
-		else
-			simple_unlink(dir, dentry);
-		dput(dentry);
-	}
-	inode_unlock(dir);
+	simple_pin_fs(&fs_type, &mount, &mount_count);
+	simple_recursive_removal(dentry, remove_one);
 	simple_release_fs(&mount, &mount_count);
 }
 EXPORT_SYMBOL_GPL(securityfs_remove);
 
 #ifdef CONFIG_SECURITY
+#include <linux/spinlock.h>
+
 static struct dentry *lsm_dentry;
+
 static ssize_t lsm_read(struct file *filp, char __user *buf, size_t count,
 			loff_t *ppos)
 {
-	return simple_read_from_buffer(buf, count, ppos, lsm_names,
-		strlen(lsm_names));
+	int i;
+	static char *str;
+	static size_t len;
+	static DEFINE_SPINLOCK(lock);
+
+	/* NOTE: we never free or modify the string once it is set */
+
+	if (unlikely(!str || !len)) {
+		char *str_tmp;
+		size_t len_tmp = 0;
+
+		for (i = 0; i < lsm_active_cnt; i++)
+			/* the '+ 1' accounts for either a comma or a NUL */
+			len_tmp += strlen(lsm_idlist[i]->name) + 1;
+
+		str_tmp = kmalloc(len_tmp, GFP_KERNEL);
+		if (!str_tmp)
+			return -ENOMEM;
+		str_tmp[0] = '\0';
+
+		for (i = 0; i < lsm_active_cnt; i++) {
+			if (i > 0)
+				strcat(str_tmp, ",");
+			strcat(str_tmp, lsm_idlist[i]->name);
+		}
+
+		spin_lock(&lock);
+		if (!str) {
+			str = str_tmp;
+			len = len_tmp - 1;
+		} else
+			kfree(str_tmp);
+		spin_unlock(&lock);
+	}
+
+	return simple_read_from_buffer(buf, count, ppos, str, len);
 }
 
 static const struct file_operations lsm_ops = {
@@ -322,7 +359,7 @@ static const struct file_operations lsm_ops = {
 };
 #endif
 
-static int __init securityfs_init(void)
+int __init securityfs_init(void)
 {
 	int retval;
 
@@ -341,7 +378,3 @@ static int __init securityfs_init(void)
 #endif
 	return 0;
 }
-
-core_initcall(securityfs_init);
-MODULE_LICENSE("GPL");
-

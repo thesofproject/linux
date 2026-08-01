@@ -1,19 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2007-2017 Nicira, Inc.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of version 2 of the GNU General Public
- * License as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -51,6 +38,7 @@
 #include <net/tun_proto.h>
 #include <net/erspan.h>
 
+#include "drop.h"
 #include "flow_netlink.h"
 
 struct ovs_len_tbl {
@@ -60,6 +48,7 @@ struct ovs_len_tbl {
 
 #define OVS_ATTR_NESTED -1
 #define OVS_ATTR_VARIABLE -2
+#define OVS_COPY_ACTIONS_MAX_DEPTH 16
 
 static bool actions_may_change_flow(const struct nlattr *actions)
 {
@@ -74,6 +63,8 @@ static bool actions_may_change_flow(const struct nlattr *actions)
 		case OVS_ACTION_ATTR_RECIRC:
 		case OVS_ACTION_ATTR_TRUNC:
 		case OVS_ACTION_ATTR_USERSPACE:
+		case OVS_ACTION_ATTR_DROP:
+		case OVS_ACTION_ATTR_PSAMPLE:
 			break;
 
 		case OVS_ACTION_ATTR_CT:
@@ -91,6 +82,9 @@ static bool actions_may_change_flow(const struct nlattr *actions)
 		case OVS_ACTION_ATTR_SET:
 		case OVS_ACTION_ATTR_SET_MASKED:
 		case OVS_ACTION_ATTR_METER:
+		case OVS_ACTION_ATTR_CHECK_PKT_LEN:
+		case OVS_ACTION_ATTR_ADD_MPLS:
+		case OVS_ACTION_ATTR_DEC_TTL:
 		default:
 			return true;
 		}
@@ -158,6 +152,13 @@ static void update_range(struct sw_flow_match *match,
 			memset((u8 *)&(match)->key->field, value,           \
 			       sizeof((match)->key->field));                \
 	} while (0)
+
+#define SW_FLOW_KEY_BITMAP_COPY(match, field, value_p, nbits, is_mask) ({     \
+	update_range(match, offsetof(struct sw_flow_key, field),	      \
+		     bitmap_size(nbits), is_mask);			      \
+	bitmap_copy(is_mask ? (match)->mask->key.field : (match)->key->field, \
+		    value_p, nbits);					      \
+})
 
 static bool match_validate(const struct sw_flow_match *match,
 			   u64 key_attrs, u64 mask_attrs, bool log)
@@ -356,7 +357,7 @@ size_t ovs_key_attr_size(void)
 	/* Whenever adding new OVS_KEY_ FIELDS, we should consider
 	 * updating this function.
 	 */
-	BUILD_BUG_ON(OVS_KEY_ATTR_TUNNEL_INFO != 29);
+	BUILD_BUG_ON(OVS_KEY_ATTR_MAX != 32);
 
 	return    nla_total_size(4)   /* OVS_KEY_ATTR_PRIORITY */
 		+ nla_total_size(0)   /* OVS_KEY_ATTR_TUNNEL */
@@ -379,7 +380,8 @@ size_t ovs_key_attr_size(void)
 		+ nla_total_size(2)   /* OVS_KEY_ATTR_ETHERTYPE */
 		+ nla_total_size(40)  /* OVS_KEY_ATTR_IPV6 */
 		+ nla_total_size(2)   /* OVS_KEY_ATTR_ICMPV6 */
-		+ nla_total_size(28); /* OVS_KEY_ATTR_ND */
+		+ nla_total_size(28)  /* OVS_KEY_ATTR_ND */
+		+ nla_total_size(2);  /* OVS_KEY_ATTR_IPV6_EXTHDRS */
 }
 
 static const struct ovs_len_tbl ovs_vxlan_ext_key_lens[OVS_VXLAN_EXT_MAX + 1] = {
@@ -403,6 +405,7 @@ static const struct ovs_len_tbl ovs_tunnel_key_lens[OVS_TUNNEL_KEY_ATTR_MAX + 1]
 	[OVS_TUNNEL_KEY_ATTR_IPV6_SRC]      = { .len = sizeof(struct in6_addr) },
 	[OVS_TUNNEL_KEY_ATTR_IPV6_DST]      = { .len = sizeof(struct in6_addr) },
 	[OVS_TUNNEL_KEY_ATTR_ERSPAN_OPTS]   = { .len = OVS_ATTR_VARIABLE },
+	[OVS_TUNNEL_KEY_ATTR_IPV4_INFO_BRIDGE]   = { .len = 0 },
 };
 
 static const struct ovs_len_tbl
@@ -435,7 +438,7 @@ static const struct ovs_len_tbl ovs_key_lens[OVS_KEY_ATTR_MAX + 1] = {
 	[OVS_KEY_ATTR_DP_HASH]	 = { .len = sizeof(u32) },
 	[OVS_KEY_ATTR_TUNNEL]	 = { .len = OVS_ATTR_NESTED,
 				     .next = ovs_tunnel_key_lens, },
-	[OVS_KEY_ATTR_MPLS]	 = { .len = sizeof(struct ovs_key_mpls) },
+	[OVS_KEY_ATTR_MPLS]	 = { .len = OVS_ATTR_VARIABLE },
 	[OVS_KEY_ATTR_CT_STATE]	 = { .len = sizeof(u32) },
 	[OVS_KEY_ATTR_CT_ZONE]	 = { .len = sizeof(u16) },
 	[OVS_KEY_ATTR_CT_MARK]	 = { .len = sizeof(u32) },
@@ -446,6 +449,8 @@ static const struct ovs_len_tbl ovs_key_lens[OVS_KEY_ATTR_MAX + 1] = {
 		.len = sizeof(struct ovs_key_ct_tuple_ipv6) },
 	[OVS_KEY_ATTR_NSH]       = { .len = OVS_ATTR_NESTED,
 				     .next = ovs_nsh_key_attr_lens, },
+	[OVS_KEY_ATTR_IPV6_EXTHDRS] = {
+		.len = sizeof(struct ovs_key_ipv6_exthdrs) },
 };
 
 static bool check_attr_len(unsigned int attr_len, unsigned int expected_len)
@@ -488,7 +493,14 @@ static int __parse_flow_nlattrs(const struct nlattr *attr,
 			return -EINVAL;
 		}
 
-		if (attrs & (1 << type)) {
+		if (type == OVS_KEY_ATTR_PACKET_TYPE ||
+		    type == OVS_KEY_ATTR_ND_EXTENSIONS ||
+		    type == OVS_KEY_ATTR_TUNNEL_INFO) {
+			OVS_NLERR(log, "Key type %d is not supported", type);
+			return -EINVAL;
+		}
+
+		if (attrs & (1ULL << type)) {
 			OVS_NLERR(log, "Duplicate key (type %d).", type);
 			return -EINVAL;
 		}
@@ -500,8 +512,8 @@ static int __parse_flow_nlattrs(const struct nlattr *attr,
 			return -EINVAL;
 		}
 
-		if (!nz || !is_all_zero(nla_data(nla), expected_len)) {
-			attrs |= 1 << type;
+		if (!nz || !is_all_zero(nla_data(nla), nla_len(nla))) {
+			attrs |= 1ULL << type;
 			a[type] = nla;
 		}
 	}
@@ -666,7 +678,8 @@ static int ip_tun_from_nlattr(const struct nlattr *attr,
 			      bool log)
 {
 	bool ttl = false, ipv4 = false, ipv6 = false;
-	__be16 tun_flags = 0;
+	IP_TUNNEL_DECLARE_FLAGS(tun_flags) = { };
+	bool info_bridge_mode = false;
 	int opts_type = 0;
 	struct nlattr *a;
 	int rem;
@@ -692,7 +705,7 @@ static int ip_tun_from_nlattr(const struct nlattr *attr,
 		case OVS_TUNNEL_KEY_ATTR_ID:
 			SW_FLOW_KEY_PUT(match, tun_key.tun_id,
 					nla_get_be64(a), is_mask);
-			tun_flags |= TUNNEL_KEY;
+			__set_bit(IP_TUNNEL_KEY_BIT, tun_flags);
 			break;
 		case OVS_TUNNEL_KEY_ATTR_IPV4_SRC:
 			SW_FLOW_KEY_PUT(match, tun_key.u.ipv4.src,
@@ -724,10 +737,10 @@ static int ip_tun_from_nlattr(const struct nlattr *attr,
 			ttl = true;
 			break;
 		case OVS_TUNNEL_KEY_ATTR_DONT_FRAGMENT:
-			tun_flags |= TUNNEL_DONT_FRAGMENT;
+			__set_bit(IP_TUNNEL_DONT_FRAGMENT_BIT, tun_flags);
 			break;
 		case OVS_TUNNEL_KEY_ATTR_CSUM:
-			tun_flags |= TUNNEL_CSUM;
+			__set_bit(IP_TUNNEL_CSUM_BIT, tun_flags);
 			break;
 		case OVS_TUNNEL_KEY_ATTR_TP_SRC:
 			SW_FLOW_KEY_PUT(match, tun_key.tp_src,
@@ -738,7 +751,7 @@ static int ip_tun_from_nlattr(const struct nlattr *attr,
 					nla_get_be16(a), is_mask);
 			break;
 		case OVS_TUNNEL_KEY_ATTR_OAM:
-			tun_flags |= TUNNEL_OAM;
+			__set_bit(IP_TUNNEL_OAM_BIT, tun_flags);
 			break;
 		case OVS_TUNNEL_KEY_ATTR_GENEVE_OPTS:
 			if (opts_type) {
@@ -750,7 +763,7 @@ static int ip_tun_from_nlattr(const struct nlattr *attr,
 			if (err)
 				return err;
 
-			tun_flags |= TUNNEL_GENEVE_OPT;
+			__set_bit(IP_TUNNEL_GENEVE_OPT_BIT, tun_flags);
 			opts_type = type;
 			break;
 		case OVS_TUNNEL_KEY_ATTR_VXLAN_OPTS:
@@ -763,7 +776,7 @@ static int ip_tun_from_nlattr(const struct nlattr *attr,
 			if (err)
 				return err;
 
-			tun_flags |= TUNNEL_VXLAN_OPT;
+			__set_bit(IP_TUNNEL_VXLAN_OPT_BIT, tun_flags);
 			opts_type = type;
 			break;
 		case OVS_TUNNEL_KEY_ATTR_PAD:
@@ -779,8 +792,12 @@ static int ip_tun_from_nlattr(const struct nlattr *attr,
 			if (err)
 				return err;
 
-			tun_flags |= TUNNEL_ERSPAN_OPT;
+			__set_bit(IP_TUNNEL_ERSPAN_OPT_BIT, tun_flags);
 			opts_type = type;
+			break;
+		case OVS_TUNNEL_KEY_ATTR_IPV4_INFO_BRIDGE:
+			info_bridge_mode = true;
+			ipv4 = true;
 			break;
 		default:
 			OVS_NLERR(log, "Unknown IP tunnel attribute %d",
@@ -789,7 +806,8 @@ static int ip_tun_from_nlattr(const struct nlattr *attr,
 		}
 	}
 
-	SW_FLOW_KEY_PUT(match, tun_key.tun_flags, tun_flags, is_mask);
+	SW_FLOW_KEY_BITMAP_COPY(match, tun_key.tun_flags, tun_flags,
+				__IP_TUNNEL_FLAG_NUM, is_mask);
 	if (is_mask)
 		SW_FLOW_KEY_MEMSET_FIELD(match, tun_proto, 0xff, true);
 	else
@@ -812,16 +830,31 @@ static int ip_tun_from_nlattr(const struct nlattr *attr,
 			OVS_NLERR(log, "IP tunnel dst address not specified");
 			return -EINVAL;
 		}
-		if (ipv4 && !match->key->tun_key.u.ipv4.dst) {
-			OVS_NLERR(log, "IPv4 tunnel dst address is zero");
-			return -EINVAL;
+		if (ipv4) {
+			if (info_bridge_mode) {
+				__clear_bit(IP_TUNNEL_KEY_BIT, tun_flags);
+
+				if (match->key->tun_key.u.ipv4.src ||
+				    match->key->tun_key.u.ipv4.dst ||
+				    match->key->tun_key.tp_src ||
+				    match->key->tun_key.tp_dst ||
+				    match->key->tun_key.ttl ||
+				    match->key->tun_key.tos ||
+				    !ip_tunnel_flags_empty(tun_flags)) {
+					OVS_NLERR(log, "IPv4 tun info is not correct");
+					return -EINVAL;
+				}
+			} else if (!match->key->tun_key.u.ipv4.dst) {
+				OVS_NLERR(log, "IPv4 tunnel dst address is zero");
+				return -EINVAL;
+			}
 		}
 		if (ipv6 && ipv6_addr_any(&match->key->tun_key.u.ipv6.dst)) {
 			OVS_NLERR(log, "IPv6 tunnel dst address is zero");
 			return -EINVAL;
 		}
 
-		if (!ttl) {
+		if (!ttl && !info_bridge_mode) {
 			OVS_NLERR(log, "IP tunnel TTL not specified.");
 			return -EINVAL;
 		}
@@ -836,7 +869,7 @@ static int vxlan_opt_to_nlattr(struct sk_buff *skb,
 	const struct vxlan_metadata *opts = tun_opts;
 	struct nlattr *nla;
 
-	nla = nla_nest_start(skb, OVS_TUNNEL_KEY_ATTR_VXLAN_OPTS);
+	nla = nla_nest_start_noflag(skb, OVS_TUNNEL_KEY_ATTR_VXLAN_OPTS);
 	if (!nla)
 		return -EMSGSIZE;
 
@@ -850,12 +883,17 @@ static int vxlan_opt_to_nlattr(struct sk_buff *skb,
 static int __ip_tun_to_nlattr(struct sk_buff *skb,
 			      const struct ip_tunnel_key *output,
 			      const void *tun_opts, int swkey_tun_opts_len,
-			      unsigned short tun_proto)
+			      unsigned short tun_proto, u8 mode)
 {
-	if (output->tun_flags & TUNNEL_KEY &&
+	if (test_bit(IP_TUNNEL_KEY_BIT, output->tun_flags) &&
 	    nla_put_be64(skb, OVS_TUNNEL_KEY_ATTR_ID, output->tun_id,
 			 OVS_TUNNEL_KEY_ATTR_PAD))
 		return -EMSGSIZE;
+
+	if (mode & IP_TUNNEL_INFO_BRIDGE)
+		return nla_put_flag(skb, OVS_TUNNEL_KEY_ATTR_IPV4_INFO_BRIDGE)
+		       ? -EMSGSIZE : 0;
+
 	switch (tun_proto) {
 	case AF_INET:
 		if (output->u.ipv4.src &&
@@ -883,10 +921,10 @@ static int __ip_tun_to_nlattr(struct sk_buff *skb,
 		return -EMSGSIZE;
 	if (nla_put_u8(skb, OVS_TUNNEL_KEY_ATTR_TTL, output->ttl))
 		return -EMSGSIZE;
-	if ((output->tun_flags & TUNNEL_DONT_FRAGMENT) &&
+	if (test_bit(IP_TUNNEL_DONT_FRAGMENT_BIT, output->tun_flags) &&
 	    nla_put_flag(skb, OVS_TUNNEL_KEY_ATTR_DONT_FRAGMENT))
 		return -EMSGSIZE;
-	if ((output->tun_flags & TUNNEL_CSUM) &&
+	if (test_bit(IP_TUNNEL_CSUM_BIT, output->tun_flags) &&
 	    nla_put_flag(skb, OVS_TUNNEL_KEY_ATTR_CSUM))
 		return -EMSGSIZE;
 	if (output->tp_src &&
@@ -895,18 +933,20 @@ static int __ip_tun_to_nlattr(struct sk_buff *skb,
 	if (output->tp_dst &&
 	    nla_put_be16(skb, OVS_TUNNEL_KEY_ATTR_TP_DST, output->tp_dst))
 		return -EMSGSIZE;
-	if ((output->tun_flags & TUNNEL_OAM) &&
+	if (test_bit(IP_TUNNEL_OAM_BIT, output->tun_flags) &&
 	    nla_put_flag(skb, OVS_TUNNEL_KEY_ATTR_OAM))
 		return -EMSGSIZE;
 	if (swkey_tun_opts_len) {
-		if (output->tun_flags & TUNNEL_GENEVE_OPT &&
+		if (test_bit(IP_TUNNEL_GENEVE_OPT_BIT, output->tun_flags) &&
 		    nla_put(skb, OVS_TUNNEL_KEY_ATTR_GENEVE_OPTS,
 			    swkey_tun_opts_len, tun_opts))
 			return -EMSGSIZE;
-		else if (output->tun_flags & TUNNEL_VXLAN_OPT &&
+		else if (test_bit(IP_TUNNEL_VXLAN_OPT_BIT,
+				  output->tun_flags) &&
 			 vxlan_opt_to_nlattr(skb, tun_opts, swkey_tun_opts_len))
 			return -EMSGSIZE;
-		else if (output->tun_flags & TUNNEL_ERSPAN_OPT &&
+		else if (test_bit(IP_TUNNEL_ERSPAN_OPT_BIT,
+				  output->tun_flags) &&
 			 nla_put(skb, OVS_TUNNEL_KEY_ATTR_ERSPAN_OPTS,
 				 swkey_tun_opts_len, tun_opts))
 			return -EMSGSIZE;
@@ -918,17 +958,17 @@ static int __ip_tun_to_nlattr(struct sk_buff *skb,
 static int ip_tun_to_nlattr(struct sk_buff *skb,
 			    const struct ip_tunnel_key *output,
 			    const void *tun_opts, int swkey_tun_opts_len,
-			    unsigned short tun_proto)
+			    unsigned short tun_proto, u8 mode)
 {
 	struct nlattr *nla;
 	int err;
 
-	nla = nla_nest_start(skb, OVS_KEY_ATTR_TUNNEL);
+	nla = nla_nest_start_noflag(skb, OVS_KEY_ATTR_TUNNEL);
 	if (!nla)
 		return -EMSGSIZE;
 
 	err = __ip_tun_to_nlattr(skb, output, tun_opts, swkey_tun_opts_len,
-				 tun_proto);
+				 tun_proto, mode);
 	if (err)
 		return err;
 
@@ -942,7 +982,7 @@ int ovs_nla_put_tunnel_info(struct sk_buff *skb,
 	return __ip_tun_to_nlattr(skb, &tun_info->key,
 				  ip_tunnel_info_opts(tun_info),
 				  tun_info->options_len,
-				  ip_tunnel_info_af(tun_info));
+				  ip_tunnel_info_af(tun_info), tun_info->mode);
 }
 
 static int encode_vlan_from_nlattrs(struct sw_flow_match *match,
@@ -990,9 +1030,9 @@ static int validate_vlan_from_nlattrs(const struct sw_flow_match *match,
 	if (a[OVS_KEY_ATTR_VLAN])
 		tci = nla_get_be16(a[OVS_KEY_ATTR_VLAN]);
 
-	if (!(tci & htons(VLAN_TAG_PRESENT))) {
+	if (!(tci & htons(VLAN_CFI_MASK))) {
 		if (tci) {
-			OVS_NLERR(log, "%s TCI does not have VLAN_TAG_PRESENT bit set.",
+			OVS_NLERR(log, "%s TCI does not have VLAN_CFI_MASK bit set.",
 				  (inner) ? "C-VLAN" : "VLAN");
 			return -EINVAL;
 		} else if (nla_len(a[OVS_KEY_ATTR_ENCAP])) {
@@ -1013,9 +1053,9 @@ static int validate_vlan_mask_from_nlattrs(const struct sw_flow_match *match,
 	__be16 tci = 0;
 	__be16 tpid = 0;
 	bool encap_valid = !!(match->key->eth.vlan.tci &
-			      htons(VLAN_TAG_PRESENT));
+			      htons(VLAN_CFI_MASK));
 	bool i_encap_valid = !!(match->key->eth.cvlan.tci &
-				htons(VLAN_TAG_PRESENT));
+				htons(VLAN_CFI_MASK));
 
 	if (!(key_attrs & (1 << OVS_KEY_ATTR_ENCAP))) {
 		/* Not a VLAN. */
@@ -1039,8 +1079,8 @@ static int validate_vlan_mask_from_nlattrs(const struct sw_flow_match *match,
 			  (inner) ? "C-VLAN" : "VLAN", ntohs(tpid));
 		return -EINVAL;
 	}
-	if (!(tci & htons(VLAN_TAG_PRESENT))) {
-		OVS_NLERR(log, "%s TCI mask does not have exact match for VLAN_TAG_PRESENT bit.",
+	if (!(tci & htons(VLAN_CFI_MASK))) {
+		OVS_NLERR(log, "%s TCI mask does not have exact match for VLAN_CFI_MASK bit.",
 			  (inner) ? "C-VLAN" : "VLAN");
 		return -EINVAL;
 	}
@@ -1095,7 +1135,7 @@ static int parse_vlan_from_nlattrs(struct sw_flow_match *match,
 	if (err)
 		return err;
 
-	encap_valid = !!(match->key->eth.vlan.tci & htons(VLAN_TAG_PRESENT));
+	encap_valid = !!(match->key->eth.vlan.tci & htons(VLAN_CFI_MASK));
 	if (encap_valid) {
 		err = __parse_vlan_from_nlattrs(match, key_attrs, true, a,
 						is_mask, log);
@@ -1265,6 +1305,11 @@ static int metadata_from_nlattrs(struct net *net, struct sw_flow_match *match,
 	return 0;
 }
 
+/*
+ * Constructs NSH header 'nh' from attributes of OVS_ACTION_ATTR_PUSH_NSH,
+ * where 'nh' points to a memory block of 'size' bytes.  It's assumed that
+ * attributes were previously validated with validate_push_nsh().
+ */
 int nsh_hdr_from_nlattr(const struct nlattr *attr,
 			struct nshhdr *nh, size_t size)
 {
@@ -1274,8 +1319,6 @@ int nsh_hdr_from_nlattr(const struct nlattr *attr,
 	u8 ttl = 0;
 	int mdlen = 0;
 
-	/* validate_nsh has check this, so we needn't do duplicate check here
-	 */
 	if (size < NSH_BASE_HDR_LEN)
 		return -ENOBUFS;
 
@@ -1315,46 +1358,6 @@ int nsh_hdr_from_nlattr(const struct nlattr *attr,
 	/* nsh header length  = NSH_BASE_HDR_LEN + mdlen */
 	nh->ver_flags_ttl_len = 0;
 	nsh_set_flags_ttl_len(nh, flags, ttl, NSH_BASE_HDR_LEN + mdlen);
-
-	return 0;
-}
-
-int nsh_key_from_nlattr(const struct nlattr *attr,
-			struct ovs_key_nsh *nsh, struct ovs_key_nsh *nsh_mask)
-{
-	struct nlattr *a;
-	int rem;
-
-	/* validate_nsh has check this, so we needn't do duplicate check here
-	 */
-	nla_for_each_nested(a, attr, rem) {
-		int type = nla_type(a);
-
-		switch (type) {
-		case OVS_NSH_KEY_ATTR_BASE: {
-			const struct ovs_nsh_key_base *base = nla_data(a);
-			const struct ovs_nsh_key_base *base_mask = base + 1;
-
-			nsh->base = *base;
-			nsh_mask->base = *base_mask;
-			break;
-		}
-		case OVS_NSH_KEY_ATTR_MD1: {
-			const struct ovs_nsh_key_md1 *md1 = nla_data(a);
-			const struct ovs_nsh_key_md1 *md1_mask = md1 + 1;
-
-			memcpy(nsh->context, md1->context, sizeof(*md1));
-			memcpy(nsh_mask->context, md1_mask->context,
-			       sizeof(*md1_mask));
-			break;
-		}
-		case OVS_NSH_KEY_ATTR_MD2:
-			/* Not supported yet */
-			return -ENOTSUPP;
-		default:
-			return -EINVAL;
-		}
-	}
 
 	return 0;
 }
@@ -1583,6 +1586,17 @@ static int ovs_key_from_nlattrs(struct net *net, struct sw_flow_match *match,
 		attrs &= ~(1 << OVS_KEY_ATTR_IPV6);
 	}
 
+	if (attrs & (1ULL << OVS_KEY_ATTR_IPV6_EXTHDRS)) {
+		const struct ovs_key_ipv6_exthdrs *ipv6_exthdrs_key;
+
+		ipv6_exthdrs_key = nla_data(a[OVS_KEY_ATTR_IPV6_EXTHDRS]);
+
+		SW_FLOW_KEY_PUT(match, ipv6.exthdrs,
+				ipv6_exthdrs_key->hdrs, is_mask);
+
+		attrs &= ~(1ULL << OVS_KEY_ATTR_IPV6_EXTHDRS);
+	}
+
 	if (attrs & (1 << OVS_KEY_ATTR_ARP)) {
 		const struct ovs_key_arp *arp_key;
 
@@ -1616,10 +1630,25 @@ static int ovs_key_from_nlattrs(struct net *net, struct sw_flow_match *match,
 
 	if (attrs & (1 << OVS_KEY_ATTR_MPLS)) {
 		const struct ovs_key_mpls *mpls_key;
+		u32 hdr_len;
+		u32 label_count, label_count_mask, i;
 
 		mpls_key = nla_data(a[OVS_KEY_ATTR_MPLS]);
-		SW_FLOW_KEY_PUT(match, mpls.top_lse,
-				mpls_key->mpls_lse, is_mask);
+		hdr_len = nla_len(a[OVS_KEY_ATTR_MPLS]);
+		label_count = hdr_len / sizeof(struct ovs_key_mpls);
+
+		if (label_count == 0 || label_count > MPLS_LABEL_DEPTH ||
+		    hdr_len % sizeof(struct ovs_key_mpls))
+			return -EINVAL;
+
+		label_count_mask =  GENMASK(label_count - 1, 0);
+
+		for (i = 0 ; i < label_count; i++)
+			SW_FLOW_KEY_PUT(match, mpls.lse[i],
+					mpls_key[i].mpls_lse, is_mask);
+
+		SW_FLOW_KEY_PUT(match, mpls.num_labels_mask,
+				label_count_mask, is_mask);
 
 		attrs &= ~(1 << OVS_KEY_ATTR_MPLS);
 	 }
@@ -1734,11 +1763,11 @@ static void mask_set_nlattr(struct nlattr *attr, u8 val)
  * does not include any don't care bit.
  * @net: Used to determine per-namespace field support.
  * @match: receives the extracted flow match information.
- * @key: Netlink attribute holding nested %OVS_KEY_ATTR_* Netlink attribute
+ * @nla_key: Netlink attribute holding nested %OVS_KEY_ATTR_* Netlink attribute
  * sequence. The fields should of the packet that triggered the creation
  * of this flow.
- * @mask: Optional. Netlink attribute holding nested %OVS_KEY_ATTR_* Netlink
- * attribute specifies the mask field of the wildcarded flow.
+ * @nla_mask: Optional. Netlink attribute holding nested %OVS_KEY_ATTR_*
+ * Netlink attribute specifies the mask field of the wildcarded flow.
  * @log: Boolean to allow kernel error logging.  Normally true, but when
  * probing for feature compatibility this should be passed in as false to
  * suppress unnecessary error logging.
@@ -1861,7 +1890,7 @@ int ovs_nla_get_identifier(struct sw_flow_id *sfid, const struct nlattr *ufid,
 		return 0;
 
 	/* If UFID was not provided, use unmasked key. */
-	new_key = kmalloc(sizeof(*new_key), GFP_KERNEL);
+	new_key = kmalloc_obj(*new_key);
 	if (!new_key)
 		return -ENOMEM;
 	memcpy(new_key, key, sizeof(*key));
@@ -1872,7 +1901,7 @@ int ovs_nla_get_identifier(struct sw_flow_id *sfid, const struct nlattr *ufid,
 
 u32 ovs_nla_get_ufid_flags(const struct nlattr *attr)
 {
-	return attr ? nla_get_u32(attr) : 0;
+	return nla_get_u32_default(attr, 0);
 }
 
 /**
@@ -1932,7 +1961,7 @@ static int nsh_key_to_nlattr(const struct ovs_key_nsh *nsh, bool is_mask,
 {
 	struct nlattr *start;
 
-	start = nla_nest_start(skb, OVS_KEY_ATTR_NSH);
+	start = nla_nest_start_noflag(skb, OVS_KEY_ATTR_NSH);
 	if (!start)
 		return -EMSGSIZE;
 
@@ -1976,11 +2005,11 @@ static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
 	if ((swkey->tun_proto || is_mask)) {
 		const void *opts = NULL;
 
-		if (output->tun_key.tun_flags & TUNNEL_OPTIONS_PRESENT)
+		if (ip_tunnel_is_options_present(output->tun_key.tun_flags))
 			opts = TUN_METADATA_OPTS(output, swkey->tun_opts_len);
 
 		if (ip_tun_to_nlattr(skb, &output->tun_key, opts,
-				     swkey->tun_opts_len, swkey->tun_proto))
+				     swkey->tun_opts_len, swkey->tun_proto, 0))
 			goto nla_put_failure;
 	}
 
@@ -2015,14 +2044,15 @@ static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
 		if (swkey->eth.vlan.tci || eth_type_vlan(swkey->eth.type)) {
 			if (ovs_nla_put_vlan(skb, &output->eth.vlan, is_mask))
 				goto nla_put_failure;
-			encap = nla_nest_start(skb, OVS_KEY_ATTR_ENCAP);
+			encap = nla_nest_start_noflag(skb, OVS_KEY_ATTR_ENCAP);
 			if (!swkey->eth.vlan.tci)
 				goto unencap;
 
 			if (swkey->eth.cvlan.tci || eth_type_vlan(swkey->eth.type)) {
 				if (ovs_nla_put_vlan(skb, &output->eth.cvlan, is_mask))
 					goto nla_put_failure;
-				in_encap = nla_nest_start(skb, OVS_KEY_ATTR_ENCAP);
+				in_encap = nla_nest_start_noflag(skb,
+								 OVS_KEY_ATTR_ENCAP);
 				if (!swkey->eth.cvlan.tci)
 					goto unencap;
 			}
@@ -2069,6 +2099,7 @@ static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
 		ipv4_key->ipv4_frag = output->ip.frag;
 	} else if (swkey->eth.type == htons(ETH_P_IPV6)) {
 		struct ovs_key_ipv6 *ipv6_key;
+		struct ovs_key_ipv6_exthdrs *ipv6_exthdrs_key;
 
 		nla = nla_reserve(skb, OVS_KEY_ATTR_IPV6, sizeof(*ipv6_key));
 		if (!nla)
@@ -2083,6 +2114,13 @@ static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
 		ipv6_key->ipv6_tclass = output->ip.tos;
 		ipv6_key->ipv6_hlimit = output->ip.ttl;
 		ipv6_key->ipv6_frag = output->ip.frag;
+
+		nla = nla_reserve(skb, OVS_KEY_ATTR_IPV6_EXTHDRS,
+				  sizeof(*ipv6_exthdrs_key));
+		if (!nla)
+			goto nla_put_failure;
+		ipv6_exthdrs_key = nla_data(nla);
+		ipv6_exthdrs_key->hdrs = output->ipv6.exthdrs;
 	} else if (swkey->eth.type == htons(ETH_P_NSH)) {
 		if (nsh_key_to_nlattr(&output->nsh, is_mask, skb))
 			goto nla_put_failure;
@@ -2101,13 +2139,18 @@ static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
 		ether_addr_copy(arp_key->arp_sha, output->ipv4.arp.sha);
 		ether_addr_copy(arp_key->arp_tha, output->ipv4.arp.tha);
 	} else if (eth_p_mpls(swkey->eth.type)) {
+		u8 i, num_labels;
 		struct ovs_key_mpls *mpls_key;
 
-		nla = nla_reserve(skb, OVS_KEY_ATTR_MPLS, sizeof(*mpls_key));
+		num_labels = hweight_long(output->mpls.num_labels_mask);
+		nla = nla_reserve(skb, OVS_KEY_ATTR_MPLS,
+				  num_labels * sizeof(*mpls_key));
 		if (!nla)
 			goto nla_put_failure;
+
 		mpls_key = nla_data(nla);
-		mpls_key->mpls_lse = output->mpls.top_lse;
+		for (i = 0; i < num_labels; i++)
+			mpls_key[i].mpls_lse = output->mpls.lse[i];
 	}
 
 	if ((swkey->eth.type == htons(ETH_P_IP) ||
@@ -2166,8 +2209,8 @@ static int __ovs_nla_put_key(const struct sw_flow_key *swkey,
 			icmpv6_key->icmpv6_type = ntohs(output->tp.src);
 			icmpv6_key->icmpv6_code = ntohs(output->tp.dst);
 
-			if (icmpv6_key->icmpv6_type == NDISC_NEIGHBOUR_SOLICITATION ||
-			    icmpv6_key->icmpv6_type == NDISC_NEIGHBOUR_ADVERTISEMENT) {
+			if (swkey->tp.src == htons(NDISC_NEIGHBOUR_SOLICITATION) ||
+			    swkey->tp.src == htons(NDISC_NEIGHBOUR_ADVERTISEMENT)) {
 				struct ovs_key_nd *nd_key;
 
 				nla = nla_reserve(skb, OVS_KEY_ATTR_ND, sizeof(*nd_key));
@@ -2201,7 +2244,7 @@ int ovs_nla_put_key(const struct sw_flow_key *swkey,
 	int err;
 	struct nlattr *nla;
 
-	nla = nla_nest_start(skb, attr);
+	nla = nla_nest_start_noflag(skb, attr);
 	if (!nla)
 		return -EMSGSIZE;
 	err = __ovs_nla_put_key(swkey, output, is_mask, skb);
@@ -2237,20 +2280,72 @@ int ovs_nla_put_mask(const struct sw_flow *flow, struct sk_buff *skb)
 				OVS_FLOW_ATTR_MASK, true, skb);
 }
 
-#define MAX_ACTIONS_BUFSIZE	(32 * 1024)
-
 static struct sw_flow_actions *nla_alloc_flow_actions(int size)
 {
 	struct sw_flow_actions *sfa;
 
-	WARN_ON_ONCE(size > MAX_ACTIONS_BUFSIZE);
-
-	sfa = kmalloc(sizeof(*sfa) + size, GFP_KERNEL);
+	sfa = kmalloc(kmalloc_size_roundup(sizeof(*sfa) + size), GFP_KERNEL);
 	if (!sfa)
 		return ERR_PTR(-ENOMEM);
 
 	sfa->actions_len = 0;
 	return sfa;
+}
+
+static void ovs_nla_free_nested_actions(const struct nlattr *actions, int len);
+
+static void ovs_nla_free_check_pkt_len_action(const struct nlattr *action)
+{
+	const struct nlattr *a;
+	int rem;
+
+	nla_for_each_nested(a, action, rem) {
+		switch (nla_type(a)) {
+		case OVS_CHECK_PKT_LEN_ATTR_ACTIONS_IF_LESS_EQUAL:
+		case OVS_CHECK_PKT_LEN_ATTR_ACTIONS_IF_GREATER:
+			ovs_nla_free_nested_actions(nla_data(a), nla_len(a));
+			break;
+		}
+	}
+}
+
+static void ovs_nla_free_clone_action(const struct nlattr *action)
+{
+	const struct nlattr *a = nla_data(action);
+	int rem = nla_len(action);
+
+	switch (nla_type(a)) {
+	case OVS_CLONE_ATTR_EXEC:
+		/* The real list of actions follows this attribute. */
+		a = nla_next(a, &rem);
+		ovs_nla_free_nested_actions(a, rem);
+		break;
+	}
+}
+
+static void ovs_nla_free_dec_ttl_action(const struct nlattr *action)
+{
+	const struct nlattr *a = nla_data(action);
+
+	switch (nla_type(a)) {
+	case OVS_DEC_TTL_ATTR_ACTION:
+		ovs_nla_free_nested_actions(nla_data(a), nla_len(a));
+		break;
+	}
+}
+
+static void ovs_nla_free_sample_action(const struct nlattr *action)
+{
+	const struct nlattr *a = nla_data(action);
+	int rem = nla_len(action);
+
+	switch (nla_type(a)) {
+	case OVS_SAMPLE_ATTR_ARG:
+		/* The real list of actions follows this attribute. */
+		a = nla_next(a, &rem);
+		ovs_nla_free_nested_actions(a, rem);
+		break;
+	}
 }
 
 static void ovs_nla_free_set_action(const struct nlattr *a)
@@ -2266,25 +2361,54 @@ static void ovs_nla_free_set_action(const struct nlattr *a)
 	}
 }
 
-void ovs_nla_free_flow_actions(struct sw_flow_actions *sf_acts)
+static void ovs_nla_free_nested_actions(const struct nlattr *actions, int len)
 {
 	const struct nlattr *a;
 	int rem;
 
-	if (!sf_acts)
+	/* Whenever new actions are added, the need to update this
+	 * function should be considered.
+	 */
+	BUILD_BUG_ON(OVS_ACTION_ATTR_MAX != 25);
+
+	if (!actions)
 		return;
 
-	nla_for_each_attr(a, sf_acts->actions, sf_acts->actions_len, rem) {
+	nla_for_each_attr(a, actions, len, rem) {
 		switch (nla_type(a)) {
-		case OVS_ACTION_ATTR_SET:
-			ovs_nla_free_set_action(a);
+		case OVS_ACTION_ATTR_CHECK_PKT_LEN:
+			ovs_nla_free_check_pkt_len_action(a);
 			break;
+
+		case OVS_ACTION_ATTR_CLONE:
+			ovs_nla_free_clone_action(a);
+			break;
+
 		case OVS_ACTION_ATTR_CT:
 			ovs_ct_free_action(a);
 			break;
+
+		case OVS_ACTION_ATTR_DEC_TTL:
+			ovs_nla_free_dec_ttl_action(a);
+			break;
+
+		case OVS_ACTION_ATTR_SAMPLE:
+			ovs_nla_free_sample_action(a);
+			break;
+
+		case OVS_ACTION_ATTR_SET:
+			ovs_nla_free_set_action(a);
+			break;
 		}
 	}
+}
 
+void ovs_nla_free_flow_actions(struct sw_flow_actions *sf_acts)
+{
+	if (!sf_acts)
+		return;
+
+	ovs_nla_free_nested_actions(sf_acts->actions, sf_acts->actions_len);
 	kfree(sf_acts);
 }
 
@@ -2306,27 +2430,18 @@ static struct nlattr *reserve_sfa_size(struct sw_flow_actions **sfa,
 
 	struct sw_flow_actions *acts;
 	int new_acts_size;
-	int req_size = NLA_ALIGN(attr_len);
+	size_t req_size = NLA_ALIGN(attr_len);
 	int next_offset = offsetof(struct sw_flow_actions, actions) +
 					(*sfa)->actions_len;
 
 	if (req_size <= (ksize(*sfa) - next_offset))
 		goto out;
 
-	new_acts_size = ksize(*sfa) * 2;
-
-	if (new_acts_size > MAX_ACTIONS_BUFSIZE) {
-		if ((MAX_ACTIONS_BUFSIZE - next_offset) < req_size) {
-			OVS_NLERR(log, "Flow action size exceeds max %u",
-				  MAX_ACTIONS_BUFSIZE);
-			return ERR_PTR(-EMSGSIZE);
-		}
-		new_acts_size = MAX_ACTIONS_BUFSIZE;
-	}
+	new_acts_size = max(next_offset + req_size, ksize(*sfa) * 2);
 
 	acts = nla_alloc_flow_actions(new_acts_size);
 	if (IS_ERR(acts))
-		return (void *)acts;
+		return ERR_CAST(acts);
 
 	memcpy(acts->actions, (*sfa)->actions, (*sfa)->actions_len);
 	acts->actions_len = (*sfa)->actions_len;
@@ -2381,29 +2496,76 @@ static inline int add_nested_action_start(struct sw_flow_actions **sfa,
 	return used;
 }
 
-static inline void add_nested_action_end(struct sw_flow_actions *sfa,
-					 int st_offset)
+static inline int add_nested_action_end(struct sw_flow_actions *sfa,
+					int st_offset)
 {
-	struct nlattr *a = (struct nlattr *) ((unsigned char *)sfa->actions +
-							       st_offset);
+	struct nlattr *a;
+	u32 attr_len;
 
-	a->nla_len = sfa->actions_len - st_offset;
+	if (WARN_ON_ONCE(st_offset < 0 ||
+			 (u32)st_offset > sfa->actions_len))
+		return -EINVAL;
+
+	attr_len = sfa->actions_len - (u32)st_offset;
+	if (WARN_ON_ONCE(attr_len < NLA_HDRLEN))
+		return -EINVAL;
+
+	if (attr_len > U16_MAX)
+		return -EMSGSIZE;
+
+	a = (struct nlattr *)((u8 *)sfa->actions + st_offset);
+	a->nla_len = attr_len;
+	return 0;
+}
+
+/* Free the generated action-list tail at @start and truncate it.
+ * If @nested, @start points to its containing nlattr header.
+ */
+static void ovs_nla_trim(struct sw_flow_actions *sfa, int start, bool nested)
+{
+	const struct nlattr *actions;
+	u32 len;
+
+	if (start < 0)
+		return;
+
+	if (WARN_ON_ONCE((u32)start > sfa->actions_len))
+		return;
+
+	actions = (const struct nlattr *)((u8 *)sfa->actions + start);
+	len = sfa->actions_len - (u32)start;
+
+	if (nested) {
+		if (len < NLA_HDRLEN)
+			goto out;
+
+		actions = (const struct nlattr *)((u8 *)actions + NLA_HDRLEN);
+		len -= NLA_HDRLEN;
+	}
+
+	ovs_nla_free_nested_actions(actions, len);
+out:
+	sfa->actions_len = start;
 }
 
 static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 				  const struct sw_flow_key *key,
 				  struct sw_flow_actions **sfa,
-				  __be16 eth_type, __be16 vlan_tci, bool log);
+				  __be16 eth_type, __be16 vlan_tci,
+				  u32 mpls_label_count, bool log,
+				  u32 depth);
 
 static int validate_and_copy_sample(struct net *net, const struct nlattr *attr,
 				    const struct sw_flow_key *key,
 				    struct sw_flow_actions **sfa,
 				    __be16 eth_type, __be16 vlan_tci,
-				    bool log, bool last)
+				    u32 mpls_label_count, bool log, bool last,
+				    u32 depth)
 {
 	const struct nlattr *attrs[OVS_SAMPLE_ATTR_MAX + 1];
 	const struct nlattr *probability, *actions;
 	const struct nlattr *a;
+	int actions_start;
 	int rem, start, err;
 	struct sample_arg arg;
 
@@ -2447,17 +2609,145 @@ static int validate_and_copy_sample(struct net *net, const struct nlattr *attr,
 	err = ovs_nla_add_action(sfa, OVS_SAMPLE_ATTR_ARG, &arg, sizeof(arg),
 				 log);
 	if (err)
-		return err;
+		goto err;
 
+	actions_start = (*sfa)->actions_len;
 	err = __ovs_nla_copy_actions(net, actions, key, sfa,
-				     eth_type, vlan_tci, log);
+				     eth_type, vlan_tci, mpls_label_count, log,
+				     depth + 1);
 
 	if (err)
-		return err;
+		goto err_free;
 
-	add_nested_action_end(*sfa, start);
+	err = add_nested_action_end(*sfa, start);
+	if (err)
+		goto err_free;
 
 	return 0;
+
+err_free:
+	ovs_nla_trim(*sfa, actions_start, false);
+err:
+	(*sfa)->actions_len = start;
+	return err;
+}
+
+static int validate_and_copy_dec_ttl(struct net *net,
+				     const struct nlattr *attr,
+				     const struct sw_flow_key *key,
+				     struct sw_flow_actions **sfa,
+				     __be16 eth_type, __be16 vlan_tci,
+				     u32 mpls_label_count, bool log,
+				     u32 depth)
+{
+	const struct nlattr *attrs[OVS_DEC_TTL_ATTR_MAX + 1];
+	int start, action_start, err, rem;
+	const struct nlattr *a, *actions;
+
+	memset(attrs, 0, sizeof(attrs));
+	nla_for_each_nested(a, attr, rem) {
+		int type = nla_type(a);
+
+		/* Ignore unknown attributes to be future proof. */
+		if (type > OVS_DEC_TTL_ATTR_MAX)
+			continue;
+
+		if (!type || attrs[type]) {
+			OVS_NLERR(log, "Duplicate or invalid key (type %d).",
+				  type);
+			return -EINVAL;
+		}
+
+		attrs[type] = a;
+	}
+
+	if (rem) {
+		OVS_NLERR(log, "Message has %d unknown bytes.", rem);
+		return -EINVAL;
+	}
+
+	actions = attrs[OVS_DEC_TTL_ATTR_ACTION];
+	if (!actions || (nla_len(actions) && nla_len(actions) < NLA_HDRLEN)) {
+		OVS_NLERR(log, "Missing valid actions attribute.");
+		return -EINVAL;
+	}
+
+	start = add_nested_action_start(sfa, OVS_ACTION_ATTR_DEC_TTL, log);
+	if (start < 0)
+		return start;
+
+	action_start = add_nested_action_start(sfa, OVS_DEC_TTL_ATTR_ACTION, log);
+	if (action_start < 0) {
+		err = action_start;
+		goto err;
+	}
+
+	err = __ovs_nla_copy_actions(net, actions, key, sfa, eth_type,
+				     vlan_tci, mpls_label_count, log,
+				     depth + 1);
+	if (err)
+		goto err_free;
+
+	err = add_nested_action_end(*sfa, action_start);
+	if (err)
+		goto err_free;
+
+	err = add_nested_action_end(*sfa, start);
+	if (err)
+		goto err_free;
+	return 0;
+
+err_free:
+	ovs_nla_trim(*sfa, action_start, true);
+err:
+	(*sfa)->actions_len = start;
+	return err;
+}
+
+static int validate_and_copy_clone(struct net *net,
+				   const struct nlattr *attr,
+				   const struct sw_flow_key *key,
+				   struct sw_flow_actions **sfa,
+				   __be16 eth_type, __be16 vlan_tci,
+				   u32 mpls_label_count, bool log, bool last,
+				   u32 depth)
+{
+	int actions_start;
+	int start, err;
+	u32 exec;
+
+	if (nla_len(attr) && nla_len(attr) < NLA_HDRLEN)
+		return -EINVAL;
+
+	start = add_nested_action_start(sfa, OVS_ACTION_ATTR_CLONE, log);
+	if (start < 0)
+		return start;
+
+	exec = last || !actions_may_change_flow(attr);
+
+	err = ovs_nla_add_action(sfa, OVS_CLONE_ATTR_EXEC, &exec,
+				 sizeof(exec), log);
+	if (err)
+		goto err;
+
+	actions_start = (*sfa)->actions_len;
+	err = __ovs_nla_copy_actions(net, attr, key, sfa,
+				     eth_type, vlan_tci, mpls_label_count, log,
+				     depth + 1);
+	if (err)
+		goto err_free;
+
+	err = add_nested_action_end(*sfa, start);
+	if (err)
+		goto err_free;
+
+	return 0;
+
+err_free:
+	ovs_nla_trim(*sfa, actions_start, false);
+err:
+	(*sfa)->actions_len = start;
+	return err;
 }
 
 void ovs_match_init(struct sw_flow_match *match,
@@ -2501,7 +2791,8 @@ static int validate_geneve_opts(struct sw_flow_key *key)
 		opts_len -= len;
 	}
 
-	key->tun_key.tun_flags |= crit_opt ? TUNNEL_CRIT_OPT : 0;
+	if (crit_opt)
+		__set_bit(IP_TUNNEL_CRIT_OPT_BIT, key->tun_key.tun_flags);
 
 	return 0;
 }
@@ -2509,6 +2800,7 @@ static int validate_geneve_opts(struct sw_flow_key *key)
 static int validate_and_copy_set_tun(const struct nlattr *attr,
 				     struct sw_flow_actions **sfa, bool log)
 {
+	IP_TUNNEL_DECLARE_FLAGS(dst_opt_type) = { };
 	struct sw_flow_match match;
 	struct sw_flow_key key;
 	struct metadata_dst *tun_dst;
@@ -2528,10 +2820,14 @@ static int validate_and_copy_set_tun(const struct nlattr *attr,
 			err = validate_geneve_opts(&key);
 			if (err < 0)
 				return err;
+
+			__set_bit(IP_TUNNEL_GENEVE_OPT_BIT, dst_opt_type);
 			break;
 		case OVS_TUNNEL_KEY_ATTR_VXLAN_OPTS:
+			__set_bit(IP_TUNNEL_VXLAN_OPT_BIT, dst_opt_type);
 			break;
 		case OVS_TUNNEL_KEY_ATTR_ERSPAN_OPTS:
+			__set_bit(IP_TUNNEL_ERSPAN_OPT_BIT, dst_opt_type);
 			break;
 		}
 	}
@@ -2543,20 +2839,20 @@ static int validate_and_copy_set_tun(const struct nlattr *attr,
 	tun_dst = metadata_dst_alloc(key.tun_opts_len, METADATA_IP_TUNNEL,
 				     GFP_KERNEL);
 
-	if (!tun_dst)
-		return -ENOMEM;
+	if (!tun_dst) {
+		err = -ENOMEM;
+		goto err;
+	}
 
 	err = dst_cache_init(&tun_dst->u.tun_info.dst_cache, GFP_KERNEL);
-	if (err) {
-		dst_release((struct dst_entry *)tun_dst);
-		return err;
-	}
+	if (err)
+		goto err_free_tun_dst;
 
 	a = __add_action(sfa, OVS_KEY_ATTR_TUNNEL_INFO, NULL,
 			 sizeof(*ovs_tun), log);
 	if (IS_ERR(a)) {
-		dst_release((struct dst_entry *)tun_dst);
-		return PTR_ERR(a);
+		err = PTR_ERR(a);
+		goto err_free_tun_dst;
 	}
 
 	ovs_tun = nla_data(a);
@@ -2566,6 +2862,8 @@ static int validate_and_copy_set_tun(const struct nlattr *attr,
 	tun_info->mode = IP_TUNNEL_INFO_TX;
 	if (key.tun_proto == AF_INET6)
 		tun_info->mode |= IP_TUNNEL_INFO_IPV6;
+	else if (key.tun_proto == AF_INET && key.tun_key.u.ipv4.dst == 0)
+		tun_info->mode |= IP_TUNNEL_INFO_BRIDGE;
 	tun_info->key = key.tun_key;
 
 	/* We need to store the options in the action itself since
@@ -2574,23 +2872,34 @@ static int validate_and_copy_set_tun(const struct nlattr *attr,
 	 */
 	ip_tunnel_info_opts_set(tun_info,
 				TUN_METADATA_OPTS(&key, key.tun_opts_len),
-				key.tun_opts_len);
-	add_nested_action_end(*sfa, start);
+				key.tun_opts_len, dst_opt_type);
+	err = add_nested_action_end(*sfa, start);
+	if (WARN_ON_ONCE(err))
+		goto err_free_tun_dst;
 
+	return 0;
+
+err_free_tun_dst:
+	dst_release((struct dst_entry *)tun_dst);
+err:
+	(*sfa)->actions_len = start;
 	return err;
 }
 
-static bool validate_nsh(const struct nlattr *attr, bool is_mask,
-			 bool is_push_nsh, bool log)
+static bool validate_push_nsh(const struct nlattr *a, bool log)
 {
+	struct nlattr *nsh_key = nla_data(a);
 	struct sw_flow_match match;
 	struct sw_flow_key key;
-	int ret = 0;
+
+	/* There must be one and only one NSH header. */
+	if (!nla_ok(nsh_key, nla_len(a)) ||
+	    nla_total_size(nla_len(nsh_key)) != nla_len(a) ||
+	    nla_type(nsh_key) != OVS_KEY_ATTR_NSH)
+		return false;
 
 	ovs_match_init(&match, &key, true, NULL);
-	ret = nsh_key_put_from_nlattr(attr, &match, is_mask,
-				      is_push_nsh, log);
-	return !ret;
+	return !nsh_key_put_from_nlattr(nsh_key, &match, false, true, log);
 }
 
 /* Return false if there are any non-masked bits set.
@@ -2617,7 +2926,8 @@ static int validate_set(const struct nlattr *a,
 	size_t key_len;
 
 	/* There can be only one key in a action */
-	if (nla_total_size(nla_len(ovs_key)) != nla_len(a))
+	if (!nla_ok(ovs_key, nla_len(a)) ||
+	    nla_total_size(nla_len(ovs_key)) != nla_len(a))
 		return -EINVAL;
 
 	key_len = nla_len(ovs_key);
@@ -2632,10 +2942,6 @@ static int validate_set(const struct nlattr *a,
 		return -EINVAL;
 
 	switch (key_type) {
-	const struct ovs_key_ipv4 *ipv4_key;
-	const struct ovs_key_ipv6 *ipv6_key;
-	int err;
-
 	case OVS_KEY_ATTR_PRIORITY:
 	case OVS_KEY_ATTR_SKB_MARK:
 	case OVS_KEY_ATTR_CT_MARK:
@@ -2647,7 +2953,9 @@ static int validate_set(const struct nlattr *a,
 			return -EINVAL;
 		break;
 
-	case OVS_KEY_ATTR_TUNNEL:
+	case OVS_KEY_ATTR_TUNNEL: {
+		int err;
+
 		if (masked)
 			return -EINVAL; /* Masked tunnel set not supported. */
 
@@ -2656,8 +2964,10 @@ static int validate_set(const struct nlattr *a,
 		if (err)
 			return err;
 		break;
+	}
+	case OVS_KEY_ATTR_IPV4: {
+		const struct ovs_key_ipv4 *ipv4_key;
 
-	case OVS_KEY_ATTR_IPV4:
 		if (eth_type != htons(ETH_P_IP))
 			return -EINVAL;
 
@@ -2677,8 +2987,10 @@ static int validate_set(const struct nlattr *a,
 				return -EINVAL;
 		}
 		break;
+	}
+	case OVS_KEY_ATTR_IPV6: {
+		const struct ovs_key_ipv6 *ipv6_key;
 
-	case OVS_KEY_ATTR_IPV6:
 		if (eth_type != htons(ETH_P_IPV6))
 			return -EINVAL;
 
@@ -2705,7 +3017,7 @@ static int validate_set(const struct nlattr *a,
 			return -EINVAL;
 
 		break;
-
+	}
 	case OVS_KEY_ATTR_TCP:
 		if ((eth_type != htons(ETH_P_IP) &&
 		     eth_type != htons(ETH_P_IPV6)) ||
@@ -2725,6 +3037,8 @@ static int validate_set(const struct nlattr *a,
 	case OVS_KEY_ATTR_MPLS:
 		if (!eth_p_mpls(eth_type))
 			return -EINVAL;
+		if (key_len != sizeof(struct ovs_key_mpls))
+			return -EINVAL;
 		break;
 
 	case OVS_KEY_ATTR_SCTP:
@@ -2735,20 +3049,13 @@ static int validate_set(const struct nlattr *a,
 
 		break;
 
-	case OVS_KEY_ATTR_NSH:
-		if (eth_type != htons(ETH_P_NSH))
-			return -EINVAL;
-		if (!validate_nsh(nla_data(a), masked, false, log))
-			return -EINVAL;
-		break;
-
 	default:
 		return -EINVAL;
 	}
 
 	/* Convert non-masked non-tunnel set actions to masked set actions. */
 	if (!masked && key_type != OVS_KEY_ATTR_TUNNEL) {
-		int start, len = key_len * 2;
+		int err, start, len = key_len * 2;
 		struct nlattr *at;
 
 		*skip_copy = true;
@@ -2760,8 +3067,11 @@ static int validate_set(const struct nlattr *a,
 			return start;
 
 		at = __add_action(sfa, key_type, NULL, len, log);
-		if (IS_ERR(at))
-			return PTR_ERR(at);
+		if (IS_ERR(at)) {
+			err = PTR_ERR(at);
+			(*sfa)->actions_len = start;
+			return err;
+		}
 
 		memcpy(nla_data(at), nla_data(ovs_key), key_len); /* Key. */
 		memset(nla_data(at) + key_len, 0xff, key_len);    /* Mask. */
@@ -2771,7 +3081,11 @@ static int validate_set(const struct nlattr *a,
 
 			mask->ipv6_label &= htonl(0x000FFFFF);
 		}
-		add_nested_action_end(*sfa, start);
+		err = add_nested_action_end(*sfa, start);
+		if (WARN_ON_ONCE(err)) {
+			(*sfa)->actions_len = start;
+			return err;
+		}
 	}
 
 	return 0;
@@ -2787,8 +3101,9 @@ static int validate_userspace(const struct nlattr *attr)
 	struct nlattr *a[OVS_USERSPACE_ATTR_MAX + 1];
 	int error;
 
-	error = nla_parse_nested(a, OVS_USERSPACE_ATTR_MAX, attr,
-				 userspace_policy, NULL);
+	error = nla_parse_deprecated_strict(a, OVS_USERSPACE_ATTR_MAX,
+					    nla_data(attr), nla_len(attr),
+					    userspace_policy, NULL);
 	if (error)
 		return error;
 
@@ -2797,6 +3112,135 @@ static int validate_userspace(const struct nlattr *attr)
 		return -EINVAL;
 
 	return 0;
+}
+
+static const struct nla_policy cpl_policy[OVS_CHECK_PKT_LEN_ATTR_MAX + 1] = {
+	[OVS_CHECK_PKT_LEN_ATTR_PKT_LEN] = {.type = NLA_U16 },
+	[OVS_CHECK_PKT_LEN_ATTR_ACTIONS_IF_GREATER] = {.type = NLA_NESTED },
+	[OVS_CHECK_PKT_LEN_ATTR_ACTIONS_IF_LESS_EQUAL] = {.type = NLA_NESTED },
+};
+
+static int validate_and_copy_check_pkt_len(struct net *net,
+					   const struct nlattr *attr,
+					   const struct sw_flow_key *key,
+					   struct sw_flow_actions **sfa,
+					   __be16 eth_type, __be16 vlan_tci,
+					   u32 mpls_label_count,
+					   bool log, bool last, u32 depth)
+{
+	const struct nlattr *acts_if_greater, *acts_if_lesser_eq;
+	struct nlattr *a[OVS_CHECK_PKT_LEN_ATTR_MAX + 1];
+	struct check_pkt_len_arg arg;
+	int greater_acts_start = -1;
+	int lesser_acts_start = -1;
+	int start, err;
+
+	err = nla_parse_deprecated_strict(a, OVS_CHECK_PKT_LEN_ATTR_MAX,
+					  nla_data(attr), nla_len(attr),
+					  cpl_policy, NULL);
+	if (err)
+		return err;
+
+	if (!a[OVS_CHECK_PKT_LEN_ATTR_PKT_LEN] ||
+	    !nla_get_u16(a[OVS_CHECK_PKT_LEN_ATTR_PKT_LEN]))
+		return -EINVAL;
+
+	acts_if_lesser_eq = a[OVS_CHECK_PKT_LEN_ATTR_ACTIONS_IF_LESS_EQUAL];
+	acts_if_greater = a[OVS_CHECK_PKT_LEN_ATTR_ACTIONS_IF_GREATER];
+
+	/* Both the nested action should be present. */
+	if (!acts_if_greater || !acts_if_lesser_eq)
+		return -EINVAL;
+
+	/* validation done, copy the nested actions. */
+	start = add_nested_action_start(sfa, OVS_ACTION_ATTR_CHECK_PKT_LEN,
+					log);
+	if (start < 0)
+		return start;
+
+	arg.pkt_len = nla_get_u16(a[OVS_CHECK_PKT_LEN_ATTR_PKT_LEN]);
+	arg.exec_for_lesser_equal =
+		last || !actions_may_change_flow(acts_if_lesser_eq);
+	arg.exec_for_greater =
+		last || !actions_may_change_flow(acts_if_greater);
+
+	err = ovs_nla_add_action(sfa, OVS_CHECK_PKT_LEN_ATTR_ARG, &arg,
+				 sizeof(arg), log);
+	if (err)
+		goto err_free;
+
+	lesser_acts_start =
+		add_nested_action_start(sfa,
+					OVS_CHECK_PKT_LEN_ATTR_ACTIONS_IF_LESS_EQUAL,
+					log);
+	if (lesser_acts_start < 0) {
+		err = lesser_acts_start;
+		goto err_free;
+	}
+
+	err = __ovs_nla_copy_actions(net, acts_if_lesser_eq, key, sfa,
+				     eth_type, vlan_tci, mpls_label_count, log,
+				     depth + 1);
+
+	if (err)
+		goto err_free;
+
+	err = add_nested_action_end(*sfa, lesser_acts_start);
+	if (err)
+		goto err_free;
+
+	greater_acts_start =
+		add_nested_action_start(sfa,
+					OVS_CHECK_PKT_LEN_ATTR_ACTIONS_IF_GREATER,
+					log);
+	if (greater_acts_start < 0) {
+		err = greater_acts_start;
+		goto err_free;
+	}
+
+	err = __ovs_nla_copy_actions(net, acts_if_greater, key, sfa,
+				     eth_type, vlan_tci, mpls_label_count, log,
+				     depth + 1);
+
+	if (err)
+		goto err_free;
+
+	err = add_nested_action_end(*sfa, greater_acts_start);
+	if (err)
+		goto err_free;
+
+	err = add_nested_action_end(*sfa, start);
+	if (err)
+		goto err_free;
+	return 0;
+
+err_free:
+	ovs_nla_trim(*sfa, greater_acts_start, true);
+	ovs_nla_trim(*sfa, lesser_acts_start, true);
+	ovs_nla_trim(*sfa, start, false);
+	return err;
+}
+
+static int validate_psample(const struct nlattr *attr)
+{
+	static const struct nla_policy policy[OVS_PSAMPLE_ATTR_MAX + 1] = {
+		[OVS_PSAMPLE_ATTR_GROUP] = { .type = NLA_U32 },
+		[OVS_PSAMPLE_ATTR_COOKIE] = {
+			.type = NLA_BINARY,
+			.len = OVS_PSAMPLE_COOKIE_MAX_SIZE,
+		},
+	};
+	struct nlattr *a[OVS_PSAMPLE_ATTR_MAX + 1];
+	int err;
+
+	if (!IS_ENABLED(CONFIG_PSAMPLE))
+		return -EOPNOTSUPP;
+
+	err = nla_parse_nested(a, OVS_PSAMPLE_ATTR_MAX, attr, policy, NULL);
+	if (err)
+		return err;
+
+	return a[OVS_PSAMPLE_ATTR_GROUP] ? 0 : -EINVAL;
 }
 
 static int copy_action(const struct nlattr *from,
@@ -2816,11 +3260,16 @@ static int copy_action(const struct nlattr *from,
 static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 				  const struct sw_flow_key *key,
 				  struct sw_flow_actions **sfa,
-				  __be16 eth_type, __be16 vlan_tci, bool log)
+				  __be16 eth_type, __be16 vlan_tci,
+				  u32 mpls_label_count, bool log,
+				  u32 depth)
 {
 	u8 mac_proto = ovs_key_mac_proto(key);
 	const struct nlattr *a;
 	int rem, err;
+
+	if (depth > OVS_COPY_ACTIONS_MAX_DEPTH)
+		return -EOVERFLOW;
 
 	nla_for_each_nested(a, attr, rem) {
 		/* Expected argument lengths, (u32)-1 for variable length. */
@@ -2844,6 +3293,12 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 			[OVS_ACTION_ATTR_PUSH_NSH] = (u32)-1,
 			[OVS_ACTION_ATTR_POP_NSH] = 0,
 			[OVS_ACTION_ATTR_METER] = sizeof(u32),
+			[OVS_ACTION_ATTR_CLONE] = (u32)-1,
+			[OVS_ACTION_ATTR_CHECK_PKT_LEN] = (u32)-1,
+			[OVS_ACTION_ATTR_ADD_MPLS] = sizeof(struct ovs_action_add_mpls),
+			[OVS_ACTION_ATTR_DEC_TTL] = (u32)-1,
+			[OVS_ACTION_ATTR_DROP] = sizeof(u32),
+			[OVS_ACTION_ATTR_PSAMPLE] = (u32)-1,
 		};
 		const struct ovs_action_push_vlan *vlan;
 		int type = nla_type(a);
@@ -2883,6 +3338,8 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 
 			switch (act_hash->hash_alg) {
 			case OVS_HASH_ALG_L4:
+				fallthrough;
+			case OVS_HASH_ALG_SYM_L4:
 				break;
 			default:
 				return  -EINVAL;
@@ -2903,13 +3360,40 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 			vlan = nla_data(a);
 			if (!eth_type_vlan(vlan->vlan_tpid))
 				return -EINVAL;
-			if (!(vlan->vlan_tci & htons(VLAN_TAG_PRESENT)))
+			if (!(vlan->vlan_tci & htons(VLAN_CFI_MASK)))
 				return -EINVAL;
 			vlan_tci = vlan->vlan_tci;
 			break;
 
 		case OVS_ACTION_ATTR_RECIRC:
 			break;
+
+		case OVS_ACTION_ATTR_ADD_MPLS: {
+			const struct ovs_action_add_mpls *mpls = nla_data(a);
+
+			if (!eth_p_mpls(mpls->mpls_ethertype))
+				return -EINVAL;
+
+			if (mpls->tun_flags & OVS_MPLS_L3_TUNNEL_FLAG_MASK) {
+				if (vlan_tci & htons(VLAN_CFI_MASK) ||
+				    (eth_type != htons(ETH_P_IP) &&
+				     eth_type != htons(ETH_P_IPV6) &&
+				     eth_type != htons(ETH_P_ARP) &&
+				     eth_type != htons(ETH_P_RARP) &&
+				     !eth_p_mpls(eth_type)))
+					return -EINVAL;
+				mpls_label_count++;
+			} else {
+				if (mac_proto == MAC_PROTO_ETHERNET) {
+					mpls_label_count = 1;
+					mac_proto = MAC_PROTO_NONE;
+				} else {
+					mpls_label_count++;
+				}
+			}
+			eth_type = mpls->mpls_ethertype;
+			break;
+		}
 
 		case OVS_ACTION_ATTR_PUSH_MPLS: {
 			const struct ovs_action_push_mpls *mpls = nla_data(a);
@@ -2919,7 +3403,7 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 			/* Prohibit push MPLS other than to a white list
 			 * for packets that have a known tag order.
 			 */
-			if (vlan_tci & htons(VLAN_TAG_PRESENT) ||
+			if (vlan_tci & htons(VLAN_CFI_MASK) ||
 			    (eth_type != htons(ETH_P_IP) &&
 			     eth_type != htons(ETH_P_IPV6) &&
 			     eth_type != htons(ETH_P_ARP) &&
@@ -2927,25 +3411,41 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 			     !eth_p_mpls(eth_type)))
 				return -EINVAL;
 			eth_type = mpls->mpls_ethertype;
+			mpls_label_count++;
 			break;
 		}
 
-		case OVS_ACTION_ATTR_POP_MPLS:
-			if (vlan_tci & htons(VLAN_TAG_PRESENT) ||
+		case OVS_ACTION_ATTR_POP_MPLS: {
+			__be16  proto;
+			if (vlan_tci & htons(VLAN_CFI_MASK) ||
 			    !eth_p_mpls(eth_type))
 				return -EINVAL;
 
-			/* Disallow subsequent L2.5+ set and mpls_pop actions
-			 * as there is no check here to ensure that the new
-			 * eth_type is valid and thus set actions could
-			 * write off the end of the packet or otherwise
-			 * corrupt it.
+			/* Disallow subsequent L2.5+ set actions and mpls_pop
+			 * actions once the last MPLS label in the packet is
+			 * popped as there is no check here to ensure that
+			 * the new eth type is valid and thus set actions could
+			 * write off the end of the packet or otherwise corrupt
+			 * it.
 			 *
 			 * Support for these actions is planned using packet
 			 * recirculation.
 			 */
-			eth_type = htons(0);
+			proto = nla_get_be16(a);
+
+			if (proto == htons(ETH_P_TEB) &&
+			    mac_proto != MAC_PROTO_NONE)
+				return -EINVAL;
+
+			mpls_label_count--;
+
+			if (!eth_p_mpls(proto) || !mpls_label_count)
+				eth_type = htons(0);
+			else
+				eth_type =  proto;
+
 			break;
+		}
 
 		case OVS_ACTION_ATTR_SET:
 			err = validate_set(a, key, sfa,
@@ -2968,7 +3468,8 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 
 			err = validate_and_copy_sample(net, a, key, sfa,
 						       eth_type, vlan_tci,
-						       log, last);
+						       mpls_label_count,
+						       log, last, depth);
 			if (err)
 				return err;
 			skip_copy = true;
@@ -2990,15 +3491,15 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 			 * is already present */
 			if (mac_proto != MAC_PROTO_NONE)
 				return -EINVAL;
-			mac_proto = MAC_PROTO_NONE;
+			mac_proto = MAC_PROTO_ETHERNET;
 			break;
 
 		case OVS_ACTION_ATTR_POP_ETH:
 			if (mac_proto != MAC_PROTO_ETHERNET)
 				return -EINVAL;
-			if (vlan_tci & htons(VLAN_TAG_PRESENT))
+			if (vlan_tci & htons(VLAN_CFI_MASK))
 				return -EINVAL;
-			mac_proto = MAC_PROTO_ETHERNET;
+			mac_proto = MAC_PROTO_NONE;
 			break;
 
 		case OVS_ACTION_ATTR_PUSH_NSH:
@@ -3010,7 +3511,7 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 					return -EINVAL;
 			}
 			mac_proto = MAC_PROTO_NONE;
-			if (!validate_nsh(nla_data(a), false, true, true))
+			if (!validate_push_nsh(a, log))
 				return -EINVAL;
 			break;
 
@@ -3031,6 +3532,55 @@ static int __ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 
 		case OVS_ACTION_ATTR_METER:
 			/* Non-existent meters are simply ignored.  */
+			break;
+
+		case OVS_ACTION_ATTR_CLONE: {
+			bool last = nla_is_last(a, rem);
+
+			err = validate_and_copy_clone(net, a, key, sfa,
+						      eth_type, vlan_tci,
+						      mpls_label_count,
+						      log, last, depth);
+			if (err)
+				return err;
+			skip_copy = true;
+			break;
+		}
+
+		case OVS_ACTION_ATTR_CHECK_PKT_LEN: {
+			bool last = nla_is_last(a, rem);
+
+			err = validate_and_copy_check_pkt_len(net, a, key, sfa,
+							      eth_type,
+							      vlan_tci,
+							      mpls_label_count,
+							      log, last,
+							      depth);
+			if (err)
+				return err;
+			skip_copy = true;
+			break;
+		}
+
+		case OVS_ACTION_ATTR_DEC_TTL:
+			err = validate_and_copy_dec_ttl(net, a, key, sfa,
+							eth_type, vlan_tci,
+							mpls_label_count, log,
+							depth);
+			if (err)
+				return err;
+			skip_copy = true;
+			break;
+
+		case OVS_ACTION_ATTR_DROP:
+			if (!nla_is_last(a, rem))
+				return -EINVAL;
+			break;
+
+		case OVS_ACTION_ATTR_PSAMPLE:
+			err = validate_psample(a);
+			if (err)
+				return err;
 			break;
 
 		default:
@@ -3056,14 +3606,19 @@ int ovs_nla_copy_actions(struct net *net, const struct nlattr *attr,
 			 struct sw_flow_actions **sfa, bool log)
 {
 	int err;
+	u32 mpls_label_count = 0;
 
-	*sfa = nla_alloc_flow_actions(min(nla_len(attr), MAX_ACTIONS_BUFSIZE));
+	*sfa = nla_alloc_flow_actions(nla_len(attr));
 	if (IS_ERR(*sfa))
 		return PTR_ERR(*sfa);
 
+	if (eth_p_mpls(key->eth.type))
+		mpls_label_count = hweight_long(key->mpls.num_labels_mask);
+
 	(*sfa)->orig_len = nla_len(attr);
 	err = __ovs_nla_copy_actions(net, attr, key, sfa, key->eth.type,
-				     key->eth.vlan.tci, log);
+				     key->eth.vlan.tci, mpls_label_count, log,
+				     0);
 	if (err)
 		ovs_nla_free_flow_actions(*sfa);
 
@@ -3078,7 +3633,7 @@ static int sample_action_to_attr(const struct nlattr *attr,
 	const struct sample_arg *arg;
 	struct nlattr *actions;
 
-	start = nla_nest_start(skb, OVS_ACTION_ATTR_SAMPLE);
+	start = nla_nest_start_noflag(skb, OVS_ACTION_ATTR_SAMPLE);
 	if (!start)
 		return -EMSGSIZE;
 
@@ -3091,7 +3646,7 @@ static int sample_action_to_attr(const struct nlattr *attr,
 		goto out;
 	}
 
-	ac_start = nla_nest_start(skb, OVS_SAMPLE_ATTR_ACTIONS);
+	ac_start = nla_nest_start_noflag(skb, OVS_SAMPLE_ATTR_ACTIONS);
 	if (!ac_start) {
 		err = -EMSGSIZE;
 		goto out;
@@ -3111,6 +3666,139 @@ out:
 	return err;
 }
 
+static int clone_action_to_attr(const struct nlattr *attr,
+				struct sk_buff *skb)
+{
+	struct nlattr *start;
+	int err = 0, rem = nla_len(attr);
+
+	start = nla_nest_start_noflag(skb, OVS_ACTION_ATTR_CLONE);
+	if (!start)
+		return -EMSGSIZE;
+
+	/* Skipping the OVS_CLONE_ATTR_EXEC that is always the first attribute. */
+	attr = nla_next(nla_data(attr), &rem);
+	err = ovs_nla_put_actions(attr, rem, skb);
+
+	if (err)
+		nla_nest_cancel(skb, start);
+	else
+		nla_nest_end(skb, start);
+
+	return err;
+}
+
+static int check_pkt_len_action_to_attr(const struct nlattr *attr,
+					struct sk_buff *skb)
+{
+	struct nlattr *start, *ac_start = NULL;
+	const struct check_pkt_len_arg *arg;
+	const struct nlattr *a, *cpl_arg;
+	int err = 0, rem = nla_len(attr);
+
+	start = nla_nest_start_noflag(skb, OVS_ACTION_ATTR_CHECK_PKT_LEN);
+	if (!start)
+		return -EMSGSIZE;
+
+	/* The first nested attribute in 'attr' is always
+	 * 'OVS_CHECK_PKT_LEN_ATTR_ARG'.
+	 */
+	cpl_arg = nla_data(attr);
+	arg = nla_data(cpl_arg);
+
+	if (nla_put_u16(skb, OVS_CHECK_PKT_LEN_ATTR_PKT_LEN, arg->pkt_len)) {
+		err = -EMSGSIZE;
+		goto out;
+	}
+
+	/* Second nested attribute in 'attr' is always
+	 * 'OVS_CHECK_PKT_LEN_ATTR_ACTIONS_IF_LESS_EQUAL'.
+	 */
+	a = nla_next(cpl_arg, &rem);
+	ac_start =  nla_nest_start_noflag(skb,
+					  OVS_CHECK_PKT_LEN_ATTR_ACTIONS_IF_LESS_EQUAL);
+	if (!ac_start) {
+		err = -EMSGSIZE;
+		goto out;
+	}
+
+	err = ovs_nla_put_actions(nla_data(a), nla_len(a), skb);
+	if (err) {
+		nla_nest_cancel(skb, ac_start);
+		goto out;
+	} else {
+		nla_nest_end(skb, ac_start);
+	}
+
+	/* Third nested attribute in 'attr' is always
+	 * OVS_CHECK_PKT_LEN_ATTR_ACTIONS_IF_GREATER.
+	 */
+	a = nla_next(a, &rem);
+	ac_start =  nla_nest_start_noflag(skb,
+					  OVS_CHECK_PKT_LEN_ATTR_ACTIONS_IF_GREATER);
+	if (!ac_start) {
+		err = -EMSGSIZE;
+		goto out;
+	}
+
+	err = ovs_nla_put_actions(nla_data(a), nla_len(a), skb);
+	if (err) {
+		nla_nest_cancel(skb, ac_start);
+		goto out;
+	} else {
+		nla_nest_end(skb, ac_start);
+	}
+
+	nla_nest_end(skb, start);
+	return 0;
+
+out:
+	nla_nest_cancel(skb, start);
+	return err;
+}
+
+static int dec_ttl_action_to_attr(const struct nlattr *attr,
+				  struct sk_buff *skb)
+{
+	struct nlattr *start, *action_start;
+	const struct nlattr *a;
+	int err = 0, rem;
+
+	start = nla_nest_start_noflag(skb, OVS_ACTION_ATTR_DEC_TTL);
+	if (!start)
+		return -EMSGSIZE;
+
+	nla_for_each_attr(a, nla_data(attr), nla_len(attr), rem) {
+		switch (nla_type(a)) {
+		case OVS_DEC_TTL_ATTR_ACTION:
+
+			action_start = nla_nest_start_noflag(skb, OVS_DEC_TTL_ATTR_ACTION);
+			if (!action_start) {
+				err = -EMSGSIZE;
+				goto out;
+			}
+
+			err = ovs_nla_put_actions(nla_data(a), nla_len(a), skb);
+			if (err)
+				goto out;
+
+			nla_nest_end(skb, action_start);
+			break;
+
+		default:
+			/* Ignore all other option to be future compatible */
+			break;
+		}
+	}
+
+	nla_nest_end(skb, start);
+	return 0;
+
+out:
+	nla_nest_cancel(skb, start);
+	return err;
+}
+
 static int set_action_to_attr(const struct nlattr *a, struct sk_buff *skb)
 {
 	const struct nlattr *ovs_key = nla_data(a);
@@ -3123,14 +3811,14 @@ static int set_action_to_attr(const struct nlattr *a, struct sk_buff *skb)
 		struct ovs_tunnel_info *ovs_tun = nla_data(ovs_key);
 		struct ip_tunnel_info *tun_info = &ovs_tun->tun_dst->u.tun_info;
 
-		start = nla_nest_start(skb, OVS_ACTION_ATTR_SET);
+		start = nla_nest_start_noflag(skb, OVS_ACTION_ATTR_SET);
 		if (!start)
 			return -EMSGSIZE;
 
 		err =  ip_tun_to_nlattr(skb, &tun_info->key,
 					ip_tunnel_info_opts(tun_info),
 					tun_info->options_len,
-					ip_tunnel_info_af(tun_info));
+					ip_tunnel_info_af(tun_info), tun_info->mode);
 		if (err)
 			return err;
 		nla_nest_end(skb, start);
@@ -3155,7 +3843,7 @@ static int masked_set_action_to_set_action_attr(const struct nlattr *a,
 	/* Revert the conversion we did from a non-masked set action to
 	 * masked set action.
 	 */
-	nla = nla_nest_start(skb, OVS_ACTION_ATTR_SET);
+	nla = nla_nest_start_noflag(skb, OVS_ACTION_ATTR_SET);
 	if (!nla)
 		return -EMSGSIZE;
 
@@ -3195,6 +3883,24 @@ int ovs_nla_put_actions(const struct nlattr *attr, int len, struct sk_buff *skb)
 
 		case OVS_ACTION_ATTR_CT:
 			err = ovs_ct_action_to_attr(nla_data(a), skb);
+			if (err)
+				return err;
+			break;
+
+		case OVS_ACTION_ATTR_CLONE:
+			err = clone_action_to_attr(a, skb);
+			if (err)
+				return err;
+			break;
+
+		case OVS_ACTION_ATTR_CHECK_PKT_LEN:
+			err = check_pkt_len_action_to_attr(a, skb);
+			if (err)
+				return err;
+			break;
+
+		case OVS_ACTION_ATTR_DEC_TTL:
+			err = dec_ttl_action_to_attr(a, skb);
 			if (err)
 				return err;
 			break;

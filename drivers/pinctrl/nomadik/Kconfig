@@ -1,4 +1,5 @@
-if ARCH_U8500
+# SPDX-License-Identifier: GPL-2.0-only
+if (ARCH_U8500 || COMPILE_TEST)
 
 config PINCTRL_ABX500
 	bool "ST-Ericsson ABx500 family Mixed Signal Circuit gpio functions"
@@ -9,24 +10,23 @@ config PINCTRL_ABX500
 
 config PINCTRL_AB8500
 	bool "AB8500 pin controller driver"
-	depends on PINCTRL_ABX500 && ARCH_U8500
+	depends on PINCTRL_ABX500 && (ARCH_U8500 || COMPILE_TEST)
 
 config PINCTRL_AB8505
 	bool "AB8505 pin controller driver"
-	depends on PINCTRL_ABX500 && ARCH_U8500
+	depends on PINCTRL_ABX500 && (ARCH_U8500 || COMPILE_TEST)
 
 endif
 
-if (ARCH_U8500 || ARCH_NOMADIK)
+if (ARCH_U8500 || ARCH_NOMADIK || COMPILE_TEST)
 
 config PINCTRL_NOMADIK
 	bool "Nomadik pin controller driver"
-	depends on ARCH_U8500 || ARCH_NOMADIK
-	depends on OF && GPIOLIB
+	depends on OF
 	select PINMUX
 	select PINCONF
-	select OF_GPIO
-	select GPIOLIB_IRQCHIP
+	select GPIOLIB
+	select GPIO_NOMADIK
 
 config PINCTRL_STN8815
 	bool "STN8815 pin controller driver"

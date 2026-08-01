@@ -17,6 +17,7 @@
 #include <linux/bitmap.h>
 #include <linux/fb.h>
 #include <linux/of.h>
+#include <drm/drm_color_mgmt.h>
 #include <media/v4l2-mediabus.h>
 #include <video/videomode.h>
 
@@ -246,6 +247,9 @@ struct ipu_image {
 	struct v4l2_rect rect;
 	dma_addr_t phys0;
 	dma_addr_t phys1;
+	/* chroma plane offset overrides */
+	u32 u_offset;
+	u32 v_offset;
 };
 
 void ipu_cpmem_zero(struct ipuv3_channel *ch);
@@ -255,9 +259,9 @@ void ipu_cpmem_set_stride(struct ipuv3_channel *ch, int stride);
 void ipu_cpmem_set_high_priority(struct ipuv3_channel *ch);
 void ipu_cpmem_set_buffer(struct ipuv3_channel *ch, int bufnum, dma_addr_t buf);
 void ipu_cpmem_set_uv_offset(struct ipuv3_channel *ch, u32 u_off, u32 v_off);
-void ipu_cpmem_interlaced_scan(struct ipuv3_channel *ch, int stride);
+void ipu_cpmem_interlaced_scan(struct ipuv3_channel *ch, int stride,
+			       u32 pixelformat);
 void ipu_cpmem_set_axi_id(struct ipuv3_channel *ch, u32 id);
-int ipu_cpmem_get_burstsize(struct ipuv3_channel *ch);
 void ipu_cpmem_set_burstsize(struct ipuv3_channel *ch, int burstsize);
 void ipu_cpmem_set_block_mode(struct ipuv3_channel *ch);
 void ipu_cpmem_set_rotation(struct ipuv3_channel *ch,
@@ -265,7 +269,6 @@ void ipu_cpmem_set_rotation(struct ipuv3_channel *ch,
 int ipu_cpmem_set_format_rgb(struct ipuv3_channel *ch,
 			     const struct ipu_rgb *rgb);
 int ipu_cpmem_set_format_passthrough(struct ipuv3_channel *ch, int width);
-void ipu_cpmem_set_yuv_interleaved(struct ipuv3_channel *ch, u32 pixel_format);
 void ipu_cpmem_set_yuv_planar_full(struct ipuv3_channel *ch,
 				   unsigned int uv_stride,
 				   unsigned int u_offset,
@@ -326,6 +329,7 @@ int ipu_dp_enable_channel(struct ipu_dp *dp);
 void ipu_dp_disable_channel(struct ipu_dp *dp, bool sync);
 void ipu_dp_disable(struct ipu_soc *ipu);
 int ipu_dp_setup_channel(struct ipu_dp *dp,
+		enum drm_color_encoding ycbcr_enc, enum drm_color_range range,
 		enum ipu_color_space in, enum ipu_color_space out);
 int ipu_dp_set_window_pos(struct ipu_dp *, u16 x_pos, u16 y_pos);
 int ipu_dp_set_global_alpha(struct ipu_dp *dp, bool enable, u8 alpha,
@@ -345,21 +349,18 @@ int ipu_prg_channel_configure(struct ipuv3_channel *ipu_chan,
 			      unsigned int axi_id,  unsigned int width,
 			      unsigned int height, unsigned int stride,
 			      u32 format, uint64_t modifier, unsigned long *eba);
+bool ipu_prg_channel_configure_pending(struct ipuv3_channel *ipu_chan);
 
 /*
  * IPU CMOS Sensor Interface (csi) functions
  */
 struct ipu_csi;
 int ipu_csi_init_interface(struct ipu_csi *csi,
-			   struct v4l2_mbus_config *mbus_cfg,
-			   struct v4l2_mbus_framefmt *mbus_fmt);
-bool ipu_csi_is_interlaced(struct ipu_csi *csi);
-void ipu_csi_get_window(struct ipu_csi *csi, struct v4l2_rect *w);
+			   const struct v4l2_mbus_config *mbus_cfg,
+			   const struct v4l2_mbus_framefmt *infmt,
+			   const struct v4l2_mbus_framefmt *outfmt);
 void ipu_csi_set_window(struct ipu_csi *csi, struct v4l2_rect *w);
 void ipu_csi_set_downsize(struct ipu_csi *csi, bool horiz, bool vert);
-void ipu_csi_set_test_generator(struct ipu_csi *csi, bool active,
-				u32 r_value, u32 g_value, u32 b_value,
-				u32 pix_clk);
 int ipu_csi_set_mipi_datatype(struct ipu_csi *csi, u32 vc,
 			      struct v4l2_mbus_framefmt *mbus_fmt);
 int ipu_csi_set_skip_smfc(struct ipu_csi *csi, u32 skip,
@@ -381,16 +382,62 @@ enum ipu_ic_task {
 	IC_NUM_TASKS,
 };
 
+/*
+ * The parameters that describe a colorspace according to the
+ * Image Converter:
+ *    - Y'CbCr encoding
+ *    - quantization
+ *    - "colorspace" (RGB or YUV).
+ */
+struct ipu_ic_colorspace {
+	enum v4l2_ycbcr_encoding enc;
+	enum v4l2_quantization quant;
+	enum ipu_color_space cs;
+};
+
+static inline void
+ipu_ic_fill_colorspace(struct ipu_ic_colorspace *ic_cs,
+		       enum v4l2_ycbcr_encoding enc,
+		       enum v4l2_quantization quant,
+		       enum ipu_color_space cs)
+{
+	ic_cs->enc = enc;
+	ic_cs->quant = quant;
+	ic_cs->cs = cs;
+}
+
+struct ipu_ic_csc_params {
+	s16 coeff[3][3];	/* signed 9-bit integer coefficients */
+	s16 offset[3];		/* signed 11+2-bit fixed point offset */
+	u8 scale:2;		/* scale coefficients * 2^(scale-1) */
+	bool sat:1;		/* saturate to (16, 235(Y) / 240(U, V)) */
+};
+
+struct ipu_ic_csc {
+	struct ipu_ic_colorspace in_cs;
+	struct ipu_ic_colorspace out_cs;
+	struct ipu_ic_csc_params params;
+};
+
 struct ipu_ic;
+
+int __ipu_ic_calc_csc(struct ipu_ic_csc *csc);
+int ipu_ic_calc_csc(struct ipu_ic_csc *csc,
+		    enum v4l2_ycbcr_encoding in_enc,
+		    enum v4l2_quantization in_quant,
+		    enum ipu_color_space in_cs,
+		    enum v4l2_ycbcr_encoding out_enc,
+		    enum v4l2_quantization out_quant,
+		    enum ipu_color_space out_cs);
 int ipu_ic_task_init(struct ipu_ic *ic,
+		     const struct ipu_ic_csc *csc,
 		     int in_width, int in_height,
-		     int out_width, int out_height,
-		     enum ipu_color_space in_cs,
-		     enum ipu_color_space out_cs);
-int ipu_ic_task_graphics_init(struct ipu_ic *ic,
-			      enum ipu_color_space in_g_cs,
-			      bool galpha_en, u32 galpha,
-			      bool colorkey_en, u32 colorkey);
+		     int out_width, int out_height);
+int ipu_ic_task_init_rsc(struct ipu_ic *ic,
+			 const struct ipu_ic_csc *csc,
+			 int in_width, int in_height,
+			 int out_width, int out_height,
+			 u32 rsc);
 void ipu_ic_task_enable(struct ipu_ic *ic);
 void ipu_ic_task_disable(struct ipu_ic *ic);
 int ipu_ic_task_idma_init(struct ipu_ic *ic, struct ipuv3_channel *channel,
@@ -409,7 +456,6 @@ struct ipu_vdi;
 void ipu_vdi_set_field_order(struct ipu_vdi *vdi, v4l2_std_id std, u32 field);
 void ipu_vdi_set_motion(struct ipu_vdi *vdi, enum ipu_motion_sel motion_sel);
 void ipu_vdi_setup(struct ipu_vdi *vdi, u32 code, int xres, int yres);
-void ipu_vdi_unsetup(struct ipu_vdi *vdi);
 int ipu_vdi_enable(struct ipu_vdi *vdi);
 int ipu_vdi_disable(struct ipu_vdi *vdi);
 struct ipu_vdi *ipu_vdi_get(struct ipu_soc *ipu);
@@ -428,12 +474,7 @@ int ipu_smfc_set_watermark(struct ipu_smfc *smfc, u32 set_level, u32 clr_level);
 
 enum ipu_color_space ipu_drm_fourcc_to_colorspace(u32 drm_fourcc);
 enum ipu_color_space ipu_pixelformat_to_colorspace(u32 pixelformat);
-enum ipu_color_space ipu_mbus_code_to_colorspace(u32 mbus_code);
-int ipu_stride_to_bytes(u32 pixel_stride, u32 pixelformat);
-bool ipu_pixelformat_is_planar(u32 pixelformat);
 int ipu_degrees_to_rot_mode(enum ipu_rotate_mode *mode, int degrees,
-			    bool hflip, bool vflip);
-int ipu_rot_mode_to_degrees(int *degrees, enum ipu_rotate_mode mode,
 			    bool hflip, bool vflip);
 
 struct ipu_client_platformdata {

@@ -1,21 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (C) 2017 Oracle.  All Rights Reserved.
- *
- * Author: Darrick J. Wong <darrick.wong@oracle.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it would be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write the Free Software Foundation,
- * Inc.,  51 Franklin St, Fifth Floor, Boston, MA  02110-1301, USA.
+ * Copyright (C) 2017-2023 Oracle.  All Rights Reserved.
+ * Author: Darrick J. Wong <djwong@kernel.org>
  */
 #ifndef __XFS_SCRUB_BTREE_H__
 #define __XFS_SCRUB_BTREE_H__
@@ -23,44 +9,62 @@
 /* btree scrub */
 
 /* Check for btree operation errors. */
-bool xfs_scrub_btree_process_error(struct xfs_scrub_context *sc,
+bool xchk_btree_process_error(struct xfs_scrub *sc,
 		struct xfs_btree_cur *cur, int level, int *error);
 
 /* Check for btree xref operation errors. */
-bool xfs_scrub_btree_xref_process_error(struct xfs_scrub_context *sc,
-				struct xfs_btree_cur *cur, int level,
-				int *error);
+bool xchk_btree_xref_process_error(struct xfs_scrub *sc,
+		struct xfs_btree_cur *cur, int level, int *error);
 
 /* Check for btree corruption. */
-void xfs_scrub_btree_set_corrupt(struct xfs_scrub_context *sc,
+void xchk_btree_set_corrupt(struct xfs_scrub *sc,
 		struct xfs_btree_cur *cur, int level);
+void xchk_btree_set_preen(struct xfs_scrub *sc, struct xfs_btree_cur *cur,
+		int level);
 
 /* Check for btree xref discrepancies. */
-void xfs_scrub_btree_xref_set_corrupt(struct xfs_scrub_context *sc,
+void xchk_btree_xref_set_corrupt(struct xfs_scrub *sc,
 		struct xfs_btree_cur *cur, int level);
 
-struct xfs_scrub_btree;
-typedef int (*xfs_scrub_btree_rec_fn)(
-	struct xfs_scrub_btree	*bs,
-	union xfs_btree_rec	*rec);
+struct xchk_btree;
+typedef int (*xchk_btree_rec_fn)(
+	struct xchk_btree		*bs,
+	const union xfs_btree_rec	*rec);
 
-struct xfs_scrub_btree {
+struct xchk_btree_key {
+	union xfs_btree_key		key;
+	bool				valid;
+};
+
+struct xchk_btree {
 	/* caller-provided scrub state */
-	struct xfs_scrub_context	*sc;
+	struct xfs_scrub		*sc;
 	struct xfs_btree_cur		*cur;
-	xfs_scrub_btree_rec_fn		scrub_rec;
-	struct xfs_owner_info		*oinfo;
+	xchk_btree_rec_fn		scrub_rec;
+	const struct xfs_owner_info	*oinfo;
 	void				*private;
 
 	/* internal scrub state */
+	bool				lastrec_valid;
 	union xfs_btree_rec		lastrec;
-	bool				firstrec;
-	union xfs_btree_key		lastkey[XFS_BTREE_MAXLEVELS];
-	bool				firstkey[XFS_BTREE_MAXLEVELS];
 	struct list_head		to_check;
+
+	/* this element must come last! */
+	struct xchk_btree_key		lastkey[];
 };
-int xfs_scrub_btree(struct xfs_scrub_context *sc, struct xfs_btree_cur *cur,
-		    xfs_scrub_btree_rec_fn scrub_fn,
-		    struct xfs_owner_info *oinfo, void *private);
+
+/*
+ * Calculate the size of a xchk_btree structure.  There are nlevels-1 slots for
+ * keys because we track leaf records separately in lastrec.
+ */
+static inline size_t
+xchk_btree_sizeof(unsigned int nlevels)
+{
+	return struct_size_t(struct xchk_btree, lastkey, nlevels - 1);
+}
+
+int xchk_btree(struct xfs_scrub *sc, struct xfs_btree_cur *cur,
+		xchk_btree_rec_fn scrub_fn, const struct xfs_owner_info *oinfo,
+		void *private);
 
 #endif /* __XFS_SCRUB_BTREE_H__ */

@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * max1586.c  --  Voltage and current regulation for the Maxim 1586
  *
  * Copyright (C) 2008 Robert Jarzmik
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 #include <linux/module.h>
 #include <linux/err.h>
@@ -24,7 +11,7 @@
 #include <linux/regulator/driver.h>
 #include <linux/slab.h>
 #include <linux/regulator/max1586.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/regulator/of_regulator.h>
 
 #define MAX1586_V3_MAX_VSEL 31
@@ -194,8 +181,10 @@ static int of_get_max1586_platform_data(struct device *dev,
 	if (matched <= 0)
 		return matched;
 
-	pdata->subdevs = devm_kzalloc(dev, sizeof(struct max1586_subdev_data) *
-						matched, GFP_KERNEL);
+	pdata->subdevs = devm_kcalloc(dev,
+				      matched,
+				      sizeof(struct max1586_subdev_data),
+				      GFP_KERNEL);
 	if (!pdata->subdevs)
 		return -ENOMEM;
 
@@ -212,29 +201,21 @@ static int of_get_max1586_platform_data(struct device *dev,
 	return 0;
 }
 
-static const struct of_device_id max1586_of_match[] = {
+static const struct of_device_id __maybe_unused max1586_of_match[] = {
 	{ .compatible = "maxim,max1586", },
 	{},
 };
 MODULE_DEVICE_TABLE(of, max1586_of_match);
 
-static int max1586_pmic_probe(struct i2c_client *client,
-					const struct i2c_device_id *i2c_id)
+static int max1586_pmic_probe(struct i2c_client *client)
 {
 	struct max1586_platform_data *pdata, pdata_of;
 	struct regulator_config config = { };
 	struct max1586_data *max1586;
 	int i, id, ret;
-	const struct of_device_id *match;
 
 	pdata = dev_get_platdata(&client->dev);
 	if (client->dev.of_node && !pdata) {
-		match = of_match_device(of_match_ptr(max1586_of_match),
-					&client->dev);
-		if (!match) {
-			dev_err(&client->dev, "Error: No device match found\n");
-			return -ENODEV;
-		}
 		ret = of_get_max1586_platform_data(&client->dev, &pdata_of);
 		if (ret < 0)
 			return ret;
@@ -295,7 +276,7 @@ static int max1586_pmic_probe(struct i2c_client *client,
 }
 
 static const struct i2c_device_id max1586_id[] = {
-	{ "max1586", 0 },
+	{ "max1586" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, max1586_id);
@@ -304,6 +285,7 @@ static struct i2c_driver max1586_pmic_driver = {
 	.probe = max1586_pmic_probe,
 	.driver		= {
 		.name	= "max1586",
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		.of_match_table = of_match_ptr(max1586_of_match),
 	},
 	.id_table	= max1586_id,

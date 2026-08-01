@@ -1,20 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Driver for the on-board character LCD found on some ARM reference boards
  * This is basically an Hitachi HD44780 LCD with a custom IP block to drive it
- * http://en.wikipedia.org/wiki/HD44780_Character_LCD
+ * https://en.wikipedia.org/wiki/HD44780_Character_LCD
  * Currently it will just display the text "ARM Linux" and the linux version
  *
- * License terms: GNU General Public License (GPL) version 2
  * Author: Linus Walleij <triad@df.lth.se>
  */
+#include <linux/completion.h>
+#include <linux/container_of.h>
+#include <linux/delay.h>
+#include <linux/err.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
+#include <linux/iopoll.h>
 #include <linux/platform_device.h>
-#include <linux/of.h>
-#include <linux/completion.h>
-#include <linux/delay.h>
-#include <linux/io.h>
-#include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/types.h>
 #include <linux/workqueue.h>
 #include <generated/utsrelease.h>
 
@@ -54,17 +56,15 @@
 #define HD_BUSY_FLAG			0x80U
 
 /**
+ * struct charlcd - Private data structure
  * @dev: a pointer back to containing device
- * @phybase: the offset to the controller in physical memory
- * @physize: the size of the physical page
  * @virtbase: the offset to the controller in virtual memory
  * @irq: reserved interrupt number
  * @complete: completion structure for the last LCD command
+ * @init_work: delayed work structure to initialize the display on boot
  */
 struct charlcd {
 	struct device *dev;
-	u32 phybase;
-	u32 physize;
 	void __iomem *virtbase;
 	int irq;
 	struct completion complete;
@@ -98,14 +98,13 @@ static void charlcd_wait_complete_irq(struct charlcd *lcd)
 
 	if (ret < 0) {
 		dev_err(lcd->dev,
-			"wait_for_completion_interruptible_timeout() "
-			"returned %d waiting for ready\n", ret);
+			"wait_for_completion_interruptible_timeout() returned %d waiting for ready\n",
+			ret);
 		return;
 	}
 
 	if (ret == 0) {
-		dev_err(lcd->dev, "charlcd controller timed out "
-			"waiting for ready\n");
+		dev_err(lcd->dev, "charlcd controller timed out waiting for ready\n");
 		return;
 	}
 }
@@ -114,20 +113,14 @@ static u8 charlcd_4bit_read_char(struct charlcd *lcd)
 {
 	u8 data;
 	u32 val;
-	int i;
 
 	/* If we can, use an IRQ to wait for the data, else poll */
 	if (lcd->irq >= 0)
 		charlcd_wait_complete_irq(lcd);
 	else {
-		i = 0;
-		val = 0;
-		while (!(val & CHAR_RAW_VALID) && i < 10) {
-			udelay(100);
-			val = readl(lcd->virtbase + CHAR_RAW);
-			i++;
-		}
-
+		udelay(100);
+		readl_poll_timeout_atomic(lcd->virtbase + CHAR_RAW, val,
+					  val & CHAR_RAW_VALID, 100, 1000);
 		writel(CHAR_RAW_CLEAR, lcd->virtbase + CHAR_RAW);
 	}
 	msleep(1);
@@ -139,13 +132,9 @@ static u8 charlcd_4bit_read_char(struct charlcd *lcd)
 	 * The second read for the low bits does not trigger an IRQ
 	 * so in this case we have to poll for the 4 lower bits
 	 */
-	i = 0;
-	val = 0;
-	while (!(val & CHAR_RAW_VALID) && i < 10) {
-		udelay(100);
-		val = readl(lcd->virtbase + CHAR_RAW);
-		i++;
-	}
+	udelay(100);
+	readl_poll_timeout_atomic(lcd->virtbase + CHAR_RAW, val,
+				  val & CHAR_RAW_VALID, 100, 1000);
 	writel(CHAR_RAW_CLEAR, lcd->virtbase + CHAR_RAW);
 	msleep(1);
 
@@ -167,7 +156,8 @@ static bool charlcd_4bit_read_bf(struct charlcd *lcd)
 		writel(0x01, lcd->virtbase + CHAR_MASK);
 	}
 	readl(lcd->virtbase + CHAR_COM);
-	return charlcd_4bit_read_char(lcd) & HD_BUSY_FLAG ? true : false;
+
+	return charlcd_4bit_read_char(lcd) & HD_BUSY_FLAG;
 }
 
 static void charlcd_4bit_wait_busy(struct charlcd *lcd)
@@ -264,44 +254,26 @@ static void charlcd_init_work(struct work_struct *work)
 
 static int __init charlcd_probe(struct platform_device *pdev)
 {
+	struct device *dev = &pdev->dev;
 	int ret;
 	struct charlcd *lcd;
-	struct resource *res;
 
-	lcd = kzalloc(sizeof(struct charlcd), GFP_KERNEL);
+	lcd = devm_kzalloc(dev, sizeof(*lcd), GFP_KERNEL);
 	if (!lcd)
 		return -ENOMEM;
 
 	lcd->dev = &pdev->dev;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res) {
-		ret = -ENOENT;
-		goto out_no_resource;
-	}
-	lcd->phybase = res->start;
-	lcd->physize = resource_size(res);
-
-	if (request_mem_region(lcd->phybase, lcd->physize,
-			       DRIVERNAME) == NULL) {
-		ret = -EBUSY;
-		goto out_no_memregion;
-	}
-
-	lcd->virtbase = ioremap(lcd->phybase, lcd->physize);
-	if (!lcd->virtbase) {
-		ret = -ENOMEM;
-		goto out_no_memregion;
-	}
+	lcd->virtbase = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(lcd->virtbase))
+		return PTR_ERR(lcd->virtbase);
 
 	lcd->irq = platform_get_irq(pdev, 0);
 	/* If no IRQ is supplied, we'll survive without it */
 	if (lcd->irq >= 0) {
-		if (request_irq(lcd->irq, charlcd_interrupt, 0,
-				DRIVERNAME, lcd)) {
-			ret = -EIO;
-			goto out_no_irq;
-		}
+		ret = devm_request_irq(dev, lcd->irq, charlcd_interrupt, 0, DRIVERNAME, lcd);
+		if (ret)
+			return ret;
 	}
 
 	platform_set_drvdata(pdev, lcd);
@@ -313,24 +285,12 @@ static int __init charlcd_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&lcd->init_work, charlcd_init_work);
 	schedule_delayed_work(&lcd->init_work, 0);
 
-	dev_info(&pdev->dev, "initialized ARM character LCD at %08x\n",
-		lcd->phybase);
-
 	return 0;
-
-out_no_irq:
-	iounmap(lcd->virtbase);
-out_no_memregion:
-	release_mem_region(lcd->phybase, SZ_4K);
-out_no_resource:
-	kfree(lcd);
-	return ret;
 }
 
 static int charlcd_suspend(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct charlcd *lcd = platform_get_drvdata(pdev);
+	struct charlcd *lcd = dev_get_drvdata(dev);
 
 	/* Power the display off */
 	charlcd_4bit_command(lcd, HD_DISPCTRL);
@@ -339,8 +299,7 @@ static int charlcd_suspend(struct device *dev)
 
 static int charlcd_resume(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct charlcd *lcd = platform_get_drvdata(pdev);
+	struct charlcd *lcd = dev_get_drvdata(dev);
 
 	/* Turn the display back on */
 	charlcd_4bit_command(lcd, HD_DISPCTRL | HD_DISPCTRL_ON);
@@ -362,7 +321,7 @@ static struct platform_driver charlcd_driver = {
 		.name = DRIVERNAME,
 		.pm = &charlcd_pm_ops,
 		.suppress_bind_attrs = true,
-		.of_match_table = of_match_ptr(charlcd_match),
+		.of_match_table = charlcd_match,
 	},
 };
 builtin_platform_driver_probe(charlcd_driver, charlcd_probe);

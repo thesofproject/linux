@@ -7,7 +7,7 @@
  */
 
 #include <linux/init.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/smp.h>
 #include <asm/bootinfo.h>
 #include <asm/bmips.h>
@@ -21,6 +21,9 @@
 void __init prom_init(void)
 {
 	u32 reg, mask;
+
+	/* Cache CBR addr before CPU/DMA setup */
+	bmips_cbr_addr = BMIPS_GET_CBR();
 
 	bcm63xx_cpu_init();
 
@@ -84,7 +87,7 @@ void __init prom_init(void)
 		 * Here we will start up CPU1 in the background and ask it to
 		 * reconfigure itself then go back to sleep.
 		 */
-		memcpy((void *)0xa0000200, &bmips_smp_movevec, 0x20);
+		memcpy((void *)0xa0000200, bmips_smp_movevec, 0x20);
 		__sync();
 		set_c0_cause(C_SW0);
 		cpumask_set_cpu(1, &bmips_booted_mask);
@@ -93,8 +96,4 @@ void __init prom_init(void)
 		 * FIXME: we really should have some sort of hazard barrier here
 		 */
 	}
-}
-
-void __init prom_free_prom_memory(void)
-{
 }

@@ -1,39 +1,32 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Based on arch/arm/include/asm/mmu_context.h
  *
  * Copyright (C) 1996 Russell King.
  * Copyright (C) 2012 ARM Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #ifndef __ASM_MMU_CONTEXT_H
 #define __ASM_MMU_CONTEXT_H
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #include <linux/compiler.h>
 #include <linux/sched.h>
 #include <linux/sched/hotplug.h>
 #include <linux/mm_types.h>
+#include <linux/pgtable.h>
+#include <linux/pkeys.h>
 
 #include <asm/cacheflush.h>
 #include <asm/cpufeature.h>
+#include <asm/daifflags.h>
+#include <asm/gcs.h>
 #include <asm/proc-fns.h>
-#include <asm-generic/mm_hooks.h>
 #include <asm/cputype.h>
-#include <asm/pgtable.h>
 #include <asm/sysreg.h>
 #include <asm/tlbflush.h>
+
+extern bool rodata_full;
 
 static inline void contextidr_thread_switch(struct task_struct *next)
 {
@@ -45,64 +38,44 @@ static inline void contextidr_thread_switch(struct task_struct *next)
 }
 
 /*
- * Set TTBR0 to empty_zero_page. No translations will be possible via TTBR0.
+ * Set TTBR0 to reserved_pg_dir. No translations will be possible via TTBR0.
  */
-static inline void cpu_set_reserved_ttbr0(void)
+static inline void cpu_set_reserved_ttbr0_nosync(void)
 {
-	unsigned long ttbr = phys_to_ttbr(__pa_symbol(empty_zero_page));
+	unsigned long ttbr = phys_to_ttbr(__pa_symbol(reserved_pg_dir));
 
 	write_sysreg(ttbr, ttbr0_el1);
+}
+
+static inline void cpu_set_reserved_ttbr0(void)
+{
+	cpu_set_reserved_ttbr0_nosync();
 	isb();
 }
+
+void cpu_do_switch_mm(phys_addr_t pgd_phys, struct mm_struct *mm);
 
 static inline void cpu_switch_mm(pgd_t *pgd, struct mm_struct *mm)
 {
 	BUG_ON(pgd == swapper_pg_dir);
-	cpu_set_reserved_ttbr0();
 	cpu_do_switch_mm(virt_to_phys(pgd),mm);
 }
 
 /*
- * TCR.T0SZ value to use when the ID map is active. Usually equals
- * TCR_T0SZ(VA_BITS), unless system RAM is positioned very high in
- * physical memory, in which case it will be smaller.
- */
-extern u64 idmap_t0sz;
-extern u64 idmap_ptrs_per_pgd;
-
-static inline bool __cpu_uses_extended_idmap(void)
-{
-	return unlikely(idmap_t0sz != TCR_T0SZ(VA_BITS));
-}
-
-/*
- * True if the extended ID map requires an extra level of translation table
- * to be configured.
- */
-static inline bool __cpu_uses_extended_idmap_level(void)
-{
-	return ARM64_HW_PGTABLE_LEVELS(64 - idmap_t0sz) > CONFIG_PGTABLE_LEVELS;
-}
-
-/*
- * Set TCR.T0SZ to its default value (based on VA_BITS)
+ * Ensure TCR.T0SZ is set to the provided value.
  */
 static inline void __cpu_set_tcr_t0sz(unsigned long t0sz)
 {
-	unsigned long tcr;
+	unsigned long tcr = read_sysreg(tcr_el1);
 
-	if (!__cpu_uses_extended_idmap())
+	if ((tcr & TCR_EL1_T0SZ_MASK) == t0sz)
 		return;
 
-	tcr = read_sysreg(tcr_el1);
-	tcr &= ~TCR_T0SZ_MASK;
-	tcr |= t0sz << TCR_T0SZ_OFFSET;
+	tcr &= ~TCR_EL1_T0SZ_MASK;
+	tcr |= t0sz;
 	write_sysreg(tcr, tcr_el1);
 	isb();
 }
-
-#define cpu_set_default_tcr_t0sz()	__cpu_set_tcr_t0sz(TCR_T0SZ(VA_BITS))
-#define cpu_set_idmap_tcr_t0sz()	__cpu_set_tcr_t0sz(idmap_t0sz)
 
 /*
  * Remove the idmap from TTBR0_EL1 and install the pgd of the active mm.
@@ -122,7 +95,7 @@ static inline void cpu_uninstall_idmap(void)
 
 	cpu_set_reserved_ttbr0();
 	local_flush_tlb_all();
-	cpu_set_default_tcr_t0sz();
+	__cpu_set_tcr_t0sz(TCR_T0SZ(vabits_actual));
 
 	if (mm != &init_mm && !system_uses_ttbr0_pan())
 		cpu_switch_mm(mm->pgd, mm);
@@ -132,28 +105,50 @@ static inline void cpu_install_idmap(void)
 {
 	cpu_set_reserved_ttbr0();
 	local_flush_tlb_all();
-	cpu_set_idmap_tcr_t0sz();
+	__cpu_set_tcr_t0sz(TCR_T0SZ(IDMAP_VA_BITS));
 
 	cpu_switch_mm(lm_alias(idmap_pg_dir), &init_mm);
 }
 
 /*
- * Atomically replaces the active TTBR1_EL1 PGD with a new VA-compatible PGD,
- * avoiding the possibility of conflicting TLB entries being allocated.
+ * Load our new page tables. A strict BBM approach requires that we ensure that
+ * TLBs are free of any entries that may overlap with the global mappings we are
+ * about to install.
+ *
+ * For a real hibernate/resume/kexec cycle TTBR0 currently points to a zero
+ * page, but TLBs may contain stale ASID-tagged entries (e.g. for EFI runtime
+ * services), while for a userspace-driven test_resume cycle it points to
+ * userspace page tables (and we must point it at a zero page ourselves).
+ *
+ * We change T0SZ as part of installing the idmap. This is undone by
+ * cpu_uninstall_idmap() in __cpu_suspend_exit().
  */
+static inline void cpu_install_ttbr0(phys_addr_t ttbr0, unsigned long t0sz)
+{
+	cpu_set_reserved_ttbr0();
+	local_flush_tlb_all();
+	__cpu_set_tcr_t0sz(t0sz);
+
+	/* avoid cpu_switch_mm() and its SW-PAN and CNP interactions */
+	write_sysreg(ttbr0, ttbr0_el1);
+	isb();
+}
+
+void __cpu_replace_ttbr1(pgd_t *pgdp, bool cnp);
+
+static inline void cpu_enable_swapper_cnp(void)
+{
+	__cpu_replace_ttbr1(lm_alias(swapper_pg_dir), true);
+}
+
 static inline void cpu_replace_ttbr1(pgd_t *pgdp)
 {
-	typedef void (ttbr_replace_func)(phys_addr_t);
-	extern ttbr_replace_func idmap_cpu_replace_ttbr1;
-	ttbr_replace_func *replace_phys;
-
-	phys_addr_t pgd_phys = virt_to_phys(pgdp);
-
-	replace_phys = (void *)__pa_symbol(idmap_cpu_replace_ttbr1);
-
-	cpu_install_idmap();
-	replace_phys(pgd_phys);
-	cpu_uninstall_idmap();
+	/*
+	 * Only for early TTBR1 replacement before cpucaps are finalized and
+	 * before we've decided whether to use CNP.
+	 */
+	WARN_ON(system_capabilities_finalized());
+	__cpu_replace_ttbr1(pgdp, false);
 }
 
 /*
@@ -165,10 +160,43 @@ static inline void cpu_replace_ttbr1(pgd_t *pgdp)
  * Setting a reserved TTBR0 or EPD0 would work, but it all gets ugly when you
  * take CPU migration into account.
  */
-#define destroy_context(mm)		do { } while(0)
-void check_and_switch_context(struct mm_struct *mm, unsigned int cpu);
+void check_and_switch_context(struct mm_struct *mm);
 
-#define init_new_context(tsk,mm)	({ atomic64_set(&(mm)->context.id, 0); 0; })
+#define init_new_context(tsk, mm) init_new_context(tsk, mm)
+static inline int
+init_new_context(struct task_struct *tsk, struct mm_struct *mm)
+{
+	atomic64_set(&mm->context.id, 0);
+	refcount_set(&mm->context.pinned, 0);
+
+	/* pkey 0 is the default, so always reserve it. */
+	mm->context.pkey_allocation_map = BIT(0);
+
+	return 0;
+}
+
+static inline void arch_dup_pkeys(struct mm_struct *oldmm,
+				  struct mm_struct *mm)
+{
+	/* Duplicate the oldmm pkey state in mm: */
+	mm->context.pkey_allocation_map = oldmm->context.pkey_allocation_map;
+}
+
+static inline int arch_dup_mmap(struct mm_struct *oldmm, struct mm_struct *mm)
+{
+	arch_dup_pkeys(oldmm, mm);
+
+	return 0;
+}
+
+static inline void arch_exit_mmap(struct mm_struct *mm)
+{
+}
+
+static inline void arch_unmap(struct mm_struct *mm,
+			unsigned long start, unsigned long end)
+{
+}
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
 static inline void update_saved_ttbr0(struct task_struct *tsk,
@@ -180,9 +208,10 @@ static inline void update_saved_ttbr0(struct task_struct *tsk,
 		return;
 
 	if (mm == &init_mm)
-		ttbr = __pa_symbol(empty_zero_page);
+		ttbr = phys_to_ttbr(__pa_symbol(reserved_pg_dir));
 	else
-		ttbr = virt_to_phys(mm->pgd) | ASID(mm) << 48;
+		ttbr = phys_to_ttbr(virt_to_phys(mm->pgd)) |
+		       FIELD_PREP(TTBRx_EL1_ASID_MASK, ASID(mm));
 
 	WRITE_ONCE(task_thread_info(tsk)->ttbr0, ttbr);
 }
@@ -193,6 +222,7 @@ static inline void update_saved_ttbr0(struct task_struct *tsk,
 }
 #endif
 
+#define enter_lazy_tlb enter_lazy_tlb
 static inline void
 enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 {
@@ -205,8 +235,6 @@ enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 
 static inline void __switch_mm(struct mm_struct *next)
 {
-	unsigned int cpu = smp_processor_id();
-
 	/*
 	 * init_mm.pgd does not contain any user mappings and it is always
 	 * active for kernel addresses in TTBR1. Just set the reserved TTBR0.
@@ -216,7 +244,7 @@ static inline void __switch_mm(struct mm_struct *next)
 		return;
 	}
 
-	check_and_switch_context(next, cpu);
+	check_and_switch_context(next);
 }
 
 static inline void
@@ -235,12 +263,66 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	update_saved_ttbr0(tsk, next);
 }
 
-#define deactivate_mm(tsk,mm)	do { } while (0)
-#define activate_mm(prev,next)	switch_mm(prev, next, current)
+static inline const struct cpumask *
+__task_cpu_possible_mask(struct task_struct *p, const struct cpumask *mask)
+{
+	if (!static_branch_unlikely(&arm64_mismatched_32bit_el0))
+		return mask;
+
+	if (!is_compat_thread(task_thread_info(p)))
+		return mask;
+
+	return system_32bit_el0_cpumask();
+}
+
+static inline const struct cpumask *
+task_cpu_possible_mask(struct task_struct *p)
+{
+	return __task_cpu_possible_mask(p, cpu_possible_mask);
+}
+#define task_cpu_possible_mask	task_cpu_possible_mask
+
+const struct cpumask *task_cpu_fallback_mask(struct task_struct *p);
 
 void verify_cpu_asid_bits(void);
 void post_ttbr_update_workaround(void);
 
-#endif /* !__ASSEMBLY__ */
+unsigned long arm64_mm_context_get(struct mm_struct *mm);
+void arm64_mm_context_put(struct mm_struct *mm);
+
+#define mm_untag_mask mm_untag_mask
+static inline unsigned long mm_untag_mask(struct mm_struct *mm)
+{
+	return -1UL >> 8;
+}
+
+/*
+ * Only enforce protection keys on the current process, because there is no
+ * user context to access POR_EL0 for another address space.
+ */
+static inline bool arch_vma_access_permitted(struct vm_area_struct *vma,
+		bool write, bool execute, bool foreign)
+{
+	if (!system_supports_poe())
+		return true;
+
+	/* allow access if the VMA is not one from this process */
+	if (foreign || vma_is_foreign(vma))
+		return true;
+
+	return por_el0_allows_pkey(vma_pkey(vma), write, execute);
+}
+
+#define deactivate_mm deactivate_mm
+static inline void deactivate_mm(struct task_struct *tsk,
+			struct mm_struct *mm)
+{
+	gcs_free(tsk);
+}
+
+
+#include <asm-generic/mmu_context.h>
+
+#endif /* !__ASSEMBLER__ */
 
 #endif /* !__ASM_MMU_CONTEXT_H */

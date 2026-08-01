@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MTD map driver for BIOS Flash on Intel SCB2 boards
  * Copyright (C) 2002 Sun Microsystems, Inc.
@@ -151,7 +152,7 @@ static int scb2_flash_probe(struct pci_dev *dev,
 	}
 
 	/* remap the IO window (w/o caching) */
-	scb2_ioaddr = ioremap_nocache(SCB2_ADDR, SCB2_WINDOW);
+	scb2_ioaddr = ioremap(SCB2_ADDR, SCB2_WINDOW);
 	if (!scb2_ioaddr) {
 		printk(KERN_ERR MODNAME ": Failed to ioremap window!\n");
 		if (!region_fail)
@@ -214,13 +215,8 @@ static void scb2_flash_remove(struct pci_dev *dev)
 }
 
 static struct pci_device_id scb2_flash_pci_ids[] = {
-	{
-	  .vendor = PCI_VENDOR_ID_SERVERWORKS,
-	  .device = PCI_DEVICE_ID_SERVERWORKS_CSB5,
-	  .subvendor = PCI_ANY_ID,
-	  .subdevice = PCI_ANY_ID
-	},
-	{ 0, }
+	{ PCI_DEVICE(PCI_VENDOR_ID_SERVERWORKS, PCI_DEVICE_ID_SERVERWORKS_CSB5) },
+	{ }
 };
 
 static struct pci_driver scb2_flash_driver = {

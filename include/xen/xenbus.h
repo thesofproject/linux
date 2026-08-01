@@ -42,14 +42,15 @@
 #include <linux/completion.h>
 #include <linux/init.h>
 #include <linux/slab.h>
+#include <linux/semaphore.h>
 #include <xen/interface/xen.h>
 #include <xen/interface/grant_table.h>
 #include <xen/interface/io/xenbus.h>
 #include <xen/interface/io/xs_wire.h>
+#include <xen/interface/event_channel.h>
 
 #define XENBUS_MAX_RING_GRANT_ORDER 4
 #define XENBUS_MAX_RING_GRANTS      (1U << XENBUS_MAX_RING_GRANT_ORDER)
-#define INVALID_GRANT_HANDLE       (~0U)
 
 /* Register callback to watch this node. */
 struct xenbus_watch
@@ -58,6 +59,15 @@ struct xenbus_watch
 
 	/* Path being watched. */
 	const char *node;
+
+	unsigned int nr_pending;
+
+	/*
+	 * Called just before enqueing new event while a spinlock is held.
+	 * The event will be discarded if this callback returns false.
+	 */
+	bool (*will_handle)(struct xenbus_watch *,
+			      const char *path, const char *token);
 
 	/* Callback (executed in a process context with no locks held). */
 	void (*callback)(struct xenbus_watch *,
@@ -70,18 +80,24 @@ struct xenbus_device {
 	const char *devicetype;
 	const char *nodename;
 	const char *otherend;
+	bool vanished;
 	int otherend_id;
 	struct xenbus_watch otherend_watch;
 	struct device dev;
 	enum xenbus_state state;
 	struct completion down;
 	struct work_struct work;
+	struct semaphore reclaim_sem;
+
+	/* Event channel based statistics and settings. */
+	atomic_t event_channels;
+	atomic_t events;
+	atomic_t spurious_events;
+	atomic_t jiffies_eoi_delayed;
+	unsigned int spurious_threshold;
 };
 
-static inline struct xenbus_device *to_xenbus_device(struct device *dev)
-{
-	return container_of(dev, struct xenbus_device, dev);
-}
+#define to_xenbus_device(__dev)	container_of_const(__dev, struct xenbus_device, dev)
 
 struct xenbus_device_id
 {
@@ -93,23 +109,23 @@ struct xenbus_device_id
 struct xenbus_driver {
 	const char *name;       /* defaults to ids[0].devicetype */
 	const struct xenbus_device_id *ids;
+	bool allow_rebind; /* avoid setting xenstore closed during remove */
+	bool not_essential;     /* is not mandatory for boot progress */
 	int (*probe)(struct xenbus_device *dev,
 		     const struct xenbus_device_id *id);
 	void (*otherend_changed)(struct xenbus_device *dev,
 				 enum xenbus_state backend_state);
-	int (*remove)(struct xenbus_device *dev);
+	void (*remove)(struct xenbus_device *dev);
 	int (*suspend)(struct xenbus_device *dev);
 	int (*resume)(struct xenbus_device *dev);
-	int (*uevent)(struct xenbus_device *, struct kobj_uevent_env *);
+	int (*uevent)(const struct xenbus_device *, struct kobj_uevent_env *);
 	struct device_driver driver;
 	int (*read_otherend_details)(struct xenbus_device *dev);
 	int (*is_ready)(struct xenbus_device *dev);
+	void (*reclaim_memory)(struct xenbus_device *dev);
 };
 
-static inline struct xenbus_driver *to_xenbus_driver(struct device_driver *drv)
-{
-	return container_of(drv, struct xenbus_driver, driver);
-}
+#define to_xenbus_driver(__drv)	container_of_const(__drv, struct xenbus_driver, driver)
 
 int __must_check __xenbus_register_frontend(struct xenbus_driver *drv,
 					    struct module *owner,
@@ -139,13 +155,11 @@ void *xenbus_read(struct xenbus_transaction t,
 		  const char *dir, const char *node, unsigned int *len);
 int xenbus_write(struct xenbus_transaction t,
 		 const char *dir, const char *node, const char *string);
-int xenbus_mkdir(struct xenbus_transaction t,
-		 const char *dir, const char *node);
 int xenbus_exists(struct xenbus_transaction t,
 		  const char *dir, const char *node);
 int xenbus_rm(struct xenbus_transaction t, const char *dir, const char *node);
 int xenbus_transaction_start(struct xenbus_transaction *t);
-int xenbus_transaction_end(struct xenbus_transaction t, int abort);
+int xenbus_transaction_end(struct xenbus_transaction t, bool abort);
 
 /* Single read and scanf: returns -errno or num scanned if > 0. */
 __scanf(4, 5)
@@ -165,7 +179,7 @@ int xenbus_printf(struct xenbus_transaction t,
  * sprintf-style type string, and pointer. Returns 0 or errno.*/
 int xenbus_gather(struct xenbus_transaction t, const char *dir, ...);
 
-/* notifer routines for when the xenstore comes up */
+/* notifier routines for when the xenstore comes up */
 extern int xenstored_ready;
 int register_xenstore_notifier(struct notifier_block *nb);
 void unregister_xenstore_notifier(struct notifier_block *nb);
@@ -177,8 +191,6 @@ void xs_resume(void);
 void xs_suspend_cancel(void);
 
 struct work_struct;
-
-void xenbus_probe(struct work_struct *);
 
 #define XENBUS_IS_ERR_READ(str) ({			\
 	if (!IS_ERR(str) && strlen(str) == 0) {		\
@@ -192,33 +204,33 @@ void xenbus_probe(struct work_struct *);
 
 int xenbus_watch_path(struct xenbus_device *dev, const char *path,
 		      struct xenbus_watch *watch,
+		      bool (*will_handle)(struct xenbus_watch *,
+					  const char *, const char *),
 		      void (*callback)(struct xenbus_watch *,
 				       const char *, const char *));
-__printf(4, 5)
+__printf(5, 6)
 int xenbus_watch_pathfmt(struct xenbus_device *dev, struct xenbus_watch *watch,
+			 bool (*will_handle)(struct xenbus_watch *,
+					     const char *, const char *),
 			 void (*callback)(struct xenbus_watch *,
 					  const char *, const char *),
 			 const char *pathfmt, ...);
 
 int xenbus_switch_state(struct xenbus_device *dev, enum xenbus_state new_state);
-int xenbus_grant_ring(struct xenbus_device *dev, void *vaddr,
+int xenbus_setup_ring(struct xenbus_device *dev, gfp_t gfp, void **vaddr,
 		      unsigned int nr_pages, grant_ref_t *grefs);
+void xenbus_teardown_ring(void **vaddr, unsigned int nr_pages,
+			  grant_ref_t *grefs);
 int xenbus_map_ring_valloc(struct xenbus_device *dev, grant_ref_t *gnt_refs,
 			   unsigned int nr_grefs, void **vaddr);
-int xenbus_map_ring(struct xenbus_device *dev,
-		    grant_ref_t *gnt_refs, unsigned int nr_grefs,
-		    grant_handle_t *handles, unsigned long *vaddrs,
-		    bool *leaked);
 
 int xenbus_unmap_ring_vfree(struct xenbus_device *dev, void *vaddr);
-int xenbus_unmap_ring(struct xenbus_device *dev,
-		      grant_handle_t *handles, unsigned int nr_handles,
-		      unsigned long *vaddrs);
 
-int xenbus_alloc_evtchn(struct xenbus_device *dev, int *port);
-int xenbus_free_evtchn(struct xenbus_device *dev, int port);
+int xenbus_alloc_evtchn(struct xenbus_device *dev, evtchn_port_t *port);
+int xenbus_free_evtchn(struct xenbus_device *dev, evtchn_port_t port);
 
-enum xenbus_state xenbus_read_driver_state(const char *path);
+enum xenbus_state xenbus_read_driver_state(const struct xenbus_device *dev,
+					   const char *path);
 
 __printf(3, 4)
 void xenbus_dev_error(struct xenbus_device *dev, int err, const char *fmt, ...);

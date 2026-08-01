@@ -1,20 +1,17 @@
-/*
+/* SPDX-License-Identifier: GPL-2.0
+ *
  * SMP support for R-Mobile / SH-Mobile
  *
  * Copyright (C) 2010  Magnus Damm
  * Copyright (C) 2010  Takashi Yoshii
  *
  * Based on vexpress, Copyright (c) 2003 ARM Limited, All Rights Reserved
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #include <linux/init.h>
 #include <linux/linkage.h>
 #include <linux/threads.h>
 #include <asm/assembler.h>
-#include <asm/memory.h>
+#include <asm/page.h>
 
 #define SCTLR_MMU	0x01
 #define BOOTROM_ADDRESS	0xE6340000
@@ -139,6 +136,7 @@ ENDPROC(shmobile_smp_sleep)
 	.long	shmobile_smp_arg - 1b
 
 	.bss
+	.align	2
 	.globl	shmobile_smp_mpidr
 shmobile_smp_mpidr:
 	.space	NR_CPUS * 4

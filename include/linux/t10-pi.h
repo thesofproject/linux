@@ -3,7 +3,8 @@
 #define _LINUX_T10_PI_H
 
 #include <linux/types.h>
-#include <linux/blkdev.h>
+#include <linux/blk-mq.h>
+#include <linux/wordpart.h>
 
 /*
  * A T10 PI-capable target device can be formatted with different
@@ -25,6 +26,16 @@ enum t10_dif_type {
 	T10_PI_TYPE3_PROTECTION = 0x3,
 };
 
+static inline u64 full_pi_ref_tag(const struct request *rq)
+{
+	unsigned int shift = ilog2(queue_logical_block_size(rq->q));
+
+	if (IS_ENABLED(CONFIG_BLK_DEV_INTEGRITY) &&
+	    rq->q->limits.integrity.interval_exp)
+		shift = rq->q->limits.integrity.interval_exp;
+	return blk_rq_pos(rq) >> (shift - SECTOR_SHIFT);
+}
+
 /*
  * T10 Protection Information tuple.
  */
@@ -37,9 +48,29 @@ struct t10_pi_tuple {
 #define T10_PI_APP_ESCAPE cpu_to_be16(0xffff)
 #define T10_PI_REF_ESCAPE cpu_to_be32(0xffffffff)
 
-extern const struct blk_integrity_profile t10_pi_type1_crc;
-extern const struct blk_integrity_profile t10_pi_type1_ip;
-extern const struct blk_integrity_profile t10_pi_type3_crc;
-extern const struct blk_integrity_profile t10_pi_type3_ip;
+static inline u32 t10_pi_ref_tag(struct request *rq)
+{
+	return lower_32_bits(full_pi_ref_tag(rq));
+}
+
+struct crc64_pi_tuple {
+	__be64 guard_tag;
+	__be16 app_tag;
+	__u8   ref_tag[6];
+};
+
+/**
+ * lower_48_bits() - return bits 0-47 of a number
+ * @n: the number we're accessing
+ */
+static inline u64 lower_48_bits(u64 n)
+{
+	return n & ((1ull << 48) - 1);
+}
+
+static inline u64 ext_pi_ref_tag(struct request *rq)
+{
+	return lower_48_bits(full_pi_ref_tag(rq));
+}
 
 #endif

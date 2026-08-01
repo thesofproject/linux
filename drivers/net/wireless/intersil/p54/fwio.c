@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Firmware I/O code for mac80211 Prism54 drivers
  *
@@ -10,10 +11,6 @@
  *   Copyright 2004-2006 Jean-Baptiste Note <jbnote@gmail.com>, et al.
  * - stlc45xx driver
  *   Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies).
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/slab.h>
@@ -128,14 +125,14 @@ int p54_parse_firmware(struct ieee80211_hw *dev, const struct firmware *fw)
 			   "FW rev %s - Softmac protocol %x.%x\n",
 			   fw_version, priv->fw_var >> 8, priv->fw_var & 0xff);
 		snprintf(dev->wiphy->fw_version, sizeof(dev->wiphy->fw_version),
-				"%s - %x.%x", fw_version,
+				"%.19s - %x.%x", fw_version,
 				priv->fw_var >> 8, priv->fw_var & 0xff);
 	}
 
 	if (priv->fw_var < 0x500)
 		wiphy_info(priv->hw->wiphy,
 			   "you are using an obsolete firmware. "
-			   "visit http://wireless.kernel.org/en/users/Drivers/p54 "
+			   "visit http://wireless.wiki.kernel.org/en/users/Drivers/p54 "
 			   "and grab one for \"kernel >= 2.6.28\"!\n");
 
 	if (priv->fw_var >= 0x300) {
@@ -176,10 +173,8 @@ int p54_parse_firmware(struct ieee80211_hw *dev, const struct firmware *fw)
 		 * keeping a extra list for uploaded keys.
 		 */
 
-		priv->used_rxkeys = kcalloc(BITS_TO_LONGS(priv->rx_keycache_size),
-					    sizeof(long),
-					    GFP_KERNEL);
-
+		priv->used_rxkeys = bitmap_zalloc(priv->rx_keycache_size,
+						  GFP_KERNEL);
 		if (!priv->used_rxkeys)
 			return -ENOMEM;
 	}
@@ -221,7 +216,7 @@ int p54_download_eeprom(struct p54_common *priv, void *buf,
 	struct sk_buff *skb;
 	size_t eeprom_hdr_size;
 	int ret = 0;
-	long timeout;
+	long time_left;
 
 	if (priv->fw_var >= 0x509)
 		eeprom_hdr_size = sizeof(*eeprom_hdr);
@@ -236,6 +231,7 @@ int p54_download_eeprom(struct p54_common *priv, void *buf,
 
 	mutex_lock(&priv->eeprom_mutex);
 	priv->eeprom = buf;
+	priv->eeprom_slice_size = len;
 	eeprom_hdr = skb_put(skb, eeprom_hdr_size + len);
 
 	if (priv->fw_var < 0x509) {
@@ -250,14 +246,15 @@ int p54_download_eeprom(struct p54_common *priv, void *buf,
 
 	p54_tx(priv, skb);
 
-	timeout = wait_for_completion_interruptible_timeout(
+	time_left = wait_for_completion_interruptible_timeout(
 			&priv->eeprom_comp, HZ);
-	if (timeout <= 0) {
+	if (time_left <= 0) {
 		wiphy_err(priv->hw->wiphy,
 			"device does not respond or signal received!\n");
 		ret = -EBUSY;
 	}
 	priv->eeprom = NULL;
+	priv->eeprom_slice_size = 0;
 	mutex_unlock(&priv->eeprom_mutex);
 	return ret;
 }

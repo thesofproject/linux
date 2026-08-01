@@ -41,6 +41,7 @@ enum as_signal_type {
 	AS_SIGNAL_TYPE_LVDS,
 	AS_SIGNAL_TYPE_DISPLAY_PORT,
 	AS_SIGNAL_TYPE_GPU_PLL,
+	AS_SIGNAL_TYPE_XGMI,
 	AS_SIGNAL_TYPE_UNKNOWN
 };
 
@@ -92,12 +93,21 @@ enum bp_external_encoder_control_action {
 	EXTERNAL_ENCODER_CONTROL_SETUP = 0xf,
 	EXTERNAL_ENCODER_CONTROL_UNBLANK = 0x10,
 	EXTERNAL_ENCODER_CONTROL_BLANK = 0x11,
+	EXTERNAL_ENCODER_CONTROL_DAC_LOAD_DETECT = 0x12,
+	EXTERNAL_ENCODER_CONTROL_DDC_SETUP = 0x14,
 };
 
 enum bp_pipe_control_action {
 	ASIC_PIPE_DISABLE = 0,
 	ASIC_PIPE_ENABLE,
 	ASIC_PIPE_INIT
+};
+
+enum bp_lvtma_control_action {
+	LVTMA_CONTROL_LCD_BLOFF = 2,
+	LVTMA_CONTROL_LCD_BLON = 3,
+	LVTMA_CONTROL_POWER_ON = 12,
+	LVTMA_CONTROL_POWER_OFF = 13
 };
 
 struct bp_encoder_control {
@@ -127,12 +137,8 @@ struct bp_external_encoder_control {
 struct bp_crtc_source_select {
 	enum engine_id engine_id;
 	enum controller_id controller_id;
-	/* from GPU Tx aka asic_signal */
-	enum signal_type signal;
-	/* sink_signal may differ from asicSignal if Translator encoder */
 	enum signal_type sink_signal;
-	enum display_output_bit_depth display_output_bit_depth;
-	bool enable_dp_audio;
+	enum dc_color_depth color_depth;
 };
 
 struct bp_transmitter_control {
@@ -144,6 +150,8 @@ struct bp_transmitter_control {
 	enum signal_type signal;
 	enum dc_color_depth color_depth; /* not used for DCE6.0 */
 	enum hpd_source_id hpd_sel; /* ucHPDSel, used for DCe6.0 */
+	enum tx_ffe_id txffe_sel; /* used for DCN3 */
+	enum engine_id hpo_engine_id; /* used for DCN3 */
 	struct graphics_object_id connector_obj_id;
 	/* symClock; in 10kHz, pixel clock, in HDMI deep color mode, it should
 	 * be pixel clock * deep_color_ratio (in KHz)
@@ -154,6 +162,11 @@ struct bp_transmitter_control {
 	bool coherent;
 	bool multi_path;
 	bool single_pll_mode;
+};
+
+struct bp_load_detection_parameters {
+	enum engine_id engine_id;
+	uint16_t device_id;
 };
 
 struct bp_hw_crtc_timing_parameters {
@@ -210,8 +223,8 @@ struct bp_pixel_clock_parameters {
 	/* signal_type -> Encoder Mode - needed by VBIOS Exec table */
 	enum signal_type signal_type;
 	/* Adjusted Pixel Clock (after VBIOS exec table)
-	 * that becomes Target Pixel Clock (KHz) */
-	uint32_t target_pixel_clock;
+	 * that becomes Target Pixel Clock (100 Hz units) */
+	uint32_t target_pixel_clock_100hz;
 	/* Calculated Reference divider of Display PLL */
 	uint32_t reference_divider;
 	/* Calculated Feedback divider of Display PLL */
@@ -234,6 +247,8 @@ struct bp_pixel_clock_parameters {
 		uint32_t USE_E_CLOCK_AS_SOURCE_FOR_D_CLOCK:1;
 		/* Use external reference clock (refDivSrc for PLL) */
 		uint32_t SET_EXTERNAL_REF_DIV_SRC:1;
+		/* Use DFS bypass for Display clock. */
+		uint32_t SET_DISPCLK_DFS_BYPASS:1;
 		/* Force program PHY PLL only */
 		uint32_t PROGRAM_PHY_PLL_ONLY:1;
 		/* Support for YUV420 */
@@ -299,12 +314,50 @@ struct bp_spread_spectrum_parameters {
 	struct spread_spectrum_flags flags;
 };
 
+struct bp_disp_connector_caps_info {
+	uint32_t INTERNAL_DISPLAY    : 1;
+	uint32_t INTERNAL_DISPLAY_BL : 1;
+	uint32_t NO_DDC_PIN : 1;
+};
+
 struct bp_encoder_cap_info {
 	uint32_t DP_HBR2_CAP:1;
 	uint32_t DP_HBR2_EN:1;
 	uint32_t DP_HBR3_EN:1;
 	uint32_t HDMI_6GB_EN:1;
-	uint32_t RESERVED:30;
+	uint32_t IS_DP2_CAPABLE:1;
+	uint32_t DP_UHBR10_EN:1;
+	uint32_t DP_UHBR13_5_EN:1;
+	uint32_t DP_UHBR20_EN:1;
+	uint32_t DP_IS_USB_C:1;
+	uint32_t IS_HDMI_FRL_CAPABLE:1;
+	uint32_t FRL_8G_EN:1;
+	uint32_t FRL_10G_EN:1;
+	uint32_t FRL_12G_EN:1;
+	uint32_t RESERVED:19;
+};
+
+struct bp_soc_bb_info {
+	uint32_t dram_clock_change_latency_100ns;
+	uint32_t dram_sr_exit_latency_100ns;
+	uint32_t dram_sr_enter_exit_latency_100ns;
+};
+
+struct bp_connector_speed_cap_info {
+	uint32_t DP_HBR2_EN:1;
+	uint32_t DP_HBR3_EN:1;
+	uint32_t HDMI_6GB_EN:1;
+	uint32_t DP_UHBR10_EN:1;
+	uint32_t DP_UHBR13_5_EN:1;
+	uint32_t DP_UHBR20_EN:1;
+	uint32_t DP_IS_USB_C:1;
+	uint32_t FRL_8G_EN:1;
+	uint32_t FRL_10G_EN:1;
+	uint32_t FRL_12G_EN:1;
+	uint32_t FRL_16G_EN:1;
+	uint32_t FRL_20G_EN:1;
+	uint32_t FRL_24G_EN:1;
+	uint32_t RESERVED:19;
 };
 
 #endif /*__DAL_BIOS_PARSER_TYPES_H__ */

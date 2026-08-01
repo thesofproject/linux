@@ -14,6 +14,8 @@
  *  more details.
  */
 
+#include <linux/aperture.h>
+#include <linux/backlight.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -27,7 +29,6 @@
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/console.h>
-#include <asm/io.h>
 
 #ifdef CONFIG_PMAC_BACKLIGHT
 #include <asm/backlight.h>
@@ -80,15 +81,13 @@ static int chipsfb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 			     u_int transp, struct fb_info *info);
 static int chipsfb_blank(int blank, struct fb_info *info);
 
-static struct fb_ops chipsfb_ops = {
+static const struct fb_ops chipsfb_ops = {
 	.owner		= THIS_MODULE,
+	FB_DEFAULT_IOMEM_OPS,
 	.fb_check_var	= chipsfb_check_var,
 	.fb_set_par	= chipsfb_set_par,
 	.fb_setcolreg	= chipsfb_setcolreg,
 	.fb_blank	= chipsfb_blank,
-	.fb_fillrect	= cfb_fillrect,
-	.fb_copyarea	= cfb_copyarea,
-	.fb_imageblit	= cfb_imageblit,
 };
 
 static int chipsfb_check_var(struct fb_var_screeninfo *var,
@@ -123,7 +122,7 @@ static int chipsfb_set_par(struct fb_info *info)
 		info->var.blue.offset = 0;
 		info->var.red.length = info->var.green.length =
 			info->var.blue.length = 5;
-		
+
 	} else {
 		/* p->var.bits_per_pixel == 8 */
 		write_cr(0x13, 100);		// Set line length (doublewords)
@@ -132,13 +131,13 @@ static int chipsfb_set_par(struct fb_info *info)
 		write_xr(0x20, 0x00);		// 8 bit blitter mode
 
 		info->fix.line_length = 800;
-		info->fix.visual = FB_VISUAL_PSEUDOCOLOR;		
+		info->fix.visual = FB_VISUAL_PSEUDOCOLOR;
 
  		info->var.red.offset = info->var.green.offset =
 			info->var.blue.offset = 0;
 		info->var.red.length = info->var.green.length =
 			info->var.blue.length = 8;
-		
+
 	}
 	return 0;
 }
@@ -332,7 +331,7 @@ static const struct fb_var_screeninfo chipsfb_var = {
 
 static void init_chips(struct fb_info *p, unsigned long addr)
 {
-	memset(p->screen_base, 0, 0x100000);
+	fb_memset_io(p->screen_base, 0, 0x100000);
 
 	p->fix = chipsfb_fix;
 	p->fix.smem_start = addr;
@@ -340,7 +339,6 @@ static void init_chips(struct fb_info *p, unsigned long addr)
 	p->var = chipsfb_var;
 
 	p->fbops = &chipsfb_ops;
-	p->flags = FBINFO_DEFAULT;
 
 	fb_alloc_cmap(&p->cmap, 256, 0);
 
@@ -350,25 +348,32 @@ static void init_chips(struct fb_info *p, unsigned long addr)
 static int chipsfb_pci_init(struct pci_dev *dp, const struct pci_device_id *ent)
 {
 	struct fb_info *p;
-	unsigned long addr, size;
+	unsigned long addr;
 	unsigned short cmd;
-	int rc = -ENODEV;
+	int rc;
 
-	if (pci_enable_device(dp) < 0) {
+	rc = aperture_remove_conflicting_pci_devices(dp, "chipsfb");
+	if (rc)
+		return rc;
+
+	rc = pci_enable_device(dp);
+	if (rc < 0) {
 		dev_err(&dp->dev, "Cannot enable PCI device\n");
 		goto err_out;
 	}
 
-	if ((dp->resource[0].flags & IORESOURCE_MEM) == 0)
+	if ((dp->resource[0].flags & IORESOURCE_MEM) == 0) {
+		rc = -ENODEV;
 		goto err_disable;
+	}
 	addr = pci_resource_start(dp, 0);
-	size = pci_resource_len(dp, 0);
-	if (addr == 0)
+	if (addr == 0) {
+		rc = -ENODEV;
 		goto err_disable;
+	}
 
 	p = framebuffer_alloc(0, &dp->dev);
 	if (p == NULL) {
-		dev_err(&dp->dev, "Cannot allocate framebuffer structure\n");
 		rc = -ENOMEM;
 		goto err_disable;
 	}
@@ -394,14 +399,14 @@ static int chipsfb_pci_init(struct pci_dev *dp, const struct pci_device_id *ent)
 	/* turn on the backlight */
 	mutex_lock(&pmac_backlight_mutex);
 	if (pmac_backlight) {
-		pmac_backlight->props.power = FB_BLANK_UNBLANK;
+		pmac_backlight->props.power = BACKLIGHT_POWER_ON;
 		backlight_update_status(pmac_backlight);
 	}
 	mutex_unlock(&pmac_backlight_mutex);
 #endif /* CONFIG_PMAC_BACKLIGHT */
 
 #ifdef CONFIG_PPC
-	p->screen_base = __ioremap(addr, 0x200000, _PAGE_NO_CACHE);
+	p->screen_base = ioremap_wc(addr, 0x200000);
 #else
 	p->screen_base = ioremap(addr, 0x200000);
 #endif
@@ -415,7 +420,8 @@ static int chipsfb_pci_init(struct pci_dev *dp, const struct pci_device_id *ent)
 
 	init_chips(p, addr);
 
-	if (register_framebuffer(p) < 0) {
+	rc = register_framebuffer(p);
+	if (rc < 0) {
 		dev_err(&dp->dev,"C&T 65550 framebuffer failed to register\n");
 		goto err_unmap;
 	}
@@ -433,6 +439,7 @@ static int chipsfb_pci_init(struct pci_dev *dp, const struct pci_device_id *ent)
  err_release_fb:
 	framebuffer_release(p);
  err_disable:
+	pci_disable_device(dp);
  err_out:
 	return rc;
 }
@@ -503,6 +510,9 @@ static struct pci_driver chipsfb_driver = {
 
 int __init chips_init(void)
 {
+	if (fb_modesetting_disabled("chipsfb"))
+		return -ENODEV;
+
 	if (fb_get_options("chipsfb", NULL))
 		return -ENODEV;
 
@@ -516,4 +526,5 @@ static void __exit chipsfb_exit(void)
 	pci_unregister_driver(&chipsfb_driver);
 }
 
+MODULE_DESCRIPTION("Chips & Technologies 65550 frame buffer driver");
 MODULE_LICENSE("GPL");

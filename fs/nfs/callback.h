@@ -19,32 +19,14 @@ enum nfs4_callback_procnum {
 	CB_COMPOUND = 1,
 };
 
-enum nfs4_callback_opnum {
-	OP_CB_GETATTR = 3,
-	OP_CB_RECALL  = 4,
-/* Callback operations new to NFSv4.1 */
-	OP_CB_LAYOUTRECALL  = 5,
-	OP_CB_NOTIFY        = 6,
-	OP_CB_PUSH_DELEG    = 7,
-	OP_CB_RECALL_ANY    = 8,
-	OP_CB_RECALLABLE_OBJ_AVAIL = 9,
-	OP_CB_RECALL_SLOT   = 10,
-	OP_CB_SEQUENCE      = 11,
-	OP_CB_WANTS_CANCELLED = 12,
-	OP_CB_NOTIFY_LOCK   = 13,
-	OP_CB_NOTIFY_DEVICEID = 14,
-/* Callback operations new to NFSv4.2 */
-	OP_CB_OFFLOAD = 15,
-	OP_CB_ILLEGAL = 10044,
-};
-
 struct nfs4_slot;
 struct cb_process_state {
-	__be32			drc_status;
 	struct nfs_client	*clp;
 	struct nfs4_slot	*slot;
-	u32			minorversion;
 	struct net		*net;
+	u32			minorversion;
+	__be32			drc_status;
+	unsigned int		referring_calls;
 };
 
 struct cb_compound_hdr_arg {
@@ -64,16 +46,17 @@ struct cb_compound_hdr_res {
 
 struct cb_getattrargs {
 	struct nfs_fh fh;
-	uint32_t bitmap[2];
+	uint32_t bitmap[3];
 };
 
 struct cb_getattrres {
 	__be32 status;
-	uint32_t bitmap[2];
+	uint32_t bitmap[3];
 	uint64_t size;
 	uint64_t change_attr;
-	struct timespec ctime;
-	struct timespec mtime;
+	struct timespec64 atime;
+	struct timespec64 ctime;
+	struct timespec64 mtime;
 };
 
 struct cb_recallargs {
@@ -81,8 +64,6 @@ struct cb_recallargs {
 	nfs4_stateid stateid;
 	uint32_t truncate;
 };
-
-#if defined(CONFIG_NFS_V4_1)
 
 struct referring_call {
 	uint32_t			rc_sequenceid;
@@ -127,7 +108,9 @@ extern __be32 nfs4_callback_sequence(void *argp, void *resp,
 #define RCA4_TYPE_MASK_OBJ_LAYOUT_MAX  9
 #define RCA4_TYPE_MASK_OTHER_LAYOUT_MIN 12
 #define RCA4_TYPE_MASK_OTHER_LAYOUT_MAX 15
-#define RCA4_TYPE_MASK_ALL 0xf31f
+#define PNFS_FF_RCA4_TYPE_MASK_READ 16
+#define PNFS_FF_RCA4_TYPE_MASK_RW 17
+#define RCA4_TYPE_MASK_ALL 0x3f31f
 
 struct cb_recallanyargs {
 	uint32_t	craa_objs_to_keep;
@@ -168,7 +151,7 @@ struct cb_devicenotifyitem {
 };
 
 struct cb_devicenotifyargs {
-	int				 ndevs;
+	uint32_t			 ndevs;
 	struct cb_devicenotifyitem	 *devs;
 };
 
@@ -183,7 +166,18 @@ struct cb_notify_lock_args {
 
 extern __be32 nfs4_callback_notify_lock(void *argp, void *resp,
 					 struct cb_process_state *cps);
-#endif /* CONFIG_NFS_V4_1 */
+#ifdef CONFIG_NFS_V4_2
+struct cb_offloadargs {
+	struct nfs_fh		coa_fh;
+	nfs4_stateid		coa_stateid;
+	uint32_t		error;
+	uint64_t		wr_count;
+	struct nfs_writeverf	wr_writeverf;
+};
+
+extern __be32 nfs4_callback_offload(void *args, void *dummy,
+				    struct cb_process_state *cps);
+#endif /* CONFIG_NFS_V4_2 */
 extern int check_gss_callback_principal(struct nfs_client *, struct svc_rqst *);
 extern __be32 nfs4_callback_getattr(void *argp, void *resp,
 				    struct cb_process_state *cps);
@@ -191,7 +185,8 @@ extern __be32 nfs4_callback_recall(void *argp, void *resp,
 				   struct cb_process_state *cps);
 #if IS_ENABLED(CONFIG_NFS_V4)
 extern int nfs_callback_up(u32 minorversion, struct rpc_xprt *xprt);
-extern void nfs_callback_down(int minorversion, struct net *net);
+extern void nfs_callback_down(int minorversion, struct net *net,
+			      struct rpc_xprt *xprt);
 #endif /* CONFIG_NFS_V4 */
 /*
  * nfs41: Callbacks are expected to not cause substantial latency,

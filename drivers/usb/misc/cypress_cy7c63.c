@@ -88,6 +88,9 @@ static int vendor_command(struct cypress *dev, unsigned char request,
 				 USB_DIR_IN | USB_TYPE_VENDOR | USB_RECIP_OTHER,
 				 address, data, iobuf, CYPRESS_MAX_REQSIZE,
 				 USB_CTRL_GET_TIMEOUT);
+	/* we must not process garbage */
+	if (retval < 2)
+		goto err_buf;
 
 	/* store returned data (more READs to be added) */
 	switch (request) {
@@ -107,6 +110,7 @@ static int vendor_command(struct cypress *dev, unsigned char request,
 			break;
 	}
 
+err_buf:
 	kfree(iobuf);
 error:
 	return retval;
@@ -183,6 +187,7 @@ static ssize_t port0_show(struct device *dev,
 {
 	return read_port(dev, attr, buf, 0, CYPRESS_READ_PORT_ID0);
 }
+static DEVICE_ATTR_RW(port0);
 
 /* attribute callback handler (read) */
 static ssize_t port1_show(struct device *dev,
@@ -190,47 +195,35 @@ static ssize_t port1_show(struct device *dev,
 {
 	return read_port(dev, attr, buf, 1, CYPRESS_READ_PORT_ID1);
 }
-
-static DEVICE_ATTR_RW(port0);
-
 static DEVICE_ATTR_RW(port1);
 
+static struct attribute *cypress_attrs[] = {
+	&dev_attr_port0.attr,
+	&dev_attr_port1.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(cypress);
 
 static int cypress_probe(struct usb_interface *interface,
 			 const struct usb_device_id *id)
 {
-	struct cypress *dev = NULL;
+	struct cypress *dev;
 	int retval = -ENOMEM;
 
 	/* allocate memory for our device state and initialize it */
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	if (!dev)
 		goto error_mem;
 
-	dev->udev = usb_get_dev(interface_to_usbdev(interface));
+	dev->udev = interface_to_usbdev(interface);
 
 	/* save our data pointer in this interface device */
 	usb_set_intfdata(interface, dev);
-
-	/* create device attribute files */
-	retval = device_create_file(&interface->dev, &dev_attr_port0);
-	if (retval)
-		goto error;
-	retval = device_create_file(&interface->dev, &dev_attr_port1);
-	if (retval)
-		goto error;
 
 	/* let the user know that the device is now attached */
 	dev_info(&interface->dev,
 		 "Cypress CY7C63xxx device now attached\n");
 	return 0;
-
-error:
-	device_remove_file(&interface->dev, &dev_attr_port0);
-	device_remove_file(&interface->dev, &dev_attr_port1);
-	usb_set_intfdata(interface, NULL);
-	usb_put_dev(dev->udev);
-	kfree(dev);
 
 error_mem:
 	return retval;
@@ -242,14 +235,9 @@ static void cypress_disconnect(struct usb_interface *interface)
 
 	dev = usb_get_intfdata(interface);
 
-	/* remove device attribute files */
-	device_remove_file(&interface->dev, &dev_attr_port0);
-	device_remove_file(&interface->dev, &dev_attr_port1);
 	/* the intfdata can be set to NULL only after the
 	 * device files have been removed */
 	usb_set_intfdata(interface, NULL);
-
-	usb_put_dev(dev->udev);
 
 	dev_info(&interface->dev,
 		 "Cypress CY7C63xxx device now disconnected\n");
@@ -262,6 +250,7 @@ static struct usb_driver cypress_driver = {
 	.probe = cypress_probe,
 	.disconnect = cypress_disconnect,
 	.id_table = cypress_table,
+	.dev_groups = cypress_groups,
 };
 
 module_usb_driver(cypress_driver);

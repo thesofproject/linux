@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * pata_amd.c 	- AMD PATA for new ATA layer
  *			  (C) 2005-2006 Red Hat Inc
@@ -65,7 +66,7 @@ static void timing_setup(struct ata_port *ap, struct ata_device *adev, int offse
 
 	if (peer) {
 		/* This may be over conservative */
-		if (peer->dma_mode) {
+		if (ata_dma_enabled(peer)) {
 			ata_timing_compute(peer, peer->dma_mode, &apeer, T, UT);
 			ata_timing_merge(&apeer, &at, &at, ATA_TIMING_8BIT);
 		}
@@ -166,7 +167,6 @@ static int amd_cable_detect(struct ata_port *ap)
 /**
  *	amd_fifo_setup		-	set the PIO FIFO for ATA/ATAPI
  *	@ap: ATA interface
- *	@adev: ATA device
  *
  *	Set the PCI fifo for this device according to the devices present
  *	on the bus at this point in time. We need to turn the post write buffer
@@ -264,8 +264,8 @@ static void amd133_set_dmamode(struct ata_port *ap, struct ata_device *adev)
  * cached during driver attach and are consulted to select transfer
  * mode.
  */
-static unsigned long nv_mode_filter(struct ata_device *dev,
-				    unsigned long xfer_mask)
+static unsigned int nv_mode_filter(struct ata_device *dev,
+				   unsigned int xfer_mask)
 {
 	static const unsigned int udma_mask_map[] =
 		{ ATA_UDMA2, ATA_UDMA1, ATA_UDMA0, 0,
@@ -274,7 +274,7 @@ static unsigned long nv_mode_filter(struct ata_device *dev,
 	char acpi_str[32] = "";
 	u32 saved_udma, udma;
 	const struct ata_acpi_gtm *gtm;
-	unsigned long bios_limit = 0, acpi_limit = 0, limit;
+	unsigned int bios_limit = 0, acpi_limit = 0, limit;
 
 	/* find out what BIOS configured */
 	udma = saved_udma = (unsigned long)ap->host->private_data;
@@ -310,17 +310,18 @@ static unsigned long nv_mode_filter(struct ata_device *dev,
 	   cable detection result */
 	limit |= ata_pack_xfermask(ATA_PIO4, ATA_MWDMA2, ATA_UDMA2);
 
-	ata_port_dbg(ap, "nv_mode_filter: 0x%lx&0x%lx->0x%lx, "
-			"BIOS=0x%lx (0x%x) ACPI=0x%lx%s\n",
-			xfer_mask, limit, xfer_mask & limit, bios_limit,
-			saved_udma, acpi_limit, acpi_str);
+	ata_port_dbg(ap,
+		     "nv_mode_filter: 0x%x&0x%x->0x%x, BIOS=0x%x (0x%x) ACPI=0x%x%s\n",
+		     xfer_mask, limit, xfer_mask & limit, bios_limit,
+		     saved_udma, acpi_limit, acpi_str);
 
 	return xfer_mask & limit;
 }
 
 /**
- *	nv_probe_init	-	cable detection
- *	@lin: ATA link
+ *	nv_pre_reset	-	cable detection
+ *	@link: ATA link
+ *	@deadline: deadline jiffies for the operation
  *
  *	Perform cable detection. The BIOS stores this in PCI config
  *	space for us.
@@ -387,13 +388,13 @@ static void nv_host_stop(struct ata_host *host)
 	pci_write_config_dword(to_pci_dev(host->dev), 0x60, udma);
 }
 
-static struct scsi_host_template amd_sht = {
+static const struct scsi_host_template amd_sht = {
 	ATA_BMDMA_SHT(DRV_NAME),
 };
 
 static const struct ata_port_operations amd_base_port_ops = {
 	.inherits	= &ata_bmdma32_port_ops,
-	.prereset	= amd_pre_reset,
+	.reset.prereset	= amd_pre_reset,
 };
 
 static struct ata_port_operations amd33_port_ops = {
@@ -428,7 +429,7 @@ static const struct ata_port_operations nv_base_port_ops = {
 	.inherits	= &ata_bmdma_port_ops,
 	.cable_detect	= ata_cable_ignore,
 	.mode_filter	= nv_mode_filter,
-	.prereset	= nv_pre_reset,
+	.reset.prereset	= nv_pre_reset,
 	.host_stop	= nv_host_stop,
 };
 
@@ -596,29 +597,71 @@ static int amd_reinit_one(struct pci_dev *pdev)
 #endif
 
 static const struct pci_device_id amd[] = {
-	{ PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_COBRA_7401),		0 },
-	{ PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_VIPER_7409),		1 },
-	{ PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_VIPER_7411),		3 },
-	{ PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_OPUS_7441),		4 },
-	{ PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_8111_IDE),		5 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_IDE),	7 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE2_IDE),	8 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE2S_IDE),	8 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE3_IDE),	8 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE3S_IDE),	8 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_CK804_IDE),	8 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP04_IDE),	8 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP51_IDE),	8 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP55_IDE),	8 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP61_IDE),	8 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP65_IDE),	8 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP67_IDE),	8 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP73_IDE),	8 },
-	{ PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP77_IDE),	8 },
-	{ PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_CS5536_IDE),		9 },
-	{ PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_CS5536_DEV_IDE),	9 },
-
-	{ },
+	{
+		PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_COBRA_7401),
+		.driver_data = 0,
+	}, {
+		PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_VIPER_7409),
+		.driver_data = 1,
+	}, {
+		PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_VIPER_7411),
+		.driver_data = 3,
+	}, {
+		PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_OPUS_7441),
+		.driver_data = 4,
+	}, {
+		PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_8111_IDE),
+		.driver_data = 5,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_IDE),
+		.driver_data = 7,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE2_IDE),
+		.driver_data = 8,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE2S_IDE),
+		.driver_data = 8,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE3_IDE),
+		.driver_data = 8,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE3S_IDE),
+		.driver_data = 8,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_CK804_IDE),
+		.driver_data = 8,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP04_IDE),
+		.driver_data = 8,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP51_IDE),
+		.driver_data = 8,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP55_IDE),
+		.driver_data = 8,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP61_IDE),
+		.driver_data = 8,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP65_IDE),
+		.driver_data = 8,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP67_IDE),
+		.driver_data = 8,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP73_IDE),
+		.driver_data = 8,
+	}, {
+		PCI_VDEVICE(NVIDIA,	PCI_DEVICE_ID_NVIDIA_NFORCE_MCP77_IDE),
+		.driver_data = 8,
+	}, {
+		PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_CS5536_IDE),
+		.driver_data = 9,
+	}, {
+		PCI_VDEVICE(AMD,	PCI_DEVICE_ID_AMD_CS5536_DEV_IDE),
+		.driver_data = 9
+	},
+	{ }
 };
 
 static struct pci_driver amd_pci_driver = {

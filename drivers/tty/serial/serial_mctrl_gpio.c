@@ -12,6 +12,7 @@
 #include <linux/termios.h>
 #include <linux/serial_core.h>
 #include <linux/module.h>
+#include <linux/property.h>
 
 #include "serial_mctrl_gpio.h"
 
@@ -26,43 +27,73 @@ struct mctrl_gpios {
 static const struct {
 	const char *name;
 	unsigned int mctrl;
-	bool dir_out;
+	enum gpiod_flags flags;
 } mctrl_gpios_desc[UART_GPIO_MAX] = {
-	{ "cts", TIOCM_CTS, false, },
-	{ "dsr", TIOCM_DSR, false, },
-	{ "dcd", TIOCM_CD, false, },
-	{ "rng", TIOCM_RNG, false, },
-	{ "rts", TIOCM_RTS, true, },
-	{ "dtr", TIOCM_DTR, true, },
+	{ "cts", TIOCM_CTS, GPIOD_IN, },
+	{ "dsr", TIOCM_DSR, GPIOD_IN, },
+	{ "dcd", TIOCM_CD,  GPIOD_IN, },
+	{ "rng", TIOCM_RNG, GPIOD_IN, },
+	{ "rts", TIOCM_RTS, GPIOD_OUT_LOW, },
+	{ "dtr", TIOCM_DTR, GPIOD_OUT_LOW, },
 };
 
+static bool mctrl_gpio_flags_is_dir_out(unsigned int idx)
+{
+	return mctrl_gpios_desc[idx].flags & GPIOD_FLAGS_BIT_DIR_OUT;
+}
+
+/**
+ * mctrl_gpio_set - set gpios according to mctrl state
+ * @gpios: gpios to set
+ * @mctrl: state to set
+ *
+ * Set the gpios according to the mctrl state.
+ */
 void mctrl_gpio_set(struct mctrl_gpios *gpios, unsigned int mctrl)
 {
 	enum mctrl_gpio_idx i;
 	struct gpio_desc *desc_array[UART_GPIO_MAX];
-	int value_array[UART_GPIO_MAX];
+	DECLARE_BITMAP(values, UART_GPIO_MAX);
 	unsigned int count = 0;
 
 	if (gpios == NULL)
 		return;
 
 	for (i = 0; i < UART_GPIO_MAX; i++)
-		if (gpios->gpio[i] && mctrl_gpios_desc[i].dir_out) {
+		if (gpios->gpio[i] && mctrl_gpio_flags_is_dir_out(i)) {
 			desc_array[count] = gpios->gpio[i];
-			value_array[count] = !!(mctrl & mctrl_gpios_desc[i].mctrl);
+			__assign_bit(count, values,
+				     mctrl & mctrl_gpios_desc[i].mctrl);
 			count++;
 		}
-	gpiod_set_array_value(count, desc_array, value_array);
+	gpiod_set_array_value(count, desc_array, NULL, values);
 }
 EXPORT_SYMBOL_GPL(mctrl_gpio_set);
 
+/**
+ * mctrl_gpio_to_gpiod - obtain gpio_desc of modem line index
+ * @gpios: gpios to look into
+ * @gidx: index of the modem line
+ * Returns: the gpio_desc structure associated to the modem line index
+ */
 struct gpio_desc *mctrl_gpio_to_gpiod(struct mctrl_gpios *gpios,
 				      enum mctrl_gpio_idx gidx)
 {
+	if (gpios == NULL)
+		return NULL;
+
 	return gpios->gpio[gidx];
 }
 EXPORT_SYMBOL_GPL(mctrl_gpio_to_gpiod);
 
+/**
+ * mctrl_gpio_get - update mctrl with the gpios values.
+ * @gpios: gpios to get the info from
+ * @mctrl: mctrl to set
+ * Returns: modified mctrl (the same value as in @mctrl)
+ *
+ * Update mctrl with the gpios values.
+ */
 unsigned int mctrl_gpio_get(struct mctrl_gpios *gpios, unsigned int *mctrl)
 {
 	enum mctrl_gpio_idx i;
@@ -71,7 +102,7 @@ unsigned int mctrl_gpio_get(struct mctrl_gpios *gpios, unsigned int *mctrl)
 		return *mctrl;
 
 	for (i = 0; i < UART_GPIO_MAX; i++) {
-		if (gpios->gpio[i] && !mctrl_gpios_desc[i].dir_out) {
+		if (gpios->gpio[i] && !mctrl_gpio_flags_is_dir_out(i)) {
 			if (gpiod_get_value(gpios->gpio[i]))
 				*mctrl |= mctrl_gpios_desc[i].mctrl;
 			else
@@ -92,7 +123,7 @@ mctrl_gpio_get_outputs(struct mctrl_gpios *gpios, unsigned int *mctrl)
 		return *mctrl;
 
 	for (i = 0; i < UART_GPIO_MAX; i++) {
-		if (gpios->gpio[i] && mctrl_gpios_desc[i].dir_out) {
+		if (gpios->gpio[i] && mctrl_gpio_flags_is_dir_out(i)) {
 			if (gpiod_get_value(gpios->gpio[i]))
 				*mctrl |= mctrl_gpios_desc[i].mctrl;
 			else
@@ -114,17 +145,25 @@ struct mctrl_gpios *mctrl_gpio_init_noauto(struct device *dev, unsigned int idx)
 		return ERR_PTR(-ENOMEM);
 
 	for (i = 0; i < UART_GPIO_MAX; i++) {
-		enum gpiod_flags flags;
+		char *gpio_str;
+		bool present;
 
-		if (mctrl_gpios_desc[i].dir_out)
-			flags = GPIOD_OUT_LOW;
-		else
-			flags = GPIOD_IN;
+		/* Check if GPIO property exists and continue if not */
+		gpio_str = kasprintf(GFP_KERNEL, "%s-gpios",
+				     mctrl_gpios_desc[i].name);
+		if (!gpio_str)
+			continue;
+
+		present = device_property_present(dev, gpio_str);
+		kfree(gpio_str);
+		if (!present)
+			continue;
 
 		gpios->gpio[i] =
 			devm_gpiod_get_index_optional(dev,
 						      mctrl_gpios_desc[i].name,
-						      idx, flags);
+						      idx,
+						      mctrl_gpios_desc[i].flags);
 
 		if (IS_ERR(gpios->gpio[i]))
 			return ERR_CAST(gpios->gpio[i]);
@@ -145,7 +184,7 @@ static irqreturn_t mctrl_gpio_irq_handle(int irq, void *context)
 
 	mctrl_gpio_get(gpios, &mctrl);
 
-	spin_lock_irqsave(&port->lock, flags);
+	uart_port_lock_irqsave(port, &flags);
 
 	mctrl_diff = mctrl ^ gpios->mctrl_prev;
 	gpios->mctrl_prev = mctrl;
@@ -166,11 +205,22 @@ static irqreturn_t mctrl_gpio_irq_handle(int irq, void *context)
 		wake_up_interruptible(&port->state->port.delta_msr_wait);
 	}
 
-	spin_unlock_irqrestore(&port->lock, flags);
+	uart_port_unlock_irqrestore(port, flags);
 
 	return IRQ_HANDLED;
 }
 
+/**
+ * mctrl_gpio_init - initialize uart gpios
+ * @port: port to initialize gpios for
+ * @idx: index of the gpio in the @port's device
+ *
+ * This will get the {cts,rts,...}-gpios from device tree if they are present
+ * and request them, set direction etc, and return an allocated structure.
+ * `devm_*` functions are used, so there's no need to explicitly free.
+ * As this sets up the irq handling, make sure to not handle changes to the
+ * gpio input lines in your driver, too.
+ */
 struct mctrl_gpios *mctrl_gpio_init(struct uart_port *port, unsigned int idx)
 {
 	struct mctrl_gpios *gpios;
@@ -185,11 +235,11 @@ struct mctrl_gpios *mctrl_gpio_init(struct uart_port *port, unsigned int idx)
 	for (i = 0; i < UART_GPIO_MAX; ++i) {
 		int ret;
 
-		if (!gpios->gpio[i] || mctrl_gpios_desc[i].dir_out)
+		if (!gpios->gpio[i] || mctrl_gpio_flags_is_dir_out(i))
 			continue;
 
 		ret = gpiod_to_irq(gpios->gpio[i]);
-		if (ret <= 0) {
+		if (ret < 0) {
 			dev_err(port->dev,
 				"failed to find corresponding irq for %s (idx=%d, err=%d)\n",
 				mctrl_gpios_desc[i].name, idx, ret);
@@ -217,24 +267,10 @@ struct mctrl_gpios *mctrl_gpio_init(struct uart_port *port, unsigned int idx)
 }
 EXPORT_SYMBOL_GPL(mctrl_gpio_init);
 
-void mctrl_gpio_free(struct device *dev, struct mctrl_gpios *gpios)
-{
-	enum mctrl_gpio_idx i;
-
-	if (gpios == NULL)
-		return;
-
-	for (i = 0; i < UART_GPIO_MAX; i++) {
-		if (gpios->irq[i])
-			devm_free_irq(gpios->port->dev, gpios->irq[i], gpios);
-
-		if (gpios->gpio[i])
-			devm_gpiod_put(dev, gpios->gpio[i]);
-	}
-	devm_kfree(dev, gpios);
-}
-EXPORT_SYMBOL_GPL(mctrl_gpio_free);
-
+/**
+ * mctrl_gpio_enable_ms - enable irqs and handling of changes to the ms lines
+ * @gpios: gpios to enable
+ */
 void mctrl_gpio_enable_ms(struct mctrl_gpios *gpios)
 {
 	enum mctrl_gpio_idx i;
@@ -260,7 +296,7 @@ void mctrl_gpio_enable_ms(struct mctrl_gpios *gpios)
 }
 EXPORT_SYMBOL_GPL(mctrl_gpio_enable_ms);
 
-void mctrl_gpio_disable_ms(struct mctrl_gpios *gpios)
+static void mctrl_gpio_disable_ms(struct mctrl_gpios *gpios, bool sync)
 {
 	enum mctrl_gpio_idx i;
 
@@ -276,9 +312,72 @@ void mctrl_gpio_disable_ms(struct mctrl_gpios *gpios)
 		if (!gpios->irq[i])
 			continue;
 
-		disable_irq(gpios->irq[i]);
+		if (sync)
+			disable_irq(gpios->irq[i]);
+		else
+			disable_irq_nosync(gpios->irq[i]);
 	}
 }
-EXPORT_SYMBOL_GPL(mctrl_gpio_disable_ms);
 
+/**
+ * mctrl_gpio_disable_ms_sync - disable irqs and handling of changes to the ms
+ * lines, and wait for any pending IRQ to be processed
+ * @gpios: gpios to disable
+ */
+void mctrl_gpio_disable_ms_sync(struct mctrl_gpios *gpios)
+{
+	mctrl_gpio_disable_ms(gpios, true);
+}
+EXPORT_SYMBOL_GPL(mctrl_gpio_disable_ms_sync);
+
+/**
+ * mctrl_gpio_disable_ms_no_sync - disable irqs and handling of changes to the
+ * ms lines, and return immediately
+ * @gpios: gpios to disable
+ */
+void mctrl_gpio_disable_ms_no_sync(struct mctrl_gpios *gpios)
+{
+	mctrl_gpio_disable_ms(gpios, false);
+}
+EXPORT_SYMBOL_GPL(mctrl_gpio_disable_ms_no_sync);
+
+void mctrl_gpio_enable_irq_wake(struct mctrl_gpios *gpios)
+{
+	enum mctrl_gpio_idx i;
+
+	if (!gpios)
+		return;
+
+	if (!gpios->mctrl_on)
+		return;
+
+	for (i = 0; i < UART_GPIO_MAX; ++i) {
+		if (!gpios->irq[i])
+			continue;
+
+		enable_irq_wake(gpios->irq[i]);
+	}
+}
+EXPORT_SYMBOL_GPL(mctrl_gpio_enable_irq_wake);
+
+void mctrl_gpio_disable_irq_wake(struct mctrl_gpios *gpios)
+{
+	enum mctrl_gpio_idx i;
+
+	if (!gpios)
+		return;
+
+	if (!gpios->mctrl_on)
+		return;
+
+	for (i = 0; i < UART_GPIO_MAX; ++i) {
+		if (!gpios->irq[i])
+			continue;
+
+		disable_irq_wake(gpios->irq[i]);
+	}
+}
+EXPORT_SYMBOL_GPL(mctrl_gpio_disable_irq_wake);
+
+MODULE_DESCRIPTION("Helpers for controlling modem lines via GPIO");
 MODULE_LICENSE("GPL");

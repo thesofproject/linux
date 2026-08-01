@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Audio support for PS3
  * Copyright (C) 2007 Sony Computer Entertainment Inc.
  * All rights reserved.
  * Copyright 2006, 2007 Sony Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the Licence.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/dma-mapping.h>
@@ -233,21 +221,19 @@ static int snd_ps3_program_dma(struct snd_ps3_card_info *card,
 	int fill_stages, dma_ch, stage;
 	enum snd_ps3_ch ch;
 	uint32_t ch0_kick_event = 0; /* initialize to mute gcc */
-	void *start_vaddr;
-	unsigned long irqsave;
 	int silent = 0;
 
 	switch (filltype) {
 	case SND_PS3_DMA_FILLTYPE_SILENT_FIRSTFILL:
 		silent = 1;
-		/* intentionally fall thru */
+		fallthrough;
 	case SND_PS3_DMA_FILLTYPE_FIRSTFILL:
 		ch0_kick_event = PS3_AUDIO_KICK_EVENT_ALWAYS;
 		break;
 
 	case SND_PS3_DMA_FILLTYPE_SILENT_RUNNING:
 		silent = 1;
-		/* intentionally fall thru */
+		fallthrough;
 	case SND_PS3_DMA_FILLTYPE_RUNNING:
 		ch0_kick_event = PS3_AUDIO_KICK_EVENT_SERIALOUT0_EMPTY;
 		break;
@@ -255,9 +241,8 @@ static int snd_ps3_program_dma(struct snd_ps3_card_info *card,
 
 	snd_ps3_verify_dma_stop(card, 700, 0);
 	fill_stages = 4;
-	spin_lock_irqsave(&card->dma_lock, irqsave);
+	guard(spinlock_irqsave)(&card->dma_lock);
 	for (ch = 0; ch < 2; ch++) {
-		start_vaddr = card->dma_next_transfer_vaddr[0];
 		for (stage = 0; stage < fill_stages; stage++) {
 			dma_ch = stage * 2 + ch;
 			if (silent)
@@ -303,7 +288,6 @@ static int snd_ps3_program_dma(struct snd_ps3_card_info *card,
 	}
 	/* ensure the hardware sees the change */
 	wmb();
-	spin_unlock_irqrestore(&card->dma_lock, irqsave);
 
 	return 0;
 }
@@ -526,9 +510,7 @@ static int snd_ps3_pcm_open(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_ps3_card_info *card = snd_pcm_substream_chip(substream);
-	int pcm_index;
 
-	pcm_index = substream->pcm->device;
 	/* to retrieve substream/runtime in interrupt handler */
 	card->substream = substream;
 
@@ -549,22 +531,6 @@ static int snd_ps3_pcm_close(struct snd_pcm_substream *substream)
 	/* mute on */
 	snd_ps3_mute(1);
 	return 0;
-};
-
-static int snd_ps3_pcm_hw_params(struct snd_pcm_substream *substream,
-				 struct snd_pcm_hw_params *hw_params)
-{
-	size_t size;
-
-	/* alloc transport buffer */
-	size = params_buffer_bytes(hw_params);
-	snd_pcm_lib_malloc_pages(substream, size);
-	return 0;
-};
-
-static int snd_ps3_pcm_hw_free(struct snd_pcm_substream *substream)
-{
-	return snd_pcm_lib_free_pages(substream);
 };
 
 static int snd_ps3_delay_to_bytes(struct snd_pcm_substream *substream,
@@ -593,7 +559,6 @@ static int snd_ps3_pcm_prepare(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_ps3_card_info *card = snd_pcm_substream_chip(substream);
-	unsigned long irqsave;
 
 	if (!snd_ps3_set_avsetting(substream)) {
 		/* some parameter changed */
@@ -610,8 +575,7 @@ static int snd_ps3_pcm_prepare(struct snd_pcm_substream *substream)
 	}
 
 	/* restart ring buffer pointer */
-	spin_lock_irqsave(&card->dma_lock, irqsave);
-	{
+	scoped_guard(spinlock_irqsave, &card->dma_lock) {
 		card->dma_buffer_size = runtime->dma_bytes;
 
 		card->dma_last_transfer_vaddr[SND_PS3_CH_L] =
@@ -632,7 +596,6 @@ static int snd_ps3_pcm_prepare(struct snd_pcm_substream *substream)
 			 card->dma_start_bus_addr[SND_PS3_CH_L]);
 
 	}
-	spin_unlock_irqrestore(&card->dma_lock, irqsave);
 
 	/* ensure the hardware sees the change */
 	mb();
@@ -644,18 +607,15 @@ static int snd_ps3_pcm_trigger(struct snd_pcm_substream *substream,
 			       int cmd)
 {
 	struct snd_ps3_card_info *card = snd_pcm_substream_chip(substream);
-	int ret = 0;
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 		/* clear outstanding interrupts  */
 		update_reg(PS3_AUDIO_AX_IS, 0);
 
-		spin_lock(&card->dma_lock);
-		{
+		scoped_guard(spinlock, &card->dma_lock) {
 			card->running = 1;
 		}
-		spin_unlock(&card->dma_lock);
 
 		snd_ps3_program_dma(card,
 				    SND_PS3_DMA_FILLTYPE_SILENT_FIRSTFILL);
@@ -669,11 +629,9 @@ static int snd_ps3_pcm_trigger(struct snd_pcm_substream *substream,
 		break;
 
 	case SNDRV_PCM_TRIGGER_STOP:
-		spin_lock(&card->dma_lock);
-		{
+		scoped_guard(spinlock, &card->dma_lock) {
 			card->running = 0;
 		}
-		spin_unlock(&card->dma_lock);
 		snd_ps3_wait_for_dma_stop(card);
 		break;
 	default:
@@ -681,7 +639,7 @@ static int snd_ps3_pcm_trigger(struct snd_pcm_substream *substream,
 
 	}
 
-	return ret;
+	return 0;
 };
 
 /*
@@ -694,12 +652,10 @@ static snd_pcm_uframes_t snd_ps3_pcm_pointer(
 	size_t bytes;
 	snd_pcm_uframes_t ret;
 
-	spin_lock(&card->dma_lock);
-	{
+	scoped_guard(spinlock, &card->dma_lock) {
 		bytes = (size_t)(card->dma_last_transfer_vaddr[SND_PS3_CH_L] -
 				 card->dma_start_vaddr[SND_PS3_CH_L]);
 	}
-	spin_unlock(&card->dma_lock);
 
 	ret = bytes_to_frames(substream->runtime, bytes * 2);
 
@@ -748,7 +704,7 @@ static int snd_ps3_spdif_default_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-static struct snd_kcontrol_new spdif_ctls[] = {
+static const struct snd_kcontrol_new spdif_ctls[] = {
 	{
 		.access = SNDRV_CTL_ELEM_ACCESS_READ,
 		.iface = SNDRV_CTL_ELEM_IFACE_PCM,
@@ -775,9 +731,6 @@ static struct snd_kcontrol_new spdif_ctls[] = {
 static const struct snd_pcm_ops snd_ps3_pcm_spdif_ops = {
 	.open = snd_ps3_pcm_open,
 	.close = snd_ps3_pcm_close,
-	.ioctl = snd_pcm_lib_ioctl,
-	.hw_params = snd_ps3_pcm_hw_params,
-	.hw_free = snd_ps3_pcm_hw_free,
 	.prepare = snd_ps3_pcm_prepare,
 	.trigger = snd_ps3_pcm_trigger,
 	.pointer = snd_ps3_pcm_pointer,
@@ -930,11 +883,7 @@ static int snd_ps3_driver_probe(struct ps3_system_bus_device *dev)
 {
 	int i, ret;
 	u64 lpar_addr, lpar_size;
-
-	if (WARN_ON(!firmware_has_feature(FW_FEATURE_PS3_LV1)))
-		return -ENODEV;
-	if (WARN_ON(dev->match_id != PS3_MATCH_ID_SOUND))
-		return -ENODEV;
+	static u64 dummy_mask;
 
 	the_card.ps3_dev = dev;
 
@@ -961,7 +910,7 @@ static int snd_ps3_driver_probe(struct ps3_system_bus_device *dev)
 			    PAGE_SHIFT, /* use system page size */
 			    0, /* dma type; not used */
 			    NULL,
-			    _ALIGN_UP(SND_PS3_DMA_REGION_SIZE, PAGE_SIZE));
+			    ALIGN(SND_PS3_DMA_REGION_SIZE, PAGE_SIZE));
 	dev->d_region->ioid = PS3_AUDIO_IOID;
 
 	ret = ps3_dma_region_create(dev->d_region);
@@ -969,6 +918,10 @@ static int snd_ps3_driver_probe(struct ps3_system_bus_device *dev)
 		pr_info("%s: region_create\n", __func__);
 		goto clean_mmio;
 	}
+
+	dummy_mask = DMA_BIT_MASK(32);
+	dev->core.dma_mask = &dummy_mask;
+	dma_set_coherent_mask(&dev->core, dummy_mask);
 
 	snd_ps3_audio_set_base_addr(dev->d_region->bus_addr);
 
@@ -987,9 +940,9 @@ static int snd_ps3_driver_probe(struct ps3_system_bus_device *dev)
 	if (ret < 0)
 		goto clean_irq;
 
-	strcpy(the_card.card->driver, "PS3");
-	strcpy(the_card.card->shortname, "PS3");
-	strcpy(the_card.card->longname, "PS3 sound");
+	strscpy(the_card.card->driver, "PS3");
+	strscpy(the_card.card->shortname, "PS3");
+	strscpy(the_card.card->longname, "PS3 sound");
 
 	/* create control elements */
 	for (i = 0; i < ARRAY_SIZE(spdif_ctls); i++) {
@@ -1011,7 +964,7 @@ static int snd_ps3_driver_probe(struct ps3_system_bus_device *dev)
 		goto clean_card;
 
 	the_card.pcm->private_data = &the_card;
-	strcpy(the_card.pcm->name, "SPDIF");
+	strscpy(the_card.pcm->name, "SPDIF");
 
 	/* set pcm ops */
 	snd_pcm_set_ops(the_card.pcm, SNDRV_PCM_STREAM_PLAYBACK,
@@ -1019,15 +972,11 @@ static int snd_ps3_driver_probe(struct ps3_system_bus_device *dev)
 
 	the_card.pcm->info_flags = SNDRV_PCM_INFO_NONINTERLEAVED;
 	/* pre-alloc PCM DMA buffer*/
-	ret = snd_pcm_lib_preallocate_pages_for_all(the_card.pcm,
-					SNDRV_DMA_TYPE_DEV,
-					&dev->core,
-					SND_PS3_PCM_PREALLOC_SIZE,
-					SND_PS3_PCM_PREALLOC_SIZE);
-	if (ret < 0) {
-		pr_info("%s: prealloc failed\n", __func__);
-		goto clean_card;
-	}
+	snd_pcm_set_managed_buffer_all(the_card.pcm,
+				       SNDRV_DMA_TYPE_DEV,
+				       &dev->core,
+				       SND_PS3_PCM_PREALLOC_SIZE,
+				       SND_PS3_PCM_PREALLOC_SIZE);
 
 	/*
 	 * allocate null buffer
@@ -1084,20 +1033,15 @@ clean_open:
 }; /* snd_ps3_probe */
 
 /* called when module removal */
-static int snd_ps3_driver_remove(struct ps3_system_bus_device *dev)
+static void snd_ps3_driver_remove(struct ps3_system_bus_device *dev)
 {
-	int ret;
 	pr_info("%s:start id=%d\n", __func__,  dev->match_id);
-	if (dev->match_id != PS3_MATCH_ID_SOUND)
-		return -ENXIO;
 
 	/*
 	 * ctl and preallocate buffer will be freed in
 	 * snd_card_free
 	 */
-	ret = snd_card_free(the_card.card);
-	if (ret)
-		pr_info("%s: ctl freecard=%d\n", __func__, ret);
+	snd_card_free(the_card.card);
 
 	dma_free_coherent(&dev->core,
 			  PAGE_SIZE,
@@ -1112,7 +1056,6 @@ static int snd_ps3_driver_remove(struct ps3_system_bus_device *dev)
 	lv1_gpu_device_unmap(2);
 	ps3_close_hv_device(dev);
 	pr_info("%s:end id=%d\n", __func__, dev->match_id);
-	return 0;
 } /* snd_ps3_remove */
 
 static struct ps3_system_bus_driver snd_ps3_bus_driver_info = {

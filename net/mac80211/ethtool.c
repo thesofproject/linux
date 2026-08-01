@@ -1,11 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * mac80211 ethtool hooks for cfg80211
  *
  * Copied from cfg.c - originally
  * Copyright 2006-2010	Johannes Berg <johannes@sipsolutions.net>
  * Copyright 2014	Intel Corporation (Author: Johannes Berg)
- *
- * This file is GPLv2 as found in COPYING.
+ * Copyright (C) 2018, 2022-2023 Intel Corporation
  */
 #include <linux/types.h>
 #include <net/cfg80211.h>
@@ -14,22 +14,30 @@
 #include "driver-ops.h"
 
 static int ieee80211_set_ringparam(struct net_device *dev,
-				   struct ethtool_ringparam *rp)
+				   struct ethtool_ringparam *rp,
+				   struct kernel_ethtool_ringparam *kernel_rp,
+				   struct netlink_ext_ack *extack)
 {
 	struct ieee80211_local *local = wiphy_priv(dev->ieee80211_ptr->wiphy);
 
 	if (rp->rx_mini_pending != 0 || rp->rx_jumbo_pending != 0)
 		return -EINVAL;
 
+	guard(wiphy)(local->hw.wiphy);
+
 	return drv_set_ringparam(local, rp->tx_pending, rp->rx_pending);
 }
 
 static void ieee80211_get_ringparam(struct net_device *dev,
-				    struct ethtool_ringparam *rp)
+				    struct ethtool_ringparam *rp,
+				    struct kernel_ethtool_ringparam *kernel_rp,
+				    struct netlink_ext_ack *extack)
 {
 	struct ieee80211_local *local = wiphy_priv(dev->ieee80211_ptr->wiphy);
 
 	memset(rp, 0, sizeof(*rp));
+
+	guard(wiphy)(local->hw.wiphy);
 
 	drv_get_ringparam(local, &rp->tx_pending, &rp->tx_max_pending,
 			  &rp->rx_pending, &rp->rx_max_pending);
@@ -40,8 +48,8 @@ static const char ieee80211_gstrings_sta_stats[][ETH_GSTRING_LEN] = {
 	"rx_duplicates", "rx_fragments", "rx_dropped",
 	"tx_packets", "tx_bytes",
 	"tx_filtered", "tx_retry_failed", "tx_retries",
-	"sta_state", "txrate", "rxrate", "signal",
-	"channel", "noise", "ch_time", "ch_time_busy",
+	"tx_handlers_drop", "sta_state", "txrate", "rxrate",
+	"signal", "channel", "noise", "ch_time", "ch_time_busy",
 	"ch_time_ext_busy", "ch_time_rx", "ch_time_tx"
 };
 #define STA_STATS_LEN	ARRAY_SIZE(ieee80211_gstrings_sta_stats)
@@ -79,17 +87,17 @@ static void ieee80211_get_stats(struct net_device *dev,
 
 #define ADD_STA_STATS(sta)					\
 	do {							\
-		data[i++] += sta->rx_stats.packets;		\
-		data[i++] += sta->rx_stats.bytes;		\
-		data[i++] += sta->rx_stats.num_duplicates;	\
-		data[i++] += sta->rx_stats.fragments;		\
-		data[i++] += sta->rx_stats.dropped;		\
+		data[i++] += sinfo.rx_packets;			\
+		data[i++] += sinfo.rx_bytes;			\
+		data[i++] += (sta)->rx_stats.num_duplicates;	\
+		data[i++] += (sta)->rx_stats.fragments;		\
+		data[i++] += sinfo.rx_dropped_misc;		\
 								\
 		data[i++] += sinfo.tx_packets;			\
 		data[i++] += sinfo.tx_bytes;			\
-		data[i++] += sta->status_stats.filtered;	\
-		data[i++] += sta->status_stats.retry_failed;	\
-		data[i++] += sta->status_stats.retry_count;	\
+		data[i++] += (sta)->status_stats.filtered;	\
+		data[i++] += sinfo.tx_failed;			\
+		data[i++] += sinfo.tx_retries;			\
 	} while (0)
 
 	/* For Managed stations, find the single station based on BSSID
@@ -98,33 +106,34 @@ static void ieee80211_get_stats(struct net_device *dev,
 	 * network device.
 	 */
 
-	mutex_lock(&local->sta_mtx);
+	guard(wiphy)(local->hw.wiphy);
 
 	if (sdata->vif.type == NL80211_IFTYPE_STATION) {
-		sta = sta_info_get_bss(sdata, sdata->u.mgd.bssid);
+		sta = sta_info_get_bss(sdata, sdata->deflink.u.mgd.bssid);
 
 		if (!(sta && !WARN_ON(sta->sdata->dev != dev)))
 			goto do_survey;
 
-		sinfo.filled = 0;
-		sta_set_sinfo(sta, &sinfo);
+		memset(&sinfo, 0, sizeof(sinfo));
+		sta_set_sinfo(sta, &sinfo, false);
 
 		i = 0;
-		ADD_STA_STATS(sta);
+		ADD_STA_STATS(&sta->deflink);
 
+		data[i++] = sdata->tx_handlers_drop;
 		data[i++] = sta->sta_state;
 
 
-		if (sinfo.filled & BIT(NL80211_STA_INFO_TX_BITRATE))
-			data[i] = 100000 *
+		if (sinfo.filled & BIT_ULL(NL80211_STA_INFO_TX_BITRATE))
+			data[i] = 100000ULL *
 				cfg80211_calculate_bitrate(&sinfo.txrate);
 		i++;
-		if (sinfo.filled & BIT(NL80211_STA_INFO_RX_BITRATE))
-			data[i] = 100000 *
+		if (sinfo.filled & BIT_ULL(NL80211_STA_INFO_RX_BITRATE))
+			data[i] = 100000ULL *
 				cfg80211_calculate_bitrate(&sinfo.rxrate);
 		i++;
 
-		if (sinfo.filled & BIT(NL80211_STA_INFO_SIGNAL_AVG))
+		if (sinfo.filled & BIT_ULL(NL80211_STA_INFO_SIGNAL_AVG))
 			data[i] = (u8)sinfo.signal_avg;
 		i++;
 	} else {
@@ -133,10 +142,11 @@ static void ieee80211_get_stats(struct net_device *dev,
 			if (sta->sdata->dev != dev)
 				continue;
 
-			sinfo.filled = 0;
-			sta_set_sinfo(sta, &sinfo);
+			memset(&sinfo, 0, sizeof(sinfo));
+			sta_set_sinfo(sta, &sinfo, false);
 			i = 0;
-			ADD_STA_STATS(sta);
+			ADD_STA_STATS(&sta->deflink);
+			data[i++] = sdata->tx_handlers_drop;
 		}
 	}
 
@@ -146,9 +156,13 @@ do_survey:
 	survey.filled = 0;
 
 	rcu_read_lock();
-	chanctx_conf = rcu_dereference(sdata->vif.chanctx_conf);
+	chanctx_conf = rcu_dereference(sdata->vif.bss_conf.chanctx_conf);
 	if (chanctx_conf)
 		channel = chanctx_conf->def.chan;
+	else if (local->open_count > 0 &&
+		 local->open_count == local->virt_monitors &&
+		 sdata->vif.type == NL80211_IFTYPE_MONITOR)
+		channel = local->monitor_chanreq.oper.chan;
 	else
 		channel = NULL;
 	rcu_read_unlock();
@@ -193,8 +207,6 @@ do_survey:
 		data[i++] = survey.time_tx;
 	else
 		data[i++] = -1LL;
-
-	mutex_unlock(&local->sta_mtx);
 
 	if (WARN_ON(i != STA_STATS_LEN))
 		return;

@@ -1,31 +1,29 @@
-/*
- * Core driver for the imx pin controller in imx1/21/27
- *
- * Copyright (C) 2013 Pengutronix
- * Author: Markus Pargmann <mpa@pengutronix.de>
- *
- * Based on pinctrl-imx.c:
- *	Author: Dong Aisheng <dong.aisheng@linaro.org>
- *	Copyright (C) 2012 Freescale Semiconductor, Inc.
- *	Copyright (C) 2012 Linaro Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// Core driver for the imx pin controller in imx1/21/27
+//
+// Copyright (C) 2013 Pengutronix
+// Author: Markus Pargmann <mpa@pengutronix.de>
+//
+// Based on pinctrl-imx.c:
+//	Author: Dong Aisheng <dong.aisheng@linaro.org>
+//	Copyright (C) 2012 Freescale Semiconductor, Inc.
+//	Copyright (C) 2012 Linaro Ltd.
 
 #include <linux/bitops.h>
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
+#include <linux/of_platform.h>
+#include <linux/platform_device.h>
+#include <linux/seq_file.h>
+#include <linux/slab.h>
+
 #include <linux/pinctrl/machine.h>
 #include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinmux.h>
-#include <linux/slab.h>
 
 #include "../core.h"
 #include "pinctrl-imx1.h"
@@ -65,7 +63,7 @@ struct imx1_pinctrl {
 
 /*
  * IMX1 IOMUXC manages the pins based on ports. Each port has 32 pins. IOMUX
- * control register are seperated into function, output configuration, input
+ * control registers are separated into function, output configuration, input
  * configuration A, input configuration B, GPIO in use and data direction.
  *
  * Those controls that are represented by 1 bit have a direct mapping between
@@ -238,15 +236,15 @@ static int imx1_dt_node_to_map(struct pinctrl_dev *pctldev,
 	 */
 	grp = imx1_pinctrl_find_group_by_name(info, np->name);
 	if (!grp) {
-		dev_err(info->dev, "unable to find group for node %s\n",
-			np->name);
+		dev_err(info->dev, "unable to find group for node %pOFn\n",
+			np);
 		return -EINVAL;
 	}
 
 	for (i = 0; i < grp->npins; i++)
 		map_num++;
 
-	new_map = kmalloc(sizeof(struct pinctrl_map) * map_num, GFP_KERNEL);
+	new_map = kmalloc_objs(struct pinctrl_map, map_num);
 	if (!new_map)
 		return -ENOMEM;
 
@@ -294,7 +292,6 @@ static const struct pinctrl_ops imx1_pctrl_ops = {
 	.pin_dbg_show = imx1_pin_dbg_show,
 	.dt_node_to_map = imx1_dt_node_to_map,
 	.dt_free_map = imx1_dt_free_map,
-
 };
 
 static int imx1_pmx_set(struct pinctrl_dev *pctldev, unsigned selector,
@@ -433,7 +430,7 @@ static void imx1_pinconf_group_dbg_show(struct pinctrl_dev *pctldev,
 	const char *name;
 	int i, ret;
 
-	if (group > info->ngroups)
+	if (group >= info->ngroups)
 		return;
 
 	seq_puts(s, "\n");
@@ -470,7 +467,7 @@ static int imx1_pinctrl_parse_groups(struct device_node *np,
 	const __be32 *list;
 	int i;
 
-	dev_dbg(info->dev, "group(%d): %s\n", index, np->name);
+	dev_dbg(info->dev, "group(%d): %pOFn\n", index, np);
 
 	/* Initialise group */
 	grp->name = np->name;
@@ -481,16 +478,16 @@ static int imx1_pinctrl_parse_groups(struct device_node *np,
 	list = of_get_property(np, "fsl,pins", &size);
 	/* we do not check return since it's safe node passed down */
 	if (!size || size % 12) {
-		dev_notice(info->dev, "Not a valid fsl,pins property (%s)\n",
-				np->name);
+		dev_notice(info->dev, "Not a valid fsl,pins property (%pOFn)\n",
+				np);
 		return -EINVAL;
 	}
 
 	grp->npins = size / 12;
-	grp->pins = devm_kzalloc(info->dev,
-			grp->npins * sizeof(struct imx1_pin), GFP_KERNEL);
-	grp->pin_ids = devm_kzalloc(info->dev,
-			grp->npins * sizeof(unsigned int), GFP_KERNEL);
+	grp->pins = devm_kcalloc(info->dev,
+			grp->npins, sizeof(struct imx1_pin), GFP_KERNEL);
+	grp->pin_ids = devm_kcalloc(info->dev,
+			grp->npins, sizeof(unsigned int), GFP_KERNEL);
 
 	if (!grp->pins || !grp->pin_ids)
 		return -ENOMEM;
@@ -510,14 +507,13 @@ static int imx1_pinctrl_parse_functions(struct device_node *np,
 				       struct imx1_pinctrl_soc_info *info,
 				       u32 index)
 {
-	struct device_node *child;
 	struct imx1_pmx_func *func;
 	struct imx1_pin_group *grp;
 	int ret;
 	static u32 grp_index;
 	u32 i = 0;
 
-	dev_dbg(info->dev, "parse function(%d): %s\n", index, np->name);
+	dev_dbg(info->dev, "parse function(%d): %pOFn\n", index, np);
 
 	func = &info->functions[index];
 
@@ -527,30 +523,51 @@ static int imx1_pinctrl_parse_functions(struct device_node *np,
 	if (func->num_groups == 0)
 		return -EINVAL;
 
-	func->groups = devm_kzalloc(info->dev,
-			func->num_groups * sizeof(char *), GFP_KERNEL);
+	func->groups = devm_kcalloc(info->dev,
+			func->num_groups, sizeof(char *), GFP_KERNEL);
 
 	if (!func->groups)
 		return -ENOMEM;
 
-	for_each_child_of_node(np, child) {
+	for_each_child_of_node_scoped(np, child) {
 		func->groups[i] = child->name;
 		grp = &info->groups[grp_index++];
 		ret = imx1_pinctrl_parse_groups(child, grp, info, i++);
-		if (ret == -ENOMEM) {
-			of_node_put(child);
+		if (ret == -ENOMEM)
 			return ret;
-		}
 	}
 
 	return 0;
+}
+
+/*
+ * Check if the DT contains pins in the direct child nodes. This indicates the
+ * newer DT format to store pins. This function returns true if the first found
+ * fsl,pins property is in a child of np. Otherwise false is returned.
+ */
+static bool imx1_pinctrl_dt_is_flat_functions(struct device_node *np)
+{
+	struct device_node *function_np;
+	struct device_node *pinctrl_np;
+
+	for_each_child_of_node(np, function_np) {
+		if (of_property_present(function_np, "fsl,pins"))
+			return true;
+
+		for_each_child_of_node(function_np, pinctrl_np) {
+			if (of_property_present(pinctrl_np, "fsl,pins"))
+				return false;
+		}
+	}
+
+	return true;
 }
 
 static int imx1_pinctrl_parse_dt(struct platform_device *pdev,
 		struct imx1_pinctrl *pctl, struct imx1_pinctrl_soc_info *info)
 {
 	struct device_node *np = pdev->dev.of_node;
-	struct device_node *child;
+	bool flat_funcs;
 	int ret;
 	u32 nfuncs = 0;
 	u32 ngroups = 0;
@@ -559,9 +576,15 @@ static int imx1_pinctrl_parse_dt(struct platform_device *pdev,
 	if (!np)
 		return -ENODEV;
 
-	for_each_child_of_node(np, child) {
-		++nfuncs;
-		ngroups += of_get_child_count(child);
+	flat_funcs = imx1_pinctrl_dt_is_flat_functions(np);
+	if (flat_funcs) {
+		nfuncs = 1;
+		ngroups = of_get_child_count(np);
+	} else {
+		for_each_child_of_node_scoped(np, child) {
+			++nfuncs;
+			ngroups += of_get_child_count(child);
+		}
 	}
 
 	if (!nfuncs) {
@@ -570,22 +593,24 @@ static int imx1_pinctrl_parse_dt(struct platform_device *pdev,
 	}
 
 	info->nfunctions = nfuncs;
-	info->functions = devm_kzalloc(&pdev->dev,
-			nfuncs * sizeof(struct imx1_pmx_func), GFP_KERNEL);
+	info->functions = devm_kcalloc(&pdev->dev,
+			nfuncs, sizeof(struct imx1_pmx_func), GFP_KERNEL);
 
 	info->ngroups = ngroups;
-	info->groups = devm_kzalloc(&pdev->dev,
-			ngroups * sizeof(struct imx1_pin_group), GFP_KERNEL);
+	info->groups = devm_kcalloc(&pdev->dev,
+			ngroups, sizeof(struct imx1_pin_group), GFP_KERNEL);
 
 
 	if (!info->functions || !info->groups)
 		return -ENOMEM;
 
-	for_each_child_of_node(np, child) {
-		ret = imx1_pinctrl_parse_functions(child, info, ifunc++);
-		if (ret == -ENOMEM) {
-			of_node_put(child);
-			return -ENOMEM;
+	if (flat_funcs) {
+		imx1_pinctrl_parse_functions(np, info, 0);
+	} else {
+		for_each_child_of_node_scoped(np, child) {
+			ret = imx1_pinctrl_parse_functions(child, info, ifunc++);
+			if (ret == -ENOMEM)
+				return -ENOMEM;
 		}
 	}
 
@@ -615,7 +640,7 @@ int imx1_pinctrl_core_probe(struct platform_device *pdev,
 	if (!res)
 		return -ENOENT;
 
-	ipctl->base = devm_ioremap_nocache(&pdev->dev, res->start,
+	ipctl->base = devm_ioremap(&pdev->dev, res->start,
 			resource_size(res));
 	if (!ipctl->base)
 		return -ENOMEM;
@@ -642,7 +667,6 @@ int imx1_pinctrl_core_probe(struct platform_device *pdev,
 
 	ret = of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
 	if (ret) {
-		pinctrl_unregister(ipctl->pctl);
 		dev_err(&pdev->dev, "Failed to populate subdevices\n");
 		return ret;
 	}

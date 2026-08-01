@@ -1,37 +1,28 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright (C) 2013-2018  B.A.T.M.A.N. contributors:
+/* Copyright (C) B.A.T.M.A.N. contributors:
  *
  * Linus Lüssing, Marek Lindner
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of version 2 of the GNU General Public
- * License as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "bat_v.h"
 #include "main.h"
 
-#include <linux/atomic.h>
 #include <linux/cache.h>
+#include <linux/compiler.h>
 #include <linux/errno.h>
 #include <linux/if_ether.h>
 #include <linux/init.h>
 #include <linux/jiffies.h>
-#include <linux/kernel.h>
 #include <linux/kref.h>
+#include <linux/limits.h>
+#include <linux/list.h>
+#include <linux/minmax.h>
 #include <linux/netdevice.h>
 #include <linux/netlink.h>
 #include <linux/rculist.h>
 #include <linux/rcupdate.h>
-#include <linux/seq_file.h>
+#include <linux/skbuff.h>
+#include <linux/spinlock.h>
 #include <linux/stddef.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
@@ -44,18 +35,15 @@
 #include "bat_v_elp.h"
 #include "bat_v_ogm.h"
 #include "gateway_client.h"
-#include "gateway_common.h"
 #include "hard-interface.h"
 #include "hash.h"
 #include "log.h"
 #include "netlink.h"
 #include "originator.h"
 
-struct sk_buff;
-
 static void batadv_v_iface_activate(struct batadv_hard_iface *hard_iface)
 {
-	struct batadv_priv *bat_priv = netdev_priv(hard_iface->soft_iface);
+	struct batadv_priv *bat_priv = netdev_priv(hard_iface->mesh_iface);
 	struct batadv_hard_iface *primary_if;
 
 	primary_if = batadv_primary_if_get_selected(bat_priv);
@@ -90,6 +78,7 @@ static int batadv_v_iface_enable(struct batadv_hard_iface *hard_iface)
 
 static void batadv_v_iface_disable(struct batadv_hard_iface *hard_iface)
 {
+	batadv_v_ogm_iface_disable(hard_iface);
 	batadv_v_elp_iface_disable(hard_iface);
 }
 
@@ -108,7 +97,7 @@ static void batadv_v_primary_iface_set(struct batadv_hard_iface *hard_iface)
  */
 static void batadv_v_iface_update_mac(struct batadv_hard_iface *hard_iface)
 {
-	struct batadv_priv *bat_priv = netdev_priv(hard_iface->soft_iface);
+	struct batadv_priv *bat_priv = netdev_priv(hard_iface->mesh_iface);
 	struct batadv_hard_iface *primary_if;
 
 	primary_if = batadv_primary_if_get_selected(bat_priv);
@@ -117,103 +106,14 @@ static void batadv_v_iface_update_mac(struct batadv_hard_iface *hard_iface)
 
 	batadv_v_primary_iface_set(hard_iface);
 out:
-	if (primary_if)
-		batadv_hardif_put(primary_if);
+	batadv_hardif_put(primary_if);
 }
 
 static void
 batadv_v_hardif_neigh_init(struct batadv_hardif_neigh_node *hardif_neigh)
 {
 	ewma_throughput_init(&hardif_neigh->bat_v.throughput);
-	INIT_WORK(&hardif_neigh->bat_v.metric_work,
-		  batadv_v_elp_throughput_metric_update);
 }
-
-#ifdef CONFIG_BATMAN_ADV_DEBUGFS
-/**
- * batadv_v_orig_print_neigh() - print neighbors for the originator table
- * @orig_node: the orig_node for which the neighbors are printed
- * @if_outgoing: outgoing interface for these entries
- * @seq: debugfs table seq_file struct
- *
- * Must be called while holding an rcu lock.
- */
-static void
-batadv_v_orig_print_neigh(struct batadv_orig_node *orig_node,
-			  struct batadv_hard_iface *if_outgoing,
-			  struct seq_file *seq)
-{
-	struct batadv_neigh_node *neigh_node;
-	struct batadv_neigh_ifinfo *n_ifinfo;
-
-	hlist_for_each_entry_rcu(neigh_node, &orig_node->neigh_list, list) {
-		n_ifinfo = batadv_neigh_ifinfo_get(neigh_node, if_outgoing);
-		if (!n_ifinfo)
-			continue;
-
-		seq_printf(seq, " %pM (%9u.%1u)",
-			   neigh_node->addr,
-			   n_ifinfo->bat_v.throughput / 10,
-			   n_ifinfo->bat_v.throughput % 10);
-
-		batadv_neigh_ifinfo_put(n_ifinfo);
-	}
-}
-
-/**
- * batadv_v_hardif_neigh_print() - print a single ELP neighbour node
- * @seq: neighbour table seq_file struct
- * @hardif_neigh: hardif neighbour information
- */
-static void
-batadv_v_hardif_neigh_print(struct seq_file *seq,
-			    struct batadv_hardif_neigh_node *hardif_neigh)
-{
-	int last_secs, last_msecs;
-	u32 throughput;
-
-	last_secs = jiffies_to_msecs(jiffies - hardif_neigh->last_seen) / 1000;
-	last_msecs = jiffies_to_msecs(jiffies - hardif_neigh->last_seen) % 1000;
-	throughput = ewma_throughput_read(&hardif_neigh->bat_v.throughput);
-
-	seq_printf(seq, "%pM %4i.%03is (%9u.%1u) [%10s]\n",
-		   hardif_neigh->addr, last_secs, last_msecs, throughput / 10,
-		   throughput % 10, hardif_neigh->if_incoming->net_dev->name);
-}
-
-/**
- * batadv_v_neigh_print() - print the single hop neighbour list
- * @bat_priv: the bat priv with all the soft interface information
- * @seq: neighbour table seq_file struct
- */
-static void batadv_v_neigh_print(struct batadv_priv *bat_priv,
-				 struct seq_file *seq)
-{
-	struct net_device *net_dev = (struct net_device *)seq->private;
-	struct batadv_hardif_neigh_node *hardif_neigh;
-	struct batadv_hard_iface *hard_iface;
-	int batman_count = 0;
-
-	seq_puts(seq,
-		 "  Neighbor        last-seen ( throughput) [        IF]\n");
-
-	rcu_read_lock();
-	list_for_each_entry_rcu(hard_iface, &batadv_hardif_list, list) {
-		if (hard_iface->soft_iface != net_dev)
-			continue;
-
-		hlist_for_each_entry_rcu(hardif_neigh,
-					 &hard_iface->neigh_list, list) {
-			batadv_v_hardif_neigh_print(seq, hardif_neigh);
-			batman_count++;
-		}
-	}
-	rcu_read_unlock();
-
-	if (batman_count == 0)
-		seq_puts(seq, "No batman nodes in range ...\n");
-}
-#endif
 
 /**
  * batadv_v_neigh_dump_neigh() - Dump a neighbour into a message
@@ -243,6 +143,8 @@ batadv_v_neigh_dump_neigh(struct sk_buff *msg, u32 portid, u32 seq,
 
 	if (nla_put(msg, BATADV_ATTR_NEIGH_ADDRESS, ETH_ALEN,
 		    hardif_neigh->addr) ||
+	    nla_put_string(msg, BATADV_ATTR_HARD_IFNAME,
+			   hardif_neigh->if_incoming->net_dev->name) ||
 	    nla_put_u32(msg, BATADV_ATTR_HARD_IFINDEX,
 			hardif_neigh->if_incoming->net_dev->ifindex) ||
 	    nla_put_u32(msg, BATADV_ATTR_LAST_SEEN_MSECS,
@@ -264,7 +166,7 @@ batadv_v_neigh_dump_neigh(struct sk_buff *msg, u32 portid, u32 seq,
  * @msg: Netlink message to dump into
  * @portid: Port making netlink request
  * @seq: Sequence number of netlink message
- * @bat_priv: The bat priv with all the soft interface information
+ * @bat_priv: The bat priv with all the mesh interface information
  * @hard_iface: The hard interface to be dumped
  * @idx_s: Entries to be skipped
  *
@@ -301,7 +203,7 @@ batadv_v_neigh_dump_hardif(struct sk_buff *msg, u32 portid, u32 seq,
  *  message
  * @msg: Netlink message to dump into
  * @cb: Control block containing additional options
- * @bat_priv: The bat priv with all the soft interface information
+ * @bat_priv: The bat priv with all the mesh interface information
  * @single_hardif: Limit dumping to this hard interface
  */
 static void
@@ -310,6 +212,7 @@ batadv_v_neigh_dump(struct sk_buff *msg, struct netlink_callback *cb,
 		    struct batadv_hard_iface *single_hardif)
 {
 	struct batadv_hard_iface *hard_iface;
+	struct list_head *iter;
 	int i_hardif = 0;
 	int i_hardif_s = cb->args[0];
 	int idx = cb->args[1];
@@ -325,10 +228,7 @@ batadv_v_neigh_dump(struct sk_buff *msg, struct netlink_callback *cb,
 				i_hardif++;
 		}
 	} else {
-		list_for_each_entry_rcu(hard_iface, &batadv_hardif_list, list) {
-			if (hard_iface->soft_iface != bat_priv->soft_iface)
-				continue;
-
+		netdev_for_each_lower_private_rcu(bat_priv->mesh_iface, hard_iface, iter) {
 			if (i_hardif++ < i_hardif_s)
 				continue;
 
@@ -347,81 +247,12 @@ batadv_v_neigh_dump(struct sk_buff *msg, struct netlink_callback *cb,
 	cb->args[1] = idx;
 }
 
-#ifdef CONFIG_BATMAN_ADV_DEBUGFS
-/**
- * batadv_v_orig_print() - print the originator table
- * @bat_priv: the bat priv with all the soft interface information
- * @seq: debugfs table seq_file struct
- * @if_outgoing: the outgoing interface for which this should be printed
- */
-static void batadv_v_orig_print(struct batadv_priv *bat_priv,
-				struct seq_file *seq,
-				struct batadv_hard_iface *if_outgoing)
-{
-	struct batadv_neigh_node *neigh_node;
-	struct batadv_hashtable *hash = bat_priv->orig_hash;
-	int last_seen_msecs, last_seen_secs;
-	struct batadv_orig_node *orig_node;
-	struct batadv_neigh_ifinfo *n_ifinfo;
-	unsigned long last_seen_jiffies;
-	struct hlist_head *head;
-	int batman_count = 0;
-	u32 i;
-
-	seq_puts(seq,
-		 "  Originator      last-seen ( throughput)           Nexthop [outgoingIF]:   Potential nexthops ...\n");
-
-	for (i = 0; i < hash->size; i++) {
-		head = &hash->table[i];
-
-		rcu_read_lock();
-		hlist_for_each_entry_rcu(orig_node, head, hash_entry) {
-			neigh_node = batadv_orig_router_get(orig_node,
-							    if_outgoing);
-			if (!neigh_node)
-				continue;
-
-			n_ifinfo = batadv_neigh_ifinfo_get(neigh_node,
-							   if_outgoing);
-			if (!n_ifinfo)
-				goto next;
-
-			last_seen_jiffies = jiffies - orig_node->last_seen;
-			last_seen_msecs = jiffies_to_msecs(last_seen_jiffies);
-			last_seen_secs = last_seen_msecs / 1000;
-			last_seen_msecs = last_seen_msecs % 1000;
-
-			seq_printf(seq, "%pM %4i.%03is (%9u.%1u) %pM [%10s]:",
-				   orig_node->orig, last_seen_secs,
-				   last_seen_msecs,
-				   n_ifinfo->bat_v.throughput / 10,
-				   n_ifinfo->bat_v.throughput % 10,
-				   neigh_node->addr,
-				   neigh_node->if_incoming->net_dev->name);
-
-			batadv_v_orig_print_neigh(orig_node, if_outgoing, seq);
-			seq_putc(seq, '\n');
-			batman_count++;
-
-next:
-			batadv_neigh_node_put(neigh_node);
-			if (n_ifinfo)
-				batadv_neigh_ifinfo_put(n_ifinfo);
-		}
-		rcu_read_unlock();
-	}
-
-	if (batman_count == 0)
-		seq_puts(seq, "No batman nodes in range ...\n");
-}
-#endif
-
 /**
  * batadv_v_orig_dump_subentry() - Dump an originator subentry into a message
  * @msg: Netlink message to dump into
  * @portid: Port making netlink request
  * @seq: Sequence number of netlink message
- * @bat_priv: The bat priv with all the soft interface information
+ * @bat_priv: The bat priv with all the mesh interface information
  * @if_outgoing: Limit dump to entries with this outgoing interface
  * @orig_node: Originator to dump
  * @neigh_node: Single hops neighbour
@@ -464,6 +295,8 @@ batadv_v_orig_dump_subentry(struct sk_buff *msg, u32 portid, u32 seq,
 	if (nla_put(msg, BATADV_ATTR_ORIG_ADDRESS, ETH_ALEN, orig_node->orig) ||
 	    nla_put(msg, BATADV_ATTR_NEIGH_ADDRESS, ETH_ALEN,
 		    neigh_node->addr) ||
+	    nla_put_string(msg, BATADV_ATTR_HARD_IFNAME,
+			   neigh_node->if_incoming->net_dev->name) ||
 	    nla_put_u32(msg, BATADV_ATTR_HARD_IFINDEX,
 			neigh_node->if_incoming->net_dev->ifindex) ||
 	    nla_put_u32(msg, BATADV_ATTR_THROUGHPUT, throughput) ||
@@ -487,7 +320,7 @@ batadv_v_orig_dump_subentry(struct sk_buff *msg, u32 portid, u32 seq,
  * @msg: Netlink message to dump into
  * @portid: Port making netlink request
  * @seq: Sequence number of netlink message
- * @bat_priv: The bat priv with all the soft interface information
+ * @bat_priv: The bat priv with all the mesh interface information
  * @if_outgoing: Limit dump to entries with this outgoing interface
  * @orig_node: Originator to dump
  * @sub_s: Number of sub entries to skip
@@ -528,8 +361,7 @@ batadv_v_orig_dump_entry(struct sk_buff *msg, u32 portid, u32 seq,
 	}
 
  out:
-	if (neigh_node_best)
-		batadv_neigh_node_put(neigh_node_best);
+	batadv_neigh_node_put(neigh_node_best);
 
 	*sub_s = 0;
 	return 0;
@@ -540,7 +372,7 @@ batadv_v_orig_dump_entry(struct sk_buff *msg, u32 portid, u32 seq,
  * @msg: Netlink message to dump into
  * @portid: Port making netlink request
  * @seq: Sequence number of netlink message
- * @bat_priv: The bat priv with all the soft interface information
+ * @bat_priv: The bat priv with all the mesh interface information
  * @if_outgoing: Limit dump to entries with this outgoing interface
  * @head: Bucket to be dumped
  * @idx_s: Number of entries to be skipped
@@ -580,7 +412,7 @@ batadv_v_orig_dump_bucket(struct sk_buff *msg, u32 portid, u32 seq,
  * batadv_v_orig_dump() - Dump the originators into a message
  * @msg: Netlink message to dump into
  * @cb: Control block containing additional options
- * @bat_priv: The bat priv with all the soft interface information
+ * @bat_priv: The bat priv with all the mesh interface information
  * @if_outgoing: Limit dump to entries with this outgoing interface
  */
 static void
@@ -668,38 +500,12 @@ err_ifinfo1:
 
 /**
  * batadv_v_init_sel_class() - initialize GW selection class
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  */
 static void batadv_v_init_sel_class(struct batadv_priv *bat_priv)
 {
 	/* set default throughput difference threshold to 5Mbps */
-	atomic_set(&bat_priv->gw.sel_class, 50);
-}
-
-static ssize_t batadv_v_store_sel_class(struct batadv_priv *bat_priv,
-					char *buff, size_t count)
-{
-	u32 old_class, class;
-
-	if (!batadv_parse_throughput(bat_priv->soft_iface, buff,
-				     "B.A.T.M.A.N. V GW selection class",
-				     &class))
-		return -EINVAL;
-
-	old_class = atomic_read(&bat_priv->gw.sel_class);
-	atomic_set(&bat_priv->gw.sel_class, class);
-
-	if (old_class != class)
-		batadv_gw_reselect(bat_priv);
-
-	return count;
-}
-
-static ssize_t batadv_v_show_sel_class(struct batadv_priv *bat_priv, char *buff)
-{
-	u32 class = atomic_read(&bat_priv->gw.sel_class);
-
-	return sprintf(buff, "%u.%u MBit\n", class / 10, class % 10);
+	WRITE_ONCE(bat_priv->gw.sel_class, 50);
 }
 
 /**
@@ -737,17 +543,15 @@ static int batadv_v_gw_throughput_get(struct batadv_gw_node *gw_node, u32 *bw)
 
 	ret = 0;
 out:
-	if (router)
-		batadv_neigh_node_put(router);
-	if (router_ifinfo)
-		batadv_neigh_ifinfo_put(router_ifinfo);
+	batadv_neigh_node_put(router);
+	batadv_neigh_ifinfo_put(router_ifinfo);
 
 	return ret;
 }
 
 /**
  * batadv_v_gw_get_best_gw_node() - retrieve the best GW node
- * @bat_priv: the bat priv with all the soft interface information
+ * @bat_priv: the bat priv with all the mesh interface information
  *
  * Return: the GW node having the best GW-metric, NULL if no GW is known
  */
@@ -768,8 +572,7 @@ batadv_v_gw_get_best_gw_node(struct batadv_priv *bat_priv)
 		if (curr_gw && bw <= max_bw)
 			goto next;
 
-		if (curr_gw)
-			batadv_gw_node_put(curr_gw);
+		batadv_gw_node_put(curr_gw);
 
 		curr_gw = gw_node;
 		kref_get(&curr_gw->refcount);
@@ -784,8 +587,8 @@ next:
 }
 
 /**
- * batadv_v_gw_is_eligible() - check if a originator would be selected as GW
- * @bat_priv: the bat priv with all the soft interface information
+ * batadv_v_gw_is_eligible() - check if an originator would be selected as GW
+ * @bat_priv: the bat priv with all the mesh interface information
  * @curr_gw_orig: originator representing the currently selected GW
  * @orig_node: the originator representing the new candidate
  *
@@ -799,7 +602,7 @@ static bool batadv_v_gw_is_eligible(struct batadv_priv *bat_priv,
 	u32 gw_throughput, orig_throughput, threshold;
 	bool ret = false;
 
-	threshold = atomic_read(&bat_priv->gw.sel_class);
+	threshold = READ_ONCE(bat_priv->gw.sel_class);
 
 	curr_gw = batadv_gw_node_get(bat_priv, curr_gw_orig);
 	if (!curr_gw) {
@@ -831,103 +634,30 @@ static bool batadv_v_gw_is_eligible(struct batadv_priv *bat_priv,
 
 	ret = true;
 out:
-	if (curr_gw)
-		batadv_gw_node_put(curr_gw);
-	if (orig_gw)
-		batadv_gw_node_put(orig_gw);
+	batadv_gw_node_put(curr_gw);
+	batadv_gw_node_put(orig_gw);
 
 	return ret;
 }
-
-#ifdef CONFIG_BATMAN_ADV_DEBUGFS
-/* fails if orig_node has no router */
-static int batadv_v_gw_write_buffer_text(struct batadv_priv *bat_priv,
-					 struct seq_file *seq,
-					 const struct batadv_gw_node *gw_node)
-{
-	struct batadv_gw_node *curr_gw;
-	struct batadv_neigh_node *router;
-	struct batadv_neigh_ifinfo *router_ifinfo = NULL;
-	int ret = -1;
-
-	router = batadv_orig_router_get(gw_node->orig_node, BATADV_IF_DEFAULT);
-	if (!router)
-		goto out;
-
-	router_ifinfo = batadv_neigh_ifinfo_get(router, BATADV_IF_DEFAULT);
-	if (!router_ifinfo)
-		goto out;
-
-	curr_gw = batadv_gw_get_selected_gw_node(bat_priv);
-
-	seq_printf(seq, "%s %pM (%9u.%1u) %pM [%10s]: %u.%u/%u.%u MBit\n",
-		   (curr_gw == gw_node ? "=>" : "  "),
-		   gw_node->orig_node->orig,
-		   router_ifinfo->bat_v.throughput / 10,
-		   router_ifinfo->bat_v.throughput % 10, router->addr,
-		   router->if_incoming->net_dev->name,
-		   gw_node->bandwidth_down / 10,
-		   gw_node->bandwidth_down % 10,
-		   gw_node->bandwidth_up / 10,
-		   gw_node->bandwidth_up % 10);
-	ret = seq_has_overflowed(seq) ? -1 : 0;
-
-	if (curr_gw)
-		batadv_gw_node_put(curr_gw);
-out:
-	if (router_ifinfo)
-		batadv_neigh_ifinfo_put(router_ifinfo);
-	if (router)
-		batadv_neigh_node_put(router);
-	return ret;
-}
-
-/**
- * batadv_v_gw_print() - print the gateway list
- * @bat_priv: the bat priv with all the soft interface information
- * @seq: gateway table seq_file struct
- */
-static void batadv_v_gw_print(struct batadv_priv *bat_priv,
-			      struct seq_file *seq)
-{
-	struct batadv_gw_node *gw_node;
-	int gw_count = 0;
-
-	seq_puts(seq,
-		 "      Gateway        ( throughput)           Nexthop [outgoingIF]: advertised uplink bandwidth\n");
-
-	rcu_read_lock();
-	hlist_for_each_entry_rcu(gw_node, &bat_priv->gw.gateway_list, list) {
-		/* fails if orig_node has no router */
-		if (batadv_v_gw_write_buffer_text(bat_priv, seq, gw_node) < 0)
-			continue;
-
-		gw_count++;
-	}
-	rcu_read_unlock();
-
-	if (gw_count == 0)
-		seq_puts(seq, "No gateways in range ...\n");
-}
-#endif
 
 /**
  * batadv_v_gw_dump_entry() - Dump a gateway into a message
  * @msg: Netlink message to dump into
  * @portid: Port making netlink request
- * @seq: Sequence number of netlink message
- * @bat_priv: The bat priv with all the soft interface information
+ * @cb: Control block containing additional options
+ * @bat_priv: The bat priv with all the mesh interface information
  * @gw_node: Gateway to be dumped
  *
  * Return: Error code, or 0 on success
  */
-static int batadv_v_gw_dump_entry(struct sk_buff *msg, u32 portid, u32 seq,
+static int batadv_v_gw_dump_entry(struct sk_buff *msg, u32 portid,
+				  struct netlink_callback *cb,
 				  struct batadv_priv *bat_priv,
 				  struct batadv_gw_node *gw_node)
 {
 	struct batadv_neigh_ifinfo *router_ifinfo = NULL;
 	struct batadv_neigh_node *router;
-	struct batadv_gw_node *curr_gw;
+	struct batadv_gw_node *curr_gw = NULL;
 	int ret = 0;
 	void *hdr;
 
@@ -941,12 +671,15 @@ static int batadv_v_gw_dump_entry(struct sk_buff *msg, u32 portid, u32 seq,
 
 	curr_gw = batadv_gw_get_selected_gw_node(bat_priv);
 
-	hdr = genlmsg_put(msg, portid, seq, &batadv_netlink_family,
-			  NLM_F_MULTI, BATADV_CMD_GET_GATEWAYS);
+	hdr = genlmsg_put(msg, portid, cb->nlh->nlmsg_seq,
+			  &batadv_netlink_family, NLM_F_MULTI,
+			  BATADV_CMD_GET_GATEWAYS);
 	if (!hdr) {
 		ret = -ENOBUFS;
 		goto out;
 	}
+
+	genl_dump_check_consistent(cb, hdr);
 
 	ret = -EMSGSIZE;
 
@@ -980,6 +713,12 @@ static int batadv_v_gw_dump_entry(struct sk_buff *msg, u32 portid, u32 seq,
 		goto out;
 	}
 
+	if (nla_put_u32(msg, BATADV_ATTR_HARD_IFINDEX,
+			router->if_incoming->net_dev->ifindex)) {
+		genlmsg_cancel(msg, hdr);
+		goto out;
+	}
+
 	if (nla_put_u32(msg, BATADV_ATTR_BANDWIDTH_DOWN,
 			gw_node->bandwidth_down)) {
 		genlmsg_cancel(msg, hdr);
@@ -995,10 +734,9 @@ static int batadv_v_gw_dump_entry(struct sk_buff *msg, u32 portid, u32 seq,
 	ret = 0;
 
 out:
-	if (router_ifinfo)
-		batadv_neigh_ifinfo_put(router_ifinfo);
-	if (router)
-		batadv_neigh_node_put(router);
+	batadv_gw_node_put(curr_gw);
+	batadv_neigh_ifinfo_put(router_ifinfo);
+	batadv_neigh_node_put(router);
 	return ret;
 }
 
@@ -1006,7 +744,7 @@ out:
  * batadv_v_gw_dump() - Dump gateways into a message
  * @msg: Netlink message to dump into
  * @cb: Control block containing additional options
- * @bat_priv: The bat priv with all the soft interface information
+ * @bat_priv: The bat priv with all the mesh interface information
  */
 static void batadv_v_gw_dump(struct sk_buff *msg, struct netlink_callback *cb,
 			     struct batadv_priv *bat_priv)
@@ -1016,13 +754,15 @@ static void batadv_v_gw_dump(struct sk_buff *msg, struct netlink_callback *cb,
 	int idx_skip = cb->args[0];
 	int idx = 0;
 
-	rcu_read_lock();
-	hlist_for_each_entry_rcu(gw_node, &bat_priv->gw.gateway_list, list) {
+	spin_lock_bh(&bat_priv->gw.list_lock);
+	cb->seq = bat_priv->gw.generation << 1 | 1;
+
+	hlist_for_each_entry(gw_node, &bat_priv->gw.gateway_list, list) {
 		if (idx++ < idx_skip)
 			continue;
 
-		if (batadv_v_gw_dump_entry(msg, portid, cb->nlh->nlmsg_seq,
-					   bat_priv, gw_node)) {
+		if (batadv_v_gw_dump_entry(msg, portid, cb, bat_priv,
+					   gw_node)) {
 			idx_skip = idx - 1;
 			goto unlock;
 		}
@@ -1030,7 +770,7 @@ static void batadv_v_gw_dump(struct sk_buff *msg, struct netlink_callback *cb,
 
 	idx_skip = idx;
 unlock:
-	rcu_read_unlock();
+	spin_unlock_bh(&bat_priv->gw.list_lock);
 
 	cb->args[0] = idx_skip;
 }
@@ -1048,26 +788,16 @@ static struct batadv_algo_ops batadv_batman_v __read_mostly = {
 		.hardif_init = batadv_v_hardif_neigh_init,
 		.cmp = batadv_v_neigh_cmp,
 		.is_similar_or_better = batadv_v_neigh_is_sob,
-#ifdef CONFIG_BATMAN_ADV_DEBUGFS
-		.print = batadv_v_neigh_print,
-#endif
 		.dump = batadv_v_neigh_dump,
 	},
 	.orig = {
-#ifdef CONFIG_BATMAN_ADV_DEBUGFS
-		.print = batadv_v_orig_print,
-#endif
 		.dump = batadv_v_orig_dump,
 	},
 	.gw = {
 		.init_sel_class = batadv_v_init_sel_class,
-		.store_sel_class = batadv_v_store_sel_class,
-		.show_sel_class = batadv_v_show_sel_class,
+		.sel_class_max = U32_MAX,
 		.get_best_gw_node = batadv_v_gw_get_best_gw_node,
 		.is_eligible = batadv_v_gw_is_eligible,
-#ifdef CONFIG_BATMAN_ADV_DEBUGFS
-		.print = batadv_v_gw_print,
-#endif
 		.dump = batadv_v_gw_dump,
 	},
 };
@@ -1082,8 +812,16 @@ void batadv_v_hardif_init(struct batadv_hard_iface *hard_iface)
 	/* enable link throughput auto-detection by setting the throughput
 	 * override to zero
 	 */
-	atomic_set(&hard_iface->bat_v.throughput_override, 0);
-	atomic_set(&hard_iface->bat_v.elp_interval, 500);
+	WRITE_ONCE(hard_iface->bat_v.throughput_override, 0);
+	WRITE_ONCE(hard_iface->bat_v.elp_interval, 500);
+
+	hard_iface->bat_v.aggr_len = 0;
+	skb_queue_head_init(&hard_iface->bat_v.aggr_list);
+	hard_iface->bat_v.aggr_list_enabled = false;
+	INIT_DELAYED_WORK(&hard_iface->bat_v.aggr_wq,
+			  batadv_v_ogm_aggr_work);
+	/* make sure it doesn't run until interface gets enabled */
+	disable_delayed_work(&hard_iface->bat_v.aggr_wq);
 }
 
 /**

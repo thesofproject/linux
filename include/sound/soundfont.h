@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 #ifndef __SOUND_SOUNDFONT_H
 #define __SOUND_SOUNDFONT_H
 
@@ -6,20 +7,6 @@
  *
  *  Copyright (C) 1999 Steve Ratcliffe
  *  Copyright (c) 1999-2000 Takashi iwai <tiwai@suse.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <sound/sfnt_info.h>
@@ -99,10 +86,12 @@ struct snd_sf_list {
 };
 
 /* Prototypes for soundfont.c */
-int snd_soundfont_load(struct snd_sf_list *sflist, const void __user *data,
+int snd_soundfont_load(struct snd_card *card,
+		       struct snd_sf_list *sflist, const void __user *data,
 		       long count, int client);
-int snd_soundfont_load_guspatch(struct snd_sf_list *sflist, const char __user *data,
-				long count, int client);
+int snd_soundfont_load_guspatch(struct snd_card *card,
+				struct snd_sf_list *sflist, const char __user *data,
+				long count);
 int snd_soundfont_close_check(struct snd_sf_list *sflist, int client);
 
 struct snd_sf_list *snd_sf_new(struct snd_sf_callback *callback,
@@ -125,5 +114,23 @@ int snd_sf_calc_parm_decay(int msec);
 extern int snd_sf_vol_table[128];
 int snd_sf_linear_to_log(unsigned int amount, int offset, int ratio);
 
+/* lock access to sflist */
+static inline void snd_soundfont_lock_preset(struct snd_sf_list *sflist)
+{
+	mutex_lock(&sflist->presets_mutex);
+	guard(spinlock_irqsave)(&sflist->lock);
+	sflist->presets_locked = 1;
+}
+
+/* remove lock */
+static inline void snd_soundfont_unlock_preset(struct snd_sf_list *sflist)
+{
+	guard(spinlock_irqsave)(&sflist->lock);
+	sflist->presets_locked = 0;
+	mutex_unlock(&sflist->presets_mutex);
+}
+
+DEFINE_GUARD(snd_soundfont_lock_preset, struct snd_sf_list *,
+	     snd_soundfont_lock_preset(_T), snd_soundfont_unlock_preset(_T))
 
 #endif /* __SOUND_SOUNDFONT_H */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Hibernation support specific for ARM
  *
@@ -11,8 +12,6 @@
  *  https://patchwork.kernel.org/patch/96442/
  *
  * Copyright (C) 2006 Rafael J. Wysocki <rjw@sisk.pl>
- *
- * License terms: GNU General Public License (GPL) version 2
  */
 
 #include <linux/mm.h>
@@ -20,8 +19,9 @@
 #include <asm/system_misc.h>
 #include <asm/idmap.h>
 #include <asm/suspend.h>
-#include <asm/memory.h>
+#include <asm/page.h>
 #include <asm/sections.h>
+#include <asm/uaccess.h>
 #include "reboot.h"
 
 int pfn_is_nosave(unsigned long pfn)
@@ -83,6 +83,15 @@ static void notrace arch_restore_image(void *unused)
 {
 	struct pbe *pbe;
 
+	/*
+	 * With CONFIG_CPU_TTBR0_PAN enabled, TTBCR.EPD0 is set to block
+	 * TTBR0 page-table walks.  The identity mapping used here lives at
+	 * low (user-space) virtual addresses and is only reachable via
+	 * TTBR0, so re-enable those walks before switching page tables.
+	 * On non-PAN kernels this is a no-op.
+	 */
+	if (IS_ENABLED(CONFIG_CPU_TTBR0_PAN))
+		uaccess_save_and_enable();
 	cpu_switch_mm(idmap_pgd, &init_mm);
 	for (pbe = restore_pblist; pbe; pbe = pbe->next)
 		copy_page(pbe->orig_address, pbe->address);

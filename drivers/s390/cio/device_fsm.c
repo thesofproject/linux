@@ -7,8 +7,10 @@
  *		 Martin Schwidefsky (schwidefsky@de.ibm.com)
  */
 
+#include <linux/export.h>
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/io.h>
 #include <linux/jiffies.h>
 #include <linux/string.h>
 
@@ -47,7 +49,7 @@ static void ccw_timeout_log(struct ccw_device *cdev)
 	orb = &private->orb;
 	cc = stsch(sch->schid, &schib);
 
-	printk(KERN_WARNING "cio: ccw device timeout occurred at %llx, "
+	printk(KERN_WARNING "cio: ccw device timeout occurred at %lx, "
 	       "device information:\n", get_tod_clock());
 	printk(KERN_WARNING "cio: orb:\n");
 	print_hex_dump(KERN_WARNING, "cio:  ", DUMP_PREFIX_NONE, 16, 1,
@@ -63,19 +65,21 @@ static void ccw_timeout_log(struct ccw_device *cdev)
 		printk(KERN_WARNING "cio: orb indicates transport mode\n");
 		printk(KERN_WARNING "cio: last tcw:\n");
 		print_hex_dump(KERN_WARNING, "cio:  ", DUMP_PREFIX_NONE, 16, 1,
-			       (void *)(addr_t)orb->tm.tcw,
+			       dma32_to_virt(orb->tm.tcw),
 			       sizeof(struct tcw), 0);
 	} else {
 		printk(KERN_WARNING "cio: orb indicates command mode\n");
-		if ((void *)(addr_t)orb->cmd.cpa == &private->sense_ccw ||
-		    (void *)(addr_t)orb->cmd.cpa == cdev->private->iccws)
+		if (dma32_to_virt(orb->cmd.cpa) ==
+		    &private->dma_area->sense_ccw ||
+		    dma32_to_virt(orb->cmd.cpa) ==
+		    cdev->private->dma_area->iccws)
 			printk(KERN_WARNING "cio: last channel program "
 			       "(intern):\n");
 		else
 			printk(KERN_WARNING "cio: last channel program:\n");
 
 		print_hex_dump(KERN_WARNING, "cio:  ", DUMP_PREFIX_NONE, 16, 1,
-			       (void *)(addr_t)orb->cmd.cpa,
+			       dma32_to_virt(orb->cmd.cpa),
 			       sizeof(struct ccw1), 0);
 	}
 	printk(KERN_WARNING "cio: ccw device state: %d\n",
@@ -95,7 +99,7 @@ static void ccw_timeout_log(struct ccw_device *cdev)
 void
 ccw_device_timeout(struct timer_list *t)
 {
-	struct ccw_device_private *priv = from_timer(priv, t, timer);
+	struct ccw_device_private *priv = timer_container_of(priv, t, timer);
 	struct ccw_device *cdev = priv->cdev;
 
 	spin_lock_irq(cdev->ccwlock);
@@ -111,16 +115,10 @@ ccw_device_timeout(struct timer_list *t)
 void
 ccw_device_set_timeout(struct ccw_device *cdev, int expires)
 {
-	if (expires == 0) {
-		del_timer(&cdev->private->timer);
-		return;
-	}
-	if (timer_pending(&cdev->private->timer)) {
-		if (mod_timer(&cdev->private->timer, jiffies + expires))
-			return;
-	}
-	cdev->private->timer.expires = jiffies + expires;
-	add_timer(&cdev->private->timer);
+	if (expires == 0)
+		timer_delete(&cdev->private->timer);
+	else
+		mod_timer(&cdev->private->timer, jiffies + expires);
 }
 
 int
@@ -143,18 +141,22 @@ ccw_device_cancel_halt_clear(struct ccw_device *cdev)
 void ccw_device_update_sense_data(struct ccw_device *cdev)
 {
 	memset(&cdev->id, 0, sizeof(cdev->id));
-	cdev->id.cu_type   = cdev->private->senseid.cu_type;
-	cdev->id.cu_model  = cdev->private->senseid.cu_model;
-	cdev->id.dev_type  = cdev->private->senseid.dev_type;
-	cdev->id.dev_model = cdev->private->senseid.dev_model;
+	cdev->id.cu_type = cdev->private->dma_area->senseid.cu_type;
+	cdev->id.cu_model = cdev->private->dma_area->senseid.cu_model;
+	cdev->id.dev_type = cdev->private->dma_area->senseid.dev_type;
+	cdev->id.dev_model = cdev->private->dma_area->senseid.dev_model;
 }
 
 int ccw_device_test_sense_data(struct ccw_device *cdev)
 {
-	return cdev->id.cu_type == cdev->private->senseid.cu_type &&
-		cdev->id.cu_model == cdev->private->senseid.cu_model &&
-		cdev->id.dev_type == cdev->private->senseid.dev_type &&
-		cdev->id.dev_model == cdev->private->senseid.dev_model;
+	return cdev->id.cu_type ==
+		cdev->private->dma_area->senseid.cu_type &&
+		cdev->id.cu_model ==
+		cdev->private->dma_area->senseid.cu_model &&
+		cdev->id.dev_type ==
+		cdev->private->dma_area->senseid.dev_type &&
+		cdev->id.dev_model ==
+		cdev->private->dma_area->senseid.dev_model;
 }
 
 /*
@@ -215,12 +217,6 @@ ccw_device_recog_done(struct ccw_device *cdev, int state)
 	    (state == DEV_STATE_NOT_OPER || state == DEV_STATE_BOXED)) {
 		cdev->private->flags.recog_done = 1;
 		cdev->private->state = DEV_STATE_DISCONNECTED;
-		wake_up(&cdev->private->wait_q);
-		return;
-	}
-	if (cdev->private->flags.resuming) {
-		cdev->private->state = state;
-		cdev->private->flags.recog_done = 1;
 		wake_up(&cdev->private->wait_q);
 		return;
 	}
@@ -315,7 +311,7 @@ static void ccw_device_oper_notify(struct ccw_device *cdev)
 	struct subchannel *sch = to_subchannel(cdev->dev.parent);
 
 	if (ccw_device_notify(cdev, CIO_OPER) == NOTIFY_OK) {
-		/* Reenable channel measurements, if needed. */
+		/* Re-enable channel measurements, if needed. */
 		ccw_device_sched_todo(cdev, CDEV_TODO_ENABLE_CMF);
 		/* Save indication for new paths. */
 		cdev->private->path_new_mask = sch->vpm;
@@ -342,7 +338,7 @@ ccw_device_done(struct ccw_device *cdev, int state)
 		cio_disable_subchannel(sch);
 
 	/* Reset device status. */
-	memset(&cdev->private->irb, 0, sizeof(struct irb));
+	memset(&cdev->private->dma_area->irb, 0, sizeof(struct irb));
 
 	cdev->private->state = state;
 
@@ -403,7 +399,7 @@ void ccw_device_recognition(struct ccw_device *cdev)
 	 */
 	cdev->private->flags.recog_done = 0;
 	cdev->private->state = DEV_STATE_SENSE_ID;
-	if (cio_enable_subchannel(sch, (u32) (addr_t) sch)) {
+	if (cio_enable_subchannel(sch, (u32)virt_to_phys(sch))) {
 		ccw_device_recog_done(cdev, DEV_STATE_NOT_OPER);
 		return;
 	}
@@ -509,13 +505,19 @@ callback:
 		ccw_device_done(cdev, DEV_STATE_ONLINE);
 		/* Deliver fake irb to device driver, if needed. */
 		if (cdev->private->flags.fake_irb) {
-			create_fake_irb(&cdev->private->irb,
+			CIO_MSG_EVENT(2, "fakeirb: deliver device 0.%x.%04x intparm %lx type=%d\n",
+				      cdev->private->dev_id.ssid,
+				      cdev->private->dev_id.devno,
+				      cdev->private->intparm,
+				      cdev->private->flags.fake_irb);
+			create_fake_irb(&cdev->private->dma_area->irb,
 					cdev->private->flags.fake_irb);
 			cdev->private->flags.fake_irb = 0;
 			if (cdev->handler)
 				cdev->handler(cdev, cdev->private->intparm,
-					      &cdev->private->irb);
-			memset(&cdev->private->irb, 0, sizeof(struct irb));
+					      &cdev->private->dma_area->irb);
+			memset(&cdev->private->dma_area->irb, 0,
+			       sizeof(struct irb));
 		}
 		ccw_device_report_path_events(cdev);
 		ccw_device_handle_broken_paths(cdev);
@@ -553,7 +555,7 @@ ccw_device_online(struct ccw_device *cdev)
 	    (cdev->private->state != DEV_STATE_BOXED))
 		return -EINVAL;
 	sch = to_subchannel(cdev->dev.parent);
-	ret = cio_enable_subchannel(sch, (u32)(addr_t)sch);
+	ret = cio_enable_subchannel(sch, (u32)virt_to_phys(sch));
 	if (ret != 0) {
 		/* Couldn't enable the subchannel for i/o. Sick device. */
 		if (ret == -ENODEV)
@@ -672,7 +674,8 @@ ccw_device_online_verify(struct ccw_device *cdev, enum dev_event dev_event)
 
 	if (scsw_actl(&sch->schib.scsw) != 0 ||
 	    (scsw_stctl(&sch->schib.scsw) & SCSW_STCTL_STATUS_PEND) ||
-	    (scsw_stctl(&cdev->private->irb.scsw) & SCSW_STCTL_STATUS_PEND)) {
+	    (scsw_stctl(&cdev->private->dma_area->irb.scsw) &
+	     SCSW_STCTL_STATUS_PEND)) {
 		/*
 		 * No final status yet or final status not yet delivered
 		 * to the device driver. Can't do path verification now,
@@ -695,7 +698,7 @@ static void ccw_device_boxed_verify(struct ccw_device *cdev,
 	struct subchannel *sch = to_subchannel(cdev->dev.parent);
 
 	if (cdev->online) {
-		if (cio_enable_subchannel(sch, (u32) (addr_t) sch))
+		if (cio_enable_subchannel(sch, (u32)virt_to_phys(sch)))
 			ccw_device_done(cdev, DEV_STATE_NOT_OPER);
 		else
 			ccw_device_online_verify(cdev, dev_event);
@@ -719,7 +722,7 @@ static int ccw_device_call_handler(struct ccw_device *cdev)
 	 *  - fast notification was requested (primary status)
 	 *  - unsolicited interrupts
 	 */
-	stctl = scsw_stctl(&cdev->private->irb.scsw);
+	stctl = scsw_stctl(&cdev->private->dma_area->irb.scsw);
 	ending_status = (stctl & SCSW_STCTL_SEC_STATUS) ||
 		(stctl == (SCSW_STCTL_ALERT_STATUS | SCSW_STCTL_STATUS_PEND)) ||
 		(stctl == SCSW_STCTL_STATUS_PEND);
@@ -735,9 +738,9 @@ static int ccw_device_call_handler(struct ccw_device *cdev)
 
 	if (cdev->handler)
 		cdev->handler(cdev, cdev->private->intparm,
-			      &cdev->private->irb);
+			      &cdev->private->dma_area->irb);
 
-	memset(&cdev->private->irb, 0, sizeof(struct irb));
+	memset(&cdev->private->dma_area->irb, 0, sizeof(struct irb));
 	return 1;
 }
 
@@ -759,7 +762,8 @@ ccw_device_irq(struct ccw_device *cdev, enum dev_event dev_event)
 			/* Unit check but no sense data. Need basic sense. */
 			if (ccw_device_do_sense(cdev, irb) != 0)
 				goto call_handler_unsol;
-			memcpy(&cdev->private->irb, irb, sizeof(struct irb));
+			memcpy(&cdev->private->dma_area->irb, irb,
+			       sizeof(struct irb));
 			cdev->private->state = DEV_STATE_W4SENSE;
 			cdev->private->intparm = 0;
 			return;
@@ -842,7 +846,7 @@ ccw_device_w4sense(struct ccw_device *cdev, enum dev_event dev_event)
 	if (scsw_fctl(&irb->scsw) &
 	    (SCSW_FCTL_CLEAR_FUNC | SCSW_FCTL_HALT_FUNC)) {
 		cdev->private->flags.dosense = 0;
-		memset(&cdev->private->irb, 0, sizeof(struct irb));
+		memset(&cdev->private->dma_area->irb, 0, sizeof(struct irb));
 		ccw_device_accumulate_irb(cdev, irb);
 		goto call_handler;
 	}
@@ -925,7 +929,7 @@ ccw_device_start_id(struct ccw_device *cdev, enum dev_event dev_event)
 	struct subchannel *sch;
 
 	sch = to_subchannel(cdev->dev.parent);
-	if (cio_enable_subchannel(sch, (u32)(addr_t)sch) != 0)
+	if (cio_enable_subchannel(sch, (u32)virt_to_phys(sch)) != 0)
 		/* Couldn't enable the subchannel for i/o. Sick device. */
 		return;
 	cdev->private->state = DEV_STATE_DISCONNECTED_SENSE_ID;
@@ -949,7 +953,7 @@ void ccw_device_trigger_reprobe(struct ccw_device *cdev)
 	 */
 	sch->lpm = sch->schib.pmcw.pam & sch->opm;
 	/*
-	 * Use the initial configuration since we can't be shure that the old
+	 * Use the initial configuration since we can't be sure that the old
 	 * paths are valid.
 	 */
 	io_subchannel_init_config(sch);

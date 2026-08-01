@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * MIPI CSI-2 Receiver Subdev for Freescale i.MX6 SOC.
  *
  * Copyright (c) 2012-2017 Mentor Graphics Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 #include <linux/clk.h>
 #include <linux/interrupt.h>
@@ -16,8 +12,10 @@
 #include <linux/module.h>
 #include <linux/of_graph.h>
 #include <linux/platform_device.h>
+#include <media/v4l2-common.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-fwnode.h>
+#include <media/v4l2-mc.h>
 #include <media/v4l2-subdev.h>
 #include "imx-media.h"
 
@@ -25,61 +23,65 @@
  * there must be 5 pads: 1 input pad from sensor, and
  * the 4 virtual channel output pads
  */
-#define CSI2_SINK_PAD       0
-#define CSI2_NUM_SINK_PADS  1
-#define CSI2_NUM_SRC_PADS   4
-#define CSI2_NUM_PADS       5
+#define CSI2_SINK_PAD		0
+#define CSI2_NUM_SINK_PADS	1
+#define CSI2_NUM_SRC_PADS	4
+#define CSI2_NUM_PADS		5
 
 /*
  * The default maximum bit-rate per lane in Mbps, if the
  * source subdev does not provide V4L2_CID_LINK_FREQ.
  */
-#define CSI2_DEFAULT_MAX_MBPS 849
+#define CSI2_DEFAULT_MAX_MBPS	849
 
 struct csi2_dev {
-	struct device          *dev;
-	struct v4l2_subdev      sd;
-	struct media_pad       pad[CSI2_NUM_PADS];
-	struct clk             *dphy_clk;
-	struct clk             *pllref_clk;
-	struct clk             *pix_clk; /* what is this? */
-	void __iomem           *base;
-	struct v4l2_fwnode_bus_mipi_csi2 bus;
+	struct device *dev;
+	struct v4l2_subdev sd;
+	struct v4l2_async_notifier notifier;
+	struct media_pad pad[CSI2_NUM_PADS];
+	struct clk *dphy_clk;
+	struct clk *pllref_clk;
+	struct clk *pix_clk; /* what is this? */
+	void __iomem *base;
+
+	struct v4l2_subdev *remote;
+	unsigned int remote_pad;
+	unsigned short data_lanes;
 
 	/* lock to protect all members below */
 	struct mutex lock;
 
 	struct v4l2_mbus_framefmt format_mbus;
 
-	int                     stream_count;
-	struct v4l2_subdev      *src_sd;
-	bool                    sink_linked[CSI2_NUM_SRC_PADS];
+	int stream_count;
+	struct v4l2_subdev *src_sd;
+	bool sink_linked[CSI2_NUM_SRC_PADS];
 };
 
 #define DEVICE_NAME "imx6-mipi-csi2"
 
 /* Register offsets */
-#define CSI2_VERSION            0x000
-#define CSI2_N_LANES            0x004
-#define CSI2_PHY_SHUTDOWNZ      0x008
-#define CSI2_DPHY_RSTZ          0x00c
-#define CSI2_RESETN             0x010
-#define CSI2_PHY_STATE          0x014
-#define PHY_STOPSTATEDATA_BIT   4
-#define PHY_STOPSTATEDATA(n)    BIT(PHY_STOPSTATEDATA_BIT + (n))
-#define PHY_RXCLKACTIVEHS       BIT(8)
-#define PHY_RXULPSCLKNOT        BIT(9)
-#define PHY_STOPSTATECLK        BIT(10)
-#define CSI2_DATA_IDS_1         0x018
-#define CSI2_DATA_IDS_2         0x01c
-#define CSI2_ERR1               0x020
-#define CSI2_ERR2               0x024
-#define CSI2_MSK1               0x028
-#define CSI2_MSK2               0x02c
-#define CSI2_PHY_TST_CTRL0      0x030
+#define CSI2_VERSION		0x000
+#define CSI2_N_LANES		0x004
+#define CSI2_PHY_SHUTDOWNZ	0x008
+#define CSI2_DPHY_RSTZ		0x00c
+#define CSI2_RESETN		0x010
+#define CSI2_PHY_STATE		0x014
+#define PHY_STOPSTATEDATA_BIT	4
+#define PHY_STOPSTATEDATA(n)	BIT(PHY_STOPSTATEDATA_BIT + (n))
+#define PHY_RXCLKACTIVEHS	BIT(8)
+#define PHY_RXULPSCLKNOT	BIT(9)
+#define PHY_STOPSTATECLK	BIT(10)
+#define CSI2_DATA_IDS_1		0x018
+#define CSI2_DATA_IDS_2		0x01c
+#define CSI2_ERR1		0x020
+#define CSI2_ERR2		0x024
+#define CSI2_MSK1		0x028
+#define CSI2_MSK2		0x02c
+#define CSI2_PHY_TST_CTRL0	0x030
 #define PHY_TESTCLR		BIT(0)
 #define PHY_TESTCLK		BIT(1)
-#define CSI2_PHY_TST_CTRL1      0x034
+#define CSI2_PHY_TST_CTRL1	0x034
 #define PHY_TESTEN		BIT(16)
 /*
  * i.MX CSI2IPU Gasket registers follow. The CSI2IPU gasket is
@@ -94,18 +96,23 @@ static inline struct csi2_dev *sd_to_dev(struct v4l2_subdev *sdev)
 	return container_of(sdev, struct csi2_dev, sd);
 }
 
+static inline struct csi2_dev *notifier_to_dev(struct v4l2_async_notifier *n)
+{
+	return container_of(n, struct csi2_dev, notifier);
+}
+
 /*
  * The required sequence of MIPI CSI-2 startup as specified in the i.MX6
  * reference manual is as follows:
  *
  * 1. Deassert presetn signal (global reset).
- *        It's not clear what this "global reset" signal is (maybe APB
- *        global reset), but in any case this step would be probably
- *        be carried out during driver load in csi2_probe().
+ *	It's not clear what this "global reset" signal is (maybe APB
+ *	global reset), but in any case this step would be probably
+ *	be carried out during driver load in csi2_probe().
  *
  * 2. Configure MIPI Camera Sensor to put all Tx lanes in LP-11 state.
- *        This must be carried out by the MIPI sensor's s_power(ON) subdev
- *        op.
+ *	This must be carried out by the MIPI sensor's s_power(ON) subdev
+ *	op.
  *
  * 3. D-PHY initialization.
  * 4. CSI2 Controller programming (Set N_LANES, deassert PHY_SHUTDOWNZ,
@@ -135,10 +142,8 @@ static void csi2_enable(struct csi2_dev *csi2, bool enable)
 	}
 }
 
-static void csi2_set_lanes(struct csi2_dev *csi2)
+static void csi2_set_lanes(struct csi2_dev *csi2, unsigned int lanes)
 {
-	int lanes = csi2->bus.num_data_lanes;
-
 	writel(lanes - 1, csi2->base + CSI2_N_LANES);
 }
 
@@ -247,22 +252,19 @@ static int __maybe_unused csi2_dphy_wait_ulp(struct csi2_dev *csi2)
 }
 
 /* Waits for low-power LP-11 state on data and clock lanes. */
-static int csi2_dphy_wait_stopstate(struct csi2_dev *csi2)
+static void csi2_dphy_wait_stopstate(struct csi2_dev *csi2, unsigned int lanes)
 {
 	u32 mask, reg;
 	int ret;
 
-	mask = PHY_STOPSTATECLK | (((1 << csi2->bus.num_data_lanes) - 1) <<
-				   PHY_STOPSTATEDATA_BIT);
+	mask = PHY_STOPSTATECLK | (((1 << lanes) - 1) << PHY_STOPSTATEDATA_BIT);
 
 	ret = readl_poll_timeout(csi2->base + CSI2_PHY_STATE, reg,
 				 (reg & mask) == mask, 0, 500000);
 	if (ret) {
-		v4l2_err(&csi2->sd, "LP-11 timeout, phy_state = 0x%08x\n", reg);
-		return ret;
+		v4l2_warn(&csi2->sd, "LP-11 wait timeout, likely a sensor driver bug, expect capture failures.\n");
+		v4l2_warn(&csi2->sd, "phy_state = 0x%08x\n", reg);
 	}
-
-	return 0;
 }
 
 /* Wait for active clock on the clock lane. */
@@ -299,8 +301,46 @@ static void csi2ipu_gasket_init(struct csi2_dev *csi2)
 	writel(reg, csi2->base + CSI2IPU_GASKET);
 }
 
+static int csi2_get_active_lanes(struct csi2_dev *csi2, unsigned int *lanes)
+{
+	struct v4l2_mbus_config mbus_config = { 0 };
+	int ret;
+
+	*lanes = csi2->data_lanes;
+
+	ret = v4l2_subdev_call(csi2->remote, pad, get_mbus_config,
+			       csi2->remote_pad, &mbus_config);
+	if (ret == -ENOIOCTLCMD) {
+		dev_dbg(csi2->dev, "No remote mbus configuration available\n");
+		return 0;
+	}
+
+	if (ret) {
+		dev_err(csi2->dev, "Failed to get remote mbus configuration\n");
+		return ret;
+	}
+
+	if (mbus_config.type != V4L2_MBUS_CSI2_DPHY) {
+		dev_err(csi2->dev, "Unsupported media bus type %u\n",
+			mbus_config.type);
+		return -EINVAL;
+	}
+
+	if (mbus_config.bus.mipi_csi2.num_data_lanes > csi2->data_lanes) {
+		dev_err(csi2->dev,
+			"Unsupported mbus config: too many data lanes %u\n",
+			mbus_config.bus.mipi_csi2.num_data_lanes);
+		return -EINVAL;
+	}
+
+	*lanes = mbus_config.bus.mipi_csi2.num_data_lanes;
+
+	return 0;
+}
+
 static int csi2_start(struct csi2_dev *csi2)
 {
+	unsigned int lanes;
 	int ret;
 
 	ret = clk_prepare_enable(csi2->pix_clk);
@@ -315,20 +355,26 @@ static int csi2_start(struct csi2_dev *csi2)
 	if (ret)
 		goto err_disable_clk;
 
+	ret = csi2_get_active_lanes(csi2, &lanes);
+	if (ret)
+		goto err_disable_clk;
+
 	/* Step 4 */
-	csi2_set_lanes(csi2);
+	csi2_set_lanes(csi2, lanes);
 	csi2_enable(csi2, true);
 
 	/* Step 5 */
-	ret = csi2_dphy_wait_stopstate(csi2);
-	if (ret)
+	ret = v4l2_subdev_call(csi2->src_sd, video, pre_streamon,
+			       V4L2_SUBDEV_PRE_STREAMON_FL_MANUAL_LP);
+	if (ret && ret != -ENOIOCTLCMD)
 		goto err_assert_reset;
+	csi2_dphy_wait_stopstate(csi2, lanes);
 
 	/* Step 6 */
 	ret = v4l2_subdev_call(csi2->src_sd, video, s_stream, 1);
 	ret = (ret && ret != -ENOIOCTLCMD) ? ret : 0;
 	if (ret)
-		goto err_assert_reset;
+		goto err_stop_lp11;
 
 	/* Step 7 */
 	ret = csi2_dphy_wait_clock_lane(csi2);
@@ -339,6 +385,8 @@ static int csi2_start(struct csi2_dev *csi2)
 
 err_stop_upstream:
 	v4l2_subdev_call(csi2->src_sd, video, s_stream, 0);
+err_stop_lp11:
+	v4l2_subdev_call(csi2->src_sd, video, post_streamoff);
 err_assert_reset:
 	csi2_enable(csi2, false);
 err_disable_clk:
@@ -350,6 +398,7 @@ static void csi2_stop(struct csi2_dev *csi2)
 {
 	/* stop upstream */
 	v4l2_subdev_call(csi2->src_sd, video, s_stream, 0);
+	v4l2_subdev_call(csi2->src_sd, video, post_streamoff);
 
 	csi2_enable(csi2, false);
 	clk_disable_unprepare(csi2->pix_clk);
@@ -448,17 +497,17 @@ out:
 }
 
 static struct v4l2_mbus_framefmt *
-__csi2_get_fmt(struct csi2_dev *csi2, struct v4l2_subdev_pad_config *cfg,
+__csi2_get_fmt(struct csi2_dev *csi2, struct v4l2_subdev_state *sd_state,
 	       unsigned int pad, enum v4l2_subdev_format_whence which)
 {
 	if (which == V4L2_SUBDEV_FORMAT_TRY)
-		return v4l2_subdev_get_try_format(&csi2->sd, cfg, pad);
+		return v4l2_subdev_state_get_format(sd_state, pad);
 	else
 		return &csi2->format_mbus;
 }
 
 static int csi2_get_fmt(struct v4l2_subdev *sd,
-			struct v4l2_subdev_pad_config *cfg,
+			struct v4l2_subdev_state *sd_state,
 			struct v4l2_subdev_format *sdformat)
 {
 	struct csi2_dev *csi2 = sd_to_dev(sd);
@@ -466,7 +515,7 @@ static int csi2_get_fmt(struct v4l2_subdev *sd,
 
 	mutex_lock(&csi2->lock);
 
-	fmt = __csi2_get_fmt(csi2, cfg, sdformat->pad, sdformat->which);
+	fmt = __csi2_get_fmt(csi2, sd_state, sdformat->pad, sdformat->which);
 
 	sdformat->format = *fmt;
 
@@ -476,7 +525,7 @@ static int csi2_get_fmt(struct v4l2_subdev *sd,
 }
 
 static int csi2_set_fmt(struct v4l2_subdev *sd,
-			struct v4l2_subdev_pad_config *cfg,
+			struct v4l2_subdev_state *sd_state,
 			struct v4l2_subdev_format *sdformat)
 {
 	struct csi2_dev *csi2 = sd_to_dev(sd);
@@ -497,7 +546,7 @@ static int csi2_set_fmt(struct v4l2_subdev *sd,
 	if (sdformat->pad != CSI2_SINK_PAD)
 		sdformat->format = csi2->format_mbus;
 
-	fmt = __csi2_get_fmt(csi2, cfg, sdformat->pad, sdformat->which);
+	fmt = __csi2_get_fmt(csi2, sd_state, sdformat->pad, sdformat->which);
 
 	*fmt = sdformat->format;
 out:
@@ -505,31 +554,64 @@ out:
 	return ret;
 }
 
-/*
- * retrieve our pads parsed from the OF graph by the media device
- */
 static int csi2_registered(struct v4l2_subdev *sd)
 {
 	struct csi2_dev *csi2 = sd_to_dev(sd);
-	int i, ret;
-
-	for (i = 0; i < CSI2_NUM_PADS; i++) {
-		csi2->pad[i].flags = (i == CSI2_SINK_PAD) ?
-		MEDIA_PAD_FL_SINK : MEDIA_PAD_FL_SOURCE;
-	}
 
 	/* set a default mbus format  */
-	ret = imx_media_init_mbus_fmt(&csi2->format_mbus,
-				      640, 480, 0, V4L2_FIELD_NONE, NULL);
-	if (ret)
-		return ret;
-
-	return media_entity_pads_init(&sd->entity, CSI2_NUM_PADS, csi2->pad);
+	return imx_media_init_mbus_fmt(&csi2->format_mbus,
+				      IMX_MEDIA_DEF_PIX_WIDTH,
+				      IMX_MEDIA_DEF_PIX_HEIGHT, 0,
+				      V4L2_FIELD_NONE, NULL);
 }
+
+/* --------------- CORE OPS --------------- */
+
+static int csi2_log_status(struct v4l2_subdev *sd)
+{
+	struct csi2_dev *csi2 = sd_to_dev(sd);
+
+	v4l2_info(sd, "-----MIPI CSI status-----\n");
+	v4l2_info(sd, "VERSION: 0x%x\n",
+		  readl(csi2->base + CSI2_VERSION));
+	v4l2_info(sd, "N_LANES: 0x%x\n",
+		  readl(csi2->base + CSI2_N_LANES));
+	v4l2_info(sd, "PHY_SHUTDOWNZ: 0x%x\n",
+		  readl(csi2->base + CSI2_PHY_SHUTDOWNZ));
+	v4l2_info(sd, "DPHY_RSTZ: 0x%x\n",
+		  readl(csi2->base + CSI2_DPHY_RSTZ));
+	v4l2_info(sd, "RESETN: 0x%x\n",
+		  readl(csi2->base + CSI2_RESETN));
+	v4l2_info(sd, "PHY_STATE: 0x%x\n",
+		  readl(csi2->base + CSI2_PHY_STATE));
+	v4l2_info(sd, "DATA_IDS_1: 0x%x\n",
+		  readl(csi2->base + CSI2_DATA_IDS_1));
+	v4l2_info(sd, "DATA_IDS_2: 0x%x\n",
+		  readl(csi2->base + CSI2_DATA_IDS_2));
+	v4l2_info(sd, "ERR1: 0x%x\n",
+		  readl(csi2->base + CSI2_ERR1));
+	v4l2_info(sd, "ERR2: 0x%x\n",
+		  readl(csi2->base + CSI2_ERR2));
+	v4l2_info(sd, "MSK1: 0x%x\n",
+		  readl(csi2->base + CSI2_MSK1));
+	v4l2_info(sd, "MSK2: 0x%x\n",
+		  readl(csi2->base + CSI2_MSK2));
+	v4l2_info(sd, "PHY_TST_CTRL0: 0x%x\n",
+		  readl(csi2->base + CSI2_PHY_TST_CTRL0));
+	v4l2_info(sd, "PHY_TST_CTRL1: 0x%x\n",
+		  readl(csi2->base + CSI2_PHY_TST_CTRL1));
+
+	return 0;
+}
+
+static const struct v4l2_subdev_core_ops csi2_core_ops = {
+	.log_status = csi2_log_status,
+};
 
 static const struct media_entity_operations csi2_entity_ops = {
 	.link_setup = csi2_link_setup,
 	.link_validate = v4l2_subdev_link_validate,
+	.get_fwnode_pad = v4l2_subdev_get_fwnode_pad_1_to_1,
 };
 
 static const struct v4l2_subdev_video_ops csi2_video_ops = {
@@ -537,52 +619,107 @@ static const struct v4l2_subdev_video_ops csi2_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops csi2_pad_ops = {
-	.init_cfg = imx_media_init_cfg,
 	.get_fmt = csi2_get_fmt,
 	.set_fmt = csi2_set_fmt,
 };
 
 static const struct v4l2_subdev_ops csi2_subdev_ops = {
+	.core = &csi2_core_ops,
 	.video = &csi2_video_ops,
 	.pad = &csi2_pad_ops,
 };
 
 static const struct v4l2_subdev_internal_ops csi2_internal_ops = {
+	.init_state = imx_media_init_state,
 	.registered = csi2_registered,
 };
 
-static int csi2_parse_endpoints(struct csi2_dev *csi2)
+static int csi2_notify_bound(struct v4l2_async_notifier *notifier,
+			     struct v4l2_subdev *sd,
+			     struct v4l2_async_connection *asd)
 {
-	struct device_node *node = csi2->dev->of_node;
-	struct device_node *epnode;
-	struct v4l2_fwnode_endpoint ep;
+	struct csi2_dev *csi2 = notifier_to_dev(notifier);
+	struct media_pad *sink = &csi2->sd.entity.pads[CSI2_SINK_PAD];
+	int pad;
 
-	epnode = of_graph_get_endpoint_by_regs(node, 0, -1);
-	if (!epnode) {
-		v4l2_err(&csi2->sd, "failed to get sink endpoint node\n");
-		return -EINVAL;
+	pad = media_entity_get_fwnode_pad(&sd->entity, asd->match.fwnode,
+					  MEDIA_PAD_FL_SOURCE);
+	if (pad < 0) {
+		dev_err(csi2->dev, "Failed to find pad for %s\n", sd->name);
+		return pad;
 	}
 
-	v4l2_fwnode_endpoint_parse(of_fwnode_handle(epnode), &ep);
-	of_node_put(epnode);
+	csi2->remote = sd;
+	csi2->remote_pad = pad;
 
-	if (ep.bus_type != V4L2_MBUS_CSI2) {
-		v4l2_err(&csi2->sd, "invalid bus type, must be MIPI CSI2\n");
-		return -EINVAL;
-	}
+	dev_dbg(csi2->dev, "Bound %s pad: %d\n", sd->name, pad);
 
-	csi2->bus = ep.bus.mipi_csi2;
+	return v4l2_create_fwnode_links_to_pad(sd, sink, 0);
+}
 
-	dev_dbg(csi2->dev, "data lanes: %d\n", csi2->bus.num_data_lanes);
-	dev_dbg(csi2->dev, "flags: 0x%08x\n", csi2->bus.flags);
-	return 0;
+static void csi2_notify_unbind(struct v4l2_async_notifier *notifier,
+			       struct v4l2_subdev *sd,
+			       struct v4l2_async_connection *asd)
+{
+	struct csi2_dev *csi2 = notifier_to_dev(notifier);
+
+	csi2->remote = NULL;
+}
+
+static const struct v4l2_async_notifier_operations csi2_notify_ops = {
+	.bound = csi2_notify_bound,
+	.unbind = csi2_notify_unbind,
+};
+
+static int csi2_async_register(struct csi2_dev *csi2)
+{
+	struct v4l2_fwnode_endpoint vep = {
+		.bus_type = V4L2_MBUS_CSI2_DPHY,
+	};
+	struct v4l2_async_connection *asd;
+	struct fwnode_handle *ep;
+	int ret;
+
+	v4l2_async_subdev_nf_init(&csi2->notifier, &csi2->sd);
+
+	ep = fwnode_graph_get_endpoint_by_id(dev_fwnode(csi2->dev), 0, 0,
+					     FWNODE_GRAPH_ENDPOINT_NEXT);
+	if (!ep)
+		return -ENOTCONN;
+
+	ret = v4l2_fwnode_endpoint_parse(ep, &vep);
+	if (ret)
+		goto err_parse;
+
+	csi2->data_lanes = vep.bus.mipi_csi2.num_data_lanes;
+
+	dev_dbg(csi2->dev, "data lanes: %d\n", vep.bus.mipi_csi2.num_data_lanes);
+	dev_dbg(csi2->dev, "flags: 0x%08x\n", vep.bus.mipi_csi2.flags);
+
+	asd = v4l2_async_nf_add_fwnode_remote(&csi2->notifier, ep,
+					      struct v4l2_async_connection);
+	fwnode_handle_put(ep);
+
+	if (IS_ERR(asd))
+		return PTR_ERR(asd);
+
+	csi2->notifier.ops = &csi2_notify_ops;
+
+	ret = v4l2_async_nf_register(&csi2->notifier);
+	if (ret)
+		return ret;
+
+	return v4l2_async_register_subdev(&csi2->sd);
+
+err_parse:
+	fwnode_handle_put(ep);
+	return ret;
 }
 
 static int csi2_probe(struct platform_device *pdev)
 {
 	struct csi2_dev *csi2;
-	struct resource *res;
-	int ret;
+	int i, ret;
 
 	csi2 = devm_kzalloc(&pdev->dev, sizeof(*csi2), GFP_KERNEL);
 	if (!csi2)
@@ -597,53 +734,50 @@ static int csi2_probe(struct platform_device *pdev)
 	csi2->sd.dev = &pdev->dev;
 	csi2->sd.owner = THIS_MODULE;
 	csi2->sd.flags = V4L2_SUBDEV_FL_HAS_DEVNODE;
-	strcpy(csi2->sd.name, DEVICE_NAME);
+	strscpy(csi2->sd.name, DEVICE_NAME, sizeof(csi2->sd.name));
 	csi2->sd.entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
 	csi2->sd.grp_id = IMX_MEDIA_GRP_ID_CSI2;
 
-	ret = csi2_parse_endpoints(csi2);
+	for (i = 0; i < CSI2_NUM_PADS; i++) {
+		csi2->pad[i].flags = (i == CSI2_SINK_PAD) ?
+		MEDIA_PAD_FL_SINK : MEDIA_PAD_FL_SOURCE;
+	}
+
+	ret = media_entity_pads_init(&csi2->sd.entity, CSI2_NUM_PADS,
+				     csi2->pad);
 	if (ret)
 		return ret;
 
 	csi2->pllref_clk = devm_clk_get(&pdev->dev, "ref");
 	if (IS_ERR(csi2->pllref_clk)) {
 		v4l2_err(&csi2->sd, "failed to get pll reference clock\n");
-		ret = PTR_ERR(csi2->pllref_clk);
-		return ret;
+		return PTR_ERR(csi2->pllref_clk);
 	}
 
 	csi2->dphy_clk = devm_clk_get(&pdev->dev, "dphy");
 	if (IS_ERR(csi2->dphy_clk)) {
 		v4l2_err(&csi2->sd, "failed to get dphy clock\n");
-		ret = PTR_ERR(csi2->dphy_clk);
-		return ret;
+		return PTR_ERR(csi2->dphy_clk);
 	}
 
 	csi2->pix_clk = devm_clk_get(&pdev->dev, "pix");
 	if (IS_ERR(csi2->pix_clk)) {
 		v4l2_err(&csi2->sd, "failed to get pixel clock\n");
-		ret = PTR_ERR(csi2->pix_clk);
+		return PTR_ERR(csi2->pix_clk);
+	}
+
+	csi2->base = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(csi2->base))
+		return PTR_ERR(csi2->base);
+
+	ret = devm_mutex_init(&pdev->dev, &csi2->lock);
+	if (ret)
 		return ret;
-	}
-
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res) {
-		v4l2_err(&csi2->sd, "failed to get platform resources\n");
-		return -ENODEV;
-	}
-
-	csi2->base = devm_ioremap(&pdev->dev, res->start, PAGE_SIZE);
-	if (!csi2->base) {
-		v4l2_err(&csi2->sd, "failed to map CSI-2 registers\n");
-		return -ENOMEM;
-	}
-
-	mutex_init(&csi2->lock);
 
 	ret = clk_prepare_enable(csi2->pllref_clk);
 	if (ret) {
 		v4l2_err(&csi2->sd, "failed to enable pllref_clk\n");
-		goto rmmutex;
+		return ret;
 	}
 
 	ret = clk_prepare_enable(csi2->dphy_clk);
@@ -654,33 +788,32 @@ static int csi2_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, &csi2->sd);
 
-	ret = v4l2_async_register_subdev(&csi2->sd);
+	ret = csi2_async_register(csi2);
 	if (ret)
-		goto dphy_off;
+		goto clean_notifier;
 
 	return 0;
 
-dphy_off:
+clean_notifier:
+	v4l2_async_nf_unregister(&csi2->notifier);
+	v4l2_async_nf_cleanup(&csi2->notifier);
 	clk_disable_unprepare(csi2->dphy_clk);
 pllref_off:
 	clk_disable_unprepare(csi2->pllref_clk);
-rmmutex:
-	mutex_destroy(&csi2->lock);
 	return ret;
 }
 
-static int csi2_remove(struct platform_device *pdev)
+static void csi2_remove(struct platform_device *pdev)
 {
 	struct v4l2_subdev *sd = platform_get_drvdata(pdev);
 	struct csi2_dev *csi2 = sd_to_dev(sd);
 
+	v4l2_async_nf_unregister(&csi2->notifier);
+	v4l2_async_nf_cleanup(&csi2->notifier);
 	v4l2_async_unregister_subdev(sd);
 	clk_disable_unprepare(csi2->dphy_clk);
 	clk_disable_unprepare(csi2->pllref_clk);
-	mutex_destroy(&csi2->lock);
 	media_entity_cleanup(&sd->entity);
-
-	return 0;
 }
 
 static const struct of_device_id csi2_dt_ids[] = {

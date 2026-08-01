@@ -1,14 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2016 Maxime Ripard. All rights reserved.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #ifndef _COMMON_H_
@@ -25,9 +17,16 @@
 #define CCU_FEATURE_LOCK_REG		BIT(5)
 #define CCU_FEATURE_MMC_TIMING_SWITCH	BIT(6)
 #define CCU_FEATURE_SIGMA_DELTA_MOD	BIT(7)
+#define CCU_FEATURE_KEY_FIELD		BIT(8)
+#define CCU_FEATURE_CLOSEST_RATE	BIT(9)
+#define CCU_FEATURE_DUAL_DIV		BIT(10)
+#define CCU_FEATURE_UPDATE_BIT		BIT(11)
 
 /* MMC timing mode switch bit */
 #define CCU_MMC_NEW_TIMING_MODE		BIT(30)
+
+/* Some clocks need this bit to actually apply register changes */
+#define CCU_SUNXI_UPDATE_BIT		BIT(27)
 
 struct device_node;
 
@@ -36,6 +35,9 @@ struct ccu_common {
 	u16		reg;
 	u16		lock_reg;
 	u32		prediv;
+
+	unsigned long	min_rate;
+	unsigned long	max_rate;
 
 	unsigned long	features;
 	spinlock_t	*lock;
@@ -53,11 +55,16 @@ struct sunxi_ccu_desc {
 
 	struct clk_hw_onecell_data	*hw_clks;
 
-	struct ccu_reset_map		*resets;
+	const struct ccu_reset_map	*resets;
 	unsigned long			num_resets;
 };
 
 void ccu_helper_wait_for_lock(struct ccu_common *common, u32 lock);
+
+bool ccu_is_better_rate(struct ccu_common *common,
+			unsigned long target_rate,
+			unsigned long current_rate,
+			unsigned long best_rate);
 
 struct ccu_pll_nb {
 	struct notifier_block	clk_nb;
@@ -71,7 +78,9 @@ struct ccu_pll_nb {
 
 int ccu_pll_notifier_register(struct ccu_pll_nb *pll_nb);
 
-int sunxi_ccu_probe(struct device_node *node, void __iomem *reg,
-		    const struct sunxi_ccu_desc *desc);
+int devm_sunxi_ccu_probe(struct device *dev, void __iomem *reg,
+			 const struct sunxi_ccu_desc *desc);
+void of_sunxi_ccu_probe(struct device_node *node, void __iomem *reg,
+			const struct sunxi_ccu_desc *desc);
 
 #endif /* _COMMON_H_ */

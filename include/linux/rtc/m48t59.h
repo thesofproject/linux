@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * include/linux/rtc/m48t59.h
  *
@@ -6,10 +7,6 @@
  * Copyright (c) 2007 Wind River Systems, Inc.
  *
  * Mark Zhan <rongkai.zhan@windriver.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef _LINUX_RTC_M48T59_H_
@@ -59,6 +56,9 @@ struct m48t59_plat_data {
 	void __iomem *ioaddr;
 	/* offset to RTC registers, automatically set according to the type */
 	unsigned int offset;
+
+	/* YY digits (in RTC) are offset, i.e. year is 1900 + yy_offset + YY */
+	int yy_offset;
 };
 
 #endif /* _LINUX_RTC_M48T59_H_ */

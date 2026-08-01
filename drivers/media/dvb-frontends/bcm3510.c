@@ -649,6 +649,7 @@ static int bcm3510_download_firmware(struct dvb_frontend* fe)
 		deb_info("firmware chunk, addr: 0x%04x, len: 0x%04x, total length: 0x%04zx\n",addr,len,fw->size);
 		if ((ret = bcm3510_write_ram(st,addr,&b[i+4],len)) < 0) {
 			err("firmware download failed: %d\n",ret);
+			release_firmware(fw);
 			return ret;
 		}
 		i += 4 + len;
@@ -728,7 +729,7 @@ static int bcm3510_init_cold(struct bcm3510_state *st)
 	int ret;
 	bcm3510_register_value v;
 
-	/* read Acquisation Processor status register and check it is not in RUN mode */
+	/* read Acquisition Processor status register and check it is not in RUN mode */
 	if ((ret = bcm3510_readB(st,0xa2,&v)) < 0)
 		return ret;
 	if (v.APSTAT1_a2.RUN) {
@@ -773,7 +774,7 @@ static int bcm3510_init(struct dvb_frontend* fe)
 			deb_info("attempting to download firmware\n");
 			if ((ret = bcm3510_init_cold(st)) < 0)
 				return ret;
-			/* fall-through */
+			fallthrough;
 		case JDEC_EEPROM_LOAD_WAIT:
 			deb_info("firmware is loaded\n");
 			bcm3510_check_firmware_version(st);
@@ -796,11 +797,10 @@ struct dvb_frontend* bcm3510_attach(const struct bcm3510_config *config,
 				   struct i2c_adapter *i2c)
 {
 	struct bcm3510_state* state = NULL;
-	int ret;
 	bcm3510_register_value v;
 
 	/* allocate memory for the internal state */
-	state = kzalloc(sizeof(struct bcm3510_state), GFP_KERNEL);
+	state = kzalloc_obj(struct bcm3510_state);
 	if (state == NULL)
 		goto error;
 
@@ -815,7 +815,7 @@ struct dvb_frontend* bcm3510_attach(const struct bcm3510_config *config,
 
 	mutex_init(&state->hab_mutex);
 
-	if ((ret = bcm3510_readB(state,0xe0,&v)) < 0)
+	if (bcm3510_readB(state, 0xe0, &v) < 0)
 		goto error;
 
 	deb_info("Revision: 0x%1x, Layer: 0x%1x.\n",v.REVID_e0.REV,v.REVID_e0.LAYER);
@@ -834,16 +834,14 @@ error:
 	kfree(state);
 	return NULL;
 }
-EXPORT_SYMBOL(bcm3510_attach);
+EXPORT_SYMBOL_GPL(bcm3510_attach);
 
 static const struct dvb_frontend_ops bcm3510_ops = {
 	.delsys = { SYS_ATSC, SYS_DVBC_ANNEX_B },
 	.info = {
 		.name = "Broadcom BCM3510 VSB/QAM frontend",
-		.frequency_min =  54000000,
-		.frequency_max = 803000000,
-		/* stepsize is just a guess */
-		.frequency_stepsize = 0,
+		.frequency_min_hz =  54 * MHz,
+		.frequency_max_hz = 803 * MHz,
 		.caps =
 			FE_CAN_FEC_1_2 | FE_CAN_FEC_2_3 | FE_CAN_FEC_3_4 |
 			FE_CAN_FEC_5_6 | FE_CAN_FEC_7_8 | FE_CAN_FEC_AUTO |

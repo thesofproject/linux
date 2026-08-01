@@ -1,17 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *
- *
  *  Copyright (C) 2005 Mike Isely <isely@pobox.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
  */
 
 #include "pvrusb2-io.h"
@@ -309,7 +299,7 @@ static int pvr2_stream_buffer_count(struct pvr2_stream *sp, unsigned int cnt)
 		if (scnt > sp->buffer_slot_count) {
 			struct pvr2_buffer **nb;
 
-			nb = kmalloc_array(scnt, sizeof(*nb), GFP_KERNEL);
+			nb = kmalloc_objs(*nb, scnt);
 			if (!nb) return -ENOMEM;
 			if (sp->buffer_slot_count) {
 				memcpy(nb, sp->buffers,
@@ -321,7 +311,7 @@ static int pvr2_stream_buffer_count(struct pvr2_stream *sp, unsigned int cnt)
 		}
 		while (sp->buffer_total_count < cnt) {
 			struct pvr2_buffer *bp;
-			bp = kmalloc(sizeof(*bp), GFP_KERNEL);
+			bp = kmalloc_obj(*bp);
 			if (!bp) return -ENOMEM;
 			ret = pvr2_buffer_init(bp, sp, sp->buffer_total_count);
 			if (ret) {
@@ -345,8 +335,8 @@ static int pvr2_stream_buffer_count(struct pvr2_stream *sp, unsigned int cnt)
 		if (scnt < sp->buffer_slot_count) {
 			struct pvr2_buffer **nb = NULL;
 			if (scnt) {
-				nb = kmemdup(sp->buffers, scnt * sizeof(*nb),
-					     GFP_KERNEL);
+				nb = kmemdup_array(sp->buffers, scnt, sizeof(*nb),
+						   GFP_KERNEL);
 				if (!nb) return -ENOMEM;
 			}
 			kfree(sp->buffers);
@@ -470,7 +460,7 @@ static void buffer_complete(struct urb *urb)
 struct pvr2_stream *pvr2_stream_create(void)
 {
 	struct pvr2_stream *sp;
-	sp = kzalloc(sizeof(*sp), GFP_KERNEL);
+	sp = kzalloc_obj(*sp);
 	if (!sp) return sp;
 	pvr2_trace(PVR2_TRACE_INIT, "pvr2_stream_create: sp=%p", sp);
 	pvr2_stream_init(sp);

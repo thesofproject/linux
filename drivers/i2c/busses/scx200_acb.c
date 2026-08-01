@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     Copyright (c) 2001,2002 Christer Weinigel <wingel@nano-system.com>
 
@@ -8,15 +9,6 @@
         Copyright (c) 2001 Benjamin Herrenschmidt <benh@kernel.crashing.org>
         Copyright (c) 2000 Philip Edelbrock <phil@stimpy.netroedge.com>
 
-    This program is free software; you can redistribute it and/or
-    modify it under the terms of the GNU General Public License as
-    published by the Free Software Foundation; either version 2 of the
-    License, or (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    General Public License for more details.
 */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -159,7 +151,7 @@ static void scx200_acb_machine(struct scx200_acb_iface *iface, u8 status)
 
 	case state_repeat_start:
 		outb(inb(ACBCTL1) | ACBCTL1_START, ACBCTL1);
-		/* fallthrough */
+		fallthrough;
 
 	case state_quick:
 		if (iface->address_byte & 1) {
@@ -426,7 +418,7 @@ static struct scx200_acb_iface *scx200_create_iface(const char *text,
 	struct scx200_acb_iface *iface;
 	struct i2c_adapter *adapter;
 
-	iface = kzalloc(sizeof(*iface), GFP_KERNEL);
+	iface = kzalloc_obj(*iface);
 	if (!iface)
 		return NULL;
 
@@ -435,7 +427,7 @@ static struct scx200_acb_iface *scx200_create_iface(const char *text,
 	snprintf(adapter->name, sizeof(adapter->name), "%s ACB%d", text, index);
 	adapter->owner = THIS_MODULE;
 	adapter->algo = &scx200_acb_algorithm;
-	adapter->class = I2C_CLASS_HWMON | I2C_CLASS_SPD;
+	adapter->class = I2C_CLASS_HWMON;
 	adapter->dev.parent = dev;
 
 	mutex_init(&iface->mutex);
@@ -508,10 +500,8 @@ static int scx200_probe(struct platform_device *pdev)
 	struct resource *res;
 
 	res = platform_get_resource(pdev, IORESOURCE_IO, 0);
-	if (!res) {
-		dev_err(&pdev->dev, "can't fetch device resource info\n");
-		return -ENODEV;
-	}
+	if (!res)
+		return dev_err_probe(&pdev->dev, -ENODEV, "can't fetch device resource info\n");
 
 	iface = scx200_create_dev("CS5535", res->start, 0, &pdev->dev);
 	if (!iface)
@@ -531,14 +521,12 @@ static void scx200_cleanup_iface(struct scx200_acb_iface *iface)
 	kfree(iface);
 }
 
-static int scx200_remove(struct platform_device *pdev)
+static void scx200_remove(struct platform_device *pdev)
 {
 	struct scx200_acb_iface *iface;
 
 	iface = platform_get_drvdata(pdev);
 	scx200_cleanup_iface(iface);
-
-	return 0;
 }
 
 static struct platform_driver scx200_pci_driver = {

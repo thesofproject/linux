@@ -23,14 +23,6 @@
 #define DISABLE_MOUSE	0xf5
 #define PSMOUSE_RST	0xff
 
-#ifdef NVEC_PS2_DEBUG
-#define NVEC_PHD(str, buf, len) \
-	print_hex_dump(KERN_DEBUG, str, DUMP_PREFIX_NONE, \
-			16, 1, buf, len, false)
-#else
-#define NVEC_PHD(str, buf, len)
-#endif
-
 enum ps2_subcmds {
 	SEND_COMMAND = 1,
 	RECEIVE_N,
@@ -60,16 +52,6 @@ static void ps2_stopstreaming(struct serio *ser_dev)
 	nvec_write_async(ps2_dev.nvec, buf, sizeof(buf));
 }
 
-static int ps2_sendcommand(struct serio *ser_dev, unsigned char cmd)
-{
-	unsigned char buf[] = { NVEC_PS2, SEND_COMMAND, ENABLE_MOUSE, 1 };
-
-	buf[2] = cmd & 0xff;
-
-	dev_dbg(&ser_dev->dev, "Sending ps2 cmd %02x\n", cmd);
-	return nvec_write_async(ps2_dev.nvec, buf, sizeof(buf));
-}
-
 static int nvec_ps2_notifier(struct notifier_block *nb,
 			     unsigned long event_type, void *data)
 {
@@ -80,22 +62,39 @@ static int nvec_ps2_notifier(struct notifier_block *nb,
 	case NVEC_PS2_EVT:
 		for (i = 0; i < msg[1]; i++)
 			serio_interrupt(ps2_dev.ser_dev, msg[2 + i], 0);
-		NVEC_PHD("ps/2 mouse event: ", &msg[2], msg[1]);
 		return NOTIFY_STOP;
 
 	case NVEC_PS2:
 		if (msg[2] == 1) {
 			for (i = 0; i < (msg[1] - 2); i++)
 				serio_interrupt(ps2_dev.ser_dev, msg[i + 4], 0);
-			NVEC_PHD("ps/2 mouse reply: ", &msg[4], msg[1] - 2);
 		}
 
-		else if (msg[1] != 2) /* !ack */
-			NVEC_PHD("unhandled mouse event: ", msg, msg[1] + 2);
 		return NOTIFY_STOP;
 	}
 
 	return NOTIFY_DONE;
+}
+
+static int ps2_sendcommand(struct serio *ser_dev, unsigned char cmd)
+{
+	unsigned char buf[] = { NVEC_PS2, SEND_COMMAND, ENABLE_MOUSE, 1 };
+	struct nvec_msg *msg;
+	int ret;
+
+	buf[2] = cmd & 0xff;
+
+	dev_dbg(&ser_dev->dev, "Sending ps2 cmd %02x\n", cmd);
+
+	ret = nvec_write_sync(ps2_dev.nvec, buf, sizeof(buf), &msg);
+	if (ret < 0)
+		return ret;
+
+	nvec_ps2_notifier(NULL, NVEC_PS2, msg->data);
+
+	nvec_msg_free(ps2_dev.nvec, msg);
+
+	return 0;
 }
 
 static int nvec_mouse_probe(struct platform_device *pdev)
@@ -103,7 +102,7 @@ static int nvec_mouse_probe(struct platform_device *pdev)
 	struct nvec_chip *nvec = dev_get_drvdata(pdev->dev.parent);
 	struct serio *ser_dev;
 
-	ser_dev = kzalloc(sizeof(*ser_dev), GFP_KERNEL);
+	ser_dev = kzalloc_obj(*ser_dev);
 	if (!ser_dev)
 		return -ENOMEM;
 
@@ -112,8 +111,8 @@ static int nvec_mouse_probe(struct platform_device *pdev)
 	ser_dev->start = ps2_startstreaming;
 	ser_dev->stop = ps2_stopstreaming;
 
-	strlcpy(ser_dev->name, "nvec mouse", sizeof(ser_dev->name));
-	strlcpy(ser_dev->phys, "nvec", sizeof(ser_dev->phys));
+	strscpy(ser_dev->name, "nvec mouse", sizeof(ser_dev->name));
+	strscpy(ser_dev->phys, "nvec", sizeof(ser_dev->phys));
 
 	ps2_dev.ser_dev = ser_dev;
 	ps2_dev.notifier.notifier_call = nvec_ps2_notifier;
@@ -125,7 +124,7 @@ static int nvec_mouse_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int nvec_mouse_remove(struct platform_device *pdev)
+static void nvec_mouse_remove(struct platform_device *pdev)
 {
 	struct nvec_chip *nvec = dev_get_drvdata(pdev->dev.parent);
 
@@ -133,8 +132,6 @@ static int nvec_mouse_remove(struct platform_device *pdev)
 	ps2_stopstreaming(ps2_dev.ser_dev);
 	nvec_unregister_notifier(nvec, &ps2_dev.notifier);
 	serio_unregister_port(ps2_dev.ser_dev);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP

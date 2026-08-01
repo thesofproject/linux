@@ -1,41 +1,41 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/compiler.h>
 #include <linux/types.h>
+#include <linux/zalloc.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <unistd.h>
 #include "tests.h"
 #include "debug.h"
+#include "env.h"
 #include "machine.h"
 #include "event.h"
 #include "../util/unwind.h"
 #include "perf_regs.h"
 #include "map.h"
+#include "symbol.h"
 #include "thread.h"
 #include "callchain.h"
-
-#if defined (__x86_64__) || defined (__i386__) || defined (__powerpc__)
-#include "arch-tests.h"
-#endif
 
 /* For bsearch. We try to unwind functions in shared object. */
 #include <stdlib.h>
 
-static int mmap_handler(struct perf_tool *tool __maybe_unused,
-			union perf_event *event,
-			struct perf_sample *sample,
-			struct machine *machine)
-{
-	return machine__process_mmap2_event(machine, event, sample);
-}
-
-static int init_live_machine(struct machine *machine)
-{
-	union perf_event event;
-	pid_t pid = getpid();
-
-	return perf_event__synthesize_mmap_events(NULL, &event, pid, pid,
-						  mmap_handler, machine, true, 500);
-}
+/*
+ * The test will assert frames are on the stack but tail call optimizations lose
+ * the frame of the caller. Clang can disable this optimization on a called
+ * function but GCC currently (11/2020) lacks this attribute. The barrier is
+ * used to inhibit tail calls in these cases.
+ */
+#ifdef __has_attribute
+#if __has_attribute(disable_tail_calls)
+#define NO_TAIL_CALL_ATTRIBUTE __attribute__((disable_tail_calls))
+#define NO_TAIL_CALL_BARRIER
+#endif
+#endif
+#ifndef NO_TAIL_CALL_ATTRIBUTE
+#define NO_TAIL_CALL_ATTRIBUTE
+#define NO_TAIL_CALL_BARRIER __asm__ __volatile__("" : : : "memory");
+#endif
 
 /*
  * We need to keep these functions global, despite the
@@ -49,13 +49,14 @@ int test_dwarf_unwind__compare(void *p1, void *p2);
 int test_dwarf_unwind__krava_3(struct thread *thread);
 int test_dwarf_unwind__krava_2(struct thread *thread);
 int test_dwarf_unwind__krava_1(struct thread *thread);
+int test__dwarf_unwind(struct test_suite *test, int subtest);
 
 #define MAX_STACK 8
 
 static int unwind_entry(struct unwind_entry *entry, void *arg)
 {
 	unsigned long *cnt = (unsigned long *) arg;
-	char *symbol = entry->sym ? entry->sym->name : NULL;
+	char *symbol = entry->ms.sym ? entry->ms.sym->name : NULL;
 	static const char *funcs[MAX_STACK] = {
 		"test__arch_unwind_sample",
 		"test_dwarf_unwind__thread",
@@ -90,21 +91,20 @@ static int unwind_entry(struct unwind_entry *entry, void *arg)
 	return strcmp((const char *) symbol, funcs[idx]);
 }
 
-noinline int test_dwarf_unwind__thread(struct thread *thread)
+NO_TAIL_CALL_ATTRIBUTE noinline int test_dwarf_unwind__thread(struct thread *thread)
 {
 	struct perf_sample sample;
 	unsigned long cnt = 0;
 	int err = -1;
 
-	memset(&sample, 0, sizeof(sample));
-
+	perf_sample__init(&sample, /*all=*/true);
 	if (test__arch_unwind_sample(&sample, thread)) {
 		pr_debug("failed to get unwind sample\n");
 		goto out;
 	}
 
 	err = unwind__get_entries(unwind_entry, &cnt, thread,
-				  &sample, MAX_STACK);
+				  &sample, MAX_STACK, false);
 	if (err)
 		pr_debug("unwind failed\n");
 	else if (cnt != MAX_STACK) {
@@ -114,14 +114,15 @@ noinline int test_dwarf_unwind__thread(struct thread *thread)
 	}
 
  out:
-	free(sample.user_stack.data);
-	free(sample.user_regs.regs);
+	zfree(&sample.user_stack.data);
+	zfree(&sample.user_regs->regs);
+	perf_sample__exit(&sample);
 	return err;
 }
 
 static int global_unwind_retval = -INT_MAX;
 
-noinline int test_dwarf_unwind__compare(void *p1, void *p2)
+NO_TAIL_CALL_ATTRIBUTE noinline int test_dwarf_unwind__compare(void *p1, void *p2)
 {
 	/* Any possible value should be 'thread' */
 	struct thread *thread = *(struct thread **)p1;
@@ -140,7 +141,7 @@ noinline int test_dwarf_unwind__compare(void *p1, void *p2)
 	return p1 - p2;
 }
 
-noinline int test_dwarf_unwind__krava_3(struct thread *thread)
+NO_TAIL_CALL_ATTRIBUTE noinline int test_dwarf_unwind__krava_3(struct thread *thread)
 {
 	struct thread *array[2] = {thread, thread};
 	void *fp = &bsearch;
@@ -159,45 +160,52 @@ noinline int test_dwarf_unwind__krava_3(struct thread *thread)
 	return global_unwind_retval;
 }
 
-noinline int test_dwarf_unwind__krava_2(struct thread *thread)
+NO_TAIL_CALL_ATTRIBUTE noinline int test_dwarf_unwind__krava_2(struct thread *thread)
 {
-	return test_dwarf_unwind__krava_3(thread);
+	int ret;
+
+	ret =  test_dwarf_unwind__krava_3(thread);
+	NO_TAIL_CALL_BARRIER;
+	return ret;
 }
 
-noinline int test_dwarf_unwind__krava_1(struct thread *thread)
+NO_TAIL_CALL_ATTRIBUTE noinline int test_dwarf_unwind__krava_1(struct thread *thread)
 {
-	return test_dwarf_unwind__krava_2(thread);
+	int ret;
+
+	ret =  test_dwarf_unwind__krava_2(thread);
+	NO_TAIL_CALL_BARRIER;
+	return ret;
 }
 
-int test__dwarf_unwind(struct test *test __maybe_unused, int subtest __maybe_unused)
+noinline int test__dwarf_unwind(struct test_suite *test __maybe_unused,
+				int subtest __maybe_unused)
 {
+	struct perf_env host_env;
 	struct machine *machine;
 	struct thread *thread;
 	int err = -1;
-
-	machine = machine__new_host();
-	if (!machine) {
-		pr_err("Could not get machine\n");
-		return -1;
-	}
-
-	if (machine__create_kernel_maps(machine)) {
-		pr_err("Failed to create kernel maps\n");
-		return -1;
-	}
+	pid_t pid = getpid();
 
 	callchain_param.record_mode = CALLCHAIN_DWARF;
 	dwarf_callchain_users = true;
 
-	if (init_live_machine(machine)) {
-		pr_err("Could not init machine\n");
+	perf_env__init(&host_env);
+	machine = machine__new_live(&host_env, /*kernel_maps=*/true, pid);
+	if (!machine) {
+		pr_err("Could not get machine\n");
+		goto out;
+	}
+
+	if (machine__create_kernel_maps(machine)) {
+		pr_err("Failed to create kernel maps\n");
 		goto out;
 	}
 
 	if (verbose > 1)
 		machine__fprintf(machine, stderr);
 
-	thread = machine__find_thread(machine, getpid(), getpid());
+	thread = machine__find_thread(machine, pid, pid);
 	if (!thread) {
 		pr_err("Could not get thread\n");
 		goto out;
@@ -207,7 +215,9 @@ int test__dwarf_unwind(struct test *test __maybe_unused, int subtest __maybe_unu
 	thread__put(thread);
 
  out:
-	machine__delete_threads(machine);
 	machine__delete(machine);
+	perf_env__exit(&host_env);
 	return err;
 }
+
+DEFINE_SUITE("Test dwarf unwind", dwarf_unwind);

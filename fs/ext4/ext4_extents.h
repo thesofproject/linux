@@ -31,13 +31,6 @@
 #define CHECK_BINSEARCH__
 
 /*
- * If EXT_STATS is defined then stats numbers are collected.
- * These number will be displayed at umount time.
- */
-#define EXT_STATS_
-
-
-/*
  * ext4_inode has i_block array (60 bytes total).
  * The first 12 bytes store ext4_extent_header;
  * the remainder stores an array of ext4_extent.
@@ -91,6 +84,7 @@ struct ext4_extent_header {
 };
 
 #define EXT4_EXT_MAGIC		cpu_to_le16(0xf30a)
+#define EXT4_MAX_EXTENT_DEPTH 5
 
 #define EXT4_EXTENT_TAIL_OFFSET(hdr) \
 	(sizeof(struct ext4_extent_header) + \
@@ -116,6 +110,19 @@ struct ext4_ext_path {
 	struct ext4_extent_idx		*p_idx;
 	struct ext4_extent_header	*p_hdr;
 	struct buffer_head		*p_bh;
+};
+
+/*
+ * Used to record a portion of a cluster found at the beginning or end
+ * of an extent while traversing the extent tree during space removal.
+ * A partial cluster may be removed if it does not contain blocks shared
+ * with extents that aren't being deleted (tofree state).  Otherwise,
+ * it cannot be removed (nofree state).
+ */
+struct partial_cluster {
+	ext4_fsblk_t pclu;  /* physical cluster number */
+	ext4_lblk_t lblk;   /* logical block number within logical cluster */
+	enum {initial, tofree, nofree} state;
 };
 
 /*
@@ -156,10 +163,14 @@ struct ext4_ext_path {
 	(EXT_FIRST_EXTENT((__hdr__)) + le16_to_cpu((__hdr__)->eh_entries) - 1)
 #define EXT_LAST_INDEX(__hdr__) \
 	(EXT_FIRST_INDEX((__hdr__)) + le16_to_cpu((__hdr__)->eh_entries) - 1)
-#define EXT_MAX_EXTENT(__hdr__) \
-	(EXT_FIRST_EXTENT((__hdr__)) + le16_to_cpu((__hdr__)->eh_max) - 1)
+#define EXT_MAX_EXTENT(__hdr__)	\
+	((le16_to_cpu((__hdr__)->eh_max)) ? \
+	((EXT_FIRST_EXTENT((__hdr__)) + le16_to_cpu((__hdr__)->eh_max) - 1)) \
+					: NULL)
 #define EXT_MAX_INDEX(__hdr__) \
-	(EXT_FIRST_INDEX((__hdr__)) + le16_to_cpu((__hdr__)->eh_max) - 1)
+	((le16_to_cpu((__hdr__)->eh_max)) ? \
+	((EXT_FIRST_INDEX((__hdr__)) + le16_to_cpu((__hdr__)->eh_max) - 1)) \
+					: NULL)
 
 static inline struct ext4_extent_header *ext_inode_hdr(struct inode *inode)
 {
@@ -253,10 +264,17 @@ static inline void ext4_idx_store_pblock(struct ext4_extent_idx *ix,
 				     0xffff);
 }
 
-#define ext4_ext_dirty(handle, inode, path) \
-		__ext4_ext_dirty(__func__, __LINE__, (handle), (inode), (path))
-int __ext4_ext_dirty(const char *where, unsigned int line, handle_t *handle,
-		     struct inode *inode, struct ext4_ext_path *path);
-
+extern int __ext4_ext_dirty(const char *where, unsigned int line,
+			    handle_t *handle, struct inode *inode,
+			    struct ext4_ext_path *path);
+extern int ext4_ext_zeroout(struct inode *inode, struct ext4_extent *ex);
+#if IS_ENABLED(CONFIG_EXT4_KUNIT_TESTS)
+extern int ext4_ext_space_root_idx_test(struct inode *inode, int check);
+extern struct ext4_ext_path *ext4_split_convert_extents_test(
+				handle_t *handle, struct inode *inode,
+				struct ext4_map_blocks *map,
+				struct ext4_ext_path *path,
+				int flags, unsigned int *allocated);
+#endif
 #endif /* _EXT4_EXTENTS */
 

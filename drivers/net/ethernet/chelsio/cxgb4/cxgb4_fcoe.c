@@ -74,15 +74,14 @@ int cxgb_fcoe_enable(struct net_device *netdev)
 	if (is_t4(adap->params.chip))
 		return -EINVAL;
 
-	if (!(adap->flags & FULL_INIT_DONE))
+	if (!(adap->flags & CXGB4_FULL_INIT_DONE))
 		return -EINVAL;
 
 	dev_info(adap->pdev_dev, "Enabling FCoE offload features\n");
 
 	netdev->features |= NETIF_F_FCOE_CRC;
 	netdev->vlan_features |= NETIF_F_FCOE_CRC;
-	netdev->features |= NETIF_F_FCOE_MTU;
-	netdev->vlan_features |= NETIF_F_FCOE_MTU;
+	netdev->fcoe_mtu = true;
 
 	netdev_features_change(netdev);
 
@@ -112,8 +111,7 @@ int cxgb_fcoe_disable(struct net_device *netdev)
 
 	netdev->features &= ~NETIF_F_FCOE_CRC;
 	netdev->vlan_features &= ~NETIF_F_FCOE_CRC;
-	netdev->features &= ~NETIF_F_FCOE_MTU;
-	netdev->vlan_features &= ~NETIF_F_FCOE_MTU;
+	netdev->fcoe_mtu = false;
 
 	netdev_features_change(netdev);
 

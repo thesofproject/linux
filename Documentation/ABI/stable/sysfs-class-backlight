@@ -3,9 +3,11 @@ Date:		April 2005
 KernelVersion:	2.6.12
 Contact:	Richard Purdie <rpurdie@rpsys.net>
 Description:
-		Control BACKLIGHT power, values are FB_BLANK_* from fb.h
-		 - FB_BLANK_UNBLANK (0)   : power on.
-		 - FB_BLANK_POWERDOWN (4) : power off
+		Control BACKLIGHT power, values are compatible with
+		FB_BLANK_* from fb.h
+
+		 - 0 (FB_BLANK_UNBLANK)   : power on.
+		 - 4 (FB_BLANK_POWERDOWN) : power off
 Users:		HAL
 
 What:		/sys/class/backlight/<backlight>/brightness
@@ -24,7 +26,12 @@ Date:		March 2006
 KernelVersion:	2.6.17
 Contact:	Richard Purdie <rpurdie@rpsys.net>
 Description:
-		Show the actual brightness by querying the hardware.
+		Show the actual brightness by querying the hardware. Due
+		to implementation differences in hardware this may not
+		match the value in 'brightness'. For example some hardware
+		may treat blanking differently or have custom power saving
+		features. Userspace should generally use the values in
+		'brightness' to make decisions.
 Users:		HAL
 
 What:		/sys/class/backlight/<backlight>/max_brightness

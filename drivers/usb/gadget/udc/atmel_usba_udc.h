@@ -287,10 +287,13 @@ struct usba_ep {
 #ifdef CONFIG_USB_GADGET_DEBUG_FS
 	u32					last_dma_status;
 	struct dentry				*debugfs_dir;
-	struct dentry				*debugfs_queue;
-	struct dentry				*debugfs_dma_status;
-	struct dentry				*debugfs_state;
 #endif
+};
+
+struct usba_ep_config {
+	u8					nr_banks;
+	unsigned int				can_dma:1;
+	unsigned int				can_isoc:1;
 };
 
 struct usba_request {
@@ -310,6 +313,13 @@ struct usba_udc_errata {
 	void (*pulse_bias)(struct usba_udc *udc);
 };
 
+struct usba_udc_config {
+	const struct usba_udc_errata *errata;
+	const struct usba_ep_config *config;
+	const int num_ep;
+	const bool ep_prealloc;
+};
+
 struct usba_udc {
 	/* Protect hw registers from concurrent modifications */
 	spinlock_t lock;
@@ -326,15 +336,15 @@ struct usba_udc {
 	const struct usba_udc_errata *errata;
 	int irq;
 	struct gpio_desc *vbus_pin;
-	int vbus_pin_inverted;
 	int num_ep;
-	int configured_ep;
 	struct usba_fifo_cfg *fifo_cfg;
 	struct clk *pclk;
 	struct clk *hclk;
 	struct usba_ep *usba_ep;
 	bool bias_pulse_needed;
 	bool clocked;
+	bool suspended;
+	bool ep_prealloc;
 
 	u16 devstatus;
 
@@ -345,7 +355,6 @@ struct usba_udc {
 
 #ifdef CONFIG_USB_GADGET_DEBUG_FS
 	struct dentry *debugfs_root;
-	struct dentry *debugfs_regs;
 #endif
 
 	struct regmap *pmc;

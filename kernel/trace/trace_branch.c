@@ -30,14 +30,12 @@ static struct trace_array *branch_tracer;
 static void
 probe_likely_condition(struct ftrace_likely_data *f, int val, int expect)
 {
-	struct trace_event_call *call = &event_branch;
 	struct trace_array *tr = branch_tracer;
-	struct trace_array_cpu *data;
+	struct trace_buffer *buffer;
 	struct ring_buffer_event *event;
 	struct trace_branch *entry;
-	struct ring_buffer *buffer;
 	unsigned long flags;
-	int pc;
+	unsigned int trace_ctx;
 	const char *p;
 
 	if (current->trace_recursion & TRACE_BRANCH_BIT)
@@ -55,14 +53,13 @@ probe_likely_condition(struct ftrace_likely_data *f, int val, int expect)
 
 	raw_local_irq_save(flags);
 	current->trace_recursion |= TRACE_BRANCH_BIT;
-	data = this_cpu_ptr(tr->trace_buffer.data);
-	if (atomic_read(&data->disabled))
+	if (!tracer_tracing_is_on_cpu(tr, raw_smp_processor_id()))
 		goto out;
 
-	pc = preempt_count();
-	buffer = tr->trace_buffer.buffer;
+	trace_ctx = tracing_gen_ctx_flags(flags);
+	buffer = tr->array_buffer.buffer;
 	event = trace_buffer_lock_reserve(buffer, TRACE_BRANCH,
-					  sizeof(*entry), flags, pc);
+					  sizeof(*entry), trace_ctx);
 	if (!event)
 		goto out;
 
@@ -74,16 +71,13 @@ probe_likely_condition(struct ftrace_likely_data *f, int val, int expect)
 		p--;
 	p++;
 
-	strncpy(entry->func, f->data.func, TRACE_FUNC_SIZE);
-	strncpy(entry->file, p, TRACE_FILE_SIZE);
-	entry->func[TRACE_FUNC_SIZE] = 0;
-	entry->file[TRACE_FILE_SIZE] = 0;
+	strscpy(entry->func, f->data.func);
+	strscpy(entry->file, p);
 	entry->constant = f->constant;
 	entry->line = f->data.line;
 	entry->correct = val == expect;
 
-	if (!call_filter_check_discard(call, entry, buffer, event))
-		trace_buffer_unlock_commit_nostack(buffer, event);
+	trace_buffer_unlock_commit_nostack(buffer, event);
 
  out:
 	current->trace_recursion &= ~TRACE_BRANCH_BIT;
@@ -187,8 +181,7 @@ __init static int init_branch_tracer(void)
 
 	ret = register_trace_event(&trace_branch_event);
 	if (!ret) {
-		printk(KERN_WARNING "Warning: could not register "
-				    "branch events\n");
+		pr_warn("Warning: could not register branch events\n");
 		return 1;
 	}
 	return register_tracer(&branch_trace);
@@ -205,6 +198,8 @@ void trace_likely_condition(struct ftrace_likely_data *f, int val, int expect)
 void ftrace_likely_update(struct ftrace_likely_data *f, int val,
 			  int expect, int is_constant)
 {
+	unsigned long flags = user_access_save();
+
 	/* A constant is always correct */
 	if (is_constant) {
 		f->constant++;
@@ -223,6 +218,8 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
 		f->data.correct++;
 	else
 		f->data.incorrect++;
+
+	user_access_restore(flags);
 }
 EXPORT_SYMBOL(ftrace_likely_update);
 
@@ -240,7 +237,7 @@ static int annotated_branch_stat_headers(struct seq_file *m)
 	return 0;
 }
 
-static inline long get_incorrect_percent(struct ftrace_branch_data *p)
+static inline long get_incorrect_percent(const struct ftrace_branch_data *p)
 {
 	long percent;
 
@@ -328,10 +325,10 @@ annotated_branch_stat_next(void *v, int idx)
 	return p;
 }
 
-static int annotated_branch_stat_cmp(void *p1, void *p2)
+static int annotated_branch_stat_cmp(const void *p1, const void *p2)
 {
-	struct ftrace_branch_data *a = p1;
-	struct ftrace_branch_data *b = p2;
+	const struct ftrace_branch_data *a = p1;
+	const struct ftrace_branch_data *b = p2;
 
 	long percent_a, percent_b;
 
@@ -375,10 +372,9 @@ __init static int init_annotated_branch_stats(void)
 	int ret;
 
 	ret = register_stat_tracer(&annotated_branch_stats);
-	if (!ret) {
-		printk(KERN_WARNING "Warning: could not register "
-				    "annotated branches stats\n");
-		return 1;
+	if (ret) {
+		pr_warn("Warning: could not register annotated branches stats\n");
+		return ret;
 	}
 	return 0;
 }
@@ -440,10 +436,9 @@ __init static int all_annotated_branch_stats(void)
 	int ret;
 
 	ret = register_stat_tracer(&all_branch_stats);
-	if (!ret) {
-		printk(KERN_WARNING "Warning: could not register "
-				    "all branches stats\n");
-		return 1;
+	if (ret) {
+		pr_warn("Warning: could not register all branches stats\n");
+		return ret;
 	}
 	return 0;
 }

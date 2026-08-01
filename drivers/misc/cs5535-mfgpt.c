@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for the CS5535/CS5536 Multi-Function General Purpose Timers (MFGPT)
  *
  * Copyright (C) 2006, Advanced Micro Devices, Inc.
  * Copyright (C) 2007  Andres Salomon <dilinger@debian.org>
  * Copyright (C) 2009  Andres Salomon <dilinger@collabora.co.uk>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of version 2 of the GNU General Public License
- * as published by the Free Software Foundation.
  *
  * The MFGPTs are documented in AMD Geode CS5536 Companion Device Data Book.
  */
@@ -19,6 +16,7 @@
 #include <linux/platform_device.h>
 #include <linux/cs5535.h>
 #include <linux/slab.h>
+#include <asm/msr.h>
 
 #define DRV_NAME "cs5535-mfgpt"
 
@@ -189,7 +187,7 @@ struct cs5535_mfgpt_timer *cs5535_mfgpt_alloc_timer(int timer_nr, int domain)
 	if (timer_nr < 0)
 		goto done;
 
-	timer = kmalloc(sizeof(*timer), GFP_KERNEL);
+	timer = kmalloc_obj(*timer);
 	if (!timer) {
 		/* aw hell */
 		spin_lock_irqsave(&mfgpt->lock, flags);

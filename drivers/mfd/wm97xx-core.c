@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Wolfson WM97xx -- Core device
  *
  * Copyright (C) 2017 Robert Jarzmik
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  *
  * Features:
  *  - an AC97 audio codec
@@ -99,7 +95,7 @@ static const struct regmap_config wm9705_regmap_config = {
 	.reg_stride = 2,
 	.val_bits = 16,
 	.max_register = 0x7e,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 
 	.reg_defaults = wm9705_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(wm9705_reg_defaults),
@@ -167,7 +163,7 @@ static const struct regmap_config wm9712_regmap_config = {
 	.reg_stride = 2,
 	.val_bits = 16,
 	.max_register = 0x7e,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 
 	.reg_defaults = wm9712_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(wm9712_reg_defaults),
@@ -238,7 +234,7 @@ static const struct regmap_config wm9713_regmap_config = {
 	.reg_stride = 2,
 	.val_bits = 16,
 	.max_register = 0x7e,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 
 	.reg_defaults = wm9713_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(wm9713_reg_defaults),
@@ -278,7 +274,7 @@ static int wm97xx_ac97_probe(struct ac97_codec_device *adev)
 
 	codec_pdata = &wm97xx->codec_pdata;
 	codec_pdata->ac97 = wm97xx->ac97;
-	codec_pdata->batt_pdata = pdata->batt_pdata;
+	codec_pdata->batt_pdata = pdata ? pdata->batt_pdata : NULL;
 
 	switch (adev->vendor_id) {
 	case WM9705_VENDOR_ID:
@@ -323,13 +319,11 @@ err_free_compat:
 	return ret;
 }
 
-static int wm97xx_ac97_remove(struct ac97_codec_device *adev)
+static void wm97xx_ac97_remove(struct ac97_codec_device *adev)
 {
 	struct wm97xx_priv *wm97xx = ac97_get_drvdata(adev);
 
 	snd_ac97_compat_release(wm97xx->ac97);
-
-	return 0;
 }
 
 static const struct ac97_id wm97xx_ac97_ids[] = {

@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * OSS compatible sequencer driver
  *
  * read/write/select interface to device file
  *
  * Copyright (C) 1998,99 Takashi Iwai <tiwai@suse.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include "seq_oss_device.h"
@@ -70,7 +57,8 @@ snd_seq_oss_read(struct seq_oss_devinfo *dp, char __user *buf, int count)
 			break;
 		}
 		ev_len = ev_length(&rec);
-		if (ev_len < count) {
+		if (count < ev_len) {
+			err = -EINVAL;
 			snd_seq_oss_readq_unlock(readq, flags);
 			break;
 		}
@@ -114,9 +102,9 @@ snd_seq_oss_write(struct seq_oss_devinfo *dp, const char __user *buf, int count,
 				break;
 			}
 			fmt = (*(unsigned short *)rec.c) & 0xffff;
-			/* FIXME the return value isn't correct */
-			return snd_seq_oss_synth_load_patch(dp, rec.s.dev,
-							    fmt, buf, 0, count);
+			err = snd_seq_oss_synth_load_patch(dp, rec.s.dev,
+							   fmt, buf, 0, count);
+			return err < 0 ? err : count;
 		}
 		if (ev_is_long(&rec)) {
 			/* extended code */
@@ -145,7 +133,8 @@ snd_seq_oss_write(struct seq_oss_devinfo *dp, const char __user *buf, int count,
 		}
 
 		/* insert queue */
-		if ((err = insert_queue(dp, &rec, opt)) < 0)
+		err = insert_queue(dp, &rec, opt);
+		if (err < 0)
 			break;
 
 		result += ev_size;
@@ -174,20 +163,19 @@ insert_queue(struct seq_oss_devinfo *dp, union evrec *rec, struct file *opt)
 	memset(&event, 0, sizeof(event));
 	/* set dummy -- to be sure */
 	event.type = SNDRV_SEQ_EVENT_NOTEOFF;
-	snd_seq_oss_fill_addr(dp, &event, dp->addr.port, dp->addr.client);
+	snd_seq_oss_fill_addr(dp, &event, dp->addr.client, dp->addr.port);
 
-	if (snd_seq_oss_process_event(dp, rec, &event))
+	snd_use_lock_t *lock __free(seq_oss_use_lock) = NULL;
+
+	if (snd_seq_oss_process_event(dp, rec, &event, &lock))
 		return 0; /* invalid event - no need to insert queue */
 
 	event.time.tick = snd_seq_oss_timer_cur_tick(dp->timer);
-	if (dp->timer->realtime || !dp->timer->running) {
+	if (dp->timer->realtime || !dp->timer->running)
 		snd_seq_oss_dispatch(dp, &event, 0, 0);
-	} else {
-		if (is_nonblock_mode(dp->file_mode))
-			rc = snd_seq_kernel_client_enqueue(dp->cseq, &event, 0, 0);
-		else
-			rc = snd_seq_kernel_client_enqueue_blocking(dp->cseq, &event, opt, 0, 0);
-	}
+	else
+		rc = snd_seq_kernel_client_enqueue(dp->cseq, &event, opt,
+						   !is_nonblock_mode(dp->file_mode));
 	return rc;
 }
 		

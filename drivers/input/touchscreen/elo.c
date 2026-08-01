@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Elo serial touchscreen driver
  *
  * Copyright (c) 2004 Vojtech Pavlik
  */
 
-/*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
- */
 
 /*
  * This driver can handle serial Elo touchscreens using either the Elo standard
@@ -223,40 +219,40 @@ static irqreturn_t elo_interrupt(struct serio *serio,
 
 static int elo_command_10(struct elo *elo, unsigned char *packet)
 {
-	int rc = -1;
+	int error;
 	int i;
 	unsigned char csum = 0xaa + ELO10_LEAD_BYTE;
 
-	mutex_lock(&elo->cmd_mutex);
+	guard(mutex)(&elo->cmd_mutex);
 
-	serio_pause_rx(elo->serio);
-	elo->expected_packet = toupper(packet[0]);
-	init_completion(&elo->cmd_done);
-	serio_continue_rx(elo->serio);
+	scoped_guard(serio_pause_rx, elo->serio) {
+		elo->expected_packet = toupper(packet[0]);
+		init_completion(&elo->cmd_done);
+	}
 
-	if (serio_write(elo->serio, ELO10_LEAD_BYTE))
-		goto out;
+	error = serio_write(elo->serio, ELO10_LEAD_BYTE);
+	if (error)
+		return error;
 
 	for (i = 0; i < ELO10_PACKET_LEN; i++) {
 		csum += packet[i];
-		if (serio_write(elo->serio, packet[i]))
-			goto out;
+		error = serio_write(elo->serio, packet[i]);
+		if (error)
+			return error;
 	}
 
-	if (serio_write(elo->serio, csum))
-		goto out;
+	error = serio_write(elo->serio, csum);
+	if (error)
+		return error;
 
 	wait_for_completion_timeout(&elo->cmd_done, HZ);
 
-	if (elo->expected_packet == ELO10_TOUCH_PACKET) {
-		/* We are back in reporting mode, the command was ACKed */
-		memcpy(packet, elo->response, ELO10_PACKET_LEN);
-		rc = 0;
-	}
+	if (elo->expected_packet != ELO10_TOUCH_PACKET)
+		return -EIO;
 
- out:
-	mutex_unlock(&elo->cmd_mutex);
-	return rc;
+	/* We are back in reporting mode, the command was ACKed */
+	memcpy(packet, elo->response, ELO10_PACKET_LEN);
+	return 0;
 }
 
 static int elo_setup_10(struct elo *elo)
@@ -311,7 +307,7 @@ static int elo_connect(struct serio *serio, struct serio_driver *drv)
 	struct input_dev *input_dev;
 	int err;
 
-	elo = kzalloc(sizeof(struct elo), GFP_KERNEL);
+	elo = kzalloc_obj(*elo);
 	input_dev = input_allocate_device();
 	if (!elo || !input_dev) {
 		err = -ENOMEM;
@@ -324,7 +320,7 @@ static int elo_connect(struct serio *serio, struct serio_driver *drv)
 	elo->expected_packet = ELO10_TOUCH_PACKET;
 	mutex_init(&elo->cmd_mutex);
 	init_completion(&elo->cmd_done);
-	snprintf(elo->phys, sizeof(elo->phys), "%s/input0", serio->phys);
+	scnprintf(elo->phys, sizeof(elo->phys), "%s/input0", serio->phys);
 
 	input_dev->name = "Elo Serial TouchScreen";
 	input_dev->phys = elo->phys;
@@ -345,13 +341,16 @@ static int elo_connect(struct serio *serio, struct serio_driver *drv)
 	switch (elo->id) {
 
 	case 0: /* 10-byte protocol */
-		if (elo_setup_10(elo))
+		if (elo_setup_10(elo)) {
+			err = -EIO;
 			goto fail3;
+		}
 
 		break;
 
 	case 1: /* 6-byte protocol */
 		input_set_abs_params(input_dev, ABS_PRESSURE, 0, 15, 0, 0);
+		fallthrough;
 
 	case 2: /* 4-byte protocol */
 		input_set_abs_params(input_dev, ABS_X, 96, 4000, 0, 0);

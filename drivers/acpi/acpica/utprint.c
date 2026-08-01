@@ -3,7 +3,7 @@
  *
  * Module Name: utprint - Formatted printing routines
  *
- * Copyright (C) 2000 - 2018, Intel Corp.
+ * Copyright (C) 2000 - 2026, Intel Corp.
  *
  *****************************************************************************/
 
@@ -332,6 +332,8 @@ int vsnprintf(char *string, acpi_size size, const char *format, va_list args)
 	int i;
 
 	pos = string;
+
+	size = ACPI_MIN(size, ACPI_PTR_DIFF(ACPI_MAX_PTR, string));
 	end = string + size;
 
 	for (; *format; ++format) {
@@ -470,6 +472,7 @@ int vsnprintf(char *string, acpi_size size, const char *format, va_list args)
 		case 'X':
 
 			type |= ACPI_FORMAT_UPPER;
+			ACPI_FALLTHROUGH;
 
 		case 'x':
 

@@ -18,17 +18,18 @@
 #include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/io.h>
-#include <asm/sizes.h>
+#include <linux/sizes.h>
 #include <linux/platform_data/mtd-orion_nand.h>
 
 struct orion_nand_info {
+	struct nand_controller controller;
 	struct nand_chip chip;
 	struct clk *clk;
 };
 
-static void orion_nand_cmd_ctrl(struct mtd_info *mtd, int cmd, unsigned int ctrl)
+static void orion_nand_cmd_ctrl(struct nand_chip *nc, int cmd,
+				unsigned int ctrl)
 {
-	struct nand_chip *nc = mtd_to_nand(mtd);
 	struct orion_nand_data *board = nand_get_controller_data(nc);
 	u32 offs;
 
@@ -45,14 +46,13 @@ static void orion_nand_cmd_ctrl(struct mtd_info *mtd, int cmd, unsigned int ctrl
 	if (nc->options & NAND_BUSWIDTH_16)
 		offs <<= 1;
 
-	writeb(cmd, nc->IO_ADDR_W + offs);
+	writeb(cmd, nc->legacy.IO_ADDR_W + offs);
 }
 
-static void orion_nand_read_buf(struct mtd_info *mtd, uint8_t *buf, int len)
+static void orion_nand_read_buf(struct nand_chip *chip, uint8_t *buf, int len)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	void __iomem *io_base = chip->IO_ADDR_R;
-#if __LINUX_ARM_ARCH__ >= 5
+	void __iomem *io_base = chip->legacy.IO_ADDR_R;
+#if defined(__LINUX_ARM_ARCH__) && __LINUX_ARM_ARCH__ >= 5
 	uint64_t *buf64;
 #endif
 	int i = 0;
@@ -61,7 +61,7 @@ static void orion_nand_read_buf(struct mtd_info *mtd, uint8_t *buf, int len)
 		*buf++ = readb(io_base);
 		len--;
 	}
-#if __LINUX_ARM_ARCH__ >= 5
+#if defined(__LINUX_ARM_ARCH__) && __LINUX_ARM_ARCH__ >= 5
 	buf64 = (uint64_t *)buf;
 	while (i < len/8) {
 		/*
@@ -83,13 +83,25 @@ static void orion_nand_read_buf(struct mtd_info *mtd, uint8_t *buf, int len)
 		buf[i++] = readb(io_base);
 }
 
+static int orion_nand_attach_chip(struct nand_chip *chip)
+{
+	if (chip->ecc.engine_type == NAND_ECC_ENGINE_TYPE_SOFT &&
+	    chip->ecc.algo == NAND_ECC_ALGO_UNKNOWN)
+		chip->ecc.algo = NAND_ECC_ALGO_HAMMING;
+
+	return 0;
+}
+
+static const struct nand_controller_ops orion_nand_ops = {
+	.attach_chip = orion_nand_attach_chip,
+};
+
 static int __init orion_nand_probe(struct platform_device *pdev)
 {
 	struct orion_nand_info *info;
 	struct mtd_info *mtd;
 	struct nand_chip *nc;
 	struct orion_nand_data *board;
-	struct resource *res;
 	void __iomem *io_base;
 	int ret = 0;
 	u32 val = 0;
@@ -102,8 +114,11 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 	nc = &info->chip;
 	mtd = nand_to_mtd(nc);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	io_base = devm_ioremap_resource(&pdev->dev, res);
+	nand_controller_init(&info->controller);
+	info->controller.ops = &orion_nand_ops;
+	nc->controller = &info->controller;
+
+	io_base = devm_platform_ioremap_resource(pdev, 0);
 
 	if (IS_ERR(io_base))
 		return PTR_ERR(io_base);
@@ -137,14 +152,12 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 
 	nand_set_controller_data(nc, board);
 	nand_set_flash_node(nc, pdev->dev.of_node);
-	nc->IO_ADDR_R = nc->IO_ADDR_W = io_base;
-	nc->cmd_ctrl = orion_nand_cmd_ctrl;
-	nc->read_buf = orion_nand_read_buf;
-	nc->ecc.mode = NAND_ECC_SOFT;
-	nc->ecc.algo = NAND_ECC_HAMMING;
+	nc->legacy.IO_ADDR_R = nc->legacy.IO_ADDR_W = io_base;
+	nc->legacy.cmd_ctrl = orion_nand_cmd_ctrl;
+	nc->legacy.read_buf = orion_nand_read_buf;
 
 	if (board->chip_delay)
-		nc->chip_delay = board->chip_delay;
+		nc->legacy.chip_delay = board->chip_delay;
 
 	WARN(board->width > 16,
 		"%d bit bus width out of range",
@@ -153,59 +166,43 @@ static int __init orion_nand_probe(struct platform_device *pdev)
 	if (board->width == 16)
 		nc->options |= NAND_BUSWIDTH_16;
 
-	if (board->dev_ready)
-		nc->dev_ready = board->dev_ready;
-
 	platform_set_drvdata(pdev, info);
 
-	/* Not all platforms can gate the clock, so it is not
-	   an error if the clock does not exists. */
-	info->clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(info->clk)) {
-		ret = PTR_ERR(info->clk);
-		if (ret == -ENOENT) {
-			info->clk = NULL;
-		} else {
-			dev_err(&pdev->dev, "failed to get clock!\n");
-			return ret;
-		}
-	}
+	/* Not all platforms can gate the clock, so it is optional. */
+	info->clk = devm_clk_get_optional_enabled(&pdev->dev, NULL);
+	if (IS_ERR(info->clk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(info->clk),
+				     "failed to get and enable clock!\n");
 
-	ret = clk_prepare_enable(info->clk);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to prepare clock!\n");
-		return ret;
-	}
+	/*
+	 * This driver assumes that the default ECC engine should be TYPE_SOFT.
+	 * Set ->engine_type before registering the NAND devices in order to
+	 * provide a driver specific default value.
+	 */
+	nc->ecc.engine_type = NAND_ECC_ENGINE_TYPE_SOFT;
 
-	ret = nand_scan(mtd, 1);
+	ret = nand_scan(nc, 1);
 	if (ret)
-		goto no_dev;
+		return ret;
 
 	mtd->name = "orion_nand";
 	ret = mtd_device_register(mtd, board->parts, board->nr_parts);
-	if (ret) {
-		nand_release(mtd);
-		goto no_dev;
-	}
+	if (ret)
+		nand_cleanup(nc);
 
-	return 0;
-
-no_dev:
-	clk_disable_unprepare(info->clk);
 	return ret;
 }
 
-static int orion_nand_remove(struct platform_device *pdev)
+static void orion_nand_remove(struct platform_device *pdev)
 {
 	struct orion_nand_info *info = platform_get_drvdata(pdev);
 	struct nand_chip *chip = &info->chip;
-	struct mtd_info *mtd = nand_to_mtd(chip);
+	int ret;
 
-	nand_release(mtd);
+	ret = mtd_device_unregister(nand_to_mtd(chip));
+	WARN_ON(ret);
 
-	clk_disable_unprepare(info->clk);
-
-	return 0;
+	nand_cleanup(chip);
 }
 
 #ifdef CONFIG_OF

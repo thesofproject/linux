@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * GPIO driver for Analog Devices ADP5520 MFD PMICs
  *
  * Copyright 2009 Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/module.h>
@@ -41,16 +40,18 @@ static int adp5520_gpio_get_value(struct gpio_chip *chip, unsigned off)
 	return !!(reg_val & dev->lut[off]);
 }
 
-static void adp5520_gpio_set_value(struct gpio_chip *chip,
-		unsigned off, int val)
+static int adp5520_gpio_set_value(struct gpio_chip *chip,
+				  unsigned int off, int val)
 {
 	struct adp5520_gpio *dev;
 	dev = gpiochip_get_data(chip);
 
 	if (val)
-		adp5520_set_bits(dev->master, ADP5520_GPIO_OUT, dev->lut[off]);
+		return adp5520_set_bits(dev->master, ADP5520_GPIO_OUT,
+					dev->lut[off]);
 	else
-		adp5520_clr_bits(dev->master, ADP5520_GPIO_OUT, dev->lut[off]);
+		return adp5520_clr_bits(dev->master, ADP5520_GPIO_OUT,
+					dev->lut[off]);
 }
 
 static int adp5520_gpio_direction_input(struct gpio_chip *chip, unsigned off)
@@ -114,10 +115,8 @@ static int adp5520_gpio_probe(struct platform_device *pdev)
 		if (pdata->gpio_en_mask & (1 << i))
 			dev->lut[gpios++] = 1 << i;
 
-	if (gpios < 1) {
-		ret = -EINVAL;
-		goto err;
-	}
+	if (gpios < 1)
+		return -EINVAL;
 
 	gc = &dev->gpio_chip;
 	gc->direction_input  = adp5520_gpio_direction_input;
@@ -149,18 +148,10 @@ static int adp5520_gpio_probe(struct platform_device *pdev)
 
 	if (ret) {
 		dev_err(&pdev->dev, "failed to write\n");
-		goto err;
+		return ret;
 	}
 
-	ret = devm_gpiochip_add_data(&pdev->dev, &dev->gpio_chip, dev);
-	if (ret)
-		goto err;
-
-	platform_set_drvdata(pdev, dev);
-	return 0;
-
-err:
-	return ret;
+	return devm_gpiochip_add_data(&pdev->dev, &dev->gpio_chip, dev);
 }
 
 static struct platform_driver adp5520_gpio_driver = {
@@ -172,7 +163,7 @@ static struct platform_driver adp5520_gpio_driver = {
 
 module_platform_driver(adp5520_gpio_driver);
 
-MODULE_AUTHOR("Michael Hennerich <hennerich@blackfin.uclinux.org>");
+MODULE_AUTHOR("Michael Hennerich <michael.hennerich@analog.com>");
 MODULE_DESCRIPTION("GPIO ADP5520 Driver");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:adp5520-gpio");

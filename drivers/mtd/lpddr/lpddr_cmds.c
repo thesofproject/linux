@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * LPDDR flash memory device operations. This module provides read, write,
  * erase, lock/unlock support for LPDDR flash memories
@@ -5,20 +6,6 @@
  * (C) 2008 Vasiliy Leonenko <vasiliy.leonenko@gmail.com>
  * Many thanks to Roman Borisov for initial enabling
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA.
  * TODO:
  * Implement VPP management
  * Implement XIP support
@@ -54,7 +41,7 @@ struct mtd_info *lpddr_cmdset(struct map_info *map)
 	int numchips;
 	int i, j;
 
-	mtd = kzalloc(sizeof(*mtd), GFP_KERNEL);
+	mtd = kzalloc_obj(*mtd);
 	if (!mtd)
 		return NULL;
 	mtd->priv = map;
@@ -74,14 +61,12 @@ struct mtd_info *lpddr_cmdset(struct map_info *map)
 		mtd->_point = lpddr_point;
 		mtd->_unpoint = lpddr_unpoint;
 	}
-	mtd->size = 1 << lpddr->qinfo->DevSizeShift;
+	mtd->size = 1ULL << lpddr->qinfo->DevSizeShift;
 	mtd->erasesize = 1 << lpddr->qinfo->UniformBlockSizeShift;
 	mtd->writesize = 1 << lpddr->qinfo->BufSizeShift;
 
-	shared = kmalloc(sizeof(struct flchip_shared) * lpddr->numchips,
-						GFP_KERNEL);
+	shared = kmalloc_objs(struct flchip_shared, lpddr->numchips);
 	if (!shared) {
-		kfree(lpddr);
 		kfree(mtd);
 		return NULL;
 	}
@@ -93,7 +78,7 @@ struct mtd_info *lpddr_cmdset(struct map_info *map)
 		mutex_init(&shared[i].lock);
 		for (j = 0; j < lpddr->qinfo->HWPartsNum; j++) {
 			*chip = lpddr->chips[i];
-			chip->start += j << lpddr->chipshift;
+			chip->start += (unsigned long)j << lpddr->chipshift;
 			chip->oldstate = chip->state = FL_READY;
 			chip->priv = &shared[i];
 			/* those should be reset too since
@@ -107,6 +92,34 @@ struct mtd_info *lpddr_cmdset(struct map_info *map)
 	return mtd;
 }
 EXPORT_SYMBOL(lpddr_cmdset);
+
+static void print_drs_error(unsigned int dsr)
+{
+	int prog_status = (dsr & DSR_RPS) >> 8;
+
+	if (!(dsr & DSR_AVAILABLE))
+		pr_notice("DSR.15: (0) Device not Available\n");
+	if ((prog_status & 0x03) == 0x03)
+		pr_notice("DSR.9,8: (11) Attempt to program invalid half with 41h command\n");
+	else if (prog_status & 0x02)
+		pr_notice("DSR.9,8: (10) Object Mode Program attempt in region with Control Mode data\n");
+	else if (prog_status &  0x01)
+		pr_notice("DSR.9,8: (01) Program attempt in region with Object Mode data\n");
+	if (!(dsr & DSR_READY_STATUS))
+		pr_notice("DSR.7: (0) Device is Busy\n");
+	if (dsr & DSR_ESS)
+		pr_notice("DSR.6: (1) Erase Suspended\n");
+	if (dsr & DSR_ERASE_STATUS)
+		pr_notice("DSR.5: (1) Erase/Blank check error\n");
+	if (dsr & DSR_PROGRAM_STATUS)
+		pr_notice("DSR.4: (1) Program Error\n");
+	if (dsr & DSR_VPPS)
+		pr_notice("DSR.3: (1) Vpp low detect, operation aborted\n");
+	if (dsr & DSR_PSS)
+		pr_notice("DSR.2: (1) Program suspended\n");
+	if (dsr & DSR_DPS)
+		pr_notice("DSR.1: (1) Aborted Erase/Program attempt on locked block\n");
+}
 
 static int wait_for_ready(struct map_info *map, struct flchip *chip,
 		unsigned int chip_op_time)
@@ -128,7 +141,7 @@ static int wait_for_ready(struct map_info *map, struct flchip *chip,
 		if (dsr & DSR_READY_STATUS)
 			break;
 		if (!timeo) {
-			printk(KERN_ERR "%s: Flash timeout error state %d \n",
+			printk(KERN_ERR "%s: Flash timeout error state %d\n",
 							map->name, chip_state);
 			ret = -ETIME;
 			break;
@@ -172,7 +185,7 @@ static int wait_for_ready(struct map_info *map, struct flchip *chip,
 	if (dsr & DSR_ERR) {
 		/* Clear DSR*/
 		map_write(map, CMD(~(DSR_ERR)), map->pfow_base + PFOW_DSR);
-		printk(KERN_WARNING"%s: Bad status on wait: 0x%x \n",
+		printk(KERN_WARNING"%s: Bad status on wait: 0x%x\n",
 				map->name, dsr);
 		print_drs_error(dsr);
 		ret = -EIO;
@@ -307,7 +320,7 @@ static int chip_ready(struct map_info *map, struct flchip *chip, int mode)
 			/* Resume and pretend we weren't here.  */
 			put_chip(map, chip);
 			printk(KERN_ERR "%s: suspend operation failed."
-					"State may be wrong \n", map->name);
+					"State may be wrong\n", map->name);
 			return -EIO;
 		}
 		chip->erase_suspended = 1;
@@ -318,7 +331,7 @@ static int chip_ready(struct map_info *map, struct flchip *chip, int mode)
 		/* Only if there's no operation suspended... */
 		if (mode == FL_READY && chip->oldstate == FL_READY)
 			return 0;
-
+		fallthrough;
 	default:
 sleep:
 		set_current_state(TASK_UNINTERRUPTIBLE);
@@ -392,7 +405,7 @@ static int do_write_buffer(struct map_info *map, struct flchip *chip,
 {
 	struct lpddr_private *lpddr = map->fldrv_priv;
 	map_word datum;
-	int ret, wbufsize, word_gap, words;
+	int ret, wbufsize, word_gap;
 	const struct kvec *vec;
 	unsigned long vec_seek;
 	unsigned long prog_buf_ofs;
@@ -407,10 +420,7 @@ static int do_write_buffer(struct map_info *map, struct flchip *chip,
 	}
 	/* Figure out the number of words to write */
 	word_gap = (-adr & (map_bankwidth(map)-1));
-	words = (len - word_gap + map_bankwidth(map) - 1) / map_bankwidth(map);
-	if (!word_gap) {
-		words--;
-	} else {
+	if (word_gap) {
 		word_gap = map_bankwidth(map) - word_gap;
 		adr -= word_gap;
 		datum = map_word_ff(map);
@@ -457,7 +467,7 @@ static int do_write_buffer(struct map_info *map, struct flchip *chip,
 	chip->state = FL_WRITING;
 	ret = wait_for_ready(map, chip, (1<<lpddr->qinfo->ProgBufferTime));
 	if (ret)	{
-		printk(KERN_WARNING"%s Buffer program error: %d at %lx; \n",
+		printk(KERN_WARNING"%s Buffer program error: %d at %lx\n",
 			map->name, ret, adr);
 		goto out;
 	}
@@ -548,7 +558,7 @@ static int lpddr_point(struct mtd_info *mtd, loff_t adr, size_t len,
 			break;
 
 		if ((len + ofs - 1) >> lpddr->chipshift)
-			thislen = (1<<lpddr->chipshift) - ofs;
+			thislen = (1UL << lpddr->chipshift) - ofs;
 		else
 			thislen = len;
 		/* get the chip */
@@ -564,7 +574,7 @@ static int lpddr_point(struct mtd_info *mtd, loff_t adr, size_t len,
 		len -= thislen;
 
 		ofs = 0;
-		last_end += 1 << lpddr->chipshift;
+		last_end += 1UL << lpddr->chipshift;
 		chipnum++;
 		chip = &lpddr->chips[chipnum];
 	}
@@ -590,7 +600,7 @@ static int lpddr_unpoint (struct mtd_info *mtd, loff_t adr, size_t len)
 			break;
 
 		if ((len + ofs - 1) >> lpddr->chipshift)
-			thislen = (1<<lpddr->chipshift) - ofs;
+			thislen = (1UL << lpddr->chipshift) - ofs;
 		else
 			thislen = len;
 
@@ -725,7 +735,7 @@ static int do_xxlock(struct mtd_info *mtd, loff_t adr, uint32_t len, int thunk)
 
 	ret = wait_for_ready(map, chip, 1);
 	if (ret)	{
-		printk(KERN_ERR "%s: block unlock error status %d \n",
+		printk(KERN_ERR "%s: block unlock error status %d\n",
 				map->name, ret);
 		goto out;
 	}

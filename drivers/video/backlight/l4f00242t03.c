@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * l4f00242t03.c -- support for Epson L4F00242T03 LCD
  *
@@ -5,10 +6,6 @@
  *
  * Copyright (c) 2009 Alberto Panizzo <maramaopercheseimorto@gmail.com>
  *	Inspired by Marek Vasut work in l4f00242t03.c
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -17,13 +14,11 @@
 #include <linux/kernel.h>
 #include <linux/delay.h>
 #include <linux/module.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/lcd.h>
 #include <linux/slab.h>
 #include <linux/regulator/consumer.h>
-
 #include <linux/spi/spi.h>
-#include <linux/spi/l4f00242t03.h>
 
 struct l4f00242t03_priv {
 	struct spi_device	*spi;
@@ -31,16 +26,18 @@ struct l4f00242t03_priv {
 	int lcd_state;
 	struct regulator *io_reg;
 	struct regulator *core_reg;
+	struct gpio_desc *reset;
+	struct gpio_desc *enable;
 };
 
-static void l4f00242t03_reset(unsigned int gpio)
+static void l4f00242t03_reset(struct gpio_desc *gpiod)
 {
 	pr_debug("l4f00242t03_reset.\n");
-	gpio_set_value(gpio, 1);
+	gpiod_set_value(gpiod, 1);
 	mdelay(100);
-	gpio_set_value(gpio, 0);
+	gpiod_set_value(gpiod, 0);
 	mdelay(10);	/* tRES >= 100us */
-	gpio_set_value(gpio, 1);
+	gpiod_set_value(gpiod, 1);
 	mdelay(20);
 }
 
@@ -48,7 +45,6 @@ static void l4f00242t03_reset(unsigned int gpio)
 
 static void l4f00242t03_lcd_init(struct spi_device *spi)
 {
-	struct l4f00242t03_pdata *pdata = dev_get_platdata(&spi->dev);
 	struct l4f00242t03_priv *priv = spi_get_drvdata(spi);
 	const u16 cmd[] = { 0x36, param(0), 0x3A, param(0x60) };
 	int ret;
@@ -79,21 +75,20 @@ static void l4f00242t03_lcd_init(struct spi_device *spi)
 		return;
 	}
 
-	l4f00242t03_reset(pdata->reset_gpio);
+	l4f00242t03_reset(priv->reset);
 
-	gpio_set_value(pdata->data_enable_gpio, 1);
+	gpiod_set_value(priv->enable, 1);
 	msleep(60);
 	spi_write(spi, (const u8 *)cmd, ARRAY_SIZE(cmd) * sizeof(u16));
 }
 
 static void l4f00242t03_lcd_powerdown(struct spi_device *spi)
 {
-	struct l4f00242t03_pdata *pdata = dev_get_platdata(&spi->dev);
 	struct l4f00242t03_priv *priv = spi_get_drvdata(spi);
 
 	dev_dbg(&spi->dev, "Powering down LCD\n");
 
-	gpio_set_value(pdata->data_enable_gpio, 0);
+	gpiod_set_value(priv->enable, 0);
 
 	regulator_disable(priv->io_reg);
 	regulator_disable(priv->core_reg);
@@ -117,40 +112,40 @@ static int l4f00242t03_lcd_power_set(struct lcd_device *ld, int power)
 	const u16 slpin = 0x10;
 	const u16 disoff = 0x28;
 
-	if (power <= FB_BLANK_NORMAL) {
-		if (priv->lcd_state <= FB_BLANK_NORMAL) {
+	if (power <= LCD_POWER_REDUCED) {
+		if (priv->lcd_state <= LCD_POWER_REDUCED) {
 			/* Do nothing, the LCD is running */
-		} else if (priv->lcd_state < FB_BLANK_POWERDOWN) {
+		} else if (priv->lcd_state < LCD_POWER_OFF) {
 			dev_dbg(&spi->dev, "Resuming LCD\n");
 
 			spi_write(spi, (const u8 *)&slpout, sizeof(u16));
 			msleep(60);
 			spi_write(spi, (const u8 *)&dison, sizeof(u16));
 		} else {
-			/* priv->lcd_state == FB_BLANK_POWERDOWN */
+			/* priv->lcd_state == LCD_POWER_OFF */
 			l4f00242t03_lcd_init(spi);
-			priv->lcd_state = FB_BLANK_VSYNC_SUSPEND;
+			priv->lcd_state = LCD_POWER_REDUCED_VSYNC_SUSPEND;
 			l4f00242t03_lcd_power_set(priv->ld, power);
 		}
-	} else if (power < FB_BLANK_POWERDOWN) {
-		if (priv->lcd_state <= FB_BLANK_NORMAL) {
+	} else if (power < LCD_POWER_OFF) {
+		if (priv->lcd_state <= LCD_POWER_REDUCED) {
 			/* Send the display in standby */
 			dev_dbg(&spi->dev, "Standby the LCD\n");
 
 			spi_write(spi, (const u8 *)&disoff, sizeof(u16));
 			msleep(60);
 			spi_write(spi, (const u8 *)&slpin, sizeof(u16));
-		} else if (priv->lcd_state < FB_BLANK_POWERDOWN) {
+		} else if (priv->lcd_state < LCD_POWER_OFF) {
 			/* Do nothing, the LCD is already in standby */
 		} else {
-			/* priv->lcd_state == FB_BLANK_POWERDOWN */
+			/* priv->lcd_state == LCD_POWER_OFF */
 			l4f00242t03_lcd_init(spi);
-			priv->lcd_state = FB_BLANK_UNBLANK;
+			priv->lcd_state = LCD_POWER_ON;
 			l4f00242t03_lcd_power_set(ld, power);
 		}
 	} else {
-		/* power == FB_BLANK_POWERDOWN */
-		if (priv->lcd_state != FB_BLANK_POWERDOWN) {
+		/* power == LCD_POWER_OFF */
+		if (priv->lcd_state != LCD_POWER_OFF) {
 			/* Clear the screen before shutting down */
 			spi_write(spi, (const u8 *)&disoff, sizeof(u16));
 			msleep(60);
@@ -163,7 +158,7 @@ static int l4f00242t03_lcd_power_set(struct lcd_device *ld, int power)
 	return 0;
 }
 
-static struct lcd_ops l4f_ops = {
+static const struct lcd_ops l4f_ops = {
 	.set_power	= l4f00242t03_lcd_power_set,
 	.get_power	= l4f00242t03_lcd_power_get,
 };
@@ -171,13 +166,7 @@ static struct lcd_ops l4f_ops = {
 static int l4f00242t03_probe(struct spi_device *spi)
 {
 	struct l4f00242t03_priv *priv;
-	struct l4f00242t03_pdata *pdata = dev_get_platdata(&spi->dev);
 	int ret;
-
-	if (pdata == NULL) {
-		dev_err(&spi->dev, "Uninitialized platform data.\n");
-		return -EINVAL;
-	}
 
 	priv = devm_kzalloc(&spi->dev, sizeof(struct l4f00242t03_priv),
 				GFP_KERNEL);
@@ -186,39 +175,35 @@ static int l4f00242t03_probe(struct spi_device *spi)
 
 	spi_set_drvdata(spi, priv);
 	spi->bits_per_word = 9;
-	spi_setup(spi);
+	ret = spi_setup(spi);
+	if (ret < 0)
+		return dev_err_probe(&spi->dev, ret, "Unable to setup spi.\n");
 
 	priv->spi = spi;
 
-	ret = devm_gpio_request_one(&spi->dev, pdata->reset_gpio,
-			GPIOF_OUT_INIT_HIGH, "lcd l4f00242t03 reset");
-	if (ret) {
-		dev_err(&spi->dev,
-			"Unable to get the lcd l4f00242t03 reset gpio.\n");
-		return ret;
-	}
+	priv->reset = devm_gpiod_get(&spi->dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(priv->reset))
+		return dev_err_probe(&spi->dev, PTR_ERR(priv->reset),
+				     "Unable to get the lcd l4f00242t03 reset gpio.\n");
+	gpiod_set_consumer_name(priv->reset, "lcd l4f00242t03 reset");
 
-	ret = devm_gpio_request_one(&spi->dev, pdata->data_enable_gpio,
-			GPIOF_OUT_INIT_LOW, "lcd l4f00242t03 data enable");
-	if (ret) {
-		dev_err(&spi->dev,
-			"Unable to get the lcd l4f00242t03 data en gpio.\n");
-		return ret;
-	}
+	priv->enable = devm_gpiod_get(&spi->dev, "enable", GPIOD_OUT_LOW);
+	if (IS_ERR(priv->enable))
+		return dev_err_probe(&spi->dev, PTR_ERR(priv->enable),
+				     "Unable to get the lcd l4f00242t03 data en gpio.\n");
+	gpiod_set_consumer_name(priv->enable, "lcd l4f00242t03 data enable");
 
 	priv->io_reg = devm_regulator_get(&spi->dev, "vdd");
-	if (IS_ERR(priv->io_reg)) {
-		dev_err(&spi->dev, "%s: Unable to get the IO regulator\n",
-		       __func__);
-		return PTR_ERR(priv->io_reg);
-	}
+	if (IS_ERR(priv->io_reg))
+		return dev_err_probe(&spi->dev, PTR_ERR(priv->io_reg),
+				     "%s: Unable to get the IO regulator\n",
+				     __func__);
 
 	priv->core_reg = devm_regulator_get(&spi->dev, "vcore");
-	if (IS_ERR(priv->core_reg)) {
-		dev_err(&spi->dev, "%s: Unable to get the core regulator\n",
-		       __func__);
-		return PTR_ERR(priv->core_reg);
-	}
+	if (IS_ERR(priv->core_reg))
+		return dev_err_probe(&spi->dev, PTR_ERR(priv->core_reg),
+				     "%s: Unable to get the core regulator\n",
+				     __func__);
 
 	priv->ld = devm_lcd_device_register(&spi->dev, "l4f00242t03", &spi->dev,
 					priv, &l4f_ops);
@@ -227,20 +212,19 @@ static int l4f00242t03_probe(struct spi_device *spi)
 
 	/* Init the LCD */
 	l4f00242t03_lcd_init(spi);
-	priv->lcd_state = FB_BLANK_VSYNC_SUSPEND;
-	l4f00242t03_lcd_power_set(priv->ld, FB_BLANK_UNBLANK);
+	priv->lcd_state = LCD_POWER_REDUCED_VSYNC_SUSPEND;
+	l4f00242t03_lcd_power_set(priv->ld, LCD_POWER_ON);
 
 	dev_info(&spi->dev, "Epson l4f00242t03 lcd probed.\n");
 
 	return 0;
 }
 
-static int l4f00242t03_remove(struct spi_device *spi)
+static void l4f00242t03_remove(struct spi_device *spi)
 {
 	struct l4f00242t03_priv *priv = spi_get_drvdata(spi);
 
-	l4f00242t03_lcd_power_set(priv->ld, FB_BLANK_POWERDOWN);
-	return 0;
+	l4f00242t03_lcd_power_set(priv->ld, LCD_POWER_OFF);
 }
 
 static void l4f00242t03_shutdown(struct spi_device *spi)
@@ -248,7 +232,7 @@ static void l4f00242t03_shutdown(struct spi_device *spi)
 	struct l4f00242t03_priv *priv = spi_get_drvdata(spi);
 
 	if (priv)
-		l4f00242t03_lcd_power_set(priv->ld, FB_BLANK_POWERDOWN);
+		l4f00242t03_lcd_power_set(priv->ld, LCD_POWER_OFF);
 
 }
 

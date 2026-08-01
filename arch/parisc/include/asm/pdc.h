@@ -4,22 +4,20 @@
 
 #include <uapi/asm/pdc.h>
 
-#if !defined(__ASSEMBLY__)
+#if !defined(__ASSEMBLER__)
 
 extern int parisc_narrow_firmware;
 
 extern int pdc_type;
 extern unsigned long parisc_cell_num; /* cell number the CPU runs on (PAT) */
 extern unsigned long parisc_cell_loc; /* cell location of CPU (PAT)	   */
+extern unsigned long parisc_pat_pdc_cap; /* PDC capabilities (PAT) */
 
 /* Values for pdc_type */
 #define PDC_TYPE_ILLEGAL	-1
 #define PDC_TYPE_PAT		 0 /* 64-bit PAT-PDC */
 #define PDC_TYPE_SYSTEM_MAP	 1 /* 32-bit, but supports PDC_SYSTEM_MAP */
 #define PDC_TYPE_SNAKE		 2 /* Doesn't support SYSTEM_MAP */
-
-void pdc_console_init(void);	/* in pdc_console.c */
-void pdc_console_restart(void);
 
 void setup_pdc(void);		/* in inventory.c */
 
@@ -39,16 +37,20 @@ int pdc_system_map_find_mods(struct pdc_system_map_mod_info *pdc_mod_info,
 int pdc_system_map_find_addrs(struct pdc_system_map_addr_info *pdc_addr_info,
 			      long mod_index, long addr_index);
 int pdc_model_info(struct pdc_model *model);
-int pdc_model_sysmodel(char *name);
+int pdc_model_sysmodel(unsigned int os_id, char *name);
 int pdc_model_cpuid(unsigned long *cpu_id);
 int pdc_model_versions(unsigned long *versions, int id);
 int pdc_model_capabilities(unsigned long *capabilities);
+int pdc_model_platform_info(char *orig_prod_num, char *current_prod_num, char *serial_no);
 int pdc_cache_info(struct pdc_cache_info *cache);
 int pdc_spaceid_bits(unsigned long *space_bits);
-#ifndef CONFIG_PA20
 int pdc_btlb_info(struct pdc_btlb_info *btlb);
+int pdc_btlb_insert(unsigned long long vpage, unsigned long physpage, unsigned long len,
+                    unsigned long entry_info, unsigned long slot);
+int pdc_btlb_purge_all(void);
 int pdc_mem_map_hpa(struct pdc_memory_map *r_addr, struct pdc_module_path *mod_path);
-#endif /* !CONFIG_PA20 */
+int pdc_pim_toc11(struct pdc_toc_pim_11 *ret);
+int pdc_pim_toc20(struct pdc_toc_pim_20 *ret);
 int pdc_lan_station_id(char *lan_addr, unsigned long net_hpa);
 
 int pdc_stable_read(unsigned long staddr, void *memaddr, unsigned long count);
@@ -79,6 +81,7 @@ int pdc_do_firm_test_reset(unsigned long ftc_bitmap);
 int pdc_do_reset(void);
 int pdc_soft_power_info(unsigned long *power_reg);
 int pdc_soft_power_button(int sw_control);
+int pdc_soft_power_button_panic(int sw_control);
 void pdc_io_reset(void);
 void pdc_io_reset_devices(void);
 int pdc_iodc_getc(void);
@@ -86,8 +89,12 @@ int pdc_iodc_print(const unsigned char *str, unsigned count);
 
 void pdc_emergency_unlock(void);
 int pdc_sti_call(unsigned long func, unsigned long flags,
-                 unsigned long inptr, unsigned long outputr,
-                 unsigned long glob_cfg);
+		unsigned long inptr, unsigned long outputr,
+		unsigned long glob_cfg, int do_call64);
+
+int __pdc_cpu_rendezvous(void);
+void pdc_cpu_rendezvous_lock(void);
+void pdc_cpu_rendezvous_unlock(void);
 
 static inline char * os_id_to_string(u16 os_id) {
 	switch(os_id) {
@@ -102,5 +109,5 @@ static inline char * os_id_to_string(u16 os_id) {
 	}
 }
 
-#endif /* !defined(__ASSEMBLY__) */
+#endif /* !defined(__ASSEMBLER__) */
 #endif /* _PARISC_PDC_H */

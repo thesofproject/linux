@@ -16,13 +16,13 @@
 #include <linux/sunrpc/clnt.h>
 #include <linux/sunrpc/addr.h>
 #include <linux/sunrpc/svc.h>
-#include <linux/lockd/lockd.h>
 #include <linux/mutex.h>
 
 #include <linux/sunrpc/svc_xprt.h>
 
 #include <net/ipv6.h>
 
+#include "lockd.h"
 #include "netns.h"
 
 #define NLMDBG_FACILITY		NLMDBG_HOSTCACHE
@@ -60,6 +60,7 @@ struct nlm_lookup_host_info {
 	const size_t		hostname_len;	/* it's length */
 	const int		noresvport;	/* use non-priv port */
 	struct net		*net;		/* network namespace to bind */
+	const struct cred	*cred;
 };
 
 /*
@@ -116,7 +117,6 @@ static struct nlm_host *nlm_alloc_host(struct nlm_lookup_host_info *ni,
 	if (nsm != NULL)
 		refcount_inc(&nsm->sm_count);
 	else {
-		host = NULL;
 		nsm = nsm_get_handle(ni->net, ni->sap, ni->salen,
 					ni->hostname, ni->hostname_len);
 		if (unlikely(nsm == NULL)) {
@@ -126,7 +126,7 @@ static struct nlm_host *nlm_alloc_host(struct nlm_lookup_host_info *ni,
 		}
 	}
 
-	host = kmalloc(sizeof(*host), GFP_KERNEL);
+	host = kmalloc_obj(*host);
 	if (unlikely(host == NULL)) {
 		dprintk("lockd: %s failed; no memory\n", __func__);
 		nsm_release(nsm);
@@ -162,7 +162,8 @@ static struct nlm_host *nlm_alloc_host(struct nlm_lookup_host_info *ni,
 	host->h_nsmhandle  = nsm;
 	host->h_addrbuf    = nsm->sm_addrbuf;
 	host->net	   = ni->net;
-	strlcpy(host->nodename, utsname()->nodename, sizeof(host->nodename));
+	host->h_cred	   = get_cred(ni->cred);
+	strscpy(host->nodename, utsname()->nodename, sizeof(host->nodename));
 
 out:
 	return host;
@@ -188,6 +189,7 @@ static void nlm_destroy_host_locked(struct nlm_host *host)
 	clnt = host->h_rpcclnt;
 	if (clnt != NULL)
 		rpc_shutdown_client(clnt);
+	put_cred(host->h_cred);
 	kfree(host);
 
 	ln->nrhosts--;
@@ -202,6 +204,8 @@ static void nlm_destroy_host_locked(struct nlm_host *host)
  * @version: NLM protocol version
  * @hostname: '\0'-terminated hostname of server
  * @noresvport: 1 if non-privileged port should be used
+ * @net: pointer to net namespace
+ * @cred: pointer to cred
  *
  * Returns an nlm_host structure that matches the passed-in
  * [server address, transport protocol, NLM version, server hostname].
@@ -214,7 +218,8 @@ struct nlm_host *nlmclnt_lookup_host(const struct sockaddr *sap,
 				     const u32 version,
 				     const char *hostname,
 				     int noresvport,
-				     struct net *net)
+				     struct net *net,
+				     const struct cred *cred)
 {
 	struct nlm_lookup_host_info ni = {
 		.server		= 0,
@@ -226,6 +231,7 @@ struct nlm_host *nlmclnt_lookup_host(const struct sockaddr *sap,
 		.hostname_len	= strlen(hostname),
 		.noresvport	= noresvport,
 		.net		= net,
+		.cred		= cred,
 	};
 	struct hlist_head *chain;
 	struct nlm_host	*host;
@@ -290,16 +296,44 @@ void nlmclnt_release_host(struct nlm_host *host)
 
 	WARN_ON_ONCE(host->h_server);
 
-	if (refcount_dec_and_test(&host->h_count)) {
+	if (refcount_dec_and_mutex_lock(&host->h_count, &nlm_host_mutex)) {
 		WARN_ON_ONCE(!list_empty(&host->h_lockowners));
 		WARN_ON_ONCE(!list_empty(&host->h_granted));
 		WARN_ON_ONCE(!list_empty(&host->h_reclaim));
 
-		mutex_lock(&nlm_host_mutex);
 		nlm_destroy_host_locked(host);
 		mutex_unlock(&nlm_host_mutex);
 	}
 }
+
+/* Callback for rpc_cancel_tasks() - matches all tasks for cancellation */
+static bool nlmclnt_match_all(const struct rpc_task *task, const void *data)
+{
+	return true;
+}
+
+/**
+ * nlmclnt_shutdown_rpc_clnt - safely shut down NLM client RPC operations
+ * @host: nlm_host to shut down
+ *
+ * Cancels outstanding RPC tasks and marks the client as shut down.
+ * Synchronizes with nlmclnt_release_host() via nlm_host_mutex to prevent
+ * races between shutdown and host destruction. Safe to call if h_rpcclnt
+ * is NULL or already shut down.
+ */
+void nlmclnt_shutdown_rpc_clnt(struct nlm_host *host)
+{
+	struct rpc_clnt *clnt;
+
+	mutex_lock(&nlm_host_mutex);
+	clnt = host->h_rpcclnt;
+	if (clnt) {
+		clnt->cl_shutdown = 1;
+		rpc_cancel_tasks(clnt, -EIO, nlmclnt_match_all, NULL);
+	}
+	mutex_unlock(&nlm_host_mutex);
+}
+EXPORT_SYMBOL_GPL(nlmclnt_shutdown_rpc_clnt);
 
 /**
  * nlmsvc_lookup_host - Find an NLM host handle matching a remote client
@@ -341,7 +375,7 @@ struct nlm_host *nlmsvc_lookup_host(const struct svc_rqst *rqstp,
 	};
 	struct lockd_net *ln = net_generic(net, lockd_net_id);
 
-	dprintk("lockd: %s(host='%*s', vers=%u, proto=%s)\n", __func__,
+	dprintk("lockd: %s(host='%.*s', vers=%u, proto=%s)\n", __func__,
 			(int)hostname_len, hostname, rqstp->rq_vers,
 			(rqstp->rq_prot == IPPROTO_UDP ? "udp" : "tcp"));
 
@@ -433,14 +467,9 @@ nlm_bind_host(struct nlm_host *host)
 	 * RPC rebind is required
 	 */
 	if ((clnt = host->h_rpcclnt) != NULL) {
-		if (time_after_eq(jiffies, host->h_nextrebind)) {
-			rpc_force_rebind(clnt);
-			host->h_nextrebind = jiffies + NLM_HOST_REBIND;
-			dprintk("lockd: next rebind in %lu jiffies\n",
-					host->h_nextrebind - jiffies);
-		}
+		nlm_rebind_host(host);
 	} else {
-		unsigned long increment = nlmsvc_timeout;
+		unsigned long increment = nlm_timeout * HZ;
 		struct rpc_timeout timeparms = {
 			.to_initval	= increment,
 			.to_increment	= increment,
@@ -458,7 +487,9 @@ nlm_bind_host(struct nlm_host *host)
 			.version	= host->h_version,
 			.authflavor	= RPC_AUTH_UNIX,
 			.flags		= (RPC_CLNT_CREATE_NOPING |
-					   RPC_CLNT_CREATE_AUTOBIND),
+					   RPC_CLNT_CREATE_AUTOBIND |
+					   RPC_CLNT_CREATE_REUSEPORT),
+			.cred		= host->h_cred,
 		};
 
 		/*
@@ -486,13 +517,20 @@ nlm_bind_host(struct nlm_host *host)
 	return clnt;
 }
 
-/*
- * Force a portmap lookup of the remote lockd port
+/**
+ * nlm_rebind_host - If needed, force a portmap lookup of the peer's lockd port
+ * @host: NLM host handle for peer
+ *
+ * This is not needed when using a connection-oriented protocol, such as TCP.
+ * The existing autobind mechanism is sufficient to force a rebind when
+ * required, e.g. on connection state transitions.
  */
 void
 nlm_rebind_host(struct nlm_host *host)
 {
-	dprintk("lockd: rebind host %s\n", host->h_name);
+	if (host->h_proto != IPPROTO_UDP)
+		return;
+
 	if (host->h_rpcclnt && time_after_eq(jiffies, host->h_nextrebind)) {
 		rpc_force_rebind(host->h_rpcclnt);
 		host->h_nextrebind = jiffies + NLM_HOST_REBIND;
@@ -514,7 +552,7 @@ struct nlm_host * nlm_get_host(struct nlm_host *host)
 
 static struct nlm_host *next_host_state(struct hlist_head *cache,
 					struct nsm_handle *nsm,
-					const struct nlm_reboot *info)
+					const struct lockd_reboot *info)
 {
 	struct nlm_host *host;
 	struct hlist_head *chain;
@@ -544,7 +582,7 @@ static struct nlm_host *next_host_state(struct hlist_head *cache,
  * We were notified that the specified host has rebooted.  Release
  * all resources held by that peer.
  */
-void nlm_host_rebooted(const struct net *net, const struct nlm_reboot *info)
+void nlm_host_rebooted(const struct net *net, const struct lockd_reboot *info)
 {
 	struct nsm_handle *nsm;
 	struct nlm_host	*host;
@@ -619,6 +657,7 @@ nlm_shutdown_hosts_net(struct net *net)
 			rpc_shutdown_client(host->h_rpcclnt);
 			host->h_rpcclnt = NULL;
 		}
+		nlmsvc_free_host_resources(host);
 	}
 
 	/* Then, perform a garbage collection pass */

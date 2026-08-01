@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*******************************************************************************
  * Filename:  target_core_pscsi.c
  *
@@ -6,20 +7,6 @@
  * (c) Copyright 2003-2013 Datera, Inc.
  *
  * Nicholas A. Bellinger <nab@kernel.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  *
  ******************************************************************************/
 
@@ -30,11 +17,10 @@
 #include <linux/blk_types.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
-#include <linux/genhd.h>
 #include <linux/cdrom.h>
 #include <linux/ratelimit.h>
 #include <linux/module.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include <scsi/scsi_device.h>
 #include <scsi/scsi_host.h>
@@ -47,15 +33,14 @@
 #include "target_core_internal.h"
 #include "target_core_pscsi.h"
 
-#define ISPRINT(a)  ((a >= ' ') && (a <= '~'))
-
 static inline struct pscsi_dev_virt *PSCSI_DEV(struct se_device *dev)
 {
 	return container_of(dev, struct pscsi_dev_virt, dev);
 }
 
 static sense_reason_t pscsi_execute_cmd(struct se_cmd *cmd);
-static void pscsi_req_done(struct request *, blk_status_t);
+static enum rq_end_io_ret pscsi_req_done(struct request *, blk_status_t,
+					 const struct io_comp_batch *);
 
 /*	pscsi_attach_hba():
  *
@@ -66,7 +51,7 @@ static int pscsi_attach_hba(struct se_hba *hba, u32 host_id)
 {
 	struct pscsi_hba_virt *phv;
 
-	phv = kzalloc(sizeof(struct pscsi_hba_virt), GFP_KERNEL);
+	phv = kzalloc_obj(struct pscsi_hba_virt);
 	if (!phv) {
 		pr_err("Unable to allocate struct pscsi_hba_virt\n");
 		return -ENOMEM;
@@ -160,8 +145,7 @@ static void pscsi_tape_read_blocksize(struct se_device *dev,
 	cdb[0] = MODE_SENSE;
 	cdb[4] = 0x0c; /* 12 bytes */
 
-	ret = scsi_execute_req(sdev, cdb, DMA_FROM_DEVICE, buf, 12, NULL,
-			HZ, 1, NULL);
+	ret = scsi_execute_cmd(sdev, cdb, REQ_OP_DRV_IN, buf, 12, HZ, 1, NULL);
 	if (ret)
 		goto out_free;
 
@@ -179,20 +163,20 @@ out_free:
 static void
 pscsi_set_inquiry_info(struct scsi_device *sdev, struct t10_wwn *wwn)
 {
-	unsigned char *buf;
-
 	if (sdev->inquiry_len < INQUIRY_LEN)
 		return;
-
-	buf = sdev->inquiry;
-	if (!buf)
-		return;
 	/*
-	 * Use sdev->inquiry from drivers/scsi/scsi_scan.c:scsi_alloc_sdev()
+	 * Use sdev->inquiry data from drivers/scsi/scsi_scan.c:scsi_add_lun()
 	 */
-	memcpy(&wwn->vendor[0], &buf[8], sizeof(wwn->vendor));
-	memcpy(&wwn->model[0], &buf[16], sizeof(wwn->model));
-	memcpy(&wwn->revision[0], &buf[32], sizeof(wwn->revision));
+	BUILD_BUG_ON(sizeof(wwn->vendor) != INQUIRY_VENDOR_LEN + 1);
+	snprintf(wwn->vendor, sizeof(wwn->vendor),
+		 "%." __stringify(INQUIRY_VENDOR_LEN) "s", sdev->vendor);
+	BUILD_BUG_ON(sizeof(wwn->model) != INQUIRY_MODEL_LEN + 1);
+	snprintf(wwn->model, sizeof(wwn->model),
+		 "%." __stringify(INQUIRY_MODEL_LEN) "s", sdev->model);
+	BUILD_BUG_ON(sizeof(wwn->revision) != INQUIRY_REVISION_LEN + 1);
+	snprintf(wwn->revision, sizeof(wwn->revision),
+		 "%." __stringify(INQUIRY_REVISION_LEN) "s", sdev->rev);
 }
 
 static int
@@ -211,8 +195,8 @@ pscsi_get_inquiry_vpd_serial(struct scsi_device *sdev, struct t10_wwn *wwn)
 	cdb[2] = 0x80; /* Unit Serial Number */
 	put_unaligned_be16(INQUIRY_VPD_SERIAL_LEN, &cdb[3]);
 
-	ret = scsi_execute_req(sdev, cdb, DMA_FROM_DEVICE, buf,
-			      INQUIRY_VPD_SERIAL_LEN, NULL, HZ, 1, NULL);
+	ret = scsi_execute_cmd(sdev, cdb, REQ_OP_DRV_IN, buf,
+			       INQUIRY_VPD_SERIAL_LEN, HZ, 1, NULL);
 	if (ret)
 		goto out_free;
 
@@ -246,9 +230,8 @@ pscsi_get_inquiry_vpd_device_ident(struct scsi_device *sdev,
 	cdb[2] = 0x83; /* Device Identifier */
 	put_unaligned_be16(INQUIRY_VPD_DEVICE_IDENTIFIER_LEN, &cdb[3]);
 
-	ret = scsi_execute_req(sdev, cdb, DMA_FROM_DEVICE, buf,
-			      INQUIRY_VPD_DEVICE_IDENTIFIER_LEN,
-			      NULL, HZ, 1, NULL);
+	ret = scsi_execute_cmd(sdev, cdb, REQ_OP_DRV_IN, buf,
+			       INQUIRY_VPD_DEVICE_IDENTIFIER_LEN, HZ, 1, NULL);
 	if (ret)
 		goto out;
 
@@ -264,7 +247,7 @@ pscsi_get_inquiry_vpd_device_ident(struct scsi_device *sdev,
 		}
 		pr_debug("T10 VPD Identifier Length: %d\n", ident_len);
 
-		vpd = kzalloc(sizeof(struct t10_vpd), GFP_KERNEL);
+		vpd = kzalloc_obj(struct t10_vpd);
 		if (!vpd) {
 			pr_err("Unable to allocate memory for"
 					" struct t10_vpd\n");
@@ -351,7 +334,7 @@ static struct se_device *pscsi_alloc_device(struct se_hba *hba,
 {
 	struct pscsi_dev_virt *pdv;
 
-	pdv = kzalloc(sizeof(struct pscsi_dev_virt), GFP_KERNEL);
+	pdv = kzalloc_obj(struct pscsi_dev_virt);
 	if (!pdv) {
 		pr_err("Unable to allocate memory for struct pscsi_dev_virt\n");
 		return NULL;
@@ -370,7 +353,7 @@ static int pscsi_create_type_disk(struct se_device *dev, struct scsi_device *sd)
 	struct pscsi_hba_virt *phv = dev->se_hba->hba_ptr;
 	struct pscsi_dev_virt *pdv = PSCSI_DEV(dev);
 	struct Scsi_Host *sh = sd->host;
-	struct block_device *bd;
+	struct file *bdev_file;
 	int ret;
 
 	if (scsi_device_get(sd)) {
@@ -384,18 +367,18 @@ static int pscsi_create_type_disk(struct se_device *dev, struct scsi_device *sd)
 	 * Claim exclusive struct block_device access to struct scsi_device
 	 * for TYPE_DISK and TYPE_ZBC using supplied udev_path
 	 */
-	bd = blkdev_get_by_path(dev->udev_path,
-				FMODE_WRITE|FMODE_READ|FMODE_EXCL, pdv);
-	if (IS_ERR(bd)) {
-		pr_err("pSCSI: blkdev_get_by_path() failed\n");
+	bdev_file = bdev_file_open_by_path(dev->udev_path,
+				BLK_OPEN_WRITE | BLK_OPEN_READ, pdv, NULL);
+	if (IS_ERR(bdev_file)) {
+		pr_err("pSCSI: bdev_file_open_by_path() failed\n");
 		scsi_device_put(sd);
-		return PTR_ERR(bd);
+		return PTR_ERR(bdev_file);
 	}
-	pdv->pdv_bd = bd;
+	pdv->pdv_bdev_file = bdev_file;
 
 	ret = pscsi_add_device_to_list(dev, sd);
 	if (ret) {
-		blkdev_put(pdv->pdv_bd, FMODE_WRITE|FMODE_READ|FMODE_EXCL);
+		fput(bdev_file);
 		scsi_device_put(sd);
 		return ret;
 	}
@@ -516,7 +499,7 @@ static int pscsi_configure_device(struct se_device *dev)
 			continue;
 		/*
 		 * Functions will release the held struct scsi_host->host_lock
-		 * before calling calling pscsi_add_device_to_list() to register
+		 * before calling pscsi_add_device_to_list() to register
 		 * struct scsi_device with target_core_mod.
 		 */
 		switch (sd->type) {
@@ -582,10 +565,9 @@ static void pscsi_destroy_device(struct se_device *dev)
 		 * from pscsi_create_type_disk()
 		 */
 		if ((sd->type == TYPE_DISK || sd->type == TYPE_ZBC) &&
-		    pdv->pdv_bd) {
-			blkdev_put(pdv->pdv_bd,
-				   FMODE_WRITE|FMODE_READ|FMODE_EXCL);
-			pdv->pdv_bd = NULL;
+		    pdv->pdv_bdev_file) {
+			fput(pdv->pdv_bdev_file);
+			pdv->pdv_bdev_file = NULL;
 		}
 		/*
 		 * For HBA mode PHV_LLD_SCSI_HOST_NO, release the reference
@@ -604,20 +586,18 @@ static void pscsi_destroy_device(struct se_device *dev)
 }
 
 static void pscsi_complete_cmd(struct se_cmd *cmd, u8 scsi_status,
-			       unsigned char *req_sense)
+			       unsigned char *req_sense, int valid_data)
 {
 	struct pscsi_dev_virt *pdv = PSCSI_DEV(cmd->se_dev);
 	struct scsi_device *sd = pdv->pdv_sd;
-	struct pscsi_plugin_task *pt = cmd->priv;
-	unsigned char *cdb;
+	unsigned char *cdb = cmd->priv;
+
 	/*
-	 * Special case for REPORT_LUNs handling where pscsi_plugin_task has
-	 * not been allocated because TCM is handling the emulation directly.
+	 * Special case for REPORT_LUNs which is emulated and not passed on.
 	 */
-	if (!pt)
+	if (!cdb)
 		return;
 
-	cdb = &pt->pscsi_cdb[0];
 	/*
 	 * Hack to make sure that Write-Protect modepage is set if R/O mode is
 	 * forced.
@@ -633,18 +613,19 @@ static void pscsi_complete_cmd(struct se_cmd *cmd, u8 scsi_status,
 			unsigned char *buf;
 
 			buf = transport_kmap_data_sg(cmd);
-			if (!buf)
+			if (!buf) {
 				; /* XXX: TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE */
-
-			if (cdb[0] == MODE_SENSE_10) {
-				if (!(buf[3] & 0x80))
-					buf[3] |= 0x80;
 			} else {
-				if (!(buf[2] & 0x80))
-					buf[2] |= 0x80;
-			}
+				if (cdb[0] == MODE_SENSE_10) {
+					if (!(buf[3] & 0x80))
+						buf[3] |= 0x80;
+				} else {
+					if (!(buf[2] & 0x80))
+						buf[2] |= 0x80;
+				}
 
-			transport_kunmap_data_sg(cmd);
+				transport_kunmap_data_sg(cmd);
+			}
 		}
 	}
 after_mode_sense:
@@ -689,8 +670,29 @@ after_mode_sense:
 	}
 after_mode_select:
 
-	if (scsi_status == SAM_STAT_CHECK_CONDITION)
+	if (scsi_status == SAM_STAT_CHECK_CONDITION) {
 		transport_copy_sense_to_cmd(cmd, req_sense);
+
+		/*
+		 * check for TAPE device reads with
+		 * FM/EOM/ILI set, so that we can get data
+		 * back despite framework assumption that a
+		 * check condition means there is no data
+		 */
+		if (sd->type == TYPE_TAPE && valid_data &&
+		    cmd->data_direction == DMA_FROM_DEVICE) {
+			/*
+			 * is sense data valid, fixed format,
+			 * and have FM, EOM, or ILI set?
+			 */
+			if (req_sense[0] == 0xf0 &&	/* valid, fixed format */
+			    req_sense[2] & 0xe0 &&	/* FM, EOM, or ILI */
+			    (req_sense[2] & 0xf) == 0) { /* key==NO_SENSE */
+				pr_debug("Tape FM/EOM/ILI status detected. Treat as normal read.\n");
+				cmd->se_cmd_flags |= SCF_TREAT_READ_AS_NORMAL;
+			}
+		}
+	}
 }
 
 enum {
@@ -790,7 +792,6 @@ static ssize_t pscsi_show_configfs_dev_params(struct se_device *dev, char *b)
 	struct scsi_device *sd = pdv->pdv_sd;
 	unsigned char host_id[16];
 	ssize_t bl;
-	int i;
 
 	if (phv->phv_mode == PHV_VIRTUAL_HOST_ID)
 		snprintf(host_id, 16, "%d", pdv->pdv_host_id);
@@ -803,60 +804,26 @@ static ssize_t pscsi_show_configfs_dev_params(struct se_device *dev, char *b)
 		host_id);
 
 	if (sd) {
-		bl += sprintf(b + bl, "        ");
-		bl += sprintf(b + bl, "Vendor: ");
-		for (i = 0; i < 8; i++) {
-			if (ISPRINT(sd->vendor[i]))   /* printable character? */
-				bl += sprintf(b + bl, "%c", sd->vendor[i]);
-			else
-				bl += sprintf(b + bl, " ");
-		}
-		bl += sprintf(b + bl, " Model: ");
-		for (i = 0; i < 16; i++) {
-			if (ISPRINT(sd->model[i]))   /* printable character ? */
-				bl += sprintf(b + bl, "%c", sd->model[i]);
-			else
-				bl += sprintf(b + bl, " ");
-		}
-		bl += sprintf(b + bl, " Rev: ");
-		for (i = 0; i < 4; i++) {
-			if (ISPRINT(sd->rev[i]))   /* printable character ? */
-				bl += sprintf(b + bl, "%c", sd->rev[i]);
-			else
-				bl += sprintf(b + bl, " ");
-		}
-		bl += sprintf(b + bl, "\n");
+		bl += sprintf(b + bl, "        Vendor: %."
+			__stringify(INQUIRY_VENDOR_LEN) "s", sd->vendor);
+		bl += sprintf(b + bl, " Model: %."
+			__stringify(INQUIRY_MODEL_LEN) "s", sd->model);
+		bl += sprintf(b + bl, " Rev: %."
+			__stringify(INQUIRY_REVISION_LEN) "s\n", sd->rev);
 	}
 	return bl;
 }
 
 static void pscsi_bi_endio(struct bio *bio)
 {
-	bio_put(bio);
-}
-
-static inline struct bio *pscsi_get_bio(int nr_vecs)
-{
-	struct bio *bio;
-	/*
-	 * Use bio_malloc() following the comment in for bio -> struct request
-	 * in block/blk-core.c:blk_make_request()
-	 */
-	bio = bio_kmalloc(GFP_KERNEL, nr_vecs);
-	if (!bio) {
-		pr_err("PSCSI: bio_kmalloc() failed\n");
-		return NULL;
-	}
-	bio->bi_end_io = pscsi_bi_endio;
-
-	return bio;
+	bio_uninit(bio);
+	kfree(bio);
 }
 
 static sense_reason_t
 pscsi_map_sg(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
 		struct request *req)
 {
-	struct pscsi_dev_virt *pdv = PSCSI_DEV(cmd->se_dev);
 	struct bio *bio = NULL;
 	struct page *page;
 	struct scatterlist *sg;
@@ -891,29 +858,24 @@ pscsi_map_sg(struct se_cmd *cmd, struct scatterlist *sgl, u32 sgl_nents,
 
 			if (!bio) {
 new_bio:
-				nr_vecs = min_t(int, BIO_MAX_PAGES, nr_pages);
-				nr_pages -= nr_vecs;
-				/*
-				 * Calls bio_kmalloc() and sets bio->bi_end_io()
-				 */
-				bio = pscsi_get_bio(nr_vecs);
+				nr_vecs = bio_max_segs(nr_pages);
+				bio = bio_kmalloc(nr_vecs, GFP_KERNEL);
 				if (!bio)
 					goto fail;
-
-				if (rw)
-					bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
+				bio_init_inline(bio, NULL, nr_vecs,
+					 rw ? REQ_OP_WRITE : REQ_OP_READ);
+				bio->bi_end_io = pscsi_bi_endio;
 
 				pr_debug("PSCSI: Allocated bio: %p,"
 					" dir: %s nr_vecs: %d\n", bio,
 					(rw) ? "rw" : "r", nr_vecs);
 			}
 
-			pr_debug("PSCSI: Calling bio_add_pc_page() i: %d"
+			pr_debug("PSCSI: Calling bio_add_page() i: %d"
 				" bio: %p page: %p len: %d off: %d\n", i, bio,
 				page, len, off);
 
-			rc = bio_add_pc_page(pdv->pdv_sd->request_queue,
-					bio, page, bytes, off);
+			rc = bio_add_page(bio, page, bytes, off);
 			pr_debug("PSCSI: bio->bi_vcnt: %d nr_vecs: %d\n",
 				bio_segments(bio), nr_vecs);
 			if (rc != bytes) {
@@ -921,17 +883,12 @@ new_bio:
 					" %d i: %d bio: %p, allocating another"
 					" bio\n", bio->bi_vcnt, i, bio);
 
-				rc = blk_rq_append_bio(req, &bio);
+				rc = blk_rq_append_bio(req, bio);
 				if (rc) {
 					pr_err("pSCSI: failed to append bio\n");
 					goto fail;
 				}
 
-				/*
-				 * Clear the pointer so that another bio will
-				 * be allocated with pscsi_get_bio() above.
-				 */
-				bio = NULL;
 				goto new_bio;
 			}
 
@@ -940,7 +897,7 @@ new_bio:
 	}
 
 	if (bio) {
-		rc = blk_rq_append_bio(req, &bio);
+		rc = blk_rq_append_bio(req, bio);
 		if (rc) {
 			pr_err("pSCSI: failed to append bio\n");
 			goto fail;
@@ -949,6 +906,17 @@ new_bio:
 
 	return 0;
 fail:
+	if (bio) {
+		bio_uninit(bio);
+		kfree(bio);
+	}
+	while (req->bio) {
+		bio = req->bio;
+		req->bio = bio->bi_next;
+		bio_uninit(bio);
+		kfree(bio);
+	}
+	req->biotail = NULL;
 	return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 }
 
@@ -967,32 +935,15 @@ pscsi_execute_cmd(struct se_cmd *cmd)
 	struct scatterlist *sgl = cmd->t_data_sg;
 	u32 sgl_nents = cmd->t_data_nents;
 	struct pscsi_dev_virt *pdv = PSCSI_DEV(cmd->se_dev);
-	struct pscsi_plugin_task *pt;
+	struct scsi_cmnd *scmd;
 	struct request *req;
 	sense_reason_t ret;
 
-	/*
-	 * Dynamically alloc cdb space, since it may be larger than
-	 * TCM_MAX_COMMAND_SIZE
-	 */
-	pt = kzalloc(sizeof(*pt) + scsi_command_size(cmd->t_task_cdb), GFP_KERNEL);
-	if (!pt) {
-		return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
-	}
-	cmd->priv = pt;
-
-	memcpy(pt->pscsi_cdb, cmd->t_task_cdb,
-		scsi_command_size(cmd->t_task_cdb));
-
-	req = blk_get_request(pdv->pdv_sd->request_queue,
+	req = scsi_alloc_request(pdv->pdv_sd->request_queue,
 			cmd->data_direction == DMA_TO_DEVICE ?
-			REQ_OP_SCSI_OUT : REQ_OP_SCSI_IN,
-			GFP_KERNEL);
-	if (IS_ERR(req)) {
-		pr_err("PSCSI: blk_get_request() failed\n");
-		ret = TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
-		goto fail;
-	}
+			REQ_OP_DRV_OUT : REQ_OP_DRV_IN, 0);
+	if (IS_ERR(req))
+		return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 
 	if (sgl) {
 		ret = pscsi_map_sg(cmd, sgl, sgl_nents, req);
@@ -1002,25 +953,30 @@ pscsi_execute_cmd(struct se_cmd *cmd)
 
 	req->end_io = pscsi_req_done;
 	req->end_io_data = cmd;
-	scsi_req(req)->cmd_len = scsi_command_size(pt->pscsi_cdb);
-	scsi_req(req)->cmd = &pt->pscsi_cdb[0];
+
+	scmd = blk_mq_rq_to_pdu(req);
+	scmd->cmd_len = scsi_command_size(cmd->t_task_cdb);
+	if (scmd->cmd_len > sizeof(scmd->cmnd)) {
+		ret = TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
+		goto fail_put_request;
+	}
+	memcpy(scmd->cmnd, cmd->t_task_cdb, scmd->cmd_len);
+
 	if (pdv->pdv_sd->type == TYPE_DISK ||
 	    pdv->pdv_sd->type == TYPE_ZBC)
 		req->timeout = PS_TIMEOUT_DISK;
 	else
 		req->timeout = PS_TIMEOUT_OTHER;
-	scsi_req(req)->retries = PS_RETRY;
+	scmd->allowed = PS_RETRY;
 
-	blk_execute_rq_nowait(pdv->pdv_sd->request_queue, NULL, req,
-			(cmd->sam_task_attr == TCM_HEAD_TAG),
-			pscsi_req_done);
+	cmd->priv = scmd->cmnd;
+
+	blk_execute_rq_nowait(req, cmd->sam_task_attr == TCM_HEAD_TAG);
 
 	return 0;
 
 fail_put_request:
-	blk_put_request(req);
-fail:
-	kfree(pt);
+	blk_mq_free_request(req);
 	return ret;
 }
 
@@ -1040,49 +996,49 @@ static sector_t pscsi_get_blocks(struct se_device *dev)
 {
 	struct pscsi_dev_virt *pdv = PSCSI_DEV(dev);
 
-	if (pdv->pdv_bd && pdv->pdv_bd->bd_part)
-		return pdv->pdv_bd->bd_part->nr_sects;
-
+	if (pdv->pdv_bdev_file)
+		return bdev_nr_sectors(file_bdev(pdv->pdv_bdev_file));
 	return 0;
 }
 
-static void pscsi_req_done(struct request *req, blk_status_t status)
+static enum rq_end_io_ret pscsi_req_done(struct request *req,
+					 blk_status_t status,
+					 const struct io_comp_batch *iob)
 {
 	struct se_cmd *cmd = req->end_io_data;
-	struct pscsi_plugin_task *pt = cmd->priv;
-	int result = scsi_req(req)->result;
-	u8 scsi_status = status_byte(result) << 1;
+	struct scsi_cmnd *scmd = blk_mq_rq_to_pdu(req);
+	enum sam_status scsi_status = scmd->result & 0xff;
+	int valid_data = cmd->data_length - scmd->resid_len;
+	u8 *cdb = cmd->priv;
 
-	if (scsi_status) {
+	if (scsi_status != SAM_STAT_GOOD) {
 		pr_debug("PSCSI Status Byte exception at cmd: %p CDB:"
-			" 0x%02x Result: 0x%08x\n", cmd, pt->pscsi_cdb[0],
-			result);
+			" 0x%02x Result: 0x%08x\n", cmd, cdb[0], scmd->result);
 	}
 
-	pscsi_complete_cmd(cmd, scsi_status, scsi_req(req)->sense);
+	pscsi_complete_cmd(cmd, scsi_status, scmd->sense_buffer, valid_data);
 
-	switch (host_byte(result)) {
+	switch (host_byte(scmd->result)) {
 	case DID_OK:
-		target_complete_cmd(cmd, scsi_status);
+		target_complete_cmd_with_length(cmd, scsi_status, valid_data);
 		break;
 	default:
 		pr_debug("PSCSI Host Byte exception at cmd: %p CDB:"
-			" 0x%02x Result: 0x%08x\n", cmd, pt->pscsi_cdb[0],
-			result);
+			" 0x%02x Result: 0x%08x\n", cmd, cdb[0], scmd->result);
 		target_complete_cmd(cmd, SAM_STAT_CHECK_CONDITION);
 		break;
 	}
 
-	__blk_put_request(req->q, req);
-	kfree(pt);
+	blk_mq_free_request(req);
+	return RQ_END_IO_NONE;
 }
 
 static const struct target_backend_ops pscsi_ops = {
 	.name			= "pscsi",
 	.owner			= THIS_MODULE,
-	.transport_flags	= TRANSPORT_FLAG_PASSTHROUGH |
-				  TRANSPORT_FLAG_PASSTHROUGH_ALUA |
-				  TRANSPORT_FLAG_PASSTHROUGH_PGR,
+	.transport_flags_default = TRANSPORT_FLAG_PASSTHROUGH |
+				   TRANSPORT_FLAG_PASSTHROUGH_ALUA |
+				   TRANSPORT_FLAG_PASSTHROUGH_PGR,
 	.attach_hba		= pscsi_attach_hba,
 	.detach_hba		= pscsi_detach_hba,
 	.pmode_enable_hba	= pscsi_pmode_enable_hba,

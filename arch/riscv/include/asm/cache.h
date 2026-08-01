@@ -1,15 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2017 Chen Liqin <liqin.chen@sunplusct.com>
  * Copyright (C) 2012 Regents of the University of California
- *
- *   This program is free software; you can redistribute it and/or
- *   modify it under the terms of the GNU General Public License
- *   as published by the Free Software Foundation, version 2.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
  */
 
 #ifndef _ASM_RISCV_CACHE_H
@@ -18,5 +10,31 @@
 #define L1_CACHE_SHIFT		6
 
 #define L1_CACHE_BYTES		(1 << L1_CACHE_SHIFT)
+
+#ifdef CONFIG_RISCV_DMA_NONCOHERENT
+#define ARCH_DMA_MINALIGN L1_CACHE_BYTES
+#define ARCH_KMALLOC_MINALIGN	(8)
+#endif
+
+/*
+ * RISC-V requires the stack pointer to be 16-byte aligned, so ensure that
+ * the flat loader aligns it accordingly.
+ */
+#ifndef CONFIG_MMU
+#define ARCH_SLAB_MINALIGN	16
+#endif
+
+#ifndef __ASSEMBLER__
+
+extern int dma_cache_alignment;
+#ifdef CONFIG_RISCV_DMA_NONCOHERENT
+#define dma_get_cache_alignment dma_get_cache_alignment
+static inline int dma_get_cache_alignment(void)
+{
+	return dma_cache_alignment;
+}
+#endif
+
+#endif	/* __ASSEMBLER__ */
 
 #endif /* _ASM_RISCV_CACHE_H */

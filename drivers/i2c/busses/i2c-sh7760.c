@@ -379,8 +379,8 @@ static u32 sh7760_i2c_func(struct i2c_adapter *adap)
 }
 
 static const struct i2c_algorithm sh7760_i2c_algo = {
-	.master_xfer	= sh7760_i2c_master_xfer,
-	.functionality	= sh7760_i2c_func,
+	.xfer = sh7760_i2c_master_xfer,
+	.functionality = sh7760_i2c_func,
 };
 
 /* calculate CCR register setting for a desired scl clock.  SCL clock is
@@ -443,9 +443,8 @@ static int sh7760_i2c_probe(struct platform_device *pdev)
 		goto out0;
 	}
 
-	id = kzalloc(sizeof(struct cami2c), GFP_KERNEL);
+	id = kzalloc_obj(*id);
 	if (!id) {
-		dev_err(&pdev->dev, "no mem for private data\n");
 		ret = -ENOMEM;
 		goto out0;
 	}
@@ -471,11 +470,14 @@ static int sh7760_i2c_probe(struct platform_device *pdev)
 		goto out2;
 	}
 
-	id->irq = platform_get_irq(pdev, 0);
+	ret = platform_get_irq(pdev, 0);
+	if (ret < 0)
+		goto out3;
+	id->irq = ret;
 
 	id->adap.nr = pdev->id;
 	id->adap.algo = &sh7760_i2c_algo;
-	id->adap.class = I2C_CLASS_HWMON | I2C_CLASS_SPD;
+	id->adap.class = I2C_CLASS_HWMON;
 	id->adap.retries = 3;
 	id->adap.algo_data = id;
 	id->adap.dev.parent = &pdev->dev;
@@ -533,7 +535,7 @@ out0:
 	return ret;
 }
 
-static int sh7760_i2c_remove(struct platform_device *pdev)
+static void sh7760_i2c_remove(struct platform_device *pdev)
 {
 	struct cami2c *id = platform_get_drvdata(pdev);
 
@@ -543,8 +545,6 @@ static int sh7760_i2c_remove(struct platform_device *pdev)
 	release_resource(id->ioarea);
 	kfree(id->ioarea);
 	kfree(id);
-
-	return 0;
 }
 
 static struct platform_driver sh7760_i2c_drv = {

@@ -15,6 +15,7 @@
 #include <linux/zorro.h>
 #include <linux/stat.h>
 #include <linux/string.h>
+#include <linux/sysfs.h>
 
 #include <asm/byteorder.h>
 
@@ -29,7 +30,7 @@ static ssize_t name##_show(struct device *dev,				\
 	struct zorro_dev *z;						\
 									\
 	z = to_zorro_dev(dev);						\
-	return sprintf(buf, format_string, z->field);			\
+	return sysfs_emit(buf, format_string, z->field);		\
 }									\
 static DEVICE_ATTR_RO(name);
 
@@ -44,7 +45,7 @@ static ssize_t serial_show(struct device *dev, struct device_attribute *attr,
 	struct zorro_dev *z;
 
 	z = to_zorro_dev(dev);
-	return sprintf(buf, "0x%08x\n", be32_to_cpu(z->rom.er_SerialNumber));
+	return sysfs_emit(buf, "0x%08x\n", be32_to_cpu(z->rom.er_SerialNumber));
 }
 static DEVICE_ATTR_RO(serial);
 
@@ -53,10 +54,10 @@ static ssize_t resource_show(struct device *dev, struct device_attribute *attr,
 {
 	struct zorro_dev *z = to_zorro_dev(dev);
 
-	return sprintf(buf, "0x%08lx 0x%08lx 0x%08lx\n",
-		       (unsigned long)zorro_resource_start(z),
-		       (unsigned long)zorro_resource_end(z),
-		       zorro_resource_flags(z));
+	return sysfs_emit(buf, "0x%08lx 0x%08lx 0x%08lx\n",
+			  (unsigned long)zorro_resource_start(z),
+			  (unsigned long)zorro_resource_end(z),
+			  zorro_resource_flags(z));
 }
 static DEVICE_ATTR_RO(resource);
 
@@ -65,7 +66,7 @@ static ssize_t modalias_show(struct device *dev, struct device_attribute *attr,
 {
 	struct zorro_dev *z = to_zorro_dev(dev);
 
-	return sprintf(buf, ZORRO_DEVICE_MODALIAS_FMT "\n", z->id);
+	return sysfs_emit(buf, ZORRO_DEVICE_MODALIAS_FMT "\n", z->id);
 }
 static DEVICE_ATTR_RO(modalias);
 
@@ -81,7 +82,7 @@ static struct attribute *zorro_device_attrs[] = {
 };
 
 static ssize_t zorro_read_config(struct file *filp, struct kobject *kobj,
-				 struct bin_attribute *bin_attr,
+				 const struct bin_attribute *bin_attr,
 				 char *buf, loff_t off, size_t count)
 {
 	struct zorro_dev *z = to_zorro_dev(kobj_to_dev(kobj));
@@ -98,7 +99,7 @@ static ssize_t zorro_read_config(struct file *filp, struct kobject *kobj,
 	return memory_read_from_buffer(buf, count, &off, &cd, sizeof(cd));
 }
 
-static struct bin_attribute zorro_config_attr = {
+static const struct bin_attribute zorro_config_attr = {
 	.attr =	{
 		.name = "config",
 		.mode = S_IRUGO,
@@ -107,7 +108,7 @@ static struct bin_attribute zorro_config_attr = {
 	.read = zorro_read_config,
 };
 
-static struct bin_attribute *zorro_device_bin_attrs[] = {
+static const struct bin_attribute *const zorro_device_bin_attrs[] = {
 	&zorro_config_attr,
 	NULL
 };

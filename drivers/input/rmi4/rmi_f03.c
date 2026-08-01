@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2015-2016 Red Hat
  * Copyright (C) 2015 Lyude Paul <thatslyude@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -64,14 +61,14 @@ void rmi_f03_commit_buttons(struct rmi_function *fn)
 	struct f03_data *f03 = dev_get_drvdata(&fn->dev);
 	struct serio *serio = f03->serio;
 
-	serio_pause_rx(serio);
+	guard(serio_pause_rx)(serio);
+
 	if (serio->drv) {
 		serio->drv->interrupt(serio, PSMOUSE_OOB_EXTRA_BTNS,
 				      SERIO_OOB_DATA);
 		serio->drv->interrupt(serio, f03->overwrite_buttons,
 				      SERIO_OOB_DATA);
 	}
-	serio_continue_rx(serio);
 }
 
 static int rmi_f03_pt_write(struct serio *id, unsigned char val)
@@ -174,7 +171,7 @@ static int rmi_f03_register_pt(struct f03_data *f03)
 {
 	struct serio *serio;
 
-	serio = kzalloc(sizeof(struct serio), GFP_KERNEL);
+	serio = kzalloc_obj(struct serio);
 	if (!serio)
 		return -ENOMEM;
 
@@ -184,7 +181,7 @@ static int rmi_f03_register_pt(struct f03_data *f03)
 	serio->close = rmi_f03_pt_close;
 	serio->port_data = f03;
 
-	strlcpy(serio->name, "RMI4 PS/2 pass-through", sizeof(serio->name));
+	strscpy(serio->name, "RMI4 PS/2 pass-through", sizeof(serio->name));
 	snprintf(serio->phys, sizeof(serio->phys), "%s/serio0",
 		 dev_name(&f03->fn->dev));
 	serio->dev.parent = &f03->fn->dev;
@@ -244,8 +241,9 @@ static int rmi_f03_config(struct rmi_function *fn)
 	return 0;
 }
 
-static int rmi_f03_attention(struct rmi_function *fn, unsigned long *irq_bits)
+static irqreturn_t rmi_f03_attention(int irq, void *ctx)
 {
+	struct rmi_function *fn = ctx;
 	struct rmi_device *rmi_dev = fn->rmi_dev;
 	struct rmi_driver_data *drvdata = dev_get_drvdata(&rmi_dev->dev);
 	struct f03_data *f03 = dev_get_drvdata(&fn->dev);
@@ -262,7 +260,7 @@ static int rmi_f03_attention(struct rmi_function *fn, unsigned long *irq_bits)
 		/* First grab the data passed by the transport device */
 		if (drvdata->attn_data.size < ob_len) {
 			dev_warn(&fn->dev, "F03 interrupted, but data is missing!\n");
-			return 0;
+			return IRQ_HANDLED;
 		}
 
 		memcpy(obs, drvdata->attn_data.data, ob_len);
@@ -277,7 +275,7 @@ static int rmi_f03_attention(struct rmi_function *fn, unsigned long *irq_bits)
 				"%s: Failed to read F03 output buffers: %d\n",
 				__func__, error);
 			serio_interrupt(f03->serio, 0, SERIO_TIMEOUT);
-			return error;
+			return IRQ_RETVAL(error);
 		}
 	}
 
@@ -303,7 +301,7 @@ static int rmi_f03_attention(struct rmi_function *fn, unsigned long *irq_bits)
 		serio_interrupt(f03->serio, ob_data, serio_flags);
 	}
 
-	return 0;
+	return IRQ_HANDLED;
 }
 
 static void rmi_f03_remove(struct rmi_function *fn)

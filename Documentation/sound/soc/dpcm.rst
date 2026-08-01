@@ -13,7 +13,7 @@ drivers that expose several ALSA PCMs and can route to multiple DAIs.
 The DPCM runtime routing is determined by the ALSA mixer settings in the same
 way as the analog signal is routed in an ASoC codec driver. DPCM uses a DAPM
 graph representing the DSP internal audio paths and uses the mixer settings to
-determine the patch used by each ALSA PCM.
+determine the path used by each ALSA PCM.
 
 DPCM re-uses all the existing component codec, platform and DAI drivers without
 any modifications.
@@ -101,7 +101,7 @@ The audio driver processes this as follows :-
 
 4. Machine driver or audio HAL enables the speaker path.
 
-5. DPCM runs the PCM ops for startup(), hw_params(), prepapre() and
+5. DPCM runs the PCM ops for startup(), hw_params(), prepare() and
    trigger(start) for DAI1 Speakers since the path is enabled.
 
 In this example, the machine driver or userspace audio HAL can alter the routing
@@ -147,25 +147,25 @@ For the example above we have to define 4 FE DAI links and 6 BE DAI links. The
 FE DAI links are defined as follows :-
 ::
 
+ SND_SOC_DAILINK_DEFS(pcm0,
+	DAILINK_COMP_ARRAY(COMP_CPU("System Pin")),
+	DAILINK_COMP_ARRAY(COMP_DUMMY()),
+	DAILINK_COMP_ARRAY(COMP_PLATFORM("dsp-audio")));
+
   static struct snd_soc_dai_link machine_dais[] = {
 	{
 		.name = "PCM0 System",
 		.stream_name = "System Playback",
-		.cpu_dai_name = "System Pin",
-		.platform_name = "dsp-audio",
-		.codec_name = "snd-soc-dummy",
-		.codec_dai_name = "snd-soc-dummy-dai",
+		SND_SOC_DAILINK_REG(pcm0),
 		.dynamic = 1,
 		.trigger = {SND_SOC_DPCM_TRIGGER_POST, SND_SOC_DPCM_TRIGGER_POST},
-		.dpcm_playback = 1,
 	},
 	.....< other FE and BE DAI links here >
   };
 
 This FE DAI link is pretty similar to a regular DAI link except that we also
-set the DAI link to a DPCM FE with the ``dynamic = 1``. The supported FE stream
-directions should also be set with the ``dpcm_playback`` and ``dpcm_capture``
-flags. There is also an option to specify the ordering of the trigger call for
+set the DAI link to a DPCM FE with the ``dynamic = 1``.
+There is also an option to specify the ordering of the trigger call for
 each FE. This allows the ASoC core to trigger the DSP before or after the other
 components (as some DSPs have strong requirements for the ordering DAI/DSP
 start and stop sequences).
@@ -176,28 +176,26 @@ dynamic and will change depending on runtime config.
 The BE DAIs are configured as follows :-
 ::
 
+ SND_SOC_DAILINK_DEFS(headset,
+	DAILINK_COMP_ARRAY(COMP_CPU("ssp-dai.0")),
+	DAILINK_COMP_ARRAY(COMP_CODEC("rt5640.0-001c", "rt5640-aif1")));
+
   static struct snd_soc_dai_link machine_dais[] = {
 	.....< FE DAI links here >
 	{
 		.name = "Codec Headset",
-		.cpu_dai_name = "ssp-dai.0",
-		.platform_name = "snd-soc-dummy",
+		SND_SOC_DAILINK_REG(headset),
 		.no_pcm = 1,
-		.codec_name = "rt5640.0-001c",
-		.codec_dai_name = "rt5640-aif1",
 		.ignore_suspend = 1,
 		.ignore_pmdown_time = 1,
 		.be_hw_params_fixup = hswult_ssp0_fixup,
 		.ops = &haswell_ops,
-		.dpcm_playback = 1,
-		.dpcm_capture = 1,
 	},
 	.....< other BE DAI links here >
   };
 
 This BE DAI link connects DAI0 to the codec (in this case RT5460 AIF1). It sets
-the ``no_pcm`` flag to mark it has a BE and sets flags for supported stream
-directions using ``dpcm_playback`` and ``dpcm_capture`` above.
+the ``no_pcm`` flag to mark it has a BE.
 
 The BE has also flags set for ignoring suspend and PM down time. This allows
 the BE to work in a hostless mode where the host CPU is not transferring data
@@ -218,10 +216,10 @@ like a BT phone call :-
                       *           * <----DAI5-----> FM
                       *************
 
-This allows the host CPU to sleep whilst the DSP, MODEM DAI and the BT DAI are
+This allows the host CPU to sleep while the DSP, MODEM DAI and the BT DAI are
 still in operation.
 
-A BE DAI link can also set the codec to a dummy device if the code is a device
+A BE DAI link can also set the codec to a dummy device if the codec is a device
 that is managed externally.
 
 Likewise a BE DAI can also set a dummy cpu DAI if the CPU DAI is managed by the
@@ -249,14 +247,12 @@ configuration.
 	struct snd_interval *channels = hw_param_interval(params,
 						SNDRV_PCM_HW_PARAM_CHANNELS);
 
-	/* The DSP will covert the FE rate to 48k, stereo */
+	/* The DSP will convert the FE rate to 48k, stereo */
 	rate->min = rate->max = 48000;
 	channels->min = channels->max = 2;
 
 	/* set DAI0 to 16 bit */
-	snd_mask_set(&params->masks[SNDRV_PCM_HW_PARAM_FORMAT -
-				    SNDRV_PCM_HW_PARAM_FIRST_MASK],
-				    SNDRV_PCM_FORMAT_S16_LE);
+	params_set_format(params, SNDRV_PCM_FORMAT_S16_LE);
 	return 0;
   }
 
@@ -369,8 +365,9 @@ The machine driver sets some additional parameters to the DAI link i.e.
 		.codec_dai_name = "modem-aif1",
 		.codec_name = "modem",
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF
-				| SND_SOC_DAIFMT_CBM_CFM,
-		.params = &dai_params,
+				| SND_SOC_DAIFMT_CBP_CFP,
+		.c2c_params = &dai_params,
+		.num_c2c_params = 1,
 	}
 	< ... more DAI links here ... >
 
@@ -388,5 +385,3 @@ This means creating a new FE that is connected with a virtual path to both
 DAI links. The DAI links will be started when the FE PCM is started and stopped
 when the FE PCM is stopped. Note that the FE PCM cannot read or write data in
 this configuration.
-
-

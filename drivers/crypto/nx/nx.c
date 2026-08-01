@@ -1,29 +1,17 @@
-/**
+// SPDX-License-Identifier: GPL-2.0-only
+/*
  * Routines supporting the Power 7+ Nest Accelerators driver
  *
  * Copyright (C) 2011-2012 International Business Machines Inc.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 only.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
- *
  * Author: Kent Yoder <yoder1@us.ibm.com>
  */
 
+#include <crypto/aes.h>
 #include <crypto/internal/aead.h>
 #include <crypto/internal/hash.h>
-#include <crypto/aes.h>
-#include <crypto/sha.h>
-#include <crypto/algapi.h>
+#include <crypto/internal/skcipher.h>
+#include <crypto/sha2.h>
 #include <crypto/scatterwalk.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -136,8 +124,6 @@ struct nx_sg *nx_build_sg_list(struct nx_sg *sg_head,
 		}
 
 		if ((sg - sg_head) == sgmax) {
-			pr_err("nx: scatter/gather list overflow, pid: %d\n",
-			       current->pid);
 			sg++;
 			break;
 		}
@@ -165,40 +151,18 @@ struct nx_sg *nx_walk_and_build(struct nx_sg       *nx_dst,
 {
 	struct scatter_walk walk;
 	struct nx_sg *nx_sg = nx_dst;
-	unsigned int n, offset = 0, len = *src_len;
-	char *dst;
+	unsigned int n, len = *src_len;
 
 	/* we need to fast forward through @start bytes first */
-	for (;;) {
-		scatterwalk_start(&walk, sg_src);
-
-		if (start < offset + sg_src->length)
-			break;
-
-		offset += sg_src->length;
-		sg_src = sg_next(sg_src);
-	}
-
-	/* start - offset is the number of bytes to advance in the scatterlist
-	 * element we're currently looking at */
-	scatterwalk_advance(&walk, start - offset);
+	scatterwalk_start_at_pos(&walk, sg_src, start);
 
 	while (len && (nx_sg - nx_dst) < sglen) {
-		n = scatterwalk_clamp(&walk, len);
-		if (!n) {
-			/* In cases where we have scatterlist chain sg_next
-			 * handles with it properly */
-			scatterwalk_start(&walk, sg_next(walk.sg));
-			n = scatterwalk_clamp(&walk, len);
-		}
-		dst = scatterwalk_map(&walk);
+		n = scatterwalk_next(&walk, len);
 
-		nx_sg = nx_build_sg_list(nx_sg, dst, &n, sglen - (nx_sg - nx_dst));
+		nx_sg = nx_build_sg_list(nx_sg, walk.addr, &n, sglen - (nx_sg - nx_dst));
+
+		scatterwalk_done_src(&walk, n);
 		len -= n;
-
-		scatterwalk_unmap(dst);
-		scatterwalk_advance(&walk, n);
-		scatterwalk_done(&walk, SCATTERWALK_FROM_SG, len);
 	}
 	/* update to_process */
 	*src_len -= len;
@@ -212,7 +176,8 @@ struct nx_sg *nx_walk_and_build(struct nx_sg       *nx_dst,
  * @sg: sg list head
  * @end: sg lisg end
  * @delta:  is the amount we need to crop in order to bound the list.
- *
+ * @nbytes: length of data in the scatterlists or data length - whichever
+ *          is greater.
  */
 static long int trim_sg_list(struct nx_sg *sg,
 			     struct nx_sg *end,
@@ -255,25 +220,25 @@ static long int trim_sg_list(struct nx_sg *sg,
  *                     scatterlists based on them.
  *
  * @nx_ctx: NX crypto context for the lists we're building
- * @desc: the block cipher descriptor for the operation
+ * @iv: iv data, if the algorithm requires it
  * @dst: destination scatterlist
  * @src: source scatterlist
  * @nbytes: length of data described in the scatterlists
  * @offset: number of bytes to fast-forward past at the beginning of
  *          scatterlists.
- * @iv: destination for the iv data, if the algorithm requires it
+ * @oiv: destination for the iv data, if the algorithm requires it
  *
- * This is common code shared by all the AES algorithms. It uses the block
- * cipher walk routines to traverse input and output scatterlists, building
+ * This is common code shared by all the AES algorithms. It uses the crypto
+ * scatterlist walk routines to traverse input and output scatterlists, building
  * corresponding NX scatterlists
  */
 int nx_build_sg_lists(struct nx_crypto_ctx  *nx_ctx,
-		      struct blkcipher_desc *desc,
+		      const u8              *iv,
 		      struct scatterlist    *dst,
 		      struct scatterlist    *src,
 		      unsigned int          *nbytes,
 		      unsigned int           offset,
-		      u8                    *iv)
+		      u8                    *oiv)
 {
 	unsigned int delta = 0;
 	unsigned int total = *nbytes;
@@ -286,8 +251,8 @@ int nx_build_sg_lists(struct nx_crypto_ctx  *nx_ctx,
 	max_sg_len = min_t(u64, max_sg_len,
 			nx_ctx->ap->databytelen/NX_PAGE_SIZE);
 
-	if (iv)
-		memcpy(iv, desc->info, AES_BLOCK_SIZE);
+	if (oiv)
+		memcpy(oiv, iv, AES_BLOCK_SIZE);
 
 	*nbytes = min_t(u64, *nbytes, nx_ctx->ap->databytelen);
 
@@ -523,10 +488,10 @@ static bool nx_check_props(struct device *dev, u32 fc, u32 mode)
 	return true;
 }
 
-static int nx_register_alg(struct crypto_alg *alg, u32 fc, u32 mode)
+static int nx_register_skcipher(struct skcipher_alg *alg, u32 fc, u32 mode)
 {
 	return nx_check_props(&nx_driver.viodev->dev, fc, mode) ?
-	       crypto_register_alg(alg) : 0;
+	       crypto_register_skcipher(alg) : 0;
 }
 
 static int nx_register_aead(struct aead_alg *alg, u32 fc, u32 mode)
@@ -543,10 +508,10 @@ static int nx_register_shash(struct shash_alg *alg, u32 fc, u32 mode, int slot)
 	       crypto_register_shash(alg) : 0;
 }
 
-static void nx_unregister_alg(struct crypto_alg *alg, u32 fc, u32 mode)
+static void nx_unregister_skcipher(struct skcipher_alg *alg, u32 fc, u32 mode)
 {
 	if (nx_check_props(NULL, fc, mode))
-		crypto_unregister_alg(alg);
+		crypto_unregister_skcipher(alg);
 }
 
 static void nx_unregister_aead(struct aead_alg *alg, u32 fc, u32 mode)
@@ -581,21 +546,20 @@ static int nx_register_algs(void)
 
 	memset(&nx_driver.stats, 0, sizeof(struct nx_stats));
 
-	rc = NX_DEBUGFS_INIT(&nx_driver);
-	if (rc)
-		goto out;
+	NX_DEBUGFS_INIT(&nx_driver);
 
 	nx_driver.of.status = NX_OKAY;
 
-	rc = nx_register_alg(&nx_ecb_aes_alg, NX_FC_AES, NX_MODE_AES_ECB);
+	rc = nx_register_skcipher(&nx_ecb_aes_alg, NX_FC_AES, NX_MODE_AES_ECB);
 	if (rc)
 		goto out;
 
-	rc = nx_register_alg(&nx_cbc_aes_alg, NX_FC_AES, NX_MODE_AES_CBC);
+	rc = nx_register_skcipher(&nx_cbc_aes_alg, NX_FC_AES, NX_MODE_AES_CBC);
 	if (rc)
 		goto out_unreg_ecb;
 
-	rc = nx_register_alg(&nx_ctr3686_aes_alg, NX_FC_AES, NX_MODE_AES_CTR);
+	rc = nx_register_skcipher(&nx_ctr3686_aes_alg, NX_FC_AES,
+				  NX_MODE_AES_CTR);
 	if (rc)
 		goto out_unreg_cbc;
 
@@ -647,11 +611,11 @@ out_unreg_gcm4106:
 out_unreg_gcm:
 	nx_unregister_aead(&nx_gcm_aes_alg, NX_FC_AES, NX_MODE_AES_GCM);
 out_unreg_ctr3686:
-	nx_unregister_alg(&nx_ctr3686_aes_alg, NX_FC_AES, NX_MODE_AES_CTR);
+	nx_unregister_skcipher(&nx_ctr3686_aes_alg, NX_FC_AES, NX_MODE_AES_CTR);
 out_unreg_cbc:
-	nx_unregister_alg(&nx_cbc_aes_alg, NX_FC_AES, NX_MODE_AES_CBC);
+	nx_unregister_skcipher(&nx_cbc_aes_alg, NX_FC_AES, NX_MODE_AES_CBC);
 out_unreg_ecb:
-	nx_unregister_alg(&nx_ecb_aes_alg, NX_FC_AES, NX_MODE_AES_ECB);
+	nx_unregister_skcipher(&nx_ecb_aes_alg, NX_FC_AES, NX_MODE_AES_ECB);
 out:
 	return rc;
 }
@@ -718,59 +682,67 @@ int nx_crypto_ctx_aes_gcm_init(struct crypto_aead *tfm)
 				  NX_MODE_AES_GCM);
 }
 
-int nx_crypto_ctx_aes_ctr_init(struct crypto_tfm *tfm)
+int nx_crypto_ctx_aes_ctr_init(struct crypto_skcipher *tfm)
 {
-	return nx_crypto_ctx_init(crypto_tfm_ctx(tfm), NX_FC_AES,
+	return nx_crypto_ctx_init(crypto_skcipher_ctx(tfm), NX_FC_AES,
 				  NX_MODE_AES_CTR);
 }
 
-int nx_crypto_ctx_aes_cbc_init(struct crypto_tfm *tfm)
+int nx_crypto_ctx_aes_cbc_init(struct crypto_skcipher *tfm)
 {
-	return nx_crypto_ctx_init(crypto_tfm_ctx(tfm), NX_FC_AES,
+	return nx_crypto_ctx_init(crypto_skcipher_ctx(tfm), NX_FC_AES,
 				  NX_MODE_AES_CBC);
 }
 
-int nx_crypto_ctx_aes_ecb_init(struct crypto_tfm *tfm)
+int nx_crypto_ctx_aes_ecb_init(struct crypto_skcipher *tfm)
 {
-	return nx_crypto_ctx_init(crypto_tfm_ctx(tfm), NX_FC_AES,
+	return nx_crypto_ctx_init(crypto_skcipher_ctx(tfm), NX_FC_AES,
 				  NX_MODE_AES_ECB);
 }
 
-int nx_crypto_ctx_sha_init(struct crypto_tfm *tfm)
+int nx_crypto_ctx_sha_init(struct crypto_shash *tfm)
 {
-	return nx_crypto_ctx_init(crypto_tfm_ctx(tfm), NX_FC_SHA, NX_MODE_SHA);
+	return nx_crypto_ctx_init(crypto_shash_ctx(tfm), NX_FC_SHA, NX_MODE_SHA);
 }
 
-int nx_crypto_ctx_aes_xcbc_init(struct crypto_tfm *tfm)
+int nx_crypto_ctx_aes_xcbc_init(struct crypto_shash *tfm)
 {
-	return nx_crypto_ctx_init(crypto_tfm_ctx(tfm), NX_FC_AES,
+	return nx_crypto_ctx_init(crypto_shash_ctx(tfm), NX_FC_AES,
 				  NX_MODE_AES_XCBC_MAC);
 }
 
 /**
  * nx_crypto_ctx_exit - destroy a crypto api context
  *
- * @tfm: the crypto transform pointer for the context
+ * @nx_ctx: the crypto api context
  *
  * As crypto API contexts are destroyed, this exit hook is called to free the
  * memory associated with it.
  */
-void nx_crypto_ctx_exit(struct crypto_tfm *tfm)
+void nx_crypto_ctx_exit(struct nx_crypto_ctx *nx_ctx)
 {
-	struct nx_crypto_ctx *nx_ctx = crypto_tfm_ctx(tfm);
-
-	kzfree(nx_ctx->kmem);
+	kfree_sensitive(nx_ctx->kmem);
 	nx_ctx->csbcpb = NULL;
 	nx_ctx->csbcpb_aead = NULL;
 	nx_ctx->in_sg = NULL;
 	nx_ctx->out_sg = NULL;
 }
 
+void nx_crypto_ctx_skcipher_exit(struct crypto_skcipher *tfm)
+{
+	nx_crypto_ctx_exit(crypto_skcipher_ctx(tfm));
+}
+
 void nx_crypto_ctx_aead_exit(struct crypto_aead *tfm)
 {
 	struct nx_crypto_ctx *nx_ctx = crypto_aead_ctx(tfm);
 
-	kzfree(nx_ctx->kmem);
+	kfree_sensitive(nx_ctx->kmem);
+}
+
+void nx_crypto_ctx_shash_exit(struct crypto_shash *tfm)
+{
+	nx_crypto_ctx_exit(crypto_shash_ctx(tfm));
 }
 
 static int nx_probe(struct vio_dev *viodev, const struct vio_device_id *id)
@@ -791,7 +763,7 @@ static int nx_probe(struct vio_dev *viodev, const struct vio_device_id *id)
 	return nx_register_algs();
 }
 
-static int nx_remove(struct vio_dev *viodev)
+static void nx_remove(struct vio_dev *viodev)
 {
 	dev_dbg(&viodev->dev, "entering nx_remove for UA 0x%x\n",
 		viodev->unit_address);
@@ -812,13 +784,13 @@ static int nx_remove(struct vio_dev *viodev)
 				   NX_FC_AES, NX_MODE_AES_GCM);
 		nx_unregister_aead(&nx_gcm_aes_alg,
 				   NX_FC_AES, NX_MODE_AES_GCM);
-		nx_unregister_alg(&nx_ctr3686_aes_alg,
-				  NX_FC_AES, NX_MODE_AES_CTR);
-		nx_unregister_alg(&nx_cbc_aes_alg, NX_FC_AES, NX_MODE_AES_CBC);
-		nx_unregister_alg(&nx_ecb_aes_alg, NX_FC_AES, NX_MODE_AES_ECB);
+		nx_unregister_skcipher(&nx_ctr3686_aes_alg,
+				       NX_FC_AES, NX_MODE_AES_CTR);
+		nx_unregister_skcipher(&nx_cbc_aes_alg, NX_FC_AES,
+				       NX_MODE_AES_CBC);
+		nx_unregister_skcipher(&nx_ecb_aes_alg, NX_FC_AES,
+				       NX_MODE_AES_ECB);
 	}
-
-	return 0;
 }
 
 

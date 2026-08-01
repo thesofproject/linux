@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Support for Digigram Lola PCI-e boards
  *
  *  Copyright (c) 2011 Takashi Iwai <tiwai@suse.de>
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License as published by the Free
- *  Software Foundation; either version 2 of the License, or (at your option)
- *  any later version.
- *
- *  This program is distributed in the hope that it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- *  more details.
- *
- *  You should have received a copy of the GNU General Public License along with
- *  this program; if not, write to the Free Software Foundation, Inc., 59
- *  Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 
 #include <linux/kernel.h>
@@ -227,11 +214,9 @@ static int lola_pcm_open(struct snd_pcm_substream *substream)
 	struct lola_stream *str = lola_get_stream(substream);
 	struct snd_pcm_runtime *runtime = substream->runtime;
 
-	mutex_lock(&chip->open_mutex);
-	if (str->opened) {
-		mutex_unlock(&chip->open_mutex);
+	guard(mutex)(&chip->open_mutex);
+	if (str->opened)
 		return -EBUSY;
-	}
 	str->substream = substream;
 	str->master = NULL;
 	str->opened = 1;
@@ -252,7 +237,6 @@ static int lola_pcm_open(struct snd_pcm_substream *substream)
 				   chip->granularity);
 	snd_pcm_hw_constraint_step(runtime, 0, SNDRV_PCM_HW_PARAM_PERIOD_SIZE,
 				   chip->granularity);
-	mutex_unlock(&chip->open_mutex);
 	return 0;
 }
 
@@ -274,7 +258,7 @@ static int lola_pcm_close(struct snd_pcm_substream *substream)
 	struct lola *chip = snd_pcm_substream_chip(substream);
 	struct lola_stream *str = lola_get_stream(substream);
 
-	mutex_lock(&chip->open_mutex);
+	guard(mutex)(&chip->open_mutex);
 	if (str->substream == substream) {
 		str->substream = NULL;
 		str->opened = 0;
@@ -283,7 +267,6 @@ static int lola_pcm_close(struct snd_pcm_substream *substream)
 		/* release sample rate */
 		chip->sample_rate = 0;
 	}
-	mutex_unlock(&chip->open_mutex);
 	return 0;
 }
 
@@ -295,8 +278,7 @@ static int lola_pcm_hw_params(struct snd_pcm_substream *substream,
 	str->bufsize = 0;
 	str->period_bytes = 0;
 	str->format_verb = 0;
-	return snd_pcm_lib_malloc_pages(substream,
-					params_buffer_bytes(hw_params));
+	return 0;
 }
 
 static int lola_pcm_hw_free(struct snd_pcm_substream *substream)
@@ -305,21 +287,20 @@ static int lola_pcm_hw_free(struct snd_pcm_substream *substream)
 	struct lola_pcm *pcm = lola_get_pcm(substream);
 	struct lola_stream *str = lola_get_stream(substream);
 
-	mutex_lock(&chip->open_mutex);
+	guard(mutex)(&chip->open_mutex);
 	lola_stream_reset(chip, str);
 	lola_cleanup_slave_streams(pcm, str);
-	mutex_unlock(&chip->open_mutex);
-	return snd_pcm_lib_free_pages(substream);
+	return 0;
 }
 
 /*
  * set up a BDL entry
  */
 static int setup_bdle(struct snd_pcm_substream *substream,
-		      struct lola_stream *str, u32 **bdlp,
+		      struct lola_stream *str, __le32 **bdlp,
 		      int ofs, int size)
 {
-	u32 *bdl = *bdlp;
+	__le32 *bdl = *bdlp;
 
 	while (size > 0) {
 		dma_addr_t addr;
@@ -355,14 +336,14 @@ static int lola_setup_periods(struct lola *chip, struct lola_pcm *pcm,
 			      struct snd_pcm_substream *substream,
 			      struct lola_stream *str)
 {
-	u32 *bdl;
+	__le32 *bdl;
 	int i, ofs, periods, period_bytes;
 
 	period_bytes = str->period_bytes;
 	periods = str->bufsize / period_bytes;
 
 	/* program the initial BDL entries */
-	bdl = (u32 *)(pcm->bdl.area + LOLA_BDL_ENTRY_SIZE * str->index);
+	bdl = (__le32 *)(pcm->bdl->area + LOLA_BDL_ENTRY_SIZE * str->index);
 	ofs = 0;
 	str->frags = 0;
 	for (i = 0; i < periods; i++) {
@@ -447,7 +428,7 @@ static int lola_setup_controller(struct lola *chip, struct lola_pcm *pcm,
 		return -EINVAL;
 
 	/* set up BDL */
-	bdl = pcm->bdl.addr + LOLA_BDL_ENTRY_SIZE * str->index;
+	bdl = pcm->bdl->addr + LOLA_BDL_ENTRY_SIZE * str->index;
 	lola_dsd_write(chip, str->dsd, BDPL, (u32)bdl);
 	lola_dsd_write(chip, str->dsd, BDPU, upper_32_bits(bdl));
 	/* program the stream LVI (last valid index) of the BDL */
@@ -471,18 +452,16 @@ static int lola_pcm_prepare(struct snd_pcm_substream *substream)
 	unsigned int bufsize, period_bytes, format_verb;
 	int i, err;
 
-	mutex_lock(&chip->open_mutex);
-	lola_stream_reset(chip, str);
-	lola_cleanup_slave_streams(pcm, str);
-	if (str->index + runtime->channels > pcm->num_streams) {
-		mutex_unlock(&chip->open_mutex);
-		return -EINVAL;
+	scoped_guard(mutex, &chip->open_mutex) {
+		lola_stream_reset(chip, str);
+		lola_cleanup_slave_streams(pcm, str);
+		if (str->index + runtime->channels > pcm->num_streams)
+			return -EINVAL;
+		for (i = 1; i < runtime->channels; i++) {
+			str[i].master = str;
+			str[i].opened = 1;
+		}
 	}
-	for (i = 1; i < runtime->channels; i++) {
-		str[i].master = str;
-		str[i].opened = 1;
-	}
-	mutex_unlock(&chip->open_mutex);
 
 	bufsize = snd_pcm_lib_buffer_bytes(substream);
 	period_bytes = snd_pcm_lib_period_bytes(substream);
@@ -544,7 +523,7 @@ static int lola_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	 */
 	sync_streams = (start && snd_pcm_stream_linked(substream));
 	tstamp = lola_get_tstamp(chip, !sync_streams);
-	spin_lock(&chip->reg_lock);
+	guard(spinlock)(&chip->reg_lock);
 	snd_pcm_group_for_each_entry(s, substream) {
 		if (s->pcm->card != substream->pcm->card)
 			continue;
@@ -557,7 +536,6 @@ static int lola_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 		str->paused = !start;
 		snd_pcm_trigger_done(s, substream);
 	}
-	spin_unlock(&chip->reg_lock);
 	return 0;
 }
 
@@ -575,8 +553,9 @@ static snd_pcm_uframes_t lola_pcm_pointer(struct snd_pcm_substream *substream)
 void lola_pcm_update(struct lola *chip, struct lola_pcm *pcm, unsigned int bits)
 {
 	int i;
+	u8 num_streams = min_t(u8, pcm->num_streams, ARRAY_SIZE(pcm->streams));
 
-	for (i = 0; bits && i < pcm->num_streams; i++) {
+	for (i = 0; bits && i < num_streams; i++) {
 		if (bits & (1 << i)) {
 			struct lola_stream *str = &pcm->streams[i];
 			if (str->substream && str->running)
@@ -589,13 +568,11 @@ void lola_pcm_update(struct lola *chip, struct lola_pcm *pcm, unsigned int bits)
 static const struct snd_pcm_ops lola_pcm_ops = {
 	.open = lola_pcm_open,
 	.close = lola_pcm_close,
-	.ioctl = snd_pcm_lib_ioctl,
 	.hw_params = lola_pcm_hw_params,
 	.hw_free = lola_pcm_hw_free,
 	.prepare = lola_pcm_prepare,
 	.trigger = lola_pcm_trigger,
 	.pointer = lola_pcm_pointer,
-	.page = snd_pcm_sgbuf_ops_page,
 };
 
 int lola_create_pcm(struct lola *chip)
@@ -604,11 +581,11 @@ int lola_create_pcm(struct lola *chip)
 	int i, err;
 
 	for (i = 0; i < 2; i++) {
-		err = snd_dma_alloc_pages(SNDRV_DMA_TYPE_DEV,
-					  snd_dma_pci_data(chip->pci),
-					  PAGE_SIZE, &chip->pcm[i].bdl);
-		if (err < 0)
-			return err;
+		chip->pcm[i].bdl =
+			snd_devm_alloc_pages(&chip->pci->dev, SNDRV_DMA_TYPE_DEV,
+					     PAGE_SIZE);
+		if (!chip->pcm[i].bdl)
+			return -ENOMEM;
 	}
 
 	err = snd_pcm_new(chip->card, "Digigram Lola", 0,
@@ -617,23 +594,17 @@ int lola_create_pcm(struct lola *chip)
 			  &pcm);
 	if (err < 0)
 		return err;
-	strlcpy(pcm->name, "Digigram Lola", sizeof(pcm->name));
+	strscpy(pcm->name, "Digigram Lola", sizeof(pcm->name));
 	pcm->private_data = chip;
 	for (i = 0; i < 2; i++) {
 		if (chip->pcm[i].num_streams)
 			snd_pcm_set_ops(pcm, i, &lola_pcm_ops);
 	}
 	/* buffer pre-allocation */
-	snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_DEV_SG,
-					      snd_dma_pci_data(chip->pci),
-					      1024 * 64, 32 * 1024 * 1024);
+	snd_pcm_set_managed_buffer_all(pcm, SNDRV_DMA_TYPE_DEV_SG,
+				       &chip->pci->dev,
+				       1024 * 64, 32 * 1024 * 1024);
 	return 0;
-}
-
-void lola_free_pcm(struct lola *chip)
-{
-	snd_dma_free_pages(&chip->pcm[0].bdl);
-	snd_dma_free_pages(&chip->pcm[1].bdl);
 }
 
 /*

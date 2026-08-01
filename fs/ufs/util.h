@@ -11,12 +11,6 @@
 #include <linux/fs.h>
 #include "swab.h"
 
-
-/*
- * some useful macros
- */
-#define in_range(b,first,len)	((b)>=(first)&&(b)<(first)+(len))
-
 /*
  * functions used for retyping
  */
@@ -42,7 +36,7 @@ ufs_get_fs_state(struct super_block *sb, struct ufs_super_block_first *usb1,
 	case UFS_ST_SUNOS:
 		if (fs32_to_cpu(sb, usb3->fs_postblformat) == UFS_42POSTBLFMT)
 			return fs32_to_cpu(sb, usb1->fs_u0.fs_sun.fs_state);
-		/* Fall Through to UFS_ST_SUN */
+		fallthrough;	/* to UFS_ST_SUN */
 	case UFS_ST_SUN:
 		return fs32_to_cpu(sb, usb3->fs_un2.fs_sun.fs_state);
 	case UFS_ST_SUNx86:
@@ -63,7 +57,7 @@ ufs_set_fs_state(struct super_block *sb, struct ufs_super_block_first *usb1,
 			usb1->fs_u0.fs_sun.fs_state = cpu_to_fs32(sb, value);
 			break;
 		}
-		/* Fall Through to UFS_ST_SUN */
+		fallthrough;	/* to UFS_ST_SUN */
 	case UFS_ST_SUN:
 		usb3->fs_un2.fs_sun.fs_state = cpu_to_fs32(sb, value);
 		break;
@@ -197,7 +191,7 @@ ufs_get_inode_uid(struct super_block *sb, struct ufs_inode *inode)
 	case UFS_UID_EFT:
 		if (inode->ui_u1.oldids.ui_suid == 0xFFFF)
 			return fs32_to_cpu(sb, inode->ui_u3.ui_sun.ui_uid);
-		/* Fall through */
+		fallthrough;
 	default:
 		return fs16_to_cpu(sb, inode->ui_u1.oldids.ui_suid);
 	}
@@ -215,7 +209,7 @@ ufs_set_inode_uid(struct super_block *sb, struct ufs_inode *inode, u32 value)
 		inode->ui_u3.ui_sun.ui_uid = cpu_to_fs32(sb, value);
 		if (value > 0xFFFF)
 			value = 0xFFFF;
-		/* Fall through */
+		fallthrough;
 	default:
 		inode->ui_u1.oldids.ui_suid = cpu_to_fs16(sb, value);
 		break;
@@ -229,9 +223,9 @@ ufs_get_inode_gid(struct super_block *sb, struct ufs_inode *inode)
 	case UFS_UID_44BSD:
 		return fs32_to_cpu(sb, inode->ui_u3.ui_44.ui_gid);
 	case UFS_UID_EFT:
-		if (inode->ui_u1.oldids.ui_suid == 0xFFFF)
+		if (inode->ui_u1.oldids.ui_sgid == 0xFFFF)
 			return fs32_to_cpu(sb, inode->ui_u3.ui_sun.ui_gid);
-		/* Fall through */
+		fallthrough;
 	default:
 		return fs16_to_cpu(sb, inode->ui_u1.oldids.ui_sgid);
 	}
@@ -249,16 +243,16 @@ ufs_set_inode_gid(struct super_block *sb, struct ufs_inode *inode, u32 value)
 		inode->ui_u3.ui_sun.ui_gid = cpu_to_fs32(sb, value);
 		if (value > 0xFFFF)
 			value = 0xFFFF;
-		/* Fall through */
+		fallthrough;
 	default:
 		inode->ui_u1.oldids.ui_sgid =  cpu_to_fs16(sb, value);
 		break;
 	}
 }
 
-extern dev_t ufs_get_inode_dev(struct super_block *, struct ufs_inode_info *);
-extern void ufs_set_inode_dev(struct super_block *, struct ufs_inode_info *, dev_t);
-extern int ufs_prepare_chunk(struct page *page, loff_t pos, unsigned len);
+dev_t ufs_get_inode_dev(struct super_block *, struct ufs_inode_info *);
+void ufs_set_inode_dev(struct super_block *, struct ufs_inode_info *, dev_t);
+int ufs_prepare_chunk(struct folio *folio, loff_t pos, unsigned len);
 
 /*
  * These functions manipulate ufs buffers
@@ -269,24 +263,17 @@ extern struct ufs_buffer_head * ubh_bread_uspi(struct ufs_sb_private_info *, str
 extern void ubh_brelse (struct ufs_buffer_head *);
 extern void ubh_brelse_uspi (struct ufs_sb_private_info *);
 extern void ubh_mark_buffer_dirty (struct ufs_buffer_head *);
-extern void ubh_mark_buffer_uptodate (struct ufs_buffer_head *, int);
 extern void ubh_sync_block(struct ufs_buffer_head *);
 extern void ubh_bforget (struct ufs_buffer_head *);
 extern int  ubh_buffer_dirty (struct ufs_buffer_head *);
-#define ubh_ubhcpymem(mem,ubh,size) _ubh_ubhcpymem_(uspi,mem,ubh,size)
-extern void _ubh_ubhcpymem_(struct ufs_sb_private_info *, unsigned char *, struct ufs_buffer_head *, unsigned);
-#define ubh_memcpyubh(ubh,mem,size) _ubh_memcpyubh_(uspi,ubh,mem,size)
-extern void _ubh_memcpyubh_(struct ufs_sb_private_info *, struct ufs_buffer_head *, unsigned char *, unsigned);
 
 /* This functions works with cache pages*/
-extern struct page *ufs_get_locked_page(struct address_space *mapping,
-					pgoff_t index);
-static inline void ufs_put_locked_page(struct page *page)
+struct folio *ufs_get_locked_folio(struct address_space *mapping, pgoff_t index);
+static inline void ufs_put_locked_folio(struct folio *folio)
 {
-       unlock_page(page);
-       put_page(page);
+       folio_unlock(folio);
+       folio_put(folio);
 }
-
 
 /*
  * macros and inline function to get important structures from ufs_sb_private_info
@@ -463,65 +450,69 @@ static inline unsigned _ubh_find_last_zero_bit_(
 	return (base << uspi->s_bpfshift) + pos - begin;
 } 	
 
-#define ubh_isblockclear(ubh,begin,block) (!_ubh_isblockset_(uspi,ubh,begin,block))
-
-#define ubh_isblockset(ubh,begin,block) _ubh_isblockset_(uspi,ubh,begin,block)
-static inline int _ubh_isblockset_(struct ufs_sb_private_info * uspi,
-	struct ufs_buffer_head * ubh, unsigned begin, unsigned block)
+static inline int ubh_isblockset(struct ufs_sb_private_info *uspi,
+	struct ufs_cg_private_info *ucpi, unsigned int frag)
 {
+	struct ufs_buffer_head *ubh = UCPI_UBH(ucpi);
+	u8 *p = ubh_get_addr(ubh, ucpi->c_freeoff + (frag >> 3));
 	u8 mask;
+
 	switch (uspi->s_fpb) {
 	case 8:
-	    	return (*ubh_get_addr (ubh, begin + block) == 0xff);
+		return *p == 0xff;
 	case 4:
-		mask = 0x0f << ((block & 0x01) << 2);
-		return (*ubh_get_addr (ubh, begin + (block >> 1)) & mask) == mask;
+		mask = 0x0f << (frag & 4);
+		return (*p & mask) == mask;
 	case 2:
-		mask = 0x03 << ((block & 0x03) << 1);
-		return (*ubh_get_addr (ubh, begin + (block >> 2)) & mask) == mask;
+		mask = 0x03 << (frag & 6);
+		return (*p & mask) == mask;
 	case 1:
-		mask = 0x01 << (block & 0x07);
-		return (*ubh_get_addr (ubh, begin + (block >> 3)) & mask) == mask;
+		mask = 0x01 << (frag & 7);
+		return (*p & mask) == mask;
 	}
 	return 0;	
 }
 
-#define ubh_clrblock(ubh,begin,block) _ubh_clrblock_(uspi,ubh,begin,block)
-static inline void _ubh_clrblock_(struct ufs_sb_private_info * uspi,
-	struct ufs_buffer_head * ubh, unsigned begin, unsigned block)
+static inline void ubh_clrblock(struct ufs_sb_private_info *uspi,
+	struct ufs_cg_private_info *ucpi, unsigned int frag)
 {
+	struct ufs_buffer_head *ubh = UCPI_UBH(ucpi);
+	u8 *p = ubh_get_addr(ubh, ucpi->c_freeoff + (frag >> 3));
+
 	switch (uspi->s_fpb) {
 	case 8:
-	    	*ubh_get_addr (ubh, begin + block) = 0x00;
+		*p = 0x00;
 	    	return; 
 	case 4:
-		*ubh_get_addr (ubh, begin + (block >> 1)) &= ~(0x0f << ((block & 0x01) << 2));
+		*p &= ~(0x0f << (frag & 4));
 		return;
 	case 2:
-		*ubh_get_addr (ubh, begin + (block >> 2)) &= ~(0x03 << ((block & 0x03) << 1));
+		*p &= ~(0x03 << (frag & 6));
 		return;
 	case 1:
-		*ubh_get_addr (ubh, begin + (block >> 3)) &= ~(0x01 << ((block & 0x07)));
+		*p &= ~(0x01 << (frag & 7));
 		return;
 	}
 }
 
-#define ubh_setblock(ubh,begin,block) _ubh_setblock_(uspi,ubh,begin,block)
-static inline void _ubh_setblock_(struct ufs_sb_private_info * uspi,
-	struct ufs_buffer_head * ubh, unsigned begin, unsigned block)
+static inline void ubh_setblock(struct ufs_sb_private_info * uspi,
+	struct ufs_cg_private_info *ucpi, unsigned int frag)
 {
+	struct ufs_buffer_head *ubh = UCPI_UBH(ucpi);
+	u8 *p = ubh_get_addr(ubh, ucpi->c_freeoff + (frag >> 3));
+
 	switch (uspi->s_fpb) {
 	case 8:
-	    	*ubh_get_addr(ubh, begin + block) = 0xff;
+		*p = 0xff;
 	    	return;
 	case 4:
-		*ubh_get_addr(ubh, begin + (block >> 1)) |= (0x0f << ((block & 0x01) << 2));
+		*p |= 0x0f << (frag & 4);
 		return;
 	case 2:
-		*ubh_get_addr(ubh, begin + (block >> 2)) |= (0x03 << ((block & 0x03) << 1));
+		*p |= 0x03 << (frag & 6);
 		return;
 	case 1:
-		*ubh_get_addr(ubh, begin + (block >> 3)) |= (0x01 << ((block & 0x07)));
+		*p |= 0x01 << (frag & 7);
 		return;
 	}
 }
@@ -589,4 +580,18 @@ static inline int ufs_is_data_ptr_zero(struct ufs_sb_private_info *uspi,
 		return *(__fs64 *)p == 0;
 	else
 		return *(__fs32 *)p == 0;
+}
+
+static inline __fs32 ufs_get_seconds(struct super_block *sbp)
+{
+	time64_t now = ktime_get_real_seconds();
+
+	/* Signed 32-bit interpretation wraps around in 2038, which
+	 * happens in ufs1 inode stamps but not ufs2 using 64-bits
+	 * stamps. For superblock and blockgroup, let's assume
+	 * unsigned 32-bit stamps, which are good until y2106.
+	 * Wrap around rather than clamp here to make the dirty
+	 * file system detection work in the superblock stamp.
+	 */
+	return cpu_to_fs32(sbp, lower_32_bits(now));
 }

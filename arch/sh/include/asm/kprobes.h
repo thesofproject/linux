@@ -26,8 +26,7 @@ typedef insn_size_t kprobe_opcode_t;
 struct kprobe;
 
 void arch_remove_kprobe(struct kprobe *);
-void kretprobe_trampoline(void);
-void jprobe_return_end(void);
+void __kretprobe_trampoline(void);
 
 /* Architecture specific copy of original instruction*/
 struct arch_specific_insn {
@@ -43,15 +42,10 @@ struct prev_kprobe {
 /* per-cpu kprobe control block */
 struct kprobe_ctlblk {
 	unsigned long kprobe_status;
-	unsigned long jprobe_saved_r15;
-	struct pt_regs jprobe_saved_regs;
-	kprobe_opcode_t jprobes_stack[MAX_STACK_SIZE];
 	struct prev_kprobe prev_kprobe;
 };
 
 extern int kprobe_fault_handler(struct pt_regs *regs, int trapnr);
-extern int kprobe_exceptions_notify(struct notifier_block *self,
-				    unsigned long val, void *data);
 extern int kprobe_handle_illslot(unsigned long pc);
 #else
 

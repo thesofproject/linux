@@ -1,25 +1,20 @@
-/*
- * imx25 pinctrl driver.
- *
- * Copyright 2013 Eukréa Electromatique <denis@eukrea.com>
- *
- * This driver was mostly copied from the imx51 pinctrl driver which has:
- *
- * Copyright (C) 2012 Freescale Semiconductor, Inc.
- * Copyright (C) 2012 Linaro, Inc.
- *
- * Author: Denis Carikli <denis@eukrea.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// imx25 pinctrl driver.
+//
+// Copyright 2013 Eukréa Electromatique <denis@eukrea.com>
+//
+// This driver was mostly copied from the imx51 pinctrl driver which has:
+//
+// Copyright (C) 2012 Freescale Semiconductor, Inc.
+// Copyright (C) 2012 Linaro, Inc.
+//
+// Author: Denis Carikli <denis@eukrea.com>
 
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/io.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
+#include <linux/platform_device.h>
 #include <linux/pinctrl/pinctrl.h>
 
 #include "pinctrl-imx.h"
@@ -327,7 +322,8 @@ static int imx25_pinctrl_probe(struct platform_device *pdev)
 static struct platform_driver imx25_pinctrl_driver = {
 	.driver = {
 		.name = "imx25-pinctrl",
-		.of_match_table = of_match_ptr(imx25_pinctrl_of_match),
+		.of_match_table = imx25_pinctrl_of_match,
+		.suppress_bind_attrs = true,
 	},
 	.probe = imx25_pinctrl_probe,
 };

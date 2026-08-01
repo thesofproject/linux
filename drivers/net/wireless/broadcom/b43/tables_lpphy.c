@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
 
   Broadcom B43 wireless driver
@@ -6,20 +7,6 @@
   Copyright (c) 2009 Michael Buesch <m@bues.ch>
   Copyright (c) 2009 Gábor Stefanik <netrolller.3d@gmail.com>
 
-  This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 2 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program; see the file COPYING.  If not, write to
-  the Free Software Foundation, Inc., 51 Franklin Steet, Fifth Floor,
-  Boston, MA 02110-1301, USA.
 
 */
 
@@ -1079,7 +1066,7 @@ static const u32 lpphy_papd_mult_table[] = {
 	0x00036963, 0x000339f2, 0x00030a89, 0x0002db28,
 };
 
-static struct lpphy_tx_gain_table_entry lpphy_rev0_nopa_tx_gain_table[] = {
+static const struct lpphy_tx_gain_table_entry lpphy_rev0_nopa_tx_gain_table[] = {
 	{ .gm = 7, .pga = 15, .pad = 14, .dac = 0, .bb_mult = 152, },
 	{ .gm = 7, .pga = 15, .pad = 14, .dac = 0, .bb_mult = 147, },
 	{ .gm = 7, .pga = 15, .pad = 14, .dac = 0, .bb_mult = 143, },
@@ -1210,7 +1197,7 @@ static struct lpphy_tx_gain_table_entry lpphy_rev0_nopa_tx_gain_table[] = {
 	{ .gm = 7, .pga = 11, .pad = 6, .dac = 0, .bb_mult = 71, },
 };
 
-static struct lpphy_tx_gain_table_entry lpphy_rev0_2ghz_tx_gain_table[] = {
+static const struct lpphy_tx_gain_table_entry lpphy_rev0_2ghz_tx_gain_table[] = {
 	{ .gm = 4, .pga = 15, .pad = 9, .dac = 0, .bb_mult = 64, },
 	{ .gm = 4, .pga = 15, .pad = 9, .dac = 0, .bb_mult = 62, },
 	{ .gm = 4, .pga = 15, .pad = 9, .dac = 0, .bb_mult = 60, },
@@ -1341,7 +1328,7 @@ static struct lpphy_tx_gain_table_entry lpphy_rev0_2ghz_tx_gain_table[] = {
 	{ .gm = 4, .pga = 4, .pad = 2, .dac = 0, .bb_mult = 72, },
 };
 
-static struct lpphy_tx_gain_table_entry lpphy_rev0_5ghz_tx_gain_table[] = {
+static const struct lpphy_tx_gain_table_entry lpphy_rev0_5ghz_tx_gain_table[] = {
 	{ .gm = 7, .pga = 15, .pad = 15, .dac = 0, .bb_mult = 99, },
 	{ .gm = 7, .pga = 15, .pad = 15, .dac = 0, .bb_mult = 96, },
 	{ .gm = 7, .pga = 15, .pad = 15, .dac = 0, .bb_mult = 93, },
@@ -1472,7 +1459,7 @@ static struct lpphy_tx_gain_table_entry lpphy_rev0_5ghz_tx_gain_table[] = {
 	{ .gm = 7, .pga = 11, .pad = 6, .dac = 0, .bb_mult = 60, },
 };
 
-static struct lpphy_tx_gain_table_entry lpphy_rev1_nopa_tx_gain_table[] = {
+static const struct lpphy_tx_gain_table_entry lpphy_rev1_nopa_tx_gain_table[] = {
 	{ .gm = 7, .pga = 15, .pad = 14, .dac = 0, .bb_mult = 152, },
 	{ .gm = 7, .pga = 15, .pad = 14, .dac = 0, .bb_mult = 147, },
 	{ .gm = 7, .pga = 15, .pad = 14, .dac = 0, .bb_mult = 143, },
@@ -1612,7 +1599,7 @@ static struct lpphy_tx_gain_table_entry lpphy_rev1_nopa_tx_gain_table[] = {
 	{ .gm = 7, .pga = 11, .pad = 6, .dac = 0, .bb_mult = 71, },
 };
 
-static struct lpphy_tx_gain_table_entry lpphy_rev1_2ghz_tx_gain_table[] = {
+static const struct lpphy_tx_gain_table_entry lpphy_rev1_2ghz_tx_gain_table[] = {
 	{ .gm = 4, .pga = 15, .pad = 15, .dac = 0, .bb_mult = 90, },
 	{ .gm = 4, .pga = 15, .pad = 15, .dac = 0, .bb_mult = 88, },
 	{ .gm = 4, .pga = 15, .pad = 15, .dac = 0, .bb_mult = 85, },
@@ -1743,7 +1730,7 @@ static struct lpphy_tx_gain_table_entry lpphy_rev1_2ghz_tx_gain_table[] = {
 	{ .gm = 4, .pga = 10, .pad = 6, .dac = 0, .bb_mult = 60, },
 };
 
-static struct lpphy_tx_gain_table_entry lpphy_rev1_5ghz_tx_gain_table[] = {
+static const struct lpphy_tx_gain_table_entry lpphy_rev1_5ghz_tx_gain_table[] = {
 	{ .gm = 7, .pga = 15, .pad = 15, .dac = 0, .bb_mult = 99, },
 	{ .gm = 7, .pga = 15, .pad = 15, .dac = 0, .bb_mult = 96, },
 	{ .gm = 7, .pga = 15, .pad = 15, .dac = 0, .bb_mult = 93, },
@@ -1874,7 +1861,7 @@ static struct lpphy_tx_gain_table_entry lpphy_rev1_5ghz_tx_gain_table[] = {
 	{ .gm = 7, .pga = 11, .pad = 6, .dac = 0, .bb_mult = 60, },
 };
 
-static struct lpphy_tx_gain_table_entry lpphy_rev2_nopa_tx_gain_table[] = {
+static const struct lpphy_tx_gain_table_entry lpphy_rev2_nopa_tx_gain_table[] = {
 	{ .gm = 255, .pga = 255, .pad = 203, .dac = 0, .bb_mult = 152, },
 	{ .gm = 255, .pga = 255, .pad = 203, .dac = 0, .bb_mult = 147, },
 	{ .gm = 255, .pga = 255, .pad = 203, .dac = 0, .bb_mult = 143, },
@@ -2005,7 +1992,7 @@ static struct lpphy_tx_gain_table_entry lpphy_rev2_nopa_tx_gain_table[] = {
 	{ .gm = 255, .pga = 111, .pad = 29, .dac = 0, .bb_mult = 64, },
 };
 
-static struct lpphy_tx_gain_table_entry lpphy_rev2_2ghz_tx_gain_table[] = {
+static const struct lpphy_tx_gain_table_entry lpphy_rev2_2ghz_tx_gain_table[] = {
 	{ .gm = 7, .pga = 99, .pad = 255, .dac = 0, .bb_mult = 64, },
 	{ .gm = 7, .pga = 96, .pad = 255, .dac = 0, .bb_mult = 64, },
 	{ .gm = 7, .pga = 93, .pad = 255, .dac = 0, .bb_mult = 64, },
@@ -2136,7 +2123,7 @@ static struct lpphy_tx_gain_table_entry lpphy_rev2_2ghz_tx_gain_table[] = {
 	{ .gm = 7, .pga = 13, .pad = 52, .dac = 0, .bb_mult = 64, },
 };
 
-static struct lpphy_tx_gain_table_entry lpphy_rev2_5ghz_tx_gain_table[] = {
+static const struct lpphy_tx_gain_table_entry lpphy_rev2_5ghz_tx_gain_table[] = {
 	{ .gm = 255, .pga = 255, .pad = 255, .dac = 0, .bb_mult = 152, },
 	{ .gm = 255, .pga = 255, .pad = 255, .dac = 0, .bb_mult = 147, },
 	{ .gm = 255, .pga = 255, .pad = 255, .dac = 0, .bb_mult = 143, },
@@ -2405,7 +2392,7 @@ void lpphy_write_gain_table(struct b43_wldev *dev, int offset,
 }
 
 void lpphy_write_gain_table_bulk(struct b43_wldev *dev, int offset, int count,
-				 struct lpphy_tx_gain_table_entry *table)
+				 const struct lpphy_tx_gain_table_entry *table)
 {
 	int i;
 

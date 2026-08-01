@@ -32,44 +32,38 @@ struct drm_printer;
 
 #define ENABLE_GUC_SUBMISSION		BIT(0)
 #define ENABLE_GUC_LOAD_HUC		BIT(1)
+#define ENABLE_GUC_MASK			GENMASK(1, 0)
 
+/*
+ * Invoke param, a function-like macro, for each i915 param, with arguments:
+ *
+ * param(type, name, value, mode)
+ *
+ * type: parameter type, one of {bool, int, unsigned int, unsigned long, char *}
+ * name: name of the parameter
+ * value: initial/default value of the parameter
+ * mode: debugfs file permissions, one of {0400, 0600, 0}, use 0 to not create
+ *       debugfs file
+ */
 #define I915_PARAMS_FOR_EACH(param) \
-	param(char *, vbt_firmware, NULL) \
-	param(int, modeset, -1) \
-	param(int, panel_ignore_lid, 1) \
-	param(int, lvds_channel_mode, 0) \
-	param(int, panel_use_ssc, -1) \
-	param(int, vbt_sdvo_panel_type, -1) \
-	param(int, enable_dc, -1) \
-	param(int, enable_fbc, -1) \
-	param(int, enable_ppgtt, -1) \
-	param(int, enable_psr, -1) \
-	param(int, disable_power_well, -1) \
-	param(int, enable_ips, 1) \
-	param(int, invert_brightness, 0) \
-	param(int, enable_guc, 0) \
-	param(int, guc_log_level, 0) \
-	param(char *, guc_firmware_path, NULL) \
-	param(char *, huc_firmware_path, NULL) \
-	param(int, mmio_debug, 0) \
-	param(int, edp_vswing, 0) \
-	param(int, reset, 2) \
-	param(unsigned int, inject_load_failure, 0) \
+	param(int, modeset, -1, 0400) \
+	param(int, enable_guc, -1, 0400) \
+	param(int, guc_log_level, -1, 0400) \
+	param(char *, guc_firmware_path, NULL, 0400) \
+	param(char *, huc_firmware_path, NULL, 0400) \
+	param(char *, gsc_firmware_path, NULL, 0400) \
+	param(bool, memtest, false, 0400) \
+	param(int, mmio_debug, -IS_ENABLED(CONFIG_DRM_I915_DEBUG_MMIO), 0600) \
+	param(unsigned int, reset, 3, 0600) \
+	param(char *, force_probe, CONFIG_DRM_I915_FORCE_PROBE, 0400) \
+	param(unsigned int, request_timeout_ms, CONFIG_DRM_I915_REQUEST_TIMEOUT, CONFIG_DRM_I915_REQUEST_TIMEOUT ? 0600 : 0) \
+	param(unsigned int, lmem_size, 0, 0400) \
+	param(unsigned int, lmem_bar_size, 0, 0400) \
 	/* leave bools at the end to not create holes */ \
-	param(bool, alpha_support, IS_ENABLED(CONFIG_DRM_I915_ALPHA_SUPPORT)) \
-	param(bool, enable_cmd_parser, true) \
-	param(bool, enable_hangcheck, true) \
-	param(bool, fastboot, false) \
-	param(bool, prefault_disable, false) \
-	param(bool, load_detect_test, false) \
-	param(bool, force_reset_modeset_test, false) \
-	param(bool, error_capture, true) \
-	param(bool, disable_display, false) \
-	param(bool, verbose_state_checks, true) \
-	param(bool, nuclear_pageflip, false) \
-	param(bool, enable_dp_mst, true) \
-	param(bool, enable_dpcd_backlight, false) \
-	param(bool, enable_gvt, false)
+	param(bool, enable_hangcheck, true, 0600) \
+	param(bool, error_capture, true, IS_ENABLED(CONFIG_DRM_I915_CAPTURE_ERROR) ? 0600 : 0) \
+	param(bool, enable_gvt, false, IS_ENABLED(CONFIG_DRM_I915_GVT) ? 0400 : 0) \
+	param(bool, enable_debug_only_api, false, IS_ENABLED(CONFIG_DRM_I915_REPLAY_GPU_HANGS_API) ? 0400 : 0)
 
 #define MEMBER(T, member, ...) T member;
 struct i915_params {
@@ -80,6 +74,7 @@ struct i915_params {
 extern struct i915_params i915_modparams __read_mostly;
 
 void i915_params_dump(const struct i915_params *params, struct drm_printer *p);
+void i915_params_copy(struct i915_params *dest, const struct i915_params *src);
+void i915_params_free(struct i915_params *params);
 
 #endif
-

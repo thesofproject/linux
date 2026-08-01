@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for CC770 and AN82527 CAN controllers on the platform bus
  *
  * Copyright (C) 2009, 2011 Wolfgang Grandegger <wg@grandegger.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the version 2 of the GNU General Public License
- * as published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -78,17 +70,10 @@ static void cc770_platform_write_reg(const struct cc770_priv *priv, int reg,
 static int cc770_get_of_node_data(struct platform_device *pdev,
 				  struct cc770_priv *priv)
 {
+	u32 clkext = CC770_PLATFORM_CAN_CLOCK, clkout = 0;
 	struct device_node *np = pdev->dev.of_node;
-	const u32 *prop;
-	int prop_size;
-	u32 clkext;
 
-	prop = of_get_property(np, "bosch,external-clock-frequency",
-			       &prop_size);
-	if (prop && (prop_size ==  sizeof(u32)))
-		clkext = *prop;
-	else
-		clkext = CC770_PLATFORM_CAN_CLOCK; /* default */
+	of_property_read_u32(np, "bosch,external-clock-frequency", &clkext);
 	priv->can.clock.freq = clkext;
 
 	/* The system clock may not exceed 10 MHz */
@@ -101,41 +86,38 @@ static int cc770_get_of_node_data(struct platform_device *pdev,
 	if (priv->can.clock.freq > 8000000)
 		priv->cpu_interface |= CPUIF_DMC;
 
-	if (of_get_property(np, "bosch,divide-memory-clock", NULL))
+	if (of_property_read_bool(np, "bosch,divide-memory-clock"))
 		priv->cpu_interface |= CPUIF_DMC;
-	if (of_get_property(np, "bosch,iso-low-speed-mux", NULL))
+	if (of_property_read_bool(np, "bosch,iso-low-speed-mux"))
 		priv->cpu_interface |= CPUIF_MUX;
 
-	if (!of_get_property(np, "bosch,no-comperator-bypass", NULL))
+	if (!of_property_read_bool(np, "bosch,no-comperator-bypass"))
 		priv->bus_config |= BUSCFG_CBY;
-	if (of_get_property(np, "bosch,disconnect-rx0-input", NULL))
+	if (of_property_read_bool(np, "bosch,disconnect-rx0-input"))
 		priv->bus_config |= BUSCFG_DR0;
-	if (of_get_property(np, "bosch,disconnect-rx1-input", NULL))
+	if (of_property_read_bool(np, "bosch,disconnect-rx1-input"))
 		priv->bus_config |= BUSCFG_DR1;
-	if (of_get_property(np, "bosch,disconnect-tx1-output", NULL))
+	if (of_property_read_bool(np, "bosch,disconnect-tx1-output"))
 		priv->bus_config |= BUSCFG_DT1;
-	if (of_get_property(np, "bosch,polarity-dominant", NULL))
+	if (of_property_read_bool(np, "bosch,polarity-dominant"))
 		priv->bus_config |= BUSCFG_POL;
 
-	prop = of_get_property(np, "bosch,clock-out-frequency", &prop_size);
-	if (prop && (prop_size == sizeof(u32)) && *prop > 0) {
-		u32 cdv = clkext / *prop;
-		int slew;
+	of_property_read_u32(np, "bosch,clock-out-frequency", &clkout);
+	if (clkout > 0) {
+		u32 cdv = clkext / clkout;
 
 		if (cdv > 0 && cdv < 16) {
+			u32 slew;
+
 			priv->cpu_interface |= CPUIF_CEN;
 			priv->clkout |= (cdv - 1) & CLKOUT_CD_MASK;
 
-			prop = of_get_property(np, "bosch,slew-rate",
-					       &prop_size);
-			if (prop && (prop_size == sizeof(u32))) {
-				slew = *prop;
-			} else {
+			if (of_property_read_u32(np, "bosch,slew-rate", &slew)) {
 				/* Determine default slew rate */
 				slew = (CLKOUT_SL_MASK >>
 					CLKOUT_SL_SHIFT) -
 					((cdv * clkext - 1) / 8000000);
-				if (slew < 0)
+				if (slew > (CLKOUT_SL_MASK >> CLKOUT_SL_SHIFT))
 					slew = 0;
 			}
 			priv->clkout |= (slew << CLKOUT_SL_SHIFT) &
@@ -238,7 +220,7 @@ exit_release_mem:
 	return err;
 }
 
-static int cc770_platform_remove(struct platform_device *pdev)
+static void cc770_platform_remove(struct platform_device *pdev)
 {
 	struct net_device *dev = platform_get_drvdata(pdev);
 	struct cc770_priv *priv = netdev_priv(dev);
@@ -250,8 +232,6 @@ static int cc770_platform_remove(struct platform_device *pdev)
 
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	release_mem_region(mem->start, resource_size(mem));
-
-	return 0;
 }
 
 static const struct of_device_id cc770_platform_table[] = {

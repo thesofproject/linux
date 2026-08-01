@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * OMAP3XXX L3 Interconnect Driver
  *
@@ -5,21 +6,6 @@
  *	Felipe Balbi <balbi@ti.com>
  *	Santosh Shilimkar <santosh.shilimkar@ti.com>
  *	Sricharan <r.sricharan@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
- * USA
  */
 
 #include <linux/kernel.h>
@@ -29,7 +15,6 @@
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 
 #include "omap_l3_smx.h"
 
@@ -180,19 +165,10 @@ static irqreturn_t omap3_l3_app_irq(int irq, void *_l3)
 	irqreturn_t ret = IRQ_NONE;
 
 	int_type = irq == l3->app_irq ? L3_APPLICATION_ERROR : L3_DEBUG_ERROR;
-	if (!int_type) {
+	if (!int_type)
 		status = omap3_l3_readll(l3->rt, L3_SI_FLAG_STATUS_0);
-		/*
-		 * if we have a timeout error, there's nothing we can
-		 * do besides rebooting the board. So let's BUG on any
-		 * of such errors and handle the others. timeout error
-		 * is severe and not expected to occur.
-		 */
-		BUG_ON(status & L3_STATUS_0_TIMEOUT_MASK);
-	} else {
+	else
 		status = omap3_l3_readll(l3->rt, L3_SI_FLAG_STATUS_1);
-		/* No timeout error for debug sources */
-	}
 
 	/* identify the error source */
 	err_source = __ffs(status);
@@ -203,6 +179,14 @@ static irqreturn_t omap3_l3_app_irq(int irq, void *_l3)
 		error_addr = omap3_l3_readll(base, L3_ERROR_LOG_ADDR);
 		ret |= omap3_l3_block_irq(l3, error, error_addr);
 	}
+
+	/*
+	 * if we have a timeout error, there's nothing we can
+	 * do besides rebooting the board. So let's BUG on any
+	 * of such errors and handle the others. timeout error
+	 * is severe and not expected to occur.
+	 */
+	BUG_ON(!int_type && status & L3_STATUS_0_TIMEOUT_MASK);
 
 	/* Clear the status register */
 	clear = (L3_AGENT_STATUS_CLEAR_IA << int_type) |
@@ -231,7 +215,7 @@ static int omap3_l3_probe(struct platform_device *pdev)
 	struct resource *res;
 	int ret;
 
-	l3 = kzalloc(sizeof(*l3), GFP_KERNEL);
+	l3 = kzalloc_obj(*l3);
 	if (!l3)
 		return -ENOMEM;
 
@@ -277,7 +261,7 @@ err0:
 	return ret;
 }
 
-static int omap3_l3_remove(struct platform_device *pdev)
+static void omap3_l3_remove(struct platform_device *pdev)
 {
 	struct omap3_l3         *l3 = platform_get_drvdata(pdev);
 
@@ -285,8 +269,6 @@ static int omap3_l3_remove(struct platform_device *pdev)
 	free_irq(l3->debug_irq, l3);
 	iounmap(l3->rt);
 	kfree(l3);
-
-	return 0;
 }
 
 static struct platform_driver omap3_l3_driver = {

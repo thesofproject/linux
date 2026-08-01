@@ -26,8 +26,6 @@
 */
 
 #define DRV_NAME        "epic100"
-#define DRV_VERSION     "2.1"
-#define DRV_RELDATE     "Sept 11, 2006"
 
 /* The user-configurable values.
    These may be modified when a driver module is loaded.*/
@@ -88,12 +86,6 @@ static int rx_copybreak;
 #include <asm/io.h>
 #include <linux/uaccess.h>
 #include <asm/byteorder.h>
-
-/* These identify the driver base version and may not be removed. */
-static char version[] =
-DRV_NAME ".c:v1.11 1/7/2001 Written by Donald Becker <becker@scyld.com>";
-static char version2[] =
-"  (unofficial 2.4.x kernel port, version " DRV_VERSION ", " DRV_RELDATE ")";
 
 MODULE_AUTHOR("Donald Becker <becker@scyld.com>");
 MODULE_DESCRIPTION("SMC 83c170 EPIC series Ethernet driver");
@@ -174,11 +166,19 @@ static const struct epic_chip_info pci_id_tbl[] = {
 
 
 static const struct pci_device_id epic_pci_tbl[] = {
-	{ 0x10B8, 0x0005, 0x1092, 0x0AB4, 0, 0, SMSC_83C170_0 },
-	{ 0x10B8, 0x0005, PCI_ANY_ID, PCI_ANY_ID, 0, 0, SMSC_83C170 },
-	{ 0x10B8, 0x0006, PCI_ANY_ID, PCI_ANY_ID,
-	  PCI_CLASS_NETWORK_ETHERNET << 8, 0xffff00, SMSC_83C175 },
-	{ 0,}
+	{
+		PCI_DEVICE_SUB(0x10B8, 0x0005, 0x1092, 0x0AB4),
+		.driver_data = SMSC_83C170_0,
+	}, {
+		PCI_DEVICE(0x10B8, 0x0005),
+		.driver_data = SMSC_83C170,
+	}, {
+		PCI_DEVICE(0x10B8, 0x0006),
+		.class = PCI_CLASS_NETWORK_ETHERNET << 8,
+		.class_mask = 0xffff00,
+		.driver_data = SMSC_83C175,
+	},
+	{ }
 };
 MODULE_DEVICE_TABLE (pci, epic_pci_tbl);
 
@@ -280,6 +280,7 @@ struct epic_private {
 	signed char phys[4];				/* MII device addresses. */
 	u16 advertising;					/* NWay media advertisement */
 	int mii_phy_cnt;
+	u32 ethtool_ops_nesting;
 	struct mii_if_info mii;
 	unsigned int tx_full:1;				/* The Tx queue is full. */
 	unsigned int default_port:4;		/* Last dev->if_port value. */
@@ -291,7 +292,7 @@ static int mdio_read(struct net_device *dev, int phy_id, int location);
 static void mdio_write(struct net_device *dev, int phy_id, int loc, int val);
 static void epic_restart(struct net_device *dev);
 static void epic_timer(struct timer_list *t);
-static void epic_tx_timeout(struct net_device *dev);
+static void epic_tx_timeout(struct net_device *dev, unsigned int txqueue);
 static void epic_init_ring(struct net_device *dev);
 static netdev_tx_t epic_start_xmit(struct sk_buff *skb,
 				   struct net_device *dev);
@@ -311,7 +312,7 @@ static const struct net_device_ops epic_netdev_ops = {
 	.ndo_tx_timeout 	= epic_tx_timeout,
 	.ndo_get_stats		= epic_get_stats,
 	.ndo_set_rx_mode	= set_rx_mode,
-	.ndo_do_ioctl 		= netdev_ioctl,
+	.ndo_eth_ioctl		= netdev_ioctl,
 	.ndo_set_mac_address 	= eth_mac_addr,
 	.ndo_validate_addr	= eth_validate_addr,
 };
@@ -321,24 +322,18 @@ static int epic_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	static int card_idx = -1;
 	void __iomem *ioaddr;
 	int chip_idx = (int) ent->driver_data;
-	int irq;
 	struct net_device *dev;
 	struct epic_private *ep;
 	int i, ret, option = 0, duplex = 0;
+	__le16 addr[ETH_ALEN / 2];
 	void *ring_space;
 	dma_addr_t ring_dma;
-
-/* when built into the kernel, we only print version if device is found */
-#ifndef MODULE
-	pr_info_once("%s%s\n", version, version2);
-#endif
 
 	card_idx++;
 
 	ret = pci_enable_device(pdev);
 	if (ret)
 		goto out;
-	irq = pdev->irq;
 
 	if (pci_resource_len(pdev, 0) < EPIC_TOTAL_SIZE) {
 		dev_err(&pdev->dev, "no PCI region space\n");
@@ -375,13 +370,15 @@ static int epic_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	ep->mii.phy_id_mask = 0x1f;
 	ep->mii.reg_num_mask = 0x1f;
 
-	ring_space = pci_alloc_consistent(pdev, TX_TOTAL_SIZE, &ring_dma);
+	ring_space = dma_alloc_coherent(&pdev->dev, TX_TOTAL_SIZE, &ring_dma,
+					GFP_KERNEL);
 	if (!ring_space)
 		goto err_out_iounmap;
 	ep->tx_ring = ring_space;
 	ep->tx_ring_dma = ring_dma;
 
-	ring_space = pci_alloc_consistent(pdev, RX_TOTAL_SIZE, &ring_dma);
+	ring_space = dma_alloc_coherent(&pdev->dev, RX_TOTAL_SIZE, &ring_dma,
+					GFP_KERNEL);
 	if (!ring_space)
 		goto err_out_unmap_tx;
 	ep->rx_ring = ring_space;
@@ -415,7 +412,8 @@ static int epic_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	/* Note: the '175 does not have a serial EEPROM. */
 	for (i = 0; i < 3; i++)
-		((__le16 *)dev->dev_addr)[i] = cpu_to_le16(er16(LAN0 + i*4));
+		addr[i] = cpu_to_le16(er16(LAN0 + i*4));
+	eth_hw_addr_set(dev, (u8 *)addr);
 
 	if (debug > 2) {
 		dev_dbg(&pdev->dev, "EEPROM contents:\n");
@@ -479,7 +477,7 @@ static int epic_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	dev->netdev_ops = &epic_netdev_ops;
 	dev->ethtool_ops = &netdev_ethtool_ops;
 	dev->watchdog_timeo = TX_TIMEOUT;
-	netif_napi_add(dev, &ep->napi, epic_poll, 64);
+	netif_napi_add(dev, &ep->napi, epic_poll);
 
 	ret = register_netdev(dev);
 	if (ret < 0)
@@ -494,9 +492,11 @@ out:
 	return ret;
 
 err_out_unmap_rx:
-	pci_free_consistent(pdev, RX_TOTAL_SIZE, ep->rx_ring, ep->rx_ring_dma);
+	dma_free_coherent(&pdev->dev, RX_TOTAL_SIZE, ep->rx_ring,
+			  ep->rx_ring_dma);
 err_out_unmap_tx:
-	pci_free_consistent(pdev, TX_TOTAL_SIZE, ep->tx_ring, ep->tx_ring_dma);
+	dma_free_coherent(&pdev->dev, TX_TOTAL_SIZE, ep->tx_ring,
+			  ep->tx_ring_dma);
 err_out_iounmap:
 	pci_iounmap(pdev, ioaddr);
 err_out_free_netdev:
@@ -845,7 +845,7 @@ static void check_media(struct net_device *dev)
 
 static void epic_timer(struct timer_list *t)
 {
-	struct epic_private *ep = from_timer(ep, t, timer);
+	struct epic_private *ep = timer_container_of(ep, t, timer);
 	struct net_device *dev = ep->mii.dev;
 	void __iomem *ioaddr = ep->ioaddr;
 	int next_tick = 5*HZ;
@@ -863,7 +863,7 @@ static void epic_timer(struct timer_list *t)
 	add_timer(&ep->timer);
 }
 
-static void epic_tx_timeout(struct net_device *dev)
+static void epic_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct epic_private *ep = netdev_priv(dev);
 	void __iomem *ioaddr = ep->ioaddr;
@@ -919,8 +919,10 @@ static void epic_init_ring(struct net_device *dev)
 		if (skb == NULL)
 			break;
 		skb_reserve(skb, 2);	/* 16 byte align the IP header. */
-		ep->rx_ring[i].bufaddr = pci_map_single(ep->pci_dev,
-			skb->data, ep->rx_buf_sz, PCI_DMA_FROMDEVICE);
+		ep->rx_ring[i].bufaddr = dma_map_single(&ep->pci_dev->dev,
+							skb->data,
+							ep->rx_buf_sz,
+							DMA_FROM_DEVICE);
 		ep->rx_ring[i].rxstatus = DescOwn;
 	}
 	ep->dirty_rx = (unsigned int)(i - RX_RING_SIZE);
@@ -956,8 +958,9 @@ static netdev_tx_t epic_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	entry = ep->cur_tx % TX_RING_SIZE;
 
 	ep->tx_skbuff[entry] = skb;
-	ep->tx_ring[entry].bufaddr = pci_map_single(ep->pci_dev, skb->data,
-		 			            skb->len, PCI_DMA_TODEVICE);
+	ep->tx_ring[entry].bufaddr = dma_map_single(&ep->pci_dev->dev,
+						    skb->data, skb->len,
+						    DMA_TO_DEVICE);
 	if (free_count < TX_QUEUE_LEN/2) {/* Typical path */
 		ctrl_word = 0x100000; /* No interrupt */
 	} else if (free_count == TX_QUEUE_LEN/2) {
@@ -1037,9 +1040,10 @@ static void epic_tx(struct net_device *dev, struct epic_private *ep)
 
 		/* Free the original skb. */
 		skb = ep->tx_skbuff[entry];
-		pci_unmap_single(ep->pci_dev, ep->tx_ring[entry].bufaddr,
-				 skb->len, PCI_DMA_TODEVICE);
-		dev_kfree_skb_irq(skb);
+		dma_unmap_single(&ep->pci_dev->dev,
+				 ep->tx_ring[entry].bufaddr, skb->len,
+				 DMA_TO_DEVICE);
+		dev_consume_skb_irq(skb);
 		ep->tx_skbuff[entry] = NULL;
 	}
 
@@ -1179,20 +1183,21 @@ static int epic_rx(struct net_device *dev, int budget)
 			if (pkt_len < rx_copybreak &&
 			    (skb = netdev_alloc_skb(dev, pkt_len + 2)) != NULL) {
 				skb_reserve(skb, 2);	/* 16 byte align the IP header */
-				pci_dma_sync_single_for_cpu(ep->pci_dev,
-							    ep->rx_ring[entry].bufaddr,
-							    ep->rx_buf_sz,
-							    PCI_DMA_FROMDEVICE);
+				dma_sync_single_for_cpu(&ep->pci_dev->dev,
+							ep->rx_ring[entry].bufaddr,
+							ep->rx_buf_sz,
+							DMA_FROM_DEVICE);
 				skb_copy_to_linear_data(skb, ep->rx_skbuff[entry]->data, pkt_len);
 				skb_put(skb, pkt_len);
-				pci_dma_sync_single_for_device(ep->pci_dev,
-							       ep->rx_ring[entry].bufaddr,
-							       ep->rx_buf_sz,
-							       PCI_DMA_FROMDEVICE);
+				dma_sync_single_for_device(&ep->pci_dev->dev,
+							   ep->rx_ring[entry].bufaddr,
+							   ep->rx_buf_sz,
+							   DMA_FROM_DEVICE);
 			} else {
-				pci_unmap_single(ep->pci_dev,
-					ep->rx_ring[entry].bufaddr,
-					ep->rx_buf_sz, PCI_DMA_FROMDEVICE);
+				dma_unmap_single(&ep->pci_dev->dev,
+						 ep->rx_ring[entry].bufaddr,
+						 ep->rx_buf_sz,
+						 DMA_FROM_DEVICE);
 				skb_put(skb = ep->rx_skbuff[entry], pkt_len);
 				ep->rx_skbuff[entry] = NULL;
 			}
@@ -1214,8 +1219,10 @@ static int epic_rx(struct net_device *dev, int budget)
 			if (skb == NULL)
 				break;
 			skb_reserve(skb, 2);	/* Align IP on 16 byte boundaries */
-			ep->rx_ring[entry].bufaddr = pci_map_single(ep->pci_dev,
-				skb->data, ep->rx_buf_sz, PCI_DMA_FROMDEVICE);
+			ep->rx_ring[entry].bufaddr = dma_map_single(&ep->pci_dev->dev,
+								    skb->data,
+								    ep->rx_buf_sz,
+								    DMA_FROM_DEVICE);
 			work_done++;
 		}
 		/* AV: shouldn't we add a barrier here? */
@@ -1280,7 +1287,7 @@ static int epic_close(struct net_device *dev)
 		netdev_dbg(dev, "Shutting down ethercard, status was %2.2x.\n",
 			   er32(INTSTAT));
 
-	del_timer_sync(&ep->timer);
+	timer_delete_sync(&ep->timer);
 
 	epic_disable_int(dev, ep);
 
@@ -1295,8 +1302,8 @@ static int epic_close(struct net_device *dev)
 		ep->rx_ring[i].rxstatus = 0;		/* Not owned by Epic chip. */
 		ep->rx_ring[i].buflength = 0;
 		if (skb) {
-			pci_unmap_single(pdev, ep->rx_ring[i].bufaddr,
-					 ep->rx_buf_sz, PCI_DMA_FROMDEVICE);
+			dma_unmap_single(&pdev->dev, ep->rx_ring[i].bufaddr,
+					 ep->rx_buf_sz, DMA_FROM_DEVICE);
 			dev_kfree_skb(skb);
 		}
 		ep->rx_ring[i].bufaddr = 0xBADF00D0; /* An invalid address. */
@@ -1306,8 +1313,8 @@ static int epic_close(struct net_device *dev)
 		ep->tx_skbuff[i] = NULL;
 		if (!skb)
 			continue;
-		pci_unmap_single(pdev, ep->tx_ring[i].bufaddr, skb->len,
-				 PCI_DMA_TODEVICE);
+		dma_unmap_single(&pdev->dev, ep->tx_ring[i].bufaddr, skb->len,
+				 DMA_TO_DEVICE);
 		dev_kfree_skb(skb);
 	}
 
@@ -1380,9 +1387,8 @@ static void netdev_get_drvinfo (struct net_device *dev, struct ethtool_drvinfo *
 {
 	struct epic_private *np = netdev_priv(dev);
 
-	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
-	strlcpy(info->bus_info, pci_name(np->pci_dev), sizeof(info->bus_info));
+	strscpy(info->driver, DRV_NAME, sizeof(info->driver));
+	strscpy(info->bus_info, pci_name(np->pci_dev), sizeof(info->bus_info));
 }
 
 static int netdev_get_link_ksettings(struct net_device *dev,
@@ -1437,8 +1443,10 @@ static int ethtool_begin(struct net_device *dev)
 	struct epic_private *ep = netdev_priv(dev);
 	void __iomem *ioaddr = ep->ioaddr;
 
+	if (ep->ethtool_ops_nesting == U32_MAX)
+		return -EBUSY;
 	/* power-up, if interface is down */
-	if (!netif_running(dev)) {
+	if (!ep->ethtool_ops_nesting++ && !netif_running(dev)) {
 		ew32(GENCTL, 0x0200);
 		ew32(NVCTL, (er32(NVCTL) & ~0x003c) | 0x4800);
 	}
@@ -1451,7 +1459,7 @@ static void ethtool_complete(struct net_device *dev)
 	void __iomem *ioaddr = ep->ioaddr;
 
 	/* power-down, if interface is down */
-	if (!netif_running(dev)) {
+	if (!--ep->ethtool_ops_nesting && !netif_running(dev)) {
 		ew32(GENCTL, 0x0008);
 		ew32(NVCTL, (er32(NVCTL) & ~0x483c) | 0x0000);
 	}
@@ -1501,22 +1509,21 @@ static void epic_remove_one(struct pci_dev *pdev)
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct epic_private *ep = netdev_priv(dev);
 
-	pci_free_consistent(pdev, TX_TOTAL_SIZE, ep->tx_ring, ep->tx_ring_dma);
-	pci_free_consistent(pdev, RX_TOTAL_SIZE, ep->rx_ring, ep->rx_ring_dma);
 	unregister_netdev(dev);
+	dma_free_coherent(&pdev->dev, TX_TOTAL_SIZE, ep->tx_ring,
+			  ep->tx_ring_dma);
+	dma_free_coherent(&pdev->dev, RX_TOTAL_SIZE, ep->rx_ring,
+			  ep->rx_ring_dma);
 	pci_iounmap(pdev, ep->ioaddr);
-	pci_release_regions(pdev);
 	free_netdev(dev);
+	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 	/* pci_power_off(pdev, -1); */
 }
 
-
-#ifdef CONFIG_PM
-
-static int epic_suspend (struct pci_dev *pdev, pm_message_t state)
+static int __maybe_unused epic_suspend(struct device *dev_d)
 {
-	struct net_device *dev = pci_get_drvdata(pdev);
+	struct net_device *dev = dev_get_drvdata(dev_d);
 	struct epic_private *ep = netdev_priv(dev);
 	void __iomem *ioaddr = ep->ioaddr;
 
@@ -1530,9 +1537,9 @@ static int epic_suspend (struct pci_dev *pdev, pm_message_t state)
 }
 
 
-static int epic_resume (struct pci_dev *pdev)
+static int __maybe_unused epic_resume(struct device *dev_d)
 {
-	struct net_device *dev = pci_get_drvdata(pdev);
+	struct net_device *dev = dev_get_drvdata(dev_d);
 
 	if (!netif_running(dev))
 		return 0;
@@ -1541,37 +1548,14 @@ static int epic_resume (struct pci_dev *pdev)
 	return 0;
 }
 
-#endif /* CONFIG_PM */
-
+static SIMPLE_DEV_PM_OPS(epic_pm_ops, epic_suspend, epic_resume);
 
 static struct pci_driver epic_driver = {
 	.name		= DRV_NAME,
 	.id_table	= epic_pci_tbl,
 	.probe		= epic_init_one,
 	.remove		= epic_remove_one,
-#ifdef CONFIG_PM
-	.suspend	= epic_suspend,
-	.resume		= epic_resume,
-#endif /* CONFIG_PM */
+	.driver.pm	= &epic_pm_ops,
 };
 
-
-static int __init epic_init (void)
-{
-/* when a module, this is printed whether or not devices are found in probe */
-#ifdef MODULE
-	pr_info("%s%s\n", version, version2);
-#endif
-
-	return pci_register_driver(&epic_driver);
-}
-
-
-static void __exit epic_cleanup (void)
-{
-	pci_unregister_driver (&epic_driver);
-}
-
-
-module_init(epic_init);
-module_exit(epic_cleanup);
+module_pci_driver(epic_driver);

@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2013 Altera Corporation
  * Copyright (C) 2011 Tobias Klauser <tklauser@distanz.ch>
  *
  * Based on cpuinfo.c from microblaze
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
  */
 
 #include <linux/kernel.h>
@@ -47,7 +34,7 @@ void __init setup_cpuinfo(void)
 	const char *str;
 	int len;
 
-	cpu = of_find_node_by_type(NULL, "cpu");
+	cpu = of_get_cpu_node(0, NULL);
 	if (!cpu)
 		panic("%s: No CPU found in devicetree!\n", __func__);
 
@@ -59,10 +46,7 @@ void __init setup_cpuinfo(void)
 	cpuinfo.cpu_clock_freq = fcpu(cpu, "clock-frequency");
 
 	str = of_get_property(cpu, "altr,implementation", &len);
-	if (str)
-		strlcpy(cpuinfo.cpu_impl, str, sizeof(cpuinfo.cpu_impl));
-	else
-		strcpy(cpuinfo.cpu_impl, "<unknown>");
+	strscpy(cpuinfo.cpu_impl, str ?: "<unknown>");
 
 	cpuinfo.has_div = of_property_read_bool(cpu, "altr,has-div");
 	cpuinfo.has_mul = of_property_read_bool(cpu, "altr,has-mul");
@@ -120,6 +104,8 @@ void __init setup_cpuinfo(void)
 	cpuinfo.reset_addr = fcpu(cpu, "altr,reset-addr");
 	cpuinfo.exception_addr = fcpu(cpu, "altr,exception-addr");
 	cpuinfo.fast_tlb_miss_exc_addr = fcpu(cpu, "altr,fast-tlb-miss-addr");
+
+	of_node_put(cpu);
 }
 
 #ifdef CONFIG_PROC_FS
@@ -154,11 +140,11 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 		   " DIV:\t\t%s\n"
 		   " BMX:\t\t%s\n"
 		   " CDX:\t\t%s\n",
-		   cpuinfo.has_mul ? "yes" : "no",
-		   cpuinfo.has_mulx ? "yes" : "no",
-		   cpuinfo.has_div ? "yes" : "no",
-		   cpuinfo.has_bmx ? "yes" : "no",
-		   cpuinfo.has_cdx ? "yes" : "no");
+		   str_yes_no(cpuinfo.has_mul),
+		   str_yes_no(cpuinfo.has_mulx),
+		   str_yes_no(cpuinfo.has_div),
+		   str_yes_no(cpuinfo.has_bmx),
+		   str_yes_no(cpuinfo.has_cdx));
 
 	seq_printf(m,
 		   "Icache:\t\t%ukB, line length: %u\n",

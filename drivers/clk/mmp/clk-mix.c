@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * mmp mix(div and mux) clock operation source file
  *
  * Copyright (C) 2014 Marvell
  * Chao Xie <chao.xie@marvell.com>
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #include <linux/clk-provider.h>
@@ -419,12 +416,14 @@ static int mmp_clk_set_rate(struct clk_hw *hw, unsigned long rate,
 	}
 }
 
-static void mmp_clk_mix_init(struct clk_hw *hw)
+static int mmp_clk_mix_init(struct clk_hw *hw)
 {
 	struct mmp_clk_mix *mix = to_clk_mix(hw);
 
 	if (mix->table)
 		_filter_clk_table(mix, mix->table, mix->table_size);
+
+	return 0;
 }
 
 const struct clk_ops mmp_clk_mix_ops = {
@@ -439,7 +438,7 @@ const struct clk_ops mmp_clk_mix_ops = {
 
 struct clk *mmp_clk_register_mix(struct device *dev,
 					const char *name,
-					const char **parent_names,
+					const char * const *parent_names,
 					u8 num_parents,
 					unsigned long flags,
 					struct mmp_clk_mix_config *config,
@@ -448,9 +447,8 @@ struct clk *mmp_clk_register_mix(struct device *dev,
 	struct mmp_clk_mix *mix;
 	struct clk *clk;
 	struct clk_init_data init;
-	size_t table_bytes;
 
-	mix = kzalloc(sizeof(*mix), GFP_KERNEL);
+	mix = kzalloc_obj(*mix);
 	if (!mix)
 		return ERR_PTR(-ENOMEM);
 
@@ -462,8 +460,8 @@ struct clk *mmp_clk_register_mix(struct device *dev,
 
 	memcpy(&mix->reg_info, &config->reg_info, sizeof(config->reg_info));
 	if (config->table) {
-		table_bytes = sizeof(*config->table) * config->table_size;
-		mix->table = kmemdup(config->table, table_bytes, GFP_KERNEL);
+		mix->table = kmemdup_array(config->table, config->table_size,
+					   sizeof(*mix->table), GFP_KERNEL);
 		if (!mix->table)
 			goto free_mix;
 
@@ -471,9 +469,8 @@ struct clk *mmp_clk_register_mix(struct device *dev,
 	}
 
 	if (config->mux_table) {
-		table_bytes = sizeof(u32) * num_parents;
-		mix->mux_table = kmemdup(config->mux_table, table_bytes,
-					 GFP_KERNEL);
+		mix->mux_table = kmemdup_array(config->mux_table, num_parents,
+					       sizeof(*mix->mux_table), GFP_KERNEL);
 		if (!mix->mux_table) {
 			kfree(mix->table);
 			goto free_mix;

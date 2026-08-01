@@ -1,19 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * omap-ocp2scp.c - transform ocp interface protocol to scp protocol
  *
  * Copyright (C) 2012 Texas Instruments Incorporated - http://www.ti.com
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  * Author: Kishon Vijay Abraham I <kishon@ti.com>
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 
 #include <linux/io.h>
@@ -26,15 +16,6 @@
 
 #define OCP2SCP_TIMING 0x18
 #define SYNC2_MASK 0xf
-
-static int ocp2scp_remove_devices(struct device *dev, void *c)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-
-	platform_device_unregister(pdev);
-
-	return 0;
-}
 
 static int omap_ocp2scp_probe(struct platform_device *pdev)
 {
@@ -89,17 +70,15 @@ err1:
 	pm_runtime_disable(&pdev->dev);
 
 err0:
-	device_for_each_child(&pdev->dev, NULL, ocp2scp_remove_devices);
+	of_platform_depopulate(&pdev->dev);
 
 	return ret;
 }
 
-static int omap_ocp2scp_remove(struct platform_device *pdev)
+static void omap_ocp2scp_remove(struct platform_device *pdev)
 {
 	pm_runtime_disable(&pdev->dev);
-	device_for_each_child(&pdev->dev, NULL, ocp2scp_remove_devices);
-
-	return 0;
+	of_platform_depopulate(&pdev->dev);
 }
 
 #ifdef CONFIG_OF

@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *	STP SAP demux
  *
  *	Copyright (c) 2008 Patrick McHardy <kaber@trash.net>
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	version 2 as published by the Free Software Foundation.
  */
 #include <linux/mutex.h>
 #include <linux/skbuff.h>
@@ -101,4 +98,5 @@ void stp_proto_unregister(const struct stp_proto *proto)
 }
 EXPORT_SYMBOL_GPL(stp_proto_unregister);
 
+MODULE_DESCRIPTION("SAP demux for IEEE 802.1D Spanning Tree Protocol (STP)");
 MODULE_LICENSE("GPL");

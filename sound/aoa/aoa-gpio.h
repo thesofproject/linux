@@ -1,16 +1,14 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Apple Onboard Audio GPIO definitions
  *
  * Copyright 2006 Johannes Berg <johannes@sipsolutions.net>
- *
- * GPL v2, can be found in COPYING.
  */
 
 #ifndef __AOA_GPIO_H
 #define __AOA_GPIO_H
 #include <linux/workqueue.h>
 #include <linux/mutex.h>
-#include <asm/prom.h>
 
 typedef void (*notify_func_t)(void *data);
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This module emits "Hello, world" on printk when loaded.
  *
@@ -30,4 +31,5 @@ static void __exit test_module_exit(void)
 module_exit(test_module_exit);
 
 MODULE_AUTHOR("Kees Cook <keescook@chromium.org>");
+MODULE_DESCRIPTION("module loading subsystem test module");
 MODULE_LICENSE("GPL");

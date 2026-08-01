@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Created by: Jason Wessel <jason.wessel@windriver.com>
  *
  * Copyright (c) 2009 Wind River Systems, Inc.  All Rights Reserved.
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #ifndef _DEBUG_CORE_H_
@@ -33,7 +30,7 @@ struct kgdb_state {
 #define DCPU_WANT_MASTER 0x1 /* Waiting to become a master kgdb cpu */
 #define DCPU_NEXT_MASTER 0x2 /* Transition from one master cpu to another */
 #define DCPU_IS_SLAVE    0x4 /* Slave cpu enter exception */
-#define DCPU_SSTEP       0x8 /* CPU is single stepping */
+#define DCPU_WANT_BT     0x8 /* Slave cpu should backtrace then clear flag */
 
 struct debuggerinfo_struct {
 	void			*debuggerinfo;
@@ -42,6 +39,7 @@ struct debuggerinfo_struct {
 	int			ret_state;
 	int			irq_depth;
 	int			enter_kgdb;
+	bool			rounding_up;
 };
 
 extern struct debuggerinfo_struct kgdb_info[];
@@ -75,6 +73,7 @@ extern int kdb_stub(struct kgdb_state *ks);
 extern int kdb_parse(const char *cmdstr);
 extern int kdb_common_init_state(struct kgdb_state *ks);
 extern int kdb_common_deinit_state(void);
+extern void kdb_dump_stack_on_cpu(int cpu);
 #else /* ! CONFIG_KGDB_KDB */
 static inline int kdb_stub(struct kgdb_state *ks)
 {

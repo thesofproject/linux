@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * AD7879-1/AD7889-1 touchscreen (I2C bus)
  *
  * Copyright (C) 2008-2010 Michael Hennerich, Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/input.h>	/* BUS_I2C */
@@ -24,8 +23,7 @@ static const struct regmap_config ad7879_i2c_regmap_config = {
 	.max_register = 15,
 };
 
-static int ad7879_i2c_probe(struct i2c_client *client,
-				      const struct i2c_device_id *id)
+static int ad7879_i2c_probe(struct i2c_client *client)
 {
 	struct regmap *regmap;
 
@@ -44,8 +42,8 @@ static int ad7879_i2c_probe(struct i2c_client *client,
 }
 
 static const struct i2c_device_id ad7879_id[] = {
-	{ "ad7879", 0 },
-	{ "ad7889", 0 },
+	{ .name = "ad7879" },
+	{ .name = "ad7889" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ad7879_id);
@@ -60,9 +58,10 @@ MODULE_DEVICE_TABLE(of, ad7879_i2c_dt_ids);
 
 static struct i2c_driver ad7879_i2c_driver = {
 	.driver = {
-		.name	= "ad7879",
-		.pm	= &ad7879_pm_ops,
-		.of_match_table = of_match_ptr(ad7879_i2c_dt_ids),
+		.name		= "ad7879",
+		.dev_groups	= ad7879_groups,
+		.pm		= &ad7879_pm_ops,
+		.of_match_table	= of_match_ptr(ad7879_i2c_dt_ids),
 	},
 	.probe		= ad7879_i2c_probe,
 	.id_table	= ad7879_id,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * TSC2005 touchscreen driver
  *
@@ -6,16 +7,6 @@
  * Copyright (C) 2015 EMAC Inc.
  *
  * Based on original tsc2005.c by Lauri Leukkunen <lauri.leukkunen@nokia.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
  */
 
 #include <linux/input.h>
@@ -73,11 +64,6 @@ static int tsc2005_probe(struct spi_device *spi)
 			     tsc2005_cmd);
 }
 
-static int tsc2005_remove(struct spi_device *spi)
-{
-	return tsc200x_remove(&spi->dev);
-}
-
 #ifdef CONFIG_OF
 static const struct of_device_id tsc2005_of_match[] = {
 	{ .compatible = "ti,tsc2005" },
@@ -88,12 +74,12 @@ MODULE_DEVICE_TABLE(of, tsc2005_of_match);
 
 static struct spi_driver tsc2005_driver = {
 	.driver	= {
-		.name	= "tsc2005",
-		.of_match_table = of_match_ptr(tsc2005_of_match),
-		.pm	= &tsc200x_pm_ops,
+		.name		= "tsc2005",
+		.dev_groups	= tsc200x_groups,
+		.of_match_table	= of_match_ptr(tsc2005_of_match),
+		.pm		= pm_sleep_ptr(&tsc200x_pm_ops),
 	},
 	.probe	= tsc2005_probe,
-	.remove	= tsc2005_remove,
 };
 module_spi_driver(tsc2005_driver);
 

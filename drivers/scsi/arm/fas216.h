@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  linux/drivers/acorn/scsi/fas216.h
  *
  *  Copyright (C) 1997-2000 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  *  FAS216 generic driver
  */
@@ -313,6 +310,20 @@ typedef struct {
 	unsigned long		magic_end;
 } FAS216_Info;
 
+/* driver-private data per SCSI command. */
+struct fas216_cmd_priv {
+	/*
+	 * @scsi_pointer must be the first member. See also arm_scsi_pointer().
+	 */
+	struct scsi_pointer scsi_pointer;
+	void (*scsi_done)(struct scsi_cmnd *cmd);
+};
+
+static inline struct fas216_cmd_priv *fas216_cmd_priv(struct scsi_cmnd *cmd)
+{
+	return scsi_cmd_priv(cmd);
+}
+
 /* Function: int fas216_init (struct Scsi_Host *instance)
  * Purpose : initialise FAS/NCR/AMD SCSI structures.
  * Params  : instance - a driver-specific filled-out structure
@@ -327,21 +338,24 @@ extern int fas216_init (struct Scsi_Host *instance);
  */
 extern int fas216_add (struct Scsi_Host *instance, struct device *dev);
 
-/* Function: int fas216_queue_command(struct Scsi_Host *h, struct scsi_cmnd *SCpnt)
+/* Function: enum scsi_qc_status fas216_queue_command(struct Scsi_Host *h, struct scsi_cmnd *SCpnt)
  * Purpose : queue a command for adapter to process.
  * Params  : h - host adapter
  *	   : SCpnt - Command to queue
  * Returns : 0 - success, else error
  */
-extern int fas216_queue_command(struct Scsi_Host *h, struct scsi_cmnd *SCpnt);
+extern enum scsi_qc_status fas216_queue_command(struct Scsi_Host *h,
+						struct scsi_cmnd *SCpnt);
 
-/* Function: int fas216_noqueue_command(struct Scsi_Host *h, struct scsi_cmnd *SCpnt)
+/* Function: enum scsi_qc_status fas216_noqueue_command(struct Scsi_Host *h,
+ * struct scsi_cmnd *SCpnt)
  * Purpose : queue a command for adapter to process, and process it to completion.
  * Params  : h - host adapter
  *	   : SCpnt - Command to queue
  * Returns : 0 - success, else error
  */
-extern int fas216_noqueue_command(struct Scsi_Host *, struct scsi_cmnd *);
+extern enum scsi_qc_status fas216_noqueue_command(struct Scsi_Host *h,
+						  struct scsi_cmnd *SCpnt);
 
 /* Function: irqreturn_t fas216_intr (FAS216_Info *info)
  * Purpose : handle interrupts from the interface to progress a command

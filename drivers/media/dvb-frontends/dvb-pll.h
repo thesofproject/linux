@@ -29,10 +29,16 @@
 #define DVB_PLL_SAMSUNG_TBMU24112      17
 #define DVB_PLL_TDEE4		       18
 #define DVB_PLL_THOMSON_DTT7520X       19
+#define DVB_PLL_TUA6034_FRIIO          20
+#define DVB_PLL_TDA665X_EARTH_PT1      21
+
+struct dvb_pll_config {
+	struct dvb_frontend *fe;
+};
 
 #if IS_REACHABLE(CONFIG_DVB_PLL)
 /**
- * Attach a dvb-pll to the supplied frontend structure.
+ * dvb_pll_attach - Attach a dvb-pll to the supplied frontend structure.
  *
  * @fe: Frontend to attach to.
  * @pll_addr: i2c address of the PLL (if used).

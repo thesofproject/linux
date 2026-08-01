@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * cx20442.c  --  CX20442 ALSA Soc Audio driver
  *
@@ -6,11 +7,6 @@
  * Initially based on sound/soc/codecs/wm8400.c
  * Copyright 2008, 2009 Wolfson Microelectronics PLC.
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
  */
 
 #include <linux/tty.h>
@@ -210,7 +206,7 @@ static int cx20442_write(struct snd_soc_component *component, unsigned int reg,
  */
 
 /* Modem init: echo off, digital speaker off, quiet off, voice mode */
-static const char *v253_init = "ate0m0q0+fclass=8\r";
+static const char v253_init[] = "ate0m0q0+fclass=8\r";
 
 /* Line discipline .open() */
 static int v253_open(struct tty_struct *tty)
@@ -240,7 +236,8 @@ err:
 /* Line discipline .close() */
 static void v253_close(struct tty_struct *tty)
 {
-	struct snd_soc_component *component = tty->disc_data;
+	struct cx20442_codec *codec = tty->disc_data;
+	struct snd_soc_component *component = codec->component;
 	struct cx20442_priv *cx20442;
 
 	tty->disc_data = NULL;
@@ -252,21 +249,21 @@ static void v253_close(struct tty_struct *tty)
 
 	/* Prevent the codec driver from further accessing the modem */
 	cx20442->tty = NULL;
-	component->card->pop_time = 0;
+	codec->ready = false;
 }
 
 /* Line discipline .hangup() */
-static int v253_hangup(struct tty_struct *tty)
+static void v253_hangup(struct tty_struct *tty)
 {
 	v253_close(tty);
-	return 0;
 }
 
 /* Line discipline .receive_buf() */
-static void v253_receive(struct tty_struct *tty,
-				const unsigned char *cp, char *fp, int count)
+static void v253_receive(struct tty_struct *tty, const u8 *cp, const u8 *fp,
+			 size_t count)
 {
-	struct snd_soc_component *component = tty->disc_data;
+	struct cx20442_codec *codec = tty->disc_data;
+	struct snd_soc_component *component = codec->component;
 	struct cx20442_priv *cx20442;
 
 	if (!component)
@@ -279,24 +276,17 @@ static void v253_receive(struct tty_struct *tty,
 
 		/* Set up codec driver access to modem controls */
 		cx20442->tty = tty;
-		component->card->pop_time = 1;
+		codec->ready = true;
 	}
 }
 
-/* Line discipline .write_wakeup() */
-static void v253_wakeup(struct tty_struct *tty)
-{
-}
-
 struct tty_ldisc_ops v253_ops = {
-	.magic = TTY_LDISC_MAGIC,
 	.name = "cx20442",
 	.owner = THIS_MODULE,
 	.open = v253_open,
 	.close = v253_close,
 	.hangup = v253_hangup,
 	.receive_buf = v253_receive,
-	.write_wakeup = v253_wakeup,
 };
 EXPORT_SYMBOL_GPL(v253_ops);
 
@@ -327,11 +317,12 @@ static int cx20442_set_bias_level(struct snd_soc_component *component,
 		enum snd_soc_bias_level level)
 {
 	struct cx20442_priv *cx20442 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	int err = 0;
 
 	switch (level) {
 	case SND_SOC_BIAS_PREPARE:
-		if (snd_soc_component_get_bias_level(component) != SND_SOC_BIAS_STANDBY)
+		if (snd_soc_dapm_get_bias_level(dapm) != SND_SOC_BIAS_STANDBY)
 			break;
 		if (IS_ERR(cx20442->por))
 			err = PTR_ERR(cx20442->por);
@@ -339,7 +330,7 @@ static int cx20442_set_bias_level(struct snd_soc_component *component,
 			err = regulator_enable(cx20442->por);
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_component_get_bias_level(component) != SND_SOC_BIAS_PREPARE)
+		if (snd_soc_dapm_get_bias_level(dapm) != SND_SOC_BIAS_PREPARE)
 			break;
 		if (IS_ERR(cx20442->por))
 			err = PTR_ERR(cx20442->por);
@@ -357,17 +348,35 @@ static int cx20442_component_probe(struct snd_soc_component *component)
 {
 	struct cx20442_priv *cx20442;
 
-	cx20442 = kzalloc(sizeof(struct cx20442_priv), GFP_KERNEL);
+	cx20442 = kzalloc_obj(struct cx20442_priv);
 	if (cx20442 == NULL)
 		return -ENOMEM;
 
 	cx20442->por = regulator_get(component->dev, "POR");
-	if (IS_ERR(cx20442->por))
-		dev_warn(component->dev, "failed to get the regulator");
+	if (IS_ERR(cx20442->por)) {
+		int err = PTR_ERR(cx20442->por);
+
+		dev_warn(component->dev, "failed to get POR supply (%d)", err);
+		/*
+		 * When running on a non-dt platform and requested regulator
+		 * is not available, regulator_get() never returns
+		 * -EPROBE_DEFER as it is not able to justify if the regulator
+		 * may still appear later.  On the other hand, the board can
+		 * still set full constraints flag at late_initcall in order
+		 * to instruct regulator_get() to return a dummy one if
+		 * sufficient.  Hence, if we get -ENODEV here, let's convert
+		 * it to -EPROBE_DEFER and wait for the board to decide or
+		 * let Deferred Probe infrastructure handle this error.
+		 */
+		if (err == -ENODEV)
+			err = -EPROBE_DEFER;
+		kfree(cx20442);
+		return err;
+	}
+
 	cx20442->tty = NULL;
 
 	snd_soc_component_set_drvdata(component, cx20442);
-	component->card->pop_time = 0;
 
 	return 0;
 }
@@ -404,7 +413,6 @@ static const struct snd_soc_component_driver cx20442_component_dev = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static int cx20442_platform_probe(struct platform_device *pdev)

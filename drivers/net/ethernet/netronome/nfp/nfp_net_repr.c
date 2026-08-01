@@ -1,46 +1,16 @@
-/*
- * Copyright (C) 2017 Netronome Systems, Inc.
- *
- * This software is dual licensed under the GNU General License Version 2,
- * June 1991 as shown in the file COPYING in the top-level directory of this
- * source tree or the BSD 2-Clause License provided below.  You have the
- * option to license this software under the complete terms of either license.
- *
- * The BSD 2-Clause License:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      1. Redistributions of source code must retain the above
- *         copyright notice, this list of conditions and the following
- *         disclaimer.
- *
- *      2. Redistributions in binary form must reproduce the above
- *         copyright notice, this list of conditions and the following
- *         disclaimer in the documentation and/or other materials
- *         provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/* Copyright (C) 2017-2018 Netronome Systems, Inc. */
 
 #include <linux/etherdevice.h>
 #include <linux/io-64-nonatomic-hi-lo.h>
 #include <linux/lockdep.h>
 #include <net/dst_metadata.h>
-#include <net/switchdev.h>
 
 #include "nfpcore/nfp_cpp.h"
 #include "nfpcore/nfp_nsp.h"
 #include "nfp_app.h"
 #include "nfp_main.h"
+#include "nfp_net.h"
 #include "nfp_net_ctrl.h"
 #include "nfp_net_repr.h"
 #include "nfp_net_sriov.h"
@@ -50,7 +20,7 @@ struct net_device *
 nfp_repr_get_locked(struct nfp_app *app, struct nfp_reprs *set, unsigned int id)
 {
 	return rcu_dereference_protected(set->reprs[id],
-					 lockdep_is_held(&app->pf->lock));
+					 nfp_app_is_locked(app));
 }
 
 static void
@@ -133,6 +103,7 @@ nfp_repr_get_stats64(struct net_device *netdev, struct rtnl_link_stats64 *stats)
 	case NFP_PORT_PF_PORT:
 	case NFP_PORT_VF_PORT:
 		nfp_repr_vnic_get_stats64(repr->port, stats);
+		break;
 	default:
 		break;
 	}
@@ -163,13 +134,13 @@ nfp_repr_get_host_stats64(const struct net_device *netdev,
 
 		repr_stats = per_cpu_ptr(repr->stats, i);
 		do {
-			start = u64_stats_fetch_begin_irq(&repr_stats->syncp);
+			start = u64_stats_fetch_begin(&repr_stats->syncp);
 			tbytes = repr_stats->tx_bytes;
 			tpkts = repr_stats->tx_packets;
 			tdrops = repr_stats->tx_drops;
 			rbytes = repr_stats->rx_bytes;
 			rpkts = repr_stats->rx_packets;
-		} while (u64_stats_fetch_retry_irq(&repr_stats->syncp, start));
+		} while (u64_stats_fetch_retry(&repr_stats->syncp, start));
 
 		stats->tx_bytes += tbytes;
 		stats->tx_packets += tpkts;
@@ -206,7 +177,7 @@ static int nfp_repr_change_mtu(struct net_device *netdev, int new_mtu)
 	if (err)
 		return err;
 
-	netdev->mtu = new_mtu;
+	WRITE_ONCE(netdev->mtu, new_mtu);
 
 	return 0;
 }
@@ -225,7 +196,7 @@ static netdev_tx_t nfp_repr_xmit(struct sk_buff *skb, struct net_device *netdev)
 	ret = dev_queue_xmit(skb);
 	nfp_repr_inc_tx_stats(netdev, len, ret);
 
-	return ret;
+	return NETDEV_TX_OK;
 }
 
 static int nfp_repr_stop(struct net_device *netdev)
@@ -261,7 +232,29 @@ err_port_disable:
 	return err;
 }
 
+static netdev_features_t
+nfp_repr_fix_features(struct net_device *netdev, netdev_features_t features)
+{
+	struct nfp_repr *repr = netdev_priv(netdev);
+	netdev_features_t old_features = features;
+	netdev_features_t lower_features;
+	struct net_device *lower_dev;
+
+	lower_dev = repr->dst->u.port_info.lower_dev;
+
+	lower_features = lower_dev->features;
+	if (lower_features & (NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM))
+		lower_features |= NETIF_F_HW_CSUM;
+
+	features = netdev_intersect_features(features, lower_features);
+	features |= old_features & (NETIF_F_SOFT_FEATURES | NETIF_F_HW_TC);
+
+	return features;
+}
+
 const struct net_device_ops nfp_repr_netdev_ops = {
+	.ndo_init		= nfp_app_ndo_init,
+	.ndo_uninit		= nfp_app_ndo_uninit,
 	.ndo_open		= nfp_repr_open,
 	.ndo_stop		= nfp_repr_stop,
 	.ndo_start_xmit		= nfp_repr_xmit,
@@ -274,10 +267,27 @@ const struct net_device_ops nfp_repr_netdev_ops = {
 	.ndo_set_vf_mac		= nfp_app_set_vf_mac,
 	.ndo_set_vf_vlan	= nfp_app_set_vf_vlan,
 	.ndo_set_vf_spoofchk	= nfp_app_set_vf_spoofchk,
+	.ndo_set_vf_trust	= nfp_app_set_vf_trust,
 	.ndo_get_vf_config	= nfp_app_get_vf_config,
 	.ndo_set_vf_link_state	= nfp_app_set_vf_link_state,
+	.ndo_fix_features	= nfp_repr_fix_features,
 	.ndo_set_features	= nfp_port_set_features,
+	.ndo_set_mac_address    = eth_mac_addr,
+	.ndo_get_port_parent_id	= nfp_port_get_port_parent_id,
 };
+
+void
+nfp_repr_transfer_features(struct net_device *netdev, struct net_device *lower)
+{
+	struct nfp_repr *repr = netdev_priv(netdev);
+
+	if (repr->dst->u.port_info.lower_dev != lower)
+		return;
+
+	netif_inherit_tso_max(netdev, lower);
+
+	netdev_update_features(netdev);
+}
 
 static void nfp_repr_clean(struct nfp_repr *repr)
 {
@@ -288,7 +298,6 @@ static void nfp_repr_clean(struct nfp_repr *repr)
 }
 
 static struct lock_class_key nfp_repr_netdev_xmit_lock_key;
-static struct lock_class_key nfp_repr_netdev_addr_lock_key;
 
 static void nfp_repr_set_lockdep_class_one(struct net_device *dev,
 					   struct netdev_queue *txq,
@@ -299,7 +308,6 @@ static void nfp_repr_set_lockdep_class_one(struct net_device *dev,
 
 static void nfp_repr_set_lockdep_class(struct net_device *dev)
 {
-	lockdep_set_class(&dev->addr_list_lock, &nfp_repr_netdev_addr_lock_key);
 	netdev_for_each_tx_queue(dev, nfp_repr_set_lockdep_class_one, NULL);
 }
 
@@ -308,6 +316,8 @@ int nfp_repr_init(struct nfp_app *app, struct net_device *netdev,
 		  struct net_device *pf_netdev)
 {
 	struct nfp_repr *repr = netdev_priv(netdev);
+	struct nfp_net *nn = netdev_priv(pf_netdev);
+	u32 repr_cap = nn->tlv_caps.repr_cap;
 	int err;
 
 	nfp_repr_set_lockdep_class(netdev);
@@ -324,7 +334,58 @@ int nfp_repr_init(struct nfp_app *app, struct net_device *netdev,
 
 	netdev->max_mtu = pf_netdev->max_mtu;
 
-	SWITCHDEV_SET_OPS(netdev, &nfp_port_switchdev_ops);
+	/* Set features the lower device can support with representors */
+	if (repr_cap & NFP_NET_CFG_CTRL_LIVE_ADDR)
+		netdev->priv_flags |= IFF_LIVE_ADDR_CHANGE;
+
+	netdev->hw_features = NETIF_F_HIGHDMA;
+	if (repr_cap & NFP_NET_CFG_CTRL_RXCSUM_ANY)
+		netdev->hw_features |= NETIF_F_RXCSUM;
+	if (repr_cap & NFP_NET_CFG_CTRL_TXCSUM)
+		netdev->hw_features |= NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM;
+	if (repr_cap & NFP_NET_CFG_CTRL_GATHER)
+		netdev->hw_features |= NETIF_F_SG;
+	if ((repr_cap & NFP_NET_CFG_CTRL_LSO && nn->fw_ver.major > 2) ||
+	    repr_cap & NFP_NET_CFG_CTRL_LSO2)
+		netdev->hw_features |= NETIF_F_TSO | NETIF_F_TSO6;
+	if (repr_cap & NFP_NET_CFG_CTRL_RSS_ANY)
+		netdev->hw_features |= NETIF_F_RXHASH;
+	if (repr_cap & NFP_NET_CFG_CTRL_VXLAN) {
+		if (repr_cap & NFP_NET_CFG_CTRL_LSO)
+			netdev->hw_features |= NETIF_F_GSO_UDP_TUNNEL;
+	}
+	if (repr_cap & NFP_NET_CFG_CTRL_NVGRE) {
+		if (repr_cap & NFP_NET_CFG_CTRL_LSO)
+			netdev->hw_features |= NETIF_F_GSO_GRE;
+	}
+	if (repr_cap & (NFP_NET_CFG_CTRL_VXLAN | NFP_NET_CFG_CTRL_NVGRE))
+		netdev->hw_enc_features = netdev->hw_features;
+
+	netdev->vlan_features = netdev->hw_features;
+
+	if (repr_cap & NFP_NET_CFG_CTRL_RXVLAN_ANY)
+		netdev->hw_features |= NETIF_F_HW_VLAN_CTAG_RX;
+	if (repr_cap & NFP_NET_CFG_CTRL_TXVLAN_ANY) {
+		if (repr_cap & NFP_NET_CFG_CTRL_LSO2)
+			netdev_warn(netdev, "Device advertises both TSO2 and TXVLAN. Refusing to enable TXVLAN.\n");
+		else
+			netdev->hw_features |= NETIF_F_HW_VLAN_CTAG_TX;
+	}
+	if (repr_cap & NFP_NET_CFG_CTRL_CTAG_FILTER)
+		netdev->hw_features |= NETIF_F_HW_VLAN_CTAG_FILTER;
+	if (repr_cap & NFP_NET_CFG_CTRL_RXQINQ)
+		netdev->hw_features |= NETIF_F_HW_VLAN_STAG_RX;
+
+	netdev->features = netdev->hw_features;
+
+	/* C-Tag strip and S-Tag strip can't be supported simultaneously,
+	 * so enable C-Tag strip and disable S-Tag strip by default.
+	 */
+	netdev->features &= ~NETIF_F_HW_VLAN_STAG_RX;
+	netif_set_tso_max_segs(netdev, NFP_NET_LSO_MAX_SEGS);
+
+	netdev->priv_flags |= IFF_NO_QUEUE | IFF_DISABLE_NETPOLL;
+	netdev->lltx = true;
 
 	if (nfp_app_has_tc(app)) {
 		netdev->features |= NETIF_F_HW_TC;
@@ -348,18 +409,24 @@ err_clean:
 	return err;
 }
 
-static void nfp_repr_free(struct nfp_repr *repr)
+static void __nfp_repr_free(struct nfp_repr *repr)
 {
 	free_percpu(repr->stats);
 	free_netdev(repr->netdev);
 }
 
-struct net_device *nfp_repr_alloc(struct nfp_app *app)
+void nfp_repr_free(struct net_device *netdev)
+{
+	__nfp_repr_free(netdev_priv(netdev));
+}
+
+struct net_device *
+nfp_repr_alloc_mqs(struct nfp_app *app, unsigned int txqs, unsigned int rxqs)
 {
 	struct net_device *netdev;
 	struct nfp_repr *repr;
 
-	netdev = alloc_etherdev(sizeof(*repr));
+	netdev = alloc_etherdev_mqs(sizeof(*repr), txqs, rxqs);
 	if (!netdev)
 		return NULL;
 
@@ -380,12 +447,12 @@ err_free_netdev:
 	return NULL;
 }
 
-static void nfp_repr_clean_and_free(struct nfp_repr *repr)
+void nfp_repr_clean_and_free(struct nfp_repr *repr)
 {
 	nfp_info(repr->app->cpp, "Destroying Representor(%s)\n",
 		 repr->netdev->name);
 	nfp_repr_clean(repr);
-	nfp_repr_free(repr);
+	__nfp_repr_free(repr);
 }
 
 void nfp_reprs_clean_and_free(struct nfp_app *app, struct nfp_reprs *reprs)
@@ -410,7 +477,7 @@ nfp_reprs_clean_and_free_by_type(struct nfp_app *app, enum nfp_repr_type type)
 	int i;
 
 	reprs = rcu_dereference_protected(app->reprs[type],
-					  lockdep_is_held(&app->pf->lock));
+					  nfp_app_is_locked(app));
 	if (!reprs)
 		return;
 
@@ -433,8 +500,7 @@ struct nfp_reprs *nfp_reprs_alloc(unsigned int num_reprs)
 {
 	struct nfp_reprs *reprs;
 
-	reprs = kzalloc(sizeof(*reprs) +
-			num_reprs * sizeof(struct net_device *), GFP_KERNEL);
+	reprs = kzalloc_flex(*reprs, reprs, num_reprs);
 	if (!reprs)
 		return NULL;
 	reprs->num_reprs = num_reprs;
@@ -463,7 +529,9 @@ int nfp_reprs_resync_phys_ports(struct nfp_app *app)
 			continue;
 
 		nfp_app_repr_preclean(app, netdev);
+		rtnl_lock();
 		rcu_assign_pointer(reprs->reprs[i], NULL);
+		rtnl_unlock();
 		synchronize_rcu();
 		nfp_repr_clean(repr);
 	}

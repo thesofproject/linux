@@ -35,11 +35,9 @@
 #include <linux/errno.h>
 #include <linux/slab.h>
 #include <linux/tty.h>
-#include <linux/tty_driver.h>
 #include <linux/tty_flip.h>
 #include <linux/module.h>
-#include <linux/uaccess.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
 #include "kl5kusb105.h"
@@ -52,11 +50,12 @@
  * Function prototypes
  */
 static int klsi_105_port_probe(struct usb_serial_port *port);
-static int klsi_105_port_remove(struct usb_serial_port *port);
+static void klsi_105_port_remove(struct usb_serial_port *port);
 static int  klsi_105_open(struct tty_struct *tty, struct usb_serial_port *port);
 static void klsi_105_close(struct usb_serial_port *port);
 static void klsi_105_set_termios(struct tty_struct *tty,
-			struct usb_serial_port *port, struct ktermios *old);
+				 struct usb_serial_port *port,
+				 const struct ktermios *old_termios);
 static int  klsi_105_tiocmget(struct tty_struct *tty);
 static void klsi_105_process_read_urb(struct urb *urb);
 static int klsi_105_prepare_write_buffer(struct usb_serial_port *port,
@@ -67,7 +66,6 @@ static int klsi_105_prepare_write_buffer(struct usb_serial_port *port,
  */
 static const struct usb_device_id id_table[] = {
 	{ USB_DEVICE(PALMCONNECT_VID, PALMCONNECT_PID) },
-	{ USB_DEVICE(KLSI_VID, KLSI_KL5KUSB105D_PID) },
 	{ }		/* Terminating entry */
 };
 
@@ -75,7 +73,6 @@ MODULE_DEVICE_TABLE(usb, id_table);
 
 static struct usb_serial_driver kl5kusb105d_device = {
 	.driver = {
-		.owner =	THIS_MODULE,
 		.name =		"kl5kusb105d",
 	},
 	.description =		"KL5KUSB105D / PalmConnect",
@@ -125,16 +122,18 @@ static int klsi_105_chg_port_settings(struct usb_serial_port *port,
 {
 	int rc;
 
-	rc = usb_control_msg(port->serial->dev,
-			usb_sndctrlpipe(port->serial->dev, 0),
-			KL5KUSB105A_SIO_SET_DATA,
-			USB_TYPE_VENDOR | USB_DIR_OUT | USB_RECIP_INTERFACE,
-			0, /* value */
-			0, /* index */
-			settings,
-			sizeof(struct klsi_105_port_settings),
-			KLSI_TIMEOUT);
-	if (rc < 0)
+	rc = usb_control_msg_send(port->serial->dev,
+				  0,
+				  KL5KUSB105A_SIO_SET_DATA,
+				  USB_TYPE_VENDOR | USB_DIR_OUT |
+				  USB_RECIP_INTERFACE,
+				  0, /* value */
+				  0, /* index */
+				  settings,
+				  sizeof(struct klsi_105_port_settings),
+				  KLSI_TIMEOUT,
+				  GFP_KERNEL);
+	if (rc)
 		dev_err(&port->dev,
 			"Change port settings failed (error = %d)\n", rc);
 
@@ -146,61 +145,37 @@ static int klsi_105_chg_port_settings(struct usb_serial_port *port,
 	return rc;
 }
 
-/* translate a 16-bit status value from the device to linux's TIO bits */
-static unsigned long klsi_105_status2linestate(const __u16 status)
-{
-	unsigned long res = 0;
-
-	res =   ((status & KL5KUSB105A_DSR) ? TIOCM_DSR : 0)
-	      | ((status & KL5KUSB105A_CTS) ? TIOCM_CTS : 0)
-	      ;
-
-	return res;
-}
-
 /*
  * Read line control via vendor command and return result through
- * *line_state_p
+ * the state pointer.
  */
-/* It seems that the status buffer has always only 2 bytes length */
-#define KLSI_STATUSBUF_LEN	2
 static int klsi_105_get_line_state(struct usb_serial_port *port,
-				   unsigned long *line_state_p)
+				   unsigned long *state)
 {
+	u16 status;
 	int rc;
-	u8 *status_buf;
-	__u16 status;
 
-	status_buf = kmalloc(KLSI_STATUSBUF_LEN, GFP_KERNEL);
-	if (!status_buf)
-		return -ENOMEM;
-
-	status_buf[0] = 0xff;
-	status_buf[1] = 0xff;
-	rc = usb_control_msg(port->serial->dev,
-			     usb_rcvctrlpipe(port->serial->dev, 0),
-			     KL5KUSB105A_SIO_POLL,
-			     USB_TYPE_VENDOR | USB_DIR_IN,
-			     0, /* value */
-			     0, /* index */
-			     status_buf, KLSI_STATUSBUF_LEN,
-			     10000
-			     );
-	if (rc != KLSI_STATUSBUF_LEN) {
+	rc = usb_control_msg_recv(port->serial->dev, 0,
+				  KL5KUSB105A_SIO_POLL,
+				  USB_TYPE_VENDOR | USB_DIR_IN,
+				  0, /* value */
+				  0, /* index */
+				  &status, sizeof(status),
+				  10000,
+				  GFP_KERNEL);
+	if (rc) {
 		dev_err(&port->dev, "reading line status failed: %d\n", rc);
-		if (rc >= 0)
-			rc = -EIO;
-	} else {
-		status = get_unaligned_le16(status_buf);
-
-		dev_dbg(&port->dev, "read status %02x %02x\n",
-			status_buf[0], status_buf[1]);
-
-		*line_state_p = klsi_105_status2linestate(status);
+		return rc;
 	}
 
-	kfree(status_buf);
-	return rc;
+	le16_to_cpus(&status);
+
+	dev_dbg(&port->dev, "read status %04x\n", status);
+
+	*state = ((status & KL5KUSB105A_DSR) ? TIOCM_DSR : 0) |
+		 ((status & KL5KUSB105A_CTS) ? TIOCM_CTS : 0);
+
+	return 0;
 }
 
 
@@ -212,7 +187,7 @@ static int klsi_105_port_probe(struct usb_serial_port *port)
 {
 	struct klsi_105_private *priv;
 
-	priv = kmalloc(sizeof(*priv), GFP_KERNEL);
+	priv = kmalloc_obj(*priv);
 	if (!priv)
 		return -ENOMEM;
 
@@ -232,14 +207,12 @@ static int klsi_105_port_probe(struct usb_serial_port *port)
 	return 0;
 }
 
-static int klsi_105_port_remove(struct usb_serial_port *port)
+static void klsi_105_port_remove(struct usb_serial_port *port)
 {
 	struct klsi_105_private *priv;
 
 	priv = usb_get_serial_port_data(port);
 	kfree(priv);
-
-	return 0;
 }
 
 static int  klsi_105_open(struct tty_struct *tty, struct usb_serial_port *port)
@@ -248,7 +221,7 @@ static int  klsi_105_open(struct tty_struct *tty, struct usb_serial_port *port)
 	int retval = 0;
 	int rc;
 	unsigned long line_state;
-	struct klsi_105_port_settings *cfg;
+	struct klsi_105_port_settings cfg;
 	unsigned long flags;
 
 	/* Do a defined restart:
@@ -258,31 +231,26 @@ static int  klsi_105_open(struct tty_struct *tty, struct usb_serial_port *port)
 	 * Then read the modem line control and store values in
 	 * priv->line_state.
 	 */
-	cfg = kmalloc(sizeof(*cfg), GFP_KERNEL);
-	if (!cfg)
-		return -ENOMEM;
 
-	cfg->pktlen   = 5;
-	cfg->baudrate = kl5kusb105a_sio_b9600;
-	cfg->databits = kl5kusb105a_dtb_8;
-	cfg->unknown1 = 0;
-	cfg->unknown2 = 1;
-	klsi_105_chg_port_settings(port, cfg);
+	cfg.pktlen   = 5;
+	cfg.baudrate = kl5kusb105a_sio_b9600;
+	cfg.databits = kl5kusb105a_dtb_8;
+	cfg.unknown1 = 0;
+	cfg.unknown2 = 1;
+	klsi_105_chg_port_settings(port, &cfg);
 
 	spin_lock_irqsave(&priv->lock, flags);
-	priv->cfg.pktlen   = cfg->pktlen;
-	priv->cfg.baudrate = cfg->baudrate;
-	priv->cfg.databits = cfg->databits;
-	priv->cfg.unknown1 = cfg->unknown1;
-	priv->cfg.unknown2 = cfg->unknown2;
+	priv->cfg.pktlen   = cfg.pktlen;
+	priv->cfg.baudrate = cfg.baudrate;
+	priv->cfg.databits = cfg.databits;
+	priv->cfg.unknown1 = cfg.unknown1;
+	priv->cfg.unknown2 = cfg.unknown2;
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 	/* READ_ON and urb submission */
 	rc = usb_serial_generic_open(tty, port);
-	if (rc) {
-		retval = rc;
-		goto err_free_cfg;
-	}
+	if (rc)
+		return rc;
 
 	rc = usb_control_msg(port->serial->dev,
 			     usb_sndctrlpipe(port->serial->dev, 0),
@@ -325,8 +293,6 @@ err_disable_read:
 			     KLSI_TIMEOUT);
 err_generic_close:
 	usb_serial_generic_close(port);
-err_free_cfg:
-	kfree(cfg);
 
 	return retval;
 }
@@ -362,8 +328,8 @@ static int klsi_105_prepare_write_buffer(struct usb_serial_port *port,
 	unsigned char *buf = dest;
 	int count;
 
-	count = kfifo_out_locked(&port->write_fifo, buf + KLSI_HDR_LEN, size,
-								&port->lock);
+	count = kfifo_out_locked(&port->write_fifo, buf + KLSI_HDR_LEN,
+				 size - KLSI_HDR_LEN, &port->lock);
 	put_unaligned_le16(count, buf);
 
 	return count + KLSI_HDR_LEN;
@@ -398,7 +364,7 @@ static void klsi_105_process_read_urb(struct urb *urb)
 
 static void klsi_105_set_termios(struct tty_struct *tty,
 				 struct usb_serial_port *port,
-				 struct ktermios *old_termios)
+				 const struct ktermios *old_termios)
 {
 	struct klsi_105_private *priv = usb_get_serial_port_data(port);
 	struct device *dev = &port->dev;
@@ -410,7 +376,7 @@ static void klsi_105_set_termios(struct tty_struct *tty,
 	unsigned long flags;
 	speed_t baud;
 
-	cfg = kmalloc(sizeof(*cfg), GFP_KERNEL);
+	cfg = kmalloc_obj(*cfg);
 	if (!cfg)
 		return;
 

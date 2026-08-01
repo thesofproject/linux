@@ -1,52 +1,32 @@
 # SPDX-License-Identifier: GPL-2.0
+kapi := arch/$(SRCARCH)/include/generated/asm
+uapi := arch/$(SRCARCH)/include/generated/uapi/asm
 
-gen	:= arch/$(ARCH)/include/generated
-kapi	:= $(gen)/asm
-uapi	:= $(gen)/uapi/asm
+$(shell mkdir -p $(uapi) $(kapi))
 
-syscall	:= $(srctree)/$(src)/syscall.tbl
-systbl	:= $(srctree)/$(src)/syscalltbl
+syscall := $(src)/syscall.tbl
+syshdr := $(srctree)/scripts/syscallhdr.sh
+systbl := $(srctree)/scripts/syscalltbl.sh
 
-gen-y := $(kapi)/syscall_table.h
-kapi-hdrs-y := $(kapi)/unistd_nr.h
-uapi-hdrs-y := $(uapi)/unistd_32.h
-uapi-hdrs-y += $(uapi)/unistd_64.h
+quiet_cmd_syshdr = SYSHDR  $@
+      cmd_syshdr = $(CONFIG_SHELL) $(syshdr) --emit-nr --abis common,$* $< $@
 
-targets += $(addprefix ../../../,$(gen-y) $(kapi-hdrs-y) $(uapi-hdrs-y))
+quiet_cmd_systbl = SYSTBL  $@
+      cmd_systbl = $(CONFIG_SHELL) $(systbl) --abis common,$* $< $@
 
-PHONY += kapi uapi
+$(uapi)/unistd_%.h: $(syscall) $(syshdr) FORCE
+	$(call if_changed,syshdr)
 
-kapi:	$(gen-y) $(kapi-hdrs-y)
-uapi:	$(uapi-hdrs-y)
+$(kapi)/syscall_table.h: $(syscall) $(systbl) FORCE
+	$(call if_changed,systbl)
 
+uapisyshdr-y		+= unistd_64.h
+kapisyshdr-y		+= syscall_table.h
 
-# Create output directory if not already present
-_dummy := $(shell [ -d '$(uapi)' ] || mkdir -p '$(uapi)') \
-	  $(shell [ -d '$(kapi)' ] || mkdir -p '$(kapi)')
+uapisyshdr-y	:= $(addprefix $(uapi)/, $(uapisyshdr-y))
+kapisyshdr-y	:= $(addprefix $(kapi)/, $(kapisyshdr-y))
+targets		+= $(addprefix ../../../../, $(uapisyshdr-y) $(kapisyshdr-y))
 
-define filechk_syshdr
-	$(CONFIG_SHELL) '$(systbl)' -H -a $(syshdr_abi_$(basetarget)) -f "$2"
-endef
-
-define filechk_sysnr
-	$(CONFIG_SHELL) '$(systbl)' -N -a $(sysnr_abi_$(basetarget))
-endef
-
-define filechk_syscalls
-	$(CONFIG_SHELL) '$(systbl)' -S
-endef
-
-syshdr_abi_unistd_32 := common,32
-$(uapi)/unistd_32.h: $(syscall) FORCE
-	$(call filechk,syshdr,$@)
-
-syshdr_abi_unistd_64 := common,64
-$(uapi)/unistd_64.h: $(syscall) FORCE
-	$(call filechk,syshdr,$@)
-
-$(kapi)/syscall_table.h: $(syscall) FORCE
-	$(call filechk,syscalls)
-
-sysnr_abi_unistd_nr := common,32,64
-$(kapi)/unistd_nr.h: $(syscall) FORCE
-	$(call filechk,sysnr)
+PHONY += all
+all: $(uapisyshdr-y) $(kapisyshdr-y)
+	@:

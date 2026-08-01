@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR MIT)
 /*
  * Spreadtrum Sharkl64 platform DTS file
  *
  * Copyright (C) 2014, Spreadtrum Communications Inc.
- *
- * This file is licensed under a dual GPLv2 or X11 license.
  */
 
 / {
@@ -17,7 +16,7 @@
 		#size-cells = <2>;
 		ranges;
 
-		ap-apb {
+		apb {
 			compatible = "simple-bus";
 			#address-cells = <2>;
 			#size-cells = <2>;

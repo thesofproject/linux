@@ -1,27 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * GPIO Driver for Dialog DA9052 PMICs.
  *
  * Copyright(c) 2011 Dialog Semiconductor Ltd.
  *
  * Author: David Dajun Chen <dchen@diasemi.com>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
  */
-#include <linux/module.h>
 #include <linux/fs.h>
-#include <linux/uaccess.h>
-#include <linux/platform_device.h>
 #include <linux/gpio/driver.h>
+#include <linux/module.h>
+#include <linux/platform_device.h>
 #include <linux/syscalls.h>
-#include <linux/seq_file.h>
+#include <linux/uaccess.h>
 
 #include <linux/mfd/da9052/da9052.h>
-#include <linux/mfd/da9052/reg.h>
 #include <linux/mfd/da9052/pdata.h>
+#include <linux/mfd/da9052/reg.h>
 
 #define DA9052_INPUT				1
 #define DA9052_OUTPUT_OPENDRAIN		2
@@ -95,30 +89,20 @@ static int da9052_gpio_get(struct gpio_chip *gc, unsigned offset)
 	}
 }
 
-static void da9052_gpio_set(struct gpio_chip *gc, unsigned offset, int value)
+static int da9052_gpio_set(struct gpio_chip *gc, unsigned int offset, int value)
 {
 	struct da9052_gpio *gpio = gpiochip_get_data(gc);
-	int ret;
 
-	if (da9052_gpio_port_odd(offset)) {
-			ret = da9052_reg_update(gpio->da9052, (offset >> 1) +
-						DA9052_GPIO_0_1_REG,
-						DA9052_GPIO_ODD_PORT_MODE,
-						value << DA9052_GPIO_ODD_SHIFT);
-			if (ret != 0)
-				dev_err(gpio->da9052->dev,
-					"Failed to updated gpio odd reg,%d",
-					ret);
-	} else {
-			ret = da9052_reg_update(gpio->da9052, (offset >> 1) +
-						DA9052_GPIO_0_1_REG,
-						DA9052_GPIO_EVEN_PORT_MODE,
-						value << DA9052_GPIO_EVEN_SHIFT);
-			if (ret != 0)
-				dev_err(gpio->da9052->dev,
-					"Failed to updated gpio even reg,%d",
-					ret);
-	}
+	if (da9052_gpio_port_odd(offset))
+		return da9052_reg_update(gpio->da9052, (offset >> 1) +
+					 DA9052_GPIO_0_1_REG,
+					 DA9052_GPIO_ODD_PORT_MODE,
+					 value << DA9052_GPIO_ODD_SHIFT);
+
+	return da9052_reg_update(gpio->da9052,
+				 (offset >> 1) + DA9052_GPIO_0_1_REG,
+				 DA9052_GPIO_EVEN_PORT_MODE,
+				 value << DA9052_GPIO_EVEN_SHIFT);
 }
 
 static int da9052_gpio_direction_input(struct gpio_chip *gc, unsigned offset)
@@ -201,7 +185,6 @@ static int da9052_gpio_probe(struct platform_device *pdev)
 {
 	struct da9052_gpio *gpio;
 	struct da9052_pdata *pdata;
-	int ret;
 
 	gpio = devm_kzalloc(&pdev->dev, sizeof(*gpio), GFP_KERNEL);
 	if (!gpio)
@@ -214,15 +197,7 @@ static int da9052_gpio_probe(struct platform_device *pdev)
 	if (pdata && pdata->gpio_base)
 		gpio->gp.base = pdata->gpio_base;
 
-	ret = devm_gpiochip_add_data(&pdev->dev, &gpio->gp, gpio);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Could not register gpiochip, %d\n", ret);
-		return ret;
-	}
-
-	platform_set_drvdata(pdev, gpio);
-
-	return 0;
+	return devm_gpiochip_add_data(&pdev->dev, &gpio->gp, gpio);
 }
 
 static struct platform_driver da9052_gpio_driver = {

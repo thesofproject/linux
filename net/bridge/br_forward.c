@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *	Forwarding decision
  *	Linux ethernet bridge
  *
  *	Authors:
  *	Lennert Buytenhek		<buytenh@gnu.org>
- *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License
- *	as published by the Free Software Foundation; either version
- *	2 of the License, or (at your option) any later version.
  */
 
 #include <linux/err.h>
@@ -28,29 +24,31 @@ static inline int should_deliver(const struct net_bridge_port *p,
 	struct net_bridge_vlan_group *vg;
 
 	vg = nbp_vlan_group_rcu(p);
-	return ((p->flags & BR_HAIRPIN_MODE) || skb->dev != p->dev) &&
-		br_allowed_egress(vg, skb) && p->state == BR_STATE_FORWARDING &&
-		nbp_switchdev_allowed_egress(p, skb);
+	return (test_bit(BR_HAIRPIN_MODE_BIT, &p->flags) || skb->dev != p->dev) &&
+		(br_mst_is_enabled(p) || p->state == BR_STATE_FORWARDING) &&
+		br_allowed_egress(vg, skb) && nbp_switchdev_allowed_egress(p, skb) &&
+		!br_skb_isolated(p, skb);
 }
 
 int br_dev_queue_push_xmit(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
+	skb_push(skb, ETH_HLEN);
 	if (!is_skb_forwardable(skb->dev, skb))
 		goto drop;
 
-	skb_push(skb, ETH_HLEN);
 	br_drop_fake_rtable(skb);
 
 	if (skb->ip_summed == CHECKSUM_PARTIAL &&
-	    (skb->protocol == htons(ETH_P_8021Q) ||
-	     skb->protocol == htons(ETH_P_8021AD))) {
+	    eth_type_vlan(skb->protocol)) {
 		int depth;
 
-		if (!__vlan_get_protocol(skb, skb->protocol, &depth))
+		if (!vlan_get_protocol_and_depth(skb, skb->protocol, &depth))
 			goto drop;
 
 		skb_set_network_header(skb, depth);
 	}
+
+	br_switchdev_frame_set_offload_fwd_mark(skb);
 
 	dev_queue_xmit(skb);
 
@@ -64,6 +62,7 @@ EXPORT_SYMBOL_GPL(br_dev_queue_push_xmit);
 
 int br_forward_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
+	skb_clear_tstamp(skb);
 	return NF_HOOK(NFPROTO_BRIDGE, NF_BR_POST_ROUTING,
 		       net, sk, skb, NULL, skb->dev,
 		       br_dev_queue_push_xmit);
@@ -78,6 +77,11 @@ static void __br_forward(const struct net_bridge_port *to,
 	struct net_device *indev;
 	struct net *net;
 	int br_hook;
+
+	/* Mark the skb for forwarding offload early so that br_handle_vlan()
+	 * can know whether to pop the VLAN header on egress or keep it.
+	 */
+	nbp_switchdev_frame_mark_tx_fwd_offload(to, skb);
 
 	vg = nbp_vlan_group_rcu(to);
 	skb = br_handle_vlan(to->br, to, vg, skb);
@@ -96,12 +100,11 @@ static void __br_forward(const struct net_bridge_port *to,
 		net = dev_net(indev);
 	} else {
 		if (unlikely(netpoll_tx_running(to->br->dev))) {
-			if (!is_skb_forwardable(skb->dev, skb)) {
+			skb_push(skb, ETH_HLEN);
+			if (!is_skb_forwardable(skb->dev, skb))
 				kfree_skb(skb);
-			} else {
-				skb_push(skb, ETH_HLEN);
+			else
 				br_netpoll_send_skb(to, skb);
-			}
 			return;
 		}
 		br_hook = NF_BR_LOCAL_OUT;
@@ -121,7 +124,7 @@ static int deliver_clone(const struct net_bridge_port *prev,
 
 	skb = skb_clone(skb, GFP_ATOMIC);
 	if (!skb) {
-		dev->stats.tx_dropped++;
+		DEV_STATS_INC(dev, tx_dropped);
 		return -ENOMEM;
 	}
 
@@ -141,7 +144,22 @@ static int deliver_clone(const struct net_bridge_port *prev,
 void br_forward(const struct net_bridge_port *to,
 		struct sk_buff *skb, bool local_rcv, bool local_orig)
 {
-	if (to && should_deliver(to, skb)) {
+	if (unlikely(!to))
+		goto out;
+
+	/* redirect to backup link if the destination port is down */
+	if (rcu_access_pointer(to->backup_port) &&
+	    (!netif_carrier_ok(to->dev) || !netif_running(to->dev))) {
+		struct net_bridge_port *backup_port;
+
+		backup_port = rcu_dereference(to->backup_port);
+		if (unlikely(!backup_port))
+			goto out;
+		BR_INPUT_SKB_CB(skb)->backup_nhid = READ_ONCE(to->backup_nhid);
+		to = backup_port;
+	}
+
+	if (should_deliver(to, skb)) {
 		if (local_rcv)
 			deliver_clone(to, skb, local_orig);
 		else
@@ -149,6 +167,7 @@ void br_forward(const struct net_bridge_port *to,
 		return;
 	}
 
+out:
 	if (!local_rcv)
 		kfree_skb(skb);
 }
@@ -158,10 +177,13 @@ static struct net_bridge_port *maybe_deliver(
 	struct net_bridge_port *prev, struct net_bridge_port *p,
 	struct sk_buff *skb, bool local_orig)
 {
+	u8 igmp_type = br_multicast_igmp_type(skb);
 	int err;
 
 	if (!should_deliver(p, skb))
 		return prev;
+
+	nbp_switchdev_frame_mark_tx_fwd_to_hwdom(p, skb);
 
 	if (!prev)
 		goto out;
@@ -169,18 +191,22 @@ static struct net_bridge_port *maybe_deliver(
 	err = deliver_clone(prev, skb, local_orig);
 	if (err)
 		return ERR_PTR(err);
-
 out:
+	br_multicast_count(p->br, p, skb, igmp_type, BR_MCAST_DIR_TX);
+
 	return p;
 }
 
 /* called under rcu_read_lock */
 void br_flood(struct net_bridge *br, struct sk_buff *skb,
-	      enum br_pkt_type pkt_type, bool local_rcv, bool local_orig)
+	      enum br_pkt_type pkt_type, bool local_rcv, bool local_orig,
+	      u16 vid)
 {
-	u8 igmp_type = br_multicast_igmp_type(skb);
+	enum skb_drop_reason reason = SKB_DROP_REASON_NO_TX_TARGET;
 	struct net_bridge_port *prev = NULL;
 	struct net_bridge_port *p;
+
+	br_tc_skb_miss_set(skb, pkt_type != BR_PKT_BROADCAST);
 
 	list_for_each_entry_rcu(p, &br->port_list, list) {
 		/* Do not flood unicast traffic to ports that turn it off, nor
@@ -188,32 +214,40 @@ void br_flood(struct net_bridge *br, struct sk_buff *skb,
 		 */
 		switch (pkt_type) {
 		case BR_PKT_UNICAST:
-			if (!(p->flags & BR_FLOOD))
+			if (!test_bit(BR_FLOOD_BIT, &p->flags))
 				continue;
 			break;
 		case BR_PKT_MULTICAST:
-			if (!(p->flags & BR_MCAST_FLOOD) && skb->dev != br->dev)
+			if (!test_bit(BR_MCAST_FLOOD_BIT, &p->flags) && skb->dev != br->dev)
 				continue;
 			break;
 		case BR_PKT_BROADCAST:
-			if (!(p->flags & BR_BCAST_FLOOD) && skb->dev != br->dev)
+			if (!test_bit(BR_BCAST_FLOOD_BIT, &p->flags) && skb->dev != br->dev)
 				continue;
 			break;
 		}
 
 		/* Do not flood to ports that enable proxy ARP */
-		if (p->flags & BR_PROXYARP)
+		if (test_bit(BR_PROXYARP_BIT, &p->flags))
 			continue;
-		if ((p->flags & (BR_PROXYARP_WIFI | BR_NEIGH_SUPPRESS)) &&
-		    BR_INPUT_SKB_CB(skb)->proxyarp_replied)
-			continue;
+		if (BR_INPUT_SKB_CB(skb)->proxyarp_replied) {
+			if (test_bit(BR_PROXYARP_WIFI_BIT, &p->flags))
+				continue;
+			/* For gratuitous ARPs/NAs, check neigh_forward_grat.
+			 * For regular ARPs/NDs, check only neigh_suppress.
+			 */
+			if (br_is_neigh_suppress_enabled(p, vid) &&
+			    (!BR_INPUT_SKB_CB(skb)->grat_arp ||
+			     !br_is_neigh_forward_grat_enabled(p, vid)))
+				continue;
+		}
 
 		prev = maybe_deliver(prev, p, skb, local_orig);
-		if (IS_ERR(prev))
+		if (IS_ERR(prev)) {
+			reason = PTR_ERR(prev) == -ENOMEM ? SKB_DROP_REASON_NOMEM :
+				 SKB_DROP_REASON_NOT_SPECIFIED;
 			goto out;
-		if (prev == p)
-			br_multicast_count(p->br, p, skb, igmp_type,
-					   BR_MCAST_DIR_TX);
+		}
 	}
 
 	if (!prev)
@@ -227,7 +261,7 @@ void br_flood(struct net_bridge *br, struct sk_buff *skb,
 
 out:
 	if (!local_rcv)
-		kfree_skb(skb);
+		kfree_skb_reason(skb, reason);
 }
 
 #ifdef CONFIG_BRIDGE_IGMP_SNOOPING
@@ -236,6 +270,7 @@ static void maybe_deliver_addr(struct net_bridge_port *p, struct sk_buff *skb,
 {
 	struct net_device *dev = BR_INPUT_SKB_CB(skb)->brdev;
 	const unsigned char *src = eth_hdr(skb)->h_source;
+	struct sk_buff *nskb;
 
 	if (!should_deliver(p, skb))
 		return;
@@ -244,12 +279,16 @@ static void maybe_deliver_addr(struct net_bridge_port *p, struct sk_buff *skb,
 	if (skb->dev == p->dev && ether_addr_equal(src, addr))
 		return;
 
-	skb = skb_copy(skb, GFP_ATOMIC);
-	if (!skb) {
-		dev->stats.tx_dropped++;
+	__skb_push(skb, ETH_HLEN);
+	nskb = pskb_copy(skb, GFP_ATOMIC);
+	__skb_pull(skb, ETH_HLEN);
+	if (!nskb) {
+		DEV_STATS_INC(dev, tx_dropped);
 		return;
 	}
 
+	skb = nskb;
+	__skb_pull(skb, ETH_HLEN);
 	if (!is_broadcast_ether_addr(addr))
 		memcpy(eth_hdr(skb)->h_dest, addr, ETH_ALEN);
 
@@ -259,44 +298,57 @@ static void maybe_deliver_addr(struct net_bridge_port *p, struct sk_buff *skb,
 /* called with rcu_read_lock */
 void br_multicast_flood(struct net_bridge_mdb_entry *mdst,
 			struct sk_buff *skb,
+			struct net_bridge_mcast *brmctx,
 			bool local_rcv, bool local_orig)
 {
-	struct net_device *dev = BR_INPUT_SKB_CB(skb)->brdev;
-	u8 igmp_type = br_multicast_igmp_type(skb);
-	struct net_bridge *br = netdev_priv(dev);
+	enum skb_drop_reason reason = SKB_DROP_REASON_NO_TX_TARGET;
 	struct net_bridge_port *prev = NULL;
 	struct net_bridge_port_group *p;
+	bool allow_mode_include = true;
 	struct hlist_node *rp;
 
-	rp = rcu_dereference(hlist_first_rcu(&br->router_list));
-	p = mdst ? rcu_dereference(mdst->ports) : NULL;
+	rp = br_multicast_get_first_rport_node(brmctx, skb);
+
+	if (mdst) {
+		p = rcu_dereference(mdst->ports);
+		if (br_multicast_should_handle_mode(brmctx, mdst->addr.proto) &&
+		    br_multicast_is_star_g(&mdst->addr))
+			allow_mode_include = false;
+	} else {
+		p = NULL;
+		br_tc_skb_miss_set(skb, true);
+	}
+
 	while (p || rp) {
 		struct net_bridge_port *port, *lport, *rport;
 
-		lport = p ? p->port : NULL;
-		rport = rp ? hlist_entry(rp, struct net_bridge_port, rlist) :
-			     NULL;
+		lport = p ? p->key.port : NULL;
+		rport = br_multicast_rport_from_node_skb(rp, skb);
 
 		if ((unsigned long)lport > (unsigned long)rport) {
 			port = lport;
 
-			if (port->flags & BR_MULTICAST_TO_UNICAST) {
+			if (test_bit(BR_MULTICAST_TO_UNICAST_BIT,
+				     &port->flags)) {
 				maybe_deliver_addr(lport, skb, p->eth_addr,
 						   local_orig);
 				goto delivered;
 			}
+			if ((!allow_mode_include &&
+			     p->filter_mode == MCAST_INCLUDE) ||
+			    (p->flags & MDB_PG_FLAGS_BLOCKED))
+				goto delivered;
 		} else {
 			port = rport;
 		}
 
 		prev = maybe_deliver(prev, port, skb, local_orig);
-delivered:
-		if (IS_ERR(prev))
+		if (IS_ERR(prev)) {
+			reason = PTR_ERR(prev) == -ENOMEM ? SKB_DROP_REASON_NOMEM :
+				 SKB_DROP_REASON_NOT_SPECIFIED;
 			goto out;
-		if (prev == port)
-			br_multicast_count(port->br, port, skb, igmp_type,
-					   BR_MCAST_DIR_TX);
-
+		}
+delivered:
 		if ((unsigned long)lport >= (unsigned long)port)
 			p = rcu_dereference(p->next);
 		if ((unsigned long)rport >= (unsigned long)port)
@@ -314,6 +366,6 @@ delivered:
 
 out:
 	if (!local_rcv)
-		kfree_skb(skb);
+		kfree_skb_reason(skb, reason);
 }
 #endif

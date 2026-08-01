@@ -1,20 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2012 by Oracle Inc
  * Author: Konrad Rzeszutek Wilk <konrad.wilk@oracle.com>
  *
- * This code borrows ideas from https://lkml.org/lkml/2011/11/30/249
+ * This code borrows ideas from
+ * https://lore.kernel.org/lkml/1322673664-14642-6-git-send-email-konrad.wilk@oracle.com
  * so many thanks go to Kevin Tian <kevin.tian@intel.com>
  * and Yu Ke <ke.yu@intel.com>.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -69,8 +61,7 @@ static int push_cxx_to_hypervisor(struct acpi_processor *_pr)
 	unsigned int i, ok;
 	int ret = 0;
 
-	dst_cx_states = kcalloc(_pr->power.count,
-				sizeof(struct xen_processor_cx), GFP_KERNEL);
+	dst_cx_states = kzalloc_objs(struct xen_processor_cx, _pr->power.count);
 	if (!dst_cx_states)
 		return -ENOMEM;
 
@@ -150,8 +141,8 @@ xen_copy_pss_data(struct acpi_processor *_pr,
 	BUILD_BUG_ON(sizeof(struct xen_processor_px) !=
 		     sizeof(struct acpi_processor_px));
 
-	dst_states = kcalloc(_pr->performance->state_count,
-			     sizeof(struct xen_processor_px), GFP_KERNEL);
+	dst_states = kzalloc_objs(struct xen_processor_px,
+				  _pr->performance->state_count);
 	if (!dst_states)
 		return ERR_PTR(-ENOMEM);
 
@@ -362,6 +353,12 @@ read_acpi_id(acpi_handle handle, u32 lvl, void *context, void **rv)
 	default:
 		return AE_OK;
 	}
+	if (invalid_phys_cpuid(acpi_get_phys_id(handle,
+						acpi_type == ACPI_TYPE_DEVICE,
+						acpi_id))) {
+		pr_debug("CPU with ACPI ID %u is unavailable\n", acpi_id);
+		return AE_OK;
+	}
 	/* There are more ACPI Processor objects than in x2APIC or MADT.
 	 * This can happen with incorrect ACPI SSDT declerations. */
 	if (acpi_id >= nr_acpi_bits) {
@@ -381,11 +378,8 @@ read_acpi_id(acpi_handle handle, u32 lvl, void *context, void **rv)
 			 acpi_psd[acpi_id].domain);
 	}
 
-	status = acpi_evaluate_object(handle, "_CST", NULL, &buffer);
-	if (ACPI_FAILURE(status)) {
-		if (!pblk)
-			return AE_OK;
-	}
+	if (!pblk && !acpi_has_method(handle, "_CST"))
+		return AE_OK;
 	/* .. and it has a C-state */
 	__set_bit(acpi_id, acpi_id_cst_present);
 
@@ -404,21 +398,20 @@ static int check_acpi_ids(struct acpi_processor *pr_backup)
 	/* All online CPUs have been processed at this stage. Now verify
 	 * whether in fact "online CPUs" == physical CPUs.
 	 */
-	acpi_id_present = kcalloc(BITS_TO_LONGS(nr_acpi_bits), sizeof(unsigned long), GFP_KERNEL);
+	acpi_id_present = bitmap_zalloc(nr_acpi_bits, GFP_KERNEL);
 	if (!acpi_id_present)
 		return -ENOMEM;
 
-	acpi_id_cst_present = kcalloc(BITS_TO_LONGS(nr_acpi_bits), sizeof(unsigned long), GFP_KERNEL);
+	acpi_id_cst_present = bitmap_zalloc(nr_acpi_bits, GFP_KERNEL);
 	if (!acpi_id_cst_present) {
-		kfree(acpi_id_present);
+		bitmap_free(acpi_id_present);
 		return -ENOMEM;
 	}
 
-	acpi_psd = kcalloc(nr_acpi_bits, sizeof(struct acpi_psd_package),
-			   GFP_KERNEL);
+	acpi_psd = kzalloc_objs(struct acpi_psd_package, nr_acpi_bits);
 	if (!acpi_psd) {
-		kfree(acpi_id_present);
-		kfree(acpi_id_cst_present);
+		bitmap_free(acpi_id_present);
+		bitmap_free(acpi_id_cst_present);
 		return -ENOMEM;
 	}
 
@@ -452,7 +445,7 @@ static struct acpi_processor_performance __percpu *acpi_perf_data;
 
 static void free_acpi_perf_data(void)
 {
-	unsigned int i;
+	int i;
 
 	/* Freeing a NULL pointer is OK, and alloc_percpu zeroes. */
 	for_each_possible_cpu(i)
@@ -464,7 +457,7 @@ static void free_acpi_perf_data(void)
 static int xen_upload_processor_pm_data(void)
 {
 	struct acpi_processor *pr_backup = NULL;
-	unsigned int i;
+	int i;
 	int rc = 0;
 
 	pr_info("Uploading Xen processor PM info\n");
@@ -475,11 +468,8 @@ static int xen_upload_processor_pm_data(void)
 		if (!_pr)
 			continue;
 
-		if (!pr_backup) {
-			pr_backup = kzalloc(sizeof(struct acpi_processor), GFP_KERNEL);
-			if (pr_backup)
-				memcpy(pr_backup, _pr, sizeof(struct acpi_processor));
-		}
+		if (!pr_backup)
+			pr_backup = kmemdup(_pr, sizeof(*_pr), GFP_KERNEL);
 		(void)upload_pm_data(_pr);
 	}
 
@@ -500,7 +490,7 @@ static void xen_acpi_processor_resume_worker(struct work_struct *dummy)
 		pr_info("ACPI data upload failed, error = %d\n", rc);
 }
 
-static void xen_acpi_processor_resume(void)
+static void xen_acpi_processor_resume(void *data)
 {
 	static DECLARE_WORK(wq, xen_acpi_processor_resume_worker);
 
@@ -514,27 +504,31 @@ static void xen_acpi_processor_resume(void)
 	schedule_work(&wq);
 }
 
-static struct syscore_ops xap_syscore_ops = {
+static const struct syscore_ops xap_syscore_ops = {
 	.resume	= xen_acpi_processor_resume,
+};
+
+static struct syscore xap_syscore = {
+	.ops = &xap_syscore_ops,
 };
 
 static int __init xen_acpi_processor_init(void)
 {
-	unsigned int i;
+	int i;
 	int rc;
 
 	if (!xen_initial_domain())
 		return -ENODEV;
 
 	nr_acpi_bits = get_max_acpi_id() + 1;
-	acpi_ids_done = kcalloc(BITS_TO_LONGS(nr_acpi_bits), sizeof(unsigned long), GFP_KERNEL);
+	acpi_ids_done = bitmap_zalloc(nr_acpi_bits, GFP_KERNEL);
 	if (!acpi_ids_done)
 		return -ENOMEM;
 
 	acpi_perf_data = alloc_percpu(struct acpi_processor_performance);
 	if (!acpi_perf_data) {
 		pr_debug("Memory allocation error for acpi_perf_data\n");
-		kfree(acpi_ids_done);
+		bitmap_free(acpi_ids_done);
 		return -ENOMEM;
 	}
 	for_each_possible_cpu(i) {
@@ -568,7 +562,7 @@ static int __init xen_acpi_processor_init(void)
 	if (rc)
 		goto err_unregister;
 
-	register_syscore_ops(&xap_syscore_ops);
+	register_syscore(&xap_syscore);
 
 	return 0;
 err_unregister:
@@ -578,17 +572,17 @@ err_unregister:
 err_out:
 	/* Freeing a NULL pointer is OK: alloc_percpu zeroes. */
 	free_acpi_perf_data();
-	kfree(acpi_ids_done);
+	bitmap_free(acpi_ids_done);
 	return rc;
 }
 static void __exit xen_acpi_processor_exit(void)
 {
 	int i;
 
-	unregister_syscore_ops(&xap_syscore_ops);
-	kfree(acpi_ids_done);
-	kfree(acpi_id_present);
-	kfree(acpi_id_cst_present);
+	unregister_syscore(&xap_syscore);
+	bitmap_free(acpi_ids_done);
+	bitmap_free(acpi_id_present);
+	bitmap_free(acpi_id_cst_present);
 	kfree(acpi_psd);
 	for_each_possible_cpu(i)
 		acpi_processor_unregister_performance(i);

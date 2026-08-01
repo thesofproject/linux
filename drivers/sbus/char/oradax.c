@@ -1,18 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 /*
@@ -30,7 +18,7 @@
  * the recommended way for applications to use the coprocessor, and
  * the driver interface is not intended for general use.
  *
- * See Documentation/sparc/oradax/oracle_dax.txt for more details.
+ * See Documentation/arch/sparc/oradax/oracle-dax.rst for more details.
  */
 
 #include <linux/uaccess.h>
@@ -238,8 +226,10 @@ static int dax_ccb_info(u64 ca, struct ccb_info_result *info);
 static int dax_ccb_kill(u64 ca, u16 *kill_res);
 
 static struct cdev c_dev;
-static struct class *cl;
 static dev_t first;
+static const struct class cl = {
+	.name = DAX_NAME,
+};
 
 static int max_ccb_version;
 static int dax_debug;
@@ -335,14 +325,11 @@ static int __init dax_attach(void)
 		goto done;
 	}
 
-	cl = class_create(THIS_MODULE, DAX_NAME);
-	if (IS_ERR(cl)) {
-		dax_err("class_create failed");
-		ret = PTR_ERR(cl);
+	ret = class_register(&cl);
+	if (ret)
 		goto class_error;
-	}
 
-	if (device_create(cl, NULL, first, NULL, dax_name) == NULL) {
+	if (device_create(&cl, NULL, first, NULL, dax_name) == NULL) {
 		dax_err("device_create failed");
 		ret = -ENXIO;
 		goto device_error;
@@ -359,9 +346,9 @@ static int __init dax_attach(void)
 	goto done;
 
 cdev_error:
-	device_destroy(cl, first);
+	device_destroy(&cl, first);
 device_error:
-	class_destroy(cl);
+	class_unregister(&cl);
 class_error:
 	unregister_chrdev_region(first, 1);
 done:
@@ -374,8 +361,8 @@ static void __exit dax_detach(void)
 {
 	pr_info("Cleaning up DAX module\n");
 	cdev_del(&c_dev);
-	device_destroy(cl, first);
-	class_destroy(cl);
+	device_destroy(&cl, first);
+	class_unregister(&cl);
 	unregister_chrdev_region(first, 1);
 }
 module_exit(dax_detach);
@@ -401,7 +388,7 @@ static int dax_devmap(struct file *f, struct vm_area_struct *vma)
 	/* completion area is mapped read-only for user */
 	if (vma->vm_flags & VM_WRITE)
 		return -EPERM;
-	vma->vm_flags &= ~VM_MAYWRITE;
+	vm_flags_clear(vma, VM_MAYWRITE);
 
 	if (remap_pfn_range(vma, vma->vm_start, ctx->ca_buf_ra >> PAGE_SHIFT,
 			    len, vma->vm_page_prot))
@@ -422,9 +409,7 @@ static void dax_unlock_pages(struct dax_ctx *ctx, int ccb_index, int nelem)
 
 			if (p) {
 				dax_dbg("freeing page %p", p);
-				if (j == OUT)
-					set_page_dirty(p);
-				put_page(p);
+				unpin_user_pages_dirty_lock(&p, 1, j == OUT);
 				ctx->pages[i][j] = NULL;
 			}
 		}
@@ -437,13 +422,13 @@ static int dax_lock_page(void *va, struct page **p)
 
 	dax_dbg("uva %p", va);
 
-	ret = get_user_pages_fast((unsigned long)va, 1, 1, p);
+	ret = pin_user_pages_fast((unsigned long)va, 1, FOLL_WRITE, p);
 	if (ret == 1) {
 		dax_dbg("locked page %p, for VA %p", *p, va);
 		return 0;
 	}
 
-	dax_dbg("get_user_pages failed, va=%p, ret=%d", va, ret);
+	dax_dbg("pin_user_pages failed, va=%p, ret=%d", va, ret);
 	return -1;
 }
 
@@ -658,12 +643,11 @@ static int dax_open(struct inode *inode, struct file *f)
 	struct dax_ctx *ctx = NULL;
 	int i;
 
-	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	ctx = kzalloc_obj(*ctx);
 	if (ctx == NULL)
 		goto done;
 
-	ctx->ccb_buf = kcalloc(DAX_MAX_CCBS, sizeof(struct dax_ccb),
-			       GFP_KERNEL);
+	ctx->ccb_buf = kzalloc_objs(struct dax_ccb, DAX_MAX_CCBS);
 	if (ctx->ccb_buf == NULL)
 		goto done;
 
@@ -689,8 +673,7 @@ static int dax_open(struct inode *inode, struct file *f)
 alloc_error:
 	kfree(ctx->ccb_buf);
 done:
-	if (ctx != NULL)
-		kfree(ctx);
+	kfree(ctx);
 	return -ENOMEM;
 }
 

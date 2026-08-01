@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     TDA10021  - Single Chip Cable Channel Receiver driver module
 	       used on the Siemens DVB-C cards
@@ -6,19 +7,6 @@
     Copyright (C) 2004 Markus Schulz <msc@antzsystem.de>
 		   Support for TDA10021
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
 #include <linux/delay.h>
@@ -149,26 +137,36 @@ static int tda10021_set_symbolrate (struct tda10021_state* state, u32 symbolrate
 {
 	s32 BDR;
 	s32 BDRI;
-	s16 SFIL=0;
+	s16 SFIL = 0;
 	u16 NDEC = 0;
 	u32 tmp, ratio;
 
-	if (symbolrate > XIN/2)
-		symbolrate = XIN/2;
-	if (symbolrate < 500000)
+	if (symbolrate > XIN / 2)
+		symbolrate = XIN / 2;
+	else if (symbolrate < 500000)
 		symbolrate = 500000;
 
-	if (symbolrate < XIN/16) NDEC = 1;
-	if (symbolrate < XIN/32) NDEC = 2;
-	if (symbolrate < XIN/64) NDEC = 3;
+	if (symbolrate < XIN / 16)
+		NDEC = 1;
+	if (symbolrate < XIN / 32)
+		NDEC = 2;
+	if (symbolrate < XIN / 64)
+		NDEC = 3;
 
-	if (symbolrate < (u32)(XIN/12.3)) SFIL = 1;
-	if (symbolrate < (u32)(XIN/16))	 SFIL = 0;
-	if (symbolrate < (u32)(XIN/24.6)) SFIL = 1;
-	if (symbolrate < (u32)(XIN/32))	 SFIL = 0;
-	if (symbolrate < (u32)(XIN/49.2)) SFIL = 1;
-	if (symbolrate < (u32)(XIN/64))	 SFIL = 0;
-	if (symbolrate < (u32)(XIN/98.4)) SFIL = 1;
+	if (symbolrate < XIN * 10 / 123)
+		SFIL = 1;
+	if (symbolrate < XIN * 10 / 160)
+		SFIL = 0;
+	if (symbolrate < XIN * 10 / 246)
+		SFIL = 1;
+	if (symbolrate < XIN * 10 / 320)
+		SFIL = 0;
+	if (symbolrate < XIN * 10 / 492)
+		SFIL = 1;
+	if (symbolrate < XIN * 10 / 640)
+		SFIL = 0;
+	if (symbolrate < XIN * 10 / 984)
+		SFIL = 1;
 
 	symbolrate <<= NDEC;
 	ratio = (symbolrate << 4) / FIN;
@@ -453,7 +451,7 @@ struct dvb_frontend* tda10021_attach(const struct tda1002x_config* config,
 	u8 id;
 
 	/* allocate memory for the internal state */
-	state = kzalloc(sizeof(struct tda10021_state), GFP_KERNEL);
+	state = kzalloc_obj(struct tda10021_state);
 	if (state == NULL) goto error;
 
 	/* setup the state */
@@ -487,11 +485,11 @@ static const struct dvb_frontend_ops tda10021_ops = {
 	.delsys = { SYS_DVBC_ANNEX_A, SYS_DVBC_ANNEX_C },
 	.info = {
 		.name = "Philips TDA10021 DVB-C",
-		.frequency_stepsize = 62500,
-		.frequency_min = 47000000,
-		.frequency_max = 862000000,
-		.symbol_rate_min = (XIN/2)/64,     /* SACLK/64 == (XIN/2)/64 */
-		.symbol_rate_max = (XIN/2)/4,      /* SACLK/4 */
+		.frequency_min_hz =  47 * MHz,
+		.frequency_max_hz = 862 * MHz,
+		.frequency_stepsize_hz = 62500,
+		.symbol_rate_min = (XIN / 2) / 64,     /* SACLK/64 == (XIN/2)/64 */
+		.symbol_rate_max = (XIN / 2) / 4,      /* SACLK/4 */
 	#if 0
 		.frequency_tolerance = ???,
 		.symbol_rate_tolerance = ???,  /* ppm */  /* == 8% (spec p. 5) */
@@ -525,4 +523,4 @@ MODULE_DESCRIPTION("Philips TDA10021 DVB-C demodulator driver");
 MODULE_AUTHOR("Ralph Metzler, Holger Waechtler, Markus Schulz");
 MODULE_LICENSE("GPL");
 
-EXPORT_SYMBOL(tda10021_attach);
+EXPORT_SYMBOL_GPL(tda10021_attach);

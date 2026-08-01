@@ -1,16 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Maxim Integrated MAX3355 USB OTG chip extcon driver
  *
  * Copyright (C)  2014-2015 Cogent Embedded, Inc.
  * Author: Sergei Shtylyov <sergei.shtylyov@cogentembedded.com>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
  */
 
 #include <linux/extcon-provider.h>
-#include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -115,13 +111,11 @@ static int max3355_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int max3355_remove(struct platform_device *pdev)
+static void max3355_remove(struct platform_device *pdev)
 {
 	struct max3355_data *data = platform_get_drvdata(pdev);
 
 	gpiod_set_value_cansleep(data->shdn_gpiod, 0);
-
-	return 0;
 }
 
 static const struct of_device_id max3355_match_table[] = {

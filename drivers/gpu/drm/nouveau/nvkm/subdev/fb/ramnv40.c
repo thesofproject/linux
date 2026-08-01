@@ -131,11 +131,13 @@ nv40_ram_prog(struct nvkm_ram *base)
 		nvkm_mask(device, 0x00402c, 0xc0771100, ram->ctrl);
 		nvkm_wr32(device, 0x004048, ram->coef);
 		nvkm_wr32(device, 0x004030, ram->coef);
+		fallthrough;
 	case 0x43:
 	case 0x49:
 	case 0x4b:
 		nvkm_mask(device, 0x004038, 0xc0771100, ram->ctrl);
 		nvkm_wr32(device, 0x00403c, ram->coef);
+		fallthrough;
 	default:
 		nvkm_mask(device, 0x004020, 0xc0771100, ram->ctrl);
 		nvkm_wr32(device, 0x004024, ram->coef);
@@ -190,7 +192,7 @@ nv40_ram_new_(struct nvkm_fb *fb, enum nvkm_ram_type type, u64 size,
 	      struct nvkm_ram **pram)
 {
 	struct nv40_ram *ram;
-	if (!(ram = kzalloc(sizeof(*ram), GFP_KERNEL)))
+	if (!(ram = kzalloc_obj(*ram)))
 		return -ENOMEM;
 	*pram = &ram->base;
 	return nvkm_ram_ctor(&nv40_ram_func, fb, type, size, &ram->base);

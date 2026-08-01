@@ -1,16 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  *
  * Copyright IBM Corp. 2008
  *
@@ -20,7 +9,7 @@
 #ifndef __POWERPC_KVM_ASM_H__
 #define __POWERPC_KVM_ASM_H__
 
-#ifdef __ASSEMBLY__
+#ifdef __ASSEMBLER__
 #ifdef CONFIG_64BIT
 #define PPC_STD(sreg, offset, areg)  std sreg, (offset)(areg)
 #define PPC_LD(treg, offset, areg)   ld treg, (offset)(areg)
@@ -84,13 +73,13 @@
 #define BOOK3S_INTERRUPT_INST_STORAGE	0x400
 #define BOOK3S_INTERRUPT_INST_SEGMENT	0x480
 #define BOOK3S_INTERRUPT_EXTERNAL	0x500
-#define BOOK3S_INTERRUPT_EXTERNAL_LEVEL	0x501
 #define BOOK3S_INTERRUPT_EXTERNAL_HV	0x502
 #define BOOK3S_INTERRUPT_ALIGNMENT	0x600
 #define BOOK3S_INTERRUPT_PROGRAM	0x700
 #define BOOK3S_INTERRUPT_FP_UNAVAIL	0x800
 #define BOOK3S_INTERRUPT_DECREMENTER	0x900
 #define BOOK3S_INTERRUPT_HV_DECREMENTER	0x980
+#define BOOK3S_INTERRUPT_NESTED_HV_DECREMENTER	0x1980
 #define BOOK3S_INTERRUPT_DOORBELL	0xa00
 #define BOOK3S_INTERRUPT_SYSCALL	0xc00
 #define BOOK3S_INTERRUPT_TRACE		0xd00
@@ -134,8 +123,7 @@
 #define BOOK3S_IRQPRIO_EXTERNAL			14
 #define BOOK3S_IRQPRIO_DECREMENTER		15
 #define BOOK3S_IRQPRIO_PERFORMANCE_MONITOR	16
-#define BOOK3S_IRQPRIO_EXTERNAL_LEVEL		17
-#define BOOK3S_IRQPRIO_MAX			18
+#define BOOK3S_IRQPRIO_MAX			17
 
 #define BOOK3S_HFLAG_DCBZ32			0x1
 #define BOOK3S_HFLAG_SLB			0x2
@@ -160,7 +148,11 @@
 #define KVM_GUEST_MODE_SKIP	2
 #define KVM_GUEST_MODE_GUEST_HV	3
 #define KVM_GUEST_MODE_HOST_HV	4
+#define KVM_GUEST_MODE_HV_P9	5 /* ISA >= v3.0 path */
 
 #define KVM_INST_FETCH_FAILED	-1
+
+/* Extract PO and XOP opcode fields */
+#define PO_XOP_OPCODE_MASK 0xfc0007fe
 
 #endif /* __POWERPC_KVM_ASM_H__ */

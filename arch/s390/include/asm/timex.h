@@ -10,8 +10,12 @@
 #ifndef _ASM_S390_TIMEX_H
 #define _ASM_S390_TIMEX_H
 
-#include <asm/lowcore.h>
+#include <linux/preempt.h>
 #include <linux/time64.h>
+#include <asm/tod_types.h>
+#include <asm/lowcore.h>
+#include <asm/machine.h>
+#include <asm/asm.h>
 
 /* The value of the TOD clock for 1.1.1970. */
 #define TOD_UNIX_EPOCH 0x7d91048bca000000ULL
@@ -24,23 +28,30 @@ static inline int set_tod_clock(__u64 time)
 	int cc;
 
 	asm volatile(
-		"   sck   %1\n"
-		"   ipm   %0\n"
-		"   srl   %0,28\n"
-		: "=d" (cc) : "Q" (time) : "cc");
-	return cc;
+		"	sck	%[time]\n"
+		CC_IPM(cc)
+		: CC_OUT(cc, cc)
+		: [time] "Q" (time)
+		: CC_CLOBBER);
+	return CC_TRANSFORM(cc);
 }
 
-static inline int store_tod_clock(__u64 *time)
+static inline int store_tod_clock_ext_cc(union tod_clock *clk)
 {
 	int cc;
 
 	asm volatile(
-		"   stck  %1\n"
-		"   ipm   %0\n"
-		"   srl   %0,28\n"
-		: "=d" (cc), "=Q" (*time) : : "cc");
-	return cc;
+		"	stcke	%[clk]\n"
+		CC_IPM(cc)
+		: CC_OUT(cc, cc), [clk] "=Q" (*clk)
+		:
+		: CC_CLOBBER);
+	return CC_TRANSFORM(cc);
+}
+
+static __always_inline void store_tod_clock_ext(union tod_clock *tod)
+{
+	asm volatile("stcke %0" : "=Q" (*tod) : : "cc");
 }
 
 static inline void set_clock_comparator(__u64 time)
@@ -48,9 +59,14 @@ static inline void set_clock_comparator(__u64 time)
 	asm volatile("sckc %0" : : "Q" (time));
 }
 
-static inline void store_clock_comparator(__u64 *time)
+static inline void set_tod_programmable_field(u16 val)
 {
-	asm volatile("stckc %0" : "=Q" (*time));
+	asm volatile(
+		"	lgr	0,%[val]\n"
+		"	sckpf"
+		:
+		: [val] "d" ((unsigned long)val)
+		: "0");
 }
 
 void clock_comparator_work(void);
@@ -63,6 +79,7 @@ extern unsigned char ptff_function_mask[16];
 #define PTFF_QAF	0x00	/* query available functions */
 #define PTFF_QTO	0x01	/* query tod offset */
 #define PTFF_QSI	0x02	/* query steering information */
+#define PTFF_QPT	0x03	/* query physical clock */
 #define PTFF_QUI	0x04	/* query UTC information */
 #define PTFF_ATO	0x40	/* adjust tod offset */
 #define PTFF_STO	0x41	/* set tod offset */
@@ -71,10 +88,10 @@ extern unsigned char ptff_function_mask[16];
 
 /* Query TOD offset result */
 struct ptff_qto {
-	unsigned long long physical_clock;
-	unsigned long long tod_offset;
-	unsigned long long logical_tod_offset;
-	unsigned long long tod_epoch_difference;
+	unsigned long physical_clock;
+	unsigned long tod_offset;
+	unsigned long logical_tod_offset;
+	unsigned long tod_epoch_difference;
 } __packed;
 
 static inline int ptff_query(unsigned int nr)
@@ -111,91 +128,88 @@ struct ptff_qui {
 #define ptff(ptff_block, len, func)					\
 ({									\
 	struct addrtype { char _[len]; };				\
-	register unsigned int reg0 asm("0") = func;			\
-	register unsigned long reg1 asm("1") = (unsigned long) (ptff_block);\
+	unsigned int reg0 = func;					\
+	unsigned long reg1 = (unsigned long)(ptff_block);		\
 	int rc;								\
 									\
 	asm volatile(							\
-		"	.word	0x0104\n"				\
-		"	ipm	%0\n"					\
-		"	srl	%0,28\n"				\
-		: "=d" (rc), "+m" (*(struct addrtype *) reg1)		\
-		: "d" (reg0), "d" (reg1) : "cc");			\
-	rc;								\
+		"	lgr	0,%[reg0]\n"				\
+		"	lgr	1,%[reg1]\n"				\
+		"	ptff\n"						\
+		CC_IPM(rc)						\
+		: CC_OUT(rc, rc), "+m" (*(struct addrtype *)reg1)	\
+		: [reg0] "d" (reg0), [reg1] "d" (reg1)			\
+		: CC_CLOBBER_LIST("0", "1"));				\
+	CC_TRANSFORM(rc);						\
 })
 
-static inline unsigned long long local_tick_disable(void)
+static inline unsigned long local_tick_disable(void)
 {
-	unsigned long long old;
+	unsigned long old;
 
-	old = S390_lowcore.clock_comparator;
-	S390_lowcore.clock_comparator = clock_comparator_max;
-	set_clock_comparator(S390_lowcore.clock_comparator);
+	old = get_lowcore()->clock_comparator;
+	get_lowcore()->clock_comparator = clock_comparator_max;
+	set_clock_comparator(get_lowcore()->clock_comparator);
 	return old;
 }
 
-static inline void local_tick_enable(unsigned long long comp)
+static inline void local_tick_enable(unsigned long comp)
 {
-	S390_lowcore.clock_comparator = comp;
-	set_clock_comparator(S390_lowcore.clock_comparator);
+	get_lowcore()->clock_comparator = comp;
+	set_clock_comparator(get_lowcore()->clock_comparator);
 }
 
 #define CLOCK_TICK_RATE		1193180 /* Underlying HZ */
-#define STORE_CLOCK_EXT_SIZE	16	/* stcke writes 16 bytes */
 
-typedef unsigned long long cycles_t;
+typedef unsigned long cycles_t;
 
-static inline void get_tod_clock_ext(char *clk)
+static __always_inline unsigned long get_tod_clock(void)
 {
-	typedef struct { char _[STORE_CLOCK_EXT_SIZE]; } addrtype;
+	union tod_clock clk;
 
-	asm volatile("stcke %0" : "=Q" (*(addrtype *) clk) : : "cc");
+	store_tod_clock_ext(&clk);
+	return clk.tod;
 }
 
-static inline unsigned long long get_tod_clock(void)
+static inline unsigned long get_tod_clock_fast(void)
 {
-	unsigned char clk[STORE_CLOCK_EXT_SIZE];
-
-	get_tod_clock_ext(clk);
-	return *((unsigned long long *)&clk[1]);
-}
-
-static inline unsigned long long get_tod_clock_fast(void)
-{
-#ifdef CONFIG_HAVE_MARCH_Z9_109_FEATURES
-	unsigned long long clk;
+	unsigned long clk;
 
 	asm volatile("stckf %0" : "=Q" (clk) : : "cc");
 	return clk;
-#else
-	return get_tod_clock();
-#endif
 }
-
-static inline cycles_t get_cycles(void)
-{
-	return (cycles_t) get_tod_clock() >> 2;
-}
-
 int get_phys_clock(unsigned long *clock);
 void init_cpu_timer(void);
-unsigned long long monotonic_clock(void);
 
-extern unsigned char tod_clock_base[16] __aligned(8);
+extern union tod_clock tod_clock_base;
+
+static __always_inline unsigned long __get_tod_clock_monotonic(void)
+{
+	return get_tod_clock() - tod_clock_base.tod;
+}
 
 /**
  * get_clock_monotonic - returns current time in clock rate units
  *
- * The caller must ensure that preemption is disabled.
  * The clock and tod_clock_base get changed via stop_machine.
- * Therefore preemption must be disabled when calling this
- * function, otherwise the returned value is not guaranteed to
- * be monotonic.
+ * Therefore preemption must be disabled, otherwise the returned
+ * value is not guaranteed to be monotonic.
  */
-static inline unsigned long long get_tod_clock_monotonic(void)
+static inline unsigned long get_tod_clock_monotonic(void)
 {
-	return get_tod_clock() - *(unsigned long long *) &tod_clock_base[1];
+	unsigned long tod;
+
+	preempt_disable_notrace();
+	tod = __get_tod_clock_monotonic();
+	preempt_enable_notrace();
+	return tod;
 }
+
+static inline cycles_t get_cycles(void)
+{
+	return (cycles_t)get_tod_clock_monotonic() >> 2;
+}
+#define get_cycles get_cycles
 
 /**
  * tod_to_ns - convert a TOD format value to nanoseconds
@@ -216,9 +230,14 @@ static inline unsigned long long get_tod_clock_monotonic(void)
  * -> ns = (th * 125) + ((tl * 125) >> 9);
  *
  */
-static inline unsigned long long tod_to_ns(unsigned long long todval)
+static __always_inline unsigned long tod_to_ns(unsigned long todval)
 {
 	return ((todval >> 9) * 125) + (((todval & 0x1ff) * 125) >> 9);
+}
+
+static __always_inline u128 eitod_to_ns(u128 todval)
+{
+	return (todval * 125) >> 9;
 }
 
 /**
@@ -228,10 +247,10 @@ static inline unsigned long long tod_to_ns(unsigned long long todval)
  *
  * Returns: true if a is later than b
  */
-static inline int tod_after(unsigned long long a, unsigned long long b)
+static inline int tod_after(unsigned long a, unsigned long b)
 {
-	if (MACHINE_HAS_SCC)
-		return (long long) a > (long long) b;
+	if (machine_has_scc())
+		return (long) a > (long) b;
 	return a > b;
 }
 
@@ -242,10 +261,10 @@ static inline int tod_after(unsigned long long a, unsigned long long b)
  *
  * Returns: true if a is later than b
  */
-static inline int tod_after_eq(unsigned long long a, unsigned long long b)
+static inline int tod_after_eq(unsigned long a, unsigned long b)
 {
-	if (MACHINE_HAS_SCC)
-		return (long long) a >= (long long) b;
+	if (machine_has_scc())
+		return (long) a >= (long) b;
 	return a >= b;
 }
 

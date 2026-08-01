@@ -1,15 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * RNG driver for Freescale RNGC
  *
  * Copyright (C) 2008-2012 Freescale Semiconductor, Inc.
  * Copyright (C) 2017 Martin Kaiser <martin@kaiser.cx>
- *
- * The code contained herein is licensed under the GNU General Public
- * License. You may obtain a copy of the GNU General Public License
- * Version 2 or later at the following locations:
- *
- * http://www.opensource.org/licenses/gpl-license.html
- * http://www.gnu.org/copyleft/gpl.html
  */
 
 #include <linux/module.h>
@@ -18,35 +12,49 @@
 #include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
+#include <linux/pm_runtime.h>
 #include <linux/interrupt.h>
 #include <linux/hw_random.h>
 #include <linux/completion.h>
 #include <linux/io.h>
+#include <linux/bitfield.h>
 
+#define RNGC_VER_ID			0x0000
 #define RNGC_COMMAND			0x0004
 #define RNGC_CONTROL			0x0008
 #define RNGC_STATUS			0x000C
 #define RNGC_ERROR			0x0010
 #define RNGC_FIFO			0x0014
 
-#define RNGC_CMD_CLR_ERR		0x00000020
-#define RNGC_CMD_CLR_INT		0x00000010
-#define RNGC_CMD_SEED			0x00000002
-#define RNGC_CMD_SELF_TEST		0x00000001
+/* the fields in the ver id register */
+#define RNG_TYPE			GENMASK(31, 28)
+#define RNGC_VER_MAJ_SHIFT		8
 
-#define RNGC_CTRL_MASK_ERROR		0x00000040
-#define RNGC_CTRL_MASK_DONE		0x00000020
+/* the rng_type field */
+#define RNGC_TYPE_RNGB			0x1
+#define RNGC_TYPE_RNGC			0x2
 
-#define RNGC_STATUS_ERROR		0x00010000
-#define RNGC_STATUS_FIFO_LEVEL_MASK	0x00000f00
-#define RNGC_STATUS_FIFO_LEVEL_SHIFT	8
-#define RNGC_STATUS_SEED_DONE		0x00000020
-#define RNGC_STATUS_ST_DONE		0x00000010
+
+#define RNGC_CMD_CLR_ERR		BIT(5)
+#define RNGC_CMD_CLR_INT		BIT(4)
+#define RNGC_CMD_SEED			BIT(1)
+#define RNGC_CMD_SELF_TEST		BIT(0)
+
+#define RNGC_CTRL_MASK_ERROR		BIT(6)
+#define RNGC_CTRL_MASK_DONE		BIT(5)
+#define RNGC_CTRL_AUTO_SEED		BIT(4)
+
+#define RNGC_STATUS_ERROR		BIT(16)
+#define RNGC_STATUS_FIFO_LEVEL_MASK	GENMASK(11, 8)
+#define RNGC_STATUS_SEED_DONE		BIT(5)
+#define RNGC_STATUS_ST_DONE		BIT(4)
 
 #define RNGC_ERROR_STATUS_STAT_ERR	0x00000008
 
-#define RNGC_TIMEOUT  3000 /* 3 sec */
-
+#define RNGC_SELFTEST_TIMEOUT 2500 /* us */
+#define RNGC_SEED_TIMEOUT      200 /* ms */
+#define RNGC_PM_TIMEOUT        500 /* ms */
 
 static bool self_test = true;
 module_param(self_test, bool, 0);
@@ -104,24 +112,24 @@ static int imx_rngc_self_test(struct imx_rngc *rngc)
 	cmd = readl(rngc->base + RNGC_COMMAND);
 	writel(cmd | RNGC_CMD_SELF_TEST, rngc->base + RNGC_COMMAND);
 
-	ret = wait_for_completion_timeout(&rngc->rng_op_done, RNGC_TIMEOUT);
-	if (!ret) {
-		imx_rngc_irq_mask_clear(rngc);
+	ret = wait_for_completion_timeout(&rngc->rng_op_done,
+					  usecs_to_jiffies(RNGC_SELFTEST_TIMEOUT));
+	imx_rngc_irq_mask_clear(rngc);
+	if (!ret)
 		return -ETIMEDOUT;
-	}
 
-	if (rngc->err_reg != 0)
-		return -EIO;
-
-	return 0;
+	return rngc->err_reg ? -EIO : 0;
 }
 
 static int imx_rngc_read(struct hwrng *rng, void *data, size_t max, bool wait)
 {
 	struct imx_rngc *rngc = container_of(rng, struct imx_rngc, rng);
 	unsigned int status;
-	unsigned int level;
-	int retval = 0;
+	int err, retval = 0;
+
+	err = pm_runtime_resume_and_get(rngc->dev);
+	if (err)
+		return err;
 
 	while (max >= sizeof(u32)) {
 		status = readl(rngc->base + RNGC_STATUS);
@@ -130,11 +138,7 @@ static int imx_rngc_read(struct hwrng *rng, void *data, size_t max, bool wait)
 		if (status & RNGC_STATUS_ERROR)
 			break;
 
-		/* how many random numbers are in FIFO? [0-16] */
-		level = (status & RNGC_STATUS_FIFO_LEVEL_MASK) >>
-			RNGC_STATUS_FIFO_LEVEL_SHIFT;
-
-		if (level) {
+		if (status & RNGC_STATUS_FIFO_LEVEL_MASK) {
 			/* retrieve a random number from FIFO */
 			*(u32 *)data = readl(rngc->base + RNGC_FIFO);
 
@@ -143,6 +147,8 @@ static int imx_rngc_read(struct hwrng *rng, void *data, size_t max, bool wait)
 			max -= sizeof(u32);
 		}
 	}
+	pm_runtime_mark_last_busy(rngc->dev);
+	pm_runtime_put(rngc->dev);
 
 	return retval ? retval : -EIO;
 }
@@ -170,71 +176,107 @@ static irqreturn_t imx_rngc_irq(int irq, void *priv)
 static int imx_rngc_init(struct hwrng *rng)
 {
 	struct imx_rngc *rngc = container_of(rng, struct imx_rngc, rng);
-	u32 cmd;
-	int ret;
+	u32 cmd, ctrl;
+	int ret, err;
+
+	err = pm_runtime_resume_and_get(rngc->dev);
+	if (err)
+		return err;
 
 	/* clear error */
 	cmd = readl(rngc->base + RNGC_COMMAND);
 	writel(cmd | RNGC_CMD_CLR_ERR, rngc->base + RNGC_COMMAND);
 
+	imx_rngc_irq_unmask(rngc);
+
 	/* create seed, repeat while there is some statistical error */
 	do {
-		imx_rngc_irq_unmask(rngc);
-
 		/* seed creation */
 		cmd = readl(rngc->base + RNGC_COMMAND);
 		writel(cmd | RNGC_CMD_SEED, rngc->base + RNGC_COMMAND);
 
 		ret = wait_for_completion_timeout(&rngc->rng_op_done,
-				RNGC_TIMEOUT);
-
+						  msecs_to_jiffies(RNGC_SEED_TIMEOUT));
 		if (!ret) {
-			imx_rngc_irq_mask_clear(rngc);
-			return -ETIMEDOUT;
+			err = -ETIMEDOUT;
+			goto out;
 		}
 
 	} while (rngc->err_reg == RNGC_ERROR_STATUS_STAT_ERR);
 
-	return rngc->err_reg ? -EIO : 0;
+	if (rngc->err_reg) {
+		err = -EIO;
+		goto out;
+	}
+
+	/*
+	 * enable automatic seeding, the rngc creates a new seed automatically
+	 * after serving 2^20 random 160-bit words
+	 */
+	ctrl = readl(rngc->base + RNGC_CONTROL);
+	ctrl |= RNGC_CTRL_AUTO_SEED;
+	writel(ctrl, rngc->base + RNGC_CONTROL);
+
+out:
+	/*
+	 * if initialisation was successful, we keep the interrupt
+	 * unmasked until imx_rngc_cleanup is called
+	 * we mask the interrupt ourselves if we return an error
+	 */
+	if (err)
+		imx_rngc_irq_mask_clear(rngc);
+
+	pm_runtime_put(rngc->dev);
+	return err;
 }
 
-static int imx_rngc_probe(struct platform_device *pdev)
+static void imx_rngc_cleanup(struct hwrng *rng)
+{
+	struct imx_rngc *rngc = container_of(rng, struct imx_rngc, rng);
+	int err;
+
+	err = pm_runtime_resume_and_get(rngc->dev);
+	if (!err) {
+		imx_rngc_irq_mask_clear(rngc);
+		pm_runtime_put(rngc->dev);
+	}
+}
+
+static int __init imx_rngc_probe(struct platform_device *pdev)
 {
 	struct imx_rngc *rngc;
-	struct resource *res;
 	int ret;
 	int irq;
+	u32 ver_id;
+	u8  rng_type;
 
 	rngc = devm_kzalloc(&pdev->dev, sizeof(*rngc), GFP_KERNEL);
 	if (!rngc)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	rngc->base = devm_ioremap_resource(&pdev->dev, res);
+	rngc->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(rngc->base))
 		return PTR_ERR(rngc->base);
 
 	rngc->clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(rngc->clk)) {
-		dev_err(&pdev->dev, "Can not get rng_clk\n");
-		return PTR_ERR(rngc->clk);
-	}
+	if (IS_ERR(rngc->clk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(rngc->clk), "Cannot get rng_clk\n");
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq <= 0) {
-		dev_err(&pdev->dev, "Couldn't get irq %d\n", irq);
+	if (irq < 0)
 		return irq;
-	}
 
-	ret = clk_prepare_enable(rngc->clk);
-	if (ret)
-		return ret;
+	clk_prepare_enable(rngc->clk);
 
-	ret = devm_request_irq(&pdev->dev,
-			irq, imx_rngc_irq, 0, pdev->name, (void *)rngc);
-	if (ret) {
-		dev_err(rngc->dev, "Can't get interrupt working.\n");
-		goto err;
+	ver_id = readl(rngc->base + RNGC_VER_ID);
+	rng_type = FIELD_GET(RNG_TYPE, ver_id);
+	/*
+	 * This driver supports only RNGC and RNGB. (There's a different
+	 * driver for RNGA.)
+	 */
+	if (rng_type != RNGC_TYPE_RNGC && rng_type != RNGC_TYPE_RNGB) {
+		clk_disable_unprepare(rngc->clk);
+		return -ENODEV;
 	}
 
 	init_completion(&rngc->rng_op_done);
@@ -242,47 +284,46 @@ static int imx_rngc_probe(struct platform_device *pdev)
 	rngc->rng.name = pdev->name;
 	rngc->rng.init = imx_rngc_init;
 	rngc->rng.read = imx_rngc_read;
+	rngc->rng.cleanup = imx_rngc_cleanup;
+	rngc->rng.quality = 19;
 
 	rngc->dev = &pdev->dev;
 	platform_set_drvdata(pdev, rngc);
 
 	imx_rngc_irq_mask_clear(rngc);
 
+	ret = devm_request_irq(&pdev->dev,
+			irq, imx_rngc_irq, 0, pdev->name, (void *)rngc);
+	if (ret) {
+		clk_disable_unprepare(rngc->clk);
+		return dev_err_probe(&pdev->dev, ret, "Can't get interrupt working.\n");
+	}
+
 	if (self_test) {
 		ret = imx_rngc_self_test(rngc);
 		if (ret) {
-			dev_err(rngc->dev, "FSL RNGC self test failed.\n");
-			goto err;
+			clk_disable_unprepare(rngc->clk);
+			return dev_err_probe(&pdev->dev, ret, "self test failed\n");
 		}
 	}
 
-	ret = hwrng_register(&rngc->rng);
-	if (ret) {
-		dev_err(&pdev->dev, "FSL RNGC registering failed (%d)\n", ret);
-		goto err;
-	}
+	pm_runtime_set_autosuspend_delay(&pdev->dev, RNGC_PM_TIMEOUT);
+	pm_runtime_use_autosuspend(&pdev->dev);
+	pm_runtime_set_active(&pdev->dev);
+	devm_pm_runtime_enable(&pdev->dev);
 
-	dev_info(&pdev->dev, "Freescale RNGC registered.\n");
-	return 0;
+	ret = devm_hwrng_register(&pdev->dev, &rngc->rng);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret, "hwrng registration failed\n");
 
-err:
-	clk_disable_unprepare(rngc->clk);
-
-	return ret;
-}
-
-static int __exit imx_rngc_remove(struct platform_device *pdev)
-{
-	struct imx_rngc *rngc = platform_get_drvdata(pdev);
-
-	hwrng_unregister(&rngc->rng);
-
-	clk_disable_unprepare(rngc->clk);
-
+	dev_info(&pdev->dev,
+		"Freescale RNG%c registered (HW revision %d.%02d)\n",
+		rng_type == RNGC_TYPE_RNGB ? 'B' : 'C',
+		(ver_id >> RNGC_VER_MAJ_SHIFT) & 0xff, ver_id & 0xff);
 	return 0;
 }
 
-static int __maybe_unused imx_rngc_suspend(struct device *dev)
+static int imx_rngc_suspend(struct device *dev)
 {
 	struct imx_rngc *rngc = dev_get_drvdata(dev);
 
@@ -291,7 +332,7 @@ static int __maybe_unused imx_rngc_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused imx_rngc_resume(struct device *dev)
+static int imx_rngc_resume(struct device *dev)
 {
 	struct imx_rngc *rngc = dev_get_drvdata(dev);
 
@@ -300,21 +341,23 @@ static int __maybe_unused imx_rngc_resume(struct device *dev)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(imx_rngc_pm_ops, imx_rngc_suspend, imx_rngc_resume);
+static const struct dev_pm_ops imx_rngc_pm_ops = {
+	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
+	RUNTIME_PM_OPS(imx_rngc_suspend, imx_rngc_resume, NULL)
+};
 
 static const struct of_device_id imx_rngc_dt_ids[] = {
-	{ .compatible = "fsl,imx25-rngb", .data = NULL, },
+	{ .compatible = "fsl,imx25-rngb" },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, imx_rngc_dt_ids);
 
 static struct platform_driver imx_rngc_driver = {
 	.driver = {
-		.name = "imx_rngc",
-		.pm = &imx_rngc_pm_ops,
+		.name = KBUILD_MODNAME,
+		.pm = pm_ptr(&imx_rngc_pm_ops),
 		.of_match_table = imx_rngc_dt_ids,
 	},
-	.remove = __exit_p(imx_rngc_remove),
 };
 
 module_platform_driver_probe(imx_rngc_driver, imx_rngc_probe);

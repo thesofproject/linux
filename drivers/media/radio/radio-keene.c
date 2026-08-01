@@ -1,15 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (c) 2012 Hans Verkuil <hverkuil@xs4all.nl>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Copyright (c) 2012 Hans Verkuil <hverkuil@kernel.org>
  */
 
 /* kernel includes */
@@ -27,7 +18,7 @@
 #include <linux/mutex.h>
 
 /* driver and module definitions */
-MODULE_AUTHOR("Hans Verkuil <hverkuil@xs4all.nl>");
+MODULE_AUTHOR("Hans Verkuil <hverkuil@kernel.org>");
 MODULE_DESCRIPTION("Keene FM Transmitter driver");
 MODULE_LICENSE("GPL");
 
@@ -174,11 +165,9 @@ static int vidioc_querycap(struct file *file, void *priv,
 {
 	struct keene_device *radio = video_drvdata(file);
 
-	strlcpy(v->driver, "radio-keene", sizeof(v->driver));
-	strlcpy(v->card, "Keene FM Transmitter", sizeof(v->card));
+	strscpy(v->driver, "radio-keene", sizeof(v->driver));
+	strscpy(v->card, "Keene FM Transmitter", sizeof(v->card));
 	usb_make_path(radio->usbdev, v->bus_info, sizeof(v->bus_info));
-	v->device_caps = V4L2_CAP_RADIO | V4L2_CAP_MODULATOR;
-	v->capabilities = v->device_caps | V4L2_CAP_DEVICE_CAPS;
 	return 0;
 }
 
@@ -190,7 +179,7 @@ static int vidioc_g_modulator(struct file *file, void *priv,
 	if (v->index > 0)
 		return -EINVAL;
 
-	strlcpy(v->name, "FM", sizeof(v->name));
+	strscpy(v->name, "FM", sizeof(v->name));
 	v->rangelow = FREQ_MIN * FREQ_MUL;
 	v->rangehigh = FREQ_MAX * FREQ_MUL;
 	v->txsubchans = radio->stereo ? V4L2_TUNER_SUB_STEREO : V4L2_TUNER_SUB_MONO;
@@ -322,7 +311,7 @@ static int usb_keene_probe(struct usb_interface *intf,
 	if (dev->product && strcmp(dev->product, "B-LINK USB Audio  "))
 		return -ENODEV;
 
-	radio = kzalloc(sizeof(struct keene_device), GFP_KERNEL);
+	radio = kzalloc_obj(struct keene_device);
 	if (radio)
 		radio->buffer = kmalloc(BUFFER_LENGTH, GFP_KERNEL);
 
@@ -349,7 +338,6 @@ static int usb_keene_probe(struct usb_interface *intf,
 	if (hdl->error) {
 		retval = hdl->error;
 
-		v4l2_ctrl_handler_free(hdl);
 		goto err_v4l2;
 	}
 	retval = v4l2_device_register(&intf->dev, &radio->v4l2_dev);
@@ -362,7 +350,7 @@ static int usb_keene_probe(struct usb_interface *intf,
 
 	radio->v4l2_dev.ctrl_handler = hdl;
 	radio->v4l2_dev.release = usb_keene_video_device_release;
-	strlcpy(radio->vdev.name, radio->v4l2_dev.name,
+	strscpy(radio->vdev.name, radio->v4l2_dev.name,
 		sizeof(radio->vdev.name));
 	radio->vdev.v4l2_dev = &radio->v4l2_dev;
 	radio->vdev.fops = &usb_keene_fops;
@@ -370,6 +358,7 @@ static int usb_keene_probe(struct usb_interface *intf,
 	radio->vdev.lock = &radio->lock;
 	radio->vdev.release = video_device_release_empty;
 	radio->vdev.vfl_dir = VFL_DIR_TX;
+	radio->vdev.device_caps = V4L2_CAP_RADIO | V4L2_CAP_MODULATOR;
 
 	radio->usbdev = interface_to_usbdev(intf);
 	radio->intf = intf;
@@ -394,6 +383,7 @@ static int usb_keene_probe(struct usb_interface *intf,
 err_vdev:
 	v4l2_device_unregister(&radio->v4l2_dev);
 err_v4l2:
+	v4l2_ctrl_handler_free(&radio->hdl);
 	kfree(radio->buffer);
 	kfree(radio);
 err:

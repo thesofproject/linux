@@ -3,20 +3,19 @@
 #include <linux/types.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
-#include <linux/tty.h>
-#include <linux/console.h>
 #include <linux/rtc.h>
-#include <linux/vt_kern.h>
 #include <linux/interrupt.h>
 
 #include <asm/setup.h>
 #include <asm/bootinfo.h>
 #include <asm/bootinfo-apollo.h>
 #include <asm/byteorder.h>
-#include <asm/pgtable.h>
 #include <asm/apollohw.h>
 #include <asm/irq.h>
 #include <asm/machdep.h>
+#include <asm/config.h>
+
+#include "apollo.h"
 
 u_long sio01_physaddr;
 u_long sio23_physaddr;
@@ -27,12 +26,9 @@ u_long cpuctrl_physaddr;
 u_long timer_physaddr;
 u_long apollo_model;
 
-extern void dn_sched_init(irq_handler_t handler);
-extern void dn_init_IRQ(void);
-extern u32 dn_gettimeoffset(void);
+extern void dn_sched_init(void);
 extern int dn_dummy_hwclk(int, struct rtc_time *);
-extern int dn_dummy_set_clock_mmss(unsigned long);
-extern void dn_dummy_reset(void);
+static void dn_dummy_reset(void);
 #ifdef CONFIG_HEARTBEAT
 static void dn_heartbeat(int on);
 #endif
@@ -110,28 +106,7 @@ static void __init dn_setup_model(void)
 
 }
 
-int dn_serial_console_wait_key(struct console *co) {
-
-	while(!(sio01.srb_csrb & 1))
-		barrier();
-	return sio01.rhrb_thrb;
-}
-
-void dn_serial_console_write (struct console *co, const char *str,unsigned int count)
-{
-   while(count--) {
-	if (*str == '\n') {
-	sio01.rhrb_thrb = (unsigned char)'\r';
-	while (!(sio01.srb_csrb & 0x4))
-                ;
-	}
-    sio01.rhrb_thrb = (unsigned char)*str++;
-    while (!(sio01.srb_csrb & 0x4))
-            ;
-  }
-}
-
-void dn_serial_print (const char *str)
+static void dn_serial_print(const char *str)
 {
     while (*str) {
         if (*str == '\n') {
@@ -153,10 +128,7 @@ void __init config_apollo(void)
 
 	mach_sched_init=dn_sched_init; /* */
 	mach_init_IRQ=dn_init_IRQ;
-	arch_gettimeoffset   = dn_gettimeoffset;
-	mach_max_dma_address = 0xffffffff;
 	mach_hwclk           = dn_dummy_hwclk; /* */
-	mach_set_clock_mmss  = dn_dummy_set_clock_mmss; /* */
 	mach_reset	     = dn_dummy_reset;  /* */
 #ifdef CONFIG_HEARTBEAT
 	mach_heartbeat = dn_heartbeat;
@@ -173,19 +145,18 @@ void __init config_apollo(void)
 
 irqreturn_t dn_timer_int(int irq, void *dev_id)
 {
-	irq_handler_t timer_handler = dev_id;
+	unsigned char *at = (unsigned char *)apollo_timer;
 
-	volatile unsigned char x;
+	legacy_timer_tick(1);
+	timer_heartbeat();
 
-	timer_handler(irq, dev_id);
-
-	x = *(volatile unsigned char *)(apollo_timer + 3);
-	x = *(volatile unsigned char *)(apollo_timer + 5);
+	READ_ONCE(*(at + 3));
+	READ_ONCE(*(at + 5));
 
 	return IRQ_HANDLED;
 }
 
-void dn_sched_init(irq_handler_t timer_routine)
+void dn_sched_init(void)
 {
 	/* program timer 1 */
 	*(volatile unsigned char *)(apollo_timer + 3) = 0x01;
@@ -203,13 +174,8 @@ void dn_sched_init(irq_handler_t timer_routine)
 		*(volatile unsigned char *)(apollo_timer + 0x3));
 #endif
 
-	if (request_irq(IRQ_APOLLO, dn_timer_int, 0, "time", timer_routine))
+	if (request_irq(IRQ_APOLLO, dn_timer_int, 0, "time", NULL))
 		pr_err("Couldn't register timer interrupt\n");
-}
-
-u32 dn_gettimeoffset(void)
-{
-	return 0xdeadbeef;
 }
 
 int dn_dummy_hwclk(int op, struct rtc_time *t) {
@@ -221,8 +187,10 @@ int dn_dummy_hwclk(int op, struct rtc_time *t) {
     t->tm_hour=rtc->hours;
     t->tm_mday=rtc->day_of_month;
     t->tm_wday=rtc->day_of_week;
-    t->tm_mon=rtc->month;
+    t->tm_mon = rtc->month - 1;
     t->tm_year=rtc->year;
+    if (t->tm_year < 70)
+	t->tm_year += 100;
   } else {
     rtc->second=t->tm_sec;
     rtc->minute=t->tm_min;
@@ -230,31 +198,19 @@ int dn_dummy_hwclk(int op, struct rtc_time *t) {
     rtc->day_of_month=t->tm_mday;
     if(t->tm_wday!=-1)
       rtc->day_of_week=t->tm_wday;
-    rtc->month=t->tm_mon;
-    rtc->year=t->tm_year;
+    rtc->month = t->tm_mon + 1;
+    rtc->year = t->tm_year % 100;
   }
 
   return 0;
 
 }
 
-int dn_dummy_set_clock_mmss(unsigned long nowtime)
+static void dn_dummy_reset(void)
 {
-	pr_info("set_clock_mmss\n");
-	return 0;
-}
-
-void dn_dummy_reset(void) {
-
   dn_serial_print("The end !\n");
 
   for(;;);
-
-}
-
-void dn_dummy_waitbut(void) {
-
-  dn_serial_print("waitbut\n");
 
 }
 

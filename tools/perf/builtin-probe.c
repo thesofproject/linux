@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * builtin-probe.c
  *
  * Builtin probe command: Set up probe events by C expression
  *
  * Written by Masami Hiramatsu <mhiramat@redhat.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
- *
  */
 #include <sys/utsname.h>
 #include <sys/types.h>
@@ -30,20 +16,23 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "perf.h"
 #include "builtin.h"
-#include "util/util.h"
+#include "namespaces.h"
+#include "util/build-id.h"
 #include "util/strlist.h"
 #include "util/strfilter.h"
 #include "util/symbol.h"
+#include "util/symbol_conf.h"
 #include "util/debug.h"
 #include <subcmd/parse-options.h>
 #include "util/probe-finder.h"
 #include "util/probe-event.h"
 #include "util/probe-file.h"
+#include <linux/string.h>
+#include <linux/zalloc.h>
 
 #define DEFAULT_VAR_FILTER "!__k???tab_* & !__crc_*"
-#define DEFAULT_FUNC_FILTER "!_*"
+#define DEFAULT_FUNC_FILTER "!_* & !*@plt"
 #define DEFAULT_LIST_FILTER "*"
 
 /* Session management structure */
@@ -51,7 +40,6 @@ static struct {
 	int command;	/* Command short_name */
 	bool list_events;
 	bool uprobes;
-	bool quiet;
 	bool target_used;
 	int nevents;
 	struct perf_probe_event events[MAX_PROBES];
@@ -59,30 +47,29 @@ static struct {
 	char *target;
 	struct strfilter *filter;
 	struct nsinfo *nsi;
-} params;
+} *params;
 
 /* Parse an event definition. Note that any error must die. */
 static int parse_probe_event(const char *str)
 {
-	struct perf_probe_event *pev = &params.events[params.nevents];
+	struct perf_probe_event *pev = &params->events[params->nevents];
 	int ret;
 
-	pr_debug("probe-definition(%d): %s\n", params.nevents, str);
-	if (++params.nevents == MAX_PROBES) {
+	pr_debug("probe-definition(%d): %s\n", params->nevents, str);
+	if (++params->nevents == MAX_PROBES) {
 		pr_err("Too many probes (> %d) were specified.", MAX_PROBES);
 		return -1;
 	}
 
-	pev->uprobes = params.uprobes;
-	if (params.target) {
-		pev->target = strdup(params.target);
+	pev->uprobes = params->uprobes;
+	if (params->target) {
+		pev->target = strdup(params->target);
 		if (!pev->target)
 			return -ENOMEM;
-		params.target_used = true;
+		params->target_used = true;
 	}
 
-	if (params.nsi)
-		pev->nsi = nsinfo__get(params.nsi);
+	pev->nsi = nsinfo__get(params->nsi);
 
 	/* Parse a perf-probe command into event */
 	ret = parse_perf_probe_command(str, pev);
@@ -97,12 +84,12 @@ static int params_add_filter(const char *str)
 	int ret = 0;
 
 	pr_debug2("Add filter: %s\n", str);
-	if (!params.filter) {
-		params.filter = strfilter__new(str, &err);
-		if (!params.filter)
+	if (!params->filter) {
+		params->filter = strfilter__new(str, &err);
+		if (!params->filter)
 			ret = err ? -EINVAL : -ENOMEM;
 	} else
-		ret = strfilter__or(params.filter, str, &err);
+		ret = strfilter__or(params->filter, str, &err);
 
 	if (ret == -EINVAL) {
 		pr_err("Filter parse error at %td.\n", err - str + 1);
@@ -125,17 +112,17 @@ static int set_target(const char *ptr)
 	 * TODO: Support relative path, and $PATH, $LD_LIBRARY_PATH,
 	 * short module name.
 	 */
-	if (!params.target && ptr && *ptr == '/') {
-		params.target = strdup(ptr);
-		if (!params.target)
+	if (!params->target && ptr && *ptr == '/') {
+		params->target = strdup(ptr);
+		if (!params->target)
 			return -ENOMEM;
-		params.target_used = false;
+		params->target_used = false;
 
 		found = 1;
 		buf = ptr + (strlen(ptr) - 3);
 
 		if (strcmp(buf, ".ko"))
-			params.uprobes = true;
+			params->uprobes = true;
 
 	}
 
@@ -185,15 +172,15 @@ static int opt_set_target(const struct option *opt, const char *str,
 
 	if  (str) {
 		if (!strcmp(opt->long_name, "exec"))
-			params.uprobes = true;
+			params->uprobes = true;
 		else if (!strcmp(opt->long_name, "module"))
-			params.uprobes = false;
+			params->uprobes = false;
 		else
 			return ret;
 
 		/* Expand given path to absolute path, except for modulename */
-		if (params.uprobes || strchr(str, '/')) {
-			tmp = nsinfo__realpath(str, params.nsi);
+		if (params->uprobes || strchr(str, '/')) {
+			tmp = nsinfo__realpath(str, params->nsi);
 			if (!tmp) {
 				pr_warning("Failed to get the absolute path of %s: %m\n", str);
 				return ret;
@@ -203,9 +190,9 @@ static int opt_set_target(const struct option *opt, const char *str,
 			if (!tmp)
 				return -ENOMEM;
 		}
-		free(params.target);
-		params.target = tmp;
-		params.target_used = false;
+		free(params->target);
+		params->target = tmp;
+		params->target_used = false;
 		ret = 0;
 	}
 
@@ -224,13 +211,12 @@ static int opt_set_target_ns(const struct option *opt __maybe_unused,
 		ns_pid = (pid_t)strtol(str, NULL, 10);
 		if (errno != 0) {
 			ret = -errno;
-			pr_warning("Failed to parse %s as a pid: %s\n", str,
-				   strerror(errno));
+			pr_warning("Failed to parse %s as a pid: %m\n", str);
 			return ret;
 		}
 		nsip = nsinfo__new(ns_pid);
-		if (nsip && nsip->need_setns)
-			params.nsi = nsinfo__get(nsip);
+		if (nsip && nsinfo__need_setns(nsip))
+			params->nsi = nsinfo__get(nsip);
 		nsinfo__put(nsip);
 
 		ret = 0;
@@ -242,7 +228,7 @@ static int opt_set_target_ns(const struct option *opt __maybe_unused,
 
 /* Command option callbacks */
 
-#ifdef HAVE_DWARF_SUPPORT
+#ifdef HAVE_LIBDW_SUPPORT
 static int opt_show_lines(const struct option *opt,
 			  const char *str, int unset __maybe_unused)
 {
@@ -251,14 +237,14 @@ static int opt_show_lines(const struct option *opt,
 	if (!str)
 		return 0;
 
-	if (params.command == 'L') {
+	if (params->command == 'L') {
 		pr_warning("Warning: more than one --line options are"
 			   " detected. Only the first one is valid.\n");
 		return 0;
 	}
 
-	params.command = opt->short_name;
-	ret = parse_line_range_desc(str, &params.line_range);
+	params->command = opt->short_name;
+	ret = parse_line_range_desc(str, &params->line_range);
 
 	return ret;
 }
@@ -266,7 +252,7 @@ static int opt_show_lines(const struct option *opt,
 static int opt_show_vars(const struct option *opt,
 			 const char *str, int unset __maybe_unused)
 {
-	struct perf_probe_event *pev = &params.events[params.nevents];
+	struct perf_probe_event *pev = &params->events[params->nevents];
 	int ret;
 
 	if (!str)
@@ -277,7 +263,7 @@ static int opt_show_vars(const struct option *opt,
 		pr_err("  Error: '--vars' doesn't accept arguments.\n");
 		return -EINVAL;
 	}
-	params.command = opt->short_name;
+	params->command = opt->short_name;
 
 	return ret;
 }
@@ -289,7 +275,7 @@ static int opt_add_probe_event(const struct option *opt,
 			      const char *str, int unset __maybe_unused)
 {
 	if (str) {
-		params.command = opt->short_name;
+		params->command = opt->short_name;
 		return parse_probe_event(str);
 	}
 
@@ -300,7 +286,7 @@ static int opt_set_filter_with_command(const struct option *opt,
 				       const char *str, int unset)
 {
 	if (!unset)
-		params.command = opt->short_name;
+		params->command = opt->short_name;
 
 	if (str)
 		return params_add_filter(str);
@@ -319,20 +305,29 @@ static int opt_set_filter(const struct option *opt __maybe_unused,
 
 static int init_params(void)
 {
-	return line_range__init(&params.line_range);
+	int ret;
+
+	params = calloc(1, sizeof(*params));
+	if (!params)
+		return -ENOMEM;
+
+	ret = line_range__init(&params->line_range);
+	if (ret)
+		zfree(&params);
+	return ret;
 }
 
 static void cleanup_params(void)
 {
 	int i;
 
-	for (i = 0; i < params.nevents; i++)
-		clear_perf_probe_event(params.events + i);
-	line_range__clear(&params.line_range);
-	free(params.target);
-	strfilter__delete(params.filter);
-	nsinfo__put(params.nsi);
-	memset(&params, 0, sizeof(params));
+	for (i = 0; i < params->nevents; i++)
+		clear_perf_probe_event(params->events + i);
+	line_range__clear(&params->line_range);
+	zfree(&params->target);
+	strfilter__delete(params->filter);
+	nsinfo__put(params->nsi);
+	zfree(&params);
 }
 
 static void pr_err_with_code(const char *msg, int err)
@@ -359,8 +354,11 @@ static int perf_add_probe_events(struct perf_probe_event *pevs, int npevs)
 	if (ret < 0)
 		goto out_cleanup;
 
-	if (params.command == 'D') {	/* it shows definition */
-		ret = show_probe_trace_events(pevs, npevs);
+	if (params->command == 'D') {	/* it shows definition */
+		if (probe_conf.bootconfig)
+			ret = show_bootconfig_events(pevs, npevs);
+		else
+			ret = show_probe_trace_events(pevs, npevs);
 		goto out_cleanup;
 	}
 
@@ -377,6 +375,9 @@ static int perf_add_probe_events(struct perf_probe_event *pevs, int npevs)
 
 		for (k = 0; k < pev->ntevs; k++) {
 			struct probe_trace_event *tev = &pev->tevs[k];
+			/* Skipped events have no event name */
+			if (!tev->event)
+				continue;
 
 			/* We use tev's name for showing new events */
 			show_perf_probe_event(tev->group, tev->event, pev,
@@ -390,9 +391,18 @@ static int perf_add_probe_events(struct perf_probe_event *pevs, int npevs)
 
 	/* Note that it is possible to skip all events because of blacklist */
 	if (event) {
+#ifndef HAVE_LIBTRACEEVENT
+		pr_info("\nperf is not linked with libtraceevent, to use the new probe you can use tracefs:\n\n");
+		pr_info("\tcd /sys/kernel/tracing/\n");
+		pr_info("\techo 1 > events/%s/%s/enable\n", group, event);
+		pr_info("\techo 1 > tracing_on\n");
+		pr_info("\tcat trace_pipe\n");
+		pr_info("\tBefore removing the probe, echo 0 > events/%s/%s/enable\n", group, event);
+#else
 		/* Show how to use the event. */
 		pr_info("\nYou can now use it in all perf tools, such as:\n\n");
 		pr_info("\tperf record -e %s:%s -aR sleep 1\n\n", group, event);
+#endif
 	}
 
 out_cleanup:
@@ -462,7 +472,8 @@ static int perf_del_probe_events(struct strfilter *filter)
 		ret = probe_file__del_strlist(kfd, klist);
 		if (ret < 0)
 			goto error;
-	}
+	} else if (ret == -ENOMEM)
+		goto error;
 
 	ret2 = probe_file__get_events(ufd, filter, ulist);
 	if (ret2 == 0) {
@@ -472,7 +483,8 @@ static int perf_del_probe_events(struct strfilter *filter)
 		ret2 = probe_file__del_strlist(ufd, ulist);
 		if (ret2 < 0)
 			goto error;
-	}
+	} else if (ret2 == -ENOMEM)
+		goto error;
 
 	if (ret == -ENOENT && ret2 == -ENOENT)
 		pr_warning("\"%s\" does not hit any event.\n", str);
@@ -492,7 +504,7 @@ out:
 	return ret;
 }
 
-#ifdef HAVE_DWARF_SUPPORT
+#ifdef HAVE_LIBDW_SUPPORT
 #define PROBEDEF_STR	\
 	"[EVENT=]FUNC[@SRC][+OFF|%return|:RL|;PT]|SRC:AL|SRC;PT [[NAME=]ARG ...]"
 #else
@@ -508,7 +520,7 @@ __cmd_probe(int argc, const char **argv)
 		"perf probe [<options>] --add 'PROBEDEF' [--add 'PROBEDEF' ...]",
 		"perf probe [<options>] --del '[GROUP:]EVENT' ...",
 		"perf probe --list [GROUP:]EVENT ...",
-#ifdef HAVE_DWARF_SUPPORT
+#ifdef HAVE_LIBDW_SUPPORT
 		"perf probe [<options>] --line 'LINEDESC'",
 		"perf probe [<options>] --vars 'PROBEPOINT'",
 #endif
@@ -518,8 +530,8 @@ __cmd_probe(int argc, const char **argv)
 	struct option options[] = {
 	OPT_INCR('v', "verbose", &verbose,
 		    "be more verbose (show parsed arguments, etc)"),
-	OPT_BOOLEAN('q', "quiet", &params.quiet,
-		    "be quiet (do not show any messages)"),
+	OPT_BOOLEAN('q', "quiet", &quiet,
+		    "be quiet (do not show any warnings or messages)"),
 	OPT_CALLBACK_DEFAULT('l', "list", NULL, "[GROUP:]EVENT",
 			     "list up probe events",
 			     opt_set_filter_with_command, DEFAULT_LIST_FILTER),
@@ -532,7 +544,7 @@ __cmd_probe(int argc, const char **argv)
 		"\t\tFUNC:\tFunction name\n"
 		"\t\tOFF:\tOffset from function entry (in byte)\n"
 		"\t\t%return:\tPut the probe at function return\n"
-#ifdef HAVE_DWARF_SUPPORT
+#ifdef HAVE_LIBDW_SUPPORT
 		"\t\tSRC:\tSource code path\n"
 		"\t\tRL:\tRelative line number from function entry.\n"
 		"\t\tAL:\tAbsolute line number in file.\n"
@@ -585,10 +597,12 @@ __cmd_probe(int argc, const char **argv)
 	OPT_BOOLEAN(0, "demangle-kernel", &symbol_conf.demangle_kernel,
 		    "Enable kernel symbol demangling"),
 	OPT_BOOLEAN(0, "cache", &probe_conf.cache, "Manipulate probe cache"),
-	OPT_STRING(0, "symfs", &symbol_conf.symfs, "directory",
-		   "Look for files with symbols relative to this directory"),
+	OPT_CALLBACK(0, "symfs", NULL, "directory[,layout]", SYMFS_HELP,
+		     symbol__config_symfs),
 	OPT_CALLBACK(0, "target-ns", NULL, "pid",
 		     "target pid for namespace contexts", opt_set_target_ns),
+	OPT_BOOLEAN(0, "bootconfig", &probe_conf.bootconfig,
+		    "Output probe definition with bootconfig format"),
 	OPT_END()
 	};
 	int ret;
@@ -597,11 +611,11 @@ __cmd_probe(int argc, const char **argv)
 	set_option_flag(options, 'd', "del", PARSE_OPT_EXCLUSIVE);
 	set_option_flag(options, 'D', "definition", PARSE_OPT_EXCLUSIVE);
 	set_option_flag(options, 'l', "list", PARSE_OPT_EXCLUSIVE);
-#ifdef HAVE_DWARF_SUPPORT
+#ifdef HAVE_LIBDW_SUPPORT
 	set_option_flag(options, 'L', "line", PARSE_OPT_EXCLUSIVE);
 	set_option_flag(options, 'V', "vars", PARSE_OPT_EXCLUSIVE);
 #else
-# define set_nobuild(s, l, c) set_option_nobuild(options, s, l, "NO_DWARF=1", c)
+# define set_nobuild(s, l, c) set_option_nobuild(options, s, l, "NO_LIBDW=1", c)
 	set_nobuild('L', "line", false);
 	set_nobuild('V', "vars", false);
 	set_nobuild('\0', "externs", false);
@@ -615,12 +629,21 @@ __cmd_probe(int argc, const char **argv)
 
 	argc = parse_options(argc, argv, options, probe_usage,
 			     PARSE_OPT_STOP_AT_NON_OPTION);
+
+	if (quiet) {
+		if (verbose != 0) {
+			pr_err("  Error: -v and -q are exclusive.\n");
+			return -EINVAL;
+		}
+		verbose = -1;
+	}
+
 	if (argc > 0) {
 		if (strcmp(argv[0], "-") == 0) {
 			usage_with_options_msg(probe_usage, options,
 				"'-' is not supported.\n");
 		}
-		if (params.command && params.command != 'a') {
+		if (params->command && params->command != 'a') {
 			usage_with_options_msg(probe_usage, options,
 				"another command except --add is set.\n");
 		}
@@ -629,16 +652,12 @@ __cmd_probe(int argc, const char **argv)
 			pr_err_with_code("  Error: Command Parse Error.", ret);
 			return ret;
 		}
-		params.command = 'a';
+		params->command = 'a';
 	}
 
-	if (params.quiet) {
-		if (verbose != 0) {
-			pr_err("  Error: -v and -q are exclusive.\n");
-			return -EINVAL;
-		}
-		verbose = -1;
-	}
+	ret = symbol__validate_sym_arguments();
+	if (ret)
+		return ret;
 
 	if (probe_conf.max_probes == 0)
 		probe_conf.max_probes = MAX_PROBES;
@@ -653,65 +672,80 @@ __cmd_probe(int argc, const char **argv)
 	 * nor change running kernel. So if user gives offline vmlinux,
 	 * ignore its buildid.
 	 */
-	if (!strchr("lda", params.command) && symbol_conf.vmlinux_name)
+	if (!strchr("lda", params->command) && symbol_conf.vmlinux_name)
 		symbol_conf.ignore_vmlinux_buildid = true;
 
-	switch (params.command) {
+	switch (params->command) {
 	case 'l':
-		if (params.uprobes) {
+		if (params->uprobes) {
 			pr_err("  Error: Don't use --list with --exec.\n");
 			parse_options_usage(probe_usage, options, "l", true);
 			parse_options_usage(NULL, options, "x", true);
 			return -EINVAL;
 		}
-		ret = show_perf_probe_events(params.filter);
+		ret = show_perf_probe_events(params->filter);
 		if (ret < 0)
 			pr_err_with_code("  Error: Failed to show event list.", ret);
 		return ret;
 	case 'F':
-		ret = show_available_funcs(params.target, params.nsi,
-					   params.filter, params.uprobes);
+		ret = show_available_funcs(params->target, params->nsi,
+					   params->filter, params->uprobes);
 		if (ret < 0)
 			pr_err_with_code("  Error: Failed to show functions.", ret);
 		return ret;
-#ifdef HAVE_DWARF_SUPPORT
+#ifdef HAVE_LIBDW_SUPPORT
 	case 'L':
-		ret = show_line_range(&params.line_range, params.target,
-				      params.nsi, params.uprobes);
+		ret = show_line_range(&params->line_range, params->target,
+				      params->nsi, params->uprobes);
 		if (ret < 0)
 			pr_err_with_code("  Error: Failed to show lines.", ret);
 		return ret;
 	case 'V':
-		if (!params.filter)
-			params.filter = strfilter__new(DEFAULT_VAR_FILTER,
+		if (!params->filter)
+			params->filter = strfilter__new(DEFAULT_VAR_FILTER,
 						       NULL);
 
-		ret = show_available_vars(params.events, params.nevents,
-					  params.filter);
+		ret = show_available_vars(params->events, params->nevents,
+					  params->filter);
 		if (ret < 0)
 			pr_err_with_code("  Error: Failed to show vars.", ret);
 		return ret;
 #endif
 	case 'd':
-		ret = perf_del_probe_events(params.filter);
+		ret = perf_del_probe_events(params->filter);
 		if (ret < 0) {
 			pr_err_with_code("  Error: Failed to delete events.", ret);
 			return ret;
 		}
 		break;
 	case 'D':
+		if (probe_conf.bootconfig && params->uprobes) {
+			pr_err("  Error: --bootconfig doesn't support uprobes.\n");
+			return -EINVAL;
+		}
+		fallthrough;
 	case 'a':
 
 		/* Ensure the last given target is used */
-		if (params.target && !params.target_used) {
+		if (params->target && !params->target_used) {
 			pr_err("  Error: -x/-m must follow the probe definitions.\n");
 			parse_options_usage(probe_usage, options, "m", true);
 			parse_options_usage(NULL, options, "x", true);
 			return -EINVAL;
 		}
 
-		ret = perf_add_probe_events(params.events, params.nevents);
+		ret = perf_add_probe_events(params->events, params->nevents);
 		if (ret < 0) {
+
+			/*
+			 * When perf_add_probe_events() fails it calls
+			 * cleanup_perf_probe_events(pevs, npevs), i.e.
+			 * cleanup_perf_probe_events(params->events, params->nevents), which
+			 * will call clear_perf_probe_event(), so set nevents to zero
+			 * to avoid cleanup_params() to call clear_perf_probe_event() again
+			 * on the same pevs.
+			 */
+			params->nevents = 0;
 			pr_err_with_code("  Error: Failed to add events.", ret);
 			return ret;
 		}

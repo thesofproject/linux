@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * RapidIO sysfs attributes and support
  *
  * Copyright 2005 MontaVista Software, Inc.
  * Matt Porter <mporter@kernel.crashing.org>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -118,7 +114,7 @@ static struct attribute *rio_dev_attrs[] = {
 
 static ssize_t
 rio_read_config(struct file *filp, struct kobject *kobj,
-		struct bin_attribute *bin_attr,
+		const struct bin_attribute *bin_attr,
 		char *buf, loff_t off, size_t count)
 {
 	struct rio_dev *dev = to_rio_dev(kobj_to_dev(kobj));
@@ -189,7 +185,7 @@ rio_read_config(struct file *filp, struct kobject *kobj,
 
 static ssize_t
 rio_write_config(struct file *filp, struct kobject *kobj,
-		 struct bin_attribute *bin_attr,
+		 const struct bin_attribute *bin_attr,
 		 char *buf, loff_t off, size_t count)
 {
 	struct rio_dev *dev = to_rio_dev(kobj_to_dev(kobj));
@@ -245,7 +241,7 @@ rio_write_config(struct file *filp, struct kobject *kobj,
 	return count;
 }
 
-static struct bin_attribute rio_config_attr = {
+static const struct bin_attribute rio_config_attr = {
 	.attr = {
 		 .name = "config",
 		 .mode = S_IRUGO | S_IWUSR,
@@ -255,7 +251,7 @@ static struct bin_attribute rio_config_attr = {
 	.write = rio_write_config,
 };
 
-static struct bin_attribute *rio_dev_bin_attrs[] = {
+static const struct bin_attribute *const rio_dev_bin_attrs[] = {
 	&rio_config_attr,
 	NULL,
 };
@@ -290,8 +286,7 @@ const struct attribute_group *rio_dev_groups[] = {
 	NULL,
 };
 
-static ssize_t bus_scan_store(struct bus_type *bus, const char *buf,
-				size_t count)
+static ssize_t scan_store(const struct bus_type *bus, const char *buf, size_t count)
 {
 	long val;
 	int rc;
@@ -314,7 +309,7 @@ exit:
 
 	return rc;
 }
-static BUS_ATTR(scan, (S_IWUSR|S_IWGRP), NULL, bus_scan_store);
+static BUS_ATTR_WO(scan);
 
 static struct attribute *rio_bus_attrs[] = {
 	&bus_attr_scan.attr,

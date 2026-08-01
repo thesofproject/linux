@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Watchdog driver for Cirrus Logic EP93xx family of devices.
  *
@@ -10,10 +11,6 @@
  *
  * Copyright (c) 2012 H Hartley Sweeten <hsweeten@visionengravers.com>
  *	Convert to a platform device and use the watchdog framework API
- *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  *
  * This watchdog fires after 250msec, which is a too short interval
  * for us to rely on the user space daemon alone. So we ping the
@@ -89,18 +86,17 @@ static const struct watchdog_ops ep93xx_wdt_ops = {
 
 static int ep93xx_wdt_probe(struct platform_device *pdev)
 {
+	struct device *dev = &pdev->dev;
 	struct ep93xx_wdt_priv *priv;
 	struct watchdog_device *wdd;
-	struct resource *res;
 	unsigned long val;
 	int ret;
 
-	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
+	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->mmio = devm_ioremap_resource(&pdev->dev, res);
+	priv->mmio = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(priv->mmio))
 		return PTR_ERR(priv->mmio);
 
@@ -112,21 +108,21 @@ static int ep93xx_wdt_probe(struct platform_device *pdev)
 	wdd->ops = &ep93xx_wdt_ops;
 	wdd->min_timeout = 1;
 	wdd->max_hw_heartbeat_ms = 200;
-	wdd->parent = &pdev->dev;
+	wdd->parent = dev;
 
 	watchdog_set_nowayout(wdd, nowayout);
 
 	wdd->timeout = WDT_TIMEOUT;
-	watchdog_init_timeout(wdd, timeout, &pdev->dev);
+	watchdog_init_timeout(wdd, timeout, dev);
 
 	watchdog_set_drvdata(wdd, priv);
 
-	ret = devm_watchdog_register_device(&pdev->dev, wdd);
+	ret = devm_watchdog_register_device(dev, wdd);
 	if (ret)
 		return ret;
 
-	dev_info(&pdev->dev, "EP93XX watchdog driver %s\n",
-		(val & 0x08) ? " (nCS1 disable detected)" : "");
+	dev_info(dev, "EP93XX watchdog driver %s\n",
+		 (val & 0x08) ? " (nCS1 disable detected)" : "");
 
 	return 0;
 }

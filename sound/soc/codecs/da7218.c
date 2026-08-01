@@ -1,19 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * da7218.c - DA7218 ALSA SoC Codec Driver
  *
  * Copyright (c) 2015 Dialog Semiconductor
  *
  * Author: Adam Thomson <Adam.Thomson.Opensource@diasemi.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/clk.h>
 #include <linux/i2c.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
 #include <linux/pm.h>
@@ -302,22 +298,22 @@ static void da7218_alc_calib(struct snd_soc_component *component)
 	bool calibrated = false;
 
 	/* Save current state of MIC control registers */
-	mic_1_ctrl = snd_soc_component_read32(component, DA7218_MIC_1_CTRL);
-	mic_2_ctrl = snd_soc_component_read32(component, DA7218_MIC_2_CTRL);
+	mic_1_ctrl = snd_soc_component_read(component, DA7218_MIC_1_CTRL);
+	mic_2_ctrl = snd_soc_component_read(component, DA7218_MIC_2_CTRL);
 
 	/* Save current state of input mixer control registers */
-	mixin_1_ctrl = snd_soc_component_read32(component, DA7218_MIXIN_1_CTRL);
-	mixin_2_ctrl = snd_soc_component_read32(component, DA7218_MIXIN_2_CTRL);
+	mixin_1_ctrl = snd_soc_component_read(component, DA7218_MIXIN_1_CTRL);
+	mixin_2_ctrl = snd_soc_component_read(component, DA7218_MIXIN_2_CTRL);
 
 	/* Save current state of input filter control registers */
-	in_1l_filt_ctrl = snd_soc_component_read32(component, DA7218_IN_1L_FILTER_CTRL);
-	in_1r_filt_ctrl = snd_soc_component_read32(component, DA7218_IN_1R_FILTER_CTRL);
-	in_2l_filt_ctrl = snd_soc_component_read32(component, DA7218_IN_2L_FILTER_CTRL);
-	in_2r_filt_ctrl = snd_soc_component_read32(component, DA7218_IN_2R_FILTER_CTRL);
+	in_1l_filt_ctrl = snd_soc_component_read(component, DA7218_IN_1L_FILTER_CTRL);
+	in_1r_filt_ctrl = snd_soc_component_read(component, DA7218_IN_1R_FILTER_CTRL);
+	in_2l_filt_ctrl = snd_soc_component_read(component, DA7218_IN_2L_FILTER_CTRL);
+	in_2r_filt_ctrl = snd_soc_component_read(component, DA7218_IN_2R_FILTER_CTRL);
 
 	/* Save current state of input HPF control registers */
-	in_1_hpf_ctrl = snd_soc_component_read32(component, DA7218_IN_1_HPF_FILTER_CTRL);
-	in_2_hpf_ctrl = snd_soc_component_read32(component, DA7218_IN_2_HPF_FILTER_CTRL);
+	in_1_hpf_ctrl = snd_soc_component_read(component, DA7218_IN_1_HPF_FILTER_CTRL);
+	in_2_hpf_ctrl = snd_soc_component_read(component, DA7218_IN_2_HPF_FILTER_CTRL);
 
 	/* Enable then Mute MIC PGAs */
 	snd_soc_component_update_bits(component, DA7218_MIC_1_CTRL, DA7218_MIC_1_AMP_EN_MASK,
@@ -373,7 +369,7 @@ static void da7218_alc_calib(struct snd_soc_component *component)
 	snd_soc_component_update_bits(component, DA7218_CALIB_CTRL, DA7218_CALIB_AUTO_EN_MASK,
 			    DA7218_CALIB_AUTO_EN_MASK);
 	do {
-		calib_ctrl = snd_soc_component_read32(component, DA7218_CALIB_CTRL);
+		calib_ctrl = snd_soc_component_read(component, DA7218_CALIB_CTRL);
 		if (calib_ctrl & DA7218_CALIB_AUTO_EN_MASK) {
 			++i;
 			usleep_range(DA7218_ALC_CALIB_DELAY_MIN,
@@ -429,7 +425,7 @@ static void da7218_alc_calib(struct snd_soc_component *component)
 static int da7218_mixin_gain_put(struct snd_kcontrol *kcontrol,
 				 struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct da7218_priv *da7218 = snd_soc_component_get_drvdata(component);
 	int ret;
 
@@ -450,7 +446,7 @@ static int da7218_alc_sw_put(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *) kcontrol->private_value;
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct da7218_priv *da7218 = snd_soc_component_get_drvdata(component);
 	unsigned int lvalue = ucontrol->value.integer.value[0];
 	unsigned int rvalue = ucontrol->value.integer.value[1];
@@ -473,7 +469,7 @@ static int da7218_alc_sw_put(struct snd_kcontrol *kcontrol,
 static int da7218_tonegen_freq_get(struct snd_kcontrol *kcontrol,
 				   struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct da7218_priv *da7218 = snd_soc_component_get_drvdata(component);
 	struct soc_mixer_control *mixer_ctrl =
 		(struct soc_mixer_control *) kcontrol->private_value;
@@ -497,7 +493,7 @@ static int da7218_tonegen_freq_get(struct snd_kcontrol *kcontrol,
 static int da7218_tonegen_freq_put(struct snd_kcontrol *kcontrol,
 				   struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct da7218_priv *da7218 = snd_soc_component_get_drvdata(component);
 	struct soc_mixer_control *mixer_ctrl =
 		(struct soc_mixer_control *) kcontrol->private_value;
@@ -517,7 +513,7 @@ static int da7218_tonegen_freq_put(struct snd_kcontrol *kcontrol,
 static int da7218_mic_lvl_det_sw_put(struct snd_kcontrol *kcontrol,
 				     struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct da7218_priv *da7218 = snd_soc_component_get_drvdata(component);
 	struct soc_mixer_control *mixer_ctrl =
 		(struct soc_mixer_control *) kcontrol->private_value;
@@ -544,7 +540,7 @@ static int da7218_mic_lvl_det_sw_put(struct snd_kcontrol *kcontrol,
 static int da7218_mic_lvl_det_sw_get(struct snd_kcontrol *kcontrol,
 				     struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct da7218_priv *da7218 = snd_soc_component_get_drvdata(component);
 	struct soc_mixer_control *mixer_ctrl =
 		(struct soc_mixer_control *) kcontrol->private_value;
@@ -564,7 +560,7 @@ static int da7218_mic_lvl_det_sw_get(struct snd_kcontrol *kcontrol,
 static int da7218_biquad_coeff_get(struct snd_kcontrol *kcontrol,
 				   struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct da7218_priv *da7218 = snd_soc_component_get_drvdata(component);
 	struct soc_bytes_ext *bytes_ext =
 		(struct soc_bytes_ext *) kcontrol->private_value;
@@ -589,7 +585,7 @@ static int da7218_biquad_coeff_get(struct snd_kcontrol *kcontrol,
 static int da7218_biquad_coeff_put(struct snd_kcontrol *kcontrol,
 				   struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct da7218_priv *da7218 = snd_soc_component_get_drvdata(component);
 	struct soc_bytes_ext *bytes_ext =
 		(struct soc_bytes_ext *) kcontrol->private_value;
@@ -617,7 +613,7 @@ static int da7218_biquad_coeff_put(struct snd_kcontrol *kcontrol,
 	}
 
 	/* Make sure at least out filter1 enabled to allow programming */
-	out_filt1l = snd_soc_component_read32(component, DA7218_OUT_1L_FILTER_CTRL);
+	out_filt1l = snd_soc_component_read(component, DA7218_OUT_1L_FILTER_CTRL);
 	snd_soc_component_write(component, DA7218_OUT_1L_FILTER_CTRL,
 		      out_filt1l | DA7218_OUT_1L_FILTER_EN_MASK);
 
@@ -1423,7 +1419,7 @@ static int da7218_dai_event(struct snd_soc_dapm_widget *w,
 		i = 0;
 		success = false;
 		do {
-			refosc_cal = snd_soc_component_read32(component, DA7218_PLL_REFOSC_CAL);
+			refosc_cal = snd_soc_component_read(component, DA7218_PLL_REFOSC_CAL);
 			if (!(refosc_cal & DA7218_PLL_REFOSC_CAL_START_MASK)) {
 				success = true;
 			} else {
@@ -1442,7 +1438,7 @@ static int da7218_dai_event(struct snd_soc_dapm_widget *w,
 			      DA7218_PC_RESYNC_AUTO_MASK);
 
 		/* If SRM not enabled, we don't need to check status */
-		pll_ctrl = snd_soc_component_read32(component, DA7218_PLL_CTRL);
+		pll_ctrl = snd_soc_component_read(component, DA7218_PLL_CTRL);
 		if ((pll_ctrl & DA7218_PLL_MODE_MASK) != DA7218_PLL_MODE_SRM)
 			return 0;
 
@@ -1450,7 +1446,7 @@ static int da7218_dai_event(struct snd_soc_dapm_widget *w,
 		i = 0;
 		success = false;
 		do {
-			pll_status = snd_soc_component_read32(component, DA7218_PLL_STATUS);
+			pll_status = snd_soc_component_read(component, DA7218_PLL_STATUS);
 			if (pll_status & DA7218_PLL_SRM_STATUS_SRM_LOCK) {
 				success = true;
 			} else {
@@ -1939,10 +1935,10 @@ static int da7218_set_dai_fmt(struct snd_soc_dai *codec_dai, unsigned int fmt)
 	u8 dai_clk_mode = 0, dai_ctrl = 0;
 
 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		da7218->master = true;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		da7218->master = false;
 		break;
 	default:
@@ -2198,9 +2194,9 @@ static struct snd_soc_dai_driver da7218_dai = {
 		.formats = DA7218_FORMATS,
 	},
 	.ops = &da7218_dai_ops,
-	.symmetric_rates = 1,
+	.symmetric_rate = 1,
 	.symmetric_channels = 1,
-	.symmetric_samplebits = 1,
+	.symmetric_sample_bits = 1,
 };
 
 
@@ -2240,7 +2236,7 @@ static void da7218_hpldet_irq(struct snd_soc_component *component)
 	u8 jack_status;
 	int report;
 
-	jack_status = snd_soc_component_read32(component, DA7218_EVENT_STATUS);
+	jack_status = snd_soc_component_read(component, DA7218_EVENT_STATUS);
 
 	if (jack_status & DA7218_HPLDET_JACK_STS_MASK)
 		report = SND_JACK_HEADPHONE;
@@ -2260,7 +2256,7 @@ static irqreturn_t da7218_irq_thread(int irq, void *data)
 	u8 status;
 
 	/* Read IRQ status reg */
-	status = snd_soc_component_read32(component, DA7218_EVENT);
+	status = snd_soc_component_read(component, DA7218_EVENT);
 	if (!status)
 		return IRQ_NONE;
 
@@ -2288,16 +2284,6 @@ static const struct of_device_id da7218_of_match[] = {
 	{ }
 };
 MODULE_DEVICE_TABLE(of, da7218_of_match);
-
-static inline int da7218_of_get_id(struct device *dev)
-{
-	const struct of_device_id *id = of_match_device(da7218_of_match, dev);
-
-	if (id)
-		return (uintptr_t)id->data;
-	else
-		return -EINVAL;
-}
 
 static enum da7218_micbias_voltage
 	da7218_of_micbias_lvl(struct snd_soc_component *component, u32 val)
@@ -2576,6 +2562,7 @@ static int da7218_set_bias_level(struct snd_soc_component *component,
 				 enum snd_soc_bias_level level)
 {
 	struct da7218_priv *da7218 = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	int ret;
 
 	switch (level) {
@@ -2583,7 +2570,7 @@ static int da7218_set_bias_level(struct snd_soc_component *component,
 		break;
 	case SND_SOC_BIAS_PREPARE:
 		/* Enable MCLK for transition to ON state */
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_STANDBY) {
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_STANDBY) {
 			if (da7218->mclk) {
 				ret = clk_prepare_enable(da7218->mclk);
 				if (ret) {
@@ -2595,7 +2582,7 @@ static int da7218_set_bias_level(struct snd_soc_component *component,
 
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF) {
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_OFF) {
 			/* Master bias */
 			snd_soc_component_update_bits(component, DA7218_REFERENCES,
 					    DA7218_BIAS_EN_MASK,
@@ -2897,14 +2884,10 @@ static int da7218_probe(struct snd_soc_component *component)
 	da7218_handle_pdata(component);
 
 	/* Check if MCLK provided, if not the clock is NULL */
-	da7218->mclk = devm_clk_get(component->dev, "mclk");
+	da7218->mclk = devm_clk_get_optional(component->dev, "mclk");
 	if (IS_ERR(da7218->mclk)) {
-		if (PTR_ERR(da7218->mclk) != -ENOENT) {
-			ret = PTR_ERR(da7218->mclk);
-			goto err_disable_reg;
-		} else {
-			da7218->mclk = NULL;
-		}
+		ret = PTR_ERR(da7218->mclk);
+		goto err_disable_reg;
 	}
 
 	/* Default PC to free-running */
@@ -3044,7 +3027,6 @@ static const struct snd_soc_component_driver soc_component_dev_da7218 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 
@@ -3052,7 +3034,7 @@ static const struct snd_soc_component_driver soc_component_dev_da7218 = {
  * Regmap configs
  */
 
-static struct reg_default da7218_reg_defaults[] = {
+static const struct reg_default da7218_reg_defaults[] = {
 	{ DA7218_SYSTEM_ACTIVE, 0x00 },
 	{ DA7218_CIF_CTRL, 0x00 },
 	{ DA7218_SPARE1, 0x00 },
@@ -3262,8 +3244,7 @@ static const struct regmap_config da7218_regmap_config = {
  * I2C layer
  */
 
-static int da7218_i2c_probe(struct i2c_client *i2c,
-			    const struct i2c_device_id *id)
+static int da7218_i2c_probe(struct i2c_client *i2c)
 {
 	struct da7218_priv *da7218;
 	int ret;
@@ -3274,10 +3255,7 @@ static int da7218_i2c_probe(struct i2c_client *i2c,
 
 	i2c_set_clientdata(i2c, da7218);
 
-	if (i2c->dev.of_node)
-		da7218->dev_id = da7218_of_get_id(&i2c->dev);
-	else
-		da7218->dev_id = id->driver_data;
+	da7218->dev_id = (uintptr_t)i2c_get_match_data(i2c);
 
 	if ((da7218->dev_id != DA7217_DEV_ID) &&
 	    (da7218->dev_id != DA7218_DEV_ID)) {
@@ -3304,8 +3282,8 @@ static int da7218_i2c_probe(struct i2c_client *i2c,
 }
 
 static const struct i2c_device_id da7218_i2c_id[] = {
-	{ "da7217", DA7217_DEV_ID },
-	{ "da7218", DA7218_DEV_ID },
+	{ .name = "da7217", .driver_data = DA7217_DEV_ID },
+	{ .name = "da7218", .driver_data = DA7218_DEV_ID },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, da7218_i2c_id);
@@ -3313,7 +3291,7 @@ MODULE_DEVICE_TABLE(i2c, da7218_i2c_id);
 static struct i2c_driver da7218_i2c_driver = {
 	.driver = {
 		.name = "da7218",
-		.of_match_table = of_match_ptr(da7218_of_match),
+		.of_match_table = da7218_of_match,
 	},
 	.probe		= da7218_i2c_probe,
 	.id_table	= da7218_i2c_id,

@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Touchscreen driver for WM831x PMICs
  *
  * Copyright 2011 Wolfson Microelectronics plc.
  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/module.h>
@@ -294,7 +290,7 @@ static int wm831x_ts_probe(struct platform_device *pdev)
 		default:
 			dev_err(&pdev->dev, "Unsupported ISEL setting: %d\n",
 				pdata->isel);
-			/* Fall through */
+			fallthrough;
 		case 200:
 		case 0:
 			wm831x_set_bits(wm831x, WM831X_TOUCH_CONTROL_2,
@@ -321,14 +317,13 @@ static int wm831x_ts_probe(struct platform_device *pdev)
 
 	error = request_threaded_irq(wm831x_ts->data_irq,
 				     NULL, wm831x_ts_data_irq,
-				     irqf | IRQF_ONESHOT,
+				     irqf | IRQF_ONESHOT | IRQF_NO_AUTOEN,
 				     "Touchscreen data", wm831x_ts);
 	if (error) {
 		dev_err(&pdev->dev, "Failed to request data IRQ %d: %d\n",
 			wm831x_ts->data_irq, error);
 		goto err_alloc;
 	}
-	disable_irq(wm831x_ts->data_irq);
 
 	if (pdata && pdata->pd_irqf)
 		irqf = pdata->pd_irqf;
@@ -379,14 +374,12 @@ err_alloc:
 	return error;
 }
 
-static int wm831x_ts_remove(struct platform_device *pdev)
+static void wm831x_ts_remove(struct platform_device *pdev)
 {
 	struct wm831x_ts *wm831x_ts = platform_get_drvdata(pdev);
 
 	free_irq(wm831x_ts->pd_irq, wm831x_ts);
 	free_irq(wm831x_ts->data_irq, wm831x_ts);
-
-	return 0;
 }
 
 static struct platform_driver wm831x_ts_driver = {

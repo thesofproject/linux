@@ -33,24 +33,8 @@ extern bool shpchp_poll_mode;
 extern int shpchp_poll_time;
 extern bool shpchp_debug;
 
-#define dbg(format, arg...)						\
-do {									\
-	if (shpchp_debug)						\
-		printk(KERN_DEBUG "%s: " format, MY_NAME, ## arg);	\
-} while (0)
-#define err(format, arg...)						\
-	printk(KERN_ERR "%s: " format, MY_NAME, ## arg)
-#define info(format, arg...)						\
-	printk(KERN_INFO "%s: " format, MY_NAME, ## arg)
-#define warn(format, arg...)						\
-	printk(KERN_WARNING "%s: " format, MY_NAME, ## arg)
-
 #define ctrl_dbg(ctrl, format, arg...)					\
-	do {								\
-		if (shpchp_debug)					\
-			pci_printk(KERN_DEBUG, ctrl->pci_dev,		\
-					format, ## arg);		\
-	} while (0)
+	pci_dbg(ctrl->pci_dev, format, ## arg)
 #define ctrl_err(ctrl, format, arg...)					\
 	pci_err(ctrl->pci_dev, format, ## arg)
 #define ctrl_info(ctrl, format, arg...)					\
@@ -67,11 +51,12 @@ struct slot {
 	u32 number;
 	u8 is_a_board;
 	u8 state;
+	u8 attention_save;
 	u8 presence_save;
+	u8 latch_save;
 	u8 pwr_save;
 	struct controller *ctrl;
-	const struct hpc_ops *hpc_ops;
-	struct hotplug_slot *hotplug_slot;
+	struct hotplug_slot hotplug_slot;
 	struct list_head	slot_list;
 	struct delayed_work work;	/* work for button event */
 	struct mutex lock;
@@ -92,7 +77,6 @@ struct controller {
 	int slot_num_inc;		/* 1 or -1 */
 	struct pci_dev *pci_dev;
 	struct list_head slot_list;
-	const struct hpc_ops *hpc_ops;
 	wait_queue_head_t queue;	/* sleep & wake process */
 	u8 slot_device_offset;
 	u32 pcix_misc2_reg;	/* for amd pogo errata */
@@ -105,7 +89,6 @@ struct controller {
 };
 
 /* Define AMD SHPC ID  */
-#define PCI_DEVICE_ID_AMD_GOLAM_7450	0x7450
 #define PCI_DEVICE_ID_AMD_POGO_7458	0x7458
 
 /* AMD PCI-X bridge registers */
@@ -163,26 +146,15 @@ u8 shpchp_handle_switch_change(u8 hp_slot, struct controller *ctrl);
 u8 shpchp_handle_presence_change(u8 hp_slot, struct controller *ctrl);
 u8 shpchp_handle_power_fault(u8 hp_slot, struct controller *ctrl);
 int shpchp_configure_device(struct slot *p_slot);
-int shpchp_unconfigure_device(struct slot *p_slot);
+void shpchp_unconfigure_device(struct slot *p_slot);
 void cleanup_slots(struct controller *ctrl);
 void shpchp_queue_pushbutton_work(struct work_struct *work);
 int shpc_init(struct controller *ctrl, struct pci_dev *pdev);
 
 static inline const char *slot_name(struct slot *slot)
 {
-	return hotplug_slot_name(slot->hotplug_slot);
+	return hotplug_slot_name(&slot->hotplug_slot);
 }
-
-#ifdef CONFIG_ACPI
-#include <linux/pci-acpi.h>
-static inline int get_hp_hw_control_from_firmware(struct pci_dev *dev)
-{
-	u32 flags = OSC_PCI_SHPC_NATIVE_HP_CONTROL;
-	return acpi_get_hp_hw_control_from_firmware(dev, flags);
-}
-#else
-#define get_hp_hw_control_from_firmware(dev) (0)
-#endif
 
 struct ctrl_reg {
 	volatile u32 base_offset;
@@ -219,7 +191,7 @@ enum ctrl_offsets {
 
 static inline struct slot *get_slot(struct hotplug_slot *hotplug_slot)
 {
-	return hotplug_slot->private;
+	return container_of(hotplug_slot, struct slot, hotplug_slot);
 }
 
 static inline struct slot *shpchp_find_slot(struct controller *ctrl, u8 device)
@@ -310,25 +282,22 @@ static inline void amd_pogo_errata_restore_misc_reg(struct slot *p_slot)
 	pci_write_config_dword(p_slot->ctrl->pci_dev, PCIX_MISCII_OFFSET, pcix_misc2_temp);
 }
 
-struct hpc_ops {
-	int (*power_on_slot)(struct slot *slot);
-	int (*slot_enable)(struct slot *slot);
-	int (*slot_disable)(struct slot *slot);
-	int (*set_bus_speed_mode)(struct slot *slot, enum pci_bus_speed speed);
-	int (*get_power_status)(struct slot *slot, u8 *status);
-	int (*get_attention_status)(struct slot *slot, u8 *status);
-	int (*set_attention_status)(struct slot *slot, u8 status);
-	int (*get_latch_status)(struct slot *slot, u8 *status);
-	int (*get_adapter_status)(struct slot *slot, u8 *status);
-	int (*get_adapter_speed)(struct slot *slot, enum pci_bus_speed *speed);
-	int (*get_mode1_ECC_cap)(struct slot *slot, u8 *mode);
-	int (*get_prog_int)(struct slot *slot, u8 *prog_int);
-	int (*query_power_fault)(struct slot *slot);
-	void (*green_led_on)(struct slot *slot);
-	void (*green_led_off)(struct slot *slot);
-	void (*green_led_blink)(struct slot *slot);
-	void (*release_ctlr)(struct controller *ctrl);
-	int (*check_cmd_status)(struct controller *ctrl);
-};
+int shpchp_power_on_slot(struct slot *slot);
+int shpchp_slot_enable(struct slot *slot);
+int shpchp_slot_disable(struct slot *slot);
+int shpchp_set_bus_speed_mode(struct slot *slot, enum pci_bus_speed speed);
+int shpchp_get_power_status(struct slot *slot, u8 *status);
+int shpchp_get_attention_status(struct slot *slot, u8 *status);
+int shpchp_set_attention_status(struct slot *slot, u8 status);
+int shpchp_get_latch_status(struct slot *slot, u8 *status);
+int shpchp_get_adapter_status(struct slot *slot, u8 *status);
+int shpchp_get_adapter_speed(struct slot *slot, enum pci_bus_speed *speed);
+int shpchp_get_prog_int(struct slot *slot, u8 *prog_int);
+int shpchp_query_power_fault(struct slot *slot);
+void shpchp_green_led_on(struct slot *slot);
+void shpchp_green_led_off(struct slot *slot);
+void shpchp_green_led_blink(struct slot *slot);
+void shpchp_release_ctlr(struct controller *ctrl);
+int shpchp_check_cmd_status(struct controller *ctrl);
 
 #endif				/* _SHPCHP_H */

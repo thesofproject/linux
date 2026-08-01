@@ -25,7 +25,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include <linux/pci.h>		/* To determine if a card is pci-e */
 #include <linux/log2.h>
@@ -522,7 +522,7 @@ ath5k_hw_set_power_mode(struct ath5k_hw *ah, enum ath5k_power_mode mode,
 	switch (mode) {
 	case AR5K_PM_AUTO:
 		staid &= ~AR5K_STA_ID1_DEFAULT_ANTENNA;
-		/* fallthrough */
+		fallthrough;
 	case AR5K_PM_NETWORK_SLEEP:
 		if (set_chip)
 			ath5k_hw_reg_write(ah,

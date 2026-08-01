@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * tascam-midi.c - a part of driver for TASCAM FireWire series
  *
  * Copyright (c) 2015 Takashi Sakamoto
- *
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 #include "tascam.h"
@@ -44,30 +43,24 @@ static void midi_playback_drain(struct snd_rawmidi_substream *substream)
 static void midi_capture_trigger(struct snd_rawmidi_substream *substrm, int up)
 {
 	struct snd_tscm *tscm = substrm->rmidi->private_data;
-	unsigned long flags;
 
-	spin_lock_irqsave(&tscm->lock, flags);
+	guard(spinlock_irqsave)(&tscm->lock);
 
 	if (up)
 		tscm->tx_midi_substreams[substrm->number] = substrm;
 	else
 		tscm->tx_midi_substreams[substrm->number] = NULL;
-
-	spin_unlock_irqrestore(&tscm->lock, flags);
 }
 
 static void midi_playback_trigger(struct snd_rawmidi_substream *substrm, int up)
 {
 	struct snd_tscm *tscm = substrm->rmidi->private_data;
-	unsigned long flags;
 
-	spin_lock_irqsave(&tscm->lock, flags);
+	guard(spinlock_irqsave)(&tscm->lock);
 
 	if (up)
 		snd_fw_async_midi_port_run(&tscm->out_ports[substrm->number],
 					   substrm);
-
-	spin_unlock_irqrestore(&tscm->lock, flags);
 }
 
 int snd_tscm_create_midi_devices(struct snd_tscm *tscm)
@@ -109,9 +102,9 @@ int snd_tscm_create_midi_devices(struct snd_tscm *tscm)
 		/* TODO: support virtual MIDI ports. */
 		if (subs->number < tscm->spec->midi_capture_ports) {
 			/* Hardware MIDI ports. */
-			snprintf(subs->name, sizeof(subs->name),
-				 "%s MIDI %d",
-				 tscm->card->shortname, subs->number + 1);
+			scnprintf(subs->name, sizeof(subs->name),
+				  "%s MIDI %d",
+				  tscm->card->shortname, subs->number + 1);
 		}
 	}
 
@@ -124,9 +117,9 @@ int snd_tscm_create_midi_devices(struct snd_tscm *tscm)
 	list_for_each_entry(subs, &stream->substreams, list) {
 		if (subs->number < tscm->spec->midi_playback_ports) {
 			/* Hardware MIDI ports only. */
-			snprintf(subs->name, sizeof(subs->name),
-				 "%s MIDI %d",
-				 tscm->card->shortname, subs->number + 1);
+			scnprintf(subs->name, sizeof(subs->name),
+				  "%s MIDI %d",
+				  tscm->card->shortname, subs->number + 1);
 		}
 	}
 

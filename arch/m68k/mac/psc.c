@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *	Apple Peripheral System Controller (PSC)
  *
@@ -24,6 +25,8 @@
 #include <asm/macintosh.h>
 #include <asm/macints.h>
 #include <asm/mac_psc.h>
+
+#include "mac.h"
 
 #define DEBUG_PSC
 

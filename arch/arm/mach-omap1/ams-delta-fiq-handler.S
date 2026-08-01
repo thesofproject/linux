@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  linux/arch/arm/mach-omap1/ams-delta-fiq-handler.S
  *
@@ -7,33 +8,26 @@
  *  Copyright (C) 2004 Pete Trapps
  *  Copyright (C) 2006 Matt Callow
  *  Copyright (C) 2010 Janusz Krzysztofik
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.
  */
 
 #include <linux/linkage.h>
+#include <linux/platform_data/ams-delta-fiq.h>
+#include <linux/platform_data/gpio-omap.h>
+#include <linux/soc/ti/omap1-io.h>
+
 #include <asm/assembler.h>
+#include <asm/irq.h>
 
-#include <mach/board-ams-delta.h>
-#include <mach/ams-delta-fiq.h>
-
+#include "hardware.h"
+#include "ams-delta-fiq.h"
+#include "board-ams-delta.h"
 #include "iomap.h"
-#include "soc.h"
 
 /*
- * GPIO related definitions, copied from arch/arm/plat-omap/gpio.c.
- * Unfortunately, those were not placed in a separate header file.
+ * OMAP1510 GPIO related symbol copied from arch/arm/mach-omap1/gpio15xx.c.
+ * Unfortunately, it was not placed in a separate header file.
  */
 #define OMAP1510_GPIO_BASE		0xFFFCE000
-#define OMAP1510_GPIO_DATA_INPUT	0x00
-#define OMAP1510_GPIO_DATA_OUTPUT	0x04
-#define OMAP1510_GPIO_DIR_CONTROL	0x08
-#define OMAP1510_GPIO_INT_CONTROL	0x0c
-#define OMAP1510_GPIO_INT_MASK		0x10
-#define OMAP1510_GPIO_INT_STATUS	0x14
-#define OMAP1510_GPIO_PIN_CONTROL	0x18
 
 /* GPIO register bitmasks */
 #define KEYBRD_DATA_MASK		(0x1 << AMS_DELTA_GPIO_PIN_KEYBRD_DATA)
@@ -103,7 +97,7 @@ ENTRY(qwerty_fiqin_start)
 
 	ldr r13, [r12, #IRQ_ITR_REG_OFFSET]	@ fetch interrupts status
 	bics r13, r13, r11			@ clear masked - any left?
-	beq exit				@ none - spurious FIQ? exit
+	beq .Lexit				@ none - spurious FIQ? exit
 
 	ldr r10, [r12, #IRQ_SIR_FIQ_REG_OFFSET]	@ get requested interrupt number
 
@@ -111,37 +105,38 @@ ENTRY(qwerty_fiqin_start)
 	str r8, [r12, #IRQ_CONTROL_REG_OFFSET]
 
 	cmp r10, #(INT_GPIO_BANK1 - NR_IRQS_LEGACY)	@ is it GPIO interrupt?
-	beq gpio				@ yes - process it
+	beq .Lgpio				@ yes - process it
 
 	mov r8, #1
 	orr r8, r11, r8, lsl r10		@ mask spurious interrupt
 	str r8, [r12, #IRQ_MIR_REG_OFFSET]
-exit:
+.Lexit:
 	subs	pc, lr, #4			@ return from FIQ
 	@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
 
 	@@@@@@@@@@@@@@@@@@@@@@@@@@@
-gpio:	@ GPIO bank interrupt handler
+.Lgpio:	@ GPIO bank interrupt handler
 	ldr r12, omap1510_gpio_base		@ set base pointer to GPIO bank
 
 	ldr r11, [r12, #OMAP1510_GPIO_INT_MASK]	@ fetch GPIO interrupts mask
-restart:
+.Lrestart:
 	ldr r13, [r12, #OMAP1510_GPIO_INT_STATUS]	@ fetch status bits
 	bics r13, r13, r11			@ clear masked - any left?
-	beq exit				@ no - spurious interrupt? exit
+	beq .Lexit				@ no - spurious interrupt? exit
 
 	orr r11, r11, r13			@ mask all requested interrupts
 	str r11, [r12, #OMAP1510_GPIO_INT_MASK]
 
+	str r13, [r12, #OMAP1510_GPIO_INT_STATUS] @ ack all requested interrupts
+
 	ands r10, r13, #KEYBRD_CLK_MASK		@ extract keyboard status - set?
-	beq hksw				@ no - try next source
+	beq .Lhksw				@ no - try next source
 
 
 	@@@@@@@@@@@@@@@@@@@@@@
 	@ Keyboard clock FIQ mode interrupt handler
 	@ r10 now contains KEYBRD_CLK_MASK, use it
-	str r10, [r12, #OMAP1510_GPIO_INT_STATUS]	@ ack the interrupt
 	bic r11, r11, r10				@ unmask it
 	str r11, [r12, #OMAP1510_GPIO_INT_MASK]
 
@@ -150,10 +145,10 @@ restart:
 
 	ldr r10, [r9, #BUF_STATE]		@ fetch kbd interface state
 	cmp r10, #0				@ are we expecting start bit?
-	bne data				@ no - go to data processing
+	bne .Ldata				@ no - go to data processing
 
 	ands r8, r8, #KEYBRD_DATA_MASK		@ check start bit - detected?
-	beq hksw				@ no - try next source
+	beq .Lhksw				@ no - try next source
 
 	@ r8 contains KEYBRD_DATA_MASK, use it
 	str r8, [r9, #BUF_STATE]		@ enter data processing state
@@ -167,9 +162,9 @@ restart:
 	mvn r11, #KEYBRD_CLK_MASK		@ prepare all except kbd mask
 	str r11, [r12, #OMAP1510_GPIO_INT_MASK]	@ store into the mask register
 
-	b restart				@ restart
+	b .Lrestart				@ restart
 
-data:	ldr r10, [r9, #BUF_MASK]		@ fetch current input bit mask
+.Ldata:	ldr r10, [r9, #BUF_MASK]		@ fetch current input bit mask
 
 	@ r8 still contains GPIO input bits
 	ands r8, r8, #KEYBRD_DATA_MASK		@ is keyboard data line low?
@@ -180,7 +175,7 @@ data:	ldr r10, [r9, #BUF_MASK]		@ fetch current input bit mask
 	mov r10, r10, lsl #1			@ shift mask left
 	bics r10, r10, #0x800			@ have we got all the bits?
 	strne r10, [r9, #BUF_MASK]		@ not yet - store the mask
-	bne restart				@ and restart
+	bne .Lrestart				@ and restart
 
 	@ r10 already contains 0, reuse it
 	str r10, [r9, #BUF_STATE]		@ reset state to start
@@ -194,7 +189,7 @@ data:	ldr r10, [r9, #BUF_MASK]		@ fetch current input bit mask
 	ldr r10, [r9, #BUF_KEYS_CNT]		@ get saved keystrokes count
 	ldr r8, [r9, #BUF_BUF_LEN]		@ get buffer size
 	cmp r10, r8				@ is buffer full?
-	beq hksw				@ yes - key lost, next source
+	beq .Lhksw				@ yes - key lost, next source
 
 	add r10, r10, #1			@ incremet keystrokes counter
 	str r10, [r9, #BUF_KEYS_CNT]
@@ -218,9 +213,9 @@ data:	ldr r10, [r9, #BUF_MASK]		@ fetch current input bit mask
 	@@@@@@@@@@@@@@@@@@@@@@@@
 
 
-hksw:	@Is hook switch interrupt requested?
+.Lhksw:	@Is hook switch interrupt requested?
 	tst r13, #HOOK_SWITCH_MASK 		@ is hook switch status bit set?
-	beq mdm					@ no - try next source
+	beq .Lmdm				@ no - try next source
 
 
 	@@@@@@@@@@@@@@@@@@@@@@@@
@@ -235,9 +230,9 @@ hksw:	@Is hook switch interrupt requested?
 	@@@@@@@@@@@@@@@@@@@@@@@@
 
 
-mdm:	@Is it a modem interrupt?
+.Lmdm:	@Is it a modem interrupt?
 	tst r13, #MODEM_IRQ_MASK 		@ is modem status bit set?
-	beq irq					@ no - check for next interrupt
+	beq .Lirq				@ no - check for next interrupt
 
 
 	@@@@@@@@@@@@@@@@@@@@@@@@
@@ -250,13 +245,13 @@ mdm:	@Is it a modem interrupt?
 	@@@@@@@@@@@@@@@@@@@@@@@@
 
 
-irq:	@ Place deferred_fiq interrupt request
+.Lirq:	@ Place deferred_fiq interrupt request
 	ldr r12, deferred_fiq_ih_base		@ set pointer to IRQ handler
 	mov r10, #DEFERRED_FIQ_MASK		@ set deferred_fiq bit
 	str r10, [r12, #IRQ_ISR_REG_OFFSET] 	@ place it in the ISR register
 
 	ldr r12, omap1510_gpio_base		@ set pointer back to GPIO bank
-	b restart				@ check for next GPIO interrupt
+	b .Lrestart				@ check for next GPIO interrupt
 	@@@@@@@@@@@@@@@@@@@@@@@@@@@
 
 

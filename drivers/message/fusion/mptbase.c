@@ -57,7 +57,7 @@
 #include <linux/kdev_t.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
-#include <linux/interrupt.h>		/* needed for in_interrupt() proto */
+#include <linux/interrupt.h>
 #include <linux/dma-mapping.h>
 #include <linux/kthread.h>
 #include <scsi/scsi_host.h>
@@ -197,9 +197,9 @@ static int	mpt_host_page_access_control(MPT_ADAPTER *ioc, u8 access_control_valu
 static int	mpt_host_page_alloc(MPT_ADAPTER *ioc, pIOCInit_t ioc_init);
 
 #ifdef CONFIG_PROC_FS
-static const struct file_operations mpt_summary_proc_fops;
-static const struct file_operations mpt_version_proc_fops;
-static const struct file_operations mpt_iocinfo_proc_fops;
+static int mpt_summary_proc_show(struct seq_file *m, void *v);
+static int mpt_version_proc_show(struct seq_file *m, void *v);
+static int mpt_iocinfo_proc_show(struct seq_file *m, void *v);
 #endif
 static void	mpt_get_fw_exp_ver(char *buf, MPT_ADAPTER *ioc);
 
@@ -300,8 +300,8 @@ mpt_is_discovery_complete(MPT_ADAPTER *ioc)
 	if (!hdr.ExtPageLength)
 		goto out;
 
-	buffer = pci_alloc_consistent(ioc->pcidev, hdr.ExtPageLength * 4,
-	    &dma_handle);
+	buffer = dma_alloc_coherent(&ioc->pcidev->dev, hdr.ExtPageLength * 4,
+				    &dma_handle, GFP_KERNEL);
 	if (!buffer)
 		goto out;
 
@@ -316,8 +316,8 @@ mpt_is_discovery_complete(MPT_ADAPTER *ioc)
 		rc = 1;
 
  out_free_consistent:
-	pci_free_consistent(ioc->pcidev, hdr.ExtPageLength * 4,
-	    buffer, dma_handle);
+	dma_free_coherent(&ioc->pcidev->dev, hdr.ExtPageLength * 4, buffer,
+			  dma_handle);
  out:
 	return rc;
 }
@@ -335,11 +335,11 @@ static int mpt_remove_dead_ioc_func(void *arg)
 	MPT_ADAPTER *ioc = (MPT_ADAPTER *)arg;
 	struct pci_dev *pdev;
 
-	if ((ioc == NULL))
+	if (!ioc)
 		return -1;
 
 	pdev = ioc->pcidev;
-	if ((pdev == NULL))
+	if (!pdev)
 		return -1;
 
 	pci_stop_and_remove_bus_device_locked(pdev);
@@ -473,7 +473,6 @@ mpt_turbo_reply(MPT_ADAPTER *ioc, u32 pa)
 			mpt_free_msg_frame(ioc, mf);
 			mb();
 			return;
-			break;
 		}
 		mr = (MPT_FRAME_HDR *) CAST_U32_TO_PTR(pa);
 		break;
@@ -642,6 +641,7 @@ mptbase_reply(MPT_ADAPTER *ioc, MPT_FRAME_HDR *req, MPT_FRAME_HDR *reply)
 			freereq = 0;
 		if (event != MPI_EVENT_EVENT_CHANGE)
 			break;
+		fallthrough;
 	case MPI_FUNCTION_CONFIG:
 	case MPI_FUNCTION_SAS_IO_UNIT_CONTROL:
 		ioc->mptbase_cmds.status |= MPT_MGMT_STATUS_COMMAND_GOOD;
@@ -712,7 +712,7 @@ mpt_register(MPT_CALLBACK cbfunc, MPT_DRIVER_CLASS dclass, char *func_name)
 			MptDriverClass[cb_idx] = dclass;
 			MptEvHandlers[cb_idx] = NULL;
 			last_drv_idx = cb_idx;
-			strlcpy(MptCallbacksName[cb_idx], func_name,
+			strscpy(MptCallbacksName[cb_idx], func_name,
 				MPT_MAX_CALLBACKNAME_LEN+1);
 			break;
 		}
@@ -829,7 +829,6 @@ int
 mpt_device_driver_register(struct mpt_pci_driver * dd_cbfunc, u8 cb_idx)
 {
 	MPT_ADAPTER	*ioc;
-	const struct pci_device_id *id;
 
 	if (!cb_idx || cb_idx >= MPT_MAX_PROTOCOL_DRIVERS)
 		return -EINVAL;
@@ -838,10 +837,8 @@ mpt_device_driver_register(struct mpt_pci_driver * dd_cbfunc, u8 cb_idx)
 
 	/* call per pci device probe entry point */
 	list_for_each_entry(ioc, &ioc_list, list) {
-		id = ioc->pcidev->driver ?
-		    ioc->pcidev->driver->id_table : NULL;
 		if (dd_cbfunc->probe)
-			dd_cbfunc->probe(ioc->pcidev, id);
+			dd_cbfunc->probe(ioc->pcidev);
 	 }
 
 	return 0;
@@ -1277,8 +1274,6 @@ mpt_send_handshake_request(u8 cb_idx, MPT_ADAPTER *ioc, int reqBytes, u32 *req, 
 static int
 mpt_host_page_access_control(MPT_ADAPTER *ioc, u8 access_control_value, int sleepFlag)
 {
-	int	 r = 0;
-
 	/* return if in use */
 	if (CHIPREG_READ32(&ioc->chip->Doorbell)
 	    & MPI_DOORBELL_ACTIVE)
@@ -1292,9 +1287,9 @@ mpt_host_page_access_control(MPT_ADAPTER *ioc, u8 access_control_value, int slee
 		 (access_control_value<<12)));
 
 	/* Wait for IOC to clear Doorbell Status bit */
-	if ((r = WaitForDoorbellAck(ioc, 5, sleepFlag)) < 0) {
+	if (WaitForDoorbellAck(ioc, 5, sleepFlag) < 0)
 		return -2;
-	}else
+	else
 		return 0;
 }
 
@@ -1323,13 +1318,13 @@ mpt_host_page_alloc(MPT_ADAPTER *ioc, pIOCInit_t ioc_init)
 			return 0; /* fw doesn't need any host buffers */
 
 		/* spin till we get enough memory */
-		while(host_page_buffer_sz > 0) {
-
-			if((ioc->HostPageBuffer = pci_alloc_consistent(
-			    ioc->pcidev,
-			    host_page_buffer_sz,
-			    &ioc->HostPageBuffer_dma)) != NULL) {
-
+		while (host_page_buffer_sz > 0) {
+			ioc->HostPageBuffer =
+				dma_alloc_coherent(&ioc->pcidev->dev,
+						host_page_buffer_sz,
+						&ioc->HostPageBuffer_dma,
+						GFP_KERNEL);
+			if (ioc->HostPageBuffer) {
 				dinitprintk(ioc, printk(MYIOC_s_DEBUG_FMT
 				    "host_page_buffer @ %p, dma @ %x, sz=%d bytes\n",
 				    ioc->name, ioc->HostPageBuffer,
@@ -1666,16 +1661,14 @@ mpt_mapresources(MPT_ADAPTER *ioc)
 		const uint64_t required_mask = dma_get_required_mask
 		    (&pdev->dev);
 		if (required_mask > DMA_BIT_MASK(32)
-			&& !pci_set_dma_mask(pdev, DMA_BIT_MASK(64))
-			&& !pci_set_consistent_dma_mask(pdev,
-						 DMA_BIT_MASK(64))) {
+			&& !dma_set_mask(&pdev->dev, DMA_BIT_MASK(64))
+			&& !dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(64))) {
 			ioc->dma_mask = DMA_BIT_MASK(64);
 			dinitprintk(ioc, printk(MYIOC_s_INFO_FMT
 				": 64 BIT PCI BUS DMA ADDRESSING SUPPORTED\n",
 				ioc->name));
-		} else if (!pci_set_dma_mask(pdev, DMA_BIT_MASK(32))
-			&& !pci_set_consistent_dma_mask(pdev,
-						DMA_BIT_MASK(32))) {
+		} else if (!dma_set_mask(&pdev->dev, DMA_BIT_MASK(32))
+			   && !dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32))) {
 			ioc->dma_mask = DMA_BIT_MASK(32);
 			dinitprintk(ioc, printk(MYIOC_s_INFO_FMT
 				": 32 BIT PCI BUS DMA ADDRESSING SUPPORTED\n",
@@ -1686,9 +1679,8 @@ mpt_mapresources(MPT_ADAPTER *ioc)
 			goto out_pci_release_region;
 		}
 	} else {
-		if (!pci_set_dma_mask(pdev, DMA_BIT_MASK(32))
-			&& !pci_set_consistent_dma_mask(pdev,
-						DMA_BIT_MASK(32))) {
+		if (!dma_set_mask(&pdev->dev, DMA_BIT_MASK(32))
+			&& !dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32))) {
 			ioc->dma_mask = DMA_BIT_MASK(32);
 			dinitprintk(ioc, printk(MYIOC_s_INFO_FMT
 				": 32 BIT PCI BUS DMA ADDRESSING SUPPORTED\n",
@@ -1779,7 +1771,7 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 	struct proc_dir_entry *dent;
 #endif
 
-	ioc = kzalloc(sizeof(MPT_ADAPTER), GFP_ATOMIC);
+	ioc = kzalloc_obj(MPT_ADAPTER);
 	if (ioc == NULL) {
 		printk(KERN_ERR MYNAM ": ERROR - Insufficient memory to add adapter!\n");
 		return -ENOMEM;
@@ -1864,10 +1856,9 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 	/* Initialize workqueue */
 	INIT_DELAYED_WORK(&ioc->fault_reset_work, mpt_fault_reset_work);
 
-	snprintf(ioc->reset_work_q_name, MPT_KOBJ_NAME_LEN,
-		 "mpt_poll_%d", ioc->id);
-	ioc->reset_work_q = alloc_workqueue(ioc->reset_work_q_name,
-					    WQ_MEM_RECLAIM, 0);
+	ioc->reset_work_q =
+		alloc_workqueue("mpt_poll_%d", WQ_MEM_RECLAIM | WQ_PERCPU, 0,
+				ioc->id);
 	if (!ioc->reset_work_q) {
 		printk(MYIOC_s_ERR_FMT "Insufficient memory to add adapter!\n",
 		    ioc->name);
@@ -1886,6 +1877,7 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 	case MPI_MANUFACTPAGE_DEVICEID_FC939X:
 	case MPI_MANUFACTPAGE_DEVICEID_FC949X:
 		ioc->errata_flag_1064 = 1;
+		fallthrough;
 	case MPI_MANUFACTPAGE_DEVICEID_FC909:
 	case MPI_MANUFACTPAGE_DEVICEID_FC929:
 	case MPI_MANUFACTPAGE_DEVICEID_FC919:
@@ -1930,6 +1922,7 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 			pcixcmd &= 0x8F;
 			pci_write_config_byte(pdev, 0x6a, pcixcmd);
 		}
+		fallthrough;
 
 	case MPI_MANUFACTPAGE_DEVID_1030_53C1035:
 		ioc->bus_type = SPI;
@@ -1992,9 +1985,9 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	INIT_LIST_HEAD(&ioc->fw_event_list);
 	spin_lock_init(&ioc->fw_event_lock);
-	snprintf(ioc->fw_event_q_name, MPT_KOBJ_NAME_LEN, "mpt/%d", ioc->id);
-	ioc->fw_event_q = alloc_workqueue(ioc->fw_event_q_name,
-					  WQ_MEM_RECLAIM, 0);
+	ioc->fw_event_q = alloc_workqueue("mpt/%d",
+					  WQ_MEM_RECLAIM | WQ_PERCPU, 0,
+					  ioc->id);
 	if (!ioc->fw_event_q) {
 		printk(MYIOC_s_ERR_FMT "Insufficient memory to add adapter!\n",
 		    ioc->name);
@@ -2030,7 +2023,7 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 	for(cb_idx = 0; cb_idx < MPT_MAX_PROTOCOL_DRIVERS; cb_idx++) {
 		if(MptDeviceDriverHandlers[cb_idx] &&
 		  MptDeviceDriverHandlers[cb_idx]->probe) {
-			MptDeviceDriverHandlers[cb_idx]->probe(pdev,id);
+			MptDeviceDriverHandlers[cb_idx]->probe(pdev);
 		}
 	}
 
@@ -2040,8 +2033,10 @@ mpt_attach(struct pci_dev *pdev, const struct pci_device_id *id)
 	 */
 	dent = proc_mkdir(ioc->name, mpt_proc_root_dir);
 	if (dent) {
-		proc_create_data("info", S_IRUGO, dent, &mpt_iocinfo_proc_fops, ioc);
-		proc_create_data("summary", S_IRUGO, dent, &mpt_summary_proc_fops, ioc);
+		proc_create_single_data("info", S_IRUGO, dent,
+				mpt_iocinfo_proc_show, ioc);
+		proc_create_single_data("summary", S_IRUGO, dent,
+				mpt_summary_proc_show, ioc);
 	}
 #endif
 
@@ -2736,8 +2731,8 @@ mpt_adapter_disable(MPT_ADAPTER *ioc)
 		sz = ioc->alloc_sz;
 		dexitprintk(ioc, printk(MYIOC_s_INFO_FMT "free  @ %p, sz=%d bytes\n",
 		    ioc->name, ioc->alloc, ioc->alloc_sz));
-		pci_free_consistent(ioc->pcidev, sz,
-				ioc->alloc, ioc->alloc_dma);
+		dma_free_coherent(&ioc->pcidev->dev, sz, ioc->alloc,
+				ioc->alloc_dma);
 		ioc->reply_frames = NULL;
 		ioc->req_frames = NULL;
 		ioc->alloc = NULL;
@@ -2746,8 +2741,8 @@ mpt_adapter_disable(MPT_ADAPTER *ioc)
 
 	if (ioc->sense_buf_pool != NULL) {
 		sz = (ioc->req_depth * MPT_SENSE_BUFFER_ALLOC);
-		pci_free_consistent(ioc->pcidev, sz,
-				ioc->sense_buf_pool, ioc->sense_buf_pool_dma);
+		dma_free_coherent(&ioc->pcidev->dev, sz, ioc->sense_buf_pool,
+				ioc->sense_buf_pool_dma);
 		ioc->sense_buf_pool = NULL;
 		ioc->alloc_total -= sz;
 	}
@@ -2770,9 +2765,9 @@ mpt_adapter_disable(MPT_ADAPTER *ioc)
 
 	if (ioc->spi_data.pIocPg4 != NULL) {
 		sz = ioc->spi_data.IocPg4Sz;
-		pci_free_consistent(ioc->pcidev, sz,
-			ioc->spi_data.pIocPg4,
-			ioc->spi_data.IocPg4_dma);
+		dma_free_coherent(&ioc->pcidev->dev, sz,
+				  ioc->spi_data.pIocPg4,
+				  ioc->spi_data.IocPg4_dma);
 		ioc->spi_data.pIocPg4 = NULL;
 		ioc->alloc_total -= sz;
 	}
@@ -2797,7 +2792,7 @@ mpt_adapter_disable(MPT_ADAPTER *ioc)
 			"HostPageBuffer free  @ %p, sz=%d bytes\n",
 			ioc->name, ioc->HostPageBuffer,
 			ioc->HostPageBuffer_sz));
-		pci_free_consistent(ioc->pcidev, ioc->HostPageBuffer_sz,
+		dma_free_coherent(&ioc->pcidev->dev, ioc->HostPageBuffer_sz,
 		    ioc->HostPageBuffer, ioc->HostPageBuffer_dma);
 		ioc->HostPageBuffer = NULL;
 		ioc->HostPageBuffer_sz = 0;
@@ -3080,7 +3075,7 @@ GetIocFacts(MPT_ADAPTER *ioc, int sleepFlag, int reason)
 	int			 req_sz;
 	int			 reply_sz;
 	int			 sz;
-	u32			 status, vv;
+	u32			 vv;
 	u8			 shiftFactor=1;
 
 	/* IOC *must* NOT be in RESET state! */
@@ -3138,7 +3133,6 @@ GetIocFacts(MPT_ADAPTER *ioc, int sleepFlag, int reason)
 		facts->IOCExceptions = le16_to_cpu(facts->IOCExceptions);
 		facts->IOCStatus = le16_to_cpu(facts->IOCStatus);
 		facts->IOCLogInfo = le32_to_cpu(facts->IOCLogInfo);
-		status = le16_to_cpu(facts->IOCStatus) & MPI_IOCSTATUS_MASK;
 		/* CHECKME! IOCStatus, IOCLogInfo */
 
 		facts->ReplyQueueDepth = le16_to_cpu(facts->ReplyQueueDepth);
@@ -3517,7 +3511,8 @@ mpt_alloc_fw_memory(MPT_ADAPTER *ioc, int size)
 		rc = 0;
 		goto out;
 	}
-	ioc->cached_fw = pci_alloc_consistent(ioc->pcidev, size, &ioc->cached_fw_dma);
+	ioc->cached_fw = dma_alloc_coherent(&ioc->pcidev->dev, size,
+					    &ioc->cached_fw_dma, GFP_ATOMIC);
 	if (!ioc->cached_fw) {
 		printk(MYIOC_s_ERR_FMT "Unable to allocate memory for the cached firmware image!\n",
 		    ioc->name);
@@ -3550,7 +3545,8 @@ mpt_free_fw_memory(MPT_ADAPTER *ioc)
 	sz = ioc->facts.FWImageSize;
 	dinitprintk(ioc, printk(MYIOC_s_DEBUG_FMT "free_fw_memory: FW Image  @ %p[%p], sz=%d[%x] bytes\n",
 		 ioc->name, ioc->cached_fw, (void *)(ulong)ioc->cached_fw_dma, sz, sz));
-	pci_free_consistent(ioc->pcidev, sz, ioc->cached_fw, ioc->cached_fw_dma);
+	dma_free_coherent(&ioc->pcidev->dev, sz, ioc->cached_fw,
+			  ioc->cached_fw_dma);
 	ioc->alloc_total -= sz;
 	ioc->cached_fw = NULL;
 }
@@ -4449,9 +4445,8 @@ PrimeIocFifos(MPT_ADAPTER *ioc)
 		 */
 		if (ioc->pcidev->device == MPI_MANUFACTPAGE_DEVID_SAS1078 &&
 		    ioc->dma_mask > DMA_BIT_MASK(35)) {
-			if (!pci_set_dma_mask(ioc->pcidev, DMA_BIT_MASK(32))
-			    && !pci_set_consistent_dma_mask(ioc->pcidev,
-			    DMA_BIT_MASK(32))) {
+			if (!dma_set_mask(&ioc->pcidev->dev, DMA_BIT_MASK(32))
+			    && !dma_set_coherent_mask(&ioc->pcidev->dev, DMA_BIT_MASK(32))) {
 				dma_mask = DMA_BIT_MASK(35);
 				d36memprintk(ioc, printk(MYIOC_s_DEBUG_FMT
 				    "setting 35 bit addressing for "
@@ -4459,10 +4454,10 @@ PrimeIocFifos(MPT_ADAPTER *ioc)
 				    ioc->name));
 			} else {
 				/*Reseting DMA mask to 64 bit*/
-				pci_set_dma_mask(ioc->pcidev,
-					DMA_BIT_MASK(64));
-				pci_set_consistent_dma_mask(ioc->pcidev,
-					DMA_BIT_MASK(64));
+				dma_set_mask(&ioc->pcidev->dev,
+					     DMA_BIT_MASK(64));
+				dma_set_coherent_mask(&ioc->pcidev->dev,
+						      DMA_BIT_MASK(64));
 
 				printk(MYIOC_s_ERR_FMT
 				    "failed setting 35 bit addressing for "
@@ -4492,7 +4487,8 @@ PrimeIocFifos(MPT_ADAPTER *ioc)
 			 	ioc->name, sz, sz, num_chain));
 
 		total_size += sz;
-		mem = pci_alloc_consistent(ioc->pcidev, total_size, &alloc_dma);
+		mem = dma_alloc_coherent(&ioc->pcidev->dev, total_size,
+				&alloc_dma, GFP_KERNEL);
 		if (mem == NULL) {
 			printk(MYIOC_s_ERR_FMT "Unable to allocate Reply, Request, Chain Buffers!\n",
 				ioc->name);
@@ -4569,8 +4565,8 @@ PrimeIocFifos(MPT_ADAPTER *ioc)
 		spin_unlock_irqrestore(&ioc->FreeQlock, flags);
 
 		sz = (ioc->req_depth * MPT_SENSE_BUFFER_ALLOC);
-		ioc->sense_buf_pool =
-			pci_alloc_consistent(ioc->pcidev, sz, &ioc->sense_buf_pool_dma);
+		ioc->sense_buf_pool = dma_alloc_coherent(&ioc->pcidev->dev, sz,
+				&ioc->sense_buf_pool_dma, GFP_KERNEL);
 		if (ioc->sense_buf_pool == NULL) {
 			printk(MYIOC_s_ERR_FMT "Unable to allocate Sense Buffers!\n",
 				ioc->name);
@@ -4596,8 +4592,8 @@ PrimeIocFifos(MPT_ADAPTER *ioc)
 		alloc_dma += ioc->reply_sz;
 	}
 
-	if (dma_mask == DMA_BIT_MASK(35) && !pci_set_dma_mask(ioc->pcidev,
-	    ioc->dma_mask) && !pci_set_consistent_dma_mask(ioc->pcidev,
+	if (dma_mask == DMA_BIT_MASK(35) && !dma_set_mask(&ioc->pcidev->dev,
+	    ioc->dma_mask) && !dma_set_coherent_mask(&ioc->pcidev->dev,
 	    ioc->dma_mask))
 		d36memprintk(ioc, printk(MYIOC_s_DEBUG_FMT
 		    "restoring 64 bit addressing\n", ioc->name));
@@ -4608,23 +4604,21 @@ out_fail:
 
 	if (ioc->alloc != NULL) {
 		sz = ioc->alloc_sz;
-		pci_free_consistent(ioc->pcidev,
-				sz,
-				ioc->alloc, ioc->alloc_dma);
+		dma_free_coherent(&ioc->pcidev->dev, sz, ioc->alloc,
+				ioc->alloc_dma);
 		ioc->reply_frames = NULL;
 		ioc->req_frames = NULL;
 		ioc->alloc_total -= sz;
 	}
 	if (ioc->sense_buf_pool != NULL) {
 		sz = (ioc->req_depth * MPT_SENSE_BUFFER_ALLOC);
-		pci_free_consistent(ioc->pcidev,
-				sz,
-				ioc->sense_buf_pool, ioc->sense_buf_pool_dma);
+		dma_free_coherent(&ioc->pcidev->dev, sz, ioc->sense_buf_pool,
+				ioc->sense_buf_pool_dma);
 		ioc->sense_buf_pool = NULL;
 	}
 
-	if (dma_mask == DMA_BIT_MASK(35) && !pci_set_dma_mask(ioc->pcidev,
-	    DMA_BIT_MASK(64)) && !pci_set_consistent_dma_mask(ioc->pcidev,
+	if (dma_mask == DMA_BIT_MASK(35) && !dma_set_mask(&ioc->pcidev->dev,
+	    DMA_BIT_MASK(64)) && !dma_set_coherent_mask(&ioc->pcidev->dev,
 	    DMA_BIT_MASK(64)))
 		d36memprintk(ioc, printk(MYIOC_s_DEBUG_FMT
 		    "restoring 64 bit addressing\n", ioc->name));
@@ -4971,7 +4965,8 @@ GetLanConfigPages(MPT_ADAPTER *ioc)
 
 	if (hdr.PageLength > 0) {
 		data_sz = hdr.PageLength * 4;
-		ppage0_alloc = (LANPage0_t *) pci_alloc_consistent(ioc->pcidev, data_sz, &page0_dma);
+		ppage0_alloc = dma_alloc_coherent(&ioc->pcidev->dev, data_sz,
+						  &page0_dma, GFP_KERNEL);
 		rc = -ENOMEM;
 		if (ppage0_alloc) {
 			memset((u8 *)ppage0_alloc, 0, data_sz);
@@ -4985,7 +4980,8 @@ GetLanConfigPages(MPT_ADAPTER *ioc)
 
 			}
 
-			pci_free_consistent(ioc->pcidev, data_sz, (u8 *) ppage0_alloc, page0_dma);
+			dma_free_coherent(&ioc->pcidev->dev, data_sz,
+					  (u8 *)ppage0_alloc, page0_dma);
 
 			/* FIXME!
 			 *	Normalize endianness of structure data,
@@ -5017,7 +5013,8 @@ GetLanConfigPages(MPT_ADAPTER *ioc)
 
 	data_sz = hdr.PageLength * 4;
 	rc = -ENOMEM;
-	ppage1_alloc = (LANPage1_t *) pci_alloc_consistent(ioc->pcidev, data_sz, &page1_dma);
+	ppage1_alloc = dma_alloc_coherent(&ioc->pcidev->dev, data_sz,
+					  &page1_dma, GFP_KERNEL);
 	if (ppage1_alloc) {
 		memset((u8 *)ppage1_alloc, 0, data_sz);
 		cfg.physAddr = page1_dma;
@@ -5029,7 +5026,8 @@ GetLanConfigPages(MPT_ADAPTER *ioc)
 			memcpy(&ioc->lan_cnfg_page1, ppage1_alloc, copy_sz);
 		}
 
-		pci_free_consistent(ioc->pcidev, data_sz, (u8 *) ppage1_alloc, page1_dma);
+		dma_free_coherent(&ioc->pcidev->dev, data_sz,
+				  (u8 *)ppage1_alloc, page1_dma);
 
 		/* FIXME!
 		 *	Normalize endianness of structure data,
@@ -5047,9 +5045,11 @@ GetLanConfigPages(MPT_ADAPTER *ioc)
  *	@ioc: Pointer to MPT_ADAPTER structure
  *	@persist_opcode: see below
  *
- *	MPI_SAS_OP_CLEAR_NOT_PRESENT - Free all persist TargetID mappings for
- *		devices not currently present.
- *	MPI_SAS_OP_CLEAR_ALL_PERSISTENT - Clear al persist TargetID mappings
+ *	===============================  ======================================
+ *	MPI_SAS_OP_CLEAR_NOT_PRESENT     Free all persist TargetID mappings for
+ *					 devices not currently present.
+ *	MPI_SAS_OP_CLEAR_ALL_PERSISTENT  Clear al persist TargetID mappings
+ *	===============================  ======================================
  *
  *	NOTE: Don't use not this function during interrupt time.
  *
@@ -5316,7 +5316,8 @@ GetIoUnitPage2(MPT_ADAPTER *ioc)
 	/* Read the config page */
 	data_sz = hdr.PageLength * 4;
 	rc = -ENOMEM;
-	ppage_alloc = (IOUnitPage2_t *) pci_alloc_consistent(ioc->pcidev, data_sz, &page_dma);
+	ppage_alloc = dma_alloc_coherent(&ioc->pcidev->dev, data_sz,
+					 &page_dma, GFP_KERNEL);
 	if (ppage_alloc) {
 		memset((u8 *)ppage_alloc, 0, data_sz);
 		cfg.physAddr = page_dma;
@@ -5326,7 +5327,8 @@ GetIoUnitPage2(MPT_ADAPTER *ioc)
 		if ((rc = mpt_config(ioc, &cfg)) == 0)
 			ioc->biosVersion = le32_to_cpu(ppage_alloc->BiosVersion);
 
-		pci_free_consistent(ioc->pcidev, data_sz, (u8 *) ppage_alloc, page_dma);
+		dma_free_coherent(&ioc->pcidev->dev, data_sz,
+				  (u8 *)ppage_alloc, page_dma);
 	}
 
 	return rc;
@@ -5401,7 +5403,9 @@ mpt_GetScsiPortSettings(MPT_ADAPTER *ioc, int portnum)
 		 return -EFAULT;
 
 	if (header.PageLength > 0) {
-		pbuf = pci_alloc_consistent(ioc->pcidev, header.PageLength * 4, &buf_dma);
+		pbuf = dma_alloc_coherent(&ioc->pcidev->dev,
+					  header.PageLength * 4, &buf_dma,
+					  GFP_KERNEL);
 		if (pbuf) {
 			cfg.action = MPI_CONFIG_ACTION_PAGE_READ_CURRENT;
 			cfg.physAddr = buf_dma;
@@ -5457,7 +5461,9 @@ mpt_GetScsiPortSettings(MPT_ADAPTER *ioc, int portnum)
 				}
 			}
 			if (pbuf) {
-				pci_free_consistent(ioc->pcidev, header.PageLength * 4, pbuf, buf_dma);
+				dma_free_coherent(&ioc->pcidev->dev,
+						  header.PageLength * 4, pbuf,
+						  buf_dma);
 			}
 		}
 	}
@@ -5479,7 +5485,9 @@ mpt_GetScsiPortSettings(MPT_ADAPTER *ioc, int portnum)
 	if (header.PageLength > 0) {
 		/* Allocate memory and read SCSI Port Page 2
 		 */
-		pbuf = pci_alloc_consistent(ioc->pcidev, header.PageLength * 4, &buf_dma);
+		pbuf = dma_alloc_coherent(&ioc->pcidev->dev,
+					  header.PageLength * 4, &buf_dma,
+					  GFP_KERNEL);
 		if (pbuf) {
 			cfg.action = MPI_CONFIG_ACTION_PAGE_READ_NVRAM;
 			cfg.physAddr = buf_dma;
@@ -5544,7 +5552,9 @@ mpt_GetScsiPortSettings(MPT_ADAPTER *ioc, int portnum)
 				}
 			}
 
-			pci_free_consistent(ioc->pcidev, header.PageLength * 4, pbuf, buf_dma);
+			dma_free_coherent(&ioc->pcidev->dev,
+					  header.PageLength * 4, pbuf,
+					  buf_dma);
 		}
 	}
 
@@ -5660,8 +5670,8 @@ mpt_inactive_raid_volumes(MPT_ADAPTER *ioc, u8 channel, u8 id)
 	if (!hdr.PageLength)
 		goto out;
 
-	buffer = pci_alloc_consistent(ioc->pcidev, hdr.PageLength * 4,
-	    &dma_handle);
+	buffer = dma_alloc_coherent(&ioc->pcidev->dev, hdr.PageLength * 4,
+				    &dma_handle, GFP_KERNEL);
 
 	if (!buffer)
 		goto out;
@@ -5690,8 +5700,7 @@ mpt_inactive_raid_volumes(MPT_ADAPTER *ioc, u8 channel, u8 id)
 		    buffer->PhysDisk[i].PhysDiskNum, &phys_disk) != 0)
 			continue;
 
-		if ((component_info = kmalloc(sizeof (*component_info),
-		 GFP_KERNEL)) == NULL)
+		if ((component_info = kmalloc_obj(*component_info)) == NULL)
 			continue;
 
 		component_info->volumeID = id;
@@ -5708,8 +5717,8 @@ mpt_inactive_raid_volumes(MPT_ADAPTER *ioc, u8 channel, u8 id)
 
  out:
 	if (buffer)
-		pci_free_consistent(ioc->pcidev, hdr.PageLength * 4, buffer,
-		    dma_handle);
+		dma_free_coherent(&ioc->pcidev->dev, hdr.PageLength * 4,
+				  buffer, dma_handle);
 }
 
 /**
@@ -5753,8 +5762,8 @@ mpt_raid_phys_disk_pg0(MPT_ADAPTER *ioc, u8 phys_disk_num,
 		goto out;
 	}
 
-	buffer = pci_alloc_consistent(ioc->pcidev, hdr.PageLength * 4,
-	    &dma_handle);
+	buffer = dma_alloc_coherent(&ioc->pcidev->dev, hdr.PageLength * 4,
+				    &dma_handle, GFP_KERNEL);
 
 	if (!buffer) {
 		rc = -ENOMEM;
@@ -5777,8 +5786,8 @@ mpt_raid_phys_disk_pg0(MPT_ADAPTER *ioc, u8 phys_disk_num,
  out:
 
 	if (buffer)
-		pci_free_consistent(ioc->pcidev, hdr.PageLength * 4, buffer,
-		    dma_handle);
+		dma_free_coherent(&ioc->pcidev->dev, hdr.PageLength * 4,
+				  buffer, dma_handle);
 
 	return rc;
 }
@@ -5820,8 +5829,8 @@ mpt_raid_phys_disk_get_num_paths(MPT_ADAPTER *ioc, u8 phys_disk_num)
 		goto out;
 	}
 
-	buffer = pci_alloc_consistent(ioc->pcidev, hdr.PageLength * 4,
-	    &dma_handle);
+	buffer = dma_alloc_coherent(&ioc->pcidev->dev, hdr.PageLength * 4,
+				    &dma_handle, GFP_KERNEL);
 
 	if (!buffer) {
 		rc = 0;
@@ -5841,8 +5850,8 @@ mpt_raid_phys_disk_get_num_paths(MPT_ADAPTER *ioc, u8 phys_disk_num)
  out:
 
 	if (buffer)
-		pci_free_consistent(ioc->pcidev, hdr.PageLength * 4, buffer,
-		    dma_handle);
+		dma_free_coherent(&ioc->pcidev->dev, hdr.PageLength * 4,
+				  buffer, dma_handle);
 
 	return rc;
 }
@@ -5892,8 +5901,8 @@ mpt_raid_phys_disk_pg1(MPT_ADAPTER *ioc, u8 phys_disk_num,
 		goto out;
 	}
 
-	buffer = pci_alloc_consistent(ioc->pcidev, hdr.PageLength * 4,
-	    &dma_handle);
+	buffer = dma_alloc_coherent(&ioc->pcidev->dev, hdr.PageLength * 4,
+				    &dma_handle, GFP_KERNEL);
 
 	if (!buffer) {
 		rc = -ENOMEM;
@@ -5930,8 +5939,8 @@ mpt_raid_phys_disk_pg1(MPT_ADAPTER *ioc, u8 phys_disk_num,
  out:
 
 	if (buffer)
-		pci_free_consistent(ioc->pcidev, hdr.PageLength * 4, buffer,
-		    dma_handle);
+		dma_free_coherent(&ioc->pcidev->dev, hdr.PageLength * 4,
+				  buffer, dma_handle);
 
 	return rc;
 }
@@ -5987,7 +5996,8 @@ mpt_findImVolumes(MPT_ADAPTER *ioc)
 		return -EFAULT;
 
 	iocpage2sz = header.PageLength * 4;
-	pIoc2 = pci_alloc_consistent(ioc->pcidev, iocpage2sz, &ioc2_dma);
+	pIoc2 = dma_alloc_coherent(&ioc->pcidev->dev, iocpage2sz, &ioc2_dma,
+				   GFP_KERNEL);
 	if (!pIoc2)
 		return -ENOMEM;
 
@@ -5996,13 +6006,12 @@ mpt_findImVolumes(MPT_ADAPTER *ioc)
 	if (mpt_config(ioc, &cfg) != 0)
 		goto out;
 
-	mem = kmalloc(iocpage2sz, GFP_KERNEL);
+	mem = kmemdup(pIoc2, iocpage2sz, GFP_KERNEL);
 	if (!mem) {
 		rc = -ENOMEM;
 		goto out;
 	}
 
-	memcpy(mem, (u8 *)pIoc2, iocpage2sz);
 	ioc->raid_data.pIocPg2 = (IOCPage2_t *) mem;
 
 	mpt_read_ioc_pg_3(ioc);
@@ -6013,7 +6022,7 @@ mpt_findImVolumes(MPT_ADAPTER *ioc)
 		    pIoc2->RaidVolume[i].VolumeID);
 
  out:
-	pci_free_consistent(ioc->pcidev, iocpage2sz, pIoc2, ioc2_dma);
+	dma_free_coherent(&ioc->pcidev->dev, iocpage2sz, pIoc2, ioc2_dma);
 
 	return rc;
 }
@@ -6055,7 +6064,8 @@ mpt_read_ioc_pg_3(MPT_ADAPTER *ioc)
 	/* Read Header good, alloc memory
 	 */
 	iocpage3sz = header.PageLength * 4;
-	pIoc3 = pci_alloc_consistent(ioc->pcidev, iocpage3sz, &ioc3_dma);
+	pIoc3 = dma_alloc_coherent(&ioc->pcidev->dev, iocpage3sz, &ioc3_dma,
+				   GFP_KERNEL);
 	if (!pIoc3)
 		return 0;
 
@@ -6072,7 +6082,7 @@ mpt_read_ioc_pg_3(MPT_ADAPTER *ioc)
 		}
 	}
 
-	pci_free_consistent(ioc->pcidev, iocpage3sz, pIoc3, ioc3_dma);
+	dma_free_coherent(&ioc->pcidev->dev, iocpage3sz, pIoc3, ioc3_dma);
 
 	return 0;
 }
@@ -6106,7 +6116,8 @@ mpt_read_ioc_pg_4(MPT_ADAPTER *ioc)
 
 	if ( (pIoc4 = ioc->spi_data.pIocPg4) == NULL ) {
 		iocpage4sz = (header.PageLength + 4) * 4; /* Allow 4 additional SEP's */
-		pIoc4 = pci_alloc_consistent(ioc->pcidev, iocpage4sz, &ioc4_dma);
+		pIoc4 = dma_alloc_coherent(&ioc->pcidev->dev, iocpage4sz,
+					   &ioc4_dma, GFP_KERNEL);
 		if (!pIoc4)
 			return;
 		ioc->alloc_total += iocpage4sz;
@@ -6124,7 +6135,8 @@ mpt_read_ioc_pg_4(MPT_ADAPTER *ioc)
 		ioc->spi_data.IocPg4_dma = ioc4_dma;
 		ioc->spi_data.IocPg4Sz = iocpage4sz;
 	} else {
-		pci_free_consistent(ioc->pcidev, iocpage4sz, pIoc4, ioc4_dma);
+		dma_free_coherent(&ioc->pcidev->dev, iocpage4sz, pIoc4,
+				  ioc4_dma);
 		ioc->spi_data.pIocPg4 = NULL;
 		ioc->alloc_total -= iocpage4sz;
 	}
@@ -6161,7 +6173,8 @@ mpt_read_ioc_pg_1(MPT_ADAPTER *ioc)
 	/* Read Header good, alloc memory
 	 */
 	iocpage1sz = header.PageLength * 4;
-	pIoc1 = pci_alloc_consistent(ioc->pcidev, iocpage1sz, &ioc1_dma);
+	pIoc1 = dma_alloc_coherent(&ioc->pcidev->dev, iocpage1sz, &ioc1_dma,
+				   GFP_KERNEL);
 	if (!pIoc1)
 		return;
 
@@ -6212,7 +6225,7 @@ mpt_read_ioc_pg_1(MPT_ADAPTER *ioc)
 		}
 	}
 
-	pci_free_consistent(ioc->pcidev, iocpage1sz, pIoc1, ioc1_dma);
+	dma_free_coherent(&ioc->pcidev->dev, iocpage1sz, pIoc1, ioc1_dma);
 
 	return;
 }
@@ -6241,7 +6254,8 @@ mpt_get_manufacturing_pg_0(MPT_ADAPTER *ioc)
 		goto out;
 
 	cfg.action = MPI_CONFIG_ACTION_PAGE_READ_CURRENT;
-	pbuf = pci_alloc_consistent(ioc->pcidev, hdr.PageLength * 4, &buf_dma);
+	pbuf = dma_alloc_coherent(&ioc->pcidev->dev, hdr.PageLength * 4,
+				  &buf_dma, GFP_KERNEL);
 	if (!pbuf)
 		goto out;
 
@@ -6257,7 +6271,8 @@ mpt_get_manufacturing_pg_0(MPT_ADAPTER *ioc)
 out:
 
 	if (pbuf)
-		pci_free_consistent(ioc->pcidev, hdr.PageLength * 4, pbuf, buf_dma);
+		dma_free_coherent(&ioc->pcidev->dev, hdr.PageLength * 4, pbuf,
+				  buf_dma);
 }
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -6331,7 +6346,6 @@ SendEventAck(MPT_ADAPTER *ioc, EventNotificationReply_t *evnp)
  *		Page header is updated.
  *
  *	Returns 0 for success
- *	-EPERM if not allowed due to ISR context
  *	-EAGAIN if no msg frames currently available
  *	-EFAULT for non-successful reply or no reply (timeout)
  */
@@ -6349,19 +6363,10 @@ mpt_config(MPT_ADAPTER *ioc, CONFIGPARMS *pCfg)
 	u8		 page_type = 0, extend_page;
 	unsigned long 	 timeleft;
 	unsigned long	 flags;
-	int		 in_isr;
 	u8		 issue_hard_reset = 0;
 	u8		 retry_count = 0;
 
-	/*	Prevent calling wait_event() (below), if caller happens
-	 *	to be in ISR context, because that is fatal!
-	 */
-	in_isr = in_interrupt();
-	if (in_isr) {
-		dcprintk(ioc, printk(MYIOC_s_WARN_FMT "Config request not allowed in ISR context!\n",
-				ioc->name));
-		return -EPERM;
-    }
+	might_sleep();
 
 	/* don't send a config page during diag reset */
 	spin_lock_irqsave(&ioc->taskmgmt_lock, flags);
@@ -6606,8 +6611,10 @@ procmpt_create(void)
 	if (mpt_proc_root_dir == NULL)
 		return -ENOTDIR;
 
-	proc_create("summary", S_IRUGO, mpt_proc_root_dir, &mpt_summary_proc_fops);
-	proc_create("version", S_IRUGO, mpt_proc_root_dir, &mpt_version_proc_fops);
+	proc_create_single("summary", S_IRUGO, mpt_proc_root_dir,
+			mpt_summary_proc_show);
+	proc_create_single("version", S_IRUGO, mpt_proc_root_dir,
+			mpt_version_proc_show);
 	return 0;
 }
 
@@ -6646,29 +6653,16 @@ static int mpt_summary_proc_show(struct seq_file *m, void *v)
 	return 0;
 }
 
-static int mpt_summary_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, mpt_summary_proc_show, PDE_DATA(inode));
-}
-
-static const struct file_operations mpt_summary_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= mpt_summary_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
 static int mpt_version_proc_show(struct seq_file *m, void *v)
 {
 	u8	 cb_idx;
-	int	 scsi, fc, sas, lan, ctl, targ, dmp;
+	int	 scsi, fc, sas, lan, ctl, targ;
 	char	*drvname;
 
 	seq_printf(m, "%s-%s\n", "mptlinux", MPT_LINUX_VERSION_COMMON);
 	seq_printf(m, "  Fusion MPT base driver\n");
 
-	scsi = fc = sas = lan = ctl = targ = dmp = 0;
+	scsi = fc = sas = lan = ctl = targ = 0;
 	for (cb_idx = MPT_MAX_PROTOCOL_DRIVERS-1; cb_idx; cb_idx--) {
 		drvname = NULL;
 		if (MptCallbacks[cb_idx]) {
@@ -6700,19 +6694,6 @@ static int mpt_version_proc_show(struct seq_file *m, void *v)
 
 	return 0;
 }
-
-static int mpt_version_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, mpt_version_proc_show, NULL);
-}
-
-static const struct file_operations mpt_version_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= mpt_version_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 
 static int mpt_iocinfo_proc_show(struct seq_file *m, void *v)
 {
@@ -6793,19 +6774,6 @@ static int mpt_iocinfo_proc_show(struct seq_file *m, void *v)
 
 	return 0;
 }
-
-static int mpt_iocinfo_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, mpt_iocinfo_proc_show, PDE_DATA(inode));
-}
-
-static const struct file_operations mpt_iocinfo_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= mpt_iocinfo_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 #endif		/* CONFIG_PROC_FS } */
 
 /*=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=*/
@@ -6965,7 +6933,7 @@ EXPORT_SYMBOL(mpt_clear_taskmgmt_in_progress_flag);
  *	@ioc: Pointer to MPT_ADAPTER structure
  *
  **/
-void
+void __noreturn
 mpt_halt_firmware(MPT_ADAPTER *ioc)
 {
 	u32	 ioc_raw_state;
@@ -7036,8 +7004,6 @@ mpt_SoftResetHandler(MPT_ADAPTER *ioc, int sleepFlag)
 	}
 	ioc->ioc_reset_in_progress = 1;
 	spin_unlock_irqrestore(&ioc->taskmgmt_lock, flags);
-
-	rc = -1;
 
 	for (cb_idx = MPT_MAX_PROTOCOL_DRIVERS-1; cb_idx; cb_idx--) {
 		if (MptResetHandlers[cb_idx])
@@ -7602,11 +7568,11 @@ mpt_display_event_info(MPT_ADAPTER *ioc, EventNotificationReply_t *pEventReply)
 		u8 phy_num = (u8)(evData0);
 		u8 port_num = (u8)(evData0 >> 8);
 		u8 port_width = (u8)(evData0 >> 16);
-		u8 primative = (u8)(evData0 >> 24);
+		u8 primitive = (u8)(evData0 >> 24);
 		snprintf(evStr, EVENT_DESCR_STR_SZ,
-		    "SAS Broadcase Primative: phy=%d port=%d "
-		    "width=%d primative=0x%02x",
-		    phy_num, port_num, port_width, primative);
+		    "SAS Broadcast Primitive: phy=%d port=%d "
+		    "width=%d primitive=0x%02x",
+		    phy_num, port_num, port_width, primitive);
 		break;
 	}
 
@@ -7635,7 +7601,7 @@ mpt_display_event_info(MPT_ADAPTER *ioc, EventNotificationReply_t *pEventReply)
 
 		snprintf(evStr, EVENT_DESCR_STR_SZ,
 		    "SAS Initiator Device Table Overflow: max initiators=%02d "
-		    "current initators=%02d",
+		    "current initiators=%02d",
 		    max_init, current_init);
 		break;
 	}
@@ -7698,7 +7664,7 @@ mpt_display_event_info(MPT_ADAPTER *ioc, EventNotificationReply_t *pEventReply)
 		break;
 	}
 	if (ds)
-		strlcpy(evStr, ds, EVENT_DESCR_STR_SZ);
+		strscpy(evStr, ds, EVENT_DESCR_STR_SZ);
 
 
 	devtprintk(ioc, printk(MYIOC_s_DEBUG_FMT

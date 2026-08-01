@@ -1,21 +1,16 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * TI/National Semiconductor LP3943 Device
  *
  * Copyright 2013 Texas Instruments
  *
  * Author: Milo Kim <milo.kim@ti.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #ifndef __MFD_LP3943_H__
 #define __MFD_LP3943_H__
 
 #include <linux/gpio.h>
-#include <linux/pwm.h>
 #include <linux/regmap.h>
 
 /* Registers */

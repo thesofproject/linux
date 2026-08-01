@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* linux/drivers/video/sm501fb.c
  *
  * Copyright (c) 2006 Simtec Electronics
  *	Vincent Sanders <vince@simtec.co.uk>
  *	Ben Dooks <ben@simtec.co.uk>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * Framebuffer driver for the Silicon Motion SM501
  */
@@ -30,6 +27,7 @@
 #include <linux/clk.h>
 #include <linux/console.h>
 #include <linux/io.h>
+#include <linux/string_choices.h>
 
 #include <linux/uaccess.h>
 #include <asm/div64.h>
@@ -98,6 +96,7 @@ struct sm501fb_info {
 	void __iomem		*fbmem;		/* remapped framebuffer */
 	size_t			 fbmem_len;	/* length of remapped region */
 	u8 *edid_data;
+	char *fb_mode;
 };
 
 /* per-framebuffer private data */
@@ -327,6 +326,13 @@ static int sm501fb_check_var(struct fb_var_screeninfo *var,
 	/* check the virtual size */
 
 	if (var->xres_virtual > 4096 || var->yres_virtual > 2048)
+		return -EINVAL;
+
+	/* geometry sanity checks */
+	if (var->xres + var->xoffset > var->xres_virtual)
+		return -EINVAL;
+
+	if (var->yres + var->yoffset > var->yres_virtual)
 		return -EINVAL;
 
 	/* can cope with 8,16 or 32bpp */
@@ -1008,7 +1014,7 @@ static int sm501fb_blank_crt(int blank_mode, struct fb_info *info)
 	case FB_BLANK_POWERDOWN:
 		ctrl &= ~SM501_DC_CRT_CONTROL_ENABLE;
 		sm501_misc_control(fbi->dev->parent, SM501_MISC_DAC_POWER, 0);
-		/* fall through */
+		fallthrough;
 
 	case FB_BLANK_NORMAL:
 		ctrl |= SM501_DC_CRT_CONTROL_BLANK;
@@ -1169,7 +1175,7 @@ static ssize_t sm501fb_crtsrc_show(struct device *dev,
 	ctrl = smc501_readl(info->regs + SM501_DC_CRT_CONTROL);
 	ctrl &= SM501_DC_CRT_CONTROL_SEL;
 
-	return snprintf(buf, PAGE_SIZE, "%s\n", ctrl ? "crt" : "panel");
+	return sysfs_emit(buf, "%s\n", ctrl ? "crt" : "panel");
 }
 
 /* sm501fb_crtsrc_show
@@ -1274,6 +1280,14 @@ static ssize_t sm501fb_debug_show_pnl(struct device *dev,
 
 static DEVICE_ATTR(fbregs_pnl, 0444, sm501fb_debug_show_pnl, NULL);
 
+static struct attribute *sm501fb_attrs[] = {
+	&dev_attr_crt_src.attr,
+	&dev_attr_fbregs_pnl.attr,
+	&dev_attr_fbregs_crt.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(sm501fb);
+
 /* acceleration operations */
 static int sm501fb_sync(struct fb_info *info)
 {
@@ -1288,7 +1302,7 @@ static int sm501fb_sync(struct fb_info *info)
 		count--;
 
 	if (count <= 0) {
-		dev_err(info->dev, "Timeout waiting for 2d engine sync\n");
+		fb_err(info, "Timeout waiting for 2d engine sync\n");
 		return 1;
 	}
 	return 0;
@@ -1447,6 +1461,7 @@ static void sm501fb_fillrect(struct fb_info *info, const struct fb_fillrect *rec
 
 static struct fb_ops sm501fb_ops_crt = {
 	.owner		= THIS_MODULE,
+	__FB_DEFAULT_IOMEM_OPS_RDWR,
 	.fb_check_var	= sm501fb_check_var_crt,
 	.fb_set_par	= sm501fb_set_par_crt,
 	.fb_blank	= sm501fb_blank_crt,
@@ -1457,10 +1472,12 @@ static struct fb_ops sm501fb_ops_crt = {
 	.fb_copyarea	= sm501fb_copyarea,
 	.fb_imageblit	= cfb_imageblit,
 	.fb_sync	= sm501fb_sync,
+	__FB_DEFAULT_IOMEM_OPS_MMAP,
 };
 
 static struct fb_ops sm501fb_ops_pnl = {
 	.owner		= THIS_MODULE,
+	__FB_DEFAULT_IOMEM_OPS_RDWR,
 	.fb_check_var	= sm501fb_check_var_pnl,
 	.fb_set_par	= sm501fb_set_par_pnl,
 	.fb_pan_display	= sm501fb_pan_pnl,
@@ -1471,6 +1488,7 @@ static struct fb_ops sm501fb_ops_pnl = {
 	.fb_copyarea	= sm501fb_copyarea,
 	.fb_imageblit	= cfb_imageblit,
 	.fb_sync	= sm501fb_sync,
+	__FB_DEFAULT_IOMEM_OPS_MMAP,
 };
 
 /* sm501_init_cursor
@@ -1703,8 +1721,8 @@ static int sm501fb_init_fb(struct fb_info *fb, enum sm501_controller head,
 		BUG();
 	}
 
-	dev_info(info->dev, "fb %s %sabled at start\n",
-		 fbname, enable ? "en" : "dis");
+	dev_info(info->dev, "fb %s %s at start\n",
+		 fbname, str_enabled_disabled(enable));
 
 	/* check to see if our routing allows this */
 
@@ -1714,7 +1732,7 @@ static int sm501fb_init_fb(struct fb_info *fb, enum sm501_controller head,
 		enable = 0;
 	}
 
-	strlcpy(fb->fix.id, fbname, sizeof(fb->fix.id));
+	strscpy(fb->fix.id, fbname, sizeof(fb->fix.id));
 
 	memcpy(&par->ops,
 	       (head == HEAD_CRT) ? &sm501fb_ops_crt : &sm501fb_ops_pnl,
@@ -1726,16 +1744,16 @@ static int sm501fb_init_fb(struct fb_info *fb, enum sm501_controller head,
 		par->ops.fb_cursor = NULL;
 
 	fb->fbops = &par->ops;
-	fb->flags = FBINFO_FLAG_DEFAULT | FBINFO_READS_FAST |
+	fb->flags = FBINFO_READS_FAST |
 		FBINFO_HWACCEL_COPYAREA | FBINFO_HWACCEL_FILLRECT |
 		FBINFO_HWACCEL_XPAN | FBINFO_HWACCEL_YPAN;
 
 #if defined(CONFIG_OF)
 #ifdef __BIG_ENDIAN
-	if (of_get_property(info->dev->parent->of_node, "little-endian", NULL))
+	if (of_property_read_bool(info->dev->parent->of_node, "little-endian"))
 		fb->flags |= FBINFO_FOREIGN_ENDIAN;
 #else
-	if (of_get_property(info->dev->parent->of_node, "big-endian", NULL))
+	if (of_property_read_bool(info->dev->parent->of_node, "big-endian"))
 		fb->flags |= FBINFO_FOREIGN_ENDIAN;
 #endif
 #endif
@@ -1776,12 +1794,11 @@ static int sm501fb_init_fb(struct fb_info *fb, enum sm501_controller head,
 			fb->var.yres_virtual = fb->var.yres;
 		} else {
 			if (info->edid_data) {
-				ret = fb_find_mode(&fb->var, fb, fb_mode,
+				ret = fb_find_mode(&fb->var, fb,
+					info->fb_mode ?: fb_mode,
 					fb->monspecs.modedb,
 					fb->monspecs.modedb_len,
 					&sm501_default_mode, default_bpp);
-				/* edid_data is no longer needed, free it */
-				kfree(info->edid_data);
 			} else {
 				ret = fb_find_mode(&fb->var, fb,
 					   NULL, NULL, 0, NULL, 8);
@@ -1868,10 +1885,8 @@ static int sm501fb_probe_one(struct sm501fb_info *info,
 	}
 
 	fbi = framebuffer_alloc(sizeof(struct sm501fb_par), info->dev);
-	if (fbi == NULL) {
-		dev_err(info->dev, "cannot allocate %s framebuffer\n", name);
+	if (!fbi)
 		return -ENOMEM;
-	}
 
 	par = fbi->par;
 	par->info = info;
@@ -1932,8 +1947,7 @@ static int sm501fb_probe(struct platform_device *pdev)
 	int ret;
 
 	/* allocate our framebuffers */
-
-	info = kzalloc(sizeof(struct sm501fb_info), GFP_KERNEL);
+	info = kzalloc_obj(*info);
 	if (!info) {
 		dev_err(dev, "failed to allocate state\n");
 		return -ENOMEM;
@@ -1960,7 +1974,7 @@ static int sm501fb_probe(struct platform_device *pdev)
 			/* Get EDID */
 			cp = of_get_property(np, "mode", &len);
 			if (cp)
-				strcpy(fb_mode, cp);
+				info->fb_mode = kstrdup(cp, GFP_KERNEL);
 			prop = of_get_property(np, "edid", &len);
 			if (prop && len == EDID_LENGTH) {
 				info->edid_data = kmemdup(prop, EDID_LENGTH,
@@ -2017,32 +2031,14 @@ static int sm501fb_probe(struct platform_device *pdev)
 		goto err_started_crt;
 	}
 
-	/* create device files */
-
-	ret = device_create_file(dev, &dev_attr_crt_src);
-	if (ret)
-		goto err_started_panel;
-
-	ret = device_create_file(dev, &dev_attr_fbregs_pnl);
-	if (ret)
-		goto err_attached_crtsrc_file;
-
-	ret = device_create_file(dev, &dev_attr_fbregs_crt);
-	if (ret)
-		goto err_attached_pnlregs_file;
+	/* These aren't needed any more */
+	kfree(info->edid_data);
+	kfree(info->fb_mode);
+	info->edid_data = NULL;
+	info->fb_mode = NULL;
 
 	/* we registered, return ok */
 	return 0;
-
-err_attached_pnlregs_file:
-	device_remove_file(dev, &dev_attr_fbregs_pnl);
-
-err_attached_crtsrc_file:
-	device_remove_file(dev, &dev_attr_crt_src);
-
-err_started_panel:
-	unregister_framebuffer(info->fb[HEAD_PANEL]);
-	sm501_free_init_fb(info, HEAD_PANEL);
 
 err_started_crt:
 	unregister_framebuffer(info->fb[HEAD_CRT]);
@@ -2058,6 +2054,8 @@ err_probed_crt:
 	framebuffer_release(info->fb[HEAD_CRT]);
 
 err_alloc:
+	kfree(info->edid_data);
+	kfree(info->fb_mode);
 	kfree(info);
 
 	return ret;
@@ -2067,15 +2065,11 @@ err_alloc:
 /*
  *  Cleanup
  */
-static int sm501fb_remove(struct platform_device *pdev)
+static void sm501fb_remove(struct platform_device *pdev)
 {
 	struct sm501fb_info *info = platform_get_drvdata(pdev);
 	struct fb_info	   *fbinfo_crt = info->fb[0];
 	struct fb_info	   *fbinfo_pnl = info->fb[1];
-
-	device_remove_file(&pdev->dev, &dev_attr_fbregs_crt);
-	device_remove_file(&pdev->dev, &dev_attr_fbregs_pnl);
-	device_remove_file(&pdev->dev, &dev_attr_crt_src);
 
 	sm501_free_init_fb(info, HEAD_CRT);
 	sm501_free_init_fb(info, HEAD_PANEL);
@@ -2090,8 +2084,6 @@ static int sm501fb_remove(struct platform_device *pdev)
 
 	framebuffer_release(fbinfo_pnl);
 	framebuffer_release(fbinfo_crt);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM
@@ -2240,6 +2232,7 @@ static struct platform_driver sm501fb_driver = {
 	.resume		= sm501fb_resume,
 	.driver		= {
 		.name	= "sm501-fb",
+		.dev_groups	= sm501fb_groups,
 	},
 };
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Linux/SPARC PROM Configuration Driver
  * Copyright (C) 1996 Thomas K. Dyas (tdyas@noc.rutgers.edu)
@@ -14,20 +15,6 @@
  * sanity's sake.
  */
 
-/* This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of the
- * License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. 
- */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -46,7 +33,7 @@
 #include <linux/pci.h>
 #endif
 
-MODULE_AUTHOR("Thomas K. Dyas (tdyas@noc.rutgers.edu) and Eddie C. Dost  (ecd@skynet.be)");
+MODULE_AUTHOR("Thomas K. Dyas <tdyas@noc.rutgers.edu> and Eddie C. Dost <ecd@skynet.be>");
 MODULE_DESCRIPTION("OPENPROM Configuration Driver");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("1.0");
@@ -679,7 +666,7 @@ static int openprom_open(struct inode * inode, struct file * file)
 {
 	DATA *data;
 
-	data = kmalloc(sizeof(DATA), GFP_KERNEL);
+	data = kmalloc_obj(DATA);
 	if (!data)
 		return -ENOMEM;
 
@@ -700,7 +687,6 @@ static int openprom_release(struct inode * inode, struct file * file)
 
 static const struct file_operations openprom_fops = {
 	.owner =	THIS_MODULE,
-	.llseek =	no_llseek,
 	.unlocked_ioctl = openprom_ioctl,
 	.compat_ioctl =	openprom_compat_ioctl,
 	.open =		openprom_open,
@@ -715,22 +701,13 @@ static struct miscdevice openprom_dev = {
 
 static int __init openprom_init(void)
 {
-	struct device_node *dp;
 	int err;
 
 	err = misc_register(&openprom_dev);
 	if (err)
 		return err;
 
-	dp = of_find_node_by_path("/");
-	dp = dp->child;
-	while (dp) {
-		if (!strcmp(dp->name, "options"))
-			break;
-		dp = dp->sibling;
-	}
-	options_node = dp;
-
+	options_node = of_get_child_by_name(of_find_node_by_path("/"), "options");
 	if (!options_node) {
 		misc_deregister(&openprom_dev);
 		return -EIO;

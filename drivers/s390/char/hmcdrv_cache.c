@@ -7,8 +7,7 @@
  *
  */
 
-#define KMSG_COMPONENT "hmcdrv"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "hmcdrv: " fmt
 
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -154,7 +153,7 @@ static ssize_t hmcdrv_cache_do(const struct hmcdrv_ftp_cmdspec *ftp,
 		/* cache some file info (FTP command, file name and file
 		 * size) unconditionally
 		 */
-		strlcpy(hmcdrv_cache_file.fname, ftp->fname,
+		strscpy(hmcdrv_cache_file.fname, ftp->fname,
 			HMCDRV_FTP_FIDENT_MAX);
 		hmcdrv_cache_file.id = ftp->id;
 		pr_debug("caching cmd %d, file size %zu for '%s'\n",

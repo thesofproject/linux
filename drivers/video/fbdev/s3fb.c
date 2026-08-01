@@ -11,6 +11,7 @@
  * which is based on the code of neofb.
  */
 
+#include <linux/aperture.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
@@ -49,10 +50,14 @@ struct s3fb_info {
 static const struct svga_fb_format s3fb_formats[] = {
 	{ 0,  {0, 6, 0},  {0, 6, 0},  {0, 6, 0}, {0, 0, 0}, 0,
 		FB_TYPE_TEXT, FB_AUX_TEXT_SVGA_STEP4,	FB_VISUAL_PSEUDOCOLOR, 8, 16},
-	{ 4,  {0, 4, 0},  {0, 4, 0},  {0, 4, 0}, {0, 0, 0}, 0,
-		FB_TYPE_PACKED_PIXELS, 0,		FB_VISUAL_PSEUDOCOLOR, 8, 16},
+	{ 1,  {0, 1, 0},  {0, 1, 0},  {0, 1, 0}, {0, 0, 0}, 2,
+		FB_TYPE_PACKED_PIXELS, 0,		FB_VISUAL_PSEUDOCOLOR, 32, 64},
+	{ 2,  {0, 2, 0},  {0, 2, 0},  {0, 2, 0}, {0, 0, 0}, 2,
+		FB_TYPE_PACKED_PIXELS, 0,		FB_VISUAL_PSEUDOCOLOR, 16, 32},
 	{ 4,  {0, 4, 0},  {0, 4, 0},  {0, 4, 0}, {0, 0, 0}, 1,
 		FB_TYPE_INTERLEAVED_PLANES, 1,		FB_VISUAL_PSEUDOCOLOR, 8, 16},
+	{ 4,  {0, 4, 0},  {0, 4, 0},  {0, 4, 0}, {0, 0, 0}, 2,
+		FB_TYPE_PACKED_PIXELS, 0,		FB_VISUAL_PSEUDOCOLOR, 8, 16},
 	{ 8,  {0, 8, 0},  {0, 8, 0},  {0, 8, 0}, {0, 0, 0}, 0,
 		FB_TYPE_PACKED_PIXELS, 0,		FB_VISUAL_PSEUDOCOLOR, 4, 8},
 	{16,  {10, 5, 0}, {5, 5, 0},  {0, 5, 0}, {0, 0, 0}, 0,
@@ -248,10 +253,9 @@ static int s3fb_setup_ddc_bus(struct fb_info *info)
 {
 	struct s3fb_info *par = info->par;
 
-	strlcpy(par->ddc_adapter.name, info->fix.id,
+	strscpy(par->ddc_adapter.name, info->fix.id,
 		sizeof(par->ddc_adapter.name));
 	par->ddc_adapter.owner		= THIS_MODULE;
-	par->ddc_adapter.class		= I2C_CLASS_DDC;
 	par->ddc_adapter.algo_data	= &par->ddc_algo;
 	par->ddc_adapter.dev.parent	= info->device;
 	par->ddc_algo.setsda		= s3fb_ddc_setsda;
@@ -549,12 +553,15 @@ static int s3fb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	int rv, mem, step;
 	u16 m, n, r;
 
+	if (!var->pixclock)
+		return -EINVAL;
+
 	/* Find appropriate format */
 	rv = svga_match_format (s3fb_formats, var, NULL);
 
 	/* 32bpp mode is not supported on VIRGE VX,
 	   24bpp is not supported on others */
-	if ((par->chip == CHIP_988_VIRGE_VX) ? (rv == 7) : (rv == 6))
+	if ((par->chip == CHIP_988_VIRGE_VX) ? (rv == 9) : (rv == 8))
 		rv = -EINVAL;
 
 	if (rv < 0) {
@@ -604,7 +611,7 @@ static int s3fb_set_par(struct fb_info *info)
 	struct s3fb_info *par = info->par;
 	u32 value, mode, hmul, offset_value, screen_size, multiplex, dbytes;
 	u32 bpp = info->var.bits_per_pixel;
-	u32 htotal, hsstart;
+	u32 htotal, hsstart, pel_msk;
 
 	if (bpp != 0) {
 		info->fix.ypanstep = 1;
@@ -614,8 +621,15 @@ static int s3fb_set_par(struct fb_info *info)
 		info->tileops = NULL;
 
 		/* in 4bpp supports 8p wide tiles only, any tiles otherwise */
-		info->pixmap.blit_x = (bpp == 4) ? (1 << (8 - 1)) : (~(u32)0);
-		info->pixmap.blit_y = ~(u32)0;
+		if (bpp == 4 && (info->var.nonstd & 1) != 0) {
+			int i;
+			bitmap_zero(info->pixmap.blit_x, FB_MAX_BLIT_WIDTH);
+			for (i = 8; i <= FB_MAX_BLIT_WIDTH; i += 8)
+				set_bit(i - 1, info->pixmap.blit_x);
+		} else {
+			bitmap_fill(info->pixmap.blit_x, FB_MAX_BLIT_WIDTH);
+		}
+		bitmap_fill(info->pixmap.blit_y, FB_MAX_BLIT_HEIGHT);
 
 		offset_value = (info->var.xres_virtual * bpp) / 64;
 		screen_size = info->var.yres_virtual * info->fix.line_length;
@@ -627,8 +641,10 @@ static int s3fb_set_par(struct fb_info *info)
 		info->tileops = fasttext ? &s3fb_fast_tile_ops : &s3fb_tile_ops;
 
 		/* supports 8x16 tiles only */
-		info->pixmap.blit_x = 1 << (8 - 1);
-		info->pixmap.blit_y = 1 << (16 - 1);
+		bitmap_zero(info->pixmap.blit_x, FB_MAX_BLIT_WIDTH);
+		set_bit(8 - 1, info->pixmap.blit_x);
+		bitmap_zero(info->pixmap.blit_y, FB_MAX_BLIT_HEIGHT);
+		set_bit(16 - 1, info->pixmap.blit_y);
 
 		offset_value = info->var.xres_virtual / 16;
 		screen_size = (info->var.xres_virtual * info->var.yres_virtual) / 64;
@@ -720,7 +736,7 @@ static int s3fb_set_par(struct fb_info *info)
 		vga_wcrt(par->state.vgabase, 0x50, 0x00);
 		vga_wcrt(par->state.vgabase, 0x67, 0x50);
 		msleep(10); /* screen remains blank sometimes without this */
-		vga_wcrt(par->state.vgabase, 0x63, (mode <= 2) ? 0x90 : 0x09);
+		vga_wcrt(par->state.vgabase, 0x63, (mode <= 4) ? 0x90 : 0x09);
 		vga_wcrt(par->state.vgabase, 0x66, 0x90);
 	}
 
@@ -753,12 +769,17 @@ static int s3fb_set_par(struct fb_info *info)
 	svga_wcrt_mask(par->state.vgabase, 0x31, 0x00, 0x40);
 	multiplex = 0;
 	hmul = 1;
+	pel_msk = 0xff;
+
+	svga_wcrt_mask(par->state.vgabase, 0x08, 0x00, 0x60);
+	svga_wcrt_mask(par->state.vgabase, 0x05, 0x00, 0x60);
 
 	/* Set mode-specific register values */
 	switch (mode) {
 	case 0:
 		fb_dbg(info, "text mode\n");
 		svga_set_textmode_vga_regs(par->state.vgabase);
+		pel_msk = 0x0f;
 
 		/* Set additional registers like in 8-bit mode */
 		svga_wcrt_mask(par->state.vgabase, 0x50, 0x00, 0x30);
@@ -773,8 +794,11 @@ static int s3fb_set_par(struct fb_info *info)
 		}
 		break;
 	case 1:
-		fb_dbg(info, "4 bit pseudocolor\n");
-		vga_wgfx(par->state.vgabase, VGA_GFX_MODE, 0x40);
+		fb_dbg(info, "1 bit pseudocolor\n");
+		svga_wseq_mask(par->state.vgabase, 0x01, 0x10, 0x14);
+		svga_wcrt_mask(par->state.vgabase, 0x08, 0x60, 0x60);
+		svga_wcrt_mask(par->state.vgabase, 0x05, 0x40, 0x60);
+		pel_msk = 0x01;
 
 		/* Set additional registers like in 8-bit mode */
 		svga_wcrt_mask(par->state.vgabase, 0x50, 0x00, 0x30);
@@ -784,7 +808,13 @@ static int s3fb_set_par(struct fb_info *info)
 		svga_wcrt_mask(par->state.vgabase, 0x3A, 0x00, 0x30);
 		break;
 	case 2:
-		fb_dbg(info, "4 bit pseudocolor, planar\n");
+		fb_dbg(info, "2 bit pseudocolor\n");
+		svga_wseq_mask(par->state.vgabase, 0x01, 0x04, 0x14);
+		svga_wseq_mask(par->state.vgabase, 0x04, 0x08, 0x08);
+		vga_wgfx(par->state.vgabase, VGA_GFX_MODE, 0x20);
+		svga_wcrt_mask(par->state.vgabase, 0x08, 0x20, 0x60);
+		svga_wcrt_mask(par->state.vgabase, 0x05, 0x40, 0x60);
+		pel_msk = 0x03;
 
 		/* Set additional registers like in 8-bit mode */
 		svga_wcrt_mask(par->state.vgabase, 0x50, 0x00, 0x30);
@@ -794,8 +824,35 @@ static int s3fb_set_par(struct fb_info *info)
 		svga_wcrt_mask(par->state.vgabase, 0x3A, 0x00, 0x30);
 		break;
 	case 3:
+		fb_dbg(info, "4 bit pseudocolor, planar\n");
+		pel_msk = 0x0f;
+
+		/* Set additional registers like in 8-bit mode */
+		svga_wcrt_mask(par->state.vgabase, 0x50, 0x00, 0x30);
+		svga_wcrt_mask(par->state.vgabase, 0x67, 0x00, 0xF0);
+		svga_wcrt_mask(par->state.vgabase, 0x05, 0x40, 0x60);
+
+		/* disable enhanced mode */
+		svga_wcrt_mask(par->state.vgabase, 0x3A, 0x00, 0x30);
+		break;
+	case 4:
+		fb_dbg(info, "4 bit pseudocolor\n");
+		vga_wgfx(par->state.vgabase, VGA_GFX_MODE, 0x40);
+		svga_wattr(par->state.vgabase, 0x33, 0x01);
+		svga_wcrt_mask(par->state.vgabase, 0x05, 0x40, 0x60);
+		pel_msk = 0xf0;
+
+		/* Set additional registers like in 8-bit mode */
+		svga_wcrt_mask(par->state.vgabase, 0x50, 0x00, 0x30);
+		svga_wcrt_mask(par->state.vgabase, 0x67, 0x00, 0xF0);
+
+		/* disable enhanced mode */
+		svga_wcrt_mask(par->state.vgabase, 0x3A, 0x00, 0x30);
+		break;
+	case 5:
 		fb_dbg(info, "8 bit pseudocolor\n");
 		svga_wcrt_mask(par->state.vgabase, 0x50, 0x00, 0x30);
+		svga_wcrt_mask(par->state.vgabase, 0x05, 0x20, 0x60);
 		if (info->var.pixclock > 20000 ||
 		    par->chip == CHIP_357_VIRGE_GX2 ||
 		    par->chip == CHIP_359_VIRGE_GX2P ||
@@ -809,7 +866,7 @@ static int s3fb_set_par(struct fb_info *info)
 			multiplex = 1;
 		}
 		break;
-	case 4:
+	case 6:
 		fb_dbg(info, "5/5/5 truecolor\n");
 		if (par->chip == CHIP_988_VIRGE_VX) {
 			if (info->var.pixclock > 20000)
@@ -837,7 +894,7 @@ static int s3fb_set_par(struct fb_info *info)
 				hmul = 2;
 		}
 		break;
-	case 5:
+	case 7:
 		fb_dbg(info, "5/6/5 truecolor\n");
 		if (par->chip == CHIP_988_VIRGE_VX) {
 			if (info->var.pixclock > 20000)
@@ -865,12 +922,12 @@ static int s3fb_set_par(struct fb_info *info)
 				hmul = 2;
 		}
 		break;
-	case 6:
+	case 8:
 		/* VIRGE VX case */
 		fb_dbg(info, "8/8/8 truecolor\n");
 		svga_wcrt_mask(par->state.vgabase, 0x67, 0xD0, 0xF0);
 		break;
-	case 7:
+	case 9:
 		fb_dbg(info, "8/8/8/8 truecolor\n");
 		svga_wcrt_mask(par->state.vgabase, 0x50, 0x30, 0x30);
 		svga_wcrt_mask(par->state.vgabase, 0x67, 0xD0, 0xF0);
@@ -879,6 +936,7 @@ static int s3fb_set_par(struct fb_info *info)
 		fb_err(info, "unsupported mode - bug\n");
 		return -EINVAL;
 	}
+	vga_w(par->state.vgabase, VGA_PEL_MSK, pel_msk);
 
 	if (par->chip != CHIP_988_VIRGE_VX) {
 		svga_wseq_mask(par->state.vgabase, 0x15, multiplex ? 0x10 : 0x00, 0x10);
@@ -902,6 +960,8 @@ static int s3fb_set_par(struct fb_info *info)
 	value = clamp((htotal + hsstart + 1) / 2 + 2, hsstart + 4, htotal + 1);
 	svga_wcrt_multi(par->state.vgabase, s3_dtpc_regs, value);
 
+	if (screen_size > info->screen_size)
+		screen_size = info->screen_size;
 	memset_io(info->screen_base, 0x00, screen_size);
 	/* Device and screen back on */
 	svga_wcrt_mask(par->state.vgabase, 0x17, 0x80, 0x80);
@@ -915,33 +975,26 @@ static int s3fb_set_par(struct fb_info *info)
 static int s3fb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 				u_int transp, struct fb_info *fb)
 {
+	struct s3fb_info *par = fb->par;
+	int cols;
+
 	switch (fb->var.bits_per_pixel) {
 	case 0:
+	case 1:
+	case 2:
 	case 4:
-		if (regno >= 16)
-			return -EINVAL;
-
-		if ((fb->var.bits_per_pixel == 4) &&
-		    (fb->var.nonstd == 0)) {
-			outb(0xF0, VGA_PEL_MSK);
-			outb(regno*16, VGA_PEL_IW);
-		} else {
-			outb(0x0F, VGA_PEL_MSK);
-			outb(regno, VGA_PEL_IW);
-		}
-		outb(red >> 10, VGA_PEL_D);
-		outb(green >> 10, VGA_PEL_D);
-		outb(blue >> 10, VGA_PEL_D);
-		break;
 	case 8:
-		if (regno >= 256)
+		cols = 1 << (fb->var.bits_per_pixel ? fb->var.bits_per_pixel : 4);
+		if (regno >= cols)
 			return -EINVAL;
 
-		outb(0xFF, VGA_PEL_MSK);
-		outb(regno, VGA_PEL_IW);
-		outb(red >> 10, VGA_PEL_D);
-		outb(green >> 10, VGA_PEL_D);
-		outb(blue >> 10, VGA_PEL_D);
+		if ((fb->var.bits_per_pixel == 4) && ((fb->var.nonstd & 1) == 0))
+			regno <<= 4;
+
+		vga_w(par->state.vgabase, VGA_PEL_IW, regno);
+		vga_w(par->state.vgabase, VGA_PEL_D, red >> 10);
+		vga_w(par->state.vgabase, VGA_PEL_D, green >> 10);
+		vga_w(par->state.vgabase, VGA_PEL_D, blue >> 10);
 		break;
 	case 16:
 		if (regno >= 16)
@@ -976,34 +1029,30 @@ static int s3fb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 static int s3fb_blank(int blank_mode, struct fb_info *info)
 {
 	struct s3fb_info *par = info->par;
+	u8 data;
+
+	data = (blank_mode == FB_BLANK_UNBLANK) ? 0x00 : 0x20;
+	svga_wseq_mask(par->state.vgabase, 0x01, data, 0x20);
+	svga_wseq_mask(par->state.vgabase, 0x18, data, 0x20);
 
 	switch (blank_mode) {
-	case FB_BLANK_UNBLANK:
-		fb_dbg(info, "unblank\n");
-		svga_wcrt_mask(par->state.vgabase, 0x56, 0x00, 0x06);
-		svga_wseq_mask(par->state.vgabase, 0x01, 0x00, 0x20);
-		break;
-	case FB_BLANK_NORMAL:
-		fb_dbg(info, "blank\n");
-		svga_wcrt_mask(par->state.vgabase, 0x56, 0x00, 0x06);
-		svga_wseq_mask(par->state.vgabase, 0x01, 0x20, 0x20);
+	default:
+		data = 0x00;
 		break;
 	case FB_BLANK_HSYNC_SUSPEND:
-		fb_dbg(info, "hsync\n");
-		svga_wcrt_mask(par->state.vgabase, 0x56, 0x02, 0x06);
-		svga_wseq_mask(par->state.vgabase, 0x01, 0x20, 0x20);
+		data = 0x02;
 		break;
 	case FB_BLANK_VSYNC_SUSPEND:
-		fb_dbg(info, "vsync\n");
-		svga_wcrt_mask(par->state.vgabase, 0x56, 0x04, 0x06);
-		svga_wseq_mask(par->state.vgabase, 0x01, 0x20, 0x20);
+		data = 0x04;
 		break;
 	case FB_BLANK_POWERDOWN:
-		fb_dbg(info, "sync down\n");
-		svga_wcrt_mask(par->state.vgabase, 0x56, 0x06, 0x06);
-		svga_wseq_mask(par->state.vgabase, 0x01, 0x20, 0x20);
+		data = 0x06;
 		break;
 	}
+	svga_wcrt_mask(par->state.vgabase, 0x56, data, 0x06);
+
+	data = (blank_mode == FB_BLANK_POWERDOWN) ? 0x01 : 0x00;
+	svga_wseq_mask(par->state.vgabase, 0x14, data, 0x01);
 
 	return 0;
 }
@@ -1033,14 +1082,42 @@ static int s3fb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
 	return 0;
 }
 
+/* Get capabilities of accelerator based on the mode */
+
+static void s3fb_get_caps(struct fb_info *info, struct fb_blit_caps *caps,
+			  struct fb_var_screeninfo *var)
+{
+	int i;
+
+	if (var->bits_per_pixel == 0) {
+		/* can only support 256 8x16 bitmap */
+		bitmap_zero(caps->x, FB_MAX_BLIT_WIDTH);
+		set_bit(8 - 1, caps->x);
+		bitmap_zero(caps->y, FB_MAX_BLIT_HEIGHT);
+		set_bit(16 - 1, caps->y);
+		caps->len = 256;
+	} else {
+		if (var->bits_per_pixel == 4 && (var->nonstd & 1) != 0) {
+			bitmap_zero(caps->x, FB_MAX_BLIT_WIDTH);
+			for (i = 8; i <= FB_MAX_BLIT_WIDTH; i += 8)
+				set_bit(i - 1, caps->x);
+		} else {
+			bitmap_fill(caps->x, FB_MAX_BLIT_WIDTH);
+		}
+		bitmap_fill(caps->y, FB_MAX_BLIT_HEIGHT);
+		caps->len = ~(u32)0;
+	}
+}
+
 /* ------------------------------------------------------------------------- */
 
 /* Frame buffer operations */
 
-static struct fb_ops s3fb_ops = {
+static const struct fb_ops s3fb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_open	= s3fb_open,
 	.fb_release	= s3fb_release,
+	__FB_DEFAULT_IOMEM_OPS_RDWR,
 	.fb_check_var	= s3fb_check_var,
 	.fb_set_par	= s3fb_set_par,
 	.fb_setcolreg	= s3fb_setcolreg,
@@ -1049,7 +1126,8 @@ static struct fb_ops s3fb_ops = {
 	.fb_fillrect	= s3fb_fillrect,
 	.fb_copyarea	= cfb_copyarea,
 	.fb_imageblit	= s3fb_imageblit,
-	.fb_get_caps    = svga_get_caps,
+	__FB_DEFAULT_IOMEM_OPS_MMAP,
+	.fb_get_caps	= s3fb_get_caps,
 };
 
 /* ------------------------------------------------------------------------- */
@@ -1126,12 +1204,14 @@ static int s3_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		return -ENODEV;
 	}
 
+	rc = aperture_remove_conflicting_pci_devices(dev, "s3fb");
+	if (rc)
+		return rc;
+
 	/* Allocate and fill driver data structure */
 	info = framebuffer_alloc(sizeof(struct s3fb_info), &(dev->dev));
-	if (!info) {
-		dev_err(&(dev->dev), "cannot allocate memory\n");
+	if (!info)
 		return -ENOMEM;
-	}
 
 	par = info->par;
 	mutex_init(&par->open_lock);
@@ -1253,7 +1333,7 @@ static int s3_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	vga_wcrt(par->state.vgabase, 0x38, cr38);
 	vga_wcrt(par->state.vgabase, 0x39, cr39);
 
-	strcpy(info->fix.id, s3_names [par->chip]);
+	strscpy(info->fix.id, s3_names[par->chip]);
 	info->fix.mmio_start = 0;
 	info->fix.mmio_len = 0;
 	info->fix.type = FB_TYPE_PACKED_PIXELS;
@@ -1366,6 +1446,7 @@ err_reg_fb:
 err_alloc_cmap:
 err_find_mode:
 #ifdef CONFIG_FB_S3_DDC
+	fb_destroy_modelist(&info->modelist);
 	if (par->ddc_registered)
 		i2c_del_adapter(&par->ddc_adapter);
 	if (par->mmio)
@@ -1412,9 +1493,9 @@ static void s3_pci_remove(struct pci_dev *dev)
 
 /* PCI suspend */
 
-static int s3_pci_suspend(struct pci_dev* dev, pm_message_t state)
+static int __maybe_unused s3_pci_suspend(struct device *dev)
 {
-	struct fb_info *info = pci_get_drvdata(dev);
+	struct fb_info *info = dev_get_drvdata(dev);
 	struct s3fb_info *par = info->par;
 
 	dev_info(info->device, "suspend\n");
@@ -1422,17 +1503,15 @@ static int s3_pci_suspend(struct pci_dev* dev, pm_message_t state)
 	console_lock();
 	mutex_lock(&(par->open_lock));
 
-	if ((state.event == PM_EVENT_FREEZE) || (par->ref_count == 0)) {
+	if (par->ref_count == 0) {
 		mutex_unlock(&(par->open_lock));
 		console_unlock();
 		return 0;
 	}
 
 	fb_set_suspend(info, 1);
-
-	pci_save_state(dev);
-	pci_disable_device(dev);
-	pci_set_power_state(dev, pci_choose_state(dev, state));
+	svga_wseq_mask(par->state.vgabase, 0x18, 0x20, 0x20);
+	svga_wseq_mask(par->state.vgabase, 0x14, 0x01, 0x01);
 
 	mutex_unlock(&(par->open_lock));
 	console_unlock();
@@ -1443,11 +1522,10 @@ static int s3_pci_suspend(struct pci_dev* dev, pm_message_t state)
 
 /* PCI resume */
 
-static int s3_pci_resume(struct pci_dev* dev)
+static int __maybe_unused s3_pci_resume(struct device *dev)
 {
-	struct fb_info *info = pci_get_drvdata(dev);
+	struct fb_info *info = dev_get_drvdata(dev);
 	struct s3fb_info *par = info->par;
-	int err;
 
 	dev_info(info->device, "resume\n");
 
@@ -1460,17 +1538,9 @@ static int s3_pci_resume(struct pci_dev* dev)
 		return 0;
 	}
 
-	pci_set_power_state(dev, PCI_D0);
-	pci_restore_state(dev);
-	err = pci_enable_device(dev);
-	if (err) {
-		mutex_unlock(&(par->open_lock));
-		console_unlock();
-		dev_err(info->device, "error %d enabling device for resume\n", err);
-		return err;
-	}
-	pci_set_master(dev);
-
+	vga_wseq(par->state.vgabase, 0x08, 0x06);
+	svga_wseq_mask(par->state.vgabase, 0x18, 0x00, 0x20);
+	svga_wseq_mask(par->state.vgabase, 0x14, 0x00, 0x01);
 	s3fb_set_par(info);
 	fb_set_suspend(info, 0);
 
@@ -1480,28 +1550,38 @@ static int s3_pci_resume(struct pci_dev* dev)
 	return 0;
 }
 
+static const struct dev_pm_ops s3_pci_pm_ops = {
+#ifdef CONFIG_PM_SLEEP
+	.suspend	= s3_pci_suspend,
+	.resume		= s3_pci_resume,
+	.freeze		= NULL,
+	.thaw		= s3_pci_resume,
+	.poweroff	= s3_pci_suspend,
+	.restore	= s3_pci_resume,
+#endif
+};
 
 /* List of boards that we are trying to support */
 
 static const struct pci_device_id s3_devices[] = {
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x8810), .driver_data = CHIP_XXX_TRIO},
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x8811), .driver_data = CHIP_XXX_TRIO},
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x8812), .driver_data = CHIP_M65_AURORA64VP},
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x8814), .driver_data = CHIP_767_TRIO64UVP},
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x8901), .driver_data = CHIP_XXX_TRIO64V2_DXGX},
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x8902), .driver_data = CHIP_551_PLATO_PX},
+	{ PCI_VDEVICE(S3, 0x8810), .driver_data = CHIP_XXX_TRIO },
+	{ PCI_VDEVICE(S3, 0x8811), .driver_data = CHIP_XXX_TRIO },
+	{ PCI_VDEVICE(S3, 0x8812), .driver_data = CHIP_M65_AURORA64VP },
+	{ PCI_VDEVICE(S3, 0x8814), .driver_data = CHIP_767_TRIO64UVP },
+	{ PCI_VDEVICE(S3, 0x8901), .driver_data = CHIP_XXX_TRIO64V2_DXGX },
+	{ PCI_VDEVICE(S3, 0x8902), .driver_data = CHIP_551_PLATO_PX },
 
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x5631), .driver_data = CHIP_325_VIRGE},
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x883D), .driver_data = CHIP_988_VIRGE_VX},
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x8A01), .driver_data = CHIP_XXX_VIRGE_DXGX},
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x8A10), .driver_data = CHIP_357_VIRGE_GX2},
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x8A11), .driver_data = CHIP_359_VIRGE_GX2P},
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x8A12), .driver_data = CHIP_359_VIRGE_GX2P},
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x8A13), .driver_data = CHIP_36X_TRIO3D_1X_2X},
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x8904), .driver_data = CHIP_365_TRIO3D},
-	{PCI_DEVICE(PCI_VENDOR_ID_S3, 0x8C01), .driver_data = CHIP_260_VIRGE_MX},
+	{ PCI_VDEVICE(S3, 0x5631), .driver_data = CHIP_325_VIRGE },
+	{ PCI_VDEVICE(S3, 0x883D), .driver_data = CHIP_988_VIRGE_VX },
+	{ PCI_VDEVICE(S3, 0x8A01), .driver_data = CHIP_XXX_VIRGE_DXGX },
+	{ PCI_VDEVICE(S3, 0x8A10), .driver_data = CHIP_357_VIRGE_GX2 },
+	{ PCI_VDEVICE(S3, 0x8A11), .driver_data = CHIP_359_VIRGE_GX2P },
+	{ PCI_VDEVICE(S3, 0x8A12), .driver_data = CHIP_359_VIRGE_GX2P },
+	{ PCI_VDEVICE(S3, 0x8A13), .driver_data = CHIP_36X_TRIO3D_1X_2X },
+	{ PCI_VDEVICE(S3, 0x8904), .driver_data = CHIP_365_TRIO3D },
+	{ PCI_VDEVICE(S3, 0x8C01), .driver_data = CHIP_260_VIRGE_MX },
 
-	{0, 0, 0, 0, 0, 0, 0}
+	{ }
 };
 
 
@@ -1512,8 +1592,7 @@ static struct pci_driver s3fb_pci_driver = {
 	.id_table	= s3_devices,
 	.probe		= s3_pci_probe,
 	.remove		= s3_pci_remove,
-	.suspend	= s3_pci_suspend,
-	.resume		= s3_pci_resume,
+	.driver.pm	= &s3_pci_pm_ops,
 };
 
 /* Parse user specified options */
@@ -1557,7 +1636,12 @@ static int __init s3fb_init(void)
 
 #ifndef MODULE
 	char *option = NULL;
+#endif
 
+	if (fb_modesetting_disabled("s3fb"))
+		return -ENODEV;
+
+#ifndef MODULE
 	if (fb_get_options("s3fb", &option))
 		return -ENODEV;
 	s3fb_setup(option);

@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /****************************************************************************
  * Driver for Solarflare network controllers and boards
  * Copyright 2005-2006 Fen Systems Ltd.
  * Copyright 2006-2013 Solarflare Communications Inc.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation, incorporated herein by reference.
  */
 
 #include <linux/bitops.h>
@@ -370,7 +367,7 @@ static const struct i2c_algo_bit_data falcon_i2c_bit_operations = {
 	.getsda		= falcon_getsda,
 	.getscl		= falcon_getscl,
 	.udelay		= 5,
-	/* Wait up to 50 ms for slave to let us pull SCL high */
+	/* Wait up to 50 ms for target to let us pull SCL high */
 	.timeout	= DIV_ROUND_UP(HZ, 20),
 };
 
@@ -932,7 +929,7 @@ static int falcon_mtd_probe(struct ef4_nic *efx)
 	ASSERT_RTNL();
 
 	/* Allocate space for maximum number of partitions */
-	parts = kcalloc(2, sizeof(*parts), GFP_KERNEL);
+	parts = kzalloc_objs(*parts, 2);
 	if (!parts)
 		return -ENOMEM;
 	n_parts = 0;
@@ -1456,8 +1453,8 @@ static void falcon_stats_complete(struct ef4_nic *efx)
 
 static void falcon_stats_timer_func(struct timer_list *t)
 {
-	struct falcon_nic_data *nic_data = from_timer(nic_data, t,
-						      stats_timer);
+	struct falcon_nic_data *nic_data = timer_container_of(nic_data, t,
+							      stats_timer);
 	struct ef4_nic *efx = nic_data->efx;
 
 	spin_lock(&efx->stats_lock);
@@ -2183,7 +2180,7 @@ static int falcon_probe_nvconfig(struct ef4_nic *efx)
 	struct falcon_nvconfig *nvconfig;
 	int rc;
 
-	nvconfig = kmalloc(sizeof(*nvconfig), GFP_KERNEL);
+	nvconfig = kmalloc_obj(*nvconfig);
 	if (!nvconfig)
 		return -ENOMEM;
 
@@ -2292,7 +2289,7 @@ static int falcon_probe_nic(struct ef4_nic *efx)
 	efx->primary = efx; /* only one usable function per controller */
 
 	/* Allocate storage for hardware specific data */
-	nic_data = kzalloc(sizeof(*nic_data), GFP_KERNEL);
+	nic_data = kzalloc_obj(*nic_data);
 	if (!nic_data)
 		return -ENOMEM;
 	efx->nic_data = nic_data;
@@ -2390,7 +2387,7 @@ static int falcon_probe_nic(struct ef4_nic *efx)
 	board->i2c_data.data = efx;
 	board->i2c_adap.algo_data = &board->i2c_data;
 	board->i2c_adap.dev.parent = &efx->pci_dev->dev;
-	strlcpy(board->i2c_adap.name, "SFC4000 GPIO",
+	strscpy(board->i2c_adap.name, "SFC4000 GPIO",
 		sizeof(board->i2c_adap.name));
 	rc = i2c_bit_add_bus(&board->i2c_adap);
 	if (rc)
@@ -2567,7 +2564,7 @@ static void falcon_remove_nic(struct ef4_nic *efx)
 	efx->nic_data = NULL;
 }
 
-static size_t falcon_describe_nic_stats(struct ef4_nic *efx, u8 *names)
+static size_t falcon_describe_nic_stats(struct ef4_nic *efx, u8 **names)
 {
 	return ef4_nic_describe_stats(falcon_stat_desc, FALCON_STAT_COUNT,
 				      falcon_stat_mask, names);
@@ -2660,7 +2657,7 @@ void falcon_stop_nic_stats(struct ef4_nic *efx)
 	++nic_data->stats_disable_count;
 	spin_unlock_bh(&efx->stats_lock);
 
-	del_timer_sync(&nic_data->stats_timer);
+	timer_delete_sync(&nic_data->stats_timer);
 
 	/* Wait enough time for the most recent transfer to
 	 * complete. */

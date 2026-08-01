@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/drivers/char/ds1620.c: Dallas Semiconductors DS1620
  *   thermometer driver (as used in the Rebel.com NetWinder)
@@ -212,7 +213,7 @@ static void ds1620_read_state(struct therm *therm)
 
 static int ds1620_open(struct inode *inode, struct file *file)
 {
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 static ssize_t
@@ -345,18 +346,6 @@ static int ds1620_proc_therm_show(struct seq_file *m, void *v)
 		   fan_state[netwinder_get_fan()]);
 	return 0;
 }
-
-static int ds1620_proc_therm_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, ds1620_proc_therm_show, NULL);
-}
-
-static const struct file_operations ds1620_proc_therm_fops = {
-	.open		= ds1620_proc_therm_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 #endif
 
 static const struct file_operations ds1620_fops = {
@@ -364,7 +353,6 @@ static const struct file_operations ds1620_fops = {
 	.open		= ds1620_open,
 	.read		= ds1620_read,
 	.unlocked_ioctl	= ds1620_unlocked_ioctl,
-	.llseek		= no_llseek,
 };
 
 static struct miscdevice ds1620_miscdev = {
@@ -404,7 +392,7 @@ static int __init ds1620_init(void)
 		return ret;
 
 #ifdef THERM_USE_PROC
-	if (!proc_create("therm", 0, NULL, &ds1620_proc_therm_fops))
+	if (!proc_create_single("therm", 0, NULL, ds1620_proc_therm_show))
 		printk(KERN_ERR "therm: unable to register /proc/therm\n");
 #endif
 
@@ -432,4 +420,5 @@ static void __exit ds1620_exit(void)
 module_init(ds1620_init);
 module_exit(ds1620_exit);
 
+MODULE_DESCRIPTION("Dallas Semiconductor DS1620 thermometer driver");
 MODULE_LICENSE("GPL");

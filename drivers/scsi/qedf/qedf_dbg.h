@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  *  QLogic FCoE Offload Driver
- *  Copyright (c) 2016-2017 Cavium Inc.
- *
- *  This software is available under the terms of the GNU General Public License
- *  (GPL) Version 2, available from the file COPYING in the main directory of
- *  this source tree.
+ *  Copyright (c) 2016-2018 Cavium Inc.
  */
 #ifndef _QEDF_DBG_H_
 #define _QEDF_DBG_H_
@@ -13,7 +10,6 @@
 #include <linux/kernel.h>
 #include <linux/compiler.h>
 #include <linux/string.h>
-#include <linux/version.h>
 #include <linux/pci.h>
 #include <linux/delay.h>
 #include <scsi/scsi_transport.h>
@@ -45,7 +41,7 @@ extern uint qedf_debug;
 #define QEDF_LOG_LPORT		0x4000		/* lport logs */
 #define QEDF_LOG_ELS		0x8000		/* ELS logs */
 #define QEDF_LOG_NPIV		0x10000		/* NPIV logs */
-#define QEDF_LOG_SESS		0x20000		/* Conection setup, cleanup */
+#define QEDF_LOG_SESS		0x20000		/* Connection setup, cleanup */
 #define QEDF_LOG_TID		0x80000         /*
 						 * FW TID context acquire
 						 * free
@@ -62,6 +58,8 @@ extern uint qedf_debug;
 						*/
 #define QEDF_LOG_NOTICE	0x40000000	/* Notice logs */
 #define QEDF_LOG_WARN		0x80000000	/* Warning logs */
+
+#define QEDF_DEBUGFS_LOG_LEN (2 * PAGE_SIZE)
 
 /* Debug context structure */
 struct qedf_dbg_ctx {
@@ -102,7 +100,7 @@ struct Scsi_Host;
 
 struct sysfs_bin_attrs {
 	char *name;
-	struct bin_attribute *attr;
+	const struct bin_attribute *attr;
 };
 
 extern int qedf_alloc_grc_dump_buf(uint8_t **buf, uint32_t len);

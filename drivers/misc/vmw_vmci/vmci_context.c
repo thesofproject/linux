@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * VMware VMCI Driver
  *
  * Copyright (C) 2012 VMware, Inc. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation version 2 and no later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
- * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
  */
 
 #include <linux/vmw_vmci_defs.h>
@@ -28,6 +20,9 @@
 #include "vmci_context.h"
 #include "vmci_driver.h"
 #include "vmci_event.h"
+
+/* Use a wide upper bound for the maximum contexts. */
+#define VMCI_MAX_CONTEXTS 2000
 
 /*
  * List of current VMCI contexts.  Contexts can be added by
@@ -109,10 +104,10 @@ struct vmci_ctx *vmci_ctx_create(u32 cid, u32 priv_flags,
 		goto err_out;
 	}
 
-	context = kzalloc(sizeof(*context), GFP_KERNEL);
+	context = kzalloc_obj(*context);
 	if (!context) {
 		pr_warn("Failed to allocate memory for VMCI context\n");
-		error = -EINVAL;
+		error = -ENOMEM;
 		goto err_out;
 	}
 
@@ -125,19 +120,22 @@ struct vmci_ctx *vmci_ctx_create(u32 cid, u32 priv_flags,
 	/* Initialize host-specific VMCI context. */
 	init_waitqueue_head(&context->host_context.wait_queue);
 
-	context->queue_pair_array = vmci_handle_arr_create(0);
+	context->queue_pair_array =
+		vmci_handle_arr_create(0, VMCI_MAX_GUEST_QP_COUNT);
 	if (!context->queue_pair_array) {
 		error = -ENOMEM;
 		goto err_free_ctx;
 	}
 
-	context->doorbell_array = vmci_handle_arr_create(0);
+	context->doorbell_array =
+		vmci_handle_arr_create(0, VMCI_MAX_GUEST_DOORBELL_COUNT);
 	if (!context->doorbell_array) {
 		error = -ENOMEM;
 		goto err_free_qp_array;
 	}
 
-	context->pending_doorbell_array = vmci_handle_arr_create(0);
+	context->pending_doorbell_array =
+		vmci_handle_arr_create(0, VMCI_MAX_GUEST_DOORBELL_COUNT);
 	if (!context->pending_doorbell_array) {
 		error = -ENOMEM;
 		goto err_free_db_array;
@@ -212,7 +210,7 @@ static int ctx_fire_notification(u32 context_id, u32 priv_flags)
 	 * We create an array to hold the subscribers we find when
 	 * scanning through all contexts.
 	 */
-	subscriber_array = vmci_handle_arr_create(0);
+	subscriber_array = vmci_handle_arr_create(0, VMCI_MAX_CONTEXTS);
 	if (subscriber_array == NULL)
 		return VMCI_ERROR_NO_MEM;
 
@@ -253,6 +251,8 @@ static int ctx_fire_notification(u32 context_id, u32 priv_flags)
 		ev.msg.hdr.src = vmci_make_handle(VMCI_HYPERVISOR_CONTEXT_ID,
 						  VMCI_CONTEXT_RESOURCE_ID);
 		ev.msg.hdr.payload_size = sizeof(ev) - sizeof(ev.msg.hdr);
+		memset((char*)&ev + sizeof(ev.msg.hdr), 0,
+			ev.msg.hdr.payload_size);
 		ev.msg.event_data.event = VMCI_EVENT_CTX_REMOVED;
 		ev.payload.context_id = context_id;
 
@@ -266,28 +266,6 @@ static int ctx_fire_notification(u32 context_id, u32 priv_flags)
 		}
 	}
 	vmci_handle_arr_destroy(subscriber_array);
-
-	return VMCI_SUCCESS;
-}
-
-/*
- * Returns the current number of pending datagrams. The call may
- * also serve as a synchronization point for the datagram queue,
- * as no enqueue operations can occur concurrently.
- */
-int vmci_ctx_pending_datagrams(u32 cid, u32 *pending)
-{
-	struct vmci_ctx *context;
-
-	context = vmci_ctx_get(cid);
-	if (context == NULL)
-		return VMCI_ERROR_INVALID_ARGS;
-
-	spin_lock(&context->lock);
-	if (pending)
-		*pending = context->pending_datagrams;
-	spin_unlock(&context->lock);
-	vmci_ctx_put(context);
 
 	return VMCI_SUCCESS;
 }
@@ -316,7 +294,7 @@ int vmci_ctx_enqueue_datagram(u32 cid, struct vmci_datagram *dg)
 	}
 
 	/* Allocate guest call entry and add it to the target VM's queue. */
-	dq_entry = kmalloc(sizeof(*dq_entry), GFP_KERNEL);
+	dq_entry = kmalloc_obj(*dq_entry);
 	if (dq_entry == NULL) {
 		pr_warn("Failed to allocate memory for datagram\n");
 		vmci_ctx_put(context);
@@ -620,7 +598,7 @@ int vmci_ctx_add_notification(u32 context_id, u32 remote_cid)
 		goto out;
 	}
 
-	notifier = kmalloc(sizeof(struct vmci_handle_list), GFP_KERNEL);
+	notifier = kmalloc_obj(struct vmci_handle_list);
 	if (!notifier) {
 		result = VMCI_ERROR_NO_MEM;
 		goto out;
@@ -631,20 +609,26 @@ int vmci_ctx_add_notification(u32 context_id, u32 remote_cid)
 
 	spin_lock(&context->lock);
 
-	list_for_each_entry(n, &context->notifier_list, node) {
-		if (vmci_handle_is_equal(n->handle, notifier->handle)) {
-			exists = true;
-			break;
+	if (context->n_notifiers < VMCI_MAX_CONTEXTS) {
+		list_for_each_entry(n, &context->notifier_list, node) {
+			if (vmci_handle_is_equal(n->handle, notifier->handle)) {
+				exists = true;
+				break;
+			}
 		}
-	}
 
-	if (exists) {
-		kfree(notifier);
-		result = VMCI_ERROR_ALREADY_EXISTS;
+		if (exists) {
+			kfree(notifier);
+			result = VMCI_ERROR_ALREADY_EXISTS;
+		} else {
+			list_add_tail_rcu(&notifier->node,
+					  &context->notifier_list);
+			context->n_notifiers++;
+			result = VMCI_SUCCESS;
+		}
 	} else {
-		list_add_tail_rcu(&notifier->node, &context->notifier_list);
-		context->n_notifiers++;
-		result = VMCI_SUCCESS;
+		kfree(notifier);
+		result = VMCI_ERROR_NO_MEM;
 	}
 
 	spin_unlock(&context->lock);
@@ -661,9 +645,8 @@ int vmci_ctx_add_notification(u32 context_id, u32 remote_cid)
 int vmci_ctx_remove_notification(u32 context_id, u32 remote_cid)
 {
 	struct vmci_ctx *context;
-	struct vmci_handle_list *notifier, *tmp;
+	struct vmci_handle_list *notifier = NULL, *iter, *tmp;
 	struct vmci_handle handle;
-	bool found = false;
 
 	context = vmci_ctx_get(context_id);
 	if (!context)
@@ -672,25 +655,23 @@ int vmci_ctx_remove_notification(u32 context_id, u32 remote_cid)
 	handle = vmci_make_handle(remote_cid, VMCI_EVENT_HANDLER);
 
 	spin_lock(&context->lock);
-	list_for_each_entry_safe(notifier, tmp,
+	list_for_each_entry_safe(iter, tmp,
 				 &context->notifier_list, node) {
-		if (vmci_handle_is_equal(notifier->handle, handle)) {
-			list_del_rcu(&notifier->node);
+		if (vmci_handle_is_equal(iter->handle, handle)) {
+			list_del_rcu(&iter->node);
 			context->n_notifiers--;
-			found = true;
+			notifier = iter;
 			break;
 		}
 	}
 	spin_unlock(&context->lock);
 
-	if (found) {
-		synchronize_rcu();
-		kfree(notifier);
-	}
+	if (notifier)
+		kvfree_rcu_mightsleep(notifier);
 
 	vmci_ctx_put(context);
 
-	return found ? VMCI_SUCCESS : VMCI_ERROR_NOT_FOUND;
+	return notifier ? VMCI_SUCCESS : VMCI_ERROR_NOT_FOUND;
 }
 
 static int vmci_ctx_get_chkpt_notifiers(struct vmci_ctx *context,
@@ -729,8 +710,7 @@ static int vmci_ctx_get_chkpt_doorbells(struct vmci_ctx *context,
 					u32 *buf_size, void **pbuf)
 {
 	struct dbell_cpt_state *dbells;
-	size_t n_doorbells;
-	int i;
+	u32 i, n_doorbells;
 
 	n_doorbells = vmci_handle_arr_get_size(context->doorbell_array);
 	if (n_doorbells > 0) {
@@ -740,7 +720,7 @@ static int vmci_ctx_get_chkpt_doorbells(struct vmci_ctx *context,
 			return VMCI_ERROR_MORE_DATA;
 		}
 
-		dbells = kmalloc(data_size, GFP_ATOMIC);
+		dbells = kzalloc(data_size, GFP_ATOMIC);
 		if (!dbells)
 			return VMCI_ERROR_NO_MEM;
 
@@ -868,7 +848,8 @@ int vmci_ctx_rcv_notifications_get(u32 context_id,
 	spin_lock(&context->lock);
 
 	*db_handle_array = context->pending_doorbell_array;
-	context->pending_doorbell_array = vmci_handle_arr_create(0);
+	context->pending_doorbell_array =
+		vmci_handle_arr_create(0, VMCI_MAX_GUEST_DOORBELL_COUNT);
 	if (!context->pending_doorbell_array) {
 		context->pending_doorbell_array = *db_handle_array;
 		*db_handle_array = NULL;
@@ -950,12 +931,11 @@ int vmci_ctx_dbell_create(u32 context_id, struct vmci_handle handle)
 		return VMCI_ERROR_NOT_FOUND;
 
 	spin_lock(&context->lock);
-	if (!vmci_handle_arr_has_entry(context->doorbell_array, handle)) {
-		vmci_handle_arr_append_entry(&context->doorbell_array, handle);
-		result = VMCI_SUCCESS;
-	} else {
+	if (!vmci_handle_arr_has_entry(context->doorbell_array, handle))
+		result = vmci_handle_arr_append_entry(&context->doorbell_array,
+						      handle);
+	else
 		result = VMCI_ERROR_DUPLICATE_ENTRY;
-	}
 
 	spin_unlock(&context->lock);
 	vmci_ctx_put(context);
@@ -989,38 +969,6 @@ int vmci_ctx_dbell_destroy(u32 context_id, struct vmci_handle handle)
 
 	return vmci_handle_is_invalid(removed_handle) ?
 	    VMCI_ERROR_NOT_FOUND : VMCI_SUCCESS;
-}
-
-/*
- * Unregisters all doorbell handles that were previously
- * registered with vmci_ctx_dbell_create.
- */
-int vmci_ctx_dbell_destroy_all(u32 context_id)
-{
-	struct vmci_ctx *context;
-	struct vmci_handle handle;
-
-	if (context_id == VMCI_INVALID_ID)
-		return VMCI_ERROR_INVALID_ARGS;
-
-	context = vmci_ctx_get(context_id);
-	if (context == NULL)
-		return VMCI_ERROR_NOT_FOUND;
-
-	spin_lock(&context->lock);
-	do {
-		struct vmci_handle_arr *arr = context->doorbell_array;
-		handle = vmci_handle_arr_remove_tail(arr);
-	} while (!vmci_handle_is_invalid(handle));
-	do {
-		struct vmci_handle_arr *arr = context->pending_doorbell_array;
-		handle = vmci_handle_arr_remove_tail(arr);
-	} while (!vmci_handle_is_invalid(handle));
-	spin_unlock(&context->lock);
-
-	vmci_ctx_put(context);
-
-	return VMCI_SUCCESS;
 }
 
 /*
@@ -1091,15 +1039,16 @@ int vmci_ctx_notify_dbell(u32 src_cid,
 			if (!vmci_handle_arr_has_entry(
 					dst_context->pending_doorbell_array,
 					handle)) {
-				vmci_handle_arr_append_entry(
+				result = vmci_handle_arr_append_entry(
 					&dst_context->pending_doorbell_array,
 					handle);
-
-				ctx_signal_notify(dst_context);
-				wake_up(&dst_context->host_context.wait_queue);
-
+				if (result == VMCI_SUCCESS) {
+					ctx_signal_notify(dst_context);
+					wake_up(&dst_context->host_context.wait_queue);
+				}
+			} else {
+				result = VMCI_SUCCESS;
 			}
-			result = VMCI_SUCCESS;
 		}
 		spin_unlock(&dst_context->lock);
 	}
@@ -1126,13 +1075,11 @@ int vmci_ctx_qp_create(struct vmci_ctx *context, struct vmci_handle handle)
 	if (context == NULL || vmci_handle_is_invalid(handle))
 		return VMCI_ERROR_INVALID_ARGS;
 
-	if (!vmci_handle_arr_has_entry(context->queue_pair_array, handle)) {
-		vmci_handle_arr_append_entry(&context->queue_pair_array,
-					     handle);
-		result = VMCI_SUCCESS;
-	} else {
+	if (!vmci_handle_arr_has_entry(context->queue_pair_array, handle))
+		result = vmci_handle_arr_append_entry(
+			&context->queue_pair_array, handle);
+	else
 		result = VMCI_ERROR_DUPLICATE_ENTRY;
-	}
 
 	return result;
 }

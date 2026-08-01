@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2017 Linus Walleij <linus.walleij@linaro.org>
  * Parts of this file were based on sources as follows:
@@ -7,22 +8,21 @@
  * Copyright (C) 2007 Dave Airlie <airlied@linux.ie>
  * Copyright (C) 2011 Texas Instruments
  * Copyright (C) 2017 Eric Anholt
- *
- * This program is free software and is provided to you under the terms of the
- * GNU General Public License version 2 as published by the Free Software
- * Foundation, and any use by you of this program is subject to the terms of
- * such GNU licence.
  */
+
 #include <linux/clk.h>
-#include <linux/version.h>
 #include <linux/dma-buf.h>
 #include <linux/of_graph.h>
+#include <linux/delay.h>
 
-#include <drm/drmP.h>
+#include <drm/drm_fb_dma_helper.h>
+#include <drm/drm_fourcc.h>
+#include <drm/drm_framebuffer.h>
+#include <drm/drm_gem_atomic_helper.h>
+#include <drm/drm_gem_dma_helper.h>
 #include <drm/drm_panel.h>
-#include <drm/drm_gem_cma_helper.h>
-#include <drm/drm_gem_framebuffer_helper.h>
-#include <drm/drm_fb_cma_helper.h>
+#include <drm/drm_print.h>
+#include <drm/drm_vblank.h>
 
 #include "tve200_drm.h"
 
@@ -91,7 +91,7 @@ static int tve200_display_check(struct drm_simple_display_pipe *pipe,
 	}
 
 	if (fb) {
-		u32 offset = drm_fb_cma_get_gem_addr(fb, pstate, 0);
+		u32 offset = drm_fb_dma_get_gem_addr(fb, pstate, 0);
 
 		/* FB base address must be dword aligned. */
 		if (offset & 3) {
@@ -120,7 +120,8 @@ static int tve200_display_check(struct drm_simple_display_pipe *pipe,
 }
 
 static void tve200_display_enable(struct drm_simple_display_pipe *pipe,
-				 struct drm_crtc_state *cstate)
+				 struct drm_crtc_state *cstate,
+				 struct drm_plane_state *plane_state)
 {
 	struct drm_crtc *crtc = &pipe->crtc;
 	struct drm_plane *plane = &pipe->plane;
@@ -131,8 +132,24 @@ static void tve200_display_enable(struct drm_simple_display_pipe *pipe,
 	struct drm_connector *connector = priv->connector;
 	u32 format = fb->format->format;
 	u32 ctrl1 = 0;
+	int retries;
 
 	clk_prepare_enable(priv->clk);
+
+	/* Reset the TVE200 and wait for it to come back online */
+	writel(TVE200_CTRL_4_RESET, priv->regs + TVE200_CTRL_4);
+	for (retries = 0; retries < 5; retries++) {
+		usleep_range(30000, 50000);
+		if (readl(priv->regs + TVE200_CTRL_4) & TVE200_CTRL_4_RESET)
+			continue;
+		else
+			break;
+	}
+	if (retries == 5 &&
+	    readl(priv->regs + TVE200_CTRL_4) & TVE200_CTRL_4_RESET) {
+		dev_err(drm->dev, "can't get hardware out of reset\n");
+		return;
+	}
 
 	/* Function 1 */
 	ctrl1 |= TVE200_CTRL_CSMODE;
@@ -148,7 +165,8 @@ static void tve200_display_enable(struct drm_simple_display_pipe *pipe,
 	/* Vsync IRQ at start of Vsync at first */
 	ctrl1 |= TVE200_VSTSTYPE_VSYNC;
 
-	if (connector->display_info.bus_flags & DRM_BUS_FLAG_PIXDATA_NEGEDGE)
+	if (connector->display_info.bus_flags &
+	    DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE)
 		ctrl1 |= TVE200_CTRL_TVCLKP;
 
 	if ((mode->hdisplay == 352 && mode->vdisplay == 240) || /* SIF(525) */
@@ -230,8 +248,9 @@ static void tve200_display_disable(struct drm_simple_display_pipe *pipe)
 
 	drm_crtc_vblank_off(crtc);
 
-	/* Disable and Power Down */
+	/* Disable put into reset and Power Down */
 	writel(0, priv->regs + TVE200_CTRL);
+	writel(TVE200_CTRL_4_RESET, priv->regs + TVE200_CTRL_4);
 
 	clk_disable_unprepare(priv->clk);
 }
@@ -249,14 +268,14 @@ static void tve200_display_update(struct drm_simple_display_pipe *pipe,
 
 	if (fb) {
 		/* For RGB, the Y component is used as base address */
-		writel(drm_fb_cma_get_gem_addr(fb, pstate, 0),
+		writel(drm_fb_dma_get_gem_addr(fb, pstate, 0),
 		       priv->regs + TVE200_Y_FRAME_BASE_ADDR);
 
 		/* For three plane YUV we need two more addresses */
 		if (fb->format->format == DRM_FORMAT_YUV420) {
-			writel(drm_fb_cma_get_gem_addr(fb, pstate, 1),
+			writel(drm_fb_dma_get_gem_addr(fb, pstate, 1),
 			       priv->regs + TVE200_U_FRAME_BASE_ADDR);
-			writel(drm_fb_cma_get_gem_addr(fb, pstate, 2),
+			writel(drm_fb_dma_get_gem_addr(fb, pstate, 2),
 			       priv->regs + TVE200_V_FRAME_BASE_ADDR);
 		}
 	}
@@ -279,6 +298,8 @@ static int tve200_display_enable_vblank(struct drm_simple_display_pipe *pipe)
 	struct drm_device *drm = crtc->dev;
 	struct tve200_drm_dev_private *priv = drm->dev_private;
 
+	/* Clear any IRQs and enable */
+	writel(0xFF, priv->regs + TVE200_INT_CLR);
 	writel(TVE200_INT_V_STATUS, priv->regs + TVE200_INT_EN);
 	return 0;
 }
@@ -292,18 +313,11 @@ static void tve200_display_disable_vblank(struct drm_simple_display_pipe *pipe)
 	writel(0, priv->regs + TVE200_INT_EN);
 }
 
-static int tve200_display_prepare_fb(struct drm_simple_display_pipe *pipe,
-				    struct drm_plane_state *plane_state)
-{
-	return drm_gem_fb_prepare_fb(&pipe->plane, plane_state);
-}
-
 static const struct drm_simple_display_pipe_funcs tve200_display_funcs = {
 	.check = tve200_display_check,
 	.enable = tve200_display_enable,
 	.disable = tve200_display_disable,
 	.update = tve200_display_update,
-	.prepare_fb = tve200_display_prepare_fb,
 	.enable_vblank = tve200_display_enable_vblank,
 	.disable_vblank = tve200_display_disable_vblank,
 };

@@ -1,22 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Coldfire generic GPIO support.
  *
  * (C) Copyright 2009, Steven King <sfking@fdwdc.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/device.h>
+#include <linux/gpio/driver.h>
 
 #include <linux/io.h>
 #include <asm/coldfire.h>
@@ -130,10 +123,12 @@ static int mcfgpio_direction_output(struct gpio_chip *chip, unsigned offset,
 	return __mcfgpio_direction_output(offset, value);
 }
 
-static void mcfgpio_set_value(struct gpio_chip *chip, unsigned offset,
-			      int value)
+static int mcfgpio_set_value(struct gpio_chip *chip, unsigned int offset,
+			     int value)
 {
 	__mcfgpio_set_value(offset, value);
+
+	return 0;
 }
 
 static int mcfgpio_request(struct gpio_chip *chip, unsigned offset)

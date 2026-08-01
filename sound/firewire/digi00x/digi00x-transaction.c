@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * digi00x-transaction.c - a part of driver for Digidesign Digi 002/003 family
  *
  * Copyright (c) 2014-2015 Takashi Sakamoto
- *
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 #include <sound/asound.h>
@@ -12,11 +11,9 @@
 static void handle_unknown_message(struct snd_dg00x *dg00x,
 				   unsigned long long offset, __be32 *buf)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&dg00x->lock, flags);
-	dg00x->msg = be32_to_cpu(*buf);
-	spin_unlock_irqrestore(&dg00x->lock, flags);
+	scoped_guard(spinlock_irqsave, &dg00x->lock) {
+		dg00x->msg = be32_to_cpu(*buf);
+	}
 
 	wake_up(&dg00x->hwdep_wait);
 }

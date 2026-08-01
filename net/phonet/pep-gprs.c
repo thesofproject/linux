@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * File: pep-gprs.c
  *
@@ -6,20 +7,6 @@
  * Copyright (C) 2008 Nokia Corporation.
  *
  * Author: Rémi Denis-Courmont
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
  */
 
 #include <linux/kernel.h>
@@ -31,6 +18,8 @@
 #include <linux/if_phonet.h>
 #include <net/tcp_states.h>
 #include <net/phonet/gprs.h>
+
+#include <trace/events/sock.h>
 
 #define GPRS_DEFAULT_MTU 1400
 
@@ -150,6 +139,8 @@ static void gprs_data_ready(struct sock *sk)
 {
 	struct gprs_dev *gp = sk->sk_user_data;
 	struct sk_buff *skb;
+
+	trace_sk_data_ready(sk);
 
 	while ((skb = pep_read(sk)) != NULL) {
 		skb_orphan(skb);

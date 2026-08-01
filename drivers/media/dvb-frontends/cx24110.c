@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
     cx24110 - Single Chip Satellite Channel Receiver driver module
 
@@ -5,20 +6,6 @@
     work
     Copyright (C) 1999 Convergence Integrated Media GmbH <ralph@convergence.de>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 */
 
@@ -237,13 +224,13 @@ static enum fe_code_rate cx24110_get_fec(struct cx24110_state *state)
 	}
 }
 
-static int cx24110_set_symbolrate (struct cx24110_state* state, u32 srate)
+static int cx24110_set_symbolrate (struct cx24110_state *state, u32 srate)
 {
 /* fixme (low): add error handling */
 	u32 ratio;
 	u32 tmp, fclk, BDRI;
 
-	static const u32 bands[]={5000000UL,15000000UL,90999000UL/2};
+	static const u32 bands[] = {5000000UL, 15000000UL, 90999000UL/2};
 	int i;
 
 	dprintk("cx24110 debug: entering %s(%d)\n",__func__,srate);
@@ -601,7 +588,7 @@ struct dvb_frontend* cx24110_attach(const struct cx24110_config* config,
 	int ret;
 
 	/* allocate memory for the internal state */
-	state = kzalloc(sizeof(struct cx24110_state), GFP_KERNEL);
+	state = kzalloc_obj(struct cx24110_state);
 	if (state == NULL) goto error;
 
 	/* setup the state */
@@ -629,10 +616,10 @@ static const struct dvb_frontend_ops cx24110_ops = {
 	.delsys = { SYS_DVBS },
 	.info = {
 		.name = "Conexant CX24110 DVB-S",
-		.frequency_min = 950000,
-		.frequency_max = 2150000,
-		.frequency_stepsize = 1011,  /* kHz for QPSK frontends */
-		.frequency_tolerance = 29500,
+		.frequency_min_hz =  950 * MHz,
+		.frequency_max_hz = 2150 * MHz,
+		.frequency_stepsize_hz = 1011 * kHz,
+		.frequency_tolerance_hz = 29500 * kHz,
 		.symbol_rate_min = 1000000,
 		.symbol_rate_max = 45000000,
 		.caps = FE_CAN_INVERSION_AUTO |
@@ -666,4 +653,4 @@ MODULE_DESCRIPTION("Conexant CX24110 DVB-S Demodulator driver");
 MODULE_AUTHOR("Peter Hettkamp");
 MODULE_LICENSE("GPL");
 
-EXPORT_SYMBOL(cx24110_attach);
+EXPORT_SYMBOL_GPL(cx24110_attach);

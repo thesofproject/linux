@@ -1,19 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * lms501kf03 TFT LCD panel driver.
  *
  * Copyright (c) 2012 Samsung Electronics Co., Ltd.
  * Author: Jingoo Han  <jg1.han@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
  */
 
-#include <linux/backlight.h>
 #include <linux/delay.h>
-#include <linux/fb.h>
-#include <linux/gpio.h>
 #include <linux/lcd.h>
 #include <linux/module.h>
 #include <linux/spi/spi.h>
@@ -91,14 +84,6 @@ static const unsigned char seq_rgb_gamma[] = {
 	0x6a, 0x73, 0x7a, 0x82, 0x8a, 0x91, 0x98, 0xa1, 0xa8, 0xb0,
 	0xb7, 0xc1, 0xc9, 0xcf, 0xd9, 0xe3, 0xea, 0xf4, 0xff, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-};
-
-static const unsigned char seq_up_dn[] = {
-	0x36, 0x10,
-};
-
-static const unsigned char seq_sleep_in[] = {
-	0x10,
 };
 
 static const unsigned char seq_sleep_out[] = {
@@ -219,7 +204,7 @@ static int lms501kf03_ldi_disable(struct lms501kf03 *lcd)
 
 static int lms501kf03_power_is_on(int power)
 {
-	return (power) <= FB_BLANK_NORMAL;
+	return (power) <= LCD_POWER_REDUCED;
 }
 
 static int lms501kf03_power_on(struct lms501kf03 *lcd)
@@ -308,8 +293,8 @@ static int lms501kf03_set_power(struct lcd_device *ld, int power)
 {
 	struct lms501kf03 *lcd = lcd_get_data(ld);
 
-	if (power != FB_BLANK_UNBLANK && power != FB_BLANK_POWERDOWN &&
-		power != FB_BLANK_NORMAL) {
+	if (power != LCD_POWER_ON && power != LCD_POWER_OFF &&
+		power != LCD_POWER_REDUCED) {
 		dev_err(lcd->dev, "power value should be 0, 1 or 4.\n");
 		return -EINVAL;
 	}
@@ -317,7 +302,7 @@ static int lms501kf03_set_power(struct lcd_device *ld, int power)
 	return lms501kf03_power(lcd, power);
 }
 
-static struct lcd_ops lms501kf03_lcd_ops = {
+static const struct lcd_ops lms501kf03_lcd_ops = {
 	.get_power = lms501kf03_get_power,
 	.set_power = lms501kf03_set_power,
 };
@@ -363,11 +348,11 @@ static int lms501kf03_probe(struct spi_device *spi)
 		 * current lcd status is powerdown and then
 		 * it enables lcd panel.
 		 */
-		lcd->power = FB_BLANK_POWERDOWN;
+		lcd->power = LCD_POWER_OFF;
 
-		lms501kf03_power(lcd, FB_BLANK_UNBLANK);
+		lms501kf03_power(lcd, LCD_POWER_ON);
 	} else {
-		lcd->power = FB_BLANK_UNBLANK;
+		lcd->power = LCD_POWER_ON;
 	}
 
 	spi_set_drvdata(spi, lcd);
@@ -377,12 +362,11 @@ static int lms501kf03_probe(struct spi_device *spi)
 	return 0;
 }
 
-static int lms501kf03_remove(struct spi_device *spi)
+static void lms501kf03_remove(struct spi_device *spi)
 {
 	struct lms501kf03 *lcd = spi_get_drvdata(spi);
 
-	lms501kf03_power(lcd, FB_BLANK_POWERDOWN);
-	return 0;
+	lms501kf03_power(lcd, LCD_POWER_OFF);
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -396,16 +380,16 @@ static int lms501kf03_suspend(struct device *dev)
 	 * when lcd panel is suspend, lcd panel becomes off
 	 * regardless of status.
 	 */
-	return lms501kf03_power(lcd, FB_BLANK_POWERDOWN);
+	return lms501kf03_power(lcd, LCD_POWER_OFF);
 }
 
 static int lms501kf03_resume(struct device *dev)
 {
 	struct lms501kf03 *lcd = dev_get_drvdata(dev);
 
-	lcd->power = FB_BLANK_POWERDOWN;
+	lcd->power = LCD_POWER_OFF;
 
-	return lms501kf03_power(lcd, FB_BLANK_UNBLANK);
+	return lms501kf03_power(lcd, LCD_POWER_ON);
 }
 #endif
 
@@ -416,7 +400,7 @@ static void lms501kf03_shutdown(struct spi_device *spi)
 {
 	struct lms501kf03 *lcd = spi_get_drvdata(spi);
 
-	lms501kf03_power(lcd, FB_BLANK_POWERDOWN);
+	lms501kf03_power(lcd, LCD_POWER_OFF);
 }
 
 static struct spi_driver lms501kf03_driver = {

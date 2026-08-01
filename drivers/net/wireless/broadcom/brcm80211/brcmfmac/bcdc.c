@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: ISC
 /*
  * Copyright (c) 2010 Broadcom Corporation
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 /*******************************************************************************
@@ -98,6 +87,8 @@ struct brcmf_proto_bcdc_header {
 					 * plus any space that might be needed
 					 * for bus alignment padding.
 					 */
+#define ROUND_UP_MARGIN 2048
+
 struct brcmf_bcdc {
 	u16 reqid;
 	u8 bus_header[BUS_HEADER_LEN];
@@ -178,8 +169,8 @@ brcmf_proto_bcdc_query_dcmd(struct brcmf_pub *drvr, int ifidx, uint cmd,
 	*fwerr = 0;
 	ret = brcmf_proto_bcdc_msg(drvr, ifidx, cmd, buf, len, false);
 	if (ret < 0) {
-		brcmf_err("brcmf_proto_bcdc_msg failed w/status %d\n",
-			  ret);
+		bphy_err(drvr, "brcmf_proto_bcdc_msg failed w/status %d\n",
+			 ret);
 		goto done;
 	}
 
@@ -195,9 +186,9 @@ retry:
 	if ((id < bcdc->reqid) && (++retries < RETRIES))
 		goto retry;
 	if (id != bcdc->reqid) {
-		brcmf_err("%s: unexpected request id %d (expected %d)\n",
-			  brcmf_ifname(brcmf_get_ifp(drvr, ifidx)), id,
-			  bcdc->reqid);
+		bphy_err(drvr, "%s: unexpected request id %d (expected %d)\n",
+			 brcmf_ifname(brcmf_get_ifp(drvr, ifidx)), id,
+			 bcdc->reqid);
 		ret = -EINVAL;
 		goto done;
 	}
@@ -245,9 +236,9 @@ brcmf_proto_bcdc_set_dcmd(struct brcmf_pub *drvr, int ifidx, uint cmd,
 	id = (flags & BCDC_DCMD_ID_MASK) >> BCDC_DCMD_ID_SHIFT;
 
 	if (id != bcdc->reqid) {
-		brcmf_err("%s: unexpected request id %d (expected %d)\n",
-			  brcmf_ifname(brcmf_get_ifp(drvr, ifidx)), id,
-			  bcdc->reqid);
+		bphy_err(drvr, "%s: unexpected request id %d (expected %d)\n",
+			 brcmf_ifname(brcmf_get_ifp(drvr, ifidx)), id,
+			 bcdc->reqid);
 		ret = -EINVAL;
 		goto done;
 	}
@@ -312,8 +303,8 @@ brcmf_proto_bcdc_hdrpull(struct brcmf_pub *drvr, bool do_fws,
 	}
 	if (((h->flags & BCDC_FLAG_VER_MASK) >> BCDC_FLAG_VER_SHIFT) !=
 	    BCDC_PROTO_VER) {
-		brcmf_err("%s: non-BCDC packet received, flags 0x%x\n",
-			  brcmf_ifname(tmp_if), h->flags);
+		bphy_err(drvr, "%s: non-BCDC packet received, flags 0x%x\n",
+			 brcmf_ifname(tmp_if), h->flags);
 		return -EBADE;
 	}
 
@@ -379,8 +370,7 @@ brcmf_proto_bcdc_txcomplete(struct device *dev, struct sk_buff *txp,
 
 	/* await txstatus signal for firmware if active */
 	if (brcmf_fws_fc_active(bcdc->fws)) {
-		if (!success)
-			brcmf_fws_bustxfail(bcdc->fws, txp);
+		brcmf_fws_bustxcomplete(bcdc->fws, txp, success);
 	} else {
 		if (brcmf_proto_bcdc_hdrpull(bus_if->drvr, false, txp, &ifp))
 			brcmu_pkt_buf_free_skb(txp);
@@ -454,13 +444,13 @@ int brcmf_proto_bcdc_attach(struct brcmf_pub *drvr)
 {
 	struct brcmf_bcdc *bcdc;
 
-	bcdc = kzalloc(sizeof(*bcdc), GFP_ATOMIC);
+	bcdc = kzalloc_obj(*bcdc, GFP_ATOMIC);
 	if (!bcdc)
 		goto fail;
 
 	/* ensure that the msg buf directly follows the cdc msg struct */
 	if ((unsigned long)(&bcdc->msg + 1) != (unsigned long)bcdc->buf) {
-		brcmf_err("struct brcmf_proto_bcdc is not correctly defined\n");
+		bphy_err(drvr, "struct brcmf_proto_bcdc is not correctly defined\n");
 		goto fail;
 	}
 
@@ -482,7 +472,7 @@ int brcmf_proto_bcdc_attach(struct brcmf_pub *drvr)
 
 	drvr->hdrlen += BCDC_HEADER_LEN + BRCMF_PROT_FW_SIGNAL_MAX_TXBYTES;
 	drvr->bus_if->maxctl = BRCMF_DCMD_MAXLEN +
-			sizeof(struct brcmf_proto_bcdc_dcmd);
+			sizeof(struct brcmf_proto_bcdc_dcmd) + ROUND_UP_MARGIN;
 	return 0;
 
 fail:

@@ -27,23 +27,11 @@
 #include <sys/timex.h>
 #include <string.h>
 #include <signal.h>
-#include "../kselftest.h"
+#include <include/vdso/time64.h>
+#include "kselftest.h"
 
-#define NSEC_PER_SEC 1000000000ULL
-
-#define CLOCK_REALTIME			0
-#define CLOCK_MONOTONIC			1
-#define CLOCK_PROCESS_CPUTIME_ID	2
-#define CLOCK_THREAD_CPUTIME_ID		3
-#define CLOCK_MONOTONIC_RAW		4
-#define CLOCK_REALTIME_COARSE		5
-#define CLOCK_MONOTONIC_COARSE		6
-#define CLOCK_BOOTTIME			7
-#define CLOCK_REALTIME_ALARM		8
-#define CLOCK_BOOTTIME_ALARM		9
+/* CLOCK_HWSPECIFIC == CLOCK_SGI_CYCLE (Deprecated) */
 #define CLOCK_HWSPECIFIC		10
-#define CLOCK_TAI			11
-#define NR_CLOCKIDS			12
 
 #define UNSUPPORTED 0xf00f
 
@@ -128,37 +116,98 @@ int nanosleep_test(int clockid, long long ns)
 	return 0;
 }
 
+static void dummy_event_handler(int val)
+{
+	/* No action needed */
+}
+
+static int nanosleep_test_remaining(int clockid)
+{
+	struct timespec rqtp = {}, rmtp = {};
+	struct itimerspec itimer = {};
+	struct sigaction sa = {};
+	timer_t timer;
+	int ret;
+
+	sa.sa_handler = dummy_event_handler;
+	ret = sigaction(SIGALRM, &sa, NULL);
+	if (ret)
+		return -1;
+
+	ret = timer_create(clockid, NULL, &timer);
+	if (ret)
+		return -1;
+
+	itimer.it_value.tv_nsec = NSEC_PER_SEC / 4;
+	ret = timer_settime(timer, 0, &itimer, NULL);
+	if (ret)
+		return -1;
+
+	rqtp.tv_nsec = NSEC_PER_SEC / 2;
+	ret = clock_nanosleep(clockid, 0, &rqtp, &rmtp);
+	if (ret != EINTR)
+		return -1;
+
+	ret = timer_delete(timer);
+	if (ret)
+		return -1;
+
+	sa.sa_handler = SIG_DFL;
+	ret = sigaction(SIGALRM, &sa, NULL);
+	if (ret)
+		return -1;
+
+	if (!in_order((struct timespec) {}, rmtp))
+		return -1;
+
+	if (!in_order(rmtp, rqtp))
+		return -1;
+
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	long long length;
 	int clockid, ret;
+	int max_clocks = CLOCK_TAI + 1;
 
-	for (clockid = CLOCK_REALTIME; clockid < NR_CLOCKIDS; clockid++) {
+	ksft_print_header();
+	ksft_set_plan(max_clocks);
+
+	for (clockid = CLOCK_REALTIME; clockid < max_clocks; clockid++) {
 
 		/* Skip cputime clockids since nanosleep won't increment cputime */
 		if (clockid == CLOCK_PROCESS_CPUTIME_ID ||
 				clockid == CLOCK_THREAD_CPUTIME_ID ||
-				clockid == CLOCK_HWSPECIFIC)
+				clockid == CLOCK_HWSPECIFIC) {
+			ksft_test_result_skip("%-31s\n", clockstring(clockid));
 			continue;
+		}
 
-		printf("Nanosleep %-31s ", clockstring(clockid));
+		fflush(stdout);
 
 		length = 10;
 		while (length <= (NSEC_PER_SEC * 10)) {
 			ret = nanosleep_test(clockid, length);
 			if (ret == UNSUPPORTED) {
-				printf("[UNSUPPORTED]\n");
+				ksft_test_result_skip("%-31s\n", clockstring(clockid));
 				goto next;
 			}
 			if (ret < 0) {
-				printf("[FAILED]\n");
-				return ksft_exit_fail();
+				ksft_test_result_fail("%-31s\n", clockstring(clockid));
+				ksft_exit_fail();
 			}
 			length *= 100;
 		}
-		printf("[OK]\n");
+		ret = nanosleep_test_remaining(clockid);
+		if (ret < 0) {
+			ksft_test_result_fail("%-31s\n", clockstring(clockid));
+			ksft_exit_fail();
+		}
+		ksft_test_result_pass("%-31s\n", clockstring(clockid));
 next:
 		ret = 0;
 	}
-	return ksft_exit_pass();
+	ksft_exit_pass();
 }

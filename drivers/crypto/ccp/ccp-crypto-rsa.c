@@ -1,18 +1,16 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AMD Cryptographic Coprocessor (CCP) RSA crypto API support
  *
  * Copyright (C) 2017 Advanced Micro Devices, Inc.
  *
  * Author: Gary R Hook <gary.hook@amd.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/scatterlist.h>
+#include <linux/string.h>
 #include <linux/crypto.h>
 #include <crypto/algapi.h>
 #include <crypto/internal/rsa.h>
@@ -37,10 +35,9 @@ static inline int ccp_copy_and_save_keypart(u8 **kpbuf, unsigned int *kplen,
 		if (buf[nskip])
 			break;
 	*kplen = sz - nskip;
-	*kpbuf = kzalloc(*kplen, GFP_KERNEL);
+	*kpbuf = kmemdup(buf + nskip, *kplen, GFP_KERNEL);
 	if (!*kpbuf)
 		return -ENOMEM;
-	memcpy(*kpbuf, buf + nskip, *kplen);
 
 	return 0;
 }
@@ -48,7 +45,7 @@ static inline int ccp_copy_and_save_keypart(u8 **kpbuf, unsigned int *kplen,
 static int ccp_rsa_complete(struct crypto_async_request *async_req, int ret)
 {
 	struct akcipher_request *req = akcipher_request_cast(async_req);
-	struct ccp_rsa_req_ctx *rctx = akcipher_request_ctx(req);
+	struct ccp_rsa_req_ctx *rctx = akcipher_request_ctx_dma(req);
 
 	if (ret)
 		return ret;
@@ -60,7 +57,7 @@ static int ccp_rsa_complete(struct crypto_async_request *async_req, int ret)
 
 static unsigned int ccp_rsa_maxsize(struct crypto_akcipher *tfm)
 {
-	struct ccp_ctx *ctx = akcipher_tfm_ctx(tfm);
+	struct ccp_ctx *ctx = akcipher_tfm_ctx_dma(tfm);
 
 	return ctx->u.rsa.n_len;
 }
@@ -68,8 +65,8 @@ static unsigned int ccp_rsa_maxsize(struct crypto_akcipher *tfm)
 static int ccp_rsa_crypt(struct akcipher_request *req, bool encrypt)
 {
 	struct crypto_akcipher *tfm = crypto_akcipher_reqtfm(req);
-	struct ccp_ctx *ctx = akcipher_tfm_ctx(tfm);
-	struct ccp_rsa_req_ctx *rctx = akcipher_request_ctx(req);
+	struct ccp_ctx *ctx = akcipher_tfm_ctx_dma(tfm);
+	struct ccp_rsa_req_ctx *rctx = akcipher_request_ctx_dma(req);
 	int ret = 0;
 
 	memset(&rctx->cmd, 0, sizeof(rctx->cmd));
@@ -116,13 +113,13 @@ static int ccp_check_key_length(unsigned int len)
 static void ccp_rsa_free_key_bufs(struct ccp_ctx *ctx)
 {
 	/* Clean up old key data */
-	kzfree(ctx->u.rsa.e_buf);
+	kfree_sensitive(ctx->u.rsa.e_buf);
 	ctx->u.rsa.e_buf = NULL;
 	ctx->u.rsa.e_len = 0;
-	kzfree(ctx->u.rsa.n_buf);
+	kfree_sensitive(ctx->u.rsa.n_buf);
 	ctx->u.rsa.n_buf = NULL;
 	ctx->u.rsa.n_len = 0;
-	kzfree(ctx->u.rsa.d_buf);
+	kfree_sensitive(ctx->u.rsa.d_buf);
 	ctx->u.rsa.d_buf = NULL;
 	ctx->u.rsa.d_len = 0;
 }
@@ -130,7 +127,7 @@ static void ccp_rsa_free_key_bufs(struct ccp_ctx *ctx)
 static int ccp_rsa_setkey(struct crypto_akcipher *tfm, const void *key,
 			  unsigned int keylen, bool private)
 {
-	struct ccp_ctx *ctx = akcipher_tfm_ctx(tfm);
+	struct ccp_ctx *ctx = akcipher_tfm_ctx_dma(tfm);
 	struct rsa_key raw_key;
 	int ret;
 
@@ -196,9 +193,9 @@ static int ccp_rsa_setpubkey(struct crypto_akcipher *tfm, const void *key,
 
 static int ccp_rsa_init_tfm(struct crypto_akcipher *tfm)
 {
-	struct ccp_ctx *ctx = akcipher_tfm_ctx(tfm);
+	struct ccp_ctx *ctx = akcipher_tfm_ctx_dma(tfm);
 
-	akcipher_set_reqsize(tfm, sizeof(struct ccp_rsa_req_ctx));
+	akcipher_set_reqsize_dma(tfm, sizeof(struct ccp_rsa_req_ctx));
 	ctx->complete = ccp_rsa_complete;
 
 	return 0;
@@ -206,7 +203,7 @@ static int ccp_rsa_init_tfm(struct crypto_akcipher *tfm)
 
 static void ccp_rsa_exit_tfm(struct crypto_akcipher *tfm)
 {
-	struct ccp_ctx *ctx = crypto_tfm_ctx(&tfm->base);
+	struct ccp_ctx *ctx = akcipher_tfm_ctx_dma(tfm);
 
 	ccp_rsa_free_key_bufs(ctx);
 }
@@ -214,8 +211,6 @@ static void ccp_rsa_exit_tfm(struct crypto_akcipher *tfm)
 static struct akcipher_alg ccp_rsa_defaults = {
 	.encrypt = ccp_rsa_encrypt,
 	.decrypt = ccp_rsa_decrypt,
-	.sign = ccp_rsa_decrypt,
-	.verify = ccp_rsa_encrypt,
 	.set_pub_key = ccp_rsa_setpubkey,
 	.set_priv_key = ccp_rsa_setprivkey,
 	.max_size = ccp_rsa_maxsize,
@@ -226,7 +221,7 @@ static struct akcipher_alg ccp_rsa_defaults = {
 		.cra_driver_name = "rsa-ccp",
 		.cra_priority = CCP_CRA_PRIORITY,
 		.cra_module = THIS_MODULE,
-		.cra_ctxsize = 2 * sizeof(struct ccp_ctx),
+		.cra_ctxsize = 2 * sizeof(struct ccp_ctx) + CRYPTO_DMA_PADDING,
 	},
 };
 
@@ -248,13 +243,14 @@ static struct ccp_rsa_def rsa_algs[] = {
 	}
 };
 
-int ccp_register_rsa_alg(struct list_head *head, const struct ccp_rsa_def *def)
+static int ccp_register_rsa_alg(struct list_head *head,
+			        const struct ccp_rsa_def *def)
 {
 	struct ccp_crypto_akcipher_alg *ccp_alg;
 	struct akcipher_alg *alg;
 	int ret;
 
-	ccp_alg = kzalloc(sizeof(*ccp_alg), GFP_KERNEL);
+	ccp_alg = kzalloc_obj(*ccp_alg);
 	if (!ccp_alg)
 		return -ENOMEM;
 
@@ -262,9 +258,8 @@ int ccp_register_rsa_alg(struct list_head *head, const struct ccp_rsa_def *def)
 
 	alg = &ccp_alg->alg;
 	*alg = *def->alg_defaults;
-	snprintf(alg->base.cra_name, CRYPTO_MAX_ALG_NAME, "%s", def->name);
-	snprintf(alg->base.cra_driver_name, CRYPTO_MAX_ALG_NAME, "%s",
-		 def->driver_name);
+	strscpy(alg->base.cra_name, def->name);
+	strscpy(alg->base.cra_driver_name, def->driver_name);
 	ret = crypto_register_akcipher(alg);
 	if (ret) {
 		pr_err("%s akcipher algorithm registration error (%d)\n",

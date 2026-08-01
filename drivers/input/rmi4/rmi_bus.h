@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2011-2016 Synaptics Incorporated
  * Copyright (c) 2011 Unixphere
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #ifndef _RMI_BUS_H
@@ -13,6 +10,12 @@
 #include <linux/rmi.h>
 
 struct rmi_device;
+
+/*
+ * The interrupt source count in the function descriptor can represent up to
+ * 6 interrupt sources in the normal manner.
+ */
+#define RMI_FN_MAX_IRQS	6
 
 /**
  * struct rmi_function - represents the implementation of an RMI4
@@ -26,6 +29,7 @@ struct rmi_device;
  * @irq_pos: The position in the irq bitfield this function holds
  * @irq_mask: For convenience, can be used to mask IRQ bits off during ATTN
  * interrupt handling.
+ * @irqs: assigned virq numbers (up to num_of_irqs)
  *
  * @node: entry in device's list of functions
  */
@@ -36,6 +40,7 @@ struct rmi_function {
 	struct list_head node;
 
 	unsigned int num_of_irqs;
+	int irq[RMI_FN_MAX_IRQS];
 	unsigned int irq_pos;
 	unsigned long irq_mask[];
 };
@@ -44,6 +49,7 @@ struct rmi_function {
 
 bool rmi_is_function_device(struct device *dev);
 
+struct rmi_function *rmi_alloc_function(struct rmi_device *rmi_dev, u8 id);
 int __must_check rmi_register_function(struct rmi_function *);
 void rmi_unregister_function(struct rmi_function *);
 
@@ -76,13 +82,13 @@ struct rmi_function_handler {
 	void (*remove)(struct rmi_function *fn);
 	int (*config)(struct rmi_function *fn);
 	int (*reset)(struct rmi_function *fn);
-	int (*attention)(struct rmi_function *fn, unsigned long *irq_bits);
+	irqreturn_t (*attention)(int irq, void *ctx);
 	int (*suspend)(struct rmi_function *fn);
 	int (*resume)(struct rmi_function *fn);
 };
 
 #define to_rmi_function_handler(d) \
-		container_of(d, struct rmi_function_handler, driver)
+		container_of_const(d, struct rmi_function_handler, driver)
 
 int __must_check __rmi_register_function_handler(struct rmi_function_handler *,
 						 struct module *, const char *);
@@ -180,7 +186,7 @@ static inline int rmi_write_block(struct rmi_device *d, u16 addr,
 
 int rmi_for_each_dev(void *data, int (*func)(struct device *dev, void *data));
 
-extern struct bus_type rmi_bus_type;
+extern const struct bus_type rmi_bus_type;
 
 int rmi_of_property_read_u32(struct device *dev, u32 *result,
 				const char *prop, bool optional);

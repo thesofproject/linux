@@ -1,16 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2012-2016 Mentor Graphics Inc.
  * Copyright (C) 2005-2009 Freescale Semiconductor, Inc.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2 of the License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
- * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details.
  */
 #include <linux/io.h>
 #include "ipu-prv.h"
@@ -158,17 +149,6 @@ void ipu_vdi_setup(struct ipu_vdi *vdi, u32 code, int xres, int yres)
 	spin_unlock_irqrestore(&vdi->lock, flags);
 }
 EXPORT_SYMBOL_GPL(ipu_vdi_setup);
-
-void ipu_vdi_unsetup(struct ipu_vdi *vdi)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&vdi->lock, flags);
-	ipu_vdi_write(vdi, 0, VDI_FSIZE);
-	ipu_vdi_write(vdi, 0, VDI_C);
-	spin_unlock_irqrestore(&vdi->lock, flags);
-}
-EXPORT_SYMBOL_GPL(ipu_vdi_unsetup);
 
 int ipu_vdi_enable(struct ipu_vdi *vdi)
 {

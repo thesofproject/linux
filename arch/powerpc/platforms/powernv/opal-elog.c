@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Error log support on PowerNV.
  *
  * Copyright 2013,2014 IBM Corp.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -44,7 +40,7 @@ static ssize_t elog_id_show(struct elog_obj *elog_obj,
 			    struct elog_attribute *attr,
 			    char *buf)
 {
-	return sprintf(buf, "0x%llx\n", elog_obj->id);
+	return sysfs_emit(buf, "0x%llx\n", elog_obj->id);
 }
 
 static const char *elog_type_to_string(uint64_t type)
@@ -59,16 +55,15 @@ static ssize_t elog_type_show(struct elog_obj *elog_obj,
 			      struct elog_attribute *attr,
 			      char *buf)
 {
-	return sprintf(buf, "0x%llx %s\n",
-		       elog_obj->type,
-		       elog_type_to_string(elog_obj->type));
+	return sysfs_emit(buf, "0x%llx %s\n", elog_obj->type,
+			  elog_type_to_string(elog_obj->type));
 }
 
 static ssize_t elog_ack_show(struct elog_obj *elog_obj,
 			     struct elog_attribute *attr,
 			     char *buf)
 {
-	return sprintf(buf, "ack - acknowledge log message\n");
+	return sysfs_emit(buf, "ack - acknowledge log message\n");
 }
 
 static ssize_t elog_ack_store(struct elog_obj *elog_obj,
@@ -76,9 +71,14 @@ static ssize_t elog_ack_store(struct elog_obj *elog_obj,
 			      const char *buf,
 			      size_t count)
 {
-	opal_send_ack_elog(elog_obj->id);
-	sysfs_remove_file_self(&elog_obj->kobj, &attr->attr);
-	kobject_put(&elog_obj->kobj);
+	/*
+	 * Try to self remove this attribute. If we are successful,
+	 * delete the kobject itself.
+	 */
+	if (sysfs_remove_file_self(&elog_obj->kobj, &attr->attr)) {
+		opal_send_ack_elog(elog_obj->id);
+		kobject_put(&elog_obj->kobj);
+	}
 	return count;
 }
 
@@ -143,18 +143,19 @@ static struct attribute *elog_default_attrs[] = {
 	&ack_attribute.attr,
 	NULL,
 };
+ATTRIBUTE_GROUPS(elog_default);
 
-static struct kobj_type elog_ktype = {
+static const struct kobj_type elog_ktype = {
 	.sysfs_ops = &elog_sysfs_ops,
 	.release = &elog_release,
-	.default_attrs = elog_default_attrs,
+	.default_groups = elog_default_groups,
 };
 
 /* Maximum size of a single log on FSP is 16KB */
 #define OPAL_MAX_ERRLOG_SIZE	16384
 
 static ssize_t raw_attr_read(struct file *filep, struct kobject *kobj,
-			     struct bin_attribute *bin_attr,
+			     const struct bin_attribute *bin_attr,
 			     char *buffer, loff_t pos, size_t count)
 {
 	int opal_rc;
@@ -170,8 +171,8 @@ static ssize_t raw_attr_read(struct file *filep, struct kobject *kobj,
 		opal_rc = opal_read_elog(__pa(elog->buffer),
 					 elog->size, elog->id);
 		if (opal_rc != OPAL_SUCCESS) {
-			pr_err("ELOG: log read failed for log-id=%llx\n",
-			       elog->id);
+			pr_err_ratelimited("ELOG: log read failed for log-id=%llx\n",
+					   elog->id);
 			kfree(elog->buffer);
 			elog->buffer = NULL;
 			return -EIO;
@@ -183,14 +184,14 @@ static ssize_t raw_attr_read(struct file *filep, struct kobject *kobj,
 	return count;
 }
 
-static struct elog_obj *create_elog_obj(uint64_t id, size_t size, uint64_t type)
+static void create_elog_obj(uint64_t id, size_t size, uint64_t type)
 {
 	struct elog_obj *elog;
 	int rc;
 
-	elog = kzalloc(sizeof(*elog), GFP_KERNEL);
+	elog = kzalloc_obj(*elog);
 	if (!elog)
-		return NULL;
+		return;
 
 	elog->kobj.kset = elog_kset;
 
@@ -223,18 +224,37 @@ static struct elog_obj *create_elog_obj(uint64_t id, size_t size, uint64_t type)
 	rc = kobject_add(&elog->kobj, NULL, "0x%llx", id);
 	if (rc) {
 		kobject_put(&elog->kobj);
-		return NULL;
+		return;
 	}
 
+	/*
+	 * As soon as the sysfs file for this elog is created/activated there is
+	 * a chance the opal_errd daemon (or any userspace) might read and
+	 * acknowledge the elog before kobject_uevent() is called. If that
+	 * happens then there is a potential race between
+	 * elog_ack_store->kobject_put() and kobject_uevent() which leads to a
+	 * use-after-free of a kernfs object resulting in a kernel crash.
+	 *
+	 * To avoid that, we need to take a reference on behalf of the bin file,
+	 * so that our reference remains valid while we call kobject_uevent().
+	 * We then drop our reference before exiting the function, leaving the
+	 * bin file to drop the last reference (if it hasn't already).
+	 */
+
+	/* Take a reference for the bin file */
+	kobject_get(&elog->kobj);
 	rc = sysfs_create_bin_file(&elog->kobj, &elog->raw_attr);
-	if (rc) {
+	if (rc == 0) {
+		kobject_uevent(&elog->kobj, KOBJ_ADD);
+	} else {
+		/* Drop the reference taken for the bin file */
 		kobject_put(&elog->kobj);
-		return NULL;
 	}
 
-	kobject_uevent(&elog->kobj, KOBJ_ADD);
+	/* Drop our reference */
+	kobject_put(&elog->kobj);
 
-	return elog;
+	return;
 }
 
 static irqreturn_t elog_event(int irq, void *data)

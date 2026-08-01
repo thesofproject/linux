@@ -19,6 +19,7 @@
 #include <asm/mipsmtregs.h>
 #include <asm/r4kcache.h>
 #include <asm/cacheflush.h>
+#include <asm/mips_mt.h>
 
 int vpelimit;
 
@@ -42,95 +43,10 @@ static int __init maxtcs(char *str)
 
 __setup("maxtcs=", maxtcs);
 
-/*
- * Dump new MIPS MT state for the core. Does not leave TCs halted.
- * Takes an argument which taken to be a pre-call MVPControl value.
- */
-
-void mips_mt_regdump(unsigned long mvpctl)
-{
-	unsigned long flags;
-	unsigned long vpflags;
-	unsigned long mvpconf0;
-	int nvpe;
-	int ntc;
-	int i;
-	int tc;
-	unsigned long haltval;
-	unsigned long tcstatval;
-
-	local_irq_save(flags);
-	vpflags = dvpe();
-	printk("=== MIPS MT State Dump ===\n");
-	printk("-- Global State --\n");
-	printk("   MVPControl Passed: %08lx\n", mvpctl);
-	printk("   MVPControl Read: %08lx\n", vpflags);
-	printk("   MVPConf0 : %08lx\n", (mvpconf0 = read_c0_mvpconf0()));
-	nvpe = ((mvpconf0 & MVPCONF0_PVPE) >> MVPCONF0_PVPE_SHIFT) + 1;
-	ntc = ((mvpconf0 & MVPCONF0_PTC) >> MVPCONF0_PTC_SHIFT) + 1;
-	printk("-- per-VPE State --\n");
-	for (i = 0; i < nvpe; i++) {
-		for (tc = 0; tc < ntc; tc++) {
-			settc(tc);
-			if ((read_tc_c0_tcbind() & TCBIND_CURVPE) == i) {
-				printk("  VPE %d\n", i);
-				printk("   VPEControl : %08lx\n",
-				       read_vpe_c0_vpecontrol());
-				printk("   VPEConf0 : %08lx\n",
-				       read_vpe_c0_vpeconf0());
-				printk("   VPE%d.Status : %08lx\n",
-				       i, read_vpe_c0_status());
-				printk("   VPE%d.EPC : %08lx %pS\n",
-				       i, read_vpe_c0_epc(),
-				       (void *) read_vpe_c0_epc());
-				printk("   VPE%d.Cause : %08lx\n",
-				       i, read_vpe_c0_cause());
-				printk("   VPE%d.Config7 : %08lx\n",
-				       i, read_vpe_c0_config7());
-				break; /* Next VPE */
-			}
-		}
-	}
-	printk("-- per-TC State --\n");
-	for (tc = 0; tc < ntc; tc++) {
-		settc(tc);
-		if (read_tc_c0_tcbind() == read_c0_tcbind()) {
-			/* Are we dumping ourself?  */
-			haltval = 0; /* Then we're not halted, and mustn't be */
-			tcstatval = flags; /* And pre-dump TCStatus is flags */
-			printk("  TC %d (current TC with VPE EPC above)\n", tc);
-		} else {
-			haltval = read_tc_c0_tchalt();
-			write_tc_c0_tchalt(1);
-			tcstatval = read_tc_c0_tcstatus();
-			printk("  TC %d\n", tc);
-		}
-		printk("   TCStatus : %08lx\n", tcstatval);
-		printk("   TCBind : %08lx\n", read_tc_c0_tcbind());
-		printk("   TCRestart : %08lx %pS\n",
-		       read_tc_c0_tcrestart(), (void *) read_tc_c0_tcrestart());
-		printk("   TCHalt : %08lx\n", haltval);
-		printk("   TCContext : %08lx\n", read_tc_c0_tccontext());
-		if (!haltval)
-			write_tc_c0_tchalt(0);
-	}
-	printk("===========================\n");
-	evpe(vpflags);
-	local_irq_restore(flags);
-}
-
-static int mt_opt_norps;
 static int mt_opt_rpsctl = -1;
 static int mt_opt_nblsu = -1;
 static int mt_opt_forceconfig7;
 static int mt_opt_config7 = -1;
-
-static int __init rps_disable(char *s)
-{
-	mt_opt_norps = 1;
-	return 1;
-}
-__setup("norps", rps_disable);
 
 static int __init rpsctl_set(char *str)
 {
@@ -154,40 +70,6 @@ static int __init config7_set(char *str)
 }
 __setup("config7=", config7_set);
 
-/* Experimental cache flush control parameters that should go away some day */
-int mt_protiflush;
-int mt_protdflush;
-int mt_n_iflushes = 1;
-int mt_n_dflushes = 1;
-
-static int __init set_protiflush(char *s)
-{
-	mt_protiflush = 1;
-	return 1;
-}
-__setup("protiflush", set_protiflush);
-
-static int __init set_protdflush(char *s)
-{
-	mt_protdflush = 1;
-	return 1;
-}
-__setup("protdflush", set_protdflush);
-
-static int __init niflush(char *s)
-{
-	get_option(&s, &mt_n_iflushes);
-	return 1;
-}
-__setup("niflush=", niflush);
-
-static int __init ndflush(char *s)
-{
-	get_option(&s, &mt_n_dflushes);
-	return 1;
-}
-__setup("ndflush=", ndflush);
-
 static unsigned int itc_base;
 
 static int __init set_itc_base(char *str)
@@ -203,9 +85,6 @@ void mips_mt_set_cpuoptions(void)
 	unsigned int oconfig7 = read_c0_config7();
 	unsigned int nconfig7 = oconfig7;
 
-	if (mt_opt_norps) {
-		printk("\"norps\" option deprecated: use \"rpsctl=\"\n");
-	}
 	if (mt_opt_rpsctl >= 0) {
 		printk("34K return prediction stack override set to %d.\n",
 			mt_opt_rpsctl);
@@ -232,16 +111,6 @@ void mips_mt_set_cpuoptions(void)
 		printk("Config7: 0x%08x\n", read_c0_config7());
 	}
 
-	/* Report Cache management debug options */
-	if (mt_protiflush)
-		printk("I-cache flushes single-threaded\n");
-	if (mt_protdflush)
-		printk("D-cache flushes single-threaded\n");
-	if (mt_n_iflushes != 1)
-		printk("I-Cache Flushes Repeated %d times\n", mt_n_iflushes);
-	if (mt_n_dflushes != 1)
-		printk("D-Cache Flushes Repeated %d times\n", mt_n_dflushes);
-
 	if (itc_base != 0) {
 		/*
 		 * Configure ITC mapping.  This code is very
@@ -253,9 +122,8 @@ void mips_mt_set_cpuoptions(void)
 		unsigned long ectlval;
 		unsigned long itcblkgrn;
 
-		/* ErrCtl register is known as "ecc" to Linux */
-		ectlval = read_c0_ecc();
-		write_c0_ecc(ectlval | (0x1 << 26));
+		ectlval = read_c0_errctl();
+		write_c0_errctl(ectlval | (0x1 << 26));
 		ehb();
 #define INDEX_0 (0x80000000)
 #define INDEX_8 (0x80000008)
@@ -276,41 +144,20 @@ void mips_mt_set_cpuoptions(void)
 		ehb();
 		/* Write out to ITU with CACHE op */
 		cache_op(Index_Store_Tag_D, INDEX_0);
-		write_c0_ecc(ectlval);
+		write_c0_errctl(ectlval);
 		ehb();
 		printk("Mapped %ld ITC cells starting at 0x%08x\n",
 			((itcblkgrn & 0x7fe00000) >> 20), itc_base);
 	}
 }
 
-/*
- * Function to protect cache flushes from concurrent execution
- * depends on MP software model chosen.
- */
+const struct class mt_class = {
+	.name = "mt",
+};
 
-void mt_cflush_lockdown(void)
+static int __init mips_mt_init(void)
 {
-	/* FILL IN VSMP and AP/SP VERSIONS HERE */
+	return class_register(&mt_class);
 }
 
-void mt_cflush_release(void)
-{
-	/* FILL IN VSMP and AP/SP VERSIONS HERE */
-}
-
-struct class *mt_class;
-
-static int __init mt_init(void)
-{
-	struct class *mtc;
-
-	mtc = class_create(THIS_MODULE, "mt");
-	if (IS_ERR(mtc))
-		return PTR_ERR(mtc);
-
-	mt_class = mtc;
-
-	return 0;
-}
-
-subsys_initcall(mt_init);
+subsys_initcall(mips_mt_init);

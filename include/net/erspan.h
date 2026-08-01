@@ -2,7 +2,19 @@
 #define __LINUX_ERSPAN_H
 
 /*
- * GRE header for ERSPAN encapsulation (8 octets [34:41]) -- 8 bytes
+ * GRE header for ERSPAN type I encapsulation (4 octets [34:37])
+ *      0                   1                   2                   3
+ *      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ *     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *     |0|0|0|0|0|00000|000000000|00000|    Protocol Type for ERSPAN   |
+ *     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *
+ *  The Type I ERSPAN frame format is based on the barebones IP + GRE
+ *  encapsulation (as described above) on top of the raw mirrored frame.
+ *  There is no extra ERSPAN header.
+ *
+ *
+ * GRE header for ERSPAN type II and II encapsulation (8 octets [34:41])
  *       0                   1                   2                   3
  *      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
  *     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -43,9 +55,12 @@
  * |                  Platform Specific Info                       |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  *
- * GRE proto ERSPAN type II = 0x88BE, type III = 0x22EB
+ * GRE proto ERSPAN type I/II = 0x88BE, type III = 0x22EB
  */
 
+#include <linux/ip.h>
+#include <linux/ipv6.h>
+#include <linux/skbuff.h>
 #include <uapi/linux/erspan.h>
 
 #define ERSPAN_VERSION	0x1	/* ERSPAN type II */
@@ -74,7 +89,7 @@ enum erspan_encap_type {
 	ERSPAN_ENCAP_NOVLAN = 0x0,	/* originally without VLAN tag */
 	ERSPAN_ENCAP_ISL = 0x1,		/* originally ISL encapsulated */
 	ERSPAN_ENCAP_8021Q = 0x2,	/* originally 802.1Q encapsulated */
-	ERSPAN_ENCAP_INFRAME = 0x3,	/* VLAN tag perserved in frame */
+	ERSPAN_ENCAP_INFRAME = 0x3,	/* VLAN tag preserved in frame */
 };
 
 #define ERSPAN_V1_MDSIZE	4
@@ -139,6 +154,9 @@ static inline u8 get_hwid(const struct erspan_md2 *md2)
 
 static inline int erspan_hdr_len(int version)
 {
+	if (version == 0)
+		return 0;
+
 	return sizeof(struct erspan_base_hdr) +
 	       (version == 1 ? ERSPAN_V1_MDSIZE : ERSPAN_V2_MDSIZE);
 }
@@ -174,7 +192,7 @@ static inline void erspan_build_header(struct sk_buff *skb,
 	enc_type = ERSPAN_ENCAP_NOVLAN;
 
 	/* If mirrored packet has vlan tag, extract tci and
-	 *  perserve vlan header in the mirrored frame.
+	 * preserve vlan header in the mirrored frame.
 	 */
 	if (eth->h_proto == htons(ETH_P_8021Q)) {
 		qp = (struct qtag_prefix *)(skb->data + 2 * ETH_ALEN);
@@ -219,6 +237,33 @@ static inline __be32 erspan_get_timestamp(void)
 	return htonl((u32)h_usecs);
 }
 
+/* ERSPAN BSO (Bad/Short/Oversized), see RFC1757
+ *   00b --> Good frame with no error, or unknown integrity
+ *   01b --> Payload is a Short Frame
+ *   10b --> Payload is an Oversized Frame
+ *   11b --> Payload is a Bad Frame with CRC or Alignment Error
+ */
+enum erspan_bso {
+	BSO_NOERROR = 0x0,
+	BSO_SHORT = 0x1,
+	BSO_OVERSIZED = 0x2,
+	BSO_BAD = 0x3,
+};
+
+static inline u8 erspan_detect_bso(struct sk_buff *skb)
+{
+	/* BSO_BAD is not handled because the frame CRC
+	 * or alignment error information is in FCS.
+	 */
+	if (skb->len < ETH_ZLEN)
+		return BSO_SHORT;
+
+	if (skb->len > ETH_FRAME_LEN)
+		return BSO_OVERSIZED;
+
+	return BSO_NOERROR;
+}
+
 static inline void erspan_build_header_v2(struct sk_buff *skb,
 					  u32 id, u8 direction, u16 hwid,
 					  bool truncate, bool is_ipv4)
@@ -248,6 +293,7 @@ static inline void erspan_build_header_v2(struct sk_buff *skb,
 		vlan_tci = ntohs(qp->tci);
 	}
 
+	bso = erspan_detect_bso(skb);
 	skb_push(skb, sizeof(*ershdr) + ERSPAN_V2_MDSIZE);
 	ershdr = (struct erspan_base_hdr *)skb->data;
 	memset(ershdr, 0, sizeof(*ershdr) + ERSPAN_V2_MDSIZE);

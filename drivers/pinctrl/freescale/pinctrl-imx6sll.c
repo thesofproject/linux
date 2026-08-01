@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0
-/*
- * Copyright (C) 2016 Freescale Semiconductor, Inc.
- * Copyright 2017-2018 NXP.
- *
- */
+//
+// Copyright (C) 2016 Freescale Semiconductor, Inc.
+// Copyright 2017-2018 NXP.
 
 #include <linux/err.h>
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
+#include <linux/platform_device.h>
 #include <linux/pinctrl/pinctrl.h>
 
 #include "pinctrl-imx.h"
@@ -347,7 +344,7 @@ static int imx6sll_pinctrl_probe(struct platform_device *pdev)
 static struct platform_driver imx6sll_pinctrl_driver = {
 	.driver = {
 		.name = "imx6sll-pinctrl",
-		.of_match_table = of_match_ptr(imx6sll_pinctrl_of_match),
+		.of_match_table = imx6sll_pinctrl_of_match,
 		.suppress_bind_attrs = true,
 	},
 	.probe = imx6sll_pinctrl_probe,

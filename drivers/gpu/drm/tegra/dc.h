@@ -1,10 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2012 Avionic Design GmbH
  * Copyright (C) 2012 NVIDIA CORPORATION.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef TEGRA_DC_H
@@ -17,6 +14,8 @@
 #include "drm.h"
 
 struct tegra_output;
+
+#define TEGRA_DC_LEGACY_PLANES_NUM	7
 
 struct tegra_dc_state {
 	struct drm_crtc_state base;
@@ -41,6 +40,11 @@ struct tegra_dc_stats {
 	unsigned long vblank;
 	unsigned long underflow;
 	unsigned long overflow;
+
+	unsigned long frames_total;
+	unsigned long vblank_total;
+	unsigned long underflow_total;
+	unsigned long overflow_total;
 };
 
 struct tegra_windowgroup_soc {
@@ -55,7 +59,8 @@ struct tegra_dc_soc_info {
 	bool supports_interlacing;
 	bool supports_cursor;
 	bool supports_block_linear;
-	bool supports_blending;
+	bool supports_sector_layout;
+	bool has_legacy_blending;
 	unsigned int pitch_align;
 	bool has_powergate;
 	bool coupled_pm;
@@ -67,6 +72,11 @@ struct tegra_dc_soc_info {
 	const u32 *overlay_formats;
 	unsigned int num_overlay_formats;
 	const u64 *modifiers;
+	bool has_win_a_without_filters;
+	bool has_win_b_vfilter_mem_client;
+	bool has_win_c_without_vert_filter;
+	bool plane_tiled_memory_bandwidth_x2;
+	bool has_pll_d2_out0;
 };
 
 struct tegra_dc {
@@ -84,6 +94,7 @@ struct tegra_dc {
 	int irq;
 
 	struct tegra_output *rgb;
+	struct tegra_pmc *pmc;
 
 	struct tegra_dc_stats stats;
 	struct list_head list;
@@ -92,7 +103,10 @@ struct tegra_dc {
 
 	const struct tegra_dc_soc_info *soc;
 
-	struct iommu_domain *domain;
+	bool has_opp_table;
+
+	u64 *cmu_output_lut;
+	dma_addr_t cmu_output_lut_phys;
 };
 
 static inline struct tegra_dc *
@@ -139,7 +153,8 @@ struct tegra_dc_window {
 	unsigned int stride[2];
 	unsigned long base[3];
 	unsigned int zpos;
-	bool bottom_up;
+	bool reflect_x;
+	bool reflect_y;
 
 	struct tegra_bo_tiling tiling;
 	u32 format;
@@ -153,10 +168,12 @@ int tegra_dc_state_setup_clock(struct tegra_dc *dc,
 			       struct drm_crtc_state *crtc_state,
 			       struct clk *clk, unsigned long pclk,
 			       unsigned int div);
+void tegra_crtc_atomic_post_commit(struct drm_crtc *crtc,
+				   struct drm_atomic_commit *state);
 
 /* from rgb.c */
 int tegra_dc_rgb_probe(struct tegra_dc *dc);
-int tegra_dc_rgb_remove(struct tegra_dc *dc);
+void tegra_dc_rgb_remove(struct tegra_dc *dc);
 int tegra_dc_rgb_init(struct drm_device *drm, struct tegra_dc *dc);
 int tegra_dc_rgb_exit(struct tegra_dc *dc);
 
@@ -298,7 +315,7 @@ int tegra_dc_rgb_exit(struct tegra_dc *dc);
 #define SOR1_TIMING_CYA	(1 << 27)
 #define CURSOR_ENABLE	(1 << 16)
 
-#define SOR_ENABLE(x)	(1 << (25 + (x)))
+#define SOR_ENABLE(x)	(1 << (25 + (((x) > 1) ? ((x) + 1) : (x))))
 
 #define DC_DISP_DISP_MEM_HIGH_PRIORITY		0x403
 #define CURSOR_THRESHOLD(x)   (((x) & 0x03) << 24)
@@ -434,6 +451,7 @@ int tegra_dc_rgb_exit(struct tegra_dc *dc);
 #define BASE_COLOR_SIZE_888    (  8 << 0)
 #define BASE_COLOR_SIZE_101010 ( 10 << 0)
 #define BASE_COLOR_SIZE_121212 ( 12 << 0)
+#define CMU_ENABLE_ENABLE      (1 << 20)
 
 #define DC_DISP_SHIFT_CLOCK_OPTIONS		0x431
 #define  SC1_H_QUALIFIER_NONE	(1 << 16)
@@ -513,6 +531,8 @@ int tegra_dc_rgb_exit(struct tegra_dc *dc);
 
 #define DC_DISP_CURSOR_START_ADDR_HI		0x4ec
 #define DC_DISP_BLEND_CURSOR_CONTROL		0x4f1
+#define CURSOR_COMPOSITION_MODE_BLEND		(0 << 25)
+#define CURSOR_COMPOSITION_MODE_XOR		(1 << 25)
 #define CURSOR_MODE_LEGACY			(0 << 24)
 #define CURSOR_MODE_NORMAL			(1 << 24)
 #define CURSOR_DST_BLEND_ZERO			(0 << 16)
@@ -553,6 +573,9 @@ int tegra_dc_rgb_exit(struct tegra_dc *dc);
 #define  THREAD_NUM(x) (((x) & 0x1f) << 1)
 #define  THREAD_GROUP_ENABLE (1 << 0)
 
+#define DC_WIN_H_FILTER_P(p)			(0x601 + (p))
+#define DC_WIN_V_FILTER_P(p)			(0x619 + (p))
+
 #define DC_WIN_CSC_YOF				0x611
 #define DC_WIN_CSC_KYRGB			0x612
 #define DC_WIN_CSC_KUR				0x613
@@ -566,6 +589,8 @@ int tegra_dc_rgb_exit(struct tegra_dc *dc);
 #define H_DIRECTION  (1 <<  0)
 #define V_DIRECTION  (1 <<  2)
 #define COLOR_EXPAND (1 <<  6)
+#define H_FILTER     (1 <<  8)
+#define V_FILTER     (1 << 10)
 #define CSC_ENABLE   (1 << 18)
 #define WIN_ENABLE   (1 << 30)
 
@@ -617,6 +642,13 @@ int tegra_dc_rgb_exit(struct tegra_dc *dc);
 #define WIN_COLOR_DEPTH_A8B8G8R8       36
 #define WIN_COLOR_DEPTH_B8G8R8X8       37
 #define WIN_COLOR_DEPTH_R8G8B8X8       38
+#define WIN_COLOR_DEPTH_YCbCr444P      41
+#define WIN_COLOR_DEPTH_YCrCb420SP     42
+#define WIN_COLOR_DEPTH_YCbCr420SP     43
+#define WIN_COLOR_DEPTH_YCrCb422SP     44
+#define WIN_COLOR_DEPTH_YCbCr422SP     45
+#define WIN_COLOR_DEPTH_YCrCb444SP     48
+#define WIN_COLOR_DEPTH_YCbCr444SP     49
 #define WIN_COLOR_DEPTH_X8B8G8R8       65
 #define WIN_COLOR_DEPTH_X8R8G8B8       66
 
@@ -690,6 +722,9 @@ int tegra_dc_rgb_exit(struct tegra_dc *dc);
 
 #define DC_WINBUF_START_ADDR_HI			0x80d
 
+#define DC_WINBUF_START_ADDR_HI_U		0x80f
+#define DC_WINBUF_START_ADDR_HI_V		0x811
+
 #define DC_WINBUF_CDE_CONTROL			0x82f
 #define  ENABLE_SURFACE (1 << 0)
 
@@ -702,14 +737,45 @@ int tegra_dc_rgb_exit(struct tegra_dc *dc);
 #define PROTOCOL_MASK (0xf << 8)
 #define PROTOCOL_SINGLE_TMDS_A (0x1 << 8)
 
+#define DC_DISP_CORE_HEAD_SET_CONTROL_OUTPUT_LUT	0x431
+#define  OUTPUT_LUT_MODE_MASK        (3 << 5)
+#define  OUTPUT_LUT_MODE_INTERPOLATE (1 << 5)
+#define  OUTPUT_LUT_SIZE_MASK        (3 << 1)
+#define  OUTPUT_LUT_SIZE_SIZE_1025   (2 << 1)
+
+#define DC_DISP_COREPVT_HEAD_SET_OUTPUT_LUT_BASE	0x432
+#define DC_DISP_COREPVT_HEAD_SET_OUTPUT_LUT_BASE_HI	0x433
+
+#define DC_DISP_PCALC_HEAD_SET_CROPPED_POINT_IN_CURSOR	0x442
+#define DC_DISP_PCALC_HEAD_SET_CROPPED_SIZE_IN_CURSOR	0x446
+
+#define DC_WINC_PRECOMP_WGRP_PIPE_CAPA 0x500
+#define DC_WINC_PRECOMP_WGRP_PIPE_CAPB 0x501
+#define DC_WINC_PRECOMP_WGRP_PIPE_CAPC 0x502
+#define  MAX_PIXELS_5TAP444(x) ((x) & 0xffff)
+#define DC_WINC_PRECOMP_WGRP_PIPE_CAPD 0x503
+#define DC_WINC_PRECOMP_WGRP_PIPE_CAPE 0x504
+#define  MAX_PIXELS_2TAP444(x) ((x) & 0xffff)
+#define DC_WINC_PRECOMP_WGRP_PIPE_CAPF 0x505
+
 #define DC_WIN_CORE_WINDOWGROUP_SET_CONTROL	0x702
 #define OWNER_MASK (0xf << 0)
 #define OWNER(x) (((x) & 0xf) << 0)
 
 #define DC_WIN_CROPPED_SIZE			0x706
 
+#define DC_WIN_SET_INPUT_SCALER_H_START_PHASE	0x707
+#define DC_WIN_SET_INPUT_SCALER_V_START_PHASE	0x708
+
 #define DC_WIN_PLANAR_STORAGE			0x709
 #define PITCH(x) (((x) >> 6) & 0x1fff)
+
+#define DC_WIN_PLANAR_STORAGE_UV		0x70a
+#define  PITCH_U(x) ((((x) >> 6) & 0x1fff) <<  0)
+#define  PITCH_V(x) ((((x) >> 6) & 0x1fff) << 16)
+
+#define DC_WIN_SET_INPUT_SCALER_HPHASE_INCR	0x70b
+#define DC_WIN_SET_INPUT_SCALER_VPHASE_INCR	0x70c
 
 #define DC_WIN_SET_PARAMS			0x70d
 #define  CLAMP_BEFORE_BLEND (1 << 15)
@@ -730,6 +796,10 @@ int tegra_dc_rgb_exit(struct tegra_dc *dc);
 #define  HORIZONTAL_TAPS_5 (4 << 3)
 #define  VERTICAL_TAPS_2 (1 << 0)
 #define  VERTICAL_TAPS_5 (4 << 0)
+
+#define DC_WIN_WINDOWGROUP_SET_INPUT_SCALER_COEFF 0x70f
+#define  COEFF_INDEX(x) (((x) & 0xff) << 15)
+#define  COEFF_DATA(x) (((x) & 0x3ff) << 0)
 
 #define DC_WIN_WINDOWGROUP_SET_INPUT_SCALER_USAGE	0x711
 #define  INPUT_SCALER_USE422  (1 << 2)

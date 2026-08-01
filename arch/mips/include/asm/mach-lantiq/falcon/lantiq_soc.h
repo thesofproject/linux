@@ -1,7 +1,5 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
  *
  * Copyright (C) 2010 John Crispin <john@phrozen.org>
  */
@@ -57,7 +55,7 @@ extern __iomem void *ltq_sys1_membase;
 #define ltq_sys1_w32_mask(clear, set, reg)   \
 	ltq_sys1_w32((ltq_sys1_r32(reg) & ~(clear)) | (set), reg)
 
-/* allow the gpio and pinctrl drivers to talk to eachother */
+/* allow the gpio and pinctrl drivers to talk to each other */
 extern int pinctrl_falcon_get_range_size(int id);
 extern void pinctrl_falcon_add_gpio_range(struct pinctrl_gpio_range *range);
 

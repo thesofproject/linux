@@ -21,8 +21,10 @@
  *
  * Authors: Martin Peres
  */
-#include <nvkm/core/option.h>
 #include "priv.h"
+
+#include <core/option.h>
+#include <subdev/pmu.h>
 
 int
 nvkm_therm_temp_get(struct nvkm_therm *therm)
@@ -132,11 +134,12 @@ nvkm_therm_update(struct nvkm_therm *therm, int mode)
 			duty = nvkm_therm_update_linear(therm);
 			break;
 		case NVBIOS_THERM_FAN_OTHER:
-			if (therm->cstate)
+			if (therm->cstate) {
 				duty = therm->cstate;
-			else
+				poll = false;
+			} else {
 				duty = nvkm_therm_update_linear_fallback(therm);
-			poll = false;
+			}
 			break;
 		}
 		immd = false;
@@ -191,8 +194,7 @@ nvkm_therm_fan_mode(struct nvkm_therm *therm, int mode)
 
 	/* The default PPWR ucode on fermi interferes with fan management */
 	if ((mode >= ARRAY_SIZE(name)) ||
-	    (mode != NVKM_THERM_CTRL_NONE && device->card_type >= NV_C0 &&
-	     !device->pmu))
+	    (mode != NVKM_THERM_CTRL_NONE && nvkm_pmu_fan_controlled(device)))
 		return -EINVAL;
 
 	/* do not allow automatic fan management if the thermal sensor is
@@ -339,15 +341,15 @@ nvkm_therm_intr(struct nvkm_subdev *subdev)
 }
 
 static int
-nvkm_therm_fini(struct nvkm_subdev *subdev, bool suspend)
+nvkm_therm_fini(struct nvkm_subdev *subdev, enum nvkm_suspend_state suspend)
 {
 	struct nvkm_therm *therm = nvkm_therm(subdev);
 
 	if (therm->func->fini)
 		therm->func->fini(therm);
 
-	nvkm_therm_fan_fini(therm, suspend);
-	nvkm_therm_sensor_fini(therm, suspend);
+	nvkm_therm_fan_fini(therm, suspend != NVKM_POWEROFF);
+	nvkm_therm_sensor_fini(therm, suspend != NVKM_POWEROFF);
 
 	if (suspend) {
 		therm->suspend = therm->mode;
@@ -419,10 +421,10 @@ nvkm_therm = {
 };
 
 void
-nvkm_therm_ctor(struct nvkm_therm *therm, struct nvkm_device *device,
-		int index, const struct nvkm_therm_func *func)
+nvkm_therm_ctor(struct nvkm_therm *therm, struct nvkm_device *device, enum nvkm_subdev_type type,
+		int inst, const struct nvkm_therm_func *func)
 {
-	nvkm_subdev_ctor(&nvkm_therm, device, index, &therm->subdev);
+	nvkm_subdev_ctor(&nvkm_therm, device, type, inst, &therm->subdev);
 	therm->func = func;
 
 	nvkm_alarm_init(&therm->alarm, nvkm_therm_alarm);
@@ -441,13 +443,13 @@ nvkm_therm_ctor(struct nvkm_therm *therm, struct nvkm_device *device,
 
 int
 nvkm_therm_new_(const struct nvkm_therm_func *func, struct nvkm_device *device,
-		int index, struct nvkm_therm **ptherm)
+		enum nvkm_subdev_type type, int inst, struct nvkm_therm **ptherm)
 {
 	struct nvkm_therm *therm;
 
-	if (!(therm = *ptherm = kzalloc(sizeof(*therm), GFP_KERNEL)))
+	if (!(therm = *ptherm = kzalloc_obj(*therm)))
 		return -ENOMEM;
 
-	nvkm_therm_ctor(therm, device, index, func);
+	nvkm_therm_ctor(therm, device, type, inst, func);
 	return 0;
 }

@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * AD7879/AD7889 based touchscreen and GPIO driver
  *
  * Copyright (C) 2008-2010 Michael Hennerich, Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
  *
  * History:
  * Copyright (c) 2005 David Brownell
@@ -23,16 +22,16 @@
 
 #include <linux/device.h>
 #include <linux/delay.h>
+#include <linux/export.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
-#include <linux/gpio.h>
+#include <linux/gpio/driver.h>
 
 #include <linux/input/touchscreen.h>
-#include <linux/platform_data/ad7879.h>
 #include <linux/module.h>
 #include "ad7879.h"
 
@@ -239,7 +238,7 @@ static void ad7879_ts_event_release(struct ad7879 *ts)
 
 static void ad7879_timer(struct timer_list *t)
 {
-	struct ad7879 *ts = from_timer(ts, t, timer);
+	struct ad7879 *ts = timer_container_of(ts, t, timer);
 
 	ad7879_ts_event_release(ts);
 }
@@ -247,11 +246,14 @@ static void ad7879_timer(struct timer_list *t)
 static irqreturn_t ad7879_irq(int irq, void *handle)
 {
 	struct ad7879 *ts = handle;
+	int error;
 
-	regmap_bulk_read(ts->regmap, AD7879_REG_XPLUS,
-			 ts->conversion_data, AD7879_NR_SENSE);
-
-	if (!ad7879_report(ts))
+	error = regmap_bulk_read(ts->regmap, AD7879_REG_XPLUS,
+				 ts->conversion_data, AD7879_NR_SENSE);
+	if (error)
+		dev_err_ratelimited(ts->dev, "failed to read %#02x: %d\n",
+				    AD7879_REG_XPLUS, error);
+	else if (!ad7879_report(ts))
 		mod_timer(&ts->timer, jiffies + TS_PEN_UP_TIMEOUT);
 
 	return IRQ_HANDLED;
@@ -272,7 +274,7 @@ static void __ad7879_disable(struct ad7879 *ts)
 		AD7879_PM(AD7879_PM_SHUTDOWN);
 	disable_irq(ts->irq);
 
-	if (del_timer_sync(&ts->timer))
+	if (timer_delete_sync(&ts->timer))
 		ad7879_ts_event_release(ts);
 
 	ad7879_write(ts, AD7879_REG_CTRL2, reg);
@@ -290,7 +292,7 @@ static int ad7879_open(struct input_dev *input)
 	return 0;
 }
 
-static void ad7879_close(struct input_dev* input)
+static void ad7879_close(struct input_dev *input)
 {
 	struct ad7879 *ts = input_get_drvdata(input);
 
@@ -303,14 +305,12 @@ static int __maybe_unused ad7879_suspend(struct device *dev)
 {
 	struct ad7879 *ts = dev_get_drvdata(dev);
 
-	mutex_lock(&ts->input->mutex);
+	guard(mutex)(&ts->input->mutex);
 
-	if (!ts->suspended && !ts->disabled && ts->input->users)
+	if (!ts->suspended && !ts->disabled && input_device_enabled(ts->input))
 		__ad7879_disable(ts);
 
 	ts->suspended = true;
-
-	mutex_unlock(&ts->input->mutex);
 
 	return 0;
 }
@@ -319,14 +319,12 @@ static int __maybe_unused ad7879_resume(struct device *dev)
 {
 	struct ad7879 *ts = dev_get_drvdata(dev);
 
-	mutex_lock(&ts->input->mutex);
+	guard(mutex)(&ts->input->mutex);
 
-	if (ts->suspended && !ts->disabled && ts->input->users)
+	if (ts->suspended && !ts->disabled && input_device_enabled(ts->input))
 		__ad7879_enable(ts);
 
 	ts->suspended = false;
-
-	mutex_unlock(&ts->input->mutex);
 
 	return 0;
 }
@@ -336,9 +334,9 @@ EXPORT_SYMBOL(ad7879_pm_ops);
 
 static void ad7879_toggle(struct ad7879 *ts, bool disable)
 {
-	mutex_lock(&ts->input->mutex);
+	guard(mutex)(&ts->input->mutex);
 
-	if (!ts->suspended && ts->input->users != 0) {
+	if (!ts->suspended && input_device_enabled(ts->input)) {
 
 		if (disable) {
 			if (ts->disabled)
@@ -350,8 +348,6 @@ static void ad7879_toggle(struct ad7879 *ts, bool disable)
 	}
 
 	ts->disabled = disable;
-
-	mutex_unlock(&ts->input->mutex);
 }
 
 static ssize_t ad7879_disable_show(struct device *dev,
@@ -390,28 +386,31 @@ static const struct attribute_group ad7879_attr_group = {
 	.attrs = ad7879_attributes,
 };
 
+const struct attribute_group *ad7879_groups[] = {
+	&ad7879_attr_group,
+	NULL
+};
+EXPORT_SYMBOL_GPL(ad7879_groups);
+
 #ifdef CONFIG_GPIOLIB
 static int ad7879_gpio_direction_input(struct gpio_chip *chip,
 					unsigned gpio)
 {
 	struct ad7879 *ts = gpiochip_get_data(chip);
-	int err;
 
-	mutex_lock(&ts->mutex);
+	guard(mutex)(&ts->mutex);
+
 	ts->cmd_crtl2 |= AD7879_GPIO_EN | AD7879_GPIODIR | AD7879_GPIOPOL;
-	err = ad7879_write(ts, AD7879_REG_CTRL2, ts->cmd_crtl2);
-	mutex_unlock(&ts->mutex);
-
-	return err;
+	return ad7879_write(ts, AD7879_REG_CTRL2, ts->cmd_crtl2);
 }
 
 static int ad7879_gpio_direction_output(struct gpio_chip *chip,
 					unsigned gpio, int level)
 {
 	struct ad7879 *ts = gpiochip_get_data(chip);
-	int err;
 
-	mutex_lock(&ts->mutex);
+	guard(mutex)(&ts->mutex);
+
 	ts->cmd_crtl2 &= ~AD7879_GPIODIR;
 	ts->cmd_crtl2 |= AD7879_GPIO_EN | AD7879_GPIOPOL;
 	if (level)
@@ -419,80 +418,65 @@ static int ad7879_gpio_direction_output(struct gpio_chip *chip,
 	else
 		ts->cmd_crtl2 &= ~AD7879_GPIO_DATA;
 
-	err = ad7879_write(ts, AD7879_REG_CTRL2, ts->cmd_crtl2);
-	mutex_unlock(&ts->mutex);
-
-	return err;
+	return ad7879_write(ts, AD7879_REG_CTRL2, ts->cmd_crtl2);
 }
 
-static int ad7879_gpio_get_value(struct gpio_chip *chip, unsigned gpio)
+static int ad7879_gpio_get_value(struct gpio_chip *chip, unsigned int gpio)
 {
 	struct ad7879 *ts = gpiochip_get_data(chip);
 	u16 val;
 
-	mutex_lock(&ts->mutex);
-	val = ad7879_read(ts, AD7879_REG_CTRL2);
-	mutex_unlock(&ts->mutex);
+	guard(mutex)(&ts->mutex);
 
+	val = ad7879_read(ts, AD7879_REG_CTRL2);
 	return !!(val & AD7879_GPIO_DATA);
 }
 
-static void ad7879_gpio_set_value(struct gpio_chip *chip,
-				  unsigned gpio, int value)
+static int ad7879_gpio_set_value(struct gpio_chip *chip, unsigned int gpio,
+				 int value)
 {
 	struct ad7879 *ts = gpiochip_get_data(chip);
 
-	mutex_lock(&ts->mutex);
+	guard(mutex)(&ts->mutex);
+
 	if (value)
 		ts->cmd_crtl2 |= AD7879_GPIO_DATA;
 	else
 		ts->cmd_crtl2 &= ~AD7879_GPIO_DATA;
 
-	ad7879_write(ts, AD7879_REG_CTRL2, ts->cmd_crtl2);
-	mutex_unlock(&ts->mutex);
+	return ad7879_write(ts, AD7879_REG_CTRL2, ts->cmd_crtl2);
 }
 
-static int ad7879_gpio_add(struct ad7879 *ts,
-			   const struct ad7879_platform_data *pdata)
+static int ad7879_gpio_add(struct ad7879 *ts)
 {
-	bool gpio_export;
-	int gpio_base;
 	int ret = 0;
-
-	if (pdata) {
-		gpio_export = pdata->gpio_export;
-		gpio_base = pdata->gpio_base;
-	} else {
-		gpio_export = device_property_read_bool(ts->dev,
-							"gpio-controller");
-		gpio_base = -1;
-	}
 
 	mutex_init(&ts->mutex);
 
-	if (gpio_export) {
-		ts->gc.direction_input = ad7879_gpio_direction_input;
-		ts->gc.direction_output = ad7879_gpio_direction_output;
-		ts->gc.get = ad7879_gpio_get_value;
-		ts->gc.set = ad7879_gpio_set_value;
-		ts->gc.can_sleep = 1;
-		ts->gc.base = gpio_base;
-		ts->gc.ngpio = 1;
-		ts->gc.label = "AD7879-GPIO";
-		ts->gc.owner = THIS_MODULE;
-		ts->gc.parent = ts->dev;
+	/* Do not create a chip unless flagged for it */
+	if (!device_property_read_bool(ts->dev, "gpio-controller"))
+		return 0;
 
-		ret = devm_gpiochip_add_data(ts->dev, &ts->gc, ts);
-		if (ret)
-			dev_err(ts->dev, "failed to register gpio %d\n",
-				ts->gc.base);
-	}
+	ts->gc.direction_input = ad7879_gpio_direction_input;
+	ts->gc.direction_output = ad7879_gpio_direction_output;
+	ts->gc.get = ad7879_gpio_get_value;
+	ts->gc.set = ad7879_gpio_set_value;
+	ts->gc.can_sleep = 1;
+	ts->gc.base = -1;
+	ts->gc.ngpio = 1;
+	ts->gc.label = "AD7879-GPIO";
+	ts->gc.owner = THIS_MODULE;
+	ts->gc.parent = ts->dev;
+
+	ret = devm_gpiochip_add_data(ts->dev, &ts->gc, ts);
+	if (ret)
+		dev_err(ts->dev, "failed to register gpio %d\n",
+			ts->gc.base);
 
 	return ret;
 }
 #else
-static int ad7879_gpio_add(struct ad7879 *ts,
-			   const struct ad7879_platform_data *pdata)
+static int ad7879_gpio_add(struct ad7879 *ts)
 {
 	return 0;
 }
@@ -527,7 +511,6 @@ static int ad7879_parse_dt(struct device *dev, struct ad7879 *ts)
 int ad7879_probe(struct device *dev, struct regmap *regmap,
 		 int irq, u16 bustype, u8 devid)
 {
-	struct ad7879_platform_data *pdata = dev_get_platdata(dev);
 	struct ad7879 *ts;
 	struct input_dev *input_dev;
 	int err;
@@ -542,22 +525,9 @@ int ad7879_probe(struct device *dev, struct regmap *regmap,
 	if (!ts)
 		return -ENOMEM;
 
-	if (pdata) {
-		/* Platform data use swapped axis (backward compatibility) */
-		ts->swap_xy = !pdata->swap_xy;
-
-		ts->x_plate_ohms = pdata->x_plate_ohms ? : 400;
-
-		ts->first_conversion_delay = pdata->first_conversion_delay;
-		ts->acquisition_time = pdata->acquisition_time;
-		ts->averaging = pdata->averaging;
-		ts->pen_down_acc_interval = pdata->pen_down_acc_interval;
-		ts->median = pdata->median;
-	} else {
-		err = ad7879_parse_dt(dev, ts);
-		if (err)
-			return err;
-	}
+	err = ad7879_parse_dt(dev, ts);
+	if (err)
+		return err;
 
 	input_dev = devm_input_allocate_device(dev);
 	if (!input_dev) {
@@ -585,28 +555,13 @@ int ad7879_probe(struct device *dev, struct regmap *regmap,
 
 	input_set_capability(input_dev, EV_KEY, BTN_TOUCH);
 
-	if (pdata) {
-		input_set_abs_params(input_dev, ABS_X,
-				pdata->x_min ? : 0,
-				pdata->x_max ? : MAX_12BIT,
-				0, 0);
-		input_set_abs_params(input_dev, ABS_Y,
-				pdata->y_min ? : 0,
-				pdata->y_max ? : MAX_12BIT,
-				0, 0);
-		input_set_abs_params(input_dev, ABS_PRESSURE,
-				pdata->pressure_min,
-				pdata->pressure_max ? : ~0,
-				0, 0);
-	} else {
-		input_set_abs_params(input_dev, ABS_X, 0, MAX_12BIT, 0, 0);
-		input_set_abs_params(input_dev, ABS_Y, 0, MAX_12BIT, 0, 0);
-		input_set_capability(input_dev, EV_ABS, ABS_PRESSURE);
-		touchscreen_parse_properties(input_dev, false, NULL);
-		if (!input_abs_get_max(input_dev, ABS_PRESSURE)) {
-			dev_err(dev, "Touchscreen pressure is not specified\n");
-			return -EINVAL;
-		}
+	input_set_abs_params(input_dev, ABS_X, 0, MAX_12BIT, 0, 0);
+	input_set_abs_params(input_dev, ABS_Y, 0, MAX_12BIT, 0, 0);
+	input_set_capability(input_dev, EV_ABS, ABS_PRESSURE);
+	touchscreen_parse_properties(input_dev, false, NULL);
+	if (!input_abs_get_max(input_dev, ABS_PRESSURE)) {
+		dev_err(dev, "Touchscreen pressure is not specified\n");
+		return -EINVAL;
 	}
 
 	err = ad7879_write(ts, AD7879_REG_CTRL2, AD7879_RESET);
@@ -651,11 +606,7 @@ int ad7879_probe(struct device *dev, struct regmap *regmap,
 
 	__ad7879_disable(ts);
 
-	err = devm_device_add_group(dev, &ad7879_attr_group);
-	if (err)
-		return err;
-
-	err = ad7879_gpio_add(ts, pdata);
+	err = ad7879_gpio_add(ts);
 	if (err)
 		return err;
 

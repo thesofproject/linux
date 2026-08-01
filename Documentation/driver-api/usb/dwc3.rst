@@ -18,7 +18,7 @@ controller which can be configured in one of 4 ways:
 	4. Hub configuration
 
 Linux currently supports several versions of this controller. In all
-likelyhood, the version in your SoC is already supported. At the time
+likelihood, the version in your SoC is already supported. At the time
 of this writing, known tested versions range from 2.02a to 3.10a. As a
 rule of thumb, anything above 2.02a should work reliably well.
 
@@ -674,9 +674,8 @@ operations, both of which can be traced. Format is::
   	__entry->flags & DWC3_EP_ENABLED ? 'E' : 'e',
   	__entry->flags & DWC3_EP_STALL ? 'S' : 's',
   	__entry->flags & DWC3_EP_WEDGE ? 'W' : 'w',
-  	__entry->flags & DWC3_EP_BUSY ? 'B' : 'b',
+  	__entry->flags & DWC3_EP_TRANSFER_STARTED ? 'B' : 'b',
   	__entry->flags & DWC3_EP_PENDING_REQUEST ? 'P' : 'p',
-  	__entry->flags & DWC3_EP_MISSED_ISOC ? 'M' : 'm',
   	__entry->flags & DWC3_EP_END_TRANSFER_PENDING ? 'E' : 'e',
   	__entry->direction ? '<' : '>'
   )

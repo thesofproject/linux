@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * ip_conntrack_helper_h323_asn1.c - BER and PER decoding library for H.323
- * 			      	     conntrack/NAT module.
+ * BER and PER decoding library for H.323 conntrack/NAT module.
  *
  * Copyright (c) 2006 by Jing Min Zhao <zhaojingmin@users.sourceforge.net>
  *
- * This source code is licensed under General Public License version 2.
- *
- * See ip_conntrack_helper_h323_asn1.h for details.
- *
+ * See nf_conntrack_helper_h323_asn1.h for details.
  */
 
 #ifdef __KERNEL__
@@ -24,7 +21,6 @@
 
 #if H323_TRACE
 #define TAB_SIZE 4
-#define IFTHEN(cond, act) if(cond){act;}
 #ifdef __KERNEL__
 #define PRINT printk
 #else
@@ -32,7 +28,6 @@
 #endif
 #define FNAME(name) name,
 #else
-#define IFTHEN(cond, act)
 #define PRINT(fmt, args...)
 #define FNAME(name)
 #endif
@@ -172,7 +167,7 @@ static int nf_h323_error_boundary(struct bitstr *bs, size_t bytes, size_t bits)
 	if (bits % BITS_PER_BYTE > 0)
 		bytes++;
 
-	if (*bs->cur + bytes > *bs->end)
+	if (bs->cur + bytes > bs->end)
 		return 1;
 
 	return 0;
@@ -260,15 +255,15 @@ static unsigned int get_uint(struct bitstr *bs, int b)
 	case 4:
 		v |= *bs->cur++;
 		v <<= 8;
-		/* fall through */
+		fallthrough;
 	case 3:
 		v |= *bs->cur++;
 		v <<= 8;
-		/* fall through */
+		fallthrough;
 	case 2:
 		v |= *bs->cur++;
 		v <<= 8;
-		/* fall through */
+		fallthrough;
 	case 1:
 		v |= *bs->cur++;
 		break;
@@ -279,7 +274,7 @@ static unsigned int get_uint(struct bitstr *bs, int b)
 static int decode_nul(struct bitstr *bs, const struct field_t *f,
                       char *base, int level)
 {
-	PRINT("%*.s%s\n", level * TAB_SIZE, " ", f->name);
+	PRINT("%*s%s\n", level * TAB_SIZE, " ", f->name);
 
 	return H323_ERROR_NONE;
 }
@@ -287,7 +282,7 @@ static int decode_nul(struct bitstr *bs, const struct field_t *f,
 static int decode_bool(struct bitstr *bs, const struct field_t *f,
                        char *base, int level)
 {
-	PRINT("%*.s%s\n", level * TAB_SIZE, " ", f->name);
+	PRINT("%*s%s\n", level * TAB_SIZE, " ", f->name);
 
 	INC_BIT(bs);
 	if (nf_h323_error_boundary(bs, 0, 0))
@@ -300,7 +295,7 @@ static int decode_oid(struct bitstr *bs, const struct field_t *f,
 {
 	int len;
 
-	PRINT("%*.s%s\n", level * TAB_SIZE, " ", f->name);
+	PRINT("%*s%s\n", level * TAB_SIZE, " ", f->name);
 
 	BYTE_ALIGN(bs);
 	if (nf_h323_error_boundary(bs, 1, 0))
@@ -319,7 +314,7 @@ static int decode_int(struct bitstr *bs, const struct field_t *f,
 {
 	unsigned int len;
 
-	PRINT("%*.s%s", level * TAB_SIZE, " ", f->name);
+	PRINT("%*s%s", level * TAB_SIZE, " ", f->name);
 
 	switch (f->sz) {
 	case BYTE:		/* Range == 256 */
@@ -334,6 +329,8 @@ static int decode_int(struct bitstr *bs, const struct field_t *f,
 		if (nf_h323_error_boundary(bs, 0, 2))
 			return H323_ERROR_BOUND;
 		len = get_bits(bs, 2) + 1;
+		if (nf_h323_error_boundary(bs, len, 0))
+			return H323_ERROR_BOUND;
 		BYTE_ALIGN(bs);
 		if (base && (f->attr & DECODE)) {	/* timeToLive */
 			unsigned int v = get_uint(bs, len) + f->lb;
@@ -364,7 +361,7 @@ static int decode_int(struct bitstr *bs, const struct field_t *f,
 static int decode_enum(struct bitstr *bs, const struct field_t *f,
                        char *base, int level)
 {
-	PRINT("%*.s%s\n", level * TAB_SIZE, " ", f->name);
+	PRINT("%*s%s\n", level * TAB_SIZE, " ", f->name);
 
 	if ((f->attr & EXT) && get_bit(bs)) {
 		INC_BITS(bs, 7);
@@ -382,7 +379,7 @@ static int decode_bitstr(struct bitstr *bs, const struct field_t *f,
 {
 	unsigned int len;
 
-	PRINT("%*.s%s\n", level * TAB_SIZE, " ", f->name);
+	PRINT("%*s%s\n", level * TAB_SIZE, " ", f->name);
 
 	BYTE_ALIGN(bs);
 	switch (f->sz) {
@@ -418,7 +415,7 @@ static int decode_numstr(struct bitstr *bs, const struct field_t *f,
 {
 	unsigned int len;
 
-	PRINT("%*.s%s\n", level * TAB_SIZE, " ", f->name);
+	PRINT("%*s%s\n", level * TAB_SIZE, " ", f->name);
 
 	/* 2 <= Range <= 255 */
 	if (nf_h323_error_boundary(bs, 0, f->sz))
@@ -438,7 +435,7 @@ static int decode_octstr(struct bitstr *bs, const struct field_t *f,
 {
 	unsigned int len;
 
-	PRINT("%*.s%s", level * TAB_SIZE, " ", f->name);
+	PRINT("%*s%s", level * TAB_SIZE, " ", f->name);
 
 	switch (f->sz) {
 	case FIXD:		/* Range == 1 */
@@ -446,11 +443,6 @@ static int decode_octstr(struct bitstr *bs, const struct field_t *f,
 			BYTE_ALIGN(bs);
 			if (base && (f->attr & DECODE)) {
 				/* The IP Address */
-				IFTHEN(f->lb == 4,
-				       PRINT(" = %d.%d.%d.%d:%d",
-					     bs->cur[0], bs->cur[1],
-					     bs->cur[2], bs->cur[3],
-					     bs->cur[4] * 256 + bs->cur[5]));
 				*((unsigned int *)(base + f->offset)) =
 				    bs->cur - bs->buf;
 			}
@@ -491,7 +483,7 @@ static int decode_bmpstr(struct bitstr *bs, const struct field_t *f,
 {
 	unsigned int len;
 
-	PRINT("%*.s%s\n", level * TAB_SIZE, " ", f->name);
+	PRINT("%*s%s\n", level * TAB_SIZE, " ", f->name);
 
 	switch (f->sz) {
 	case BYTE:		/* Range == 256 */
@@ -523,7 +515,7 @@ static int decode_seq(struct bitstr *bs, const struct field_t *f,
 	const struct field_t *son;
 	unsigned char *beg = NULL;
 
-	PRINT("%*.s%s\n", level * TAB_SIZE, " ", f->name);
+	PRINT("%*s%s\n", level * TAB_SIZE, " ", f->name);
 
 	/* Decode? */
 	base = (base && (f->attr & DECODE)) ? base + f->offset : NULL;
@@ -536,6 +528,8 @@ static int decode_seq(struct bitstr *bs, const struct field_t *f,
 	/* Get fields bitmap */
 	if (nf_h323_error_boundary(bs, 0, f->sz))
 		return H323_ERROR_BOUND;
+	if (f->sz > 32)
+		return H323_ERROR_RANGE;
 	bmp = get_bitmap(bs, f->sz);
 	if (base)
 		*(unsigned int *)base = bmp;
@@ -543,7 +537,7 @@ static int decode_seq(struct bitstr *bs, const struct field_t *f,
 	/* Decode the root components */
 	for (i = opt = 0, son = f->fields; i < f->lb; i++, son++) {
 		if (son->attr & STOP) {
-			PRINT("%*.s%s\n", (level + 1) * TAB_SIZE, " ",
+			PRINT("%*s%s\n", (level + 1) * TAB_SIZE, " ",
 			      son->name);
 			return H323_ERROR_STOP;
 		}
@@ -561,7 +555,7 @@ static int decode_seq(struct bitstr *bs, const struct field_t *f,
 			if (nf_h323_error_boundary(bs, len, 0))
 				return H323_ERROR_BOUND;
 			if (!base || !(son->attr & DECODE)) {
-				PRINT("%*.s%s\n", (level + 1) * TAB_SIZE,
+				PRINT("%*s%s\n", (level + 1) * TAB_SIZE,
 				      " ", son->name);
 				bs->cur += len;
 				continue;
@@ -592,6 +586,8 @@ static int decode_seq(struct bitstr *bs, const struct field_t *f,
 	bmp2_len = get_bits(bs, 7) + 1;
 	if (nf_h323_error_boundary(bs, 0, bmp2_len))
 		return H323_ERROR_BOUND;
+	if (bmp2_len > 32)
+		return H323_ERROR_RANGE;
 	bmp2 = get_bitmap(bs, bmp2_len);
 	bmp |= bmp2 >> f->sz;
 	if (base)
@@ -612,7 +608,7 @@ static int decode_seq(struct bitstr *bs, const struct field_t *f,
 		}
 
 		if (son->attr & STOP) {
-			PRINT("%*.s%s\n", (level + 1) * TAB_SIZE, " ",
+			PRINT("%*s%s\n", (level + 1) * TAB_SIZE, " ",
 			      son->name);
 			return H323_ERROR_STOP;
 		}
@@ -626,7 +622,7 @@ static int decode_seq(struct bitstr *bs, const struct field_t *f,
 		if (nf_h323_error_boundary(bs, len, 0))
 			return H323_ERROR_BOUND;
 		if (!base || !(son->attr & DECODE)) {
-			PRINT("%*.s%s\n", (level + 1) * TAB_SIZE, " ",
+			PRINT("%*s%s\n", (level + 1) * TAB_SIZE, " ",
 			      son->name);
 			bs->cur += len;
 			continue;
@@ -652,7 +648,7 @@ static int decode_seqof(struct bitstr *bs, const struct field_t *f,
 	const struct field_t *son;
 	unsigned char *beg = NULL;
 
-	PRINT("%*.s%s\n", level * TAB_SIZE, " ", f->name);
+	PRINT("%*s%s\n", level * TAB_SIZE, " ", f->name);
 
 	/* Decode? */
 	base = (base && (f->attr & DECODE)) ? base + f->offset : NULL;
@@ -707,7 +703,7 @@ static int decode_seqof(struct bitstr *bs, const struct field_t *f,
 			if (nf_h323_error_boundary(bs, len, 0))
 				return H323_ERROR_BOUND;
 			if (!base || !(son->attr & DECODE)) {
-				PRINT("%*.s%s\n", (level + 1) * TAB_SIZE,
+				PRINT("%*s%s\n", (level + 1) * TAB_SIZE,
 				      " ", son->name);
 				bs->cur += len;
 				continue;
@@ -748,7 +744,7 @@ static int decode_choice(struct bitstr *bs, const struct field_t *f,
 	const struct field_t *son;
 	unsigned char *beg = NULL;
 
-	PRINT("%*.s%s\n", level * TAB_SIZE, " ", f->name);
+	PRINT("%*s%s\n", level * TAB_SIZE, " ", f->name);
 
 	/* Decode? */
 	base = (base && (f->attr & DECODE)) ? base + f->offset : NULL;
@@ -789,19 +785,19 @@ static int decode_choice(struct bitstr *bs, const struct field_t *f,
 	/* Transfer to son level */
 	son = &f->fields[type];
 	if (son->attr & STOP) {
-		PRINT("%*.s%s\n", (level + 1) * TAB_SIZE, " ", son->name);
+		PRINT("%*s%s\n", (level + 1) * TAB_SIZE, " ", son->name);
 		return H323_ERROR_STOP;
 	}
 
 	if (ext || (son->attr & OPEN)) {
 		BYTE_ALIGN(bs);
-		if (nf_h323_error_boundary(bs, len, 0))
+		if (nf_h323_error_boundary(bs, 2, 0))
 			return H323_ERROR_BOUND;
 		len = get_len(bs);
 		if (nf_h323_error_boundary(bs, len, 0))
 			return H323_ERROR_BOUND;
 		if (!base || !(son->attr & DECODE)) {
-			PRINT("%*.s%s\n", (level + 1) * TAB_SIZE, " ",
+			PRINT("%*s%s\n", (level + 1) * TAB_SIZE, " ",
 			      son->name);
 			bs->cur += len;
 			return H323_ERROR_NONE;
@@ -921,6 +917,8 @@ int DecodeQ931(unsigned char *buf, size_t sz, Q931 *q931)
 				break;
 			p++;
 			len--;
+			if (len <= 0)
+				break;
 			return DecodeH323_UserInformation(buf, p, len,
 							  &q931->UUIE);
 		}

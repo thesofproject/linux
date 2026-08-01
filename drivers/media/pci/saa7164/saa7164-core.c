@@ -1,18 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for the NXP SAA7164 PCIe bridge
  *
  *  Copyright (c) 2010-2015 Steven Toth <stoth@kernellabs.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *
- *  GNU General Public License for more details.
  */
 
 #include <linux/init.h>
@@ -23,12 +13,10 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
+#include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <asm/div64.h>
 
-#ifdef CONFIG_PROC_FS
-#include <linux/proc_fs.h>
-#endif
 #include "saa7164.h"
 
 MODULE_DESCRIPTION("Driver for NXP SAA7164 based TV cards");
@@ -157,7 +145,7 @@ static void saa7164_ts_verifier(struct saa7164_buffer *buf)
 
 	}
 
-	/* Only report errors if we've been through this function atleast
+	/* Only report errors if we've been through this function at least
 	 * once already and the cached cc values are primed. First time through
 	 * always generates errors.
 	 */
@@ -179,7 +167,7 @@ static void saa7164_histogram_reset(struct saa7164_histogram *hg, char *name)
 	int i;
 
 	memset(hg, 0, sizeof(struct saa7164_histogram));
-	strcpy(hg->name, name);
+	strscpy(hg->name, name, sizeof(hg->name));
 
 	/* First 30ms x 1ms */
 	for (i = 0; i < 30; i++)
@@ -364,7 +352,7 @@ static void saa7164_work_enchandler(struct work_struct *w)
 		container_of(w, struct saa7164_port, workenc);
 	struct saa7164_dev *dev = port->dev;
 
-	u32 wp, mcb, rp, cnt = 0;
+	u32 wp, mcb, rp;
 
 	port->last_svc_msecs_diff = port->last_svc_msecs;
 	port->last_svc_msecs = jiffies_to_msecs(jiffies);
@@ -417,7 +405,6 @@ static void saa7164_work_enchandler(struct work_struct *w)
 
 		saa7164_work_enchandler_helper(port, rp);
 		port->last_svc_rp = rp;
-		cnt++;
 
 		if (rp == mcb)
 			break;
@@ -441,7 +428,7 @@ static void saa7164_work_vbihandler(struct work_struct *w)
 		container_of(w, struct saa7164_port, workenc);
 	struct saa7164_dev *dev = port->dev;
 
-	u32 wp, mcb, rp, cnt = 0;
+	u32 wp, mcb, rp;
 
 	port->last_svc_msecs_diff = port->last_svc_msecs;
 	port->last_svc_msecs = jiffies_to_msecs(jiffies);
@@ -493,7 +480,6 @@ static void saa7164_work_vbihandler(struct work_struct *w)
 
 		saa7164_work_enchandler_helper(port, rp);
 		port->last_svc_rp = rp;
-		cnt++;
 
 		if (rp == mcb)
 			break;
@@ -587,8 +573,8 @@ static irqreturn_t saa7164_irq_ts(struct saa7164_port *port)
 
 	/* Find the current write point from the hardware */
 	wp = saa7164_readl(port->bufcounter);
-	if (wp > (port->hwcfg.buffercount - 1))
-		BUG();
+
+	BUG_ON(wp > (port->hwcfg.buffercount - 1));
 
 	/* Find the previous buffer to the current write point */
 	if (wp == 0)
@@ -600,8 +586,8 @@ static irqreturn_t saa7164_irq_ts(struct saa7164_port *port)
 	/* TODO: turn this into a worker thread */
 	list_for_each_safe(c, n, &port->dmaqueue.list) {
 		buf = list_entry(c, struct saa7164_buffer, list);
-		if (i++ > port->hwcfg.buffercount)
-			BUG();
+		BUG_ON(i > port->hwcfg.buffercount);
+		i++;
 
 		if (buf->idx == rp) {
 			/* Found the buffer, deal with it */
@@ -638,7 +624,7 @@ static irqreturn_t saa7164_irq(int irq, void *dev_id)
 	portf = &dev->ports[SAA7164_PORT_VBI2];
 
 	/* Check that the hardware is accessible. If the status bytes are
-	 * 0xFF then the device is not accessible, the the IRQ belongs
+	 * 0xFF then the device is not accessible, the IRQ belongs
 	 * to another driver.
 	 * 4 x u32 interrupt registers.
 	 */
@@ -902,12 +888,20 @@ static int get_resources(struct saa7164_dev *dev)
 	return -EBUSY;
 }
 
+static void release_resources(struct saa7164_dev *dev)
+{
+	release_mem_region(pci_resource_start(dev->pci, 0),
+			   pci_resource_len(dev->pci, 0));
+
+	release_mem_region(pci_resource_start(dev->pci, 2),
+			   pci_resource_len(dev->pci, 2));
+}
+
 static int saa7164_port_init(struct saa7164_dev *dev, int portnr)
 {
 	struct saa7164_port *port = NULL;
 
-	if ((portnr < 0) || (portnr >= SAA7164_MAX_PORTS))
-		BUG();
+	BUG_ON((portnr < 0) || (portnr >= SAA7164_MAX_PORTS));
 
 	port = &dev->ports[portnr];
 
@@ -962,9 +956,9 @@ static int saa7164_dev_setup(struct saa7164_dev *dev)
 
 	snprintf(dev->name, sizeof(dev->name), "saa7164[%d]", dev->nr);
 
-	mutex_lock(&devlist);
-	list_add_tail(&dev->devlist, &saa7164_devlist);
-	mutex_unlock(&devlist);
+	scoped_guard(mutex, &devlist) {
+		list_add_tail(&dev->devlist, &saa7164_devlist);
+	}
 
 	/* board config */
 	dev->board = UNSET;
@@ -1011,16 +1005,22 @@ static int saa7164_dev_setup(struct saa7164_dev *dev)
 	}
 
 	/* PCI/e allocations */
-	dev->lmmio = ioremap(pci_resource_start(dev->pci, 0),
-			     pci_resource_len(dev->pci, 0));
+	dev->lmmio = pci_ioremap_bar(dev->pci, 0);
+	if (!dev->lmmio) {
+		dev_err(&dev->pci->dev, "Failed to remap MMIO BAR 0\n");
+		goto err_ioremap_bar0;
+	}
 
-	dev->lmmio2 = ioremap(pci_resource_start(dev->pci, 2),
-			     pci_resource_len(dev->pci, 2));
+	dev->lmmio2 = pci_ioremap_bar(dev->pci, 2);
+	if (!dev->lmmio2) {
+		dev_err(&dev->pci->dev, "Failed to remap MMIO BAR 2\n");
+		goto err_ioremap_bar2;
+	}
 
 	dev->bmmio = (u8 __iomem *)dev->lmmio;
 	dev->bmmio2 = (u8 __iomem *)dev->lmmio2;
 
-	/* Inerrupt and ack register locations offset of bmmio */
+	/* Interrupt and ack register locations offset of bmmio */
 	dev->int_status = 0x183000 + 0xf80;
 	dev->int_ack = 0x183000 + 0xf90;
 
@@ -1034,17 +1034,25 @@ static int saa7164_dev_setup(struct saa7164_dev *dev)
 	saa7164_pci_quirks(dev);
 
 	return 0;
+
+err_ioremap_bar2:
+	iounmap(dev->lmmio);
+err_ioremap_bar0:
+	release_resources(dev);
+
+	scoped_guard(mutex, &devlist) {
+		list_del(&dev->devlist);
+	}
+	saa7164_devcount--;
+
+	return -ENODEV;
 }
 
 static void saa7164_dev_unregister(struct saa7164_dev *dev)
 {
 	dprintk(1, "%s()\n", __func__);
 
-	release_mem_region(pci_resource_start(dev->pci, 0),
-		pci_resource_len(dev->pci, 0));
-
-	release_mem_region(pci_resource_start(dev->pci, 2),
-		pci_resource_len(dev->pci, 2));
+	release_resources(dev);
 
 	if (!atomic_dec_and_test(&dev->refcount))
 		return;
@@ -1055,95 +1063,127 @@ static void saa7164_dev_unregister(struct saa7164_dev *dev)
 	return;
 }
 
-#ifdef CONFIG_PROC_FS
-static int saa7164_proc_show(struct seq_file *m, void *v)
+#ifdef CONFIG_DEBUG_FS
+static void *saa7164_seq_start(struct seq_file *s, loff_t *pos)
 {
 	struct saa7164_dev *dev;
+	loff_t index = *pos;
+
+	mutex_lock(&devlist);
+	list_for_each_entry(dev, &saa7164_devlist, devlist) {
+		if (index-- == 0) {
+			mutex_unlock(&devlist);
+			return dev;
+		}
+	}
+	mutex_unlock(&devlist);
+
+	return NULL;
+}
+
+static void *saa7164_seq_next(struct seq_file *s, void *v, loff_t *pos)
+{
+	struct saa7164_dev *dev = v;
+	void *ret;
+
+	mutex_lock(&devlist);
+	if (list_is_last(&dev->devlist, &saa7164_devlist))
+		ret = NULL;
+	else
+		ret = list_next_entry(dev, devlist);
+	mutex_unlock(&devlist);
+
+	++*pos;
+
+	return ret;
+}
+
+static void saa7164_seq_stop(struct seq_file *s, void *v)
+{
+}
+
+static int saa7164_seq_show(struct seq_file *m, void *v)
+{
+	struct saa7164_dev *dev = v;
 	struct tmComResBusInfo *b;
-	struct list_head *list;
 	int i, c;
 
-	if (saa7164_devcount == 0)
-		return 0;
+	seq_printf(m, "%s = %p\n", dev->name, dev);
 
-	list_for_each(list, &saa7164_devlist) {
-		dev = list_entry(list, struct saa7164_dev, devlist);
-		seq_printf(m, "%s = %p\n", dev->name, dev);
+	/* Lock the bus from any other access */
+	b = &dev->bus;
+	mutex_lock(&b->lock);
 
-		/* Lock the bus from any other access */
-		b = &dev->bus;
-		mutex_lock(&b->lock);
+	seq_printf(m, " .m_pdwSetWritePos = 0x%x (0x%08x)\n",
+		   b->m_dwSetReadPos, saa7164_readl(b->m_dwSetReadPos));
 
-		seq_printf(m, " .m_pdwSetWritePos = 0x%x (0x%08x)\n",
-			b->m_dwSetReadPos, saa7164_readl(b->m_dwSetReadPos));
+	seq_printf(m, " .m_pdwSetReadPos  = 0x%x (0x%08x)\n",
+		   b->m_dwSetWritePos, saa7164_readl(b->m_dwSetWritePos));
 
-		seq_printf(m, " .m_pdwSetReadPos  = 0x%x (0x%08x)\n",
-			b->m_dwSetWritePos, saa7164_readl(b->m_dwSetWritePos));
+	seq_printf(m, " .m_pdwGetWritePos = 0x%x (0x%08x)\n",
+		   b->m_dwGetReadPos, saa7164_readl(b->m_dwGetReadPos));
 
-		seq_printf(m, " .m_pdwGetWritePos = 0x%x (0x%08x)\n",
-			b->m_dwGetReadPos, saa7164_readl(b->m_dwGetReadPos));
+	seq_printf(m, " .m_pdwGetReadPos  = 0x%x (0x%08x)\n",
+		   b->m_dwGetWritePos, saa7164_readl(b->m_dwGetWritePos));
+	c = 0;
+	seq_puts(m, "\n  Set Ring:\n");
+	seq_puts(m, "\n addr  00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f\n");
+	for (i = 0; i < b->m_dwSizeSetRing; i++) {
+		if (c == 0)
+			seq_printf(m, " %04x:", i);
 
-		seq_printf(m, " .m_pdwGetReadPos  = 0x%x (0x%08x)\n",
-			b->m_dwGetWritePos, saa7164_readl(b->m_dwGetWritePos));
-		c = 0;
-		seq_printf(m, "\n  Set Ring:\n");
-		seq_printf(m, "\n addr  00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f\n");
-		for (i = 0; i < b->m_dwSizeSetRing; i++) {
-			if (c == 0)
-				seq_printf(m, " %04x:", i);
+		seq_printf(m, " %02x", readb(b->m_pdwSetRing + i));
 
-			seq_printf(m, " %02x", readb(b->m_pdwSetRing + i));
-
-			if (++c == 16) {
-				seq_printf(m, "\n");
-				c = 0;
-			}
+		if (++c == 16) {
+			seq_puts(m, "\n");
+			c = 0;
 		}
-
-		c = 0;
-		seq_printf(m, "\n  Get Ring:\n");
-		seq_printf(m, "\n addr  00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f\n");
-		for (i = 0; i < b->m_dwSizeGetRing; i++) {
-			if (c == 0)
-				seq_printf(m, " %04x:", i);
-
-			seq_printf(m, " %02x", readb(b->m_pdwGetRing + i));
-
-			if (++c == 16) {
-				seq_printf(m, "\n");
-				c = 0;
-			}
-		}
-
-		mutex_unlock(&b->lock);
-
 	}
 
+	c = 0;
+	seq_puts(m, "\n  Get Ring:\n");
+	seq_puts(m, "\n addr  00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f\n");
+	for (i = 0; i < b->m_dwSizeGetRing; i++) {
+		if (c == 0)
+			seq_printf(m, " %04x:", i);
+
+		seq_printf(m, " %02x", readb(b->m_pdwGetRing + i));
+
+		if (++c == 16) {
+			seq_puts(m, "\n");
+			c = 0;
+		}
+	}
+
+	mutex_unlock(&b->lock);
+
 	return 0;
 }
 
-static int saa7164_proc_open(struct inode *inode, struct file *filp)
-{
-	return single_open(filp, saa7164_proc_show, NULL);
-}
-
-static const struct file_operations saa7164_proc_fops = {
-	.open		= saa7164_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
+static const struct seq_operations saa7164_sops = {
+	.start = saa7164_seq_start,
+	.next = saa7164_seq_next,
+	.stop = saa7164_seq_stop,
+	.show = saa7164_seq_show,
 };
 
-static int saa7164_proc_create(void)
+DEFINE_SEQ_ATTRIBUTE(saa7164);
+
+static struct dentry *saa7614_dentry;
+
+static void __init saa7164_debugfs_create(void)
 {
-	struct proc_dir_entry *pe;
-
-	pe = proc_create("saa7164", S_IRUGO, NULL, &saa7164_proc_fops);
-	if (!pe)
-		return -ENOMEM;
-
-	return 0;
+	saa7614_dentry = debugfs_create_file("saa7164", 0444, NULL, NULL,
+					     &saa7164_fops);
 }
+
+static void __exit saa7164_debugfs_remove(void)
+{
+	debugfs_remove(saa7614_dentry);
+}
+#else
+static void saa7164_debugfs_create(void) { }
+static void saa7164_debugfs_remove(void) { }
 #endif
 
 static int saa7164_thread_function(void *data)
@@ -1221,7 +1261,7 @@ static int saa7164_initdev(struct pci_dev *pci_dev,
 	int err, i;
 	u32 version;
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	if (NULL == dev)
 		return -ENOMEM;
 
@@ -1240,7 +1280,7 @@ static int saa7164_initdev(struct pci_dev *pci_dev,
 
 	if (saa7164_dev_setup(dev) < 0) {
 		err = -EINVAL;
-		goto fail_free;
+		goto fail_dev;
 	}
 
 	/* print pci info */
@@ -1254,7 +1294,7 @@ static int saa7164_initdev(struct pci_dev *pci_dev,
 
 	pci_set_master(pci_dev);
 	/* TODO */
-	err = pci_set_dma_mask(pci_dev, 0xffffffff);
+	err = dma_set_mask(&pci_dev->dev, 0xffffffff);
 	if (err) {
 		printk("%s/0: Oops: no 32bit PCI DMA ???\n", dev->name);
 		goto fail_irq;
@@ -1408,6 +1448,8 @@ fail_fw:
 
 fail_irq:
 	saa7164_dev_unregister(dev);
+fail_dev:
+	pci_disable_device(pci_dev);
 fail_free:
 	v4l2_device_unregister(&dev->v4l2_dev);
 	kfree(dev);
@@ -1508,29 +1550,27 @@ static struct pci_driver saa7164_pci_driver = {
 	.id_table = saa7164_pci_tbl,
 	.probe    = saa7164_initdev,
 	.remove   = saa7164_finidev,
-	/* TODO */
-	.suspend  = NULL,
-	.resume   = NULL,
 };
 
 static int __init saa7164_init(void)
 {
-	printk(KERN_INFO "saa7164 driver loaded\n");
+	int ret = pci_register_driver(&saa7164_pci_driver);
 
-#ifdef CONFIG_PROC_FS
-	saa7164_proc_create();
-#endif
-	return pci_register_driver(&saa7164_pci_driver);
+	if (ret)
+		return ret;
+
+	saa7164_debugfs_create();
+
+	pr_info("saa7164 driver loaded\n");
+
+	return 0;
 }
 
 static void __exit saa7164_fini(void)
 {
-#ifdef CONFIG_PROC_FS
-	remove_proc_entry("saa7164", NULL);
-#endif
+	saa7164_debugfs_remove();
 	pci_unregister_driver(&saa7164_pci_driver);
 }
 
 module_init(saa7164_init);
 module_exit(saa7164_fini);
-

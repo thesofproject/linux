@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /* 
  * Copyright (C) 2001 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
- * Licensed under the GPL
  */
 
 #include <linux/slab.h>
@@ -9,6 +9,7 @@
 #include <asm/irq.h>
 #include <irq_kern.h>
 #include <os.h>
+#include "xterm.h"
 
 struct xterm_wait {
 	struct completion ready;
@@ -20,11 +21,18 @@ struct xterm_wait {
 static irqreturn_t xterm_interrupt(int irq, void *data)
 {
 	struct xterm_wait *xterm = data;
-	int fd;
+	int fd = -1, n_fds = 1;
+	ssize_t ret;
 
-	fd = os_rcv_fd(xterm->fd, &xterm->pid);
-	if (fd == -EAGAIN)
+	ret = os_rcv_fd_msg(xterm->fd, &fd, n_fds,
+			    &xterm->pid, sizeof(xterm->pid));
+	if (ret == -EAGAIN)
 		return IRQ_NONE;
+
+	if (ret < 0)
+		fd = ret;
+	else if (ret != sizeof(xterm->pid))
+		fd = -EMSGSIZE;
 
 	xterm->new_fd = fd;
 	complete(&xterm->ready);
@@ -37,7 +45,7 @@ int xterm_fd(int socket, int *pid_out)
 	struct xterm_wait *data;
 	int err, ret;
 
-	data = kmalloc(sizeof(*data), GFP_KERNEL);
+	data = kmalloc_obj(*data);
 	if (data == NULL) {
 		printk(KERN_ERR "xterm_fd : failed to allocate xterm_wait\n");
 		return -ENOMEM;
@@ -51,7 +59,7 @@ int xterm_fd(int socket, int *pid_out)
 
 	err = um_request_irq(XTERM_IRQ, socket, IRQ_READ, xterm_interrupt,
 			     IRQF_SHARED, "xterm", data);
-	if (err) {
+	if (err < 0) {
 		printk(KERN_ERR "xterm_fd : failed to get IRQ for xterm, "
 		       "err = %d\n",  err);
 		ret = err;

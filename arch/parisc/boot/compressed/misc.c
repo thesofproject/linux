@@ -5,7 +5,8 @@
  */
 
 #include <linux/uaccess.h>
-#include <asm/unaligned.h>
+#include <linux/elf.h>
+#include <linux/unaligned.h>
 #include <asm/page.h>
 #include "sizes.h"
 
@@ -25,7 +26,7 @@
 extern char input_data[];
 extern int input_len;
 /* output_len is inserted by the linker possibly at an unaligned address */
-extern __le32 output_len __aligned(1);
+extern char output_len;
 extern char _text, _end;
 extern char _bss, _ebss;
 extern char _startcode_end;
@@ -116,7 +117,7 @@ char *strchr(const char *s, int c)
 	return NULL;
 }
 
-int puts(const char *s)
+static int puts(const char *s)
 {
 	const char *nuline = s;
 
@@ -144,14 +145,13 @@ static int putchar(int c)
 
 void __noreturn error(char *x)
 {
-	puts("\n\n");
-	puts(x);
-	puts("\n\n -- System halted");
+	if (x) puts(x);
+	puts("\n -- System halted\n");
 	while (1)	/* wait forever */
 		;
 }
 
-static int print_hex(unsigned long num)
+static int print_num(unsigned long num, int base)
 {
 	const char hex[] = "0123456789abcdef";
 	char str[40];
@@ -159,18 +159,20 @@ static int print_hex(unsigned long num)
 
 	str[i--] = '\0';
 	do {
-		str[i--] = hex[num & 0x0f];
-		num >>= 4;
+		str[i--] = hex[num % base];
+		num = num / base;
 	} while (num);
 
-	str[i--] = 'x';
-	str[i] = '0';
+	if (base == 16) {
+		str[i--] = 'x';
+		str[i] = '0';
+	} else i++;
 	puts(&str[i]);
 
 	return 0;
 }
 
-int printf(const char *fmt, ...)
+static int printf(const char *fmt, ...)
 {
 	va_list args;
 	int i = 0;
@@ -186,8 +188,9 @@ put:
 
 		if (fmt[++i] == '%')
 			goto put;
+		print_num(va_arg(args, unsigned long),
+			fmt[i] == 'x' ? 16:10);
 		++i;
-		print_hex(va_arg(args, unsigned long));
 	}
 
 	va_end(args);
@@ -201,13 +204,13 @@ void abort(void)
 }
 
 #undef malloc
-void *malloc(size_t size)
+static void *malloc(size_t size)
 {
 	return malloc_gzip(size);
 }
 
 #undef free
-void free(void *ptr)
+static void free(void *ptr)
 {
 	return free_gzip(ptr);
 }
@@ -227,13 +230,75 @@ static void flush_data_cache(char *start, unsigned long length)
 	asm ("sync");
 }
 
-unsigned long decompress_kernel(unsigned int started_wide,
+static void parse_elf(void *output)
+{
+#ifdef CONFIG_64BIT
+	Elf64_Ehdr ehdr;
+	Elf64_Phdr *phdrs, *phdr;
+#else
+	Elf32_Ehdr ehdr;
+	Elf32_Phdr *phdrs, *phdr;
+#endif
+	void *dest;
+	int i;
+
+	memcpy(&ehdr, output, sizeof(ehdr));
+	if (ehdr.e_ident[EI_MAG0] != ELFMAG0 ||
+	   ehdr.e_ident[EI_MAG1] != ELFMAG1 ||
+	   ehdr.e_ident[EI_MAG2] != ELFMAG2 ||
+	   ehdr.e_ident[EI_MAG3] != ELFMAG3) {
+		error("Kernel is not a valid ELF file");
+		return;
+	}
+
+#ifdef DEBUG
+	printf("Parsing ELF... ");
+#endif
+
+	phdrs = malloc(sizeof(*phdrs) * ehdr.e_phnum);
+	if (!phdrs)
+		error("Failed to allocate space for phdrs");
+
+	memcpy(phdrs, output + ehdr.e_phoff, sizeof(*phdrs) * ehdr.e_phnum);
+
+	for (i = 0; i < ehdr.e_phnum; i++) {
+		phdr = &phdrs[i];
+
+		switch (phdr->p_type) {
+		case PT_LOAD:
+			dest = (void *)((unsigned long) phdr->p_paddr &
+					(__PAGE_OFFSET_DEFAULT-1));
+			memmove(dest, output + phdr->p_offset, phdr->p_filesz);
+			break;
+		default:
+			break;
+		}
+	}
+
+	free(phdrs);
+}
+
+/*
+ * The regular get_unaligned_le32 uses __builtin_memcpy which can trigger
+ * warnings when reading a byte/char output_len as an integer, as the size of a
+ * char is less than that of an integer. Use type punning and the packed
+ * attribute, which requires -fno-strict-aliasing, to work around the problem.
+ */
+static u32 punned_get_unaligned_le32(const void *p)
+{
+	const struct { __le32 x; } __packed * __get_pptr = p;
+
+	return le32_to_cpu(__get_pptr->x);
+}
+
+asmlinkage unsigned long __visible decompress_kernel(unsigned int started_wide,
 		unsigned int command_line,
 		const unsigned int rd_start,
 		const unsigned int rd_end)
 {
 	char *output;
-	unsigned long len, len_all;
+	unsigned long vmlinux_addr, vmlinux_len;
+	unsigned long kernel_addr, kernel_len;
 
 #ifdef CONFIG_64BIT
 	parisc_narrow_firmware = 0;
@@ -241,27 +306,29 @@ unsigned long decompress_kernel(unsigned int started_wide,
 
 	set_firmware_width_unlocked();
 
-	putchar('U');	/* if you get this p and no more, string storage */
+	putchar('D');	/* if you get this D and no more, string storage */
 			/* in $GLOBAL$ is wrong or %dp is wrong */
-	puts("ncompressing ...\n");
+	puts("ecompressing Linux... ");
 
-	output = (char *) KERNEL_BINARY_TEXT_START;
-	len_all = __pa(SZ_end) - __pa(SZparisc_kernel_start);
-
-	if ((unsigned long) &_startcode_end > (unsigned long) output)
+	/* where the final bits are stored */
+	kernel_addr = KERNEL_BINARY_TEXT_START;
+	kernel_len = __pa(SZ_end) - __pa(SZparisc_kernel_start);
+	if ((unsigned long) &_startcode_end > kernel_addr)
 		error("Bootcode overlaps kernel code");
 
-	len = get_unaligned_le32(&output_len);
-	if (len > len_all)
-		error("Output len too big.");
-	else
-		memset(&output[len], 0, len_all - len);
+	/*
+	 * Calculate addr to where the vmlinux ELF file shall be decompressed.
+	 * Assembly code in head.S positioned the stack directly behind bss, so
+	 * leave 2 MB for the stack.
+	 */
+	vmlinux_addr = (unsigned long) &_ebss + 2*1024*1024;
+	vmlinux_len = punned_get_unaligned_le32(&output_len);
+	output = (char *) vmlinux_addr;
 
 	/*
 	 * Initialize free_mem_ptr and free_mem_end_ptr.
 	 */
-	free_mem_ptr = (unsigned long) &_ebss;
-	free_mem_ptr += 2*1024*1024;	/* leave 2 MB for stack */
+	free_mem_ptr = vmlinux_addr + vmlinux_len;
 
 	/* Limit memory for bootoader to 1GB */
 	#define ARTIFICIAL_LIMIT (1*1024*1024*1024)
@@ -275,7 +342,18 @@ unsigned long decompress_kernel(unsigned int started_wide,
 		free_mem_end_ptr = rd_start;
 #endif
 
+	if (free_mem_ptr >= free_mem_end_ptr) {
+		int free_ram;
+		free_ram = (free_mem_ptr >> 20) + 1;
+		if (free_ram < 32)
+			free_ram = 32;
+		printf("\nKernel requires at least %d MB RAM.\n",
+			free_ram);
+		error(NULL);
+	}
+
 #ifdef DEBUG
+	printf("\n");
 	printf("startcode_end = %x\n", &_startcode_end);
 	printf("commandline   = %x\n", command_line);
 	printf("rd_start      = %x\n", rd_start);
@@ -287,16 +365,19 @@ unsigned long decompress_kernel(unsigned int started_wide,
 	printf("input_data    = %x\n", input_data);
 	printf("input_len     = %x\n", input_len);
 	printf("output        = %x\n", output);
-	printf("output_len    = %x\n", len);
-	printf("output_max    = %x\n", len_all);
+	printf("output_len    = %x\n", vmlinux_len);
+	printf("kernel_addr   = %x\n", kernel_addr);
+	printf("kernel_len    = %x\n", kernel_len);
 #endif
 
 	__decompress(input_data, input_len, NULL, NULL,
 			output, 0, NULL, error);
+	parse_elf(output);
 
-	flush_data_cache(output, len);
+	output = (char *) kernel_addr;
+	flush_data_cache(output, kernel_len);
 
-	printf("Booting kernel ...\n\n");
+	printf("done.\nBooting the kernel.\n");
 
 	return (unsigned long) output;
 }

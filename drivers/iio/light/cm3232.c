@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * CM3232 Ambient Light Sensor
  *
  * Copyright (C) 2014-2015 Capella Microsystems Inc.
  * Author: Kevin Tsai <ktsai@capellamicro.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2, as published
- * by the Free Software Foundation.
  *
  * IIO driver for CM3232 (7-bit I2C slave address 0x10).
  */
@@ -56,22 +53,21 @@ static const struct {
 struct cm3232_als_info {
 	u8 regs_cmd_default;
 	u8 hw_id;
-	int calibscale;
 	int mlux_per_bit;
 	int mlux_per_bit_base_it;
 };
 
-static struct cm3232_als_info cm3232_als_info_default = {
+static const struct cm3232_als_info cm3232_als_info_default = {
 	.regs_cmd_default = CM3232_CMD_DEFAULT,
 	.hw_id = CM3232_HW_ID,
-	.calibscale = CM3232_CALIBSCALE_DEFAULT,
 	.mlux_per_bit = CM3232_MLUX_PER_BIT_DEFAULT,
 	.mlux_per_bit_base_it = CM3232_MLUX_PER_BIT_BASE_IT,
 };
 
 struct cm3232_chip {
 	struct i2c_client *client;
-	struct cm3232_als_info *als_info;
+	const struct cm3232_als_info *als_info;
+	int calibscale;
 	u8 regs_cmd;
 	u16 regs_als;
 };
@@ -91,6 +87,15 @@ static int cm3232_reg_init(struct cm3232_chip *chip)
 
 	chip->als_info = &cm3232_als_info_default;
 
+	/* Disable and reset device */
+	chip->regs_cmd = CM3232_CMD_ALS_DISABLE | CM3232_CMD_ALS_RESET;
+	ret = i2c_smbus_write_byte_data(client, CM3232_REG_ADDR_CMD,
+					chip->regs_cmd);
+	if (ret < 0) {
+		dev_err(&chip->client->dev, "Error writing reg_cmd\n");
+		return ret;
+	}
+
 	/* Identify device */
 	ret = i2c_smbus_read_word_data(client, CM3232_REG_ADDR_ID);
 	if (ret < 0) {
@@ -100,15 +105,6 @@ static int cm3232_reg_init(struct cm3232_chip *chip)
 
 	if ((ret & 0xFF) != chip->als_info->hw_id)
 		return -ENODEV;
-
-	/* Disable and reset device */
-	chip->regs_cmd = CM3232_CMD_ALS_DISABLE | CM3232_CMD_ALS_RESET;
-	ret = i2c_smbus_write_byte_data(client, CM3232_REG_ADDR_CMD,
-					chip->regs_cmd);
-	if (ret < 0) {
-		dev_err(&chip->client->dev, "Error writing reg_cmd\n");
-		return ret;
-	}
 
 	/* Register default value */
 	chip->regs_cmd = chip->als_info->regs_cmd_default;
@@ -201,7 +197,7 @@ static int cm3232_write_als_it(struct cm3232_chip *chip, int val, int val2)
 static int cm3232_get_lux(struct cm3232_chip *chip)
 {
 	struct i2c_client *client = chip->client;
-	struct cm3232_als_info *als_info = chip->als_info;
+	const struct cm3232_als_info *als_info = chip->als_info;
 	int ret;
 	int val, val2;
 	int als_it;
@@ -224,7 +220,7 @@ static int cm3232_get_lux(struct cm3232_chip *chip)
 
 	chip->regs_als = (u16)ret;
 	lux *= chip->regs_als;
-	lux *= als_info->calibscale;
+	lux *= chip->calibscale;
 	lux = div_u64(lux, CM3232_CALIBSCALE_RESOLUTION);
 	lux = div_u64(lux, CM3232_MLUX_PER_LUX);
 
@@ -239,7 +235,6 @@ static int cm3232_read_raw(struct iio_dev *indio_dev,
 			int *val, int *val2, long mask)
 {
 	struct cm3232_chip *chip = iio_priv(indio_dev);
-	struct cm3232_als_info *als_info = chip->als_info;
 	int ret;
 
 	switch (mask) {
@@ -250,7 +245,7 @@ static int cm3232_read_raw(struct iio_dev *indio_dev,
 		*val = ret;
 		return IIO_VAL_INT;
 	case IIO_CHAN_INFO_CALIBSCALE:
-		*val = als_info->calibscale;
+		*val = chip->calibscale;
 		return IIO_VAL_INT;
 	case IIO_CHAN_INFO_INT_TIME:
 		return cm3232_read_als_it(chip, val, val2);
@@ -264,11 +259,10 @@ static int cm3232_write_raw(struct iio_dev *indio_dev,
 			int val, int val2, long mask)
 {
 	struct cm3232_chip *chip = iio_priv(indio_dev);
-	struct cm3232_als_info *als_info = chip->als_info;
 
 	switch (mask) {
 	case IIO_CHAN_INFO_CALIBSCALE:
-		als_info->calibscale = val;
+		chip->calibscale = val;
 		return 0;
 	case IIO_CHAN_INFO_INT_TIME:
 		return cm3232_write_als_it(chip, val, val2);
@@ -327,9 +321,9 @@ static const struct iio_info cm3232_info = {
 	.attrs			= &cm3232_attribute_group,
 };
 
-static int cm3232_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int cm3232_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct cm3232_chip *chip;
 	struct iio_dev *indio_dev;
 	int ret;
@@ -341,8 +335,8 @@ static int cm3232_probe(struct i2c_client *client,
 	chip = iio_priv(indio_dev);
 	i2c_set_clientdata(client, indio_dev);
 	chip->client = client;
+	chip->calibscale = CM3232_CALIBSCALE_DEFAULT;
 
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->channels = cm3232_channels;
 	indio_dev->num_channels = ARRAY_SIZE(cm3232_channels);
 	indio_dev->info = &cm3232_info;
@@ -360,7 +354,7 @@ static int cm3232_probe(struct i2c_client *client,
 	return iio_device_register(indio_dev);
 }
 
-static int cm3232_remove(struct i2c_client *client)
+static void cm3232_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
 
@@ -368,16 +362,14 @@ static int cm3232_remove(struct i2c_client *client)
 		CM3232_CMD_ALS_DISABLE);
 
 	iio_device_unregister(indio_dev);
-
-	return 0;
 }
 
 static const struct i2c_device_id cm3232_id[] = {
-	{"cm3232", 0},
-	{}
+	{ .name = "cm3232" },
+	{ }
 };
+MODULE_DEVICE_TABLE(i2c, cm3232_id);
 
-#ifdef CONFIG_PM_SLEEP
 static int cm3232_suspend(struct device *dev)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(to_i2c_client(dev));
@@ -406,25 +398,19 @@ static int cm3232_resume(struct device *dev)
 	return ret;
 }
 
-static const struct dev_pm_ops cm3232_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(cm3232_suspend, cm3232_resume)};
-#endif
-
-MODULE_DEVICE_TABLE(i2c, cm3232_id);
+static DEFINE_SIMPLE_DEV_PM_OPS(cm3232_pm_ops, cm3232_suspend, cm3232_resume);
 
 static const struct of_device_id cm3232_of_match[] = {
 	{.compatible = "capella,cm3232"},
-	{}
+	{ }
 };
 MODULE_DEVICE_TABLE(of, cm3232_of_match);
 
 static struct i2c_driver cm3232_driver = {
 	.driver = {
 		.name	= "cm3232",
-		.of_match_table = of_match_ptr(cm3232_of_match),
-#ifdef CONFIG_PM_SLEEP
-		.pm	= &cm3232_pm_ops,
-#endif
+		.of_match_table = cm3232_of_match,
+		.pm	= pm_sleep_ptr(&cm3232_pm_ops),
 	},
 	.id_table	= cm3232_id,
 	.probe		= cm3232_probe,

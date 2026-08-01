@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * 	NetWinder Button Driver-
  *	Copyright (C) Alex Holden <alex@linuxhacker.org> 1998, 1999.
@@ -240,6 +241,7 @@ static void __exit nwbutton_exit (void)
 
 
 MODULE_AUTHOR("Alex Holden");
+MODULE_DESCRIPTION("NetWinder button driver");
 MODULE_LICENSE("GPL");
 
 module_init(nwbutton_init);

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Force feedback support for SmartJoy PLUS PS2->USB adapter
  *
@@ -9,19 +10,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 /* #define DEBUG */
@@ -95,7 +83,7 @@ static int sjoyff_init(struct hid_device *hid)
 			return -ENODEV;
 		}
 
-		sjoyff = kzalloc(sizeof(struct sjoyff_device), GFP_KERNEL);
+		sjoyff = kzalloc_obj(struct sjoyff_device);
 		if (!sjoyff)
 			return -ENOMEM;
 
@@ -103,17 +91,17 @@ static int sjoyff_init(struct hid_device *hid)
 
 		set_bit(FF_RUMBLE, dev->ffbit);
 
-		error = input_ff_create_memless(dev, sjoyff, hid_sjoyff_play);
-		if (error) {
-			kfree(sjoyff);
-			return error;
-		}
-
 		sjoyff->report = report;
 		sjoyff->report->field[0]->value[0] = 0x01;
 		sjoyff->report->field[0]->value[1] = 0x00;
 		sjoyff->report->field[0]->value[2] = 0x00;
 		hid_hw_request(hid, sjoyff->report, HID_REQ_SET_REPORT);
+
+		error = input_ff_create_memless(dev, sjoyff, hid_sjoyff_play);
+		if (error) {
+			kfree(sjoyff);
+			return error;
+		}
 	}
 
 	hid_info(hid, "Force feedback for SmartJoy PLUS PS2/USB adapter\n");
@@ -180,6 +168,7 @@ static struct hid_driver sjoy_driver = {
 };
 module_hid_driver(sjoy_driver);
 
+MODULE_DESCRIPTION("Force feedback support for SmartJoy PLUS PS2->USB adapter");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Jussi Kivilinna");
 

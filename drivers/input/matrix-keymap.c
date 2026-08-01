@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Helpers for matrix keyboard bindings
  *
@@ -5,15 +6,6 @@
  *
  * Author:
  *	Olof Johansson <olof@lixom.net>
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/device.h>
@@ -81,15 +73,14 @@ static int matrix_keypad_parse_keymap(const char *propname,
 	struct device *dev = input_dev->dev.parent;
 	unsigned int row_shift = get_count_order(cols);
 	unsigned int max_keys = rows << row_shift;
-	u32 *keys;
 	int i;
 	int size;
-	int retval;
+	int error;
 
 	if (!propname)
 		propname = "linux,keymap";
 
-	size = device_property_read_u32_array(dev, propname, NULL, 0);
+	size = device_property_count_u32(dev, propname);
 	if (size <= 0) {
 		dev_err(dev, "missing or malformed property %s: %d\n",
 			propname, size);
@@ -102,30 +93,24 @@ static int matrix_keypad_parse_keymap(const char *propname,
 		return -EINVAL;
 	}
 
-	keys = kmalloc_array(size, sizeof(u32), GFP_KERNEL);
+	u32 *keys __free(kfree) = kmalloc_array(size, sizeof(*keys), GFP_KERNEL);
 	if (!keys)
 		return -ENOMEM;
 
-	retval = device_property_read_u32_array(dev, propname, keys, size);
-	if (retval) {
+	error = device_property_read_u32_array(dev, propname, keys, size);
+	if (error) {
 		dev_err(dev, "failed to read %s property: %d\n",
-			propname, retval);
-		goto out;
+			propname, error);
+		return error;
 	}
 
 	for (i = 0; i < size; i++) {
 		if (!matrix_keypad_map_key(input_dev, rows, cols,
-					   row_shift, keys[i])) {
-			retval = -EINVAL;
-			goto out;
-		}
+					   row_shift, keys[i]))
+			return -EINVAL;
 	}
 
-	retval = 0;
-
-out:
-	kfree(keys);
-	return retval;
+	return 0;
 }
 
 /**
@@ -170,8 +155,8 @@ int matrix_keypad_build_keymap(const struct matrix_keymap_data *keymap_data,
 		return -EINVAL;
 
 	if (!keymap) {
-		keymap = devm_kzalloc(input_dev->dev.parent,
-				      max_keys * sizeof(*keymap),
+		keymap = devm_kcalloc(input_dev->dev.parent,
+				      max_keys, sizeof(*keymap),
 				      GFP_KERNEL);
 		if (!keymap) {
 			dev_err(input_dev->dev.parent,
@@ -207,4 +192,5 @@ int matrix_keypad_build_keymap(const struct matrix_keymap_data *keymap_data,
 }
 EXPORT_SYMBOL(matrix_keypad_build_keymap);
 
+MODULE_DESCRIPTION("Helpers for matrix keyboard bindings");
 MODULE_LICENSE("GPL");

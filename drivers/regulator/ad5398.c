@@ -1,11 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Voltage and current regulation for AD5398 and AD5821
  *
  * Copyright 2010 Analog Devices Inc.
  *
  * Enter bugs at http://blackfin.uclinux.org/
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/module.h>
@@ -15,8 +14,9 @@
 #include <linux/platform_device.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
+#include <linux/regulator/of_regulator.h>
 
-#define AD5398_CURRENT_EN_MASK	0x8000
+#define AD5398_SW_POWER_DOWN	BIT(15)
 
 struct ad5398_chip_info {
 	struct i2c_client *client;
@@ -114,7 +114,7 @@ static int ad5398_set_current_limit(struct regulator_dev *rdev, int min_uA, int 
 
 	/* prepare register data */
 	selector = (selector << chip->current_offset) & chip->current_mask;
-	data = (unsigned short)selector | (data & AD5398_CURRENT_EN_MASK);
+	data = (unsigned short)selector | (data & AD5398_SW_POWER_DOWN);
 
 	/* write the new current value back as well as enable bit */
 	ret = ad5398_write_reg(client, data);
@@ -133,10 +133,10 @@ static int ad5398_is_enabled(struct regulator_dev *rdev)
 	if (ret < 0)
 		return ret;
 
-	if (data & AD5398_CURRENT_EN_MASK)
-		return 1;
-	else
+	if (data & AD5398_SW_POWER_DOWN)
 		return 0;
+	else
+		return 1;
 }
 
 static int ad5398_enable(struct regulator_dev *rdev)
@@ -150,10 +150,10 @@ static int ad5398_enable(struct regulator_dev *rdev)
 	if (ret < 0)
 		return ret;
 
-	if (data & AD5398_CURRENT_EN_MASK)
+	if (!(data & AD5398_SW_POWER_DOWN))
 		return 0;
 
-	data |= AD5398_CURRENT_EN_MASK;
+	data &= ~AD5398_SW_POWER_DOWN;
 
 	ret = ad5398_write_reg(client, data);
 
@@ -171,10 +171,10 @@ static int ad5398_disable(struct regulator_dev *rdev)
 	if (ret < 0)
 		return ret;
 
-	if (!(data & AD5398_CURRENT_EN_MASK))
+	if (data & AD5398_SW_POWER_DOWN)
 		return 0;
 
-	data &= ~AD5398_CURRENT_EN_MASK;
+	data |= AD5398_SW_POWER_DOWN;
 
 	ret = ad5398_write_reg(client, data);
 
@@ -213,24 +213,29 @@ static const struct i2c_device_id ad5398_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, ad5398_id);
 
-static int ad5398_probe(struct i2c_client *client,
-				const struct i2c_device_id *id)
+static int ad5398_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct regulator_init_data *init_data = dev_get_platdata(&client->dev);
 	struct regulator_config config = { };
 	struct ad5398_chip_info *chip;
 	const struct ad5398_current_data_format *df =
 			(struct ad5398_current_data_format *)id->driver_data;
 
-	if (!init_data)
-		return -EINVAL;
-
 	chip = devm_kzalloc(&client->dev, sizeof(*chip), GFP_KERNEL);
 	if (!chip)
 		return -ENOMEM;
 
 	config.dev = &client->dev;
+	if (client->dev.of_node)
+		init_data = of_get_regulator_init_data(&client->dev,
+						       client->dev.of_node,
+						       &ad5398_reg);
+	if (!init_data)
+		return -EINVAL;
+
 	config.init_data = init_data;
+	config.of_node = client->dev.of_node;
 	config.driver_data = chip;
 
 	chip->client = client;
@@ -258,6 +263,7 @@ static struct i2c_driver ad5398_driver = {
 	.probe = ad5398_probe,
 	.driver		= {
 		.name	= "ad5398",
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	},
 	.id_table	= ad5398_id,
 };

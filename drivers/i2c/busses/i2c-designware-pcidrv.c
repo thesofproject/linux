@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Synopsys DesignWare I2C adapter driver (master only).
  *
@@ -7,23 +8,7 @@
  * Copyright (C) 2007 MontaVista Software Inc.
  * Copyright (C) 2009 Provigent Ltd.
  * Copyright (C) 2011, 2015, 2016 Intel Corporation.
- *
- * ----------------------------------------------------------------------------
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- * ----------------------------------------------------------------------------
- *
  */
-
-#include <linux/acpi.h>
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/errno.h>
@@ -33,11 +18,14 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/pm.h>
 #include <linux/pm_runtime.h>
+#include <linux/power_supply.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 
 #include "i2c-designware-core.h"
+#include "i2c-ccgx-ucsi.h"
 
 #define DRIVER_NAME "i2c-designware-pci"
 
@@ -47,31 +35,32 @@ enum dw_pci_ctl_id_t {
 	baytrail,
 	cherrytrail,
 	haswell,
+	elkhartlake,
+	navi_amd,
 };
 
+/*
+ * This is a legacy structure to describe the hardware counters
+ * to configure signal timings on the bus. For Device Tree platforms
+ * one should use the respective properties and for ACPI there is
+ * a set of ACPI methods that provide these counters. No new
+ * platform should use this structure.
+ */
 struct dw_scl_sda_cfg {
-	u32 ss_hcnt;
-	u32 fs_hcnt;
-	u32 ss_lcnt;
-	u32 fs_lcnt;
-	u32 sda_hold;
+	u16 ss_hcnt;
+	u16 fs_hcnt;
+	u16 ss_lcnt;
+	u16 fs_lcnt;
+	u32 sda_hold_time;
 };
 
 struct dw_pci_controller {
 	u32 bus_num;
-	u32 bus_cfg;
-	u32 tx_fifo_depth;
-	u32 rx_fifo_depth;
-	u32 clk_khz;
-	u32 functionality;
 	u32 flags;
 	struct dw_scl_sda_cfg *scl_sda_cfg;
 	int (*setup)(struct pci_dev *pdev, struct dw_pci_controller *c);
+	u32 (*get_clk_rate_khz)(struct dw_i2c_dev *dev);
 };
-
-#define INTEL_MID_STD_CFG  (DW_IC_CON_MASTER |			\
-				DW_IC_CON_SLAVE_DISABLE |	\
-				DW_IC_CON_RESTART_EN)
 
 /* Merrifield HCNT/LCNT/SDA hold time */
 static struct dw_scl_sda_cfg mrfld_config = {
@@ -87,7 +76,7 @@ static struct dw_scl_sda_cfg byt_config = {
 	.fs_hcnt = 0x55,
 	.ss_lcnt = 0x200,
 	.fs_lcnt = 0x99,
-	.sda_hold = 0x6,
+	.sda_hold_time = 0x6,
 };
 
 /* Haswell HCNT/LCNT/SDA hold time */
@@ -96,15 +85,29 @@ static struct dw_scl_sda_cfg hsw_config = {
 	.fs_hcnt = 0x48,
 	.ss_lcnt = 0x01fb,
 	.fs_lcnt = 0xa0,
-	.sda_hold = 0x9,
+	.sda_hold_time = 0x9,
 };
+
+/* NAVI-AMD HCNT/LCNT/SDA hold time */
+static struct dw_scl_sda_cfg navi_amd_config = {
+	.ss_hcnt = 0x1ae,
+	.ss_lcnt = 0x23a,
+	.sda_hold_time = 0x9,
+};
+
+static u32 mfld_get_clk_rate_khz(struct dw_i2c_dev *dev)
+{
+	return 25000;
+}
 
 static int mfld_setup(struct pci_dev *pdev, struct dw_pci_controller *c)
 {
+	struct dw_i2c_dev *dev = pci_get_drvdata(pdev);
+
 	switch (pdev->device) {
 	case 0x0817:
-		c->bus_cfg &= ~DW_IC_CON_SPEED_MASK;
-		c->bus_cfg |= DW_IC_CON_SPEED_STD;
+		dev->timings.bus_freq_hz = I2C_MAX_STANDARD_MODE_FREQ;
+		fallthrough;
 	case 0x0818:
 	case 0x0819:
 		c->bus_num = pdev->device - 0x817 + 3;
@@ -121,7 +124,7 @@ static int mfld_setup(struct pci_dev *pdev, struct dw_pci_controller *c)
 static int mrfld_setup(struct pci_dev *pdev, struct dw_pci_controller *c)
 {
 	/*
-	 * On Intel Merrifield the user visible i2c busses are enumerated
+	 * On Intel Merrifield the user visible i2c buses are enumerated
 	 * [1..7]. So, we add 1 to shift the default range. Besides that the
 	 * first PCI slot provides 4 functions, that's why we have to add 0 to
 	 * the first slot and 4 to the next one.
@@ -137,121 +140,111 @@ static int mrfld_setup(struct pci_dev *pdev, struct dw_pci_controller *c)
 	return -ENODEV;
 }
 
+static u32 ehl_get_clk_rate_khz(struct dw_i2c_dev *dev)
+{
+	return 100000;
+}
+
+static u32 navi_amd_get_clk_rate_khz(struct dw_i2c_dev *dev)
+{
+	return 100000;
+}
+
+static int navi_amd_setup(struct pci_dev *pdev, struct dw_pci_controller *c)
+{
+	struct dw_i2c_dev *dev = pci_get_drvdata(pdev);
+
+	dev->flags |= MODEL_AMD_NAVI_GPU | ACCESS_POLLING;
+	dev->timings.bus_freq_hz = I2C_MAX_STANDARD_MODE_FREQ;
+	return 0;
+}
+
 static struct dw_pci_controller dw_pci_controllers[] = {
 	[medfield] = {
 		.bus_num = -1,
-		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
-		.tx_fifo_depth = 32,
-		.rx_fifo_depth = 32,
-		.functionality = I2C_FUNC_10BIT_ADDR,
-		.clk_khz      = 25000,
 		.setup = mfld_setup,
+		.get_clk_rate_khz = mfld_get_clk_rate_khz,
 	},
 	[merrifield] = {
 		.bus_num = -1,
-		.bus_cfg = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
-		.tx_fifo_depth = 64,
-		.rx_fifo_depth = 64,
-		.functionality = I2C_FUNC_10BIT_ADDR,
 		.scl_sda_cfg = &mrfld_config,
 		.setup = mrfld_setup,
 	},
 	[baytrail] = {
 		.bus_num = -1,
-		.bus_cfg = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
-		.tx_fifo_depth = 32,
-		.rx_fifo_depth = 32,
-		.functionality = I2C_FUNC_10BIT_ADDR,
 		.scl_sda_cfg = &byt_config,
 	},
 	[haswell] = {
 		.bus_num = -1,
-		.bus_cfg = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
-		.tx_fifo_depth = 32,
-		.rx_fifo_depth = 32,
-		.functionality = I2C_FUNC_10BIT_ADDR,
 		.scl_sda_cfg = &hsw_config,
 	},
 	[cherrytrail] = {
 		.bus_num = -1,
-		.bus_cfg = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
-		.tx_fifo_depth = 32,
-		.rx_fifo_depth = 32,
-		.functionality = I2C_FUNC_10BIT_ADDR,
-		.flags = MODEL_CHERRYTRAIL,
 		.scl_sda_cfg = &byt_config,
+	},
+	[elkhartlake] = {
+		.bus_num = -1,
+		.get_clk_rate_khz = ehl_get_clk_rate_khz,
+	},
+	[navi_amd] = {
+		.bus_num = -1,
+		.scl_sda_cfg = &navi_amd_config,
+		.setup =  navi_amd_setup,
+		.get_clk_rate_khz = navi_amd_get_clk_rate_khz,
 	},
 };
 
-#ifdef CONFIG_PM
-static int i2c_dw_pci_suspend(struct device *dev)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct dw_i2c_dev *i_dev = pci_get_drvdata(pdev);
+static const struct property_entry dgpu_properties[] = {
+	/* USB-C doesn't power the system */
+	PROPERTY_ENTRY_U8("scope", POWER_SUPPLY_SCOPE_DEVICE),
+	{}
+};
 
-	i_dev->disable(i_dev);
-
-	return 0;
-}
-
-static int i2c_dw_pci_resume(struct device *dev)
-{
-	struct pci_dev *pdev = to_pci_dev(dev);
-	struct dw_i2c_dev *i_dev = pci_get_drvdata(pdev);
-
-	return i_dev->init(i_dev);
-}
-#endif
-
-static UNIVERSAL_DEV_PM_OPS(i2c_dw_pm_ops, i2c_dw_pci_suspend,
-			    i2c_dw_pci_resume, NULL);
-
-static u32 i2c_dw_get_clk_rate_khz(struct dw_i2c_dev *dev)
-{
-	return dev->controller->clk_khz;
-}
+static const struct software_node dgpu_node = {
+	.properties = dgpu_properties,
+};
 
 static int i2c_dw_pci_probe(struct pci_dev *pdev,
 			    const struct pci_device_id *id)
 {
+	struct device *device = &pdev->dev;
 	struct dw_i2c_dev *dev;
 	struct i2c_adapter *adap;
 	int r;
 	struct dw_pci_controller *controller;
 	struct dw_scl_sda_cfg *cfg;
 
-	if (id->driver_data >= ARRAY_SIZE(dw_pci_controllers)) {
-		dev_err(&pdev->dev, "%s: invalid driver data %ld\n", __func__,
-			id->driver_data);
-		return -EINVAL;
-	}
+	if (id->driver_data >= ARRAY_SIZE(dw_pci_controllers))
+		return dev_err_probe(device, -EINVAL, "Invalid driver data %ld\n",
+				     id->driver_data);
 
 	controller = &dw_pci_controllers[id->driver_data];
 
 	r = pcim_enable_device(pdev);
-	if (r) {
-		dev_err(&pdev->dev, "Failed to enable I2C PCI device (%d)\n",
-			r);
-		return r;
-	}
+	if (r)
+		return dev_err_probe(device, r, "Failed to enable I2C PCI device\n");
+
+	pci_set_master(pdev);
 
 	r = pcim_iomap_regions(pdev, 1 << 0, pci_name(pdev));
-	if (r) {
-		dev_err(&pdev->dev, "I/O memory remapping failed\n");
-		return r;
-	}
+	if (r)
+		return dev_err_probe(device, r, "I/O memory remapping failed\n");
 
-	dev = devm_kzalloc(&pdev->dev, sizeof(struct dw_i2c_dev), GFP_KERNEL);
+	dev = devm_kzalloc(device, sizeof(*dev), GFP_KERNEL);
 	if (!dev)
 		return -ENOMEM;
 
-	dev->clk = NULL;
-	dev->controller = controller;
-	dev->get_clk_rate_khz = i2c_dw_get_clk_rate_khz;
+	r = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_ALL_TYPES);
+	if (r < 0)
+		return r;
+
+	dev->get_clk_rate_khz = controller->get_clk_rate_khz;
 	dev->base = pcim_iomap_table(pdev)[0];
-	dev->dev = &pdev->dev;
-	dev->irq = pdev->irq;
+	dev->dev = device;
+	dev->irq = pci_irq_vector(pdev, 0);
 	dev->flags |= controller->flags;
+
+	pci_set_drvdata(pdev, dev);
 
 	if (controller->setup) {
 		r = controller->setup(pdev, controller);
@@ -259,38 +252,43 @@ static int i2c_dw_pci_probe(struct pci_dev *pdev,
 			return r;
 	}
 
-	dev->functionality = controller->functionality |
-				DW_IC_DEFAULT_FUNCTIONALITY;
+	r = i2c_dw_fw_parse_and_configure(dev);
+	if (r)
+		return r;
 
-	dev->master_cfg = controller->bus_cfg;
+	i2c_dw_configure(dev);
+
 	if (controller->scl_sda_cfg) {
 		cfg = controller->scl_sda_cfg;
 		dev->ss_hcnt = cfg->ss_hcnt;
 		dev->fs_hcnt = cfg->fs_hcnt;
 		dev->ss_lcnt = cfg->ss_lcnt;
 		dev->fs_lcnt = cfg->fs_lcnt;
-		dev->sda_hold_time = cfg->sda_hold;
+		dev->sda_hold_time = cfg->sda_hold_time;
 	}
-
-	pci_set_drvdata(pdev, dev);
-
-	dev->tx_fifo_depth = controller->tx_fifo_depth;
-	dev->rx_fifo_depth = controller->rx_fifo_depth;
 
 	adap = &dev->adapter;
 	adap->owner = THIS_MODULE;
 	adap->class = 0;
-	ACPI_COMPANION_SET(&adap->dev, ACPI_COMPANION(&pdev->dev));
 	adap->nr = controller->bus_num;
 
 	r = i2c_dw_probe(dev);
 	if (r)
 		return r;
 
-	pm_runtime_set_autosuspend_delay(&pdev->dev, 1000);
-	pm_runtime_use_autosuspend(&pdev->dev);
-	pm_runtime_put_autosuspend(&pdev->dev);
-	pm_runtime_allow(&pdev->dev);
+	if ((dev->flags & MODEL_MASK) == MODEL_AMD_NAVI_GPU) {
+		dev->slave = i2c_new_ccgx_ucsi(&dev->adapter, dev->irq, &dgpu_node);
+		if (IS_ERR(dev->slave)) {
+			i2c_del_adapter(&dev->adapter);
+			return dev_err_probe(device, PTR_ERR(dev->slave),
+					     "register UCSI failed\n");
+		}
+	}
+
+	pm_runtime_set_autosuspend_delay(device, 1000);
+	pm_runtime_use_autosuspend(device);
+	pm_runtime_put_autosuspend(device);
+	pm_runtime_allow(device);
 
 	return 0;
 }
@@ -298,63 +296,93 @@ static int i2c_dw_pci_probe(struct pci_dev *pdev,
 static void i2c_dw_pci_remove(struct pci_dev *pdev)
 {
 	struct dw_i2c_dev *dev = pci_get_drvdata(pdev);
+	struct device *device = &pdev->dev;
 
-	dev->disable(dev);
-	pm_runtime_forbid(&pdev->dev);
-	pm_runtime_get_noresume(&pdev->dev);
+	i2c_dw_disable(dev);
+
+	pm_runtime_forbid(device);
+	pm_runtime_get_noresume(device);
 
 	i2c_del_adapter(&dev->adapter);
 }
 
-/* work with hotplug and coldplug */
-MODULE_ALIAS("i2c_designware-pci");
-
-static const struct pci_device_id i2_designware_pci_ids[] = {
+static const struct pci_device_id i2c_designware_pci_ids[] = {
 	/* Medfield */
-	{ PCI_VDEVICE(INTEL, 0x0817), medfield },
-	{ PCI_VDEVICE(INTEL, 0x0818), medfield },
-	{ PCI_VDEVICE(INTEL, 0x0819), medfield },
-	{ PCI_VDEVICE(INTEL, 0x082C), medfield },
-	{ PCI_VDEVICE(INTEL, 0x082D), medfield },
-	{ PCI_VDEVICE(INTEL, 0x082E), medfield },
+	{ PCI_VDEVICE(INTEL, 0x0817), .driver_data = medfield },
+	{ PCI_VDEVICE(INTEL, 0x0818), .driver_data = medfield },
+	{ PCI_VDEVICE(INTEL, 0x0819), .driver_data = medfield },
+	{ PCI_VDEVICE(INTEL, 0x082C), .driver_data = medfield },
+	{ PCI_VDEVICE(INTEL, 0x082D), .driver_data = medfield },
+	{ PCI_VDEVICE(INTEL, 0x082E), .driver_data = medfield },
 	/* Merrifield */
-	{ PCI_VDEVICE(INTEL, 0x1195), merrifield },
-	{ PCI_VDEVICE(INTEL, 0x1196), merrifield },
+	{ PCI_VDEVICE(INTEL, 0x1195), .driver_data = merrifield },
+	{ PCI_VDEVICE(INTEL, 0x1196), .driver_data = merrifield },
 	/* Baytrail */
-	{ PCI_VDEVICE(INTEL, 0x0F41), baytrail },
-	{ PCI_VDEVICE(INTEL, 0x0F42), baytrail },
-	{ PCI_VDEVICE(INTEL, 0x0F43), baytrail },
-	{ PCI_VDEVICE(INTEL, 0x0F44), baytrail },
-	{ PCI_VDEVICE(INTEL, 0x0F45), baytrail },
-	{ PCI_VDEVICE(INTEL, 0x0F46), baytrail },
-	{ PCI_VDEVICE(INTEL, 0x0F47), baytrail },
+	{ PCI_VDEVICE(INTEL, 0x0F41), .driver_data = baytrail },
+	{ PCI_VDEVICE(INTEL, 0x0F42), .driver_data = baytrail },
+	{ PCI_VDEVICE(INTEL, 0x0F43), .driver_data = baytrail },
+	{ PCI_VDEVICE(INTEL, 0x0F44), .driver_data = baytrail },
+	{ PCI_VDEVICE(INTEL, 0x0F45), .driver_data = baytrail },
+	{ PCI_VDEVICE(INTEL, 0x0F46), .driver_data = baytrail },
+	{ PCI_VDEVICE(INTEL, 0x0F47), .driver_data = baytrail },
 	/* Haswell */
-	{ PCI_VDEVICE(INTEL, 0x9c61), haswell },
-	{ PCI_VDEVICE(INTEL, 0x9c62), haswell },
+	{ PCI_VDEVICE(INTEL, 0x9c61), .driver_data = haswell },
+	{ PCI_VDEVICE(INTEL, 0x9c62), .driver_data = haswell },
 	/* Braswell / Cherrytrail */
-	{ PCI_VDEVICE(INTEL, 0x22C1), cherrytrail },
-	{ PCI_VDEVICE(INTEL, 0x22C2), cherrytrail },
-	{ PCI_VDEVICE(INTEL, 0x22C3), cherrytrail },
-	{ PCI_VDEVICE(INTEL, 0x22C4), cherrytrail },
-	{ PCI_VDEVICE(INTEL, 0x22C5), cherrytrail },
-	{ PCI_VDEVICE(INTEL, 0x22C6), cherrytrail },
-	{ PCI_VDEVICE(INTEL, 0x22C7), cherrytrail },
-	{ 0,}
+	{ PCI_VDEVICE(INTEL, 0x22C1), .driver_data = cherrytrail },
+	{ PCI_VDEVICE(INTEL, 0x22C2), .driver_data = cherrytrail },
+	{ PCI_VDEVICE(INTEL, 0x22C3), .driver_data = cherrytrail },
+	{ PCI_VDEVICE(INTEL, 0x22C4), .driver_data = cherrytrail },
+	{ PCI_VDEVICE(INTEL, 0x22C5), .driver_data = cherrytrail },
+	{ PCI_VDEVICE(INTEL, 0x22C6), .driver_data = cherrytrail },
+	{ PCI_VDEVICE(INTEL, 0x22C7), .driver_data = cherrytrail },
+	/* Elkhart Lake (PSE I2C) */
+	{ PCI_VDEVICE(INTEL, 0x4bb9), .driver_data = elkhartlake },
+	{ PCI_VDEVICE(INTEL, 0x4bba), .driver_data = elkhartlake },
+	{ PCI_VDEVICE(INTEL, 0x4bbb), .driver_data = elkhartlake },
+	{ PCI_VDEVICE(INTEL, 0x4bbc), .driver_data = elkhartlake },
+	{ PCI_VDEVICE(INTEL, 0x4bbd), .driver_data = elkhartlake },
+	{ PCI_VDEVICE(INTEL, 0x4bbe), .driver_data = elkhartlake },
+	{ PCI_VDEVICE(INTEL, 0x4bbf), .driver_data = elkhartlake },
+	{ PCI_VDEVICE(INTEL, 0x4bc0), .driver_data = elkhartlake },
+	/* AMD NAVI */
+	{ PCI_VDEVICE(ATI,  0x7314), .driver_data = navi_amd },
+	{ PCI_VDEVICE(ATI,  0x73a4), .driver_data = navi_amd },
+	{ PCI_VDEVICE(ATI,  0x73e4), .driver_data = navi_amd },
+	{ PCI_VDEVICE(ATI,  0x73c4), .driver_data = navi_amd },
+	{ PCI_VDEVICE(ATI,  0x7444), .driver_data = navi_amd },
+	{ PCI_VDEVICE(ATI,  0x7464), .driver_data = navi_amd },
+	{ }
 };
-MODULE_DEVICE_TABLE(pci, i2_designware_pci_ids);
+MODULE_DEVICE_TABLE(pci, i2c_designware_pci_ids);
+
+static void i2c_dw_pci_shutdown(struct pci_dev *pdev)
+{
+	struct dw_i2c_dev *i_dev;
+
+	i_dev = pci_get_drvdata(pdev);
+	if (!i_dev)
+		return;
+
+	pm_runtime_disable(&pdev->dev);
+	if (!pm_runtime_status_suspended(&pdev->dev))
+		i2c_dw_shutdown(i_dev);
+}
 
 static struct pci_driver dw_i2c_driver = {
 	.name		= DRIVER_NAME,
-	.id_table	= i2_designware_pci_ids,
 	.probe		= i2c_dw_pci_probe,
 	.remove		= i2c_dw_pci_remove,
+	.shutdown	= i2c_dw_pci_shutdown,
 	.driver         = {
-		.pm     = &i2c_dw_pm_ops,
+		.pm	= pm_ptr(&i2c_dw_dev_pm_ops),
 	},
+	.id_table	= i2c_designware_pci_ids,
 };
-
 module_pci_driver(dw_i2c_driver);
 
 MODULE_AUTHOR("Baruch Siach <baruch@tkos.co.il>");
 MODULE_DESCRIPTION("Synopsys DesignWare PCI I2C bus adapter");
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS("I2C_DW");
+MODULE_IMPORT_NS("I2C_DW_COMMON");

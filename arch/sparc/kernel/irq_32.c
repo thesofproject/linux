@@ -199,19 +199,19 @@ int arch_show_interrupts(struct seq_file *p, int prec)
 	int j;
 
 #ifdef CONFIG_SMP
-	seq_printf(p, "RES: ");
+	seq_printf(p, "%*s:", prec, "RES");
 	for_each_online_cpu(j)
-		seq_printf(p, "%10u ", cpu_data(j).irq_resched_count);
-	seq_printf(p, "     IPI rescheduling interrupts\n");
-	seq_printf(p, "CAL: ");
+		seq_put_decimal_ull_width(p, " ", cpu_data(j).irq_resched_count, 10);
+	seq_printf(p, " IPI rescheduling interrupts\n");
+	seq_printf(p, "%*s:", prec, "CAL");
 	for_each_online_cpu(j)
-		seq_printf(p, "%10u ", cpu_data(j).irq_call_count);
-	seq_printf(p, "     IPI function call interrupts\n");
+		seq_put_decimal_ull_width(p, " ", cpu_data(j).irq_call_count, 10);
+	seq_printf(p, " IPI function call interrupts\n");
 #endif
-	seq_printf(p, "NMI: ");
+	seq_printf(p, "%*s:", prec, "NMI");
 	for_each_online_cpu(j)
-		seq_printf(p, "%10u ", cpu_data(j).counter);
-	seq_printf(p, "     Non-maskable interrupts\n");
+		seq_put_decimal_ull_width(p, " ", cpu_data(j).counter, 10);
+	seq_printf(p, " Non-maskable interrupts\n");
 	return 0;
 }
 
@@ -268,11 +268,11 @@ int sparc_floppy_request_irq(unsigned int irq, irq_handler_t irq_handler)
 	if (sparc_cpu_model != sparc_leon) {
 		struct tt_entry *trap_table;
 
-		trap_table = &trapbase_cpu1;
+		trap_table = &trapbase_cpu1[0];
 		INSTANTIATE(trap_table)
-		trap_table = &trapbase_cpu2;
+		trap_table = &trapbase_cpu2[0];
 		INSTANTIATE(trap_table)
-		trap_table = &trapbase_cpu3;
+		trap_table = &trapbase_cpu3[0];
 		INSTANTIATE(trap_table)
 	}
 #endif

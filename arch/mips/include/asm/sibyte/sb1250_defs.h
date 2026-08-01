@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*  *********************************************************************
     *  SB1250 Board Support Package
     *
@@ -13,20 +14,6 @@
     *  Copyright 2000,2001,2002,2003
     *  Broadcom Corporation. All rights reserved.
     *
-    *  This program is free software; you can redistribute it and/or
-    *  modify it under the terms of the GNU General Public License as
-    *  published by the Free Software Foundation; either version 2 of
-    *  the License, or (at your option) any later version.
-    *
-    *  This program is distributed in the hope that it will be useful,
-    *  but WITHOUT ANY WARRANTY; without even the implied warranty of
-    *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    *  GNU General Public License for more details.
-    *
-    *  You should have received a copy of the GNU General Public License
-    *  along with this program; if not, write to the Free Software
-    *  Foundation, Inc., 59 Temple Place, Suite 330, Boston,
-    *  MA 02111-1307 USA
     ********************************************************************* */
 
 #ifndef _SB1250_DEFS_H
@@ -212,7 +199,7 @@
  * Note: you'll need to define uint32_t and uint64_t in your headers.
  */
 
-#if !defined(__ASSEMBLY__)
+#if !defined(__ASSEMBLER__)
 #define _SB_MAKE64(x) ((uint64_t)(x))
 #define _SB_MAKE32(x) ((uint32_t)(x))
 #else
@@ -251,9 +238,9 @@
  */
 
 
-#if defined(__mips64) && !defined(__ASSEMBLY__)
+#if defined(__mips64) && !defined(__ASSEMBLER__)
 #define SBWRITECSR(csr, val) *((volatile uint64_t *) PHYS_TO_K1(csr)) = (val)
 #define SBREADCSR(csr) (*((volatile uint64_t *) PHYS_TO_K1(csr)))
-#endif /* __ASSEMBLY__ */
+#endif /* __ASSEMBLER__ */
 
 #endif

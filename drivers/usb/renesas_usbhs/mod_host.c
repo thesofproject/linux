@@ -158,7 +158,7 @@ static struct usbhsh_request *usbhsh_ureq_alloc(struct usbhsh_hpriv *hpriv,
 {
 	struct usbhsh_request *ureq;
 
-	ureq = kzalloc(sizeof(struct usbhsh_request), mem_flags);
+	ureq = kzalloc_obj(struct usbhsh_request, mem_flags);
 	if (!ureq)
 		return NULL;
 
@@ -340,7 +340,7 @@ static void usbhsh_pipe_detach(struct usbhsh_hpriv *hpriv,
 	pipe = usbhsh_uep_to_pipe(uep);
 
 	if (unlikely(!pipe)) {
-		dev_err(dev, "uep doens't have pipe\n");
+		dev_err(dev, "uep doesn't have pipe\n");
 	} else if (1 == uep->counter--) { /* last user */
 		struct usb_host_endpoint *ep = usbhsh_uep_to_ep(uep);
 		struct usbhsh_device *udev = usbhsh_uep_to_udev(uep);
@@ -374,7 +374,7 @@ static int usbhsh_endpoint_attach(struct usbhsh_hpriv *hpriv,
 	struct usb_endpoint_descriptor *desc = &ep->desc;
 	unsigned long flags;
 
-	uep = kzalloc(sizeof(struct usbhsh_ep), mem_flags);
+	uep = kzalloc_obj(struct usbhsh_ep, mem_flags);
 	if (!uep)
 		return -ENOMEM;
 
@@ -1283,7 +1283,7 @@ static const struct hc_driver usbhsh_driver = {
 	/*
 	 * generic hardware linkage
 	 */
-	.flags =		HCD_USB2,
+	.flags =		HCD_DMA | HCD_USB2,
 
 	.start =		usbhsh_host_start,
 	.stop =			usbhsh_host_stop,

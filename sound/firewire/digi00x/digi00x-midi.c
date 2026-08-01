@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * digi00x-midi.h - a part of driver for Digidesign Digi 002/003 family
  *
  * Copyright (c) 2014-2015 Takashi Sakamoto
- *
- * Licensed under the terms of the GNU General Public License, version 2.
  */
 
 #include "digi00x.h"
@@ -17,10 +16,15 @@ static int midi_open(struct snd_rawmidi_substream *substream)
 	if (err < 0)
 		return err;
 
-	mutex_lock(&dg00x->mutex);
-	dg00x->substreams_counter++;
-	err = snd_dg00x_stream_start_duplex(dg00x, 0);
-	mutex_unlock(&dg00x->mutex);
+	scoped_guard(mutex, &dg00x->mutex) {
+		err = snd_dg00x_stream_reserve_duplex(dg00x, 0, 0, 0);
+		if (err >= 0) {
+			++dg00x->substreams_counter;
+			err = snd_dg00x_stream_start_duplex(dg00x);
+			if (err < 0)
+				--dg00x->substreams_counter;
+		}
+	}
 	if (err < 0)
 		snd_dg00x_stream_lock_release(dg00x);
 
@@ -31,10 +35,10 @@ static int midi_close(struct snd_rawmidi_substream *substream)
 {
 	struct snd_dg00x *dg00x = substream->rmidi->private_data;
 
-	mutex_lock(&dg00x->mutex);
-	dg00x->substreams_counter--;
-	snd_dg00x_stream_stop_duplex(dg00x);
-	mutex_unlock(&dg00x->mutex);
+	scoped_guard(mutex, &dg00x->mutex) {
+		--dg00x->substreams_counter;
+		snd_dg00x_stream_stop_duplex(dg00x);
+	}
 
 	snd_dg00x_stream_lock_release(dg00x);
 	return 0;
@@ -45,21 +49,18 @@ static void midi_capture_trigger(struct snd_rawmidi_substream *substream,
 {
 	struct snd_dg00x *dg00x = substream->rmidi->private_data;
 	unsigned int port;
-	unsigned long flags;
 
 	if (substream->rmidi->device == 0)
 		port = substream->number;
 	else
 		port = 2;
 
-	spin_lock_irqsave(&dg00x->lock, flags);
+	guard(spinlock_irqsave)(&dg00x->lock);
 
 	if (up)
 		amdtp_dot_midi_trigger(&dg00x->tx_stream, port, substream);
 	else
 		amdtp_dot_midi_trigger(&dg00x->tx_stream, port, NULL);
-
-	spin_unlock_irqrestore(&dg00x->lock, flags);
 }
 
 static void midi_playback_trigger(struct snd_rawmidi_substream *substream,
@@ -67,21 +68,18 @@ static void midi_playback_trigger(struct snd_rawmidi_substream *substream,
 {
 	struct snd_dg00x *dg00x = substream->rmidi->private_data;
 	unsigned int port;
-	unsigned long flags;
 
 	if (substream->rmidi->device == 0)
 		port = substream->number;
 	else
 		port = 2;
 
-	spin_lock_irqsave(&dg00x->lock, flags);
+	guard(spinlock_irqsave)(&dg00x->lock);
 
 	if (up)
 		amdtp_dot_midi_trigger(&dg00x->rx_stream, port, substream);
 	else
 		amdtp_dot_midi_trigger(&dg00x->rx_stream, port, NULL);
-
-	spin_unlock_irqrestore(&dg00x->lock, flags);
 }
 
 static void set_substream_names(struct snd_dg00x *dg00x,
@@ -96,14 +94,14 @@ static void set_substream_names(struct snd_dg00x *dg00x,
 
 		list_for_each_entry(subs, &str->substreams, list) {
 			if (!is_console) {
-				snprintf(subs->name, sizeof(subs->name),
-					 "%s MIDI %d",
-					 dg00x->card->shortname,
-					 subs->number + 1);
+				scnprintf(subs->name, sizeof(subs->name),
+					  "%s MIDI %d",
+					  dg00x->card->shortname,
+					  subs->number + 1);
 			} else {
-				snprintf(subs->name, sizeof(subs->name),
-					 "%s control",
-					 dg00x->card->shortname);
+				scnprintf(subs->name, sizeof(subs->name),
+					  "%s control",
+					  dg00x->card->shortname);
 			}
 		}
 	}

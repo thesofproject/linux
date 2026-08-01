@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (C) 2016 Atmel Corporation,
  *		       Songjun Wu <songjun.wu@atmel.com>,
  *                     Nicolas Ferre <nicolas.ferre@atmel.com>
  *  Copyright (C) 2017 Free Electrons,
  *		       Quentin Schulz <quentin.schulz@free-electrons.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  *
  * The Sama5d2 SoC has two audio PLLs (PMC and PAD) that shares the same parent
  * (FRAC). FRAC can output between 620 and 700MHz and only multiply the rate of
@@ -32,7 +28,6 @@
  * rate - rate is adjustable.
  *        clk->rate = parent->rate / (qdaudio * div))
  * parent - fixed parent.  No clk_set_parent support
- *
  */
 
 #include <linux/clk.h>
@@ -42,6 +37,8 @@
 #include <linux/mfd/syscon.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
+
+#include "pmc.h"
 
 #define AUDIO_PLL_DIV_FRAC	BIT(22)
 #define AUDIO_PLL_ND_MAX	(AT91_PMC_AUDIO_PLL_ND_MASK >> \
@@ -273,8 +270,8 @@ static int clk_audio_pll_frac_determine_rate(struct clk_hw *hw,
 	return 0;
 }
 
-static long clk_audio_pll_pad_round_rate(struct clk_hw *hw, unsigned long rate,
-					 unsigned long *parent_rate)
+static int clk_audio_pll_pad_determine_rate(struct clk_hw *hw,
+					    struct clk_rate_request *req)
 {
 	struct clk_hw *pclk = clk_hw_get_parent(hw);
 	long best_rate = -EINVAL;
@@ -286,7 +283,7 @@ static long clk_audio_pll_pad_round_rate(struct clk_hw *hw, unsigned long rate,
 	int best_diff = -1;
 
 	pr_debug("A PLL/PAD: %s, rate = %lu (parent_rate = %lu)\n", __func__,
-		 rate, *parent_rate);
+		 req->rate, req->best_parent_rate);
 
 	/*
 	 * Rate divisor is actually made of two different divisors, multiplied
@@ -307,12 +304,12 @@ static long clk_audio_pll_pad_round_rate(struct clk_hw *hw, unsigned long rate,
 				continue;
 
 			best_parent_rate = clk_hw_round_rate(pclk,
-							rate * tmp_qd * div);
+							req->rate * tmp_qd * div);
 			tmp_rate = best_parent_rate / (div * tmp_qd);
-			tmp_diff = abs(rate - tmp_rate);
+			tmp_diff = abs(req->rate - tmp_rate);
 
 			if (best_diff < 0 || best_diff > tmp_diff) {
-				*parent_rate = best_parent_rate;
+				req->best_parent_rate = best_parent_rate;
 				best_rate = tmp_rate;
 				best_diff = tmp_diff;
 			}
@@ -321,11 +318,13 @@ static long clk_audio_pll_pad_round_rate(struct clk_hw *hw, unsigned long rate,
 	pr_debug("A PLL/PAD: %s, best_rate = %ld, best_parent_rate = %lu\n",
 		 __func__, best_rate, best_parent_rate);
 
-	return best_rate;
+	req->rate = best_rate;
+
+	return 0;
 }
 
-static long clk_audio_pll_pmc_round_rate(struct clk_hw *hw, unsigned long rate,
-					 unsigned long *parent_rate)
+static int clk_audio_pll_pmc_determine_rate(struct clk_hw *hw,
+					    struct clk_rate_request *req)
 {
 	struct clk_hw *pclk = clk_hw_get_parent(hw);
 	long best_rate = -EINVAL;
@@ -336,25 +335,34 @@ static long clk_audio_pll_pmc_round_rate(struct clk_hw *hw, unsigned long rate,
 	int best_diff = -1;
 
 	pr_debug("A PLL/PMC: %s, rate = %lu (parent_rate = %lu)\n", __func__,
-		 rate, *parent_rate);
+		 req->rate, req->best_parent_rate);
 
-	for (div = 1; div <= AUDIO_PLL_QDPMC_MAX; div++) {
-		best_parent_rate = clk_round_rate(pclk->clk, rate * div);
+	if (!req->rate)
+		return 0;
+
+	best_parent_rate = clk_round_rate(pclk->clk, 1);
+	div = max(best_parent_rate / req->rate, 1UL);
+	for (; div <= AUDIO_PLL_QDPMC_MAX; div++) {
+		best_parent_rate = clk_round_rate(pclk->clk, req->rate * div);
 		tmp_rate = best_parent_rate / div;
-		tmp_diff = abs(rate - tmp_rate);
+		tmp_diff = abs(req->rate - tmp_rate);
 
 		if (best_diff < 0 || best_diff > tmp_diff) {
-			*parent_rate = best_parent_rate;
+			req->best_parent_rate = best_parent_rate;
 			best_rate = tmp_rate;
 			best_diff = tmp_diff;
 			tmp_qd = div;
+			if (!best_diff)
+				break;	/* got exact match */
 		}
 	}
 
 	pr_debug("A PLL/PMC: %s, best_rate = %ld, best_parent_rate = %lu (qd = %d)\n",
-		 __func__, best_rate, *parent_rate, tmp_qd - 1);
+		 __func__, best_rate, req->best_parent_rate, tmp_qd - 1);
 
-	return best_rate;
+	req->rate = best_rate;
+
+	return 0;
 }
 
 static int clk_audio_pll_frac_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -432,7 +440,7 @@ static const struct clk_ops audio_pll_pad_ops = {
 	.enable = clk_audio_pll_pad_enable,
 	.disable = clk_audio_pll_pad_disable,
 	.recalc_rate = clk_audio_pll_pad_recalc_rate,
-	.round_rate = clk_audio_pll_pad_round_rate,
+	.determine_rate = clk_audio_pll_pad_determine_rate,
 	.set_rate = clk_audio_pll_pad_set_rate,
 };
 
@@ -440,97 +448,98 @@ static const struct clk_ops audio_pll_pmc_ops = {
 	.enable = clk_audio_pll_pmc_enable,
 	.disable = clk_audio_pll_pmc_disable,
 	.recalc_rate = clk_audio_pll_pmc_recalc_rate,
-	.round_rate = clk_audio_pll_pmc_round_rate,
+	.determine_rate = clk_audio_pll_pmc_determine_rate,
 	.set_rate = clk_audio_pll_pmc_set_rate,
 };
 
-static int of_sama5d2_clk_audio_pll_setup(struct device_node *np,
-					  struct clk_init_data *init,
-					  struct clk_hw *hw,
-					  struct regmap **clk_audio_regmap)
-{
-	struct regmap *regmap;
-	const char *parent_names[1];
-	int ret;
-
-	regmap = syscon_node_to_regmap(of_get_parent(np));
-	if (IS_ERR(regmap))
-		return PTR_ERR(regmap);
-
-	init->name = np->name;
-	of_clk_parent_fill(np, parent_names, 1);
-	init->parent_names = parent_names;
-	init->num_parents = 1;
-
-	hw->init = init;
-	*clk_audio_regmap = regmap;
-
-	ret = clk_hw_register(NULL, hw);
-	if (ret)
-		return ret;
-
-	return of_clk_add_hw_provider(np, of_clk_hw_simple_get, hw);
-}
-
-static void __init of_sama5d2_clk_audio_pll_frac_setup(struct device_node *np)
+struct clk_hw * __init
+at91_clk_register_audio_pll_frac(struct regmap *regmap, const char *name,
+				 const char *parent_name)
 {
 	struct clk_audio_frac *frac_ck;
 	struct clk_init_data init = {};
+	int ret;
 
-	frac_ck = kzalloc(sizeof(*frac_ck), GFP_KERNEL);
+	frac_ck = kzalloc_obj(*frac_ck);
 	if (!frac_ck)
-		return;
+		return ERR_PTR(-ENOMEM);
 
+	init.name = name;
 	init.ops = &audio_pll_frac_ops;
+	init.parent_names = &parent_name;
+	init.num_parents = 1;
 	init.flags = CLK_SET_RATE_GATE;
 
-	if (of_sama5d2_clk_audio_pll_setup(np, &init, &frac_ck->hw,
-					   &frac_ck->regmap))
+	frac_ck->hw.init = &init;
+	frac_ck->regmap = regmap;
+
+	ret = clk_hw_register(NULL, &frac_ck->hw);
+	if (ret) {
 		kfree(frac_ck);
+		return ERR_PTR(ret);
+	}
+
+	return &frac_ck->hw;
 }
 
-static void __init of_sama5d2_clk_audio_pll_pad_setup(struct device_node *np)
+struct clk_hw * __init
+at91_clk_register_audio_pll_pad(struct regmap *regmap, const char *name,
+				const char *parent_name)
 {
 	struct clk_audio_pad *apad_ck;
-	struct clk_init_data init = {};
+	struct clk_init_data init;
+	int ret;
 
-	apad_ck = kzalloc(sizeof(*apad_ck), GFP_KERNEL);
+	apad_ck = kzalloc_obj(*apad_ck);
 	if (!apad_ck)
-		return;
+		return ERR_PTR(-ENOMEM);
 
+	init.name = name;
 	init.ops = &audio_pll_pad_ops;
+	init.parent_names = &parent_name;
+	init.num_parents = 1;
 	init.flags = CLK_SET_RATE_GATE | CLK_SET_PARENT_GATE |
 		CLK_SET_RATE_PARENT;
 
-	if (of_sama5d2_clk_audio_pll_setup(np, &init, &apad_ck->hw,
-					   &apad_ck->regmap))
+	apad_ck->hw.init = &init;
+	apad_ck->regmap = regmap;
+
+	ret = clk_hw_register(NULL, &apad_ck->hw);
+	if (ret) {
 		kfree(apad_ck);
+		return ERR_PTR(ret);
+	}
+
+	return &apad_ck->hw;
 }
 
-static void __init of_sama5d2_clk_audio_pll_pmc_setup(struct device_node *np)
+struct clk_hw * __init
+at91_clk_register_audio_pll_pmc(struct regmap *regmap, const char *name,
+				const char *parent_name)
 {
-	struct clk_audio_pad *apmc_ck;
-	struct clk_init_data init = {};
+	struct clk_audio_pmc *apmc_ck;
+	struct clk_init_data init;
+	int ret;
 
-	apmc_ck = kzalloc(sizeof(*apmc_ck), GFP_KERNEL);
+	apmc_ck = kzalloc_obj(*apmc_ck);
 	if (!apmc_ck)
-		return;
+		return ERR_PTR(-ENOMEM);
 
+	init.name = name;
 	init.ops = &audio_pll_pmc_ops;
+	init.parent_names = &parent_name;
+	init.num_parents = 1;
 	init.flags = CLK_SET_RATE_GATE | CLK_SET_PARENT_GATE |
 		CLK_SET_RATE_PARENT;
 
-	if (of_sama5d2_clk_audio_pll_setup(np, &init, &apmc_ck->hw,
-					   &apmc_ck->regmap))
-		kfree(apmc_ck);
-}
+	apmc_ck->hw.init = &init;
+	apmc_ck->regmap = regmap;
 
-CLK_OF_DECLARE(of_sama5d2_clk_audio_pll_frac_setup,
-	       "atmel,sama5d2-clk-audio-pll-frac",
-	       of_sama5d2_clk_audio_pll_frac_setup);
-CLK_OF_DECLARE(of_sama5d2_clk_audio_pll_pad_setup,
-	       "atmel,sama5d2-clk-audio-pll-pad",
-	       of_sama5d2_clk_audio_pll_pad_setup);
-CLK_OF_DECLARE(of_sama5d2_clk_audio_pll_pmc_setup,
-	       "atmel,sama5d2-clk-audio-pll-pmc",
-	       of_sama5d2_clk_audio_pll_pmc_setup);
+	ret = clk_hw_register(NULL, &apmc_ck->hw);
+	if (ret) {
+		kfree(apmc_ck);
+		return ERR_PTR(ret);
+	}
+
+	return &apmc_ck->hw;
+}

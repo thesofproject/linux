@@ -13,7 +13,7 @@
 #include <linux/mfd/rave-sp.h>
 #include <linux/module.h>
 #include <linux/nvmem-consumer.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/reboot.h>
 #include <linux/slab.h>
@@ -310,7 +310,6 @@ static int rave_sp_wdt_probe(struct platform_device *pdev)
 
 	ret = devm_watchdog_register_device(dev, wdd);
 	if (ret) {
-		dev_err(dev, "Failed to register watchdog device\n");
 		rave_sp_wdt_stop(wdd);
 		return ret;
 	}

@@ -1,10 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Windfarm PowerMac thermal control. SMU based 1 CPU desktop control loops
  *
  * (c) Copyright 2005 Benjamin Herrenschmidt, IBM Corp.
  *                    <benh@kernel.crashing.org>
- *
- * Released under the term of the GNU GPL v2.
  *
  * The algorithm used is the PID control algorithm, used the same
  * way the published Darwin code does, using the same values that
@@ -38,7 +37,8 @@
 #include <linux/kmod.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>
-#include <asm/prom.h>
+#include <linux/of.h>
+
 #include <asm/machdep.h>
 #include <asm/io.h>
 #include <asm/sections.h>
@@ -150,7 +150,7 @@ static void wf_smu_create_cpu_fans(void)
 
 	/* First, locate the PID params in SMU SBD */
 	hdr = smu_get_sdb_partition(SMU_SDB_CPUPIDDATA_ID, NULL);
-	if (hdr == 0) {
+	if (!hdr) {
 		printk(KERN_WARNING "windfarm: CPU PID fan config not found "
 		       "max fan speed\n");
 		goto fail;
@@ -168,8 +168,7 @@ static void wf_smu_create_cpu_fans(void)
 		tmax = 0x5e0000; /* 94 degree default */
 
 	/* Alloc & initialize state */
-	wf_smu_cpu_fans = kmalloc(sizeof(struct wf_smu_cpu_fans_state),
-				  GFP_KERNEL);
+	wf_smu_cpu_fans = kmalloc_obj(struct wf_smu_cpu_fans_state);
 	if (wf_smu_cpu_fans == NULL)
 		goto fail;
        	wf_smu_cpu_fans->ticks = 1;
@@ -200,7 +199,7 @@ static void wf_smu_create_cpu_fans(void)
 	wf_cpu_pid_init(&wf_smu_cpu_fans->pid, &pid_param);
 
 	DBG("wf: CPU Fan control initialized.\n");
-	DBG("    ttarged=%d.%03d, tmax=%d.%03d, min=%d RPM, max=%d RPM\n",
+	DBG("    ttarget=%d.%03d, tmax=%d.%03d, min=%d RPM, max=%d RPM\n",
 	    FIX32TOPRINT(pid_param.ttarget), FIX32TOPRINT(pid_param.tmax),
 	    pid_param.min, pid_param.max);
 
@@ -300,8 +299,7 @@ static void wf_smu_create_drive_fans(void)
 	};
 
 	/* Alloc & initialize state */
-	wf_smu_drive_fans = kmalloc(sizeof(struct wf_smu_drive_fans_state),
-					GFP_KERNEL);
+	wf_smu_drive_fans = kmalloc_obj(struct wf_smu_drive_fans_state);
 	if (wf_smu_drive_fans == NULL) {
 		printk(KERN_WARNING "windfarm: Memory allocation error"
 		       " max fan speed\n");
@@ -381,8 +379,7 @@ static void wf_smu_create_slots_fans(void)
 	};
 
 	/* Alloc & initialize state */
-	wf_smu_slots_fans = kmalloc(sizeof(struct wf_smu_slots_fans_state),
-					GFP_KERNEL);
+	wf_smu_slots_fans = kmalloc_obj(struct wf_smu_slots_fans_state);
 	if (wf_smu_slots_fans == NULL) {
 		printk(KERN_WARNING "windfarm: Memory allocation error"
 		       " max fan speed\n");
@@ -647,7 +644,7 @@ static int wf_smu_probe(struct platform_device *ddev)
 	return 0;
 }
 
-static int wf_smu_remove(struct platform_device *ddev)
+static void wf_smu_remove(struct platform_device *ddev)
 {
 	wf_unregister_client(&wf_smu_events);
 
@@ -691,13 +688,11 @@ static int wf_smu_remove(struct platform_device *ddev)
 	kfree(wf_smu_slots_fans);
 	kfree(wf_smu_drive_fans);
 	kfree(wf_smu_cpu_fans);
-
-	return 0;
 }
 
 static struct platform_driver wf_smu_driver = {
-        .probe = wf_smu_probe,
-        .remove = wf_smu_remove,
+	.probe = wf_smu_probe,
+	.remove = wf_smu_remove,
 	.driver = {
 		.name = "windfarm",
 	},

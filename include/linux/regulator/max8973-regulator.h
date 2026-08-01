@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * max8973-regulator.h -- MAXIM 8973 regulator
  *
@@ -7,21 +8,6 @@
  * Copyright (C) 2012 NVIDIA Corporation
 
  * Author: Laxman Dewangan <ldewangan@nvidia.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA	02110-1301, USA.
- *
  */
 
 #ifndef __LINUX_REGULATOR_MAX8973_H
@@ -62,10 +48,6 @@
  *		control signal from EN input pin. If it is false then
  *		voltage output will be enabled/disabled through EN bit of
  *		device register.
- * @enable_gpio: Enable GPIO. If EN pin is controlled through GPIO from host
- *		then GPIO number can be provided. If no GPIO controlled then
- *		it should be -1.
- * @dvs_gpio: GPIO for dvs. It should be -1 if this is tied with fixed logic.
  * @dvs_def_state: Default state of dvs. 1 if it is high else 0.
  */
 struct max8973_regulator_platform_data {
@@ -73,8 +55,6 @@ struct max8973_regulator_platform_data {
 	unsigned long control_flags;
 	unsigned long junction_temp_warning;
 	bool enable_ext_control;
-	int enable_gpio;
-	int dvs_gpio;
 	unsigned dvs_def_state:1;
 };
 

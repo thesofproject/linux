@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/media/radio/radio-si4713.c
  *
@@ -5,16 +6,6 @@
  *
  * Copyright (c) 2008 Instituto Nokia de Tecnologia - INdT
  * Contact: Eduardo Valentin <eduardo.valentin@nokia.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -67,14 +58,11 @@ static const struct v4l2_file_operations radio_si4713_fops = {
 static int radio_si4713_querycap(struct file *file, void *priv,
 					struct v4l2_capability *capability)
 {
-	strlcpy(capability->driver, "radio-si4713", sizeof(capability->driver));
-	strlcpy(capability->card, "Silicon Labs Si4713 Modulator",
+	strscpy(capability->driver, "radio-si4713", sizeof(capability->driver));
+	strscpy(capability->card, "Silicon Labs Si4713 Modulator",
 		sizeof(capability->card));
-	strlcpy(capability->bus_info, "platform:radio-si4713",
+	strscpy(capability->bus_info, "platform:radio-si4713",
 		sizeof(capability->bus_info));
-	capability->device_caps = V4L2_CAP_MODULATOR | V4L2_CAP_RDS_OUTPUT;
-	capability->capabilities = capability->device_caps | V4L2_CAP_DEVICE_CAPS;
-
 	return 0;
 }
 
@@ -87,42 +75,42 @@ static inline struct v4l2_device *get_v4l2_dev(struct file *file)
 	return &((struct radio_si4713_device *)video_drvdata(file))->v4l2_dev;
 }
 
-static int radio_si4713_g_modulator(struct file *file, void *p,
+static int radio_si4713_g_modulator(struct file *file, void *priv,
 				    struct v4l2_modulator *vm)
 {
 	return v4l2_device_call_until_err(get_v4l2_dev(file), 0, tuner,
 					  g_modulator, vm);
 }
 
-static int radio_si4713_s_modulator(struct file *file, void *p,
+static int radio_si4713_s_modulator(struct file *file, void *priv,
 				    const struct v4l2_modulator *vm)
 {
 	return v4l2_device_call_until_err(get_v4l2_dev(file), 0, tuner,
 					  s_modulator, vm);
 }
 
-static int radio_si4713_g_frequency(struct file *file, void *p,
+static int radio_si4713_g_frequency(struct file *file, void *priv,
 				    struct v4l2_frequency *vf)
 {
 	return v4l2_device_call_until_err(get_v4l2_dev(file), 0, tuner,
 					  g_frequency, vf);
 }
 
-static int radio_si4713_s_frequency(struct file *file, void *p,
+static int radio_si4713_s_frequency(struct file *file, void *priv,
 				    const struct v4l2_frequency *vf)
 {
 	return v4l2_device_call_until_err(get_v4l2_dev(file), 0, tuner,
 					  s_frequency, vf);
 }
 
-static long radio_si4713_default(struct file *file, void *p,
+static long radio_si4713_default(struct file *file, void *priv,
 				 bool valid_prio, unsigned int cmd, void *arg)
 {
 	return v4l2_device_call_until_err(get_v4l2_dev(file), 0, core,
 					  ioctl, cmd, arg);
 }
 
-static struct v4l2_ioctl_ops radio_si4713_ioctl_ops = {
+static const struct v4l2_ioctl_ops radio_si4713_ioctl_ops = {
 	.vidioc_querycap	= radio_si4713_querycap,
 	.vidioc_g_modulator	= radio_si4713_g_modulator,
 	.vidioc_s_modulator	= radio_si4713_s_modulator,
@@ -184,6 +172,7 @@ static int radio_si4713_pdriver_probe(struct platform_device *pdev)
 	rsdev->radio_dev.ctrl_handler = sd->ctrl_handler;
 	/* Serialize all access to the si4713 */
 	rsdev->radio_dev.lock = &rsdev->lock;
+	rsdev->radio_dev.device_caps = V4L2_CAP_MODULATOR | V4L2_CAP_RDS_OUTPUT;
 	video_set_drvdata(&rsdev->radio_dev, rsdev);
 	if (video_register_device(&rsdev->radio_dev, VFL_TYPE_RADIO, radio_nr)) {
 		dev_err(&pdev->dev, "Could not register video device.\n");
@@ -201,7 +190,7 @@ exit:
 }
 
 /* radio_si4713_pdriver_remove - remove the device */
-static int radio_si4713_pdriver_remove(struct platform_device *pdev)
+static void radio_si4713_pdriver_remove(struct platform_device *pdev)
 {
 	struct v4l2_device *v4l2_dev = platform_get_drvdata(pdev);
 	struct radio_si4713_device *rsdev;
@@ -209,8 +198,6 @@ static int radio_si4713_pdriver_remove(struct platform_device *pdev)
 	rsdev = container_of(v4l2_dev, struct radio_si4713_device, v4l2_dev);
 	video_unregister_device(&rsdev->radio_dev);
 	v4l2_device_unregister(&rsdev->v4l2_dev);
-
-	return 0;
 }
 
 static struct platform_driver radio_si4713_pdriver = {

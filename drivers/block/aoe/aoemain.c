@@ -16,6 +16,7 @@ MODULE_DESCRIPTION("AoE block/char driver for 2.6.2 and newer 2.6 kernels");
 MODULE_VERSION(VERSION);
 
 static struct timer_list timer;
+struct workqueue_struct *aoe_wq;
 
 static void discover_timer(struct timer_list *t)
 {
@@ -24,10 +25,10 @@ static void discover_timer(struct timer_list *t)
 	aoecmd_cfg(0xffff, 0xff);
 }
 
-static void
+static void __exit
 aoe_exit(void)
 {
-	del_timer_sync(&timer);
+	timer_delete_sync(&timer);
 
 	aoenet_exit();
 	unregister_blkdev(AOE_MAJOR, DEVICE_NAME);
@@ -35,6 +36,7 @@ aoe_exit(void)
 	aoechr_exit();
 	aoedev_exit();
 	aoeblk_exit();		/* free cache after de-allocating bufs */
+	destroy_workqueue(aoe_wq);
 }
 
 static int __init
@@ -42,9 +44,13 @@ aoe_init(void)
 {
 	int ret;
 
+	aoe_wq = alloc_workqueue("aoe_wq", WQ_PERCPU, 0);
+	if (!aoe_wq)
+		return -ENOMEM;
+
 	ret = aoedev_init();
 	if (ret)
-		return ret;
+		goto dev_fail;
 	ret = aoechr_init();
 	if (ret)
 		goto chr_fail;
@@ -77,6 +83,8 @@ aoe_init(void)
 	aoechr_exit();
  chr_fail:
 	aoedev_exit();
+ dev_fail:
+	destroy_workqueue(aoe_wq);
 
 	printk(KERN_INFO "aoe: initialisation failure.\n");
 	return ret;

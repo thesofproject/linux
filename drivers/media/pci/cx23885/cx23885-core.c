@@ -1,18 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for the Conexant CX23885 PCIe bridge
  *
  *  Copyright (c) 2006 Steven Toth <stoth@linuxtv.org>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *
- *  GNU General Public License for more details.
  */
 
 #include "cx23885.h"
@@ -23,6 +13,7 @@
 #include <linux/moduleparam.h>
 #include <linux/kmod.h>
 #include <linux/kernel.h>
+#include <linux/pci.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
@@ -41,9 +32,26 @@ MODULE_AUTHOR("Steven Toth <stoth@linuxtv.org>");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(CX23885_VERSION);
 
+/*
+ * Some platforms have been found to require periodic resetting of the DMA
+ * engine. Ryzen and XEON platforms are known to be affected. The symptom
+ * encountered is "mpeg risc op code error". Only Ryzen platforms employ
+ * this workaround if the option equals 1. The workaround can be explicitly
+ * disabled for all platforms by setting to 0, the workaround can be forced
+ * on for any platform by setting to 2.
+ */
+static unsigned int dma_reset_workaround = 1;
+module_param(dma_reset_workaround, int, 0644);
+MODULE_PARM_DESC(dma_reset_workaround, "periodic RiSC dma engine reset; 0-force disable, 1-driver detect (default), 2-force enable");
+
 static unsigned int debug;
 module_param(debug, int, 0644);
 MODULE_PARM_DESC(debug, "enable debug messages");
+
+static unsigned int disable_analog_video[8] = { 0, 0, 0, 0, 0, 0, 0, 0};
+static int disable_analog_argc;
+module_param_array(disable_analog_video, int, &disable_analog_argc, 0644);
+MODULE_PARM_DESC(disable_analog_video, "disable analog video for card type");
 
 static unsigned int card[]  = {[0 ... (CX23885_MAXBOARDS - 1)] = UNSET };
 module_param_array(card,  int, NULL, 0444);
@@ -422,19 +430,30 @@ static void cx23885_wakeup(struct cx23885_tsport *port,
 			   struct cx23885_dmaqueue *q, u32 count)
 {
 	struct cx23885_buffer *buf;
+	int count_delta;
+	int max_buf_done = 5; /* service maximum five buffers */
 
-	if (list_empty(&q->active))
-		return;
-	buf = list_entry(q->active.next,
-			 struct cx23885_buffer, queue);
+	do {
+		if (list_empty(&q->active))
+			return;
+		buf = list_entry(q->active.next,
+				 struct cx23885_buffer, queue);
 
-	buf->vb.vb2_buf.timestamp = ktime_get_ns();
-	buf->vb.sequence = q->count++;
-	dprintk(1, "[%p/%d] wakeup reg=%d buf=%d\n", buf,
-		buf->vb.vb2_buf.index,
-		count, q->count);
-	list_del(&buf->queue);
-	vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
+		buf->vb.vb2_buf.timestamp = ktime_get_ns();
+		buf->vb.sequence = q->count++;
+		if (count != (q->count % 65536)) {
+			dprintk(1, "[%p/%d] wakeup reg=%d buf=%d\n", buf,
+				buf->vb.vb2_buf.index, count, q->count);
+		} else {
+			dprintk(7, "[%p/%d] wakeup reg=%d buf=%d\n", buf,
+				buf->vb.vb2_buf.index, count, q->count);
+		}
+		list_del(&buf->queue);
+		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
+		max_buf_done--;
+		/* count register is 16 bits so apply modulo appropriately */
+		count_delta = ((int)count - (int)(q->count % 65536));
+	} while ((count_delta > 0) && (max_buf_done > 0));
 }
 
 int cx23885_sram_channel_setup(struct cx23885_dev *dev,
@@ -540,14 +559,14 @@ void cx23885_sram_channel_dump(struct cx23885_dev *dev,
 
 	for (i = 0; i < 4; i++) {
 		risc = cx_read(ch->cmds_start + 4 * (i + 14));
-		pr_warn("%s:   risc%d: ", dev->name, i);
+		pr_warn("%s:   risc%d:", dev->name, i);
 		cx23885_risc_decode(risc);
 	}
 	for (i = 0; i < (64 >> 2); i += n) {
 		risc = cx_read(ch->ctrl_start + 4 * i);
 		/* No consideration for bits 63-32 */
 
-		pr_warn("%s:   (0x%08x) iq %x: ", dev->name,
+		pr_warn("%s:   (0x%08x) iq %x:", dev->name,
 			ch->ctrl_start + 4 * i, i);
 		n = cx23885_risc_decode(risc);
 		for (j = 1; j < n; j++) {
@@ -580,13 +599,37 @@ static void cx23885_risc_disasm(struct cx23885_tsport *port,
 	pr_info("%s: risc disasm: %p [dma=0x%08lx]\n",
 	       dev->name, risc->cpu, (unsigned long)risc->dma);
 	for (i = 0; i < (risc->size >> 2); i += n) {
-		pr_info("%s:   %04d: ", dev->name, i);
+		pr_info("%s:   %04d:", dev->name, i);
 		n = cx23885_risc_decode(le32_to_cpu(risc->cpu[i]));
 		for (j = 1; j < n; j++)
 			pr_info("%s:   %04d: 0x%08x [ arg #%d ]\n",
 				dev->name, i + j, risc->cpu[i + j], j);
 		if (risc->cpu[i] == cpu_to_le32(RISC_JUMP))
 			break;
+	}
+}
+
+static void cx23885_clear_bridge_error(struct cx23885_dev *dev)
+{
+	uint32_t reg1_val, reg2_val;
+
+	if (!dev->need_dma_reset)
+		return;
+
+	reg1_val = cx_read(TC_REQ); /* read-only */
+	reg2_val = cx_read(TC_REQ_SET);
+
+	if (reg1_val && reg2_val) {
+		cx_write(TC_REQ, reg1_val);
+		cx_write(TC_REQ_SET, reg2_val);
+		cx_read(VID_B_DMA);
+		cx_read(VBI_B_DMA);
+		cx_read(VID_C_DMA);
+		cx_read(VBI_C_DMA);
+
+		dev_info(&dev->pci->dev,
+			"dma in progress detected 0x%08x 0x%08x, clearing\n",
+			reg1_val, reg2_val);
 	}
 }
 
@@ -635,7 +678,9 @@ static void cx23885_reset(struct cx23885_dev *dev)
 	cx_write(CLK_DELAY, cx_read(CLK_DELAY) & 0x80000000);
 	cx_write(PAD_CTRL, 0x00500300);
 
-	mdelay(100);
+	/* clear dma in progress */
+	cx23885_clear_bridge_error(dev);
+	msleep(100);
 
 	cx23885_sram_channel_setup(dev, &dev->sram_channels[SRAM_CH01],
 		720*4, 0);
@@ -651,6 +696,11 @@ static void cx23885_reset(struct cx23885_dev *dev)
 	cx23885_sram_channel_setup(dev, &dev->sram_channels[SRAM_CH09], 128, 0);
 
 	cx23885_gpio_setup(dev);
+
+	cx23885_irq_get_mask(dev);
+
+	/* clear dma in progress */
+	cx23885_clear_bridge_error(dev);
 }
 
 
@@ -665,6 +715,8 @@ static int cx23885_pci_quirks(struct cx23885_dev *dev)
 	if (dev->bridge == CX23885_BRIDGE_885)
 		cx_clear(RDR_TLCTL0, 1 << 4);
 
+	/* clear dma in progress */
+	cx23885_clear_bridge_error(dev);
 	return 0;
 }
 
@@ -877,6 +929,13 @@ static int cx23885_dev_setup(struct cx23885_dev *dev)
 			dev->board = CX23885_BOARD_HAUPPAUGE_QUADHD_DVB_885;
 	}
 
+	for (i = 0; i < disable_analog_argc; i++) {
+		if (disable_analog_video[i] == dev->board) {
+			pr_warn("Disabling analog for board %d\n", dev->board);
+			dev->disable_analog = 1;
+		}
+	}
+
 	/* If the user specific a clk freq override, apply it */
 	if (cx23885_boards[dev->board].clk_freq > 0)
 		dev->clk_freq = cx23885_boards[dev->board].clk_freq;
@@ -943,8 +1002,12 @@ static int cx23885_dev_setup(struct cx23885_dev *dev)
 	}
 
 	/* PCIe stuff */
-	dev->lmmio = ioremap(pci_resource_start(dev->pci, 0),
-			     pci_resource_len(dev->pci, 0));
+	dev->lmmio = pci_ioremap_bar(dev->pci, 0);
+	if (!dev->lmmio) {
+		dev_err(&dev->pci->dev, "CORE %s: can't ioremap MMIO memory\n",
+			dev->name);
+		goto err_release_region;
+	}
 
 	dev->bmmio = (u8 __iomem *)dev->lmmio;
 
@@ -996,7 +1059,8 @@ static int cx23885_dev_setup(struct cx23885_dev *dev)
 		cx23885_gpio_enable(dev, 0x300, 0);
 	}
 
-	if (cx23885_boards[dev->board].porta == CX23885_ANALOG_VIDEO) {
+	if (cx23885_boards[dev->board].porta == CX23885_ANALOG_VIDEO &&
+	    !dev->disable_analog) {
 		if (cx23885_video_register(dev) < 0) {
 			pr_err("%s() Failed to register analog video adapters on VID_A\n",
 			       __func__);
@@ -1049,6 +1113,12 @@ static int cx23885_dev_setup(struct cx23885_dev *dev)
 	}
 
 	return 0;
+
+err_release_region:
+	release_mem_region(pci_resource_start(dev->pci, 0),
+			   pci_resource_len(dev->pci, 0));
+	cx23885_devcount--;
+	return -ENODEV;
 }
 
 static void cx23885_dev_unregister(struct cx23885_dev *dev)
@@ -1171,7 +1241,8 @@ int cx23885_risc_buffer(struct pci_dev *pci, struct cx23885_riscmem *risc,
 		/ PAGE_SIZE + lines);
 	instructions += 5;
 	risc->size = instructions * 12;
-	risc->cpu = pci_alloc_consistent(pci, risc->size, &risc->dma);
+	risc->cpu = dma_alloc_coherent(&pci->dev, risc->size, &risc->dma,
+				       GFP_KERNEL);
 	if (risc->cpu == NULL)
 		return -ENOMEM;
 
@@ -1208,7 +1279,8 @@ int cx23885_risc_databuffer(struct pci_dev *pci,
 	instructions += 4;
 
 	risc->size = instructions * 12;
-	risc->cpu = pci_alloc_consistent(pci, risc->size, &risc->dma);
+	risc->cpu = dma_alloc_coherent(&pci->dev, risc->size, &risc->dma,
+				       GFP_KERNEL);
 	if (risc->cpu == NULL)
 		return -ENOMEM;
 
@@ -1246,7 +1318,8 @@ int cx23885_risc_vbibuffer(struct pci_dev *pci, struct cx23885_riscmem *risc,
 		/ PAGE_SIZE + lines);
 	instructions += 5;
 	risc->size = instructions * 12;
-	risc->cpu = pci_alloc_consistent(pci, risc->size, &risc->dma);
+	risc->cpu = dma_alloc_coherent(&pci->dev, risc->size, &risc->dma,
+				       GFP_KERNEL);
 	if (risc->cpu == NULL)
 		return -ENOMEM;
 	/* write risc instructions */
@@ -1275,8 +1348,9 @@ void cx23885_free_buffer(struct cx23885_dev *dev, struct cx23885_buffer *buf)
 {
 	struct cx23885_riscmem *risc = &buf->risc;
 
-	BUG_ON(in_interrupt());
-	pci_free_consistent(dev->pci, risc->size, risc->cpu, risc->dma);
+	if (risc->cpu)
+		dma_free_coherent(&dev->pci->dev, risc->size, risc->cpu, risc->dma);
+	memset(risc, 0, sizeof(*risc));
 }
 
 static void cx23885_tsport_reg_dump(struct cx23885_tsport *port)
@@ -1329,6 +1403,18 @@ static void cx23885_tsport_reg_dump(struct cx23885_tsport *port)
 		port->reg_ts_clk_en, cx_read(port->reg_ts_clk_en));
 	dprintk(1, "%s() ts_int_msk(0x%08X)     0x%08x\n", __func__,
 		port->reg_ts_int_msk, cx_read(port->reg_ts_int_msk));
+	dprintk(1, "%s() ts_int_status(0x%08X)  0x%08x\n", __func__,
+		port->reg_ts_int_stat, cx_read(port->reg_ts_int_stat));
+	dprintk(1, "%s() PCI_INT_STAT           0x%08X\n", __func__,
+		cx_read(PCI_INT_STAT));
+	dprintk(1, "%s() VID_B_INT_MSTAT        0x%08X\n", __func__,
+		cx_read(VID_B_INT_MSTAT));
+	dprintk(1, "%s() VID_B_INT_SSTAT        0x%08X\n", __func__,
+		cx_read(VID_B_INT_SSTAT));
+	dprintk(1, "%s() VID_C_INT_MSTAT        0x%08X\n", __func__,
+		cx_read(VID_C_INT_MSTAT));
+	dprintk(1, "%s() VID_C_INT_SSTAT        0x%08X\n", __func__,
+		cx_read(VID_C_INT_SSTAT));
 }
 
 int cx23885_start_dma(struct cx23885_tsport *port,
@@ -1340,6 +1426,9 @@ int cx23885_start_dma(struct cx23885_tsport *port,
 
 	dprintk(1, "%s() w: %d, h: %d, f: %d\n", __func__,
 		dev->width, dev->height, dev->field);
+
+	/* clear dma in progress */
+	cx23885_clear_bridge_error(dev);
 
 	/* Stop the fifo and risc engine for this port */
 	cx_clear(port->reg_dma_ctl, port->dma_ctl_val);
@@ -1410,8 +1499,15 @@ int cx23885_start_dma(struct cx23885_tsport *port,
 		reg = reg | 0xa;
 		cx_write(PAD_CTRL, reg);
 
-		/* FIXME and these two registers should be documented. */
+		/* Sets MOE_CLK_DIS to disable MoE clock */
+		/* sets MCLK_DLY_SEL/BCLK_DLY_SEL to 1 buffer delay each */
 		cx_write(CLK_DELAY, cx_read(CLK_DELAY) | 0x80000011);
+
+		/* ALT_GPIO_ALT_SET: GPIO[0]
+		 * IR_ALT_TX_SEL: GPIO[1]
+		 * GPIO1_ALT_SEL: VIP_656_DATA[0]
+		 * GPIO0_ALT_SEL: VIP_656_CLK
+		 */
 		cx_write(ALT_PIN_OUT_SEL, 0x10100045);
 	}
 
@@ -1421,22 +1517,37 @@ int cx23885_start_dma(struct cx23885_tsport *port,
 	case CX23885_BRIDGE_888:
 		/* enable irqs */
 		dprintk(1, "%s() enabling TS int's and DMA\n", __func__);
+		/* clear dma in progress */
+		cx23885_clear_bridge_error(dev);
 		cx_set(port->reg_ts_int_msk,  port->ts_int_msk_val);
 		cx_set(port->reg_dma_ctl, port->dma_ctl_val);
+
+		/* clear dma in progress */
+		cx23885_clear_bridge_error(dev);
 		cx23885_irq_add(dev, port->pci_irqmask);
 		cx23885_irq_enable_all(dev);
+
+		/* clear dma in progress */
+		cx23885_clear_bridge_error(dev);
 		break;
 	default:
 		BUG();
 	}
 
 	cx_set(DEV_CNTRL2, (1<<5)); /* Enable RISC controller */
+	/* clear dma in progress */
+	cx23885_clear_bridge_error(dev);
 
 	if (cx23885_boards[dev->board].portb == CX23885_MPEG_ENCODER)
 		cx23885_av_clk(dev, 1);
 
 	if (debug > 4)
 		cx23885_tsport_reg_dump(port);
+
+	cx23885_irq_get_mask(dev);
+
+	/* clear dma in progress */
+	cx23885_clear_bridge_error(dev);
 
 	return 0;
 }
@@ -1445,15 +1556,28 @@ static int cx23885_stop_dma(struct cx23885_tsport *port)
 {
 	struct cx23885_dev *dev = port->dev;
 	u32 reg;
+	int delay = 0;
+	uint32_t reg1_val;
+	uint32_t reg2_val;
 
 	dprintk(1, "%s()\n", __func__);
 
 	/* Stop interrupts and DMA */
 	cx_clear(port->reg_ts_int_msk, port->ts_int_msk_val);
 	cx_clear(port->reg_dma_ctl, port->dma_ctl_val);
+	/* just in case wait for any dma to complete before allowing dealloc */
+	mdelay(20);
+	for (delay = 0; delay < 100; delay++) {
+		reg1_val = cx_read(TC_REQ);
+		reg2_val = cx_read(TC_REQ_SET);
+		if (reg1_val == 0 || reg2_val == 0)
+			break;
+		mdelay(1);
+	}
+	dev_dbg(&dev->pci->dev, "delay=%d reg1=0x%08x reg2=0x%08x\n",
+		delay, reg1_val, reg2_val);
 
 	if (cx23885_boards[dev->board].portb == CX23885_MPEG_ENCODER) {
-
 		reg = cx_read(PAD_CTRL);
 
 		/* Set TS1_OE */
@@ -1464,7 +1588,6 @@ static int cx23885_stop_dma(struct cx23885_tsport *port)
 		cx_write(PAD_CTRL, reg);
 		cx_write(port->reg_src_sel, 0);
 		cx_write(port->reg_gen_ctrl, 8);
-
 	}
 
 	if (cx23885_boards[dev->board].portb == CX23885_MPEG_ENCODER)
@@ -1693,6 +1816,12 @@ static irqreturn_t cx23885_irq(int irq, void *dev_id)
 
 	pci_status = cx_read(PCI_INT_STAT);
 	pci_mask = cx23885_irq_get_mask(dev);
+	if ((pci_status & pci_mask) == 0) {
+		dprintk(7, "pci_status: 0x%08x  pci_mask: 0x%08x\n",
+			pci_status, pci_mask);
+		goto out;
+	}
+
 	vida_status = cx_read(VID_A_INT_STAT);
 	vida_mask = cx_read(VID_A_INT_MSK);
 	audint_status = cx_read(AUDIO_INT_INT_STAT);
@@ -1702,7 +1831,9 @@ static irqreturn_t cx23885_irq(int irq, void *dev_id)
 	ts2_status = cx_read(VID_C_INT_STAT);
 	ts2_mask = cx_read(VID_C_INT_MSK);
 
-	if ((pci_status == 0) && (ts2_status == 0) && (ts1_status == 0))
+	if (((pci_status & pci_mask) == 0) &&
+		((ts2_status & ts2_mask) == 0) &&
+		((ts1_status & ts1_mask) == 0))
 		goto out;
 
 	vida_count = cx_read(VID_A_GPCNT);
@@ -1829,7 +1960,7 @@ static irqreturn_t cx23885_irq(int irq, void *dev_id)
 	}
 
 	if (handled)
-		cx_write(PCI_INT_STAT, pci_status);
+		cx_write(PCI_INT_STAT, pci_status & pci_mask);
 out:
 	return IRQ_RETVAL(handled);
 }
@@ -1882,9 +2013,9 @@ static inline int encoder_on_portc(struct cx23885_dev *dev)
  * and report errors if we think we're tampering with a GPIo that might
  * be assigned to the encoder (and used for the host bus).
  *
- * GPIO  2 thru  0 - On the cx23885 bridge
- * GPIO 18 thru  3 - On the cx23417 host bus interface
- * GPIO 23 thru 19 - On the cx25840 a/v core
+ * GPIO  2 through  0 - On the cx23885 bridge
+ * GPIO 18 through  3 - On the cx23417 host bus interface
+ * GPIO 23 through 19 - On the cx25840 a/v core
  */
 void cx23885_gpio_set(struct cx23885_dev *dev, u32 mask)
 {
@@ -1962,6 +2093,53 @@ void cx23885_gpio_enable(struct cx23885_dev *dev, u32 mask, int asoutput)
 	/* TODO: 23-19 */
 }
 
+static struct {
+	int vendor, dev;
+} const broken_dev_id[] = {
+	/* According with
+	 * https://openbenchmarking.org/system/1703021-RI-AMDZEN08075/Ryzen%207%201800X/lspci,
+	 * 0x1451 is PCI ID for the IOMMU found on Ryzen
+	 */
+	{ PCI_VENDOR_ID_AMD, 0x1451 },
+	/* According to sudo lspci -nn,
+	 * 0x1423 is the PCI ID for the IOMMU found on Kaveri
+	 */
+	{ PCI_VENDOR_ID_AMD, 0x1423 },
+	/* 0x1481 is the PCI ID for the IOMMU found on Starship/Matisse
+	 */
+	{ PCI_VENDOR_ID_AMD, 0x1481 },
+	/* 0x1419 is the PCI ID for the IOMMU found on 15h (Models 10h-1fh) family
+	 */
+	{ PCI_VENDOR_ID_AMD, 0x1419 },
+	/* 0x1631 is the PCI ID for the IOMMU found on Renoir/Cezanne
+	 */
+	{ PCI_VENDOR_ID_AMD, 0x1631 },
+	/* 0x5a23 is the PCI ID for the IOMMU found on RD890S/RD990
+	 */
+	{ PCI_VENDOR_ID_ATI, 0x5a23 },
+};
+
+static bool cx23885_does_need_dma_reset(void)
+{
+	int i;
+	struct pci_dev *pdev = NULL;
+
+	if (dma_reset_workaround == 0)
+		return false;
+	else if (dma_reset_workaround == 2)
+		return true;
+
+	for (i = 0; i < ARRAY_SIZE(broken_dev_id); i++) {
+		pdev = pci_get_device(broken_dev_id[i].vendor,
+				      broken_dev_id[i].dev, NULL);
+		if (pdev) {
+			pci_dev_put(pdev);
+			return true;
+		}
+	}
+	return false;
+}
+
 static int cx23885_initdev(struct pci_dev *pci_dev,
 			   const struct pci_device_id *pci_id)
 {
@@ -1969,9 +2147,11 @@ static int cx23885_initdev(struct pci_dev *pci_dev,
 	struct v4l2_ctrl_handler *hdl;
 	int err;
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	if (NULL == dev)
 		return -ENOMEM;
+
+	dev->need_dma_reset = cx23885_does_need_dma_reset();
 
 	err = v4l2_device_register(&pci_dev->dev, &dev->v4l2_dev);
 	if (err < 0)
@@ -2010,10 +2190,10 @@ static int cx23885_initdev(struct pci_dev *pci_dev,
 		(unsigned long long)pci_resource_start(pci_dev, 0));
 
 	pci_set_master(pci_dev);
-	err = pci_set_dma_mask(pci_dev, 0xffffffff);
+	err = dma_set_mask(&pci_dev->dev, 0xffffffff);
 	if (err) {
 		pr_err("%s/0: Oops: no 32bit PCI DMA ???\n", dev->name);
-		goto fail_ctrl;
+		goto fail_dma_set_mask;
 	}
 
 	err = request_irq(pci_dev->irq, cx23885_irq,
@@ -2021,7 +2201,7 @@ static int cx23885_initdev(struct pci_dev *pci_dev,
 	if (err < 0) {
 		pr_err("%s: can't get IRQ %d\n",
 		       dev->name, pci_dev->irq);
-		goto fail_irq;
+		goto fail_dma_set_mask;
 	}
 
 	switch (dev->board) {
@@ -2043,7 +2223,7 @@ static int cx23885_initdev(struct pci_dev *pci_dev,
 
 	return 0;
 
-fail_irq:
+fail_dma_set_mask:
 	cx23885_dev_unregister(dev);
 fail_ctrl:
 	v4l2_ctrl_handler_free(hdl);
@@ -2074,6 +2254,28 @@ static void cx23885_finidev(struct pci_dev *pci_dev)
 	kfree(dev);
 }
 
+static int __maybe_unused cx23885_suspend(struct device *dev_d)
+{
+	struct pci_dev *pci_dev = to_pci_dev(dev_d);
+	struct v4l2_device *v4l2_dev = pci_get_drvdata(pci_dev);
+	struct cx23885_dev *dev = to_cx23885(v4l2_dev);
+
+	cx23885_shutdown(dev);
+
+	return 0;
+}
+
+static int __maybe_unused cx23885_resume(struct device *dev_d)
+{
+	struct pci_dev *pci_dev = to_pci_dev(dev_d);
+	struct v4l2_device *v4l2_dev = pci_get_drvdata(pci_dev);
+	struct cx23885_dev *dev = to_cx23885(v4l2_dev);
+
+	cx23885_reset(dev);
+
+	return 0;
+}
+
 static const struct pci_device_id cx23885_pci_tbl[] = {
 	{
 		/* CX23885 */
@@ -2093,14 +2295,14 @@ static const struct pci_device_id cx23885_pci_tbl[] = {
 };
 MODULE_DEVICE_TABLE(pci, cx23885_pci_tbl);
 
+static SIMPLE_DEV_PM_OPS(cx23885_pm_ops, cx23885_suspend, cx23885_resume);
+
 static struct pci_driver cx23885_pci_driver = {
-	.name     = "cx23885",
-	.id_table = cx23885_pci_tbl,
-	.probe    = cx23885_initdev,
-	.remove   = cx23885_finidev,
-	/* TODO */
-	.suspend  = NULL,
-	.resume   = NULL,
+	.name      = "cx23885",
+	.id_table  = cx23885_pci_tbl,
+	.probe     = cx23885_initdev,
+	.remove    = cx23885_finidev,
+	.driver.pm = &cx23885_pm_ops,
 };
 
 static int __init cx23885_init(void)

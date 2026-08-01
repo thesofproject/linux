@@ -1,14 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Apple Onboard Audio definitions
  *
  * Copyright 2006 Johannes Berg <johannes@sipsolutions.net>
- *
- * GPL v2, can be found in COPYING.
  */
 
 #ifndef __AOA_H
 #define __AOA_H
-#include <asm/prom.h>
 #include <linux/module.h>
 #include <sound/core.h>
 #include <sound/asound.h>
@@ -50,7 +48,7 @@ struct aoa_codec {
 	u32 connected;
 
 	/* data the fabric can associate with this structure */
-	void *fabric_data;
+	const void *fabric_data;
 
 	/* private! */
 	struct list_head list;
@@ -117,7 +115,7 @@ struct aoa_card {
 };
         
 extern int aoa_snd_device_new(enum snd_device_type type,
-	void * device_data, struct snd_device_ops * ops);
+	void *device_data, const struct snd_device_ops *ops);
 extern struct snd_card *aoa_get_card(void);
 extern int aoa_snd_ctl_add(struct snd_kcontrol* control);
 

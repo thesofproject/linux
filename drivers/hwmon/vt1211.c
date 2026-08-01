@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * vt1211.c - driver for the VIA VT1211 Super-I/O chip integrated hardware
  *            monitoring features
@@ -5,20 +6,6 @@
  *
  * This driver is based on the driver for kernel 2.4 by Mark D. Studebaker
  * and its port to kernel 2.6 by Lars Ekman.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -118,7 +105,7 @@ struct vt1211_data {
 	struct device *hwmon_dev;
 
 	struct mutex update_lock;
-	char valid;			/* !=0 if following fields are valid */
+	bool valid;			/* true if following fields are valid */
 	unsigned long last_updated;	/* In jiffies */
 
 	/* Register values */
@@ -155,9 +142,15 @@ struct vt1211_data {
  * in5 (ix = 5) is special. It's the internal 3.3V so it's scaled in the
  * driver according to the VT1211 BIOS porting guide
  */
-#define IN_FROM_REG(ix, reg)	((reg) < 3 ? 0 : (ix) == 5 ? \
-				 (((reg) - 3) * 15882 + 479) / 958 : \
-				 (((reg) - 3) * 10000 + 479) / 958)
+static int in_from_reg(int ix, int reg)
+{
+	if (reg < 3)
+		return 0;
+	if (ix == 5)
+		return ((reg - 3) * 15882 + 479) / 958;
+	return ((reg - 3) * 10000 + 479) / 958;
+}
+
 #define IN_TO_REG(ix, val)	(clamp_val((ix) == 5 ? \
 				 ((val) * 958 + 7941) / 15882 + 3 : \
 				 ((val) * 958 + 5000) / 10000 + 3, 0, 255))
@@ -169,10 +162,15 @@ struct vt1211_data {
  * temp3-7 are thermistor based so the driver returns the voltage measured at
  * the pin (range 0V - 2.2V).
  */
-#define TEMP_FROM_REG(ix, reg)	((ix) == 0 ? (reg) * 1000 : \
-				 (ix) == 1 ? (reg) < 51 ? 0 : \
-				 ((reg) - 51) * 1000 : \
-				 ((253 - (reg)) * 2200 + 105) / 210)
+static int temp_from_reg(int ix, int reg)
+{
+	if (ix == 0)
+		return reg * 1000;
+	if (ix == 1)
+		return reg < 51 ? 0 : (reg - 51) * 1000;
+	return ((253 - reg) * 2200 + 105) / 210;
+}
+
 #define TEMP_TO_REG(ix, val)	clamp_val( \
 				 ((ix) == 0 ? ((val) + 500) / 1000 : \
 				  (ix) == 1 ? ((val) + 500) / 1000 + 51 : \
@@ -180,8 +178,14 @@ struct vt1211_data {
 
 #define DIV_FROM_REG(reg)	(1 << (reg))
 
-#define RPM_FROM_REG(reg, div)	(((reg) == 0) || ((reg) == 255) ? 0 : \
-				 1310720 / (reg) / DIV_FROM_REG(div))
+static int rpm_from_reg(int reg, int div)
+{
+	if (reg == 0 || reg == 255)
+		return 0;
+
+	return 1310720 / reg / DIV_FROM_REG(div);
+}
+
 #define RPM_TO_REG(val, div)	((val) == 0 ? 255 : \
 				 clamp_val((1310720 / (val) / \
 				 DIV_FROM_REG(div)), 1, 254))
@@ -208,12 +212,6 @@ struct vt1211_data {
 /* VT1211 logical device numbers */
 #define SIO_VT1211_LDN_HWMON	0x0b	/* HW monitor */
 
-static inline void superio_outb(int sio_cip, int reg, int val)
-{
-	outb(reg, sio_cip);
-	outb(val, sio_cip + 1);
-}
-
 static inline int superio_inb(int sio_cip, int reg)
 {
 	outb(reg, sio_cip);
@@ -226,15 +224,21 @@ static inline void superio_select(int sio_cip, int ldn)
 	outb(ldn, sio_cip + 1);
 }
 
-static inline void superio_enter(int sio_cip)
+static inline int superio_enter(int sio_cip)
 {
+	if (!request_muxed_region(sio_cip, 2, DRVNAME))
+		return -EBUSY;
+
 	outb(0x87, sio_cip);
 	outb(0x87, sio_cip);
+
+	return 0;
 }
 
 static inline void superio_exit(int sio_cip)
 {
 	outb(0xaa, sio_cip);
+	release_region(sio_cip, 2);
 }
 
 /* ---------------------------------------------------------------------
@@ -326,7 +330,7 @@ static struct vt1211_data *vt1211_update_device(struct device *dev)
 				vt1211_read8(data, VT1211_REG_ALARM1);
 
 		data->last_updated = jiffies;
-		data->valid = 1;
+		data->valid = true;
 	}
 
 	mutex_unlock(&data->update_lock);
@@ -356,13 +360,13 @@ static ssize_t show_in(struct device *dev, struct device_attribute *attr,
 
 	switch (fn) {
 	case SHOW_IN_INPUT:
-		res = IN_FROM_REG(ix, data->in[ix]);
+		res = in_from_reg(ix, data->in[ix]);
 		break;
 	case SHOW_SET_IN_MIN:
-		res = IN_FROM_REG(ix, data->in_min[ix]);
+		res = in_from_reg(ix, data->in_min[ix]);
 		break;
 	case SHOW_SET_IN_MAX:
-		res = IN_FROM_REG(ix, data->in_max[ix]);
+		res = in_from_reg(ix, data->in_max[ix]);
 		break;
 	case SHOW_IN_ALARM:
 		res = (data->alarms >> bitalarmin[ix]) & 1;
@@ -430,13 +434,13 @@ static ssize_t show_temp(struct device *dev, struct device_attribute *attr,
 
 	switch (fn) {
 	case SHOW_TEMP_INPUT:
-		res = TEMP_FROM_REG(ix, data->temp[ix]);
+		res = temp_from_reg(ix, data->temp[ix]);
 		break;
 	case SHOW_SET_TEMP_MAX:
-		res = TEMP_FROM_REG(ix, data->temp_max[ix]);
+		res = temp_from_reg(ix, data->temp_max[ix]);
 		break;
 	case SHOW_SET_TEMP_MAX_HYST:
-		res = TEMP_FROM_REG(ix, data->temp_hyst[ix]);
+		res = temp_from_reg(ix, data->temp_hyst[ix]);
 		break;
 	case SHOW_TEMP_ALARM:
 		res = (data->alarms >> bitalarmtemp[ix]) & 1;
@@ -506,10 +510,10 @@ static ssize_t show_fan(struct device *dev, struct device_attribute *attr,
 
 	switch (fn) {
 	case SHOW_FAN_INPUT:
-		res = RPM_FROM_REG(data->fan[ix], data->fan_div[ix]);
+		res = rpm_from_reg(data->fan[ix], data->fan_div[ix]);
 		break;
 	case SHOW_SET_FAN_MIN:
-		res = RPM_FROM_REG(data->fan_min[ix], data->fan_div[ix]);
+		res = rpm_from_reg(data->fan_min[ix], data->fan_div[ix]);
 		break;
 	case SHOW_SET_FAN_DIV:
 		res = DIV_FROM_REG(data->fan_div[ix]);
@@ -764,7 +768,7 @@ static ssize_t show_pwm_auto_point_temp(struct device *dev,
 	int ix = sensor_attr_2->index;
 	int ap = sensor_attr_2->nr;
 
-	return sprintf(buf, "%d\n", TEMP_FROM_REG(data->pwm_ctl[ix] & 7,
+	return sprintf(buf, "%d\n", temp_from_reg(data->pwm_ctl[ix] & 7,
 		       data->pwm_auto_temp[ap]));
 }
 
@@ -1221,14 +1225,12 @@ EXIT_DEV_REMOVE_SILENT:
 	return err;
 }
 
-static int vt1211_remove(struct platform_device *pdev)
+static void vt1211_remove(struct platform_device *pdev)
 {
 	struct vt1211_data *data = platform_get_drvdata(pdev);
 
 	hwmon_device_unregister(data->hwmon_dev);
 	vt1211_remove_sysfs(pdev);
-
-	return 0;
 }
 
 static struct platform_driver vt1211_driver = {
@@ -1282,11 +1284,14 @@ EXIT:
 
 static int __init vt1211_find(int sio_cip, unsigned short *address)
 {
-	int err = -ENODEV;
+	int err;
 	int devid;
 
-	superio_enter(sio_cip);
+	err = superio_enter(sio_cip);
+	if (err)
+		return err;
 
+	err = -ENODEV;
 	devid = force_id ? force_id : superio_inb(sio_cip, SIO_VT1211_DEVID);
 	if (devid != SIO_VT1211_ID)
 		goto EXIT;

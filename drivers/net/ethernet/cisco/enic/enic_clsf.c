@@ -32,7 +32,8 @@ int enic_addfltr_5t(struct enic *enic, struct flow_keys *keys, u16 rq)
 		break;
 	default:
 		return -EPROTONOSUPPORT;
-	};
+	}
+
 	data.type = FILTER_IPV4_5TUPLE;
 	data.u.ipv4.src_addr = ntohl(keys->addrs.v4addrs.src);
 	data.u.ipv4.dst_addr = ntohl(keys->addrs.v4addrs.dst);
@@ -79,7 +80,6 @@ void enic_rfs_flw_tbl_init(struct enic *enic)
 	enic->rfs_h.max = enic->config.num_arfs;
 	enic->rfs_h.free = enic->rfs_h.max;
 	enic->rfs_h.toclean = 0;
-	enic_rfs_timer_start(enic);
 }
 
 void enic_rfs_flw_tbl_free(struct enic *enic)
@@ -88,7 +88,6 @@ void enic_rfs_flw_tbl_free(struct enic *enic)
 
 	enic_rfs_timer_stop(enic);
 	spin_lock_bh(&enic->rfs_h.lock);
-	enic->rfs_h.free = 0;
 	for (i = 0; i < (1 << ENIC_RFS_FLW_BITSHIFT); i++) {
 		struct hlist_head *hhead;
 		struct hlist_node *tmp;
@@ -99,6 +98,7 @@ void enic_rfs_flw_tbl_free(struct enic *enic)
 			enic_delfltr(enic, n->fltr_id);
 			hlist_del(&n->node);
 			kfree(n);
+			enic->rfs_h.free++;
 		}
 	}
 	spin_unlock_bh(&enic->rfs_h.lock);
@@ -125,7 +125,7 @@ struct enic_rfs_fltr_node *htbl_fltr_search(struct enic *enic, u16 fltr_id)
 #ifdef CONFIG_RFS_ACCEL
 void enic_flow_may_expire(struct timer_list *t)
 {
-	struct enic *enic = from_timer(enic, t, rfs_h.rfs_may_expire);
+	struct enic *enic = timer_container_of(enic, t, rfs_h.rfs_may_expire);
 	bool res;
 	int j;
 
@@ -235,7 +235,7 @@ int enic_rx_flow_steer(struct net_device *dev, const struct sk_buff *skb,
 				struct hlist_head *head;
 
 				head = &enic->rfs_h.ht_head[tbl_idx];
-				d = kmalloc(sizeof(*d), GFP_ATOMIC);
+				d = kmalloc_obj(*d, GFP_ATOMIC);
 				if (d) {
 					d->fltr_id = n->fltr_id;
 					INIT_HLIST_NODE(&d->node);
@@ -257,7 +257,7 @@ int enic_rx_flow_steer(struct net_device *dev, const struct sk_buff *skb,
 			goto ret_unlock;
 		}
 
-		n = kmalloc(sizeof(*n), GFP_ATOMIC);
+		n = kmalloc_obj(*n, GFP_ATOMIC);
 		if (!n) {
 			res = -ENOMEM;
 			enic->rfs_h.free++;

@@ -1,22 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Applied Micro X-Gene SoC Ethernet Driver
  *
  * Copyright (c) 2014, Applied Micro Circuits Corporation
  * Authors: Iyappan Subramanian <isubramanian@apm.com>
  *	    Ravi Patel <rapatel@apm.com>
  *	    Keyur Chudgar <kchudgar@apm.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include "xgene_enet_main.h"
@@ -390,8 +378,8 @@ u32 xgene_enet_rd_stat(struct xgene_enet_pdata *pdata, u32 rd_addr)
 
 static void xgene_gmac_set_mac_addr(struct xgene_enet_pdata *pdata)
 {
+	const u8 *dev_addr = pdata->ndev->dev_addr;
 	u32 addr0, addr1;
-	u8 *dev_addr = pdata->ndev->dev_addr;
 
 	addr0 = (dev_addr[3] << 24) | (dev_addr[2] << 16) |
 		(dev_addr[1] << 8) | dev_addr[0];
@@ -433,18 +421,12 @@ static void xgene_enet_configure_clock(struct xgene_enet_pdata *pdata)
 
 	if (dev->of_node) {
 		struct clk *parent = clk_get_parent(pdata->clk);
+		long rate = rgmii_clock(pdata->phy_speed);
 
-		switch (pdata->phy_speed) {
-		case SPEED_10:
-			clk_set_rate(parent, 2500000);
-			break;
-		case SPEED_100:
-			clk_set_rate(parent, 25000000);
-			break;
-		default:
-			clk_set_rate(parent, 125000000);
-			break;
-		}
+		if (rate < 0)
+			rate = 125000000;
+
+		clk_set_rate(parent, rate);
 	}
 #ifdef CONFIG_ACPI
 	else {
@@ -724,11 +706,11 @@ static int xgene_enet_reset(struct xgene_enet_pdata *pdata)
 		udelay(5);
 	} else {
 #ifdef CONFIG_ACPI
-		if (acpi_has_method(ACPI_HANDLE(&pdata->pdev->dev), "_RST")) {
-			acpi_evaluate_object(ACPI_HANDLE(&pdata->pdev->dev),
-					     "_RST", NULL, NULL);
-		} else if (acpi_has_method(ACPI_HANDLE(&pdata->pdev->dev),
-					 "_INI")) {
+		acpi_status status;
+
+		status = acpi_evaluate_object(ACPI_HANDLE(&pdata->pdev->dev),
+					      "_RST", NULL, NULL);
+		if (ACPI_FAILURE(status)) {
 			acpi_evaluate_object(ACPI_HANDLE(&pdata->pdev->dev),
 					     "_INI", NULL, NULL);
 		}
@@ -836,19 +818,19 @@ static void xgene_enet_adjust_link(struct net_device *ndev)
 #ifdef CONFIG_ACPI
 static struct acpi_device *acpi_phy_find_device(struct device *dev)
 {
-	struct acpi_reference_args args;
+	struct fwnode_reference_args args;
 	struct fwnode_handle *fw_node;
 	int status;
 
 	fw_node = acpi_fwnode_handle(ACPI_COMPANION(dev));
 	status = acpi_node_get_property_reference(fw_node, "phy-handle", 0,
 						  &args);
-	if (ACPI_FAILURE(status)) {
+	if (ACPI_FAILURE(status) || !is_acpi_device_node(args.fwnode)) {
 		dev_dbg(dev, "No matching phy in ACPI table\n");
 		return NULL;
 	}
 
-	return args.adev;
+	return to_acpi_device_node(args.fwnode);
 }
 #endif
 
@@ -895,12 +877,10 @@ int xgene_enet_phy_connect(struct net_device *ndev)
 	}
 
 	pdata->phy_speed = SPEED_UNKNOWN;
-	phy_dev->supported &= ~SUPPORTED_10baseT_Half &
-			      ~SUPPORTED_100baseT_Half &
-			      ~SUPPORTED_1000baseT_Half;
-	phy_dev->supported |= SUPPORTED_Pause |
-			      SUPPORTED_Asym_Pause;
-	phy_dev->advertising = phy_dev->supported;
+	phy_remove_link_mode(phy_dev, ETHTOOL_LINK_MODE_10baseT_Half_BIT);
+	phy_remove_link_mode(phy_dev, ETHTOOL_LINK_MODE_100baseT_Half_BIT);
+	phy_remove_link_mode(phy_dev, ETHTOOL_LINK_MODE_1000baseT_Half_BIT);
+	phy_support_asym_pause(phy_dev);
 
 	return 0;
 }
@@ -930,7 +910,9 @@ static int xgene_mdiobus_register(struct xgene_enet_pdata *pdata,
 			return -ENXIO;
 		}
 
-		return of_mdiobus_register(mdio, mdio_np);
+		ret = of_mdiobus_register(mdio, mdio_np);
+		of_node_put(mdio_np);
+		return ret;
 	}
 
 	/* Mask out all PHYs from auto probing. */

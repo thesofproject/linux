@@ -1,27 +1,5 @@
-/******************************************************************************
- *
- * Copyright(c) 2009-2012  Realtek Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- * wlanfae <wlanfae@realtek.com>
- * Realtek Corporation, No. 2, Innovation Road II, Hsinchu Science Park,
- * Hsinchu 300, Taiwan.
- *
- * Larry Finger <Larry.Finger@lwfinger.net>
- *
- *****************************************************************************/
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2009-2012  Realtek Corporation.*/
 
 #include "../wifi.h"
 #include "../core.h"
@@ -33,7 +11,6 @@
 #include "fw.h"
 #include "../rtl8723com/fw_common.h"
 #include "hw.h"
-#include "sw.h"
 #include "trx.h"
 #include "led.h"
 #include "table.h"
@@ -49,9 +26,6 @@ static void rtl8723e_init_aspm_vars(struct ieee80211_hw *hw)
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 	struct rtl_pci *rtlpci = rtl_pcidev(rtl_pcipriv(hw));
 
-	/*close ASPM for AMD defaultly */
-	rtlpci->const_amdpci_aspm = 0;
-
 	/**
 	 * ASPM PS mode.
 	 * 0 - Disable ASPM,
@@ -59,7 +33,7 @@ static void rtl8723e_init_aspm_vars(struct ieee80211_hw *hw)
 	 * 2 - Enable ASPM with Clock Req,
 	 * 3 - Alwyas Enable ASPM with Clock Req,
 	 * 4 - Always Enable ASPM without Clock Req.
-	 * set defult to RTL8192CE:3 RTL8192E:2
+	 * set default to RTL8192CE:3 RTL8192E:2
 	 */
 	rtlpci->const_pci_aspm = 3;
 
@@ -89,7 +63,7 @@ static void rtl8723e_init_aspm_vars(struct ieee80211_hw *hw)
 	rtlpci->const_support_pciaspm = rtlpriv->cfg->mod_params->aspm_support;
 }
 
-int rtl8723e_init_sw_vars(struct ieee80211_hw *hw)
+static int rtl8723e_init_sw_vars(struct ieee80211_hw *hw)
 {
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 	struct rtl_pci *rtlpci = rtl_pcidev(rtl_pcipriv(hw));
@@ -101,9 +75,9 @@ int rtl8723e_init_sw_vars(struct ieee80211_hw *hw)
 
 	rtlpriv->btcoexist.btc_ops = rtl_btc_get_ops_pointer();
 
-	rtlpriv->dm.dm_initialgain_enable = 1;
+	rtlpriv->dm.dm_initialgain_enable = true;
 	rtlpriv->dm.dm_flag = 0;
-	rtlpriv->dm.disable_framebursting = 0;
+	rtlpriv->dm.disable_framebursting = false;
 	rtlpriv->dm.thermalvalue = 0;
 	rtlpci->transmit_config = CFENDFORM | BIT(12) | BIT(13);
 
@@ -151,10 +125,6 @@ int rtl8723e_init_sw_vars(struct ieee80211_hw *hw)
 	rtlpriv->psc.swctrl_lps = rtlpriv->cfg->mod_params->swctrl_lps;
 	rtlpriv->psc.fwctrl_lps = rtlpriv->cfg->mod_params->fwctrl_lps;
 	rtlpci->msi_support = rtlpriv->cfg->mod_params->msi_support;
-	rtlpriv->cfg->mod_params->sw_crypto =
-		rtlpriv->cfg->mod_params->sw_crypto;
-	rtlpriv->cfg->mod_params->disable_watchdog =
-		rtlpriv->cfg->mod_params->disable_watchdog;
 	if (rtlpriv->cfg->mod_params->disable_watchdog)
 		pr_info("watchdog disabled\n");
 	rtlpriv->psc.reg_fwctrl_lps = 3;
@@ -175,7 +145,7 @@ int rtl8723e_init_sw_vars(struct ieee80211_hw *hw)
 		return 1;
 	}
 
-	if (IS_81xxC_VENDOR_UMC_B_CUT(rtlhal->version))
+	if (IS_81XXC_VENDOR_UMC_B_CUT(rtlhal->version))
 		fw_name = "rtlwifi/rtl8723fw_B.bin";
 
 	rtlpriv->max_fw_size = 0x6000;
@@ -192,7 +162,7 @@ int rtl8723e_init_sw_vars(struct ieee80211_hw *hw)
 	return 0;
 }
 
-void rtl8723e_deinit_sw_vars(struct ieee80211_hw *hw)
+static void rtl8723e_deinit_sw_vars(struct ieee80211_hw *hw)
 {
 	struct rtl_priv *rtlpriv = rtl_priv(hw);
 
@@ -203,7 +173,7 @@ void rtl8723e_deinit_sw_vars(struct ieee80211_hw *hw)
 }
 
 /* get bt coexist status */
-bool rtl8723e_get_btc_status(void)
+static bool rtl8723e_get_btc_status(void)
 {
 	return true;
 }
@@ -213,7 +183,7 @@ static bool is_fw_header(struct rtlwifi_firmware_header *hdr)
 	return (le16_to_cpu(hdr->signature) & 0xfff0) == 0x2300;
 }
 
-static struct rtl_hal_ops rtl8723e_hal_ops = {
+static const struct rtl_hal_ops rtl8723e_hal_ops = {
 	.init_sw_vars = rtl8723e_init_sw_vars,
 	.deinit_sw_vars = rtl8723e_deinit_sw_vars,
 	.read_eeprom_info = rtl8723e_read_eeprom_info,
@@ -250,7 +220,6 @@ static struct rtl_hal_ops rtl8723e_hal_ops = {
 	.tx_polling = rtl8723e_tx_polling,
 	.enable_hw_sec = rtl8723e_enable_hw_security_config,
 	.set_key = rtl8723e_set_key,
-	.init_sw_leds = rtl8723e_init_sw_leds,
 	.get_bbreg = rtl8723_phy_query_bb_reg,
 	.set_bbreg = rtl8723_phy_set_bb_reg,
 	.get_rfreg = rtl8723e_phy_query_rf_reg,
@@ -260,15 +229,14 @@ static struct rtl_hal_ops rtl8723e_hal_ops = {
 	.bt_coex_off_before_lps =
 		rtl8723e_dm_bt_turn_off_bt_coexist_before_enter_lps,
 	.get_btc_status = rtl8723e_get_btc_status,
-	.rx_command_packet = rtl8723e_rx_command_packet,
 	.is_fw_header = is_fw_header,
 };
 
 static struct rtl_mod_params rtl8723e_mod_params = {
 	.sw_crypto = false,
 	.inactiveps = true,
-	.swctrl_lps = false,
-	.fwctrl_lps = true,
+	.swctrl_lps = true,
+	.fwctrl_lps = false,
 	.aspm_support = 1,
 	.debug_level = 0,
 	.debug_mask = 0,
@@ -382,7 +350,8 @@ MODULE_AUTHOR("lizhaoming	<chaoming_li@realsil.com.cn>");
 MODULE_AUTHOR("Realtek WlanFAE	<wlanfae@realtek.com>");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Realtek 8723E 802.11n PCI wireless");
-MODULE_FIRMWARE("rtlwifi/rtl8723efw.bin");
+MODULE_FIRMWARE("rtlwifi/rtl8723fw.bin");
+MODULE_FIRMWARE("rtlwifi/rtl8723fw_B.bin");
 
 module_param_named(swenc, rtl8723e_mod_params.sw_crypto, bool, 0444);
 module_param_named(debug_level, rtl8723e_mod_params.debug_level, int, 0644);
@@ -396,8 +365,8 @@ module_param_named(disable_watchdog, rtl8723e_mod_params.disable_watchdog,
 		   bool, 0444);
 MODULE_PARM_DESC(swenc, "Set to 1 for software crypto (default 0)\n");
 MODULE_PARM_DESC(ips, "Set to 0 to not use link power save (default 1)\n");
-MODULE_PARM_DESC(swlps, "Set to 1 to use SW control power save (default 0)\n");
-MODULE_PARM_DESC(fwlps, "Set to 1 to use FW control power save (default 1)\n");
+MODULE_PARM_DESC(swlps, "Set to 1 to use SW control power save (default 1)\n");
+MODULE_PARM_DESC(fwlps, "Set to 1 to use FW control power save (default 0)\n");
 MODULE_PARM_DESC(msi, "Set to 1 to use MSI interrupts mode (default 0)\n");
 MODULE_PARM_DESC(aspm, "Set to 1 to enable ASPM (default 1)\n");
 MODULE_PARM_DESC(debug_level, "Set debug level (0-5) (default 0)");

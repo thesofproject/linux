@@ -1,20 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * xfrm algorithm interface
  *
  * Copyright (c) 2002 James Morris <jmorris@intercode.com.au>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
  */
 
+#include <crypto/acompress.h>
+#include <crypto/aead.h>
 #include <crypto/hash.h>
 #include <crypto/skcipher.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/pfkeyv2.h>
-#include <linux/crypto.h>
 #include <linux/scatterlist.h>
 #include <net/xfrm.h>
 #if IS_ENABLED(CONFIG_INET_ESP) || IS_ENABLED(CONFIG_INET6_ESP)
@@ -294,26 +291,6 @@ static struct xfrm_algo_desc aalg_list[] = {
 	}
 },
 {
-	.name = "hmac(rmd160)",
-	.compat = "rmd160",
-
-	.uinfo = {
-		.auth = {
-			.icv_truncbits = 96,
-			.icv_fullbits = 160,
-		}
-	},
-
-	.pfkey_supported = 1,
-
-	.desc = {
-		.sadb_alg_id = SADB_X_AALG_RIPEMD160HMAC,
-		.sadb_alg_ivlen = 0,
-		.sadb_alg_minbits = 160,
-		.sadb_alg_maxbits = 160
-	}
-},
-{
 	.name = "xcbc(aes)",
 
 	.uinfo = {
@@ -344,6 +321,26 @@ static struct xfrm_algo_desc aalg_list[] = {
 	},
 
 	.pfkey_supported = 0,
+},
+{
+	.name = "hmac(sm3)",
+	.compat = "sm3",
+
+	.uinfo = {
+		.auth = {
+			.icv_truncbits = 256,
+			.icv_fullbits = 256,
+		}
+	},
+
+	.pfkey_supported = 1,
+
+	.desc = {
+		.sadb_alg_id = SADB_X_AALG_SM3_256HMAC,
+		.sadb_alg_ivlen = 0,
+		.sadb_alg_minbits = 256,
+		.sadb_alg_maxbits = 256
+	}
 },
 };
 
@@ -556,6 +553,27 @@ static struct xfrm_algo_desc ealg_list[] = {
 		.sadb_alg_maxbits = 288
 	}
 },
+{
+	.name = "cbc(sm4)",
+	.compat = "sm4",
+
+	.uinfo = {
+		.encr = {
+			.geniv = "echainiv",
+			.blockbits = 128,
+			.defkeybits = 128,
+		}
+	},
+
+	.pfkey_supported = 1,
+
+	.desc = {
+		.sadb_alg_id = SADB_X_EALG_SM4CBC,
+		.sadb_alg_ivlen	= 16,
+		.sadb_alg_minbits = 128,
+		.sadb_alg_maxbits = 256
+	}
+},
 };
 
 static struct xfrm_algo_desc calg_list[] = {
@@ -607,38 +625,33 @@ static inline int calg_entries(void)
 }
 
 struct xfrm_algo_list {
+	int (*find)(const char *name, u32 type, u32 mask);
 	struct xfrm_algo_desc *algs;
 	int entries;
-	u32 type;
-	u32 mask;
 };
 
 static const struct xfrm_algo_list xfrm_aead_list = {
+	.find = crypto_has_aead,
 	.algs = aead_list,
 	.entries = ARRAY_SIZE(aead_list),
-	.type = CRYPTO_ALG_TYPE_AEAD,
-	.mask = CRYPTO_ALG_TYPE_MASK,
 };
 
 static const struct xfrm_algo_list xfrm_aalg_list = {
+	.find = crypto_has_ahash,
 	.algs = aalg_list,
 	.entries = ARRAY_SIZE(aalg_list),
-	.type = CRYPTO_ALG_TYPE_HASH,
-	.mask = CRYPTO_ALG_TYPE_HASH_MASK,
 };
 
 static const struct xfrm_algo_list xfrm_ealg_list = {
+	.find = crypto_has_skcipher,
 	.algs = ealg_list,
 	.entries = ARRAY_SIZE(ealg_list),
-	.type = CRYPTO_ALG_TYPE_BLKCIPHER,
-	.mask = CRYPTO_ALG_TYPE_BLKCIPHER_MASK,
 };
 
 static const struct xfrm_algo_list xfrm_calg_list = {
+	.find = crypto_has_acomp,
 	.algs = calg_list,
 	.entries = ARRAY_SIZE(calg_list),
-	.type = CRYPTO_ALG_TYPE_COMPRESS,
-	.mask = CRYPTO_ALG_TYPE_MASK,
 };
 
 static struct xfrm_algo_desc *xfrm_find_algo(
@@ -659,8 +672,7 @@ static struct xfrm_algo_desc *xfrm_find_algo(
 		if (!probe)
 			break;
 
-		status = crypto_has_alg(list[i].name, algo_list->type,
-					algo_list->mask);
+		status = algo_list->find(list[i].name, 0, 0);
 		if (!status)
 			break;
 
@@ -796,8 +808,7 @@ void xfrm_probe_algs(void)
 	}
 
 	for (i = 0; i < calg_entries(); i++) {
-		status = crypto_has_comp(calg_list[i].name, 0,
-					 CRYPTO_ALG_ASYNC);
+		status = crypto_has_acomp(calg_list[i].name, 0, 0);
 		if (calg_list[i].available != status)
 			calg_list[i].available = status;
 	}
@@ -826,4 +837,5 @@ int xfrm_count_pfkey_enc_supported(void)
 }
 EXPORT_SYMBOL_GPL(xfrm_count_pfkey_enc_supported);
 
+MODULE_DESCRIPTION("XFRM Algorithm interface");
 MODULE_LICENSE("GPL");

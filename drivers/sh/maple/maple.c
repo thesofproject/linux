@@ -30,7 +30,6 @@
 MODULE_AUTHOR("Adrian McMenamin <adrian@mcmen.demon.co.uk>");
 MODULE_DESCRIPTION("Maple bus driver for Dreamcast");
 MODULE_LICENSE("GPL v2");
-MODULE_SUPPORTED_DEVICE("{{SEGA, Dreamcast/Maple}}");
 
 static void maple_dma_handler(struct work_struct *work);
 static void maple_vblank_handler(struct work_struct *work);
@@ -60,6 +59,7 @@ struct maple_device_specify {
 static bool checked[MAPLE_PORTS];
 static bool empty[MAPLE_PORTS];
 static struct maple_device *baseunits[MAPLE_PORTS];
+static const struct bus_type maple_bus_type;
 
 /**
  * maple_driver_register - register a maple driver
@@ -161,7 +161,7 @@ int maple_add_packet(struct maple_device *mdev, u32 function, u32 command,
 	void *sendbuf = NULL;
 
 	if (length) {
-		sendbuf = kzalloc(length * 4, GFP_KERNEL);
+		sendbuf = kcalloc(length, 4, GFP_KERNEL);
 		if (!sendbuf) {
 			ret = -ENOMEM;
 			goto out;
@@ -187,7 +187,7 @@ static struct mapleq *maple_allocq(struct maple_device *mdev)
 {
 	struct mapleq *mq;
 
-	mq = kzalloc(sizeof(*mq), GFP_KERNEL);
+	mq = kzalloc_obj(*mq);
 	if (!mq)
 		goto failed_nomem;
 
@@ -215,7 +215,7 @@ static struct maple_device *maple_alloc_dev(int port, int unit)
 	/* zero this out to avoid kobj subsystem
 	* thinking it has already been registered */
 
-	mdev = kzalloc(sizeof(*mdev), GFP_KERNEL);
+	mdev = kzalloc_obj(*mdev);
 	if (!mdev)
 		return NULL;
 
@@ -300,8 +300,8 @@ static void maple_send(void)
 	mutex_unlock(&maple_wlist_lock);
 	if (maple_packets > 0) {
 		for (i = 0; i < (1 << MAPLE_DMA_PAGES); i++)
-			sh_sync_dma_for_device(maple_sendbuf + i * PAGE_SIZE,
-				       PAGE_SIZE, DMA_BIDIRECTIONAL);
+			__flush_purge_region(maple_sendbuf + i * PAGE_SIZE,
+					PAGE_SIZE);
 	}
 
 finish:
@@ -642,7 +642,8 @@ static void maple_dma_handler(struct work_struct *work)
 		list_for_each_entry_safe(mq, nmq, &maple_sentq, list) {
 			mdev = mq->dev;
 			recvbuf = mq->recvbuf->buf;
-			sh_sync_dma_for_device(recvbuf, 0x400, DMA_FROM_DEVICE);
+			__flush_invalidate_region(sh_cacheop_vaddr(recvbuf),
+					0x400);
 			code = recvbuf[0];
 			kfree(mq->sendbuf);
 			list_del_init(&mq->list);
@@ -746,9 +747,9 @@ static int maple_get_dma_buffer(void)
 }
 
 static int maple_match_bus_driver(struct device *devptr,
-				  struct device_driver *drvptr)
+				  const struct device_driver *drvptr)
 {
-	struct maple_driver *maple_drv = to_maple_driver(drvptr);
+	const struct maple_driver *maple_drv = to_maple_driver(drvptr);
 	struct maple_device *maple_dev = to_maple_dev(devptr);
 
 	/* Trap empty port case */
@@ -757,12 +758,6 @@ static int maple_match_bus_driver(struct device *devptr,
 	else if (maple_dev->devinfo.function &
 		 cpu_to_be32(maple_drv->function))
 		return 1;
-	return 0;
-}
-
-static int maple_bus_uevent(struct device *dev,
-			    struct kobj_uevent_env *env)
-{
 	return 0;
 }
 
@@ -779,12 +774,10 @@ static struct maple_driver maple_unsupported_device = {
 /*
  * maple_bus_type - core maple bus structure
  */
-struct bus_type maple_bus_type = {
+static const struct bus_type maple_bus_type = {
 	.name = "maple",
 	.match = maple_match_bus_driver,
-	.uevent = maple_bus_uevent,
 };
-EXPORT_SYMBOL_GPL(maple_bus_type);
 
 static struct device maple_bus = {
 	.init_name = "maple",
@@ -834,8 +827,10 @@ static int __init maple_bus_init(void)
 
 	maple_queue_cache = KMEM_CACHE(maple_buffer, SLAB_HWCACHE_ALIGN);
 
-	if (!maple_queue_cache)
+	if (!maple_queue_cache) {
+		retval = -ENOMEM;
 		goto cleanup_bothirqs;
+	}
 
 	INIT_LIST_HEAD(&maple_waitq);
 	INIT_LIST_HEAD(&maple_sentq);
@@ -848,6 +843,7 @@ static int __init maple_bus_init(void)
 		if (!mdev[i]) {
 			while (i-- > 0)
 				maple_free_dev(mdev[i]);
+			retval = -ENOMEM;
 			goto cleanup_cache;
 		}
 		baseunits[i] = mdev[i];

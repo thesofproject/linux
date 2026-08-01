@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012,2013 Infineon Technologies
  *
@@ -13,21 +14,13 @@
  *
  * It is based on the original tpm_tis device driver from Leendert van
  * Dorn and Kyleen Hall.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation, version 2 of the
- * License.
- *
- *
  */
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/wait.h>
 #include "tpm.h"
 
-/* max. buffer size supported by our TPM */
-#define TPM_BUFSIZE 1260
+#define TPM_I2C_INFINEON_BUFSIZE 1260
 
 /* max. number of iterations after I2C NAK */
 #define MAX_COUNT 3
@@ -63,11 +56,13 @@ enum i2c_chip_type {
 	UNKNOWN,
 };
 
-/* Structure to store I2C TPM specific stuff */
 struct tpm_inf_dev {
 	struct i2c_client *client;
 	int locality;
-	u8 buf[TPM_BUFSIZE + sizeof(u8)]; /* max. buffer size + addr */
+	/* In addition to the data itself, the buffer must fit the 7-bit I2C
+	 * address and the direction bit.
+	 */
+	u8 buf[TPM_I2C_INFINEON_BUFSIZE + 1];
 	struct tpm_chip *chip;
 	enum i2c_chip_type chip_type;
 	unsigned int adapterlimit;
@@ -117,7 +112,7 @@ static int iic_tpm_read(u8 addr, u8 *buffer, size_t len)
 	/* Lock the adapter for the duration of the whole sequence. */
 	if (!tpm_dev.client->adapter->algo->master_xfer)
 		return -EOPNOTSUPP;
-	i2c_lock_adapter(tpm_dev.client->adapter);
+	i2c_lock_bus(tpm_dev.client->adapter, I2C_LOCK_SEGMENT);
 
 	if (tpm_dev.chip_type == SLB9645) {
 		/* use a combined read for newer chips
@@ -192,7 +187,7 @@ static int iic_tpm_read(u8 addr, u8 *buffer, size_t len)
 	}
 
 out:
-	i2c_unlock_adapter(tpm_dev.client->adapter);
+	i2c_unlock_bus(tpm_dev.client->adapter, I2C_LOCK_SEGMENT);
 	/* take care of 'guard time' */
 	usleep_range(SLEEP_DURATION_LOW, SLEEP_DURATION_HI);
 
@@ -219,12 +214,12 @@ static int iic_tpm_write_generic(u8 addr, u8 *buffer, size_t len,
 		.buf = tpm_dev.buf
 	};
 
-	if (len > TPM_BUFSIZE)
+	if (len > TPM_I2C_INFINEON_BUFSIZE)
 		return -EINVAL;
 
 	if (!tpm_dev.client->adapter->algo->master_xfer)
 		return -EOPNOTSUPP;
-	i2c_lock_adapter(tpm_dev.client->adapter);
+	i2c_lock_bus(tpm_dev.client->adapter, I2C_LOCK_SEGMENT);
 
 	/* prepend the 'register address' to the buffer */
 	tpm_dev.buf[0] = addr;
@@ -243,7 +238,7 @@ static int iic_tpm_write_generic(u8 addr, u8 *buffer, size_t len,
 		usleep_range(sleep_low, sleep_hi);
 	}
 
-	i2c_unlock_adapter(tpm_dev.client->adapter);
+	i2c_unlock_bus(tpm_dev.client->adapter, I2C_LOCK_SEGMENT);
 	/* take care of 'guard time' */
 	usleep_range(SLEEP_DURATION_LOW, SLEEP_DURATION_HI);
 
@@ -519,7 +514,8 @@ out:
 	return size;
 }
 
-static int tpm_tis_i2c_send(struct tpm_chip *chip, u8 *buf, size_t len)
+static int tpm_tis_i2c_send(struct tpm_chip *chip, u8 *buf, size_t bufsiz,
+			    size_t len)
 {
 	int rc, status;
 	ssize_t burstcnt;
@@ -527,8 +523,8 @@ static int tpm_tis_i2c_send(struct tpm_chip *chip, u8 *buf, size_t len)
 	u8 retries = 0;
 	u8 sts = TPM_STS_GO;
 
-	if (len > TPM_BUFSIZE)
-		return -E2BIG;	/* command is too long for our tpm, sorry */
+	if (len > TPM_I2C_INFINEON_BUFSIZE)
+		return -E2BIG;
 
 	if (request_locality(chip, 0) < 0)
 		return -EBUSY;
@@ -548,8 +544,10 @@ static int tpm_tis_i2c_send(struct tpm_chip *chip, u8 *buf, size_t len)
 		burstcnt = get_burstcount(chip);
 
 		/* burstcnt < 0 = TPM is busy */
-		if (burstcnt < 0)
-			return burstcnt;
+		if (burstcnt < 0) {
+			rc = burstcnt;
+			goto out_err;
+		}
 
 		if (burstcnt > (len - 1 - count))
 			burstcnt = len - 1 - count;
@@ -587,7 +585,7 @@ static int tpm_tis_i2c_send(struct tpm_chip *chip, u8 *buf, size_t len)
 	/* go and do it */
 	iic_tpm_write(TPM_STS(tpm_dev.locality), &sts, 1);
 
-	return len;
+	return 0;
 out_err:
 	tpm_tis_i2c_ready(chip);
 	/* The TPM needs some time to clean up here,
@@ -686,8 +684,7 @@ MODULE_DEVICE_TABLE(of, tpm_tis_i2c_of_match);
 
 static SIMPLE_DEV_PM_OPS(tpm_tis_i2c_ops, tpm_pm_suspend, tpm_pm_resume);
 
-static int tpm_tis_i2c_probe(struct i2c_client *client,
-			     const struct i2c_device_id *id)
+static int tpm_tis_i2c_probe(struct i2c_client *client)
 {
 	int rc;
 	struct device *dev = &(client->dev);
@@ -711,15 +708,13 @@ static int tpm_tis_i2c_probe(struct i2c_client *client,
 	return rc;
 }
 
-static int tpm_tis_i2c_remove(struct i2c_client *client)
+static void tpm_tis_i2c_remove(struct i2c_client *client)
 {
 	struct tpm_chip *chip = tpm_dev.chip;
 
 	tpm_chip_unregister(chip);
 	release_locality(chip, tpm_dev.locality, 1);
 	tpm_dev.client = NULL;
-
-	return 0;
 }
 
 static struct i2c_driver tpm_tis_i2c_driver = {

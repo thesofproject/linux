@@ -1,20 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2008-2010 Cisco Systems, Inc.  All rights reserved.
  * Copyright 2007 Nuova Systems, Inc.  All rights reserved.
- *
- * This program is free software; you may redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; version 2 of the License.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
  */
 
 #include <linux/kernel.h>
@@ -72,31 +59,38 @@ int enic_get_vnic_config(struct enic *enic)
 	GET_CONFIG(intr_timer_usec);
 	GET_CONFIG(loop_tag);
 	GET_CONFIG(num_arfs);
+	GET_CONFIG(max_rq_ring);
+	GET_CONFIG(max_wq_ring);
+	GET_CONFIG(max_cq_ring);
+
+	if (!c->max_wq_ring)
+		c->max_wq_ring = ENIC_MAX_WQ_DESCS_DEFAULT;
+	if (!c->max_rq_ring)
+		c->max_rq_ring = ENIC_MAX_RQ_DESCS_DEFAULT;
+	if (!c->max_cq_ring)
+		c->max_cq_ring = ENIC_MAX_CQ_DESCS_DEFAULT;
 
 	c->wq_desc_count =
-		min_t(u32, ENIC_MAX_WQ_DESCS,
-		max_t(u32, ENIC_MIN_WQ_DESCS,
-		c->wq_desc_count));
+		min_t(u32, c->max_wq_ring,
+		      max_t(u32, ENIC_MIN_WQ_DESCS, c->wq_desc_count));
 	c->wq_desc_count &= 0xffffffe0; /* must be aligned to groups of 32 */
 
 	c->rq_desc_count =
-		min_t(u32, ENIC_MAX_RQ_DESCS,
-		max_t(u32, ENIC_MIN_RQ_DESCS,
-		c->rq_desc_count));
+		min_t(u32, c->max_rq_ring,
+		      max_t(u32, ENIC_MIN_RQ_DESCS, c->rq_desc_count));
 	c->rq_desc_count &= 0xffffffe0; /* must be aligned to groups of 32 */
 
 	if (c->mtu == 0)
 		c->mtu = 1500;
-	c->mtu = min_t(u16, ENIC_MAX_MTU,
-		max_t(u16, ENIC_MIN_MTU,
-		c->mtu));
+	c->mtu = min_t(u16, ENIC_MAX_MTU, max_t(u16, ENIC_MIN_MTU, c->mtu));
 
 	c->intr_timer_usec = min_t(u32, c->intr_timer_usec,
 		vnic_dev_get_intr_coal_timer_max(enic->vdev));
 
 	dev_info(enic_get_dev(enic),
-		"vNIC MAC addr %pM wq/rq %d/%d mtu %d\n",
-		enic->mac_addr, c->wq_desc_count, c->rq_desc_count, c->mtu);
+		 "vNIC MAC addr %pM wq/rq %d/%d max wq/rq/cq %d/%d/%d mtu %d\n",
+		 enic->mac_addr, c->wq_desc_count, c->rq_desc_count,
+		 c->max_wq_ring, c->max_rq_ring, c->max_cq_ring, c->mtu);
 
 	dev_info(enic_get_dev(enic), "vNIC csum tx/rx %s/%s "
 		"tso/lro %s/%s rss %s intr mode %s type %s timer %d usec "
@@ -149,6 +143,7 @@ int enic_set_nic_cfg(struct enic *enic, u8 rss_default_cpu, u8 rss_hash_type,
 	u8 rss_hash_bits, u8 rss_base_cpu, u8 rss_enable, u8 tso_ipid_split_en,
 	u8 ig_vlan_strip_en)
 {
+	enum vnic_devcmd_cmd cmd = CMD_NIC_CFG;
 	u64 a0, a1;
 	u32 nic_cfg;
 	int wait = 1000;
@@ -160,7 +155,11 @@ int enic_set_nic_cfg(struct enic *enic, u8 rss_default_cpu, u8 rss_hash_type,
 	a0 = nic_cfg;
 	a1 = 0;
 
-	return vnic_dev_cmd(enic->vdev, CMD_NIC_CFG, &a0, &a1, wait);
+	if (rss_hash_type & (NIC_CFG_RSS_HASH_TYPE_UDP_IPV4 |
+			     NIC_CFG_RSS_HASH_TYPE_UDP_IPV6))
+		cmd = CMD_NIC_CFG_CHK;
+
+	return vnic_dev_cmd(enic->vdev, cmd, &a0, &a1, wait);
 }
 
 int enic_set_rss_key(struct enic *enic, dma_addr_t key_pa, u64 len)
@@ -184,9 +183,9 @@ void enic_free_vnic_resources(struct enic *enic)
 	unsigned int i;
 
 	for (i = 0; i < enic->wq_count; i++)
-		vnic_wq_free(&enic->wq[i]);
+		vnic_wq_free(&enic->wq[i].vwq);
 	for (i = 0; i < enic->rq_count; i++)
-		vnic_rq_free(&enic->rq[i]);
+		vnic_rq_free(&enic->rq[i].vrq);
 	for (i = 0; i < enic->cq_count; i++)
 		vnic_cq_free(&enic->cq[i]);
 	for (i = 0; i < enic->intr_count; i++)
@@ -195,16 +194,29 @@ void enic_free_vnic_resources(struct enic *enic)
 
 void enic_get_res_counts(struct enic *enic)
 {
-	enic->wq_count = vnic_dev_get_res_count(enic->vdev, RES_TYPE_WQ);
-	enic->rq_count = vnic_dev_get_res_count(enic->vdev, RES_TYPE_RQ);
-	enic->cq_count = vnic_dev_get_res_count(enic->vdev, RES_TYPE_CQ);
-	enic->intr_count = vnic_dev_get_res_count(enic->vdev,
-		RES_TYPE_INTR_CTRL);
+	enic->wq_avail = vnic_dev_get_res_count(enic->vdev, RES_TYPE_WQ);
+	enic->rq_avail = vnic_dev_get_res_count(enic->vdev, RES_TYPE_RQ);
+	enic->cq_avail = vnic_dev_get_res_count(enic->vdev, RES_TYPE_CQ);
+	enic->intr_avail = vnic_dev_get_res_count(enic->vdev,
+						  RES_TYPE_INTR_CTRL);
+
+	enic->wq_count = enic->wq_avail;
+	enic->rq_count = enic->rq_avail;
+	enic->cq_count = enic->cq_avail;
+	enic->intr_count = enic->intr_avail;
+
+	enic->has_admin_channel =
+		vnic_dev_get_res_count(enic->vdev, RES_TYPE_ADMIN_WQ) >= 1 &&
+		vnic_dev_get_res_count(enic->vdev, RES_TYPE_ADMIN_RQ) >= 1 &&
+		vnic_dev_get_res_count(enic->vdev, RES_TYPE_ADMIN_CQ) >=
+			ARRAY_SIZE(enic->admin_cq) &&
+		vnic_dev_get_res_count(enic->vdev, RES_TYPE_SRIOV_INTR) >= 1;
 
 	dev_info(enic_get_dev(enic),
-		"vNIC resources avail: wq %d rq %d cq %d intr %d\n",
-		enic->wq_count, enic->rq_count,
-		enic->cq_count, enic->intr_count);
+		"vNIC resources avail: wq %d rq %d cq %d intr %d admin %s\n",
+		enic->wq_avail, enic->rq_avail,
+		enic->cq_avail, enic->intr_avail,
+		enic->has_admin_channel ? "yes" : "no");
 }
 
 void enic_init_vnic_resources(struct enic *enic)
@@ -229,9 +241,12 @@ void enic_init_vnic_resources(struct enic *enic)
 
 	switch (intr_mode) {
 	case VNIC_DEV_INTR_MODE_INTX:
+		error_interrupt_enable = 1;
+		error_interrupt_offset = ENIC_LEGACY_ERR_INTR;
+		break;
 	case VNIC_DEV_INTR_MODE_MSIX:
 		error_interrupt_enable = 1;
-		error_interrupt_offset = enic->intr_count - 2;
+		error_interrupt_offset = enic_msix_err_intr(enic);
 		break;
 	default:
 		error_interrupt_enable = 0;
@@ -241,7 +256,7 @@ void enic_init_vnic_resources(struct enic *enic)
 
 	for (i = 0; i < enic->rq_count; i++) {
 		cq_index = i;
-		vnic_rq_init(&enic->rq[i],
+		vnic_rq_init(&enic->rq[i].vrq,
 			cq_index,
 			error_interrupt_enable,
 			error_interrupt_offset);
@@ -249,7 +264,7 @@ void enic_init_vnic_resources(struct enic *enic)
 
 	for (i = 0; i < enic->wq_count; i++) {
 		cq_index = enic->rq_count + i;
-		vnic_wq_init(&enic->wq[i],
+		vnic_wq_init(&enic->wq[i].vwq,
 			cq_index,
 			error_interrupt_enable,
 			error_interrupt_offset);
@@ -257,15 +272,15 @@ void enic_init_vnic_resources(struct enic *enic)
 
 	/* Init CQ resources
 	 *
-	 * CQ[0 - n+m-1] point to INTR[0] for INTx, MSI
-	 * CQ[0 - n+m-1] point to INTR[0 - n+m-1] for MSI-X
+	 * All CQs point to INTR[0] for INTx, MSI
+	 * CQ[i] point to INTR[ENIC_MSIX_IO_INTR_BASE + i] for MSI-X
 	 */
 
 	for (i = 0; i < enic->cq_count; i++) {
 
 		switch (intr_mode) {
 		case VNIC_DEV_INTR_MODE_MSIX:
-			interrupt_offset = i;
+			interrupt_offset = ENIC_MSIX_IO_INTR_BASE + i;
 			break;
 		default:
 			interrupt_offset = 0;
@@ -312,6 +327,7 @@ void enic_init_vnic_resources(struct enic *enic)
 int enic_alloc_vnic_resources(struct enic *enic)
 {
 	enum vnic_dev_intr_mode intr_mode;
+	int rq_cq_desc_size;
 	unsigned int i;
 	int err;
 
@@ -326,11 +342,29 @@ int enic_alloc_vnic_resources(struct enic *enic)
 		intr_mode == VNIC_DEV_INTR_MODE_MSIX ? "MSI-X" :
 		"unknown");
 
+	switch (enic->ext_cq) {
+	case ENIC_RQ_CQ_ENTRY_SIZE_16:
+		rq_cq_desc_size = 16;
+		break;
+	case ENIC_RQ_CQ_ENTRY_SIZE_32:
+		rq_cq_desc_size = 32;
+		break;
+	case ENIC_RQ_CQ_ENTRY_SIZE_64:
+		rq_cq_desc_size = 64;
+		break;
+	default:
+		dev_err(enic_get_dev(enic),
+			"Unable to determine rq cq desc size: %d",
+			enic->ext_cq);
+		err = -ENODEV;
+		goto err_out;
+	}
+
 	/* Allocate queue resources
 	 */
 
 	for (i = 0; i < enic->wq_count; i++) {
-		err = vnic_wq_alloc(enic->vdev, &enic->wq[i], i,
+		err = vnic_wq_alloc(enic->vdev, &enic->wq[i].vwq, i,
 			enic->config.wq_desc_count,
 			sizeof(struct wq_enet_desc));
 		if (err)
@@ -338,7 +372,7 @@ int enic_alloc_vnic_resources(struct enic *enic)
 	}
 
 	for (i = 0; i < enic->rq_count; i++) {
-		err = vnic_rq_alloc(enic->vdev, &enic->rq[i], i,
+		err = vnic_rq_alloc(enic->vdev, &enic->rq[i].vrq, i,
 			enic->config.rq_desc_count,
 			sizeof(struct rq_enet_desc));
 		if (err)
@@ -348,8 +382,8 @@ int enic_alloc_vnic_resources(struct enic *enic)
 	for (i = 0; i < enic->cq_count; i++) {
 		if (i < enic->rq_count)
 			err = vnic_cq_alloc(enic->vdev, &enic->cq[i], i,
-				enic->config.rq_desc_count,
-				sizeof(struct cq_enet_rq_desc));
+					enic->config.rq_desc_count,
+					rq_cq_desc_size);
 		else
 			err = vnic_cq_alloc(enic->vdev, &enic->cq[i], i,
 				enic->config.wq_desc_count,
@@ -380,6 +414,39 @@ int enic_alloc_vnic_resources(struct enic *enic)
 
 err_out_cleanup:
 	enic_free_vnic_resources(enic);
-
+err_out:
 	return err;
+}
+
+/*
+ * CMD_CQ_ENTRY_SIZE_SET can fail on older hw generations that don't support
+ * that command
+ */
+void enic_ext_cq(struct enic *enic)
+{
+	u64 a0 = CMD_CQ_ENTRY_SIZE_SET, a1 = 0;
+	int wait = 1000;
+	int ret;
+
+	spin_lock_bh(&enic->devcmd_lock);
+	ret = vnic_dev_cmd(enic->vdev, CMD_CAPABILITY, &a0, &a1, wait);
+	if (ret || a0) {
+		dev_info(&enic->pdev->dev,
+			 "CMD_CQ_ENTRY_SIZE_SET not supported.");
+		enic->ext_cq = ENIC_RQ_CQ_ENTRY_SIZE_16;
+		goto out;
+	}
+	a1 &= VNIC_RQ_CQ_ENTRY_SIZE_ALL_BIT;
+	enic->ext_cq = fls(a1) - 1;
+	a0 = VNIC_RQ_ALL;
+	a1 = enic->ext_cq;
+	ret = vnic_dev_cmd(enic->vdev, CMD_CQ_ENTRY_SIZE_SET, &a0, &a1, wait);
+	if (ret) {
+		dev_info(&enic->pdev->dev, "CMD_CQ_ENTRY_SIZE_SET failed.");
+		enic->ext_cq = ENIC_RQ_CQ_ENTRY_SIZE_16;
+	}
+out:
+	spin_unlock_bh(&enic->devcmd_lock);
+	dev_info(&enic->pdev->dev, "CQ entry size set to %d bytes",
+		 16 << enic->ext_cq);
 }

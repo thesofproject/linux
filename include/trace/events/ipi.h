@@ -7,6 +7,51 @@
 
 #include <linux/tracepoint.h>
 
+TRACE_EVENT(ipi_send_cpu,
+
+	TP_PROTO(const unsigned int cpu, unsigned long callsite, void *callback),
+
+	TP_ARGS(cpu, callsite, callback),
+
+	TP_STRUCT__entry(
+		__field(unsigned int, cpu)
+		__field(void *, callsite)
+		__field(void *, callback)
+	),
+
+	TP_fast_assign(
+		__entry->cpu = cpu;
+		__entry->callsite = (void *)callsite;
+		__entry->callback = callback;
+	),
+
+	TP_printk("cpu=%u callsite=%pS callback=%pS",
+		  __entry->cpu, __entry->callsite, __entry->callback)
+);
+
+TRACE_EVENT(ipi_send_cpumask,
+
+	TP_PROTO(const struct cpumask *cpumask, unsigned long callsite, void *callback),
+
+	TP_ARGS(cpumask, callsite, callback),
+
+	TP_STRUCT__entry(
+		__cpumask(cpumask)
+		__field(void *, callsite)
+		__field(void *, callback)
+	),
+
+	TP_fast_assign(
+		__assign_cpumask(cpumask, cpumask_bits(cpumask));
+		__entry->callsite = (void *)callsite;
+		__entry->callback = callback;
+	),
+
+	TP_printk("cpumask=%s callsite=%pS callback=%pS",
+		  __get_cpumask(cpumask), __entry->callsite, __entry->callback)
+);
+
+#ifdef CONFIG_HAVE_EXTRA_IPI_TRACEPOINTS
 /**
  * ipi_raise - called when a smp cross call is made
  *
@@ -23,16 +68,16 @@ TRACE_EVENT(ipi_raise,
 	TP_ARGS(mask, reason),
 
 	TP_STRUCT__entry(
-		__bitmask(target_cpus, nr_cpumask_bits)
+		__cpumask(target_cpus)
 		__field(const char *, reason)
 	),
 
 	TP_fast_assign(
-		__assign_bitmask(target_cpus, cpumask_bits(mask), nr_cpumask_bits);
+		__assign_cpumask(target_cpus, cpumask_bits(mask));
 		__entry->reason = reason;
 	),
 
-	TP_printk("target_mask=%s (%s)", __get_bitmask(target_cpus), __entry->reason)
+	TP_printk("target_mask=%s (%s)", __get_cpumask(target_cpus), __entry->reason)
 );
 
 DECLARE_EVENT_CLASS(ipi_handler,
@@ -83,6 +128,7 @@ DEFINE_EVENT(ipi_handler, ipi_exit,
 
 	TP_ARGS(reason)
 );
+#endif /* CONFIG_HAVE_EXTRA_IPI_TRACEPOINTS */
 
 #endif /* _TRACE_IPI_H */
 

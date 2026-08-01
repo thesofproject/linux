@@ -8,23 +8,20 @@
 #ifndef _S390_IDLE_H
 #define _S390_IDLE_H
 
+#include <linux/percpu-defs.h>
 #include <linux/types.h>
-#include <linux/device.h>
-#include <linux/seqlock.h>
+#include <asm/tod_types.h>
 
 struct s390_idle_data {
-	seqcount_t seqcount;
-	unsigned long long idle_count;
-	unsigned long long idle_time;
-	unsigned long long clock_idle_enter;
-	unsigned long long clock_idle_exit;
-	unsigned long long timer_idle_enter;
-	unsigned long long timer_idle_exit;
+#ifdef CONFIG_NO_HZ_COMMON
+	bool	      in_idle;
+#endif
+	unsigned long timer_idle_enter;
+	unsigned long mt_cycles_enter[8];
+	union tod_clock clock_idle_enter;
+	union tod_clock clock_idle_exit;
 };
 
-extern struct device_attribute dev_attr_idle_count;
-extern struct device_attribute dev_attr_idle_time_us;
-
-void psw_idle(struct s390_idle_data *, unsigned long);
+DECLARE_PER_CPU(struct s390_idle_data, s390_idle);
 
 #endif /* _S390_IDLE_H */

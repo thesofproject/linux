@@ -8,8 +8,8 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/firmware.h>
+#include <linux/greybus.h>
 #include "firmware.h"
-#include "greybus.h"
 #include "spilib.h"
 
 struct gb_fw_core {
@@ -68,7 +68,7 @@ static int gb_fw_core_probe(struct gb_bundle *bundle,
 	u16 cport_id;
 	u8 protocol_id;
 
-	fw_core = kzalloc(sizeof(*fw_core), GFP_KERNEL);
+	fw_core = kzalloc_obj(*fw_core);
 	if (!fw_core)
 		return -ENOMEM;
 
@@ -89,7 +89,7 @@ static int gb_fw_core_probe(struct gb_bundle *bundle,
 			}
 
 			connection = gb_connection_create(bundle, cport_id,
-						gb_fw_mgmt_request_handler);
+							  gb_fw_mgmt_request_handler);
 			if (IS_ERR(connection)) {
 				ret = PTR_ERR(connection);
 				dev_err(&bundle->dev,
@@ -110,7 +110,7 @@ static int gb_fw_core_probe(struct gb_bundle *bundle,
 			}
 
 			connection = gb_connection_create(bundle, cport_id,
-						gb_fw_download_request_handler);
+							  gb_fw_download_request_handler);
 			if (IS_ERR(connection)) {
 				dev_err(&bundle->dev, "failed to create download connection (%ld)\n",
 					PTR_ERR(connection));

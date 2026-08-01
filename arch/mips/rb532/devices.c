@@ -1,31 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  RouterBoard 500 Platform devices
  *
  *  Copyright (C) 2006 Felix Fietkau <nbd@openwrt.org>
  *  Copyright (C) 2007 Florian Fainelli <florian@openwrt.org>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- *  GNU General Public License for more details.
  */
 #include <linux/kernel.h>
 #include <linux/export.h>
+#include <linux/hex.h>
 #include <linux/init.h>
 #include <linux/ctype.h>
 #include <linux/string.h>
 #include <linux/platform_device.h>
-#include <linux/mtd/rawnand.h>
+#include <linux/mtd/platnand.h>
 #include <linux/mtd/mtd.h>
-#include <linux/mtd/partitions.h>
-#include <linux/gpio.h>
+#include <linux/gpio/machine.h>
+#include <linux/gpio/property.h>
 #include <linux/gpio_keys.h>
 #include <linux/input.h>
+#include <linux/property.h>
 #include <linux/serial_8250.h>
 
 #include <asm/bootinfo.h>
@@ -45,6 +38,10 @@
 extern unsigned int idt_cpu_freq;
 
 static struct mpmc_device dev3;
+
+static const struct software_node rb532_gpio0_node = {
+	.name = "gpio0",
+};
 
 void set_latch_u5(unsigned char or_mask, unsigned char nand_mask)
 {
@@ -67,37 +64,27 @@ EXPORT_SYMBOL(get_latch_u5);
 
 static struct resource korina_dev0_res[] = {
 	{
-		.name = "korina_regs",
+		.name = "emac",
 		.start = ETH0_BASE_ADDR,
 		.end = ETH0_BASE_ADDR + sizeof(struct eth_regs),
 		.flags = IORESOURCE_MEM,
 	 }, {
-		.name = "korina_rx",
+		.name = "rx",
 		.start = ETH0_DMA_RX_IRQ,
 		.end = ETH0_DMA_RX_IRQ,
 		.flags = IORESOURCE_IRQ
 	}, {
-		.name = "korina_tx",
+		.name = "tx",
 		.start = ETH0_DMA_TX_IRQ,
 		.end = ETH0_DMA_TX_IRQ,
 		.flags = IORESOURCE_IRQ
 	}, {
-		.name = "korina_ovr",
-		.start = ETH0_RX_OVR_IRQ,
-		.end = ETH0_RX_OVR_IRQ,
-		.flags = IORESOURCE_IRQ
-	}, {
-		.name = "korina_und",
-		.start = ETH0_TX_UND_IRQ,
-		.end = ETH0_TX_UND_IRQ,
-		.flags = IORESOURCE_IRQ
-	}, {
-		.name = "korina_dma_rx",
+		.name = "dma_rx",
 		.start = ETH0_RX_DMA_ADDR,
 		.end = ETH0_RX_DMA_ADDR + DMA_CHAN_OFFSET - 1,
 		.flags = IORESOURCE_MEM,
 	 }, {
-		.name = "korina_dma_tx",
+		.name = "dma_tx",
 		.start = ETH0_TX_DMA_ADDR,
 		.end = ETH0_TX_DMA_ADDR + DMA_CHAN_OFFSET - 1,
 		.flags = IORESOURCE_MEM,
@@ -114,6 +101,9 @@ static struct platform_device korina_dev0 = {
 	.name = "korina",
 	.resource = korina_dev0_res,
 	.num_resources = ARRAY_SIZE(korina_dev0_res),
+	.dev = {
+		.platform_data = &korina_dev0_data.mac,
+	}
 };
 
 static struct resource cf_slot0_res[] = {
@@ -128,27 +118,24 @@ static struct resource cf_slot0_res[] = {
 	}
 };
 
-static struct cf_device cf_slot0_data = {
-	.gpio_pin = CF_GPIO_NUM
+static struct gpiod_lookup_table cf_slot0_gpio_table = {
+	.dev_id = "pata-rb532-cf",
+	.table = {
+		GPIO_LOOKUP("gpio0", CF_GPIO_NUM,
+			    NULL, GPIO_ACTIVE_HIGH),
+		{ },
+	},
 };
 
 static struct platform_device cf_slot0 = {
 	.id = -1,
 	.name = "pata-rb532-cf",
-	.dev.platform_data = &cf_slot0_data,
 	.resource = cf_slot0_res,
 	.num_resources = ARRAY_SIZE(cf_slot0_res),
 };
 
-/* Resources and device for NAND */
-static int rb532_dev_ready(struct mtd_info *mtd)
+static void rb532_cmd_ctrl(struct nand_chip *chip, int cmd, unsigned int ctrl)
 {
-	return gpio_get_value(GPIO_RDY);
-}
-
-static void rb532_cmd_ctrl(struct mtd_info *mtd, int cmd, unsigned int ctrl)
-{
-	struct nand_chip *chip = mtd_to_nand(mtd);
 	unsigned char orbits, nandbits;
 
 	if (ctrl & NAND_CTRL_CHANGE) {
@@ -161,7 +148,7 @@ static void rb532_cmd_ctrl(struct mtd_info *mtd, int cmd, unsigned int ctrl)
 		set_latch_u5(orbits, nandbits);
 	}
 	if (cmd != NAND_CMD_NONE)
-		writeb(cmd, chip->IO_ADDR_W);
+		writeb(cmd, chip->legacy.IO_ADDR_W);
 }
 
 static struct resource nand_slot0_res[] = {
@@ -172,16 +159,23 @@ static struct resource nand_slot0_res[] = {
 };
 
 static struct platform_nand_data rb532_nand_data = {
-	.ctrl.dev_ready = rb532_dev_ready,
 	.ctrl.cmd_ctrl	= rb532_cmd_ctrl,
 };
 
-static struct platform_device nand_slot0 = {
-	.name = "gen_nand",
-	.id = -1,
-	.resource = nand_slot0_res,
-	.num_resources = ARRAY_SIZE(nand_slot0_res),
-	.dev.platform_data = &rb532_nand_data,
+static const struct property_entry nand0_properties[] = {
+	PROPERTY_ENTRY_GPIO("ready-gpios", &rb532_gpio0_node,
+			    GPIO_RDY, GPIO_ACTIVE_HIGH),
+	{ }
+};
+
+static const struct platform_device_info nand0_info  __initconst = {
+	.name		= "gen_nand",
+	.id		= PLATFORM_DEVID_NONE,
+	.res		= nand_slot0_res,
+	.num_res	= ARRAY_SIZE(nand_slot0_res),
+	.data		= &rb532_nand_data,
+	.size_data	= sizeof(struct platform_nand_data),
+	.properties	= nand0_properties,
 };
 
 static struct mtd_partition rb532_partition_info[] = {
@@ -199,11 +193,6 @@ static struct mtd_partition rb532_partition_info[] = {
 static struct platform_device rb532_led = {
 	.name = "rb532-led",
 	.id = -1,
-};
-
-static struct platform_device rb532_button = {
-	.name	= "rb532-button",
-	.id	= -1,
 };
 
 static struct resource rb532_wdt_res[] = {
@@ -225,11 +214,12 @@ static struct platform_device rb532_wdt = {
 static struct plat_serial8250_port rb532_uart_res[] = {
 	{
 		.type           = PORT_16550A,
-		.membase	= (char *)KSEG1ADDR(REGBASE + UART0BASE),
+		.mapbase        = REGBASE + UART0BASE,
+		.mapsize        = 0x1000,
 		.irq		= UART0_IRQ,
 		.regshift	= 2,
 		.iotype		= UPIO_MEM,
-		.flags		= UPF_BOOT_AUTOCONF,
+		.flags		= UPF_BOOT_AUTOCONF | UPF_IOREMAP,
 	},
 	{
 		.flags		= 0,
@@ -244,13 +234,43 @@ static struct platform_device rb532_uart = {
 
 static struct platform_device *rb532_devs[] = {
 	&korina_dev0,
-	&nand_slot0,
 	&cf_slot0,
 	&rb532_led,
-	&rb532_button,
 	&rb532_uart,
 	&rb532_wdt
 };
+
+#define GPIOBASE 0x050000
+
+static struct resource rb532_gpio_reg0_res[] = {
+	{
+		.name	= "gpio_reg0",
+		.start	= REGBASE + GPIOBASE,
+		.end	= REGBASE + GPIOBASE + sizeof(struct rb532_gpio_reg) - 1,
+		.flags	= IORESOURCE_MEM,
+	}
+};
+
+static struct platform_device_info rb532_gpio_devinfo = {
+	.name		= "rb532-gpio",
+	.id		= PLATFORM_DEVID_NONE,
+	.res		= rb532_gpio_reg0_res,
+	.num_res	= ARRAY_SIZE(rb532_gpio_reg0_res),
+	.swnode		= &rb532_gpio0_node,
+};
+
+static const struct property_entry rb532_button_properties[] = {
+	PROPERTY_ENTRY_GPIO("button-gpios", &rb532_gpio0_node,
+			    GPIO_BTN_S1, GPIO_ACTIVE_LOW),
+	{ }
+};
+
+static const struct platform_device_info rb532_button_info  __initconst = {
+	.name		= "rb532-button",
+	.id		= PLATFORM_DEVID_NONE,
+	.properties	= rb532_button_properties,
+};
+
 
 /* NAND definitions */
 #define NAND_CHIP_DELAY 25
@@ -278,6 +298,9 @@ static void __init rb532_nand_setup(void)
 
 static int __init plat_setup_devices(void)
 {
+	struct platform_device *pd;
+	int ret;
+
 	/* Look for the CF card reader */
 	if (!readl(IDT434_REG_BASE + DEV1MASK))
 		rb532_devs[2] = NULL;	/* disable cf_slot0 at index 2 */
@@ -292,7 +315,7 @@ static int __init plat_setup_devices(void)
 	nand_slot0_res[0].end = nand_slot0_res[0].start + 0x1000;
 
 	/* Read and map device controller 3 */
-	dev3.base = ioremap_nocache(readl(IDT434_REG_BASE + DEV3BASE), 1);
+	dev3.base = ioremap(readl(IDT434_REG_BASE + DEV3BASE), 1);
 
 	if (!dev3.base) {
 		printk(KERN_ERR "rb532: cannot remap device controller 3\n");
@@ -305,9 +328,33 @@ static int __init plat_setup_devices(void)
 	/* set the uart clock to the current cpu frequency */
 	rb532_uart_res[0].uartclk = idt_cpu_freq;
 
-	dev_set_drvdata(&korina_dev0.dev, &korina_dev0_data);
+	pd = platform_device_register_full(&rb532_gpio_devinfo);
+	ret = PTR_ERR_OR_ZERO(pd);
+	if (ret) {
+		pr_err("failed to create the GPIO device: %d\n", ret);
+		return ret;
+	}
 
-	return platform_add_devices(rb532_devs, ARRAY_SIZE(rb532_devs));
+	gpiod_add_lookup_table(&cf_slot0_gpio_table);
+	ret = platform_add_devices(rb532_devs, ARRAY_SIZE(rb532_devs));
+	if (ret)
+		return ret;
+
+	pd = platform_device_register_full(&nand0_info);
+	ret = PTR_ERR_OR_ZERO(pd);
+	if (ret) {
+		pr_err("failed to create NAND slot0 device: %d\n", ret);
+		return ret;
+	}
+
+	pd = platform_device_register_full(&rb532_button_info);
+	ret = PTR_ERR_OR_ZERO(pd);
+	if (ret) {
+		pr_err("failed to create RB532 button device: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
 }
 
 #ifdef CONFIG_NET
@@ -315,11 +362,9 @@ static int __init plat_setup_devices(void)
 static int __init setup_kmac(char *s)
 {
 	printk(KERN_INFO "korina mac = %s\n", s);
-	if (!mac_pton(s, korina_dev0_data.mac)) {
+	if (!mac_pton(s, korina_dev0_data.mac))
 		printk(KERN_ERR "Invalid mac\n");
-		return -EINVAL;
-	}
-	return 0;
+	return 1;
 }
 
 __setup("kmac=", setup_kmac);

@@ -1,17 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * TAS5086 ASoC codec driver
  *
  * Copyright (c) 2013 Daniel Mack <zonque@gmail.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  * TODO:
  *  - implement DAPM and input muxing
@@ -33,14 +24,13 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/spi/spi.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
@@ -255,7 +245,7 @@ struct tas5086_private {
 	/* Current sample rate for de-emphasis control */
 	int		rate;
 	/* GPIO driving Reset pin, if any */
-	int		gpio_nreset;
+	struct gpio_desc *reset;
 	struct		regulator_bulk_data supplies[ARRAY_SIZE(supply_names)];
 };
 
@@ -282,7 +272,7 @@ static int tas5086_set_deemph(struct snd_soc_component *component)
 static int tas5086_get_deemph(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct tas5086_private *priv = snd_soc_component_get_drvdata(component);
 
 	ucontrol->value.integer.value[0] = priv->deemph;
@@ -293,7 +283,7 @@ static int tas5086_get_deemph(struct snd_kcontrol *kcontrol,
 static int tas5086_put_deemph(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct tas5086_private *priv = snd_soc_component_get_drvdata(component);
 
 	priv->deemph = ucontrol->value.integer.value[0];
@@ -327,7 +317,7 @@ static int tas5086_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	struct tas5086_private *priv = snd_soc_component_get_drvdata(component);
 
 	/* The TAS5086 can only be slave to all clocks */
-	if ((format & SND_SOC_DAIFMT_MASTER_MASK) != SND_SOC_DAIFMT_CBS_CFS) {
+	if ((format & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) != SND_SOC_DAIFMT_CBC_CFC) {
 		dev_err(component->dev, "Invalid clocking mode\n");
 		return -EINVAL;
 	}
@@ -471,11 +461,11 @@ static int tas5086_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
 
 static void tas5086_reset(struct tas5086_private *priv)
 {
-	if (gpio_is_valid(priv->gpio_nreset)) {
+	if (priv->reset) {
 		/* Reset codec - minimum assertion time is 400ns */
-		gpio_direction_output(priv->gpio_nreset, 0);
+		gpiod_set_value_cansleep(priv->reset, 1);
 		udelay(1);
-		gpio_set_value(priv->gpio_nreset, 1);
+		gpiod_set_value_cansleep(priv->reset, 0);
 
 		/* Codec needs ~15ms to wake up */
 		msleep(15);
@@ -496,7 +486,7 @@ static int tas5086_init(struct device *dev, struct tas5086_private *priv)
 	/*
 	 * If any of the channels is configured to start in Mid-Z mode,
 	 * configure 'part 1' of the PWM starts to use Mid-Z, and tell
-	 * all configured mid-z channels to start start under 'part 1'.
+	 * all configured mid-z channels to start under 'part 1'.
 	 */
 	if (priv->pwm_start_mid_z)
 		regmap_write(priv->regmap, TAS5086_PWM_START,
@@ -849,7 +839,7 @@ static int tas5086_probe(struct snd_soc_component *component)
 			snprintf(name, sizeof(name),
 				 "ti,mid-z-channel-%d", i + 1);
 
-			if (of_get_property(of_node, name, NULL) != NULL)
+			if (of_property_read_bool(of_node, name))
 				priv->pwm_start_mid_z |= 1 << i;
 		}
 	}
@@ -876,9 +866,10 @@ static void tas5086_remove(struct snd_soc_component *component)
 {
 	struct tas5086_private *priv = snd_soc_component_get_drvdata(component);
 
-	if (gpio_is_valid(priv->gpio_nreset))
+	if (priv->reset) {
 		/* Set codec to the reset state */
-		gpio_set_value(priv->gpio_nreset, 0);
+		gpiod_set_value_cansleep(priv->reset, 1);
+	}
 
 	regulator_bulk_disable(ARRAY_SIZE(priv->supplies), priv->supplies);
 };
@@ -897,11 +888,10 @@ static const struct snd_soc_component_driver soc_component_dev_tas5086 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct i2c_device_id tas5086_i2c_id[] = {
-	{ "tas5086", 0 },
+	{ .name = "tas5086" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, tas5086_i2c_id);
@@ -920,12 +910,10 @@ static const struct regmap_config tas5086_regmap = {
 	.reg_write		= tas5086_reg_write,
 };
 
-static int tas5086_i2c_probe(struct i2c_client *i2c,
-			     const struct i2c_device_id *id)
+static int tas5086_i2c_probe(struct i2c_client *i2c)
 {
 	struct tas5086_private *priv;
 	struct device *dev = &i2c->dev;
-	int gpio_nreset = -EINVAL;
 	int i, ret;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
@@ -951,16 +939,11 @@ static int tas5086_i2c_probe(struct i2c_client *i2c,
 
 	i2c_set_clientdata(i2c, priv);
 
-	if (of_match_device(of_match_ptr(tas5086_dt_ids), dev)) {
-		struct device_node *of_node = dev->of_node;
-		gpio_nreset = of_get_named_gpio(of_node, "reset-gpio", 0);
-	}
-
-	if (gpio_is_valid(gpio_nreset))
-		if (devm_gpio_request(dev, gpio_nreset, "TAS5086 Reset"))
-			gpio_nreset = -EINVAL;
-
-	priv->gpio_nreset = gpio_nreset;
+	/* Request line asserted */
+	priv->reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(priv->reset))
+		return PTR_ERR(priv->reset);
+	gpiod_set_consumer_name(priv->reset, "TAS5086 Reset");
 
 	ret = regulator_bulk_enable(ARRAY_SIZE(priv->supplies), priv->supplies);
 	if (ret < 0) {
@@ -992,19 +975,13 @@ static int tas5086_i2c_probe(struct i2c_client *i2c,
 	return ret;
 }
 
-static int tas5086_i2c_remove(struct i2c_client *i2c)
-{
-	return 0;
-}
-
 static struct i2c_driver tas5086_i2c_driver = {
 	.driver = {
-		.name	= "tas5086",
+		.name = "tas5086",
 		.of_match_table = of_match_ptr(tas5086_dt_ids),
 	},
-	.id_table	= tas5086_i2c_id,
-	.probe		= tas5086_i2c_probe,
-	.remove		= tas5086_i2c_remove,
+	.id_table = tas5086_i2c_id,
+	.probe = tas5086_i2c_probe,
 };
 
 module_i2c_driver(tas5086_i2c_driver);

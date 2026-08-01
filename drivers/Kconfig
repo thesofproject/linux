@@ -1,13 +1,35 @@
 # SPDX-License-Identifier: GPL-2.0
 menu "Device Drivers"
 
+# Keep I/O buses first
+
 source "drivers/amba/Kconfig"
+source "drivers/eisa/Kconfig"
+source "drivers/pci/Kconfig"
+source "drivers/cxl/Kconfig"
+source "drivers/pcmcia/Kconfig"
+source "drivers/rapidio/Kconfig"
+
+config PC104
+	bool "PC/104 support" if EXPERT
+	help
+	  Expose PC/104 form factor device drivers and options available for
+	  selection and configuration. Enable this option if your target
+	  machine has a PC/104 bus.
 
 source "drivers/base/Kconfig"
 
 source "drivers/bus/Kconfig"
 
+source "drivers/cache/Kconfig"
+
 source "drivers/connector/Kconfig"
+
+source "drivers/firmware/Kconfig"
+
+source "drivers/fwctl/Kconfig"
+
+source "drivers/gnss/Kconfig"
 
 source "drivers/mtd/Kconfig"
 
@@ -21,11 +43,7 @@ source "drivers/block/Kconfig"
 
 source "drivers/nvme/Kconfig"
 
-# misc before ide - BLK_DEV_SGIIOC4 depends on SGI_IOC4
-
 source "drivers/misc/Kconfig"
-
-source "drivers/ide/Kconfig"
 
 source "drivers/scsi/Kconfig"
 
@@ -43,10 +61,6 @@ source "drivers/macintosh/Kconfig"
 
 source "drivers/net/Kconfig"
 
-source "drivers/isdn/Kconfig"
-
-source "drivers/lightnvm/Kconfig"
-
 # input before char - char/joystick depends on it. As does USB.
 
 source "drivers/input/Kconfig"
@@ -54,6 +68,8 @@ source "drivers/input/Kconfig"
 source "drivers/char/Kconfig"
 
 source "drivers/i2c/Kconfig"
+
+source "drivers/i3c/Kconfig"
 
 source "drivers/spi/Kconfig"
 
@@ -64,6 +80,8 @@ source "drivers/hsi/Kconfig"
 source "drivers/pps/Kconfig"
 
 source "drivers/ptp/Kconfig"
+
+source "drivers/dpll/Kconfig"
 
 source "drivers/pinctrl/Kconfig"
 
@@ -91,15 +109,17 @@ source "drivers/media/Kconfig"
 
 source "drivers/video/Kconfig"
 
+source "drivers/accel/Kconfig"
+
 source "sound/Kconfig"
 
 source "drivers/hid/Kconfig"
 
 source "drivers/usb/Kconfig"
 
-source "drivers/uwb/Kconfig"
-
 source "drivers/mmc/Kconfig"
+
+source "drivers/ufs/Kconfig"
 
 source "drivers/memstick/Kconfig"
 
@@ -119,21 +139,27 @@ source "drivers/dma-buf/Kconfig"
 
 source "drivers/dca/Kconfig"
 
-source "drivers/auxdisplay/Kconfig"
-
 source "drivers/uio/Kconfig"
 
 source "drivers/vfio/Kconfig"
-
-source "drivers/vlynq/Kconfig"
 
 source "drivers/virt/Kconfig"
 
 source "drivers/virtio/Kconfig"
 
+source "drivers/vdpa/Kconfig"
+
+source "drivers/vhost/Kconfig"
+
 source "drivers/hv/Kconfig"
 
 source "drivers/xen/Kconfig"
+
+source "drivers/greybus/Kconfig"
+
+source "drivers/comedi/Kconfig"
+
+source "drivers/gpib/Kconfig"
 
 source "drivers/staging/Kconfig"
 
@@ -157,6 +183,8 @@ source "drivers/soundwire/Kconfig"
 
 source "drivers/soc/Kconfig"
 
+source "drivers/pmdomain/Kconfig"
+
 source "drivers/devfreq/Kconfig"
 
 source "drivers/extcon/Kconfig"
@@ -167,8 +195,6 @@ source "drivers/iio/Kconfig"
 
 source "drivers/ntb/Kconfig"
 
-source "drivers/vme/Kconfig"
-
 source "drivers/pwm/Kconfig"
 
 source "drivers/irqchip/Kconfig"
@@ -176,8 +202,6 @@ source "drivers/irqchip/Kconfig"
 source "drivers/ipack/Kconfig"
 
 source "drivers/reset/Kconfig"
-
-source "drivers/fmc/Kconfig"
 
 source "drivers/phy/Kconfig"
 
@@ -211,10 +235,22 @@ source "drivers/mux/Kconfig"
 
 source "drivers/opp/Kconfig"
 
-source "drivers/visorbus/Kconfig"
-
 source "drivers/siox/Kconfig"
 
 source "drivers/slimbus/Kconfig"
+
+source "drivers/interconnect/Kconfig"
+
+source "drivers/counter/Kconfig"
+
+source "drivers/most/Kconfig"
+
+source "drivers/peci/Kconfig"
+
+source "drivers/hte/Kconfig"
+
+source "drivers/cdx/Kconfig"
+
+source "drivers/resctrl/Kconfig"
 
 endmenu

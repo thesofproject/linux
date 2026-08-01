@@ -1,25 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2013 ARM Ltd.
  * Copyright (C) 2013 Linaro.
  *
  * This code is based on glibc cortex strings work originally authored by Linaro
- * and re-licensed under GPLv2 for the Linux kernel. The original code can
  * be found @
  *
  * http://bazaar.launchpad.net/~linaro-toolchain-dev/cortex-strings/trunk/
  * files/head:/src/aarch64/
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/linkage.h>
@@ -38,6 +26,7 @@
  */
 
 dstin		.req	x0
+val_x		.req	x1
 val		.req	w1
 count		.req	x2
 tmp1		.req	x3
@@ -54,9 +43,7 @@ dst		.req	x8
 tmp3w		.req	w9
 tmp3		.req	x9
 
-	.weak memset
-ENTRY(__memset)
-ENTRY(memset)
+SYM_FUNC_START_LOCAL(__pi_memset_generic)
 	mov	dst, dstin	/* Preserve return value.  */
 	and	A_lw, val, #255
 	orr	A_lw, A_lw, A_lw, lsl #8
@@ -215,5 +202,27 @@ ENTRY(memset)
 	ands	count, count, zva_bits_x
 	b.ne	.Ltail_maybe_long
 	ret
-ENDPIPROC(memset)
-ENDPROC(__memset)
+SYM_FUNC_END(__pi_memset_generic)
+
+#ifdef CONFIG_AS_HAS_MOPS
+	.arch_extension mops
+SYM_FUNC_START(__pi_memset)
+alternative_if_not ARM64_HAS_MOPS
+	b	__pi_memset_generic
+alternative_else_nop_endif
+
+	mov	dst, dstin
+	setp	[dst]!, count!, val_x
+	setm	[dst]!, count!, val_x
+	sete	[dst]!, count!, val_x
+	ret
+SYM_FUNC_END(__pi_memset)
+#else
+SYM_FUNC_ALIAS(__pi_memset, __pi_memset_generic)
+#endif
+
+SYM_FUNC_ALIAS(__memset, __pi_memset)
+EXPORT_SYMBOL(__memset)
+
+SYM_FUNC_ALIAS_WEAK(memset, __pi_memset)
+EXPORT_SYMBOL(memset)

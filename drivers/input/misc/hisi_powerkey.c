@@ -30,7 +30,7 @@ static irqreturn_t hi65xx_power_press_isr(int irq, void *q)
 {
 	struct input_dev *input = q;
 
-	pm_wakeup_event(input->dev.parent, MAX_HELD_TIME);
+	pm_wakeup_dev_event(input->dev.parent, MAX_HELD_TIME, true);
 	input_report_key(input, KEY_POWER, 1);
 	input_sync(input);
 
@@ -90,12 +90,8 @@ static int hi65xx_powerkey_probe(struct platform_device *pdev)
 	for (i = 0; i < ARRAY_SIZE(hi65xx_irq_info); i++) {
 
 		irq = platform_get_irq_byname(pdev, hi65xx_irq_info[i].name);
-		if (irq < 0) {
-			error = irq;
-			dev_err(dev, "couldn't get irq %s: %d\n",
-				hi65xx_irq_info[i].name, error);
-			return error;
-		}
+		if (irq < 0)
+			return irq;
 
 		error = devm_request_any_context_irq(dev, irq,
 						     hi65xx_irq_info[i].handler,

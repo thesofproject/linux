@@ -1,23 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2011-2012 Calxeda, Inc.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/err.h>
-#include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/io.h>
 #include <linux/of.h>
@@ -49,7 +37,6 @@
 struct hb_clk {
         struct clk_hw	hw;
 	void __iomem	*reg;
-	char *parent_name;
 };
 #define to_hb_clk(p) container_of(p, struct hb_clk, hw)
 
@@ -143,15 +130,17 @@ static void clk_pll_calc(unsigned long rate, unsigned long ref_freq,
 	*pdivf = divf;
 }
 
-static long clk_pll_round_rate(struct clk_hw *hwclk, unsigned long rate,
-			       unsigned long *parent_rate)
+static int clk_pll_determine_rate(struct clk_hw *hw,
+				  struct clk_rate_request *req)
 {
 	u32 divq, divf;
-	unsigned long ref_freq = *parent_rate;
+	unsigned long ref_freq = req->best_parent_rate;
 
-	clk_pll_calc(rate, ref_freq, &divq, &divf);
+	clk_pll_calc(req->rate, ref_freq, &divq, &divf);
 
-	return (ref_freq * (divf + 1)) / (1 << divq);
+	req->rate = (ref_freq * (divf + 1)) / (1 << divq);
+
+	return 0;
 }
 
 static int clk_pll_set_rate(struct clk_hw *hwclk, unsigned long rate,
@@ -198,7 +187,7 @@ static const struct clk_ops clk_pll_ops = {
 	.enable = clk_pll_enable,
 	.disable = clk_pll_disable,
 	.recalc_rate = clk_pll_recalc_rate,
-	.round_rate = clk_pll_round_rate,
+	.determine_rate = clk_pll_determine_rate,
 	.set_rate = clk_pll_set_rate,
 };
 
@@ -240,16 +229,18 @@ static unsigned long clk_periclk_recalc_rate(struct clk_hw *hwclk,
 	return parent_rate / div;
 }
 
-static long clk_periclk_round_rate(struct clk_hw *hwclk, unsigned long rate,
-				   unsigned long *parent_rate)
+static int clk_periclk_determine_rate(struct clk_hw *hw,
+				      struct clk_rate_request *req)
 {
 	u32 div;
 
-	div = *parent_rate / rate;
+	div = req->best_parent_rate / req->rate;
 	div++;
 	div &= ~0x1;
 
-	return *parent_rate / div;
+	req->rate = req->best_parent_rate / div;
+
+	return 0;
 }
 
 static int clk_periclk_set_rate(struct clk_hw *hwclk, unsigned long rate,
@@ -268,11 +259,11 @@ static int clk_periclk_set_rate(struct clk_hw *hwclk, unsigned long rate,
 
 static const struct clk_ops periclk_ops = {
 	.recalc_rate = clk_periclk_recalc_rate,
-	.round_rate = clk_periclk_round_rate,
+	.determine_rate = clk_periclk_determine_rate,
 	.set_rate = clk_periclk_set_rate,
 };
 
-static __init struct clk *hb_clk_init(struct device_node *node, const struct clk_ops *ops)
+static void __init hb_clk_init(struct device_node *node, const struct clk_ops *ops, unsigned long clkflags)
 {
 	u32 reg;
 	struct hb_clk *hb_clk;
@@ -284,15 +275,16 @@ static __init struct clk *hb_clk_init(struct device_node *node, const struct clk
 
 	rc = of_property_read_u32(node, "reg", &reg);
 	if (WARN_ON(rc))
-		return NULL;
+		return;
 
-	hb_clk = kzalloc(sizeof(*hb_clk), GFP_KERNEL);
+	hb_clk = kzalloc_obj(*hb_clk);
 	if (WARN_ON(!hb_clk))
-		return NULL;
+		return;
 
 	/* Map system registers */
 	srnp = of_find_compatible_node(NULL, NULL, "calxeda,hb-sregs");
 	hb_clk->reg = of_iomap(srnp, 0);
+	of_node_put(srnp);
 	BUG_ON(!hb_clk->reg);
 	hb_clk->reg += reg;
 
@@ -300,7 +292,7 @@ static __init struct clk *hb_clk_init(struct device_node *node, const struct clk
 
 	init.name = clk_name;
 	init.ops = ops;
-	init.flags = 0;
+	init.flags = clkflags;
 	parent_name = of_clk_get_parent_name(node, 0);
 	init.parent_names = &parent_name;
 	init.num_parents = 1;
@@ -310,33 +302,31 @@ static __init struct clk *hb_clk_init(struct device_node *node, const struct clk
 	rc = clk_hw_register(NULL, &hb_clk->hw);
 	if (WARN_ON(rc)) {
 		kfree(hb_clk);
-		return NULL;
+		return;
 	}
-	rc = of_clk_add_hw_provider(node, of_clk_hw_simple_get, &hb_clk->hw);
-	return hb_clk->hw.clk;
+	of_clk_add_hw_provider(node, of_clk_hw_simple_get, &hb_clk->hw);
 }
 
 static void __init hb_pll_init(struct device_node *node)
 {
-	hb_clk_init(node, &clk_pll_ops);
+	hb_clk_init(node, &clk_pll_ops, 0);
 }
 CLK_OF_DECLARE(hb_pll, "calxeda,hb-pll-clock", hb_pll_init);
 
 static void __init hb_a9periph_init(struct device_node *node)
 {
-	hb_clk_init(node, &a9periphclk_ops);
+	hb_clk_init(node, &a9periphclk_ops, 0);
 }
 CLK_OF_DECLARE(hb_a9periph, "calxeda,hb-a9periph-clock", hb_a9periph_init);
 
 static void __init hb_a9bus_init(struct device_node *node)
 {
-	struct clk *clk = hb_clk_init(node, &a9bclk_ops);
-	clk_prepare_enable(clk);
+	hb_clk_init(node, &a9bclk_ops, CLK_IS_CRITICAL);
 }
 CLK_OF_DECLARE(hb_a9bus, "calxeda,hb-a9bus-clock", hb_a9bus_init);
 
 static void __init hb_emmc_init(struct device_node *node)
 {
-	hb_clk_init(node, &periclk_ops);
+	hb_clk_init(node, &periclk_ops, 0);
 }
 CLK_OF_DECLARE(hb_emmc, "calxeda,hb-emmc-clock", hb_emmc_init);

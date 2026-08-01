@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * Marvell Wireless LAN device driver: functions for station ioctl
+ * NXP Wireless LAN device driver: functions for station ioctl
  *
- * Copyright (C) 2011-2014, Marvell International Ltd.
- *
- * This software file (the "File") is distributed by Marvell International
- * Ltd. under the terms of the GNU General Public License Version 2, June 1991
- * (the "License").  You may use, redistribute and/or modify this File in
- * accordance with the terms and conditions of the License, a copy of which
- * is available by writing to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA or on the
- * worldwide web at http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt.
- *
- * THE FILE IS DISTRIBUTED AS-IS, WITHOUT WARRANTY OF ANY KIND, AND THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE
- * ARE EXPRESSLY DISCLAIMED.  The License provides additional details about
- * this warranty disclaimer.
+ * Copyright 2011-2020 NXP
  */
 
 #include "decl.h"
@@ -192,7 +180,7 @@ int mwifiex_fill_new_bss_desc(struct mwifiex_private *priv,
 	return mwifiex_update_bss_desc_with_ie(priv->adapter, bss_desc);
 }
 
-void mwifiex_dnld_txpwr_table(struct mwifiex_private *priv)
+static void mwifiex_dnld_dt_txpwr_table(struct mwifiex_private *priv)
 {
 	if (priv->adapter->dt_node) {
 		char txpwr[] = {"marvell,00_txpwrlimit"};
@@ -200,6 +188,64 @@ void mwifiex_dnld_txpwr_table(struct mwifiex_private *priv)
 		memcpy(&txpwr[8], priv->adapter->country_code, 2);
 		mwifiex_dnld_dt_cfgdata(priv, priv->adapter->dt_node, txpwr);
 	}
+}
+
+static int mwifiex_request_rgpower_table(struct mwifiex_private *priv)
+{
+	struct mwifiex_802_11d_domain_reg *domain_info = &priv->adapter->domain_reg;
+	struct mwifiex_adapter *adapter = priv->adapter;
+	char rgpower_table_name[30];
+	char country_code[3];
+	int ret;
+
+	strscpy(country_code, domain_info->country_code, sizeof(country_code));
+
+	/* World regulatory domain "00" has WW as country code */
+	if (strncmp(country_code, "00", 2) == 0)
+		strscpy(country_code, "WW", sizeof(country_code));
+
+	snprintf(rgpower_table_name, sizeof(rgpower_table_name),
+		 "nxp/rgpower_%s.bin", country_code);
+
+	mwifiex_dbg(adapter, INFO, "info: %s: requesting regulatory power table %s\n",
+		    __func__, rgpower_table_name);
+
+	if (adapter->rgpower_data) {
+		release_firmware(adapter->rgpower_data);
+		adapter->rgpower_data = NULL;
+	}
+
+	ret = request_firmware_direct(&adapter->rgpower_data, rgpower_table_name,
+				      adapter->dev);
+
+	if (ret) {
+		mwifiex_dbg(
+			adapter, INFO,
+			"info: %s: failed to request regulatory power table: %d\n",
+			__func__, ret);
+	}
+
+	return ret;
+}
+
+static int mwifiex_dnld_rgpower_table(struct mwifiex_private *priv)
+{
+	int ret;
+
+	ret = mwifiex_request_rgpower_table(priv);
+	if (ret)
+		return ret;
+
+	return mwifiex_send_rgpower_table(priv, priv->adapter->rgpower_data->data,
+					  priv->adapter->rgpower_data->size);
+}
+
+void mwifiex_dnld_txpwr_table(struct mwifiex_private *priv)
+{
+	if (mwifiex_dnld_rgpower_table(priv) == 0)
+		return;
+
+	mwifiex_dnld_dt_txpwr_table(priv);
 }
 
 static int mwifiex_process_country_ie(struct mwifiex_private *priv,
@@ -229,6 +275,15 @@ static int mwifiex_process_country_ie(struct mwifiex_private *priv,
 			    "11D: skip setting domain info in FW\n");
 		return 0;
 	}
+
+	if (country_ie_len >
+	    (IEEE80211_COUNTRY_STRING_LEN + MWIFIEX_MAX_TRIPLET_802_11D)) {
+		rcu_read_unlock();
+		mwifiex_dbg(priv->adapter, ERROR,
+			    "11D: country_ie_len overflow!, deauth AP\n");
+		return -EINVAL;
+	}
+
 	memcpy(priv->adapter->country_code, &country_ie[2], 2);
 
 	domain_info->country_code[0] = country_ie[2];
@@ -272,12 +327,12 @@ int mwifiex_bss_start(struct mwifiex_private *priv, struct cfg80211_bss *bss,
 	priv->scan_block = false;
 
 	if (bss) {
-		if (adapter->region_code == 0x00)
-			mwifiex_process_country_ie(priv, bss);
+		if (adapter->region_code == 0x00 &&
+		    mwifiex_process_country_ie(priv, bss))
+			return -EINVAL;
 
 		/* Allocate and fill new bss descriptor */
-		bss_desc = kzalloc(sizeof(struct mwifiex_bssdescriptor),
-				   GFP_KERNEL);
+		bss_desc = kzalloc_obj(struct mwifiex_bssdescriptor);
 		if (!bss_desc)
 			return -ENOMEM;
 
@@ -341,19 +396,17 @@ int mwifiex_bss_start(struct mwifiex_private *priv, struct cfg80211_bss *bss,
 			ret = mwifiex_associate(priv, bss_desc);
 		}
 
-		if (bss)
+		if (bss && !priv->adapter->host_mlme_enabled)
 			cfg80211_put_bss(priv->adapter->wiphy, bss);
 	} else {
 		/* Adhoc mode */
 		/* If the requested SSID matches current SSID, return */
 		if (bss_desc && bss_desc->ssid.ssid_len &&
-		    (!mwifiex_ssid_cmp(&priv->curr_bss_params.bss_descriptor.
-				       ssid, &bss_desc->ssid))) {
+		    cfg80211_ssid_eq(&priv->curr_bss_params.bss_descriptor.ssid,
+				     &bss_desc->ssid)) {
 			ret = 0;
 			goto done;
 		}
-
-		priv->adhoc_is_link_sensed = false;
 
 		ret = mwifiex_check_network_compatibility(priv, bss_desc);
 
@@ -419,7 +472,8 @@ int mwifiex_set_hs_params(struct mwifiex_private *priv, u16 action,
 		}
 		if (hs_cfg->is_invoke_hostcmd) {
 			if (hs_cfg->conditions == HS_CFG_CANCEL) {
-				if (!adapter->is_hs_configured)
+				if (!test_bit(MWIFIEX_IS_HS_CONFIGURED,
+					      &adapter->work_flags))
 					/* Already cancelled */
 					break;
 				/* Save previous condition */
@@ -504,8 +558,7 @@ int mwifiex_enable_hs(struct mwifiex_adapter *adapter)
 	if (disconnect_on_suspend) {
 		for (i = 0; i < adapter->priv_num; i++) {
 			priv = adapter->priv[i];
-			if (priv)
-				mwifiex_deauthenticate(priv, NULL);
+			mwifiex_deauthenticate(priv, NULL);
 		}
 	}
 
@@ -535,7 +588,7 @@ int mwifiex_enable_hs(struct mwifiex_adapter *adapter)
 	memset(&hscfg, 0, sizeof(hscfg));
 	hscfg.is_invoke_hostcmd = true;
 
-	adapter->hs_enabling = true;
+	set_bit(MWIFIEX_IS_HS_ENABLING, &adapter->work_flags);
 	mwifiex_cancel_all_pending_cmd(adapter);
 
 	if (mwifiex_set_hs_params(mwifiex_get_priv(adapter,
@@ -549,7 +602,7 @@ int mwifiex_enable_hs(struct mwifiex_adapter *adapter)
 
 	if (wait_event_interruptible_timeout(adapter->hs_activate_wait_q,
 					     adapter->hs_activate_wait_q_woken,
-					     (10 * HZ)) <= 0) {
+					     (5 * HZ)) <= 0) {
 		mwifiex_dbg(adapter, ERROR,
 			    "hs_activate_wait_q terminated\n");
 		return false;
@@ -601,7 +654,8 @@ int mwifiex_get_bss_info(struct mwifiex_private *priv,
 	else
 		info->wep_status = false;
 
-	info->is_hs_configured = adapter->is_hs_configured;
+	info->is_hs_configured = test_bit(MWIFIEX_IS_HS_CONFIGURED,
+					  &adapter->work_flags);
 	info->is_deep_sleep = adapter->is_deep_sleep;
 
 	return 0;
@@ -686,6 +740,9 @@ int mwifiex_set_tx_power(struct mwifiex_private *priv,
 	txp_cfg = (struct host_cmd_ds_txpwr_cfg *) buf;
 	txp_cfg->action = cpu_to_le16(HostCmd_ACT_GEN_SET);
 	if (!power_cfg->is_power_auto) {
+		u16 dbm_min = power_cfg->is_power_fixed ?
+			      dbm : priv->min_tx_power_level;
+
 		txp_cfg->mode = cpu_to_le32(1);
 		pg_tlv = (struct mwifiex_types_power_group *)
 			 (buf + sizeof(struct host_cmd_ds_txpwr_cfg));
@@ -700,7 +757,7 @@ int mwifiex_set_tx_power(struct mwifiex_private *priv,
 		pg->last_rate_code = 0x03;
 		pg->modulation_class = MOD_CLASS_HR_DSSS;
 		pg->power_step = 0;
-		pg->power_min = (s8) dbm;
+		pg->power_min = (s8) dbm_min;
 		pg->power_max = (s8) dbm;
 		pg++;
 		/* Power group for modulation class OFDM */
@@ -708,7 +765,7 @@ int mwifiex_set_tx_power(struct mwifiex_private *priv,
 		pg->last_rate_code = 0x07;
 		pg->modulation_class = MOD_CLASS_OFDM;
 		pg->power_step = 0;
-		pg->power_min = (s8) dbm;
+		pg->power_min = (s8) dbm_min;
 		pg->power_max = (s8) dbm;
 		pg++;
 		/* Power group for modulation class HTBW20 */
@@ -716,7 +773,7 @@ int mwifiex_set_tx_power(struct mwifiex_private *priv,
 		pg->last_rate_code = 0x20;
 		pg->modulation_class = MOD_CLASS_HT;
 		pg->power_step = 0;
-		pg->power_min = (s8) dbm;
+		pg->power_min = (s8) dbm_min;
 		pg->power_max = (s8) dbm;
 		pg->ht_bandwidth = HT_BW_20;
 		pg++;
@@ -725,7 +782,7 @@ int mwifiex_set_tx_power(struct mwifiex_private *priv,
 		pg->last_rate_code = 0x20;
 		pg->modulation_class = MOD_CLASS_HT;
 		pg->power_step = 0;
-		pg->power_min = (s8) dbm;
+		pg->power_min = (s8) dbm_min;
 		pg->power_max = (s8) dbm;
 		pg->ht_bandwidth = HT_BW_40;
 	}
@@ -1310,8 +1367,8 @@ mwifiex_set_gen_ie_helper(struct mwifiex_private *priv, u8 *ie_data_ptr,
 			  u16 ie_len)
 {
 	struct ieee_types_vendor_header *pvendor_ie;
-	const u8 wpa_oui[] = { 0x00, 0x50, 0xf2, 0x01 };
-	const u8 wps_oui[] = { 0x00, 0x50, 0xf2, 0x04 };
+	static const u8 wpa_oui[] = { 0x00, 0x50, 0xf2, 0x01 };
+	static const u8 wps_oui[] = { 0x00, 0x50, 0xf2, 0x04 };
 	u16 unparsed_len = ie_len, cur_ie_len;
 
 	/* If the passed length is zero, reset the buffer */
@@ -1346,7 +1403,7 @@ mwifiex_set_gen_ie_helper(struct mwifiex_private *priv, u8 *ie_data_ptr,
 			/* Test to see if it is a WPA IE, if not, then
 			 * it is a gen IE
 			 */
-			if (!memcmp(pvendor_ie->oui, wpa_oui,
+			if (!memcmp(&pvendor_ie->oui, wpa_oui,
 				    sizeof(wpa_oui))) {
 				/* IE is a WPA/WPA2 IE so call set_wpa function
 				 */
@@ -1356,7 +1413,7 @@ mwifiex_set_gen_ie_helper(struct mwifiex_private *priv, u8 *ie_data_ptr,
 				goto next_ie;
 			}
 
-			if (!memcmp(pvendor_ie->oui, wps_oui,
+			if (!memcmp(&pvendor_ie->oui, wps_oui,
 				    sizeof(wps_oui))) {
 				/* Test to see if it is a WPS IE,
 				 * if so, enable wps session flag

@@ -1,14 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2014  Google, Inc.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/cdev.h>
@@ -33,7 +25,7 @@ static ssize_t write_pmsg(struct file *file, const char __user *buf,
 	record.size = count;
 
 	/* check outside lock, page in any data. write_user also checks */
-	if (!access_ok(VERIFY_READ, buf, count))
+	if (!access_ok(buf, count))
 		return -EFAULT;
 
 	mutex_lock(&pmsg_lock);
@@ -54,7 +46,7 @@ static int pmsg_major;
 #undef pr_fmt
 #define pr_fmt(fmt) PMSG_NAME ": " fmt
 
-static char *pmsg_devnode(struct device *dev, umode_t *mode)
+static char *pmsg_devnode(const struct device *dev, umode_t *mode)
 {
 	if (mode)
 		*mode = 0220;
@@ -71,7 +63,7 @@ void pstore_register_pmsg(void)
 		goto err;
 	}
 
-	pmsg_class = class_create(THIS_MODULE, PMSG_NAME);
+	pmsg_class = class_create(PMSG_NAME);
 	if (IS_ERR(pmsg_class)) {
 		pr_err("device class file already in use\n");
 		goto err_class;

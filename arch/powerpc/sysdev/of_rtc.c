@@ -1,19 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Instantiate mmio-mapped RTC chips based on device tree information
  *
  * Copyright 2007 David Gibson <dwg@au1.ibm.com>, IBM Corporation.
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 #include <linux/kernel.h>
-#include <linux/of.h>
 #include <linux/init.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include <linux/slab.h>
+
+#include <asm/prom.h>
 
 static __initdata struct {
 	const char *compatible;
@@ -35,7 +33,7 @@ void __init of_instantiate_rtc(void)
 					 of_rtc_table[i].compatible) {
 			struct resource *res;
 
-			res = kmalloc(sizeof(*res), GFP_KERNEL);
+			res = kmalloc_obj(*res);
 			if (!res) {
 				printk(KERN_ERR "OF RTC: Out of memory "
 				       "allocating resource structure for %pOF\n",

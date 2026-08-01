@@ -76,7 +76,7 @@
  * conventions for the use the flash space:
  */
 
-/* Minumum amount of flash we support */
+/* Minimum amount of flash we support */
 #define FLASH_MIN		0x00020000	/* Minimum flash size */
 
 #define	CC_SROM_OTP		0x800	/* SROM/OTP address space */
@@ -144,14 +144,6 @@ struct si_pub {
 };
 
 struct pci_dev;
-
-struct gpioh_item {
-	void *arg;
-	bool level;
-	void (*handler) (u32 stat, void *arg);
-	u32 event;
-	struct gpioh_item *next;
-};
 
 /* misc si info needed by some of the routines */
 struct si_info {

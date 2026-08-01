@@ -9,9 +9,9 @@
  *		 Martin Schwidefsky (schwidefsky@de.ibm.com)
  */
 
-#define KMSG_COMPONENT "cio"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "cio: " fmt
 
+#include <linux/export.h>
 #include <linux/ftrace.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -112,7 +112,7 @@ cio_start_handle_notoper(struct subchannel *sch, __u8 lpm)
 	if (cio_update_schib(sch))
 		return -ENODEV;
 
-	sprintf(dbf_text, "no%s", dev_name(&sch->dev));
+	scnprintf(dbf_text, sizeof(dbf_text), "no%s", dev_name(&sch->dev));
 	CIO_TRACE_EVENT(0, dbf_text);
 	CIO_HEX_EVENT(0, &sch->schib, sizeof (struct schib));
 
@@ -134,7 +134,7 @@ cio_start_key (struct subchannel *sch,	/* subchannel structure */
 
 	memset(orb, 0, sizeof(union orb));
 	/* sch is always under 2G. */
-	orb->cmd.intparm = (u32)(addr_t)sch;
+	orb->cmd.intparm = (u32)virt_to_phys(sch);
 	orb->cmd.fmt = 1;
 
 	orb->cmd.pfch = priv->options.prefetch == 0;
@@ -148,7 +148,7 @@ cio_start_key (struct subchannel *sch,	/* subchannel structure */
 	orb->cmd.i2k = 0;
 	orb->cmd.key = key >> 4;
 	/* issue "Start Subchannel" */
-	orb->cmd.cpa = (__u32) __pa(cpa);
+	orb->cmd.cpa = virt_to_dma32(cpa);
 	ccode = ssch(sch->schid, orb);
 
 	/* process condition code */
@@ -459,10 +459,14 @@ int cio_update_schib(struct subchannel *sch)
 {
 	struct schib schib;
 
-	if (stsch(sch->schid, &schib) || !css_sch_is_valid(&schib))
+	if (stsch(sch->schid, &schib))
 		return -ENODEV;
 
 	memcpy(&sch->schib, &schib, sizeof(schib));
+
+	if (!css_sch_is_valid(&schib))
+		return -EACCES;
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(cio_update_schib);
@@ -526,76 +530,6 @@ int cio_disable_subchannel(struct subchannel *sch)
 }
 EXPORT_SYMBOL_GPL(cio_disable_subchannel);
 
-static int cio_check_devno_blacklisted(struct subchannel *sch)
-{
-	if (is_blacklisted(sch->schid.ssid, sch->schib.pmcw.dev)) {
-		/*
-		 * This device must not be known to Linux. So we simply
-		 * say that there is no device and return ENODEV.
-		 */
-		CIO_MSG_EVENT(6, "Blacklisted device detected "
-			      "at devno %04X, subchannel set %x\n",
-			      sch->schib.pmcw.dev, sch->schid.ssid);
-		return -ENODEV;
-	}
-	return 0;
-}
-
-/**
- * cio_validate_subchannel - basic validation of subchannel
- * @sch: subchannel structure to be filled out
- * @schid: subchannel id
- *
- * Find out subchannel type and initialize struct subchannel.
- * Return codes:
- *   0 on success
- *   -ENXIO for non-defined subchannels
- *   -ENODEV for invalid subchannels or blacklisted devices
- *   -EIO for subchannels in an invalid subchannel set
- */
-int cio_validate_subchannel(struct subchannel *sch, struct subchannel_id schid)
-{
-	char dbf_txt[15];
-	int ccode;
-	int err;
-
-	sprintf(dbf_txt, "valsch%x", schid.sch_no);
-	CIO_TRACE_EVENT(4, dbf_txt);
-
-	/*
-	 * The first subchannel that is not-operational (ccode==3)
-	 * indicates that there aren't any more devices available.
-	 * If stsch gets an exception, it means the current subchannel set
-	 * is not valid.
-	 */
-	ccode = stsch(schid, &sch->schib);
-	if (ccode) {
-		err = (ccode == 3) ? -ENXIO : ccode;
-		goto out;
-	}
-	sch->st = sch->schib.pmcw.st;
-	sch->schid = schid;
-
-	switch (sch->st) {
-	case SUBCHANNEL_TYPE_IO:
-	case SUBCHANNEL_TYPE_MSG:
-		if (!css_sch_is_valid(&sch->schib))
-			err = -ENODEV;
-		else
-			err = cio_check_devno_blacklisted(sch);
-		break;
-	default:
-		err = 0;
-	}
-	if (err)
-		goto out;
-
-	CIO_MSG_EVENT(4, "Subchannel 0.%x.%04x reports subchannel type %04X\n",
-		      sch->schid.ssid, sch->schid.sch_no, sch->st);
-out:
-	return err;
-}
-
 /*
  * do_cio_interrupt() handles all normal I/O device IRQ's
  */
@@ -605,18 +539,17 @@ static irqreturn_t do_cio_interrupt(int irq, void *dummy)
 	struct subchannel *sch;
 	struct irb *irb;
 
-	set_cpu_flag(CIF_NOHZ_DELAY);
-	tpi_info = (struct tpi_info *) &get_irq_regs()->int_code;
+	tpi_info = &get_irq_regs()->tpi_info;
 	trace_s390_cio_interrupt(tpi_info);
 	irb = this_cpu_ptr(&cio_irb);
-	sch = (struct subchannel *)(unsigned long) tpi_info->intparm;
-	if (!sch) {
+	if (!tpi_info->intparm) {
 		/* Clear pending interrupt condition. */
 		inc_irq_stat(IRQIO_CIO);
 		tsch(tpi_info->schid, irb);
 		return IRQ_HANDLED;
 	}
-	spin_lock(sch->lock);
+	sch = phys_to_virt(tpi_info->intparm);
+	spin_lock(&sch->lock);
 	/* Store interrupt response block to lowcore. */
 	if (tsch(tpi_info->schid, irb) == 0) {
 		/* Keep subchannel information word up to date. */
@@ -628,21 +561,17 @@ static irqreturn_t do_cio_interrupt(int irq, void *dummy)
 			inc_irq_stat(IRQIO_CIO);
 	} else
 		inc_irq_stat(IRQIO_CIO);
-	spin_unlock(sch->lock);
+	spin_unlock(&sch->lock);
 
 	return IRQ_HANDLED;
 }
-
-static struct irqaction io_interrupt = {
-	.name	 = "IO",
-	.handler = do_cio_interrupt,
-};
 
 void __init init_cio_interrupts(void)
 {
 	irq_set_chip_and_handler(IO_INTERRUPT,
 				 &dummy_irq_chip, handle_percpu_irq);
-	setup_irq(IO_INTERRUPT, &io_interrupt);
+	if (request_irq(IO_INTERRUPT, do_cio_interrupt, 0, "I/O", NULL))
+		panic("Failed to register I/O interrupt\n");
 }
 
 #ifdef CONFIG_CCW_CONSOLE
@@ -719,6 +648,7 @@ struct subchannel *cio_probe_console(void)
 {
 	struct subchannel_id schid;
 	struct subchannel *sch;
+	struct schib schib;
 	int sch_no, ret;
 
 	sch_no = cio_get_console_sch_no();
@@ -728,14 +658,18 @@ struct subchannel *cio_probe_console(void)
 	}
 	init_subchannel_id(&schid);
 	schid.sch_no = sch_no;
-	sch = css_alloc_subchannel(schid);
+	ret = stsch(schid, &schib);
+	if (ret)
+		return ERR_PTR(-ENODEV);
+
+	sch = css_alloc_subchannel(schid, &schib);
 	if (IS_ERR(sch))
 		return sch;
 
-	lockdep_set_class(sch->lock, &console_sch_key);
+	lockdep_set_class(&sch->lock, &console_sch_key);
 	isc_register(CONSOLE_ISC);
 	sch->config.isc = CONSOLE_ISC;
-	sch->config.intparm = (u32)(addr_t)sch;
+	sch->config.intparm = (u32)virt_to_phys(sch);
 	ret = cio_commit_config(sch);
 	if (ret) {
 		isc_unregister(CONSOLE_ISC);
@@ -782,11 +716,11 @@ int cio_tm_start_key(struct subchannel *sch, struct tcw *tcw, u8 lpm, u8 key)
 	union orb *orb = &to_io_private(sch)->orb;
 
 	memset(orb, 0, sizeof(union orb));
-	orb->tm.intparm = (u32) (addr_t) sch;
+	orb->tm.intparm = (u32)virt_to_phys(sch);
 	orb->tm.key = key >> 4;
 	orb->tm.b = 1;
 	orb->tm.lpm = lpm ? lpm : sch->lpm;
-	orb->tm.tcw = (u32) (addr_t) tcw;
+	orb->tm.tcw = virt_to_dma32(tcw);
 	cc = ssch(sch->schid, orb);
 	switch (cc) {
 	case 0:

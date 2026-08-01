@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* multi_arith.h: multi-precision integer arithmetic functions, needed
    to do extended-precision floating point.
 
@@ -6,9 +7,7 @@
    Somewhat based on arch/alpha/math-emu/ieee-math.c, which is (c)
    David Mosberger-Tang.
 
-   You may copy, modify, and redistribute this file under the terms of
-   the GNU General Public License, version 2, or any later version, at
-   your convenience. */
+ */
 
 /* Note:
 
@@ -16,8 +15,10 @@
    implement the subset of integer arithmetic that we need in order to
    multiply, divide, and normalize 128-bit unsigned mantissae.  */
 
-#ifndef MULTI_ARITH_H
-#define MULTI_ARITH_H
+#ifndef _MULTI_ARITH_H
+#define _MULTI_ARITH_H
+
+#include "fp_emu.h"
 
 static inline void fp_denormalize(struct fp_ext *reg, unsigned int cnt)
 {
@@ -286,4 +287,4 @@ static inline void fp_putmant128(struct fp_ext *dest, union fp_mant128 *src,
 	}
 }
 
-#endif	/* MULTI_ARITH_H */
+#endif	/* _MULTI_ARITH_H */

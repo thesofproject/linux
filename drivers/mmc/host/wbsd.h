@@ -1,12 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *  linux/drivers/mmc/host/wbsd.h - Winbond W83L51xD SD/MMC driver
  *
  *  Copyright (C) 2004-2007 Pierre Ossman, All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or (at
- * your option) any later version.
  */
 
 #define LOCK_CODE		0xAA
@@ -175,11 +171,11 @@ struct wbsd_host
 	int			irq;		/* Interrupt */
 	int			dma;		/* DMA channel */
 
-	struct tasklet_struct	card_tasklet;	/* Tasklet structures */
-	struct tasklet_struct	fifo_tasklet;
-	struct tasklet_struct	crc_tasklet;
-	struct tasklet_struct	timeout_tasklet;
-	struct tasklet_struct	finish_tasklet;
+	struct work_struct	card_bh_work;	/* Work structures */
+	struct work_struct	fifo_bh_work;
+	struct work_struct	crc_bh_work;
+	struct work_struct	timeout_bh_work;
+	struct work_struct	finish_bh_work;
 
 	struct timer_list	ignore_timer;	/* Ignore detection timer */
 };

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Combined Ethernet driver for Motorola MPC8xx and MPC82xx.
  *
@@ -6,10 +7,6 @@
  *
  * 2005 (c) MontaVista Software, Inc.
  * Vitaly Bordug <vbordug@ru.mvista.com>
- *
- * This file is licensed under the terms of the GNU General Public License
- * version 2. This program is licensed "as is" without any warranty of any
- * kind, whether express or implied.
  */
 
 #include <linux/module.h>
@@ -30,10 +27,12 @@
 #include <linux/ethtool.h>
 #include <linux/bitops.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_platform.h>
+#include <linux/of_mdio.h>
+#include <linux/pgtable.h>
 
-#include <asm/pgtable.h>
 #include <asm/irq.h>
 #include <linux/uaccess.h>
 #include <asm/mpc5xxx.h>
@@ -95,26 +94,21 @@ static int fs_enet_fec_mii_write(struct mii_bus *bus, int phy_id, int location, 
 
 }
 
-static const struct of_device_id fs_enet_mdio_fec_match[];
 static int fs_enet_mdio_probe(struct platform_device *ofdev)
 {
-	const struct of_device_id *match;
 	struct resource res;
 	struct mii_bus *new_bus;
 	struct fec_info *fec;
-	int (*get_bus_freq)(struct device_node *);
+	int (*get_bus_freq)(struct device *);
 	int ret = -ENOMEM, clock, speed;
 
-	match = of_match_device(fs_enet_mdio_fec_match, &ofdev->dev);
-	if (!match)
-		return -EINVAL;
-	get_bus_freq = match->data;
+	get_bus_freq = device_get_match_data(&ofdev->dev);
 
 	new_bus = mdiobus_alloc();
 	if (!new_bus)
 		goto out;
 
-	fec = kzalloc(sizeof(struct fec_info), GFP_KERNEL);
+	fec = kzalloc_obj(struct fec_info);
 	if (!fec)
 		goto out_mii;
 
@@ -127,7 +121,7 @@ static int fs_enet_mdio_probe(struct platform_device *ofdev)
 	if (ret)
 		goto out_res;
 
-	snprintf(new_bus->id, MII_BUS_ID_SIZE, "%x", res.start);
+	snprintf(new_bus->id, MII_BUS_ID_SIZE, "%pap", &res.start);
 
 	fec->fecp = ioremap(res.start, resource_size(&res));
 	if (!fec->fecp) {
@@ -136,7 +130,7 @@ static int fs_enet_mdio_probe(struct platform_device *ofdev)
 	}
 
 	if (get_bus_freq) {
-		clock = get_bus_freq(ofdev->dev.of_node);
+		clock = get_bus_freq(&ofdev->dev);
 		if (!clock) {
 			/* Use maximum divider if clock is unknown */
 			dev_warn(&ofdev->dev, "could not determine IPS clock\n");
@@ -187,7 +181,7 @@ out:
 	return ret;
 }
 
-static int fs_enet_mdio_remove(struct platform_device *ofdev)
+static void fs_enet_mdio_remove(struct platform_device *ofdev)
 {
 	struct mii_bus *bus = platform_get_drvdata(ofdev);
 	struct fec_info *fec = bus->priv;
@@ -196,8 +190,6 @@ static int fs_enet_mdio_remove(struct platform_device *ofdev)
 	iounmap(fec->fecp);
 	kfree(fec);
 	mdiobus_free(bus);
-
-	return 0;
 }
 
 static const struct of_device_id fs_enet_mdio_fec_match[] = {
@@ -224,3 +216,4 @@ static struct platform_driver fs_enet_fec_mdio_driver = {
 };
 
 module_platform_driver(fs_enet_fec_mdio_driver);
+MODULE_LICENSE("GPL");

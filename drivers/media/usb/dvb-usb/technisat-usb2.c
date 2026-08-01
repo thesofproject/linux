@@ -199,7 +199,7 @@ static u32 technisat_usb2_i2c_func(struct i2c_adapter *adapter)
 	return I2C_FUNC_I2C;
 }
 
-static struct i2c_algorithm technisat_usb2_i2c_algo = {
+static const struct i2c_algorithm technisat_usb2_i2c_algo = {
 	.master_xfer   = technisat_usb2_i2c_xfer,
 	.functionality = technisat_usb2_i2c_func,
 };
@@ -330,8 +330,8 @@ schedule:
 
 /* method to find out whether the firmware has to be downloaded or not */
 static int technisat_usb2_identify_state(struct usb_device *udev,
-		struct dvb_usb_device_properties *props,
-		struct dvb_usb_device_description **desc, int *cold)
+		const struct dvb_usb_device_properties *props,
+		const struct dvb_usb_device_description **desc, int *cold)
 {
 	int ret;
 	u8 *version;
@@ -566,8 +566,9 @@ static int technisat_usb2_frontend_attach(struct dvb_usb_adapter *a)
 			a->fe_adap[0].fe->ops.set_voltage = technisat_usb2_set_voltage;
 
 			/* if everything was successful assign a nice name to the frontend */
-			strlcpy(a->fe_adap[0].fe->ops.info.name, a->dev->desc->name,
-					sizeof(a->fe_adap[0].fe->ops.info.name));
+			strscpy(a->fe_adap[0].fe->ops.info.name,
+				a->dev->desc->name,
+				sizeof(a->fe_adap[0].fe->ops.info.name));
 		} else {
 			dvb_frontend_detach(a->fe_adap[0].fe);
 			a->fe_adap[0].fe = NULL;
@@ -607,10 +608,9 @@ static int technisat_usb2_frontend_attach(struct dvb_usb_adapter *a)
 static int technisat_usb2_get_ir(struct dvb_usb_device *d)
 {
 	struct technisat_usb2_state *state = d->priv;
-	u8 *buf = state->buf;
-	u8 *b;
-	int ret;
 	struct ir_raw_event ev;
+	u8 *buf = state->buf;
+	int i, ret;
 
 	buf[0] = GET_IR_DATA_VENDOR_REQUEST;
 	buf[1] = 0x08;
@@ -646,26 +646,25 @@ unlock:
 		return 0; /* no key pressed */
 
 	/* decoding */
-	b = buf+1;
 
 #if 0
 	deb_rc("RC: %d ", ret);
-	debug_dump(b, ret, deb_rc);
+	debug_dump(buf + 1, ret, deb_rc);
 #endif
 
 	ev.pulse = 0;
-	while (1) {
-		ev.pulse = !ev.pulse;
-		ev.duration = (*b * FIRMWARE_CLOCK_DIVISOR * FIRMWARE_CLOCK_TICK) / 1000;
-		ir_raw_event_store(d->rc_dev, &ev);
-
-		b++;
-		if (*b == 0xff) {
+	for (i = 1; i < ARRAY_SIZE(state->buf); i++) {
+		if (buf[i] == 0xff) {
 			ev.pulse = 0;
-			ev.duration = 888888*2;
+			ev.duration = 889 * 2;
 			ir_raw_event_store(d->rc_dev, &ev);
 			break;
 		}
+
+		ev.pulse = !ev.pulse;
+		ev.duration = (buf[i] * FIRMWARE_CLOCK_DIVISOR *
+			       FIRMWARE_CLOCK_TICK) / (1000 * 1000);
+		ir_raw_event_store(d->rc_dev, &ev);
 	}
 
 	ir_raw_event_handle(d->rc_dev);
@@ -690,10 +689,15 @@ static int technisat_usb2_rc_query(struct dvb_usb_device *d)
 }
 
 /* DVB-USB and USB stuff follows */
-static struct usb_device_id technisat_usb2_id_table[] = {
-	{ USB_DEVICE(USB_VID_TECHNISAT, USB_PID_TECHNISAT_USB2_DVB_S2) },
-	{ 0 }		/* Terminating entry */
+enum {
+	TECHNISAT_USB2_DVB_S2,
 };
+
+static const struct usb_device_id technisat_usb2_id_table[] = {
+	DVB_USB_DEV(TECHNISAT, TECHNISAT_USB2_DVB_S2),
+	{ }
+};
+
 MODULE_DEVICE_TABLE(usb, technisat_usb2_id_table);
 
 /* device description */
@@ -739,7 +743,7 @@ static struct dvb_usb_device_properties technisat_usb2_devices = {
 	.num_device_descs = 1,
 	.devices = {
 		{   "Technisat SkyStar USB HD (DVB-S/S2)",
-			{ &technisat_usb2_id_table[0], NULL },
+			{ &technisat_usb2_id_table[TECHNISAT_USB2_DVB_S2], NULL },
 			{ NULL },
 		},
 	},
@@ -782,7 +786,7 @@ static void technisat_usb2_disconnect(struct usb_interface *intf)
 {
 	struct dvb_usb_device *dev = usb_get_intfdata(intf);
 
-	/* work and stuff was only created when the device is is hot-state */
+	/* work and stuff was only created when the device is hot-state */
 	if (dev != NULL) {
 		struct technisat_usb2_state *state = dev->priv;
 		if (state != NULL)

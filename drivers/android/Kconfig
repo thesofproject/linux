@@ -1,18 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0
 menu "Android"
 
-config ANDROID
-	bool "Android Drivers"
-	---help---
-	  Enable support for various drivers needed on the Android platform
-
-if ANDROID
-
 config ANDROID_BINDER_IPC
 	bool "Android Binder IPC Driver"
 	depends on MMU
+	depends on NET
 	default n
-	---help---
+	help
 	  Binder is used in Android for both communication between processes,
 	  and remote method invocation.
 
@@ -20,11 +14,36 @@ config ANDROID_BINDER_IPC
 	  Android process, using Binder to identify, invoke and pass arguments
 	  between said processes.
 
+config ANDROID_BINDER_IPC_RUST
+	bool "Rust version of Android Binder IPC Driver"
+	depends on RUST && MMU && !ANDROID_BINDER_IPC
+	help
+	  This enables the Rust implementation of the Binder driver.
+
+	  Binder is used in Android for both communication between processes,
+	  and remote method invocation.
+
+	  This means one Android process can call a method/routine in another
+	  Android process, using Binder to identify, invoke and pass arguments
+	  between said processes.
+
+config ANDROID_BINDERFS
+	bool "Android Binderfs filesystem"
+	depends on ANDROID_BINDER_IPC
+	default n
+	help
+	  Binderfs is a pseudo-filesystem for the Android Binder IPC driver
+	  which can be mounted per-ipc namespace allowing to run multiple
+	  instances of Android.
+	  Each binderfs mount initially only contains a binder-control device.
+	  It can be used to dynamically allocate new binder IPC devices via
+	  ioctls.
+
 config ANDROID_BINDER_DEVICES
 	string "Android Binder devices"
-	depends on ANDROID_BINDER_IPC
+	depends on ANDROID_BINDER_IPC || ANDROID_BINDER_IPC_RUST
 	default "binder,hwbinder,vndbinder"
-	---help---
+	help
 	  Default value for the binder.devices parameter.
 
 	  The binder.devices parameter is a comma-separated list of strings
@@ -32,29 +51,15 @@ config ANDROID_BINDER_DEVICES
 	  created. Each binder device has its own context manager, and is
 	  therefore logically separated from the other devices.
 
-config ANDROID_BINDER_IPC_32BIT
-	bool "Use old (Android 4.4 and earlier) 32-bit binder API"
-	depends on !64BIT && ANDROID_BINDER_IPC
-	default y
-	---help---
-	  The Binder API has been changed to support both 32 and 64bit
-	  applications in a mixed environment.
+config ANDROID_BINDER_ALLOC_KUNIT_TEST
+	tristate "KUnit Tests for Android Binder Alloc" if !KUNIT_ALL_TESTS
+	depends on ANDROID_BINDER_IPC && KUNIT
+	default KUNIT_ALL_TESTS
+	help
+	  This feature builds the binder alloc KUnit tests.
 
-	  Enable this to support an old 32-bit Android user-space (v4.4 and
-	  earlier).
-
-	  Note that enabling this will break newer Android user-space.
-
-config ANDROID_BINDER_IPC_SELFTEST
-	bool "Android Binder IPC Driver Selftest"
-	depends on ANDROID_BINDER_IPC
-	---help---
-	  This feature allows binder selftest to run.
-
-	  Binder selftest checks the allocation and free of binder buffers
-	  exhaustively with combinations of various buffer sizes and
-	  alignments.
-
-endif # if ANDROID
+	  Each test case runs using a pared-down binder_alloc struct and
+	  test-specific freelist, which allows this KUnit module to be loaded
+	  for testing without interfering with a running system.
 
 endmenu

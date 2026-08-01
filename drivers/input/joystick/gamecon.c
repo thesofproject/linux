@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * NES, SNES, N64, MultiSystem, PSX gamepad driver for Linux
  *
@@ -8,26 +9,6 @@
  *	Andree Borrmann		John Dahlstrom
  *	David Kuder		Nathan Hand
  *	Raphael Assenat
- */
-
-/*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
- * Should you need to contact me, the author, you can do so either by
- * e-mail - mail your message to <vojtech@ucw.cz>, or by paper mail:
- * Vojtech Pavlik, Simunkova 1594, Prague 8, 182 00 Czech Republic
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -310,7 +291,7 @@ static int gc_n64_init_ff(struct input_dev *dev, int i)
 	struct gc_subdev *sdev;
 	int err;
 
-	sdev = kmalloc(sizeof(*sdev), GFP_KERNEL);
+	sdev = kmalloc_obj(*sdev);
 	if (!sdev)
 		return -ENOMEM;
 
@@ -501,7 +482,7 @@ static void gc_multi_process_packet(struct gc *gc)
 		switch (pad->type) {
 		case GC_MULTI2:
 			input_report_key(dev, BTN_THUMB, s & data[5]);
-			/* fall through */
+			fallthrough;
 
 		case GC_MULTI:
 			input_report_abs(dev, ABS_X,
@@ -654,7 +635,7 @@ static void gc_psx_report_one(struct gc_pad *pad, unsigned char psx_type,
 
 		input_report_key(dev, BTN_THUMBL, ~data[0] & 0x04);
 		input_report_key(dev, BTN_THUMBR, ~data[0] & 0x02);
-		/* fall through */
+		fallthrough;
 
 	case GC_PSX_NEGCON:
 	case GC_PSX_ANALOG:
@@ -745,7 +726,7 @@ static void gc_psx_process_packet(struct gc *gc)
 
 static void gc_timer(struct timer_list *t)
 {
-	struct gc *gc = from_timer(gc, t, timer);
+	struct gc *gc = timer_container_of(gc, t, timer);
 
 /*
  * N64 pads - must be read first, any read confuses them for 200 us
@@ -784,33 +765,31 @@ static void gc_timer(struct timer_list *t)
 static int gc_open(struct input_dev *dev)
 {
 	struct gc *gc = input_get_drvdata(dev);
-	int err;
 
-	err = mutex_lock_interruptible(&gc->mutex);
-	if (err)
-		return err;
+	scoped_guard(mutex_intr, &gc->mutex) {
+		if (!gc->used++) {
+			parport_claim(gc->pd);
+			parport_write_control(gc->pd->port, 0x04);
+			mod_timer(&gc->timer, jiffies + GC_REFRESH_TIME);
+		}
 
-	if (!gc->used++) {
-		parport_claim(gc->pd);
-		parport_write_control(gc->pd->port, 0x04);
-		mod_timer(&gc->timer, jiffies + GC_REFRESH_TIME);
+		return 0;
 	}
 
-	mutex_unlock(&gc->mutex);
-	return 0;
+	return -EINTR;
 }
 
 static void gc_close(struct input_dev *dev)
 {
 	struct gc *gc = input_get_drvdata(dev);
 
-	mutex_lock(&gc->mutex);
+	guard(mutex)(&gc->mutex);
+
 	if (!--gc->used) {
-		del_timer_sync(&gc->timer);
+		timer_delete_sync(&gc->timer);
 		parport_write_control(gc->pd->port, 0x00);
 		parport_release(gc->pd);
 	}
-	mutex_unlock(&gc->mutex);
 }
 
 static int gc_setup_pad(struct gc *gc, int idx, int pad_type)
@@ -862,7 +841,7 @@ static int gc_setup_pad(struct gc *gc, int idx, int pad_type)
 
 	case GC_N64:
 		for (i = 0; i < 10; i++)
-			__set_bit(gc_n64_btn[i], input_dev->keybit);
+			input_set_capability(input_dev, EV_KEY, gc_n64_btn[i]);
 
 		for (i = 0; i < 2; i++) {
 			input_set_abs_params(input_dev, ABS_X + i, -127, 126, 0, 2);
@@ -879,26 +858,28 @@ static int gc_setup_pad(struct gc *gc, int idx, int pad_type)
 		break;
 
 	case GC_SNESMOUSE:
-		__set_bit(BTN_LEFT, input_dev->keybit);
-		__set_bit(BTN_RIGHT, input_dev->keybit);
-		__set_bit(REL_X, input_dev->relbit);
-		__set_bit(REL_Y, input_dev->relbit);
+		input_set_capability(input_dev, EV_KEY, BTN_LEFT);
+		input_set_capability(input_dev, EV_KEY, BTN_RIGHT);
+		input_set_capability(input_dev, EV_REL, REL_X);
+		input_set_capability(input_dev, EV_REL, REL_Y);
 		break;
 
 	case GC_SNES:
 		for (i = 4; i < 8; i++)
-			__set_bit(gc_snes_btn[i], input_dev->keybit);
-		/* fall through */
+			input_set_capability(input_dev, EV_KEY, gc_snes_btn[i]);
+		fallthrough;
+
 	case GC_NES:
 		for (i = 0; i < 4; i++)
-			__set_bit(gc_snes_btn[i], input_dev->keybit);
+			input_set_capability(input_dev, EV_KEY, gc_snes_btn[i]);
 		break;
 
 	case GC_MULTI2:
-		__set_bit(BTN_THUMB, input_dev->keybit);
-		/* fall through */
+		input_set_capability(input_dev, EV_KEY, BTN_THUMB);
+		fallthrough;
+
 	case GC_MULTI:
-		__set_bit(BTN_TRIGGER, input_dev->keybit);
+		input_set_capability(input_dev, EV_KEY, BTN_TRIGGER);
 		break;
 
 	case GC_PSX:
@@ -906,15 +887,17 @@ static int gc_setup_pad(struct gc *gc, int idx, int pad_type)
 			input_set_abs_params(input_dev,
 					     gc_psx_abs[i], 4, 252, 0, 2);
 		for (i = 0; i < 12; i++)
-			__set_bit(gc_psx_btn[i], input_dev->keybit);
+			input_set_capability(input_dev, EV_KEY, gc_psx_btn[i]);
+		break;
 
 		break;
 
 	case GC_DDR:
 		for (i = 0; i < 4; i++)
-			__set_bit(gc_psx_ddr_btn[i], input_dev->keybit);
+			input_set_capability(input_dev, EV_KEY,
+					     gc_psx_ddr_btn[i]);
 		for (i = 0; i < 12; i++)
-			__set_bit(gc_psx_btn[i], input_dev->keybit);
+			input_set_capability(input_dev, EV_KEY, gc_psx_btn[i]);
 
 		break;
 	}
@@ -965,7 +948,7 @@ static void gc_attach(struct parport *pp)
 		return;
 	}
 
-	gc = kzalloc(sizeof(struct gc), GFP_KERNEL);
+	gc = kzalloc_obj(*gc);
 	if (!gc) {
 		pr_err("Not enough memory\n");
 		goto err_unreg_pardev;
@@ -1031,7 +1014,6 @@ static struct parport_driver gc_parport_driver = {
 	.name = "gamecon",
 	.match_port = gc_attach,
 	.detach = gc_detach,
-	.devmodel = true,
 };
 
 static int __init gc_init(void)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 1999, 2000, 2004  MIPS Technologies, Inc.
  *	All rights reserved.
@@ -6,10 +7,6 @@
  *
  * Copyright (C) 2009 Lemote Inc.
  * Author: Wu Zhangjin <wuzhangjin@gmail.com>
- *
- *  This program is free software; you can distribute it and/or modify it
- *  under the terms of the GNU General Public License (Version 2) as
- *  published by the Free Software Foundation.
  */
 #include <linux/types.h>
 #include <linux/pci.h>
@@ -52,7 +49,7 @@ static int loongson_pcibios_config_access(unsigned char access_type,
 		 */
 #ifdef CONFIG_CS5536
 		/* cs5536_pci_conf_read4/write4() will call _rdmsr/_wrmsr() to
-		 * access the regsters PCI_MSR_ADDR, PCI_MSR_DATA_LO,
+		 * access the registers PCI_MSR_ADDR, PCI_MSR_DATA_LO,
 		 * PCI_MSR_DATA_HI, which is bigger than PCI_MSR_CTRL, so, it
 		 * will not go this branch, but the others. so, no calling dead
 		 * loop here.

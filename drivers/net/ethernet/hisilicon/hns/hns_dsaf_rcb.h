@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (c) 2014-2015 Hisilicon Limited.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef _HNS_DSAF_RCB_H
@@ -112,7 +108,7 @@ struct rcb_common_cb {
 	u32 ring_num;
 	u32 desc_num; /*  desc num per queue*/
 
-	struct ring_pair_cb ring_pair_cb[0];
+	struct ring_pair_cb ring_pair_cb[] __counted_by(ring_num);
 };
 
 int hns_rcb_buf_size2type(u32 buf_size);
@@ -120,7 +116,6 @@ int hns_rcb_buf_size2type(u32 buf_size);
 int hns_rcb_common_get_cfg(struct dsaf_device *dsaf_dev, int comm_index);
 void hns_rcb_common_free_cfg(struct dsaf_device *dsaf_dev, u32 comm_index);
 int hns_rcb_common_init_hw(struct rcb_common_cb *rcb_common);
-void hns_rcb_start(struct hnae_queue *q, u32 val);
 int hns_rcb_get_cfg(struct rcb_common_cb *rcb_common);
 void hns_rcb_get_queue_mode(enum dsaf_mode dsaf_mode,
 			    u16 *max_vfn, u16 *max_q_per_vf);
@@ -136,6 +131,7 @@ void hns_rcbv2_int_clr_hw(struct hnae_queue *q, u32 flag);
 void hns_rcb_init_hw(struct ring_pair_cb *ring);
 void hns_rcb_reset_ring_hw(struct hnae_queue *q);
 void hns_rcb_wait_fbd_clean(struct hnae_queue **qs, int q_num, u32 flag);
+int hns_rcb_wait_tx_ring_clean(struct hnae_queue *qs);
 u32 hns_rcb_get_rx_coalesced_frames(
 	struct rcb_common_cb *rcb_common, u32 port_idx);
 u32 hns_rcb_get_tx_coalesced_frames(
@@ -160,7 +156,7 @@ int hns_rcb_get_ring_regs_count(void);
 
 void hns_rcb_get_ring_regs(struct hnae_queue *queue, void *data);
 
-void hns_rcb_get_strings(int stringset, u8 *data, int index);
+void hns_rcb_get_strings(int stringset, u8 **data, int index);
 void hns_rcb_set_rx_ring_bs(struct hnae_queue *q, u32 buf_size);
 void hns_rcb_set_tx_ring_bs(struct hnae_queue *q, u32 buf_size);
 

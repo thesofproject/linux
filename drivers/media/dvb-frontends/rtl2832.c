@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Realtek RTL2832 DVB-T demodulator driver
  *
  * Copyright (C) 2012 Thomas Mair <thomas.mair86@gmail.com>
  * Copyright (C) 2012-2014 Antti Palosaari <crope@iki.fi>
- *
- *	This program is free software; you can redistribute it and/or modify
- *	it under the terms of the GNU General Public License as published by
- *	the Free Software Foundation; either version 2 of the License, or
- *	(at your option) any later version.
- *
- *	This program is distributed in the hope that it will be useful,
- *	but WITHOUT ANY WARRANTY; without even the implied warranty of
- *	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *	GNU General Public License for more details.
- *
- *	You should have received a copy of the GNU General Public License along
- *	with this program; if not, write to the Free Software Foundation, Inc.,
- *	51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "rtl2832_priv.h"
@@ -408,8 +395,8 @@ static int rtl2832_get_tune_settings(struct dvb_frontend *fe,
 
 	dev_dbg(&client->dev, "\n");
 	s->min_delay_ms = 1000;
-	s->step_size = fe->ops.info.frequency_stepsize * 2;
-	s->max_drift = (fe->ops.info.frequency_stepsize * 2) + 1;
+	s->step_size = fe->ops.info.frequency_stepsize_hz * 2;
+	s->max_drift = (fe->ops.info.frequency_stepsize_hz * 2) + 1;
 	return 0;
 }
 
@@ -653,7 +640,7 @@ static int rtl2832_read_status(struct dvb_frontend *fe, enum fe_status *status)
 	struct i2c_client *client = dev->client;
 	struct dtv_frontend_properties *c = &fe->dtv_property_cache;
 	int ret;
-	u32 uninitialized_var(tmp);
+	u32 tmp;
 	u8 u8tmp, buf[2];
 	u16 u16tmp;
 
@@ -711,6 +698,7 @@ static int rtl2832_read_status(struct dvb_frontend *fe, enum fe_status *status)
 			goto err;
 
 		constellation = (u8tmp >> 2) & 0x03; /* [3:2] */
+		ret = -EINVAL;
 		if (constellation > CONSTELLATION_NUM - 1)
 			goto err;
 
@@ -841,9 +829,9 @@ static const struct dvb_frontend_ops rtl2832_ops = {
 	.delsys = { SYS_DVBT },
 	.info = {
 		.name = "Realtek RTL2832 (DVB-T)",
-		.frequency_min	  = 174000000,
-		.frequency_max	  = 862000000,
-		.frequency_stepsize = 166667,
+		.frequency_min_hz	= 174 * MHz,
+		.frequency_max_hz	= 862 * MHz,
+		.frequency_stepsize_hz	= 166667,
 		.caps = FE_CAN_FEC_1_2 |
 			FE_CAN_FEC_2_3 |
 			FE_CAN_FEC_3_4 |
@@ -995,7 +983,7 @@ static int rtl2832_pid_filter(struct dvb_frontend *fe, u8 index, u16 pid,
 		index, pid, onoff, dev->slave_ts);
 
 	/* skip invalid PIDs (0x2000) */
-	if (pid > 0x1fff || index > 32)
+	if (pid > 0x1fff || index >= 32)
 		return 0;
 
 	if (onoff)
@@ -1033,8 +1021,7 @@ err:
 	return ret;
 }
 
-static int rtl2832_probe(struct i2c_client *client,
-		const struct i2c_device_id *id)
+static int rtl2832_probe(struct i2c_client *client)
 {
 	struct rtl2832_platform_data *pdata = client->dev.platform_data;
 	struct i2c_adapter *i2c = client->adapter;
@@ -1056,7 +1043,7 @@ static int rtl2832_probe(struct i2c_client *client,
 	dev_dbg(&client->dev, "\n");
 
 	/* allocate memory for the internal state */
-	dev = kzalloc(sizeof(struct rtl2832_dev), GFP_KERNEL);
+	dev = kzalloc_obj(struct rtl2832_dev);
 	if (dev == NULL) {
 		ret = -ENOMEM;
 		goto err;
@@ -1069,13 +1056,13 @@ static int rtl2832_probe(struct i2c_client *client,
 	dev->sleeping = true;
 	INIT_DELAYED_WORK(&dev->i2c_gate_work, rtl2832_i2c_gate_work);
 	/* create regmap */
-	dev->regmap_config.reg_bits =  8,
-	dev->regmap_config.val_bits =  8,
-	dev->regmap_config.volatile_reg = rtl2832_volatile_reg,
-	dev->regmap_config.max_register = 5 * 0x100,
-	dev->regmap_config.ranges = regmap_range_cfg,
-	dev->regmap_config.num_ranges = ARRAY_SIZE(regmap_range_cfg),
-	dev->regmap_config.cache_type = REGCACHE_NONE,
+	dev->regmap_config.reg_bits =  8;
+	dev->regmap_config.val_bits =  8;
+	dev->regmap_config.volatile_reg = rtl2832_volatile_reg;
+	dev->regmap_config.max_register = 5 * 0x100;
+	dev->regmap_config.ranges = regmap_range_cfg;
+	dev->regmap_config.num_ranges = ARRAY_SIZE(regmap_range_cfg);
+	dev->regmap_config.cache_type = REGCACHE_NONE;
 	dev->regmap = regmap_init_i2c(client, &dev->regmap_config);
 	if (IS_ERR(dev->regmap)) {
 		ret = PTR_ERR(dev->regmap);
@@ -1095,7 +1082,7 @@ static int rtl2832_probe(struct i2c_client *client,
 		goto err_regmap_exit;
 	}
 	dev->muxc->priv = dev;
-	ret = i2c_mux_add_adapter(dev->muxc, 0, 0, 0);
+	ret = i2c_mux_add_adapter(dev->muxc, 0, 0);
 	if (ret)
 		goto err_regmap_exit;
 
@@ -1122,26 +1109,24 @@ err:
 	return ret;
 }
 
-static int rtl2832_remove(struct i2c_client *client)
+static void rtl2832_remove(struct i2c_client *client)
 {
 	struct rtl2832_dev *dev = i2c_get_clientdata(client);
 
 	dev_dbg(&client->dev, "\n");
 
-	cancel_delayed_work_sync(&dev->i2c_gate_work);
-
 	i2c_mux_del_adapters(dev->muxc);
+
+	cancel_delayed_work_sync(&dev->i2c_gate_work);
 
 	regmap_exit(dev->regmap);
 
 	kfree(dev);
-
-	return 0;
 }
 
 static const struct i2c_device_id rtl2832_id_table[] = {
-	{"rtl2832", 0},
-	{}
+	{ .name = "rtl2832" },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, rtl2832_id_table);
 

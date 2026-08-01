@@ -7,8 +7,7 @@
  * Author: Gerald Schaefer <gerald.schaefer@de.ibm.com>
  */
 
-#define KMSG_COMPONENT "monreader"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "monreader: " fmt
 
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -21,10 +20,10 @@
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
 #include <linux/poll.h>
-#include <linux/device.h>
 #include <linux/slab.h>
 #include <net/iucv/iucv.h>
 #include <linux/uaccess.h>
+#include <asm/machine.h>
 #include <asm/ebcdic.h>
 #include <asm/extmem.h>
 
@@ -79,8 +78,6 @@ static u8 user_data_sever[16] = {
 	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 };
 
-static struct device *monreader_device;
-
 /******************************************************************************
  *                             helper functions                               *
  *****************************************************************************/
@@ -114,7 +111,7 @@ static inline unsigned long mon_mca_end(struct mon_msg *monmsg)
 
 static inline u8 mon_mca_type(struct mon_msg *monmsg, u8 index)
 {
-	return *((u8 *) mon_mca_start(monmsg) + monmsg->mca_offset + index);
+	return *((u8 *)__va(mon_mca_start(monmsg)) + monmsg->mca_offset + index);
 }
 
 static inline u32 mon_mca_size(struct mon_msg *monmsg)
@@ -124,12 +121,12 @@ static inline u32 mon_mca_size(struct mon_msg *monmsg)
 
 static inline u32 mon_rec_start(struct mon_msg *monmsg)
 {
-	return *((u32 *) (mon_mca_start(monmsg) + monmsg->mca_offset + 4));
+	return *((u32 *)(__va(mon_mca_start(monmsg)) + monmsg->mca_offset + 4));
 }
 
 static inline u32 mon_rec_end(struct mon_msg *monmsg)
 {
-	return *((u32 *) (mon_mca_start(monmsg) + monmsg->mca_offset + 8));
+	return *((u32 *)(__va(mon_mca_start(monmsg)) + monmsg->mca_offset + 8));
 }
 
 static int mon_check_mca(struct mon_msg *monmsg)
@@ -184,12 +181,11 @@ static struct mon_private *mon_alloc_mem(void)
 	int i;
 	struct mon_private *monpriv;
 
-	monpriv = kzalloc(sizeof(struct mon_private), GFP_KERNEL);
+	monpriv = kzalloc_obj(struct mon_private);
 	if (!monpriv)
 		return NULL;
 	for (i = 0; i < MON_MSGLIM; i++) {
-		monpriv->msg_array[i] = kzalloc(sizeof(struct mon_msg),
-						    GFP_KERNEL);
+		monpriv->msg_array[i] = kzalloc_obj(struct mon_msg);
 		if (!monpriv->msg_array[i]) {
 			mon_free_mem(monpriv);
 			return NULL;
@@ -319,7 +315,6 @@ static int mon_open(struct inode *inode, struct file *filp)
 		goto out_path;
 	}
 	filp->private_data = monpriv;
-	dev_set_drvdata(monreader_device, monpriv);
 	return nonseekable_open(inode, filp);
 
 out_path:
@@ -354,7 +349,6 @@ static int mon_close(struct inode *inode, struct file *filp)
 	atomic_set(&monpriv->msglim_count, 0);
 	monpriv->write_index  = 0;
 	monpriv->read_index   = 0;
-	dev_set_drvdata(monreader_device, NULL);
 
 	for (i = 0; i < MON_MSGLIM; i++)
 		kfree(monpriv->msg_array[i]);
@@ -397,8 +391,7 @@ static ssize_t mon_read(struct file *filp, char __user *data,
 	mce_start = mon_mca_start(monmsg) + monmsg->mca_offset;
 	if ((monmsg->pos >= mce_start) && (monmsg->pos < mce_start + 12)) {
 		count = min(count, (size_t) mce_start + 12 - monmsg->pos);
-		ret = copy_to_user(data, (void *) (unsigned long) monmsg->pos,
-				   count);
+		ret = copy_to_user(data, __va(monmsg->pos), count);
 		if (ret)
 			return -EFAULT;
 		monmsg->pos += count;
@@ -411,8 +404,7 @@ static ssize_t mon_read(struct file *filp, char __user *data,
 	if (monmsg->pos <= mon_rec_end(monmsg)) {
 		count = min(count, (size_t) mon_rec_end(monmsg) - monmsg->pos
 					    + 1);
-		ret = copy_to_user(data, (void *) (unsigned long) monmsg->pos,
-				   count);
+		ret = copy_to_user(data, __va(monmsg->pos), count);
 		if (ret)
 			return -EFAULT;
 		monmsg->pos += count;
@@ -456,94 +448,6 @@ static struct miscdevice mon_dev = {
 	.minor      = MISC_DYNAMIC_MINOR,
 };
 
-
-/******************************************************************************
- *				suspend / resume			      *
- *****************************************************************************/
-static int monreader_freeze(struct device *dev)
-{
-	struct mon_private *monpriv = dev_get_drvdata(dev);
-	int rc;
-
-	if (!monpriv)
-		return 0;
-	if (monpriv->path) {
-		rc = iucv_path_sever(monpriv->path, user_data_sever);
-		if (rc)
-			pr_warn("Disconnecting the z/VM *MONITOR system service failed with rc=%i\n",
-				rc);
-		iucv_path_free(monpriv->path);
-	}
-	atomic_set(&monpriv->iucv_severed, 0);
-	atomic_set(&monpriv->iucv_connected, 0);
-	atomic_set(&monpriv->read_ready, 0);
-	atomic_set(&monpriv->msglim_count, 0);
-	monpriv->write_index  = 0;
-	monpriv->read_index   = 0;
-	monpriv->path = NULL;
-	return 0;
-}
-
-static int monreader_thaw(struct device *dev)
-{
-	struct mon_private *monpriv = dev_get_drvdata(dev);
-	int rc;
-
-	if (!monpriv)
-		return 0;
-	rc = -ENOMEM;
-	monpriv->path = iucv_path_alloc(MON_MSGLIM, IUCV_IPRMDATA, GFP_KERNEL);
-	if (!monpriv->path)
-		goto out;
-	rc = iucv_path_connect(monpriv->path, &monreader_iucv_handler,
-			       MON_SERVICE, NULL, user_data_connect, monpriv);
-	if (rc) {
-		pr_err("Connecting to the z/VM *MONITOR system service "
-		       "failed with rc=%i\n", rc);
-		goto out_path;
-	}
-	wait_event(mon_conn_wait_queue,
-		   atomic_read(&monpriv->iucv_connected) ||
-		   atomic_read(&monpriv->iucv_severed));
-	if (atomic_read(&monpriv->iucv_severed))
-		goto out_path;
-	return 0;
-out_path:
-	rc = -EIO;
-	iucv_path_free(monpriv->path);
-	monpriv->path = NULL;
-out:
-	atomic_set(&monpriv->iucv_severed, 1);
-	return rc;
-}
-
-static int monreader_restore(struct device *dev)
-{
-	int rc;
-
-	segment_unload(mon_dcss_name);
-	rc = segment_load(mon_dcss_name, SEGMENT_SHARED,
-			  &mon_dcss_start, &mon_dcss_end);
-	if (rc < 0) {
-		segment_warning(rc, mon_dcss_name);
-		panic("fatal monreader resume error: no monitor dcss\n");
-	}
-	return monreader_thaw(dev);
-}
-
-static const struct dev_pm_ops monreader_pm_ops = {
-	.freeze  = monreader_freeze,
-	.thaw	 = monreader_thaw,
-	.restore = monreader_restore,
-};
-
-static struct device_driver monreader_driver = {
-	.name = "monreader",
-	.bus  = &iucv_bus,
-	.pm   = &monreader_pm_ops,
-};
-
-
 /******************************************************************************
  *                              module init/exit                              *
  *****************************************************************************/
@@ -551,7 +455,7 @@ static int __init mon_init(void)
 {
 	int rc;
 
-	if (!MACHINE_IS_VM) {
+	if (!machine_is_vm()) {
 		pr_err("The z/VM *MONITOR record device driver cannot be "
 		       "loaded without z/VM\n");
 		return -ENODEV;
@@ -567,36 +471,16 @@ static int __init mon_init(void)
 		return rc;
 	}
 
-	rc = driver_register(&monreader_driver);
-	if (rc)
-		goto out_iucv;
-	monreader_device = kzalloc(sizeof(struct device), GFP_KERNEL);
-	if (!monreader_device) {
-		rc = -ENOMEM;
-		goto out_driver;
-	}
-
-	dev_set_name(monreader_device, "monreader-dev");
-	monreader_device->bus = &iucv_bus;
-	monreader_device->parent = iucv_root;
-	monreader_device->driver = &monreader_driver;
-	monreader_device->release = (void (*)(struct device *))kfree;
-	rc = device_register(monreader_device);
-	if (rc) {
-		put_device(monreader_device);
-		goto out_driver;
-	}
-
 	rc = segment_type(mon_dcss_name);
 	if (rc < 0) {
 		segment_warning(rc, mon_dcss_name);
-		goto out_device;
+		goto out_iucv;
 	}
 	if (rc != SEG_TYPE_SC) {
 		pr_err("The specified *MONITOR DCSS %s does not have the "
 		       "required type SC\n", mon_dcss_name);
 		rc = -EINVAL;
-		goto out_device;
+		goto out_iucv;
 	}
 
 	rc = segment_load(mon_dcss_name, SEGMENT_SHARED,
@@ -604,7 +488,7 @@ static int __init mon_init(void)
 	if (rc < 0) {
 		segment_warning(rc, mon_dcss_name);
 		rc = -EINVAL;
-		goto out_device;
+		goto out_iucv;
 	}
 	dcss_mkname(mon_dcss_name, &user_data_connect[8]);
 
@@ -619,10 +503,6 @@ static int __init mon_init(void)
 
 out:
 	segment_unload(mon_dcss_name);
-out_device:
-	device_unregister(monreader_device);
-out_driver:
-	driver_unregister(&monreader_driver);
 out_iucv:
 	iucv_unregister(&monreader_iucv_handler, 1);
 	return rc;
@@ -632,8 +512,6 @@ static void __exit mon_exit(void)
 {
 	segment_unload(mon_dcss_name);
 	misc_deregister(&mon_dev);
-	device_unregister(monreader_device);
-	driver_unregister(&monreader_driver);
 	iucv_unregister(&monreader_iucv_handler, 1);
 	return;
 }

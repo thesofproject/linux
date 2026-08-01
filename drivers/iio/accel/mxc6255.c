@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * MXC6255 - MEMSIC orientation sensing accelerometer
  *
  * Copyright (c) 2015, Intel Corporation.
- *
- * This file is subject to the terms and conditions of version 2 of
- * the GNU General Public License.  See the file COPYING in the main
- * directory of this archive for more details.
  *
  * IIO driver for MXC6255 (7-bit I2C slave address 0x15).
  */
@@ -15,12 +12,10 @@
 #include <linux/init.h>
 #include <linux/iio/iio.h>
 #include <linux/delay.h>
-#include <linux/acpi.h>
 #include <linux/regmap.h>
 #include <linux/iio/sysfs.h>
 
 #define MXC6255_DRV_NAME		"mxc6255"
-#define MXC6255_REGMAP_NAME		"mxc6255_regmap"
 
 #define MXC6255_REG_XOUT		0x00
 #define MXC6255_REG_YOUT		0x01
@@ -108,7 +103,7 @@ static bool mxc6255_is_readable_reg(struct device *dev, unsigned int reg)
 }
 
 static const struct regmap_config mxc6255_regmap_config = {
-	.name = MXC6255_REGMAP_NAME,
+	.name = "mxc6255_regmap",
 
 	.reg_bits = 8,
 	.val_bits = 8,
@@ -116,8 +111,7 @@ static const struct regmap_config mxc6255_regmap_config = {
 	.readable_reg = mxc6255_is_readable_reg,
 };
 
-static int mxc6255_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int mxc6255_probe(struct i2c_client *client)
 {
 	struct mxc6255_data *data;
 	struct iio_dev *indio_dev;
@@ -141,7 +135,6 @@ static int mxc6255_probe(struct i2c_client *client,
 	data->regmap = regmap;
 
 	indio_dev->name = MXC6255_DRV_NAME;
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->channels = mxc6255_channels;
 	indio_dev->num_channels = ARRAY_SIZE(mxc6255_channels);
 	indio_dev->modes = INDIO_DIRECT_MODE;
@@ -177,8 +170,8 @@ static const struct acpi_device_id mxc6255_acpi_match[] = {
 MODULE_DEVICE_TABLE(acpi, mxc6255_acpi_match);
 
 static const struct i2c_device_id mxc6255_id[] = {
-	{"mxc6225",	0},
-	{"mxc6255",	0},
+	{ .name = "mxc6225" },
+	{ .name = "mxc6255" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, mxc6255_id);
@@ -186,7 +179,7 @@ MODULE_DEVICE_TABLE(i2c, mxc6255_id);
 static struct i2c_driver mxc6255_driver = {
 	.driver = {
 		.name = MXC6255_DRV_NAME,
-		.acpi_match_table = ACPI_PTR(mxc6255_acpi_match),
+		.acpi_match_table = mxc6255_acpi_match,
 	},
 	.probe		= mxc6255_probe,
 	.id_table	= mxc6255_id,

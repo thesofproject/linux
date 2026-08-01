@@ -3,50 +3,22 @@
 #define __UM_FS_HOSTFS
 
 #include <os.h>
+#include <generated/asm-offsets.h>
 
-/*
- * These are exactly the same definitions as in fs.h, but the names are
- * changed so that this file can be included in both kernel and user files.
- */
-
-#define HOSTFS_ATTR_MODE	1
-#define HOSTFS_ATTR_UID 	2
-#define HOSTFS_ATTR_GID 	4
-#define HOSTFS_ATTR_SIZE	8
-#define HOSTFS_ATTR_ATIME	16
-#define HOSTFS_ATTR_MTIME	32
-#define HOSTFS_ATTR_CTIME	64
-#define HOSTFS_ATTR_ATIME_SET	128
-#define HOSTFS_ATTR_MTIME_SET	256
-
-/* These two are unused by hostfs. */
-#define HOSTFS_ATTR_FORCE	512	/* Not a change, but a change it */
-#define HOSTFS_ATTR_ATTR_FLAG	1024
-
-/*
- * If you are very careful, you'll notice that these two are missing:
- *
- * #define ATTR_KILL_SUID	2048
- * #define ATTR_KILL_SGID	4096
- *
- * and this is because they were added in 2.5 development.
- * Actually, they are not needed by most ->setattr() methods - they are set by
- * callers of notify_change() to notify that the setuid/setgid bits must be
- * dropped.
- * notify_change() will delete those flags, make sure attr->ia_valid & ATTR_MODE
- * is on, and remove the appropriate bits from attr->ia_mode (attr is a
- * "struct iattr *"). -BlaisorBlade
- */
+struct hostfs_timespec {
+	long long tv_sec;
+	long long tv_nsec;
+};
 
 struct hostfs_iattr {
-	unsigned int	ia_valid;
-	unsigned short	ia_mode;
-	uid_t		ia_uid;
-	gid_t		ia_gid;
-	loff_t		ia_size;
-	struct timespec	ia_atime;
-	struct timespec	ia_mtime;
-	struct timespec	ia_ctime;
+	unsigned int		ia_valid;
+	unsigned short		ia_mode;
+	uid_t			ia_uid;
+	gid_t			ia_gid;
+	loff_t			ia_size;
+	struct hostfs_timespec	ia_atime;
+	struct hostfs_timespec	ia_mtime;
+	struct hostfs_timespec	ia_ctime;
 };
 
 struct hostfs_stat {
@@ -56,11 +28,13 @@ struct hostfs_stat {
 	unsigned int uid;
 	unsigned int gid;
 	unsigned long long size;
-	struct timespec atime, mtime, ctime;
+	struct hostfs_timespec atime, mtime, ctime, btime;
 	unsigned int blksize;
 	unsigned long long blocks;
-	unsigned int maj;
-	unsigned int min;
+	struct {
+		unsigned int maj;
+		unsigned int min;
+	} rdev, dev;
 };
 
 extern int stat_file(const char *path, struct hostfs_stat *p, int fd);
@@ -87,7 +61,7 @@ extern int do_mkdir(const char *file, int mode);
 extern int hostfs_do_rmdir(const char *file);
 extern int do_mknod(const char *file, int mode, unsigned int major,
 		    unsigned int minor);
-extern int link_file(const char *from, const char *to);
+extern int link_file(const char *to, const char *from);
 extern int hostfs_do_readlink(char *file, char *buf, int size);
 extern int rename_file(char *from, char *to);
 extern int rename2_file(char *from, char *to, unsigned int flags);

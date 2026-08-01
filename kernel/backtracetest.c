@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Simple stack backtrace regression test module
  *
  * (C) Copyright 2008 Intel Corporation
  * Author: Arjan van de Ven <arjan@linux.intel.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2
- * of the License.
  */
 
 #include <linux/completion.h>
@@ -25,42 +21,33 @@ static void backtrace_test_normal(void)
 	dump_stack();
 }
 
-static DECLARE_COMPLETION(backtrace_work);
-
-static void backtrace_test_irq_callback(unsigned long data)
+static void backtrace_test_bh_workfn(struct work_struct *work)
 {
 	dump_stack();
-	complete(&backtrace_work);
 }
 
-static DECLARE_TASKLET(backtrace_tasklet, &backtrace_test_irq_callback, 0);
+static DECLARE_WORK(backtrace_bh_work, &backtrace_test_bh_workfn);
 
-static void backtrace_test_irq(void)
+static void backtrace_test_bh(void)
 {
-	pr_info("Testing a backtrace from irq context.\n");
+	pr_info("Testing a backtrace from BH context.\n");
 	pr_info("The following trace is a kernel self test and not a bug!\n");
 
-	init_completion(&backtrace_work);
-	tasklet_schedule(&backtrace_tasklet);
-	wait_for_completion(&backtrace_work);
+	queue_work(system_bh_wq, &backtrace_bh_work);
+	flush_work(&backtrace_bh_work);
 }
 
 #ifdef CONFIG_STACKTRACE
 static void backtrace_test_saved(void)
 {
-	struct stack_trace trace;
 	unsigned long entries[8];
+	unsigned int nr_entries;
 
 	pr_info("Testing a saved backtrace.\n");
 	pr_info("The following trace is a kernel self test and not a bug!\n");
 
-	trace.nr_entries = 0;
-	trace.max_entries = ARRAY_SIZE(entries);
-	trace.entries = entries;
-	trace.skip = 0;
-
-	save_stack_trace(&trace);
-	print_stack_trace(&trace, 0);
+	nr_entries = stack_trace_save(entries, ARRAY_SIZE(entries), 0);
+	stack_trace_print(entries, nr_entries, 0);
 }
 #else
 static void backtrace_test_saved(void)
@@ -74,7 +61,7 @@ static int backtrace_regression_test(void)
 	pr_info("====[ backtrace testing ]===========\n");
 
 	backtrace_test_normal();
-	backtrace_test_irq();
+	backtrace_test_bh();
 	backtrace_test_saved();
 
 	pr_info("====[ end of backtrace testing ]====\n");
@@ -87,5 +74,6 @@ static void exitf(void)
 
 module_init(backtrace_regression_test);
 module_exit(exitf);
+MODULE_DESCRIPTION("Simple stack backtrace regression test module");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Arjan van de Ven <arjan@linux.intel.com>");

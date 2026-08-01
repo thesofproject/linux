@@ -2,19 +2,19 @@
 Core elements
 =============
 
-The Industrial I/O core offers a unified framework for writing drivers for
-many different types of embedded sensors. a standard interface to user space
+The Industrial I/O core offers both a unified framework for writing drivers for
+many different types of embedded sensors and a standard interface to user space
 applications manipulating sensors. The implementation can be found under
 :file:`drivers/iio/industrialio-*`
 
 Industrial I/O Devices
 ----------------------
 
-* struct :c:type:`iio_dev` - industrial I/O device
-* :c:func:`iio_device_alloc()` - alocate an :c:type:`iio_dev` from a driver
-* :c:func:`iio_device_free()` - free an :c:type:`iio_dev` from a driver
-* :c:func:`iio_device_register()` - register a device with the IIO subsystem
-* :c:func:`iio_device_unregister()` - unregister a device from the IIO
+* struct iio_dev - industrial I/O device
+* iio_device_alloc() - allocate an :c:type:`iio_dev` from a driver
+* iio_device_free() - free an :c:type:`iio_dev` from a driver
+* iio_device_register() - register a device with the IIO subsystem
+* iio_device_unregister() - unregister a device from the IIO
   subsystem
 
 An IIO device usually corresponds to a single hardware sensor and it
@@ -24,7 +24,7 @@ then we will show how a device driver makes use of an IIO device.
 
 There are two ways for a user space application to interact with an IIO driver.
 
-1. :file:`/sys/bus/iio/iio:device{X}/`, this represents a hardware sensor
+1. :file:`/sys/bus/iio/devices/iio:device{X}/`, this represents a hardware sensor
    and groups together the data channels of the same chip.
 2. :file:`/dev/iio:device{X}`, character device node interface used for
    buffered data transfer and for events information retrieval.
@@ -34,25 +34,25 @@ A typical IIO driver will register itself as an :doc:`I2C <../i2c>` or
 
 At probe:
 
-1. Call :c:func:`iio_device_alloc()`, which allocates memory for an IIO device.
+1. Call iio_device_alloc(), which allocates memory for an IIO device.
 2. Initialize IIO device fields with driver specific information (e.g.
    device name, device channels).
-3. Call :c:func:`iio_device_register()`, this registers the device with the
+3. Call iio_device_register(), this registers the device with the
    IIO core. After this call the device is ready to accept requests from user
    space applications.
 
 At remove, we free the resources allocated in probe in reverse order:
 
-1. :c:func:`iio_device_unregister()`, unregister the device from the IIO core.
-2. :c:func:`iio_device_free()`, free the memory allocated for the IIO device.
+1. iio_device_unregister(), unregister the device from the IIO core.
+2. iio_device_free(), free the memory allocated for the IIO device.
 
 IIO device sysfs interface
 ==========================
 
 Attributes are sysfs files used to expose chip info and also allowing
 applications to set various configuration parameters. For device with
-index X, attributes can be found under /sys/bus/iio/iio:deviceX/ directory.
-Common attributes are:
+index X, attributes can be found under /sys/bus/iio/devices/iio:deviceX/
+directory.  Common attributes are:
 
 * :file:`name`, description of the physical chip.
 * :file:`dev`, shows the major:minor pair associated with
@@ -60,13 +60,13 @@ Common attributes are:
 * :file:`sampling_frequency_available`, available discrete set of sampling
   frequency values for device.
 * Available standard attributes for IIO devices are described in the
-  :file:`Documentation/ABI/testing/sysfs-bus-iio` file in the Linux kernel
+  :file:Documentation/ABI/testing/sysfs-bus-iio file in the Linux kernel
   sources.
 
 IIO device channels
 ===================
 
-struct :c:type:`iio_chan_spec` - specification of a single channel
+struct iio_chan_spec - specification of a single channel
 
 An IIO device channel is a representation of a data channel. An IIO device can
 have one or multiple channels. For example:
@@ -77,7 +77,7 @@ have one or multiple channels. For example:
 * an accelerometer can have up to 3 channels representing acceleration on X, Y
   and Z axes.
 
-An IIO channel is described by the struct :c:type:`iio_chan_spec`.
+An IIO channel is described by the struct iio_chan_spec.
 A thermometer driver for the temperature sensor in the example above would
 have to describe its channel as follows::
 
@@ -140,16 +140,16 @@ Here is how we can make use of the channel's modifiers::
 This channel's definition will generate two separate sysfs files for raw data
 retrieval:
 
-* :file:`/sys/bus/iio/iio:device{X}/in_intensity_ir_raw`
-* :file:`/sys/bus/iio/iio:device{X}/in_intensity_both_raw`
+* :file:`/sys/bus/iio/devices/iio:device{X}/in_intensity_ir_raw`
+* :file:`/sys/bus/iio/devices/iio:device{X}/in_intensity_both_raw`
 
 one file for processed data:
 
-* :file:`/sys/bus/iio/iio:device{X}/in_illuminance_input`
+* :file:`/sys/bus/iio/devices/iio:device{X}/in_illuminance_input`
 
 and one shared sysfs file for sampling frequency:
 
-* :file:`/sys/bus/iio/iio:device{X}/sampling_frequency`.
+* :file:`/sys/bus/iio/devices/iio:device{X}/sampling_frequency`.
 
 Here is how we can make use of the channel's indexing::
 

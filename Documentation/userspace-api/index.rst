@@ -9,21 +9,63 @@ While much of the kernel's user-space API is documented elsewhere
 also be found in the kernel tree itself.  This manual is intended to be the
 place where this information is gathered.
 
-.. class:: toc-title
 
-	   Table of contents
+System calls
+============
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
+
+   unshare
+   futex2
+   ebpf/index
+   ioctl/index
+   mseal
+   rseq
+
+Security-related interfaces
+===========================
+
+.. toctree::
+   :maxdepth: 1
 
    no_new_privs
    seccomp_filter
-   unshare
+   landlock
+   lsm
+   mfd_noexec
    spec_ctrl
+   tee
+   check_exec
 
-.. only::  subproject and html
+Devices and I/O
+===============
 
-   Indices
-   =======
+.. toctree::
+   :maxdepth: 1
 
-   * :ref:`genindex`
+   accelerators/ocxl
+   dma-buf-heaps
+   dma-buf-alloc-exchange
+   fwctl/index
+   gpio/index
+   iommufd
+   media/index
+   dcdbas
+   vduse
+   isapnp
+
+Everything else
+===============
+
+.. toctree::
+   :maxdepth: 1
+
+   ELF
+   liveupdate
+   netlink/index
+   sysfs-platform_profile
+   vduse
+   futex2
+   perf_ring_buffer
+   ntsync

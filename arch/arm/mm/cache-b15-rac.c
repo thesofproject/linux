@@ -1,13 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Broadcom Brahma-B15 CPU read-ahead cache management functions
  *
  * Copyright (C) 2015-2016 Broadcom
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
+#include <linux/cfi_types.h>
 #include <linux/err.h>
 #include <linux/spinlock.h>
 #include <linux/io.h>
@@ -33,7 +31,10 @@ extern void v7_flush_kern_cache_all(void);
 #define  RAC_CPU_SHIFT			(8)
 #define  RACCFG_MASK			(0xff)
 #define RAC_CONFIG1_REG			(0x7c)
-#define RAC_FLUSH_REG			(0x80)
+/* Brahma-B15 is a quad-core only design */
+#define B15_RAC_FLUSH_REG		(0x80)
+/* Brahma-B53 is an octo-core design */
+#define B53_RAC_FLUSH_REG		(0x84)
 #define  FLUSH_RAC			(1 << 0)
 
 /* Bitmask to enable instruction and data prefetching with a 256-bytes stride */
@@ -52,6 +53,7 @@ static void __iomem *b15_rac_base;
 static DEFINE_SPINLOCK(rac_lock);
 
 static u32 rac_config0_reg;
+static u32 rac_flush_offset;
 
 /* Initialization flag to avoid checking for b15_rac_base, and to prevent
  * multi-platform kernels from crashing here as well.
@@ -70,14 +72,14 @@ static inline void __b15_rac_flush(void)
 {
 	u32 reg;
 
-	__raw_writel(FLUSH_RAC, b15_rac_base + RAC_FLUSH_REG);
+	__raw_writel(FLUSH_RAC, b15_rac_base + rac_flush_offset);
 	do {
 		/* This dmb() is required to force the Bus Interface Unit
-		 * to clean oustanding writes, and forces an idle cycle
+		 * to clean outstanding writes, and forces an idle cycle
 		 * to be inserted.
 		 */
 		dmb();
-		reg = __raw_readl(b15_rac_base + RAC_FLUSH_REG);
+		reg = __raw_readl(b15_rac_base + rac_flush_offset);
 	} while (reg & FLUSH_RAC);
 }
 
@@ -254,7 +256,7 @@ static int b15_rac_dead_cpu(unsigned int cpu)
 	return 0;
 }
 
-static int b15_rac_suspend(void)
+static int b15_rac_suspend(void *data)
 {
 	/* Suspend the read-ahead cache oeprations, forcing our cache
 	 * implementation to fallback to the regular ARMv7 calls.
@@ -269,7 +271,7 @@ static int b15_rac_suspend(void)
 	return 0;
 }
 
-static void b15_rac_resume(void)
+static void b15_rac_resume(void *data)
 {
 	/* Coming out of a S3 suspend/resume cycle, the read-ahead cache
 	 * register RAC_CONFIG0_REG will be restored to its default value, make
@@ -280,14 +282,18 @@ static void b15_rac_resume(void)
 	clear_bit(RAC_SUSPENDED, &b15_rac_flags);
 }
 
-static struct syscore_ops b15_rac_syscore_ops = {
+static const struct syscore_ops b15_rac_syscore_ops = {
 	.suspend	= b15_rac_suspend,
 	.resume		= b15_rac_resume,
 };
 
+static struct syscore b15_rac_syscore = {
+	.ops = &b15_rac_syscore_ops,
+};
+
 static int __init b15_rac_init(void)
 {
-	struct device_node *dn;
+	struct device_node *dn, *cpu_dn;
 	int ret = 0, cpu;
 	u32 reg, en_mask = 0;
 
@@ -304,6 +310,24 @@ static int __init b15_rac_init(void)
 		ret = -ENOMEM;
 		goto out;
 	}
+
+	cpu_dn = of_get_cpu_node(0, NULL);
+	if (!cpu_dn) {
+		ret = -ENODEV;
+		goto out;
+	}
+
+	if (of_device_is_compatible(cpu_dn, "brcm,brahma-b15"))
+		rac_flush_offset = B15_RAC_FLUSH_REG;
+	else if (of_device_is_compatible(cpu_dn, "brcm,brahma-b53"))
+		rac_flush_offset = B53_RAC_FLUSH_REG;
+	else {
+		pr_err("Unsupported CPU\n");
+		of_node_put(cpu_dn);
+		ret = -EINVAL;
+		goto out;
+	}
+	of_node_put(cpu_dn);
 
 	ret = register_reboot_notifier(&b15_rac_reboot_nb);
 	if (ret) {
@@ -327,7 +351,7 @@ static int __init b15_rac_init(void)
 	}
 
 	if (IS_ENABLED(CONFIG_PM_SLEEP))
-		register_syscore_ops(&b15_rac_syscore_ops);
+		register_syscore(&b15_rac_syscore);
 
 	spin_lock(&rac_lock);
 	reg = __raw_readl(b15_rac_base + RAC_CONFIG0_REG);
@@ -339,8 +363,7 @@ static int __init b15_rac_init(void)
 	set_bit(RAC_ENABLED, &b15_rac_flags);
 	spin_unlock(&rac_lock);
 
-	pr_info("Broadcom Brahma-B15 readahead cache at: 0x%p\n",
-		b15_rac_base + RAC_CONFIG0_REG);
+	pr_info("%pOF: Broadcom Brahma-B15 readahead cache\n", dn);
 
 	goto out;
 

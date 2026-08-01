@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * PIKA FPGA based Watchdog Timer
  *
@@ -22,8 +23,8 @@
 #include <linux/bitops.h>
 #include <linux/uaccess.h>
 #include <linux/io.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_platform.h>
 
 #define DRV_NAME "PIKA-WDT"
 
@@ -118,7 +119,7 @@ static int pikawdt_open(struct inode *inode, struct file *file)
 
 	pikawdt_start();
 
-	return nonseekable_open(inode, file);
+	return stream_open(inode, file);
 }
 
 /*
@@ -128,7 +129,7 @@ static int pikawdt_release(struct inode *inode, struct file *file)
 {
 	/* stop internal ping */
 	if (!pikawdt_private.expect_close)
-		del_timer(&pikawdt_private.timer);
+		timer_delete(&pikawdt_private.timer);
 
 	clear_bit(0, &pikawdt_private.open);
 	pikawdt_private.expect_close = 0;
@@ -208,11 +209,11 @@ static long pikawdt_ioctl(struct file *file,
 
 static const struct file_operations pikawdt_fops = {
 	.owner		= THIS_MODULE,
-	.llseek		= no_llseek,
 	.open		= pikawdt_open,
 	.release	= pikawdt_release,
 	.write		= pikawdt_write,
 	.unlocked_ioctl	= pikawdt_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 };
 
 static struct miscdevice pikawdt_miscdev = {
@@ -225,7 +226,7 @@ static int __init pikawdt_init(void)
 {
 	struct device_node *np;
 	void __iomem *fpga;
-	static u32 post1;
+	u32 post1;
 	int ret;
 
 	np = of_find_compatible_node(NULL, NULL, "pika,fpga");

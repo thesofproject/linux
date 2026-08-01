@@ -8,7 +8,7 @@
  *	 Ben Woodard <woodard@redhat.com>
  *	 Mauro Carvalho Chehab
  *
- * Red Hat Inc. http://www.redhat.com
+ * Red Hat Inc. https://www.redhat.com
  *
  * Forked and adapted from the i5000_edac driver which was
  * written by Douglas Thompson Linux Networx <norsk5@xmission.com>
@@ -31,6 +31,7 @@
 #include <linux/slab.h>
 #include <linux/edac.h>
 #include <linux/mmzone.h>
+#include <linux/string_choices.h>
 
 #include "edac_module.h"
 
@@ -279,7 +280,8 @@ static inline int from_nf_ferr(unsigned int mask)
 #define FERR_NF_RECOVERABLE	to_nf_mask(ERROR_NF_RECOVERABLE)
 #define FERR_NF_UNCORRECTABLE	to_nf_mask(ERROR_NF_UNCORRECTABLE)
 
-/* Defines to extract the vaious fields from the
+/*
+ * Defines to extract the various fields from the
  *	MTRx - Memory Technology Registers
  */
 #define MTR_DIMMS_PRESENT(mtr)		((mtr) & (1 << 10))
@@ -351,6 +353,9 @@ struct i5400_pvt {
 	/* Actual values for this controller */
 	int maxch;				/* Max channels */
 	int maxdimmperch;			/* Max DIMMs per channel */
+
+	/* Hardware error reporting status */
+	bool enabled_error_reporting;
 };
 
 /* I5400 MCH error information retrieved from Hardware */
@@ -548,8 +553,8 @@ static void i5400_proccess_non_recoverable_info(struct mem_ctl_info *mci,
 	ras = nrec_ras(info);
 	cas = nrec_cas(info);
 
-	edac_dbg(0, "\t\tDIMM= %d  Channels= %d,%d  (Branch= %d DRAM Bank= %d Buffer ID = %d rdwr= %s ras= %d cas= %d)\n",
-		 rank, channel, channel + 1, branch >> 1, bank,
+	edac_dbg(0, "\t\t%s DIMM= %d  Channels= %d,%d  (Branch= %d DRAM Bank= %d Buffer ID = %d rdwr= %s ras= %d cas= %d)\n",
+		 type, rank, channel, channel + 1, branch >> 1, bank,
 		 buf_id, rdwr_str(rdwr), ras, cas);
 
 	/* Only 1 bit will be on */
@@ -686,7 +691,7 @@ static void i5400_clear_error(struct mem_ctl_info *mci)
 static void i5400_check_error(struct mem_ctl_info *mci)
 {
 	struct i5400_error_info info;
-	edac_dbg(4, "MC%d\n", mci->mc_idx);
+
 	i5400_get_error_info(mci, &info);
 	i5400_process_error_info(mci, &info);
 }
@@ -898,7 +903,7 @@ static void decode_mtr(int slot_row, u16 mtr)
 	edac_dbg(2, "\t\tWIDTH: x%d\n", MTR_DRAM_WIDTH(mtr));
 
 	edac_dbg(2, "\t\tELECTRICAL THROTTLING is %s\n",
-		 MTR_DIMMS_ETHROTTLE(mtr) ? "enabled" : "disabled");
+		 str_enabled_disabled(MTR_DIMMS_ETHROTTLE(mtr)));
 
 	edac_dbg(2, "\t\tNUMBANK: %d bank(s)\n", MTR_DRAM_BANKS(mtr));
 	edac_dbg(2, "\t\tNUMRANK: %s\n",
@@ -1024,13 +1029,13 @@ static void calculate_dimm_size(struct i5400_pvt *pvt)
 		space -= n;
 	}
 
-	space -= n;
 	edac_dbg(2, "%s\n", mem_buffer);
 	p = mem_buffer;
 	space = PAGE_SIZE;
 
 	n = snprintf(p, space, "           ");
 	p += n;
+	space -= n;
 	for (branch = 0; branch < MAX_BRANCHES; branch++) {
 		n = snprintf(p, space, "       branch %d       | ", branch);
 		p += n;
@@ -1054,8 +1059,6 @@ static void i5400_get_mc_regs(struct mem_ctl_info *mci)
 	u32 actual_tolm;
 	u16 limit;
 	int slot_row;
-	int maxch;
-	int maxdimmperch;
 	int way0, way1;
 
 	pvt = mci->pvt_info;
@@ -1064,9 +1067,6 @@ static void i5400_get_mc_regs(struct mem_ctl_info *mci)
 			&pvt->u.ambase_bottom);
 	pci_read_config_dword(pvt->system_address, AMBASE + sizeof(u32),
 			&pvt->u.ambase_top);
-
-	maxdimmperch = pvt->maxdimmperch;
-	maxch = pvt->maxch;
 
 	edac_dbg(2, "AMBASE= 0x%lx  MAXCH= %d  MAX-DIMM-Per-CH= %d\n",
 		 (long unsigned int)pvt->ambase, pvt->maxch, pvt->maxdimmperch);
@@ -1170,16 +1170,12 @@ static int i5400_init_dimms(struct mem_ctl_info *mci)
 {
 	struct i5400_pvt *pvt;
 	struct dimm_info *dimm;
-	int ndimms, channel_count;
-	int max_dimms;
+	int ndimms;
 	int mtr;
 	int size_mb;
 	int  channel, slot;
 
 	pvt = mci->pvt_info;
-
-	channel_count = pvt->maxch;
-	max_dimms = pvt->maxdimmperch;
 
 	ndimms = 0;
 
@@ -1196,8 +1192,7 @@ static int i5400_init_dimms(struct mem_ctl_info *mci)
 			if (!MTR_DIMMS_PRESENT(mtr))
 				continue;
 
-			dimm = EDAC_DIMM_PTR(mci->layers, mci->dimms, mci->n_layers,
-				       channel / 2, channel % 2, slot);
+			dimm = edac_get_dimm(mci, channel / 2, channel % 2, slot);
 
 			size_mb =  pvt->dimm_info[slot][channel].megabytes;
 
@@ -1231,10 +1226,10 @@ static int i5400_init_dimms(struct mem_ctl_info *mci)
 }
 
 /*
- *	i5400_enable_error_reporting
- *			Turn on the memory reporting features of the hardware
+ *	i5400_set_error_reporting
+ *			Turn on/off the memory reporting features of the hardware
  */
-static void i5400_enable_error_reporting(struct mem_ctl_info *mci)
+static void i5400_set_error_reporting(struct mem_ctl_info *mci, bool enable)
 {
 	struct i5400_pvt *pvt;
 	u32 fbd_error_mask;
@@ -1245,8 +1240,11 @@ static void i5400_enable_error_reporting(struct mem_ctl_info *mci)
 	pci_read_config_dword(pvt->branchmap_werrors, EMASK_FBD,
 			&fbd_error_mask);
 
-	/* Enable with a '0' */
-	fbd_error_mask &= ~(ENABLE_EMASK_ALL);
+	/* Enable with 0, disable with 1 */
+	if (enable)
+		fbd_error_mask &= ~(ENABLE_EMASK_ALL);
+	else
+		fbd_error_mask |= ENABLE_EMASK_ALL;
 
 	pci_write_config_dword(pvt->branchmap_werrors, EMASK_FBD,
 			fbd_error_mask);
@@ -1327,17 +1325,19 @@ static int i5400_probe1(struct pci_dev *pdev, int dev_idx)
 	if (i5400_init_dimms(mci)) {
 		edac_dbg(0, "MC: Setting mci->edac_cap to EDAC_FLAG_NONE because i5400_init_dimms() returned nonzero value\n");
 		mci->edac_cap = EDAC_FLAG_NONE;	/* no dimms found */
+		pvt->enabled_error_reporting = false;
 	} else {
 		edac_dbg(1, "MC: Enable error reporting now\n");
-		i5400_enable_error_reporting(mci);
+		i5400_set_error_reporting(mci, true);
+		pvt->enabled_error_reporting = true;
 	}
 
 	/* add this new MC control structure to EDAC's list of MCs */
 	if (edac_mc_add_mc(mci)) {
 		edac_dbg(0, "MC: failed edac_mc_add_mc()\n");
-		/* FIXME: perhaps some code should go here that disables error
-		 * reporting if we just enabled it
-		 */
+		/* Disable error reporting if we just enabled it */
+		if (pvt->enabled_error_reporting)
+			i5400_set_error_reporting(mci, false);
 		goto fail1;
 	}
 
@@ -1395,6 +1395,7 @@ static int i5400_init_one(struct pci_dev *pdev, const struct pci_device_id *id)
 static void i5400_remove_one(struct pci_dev *pdev)
 {
 	struct mem_ctl_info *mci;
+	struct i5400_pvt *pvt;
 
 	edac_dbg(0, "\n");
 
@@ -1404,6 +1405,12 @@ static void i5400_remove_one(struct pci_dev *pdev)
 	mci = edac_mc_del_mc(&pdev->dev);
 	if (!mci)
 		return;
+
+	pvt = mci->pvt_info;
+
+	/* Disable error reporting on teardown */
+	if (pvt->enabled_error_reporting)
+		i5400_set_error_reporting(mci, false);
 
 	/* retrieve references to resources, and free those resources */
 	i5400_put_devices(mci);
@@ -1470,7 +1477,7 @@ module_exit(i5400_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Ben Woodard <woodard@redhat.com>");
 MODULE_AUTHOR("Mauro Carvalho Chehab");
-MODULE_AUTHOR("Red Hat Inc. (http://www.redhat.com)");
+MODULE_AUTHOR("Red Hat Inc. (https://www.redhat.com)");
 MODULE_DESCRIPTION("MC Driver for Intel I5400 memory controllers - "
 		   I5400_REVISION);
 

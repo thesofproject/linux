@@ -9,9 +9,9 @@
  */
 
 #include "check.h"
-#include "osf.h"
 
 #define MAX_OSF_PARTITIONS 18
+#define DISKLABELMAGIC (0x82564557UL)
 
 int osf_partition(struct parsed_partitions *state)
 {
@@ -81,7 +81,7 @@ int osf_partition(struct parsed_partitions *state)
 				le32_to_cpu(partition->p_size));
 		slot++;
 	}
-	strlcat(state->pp_buf, "\n", PAGE_SIZE);
+	seq_buf_puts(&state->pp_buf, "\n");
 	put_dev_sector(sect);
 	return 1;
 }

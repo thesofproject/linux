@@ -1,19 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * AM33XX CM functions
  *
- * Copyright (C) 2011-2012 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2011-2012 Texas Instruments Incorporated - https://www.ti.com/
  * Vaibhav Hiremath <hvaibhav@ti.com>
  *
- * Reference taken from from OMAP4 cminst44xx.c
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Reference taken from OMAP4 cminst44xx.c
  */
 
 #include <linux/kernel.h>
@@ -28,6 +20,9 @@
 #include "cm-regbits-34xx.h"
 #include "cm-regbits-33xx.h"
 #include "prm33xx.h"
+#if IS_ENABLED(CONFIG_SUSPEND)
+#include <linux/suspend.h>
+#endif
 
 /*
  * CLKCTRL_IDLEST_*: possible values for the CM_*_CLKCTRL.IDLEST bitfield:
@@ -68,6 +63,17 @@ static inline u32 am33xx_cm_rmw_reg_bits(u32 mask, u32 bits, s16 inst, s16 idx)
 	v &= ~mask;
 	v |= bits;
 	am33xx_cm_write_reg(v, inst, idx);
+
+	return v;
+}
+
+static inline u32 am33xx_cm_read_reg_bits(u16 inst, s16 idx, u32 mask)
+{
+	u32 v;
+
+	v = am33xx_cm_read_reg(inst, idx);
+	v &= mask;
+	v >>= __ffs(mask);
 
 	return v;
 }
@@ -325,8 +331,17 @@ static int am33xx_clkdm_clk_disable(struct clockdomain *clkdm)
 {
 	bool hwsup = false;
 
+#if IS_ENABLED(CONFIG_SUSPEND)
+	/*
+	 * In case of standby, Don't put the l4ls clk domain to sleep.
+	 * Since CM3 PM FW doesn't wake-up/enable the l4ls clk domain
+	 * upon wake-up, CM3 PM FW fails to wake-up th MPU.
+	 */
+	if (pm_suspend_target_state == PM_SUSPEND_STANDBY &&
+	    (clkdm->flags & CLKDM_STANDBY_FORCE_WAKEUP))
+		return 0;
+#endif
 	hwsup = am33xx_cm_is_clkdm_in_hwsup(clkdm->cm_inst, clkdm->clkdm_offs);
-
 	if (!hwsup && (clkdm->flags & CLKDM_CAN_FORCE_SLEEP))
 		am33xx_clkdm_sleep(clkdm);
 
@@ -338,6 +353,46 @@ static u32 am33xx_cm_xlate_clkctrl(u8 part, u16 inst, u16 offset)
 	return cm_base.pa + inst + offset;
 }
 
+/**
+ * am33xx_clkdm_save_context - Save the clockdomain transition context
+ * @clkdm: The clockdomain pointer whose context needs to be saved
+ *
+ * Save the clockdomain transition context.
+ */
+static int am33xx_clkdm_save_context(struct clockdomain *clkdm)
+{
+	clkdm->context = am33xx_cm_read_reg_bits(clkdm->cm_inst,
+						 clkdm->clkdm_offs,
+						 AM33XX_CLKTRCTRL_MASK);
+
+	return 0;
+}
+
+/**
+ * am33xx_clkdm_restore_context - Restore the clockdomain transition context
+ * @clkdm: The clockdomain pointer whose context needs to be restored
+ *
+ * Restore the clockdomain transition context.
+ */
+static int am33xx_clkdm_restore_context(struct clockdomain *clkdm)
+{
+	switch (clkdm->context) {
+	case OMAP34XX_CLKSTCTRL_DISABLE_AUTO:
+		am33xx_clkdm_deny_idle(clkdm);
+		break;
+	case OMAP34XX_CLKSTCTRL_FORCE_SLEEP:
+		am33xx_clkdm_sleep(clkdm);
+		break;
+	case OMAP34XX_CLKSTCTRL_FORCE_WAKEUP:
+		am33xx_clkdm_wakeup(clkdm);
+		break;
+	case OMAP34XX_CLKSTCTRL_ENABLE_AUTO:
+		am33xx_clkdm_allow_idle(clkdm);
+		break;
+	}
+	return 0;
+}
+
 struct clkdm_ops am33xx_clkdm_operations = {
 	.clkdm_sleep		= am33xx_clkdm_sleep,
 	.clkdm_wakeup		= am33xx_clkdm_wakeup,
@@ -345,6 +400,8 @@ struct clkdm_ops am33xx_clkdm_operations = {
 	.clkdm_deny_idle	= am33xx_clkdm_deny_idle,
 	.clkdm_clk_enable	= am33xx_clkdm_clk_enable,
 	.clkdm_clk_disable	= am33xx_clkdm_clk_disable,
+	.clkdm_save_context	= am33xx_clkdm_save_context,
+	.clkdm_restore_context	= am33xx_clkdm_restore_context,
 };
 
 static const struct cm_ll_data am33xx_cm_ll_data = {

@@ -1,40 +1,27 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2012 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
-#include <drm/drm_crtc_helper.h>
-#include <drm/drm_fb_helper.h>
+
+#include <drm/drm_modeset_helper.h>
+#include <drm/drm_fourcc.h>
+#include <drm/drm_gem_framebuffer_helper.h>
+#include <drm/drm_print.h>
+
 #include "armada_drm.h"
 #include "armada_fb.h"
 #include "armada_gem.h"
 #include "armada_hw.h"
 
-static void armada_fb_destroy(struct drm_framebuffer *fb)
-{
-	struct armada_framebuffer *dfb = drm_fb_to_armada_fb(fb);
-
-	drm_framebuffer_cleanup(&dfb->fb);
-	drm_gem_object_put_unlocked(&dfb->obj->obj);
-	kfree(dfb);
-}
-
-static int armada_fb_create_handle(struct drm_framebuffer *fb,
-	struct drm_file *dfile, unsigned int *handle)
-{
-	struct armada_framebuffer *dfb = drm_fb_to_armada_fb(fb);
-	return drm_gem_handle_create(dfile, &dfb->obj->obj, handle);
-}
-
 static const struct drm_framebuffer_funcs armada_fb_funcs = {
-	.destroy	= armada_fb_destroy,
-	.create_handle	= armada_fb_create_handle,
+	.destroy	= drm_gem_fb_destroy,
+	.create_handle	= drm_gem_fb_create_handle,
 };
 
 struct armada_framebuffer *armada_framebuffer_create(struct drm_device *dev,
-	const struct drm_mode_fb_cmd2 *mode, struct armada_gem_object *obj)
+						     const struct drm_format_info *info,
+						     const struct drm_mode_fb_cmd2 *mode,
+						     struct armada_gem_object *obj)
 {
 	struct armada_framebuffer *dfb;
 	uint8_t format, config;
@@ -70,7 +57,7 @@ struct armada_framebuffer *armada_framebuffer_create(struct drm_device *dev,
 		return ERR_PTR(-EINVAL);
 	}
 
-	dfb = kzalloc(sizeof(*dfb), GFP_KERNEL);
+	dfb = kzalloc_obj(*dfb);
 	if (!dfb) {
 		DRM_ERROR("failed to allocate Armada fb object\n");
 		return ERR_PTR(-ENOMEM);
@@ -78,9 +65,9 @@ struct armada_framebuffer *armada_framebuffer_create(struct drm_device *dev,
 
 	dfb->fmt = format;
 	dfb->mod = config;
-	dfb->obj = obj;
+	dfb->fb.obj[0] = &obj->obj;
 
-	drm_helper_mode_fill_fb_struct(dev, &dfb->fb, mode);
+	drm_helper_mode_fill_fb_struct(dev, &dfb->fb, info, mode);
 
 	ret = drm_framebuffer_init(dev, &dfb->fb, &armada_fb_funcs);
 	if (ret) {
@@ -99,8 +86,9 @@ struct armada_framebuffer *armada_framebuffer_create(struct drm_device *dev,
 	return dfb;
 }
 
-static struct drm_framebuffer *armada_fb_create(struct drm_device *dev,
-	struct drm_file *dfile, const struct drm_mode_fb_cmd2 *mode)
+struct drm_framebuffer *armada_fb_create(struct drm_device *dev,
+	struct drm_file *dfile, const struct drm_format_info *info,
+	const struct drm_mode_fb_cmd2 *mode)
 {
 	struct armada_gem_object *obj;
 	struct armada_framebuffer *dfb;
@@ -112,7 +100,7 @@ static struct drm_framebuffer *armada_fb_create(struct drm_device *dev,
 		mode->pitches[2]);
 
 	/* We can only handle a single plane at the moment */
-	if (drm_format_num_planes(mode->pixel_format) > 1 &&
+	if (info->num_planes > 1 &&
 	    (mode->handles[0] != mode->handles[1] ||
 	     mode->handles[0] != mode->handles[2])) {
 		ret = -EINVAL;
@@ -137,24 +125,19 @@ static struct drm_framebuffer *armada_fb_create(struct drm_device *dev,
 		goto err_unref;
 	}
 
-	dfb = armada_framebuffer_create(dev, mode, obj);
+	dfb = armada_framebuffer_create(dev, info, mode, obj);
 	if (IS_ERR(dfb)) {
 		ret = PTR_ERR(dfb);
 		goto err;
 	}
 
-	drm_gem_object_put_unlocked(&obj->obj);
+	drm_gem_object_put(&obj->obj);
 
 	return &dfb->fb;
 
  err_unref:
-	drm_gem_object_put_unlocked(&obj->obj);
+	drm_gem_object_put(&obj->obj);
  err:
 	DRM_ERROR("failed to initialize framebuffer: %d\n", ret);
 	return ERR_PTR(ret);
 }
-
-const struct drm_mode_config_funcs armada_drm_mode_config_funcs = {
-	.fb_create		= armada_fb_create,
-	.output_poll_changed	= drm_fb_helper_output_poll_changed,
-};

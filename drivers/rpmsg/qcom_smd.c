@@ -1,19 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2015, Sony Mobile Communications AB.
  * Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/mailbox_client.h>
 #include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of_irq.h>
@@ -21,6 +14,7 @@
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/sched.h>
+#include <linux/sizes.h>
 #include <linux/slab.h>
 #include <linux/soc/qcom/smem.h>
 #include <linux/wait.h>
@@ -100,6 +94,8 @@ static const struct {
 
 /**
  * struct qcom_smd_edge - representing a remote processor
+ * @dev:		device associated with this edge
+ * @name:		name of this edge
  * @of_node:		of_node handle for information related to this edge
  * @edge_id:		identifier of this edge
  * @remote_pid:		identifier of remote processor
@@ -107,10 +103,13 @@ static const struct {
  * @ipc_regmap:		regmap handle holding the outgoing ipc register
  * @ipc_offset:		offset within @ipc_regmap of the register for ipc
  * @ipc_bit:		bit in the register at @ipc_offset of @ipc_regmap
+ * @mbox_client:	mailbox client handle
+ * @mbox_chan:		apcs ipc mailbox channel handle
  * @channels:		list of all channels detected on this edge
  * @channels_lock:	guard for modifications of @channels
  * @allocated:		array of bitmaps representing already allocated channels
  * @smem_available:	last available amount of smem triggering a channel scan
+ * @new_channel_event:	wait queue for new channel events
  * @scan_work:		work item for discovering new channels
  * @state_work:		work item for edge state changes
  */
@@ -128,6 +127,9 @@ struct qcom_smd_edge {
 	struct regmap *ipc_regmap;
 	int ipc_offset;
 	int ipc_bit;
+
+	struct mbox_client mbox_client;
+	struct mbox_chan *mbox_chan;
 
 	struct list_head channels;
 	spinlock_t channels_lock;
@@ -174,10 +176,12 @@ struct qcom_smd_endpoint {
 /**
  * struct qcom_smd_channel - smd channel struct
  * @edge:		qcom_smd_edge this channel is living on
- * @qsdev:		reference to a associated smd client device
+ * @qsept:		reference to a associated smd endpoint
+ * @registered:		flag to indicate if the channel is registered
  * @name:		name of the channel
  * @state:		local state of the channel
  * @remote_state:	remote state of the channel
+ * @state_change_event:	state change event
  * @info:		byte aligned outgoing/incoming channel info
  * @info_word:		word aligned outgoing/incoming channel info
  * @tx_lock:		lock to make writes to the channel mutually exclusive
@@ -189,6 +193,7 @@ struct qcom_smd_endpoint {
  * @cb:			callback function registered for this channel
  * @recv_lock:		guard for rx info modifications and cb pointer
  * @pkt_size:		size of the currently handled packet
+ * @drvdata:		driver private data
  * @list:		lite entry for @channels in qcom_smd_edge
  */
 struct qcom_smd_channel {
@@ -366,7 +371,17 @@ static void qcom_smd_signal_channel(struct qcom_smd_channel *channel)
 {
 	struct qcom_smd_edge *edge = channel->edge;
 
-	regmap_write(edge->ipc_regmap, edge->ipc_offset, BIT(edge->ipc_bit));
+	if (edge->mbox_chan) {
+		/*
+		 * We can ignore a failing mbox_send_message() as the only
+		 * possible cause is that the FIFO in the framework is full of
+		 * other writes to the same bit.
+		 */
+		mbox_send_message(edge->mbox_chan, NULL);
+		mbox_client_txdone(edge->mbox_chan, 0);
+	} else {
+		regmap_write(edge->ipc_regmap, edge->ipc_offset, BIT(edge->ipc_bit));
+	}
 }
 
 /*
@@ -714,10 +729,11 @@ static int qcom_smd_write_fifo(struct qcom_smd_channel *channel,
 }
 
 /**
- * qcom_smd_send - write data to smd channel
+ * __qcom_smd_send - write data to smd channel
  * @channel:	channel handle
  * @data:	buffer of data to write
  * @len:	number of bytes to write
+ * @wait:	flag to indicate if write can wait
  *
  * This is a blocking write of len bytes into the channel's tx ring buffer and
  * signal the remote end. It will sleep until there is enough space available
@@ -730,7 +746,7 @@ static int __qcom_smd_send(struct qcom_smd_channel *channel, const void *data,
 	__le32 hdr[5] = { cpu_to_le32(len), };
 	int tlen = sizeof(hdr) + len;
 	unsigned long flags;
-	int ret;
+	int ret = 0;
 
 	/* Word aligned channels only accept word size aligned data */
 	if (channel->info_word && len % 4)
@@ -906,7 +922,7 @@ static struct rpmsg_endpoint *qcom_smd_create_ept(struct rpmsg_device *rpdev,
 		return NULL;
 	}
 
-	qsept = kzalloc(sizeof(*qsept), GFP_KERNEL);
+	qsept = kzalloc_obj(*qsept);
 	if (!qsept)
 		return NULL;
 
@@ -944,14 +960,30 @@ static void qcom_smd_destroy_ept(struct rpmsg_endpoint *ept)
 	kref_put(&ept->refcount, __ept_release);
 }
 
-static int qcom_smd_send(struct rpmsg_endpoint *ept, void *data, int len)
+static int qcom_smd_send(struct rpmsg_endpoint *ept, const void *data, int len)
 {
 	struct qcom_smd_endpoint *qsept = to_smd_endpoint(ept);
 
 	return __qcom_smd_send(qsept->qsch, data, len, true);
 }
 
-static int qcom_smd_trysend(struct rpmsg_endpoint *ept, void *data, int len)
+static int qcom_smd_trysend(struct rpmsg_endpoint *ept, const void *data, int len)
+{
+	struct qcom_smd_endpoint *qsept = to_smd_endpoint(ept);
+
+	return __qcom_smd_send(qsept->qsch, data, len, false);
+}
+
+static int qcom_smd_sendto(struct rpmsg_endpoint *ept, const void *data, int len,
+			   u32 dst)
+{
+	struct qcom_smd_endpoint *qsept = to_smd_endpoint(ept);
+
+	return __qcom_smd_send(qsept->qsch, data, len, true);
+}
+
+static int qcom_smd_trysendto(struct rpmsg_endpoint *ept, const void *data,
+			      int len, u32 dst)
 {
 	struct qcom_smd_endpoint *qsept = to_smd_endpoint(ept);
 
@@ -1022,7 +1054,9 @@ static const struct rpmsg_device_ops qcom_smd_device_ops = {
 static const struct rpmsg_endpoint_ops qcom_smd_endpoint_ops = {
 	.destroy_ept = qcom_smd_destroy_ept,
 	.send = qcom_smd_send,
+	.sendto = qcom_smd_sendto,
 	.trysend = qcom_smd_trysend,
+	.trysendto = qcom_smd_trysendto,
 	.poll = qcom_smd_poll,
 };
 
@@ -1045,7 +1079,7 @@ static int qcom_smd_create_device(struct qcom_smd_channel *channel)
 
 	dev_dbg(&edge->dev, "registering '%s'\n", channel->name);
 
-	qsdev = kzalloc(sizeof(*qsdev), GFP_KERNEL);
+	qsdev = kzalloc_obj(*qsdev);
 	if (!qsdev)
 		return -ENOMEM;
 
@@ -1057,7 +1091,7 @@ static int qcom_smd_create_device(struct qcom_smd_channel *channel)
 
 	/* Assign public information to the rpmsg_device */
 	rpdev = &qsdev->rpdev;
-	strncpy(rpdev->id.name, channel->name, RPMSG_NAME_SIZE);
+	strscpy(rpdev->id.name, channel->name);
 	rpdev->src = RPMSG_ADDR_ANY;
 	rpdev->dst = RPMSG_ADDR_ANY;
 
@@ -1072,7 +1106,7 @@ static int qcom_smd_create_chrdev(struct qcom_smd_edge *edge)
 {
 	struct qcom_smd_device *qsdev;
 
-	qsdev = kzalloc(sizeof(*qsdev), GFP_KERNEL);
+	qsdev = kzalloc_obj(*qsdev);
 	if (!qsdev)
 		return -ENOMEM;
 
@@ -1081,7 +1115,7 @@ static int qcom_smd_create_chrdev(struct qcom_smd_edge *edge)
 	qsdev->rpdev.dev.parent = &edge->dev;
 	qsdev->rpdev.dev.release = qcom_smd_release_device;
 
-	return rpmsg_chrdev_register_device(&qsdev->rpdev);
+	return rpmsg_ctrldev_register_device(&qsdev->rpdev);
 }
 
 /*
@@ -1100,14 +1134,16 @@ static struct qcom_smd_channel *qcom_smd_create_channel(struct qcom_smd_edge *ed
 	void *info;
 	int ret;
 
-	channel = devm_kzalloc(&edge->dev, sizeof(*channel), GFP_KERNEL);
+	channel = kzalloc_obj(*channel);
 	if (!channel)
 		return ERR_PTR(-ENOMEM);
 
 	channel->edge = edge;
-	channel->name = devm_kstrdup(&edge->dev, name, GFP_KERNEL);
-	if (!channel->name)
-		return ERR_PTR(-ENOMEM);
+	channel->name = kstrdup(name, GFP_KERNEL);
+	if (!channel->name) {
+		ret = -ENOMEM;
+		goto free_channel;
+	}
 
 	spin_lock_init(&channel->tx_lock);
 	spin_lock_init(&channel->recv_lock);
@@ -1156,8 +1192,9 @@ static struct qcom_smd_channel *qcom_smd_create_channel(struct qcom_smd_edge *ed
 	return channel;
 
 free_name_and_channel:
-	devm_kfree(&edge->dev, channel->name);
-	devm_kfree(&edge->dev, channel);
+	kfree(channel->name);
+free_channel:
+	kfree(channel);
 
 	return ERR_PTR(ret);
 }
@@ -1253,9 +1290,14 @@ static void qcom_channel_state_worker(struct work_struct *work)
 		if (channel->state != SMD_CHANNEL_CLOSED)
 			continue;
 
+		/*
+		 * Always open rpm_requests, even when already opened which is
+		 * required on some SoCs like msm8953.
+		 */
 		remote_state = GET_RX_CHANNEL_INFO(channel, state);
 		if (remote_state != SMD_CHANNEL_OPENING &&
-		    remote_state != SMD_CHANNEL_OPENED)
+		    remote_state != SMD_CHANNEL_OPENED &&
+		    strcmp(channel->name, "rpm_requests"))
 			continue;
 
 		if (channel->registered)
@@ -1263,9 +1305,7 @@ static void qcom_channel_state_worker(struct work_struct *work)
 
 		spin_unlock_irqrestore(&edge->channels_lock, flags);
 		qcom_smd_create_device(channel);
-		channel->registered = true;
 		spin_lock_irqsave(&edge->channels_lock, flags);
-
 		channel->registered = true;
 	}
 
@@ -1285,7 +1325,7 @@ static void qcom_channel_state_worker(struct work_struct *work)
 
 		spin_unlock_irqrestore(&edge->channels_lock, flags);
 
-		strncpy(chinfo.name, channel->name, sizeof(chinfo.name));
+		strscpy_pad(chinfo.name, channel->name, sizeof(chinfo.name));
 		chinfo.src = RPMSG_ADDR_ANY;
 		chinfo.dst = RPMSG_ADDR_ANY;
 		rpmsg_unregister_device(&edge->dev, &chinfo);
@@ -1319,34 +1359,52 @@ static int qcom_smd_parse_edge(struct device *dev,
 	ret = of_property_read_u32(node, key, &edge->edge_id);
 	if (ret) {
 		dev_err(dev, "edge missing %s property\n", key);
-		return -EINVAL;
+		goto put_node;
 	}
 
 	edge->remote_pid = QCOM_SMEM_HOST_ANY;
 	key = "qcom,remote-pid";
 	of_property_read_u32(node, key, &edge->remote_pid);
 
-	syscon_np = of_parse_phandle(node, "qcom,ipc", 0);
-	if (!syscon_np) {
-		dev_err(dev, "no qcom,ipc node\n");
-		return -ENODEV;
-	}
+	edge->mbox_client.dev = dev;
+	edge->mbox_client.knows_txdone = true;
+	edge->mbox_chan = mbox_request_channel(&edge->mbox_client, 0);
+	if (IS_ERR(edge->mbox_chan)) {
+		if (PTR_ERR(edge->mbox_chan) != -ENOENT) {
+			ret = dev_err_probe(dev, PTR_ERR(edge->mbox_chan),
+					    "failed to acquire IPC mailbox\n");
+			goto put_node;
+		}
 
-	edge->ipc_regmap = syscon_node_to_regmap(syscon_np);
-	if (IS_ERR(edge->ipc_regmap))
-		return PTR_ERR(edge->ipc_regmap);
+		edge->mbox_chan = NULL;
 
-	key = "qcom,ipc";
-	ret = of_property_read_u32_index(node, key, 1, &edge->ipc_offset);
-	if (ret < 0) {
-		dev_err(dev, "no offset in %s\n", key);
-		return -EINVAL;
-	}
+		syscon_np = of_parse_phandle(node, "qcom,ipc", 0);
+		if (!syscon_np) {
+			dev_err(dev, "no qcom,ipc node\n");
+			ret = -ENODEV;
+			goto put_node;
+		}
 
-	ret = of_property_read_u32_index(node, key, 2, &edge->ipc_bit);
-	if (ret < 0) {
-		dev_err(dev, "no bit in %s\n", key);
-		return -EINVAL;
+		edge->ipc_regmap = syscon_node_to_regmap(syscon_np);
+		of_node_put(syscon_np);
+		if (IS_ERR(edge->ipc_regmap)) {
+			ret = PTR_ERR(edge->ipc_regmap);
+			dev_err(dev, "failed to get regmap from syscon: %d\n", ret);
+			goto put_node;
+		}
+
+		key = "qcom,ipc";
+		ret = of_property_read_u32_index(node, key, 1, &edge->ipc_offset);
+		if (ret < 0) {
+			dev_err(dev, "no offset in %s\n", key);
+			goto put_node;
+		}
+
+		ret = of_property_read_u32_index(node, key, 2, &edge->ipc_bit);
+		if (ret < 0) {
+			dev_err(dev, "no bit in %s\n", key);
+			goto put_node;
+		}
 	}
 
 	ret = of_property_read_string(node, "label", &edge->name);
@@ -1354,9 +1412,10 @@ static int qcom_smd_parse_edge(struct device *dev,
 		edge->name = node->name;
 
 	irq = irq_of_parse_and_map(node, 0);
-	if (irq < 0) {
+	if (!irq) {
 		dev_err(dev, "required smd interrupt missing\n");
-		return -EINVAL;
+		ret = -EINVAL;
+		goto put_node;
 	}
 
 	ret = devm_request_irq(dev, irq,
@@ -1364,12 +1423,18 @@ static int qcom_smd_parse_edge(struct device *dev,
 			       node->name, edge);
 	if (ret) {
 		dev_err(dev, "failed to request smd irq\n");
-		return ret;
+		goto put_node;
 	}
 
 	edge->irq = irq;
 
 	return 0;
+
+put_node:
+	of_node_put(node);
+	edge->of_node = NULL;
+
+	return ret;
 }
 
 /*
@@ -1378,13 +1443,13 @@ static int qcom_smd_parse_edge(struct device *dev,
  */
 static void qcom_smd_edge_release(struct device *dev)
 {
-	struct qcom_smd_channel *channel;
+	struct qcom_smd_channel *channel, *tmp;
 	struct qcom_smd_edge *edge = to_smd_edge(dev);
 
-	list_for_each_entry(channel, &edge->channels, list) {
-		SET_RX_CHANNEL_INFO(channel, state, SMD_CHANNEL_CLOSED);
-		SET_RX_CHANNEL_INFO(channel, head, 0);
-		SET_RX_CHANNEL_INFO(channel, tail, 0);
+	list_for_each_entry_safe(channel, tmp, &edge->channels, list) {
+		list_del(&channel->list);
+		kfree(channel->name);
+		kfree(channel);
 	}
 
 	kfree(edge);
@@ -1410,7 +1475,7 @@ ATTRIBUTE_GROUPS(qcom_smd_edge);
  * @parent:    parent device for the edge
  * @node:      device_node describing the edge
  *
- * Returns an edge reference, or negative ERR_PTR() on failure.
+ * Return: an edge reference, or negative ERR_PTR() on failure.
  */
 struct qcom_smd_edge *qcom_smd_register_edge(struct device *parent,
 					     struct device_node *node)
@@ -1418,7 +1483,10 @@ struct qcom_smd_edge *qcom_smd_register_edge(struct device *parent,
 	struct qcom_smd_edge *edge;
 	int ret;
 
-	edge = kzalloc(sizeof(*edge), GFP_KERNEL);
+	if (!qcom_smem_is_available())
+		return ERR_PTR(-EPROBE_DEFER);
+
+	edge = kzalloc_obj(*edge);
 	if (!edge)
 		return ERR_PTR(-ENOMEM);
 
@@ -1428,7 +1496,7 @@ struct qcom_smd_edge *qcom_smd_register_edge(struct device *parent,
 	edge->dev.release = qcom_smd_edge_release;
 	edge->dev.of_node = node;
 	edge->dev.groups = qcom_smd_edge_groups;
-	dev_set_name(&edge->dev, "%s:%s", dev_name(parent), node->name);
+	dev_set_name(&edge->dev, "%s:%pOFn", dev_name(parent), node);
 	ret = device_register(&edge->dev);
 	if (ret) {
 		pr_err("failed to register smd edge\n");
@@ -1437,10 +1505,8 @@ struct qcom_smd_edge *qcom_smd_register_edge(struct device *parent,
 	}
 
 	ret = qcom_smd_parse_edge(&edge->dev, node, edge);
-	if (ret) {
-		dev_err(&edge->dev, "failed to parse smd edge\n");
+	if (ret)
 		goto unregister_dev;
-	}
 
 	ret = qcom_smd_create_chrdev(edge);
 	if (ret) {
@@ -1453,6 +1519,9 @@ struct qcom_smd_edge *qcom_smd_register_edge(struct device *parent,
 	return edge;
 
 unregister_dev:
+	if (!IS_ERR_OR_NULL(edge->mbox_chan))
+		mbox_free_channel(edge->mbox_chan);
+
 	device_unregister(&edge->dev);
 	return ERR_PTR(ret);
 }
@@ -1469,7 +1538,7 @@ static int qcom_smd_remove_device(struct device *dev, void *data)
  * qcom_smd_unregister_edge() - release an edge and its children
  * @edge:      edge reference acquired from qcom_smd_register_edge
  */
-int qcom_smd_unregister_edge(struct qcom_smd_edge *edge)
+void qcom_smd_unregister_edge(struct qcom_smd_edge *edge)
 {
 	int ret;
 
@@ -1481,21 +1550,17 @@ int qcom_smd_unregister_edge(struct qcom_smd_edge *edge)
 	if (ret)
 		dev_warn(&edge->dev, "can't remove smd device: %d\n", ret);
 
+	mbox_free_channel(edge->mbox_chan);
 	device_unregister(&edge->dev);
-
-	return 0;
 }
 EXPORT_SYMBOL(qcom_smd_unregister_edge);
 
 static int qcom_smd_probe(struct platform_device *pdev)
 {
 	struct device_node *node;
-	void *p;
 
-	/* Wait for smem */
-	p = qcom_smem_get(QCOM_SMEM_HOST_ANY, smem_items[0].alloc_tbl_id, NULL);
-	if (PTR_ERR(p) == -EPROBE_DEFER)
-		return PTR_ERR(p);
+	if (!qcom_smem_is_available())
+		return -EPROBE_DEFER;
 
 	for_each_available_child_of_node(pdev->dev.of_node, node)
 		qcom_smd_register_edge(&pdev->dev, node);
@@ -1507,22 +1572,22 @@ static int qcom_smd_remove_edge(struct device *dev, void *data)
 {
 	struct qcom_smd_edge *edge = to_smd_edge(dev);
 
-	return qcom_smd_unregister_edge(edge);
+	qcom_smd_unregister_edge(edge);
+
+	return 0;
 }
 
 /*
  * Shut down all smd clients by making sure that each edge stops processing
  * events and scanning for new channels, then call destroy on the devices.
  */
-static int qcom_smd_remove(struct platform_device *pdev)
+static void qcom_smd_remove(struct platform_device *pdev)
 {
-	int ret;
-
-	ret = device_for_each_child(&pdev->dev, NULL, qcom_smd_remove_edge);
-	if (ret)
-		dev_warn(&pdev->dev, "can't remove smd device: %d\n", ret);
-
-	return ret;
+	/*
+	 * qcom_smd_remove_edge always returns zero, so there is no need to
+	 * check the return value of device_for_each_child.
+	 */
+	device_for_each_child(&pdev->dev, NULL, qcom_smd_remove_edge);
 }
 
 static const struct of_device_id qcom_smd_of_match[] = {
@@ -1544,7 +1609,7 @@ static int __init qcom_smd_init(void)
 {
 	return platform_driver_register(&qcom_smd_driver);
 }
-subsys_initcall(qcom_smd_init);
+arch_initcall(qcom_smd_init);
 
 static void __exit qcom_smd_exit(void)
 {

@@ -1,13 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* 10G controller driver for Samsung SoCs
  *
  * Copyright (C) 2013 Samsung Electronics Co., Ltd.
  *		http://www.samsung.com
  *
  * Author: Siva Reddy Kallam <siva.kallam@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -28,7 +25,7 @@ static void sxgbe_mtl_init(void __iomem *ioaddr, unsigned int etsalg,
 	reg_val = readl(ioaddr + SXGBE_MTL_OP_MODE_REG);
 	reg_val &= ETS_RST;
 
-	/* ETS Algorith */
+	/* ETS Algorithm */
 	switch (etsalg & SXGBE_MTL_OPMODE_ESTMASK) {
 	case ETS_WRR:
 		reg_val &= ETS_WRR;

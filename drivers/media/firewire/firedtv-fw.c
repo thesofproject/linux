@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * FireDTV driver -- firewire I/O backend
  */
@@ -9,7 +10,6 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <linux/mm.h>
-#include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
@@ -134,7 +134,7 @@ int fdtv_start_iso(struct firedtv *fdtv)
 	struct fw_device *device = device_of(fdtv);
 	int i, err;
 
-	ctx = kmalloc(sizeof(*ctx), GFP_KERNEL);
+	ctx = kmalloc_obj(*ctx);
 	if (!ctx)
 		return -ENOMEM;
 
@@ -254,7 +254,7 @@ static int node_probe(struct fw_unit *unit, const struct ieee1394_device_id *id)
 	char name[MAX_MODEL_NAME_LEN];
 	int name_len, i, err;
 
-	fdtv = kzalloc(sizeof(*fdtv), GFP_KERNEL);
+	fdtv = kzalloc_obj(*fdtv);
 	if (!fdtv)
 		return -ENOMEM;
 
@@ -271,6 +271,10 @@ static int node_probe(struct fw_unit *unit, const struct ieee1394_device_id *id)
 
 	name_len = fw_csr_string(unit->directory, CSR_MODEL,
 				 name, sizeof(name));
+	if (name_len < 0) {
+		err = name_len;
+		goto fail_free;
+	}
 	for (i = ARRAY_SIZE(model_names); --i; )
 		if (strlen(model_names[i]) <= name_len &&
 		    strncmp(name, model_names[i], name_len) == 0)
@@ -425,4 +429,3 @@ MODULE_AUTHOR("Andreas Monitzer <andy@monitzer.com>");
 MODULE_AUTHOR("Ben Backx <ben@bbackx.com>");
 MODULE_DESCRIPTION("FireDTV DVB Driver");
 MODULE_LICENSE("GPL");
-MODULE_SUPPORTED_DEVICE("FireDTV DVB");

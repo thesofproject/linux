@@ -1,15 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef LLC_C_EV_H
 #define LLC_C_EV_H
 /*
  * Copyright (c) 1997 by Procom Technology,Inc.
  *		 2001 by Arnaldo Carvalho de Melo <acme@conectiva.com.br>
- *
- * This program can be redistributed or modified under the terms of the
- * GNU General Public License as published by the Free Software Foundation.
- * This program is distributed without any warranty or implied warranty
- * of merchantability or fitness for a particular purpose.
- *
- * See the GNU General Public License for more details.
  */
 
 #include <net/sock.h>
@@ -158,7 +152,6 @@ int llc_conn_ev_p_tmr_exp(struct sock *sk, struct sk_buff *skb);
 int llc_conn_ev_ack_tmr_exp(struct sock *sk, struct sk_buff *skb);
 int llc_conn_ev_rej_tmr_exp(struct sock *sk, struct sk_buff *skb);
 int llc_conn_ev_busy_tmr_exp(struct sock *sk, struct sk_buff *skb);
-int llc_conn_ev_sendack_tmr_exp(struct sock *sk, struct sk_buff *skb);
 /* NOT_USED functions and their variations */
 int llc_conn_ev_rx_xxx_cmd_pbit_set_1(struct sock *sk, struct sk_buff *skb);
 int llc_conn_ev_rx_xxx_rsp_fbit_set_1(struct sock *sk, struct sk_buff *skb);

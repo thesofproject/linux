@@ -25,17 +25,27 @@
 #include <nvif/if0008.h>
 
 void
-nvif_mmu_fini(struct nvif_mmu *mmu)
+nvif_mmu_dtor(struct nvif_mmu *mmu)
 {
+	if (!nvif_object_constructed(&mmu->object))
+		return;
+
 	kfree(mmu->kind);
 	kfree(mmu->type);
 	kfree(mmu->heap);
-	nvif_object_fini(&mmu->object);
+	nvif_object_dtor(&mmu->object);
 }
 
 int
-nvif_mmu_init(struct nvif_object *parent, s32 oclass, struct nvif_mmu *mmu)
+nvif_mmu_ctor(struct nvif_object *parent, const char *name, s32 oclass,
+	      struct nvif_mmu *mmu)
 {
+	static const struct nvif_mclass mems[] = {
+		{ NVIF_CLASS_MEM_GF100, -1 },
+		{ NVIF_CLASS_MEM_NV50 , -1 },
+		{ NVIF_CLASS_MEM_NV04 , -1 },
+		{}
+	};
 	struct nvif_mmu_v0 args;
 	int ret, i;
 
@@ -44,8 +54,8 @@ nvif_mmu_init(struct nvif_object *parent, s32 oclass, struct nvif_mmu *mmu)
 	mmu->type = NULL;
 	mmu->kind = NULL;
 
-	ret = nvif_object_init(parent, 0, oclass, &args, sizeof(args),
-			       &mmu->object);
+	ret = nvif_object_ctor(parent, name ? name : "nvifMmu", 0, oclass,
+			       &args, sizeof(args), &mmu->object);
 	if (ret)
 		goto done;
 
@@ -54,12 +64,17 @@ nvif_mmu_init(struct nvif_object *parent, s32 oclass, struct nvif_mmu *mmu)
 	mmu->type_nr = args.type_nr;
 	mmu->kind_nr = args.kind_nr;
 
-	mmu->heap = kmalloc(sizeof(*mmu->heap) * mmu->heap_nr, GFP_KERNEL);
-	mmu->type = kmalloc(sizeof(*mmu->type) * mmu->type_nr, GFP_KERNEL);
+	ret = nvif_mclass(&mmu->object, mems);
+	if (ret < 0)
+		goto done;
+	mmu->mem = mems[ret].oclass;
+
+	mmu->heap = kmalloc_objs(*mmu->heap, mmu->heap_nr);
+	mmu->type = kmalloc_objs(*mmu->type, mmu->type_nr);
 	if (ret = -ENOMEM, !mmu->heap || !mmu->type)
 		goto done;
 
-	mmu->kind = kmalloc(sizeof(*mmu->kind) * mmu->kind_nr, GFP_KERNEL);
+	mmu->kind = kmalloc_objs(*mmu->kind, mmu->kind_nr);
 	if (!mmu->kind && mmu->kind_nr)
 		goto done;
 
@@ -96,7 +111,7 @@ nvif_mmu_init(struct nvif_object *parent, s32 oclass, struct nvif_mmu *mmu)
 
 	if (mmu->kind_nr) {
 		struct nvif_mmu_kind_v0 *kind;
-		u32 argc = sizeof(*kind) + sizeof(*kind->data) * mmu->kind_nr;
+		size_t argc = struct_size(kind, data, mmu->kind_nr);
 
 		if (ret = -ENOMEM, !(kind = kmalloc(argc, GFP_KERNEL)))
 			goto done;
@@ -107,11 +122,12 @@ nvif_mmu_init(struct nvif_object *parent, s32 oclass, struct nvif_mmu *mmu)
 				       kind, argc);
 		if (ret == 0)
 			memcpy(mmu->kind, kind->data, kind->count);
+		mmu->kind_inv = kind->kind_inv;
 		kfree(kind);
 	}
 
 done:
 	if (ret)
-		nvif_mmu_fini(mmu);
+		nvif_mmu_dtor(mmu);
 	return ret;
 }

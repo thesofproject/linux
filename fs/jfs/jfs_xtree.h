@@ -1,19 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *   Copyright (C) International Business Machines Corp., 2000-2002
- *
- *   This program is free software;  you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY;  without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
- *   the GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program;  if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 #ifndef _H_JFS_XTREE
 #define _H_JFS_XTREE
@@ -78,24 +65,33 @@ struct xadlist {
 #define XTPAGEMAXSLOT	256
 #define XTENTRYSTART	2
 
+struct xtheader {
+	__le64 next;	/* 8: */
+	__le64 prev;	/* 8: */
+
+	u8 flag;	/* 1: */
+	u8 rsrvd1;	/* 1: */
+	__le16 nextindex;	/* 2: next index = number of entries */
+	__le16 maxentry;	/* 2: max number of entries */
+	__le16 rsrvd2;	/* 2: */
+
+	pxd_t self;	/* 8: self */
+};
+
+/*
+ *	xtree root (in inode):
+ */
+typedef union {
+	struct xtheader header;
+	xad_t xad[XTROOTMAXSLOT];	/* 16 * maxentry: xad array */
+} xtroot_t;
+
 /*
  *	xtree page:
  */
 typedef union {
-	struct xtheader {
-		__le64 next;	/* 8: */
-		__le64 prev;	/* 8: */
-
-		u8 flag;	/* 1: */
-		u8 rsrvd1;	/* 1: */
-		__le16 nextindex;	/* 2: next index = number of entries */
-		__le16 maxentry;	/* 2: max number of entries */
-		__le16 rsrvd2;	/* 2: */
-
-		pxd_t self;	/* 8: self */
-	} header;		/* (32) */
-
-	xad_t xad[XTROOTMAXSLOT];	/* 16 * maxentry: xad array */
+	struct xtheader header;
+	xad_t xad[XTPAGEMAXSLOT];	/* 16 * maxentry: xad array */
 } xtpage_t;
 
 /*
@@ -108,17 +104,9 @@ extern int xtInsert(tid_t tid, struct inode *ip,
 		    int xflag, s64 xoff, int xlen, s64 * xaddrp, int flag);
 extern int xtExtend(tid_t tid, struct inode *ip, s64 xoff, int xlen,
 		    int flag);
-#ifdef _NOTYET
-extern int xtTailgate(tid_t tid, struct inode *ip,
-		      s64 xoff, int xlen, s64 xaddr, int flag);
-#endif
 extern int xtUpdate(tid_t tid, struct inode *ip, struct xad *nxad);
-extern int xtDelete(tid_t tid, struct inode *ip, s64 xoff, int xlen,
-		    int flag);
 extern s64 xtTruncate(tid_t tid, struct inode *ip, s64 newsize, int type);
 extern s64 xtTruncate_pmap(tid_t tid, struct inode *ip, s64 committed_size);
-extern int xtRelocate(tid_t tid, struct inode *ip,
-		      xad_t * oxad, s64 nxaddr, int xtype);
 extern int xtAppend(tid_t tid,
 		    struct inode *ip, int xflag, s64 xoff, int maxblocks,
 		    int *xlenp, s64 * xaddrp, int flag);

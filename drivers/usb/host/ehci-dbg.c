@@ -430,13 +430,13 @@ static void qh_lines(struct ehci_hcd *ehci, struct ehci_qh *qh,
 				mark = '/';
 		}
 		switch ((scratch >> 8) & 0x03) {
-		case 0:
+		case PID_CODE_OUT:
 			type = "out";
 			break;
-		case 1:
+		case PID_CODE_IN:
 			type = "in";
 			break;
-		case 2:
+		case PID_CODE_SETUP:
 			type = "setup";
 			break;
 		default:
@@ -602,10 +602,10 @@ static unsigned output_buf_tds_dir(char *buf, struct ehci_hcd *ehci,
 	list_for_each_entry(qtd, &qh->qtd_list, qtd_list) {
 		temp++;
 		switch ((hc32_to_cpu(ehci, qtd->hw_token) >> 8)	& 0x03) {
-		case 0:
+		case PID_CODE_OUT:
 			type = "out";
 			continue;
-		case 1:
+		case PID_CODE_IN:
 			type = "in";
 			continue;
 		}
@@ -629,7 +629,7 @@ static ssize_t fill_periodic_buffer(struct debug_buffer *buf)
 	unsigned		i;
 	__hc32			tag;
 
-	seen = kmalloc_array(DBG_SCHED_LIMIT, sizeof(*seen), GFP_ATOMIC);
+	seen = kmalloc_objs(*seen, DBG_SCHED_LIMIT, GFP_ATOMIC);
 	if (!seen)
 		return 0;
 	seen_count = 0;
@@ -823,7 +823,7 @@ static ssize_t fill_registers_buffer(struct debug_buffer *buf)
 				break;
 			case 0:		/* illegal reserved capability */
 				cap = 0;
-				/* FALLTHROUGH */
+				fallthrough;
 			default:		/* unknown */
 				break;
 			}
@@ -917,7 +917,7 @@ static struct debug_buffer *alloc_buffer(struct usb_bus *bus,
 {
 	struct debug_buffer *buf;
 
-	buf = kzalloc(sizeof(*buf), GFP_KERNEL);
+	buf = kzalloc_obj(*buf);
 
 	if (buf) {
 		buf->bus = bus;
@@ -931,7 +931,7 @@ static struct debug_buffer *alloc_buffer(struct usb_bus *bus,
 
 static int fill_buffer(struct debug_buffer *buf)
 {
-	int ret = 0;
+	int ret;
 
 	if (!buf->output_buf)
 		buf->output_buf = vmalloc(buf->alloc_size);
@@ -956,7 +956,7 @@ static ssize_t debug_output(struct file *file, char __user *user_buf,
 		size_t len, loff_t *offset)
 {
 	struct debug_buffer *buf = file->private_data;
-	int ret = 0;
+	int ret;
 
 	mutex_lock(&buf->mutex);
 	if (buf->count == 0) {
@@ -1028,29 +1028,15 @@ static inline void create_debug_files(struct ehci_hcd *ehci)
 	struct usb_bus *bus = &ehci_to_hcd(ehci)->self;
 
 	ehci->debug_dir = debugfs_create_dir(bus->bus_name, ehci_debug_root);
-	if (!ehci->debug_dir)
-		return;
 
-	if (!debugfs_create_file("async", S_IRUGO, ehci->debug_dir, bus,
-						&debug_async_fops))
-		goto file_error;
-
-	if (!debugfs_create_file("bandwidth", S_IRUGO, ehci->debug_dir, bus,
-						&debug_bandwidth_fops))
-		goto file_error;
-
-	if (!debugfs_create_file("periodic", S_IRUGO, ehci->debug_dir, bus,
-						&debug_periodic_fops))
-		goto file_error;
-
-	if (!debugfs_create_file("registers", S_IRUGO, ehci->debug_dir, bus,
-						    &debug_registers_fops))
-		goto file_error;
-
-	return;
-
-file_error:
-	debugfs_remove_recursive(ehci->debug_dir);
+	debugfs_create_file("async", S_IRUGO, ehci->debug_dir, bus,
+			    &debug_async_fops);
+	debugfs_create_file("bandwidth", S_IRUGO, ehci->debug_dir, bus,
+			    &debug_bandwidth_fops);
+	debugfs_create_file("periodic", S_IRUGO, ehci->debug_dir, bus,
+			    &debug_periodic_fops);
+	debugfs_create_file("registers", S_IRUGO, ehci->debug_dir, bus,
+			    &debug_registers_fops);
 }
 
 static inline void remove_debug_files(struct ehci_hcd *ehci)

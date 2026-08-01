@@ -9,6 +9,7 @@
 #include <linux/init.h>
 #include <linux/idr.h>
 #include <linux/of.h>
+#include <linux/of_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/slimbus.h>
 #include "slimbus.h"
@@ -20,30 +21,67 @@ static const struct slim_device_id *slim_match(const struct slim_device_id *id,
 {
 	while (id->manf_id != 0 || id->prod_code != 0) {
 		if (id->manf_id == sbdev->e_addr.manf_id &&
-		    id->prod_code == sbdev->e_addr.prod_code)
+		    id->prod_code == sbdev->e_addr.prod_code &&
+		    id->dev_index == sbdev->e_addr.dev_index &&
+		    id->instance == sbdev->e_addr.instance)
 			return id;
 		id++;
 	}
 	return NULL;
 }
 
-static int slim_device_match(struct device *dev, struct device_driver *drv)
+static int slim_device_match(struct device *dev, const struct device_driver *drv)
 {
 	struct slim_device *sbdev = to_slim_device(dev);
-	struct slim_driver *sbdrv = to_slim_driver(drv);
+	const struct slim_driver *sbdrv = to_slim_driver(drv);
+
+	/* Attempt an OF style match first */
+	if (of_driver_match_device(dev, drv))
+		return 1;
 
 	return !!slim_match(sbdrv->id_table, sbdev);
+}
+
+static void slim_device_update_status(struct slim_device *sbdev,
+				      enum slim_device_status status)
+{
+	struct slim_driver *sbdrv;
+
+	if (sbdev->status == status)
+		return;
+
+	sbdev->status = status;
+	if (!sbdev->dev.driver)
+		return;
+
+	sbdrv = to_slim_driver(sbdev->dev.driver);
+	if (sbdrv->device_status)
+		sbdrv->device_status(sbdev, sbdev->status);
 }
 
 static int slim_device_probe(struct device *dev)
 {
 	struct slim_device	*sbdev = to_slim_device(dev);
 	struct slim_driver	*sbdrv = to_slim_driver(dev->driver);
+	int ret;
 
-	return sbdrv->probe(sbdev);
+	ret = sbdrv->probe(sbdev);
+	if (ret)
+		return ret;
+
+	/* try getting the logical address after probe */
+	ret = slim_get_logical_addr(sbdev);
+	if (!ret) {
+		slim_device_update_status(sbdev, SLIM_DEVICE_STATUS_UP);
+	} else {
+		dev_err(&sbdev->dev, "Failed to get logical address\n");
+		ret = -EPROBE_DEFER;
+	}
+
+	return ret;
 }
 
-static int slim_device_remove(struct device *dev)
+static void slim_device_remove(struct device *dev)
 {
 	struct slim_device *sbdev = to_slim_device(dev);
 	struct slim_driver *sbdrv;
@@ -53,15 +91,21 @@ static int slim_device_remove(struct device *dev)
 		if (sbdrv->remove)
 			sbdrv->remove(sbdev);
 	}
-
-	return 0;
 }
 
-struct bus_type slimbus_bus = {
+static int slim_device_uevent(const struct device *dev, struct kobj_uevent_env *env)
+{
+	const struct slim_device *sbdev = to_slim_device(dev);
+
+	return add_uevent_var(env, "MODALIAS=slim:%s", dev_name(&sbdev->dev));
+}
+
+const struct bus_type slimbus_bus = {
 	.name		= "slimbus",
 	.match		= slim_device_match,
 	.probe		= slim_device_probe,
 	.remove		= slim_device_remove,
+	.uevent		= slim_device_uevent,
 };
 EXPORT_SYMBOL_GPL(slimbus_bus);
 
@@ -77,7 +121,7 @@ EXPORT_SYMBOL_GPL(slimbus_bus);
 int __slim_driver_register(struct slim_driver *drv, struct module *owner)
 {
 	/* ID table and probe are mandatory */
-	if (!drv->id_table || !drv->probe)
+	if (!(drv->driver.of_match_table || drv->id_table) || !drv->probe)
 		return -EINVAL;
 
 	drv->driver.bus = &slimbus_bus;
@@ -102,6 +146,7 @@ static void slim_dev_release(struct device *dev)
 {
 	struct slim_device *sbdev = to_slim_device(dev);
 
+	of_node_put(sbdev->dev.of_node);
 	kfree(sbdev);
 }
 
@@ -114,9 +159,10 @@ static int slim_add_device(struct slim_controller *ctrl,
 	sbdev->dev.release = slim_dev_release;
 	sbdev->dev.driver = NULL;
 	sbdev->ctrl = ctrl;
-
-	if (node)
-		sbdev->dev.of_node = of_node_get(node);
+	INIT_LIST_HEAD(&sbdev->stream_list);
+	spin_lock_init(&sbdev->stream_list_lock);
+	sbdev->dev.of_node = of_node_get(node);
+	sbdev->dev.fwnode = of_fwnode_handle(node);
 
 	dev_set_name(&sbdev->dev, "%x:%x:%x:%x",
 				  sbdev->e_addr.manf_id,
@@ -134,7 +180,7 @@ static struct slim_device *slim_alloc_device(struct slim_controller *ctrl,
 	struct slim_device *sbdev;
 	int ret;
 
-	sbdev = kzalloc(sizeof(*sbdev), GFP_KERNEL);
+	sbdev = kzalloc_obj(*sbdev);
 	if (!sbdev)
 		return NULL;
 
@@ -205,7 +251,7 @@ int slim_register_controller(struct slim_controller *ctrl)
 {
 	int id;
 
-	id = ida_simple_get(&ctrl_ida, 0, 0, GFP_KERNEL);
+	id = ida_alloc(&ctrl_ida, GFP_KERNEL);
 	if (id < 0)
 		return id;
 
@@ -221,6 +267,7 @@ int slim_register_controller(struct slim_controller *ctrl)
 	mutex_init(&ctrl->lock);
 	mutex_init(&ctrl->sched.m_reconf);
 	init_completion(&ctrl->sched.pause_comp);
+	spin_lock_init(&ctrl->txn_lock);
 
 	dev_dbg(ctrl->dev, "Bus [%s] registered:dev:%p\n",
 		ctrl->name, ctrl->dev);
@@ -252,30 +299,11 @@ int slim_unregister_controller(struct slim_controller *ctrl)
 {
 	/* Remove all clients */
 	device_for_each_child(ctrl->dev, NULL, slim_ctrl_remove_device);
-	/* Enter Clock Pause */
-	slim_ctrl_clk_pause(ctrl, false, 0);
-	ida_simple_remove(&ctrl_ida, ctrl->id);
+	ida_free(&ctrl_ida, ctrl->id);
 
 	return 0;
 }
 EXPORT_SYMBOL_GPL(slim_unregister_controller);
-
-static void slim_device_update_status(struct slim_device *sbdev,
-				      enum slim_device_status status)
-{
-	struct slim_driver *sbdrv;
-
-	if (sbdev->status == status)
-		return;
-
-	sbdev->status = status;
-	if (!sbdev->dev.driver)
-		return;
-
-	sbdrv = to_slim_driver(sbdev->dev.driver);
-	if (sbdrv->device_status)
-		sbdrv->device_status(sbdev, sbdev->status);
-}
 
 /**
  * slim_report_absent() - Controller calls this function when a device
@@ -294,13 +322,14 @@ void slim_report_absent(struct slim_device *sbdev)
 	mutex_lock(&ctrl->lock);
 	sbdev->is_laddr_valid = false;
 	mutex_unlock(&ctrl->lock);
-
-	ida_simple_remove(&ctrl->laddr_ida, sbdev->laddr);
+	if (!ctrl->get_laddr)
+		ida_free(&ctrl->laddr_ida, sbdev->laddr);
 	slim_device_update_status(sbdev, SLIM_DEVICE_STATUS_DOWN);
 }
 EXPORT_SYMBOL_GPL(slim_report_absent);
 
-static bool slim_eaddr_equal(struct slim_eaddr *a, struct slim_eaddr *b)
+static bool slim_eaddr_equal(const struct slim_eaddr *a,
+			     const struct slim_eaddr *b)
 {
 	return (a->manf_id == b->manf_id &&
 		a->prod_code == b->prod_code &&
@@ -308,9 +337,9 @@ static bool slim_eaddr_equal(struct slim_eaddr *a, struct slim_eaddr *b)
 		a->instance == b->instance);
 }
 
-static int slim_match_dev(struct device *dev, void *data)
+static int slim_match_dev(struct device *dev, const void *data)
 {
-	struct slim_eaddr *e_addr = data;
+	const struct slim_eaddr *e_addr = data;
 	struct slim_device *sbdev = to_slim_device(dev);
 
 	return slim_eaddr_equal(&sbdev->e_addr, e_addr);
@@ -337,6 +366,9 @@ static struct slim_device *find_slim_device(struct slim_controller *ctrl,
  * @ctrl: Controller on which this device will be added/queried
  * @e_addr: Enumeration address of the device to be queried
  *
+ * Takes a reference to the embedded struct device which needs to be dropped
+ * after use.
+ *
  * Return: pointer to a device if it has already reported. Creates a new
  * device and returns pointer to it if the device has not yet enumerated.
  */
@@ -350,11 +382,40 @@ struct slim_device *slim_get_device(struct slim_controller *ctrl,
 		sbdev = slim_alloc_device(ctrl, e_addr, NULL);
 		if (!sbdev)
 			return ERR_PTR(-ENOMEM);
+
+		get_device(&sbdev->dev);
 	}
 
 	return sbdev;
 }
 EXPORT_SYMBOL_GPL(slim_get_device);
+
+/**
+ * of_slim_get_device() - get handle to a device using dt node.
+ *
+ * @ctrl: Controller on which this device will be queried
+ * @np: node pointer to device
+ *
+ * Takes a reference to the embedded struct device which needs to be dropped
+ * after use.
+ *
+ * Return: pointer to a device if it has been registered, otherwise NULL.
+ */
+struct slim_device *of_slim_get_device(struct slim_controller *ctrl,
+				       struct device_node *np)
+{
+	struct slim_device *sbdev;
+	struct device *dev;
+
+	dev = device_find_child(ctrl->dev, np, device_match_of_node);
+	if (dev) {
+		sbdev = to_slim_device(dev);
+		return sbdev;
+	}
+
+	return NULL;
+}
+EXPORT_SYMBOL_GPL(of_slim_get_device);
 
 static int slim_device_alloc_laddr(struct slim_device *sbdev,
 				   bool report_present)
@@ -369,8 +430,8 @@ static int slim_device_alloc_laddr(struct slim_device *sbdev,
 		if (ret < 0)
 			goto err;
 	} else if (report_present) {
-		ret = ida_simple_get(&ctrl->laddr_ida,
-				     0, SLIM_LA_MANAGER - 1, GFP_KERNEL);
+		ret = ida_alloc_max(&ctrl->laddr_ida,
+				    SLIM_LA_MANAGER - 1, GFP_KERNEL);
 		if (ret < 0)
 			goto err;
 
@@ -390,12 +451,15 @@ static int slim_device_alloc_laddr(struct slim_device *sbdev,
 
 	sbdev->laddr = laddr;
 	sbdev->is_laddr_valid = true;
+	mutex_unlock(&ctrl->lock);
 
 	slim_device_update_status(sbdev, SLIM_DEVICE_STATUS_UP);
 
 	dev_dbg(ctrl->dev, "setting slimbus l-addr:%x, ea:%x,%x,%x,%x\n",
 		laddr, sbdev->e_addr.manf_id, sbdev->e_addr.prod_code,
 		sbdev->e_addr.dev_index, sbdev->e_addr.instance);
+
+	return 0;
 
 err:
 	mutex_unlock(&ctrl->lock);
@@ -426,21 +490,24 @@ int slim_device_report_present(struct slim_controller *ctrl,
 	if (ctrl->sched.clk_state != SLIM_CLK_ACTIVE) {
 		dev_err(ctrl->dev, "slim ctrl not active,state:%d, ret:%d\n",
 				    ctrl->sched.clk_state, ret);
-		goto slimbus_not_active;
+		goto out_put_rpm;
 	}
 
 	sbdev = slim_get_device(ctrl, e_addr);
-	if (IS_ERR(sbdev))
-		return -ENODEV;
+	if (IS_ERR(sbdev)) {
+		ret = -ENODEV;
+		goto out_put_rpm;
+	}
 
 	if (sbdev->is_laddr_valid) {
 		*laddr = sbdev->laddr;
-		return 0;
+		ret = 0;
+	} else {
+		ret = slim_device_alloc_laddr(sbdev, true);
 	}
 
-	ret = slim_device_alloc_laddr(sbdev, true);
-
-slimbus_not_active:
+	put_device(&sbdev->dev);
+out_put_rpm:
 	pm_runtime_mark_last_busy(ctrl->dev);
 	pm_runtime_put_autosuspend(ctrl->dev);
 	return ret;

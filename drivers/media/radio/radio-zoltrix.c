@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Zoltrix Radio Plus driver
  * Copyright 1998 C. van Schaik <carl@leg.uct.ac.za>
@@ -29,7 +30,7 @@
  * 2006-07-24 - Converted to V4L2 API
  *		by Mauro Carvalho Chehab <mchehab@kernel.org>
  *
- * Converted to the radio-isa framework by Hans Verkuil <hans.verkuil@cisco.com>
+ * Converted to the radio-isa framework by Hans Verkuil <hverkuil@kernel.org>
  *
  * Note that this is the driver for the Zoltrix Radio Plus.
  * This driver does not work for the Zoltrix Radio Plus 108 or the
@@ -78,7 +79,7 @@ struct zoltrix {
 
 static struct radio_isa_card *zoltrix_alloc(void)
 {
-	struct zoltrix *zol = kzalloc(sizeof(*zol), GFP_KERNEL);
+	struct zoltrix *zol = kzalloc_obj(*zol);
 
 	return zol ? &zol->isa : NULL;
 }

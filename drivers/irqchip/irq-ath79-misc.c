@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  Atheros AR71xx/AR724x/AR913x MISC interrupt controller
  *
@@ -7,10 +8,6 @@
  *  Copyright (C) 2008 Imre Kaloz <kaloz@openwrt.org>
  *
  *  Parts of this file are based on Atheros' 2.6.15/2.6.31 BSP
- *
- *  This program is free software; you can redistribute it and/or modify it
- *  under the terms of the GNU General Public License version 2 as published
- *  by the Free Software Foundation.
  */
 
 #include <linux/irqchip.h>
@@ -18,10 +15,21 @@
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 
+#include <asm/time.h>
+
 #define AR71XX_RESET_REG_MISC_INT_STATUS	0
 #define AR71XX_RESET_REG_MISC_INT_ENABLE	4
 
 #define ATH79_MISC_IRQ_COUNT			32
+#define ATH79_MISC_PERF_IRQ			5
+
+static int ath79_perfcount_irq;
+
+int get_c0_perfcount_int(void)
+{
+	return ath79_perfcount_irq;
+}
+EXPORT_SYMBOL_GPL(get_c0_perfcount_int);
 
 static void ath79_misc_irq_handler(struct irq_desc *desc)
 {
@@ -44,7 +52,7 @@ static void ath79_misc_irq_handler(struct irq_desc *desc)
 	while (pending) {
 		int bit = __ffs(pending);
 
-		generic_handle_irq(irq_linear_revmap(domain, bit));
+		generic_handle_domain_irq(domain, bit);
 		pending &= ~BIT(bit);
 	}
 
@@ -113,6 +121,8 @@ static void __init ath79_misc_intc_domain_init(
 {
 	void __iomem *base = domain->host_data;
 
+	ath79_perfcount_irq = irq_create_mapping(domain, ATH79_MISC_PERF_IRQ);
+
 	/* Disable and clear all interrupts */
 	__raw_writel(0, base + AR71XX_RESET_REG_MISC_INT_ENABLE);
 	__raw_writel(0, base + AR71XX_RESET_REG_MISC_INT_STATUS);
@@ -139,7 +149,7 @@ static int __init ath79_misc_intc_of_init(
 		return -ENOMEM;
 	}
 
-	domain = irq_domain_add_linear(node, ATH79_MISC_IRQ_COUNT,
+	domain = irq_domain_create_linear(of_fwnode_handle(node), ATH79_MISC_IRQ_COUNT,
 				&misc_irq_domain_ops, base);
 	if (!domain) {
 		pr_err("Failed to add MISC irqdomain\n");
@@ -169,21 +179,3 @@ static int __init ar7240_misc_intc_of_init(
 
 IRQCHIP_DECLARE(ar7240_misc_intc, "qca,ar7240-misc-intc",
 		ar7240_misc_intc_of_init);
-
-void __init ath79_misc_irq_init(void __iomem *regs, int irq,
-				int irq_base, bool is_ar71xx)
-{
-	struct irq_domain *domain;
-
-	if (is_ar71xx)
-		ath79_misc_irq_chip.irq_mask_ack = ar71xx_misc_irq_mask;
-	else
-		ath79_misc_irq_chip.irq_ack = ar724x_misc_irq_ack;
-
-	domain = irq_domain_add_legacy(NULL, ATH79_MISC_IRQ_COUNT,
-			irq_base, 0, &misc_irq_domain_ops, regs);
-	if (!domain)
-		panic("Failed to create MISC irqdomain");
-
-	ath79_misc_intc_domain_init(domain, irq);
-}

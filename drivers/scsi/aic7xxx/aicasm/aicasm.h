@@ -42,11 +42,7 @@
  * $FreeBSD$
  */
 
-#ifdef __linux__
 #include "../queue.h"
-#else
-#include <sys/queue.h>
-#endif
 
 #ifndef TRUE
 #define TRUE 1
@@ -86,7 +82,7 @@ extern int   src_mode;
 extern int   dst_mode;
 struct symbol;
 
-void stop(const char *errstring, int err_code);
+void __attribute__((noreturn)) stop(const char *errstring, int err_code);
 void include_file(char *file_name, include_type type);
 void expand_macro(struct symbol *macro_symbol);
 struct instruction *seq_alloc(void);

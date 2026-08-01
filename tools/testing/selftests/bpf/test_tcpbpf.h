@@ -12,5 +12,11 @@ struct tcpbpf_globals {
 	__u32 good_cb_test_rv;
 	__u64 bytes_received;
 	__u64 bytes_acked;
+	__u32 num_listen;
+	__u32 num_close_events;
+	__u32 tcp_save_syn;
+	__u32 tcp_saved_syn;
+	__u32 window_clamp_client;
+	__u32 window_clamp_server;
 };
 #endif

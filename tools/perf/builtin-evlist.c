@@ -5,45 +5,66 @@
  */
 #include "builtin.h"
 
-#include "util/util.h"
-
 #include <linux/list.h>
 
-#include "perf.h"
 #include "util/evlist.h"
 #include "util/evsel.h"
+#include "util/evsel_fprintf.h"
 #include "util/parse-events.h"
 #include <subcmd/parse-options.h>
 #include "util/session.h"
 #include "util/data.h"
 #include "util/debug.h"
+#include <linux/err.h>
+#include "util/tool.h"
+#include "util/util.h"
+
+static int process_header_feature(const struct perf_tool *tool __maybe_unused,
+				  struct perf_session *session __maybe_unused,
+				  union perf_event *event __maybe_unused)
+{
+	session_done = 1;
+	return 0;
+}
 
 static int __cmd_evlist(const char *file_name, struct perf_attr_details *details)
 {
 	struct perf_session *session;
-	struct perf_evsel *pos;
+	struct evsel *pos;
 	struct perf_data data = {
-		.file      = {
-			.path = file_name,
-		},
+		.path      = file_name,
 		.mode      = PERF_DATA_MODE_READ,
 		.force     = details->force,
 	};
-	bool has_tracepoint = false;
+	struct perf_tool tool;
+	bool has_tracepoint = false, has_group = false;
 
-	session = perf_session__new(&data, 0, NULL);
-	if (session == NULL)
-		return -1;
+	perf_tool__init(&tool, /*ordered_events=*/false);
+	/* only needed for pipe mode */
+	tool.attr = perf_event__process_attr;
+	tool.feature = process_header_feature;
+	session = perf_session__new(&data, &tool);
+	if (IS_ERR(session))
+		return PTR_ERR(session);
+
+	if (data.is_pipe)
+		perf_session__process_events(session);
 
 	evlist__for_each_entry(session->evlist, pos) {
-		perf_evsel__fprintf(pos, details, stdout);
+		evsel__fprintf(pos, details, stdout);
 
-		if (pos->attr.type == PERF_TYPE_TRACEPOINT)
+		if (pos->core.attr.type == PERF_TYPE_TRACEPOINT)
 			has_tracepoint = true;
+
+		if (!evsel__is_group_leader(pos))
+			has_group = true;
 	}
 
 	if (has_tracepoint && !details->trace_fields)
 		printf("# Tip: use 'perf evlist --trace-fields' to show fields for tracepoint events\n");
+
+	if (has_group && !details->event_group)
+		printf("# Tip: use 'perf evlist -g' to show group information\n");
 
 	perf_session__delete(session);
 	return 0;

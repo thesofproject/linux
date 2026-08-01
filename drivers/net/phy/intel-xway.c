@@ -1,25 +1,38 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2012 Daniel Schwierzeck <daniel.schwierzeck@googlemail.com>
  * Copyright (C) 2016 Hauke Mehrtens <hauke@hauke-m.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/mdio.h>
 #include <linux/module.h>
 #include <linux/phy.h>
 #include <linux/of.h>
+#include <linux/bitfield.h>
 
+#define XWAY_MDIO_ERRCNT		0x15	/* error counter */
+#define XWAY_MDIO_MIICTRL		0x17	/* mii control */
 #define XWAY_MDIO_IMASK			0x19	/* interrupt mask */
 #define XWAY_MDIO_ISTAT			0x1A	/* interrupt status */
+#define XWAY_MDIO_LED			0x1B	/* led control */
+
+#define XWAY_MDIO_ERRCNT_SEL		GENMASK(11, 8)
+#define XWAY_MDIO_ERRCNT_COUNT		GENMASK(7, 0)
+#define XWAY_MDIO_ERRCNT_SEL_RXERR	0
+
+#define XWAY_MDIO_MIICTRL_RXSKEW_MASK	GENMASK(14, 12)
+#define XWAY_MDIO_MIICTRL_TXSKEW_MASK	GENMASK(10, 8)
+
+/* bit 15:12 are reserved */
+#define XWAY_MDIO_LED_LED3_EN		BIT(11)	/* Enable the integrated function of LED3 */
+#define XWAY_MDIO_LED_LED2_EN		BIT(10)	/* Enable the integrated function of LED2 */
+#define XWAY_MDIO_LED_LED1_EN		BIT(9)	/* Enable the integrated function of LED1 */
+#define XWAY_MDIO_LED_LED0_EN		BIT(8)	/* Enable the integrated function of LED0 */
+/* bit 7:4 are reserved */
+#define XWAY_MDIO_LED_LED3_DA		BIT(3)	/* Direct Access to LED3 */
+#define XWAY_MDIO_LED_LED2_DA		BIT(2)	/* Direct Access to LED2 */
+#define XWAY_MDIO_LED_LED1_DA		BIT(1)	/* Direct Access to LED1 */
+#define XWAY_MDIO_LED_LED0_DA		BIT(0)	/* Direct Access to LED0 */
 
 #define XWAY_MDIO_INIT_WOL		BIT(15)	/* Wake-On-LAN */
 #define XWAY_MDIO_INIT_MSRE		BIT(14)
@@ -143,6 +156,13 @@
 #define XWAY_MMD_LED3H			0x01E8
 #define XWAY_MMD_LED3L			0x01E9
 
+#define XWAY_GPHY_MAX_LEDS		3
+#define XWAY_GPHY_LED_INV(idx)		BIT(12 + (idx))
+#define XWAY_GPHY_LED_EN(idx)		BIT(8 + (idx))
+#define XWAY_GPHY_LED_DA(idx)		BIT(idx)
+#define XWAY_MMD_LEDxH(idx)		(XWAY_MMD_LED0H + 2 * (idx))
+#define XWAY_MMD_LEDxL(idx)		(XWAY_MMD_LED0L + 2 * (idx))
+
 #define PHY_ID_PHY11G_1_3		0x030260D1
 #define PHY_ID_PHY22F_1_3		0x030260E1
 #define PHY_ID_PHY11G_1_4		0xD565A400
@@ -154,19 +174,88 @@
 #define PHY_ID_PHY11G_VR9_1_2		0xD565A409
 #define PHY_ID_PHY22F_VR9_1_2		0xD565A419
 
-static int xway_gphy_config_init(struct phy_device *phydev)
+struct xway_gphy_priv {
+	u64 rx_errors;
+};
+
+static const int xway_internal_delay[] = {0, 500, 1000, 1500, 2000, 2500,
+					 3000, 3500};
+
+static int xway_gphy_rgmii_init(struct phy_device *phydev)
+{
+	unsigned int delay_size = ARRAY_SIZE(xway_internal_delay);
+	s32 int_delay;
+	int val = 0;
+
+	if (!phy_interface_is_rgmii(phydev))
+		return 0;
+
+	/* Existing behavior was to use default pin strapping delay in rgmii
+	 * mode, but rgmii should have meant no delay.  Warn existing users,
+	 * but do not change anything at the moment.
+	 */
+	if (phydev->interface == PHY_INTERFACE_MODE_RGMII) {
+		u16 txskew, rxskew;
+
+		val = phy_read(phydev, XWAY_MDIO_MIICTRL);
+		if (val < 0)
+			return val;
+
+		txskew = FIELD_GET(XWAY_MDIO_MIICTRL_TXSKEW_MASK, val);
+		rxskew = FIELD_GET(XWAY_MDIO_MIICTRL_RXSKEW_MASK, val);
+
+		if (txskew > 0 || rxskew > 0)
+			phydev_warn(phydev,
+				    "PHY has delays (e.g. via pin strapping), but phy-mode = 'rgmii'\n"
+				    "Should be 'rgmii-id' to use internal delays txskew:%d ps rxskew:%d ps\n",
+				    xway_internal_delay[txskew],
+				    xway_internal_delay[rxskew]);
+		return 0;
+	}
+
+	if (phydev->interface == PHY_INTERFACE_MODE_RGMII_ID ||
+	    phydev->interface == PHY_INTERFACE_MODE_RGMII_RXID) {
+		int_delay = phy_get_internal_delay(phydev, xway_internal_delay,
+						   delay_size, true);
+
+		/* if rx-internal-delay-ps is missing, use default of 2.0 ns */
+		if (int_delay < 0)
+			int_delay = 4; /* 2000 ps */
+
+		val |= FIELD_PREP(XWAY_MDIO_MIICTRL_RXSKEW_MASK, int_delay);
+	}
+
+	if (phydev->interface == PHY_INTERFACE_MODE_RGMII_ID ||
+	    phydev->interface == PHY_INTERFACE_MODE_RGMII_TXID) {
+		int_delay = phy_get_internal_delay(phydev, xway_internal_delay,
+						   delay_size, false);
+
+		/* if tx-internal-delay-ps is missing, use default of 2.0 ns */
+		if (int_delay < 0)
+			int_delay = 4; /* 2000 ps */
+
+		val |= FIELD_PREP(XWAY_MDIO_MIICTRL_TXSKEW_MASK, int_delay);
+	}
+
+	return phy_modify(phydev, XWAY_MDIO_MIICTRL,
+			  XWAY_MDIO_MIICTRL_RXSKEW_MASK |
+			  XWAY_MDIO_MIICTRL_TXSKEW_MASK, val);
+}
+
+static int xway_gphy_init_leds(struct phy_device *phydev)
 {
 	int err;
 	u32 ledxh;
 	u32 ledxl;
 
-	/* Mask all interrupts */
-	err = phy_write(phydev, XWAY_MDIO_IMASK, 0);
+	/* Ensure that integrated led function is enabled for all leds */
+	err = phy_write(phydev, XWAY_MDIO_LED,
+			XWAY_MDIO_LED_LED0_EN |
+			XWAY_MDIO_LED_LED1_EN |
+			XWAY_MDIO_LED_LED2_EN |
+			XWAY_MDIO_LED_LED3_EN);
 	if (err)
 		return err;
-
-	/* Clear all pending interrupts */
-	phy_read(phydev, XWAY_MDIO_ISTAT);
 
 	phy_write_mmd(phydev, MDIO_MMD_VEND2, XWAY_MMD_LEDCH,
 		      XWAY_MMD_LEDCH_NACS_NONE |
@@ -195,6 +284,48 @@ static int xway_gphy_config_init(struct phy_device *phydev)
 	return 0;
 }
 
+static int xway_gphy_config_init(struct phy_device *phydev)
+{
+	struct device_node *np;
+	int err;
+
+	/* Mask all interrupts */
+	err = phy_write(phydev, XWAY_MDIO_IMASK, 0);
+	if (err)
+		return err;
+
+	/* Use default LED configuration if 'leds' node isn't defined */
+	np = of_get_child_by_name(phydev->mdio.dev.of_node, "leds");
+	if (np)
+		of_node_put(np);
+	else
+		xway_gphy_init_leds(phydev);
+
+	/* Clear all pending interrupts */
+	phy_read(phydev, XWAY_MDIO_ISTAT);
+
+	err = xway_gphy_rgmii_init(phydev);
+	if (err)
+		return err;
+
+	/* Count MDI RX errors (SymbolErrorDuringCarrier) */
+	return phy_write(phydev, XWAY_MDIO_ERRCNT,
+			 FIELD_PREP(XWAY_MDIO_ERRCNT_SEL, XWAY_MDIO_ERRCNT_SEL_RXERR));
+}
+
+static int xway_gphy_probe(struct phy_device *phydev)
+{
+	struct device *dev = &phydev->mdio.dev;
+	struct xway_gphy_priv *priv;
+
+	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
+	phydev->priv = priv;
+
+	return 0;
+}
+
 static int xway_gphy14_config_aneg(struct phy_device *phydev)
 {
 	int reg, err;
@@ -218,22 +349,236 @@ static int xway_gphy_ack_interrupt(struct phy_device *phydev)
 	return (reg < 0) ? reg : 0;
 }
 
-static int xway_gphy_did_interrupt(struct phy_device *phydev)
-{
-	int reg;
-
-	reg = phy_read(phydev, XWAY_MDIO_ISTAT);
-	return reg & XWAY_MDIO_INIT_MASK;
-}
-
 static int xway_gphy_config_intr(struct phy_device *phydev)
 {
 	u16 mask = 0;
+	int err;
 
-	if (phydev->interrupts == PHY_INTERRUPT_ENABLED)
+	if (phydev->interrupts == PHY_INTERRUPT_ENABLED) {
+		err = xway_gphy_ack_interrupt(phydev);
+		if (err)
+			return err;
+
 		mask = XWAY_MDIO_INIT_MASK;
+		err = phy_write(phydev, XWAY_MDIO_IMASK, mask);
+	} else {
+		err = phy_write(phydev, XWAY_MDIO_IMASK, mask);
+		if (err)
+			return err;
 
-	return phy_write(phydev, XWAY_MDIO_IMASK, mask);
+		err = xway_gphy_ack_interrupt(phydev);
+	}
+
+	return err;
+}
+
+static irqreturn_t xway_gphy_handle_interrupt(struct phy_device *phydev)
+{
+	int irq_status;
+
+	irq_status = phy_read(phydev, XWAY_MDIO_ISTAT);
+	if (irq_status < 0) {
+		phy_error(phydev);
+		return IRQ_NONE;
+	}
+
+	if (!(irq_status & XWAY_MDIO_INIT_MASK))
+		return IRQ_NONE;
+
+	phy_trigger_machine(phydev);
+
+	return IRQ_HANDLED;
+}
+
+static int xway_gphy_led_brightness_set(struct phy_device *phydev,
+					u8 index, enum led_brightness value)
+{
+	int ret;
+
+	if (index >= XWAY_GPHY_MAX_LEDS)
+		return -EINVAL;
+
+	/* clear EN and set manual LED state */
+	ret = phy_modify(phydev, XWAY_MDIO_LED,
+			 ((value == LED_OFF) ? XWAY_GPHY_LED_EN(index) : 0) |
+			 XWAY_GPHY_LED_DA(index),
+			 (value == LED_OFF) ? 0 : XWAY_GPHY_LED_DA(index));
+	if (ret)
+		return ret;
+
+	/* clear HW LED setup */
+	if (value == LED_OFF) {
+		ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, XWAY_MMD_LEDxH(index), 0);
+		if (ret)
+			return ret;
+
+		return phy_write_mmd(phydev, MDIO_MMD_VEND2, XWAY_MMD_LEDxL(index), 0);
+	} else {
+		return 0;
+	}
+}
+
+static const unsigned long supported_triggers = (BIT(TRIGGER_NETDEV_LINK) |
+						 BIT(TRIGGER_NETDEV_LINK_10) |
+						 BIT(TRIGGER_NETDEV_LINK_100) |
+						 BIT(TRIGGER_NETDEV_LINK_1000) |
+						 BIT(TRIGGER_NETDEV_RX) |
+						 BIT(TRIGGER_NETDEV_TX));
+
+static int xway_gphy_led_hw_is_supported(struct phy_device *phydev, u8 index,
+					 unsigned long rules)
+{
+	if (index >= XWAY_GPHY_MAX_LEDS)
+		return -EINVAL;
+
+	/* activity triggers are not possible without combination with a link
+	 * trigger.
+	 */
+	if (rules & (BIT(TRIGGER_NETDEV_RX) | BIT(TRIGGER_NETDEV_TX)) &&
+	    !(rules & (BIT(TRIGGER_NETDEV_LINK) |
+		       BIT(TRIGGER_NETDEV_LINK_10) |
+		       BIT(TRIGGER_NETDEV_LINK_100) |
+		       BIT(TRIGGER_NETDEV_LINK_1000))))
+		return -EOPNOTSUPP;
+
+	/* All other combinations of the supported triggers are allowed */
+	if (rules & ~supported_triggers)
+		return -EOPNOTSUPP;
+
+	return 0;
+}
+
+static int xway_gphy_led_hw_control_get(struct phy_device *phydev, u8 index,
+					unsigned long *rules)
+{
+	int lval, hval;
+
+	if (index >= XWAY_GPHY_MAX_LEDS)
+		return -EINVAL;
+
+	hval = phy_read_mmd(phydev, MDIO_MMD_VEND2, XWAY_MMD_LEDxH(index));
+	if (hval < 0)
+		return hval;
+
+	lval = phy_read_mmd(phydev, MDIO_MMD_VEND2, XWAY_MMD_LEDxL(index));
+	if (lval < 0)
+		return lval;
+
+	if (hval & XWAY_MMD_LEDxH_CON_LINK10)
+		*rules |= BIT(TRIGGER_NETDEV_LINK_10);
+
+	if (hval & XWAY_MMD_LEDxH_CON_LINK100)
+		*rules |= BIT(TRIGGER_NETDEV_LINK_100);
+
+	if (hval & XWAY_MMD_LEDxH_CON_LINK1000)
+		*rules |= BIT(TRIGGER_NETDEV_LINK_1000);
+
+	if ((hval & XWAY_MMD_LEDxH_CON_LINK10) &&
+	    (hval & XWAY_MMD_LEDxH_CON_LINK100) &&
+	    (hval & XWAY_MMD_LEDxH_CON_LINK1000))
+		*rules |= BIT(TRIGGER_NETDEV_LINK);
+
+	if (lval & XWAY_MMD_LEDxL_PULSE_TXACT)
+		*rules |= BIT(TRIGGER_NETDEV_TX);
+
+	if (lval & XWAY_MMD_LEDxL_PULSE_RXACT)
+		*rules |= BIT(TRIGGER_NETDEV_RX);
+
+	return 0;
+}
+
+static int xway_gphy_led_hw_control_set(struct phy_device *phydev, u8 index,
+					unsigned long rules)
+{
+	u16 hval = 0, lval = 0;
+	int ret;
+
+	if (index >= XWAY_GPHY_MAX_LEDS)
+		return -EINVAL;
+
+	if (rules & BIT(TRIGGER_NETDEV_LINK) ||
+	    rules & BIT(TRIGGER_NETDEV_LINK_10))
+		hval |= XWAY_MMD_LEDxH_CON_LINK10;
+
+	if (rules & BIT(TRIGGER_NETDEV_LINK) ||
+	    rules & BIT(TRIGGER_NETDEV_LINK_100))
+		hval |= XWAY_MMD_LEDxH_CON_LINK100;
+
+	if (rules & BIT(TRIGGER_NETDEV_LINK) ||
+	    rules & BIT(TRIGGER_NETDEV_LINK_1000))
+		hval |= XWAY_MMD_LEDxH_CON_LINK1000;
+
+	if (rules & BIT(TRIGGER_NETDEV_TX))
+		lval |= XWAY_MMD_LEDxL_PULSE_TXACT;
+
+	if (rules & BIT(TRIGGER_NETDEV_RX))
+		lval |= XWAY_MMD_LEDxL_PULSE_RXACT;
+
+	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, XWAY_MMD_LEDxH(index), hval);
+	if (ret)
+		return ret;
+
+	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, XWAY_MMD_LEDxL(index), lval);
+	if (ret)
+		return ret;
+
+	return phy_set_bits(phydev, XWAY_MDIO_LED, XWAY_GPHY_LED_EN(index));
+}
+
+static int xway_gphy_led_polarity_set(struct phy_device *phydev, int index,
+				      unsigned long modes)
+{
+	bool force_active_low = false, force_active_high = false;
+	u32 mode;
+
+	if (index >= XWAY_GPHY_MAX_LEDS)
+		return -EINVAL;
+
+	for_each_set_bit(mode, &modes, __PHY_LED_MODES_NUM) {
+		switch (mode) {
+		case PHY_LED_ACTIVE_LOW:
+			force_active_low = true;
+			break;
+		case PHY_LED_ACTIVE_HIGH:
+			force_active_high = true;
+			break;
+		default:
+			return -EINVAL;
+		}
+	}
+
+	if (force_active_low)
+		return phy_set_bits(phydev, XWAY_MDIO_LED, XWAY_GPHY_LED_INV(index));
+
+	if (force_active_high)
+		return phy_clear_bits(phydev, XWAY_MDIO_LED, XWAY_GPHY_LED_INV(index));
+
+	return -EINVAL;
+}
+
+static int xway_gphy_update_stats(struct phy_device *phydev)
+{
+	struct xway_gphy_priv *priv = phydev->priv;
+	int ret;
+
+	/* XWAY_MDIO_ERRCNT: 8-bit read-clear counter, SEL set to RXERR */
+	ret = phy_read(phydev, XWAY_MDIO_ERRCNT);
+	if (ret < 0)
+		return ret;
+
+	priv->rx_errors += FIELD_GET(XWAY_MDIO_ERRCNT_COUNT, ret);
+
+	return 0;
+}
+
+static void xway_gphy_get_phy_stats(struct phy_device *phydev,
+				    struct ethtool_eth_phy_stats *eth_stats,
+				    struct ethtool_phy_stats *stats)
+{
+	struct xway_gphy_priv *priv = phydev->priv;
+
+	eth_stats->SymbolErrorDuringCarrier = priv->rx_errors;
+	stats->rx_errors = priv->rx_errors;
 }
 
 static struct phy_driver xway_gphy[] = {
@@ -241,131 +586,191 @@ static struct phy_driver xway_gphy[] = {
 		.phy_id		= PHY_ID_PHY11G_1_3,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY11G (PEF 7071/PEF 7072) v1.3",
-		.features	= PHY_GBIT_FEATURES,
-		.flags		= PHY_HAS_INTERRUPT,
+		/* PHY_GBIT_FEATURES */
 		.config_init	= xway_gphy_config_init,
+		.probe		= xway_gphy_probe,
 		.config_aneg	= xway_gphy14_config_aneg,
-		.ack_interrupt	= xway_gphy_ack_interrupt,
-		.did_interrupt	= xway_gphy_did_interrupt,
+		.handle_interrupt = xway_gphy_handle_interrupt,
 		.config_intr	= xway_gphy_config_intr,
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
+		.led_brightness_set = xway_gphy_led_brightness_set,
+		.led_hw_is_supported = xway_gphy_led_hw_is_supported,
+		.led_hw_control_get = xway_gphy_led_hw_control_get,
+		.led_hw_control_set = xway_gphy_led_hw_control_set,
+		.led_polarity_set = xway_gphy_led_polarity_set,
+		.update_stats	= xway_gphy_update_stats,
+		.get_phy_stats	= xway_gphy_get_phy_stats,
 	}, {
 		.phy_id		= PHY_ID_PHY22F_1_3,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY22F (PEF 7061) v1.3",
-		.features	= PHY_BASIC_FEATURES,
-		.flags		= PHY_HAS_INTERRUPT,
+		/* PHY_BASIC_FEATURES */
 		.config_init	= xway_gphy_config_init,
+		.probe		= xway_gphy_probe,
 		.config_aneg	= xway_gphy14_config_aneg,
-		.ack_interrupt	= xway_gphy_ack_interrupt,
-		.did_interrupt	= xway_gphy_did_interrupt,
+		.handle_interrupt = xway_gphy_handle_interrupt,
 		.config_intr	= xway_gphy_config_intr,
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
+		.led_brightness_set = xway_gphy_led_brightness_set,
+		.led_hw_is_supported = xway_gphy_led_hw_is_supported,
+		.led_hw_control_get = xway_gphy_led_hw_control_get,
+		.led_hw_control_set = xway_gphy_led_hw_control_set,
+		.led_polarity_set = xway_gphy_led_polarity_set,
+		.update_stats	= xway_gphy_update_stats,
+		.get_phy_stats	= xway_gphy_get_phy_stats,
 	}, {
 		.phy_id		= PHY_ID_PHY11G_1_4,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY11G (PEF 7071/PEF 7072) v1.4",
-		.features	= PHY_GBIT_FEATURES,
-		.flags		= PHY_HAS_INTERRUPT,
+		/* PHY_GBIT_FEATURES */
 		.config_init	= xway_gphy_config_init,
+		.probe		= xway_gphy_probe,
 		.config_aneg	= xway_gphy14_config_aneg,
-		.ack_interrupt	= xway_gphy_ack_interrupt,
-		.did_interrupt	= xway_gphy_did_interrupt,
+		.handle_interrupt = xway_gphy_handle_interrupt,
 		.config_intr	= xway_gphy_config_intr,
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
+		.led_brightness_set = xway_gphy_led_brightness_set,
+		.led_hw_is_supported = xway_gphy_led_hw_is_supported,
+		.led_hw_control_get = xway_gphy_led_hw_control_get,
+		.led_hw_control_set = xway_gphy_led_hw_control_set,
+		.led_polarity_set = xway_gphy_led_polarity_set,
+		.update_stats	= xway_gphy_update_stats,
+		.get_phy_stats	= xway_gphy_get_phy_stats,
 	}, {
 		.phy_id		= PHY_ID_PHY22F_1_4,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY22F (PEF 7061) v1.4",
-		.features	= PHY_BASIC_FEATURES,
-		.flags		= PHY_HAS_INTERRUPT,
+		/* PHY_BASIC_FEATURES */
 		.config_init	= xway_gphy_config_init,
+		.probe		= xway_gphy_probe,
 		.config_aneg	= xway_gphy14_config_aneg,
-		.ack_interrupt	= xway_gphy_ack_interrupt,
-		.did_interrupt	= xway_gphy_did_interrupt,
+		.handle_interrupt = xway_gphy_handle_interrupt,
 		.config_intr	= xway_gphy_config_intr,
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
+		.led_brightness_set = xway_gphy_led_brightness_set,
+		.led_hw_is_supported = xway_gphy_led_hw_is_supported,
+		.led_hw_control_get = xway_gphy_led_hw_control_get,
+		.led_hw_control_set = xway_gphy_led_hw_control_set,
+		.led_polarity_set = xway_gphy_led_polarity_set,
+		.update_stats	= xway_gphy_update_stats,
+		.get_phy_stats	= xway_gphy_get_phy_stats,
 	}, {
 		.phy_id		= PHY_ID_PHY11G_1_5,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY11G (PEF 7071/PEF 7072) v1.5 / v1.6",
-		.features	= PHY_GBIT_FEATURES,
-		.flags		= PHY_HAS_INTERRUPT,
+		/* PHY_GBIT_FEATURES */
 		.config_init	= xway_gphy_config_init,
-		.ack_interrupt	= xway_gphy_ack_interrupt,
-		.did_interrupt	= xway_gphy_did_interrupt,
+		.probe		= xway_gphy_probe,
+		.handle_interrupt = xway_gphy_handle_interrupt,
 		.config_intr	= xway_gphy_config_intr,
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
+		.led_brightness_set = xway_gphy_led_brightness_set,
+		.led_hw_is_supported = xway_gphy_led_hw_is_supported,
+		.led_hw_control_get = xway_gphy_led_hw_control_get,
+		.led_hw_control_set = xway_gphy_led_hw_control_set,
+		.led_polarity_set = xway_gphy_led_polarity_set,
+		.update_stats	= xway_gphy_update_stats,
+		.get_phy_stats	= xway_gphy_get_phy_stats,
 	}, {
 		.phy_id		= PHY_ID_PHY22F_1_5,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY22F (PEF 7061) v1.5 / v1.6",
-		.features	= PHY_BASIC_FEATURES,
-		.flags		= PHY_HAS_INTERRUPT,
+		/* PHY_BASIC_FEATURES */
 		.config_init	= xway_gphy_config_init,
-		.ack_interrupt	= xway_gphy_ack_interrupt,
-		.did_interrupt	= xway_gphy_did_interrupt,
+		.probe		= xway_gphy_probe,
+		.handle_interrupt = xway_gphy_handle_interrupt,
 		.config_intr	= xway_gphy_config_intr,
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
+		.led_brightness_set = xway_gphy_led_brightness_set,
+		.led_hw_is_supported = xway_gphy_led_hw_is_supported,
+		.led_hw_control_get = xway_gphy_led_hw_control_get,
+		.led_hw_control_set = xway_gphy_led_hw_control_set,
+		.led_polarity_set = xway_gphy_led_polarity_set,
+		.update_stats	= xway_gphy_update_stats,
+		.get_phy_stats	= xway_gphy_get_phy_stats,
 	}, {
 		.phy_id		= PHY_ID_PHY11G_VR9_1_1,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY11G (xRX v1.1 integrated)",
-		.features	= PHY_GBIT_FEATURES,
-		.flags		= PHY_HAS_INTERRUPT,
+		/* PHY_GBIT_FEATURES */
 		.config_init	= xway_gphy_config_init,
-		.ack_interrupt	= xway_gphy_ack_interrupt,
-		.did_interrupt	= xway_gphy_did_interrupt,
+		.probe		= xway_gphy_probe,
+		.handle_interrupt = xway_gphy_handle_interrupt,
 		.config_intr	= xway_gphy_config_intr,
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
+		.led_brightness_set = xway_gphy_led_brightness_set,
+		.led_hw_is_supported = xway_gphy_led_hw_is_supported,
+		.led_hw_control_get = xway_gphy_led_hw_control_get,
+		.led_hw_control_set = xway_gphy_led_hw_control_set,
+		.led_polarity_set = xway_gphy_led_polarity_set,
+		.update_stats	= xway_gphy_update_stats,
+		.get_phy_stats	= xway_gphy_get_phy_stats,
 	}, {
 		.phy_id		= PHY_ID_PHY22F_VR9_1_1,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY22F (xRX v1.1 integrated)",
-		.features	= PHY_BASIC_FEATURES,
-		.flags		= PHY_HAS_INTERRUPT,
+		/* PHY_BASIC_FEATURES */
 		.config_init	= xway_gphy_config_init,
-		.ack_interrupt	= xway_gphy_ack_interrupt,
-		.did_interrupt	= xway_gphy_did_interrupt,
+		.probe		= xway_gphy_probe,
+		.handle_interrupt = xway_gphy_handle_interrupt,
 		.config_intr	= xway_gphy_config_intr,
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
+		.led_brightness_set = xway_gphy_led_brightness_set,
+		.led_hw_is_supported = xway_gphy_led_hw_is_supported,
+		.led_hw_control_get = xway_gphy_led_hw_control_get,
+		.led_hw_control_set = xway_gphy_led_hw_control_set,
+		.led_polarity_set = xway_gphy_led_polarity_set,
+		.update_stats	= xway_gphy_update_stats,
+		.get_phy_stats	= xway_gphy_get_phy_stats,
 	}, {
 		.phy_id		= PHY_ID_PHY11G_VR9_1_2,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY11G (xRX v1.2 integrated)",
-		.features	= PHY_GBIT_FEATURES,
-		.flags		= PHY_HAS_INTERRUPT,
+		/* PHY_GBIT_FEATURES */
 		.config_init	= xway_gphy_config_init,
-		.ack_interrupt	= xway_gphy_ack_interrupt,
-		.did_interrupt	= xway_gphy_did_interrupt,
+		.probe		= xway_gphy_probe,
+		.handle_interrupt = xway_gphy_handle_interrupt,
 		.config_intr	= xway_gphy_config_intr,
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
+		.led_brightness_set = xway_gphy_led_brightness_set,
+		.led_hw_is_supported = xway_gphy_led_hw_is_supported,
+		.led_hw_control_get = xway_gphy_led_hw_control_get,
+		.led_hw_control_set = xway_gphy_led_hw_control_set,
+		.led_polarity_set = xway_gphy_led_polarity_set,
+		.update_stats	= xway_gphy_update_stats,
+		.get_phy_stats	= xway_gphy_get_phy_stats,
 	}, {
 		.phy_id		= PHY_ID_PHY22F_VR9_1_2,
 		.phy_id_mask	= 0xffffffff,
 		.name		= "Intel XWAY PHY22F (xRX v1.2 integrated)",
-		.features	= PHY_BASIC_FEATURES,
-		.flags		= PHY_HAS_INTERRUPT,
+		/* PHY_BASIC_FEATURES */
 		.config_init	= xway_gphy_config_init,
-		.ack_interrupt	= xway_gphy_ack_interrupt,
-		.did_interrupt	= xway_gphy_did_interrupt,
+		.probe		= xway_gphy_probe,
+		.handle_interrupt = xway_gphy_handle_interrupt,
 		.config_intr	= xway_gphy_config_intr,
 		.suspend	= genphy_suspend,
 		.resume		= genphy_resume,
+		.led_brightness_set = xway_gphy_led_brightness_set,
+		.led_hw_is_supported = xway_gphy_led_hw_is_supported,
+		.led_hw_control_get = xway_gphy_led_hw_control_get,
+		.led_hw_control_set = xway_gphy_led_hw_control_set,
+		.led_polarity_set = xway_gphy_led_polarity_set,
+		.update_stats	= xway_gphy_update_stats,
+		.get_phy_stats	= xway_gphy_get_phy_stats,
 	},
 };
 module_phy_driver(xway_gphy);
 
-static struct mdio_device_id __maybe_unused xway_gphy_tbl[] = {
+static const struct mdio_device_id __maybe_unused xway_gphy_tbl[] = {
 	{ PHY_ID_PHY11G_1_3, 0xffffffff },
 	{ PHY_ID_PHY22F_1_3, 0xffffffff },
 	{ PHY_ID_PHY11G_1_4, 0xffffffff },

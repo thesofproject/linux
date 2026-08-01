@@ -318,7 +318,7 @@ static int chip_cmd(struct CHIPSTATE *chip, char *name, audiocmd *cmd)
 
 static void chip_thread_wake(struct timer_list *t)
 {
-	struct CHIPSTATE *chip = from_timer(chip, t, wt);
+	struct CHIPSTATE *chip = timer_container_of(chip, t, wt);
 	wake_up_process(chip->thread);
 }
 
@@ -538,7 +538,7 @@ static int tda9840_checkit(struct CHIPSTATE *chip)
 #define TDA9855_INT	0    /* Selects inputs LOR and LOL.  (internal) */
 
 /* Unique to TDA9850:  */
-/* lower 4 bits contol SAP noise threshold, over which SAP turns off
+/* lower 4 bits control SAP noise threshold, over which SAP turns off
  * set to values of 0x00 through 0x0f for SAP1 through SAP16 */
 
 
@@ -546,7 +546,7 @@ static int tda9840_checkit(struct CHIPSTATE *chip)
 /* Common to TDA9855 and TDA9850: */
 #define TDA985x_SAP	3<<6 /* Selects SAP output, mute if not received */
 #define TDA985x_MONOSAP	2<<6 /* Selects Mono on left, SAP on right */
-#define TDA985x_STEREO	1<<6 /* Selects Stereo ouput, mono if not received */
+#define TDA985x_STEREO	1<<6 /* Selects Stereo output, mono if not received */
 #define TDA985x_MONO	0    /* Forces Mono output */
 #define TDA985x_LMU	1<<3 /* Mute (LOR/LOL for 9855, OUTL/OUTR for 9850) */
 
@@ -1787,7 +1787,7 @@ static int tvaudio_s_radio(struct v4l2_subdev *sd)
 	struct CHIPSTATE *chip = to_state(sd);
 
 	chip->radio = 1;
-	/* del_timer(&chip->wt); */
+	/* timer_delete(&chip->wt); */
 	return 0;
 }
 
@@ -1934,8 +1934,9 @@ static const struct v4l2_subdev_ops tvaudio_ops = {
 
 /* i2c registration                                                       */
 
-static int tvaudio_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int tvaudio_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct CHIPSTATE *chip;
 	struct CHIPDESC  *desc;
 	struct v4l2_subdev *sd;
@@ -1981,7 +1982,7 @@ static int tvaudio_probe(struct i2c_client *client, const struct i2c_device_id *
 
 	/* fill required data structures */
 	if (!id)
-		strlcpy(client->name, desc->name, I2C_NAME_SIZE);
+		strscpy(client->name, desc->name, I2C_NAME_SIZE);
 	chip->desc = desc;
 	chip->shadow.count = desc->registers+1;
 	chip->prevmode = -1;
@@ -2065,12 +2066,12 @@ static int tvaudio_probe(struct i2c_client *client, const struct i2c_device_id *
 	return 0;
 }
 
-static int tvaudio_remove(struct i2c_client *client)
+static void tvaudio_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct CHIPSTATE *chip = to_state(sd);
 
-	del_timer_sync(&chip->wt);
+	timer_delete_sync(&chip->wt);
 	if (chip->thread) {
 		/* shutdown async thread */
 		kthread_stop(chip->thread);
@@ -2079,14 +2080,13 @@ static int tvaudio_remove(struct i2c_client *client)
 
 	v4l2_device_unregister_subdev(sd);
 	v4l2_ctrl_handler_free(&chip->hdl);
-	return 0;
 }
 
 /* This driver supports many devices and the idea is to let the driver
    detect which device is present. So rather than listing all supported
    devices here, we pretend to support a single, fake device type. */
 static const struct i2c_device_id tvaudio_id[] = {
-	{ "tvaudio", 0 },
+	{ .name = "tvaudio" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, tvaudio_id);

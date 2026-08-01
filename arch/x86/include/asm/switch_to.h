@@ -11,32 +11,10 @@ struct task_struct *__switch_to_asm(struct task_struct *prev,
 
 __visible struct task_struct *__switch_to(struct task_struct *prev,
 					  struct task_struct *next);
-struct tss_struct;
-void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
-		      struct tss_struct *tss);
 
-/* This runs runs on the previous thread's stack. */
-static inline void prepare_switch_to(struct task_struct *next)
-{
-#ifdef CONFIG_VMAP_STACK
-	/*
-	 * If we switch to a stack that has a top-level paging entry
-	 * that is not present in the current mm, the resulting #PF will
-	 * will be promoted to a double-fault and we'll panic.  Probe
-	 * the new stack now so that vmalloc_fault can fix up the page
-	 * tables if needed.  This can only happen if we use a stack
-	 * in vmap space.
-	 *
-	 * We assume that the stack is aligned so that it never spans
-	 * more than one top-level paging entry.
-	 *
-	 * To minimize cache pollution, just follow the stack pointer.
-	 */
-	READ_ONCE(*(unsigned char *)next->thread.sp);
-#endif
-}
-
-asmlinkage void ret_from_fork(void);
+asmlinkage void ret_from_fork_asm(void);
+__visible void ret_from_fork(struct task_struct *prev, struct pt_regs *regs,
+			     int (*fn)(void *), void *fn_arg);
 
 /*
  * This is the structure pointed to by thread.sp for an inactive task.  The
@@ -49,6 +27,7 @@ struct inactive_task_frame {
 	unsigned long r13;
 	unsigned long r12;
 #else
+	unsigned long flags;
 	unsigned long si;
 	unsigned long di;
 #endif
@@ -69,12 +48,12 @@ struct fork_frame {
 
 #define switch_to(prev, next, last)					\
 do {									\
-	prepare_switch_to(next);					\
-									\
 	((last) = __switch_to_asm((prev), (next)));			\
 } while (0)
 
 #ifdef CONFIG_X86_32
+#include <asm/msr.h>
+
 static inline void refresh_sysenter_cs(struct thread_struct *thread)
 {
 	/* Only happens when SEP is enabled, no need to test "SEP"arately: */
@@ -82,19 +61,31 @@ static inline void refresh_sysenter_cs(struct thread_struct *thread)
 		return;
 
 	this_cpu_write(cpu_tss_rw.x86_tss.ss1, thread->sysenter_cs);
-	wrmsr(MSR_IA32_SYSENTER_CS, thread->sysenter_cs, 0);
+	wrmsrq(MSR_IA32_SYSENTER_CS, thread->sysenter_cs);
 }
 #endif
 
 /* This is used when switching tasks or entering/exiting vm86 mode. */
-static inline void update_sp0(struct task_struct *task)
+static inline void update_task_stack(struct task_struct *task)
 {
-	/* On x86_64, sp0 always points to the entry trampoline stack, which is constant: */
+	/* sp0 always points to the entry trampoline stack, which is constant: */
 #ifdef CONFIG_X86_32
-	load_sp0(task->thread.sp0);
+	this_cpu_write(cpu_tss_rw.x86_tss.sp1, task->thread.sp0);
 #else
-	if (static_cpu_has(X86_FEATURE_XENPV))
+	if (!cpu_feature_enabled(X86_FEATURE_FRED) && cpu_feature_enabled(X86_FEATURE_XENPV))
+		/* Xen PV enters the kernel on the thread stack. */
 		load_sp0(task_top_of_stack(task));
+#endif
+}
+
+static inline void kthread_frame_init(struct inactive_task_frame *frame,
+				      int (*fun)(void *), void *arg)
+{
+	frame->bx = (unsigned long)fun;
+#ifdef CONFIG_X86_32
+	frame->di = (unsigned long)arg;
+#else
+	frame->r12 = (unsigned long)arg;
 #endif
 }
 

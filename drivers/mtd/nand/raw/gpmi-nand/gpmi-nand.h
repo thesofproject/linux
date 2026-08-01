@@ -1,18 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * Freescale GPMI NAND Flash Driver
  *
  * Copyright (C) 2010-2011 Freescale Semiconductor, Inc.
  * Copyright (C) 2008 Embedded Alley Solutions, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 #ifndef __DRIVERS_MTD_NAND_GPMI_NAND_H
 #define __DRIVERS_MTD_NAND_GPMI_NAND_H
@@ -39,9 +30,9 @@ struct resources {
  * @page_size:                The size, in bytes, of a physical page, including
  *                            both data and OOB.
  * @metadata_size:            The size, in bytes, of the metadata.
- * @ecc_chunk_size:           The size, in bytes, of a single ECC chunk. Note
- *                            the first chunk in the page includes both data and
- *                            metadata, so it's a bit larger than this value.
+ * @ecc0_chunk_size:          The size, in bytes, of a first ECC chunk.
+ * @eccn_chunk_size:          The size, in bytes, of a single ECC chunk after
+ *                            the first chunk in the page.
  * @ecc_chunk_count:          The number of ECC chunks in the page,
  * @payload_size:             The size, in bytes, of the payload buffer.
  * @auxiliary_size:           The size, in bytes, of the auxiliary buffer.
@@ -51,19 +42,23 @@ struct resources {
  *                            which the underlying physical block mark appears.
  * @block_mark_bit_offset:    The bit offset into the ECC-based page view at
  *                            which the underlying physical block mark appears.
+ * @ecc_for_meta:             The flag to indicate if there is a dedicate ecc
+ *                            for meta.
  */
 struct bch_geometry {
 	unsigned int  gf_len;
 	unsigned int  ecc_strength;
 	unsigned int  page_size;
 	unsigned int  metadata_size;
-	unsigned int  ecc_chunk_size;
+	unsigned int  ecc0_chunk_size;
+	unsigned int  eccn_chunk_size;
 	unsigned int  ecc_chunk_count;
 	unsigned int  payload_size;
 	unsigned int  auxiliary_size;
 	unsigned int  auxiliary_status_offset;
 	unsigned int  block_mark_byte_offset;
 	unsigned int  block_mark_bit_offset;
+	unsigned int  ecc_for_meta; /* ECC for meta data */
 };
 
 /**
@@ -77,29 +72,22 @@ struct boot_rom_geometry {
 	unsigned int  search_area_stride_exponent;
 };
 
-/* DMA operations types */
-enum dma_ops_type {
-	DMA_FOR_COMMAND = 1,
-	DMA_FOR_READ_DATA,
-	DMA_FOR_WRITE_DATA,
-	DMA_FOR_READ_ECC_PAGE,
-	DMA_FOR_WRITE_ECC_PAGE
-};
-
 enum gpmi_type {
 	IS_MX23,
 	IS_MX28,
 	IS_MX6Q,
 	IS_MX6SX,
 	IS_MX7D,
+	IS_MX8QXP,
 };
 
 struct gpmi_devdata {
 	enum gpmi_type type;
 	int bch_max_ecc_strength;
-	int max_chain_delay; /* See the async EDO mode */
+	int max_chain_delay; /* See the SDR EDO mode */
 	const char * const *clks;
 	const int clks_count;
+	bool support_edo_timing;
 };
 
 /**
@@ -119,6 +107,14 @@ struct gpmi_nfc_hardware_timing {
 	u32 timing0;
 	u32 timing1;
 	u32 ctrl1n;
+};
+
+#define GPMI_MAX_TRANSFERS	8
+
+struct gpmi_transfer {
+	u8 cmdbuf[8];
+	struct scatterlist sgl;
+	enum dma_data_direction direction;
 };
 
 struct gpmi_nand_data {
@@ -144,31 +140,17 @@ struct gpmi_nand_data {
 	struct boot_rom_geometry rom_geometry;
 
 	/* MTD / NAND */
+	struct nand_controller	base;
 	struct nand_chip	nand;
 
-	/* General-use Variables */
-	int			current_chip;
-	unsigned int		command_length;
+	struct gpmi_transfer	transfers[GPMI_MAX_TRANSFERS];
+	int			ntransfers;
 
-	/* passed from upper layer */
-	uint8_t			*upper_buf;
-	int			upper_len;
+	bool			bch;
+	uint32_t		bch_flashlayout0;
+	uint32_t		bch_flashlayout1;
 
-	/* for DMA operations */
-	bool			direct_dma_map_ok;
-
-	struct scatterlist	cmd_sgl;
-	char			*cmd_buffer;
-
-	struct scatterlist	data_sgl;
 	char			*data_buffer_dma;
-
-	void			*page_buffer_virt;
-	dma_addr_t		page_buffer_phys;
-	unsigned int		page_buffer_size;
-
-	void			*payload_virt;
-	dma_addr_t		payload_phys;
 
 	void			*auxiliary_virt;
 	dma_addr_t		auxiliary_phys;
@@ -178,46 +160,8 @@ struct gpmi_nand_data {
 	/* DMA channels */
 #define DMA_CHANS		8
 	struct dma_chan		*dma_chans[DMA_CHANS];
-	enum dma_ops_type	last_dma_type;
-	enum dma_ops_type	dma_type;
 	struct completion	dma_done;
-
-	/* private */
-	void			*private;
 };
-
-/* Common Services */
-int common_nfc_set_geometry(struct gpmi_nand_data *);
-struct dma_chan *get_dma_chan(struct gpmi_nand_data *);
-void prepare_data_dma(struct gpmi_nand_data *,
-		      enum dma_data_direction dr);
-int start_dma_without_bch_irq(struct gpmi_nand_data *,
-			      struct dma_async_tx_descriptor *);
-int start_dma_with_bch_irq(struct gpmi_nand_data *,
-			   struct dma_async_tx_descriptor *);
-
-/* GPMI-NAND helper function library */
-int gpmi_init(struct gpmi_nand_data *);
-void gpmi_clear_bch(struct gpmi_nand_data *);
-void gpmi_dump_info(struct gpmi_nand_data *);
-int bch_set_geometry(struct gpmi_nand_data *);
-int gpmi_is_ready(struct gpmi_nand_data *, unsigned chip);
-int gpmi_send_command(struct gpmi_nand_data *);
-int gpmi_enable_clk(struct gpmi_nand_data *this);
-int gpmi_disable_clk(struct gpmi_nand_data *this);
-int gpmi_setup_data_interface(struct mtd_info *mtd, int chipnr,
-			      const struct nand_data_interface *conf);
-void gpmi_nfc_apply_timings(struct gpmi_nand_data *this);
-int gpmi_read_data(struct gpmi_nand_data *);
-int gpmi_send_data(struct gpmi_nand_data *);
-int gpmi_send_page(struct gpmi_nand_data *,
-		   dma_addr_t payload, dma_addr_t auxiliary);
-int gpmi_read_page(struct gpmi_nand_data *,
-		   dma_addr_t payload, dma_addr_t auxiliary);
-
-void gpmi_copy_bits(u8 *dst, size_t dst_bit_off,
-		    const u8 *src, size_t src_bit_off,
-		    size_t nbits);
 
 /* BCH : Status Block Completion Codes */
 #define STATUS_GOOD		0x00
@@ -230,7 +174,10 @@ void gpmi_copy_bits(u8 *dst, size_t dst_bit_off,
 #define GPMI_IS_MX6Q(x)		((x)->devdata->type == IS_MX6Q)
 #define GPMI_IS_MX6SX(x)	((x)->devdata->type == IS_MX6SX)
 #define GPMI_IS_MX7D(x)		((x)->devdata->type == IS_MX7D)
+#define GPMI_IS_MX8QXP(x)	((x)->devdata->type == IS_MX8QXP)
 
 #define GPMI_IS_MX6(x)		(GPMI_IS_MX6Q(x) || GPMI_IS_MX6SX(x) || \
-				 GPMI_IS_MX7D(x))
+				 GPMI_IS_MX7D(x) || GPMI_IS_MX8QXP(x))
+
+#define GPMI_IS_MXS(x)		(GPMI_IS_MX23(x) || GPMI_IS_MX28(x))
 #endif

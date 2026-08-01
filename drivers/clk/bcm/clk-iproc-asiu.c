@@ -1,15 +1,5 @@
-/*
- * Copyright (C) 2014 Broadcom Corporation
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation version 2.
- *
- * This program is distributed "as is" WITHOUT ANY WARRANTY of any
- * kind, whether express or implied; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2014 Broadcom Corporation
 
 #include <linux/kernel.h>
 #include <linux/err.h>
@@ -37,8 +27,7 @@ struct iproc_asiu {
 	void __iomem *div_base;
 	void __iomem *gate_base;
 
-	struct clk_hw_onecell_data *clk_data;
-	struct iproc_asiu_clk *clks;
+	struct iproc_asiu_clk clks[];
 };
 
 #define to_asiu_clk(hw) container_of(hw, struct iproc_asiu_clk, hw)
@@ -108,22 +97,27 @@ static unsigned long iproc_asiu_clk_recalc_rate(struct clk_hw *hw,
 	return clk->rate;
 }
 
-static long iproc_asiu_clk_round_rate(struct clk_hw *hw, unsigned long rate,
-				      unsigned long *parent_rate)
+static int iproc_asiu_clk_determine_rate(struct clk_hw *hw,
+					 struct clk_rate_request *req)
 {
 	unsigned int div;
 
-	if (rate == 0 || *parent_rate == 0)
+	if (req->rate == 0 || req->best_parent_rate == 0)
 		return -EINVAL;
 
-	if (rate == *parent_rate)
-		return *parent_rate;
+	if (req->rate == req->best_parent_rate)
+		return 0;
 
-	div = DIV_ROUND_UP(*parent_rate, rate);
-	if (div < 2)
-		return *parent_rate;
+	div = DIV_ROUND_CLOSEST(req->best_parent_rate, req->rate);
+	if (div < 2) {
+		req->rate = req->best_parent_rate;
 
-	return *parent_rate / div;
+		return 0;
+	}
+
+	req->rate = req->best_parent_rate / div;
+
+	return 0;
 }
 
 static int iproc_asiu_clk_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -145,7 +139,7 @@ static int iproc_asiu_clk_set_rate(struct clk_hw *hw, unsigned long rate,
 		return 0;
 	}
 
-	div = DIV_ROUND_UP(parent_rate, rate);
+	div = DIV_ROUND_CLOSEST(parent_rate, rate);
 	if (div < 2)
 		return -EINVAL;
 
@@ -178,7 +172,7 @@ static const struct clk_ops iproc_asiu_ops = {
 	.enable = iproc_asiu_clk_enable,
 	.disable = iproc_asiu_clk_disable,
 	.recalc_rate = iproc_asiu_clk_recalc_rate,
-	.round_rate = iproc_asiu_clk_round_rate,
+	.determine_rate = iproc_asiu_clk_determine_rate,
 	.set_rate = iproc_asiu_clk_set_rate,
 };
 
@@ -189,23 +183,19 @@ void __init iproc_asiu_setup(struct device_node *node,
 {
 	int i, ret;
 	struct iproc_asiu *asiu;
+	struct clk_hw_onecell_data *clk_data;
 
 	if (WARN_ON(!gate || !div))
 		return;
 
-	asiu = kzalloc(sizeof(*asiu), GFP_KERNEL);
+	asiu = kzalloc_flex(*asiu, clks, num_clks);
 	if (WARN_ON(!asiu))
 		return;
 
-	asiu->clk_data = kzalloc(sizeof(*asiu->clk_data->hws) * num_clks +
-				 sizeof(*asiu->clk_data), GFP_KERNEL);
-	if (WARN_ON(!asiu->clk_data))
+	clk_data = kzalloc_flex(*clk_data, hws, num_clks);
+	if (WARN_ON(!clk_data))
 		goto err_clks;
-	asiu->clk_data->num = num_clks;
-
-	asiu->clks = kcalloc(num_clks, sizeof(*asiu->clks), GFP_KERNEL);
-	if (WARN_ON(!asiu->clks))
-		goto err_asiu_clks;
+	clk_data->num = num_clks;
 
 	asiu->div_base = of_iomap(node, 0);
 	if (WARN_ON(!asiu->div_base))
@@ -242,11 +232,11 @@ void __init iproc_asiu_setup(struct device_node *node,
 		ret = clk_hw_register(NULL, &asiu_clk->hw);
 		if (WARN_ON(ret))
 			goto err_clk_register;
-		asiu->clk_data->hws[i] = &asiu_clk->hw;
+		clk_data->hws[i] = &asiu_clk->hw;
 	}
 
 	ret = of_clk_add_hw_provider(node, of_clk_hw_onecell_get,
-				     asiu->clk_data);
+				     clk_data);
 	if (WARN_ON(ret))
 		goto err_clk_register;
 
@@ -254,17 +244,14 @@ void __init iproc_asiu_setup(struct device_node *node,
 
 err_clk_register:
 	while (--i >= 0)
-		clk_hw_unregister(asiu->clk_data->hws[i]);
+		clk_hw_unregister(clk_data->hws[i]);
 	iounmap(asiu->gate_base);
 
 err_iomap_gate:
 	iounmap(asiu->div_base);
 
 err_iomap_div:
-	kfree(asiu->clks);
-
-err_asiu_clks:
-	kfree(asiu->clk_data);
+	kfree(clk_data);
 
 err_clks:
 	kfree(asiu);

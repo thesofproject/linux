@@ -180,10 +180,10 @@ by a chip select decoder.
     {
         struct nand_chip *this = mtd_to_nand(mtd);
         switch(cmd){
-            case NAND_CTL_SETCLE: this->IO_ADDR_W |= CLE_ADRR_BIT;  break;
-            case NAND_CTL_CLRCLE: this->IO_ADDR_W &= ~CLE_ADRR_BIT; break;
-            case NAND_CTL_SETALE: this->IO_ADDR_W |= ALE_ADRR_BIT;  break;
-            case NAND_CTL_CLRALE: this->IO_ADDR_W &= ~ALE_ADRR_BIT; break;
+            case NAND_CTL_SETCLE: this->legacy.IO_ADDR_W |= CLE_ADRR_BIT;  break;
+            case NAND_CTL_CLRCLE: this->legacy.IO_ADDR_W &= ~CLE_ADRR_BIT; break;
+            case NAND_CTL_SETALE: this->legacy.IO_ADDR_W |= ALE_ADRR_BIT;  break;
+            case NAND_CTL_CLRALE: this->legacy.IO_ADDR_W &= ~ALE_ADRR_BIT; break;
         }
     }
 
@@ -197,7 +197,7 @@ to read back the state of the pin. The function has no arguments and
 should return 0, if the device is busy (R/B pin is low) and 1, if the
 device is ready (R/B pin is high). If the hardware interface does not
 give access to the ready busy pin, then the function must not be defined
-and the function pointer this->dev_ready is set to NULL.
+and the function pointer this->legacy.dev_ready is set to NULL.
 
 Init function
 -------------
@@ -235,18 +235,18 @@ necessary information about the device.
         }
 
         /* Set address of NAND IO lines */
-        this->IO_ADDR_R = baseaddr;
-        this->IO_ADDR_W = baseaddr;
+        this->legacy.IO_ADDR_R = baseaddr;
+        this->legacy.IO_ADDR_W = baseaddr;
         /* Reference hardware control function */
         this->hwcontrol = board_hwcontrol;
         /* Set command delay time, see datasheet for correct value */
-        this->chip_delay = CHIP_DEPENDEND_COMMAND_DELAY;
+        this->legacy.chip_delay = CHIP_DEPENDEND_COMMAND_DELAY;
         /* Assign the device ready function, if available */
-        this->dev_ready = board_dev_ready;
+        this->legacy.dev_ready = board_dev_ready;
         this->eccmode = NAND_ECC_SOFT;
 
         /* Scan to find existence of the device */
-        if (nand_scan (board_mtd, 1)) {
+        if (nand_scan (this, 1)) {
             err = -ENXIO;
             goto out_ior;
         }
@@ -276,8 +276,10 @@ unregisters the partitions in the MTD layer.
     #ifdef MODULE
     static void __exit board_cleanup (void)
     {
-        /* Release resources, unregister device */
-        nand_release (board_mtd);
+        /* Unregister device */
+        WARN_ON(mtd_device_unregister(board_mtd));
+        /* Release resources */
+        nand_cleanup(mtd_to_nand(board_mtd));
 
         /* unmap physical address */
         iounmap(baseaddr);
@@ -336,17 +338,17 @@ connected to an address decoder.
         struct nand_chip *this = mtd_to_nand(mtd);
 
         /* Deselect all chips */
-        this->IO_ADDR_R &= ~BOARD_NAND_ADDR_MASK;
-        this->IO_ADDR_W &= ~BOARD_NAND_ADDR_MASK;
+        this->legacy.IO_ADDR_R &= ~BOARD_NAND_ADDR_MASK;
+        this->legacy.IO_ADDR_W &= ~BOARD_NAND_ADDR_MASK;
         switch (chip) {
         case 0:
-            this->IO_ADDR_R |= BOARD_NAND_ADDR_CHIP0;
-            this->IO_ADDR_W |= BOARD_NAND_ADDR_CHIP0;
+            this->legacy.IO_ADDR_R |= BOARD_NAND_ADDR_CHIP0;
+            this->legacy.IO_ADDR_W |= BOARD_NAND_ADDR_CHIP0;
             break;
         ....
         case n:
-            this->IO_ADDR_R |= BOARD_NAND_ADDR_CHIPn;
-            this->IO_ADDR_W |= BOARD_NAND_ADDR_CHIPn;
+            this->legacy.IO_ADDR_R |= BOARD_NAND_ADDR_CHIPn;
+            this->legacy.IO_ADDR_W |= BOARD_NAND_ADDR_CHIPn;
             break;
         }
     }
@@ -374,7 +376,7 @@ The nand driver supports three different types of hardware ECC.
 
 -  NAND_ECC_HW8_512
 
-   Hardware ECC generator providing 6 bytes ECC per 512 byte.
+   Hardware ECC generator providing 8 bytes ECC per 512 byte.
 
 If your hardware generator has a different functionality add it at the
 appropriate place in nand_base.c
@@ -889,7 +891,7 @@ Use these constants to select the ECC algorithm::
     #define NAND_ECC_HW3_512    3
     /* Hardware ECC 6 byte ECC per 512 Byte data */
     #define NAND_ECC_HW6_512    4
-    /* Hardware ECC 6 byte ECC per 512 Byte data */
+    /* Hardware ECC 8 byte ECC per 512 Byte data */
     #define NAND_ECC_HW8_512    6
 
 
@@ -970,9 +972,6 @@ hints" for an explanation.
 .. kernel-doc:: drivers/mtd/nand/raw/nand_base.c
    :export:
 
-.. kernel-doc:: drivers/mtd/nand/raw/nand_ecc.c
-   :export:
-
 Internal Functions Provided
 ===========================
 
@@ -997,11 +996,11 @@ The following people have contributed to the NAND driver:
 
 2. David Woodhouse\ dwmw2@infradead.org
 
-3. Thomas Gleixner\ tglx@linutronix.de
+3. Thomas Gleixner\ tglx@kernel.org
 
 A lot of users have provided bugfixes, improvements and helping hands
 for testing. Thanks a lot.
 
 The following people have contributed to this document:
 
-1. Thomas Gleixner\ tglx@linutronix.de
+1. Thomas Gleixner\ tglx@kernel.org

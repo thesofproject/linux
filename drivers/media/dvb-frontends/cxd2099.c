@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * cxd2099.c: Driver for the CXD2099AR Common Interface Controller
+ * cxd2099.c: Driver for the Sony CXD2099AR Common Interface Controller
  *
  * Copyright (C) 2010-2013 Digital Devices GmbH
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 only, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/slab.h>
@@ -593,7 +585,7 @@ static int write_data(struct dvb_ca_en50221 *ca, int slot, u8 *ebuf, int ecount)
 	return ecount;
 }
 
-static struct dvb_ca_en50221 en_templ = {
+static const struct dvb_ca_en50221 en_templ = {
 	.read_attribute_mem  = read_attribute_mem,
 	.write_attribute_mem = write_attribute_mem,
 	.read_cam_control    = read_cam_control,
@@ -606,8 +598,7 @@ static struct dvb_ca_en50221 en_templ = {
 	.write_data          = write_data,
 };
 
-static int cxd2099_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int cxd2099_probe(struct i2c_client *client)
 {
 	struct cxd *ci;
 	struct cxd2099_cfg *cfg = client->dev.platform_data;
@@ -618,7 +609,7 @@ static int cxd2099_probe(struct i2c_client *client,
 	unsigned int val;
 	int ret;
 
-	ci = kzalloc(sizeof(*ci), GFP_KERNEL);
+	ci = kzalloc_obj(*ci);
 	if (!ci) {
 		ret = -ENOMEM;
 		goto err;
@@ -672,19 +663,17 @@ err:
 	return ret;
 }
 
-static int cxd2099_remove(struct i2c_client *client)
+static void cxd2099_remove(struct i2c_client *client)
 {
 	struct cxd *ci = i2c_get_clientdata(client);
 
 	regmap_exit(ci->regmap);
 	kfree(ci);
-
-	return 0;
 }
 
 static const struct i2c_device_id cxd2099_id[] = {
-	{"cxd2099", 0},
-	{}
+	{ .name = "cxd2099" },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, cxd2099_id);
 
@@ -699,6 +688,6 @@ static struct i2c_driver cxd2099_driver = {
 
 module_i2c_driver(cxd2099_driver);
 
-MODULE_DESCRIPTION("CXD2099AR Common Interface controller driver");
+MODULE_DESCRIPTION("Sony CXD2099AR Common Interface controller driver");
 MODULE_AUTHOR("Ralph Metzler");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");

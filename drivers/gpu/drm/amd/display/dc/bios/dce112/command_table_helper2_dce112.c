@@ -29,40 +29,9 @@
 
 #include "include/bios_parser_types.h"
 
+#include "../command_table_helper.h"
+
 #include "../command_table_helper2.h"
-
-static uint8_t phy_id_to_atom(enum transmitter t)
-{
-	uint8_t atom_phy_id;
-
-	switch (t) {
-	case TRANSMITTER_UNIPHY_A:
-		atom_phy_id = ATOM_PHY_ID_UNIPHYA;
-		break;
-	case TRANSMITTER_UNIPHY_B:
-		atom_phy_id = ATOM_PHY_ID_UNIPHYB;
-		break;
-	case TRANSMITTER_UNIPHY_C:
-		atom_phy_id = ATOM_PHY_ID_UNIPHYC;
-		break;
-	case TRANSMITTER_UNIPHY_D:
-		atom_phy_id = ATOM_PHY_ID_UNIPHYD;
-		break;
-	case TRANSMITTER_UNIPHY_E:
-		atom_phy_id = ATOM_PHY_ID_UNIPHYE;
-		break;
-	case TRANSMITTER_UNIPHY_F:
-		atom_phy_id = ATOM_PHY_ID_UNIPHYF;
-		break;
-	case TRANSMITTER_UNIPHY_G:
-		atom_phy_id = ATOM_PHY_ID_UNIPHYG;
-		break;
-	default:
-		atom_phy_id = ATOM_PHY_ID_UNIPHYA;
-		break;
-	}
-	return atom_phy_id;
-}
 
 static uint8_t signal_type_to_atom_dig_mode(enum signal_type s)
 {
@@ -80,6 +49,9 @@ static uint8_t signal_type_to_atom_dig_mode(enum signal_type s)
 	case SIGNAL_TYPE_HDMI_TYPE_A:
 		atom_dig_mode = ATOM_TRANSMITTER_DIGMODE_V6_HDMI;
 		break;
+	case SIGNAL_TYPE_HDMI_FRL:
+		atom_dig_mode = 4;
+		break;
 	case SIGNAL_TYPE_DISPLAY_PORT_MST:
 		atom_dig_mode = ATOM_TRANSMITTER_DIGMODE_V6_DP_MST;
 		break;
@@ -89,32 +61,6 @@ static uint8_t signal_type_to_atom_dig_mode(enum signal_type s)
 	}
 
 	return atom_dig_mode;
-}
-
-static uint8_t clock_source_id_to_atom_phy_clk_src_id(
-		enum clock_source_id id)
-{
-	uint8_t atom_phy_clk_src_id = 0;
-
-	switch (id) {
-	case CLOCK_SOURCE_ID_PLL0:
-		atom_phy_clk_src_id = ATOM_TRANSMITTER_CONFIG_V5_P0PLL;
-		break;
-	case CLOCK_SOURCE_ID_PLL1:
-		atom_phy_clk_src_id = ATOM_TRANSMITTER_CONFIG_V5_P1PLL;
-		break;
-	case CLOCK_SOURCE_ID_PLL2:
-		atom_phy_clk_src_id = ATOM_TRANSMITTER_CONFIG_V5_P2PLL;
-		break;
-	case CLOCK_SOURCE_ID_EXTERNAL:
-		atom_phy_clk_src_id = ATOM_TRANSMITTER_CONFIG_V5_REFCLK_SRC_EXT;
-		break;
-	default:
-		atom_phy_clk_src_id = ATOM_TRANSMITTER_CONFIG_V5_P1PLL;
-		break;
-	}
-
-	return atom_phy_clk_src_id >> 2;
 }
 
 static uint8_t hpd_sel_to_atom(enum hpd_source_id id)
@@ -150,38 +96,11 @@ static uint8_t hpd_sel_to_atom(enum hpd_source_id id)
 
 static uint8_t dig_encoder_sel_to_atom(enum engine_id id)
 {
-	uint8_t atom_dig_encoder_sel = 0;
-
-	switch (id) {
-	case ENGINE_ID_DIGA:
-		atom_dig_encoder_sel = ATOM_TRANMSITTER_V6__DIGA_SEL;
-		break;
-	case ENGINE_ID_DIGB:
-		atom_dig_encoder_sel = ATOM_TRANMSITTER_V6__DIGB_SEL;
-		break;
-	case ENGINE_ID_DIGC:
-		atom_dig_encoder_sel = ATOM_TRANMSITTER_V6__DIGC_SEL;
-		break;
-	case ENGINE_ID_DIGD:
-		atom_dig_encoder_sel = ATOM_TRANMSITTER_V6__DIGD_SEL;
-		break;
-	case ENGINE_ID_DIGE:
-		atom_dig_encoder_sel = ATOM_TRANMSITTER_V6__DIGE_SEL;
-		break;
-	case ENGINE_ID_DIGF:
-		atom_dig_encoder_sel = ATOM_TRANMSITTER_V6__DIGF_SEL;
-		break;
-	case ENGINE_ID_DIGG:
-		atom_dig_encoder_sel = ATOM_TRANMSITTER_V6__DIGG_SEL;
-		break;
-	case ENGINE_ID_UNKNOWN:
-		/* No DIG_FRONT is associated to DIG_BACKEND */
-		atom_dig_encoder_sel = 0;
-		break;
-	default:
-		atom_dig_encoder_sel = ATOM_TRANMSITTER_V6__DIGA_SEL;
-		break;
-	}
+	(void)id;
+	/* On any ASIC after DCE80, we manually program the DIG_FE
+	 * selection (see connect_dig_be_to_fe function of the link
+	 * encoder), so translation should always return 0 (no FE).
+	 */
 
 	return 0;
 }
@@ -231,51 +150,6 @@ static bool clock_source_id_to_atom(
 			break;
 		default:
 			result = false;
-			break;
-		}
-
-	return result;
-}
-
-static bool engine_bp_to_atom(enum engine_id id, uint32_t *atom_engine_id)
-{
-	bool result = false;
-
-	if (atom_engine_id != NULL)
-		switch (id) {
-		case ENGINE_ID_DIGA:
-			*atom_engine_id = ASIC_INT_DIG1_ENCODER_ID;
-			result = true;
-			break;
-		case ENGINE_ID_DIGB:
-			*atom_engine_id = ASIC_INT_DIG2_ENCODER_ID;
-			result = true;
-			break;
-		case ENGINE_ID_DIGC:
-			*atom_engine_id = ASIC_INT_DIG3_ENCODER_ID;
-			result = true;
-			break;
-		case ENGINE_ID_DIGD:
-			*atom_engine_id = ASIC_INT_DIG4_ENCODER_ID;
-			result = true;
-			break;
-		case ENGINE_ID_DIGE:
-			*atom_engine_id = ASIC_INT_DIG5_ENCODER_ID;
-			result = true;
-			break;
-		case ENGINE_ID_DIGF:
-			*atom_engine_id = ASIC_INT_DIG6_ENCODER_ID;
-			result = true;
-			break;
-		case ENGINE_ID_DIGG:
-			*atom_engine_id = ASIC_INT_DIG7_ENCODER_ID;
-			result = true;
-			break;
-		case ENGINE_ID_DACA:
-			*atom_engine_id = ASIC_INT_DAC1_ENCODER_ID;
-			result = true;
-			break;
-		default:
 			break;
 		}
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
     v4l2 common internal API header
 
@@ -6,26 +7,14 @@
     Each ioctl begins with VIDIOC_INT_ to clearly mark that it is an internal
     define,
 
-    Copyright (C) 2005  Hans Verkuil <hverkuil@xs4all.nl>
+    Copyright (C) 2005  Hans Verkuil <hverkuil@kernel.org>
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef V4L2_COMMON_H_
 #define V4L2_COMMON_H_
 
+#include <linux/time.h>
 #include <media/v4l2-dev.h>
 
 /* Common printk constructs for v4l-i2c drivers. These macros create a unique
@@ -108,71 +97,13 @@ int v4l2_ctrl_query_fill(struct v4l2_queryctrl *qctrl,
 
 /* ------------------------------------------------------------------------- */
 
-/* I2C Helper functions */
-
-struct i2c_driver;
-struct i2c_adapter;
-struct i2c_client;
-struct i2c_device_id;
+struct clk;
 struct v4l2_device;
 struct v4l2_subdev;
 struct v4l2_subdev_ops;
 
-/**
- * v4l2_i2c_new_subdev - Load an i2c module and return an initialized
- *	&struct v4l2_subdev.
- *
- * @v4l2_dev: pointer to &struct v4l2_device
- * @adapter: pointer to struct i2c_adapter
- * @client_type:  name of the chip that's on the adapter.
- * @addr: I2C address. If zero, it will use @probe_addrs
- * @probe_addrs: array with a list of address. The last entry at such
- *	array should be %I2C_CLIENT_END.
- *
- * returns a &struct v4l2_subdev pointer.
- */
-struct v4l2_subdev *v4l2_i2c_new_subdev(struct v4l2_device *v4l2_dev,
-		struct i2c_adapter *adapter, const char *client_type,
-		u8 addr, const unsigned short *probe_addrs);
-
-struct i2c_board_info;
-
-/**
- * v4l2_i2c_new_subdev_board - Load an i2c module and return an initialized
- *	&struct v4l2_subdev.
- *
- * @v4l2_dev: pointer to &struct v4l2_device
- * @adapter: pointer to struct i2c_adapter
- * @info: pointer to struct i2c_board_info used to replace the irq,
- *	 platform_data and addr arguments.
- * @probe_addrs: array with a list of address. The last entry at such
- *	array should be %I2C_CLIENT_END.
- *
- * returns a &struct v4l2_subdev pointer.
- */
-struct v4l2_subdev *v4l2_i2c_new_subdev_board(struct v4l2_device *v4l2_dev,
-		struct i2c_adapter *adapter, struct i2c_board_info *info,
-		const unsigned short *probe_addrs);
-
-/**
- * v4l2_i2c_subdev_init - Initializes a &struct v4l2_subdev with data from
- *	an i2c_client struct.
- *
- * @sd: pointer to &struct v4l2_subdev
- * @client: pointer to struct i2c_client
- * @ops: pointer to &struct v4l2_subdev_ops
- */
-void v4l2_i2c_subdev_init(struct v4l2_subdev *sd, struct i2c_client *client,
-		const struct v4l2_subdev_ops *ops);
-
-/**
- * v4l2_i2c_subdev_addr - returns i2c client address of &struct v4l2_subdev.
- *
- * @sd: pointer to &struct v4l2_subdev
- *
- * Returns the address of an I2C sub-device
- */
-unsigned short v4l2_i2c_subdev_addr(struct v4l2_subdev *sd);
+/* I2C Helper functions */
+#include <linux/i2c.h>
 
 /**
  * enum v4l2_i2c_tuner_type - specifies the range of tuner address that
@@ -203,6 +134,76 @@ enum v4l2_i2c_tuner_type {
 	ADDRS_TV,
 	ADDRS_TV_WITH_DEMOD,
 };
+
+#if defined(CONFIG_VIDEO_V4L2_I2C)
+
+/**
+ * v4l2_i2c_new_subdev - Load an i2c module and return an initialized
+ *	&struct v4l2_subdev.
+ *
+ * @v4l2_dev: pointer to &struct v4l2_device
+ * @adapter: pointer to struct i2c_adapter
+ * @client_type:  name of the chip that's on the adapter.
+ * @addr: I2C address. If zero, it will use @probe_addrs
+ * @probe_addrs: array with a list of address. The last entry at such
+ *	array should be %I2C_CLIENT_END.
+ *
+ * returns a &struct v4l2_subdev pointer.
+ */
+struct v4l2_subdev *v4l2_i2c_new_subdev(struct v4l2_device *v4l2_dev,
+		struct i2c_adapter *adapter, const char *client_type,
+		u8 addr, const unsigned short *probe_addrs);
+
+/**
+ * v4l2_i2c_new_subdev_board - Load an i2c module and return an initialized
+ *	&struct v4l2_subdev.
+ *
+ * @v4l2_dev: pointer to &struct v4l2_device
+ * @adapter: pointer to struct i2c_adapter
+ * @info: pointer to struct i2c_board_info used to replace the irq,
+ *	 platform_data and addr arguments.
+ * @probe_addrs: array with a list of address. The last entry at such
+ *	array should be %I2C_CLIENT_END.
+ *
+ * returns a &struct v4l2_subdev pointer.
+ */
+struct v4l2_subdev *v4l2_i2c_new_subdev_board(struct v4l2_device *v4l2_dev,
+		struct i2c_adapter *adapter, struct i2c_board_info *info,
+		const unsigned short *probe_addrs);
+
+/**
+ * v4l2_i2c_subdev_set_name - Set name for an I²C sub-device
+ *
+ * @sd: pointer to &struct v4l2_subdev
+ * @client: pointer to struct i2c_client
+ * @devname: the name of the device; if NULL, the I²C device drivers's name
+ *           will be used
+ * @postfix: sub-device specific string to put right after the I²C device name;
+ *	     may be NULL
+ */
+void v4l2_i2c_subdev_set_name(struct v4l2_subdev *sd, struct i2c_client *client,
+			      const char *devname, const char *postfix);
+
+/**
+ * v4l2_i2c_subdev_init - Initializes a &struct v4l2_subdev with data from
+ *	an i2c_client struct.
+ *
+ * @sd: pointer to &struct v4l2_subdev
+ * @client: pointer to struct i2c_client
+ * @ops: pointer to &struct v4l2_subdev_ops
+ */
+void v4l2_i2c_subdev_init(struct v4l2_subdev *sd, struct i2c_client *client,
+		const struct v4l2_subdev_ops *ops);
+
+/**
+ * v4l2_i2c_subdev_addr - returns i2c client address of &struct v4l2_subdev.
+ *
+ * @sd: pointer to &struct v4l2_subdev
+ *
+ * Returns the address of an I2C sub-device
+ */
+unsigned short v4l2_i2c_subdev_addr(struct v4l2_subdev *sd);
+
 /**
  * v4l2_i2c_tuner_addrs - Return a list of I2C tuner addresses to probe.
  *
@@ -213,14 +214,64 @@ enum v4l2_i2c_tuner_type {
  */
 const unsigned short *v4l2_i2c_tuner_addrs(enum v4l2_i2c_tuner_type type);
 
+/**
+ * v4l2_i2c_subdev_unregister - Unregister a v4l2_subdev
+ *
+ * @sd: pointer to &struct v4l2_subdev
+ */
+void v4l2_i2c_subdev_unregister(struct v4l2_subdev *sd);
+
+#else
+
+static inline struct v4l2_subdev *
+v4l2_i2c_new_subdev(struct v4l2_device *v4l2_dev,
+		    struct i2c_adapter *adapter, const char *client_type,
+		    u8 addr, const unsigned short *probe_addrs)
+{
+	return NULL;
+}
+
+static inline struct v4l2_subdev *
+v4l2_i2c_new_subdev_board(struct v4l2_device *v4l2_dev,
+			  struct i2c_adapter *adapter, struct i2c_board_info *info,
+			  const unsigned short *probe_addrs)
+{
+	return NULL;
+}
+
+static inline void
+v4l2_i2c_subdev_set_name(struct v4l2_subdev *sd, struct i2c_client *client,
+			 const char *devname, const char *postfix)
+{}
+
+static inline void
+v4l2_i2c_subdev_init(struct v4l2_subdev *sd, struct i2c_client *client,
+		     const struct v4l2_subdev_ops *ops)
+{}
+
+static inline unsigned short v4l2_i2c_subdev_addr(struct v4l2_subdev *sd)
+{
+	return I2C_CLIENT_END;
+}
+
+static inline const unsigned short *
+v4l2_i2c_tuner_addrs(enum v4l2_i2c_tuner_type type)
+{
+	return NULL;
+}
+
+static inline void v4l2_i2c_subdev_unregister(struct v4l2_subdev *sd)
+{}
+
+#endif
+
 /* ------------------------------------------------------------------------- */
 
 /* SPI Helper functions */
-#if defined(CONFIG_SPI)
 
 #include <linux/spi/spi.h>
 
-struct spi_device;
+#if defined(CONFIG_SPI)
 
 /**
  *  v4l2_spi_new_subdev - Load an spi module and return an initialized
@@ -228,13 +279,13 @@ struct spi_device;
  *
  *
  * @v4l2_dev: pointer to &struct v4l2_device.
- * @master: pointer to struct spi_master.
+ * @ctlr: pointer to struct spi_controller.
  * @info: pointer to struct spi_board_info.
  *
  * returns a &struct v4l2_subdev pointer.
  */
 struct v4l2_subdev *v4l2_spi_new_subdev(struct v4l2_device *v4l2_dev,
-		struct spi_master *master, struct spi_board_info *info);
+		struct spi_controller *ctlr, struct spi_board_info *info);
 
 /**
  * v4l2_spi_subdev_init - Initialize a v4l2_subdev with data from an
@@ -246,6 +297,30 @@ struct v4l2_subdev *v4l2_spi_new_subdev(struct v4l2_device *v4l2_dev,
  */
 void v4l2_spi_subdev_init(struct v4l2_subdev *sd, struct spi_device *spi,
 		const struct v4l2_subdev_ops *ops);
+
+/**
+ * v4l2_spi_subdev_unregister - Unregister a v4l2_subdev
+ *
+ * @sd: pointer to &struct v4l2_subdev
+ */
+void v4l2_spi_subdev_unregister(struct v4l2_subdev *sd);
+
+#else
+
+static inline struct v4l2_subdev *
+v4l2_spi_new_subdev(struct v4l2_device *v4l2_dev,
+		    struct spi_controller *ctlr, struct spi_board_info *info)
+{
+	return NULL;
+}
+
+static inline void
+v4l2_spi_subdev_init(struct v4l2_subdev *sd, struct spi_device *spi,
+		     const struct v4l2_subdev_ops *ops)
+{}
+
+static inline void v4l2_spi_subdev_unregister(struct v4l2_subdev *sd)
+{}
 #endif
 
 /* ------------------------------------------------------------------------- */
@@ -283,7 +358,7 @@ struct v4l2_priv_tun_config {
  * @height:	pointer to height that will be adjusted if needed.
  * @hmin:	minimum height.
  * @hmax:	maximum height.
- * @halign:	least significant bit on width.
+ * @halign:	least significant bit on height.
  * @salign:	least significant bit for the image size (e. g.
  *		:math:`width * height`).
  *
@@ -316,15 +391,59 @@ void v4l_bound_align_image(unsigned int *width, unsigned int wmin,
 			   unsigned int salign);
 
 /**
- * v4l2_find_nearest_size - Find the nearest size among a discrete
- *	set of resolutions contained in an array of a driver specific struct.
+ * v4l2_find_nearest_size_conditional - Find the nearest size among a discrete
+ *	set of resolutions contained in an array of a driver specific struct,
+ *	with conditionally exlusion of certain modes
  *
  * @array: a driver specific array of image sizes
  * @array_size: the length of the driver specific array of image sizes
  * @width_field: the name of the width field in the driver specific struct
  * @height_field: the name of the height field in the driver specific struct
- * @width: desired width.
- * @height: desired height.
+ * @width: desired width
+ * @height: desired height
+ * @func: ignores mode if returns false
+ * @context: context for the function
+ *
+ * Finds the closest resolution to minimize the width and height differences
+ * between what requested and the supported resolutions. The size of the width
+ * and height fields in the driver specific must equal to that of u32, i.e. four
+ * bytes. @func is called for each mode considered, a mode is ignored if @func
+ * returns false for it.
+ *
+ * Returns the best match or NULL if the length of the array is zero.
+ */
+#define v4l2_find_nearest_size_conditional(array, array_size, width_field, \
+					   height_field, width, height, \
+					   func, context) \
+	({								\
+		BUILD_BUG_ON(sizeof((array)->width_field) != sizeof(u32) || \
+			     sizeof((array)->height_field) != sizeof(u32)); \
+		(typeof(&(array)[0]))__v4l2_find_nearest_size_conditional( \
+			(array), array_size, sizeof(*(array)),		\
+			offsetof(typeof(*(array)), width_field),	\
+			offsetof(typeof(*(array)), height_field),	\
+			width, height, func, context);			\
+	})
+const void *
+__v4l2_find_nearest_size_conditional(const void *array, size_t array_size,
+				     size_t entry_size, size_t width_offset,
+				     size_t height_offset, s32 width,
+				     s32 height,
+				     bool (*func)(const void *array,
+						  size_t index,
+						  const void *context),
+				     const void *context);
+
+/**
+ * v4l2_find_nearest_size - Find the nearest size among a discrete set of
+ *	resolutions contained in an array of a driver specific struct
+ *
+ * @array: a driver specific array of image sizes
+ * @array_size: the length of the driver specific array of image sizes
+ * @width_field: the name of the width field in the driver specific struct
+ * @height_field: the name of the height field in the driver specific struct
+ * @width: desired width
+ * @height: desired height
  *
  * Finds the closest resolution to minimize the width and height differences
  * between what requested and the supported resolutions. The size of the width
@@ -333,34 +452,15 @@ void v4l_bound_align_image(unsigned int *width, unsigned int wmin,
  *
  * Returns the best match or NULL if the length of the array is zero.
  */
-#define v4l2_find_nearest_size(array, array_size, width_field, height_field, \
-			       width, height)				\
-	({								\
-		BUILD_BUG_ON(sizeof((array)->width_field) != sizeof(u32) || \
-			     sizeof((array)->height_field) != sizeof(u32)); \
-		(typeof(&(*(array))))__v4l2_find_nearest_size(		\
-			(array), array_size, sizeof(*(array)),		\
-			offsetof(typeof(*(array)), width_field),	\
-			offsetof(typeof(*(array)), height_field),	\
-			width, height);					\
-	})
-const void *
-__v4l2_find_nearest_size(const void *array, size_t array_size,
-			 size_t entry_size, size_t width_offset,
-			 size_t height_offset, s32 width, s32 height);
-
-/**
- * v4l2_get_timestamp - helper routine to get a timestamp to be used when
- *	filling streaming metadata. Internally, it uses ktime_get_ts(),
- *	which is the recommended way to get it.
- *
- * @tv: pointer to &struct timeval to be filled.
- */
-void v4l2_get_timestamp(struct timeval *tv);
+#define v4l2_find_nearest_size(array, array_size, width_field,		\
+			       height_field, width, height)		\
+	v4l2_find_nearest_size_conditional(array, array_size, width_field, \
+					   height_field, width, height, NULL, \
+					   NULL)
 
 /**
  * v4l2_g_parm_cap - helper routine for vidioc_g_parm to fill this in by
- *      calling the g_frame_interval op of the given subdev. It only works
+ *      calling the get_frame_interval op of the given subdev. It only works
  *      for V4L2_BUF_TYPE_VIDEO_CAPTURE(_MPLANE), hence the _cap in the
  *      function name.
  *
@@ -373,7 +473,7 @@ int v4l2_g_parm_cap(struct video_device *vdev,
 
 /**
  * v4l2_s_parm_cap - helper routine for vidioc_s_parm to fill this in by
- *      calling the s_frame_interval op of the given subdev. It only works
+ *      calling the set_frame_interval op of the given subdev. It only works
  *      for V4L2_BUF_TYPE_VIDEO_CAPTURE(_MPLANE), hence the _cap in the
  *      function name.
  *
@@ -383,5 +483,281 @@ int v4l2_g_parm_cap(struct video_device *vdev,
  */
 int v4l2_s_parm_cap(struct video_device *vdev,
 		    struct v4l2_subdev *sd, struct v4l2_streamparm *a);
+
+/* Compare two v4l2_fract structs */
+#define V4L2_FRACT_COMPARE(a, OP, b)			\
+	((u64)(a).numerator * (b).denominator OP	\
+	(u64)(b).numerator * (a).denominator)
+
+/* ------------------------------------------------------------------------- */
+
+/* Pixel format and FourCC helpers */
+
+/**
+ * enum v4l2_pixel_encoding - specifies the pixel encoding value
+ *
+ * @V4L2_PIXEL_ENC_UNKNOWN:	Pixel encoding is unknown/un-initialized
+ * @V4L2_PIXEL_ENC_YUV:		Pixel encoding is YUV
+ * @V4L2_PIXEL_ENC_RGB:		Pixel encoding is RGB
+ * @V4L2_PIXEL_ENC_BAYER:	Pixel encoding is Bayer
+ */
+enum v4l2_pixel_encoding {
+	V4L2_PIXEL_ENC_UNKNOWN = 0,
+	V4L2_PIXEL_ENC_YUV = 1,
+	V4L2_PIXEL_ENC_RGB = 2,
+	V4L2_PIXEL_ENC_BAYER = 3,
+};
+
+/**
+ * struct v4l2_format_info - information about a V4L2 format
+ * @format: 4CC format identifier (V4L2_PIX_FMT_*)
+ * @pixel_enc: Pixel encoding (see enum v4l2_pixel_encoding above)
+ * @mem_planes: Number of memory planes, which includes the alpha plane (1 to 4).
+ * @comp_planes: Number of component planes, which includes the alpha plane (1 to 4).
+ * @bpp: Array of per-plane bytes per pixel
+ * @bpp_div: Array of per-plane bytes per pixel divisors to support fractional pixel sizes.
+ * @hdiv: Horizontal chroma subsampling factor
+ * @vdiv: Vertical chroma subsampling factor
+ * @block_w: Per-plane macroblock pixel width (optional)
+ * @block_h: Per-plane macroblock pixel height (optional)
+ * @has_alpha: Does the format embeds an alpha component?
+ */
+struct v4l2_format_info {
+	u32 format;
+	u8 pixel_enc;
+	u8 mem_planes;
+	u8 comp_planes;
+	u8 bpp[4];
+	u8 bpp_div[4];
+	u8 hdiv;
+	u8 vdiv;
+	u8 block_w[4];
+	u8 block_h[4];
+	bool has_alpha;
+};
+
+static inline bool v4l2_is_format_rgb(const struct v4l2_format_info *f)
+{
+	return f && f->pixel_enc == V4L2_PIXEL_ENC_RGB;
+}
+
+static inline bool v4l2_is_format_yuv(const struct v4l2_format_info *f)
+{
+	return f && f->pixel_enc == V4L2_PIXEL_ENC_YUV;
+}
+
+static inline bool v4l2_is_format_bayer(const struct v4l2_format_info *f)
+{
+	return f && f->pixel_enc == V4L2_PIXEL_ENC_BAYER;
+}
+
+const struct v4l2_format_info *v4l2_format_info(u32 format);
+void v4l2_apply_frmsize_constraints(u32 *width, u32 *height,
+				    const struct v4l2_frmsize_stepwise *frmsize);
+int v4l2_fill_pixfmt(struct v4l2_pix_format *pixfmt, u32 pixelformat,
+		     u32 width, u32 height);
+int v4l2_fill_pixfmt_mp(struct v4l2_pix_format_mplane *pixfmt, u32 pixelformat,
+			u32 width, u32 height);
+/* @stride_alignment is a power of 2 value in bytes */
+int v4l2_fill_pixfmt_mp_aligned(struct v4l2_pix_format_mplane *pixfmt,
+				u32 pixelformat, u32 width, u32 height,
+				u8 stride_alignment);
+
+/**
+ * v4l2_get_link_freq - Get link rate from transmitter
+ *
+ * @pad: The transmitter's media pad
+ * @mul: The multiplier between pixel rate and link frequency. Bits per pixel on
+ *	 D-PHY, samples per clock on parallel. 0 otherwise.
+ * @div: The divisor between pixel rate and link frequency. Number of data lanes
+ *	 times two on D-PHY, 1 on parallel. 0 otherwise.
+ *
+ * This function obtains and returns the link frequency from the transmitter
+ * sub-device's pad. The link frequency is retrieved using the get_mbus_config
+ * sub-device pad operation. If this fails, the function falls back to obtaining
+ * the frequency either directly from the V4L2_CID_LINK_FREQ control if
+ * implemented by the transmitter, or by calculating it from the pixel rate
+ * obtained from the V4L2_CID_PIXEL_RATE control.
+ *
+ * Return:
+ * * >0: Link frequency
+ * * %-ENOENT: Link frequency or pixel rate control not found
+ * * %-EINVAL: Invalid link frequency value
+ */
+#ifdef CONFIG_MEDIA_CONTROLLER
+s64 v4l2_get_link_freq(const struct media_pad *pad, unsigned int mul,
+		       unsigned int div);
+
+/**
+ * v4l2_get_active_data_lanes - Get number of active data lanes from driver
+ *
+ * @pad: The transmitter's media pad.
+ * @max_data_lanes: The maximum number of active data lanes supported by
+ *		    the MIPI CSI link in hardware.
+ *
+ * This function is intended for obtaining the number of data lanes that are
+ * actively being used by the driver for a MIPI CSI-2 device on a given media pad.
+ * This information is derived from a mbus_config fetched from a device driver
+ * using the get_mbus_config v4l2_subdev pad op.
+ *
+ * Return:
+ * * >0: Number of active data lanes
+ * * %-EINVAL: Number of active data lanes is invalid, as it exceeds the maximum
+ *	       supported data lanes.
+ */
+int v4l2_get_active_data_lanes(const struct media_pad *pad,
+			       unsigned int max_data_lanes);
+#endif
+
+void v4l2_simplify_fraction(u32 *numerator, u32 *denominator,
+		unsigned int n_terms, unsigned int threshold);
+u32 v4l2_fraction_to_interval(u32 numerator, u32 denominator);
+
+/**
+ * v4l2_link_freq_to_bitmap - Figure out platform-supported link frequencies
+ * @dev: The struct device
+ * @fw_link_freqs: Array of link frequencies from firmware
+ * @num_of_fw_link_freqs: Number of entries in @fw_link_freqs
+ * @driver_link_freqs: Array of link frequencies supported by the driver
+ * @num_of_driver_link_freqs: Number of entries in @driver_link_freqs
+ * @bitmap: Bitmap of driver-supported link frequencies found in @fw_link_freqs
+ *
+ * This function checks which driver-supported link frequencies are enabled in
+ * system firmware and sets the corresponding bits in @bitmap (after first
+ * zeroing it).
+ *
+ * Return:
+ * * %0: Success
+ * * %-ENOENT: No match found between driver-supported link frequencies and
+ *   those available in firmware.
+ * * %-ENODATA: No link frequencies were specified in firmware.
+ */
+int v4l2_link_freq_to_bitmap(struct device *dev, const u64 *fw_link_freqs,
+			     unsigned int num_of_fw_link_freqs,
+			     const s64 *driver_link_freqs,
+			     unsigned int num_of_driver_link_freqs,
+			     unsigned long *bitmap);
+
+struct clk *__devm_v4l2_sensor_clk_get(struct device *dev, const char *id,
+				       bool legacy, bool fixed_rate,
+				       unsigned long clk_rate);
+
+/**
+ * devm_v4l2_sensor_clk_get - lookup and obtain a reference to a clock producer
+ *	for a camera sensor
+ *
+ * @dev: device for v4l2 sensor clock "consumer"
+ * @id: clock consumer ID
+ *
+ * This function behaves the same way as devm_clk_get() except where there
+ * is no clock producer like in ACPI-based platforms.
+ *
+ * For ACPI-based platforms, the function will read the "clock-frequency"
+ * ACPI _DSD property and register a fixed-clock with the frequency indicated
+ * in the property.
+ *
+ * This function also handles the special ACPI-based system case where:
+ *
+ * * The clock-frequency _DSD property is present.
+ * * A reference to the clock producer is present, where the clock is provided
+ *   by a camera sensor PMIC driver (e.g. int3472/tps68470.c)
+ *
+ * In this case try to set the clock-frequency value to the provided clock.
+ *
+ * As the name indicates, this function may only be used on camera sensor
+ * devices. This is because generally only camera sensors do need a clock to
+ * query the frequency from, due to the requirement to configure the PLL for a
+ * given CSI-2 interface frequency where the sensor's external clock frequency
+ * is a factor. Additionally, the clock frequency tends to be available on ACPI
+ * firmware based systems for camera sensors specifically (if e.g. DisCo for
+ * Imaging compliant).
+ *
+ * Returns a pointer to a struct clk on success or an error pointer on failure.
+ */
+static inline struct clk *
+devm_v4l2_sensor_clk_get(struct device *dev, const char *id)
+{
+	return __devm_v4l2_sensor_clk_get(dev, id, false, false, 0);
+}
+
+/**
+ * devm_v4l2_sensor_clk_get_legacy - lookup and obtain a reference to a clock
+ *	producer for a camera sensor.
+ *
+ * @dev: device for v4l2 sensor clock "consumer"
+ * @id: clock consumer ID
+ * @fixed_rate: interpret the @clk_rate as a fixed rate or default rate
+ * @clk_rate: the clock rate
+ *
+ * This function behaves the same way as devm_v4l2_sensor_clk_get() except that
+ * it extends the behaviour on ACPI platforms to all platforms.
+ *
+ * The function also provides the ability to set the clock rate to a fixed
+ * frequency by setting @fixed_rate to true and specifying the fixed frequency
+ * in @clk_rate, or to use a default clock rate when the "clock-frequency"
+ * property is absent by setting @fixed_rate to false and specifying the default
+ * frequency in @clk_rate. Setting @fixed_rate to true and @clk_rate to 0 is an
+ * error.
+ *
+ * This function is meant to support legacy behaviour in existing drivers only.
+ * It must not be used in any new driver.
+ *
+ * Returns a pointer to a struct clk on success or an error pointer on failure.
+ */
+static inline struct clk *
+devm_v4l2_sensor_clk_get_legacy(struct device *dev, const char *id,
+				bool fixed_rate, unsigned long clk_rate)
+{
+	return __devm_v4l2_sensor_clk_get(dev, id, true, fixed_rate, clk_rate);
+}
+
+static inline u64 v4l2_buffer_get_timestamp(const struct v4l2_buffer *buf)
+{
+	/*
+	 * When the timestamp comes from 32-bit user space, there may be
+	 * uninitialized data in tv_usec, so cast it to u32.
+	 * Otherwise allow invalid input for backwards compatibility.
+	 */
+	return buf->timestamp.tv_sec * NSEC_PER_SEC +
+		(u32)buf->timestamp.tv_usec * NSEC_PER_USEC;
+}
+
+static inline void v4l2_buffer_set_timestamp(struct v4l2_buffer *buf,
+					     u64 timestamp)
+{
+	struct timespec64 ts = ns_to_timespec64(timestamp);
+
+	buf->timestamp.tv_sec  = ts.tv_sec;
+	buf->timestamp.tv_usec = ts.tv_nsec / NSEC_PER_USEC;
+}
+
+static inline bool v4l2_is_colorspace_valid(__u32 colorspace)
+{
+	return colorspace > V4L2_COLORSPACE_DEFAULT &&
+	       colorspace < V4L2_COLORSPACE_LAST;
+}
+
+static inline bool v4l2_is_xfer_func_valid(__u32 xfer_func)
+{
+	return xfer_func > V4L2_XFER_FUNC_DEFAULT &&
+	       xfer_func < V4L2_XFER_FUNC_LAST;
+}
+
+static inline bool v4l2_is_ycbcr_enc_valid(__u8 ycbcr_enc)
+{
+	return ycbcr_enc > V4L2_YCBCR_ENC_DEFAULT &&
+	       ycbcr_enc < V4L2_YCBCR_ENC_LAST;
+}
+
+static inline bool v4l2_is_hsv_enc_valid(__u8 hsv_enc)
+{
+	return hsv_enc == V4L2_HSV_ENC_180 || hsv_enc == V4L2_HSV_ENC_256;
+}
+
+static inline bool v4l2_is_quant_valid(__u8 quantization)
+{
+	return quantization == V4L2_QUANTIZATION_FULL_RANGE ||
+	       quantization == V4L2_QUANTIZATION_LIM_RANGE;
+}
 
 #endif /* V4L2_COMMON_H_ */

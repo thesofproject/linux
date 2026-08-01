@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * A gpio chip driver for TXx9 SoCs
  *
  * Copyright (C) 2008 Atsushi Nemoto <anemo@mba.ocn.ne.jp>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/init.h>
@@ -35,14 +32,16 @@ static void txx9_gpio_set_raw(unsigned int offset, int value)
 	__raw_writel(val, &txx9_pioptr->dout);
 }
 
-static void txx9_gpio_set(struct gpio_chip *chip, unsigned int offset,
-			  int value)
+static int txx9_gpio_set(struct gpio_chip *chip, unsigned int offset,
+			 int value)
 {
 	unsigned long flags;
 	spin_lock_irqsave(&txx9_gpio_lock, flags);
 	txx9_gpio_set_raw(offset, value);
 	mmiowb();
 	spin_unlock_irqrestore(&txx9_gpio_lock, flags);
+
+	return 0;
 }
 
 static int txx9_gpio_dir_in(struct gpio_chip *chip, unsigned int offset)

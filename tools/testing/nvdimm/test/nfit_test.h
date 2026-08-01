@@ -1,17 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright(c) 2013-2015 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 #ifndef __NFIT_TEST_H__
 #define __NFIT_TEST_H__
+#include <linux/acpi.h>
 #include <linux/list.h>
 #include <linux/uuid.h>
 #include <linux/ioport.h>
@@ -58,7 +51,7 @@ struct nd_cmd_translate_spa {
 		__u32 nfit_device_handle;
 		__u32 _reserved;
 		__u64 dpa;
-	} __packed devices[0];
+	} __packed devices[];
 
 } __packed;
 
@@ -81,7 +74,7 @@ struct nd_cmd_ars_err_inj_stat {
 	struct nd_error_stat_query_record {
 		__u64 err_inj_stat_spa_range_base;
 		__u64 err_inj_stat_spa_range_length;
-	} __packed record[0];
+	} __packed record[];
 } __packed;
 
 #define ND_INTEL_SMART			 1
@@ -116,30 +109,6 @@ struct nd_cmd_ars_err_inj_stat {
 #define ND_INTEL_SMART_INJECT_SPARE		(1 << 1)
 #define ND_INTEL_SMART_INJECT_FATAL		(1 << 2)
 #define ND_INTEL_SMART_INJECT_SHUTDOWN		(1 << 3)
-
-struct nd_intel_smart {
-	__u32 status;
-	union {
-		struct {
-			__u32 flags;
-			__u8 reserved0[4];
-			__u8 health;
-			__u8 spares;
-			__u8 life_used;
-			__u8 alarm_flags;
-			__u16 media_temperature;
-			__u16 ctrl_temperature;
-			__u32 shutdown_count;
-			__u8 ait_status;
-			__u16 pmic_temperature;
-			__u8 reserved1[8];
-			__u8 shutdown_state;
-			__u32 vendor_size;
-			__u8 vendor_data[92];
-		} __packed;
-		__u8 data[128];
-	};
-} __packed;
 
 struct nd_intel_smart_threshold {
 	__u32 status;
@@ -211,7 +180,7 @@ struct nd_intel_fw_send_data {
 	__u32 context;
 	__u32 offset;
 	__u32 length;
-	__u8 data[0];
+	__u8 data[];
 /* this field is not declared due ot variable data from input */
 /*	__u32 status; */
 } __packed;
@@ -234,16 +203,39 @@ struct nd_intel_lss {
 	__u32 status;
 } __packed;
 
-union acpi_object;
-typedef void *acpi_handle;
-
 typedef struct nfit_test_resource *(*nfit_test_lookup_fn)(resource_size_t);
 typedef union acpi_object *(*nfit_test_evaluate_dsm_fn)(acpi_handle handle,
 		 const guid_t *guid, u64 rev, u64 func,
 		 union acpi_object *argv4);
-void __iomem *__wrap_ioremap_nocache(resource_size_t offset,
-		unsigned long size);
+void __iomem *__wrap_devm_ioremap(struct device *dev,
+		resource_size_t offset, unsigned long size);
+void *__wrap_devm_memremap(struct device *dev, resource_size_t offset,
+		size_t size, unsigned long flags);
+void *__wrap_devm_memremap_pages(struct device *dev, struct dev_pagemap *pgmap);
+void *__wrap_memremap(resource_size_t offset, size_t size,
+		unsigned long flags);
+void __wrap_devm_memunmap(struct device *dev, void *addr);
+void __iomem *__wrap_ioremap(resource_size_t offset, unsigned long size);
+void __iomem *__wrap_ioremap_wc(resource_size_t offset, unsigned long size);
 void __wrap_iounmap(volatile void __iomem *addr);
+void __wrap_memunmap(void *addr);
+struct resource *__wrap___request_region(struct resource *parent,
+		resource_size_t start, resource_size_t n, const char *name,
+		int flags);
+int __wrap_insert_resource(struct resource *parent, struct resource *res);
+int __wrap_remove_resource(struct resource *res);
+struct resource *__wrap___devm_request_region(struct device *dev,
+		struct resource *parent, resource_size_t start,
+		resource_size_t n, const char *name);
+void __wrap___release_region(struct resource *parent, resource_size_t start,
+		resource_size_t n);
+void __wrap___devm_release_region(struct device *dev, struct resource *parent,
+		resource_size_t start, resource_size_t n);
+acpi_status __wrap_acpi_evaluate_object(acpi_handle handle, acpi_string path,
+		struct acpi_object_list *p, struct acpi_buffer *buf);
+union acpi_object * __wrap_acpi_evaluate_dsm(acpi_handle handle, const guid_t *guid,
+		u64 rev, u64 func, union acpi_object *argv4);
+
 void nfit_test_setup(nfit_test_lookup_fn lookup,
 		nfit_test_evaluate_dsm_fn evaluate);
 void nfit_test_teardown(void);

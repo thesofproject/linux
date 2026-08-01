@@ -26,7 +26,59 @@
 #ifndef __DAL_DPCD_DEFS_H__
 #define __DAL_DPCD_DEFS_H__
 
-#include <drm/drm_dp_helper.h>
+#include <drm/display/drm_dp_helper.h>
+#ifndef DP_SINK_HW_REVISION_START // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_SINK_HW_REVISION_START 0x409
+#endif
+/* Panel Replay*/
+#ifndef DP_PANEL_REPLAY_CAPABILITY_SUPPORT // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PANEL_REPLAY_CAPABILITY_SUPPORT 0x0b0
+#endif /* DP_PANEL_REPLAY_CAPABILITY_SUPPORT */
+#ifndef DP_PANEL_REPLAY_CAPABILITY // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PANEL_REPLAY_CAPABILITY 0x0b1
+#endif /* DP_PANEL_REPLAY_CAPABILITY */
+#ifndef DP_PR_SU_X_GRANULARITY_LOW         // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PR_SU_X_GRANULARITY_LOW			0x0b2
+#endif /* DP_PR_SU_X_GRANULARITY_LOW */
+#ifndef DP_PR_SU_X_GRANULARITY_HIGH        // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PR_SU_X_GRANULARITY_HIGH			0x0b3
+#endif /* DP_PR_SU_X_GRANULARITY_HIGH */
+#ifndef DP_PR_SU_Y_GRANULARITY             // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PR_SU_Y_GRANULARITY				0x0b4
+#endif /* DP_PR_SU_Y_GRANULARITY */
+#ifndef DP_PR_SU_Y_GRANULARITY_EXTENDED_CAP_LOW // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PR_SU_Y_GRANULARITY_EXTENDED_CAP_LOW		0x0b5
+#endif /* DP_PR_SU_Y_GRANULARITY_EXTENDED_CAP_LOW */
+#ifndef DP_PR_SU_Y_GRANULARITY_EXTENDED_CAP_HIGH // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PR_SU_Y_GRANULARITY_EXTENDED_CAP_HIGH	0x0b6
+#endif /* DP_PR_SU_Y_GRANULARITY_EXTENDED_CAP_HIGH */
+#ifndef DP_PANEL_REPLAY_ENABLE_AND_CONFIGURATION_1  // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PANEL_REPLAY_ENABLE_AND_CONFIGURATION_1  0x1b0
+#endif /* DP_PANEL_REPLAY_ENABLE_AND_CONFIGURATION_1 */
+#ifndef DP_PANEL_REPLAY_ENABLE // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PANEL_REPLAY_ENABLE (1 << 0)
+#endif /* DP_PANEL_REPLAY_ENABLE */
+#ifndef DP_PANEL_REPLAY_ENABLE_AND_CONFIGURATION_2 // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PANEL_REPLAY_ENABLE_AND_CONFIGURATION_2 0x1b1
+#endif /* DP_PANEL_REPLAY_ENABLE_AND_CONFIGURATION_2 */
+#ifndef DP_PR_ERROR_STATUS                  // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PR_ERROR_STATUS                  0x2020  /* DP 2.0 */
+#endif /* DP_PR_ERROR_STATUS */
+#ifndef DP_PR_REPLAY_SINK_STATUS            // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PR_REPLAY_SINK_STATUS            0x2022
+#endif /* DP_PR_REPLAY_SINK_STATUS */
+#ifndef DP_PR_LINK_CRC_ERROR               // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PR_LINK_CRC_ERROR               (1 << 0)
+#endif /* DP_PR_LINK_CRC_ERROR */
+#ifndef DP_PR_RFB_STORAGE_ERROR            // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PR_RFB_STORAGE_ERROR            (1 << 1)
+#endif /* DP_PR_RFB_STORAGE_ERROR */
+#ifndef DP_PR_VSC_SDP_UNCORRECTABLE_ERROR // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PR_VSC_SDP_UNCORRECTABLE_ERROR  (1 << 2) /* eDP 1.4 */
+#endif /* DP_PR_VSC_SDP_UNCORRECTABLE_ERROR */
+#ifndef DP_PR_ASSDP_MISSING_ERROR          // can remove this once the define gets into linux drm_dp_helper.h
+#define DP_PR_ASSDP_MISSING_ERROR          (1 << 3) /* eDP 1.5 */
+#endif /* DP_PR_ASSDP_MISSING_ERROR */
 
 enum dpcd_revision {
 	DPCD_REV_10 = 0x10,
@@ -40,7 +92,7 @@ enum dpcd_revision {
 enum dpcd_downstream_port_type {
 	DOWNSTREAM_DP = 0,
 	DOWNSTREAM_VGA,
-	DOWNSTREAM_DVI_HDMI,
+	DOWNSTREAM_DVI_HDMI_DP_PLUS_PLUS,/* DVI, HDMI, DP++ */
 	DOWNSTREAM_NONDDC /* has no EDID (TV,CV) */
 };
 
@@ -77,6 +129,18 @@ enum dpcd_phy_test_patterns {
 	PHY_TEST_PATTERN_CP2520_1,
 	PHY_TEST_PATTERN_CP2520_2,
 	PHY_TEST_PATTERN_CP2520_3, /* same as TPS4 */
+	PHY_TEST_PATTERN_128b_132b_TPS1 = 0x8,
+	PHY_TEST_PATTERN_128b_132b_TPS2 = 0x10,
+	PHY_TEST_PATTERN_PRBS9 = 0x18,
+	PHY_TEST_PATTERN_PRBS11 = 0x20,
+	PHY_TEST_PATTERN_PRBS15 = 0x28,
+	PHY_TEST_PATTERN_PRBS23 = 0x30,
+	PHY_TEST_PATTERN_PRBS31 = 0x38,
+	PHY_TEST_PATTERN_264BIT_CUSTOM = 0x40,
+	PHY_TEST_PATTERN_SQUARE = 0x48,
+	PHY_TEST_PATTERN_SQUARE_PRESHOOT_DISABLED = 0x49,
+	PHY_TEST_PATTERN_SQUARE_DEEMPHASIS_DISABLED = 0x4A,
+	PHY_TEST_PATTERN_SQUARE_PRESHOOT_DEEMPHASIS_DISABLED = 0x4B,
 };
 
 enum dpcd_test_dyn_range {
@@ -132,7 +196,10 @@ enum dpcd_training_patterns {
 	DPCD_TRAINING_PATTERN_1,
 	DPCD_TRAINING_PATTERN_2,
 	DPCD_TRAINING_PATTERN_3,
-	DPCD_TRAINING_PATTERN_4 = 7
+	DPCD_TRAINING_PATTERN_4 = 7,
+	DPCD_128b_132b_TPS1 = 1,
+	DPCD_128b_132b_TPS2 = 2,
+	DPCD_128b_132b_TPS2_CDS = 3,
 };
 
 /* This enum is for use with PsrSinkPsrStatus.bits.sinkSelfRefreshStatus
@@ -145,5 +212,26 @@ enum dpcd_psr_sink_states {
 	PSR_SINK_STATE_ACTIVE_CAPTURE_TIMING_RESYNC = 4,
 	PSR_SINK_STATE_SINK_INTERNAL_ERROR = 7,
 };
+
+#define DP_SOURCE_SEQUENCE                      0x30C
+#define DP_SOURCE_TABLE_REVISION                0x310
+#define DP_SOURCE_PAYLOAD_SIZE                  0x311
+#define DP_SOURCE_SINK_CAP                      0x317
+#define DP_SOURCE_BACKLIGHT_LEVEL               0x320
+#define DP_SOURCE_BACKLIGHT_CURRENT_PEAK        0x326
+#define DP_SOURCE_BACKLIGHT_CONTROL             0x32E
+#define DP_SOURCE_BACKLIGHT_ENABLE              0x32F
+#define DP_SINK_DRR_GRANULARITY                 0x33B
+#define DP_SOURCE_MINIMUM_HBLANK_SUPPORTED      0x340
+#define DP_SINK_PR_REPLAY_STATUS                0x378
+#define DP_SINK_PR_PIXEL_DEVIATION_PER_LINE     0x379
+#define DP_SINK_PR_MAX_NUMBER_OF_DEVIATION_LINE 0x37A
+#define DP_SINK_EMISSION_RATE                   0x37E
+#define DP_SINK_PR_FRAME_SKIP_COUNT             0x337
+
+/* Remove once drm_dp_helper.h is updated upstream */
+#ifndef DP_TOTAL_LTTPR_CNT
+#define DP_TOTAL_LTTPR_CNT                                  0xF000A /* 2.1 */
+#endif
 
 #endif /* __DAL_DPCD_DEFS_H__ */

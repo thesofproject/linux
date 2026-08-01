@@ -14,15 +14,17 @@
  */
 
 #include <linux/err.h>
+#include <linux/mfd/syscon.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_gpio.h>
+#include <linux/platform_device.h>
+#include <linux/seq_file.h>
+#include <linux/slab.h>
+
 #include <linux/pinctrl/machine.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinmux.h>
-#include <linux/platform_device.h>
-#include <linux/slab.h>
 
 #include "pinctrl-spear.h"
 
@@ -149,13 +151,12 @@ static int spear_pinctrl_dt_node_to_map(struct pinctrl_dev *pctldev,
 					unsigned *num_maps)
 {
 	struct spear_pmx *pmx = pinctrl_dev_get_drvdata(pctldev);
-	struct device_node *np;
 	struct property *prop;
 	const char *function, *group;
 	int ret, index = 0, count = 0;
 
 	/* calculate number of maps required */
-	for_each_child_of_node(np_config, np) {
+	for_each_child_of_node_scoped(np_config, np) {
 		ret = of_property_read_string(np, "st,function", &function);
 		if (ret < 0)
 			return ret;
@@ -172,11 +173,11 @@ static int spear_pinctrl_dt_node_to_map(struct pinctrl_dev *pctldev,
 		return -ENODEV;
 	}
 
-	*map = kzalloc(sizeof(**map) * count, GFP_KERNEL);
+	*map = kzalloc_objs(**map, count);
 	if (!*map)
 		return -ENOMEM;
 
-	for_each_child_of_node(np_config, np) {
+	for_each_child_of_node_scoped(np_config, np) {
 		of_property_read_string(np, "st,function", &function);
 		of_property_for_each_string(np, "st,pins", prop, group) {
 			(*map)[index].type = PIN_MAP_TYPE_MUX_GROUP;
@@ -354,7 +355,6 @@ int spear_pinctrl_probe(struct platform_device *pdev,
 			struct spear_pinctrl_machdata *machdata)
 {
 	struct device_node *np = pdev->dev.of_node;
-	struct resource *res;
 	struct spear_pmx *pmx;
 
 	if (!machdata)
@@ -364,10 +364,12 @@ int spear_pinctrl_probe(struct platform_device *pdev,
 	if (!pmx)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	pmx->vbase = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(pmx->vbase))
-		return PTR_ERR(pmx->vbase);
+	pmx->regmap = device_node_to_regmap(np);
+	if (IS_ERR(pmx->regmap)) {
+		dev_err(&pdev->dev, "Init regmap failed (%pe).\n",
+			pmx->regmap);
+		return PTR_ERR(pmx->regmap);
+	}
 
 	pmx->dev = &pdev->dev;
 	pmx->machdata = machdata;

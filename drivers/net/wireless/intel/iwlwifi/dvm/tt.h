@@ -1,29 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /******************************************************************************
  *
- * Copyright(c) 2007 - 2014 Intel Corporation. All rights reserved.
+ * Copyright(c) 2007 - 2014, 2023-2024 Intel Corporation. All rights reserved.
  *
  * Portions of this file are derived from the ipw3945 project, as well
  * as portions of the ieee80211 subsystem header files.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- *  Intel Linux Wireless <linuxwifi@intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
  *****************************************************************************/
 #ifndef __iwl_tt_setting_h__
 #define __iwl_tt_setting_h__
@@ -83,7 +64,7 @@ struct iwl_tt_trans {
 };
 
 /**
- * struct iwl_tt_mgnt - Thermal Throttling Management structure
+ * struct iwl_tt_mgmt - Thermal Throttling Management structure
  * @advanced_tt:    advanced thermal throttle required
  * @state:          current Thermal Throttling state
  * @tt_power_mode:  Thermal Throttling power mode index
@@ -91,14 +72,15 @@ struct iwl_tt_trans {
  *		    when thermal throttling state != IWL_TI_0
  *		    the tt_power_mode should set to different
  *		    power mode based on the current tt state
- * @tt_previous_temperature: last measured temperature
- * @iwl_tt_restriction: ptr to restriction tbl, used by advance
+ * @tt_previous_temp: last measured temperature
+ * @restriction: ptr to restriction tbl, used by advance
  *		    thermal throttling to determine how many tx/rx streams
  *		    should be used in tt state; and can HT be enabled or not
- * @iwl_tt_trans: ptr to adv trans table, used by advance thermal throttling
+ * @transaction: ptr to adv trans table, used by advance thermal throttling
  *		    state transaction
  * @ct_kill_toggle: used to toggle the CSR bit when checking uCode temperature
  * @ct_kill_exit_tm: timer to exit thermal kill
+ * @ct_kill_waiting_tm: timer to enter thermal kill
  */
 struct iwl_tt_mgmt {
 	enum iwl_tt_state state;
@@ -118,7 +100,6 @@ u8 iwl_tt_current_power_mode(struct iwl_priv *priv);
 bool iwl_tt_is_low_power_state(struct iwl_priv *priv);
 bool iwl_ht_enabled(struct iwl_priv *priv);
 enum iwl_antenna_ok iwl_tx_ant_restriction(struct iwl_priv *priv);
-enum iwl_antenna_ok iwl_rx_ant_restriction(struct iwl_priv *priv);
 void iwl_tt_enter_ct_kill(struct iwl_priv *priv);
 void iwl_tt_exit_ct_kill(struct iwl_priv *priv);
 void iwl_tt_handler(struct iwl_priv *priv);

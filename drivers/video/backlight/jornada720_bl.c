@@ -1,17 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  * Backlight driver for HP Jornada 700 series (710/720/728)
  * Copyright (C) 2006-2009 Kristoffer Ericson <kristoffer.ericson@gmail.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version
- * 2 or any later version as published by the Free Software Foundation.
- *
  */
 
 #include <linux/backlight.h>
 #include <linux/device.h>
-#include <linux/fb.h>
+#include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
@@ -58,7 +54,7 @@ static int jornada_bl_update_status(struct backlight_device *bd)
 	jornada_ssp_start();
 
 	/* If backlight is off then really turn it off */
-	if ((bd->props.power != FB_BLANK_UNBLANK) || (bd->props.fb_blank != FB_BLANK_UNBLANK)) {
+	if (backlight_is_blank(bd)) {
 		ret = jornada_ssp_byte(BRIGHTNESSOFF);
 		if (ret != TXDUMMY) {
 			dev_info(&bd->dev, "brightness off timeout\n");
@@ -70,30 +66,30 @@ static int jornada_bl_update_status(struct backlight_device *bd)
 	} else  /* turn on backlight */
 		PPSR |= PPC_LDD1;
 
-		/* send command to our mcu */
-		if (jornada_ssp_byte(SETBRIGHTNESS) != TXDUMMY) {
-			dev_info(&bd->dev, "failed to set brightness\n");
-			ret = -ETIMEDOUT;
-			goto out;
-		}
+	/* send command to our mcu */
+	if (jornada_ssp_byte(SETBRIGHTNESS) != TXDUMMY) {
+		dev_info(&bd->dev, "failed to set brightness\n");
+		ret = -ETIMEDOUT;
+		goto out;
+	}
 
-		/*
-		 * at this point we expect that the mcu has accepted
-		 * our command and is waiting for our new value
-		 * please note that maximum brightness is 255,
-		 * but due to physical layout it is equal to 0, so we simply
-		 * invert the value (MAX VALUE - NEW VALUE).
-		 */
-		if (jornada_ssp_byte(BL_MAX_BRIGHT - bd->props.brightness)
-			!= TXDUMMY) {
-			dev_err(&bd->dev, "set brightness failed\n");
-			ret = -ETIMEDOUT;
-		}
+	/*
+	 * at this point we expect that the mcu has accepted
+	 * our command and is waiting for our new value
+	 * please note that maximum brightness is 255,
+	 * but due to physical layout it is equal to 0, so we simply
+	 * invert the value (MAX VALUE - NEW VALUE).
+	 */
+	if (jornada_ssp_byte(BL_MAX_BRIGHT - bd->props.brightness)
+		!= TXDUMMY) {
+		dev_err(&bd->dev, "set brightness failed\n");
+		ret = -ETIMEDOUT;
+	}
 
-		/*
-		 * If infact we get an TXDUMMY as output we are happy and dont
-		 * make any further comments about it
-		 */
+	/*
+	 * If infact we get an TXDUMMY as output we are happy and dont
+	 * make any further comments about it
+	 */
 out:
 	jornada_ssp_end();
 
@@ -125,7 +121,7 @@ static int jornada_bl_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	bd->props.power = FB_BLANK_UNBLANK;
+	bd->props.power = BACKLIGHT_POWER_ON;
 	bd->props.brightness = BL_DEF_BRIGHT;
 	/*
 	 * note. make sure max brightness is set otherwise

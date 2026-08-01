@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * f75375s.c - driver for the Fintek F75375/SP, F75373 and
  *             F75387SG/RG hardware monitoring features
@@ -13,21 +14,6 @@
  *
  * f75387:
  * http://www.fintek.com.tw/files/productfiles/F75387_V027P.pdf
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
- *
  */
 
 #include <linux/module.h>
@@ -99,7 +85,7 @@ struct f75375_data {
 	const char *name;
 	int kind;
 	struct mutex update_lock; /* protect register access */
-	char valid;
+	bool valid;
 	unsigned long last_updated;	/* In jiffies */
 	unsigned long last_limits;	/* In jiffies */
 
@@ -123,32 +109,6 @@ struct f75375_data {
 	s16 temp11[2];
 	s8 temp_high[2];
 	s8 temp_max_hyst[2];
-};
-
-static int f75375_detect(struct i2c_client *client,
-			 struct i2c_board_info *info);
-static int f75375_probe(struct i2c_client *client,
-			const struct i2c_device_id *id);
-static int f75375_remove(struct i2c_client *client);
-
-static const struct i2c_device_id f75375_id[] = {
-	{ "f75373", f75373 },
-	{ "f75375", f75375 },
-	{ "f75387", f75387 },
-	{ }
-};
-MODULE_DEVICE_TABLE(i2c, f75375_id);
-
-static struct i2c_driver f75375_driver = {
-	.class = I2C_CLASS_HWMON,
-	.driver = {
-		.name = "f75375",
-	},
-	.probe = f75375_probe,
-	.remove = f75375_remove,
-	.id_table = f75375_id,
-	.detect = f75375_detect,
-	.address_list = normal_i2c,
 };
 
 static inline int f75375_read8(struct i2c_client *client, u8 reg)
@@ -243,7 +203,7 @@ static struct f75375_data *f75375_update_device(struct device *dev)
 				f75375_read8(client, F75375_REG_VOLT(nr));
 
 		data->last_updated = jiffies;
-		data->valid = 1;
+		data->valid = true;
 	}
 
 	mutex_unlock(&data->update_lock);
@@ -828,8 +788,7 @@ static void f75375_init(struct i2c_client *client, struct f75375_data *data,
 
 }
 
-static int f75375_probe(struct i2c_client *client,
-		const struct i2c_device_id *id)
+static int f75375_probe(struct i2c_client *client)
 {
 	struct f75375_data *data;
 	struct f75375s_platform_data *f75375s_pdata =
@@ -846,7 +805,7 @@ static int f75375_probe(struct i2c_client *client,
 
 	i2c_set_clientdata(client, data);
 	mutex_init(&data->update_lock);
-	data->kind = id->driver_data;
+	data->kind = (uintptr_t)i2c_get_match_data(client);
 
 	err = sysfs_create_group(&client->dev.kobj, &f75375_group);
 	if (err)
@@ -880,12 +839,11 @@ exit_remove:
 	return err;
 }
 
-static int f75375_remove(struct i2c_client *client)
+static void f75375_remove(struct i2c_client *client)
 {
 	struct f75375_data *data = i2c_get_clientdata(client);
 	hwmon_device_unregister(data->hwmon_dev);
 	sysfs_remove_group(&client->dev.kobj, &f75375_group);
-	return 0;
 }
 
 /* Return 0 if detection is successful, -ENODEV otherwise */
@@ -913,11 +871,30 @@ static int f75375_detect(struct i2c_client *client,
 
 	version = f75375_read8(client, F75375_REG_VERSION);
 	dev_info(&adapter->dev, "found %s version: %02X\n", name, version);
-	strlcpy(info->type, name, I2C_NAME_SIZE);
+	strscpy(info->type, name, I2C_NAME_SIZE);
 
 	return 0;
 }
 
+static const struct i2c_device_id f75375_id[] = {
+	{ .name = "f75373", .driver_data = f75373 },
+	{ .name = "f75375", .driver_data = f75375 },
+	{ .name = "f75387", .driver_data = f75387 },
+	{ }
+};
+MODULE_DEVICE_TABLE(i2c, f75375_id);
+
+static struct i2c_driver f75375_driver = {
+	.class = I2C_CLASS_HWMON,
+	.driver = {
+		.name = "f75375",
+	},
+	.probe = f75375_probe,
+	.remove = f75375_remove,
+	.id_table = f75375_id,
+	.detect = f75375_detect,
+	.address_list = normal_i2c,
+};
 module_i2c_driver(f75375_driver);
 
 MODULE_AUTHOR("Riku Voipio");

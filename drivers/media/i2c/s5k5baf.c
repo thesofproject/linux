@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for Samsung S5K5BAF UXGA 1/5" 2M CMOS Image Sensor
  * with embedded SoC ISP.
@@ -7,20 +8,15 @@
  *
  * Based on S5K6AA driver authored by Sylwester Nawrocki
  * Copyright (C) 2013, Samsung Electronics Co., Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/firmware.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/media.h>
 #include <linux/module.h>
-#include <linux/of_gpio.h>
 #include <linux/of_graph.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
@@ -231,14 +227,9 @@ static const char * const s5k5baf_supply_names[] = {
 };
 #define S5K5BAF_NUM_SUPPLIES ARRAY_SIZE(s5k5baf_supply_names)
 
-struct s5k5baf_gpio {
-	int gpio;
-	int level;
-};
-
 enum s5k5baf_gpio_id {
 	STBY,
-	RST,
+	RSET,
 	NUM_GPIOS,
 };
 
@@ -283,18 +274,16 @@ struct s5k5baf_fw {
 	struct {
 		u16 id;
 		u16 offset;
-	} seq[0];
-	u16 data[0];
+	} seq[];
 };
 
 struct s5k5baf {
-	struct s5k5baf_gpio gpios[NUM_GPIOS];
+	struct gpio_desc *gpios[NUM_GPIOS];
 	enum v4l2_mbus_type bus_type;
 	u8 nlanes;
 	struct regulator_bulk_data supplies[S5K5BAF_NUM_SUPPLIES];
 
 	struct clk *clock;
-	u32 mclk_frequency;
 
 	struct s5k5baf_fw *fw;
 
@@ -373,7 +362,7 @@ static int s5k5baf_fw_parse(struct device *dev, struct s5k5baf_fw **fw,
 	data += S5K5BAG_FW_TAG_LEN;
 	count -= S5K5BAG_FW_TAG_LEN;
 
-	d = devm_kzalloc(dev, count * sizeof(u16), GFP_KERNEL);
+	d = devm_kcalloc(dev, count, sizeof(u16), GFP_KERNEL);
 	if (!d)
 		return -ENOMEM;
 
@@ -514,7 +503,7 @@ static void s5k5baf_write_arr_seq(struct s5k5baf *state, u16 addr,
 
 #define s5k5baf_write_seq(state, addr, seq...) \
 	s5k5baf_write_arr_seq(state, addr, sizeof((char[]){ seq }), \
-			      (const u16 []){ seq });
+			      (const u16 []){ seq })
 
 /* add items count at the beginning of the list */
 #define NSEQ(seq...) sizeof((char[]){ seq }), seq
@@ -566,7 +555,7 @@ static u16 *s5k5baf_fw_get_seq(struct s5k5baf *state, u16 seq_id)
 	if (fw == NULL)
 		return NULL;
 
-	data = fw->data + 2 * fw->count;
+	data = &fw->seq[0].id + 2 * fw->count;
 
 	for (i = 0; i < fw->count; ++i) {
 		if (fw->seq[i].id == seq_id)
@@ -586,7 +575,7 @@ static void s5k5baf_hw_patch(struct s5k5baf *state)
 
 static void s5k5baf_hw_set_clocks(struct s5k5baf *state)
 {
-	unsigned long mclk = state->mclk_frequency / 1000;
+	unsigned long mclk = clk_get_rate(state->clock) / 1000;
 	u16 status;
 	static const u16 nseq_clk_cfg[] = {
 		NSEQ(REG_I_USE_NPVI_CLOCKS,
@@ -766,7 +755,7 @@ static int s5k5baf_hw_set_video_bus(struct s5k5baf *state)
 {
 	u16 en_pkts;
 
-	if (state->bus_type == V4L2_MBUS_CSI2)
+	if (state->bus_type == V4L2_MBUS_CSI2_DPHY)
 		en_pkts = EN_PACKETS_CSI2;
 	else
 		en_pkts = 0;
@@ -940,16 +929,12 @@ static void s5k5baf_hw_set_test_pattern(struct s5k5baf *state, int id)
 
 static void s5k5baf_gpio_assert(struct s5k5baf *state, int id)
 {
-	struct s5k5baf_gpio *gpio = &state->gpios[id];
-
-	gpio_set_value(gpio->gpio, gpio->level);
+	gpiod_set_value_cansleep(state->gpios[id], 1);
 }
 
 static void s5k5baf_gpio_deassert(struct s5k5baf *state, int id)
 {
-	struct s5k5baf_gpio *gpio = &state->gpios[id];
-
-	gpio_set_value(gpio->gpio, !gpio->level);
+	gpiod_set_value_cansleep(state->gpios[id], 0);
 }
 
 static int s5k5baf_power_on(struct s5k5baf *state)
@@ -960,10 +945,6 @@ static int s5k5baf_power_on(struct s5k5baf *state)
 	if (ret < 0)
 		goto err;
 
-	ret = clk_set_rate(state->clock, state->mclk_frequency);
-	if (ret < 0)
-		goto err_reg_dis;
-
 	ret = clk_prepare_enable(state->clock);
 	if (ret < 0)
 		goto err_reg_dis;
@@ -973,7 +954,7 @@ static int s5k5baf_power_on(struct s5k5baf *state)
 
 	s5k5baf_gpio_deassert(state, STBY);
 	usleep_range(50, 100);
-	s5k5baf_gpio_deassert(state, RST);
+	s5k5baf_gpio_deassert(state, RSET);
 	return 0;
 
 err_reg_dis:
@@ -991,7 +972,7 @@ static int s5k5baf_power_off(struct s5k5baf *state)
 	state->apply_cfg = 0;
 	state->apply_crop = 0;
 
-	s5k5baf_gpio_assert(state, RST);
+	s5k5baf_gpio_assert(state, RSET);
 	s5k5baf_gpio_assert(state, STBY);
 
 	if (!IS_ERR(state->clock))
@@ -1132,10 +1113,18 @@ out:
 	return ret;
 }
 
-static int s5k5baf_g_frame_interval(struct v4l2_subdev *sd,
-				   struct v4l2_subdev_frame_interval *fi)
+static int s5k5baf_get_frame_interval(struct v4l2_subdev *sd,
+				      struct v4l2_subdev_state *sd_state,
+				      struct v4l2_subdev_frame_interval *fi)
 {
 	struct s5k5baf *state = to_s5k5baf(sd);
+
+	/*
+	 * FIXME: Implement support for V4L2_SUBDEV_FORMAT_TRY, using the V4L2
+	 * subdev active state API.
+	 */
+	if (fi->which != V4L2_SUBDEV_FORMAT_ACTIVE)
+		return -EINVAL;
 
 	mutex_lock(&state->lock);
 	fi->interval.numerator = state->fiv;
@@ -1145,8 +1134,8 @@ static int s5k5baf_g_frame_interval(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static void s5k5baf_set_frame_interval(struct s5k5baf *state,
-				       struct v4l2_subdev_frame_interval *fi)
+static void __s5k5baf_set_frame_interval(struct s5k5baf *state,
+					 struct v4l2_subdev_frame_interval *fi)
 {
 	struct v4l2_fract *i = &fi->interval;
 
@@ -1169,13 +1158,21 @@ static void s5k5baf_set_frame_interval(struct s5k5baf *state,
 			  state->fiv);
 }
 
-static int s5k5baf_s_frame_interval(struct v4l2_subdev *sd,
-				   struct v4l2_subdev_frame_interval *fi)
+static int s5k5baf_set_frame_interval(struct v4l2_subdev *sd,
+				      struct v4l2_subdev_state *sd_state,
+				      struct v4l2_subdev_frame_interval *fi)
 {
 	struct s5k5baf *state = to_s5k5baf(sd);
 
+	/*
+	 * FIXME: Implement support for V4L2_SUBDEV_FORMAT_TRY, using the V4L2
+	 * subdev active state API.
+	 */
+	if (fi->which != V4L2_SUBDEV_FORMAT_ACTIVE)
+		return -EINVAL;
+
 	mutex_lock(&state->lock);
-	s5k5baf_set_frame_interval(state, fi);
+	__s5k5baf_set_frame_interval(state, fi);
 	mutex_unlock(&state->lock);
 	return 0;
 }
@@ -1184,7 +1181,7 @@ static int s5k5baf_s_frame_interval(struct v4l2_subdev *sd,
  * V4L2 subdev pad level and video operations
  */
 static int s5k5baf_enum_frame_interval(struct v4l2_subdev *sd,
-			      struct v4l2_subdev_pad_config *cfg,
+			      struct v4l2_subdev_state *sd_state,
 			      struct v4l2_subdev_frame_interval_enum *fie)
 {
 	if (fie->index > S5K5BAF_MAX_FR_TIME - S5K5BAF_MIN_FR_TIME ||
@@ -1203,7 +1200,7 @@ static int s5k5baf_enum_frame_interval(struct v4l2_subdev *sd,
 }
 
 static int s5k5baf_enum_mbus_code(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_pad_config *cfg,
+				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
 	if (code->pad == PAD_CIS) {
@@ -1221,7 +1218,7 @@ static int s5k5baf_enum_mbus_code(struct v4l2_subdev *sd,
 }
 
 static int s5k5baf_enum_frame_size(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_pad_config *cfg,
+				  struct v4l2_subdev_state *sd_state,
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
 	int i;
@@ -1278,15 +1275,16 @@ static int s5k5baf_try_isp_format(struct v4l2_mbus_framefmt *mf)
 	return pixfmt;
 }
 
-static int s5k5baf_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
-			  struct v4l2_subdev_format *fmt)
+static int s5k5baf_get_fmt(struct v4l2_subdev *sd,
+			   struct v4l2_subdev_state *sd_state,
+			   struct v4l2_subdev_format *fmt)
 {
 	struct s5k5baf *state = to_s5k5baf(sd);
 	const struct s5k5baf_pixfmt *pixfmt;
 	struct v4l2_mbus_framefmt *mf;
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-		mf = v4l2_subdev_get_try_format(sd, cfg, fmt->pad);
+		mf = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 		fmt->format = *mf;
 		return 0;
 	}
@@ -1308,8 +1306,9 @@ static int s5k5baf_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config
 	return 0;
 }
 
-static int s5k5baf_set_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config *cfg,
-			  struct v4l2_subdev_format *fmt)
+static int s5k5baf_set_fmt(struct v4l2_subdev *sd,
+			   struct v4l2_subdev_state *sd_state,
+			   struct v4l2_subdev_format *fmt)
 {
 	struct v4l2_mbus_framefmt *mf = &fmt->format;
 	struct s5k5baf *state = to_s5k5baf(sd);
@@ -1319,7 +1318,7 @@ static int s5k5baf_set_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_pad_config
 	mf->field = V4L2_FIELD_NONE;
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-		*v4l2_subdev_get_try_format(sd, cfg, fmt->pad) = *mf;
+		*v4l2_subdev_state_get_format(sd_state, fmt->pad) = *mf;
 		return 0;
 	}
 
@@ -1371,7 +1370,7 @@ static int s5k5baf_is_bound_target(u32 target)
 }
 
 static int s5k5baf_get_selection(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_pad_config *cfg,
+				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_selection *sel)
 {
 	enum selection_rect rtype;
@@ -1391,9 +1390,11 @@ static int s5k5baf_get_selection(struct v4l2_subdev *sd,
 
 	if (sel->which == V4L2_SUBDEV_FORMAT_TRY) {
 		if (rtype == R_COMPOSE)
-			sel->r = *v4l2_subdev_get_try_compose(sd, cfg, sel->pad);
+			sel->r = *v4l2_subdev_state_get_compose(sd_state,
+								sel->pad);
 		else
-			sel->r = *v4l2_subdev_get_try_crop(sd, cfg, sel->pad);
+			sel->r = *v4l2_subdev_state_get_crop(sd_state,
+							     sel->pad);
 		return 0;
 	}
 
@@ -1462,7 +1463,7 @@ static bool s5k5baf_cmp_rect(const struct v4l2_rect *r1,
 }
 
 static int s5k5baf_set_selection(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_pad_config *cfg,
+				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_selection *sel)
 {
 	static enum selection_rect rtype;
@@ -1482,11 +1483,11 @@ static int s5k5baf_set_selection(struct v4l2_subdev *sd,
 
 	if (sel->which == V4L2_SUBDEV_FORMAT_TRY) {
 		rects = (struct v4l2_rect * []) {
-				&s5k5baf_cis_rect,
-				v4l2_subdev_get_try_crop(sd, cfg, PAD_CIS),
-				v4l2_subdev_get_try_compose(sd, cfg, PAD_CIS),
-				v4l2_subdev_get_try_crop(sd, cfg, PAD_OUT)
-			};
+			&s5k5baf_cis_rect,
+			v4l2_subdev_state_get_crop(sd_state, PAD_CIS),
+			v4l2_subdev_state_get_compose(sd_state, PAD_CIS),
+			v4l2_subdev_state_get_crop(sd_state, PAD_OUT)
+		};
 		s5k5baf_set_rect_and_adjust(rects, rtype, &sel->r);
 		return 0;
 	}
@@ -1536,11 +1537,11 @@ static const struct v4l2_subdev_pad_ops s5k5baf_pad_ops = {
 	.set_fmt		= s5k5baf_set_fmt,
 	.get_selection		= s5k5baf_get_selection,
 	.set_selection		= s5k5baf_set_selection,
+	.get_frame_interval	= s5k5baf_get_frame_interval,
+	.set_frame_interval	= s5k5baf_set_frame_interval,
 };
 
 static const struct v4l2_subdev_video_ops s5k5baf_video_ops = {
-	.g_frame_interval	= s5k5baf_g_frame_interval,
-	.s_frame_interval	= s5k5baf_s_frame_interval,
 	.s_stream		= s5k5baf_s_stream,
 };
 
@@ -1703,22 +1704,22 @@ static int s5k5baf_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
 	struct v4l2_mbus_framefmt *mf;
 
-	mf = v4l2_subdev_get_try_format(sd, fh->pad, PAD_CIS);
+	mf = v4l2_subdev_state_get_format(fh->state, PAD_CIS);
 	s5k5baf_try_cis_format(mf);
 
 	if (s5k5baf_is_cis_subdev(sd))
 		return 0;
 
-	mf = v4l2_subdev_get_try_format(sd, fh->pad, PAD_OUT);
+	mf = v4l2_subdev_state_get_format(fh->state, PAD_OUT);
 	mf->colorspace = s5k5baf_formats[0].colorspace;
 	mf->code = s5k5baf_formats[0].code;
 	mf->width = s5k5baf_cis_rect.width;
 	mf->height = s5k5baf_cis_rect.height;
 	mf->field = V4L2_FIELD_NONE;
 
-	*v4l2_subdev_get_try_crop(sd, fh->pad, PAD_CIS) = s5k5baf_cis_rect;
-	*v4l2_subdev_get_try_compose(sd, fh->pad, PAD_CIS) = s5k5baf_cis_rect;
-	*v4l2_subdev_get_try_crop(sd, fh->pad, PAD_OUT) = s5k5baf_cis_rect;
+	*v4l2_subdev_state_get_crop(fh->state, PAD_CIS) = s5k5baf_cis_rect;
+	*v4l2_subdev_state_get_compose(fh->state, PAD_CIS) = s5k5baf_cis_rect;
+	*v4l2_subdev_state_get_crop(fh->state, PAD_OUT) = s5k5baf_cis_rect;
 
 	return 0;
 }
@@ -1796,44 +1797,30 @@ static const struct v4l2_subdev_ops s5k5baf_subdev_ops = {
 
 static int s5k5baf_configure_gpios(struct s5k5baf *state)
 {
-	static const char * const name[] = { "S5K5BAF_STBY", "S5K5BAF_RST" };
+	static const char * const name[] = { "stbyn", "rstn" };
+	static const char * const label[] = { "S5K5BAF_STBY", "S5K5BAF_RST" };
 	struct i2c_client *c = v4l2_get_subdevdata(&state->sd);
-	struct s5k5baf_gpio *g = state->gpios;
+	struct gpio_desc *gpio;
 	int ret, i;
 
 	for (i = 0; i < NUM_GPIOS; ++i) {
-		int flags = GPIOF_DIR_OUT;
-		if (g[i].level)
-			flags |= GPIOF_INIT_HIGH;
-		ret = devm_gpio_request_one(&c->dev, g[i].gpio, flags, name[i]);
-		if (ret < 0) {
-			v4l2_err(c, "failed to request gpio %s\n", name[i]);
+		gpio = devm_gpiod_get(&c->dev, name[i], GPIOD_OUT_HIGH);
+		ret = PTR_ERR_OR_ZERO(gpio);
+		if (ret) {
+			v4l2_err(c, "failed to request gpio %s: %d\n",
+				 name[i], ret);
 			return ret;
 		}
-	}
-	return 0;
-}
 
-static int s5k5baf_parse_gpios(struct s5k5baf_gpio *gpios, struct device *dev)
-{
-	static const char * const names[] = {
-		"stbyn-gpios",
-		"rstn-gpios",
-	};
-	struct device_node *node = dev->of_node;
-	enum of_gpio_flags flags;
-	int ret, i;
-
-	for (i = 0; i < NUM_GPIOS; ++i) {
-		ret = of_get_named_gpio_flags(node, names[i], 0, &flags);
-		if (ret < 0) {
-			dev_err(dev, "no %s GPIO pin provided\n", names[i]);
+		ret = gpiod_set_consumer_name(gpio, label[i]);
+		if (ret) {
+			v4l2_err(c, "failed to set up name for gpio %s: %d\n",
+				 name[i], ret);
 			return ret;
 		}
-		gpios[i].gpio = ret;
-		gpios[i].level = !(flags & OF_GPIO_ACTIVE_LOW);
-	}
 
+		state->gpios[i] = gpio;
+	}
 	return 0;
 }
 
@@ -1841,7 +1828,7 @@ static int s5k5baf_parse_device_node(struct s5k5baf *state, struct device *dev)
 {
 	struct device_node *node = dev->of_node;
 	struct device_node *node_ep;
-	struct v4l2_fwnode_endpoint ep;
+	struct v4l2_fwnode_endpoint ep = { .bus_type = 0 };
 	int ret;
 
 	if (!node) {
@@ -1849,19 +1836,7 @@ static int s5k5baf_parse_device_node(struct s5k5baf *state, struct device *dev)
 		return -EINVAL;
 	}
 
-	ret = of_property_read_u32(node, "clock-frequency",
-				   &state->mclk_frequency);
-	if (ret < 0) {
-		state->mclk_frequency = S5K5BAF_DEFAULT_MCLK_FREQ;
-		dev_info(dev, "using default %u Hz clock frequency\n",
-			 state->mclk_frequency);
-	}
-
-	ret = s5k5baf_parse_gpios(state->gpios, dev);
-	if (ret < 0)
-		return ret;
-
-	node_ep = of_graph_get_next_endpoint(node, NULL);
+	node_ep = of_graph_get_endpoint_by_regs(node, 0, -1);
 	if (!node_ep) {
 		dev_err(dev, "no endpoint defined at node %pOF\n", node);
 		return -EINVAL;
@@ -1875,7 +1850,7 @@ static int s5k5baf_parse_device_node(struct s5k5baf *state, struct device *dev)
 	state->bus_type = ep.bus_type;
 
 	switch (state->bus_type) {
-	case V4L2_MBUS_CSI2:
+	case V4L2_MBUS_CSI2_DPHY:
 		state->nlanes = ep.bus.mipi_csi2.num_data_lanes;
 		break;
 	case V4L2_MBUS_PARALLEL:
@@ -1949,8 +1924,7 @@ static int s5k5baf_configure_regulators(struct s5k5baf *state)
 	return ret;
 }
 
-static int s5k5baf_probe(struct i2c_client *c,
-			const struct i2c_device_id *id)
+static int s5k5baf_probe(struct i2c_client *c)
 {
 	struct s5k5baf *state;
 	int ret;
@@ -1980,9 +1954,11 @@ static int s5k5baf_probe(struct i2c_client *c,
 	if (ret < 0)
 		goto err_me;
 
-	state->clock = devm_clk_get(state->sd.dev, S5K5BAF_CLK_NAME);
+	state->clock = devm_v4l2_sensor_clk_get_legacy(state->sd.dev,
+						       S5K5BAF_CLK_NAME, false,
+						       S5K5BAF_DEFAULT_MCLK_FREQ);
 	if (IS_ERR(state->clock)) {
-		ret = -EPROBE_DEFER;
+		ret = PTR_ERR(state->clock);
 		goto err_me;
 	}
 
@@ -2016,7 +1992,7 @@ err_me:
 	return ret;
 }
 
-static int s5k5baf_remove(struct i2c_client *c)
+static void s5k5baf_remove(struct i2c_client *c)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(c);
 	struct s5k5baf *state = to_s5k5baf(sd);
@@ -2028,13 +2004,11 @@ static int s5k5baf_remove(struct i2c_client *c)
 	sd = &state->cis_sd;
 	v4l2_device_unregister_subdev(sd);
 	media_entity_cleanup(&sd->entity);
-
-	return 0;
 }
 
 static const struct i2c_device_id s5k5baf_id[] = {
-	{ S5K5BAF_DRIVER_NAME, 0 },
-	{ },
+	{ .name = S5K5BAF_DRIVER_NAME },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, s5k5baf_id);
 

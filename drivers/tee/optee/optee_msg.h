@@ -1,28 +1,6 @@
+/* SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause) */
 /*
- * Copyright (c) 2015-2016, Linaro Limited
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- * this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Copyright (c) 2015-2021, Linaro Limited
  */
 #ifndef _OPTEE_MSG_H
 #define _OPTEE_MSG_H
@@ -31,14 +9,12 @@
 #include <linux/types.h>
 
 /*
- * This file defines the OP-TEE message protocol used to communicate
+ * This file defines the OP-TEE message protocol (ABI) used to communicate
  * with an instance of OP-TEE running in secure world.
  *
- * This file is divided into three sections.
+ * This file is divided into two sections.
  * 1. Formatting of messages.
  * 2. Requests from normal world
- * 3. Requests from secure world, Remote Procedure Call (RPC), handled by
- *    tee-supplicant.
  */
 
 /*****************************************************************************
@@ -52,6 +28,9 @@
 #define OPTEE_MSG_ATTR_TYPE_RMEM_INPUT		0x5
 #define OPTEE_MSG_ATTR_TYPE_RMEM_OUTPUT		0x6
 #define OPTEE_MSG_ATTR_TYPE_RMEM_INOUT		0x7
+#define OPTEE_MSG_ATTR_TYPE_FMEM_INPUT		OPTEE_MSG_ATTR_TYPE_RMEM_INPUT
+#define OPTEE_MSG_ATTR_TYPE_FMEM_OUTPUT		OPTEE_MSG_ATTR_TYPE_RMEM_OUTPUT
+#define OPTEE_MSG_ATTR_TYPE_FMEM_INOUT		OPTEE_MSG_ATTR_TYPE_RMEM_INOUT
 #define OPTEE_MSG_ATTR_TYPE_TMEM_INPUT		0x9
 #define OPTEE_MSG_ATTR_TYPE_TMEM_OUTPUT		0xa
 #define OPTEE_MSG_ATTR_TYPE_TMEM_INOUT		0xb
@@ -76,8 +55,8 @@
  * Every entry in buffer should point to a 4k page beginning (12 least
  * significant bits must be equal to zero).
  *
- * 12 least significant bints of optee_msg_param.u.tmem.buf_ptr should hold page
- * offset of the user buffer.
+ * 12 least significant bits of optee_msg_param.u.tmem.buf_ptr should hold
+ * page offset of user buffer.
  *
  * So, entries should be placed like members of this structure:
  *
@@ -120,11 +99,13 @@
  */
 #define OPTEE_MSG_NONCONTIG_PAGE_SIZE		4096
 
+#define OPTEE_MSG_FMEM_INVALID_GLOBAL_ID	0xffffffffffffffff
+
 /**
  * struct optee_msg_param_tmem - temporary memory reference parameter
- * @buf_ptr:	Address of the buffer
- * @size:	Size of the buffer
- * @shm_ref:	Temporary shared memory reference, pointer to a struct tee_shm
+ * @buf_ptr:	address of the buffer
+ * @size:	size of the buffer
+ * @shm_ref:	temporary shared memory reference, pointer to a struct tee_shm
  *
  * Secure and normal world communicates pointers as physical address
  * instead of the virtual address. This is because secure and normal world
@@ -141,9 +122,9 @@ struct optee_msg_param_tmem {
 
 /**
  * struct optee_msg_param_rmem - registered memory reference parameter
- * @offs:	Offset into shared memory reference
- * @size:	Size of the buffer
- * @shm_ref:	Shared memory reference, pointer to a struct tee_shm
+ * @offs:	offset into shared memory reference
+ * @size:	size of the buffer
+ * @shm_ref:	shared memory reference, pointer to a struct tee_shm
  */
 struct optee_msg_param_rmem {
 	u64 offs;
@@ -152,7 +133,27 @@ struct optee_msg_param_rmem {
 };
 
 /**
+ * struct optee_msg_param_fmem - FF-A memory reference parameter
+ * @offs_low:		lower bits of offset into shared memory reference
+ * @offs_high:		higher bits of offset into shared memory reference
+ * @internal_offs:	internal offset into the first page of shared memory
+ *			reference
+ * @size:		size of the buffer
+ * @global_id:		global identifier of the shared memory
+ */
+struct optee_msg_param_fmem {
+	u32 offs_low;
+	u16 offs_high;
+	u16 internal_offs;
+	u64 size;
+	u64 global_id;
+};
+
+/**
  * struct optee_msg_param_value - opaque value parameter
+ * @a: first opaque value
+ * @b: second opaque value
+ * @c: third opaque value
  *
  * Value parameters are passed unchecked between normal and secure world.
  */
@@ -167,12 +168,16 @@ struct optee_msg_param_value {
  * @attr:	attributes
  * @tmem:	parameter by temporary memory reference
  * @rmem:	parameter by registered memory reference
+ * @fmem:	parameter by FF-A registered memory reference
  * @value:	parameter by opaque value
+ * @octets:	parameter by octet string
+ * @u:		union holding OP-TEE msg parameter
  *
  * @attr & OPTEE_MSG_ATTR_TYPE_MASK indicates if tmem, rmem or value is used in
- * the union. OPTEE_MSG_ATTR_TYPE_VALUE_* indicates value,
+ * the union. OPTEE_MSG_ATTR_TYPE_VALUE_* indicates value or octets,
  * OPTEE_MSG_ATTR_TYPE_TMEM_* indicates @tmem and
- * OPTEE_MSG_ATTR_TYPE_RMEM_* indicates @rmem,
+ * OPTEE_MSG_ATTR_TYPE_RMEM_* or the alias PTEE_MSG_ATTR_TYPE_FMEM_* indicates
+ * @rmem or @fmem depending on the conduit.
  * OPTEE_MSG_ATTR_TYPE_NONE indicates that none of the members are used.
  */
 struct optee_msg_param {
@@ -180,35 +185,31 @@ struct optee_msg_param {
 	union {
 		struct optee_msg_param_tmem tmem;
 		struct optee_msg_param_rmem rmem;
+		struct optee_msg_param_fmem fmem;
 		struct optee_msg_param_value value;
+		u8 octets[24];
 	} u;
 };
 
 /**
  * struct optee_msg_arg - call argument
- * @cmd: Command, one of OPTEE_MSG_CMD_* or OPTEE_MSG_RPC_CMD_*
- * @func: Trusted Application function, specific to the Trusted Application,
- *	     used if cmd == OPTEE_MSG_CMD_INVOKE_COMMAND
- * @session: In parameter for all OPTEE_MSG_CMD_* except
- *	     OPTEE_MSG_CMD_OPEN_SESSION where it's an output parameter instead
- * @cancel_id: Cancellation id, a unique value to identify this request
- * @ret: return value
- * @ret_origin: origin of the return value
- * @num_params: number of parameters supplied to the OS Command
- * @params: the parameters supplied to the OS Command
+ * @cmd:	command, one of OPTEE_MSG_CMD_* or OPTEE_MSG_RPC_CMD_*
+ * @func:	Trusted Application function, specific to the Trusted
+ *		Application, used if cmd == OPTEE_MSG_CMD_INVOKE_COMMAND
+ * @session:	in parameter for all OPTEE_MSG_CMD_* except
+ *		OPTEE_MSG_CMD_OPEN_SESSION where it's an output parameter
+ *		instead
+ * @cancel_id:	cancellation id, a unique value to identify this request
+ * @pad:	padding for alignment
+ * @ret:	return value
+ * @ret_origin:	origin of the return value
+ * @num_params:	number of parameters supplied to the OS Command
+ * @params:	the parameters supplied to the OS Command
  *
  * All normal calls to Trusted OS uses this struct. If cmd requires further
- * information than what these field holds it can be passed as a parameter
+ * information than what these fields hold it can be passed as a parameter
  * tagged as meta (setting the OPTEE_MSG_ATTR_META bit in corresponding
- * attrs field). All parameters tagged as meta has to come first.
- *
- * Temp memref parameters can be fragmented if supported by the Trusted OS
- * (when optee_smc.h is bearer of this protocol this is indicated with
- * OPTEE_SMC_SEC_CAP_UNREGISTERED_SHM). If a logical memref parameter is
- * fragmented then has all but the last fragment the
- * OPTEE_MSG_ATTR_FRAGMENT bit set in attrs. Even if a memref is fragmented
- * it will still be presented as a single logical memref to the Trusted
- * Application.
+ * attrs field). All parameters tagged as meta have to come first.
  */
 struct optee_msg_arg {
 	u32 cmd;
@@ -221,7 +222,7 @@ struct optee_msg_arg {
 	u32 num_params;
 
 	/* num_params tells the actual number of element in params */
-	struct optee_msg_param params[0];
+	struct optee_msg_param params[];
 };
 
 /**
@@ -246,11 +247,23 @@ struct optee_msg_arg {
  * 384fb3e0-e7f8-11e3-af63-0002a5d5c51b.
  * Represented in 4 32-bit words in OPTEE_MSG_UID_0, OPTEE_MSG_UID_1,
  * OPTEE_MSG_UID_2, OPTEE_MSG_UID_3.
+ *
+ * In the case where the OP-TEE image is loaded by the kernel, this will
+ * initially return an alternate UID to reflect that we are communicating with
+ * the TF-A image loading service at that time instead of OP-TEE. That UID is:
+ * a3fbeab1-1246-315d-c7c4-06b9c03cbea4.
+ * Represented in 4 32-bit words in OPTEE_MSG_IMAGE_LOAD_UID_0,
+ * OPTEE_MSG_IMAGE_LOAD_UID_1, OPTEE_MSG_IMAGE_LOAD_UID_2,
+ * OPTEE_MSG_IMAGE_LOAD_UID_3.
  */
 #define OPTEE_MSG_UID_0			0x384fb3e0
 #define OPTEE_MSG_UID_1			0xe7f811e3
 #define OPTEE_MSG_UID_2			0xaf630002
 #define OPTEE_MSG_UID_3			0xa5d5c51b
+#define OPTEE_MSG_IMAGE_LOAD_UID_0	0xa3fbeab1
+#define OPTEE_MSG_IMAGE_LOAD_UID_1	0x1246315d
+#define OPTEE_MSG_IMAGE_LOAD_UID_2	0xc7c406b9
+#define OPTEE_MSG_IMAGE_LOAD_UID_3	0xc03cbea4
 #define OPTEE_MSG_FUNCID_CALLS_UID	0xFF01
 
 /*
@@ -290,6 +303,18 @@ struct optee_msg_arg {
 #define OPTEE_MSG_FUNCID_GET_OS_REVISION	0x0001
 
 /*
+ * Values used in OPTEE_MSG_CMD_LEND_PROTMEM below
+ * OPTEE_MSG_PROTMEM_RESERVED		Reserved
+ * OPTEE_MSG_PROTMEM_SECURE_VIDEO_PLAY	Secure Video Playback
+ * OPTEE_MSG_PROTMEM_TRUSTED_UI		Trused UI
+ * OPTEE_MSG_PROTMEM_SECURE_VIDEO_RECORD	Secure Video Recording
+ */
+#define OPTEE_MSG_PROTMEM_RESERVED		0
+#define OPTEE_MSG_PROTMEM_SECURE_VIDEO_PLAY	1
+#define OPTEE_MSG_PROTMEM_TRUSTED_UI		2
+#define OPTEE_MSG_PROTMEM_SECURE_VIDEO_RECORD	3
+
+/*
  * Do a secure call with struct optee_msg_arg as argument
  * The OPTEE_MSG_CMD_* below defines what goes in struct optee_msg_arg::cmd
  *
@@ -312,133 +337,81 @@ struct optee_msg_arg {
  * OPTEE_MSG_CMD_REGISTER_SHM registers a shared memory reference. The
  * information is passed as:
  * [in] param[0].attr			OPTEE_MSG_ATTR_TYPE_TMEM_INPUT
- *					[| OPTEE_MSG_ATTR_FRAGMENT]
+ *					[| OPTEE_MSG_ATTR_NONCONTIG]
  * [in] param[0].u.tmem.buf_ptr		physical address (of first fragment)
  * [in] param[0].u.tmem.size		size (of first fragment)
  * [in] param[0].u.tmem.shm_ref		holds shared memory reference
- * ...
- * The shared memory can optionally be fragmented, temp memrefs can follow
- * each other with all but the last with the OPTEE_MSG_ATTR_FRAGMENT bit set.
  *
- * OPTEE_MSG_CMD_UNREGISTER_SHM unregisteres a previously registered shared
+ * OPTEE_MSG_CMD_UNREGISTER_SHM unregisters a previously registered shared
  * memory reference. The information is passed as:
  * [in] param[0].attr			OPTEE_MSG_ATTR_TYPE_RMEM_INPUT
  * [in] param[0].u.rmem.shm_ref		holds shared memory reference
  * [in] param[0].u.rmem.offs		0
  * [in] param[0].u.rmem.size		0
+ *
+ * OPTEE_MSG_CMD_DO_BOTTOM_HALF does the scheduled bottom half processing
+ * of a driver.
+ *
+ * OPTEE_MSG_CMD_STOP_ASYNC_NOTIF informs secure world that from now is
+ * normal world unable to process asynchronous notifications. Typically
+ * used when the driver is shut down.
+ *
+ * OPTEE_MSG_CMD_LEND_PROTMEM lends protected memory. The passed normal
+ * physical memory is protected from normal world access. The memory
+ * should be unmapped prior to this call since it becomes inaccessible
+ * during the request.
+ * Parameters are passed as:
+ * [in] param[0].attr			OPTEE_MSG_ATTR_TYPE_VALUE_INPUT
+ * [in] param[0].u.value.a		OPTEE_MSG_PROTMEM_* defined above
+ * [in] param[1].attr			OPTEE_MSG_ATTR_TYPE_TMEM_INPUT
+ * [in] param[1].u.tmem.buf_ptr		physical address
+ * [in] param[1].u.tmem.size		size
+ * [in] param[1].u.tmem.shm_ref		holds protected memory reference
+ *
+ * OPTEE_MSG_CMD_RECLAIM_PROTMEM reclaims a previously lent protected
+ * memory reference. The physical memory is accessible by the normal world
+ * after this function has return and can be mapped again. The information
+ * is passed as:
+ * [in] param[0].attr			OPTEE_MSG_ATTR_TYPE_VALUE_INPUT
+ * [in] param[0].u.value.a		holds protected memory cookie
+ *
+ * OPTEE_MSG_CMD_GET_PROTMEM_CONFIG get configuration for a specific
+ * protected memory use case. Parameters are passed as:
+ * [in] param[0].attr			OPTEE_MSG_ATTR_TYPE_VALUE_INOUT
+ * [in] param[0].value.a		OPTEE_MSG_PROTMEM_*
+ * [in] param[1].attr			OPTEE_MSG_ATTR_TYPE_{R,F}MEM_OUTPUT
+ * [in] param[1].u.{r,f}mem		Buffer or NULL
+ * [in] param[1].u.{r,f}mem.size	Provided size of buffer or 0 for query
+ * output for the protected use case:
+ * [out] param[0].value.a		Minimal size of protected memory
+ * [out] param[0].value.b		Required alignment of size and start of
+ *					protected memory
+ * [out] param[0].value.c               PA width, max 64
+ * [out] param[1].{r,f}mem.size		Size of output data
+ * [out] param[1].{r,f}mem		If non-NULL, contains an array of
+ *					uint32_t memory attributes that must be
+ *					included when lending memory for this
+ *					use case
+ *
+ * OPTEE_MSG_CMD_ASSIGN_PROTMEM assigns use-case to protected memory
+ * previously lent using the FFA_LEND framework ABI. Parameters are passed
+ * as:
+ * [in] param[0].attr			OPTEE_MSG_ATTR_TYPE_VALUE_INPUT
+ * [in] param[0].u.value.a		holds protected memory cookie
+ * [in] param[0].u.value.b		OPTEE_MSG_PROTMEM_* defined above
  */
-#define OPTEE_MSG_CMD_OPEN_SESSION	0
-#define OPTEE_MSG_CMD_INVOKE_COMMAND	1
-#define OPTEE_MSG_CMD_CLOSE_SESSION	2
-#define OPTEE_MSG_CMD_CANCEL		3
-#define OPTEE_MSG_CMD_REGISTER_SHM	4
-#define OPTEE_MSG_CMD_UNREGISTER_SHM	5
-#define OPTEE_MSG_FUNCID_CALL_WITH_ARG	0x0004
-
-/*****************************************************************************
- * Part 3 - Requests from secure world, RPC
- *****************************************************************************/
-
-/*
- * All RPC is done with a struct optee_msg_arg as bearer of information,
- * struct optee_msg_arg::arg holds values defined by OPTEE_MSG_RPC_CMD_* below
- *
- * RPC communication with tee-supplicant is reversed compared to normal
- * client communication desribed above. The supplicant receives requests
- * and sends responses.
- */
-
-/*
- * Load a TA into memory, defined in tee-supplicant
- */
-#define OPTEE_MSG_RPC_CMD_LOAD_TA	0
-
-/*
- * Reserved
- */
-#define OPTEE_MSG_RPC_CMD_RPMB		1
-
-/*
- * File system access, defined in tee-supplicant
- */
-#define OPTEE_MSG_RPC_CMD_FS		2
-
-/*
- * Get time
- *
- * Returns number of seconds and nano seconds since the Epoch,
- * 1970-01-01 00:00:00 +0000 (UTC).
- *
- * [out] param[0].u.value.a	Number of seconds
- * [out] param[0].u.value.b	Number of nano seconds.
- */
-#define OPTEE_MSG_RPC_CMD_GET_TIME	3
-
-/*
- * Wait queue primitive, helper for secure world to implement a wait queue.
- *
- * If secure world need to wait for a secure world mutex it issues a sleep
- * request instead of spinning in secure world. Conversely is a wakeup
- * request issued when a secure world mutex with a thread waiting thread is
- * unlocked.
- *
- * Waiting on a key
- * [in] param[0].u.value.a OPTEE_MSG_RPC_WAIT_QUEUE_SLEEP
- * [in] param[0].u.value.b wait key
- *
- * Waking up a key
- * [in] param[0].u.value.a OPTEE_MSG_RPC_WAIT_QUEUE_WAKEUP
- * [in] param[0].u.value.b wakeup key
- */
-#define OPTEE_MSG_RPC_CMD_WAIT_QUEUE	4
-#define OPTEE_MSG_RPC_WAIT_QUEUE_SLEEP	0
-#define OPTEE_MSG_RPC_WAIT_QUEUE_WAKEUP	1
-
-/*
- * Suspend execution
- *
- * [in] param[0].value	.a number of milliseconds to suspend
- */
-#define OPTEE_MSG_RPC_CMD_SUSPEND	5
-
-/*
- * Allocate a piece of shared memory
- *
- * Shared memory can optionally be fragmented, to support that additional
- * spare param entries are allocated to make room for eventual fragments.
- * The spare param entries has .attr = OPTEE_MSG_ATTR_TYPE_NONE when
- * unused. All returned temp memrefs except the last should have the
- * OPTEE_MSG_ATTR_FRAGMENT bit set in the attr field.
- *
- * [in]  param[0].u.value.a		type of memory one of
- *					OPTEE_MSG_RPC_SHM_TYPE_* below
- * [in]  param[0].u.value.b		requested size
- * [in]  param[0].u.value.c		required alignment
- *
- * [out] param[0].u.tmem.buf_ptr	physical address (of first fragment)
- * [out] param[0].u.tmem.size		size (of first fragment)
- * [out] param[0].u.tmem.shm_ref	shared memory reference
- * ...
- * [out] param[n].u.tmem.buf_ptr	physical address
- * [out] param[n].u.tmem.size		size
- * [out] param[n].u.tmem.shm_ref	shared memory reference (same value
- *					as in param[n-1].u.tmem.shm_ref)
- */
-#define OPTEE_MSG_RPC_CMD_SHM_ALLOC	6
-/* Memory that can be shared with a non-secure user space application */
-#define OPTEE_MSG_RPC_SHM_TYPE_APPL	0
-/* Memory only shared with non-secure kernel */
-#define OPTEE_MSG_RPC_SHM_TYPE_KERNEL	1
-
-/*
- * Free shared memory previously allocated with OPTEE_MSG_RPC_CMD_SHM_ALLOC
- *
- * [in]  param[0].u.value.a		type of memory one of
- *					OPTEE_MSG_RPC_SHM_TYPE_* above
- * [in]  param[0].u.value.b		value of shared memory reference
- *					returned in param[0].u.tmem.shm_ref
- *					above
- */
-#define OPTEE_MSG_RPC_CMD_SHM_FREE	7
+#define OPTEE_MSG_CMD_OPEN_SESSION		0
+#define OPTEE_MSG_CMD_INVOKE_COMMAND		1
+#define OPTEE_MSG_CMD_CLOSE_SESSION		2
+#define OPTEE_MSG_CMD_CANCEL			3
+#define OPTEE_MSG_CMD_REGISTER_SHM		4
+#define OPTEE_MSG_CMD_UNREGISTER_SHM		5
+#define OPTEE_MSG_CMD_DO_BOTTOM_HALF		6
+#define OPTEE_MSG_CMD_STOP_ASYNC_NOTIF		7
+#define OPTEE_MSG_CMD_LEND_PROTMEM		8
+#define OPTEE_MSG_CMD_RECLAIM_PROTMEM		9
+#define OPTEE_MSG_CMD_GET_PROTMEM_CONFIG	10
+#define OPTEE_MSG_CMD_ASSIGN_PROTMEM		11
+#define OPTEE_MSG_FUNCID_CALL_WITH_ARG		0x0004
 
 #endif /* _OPTEE_MSG_H */

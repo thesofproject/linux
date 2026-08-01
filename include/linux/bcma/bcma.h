@@ -3,7 +3,7 @@
 #define LINUX_BCMA_H_
 
 #include <linux/pci.h>
-#include <linux/mod_devicetable.h>
+#include <linux/device-id/bcma.h>
 
 #include <linux/bcma/bcma_driver_arm_c9.h>
 #include <linux/bcma/bcma_driver_chipcommon.h>
@@ -332,6 +332,8 @@ extern int bcma_arch_register_fallback_sprom(
 		struct ssb_sprom *out));
 
 struct bcma_bus {
+	struct device *dev;
+
 	/* The MMIO area. */
 	void __iomem *mmio;
 
@@ -339,14 +341,7 @@ struct bcma_bus {
 
 	enum bcma_hosttype hosttype;
 	bool host_is_pcie2; /* Used for BCMA_HOSTTYPE_PCI only */
-	union {
-		/* Pointer to the PCI bus (only for BCMA_HOSTTYPE_PCI) */
-		struct pci_dev *host_pci;
-		/* Pointer to the SDIO device (only for BCMA_HOSTTYPE_SDIO) */
-		struct sdio_func *host_sdio;
-		/* Pointer to platform device (only for BCMA_HOSTTYPE_SOC) */
-		struct platform_device *host_pdev;
-	};
+	struct pci_dev *host_pci; /* PCI bus pointer (BCMA_HOSTTYPE_PCI only) */
 
 	struct bcma_chipinfo chipinfo;
 

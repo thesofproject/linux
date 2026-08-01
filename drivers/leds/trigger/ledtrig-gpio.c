@@ -1,18 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ledtrig-gio.c - LED Trigger Based on GPIO events
  *
  * Copyright 2009 Felipe Balbi <me@felipebalbi.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
+ * Copyright 2023 Linus Walleij <linus.walleij@linaro.org>
  */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/leds.h>
 #include <linux/slab.h>
@@ -20,22 +17,17 @@
 
 struct gpio_trig_data {
 	struct led_classdev *led;
-
 	unsigned desired_brightness;	/* desired brightness when led is on */
-	unsigned inverted;		/* true when gpio is inverted */
-	unsigned gpio;			/* gpio that triggers the leds */
+	struct gpio_desc *gpiod;	/* gpio that triggers the led */
 };
 
 static irqreturn_t gpio_trig_irq(int irq, void *_led)
 {
 	struct led_classdev *led = _led;
-	struct gpio_trig_data *gpio_data = led->trigger_data;
+	struct gpio_trig_data *gpio_data = led_get_trigger_data(led);
 	int tmp;
 
-	tmp = gpio_get_value_cansleep(gpio_data->gpio);
-	if (gpio_data->inverted)
-		tmp = !tmp;
-
+	tmp = gpiod_get_value_cansleep(gpio_data->gpiod);
 	if (tmp) {
 		if (gpio_data->desired_brightness)
 			led_set_brightness_nosleep(gpio_data->led,
@@ -49,190 +41,102 @@ static irqreturn_t gpio_trig_irq(int irq, void *_led)
 	return IRQ_HANDLED;
 }
 
-static ssize_t gpio_trig_brightness_show(struct device *dev,
+static ssize_t desired_brightness_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct led_classdev *led = dev_get_drvdata(dev);
-	struct gpio_trig_data *gpio_data = led->trigger_data;
+	struct gpio_trig_data *gpio_data = led_trigger_get_drvdata(dev);
 
-	return sprintf(buf, "%u\n", gpio_data->desired_brightness);
+	return sysfs_emit(buf, "%u\n", gpio_data->desired_brightness);
 }
 
-static ssize_t gpio_trig_brightness_store(struct device *dev,
+static ssize_t desired_brightness_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t n)
 {
-	struct led_classdev *led = dev_get_drvdata(dev);
-	struct gpio_trig_data *gpio_data = led->trigger_data;
-	unsigned desired_brightness;
+	struct gpio_trig_data *gpio_data = led_trigger_get_drvdata(dev);
+	u8 desired_brightness;
 	int ret;
 
-	ret = sscanf(buf, "%u", &desired_brightness);
-	if (ret < 1 || desired_brightness > 255) {
-		dev_err(dev, "invalid value\n");
-		return -EINVAL;
-	}
+	ret = kstrtou8(buf, 10, &desired_brightness);
+	if (ret)
+		return ret;
 
 	gpio_data->desired_brightness = desired_brightness;
 
 	return n;
 }
-static DEVICE_ATTR(desired_brightness, 0644, gpio_trig_brightness_show,
-		gpio_trig_brightness_store);
+static DEVICE_ATTR_RW(desired_brightness);
 
-static ssize_t gpio_trig_inverted_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
+static struct attribute *gpio_trig_attrs[] = {
+	&dev_attr_desired_brightness.attr,
+	NULL
+};
+ATTRIBUTE_GROUPS(gpio_trig);
+
+static int gpio_trig_activate(struct led_classdev *led)
 {
-	struct led_classdev *led = dev_get_drvdata(dev);
-	struct gpio_trig_data *gpio_data = led->trigger_data;
-
-	return sprintf(buf, "%u\n", gpio_data->inverted);
-}
-
-static ssize_t gpio_trig_inverted_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t n)
-{
-	struct led_classdev *led = dev_get_drvdata(dev);
-	struct gpio_trig_data *gpio_data = led->trigger_data;
-	unsigned long inverted;
+	struct gpio_trig_data *gpio_data;
+	struct device *dev = led->dev;
 	int ret;
 
-	ret = kstrtoul(buf, 10, &inverted);
-	if (ret < 0)
+	gpio_data = kzalloc_obj(*gpio_data);
+	if (!gpio_data)
+		return -ENOMEM;
+
+	/*
+	 * The generic property "trigger-sources" is followed,
+	 * and we hope that this is a GPIO.
+	 */
+	gpio_data->gpiod = gpiod_get_optional(dev, "trigger-sources",
+					      GPIOD_IN | GPIOD_FLAGS_BIT_NONEXCLUSIVE);
+	if (IS_ERR(gpio_data->gpiod)) {
+		ret = PTR_ERR(gpio_data->gpiod);
+		kfree(gpio_data);
 		return ret;
-
-	if (inverted > 1)
-		return -EINVAL;
-
-	gpio_data->inverted = inverted;
-
-	/* After inverting, we need to update the LED. */
-	gpio_trig_irq(0, led);
-
-	return n;
-}
-static DEVICE_ATTR(inverted, 0644, gpio_trig_inverted_show,
-		gpio_trig_inverted_store);
-
-static ssize_t gpio_trig_gpio_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct led_classdev *led = dev_get_drvdata(dev);
-	struct gpio_trig_data *gpio_data = led->trigger_data;
-
-	return sprintf(buf, "%u\n", gpio_data->gpio);
-}
-
-static ssize_t gpio_trig_gpio_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t n)
-{
-	struct led_classdev *led = dev_get_drvdata(dev);
-	struct gpio_trig_data *gpio_data = led->trigger_data;
-	unsigned gpio;
-	int ret;
-
-	ret = sscanf(buf, "%u", &gpio);
-	if (ret < 1) {
-		dev_err(dev, "couldn't read gpio number\n");
+	}
+	if (!gpio_data->gpiod) {
+		dev_err(dev, "no valid GPIO for the trigger\n");
+		kfree(gpio_data);
 		return -EINVAL;
 	}
 
-	if (gpio_data->gpio == gpio)
-		return n;
+	gpiod_set_consumer_name(gpio_data->gpiod, "led-trigger");
 
-	if (!gpio) {
-		if (gpio_data->gpio != 0)
-			free_irq(gpio_to_irq(gpio_data->gpio), led);
-		gpio_data->gpio = 0;
-		return n;
-	}
+	gpio_data->led = led;
+	led_set_trigger_data(led, gpio_data);
 
-	ret = request_threaded_irq(gpio_to_irq(gpio), NULL, gpio_trig_irq,
+	ret = request_threaded_irq(gpiod_to_irq(gpio_data->gpiod), NULL, gpio_trig_irq,
 			IRQF_ONESHOT | IRQF_SHARED | IRQF_TRIGGER_RISING
 			| IRQF_TRIGGER_FALLING, "ledtrig-gpio", led);
 	if (ret) {
 		dev_err(dev, "request_irq failed with error %d\n", ret);
-	} else {
-		if (gpio_data->gpio != 0)
-			free_irq(gpio_to_irq(gpio_data->gpio), led);
-		gpio_data->gpio = gpio;
-		/* After changing the GPIO, we need to update the LED. */
-		gpio_trig_irq(0, led);
+		gpiod_put(gpio_data->gpiod);
+		kfree(gpio_data);
+		return ret;
 	}
 
-	return ret ? ret : n;
-}
-static DEVICE_ATTR(gpio, 0644, gpio_trig_gpio_show, gpio_trig_gpio_store);
+	/* Finally update the LED to initial status */
+	gpio_trig_irq(0, led);
 
-static void gpio_trig_activate(struct led_classdev *led)
-{
-	struct gpio_trig_data *gpio_data;
-	int ret;
-
-	gpio_data = kzalloc(sizeof(*gpio_data), GFP_KERNEL);
-	if (!gpio_data)
-		return;
-
-	ret = device_create_file(led->dev, &dev_attr_gpio);
-	if (ret)
-		goto err_gpio;
-
-	ret = device_create_file(led->dev, &dev_attr_inverted);
-	if (ret)
-		goto err_inverted;
-
-	ret = device_create_file(led->dev, &dev_attr_desired_brightness);
-	if (ret)
-		goto err_brightness;
-
-	gpio_data->led = led;
-	led->trigger_data = gpio_data;
-	led->activated = true;
-
-	return;
-
-err_brightness:
-	device_remove_file(led->dev, &dev_attr_inverted);
-
-err_inverted:
-	device_remove_file(led->dev, &dev_attr_gpio);
-
-err_gpio:
-	kfree(gpio_data);
+	return 0;
 }
 
 static void gpio_trig_deactivate(struct led_classdev *led)
 {
-	struct gpio_trig_data *gpio_data = led->trigger_data;
+	struct gpio_trig_data *gpio_data = led_get_trigger_data(led);
 
-	if (led->activated) {
-		device_remove_file(led->dev, &dev_attr_gpio);
-		device_remove_file(led->dev, &dev_attr_inverted);
-		device_remove_file(led->dev, &dev_attr_desired_brightness);
-		if (gpio_data->gpio != 0)
-			free_irq(gpio_to_irq(gpio_data->gpio), led);
-		kfree(gpio_data);
-		led->activated = false;
-	}
+	free_irq(gpiod_to_irq(gpio_data->gpiod), led);
+	gpiod_put(gpio_data->gpiod);
+	kfree(gpio_data);
 }
 
 static struct led_trigger gpio_led_trigger = {
 	.name		= "gpio",
 	.activate	= gpio_trig_activate,
 	.deactivate	= gpio_trig_deactivate,
+	.groups		= gpio_trig_groups,
 };
-
-static int __init gpio_trig_init(void)
-{
-	return led_trigger_register(&gpio_led_trigger);
-}
-module_init(gpio_trig_init);
-
-static void __exit gpio_trig_exit(void)
-{
-	led_trigger_unregister(&gpio_led_trigger);
-}
-module_exit(gpio_trig_exit);
+module_led_trigger(gpio_led_trigger);
 
 MODULE_AUTHOR("Felipe Balbi <me@felipebalbi.com>");
 MODULE_DESCRIPTION("GPIO LED trigger");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");

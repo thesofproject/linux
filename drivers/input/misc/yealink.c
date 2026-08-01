@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * drivers/usb/input/yealink.c
  *
  * Copyright (c) 2005 Henk Vergonet <Henk.Vergonet@gmail.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 /*
  * Description:
@@ -35,21 +22,12 @@
  *   - Olivier Vandorpe, for providing the usbb2k-api.
  *   - Martin Diehl, for spotting my memory allocation bug.
  *
- * History:
- *   20050527 henk	First version, functional keyboard. Keyboard events
- *			will pop-up on the ../input/eventX bus.
- *   20050531 henk	Added led, LCD, dialtone and sysfs interface.
- *   20050610 henk	Cleanups, make it ready for public consumption.
- *   20050630 henk	Cleanups, fixes in response to comments.
- *   20050701 henk	sysfs write serialisation, fix potential unload races
- *   20050801 henk	Added ringtone, restructure USB
- *   20050816 henk	Merge 2.6.13-rc6
  */
 
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/rwsem.h>
+#include <linux/mutex.h>
 #include <linux/usb/input.h>
 #include <linux/map_to_7segment.h>
 
@@ -115,6 +93,8 @@ struct yealink_dev {
 
 	u8 lcdMap[ARRAY_SIZE(lcdMap)];	/* state of LCD, LED ... */
 	int key_code;			/* last reported key	 */
+
+	struct mutex sysfs_mutex;
 
 	unsigned int shutdown:1;
 
@@ -388,7 +368,7 @@ send_update:
 		if (len > sizeof(yld->ctl_data->data))
 			len = sizeof(yld->ctl_data->data);
 
-		/* Combine up to <len> consecutive LCD bytes in a singe request
+		/* Combine up to <len> consecutive LCD bytes in a single request
 		 */
 		yld->ctl_data->cmd	= CMD_LCD;
 		yld->ctl_data->offset	= cpu_to_be16(ix);
@@ -561,8 +541,6 @@ static void input_close(struct input_dev *dev)
  * sysfs interface
  ******************************************************************************/
 
-static DECLARE_RWSEM(sysfs_rwsema);
-
 /* Interface to the 7-segments translation table aka. char set.
  */
 static ssize_t show_map(struct device *dev, struct device_attribute *attr,
@@ -593,15 +571,10 @@ static ssize_t store_map(struct device *dev, struct device_attribute *attr,
  */
 static ssize_t show_line(struct device *dev, char *buf, int a, int b)
 {
-	struct yealink_dev *yld;
+	struct yealink_dev *yld = dev_get_drvdata(dev);
 	int i;
 
-	down_read(&sysfs_rwsema);
-	yld = dev_get_drvdata(dev);
-	if (yld == NULL) {
-		up_read(&sysfs_rwsema);
-		return -ENODEV;
-	}
+	guard(mutex)(&yld->sysfs_mutex);
 
 	for (i = a; i < b; i++)
 		*buf++ = lcdMap[i].type;
@@ -611,7 +584,6 @@ static ssize_t show_line(struct device *dev, char *buf, int a, int b)
 	*buf++ = '\n';
 	*buf = 0;
 
-	up_read(&sysfs_rwsema);
 	return 3 + ((b - a) << 1);
 }
 
@@ -633,7 +605,7 @@ static ssize_t show_line3(struct device *dev, struct device_attribute *attr,
 	return show_line(dev, buf, LCD_LINE3_OFFSET, LCD_LINE4_OFFSET);
 }
 
-/* Writing to /sys/../lineX will set the coresponding LCD line.
+/* Writing to /sys/../lineX will set the corresponding LCD line.
  * - Excess characters are ignored.
  * - If less characters are written than allowed, the remaining digits are
  *   unchanged.
@@ -643,22 +615,16 @@ static ssize_t show_line3(struct device *dev, struct device_attribute *attr,
 static ssize_t store_line(struct device *dev, const char *buf, size_t count,
 		int el, size_t len)
 {
-	struct yealink_dev *yld;
+	struct yealink_dev *yld = dev_get_drvdata(dev);
 	int i;
 
-	down_write(&sysfs_rwsema);
-	yld = dev_get_drvdata(dev);
-	if (yld == NULL) {
-		up_write(&sysfs_rwsema);
-		return -ENODEV;
-	}
+	guard(mutex)(&yld->sysfs_mutex);
 
 	if (len > count)
 		len = count;
 	for (i = 0; i < len; i++)
 		setChar(yld, el++, buf[i]);
 
-	up_write(&sysfs_rwsema);
 	return count;
 }
 
@@ -688,15 +654,10 @@ static ssize_t store_line3(struct device *dev, struct device_attribute *attr,
 static ssize_t get_icons(struct device *dev, struct device_attribute *attr,
 			char *buf)
 {
-	struct yealink_dev *yld;
+	struct yealink_dev *yld = dev_get_drvdata(dev);
 	int i, ret = 1;
 
-	down_read(&sysfs_rwsema);
-	yld = dev_get_drvdata(dev);
-	if (yld == NULL) {
-		up_read(&sysfs_rwsema);
-		return -ENODEV;
-	}
+	guard(mutex)(&yld->sysfs_mutex);
 
 	for (i = 0; i < ARRAY_SIZE(lcdMap); i++) {
 		if (lcdMap[i].type != '.')
@@ -705,7 +666,7 @@ static ssize_t get_icons(struct device *dev, struct device_attribute *attr,
 				yld->lcdMap[i] == ' ' ? "  " : "on",
 				lcdMap[i].u.p.name);
 	}
-	up_read(&sysfs_rwsema);
+
 	return ret;
 }
 
@@ -713,15 +674,10 @@ static ssize_t get_icons(struct device *dev, struct device_attribute *attr,
 static ssize_t set_icon(struct device *dev, const char *buf, size_t count,
 			int chr)
 {
-	struct yealink_dev *yld;
+	struct yealink_dev *yld = dev_get_drvdata(dev);
 	int i;
 
-	down_write(&sysfs_rwsema);
-	yld = dev_get_drvdata(dev);
-	if (yld == NULL) {
-		up_write(&sysfs_rwsema);
-		return -ENODEV;
-	}
+	guard(mutex)(&yld->sysfs_mutex);
 
 	for (i = 0; i < ARRAY_SIZE(lcdMap); i++) {
 		if (lcdMap[i].type != '.')
@@ -732,7 +688,6 @@ static ssize_t set_icon(struct device *dev, const char *buf, size_t count,
 		}
 	}
 
-	up_write(&sysfs_rwsema);
 	return count;
 }
 
@@ -752,22 +707,16 @@ static ssize_t hide_icon(struct device *dev, struct device_attribute *attr,
  */
 
 /* Stores raw ringtone data in the phone */
-static ssize_t store_ringtone(struct device *dev,
-		struct device_attribute *attr,
-		const char *buf, size_t count)
+static ssize_t store_ringtone(struct device *dev, struct device_attribute *attr,
+			      const char *buf, size_t count)
 {
-	struct yealink_dev *yld;
+	struct yealink_dev *yld = dev_get_drvdata(dev);
 
-	down_write(&sysfs_rwsema);
-	yld = dev_get_drvdata(dev);
-	if (yld == NULL) {
-		up_write(&sysfs_rwsema);
-		return -ENODEV;
-	}
+	guard(mutex)(&yld->sysfs_mutex);
 
 	/* TODO locking with async usb control interface??? */
 	yealink_set_ringtone(yld, (char *)buf, count);
-	up_write(&sysfs_rwsema);
+
 	return count;
 }
 
@@ -784,7 +733,7 @@ static DEVICE_ATTR(show_icon	, _M220, NULL		, show_icon	);
 static DEVICE_ATTR(hide_icon	, _M220, NULL		, hide_icon	);
 static DEVICE_ATTR(ringtone	, _M220, NULL		, store_ringtone);
 
-static struct attribute *yld_attributes[] = {
+static struct attribute *yld_attrs[] = {
 	&dev_attr_line1.attr,
 	&dev_attr_line2.attr,
 	&dev_attr_line3.attr,
@@ -795,10 +744,7 @@ static struct attribute *yld_attributes[] = {
 	&dev_attr_ringtone.attr,
 	NULL
 };
-
-static const struct attribute_group yld_attr_group = {
-	.attrs = yld_attributes
-};
+ATTRIBUTE_GROUPS(yld);
 
 /*******************************************************************************
  * Linux interface and usb initialisation
@@ -851,15 +797,10 @@ static int usb_cleanup(struct yealink_dev *yld, int err)
 
 static void usb_disconnect(struct usb_interface *intf)
 {
-	struct yealink_dev *yld;
-
-	down_write(&sysfs_rwsema);
-	yld = usb_get_intfdata(intf);
-	sysfs_remove_group(&intf->dev.kobj, &yld_attr_group);
-	usb_set_intfdata(intf, NULL);
-	up_write(&sysfs_rwsema);
+	struct yealink_dev *yld = usb_get_intfdata(intf);
 
 	usb_cleanup(yld, 0);
+	usb_set_intfdata(intf, NULL);
 }
 
 static int usb_probe(struct usb_interface *intf, const struct usb_device_id *id)
@@ -881,12 +822,13 @@ static int usb_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	if (!usb_endpoint_is_int_in(endpoint))
 		return -ENODEV;
 
-	yld = kzalloc(sizeof(struct yealink_dev), GFP_KERNEL);
+	yld = kzalloc_obj(*yld);
 	if (!yld)
 		return -ENOMEM;
 
 	yld->udev = udev;
 	yld->intf = intf;
+	mutex_init(&yld->sysfs_mutex);
 
 	yld->idev = input_dev = input_allocate_device();
 	if (!input_dev)
@@ -894,16 +836,16 @@ static int usb_probe(struct usb_interface *intf, const struct usb_device_id *id)
 
 	/* allocate usb buffers */
 	yld->irq_data = usb_alloc_coherent(udev, USB_PKT_LEN,
-					   GFP_ATOMIC, &yld->irq_dma);
+					   GFP_KERNEL, &yld->irq_dma);
 	if (yld->irq_data == NULL)
 		return usb_cleanup(yld, -ENOMEM);
 
 	yld->ctl_data = usb_alloc_coherent(udev, USB_PKT_LEN,
-					   GFP_ATOMIC, &yld->ctl_dma);
+					   GFP_KERNEL, &yld->ctl_dma);
 	if (!yld->ctl_data)
 		return usb_cleanup(yld, -ENOMEM);
 
-	yld->ctl_req = kmalloc(sizeof(*(yld->ctl_req)), GFP_KERNEL);
+	yld->ctl_req = kmalloc_obj(*(yld->ctl_req));
 	if (yld->ctl_req == NULL)
 		return usb_cleanup(yld, -ENOMEM);
 
@@ -918,7 +860,7 @@ static int usb_probe(struct usb_interface *intf, const struct usb_device_id *id)
 
 	/* get a handle to the interrupt data pipe */
 	pipe = usb_rcvintpipe(udev, endpoint->bEndpointAddress);
-	ret = usb_maxpacket(udev, pipe, usb_pipeout(pipe));
+	ret = usb_maxpacket(udev, pipe);
 	if (ret != USB_PKT_LEN)
 		dev_err(&intf->dev, "invalid payload size %d, expected %zd\n",
 			ret, USB_PKT_LEN);
@@ -988,8 +930,6 @@ static int usb_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	store_line3(&intf->dev, NULL,
 			DRIVER_VERSION, sizeof(DRIVER_VERSION));
 
-	/* Register sysfs hooks (don't care about failure) */
-	ret = sysfs_create_group(&intf->dev.kobj, &yld_attr_group);
 	return 0;
 }
 
@@ -998,6 +938,7 @@ static struct usb_driver yealink_driver = {
 	.probe		= usb_probe,
 	.disconnect	= usb_disconnect,
 	.id_table	= usb_table,
+	.dev_groups	= yld_groups,
 };
 
 module_usb_driver(yealink_driver);

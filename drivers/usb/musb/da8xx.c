@@ -17,9 +17,11 @@
 #include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/io.h>
+#include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/phy/phy.h>
 #include <linux/platform_device.h>
+#include <linux/string_choices.h>
 #include <linux/dma-mapping.h>
 #include <linux/usb/usb_phy_generic.h>
 
@@ -121,7 +123,8 @@ static void da8xx_musb_set_vbus(struct musb *musb, int is_on)
 
 static void otg_timer(struct timer_list *t)
 {
-	struct musb		*musb = from_timer(musb, t, dev_timer);
+	struct musb		*musb = timer_container_of(musb, t,
+							      dev_timer);
 	void __iomem		*mregs = musb->mregs;
 	u8			devctl;
 	unsigned long		flags;
@@ -190,7 +193,7 @@ static void otg_timer(struct timer_list *t)
 	spin_unlock_irqrestore(&musb->lock, flags);
 }
 
-static void da8xx_musb_try_idle(struct musb *musb, unsigned long timeout)
+static void __maybe_unused da8xx_musb_try_idle(struct musb *musb, unsigned long timeout)
 {
 	static unsigned long last_timer;
 
@@ -202,7 +205,7 @@ static void da8xx_musb_try_idle(struct musb *musb, unsigned long timeout)
 				musb->xceiv->otg->state == OTG_STATE_A_WAIT_BCON)) {
 		dev_dbg(musb->controller, "%s active, deleting timer\n",
 			usb_otg_state_string(musb->xceiv->otg->state));
-		del_timer(&musb->dev_timer);
+		timer_delete(&musb->dev_timer);
 		last_timer = jiffies;
 		return;
 	}
@@ -219,11 +222,17 @@ static void da8xx_musb_try_idle(struct musb *musb, unsigned long timeout)
 	mod_timer(&musb->dev_timer, timeout);
 }
 
+static int da8xx_babble_recover(struct musb *musb)
+{
+	dev_dbg(musb->controller, "resetting controller to recover from babble\n");
+	musb_writel(musb->ctrl_base, DA8XX_USB_CTRL_REG, DA8XX_SOFT_RESET_MASK);
+	return 0;
+}
+
 static irqreturn_t da8xx_musb_interrupt(int irq, void *hci)
 {
 	struct musb		*musb = hci;
 	void __iomem		*reg_base = musb->ctrl_base;
-	struct usb_otg		*otg = musb->xceiv->otg;
 	unsigned long		flags;
 	irqreturn_t		ret = IRQ_NONE;
 	u32			status;
@@ -280,10 +289,9 @@ static irqreturn_t da8xx_musb_interrupt(int irq, void *hci)
 			WARNING("VBUS error workaround (delay coming)\n");
 		} else if (drvvbus) {
 			MUSB_HST_MODE(musb);
-			otg->default_a = 1;
 			musb->xceiv->otg->state = OTG_STATE_A_WAIT_VRISE;
 			portstate(musb->port1_status |= USB_PORT_STAT_POWER);
-			del_timer(&musb->dev_timer);
+			timer_delete(&musb->dev_timer);
 		} else if (!(musb->int_usb & MUSB_INTR_BABBLE)) {
 			/*
 			 * When babble condition happens, drvvbus interrupt
@@ -295,13 +303,12 @@ static irqreturn_t da8xx_musb_interrupt(int irq, void *hci)
 			 */
 			musb->is_active = 0;
 			MUSB_DEV_MODE(musb);
-			otg->default_a = 0;
 			musb->xceiv->otg->state = OTG_STATE_B_IDLE;
 			portstate(musb->port1_status &= ~USB_PORT_STAT_POWER);
 		}
 
 		dev_dbg(musb->controller, "VBUS %s (%s)%s, devctl %02x\n",
-				drvvbus ? "on" : "off",
+				str_on_off(drvvbus),
 				usb_otg_state_string(musb->xceiv->otg->state),
 				err ? " ERROR" : "",
 				devctl);
@@ -329,13 +336,6 @@ static int da8xx_musb_set_mode(struct musb *musb, u8 musb_mode)
 {
 	struct da8xx_glue *glue = dev_get_drvdata(musb->controller->parent);
 	enum phy_mode phy_mode;
-
-	/*
-	 * The PHY has some issues when it is forced in device or host mode.
-	 * Unless the user request another mode, configure the PHY in OTG mode.
-	 */
-	if (!musb->is_initialized)
-		return phy_set_mode(glue->phy, PHY_MODE_USB_OTG);
 
 	switch (musb_mode) {
 	case MUSB_HOST:		/* Force VBUS valid, ID = 0 */
@@ -371,8 +371,10 @@ static int da8xx_musb_init(struct musb *musb)
 
 	/* Returns zero if e.g. not clocked */
 	rev = musb_readl(reg_base, DA8XX_USB_REVISION_REG);
-	if (!rev)
+	if (!rev) {
+		ret = -ENODEV;
 		goto fail;
+	}
 
 	musb->xceiv = usb_get_phy(USB_PHY_TYPE_USB2);
 	if (IS_ERR_OR_NULL(musb->xceiv)) {
@@ -418,7 +420,7 @@ static int da8xx_musb_exit(struct musb *musb)
 {
 	struct da8xx_glue *glue = dev_get_drvdata(musb->controller->parent);
 
-	del_timer_sync(&musb->dev_timer);
+	timer_delete_sync(&musb->dev_timer);
 
 	phy_power_off(glue->phy);
 	phy_exit(glue->phy);
@@ -483,7 +485,11 @@ static const struct musb_platform_ops da8xx_ops = {
 	.disable	= da8xx_musb_disable,
 
 	.set_mode	= da8xx_musb_set_mode,
+
+#ifndef CONFIG_USB_MUSB_HOST
 	.try_idle	= da8xx_musb_try_idle,
+#endif
+	.recover	= da8xx_babble_recover,
 
 	.set_vbus	= da8xx_musb_set_vbus,
 };
@@ -508,7 +514,6 @@ static struct of_dev_auxdata da8xx_auxdata_lookup[] = {
 
 static int da8xx_probe(struct platform_device *pdev)
 {
-	struct resource musb_resources[2];
 	struct musb_hdrc_platform_data	*pdata = dev_get_platdata(&pdev->dev);
 	struct da8xx_glue		*glue;
 	struct platform_device_info	pinfo;
@@ -527,11 +532,9 @@ static int da8xx_probe(struct platform_device *pdev)
 	}
 
 	glue->phy = devm_phy_get(&pdev->dev, "usb-phy");
-	if (IS_ERR(glue->phy)) {
-		if (PTR_ERR(glue->phy) != -EPROBE_DEFER)
-			dev_err(&pdev->dev, "failed to get phy\n");
-		return PTR_ERR(glue->phy);
-	}
+	if (IS_ERR(glue->phy))
+		return dev_err_probe(&pdev->dev, PTR_ERR(glue->phy),
+				     "failed to get phy\n");
 
 	glue->dev			= &pdev->dev;
 	glue->clk			= clk;
@@ -559,46 +562,37 @@ static int da8xx_probe(struct platform_device *pdev)
 	ret = of_platform_populate(pdev->dev.of_node, NULL,
 				   da8xx_auxdata_lookup, &pdev->dev);
 	if (ret)
-		return ret;
-
-	memset(musb_resources, 0x00, sizeof(*musb_resources) *
-			ARRAY_SIZE(musb_resources));
-
-	musb_resources[0].name = pdev->resource[0].name;
-	musb_resources[0].start = pdev->resource[0].start;
-	musb_resources[0].end = pdev->resource[0].end;
-	musb_resources[0].flags = pdev->resource[0].flags;
-
-	musb_resources[1].name = pdev->resource[1].name;
-	musb_resources[1].start = pdev->resource[1].start;
-	musb_resources[1].end = pdev->resource[1].end;
-	musb_resources[1].flags = pdev->resource[1].flags;
+		goto err_unregister_phy;
 
 	pinfo = da8xx_dev_info;
 	pinfo.parent = &pdev->dev;
-	pinfo.res = musb_resources;
-	pinfo.num_res = ARRAY_SIZE(musb_resources);
+	pinfo.res = pdev->resource;
+	pinfo.num_res = pdev->num_resources;
 	pinfo.data = pdata;
 	pinfo.size_data = sizeof(*pdata);
+	pinfo.fwnode = of_fwnode_handle(np);
+	pinfo.of_node_reused = true;
 
 	glue->musb = platform_device_register_full(&pinfo);
 	ret = PTR_ERR_OR_ZERO(glue->musb);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to register musb device: %d\n", ret);
-		usb_phy_generic_unregister(glue->usb_phy);
+		goto err_unregister_phy;
 	}
 
+	return 0;
+
+err_unregister_phy:
+	usb_phy_generic_unregister(glue->usb_phy);
 	return ret;
 }
 
-static int da8xx_remove(struct platform_device *pdev)
+static void da8xx_remove(struct platform_device *pdev)
 {
 	struct da8xx_glue		*glue = platform_get_drvdata(pdev);
 
 	platform_device_unregister(glue->musb);
 	usb_phy_generic_unregister(glue->usb_phy);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP

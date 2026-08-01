@@ -1,21 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * Marvell Wireless LAN device driver: management IE handling- setting and
+ * NXP Wireless LAN device driver: management IE handling- setting and
  * deleting IE.
  *
- * Copyright (C) 2012-2014, Marvell International Ltd.
- *
- * This software file (the "File") is distributed by Marvell International
- * Ltd. under the terms of the GNU General Public License Version 2, June 1991
- * (the "License").  You may use, redistribute and/or modify this File in
- * accordance with the terms and conditions of the License, a copy of which
- * is available by writing to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA or on the
- * worldwide web at http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt.
- *
- * THE FILE IS DISTRIBUTED AS-IS, WITHOUT WARRANTY OF ANY KIND, AND THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE
- * ARE EXPRESSLY DISCLAIMED.  The License provides additional details about
- * this warranty disclaimer.
+ * Copyright 2011-2020 NXP
  */
 
 #include "main.h"
@@ -161,7 +149,7 @@ mwifiex_update_uap_custom_ie(struct mwifiex_private *priv,
 	u16 len;
 	int ret;
 
-	ap_custom_ie = kzalloc(sizeof(*ap_custom_ie), GFP_KERNEL);
+	ap_custom_ie = kzalloc_obj(*ap_custom_ie);
 	if (!ap_custom_ie)
 		return -ENOMEM;
 
@@ -233,14 +221,16 @@ static int mwifiex_update_vs_ie(const u8 *ies, int ies_len,
 	vendor_ie = cfg80211_find_vendor_ie(oui, oui_type, ies, ies_len);
 	if (vendor_ie) {
 		if (!*ie_ptr) {
-			*ie_ptr = kzalloc(sizeof(struct mwifiex_ie),
-					  GFP_KERNEL);
+			*ie_ptr = kzalloc_obj(struct mwifiex_ie);
 			if (!*ie_ptr)
 				return -ENOMEM;
 			ie = *ie_ptr;
 		}
 
 		vs_ie = (struct ieee_types_header *)vendor_ie;
+		if (le16_to_cpu(ie->ie_length) + vs_ie->len + 2 >
+			IEEE_MAX_IE_SIZE)
+			return -EINVAL;
 		memcpy(ie->ie_buffer + le16_to_cpu(ie->ie_length),
 		       vs_ie, vs_ie->len + 2);
 		le16_unaligned_add_cpu(&ie->ie_length, vs_ie->len + 2);
@@ -329,11 +319,13 @@ static int mwifiex_uap_parse_tail_ies(struct mwifiex_private *priv,
 	struct ieee80211_vendor_ie *vendorhdr;
 	u16 gen_idx = MWIFIEX_AUTO_IDX_MASK, ie_len = 0;
 	int left_len, parsed_len = 0;
+	unsigned int token_len;
+	int err = 0;
 
 	if (!info->tail || !info->tail_len)
 		return 0;
 
-	gen_ie = kzalloc(sizeof(*gen_ie), GFP_KERNEL);
+	gen_ie = kzalloc_obj(*gen_ie);
 	if (!gen_ie)
 		return -ENOMEM;
 
@@ -344,26 +336,43 @@ static int mwifiex_uap_parse_tail_ies(struct mwifiex_private *priv,
 	 */
 	while (left_len > sizeof(struct ieee_types_header)) {
 		hdr = (void *)(info->tail + parsed_len);
+		token_len = hdr->len + sizeof(struct ieee_types_header);
+		if (token_len > left_len) {
+			err = -EINVAL;
+			goto out;
+		}
+
 		switch (hdr->element_id) {
 		case WLAN_EID_SSID:
 		case WLAN_EID_SUPP_RATES:
 		case WLAN_EID_COUNTRY:
 		case WLAN_EID_PWR_CONSTRAINT:
+		case WLAN_EID_ERP_INFO:
 		case WLAN_EID_EXT_SUPP_RATES:
 		case WLAN_EID_HT_CAPABILITY:
 		case WLAN_EID_HT_OPERATION:
 		case WLAN_EID_VHT_CAPABILITY:
 		case WLAN_EID_VHT_OPERATION:
-		case WLAN_EID_VENDOR_SPECIFIC:
 			break;
+		case WLAN_EID_VENDOR_SPECIFIC:
+			/* Skip only Microsoft WMM IE */
+			if (cfg80211_find_vendor_ie(WLAN_OUI_MICROSOFT,
+						    WLAN_OUI_TYPE_MICROSOFT_WMM,
+						    (const u8 *)hdr,
+						    token_len))
+				break;
+			fallthrough;
 		default:
-			memcpy(gen_ie->ie_buffer + ie_len, hdr,
-			       hdr->len + sizeof(struct ieee_types_header));
-			ie_len += hdr->len + sizeof(struct ieee_types_header);
+			if (ie_len + token_len > IEEE_MAX_IE_SIZE) {
+				err = -EINVAL;
+				goto out;
+			}
+			memcpy(gen_ie->ie_buffer + ie_len, hdr, token_len);
+			ie_len += token_len;
 			break;
 		}
-		left_len -= hdr->len + sizeof(struct ieee_types_header);
-		parsed_len += hdr->len + sizeof(struct ieee_types_header);
+		left_len -= token_len;
+		parsed_len += token_len;
 	}
 
 	/* parse only WPA vendor IE from tail, WMM IE is configured by
@@ -373,15 +382,17 @@ static int mwifiex_uap_parse_tail_ies(struct mwifiex_private *priv,
 						    WLAN_OUI_TYPE_MICROSOFT_WPA,
 						    info->tail, info->tail_len);
 	if (vendorhdr) {
-		memcpy(gen_ie->ie_buffer + ie_len, vendorhdr,
-		       vendorhdr->len + sizeof(struct ieee_types_header));
-		ie_len += vendorhdr->len + sizeof(struct ieee_types_header);
+		token_len = vendorhdr->len + sizeof(struct ieee_types_header);
+		if (ie_len + token_len > IEEE_MAX_IE_SIZE) {
+			err = -EINVAL;
+			goto out;
+		}
+		memcpy(gen_ie->ie_buffer + ie_len, vendorhdr, token_len);
+		ie_len += token_len;
 	}
 
-	if (!ie_len) {
-		kfree(gen_ie);
-		return 0;
-	}
+	if (!ie_len)
+		goto out;
 
 	gen_ie->ie_index = cpu_to_le16(gen_idx);
 	gen_ie->mgmt_subtype_mask = cpu_to_le16(MGMT_MASK_BEACON |
@@ -391,13 +402,15 @@ static int mwifiex_uap_parse_tail_ies(struct mwifiex_private *priv,
 
 	if (mwifiex_update_uap_custom_ie(priv, gen_ie, &gen_idx, NULL, NULL,
 					 NULL, NULL)) {
-		kfree(gen_ie);
-		return -1;
+		err = -EINVAL;
+		goto out;
 	}
 
 	priv->gen_idx = gen_idx;
+
+ out:
 	kfree(gen_ie);
-	return 0;
+	return err;
 }
 
 /* This function parses different IEs-head & tail IEs, beacon IEs,
@@ -425,7 +438,7 @@ int mwifiex_del_mgmt_ies(struct mwifiex_private *priv)
 	int ret = 0;
 
 	if (priv->gen_idx != MWIFIEX_AUTO_IDX_MASK) {
-		gen_ie = kmalloc(sizeof(*gen_ie), GFP_KERNEL);
+		gen_ie = kmalloc_obj(*gen_ie);
 		if (!gen_ie)
 			return -ENOMEM;
 
@@ -443,7 +456,7 @@ int mwifiex_del_mgmt_ies(struct mwifiex_private *priv)
 	}
 
 	if (priv->beacon_idx != MWIFIEX_AUTO_IDX_MASK) {
-		beacon_ie = kmalloc(sizeof(struct mwifiex_ie), GFP_KERNEL);
+		beacon_ie = kmalloc_obj(struct mwifiex_ie);
 		if (!beacon_ie) {
 			ret = -ENOMEM;
 			goto done;
@@ -453,7 +466,7 @@ int mwifiex_del_mgmt_ies(struct mwifiex_private *priv)
 		beacon_ie->ie_length = 0;
 	}
 	if (priv->proberesp_idx != MWIFIEX_AUTO_IDX_MASK) {
-		pr_ie = kmalloc(sizeof(struct mwifiex_ie), GFP_KERNEL);
+		pr_ie = kmalloc_obj(struct mwifiex_ie);
 		if (!pr_ie) {
 			ret = -ENOMEM;
 			goto done;
@@ -463,7 +476,7 @@ int mwifiex_del_mgmt_ies(struct mwifiex_private *priv)
 		pr_ie->ie_length = 0;
 	}
 	if (priv->assocresp_idx != MWIFIEX_AUTO_IDX_MASK) {
-		ar_ie = kmalloc(sizeof(struct mwifiex_ie), GFP_KERNEL);
+		ar_ie = kmalloc_obj(struct mwifiex_ie);
 		if (!ar_ie) {
 			ret = -ENOMEM;
 			goto done;

@@ -1,13 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /*
@@ -41,7 +33,7 @@ struct combiner {
 	int                 parent_irq;
 	u32                 nirqs;
 	u32                 nregs;
-	struct combiner_reg regs[0];
+	struct combiner_reg regs[];
 };
 
 static inline int irq_nr(u32 reg, u32 bit)
@@ -61,7 +53,6 @@ static void combiner_handle_irq(struct irq_desc *desc)
 	chained_irq_enter(chip, desc);
 
 	for (reg = 0; reg < combiner->nregs; reg++) {
-		int virq;
 		int hwirq;
 		u32 bit;
 		u32 status;
@@ -78,10 +69,7 @@ static void combiner_handle_irq(struct irq_desc *desc)
 			bit = __ffs(status);
 			status &= ~(1 << bit);
 			hwirq = irq_nr(reg, bit);
-			virq = irq_find_mapping(combiner->domain, hwirq);
-			if (virq > 0)
-				generic_handle_irq(virq);
-
+			generic_handle_domain_irq(combiner->domain, hwirq);
 		}
 	}
 
@@ -234,10 +222,9 @@ static int get_registers(struct platform_device *pdev, struct combiner *comb)
 	return 0;
 }
 
-static int __init combiner_probe(struct platform_device *pdev)
+static int combiner_probe(struct platform_device *pdev)
 {
 	struct combiner *combiner;
-	size_t alloc_sz;
 	int nregs;
 	int err;
 
@@ -247,8 +234,8 @@ static int __init combiner_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	alloc_sz = sizeof(*combiner) + sizeof(struct combiner_reg) * nregs;
-	combiner = devm_kzalloc(&pdev->dev, alloc_sz, GFP_KERNEL);
+	combiner = devm_kzalloc(&pdev->dev, struct_size(combiner, regs, nregs),
+				GFP_KERNEL);
 	if (!combiner)
 		return -ENOMEM;
 
@@ -257,10 +244,8 @@ static int __init combiner_probe(struct platform_device *pdev)
 		return err;
 
 	combiner->parent_irq = platform_get_irq(pdev, 0);
-	if (combiner->parent_irq <= 0) {
-		dev_err(&pdev->dev, "Error getting IRQ resource\n");
+	if (combiner->parent_irq <= 0)
 		return -EPROBE_DEFER;
-	}
 
 	combiner->domain = irq_domain_create_linear(pdev->dev.fwnode, combiner->nirqs,
 						    &domain_ops, combiner);
@@ -281,11 +266,11 @@ static const struct acpi_device_id qcom_irq_combiner_ids[] = {
 	{ }
 };
 
-static struct platform_driver qcom_irq_combiner_probe = {
+static struct platform_driver qcom_irq_combiner_driver = {
 	.driver = {
 		.name = "qcom-irq-combiner",
 		.acpi_match_table = ACPI_PTR(qcom_irq_combiner_ids),
 	},
 	.probe = combiner_probe,
 };
-builtin_platform_driver(qcom_irq_combiner_probe);
+builtin_platform_driver(qcom_irq_combiner_driver);

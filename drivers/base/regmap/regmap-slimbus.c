@@ -7,33 +7,24 @@
 
 #include "internal.h"
 
-static int regmap_slimbus_byte_reg_read(void *context, unsigned int reg,
-					unsigned int *val)
-{
-	struct slim_device *sdev = context;
-	int v;
-
-	v = slim_readb(sdev, reg);
-
-	if (v < 0)
-		return v;
-
-	*val = v;
-
-	return 0;
-}
-
-static int regmap_slimbus_byte_reg_write(void *context, unsigned int reg,
-					 unsigned int val)
+static int regmap_slimbus_write(void *context, const void *data, size_t count)
 {
 	struct slim_device *sdev = context;
 
-	return slim_writeb(sdev, reg, val);
+	return slim_write(sdev, *(u16 *)data, count - 2, (u8 *)data + 2);
 }
 
-static struct regmap_bus regmap_slimbus_bus = {
-	.reg_write = regmap_slimbus_byte_reg_write,
-	.reg_read = regmap_slimbus_byte_reg_read,
+static int regmap_slimbus_read(void *context, const void *reg, size_t reg_size,
+			       void *val, size_t val_size)
+{
+	struct slim_device *sdev = context;
+
+	return slim_read(sdev, *(u16 *)reg, val_size, val);
+}
+
+static const struct regmap_bus regmap_slimbus_bus = {
+	.write = regmap_slimbus_write,
+	.read = regmap_slimbus_read,
 	.reg_format_endian_default = REGMAP_ENDIAN_LITTLE,
 	.val_format_endian_default = REGMAP_ENDIAN_LITTLE,
 };
@@ -41,7 +32,7 @@ static struct regmap_bus regmap_slimbus_bus = {
 static const struct regmap_bus *regmap_get_slimbus(struct slim_device *slim,
 					const struct regmap_config *config)
 {
-	if (config->val_bits == 8 && config->reg_bits == 8)
+	if (config->val_bits == 8 && config->reg_bits == 16)
 		return &regmap_slimbus_bus;
 
 	return ERR_PTR(-ENOTSUPP);
@@ -57,8 +48,7 @@ struct regmap *__regmap_init_slimbus(struct slim_device *slimbus,
 	if (IS_ERR(bus))
 		return ERR_CAST(bus);
 
-	return __regmap_init(&slimbus->dev, bus, &slimbus->dev, config,
-			     lock_key, lock_name);
+	return __regmap_init(&slimbus->dev, bus, slimbus, config, lock_key, lock_name);
 }
 EXPORT_SYMBOL_GPL(__regmap_init_slimbus);
 
@@ -72,9 +62,9 @@ struct regmap *__devm_regmap_init_slimbus(struct slim_device *slimbus,
 	if (IS_ERR(bus))
 		return ERR_CAST(bus);
 
-	return __devm_regmap_init(&slimbus->dev, bus, &slimbus, config,
-				  lock_key, lock_name);
+	return __devm_regmap_init(&slimbus->dev, bus, slimbus, config, lock_key, lock_name);
 }
 EXPORT_SYMBOL_GPL(__devm_regmap_init_slimbus);
 
+MODULE_DESCRIPTION("Register map access API - SLIMbus support");
 MODULE_LICENSE("GPL v2");

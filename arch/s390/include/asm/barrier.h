@@ -8,28 +8,30 @@
 #ifndef __ASM_BARRIER_H
 #define __ASM_BARRIER_H
 
+#include <asm/alternative.h>
+#include <asm/march.h>
+
 /*
  * Force strict CPU ordering.
  * And yes, this is required on UP too when we're talking
  * to devices.
  */
 
-#ifdef CONFIG_HAVE_MARCH_Z196_FEATURES
-/* Fast-BCR without checkpoint synchronization */
-#define __ASM_BARRIER "bcr 14,0\n"
-#else
-#define __ASM_BARRIER "bcr 15,0\n"
-#endif
+static __always_inline void bcr_serialize(void)
+{
+	asm_inline volatile(
+		ALTERNATIVE("bcr 15,0", "bcr 14,0", ALT_FACILITY(45))
+		: : : "memory");
+}
 
-#define mb() do {  asm volatile(__ASM_BARRIER : : : "memory"); } while (0)
-
-#define rmb()				barrier()
-#define wmb()				barrier()
-#define dma_rmb()			mb()
-#define dma_wmb()			mb()
-#define __smp_mb()			mb()
-#define __smp_rmb()			rmb()
-#define __smp_wmb()			wmb()
+#define __mb()		bcr_serialize()
+#define __rmb()		barrier()
+#define __wmb()		barrier()
+#define __dma_rmb()	__mb()
+#define __dma_wmb()	__mb()
+#define __smp_mb()	__mb()
+#define __smp_rmb()	__rmb()
+#define __smp_wmb()	__wmb()
 
 #define __smp_store_release(p, v)					\
 do {									\
@@ -56,19 +58,19 @@ do {									\
  * @size: number of elements in array
  */
 #define array_index_mask_nospec array_index_mask_nospec
-static inline unsigned long array_index_mask_nospec(unsigned long index,
-						    unsigned long size)
+static __always_inline unsigned long array_index_mask_nospec(unsigned long index,
+							     unsigned long size)
 {
 	unsigned long mask;
 
 	if (__builtin_constant_p(size) && size > 0) {
 		asm("	clgr	%2,%1\n"
-		    "	slbgr	%0,%0\n"
+		    "	slbgr	%0,%0"
 		    :"=d" (mask) : "d" (size-1), "d" (index) :"cc");
 		return mask;
 	}
 	asm("	clgr	%1,%2\n"
-	    "	slbgr	%0,%0\n"
+	    "	slbgr	%0,%0"
 	    :"=d" (mask) : "d" (size), "d" (index) :"cc");
 	return ~mask;
 }

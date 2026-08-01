@@ -1,36 +1,41 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  * Copyright (C) 2017 Linaro Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
  */
 #include <linux/hash.h>
 #include <linux/list.h>
 #include <linux/slab.h>
+#include <linux/soc/qcom/smem.h>
 #include <media/videobuf2-v4l2.h>
 
 #include "core.h"
 #include "hfi.h"
 #include "hfi_helper.h"
 #include "hfi_msgs.h"
+#include "hfi_parser.h"
+
+#define SMEM_IMG_VER_TBL	469
+#define VER_STR_SZ		128
+#define SMEM_IMG_OFFSET_VENUS	(14 * 128)
 
 static void event_seq_changed(struct venus_core *core, struct venus_inst *inst,
 			      struct hfi_msg_event_notify_pkt *pkt)
 {
+	enum hfi_version ver = core->res->hfi_version;
 	struct hfi_event_data event = {0};
 	int num_properties_changed;
 	struct hfi_framesize *frame_sz;
 	struct hfi_profile_level *profile_level;
+	struct hfi_bit_depth *pixel_depth;
+	struct hfi_pic_struct *pic_struct;
+	struct hfi_colour_space *colour_info;
+	struct hfi_buffer_requirements *bufreq;
+	struct hfi_extradata_input_crop *crop;
+	struct hfi_dpb_counts *dpb_count;
+	u32 ptype, rem_bytes;
+	u32 size_read = 0;
 	u8 *data_ptr;
-	u32 ptype;
 
 	inst->error = HFI_ERR_NONE;
 
@@ -40,42 +45,118 @@ static void event_seq_changed(struct venus_core *core, struct venus_inst *inst,
 		break;
 	default:
 		inst->error = HFI_ERR_SESSION_INVALID_PARAMETER;
-		goto done;
+		inst->ops->event_notify(inst, EVT_SYS_EVENT_CHANGE, &event);
+		return;
 	}
 
 	event.event_type = pkt->event_data1;
 
 	num_properties_changed = pkt->event_data2;
-	if (!num_properties_changed) {
-		inst->error = HFI_ERR_SESSION_INSUFFICIENT_RESOURCES;
-		goto done;
-	}
+	if (!num_properties_changed)
+		goto error;
 
 	data_ptr = (u8 *)&pkt->ext_event_data[0];
+	rem_bytes = pkt->shdr.hdr.size - sizeof(*pkt);
+
 	do {
+		if (rem_bytes < sizeof(u32))
+			goto error;
 		ptype = *((u32 *)data_ptr);
+
+		data_ptr += sizeof(u32);
+		rem_bytes -= sizeof(u32);
+
 		switch (ptype) {
 		case HFI_PROPERTY_PARAM_FRAME_SIZE:
-			data_ptr += sizeof(u32);
+			if (rem_bytes < sizeof(struct hfi_framesize))
+				goto error;
+
 			frame_sz = (struct hfi_framesize *)data_ptr;
 			event.width = frame_sz->width;
 			event.height = frame_sz->height;
-			data_ptr += sizeof(frame_sz);
+			size_read = sizeof(struct hfi_framesize);
 			break;
 		case HFI_PROPERTY_PARAM_PROFILE_LEVEL_CURRENT:
-			data_ptr += sizeof(u32);
+			if (rem_bytes < sizeof(struct hfi_profile_level))
+				goto error;
+
 			profile_level = (struct hfi_profile_level *)data_ptr;
 			event.profile = profile_level->profile;
 			event.level = profile_level->level;
-			data_ptr += sizeof(profile_level);
+			size_read = sizeof(struct hfi_profile_level);
+			break;
+		case HFI_PROPERTY_PARAM_VDEC_PIXEL_BITDEPTH:
+			if (rem_bytes < sizeof(struct hfi_bit_depth))
+				goto error;
+
+			pixel_depth = (struct hfi_bit_depth *)data_ptr;
+			event.bit_depth = pixel_depth->bit_depth;
+			size_read = sizeof(struct hfi_bit_depth);
+			break;
+		case HFI_PROPERTY_PARAM_VDEC_PIC_STRUCT:
+			if (rem_bytes < sizeof(struct hfi_pic_struct))
+				goto error;
+
+			pic_struct = (struct hfi_pic_struct *)data_ptr;
+			event.pic_struct = pic_struct->progressive_only;
+			size_read = sizeof(struct hfi_pic_struct);
+			break;
+		case HFI_PROPERTY_PARAM_VDEC_COLOUR_SPACE:
+			if (rem_bytes < sizeof(struct hfi_colour_space))
+				goto error;
+
+			colour_info = (struct hfi_colour_space *)data_ptr;
+			event.colour_space = colour_info->colour_space;
+			size_read = sizeof(struct hfi_colour_space);
+			break;
+		case HFI_PROPERTY_CONFIG_VDEC_ENTROPY:
+			if (rem_bytes < sizeof(u32))
+				goto error;
+
+			event.entropy_mode = *(u32 *)data_ptr;
+			size_read = sizeof(u32);
+			break;
+		case HFI_PROPERTY_CONFIG_BUFFER_REQUIREMENTS:
+			if (rem_bytes < sizeof(struct hfi_buffer_requirements))
+				goto error;
+
+			bufreq = (struct hfi_buffer_requirements *)data_ptr;
+			event.buf_count = hfi_bufreq_get_count_min(bufreq, ver);
+			size_read = sizeof(struct hfi_buffer_requirements);
+			break;
+		case HFI_INDEX_EXTRADATA_INPUT_CROP:
+			if (rem_bytes < sizeof(struct hfi_extradata_input_crop))
+				goto error;
+
+			crop = (struct hfi_extradata_input_crop *)data_ptr;
+			event.input_crop.left = crop->left;
+			event.input_crop.top = crop->top;
+			event.input_crop.width = crop->width;
+			event.input_crop.height = crop->height;
+			size_read = sizeof(struct hfi_extradata_input_crop);
+			break;
+		case HFI_PROPERTY_PARAM_VDEC_DPB_COUNTS:
+			if (rem_bytes < sizeof(struct hfi_dpb_counts))
+				goto error;
+
+			dpb_count = (struct hfi_dpb_counts *)data_ptr;
+			event.buf_count = dpb_count->fw_min_cnt;
+			size_read = sizeof(struct hfi_dpb_counts);
 			break;
 		default:
+			size_read = 0;
 			break;
 		}
+		data_ptr += size_read;
+		rem_bytes -= size_read;
 		num_properties_changed--;
 	} while (num_properties_changed > 0);
 
-done:
+	inst->ops->event_notify(inst, EVT_SYS_EVENT_CHANGE, &event);
+	return;
+
+error:
+	inst->error = HFI_ERR_SESSION_INSUFFICIENT_RESOURCES;
 	inst->ops->event_notify(inst, EVT_SYS_EVENT_CHANGE, &event);
 }
 
@@ -102,7 +183,7 @@ static void event_sys_error(struct venus_core *core, u32 event,
 			    struct hfi_msg_event_notify_pkt *pkt)
 {
 	if (pkt)
-		dev_dbg(core->dev,
+		dev_dbg(core->dev, VDBGH
 			"sys error (session id:%x, data1:%x, data2:%x)\n",
 			pkt->shdr.session_id, pkt->event_data1,
 			pkt->event_data2);
@@ -116,7 +197,7 @@ event_session_error(struct venus_core *core, struct venus_inst *inst,
 {
 	struct device *dev = core->dev;
 
-	dev_dbg(dev, "session error: event id:%x, session id:%x\n",
+	dev_dbg(dev, VDBGH "session error: event id:%x, session id:%x\n",
 		pkt->event_data1, pkt->shdr.session_id);
 
 	if (!inst)
@@ -173,98 +254,89 @@ static void hfi_sys_init_done(struct venus_core *core, struct venus_inst *inst,
 			      void *packet)
 {
 	struct hfi_msg_sys_init_done_pkt *pkt = packet;
-	u32 rem_bytes, read_bytes = 0, num_properties;
-	u32 error, ptype;
-	u8 *data;
+	int rem_bytes;
+	u32 error;
 
 	error = pkt->error_type;
 	if (error != HFI_ERR_NONE)
-		goto err_no_prop;
+		goto done;
 
-	num_properties = pkt->num_properties;
-
-	if (!num_properties) {
+	if (!pkt->num_properties) {
 		error = HFI_ERR_SYS_INVALID_PARAMETER;
-		goto err_no_prop;
+		goto done;
 	}
 
-	rem_bytes = pkt->hdr.size - sizeof(*pkt) + sizeof(u32);
-
-	if (!rem_bytes) {
+	rem_bytes = pkt->hdr.size - sizeof(*pkt);
+	if (rem_bytes <= 0) {
 		/* missing property data */
 		error = HFI_ERR_SYS_INSUFFICIENT_RESOURCES;
-		goto err_no_prop;
+		goto done;
 	}
 
-	data = (u8 *)&pkt->data[0];
+	error = hfi_parser(core, inst, pkt->data, rem_bytes);
 
-	if (core->res->hfi_version == HFI_VERSION_3XX)
-		goto err_no_prop;
-
-	while (num_properties && rem_bytes >= sizeof(u32)) {
-		ptype = *((u32 *)data);
-		data += sizeof(u32);
-
-		switch (ptype) {
-		case HFI_PROPERTY_PARAM_CODEC_SUPPORTED: {
-			struct hfi_codec_supported *prop;
-
-			prop = (struct hfi_codec_supported *)data;
-
-			if (rem_bytes < sizeof(*prop)) {
-				error = HFI_ERR_SYS_INSUFFICIENT_RESOURCES;
-				break;
-			}
-
-			read_bytes += sizeof(*prop) + sizeof(u32);
-			core->dec_codecs = prop->dec_codecs;
-			core->enc_codecs = prop->enc_codecs;
-			break;
-		}
-		case HFI_PROPERTY_PARAM_MAX_SESSIONS_SUPPORTED: {
-			struct hfi_max_sessions_supported *prop;
-
-			if (rem_bytes < sizeof(*prop)) {
-				error = HFI_ERR_SYS_INSUFFICIENT_RESOURCES;
-				break;
-			}
-
-			prop = (struct hfi_max_sessions_supported *)data;
-			read_bytes += sizeof(*prop) + sizeof(u32);
-			core->max_sessions_supported = prop->max_sessions;
-			break;
-		}
-		default:
-			error = HFI_ERR_SYS_INVALID_PARAMETER;
-			break;
-		}
-
-		if (error)
-			break;
-
-		rem_bytes -= read_bytes;
-		data += read_bytes;
-		num_properties--;
-	}
-
-err_no_prop:
+done:
 	core->error = error;
-	complete(&core->done);
+	/*
+	 * Since core_init could ask for the firmware version to be validated,
+	 * completion might have to wait until the version is retrieved.
+	 */
+	if (!core->res->min_fw)
+		complete(&core->done);
 }
 
 static void
-sys_get_prop_image_version(struct device *dev,
+sys_get_prop_image_version(struct venus_core *core,
 			   struct hfi_msg_sys_property_info_pkt *pkt)
 {
+	struct device *dev = core->dev;
+	u8 *smem_tbl_ptr;
+	u8 *img_ver;
 	int req_bytes;
+	size_t smem_blk_sz;
+	int ret;
 
 	req_bytes = pkt->hdr.size - sizeof(*pkt);
 
-	if (req_bytes < 128 || !pkt->data[1] || pkt->num_properties > 1)
+	if (req_bytes < VER_STR_SZ || !pkt->data[0] || pkt->num_properties > 1)
 		/* bad packet */
 		return;
 
-	dev_dbg(dev, "F/W version: %s\n", (u8 *)&pkt->data[1]);
+	img_ver = pkt->data;
+	if (!img_ver)
+		return;
+
+	ret = sscanf(img_ver, "14:video-firmware.%u.%u-%u",
+		     &core->venus_ver.major, &core->venus_ver.minor, &core->venus_ver.rev);
+	if (ret)
+		goto done;
+
+	ret = sscanf(img_ver, "14:VIDEO.VPU.%u.%u-%u",
+		     &core->venus_ver.major, &core->venus_ver.minor, &core->venus_ver.rev);
+	if (ret)
+		goto done;
+
+	ret = sscanf(img_ver, "14:VIDEO.VE.%u.%u-%u",
+		     &core->venus_ver.major, &core->venus_ver.minor, &core->venus_ver.rev);
+	if (ret)
+		goto done;
+
+	dev_err(dev, VDBGL "error reading F/W version\n");
+	return;
+
+done:
+	dev_dbg(dev, VDBGL "F/W version: %s, major %u, minor %u, revision %u\n",
+		img_ver, core->venus_ver.major, core->venus_ver.minor, core->venus_ver.rev);
+
+	smem_tbl_ptr = qcom_smem_get(QCOM_SMEM_HOST_ANY,
+		SMEM_IMG_VER_TBL, &smem_blk_sz);
+	if (!IS_ERR(smem_tbl_ptr) && smem_blk_sz >= SMEM_IMG_OFFSET_VENUS + VER_STR_SZ)
+		memcpy(smem_tbl_ptr + SMEM_IMG_OFFSET_VENUS,
+		       img_ver, VER_STR_SZ);
+
+	/* core_init could have had to wait for a version check */
+	if (core->res->min_fw)
+		complete(&core->done);
 }
 
 static void hfi_sys_property_info(struct venus_core *core,
@@ -274,16 +346,16 @@ static void hfi_sys_property_info(struct venus_core *core,
 	struct device *dev = core->dev;
 
 	if (!pkt->num_properties) {
-		dev_dbg(dev, "%s: no properties\n", __func__);
+		dev_dbg(dev, VDBGL "no properties\n");
 		return;
 	}
 
-	switch (pkt->data[0]) {
+	switch (pkt->property) {
 	case HFI_PROPERTY_SYS_IMAGE_VERSION:
-		sys_get_prop_image_version(dev, pkt);
+		sys_get_prop_image_version(core, pkt);
 		break;
 	default:
-		dev_dbg(dev, "%s: unknown property data\n", __func__);
+		dev_dbg(dev, VDBGL "unknown property data\n");
 		break;
 	}
 }
@@ -314,7 +386,7 @@ static void hfi_sys_ping_done(struct venus_core *core, struct venus_inst *inst,
 static void hfi_sys_idle_done(struct venus_core *core, struct venus_inst *inst,
 			      void *packet)
 {
-	dev_dbg(core->dev, "sys idle\n");
+	dev_dbg(core->dev, VDBGL "sys idle\n");
 }
 
 static void hfi_sys_pc_prepare_done(struct venus_core *core,
@@ -322,52 +394,8 @@ static void hfi_sys_pc_prepare_done(struct venus_core *core,
 {
 	struct hfi_msg_sys_pc_prep_done_pkt *pkt = packet;
 
-	dev_dbg(core->dev, "pc prepare done (error %x)\n", pkt->error_type);
-}
-
-static void
-hfi_copy_cap_prop(struct hfi_capability *in, struct venus_inst *inst)
-{
-	if (!in || !inst)
-		return;
-
-	switch (in->capability_type) {
-	case HFI_CAPABILITY_FRAME_WIDTH:
-		inst->cap_width = *in;
-		break;
-	case HFI_CAPABILITY_FRAME_HEIGHT:
-		inst->cap_height = *in;
-		break;
-	case HFI_CAPABILITY_MBS_PER_FRAME:
-		inst->cap_mbs_per_frame = *in;
-		break;
-	case HFI_CAPABILITY_MBS_PER_SECOND:
-		inst->cap_mbs_per_sec = *in;
-		break;
-	case HFI_CAPABILITY_FRAMERATE:
-		inst->cap_framerate = *in;
-		break;
-	case HFI_CAPABILITY_SCALE_X:
-		inst->cap_scale_x = *in;
-		break;
-	case HFI_CAPABILITY_SCALE_Y:
-		inst->cap_scale_y = *in;
-		break;
-	case HFI_CAPABILITY_BITRATE:
-		inst->cap_bitrate = *in;
-		break;
-	case HFI_CAPABILITY_HIER_P_NUM_ENH_LAYERS:
-		inst->cap_hier_p = *in;
-		break;
-	case HFI_CAPABILITY_ENC_LTR_COUNT:
-		inst->cap_ltr_count = *in;
-		break;
-	case HFI_CAPABILITY_CP_OUTPUT2_THRESH:
-		inst->cap_secure_output2_threshold = *in;
-		break;
-	default:
-		break;
-	}
+	dev_dbg(core->dev, VDBGL "pc prepare done (error %x)\n",
+		pkt->error_type);
 }
 
 static unsigned int
@@ -383,7 +411,7 @@ session_get_prop_profile_level(struct hfi_msg_session_property_info_pkt *pkt,
 		/* bad packet */
 		return HFI_ERR_SESSION_INVALID_PARAMETER;
 
-	hfi = (struct hfi_profile_level *)&pkt->data[1];
+	hfi = (struct hfi_profile_level *)&pkt->data[0];
 	profile_level->profile = hfi->profile;
 	profile_level->level = hfi->level;
 
@@ -400,11 +428,11 @@ session_get_prop_buf_req(struct hfi_msg_session_property_info_pkt *pkt,
 
 	req_bytes = pkt->shdr.hdr.size - sizeof(*pkt);
 
-	if (!req_bytes || req_bytes % sizeof(*buf_req) || !pkt->data[1])
+	if (!req_bytes || req_bytes % sizeof(*buf_req) || !pkt->data[0])
 		/* bad packet */
 		return HFI_ERR_SESSION_INVALID_PARAMETER;
 
-	buf_req = (struct hfi_buffer_requirements *)&pkt->data[1];
+	buf_req = (struct hfi_buffer_requirements *)&pkt->data[0];
 	if (!buf_req)
 		return HFI_ERR_SESSION_INVALID_PARAMETER;
 
@@ -412,7 +440,7 @@ session_get_prop_buf_req(struct hfi_msg_session_property_info_pkt *pkt,
 		memcpy(&bufreq[idx], buf_req, sizeof(*bufreq));
 		idx++;
 
-		if (idx > HFI_BUFFER_TYPE_MAX)
+		if (idx >= HFI_BUFFER_TYPE_MAX)
 			return HFI_ERR_SESSION_INVALID_PARAMETER;
 
 		req_bytes -= sizeof(struct hfi_buffer_requirements);
@@ -436,7 +464,7 @@ static void hfi_session_prop_info(struct venus_core *core,
 		goto done;
 	}
 
-	switch (pkt->data[0]) {
+	switch (pkt->property) {
 	case HFI_PROPERTY_CONFIG_BUFFER_REQUIREMENTS:
 		memset(hprop->bufreq, 0, sizeof(hprop->bufreq));
 		error = session_get_prop_buf_req(pkt, hprop->bufreq);
@@ -449,8 +477,7 @@ static void hfi_session_prop_info(struct venus_core *core,
 	case HFI_PROPERTY_CONFIG_VDEC_ENTROPY:
 		break;
 	default:
-		dev_dbg(dev, "%s: unknown property id:%x\n", __func__,
-			pkt->data[0]);
+		dev_dbg(dev, VDBGM "unknown property id:%x\n", pkt->property);
 		return;
 	}
 
@@ -459,248 +486,27 @@ done:
 	complete(&inst->done);
 }
 
-static u32 init_done_read_prop(struct venus_core *core, struct venus_inst *inst,
-			       struct hfi_msg_session_init_done_pkt *pkt)
-{
-	struct device *dev = core->dev;
-	u32 rem_bytes, num_props;
-	u32 ptype, next_offset = 0;
-	u32 err;
-	u8 *data;
-
-	rem_bytes = pkt->shdr.hdr.size - sizeof(*pkt) + sizeof(u32);
-	if (!rem_bytes) {
-		dev_err(dev, "%s: missing property info\n", __func__);
-		return HFI_ERR_SESSION_INSUFFICIENT_RESOURCES;
-	}
-
-	err = pkt->error_type;
-	if (err)
-		return err;
-
-	data = (u8 *)&pkt->data[0];
-	num_props = pkt->num_properties;
-
-	while (err == HFI_ERR_NONE && num_props && rem_bytes >= sizeof(u32)) {
-		ptype = *((u32 *)data);
-		next_offset = sizeof(u32);
-
-		switch (ptype) {
-		case HFI_PROPERTY_PARAM_CODEC_MASK_SUPPORTED: {
-			struct hfi_codec_mask_supported *masks =
-				(struct hfi_codec_mask_supported *)
-				(data + next_offset);
-
-			next_offset += sizeof(*masks);
-			num_props--;
-			break;
-		}
-		case HFI_PROPERTY_PARAM_CAPABILITY_SUPPORTED: {
-			struct hfi_capabilities *caps;
-			struct hfi_capability *cap;
-			u32 num_caps;
-
-			if ((rem_bytes - next_offset) < sizeof(*cap)) {
-				err = HFI_ERR_SESSION_INVALID_PARAMETER;
-				break;
-			}
-
-			caps = (struct hfi_capabilities *)(data + next_offset);
-
-			num_caps = caps->num_capabilities;
-			cap = &caps->data[0];
-			next_offset += sizeof(u32);
-
-			while (num_caps &&
-			       (rem_bytes - next_offset) >= sizeof(u32)) {
-				hfi_copy_cap_prop(cap, inst);
-				cap++;
-				next_offset += sizeof(*cap);
-				num_caps--;
-			}
-			num_props--;
-			break;
-		}
-		case HFI_PROPERTY_PARAM_UNCOMPRESSED_FORMAT_SUPPORTED: {
-			struct hfi_uncompressed_format_supported *prop =
-				(struct hfi_uncompressed_format_supported *)
-				(data + next_offset);
-			u32 num_fmt_entries;
-			u8 *fmt;
-			struct hfi_uncompressed_plane_info *inf;
-
-			if ((rem_bytes - next_offset) < sizeof(*prop)) {
-				err = HFI_ERR_SESSION_INVALID_PARAMETER;
-				break;
-			}
-
-			num_fmt_entries = prop->format_entries;
-			next_offset = sizeof(*prop) - sizeof(u32);
-			fmt = (u8 *)&prop->format_info[0];
-
-			dev_dbg(dev, "uncomm format support num entries:%u\n",
-				num_fmt_entries);
-
-			while (num_fmt_entries) {
-				struct hfi_uncompressed_plane_constraints *cnts;
-				u32 bytes_to_skip;
-
-				inf = (struct hfi_uncompressed_plane_info *)fmt;
-
-				if ((rem_bytes - next_offset) < sizeof(*inf)) {
-					err = HFI_ERR_SESSION_INVALID_PARAMETER;
-					break;
-				}
-
-				dev_dbg(dev, "plane info: fmt:%x, planes:%x\n",
-					inf->format, inf->num_planes);
-
-				cnts = &inf->plane_format[0];
-				dev_dbg(dev, "%u %u %u %u\n",
-					cnts->stride_multiples,
-					cnts->max_stride,
-					cnts->min_plane_buffer_height_multiple,
-					cnts->buffer_alignment);
-
-				bytes_to_skip = sizeof(*inf) - sizeof(*cnts) +
-						inf->num_planes * sizeof(*cnts);
-
-				fmt += bytes_to_skip;
-				next_offset += bytes_to_skip;
-				num_fmt_entries--;
-			}
-			num_props--;
-			break;
-		}
-		case HFI_PROPERTY_PARAM_PROPERTIES_SUPPORTED: {
-			struct hfi_properties_supported *prop =
-				(struct hfi_properties_supported *)
-				(data + next_offset);
-
-			next_offset += sizeof(*prop) - sizeof(u32)
-					+ prop->num_properties * sizeof(u32);
-			num_props--;
-			break;
-		}
-		case HFI_PROPERTY_PARAM_PROFILE_LEVEL_SUPPORTED: {
-			struct hfi_profile_level_supported *prop =
-				(struct hfi_profile_level_supported *)
-				(data + next_offset);
-			struct hfi_profile_level *pl;
-			unsigned int prop_count = 0;
-			unsigned int count = 0;
-			u8 *ptr;
-
-			ptr = (u8 *)&prop->profile_level[0];
-			prop_count = prop->profile_count;
-
-			if (prop_count > HFI_MAX_PROFILE_COUNT)
-				prop_count = HFI_MAX_PROFILE_COUNT;
-
-			while (prop_count) {
-				ptr++;
-				pl = (struct hfi_profile_level *)ptr;
-
-				inst->pl[count].profile = pl->profile;
-				inst->pl[count].level = pl->level;
-				prop_count--;
-				count++;
-				ptr += sizeof(*pl) / sizeof(u32);
-			}
-
-			inst->pl_count = count;
-			next_offset += sizeof(*prop) - sizeof(*pl) +
-				       prop->profile_count * sizeof(*pl);
-
-			num_props--;
-			break;
-		}
-		case HFI_PROPERTY_PARAM_INTERLACE_FORMAT_SUPPORTED: {
-			next_offset +=
-				sizeof(struct hfi_interlace_format_supported);
-			num_props--;
-			break;
-		}
-		case HFI_PROPERTY_PARAM_NAL_STREAM_FORMAT_SUPPORTED: {
-			struct hfi_nal_stream_format *nal =
-				(struct hfi_nal_stream_format *)
-				(data + next_offset);
-			dev_dbg(dev, "NAL format: %x\n", nal->format);
-			next_offset += sizeof(*nal);
-			num_props--;
-			break;
-		}
-		case HFI_PROPERTY_PARAM_NAL_STREAM_FORMAT_SELECT: {
-			next_offset += sizeof(u32);
-			num_props--;
-			break;
-		}
-		case HFI_PROPERTY_PARAM_MAX_SEQUENCE_HEADER_SIZE: {
-			u32 *max_seq_sz = (u32 *)(data + next_offset);
-
-			dev_dbg(dev, "max seq header sz: %x\n", *max_seq_sz);
-			next_offset += sizeof(u32);
-			num_props--;
-			break;
-		}
-		case HFI_PROPERTY_PARAM_VENC_INTRA_REFRESH: {
-			next_offset += sizeof(struct hfi_intra_refresh);
-			num_props--;
-			break;
-		}
-		case HFI_PROPERTY_PARAM_BUFFER_ALLOC_MODE_SUPPORTED: {
-			struct hfi_buffer_alloc_mode_supported *prop =
-				(struct hfi_buffer_alloc_mode_supported *)
-				(data + next_offset);
-			unsigned int i;
-
-			for (i = 0; i < prop->num_entries; i++) {
-				if (prop->buffer_type == HFI_BUFFER_OUTPUT ||
-				    prop->buffer_type == HFI_BUFFER_OUTPUT2) {
-					switch (prop->data[i]) {
-					case HFI_BUFFER_MODE_STATIC:
-						inst->cap_bufs_mode_static = true;
-						break;
-					case HFI_BUFFER_MODE_DYNAMIC:
-						inst->cap_bufs_mode_dynamic = true;
-						break;
-					default:
-						break;
-					}
-				}
-			}
-			next_offset += sizeof(*prop) -
-				sizeof(u32) + prop->num_entries * sizeof(u32);
-			num_props--;
-			break;
-		}
-		default:
-			dev_dbg(dev, "%s: default case %#x\n", __func__, ptype);
-			break;
-		}
-
-		rem_bytes -= next_offset;
-		data += next_offset;
-	}
-
-	return err;
-}
-
 static void hfi_session_init_done(struct venus_core *core,
 				  struct venus_inst *inst, void *packet)
 {
 	struct hfi_msg_session_init_done_pkt *pkt = packet;
-	unsigned int error;
+	int rem_bytes;
+	u32 error;
 
 	error = pkt->error_type;
 	if (error != HFI_ERR_NONE)
 		goto done;
 
-	if (core->res->hfi_version != HFI_VERSION_1XX)
+	if (!IS_V1(core))
 		goto done;
 
-	error = init_done_read_prop(core, inst, pkt);
+	rem_bytes = pkt->shdr.hdr.size - sizeof(*pkt);
+	if (rem_bytes <= 0) {
+		error = HFI_ERR_SESSION_INSUFFICIENT_RESOURCES;
+		goto done;
+	}
 
+	error = hfi_parser(core, inst, pkt->data, rem_bytes);
 done:
 	inst->error = error;
 	complete(&inst->done);
@@ -722,6 +528,8 @@ static void hfi_session_flush_done(struct venus_core *core,
 
 	inst->error = pkt->error_type;
 	complete(&inst->done);
+	if (inst->ops->flush_done)
+		inst->ops->flush_done(inst);
 }
 
 static void hfi_session_etb_done(struct venus_core *core,
@@ -779,7 +587,8 @@ static void hfi_session_ftb_done(struct venus_core *core,
 		error = HFI_ERR_SESSION_INVALID_PARAMETER;
 	}
 
-	if (buffer_type != HFI_BUFFER_OUTPUT)
+	if (buffer_type != HFI_BUFFER_OUTPUT &&
+	    buffer_type != HFI_BUFFER_OUTPUT2)
 		goto done;
 
 	if (hfi_flags & HFI_BUFFERFLAG_EOS)

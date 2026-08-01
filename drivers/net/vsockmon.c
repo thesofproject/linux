@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#include <linux/ethtool.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/if_arp.h>
@@ -10,25 +12,6 @@
 /* Virtio transport max packet size plus header */
 #define DEFAULT_MTU (VIRTIO_VSOCK_MAX_PKT_BUF_SIZE + \
 		     sizeof(struct af_vsockmon_hdr))
-
-struct pcpu_lstats {
-	u64 rx_packets;
-	u64 rx_bytes;
-	struct u64_stats_sync syncp;
-};
-
-static int vsockmon_dev_init(struct net_device *dev)
-{
-	dev->lstats = netdev_alloc_pcpu_stats(struct pcpu_lstats);
-	if (!dev->lstats)
-		return -ENOMEM;
-	return 0;
-}
-
-static void vsockmon_dev_uninit(struct net_device *dev)
-{
-	free_percpu(dev->lstats);
-}
 
 struct vsockmon {
 	struct vsock_tap vt;
@@ -52,13 +35,7 @@ static int vsockmon_close(struct net_device *dev)
 
 static netdev_tx_t vsockmon_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	int len = skb->len;
-	struct pcpu_lstats *stats = this_cpu_ptr(dev->lstats);
-
-	u64_stats_update_begin(&stats->syncp);
-	stats->rx_bytes += len;
-	stats->rx_packets++;
-	u64_stats_update_end(&stats->syncp);
+	dev_lstats_add(dev, skb->len);
 
 	dev_kfree_skb(skb);
 
@@ -68,31 +45,7 @@ static netdev_tx_t vsockmon_xmit(struct sk_buff *skb, struct net_device *dev)
 static void
 vsockmon_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats)
 {
-	int i;
-	u64 bytes = 0, packets = 0;
-
-	for_each_possible_cpu(i) {
-		const struct pcpu_lstats *vstats;
-		u64 tbytes, tpackets;
-		unsigned int start;
-
-		vstats = per_cpu_ptr(dev->lstats, i);
-
-		do {
-			start = u64_stats_fetch_begin_irq(&vstats->syncp);
-			tbytes = vstats->rx_bytes;
-			tpackets = vstats->rx_packets;
-		} while (u64_stats_fetch_retry_irq(&vstats->syncp, start));
-
-		packets += tpackets;
-		bytes += tbytes;
-	}
-
-	stats->rx_packets = packets;
-	stats->tx_packets = 0;
-
-	stats->rx_bytes = bytes;
-	stats->tx_bytes = 0;
+	dev_lstats_read(dev, &stats->rx_packets, &stats->rx_bytes);
 }
 
 static int vsockmon_is_valid_mtu(int new_mtu)
@@ -105,13 +58,11 @@ static int vsockmon_change_mtu(struct net_device *dev, int new_mtu)
 	if (!vsockmon_is_valid_mtu(new_mtu))
 		return -EINVAL;
 
-	dev->mtu = new_mtu;
+	WRITE_ONCE(dev->mtu, new_mtu);
 	return 0;
 }
 
 static const struct net_device_ops vsockmon_ops = {
-	.ndo_init = vsockmon_dev_init,
-	.ndo_uninit = vsockmon_dev_uninit,
 	.ndo_open = vsockmon_open,
 	.ndo_stop = vsockmon_close,
 	.ndo_start_xmit = vsockmon_xmit,
@@ -132,17 +83,18 @@ static void vsockmon_setup(struct net_device *dev)
 {
 	dev->type = ARPHRD_VSOCKMON;
 	dev->priv_flags |= IFF_NO_QUEUE;
+	dev->lltx = true;
 
 	dev->netdev_ops	= &vsockmon_ops;
 	dev->ethtool_ops = &vsockmon_ethtool_ops;
 	dev->needs_free_netdev = true;
 
-	dev->features = NETIF_F_SG | NETIF_F_FRAGLIST |
-			NETIF_F_HIGHDMA | NETIF_F_LLTX;
+	dev->features = NETIF_F_SG | NETIF_F_FRAGLIST | NETIF_F_HIGHDMA;
 
 	dev->flags = IFF_NOARP;
 
 	dev->mtu = DEFAULT_MTU;
+	dev->pcpu_stat_type = NETDEV_PCPU_STAT_LSTATS;
 }
 
 static struct rtnl_link_ops vsockmon_link_ops __read_mostly = {

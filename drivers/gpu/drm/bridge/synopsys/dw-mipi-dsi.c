@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (c) 2016, Fuzhou Rockchip Electronics Co., Ltd
  * Copyright (C) STMicroelectronics SA 2017
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  *
  * Modified by Philippe Cornu <philippe.cornu@st.com>
  * This generic Synopsys DesignWare MIPI DSI host driver is based on the
@@ -14,20 +10,27 @@
 
 #include <linux/clk.h>
 #include <linux/component.h>
+#include <linux/debugfs.h>
+#include <linux/export.h>
 #include <linux/iopoll.h>
+#include <linux/math64.h>
+#include <linux/media-bus-format.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/reset.h>
-#include <drm/drmP.h>
+
+#include <video/mipi_display.h>
+
+#include <drm/bridge/dw_mipi_dsi.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_bridge.h>
+#include <drm/drm_connector.h>
 #include <drm/drm_crtc.h>
-#include <drm/drm_crtc_helper.h>
 #include <drm/drm_mipi_dsi.h>
+#include <drm/drm_modes.h>
 #include <drm/drm_of.h>
-#include <drm/bridge/dw_mipi_dsi.h>
-#include <video/mipi_display.h>
+#include <drm/drm_print.h>
 
 #define HWVER_131			0x31333100	/* IP version 1.31 */
 
@@ -90,6 +93,10 @@
 #define VID_MODE_TYPE_NON_BURST_SYNC_EVENTS	0x1
 #define VID_MODE_TYPE_BURST			0x2
 #define VID_MODE_TYPE_MASK			0x3
+#define ENABLE_LOW_POWER_CMD		BIT(15)
+#define VID_MODE_VPG_ENABLE		BIT(16)
+#define VID_MODE_VPG_MODE		BIT(20)
+#define VID_MODE_VPG_HORIZONTAL		BIT(24)
 
 #define DSI_VID_PKT_SIZE		0x3c
 #define VID_PKT_SIZE(p)			((p) & 0x3fff)
@@ -219,6 +226,21 @@
 #define PHY_STATUS_TIMEOUT_US		10000
 #define CMD_PKT_STATUS_TIMEOUT_US	20000
 
+#ifdef CONFIG_DEBUG_FS
+#define VPG_DEFS(name, dsi) \
+	((void __force *)&((*dsi).vpg_defs.name))
+
+#define REGISTER(name, mask, dsi) \
+	{ #name, VPG_DEFS(name, dsi), mask, dsi }
+
+struct debugfs_entries {
+	const char				*name;
+	bool					*reg;
+	u32					mask;
+	struct dw_mipi_dsi			*dsi;
+};
+#endif /* CONFIG_DEBUG_FS */
+
 struct dw_mipi_dsi {
 	struct drm_bridge bridge;
 	struct mipi_dsi_host dsi_host;
@@ -234,14 +256,36 @@ struct dw_mipi_dsi {
 	u32 format;
 	unsigned long mode_flags;
 
+#ifdef CONFIG_DEBUG_FS
+	struct dentry *debugfs;
+	struct debugfs_entries *debugfs_vpg;
+	struct {
+		bool vpg;
+		bool vpg_horizontal;
+		bool vpg_ber_pattern;
+	} vpg_defs;
+#endif /* CONFIG_DEBUG_FS */
+
+	struct dw_mipi_dsi *master; /* dual-dsi master ptr */
+	struct dw_mipi_dsi *slave; /* dual-dsi slave ptr */
+
+	struct drm_display_mode mode;
 	const struct dw_mipi_dsi_plat_data *plat_data;
 };
+
+/*
+ * Check if either a link to a master or slave is present
+ */
+static inline bool dw_mipi_is_dual_mode(struct dw_mipi_dsi *dsi)
+{
+	return dsi->slave || dsi->master;
+}
 
 /*
  * The controller should generate 2 frames before
  * preparing the peripheral.
  */
-static void dw_mipi_dsi_wait_for_two_frames(struct drm_display_mode *mode)
+static void dw_mipi_dsi_wait_for_two_frames(const struct drm_display_mode *mode)
 {
 	int refresh, two_frames;
 
@@ -274,8 +318,8 @@ static int dw_mipi_dsi_host_attach(struct mipi_dsi_host *host,
 				   struct mipi_dsi_device *device)
 {
 	struct dw_mipi_dsi *dsi = host_to_dsi(host);
+	const struct dw_mipi_dsi_plat_data *pdata = dsi->plat_data;
 	struct drm_bridge *bridge;
-	struct drm_panel *panel;
 	int ret;
 
 	if (device->lanes > dsi->plat_data->max_data_lanes) {
@@ -289,28 +333,40 @@ static int dw_mipi_dsi_host_attach(struct mipi_dsi_host *host,
 	dsi->format = device->format;
 	dsi->mode_flags = device->mode_flags;
 
-	ret = drm_of_find_panel_or_bridge(host->dev->of_node, 1, 0,
-					  &panel, &bridge);
-	if (ret)
-		return ret;
+	bridge = devm_drm_of_get_bridge(dsi->dev, dsi->dev->of_node, 1, 0);
+	if (IS_ERR(bridge))
+		return PTR_ERR(bridge);
 
-	if (panel) {
-		bridge = drm_panel_bridge_add(panel, DRM_MODE_CONNECTOR_DSI);
-		if (IS_ERR(bridge))
-			return PTR_ERR(bridge);
-	}
-
+	bridge->pre_enable_prev_first = true;
 	dsi->panel_bridge = bridge;
 
 	drm_bridge_add(&dsi->bridge);
 
+	if (pdata->host_ops && pdata->host_ops->attach) {
+		ret = pdata->host_ops->attach(pdata->priv_data, device);
+		if (ret < 0)
+			goto err_remove_bridge;
+	}
+
 	return 0;
+
+err_remove_bridge:
+	drm_bridge_remove(&dsi->bridge);
+	return ret;
 }
 
 static int dw_mipi_dsi_host_detach(struct mipi_dsi_host *host,
 				   struct mipi_dsi_device *device)
 {
 	struct dw_mipi_dsi *dsi = host_to_dsi(host);
+	const struct dw_mipi_dsi_plat_data *pdata = dsi->plat_data;
+	int ret;
+
+	if (pdata->host_ops && pdata->host_ops->detach) {
+		ret = pdata->host_ops->detach(pdata->priv_data, device);
+		if (ret < 0)
+			return ret;
+	}
 
 	drm_of_panel_bridge_remove(host->dev->of_node, 1, 0);
 
@@ -325,13 +381,28 @@ static void dw_mipi_message_config(struct dw_mipi_dsi *dsi,
 	bool lpm = msg->flags & MIPI_DSI_MSG_USE_LPM;
 	u32 val = 0;
 
+	/*
+	 * TODO dw drv improvements
+	 * largest packet sizes during hfp or during vsa/vpb/vfp
+	 * should be computed according to byte lane, lane number and only
+	 * if sending lp cmds in high speed is enable (PHY_TXREQUESTCLKHS)
+	 */
+	dsi_write(dsi, DSI_DPI_LP_CMD_TIM, OUTVACT_LPCMD_TIME(16)
+		  | INVACT_LPCMD_TIME(4));
+
 	if (msg->flags & MIPI_DSI_MSG_REQ_ACK)
 		val |= ACK_RQST_EN;
 	if (lpm)
 		val |= CMD_MODE_ALL_LP;
 
-	dsi_write(dsi, DSI_LPCLK_CTRL, lpm ? 0 : PHY_TXREQUESTCLKHS);
 	dsi_write(dsi, DSI_CMD_MODE_CFG, val);
+
+	val = dsi_read(dsi, DSI_VID_MODE_CFG);
+	if (lpm)
+		val |= ENABLE_LOW_POWER_CMD;
+	else
+		val &= ~ENABLE_LOW_POWER_CMD;
+	dsi_write(dsi, DSI_VID_MODE_CFG, val);
 }
 
 static int dw_mipi_dsi_gen_pkt_hdr_write(struct dw_mipi_dsi *dsi, u32 hdr_val)
@@ -445,10 +516,17 @@ static ssize_t dw_mipi_dsi_host_transfer(struct mipi_dsi_host *host,
 	}
 
 	dw_mipi_message_config(dsi, msg);
+	if (dsi->slave)
+		dw_mipi_message_config(dsi->slave, msg);
 
 	ret = dw_mipi_dsi_write(dsi, &packet);
 	if (ret)
 		return ret;
+	if (dsi->slave) {
+		ret = dw_mipi_dsi_write(dsi->slave, &packet);
+		if (ret)
+			return ret;
+	}
 
 	if (msg->rx_buf && msg->rx_len) {
 		ret = dw_mipi_dsi_read(dsi, msg);
@@ -468,6 +546,59 @@ static const struct mipi_dsi_host_ops dw_mipi_dsi_host_ops = {
 	.transfer = dw_mipi_dsi_host_transfer,
 };
 
+static u32 *
+dw_mipi_dsi_bridge_atomic_get_input_bus_fmts(struct drm_bridge *bridge,
+					     struct drm_bridge_state *bridge_state,
+					     struct drm_crtc_state *crtc_state,
+					     struct drm_connector_state *conn_state,
+					     u32 output_fmt,
+					     unsigned int *num_input_fmts)
+{
+	struct dw_mipi_dsi *dsi = bridge_to_dsi(bridge);
+	const struct dw_mipi_dsi_plat_data *pdata = dsi->plat_data;
+	u32 *input_fmts;
+
+	if (pdata->get_input_bus_fmts)
+		return pdata->get_input_bus_fmts(pdata->priv_data,
+						 bridge, bridge_state,
+						 crtc_state, conn_state,
+						 output_fmt, num_input_fmts);
+
+	/* Fall back to MEDIA_BUS_FMT_FIXED as the only input format. */
+	input_fmts = kmalloc_obj(*input_fmts);
+	if (!input_fmts)
+		return NULL;
+	input_fmts[0] = MEDIA_BUS_FMT_FIXED;
+	*num_input_fmts = 1;
+
+	return input_fmts;
+}
+
+static int dw_mipi_dsi_bridge_atomic_check(struct drm_bridge *bridge,
+					   struct drm_bridge_state *bridge_state,
+					   struct drm_crtc_state *crtc_state,
+					   struct drm_connector_state *conn_state)
+{
+	struct dw_mipi_dsi *dsi = bridge_to_dsi(bridge);
+	const struct dw_mipi_dsi_plat_data *pdata = dsi->plat_data;
+	bool ret;
+
+	bridge_state->input_bus_cfg.flags =
+		DRM_BUS_FLAG_DE_HIGH | DRM_BUS_FLAG_PIXDATA_SAMPLE_NEGEDGE;
+
+	if (pdata->mode_fixup) {
+		ret = pdata->mode_fixup(pdata->priv_data, &crtc_state->mode,
+					&crtc_state->adjusted_mode);
+		if (!ret) {
+			DRM_DEBUG_DRIVER("failed to fixup mode " DRM_MODE_FMT "\n",
+					 DRM_MODE_ARG(&crtc_state->mode));
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
 static void dw_mipi_dsi_video_mode_config(struct dw_mipi_dsi *dsi)
 {
 	u32 val;
@@ -486,21 +617,36 @@ static void dw_mipi_dsi_video_mode_config(struct dw_mipi_dsi *dsi)
 	else
 		val |= VID_MODE_TYPE_NON_BURST_SYNC_EVENTS;
 
+#ifdef CONFIG_DEBUG_FS
+	if (dsi->vpg_defs.vpg) {
+		val |= VID_MODE_VPG_ENABLE;
+		val |= dsi->vpg_defs.vpg_horizontal ?
+		       VID_MODE_VPG_HORIZONTAL : 0;
+		val |= dsi->vpg_defs.vpg_ber_pattern ? VID_MODE_VPG_MODE : 0;
+	}
+#endif /* CONFIG_DEBUG_FS */
+
 	dsi_write(dsi, DSI_VID_MODE_CFG, val);
 }
 
 static void dw_mipi_dsi_set_mode(struct dw_mipi_dsi *dsi,
 				 unsigned long mode_flags)
 {
+	u32 val;
+
 	dsi_write(dsi, DSI_PWR_UP, RESET);
 
 	if (mode_flags & MIPI_DSI_MODE_VIDEO) {
 		dsi_write(dsi, DSI_MODE_CFG, ENABLE_VIDEO_MODE);
 		dw_mipi_dsi_video_mode_config(dsi);
-		dsi_write(dsi, DSI_LPCLK_CTRL, PHY_TXREQUESTCLKHS);
 	} else {
 		dsi_write(dsi, DSI_MODE_CFG, ENABLE_CMD_MODE);
 	}
+
+	val = PHY_TXREQUESTCLKHS;
+	if (dsi->mode_flags & MIPI_DSI_CLOCK_NON_CONTINUOUS)
+		val |= AUTO_CLKLANE_CTRL;
+	dsi_write(dsi, DSI_LPCLK_CTRL, val);
 
 	dsi_write(dsi, DSI_PWR_UP, POWERUP);
 }
@@ -513,15 +659,30 @@ static void dw_mipi_dsi_disable(struct dw_mipi_dsi *dsi)
 
 static void dw_mipi_dsi_init(struct dw_mipi_dsi *dsi)
 {
+	const struct dw_mipi_dsi_phy_ops *phy_ops = dsi->plat_data->phy_ops;
+	unsigned int esc_rate; /* in MHz */
+	u32 esc_clk_division;
+	int ret;
+
 	/*
 	 * The maximum permitted escape clock is 20MHz and it is derived from
-	 * lanebyteclk, which is running at "lane_mbps / 8".  Thus we want:
-	 *
-	 *     (lane_mbps >> 3) / esc_clk_division < 20
-	 * which is:
-	 *     (lane_mbps >> 3) / 20 > esc_clk_division
+	 * lanebyteclk, which is running at "lane_mbps / 8".
 	 */
-	u32 esc_clk_division = (dsi->lane_mbps >> 3) / 20 + 1;
+	if (phy_ops->get_esc_clk_rate) {
+		ret = phy_ops->get_esc_clk_rate(dsi->plat_data->priv_data,
+						&esc_rate);
+		if (ret)
+			DRM_DEBUG_DRIVER("Phy get_esc_clk_rate() failed\n");
+	} else
+		esc_rate = 20; /* Default to 20MHz */
+
+	/*
+	 * We want :
+	 *     (lane_mbps >> 3) / esc_clk_division < X
+	 * which is:
+	 *     (lane_mbps >> 3) / X > esc_clk_division
+	 */
+	esc_clk_division = (dsi->lane_mbps >> 3) / esc_rate + 1;
 
 	dsi_write(dsi, DSI_PWR_UP, RESET);
 
@@ -530,12 +691,12 @@ static void dw_mipi_dsi_init(struct dw_mipi_dsi *dsi)
 	 * timeout clock division should be computed with the
 	 * high speed transmission counter timeout and byte lane...
 	 */
-	dsi_write(dsi, DSI_CLKMGR_CFG, TO_CLK_DIVISION(10) |
+	dsi_write(dsi, DSI_CLKMGR_CFG, TO_CLK_DIVISION(0) |
 		  TX_ESC_CLK_DIVISION(esc_clk_division));
 }
 
 static void dw_mipi_dsi_dpi_config(struct dw_mipi_dsi *dsi,
-				   struct drm_display_mode *mode)
+				   const struct drm_display_mode *mode)
 {
 	u32 val = 0, color = 0;
 
@@ -562,23 +723,20 @@ static void dw_mipi_dsi_dpi_config(struct dw_mipi_dsi *dsi,
 	dsi_write(dsi, DSI_DPI_VCID, DPI_VCID(dsi->channel));
 	dsi_write(dsi, DSI_DPI_COLOR_CODING, color);
 	dsi_write(dsi, DSI_DPI_CFG_POL, val);
-	/*
-	 * TODO dw drv improvements
-	 * largest packet sizes during hfp or during vsa/vpb/vfp
-	 * should be computed according to byte lane, lane number and only
-	 * if sending lp cmds in high speed is enable (PHY_TXREQUESTCLKHS)
-	 */
-	dsi_write(dsi, DSI_DPI_LP_CMD_TIM, OUTVACT_LPCMD_TIME(4)
-		  | INVACT_LPCMD_TIME(4));
 }
 
 static void dw_mipi_dsi_packet_handler_config(struct dw_mipi_dsi *dsi)
 {
-	dsi_write(dsi, DSI_PCKHDL_CFG, CRC_RX_EN | ECC_RX_EN | BTA_EN);
+	u32 val = CRC_RX_EN | ECC_RX_EN | BTA_EN | EOTP_TX_EN;
+
+	if (dsi->mode_flags & MIPI_DSI_MODE_NO_EOT_PACKET)
+		val &= ~EOTP_TX_EN;
+
+	dsi_write(dsi, DSI_PCKHDL_CFG, val);
 }
 
 static void dw_mipi_dsi_video_packet_config(struct dw_mipi_dsi *dsi,
-					    struct drm_display_mode *mode)
+					    const struct drm_display_mode *mode)
 {
 	/*
 	 * TODO dw drv improvements
@@ -587,7 +745,11 @@ static void dw_mipi_dsi_video_packet_config(struct dw_mipi_dsi *dsi,
 	 * DSI_VNPCR.NPSIZE... especially because this driver supports
 	 * non-burst video modes, see dw_mipi_dsi_video_mode_config()...
 	 */
-	dsi_write(dsi, DSI_VID_PKT_SIZE, VID_PKT_SIZE(mode->hdisplay));
+
+	dsi_write(dsi, DSI_VID_PKT_SIZE,
+		       dw_mipi_is_dual_mode(dsi) ?
+				VID_PKT_SIZE(mode->hdisplay / 2) :
+				VID_PKT_SIZE(mode->hdisplay));
 }
 
 static void dw_mipi_dsi_command_mode_config(struct dw_mipi_dsi *dsi)
@@ -597,7 +759,7 @@ static void dw_mipi_dsi_command_mode_config(struct dw_mipi_dsi *dsi)
 	 * compute high speed transmission counter timeout according
 	 * to the timeout clock division (TO_CLK_DIVISION) and byte lane...
 	 */
-	dsi_write(dsi, DSI_TO_CNT_CFG, HSTX_TO_CNT(1000) | LPRX_TO_CNT(1000));
+	dsi_write(dsi, DSI_TO_CNT_CFG, HSTX_TO_CNT(0) | LPRX_TO_CNT(0));
 	/*
 	 * TODO dw drv improvements
 	 * the Bus-Turn-Around Timeout Counter should be computed
@@ -607,25 +769,50 @@ static void dw_mipi_dsi_command_mode_config(struct dw_mipi_dsi *dsi)
 	dsi_write(dsi, DSI_MODE_CFG, ENABLE_CMD_MODE);
 }
 
+static const u32 minimum_lbccs[] = {10, 5, 4, 3};
+
+static inline u32 dw_mipi_dsi_get_minimum_lbcc(struct dw_mipi_dsi *dsi)
+{
+	return minimum_lbccs[dsi->lanes - 1];
+}
+
 /* Get lane byte clock cycles. */
 static u32 dw_mipi_dsi_get_hcomponent_lbcc(struct dw_mipi_dsi *dsi,
-					   struct drm_display_mode *mode,
+					   const struct drm_display_mode *mode,
 					   u32 hcomponent)
 {
-	u32 frac, lbcc;
+	u32 frac, lbcc, minimum_lbcc;
+	int bpp;
 
-	lbcc = hcomponent * dsi->lane_mbps * MSEC_PER_SEC / 8;
+	if (dsi->mode_flags & MIPI_DSI_MODE_VIDEO_BURST) {
+		/* lbcc based on lane_mbps */
+		lbcc = hcomponent * dsi->lane_mbps * MSEC_PER_SEC / 8;
+	} else {
+		/* lbcc based on pixel clock rate */
+		bpp = mipi_dsi_pixel_format_to_bpp(dsi->format);
+		if (bpp < 0) {
+			dev_err(dsi->dev, "failed to get bpp\n");
+			return 0;
+		}
+
+		lbcc = div_u64((u64)hcomponent * mode->clock * bpp, dsi->lanes * 8);
+	}
 
 	frac = lbcc % mode->clock;
 	lbcc = lbcc / mode->clock;
 	if (frac)
 		lbcc++;
 
+	minimum_lbcc = dw_mipi_dsi_get_minimum_lbcc(dsi);
+
+	if (lbcc < minimum_lbcc)
+		lbcc = minimum_lbcc;
+
 	return lbcc;
 }
 
 static void dw_mipi_dsi_line_timer_config(struct dw_mipi_dsi *dsi,
-					  struct drm_display_mode *mode)
+					  const struct drm_display_mode *mode)
 {
 	u32 htotal, hsa, hbp, lbcc;
 
@@ -648,7 +835,7 @@ static void dw_mipi_dsi_line_timer_config(struct dw_mipi_dsi *dsi,
 }
 
 static void dw_mipi_dsi_vertical_timing_config(struct dw_mipi_dsi *dsi,
-					       struct drm_display_mode *mode)
+					const struct drm_display_mode *mode)
 {
 	u32 vactive, vsa, vfp, vbp;
 
@@ -665,7 +852,15 @@ static void dw_mipi_dsi_vertical_timing_config(struct dw_mipi_dsi *dsi,
 
 static void dw_mipi_dsi_dphy_timing_config(struct dw_mipi_dsi *dsi)
 {
+	const struct dw_mipi_dsi_phy_ops *phy_ops = dsi->plat_data->phy_ops;
+	struct dw_mipi_dsi_dphy_timing timing;
 	u32 hw_version;
+	int ret;
+
+	ret = phy_ops->get_timing(dsi->plat_data->priv_data,
+				  dsi->lane_mbps, &timing);
+	if (ret)
+		DRM_DEV_ERROR(dsi->dev, "Retrieving phy timings failed\n");
 
 	/*
 	 * TODO dw drv improvements
@@ -678,16 +873,20 @@ static void dw_mipi_dsi_dphy_timing_config(struct dw_mipi_dsi *dsi)
 	hw_version = dsi_read(dsi, DSI_VERSION) & VERSION;
 
 	if (hw_version >= HWVER_131) {
-		dsi_write(dsi, DSI_PHY_TMR_CFG, PHY_HS2LP_TIME_V131(0x40) |
-			  PHY_LP2HS_TIME_V131(0x40));
+		dsi_write(dsi, DSI_PHY_TMR_CFG,
+			  PHY_HS2LP_TIME_V131(timing.data_hs2lp) |
+			  PHY_LP2HS_TIME_V131(timing.data_lp2hs));
 		dsi_write(dsi, DSI_PHY_TMR_RD_CFG, MAX_RD_TIME_V131(10000));
 	} else {
-		dsi_write(dsi, DSI_PHY_TMR_CFG, PHY_HS2LP_TIME(0x40) |
-			  PHY_LP2HS_TIME(0x40) | MAX_RD_TIME(10000));
+		dsi_write(dsi, DSI_PHY_TMR_CFG,
+			  PHY_HS2LP_TIME(timing.data_hs2lp) |
+			  PHY_LP2HS_TIME(timing.data_lp2hs) |
+			  MAX_RD_TIME(10000));
 	}
 
-	dsi_write(dsi, DSI_PHY_TMR_LPCLK_CFG, PHY_CLKHS2LP_TIME(0x40)
-		  | PHY_CLKLP2HS_TIME(0x40));
+	dsi_write(dsi, DSI_PHY_TMR_LPCLK_CFG,
+		  PHY_CLKHS2LP_TIME(timing.clk_hs2lp) |
+		  PHY_CLKLP2HS_TIME(timing.clk_lp2hs));
 }
 
 static void dw_mipi_dsi_dphy_interface_config(struct dw_mipi_dsi *dsi)
@@ -739,9 +938,11 @@ static void dw_mipi_dsi_clear_err(struct dw_mipi_dsi *dsi)
 	dsi_write(dsi, DSI_INT_MSK1, 0);
 }
 
-static void dw_mipi_dsi_bridge_post_disable(struct drm_bridge *bridge)
+static void dw_mipi_dsi_bridge_post_atomic_disable(struct drm_bridge *bridge,
+						   struct drm_atomic_commit *state)
 {
 	struct dw_mipi_dsi *dsi = bridge_to_dsi(bridge);
+	const struct dw_mipi_dsi_phy_ops *phy_ops = dsi->plat_data->phy_ops;
 
 	/*
 	 * Switch to command mode before panel-bridge post_disable &
@@ -751,44 +952,58 @@ static void dw_mipi_dsi_bridge_post_disable(struct drm_bridge *bridge)
 	 */
 	dw_mipi_dsi_set_mode(dsi, 0);
 
-	/*
-	 * TODO Only way found to call panel-bridge post_disable &
-	 * panel unprepare before the dsi "final" disable...
-	 * This needs to be fixed in the drm_bridge framework and the API
-	 * needs to be updated to manage our own call chains...
-	 */
-	dsi->panel_bridge->funcs->post_disable(dsi->panel_bridge);
+	if (phy_ops->power_off)
+		phy_ops->power_off(dsi->plat_data->priv_data);
 
+	if (dsi->slave) {
+		dw_mipi_dsi_disable(dsi->slave);
+		clk_disable_unprepare(dsi->slave->pclk);
+		pm_runtime_put(dsi->slave->dev);
+	}
 	dw_mipi_dsi_disable(dsi);
+
 	clk_disable_unprepare(dsi->pclk);
 	pm_runtime_put(dsi->dev);
 }
 
-static void dw_mipi_dsi_bridge_mode_set(struct drm_bridge *bridge,
-					struct drm_display_mode *mode,
-					struct drm_display_mode *adjusted_mode)
+static unsigned int dw_mipi_dsi_get_lanes(struct dw_mipi_dsi *dsi)
 {
-	struct dw_mipi_dsi *dsi = bridge_to_dsi(bridge);
+	/* this instance is the slave, so add the master's lanes */
+	if (dsi->master)
+		return dsi->master->lanes + dsi->lanes;
+
+	/* this instance is the master, so add the slave's lanes */
+	if (dsi->slave)
+		return dsi->lanes + dsi->slave->lanes;
+
+	/* single-dsi, so no other instance to consider */
+	return dsi->lanes;
+}
+
+static void dw_mipi_dsi_mode_set(struct dw_mipi_dsi *dsi,
+				 const struct drm_display_mode *adjusted_mode)
+{
 	const struct dw_mipi_dsi_phy_ops *phy_ops = dsi->plat_data->phy_ops;
 	void *priv_data = dsi->plat_data->priv_data;
 	int ret;
+	u32 lanes = dw_mipi_dsi_get_lanes(dsi);
 
 	clk_prepare_enable(dsi->pclk);
 
-	ret = phy_ops->get_lane_mbps(priv_data, mode, dsi->mode_flags,
-				     dsi->lanes, dsi->format, &dsi->lane_mbps);
+	ret = phy_ops->get_lane_mbps(priv_data, adjusted_mode, dsi->mode_flags,
+				     lanes, dsi->format, &dsi->lane_mbps);
 	if (ret)
 		DRM_DEBUG_DRIVER("Phy get_lane_mbps() failed\n");
 
 	pm_runtime_get_sync(dsi->dev);
 	dw_mipi_dsi_init(dsi);
-	dw_mipi_dsi_dpi_config(dsi, mode);
+	dw_mipi_dsi_dpi_config(dsi, adjusted_mode);
 	dw_mipi_dsi_packet_handler_config(dsi);
 	dw_mipi_dsi_video_mode_config(dsi);
-	dw_mipi_dsi_video_packet_config(dsi, mode);
+	dw_mipi_dsi_video_packet_config(dsi, adjusted_mode);
 	dw_mipi_dsi_command_mode_config(dsi);
-	dw_mipi_dsi_line_timer_config(dsi, mode);
-	dw_mipi_dsi_vertical_timing_config(dsi, mode);
+	dw_mipi_dsi_line_timer_config(dsi, adjusted_mode);
+	dw_mipi_dsi_vertical_timing_config(dsi, adjusted_mode);
 
 	dw_mipi_dsi_dphy_init(dsi);
 	dw_mipi_dsi_dphy_timing_config(dsi);
@@ -802,22 +1017,50 @@ static void dw_mipi_dsi_bridge_mode_set(struct drm_bridge *bridge,
 
 	dw_mipi_dsi_dphy_enable(dsi);
 
-	dw_mipi_dsi_wait_for_two_frames(mode);
+	dw_mipi_dsi_wait_for_two_frames(adjusted_mode);
 
 	/* Switch to cmd mode for panel-bridge pre_enable & panel prepare */
 	dw_mipi_dsi_set_mode(dsi, 0);
+
+	if (phy_ops->power_on)
+		phy_ops->power_on(dsi->plat_data->priv_data);
 }
 
-static void dw_mipi_dsi_bridge_enable(struct drm_bridge *bridge)
+static void dw_mipi_dsi_bridge_atomic_pre_enable(struct drm_bridge *bridge,
+						 struct drm_atomic_commit *state)
+{
+	struct dw_mipi_dsi *dsi = bridge_to_dsi(bridge);
+
+	/* Power up the dsi ctl into a command mode */
+	dw_mipi_dsi_mode_set(dsi, &dsi->mode);
+	if (dsi->slave)
+		dw_mipi_dsi_mode_set(dsi->slave, &dsi->mode);
+}
+
+static void dw_mipi_dsi_bridge_mode_set(struct drm_bridge *bridge,
+					const struct drm_display_mode *mode,
+					const struct drm_display_mode *adjusted_mode)
+{
+	struct dw_mipi_dsi *dsi = bridge_to_dsi(bridge);
+
+	/* Store the display mode for later use in pre_enable callback */
+	drm_mode_copy(&dsi->mode, adjusted_mode);
+}
+
+static void dw_mipi_dsi_bridge_atomic_enable(struct drm_bridge *bridge,
+					     struct drm_atomic_commit *state)
 {
 	struct dw_mipi_dsi *dsi = bridge_to_dsi(bridge);
 
 	/* Switch to video mode for panel-bridge enable & panel enable */
 	dw_mipi_dsi_set_mode(dsi, MIPI_DSI_MODE_VIDEO);
+	if (dsi->slave)
+		dw_mipi_dsi_set_mode(dsi->slave, MIPI_DSI_MODE_VIDEO);
 }
 
 static enum drm_mode_status
 dw_mipi_dsi_bridge_mode_valid(struct drm_bridge *bridge,
+			      const struct drm_display_info *info,
 			      const struct drm_display_mode *mode)
 {
 	struct dw_mipi_dsi *dsi = bridge_to_dsi(bridge);
@@ -825,34 +1068,127 @@ dw_mipi_dsi_bridge_mode_valid(struct drm_bridge *bridge,
 	enum drm_mode_status mode_status = MODE_OK;
 
 	if (pdata->mode_valid)
-		mode_status = pdata->mode_valid(pdata->priv_data, mode);
+		mode_status = pdata->mode_valid(pdata->priv_data, mode,
+						dsi->mode_flags,
+						dw_mipi_dsi_get_lanes(dsi),
+						dsi->format);
 
 	return mode_status;
 }
 
-static int dw_mipi_dsi_bridge_attach(struct drm_bridge *bridge)
+static int dw_mipi_dsi_bridge_attach(struct drm_bridge *bridge,
+				     struct drm_encoder *encoder,
+				     enum drm_bridge_attach_flags flags)
 {
 	struct dw_mipi_dsi *dsi = bridge_to_dsi(bridge);
 
-	if (!bridge->encoder) {
-		DRM_ERROR("Parent encoder object not found\n");
-		return -ENODEV;
-	}
-
 	/* Set the encoder type as caller does not know it */
-	bridge->encoder->encoder_type = DRM_MODE_ENCODER_DSI;
+	encoder->encoder_type = DRM_MODE_ENCODER_DSI;
 
 	/* Attach the panel-bridge to the dsi bridge */
-	return drm_bridge_attach(bridge->encoder, dsi->panel_bridge, bridge);
+	return drm_bridge_attach(encoder, dsi->panel_bridge, bridge,
+				 flags);
 }
 
 static const struct drm_bridge_funcs dw_mipi_dsi_bridge_funcs = {
-	.mode_set     = dw_mipi_dsi_bridge_mode_set,
-	.enable	      = dw_mipi_dsi_bridge_enable,
-	.post_disable = dw_mipi_dsi_bridge_post_disable,
-	.mode_valid   = dw_mipi_dsi_bridge_mode_valid,
-	.attach	      = dw_mipi_dsi_bridge_attach,
+	.atomic_duplicate_state	= drm_atomic_helper_bridge_duplicate_state,
+	.atomic_destroy_state	= drm_atomic_helper_bridge_destroy_state,
+	.atomic_get_input_bus_fmts = dw_mipi_dsi_bridge_atomic_get_input_bus_fmts,
+	.atomic_check		= dw_mipi_dsi_bridge_atomic_check,
+	.atomic_reset		= drm_atomic_helper_bridge_reset,
+	.atomic_pre_enable	= dw_mipi_dsi_bridge_atomic_pre_enable,
+	.atomic_enable		= dw_mipi_dsi_bridge_atomic_enable,
+	.atomic_post_disable	= dw_mipi_dsi_bridge_post_atomic_disable,
+	.mode_set		= dw_mipi_dsi_bridge_mode_set,
+	.mode_valid		= dw_mipi_dsi_bridge_mode_valid,
+	.attach			= dw_mipi_dsi_bridge_attach,
 };
+
+#ifdef CONFIG_DEBUG_FS
+
+static int dw_mipi_dsi_debugfs_write(void *data, u64 val)
+{
+	struct debugfs_entries *vpg = data;
+	struct dw_mipi_dsi *dsi;
+	u32 mode_cfg;
+
+	if (!vpg)
+		return -ENODEV;
+
+	dsi = vpg->dsi;
+
+	*vpg->reg = (bool)val;
+
+	mode_cfg = dsi_read(dsi, DSI_VID_MODE_CFG);
+
+	if (*vpg->reg)
+		mode_cfg |= vpg->mask;
+	else
+		mode_cfg &= ~vpg->mask;
+
+	dsi_write(dsi, DSI_VID_MODE_CFG, mode_cfg);
+
+	return 0;
+}
+
+static int dw_mipi_dsi_debugfs_show(void *data, u64 *val)
+{
+	struct debugfs_entries *vpg = data;
+
+	if (!vpg)
+		return -ENODEV;
+
+	*val = *vpg->reg;
+
+	return 0;
+}
+
+DEFINE_DEBUGFS_ATTRIBUTE(fops_x32, dw_mipi_dsi_debugfs_show,
+			 dw_mipi_dsi_debugfs_write, "%llu\n");
+
+static void debugfs_create_files(void *data)
+{
+	struct dw_mipi_dsi *dsi = data;
+	struct debugfs_entries debugfs[] = {
+		REGISTER(vpg, VID_MODE_VPG_ENABLE, dsi),
+		REGISTER(vpg_horizontal, VID_MODE_VPG_HORIZONTAL, dsi),
+		REGISTER(vpg_ber_pattern, VID_MODE_VPG_MODE, dsi),
+	};
+	int i;
+
+	dsi->debugfs_vpg = kmemdup(debugfs, sizeof(debugfs), GFP_KERNEL);
+	if (!dsi->debugfs_vpg)
+		return;
+
+	for (i = 0; i < ARRAY_SIZE(debugfs); i++)
+		debugfs_create_file(dsi->debugfs_vpg[i].name, 0644,
+				    dsi->debugfs, &dsi->debugfs_vpg[i],
+				    &fops_x32);
+}
+
+static void dw_mipi_dsi_debugfs_init(struct dw_mipi_dsi *dsi)
+{
+	dsi->debugfs = debugfs_create_dir(dev_name(dsi->dev), NULL);
+	if (IS_ERR(dsi->debugfs)) {
+		dev_err(dsi->dev, "failed to create debugfs root\n");
+		return;
+	}
+
+	debugfs_create_files(dsi);
+}
+
+static void dw_mipi_dsi_debugfs_remove(struct dw_mipi_dsi *dsi)
+{
+	debugfs_remove_recursive(dsi->debugfs);
+	kfree(dsi->debugfs_vpg);
+}
+
+#else
+
+static void dw_mipi_dsi_debugfs_init(struct dw_mipi_dsi *dsi) { }
+static void dw_mipi_dsi_debugfs_remove(struct dw_mipi_dsi *dsi) { }
+
+#endif /* CONFIG_DEBUG_FS */
 
 static struct dw_mipi_dsi *
 __dw_mipi_dsi_probe(struct platform_device *pdev,
@@ -861,27 +1197,24 @@ __dw_mipi_dsi_probe(struct platform_device *pdev,
 	struct device *dev = &pdev->dev;
 	struct reset_control *apb_rst;
 	struct dw_mipi_dsi *dsi;
-	struct resource *res;
 	int ret;
 
-	dsi = devm_kzalloc(dev, sizeof(*dsi), GFP_KERNEL);
-	if (!dsi)
-		return ERR_PTR(-ENOMEM);
+	dsi = devm_drm_bridge_alloc(dev, struct dw_mipi_dsi, bridge,
+				    &dw_mipi_dsi_bridge_funcs);
+	if (IS_ERR(dsi))
+		return ERR_CAST(dsi);
 
 	dsi->dev = dev;
 	dsi->plat_data = plat_data;
 
-	if (!plat_data->phy_ops->init || !plat_data->phy_ops->get_lane_mbps) {
+	if (!plat_data->phy_ops->init || !plat_data->phy_ops->get_lane_mbps ||
+	    !plat_data->phy_ops->get_timing) {
 		DRM_ERROR("Phy not properly configured\n");
 		return ERR_PTR(-ENODEV);
 	}
 
 	if (!plat_data->base) {
-		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-		if (!res)
-			return ERR_PTR(-ENODEV);
-
-		dsi->base = devm_ioremap_resource(dev, res);
+		dsi->base = devm_platform_ioremap_resource(pdev, 0);
 		if (IS_ERR(dsi->base))
 			return ERR_PTR(-ENODEV);
 
@@ -924,6 +1257,7 @@ __dw_mipi_dsi_probe(struct platform_device *pdev,
 		clk_disable_unprepare(dsi->pclk);
 	}
 
+	dw_mipi_dsi_debugfs_init(dsi);
 	pm_runtime_enable(dev);
 
 	dsi->dsi_host.ops = &dw_mipi_dsi_host_ops;
@@ -931,22 +1265,44 @@ __dw_mipi_dsi_probe(struct platform_device *pdev,
 	ret = mipi_dsi_host_register(&dsi->dsi_host);
 	if (ret) {
 		dev_err(dev, "Failed to register MIPI host: %d\n", ret);
+		pm_runtime_disable(dev);
+		dw_mipi_dsi_debugfs_remove(dsi);
 		return ERR_PTR(ret);
 	}
 
 	dsi->bridge.driver_private = dsi;
-	dsi->bridge.funcs = &dw_mipi_dsi_bridge_funcs;
-#ifdef CONFIG_OF
 	dsi->bridge.of_node = pdev->dev.of_node;
-#endif
 
 	return dsi;
 }
 
 static void __dw_mipi_dsi_remove(struct dw_mipi_dsi *dsi)
 {
+	mipi_dsi_host_unregister(&dsi->dsi_host);
+
 	pm_runtime_disable(dsi->dev);
+	dw_mipi_dsi_debugfs_remove(dsi);
 }
+
+void dw_mipi_dsi_set_slave(struct dw_mipi_dsi *dsi, struct dw_mipi_dsi *slave)
+{
+	/* introduce controllers to each other */
+	dsi->slave = slave;
+	dsi->slave->master = dsi;
+
+	/* migrate settings for already attached displays */
+	dsi->slave->lanes = dsi->lanes;
+	dsi->slave->channel = dsi->channel;
+	dsi->slave->format = dsi->format;
+	dsi->slave->mode_flags = dsi->mode_flags;
+}
+EXPORT_SYMBOL_GPL(dw_mipi_dsi_set_slave);
+
+struct drm_bridge *dw_mipi_dsi_get_bridge(struct dw_mipi_dsi *dsi)
+{
+	return &dsi->bridge;
+}
+EXPORT_SYMBOL_GPL(dw_mipi_dsi_get_bridge);
 
 /*
  * Probe/remove API, used from platforms based on the DRM bridge API.
@@ -961,8 +1317,6 @@ EXPORT_SYMBOL_GPL(dw_mipi_dsi_probe);
 
 void dw_mipi_dsi_remove(struct dw_mipi_dsi *dsi)
 {
-	mipi_dsi_host_unregister(&dsi->dsi_host);
-
 	__dw_mipi_dsi_remove(dsi);
 }
 EXPORT_SYMBOL_GPL(dw_mipi_dsi_remove);
@@ -970,31 +1324,14 @@ EXPORT_SYMBOL_GPL(dw_mipi_dsi_remove);
 /*
  * Bind/unbind API, used from platforms based on the component framework.
  */
-struct dw_mipi_dsi *
-dw_mipi_dsi_bind(struct platform_device *pdev, struct drm_encoder *encoder,
-		 const struct dw_mipi_dsi_plat_data *plat_data)
+int dw_mipi_dsi_bind(struct dw_mipi_dsi *dsi, struct drm_encoder *encoder)
 {
-	struct dw_mipi_dsi *dsi;
-	int ret;
-
-	dsi = __dw_mipi_dsi_probe(pdev, plat_data);
-	if (IS_ERR(dsi))
-		return dsi;
-
-	ret = drm_bridge_attach(encoder, &dsi->bridge, NULL);
-	if (ret) {
-		dw_mipi_dsi_remove(dsi);
-		DRM_ERROR("Failed to initialize bridge with drm\n");
-		return ERR_PTR(ret);
-	}
-
-	return dsi;
+	return drm_bridge_attach(encoder, &dsi->bridge, NULL, 0);
 }
 EXPORT_SYMBOL_GPL(dw_mipi_dsi_bind);
 
 void dw_mipi_dsi_unbind(struct dw_mipi_dsi *dsi)
 {
-	__dw_mipi_dsi_remove(dsi);
 }
 EXPORT_SYMBOL_GPL(dw_mipi_dsi_unbind);
 

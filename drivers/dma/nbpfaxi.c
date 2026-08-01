@@ -1,10 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2013-2014 Renesas Electronics Europe Ltd.
  * Author: Guennadi Liakhovetski <g.liakhovetski@gmx.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
  */
 
 #include <linux/bitmap.h>
@@ -18,7 +15,6 @@
 #include <linux/log2.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/of_dma.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
@@ -147,6 +143,7 @@ struct nbpf_link_desc {
  * @async_tx:	dmaengine object
  * @user_wait:	waiting for a user ack
  * @length:	total transfer length
+ * @chan:	associated DMAC channel
  * @sg:		list of hardware descriptors, represented by struct nbpf_link_desc
  * @node:	member in channel descriptor lists
  */
@@ -177,13 +174,17 @@ struct nbpf_desc_page {
 /**
  * struct nbpf_channel - one DMAC channel
  * @dma_chan:	standard dmaengine channel object
+ * @tasklet:	channel specific tasklet used for callbacks
  * @base:	register address base
  * @nbpf:	DMAC
  * @name:	IRQ name
  * @irq:	IRQ number
- * @slave_addr:	address for slave DMA
- * @slave_width:slave data size in bytes
- * @slave_burst:maximum slave burst size in bytes
+ * @slave_src_addr:	source address for slave DMA
+ * @slave_src_width:	source slave data size in bytes
+ * @slave_src_burst:	maximum source slave burst size in bytes
+ * @slave_dst_addr:	destination address for slave DMA
+ * @slave_dst_width:	destination slave data size in bytes
+ * @slave_dst_burst:	maximum destination slave burst size in bytes
  * @terminal:	DMA terminal, assigned to this channel
  * @dmarq_cfg:	DMA request line configuration - high / low, edge / level for NBPF_CHAN_CFG
  * @flags:	configuration flags from DT
@@ -194,6 +195,8 @@ struct nbpf_desc_page {
  * @active:	list of descriptors, scheduled for processing
  * @done:	list of completed descriptors, waiting post-processing
  * @desc_page:	list of additionally allocated descriptor pages - if any
+ * @running:	linked descriptor of running transaction
+ * @paused:	are translations on this channel paused?
  */
 struct nbpf_channel {
 	struct dma_chan dma_chan;
@@ -479,6 +482,7 @@ static size_t nbpf_xfer_size(struct nbpf_device *nbpf,
 
 	default:
 		pr_warn("%s(): invalid bus width %u\n", __func__, width);
+		fallthrough;
 	case DMA_SLAVE_BUSWIDTH_1_BYTE:
 		size = burst;
 	}
@@ -707,6 +711,9 @@ static int nbpf_desc_page_alloc(struct nbpf_channel *chan)
 		list_add_tail(&ldesc->node, &lhead);
 		ldesc->hwdesc_dma_addr = dma_map_single(dchan->device->dev,
 					hwdesc, sizeof(*hwdesc), DMA_TO_DEVICE);
+		if (dma_mapping_error(dchan->device->dev,
+				      ldesc->hwdesc_dma_addr))
+			goto unmap_error;
 
 		dev_dbg(dev, "%s(): mapped 0x%p to %pad\n", __func__,
 			hwdesc, &ldesc->hwdesc_dma_addr);
@@ -733,6 +740,16 @@ static int nbpf_desc_page_alloc(struct nbpf_channel *chan)
 	spin_unlock_irq(&chan->lock);
 
 	return ARRAY_SIZE(dpage->desc);
+
+unmap_error:
+	while (i--) {
+		ldesc--; hwdesc--;
+
+		dma_unmap_single(dchan->device->dev, ldesc->hwdesc_dma_addr,
+				 sizeof(hwdesc), DMA_TO_DEVICE);
+	}
+
+	return -ENOMEM;
 }
 
 static void nbpf_desc_put(struct nbpf_desc *desc)
@@ -893,7 +910,7 @@ static int nbpf_config(struct dma_chan *dchan,
 	/*
 	 * We could check config->slave_id to match chan->terminal here,
 	 * but with DT they would be coming from the same source, so
-	 * such a check would be superflous
+	 * such a check would be superfluous
 	 */
 
 	chan->slave_dst_addr = config->dst_addr;
@@ -1094,8 +1111,8 @@ static struct dma_chan *nbpf_of_xlate(struct of_phandle_args *dma_spec,
 	if (!dchan)
 		return NULL;
 
-	dev_dbg(dchan->device->dev, "Entry %s(%s)\n", __func__,
-		dma_spec->np->name);
+	dev_dbg(dchan->device->dev, "Entry %s(%pOFn)\n", __func__,
+		dma_spec->np);
 
 	chan = nbpf_to_chan(dchan);
 
@@ -1108,9 +1125,9 @@ static struct dma_chan *nbpf_of_xlate(struct of_phandle_args *dma_spec,
 	return dchan;
 }
 
-static void nbpf_chan_tasklet(unsigned long data)
+static void nbpf_chan_tasklet(struct tasklet_struct *t)
 {
-	struct nbpf_channel *chan = (struct nbpf_channel *)data;
+	struct nbpf_channel *chan = from_tasklet(chan, t, tasklet);
 	struct nbpf_desc *desc, *tmp;
 	struct dmaengine_desc_callback cb;
 
@@ -1255,7 +1272,7 @@ static int nbpf_chan_probe(struct nbpf_device *nbpf, int n)
 
 	snprintf(chan->name, sizeof(chan->name), "nbpf %d", n);
 
-	tasklet_init(&chan->tasklet, nbpf_chan_tasklet, (unsigned long)chan);
+	tasklet_setup(&chan->tasklet, nbpf_chan_tasklet);
 	ret = devm_request_irq(dma_dev->dev, chan->irq,
 			nbpf_chan_irq, IRQF_SHARED,
 			chan->name, chan);
@@ -1289,7 +1306,6 @@ static int nbpf_probe(struct platform_device *pdev)
 	struct device_node *np = dev->of_node;
 	struct nbpf_device *nbpf;
 	struct dma_device *dma_dev;
-	struct resource *iomem, *irq_res;
 	const struct nbpf_config *cfg;
 	int num_channels;
 	int ret, irq, eirq, i;
@@ -1305,16 +1321,15 @@ static int nbpf_probe(struct platform_device *pdev)
 	cfg = of_device_get_match_data(dev);
 	num_channels = cfg->num_channels;
 
-	nbpf = devm_kzalloc(dev, sizeof(*nbpf) + num_channels *
-			    sizeof(nbpf->chan[0]), GFP_KERNEL);
+	nbpf = devm_kzalloc(dev, struct_size(nbpf, chan, num_channels),
+			    GFP_KERNEL);
 	if (!nbpf)
 		return -ENOMEM;
 
 	dma_dev = &nbpf->dma_dev;
 	dma_dev->dev = dev;
 
-	iomem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	nbpf->base = devm_ioremap_resource(dev, iomem);
+	nbpf->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(nbpf->base))
 		return PTR_ERR(nbpf->base);
 
@@ -1330,13 +1345,11 @@ static int nbpf_probe(struct platform_device *pdev)
 	nbpf->config = cfg;
 
 	for (i = 0; irqs < ARRAY_SIZE(irqbuf); i++) {
-		irq_res = platform_get_resource(pdev, IORESOURCE_IRQ, i);
-		if (!irq_res)
-			break;
-
-		for (irq = irq_res->start; irq <= irq_res->end;
-		     irq++, irqs++)
-			irqbuf[irqs] = irq;
+		irq = platform_get_irq_optional(pdev, i);
+		if (irq < 0 && irq != -ENXIO)
+			return irq;
+		if (irq > 0)
+			irqbuf[irqs++] = irq;
 	}
 
 	/*
@@ -1351,7 +1364,7 @@ static int nbpf_probe(struct platform_device *pdev)
 	if (irqs == 1) {
 		eirq = irqbuf[0];
 
-		for (i = 0; i <= num_channels; i++)
+		for (i = 0; i < num_channels; i++)
 			nbpf->chan[i].irq = irqbuf[0];
 	} else {
 		eirq = platform_get_irq_byname(pdev, "error");
@@ -1361,16 +1374,15 @@ static int nbpf_probe(struct platform_device *pdev)
 		if (irqs == num_channels + 1) {
 			struct nbpf_channel *chan;
 
-			for (i = 0, chan = nbpf->chan; i <= num_channels;
+			for (i = 0, chan = nbpf->chan; i < num_channels;
 			     i++, chan++) {
 				/* Skip the error IRQ */
 				if (irqbuf[i] == eirq)
 					i++;
+				if (i >= ARRAY_SIZE(irqbuf))
+					return -EINVAL;
 				chan->irq = irqbuf[i];
 			}
-
-			if (chan != nbpf->chan + num_channels)
-				return -EINVAL;
 		} else {
 			/* 2 IRQs and more than one channel */
 			if (irqbuf[0] == eirq)
@@ -1378,7 +1390,7 @@ static int nbpf_probe(struct platform_device *pdev)
 			else
 				irq = irqbuf[0];
 
-			for (i = 0; i <= num_channels; i++)
+			for (i = 0; i < num_channels; i++)
 				nbpf->chan[i].irq = irq;
 		}
 	}
@@ -1454,7 +1466,7 @@ e_clk_off:
 	return ret;
 }
 
-static int nbpf_remove(struct platform_device *pdev)
+static void nbpf_remove(struct platform_device *pdev)
 {
 	struct nbpf_device *nbpf = platform_get_drvdata(pdev);
 	int i;
@@ -1472,50 +1484,31 @@ static int nbpf_remove(struct platform_device *pdev)
 	of_dma_controller_free(pdev->dev.of_node);
 	dma_async_device_unregister(&nbpf->dma_dev);
 	clk_disable_unprepare(nbpf->clk);
-
-	return 0;
 }
 
-static const struct platform_device_id nbpf_ids[] = {
-	{"nbpfaxi64dmac1b4",	(kernel_ulong_t)&nbpf_cfg[NBPF1B4]},
-	{"nbpfaxi64dmac1b8",	(kernel_ulong_t)&nbpf_cfg[NBPF1B8]},
-	{"nbpfaxi64dmac1b16",	(kernel_ulong_t)&nbpf_cfg[NBPF1B16]},
-	{"nbpfaxi64dmac4b4",	(kernel_ulong_t)&nbpf_cfg[NBPF4B4]},
-	{"nbpfaxi64dmac4b8",	(kernel_ulong_t)&nbpf_cfg[NBPF4B8]},
-	{"nbpfaxi64dmac4b16",	(kernel_ulong_t)&nbpf_cfg[NBPF4B16]},
-	{"nbpfaxi64dmac8b4",	(kernel_ulong_t)&nbpf_cfg[NBPF8B4]},
-	{"nbpfaxi64dmac8b8",	(kernel_ulong_t)&nbpf_cfg[NBPF8B8]},
-	{"nbpfaxi64dmac8b16",	(kernel_ulong_t)&nbpf_cfg[NBPF8B16]},
-	{},
-};
-MODULE_DEVICE_TABLE(platform, nbpf_ids);
-
-#ifdef CONFIG_PM
 static int nbpf_runtime_suspend(struct device *dev)
 {
-	struct nbpf_device *nbpf = platform_get_drvdata(to_platform_device(dev));
+	struct nbpf_device *nbpf = dev_get_drvdata(dev);
 	clk_disable_unprepare(nbpf->clk);
 	return 0;
 }
 
 static int nbpf_runtime_resume(struct device *dev)
 {
-	struct nbpf_device *nbpf = platform_get_drvdata(to_platform_device(dev));
+	struct nbpf_device *nbpf = dev_get_drvdata(dev);
 	return clk_prepare_enable(nbpf->clk);
 }
-#endif
 
 static const struct dev_pm_ops nbpf_pm_ops = {
-	SET_RUNTIME_PM_OPS(nbpf_runtime_suspend, nbpf_runtime_resume, NULL)
+	RUNTIME_PM_OPS(nbpf_runtime_suspend, nbpf_runtime_resume, NULL)
 };
 
 static struct platform_driver nbpf_driver = {
 	.driver = {
 		.name = "dma-nbpf",
 		.of_match_table = nbpf_match,
-		.pm = &nbpf_pm_ops,
+		.pm = pm_ptr(&nbpf_pm_ops),
 	},
-	.id_table = nbpf_ids,
 	.probe = nbpf_probe,
 	.remove = nbpf_remove,
 };

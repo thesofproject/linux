@@ -26,7 +26,7 @@
 
 #include <asm/page.h>
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #include <asm/ptrace.h>
 #include <asm/types.h>
@@ -46,7 +46,7 @@ struct thread_info {
 	struct pt_regs		*kregs;
 	int			preempt_count;	/* 0 => preemptable, <0 => BUG */
 	__u8			new_child;
-	__u8			current_ds;
+	__u8			__pad;
 	__u16			cpu;
 
 	unsigned long		*utraps;
@@ -64,7 +64,7 @@ struct thread_info {
 		__attribute__ ((aligned(64)));
 };
 
-#endif /* !(__ASSEMBLY__) */
+#endif /* !(__ASSEMBLER__) */
 
 /* offsets into the thread_info struct for assembly code access */
 #define TI_TASK		0x00000000
@@ -81,7 +81,6 @@ struct thread_info {
 #define TI_KREGS	0x00000028
 #define TI_PRE_COUNT	0x00000030
 #define TI_NEW_CHILD	0x00000034
-#define TI_CURRENT_DS	0x00000035
 #define TI_CPU		0x00000036
 #define TI_UTRAPS	0x00000038
 #define TI_REG_WINDOW	0x00000040
@@ -111,18 +110,22 @@ struct thread_info {
 /*
  * macros/functions for gaining access to the thread information structure
  */
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #define INIT_THREAD_INFO(tsk)				\
 {							\
 	.task		=	&tsk,			\
-	.current_ds	=	ASI_P,			\
 	.preempt_count	=	INIT_PREEMPT_COUNT,	\
+	.kregs		=	(struct pt_regs *)(init_stack+THREAD_SIZE)-1 \
 }
 
 /* how to get the thread information struct from C */
+#ifndef BUILD_VDSO
 register struct thread_info *current_thread_info_reg asm("g6");
 #define current_thread_info()	(current_thread_info_reg)
+#else
+extern struct thread_info *current_thread_info(void);
+#endif
 
 /* thread information allocation */
 #if PAGE_SHIFT == 13
@@ -147,7 +150,7 @@ register struct thread_info *current_thread_info_reg asm("g6");
 #define set_thread_fpdepth(val)		(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_FPDEPTH] = (val))
 #define get_thread_wsaved()		(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_WSAVED])
 #define set_thread_wsaved(val)		(__cur_thread_flag_byte_ptr[TI_FLAG_BYTE_WSAVED] = (val))
-#endif /* !(__ASSEMBLY__) */
+#endif /* !(__ASSEMBLER__) */
 
 /*
  * Thread information flags, only 16 bits are available as we encode
@@ -176,7 +179,7 @@ register struct thread_info *current_thread_info_reg asm("g6");
 #define TIF_NOTIFY_RESUME	1	/* callback before returning to user */
 #define TIF_SIGPENDING		2	/* signal pending */
 #define TIF_NEED_RESCHED	3	/* rescheduling necessary */
-/* flag bit 4 is available */
+#define TIF_NOTIFY_SIGNAL	4	/* signal notifications exist */
 #define TIF_UNALIGNED		5	/* allowed to do unaligned accesses */
 #define TIF_UPROBE		6	/* breakpointed or singlestepped */
 #define TIF_32BIT		7	/* 32-bit binary */
@@ -196,6 +199,7 @@ register struct thread_info *current_thread_info_reg asm("g6");
 #define _TIF_NOTIFY_RESUME	(1<<TIF_NOTIFY_RESUME)
 #define _TIF_SIGPENDING		(1<<TIF_SIGPENDING)
 #define _TIF_NEED_RESCHED	(1<<TIF_NEED_RESCHED)
+#define _TIF_NOTIFY_SIGNAL	(1<<TIF_NOTIFY_SIGNAL)
 #define _TIF_UNALIGNED		(1<<TIF_UNALIGNED)
 #define _TIF_UPROBE		(1<<TIF_UPROBE)
 #define _TIF_32BIT		(1<<TIF_32BIT)
@@ -209,7 +213,8 @@ register struct thread_info *current_thread_info_reg asm("g6");
 				 _TIF_DO_NOTIFY_RESUME_MASK | \
 				 _TIF_NEED_RESCHED)
 #define _TIF_DO_NOTIFY_RESUME_MASK	(_TIF_NOTIFY_RESUME | \
-					 _TIF_SIGPENDING | _TIF_UPROBE)
+					 _TIF_SIGPENDING | _TIF_UPROBE | \
+					 _TIF_NOTIFY_SIGNAL)
 
 #define is_32bit_task()	(test_thread_flag(TIF_32BIT))
 
@@ -223,14 +228,14 @@ register struct thread_info *current_thread_info_reg asm("g6");
  * Note that there are only 8 bits available.
  */
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #define thread32_stack_is_64bit(__SP) (((__SP) & 0x1) != 0)
 #define test_thread_64bit_stack(__SP) \
 	((test_thread_flag(TIF_32BIT) && !thread32_stack_is_64bit(__SP)) ? \
 	 false : true)
 
-#endif	/* !__ASSEMBLY__ */
+#endif	/* !__ASSEMBLER__ */
 
 #endif /* __KERNEL__ */
 

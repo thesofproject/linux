@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Generic push-switch framework
  *
  * Copyright (C) 2006  Paul Mundt
- *
- * This file is subject to the terms and conditions of the GNU General Public
- * License.  See the file "COPYING" in the main directory of this archive
- * for more details.
  */
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -28,7 +25,7 @@ static DEVICE_ATTR_RO(switch);
 
 static void switch_timer(struct timer_list *t)
 {
-	struct push_switch *psw = from_timer(psw, t, debounce);
+	struct push_switch *psw = timer_container_of(psw, t, debounce);
 
 	schedule_work(&psw->work);
 }
@@ -49,7 +46,7 @@ static int switch_drv_probe(struct platform_device *pdev)
 	struct push_switch *psw;
 	int ret, irq;
 
-	psw = kzalloc(sizeof(struct push_switch), GFP_KERNEL);
+	psw = kzalloc_obj(struct push_switch);
 	if (unlikely(!psw))
 		return -ENOMEM;
 
@@ -94,7 +91,7 @@ err:
 	return ret;
 }
 
-static int switch_drv_remove(struct platform_device *pdev)
+static void switch_drv_remove(struct platform_device *pdev)
 {
 	struct push_switch *psw = platform_get_drvdata(pdev);
 	struct push_switch_platform_info *psw_info = pdev->dev.platform_data;
@@ -104,13 +101,11 @@ static int switch_drv_remove(struct platform_device *pdev)
 		device_remove_file(&pdev->dev, &dev_attr_switch);
 
 	platform_set_drvdata(pdev, NULL);
+	timer_shutdown_sync(&psw->debounce);
 	flush_work(&psw->work);
-	del_timer_sync(&psw->debounce);
 	free_irq(irq, pdev);
 
 	kfree(psw);
-
-	return 0;
 }
 
 static struct platform_driver switch_driver = {
@@ -136,4 +131,5 @@ module_exit(switch_exit);
 
 MODULE_VERSION(DRV_VERSION);
 MODULE_AUTHOR("Paul Mundt");
+MODULE_DESCRIPTION("Generic push-switch framework");
 MODULE_LICENSE("GPL v2");

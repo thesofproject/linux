@@ -4,13 +4,15 @@
 
 #include <linux/workqueue.h>
 
+typedef u32 (*spi_bb_txrx_word_fn)(struct spi_device *, unsigned int, u32, u8, unsigned int);
+
 struct spi_bitbang {
 	struct mutex		lock;
 	u8			busy;
 	u8			use_dma;
-	u8			flags;		/* extra spi->mode support */
+	u16			flags;		/* extra spi->mode support */
 
-	struct spi_master	*master;
+	struct spi_controller	*ctlr;
 
 	/* setup_transfer() changes clock and/or wordsize to match settings
 	 * for this transfer; zeroes restore defaults from spi_device.
@@ -22,15 +24,16 @@ struct spi_bitbang {
 #define	BITBANG_CS_ACTIVE	1	/* normally nCS, active low */
 #define	BITBANG_CS_INACTIVE	0
 
+	void	(*set_mosi_idle)(struct spi_device *spi);
 	/* txrx_bufs() may handle dma mapping for transfers that don't
 	 * already have one (transfer.{tx,rx}_dma is zero), or use PIO
 	 */
 	int	(*txrx_bufs)(struct spi_device *spi, struct spi_transfer *t);
 
 	/* txrx_word[SPI_MODE_*]() just looks like a shift register */
-	u32	(*txrx_word[4])(struct spi_device *spi,
-			unsigned nsecs,
-			u32 word, u8 bits);
+	spi_bb_txrx_word_fn txrx_word[SPI_MODE_X_MASK + 1];
+
+	int	(*set_line_direction)(struct spi_device *spi, bool output);
 };
 
 /* you can call these default bitbang->master methods from your custom
@@ -43,6 +46,7 @@ extern int spi_bitbang_setup_transfer(struct spi_device *spi,
 
 /* start or stop queue processing */
 extern int spi_bitbang_start(struct spi_bitbang *spi);
+extern int spi_bitbang_init(struct spi_bitbang *spi);
 extern void spi_bitbang_stop(struct spi_bitbang *spi);
 
 #endif	/* __SPI_BITBANG_H */

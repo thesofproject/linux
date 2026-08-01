@@ -5,28 +5,21 @@
 #include <asm/cpufeatures.h>
 
 #ifdef CONFIG_64BIT
-/* popcnt %edi, %eax */
-#define POPCNT32 ".byte 0xf3,0x0f,0xb8,0xc7"
-/* popcnt %rdi, %rax */
-#define POPCNT64 ".byte 0xf3,0x48,0x0f,0xb8,0xc7"
 #define REG_IN "D"
 #define REG_OUT "a"
 #else
-/* popcnt %eax, %eax */
-#define POPCNT32 ".byte 0xf3,0x0f,0xb8,0xc0"
 #define REG_IN "a"
 #define REG_OUT "a"
 #endif
-
-#define __HAVE_ARCH_SW_HWEIGHT
 
 static __always_inline unsigned int __arch_hweight32(unsigned int w)
 {
 	unsigned int res;
 
-	asm (ALTERNATIVE("call __sw_hweight32", POPCNT32, X86_FEATURE_POPCNT)
-			 : "="REG_OUT (res)
-			 : REG_IN (w));
+	asm_inline (ALTERNATIVE("call __sw_hweight32",
+				"popcntl %[val], %[cnt]", X86_FEATURE_POPCNT)
+			 : [cnt] "=" REG_OUT (res), ASM_CALL_CONSTRAINT
+			 : [val] REG_IN (w));
 
 	return res;
 }
@@ -52,9 +45,10 @@ static __always_inline unsigned long __arch_hweight64(__u64 w)
 {
 	unsigned long res;
 
-	asm (ALTERNATIVE("call __sw_hweight64", POPCNT64, X86_FEATURE_POPCNT)
-			 : "="REG_OUT (res)
-			 : REG_IN (w));
+	asm_inline (ALTERNATIVE("call __sw_hweight64",
+				"popcntq %[val], %[cnt]", X86_FEATURE_POPCNT)
+			 : [cnt] "=" REG_OUT (res), ASM_CALL_CONSTRAINT
+			 : [val] REG_IN (w));
 
 	return res;
 }

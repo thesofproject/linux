@@ -3,7 +3,7 @@
  *
  * Name: aclinuxex.h - Extra OS specific defines, etc. for Linux
  *
- * Copyright (C) 2000 - 2018, Intel Corp.
+ * Copyright (C) 2000 - 2026, Intel Corp.
  *
  *****************************************************************************/
 
@@ -46,26 +46,22 @@ acpi_status acpi_os_terminate(void);
  * Interrupts are off during resume, just like they are for boot.
  * However, boot has  (system_state != SYSTEM_RUNNING)
  * to quiet __might_sleep() in kmalloc() and resume does not.
+ *
+ * These specialized allocators have to be macros for their allocations to be
+ * accounted separately (to have separate alloc_tag).
  */
-static inline void *acpi_os_allocate(acpi_size size)
-{
-	return kmalloc(size, irqs_disabled()? GFP_ATOMIC : GFP_KERNEL);
-}
+#define acpi_os_allocate(_size)	\
+		kmalloc(_size, irqs_disabled() ? GFP_ATOMIC : GFP_KERNEL)
 
-static inline void *acpi_os_allocate_zeroed(acpi_size size)
-{
-	return kzalloc(size, irqs_disabled()? GFP_ATOMIC : GFP_KERNEL);
-}
+#define acpi_os_allocate_zeroed(_size)	\
+		kzalloc(_size, irqs_disabled() ? GFP_ATOMIC : GFP_KERNEL)
+
+#define acpi_os_acquire_object(_cache)	\
+		kmem_cache_zalloc(_cache, irqs_disabled() ? GFP_ATOMIC : GFP_KERNEL)
 
 static inline void acpi_os_free(void *memory)
 {
 	kfree(memory);
-}
-
-static inline void *acpi_os_acquire_object(acpi_cache_t * cache)
-{
-	return kmem_cache_zalloc(cache,
-				 irqs_disabled()? GFP_ATOMIC : GFP_KERNEL);
 }
 
 static inline acpi_thread_id acpi_os_get_thread_id(void)
@@ -90,6 +86,36 @@ static inline acpi_thread_id acpi_os_get_thread_id(void)
 		lock ? AE_OK : AE_NO_MEMORY; \
 	})
 
+
+#define acpi_os_create_raw_lock(__handle) \
+	({ \
+		raw_spinlock_t *lock = ACPI_ALLOCATE(sizeof(*lock)); \
+		if (lock) { \
+			*(__handle) = lock; \
+			raw_spin_lock_init(*(__handle)); \
+		} \
+		lock ? AE_OK : AE_NO_MEMORY; \
+	})
+
+static inline acpi_cpu_flags acpi_os_acquire_raw_lock(acpi_raw_spinlock lockp)
+{
+	acpi_cpu_flags flags;
+
+	raw_spin_lock_irqsave(lockp, flags);
+	return flags;
+}
+
+static inline void acpi_os_release_raw_lock(acpi_raw_spinlock lockp,
+					    acpi_cpu_flags flags)
+{
+	raw_spin_unlock_irqrestore(lockp, flags);
+}
+
+static inline void acpi_os_delete_raw_lock(acpi_raw_spinlock handle)
+{
+	ACPI_FREE(handle);
+}
+
 static inline u8 acpi_os_readable(void *pointer, acpi_size length)
 {
 	return TRUE;
@@ -108,6 +134,7 @@ static inline void acpi_os_terminate_debugger(void)
 /*
  * OSL interfaces added by Linux
  */
+#define acpi_ut_safe_strncpy	strscpy_pad
 
 #endif				/* __KERNEL__ */
 

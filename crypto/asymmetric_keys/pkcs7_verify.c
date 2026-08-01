@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Verify the signature on a PKCS#7 message.
  *
  * Copyright (C) 2012 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt) "PKCS7: "fmt
@@ -16,6 +12,7 @@
 #include <linux/err.h>
 #include <linux/asn1.h>
 #include <crypto/hash.h>
+#include <crypto/hash_info.h>
 #include <crypto/public_key.h>
 #include "pkcs7_parser.h"
 
@@ -33,6 +30,20 @@ static int pkcs7_digest(struct pkcs7_message *pkcs7,
 
 	kenter(",%u,%s", sinfo->index, sinfo->sig->hash_algo);
 
+	if (!sinfo->authattrs && sig->algo_takes_data) {
+		/* There's no intermediate digest and the signature algo
+		 * doesn't want the data prehashing.
+		 */
+		sig->m = (void *)pkcs7->data;
+		sig->m_size = pkcs7->data_len;
+		sig->m_free = false;
+		return 0;
+	}
+
+	/* The digest was calculated already. */
+	if (sig->m)
+		return 0;
+
 	if (!sinfo->sig->hash_algo)
 		return -ENOPKG;
 
@@ -44,51 +55,48 @@ static int pkcs7_digest(struct pkcs7_message *pkcs7,
 		return (PTR_ERR(tfm) == -ENOENT) ? -ENOPKG : PTR_ERR(tfm);
 
 	desc_size = crypto_shash_descsize(tfm) + sizeof(*desc);
-	sig->digest_size = crypto_shash_digestsize(tfm);
+	sig->m_size = crypto_shash_digestsize(tfm);
 
 	ret = -ENOMEM;
-	sig->digest = kmalloc(sig->digest_size, GFP_KERNEL);
-	if (!sig->digest)
+	sig->m = kmalloc(umax(sinfo->authattrs_len, sig->m_size), GFP_KERNEL);
+	if (!sig->m)
 		goto error_no_desc;
+	sig->m_free = true;
 
 	desc = kzalloc(desc_size, GFP_KERNEL);
 	if (!desc)
 		goto error_no_desc;
 
 	desc->tfm   = tfm;
-	desc->flags = CRYPTO_TFM_REQ_MAY_SLEEP;
 
 	/* Digest the message [RFC2315 9.3] */
-	ret = crypto_shash_digest(desc, pkcs7->data, pkcs7->data_len,
-				  sig->digest);
+	ret = crypto_shash_digest(desc, pkcs7->data, pkcs7->data_len, sig->m);
 	if (ret < 0)
 		goto error;
-	pr_devel("MsgDigest = [%*ph]\n", 8, sig->digest);
+	pr_devel("MsgDigest = [%*ph]\n", 8, sig->m);
 
 	/* However, if there are authenticated attributes, there must be a
 	 * message digest attribute amongst them which corresponds to the
 	 * digest we just calculated.
 	 */
 	if (sinfo->authattrs) {
-		u8 tag;
-
 		if (!sinfo->msgdigest) {
 			pr_warn("Sig %u: No messageDigest\n", sinfo->index);
 			ret = -EKEYREJECTED;
 			goto error;
 		}
 
-		if (sinfo->msgdigest_len != sig->digest_size) {
-			pr_debug("Sig %u: Invalid digest size (%u)\n",
-				 sinfo->index, sinfo->msgdigest_len);
+		if (sinfo->msgdigest_len != sig->m_size) {
+			pr_warn("Sig %u: Invalid digest size (%u)\n",
+				sinfo->index, sinfo->msgdigest_len);
 			ret = -EBADMSG;
 			goto error;
 		}
 
-		if (memcmp(sig->digest, sinfo->msgdigest,
+		if (memcmp(sig->m, sinfo->msgdigest,
 			   sinfo->msgdigest_len) != 0) {
-			pr_debug("Sig %u: Message digest doesn't match\n",
-				 sinfo->index);
+			pr_warn("Sig %u: Message digest doesn't match\n",
+				sinfo->index);
 			ret = -EKEYREJECTED;
 			goto error;
 		}
@@ -97,21 +105,26 @@ static int pkcs7_digest(struct pkcs7_message *pkcs7,
 		 * as the contents of the digest instead.  Note that we need to
 		 * convert the attributes from a CONT.0 into a SET before we
 		 * hash it.
+		 *
+		 * However, for certain algorithms, such as ML-DSA, the digest
+		 * is integrated into the signing algorithm.  In such a case,
+		 * we copy the authattrs, modifying the tag type, and set that
+		 * as the digest.
 		 */
-		memset(sig->digest, 0, sig->digest_size);
+		memcpy(sig->m, sinfo->authattrs, sinfo->authattrs_len);
+		sig->m[0] = ASN1_CONS_BIT | ASN1_SET;
 
-		ret = crypto_shash_init(desc);
-		if (ret < 0)
-			goto error;
-		tag = ASN1_CONS_BIT | ASN1_SET;
-		ret = crypto_shash_update(desc, &tag, 1);
-		if (ret < 0)
-			goto error;
-		ret = crypto_shash_finup(desc, sinfo->authattrs,
-					 sinfo->authattrs_len, sig->digest);
-		if (ret < 0)
-			goto error;
-		pr_devel("AADigest = [%*ph]\n", 8, sig->digest);
+		if (sig->algo_takes_data) {
+			sig->m_size = sinfo->authattrs_len;
+			ret = 0;
+		} else {
+			ret = crypto_shash_digest(desc, sig->m,
+						  sinfo->authattrs_len,
+						  sig->m);
+			if (ret < 0)
+				goto error;
+		}
+		pr_devel("AADigest = [%*ph]\n", 8, sig->m);
 	}
 
 error:
@@ -120,6 +133,38 @@ error_no_desc:
 	crypto_free_shash(tfm);
 	kleave(" = %d", ret);
 	return ret;
+}
+
+int pkcs7_get_digest(struct pkcs7_message *pkcs7, const u8 **buf, u32 *len,
+		     enum hash_algo *hash_algo)
+{
+	struct pkcs7_signed_info *sinfo = pkcs7->signed_infos;
+	int i, ret;
+
+	/*
+	 * This function doesn't support messages with more than one signature.
+	 */
+	if (sinfo == NULL || sinfo->next != NULL)
+		return -EBADMSG;
+
+	ret = pkcs7_digest(pkcs7, sinfo);
+	if (ret)
+		return ret;
+	if (!sinfo->sig->m_free) {
+		pr_notice_once("%s: No digest available\n", __func__);
+		return -EINVAL; /* TODO: MLDSA doesn't necessarily calculate an
+				 * intermediate digest. */
+	}
+
+	*buf = sinfo->sig->m;
+	*len = sinfo->sig->m_size;
+
+	i = match_string(hash_algo_name, HASH_ALGO__LAST,
+			 sinfo->sig->hash_algo);
+	if (i >= 0)
+		*hash_algo = i;
+
+	return 0;
 }
 
 /*
@@ -146,12 +191,6 @@ static int pkcs7_find_key(struct pkcs7_message *pkcs7,
 			continue;
 		pr_devel("Sig %u: Found cert serial match X.509[%u]\n",
 			 sinfo->index, certix);
-
-		if (strcmp(x509->pub->pkey_algo, sinfo->sig->pkey_algo) != 0) {
-			pr_warn("Sig %u: X.509 algo and PKCS#7 sig algo don't match\n",
-				sinfo->index);
-			continue;
-		}
 
 		sinfo->signer = x509;
 		return 0;
@@ -199,9 +238,6 @@ static int pkcs7_verify_sig_chain(struct pkcs7_message *pkcs7,
 			return 0;
 		}
 
-		if (x509->unsupported_key)
-			goto unsupported_crypto_in_x509;
-
 		pr_debug("- issuer %s\n", x509->issuer);
 		sig = x509->sig;
 		if (sig->auth_ids[0])
@@ -218,7 +254,7 @@ static int pkcs7_verify_sig_chain(struct pkcs7_message *pkcs7,
 			 * authority.
 			 */
 			if (x509->unsupported_sig)
-				goto unsupported_crypto_in_x509;
+				goto unsupported_sig_in_x509;
 			x509->signer = x509;
 			pr_debug("- self-signed\n");
 			return 0;
@@ -282,7 +318,7 @@ static int pkcs7_verify_sig_chain(struct pkcs7_message *pkcs7,
 		might_sleep();
 	}
 
-unsupported_crypto_in_x509:
+unsupported_sig_in_x509:
 	/* Just prune the certificate chain at this point if we lack some
 	 * crypto module to go further.  Note, however, we don't want to set
 	 * sinfo->unsupported_crypto as the signed info block may still be
@@ -389,6 +425,12 @@ int pkcs7_verify(struct pkcs7_message *pkcs7,
 			return -EKEYREJECTED;
 		}
 		if (pkcs7->have_authattrs) {
+#ifdef CONFIG_PKCS7_WAIVE_AUTHATTRS_REJECTION_FOR_MLDSA
+			if (pkcs7->authattrs_rej_waivable) {
+				pr_warn_once("Waived invalid module sig (has authattrs)\n");
+				break;
+			}
+#endif
 			pr_warn("Invalid module sig (has authattrs)\n");
 			return -EKEYREJECTED;
 		}
@@ -411,6 +453,7 @@ int pkcs7_verify(struct pkcs7_message *pkcs7,
 		/* Authattr presence checked in parser */
 		break;
 	case VERIFYING_UNSPECIFIED_SIGNATURE:
+	case VERIFYING_BPF_SIGNATURE:
 		if (pkcs7->data_type != OID_data) {
 			pr_warn("Invalid unspecified sig (not pkcs7-data)\n");
 			return -EKEYREJECTED;
@@ -460,10 +503,11 @@ int pkcs7_supply_detached_data(struct pkcs7_message *pkcs7,
 			       const void *data, size_t datalen)
 {
 	if (pkcs7->data) {
-		pr_debug("Data already supplied\n");
+		pr_warn("Data already supplied\n");
 		return -EINVAL;
 	}
 	pkcs7->data = data;
 	pkcs7->data_len = datalen;
 	return 0;
 }
+EXPORT_SYMBOL_GPL(pkcs7_supply_detached_data);

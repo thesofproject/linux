@@ -1,22 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * APM X-Gene SoC EDAC (error detection and correction)
  *
  * Copyright (c) 2015, Applied Micro Circuits Corporation
  * Author: Feng Kan <fkan@apm.com>
  *         Loc Ho <lho@apm.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/ctype.h>
@@ -27,6 +15,7 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/regmap.h>
+#include <linux/string_choices.h>
 
 #include "edac_module.h"
 
@@ -513,7 +502,7 @@ static int xgene_edac_mc_remove(struct xgene_edac_mc_ctx *mcu)
 #define MEMERR_L2C_L2ESRA_PAGE_OFFSET		0x0804
 
 /*
- * Processor Module Domain (PMD) context - Context for a pair of processsors.
+ * Processor Module Domain (PMD) context - Context for a pair of processors.
  * Each PMD consists of 2 CPUs and a shared L2 cache. Each CPU consists of
  * its own L1 cache.
  */
@@ -925,8 +914,8 @@ static int xgene_edac_pmd_add(struct xgene_edac *edac, struct device_node *np,
 
 	snprintf(edac_name, sizeof(edac_name), "l2c%d", pmd);
 	edac_dev = edac_device_alloc_ctl_info(sizeof(*ctx),
-					      edac_name, 1, "l2c", 1, 2, NULL,
-					      0, edac_device_alloc_index());
+					      edac_name, 1, "l2c", 1, 2,
+					      edac_device_alloc_index());
 	if (!edac_dev) {
 		rc = -ENOMEM;
 		goto err_group;
@@ -1220,8 +1209,7 @@ static int xgene_edac_l3_add(struct xgene_edac *edac, struct device_node *np,
 
 	edac_idx = edac_device_alloc_index();
 	edac_dev = edac_device_alloc_ctl_info(sizeof(*ctx),
-					      "l3c", 1, "l3c", 1, 0, NULL, 0,
-					      edac_idx);
+					      "l3c", 1, "l3c", 1, 0, edac_idx);
 	if (!edac_dev) {
 		rc = -ENOMEM;
 		goto err_release_group;
@@ -1361,7 +1349,6 @@ static int xgene_edac_l3_remove(struct xgene_edac_dev_ctx *l3)
 #define WORD_ALIGNED_ERR_MASK		BIT(28)
 #define PAGE_ACCESS_ERR_MASK		BIT(27)
 #define WRITE_ACCESS_MASK		BIT(26)
-#define RBERRADDR_RD(src)		((src) & 0x03FFFFFF)
 
 static const char * const soc_mem_err_v1[] = {
 	"10GbE0",
@@ -1421,7 +1408,7 @@ static void xgene_edac_iob_gic_report(struct edac_device_ctl_info *edac_dev)
 		dev_err(edac_dev->dev, "Multiple XGIC write size error\n");
 	info = readl(ctx->dev_csr + XGICTRANSERRREQINFO);
 	dev_err(edac_dev->dev, "XGIC %s access @ 0x%08X (0x%08X)\n",
-		info & REQTYPE_MASK ? "read" : "write", ERRADDR_RD(info),
+		str_read_write(info & REQTYPE_MASK), ERRADDR_RD(info),
 		info);
 	writel(reg, ctx->dev_csr + XGICTRANSERRINTSTS);
 
@@ -1495,29 +1482,27 @@ static void xgene_edac_rb_report(struct edac_device_ctl_info *edac_dev)
 		return;
 	if (reg & STICKYERR_MASK) {
 		bool write;
-		u32 address;
 
 		dev_err(edac_dev->dev, "IOB bus access error(s)\n");
 		if (regmap_read(ctx->edac->rb_map, RBEIR, &reg))
 			return;
 		write = reg & WRITE_ACCESS_MASK ? 1 : 0;
-		address = RBERRADDR_RD(reg);
 		if (reg & AGENT_OFFLINE_ERR_MASK)
 			dev_err(edac_dev->dev,
 				"IOB bus %s access to offline agent error\n",
-				write ? "write" : "read");
+				str_write_read(write));
 		if (reg & UNIMPL_RBPAGE_ERR_MASK)
 			dev_err(edac_dev->dev,
 				"IOB bus %s access to unimplemented page error\n",
-				write ? "write" : "read");
+				str_write_read(write));
 		if (reg & WORD_ALIGNED_ERR_MASK)
 			dev_err(edac_dev->dev,
 				"IOB bus %s word aligned access error\n",
-				write ? "write" : "read");
+				str_write_read(write));
 		if (reg & PAGE_ACCESS_ERR_MASK)
 			dev_err(edac_dev->dev,
 				"IOB bus %s to page out of range access error\n",
-				write ? "write" : "read");
+				str_write_read(write));
 		if (regmap_write(ctx->edac->rb_map, RBEIR, 0))
 			return;
 		if (regmap_write(ctx->edac->rb_map, RBCSR, 0))
@@ -1576,7 +1561,7 @@ rb_skip:
 	err_addr_lo = readl(ctx->dev_csr + IOBBATRANSERRREQINFOL);
 	err_addr_hi = readl(ctx->dev_csr + IOBBATRANSERRREQINFOH);
 	dev_err(edac_dev->dev, "IOB BA %s access at 0x%02X.%08X (0x%08X)\n",
-		REQTYPE_F2_RD(err_addr_hi) ? "read" : "write",
+		str_read_write(REQTYPE_F2_RD(err_addr_hi)),
 		ERRADDRH_F2_RD(err_addr_hi), err_addr_lo, err_addr_hi);
 	if (reg & WRERR_RESP_MASK)
 		dev_err(edac_dev->dev, "IOB BA requestor ID 0x%08X\n",
@@ -1627,7 +1612,7 @@ chk_iob_axi0:
 	dev_err(edac_dev->dev,
 		"%sAXI slave 0 illegal %s access @ 0x%02X.%08X (0x%08X)\n",
 		reg & IOBAXIS0_M_ILLEGAL_ACCESS_MASK ? "Multiple " : "",
-		REQTYPE_RD(err_addr_hi) ? "read" : "write",
+		str_read_write(REQTYPE_RD(err_addr_hi)),
 		ERRADDRH_RD(err_addr_hi), err_addr_lo, err_addr_hi);
 	writel(reg, ctx->dev_csr + IOBAXIS0TRANSERRINTSTS);
 
@@ -1641,7 +1626,7 @@ chk_iob_axi1:
 	dev_err(edac_dev->dev,
 		"%sAXI slave 1 illegal %s access @ 0x%02X.%08X (0x%08X)\n",
 		reg & IOBAXIS0_M_ILLEGAL_ACCESS_MASK ? "Multiple " : "",
-		REQTYPE_RD(err_addr_hi) ? "read" : "write",
+		str_read_write(REQTYPE_RD(err_addr_hi)),
 		ERRADDRH_RD(err_addr_hi), err_addr_lo, err_addr_hi);
 	writel(reg, ctx->dev_csr + IOBAXIS1TRANSERRINTSTS);
 }
@@ -1763,8 +1748,7 @@ static int xgene_edac_soc_add(struct xgene_edac *edac, struct device_node *np,
 
 	edac_idx = edac_device_alloc_index();
 	edac_dev = edac_device_alloc_ctl_info(sizeof(*ctx),
-					      "SOC", 1, "SOC", 1, 2, NULL, 0,
-					      edac_idx);
+					      "SOC", 1, "SOC", 1, 2, edac_idx);
 	if (!edac_dev) {
 		rc = -ENOMEM;
 		goto err_release_group;
@@ -1931,10 +1915,10 @@ static int xgene_edac_probe(struct platform_device *pdev)
 		int i;
 
 		for (i = 0; i < 3; i++) {
-			irq = platform_get_irq(pdev, i);
+			irq = platform_get_irq_optional(pdev, i);
 			if (irq < 0) {
 				dev_err(&pdev->dev, "No IRQ resource\n");
-				rc = -EINVAL;
+				rc = irq;
 				goto out_err;
 			}
 			rc = devm_request_irq(&pdev->dev, irq,
@@ -1975,7 +1959,7 @@ out_err:
 	return rc;
 }
 
-static int xgene_edac_remove(struct platform_device *pdev)
+static void xgene_edac_remove(struct platform_device *pdev)
 {
 	struct xgene_edac *edac = dev_get_drvdata(&pdev->dev);
 	struct xgene_edac_mc_ctx *mcu;
@@ -1996,8 +1980,6 @@ static int xgene_edac_remove(struct platform_device *pdev)
 
 	list_for_each_entry_safe(node, temp_node, &edac->socs, next)
 		xgene_edac_soc_remove(node);
-
-	return 0;
 }
 
 static const struct of_device_id xgene_edac_of_match[] = {
@@ -2018,6 +2000,9 @@ static struct platform_driver xgene_edac_driver = {
 static int __init xgene_edac_init(void)
 {
 	int rc;
+
+	if (ghes_get_devices())
+		return -EBUSY;
 
 	/* Make sure error reporting method is sane */
 	switch (edac_op_state) {

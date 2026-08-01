@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Patch routines for the emu8000 (AWE32/64)
  *
  *  Copyright (C) 1999 Steve Ratcliffe
  *  Copyright (C) 1999-2000 Takashi Iwai <tiwai@suse.de>
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include "emu8000_local.h"
@@ -161,16 +148,6 @@ snd_emu8000_sample_new(struct snd_emux *rec, struct snd_sf_sample *sp,
 	if (snd_BUG_ON(!sp))
 		return -EINVAL;
 
-	if (sp->v.size == 0)
-		return 0;
-
-	/* be sure loop points start < end */
-	if (sp->v.loopstart > sp->v.loopend) {
-		int tmp = sp->v.loopstart;
-		sp->v.loopstart = sp->v.loopend;
-		sp->v.loopend = tmp;
-	}
-
 	/* compute true data size to be loaded */
 	truesize = sp->v.size;
 	if (sp->v.mode_flags & (SNDRV_SFNT_SAMPLE_BIDIR_LOOP|SNDRV_SFNT_SAMPLE_REVERSE_LOOP))
@@ -180,24 +157,17 @@ snd_emu8000_sample_new(struct snd_emux *rec, struct snd_sf_sample *sp,
 
 	sp->block = snd_util_mem_alloc(hdr, truesize * 2);
 	if (sp->block == NULL) {
-		/*snd_printd("EMU8000: out of memory\n");*/
 		/* not ENOMEM (for compatibility) */
 		return -ENOSPC;
 	}
 
 	if (sp->v.mode_flags & SNDRV_SFNT_SAMPLE_8BITS) {
-		if (!access_ok(VERIFY_READ, data, sp->v.size))
+		if (!access_ok(data, sp->v.size))
 			return -EFAULT;
 	} else {
-		if (!access_ok(VERIFY_READ, data, sp->v.size * 2))
+		if (!access_ok(data, sp->v.size * 2))
 			return -EFAULT;
 	}
-
-	/* recalculate address offset */
-	sp->v.end -= sp->v.start;
-	sp->v.loopstart -= sp->v.start;
-	sp->v.loopend -= sp->v.start;
-	sp->v.start = 0;
 
 	/* dram position (in word) -- mem_offset is byte */
 	dram_offset = EMU8000_DRAM_OFFSET + (sp->block->offset >> 1);
@@ -207,7 +177,8 @@ snd_emu8000_sample_new(struct snd_emux *rec, struct snd_sf_sample *sp,
 	sp->v.truesize = truesize * 2; /* in bytes */
 
 	snd_emux_terminate_all(emu->emu);
-	if ((rc = snd_emu8000_open_dma(emu, EMU8000_RAM_WRITE)) != 0)
+	rc = snd_emu8000_open_dma(emu, EMU8000_RAM_WRITE);
+	if (rc)
 		return rc;
 
 	/* Set the address to start writing at */

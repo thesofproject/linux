@@ -2,7 +2,7 @@
 /*
  * ALSA SoC TLV320AIC31xx CODEC Driver
  *
- * Copyright (C) 2014-2017 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2014-2017 Texas Instruments Incorporated - https://www.ti.com/
  *	Jyri Sarha <jsarha@ti.com>
  *
  * Based on ground work by: Ajit Kulkarni <x0175765@ti.com>
@@ -12,27 +12,33 @@
  * and mono/stereo Class-D speaker driver.
  */
 
+#include <linux/unaligned.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
+#include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/pm.h>
 #include <linux/i2c.h>
 #include <linux/gpio/consumer.h>
 #include <linux/regulator/consumer.h>
 #include <linux/acpi.h>
+#include <linux/firmware.h>
 #include <linux/of.h>
-#include <linux/of_gpio.h>
 #include <linux/slab.h>
 #include <sound/core.h>
+#include <sound/jack.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/initval.h>
 #include <sound/tlv.h>
-#include <dt-bindings/sound/tlv320aic31xx-micbias.h>
+#include <dt-bindings/sound/tlv320aic31xx.h>
 
 #include "tlv320aic31xx.h"
+
+static int aic31xx_set_jack(struct snd_soc_component *component,
+                            struct snd_soc_jack *jack, void *data);
 
 static const struct reg_default aic31xx_reg_defaults[] = {
 	{ AIC31XX_CLKMUX, 0x00 },
@@ -89,6 +95,7 @@ static bool aic31xx_volatile(struct device *dev, unsigned int reg)
 	case AIC31XX_INTRADCFLAG: /* Sticky interrupt flags */
 	case AIC31XX_INTRDACFLAG2:
 	case AIC31XX_INTRADCFLAG2:
+	case AIC31XX_HSDETECT:
 		return true;
 	}
 	return false;
@@ -163,15 +170,20 @@ struct aic31xx_priv {
 	struct aic31xx_pdata pdata;
 	struct regulator_bulk_data supplies[AIC31XX_NUM_SUPPLIES];
 	struct aic31xx_disable_nb disable_nb[AIC31XX_NUM_SUPPLIES];
+	struct snd_soc_jack *jack;
+	u32 sysclk_id;
 	unsigned int sysclk;
 	u8 p_div;
 	int rate_div_line;
 	bool master_dapm_route_applied;
+	int irq;
+	u8 ocmv; /* output common-mode voltage */
 };
 
 struct aic31xx_rate_divs {
 	u32 mclk_p;
 	u32 rate;
+	u8 pll_r;
 	u8 pll_j;
 	u16 pll_d;
 	u16 dosr;
@@ -184,51 +196,71 @@ struct aic31xx_rate_divs {
 
 /* ADC dividers can be disabled by configuring them to 0 */
 static const struct aic31xx_rate_divs aic31xx_divs[] = {
-	/* mclk/p    rate  pll: j     d        dosr ndac mdac  aors nadc madc */
+	/* mclk/p    rate  pll: r  j     d     dosr ndac mdac  aors nadc madc */
 	/* 8k rate */
-	{12000000,   8000,	8, 1920,	128,  48,  2,	128,  48,  2},
-	{12000000,   8000,	8, 1920,	128,  32,  3,	128,  32,  3},
-	{12500000,   8000,	7, 8643,	128,  48,  2,	128,  48,  2},
+	{  512000,   8000,	4, 48,   0,	128,  48,  2,   128,  48,  2},
+	{12000000,   8000,	1, 8, 1920,	128,  48,  2,	128,  48,  2},
+	{12000000,   8000,	1, 8, 1920,	128,  32,  3,	128,  32,  3},
+	{12500000,   8000,	1, 7, 8643,	128,  48,  2,	128,  48,  2},
 	/* 11.025k rate */
-	{12000000,  11025,	7, 5264,	128,  32,  2,	128,  32,  2},
-	{12000000,  11025,	8, 4672,	128,  24,  3,	128,  24,  3},
-	{12500000,  11025,	7, 2253,	128,  32,  2,	128,  32,  2},
+	{  705600,  11025,	3, 48,   0,	128,  24,  3,	128,  24,  3},
+	{12000000,  11025,	1, 7, 5264,	128,  32,  2,	128,  32,  2},
+	{12000000,  11025,	1, 8, 4672,	128,  24,  3,	128,  24,  3},
+	{12500000,  11025,	1, 7, 2253,	128,  32,  2,	128,  32,  2},
 	/* 16k rate */
-	{12000000,  16000,	8, 1920,	128,  24,  2,	128,  24,  2},
-	{12000000,  16000,	8, 1920,	128,  16,  3,	128,  16,  3},
-	{12500000,  16000,	7, 8643,	128,  24,  2,	128,  24,  2},
+	{  512000,  16000,	4, 48,   0,	128,  16,  3,	128,  16,  3},
+	{ 1024000,  16000,	2, 48,   0,	128,  16,  3,	128,  16,  3},
+	{12000000,  16000,	1, 8, 1920,	128,  24,  2,	128,  24,  2},
+	{12000000,  16000,	1, 8, 1920,	128,  16,  3,	128,  16,  3},
+	{12500000,  16000,	1, 7, 8643,	128,  24,  2,	128,  24,  2},
 	/* 22.05k rate */
-	{12000000,  22050,	7, 5264,	128,  16,  2,	128,  16,  2},
-	{12000000,  22050,	8, 4672,	128,  12,  3,	128,  12,  3},
-	{12500000,  22050,	7, 2253,	128,  16,  2,	128,  16,  2},
+	{  705600,  22050,	4, 36,   0,	128,  12,  3,	128,  12,  3},
+	{ 1411200,  22050,	2, 36,   0,	128,  12,  3,	128,  12,  3},
+	{12000000,  22050,	1, 7, 5264,	128,  16,  2,	128,  16,  2},
+	{12000000,  22050,	1, 8, 4672,	128,  12,  3,	128,  12,  3},
+	{12500000,  22050,	1, 7, 2253,	128,  16,  2,	128,  16,  2},
 	/* 32k rate */
-	{12000000,  32000,	8, 1920,	128,  12,  2,	128,  12,  2},
-	{12000000,  32000,	8, 1920,	128,   8,  3,	128,   8,  3},
-	{12500000,  32000,	7, 8643,	128,  12,  2,	128,  12,  2},
+	{ 1024000,  32000,      2, 48,   0,	128,  12,  2,	128,  12,  2},
+	{ 2048000,  32000,      1, 48,   0,	128,  12,  2,	128,  12,  2},
+	{12000000,  32000,	1, 8, 1920,	128,  12,  2,	128,  12,  2},
+	{12000000,  32000,	1, 8, 1920,	128,   8,  3,	128,   8,  3},
+	{12500000,  32000,	1, 7, 8643,	128,  12,  2,	128,  12,  2},
 	/* 44.1k rate */
-	{12000000,  44100,	7, 5264,	128,   8,  2,	128,   8,  2},
-	{12000000,  44100,	8, 4672,	128,   6,  3,	128,   6,  3},
-	{12500000,  44100,	7, 2253,	128,   8,  2,	128,   8,  2},
+	{ 1411200,  44100,	2, 32,   0,	128,   8,  2,	128,   8,  2},
+	{ 2822400,  44100,	1, 32,   0,	128,   8,  2,	128,   8,  2},
+	{12000000,  44100,	1, 7, 5264,	128,   8,  2,	128,   8,  2},
+	{12000000,  44100,	1, 8, 4672,	128,   6,  3,	128,   6,  3},
+	{12500000,  44100,	1, 7, 2253,	128,   8,  2,	128,   8,  2},
 	/* 48k rate */
-	{12000000,  48000,	8, 1920,	128,   8,  2,	128,   8,  2},
-	{12000000,  48000,	7, 6800,	 96,   5,  4,	 96,   5,  4},
-	{12500000,  48000,	7, 8643,	128,   8,  2,	128,   8,  2},
+	{ 1536000,  48000,	2, 32,   0,	128,   8,  2,	128,   8,  2},
+	{ 3072000,  48000,	1, 32,   0,	128,   8,  2,	128,   8,  2},
+	{12000000,  48000,	1, 8, 1920,	128,   8,  2,	128,   8,  2},
+	{12000000,  48000,	1, 7, 6800,	 96,   5,  4,	 96,   5,  4},
+	{12500000,  48000,	1, 7, 8643,	128,   8,  2,	128,   8,  2},
 	/* 88.2k rate */
-	{12000000,  88200,	7, 5264,	 64,   8,  2,	 64,   8,  2},
-	{12000000,  88200,	8, 4672,	 64,   6,  3,	 64,   6,  3},
-	{12500000,  88200,	7, 2253,	 64,   8,  2,	 64,   8,  2},
+	{ 2822400,  88200,	2, 16,   0,	 64,   8,  2,	 64,   8,  2},
+	{ 5644800,  88200,	1, 16,   0,	 64,   8,  2,	 64,   8,  2},
+	{12000000,  88200,	1, 7, 5264,	 64,   8,  2,	 64,   8,  2},
+	{12000000,  88200,	1, 8, 4672,	 64,   6,  3,	 64,   6,  3},
+	{12500000,  88200,	1, 7, 2253,	 64,   8,  2,	 64,   8,  2},
 	/* 96k rate */
-	{12000000,  96000,	8, 1920,	 64,   8,  2,	 64,   8,  2},
-	{12000000,  96000,	7, 6800,	 48,   5,  4,	 48,   5,  4},
-	{12500000,  96000,	7, 8643,	 64,   8,  2,	 64,   8,  2},
+	{ 3072000,  96000,	2, 16,   0,	 64,   8,  2,	 64,   8,  2},
+	{ 6144000,  96000,	1, 16,   0,	 64,   8,  2,	 64,   8,  2},
+	{12000000,  96000,	1, 8, 1920,	 64,   8,  2,	 64,   8,  2},
+	{12000000,  96000,	1, 7, 6800,	 48,   5,  4,	 48,   5,  4},
+	{12500000,  96000,	1, 7, 8643,	 64,   8,  2,	 64,   8,  2},
 	/* 176.4k rate */
-	{12000000, 176400,	7, 5264,	 32,   8,  2,	 32,   8,  2},
-	{12000000, 176400,	8, 4672,	 32,   6,  3,	 32,   6,  3},
-	{12500000, 176400,	7, 2253,	 32,   8,  2,	 32,   8,  2},
+	{ 5644800, 176400,	2, 8,    0,	 32,   8,  2,	 32,   8,  2},
+	{11289600, 176400,	1, 8,    0,	 32,   8,  2,	 32,   8,  2},
+	{12000000, 176400,	1, 7, 5264,	 32,   8,  2,	 32,   8,  2},
+	{12000000, 176400,	1, 8, 4672,	 32,   6,  3,	 32,   6,  3},
+	{12500000, 176400,	1, 7, 2253,	 32,   8,  2,	 32,   8,  2},
 	/* 192k rate */
-	{12000000, 192000,	8, 1920,	 32,   8,  2,	 32,   8,  2},
-	{12000000, 192000,	7, 6800,	 24,   5,  4,	 24,   5,  4},
-	{12500000, 192000,	7, 8643,	 32,   8,  2,	 32,   8,  2},
+	{ 6144000, 192000,	2, 8,	 0,	 32,   8,  2,	 32,   8,  2},
+	{12288000, 192000,	1, 8,	 0,	 32,   8,  2,	 32,   8,  2},
+	{12000000, 192000,	1, 8, 1920,	 32,   8,  2,	 32,   8,  2},
+	{12000000, 192000,	1, 7, 6800,	 24,   5,  4,	 24,   5,  4},
+	{12500000, 192000,	1, 7, 8643,	 32,   8,  2,	 32,   8,  2},
 };
 
 static const char * const ldac_in_text[] = {
@@ -254,9 +286,27 @@ static SOC_ENUM_SINGLE_DECL(mic1rp_p_enum, AIC31XX_MICPGAPI, 4,
 static SOC_ENUM_SINGLE_DECL(mic1lm_p_enum, AIC31XX_MICPGAPI, 2,
 	mic_select_text);
 
-static SOC_ENUM_SINGLE_DECL(cm_m_enum, AIC31XX_MICPGAMI, 6, mic_select_text);
 static SOC_ENUM_SINGLE_DECL(mic1lm_m_enum, AIC31XX_MICPGAMI, 4,
 	mic_select_text);
+
+static const char * const hp_poweron_time_text[] = {
+	"0us", "15.3us", "153us", "1.53ms", "15.3ms", "76.2ms",
+	"153ms", "304ms", "610ms", "1.22s", "3.04s", "6.1s" };
+
+static SOC_ENUM_SINGLE_DECL(hp_poweron_time_enum, AIC31XX_HPPOP, 3,
+	hp_poweron_time_text);
+
+static const char * const hp_rampup_step_text[] = {
+	"0ms", "0.98ms", "1.95ms", "3.9ms" };
+
+static SOC_ENUM_SINGLE_DECL(hp_rampup_step_enum, AIC31XX_HPPOP, 1,
+	hp_rampup_step_text);
+
+static const char * const vol_soft_step_mode_text[] = {
+	"fast", "slow", "disabled" };
+
+static SOC_ENUM_SINGLE_DECL(vol_soft_step_mode_enum, AIC31XX_DACSETUP, 0,
+	vol_soft_step_mode_text);
 
 static const DECLARE_TLV_DB_SCALE(dac_vol_tlv, -6350, 50, 0);
 static const DECLARE_TLV_DB_SCALE(adc_fgain_tlv, 0, 10, 0);
@@ -281,6 +331,16 @@ static const struct snd_kcontrol_new common31xx_snd_controls[] = {
 
 	SOC_DOUBLE_R_TLV("HP Analog Playback Volume", AIC31XX_LANALOGHPL,
 			 AIC31XX_RANALOGHPR, 0, 0x7F, 1, hp_vol_tlv),
+
+	/* HP de-pop control: apply power not immediately but via ramp
+	 * function with these psarameters. Note that power up sequence
+	 * has to wait for this to complete; this is implemented by
+	 * polling HP driver status in aic31xx_dapm_power_event()
+	 */
+	SOC_ENUM("HP Output Driver Power-On time", hp_poweron_time_enum),
+	SOC_ENUM("HP Output Driver Ramp-up step", hp_rampup_step_enum),
+
+	SOC_ENUM("Volume Soft Stepping", vol_soft_step_mode_enum),
 };
 
 static const struct snd_kcontrol_new aic31xx_snd_controls[] = {
@@ -353,6 +413,7 @@ static int aic31xx_dapm_power_event(struct snd_soc_dapm_widget *w,
 	struct aic31xx_priv *aic31xx = snd_soc_component_get_drvdata(component);
 	unsigned int reg = AIC31XX_DACFLAG1;
 	unsigned int mask;
+	unsigned int timeout = 500 * USEC_PER_MSEC;
 
 	switch (WIDGET_BIT(w->reg, w->shift)) {
 	case WIDGET_BIT(AIC31XX_DACSETUP, 7):
@@ -363,9 +424,13 @@ static int aic31xx_dapm_power_event(struct snd_soc_dapm_widget *w,
 		break;
 	case WIDGET_BIT(AIC31XX_HPDRIVER, 7):
 		mask = AIC31XX_HPLDRVPWRSTATUS_MASK;
+		if (event == SND_SOC_DAPM_POST_PMU)
+			timeout = 7 * USEC_PER_SEC;
 		break;
 	case WIDGET_BIT(AIC31XX_HPDRIVER, 6):
 		mask = AIC31XX_HPRDRVPWRSTATUS_MASK;
+		if (event == SND_SOC_DAPM_POST_PMU)
+			timeout = 7 * USEC_PER_SEC;
 		break;
 	case WIDGET_BIT(AIC31XX_SPKAMP, 7):
 		mask = AIC31XX_SPLDRVPWRSTATUS_MASK;
@@ -385,9 +450,11 @@ static int aic31xx_dapm_power_event(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
-		return aic31xx_wait_bits(aic31xx, reg, mask, mask, 5000, 100);
+		return aic31xx_wait_bits(aic31xx, reg, mask, mask,
+				5000, timeout / 5000);
 	case SND_SOC_DAPM_POST_PMD:
-		return aic31xx_wait_bits(aic31xx, reg, mask, 0, 5000, 100);
+		return aic31xx_wait_bits(aic31xx, reg, mask, 0,
+				5000, timeout / 5000);
 	default:
 		dev_dbg(component->dev,
 			"Unhandled dapm widget event %d from %s\n",
@@ -732,7 +799,7 @@ static int aic31xx_add_controls(struct snd_soc_component *component)
 
 static int aic31xx_add_widgets(struct snd_soc_component *component)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	struct aic31xx_priv *aic31xx = snd_soc_component_get_drvdata(component);
 	int ret = 0;
 
@@ -828,7 +895,7 @@ static int aic31xx_setup_pll(struct snd_soc_component *component,
 		dev_err(component->dev,
 			"%s: Sample rate (%u) and format not supported\n",
 			__func__, params_rate(params));
-		/* See bellow for details how fix this. */
+		/* See below for details on how to fix this. */
 		return -EINVAL;
 	}
 	if (bclk_score != 0) {
@@ -837,7 +904,7 @@ static int aic31xx_setup_pll(struct snd_soc_component *component,
 		   there may be trouble. To fix the issue edit the
 		   aic31xx_divs table for your mclk and sample
 		   rate. Details can be found from:
-		   http://www.ti.com/lit/ds/symlink/tlv320aic3100.pdf
+		   https://www.ti.com/lit/ds/symlink/tlv320aic3100.pdf
 		   Section: 5.6 CLOCK Generation and PLL
 		*/
 	}
@@ -845,7 +912,7 @@ static int aic31xx_setup_pll(struct snd_soc_component *component,
 
 	/* PLL configuration */
 	snd_soc_component_update_bits(component, AIC31XX_PLLPR, AIC31XX_PLL_MASK,
-			    (aic31xx->p_div << 4) | 0x01);
+			    (aic31xx->p_div << 4) | aic31xx_divs[i].pll_r);
 	snd_soc_component_write(component, AIC31XX_PLLJ, aic31xx_divs[i].pll_j);
 
 	snd_soc_component_write(component, AIC31XX_PLLDMSB,
@@ -898,6 +965,7 @@ static int aic31xx_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_soc_dai *dai)
 {
 	struct snd_soc_component *component = dai->component;
+	struct aic31xx_priv *aic31xx = snd_soc_component_get_drvdata(component);
 	u8 data = 0;
 
 	dev_dbg(component->dev, "## %s: width %d rate %d\n",
@@ -929,10 +997,21 @@ static int aic31xx_hw_params(struct snd_pcm_substream *substream,
 			    AIC31XX_IFACE1_DATALEN_MASK,
 			    data);
 
+	/*
+	 * If BCLK is used as PLL input, the sysclk is determined by the hw
+	 * params. So it must be updated here to match the input frequency.
+	 */
+	if (aic31xx->sysclk_id == AIC31XX_PLL_CLKIN_BCLK) {
+		aic31xx->sysclk = params_rate(params) * params_width(params) *
+				  params_channels(params);
+		aic31xx->p_div = 1;
+	}
+
 	return aic31xx_setup_pll(component, params);
 }
 
-static int aic31xx_dac_mute(struct snd_soc_dai *codec_dai, int mute)
+static int aic31xx_dac_mute(struct snd_soc_dai *codec_dai, int mute,
+			    int direction)
 {
 	struct snd_soc_component *component = codec_dai->component;
 
@@ -951,12 +1030,12 @@ static int aic31xx_dac_mute(struct snd_soc_dai *codec_dai, int mute)
 static int aic31xx_clock_master_routes(struct snd_soc_component *component,
 				       unsigned int fmt)
 {
-	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
 	struct aic31xx_priv *aic31xx = snd_soc_component_get_drvdata(component);
 	int ret;
 
-	fmt &= SND_SOC_DAIFMT_MASTER_MASK;
-	if (fmt == SND_SOC_DAIFMT_CBS_CFS &&
+	fmt &= SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK;
+	if (fmt == SND_SOC_DAIFMT_CBC_CFC &&
 	    aic31xx->master_dapm_route_applied) {
 		/*
 		 * Remove the DAPM route(s) for codec clock master modes,
@@ -973,7 +1052,7 @@ static int aic31xx_clock_master_routes(struct snd_soc_component *component,
 			return ret;
 
 		aic31xx->master_dapm_route_applied = false;
-	} else if (fmt != SND_SOC_DAIFMT_CBS_CFS &&
+	} else if (fmt != SND_SOC_DAIFMT_CBC_CFC &&
 		   !aic31xx->master_dapm_route_applied) {
 		/*
 		 * Add the needed DAPM route(s) for codec clock master modes,
@@ -1005,21 +1084,20 @@ static int aic31xx_set_dai_fmt(struct snd_soc_dai *codec_dai,
 
 	dev_dbg(component->dev, "## %s: fmt = 0x%x\n", __func__, fmt);
 
-	/* set master/slave audio interface */
-	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	switch (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) {
+	case SND_SOC_DAIFMT_CBP_CFP:
 		iface_reg1 |= AIC31XX_BCLK_MASTER | AIC31XX_WCLK_MASTER;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFM:
+	case SND_SOC_DAIFMT_CBC_CFP:
 		iface_reg1 |= AIC31XX_WCLK_MASTER;
 		break;
-	case SND_SOC_DAIFMT_CBM_CFS:
+	case SND_SOC_DAIFMT_CBP_CFC:
 		iface_reg1 |= AIC31XX_BCLK_MASTER;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
 	default:
-		dev_err(component->dev, "Invalid DAI master/slave interface\n");
+		dev_err(component->dev, "Invalid DAI clock provider\n");
 		return -EINVAL;
 	}
 
@@ -1040,7 +1118,8 @@ static int aic31xx_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	case SND_SOC_DAIFMT_I2S:
 		break;
 	case SND_SOC_DAIFMT_DSP_A:
-		dsp_a_val = 0x1; /* fall through */
+		dsp_a_val = 0x1;
+		fallthrough;
 	case SND_SOC_DAIFMT_DSP_B:
 		/*
 		 * NOTE: This CODEC samples on the falling edge of BCLK in
@@ -1094,7 +1173,7 @@ static int aic31xx_set_dai_sysclk(struct snd_soc_dai *codec_dai,
 	if (freq/i > 20000000) {
 		dev_err(aic31xx->dev, "%s: Too high mclk frequency %u\n",
 			__func__, freq);
-			return -EINVAL;
+		return -EINVAL;
 	}
 	aic31xx->p_div = i;
 
@@ -1111,6 +1190,7 @@ static int aic31xx_set_dai_sysclk(struct snd_soc_dai *codec_dai,
 	snd_soc_component_update_bits(component, AIC31XX_CLKMUX, AIC31XX_PLL_CLKIN_MASK,
 			    clk_id << AIC31XX_PLL_CLKIN_SHIFT);
 
+	aic31xx->sysclk_id = clk_id;
 	aic31xx->sysclk = freq;
 
 	return 0;
@@ -1129,7 +1209,7 @@ static int aic31xx_regulator_event(struct notifier_block *nb,
 		 * supplies was disabled.
 		 */
 		if (aic31xx->gpio_reset)
-			gpiod_set_value(aic31xx->gpio_reset, 1);
+			gpiod_set_value_cansleep(aic31xx->gpio_reset, 1);
 
 		regcache_mark_dirty(aic31xx->regmap);
 		dev_dbg(aic31xx->dev, "## %s: DISABLE received\n", __func__);
@@ -1143,9 +1223,9 @@ static int aic31xx_reset(struct aic31xx_priv *aic31xx)
 	int ret = 0;
 
 	if (aic31xx->gpio_reset) {
-		gpiod_set_value(aic31xx->gpio_reset, 1);
+		gpiod_set_value_cansleep(aic31xx->gpio_reset, 1);
 		ndelay(10); /* At least 10ns */
-		gpiod_set_value(aic31xx->gpio_reset, 0);
+		gpiod_set_value_cansleep(aic31xx->gpio_reset, 0);
 	} else {
 		ret = regmap_write(aic31xx->regmap, AIC31XX_RESET, 1);
 	}
@@ -1214,6 +1294,13 @@ static int aic31xx_power_on(struct snd_soc_component *component)
 		return ret;
 	}
 
+	/*
+	 * The jack detection configuration is in the same register
+	 * that is used to report jack detect status so is volatile
+	 * and not covered by the cache sync, restore it separately.
+	 */
+	aic31xx_set_jack(component, aic31xx->jack, NULL);
+
 	return 0;
 }
 
@@ -1229,18 +1316,20 @@ static void aic31xx_power_off(struct snd_soc_component *component)
 static int aic31xx_set_bias_level(struct snd_soc_component *component,
 				  enum snd_soc_bias_level level)
 {
+	struct snd_soc_dapm_context *dapm = snd_soc_component_to_dapm(component);
+
 	dev_dbg(component->dev, "## %s: %d -> %d\n", __func__,
-		snd_soc_component_get_bias_level(component), level);
+		snd_soc_dapm_get_bias_level(dapm), level);
 
 	switch (level) {
 	case SND_SOC_BIAS_ON:
 		break;
 	case SND_SOC_BIAS_PREPARE:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_STANDBY)
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_STANDBY)
 			aic31xx_clk_on(component);
 		break;
 	case SND_SOC_BIAS_STANDBY:
-		switch (snd_soc_component_get_bias_level(component)) {
+		switch (snd_soc_dapm_get_bias_level(dapm)) {
 		case SND_SOC_BIAS_OFF:
 			aic31xx_power_on(component);
 			break;
@@ -1252,10 +1341,24 @@ static int aic31xx_set_bias_level(struct snd_soc_component *component,
 		}
 		break;
 	case SND_SOC_BIAS_OFF:
-		if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_STANDBY)
+		if (snd_soc_dapm_get_bias_level(dapm) == SND_SOC_BIAS_STANDBY)
 			aic31xx_power_off(component);
 		break;
 	}
+
+	return 0;
+}
+
+static int aic31xx_set_jack(struct snd_soc_component *component,
+			    struct snd_soc_jack *jack, void *data)
+{
+	struct aic31xx_priv *aic31xx = snd_soc_component_get_drvdata(component);
+
+	aic31xx->jack = jack;
+
+	/* Enable/Disable jack detection */
+	regmap_write(aic31xx->regmap, AIC31XX_HSDETECT,
+		     jack ? AIC31XX_HSD_ENABLE : 0);
 
 	return 0;
 }
@@ -1273,8 +1376,9 @@ static int aic31xx_codec_probe(struct snd_soc_component *component)
 		aic31xx->disable_nb[i].nb.notifier_call =
 			aic31xx_regulator_event;
 		aic31xx->disable_nb[i].aic31xx = aic31xx;
-		ret = regulator_register_notifier(aic31xx->supplies[i].consumer,
-						  &aic31xx->disable_nb[i].nb);
+		ret = devm_regulator_register_notifier(
+						aic31xx->supplies[i].consumer,
+						&aic31xx->disable_nb[i].nb);
 		if (ret) {
 			dev_err(component->dev,
 				"Failed to request regulator notifier: %d\n",
@@ -1294,22 +1398,17 @@ static int aic31xx_codec_probe(struct snd_soc_component *component)
 	if (ret)
 		return ret;
 
+	/* set output common-mode voltage */
+	snd_soc_component_update_bits(component, AIC31XX_HPDRIVER,
+				      AIC31XX_HPD_OCMV_MASK,
+				      aic31xx->ocmv << AIC31XX_HPD_OCMV_SHIFT);
+
 	return 0;
-}
-
-static void aic31xx_codec_remove(struct snd_soc_component *component)
-{
-	struct aic31xx_priv *aic31xx = snd_soc_component_get_drvdata(component);
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(aic31xx->supplies); i++)
-		regulator_unregister_notifier(aic31xx->supplies[i].consumer,
-					      &aic31xx->disable_nb[i].nb);
 }
 
 static const struct snd_soc_component_driver soc_codec_driver_aic31xx = {
 	.probe			= aic31xx_codec_probe,
-	.remove			= aic31xx_codec_remove,
+	.set_jack		= aic31xx_set_jack,
 	.set_bias_level		= aic31xx_set_bias_level,
 	.controls		= common31xx_snd_controls,
 	.num_controls		= ARRAY_SIZE(common31xx_snd_controls),
@@ -1321,14 +1420,14 @@ static const struct snd_soc_component_driver soc_codec_driver_aic31xx = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct snd_soc_dai_ops aic31xx_dai_ops = {
 	.hw_params	= aic31xx_hw_params,
 	.set_sysclk	= aic31xx_set_dai_sysclk,
 	.set_fmt	= aic31xx_set_dai_fmt,
-	.digital_mute	= aic31xx_dac_mute,
+	.mute_stream	= aic31xx_dac_mute,
+	.no_capture_mute = 1,
 };
 
 static struct snd_soc_dai_driver dac31xx_dai_driver[] = {
@@ -1342,7 +1441,7 @@ static struct snd_soc_dai_driver dac31xx_dai_driver[] = {
 			.formats	 = AIC31XX_FORMATS,
 		},
 		.ops = &aic31xx_dai_ops,
-		.symmetric_rates = 1,
+		.symmetric_rate = 1,
 	}
 };
 
@@ -1364,7 +1463,7 @@ static struct snd_soc_dai_driver aic31xx_dai_driver[] = {
 			.formats	 = AIC31XX_FORMATS,
 		},
 		.ops = &aic31xx_dai_ops,
-		.symmetric_rates = 1,
+		.symmetric_rate = 1,
 	}
 };
 
@@ -1391,15 +1490,255 @@ static const struct acpi_device_id aic31xx_acpi_match[] = {
 MODULE_DEVICE_TABLE(acpi, aic31xx_acpi_match);
 #endif
 
-static int aic31xx_i2c_probe(struct i2c_client *i2c,
-			     const struct i2c_device_id *id)
+static irqreturn_t aic31xx_irq(int irq, void *data)
+{
+	struct aic31xx_priv *aic31xx = data;
+	struct device *dev = aic31xx->dev;
+	unsigned int value;
+	bool handled = false;
+	int ret;
+
+	ret = regmap_read(aic31xx->regmap, AIC31XX_INTRDACFLAG, &value);
+	if (ret) {
+		dev_err(dev, "Failed to read interrupt mask: %d\n", ret);
+		goto exit;
+	}
+
+	if (value)
+		handled = true;
+	else
+		goto read_overflow;
+
+	if (value & AIC31XX_HPLSCDETECT)
+		dev_err(dev, "Short circuit on Left output is detected\n");
+	if (value & AIC31XX_HPRSCDETECT)
+		dev_err(dev, "Short circuit on Right output is detected\n");
+	if (value & (AIC31XX_HSPLUG | AIC31XX_BUTTONPRESS)) {
+		unsigned int val;
+		int status = 0;
+
+		ret = regmap_read(aic31xx->regmap, AIC31XX_INTRDACFLAG2,
+				  &val);
+		if (ret) {
+			dev_err(dev, "Failed to read interrupt mask: %d\n",
+				ret);
+			goto exit;
+		}
+
+		if (val & AIC31XX_BUTTONPRESS)
+			status |= SND_JACK_BTN_0;
+
+		ret = regmap_read(aic31xx->regmap, AIC31XX_HSDETECT, &val);
+		if (ret) {
+			dev_err(dev, "Failed to read headset type: %d\n", ret);
+			goto exit;
+		}
+
+		switch ((val & AIC31XX_HSD_TYPE_MASK) >>
+			AIC31XX_HSD_TYPE_SHIFT) {
+		case AIC31XX_HSD_HP:
+			status |= SND_JACK_HEADPHONE;
+			break;
+		case AIC31XX_HSD_HS:
+			status |= SND_JACK_HEADSET;
+			break;
+		default:
+			break;
+		}
+
+		if (aic31xx->jack)
+			snd_soc_jack_report(aic31xx->jack, status,
+					    AIC31XX_JACK_MASK);
+	}
+	if (value & ~(AIC31XX_HPLSCDETECT |
+		      AIC31XX_HPRSCDETECT |
+		      AIC31XX_HSPLUG |
+		      AIC31XX_BUTTONPRESS))
+		dev_err(dev, "Unknown DAC interrupt flags: 0x%08x\n", value);
+
+read_overflow:
+	ret = regmap_read(aic31xx->regmap, AIC31XX_OFFLAG, &value);
+	if (ret) {
+		dev_err(dev, "Failed to read overflow flag: %d\n", ret);
+		goto exit;
+	}
+
+	if (value)
+		handled = true;
+	else
+		goto exit;
+
+	if (value & AIC31XX_DAC_OF_LEFT)
+		dev_warn(dev, "Left-channel DAC overflow has occurred\n");
+	if (value & AIC31XX_DAC_OF_RIGHT)
+		dev_warn(dev, "Right-channel DAC overflow has occurred\n");
+	if (value & AIC31XX_DAC_OF_SHIFTER)
+		dev_warn(dev, "DAC barrel shifter overflow has occurred\n");
+	if (value & AIC31XX_ADC_OF)
+		dev_warn(dev, "ADC overflow has occurred\n");
+	if (value & AIC31XX_ADC_OF_SHIFTER)
+		dev_warn(dev, "ADC barrel shifter overflow has occurred\n");
+	if (value & ~(AIC31XX_DAC_OF_LEFT |
+		      AIC31XX_DAC_OF_RIGHT |
+		      AIC31XX_DAC_OF_SHIFTER |
+		      AIC31XX_ADC_OF |
+		      AIC31XX_ADC_OF_SHIFTER))
+		dev_warn(dev, "Unknown overflow interrupt flags: 0x%08x\n", value);
+
+exit:
+	if (handled)
+		return IRQ_HANDLED;
+	else
+		return IRQ_NONE;
+}
+
+static void aic31xx_configure_ocmv(struct aic31xx_priv *priv)
+{
+	struct device *dev = priv->dev;
+	int dvdd, avdd;
+	u32 value;
+
+	if (dev->fwnode &&
+	    fwnode_property_read_u32(dev->fwnode, "ai31xx-ocmv", &value)) {
+		/* OCMV setting is forced by DT */
+		if (value <= 3) {
+			priv->ocmv = value;
+			return;
+		}
+	}
+
+	avdd = regulator_get_voltage(priv->supplies[3].consumer);
+	dvdd = regulator_get_voltage(priv->supplies[5].consumer);
+
+	if (avdd > 3600000 || dvdd > 1950000) {
+		dev_warn(dev,
+			 "Too high supply voltage(s) AVDD: %d, DVDD: %d\n",
+			 avdd, dvdd);
+	} else if (avdd == 3600000 && dvdd == 1950000) {
+		priv->ocmv = AIC31XX_HPD_OCMV_1_8V;
+	} else if (avdd >= 3300000 && dvdd >= 1800000) {
+		priv->ocmv = AIC31XX_HPD_OCMV_1_65V;
+	} else if (avdd >= 3000000 && dvdd >= 1650000) {
+		priv->ocmv = AIC31XX_HPD_OCMV_1_5V;
+	} else if (avdd >= 2700000 && dvdd >= 1525000) {
+		priv->ocmv = AIC31XX_HPD_OCMV_1_35V;
+	} else {
+		dev_warn(dev,
+			 "Invalid supply voltage(s) AVDD: %d, DVDD: %d\n",
+			 avdd, dvdd);
+	}
+}
+
+static const struct i2c_device_id aic31xx_i2c_id[] = {
+	{ .name = "tlv320aic310x", .driver_data = AIC3100 },
+	{ .name = "tlv320aic311x", .driver_data = AIC3110 },
+	{ .name = "tlv320aic3100", .driver_data = AIC3100 },
+	{ .name = "tlv320aic3110", .driver_data = AIC3110 },
+	{ .name = "tlv320aic3120", .driver_data = AIC3120 },
+	{ .name = "tlv320aic3111", .driver_data = AIC3111 },
+	{ .name = "tlv320dac3100", .driver_data = DAC3100 },
+	{ .name = "tlv320dac3101", .driver_data = DAC3101 },
+	{ }
+};
+MODULE_DEVICE_TABLE(i2c, aic31xx_i2c_id);
+
+static int tlv320dac3100_fw_load(struct aic31xx_priv *aic31xx,
+				 const u8 *data, size_t size)
+{
+	int ret, reg;
+	u16 val16;
+
+	/*
+	 * Coefficients firmware binary structure. Multi-byte values are big-endian.
+	 *
+	 * @0, 16bits: Magic (0xB30C)
+	 * @2, 16bits: Version (0x0100 for version 1.0)
+	 * @4, 8bits: DAC Processing Block Selection
+	 * @5, 62 16-bit values: Page 8 buffer A DAC programmable filter coefficients
+	 * @129, 12 16-bit values: Page 9 Buffer A DAC programmable filter coefficients
+	 *
+	 * Filter coefficients are interpreted as two's complement values
+	 * ranging from -32 768 to 32 767. For more details on filter coefficients,
+	 * please refer to the TLV320DAC3100 datasheet, tables 6-120 and 6-123.
+	 */
+
+	if (size != 153) {
+		dev_err(aic31xx->dev, "firmware size is %zu, expected 153 bytes\n", size);
+		return -EINVAL;
+	}
+
+	/* Check magic */
+	val16 = get_unaligned_be16(data);
+	if (val16 != 0xb30c) {
+		dev_err(aic31xx->dev, "fw magic is 0x%04x expected 0xb30c\n", val16);
+		return -EINVAL;
+	}
+	data += 2;
+
+	/* Check version */
+	val16 = get_unaligned_be16(data);
+	if (val16 != 0x0100) {
+		dev_err(aic31xx->dev, "invalid firmware version 0x%04x! expected 1", val16);
+		return -EINVAL;
+	}
+	data += 2;
+
+	ret = regmap_write(aic31xx->regmap, AIC31XX_DACPRB, *data);
+	if (ret) {
+		dev_err(aic31xx->dev, "failed to write PRB index: err %d\n", ret);
+		return ret;
+	}
+	data += 1;
+
+	/* Page 8 Buffer A coefficients */
+	for (reg = 2; reg < 126; reg++) {
+		ret = regmap_write(aic31xx->regmap, AIC31XX_REG(8, reg), *data);
+		if (ret) {
+			dev_err(aic31xx->dev,
+				"failed to write page 8 filter coefficient %d: err %d\n", reg, ret);
+			return ret;
+		}
+		data++;
+	}
+
+	/* Page 9 Buffer A coefficients */
+	for (reg = 2; reg < 26; reg++) {
+		ret = regmap_write(aic31xx->regmap, AIC31XX_REG(9, reg), *data);
+		if (ret) {
+			dev_err(aic31xx->dev,
+				"failed to write page 9 filter coefficient %d: err %d\n", reg, ret);
+			return ret;
+		}
+		data++;
+	}
+
+	dev_info(aic31xx->dev, "done loading DAC filter coefficients\n");
+
+	return ret;
+}
+
+static int tlv320dac3100_load_coeffs(struct aic31xx_priv *aic31xx,
+				     const char *fw_name)
+{
+	const struct firmware *fw;
+	int ret;
+
+	ret = request_firmware(&fw, fw_name, aic31xx->dev);
+	if (ret)
+		return ret;
+
+	ret = tlv320dac3100_fw_load(aic31xx, fw->data, fw->size);
+
+	release_firmware(fw);
+
+	return ret;
+}
+
+static int aic31xx_i2c_probe(struct i2c_client *i2c)
 {
 	struct aic31xx_priv *aic31xx;
 	unsigned int micbias_value = MICBIAS_2_0V;
 	int i, ret;
-
-	dev_dbg(&i2c->dev, "## %s: %s codec_type = %d\n", __func__,
-		id->name, (int)id->driver_data);
 
 	aic31xx = devm_kzalloc(&i2c->dev, sizeof(*aic31xx), GFP_KERNEL);
 	if (!aic31xx)
@@ -1412,9 +1751,12 @@ static int aic31xx_i2c_probe(struct i2c_client *i2c,
 			ret);
 		return ret;
 	}
-	aic31xx->dev = &i2c->dev;
+	regcache_cache_only(aic31xx->regmap, true);
 
-	aic31xx->codec_type = id->driver_data;
+	aic31xx->dev = &i2c->dev;
+	aic31xx->irq = i2c->irq;
+
+	aic31xx->codec_type = (uintptr_t)i2c_get_match_data(i2c);
 
 	dev_set_drvdata(aic31xx->dev, aic31xx);
 
@@ -1440,10 +1782,9 @@ static int aic31xx_i2c_probe(struct i2c_client *i2c,
 
 	aic31xx->gpio_reset = devm_gpiod_get_optional(aic31xx->dev, "reset",
 						      GPIOD_OUT_LOW);
-	if (IS_ERR(aic31xx->gpio_reset)) {
-		dev_err(aic31xx->dev, "not able to acquire gpio\n");
-		return PTR_ERR(aic31xx->gpio_reset);
-	}
+	if (IS_ERR(aic31xx->gpio_reset))
+		return dev_err_probe(aic31xx->dev, PTR_ERR(aic31xx->gpio_reset),
+				     "not able to acquire gpio\n");
 
 	for (i = 0; i < ARRAY_SIZE(aic31xx->supplies); i++)
 		aic31xx->supplies[i].supply = aic31xx_supply_names[i];
@@ -1451,9 +1792,37 @@ static int aic31xx_i2c_probe(struct i2c_client *i2c,
 	ret = devm_regulator_bulk_get(aic31xx->dev,
 				      ARRAY_SIZE(aic31xx->supplies),
 				      aic31xx->supplies);
-	if (ret) {
-		dev_err(aic31xx->dev, "Failed to request supplies: %d\n", ret);
-		return ret;
+	if (ret)
+		return dev_err_probe(aic31xx->dev, ret, "Failed to request supplies\n");
+
+	aic31xx_configure_ocmv(aic31xx);
+
+	if (aic31xx->irq > 0) {
+		regmap_update_bits(aic31xx->regmap, AIC31XX_GPIO1,
+				   AIC31XX_GPIO1_FUNC_MASK,
+				   AIC31XX_GPIO1_INT1 <<
+				   AIC31XX_GPIO1_FUNC_SHIFT);
+
+		regmap_write(aic31xx->regmap, AIC31XX_INT1CTRL,
+			     AIC31XX_HSPLUGDET |
+			     AIC31XX_BUTTONPRESSDET |
+			     AIC31XX_SC |
+			     AIC31XX_ENGINE);
+
+		ret = devm_request_threaded_irq(aic31xx->dev, aic31xx->irq,
+						NULL, aic31xx_irq,
+						IRQF_ONESHOT, "aic31xx-irq",
+						aic31xx);
+		if (ret) {
+			dev_err(aic31xx->dev, "Unable to request IRQ\n");
+			return ret;
+		}
+	}
+
+	if (aic31xx->codec_type == DAC3100) {
+		ret = tlv320dac3100_load_coeffs(aic31xx, "tlv320dac3100-coeffs.bin");
+		if (ret)
+			dev_warn(aic31xx->dev, "Did not load any filter coefficients\n");
 	}
 
 	if (aic31xx->codec_type & DAC31XX_BIT)
@@ -1467,19 +1836,6 @@ static int aic31xx_i2c_probe(struct i2c_client *i2c,
 				aic31xx_dai_driver,
 				ARRAY_SIZE(aic31xx_dai_driver));
 }
-
-static const struct i2c_device_id aic31xx_i2c_id[] = {
-	{ "tlv320aic310x", AIC3100 },
-	{ "tlv320aic311x", AIC3110 },
-	{ "tlv320aic3100", AIC3100 },
-	{ "tlv320aic3110", AIC3110 },
-	{ "tlv320aic3120", AIC3120 },
-	{ "tlv320aic3111", AIC3111 },
-	{ "tlv320dac3100", DAC3100 },
-	{ "tlv320dac3101", DAC3101 },
-	{ }
-};
-MODULE_DEVICE_TABLE(i2c, aic31xx_i2c_id);
 
 static struct i2c_driver aic31xx_i2c_driver = {
 	.driver = {

@@ -1,23 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This file is part of wl12xx
  *
  * Copyright (C) 2008-2009 Nokia Corporation
  * Copyright (C) 2011 Texas Instruments Inc.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #include "../wlcore/cmd.h"
@@ -31,7 +17,7 @@ int wl1271_acx_host_if_cfg_bitmap(struct wl1271 *wl, u32 host_cfg_bitmap)
 	struct wl1271_acx_host_config_bitmap *bitmap_conf;
 	int ret;
 
-	bitmap_conf = kzalloc(sizeof(*bitmap_conf), GFP_KERNEL);
+	bitmap_conf = kzalloc_obj(*bitmap_conf);
 	if (!bitmap_conf) {
 		ret = -ENOMEM;
 		goto out;

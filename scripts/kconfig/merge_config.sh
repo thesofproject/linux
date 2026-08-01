@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+#
 #  merge_config.sh - Takes a list of config fragment values, and merges
 #  them one by one. Provides warnings on overridden values, and specified
 #  values that did not make it to the resulting .config file (due to missed
@@ -10,21 +12,13 @@
 #
 #  Copyright (c) 2009-2010 Wind River Systems, Inc.
 #  Copyright 2011 Linaro
-#
-#  This program is free software; you can redistribute it and/or modify
-#  it under the terms of the GNU General Public License version 2 as
-#  published by the Free Software Foundation.
-#
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-#  See the GNU General Public License for more details.
+
+set -e
 
 clean_up() {
-	rm -f $TMP_FILE
-	exit
+	rm -f "$TMP_FILE"
+	rm -f "$TMP_FILE.new"
 }
-trap clean_up HUP INT TERM
 
 usage() {
 	echo "Usage: $0 [OPTIONS] [CONFIG [...]]"
@@ -32,13 +26,26 @@ usage() {
 	echo "  -m    only merge the fragments, do not execute the make command"
 	echo "  -n    use allnoconfig instead of alldefconfig"
 	echo "  -r    list redundant entries when merging fragments"
+	echo "  -y    make builtin have precedence over modules"
 	echo "  -O    dir to put generated output files.  Consider setting \$KCONFIG_CONFIG instead."
+	echo "  -s    strict mode. Fail if the fragment redefines any value."
+	echo "  -Q    disable warning messages for overridden options."
+	echo
+	echo "Used prefix: '$CONFIG_PREFIX'. You can redefine it with \$CONFIG_ environment variable."
 }
 
 RUNMAKE=true
 ALLTARGET=alldefconfig
 WARNREDUN=false
+BUILTIN=false
 OUTPUT=.
+STRICT=false
+CONFIG_PREFIX=${CONFIG_-CONFIG_}
+WARNOVERRIDE=echo
+
+if [ -z "$AWK" ]; then
+	AWK=awk
+fi
 
 while true; do
 	case $1 in
@@ -61,6 +68,11 @@ while true; do
 		shift
 		continue
 		;;
+	"-y")
+		BUILTIN=true
+		shift
+		continue
+		;;
 	"-O")
 		if [ -d $2 ];then
 			OUTPUT=$(echo $2 | sed 's/\/*$//')
@@ -69,6 +81,16 @@ while true; do
 			exit 1
 		fi
 		shift 2
+		continue
+		;;
+	"-s")
+		STRICT=true
+		shift
+		continue
+		;;
+	"-Q")
+		WARNOVERRIDE=true
+		shift
 		continue
 		;;
 	*)
@@ -94,49 +116,167 @@ INITFILE=$1
 shift;
 
 if [ ! -r "$INITFILE" ]; then
-	echo "The base file '$INITFILE' does not exist.  Exit." >&2
-	exit 1
+	echo "The base file '$INITFILE' does not exist. Creating one..." >&2
+	touch "$INITFILE"
 fi
 
 MERGE_LIST=$*
-SED_CONFIG_EXP="s/^\(# \)\{0,1\}\(CONFIG_[a-zA-Z0-9_]*\)[= ].*/\2/p"
+
 TMP_FILE=$(mktemp ./.tmp.config.XXXXXXXXXX)
 
 echo "Using $INITFILE as base"
+
+trap clean_up EXIT
+
 cat $INITFILE > $TMP_FILE
 
+PROCESSED_FILES=""
+
 # Merge files, printing warnings on overridden values
-for MERGE_FILE in $MERGE_LIST ; do
-	echo "Merging $MERGE_FILE"
-	if [ ! -r "$MERGE_FILE" ]; then
-		echo "The merge file '$MERGE_FILE' does not exist.  Exit." >&2
+for ORIG_MERGE_FILE in $MERGE_LIST ; do
+	echo "Merging $ORIG_MERGE_FILE"
+	if [ ! -r "$ORIG_MERGE_FILE" ]; then
+		echo "The merge file '$ORIG_MERGE_FILE' does not exist.  Exit." >&2
 		exit 1
 	fi
-	CFG_LIST=$(sed -n "$SED_CONFIG_EXP" $MERGE_FILE)
 
-	for CFG in $CFG_LIST ; do
-		grep -q -w $CFG $TMP_FILE || continue
-		PREV_VAL=$(grep -w $CFG $TMP_FILE)
-		NEW_VAL=$(grep -w $CFG $MERGE_FILE)
-		if [ "x$PREV_VAL" != "x$NEW_VAL" ] ; then
-			echo Value of $CFG is redefined by fragment $MERGE_FILE:
-			echo Previous  value: $PREV_VAL
-			echo New value:       $NEW_VAL
-			echo
-		elif [ "$WARNREDUN" = "true" ]; then
-			echo Value of $CFG is redundant by fragment $MERGE_FILE:
-		fi
-		sed -i "/$CFG[ =]/d" $TMP_FILE
-	done
-	cat $MERGE_FILE >> $TMP_FILE
+	# Check for duplicate input files
+	case " $PROCESSED_FILES " in
+		*" $ORIG_MERGE_FILE "*)
+			${WARNOVERRIDE} "WARNING: Input file provided multiple times: $ORIG_MERGE_FILE"
+			;;
+	esac
+
+	# Use awk for single-pass processing instead of per-symbol grep/sed
+	if ! "$AWK" -v prefix="$CONFIG_PREFIX" \
+		-v warnoverride="$WARNOVERRIDE" \
+		-v strict="$STRICT" \
+		-v outfile="$TMP_FILE.new" \
+		-v builtin="$BUILTIN" \
+		-v warnredun="$WARNREDUN" '
+	BEGIN {
+		strict_violated = 0
+		cfg_regex = "^" prefix "[a-zA-Z0-9_]+"
+		notset_regex = "^# " prefix "[a-zA-Z0-9_]+ is not set$"
+	}
+
+	# Extract config name from a line, returns "" if not a config line
+	function get_cfg(line) {
+		if (match(line, cfg_regex)) {
+			return substr(line, RSTART, RLENGTH)
+		} else if (match(line, notset_regex)) {
+			# Extract CONFIG_FOO from "# CONFIG_FOO is not set"
+			sub(/^# /, "", line)
+			sub(/ is not set$/, "", line)
+			return line
+		}
+		return ""
+	}
+
+	function warn_builtin(cfg, prev, new) {
+		if (warnoverride == "true") return
+		print cfg ": -y passed, will not demote y to m"
+		print "Previous value: " prev
+		print "New value: " new
+		print ""
+	}
+
+	function warn_redefined(cfg, prev, new) {
+		if (warnoverride == "true") return
+		print "Value of " cfg " is redefined by fragment " mergefile ":"
+		print "Previous value: " prev
+		print "New value: " new
+		print ""
+	}
+
+	function warn_redundant(cfg) {
+		if (warnredun != "true" || warnoverride == "true") return
+		print "Value of " cfg " is redundant by fragment " mergefile ":"
+	}
+
+	# First pass: read merge file, store all lines and index
+	FILENAME == ARGV[1] {
+		mergefile = FILENAME
+		merge_lines[FNR] = $0
+		merge_total = FNR
+		cfg = get_cfg($0)
+		if (cfg != "") {
+			merge_cfg[cfg] = $0
+			merge_cfg_line[cfg] = FNR
+		}
+		next
+	}
+
+	# Second pass: process base file (TMP_FILE)
+	FILENAME == ARGV[2] {
+		cfg = get_cfg($0)
+
+		# Not a config or not in merge file - keep it
+		if (cfg == "" || !(cfg in merge_cfg)) {
+			print $0 >> outfile
+			next
+		}
+
+		prev_val = $0
+		new_val = merge_cfg[cfg]
+
+		# BUILTIN: do not demote y to m
+		if (builtin == "true" && new_val ~ /=m$/ && prev_val ~ /=y$/) {
+			warn_builtin(cfg, prev_val, new_val)
+			print $0 >> outfile
+			skip_merge[merge_cfg_line[cfg]] = 1
+			next
+		}
+
+		# Values equal - redundant
+		if (prev_val == new_val) {
+			warn_redundant(cfg)
+			next
+		}
+
+		# "=n" is the same as "is not set"
+		if (prev_val ~ /=n$/ && new_val ~ / is not set$/) {
+			print $0 >> outfile
+			next
+		}
+
+		# Values differ - redefined
+		warn_redefined(cfg, prev_val, new_val)
+		if (strict == "true") {
+			strict_violated = 1
+		}
+	}
+
+	END {
+		# Newline in case base file lacks trailing newline
+		print "" >> outfile
+		# Append merge file, skipping lines marked for builtin preservation
+		for (i = 1; i <= merge_total; i++) {
+			if (!(i in skip_merge)) {
+				print merge_lines[i] >> outfile
+			}
+		}
+		if (strict_violated) {
+			exit 1
+		}
+	}' \
+	"$ORIG_MERGE_FILE" "$TMP_FILE"; then
+		# awk exited non-zero, strict mode was violated
+		STRICT_MODE_VIOLATED=true
+	fi
+	mv "$TMP_FILE.new" "$TMP_FILE"
+	PROCESSED_FILES="$PROCESSED_FILES $ORIG_MERGE_FILE"
 done
+if [ "$STRICT_MODE_VIOLATED" = "true" ]; then
+	echo "The fragment redefined a value and strict mode had been passed."
+	exit 1
+fi
 
 if [ "$RUNMAKE" = "false" ]; then
 	cp -T -- "$TMP_FILE" "$KCONFIG_CONFIG"
 	echo "#"
 	echo "# merged configuration written to $KCONFIG_CONFIG (needs make)"
 	echo "#"
-	clean_up
 	exit
 fi
 
@@ -153,18 +293,91 @@ fi
 # allnoconfig: Fills in any missing symbols with # CONFIG_* is not set
 make KCONFIG_ALLCONFIG=$TMP_FILE $OUTPUT_ARG $ALLTARGET
 
+# Check all specified config values took effect (might have missed-dependency issues)
+if ! "$AWK" -v prefix="$CONFIG_PREFIX" \
+	-v warnoverride="$WARNOVERRIDE" \
+	-v strict="$STRICT" \
+	-v warnredun="$WARNREDUN" '
+BEGIN {
+	strict_violated = 0
+	cfg_regex = "^" prefix "[a-zA-Z0-9_]+"
+	notset_regex = "^# " prefix "[a-zA-Z0-9_]+ is not set$"
+}
 
-# Check all specified config values took (might have missed-dependency issues)
-for CFG in $(sed -n "$SED_CONFIG_EXP" $TMP_FILE); do
+# Extract config name from a line, returns "" if not a config line
+function get_cfg(line) {
+	if (match(line, cfg_regex)) {
+		return substr(line, RSTART, RLENGTH)
+	} else if (match(line, notset_regex)) {
+		# Extract CONFIG_FOO from "# CONFIG_FOO is not set"
+		sub(/^# /, "", line)
+		sub(/ is not set$/, "", line)
+		return line
+	}
+	return ""
+}
 
-	REQUESTED_VAL=$(grep -w -e "$CFG" $TMP_FILE)
-	ACTUAL_VAL=$(grep -w -e "$CFG" "$KCONFIG_CONFIG")
-	if [ "x$REQUESTED_VAL" != "x$ACTUAL_VAL" ] ; then
-		echo "Value requested for $CFG not in final .config"
-		echo "Requested value:  $REQUESTED_VAL"
-		echo "Actual value:     $ACTUAL_VAL"
-		echo ""
-	fi
-done
+function warn_mismatch(cfg, merged, final) {
+	if (warnredun == "true") return
+	if (final == "" && !(merged ~ / is not set$/ || merged ~ /=n$/)) {
+		print "WARNING: Value requested for " cfg " not in final .config"
+		print "Requested value: " merged
+		print "Actual value:    " final
+	} else if (final == "" && merged ~ / is not set$/) {
+		# not set, pass
+	} else if (merged == "" && final != "") {
+		print "WARNING: " cfg " not in merged config but added in final .config:"
+		print "Requested value: " merged
+		print "Actual value:    " final
+	} else {
+		print "WARNING: " cfg " differs:"
+		print "Requested value: " merged
+		print "Actual value:    " final
+	}
+}
 
-clean_up
+# First pass: read effective config file, store all lines
+FILENAME == ARGV[1] {
+	cfg = get_cfg($0)
+	if (cfg != "") {
+		config_cfg[cfg] = $0
+	}
+	next
+}
+
+# Second pass: process merged config and compare against effective config
+{
+	cfg = get_cfg($0)
+	if (cfg == "") next
+
+	# strip trailing comment
+	sub(/[[:space:]]+#.*/, "", $0)
+	merged_val = $0
+	final_val = config_cfg[cfg]
+
+	if (merged_val == final_val) next
+
+	if (merged_val ~ /=n$/ && final_val ~ / is not set$/) next
+	if (merged_val ~ /=n$/ && final_val == "") next
+
+	warn_mismatch(cfg, merged_val, final_val)
+
+	if (strict == "true") {
+		strict_violated = 1
+	}
+}
+
+END {
+	if (strict_violated) {
+		exit 1
+	}
+}' \
+"$KCONFIG_CONFIG" "$TMP_FILE"; then
+	# awk exited non-zero, strict mode was violated
+	STRICT_MODE_VIOLATED=true
+fi
+
+if [ "$STRICT" = "true" ] && [ "$STRICT_MODE_VIOLATED" = "true" ]; then
+	echo "Requested and effective config differ"
+	exit 1
+fi

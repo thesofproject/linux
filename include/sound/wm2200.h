@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * linux/sound/wm2200.h -- Platform data for WM2200
  *
  * Copyright 2012 Wolfson Microelectronics. PLC.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __LINUX_SND_WM2200_H
@@ -45,8 +42,6 @@ struct wm2200_micbias {
 };
 
 struct wm2200_pdata {
-	int reset;      /** GPIO controlling /RESET, if any */
-	int ldo_ena;    /** GPIO controlling LODENA, if any */
 	int irq_flags;
 
 	int gpio_defaults[4];

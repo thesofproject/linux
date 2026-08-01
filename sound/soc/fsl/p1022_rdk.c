@@ -1,27 +1,23 @@
-/**
- * Freescale P1022RDK ALSA SoC Machine driver
- *
- * Author: Timur Tabi <timur@freescale.com>
- *
- * Copyright 2012 Freescale Semiconductor, Inc.
- *
- * This file is licensed under the terms of the GNU General Public License
- * version 2.  This program is licensed "as is" without any warranty of any
- * kind, whether express or implied.
- *
- * Note: in order for audio to work correctly, the output controls need
- * to be enabled, because they control the clock.  So for playback, for
- * example:
- *
- *      amixer sset 'Left Output Mixer PCM' on
- *      amixer sset 'Right Output Mixer PCM' on
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// Freescale P1022RDK ALSA SoC Machine driver
+//
+// Author: Timur Tabi <timur@freescale.com>
+//
+// Copyright 2012 Freescale Semiconductor, Inc.
+//
+// Note: in order for audio to work correctly, the output controls need
+// to be enabled, because they control the clock.  So for playback, for
+// example:
+//
+//      amixer sset 'Left Output Mixer PCM' on
+//      amixer sset 'Right Output Mixer PCM' on
 
 #include <linux/module.h>
 #include <linux/fsl/guts.h>
 #include <linux/interrupt.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_device.h>
 #include <linux/slab.h>
 #include <sound/soc.h>
 
@@ -65,7 +61,7 @@ static inline void guts_set_dmuxcr(struct ccsr_guts __iomem *guts,
 /* There's only one global utilities register */
 static phys_addr_t guts_phys;
 
-/**
+/*
  * machine_data: machine-specific ASoC device data
  *
  * This structure contains data for a single sound platform device on an
@@ -84,11 +80,14 @@ struct machine_data {
 };
 
 /**
- * p1022_rdk_machine_probe: initialize the board
+ * p1022_rdk_machine_probe - initialize the board
+ * @card: ASoC card instance
  *
  * This function is used to initialize the board-specific hardware.
  *
  * Here we program the DMACR and PMUXCR registers.
+ *
+ * Returns: %0 on success or negative errno value on error
  */
 static int p1022_rdk_machine_probe(struct snd_soc_card *card)
 {
@@ -123,29 +122,32 @@ static int p1022_rdk_machine_probe(struct snd_soc_card *card)
 }
 
 /**
- * p1022_rdk_startup: program the board with various hardware parameters
+ * p1022_rdk_startup - program the board with various hardware parameters
+ * @substream: ASoC substream object
  *
  * This function takes board-specific information, like clock frequencies
  * and serial data formats, and passes that information to the codec and
  * transport drivers.
+ *
+ * Returns: %0 on success or negative errno value on error
  */
 static int p1022_rdk_startup(struct snd_pcm_substream *substream)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct machine_data *mdata =
 		container_of(rtd->card, struct machine_data, card);
 	struct device *dev = rtd->card->dev;
 	int ret = 0;
 
 	/* Tell the codec driver what the serial protocol is. */
-	ret = snd_soc_dai_set_fmt(rtd->codec_dai, mdata->dai_format);
+	ret = snd_soc_dai_set_fmt(snd_soc_rtd_to_codec(rtd, 0), mdata->dai_format);
 	if (ret < 0) {
 		dev_err(dev, "could not set codec driver audio format (ret=%i)\n",
 			ret);
 		return ret;
 	}
 
-	ret = snd_soc_dai_set_pll(rtd->codec_dai, 0, 0, mdata->clk_frequency,
+	ret = snd_soc_dai_set_pll(snd_soc_rtd_to_codec(rtd, 0), 0, 0, mdata->clk_frequency,
 		mdata->clk_frequency);
 	if (ret < 0) {
 		dev_err(dev, "could not set codec PLL frequency (ret=%i)\n",
@@ -157,10 +159,13 @@ static int p1022_rdk_startup(struct snd_pcm_substream *substream)
 }
 
 /**
- * p1022_rdk_machine_remove: Remove the sound device
+ * p1022_rdk_machine_remove - Remove the sound device
+ * @card: ASoC card instance
  *
  * This function is called to remove the sound device for one SSI.  We
  * de-program the DMACR and PMUXCR register.
+ *
+ * Returns: %0 on success or negative errno value on error
  */
 static int p1022_rdk_machine_remove(struct snd_soc_card *card)
 {
@@ -185,7 +190,7 @@ static int p1022_rdk_machine_remove(struct snd_soc_card *card)
 	return 0;
 }
 
-/**
+/*
  * p1022_rdk_ops: ASoC machine driver operations
  */
 static const struct snd_soc_ops p1022_rdk_ops = {
@@ -193,11 +198,14 @@ static const struct snd_soc_ops p1022_rdk_ops = {
 };
 
 /**
- * p1022_rdk_probe: platform probe function for the machine driver
+ * p1022_rdk_probe - platform probe function for the machine driver
+ * @pdev: platform device pointer
  *
  * Although this is a machine driver, the SSI node is the "master" node with
  * respect to audio hardware connections.  Therefore, we create a new ASoC
  * device for each new SSI node that has a codec attached.
+ *
+ * Returns: %0 on success or negative errno value on error
  */
 static int p1022_rdk_probe(struct platform_device *pdev)
 {
@@ -207,6 +215,7 @@ static int p1022_rdk_probe(struct platform_device *pdev)
 	struct device_node *np = ssi_pdev->dev.of_node;
 	struct device_node *codec_np = NULL;
 	struct machine_data *mdata;
+	struct snd_soc_dai_link_component *comp;
 	const u32 *iprop;
 	int ret;
 
@@ -217,17 +226,39 @@ static int p1022_rdk_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	mdata = kzalloc(sizeof(struct machine_data), GFP_KERNEL);
+	mdata = kzalloc_obj(struct machine_data);
 	if (!mdata) {
 		ret = -ENOMEM;
 		goto error_put;
 	}
 
-	mdata->dai[0].cpu_dai_name = dev_name(&ssi_pdev->dev);
+	comp = devm_kzalloc(&pdev->dev, 6 * sizeof(*comp), GFP_KERNEL);
+	if (!comp) {
+		ret = -ENOMEM;
+		goto error_put;
+	}
+
+	mdata->dai[0].cpus	= &comp[0];
+	mdata->dai[0].codecs	= &comp[1];
+	mdata->dai[0].platforms	= &comp[2];
+
+	mdata->dai[0].num_cpus		= 1;
+	mdata->dai[0].num_codecs	= 1;
+	mdata->dai[0].num_platforms	= 1;
+
+	mdata->dai[1].cpus	= &comp[3];
+	mdata->dai[1].codecs	= &comp[4];
+	mdata->dai[1].platforms	= &comp[5];
+
+	mdata->dai[1].num_cpus		= 1;
+	mdata->dai[1].num_codecs	= 1;
+	mdata->dai[1].num_platforms	= 1;
+
+	mdata->dai[0].cpus->dai_name = dev_name(&ssi_pdev->dev);
 	mdata->dai[0].ops = &p1022_rdk_ops;
 
 	/* ASoC core can match codec with device node */
-	mdata->dai[0].codec_of_node = codec_np;
+	mdata->dai[0].codecs->of_node = codec_np;
 
 	/*
 	 * We register two DAIs per SSI, one for playback and the other for
@@ -237,8 +268,8 @@ static int p1022_rdk_probe(struct platform_device *pdev)
 	memcpy(&mdata->dai[1], &mdata->dai[0], sizeof(struct snd_soc_dai_link));
 
 	/* The DAI names from the codec (snd_soc_dai_driver.name) */
-	mdata->dai[0].codec_dai_name = "wm8960-hifi";
-	mdata->dai[1].codec_dai_name = mdata->dai[0].codec_dai_name;
+	mdata->dai[0].codecs->dai_name = "wm8960-hifi";
+	mdata->dai[1].codecs->dai_name = mdata->dai[0].codecs->dai_name;
 
 	/*
 	 * Configure the SSI for I2S slave mode.  Older device trees have
@@ -246,7 +277,7 @@ static int p1022_rdk_probe(struct platform_device *pdev)
 	 * only one way to configure the SSI.
 	 */
 	mdata->dai_format = SND_SOC_DAIFMT_NB_NF |
-		SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBM_CFM;
+		SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBP_CFP;
 	mdata->codec_clk_direction = SND_SOC_CLOCK_OUT;
 	mdata->cpu_clk_direction = SND_SOC_CLOCK_IN;
 
@@ -270,7 +301,7 @@ static int p1022_rdk_probe(struct platform_device *pdev)
 	}
 
 	/* Find the playback DMA channel to use. */
-	mdata->dai[0].platform_name = mdata->platform_name[0];
+	mdata->dai[0].platforms->name = mdata->platform_name[0];
 	ret = fsl_asoc_get_dma_channel(np, "fsl,playback-dma", &mdata->dai[0],
 				       &mdata->dma_channel_id[0],
 				       &mdata->dma_id[0]);
@@ -281,7 +312,7 @@ static int p1022_rdk_probe(struct platform_device *pdev)
 	}
 
 	/* Find the capture DMA channel to use. */
-	mdata->dai[1].platform_name = mdata->platform_name[1];
+	mdata->dai[1].platforms->name = mdata->platform_name[1];
 	ret = fsl_asoc_get_dma_channel(np, "fsl,capture-dma", &mdata->dai[1],
 				       &mdata->dma_channel_id[1],
 				       &mdata->dma_id[1]);
@@ -322,11 +353,12 @@ error_put:
 }
 
 /**
- * p1022_rdk_remove: remove the platform device
+ * p1022_rdk_remove - remove the platform device
+ * @pdev: platform device pointer
  *
  * This function is called when the platform device is removed.
  */
-static int p1022_rdk_remove(struct platform_device *pdev)
+static void p1022_rdk_remove(struct platform_device *pdev)
 {
 	struct snd_soc_card *card = platform_get_drvdata(pdev);
 	struct machine_data *mdata =
@@ -334,8 +366,6 @@ static int p1022_rdk_remove(struct platform_device *pdev)
 
 	snd_soc_unregister_card(card);
 	kfree(mdata);
-
-	return 0;
 }
 
 static struct platform_driver p1022_rdk_driver = {
@@ -351,9 +381,11 @@ static struct platform_driver p1022_rdk_driver = {
 };
 
 /**
- * p1022_rdk_init: machine driver initialization.
+ * p1022_rdk_init - machine driver initialization.
  *
  * This function is called when this module is loaded.
+ *
+ * Returns: %0 on success or negative errno value on error
  */
 static int __init p1022_rdk_init(void)
 {
@@ -374,7 +406,7 @@ static int __init p1022_rdk_init(void)
 }
 
 /**
- * p1022_rdk_exit: machine driver exit
+ * p1022_rdk_exit - machine driver exit
  *
  * This function is called when this driver is unloaded.
  */

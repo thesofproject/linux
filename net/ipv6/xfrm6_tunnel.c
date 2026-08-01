@@ -1,24 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C)2003,2004 USAGI/WIDE Project
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  * Authors	Mitsuru KANDA  <mk@linux-ipv6.org>
  *		YOSHIFUJI Hideaki <yoshfuji@linux-ipv6.org>
  *
  * Based on net/ipv4/xfrm4_tunnel.c
- *
  */
 #include <linux/module.h>
 #include <linux/xfrm.h>
@@ -91,7 +78,7 @@ static struct xfrm6_tunnel_spi *__xfrm6_tunnel_spi_lookup(struct net *net, const
 
 	hlist_for_each_entry_rcu(x6spi,
 			     &xfrm6_tn->spi_byaddr[xfrm6_tunnel_spi_hash_byaddr(saddr)],
-			     list_byaddr) {
+			     list_byaddr, lockdep_is_held(&xfrm6_tunnel_spi_lock)) {
 		if (xfrm6_addr_equal(&x6spi->addr, saddr))
 			return x6spi;
 	}
@@ -144,6 +131,9 @@ static u32 __xfrm6_tunnel_alloc_spi(struct net *net, xfrm_address_t *saddr)
 		index = __xfrm6_tunnel_spi_check(net, spi);
 		if (index >= 0)
 			goto alloc_spi;
+
+		if (spi == XFRM6_TUNNEL_SPI_MAX)
+			break;
 	}
 	for (spi = XFRM6_TUNNEL_SPI_MIN; spi < xfrm6_tn->spi; spi++) {
 		index = __xfrm6_tunnel_spi_check(net, spi);
@@ -280,13 +270,17 @@ static int xfrm6_tunnel_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	return 0;
 }
 
-static int xfrm6_tunnel_init_state(struct xfrm_state *x)
+static int xfrm6_tunnel_init_state(struct xfrm_state *x, struct netlink_ext_ack *extack)
 {
-	if (x->props.mode != XFRM_MODE_TUNNEL)
+	if (x->props.mode != XFRM_MODE_TUNNEL) {
+		NL_SET_ERR_MSG(extack, "IPv6 tunnel can only be used with tunnel mode");
 		return -EINVAL;
+	}
 
-	if (x->encap)
+	if (x->encap) {
+		NL_SET_ERR_MSG(extack, "IPv6 tunnel is not compatible with encapsulation");
 		return -EINVAL;
+	}
 
 	x->props.header_len = sizeof(struct ipv6hdr);
 
@@ -301,7 +295,6 @@ static void xfrm6_tunnel_destroy(struct xfrm_state *x)
 }
 
 static const struct xfrm_type xfrm6_tunnel_type = {
-	.description	= "IP6IP6",
 	.owner          = THIS_MODULE,
 	.proto		= IPPROTO_IPV6,
 	.init_state	= xfrm6_tunnel_init_state,
@@ -313,13 +306,13 @@ static const struct xfrm_type xfrm6_tunnel_type = {
 static struct xfrm6_tunnel xfrm6_tunnel_handler __read_mostly = {
 	.handler	= xfrm6_tunnel_rcv,
 	.err_handler	= xfrm6_tunnel_err,
-	.priority	= 2,
+	.priority	= 3,
 };
 
 static struct xfrm6_tunnel xfrm46_tunnel_handler __read_mostly = {
 	.handler	= xfrm6_tunnel_rcv,
 	.err_handler	= xfrm6_tunnel_err,
-	.priority	= 2,
+	.priority	= 3,
 };
 
 static int __net_init xfrm6_tunnel_net_init(struct net *net)
@@ -341,7 +334,7 @@ static void __net_exit xfrm6_tunnel_net_exit(struct net *net)
 	struct xfrm6_tunnel_net *xfrm6_tn = xfrm6_tunnel_pernet(net);
 	unsigned int i;
 
-	xfrm_state_flush(net, IPSEC_PROTO_ANY, false);
+	xfrm_state_flush(net, 0, false);
 	xfrm_flush_gc();
 
 	for (i = 0; i < XFRM6_TUNNEL_SPI_BYADDR_HSIZE; i++)
@@ -362,10 +355,7 @@ static int __init xfrm6_tunnel_init(void)
 {
 	int rv;
 
-	xfrm6_tunnel_spi_kmem = kmem_cache_create("xfrm6_tunnel_spi",
-						  sizeof(struct xfrm6_tunnel_spi),
-						  0, SLAB_HWCACHE_ALIGN,
-						  NULL);
+	xfrm6_tunnel_spi_kmem = KMEM_CACHE(xfrm6_tunnel_spi, SLAB_HWCACHE_ALIGN);
 	if (!xfrm6_tunnel_spi_kmem)
 		return -ENOMEM;
 	rv = register_pernet_subsys(&xfrm6_tunnel_net_ops);
@@ -399,10 +389,15 @@ static void __exit xfrm6_tunnel_fini(void)
 	xfrm6_tunnel_deregister(&xfrm6_tunnel_handler, AF_INET6);
 	xfrm_unregister_type(&xfrm6_tunnel_type, AF_INET6);
 	unregister_pernet_subsys(&xfrm6_tunnel_net_ops);
+	/* Someone maybe has gotten the xfrm6_tunnel_spi.
+	 * So need to wait it.
+	 */
+	rcu_barrier();
 	kmem_cache_destroy(xfrm6_tunnel_spi_kmem);
 }
 
 module_init(xfrm6_tunnel_init);
 module_exit(xfrm6_tunnel_fini);
+MODULE_DESCRIPTION("IPv6 XFRM tunnel driver");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS_XFRM_TYPE(AF_INET6, XFRM_PROTO_IPV6);

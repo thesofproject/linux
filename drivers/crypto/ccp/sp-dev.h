@@ -1,22 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * AMD Secure Processor driver
  *
- * Copyright (C) 2017 Advanced Micro Devices, Inc.
+ * Copyright (C) 2017-2019 Advanced Micro Devices, Inc.
  *
  * Author: Tom Lendacky <thomas.lendacky@amd.com>
  * Author: Gary R Hook <gary.hook@amd.com>
  * Author: Brijesh Singh <brijesh.singh@amd.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef __SP_DEV_H__
 #define __SP_DEV_H__
 
 #include <linux/device.h>
-#include <linux/pci.h>
 #include <linux/spinlock.h>
 #include <linux/mutex.h>
 #include <linux/list.h>
@@ -32,6 +28,11 @@
 #define CACHE_NONE			0x00
 #define CACHE_WB_NO_ALLOC		0xb7
 
+#define PLATFORM_FEATURE_DBC		0x1
+#define PLATFORM_FEATURE_HSTI		0x2
+
+#define PSP_FEATURE(psp, feat)	(psp->vdata && psp->vdata->platform_features & PLATFORM_FEATURE_##feat)
+
 /* Structure to hold CCP device data */
 struct ccp_device;
 struct ccp_vdata {
@@ -43,8 +44,42 @@ struct ccp_vdata {
 	const unsigned int rsamax;
 };
 
+struct sev_vdata {
+	const unsigned int cmdresp_reg;
+	const unsigned int cmdbuff_addr_lo_reg;
+	const unsigned int cmdbuff_addr_hi_reg;
+};
+
+struct tee_vdata {
+	const unsigned int cmdresp_reg;
+	const unsigned int cmdbuff_addr_lo_reg;
+	const unsigned int cmdbuff_addr_hi_reg;
+	const unsigned int ring_wptr_reg;
+	const unsigned int ring_rptr_reg;
+	const unsigned int info_reg;
+};
+
+struct platform_access_vdata {
+	const unsigned int cmdresp_reg;
+	const unsigned int cmdbuff_addr_lo_reg;
+	const unsigned int cmdbuff_addr_hi_reg;
+	const unsigned int doorbell_button_reg;
+	const unsigned int doorbell_cmd_reg;
+
+};
+
 struct psp_vdata {
-	const unsigned int offset;
+	const struct sev_vdata *sev;
+	const struct tee_vdata *tee;
+	const struct platform_access_vdata *platform_access;
+	const unsigned int cmdresp_reg;
+	const unsigned int cmdbuff_addr_lo_reg;
+	const unsigned int cmdbuff_addr_hi_reg;
+	const unsigned int feature_reg;
+	const unsigned int inten_reg;
+	const unsigned int intsts_reg;
+	const unsigned int bootloader_info_reg;
+	const unsigned int platform_features;
 };
 
 /* Structure to hold SP device data */
@@ -60,7 +95,7 @@ struct sp_device {
 
 	struct device *dev;
 
-	struct sp_dev_vdata *dev_vdata;
+	const struct sp_dev_vdata *dev_vdata;
 	unsigned int ord;
 	char name[SP_MAX_NAME_LEN];
 
@@ -76,6 +111,7 @@ struct sp_device {
 	/* get and set master device */
 	struct sp_device*(*get_psp_master_device)(void);
 	void (*set_psp_master_device)(struct sp_device *);
+	void (*clear_psp_master_device)(struct sp_device *);
 
 	bool irq_registered;
 	bool use_tasklet;
@@ -102,10 +138,10 @@ struct sp_device *sp_alloc_struct(struct device *dev);
 
 int sp_init(struct sp_device *sp);
 void sp_destroy(struct sp_device *sp);
-struct sp_device *sp_get_master(void);
 
-int sp_suspend(struct sp_device *sp, pm_message_t state);
+int sp_suspend(struct sp_device *sp);
 int sp_resume(struct sp_device *sp);
+int sp_restore(struct sp_device *sp);
 int sp_request_ccp_irq(struct sp_device *sp, irq_handler_t handler,
 		       const char *name, void *data);
 void sp_free_ccp_irq(struct sp_device *sp, void *data);
@@ -119,8 +155,8 @@ struct sp_device *sp_get_psp_master_device(void);
 int ccp_dev_init(struct sp_device *sp);
 void ccp_dev_destroy(struct sp_device *sp);
 
-int ccp_dev_suspend(struct sp_device *sp, pm_message_t state);
-int ccp_dev_resume(struct sp_device *sp);
+void ccp_dev_suspend(struct sp_device *sp);
+void ccp_dev_resume(struct sp_device *sp);
 
 #else	/* !CONFIG_CRYPTO_DEV_SP_CCP */
 
@@ -129,15 +165,8 @@ static inline int ccp_dev_init(struct sp_device *sp)
 	return 0;
 }
 static inline void ccp_dev_destroy(struct sp_device *sp) { }
-
-static inline int ccp_dev_suspend(struct sp_device *sp, pm_message_t state)
-{
-	return 0;
-}
-static inline int ccp_dev_resume(struct sp_device *sp)
-{
-	return 0;
-}
+static inline void ccp_dev_suspend(struct sp_device *sp) { }
+static inline void ccp_dev_resume(struct sp_device *sp) { }
 #endif	/* CONFIG_CRYPTO_DEV_SP_CCP */
 
 #ifdef CONFIG_CRYPTO_DEV_SP_PSP
@@ -146,6 +175,7 @@ int psp_dev_init(struct sp_device *sp);
 void psp_pci_init(void);
 void psp_dev_destroy(struct sp_device *sp);
 void psp_pci_exit(void);
+int psp_restore(struct sp_device *sp);
 
 #else /* !CONFIG_CRYPTO_DEV_SP_PSP */
 
@@ -153,6 +183,7 @@ static inline int psp_dev_init(struct sp_device *sp) { return 0; }
 static inline void psp_pci_init(void) { }
 static inline void psp_dev_destroy(struct sp_device *sp) { }
 static inline void psp_pci_exit(void) { }
+static inline int psp_restore(struct sp_device *sp) { return 0; }
 
 #endif /* CONFIG_CRYPTO_DEV_SP_PSP */
 

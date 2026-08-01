@@ -19,7 +19,7 @@
 #include <scsi/scsi_tcq.h>
 #include <target/target_core_base.h>
 #include <target/target_core_fabric.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "u_tcm.h"
 
@@ -41,7 +41,7 @@ static struct usb_device_descriptor usbg_device_desc = {
 #define USB_G_STR_CONFIG USB_GADGET_FIRST_AVAIL_IDX
 
 static struct usb_string	usbg_us_strings[] = {
-	[USB_GADGET_MANUFACTURER_IDX].s	= "Target Manufactor",
+	[USB_GADGET_MANUFACTURER_IDX].s	= "Target Manufacturer",
 	[USB_GADGET_PRODUCT_IDX].s	= "Target Product",
 	[USB_GADGET_SERIAL_IDX].s	= "000000000001",
 	[USB_G_STR_CONFIG].s		= "default config",

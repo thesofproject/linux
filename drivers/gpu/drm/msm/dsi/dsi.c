@@ -1,24 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include "dsi.h"
 
-struct drm_encoder *msm_dsi_get_encoder(struct msm_dsi *msm_dsi)
+bool msm_dsi_is_cmd_mode(struct msm_dsi *msm_dsi)
 {
-	if (!msm_dsi || !msm_dsi_device_connected(msm_dsi))
-		return NULL;
+	unsigned long host_flags = msm_dsi_host_get_mode_flags(msm_dsi->host);
 
-	return msm_dsi->encoder;
+	return !(host_flags & MIPI_DSI_MODE_VIDEO);
+}
+
+struct drm_dsc_config *msm_dsi_get_dsc_config(struct msm_dsi *msm_dsi)
+{
+	return msm_dsi_host_get_dsc_config(msm_dsi->host);
+}
+
+bool msm_dsi_wide_bus_enabled(struct msm_dsi *msm_dsi)
+{
+	return msm_dsi_host_is_wide_bus_enabled(msm_dsi->host);
 }
 
 static int dsi_get_phy(struct msm_dsi *msm_dsi)
@@ -29,22 +30,27 @@ static int dsi_get_phy(struct msm_dsi *msm_dsi)
 
 	phy_node = of_parse_phandle(pdev->dev.of_node, "phys", 0);
 	if (!phy_node) {
-		dev_err(&pdev->dev, "cannot find phy device\n");
+		DRM_DEV_ERROR(&pdev->dev, "cannot find phy device\n");
 		return -ENXIO;
 	}
 
 	phy_pdev = of_find_device_by_node(phy_node);
-	if (phy_pdev)
+	if (phy_pdev) {
 		msm_dsi->phy = platform_get_drvdata(phy_pdev);
+		msm_dsi->phy_dev = &phy_pdev->dev;
+	}
 
 	of_node_put(phy_node);
 
-	if (!phy_pdev || !msm_dsi->phy) {
-		dev_err(&pdev->dev, "%s: phy driver is not ready\n", __func__);
+	if (!phy_pdev) {
+		DRM_DEV_ERROR(&pdev->dev, "%s: phy driver is not ready\n", __func__);
 		return -EPROBE_DEFER;
 	}
-
-	msm_dsi->phy_dev = get_device(&phy_pdev->dev);
+	if (!msm_dsi->phy) {
+		put_device(&phy_pdev->dev);
+		DRM_DEV_ERROR(&pdev->dev, "%s: phy driver is not ready\n", __func__);
+		return -EPROBE_DEFER;
+	}
 
 	return 0;
 }
@@ -83,6 +89,7 @@ static struct msm_dsi *dsi_init(struct platform_device *pdev)
 		return ERR_PTR(-ENOMEM);
 	DBG("dsi probed=%p", msm_dsi);
 
+	msm_dsi->id = -1;
 	msm_dsi->pdev = pdev;
 	platform_set_drvdata(pdev, msm_dsi);
 
@@ -110,17 +117,26 @@ destroy_dsi:
 
 static int dsi_bind(struct device *dev, struct device *master, void *data)
 {
-	struct drm_device *drm = dev_get_drvdata(master);
-	struct msm_drm_private *priv = drm->dev_private;
-	struct platform_device *pdev = to_platform_device(dev);
-	struct msm_dsi *msm_dsi;
+	struct msm_drm_private *priv = dev_get_drvdata(master);
+	struct msm_dsi *msm_dsi = dev_get_drvdata(dev);
 
-	DBG("");
-	msm_dsi = dsi_init(pdev);
-	if (IS_ERR(msm_dsi))
-		return PTR_ERR(msm_dsi);
+	/*
+	 * Next bridge doesn't exist for the secondary DSI host in a bonded
+	 * pair.
+	 */
+	if (!msm_dsi_is_bonded_dsi(msm_dsi) ||
+	    msm_dsi_is_master_dsi(msm_dsi)) {
+		struct drm_bridge *ext_bridge;
 
-	priv->dsi[msm_dsi->id] = msm_dsi;
+		ext_bridge = devm_drm_of_get_bridge(&msm_dsi->pdev->dev,
+						    msm_dsi->pdev->dev.of_node, 1, 0);
+		if (IS_ERR(ext_bridge))
+			return PTR_ERR(ext_bridge);
+
+		msm_dsi->next_bridge = ext_bridge;
+	}
+
+	priv->kms->dsi[msm_dsi->id] = msm_dsi;
 
 	return 0;
 }
@@ -128,15 +144,11 @@ static int dsi_bind(struct device *dev, struct device *master, void *data)
 static void dsi_unbind(struct device *dev, struct device *master,
 		void *data)
 {
-	struct drm_device *drm = dev_get_drvdata(master);
-	struct msm_drm_private *priv = drm->dev_private;
+	struct msm_drm_private *priv = dev_get_drvdata(master);
 	struct msm_dsi *msm_dsi = dev_get_drvdata(dev);
-	int id = msm_dsi->id;
 
-	if (priv->dsi[id]) {
-		dsi_destroy(msm_dsi);
-		priv->dsi[id] = NULL;
-	}
+	msm_dsi_tx_buf_free(msm_dsi->host);
+	priv->kms->dsi[msm_dsi->id] = NULL;
 }
 
 static const struct component_ops dsi_ops = {
@@ -144,25 +156,54 @@ static const struct component_ops dsi_ops = {
 	.unbind = dsi_unbind,
 };
 
-static int dsi_dev_probe(struct platform_device *pdev)
+int dsi_dev_attach(struct platform_device *pdev)
 {
 	return component_add(&pdev->dev, &dsi_ops);
 }
 
-static int dsi_dev_remove(struct platform_device *pdev)
+void dsi_dev_detach(struct platform_device *pdev)
 {
-	DBG("");
 	component_del(&pdev->dev, &dsi_ops);
+}
+
+static int dsi_dev_probe(struct platform_device *pdev)
+{
+	struct msm_dsi *msm_dsi;
+
+	DBG("");
+	msm_dsi = dsi_init(pdev);
+	if (IS_ERR(msm_dsi)) {
+		/* Don't fail the bind if the dsi port is not connected */
+		if (PTR_ERR(msm_dsi) == -ENODEV)
+			return 0;
+		else
+			return PTR_ERR(msm_dsi);
+	}
+
 	return 0;
+}
+
+static void dsi_dev_remove(struct platform_device *pdev)
+{
+	struct msm_dsi *msm_dsi = platform_get_drvdata(pdev);
+
+	DBG("");
+	dsi_destroy(msm_dsi);
 }
 
 static const struct of_device_id dt_match[] = {
 	{ .compatible = "qcom,mdss-dsi-ctrl" },
+
+	/* Deprecated, don't use */
+	{ .compatible = "qcom,dsi-ctrl-6g-qcm2290" },
 	{}
 };
+MODULE_DEVICE_TABLE(of, dt_match);
 
 static const struct dev_pm_ops dsi_pm_ops = {
 	SET_RUNTIME_PM_OPS(msm_dsi_runtime_suspend, msm_dsi_runtime_resume, NULL)
+	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
+				pm_runtime_force_resume)
 };
 
 static struct platform_driver dsi_driver = {
@@ -192,72 +233,38 @@ void __exit msm_dsi_unregister(void)
 int msm_dsi_modeset_init(struct msm_dsi *msm_dsi, struct drm_device *dev,
 			 struct drm_encoder *encoder)
 {
-	struct msm_drm_private *priv;
-	struct drm_bridge *ext_bridge;
 	int ret;
 
-	if (WARN_ON(!encoder) || WARN_ON(!msm_dsi) || WARN_ON(!dev))
-		return -EINVAL;
-
-	priv = dev->dev_private;
 	msm_dsi->dev = dev;
 
 	ret = msm_dsi_host_modeset_init(msm_dsi->host, dev);
 	if (ret) {
-		dev_err(dev->dev, "failed to modeset init host: %d\n", ret);
-		goto fail;
+		DRM_DEV_ERROR(dev->dev, "failed to modeset init host: %d\n", ret);
+		return ret;
 	}
 
-	msm_dsi->encoder = encoder;
-
-	msm_dsi->bridge = msm_dsi_manager_bridge_init(msm_dsi->id);
-	if (IS_ERR(msm_dsi->bridge)) {
-		ret = PTR_ERR(msm_dsi->bridge);
-		dev_err(dev->dev, "failed to create dsi bridge: %d\n", ret);
-		msm_dsi->bridge = NULL;
-		goto fail;
+	if (msm_dsi_is_bonded_dsi(msm_dsi) &&
+	    !msm_dsi_is_master_dsi(msm_dsi)) {
+		/*
+		 * Do not return an eror here,
+		 * Just skip creating encoder/connector for the slave-DSI.
+		 */
+		return 0;
 	}
 
-	/*
-	 * check if the dsi encoder output is connected to a panel or an
-	 * external bridge. We create a connector only if we're connected to a
-	 * drm_panel device. When we're connected to an external bridge, we
-	 * assume that the drm_bridge driver will create the connector itself.
-	 */
-	ext_bridge = msm_dsi_host_get_bridge(msm_dsi->host);
-
-	if (ext_bridge)
-		msm_dsi->connector =
-			msm_dsi_manager_ext_bridge_init(msm_dsi->id);
-	else
-		msm_dsi->connector =
-			msm_dsi_manager_connector_init(msm_dsi->id);
-
-	if (IS_ERR(msm_dsi->connector)) {
-		ret = PTR_ERR(msm_dsi->connector);
-		dev_err(dev->dev,
+	ret = msm_dsi_manager_connector_init(msm_dsi, encoder);
+	if (ret) {
+		DRM_DEV_ERROR(dev->dev,
 			"failed to create dsi connector: %d\n", ret);
-		msm_dsi->connector = NULL;
-		goto fail;
+		return ret;
 	}
-
-	priv->bridges[priv->num_bridges++]       = msm_dsi->bridge;
-	priv->connectors[priv->num_connectors++] = msm_dsi->connector;
 
 	return 0;
-fail:
-	/* bridge/connector are normally destroyed by drm: */
-	if (msm_dsi->bridge) {
-		msm_dsi_manager_bridge_destroy(msm_dsi->bridge);
-		msm_dsi->bridge = NULL;
-	}
+}
 
-	/* don't destroy connector if we didn't make it */
-	if (msm_dsi->connector && !msm_dsi->external_bridge)
-		msm_dsi->connector->funcs->destroy(msm_dsi->connector);
-
-	msm_dsi->connector = NULL;
-
-	return ret;
+void msm_dsi_snapshot(struct msm_disp_state *disp_state, struct msm_dsi *msm_dsi)
+{
+	msm_dsi_host_snapshot(disp_state, msm_dsi->host);
+	msm_dsi_phy_snapshot(disp_state, msm_dsi->phy);
 }
 

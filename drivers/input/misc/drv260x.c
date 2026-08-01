@@ -1,28 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * DRV260X haptics driver family
  *
  * Author: Dan Murphy <dmurphy@ti.com>
  *
  * Copyright:   (C) 2014 Texas Instruments, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
  */
 
+#include <linux/acpi.h>
+#include <linux/delay.h>
+#include <linux/device/devres.h>
+#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/input.h>
 #include <linux/module.h>
 #include <linux/regmap.h>
-#include <linux/slab.h>
-#include <linux/delay.h>
-#include <linux/gpio/consumer.h>
 #include <linux/regulator/consumer.h>
+#include <linux/slab.h>
 
 #include <dt-bindings/input/ti-drv260x.h>
 
@@ -157,7 +151,7 @@
 
 /* Control 3 Register */
 #define DRV260X_LRA_OPEN_LOOP		(1 << 0)
-#define DRV260X_ANANLOG_IN			(1 << 1)
+#define DRV260X_ANALOG_IN			(1 << 1)
 #define DRV260X_LRA_DRV_MODE		(1 << 2)
 #define DRV260X_RTP_UNSIGNED_DATA	(1 << 3)
 #define DRV260X_SUPPLY_COMP_DIS		(1 << 4)
@@ -173,19 +167,25 @@
 #define DRV260X_AUTOCAL_TIME_500MS		(2 << 4)
 #define DRV260X_AUTOCAL_TIME_1000MS		(3 << 4)
 
+/*
+ * Timeout for waiting for the GO status bit, in seconds. Should be reasonably
+ * large to wait for a auto-calibration cycle completion.
+ */
+#define DRV260X_GO_TIMEOUT_S 5
+
 /**
  * struct drv260x_data -
- * @input_dev - Pointer to the input device
- * @client - Pointer to the I2C client
- * @regmap - Register map of the device
- * @work - Work item used to off load the enable/disable of the vibration
- * @enable_gpio - Pointer to the gpio used for enable/disabling
- * @regulator - Pointer to the regulator for the IC
- * @magnitude - Magnitude of the vibration event
- * @mode - The operating mode of the IC (LRA_NO_CAL, ERM or LRA)
- * @library - The vibration library to be used
- * @rated_voltage - The rated_voltage of the actuator
- * @overdriver_voltage - The over drive voltage of the actuator
+ * @input_dev: Pointer to the input device
+ * @client: Pointer to the I2C client
+ * @regmap: Register map of the device
+ * @work: Work item used to off load the enable/disable of the vibration
+ * @enable_gpio: Pointer to the gpio used for enable/disabling
+ * @regulator: Pointer to the regulator for the IC
+ * @magnitude: Magnitude of the vibration event
+ * @mode: The operating mode of the IC (LRA_NO_CAL, ERM or LRA)
+ * @library: The vibration library to be used
+ * @rated_voltage: The rated_voltage of the actuator
+ * @overdrive_voltage: The over drive voltage of the actuator
 **/
 struct drv260x_data {
 	struct input_dev *input_dev;
@@ -194,60 +194,22 @@ struct drv260x_data {
 	struct work_struct work;
 	struct gpio_desc *enable_gpio;
 	struct regulator *regulator;
-	u32 magnitude;
+	u8 magnitude;
 	u32 mode;
 	u32 library;
 	int rated_voltage;
 	int overdrive_voltage;
 };
 
-static const struct reg_default drv260x_reg_defs[] = {
-	{ DRV260X_STATUS, 0xe0 },
-	{ DRV260X_MODE, 0x40 },
-	{ DRV260X_RT_PB_IN, 0x00 },
-	{ DRV260X_LIB_SEL, 0x00 },
-	{ DRV260X_WV_SEQ_1, 0x01 },
-	{ DRV260X_WV_SEQ_2, 0x00 },
-	{ DRV260X_WV_SEQ_3, 0x00 },
-	{ DRV260X_WV_SEQ_4, 0x00 },
-	{ DRV260X_WV_SEQ_5, 0x00 },
-	{ DRV260X_WV_SEQ_6, 0x00 },
-	{ DRV260X_WV_SEQ_7, 0x00 },
-	{ DRV260X_WV_SEQ_8, 0x00 },
-	{ DRV260X_GO, 0x00 },
-	{ DRV260X_OVERDRIVE_OFF, 0x00 },
-	{ DRV260X_SUSTAIN_P_OFF, 0x00 },
-	{ DRV260X_SUSTAIN_N_OFF, 0x00 },
-	{ DRV260X_BRAKE_OFF, 0x00 },
-	{ DRV260X_A_TO_V_CTRL, 0x05 },
-	{ DRV260X_A_TO_V_MIN_INPUT, 0x19 },
-	{ DRV260X_A_TO_V_MAX_INPUT, 0xff },
-	{ DRV260X_A_TO_V_MIN_OUT, 0x19 },
-	{ DRV260X_A_TO_V_MAX_OUT, 0xff },
-	{ DRV260X_RATED_VOLT, 0x3e },
-	{ DRV260X_OD_CLAMP_VOLT, 0x8c },
-	{ DRV260X_CAL_COMP, 0x0c },
-	{ DRV260X_CAL_BACK_EMF, 0x6c },
-	{ DRV260X_FEEDBACK_CTRL, 0x36 },
-	{ DRV260X_CTRL1, 0x93 },
-	{ DRV260X_CTRL2, 0xfa },
-	{ DRV260X_CTRL3, 0xa0 },
-	{ DRV260X_CTRL4, 0x20 },
-	{ DRV260X_CTRL5, 0x80 },
-	{ DRV260X_LRA_LOOP_PERIOD, 0x33 },
-	{ DRV260X_VBAT_MON, 0x00 },
-	{ DRV260X_LRA_RES_PERIOD, 0x00 },
-};
-
 #define DRV260X_DEF_RATED_VOLT		0x90
 #define DRV260X_DEF_OD_CLAMP_VOLT	0x90
 
-/**
+/*
  * Rated and Overdriver Voltages:
  * Calculated using the formula r = v * 255 / 5.6
  * where r is what will be written to the register
  * and v is the rated or overdriver voltage of the actuator
- **/
+ */
 static int drv260x_calculate_voltage(unsigned int voltage)
 {
 	return (voltage * 255 / 5600);
@@ -283,10 +245,11 @@ static int drv260x_haptics_play(struct input_dev *input, void *data,
 
 	haptics->mode = DRV260X_LRA_NO_CAL_MODE;
 
+	/* Scale u16 magnitude into u8 register value */
 	if (effect->u.rumble.strong_magnitude > 0)
-		haptics->magnitude = effect->u.rumble.strong_magnitude;
+		haptics->magnitude = effect->u.rumble.strong_magnitude >> 8;
 	else if (effect->u.rumble.weak_magnitude > 0)
-		haptics->magnitude = effect->u.rumble.weak_magnitude;
+		haptics->magnitude = effect->u.rumble.weak_magnitude >> 8;
 	else
 		haptics->magnitude = 0;
 
@@ -312,7 +275,7 @@ static void drv260x_close(struct input_dev *input)
 
 static const struct reg_sequence drv260x_lra_cal_regs[] = {
 	{ DRV260X_MODE, DRV260X_AUTO_CAL },
-	{ DRV260X_CTRL3, DRV260X_NG_THRESH_2 },
+	{ DRV260X_CTRL3, DRV260X_NG_THRESH_2 | DRV260X_RTP_UNSIGNED_DATA },
 	{ DRV260X_FEEDBACK_CTRL, DRV260X_FB_REG_LRA_MODE |
 		DRV260X_BRAKE_FACTOR_4X | DRV260X_LOOP_GAIN_HIGH },
 };
@@ -330,7 +293,7 @@ static const struct reg_sequence drv260x_lra_init_regs[] = {
 		DRV260X_BEMF_GAIN_3 },
 	{ DRV260X_CTRL1, DRV260X_STARTUP_BOOST },
 	{ DRV260X_CTRL2, DRV260X_SAMP_TIME_250 },
-	{ DRV260X_CTRL3, DRV260X_NG_THRESH_2 | DRV260X_ANANLOG_IN },
+	{ DRV260X_CTRL3, DRV260X_NG_THRESH_2 | DRV260X_RTP_UNSIGNED_DATA | DRV260X_ANALOG_IN },
 	{ DRV260X_CTRL4, DRV260X_AUTOCAL_TIME_500MS },
 };
 
@@ -345,7 +308,7 @@ static const struct reg_sequence drv260x_erm_cal_regs[] = {
 	{ DRV260X_CTRL1, DRV260X_STARTUP_BOOST },
 	{ DRV260X_CTRL2, DRV260X_SAMP_TIME_250 | DRV260X_BLANK_TIME_75 |
 		DRV260X_IDISS_TIME_75 },
-	{ DRV260X_CTRL3, DRV260X_NG_THRESH_2 | DRV260X_ERM_OPEN_LOOP },
+	{ DRV260X_CTRL3, DRV260X_NG_THRESH_2 | DRV260X_RTP_UNSIGNED_DATA },
 	{ DRV260X_CTRL4, DRV260X_AUTOCAL_TIME_500MS },
 };
 
@@ -353,6 +316,7 @@ static int drv260x_init(struct drv260x_data *haptics)
 {
 	int error;
 	unsigned int cal_buf;
+	unsigned long timeout;
 
 	error = regmap_write(haptics->regmap,
 			     DRV260X_RATED_VOLT, haptics->rated_voltage);
@@ -442,13 +406,20 @@ static int drv260x_init(struct drv260x_data *haptics)
 		return error;
 	}
 
+	timeout = jiffies + DRV260X_GO_TIMEOUT_S * HZ;
 	do {
+		usleep_range(15000, 15500);
 		error = regmap_read(haptics->regmap, DRV260X_GO, &cal_buf);
 		if (error) {
 			dev_err(&haptics->client->dev,
 				"Failed to read GO register: %d\n",
 				error);
 			return error;
+		}
+		if (time_after(jiffies, timeout)) {
+			dev_err(&haptics->client->dev,
+				"Calibration timeout. The device cannot be used.\n");
+			return -ETIMEDOUT;
 		}
 	} while (cal_buf == DRV260X_GO_BIT);
 
@@ -460,13 +431,17 @@ static const struct regmap_config drv260x_regmap_config = {
 	.val_bits = 8,
 
 	.max_register = DRV260X_MAX_REG,
-	.reg_defaults = drv260x_reg_defs,
-	.num_reg_defaults = ARRAY_SIZE(drv260x_reg_defs),
 	.cache_type = REGCACHE_NONE,
 };
 
-static int drv260x_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static void drv260x_power_off(void *data)
+{
+	struct drv260x_data *haptics = data;
+
+	regulator_disable(haptics->regulator);
+}
+
+static int drv260x_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct drv260x_data *haptics;
@@ -531,6 +506,16 @@ static int drv260x_probe(struct i2c_client *client,
 		return error;
 	}
 
+	error = regulator_enable(haptics->regulator);
+	if (error) {
+		dev_err(dev, "Failed to enable regulator: %d\n", error);
+		return error;
+	}
+
+	error = devm_add_action_or_reset(dev, drv260x_power_off, haptics);
+	if (error)
+		return error;
+
 	haptics->enable_gpio = devm_gpiod_get_optional(dev, "enable",
 						       GPIOD_OUT_HIGH);
 	if (IS_ERR(haptics->enable_gpio))
@@ -581,76 +566,85 @@ static int drv260x_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int __maybe_unused drv260x_suspend(struct device *dev)
+static int drv260x_suspend(struct device *dev)
 {
 	struct drv260x_data *haptics = dev_get_drvdata(dev);
-	int ret = 0;
+	int error;
 
-	mutex_lock(&haptics->input_dev->mutex);
+	guard(mutex)(&haptics->input_dev->mutex);
 
-	if (haptics->input_dev->users) {
-		ret = regmap_update_bits(haptics->regmap,
-					 DRV260X_MODE,
-					 DRV260X_STANDBY_MASK,
-					 DRV260X_STANDBY);
-		if (ret) {
+	if (input_device_enabled(haptics->input_dev)) {
+		error = regmap_update_bits(haptics->regmap,
+					   DRV260X_MODE,
+					   DRV260X_STANDBY_MASK,
+					   DRV260X_STANDBY);
+		if (error) {
 			dev_err(dev, "Failed to set standby mode\n");
-			goto out;
+			return error;
 		}
 
 		gpiod_set_value(haptics->enable_gpio, 0);
 
-		ret = regulator_disable(haptics->regulator);
-		if (ret) {
+		error = regulator_disable(haptics->regulator);
+		if (error) {
 			dev_err(dev, "Failed to disable regulator\n");
 			regmap_update_bits(haptics->regmap,
 					   DRV260X_MODE,
 					   DRV260X_STANDBY_MASK, 0);
+			return error;
 		}
 	}
-out:
-	mutex_unlock(&haptics->input_dev->mutex);
-	return ret;
+
+	return 0;
 }
 
-static int __maybe_unused drv260x_resume(struct device *dev)
+static int drv260x_resume(struct device *dev)
 {
 	struct drv260x_data *haptics = dev_get_drvdata(dev);
-	int ret = 0;
+	int error;
 
-	mutex_lock(&haptics->input_dev->mutex);
+	guard(mutex)(&haptics->input_dev->mutex);
 
-	if (haptics->input_dev->users) {
-		ret = regulator_enable(haptics->regulator);
-		if (ret) {
+	if (input_device_enabled(haptics->input_dev)) {
+		error = regulator_enable(haptics->regulator);
+		if (error) {
 			dev_err(dev, "Failed to enable regulator\n");
-			goto out;
+			return error;
 		}
 
-		ret = regmap_update_bits(haptics->regmap,
-					 DRV260X_MODE,
-					 DRV260X_STANDBY_MASK, 0);
-		if (ret) {
+		error = regmap_update_bits(haptics->regmap,
+					   DRV260X_MODE,
+					   DRV260X_STANDBY_MASK, 0);
+		if (error) {
 			dev_err(dev, "Failed to unset standby mode\n");
 			regulator_disable(haptics->regulator);
-			goto out;
+			return error;
 		}
 
 		gpiod_set_value(haptics->enable_gpio, 1);
 	}
 
-out:
-	mutex_unlock(&haptics->input_dev->mutex);
-	return ret;
+	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(drv260x_pm_ops, drv260x_suspend, drv260x_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(drv260x_pm_ops, drv260x_suspend, drv260x_resume);
 
 static const struct i2c_device_id drv260x_id[] = {
-	{ "drv2605l", 0 },
+	{ .name = "drv2604" },
+	{ .name = "drv2604l" },
+	{ .name = "drv2605" },
+	{ .name = "drv2605l" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, drv260x_id);
+
+#ifdef CONFIG_ACPI
+static const struct acpi_device_id drv260x_acpi_match[] = {
+	{ "DRV2604" },
+	{ }
+};
+MODULE_DEVICE_TABLE(acpi, drv260x_acpi_match);
+#endif
 
 static const struct of_device_id drv260x_of_match[] = {
 	{ .compatible = "ti,drv2604", },
@@ -665,8 +659,9 @@ static struct i2c_driver drv260x_driver = {
 	.probe		= drv260x_probe,
 	.driver		= {
 		.name	= "drv260x-haptics",
+		.acpi_match_table = ACPI_PTR(drv260x_acpi_match),
 		.of_match_table = drv260x_of_match,
-		.pm	= &drv260x_pm_ops,
+		.pm	= pm_sleep_ptr(&drv260x_pm_ops),
 	},
 	.id_table = drv260x_id,
 };

@@ -149,6 +149,8 @@ static struct spear_shirq spear320_shirq_ras3 = {
 	.offset		= 0,
 	.nr_irqs	= 7,
 	.mask		= ((0x1 << 7) - 1) << 0,
+	.irq_chip	= &dummy_irq_chip,
+	.status_reg	= SPEAR320_INT_STS_MASK_REG,
 };
 
 static struct spear_shirq spear320_shirq_ras1 = {
@@ -237,7 +239,7 @@ static int __init shirq_init(struct spear_shirq **shirq_blocks, int block_nr,
 		goto err_unmap;
 	}
 
-	shirq_domain = irq_domain_add_legacy(np, nr_irqs, virq_base, 0,
+	shirq_domain = irq_domain_create_legacy(of_fwnode_handle(np), nr_irqs, virq_base, 0,
 			&irq_domain_simple_ops, NULL);
 	if (WARN_ON(!shirq_domain)) {
 		pr_warn("%s: irq domain init failed\n", __func__);

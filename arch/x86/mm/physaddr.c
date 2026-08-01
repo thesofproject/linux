@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/mmdebug.h>
 #include <linux/export.h>
 #include <linux/mm.h>
 
 #include <asm/page.h>
+#include <linux/vmalloc.h>
 
 #include "physaddr.h"
 
@@ -30,17 +31,6 @@ unsigned long __phys_addr(unsigned long x)
 	return x;
 }
 EXPORT_SYMBOL(__phys_addr);
-
-unsigned long __phys_addr_symbol(unsigned long x)
-{
-	unsigned long y = x - __START_KERNEL_map;
-
-	/* only check upper bounds since lower bounds will trigger carry */
-	VIRTUAL_BUG_ON(y >= KERNEL_IMAGE_SIZE);
-
-	return y + phys_base;
-}
-EXPORT_SYMBOL(__phys_addr_symbol);
 #endif
 
 bool __virt_addr_valid(unsigned long x)

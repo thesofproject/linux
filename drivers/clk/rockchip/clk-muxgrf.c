@@ -1,14 +1,4 @@
-/*
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0-only
 
 #include <linux/slab.h>
 #include <linux/bitops.h>
@@ -77,7 +67,7 @@ struct clk *rockchip_clk_register_muxgrf(const char *name,
 		return ERR_PTR(-ENOTSUPP);
 	}
 
-	muxgrf_clock = kmalloc(sizeof(*muxgrf_clock), GFP_KERNEL);
+	muxgrf_clock = kmalloc_obj(*muxgrf_clock);
 	if (!muxgrf_clock)
 		return ERR_PTR(-ENOMEM);
 

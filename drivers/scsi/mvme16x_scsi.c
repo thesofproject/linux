@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Detection routine for the NCR53c710 based MVME16x SCSI Controllers for Linux.
  *
@@ -48,7 +49,7 @@ static int mvme16x_probe(struct platform_device *dev)
 		goto out;
 	}
 
-	hostdata = kzalloc(sizeof(struct NCR_700_Host_Parameters), GFP_KERNEL);
+	hostdata = kzalloc_obj(struct NCR_700_Host_Parameters);
 	if (hostdata == NULL) {
 		printk(KERN_ERR "mvme16x-scsi: "
 				"Failed to allocate host data\n");
@@ -102,7 +103,7 @@ static int mvme16x_probe(struct platform_device *dev)
 	return -ENODEV;
 }
 
-static int mvme16x_device_remove(struct platform_device *dev)
+static void mvme16x_device_remove(struct platform_device *dev)
 {
 	struct Scsi_Host *host = platform_get_drvdata(dev);
 	struct NCR_700_Host_Parameters *hostdata = shost_priv(host);
@@ -119,8 +120,6 @@ static int mvme16x_device_remove(struct platform_device *dev)
 	NCR_700_release(host);
 	kfree(hostdata);
 	free_irq(host->irq, host);
-
-	return 0;
 }
 
 static struct platform_driver mvme16x_scsi_driver = {

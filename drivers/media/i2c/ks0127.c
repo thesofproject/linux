@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Video Capture Driver (Video for Linux 1/2)
  * for the Matrox Marvel G200,G400 and Rainbow Runner-G series
@@ -5,16 +6,6 @@
  * This module is an interface to the KS0127 video decoder chip.
  *
  * Copyright (C) 1999  Ryan Drake <stiletto@mediaone.net>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  *
  *****************************************************************************
  *
@@ -183,14 +174,6 @@ MODULE_LICENSE("GPL");
 /****************************************************************************
 * mga_dev : represents one ks0127 chip.
 ****************************************************************************/
-
-struct adjust {
-	int	contrast;
-	int	bright;
-	int	hue;
-	int	ugain;
-	int	vgain;
-};
 
 struct ks0127 {
 	struct v4l2_subdev sd;
@@ -659,7 +642,7 @@ static const struct v4l2_subdev_ops ks0127_ops = {
 /* ----------------------------------------------------------------------- */
 
 
-static int ks0127_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int ks0127_probe(struct i2c_client *client)
 {
 	struct ks0127 *ks;
 	struct v4l2_subdev *sd;
@@ -684,20 +667,19 @@ static int ks0127_probe(struct i2c_client *client, const struct i2c_device_id *i
 	return 0;
 }
 
-static int ks0127_remove(struct i2c_client *client)
+static void ks0127_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 
 	v4l2_device_unregister_subdev(sd);
 	ks0127_write(sd, KS_OFMTA, 0x20); /* tristate */
 	ks0127_write(sd, KS_CMDA, 0x2c | 0x80); /* power down */
-	return 0;
 }
 
 static const struct i2c_device_id ks0127_id[] = {
-	{ "ks0127", 0 },
-	{ "ks0127b", 0 },
-	{ "ks0122s", 0 },
+	{ .name = "ks0127" },
+	{ .name = "ks0127b" },
+	{ .name = "ks0122s" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ks0127_id);

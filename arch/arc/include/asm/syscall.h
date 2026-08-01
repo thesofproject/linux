@@ -1,18 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2004, 2007-2010, 2011-2012 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef _ASM_ARC_SYSCALL_H
 #define _ASM_ARC_SYSCALL_H  1
 
+#include <uapi/linux/audit.h>
 #include <linux/err.h>
 #include <linux/sched.h>
 #include <asm/unistd.h>
 #include <asm/ptrace.h>		/* in_syscall() */
+
+extern void *sys_call_table[];
 
 static inline long
 syscall_get_nr(struct task_struct *task, struct pt_regs *regs)
@@ -21,6 +21,17 @@ syscall_get_nr(struct task_struct *task, struct pt_regs *regs)
 		return regs->r8;
 	else
 		return -1;
+}
+
+static inline void
+syscall_set_nr(struct task_struct *task, struct pt_regs *regs, int nr)
+{
+	/*
+	 * Unlike syscall_get_nr(), syscall_set_nr() can be called only when
+	 * the target task is stopped for tracing on entering syscall, so
+	 * there is no need to have the same check syscall_get_nr() has.
+	 */
+	regs->r8 = nr;
 }
 
 static inline void
@@ -55,17 +66,40 @@ syscall_set_return_value(struct task_struct *task, struct pt_regs *regs,
  */
 static inline void
 syscall_get_arguments(struct task_struct *task, struct pt_regs *regs,
-		      unsigned int i, unsigned int n, unsigned long *args)
+		      unsigned long *args)
 {
 	unsigned long *inside_ptregs = &(regs->r0);
-	inside_ptregs -= i;
-
-	BUG_ON((i + n) > 6);
+	unsigned int n = 6;
+	unsigned int i = 0;
 
 	while (n--) {
 		args[i++] = (*inside_ptregs);
 		inside_ptregs--;
 	}
+}
+
+static inline void
+syscall_set_arguments(struct task_struct *task, struct pt_regs *regs,
+		      unsigned long *args)
+{
+	unsigned long *inside_ptregs = &regs->r0;
+	unsigned int n = 6;
+	unsigned int i = 0;
+
+	while (n--) {
+		*inside_ptregs = args[i++];
+		inside_ptregs--;
+	}
+}
+
+static inline int
+syscall_get_arch(struct task_struct *task)
+{
+	return IS_ENABLED(CONFIG_ISA_ARCOMPACT)
+		? (IS_ENABLED(CONFIG_CPU_BIG_ENDIAN)
+			? AUDIT_ARCH_ARCOMPACTBE : AUDIT_ARCH_ARCOMPACT)
+		: (IS_ENABLED(CONFIG_CPU_BIG_ENDIAN)
+			? AUDIT_ARCH_ARCV2BE : AUDIT_ARCH_ARCV2);
 }
 
 #endif

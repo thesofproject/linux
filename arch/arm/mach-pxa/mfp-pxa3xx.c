@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * linux/arch/arm/mach-pxa/mfp.c
  *
@@ -7,10 +8,6 @@
  *
  * 2007-08-21: eric miao <eric.miao@marvell.com>
  *             initial version
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2 as
- *  published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -19,9 +16,8 @@
 #include <linux/io.h>
 #include <linux/syscore_ops.h>
 
-#include <mach/hardware.h>
 #include "mfp-pxa3xx.h"
-#include <mach/pxa3xx-regs.h>
+#include "pxa3xx-regs.h"
 
 #ifdef CONFIG_PM
 /*
@@ -31,13 +27,13 @@
  * a pull-down mode if they're an active low chip select, and we're
  * just entering standby.
  */
-static int pxa3xx_mfp_suspend(void)
+static int pxa3xx_mfp_suspend(void *data)
 {
 	mfp_config_lpm();
 	return 0;
 }
 
-static void pxa3xx_mfp_resume(void)
+static void pxa3xx_mfp_resume(void *data)
 {
 	mfp_config_run();
 
@@ -53,7 +49,11 @@ static void pxa3xx_mfp_resume(void)
 #define pxa3xx_mfp_resume	NULL
 #endif
 
-struct syscore_ops pxa3xx_mfp_syscore_ops = {
+static const struct syscore_ops pxa3xx_mfp_syscore_ops = {
 	.suspend	= pxa3xx_mfp_suspend,
 	.resume		= pxa3xx_mfp_resume,
+};
+
+struct syscore pxa3xx_mfp_syscore = {
+	.ops = &pxa3xx_mfp_syscore_ops,
 };

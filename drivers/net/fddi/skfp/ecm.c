@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /******************************************************************************
  *
  *	(C)Copyright 1998,1999 SysKonnect,
  *	a business unit of Schneider & Koch & Co. Datensysteme GmbH.
  *
  *	See the file "skfddi.c" for further information.
- *
- *	This program is free software; you can redistribute it and/or modify
- *	it under the terms of the GNU General Public License as published by
- *	the Free Software Foundation; either version 2 of the License, or
- *	(at your option) any later version.
  *
  *	The information in this file is provided "AS IS" without warranty.
  *
@@ -30,7 +26,6 @@
  *
  * 	The following external HW dependent functions are referenced :
  * 		sm_pm_bypass_req()
- * 		sm_pm_ls_latch()
  * 		sm_pm_get_ls()
  * 
  * 	The following HW dependent events are required :
@@ -44,10 +39,6 @@
 
 #define KERNEL
 #include "h/smtstate.h"
-
-#ifndef	lint
-static const char ID_sccs[] = "@(#)ecm.c	2.7 99/08/05 (C) SK " ;
-#endif
 
 /*
  * FSM Macros
@@ -152,10 +143,11 @@ static void ecm_fsm(struct s_smc *smc, int cmd)
 	/* For AIX event notification: */
 	/* Is a disconnect  command remotely issued ? */
 	if (cmd == EC_DISCONNECT &&
-		smc->mib.fddiSMTRemoteDisconnectFlag == TRUE)
+	    smc->mib.fddiSMTRemoteDisconnectFlag == TRUE) {
 		AIX_EVENT (smc, (u_long) CIO_HARD_FAIL, (u_long)
 			FDDI_REMOTE_DISCONNECT, smt_get_event_word(smc),
 			smt_get_error_word(smc) );
+	}
 
 	/*jd 05-Aug-1999 Bug #10419 "Port Disconnect fails at Dup MAc Cond."*/
 	if (cmd == EC_CONNECT) {
@@ -356,8 +348,6 @@ static void ecm_fsm(struct s_smc *smc, int cmd)
 		 */
 		start_ecm_timer(smc,smc->s.ecm_check_poll,0) ;
 		smc->e.ecm_line_state = TRUE ;	/* flag to pcm: report Q/HLS */
-		(void) sm_pm_ls_latch(smc,PA,1) ; /* enable line state latch */
-		(void) sm_pm_ls_latch(smc,PB,1) ; /* enable line state latch */
 		ACTIONS_DONE() ;
 		break ;
 	case EC6_CHECK :

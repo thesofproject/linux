@@ -1,21 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * lm3533-core.c -- LM3533 Core
  *
  * Copyright (C) 2011-2012 Texas Instruments
  *
  * Author: Johan Hovold <jhovold@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under  the terms of the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the License, or (at your
- * option) any later version.
  */
 
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/err.h>
-#include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/mfd/core.h>
 #include <linux/regmap.h>
@@ -229,14 +225,12 @@ static int lm3533_set_lvled_config(struct lm3533 *lm3533, u8 lvled, u8 led)
 
 static void lm3533_enable(struct lm3533 *lm3533)
 {
-	if (gpio_is_valid(lm3533->gpio_hwen))
-		gpio_set_value(lm3533->gpio_hwen, 1);
+	gpiod_set_value(lm3533->hwen, 1);
 }
 
 static void lm3533_disable(struct lm3533 *lm3533)
 {
-	if (gpio_is_valid(lm3533->gpio_hwen))
-		gpio_set_value(lm3533->gpio_hwen, 0);
+	gpiod_set_value(lm3533->hwen, 0);
 }
 
 enum lm3533_attribute_type {
@@ -290,7 +284,7 @@ static ssize_t show_output(struct device *dev,
 
 	val = (val & mask) >> shift;
 
-	return scnprintf(buf, PAGE_SIZE, "%u\n", val);
+	return sysfs_emit(buf, "%u\n", val);
 }
 
 static ssize_t store_output(struct device *dev,
@@ -362,7 +356,7 @@ static struct attribute *lm3533_attributes[] = {
 static umode_t lm3533_attr_is_visible(struct kobject *kobj,
 					     struct attribute *attr, int n)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
+	struct device *dev = kobj_to_dev(kobj);
 	struct lm3533 *lm3533 = dev_get_drvdata(dev);
 	struct device_attribute *dattr = to_dev_attr(attr);
 	struct lm3533_device_attribute *lattr = to_lm3533_dev_attr(dattr);
@@ -487,20 +481,10 @@ static int lm3533_device_init(struct lm3533 *lm3533)
 		return -EINVAL;
 	}
 
-	lm3533->gpio_hwen = pdata->gpio_hwen;
-
-	dev_set_drvdata(lm3533->dev, lm3533);
-
-	if (gpio_is_valid(lm3533->gpio_hwen)) {
-		ret = devm_gpio_request_one(lm3533->dev, lm3533->gpio_hwen,
-					GPIOF_OUT_INIT_LOW, "lm3533-hwen");
-		if (ret < 0) {
-			dev_err(lm3533->dev,
-				"failed to request HWEN GPIO %d\n",
-				lm3533->gpio_hwen);
-			return ret;
-		}
-	}
+	lm3533->hwen = devm_gpiod_get(lm3533->dev, NULL, GPIOD_OUT_LOW);
+	if (IS_ERR(lm3533->hwen))
+		return dev_err_probe(lm3533->dev, PTR_ERR(lm3533->hwen), "failed to request HWEN GPIO\n");
+	gpiod_set_consumer_name(lm3533->hwen, "lm3533-hwen");
 
 	lm3533_enable(lm3533);
 
@@ -588,8 +572,7 @@ static const struct regmap_config regmap_config = {
 	.precious_reg	= lm3533_precious_register,
 };
 
-static int lm3533_i2c_probe(struct i2c_client *i2c,
-					const struct i2c_device_id *id)
+static int lm3533_i2c_probe(struct i2c_client *i2c)
 {
 	struct lm3533 *lm3533;
 
@@ -611,20 +594,18 @@ static int lm3533_i2c_probe(struct i2c_client *i2c,
 	return lm3533_device_init(lm3533);
 }
 
-static int lm3533_i2c_remove(struct i2c_client *i2c)
+static void lm3533_i2c_remove(struct i2c_client *i2c)
 {
 	struct lm3533 *lm3533 = i2c_get_clientdata(i2c);
 
 	dev_dbg(&i2c->dev, "%s\n", __func__);
 
 	lm3533_device_exit(lm3533);
-
-	return 0;
 }
 
 static const struct i2c_device_id lm3533_i2c_ids[] = {
-	{ "lm3533", 0 },
-	{ },
+	{ "lm3533" },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, lm3533_i2c_ids);
 

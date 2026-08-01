@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * IPVS:        Never Queue scheduling module
  *
  * Authors:     Wensong Zhang <wensong@linuxvirtualserver.org>
  *
- *              This program is free software; you can redistribute it and/or
- *              modify it under the terms of the GNU General Public License
- *              as published by the Free Software Foundation; either version
- *              2 of the License, or (at your option) any later version.
- *
  * Changes:
- *
  */
 
 /*
@@ -31,8 +26,7 @@
  *
  */
 
-#define KMSG_COMPONENT "IPVS"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "IPVS: " fmt
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -141,3 +135,4 @@ static void __exit ip_vs_nq_cleanup(void)
 module_init(ip_vs_nq_init);
 module_exit(ip_vs_nq_cleanup);
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("ipvs never queue scheduler");

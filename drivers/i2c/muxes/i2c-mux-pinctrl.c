@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * I2C multiplexer using pinctrl API
  *
  * Copyright (c) 2012, NVIDIA CORPORATION.  All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <linux/i2c.h>
@@ -27,7 +16,7 @@
 
 struct i2c_mux_pinctrl {
 	struct pinctrl *pinctrl;
-	struct pinctrl_state **states;
+	struct pinctrl_state *states[];
 };
 
 static int i2c_mux_pinctrl_select(struct i2c_mux_core *muxc, u32 chan)
@@ -73,7 +62,7 @@ static struct i2c_adapter *i2c_mux_pinctrl_parent_adapter(struct device *dev)
 		dev_err(dev, "Cannot parse i2c-parent\n");
 		return ERR_PTR(-ENODEV);
 	}
-	parent = of_find_i2c_adapter_by_node(parent_np);
+	parent = of_get_i2c_adapter_by_node(parent_np);
 	of_node_put(parent_np);
 	if (!parent)
 		return ERR_PTR(-EPROBE_DEFER);
@@ -104,14 +93,13 @@ static int i2c_mux_pinctrl_probe(struct platform_device *pdev)
 		return PTR_ERR(parent);
 
 	muxc = i2c_mux_alloc(parent, dev, num_names,
-			     sizeof(*mux) + num_names * sizeof(*mux->states),
+			     struct_size(mux, states, num_names),
 			     0, i2c_mux_pinctrl_select, NULL);
 	if (!muxc) {
 		ret = -ENOMEM;
 		goto err_put_parent;
 	}
 	mux = i2c_mux_priv(muxc);
-	mux->states = (struct pinctrl_state **)(mux + 1);
 
 	platform_set_drvdata(pdev, muxc);
 
@@ -163,7 +151,7 @@ static int i2c_mux_pinctrl_probe(struct platform_device *pdev)
 
 	/* Do not add any adapter for the idle state (if it's there at all). */
 	for (i = 0; i < num_names - !!muxc->deselect; i++) {
-		ret = i2c_mux_add_adapter(muxc, 0, i, 0);
+		ret = i2c_mux_add_adapter(muxc, 0, i);
 		if (ret)
 			goto err_del_adapter;
 	}
@@ -178,14 +166,12 @@ err_put_parent:
 	return ret;
 }
 
-static int i2c_mux_pinctrl_remove(struct platform_device *pdev)
+static void i2c_mux_pinctrl_remove(struct platform_device *pdev)
 {
 	struct i2c_mux_core *muxc = platform_get_drvdata(pdev);
 
 	i2c_mux_del_adapters(muxc);
 	i2c_put_adapter(muxc->parent);
-
-	return 0;
 }
 
 static const struct of_device_id i2c_mux_pinctrl_of_match[] = {
@@ -197,10 +183,10 @@ MODULE_DEVICE_TABLE(of, i2c_mux_pinctrl_of_match);
 static struct platform_driver i2c_mux_pinctrl_driver = {
 	.driver	= {
 		.name	= "i2c-mux-pinctrl",
-		.of_match_table = of_match_ptr(i2c_mux_pinctrl_of_match),
+		.of_match_table = i2c_mux_pinctrl_of_match,
 	},
 	.probe	= i2c_mux_pinctrl_probe,
-	.remove	= i2c_mux_pinctrl_remove,
+	.remove = i2c_mux_pinctrl_remove,
 };
 module_platform_driver(i2c_mux_pinctrl_driver);
 

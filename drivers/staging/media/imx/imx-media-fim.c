@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Frame Interval Monitor.
  *
  * Copyright (c) 2016 Mentor Graphics Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 #include <linux/delay.h>
 #include <linux/irq.h>
@@ -41,8 +37,6 @@ enum {
 #define FIM_CL_TOLERANCE_MAX_DEF   0 /* no max tolerance (unbounded) */
 
 struct imx_media_fim {
-	struct imx_media_dev *md;
-
 	/* the owning subdev of this fim instance */
 	struct v4l2_subdev *sd;
 
@@ -74,7 +68,10 @@ struct imx_media_fim {
 	bool              stream_on;
 };
 
-#define icap_enabled(fim) ((fim)->icap_flags != IRQ_TYPE_NONE)
+static bool icap_enabled(struct imx_media_fim *fim)
+{
+	return fim->icap_flags != IRQ_TYPE_NONE;
+}
 
 static void update_fim_nominal(struct imx_media_fim *fim,
 			       const struct v4l2_fract *fi)
@@ -192,54 +189,6 @@ out_update_ts:
 	if (send_event)
 		send_fim_event(fim, error_avg);
 }
-
-#ifdef CONFIG_IMX_GPT_ICAP
-/*
- * Input Capture method of measuring frame intervals. Not subject
- * to interrupt latency.
- */
-static void fim_input_capture_handler(int channel, void *dev_id,
-				      ktime_t timestamp)
-{
-	struct imx_media_fim *fim = dev_id;
-	unsigned long flags;
-
-	spin_lock_irqsave(&fim->lock, flags);
-
-	frame_interval_monitor(fim, timestamp);
-
-	if (!completion_done(&fim->icap_first_event))
-		complete(&fim->icap_first_event);
-
-	spin_unlock_irqrestore(&fim->lock, flags);
-}
-
-static int fim_request_input_capture(struct imx_media_fim *fim)
-{
-	init_completion(&fim->icap_first_event);
-
-	return mxc_request_input_capture(fim->icap_channel,
-					 fim_input_capture_handler,
-					 fim->icap_flags, fim);
-}
-
-static void fim_free_input_capture(struct imx_media_fim *fim)
-{
-	mxc_free_input_capture(fim->icap_channel, fim);
-}
-
-#else /* CONFIG_IMX_GPT_ICAP */
-
-static int fim_request_input_capture(struct imx_media_fim *fim)
-{
-	return 0;
-}
-
-static void fim_free_input_capture(struct imx_media_fim *fim)
-{
-}
-
-#endif /* CONFIG_IMX_GPT_ICAP */
 
 /*
  * In case we are monitoring the first frame interval after streamon
@@ -420,15 +369,13 @@ void imx_media_fim_eof_monitor(struct imx_media_fim *fim, ktime_t timestamp)
 
 	spin_unlock_irqrestore(&fim->lock, flags);
 }
-EXPORT_SYMBOL_GPL(imx_media_fim_eof_monitor);
 
 /* Called by the subdev in its s_stream callback */
-int imx_media_fim_set_stream(struct imx_media_fim *fim,
-			     const struct v4l2_fract *fi,
-			     bool on)
+void imx_media_fim_set_stream(struct imx_media_fim *fim,
+			      const struct v4l2_fract *fi,
+			      bool on)
 {
 	unsigned long flags;
-	int ret = 0;
 
 	v4l2_ctrl_lock(fim->ctrl[FIM_CL_ENABLE]);
 
@@ -441,31 +388,21 @@ int imx_media_fim_set_stream(struct imx_media_fim *fim,
 		update_fim_nominal(fim, fi);
 		spin_unlock_irqrestore(&fim->lock, flags);
 
-		if (icap_enabled(fim)) {
-			ret = fim_request_input_capture(fim);
-			if (ret)
-				goto out;
-			fim_acquire_first_ts(fim);
-		}
-	} else {
 		if (icap_enabled(fim))
-			fim_free_input_capture(fim);
+			fim_acquire_first_ts(fim);
 	}
 
 	fim->stream_on = on;
 out:
 	v4l2_ctrl_unlock(fim->ctrl[FIM_CL_ENABLE]);
-	return ret;
 }
-EXPORT_SYMBOL_GPL(imx_media_fim_set_stream);
 
 int imx_media_fim_add_controls(struct imx_media_fim *fim)
 {
 	/* add the FIM controls to the calling subdev ctrl handler */
 	return v4l2_ctrl_add_handler(fim->sd->ctrl_handler,
-				     &fim->ctrl_handler, NULL);
+				     &fim->ctrl_handler, NULL, true);
 }
-EXPORT_SYMBOL_GPL(imx_media_fim_add_controls);
 
 /* Called by the subdev in its subdev registered callback */
 struct imx_media_fim *imx_media_fim_init(struct v4l2_subdev *sd)
@@ -477,8 +414,6 @@ struct imx_media_fim *imx_media_fim_init(struct v4l2_subdev *sd)
 	if (!fim)
 		return ERR_PTR(-ENOMEM);
 
-	/* get media device */
-	fim->md = dev_get_drvdata(sd->v4l2_dev->dev);
 	fim->sd = sd;
 
 	spin_lock_init(&fim->lock);
@@ -489,10 +424,8 @@ struct imx_media_fim *imx_media_fim_init(struct v4l2_subdev *sd)
 
 	return fim;
 }
-EXPORT_SYMBOL_GPL(imx_media_fim_init);
 
 void imx_media_fim_free(struct imx_media_fim *fim)
 {
 	v4l2_ctrl_handler_free(&fim->ctrl_handler);
 }
-EXPORT_SYMBOL_GPL(imx_media_fim_free);

@@ -1,10 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0
-// Copyright (c) 2018 BayLibre, SAS.
-// Author: Jerome Brunet <jbrunet@baylibre.com>
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Copyright (c) 2018 BayLibre, SAS.
+ * Author: Jerome Brunet <jbrunet@baylibre.com>
+ */
 
 #ifndef __CLK_REGMAP_H
 #define __CLK_REGMAP_H
 
+#include <linux/device.h>
 #include <linux/clk-provider.h>
 #include <linux/regmap.h>
 
@@ -24,7 +27,13 @@ struct clk_regmap {
 	void		*data;
 };
 
-#define to_clk_regmap(_hw) container_of(_hw, struct clk_regmap, hw)
+static inline struct clk_regmap *to_clk_regmap(struct clk_hw *hw)
+{
+	return container_of(hw, struct clk_regmap, hw);
+}
+
+/* clk_regmap init op to get and cache regmap from the controllers */
+int clk_regmap_init(struct clk_hw *hw);
 
 /**
  * struct clk_regmap_gate_data - regmap backed gate specific data
@@ -49,6 +58,7 @@ clk_get_regmap_gate_data(struct clk_regmap *clk)
 }
 
 extern const struct clk_ops clk_regmap_gate_ops;
+extern const struct clk_ops clk_regmap_gate_ro_ops;
 
 /**
  * struct clk_regmap_div_data - regmap backed adjustable divider specific data

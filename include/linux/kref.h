@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * kref.h - library routines for handling generic reference counted objects
  *
@@ -7,9 +8,6 @@
  * based on kobject.h which was:
  * Copyright (C) 2002-2003 Patrick Mochel <mochel@osdl.org>
  * Copyright (C) 2002-2003 Open Source Development Labs
- *
- * This file is released under the GPLv2.
- *
  */
 
 #ifndef _KREF_H_
@@ -48,21 +46,18 @@ static inline void kref_get(struct kref *kref)
 }
 
 /**
- * kref_put - decrement refcount for object.
- * @kref: object.
- * @release: pointer to the function that will clean up the object when the
+ * kref_put - Decrement refcount for object
+ * @kref: Object
+ * @release: Pointer to the function that will clean up the object when the
  *	     last reference to the object is released.
- *	     This pointer is required, and it is not acceptable to pass kfree
- *	     in as this function.  If the caller does pass kfree to this
- *	     function, you will be publicly mocked mercilessly by the kref
- *	     maintainer, and anyone else who happens to notice it.  You have
- *	     been warned.
  *
- * Decrement the refcount, and if 0, call release().
- * Return 1 if the object was removed, otherwise return 0.  Beware, if this
- * function returns 0, you still can not count on the kref from remaining in
- * memory.  Only use the return value if you want to see if the kref is now
- * gone, not present.
+ * Decrement the refcount, and if 0, call @release.  The caller may not
+ * pass NULL or kfree() as the release function.
+ *
+ * Return: 1 if this call removed the object, otherwise return 0.  Beware,
+ * if this function returns 0, another caller may have removed the object
+ * by the time this function returns.  The return value is only certain
+ * if you want to see if the object is definitely released.
  */
 static inline int kref_put(struct kref *kref, void (*release)(struct kref *kref))
 {
@@ -73,20 +68,42 @@ static inline int kref_put(struct kref *kref, void (*release)(struct kref *kref)
 	return 0;
 }
 
+/**
+ * kref_put_mutex - Decrement refcount for object
+ * @kref: Object
+ * @release: Pointer to the function that will clean up the object when the
+ *	     last reference to the object is released.
+ * @mutex: Mutex which protects the release function.
+ *
+ * This variant of kref_lock() calls the @release function with the @mutex
+ * held.  The @release function will release the mutex.
+ */
 static inline int kref_put_mutex(struct kref *kref,
 				 void (*release)(struct kref *kref),
-				 struct mutex *lock)
+				 struct mutex *mutex)
+	__cond_acquires(true, mutex)
 {
-	if (refcount_dec_and_mutex_lock(&kref->refcount, lock)) {
+	if (refcount_dec_and_mutex_lock(&kref->refcount, mutex)) {
 		release(kref);
 		return 1;
 	}
 	return 0;
 }
 
+/**
+ * kref_put_lock - Decrement refcount for object
+ * @kref: Object
+ * @release: Pointer to the function that will clean up the object when the
+ *	     last reference to the object is released.
+ * @lock: Spinlock which protects the release function.
+ *
+ * This variant of kref_lock() calls the @release function with the @lock
+ * held.  The @release function will release the lock.
+ */
 static inline int kref_put_lock(struct kref *kref,
 				void (*release)(struct kref *kref),
 				spinlock_t *lock)
+	__cond_acquires(true, lock)
 {
 	if (refcount_dec_and_lock(&kref->refcount, lock)) {
 		release(kref);
@@ -99,8 +116,6 @@ static inline int kref_put_lock(struct kref *kref,
  * kref_get_unless_zero - Increment refcount for object unless it is zero.
  * @kref: object.
  *
- * Return non-zero if the increment succeeded. Otherwise return 0.
- *
  * This function is intended to simplify locking around refcounting for
  * objects that can be looked up from a lookup structure, and which are
  * removed from that lookup structure in the object destructor.
@@ -110,6 +125,8 @@ static inline int kref_put_lock(struct kref *kref,
  * With a lookup followed by a kref_get_unless_zero *with return value check*
  * locking in the kref_put path can be deferred to the actual removal from
  * the lookup structure and RCU lookups become trivial.
+ *
+ * Return: non-zero if the increment succeeded. Otherwise return 0.
  */
 static inline int __must_check kref_get_unless_zero(struct kref *kref)
 {

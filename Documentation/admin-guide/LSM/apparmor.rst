@@ -18,8 +18,11 @@ set ``CONFIG_SECURITY_APPARMOR=y``
 
 If AppArmor should be selected as the default security module then set::
 
-   CONFIG_DEFAULT_SECURITY="apparmor"
-   CONFIG_SECURITY_APPARMOR_BOOTPARAM_VALUE=1
+   CONFIG_DEFAULT_SECURITY_APPARMOR=y
+
+The CONFIG_LSM parameter manages the order and selection of LSMs.
+Specify apparmor as the first "major" module (e.g. AppArmor, SELinux, Smack)
+in the list.
 
 Build the kernel
 
@@ -44,8 +47,8 @@ Links
 
 Mailing List - apparmor@lists.ubuntu.com
 
-Wiki - http://apparmor.wiki.kernel.org/
+Wiki - http://wiki.apparmor.net
 
-User space tools - https://launchpad.net/apparmor
+User space tools - https://gitlab.com/apparmor
 
-Kernel module - git://git.kernel.org/pub/scm/linux/kernel/git/jj/apparmor-dev.git
+Kernel module - git://git.kernel.org/pub/scm/linux/kernel/git/jj/linux-apparmor

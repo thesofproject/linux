@@ -1,11 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015 Intel Corporation
  *
  * Driver for TXC PA12203001 Proximity and Ambient Light Sensor.
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  * To do: Interrupt support.
  */
 
@@ -187,17 +185,10 @@ static int pa12203001_set_power_state(struct pa12203001_data *data, bool on,
 		mutex_unlock(&data->lock);
 	}
 
-	if (on) {
-		ret = pm_runtime_get_sync(&data->client->dev);
-		if (ret < 0)
-			pm_runtime_put_noidle(&data->client->dev);
+	if (on)
+		return pm_runtime_resume_and_get(&data->client->dev);
 
-	} else {
-		pm_runtime_mark_last_busy(&data->client->dev);
-		ret = pm_runtime_put_autosuspend(&data->client->dev);
-	}
-
-	return ret;
+	return pm_runtime_put_autosuspend(&data->client->dev);
 
 err:
 	mutex_unlock(&data->lock);
@@ -342,8 +333,7 @@ out:
 	return ret;
 }
 
-static int pa12203001_probe(struct i2c_client *client,
-			    const struct i2c_device_id *id)
+static int pa12203001_probe(struct i2c_client *client)
 {
 	struct pa12203001_data *data;
 	struct iio_dev *indio_dev;
@@ -364,7 +354,6 @@ static int pa12203001_probe(struct i2c_client *client,
 
 	mutex_init(&data->lock);
 
-	indio_dev->dev.parent = &client->dev;
 	indio_dev->info = &pa12203001_info;
 	indio_dev->name = PA12203001_DRIVER_NAME;
 	indio_dev->channels = pa12203001_channels;
@@ -399,16 +388,20 @@ out_err:
 	return ret;
 }
 
-static int pa12203001_remove(struct i2c_client *client)
+static void pa12203001_remove(struct i2c_client *client)
 {
 	struct iio_dev *indio_dev = i2c_get_clientdata(client);
+	int ret;
 
 	iio_device_unregister(indio_dev);
 
 	pm_runtime_disable(&client->dev);
 	pm_runtime_set_suspended(&client->dev);
 
-	return pa12203001_power_chip(indio_dev, PA12203001_CHIP_DISABLE);
+	ret = pa12203001_power_chip(indio_dev, PA12203001_CHIP_DISABLE);
+	if (ret)
+		dev_warn(&client->dev, "Failed to power down (%pe)\n",
+			 ERR_PTR(ret));
 }
 
 #if defined(CONFIG_PM_SLEEP) || defined(CONFIG_PM)
@@ -457,15 +450,15 @@ static const struct dev_pm_ops pa12203001_pm_ops = {
 };
 
 static const struct acpi_device_id pa12203001_acpi_match[] = {
-	{ "TXCPA122", 0},
-	{}
+	{ "TXCPA122", 0 },
+	{ }
 };
 
 MODULE_DEVICE_TABLE(acpi, pa12203001_acpi_match);
 
 static const struct i2c_device_id pa12203001_id[] = {
-		{"txcpa122", 0},
-		{}
+		{ .name = "txcpa122" },
+		{ }
 };
 
 MODULE_DEVICE_TABLE(i2c, pa12203001_id);
@@ -474,7 +467,7 @@ static struct i2c_driver pa12203001_driver = {
 	.driver = {
 		.name = PA12203001_DRIVER_NAME,
 		.pm = &pa12203001_pm_ops,
-		.acpi_match_table = ACPI_PTR(pa12203001_acpi_match),
+		.acpi_match_table = pa12203001_acpi_match,
 	},
 	.probe = pa12203001_probe,
 	.remove = pa12203001_remove,

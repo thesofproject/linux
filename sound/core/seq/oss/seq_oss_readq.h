@@ -1,35 +1,22 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * OSS compatible sequencer driver
  * read fifo queue
  *
  * Copyright (C) 1998,99 Takashi Iwai <tiwai@suse.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #ifndef __SEQ_OSS_READQ_H
 #define __SEQ_OSS_READQ_H
 
 #include "seq_oss_device.h"
+#include "seq_oss_event.h"
 
 
 /*
  * definition of read queue
  */
 struct seq_oss_readq {
-	union evrec *q;
 	int qlen;
 	int maxlen;
 	int head, tail;
@@ -37,6 +24,7 @@ struct seq_oss_readq {
 	unsigned long input_time;
 	wait_queue_head_t midi_sleep;
 	spinlock_t lock;
+	union evrec q[] __counted_by(maxlen);
 };
 
 struct seq_oss_readq *snd_seq_oss_readq_new(struct seq_oss_devinfo *dp, int maxlen);

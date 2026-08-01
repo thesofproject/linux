@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * CIMaX SP2/SP2HF (Atmel T90FJR) CI driver
  *
@@ -9,16 +10,6 @@
  *  Copyright (C) 2009 NetUP Inc.
  *  Copyright (C) 2009 Igor M. Liplianin <liplianin@netup.ru>
  *  Copyright (C) 2009 Abylay Ospan <aospan@netup.ru>
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2 of the License, or
- *    (at your option) any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
  */
 
 #include "sp2_priv.h"
@@ -372,8 +363,7 @@ static int sp2_exit(struct i2c_client *client)
 	return 0;
 }
 
-static int sp2_probe(struct i2c_client *client,
-		const struct i2c_device_id *id)
+static int sp2_probe(struct i2c_client *client)
 {
 	struct sp2_config *cfg = client->dev.platform_data;
 	struct sp2 *s;
@@ -381,7 +371,7 @@ static int sp2_probe(struct i2c_client *client,
 
 	dev_dbg(&client->dev, "\n");
 
-	s = kzalloc(sizeof(*s), GFP_KERNEL);
+	s = kzalloc_obj(*s);
 	if (!s) {
 		ret = -ENOMEM;
 		goto err;
@@ -407,19 +397,18 @@ err:
 	return ret;
 }
 
-static int sp2_remove(struct i2c_client *client)
+static void sp2_remove(struct i2c_client *client)
 {
 	struct sp2 *s = i2c_get_clientdata(client);
 
 	dev_dbg(&client->dev, "\n");
 	sp2_exit(client);
 	kfree(s);
-	return 0;
 }
 
 static const struct i2c_device_id sp2_id[] = {
-	{"sp2", 0},
-	{}
+	{ .name = "sp2" },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, sp2_id);
 

@@ -1,22 +1,6 @@
-/* -*- mode: c; c-basic-offset: 8; -*-
- * vim: noexpandtab sw=8 ts=8 sts=0:
- *
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+/*
  * configfs.h - definitions for the device driver filesystem
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public
- * License along with this program; if not, write to the
- * Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 021110-1307, USA.
  *
  * Based on sysfs:
  * 	sysfs is Copyright (C) 2001, 2002, 2003 Patrick Mochel
@@ -27,7 +11,7 @@
  *
  * configfs Copyright (C) 2005 Oracle.  All rights reserved.
  *
- * Please read Documentation/filesystems/configfs/configfs.txt before using
+ * Please read Documentation/filesystems/configfs.rst before using
  * the configfs interface, ESPECIALLY the parts about reference counts and
  * item destructors.
  */
@@ -80,8 +64,8 @@ extern void config_item_put(struct config_item *);
 
 struct config_item_type {
 	struct module				*ct_owner;
-	struct configfs_item_operations		*ct_item_ops;
-	struct configfs_group_operations	*ct_group_ops;
+	const struct configfs_item_operations	*ct_item_ops;
+	const struct configfs_group_operations	*ct_group_ops;
 	struct configfs_attribute		**ct_attrs;
 	struct configfs_bin_attribute		**ct_bin_attrs;
 };
@@ -136,14 +120,18 @@ struct configfs_attribute {
 	ssize_t (*store)(struct config_item *, const char *, size_t);
 };
 
-#define CONFIGFS_ATTR(_pfx, _name)			\
+#define CONFIGFS_ATTR_PERM(_pfx, _name, _perm)		\
 static struct configfs_attribute _pfx##attr_##_name = {	\
 	.ca_name	= __stringify(_name),		\
-	.ca_mode	= S_IRUGO | S_IWUSR,		\
+	.ca_mode	= _perm,			\
 	.ca_owner	= THIS_MODULE,			\
 	.show		= _pfx##_name##_show,		\
 	.store		= _pfx##_name##_store,		\
 }
+
+#define CONFIGFS_ATTR(_pfx, _name) CONFIGFS_ATTR_PERM(	\
+		_pfx, _name, S_IRUGO | S_IWUSR		\
+)
 
 #define CONFIGFS_ATTR_RO(_pfx, _name)			\
 static struct configfs_attribute _pfx##attr_##_name = {	\
@@ -220,8 +208,6 @@ static struct configfs_bin_attribute _pfx##attr_##_name = {	\
  * group children.  default_groups may coexist alongsize make_group() or
  * make_item(), but if the group wishes to have only default_groups
  * children (disallowing mkdir(2)), it need not provide either function.
- * If the group has commit(), it supports pending and committed (active)
- * items.
  */
 struct configfs_item_operations {
 	void (*release)(struct config_item *);
@@ -232,9 +218,11 @@ struct configfs_item_operations {
 struct configfs_group_operations {
 	struct config_item *(*make_item)(struct config_group *group, const char *name);
 	struct config_group *(*make_group)(struct config_group *group, const char *name);
-	int (*commit_item)(struct config_item *item);
 	void (*disconnect_notify)(struct config_group *group, struct config_item *item);
 	void (*drop_item)(struct config_group *group, struct config_item *item);
+	bool (*is_visible)(struct config_item *item, struct configfs_attribute *attr, int n);
+	bool (*is_bin_visible)(struct config_item *item, struct configfs_bin_attribute *attr,
+			       int n);
 };
 
 struct configfs_subsystem {

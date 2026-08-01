@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <net/ip.h>
+#include <net/ip6_checksum.h>
 #include <net/udp.h>
-#include <net/udplite.h>
 #include <asm/checksum.h>
 
 #ifndef _HAVE_ARCH_IPV6_CSUM
@@ -61,37 +61,6 @@ __sum16 csum_ipv6_magic(const struct in6_addr *saddr,
 }
 EXPORT_SYMBOL(csum_ipv6_magic);
 #endif
-
-int udp6_csum_init(struct sk_buff *skb, struct udphdr *uh, int proto)
-{
-	int err;
-
-	UDP_SKB_CB(skb)->partial_cov = 0;
-	UDP_SKB_CB(skb)->cscov = skb->len;
-
-	if (proto == IPPROTO_UDPLITE) {
-		err = udplite_checksum_init(skb, uh);
-		if (err)
-			return err;
-
-		if (UDP_SKB_CB(skb)->partial_cov) {
-			skb->csum = ip6_compute_pseudo(skb, proto);
-			return 0;
-		}
-	}
-
-	/* To support RFC 6936 (allow zero checksum in UDP/IPV6 for tunnels)
-	 * we accept a checksum of zero here. When we find the socket
-	 * for the UDP packet we'll check if that socket allows zero checksum
-	 * for IPv6 (set by socket option).
-	 *
-	 * Note, we are only interested in != 0 or == 0, thus the
-	 * force to int.
-	 */
-	return (__force int)skb_checksum_init_zero_check(skb, proto, uh->check,
-							 ip6_compute_pseudo);
-}
-EXPORT_SYMBOL(udp6_csum_init);
 
 /* Function to set UDP checksum for an IPv6 UDP packet. This is intended
  * for the simple case like when setting the checksum for a UDP tunnel.

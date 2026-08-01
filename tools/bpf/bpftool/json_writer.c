@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: (GPL-2.0-or-later OR BSD-2-Clause)
 /*
  * Simple streaming JSON writer
  *
  * This takes care of the annoying bits of JSON syntax like the commas
  * after elements
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  *
  * Authors:	Stephen Hemminger <stephen@networkplumber.org>
  */
@@ -79,13 +75,10 @@ static void jsonw_puts(json_writer_t *self, const char *str)
 			fputs("\\b", self->out);
 			break;
 		case '\\':
-			fputs("\\n", self->out);
+			fputs("\\\\", self->out);
 			break;
 		case '"':
 			fputs("\\\"", self->out);
-			break;
-		case '\'':
-			fputs("\\\'", self->out);
 			break;
 		default:
 			putc(*str, self->out);
@@ -121,6 +114,12 @@ void jsonw_destroy(json_writer_t **self_p)
 void jsonw_pretty(json_writer_t *self, bool on)
 {
 	self->pretty = on;
+}
+
+void jsonw_reset(json_writer_t *self)
+{
+	assert(self->depth == 0);
+	self->sep = '\0';
 }
 
 /* Basic blocks */

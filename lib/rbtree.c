@@ -1,22 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
   Red Black Trees
   (C) 1999  Andrea Arcangeli <andrea@suse.de>
   (C) 2002  David Woodhouse <dwmw2@infradead.org>
   (C) 2012  Michel Lespinasse <walken@google.com>
 
-  This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 2 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program; if not, write to the Free Software
-  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
   linux/lib/rbtree.c
 */
@@ -25,7 +13,7 @@
 #include <linux/export.h>
 
 /*
- * red-black trees properties:  http://en.wikipedia.org/wiki/Rbtree
+ * red-black trees properties:  https://en.wikipedia.org/wiki/Rbtree
  *
  *  1) A node is either red or black
  *  2) The root is black
@@ -70,7 +58,7 @@
 
 static inline void rb_set_black(struct rb_node *rb)
 {
-	rb->__rb_parent_color |= RB_BLACK;
+	rb->__rb_parent_color += RB_BLACK;
 }
 
 static inline struct rb_node *rb_red_parent(struct rb_node *red)
@@ -95,13 +83,9 @@ __rb_rotate_set_parents(struct rb_node *old, struct rb_node *new,
 
 static __always_inline void
 __rb_insert(struct rb_node *node, struct rb_root *root,
-	    bool newleft, struct rb_node **leftmost,
 	    void (*augment_rotate)(struct rb_node *old, struct rb_node *new))
 {
 	struct rb_node *parent = rb_red_parent(node), *gparent, *tmp;
-
-	if (newleft)
-		*leftmost = node;
 
 	while (true) {
 		/*
@@ -449,37 +433,35 @@ static const struct rb_augment_callbacks dummy_callbacks = {
 
 void rb_insert_color(struct rb_node *node, struct rb_root *root)
 {
-	__rb_insert(node, root, false, NULL, dummy_rotate);
+	__rb_insert(node, root, dummy_rotate);
 }
 EXPORT_SYMBOL(rb_insert_color);
 
 void rb_erase(struct rb_node *node, struct rb_root *root)
 {
 	struct rb_node *rebalance;
-	rebalance = __rb_erase_augmented(node, root,
-					 NULL, &dummy_callbacks);
+	rebalance = __rb_erase_augmented(node, root, &dummy_callbacks);
 	if (rebalance)
 		____rb_erase_color(rebalance, root, dummy_rotate);
 }
 EXPORT_SYMBOL(rb_erase);
 
-void rb_insert_color_cached(struct rb_node *node,
-			    struct rb_root_cached *root, bool leftmost)
+bool rb_erase_linked(struct rb_node_linked *node, struct rb_root_linked *root)
 {
-	__rb_insert(node, &root->rb_root, leftmost,
-		    &root->rb_leftmost, dummy_rotate);
-}
-EXPORT_SYMBOL(rb_insert_color_cached);
+	if (node->prev)
+		node->prev->next = node->next;
+	else
+		root->rb_leftmost = node->next;
 
-void rb_erase_cached(struct rb_node *node, struct rb_root_cached *root)
-{
-	struct rb_node *rebalance;
-	rebalance = __rb_erase_augmented(node, &root->rb_root,
-					 &root->rb_leftmost, &dummy_callbacks);
-	if (rebalance)
-		____rb_erase_color(rebalance, &root->rb_root, dummy_rotate);
+	if (node->next)
+		node->next->prev = node->prev;
+
+	rb_erase(&node->node, &root->rb_root);
+	RB_CLEAR_LINKED_NODE(node);
+
+	return !!root->rb_leftmost;
 }
-EXPORT_SYMBOL(rb_erase_cached);
+EXPORT_SYMBOL_GPL(rb_erase_linked);
 
 /*
  * Augmented rbtree manipulation functions.
@@ -489,41 +471,11 @@ EXPORT_SYMBOL(rb_erase_cached);
  */
 
 void __rb_insert_augmented(struct rb_node *node, struct rb_root *root,
-			   bool newleft, struct rb_node **leftmost,
 	void (*augment_rotate)(struct rb_node *old, struct rb_node *new))
 {
-	__rb_insert(node, root, newleft, leftmost, augment_rotate);
+	__rb_insert(node, root, augment_rotate);
 }
 EXPORT_SYMBOL(__rb_insert_augmented);
-
-/*
- * This function returns the first node (in sort order) of the tree.
- */
-struct rb_node *rb_first(const struct rb_root *root)
-{
-	struct rb_node	*n;
-
-	n = root->rb_node;
-	if (!n)
-		return NULL;
-	while (n->rb_left)
-		n = n->rb_left;
-	return n;
-}
-EXPORT_SYMBOL(rb_first);
-
-struct rb_node *rb_last(const struct rb_root *root)
-{
-	struct rb_node	*n;
-
-	n = root->rb_node;
-	if (!n)
-		return NULL;
-	while (n->rb_right)
-		n = n->rb_right;
-	return n;
-}
-EXPORT_SYMBOL(rb_last);
 
 struct rb_node *rb_next(const struct rb_node *node)
 {
@@ -539,7 +491,7 @@ struct rb_node *rb_next(const struct rb_node *node)
 	if (node->rb_right) {
 		node = node->rb_right;
 		while (node->rb_left)
-			node=node->rb_left;
+			node = node->rb_left;
 		return (struct rb_node *)node;
 	}
 
@@ -571,7 +523,7 @@ struct rb_node *rb_prev(const struct rb_node *node)
 	if (node->rb_left) {
 		node = node->rb_left;
 		while (node->rb_right)
-			node=node->rb_right;
+			node = node->rb_right;
 		return (struct rb_node *)node;
 	}
 
@@ -602,16 +554,6 @@ void rb_replace_node(struct rb_node *victim, struct rb_node *new,
 	__rb_change_child(victim, new, parent, root);
 }
 EXPORT_SYMBOL(rb_replace_node);
-
-void rb_replace_node_cached(struct rb_node *victim, struct rb_node *new,
-			    struct rb_root_cached *root)
-{
-	rb_replace_node(victim, new, &root->rb_root);
-
-	if (root->rb_leftmost == victim)
-		root->rb_leftmost = new;
-}
-EXPORT_SYMBOL(rb_replace_node_cached);
 
 void rb_replace_node_rcu(struct rb_node *victim, struct rb_node *new,
 			 struct rb_root *root)

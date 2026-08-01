@@ -1,13 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2013-2016, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 /* Qualcomm Technologies, Inc. EMAC Ethernet Controller MAC layer support
@@ -428,7 +420,7 @@ static void emac_mac_dma_config(struct emac_adapter *adpt)
 }
 
 /* set MAC address */
-static void emac_set_mac_address(struct emac_adapter *adpt, u8 *addr)
+static void emac_set_mac_address(struct emac_adapter *adpt, const u8 *addr)
 {
 	u32 sta;
 
@@ -683,10 +675,11 @@ static int emac_tx_q_desc_alloc(struct emac_adapter *adpt,
 				struct emac_tx_queue *tx_q)
 {
 	struct emac_ring_header *ring_header = &adpt->ring_header;
+	int node = dev_to_node(adpt->netdev->dev.parent);
 	size_t size;
 
 	size = sizeof(struct emac_buffer) * tx_q->tpd.count;
-	tx_q->tpd.tpbuff = kzalloc(size, GFP_KERNEL);
+	tx_q->tpd.tpbuff = kzalloc_node(size, GFP_KERNEL, node);
 	if (!tx_q->tpd.tpbuff)
 		return -ENOMEM;
 
@@ -723,11 +716,12 @@ static void emac_rx_q_bufs_free(struct emac_adapter *adpt)
 static int emac_rx_descs_alloc(struct emac_adapter *adpt)
 {
 	struct emac_ring_header *ring_header = &adpt->ring_header;
+	int node = dev_to_node(adpt->netdev->dev.parent);
 	struct emac_rx_queue *rx_q = &adpt->rx_q;
 	size_t size;
 
 	size = sizeof(struct emac_buffer) * rx_q->rfd.count;
-	rx_q->rfd.rfbuff = kzalloc(size, GFP_KERNEL);
+	rx_q->rfd.rfbuff = kzalloc_node(size, GFP_KERNEL, node);
 	if (!rx_q->rfd.rfbuff)
 		return -ENOMEM;
 
@@ -774,7 +768,7 @@ int emac_mac_rx_tx_rings_alloc_all(struct emac_adapter *adpt)
 			    8 + 2 * 8; /* 8 byte per one Tx and two Rx rings */
 
 	ring_header->used = 0;
-	ring_header->v_addr = dma_zalloc_coherent(dev, ring_header->size,
+	ring_header->v_addr = dma_alloc_coherent(dev, ring_header->size,
 						 &ring_header->dma_addr,
 						 GFP_KERNEL);
 	if (!ring_header->v_addr)
@@ -920,14 +914,13 @@ static void emac_mac_rx_descs_refill(struct emac_adapter *adpt,
 static void emac_adjust_link(struct net_device *netdev)
 {
 	struct emac_adapter *adpt = netdev_priv(netdev);
-	struct emac_sgmii *sgmii = &adpt->phy;
 	struct phy_device *phydev = netdev->phydev;
 
 	if (phydev->link) {
 		emac_mac_start(adpt);
-		sgmii->link_up(adpt);
+		emac_sgmii_link_change(adpt, true);
 	} else {
-		sgmii->link_down(adpt);
+		emac_sgmii_link_change(adpt, false);
 		emac_mac_stop(adpt);
 	}
 
@@ -1203,7 +1196,7 @@ void emac_mac_tx_process(struct emac_adapter *adpt, struct emac_tx_queue *tx_q)
 		if (tpbuf->skb) {
 			pkts_compl++;
 			bytes_compl += tpbuf->skb->len;
-			dev_kfree_skb_irq(tpbuf->skb);
+			dev_consume_skb_irq(tpbuf->skb);
 			tpbuf->skb = NULL;
 		}
 
@@ -1267,11 +1260,14 @@ static int emac_tso_csum(struct emac_adapter *adpt,
 		if (skb->protocol == htons(ETH_P_IP)) {
 			u32 pkt_len = ((unsigned char *)ip_hdr(skb) - skb->data)
 				       + ntohs(ip_hdr(skb)->tot_len);
-			if (skb->len > pkt_len)
-				pskb_trim(skb, pkt_len);
+			if (skb->len > pkt_len) {
+				ret = pskb_trim(skb, pkt_len);
+				if (unlikely(ret))
+					return ret;
+			}
 		}
 
-		hdr_len = skb_transport_offset(skb) + tcp_hdrlen(skb);
+		hdr_len = skb_tcp_all_headers(skb);
 		if (unlikely(skb->len == hdr_len)) {
 			/* we only need to do csum */
 			netif_warn(adpt, tx_err, adpt->netdev,
@@ -1295,11 +1291,8 @@ static int emac_tso_csum(struct emac_adapter *adpt,
 			memset(tpd, 0, sizeof(*tpd));
 			memset(&extra_tpd, 0, sizeof(extra_tpd));
 
-			ipv6_hdr(skb)->payload_len = 0;
-			tcp_hdr(skb)->check =
-				~csum_ipv6_magic(&ipv6_hdr(skb)->saddr,
-						 &ipv6_hdr(skb)->daddr,
-						 0, IPPROTO_TCP, 0);
+			tcp_v6_gso_csum_prep(skb);
+
 			TPD_PKT_LEN_SET(&extra_tpd, skb->len);
 			TPD_LSO_SET(&extra_tpd, 1);
 			TPD_LSOV_SET(&extra_tpd, 1);
@@ -1349,7 +1342,7 @@ static void emac_tx_fill_tpd(struct emac_adapter *adpt,
 
 	/* if Large Segment Offload is (in TCP Segmentation Offload struct) */
 	if (TPD_LSO(tpd)) {
-		mapped_len = skb_transport_offset(skb) + tcp_hdrlen(skb);
+		mapped_len = skb_tcp_all_headers(skb);
 
 		tpbuf = GET_TPD_BUFFER(tx_q, tx_q->tpd.produce_idx);
 		tpbuf->length = mapped_len;
@@ -1392,15 +1385,13 @@ static void emac_tx_fill_tpd(struct emac_adapter *adpt,
 	}
 
 	for (i = 0; i < nr_frags; i++) {
-		struct skb_frag_struct *frag;
-
-		frag = &skb_shinfo(skb)->frags[i];
+		skb_frag_t *frag = &skb_shinfo(skb)->frags[i];
 
 		tpbuf = GET_TPD_BUFFER(tx_q, tx_q->tpd.produce_idx);
-		tpbuf->length = frag->size;
-		tpbuf->dma_addr = dma_map_page(adpt->netdev->dev.parent,
-					       frag->page.p, frag->page_offset,
-					       tpbuf->length, DMA_TO_DEVICE);
+		tpbuf->length = skb_frag_size(frag);
+		tpbuf->dma_addr = skb_frag_dma_map(adpt->netdev->dev.parent,
+						   frag, 0, tpbuf->length,
+						   DMA_TO_DEVICE);
 		ret = dma_mapping_error(adpt->netdev->dev.parent,
 					tpbuf->dma_addr);
 		if (ret)
@@ -1443,11 +1434,13 @@ error:
 }
 
 /* Transmit the packet using specified transmit queue */
-int emac_mac_tx_buf_send(struct emac_adapter *adpt, struct emac_tx_queue *tx_q,
-			 struct sk_buff *skb)
+netdev_tx_t emac_mac_tx_buf_send(struct emac_adapter *adpt,
+				 struct emac_tx_queue *tx_q,
+				 struct sk_buff *skb)
 {
 	struct emac_tpd tpd;
 	u32 prod_idx;
+	int len;
 
 	memset(&tpd, 0, sizeof(tpd));
 
@@ -1467,14 +1460,15 @@ int emac_mac_tx_buf_send(struct emac_adapter *adpt, struct emac_tx_queue *tx_q,
 	if (skb_network_offset(skb) != ETH_HLEN)
 		TPD_TYP_SET(&tpd, 1);
 
+	len = skb->len;
 	emac_tx_fill_tpd(adpt, tx_q, skb, &tpd);
 
-	netdev_sent_queue(adpt->netdev, skb->len);
+	netdev_sent_queue(adpt->netdev, len);
 
 	/* Make sure the are enough free descriptors to hold one
 	 * maximum-sized SKB.  We need one desc for each fragment,
 	 * one for the checksum (emac_tso_csum), one for TSO, and
-	 * and one for the SKB header.
+	 * one for the SKB header.
 	 */
 	if (emac_tpd_num_free_descs(tx_q) < (MAX_SKB_FRAGS + 3))
 		netif_stop_queue(adpt->netdev);

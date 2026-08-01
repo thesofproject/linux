@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  pata_sch.c - Intel SCH PATA controllers
  *
  *  Copyright (c) 2008 Alek Du <alek.du@intel.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License 2 as published
- *  by the Free Software Foundation.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
- *
  */
 
 /*
@@ -55,7 +42,7 @@ static void sch_set_dmamode(struct ata_port *ap, struct ata_device *adev);
 
 static const struct pci_device_id sch_pci_tbl[] = {
 	/* Intel SCH PATA Controller */
-	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_SCH_IDE), 0 },
+	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_SCH_IDE) },
 	{ }	/* terminate list */
 };
 
@@ -70,7 +57,7 @@ static struct pci_driver sch_pci_driver = {
 #endif
 };
 
-static struct scsi_host_template sch_sht = {
+static const struct scsi_host_template sch_sht = {
 	ATA_BMDMA_SHT(DRV_NAME),
 };
 

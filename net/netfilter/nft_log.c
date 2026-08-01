@@ -1,20 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2008-2009 Patrick McHardy <kaber@trash.net>
  * Copyright (c) 2012-2014 Pablo Neira Ayuso <pablo@netfilter.org>
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  * Development of this code funded by Astaro AG (http://www.astaro.com/)
  */
 
+#include <linux/audit.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/netlink.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter/nf_tables.h>
+#include <net/ipv6.h>
+#include <net/ip.h>
 #include <net/netfilter/nf_tables.h>
 #include <net/netfilter/nf_log.h>
 #include <linux/netdevice.h>
@@ -26,11 +26,36 @@ struct nft_log {
 	char			*prefix;
 };
 
+static void nft_log_eval_audit(const struct nft_pktinfo *pkt)
+{
+	struct sk_buff *skb = pkt->skb;
+	struct audit_buffer *ab;
+
+	if (!audit_enabled)
+		return;
+
+	ab = audit_log_start(NULL, GFP_ATOMIC, AUDIT_NETFILTER_PKT);
+	if (!ab)
+		return;
+
+	audit_log_format(ab, "mark=%#x", skb->mark);
+
+	audit_log_nf_skb(ab, skb, nft_pf(pkt));
+
+	audit_log_end(ab);
+}
+
 static void nft_log_eval(const struct nft_expr *expr,
 			 struct nft_regs *regs,
 			 const struct nft_pktinfo *pkt)
 {
 	const struct nft_log *priv = nft_expr_priv(expr);
+
+	if (priv->loginfo.type == NF_LOG_TYPE_LOG &&
+	    priv->loginfo.u.log.level == NFT_LOGLEVEL_AUDIT) {
+		nft_log_eval_audit(pkt);
+		return;
+	}
 
 	nf_log_packet(nft_net(pkt), nft_pf(pkt), nft_hook(pkt), pkt->skb,
 		      nft_in(pkt), nft_out(pkt), &priv->loginfo, "%s",
@@ -44,8 +69,22 @@ static const struct nla_policy nft_log_policy[NFTA_LOG_MAX + 1] = {
 	[NFTA_LOG_SNAPLEN]	= { .type = NLA_U32 },
 	[NFTA_LOG_QTHRESHOLD]	= { .type = NLA_U16 },
 	[NFTA_LOG_LEVEL]	= { .type = NLA_U32 },
-	[NFTA_LOG_FLAGS]	= { .type = NLA_U32 },
+	[NFTA_LOG_FLAGS]	= NLA_POLICY_MASK(NLA_BE32, NF_LOG_MASK),
 };
+
+static int nft_log_modprobe(struct net *net, enum nf_log_type t)
+{
+	switch (t) {
+	case NF_LOG_TYPE_LOG:
+		return nft_request_module(net, "%s", "nf_log_syslog");
+	case NF_LOG_TYPE_ULOG:
+		return nft_request_module(net, "%s", "nfnetlink_log");
+	case NF_LOG_TYPE_MAX:
+		break;
+	}
+
+	return -ENOENT;
+}
 
 static int nft_log_init(const struct nft_ctx *ctx,
 			const struct nft_expr *expr,
@@ -68,10 +107,10 @@ static int nft_log_init(const struct nft_ctx *ctx,
 
 	nla = tb[NFTA_LOG_PREFIX];
 	if (nla != NULL) {
-		priv->prefix = kmalloc(nla_len(nla) + 1, GFP_KERNEL);
+		priv->prefix = kmalloc(nla_len(nla) + 1, GFP_KERNEL_ACCOUNT);
 		if (priv->prefix == NULL)
 			return -ENOMEM;
-		nla_strlcpy(priv->prefix, nla, nla_len(nla) + 1);
+		nla_strscpy(priv->prefix, nla, nla_len(nla) + 1);
 	} else {
 		priv->prefix = (char *)nft_log_null_prefix;
 	}
@@ -82,9 +121,9 @@ static int nft_log_init(const struct nft_ctx *ctx,
 			li->u.log.level =
 				ntohl(nla_get_be32(tb[NFTA_LOG_LEVEL]));
 		} else {
-			li->u.log.level = LOGLEVEL_WARNING;
+			li->u.log.level = NFT_LOGLEVEL_WARNING;
 		}
-		if (li->u.log.level > LOGLEVEL_DEBUG) {
+		if (li->u.log.level > NFT_LOGLEVEL_AUDIT) {
 			err = -EINVAL;
 			goto err1;
 		}
@@ -112,9 +151,16 @@ static int nft_log_init(const struct nft_ctx *ctx,
 		break;
 	}
 
+	if (li->u.log.level == NFT_LOGLEVEL_AUDIT)
+		return 0;
+
 	err = nf_logger_find_get(ctx->family, li->type);
-	if (err < 0)
+	if (err < 0) {
+		if (nft_log_modprobe(ctx->net, li->type) == -EAGAIN)
+			err = -EAGAIN;
+
 		goto err1;
+	}
 
 	return 0;
 
@@ -133,10 +179,14 @@ static void nft_log_destroy(const struct nft_ctx *ctx,
 	if (priv->prefix != nft_log_null_prefix)
 		kfree(priv->prefix);
 
+	if (li->u.log.level == NFT_LOGLEVEL_AUDIT)
+		return;
+
 	nf_logger_put(ctx->family, li->type);
 }
 
-static int nft_log_dump(struct sk_buff *skb, const struct nft_expr *expr)
+static int nft_log_dump(struct sk_buff *skb,
+			const struct nft_expr *expr, bool reset)
 {
 	const struct nft_log *priv = nft_expr_priv(expr);
 	const struct nf_loginfo *li = &priv->loginfo;
@@ -211,3 +261,4 @@ module_exit(nft_log_module_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Patrick McHardy <kaber@trash.net>");
 MODULE_ALIAS_NFT_EXPR("log");
+MODULE_DESCRIPTION("Netfilter nf_tables log module");

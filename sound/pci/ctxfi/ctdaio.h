@@ -1,9 +1,6 @@
-/**
+/* SPDX-License-Identifier: GPL-2.0-only */
+/*
  * Copyright (C) 2008, Creative Technology Ltd. All Rights Reserved.
- *
- * This source file is released under GPL v2 license (no other versions).
- * See the COPYING file included in the main directory of this source
- * distribution for the license terms and conditions.
  *
  * @File	ctdaio.h
  *
@@ -13,7 +10,6 @@
  *
  * @Author	Liu Chun
  * @Date 	May 23 2008
- *
  */
 
 #ifndef CTDAIO_H
@@ -35,7 +31,8 @@ enum DAIOTYP {
 	LINEIM,
 	SPDIFIO,	/* S/PDIF In (Flexijack/Optical) on the card */
 	MIC,		/* Dedicated mic on Titanium HD */
-	SPDIFI1,	/* S/PDIF In on internal Drive Bay */
+	RCA,		/* Dedicated RCA on SE-300PCIE */
+	SPDIFI_BAY,	/* S/PDIF In on internal drive bay */
 	NUM_DAIOTYP
 };
 
@@ -47,6 +44,7 @@ struct daio {
 	struct rsc rscl;	/* Basic resource info for left TX/RX */
 	struct rsc rscr;	/* Basic resource info for right TX/RX */
 	enum DAIOTYP type;
+	unsigned char output;
 };
 
 struct dao {
@@ -95,6 +93,7 @@ struct daio_desc {
 	unsigned int type:4;
 	unsigned int msr:4;
 	unsigned int passthru:1;
+	unsigned int output:1;
 };
 
 struct daio_mgr {
@@ -119,7 +118,7 @@ struct daio_mgr {
 };
 
 /* Constructor and destructor of daio resource manager */
-int daio_mgr_create(struct hw *hw, struct daio_mgr **rdaio_mgr);
-int daio_mgr_destroy(struct daio_mgr *daio_mgr);
+int daio_mgr_create(struct hw *hw, void **ptr);
+int daio_mgr_destroy(void *ptr);
 
 #endif /* CTDAIO_H */

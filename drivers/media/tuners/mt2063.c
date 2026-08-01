@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for mt2063 Micronas tuner
  *
@@ -7,16 +8,6 @@
  *		Henry Wang <Henry.wang@AzureWave.com>
  * Made publicly available by Terratec, at:
  *	http://linux.terratec.de/files/TERRATEC_H7/20110323_TERRATEC_H7_Linux.tar.gz
- * The original driver's license is GPL, as declared with MODULE_LICENSE()
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation under version 2 of the License.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/init.h>
@@ -1392,7 +1383,7 @@ static u32 MT2063_Round_fLO(u32 f_LO, u32 f_LO_Step, u32 f_ref)
 }
 
 /**
- * fLO_FractionalTerm() - Calculates the portion contributed by FracN / denom.
+ * MT2063_fLO_FractionalTerm - Calculates the portion contributed by FracN / denom.
  *                        This function preserves maximum precision without
  *                        risk of overflow.  It accurately calculates
  *                        f_ref * num / denom to within 1 HZ with fixed math.
@@ -1420,7 +1411,7 @@ static u32 MT2063_fLO_FractionalTerm(u32 f_ref, u32 num, u32 denom)
 }
 
 /*
- * CalcLO1Mult()- Calculates Integer divider value and the numerator
+ * MT2063_CalcLO1Mult - Calculates Integer divider value and the numerator
  *                value for a FracN PLL.
  *
  *                This function assumes that the f_LO and f_Ref are
@@ -1453,7 +1444,7 @@ static u32 MT2063_CalcLO1Mult(u32 *Div,
 }
 
 /**
- * CalcLO2Mult() - Calculates Integer divider value and the numerator
+ * MT2063_CalcLO2Mult - Calculates Integer divider value and the numerator
  *                 value for a FracN PLL.
  *
  *                  This function assumes that the f_LO and f_Ref are
@@ -1485,7 +1476,7 @@ static u32 MT2063_CalcLO2Mult(u32 *Div,
 }
 
 /*
- * FindClearTuneFilter() - Calculate the corrrect ClearTune filter to be
+ * FindClearTuneFilter() - Calculate the correct ClearTune filter to be
  *			   used for a given input frequency.
  *
  * @state:	ptr to tuner data structure
@@ -1858,7 +1849,6 @@ static int mt2063_init(struct dvb_frontend *fe)
 
 	default:
 		return -ENODEV;
-		break;
 	}
 
 	while (status >= 0 && *def) {
@@ -2200,10 +2190,9 @@ static int mt2063_get_bandwidth(struct dvb_frontend *fe, u32 *bw)
 static const struct dvb_tuner_ops mt2063_ops = {
 	.info = {
 		 .name = "MT2063 Silicon Tuner",
-		 .frequency_min = 45000000,
-		 .frequency_max = 865000000,
-		 .frequency_step = 0,
-		 },
+		 .frequency_min_hz  =  45 * MHz,
+		 .frequency_max_hz  = 865 * MHz,
+	 },
 
 	.init = mt2063_init,
 	.sleep = MT2063_Sleep,
@@ -2223,7 +2212,7 @@ struct dvb_frontend *mt2063_attach(struct dvb_frontend *fe,
 
 	dprintk(2, "\n");
 
-	state = kzalloc(sizeof(struct mt2063_state), GFP_KERNEL);
+	state = kzalloc_obj(struct mt2063_state);
 	if (!state)
 		return NULL;
 

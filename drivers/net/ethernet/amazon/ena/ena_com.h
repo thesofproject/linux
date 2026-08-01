@@ -1,33 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB */
 /*
- * Copyright 2015 Amazon.com, Inc. or its affiliates.
- *
- * This software is available to you under a choice of one of two
- * licenses.  You may choose to be licensed under the terms of the GNU
- * General Public License (GPL) Version 2, available from the file
- * COPYING in the main directory of this source tree, or the
- * BSD license below:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      - Redistributions of source code must retain the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer.
- *
- *      - Redistributions in binary form must reproduce the above
- *        copyright notice, this list of conditions and the following
- *        disclaimer in the documentation and/or other materials
- *        provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright 2015-2020 Amazon.com, Inc. or its affiliates. All rights reserved.
  */
 
 #ifndef ENA_COM
@@ -37,11 +10,14 @@
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/gfp.h>
+#include <linux/io.h>
+#include <linux/prefetch.h>
 #include <linux/sched.h>
 #include <linux/sizes.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
 #include <linux/wait.h>
+#include <linux/netdevice.h>
 
 #include "ena_common_defs.h"
 #include "ena_admin_defs.h"
@@ -51,9 +27,9 @@
 #undef pr_fmt
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#define ENA_MAX_NUM_IO_QUEUES		128U
+#define ENA_MAX_NUM_IO_QUEUES 128U
 /* We need to queues for each IO (on for Tx and one for Rx) */
-#define ENA_TOTAL_NUM_QUEUES		(2 * (ENA_MAX_NUM_IO_QUEUES))
+#define ENA_TOTAL_NUM_QUEUES (2 * (ENA_MAX_NUM_IO_QUEUES))
 
 #define ENA_MAX_HANDLERS 256
 
@@ -66,52 +42,28 @@
 #define ADMIN_CQ_SIZE(depth)	((depth) * sizeof(struct ena_admin_acq_entry))
 #define ADMIN_AENQ_SIZE(depth)	((depth) * sizeof(struct ena_admin_aenq_entry))
 
+#define ENA_CUSTOMER_METRICS_BUFFER_SIZE 512
+
 /*****************************************************************************/
 /*****************************************************************************/
 /* ENA adaptive interrupt moderation settings */
 
-#define ENA_INTR_LOWEST_USECS           (0)
-#define ENA_INTR_LOWEST_PKTS            (3)
-#define ENA_INTR_LOWEST_BYTES           (2 * 1524)
+#define ENA_INTR_INITIAL_TX_INTERVAL_USECS 64
+#define ENA_INTR_INITIAL_RX_INTERVAL_USECS 20
+#define ENA_DEFAULT_INTR_DELAY_RESOLUTION 1
 
-#define ENA_INTR_LOW_USECS              (32)
-#define ENA_INTR_LOW_PKTS               (12)
-#define ENA_INTR_LOW_BYTES              (16 * 1024)
+#define ENA_HASH_KEY_SIZE 40
 
-#define ENA_INTR_MID_USECS              (80)
-#define ENA_INTR_MID_PKTS               (48)
-#define ENA_INTR_MID_BYTES              (64 * 1024)
+#define ENA_HW_HINTS_NO_TIMEOUT	0xFFFF
 
-#define ENA_INTR_HIGH_USECS             (128)
-#define ENA_INTR_HIGH_PKTS              (96)
-#define ENA_INTR_HIGH_BYTES             (128 * 1024)
+#define ENA_FEATURE_MAX_QUEUE_EXT_VER 1
 
-#define ENA_INTR_HIGHEST_USECS          (192)
-#define ENA_INTR_HIGHEST_PKTS           (128)
-#define ENA_INTR_HIGHEST_BYTES          (192 * 1024)
-
-#define ENA_INTR_INITIAL_TX_INTERVAL_USECS		196
-#define ENA_INTR_INITIAL_RX_INTERVAL_USECS		4
-#define ENA_INTR_DELAY_OLD_VALUE_WEIGHT			6
-#define ENA_INTR_DELAY_NEW_VALUE_WEIGHT			4
-#define ENA_INTR_MODER_LEVEL_STRIDE			2
-#define ENA_INTR_BYTE_COUNT_NOT_SUPPORTED		0xFFFFFF
-
-#define ENA_HW_HINTS_NO_TIMEOUT				0xFFFF
-
-enum ena_intr_moder_level {
-	ENA_INTR_MODER_LOWEST = 0,
-	ENA_INTR_MODER_LOW,
-	ENA_INTR_MODER_MID,
-	ENA_INTR_MODER_HIGH,
-	ENA_INTR_MODER_HIGHEST,
-	ENA_INTR_MAX_NUM_OF_LEVELS,
-};
-
-struct ena_intr_moder_entry {
-	unsigned int intr_moder_interval;
-	unsigned int pkts_per_interval;
-	unsigned int bytes_per_interval;
+struct ena_llq_configurations {
+	enum ena_admin_llq_header_location llq_header_location;
+	enum ena_admin_llq_ring_entry_size llq_ring_entry_size;
+	enum ena_admin_llq_stride_ctrl  llq_stride_ctrl;
+	enum ena_admin_llq_num_descs_before_header llq_num_decs_before_header;
+	u16 llq_ring_entry_size_value;
 };
 
 enum queue_direction {
@@ -142,14 +94,22 @@ struct ena_com_tx_meta {
 	u16 l4_hdr_len; /* In words */
 };
 
+struct ena_com_llq_info {
+	u16 header_location_ctrl;
+	u16 desc_stride_ctrl;
+	u16 desc_list_entry_size_ctrl;
+	u16 desc_list_entry_size;
+	u16 descs_num_before_header;
+	u16 descs_per_entry;
+	u16 max_entries_in_tx_burst;
+	bool disable_meta_caching;
+};
+
 struct ena_com_io_cq {
 	struct ena_com_io_desc_addr cdesc_addr;
 
 	/* Interrupt unmask register */
 	u32 __iomem *unmask_reg;
-
-	/* The completion queue head doorbell register */
-	u32 __iomem *cq_head_db_reg;
 
 	/* numa configuration register (for TPH) */
 	u32 __iomem *numa_node_cfg_reg;
@@ -157,13 +117,13 @@ struct ena_com_io_cq {
 	/* The value to write to the above register to unmask
 	 * the interrupt of this queue
 	 */
-	u32 msix_vector;
+	u32 msix_vector ____cacheline_aligned;
 
 	enum queue_direction direction;
 
 	/* holds the number of cdesc of the current packet */
 	u16 cur_rx_pkt_cdesc_count;
-	/* save the firt cdesc idx of the current packet */
+	/* save the first cdesc idx of the current packet */
 	u16 cur_rx_pkt_cdesc_start_idx;
 
 	u16 q_depth;
@@ -173,23 +133,40 @@ struct ena_com_io_cq {
 	/* Device queue index */
 	u16 idx;
 	u16 head;
-	u16 last_head_update;
 	u8 phase;
 	u8 cdesc_entry_size_in_bytes;
 
 } ____cacheline_aligned;
 
+struct ena_com_io_bounce_buffer_control {
+	u8 *base_buffer;
+	u16 next_to_use;
+	u16 buffer_size;
+	u16 buffers_num;  /* Must be a power of 2 */
+};
+
+/* This struct is to keep tracking the current location of the next llq entry */
+struct ena_com_llq_pkt_ctrl {
+	u8 *curr_bounce_buf;
+	u16 idx;
+	u16 descs_left_in_line;
+};
+
 struct ena_com_io_sq {
 	struct ena_com_io_desc_addr desc_addr;
 
 	u32 __iomem *db_addr;
-	u8 __iomem *header_addr;
 
 	enum queue_direction direction;
 	enum ena_admin_placement_policy_type mem_queue_type;
 
+	bool disable_meta_caching;
+
 	u32 msix_vector;
 	struct ena_com_tx_meta cached_tx_meta;
+	struct ena_com_llq_info llq_info;
+	struct ena_com_llq_pkt_ctrl llq_buf_ctrl;
+	struct ena_com_io_bounce_buffer_control bounce_buf_ctrl;
 
 	u16 q_depth;
 	u16 qid;
@@ -197,10 +174,12 @@ struct ena_com_io_sq {
 	u16 idx;
 	u16 tail;
 	u16 next_to_comp;
+	u16 llq_last_copy_tail;
 	u32 tx_max_header_size;
 	u8 phase;
 	u8 desc_entry_size;
 	u8 dma_addr_bits;
+	u16 entries_in_tx_burst_left;
 } ____cacheline_aligned;
 
 struct ena_com_admin_cq {
@@ -224,15 +203,24 @@ struct ena_com_admin_sq {
 };
 
 struct ena_com_stats_admin {
-	u32 aborted_cmd;
-	u32 submitted_cmd;
-	u32 completed_cmd;
-	u32 out_of_space;
-	u32 no_completion;
+	u64 aborted_cmd;
+	u64 submitted_cmd;
+	u64 completed_cmd;
+	u64 out_of_space;
+	u64 no_completion;
+};
+
+struct ena_com_stats_phc {
+	u64 phc_cnt;
+	u64 phc_exp;
+	u64 phc_skp;
+	u64 phc_err_dv;
+	u64 phc_err_ts;
 };
 
 struct ena_com_admin_queue {
 	void *q_dmadev;
+	struct ena_com_dev *ena_dev;
 	spinlock_t q_lock; /* spinlock for the admin queue */
 
 	struct ena_comp_ctx *comp_ctx;
@@ -278,6 +266,47 @@ struct ena_com_mmio_read {
 	spinlock_t lock;
 };
 
+/* PTP hardware clock (PHC) MMIO read data info */
+struct ena_com_phc_info {
+	/* Internal PHC statistics */
+	struct ena_com_stats_phc stats;
+
+	/* PHC shared memory - virtual address */
+	struct ena_admin_phc_resp *virt_addr;
+
+	/* System time of last PHC request */
+	ktime_t system_time;
+
+	/* Spin lock to ensure a single outstanding PHC read */
+	spinlock_t lock;
+
+	/* PHC doorbell address as an offset to PCIe MMIO REG BAR */
+	u32 doorbell_offset;
+
+	/* Shared memory read expire timeout (usec)
+	 * Max time for valid PHC retrieval, passing this threshold will fail
+	 * the get time request and block new PHC requests for block_timeout_usec
+	 * in order to prevent floods on busy device
+	 */
+	u32 expire_timeout_usec;
+
+	/* Shared memory read abort timeout (usec)
+	 * PHC requests block period, blocking starts once PHC request expired
+	 * in order to prevent floods on busy device,
+	 * any PHC requests during block period will be skipped
+	 */
+	u32 block_timeout_usec;
+
+	/* PHC shared memory - physical address */
+	dma_addr_t phys_addr;
+
+	/* Request id sent to the device */
+	u16 req_id;
+
+	/* True if PHC is active in the device */
+	bool active;
+};
+
 struct ena_rss {
 	/* Indirect table */
 	u16 *host_rss_ind_tbl;
@@ -295,6 +324,16 @@ struct ena_rss {
 	struct ena_admin_feature_rss_hash_control *hash_ctrl;
 	dma_addr_t hash_ctrl_dma_addr;
 
+};
+
+struct ena_customer_metrics {
+	/* in correlation with ENA_ADMIN_CUSTOMER_METRICS_SUPPORT_MASK
+	 * and ena_admin_customer_metrics_id
+	 */
+	u64 supported_metrics;
+	dma_addr_t buffer_dma_addr;
+	void *buffer_virt_addr;
+	u32 buffer_len;
 };
 
 struct ena_host_attribute {
@@ -317,31 +356,48 @@ struct ena_com_dev {
 	u8 __iomem *reg_bar;
 	void __iomem *mem_bar;
 	void *dmadev;
+	struct net_device *net_device;
 
 	enum ena_admin_placement_policy_type tx_mem_queue_type;
 	u32 tx_max_header_size;
 	u16 stats_func; /* Selected function for extended statistic dump */
 	u16 stats_queue; /* Selected queue for extended statistic dump */
 
+	u32 ena_min_poll_delay_us;
+
 	struct ena_com_mmio_read mmio_read;
+	struct ena_com_phc_info phc;
 
 	struct ena_rss rss;
 	u32 supported_features;
+	u32 capabilities;
 	u32 dma_addr_bits;
 
 	struct ena_host_attribute host_attr;
 	bool adaptive_coalescing;
 	u16 intr_delay_resolution;
+
+	/* interrupt moderation intervals are in usec divided by
+	 * intr_delay_resolution, which is supplied by the device.
+	 */
 	u32 intr_moder_tx_interval;
+	u32 intr_moder_rx_interval;
+
 	struct ena_intr_moder_entry *intr_moder_tbl;
+
+	struct ena_com_llq_info llq_info;
+
+	struct ena_customer_metrics customer_metrics;
 };
 
 struct ena_com_dev_get_features_ctx {
 	struct ena_admin_queue_feature_desc max_queues;
+	struct ena_admin_queue_ext_feature_desc max_queue_ext;
 	struct ena_admin_device_attr_feature_desc dev_attr;
 	struct ena_admin_feature_aenq_desc aenq;
 	struct ena_admin_feature_offload_desc offload;
 	struct ena_admin_ena_hw_hints hw_hints;
+	struct ena_admin_feature_llq_desc llq;
 };
 
 struct ena_com_create_io_ctx {
@@ -376,7 +432,41 @@ struct ena_aenq_handlers {
  */
 int ena_com_mmio_reg_read_request_init(struct ena_com_dev *ena_dev);
 
-/* ena_com_set_mmio_read_mode - Enable/disable the mmio reg read mechanism
+/* ena_com_phc_init - Allocate and initialize PHC feature
+ * @ena_dev: ENA communication layer struct
+ * @note: This method assumes PHC is supported by the device
+ * @return - 0 on success, negative value on failure
+ */
+int ena_com_phc_init(struct ena_com_dev *ena_dev);
+
+/* ena_com_phc_supported - Return if PHC feature is supported by the device
+ * @ena_dev: ENA communication layer struct
+ * @note: This method must be called after getting supported features
+ * @return - supported or not
+ */
+bool ena_com_phc_supported(struct ena_com_dev *ena_dev);
+
+/* ena_com_phc_config - Configure PHC feature
+ * @ena_dev: ENA communication layer struct
+ * Configure PHC feature in driver and device
+ * @note: This method assumes PHC is supported by the device
+ * @return - 0 on success, negative value on failure
+ */
+int ena_com_phc_config(struct ena_com_dev *ena_dev);
+
+/* ena_com_phc_destroy - Destroy PHC feature
+ * @ena_dev: ENA communication layer struct
+ */
+void ena_com_phc_destroy(struct ena_com_dev *ena_dev);
+
+/* ena_com_phc_get_timestamp - Retrieve PHC timestamp
+ * @ena_dev: ENA communication layer struct
+ * @timestamp: Retrieved PHC timestamp
+ * @return - 0 on success, negative value on failure
+ */
+int ena_com_phc_get_timestamp(struct ena_com_dev *ena_dev, u64 *timestamp);
+
+/* ena_com_set_mmio_read_mode - Enable/disable the indirect mmio reg read mechanism
  * @ena_dev: ENA communication layer struct
  * @readless_supported: readless mode (enable/disable)
  */
@@ -397,8 +487,6 @@ void ena_com_mmio_reg_read_request_destroy(struct ena_com_dev *ena_dev);
 /* ena_com_admin_init - Init the admin and the async queues
  * @ena_dev: ENA communication layer struct
  * @aenq_handlers: Those handlers to be called upon event.
- * @init_spinlock: Indicate if this method should init the admin spinlock or
- * the spinlock was init before (for example, in a case of FLR).
  *
  * Initialize the admin submission and completion queues.
  * Initialize the asynchronous events notification queues.
@@ -406,8 +494,7 @@ void ena_com_mmio_reg_read_request_destroy(struct ena_com_dev *ena_dev);
  * @return - 0 on success, negative value on failure.
  */
 int ena_com_admin_init(struct ena_com_dev *ena_dev,
-		       struct ena_aenq_handlers *aenq_handlers,
-		       bool init_spinlock);
+		       struct ena_aenq_handlers *aenq_handlers);
 
 /* ena_com_admin_destroy - Destroy the admin and the async events queues.
  * @ena_dev: ENA communication layer struct
@@ -487,22 +574,10 @@ bool ena_com_get_admin_running_state(struct ena_com_dev *ena_dev);
  */
 void ena_com_set_admin_polling_mode(struct ena_com_dev *ena_dev, bool polling);
 
-/* ena_com_set_admin_polling_mode - Get the admin completion queue polling mode
- * @ena_dev: ENA communication layer struct
- *
- * Get the admin completion mode.
- * If polling mode is on, ena_com_execute_admin_command will perform a
- * polling on the admin completion queue for the commands completion,
- * otherwise it will wait on wait event.
- *
- * @return state
- */
-bool ena_com_get_ena_admin_polling_mode(struct ena_com_dev *ena_dev);
-
 /* ena_com_admin_q_comp_intr_handler - admin queue interrupt handler
  * @ena_dev: ENA communication layer struct
  *
- * This method go over the admin completion queue and wake up all the pending
+ * This method goes over the admin completion queue and wakes up all the pending
  * threads that wait on the commands wait event.
  *
  * @note: Should be called after MSI-X interrupt.
@@ -512,10 +587,10 @@ void ena_com_admin_q_comp_intr_handler(struct ena_com_dev *ena_dev);
 /* ena_com_aenq_intr_handler - AENQ interrupt handler
  * @ena_dev: ENA communication layer struct
  *
- * This method go over the async event notification queue and call the proper
+ * This method goes over the async event notification queue and calls the proper
  * aenq handler.
  */
-void ena_com_aenq_intr_handler(struct ena_com_dev *dev, void *data);
+void ena_com_aenq_intr_handler(struct ena_com_dev *ena_dev, void *data);
 
 /* ena_com_abort_admin_commands - Abort all the outstanding admin commands.
  * @ena_dev: ENA communication layer struct
@@ -529,14 +604,14 @@ void ena_com_abort_admin_commands(struct ena_com_dev *ena_dev);
 /* ena_com_wait_for_abort_completion - Wait for admin commands abort.
  * @ena_dev: ENA communication layer struct
  *
- * This method wait until all the outstanding admin commands will be completed.
+ * This method waits until all the outstanding admin commands are completed.
  */
 void ena_com_wait_for_abort_completion(struct ena_com_dev *ena_dev);
 
 /* ena_com_validate_version - Validate the device parameters
  * @ena_dev: ENA communication layer struct
  *
- * This method validate the device parameters are the same as the saved
+ * This method verifies the device parameters are the same as the saved
  * parameters in ena_dev.
  * This method is useful after device reset, to validate the device mac address
  * and the device offloads are the same as before the reset.
@@ -586,14 +661,32 @@ int ena_com_set_aenq_config(struct ena_com_dev *ena_dev, u32 groups_flag);
 int ena_com_get_dev_attr_feat(struct ena_com_dev *ena_dev,
 			      struct ena_com_dev_get_features_ctx *get_feat_ctx);
 
-/* ena_com_get_dev_basic_stats - Get device basic statistics
+/* ena_com_get_eni_stats - Get extended network interface statistics
  * @ena_dev: ENA communication layer struct
  * @stats: stats return value
  *
  * @return: 0 on Success and negative value otherwise.
  */
-int ena_com_get_dev_basic_stats(struct ena_com_dev *ena_dev,
-				struct ena_admin_basic_stats *stats);
+int ena_com_get_eni_stats(struct ena_com_dev *ena_dev,
+			  struct ena_admin_eni_stats *stats);
+
+/* ena_com_get_ena_srd_info - Get ENA SRD network interface statistics
+ * @ena_dev: ENA communication layer struct
+ * @info: ena srd stats and flags
+ *
+ * @return: 0 on Success and negative value otherwise.
+ */
+int ena_com_get_ena_srd_info(struct ena_com_dev *ena_dev,
+			     struct ena_admin_ena_srd_info *info);
+
+/* ena_com_get_customer_metrics - Get customer metrics for network interface
+ * @ena_dev: ENA communication layer struct
+ * @buffer: buffer for returned customer metrics
+ * @len: size of the buffer
+ *
+ * @return: 0 on Success and negative value otherwise.
+ */
+int ena_com_get_customer_metrics(struct ena_com_dev *ena_dev, char *buffer, u32 len);
 
 /* ena_com_set_dev_mtu - Configure the device mtu.
  * @ena_dev: ENA communication layer struct
@@ -601,16 +694,7 @@ int ena_com_get_dev_basic_stats(struct ena_com_dev *ena_dev,
  *
  * @return: 0 on Success and negative value otherwise.
  */
-int ena_com_set_dev_mtu(struct ena_com_dev *ena_dev, int mtu);
-
-/* ena_com_get_offload_settings - Retrieve the device offloads capabilities
- * @ena_dev: ENA communication layer struct
- * @offlad: offload return value
- *
- * @return: 0 on Success and negative value otherwise.
- */
-int ena_com_get_offload_settings(struct ena_com_dev *ena_dev,
-				 struct ena_admin_feature_offload_desc *offload);
+int ena_com_set_dev_mtu(struct ena_com_dev *ena_dev, u32 mtu);
 
 /* ena_com_rss_init - Init RSS
  * @ena_dev: ENA communication layer struct
@@ -630,6 +714,14 @@ int ena_com_rss_init(struct ena_com_dev *ena_dev, u16 log_size);
  * Free all the RSS/RFS resources.
  */
 void ena_com_rss_destroy(struct ena_com_dev *ena_dev);
+
+/* ena_com_get_current_hash_function - Get RSS hash function
+ * @ena_dev: ENA communication layer struct
+ *
+ * Return the current hash function.
+ * @return: 0 or one of the ena_admin_hash_functions values.
+ */
+int ena_com_get_current_hash_function(struct ena_com_dev *ena_dev);
 
 /* ena_com_fill_hash_function - Fill RSS hash function
  * @ena_dev: ENA communication layer struct
@@ -662,23 +754,32 @@ int ena_com_fill_hash_function(struct ena_com_dev *ena_dev,
  */
 int ena_com_set_hash_function(struct ena_com_dev *ena_dev);
 
-/* ena_com_get_hash_function - Retrieve the hash function and the hash key
- * from the device.
+/* ena_com_get_hash_function - Retrieve the hash function from the device.
  * @ena_dev: ENA communication layer struct
  * @func: hash function
- * @key: hash key
  *
- * Retrieve the hash function and the hash key from the device.
+ * Retrieve the hash function from the device.
  *
- * @note: If the caller called ena_com_fill_hash_function but didn't flash
+ * @note: If the caller called ena_com_fill_hash_function but didn't flush
  * it to the device, the new configuration will be lost.
  *
  * @return: 0 on Success and negative value otherwise.
  */
 int ena_com_get_hash_function(struct ena_com_dev *ena_dev,
-			      enum ena_admin_hash_functions *func,
-			      u8 *key);
+			      enum ena_admin_hash_functions *func);
 
+/* ena_com_get_hash_key - Retrieve the hash key
+ * @ena_dev: ENA communication layer struct
+ * @key: hash key
+ *
+ * Retrieve the hash key.
+ *
+ * @note: If the caller called ena_com_fill_hash_key but didn't flush
+ * it to the device, the new configuration will be lost.
+ *
+ * @return: 0 on Success and negative value otherwise.
+ */
+int ena_com_get_hash_key(struct ena_com_dev *ena_dev, u8 *key);
 /* ena_com_fill_hash_ctrl - Fill RSS hash control
  * @ena_dev: ENA communication layer struct.
  * @proto: The protocol to configure.
@@ -713,7 +814,7 @@ int ena_com_set_hash_ctrl(struct ena_com_dev *ena_dev);
  *
  * Retrieve the hash control from the device.
  *
- * @note, If the caller called ena_com_fill_hash_ctrl but didn't flash
+ * @note: If the caller called ena_com_fill_hash_ctrl but didn't flush
  * it to the device, the new configuration will be lost.
  *
  * @return: 0 on Success and negative value otherwise.
@@ -765,7 +866,7 @@ int ena_com_indirect_table_set(struct ena_com_dev *ena_dev);
  *
  * Retrieve the RSS indirection table from the device.
  *
- * @note: If the caller called ena_com_indirect_table_fill_entry but didn't flash
+ * @note: If the caller called ena_com_indirect_table_fill_entry but didn't flush
  * it to the device, the new configuration will be lost.
  *
  * @return: 0 on Success and negative value otherwise.
@@ -788,19 +889,33 @@ int ena_com_allocate_host_info(struct ena_com_dev *ena_dev);
 int ena_com_allocate_debug_area(struct ena_com_dev *ena_dev,
 				u32 debug_area_size);
 
+/* ena_com_allocate_customer_metrics_buffer - Allocate customer metrics resources.
+ * @ena_dev: ENA communication layer struct
+ *
+ * @return: 0 on Success and negative value otherwise.
+ */
+int ena_com_allocate_customer_metrics_buffer(struct ena_com_dev *ena_dev);
+
 /* ena_com_delete_debug_area - Free the debug area resources.
  * @ena_dev: ENA communication layer struct
  *
- * Free the allocate debug area.
+ * Free the allocated debug area.
  */
 void ena_com_delete_debug_area(struct ena_com_dev *ena_dev);
 
 /* ena_com_delete_host_info - Free the host info resources.
  * @ena_dev: ENA communication layer struct
  *
- * Free the allocate host info.
+ * Free the allocated host info.
  */
 void ena_com_delete_host_info(struct ena_com_dev *ena_dev);
+
+/* ena_com_delete_customer_metrics_buffer - Free the customer metrics resources.
+ * @ena_dev: ENA communication layer struct
+ *
+ * Free the allocated customer metrics area.
+ */
+void ena_com_delete_customer_metrics_buffer(struct ena_com_dev *ena_dev);
 
 /* ena_com_set_host_attributes - Update the device with the host
  * attributes (debug area and host info) base address.
@@ -839,9 +954,9 @@ int ena_com_destroy_io_cq(struct ena_com_dev *ena_dev,
  * @cmd_completion: command completion return value.
  * @cmd_comp_size: command completion size.
 
- * Submit an admin command and then wait until the device will return a
+ * Submit an admin command and then wait until the device returns a
  * completion.
- * The completion will be copyed into cmd_comp.
+ * The completion will be copied into cmd_comp.
  *
  * @return - 0 on success, negative value on failure.
  */
@@ -858,23 +973,12 @@ int ena_com_execute_admin_command(struct ena_com_admin_queue *admin_queue,
  */
 int ena_com_init_interrupt_moderation(struct ena_com_dev *ena_dev);
 
-/* ena_com_destroy_interrupt_moderation - Destroy interrupt moderation resources
- * @ena_dev: ENA communication layer struct
- */
-void ena_com_destroy_interrupt_moderation(struct ena_com_dev *ena_dev);
-
 /* ena_com_interrupt_moderation_supported - Return if interrupt moderation
  * capability is supported by the device.
  *
  * @return - supported or not.
  */
 bool ena_com_interrupt_moderation_supported(struct ena_com_dev *ena_dev);
-
-/* ena_com_config_default_interrupt_moderation_table - Restore the interrupt
- * moderation table back to the default parameters.
- * @ena_dev: ENA communication layer struct
- */
-void ena_com_config_default_interrupt_moderation_table(struct ena_com_dev *ena_dev);
 
 /* ena_com_update_nonadaptive_moderation_interval_tx - Update the
  * non-adaptive interval in Tx direction.
@@ -912,28 +1016,35 @@ unsigned int ena_com_get_nonadaptive_moderation_interval_tx(struct ena_com_dev *
  */
 unsigned int ena_com_get_nonadaptive_moderation_interval_rx(struct ena_com_dev *ena_dev);
 
-/* ena_com_init_intr_moderation_entry - Update a single entry in the interrupt
- * moderation table.
+/* ena_com_config_dev_mode - Configure the placement policy of the device.
  * @ena_dev: ENA communication layer struct
- * @level: Interrupt moderation table level
- * @entry: Entry value
- *
- * Update a single entry in the interrupt moderation table.
+ * @llq_features: LLQ feature descriptor, retrieve via
+ *		   ena_com_get_dev_attr_feat.
+ * @ena_llq_config: The default driver LLQ parameters configurations
  */
-void ena_com_init_intr_moderation_entry(struct ena_com_dev *ena_dev,
-					enum ena_intr_moder_level level,
-					struct ena_intr_moder_entry *entry);
+int ena_com_config_dev_mode(struct ena_com_dev *ena_dev,
+			    struct ena_admin_feature_llq_desc *llq_features,
+			    struct ena_llq_configurations *llq_default_config);
 
-/* ena_com_get_intr_moderation_entry - Init ena_intr_moder_entry.
- * @ena_dev: ENA communication layer struct
- * @level: Interrupt moderation table level
- * @entry: Entry to fill.
+/* ena_com_io_sq_to_ena_dev - Extract ena_com_dev using contained field io_sq.
+ * @io_sq: IO submit queue struct
  *
- * Initialize the entry according to the adaptive interrupt moderation table.
+ * @return - ena_com_dev struct extracted from io_sq
  */
-void ena_com_get_intr_moderation_entry(struct ena_com_dev *ena_dev,
-				       enum ena_intr_moder_level level,
-				       struct ena_intr_moder_entry *entry);
+static inline struct ena_com_dev *ena_com_io_sq_to_ena_dev(struct ena_com_io_sq *io_sq)
+{
+	return container_of(io_sq, struct ena_com_dev, io_sq_queues[io_sq->qid]);
+}
+
+/* ena_com_io_cq_to_ena_dev - Extract ena_com_dev using contained field io_cq.
+ * @io_sq: IO submit queue struct
+ *
+ * @return - ena_com_dev struct extracted from io_sq
+ */
+static inline struct ena_com_dev *ena_com_io_cq_to_ena_dev(struct ena_com_io_cq *io_cq)
+{
+	return container_of(io_cq, struct ena_com_dev, io_cq_queues[io_cq->qid]);
+}
 
 static inline bool ena_com_get_adaptive_moderation_enabled(struct ena_com_dev *ena_dev)
 {
@@ -950,80 +1061,45 @@ static inline void ena_com_disable_adaptive_moderation(struct ena_com_dev *ena_d
 	ena_dev->adaptive_coalescing = false;
 }
 
-/* ena_com_calculate_interrupt_delay - Calculate new interrupt delay
+/* ena_com_get_cap - query whether device supports a capability.
  * @ena_dev: ENA communication layer struct
- * @pkts: Number of packets since the last update
- * @bytes: Number of bytes received since the last update.
- * @smoothed_interval: Returned interval
- * @moder_tbl_idx: Current table level as input update new level as return
- * value.
+ * @cap_id: enum value representing the capability
+ *
+ * @return - true if capability is supported or false otherwise
  */
-static inline void ena_com_calculate_interrupt_delay(struct ena_com_dev *ena_dev,
-						     unsigned int pkts,
-						     unsigned int bytes,
-						     unsigned int *smoothed_interval,
-						     unsigned int *moder_tbl_idx)
+static inline bool ena_com_get_cap(struct ena_com_dev *ena_dev,
+				   enum ena_admin_aq_caps_id cap_id)
 {
-	enum ena_intr_moder_level curr_moder_idx, new_moder_idx;
-	struct ena_intr_moder_entry *curr_moder_entry;
-	struct ena_intr_moder_entry *pred_moder_entry;
-	struct ena_intr_moder_entry *new_moder_entry;
-	struct ena_intr_moder_entry *intr_moder_tbl = ena_dev->intr_moder_tbl;
-	unsigned int interval;
+	return !!(ena_dev->capabilities & BIT(cap_id));
+}
 
-	/* We apply adaptive moderation on Rx path only.
-	 * Tx uses static interrupt moderation.
-	 */
-	if (!pkts || !bytes)
-		/* Tx interrupt, or spurious interrupt,
-		 * in both cases we just use same delay values
-		 */
-		return;
+/* ena_com_get_customer_metric_support - query whether device supports a given customer metric.
+ * @ena_dev: ENA communication layer struct
+ * @metric_id: enum value representing the customer metric
+ *
+ * @return - true if customer metric is supported or false otherwise
+ */
+static inline bool ena_com_get_customer_metric_support(struct ena_com_dev *ena_dev,
+						       enum ena_admin_customer_metrics_id metric_id)
+{
+	return !!(ena_dev->customer_metrics.supported_metrics & BIT(metric_id));
+}
 
-	curr_moder_idx = (enum ena_intr_moder_level)(*moder_tbl_idx);
-	if (unlikely(curr_moder_idx >= ENA_INTR_MAX_NUM_OF_LEVELS)) {
-		pr_err("Wrong moderation index %u\n", curr_moder_idx);
-		return;
-	}
-
-	curr_moder_entry = &intr_moder_tbl[curr_moder_idx];
-	new_moder_idx = curr_moder_idx;
-
-	if (curr_moder_idx == ENA_INTR_MODER_LOWEST) {
-		if ((pkts > curr_moder_entry->pkts_per_interval) ||
-		    (bytes > curr_moder_entry->bytes_per_interval))
-			new_moder_idx =
-				(enum ena_intr_moder_level)(curr_moder_idx + ENA_INTR_MODER_LEVEL_STRIDE);
-	} else {
-		pred_moder_entry = &intr_moder_tbl[curr_moder_idx - ENA_INTR_MODER_LEVEL_STRIDE];
-
-		if ((pkts <= pred_moder_entry->pkts_per_interval) ||
-		    (bytes <= pred_moder_entry->bytes_per_interval))
-			new_moder_idx =
-				(enum ena_intr_moder_level)(curr_moder_idx - ENA_INTR_MODER_LEVEL_STRIDE);
-		else if ((pkts > curr_moder_entry->pkts_per_interval) ||
-			 (bytes > curr_moder_entry->bytes_per_interval)) {
-			if (curr_moder_idx != ENA_INTR_MODER_HIGHEST)
-				new_moder_idx =
-					(enum ena_intr_moder_level)(curr_moder_idx + ENA_INTR_MODER_LEVEL_STRIDE);
-		}
-	}
-	new_moder_entry = &intr_moder_tbl[new_moder_idx];
-
-	interval = new_moder_entry->intr_moder_interval;
-	*smoothed_interval = (
-		(interval * ENA_INTR_DELAY_NEW_VALUE_WEIGHT +
-		ENA_INTR_DELAY_OLD_VALUE_WEIGHT * (*smoothed_interval)) + 5) /
-		10;
-
-	*moder_tbl_idx = new_moder_idx;
+/* ena_com_get_customer_metric_count - return the number of supported customer metrics.
+ * @ena_dev: ENA communication layer struct
+ *
+ * @return - the number of supported customer metrics
+ */
+static inline int ena_com_get_customer_metric_count(struct ena_com_dev *ena_dev)
+{
+	return hweight64(ena_dev->customer_metrics.supported_metrics);
 }
 
 /* ena_com_update_intr_reg - Prepare interrupt register
  * @intr_reg: interrupt register to update.
  * @rx_delay_interval: Rx interval in usecs
  * @tx_delay_interval: Tx interval in usecs
- * @unmask: unask enable/disable
+ * @unmask: unmask enable/disable
  *
  * Prepare interrupt update register with the supplied parameters.
  */
@@ -1042,6 +1118,23 @@ static inline void ena_com_update_intr_reg(struct ena_eth_io_intr_reg *intr_reg,
 
 	if (unmask)
 		intr_reg->intr_control |= ENA_ETH_IO_INTR_REG_INTR_UNMASK_MASK;
+}
+
+static inline u8 *ena_com_get_next_bounce_buffer(struct ena_com_io_bounce_buffer_control *bounce_buf_ctrl)
+{
+	u16 size, buffers_num;
+	u8 *buf;
+
+	size = bounce_buf_ctrl->buffer_size;
+	buffers_num = bounce_buf_ctrl->buffers_num;
+
+	buf = bounce_buf_ctrl->base_buffer +
+		(bounce_buf_ctrl->next_to_use++ & (buffers_num - 1)) * size;
+
+	prefetchw(bounce_buf_ctrl->base_buffer +
+		(bounce_buf_ctrl->next_to_use & (buffers_num - 1)) * size);
+
+	return buf;
 }
 
 #endif /* !(ENA_COM) */

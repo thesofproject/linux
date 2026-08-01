@@ -23,7 +23,7 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
-#include "../kselftest.h"
+#include "kselftest.h"
 
 int set_tai(int offset)
 {
@@ -55,14 +55,15 @@ int main(int argc, char **argv)
 	printf("tai offset started at %i\n", ret);
 
 	printf("Checking tai offsets can be properly set: ");
+	fflush(stdout);
 	for (i = 1; i <= 60; i++) {
 		ret = set_tai(i);
 		ret = get_tai();
 		if (ret != i) {
 			printf("[FAILED] expected: %i got %i\n", i, ret);
-			return ksft_exit_fail();
+			ksft_exit_fail();
 		}
 	}
 	printf("[OK]\n");
-	return ksft_exit_pass();
+	ksft_exit_pass();
 }

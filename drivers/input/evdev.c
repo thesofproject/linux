@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Event char devices, giving access to raw input device events.
  *
  * Copyright (c) 1999-2002 Vojtech Pavlik
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -28,17 +25,9 @@
 #include <linux/cdev.h>
 #include "input-compat.h"
 
-enum evdev_clock_type {
-	EV_CLK_REAL = 0,
-	EV_CLK_MONO,
-	EV_CLK_BOOT,
-	EV_CLK_MAX
-};
-
 struct evdev {
 	int open;
 	struct input_handle handle;
-	wait_queue_head_t wait;
 	struct evdev_client __rcu *grab;
 	struct list_head client_list;
 	spinlock_t client_lock; /* protects client_list */
@@ -53,14 +42,15 @@ struct evdev_client {
 	unsigned int tail;
 	unsigned int packet_head; /* [future] position of the first element of next packet */
 	spinlock_t buffer_lock; /* protects access to buffer, head and tail */
+	wait_queue_head_t wait;
 	struct fasync_struct *fasync;
 	struct evdev *evdev;
 	struct list_head node;
-	unsigned int clk_type;
+	enum input_clock_type clk_type;
 	bool revoked;
 	unsigned long *evmasks[EV_CNT];
 	unsigned int bufsize;
-	struct input_event buffer[];
+	struct input_event buffer[] __counted_by(bufsize);
 };
 
 static size_t evdev_get_mask_cnt(unsigned int type)
@@ -152,17 +142,10 @@ static void __evdev_flush_queue(struct evdev_client *client, unsigned int type)
 
 static void __evdev_queue_syn_dropped(struct evdev_client *client)
 {
+	ktime_t *ev_time = input_get_timestamp(client->evdev->handle.dev);
+	struct timespec64 ts = ktime_to_timespec64(ev_time[client->clk_type]);
 	struct input_event ev;
-	ktime_t time;
-	struct timespec64 ts;
 
-	time = client->clk_type == EV_CLK_REAL ?
-			ktime_get_real() :
-			client->clk_type == EV_CLK_MONO ?
-				ktime_get() :
-				ktime_get_boottime();
-
-	ts = ktime_to_timespec64(time);
 	ev.input_event_sec = ts.tv_sec;
 	ev.input_event_usec = ts.tv_nsec / NSEC_PER_USEC;
 	ev.type = EV_SYN;
@@ -191,18 +174,18 @@ static void evdev_queue_syn_dropped(struct evdev_client *client)
 static int evdev_set_clk_type(struct evdev_client *client, unsigned int clkid)
 {
 	unsigned long flags;
-	unsigned int clk_type;
+	enum input_clock_type clk_type;
 
 	switch (clkid) {
 
 	case CLOCK_REALTIME:
-		clk_type = EV_CLK_REAL;
+		clk_type = INPUT_CLK_REAL;
 		break;
 	case CLOCK_MONOTONIC:
-		clk_type = EV_CLK_MONO;
+		clk_type = INPUT_CLK_MONO;
 		break;
 	case CLOCK_BOOTTIME:
-		clk_type = EV_CLK_BOOT;
+		clk_type = INPUT_CLK_BOOT;
 		break;
 	default:
 		return -EINVAL;
@@ -241,13 +224,13 @@ static void __pass_event(struct evdev_client *client,
 		 */
 		client->tail = (client->head - 2) & (client->bufsize - 1);
 
-		client->buffer[client->tail].input_event_sec =
-						event->input_event_sec;
-		client->buffer[client->tail].input_event_usec =
-						event->input_event_usec;
-		client->buffer[client->tail].type = EV_SYN;
-		client->buffer[client->tail].code = SYN_DROPPED;
-		client->buffer[client->tail].value = 0;
+		client->buffer[client->tail] = (struct input_event) {
+			.input_event_sec = event->input_event_sec,
+			.input_event_usec = event->input_event_usec,
+			.type = EV_SYN,
+			.code = SYN_DROPPED,
+			.value = 0,
+		};
 
 		client->packet_head = client->tail;
 	}
@@ -262,7 +245,6 @@ static void evdev_pass_values(struct evdev_client *client,
 			const struct input_value *vals, unsigned int count,
 			ktime_t *ev_time)
 {
-	struct evdev *evdev = client->evdev;
 	const struct input_value *v;
 	struct input_event event;
 	struct timespec64 ts;
@@ -299,23 +281,19 @@ static void evdev_pass_values(struct evdev_client *client,
 	spin_unlock(&client->buffer_lock);
 
 	if (wakeup)
-		wake_up_interruptible(&evdev->wait);
+		wake_up_interruptible_poll(&client->wait,
+			EPOLLIN | EPOLLOUT | EPOLLRDNORM | EPOLLWRNORM);
 }
 
 /*
  * Pass incoming events to all connected clients.
  */
-static void evdev_events(struct input_handle *handle,
-			 const struct input_value *vals, unsigned int count)
+static unsigned int evdev_events(struct input_handle *handle,
+				 struct input_value *vals, unsigned int count)
 {
 	struct evdev *evdev = handle->private;
 	struct evdev_client *client;
-	ktime_t ev_time[EV_CLK_MAX];
-
-	ev_time[EV_CLK_MONO] = ktime_get();
-	ev_time[EV_CLK_REAL] = ktime_mono_to_real(ev_time[EV_CLK_MONO]);
-	ev_time[EV_CLK_BOOT] = ktime_mono_to_any(ev_time[EV_CLK_MONO],
-						 TK_OFFS_BOOT);
+	ktime_t *ev_time = input_get_timestamp(handle->dev);
 
 	rcu_read_lock();
 
@@ -328,17 +306,8 @@ static void evdev_events(struct input_handle *handle,
 			evdev_pass_values(client, vals, count, ev_time);
 
 	rcu_read_unlock();
-}
 
-/*
- * Pass incoming event to all connected clients.
- */
-static void evdev_event(struct input_handle *handle,
-			unsigned int type, unsigned int code, int value)
-{
-	struct input_value vals[] = { { type, code, value } };
-
-	evdev_events(handle, vals, 1);
+	return count;
 }
 
 static int evdev_fasync(int fd, struct file *file, int on)
@@ -346,20 +315,6 @@ static int evdev_fasync(int fd, struct file *file, int on)
 	struct evdev_client *client = file->private_data;
 
 	return fasync_helper(fd, file, on, &client->fasync);
-}
-
-static int evdev_flush(struct file *file, fl_owner_t id)
-{
-	struct evdev_client *client = file->private_data;
-	struct evdev *evdev = client->evdev;
-
-	mutex_lock(&evdev->mutex);
-
-	if (evdev->exist && !client->revoked)
-		input_flush_device(&evdev->handle, file);
-
-	mutex_unlock(&evdev->mutex);
-	return 0;
 }
 
 static void evdev_free(struct device *dev)
@@ -461,11 +416,11 @@ static void evdev_hangup(struct evdev *evdev)
 	struct evdev_client *client;
 
 	spin_lock(&evdev->client_lock);
-	list_for_each_entry(client, &evdev->client_list, node)
+	list_for_each_entry(client, &evdev->client_list, node) {
 		kill_fasync(&client->fasync, SIGIO, POLL_HUP);
+		wake_up_interruptible_poll(&client->wait, EPOLLHUP | EPOLLERR);
+	}
 	spin_unlock(&evdev->client_lock);
-
-	wake_up_interruptible(&evdev->wait);
 }
 
 static int evdev_release(struct inode *inode, struct file *file)
@@ -475,13 +430,17 @@ static int evdev_release(struct inode *inode, struct file *file)
 	unsigned int i;
 
 	mutex_lock(&evdev->mutex);
+
+	if (evdev->exist && !client->revoked)
+		input_flush_device(&evdev->handle, file);
+
 	evdev_ungrab(evdev, client);
 	mutex_unlock(&evdev->mutex);
 
 	evdev_detach_client(evdev, client);
 
 	for (i = 0; i < EV_CNT; ++i)
-		kfree(client->evmasks[i]);
+		bitmap_free(client->evmasks[i]);
 
 	kvfree(client);
 
@@ -503,17 +462,14 @@ static int evdev_open(struct inode *inode, struct file *file)
 {
 	struct evdev *evdev = container_of(inode->i_cdev, struct evdev, cdev);
 	unsigned int bufsize = evdev_compute_buffer_size(evdev->handle.dev);
-	unsigned int size = sizeof(struct evdev_client) +
-					bufsize * sizeof(struct input_event);
 	struct evdev_client *client;
 	int error;
 
-	client = kzalloc(size, GFP_KERNEL | __GFP_NOWARN);
-	if (!client)
-		client = vzalloc(size);
+	client = kvzalloc_flex(*client, buffer, bufsize);
 	if (!client)
 		return -ENOMEM;
 
+	init_waitqueue_head(&client->wait);
 	client->bufsize = bufsize;
 	spin_lock_init(&client->buffer_lock);
 	client->evdev = evdev;
@@ -524,7 +480,7 @@ static int evdev_open(struct inode *inode, struct file *file)
 		goto err_free_client;
 
 	file->private_data = client;
-	nonseekable_open(inode, file);
+	stream_open(inode, file);
 
 	return 0;
 
@@ -541,6 +497,13 @@ static ssize_t evdev_write(struct file *file, const char __user *buffer,
 	struct evdev *evdev = client->evdev;
 	struct input_event event;
 	int retval = 0;
+
+	/*
+	 * Limit amount of data we inject into the input subsystem so that
+	 * we do not hold evdev->mutex for too long. 4096 bytes corresponds
+	 * to 170 input events.
+	 */
+	count = min(count, 4096);
 
 	if (count != 0 && count < input_event_size())
 		return -EINVAL;
@@ -564,6 +527,7 @@ static ssize_t evdev_write(struct file *file, const char __user *buffer,
 
 		input_inject_event(&evdev->handle,
 				   event.type, event.code, event.value);
+		cond_resched();
 	}
 
  out:
@@ -629,7 +593,7 @@ static ssize_t evdev_read(struct file *file, char __user *buffer,
 			break;
 
 		if (!(file->f_flags & O_NONBLOCK)) {
-			error = wait_event_interruptible(evdev->wait,
+			error = wait_event_interruptible(client->wait,
 					client->packet_head != client->tail ||
 					!evdev->exist || client->revoked);
 			if (error)
@@ -647,7 +611,7 @@ static __poll_t evdev_poll(struct file *file, poll_table *wait)
 	struct evdev *evdev = client->evdev;
 	__poll_t mask;
 
-	poll_wait(file, &evdev->wait, wait);
+	poll_wait(file, &client->wait, wait);
 
 	if (evdev->exist && !client->revoked)
 		mask = EPOLLOUT | EPOLLWRNORM;
@@ -925,17 +889,15 @@ static int evdev_handle_get_val(struct evdev_client *client,
 {
 	int ret;
 	unsigned long *mem;
-	size_t len;
 
-	len = BITS_TO_LONGS(maxbit) * sizeof(unsigned long);
-	mem = kmalloc(len, GFP_KERNEL);
+	mem = bitmap_alloc(maxbit, GFP_KERNEL);
 	if (!mem)
 		return -ENOMEM;
 
 	spin_lock_irq(&dev->event_lock);
 	spin_lock(&client->buffer_lock);
 
-	memcpy(mem, bits, len);
+	bitmap_copy(mem, bits, maxbit);
 
 	spin_unlock(&dev->event_lock);
 
@@ -947,7 +909,7 @@ static int evdev_handle_get_val(struct evdev_client *client,
 	if (ret < 0)
 		evdev_queue_syn_dropped(client);
 
-	kfree(mem);
+	bitmap_free(mem);
 
 	return ret;
 }
@@ -982,7 +944,7 @@ static int evdev_revoke(struct evdev *evdev, struct evdev_client *client,
 	client->revoked = true;
 	evdev_ungrab(evdev, client);
 	input_flush_device(&evdev->handle, file);
-	wake_up_interruptible(&evdev->wait);
+	wake_up_interruptible_poll(&client->wait, EPOLLHUP | EPOLLERR);
 
 	return 0;
 }
@@ -1003,13 +965,13 @@ static int evdev_set_mask(struct evdev_client *client,
 	if (!cnt)
 		return 0;
 
-	mask = kcalloc(sizeof(unsigned long), BITS_TO_LONGS(cnt), GFP_KERNEL);
+	mask = bitmap_zalloc(cnt, GFP_KERNEL);
 	if (!mask)
 		return -ENOMEM;
 
 	error = bits_from_user(mask, cnt - 1, codes_size, codes, compat);
 	if (error < 0) {
-		kfree(mask);
+		bitmap_free(mask);
 		return error;
 	}
 
@@ -1018,7 +980,7 @@ static int evdev_set_mask(struct evdev_client *client,
 	client->evmasks[type] = mask;
 	spin_unlock_irqrestore(&client->buffer_lock, flags);
 
-	kfree(oldmask);
+	bitmap_free(oldmask);
 
 	return 0;
 }
@@ -1337,8 +1299,6 @@ static const struct file_operations evdev_fops = {
 	.compat_ioctl	= evdev_ioctl_compat,
 #endif
 	.fasync		= evdev_fasync,
-	.flush		= evdev_flush,
-	.llseek		= no_llseek,
 };
 
 /*
@@ -1386,7 +1346,7 @@ static int evdev_connect(struct input_handler *handler, struct input_dev *dev,
 		return error;
 	}
 
-	evdev = kzalloc(sizeof(struct evdev), GFP_KERNEL);
+	evdev = kzalloc_obj(struct evdev);
 	if (!evdev) {
 		error = -ENOMEM;
 		goto err_free_minor;
@@ -1395,7 +1355,6 @@ static int evdev_connect(struct input_handler *handler, struct input_dev *dev,
 	INIT_LIST_HEAD(&evdev->client_list);
 	spin_lock_init(&evdev->client_lock);
 	mutex_init(&evdev->mutex);
-	init_waitqueue_head(&evdev->wait);
 	evdev->exist = true;
 
 	dev_no = minor;
@@ -1449,14 +1408,17 @@ static void evdev_disconnect(struct input_handle *handle)
 }
 
 static const struct input_device_id evdev_ids[] = {
-	{ .driver_info = 1 },	/* Matches all devices */
-	{ },			/* Terminating zero entry */
+	{
+		/* Matches all devices */
+		.flags = INPUT_DEVICE_ID_MATCH_EVBIT,
+		.evbit = { BIT_MASK(EV_SYN) },
+	},
+	{ }	/* Terminating zero entry */
 };
 
 MODULE_DEVICE_TABLE(input, evdev_ids);
 
 static struct input_handler evdev_handler = {
-	.event		= evdev_event,
 	.events		= evdev_events,
 	.connect	= evdev_connect,
 	.disconnect	= evdev_disconnect,

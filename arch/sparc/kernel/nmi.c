@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Pseudo NMI support on sparc64 systems.
  *
  * Copyright (C) 2009 David S. Miller <davem@davemloft.net>
@@ -63,6 +64,11 @@ void arch_touch_nmi_watchdog(void)
 	}
 }
 EXPORT_SYMBOL(arch_touch_nmi_watchdog);
+
+int __init watchdog_hardlockup_probe(void)
+{
+	return 0;
+}
 
 static void die_nmi(const char *str, struct pt_regs *regs, int do_panic)
 {
@@ -166,7 +172,8 @@ static int __init check_nmi_watchdog(void)
 	if (!atomic_read(&nmi_active))
 		return 0;
 
-	prev_nmi_count = kmalloc(nr_cpu_ids * sizeof(unsigned int), GFP_KERNEL);
+	prev_nmi_count = kmalloc_array(nr_cpu_ids, sizeof(unsigned int),
+				       GFP_KERNEL);
 	if (!prev_nmi_count) {
 		err = -ENOMEM;
 		goto error;
@@ -272,7 +279,7 @@ static int __init setup_nmi_watchdog(char *str)
 	if (!strncmp(str, "panic", 5))
 		panic_on_timeout = 1;
 
-	return 0;
+	return 1;
 }
 __setup("nmi_watchdog=", setup_nmi_watchdog);
 
@@ -280,11 +287,11 @@ __setup("nmi_watchdog=", setup_nmi_watchdog);
  * sparc specific NMI watchdog enable function.
  * Enables watchdog if it is not enabled already.
  */
-int watchdog_nmi_enable(unsigned int cpu)
+void watchdog_hardlockup_enable(unsigned int cpu)
 {
 	if (atomic_read(&nmi_active) == -1) {
 		pr_warn("NMI watchdog cannot be enabled or disabled\n");
-		return -1;
+		return;
 	}
 
 	/*
@@ -293,17 +300,15 @@ int watchdog_nmi_enable(unsigned int cpu)
 	 * process first.
 	 */
 	if (!nmi_init_done)
-		return 0;
+		return;
 
 	smp_call_function_single(cpu, start_nmi_watchdog, NULL, 1);
-
-	return 0;
 }
 /*
  * sparc specific NMI watchdog disable function.
  * Disables watchdog if it is not disabled already.
  */
-void watchdog_nmi_disable(unsigned int cpu)
+void watchdog_hardlockup_disable(unsigned int cpu)
 {
 	if (atomic_read(&nmi_active) == -1)
 		pr_warn_once("NMI watchdog cannot be enabled or disabled\n");

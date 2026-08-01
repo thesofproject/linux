@@ -1,28 +1,18 @@
-/**
+// SPDX-License-Identifier: ISC
+/*
  * Copyright (c) 2017 Redpine Signals Inc.
  *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <net/rsi_91x.h>
-#include <net/genetlink.h>
 
-#define RSI_HEADROOM_FOR_BT_HAL	16
+#define RSI_DMA_ALIGN	8
 #define RSI_FRAME_DESC_SIZE	16
+#define RSI_HEADROOM_FOR_BT_HAL	(RSI_FRAME_DESC_SIZE + RSI_DMA_ALIGN)
 
 struct rsi_hci_adapter {
 	void *priv;
@@ -70,6 +60,16 @@ static int rsi_hci_send_pkt(struct hci_dev *hdev, struct sk_buff *skb)
 		bt_cb(new_skb)->pkt_type = hci_skb_pkt_type(skb);
 		kfree_skb(skb);
 		skb = new_skb;
+		if (!IS_ALIGNED((unsigned long)skb->data, RSI_DMA_ALIGN)) {
+			u8 *skb_data = skb->data;
+			int skb_len = skb->len;
+
+			skb_push(skb, RSI_DMA_ALIGN);
+			skb_pull(skb, PTR_ALIGN(skb->data,
+						RSI_DMA_ALIGN) - skb->data);
+			memmove(skb->data, skb_data, skb_len);
+			skb_trim(skb, skb_len);
+		}
 	}
 
 	return h_adapter->proto_ops->coex_send_pkt(h_adapter->priv, skb,
@@ -102,7 +102,7 @@ static int rsi_hci_attach(void *priv, struct rsi_proto_ops *ops)
 	struct hci_dev *hdev;
 	int err = 0;
 
-	h_adapter = kzalloc(sizeof(*h_adapter), GFP_KERNEL);
+	h_adapter = kzalloc_obj(*h_adapter);
 	if (!h_adapter)
 		return -ENOMEM;
 
@@ -124,7 +124,6 @@ static int rsi_hci_attach(void *priv, struct rsi_proto_ops *ops)
 		hdev->bus = HCI_USB;
 
 	hci_set_drvdata(hdev, h_adapter);
-	hdev->dev_type = HCI_PRIMARY;
 	hdev->open = rsi_hci_open;
 	hdev->close = rsi_hci_close;
 	hdev->flush = rsi_hci_flush;
@@ -183,5 +182,4 @@ module_init(rsi_91x_bt_module_init);
 module_exit(rsi_91x_bt_module_exit);
 MODULE_AUTHOR("Redpine Signals Inc");
 MODULE_DESCRIPTION("RSI BT driver");
-MODULE_SUPPORTED_DEVICE("RSI-BT");
 MODULE_LICENSE("Dual BSD/GPL");

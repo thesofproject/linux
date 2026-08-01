@@ -1,25 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * SBP2 target driver (SCSI over IEEE1394 in target mode)
  *
  * Copyright (C) 2011  Chris Boot <bootc@bootc.net>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software Foundation,
- * Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  */
 
-#define KMSG_COMPONENT "sbp_target"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "sbp_target: " fmt
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -36,7 +22,7 @@
 #include <target/target_core_base.h>
 #include <target/target_core_backend.h>
 #include <target/target_core_fabric.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include "sbp_target.h"
 
@@ -200,7 +186,7 @@ static struct sbp_session *sbp_session_create(
 
 	snprintf(guid_str, sizeof(guid_str), "%016llx", guid);
 
-	sess = kmalloc(sizeof(*sess), GFP_KERNEL);
+	sess = kmalloc_obj(*sess);
 	if (!sess)
 		return ERR_PTR(-ENOMEM);
 
@@ -209,7 +195,7 @@ static struct sbp_session *sbp_session_create(
 	INIT_DELAYED_WORK(&sess->maint_work, session_maintenance_work);
 	sess->guid = guid;
 
-	sess->se_sess = target_alloc_session(&tpg->se_tpg, 128,
+	sess->se_sess = target_setup_session(&tpg->se_tpg, 128,
 					     sizeof(struct sbp_target_request),
 					     TARGET_PROT_NORMAL, guid_str,
 					     sess, NULL);
@@ -235,8 +221,7 @@ static void sbp_session_release(struct sbp_session *sess, bool cancel_work)
 	if (cancel_work)
 		cancel_delayed_work_sync(&sess->maint_work);
 
-	transport_deregister_session_configfs(sess->se_sess);
-	transport_deregister_session(sess->se_sess);
+	target_remove_session(sess->se_sess);
 
 	if (sess->card)
 		fw_card_put(sess->card);
@@ -406,7 +391,7 @@ static void sbp_management_request_login(
 		1 << LOGIN_ORB_RECONNECT(be32_to_cpu(req->orb.misc)),
 		tport->max_reconnect_timeout) - 1;
 
-	login = kmalloc(sizeof(*login), GFP_KERNEL);
+	login = kmalloc_obj(*login);
 	if (!login) {
 		pr_err("failed to allocate login descriptor\n");
 
@@ -443,7 +428,7 @@ static void sbp_management_request_login(
 	spin_unlock_bh(&sess->lock);
 
 already_logged_in:
-	response = kzalloc(sizeof(*response), GFP_KERNEL);
+	response = kzalloc_obj(*response);
 	if (!response) {
 		pr_err("failed to allocate login response block\n");
 
@@ -744,7 +729,7 @@ static int tgt_agent_rw_orb_pointer(struct fw_card *card, int tcode, void *data,
 		pr_debug("tgt_agent ORB_POINTER write: 0x%llx\n",
 				agent->orb_pointer);
 
-		queue_work(system_unbound_wq, &agent->work);
+		queue_work(system_dfl_wq, &agent->work);
 
 		return RCODE_COMPLETE;
 
@@ -778,7 +763,7 @@ static int tgt_agent_rw_doorbell(struct fw_card *card, int tcode, void *data,
 
 		pr_debug("tgt_agent DOORBELL\n");
 
-		queue_work(system_unbound_wq, &agent->work);
+		queue_work(system_dfl_wq, &agent->work);
 
 		return RCODE_COMPLETE;
 
@@ -926,15 +911,16 @@ static struct sbp_target_request *sbp_mgt_get_req(struct sbp_session *sess,
 {
 	struct se_session *se_sess = sess->se_sess;
 	struct sbp_target_request *req;
-	int tag;
+	int tag, cpu;
 
-	tag = percpu_ida_alloc(&se_sess->sess_tag_pool, TASK_RUNNING);
+	tag = sbitmap_queue_get(&se_sess->sess_tag_pool, &cpu);
 	if (tag < 0)
 		return ERR_PTR(-ENOMEM);
 
 	req = &((struct sbp_target_request *)se_sess->sess_cmd_map)[tag];
 	memset(req, 0, sizeof(*req));
 	req->se_cmd.map_tag = tag;
+	req->se_cmd.map_cpu = cpu;
 	req->se_cmd.tag = next_orb;
 
 	return req;
@@ -1003,7 +989,7 @@ static void tgt_agent_fetch_work(struct work_struct *work)
 
 		if (tgt_agent_check_active(agent) && !doorbell) {
 			INIT_WORK(&req->work, tgt_agent_process_work);
-			queue_work(system_unbound_wq, &req->work);
+			queue_work(system_dfl_wq, &req->work);
 		} else {
 			/* don't process this request, just check next_ORB */
 			sbp_free_request(req);
@@ -1019,7 +1005,7 @@ static void tgt_agent_fetch_work(struct work_struct *work)
 			agent->state = AGENT_STATE_SUSPENDED;
 
 		spin_unlock_bh(&agent->lock);
-	};
+	}
 }
 
 static struct sbp_target_agent *sbp_target_agent_register(
@@ -1028,7 +1014,7 @@ static struct sbp_target_agent *sbp_target_agent_register(
 	struct sbp_target_agent *agent;
 	int ret;
 
-	agent = kmalloc(sizeof(*agent), GFP_KERNEL);
+	agent = kmalloc_obj(*agent);
 	if (!agent)
 		return ERR_PTR(-ENOMEM);
 
@@ -1231,11 +1217,9 @@ static void sbp_handle_command(struct sbp_target_request *req)
 
 	/* only used for printk until we do TMRs */
 	req->se_cmd.tag = req->orb_pointer;
-	if (target_submit_cmd(&req->se_cmd, sess->se_sess, req->cmd_buf,
-			      req->sense_buf, unpacked_lun, data_length,
-			      TCM_SIMPLE_TAG, data_dir, TARGET_SCF_ACK_KREF))
-		goto err;
-
+	target_submit_cmd(&req->se_cmd, sess->se_sess, req->cmd_buf,
+			  req->sense_buf, unpacked_lun, data_length,
+			  TCM_SIMPLE_TAG, data_dir, TARGET_SCF_ACK_KREF);
 	return;
 
 err:
@@ -1276,7 +1260,6 @@ static int sbp_rw_data(struct sbp_target_request *req)
 	pg_size = CMDBLK_ORB_PG_SIZE(be32_to_cpu(req->orb.misc));
 	if (pg_size) {
 		pr_err("sbp_run_transaction: page size ignored\n");
-		pg_size = 0x100 << pg_size;
 	}
 
 	spin_lock_bh(&sess->lock);
@@ -1405,8 +1388,8 @@ static void sbp_sense_mangle(struct sbp_target_request *req)
 		(sense[0] & 0x80) |		/* valid */
 		((sense[2] & 0xe0) >> 1) |	/* mark, eom, ili */
 		(sense[2] & 0x0f);		/* sense_key */
-	status[2] = se_cmd->scsi_asc;		/* sense_code */
-	status[3] = se_cmd->scsi_ascq;		/* sense_qualifier */
+	status[2] = 0;				/* XXX sense_code */
+	status[3] = 0;				/* XXX sense_qualifier */
 
 	/* information */
 	status[4] = sense[3];
@@ -1460,7 +1443,7 @@ static void sbp_free_request(struct sbp_target_request *req)
 	kfree(req->pg_tbl);
 	kfree(req->cmd_buf);
 
-	percpu_ida_free(&se_sess->sess_tag_pool, se_cmd->map_tag);
+	target_free_tag(se_sess, se_cmd);
 }
 
 static void sbp_mgt_agent_process(struct work_struct *work)
@@ -1620,7 +1603,7 @@ static void sbp_mgt_agent_rw(struct fw_card *card,
 			rcode = RCODE_CONFLICT_ERROR;
 			goto out;
 		}
-		req = kzalloc(sizeof(*req), GFP_ATOMIC);
+		req = kzalloc_obj(*req, GFP_ATOMIC);
 		if (!req) {
 			rcode = RCODE_CONFLICT_ERROR;
 			goto out;
@@ -1634,7 +1617,7 @@ static void sbp_mgt_agent_rw(struct fw_card *card,
 		agent->orb_offset = sbp2_pointer_to_addr(ptr);
 		agent->request = req;
 
-		queue_work(system_unbound_wq, &agent->work);
+		queue_work(system_dfl_wq, &agent->work);
 		rcode = RCODE_COMPLETE;
 	} else if (tcode == TCODE_READ_BLOCK_REQUEST) {
 		addr_to_sbp2_pointer(agent->orb_offset, ptr);
@@ -1653,7 +1636,7 @@ static struct sbp_management_agent *sbp_management_agent_register(
 	int ret;
 	struct sbp_management_agent *agent;
 
-	agent = kmalloc(sizeof(*agent), GFP_KERNEL);
+	agent = kmalloc_obj(*agent);
 	if (!agent)
 		return ERR_PTR(-ENOMEM);
 
@@ -1689,16 +1672,6 @@ static int sbp_check_true(struct se_portal_group *se_tpg)
 	return 1;
 }
 
-static int sbp_check_false(struct se_portal_group *se_tpg)
-{
-	return 0;
-}
-
-static char *sbp_get_fabric_name(void)
-{
-	return "sbp";
-}
-
 static char *sbp_get_fabric_wwn(struct se_portal_group *se_tpg)
 {
 	struct sbp_tpg *tpg = container_of(se_tpg, struct sbp_tpg, se_tpg);
@@ -1713,22 +1686,12 @@ static u16 sbp_get_tag(struct se_portal_group *se_tpg)
 	return tpg->tport_tpgt;
 }
 
-static u32 sbp_tpg_get_inst_index(struct se_portal_group *se_tpg)
-{
-	return 1;
-}
-
 static void sbp_release_cmd(struct se_cmd *se_cmd)
 {
 	struct sbp_target_request *req = container_of(se_cmd,
 			struct sbp_target_request, se_cmd);
 
 	sbp_free_request(req);
-}
-
-static u32 sbp_sess_get_index(struct se_session *se_sess)
-{
-	return 0;
 }
 
 static int sbp_write_pending(struct se_cmd *se_cmd)
@@ -1751,21 +1714,6 @@ static int sbp_write_pending(struct se_cmd *se_cmd)
 	}
 
 	target_execute_cmd(se_cmd);
-	return 0;
-}
-
-static int sbp_write_pending_status(struct se_cmd *se_cmd)
-{
-	return 0;
-}
-
-static void sbp_set_default_node_attrs(struct se_node_acl *nacl)
-{
-	return;
-}
-
-static int sbp_get_cmd_state(struct se_cmd *se_cmd)
-{
 	return 0;
 }
 
@@ -2005,21 +1953,19 @@ static void sbp_pre_unlink_lun(
 		pr_err("unlink LUN: failed to update unit directory\n");
 }
 
-static struct se_portal_group *sbp_make_tpg(
-		struct se_wwn *wwn,
-		struct config_group *group,
-		const char *name)
+static struct se_portal_group *sbp_make_tpg(struct se_wwn *wwn,
+					    const char *name)
 {
 	struct sbp_tport *tport =
 		container_of(wwn, struct sbp_tport, tport_wwn);
 
 	struct sbp_tpg *tpg;
-	unsigned long tpgt;
+	u16 tpgt;
 	int ret;
 
 	if (strstr(name, "tpgt_") != name)
 		return ERR_PTR(-EINVAL);
-	if (kstrtoul(name + 5, 10, &tpgt) || tpgt > UINT_MAX)
+	if (kstrtou16(name + 5, 10, &tpgt))
 		return ERR_PTR(-EINVAL);
 
 	if (tport->tpg) {
@@ -2027,7 +1973,7 @@ static struct se_portal_group *sbp_make_tpg(
 		return ERR_PTR(-EBUSY);
 	}
 
-	tpg = kzalloc(sizeof(*tpg), GFP_KERNEL);
+	tpg = kzalloc_obj(*tpg);
 	if (!tpg)
 		return ERR_PTR(-ENOMEM);
 
@@ -2084,7 +2030,7 @@ static struct se_wwn *sbp_make_tport(
 	if (sbp_parse_wwn(name, &guid) < 0)
 		return ERR_PTR(-EINVAL);
 
-	tport = kzalloc(sizeof(*tport), GFP_KERNEL);
+	tport = kzalloc_obj(*tport);
 	if (!tport)
 		return ERR_PTR(-ENOMEM);
 
@@ -2153,32 +2099,13 @@ static ssize_t sbp_tpg_directory_id_store(struct config_item *item,
 	return count;
 }
 
-static ssize_t sbp_tpg_enable_show(struct config_item *item, char *page)
+static int sbp_enable_tpg(struct se_portal_group *se_tpg, bool enable)
 {
-	struct se_portal_group *se_tpg = to_tpg(item);
 	struct sbp_tpg *tpg = container_of(se_tpg, struct sbp_tpg, se_tpg);
 	struct sbp_tport *tport = tpg->tport;
-	return sprintf(page, "%d\n", tport->enable);
-}
-
-static ssize_t sbp_tpg_enable_store(struct config_item *item,
-		const char *page, size_t count)
-{
-	struct se_portal_group *se_tpg = to_tpg(item);
-	struct sbp_tpg *tpg = container_of(se_tpg, struct sbp_tpg, se_tpg);
-	struct sbp_tport *tport = tpg->tport;
-	unsigned long val;
 	int ret;
 
-	if (kstrtoul(page, 0, &val) < 0)
-		return -EINVAL;
-	if ((val != 0) && (val != 1))
-		return -EINVAL;
-
-	if (tport->enable == val)
-		return count;
-
-	if (val) {
+	if (enable) {
 		if (sbp_count_se_tpg_luns(&tpg->se_tpg) == 0) {
 			pr_err("Cannot enable a target with no LUNs!\n");
 			return -EINVAL;
@@ -2193,7 +2120,7 @@ static ssize_t sbp_tpg_enable_store(struct config_item *item,
 		spin_unlock_bh(&se_tpg->session_lock);
 	}
 
-	tport->enable = val;
+	tport->enable = enable;
 
 	ret = sbp_update_unit_directory(tport);
 	if (ret < 0) {
@@ -2201,15 +2128,13 @@ static ssize_t sbp_tpg_enable_store(struct config_item *item,
 		return ret;
 	}
 
-	return count;
+	return 0;
 }
 
 CONFIGFS_ATTR(sbp_tpg_, directory_id);
-CONFIGFS_ATTR(sbp_tpg_, enable);
 
 static struct configfs_attribute *sbp_tpg_base_attrs[] = {
 	&sbp_tpg_attr_directory_id,
-	&sbp_tpg_attr_enable,
 	NULL,
 };
 
@@ -2325,21 +2250,13 @@ static struct configfs_attribute *sbp_tpg_attrib_attrs[] = {
 
 static const struct target_core_fabric_ops sbp_ops = {
 	.module				= THIS_MODULE,
-	.name				= "sbp",
-	.get_fabric_name		= sbp_get_fabric_name,
+	.fabric_name			= "sbp",
 	.tpg_get_wwn			= sbp_get_fabric_wwn,
 	.tpg_get_tag			= sbp_get_tag,
 	.tpg_check_demo_mode		= sbp_check_true,
 	.tpg_check_demo_mode_cache	= sbp_check_true,
-	.tpg_check_demo_mode_write_protect = sbp_check_false,
-	.tpg_check_prod_mode_write_protect = sbp_check_false,
-	.tpg_get_inst_index		= sbp_tpg_get_inst_index,
 	.release_cmd			= sbp_release_cmd,
-	.sess_get_index			= sbp_sess_get_index,
 	.write_pending			= sbp_write_pending,
-	.write_pending_status		= sbp_write_pending_status,
-	.set_default_node_attributes	= sbp_set_default_node_attrs,
-	.get_cmd_state			= sbp_get_cmd_state,
 	.queue_data_in			= sbp_queue_data_in,
 	.queue_status			= sbp_queue_status,
 	.queue_tm_rsp			= sbp_queue_tm_rsp,
@@ -2349,6 +2266,7 @@ static const struct target_core_fabric_ops sbp_ops = {
 	.fabric_make_wwn		= sbp_make_tport,
 	.fabric_drop_wwn		= sbp_drop_tport,
 	.fabric_make_tpg		= sbp_make_tpg,
+	.fabric_enable_tpg		= sbp_enable_tpg,
 	.fabric_drop_tpg		= sbp_drop_tpg,
 	.fabric_post_link		= sbp_post_link_lun,
 	.fabric_pre_unlink		= sbp_pre_unlink_lun,
@@ -2359,6 +2277,10 @@ static const struct target_core_fabric_ops sbp_ops = {
 	.tfc_wwn_attrs			= sbp_wwn_attrs,
 	.tfc_tpg_base_attrs		= sbp_tpg_base_attrs,
 	.tfc_tpg_attrib_attrs		= sbp_tpg_attrib_attrs,
+
+	.default_compl_type		= TARGET_QUEUE_COMPL,
+	.default_submit_type		= TARGET_DIRECT_SUBMIT,
+	.direct_submit_supp		= 1,
 };
 
 static int __init sbp_init(void)

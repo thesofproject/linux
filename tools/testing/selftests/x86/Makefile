@@ -6,16 +6,20 @@ include ../lib.mk
 .PHONY: all all_32 all_64 warn_32bit_failure clean
 
 UNAME_M := $(shell uname -m)
-CAN_BUILD_I386 := $(shell ./check_cc.sh $(CC) trivial_32bit_program.c -m32)
-CAN_BUILD_X86_64 := $(shell ./check_cc.sh $(CC) trivial_64bit_program.c)
+CAN_BUILD_I386 := $(shell ./check_cc.sh "$(CC)" trivial_32bit_program.c -m32)
+CAN_BUILD_X86_64 := $(shell ./check_cc.sh "$(CC)" trivial_64bit_program.c)
+CAN_BUILD_WITH_NOPIE := $(shell ./check_cc.sh "$(CC)" trivial_program.c -no-pie)
 
 TARGETS_C_BOTHBITS := single_step_syscall sysret_ss_attrs syscall_nt test_mremap_vdso \
-			check_initial_reg_state sigreturn iopl mpx-mini-test ioperm \
-			protection_keys test_vdso test_vsyscall mov_ss_trap
-TARGETS_C_32BIT_ONLY := entry_from_vm86 syscall_arg_fault test_syscall_vdso unwind_vdso \
+			check_initial_reg_state sigreturn iopl ioperm \
+			test_vsyscall mov_ss_trap sigtrap_loop \
+			syscall_arg_fault fsgsbase_restore sigaltstack
+TARGETS_C_BOTHBITS += nx_stack
+TARGETS_C_32BIT_ONLY := entry_from_vm86 test_syscall_vdso unwind_vdso \
 			test_FCMOV test_FCOMI test_FISTTP \
 			vdso_restorer
-TARGETS_C_64BIT_ONLY := fsgsbase sysret_rip
+TARGETS_C_64BIT_ONLY := fsgsbase sysret_rip syscall_numbering \
+			corrupt_xstate_header amx lam test_shadow_stack avx apx
 # Some selftests require 32bit support enabled also on 64bit systems
 TARGETS_C_32BIT_NEEDED := ldt_gdt ptrace_syscall
 
@@ -31,7 +35,20 @@ BINARIES_64 := $(TARGETS_C_64BIT_ALL:%=%_64)
 BINARIES_32 := $(patsubst %,$(OUTPUT)/%,$(BINARIES_32))
 BINARIES_64 := $(patsubst %,$(OUTPUT)/%,$(BINARIES_64))
 
-CFLAGS := -O2 -g -std=gnu99 -pthread -Wall -no-pie
+CFLAGS := -O2 -g -std=gnu99 -pthread -Wall $(KHDR_INCLUDES)
+CFLAGS += -I $(top_srcdir)/tools/testing/selftests/
+
+# call32_from_64 in thunks.S uses absolute addresses.
+ifeq ($(CAN_BUILD_WITH_NOPIE),1)
+CFLAGS += -no-pie
+
+ifneq ($(LLVM),)
+# clang only wants to see -no-pie during linking. Here, we don't have a separate
+# linking stage, so a compiler warning is unavoidable without (wastefully)
+# restructuring the Makefile. Avoid this by simply disabling that warning.
+CFLAGS += -Wno-unused-command-line-argument
+endif
+endif
 
 define gen-target-rule-32
 $(1) $(1)_32: $(OUTPUT)/$(1)_32
@@ -61,13 +78,13 @@ all_32: $(BINARIES_32)
 
 all_64: $(BINARIES_64)
 
-EXTRA_CLEAN := $(BINARIES_32) $(BINARIES_64)
+EXTRA_CLEAN := $(BINARIES_32) $(BINARIES_64) srso
 
-$(BINARIES_32): $(OUTPUT)/%_32: %.c
-	$(CC) -m32 -o $@ $(CFLAGS) $(EXTRA_CFLAGS) $^ -lrt -ldl -lm
+$(BINARIES_32): $(OUTPUT)/%_32: %.c helpers.h
+	$(CC) -m32 -o $@ $(CFLAGS) $(EXTRA_CFLAGS) $< $(EXTRA_FILES) -lrt -ldl -lm
 
-$(BINARIES_64): $(OUTPUT)/%_64: %.c
-	$(CC) -m64 -o $@ $(CFLAGS) $(EXTRA_CFLAGS) $^ -lrt -ldl
+$(BINARIES_64): $(OUTPUT)/%_64: %.c helpers.h
+	$(CC) -m64 -o $@ $(CFLAGS) $(EXTRA_CFLAGS) $< $(EXTRA_FILES) -lrt -ldl
 
 # x86_64 users should be encouraged to install 32-bit libraries
 ifeq ($(CAN_BUILD_I386)$(CAN_BUILD_X86_64),01)
@@ -84,16 +101,40 @@ warn_32bit_failure:
 	echo "If you are using a Fedora-like distribution, try:";	\
 	echo "";							\
 	echo "  yum install glibc-devel.*i686";				\
+	echo "";							\
+	echo "If you are using a SUSE-like distribution, try:";		\
+	echo "";							\
+	echo "  zypper install gcc-32bit glibc-devel-static-32bit";	\
 	exit 0;
 endif
 
-# Some tests have additional dependencies.
-$(OUTPUT)/sysret_ss_attrs_64: thunks.S
-$(OUTPUT)/ptrace_syscall_32: raw_syscall_helper_32.S
-$(OUTPUT)/test_syscall_vdso_32: thunks_32.S
+# Add an additional file to the source file list for a given target, and also
+# add a Makefile dependency on that same file. However, do these separately, so
+# that the compiler invocation ("$(CC) file1.c file2.S") is not combined with
+# the dependencies ("header3.h"), because clang, unlike gcc, will not accept
+# header files as an input to the compiler invocation.
+define extra-files
+$(OUTPUT)/$(1): EXTRA_FILES := $(2)
+$(OUTPUT)/$(1): $(2)
+endef
+
+$(eval $(call extra-files,sysret_ss_attrs_64,thunks.S))
+$(eval $(call extra-files,ptrace_syscall_32,raw_syscall_helper_32.S))
+$(eval $(call extra-files,test_syscall_vdso_32,thunks_32.S))
+$(eval $(call extra-files,fsgsbase_restore_64,clang_helpers_64.S))
+$(eval $(call extra-files,fsgsbase_restore_32,clang_helpers_32.S))
+$(eval $(call extra-files,sysret_rip_64,clang_helpers_64.S))
 
 # check_initial_reg_state is special: it needs a custom entry, and it
 # needs to be static so that its interpreter doesn't destroy its initial
 # state.
 $(OUTPUT)/check_initial_reg_state_32: CFLAGS += -Wl,-ereal_start -static
 $(OUTPUT)/check_initial_reg_state_64: CFLAGS += -Wl,-ereal_start -static
+
+$(OUTPUT)/nx_stack_32: CFLAGS += -Wl,-z,noexecstack
+$(OUTPUT)/nx_stack_64: CFLAGS += -Wl,-z,noexecstack
+
+$(OUTPUT)/avx_64: CFLAGS += -mno-avx -mno-avx512f
+$(OUTPUT)/amx_64: EXTRA_FILES += xstate.c
+$(OUTPUT)/avx_64: EXTRA_FILES += xstate.c
+$(OUTPUT)/apx_64: EXTRA_FILES += xstate.c

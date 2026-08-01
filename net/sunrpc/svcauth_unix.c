@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/types.h>
 #include <linux/sched.h>
 #include <linux/module.h>
@@ -16,10 +17,14 @@
 #include <net/ipv6.h>
 #include <linux/kernel.h>
 #include <linux/user_namespace.h>
+#include <net/genetlink.h>
+#include <uapi/linux/sunrpc_netlink.h>
+#include <trace/events/sunrpc.h>
+
 #define RPCDBG_FACILITY	RPCDBG_AUTH
 
-
 #include "netns.h"
+#include "netlink.h"
 
 /*
  * AUTHUNIX and AUTHNULL credentials are both handled here.
@@ -36,13 +41,20 @@ struct unix_domain {
 
 extern struct auth_ops svcauth_null;
 extern struct auth_ops svcauth_unix;
+extern struct auth_ops svcauth_tls;
 
-static void svcauth_unix_domain_release(struct auth_domain *dom)
+static void svcauth_unix_domain_release_rcu(struct rcu_head *head)
 {
+	struct auth_domain *dom = container_of(head, struct auth_domain, rcu_head);
 	struct unix_domain *ud = container_of(dom, struct unix_domain, h);
 
 	kfree(dom->name);
 	kfree(ud);
+}
+
+static void svcauth_unix_domain_release(struct auth_domain *dom)
+{
+	call_rcu(&dom->rcu_head, svcauth_unix_domain_release_rcu);
 }
 
 struct auth_domain *unix_domain_find(char *name)
@@ -50,7 +62,7 @@ struct auth_domain *unix_domain_find(char *name)
 	struct auth_domain *rv;
 	struct unix_domain *new = NULL;
 
-	rv = auth_domain_lookup(name, NULL);
+	rv = auth_domain_find(name);
 	while(1) {
 		if (rv) {
 			if (new && rv != &new->h)
@@ -63,7 +75,7 @@ struct auth_domain *unix_domain_find(char *name)
 			return rv;
 		}
 
-		new = kmalloc(sizeof(*new), GFP_KERNEL);
+		new = kmalloc_obj(*new);
 		if (new == NULL)
 			return NULL;
 		kref_init(&new->h.ref);
@@ -91,6 +103,7 @@ struct ip_map {
 	char			m_class[8]; /* e.g. "nfsd" */
 	struct in6_addr		m_addr;
 	struct unix_domain	*m_client;
+	struct rcu_head		m_rcu;
 };
 
 static void ip_map_put(struct kref *kref)
@@ -101,7 +114,7 @@ static void ip_map_put(struct kref *kref)
 	if (test_bit(CACHE_VALID, &item->flags) &&
 	    !test_bit(CACHE_NEGATIVE, &item->flags))
 		auth_domain_put(&im->m_client->h);
-	kfree(im);
+	kfree_rcu(im, m_rcu);
 }
 
 static inline int hash_ip6(const struct in6_addr *ip)
@@ -133,11 +146,16 @@ static void update(struct cache_head *cnew, struct cache_head *citem)
 }
 static struct cache_head *ip_map_alloc(void)
 {
-	struct ip_map *i = kmalloc(sizeof(*i), GFP_KERNEL);
+	struct ip_map *i = kmalloc_obj(*i);
 	if (i)
 		return &i->h;
 	else
 		return NULL;
+}
+
+static int ip_map_upcall(struct cache_detail *cd, struct cache_head *h)
+{
+	return sunrpc_cache_upcall(cd, h);
 }
 
 static void ip_map_request(struct cache_detail *cd,
@@ -158,7 +176,7 @@ static void ip_map_request(struct cache_detail *cd,
 }
 
 static struct ip_map *__ip_map_lookup(struct cache_detail *cd, char *class, struct in6_addr *addr);
-static int __ip_map_update(struct cache_detail *cd, struct ip_map *ipm, struct unix_domain *udom, time_t expiry);
+static int __ip_map_update(struct cache_detail *cd, struct ip_map *ipm, struct unix_domain *udom, time64_t expiry);
 
 static int ip_map_parse(struct cache_detail *cd,
 			  char *mesg, int mlen)
@@ -179,7 +197,7 @@ static int ip_map_parse(struct cache_detail *cd,
 
 	struct ip_map *ipmp;
 	struct auth_domain *dom;
-	time_t expiry;
+	time64_t expiry;
 
 	if (mesg[mlen-1] != '\n')
 		return -EINVAL;
@@ -211,9 +229,9 @@ static int ip_map_parse(struct cache_detail *cd,
 		return -EINVAL;
 	}
 
-	expiry = get_expiry(&mesg);
-	if (expiry ==0)
-		return -EINVAL;
+	err = get_expiry(&mesg, &expiry);
+	if (err)
+		return err;
 
 	/* domainname, or empty for NEGATIVE */
 	len = qword_get(&mesg, buf, mlen);
@@ -280,9 +298,9 @@ static struct ip_map *__ip_map_lookup(struct cache_detail *cd, char *class,
 
 	strcpy(ip.m_class, class);
 	ip.m_addr = *addr;
-	ch = sunrpc_cache_lookup(cd, &ip.h,
-				 hash_str(class, IP_HASHBITS) ^
-				 hash_ip6(addr));
+	ch = sunrpc_cache_lookup_rcu(cd, &ip.h,
+				     hash_str(class, IP_HASHBITS) ^
+				     hash_ip6(addr));
 
 	if (ch)
 		return container_of(ch, struct ip_map, h);
@@ -290,17 +308,8 @@ static struct ip_map *__ip_map_lookup(struct cache_detail *cd, char *class,
 		return NULL;
 }
 
-static inline struct ip_map *ip_map_lookup(struct net *net, char *class,
-		struct in6_addr *addr)
-{
-	struct sunrpc_net *sn;
-
-	sn = net_generic(net, sunrpc_net_id);
-	return __ip_map_lookup(sn->ip_map_cache, class, addr);
-}
-
 static int __ip_map_update(struct cache_detail *cd, struct ip_map *ipm,
-		struct unix_domain *udom, time_t expiry)
+		struct unix_domain *udom, time64_t expiry)
 {
 	struct ip_map ip;
 	struct cache_head *ch;
@@ -317,15 +326,6 @@ static int __ip_map_update(struct cache_detail *cd, struct ip_map *ipm,
 		return -ENOMEM;
 	cache_put(ch, cd);
 	return 0;
-}
-
-static inline int ip_map_update(struct net *net, struct ip_map *ipm,
-		struct unix_domain *udom, time_t expiry)
-{
-	struct sunrpc_net *sn;
-
-	sn = net_generic(net, sunrpc_net_id);
-	return __ip_map_update(sn->ip_map_cache, ipm, udom, expiry);
 }
 
 void svcauth_unix_purge(struct net *net)
@@ -412,6 +412,7 @@ struct unix_gid {
 	struct cache_head	h;
 	kuid_t			uid;
 	struct group_info	*gi;
+	struct rcu_head		rcu;
 };
 
 static int unix_gid_hash(kuid_t uid)
@@ -419,14 +420,23 @@ static int unix_gid_hash(kuid_t uid)
 	return hash_long(from_kuid(&init_user_ns, uid), GID_HASHBITS);
 }
 
-static void unix_gid_put(struct kref *kref)
+static void unix_gid_free(struct rcu_head *rcu)
 {
-	struct cache_head *item = container_of(kref, struct cache_head, ref);
-	struct unix_gid *ug = container_of(item, struct unix_gid, h);
+	struct unix_gid *ug = container_of(rcu, struct unix_gid, rcu);
+	struct cache_head *item = &ug->h;
+
 	if (test_bit(CACHE_VALID, &item->flags) &&
 	    !test_bit(CACHE_NEGATIVE, &item->flags))
 		put_group_info(ug->gi);
 	kfree(ug);
+}
+
+static void unix_gid_put(struct kref *kref)
+{
+	struct cache_head *item = container_of(kref, struct cache_head, ref);
+	struct unix_gid *ug = container_of(item, struct unix_gid, h);
+
+	call_rcu(&ug->rcu, unix_gid_free);
 }
 
 static int unix_gid_match(struct cache_head *corig, struct cache_head *cnew)
@@ -451,11 +461,16 @@ static void unix_gid_update(struct cache_head *cnew, struct cache_head *citem)
 }
 static struct cache_head *unix_gid_alloc(void)
 {
-	struct unix_gid *g = kmalloc(sizeof(*g), GFP_KERNEL);
+	struct unix_gid *g = kmalloc_obj(*g);
 	if (g)
 		return &g->h;
 	else
 		return NULL;
+}
+
+static int unix_gid_upcall(struct cache_detail *cd, struct cache_head *h)
+{
+	return sunrpc_cache_upcall_warn(cd, h);
 }
 
 static void unix_gid_request(struct cache_detail *cd,
@@ -482,7 +497,7 @@ static int unix_gid_parse(struct cache_detail *cd,
 	int rv;
 	int i;
 	int err;
-	time_t expiry;
+	time64_t expiry;
 	struct unix_gid ug, *ugp;
 
 	if (mesg[mlen - 1] != '\n')
@@ -492,12 +507,12 @@ static int unix_gid_parse(struct cache_detail *cd,
 	rv = get_int(&mesg, &id);
 	if (rv)
 		return -EINVAL;
-	uid = make_kuid(&init_user_ns, id);
+	uid = make_kuid(current_user_ns(), id);
 	ug.uid = uid;
 
-	expiry = get_expiry(&mesg);
-	if (expiry == 0)
-		return -EINVAL;
+	err = get_expiry(&mesg, &expiry);
+	if (err)
+		return err;
 
 	rv = get_int(&mesg, &gids);
 	if (rv || gids < 0 || gids > 8192)
@@ -514,7 +529,7 @@ static int unix_gid_parse(struct cache_detail *cd,
 		err = -EINVAL;
 		if (rv)
 			goto out;
-		kgid = make_kgid(&init_user_ns, gid);
+		kgid = make_kgid(current_user_ns(), gid);
 		if (!gid_valid(kgid))
 			goto out;
 		ug.gi->gid[i] = kgid;
@@ -547,7 +562,7 @@ static int unix_gid_show(struct seq_file *m,
 			 struct cache_detail *cd,
 			 struct cache_head *h)
 {
-	struct user_namespace *user_ns = &init_user_ns;
+	struct user_namespace *user_ns = m->file->f_cred->user_ns;
 	struct unix_gid *ug;
 	int i;
 	int glen;
@@ -570,11 +585,278 @@ static int unix_gid_show(struct seq_file *m,
 	return 0;
 }
 
+static int unix_gid_notify(struct cache_detail *cd, struct cache_head *h)
+{
+	return sunrpc_cache_notify(cd, h, SUNRPC_CACHE_TYPE_UNIX_GID);
+}
+
+/**
+ * sunrpc_nl_unix_gid_get_reqs_dumpit - dump pending unix_gid requests
+ * @skb: reply buffer
+ * @cb: netlink metadata and command arguments
+ *
+ * Walk the unix_gid cache's pending request list and create a netlink
+ * message with a nested entry for each cache_request, containing the
+ * seqno and uid.
+ *
+ * Uses cb->args[0] as a seqno cursor for dump continuation across
+ * multiple netlink messages.
+ *
+ * Returns the size of the reply or a negative errno.
+ */
+int sunrpc_nl_unix_gid_get_reqs_dumpit(struct sk_buff *skb,
+					struct netlink_callback *cb)
+{
+	struct sunrpc_net *sn;
+	struct cache_detail *cd;
+	struct cache_head **items;
+	u64 *seqnos;
+	int cnt, i, emitted;
+	void *hdr;
+	int ret;
+
+	sn = net_generic(sock_net(skb->sk), sunrpc_net_id);
+
+	cd = sn->unix_gid_cache;
+	if (!cd)
+		return -ENODEV;
+
+	cnt = sunrpc_cache_requests_count(cd);
+	if (!cnt)
+		return 0;
+
+	items = kcalloc(cnt, sizeof(*items), GFP_KERNEL);
+	seqnos = kcalloc(cnt, sizeof(*seqnos), GFP_KERNEL);
+	if (!items || !seqnos) {
+		ret = -ENOMEM;
+		goto out_alloc;
+	}
+
+	cnt = sunrpc_cache_requests_snapshot(cd, items, seqnos, cnt,
+					     cb->args[0]);
+	if (!cnt) {
+		ret = 0;
+		goto out_alloc;
+	}
+
+	hdr = genlmsg_put(skb, NETLINK_CB(cb->skb).portid,
+			  cb->nlh->nlmsg_seq, &sunrpc_nl_family,
+			  NLM_F_MULTI, SUNRPC_CMD_UNIX_GID_GET_REQS);
+	if (!hdr) {
+		ret = -ENOBUFS;
+		goto out_put;
+	}
+
+	emitted = 0;
+	for (i = 0; i < cnt; i++) {
+		struct unix_gid *ug;
+		struct nlattr *nest;
+
+		ug = container_of(items[i], struct unix_gid, h);
+
+		nest = nla_nest_start(skb,
+				      SUNRPC_A_UNIX_GID_REQS_REQUESTS);
+		if (!nest)
+			break;
+
+		if (nla_put_u64_64bit(skb, SUNRPC_A_UNIX_GID_SEQNO,
+				      seqnos[i], 0) ||
+		    nla_put_u32(skb, SUNRPC_A_UNIX_GID_UID,
+				from_kuid(&init_user_ns, ug->uid))) {
+			nla_nest_cancel(skb, nest);
+			break;
+		}
+
+		nla_nest_end(skb, nest);
+		cb->args[0] = seqnos[i];
+		emitted++;
+	}
+
+	if (!emitted) {
+		genlmsg_cancel(skb, hdr);
+		ret = -EMSGSIZE;
+		goto out_put;
+	}
+
+	genlmsg_end(skb, hdr);
+	ret = skb->len;
+out_put:
+	for (i = 0; i < cnt; i++)
+		cache_put(items[i], cd);
+out_alloc:
+	kfree(seqnos);
+	kfree(items);
+	return ret;
+}
+
+/**
+ * sunrpc_nl_parse_one_unix_gid - parse one unix_gid entry from netlink
+ * @cd: cache_detail for the unix_gid cache
+ * @attr: nested attribute containing unix_gid fields
+ *
+ * Parses one unix_gid entry from a netlink message and updates the
+ * cache. Mirrors the logic in unix_gid_parse().
+ *
+ * Returns 0 on success or a negative errno.
+ */
+static int sunrpc_nl_parse_one_unix_gid(struct cache_detail *cd,
+					 struct nlattr *attr)
+{
+	struct nlattr *tb[SUNRPC_A_UNIX_GID_EXPIRY + 1];
+	struct unix_gid ug, *ugp;
+	struct timespec64 boot;
+	struct nlattr *gid_attr;
+	int err, rem, gids = 0;
+	kuid_t uid;
+
+	err = nla_parse_nested(tb, SUNRPC_A_UNIX_GID_EXPIRY, attr,
+			       sunrpc_unix_gid_nl_policy, NULL);
+	if (err)
+		return err;
+
+	/* uid (required) */
+	if (!tb[SUNRPC_A_UNIX_GID_UID])
+		return -EINVAL;
+	uid = make_kuid(current_user_ns(),
+			nla_get_u32(tb[SUNRPC_A_UNIX_GID_UID]));
+	ug.uid = uid;
+
+	/* expiry (required, wallclock seconds) */
+	if (!tb[SUNRPC_A_UNIX_GID_EXPIRY])
+		return -EINVAL;
+	getboottime64(&boot);
+	ug.h.flags = 0;
+	ug.h.expiry_time = nla_get_u64(tb[SUNRPC_A_UNIX_GID_EXPIRY]) -
+			   boot.tv_sec;
+
+	if (tb[SUNRPC_A_UNIX_GID_NEGATIVE]) {
+		ug.gi = groups_alloc(0);
+		if (!ug.gi)
+			return -ENOMEM;
+	} else {
+		/* Count gids */
+		nla_for_each_nested_type(gid_attr, SUNRPC_A_UNIX_GID_GIDS,
+					 attr, rem)
+			gids++;
+
+		if (gids > 8192)
+			return -EINVAL;
+
+		ug.gi = groups_alloc(gids);
+		if (!ug.gi)
+			return -ENOMEM;
+
+		gids = 0;
+		nla_for_each_nested_type(gid_attr, SUNRPC_A_UNIX_GID_GIDS,
+					 attr, rem) {
+			kgid_t kgid;
+
+			kgid = make_kgid(current_user_ns(),
+					 nla_get_u32(gid_attr));
+			if (!gid_valid(kgid)) {
+				err = -EINVAL;
+				goto out;
+			}
+			ug.gi->gid[gids++] = kgid;
+		}
+		groups_sort(ug.gi);
+	}
+
+	ugp = unix_gid_lookup(cd, uid);
+	if (ugp) {
+		struct cache_head *ch;
+
+		ch = sunrpc_cache_update(cd, &ug.h, &ugp->h,
+					 unix_gid_hash(uid));
+		if (!ch) {
+			err = -ENOMEM;
+		} else {
+			err = 0;
+			cache_put(ch, cd);
+		}
+	} else {
+		err = -ENOMEM;
+	}
+out:
+	if (ug.gi)
+		put_group_info(ug.gi);
+	return err;
+}
+
+/**
+ * sunrpc_nl_unix_gid_set_reqs_doit - respond to unix_gid requests
+ * @skb: reply buffer
+ * @info: netlink metadata and command arguments
+ *
+ * Parse one or more unix_gid cache responses from userspace and
+ * update the unix_gid cache accordingly.
+ *
+ * Returns 0 on success or a negative errno.
+ */
+int sunrpc_nl_unix_gid_set_reqs_doit(struct sk_buff *skb,
+				     struct genl_info *info)
+{
+	struct sunrpc_net *sn;
+	struct cache_detail *cd;
+	const struct nlattr *attr;
+	int rem, ret = 0;
+
+	sn = net_generic(genl_info_net(info), sunrpc_net_id);
+
+	cd = sn->unix_gid_cache;
+	if (!cd)
+		return -ENODEV;
+
+	nlmsg_for_each_attr_type(attr, SUNRPC_A_UNIX_GID_REQS_REQUESTS,
+				 info->nlhdr, GENL_HDRLEN, rem) {
+		ret = sunrpc_nl_parse_one_unix_gid(cd,
+						   (struct nlattr *)attr);
+		if (ret)
+			break;
+	}
+
+	return ret;
+}
+
+/**
+ * sunrpc_nl_cache_flush_doit - flush sunrpc caches via netlink
+ * @skb: reply buffer
+ * @info: netlink metadata and command arguments
+ *
+ * Flush the ip_map and/or unix_gid caches. If SUNRPC_A_CACHE_FLUSH_MASK
+ * is provided, only flush the caches indicated by the bitmask (bit 1 =
+ * ip_map, bit 2 = unix_gid). If omitted, flush both.
+ *
+ * Return 0 on success or a negative errno.
+ */
+int sunrpc_nl_cache_flush_doit(struct sk_buff *skb, struct genl_info *info)
+{
+	struct sunrpc_net *sn;
+	u32 mask = ~0U;
+
+	sn = net_generic(genl_info_net(info), sunrpc_net_id);
+
+	if (info->attrs[SUNRPC_A_CACHE_FLUSH_MASK])
+		mask = nla_get_u32(info->attrs[SUNRPC_A_CACHE_FLUSH_MASK]);
+
+	if ((mask & SUNRPC_CACHE_TYPE_IP_MAP) &&
+	    sn->ip_map_cache)
+		cache_purge(sn->ip_map_cache);
+
+	if ((mask & SUNRPC_CACHE_TYPE_UNIX_GID) &&
+	    sn->unix_gid_cache)
+		cache_purge(sn->unix_gid_cache);
+
+	return 0;
+}
+
 static const struct cache_detail unix_gid_cache_template = {
 	.owner		= THIS_MODULE,
 	.hash_size	= GID_HASHMAX,
 	.name		= "auth.unix.gid",
 	.cache_put	= unix_gid_put,
+	.cache_upcall	= unix_gid_upcall,
+	.cache_notify	= unix_gid_notify,
 	.cache_request	= unix_gid_request,
 	.cache_parse	= unix_gid_parse,
 	.cache_show	= unix_gid_show,
@@ -619,7 +901,7 @@ static struct unix_gid *unix_gid_lookup(struct cache_detail *cd, kuid_t uid)
 	struct cache_head *ch;
 
 	ug.uid = uid;
-	ch = sunrpc_cache_lookup(cd, &ug.h, unix_gid_hash(uid));
+	ch = sunrpc_cache_lookup_rcu(cd, &ug.h, unix_gid_hash(uid));
 	if (ch)
 		return container_of(ch, struct unix_gid, h);
 	else
@@ -652,7 +934,7 @@ static struct group_info *unix_gid_find(kuid_t uid, struct svc_rqst *rqstp)
 	}
 }
 
-int
+enum svc_auth_status
 svcauth_unix_set_client(struct svc_rqst *rqstp)
 {
 	struct sockaddr_in *sin;
@@ -679,11 +961,13 @@ svcauth_unix_set_client(struct svc_rqst *rqstp)
 
 	rqstp->rq_client = NULL;
 	if (rqstp->rq_proc == 0)
-		return SVC_OK;
+		goto out;
 
+	rqstp->rq_auth_stat = rpc_autherr_badcred;
 	ipm = ip_map_cached_get(xprt);
 	if (ipm == NULL)
-		ipm = __ip_map_lookup(sn->ip_map_cache, rqstp->rq_server->sv_program->pg_class,
+		ipm = __ip_map_lookup(sn->ip_map_cache,
+				      rqstp->rq_server->sv_programs->pg_class,
 				    &sin6->sin6_addr);
 
 	if (ipm == NULL)
@@ -717,29 +1001,46 @@ svcauth_unix_set_client(struct svc_rqst *rqstp)
 		put_group_info(cred->cr_group_info);
 		cred->cr_group_info = gi;
 	}
+
+out:
+	rqstp->rq_auth_stat = rpc_auth_ok;
 	return SVC_OK;
 }
-
 EXPORT_SYMBOL_GPL(svcauth_unix_set_client);
 
-static int
-svcauth_null_accept(struct svc_rqst *rqstp, __be32 *authp)
+/**
+ * svcauth_null_accept - Decode and validate incoming RPC_AUTH_NULL credential
+ * @rqstp: RPC transaction
+ *
+ * Return values:
+ *   %SVC_OK: Both credential and verifier are valid
+ *   %SVC_DENIED: Credential or verifier is not valid
+ *   %SVC_GARBAGE: Failed to decode credential or verifier
+ *   %SVC_CLOSE: Temporary failure
+ *
+ * rqstp->rq_auth_stat is set as mandated by RFC 5531.
+ */
+static enum svc_auth_status
+svcauth_null_accept(struct svc_rqst *rqstp)
 {
-	struct kvec	*argv = &rqstp->rq_arg.head[0];
-	struct kvec	*resv = &rqstp->rq_res.head[0];
+	struct xdr_stream *xdr = &rqstp->rq_arg_stream;
 	struct svc_cred	*cred = &rqstp->rq_cred;
+	u32 flavor, len;
+	void *body;
 
-	if (argv->iov_len < 3*4)
+	/* Length of Call's credential body field: */
+	if (xdr_stream_decode_u32(xdr, &len) < 0)
 		return SVC_GARBAGE;
-
-	if (svc_getu32(argv) != 0) {
-		dprintk("svc: bad null cred\n");
-		*authp = rpc_autherr_badcred;
+	if (len != 0) {
+		rqstp->rq_auth_stat = rpc_autherr_badcred;
 		return SVC_DENIED;
 	}
-	if (svc_getu32(argv) != htonl(RPC_AUTH_NULL) || svc_getu32(argv) != 0) {
-		dprintk("svc: bad null verf\n");
-		*authp = rpc_autherr_badverf;
+
+	/* Call's verf field: */
+	if (xdr_stream_decode_opaque_auth(xdr, &flavor, &body, &len) < 0)
+		return SVC_GARBAGE;
+	if (flavor != RPC_AUTH_NULL || len != 0) {
+		rqstp->rq_auth_stat = rpc_autherr_badverf;
 		return SVC_DENIED;
 	}
 
@@ -750,9 +1051,11 @@ svcauth_null_accept(struct svc_rqst *rqstp, __be32 *authp)
 	if (cred->cr_group_info == NULL)
 		return SVC_CLOSE; /* kmalloc failure - client must retry */
 
-	/* Put NULL verifier */
-	svc_putnl(resv, RPC_AUTH_NULL);
-	svc_putnl(resv, 0);
+	if (xdr_stream_encode_opaque_auth(&rqstp->rq_res_stream,
+					  RPC_AUTH_NULL, NULL, 0) < 0)
+		return SVC_CLOSE;
+	if (!svcxdr_set_accept_stat(rqstp))
+		return SVC_CLOSE;
 
 	rqstp->rq_cred.cr_flavor = RPC_AUTH_NULL;
 	return SVC_OK;
@@ -776,31 +1079,133 @@ struct auth_ops svcauth_null = {
 	.name		= "null",
 	.owner		= THIS_MODULE,
 	.flavour	= RPC_AUTH_NULL,
-	.accept 	= svcauth_null_accept,
+	.accept		= svcauth_null_accept,
 	.release	= svcauth_null_release,
 	.set_client	= svcauth_unix_set_client,
 };
 
 
-static int
-svcauth_unix_accept(struct svc_rqst *rqstp, __be32 *authp)
+/**
+ * svcauth_tls_accept - Decode and validate incoming RPC_AUTH_TLS credential
+ * @rqstp: RPC transaction
+ *
+ * Return values:
+ *   %SVC_OK: Both credential and verifier are valid
+ *   %SVC_DENIED: Credential or verifier is not valid
+ *   %SVC_GARBAGE: Failed to decode credential or verifier
+ *   %SVC_CLOSE: Temporary failure
+ *
+ * rqstp->rq_auth_stat is set as mandated by RFC 5531.
+ */
+static enum svc_auth_status
+svcauth_tls_accept(struct svc_rqst *rqstp)
 {
-	struct kvec	*argv = &rqstp->rq_arg.head[0];
-	struct kvec	*resv = &rqstp->rq_res.head[0];
+	struct xdr_stream *xdr = &rqstp->rq_arg_stream;
 	struct svc_cred	*cred = &rqstp->rq_cred;
-	u32		slen, i;
-	int		len   = argv->iov_len;
+	struct svc_xprt *xprt = rqstp->rq_xprt;
+	u32 flavor, len;
+	void *body;
+	__be32 *p;
 
-	if ((len -= 3*4) < 0)
+	/* Length of Call's credential body field: */
+	if (xdr_stream_decode_u32(xdr, &len) < 0)
+		return SVC_GARBAGE;
+	if (len != 0) {
+		rqstp->rq_auth_stat = rpc_autherr_badcred;
+		return SVC_DENIED;
+	}
+
+	/* Call's verf field: */
+	if (xdr_stream_decode_opaque_auth(xdr, &flavor, &body, &len) < 0)
+		return SVC_GARBAGE;
+	if (flavor != RPC_AUTH_NULL || len != 0) {
+		rqstp->rq_auth_stat = rpc_autherr_badverf;
+		return SVC_DENIED;
+	}
+
+	/* AUTH_TLS is not valid on non-NULL procedures */
+	if (rqstp->rq_proc != 0) {
+		rqstp->rq_auth_stat = rpc_autherr_badcred;
+		return SVC_DENIED;
+	}
+
+	/* Signal that mapping to nobody uid/gid is required */
+	cred->cr_uid = INVALID_UID;
+	cred->cr_gid = INVALID_GID;
+	cred->cr_group_info = groups_alloc(0);
+	if (cred->cr_group_info == NULL)
+		return SVC_CLOSE;
+
+	if (xprt->xpt_ops->xpo_handshake) {
+		p = xdr_reserve_space(&rqstp->rq_res_stream, XDR_UNIT * 2 + 8);
+		if (!p)
+			return SVC_CLOSE;
+		trace_svc_tls_start(xprt);
+		*p++ = rpc_auth_null;
+		*p++ = cpu_to_be32(8);
+		memcpy(p, "STARTTLS", 8);
+
+		set_bit(XPT_HANDSHAKE, &xprt->xpt_flags);
+		svc_xprt_enqueue(xprt);
+	} else {
+		trace_svc_tls_unavailable(xprt);
+		if (xdr_stream_encode_opaque_auth(&rqstp->rq_res_stream,
+						  RPC_AUTH_NULL, NULL, 0) < 0)
+			return SVC_CLOSE;
+	}
+	if (!svcxdr_set_accept_stat(rqstp))
+		return SVC_CLOSE;
+
+	rqstp->rq_cred.cr_flavor = RPC_AUTH_TLS;
+	return SVC_OK;
+}
+
+struct auth_ops svcauth_tls = {
+	.name		= "tls",
+	.owner		= THIS_MODULE,
+	.flavour	= RPC_AUTH_TLS,
+	.accept		= svcauth_tls_accept,
+	.release	= svcauth_null_release,
+	.set_client	= svcauth_unix_set_client,
+};
+
+
+/**
+ * svcauth_unix_accept - Decode and validate incoming RPC_AUTH_SYS credential
+ * @rqstp: RPC transaction
+ *
+ * Return values:
+ *   %SVC_OK: Both credential and verifier are valid
+ *   %SVC_DENIED: Credential or verifier is not valid
+ *   %SVC_GARBAGE: Failed to decode credential or verifier
+ *   %SVC_CLOSE: Temporary failure
+ *
+ * rqstp->rq_auth_stat is set as mandated by RFC 5531.
+ */
+static enum svc_auth_status
+svcauth_unix_accept(struct svc_rqst *rqstp)
+{
+	struct xdr_stream *xdr = &rqstp->rq_arg_stream;
+	struct svc_cred	*cred = &rqstp->rq_cred;
+	struct user_namespace *userns;
+	u32 flavor, len, i;
+	void *body;
+	__be32 *p;
+
+	/*
+	 * This implementation ignores the length of the Call's
+	 * credential body field and the timestamp and machinename
+	 * fields.
+	 */
+	p = xdr_inline_decode(xdr, XDR_UNIT * 3);
+	if (!p)
+		return SVC_GARBAGE;
+	len = be32_to_cpup(p + 2);
+	if (len > RPC_MAX_MACHINENAME)
+		return SVC_GARBAGE;
+	if (!xdr_inline_decode(xdr, len))
 		return SVC_GARBAGE;
 
-	svc_getu32(argv);			/* length */
-	svc_getu32(argv);			/* time stamp */
-	slen = XDR_QUADLEN(svc_getnl(argv));	/* machname length */
-	if (slen > 64 || (len -= (slen + 3)*4) < 0)
-		goto badcred;
-	argv->iov_base = (void*)((__be32*)argv->iov_base + slen);	/* skip machname */
-	argv->iov_len -= slen*4;
 	/*
 	 * Note: we skip uid_valid()/gid_valid() checks here for
 	 * backwards compatibility with clients that use -1 id's.
@@ -808,33 +1213,50 @@ svcauth_unix_accept(struct svc_rqst *rqstp, __be32 *authp)
 	 * (export-specific) anonymous id by nfsd_setuser.
 	 * Supplementary gid's will be left alone.
 	 */
-	cred->cr_uid = make_kuid(&init_user_ns, svc_getnl(argv)); /* uid */
-	cred->cr_gid = make_kgid(&init_user_ns, svc_getnl(argv)); /* gid */
-	slen = svc_getnl(argv);			/* gids length */
-	if (slen > UNX_NGROUPS || (len -= (slen + 2)*4) < 0)
+	userns = (rqstp->rq_xprt && rqstp->rq_xprt->xpt_cred) ?
+		rqstp->rq_xprt->xpt_cred->user_ns : &init_user_ns;
+	if (xdr_stream_decode_u32(xdr, &i) < 0)
+		return SVC_GARBAGE;
+	cred->cr_uid = make_kuid(userns, i);
+	if (xdr_stream_decode_u32(xdr, &i) < 0)
+		return SVC_GARBAGE;
+	cred->cr_gid = make_kgid(userns, i);
+
+	if (xdr_stream_decode_u32(xdr, &len) < 0)
+		return SVC_GARBAGE;
+	if (len > UNX_NGROUPS)
 		goto badcred;
-	cred->cr_group_info = groups_alloc(slen);
+	p = xdr_inline_decode(xdr, XDR_UNIT * len);
+	if (!p)
+		return SVC_GARBAGE;
+	cred->cr_group_info = groups_alloc(len);
 	if (cred->cr_group_info == NULL)
 		return SVC_CLOSE;
-	for (i = 0; i < slen; i++) {
-		kgid_t kgid = make_kgid(&init_user_ns, svc_getnl(argv));
+	for (i = 0; i < len; i++) {
+		kgid_t kgid = make_kgid(userns, be32_to_cpup(p++));
 		cred->cr_group_info->gid[i] = kgid;
 	}
 	groups_sort(cred->cr_group_info);
-	if (svc_getu32(argv) != htonl(RPC_AUTH_NULL) || svc_getu32(argv) != 0) {
-		*authp = rpc_autherr_badverf;
+
+	/* Call's verf field: */
+	if (xdr_stream_decode_opaque_auth(xdr, &flavor, &body, &len) < 0)
+		return SVC_GARBAGE;
+	if (flavor != RPC_AUTH_NULL || len != 0) {
+		rqstp->rq_auth_stat = rpc_autherr_badverf;
 		return SVC_DENIED;
 	}
 
-	/* Put NULL verifier */
-	svc_putnl(resv, RPC_AUTH_NULL);
-	svc_putnl(resv, 0);
+	if (xdr_stream_encode_opaque_auth(&rqstp->rq_res_stream,
+					  RPC_AUTH_NULL, NULL, 0) < 0)
+		return SVC_CLOSE;
+	if (!svcxdr_set_accept_stat(rqstp))
+		return SVC_CLOSE;
 
 	rqstp->rq_cred.cr_flavor = RPC_AUTH_UNIX;
 	return SVC_OK;
 
 badcred:
-	*authp = rpc_autherr_badcred;
+	rqstp->rq_auth_stat = rpc_autherr_badcred;
 	return SVC_DENIED;
 }
 
@@ -858,17 +1280,261 @@ struct auth_ops svcauth_unix = {
 	.name		= "unix",
 	.owner		= THIS_MODULE,
 	.flavour	= RPC_AUTH_UNIX,
-	.accept 	= svcauth_unix_accept,
+	.accept		= svcauth_unix_accept,
 	.release	= svcauth_unix_release,
 	.domain_release	= svcauth_unix_domain_release,
 	.set_client	= svcauth_unix_set_client,
 };
+
+static int ip_map_notify(struct cache_detail *cd, struct cache_head *h)
+{
+	return sunrpc_cache_notify(cd, h, SUNRPC_CACHE_TYPE_IP_MAP);
+}
+
+/**
+ * sunrpc_nl_ip_map_get_reqs_dumpit - dump pending ip_map requests
+ * @skb: reply buffer
+ * @cb: netlink metadata and command arguments
+ *
+ * Walk the ip_map cache's pending request list and create a netlink
+ * message with a nested entry for each cache_request, containing the
+ * seqno, class and addr.
+ *
+ * Uses cb->args[0] as a seqno cursor for dump continuation across
+ * multiple netlink messages.
+ *
+ * Returns the size of the reply or a negative errno.
+ */
+int sunrpc_nl_ip_map_get_reqs_dumpit(struct sk_buff *skb,
+				     struct netlink_callback *cb)
+{
+	struct sunrpc_net *sn;
+	struct cache_detail *cd;
+	struct cache_head **items;
+	u64 *seqnos;
+	int cnt, i, emitted;
+	void *hdr;
+	int ret;
+
+	sn = net_generic(sock_net(skb->sk), sunrpc_net_id);
+
+	cd = sn->ip_map_cache;
+	if (!cd)
+		return -ENODEV;
+
+	cnt = sunrpc_cache_requests_count(cd);
+	if (!cnt)
+		return 0;
+
+	items = kcalloc(cnt, sizeof(*items), GFP_KERNEL);
+	seqnos = kcalloc(cnt, sizeof(*seqnos), GFP_KERNEL);
+	if (!items || !seqnos) {
+		ret = -ENOMEM;
+		goto out_alloc;
+	}
+
+	cnt = sunrpc_cache_requests_snapshot(cd, items, seqnos, cnt,
+					     cb->args[0]);
+	if (!cnt) {
+		ret = 0;
+		goto out_alloc;
+	}
+
+	hdr = genlmsg_put(skb, NETLINK_CB(cb->skb).portid,
+			  cb->nlh->nlmsg_seq, &sunrpc_nl_family,
+			  NLM_F_MULTI, SUNRPC_CMD_IP_MAP_GET_REQS);
+	if (!hdr) {
+		ret = -ENOBUFS;
+		goto out_put;
+	}
+
+	emitted = 0;
+	for (i = 0; i < cnt; i++) {
+		struct ip_map *im;
+		struct nlattr *nest;
+		char text_addr[40];
+
+		im = container_of(items[i], struct ip_map, h);
+
+		if (ipv6_addr_v4mapped(&im->m_addr))
+			snprintf(text_addr, 20, "%pI4",
+				 &im->m_addr.s6_addr32[3]);
+		else
+			snprintf(text_addr, 40, "%pI6", &im->m_addr);
+
+		nest = nla_nest_start(skb, SUNRPC_A_IP_MAP_REQS_REQUESTS);
+		if (!nest)
+			break;
+
+		if (nla_put_u64_64bit(skb, SUNRPC_A_IP_MAP_SEQNO,
+				      seqnos[i], 0) ||
+		    nla_put_string(skb, SUNRPC_A_IP_MAP_CLASS,
+				   im->m_class) ||
+		    nla_put_string(skb, SUNRPC_A_IP_MAP_ADDR, text_addr)) {
+			nla_nest_cancel(skb, nest);
+			break;
+		}
+
+		nla_nest_end(skb, nest);
+		cb->args[0] = seqnos[i];
+		emitted++;
+	}
+
+	if (!emitted) {
+		genlmsg_cancel(skb, hdr);
+		ret = -EMSGSIZE;
+		goto out_put;
+	}
+
+	genlmsg_end(skb, hdr);
+	ret = skb->len;
+out_put:
+	for (i = 0; i < cnt; i++)
+		cache_put(items[i], cd);
+out_alloc:
+	kfree(seqnos);
+	kfree(items);
+	return ret;
+}
+
+/**
+ * sunrpc_nl_parse_one_ip_map - parse one ip_map entry from netlink
+ * @cd: cache_detail for the ip_map cache
+ * @attr: nested attribute containing ip_map fields
+ *
+ * Parses one ip_map entry from a netlink message and updates the
+ * cache. Mirrors the logic in ip_map_parse().
+ *
+ * Returns 0 on success or a negative errno.
+ */
+static int sunrpc_nl_parse_one_ip_map(struct cache_detail *cd,
+				      struct nlattr *attr)
+{
+	struct nlattr *tb[SUNRPC_A_IP_MAP_EXPIRY + 1];
+	union {
+		struct sockaddr		sa;
+		struct sockaddr_in	s4;
+		struct sockaddr_in6	s6;
+	} address;
+	struct sockaddr_in6 sin6;
+	struct ip_map *ipmp;
+	struct auth_domain *dom = NULL;
+	struct unix_domain *udom = NULL;
+	struct timespec64 boot;
+	time64_t expiry;
+	char class[8];
+	int err;
+	int len;
+
+	err = nla_parse_nested(tb, SUNRPC_A_IP_MAP_EXPIRY, attr,
+			       sunrpc_ip_map_nl_policy, NULL);
+	if (err)
+		return err;
+
+	/* class (required) */
+	if (!tb[SUNRPC_A_IP_MAP_CLASS])
+		return -EINVAL;
+	len = nla_len(tb[SUNRPC_A_IP_MAP_CLASS]);
+	if (len <= 0 || len > sizeof(class))
+		return -EINVAL;
+	nla_strscpy(class, tb[SUNRPC_A_IP_MAP_CLASS], sizeof(class));
+
+	/* addr (required) */
+	if (!tb[SUNRPC_A_IP_MAP_ADDR])
+		return -EINVAL;
+	if (rpc_pton(cd->net, nla_data(tb[SUNRPC_A_IP_MAP_ADDR]),
+		     nla_len(tb[SUNRPC_A_IP_MAP_ADDR]) - 1,
+		     &address.sa, sizeof(address)) == 0)
+		return -EINVAL;
+
+	switch (address.sa.sa_family) {
+	case AF_INET:
+		sin6.sin6_family = AF_INET6;
+		ipv6_addr_set_v4mapped(address.s4.sin_addr.s_addr,
+				       &sin6.sin6_addr);
+		break;
+#if IS_ENABLED(CONFIG_IPV6)
+	case AF_INET6:
+		memcpy(&sin6, &address.s6, sizeof(sin6));
+		break;
+#endif
+	default:
+		return -EINVAL;
+	}
+
+	/* expiry (required, wallclock seconds) */
+	if (!tb[SUNRPC_A_IP_MAP_EXPIRY])
+		return -EINVAL;
+	getboottime64(&boot);
+	expiry = nla_get_u64(tb[SUNRPC_A_IP_MAP_EXPIRY]) - boot.tv_sec;
+
+	/* domain name or negative */
+	if (tb[SUNRPC_A_IP_MAP_NEGATIVE]) {
+		udom = NULL;
+	} else if (tb[SUNRPC_A_IP_MAP_DOMAIN]) {
+		dom = unix_domain_find(nla_data(tb[SUNRPC_A_IP_MAP_DOMAIN]));
+		if (!dom)
+			return -ENOENT;
+		udom = container_of(dom, struct unix_domain, h);
+	} else {
+		return -EINVAL;
+	}
+
+	ipmp = __ip_map_lookup(cd, class, &sin6.sin6_addr);
+	if (ipmp)
+		err = __ip_map_update(cd, ipmp, udom, expiry);
+	else
+		err = -ENOMEM;
+
+	if (dom)
+		auth_domain_put(dom);
+
+	cache_flush();
+	return err;
+}
+
+/**
+ * sunrpc_nl_ip_map_set_reqs_doit - respond to ip_map requests
+ * @skb: reply buffer
+ * @info: netlink metadata and command arguments
+ *
+ * Parse one or more ip_map cache responses from userspace and
+ * update the ip_map cache accordingly.
+ *
+ * Returns 0 on success or a negative errno.
+ */
+int sunrpc_nl_ip_map_set_reqs_doit(struct sk_buff *skb,
+				   struct genl_info *info)
+{
+	struct sunrpc_net *sn;
+	struct cache_detail *cd;
+	const struct nlattr *attr;
+	int rem, ret = 0;
+
+	sn = net_generic(genl_info_net(info), sunrpc_net_id);
+
+	cd = sn->ip_map_cache;
+	if (!cd)
+		return -ENODEV;
+
+	nlmsg_for_each_attr_type(attr, SUNRPC_A_IP_MAP_REQS_REQUESTS,
+				 info->nlhdr, GENL_HDRLEN, rem) {
+		ret = sunrpc_nl_parse_one_ip_map(cd,
+						 (struct nlattr *)attr);
+		if (ret)
+			break;
+	}
+
+	return ret;
+}
 
 static const struct cache_detail ip_map_cache_template = {
 	.owner		= THIS_MODULE,
 	.hash_size	= IP_HASHMAX,
 	.name		= "auth.unix.ip",
 	.cache_put	= ip_map_put,
+	.cache_upcall	= ip_map_upcall,
+	.cache_notify	= ip_map_notify,
 	.cache_request	= ip_map_request,
 	.cache_parse	= ip_map_parse,
 	.cache_show	= ip_map_show,

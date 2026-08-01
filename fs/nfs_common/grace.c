@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Common code for control of lockd and nfsv4 grace periods.
  *
@@ -8,6 +9,7 @@
 #include <net/net_namespace.h>
 #include <net/netns/generic.h>
 #include <linux/fs.h>
+#include <linux/filelock.h>
 
 static unsigned int grace_net_id;
 static DEFINE_SPINLOCK(grace_lock);
@@ -41,7 +43,6 @@ EXPORT_SYMBOL_GPL(locks_start_grace);
 
 /**
  * locks_end_grace
- * @net: net namespace that this lock manager belongs to
  * @lm: who this grace period is for
  *
  * Call this function to state that the given lock manager is ready to
@@ -68,15 +69,20 @@ __state_in_grace(struct net *net, bool open)
 	if (!open)
 		return !list_empty(grace_list);
 
+	spin_lock(&grace_lock);
 	list_for_each_entry(lm, grace_list, list) {
-		if (lm->block_opens)
+		if (lm->block_opens) {
+			spin_unlock(&grace_lock);
 			return true;
+		}
 	}
+	spin_unlock(&grace_lock);
 	return false;
 }
 
 /**
  * locks_in_grace
+ * @net: network namespace
  *
  * Lock managers call this function to determine when it is OK for them
  * to answer ordinary lock requests, and when they should accept only
@@ -133,6 +139,7 @@ exit_grace(void)
 }
 
 MODULE_AUTHOR("Jeff Layton <jlayton@primarydata.com>");
+MODULE_DESCRIPTION("NFS client and server infrastructure");
 MODULE_LICENSE("GPL");
 module_init(init_grace)
 module_exit(exit_grace)

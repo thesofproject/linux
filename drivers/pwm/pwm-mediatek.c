@@ -1,14 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Mediatek Pulse Width Modulator driver
+ * MediaTek Pulse Width Modulator driver
  *
  * Copyright (C) 2015 John Crispin <blogic@openwrt.org>
  * Copyright (C) 2017 Zhi Mao <zhi.mao@mediatek.com>
  *
- * This file is licensed under the terms of the GNU General Public
- * License version 2. This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
+#include <linux/bitfield.h>
 #include <linux/err.h>
 #include <linux/io.h>
 #include <linux/ioport.h>
@@ -16,7 +15,6 @@
 #include <linux/module.h>
 #include <linux/clk.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/pwm.h>
 #include <linux/slab.h>
@@ -24,285 +22,624 @@
 
 /* PWM registers and bits definitions */
 #define PWMCON			0x00
+#define PWMCON_CLKDIV			GENMASK(2, 0)
+#define PWMCON_CLKSEL			BIT(3)
+#define PWMCON_OLD_PWM_MODE		BIT(15)
 #define PWMHDUR			0x04
 #define PWMLDUR			0x08
 #define PWMGDUR			0x0c
 #define PWMWAVENUM		0x28
 #define PWMDWIDTH		0x2c
+#define PWMDWIDTH_PERIOD		GENMASK(12, 0)
 #define PWM45DWIDTH_FIXUP	0x30
 #define PWMTHRES		0x30
+#define PWMTHRES_DUTY			GENMASK(12, 0)
 #define PWM45THRES_FIXUP	0x34
+#define PWM_CK_26M_SEL_V3	0x74
+#define PWM_CK_26M_SEL		0x210
 
-#define PWM_CLK_DIV_MAX		7
-
-enum {
-	MTK_CLK_MAIN = 0,
-	MTK_CLK_TOP,
-	MTK_CLK_PWM1,
-	MTK_CLK_PWM2,
-	MTK_CLK_PWM3,
-	MTK_CLK_PWM4,
-	MTK_CLK_PWM5,
-	MTK_CLK_PWM6,
-	MTK_CLK_PWM7,
-	MTK_CLK_PWM8,
-	MTK_CLK_MAX,
-};
-
-static const char * const mtk_pwm_clk_name[MTK_CLK_MAX] = {
-	"main", "top", "pwm1", "pwm2", "pwm3", "pwm4", "pwm5", "pwm6", "pwm7",
-	"pwm8"
-};
-
-struct mtk_pwm_platform_data {
+struct pwm_mediatek_of_data {
 	unsigned int num_pwms;
+	bool clksel_fixup;
 	bool pwm45_fixup;
+	u16 pwm_ck_26m_sel_reg;
+	unsigned int chanreg_base;
+	unsigned int chanreg_width;
 };
 
 /**
- * struct mtk_pwm_chip - struct representing PWM chip
- * @chip: linux PWM chip representation
+ * struct pwm_mediatek_chip - struct representing PWM chip
  * @regs: base address of PWM chip
- * @clks: list of clocks
+ * @clk_top: the top clock generator
+ * @clk_main: the clock used by PWM core
+ * @soc: pointer to chip's platform data
+ * @clk_pwms: the clock and clkrate used by each PWM channel
  */
-struct mtk_pwm_chip {
-	struct pwm_chip chip;
+struct pwm_mediatek_chip {
 	void __iomem *regs;
-	struct clk *clks[MTK_CLK_MAX];
-	const struct mtk_pwm_platform_data *soc;
+	struct clk *clk_top;
+	struct clk *clk_main;
+	const struct pwm_mediatek_of_data *soc;
+	struct {
+		struct clk *clk;
+		unsigned long rate;
+	} clk_pwms[];
 };
 
-static const unsigned int mtk_pwm_reg_offset[] = {
-	0x0010, 0x0050, 0x0090, 0x00d0, 0x0110, 0x0150, 0x0190, 0x0220
-};
-
-static inline struct mtk_pwm_chip *to_mtk_pwm_chip(struct pwm_chip *chip)
+static inline struct pwm_mediatek_chip *
+to_pwm_mediatek_chip(struct pwm_chip *chip)
 {
-	return container_of(chip, struct mtk_pwm_chip, chip);
+	return pwmchip_get_drvdata(chip);
 }
 
-static int mtk_pwm_clk_enable(struct pwm_chip *chip, struct pwm_device *pwm)
+static int pwm_mediatek_clk_enable(struct pwm_mediatek_chip *pc,
+				   unsigned int hwpwm)
 {
-	struct mtk_pwm_chip *pc = to_mtk_pwm_chip(chip);
 	int ret;
 
-	ret = clk_prepare_enable(pc->clks[MTK_CLK_TOP]);
+	ret = clk_prepare_enable(pc->clk_top);
 	if (ret < 0)
 		return ret;
 
-	ret = clk_prepare_enable(pc->clks[MTK_CLK_MAIN]);
+	ret = clk_prepare_enable(pc->clk_main);
 	if (ret < 0)
 		goto disable_clk_top;
 
-	ret = clk_prepare_enable(pc->clks[MTK_CLK_PWM1 + pwm->hwpwm]);
+	ret = clk_prepare_enable(pc->clk_pwms[hwpwm].clk);
 	if (ret < 0)
 		goto disable_clk_main;
 
+	if (!pc->clk_pwms[hwpwm].rate) {
+		pc->clk_pwms[hwpwm].rate = clk_get_rate(pc->clk_pwms[hwpwm].clk);
+
+		/*
+		 * With the clk running with not more than 1 GHz the
+		 * calculations in .apply() won't overflow.
+		 */
+		if (!pc->clk_pwms[hwpwm].rate ||
+		    pc->clk_pwms[hwpwm].rate > 1000000000) {
+			ret = -EINVAL;
+			goto disable_clk_hwpwm;
+		}
+	}
+
 	return 0;
 
+disable_clk_hwpwm:
+	clk_disable_unprepare(pc->clk_pwms[hwpwm].clk);
 disable_clk_main:
-	clk_disable_unprepare(pc->clks[MTK_CLK_MAIN]);
+	clk_disable_unprepare(pc->clk_main);
 disable_clk_top:
-	clk_disable_unprepare(pc->clks[MTK_CLK_TOP]);
+	clk_disable_unprepare(pc->clk_top);
 
 	return ret;
 }
 
-static void mtk_pwm_clk_disable(struct pwm_chip *chip, struct pwm_device *pwm)
+static void pwm_mediatek_clk_disable(struct pwm_mediatek_chip *pc,
+				     unsigned int hwpwm)
 {
-	struct mtk_pwm_chip *pc = to_mtk_pwm_chip(chip);
-
-	clk_disable_unprepare(pc->clks[MTK_CLK_PWM1 + pwm->hwpwm]);
-	clk_disable_unprepare(pc->clks[MTK_CLK_MAIN]);
-	clk_disable_unprepare(pc->clks[MTK_CLK_TOP]);
+	clk_disable_unprepare(pc->clk_pwms[hwpwm].clk);
+	clk_disable_unprepare(pc->clk_main);
+	clk_disable_unprepare(pc->clk_top);
 }
 
-static inline u32 mtk_pwm_readl(struct mtk_pwm_chip *chip, unsigned int num,
-				unsigned int offset)
+static inline void pwm_mediatek_writel(struct pwm_mediatek_chip *chip,
+				       unsigned int num, unsigned int offset,
+				       u32 value)
 {
-	return readl(chip->regs + mtk_pwm_reg_offset[num] + offset);
+	writel(value, chip->regs + chip->soc->chanreg_base +
+	       num * chip->soc->chanreg_width + offset);
 }
 
-static inline void mtk_pwm_writel(struct mtk_pwm_chip *chip,
-				  unsigned int num, unsigned int offset,
-				  u32 value)
+static inline u32 pwm_mediatek_readl(struct pwm_mediatek_chip *chip,
+				     unsigned int num, unsigned int offset)
 {
-	writel(value, chip->regs + mtk_pwm_reg_offset[num] + offset);
+	return readl(chip->regs + chip->soc->chanreg_base +
+		     num * chip->soc->chanreg_width + offset);
 }
 
-static int mtk_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
-			  int duty_ns, int period_ns)
-{
-	struct mtk_pwm_chip *pc = to_mtk_pwm_chip(chip);
-	struct clk *clk = pc->clks[MTK_CLK_PWM1 + pwm->hwpwm];
-	u32 clkdiv = 0, cnt_period, cnt_duty, reg_width = PWMDWIDTH,
-	    reg_thres = PWMTHRES;
-	u64 resolution;
-	int ret;
-
-	ret = mtk_pwm_clk_enable(chip, pwm);
-	if (ret < 0)
-		return ret;
-
-	/* Using resolution in picosecond gets accuracy higher */
-	resolution = (u64)NSEC_PER_SEC * 1000;
-	do_div(resolution, clk_get_rate(clk));
-
-	cnt_period = DIV_ROUND_CLOSEST_ULL((u64)period_ns * 1000, resolution);
-	while (cnt_period > 8191) {
-		resolution *= 2;
-		clkdiv++;
-		cnt_period = DIV_ROUND_CLOSEST_ULL((u64)period_ns * 1000,
-						   resolution);
-	}
-
-	if (clkdiv > PWM_CLK_DIV_MAX) {
-		mtk_pwm_clk_disable(chip, pwm);
-		dev_err(chip->dev, "period %d not supported\n", period_ns);
-		return -EINVAL;
-	}
-
-	if (pc->soc->pwm45_fixup && pwm->hwpwm > 2) {
-		/*
-		 * PWM[4,5] has distinct offset for PWMDWIDTH and PWMTHRES
-		 * from the other PWMs on MT7623.
-		 */
-		reg_width = PWM45DWIDTH_FIXUP;
-		reg_thres = PWM45THRES_FIXUP;
-	}
-
-	cnt_duty = DIV_ROUND_CLOSEST_ULL((u64)duty_ns * 1000, resolution);
-	mtk_pwm_writel(pc, pwm->hwpwm, PWMCON, BIT(15) | clkdiv);
-	mtk_pwm_writel(pc, pwm->hwpwm, reg_width, cnt_period);
-	mtk_pwm_writel(pc, pwm->hwpwm, reg_thres, cnt_duty);
-
-	mtk_pwm_clk_disable(chip, pwm);
-
-	return 0;
-}
-
-static int mtk_pwm_enable(struct pwm_chip *chip, struct pwm_device *pwm)
-{
-	struct mtk_pwm_chip *pc = to_mtk_pwm_chip(chip);
-	u32 value;
-	int ret;
-
-	ret = mtk_pwm_clk_enable(chip, pwm);
-	if (ret < 0)
-		return ret;
-
-	value = readl(pc->regs);
-	value |= BIT(pwm->hwpwm);
-	writel(value, pc->regs);
-
-	return 0;
-}
-
-static void mtk_pwm_disable(struct pwm_chip *chip, struct pwm_device *pwm)
-{
-	struct mtk_pwm_chip *pc = to_mtk_pwm_chip(chip);
-	u32 value;
-
-	value = readl(pc->regs);
-	value &= ~BIT(pwm->hwpwm);
-	writel(value, pc->regs);
-
-	mtk_pwm_clk_disable(chip, pwm);
-}
-
-static const struct pwm_ops mtk_pwm_ops = {
-	.config = mtk_pwm_config,
-	.enable = mtk_pwm_enable,
-	.disable = mtk_pwm_disable,
-	.owner = THIS_MODULE,
+struct pwm_mediatek_waveform {
+	u32 enable;
+	u32 con;
+	u32 width;
+	u32 thres;
 };
 
-static int mtk_pwm_probe(struct platform_device *pdev)
+static int pwm_mediatek_round_waveform_tohw(struct pwm_chip *chip, struct pwm_device *pwm,
+					    const struct pwm_waveform *wf, void *_wfhw)
 {
-	const struct mtk_pwm_platform_data *data;
-	struct mtk_pwm_chip *pc;
-	struct resource *res;
-	unsigned int i;
+	struct pwm_mediatek_waveform *wfhw = _wfhw;
+	struct pwm_mediatek_chip *pc = to_pwm_mediatek_chip(chip);
+	u32 clkdiv, enable;
+	u64 cnt_period, cnt_duty;
+	unsigned long clk_rate;
+	int ret = 0;
+
+	if (wf->period_length_ns == 0) {
+		*wfhw = (typeof(*wfhw)){
+			.enable = 0,
+		};
+
+		return 0;
+	}
+
+	if (!pc->clk_pwms[pwm->hwpwm].rate) {
+		struct clk *clk = pc->clk_pwms[pwm->hwpwm].clk;
+
+		ret = clk_prepare_enable(clk);
+		if (ret)
+			return ret;
+
+		pc->clk_pwms[pwm->hwpwm].rate = clk_get_rate(clk);
+
+		clk_disable_unprepare(clk);
+	}
+
+	clk_rate = pc->clk_pwms[pwm->hwpwm].rate;
+	if (clk_rate == 0 || clk_rate > 1000000000)
+		return -EINVAL;
+
+	cnt_period = mul_u64_u64_div_u64(wf->period_length_ns, clk_rate, NSEC_PER_SEC);
+	if (cnt_period == 0) {
+		cnt_period = 1;
+		ret = 1;
+	}
+
+	if (cnt_period > FIELD_MAX(PWMDWIDTH_PERIOD) + 1) {
+		if (cnt_period >= ((FIELD_MAX(PWMDWIDTH_PERIOD) + 1) << FIELD_MAX(PWMCON_CLKDIV))) {
+			clkdiv = FIELD_MAX(PWMCON_CLKDIV);
+			cnt_period = FIELD_MAX(PWMDWIDTH_PERIOD) + 1;
+		} else {
+			clkdiv = ilog2(cnt_period) - ilog2(FIELD_MAX(PWMDWIDTH_PERIOD));
+			cnt_period >>= clkdiv;
+		}
+	} else {
+		clkdiv = 0;
+	}
+
+	cnt_duty = mul_u64_u64_div_u64(wf->duty_length_ns, clk_rate, NSEC_PER_SEC) >> clkdiv;
+	if (cnt_duty > cnt_period)
+		cnt_duty = cnt_period;
+
+	if (cnt_duty) {
+		cnt_duty -= 1;
+		enable = BIT(pwm->hwpwm);
+	} else {
+		enable = 0;
+	}
+
+	cnt_period -= 1;
+
+	dev_dbg(&chip->dev, "pwm#%u: %lld/%lld @%lu -> ENABLE: %x, CON: %x, PERIOD: %llx, DUTY: %llx\n",
+		pwm->hwpwm, wf->duty_length_ns, wf->period_length_ns, clk_rate,
+		enable, clkdiv, cnt_period, cnt_duty);
+
+	*wfhw = (typeof(*wfhw)){
+		.enable = enable,
+		.con = clkdiv,
+		.width = cnt_period,
+		.thres = cnt_duty,
+	};
+
+	return ret;
+}
+
+static int pwm_mediatek_round_waveform_fromhw(struct pwm_chip *chip, struct pwm_device *pwm,
+					      const void *_wfhw, struct pwm_waveform *wf)
+{
+	const struct pwm_mediatek_waveform *wfhw = _wfhw;
+	struct pwm_mediatek_chip *pc = to_pwm_mediatek_chip(chip);
+	u32 clkdiv, cnt_period, cnt_duty;
+	unsigned long clk_rate;
+
+	/*
+	 * When _wfhw was populated, the clock was on, so .rate is
+	 * already set appropriately.
+	 */
+	clk_rate = pc->clk_pwms[pwm->hwpwm].rate;
+
+	if (wfhw->enable) {
+		clkdiv = FIELD_GET(PWMCON_CLKDIV, wfhw->con);
+		cnt_period = FIELD_GET(PWMDWIDTH_PERIOD, wfhw->width);
+		cnt_duty = FIELD_GET(PWMTHRES_DUTY, wfhw->thres);
+
+		/*
+		 * cnt_period is a 13 bit value, NSEC_PER_SEC is 30 bits wide
+		 * and clkdiv is less than 8, so the multiplication doesn't
+		 * overflow an u64.
+		 */
+		*wf = (typeof(*wf)){
+			.period_length_ns =
+				DIV_ROUND_UP_ULL((u64)(cnt_period + 1) * NSEC_PER_SEC << clkdiv, clk_rate),
+			.duty_length_ns =
+				DIV_ROUND_UP_ULL((u64)(cnt_duty + 1) * NSEC_PER_SEC << clkdiv, clk_rate),
+		};
+	} else {
+		clkdiv = 0;
+		cnt_period = 0;
+		cnt_duty = 0;
+
+		/*
+		 * .enable = 0 is also used for too small duty_cycle values, so
+		 * report the HW as being enabled to communicate the minimal
+		 * period.
+		 */
+		*wf = (typeof(*wf)){
+			.period_length_ns =
+				DIV_ROUND_UP_ULL(NSEC_PER_SEC, clk_rate),
+			.duty_length_ns = 0,
+		};
+	}
+
+	dev_dbg(&chip->dev, "pwm#%u: ENABLE: %x, CLKDIV: %x, PERIOD: %x, DUTY: %x @%lu -> %lld/%lld\n",
+		pwm->hwpwm, wfhw->enable, clkdiv, cnt_period, cnt_duty, clk_rate,
+		wf->duty_length_ns, wf->period_length_ns);
+
+	return 0;
+}
+
+static int pwm_mediatek_read_waveform(struct pwm_chip *chip,
+				      struct pwm_device *pwm, void *_wfhw)
+{
+	struct pwm_mediatek_waveform *wfhw = _wfhw;
+	struct pwm_mediatek_chip *pc = to_pwm_mediatek_chip(chip);
+	u32 enable, clkdiv, cnt_period, cnt_duty;
+	u32 reg_width = PWMDWIDTH, reg_thres = PWMTHRES;
 	int ret;
 
-	pc = devm_kzalloc(&pdev->dev, sizeof(*pc), GFP_KERNEL);
-	if (!pc)
-		return -ENOMEM;
+	ret = pwm_mediatek_clk_enable(pc, pwm->hwpwm);
+	if (ret < 0)
+		return ret;
 
-	data = of_device_get_match_data(&pdev->dev);
-	if (data == NULL)
-		return -EINVAL;
-	pc->soc = data;
+	enable = readl(pc->regs) & BIT(pwm->hwpwm);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	pc->regs = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(pc->regs))
-		return PTR_ERR(pc->regs);
+	if (enable) {
+		if (pc->soc->pwm45_fixup && pwm->hwpwm > 2) {
+			/*
+			 * PWM[4,5] has distinct offset for PWMDWIDTH and PWMTHRES
+			 * from the other PWMs on MT7623.
+			 */
+			reg_width = PWM45DWIDTH_FIXUP;
+			reg_thres = PWM45THRES_FIXUP;
+		}
 
-	for (i = 0; i < data->num_pwms + 2; i++) {
-		pc->clks[i] = devm_clk_get(&pdev->dev, mtk_pwm_clk_name[i]);
-		if (IS_ERR(pc->clks[i])) {
-			dev_err(&pdev->dev, "clock: %s fail: %ld\n",
-				mtk_pwm_clk_name[i], PTR_ERR(pc->clks[i]));
-			return PTR_ERR(pc->clks[i]);
+		clkdiv = FIELD_GET(PWMCON_CLKDIV, pwm_mediatek_readl(pc, pwm->hwpwm, PWMCON));
+		cnt_period = FIELD_GET(PWMDWIDTH_PERIOD, pwm_mediatek_readl(pc, pwm->hwpwm, reg_width));
+		cnt_duty = FIELD_GET(PWMTHRES_DUTY, pwm_mediatek_readl(pc, pwm->hwpwm, reg_thres));
+
+		*wfhw = (typeof(*wfhw)){
+			.enable = enable,
+			.con = BIT(15) | clkdiv,
+			.width = cnt_period,
+			.thres = cnt_duty,
+		};
+	} else {
+		*wfhw = (typeof(*wfhw)){
+			.enable = 0,
+		};
+	}
+
+	pwm_mediatek_clk_disable(pc, pwm->hwpwm);
+
+	return ret;
+}
+
+static int pwm_mediatek_write_waveform(struct pwm_chip *chip,
+				       struct pwm_device *pwm, const void *_wfhw)
+{
+	const struct pwm_mediatek_waveform *wfhw = _wfhw;
+	struct pwm_mediatek_chip *pc = to_pwm_mediatek_chip(chip);
+	u32 ctrl;
+	int ret;
+
+	ret = pwm_mediatek_clk_enable(pc, pwm->hwpwm);
+	if (ret < 0)
+		return ret;
+
+	ctrl = readl(pc->regs);
+
+	if (wfhw->enable) {
+		u32 reg_width = PWMDWIDTH, reg_thres = PWMTHRES;
+		u32 con_val = PWMCON_OLD_PWM_MODE | wfhw->con;
+
+		if (pc->soc->pwm45_fixup && pwm->hwpwm > 2) {
+			/*
+			 * PWM[4,5] has distinct offset for PWMDWIDTH and PWMTHRES
+			 * from the other PWMs on MT7623.
+			 */
+			reg_width = PWM45DWIDTH_FIXUP;
+			reg_thres = PWM45THRES_FIXUP;
+		}
+
+		if (!(ctrl & BIT(pwm->hwpwm))) {
+			/*
+			 * The clks are already on, just increasing the usage
+			 * counter doesn't fail.
+			 */
+			ret = pwm_mediatek_clk_enable(pc, pwm->hwpwm);
+			if (unlikely(ret < 0))
+				goto out;
+
+			ctrl |= BIT(pwm->hwpwm);
+			writel(ctrl, pc->regs);
+		}
+
+		/* Make sure we use the bus clock and not the 26MHz clock */
+		if (pc->soc->pwm_ck_26m_sel_reg)
+			writel(0, pc->regs + pc->soc->pwm_ck_26m_sel_reg);
+
+		/* Set BIT(3) to disable clock division */
+		if (pc->soc->clksel_fixup)
+			con_val |= PWMCON_CLKSEL;
+
+		pwm_mediatek_writel(pc, pwm->hwpwm, PWMCON, con_val);
+		pwm_mediatek_writel(pc, pwm->hwpwm, reg_width, wfhw->width);
+		pwm_mediatek_writel(pc, pwm->hwpwm, reg_thres, wfhw->thres);
+	} else {
+		if (ctrl & BIT(pwm->hwpwm)) {
+			ctrl &= ~BIT(pwm->hwpwm);
+			writel(ctrl, pc->regs);
+
+			pwm_mediatek_clk_disable(pc, pwm->hwpwm);
 		}
 	}
 
-	platform_set_drvdata(pdev, pc);
+out:
+	pwm_mediatek_clk_disable(pc, pwm->hwpwm);
 
-	pc->chip.dev = &pdev->dev;
-	pc->chip.ops = &mtk_pwm_ops;
-	pc->chip.base = -1;
-	pc->chip.npwm = data->num_pwms;
+	return ret;
+}
 
-	ret = pwmchip_add(&pc->chip);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "pwmchip_add() failed: %d\n", ret);
+static const struct pwm_ops pwm_mediatek_ops = {
+	.sizeof_wfhw = sizeof(struct pwm_mediatek_waveform),
+	.round_waveform_tohw = pwm_mediatek_round_waveform_tohw,
+	.round_waveform_fromhw = pwm_mediatek_round_waveform_fromhw,
+	.read_waveform = pwm_mediatek_read_waveform,
+	.write_waveform = pwm_mediatek_write_waveform,
+};
+
+static int pwm_mediatek_init_used_clks(struct pwm_mediatek_chip *pc)
+{
+	const struct pwm_mediatek_of_data *soc = pc->soc;
+	unsigned int hwpwm;
+	u32 enabled, handled = 0;
+	int ret;
+
+	ret = clk_prepare_enable(pc->clk_top);
+	if (ret)
 		return ret;
+
+	ret = clk_prepare_enable(pc->clk_main);
+	if (ret)
+		goto err_enable_main;
+
+	enabled = readl(pc->regs) & GENMASK(soc->num_pwms - 1, 0);
+
+	while (enabled & ~handled) {
+		hwpwm = ilog2(enabled & ~handled);
+
+		ret = pwm_mediatek_clk_enable(pc, hwpwm);
+		if (ret) {
+			while (handled) {
+				hwpwm = ilog2(handled);
+
+				pwm_mediatek_clk_disable(pc, hwpwm);
+				handled &= ~BIT(hwpwm);
+			}
+
+			break;
+		}
+
+		handled |= BIT(hwpwm);
 	}
+
+	clk_disable_unprepare(pc->clk_main);
+err_enable_main:
+
+	clk_disable_unprepare(pc->clk_top);
+
+	return ret;
+}
+
+static int pwm_mediatek_probe(struct platform_device *pdev)
+{
+	struct pwm_chip *chip;
+	struct pwm_mediatek_chip *pc;
+	const struct pwm_mediatek_of_data *soc;
+	unsigned int i;
+	int ret;
+
+	soc = of_device_get_match_data(&pdev->dev);
+
+	chip = devm_pwmchip_alloc(&pdev->dev, soc->num_pwms,
+				  struct_size(pc, clk_pwms, soc->num_pwms));
+	if (IS_ERR(chip))
+		return PTR_ERR(chip);
+	pc = to_pwm_mediatek_chip(chip);
+
+	pc->soc = soc;
+
+	pc->regs = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(pc->regs))
+		return PTR_ERR(pc->regs);
+
+	pc->clk_top = devm_clk_get(&pdev->dev, "top");
+	if (IS_ERR(pc->clk_top))
+		return dev_err_probe(&pdev->dev, PTR_ERR(pc->clk_top),
+				     "Failed to get top clock\n");
+
+	pc->clk_main = devm_clk_get(&pdev->dev, "main");
+	if (IS_ERR(pc->clk_main))
+		return dev_err_probe(&pdev->dev, PTR_ERR(pc->clk_main),
+				     "Failed to get main clock\n");
+
+	for (i = 0; i < soc->num_pwms; i++) {
+		char name[8];
+
+		snprintf(name, sizeof(name), "pwm%d", i + 1);
+
+		pc->clk_pwms[i].clk = devm_clk_get(&pdev->dev, name);
+		if (IS_ERR(pc->clk_pwms[i].clk))
+			return dev_err_probe(&pdev->dev, PTR_ERR(pc->clk_pwms[i].clk),
+					     "Failed to get %s clock\n", name);
+
+		ret = devm_clk_rate_exclusive_get(&pdev->dev, pc->clk_pwms[i].clk);
+		if (ret)
+			return dev_err_probe(&pdev->dev, ret,
+					     "Failed to lock clock rate for %s\n", name);
+	}
+
+	ret = pwm_mediatek_init_used_clks(pc);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret, "Failed to initialize used clocks\n");
+
+	chip->ops = &pwm_mediatek_ops;
+
+	ret = devm_pwmchip_add(&pdev->dev, chip);
+	if (ret < 0)
+		return dev_err_probe(&pdev->dev, ret, "pwmchip_add() failed\n");
 
 	return 0;
 }
 
-static int mtk_pwm_remove(struct platform_device *pdev)
-{
-	struct mtk_pwm_chip *pc = platform_get_drvdata(pdev);
-
-	return pwmchip_remove(&pc->chip);
-}
-
-static const struct mtk_pwm_platform_data mt2712_pwm_data = {
+static const struct pwm_mediatek_of_data mt2712_pwm_data = {
 	.num_pwms = 8,
+	.clksel_fixup = false,
 	.pwm45_fixup = false,
+	.chanreg_base = 0x10,
+	.chanreg_width = 0x40,
 };
 
-static const struct mtk_pwm_platform_data mt7622_pwm_data = {
+static const struct pwm_mediatek_of_data mt6795_pwm_data = {
+	.num_pwms = 7,
+	.clksel_fixup = false,
+	.pwm45_fixup = false,
+	.chanreg_base = 0x10,
+	.chanreg_width = 0x40,
+};
+
+static const struct pwm_mediatek_of_data mt7622_pwm_data = {
 	.num_pwms = 6,
+	.clksel_fixup = false,
 	.pwm45_fixup = false,
+	.pwm_ck_26m_sel_reg = PWM_CK_26M_SEL,
+	.chanreg_base = 0x10,
+	.chanreg_width = 0x40,
 };
 
-static const struct mtk_pwm_platform_data mt7623_pwm_data = {
+static const struct pwm_mediatek_of_data mt7623_pwm_data = {
 	.num_pwms = 5,
+	.clksel_fixup = false,
 	.pwm45_fixup = true,
+	.chanreg_base = 0x10,
+	.chanreg_width = 0x40,
 };
 
-static const struct of_device_id mtk_pwm_of_match[] = {
+static const struct pwm_mediatek_of_data mt7628_pwm_data = {
+	.num_pwms = 4,
+	.clksel_fixup = true,
+	.pwm45_fixup = false,
+	.chanreg_base = 0x10,
+	.chanreg_width = 0x40,
+};
+
+static const struct pwm_mediatek_of_data mt7629_pwm_data = {
+	.num_pwms = 1,
+	.clksel_fixup = false,
+	.pwm45_fixup = false,
+	.chanreg_base = 0x10,
+	.chanreg_width = 0x40,
+};
+
+static const struct pwm_mediatek_of_data mt7981_pwm_data = {
+	.num_pwms = 3,
+	.clksel_fixup = false,
+	.pwm45_fixup = false,
+	.pwm_ck_26m_sel_reg = PWM_CK_26M_SEL,
+	.chanreg_base = 0x80,
+	.chanreg_width = 0x40,
+};
+
+static const struct pwm_mediatek_of_data mt7986_pwm_data = {
+	.num_pwms = 2,
+	.clksel_fixup = false,
+	.pwm45_fixup = false,
+	.pwm_ck_26m_sel_reg = PWM_CK_26M_SEL,
+	.chanreg_base = 0x10,
+	.chanreg_width = 0x40,
+};
+
+static const struct pwm_mediatek_of_data mt7988_pwm_data = {
+	.num_pwms = 8,
+	.clksel_fixup = false,
+	.pwm45_fixup = false,
+	.chanreg_base = 0x80,
+	.chanreg_width = 0x40,
+};
+
+static const struct pwm_mediatek_of_data mt8183_pwm_data = {
+	.num_pwms = 4,
+	.clksel_fixup = false,
+	.pwm45_fixup = false,
+	.pwm_ck_26m_sel_reg = PWM_CK_26M_SEL,
+	.chanreg_base = 0x10,
+	.chanreg_width = 0x40,
+};
+
+static const struct pwm_mediatek_of_data mt8365_pwm_data = {
+	.num_pwms = 3,
+	.clksel_fixup = false,
+	.pwm45_fixup = false,
+	.pwm_ck_26m_sel_reg = PWM_CK_26M_SEL,
+	.chanreg_base = 0x10,
+	.chanreg_width = 0x40,
+};
+
+static const struct pwm_mediatek_of_data mt8516_pwm_data = {
+	.num_pwms = 5,
+	.clksel_fixup = false,
+	.pwm45_fixup = false,
+	.pwm_ck_26m_sel_reg = PWM_CK_26M_SEL,
+	.chanreg_base = 0x10,
+	.chanreg_width = 0x40,
+};
+
+static const struct pwm_mediatek_of_data mt6991_pwm_data = {
+	.num_pwms = 4,
+	.clksel_fixup = false,
+	.pwm45_fixup = false,
+	.pwm_ck_26m_sel_reg = PWM_CK_26M_SEL_V3,
+	.chanreg_base = 0x100,
+	.chanreg_width = 0x100,
+};
+
+static const struct of_device_id pwm_mediatek_of_match[] = {
 	{ .compatible = "mediatek,mt2712-pwm", .data = &mt2712_pwm_data },
+	{ .compatible = "mediatek,mt6795-pwm", .data = &mt6795_pwm_data },
+	{ .compatible = "mediatek,mt6991-pwm", .data = &mt6991_pwm_data },
 	{ .compatible = "mediatek,mt7622-pwm", .data = &mt7622_pwm_data },
 	{ .compatible = "mediatek,mt7623-pwm", .data = &mt7623_pwm_data },
+	{ .compatible = "mediatek,mt7628-pwm", .data = &mt7628_pwm_data },
+	{ .compatible = "mediatek,mt7629-pwm", .data = &mt7629_pwm_data },
+	{ .compatible = "mediatek,mt7981-pwm", .data = &mt7981_pwm_data },
+	{ .compatible = "mediatek,mt7986-pwm", .data = &mt7986_pwm_data },
+	{ .compatible = "mediatek,mt7988-pwm", .data = &mt7988_pwm_data },
+	{ .compatible = "mediatek,mt8183-pwm", .data = &mt8183_pwm_data },
+	{ .compatible = "mediatek,mt8365-pwm", .data = &mt8365_pwm_data },
+	{ .compatible = "mediatek,mt8516-pwm", .data = &mt8516_pwm_data },
 	{ },
 };
-MODULE_DEVICE_TABLE(of, mtk_pwm_of_match);
+MODULE_DEVICE_TABLE(of, pwm_mediatek_of_match);
 
-static struct platform_driver mtk_pwm_driver = {
+static struct platform_driver pwm_mediatek_driver = {
 	.driver = {
-		.name = "mtk-pwm",
-		.of_match_table = mtk_pwm_of_match,
+		.name = "pwm-mediatek",
+		.of_match_table = pwm_mediatek_of_match,
 	},
-	.probe = mtk_pwm_probe,
-	.remove = mtk_pwm_remove,
+	.probe = pwm_mediatek_probe,
 };
-module_platform_driver(mtk_pwm_driver);
+module_platform_driver(pwm_mediatek_driver);
 
 MODULE_AUTHOR("John Crispin <blogic@openwrt.org>");
-MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("MediaTek general purpose Pulse Width Modulator driver");
+MODULE_LICENSE("GPL v2");

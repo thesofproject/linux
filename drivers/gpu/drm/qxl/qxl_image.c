@@ -26,6 +26,8 @@
 #include <linux/gfp.h>
 #include <linux/slab.h>
 
+#include <drm/drm_print.h>
+
 #include "qxl_drv.h"
 #include "qxl_object.h"
 
@@ -38,7 +40,7 @@ qxl_allocate_chunk(struct qxl_device *qdev,
 	struct qxl_drm_chunk *chunk;
 	int ret;
 
-	chunk = kmalloc(sizeof(struct qxl_drm_chunk), GFP_KERNEL);
+	chunk = kmalloc_obj(struct qxl_drm_chunk);
 	if (!chunk)
 		return -ENOMEM;
 
@@ -61,7 +63,7 @@ qxl_image_alloc_objects(struct qxl_device *qdev,
 	struct qxl_drm_image *image;
 	int ret;
 
-	image = kmalloc(sizeof(struct qxl_drm_image), GFP_KERNEL);
+	image = kmalloc_obj(struct qxl_drm_image);
 	if (!image)
 		return -ENOMEM;
 
@@ -136,6 +138,7 @@ qxl_image_init_helper(struct qxl_device *qdev,
 		int remain;
 		int page;
 		int size;
+
 		if (stride == linesize && chunk_stride == stride) {
 			remain = linesize * height;
 			page = 0;
@@ -162,7 +165,8 @@ qxl_image_init_helper(struct qxl_device *qdev,
 				page++;
 			}
 		} else {
-			unsigned page_base, page_offset, out_offset;
+			unsigned int page_base, page_offset, out_offset;
+
 			for (i = 0 ; i < height ; ++i) {
 				i_data = (void *)data + i * stride;
 				remain = linesize;
@@ -184,7 +188,7 @@ qxl_image_init_helper(struct qxl_device *qdev,
 			}
 		}
 	}
-	qxl_bo_kunmap(chunk_bo);
+	qxl_bo_vunmap_locked(chunk_bo);
 
 	image_bo = dimage->bo;
 	ptr = qxl_bo_kmap_atomic_page(qdev, image_bo, 0);
@@ -210,7 +214,8 @@ qxl_image_init_helper(struct qxl_device *qdev,
 		break;
 	default:
 		DRM_ERROR("unsupported image bit depth\n");
-		return -EINVAL; /* TODO: cleanup */
+		qxl_bo_kunmap_atomic_page(qdev, image_bo, ptr);
+		return -EINVAL;
 	}
 	image->u.bitmap.flags = QXL_BITMAP_TOP_DOWN;
 	image->u.bitmap.x = width;

@@ -21,7 +21,7 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <pthread.h>
-#include "../kselftest.h"
+#include "kselftest.h"
 
 /* serializes shared list access */
 pthread_mutex_t list_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -38,10 +38,10 @@ struct timespec global_list[LISTSIZE];
 int listcount = 0;
 
 
-void checklist(struct timespec *list, int size)
+void checklist(const struct timespec *list, int size)
 {
 	int i, j;
-	struct timespec *a, *b;
+	const struct timespec *a, *b;
 
 	/* scan the list */
 	for (i = 0; i < size-1; i++) {
@@ -76,7 +76,7 @@ void checklist(struct timespec *list, int size)
 
 /* The shared thread shares a global list
  * that each thread fills while holding the lock.
- * This stresses clock syncronization across cpus.
+ * This stresses clock synchronization across cpus.
  */
 void *shared_thread(void *arg)
 {
@@ -163,6 +163,7 @@ int main(int argc, char **argv)
 	strftime(buf, 255, "%a, %d %b %Y %T %z", localtime(&start));
 	printf("%s\n", buf);
 	printf("Testing consistency with %i threads for %ld seconds: ", thread_count, runtime);
+	fflush(stdout);
 
 	/* spawn */
 	for (i = 0; i < thread_count; i++)
@@ -188,5 +189,5 @@ out:
 	/* die */
 	if (ret)
 		ksft_exit_fail();
-	return ksft_exit_pass();
+	ksft_exit_pass();
 }

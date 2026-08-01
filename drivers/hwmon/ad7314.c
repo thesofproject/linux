@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * AD7314 digital temperature sensor driver for AD7314, ADT7301 and ADT7302
  *
  * Copyright 2010 Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
  *
  * Conversion to hwmon from IIO done by Jonathan Cameron <jic23@cam.ac.uk>
  */
@@ -23,11 +22,13 @@
  */
 #define AD7314_TEMP_MASK		0x7FE0
 #define AD7314_TEMP_SHIFT		5
+#define AD7314_LEADING_ZEROS_MASK	BIT(15)
 
 /*
  * ADT7301 and ADT7302 temperature masks
  */
 #define ADT7301_TEMP_MASK		0x3FFF
+#define ADT7301_LEADING_ZEROS_MASK	(BIT(15) | BIT(14))
 
 enum ad7314_variant {
 	adt7301,
@@ -53,9 +54,9 @@ static int ad7314_spi_read(struct ad7314_data *chip)
 	return be16_to_cpu(chip->rx);
 }
 
-static ssize_t ad7314_show_temperature(struct device *dev,
-		struct device_attribute *attr,
-		char *buf)
+static ssize_t ad7314_temperature_show(struct device *dev,
+				       struct device_attribute *attr,
+				       char *buf)
 {
 	struct ad7314_data *chip = dev_get_drvdata(dev);
 	s16 data;
@@ -66,12 +67,20 @@ static ssize_t ad7314_show_temperature(struct device *dev,
 		return ret;
 	switch (spi_get_device_id(chip->spi_dev)->driver_data) {
 	case ad7314:
+		if (ret & AD7314_LEADING_ZEROS_MASK) {
+			/* Invalid read-out, leading zero part is missing */
+			return -EIO;
+		}
 		data = (ret & AD7314_TEMP_MASK) >> AD7314_TEMP_SHIFT;
 		data = sign_extend32(data, 9);
 
 		return sprintf(buf, "%d\n", 250 * data);
 	case adt7301:
 	case adt7302:
+		if (ret & ADT7301_LEADING_ZEROS_MASK) {
+			/* Invalid read-out, leading zero part is missing */
+			return -EIO;
+		}
 		/*
 		 * Documented as a 13 bit twos complement register
 		 * with a sign bit - which is a 14 bit 2's complement
@@ -87,8 +96,7 @@ static ssize_t ad7314_show_temperature(struct device *dev,
 	}
 }
 
-static SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO,
-			  ad7314_show_temperature, NULL, 0);
+static SENSOR_DEVICE_ATTR_RO(temp1_input, ad7314_temperature, 0);
 
 static struct attribute *ad7314_attrs[] = {
 	&sensor_dev_attr_temp1_input.dev_attr.attr,

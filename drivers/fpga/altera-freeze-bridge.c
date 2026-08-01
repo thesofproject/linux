@@ -1,25 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * FPGA Freeze Bridge Controller
  *
  *  Copyright (C) 2016 Altera Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
-#include <linux/of_device.h>
 #include <linux/module.h>
+#include <linux/platform_device.h>
 #include <linux/fpga/fpga-bridge.h>
 
 #define FREEZE_CSR_STATUS_OFFSET		0
@@ -221,14 +210,13 @@ static int altera_freeze_br_probe(struct platform_device *pdev)
 	struct device_node *np = pdev->dev.of_node;
 	void __iomem *base_addr;
 	struct altera_freeze_br_data *priv;
-	struct resource *res;
+	struct fpga_bridge *br;
 	u32 status, revision;
 
 	if (!np)
 		return -ENODEV;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base_addr = devm_ioremap_resource(dev, res);
+	base_addr = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(base_addr))
 		return PTR_ERR(base_addr);
 
@@ -254,15 +242,21 @@ static int altera_freeze_br_probe(struct platform_device *pdev)
 
 	priv->base_addr = base_addr;
 
-	return fpga_bridge_register(dev, FREEZE_BRIDGE_NAME,
-				    &altera_freeze_br_br_ops, priv);
-}
+	br = fpga_bridge_register(dev, FREEZE_BRIDGE_NAME,
+				  &altera_freeze_br_br_ops, priv);
+	if (IS_ERR(br))
+		return PTR_ERR(br);
 
-static int altera_freeze_br_remove(struct platform_device *pdev)
-{
-	fpga_bridge_unregister(&pdev->dev);
+	platform_set_drvdata(pdev, br);
 
 	return 0;
+}
+
+static void altera_freeze_br_remove(struct platform_device *pdev)
+{
+	struct fpga_bridge *br = platform_get_drvdata(pdev);
+
+	fpga_bridge_unregister(br);
 }
 
 static struct platform_driver altera_freeze_br_driver = {
@@ -270,7 +264,7 @@ static struct platform_driver altera_freeze_br_driver = {
 	.remove = altera_freeze_br_remove,
 	.driver = {
 		.name	= "altera_freeze_br",
-		.of_match_table = of_match_ptr(altera_freeze_br_of_match),
+		.of_match_table = altera_freeze_br_of_match,
 	},
 };
 

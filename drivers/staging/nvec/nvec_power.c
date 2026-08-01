@@ -194,7 +194,7 @@ static int nvec_power_bat_notifier(struct notifier_block *nb,
 		break;
 	case MANUFACTURER:
 		memcpy(power->bat_manu, &res->plc, res->length - 2);
-		power->bat_model[res->length - 2] = '\0';
+		power->bat_manu[res->length - 2] = '\0';
 		break;
 	case MODEL:
 		memcpy(power->bat_model, &res->plc, res->length - 2);
@@ -338,7 +338,7 @@ static const struct power_supply_desc nvec_psy_desc = {
 };
 
 static int counter;
-static int const bat_iter[] = {
+static const int bat_iter[] = {
 	SLOT_STATUS, VOLTAGE, CURRENT, CAPACITY_REMAINING,
 #ifdef EC_FULL_DIAG
 	AVERAGE_CURRENT, TEMPERATURE, TIME_REMAINING,
@@ -416,7 +416,7 @@ static int nvec_power_probe(struct platform_device *pdev)
 	return PTR_ERR_OR_ZERO(*psy);
 }
 
-static int nvec_power_remove(struct platform_device *pdev)
+static void nvec_power_remove(struct platform_device *pdev)
 {
 	struct nvec_power *power = platform_get_drvdata(pdev);
 
@@ -429,8 +429,6 @@ static int nvec_power_remove(struct platform_device *pdev)
 	case BAT:
 		power_supply_unregister(nvec_bat_psy);
 	}
-
-	return 0;
 }
 
 static struct platform_driver nvec_power_driver = {

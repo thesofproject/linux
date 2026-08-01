@@ -1,14 +1,17 @@
 # SPDX-License-Identifier: GPL-2.0
-TEST_PROGS := signal signal_tm
+TEST_GEN_PROGS := signal signal_tm sigfuz sigreturn_vdso sig_sc_double_restart
+TEST_GEN_PROGS += sigreturn_kernel
+TEST_GEN_PROGS += sigreturn_unaligned
 
-all: $(TEST_PROGS)
+$(OUTPUT)/signal_tm: CFLAGS += -mhtm
+$(OUTPUT)/sigfuz: CFLAGS += -pthread -m64
 
-$(TEST_PROGS): ../harness.c ../utils.c signal.S
+TEST_FILES := settings
+
+top_srcdir = ../../../../..
+include ../../lib.mk
+include ../flags.mk
 
 CFLAGS += -maltivec
-signal_tm: CFLAGS += -mhtm
 
-include ../../lib.mk
-
-clean:
-	rm -f $(TEST_PROGS) *.o
+$(TEST_GEN_PROGS): ../harness.c ../utils.c signal.S

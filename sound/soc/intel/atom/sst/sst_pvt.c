@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  sst_pvt.c - Intel SST Driver for audio engine
  *
@@ -7,15 +8,6 @@
  *		Dharageswari R <dharageswari.r@intel.com>
  *		KP Jeeja <jeeja.kp@intel.com>
  *  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful, but
- *  WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  General Public License for more details.
  *
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
@@ -34,7 +26,6 @@
 #include <asm/platform_sst_audio.h>
 #include "../sst-mfld-platform.h"
 #include "sst.h"
-#include "../../common/sst-dsp.h"
 
 int sst_shim_write(void __iomem *addr, int offset, int value)
 {
@@ -76,39 +67,6 @@ void sst_set_fw_state_locked(
 	mutex_lock(&sst_drv_ctx->sst_lock);
 	sst_drv_ctx->sst_state = sst_state;
 	mutex_unlock(&sst_drv_ctx->sst_lock);
-}
-
-/*
- * sst_wait_interruptible - wait on event
- *
- * @sst_drv_ctx: Driver context
- * @block: Driver block to wait on
- *
- * This function waits without a timeout (and is interruptable) for a
- * given block event
- */
-int sst_wait_interruptible(struct intel_sst_drv *sst_drv_ctx,
-				struct sst_block *block)
-{
-	int retval = 0;
-
-	if (!wait_event_interruptible(sst_drv_ctx->wait_queue,
-				block->condition)) {
-		/* event wake */
-		if (block->ret_code < 0) {
-			dev_err(sst_drv_ctx->dev,
-				"stream failed %d\n", block->ret_code);
-			retval = -EBUSY;
-		} else {
-			dev_dbg(sst_drv_ctx->dev, "event up\n");
-			retval = 0;
-		}
-	} else {
-		dev_err(sst_drv_ctx->dev, "signal interrupted\n");
-		retval = -EINTR;
-	}
-	return retval;
-
 }
 
 /*
@@ -166,7 +124,7 @@ int sst_create_ipc_msg(struct ipc_post **arg, bool large)
 {
 	struct ipc_post *msg;
 
-	msg = kzalloc(sizeof(struct ipc_post), GFP_ATOMIC);
+	msg = kzalloc_obj(*msg, GFP_ATOMIC);
 	if (!msg)
 		return -ENOMEM;
 	if (large) {
@@ -196,7 +154,7 @@ int sst_create_block_and_ipc_msg(struct ipc_post **arg, bool large,
 		struct intel_sst_drv *sst_drv_ctx, struct sst_block **block,
 		u32 msg_id, u32 drv_id)
 {
-	int retval = 0;
+	int retval;
 
 	retval = sst_create_ipc_msg(arg, large);
 	if (retval)
@@ -206,7 +164,7 @@ int sst_create_block_and_ipc_msg(struct ipc_post **arg, bool large,
 		kfree(*arg);
 		return -ENOMEM;
 	}
-	return retval;
+	return 0;
 }
 
 /*
@@ -231,9 +189,9 @@ int sst_prepare_and_post_msg(struct intel_sst_drv *sst,
 		size_t mbox_data_len, const void *mbox_data, void **data,
 		bool large, bool fill_dsp, bool sync, bool response)
 {
+	struct sst_block *block = NULL;
 	struct ipc_post *msg = NULL;
 	struct ipc_dsp_hdr dsp_hdr;
-	struct sst_block *block;
 	int ret = 0, pvt_id;
 
 	pvt_id = sst_assign_pvt_id(sst);
@@ -301,7 +259,6 @@ int sst_pm_runtime_put(struct intel_sst_drv *sst_drv)
 {
 	int ret;
 
-	pm_runtime_mark_last_busy(sst_drv->dev);
 	ret = pm_runtime_put_autosuspend(sst_drv->dev);
 	if (ret < 0)
 		return ret;

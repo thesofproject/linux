@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Detection routine for the NCR53c710 based Amiga SCSI Controllers for Linux.
  *		Amiga Technologies A4000T SCSI controller.
@@ -46,8 +47,7 @@ static int __init amiga_a4000t_scsi_probe(struct platform_device *pdev)
 				"A4000T builtin SCSI"))
 		return -EBUSY;
 
-	hostdata = kzalloc(sizeof(struct NCR_700_Host_Parameters),
-			   GFP_KERNEL);
+	hostdata = kzalloc_obj(struct NCR_700_Host_Parameters);
 	if (!hostdata) {
 		dev_err(&pdev->dev, "Failed to allocate host data\n");
 		goto out_release;
@@ -94,7 +94,7 @@ static int __init amiga_a4000t_scsi_probe(struct platform_device *pdev)
 	return -ENODEV;
 }
 
-static int __exit amiga_a4000t_scsi_remove(struct platform_device *pdev)
+static void __exit amiga_a4000t_scsi_remove(struct platform_device *pdev)
 {
 	struct Scsi_Host *host = platform_get_drvdata(pdev);
 	struct NCR_700_Host_Parameters *hostdata = shost_priv(host);
@@ -105,13 +105,18 @@ static int __exit amiga_a4000t_scsi_remove(struct platform_device *pdev)
 	kfree(hostdata);
 	free_irq(host->irq, host);
 	release_mem_region(res->start, resource_size(res));
-	return 0;
 }
 
-static struct platform_driver amiga_a4000t_scsi_driver = {
+/*
+ * amiga_a4000t_scsi_remove() lives in .exit.text. For drivers registered via
+ * module_platform_driver_probe() this is ok because they cannot get unbound at
+ * runtime. So mark the driver struct with __refdata to prevent modpost
+ * triggering a section mismatch warning.
+ */
+static struct platform_driver amiga_a4000t_scsi_driver __refdata = {
 	.remove = __exit_p(amiga_a4000t_scsi_remove),
-	.driver   = {
-		.name	= "amiga-a4000t-scsi",
+	.driver = {
+		.name = "amiga-a4000t-scsi",
 	},
 };
 

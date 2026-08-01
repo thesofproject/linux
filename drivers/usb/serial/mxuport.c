@@ -20,12 +20,10 @@
 #include <linux/serial_reg.h>
 #include <linux/slab.h>
 #include <linux/tty.h>
-#include <linux/tty_driver.h>
 #include <linux/tty_flip.h>
-#include <linux/uaccess.h>
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 /* Definitions for the vendor ID and device ID */
 #define MX_USBSERIAL_VID	0x110A
@@ -146,11 +144,6 @@
 #define MX_WAIT_FOR_LOW_WATER		0x0040
 #define MX_WAIT_FOR_SEND_NEXT		0x0080
 
-#define MX_UPORT_2_PORT			BIT(0)
-#define MX_UPORT_4_PORT			BIT(1)
-#define MX_UPORT_8_PORT			BIT(2)
-#define MX_UPORT_16_PORT		BIT(3)
-
 /* This structure holds all of the local port information */
 struct mxuport_port {
 	u8 mcr_state;		/* Last MCR state */
@@ -159,26 +152,31 @@ struct mxuport_port {
 	spinlock_t spinlock;	/* Protects msr_state */
 };
 
+/* Encode number of ports (2..16 or undefined) */
+#define MX_PORTS_MASK			GENMASK(3, 0)
+#define MX_PORTS_OFFSET			1
+#define MX_PORTS(n)			(((n) - MX_PORTS_OFFSET) & MX_PORTS_MASK)
+
 /* Table of devices that work with this driver */
 static const struct usb_device_id mxuport_idtable[] = {
 	{ USB_DEVICE(MX_USBSERIAL_VID, MX_UPORT1250_PID),
-	  .driver_info = MX_UPORT_2_PORT },
+	  .driver_info = MX_PORTS(2) },
 	{ USB_DEVICE(MX_USBSERIAL_VID, MX_UPORT1251_PID),
-	  .driver_info = MX_UPORT_2_PORT },
+	  .driver_info = MX_PORTS(2) },
 	{ USB_DEVICE(MX_USBSERIAL_VID, MX_UPORT1410_PID),
-	  .driver_info = MX_UPORT_4_PORT },
+	  .driver_info = MX_PORTS(4) },
 	{ USB_DEVICE(MX_USBSERIAL_VID, MX_UPORT1450_PID),
-	  .driver_info = MX_UPORT_4_PORT },
+	  .driver_info = MX_PORTS(4) },
 	{ USB_DEVICE(MX_USBSERIAL_VID, MX_UPORT1451_PID),
-	  .driver_info = MX_UPORT_4_PORT },
+	  .driver_info = MX_PORTS(4) },
 	{ USB_DEVICE(MX_USBSERIAL_VID, MX_UPORT1618_PID),
-	  .driver_info = MX_UPORT_8_PORT },
+	  .driver_info = MX_PORTS(8) },
 	{ USB_DEVICE(MX_USBSERIAL_VID, MX_UPORT1658_PID),
-	  .driver_info = MX_UPORT_8_PORT },
+	  .driver_info = MX_PORTS(8) },
 	{ USB_DEVICE(MX_USBSERIAL_VID, MX_UPORT1613_PID),
-	  .driver_info = MX_UPORT_16_PORT },
+	  .driver_info = MX_PORTS(16) },
 	{ USB_DEVICE(MX_USBSERIAL_VID, MX_UPORT1653_PID),
-	  .driver_info = MX_UPORT_16_PORT },
+	  .driver_info = MX_PORTS(16) },
 	{}			/* Terminating entry */
 };
 
@@ -261,13 +259,6 @@ static int mxuport_send_ctrl_data_urb(struct usb_serial *serial,
 		return status;
 	}
 
-	if (status != size) {
-		dev_err(&serial->interface->dev,
-			"%s - short write (%d / %zd)\n",
-			__func__, status, size);
-		return -EIO;
-	}
-
 	return 0;
 }
 
@@ -327,14 +318,14 @@ static void mxuport_process_read_urb_data(struct usb_serial_port *port,
 {
 	int i;
 
-	if (!port->port.console || !port->sysrq) {
-		tty_insert_flip_string(&port->port, data, size);
-	} else {
+	if (port->sysrq) {
 		for (i = 0; i < size; i++, data++) {
 			if (!usb_serial_handle_sysrq_char(port, *data))
 				tty_insert_flip_char(&port->port, *data,
 						     TTY_NORMAL);
 		}
+	} else {
+		tty_insert_flip_string(&port->port, data, size);
 	}
 	tty_flip_buffer_push(&port->port);
 }
@@ -767,7 +758,7 @@ static int mxuport_tiocmget(struct tty_struct *tty)
 }
 
 static int mxuport_set_termios_flow(struct tty_struct *tty,
-				    struct ktermios *old_termios,
+				    const struct ktermios *old_termios,
 				    struct usb_serial_port *port,
 				    struct usb_serial *serial)
 {
@@ -841,7 +832,7 @@ out:
 
 static void mxuport_set_termios(struct tty_struct *tty,
 				struct usb_serial_port *port,
-				struct ktermios *old_termios)
+				const struct ktermios *old_termios)
 {
 	struct usb_serial *serial = port->serial;
 	u8 *buf;
@@ -949,14 +940,8 @@ static int mxuport_calc_num_ports(struct usb_serial *serial,
 	int num_ports;
 	int i;
 
-	if (features & MX_UPORT_2_PORT) {
-		num_ports = 2;
-	} else if (features & MX_UPORT_4_PORT) {
-		num_ports = 4;
-	} else if (features & MX_UPORT_8_PORT) {
-		num_ports = 8;
-	} else if (features & MX_UPORT_16_PORT) {
-		num_ports = 16;
+	if (features & MX_PORTS_MASK) {
+		num_ports = (features & MX_PORTS_MASK) + MX_PORTS_OFFSET;
 	} else {
 		dev_warn(&serial->interface->dev,
 				"unknown device, assuming two ports\n");
@@ -968,6 +953,14 @@ static int mxuport_calc_num_ports(struct usb_serial *serial,
 	 * bulk-out endpoint.
 	 */
 	BUILD_BUG_ON(ARRAY_SIZE(epds->bulk_out) < 16);
+
+	/*
+	 * The bulk-out buffers must be large enough for the four-byte header
+	 * (and following data), but assume anything smaller than eight bytes
+	 * is broken.
+	 */
+	if (usb_endpoint_maxp(epds->bulk_out[0]) < 8)
+		return -EINVAL;
 
 	for (i = 1; i < num_ports; ++i)
 		epds->bulk_out[i] = epds->bulk_out[0];
@@ -1087,6 +1080,13 @@ static int mxuport_probe(struct usb_serial *serial,
 		/* Use the firmware already in the device */
 		err = 0;
 	} else {
+		if (fw_p->size <= VER_ADDR_3) {
+			dev_err(&serial->interface->dev,
+				"Firmware %s is too short\n", buf);
+			err = -EINVAL;
+			goto out;
+		}
+
 		local_ver = ((fw_p->data[VER_ADDR_1] << 16) |
 			     (fw_p->data[VER_ADDR_2] << 8) |
 			     fw_p->data[VER_ADDR_3]);
@@ -1237,7 +1237,7 @@ static void mxuport_close(struct usb_serial_port *port)
 }
 
 /* Send a break to the port. */
-static void mxuport_break_ctl(struct tty_struct *tty, int break_state)
+static int mxuport_break_ctl(struct tty_struct *tty, int break_state)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	struct usb_serial *serial = port->serial;
@@ -1251,8 +1251,8 @@ static void mxuport_break_ctl(struct tty_struct *tty, int break_state)
 		dev_dbg(&port->dev, "%s - clearing break\n", __func__);
 	}
 
-	mxuport_send_ctrl_urb(serial, RQ_VENDOR_SET_BREAK,
-			      enable, port->port_number);
+	return mxuport_send_ctrl_urb(serial, RQ_VENDOR_SET_BREAK,
+				     enable, port->port_number);
 }
 
 static int mxuport_resume(struct usb_serial *serial)
@@ -1285,7 +1285,6 @@ static int mxuport_resume(struct usb_serial *serial)
 
 static struct usb_serial_driver mxuport_device = {
 	.driver = {
-		.owner =	THIS_MODULE,
 		.name =		"mxuport",
 	},
 	.description		= "MOXA UPort",
@@ -1322,4 +1321,5 @@ module_usb_serial_driver(serial_drivers, mxuport_idtable);
 
 MODULE_AUTHOR("Andrew Lunn <andrew@lunn.ch>");
 MODULE_AUTHOR("<support@moxa.com>");
+MODULE_DESCRIPTION("Moxa UPORT USB Serial driver");
 MODULE_LICENSE("GPL");

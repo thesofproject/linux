@@ -15,40 +15,19 @@
 #include <linux/sysctl.h>
 
 #include <asm/mman.h>
-#include <asm/pgalloc.h>
 #include <asm/tlb.h>
 #include <asm/tlbflush.h>
 #include <asm/cacheflush.h>
 #include <asm/mmu_context.h>
 
 
-unsigned long
-hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
-		unsigned long len, unsigned long pgoff, unsigned long flags)
-{
-	struct hstate *h = hstate_file(file);
-
-	if (len & ~huge_page_mask(h))
-		return -EINVAL;
-	if (len > TASK_SIZE)
-		return -ENOMEM;
-
-	if (flags & MAP_FIXED)
-		if (prepare_hugepage_range(file, addr, len))
-			return -EINVAL;
-
-	if (addr)
-		addr = ALIGN(addr, huge_page_size(h));
-
-	/* we need to make sure the colouring is OK */
-	return arch_get_unmapped_area(file, addr, len, pgoff, flags);
-}
 
 
-pte_t *huge_pte_alloc(struct mm_struct *mm,
+pte_t *huge_pte_alloc(struct mm_struct *mm, struct vm_area_struct *vma,
 			unsigned long addr, unsigned long sz)
 {
 	pgd_t *pgd;
+	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte = NULL;
@@ -61,11 +40,12 @@ pte_t *huge_pte_alloc(struct mm_struct *mm,
 	addr &= HPAGE_MASK;
 
 	pgd = pgd_offset(mm, addr);
-	pud = pud_alloc(mm, pgd, addr);
+	p4d = p4d_offset(pgd, addr);
+	pud = pud_alloc(mm, p4d, addr);
 	if (pud) {
 		pmd = pmd_alloc(mm, pud, addr);
 		if (pmd)
-			pte = pte_alloc_map(mm, pmd, addr);
+			pte = pte_alloc_huge(mm, pmd, addr);
 	}
 	return pte;
 }
@@ -74,6 +54,7 @@ pte_t *huge_pte_offset(struct mm_struct *mm,
 		       unsigned long addr, unsigned long sz)
 {
 	pgd_t *pgd;
+	p4d_t *p4d;
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte = NULL;
@@ -82,11 +63,14 @@ pte_t *huge_pte_offset(struct mm_struct *mm,
 
 	pgd = pgd_offset(mm, addr);
 	if (!pgd_none(*pgd)) {
-		pud = pud_offset(pgd, addr);
-		if (!pud_none(*pud)) {
-			pmd = pmd_offset(pud, addr);
-			if (!pmd_none(*pmd))
-				pte = pte_offset_map(pmd, addr);
+		p4d = p4d_offset(pgd, addr);
+		if (!p4d_none(*p4d)) {
+			pud = pud_offset(p4d, addr);
+			if (!pud_none(*pud)) {
+				pmd = pmd_offset(pud, addr);
+				if (!pmd_none(*pmd))
+					pte = pte_offset_huge(pmd, addr);
+			}
 		}
 	}
 	return pte;
@@ -135,26 +119,19 @@ static void __set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
 }
 
 void set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
-		     pte_t *ptep, pte_t entry)
+		     pte_t *ptep, pte_t entry, unsigned long sz)
 {
-	unsigned long flags;
-
-	purge_tlb_start(flags);
 	__set_huge_pte_at(mm, addr, ptep, entry);
-	purge_tlb_end(flags);
 }
 
 
 pte_t huge_ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
-			      pte_t *ptep)
+			      pte_t *ptep, unsigned long sz)
 {
-	unsigned long flags;
 	pte_t entry;
 
-	purge_tlb_start(flags);
 	entry = *ptep;
 	__set_huge_pte_at(mm, addr, ptep, __pte(0));
-	purge_tlb_end(flags);
 
 	return entry;
 }
@@ -163,38 +140,22 @@ pte_t huge_ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
 void huge_ptep_set_wrprotect(struct mm_struct *mm,
 				unsigned long addr, pte_t *ptep)
 {
-	unsigned long flags;
 	pte_t old_pte;
 
-	purge_tlb_start(flags);
 	old_pte = *ptep;
 	__set_huge_pte_at(mm, addr, ptep, pte_wrprotect(old_pte));
-	purge_tlb_end(flags);
 }
 
 int huge_ptep_set_access_flags(struct vm_area_struct *vma,
 				unsigned long addr, pte_t *ptep,
 				pte_t pte, int dirty)
 {
-	unsigned long flags;
 	int changed;
+	struct mm_struct *mm = vma->vm_mm;
 
-	purge_tlb_start(flags);
 	changed = !pte_same(*ptep, pte);
 	if (changed) {
-		__set_huge_pte_at(vma->vm_mm, addr, ptep, pte);
+		__set_huge_pte_at(mm, addr, ptep, pte);
 	}
-	purge_tlb_end(flags);
 	return changed;
-}
-
-
-int pmd_huge(pmd_t pmd)
-{
-	return 0;
-}
-
-int pud_huge(pud_t pud)
-{
-	return 0;
 }

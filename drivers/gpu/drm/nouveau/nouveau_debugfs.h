@@ -1,8 +1,8 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: MIT */
 #ifndef __NOUVEAU_DEBUGFS_H__
 #define __NOUVEAU_DEBUGFS_H__
 
-#include <drm/drmP.h>
+#include <drm/drm_debugfs.h>
 
 #if defined(CONFIG_DEBUG_FS)
 
@@ -18,15 +18,18 @@ nouveau_debugfs(struct drm_device *dev)
 	return nouveau_drm(dev)->debugfs;
 }
 
-extern int  nouveau_drm_debugfs_init(struct drm_minor *);
+extern void  nouveau_drm_debugfs_init(struct drm_minor *);
 extern int  nouveau_debugfs_init(struct nouveau_drm *);
 extern void nouveau_debugfs_fini(struct nouveau_drm *);
+
+extern struct dentry *nouveau_debugfs_root;
+
+void nouveau_module_debugfs_init(void);
+void nouveau_module_debugfs_fini(void);
 #else
-static inline int
+static inline void
 nouveau_drm_debugfs_init(struct drm_minor *minor)
-{
-       return 0;
-}
+{}
 
 static inline int
 nouveau_debugfs_init(struct nouveau_drm *drm)
@@ -36,6 +39,16 @@ nouveau_debugfs_init(struct nouveau_drm *drm)
 
 static inline void
 nouveau_debugfs_fini(struct nouveau_drm *drm)
+{
+}
+
+static inline void
+nouveau_module_debugfs_init(void)
+{
+}
+
+static inline void
+nouveau_module_debugfs_fini(void)
 {
 }
 

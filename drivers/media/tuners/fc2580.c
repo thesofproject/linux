@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * FCI FC2580 silicon tuner driver
  *
  * Copyright (C) 2012 Antti Palosaari <crope@iki.fi>
- *
- *    This program is free software; you can redistribute it and/or modify
- *    it under the terms of the GNU General Public License as published by
- *    the Free Software Foundation; either version 2 of the License, or
- *    (at your option) any later version.
- *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU General Public License for more details.
- *
- *    You should have received a copy of the GNU General Public License along
- *    with this program; if not, write to the Free Software Foundation, Inc.,
- *    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "fc2580_priv.h"
@@ -355,9 +342,9 @@ static int fc2580_dvb_get_if_frequency(struct dvb_frontend *fe, u32 *frequency)
 
 static const struct dvb_tuner_ops fc2580_dvb_tuner_ops = {
 	.info = {
-		.name           = "FCI FC2580",
-		.frequency_min  = 174000000,
-		.frequency_max  = 862000000,
+		.name             = "FCI FC2580",
+		.frequency_min_hz = 174 * MHz,
+		.frequency_max_hz = 862 * MHz,
 	},
 
 	.init = fc2580_dvb_init,
@@ -370,7 +357,7 @@ static const struct dvb_tuner_ops fc2580_dvb_tuner_ops = {
 /*
  * V4L2 API
  */
-#if IS_ENABLED(CONFIG_VIDEO_V4L2)
+#if IS_ENABLED(CONFIG_VIDEO_DEV)
 static const struct v4l2_frequency_band bands[] = {
 	{
 		.type = V4L2_TUNER_RF,
@@ -405,7 +392,7 @@ static int fc2580_g_tuner(struct v4l2_subdev *sd, struct v4l2_tuner *v)
 
 	dev_dbg(&client->dev, "index=%d\n", v->index);
 
-	strlcpy(v->name, "FCI FC2580", sizeof(v->name));
+	strscpy(v->name, "FCI FC2580", sizeof(v->name));
 	v->type = V4L2_TUNER_RF;
 	v->capability = V4L2_TUNER_CAP_1HZ | V4L2_TUNER_CAP_FREQ_BANDS;
 	v->rangelow  = bands[0].rangelow;
@@ -519,8 +506,7 @@ static struct v4l2_subdev *fc2580_get_v4l2_subdev(struct i2c_client *client)
 		return NULL;
 }
 
-static int fc2580_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int fc2580_probe(struct i2c_client *client)
 {
 	struct fc2580_dev *dev;
 	struct fc2580_platform_data *pdata = client->dev.platform_data;
@@ -532,7 +518,7 @@ static int fc2580_probe(struct i2c_client *client,
 		.val_bits = 8,
 	};
 
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	dev = kzalloc_obj(*dev);
 	if (!dev) {
 		ret = -ENOMEM;
 		goto err;
@@ -565,7 +551,7 @@ static int fc2580_probe(struct i2c_client *client,
 		goto err_kfree;
 	}
 
-#if IS_ENABLED(CONFIG_VIDEO_V4L2)
+#if IS_ENABLED(CONFIG_VIDEO_DEV)
 	/* Register controls */
 	v4l2_ctrl_handler_init(&dev->hdl, 2);
 	dev->bandwidth_auto = v4l2_ctrl_new_std(&dev->hdl, &fc2580_ctrl_ops,
@@ -601,22 +587,21 @@ err:
 	return ret;
 }
 
-static int fc2580_remove(struct i2c_client *client)
+static void fc2580_remove(struct i2c_client *client)
 {
 	struct fc2580_dev *dev = i2c_get_clientdata(client);
 
 	dev_dbg(&client->dev, "\n");
 
-#if IS_ENABLED(CONFIG_VIDEO_V4L2)
+#if IS_ENABLED(CONFIG_VIDEO_DEV)
 	v4l2_ctrl_handler_free(&dev->hdl);
 #endif
 	kfree(dev);
-	return 0;
 }
 
 static const struct i2c_device_id fc2580_id_table[] = {
-	{"fc2580", 0},
-	{}
+	{ .name = "fc2580" },
+	{ }
 };
 MODULE_DEVICE_TABLE(i2c, fc2580_id_table);
 

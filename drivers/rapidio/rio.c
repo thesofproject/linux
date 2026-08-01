@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * RapidIO interconnect services
  * (RapidIO Interconnect Specification, http://www.rapidio.org)
@@ -7,11 +8,6 @@
  *
  * Copyright 2009 - 2013 Integrated Device Technology, Inc.
  * Alex Bounine <alexandre.bounine@idt.com>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/types.h>
@@ -111,7 +107,7 @@ EXPORT_SYMBOL(rio_query_mport);
  */
 struct rio_net *rio_alloc_net(struct rio_mport *mport)
 {
-	struct rio_net *net = kzalloc(sizeof(*net), GFP_KERNEL);
+	struct rio_net *net = kzalloc_obj(*net);
 
 	if (net) {
 		INIT_LIST_HEAD(&net->node);
@@ -246,7 +242,7 @@ int rio_request_inb_mbox(struct rio_mport *mport,
 	if (!mport->ops->open_inb_mbox)
 		goto out;
 
-	res = kzalloc(sizeof(*res), GFP_KERNEL);
+	res = kzalloc_obj(*res);
 	if (res) {
 		rio_init_mbox_res(res, mbox, mbox);
 
@@ -330,7 +326,7 @@ int rio_request_outb_mbox(struct rio_mport *mport,
 	if (!mport->ops->open_outb_mbox)
 		goto out;
 
-	res = kzalloc(sizeof(*res), GFP_KERNEL);
+	res = kzalloc_obj(*res);
 	if (res) {
 		rio_init_mbox_res(res, mbox, mbox);
 
@@ -407,7 +403,7 @@ rio_setup_inb_dbell(struct rio_mport *mport, void *dev_id, struct resource *res,
 		    void (*dinb) (struct rio_mport * mport, void *dev_id, u16 src, u16 dst,
 				  u16 info))
 {
-	struct rio_dbell *dbell = kmalloc(sizeof(*dbell), GFP_KERNEL);
+	struct rio_dbell *dbell = kmalloc_obj(*dbell);
 
 	if (!dbell)
 		return -ENOMEM;
@@ -442,7 +438,7 @@ int rio_request_inb_dbell(struct rio_mport *mport,
 					u16 dst, u16 info))
 {
 	int rc;
-	struct resource *res = kzalloc(sizeof(*res), GFP_KERNEL);
+	struct resource *res = kzalloc_obj(*res);
 
 	if (res) {
 		rio_init_dbell_res(res, start, end);
@@ -519,7 +515,7 @@ EXPORT_SYMBOL_GPL(rio_release_inb_dbell);
 struct resource *rio_request_outb_dbell(struct rio_dev *rdev, u16 start,
 					u16 end)
 {
-	struct resource *res = kzalloc(sizeof(struct resource), GFP_KERNEL);
+	struct resource *res = kzalloc_obj(struct resource);
 
 	if (res) {
 		rio_init_dbell_res(res, start, end);
@@ -567,7 +563,7 @@ int rio_add_mport_pw_handler(struct rio_mport *mport, void *context,
 			     int (*pwcback)(struct rio_mport *mport,
 			     void *context, union rio_pw_msg *msg, int step))
 {
-	struct rio_pwrite *pwrite = kzalloc(sizeof(*pwrite), GFP_KERNEL);
+	struct rio_pwrite *pwrite = kzalloc_obj(*pwrite);
 
 	if (!pwrite)
 		return -ENOMEM;
@@ -753,7 +749,7 @@ int rio_map_outb_region(struct rio_mport *mport, u16 destid, u64 rbase,
 EXPORT_SYMBOL_GPL(rio_map_outb_region);
 
 /**
- * rio_unmap_inb_region -- Unmap the inbound memory region
+ * rio_unmap_outb_region -- Unmap the inbound memory region
  * @mport: Master port
  * @destid: destination id mapping points to
  * @rstart: RIO base address window translates to
@@ -1417,71 +1413,6 @@ rio_mport_get_feature(struct rio_mport * port, int local, u16 destid,
 EXPORT_SYMBOL_GPL(rio_mport_get_feature);
 
 /**
- * rio_get_asm - Begin or continue searching for a RIO device by vid/did/asm_vid/asm_did
- * @vid: RIO vid to match or %RIO_ANY_ID to match all vids
- * @did: RIO did to match or %RIO_ANY_ID to match all dids
- * @asm_vid: RIO asm_vid to match or %RIO_ANY_ID to match all asm_vids
- * @asm_did: RIO asm_did to match or %RIO_ANY_ID to match all asm_dids
- * @from: Previous RIO device found in search, or %NULL for new search
- *
- * Iterates through the list of known RIO devices. If a RIO device is
- * found with a matching @vid, @did, @asm_vid, @asm_did, the reference
- * count to the device is incrememted and a pointer to its device
- * structure is returned. Otherwise, %NULL is returned. A new search
- * is initiated by passing %NULL to the @from argument. Otherwise, if
- * @from is not %NULL, searches continue from next device on the global
- * list. The reference count for @from is always decremented if it is
- * not %NULL.
- */
-struct rio_dev *rio_get_asm(u16 vid, u16 did,
-			    u16 asm_vid, u16 asm_did, struct rio_dev *from)
-{
-	struct list_head *n;
-	struct rio_dev *rdev;
-
-	WARN_ON(in_interrupt());
-	spin_lock(&rio_global_list_lock);
-	n = from ? from->global_list.next : rio_devices.next;
-
-	while (n && (n != &rio_devices)) {
-		rdev = rio_dev_g(n);
-		if ((vid == RIO_ANY_ID || rdev->vid == vid) &&
-		    (did == RIO_ANY_ID || rdev->did == did) &&
-		    (asm_vid == RIO_ANY_ID || rdev->asm_vid == asm_vid) &&
-		    (asm_did == RIO_ANY_ID || rdev->asm_did == asm_did))
-			goto exit;
-		n = n->next;
-	}
-	rdev = NULL;
-      exit:
-	rio_dev_put(from);
-	rdev = rio_dev_get(rdev);
-	spin_unlock(&rio_global_list_lock);
-	return rdev;
-}
-EXPORT_SYMBOL_GPL(rio_get_asm);
-
-/**
- * rio_get_device - Begin or continue searching for a RIO device by vid/did
- * @vid: RIO vid to match or %RIO_ANY_ID to match all vids
- * @did: RIO did to match or %RIO_ANY_ID to match all dids
- * @from: Previous RIO device found in search, or %NULL for new search
- *
- * Iterates through the list of known RIO devices. If a RIO device is
- * found with a matching @vid and @did, the reference count to the
- * device is incrememted and a pointer to its device structure is returned.
- * Otherwise, %NULL is returned. A new search is initiated by passing %NULL
- * to the @from argument. Otherwise, if @from is not %NULL, searches
- * continue from next device on the global list. The reference count for
- * @from is always decremented if it is not %NULL.
- */
-struct rio_dev *rio_get_device(u16 vid, u16 did, struct rio_dev *from)
-{
-	return rio_get_asm(vid, did, RIO_ANY_ID, RIO_ANY_ID, from);
-}
-EXPORT_SYMBOL_GPL(rio_get_device);
-
-/**
  * rio_std_route_add_entry - Add switch route table entry using standard
  *   registers defined in RIO specification rev.1.3
  * @mport: Master port to issue transaction
@@ -1844,19 +1775,6 @@ struct dma_chan *rio_request_mport_dma(struct rio_mport *mport)
 EXPORT_SYMBOL_GPL(rio_request_mport_dma);
 
 /**
- * rio_request_dma - request RapidIO capable DMA channel that supports
- *   specified target RapidIO device.
- * @rdev: RIO device associated with DMA transfer
- *
- * Returns pointer to allocated DMA channel or NULL if failed.
- */
-struct dma_chan *rio_request_dma(struct rio_dev *rdev)
-{
-	return rio_request_mport_dma(rdev->net->hport);
-}
-EXPORT_SYMBOL_GPL(rio_request_dma);
-
-/**
  * rio_release_dma - release specified DMA channel
  * @dchan: DMA channel to release
  */
@@ -1903,55 +1821,7 @@ struct dma_async_tx_descriptor *rio_dma_prep_xfer(struct dma_chan *dchan,
 }
 EXPORT_SYMBOL_GPL(rio_dma_prep_xfer);
 
-/**
- * rio_dma_prep_slave_sg - RapidIO specific wrapper
- *   for device_prep_slave_sg callback defined by DMAENGINE.
- * @rdev: RIO device control structure
- * @dchan: DMA channel to configure
- * @data: RIO specific data descriptor
- * @direction: DMA data transfer direction (TO or FROM the device)
- * @flags: dmaengine defined flags
- *
- * Initializes RapidIO capable DMA channel for the specified data transfer.
- * Uses DMA channel private extension to pass information related to remote
- * target RIO device.
- *
- * Returns: pointer to DMA transaction descriptor if successful,
- *          error-valued pointer or NULL if failed.
- */
-struct dma_async_tx_descriptor *rio_dma_prep_slave_sg(struct rio_dev *rdev,
-	struct dma_chan *dchan, struct rio_dma_data *data,
-	enum dma_transfer_direction direction, unsigned long flags)
-{
-	return rio_dma_prep_xfer(dchan,	rdev->destid, data, direction, flags);
-}
-EXPORT_SYMBOL_GPL(rio_dma_prep_slave_sg);
-
 #endif /* CONFIG_RAPIDIO_DMA_ENGINE */
-
-/**
- * rio_find_mport - find RIO mport by its ID
- * @mport_id: number (ID) of mport device
- *
- * Given a RIO mport number, the desired mport is located
- * in the global list of mports. If the mport is found, a pointer to its
- * data structure is returned.  If no mport is found, %NULL is returned.
- */
-struct rio_mport *rio_find_mport(int mport_id)
-{
-	struct rio_mport *port;
-
-	mutex_lock(&rio_mport_list_lock);
-	list_for_each_entry(port, &rio_mports, node) {
-		if (port->id == mport_id)
-			goto found;
-	}
-	port = NULL;
-found:
-	mutex_unlock(&rio_mport_list_lock);
-
-	return port;
-}
 
 /**
  * rio_register_scan - enumeration/discovery method registration interface
@@ -1995,7 +1865,7 @@ int rio_register_scan(int mport_id, struct rio_scan *scan_ops)
 	/*
 	 * Allocate and initialize new scan registration node.
 	 */
-	scan = kzalloc(sizeof(*scan), GFP_KERNEL);
+	scan = kzalloc_obj(*scan);
 	if (!scan) {
 		rc = -ENOMEM;
 		goto err_out;
@@ -2029,48 +1899,6 @@ err_out:
 	return rc;
 }
 EXPORT_SYMBOL_GPL(rio_register_scan);
-
-/**
- * rio_unregister_scan - removes enumeration/discovery method from mport
- * @mport_id: mport device ID for which fabric scan routine has to be
- *            unregistered (RIO_MPORT_ANY = apply to all mports that use
- *            the specified scan_ops)
- * @scan_ops: enumeration/discovery operations structure
- *
- * Removes enumeration or discovery method assigned to the specified mport
- * device. If RIO_MPORT_ANY is specified, removes the specified operations from
- * all mports that have them attached.
- */
-int rio_unregister_scan(int mport_id, struct rio_scan *scan_ops)
-{
-	struct rio_mport *port;
-	struct rio_scan_node *scan;
-
-	pr_debug("RIO: %s for mport_id=%d\n", __func__, mport_id);
-
-	if (mport_id != RIO_MPORT_ANY && mport_id >= RIO_MAX_MPORTS)
-		return -EINVAL;
-
-	mutex_lock(&rio_mport_list_lock);
-
-	list_for_each_entry(port, &rio_mports, node)
-		if (port->id == mport_id ||
-		    (mport_id == RIO_MPORT_ANY && port->nscan == scan_ops))
-			port->nscan = NULL;
-
-	list_for_each_entry(scan, &rio_scans, node) {
-		if (scan->mport_id == mport_id) {
-			list_del(&scan->node);
-			kfree(scan);
-			break;
-		}
-	}
-
-	mutex_unlock(&rio_mport_list_lock);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(rio_unregister_scan);
 
 /**
  * rio_mport_scan - execute enumeration/discovery on the specified mport
@@ -2108,20 +1936,6 @@ found:
 
 	module_put(port->nscan->owner);
 	return rc;
-}
-
-static void rio_fixup_device(struct rio_dev *dev)
-{
-}
-
-static int rio_init(void)
-{
-	struct rio_dev *dev = NULL;
-
-	while ((dev = rio_get_device(RIO_ANY_ID, RIO_ANY_ID, dev)) != NULL) {
-		rio_fixup_device(dev);
-	}
-	return 0;
 }
 
 static struct workqueue_struct *rio_wq;
@@ -2180,13 +1994,13 @@ int rio_init_mports(void)
 	 * TODO: Implement restart of discovery process for all or
 	 * individual discovering mports.
 	 */
-	rio_wq = alloc_workqueue("riodisc", 0, 0);
+	rio_wq = alloc_workqueue("riodisc", WQ_PERCPU, 0);
 	if (!rio_wq) {
 		pr_err("RIO: unable allocate rio_wq\n");
 		goto no_disc;
 	}
 
-	work = kcalloc(n, sizeof *work, GFP_KERNEL);
+	work = kzalloc_objs(*work, n);
 	if (!work) {
 		destroy_workqueue(rio_wq);
 		goto no_disc;
@@ -2210,8 +2024,6 @@ int rio_init_mports(void)
 	kfree(work);
 
 no_disc:
-	rio_init();
-
 	return 0;
 }
 EXPORT_SYMBOL_GPL(rio_init_mports);
@@ -2271,11 +2083,16 @@ int rio_register_mport(struct rio_mport *port)
 	atomic_set(&port->state, RIO_DEVICE_RUNNING);
 
 	res = device_register(&port->dev);
-	if (res)
+	if (res) {
 		dev_err(&port->dev, "RIO: mport%d registration failed ERR=%d\n",
 			port->id, res);
-	else
+		mutex_lock(&rio_mport_list_lock);
+		list_del(&port->node);
+		mutex_unlock(&rio_mport_list_lock);
+		put_device(&port->dev);
+	} else {
 		dev_dbg(&port->dev, "RIO: registered mport%d\n", port->id);
+	}
 
 	return res;
 }

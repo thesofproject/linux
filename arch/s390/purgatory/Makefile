@@ -1,37 +1,48 @@
 # SPDX-License-Identifier: GPL-2.0
 
-OBJECT_FILES_NON_STANDARD := y
+purgatory-y := head.o purgatory.o string.o sha256.o
 
-purgatory-y := head.o purgatory.o string.o sha256.o mem.o
-
-targets += $(purgatory-y) purgatory.ro kexec-purgatory.c
+targets += $(purgatory-y) purgatory.lds purgatory purgatory.chk purgatory.ro
 PURGATORY_OBJS = $(addprefix $(obj)/,$(purgatory-y))
 
-$(obj)/sha256.o: $(srctree)/lib/sha256.c
+$(obj)/sha256.o: $(srctree)/lib/crypto/sha256.c FORCE
 	$(call if_changed_rule,cc_o_c)
 
-$(obj)/mem.o: $(srctree)/arch/s390/lib/mem.S
-	$(call if_changed_rule,as_o_S)
+CFLAGS_sha256.o := -D__NO_FORTIFY
 
-$(obj)/string.o: $(srctree)/arch/s390/lib/string.c
-	$(call if_changed_rule,cc_o_c)
+CC_FLAGS_MARCH_MINIMUM := -march=z10
 
-LDFLAGS_purgatory.ro := -e purgatory_start -r --no-undefined -nostdlib
-LDFLAGS_purgatory.ro += -z nodefaultlib
-KBUILD_CFLAGS := -fno-strict-aliasing -Wall -Wstrict-prototypes
+KBUILD_CFLAGS := $(CC_FLAGS_DIALECT) -fno-strict-aliasing -Wall -Wstrict-prototypes
 KBUILD_CFLAGS += -Wno-pointer-sign -Wno-sign-compare
 KBUILD_CFLAGS += -fno-zero-initialized-in-bss -fno-builtin -ffreestanding
-KBUILD_CFLAGS += -c -MD -Os -m64 -msoft-float
+KBUILD_CFLAGS += -Os -m64 -msoft-float -fno-common
+KBUILD_CFLAGS += -fno-stack-protector
+KBUILD_CFLAGS += -DDISABLE_BRANCH_PROFILING
+KBUILD_CFLAGS += $(CC_FLAGS_MARCH_MINIMUM) -D__DISABLE_EXPORTS
+KBUILD_CFLAGS += $(CLANG_FLAGS)
 KBUILD_CFLAGS += $(call cc-option,-fno-PIE)
+KBUILD_CFLAGS += $(call cc-option, -Wno-default-const-init-unsafe)
+KBUILD_AFLAGS := $(filter-out -DCC_USING_EXPOLINE,$(KBUILD_AFLAGS))
+KBUILD_AFLAGS += $(CC_FLAGS_MARCH_MINIMUM) -D__DISABLE_EXPORTS
 
-$(obj)/purgatory.ro: $(PURGATORY_OBJS) FORCE
+# Since we link purgatory with -r unresolved symbols are not checked, so we
+# also link a purgatory.chk binary without -r to check for unresolved symbols.
+PURGATORY_LDFLAGS := -nostdlib -z nodefaultlib
+LDFLAGS_purgatory := -r $(PURGATORY_LDFLAGS) -T
+LDFLAGS_purgatory.chk := -e purgatory_start $(PURGATORY_LDFLAGS)
+$(obj)/purgatory: $(obj)/purgatory.lds $(PURGATORY_OBJS) FORCE
 		$(call if_changed,ld)
 
-CMD_BIN2C = $(objtree)/scripts/basic/bin2c
-quiet_cmd_bin2c = BIN2C   $@
-      cmd_bin2c = $(CMD_BIN2C) kexec_purgatory < $< > $@
+$(obj)/purgatory.chk: $(obj)/purgatory FORCE
+		$(call if_changed,ld)
 
-$(obj)/kexec-purgatory.c: $(obj)/purgatory.ro FORCE
-	$(call if_changed,bin2c)
+OBJCOPYFLAGS_purgatory.ro := -O elf64-s390
+OBJCOPYFLAGS_purgatory.ro += --remove-section='*debug*'
+OBJCOPYFLAGS_purgatory.ro += --remove-section='.comment'
+OBJCOPYFLAGS_purgatory.ro += --remove-section='.note.*'
+$(obj)/purgatory.ro: $(obj)/purgatory $(obj)/purgatory.chk FORCE
+		$(call if_changed,objcopy)
 
-obj-$(CONFIG_ARCH_HAS_KEXEC_PURGATORY) += kexec-purgatory.o
+$(obj)/kexec-purgatory.o: $(obj)/purgatory.ro
+
+obj-y += kexec-purgatory.o

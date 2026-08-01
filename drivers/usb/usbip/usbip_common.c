@@ -309,12 +309,13 @@ int usbip_recv(struct socket *sock, void *buf, int size)
 	if (!sock || !buf || !size)
 		return -EINVAL;
 
-	iov_iter_kvec(&msg.msg_iter, READ|ITER_KVEC, &iov, 1, size);
+	iov_iter_kvec(&msg.msg_iter, ITER_DEST, &iov, 1, size);
 
 	usbip_dbg_xmit("enter\n");
 
 	do {
 		sock->sk->sk_allocation = GFP_NOIO;
+		sock->sk->sk_use_task_frag = false;
 
 		result = sock_recvmsg(sock, &msg, MSG_WAITALL);
 		if (result <= 0)
@@ -324,11 +325,6 @@ int usbip_recv(struct socket *sock, void *buf, int size)
 	} while (msg_data_left(&msg));
 
 	if (usbip_dbg_flag_xmit) {
-		if (!in_interrupt())
-			pr_debug("%-10s:", current->comm);
-		else
-			pr_debug("interrupt  :");
-
 		pr_debug("receiving....\n");
 		usbip_dump_buffer(buf, size);
 		pr_debug("received, osize %d ret %d size %zd total %d\n",
@@ -349,6 +345,91 @@ static unsigned int tweak_transfer_flags(unsigned int flags)
 	return flags;
 }
 
+/*
+ * USBIP driver packs URB transfer flags in PDUs that are exchanged
+ * between Server (usbip_host) and Client (vhci_hcd). URB_* flags
+ * are internal to kernel and could change. Where as USBIP URB flags
+ * exchanged in PDUs are USBIP user API must not change.
+ *
+ * USBIP_URB* flags are exported as explicit API and client and server
+ * do mapping from kernel flags to USBIP_URB*. Details as follows:
+ *
+ * Client tx path (USBIP_CMD_SUBMIT):
+ * - Maps URB_* to USBIP_URB_* when it sends USBIP_CMD_SUBMIT packet.
+ *
+ * Server rx path (USBIP_CMD_SUBMIT):
+ * - Maps USBIP_URB_* to URB_* when it receives USBIP_CMD_SUBMIT packet.
+ *
+ * Flags aren't included in USBIP_CMD_UNLINK and USBIP_RET_SUBMIT packets
+ * and no special handling is needed for them in the following cases:
+ * - Server rx path (USBIP_CMD_UNLINK)
+ * - Client rx path & Server tx path (USBIP_RET_SUBMIT)
+ *
+ * Code paths:
+ * usbip_pack_pdu() is the common routine that handles packing pdu from
+ * urb and unpack pdu to an urb.
+ *
+ * usbip_pack_cmd_submit() and usbip_pack_ret_submit() handle
+ * USBIP_CMD_SUBMIT and USBIP_RET_SUBMIT respectively.
+ *
+ * usbip_map_urb_to_usbip() and usbip_map_usbip_to_urb() are used
+ * by usbip_pack_cmd_submit() and usbip_pack_ret_submit() to map
+ * flags.
+ */
+
+struct urb_to_usbip_flags {
+	u32 urb_flag;
+	u32 usbip_flag;
+};
+
+#define NUM_USBIP_FLAGS	17
+
+static const struct urb_to_usbip_flags flag_map[NUM_USBIP_FLAGS] = {
+	{URB_SHORT_NOT_OK, USBIP_URB_SHORT_NOT_OK},
+	{URB_ISO_ASAP, USBIP_URB_ISO_ASAP},
+	{URB_NO_TRANSFER_DMA_MAP, USBIP_URB_NO_TRANSFER_DMA_MAP},
+	{URB_ZERO_PACKET, USBIP_URB_ZERO_PACKET},
+	{URB_NO_INTERRUPT, USBIP_URB_NO_INTERRUPT},
+	{URB_FREE_BUFFER, USBIP_URB_FREE_BUFFER},
+	{URB_DIR_IN, USBIP_URB_DIR_IN},
+	{URB_DIR_OUT, USBIP_URB_DIR_OUT},
+	{URB_DIR_MASK, USBIP_URB_DIR_MASK},
+	{URB_DMA_MAP_SINGLE, USBIP_URB_DMA_MAP_SINGLE},
+	{URB_DMA_MAP_PAGE, USBIP_URB_DMA_MAP_PAGE},
+	{URB_DMA_MAP_SG, USBIP_URB_DMA_MAP_SG},
+	{URB_MAP_LOCAL, USBIP_URB_MAP_LOCAL},
+	{URB_SETUP_MAP_SINGLE, USBIP_URB_SETUP_MAP_SINGLE},
+	{URB_SETUP_MAP_LOCAL, USBIP_URB_SETUP_MAP_LOCAL},
+	{URB_DMA_SG_COMBINED, USBIP_URB_DMA_SG_COMBINED},
+	{URB_ALIGNED_TEMP_BUFFER, USBIP_URB_ALIGNED_TEMP_BUFFER},
+};
+
+static unsigned int urb_to_usbip(unsigned int flags)
+{
+	unsigned int map_flags = 0;
+	int loop;
+
+	for (loop = 0; loop < NUM_USBIP_FLAGS; loop++) {
+		if (flags & flag_map[loop].urb_flag)
+			map_flags |= flag_map[loop].usbip_flag;
+	}
+
+	return map_flags;
+}
+
+static unsigned int usbip_to_urb(unsigned int flags)
+{
+	unsigned int map_flags = 0;
+	int loop;
+
+	for (loop = 0; loop < NUM_USBIP_FLAGS; loop++) {
+		if (flags & flag_map[loop].usbip_flag)
+			map_flags |= flag_map[loop].urb_flag;
+	}
+
+	return map_flags;
+}
+
 static void usbip_pack_cmd_submit(struct usbip_header *pdu, struct urb *urb,
 				  int pack)
 {
@@ -359,14 +440,14 @@ static void usbip_pack_cmd_submit(struct usbip_header *pdu, struct urb *urb,
 	 * will be discussed when usbip is ported to other operating systems.
 	 */
 	if (pack) {
-		spdu->transfer_flags =
-			tweak_transfer_flags(urb->transfer_flags);
+		/* map after tweaking the urb flags */
+		spdu->transfer_flags = urb_to_usbip(tweak_transfer_flags(urb->transfer_flags));
 		spdu->transfer_buffer_length	= urb->transfer_buffer_length;
 		spdu->start_frame		= urb->start_frame;
 		spdu->number_of_packets		= urb->number_of_packets;
 		spdu->interval			= urb->interval;
 	} else  {
-		urb->transfer_flags         = spdu->transfer_flags;
+		urb->transfer_flags         = usbip_to_urb(spdu->transfer_flags);
 		urb->transfer_buffer_length = spdu->transfer_buffer_length;
 		urb->start_frame            = spdu->start_frame;
 		urb->number_of_packets      = spdu->number_of_packets;
@@ -389,6 +470,18 @@ static void usbip_pack_ret_submit(struct usbip_header *pdu, struct urb *urb,
 		urb->status		= rpdu->status;
 		urb->actual_length	= rpdu->actual_length;
 		urb->start_frame	= rpdu->start_frame;
+		/*
+		 * The number_of_packets field determines the length of
+		 * iso_frame_desc[], which is a flexible array allocated
+		 * at URB creation time. A response must never claim more
+		 * packets than originally submitted; doing so would cause
+		 * an out-of-bounds write in usbip_recv_iso() and
+		 * usbip_pad_iso(). Clamp to zero on violation so both
+		 * functions safely return early.
+		 */
+		if (rpdu->number_of_packets < 0 ||
+		    rpdu->number_of_packets > urb->number_of_packets)
+			rpdu->number_of_packets = 0;
 		urb->number_of_packets = rpdu->number_of_packets;
 		urb->error_count	= rpdu->error_count;
 	}
@@ -581,19 +674,29 @@ int usbip_recv_iso(struct usbip_device *ud, struct urb *urb)
 	void *buff;
 	struct usbip_iso_packet_descriptor *iso;
 	int np = urb->number_of_packets;
-	int size = np * sizeof(*iso);
+	int size;
 	int i;
 	int ret;
-	int total_length = 0;
+	u32 total_length = 0;
 
 	if (!usb_pipeisoc(urb->pipe))
 		return 0;
 
-	/* my Bluetooth dongle gets ISO URBs which are np = 0 */
-	if (np == 0)
-		return 0;
+	if (np <= 0 || np > USBIP_MAX_ISO_PACKETS) {
+		dev_err(&urb->dev->dev,
+			"recv iso: invalid number_of_packets %d\n", np);
+		/*
+		 * usbip_pack_ret_submit() already set urb->number_of_packets
+		 * from the wire.  Zero it so processcompl() does not iterate
+		 * OOB descriptors on the way out.
+		 */
+		urb->number_of_packets = 0;
+		return -EPROTO;
+	}
 
-	buff = kzalloc(size, GFP_KERNEL);
+	size = np * sizeof(*iso);
+
+	buff = kcalloc(np, sizeof(*iso), GFP_KERNEL);
 	if (!buff)
 		return -ENOMEM;
 
@@ -615,14 +718,23 @@ int usbip_recv_iso(struct usbip_device *ud, struct urb *urb)
 	for (i = 0; i < np; i++) {
 		usbip_iso_packet_correct_endian(&iso[i], 0);
 		usbip_pack_iso(&iso[i], &urb->iso_frame_desc[i], 0);
+		if (urb->iso_frame_desc[i].actual_length >
+				(unsigned int)urb->transfer_buffer_length) {
+			dev_err(&urb->dev->dev,
+				"recv iso: frame actual_length %u exceeds buffer %d\n",
+				urb->iso_frame_desc[i].actual_length,
+				urb->transfer_buffer_length);
+			kfree(buff);
+			return -EPROTO;
+		}
 		total_length += urb->iso_frame_desc[i].actual_length;
 	}
 
 	kfree(buff);
 
-	if (total_length != urb->actual_length) {
+	if (total_length != (u32)urb->actual_length) {
 		dev_err(&urb->dev->dev,
-			"total length of iso packets %d not equal to actual length of buffer %d\n",
+			"total length of iso packets %u not equal to actual length of buffer %d\n",
 			total_length, urb->actual_length);
 
 		if (ud->side == USBIP_STUB || ud->side == USBIP_VUDC)
@@ -670,6 +782,42 @@ void usbip_pad_iso(struct usbip_device *ud, struct urb *urb)
 	 */
 	for (i = np-1; i > 0; i--) {
 		actualoffset -= urb->iso_frame_desc[i].actual_length;
+
+		/*
+		 * Validate source range: actualoffset can go negative
+		 * via crafted actual_length values from the wire.
+		 */
+		if (actualoffset < 0 ||
+		    (unsigned int)actualoffset >
+				(unsigned int)urb->transfer_buffer_length ||
+		    urb->iso_frame_desc[i].actual_length >
+				(unsigned int)urb->transfer_buffer_length -
+				(unsigned int)actualoffset) {
+			dev_err(&urb->dev->dev,
+				"pad_iso: bad src off=%d len=%u bufsz=%d\n",
+				actualoffset,
+				urb->iso_frame_desc[i].actual_length,
+				urb->transfer_buffer_length);
+			return;
+		}
+
+		/*
+		 * Validate destination range: iso_frame_desc[i].offset
+		 * is wire-supplied and must not exceed the buffer.
+		 */
+		if (urb->iso_frame_desc[i].offset >
+				(unsigned int)urb->transfer_buffer_length ||
+		    urb->iso_frame_desc[i].actual_length >
+				(unsigned int)urb->transfer_buffer_length -
+				urb->iso_frame_desc[i].offset) {
+			dev_err(&urb->dev->dev,
+				"pad_iso: bad dst off=%u len=%u bufsz=%d\n",
+				urb->iso_frame_desc[i].offset,
+				urb->iso_frame_desc[i].actual_length,
+				urb->transfer_buffer_length);
+			return;
+		}
+
 		memmove(urb->transfer_buffer + urb->iso_frame_desc[i].offset,
 			urb->transfer_buffer + actualoffset,
 			urb->iso_frame_desc[i].actual_length);
@@ -680,8 +828,12 @@ EXPORT_SYMBOL_GPL(usbip_pad_iso);
 /* some members of urb must be substituted before. */
 int usbip_recv_xbuff(struct usbip_device *ud, struct urb *urb)
 {
-	int ret;
+	struct scatterlist *sg;
+	int ret = 0;
+	int recv;
 	int size;
+	int copy;
+	int i;
 
 	if (ud->side == USBIP_STUB || ud->side == USBIP_VUDC) {
 		/* the direction of urb must be OUT. */
@@ -701,41 +853,57 @@ int usbip_recv_xbuff(struct usbip_device *ud, struct urb *urb)
 	if (!(size > 0))
 		return 0;
 
-	if (size > urb->transfer_buffer_length) {
+	if (size > urb->transfer_buffer_length)
 		/* should not happen, probably malicious packet */
-		if (ud->side == USBIP_STUB) {
-			usbip_event_add(ud, SDEV_EVENT_ERROR_TCP);
-			return 0;
-		} else {
-			usbip_event_add(ud, VDEV_EVENT_ERROR_TCP);
-			return -EPIPE;
-		}
-	}
+		goto error;
 
-	ret = usbip_recv(ud->tcp_socket, urb->transfer_buffer, size);
-	if (ret != size) {
-		dev_err(&urb->dev->dev, "recv xbuf, %d\n", ret);
-		if (ud->side == USBIP_STUB || ud->side == USBIP_VUDC) {
-			usbip_event_add(ud, SDEV_EVENT_ERROR_TCP);
-		} else {
-			usbip_event_add(ud, VDEV_EVENT_ERROR_TCP);
-			return -EPIPE;
+	if (urb->num_sgs) {
+		copy = size;
+		for_each_sg(urb->sg, sg, urb->num_sgs, i) {
+			int recv_size;
+
+			if (copy < sg->length)
+				recv_size = copy;
+			else
+				recv_size = sg->length;
+
+			recv = usbip_recv(ud->tcp_socket, sg_virt(sg),
+						recv_size);
+
+			if (recv != recv_size)
+				goto error;
+
+			copy -= recv;
+			ret += recv;
+
+			if (!copy)
+				break;
 		}
+
+		if (ret != size)
+			goto error;
+	} else {
+		ret = usbip_recv(ud->tcp_socket, urb->transfer_buffer, size);
+		if (ret != size)
+			goto error;
 	}
 
 	return ret;
+
+error:
+	dev_err(&urb->dev->dev, "recv xbuf, %d\n", ret);
+	if (ud->side == USBIP_STUB || ud->side == USBIP_VUDC)
+		usbip_event_add(ud, SDEV_EVENT_ERROR_TCP);
+	else
+		usbip_event_add(ud, VDEV_EVENT_ERROR_TCP);
+
+	return -EPIPE;
 }
 EXPORT_SYMBOL_GPL(usbip_recv_xbuff);
 
 static int __init usbip_core_init(void)
 {
-	int ret;
-
-	ret = usbip_init_eh();
-	if (ret)
-		return ret;
-
-	return 0;
+	return usbip_init_eh();
 }
 
 static void __exit usbip_core_exit(void)

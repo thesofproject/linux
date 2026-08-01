@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Frontend driver for mobile DVB-T demodulator DiBcom 3000M-B
  * DiBcom (http://www.dibcom.fr/)
@@ -8,17 +9,12 @@
  *
  * Copyright (C) 2004 Amaury Demol for DiBcom
  *
- *	This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License as
- *	published by the Free Software Foundation, version 2.
- *
  * Acknowledgements
  *
  *  Amaury Demol from DiBcom for providing specs and driver
  *  sources, on which this driver (and the dvb-dibusb) are based.
  *
- * see Documentation/dvb/README.dvb-usb for more information
- *
+ * see Documentation/driver-api/media/drivers/dvb-usb.rst for more information
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -55,7 +51,7 @@ MODULE_PARM_DESC(debug, "set debugging level (1=info,2=xfer,4=setfe,8=getfe (|-a
 static int dib3000_read_reg(struct dib3000_state *state, u16 reg)
 {
 	u8 wb[] = { ((reg >> 8) | 0x80) & 0xff, reg & 0xff };
-	u8 rb[2];
+	u8 rb[2] = {};
 	struct i2c_msg msg[] = {
 		{ .addr = state->config.demod_address, .flags = 0,        .buf = wb, .len = 2 },
 		{ .addr = state->config.demod_address, .flags = I2C_M_RD, .buf = rb, .len = 2 },
@@ -228,7 +224,7 @@ static int dib3000mb_set_frontend(struct dvb_frontend *fe, int tuner)
 	switch (c->hierarchy) {
 		case HIERARCHY_NONE:
 			deb_setf("hierarchy: none\n");
-			/* fall through */
+			fallthrough;
 		case HIERARCHY_1:
 			deb_setf("hierarchy: alpha=1\n");
 			wr(DIB3000MB_REG_VIT_ALPHA, DIB3000_ALPHA_1);
@@ -644,7 +640,7 @@ static int dib3000mb_read_ber(struct dvb_frontend* fe, u32 *ber)
 	return 0;
 }
 
-/* see dib3000-watch dvb-apps for exact calcuations of signal_strength and snr */
+/* see dib3000-watch dvb-apps for exact calculations of signal_strength and snr */
 static int dib3000mb_read_signal_strength(struct dvb_frontend* fe, u16 *strength)
 {
 	struct dib3000_state* state = fe->demodulator_priv;
@@ -750,7 +746,7 @@ struct dvb_frontend* dib3000mb_attach(const struct dib3000_config* config,
 	struct dib3000_state* state = NULL;
 
 	/* allocate memory for the internal state */
-	state = kzalloc(sizeof(struct dib3000_state), GFP_KERNEL);
+	state = kzalloc_obj(struct dib3000_state);
 	if (state == NULL)
 		goto error;
 
@@ -786,9 +782,9 @@ static const struct dvb_frontend_ops dib3000mb_ops = {
 	.delsys = { SYS_DVBT },
 	.info = {
 		.name			= "DiBcom 3000M-B DVB-T",
-		.frequency_min		= 44250000,
-		.frequency_max		= 867250000,
-		.frequency_stepsize	= 62500,
+		.frequency_min_hz	=  44250 * kHz,
+		.frequency_max_hz	= 867250 * kHz,
+		.frequency_stepsize_hz	= 62500,
 		.caps = FE_CAN_INVERSION_AUTO |
 				FE_CAN_FEC_1_2 | FE_CAN_FEC_2_3 | FE_CAN_FEC_3_4 |
 				FE_CAN_FEC_5_6 | FE_CAN_FEC_7_8 | FE_CAN_FEC_AUTO |
@@ -819,4 +815,4 @@ MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
 
-EXPORT_SYMBOL(dib3000mb_attach);
+EXPORT_SYMBOL_GPL(dib3000mb_attach);

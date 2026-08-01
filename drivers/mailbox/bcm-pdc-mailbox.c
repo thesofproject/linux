@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright 2016 Broadcom
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License, version 2, as
- * published by the Free Software Foundation (the "GPL").
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License version 2 (GPLv2) for more details.
- *
- * You should have received a copy of the GNU General Public License
- * version 2 (GPLv2) along with this source code.
  */
 
 /*
@@ -44,10 +33,9 @@
 #include <linux/interrupt.h>
 #include <linux/wait.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/io.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
-#include <linux/of_address.h>
 #include <linux/of_irq.h>
 #include <linux/mailbox_controller.h>
 #include <linux/mailbox/brcm-message.h>
@@ -55,6 +43,7 @@
 #include <linux/dma-direction.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmapool.h>
+#include <linux/workqueue.h>
 
 #define PDC_SUCCESS  0
 
@@ -167,10 +156,6 @@
 enum pdc_hw {
 	FA_HW,		/* FA2/FA+ hardware (i.e. Northstar Plus) */
 	PDC_HW		/* PDC/MDE hardware (i.e. Northstar 2, Pegasus) */
-};
-
-struct pdc_dma_map {
-	void *ctx;          /* opaque context associated with frame */
 };
 
 /* dma descriptor */
@@ -305,8 +290,8 @@ struct pdc_state {
 
 	unsigned int pdc_irq;
 
-	/* tasklet for deferred processing after DMA rx interrupt */
-	struct tasklet_struct rx_tasklet;
+	/* work for deferred processing after DMA rx interrupt */
+	struct work_struct rx_work;
 
 	/* Number of bytes of receive status prior to each rx frame */
 	u32 rx_status_len;
@@ -406,8 +391,6 @@ struct pdc_state {
 	 */
 	struct scatterlist *src_sg[PDC_RING_ENTRIES];
 
-	struct dentry *debugfs_stats;  /* debug FS stats file for this PDC */
-
 	/* counters */
 	u32  pdc_requests;     /* number of request messages submitted */
 	u32  pdc_replies;      /* number of reply messages received */
@@ -449,33 +432,33 @@ static ssize_t pdc_debugfs_read(struct file *filp, char __user *ubuf,
 
 	pdcs = filp->private_data;
 	out_offset = 0;
-	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+	out_offset += scnprintf(buf + out_offset, out_count - out_offset,
 			       "SPU %u stats:\n", pdcs->pdc_idx);
-	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+	out_offset += scnprintf(buf + out_offset, out_count - out_offset,
 			       "PDC requests....................%u\n",
 			       pdcs->pdc_requests);
-	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+	out_offset += scnprintf(buf + out_offset, out_count - out_offset,
 			       "PDC responses...................%u\n",
 			       pdcs->pdc_replies);
-	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+	out_offset += scnprintf(buf + out_offset, out_count - out_offset,
 			       "Tx not done.....................%u\n",
 			       pdcs->last_tx_not_done);
-	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+	out_offset += scnprintf(buf + out_offset, out_count - out_offset,
 			       "Tx ring full....................%u\n",
 			       pdcs->tx_ring_full);
-	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+	out_offset += scnprintf(buf + out_offset, out_count - out_offset,
 			       "Rx ring full....................%u\n",
 			       pdcs->rx_ring_full);
-	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+	out_offset += scnprintf(buf + out_offset, out_count - out_offset,
 			       "Tx desc write fail. Ring full...%u\n",
 			       pdcs->txnobuf);
-	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+	out_offset += scnprintf(buf + out_offset, out_count - out_offset,
 			       "Rx desc write fail. Ring full...%u\n",
 			       pdcs->rxnobuf);
-	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+	out_offset += scnprintf(buf + out_offset, out_count - out_offset,
 			       "Receive overflow................%u\n",
 			       pdcs->rx_oflow);
-	out_offset += snprintf(buf + out_offset, out_count - out_offset,
+	out_offset += scnprintf(buf + out_offset, out_count - out_offset,
 			       "Num frags in rx ring............%u\n",
 			       NRXDACTIVE(pdcs->rxin, pdcs->last_rx_curr,
 					  pdcs->nrxpost));
@@ -512,9 +495,8 @@ static void pdc_setup_debugfs(struct pdc_state *pdcs)
 		debugfs_dir = debugfs_create_dir(KBUILD_MODNAME, NULL);
 
 	/* S_IRUSR == 0400 */
-	pdcs->debugfs_stats = debugfs_create_file(spu_stats_name, 0400,
-						  debugfs_dir, pdcs,
-						  &pdc_debugfs_stats);
+	debugfs_create_file(spu_stats_name, 0400, debugfs_dir, pdcs,
+			    &pdc_debugfs_stats);
 }
 
 static void pdc_free_debugfs(void)
@@ -693,7 +675,7 @@ pdc_receive(struct pdc_state *pdcs)
 
 	/* read last_rx_curr from register once */
 	pdcs->last_rx_curr =
-	    (ioread32(&pdcs->rxregs_64->status0) &
+	    (ioread32((const void __iomem *)&pdcs->rxregs_64->status0) &
 	     CRYPTO_D64_RS0_CD_MASK) / RING_ENTRY_SIZE;
 
 	do {
@@ -708,7 +690,7 @@ pdc_receive(struct pdc_state *pdcs)
  * pdc_tx_list_sg_add() - Add the buffers in a scatterlist to the transmit
  * descriptors for a given SPU. The scatterlist buffers contain the data for a
  * SPU request message.
- * @spu_idx:   The index of the SPU to submit the request to, [0, max_spu)
+ * @pdcs:      PDC state for the SPU that will process this request
  * @sg:        Scatterlist whose buffers contain part of the SPU request
  *
  * If a scatterlist buffer is larger than PDC_DMA_BUF_MAX, multiple descriptors
@@ -875,7 +857,7 @@ static int pdc_rx_list_init(struct pdc_state *pdcs, struct scatterlist *dst_sg,
  * pdc_rx_list_sg_add() - Add the buffers in a scatterlist to the receive
  * descriptors for a given SPU. The caller must have already DMA mapped the
  * scatterlist.
- * @spu_idx:    Indicates which SPU the buffers are for
+ * @pdcs:       PDC state for the SPU that will process this request
  * @sg:         Scatterlist whose buffers are added to the receive ring
  *
  * If a receive buffer in the scatterlist is larger than PDC_DMA_BUF_MAX,
@@ -967,18 +949,18 @@ static irqreturn_t pdc_irq_handler(int irq, void *data)
 	iowrite32(intstatus, pdcs->pdc_reg_vbase + PDC_INTSTATUS_OFFSET);
 
 	/* Wakeup IRQ thread */
-	tasklet_schedule(&pdcs->rx_tasklet);
+	queue_work(system_bh_wq, &pdcs->rx_work);
 	return IRQ_HANDLED;
 }
 
 /**
- * pdc_tasklet_cb() - Tasklet callback that runs the deferred processing after
+ * pdc_work_cb() - Work callback that runs the deferred processing after
  * a DMA receive interrupt. Reenables the receive interrupt.
- * @data: PDC state structure
+ * @t: Pointer to the Altera sSGDMA channel structure
  */
-static void pdc_tasklet_cb(unsigned long data)
+static void pdc_work_cb(struct work_struct *t)
 {
-	struct pdc_state *pdcs = (struct pdc_state *)data;
+	struct pdc_state *pdcs = from_work(pdcs, t, rx_work);
 
 	pdc_receive(pdcs);
 
@@ -1471,7 +1453,7 @@ static int pdc_mb_init(struct pdc_state *pdcs)
 		mbc->chans[chan_index].con_priv = pdcs;
 
 	/* Register mailbox controller */
-	err = mbox_controller_register(mbc);
+	err = devm_mbox_controller_register(dev, mbc);
 	if (err) {
 		dev_crit(dev,
 			 "Failed to register PDC mailbox controller. Error %d.",
@@ -1508,7 +1490,6 @@ static int pdc_dt_read(struct platform_device *pdev, struct pdc_state *pdcs)
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *dn = pdev->dev.of_node;
-	const struct of_device_id *match;
 	const int *hw_type;
 	int err;
 
@@ -1523,11 +1504,9 @@ static int pdc_dt_read(struct platform_device *pdev, struct pdc_state *pdcs)
 
 	pdcs->hw_type = PDC_HW;
 
-	match = of_match_device(of_match_ptr(pdc_mbox_of_match), dev);
-	if (match != NULL) {
-		hw_type = match->data;
+	hw_type = device_get_match_data(dev);
+	if (hw_type)
 		pdcs->hw_type = *hw_type;
-	}
 
 	return 0;
 }
@@ -1580,20 +1559,13 @@ static int pdc_probe(struct platform_device *pdev)
 	if (err)
 		goto cleanup_ring_pool;
 
-	pdc_regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!pdc_regs) {
-		err = -ENODEV;
+	pdcs->pdc_reg_vbase = devm_platform_get_and_ioremap_resource(pdev, 0, &pdc_regs);
+	if (IS_ERR(pdcs->pdc_reg_vbase)) {
+		err = PTR_ERR(pdcs->pdc_reg_vbase);
 		goto cleanup_ring_pool;
 	}
 	dev_dbg(dev, "PDC register region res.start = %pa, res.end = %pa",
 		&pdc_regs->start, &pdc_regs->end);
-
-	pdcs->pdc_reg_vbase = devm_ioremap_resource(&pdev->dev, pdc_regs);
-	if (IS_ERR(pdcs->pdc_reg_vbase)) {
-		err = PTR_ERR(pdcs->pdc_reg_vbase);
-		dev_err(&pdev->dev, "Failed to map registers: %d\n", err);
-		goto cleanup_ring_pool;
-	}
 
 	/* create rx buffer pool after dt read to know how big buffers are */
 	err = pdc_rx_buf_pool_create(pdcs);
@@ -1602,8 +1574,8 @@ static int pdc_probe(struct platform_device *pdev)
 
 	pdc_hw_init(pdcs);
 
-	/* Init tasklet for deferred DMA rx processing */
-	tasklet_init(&pdcs->rx_tasklet, pdc_tasklet_cb, (unsigned long)pdcs);
+	/* Init work for deferred DMA rx processing */
+	INIT_WORK(&pdcs->rx_work, pdc_work_cb);
 
 	err = pdc_interrupts_init(pdcs);
 	if (err)
@@ -1614,14 +1586,13 @@ static int pdc_probe(struct platform_device *pdev)
 	if (err)
 		goto cleanup_buf_pool;
 
-	pdcs->debugfs_stats = NULL;
 	pdc_setup_debugfs(pdcs);
 
 	dev_dbg(dev, "pdc_probe() successful");
 	return PDC_SUCCESS;
 
 cleanup_buf_pool:
-	tasklet_kill(&pdcs->rx_tasklet);
+	cancel_work_sync(&pdcs->rx_work);
 	dma_pool_destroy(pdcs->rx_buf_pool);
 
 cleanup_ring_pool:
@@ -1631,21 +1602,18 @@ cleanup:
 	return err;
 }
 
-static int pdc_remove(struct platform_device *pdev)
+static void pdc_remove(struct platform_device *pdev)
 {
 	struct pdc_state *pdcs = platform_get_drvdata(pdev);
 
 	pdc_free_debugfs();
 
-	tasklet_kill(&pdcs->rx_tasklet);
+	cancel_work_sync(&pdcs->rx_work);
 
 	pdc_hw_disable(pdcs);
 
-	mbox_controller_unregister(&pdcs->mbc);
-
 	dma_pool_destroy(pdcs->rx_buf_pool);
 	dma_pool_destroy(pdcs->ring_pool);
-	return 0;
 }
 
 static struct platform_driver pdc_mbox_driver = {
@@ -1653,7 +1621,7 @@ static struct platform_driver pdc_mbox_driver = {
 	.remove = pdc_remove,
 	.driver = {
 		   .name = "brcm-iproc-pdc-mbox",
-		   .of_match_table = of_match_ptr(pdc_mbox_of_match),
+		   .of_match_table = pdc_mbox_of_match,
 		   },
 };
 module_platform_driver(pdc_mbox_driver);

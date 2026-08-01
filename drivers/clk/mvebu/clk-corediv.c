@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * MVEBU Core divider clock
  *
@@ -5,13 +6,11 @@
  *
  * Ezequiel Garcia <ezequiel.garcia@free-electrons.com>
  *
- * This file is licensed under the terms of the GNU General Public
- * License version 2.  This program is licensed "as is" without any
- * warranty of any kind, whether express or implied.
  */
 
 #include <linux/kernel.h>
 #include <linux/clk-provider.h>
+#include <linux/io.h>
 #include <linux/of_address.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
@@ -72,7 +71,7 @@ static const struct clk_corediv_desc mvebu_corediv_desc[] = {
 };
 
 static const struct clk_corediv_desc mv98dx3236_corediv_desc[] = {
-	{ .mask = 0x0f, .offset = 6, .fieldbit = 26 }, /* NAND clock */
+	{ .mask = 0x0f, .offset = 6, .fieldbit = 27 }, /* NAND clock */
 };
 
 #define to_corediv_clk(p) container_of(p, struct clk_corediv, hw)
@@ -136,19 +135,21 @@ static unsigned long clk_corediv_recalc_rate(struct clk_hw *hwclk,
 	return parent_rate / div;
 }
 
-static long clk_corediv_round_rate(struct clk_hw *hwclk, unsigned long rate,
-			       unsigned long *parent_rate)
+static int clk_corediv_determine_rate(struct clk_hw *hw,
+				      struct clk_rate_request *req)
 {
 	/* Valid ratio are 1:4, 1:5, 1:6 and 1:8 */
 	u32 div;
 
-	div = *parent_rate / rate;
+	div = req->best_parent_rate / req->rate;
 	if (div < 4)
 		div = 4;
 	else if (div > 6)
 		div = 8;
 
-	return *parent_rate / div;
+	req->rate = req->best_parent_rate / div;
+
+	return 0;
 }
 
 static int clk_corediv_set_rate(struct clk_hw *hwclk, unsigned long rate,
@@ -200,7 +201,7 @@ static const struct clk_corediv_soc_desc armada370_corediv_soc = {
 		.disable = clk_corediv_disable,
 		.is_enabled = clk_corediv_is_enabled,
 		.recalc_rate = clk_corediv_recalc_rate,
-		.round_rate = clk_corediv_round_rate,
+		.determine_rate = clk_corediv_determine_rate,
 		.set_rate = clk_corediv_set_rate,
 	},
 	.ratio_reload = BIT(8),
@@ -216,7 +217,7 @@ static const struct clk_corediv_soc_desc armada380_corediv_soc = {
 		.disable = clk_corediv_disable,
 		.is_enabled = clk_corediv_is_enabled,
 		.recalc_rate = clk_corediv_recalc_rate,
-		.round_rate = clk_corediv_round_rate,
+		.determine_rate = clk_corediv_determine_rate,
 		.set_rate = clk_corediv_set_rate,
 	},
 	.ratio_reload = BIT(8),
@@ -229,7 +230,7 @@ static const struct clk_corediv_soc_desc armada375_corediv_soc = {
 	.ndescs = ARRAY_SIZE(mvebu_corediv_desc),
 	.ops = {
 		.recalc_rate = clk_corediv_recalc_rate,
-		.round_rate = clk_corediv_round_rate,
+		.determine_rate = clk_corediv_determine_rate,
 		.set_rate = clk_corediv_set_rate,
 	},
 	.ratio_reload = BIT(8),
@@ -241,7 +242,7 @@ static const struct clk_corediv_soc_desc mv98dx3236_corediv_soc = {
 	.ndescs = ARRAY_SIZE(mv98dx3236_corediv_desc),
 	.ops = {
 		.recalc_rate = clk_corediv_recalc_rate,
-		.round_rate = clk_corediv_round_rate,
+		.determine_rate = clk_corediv_determine_rate,
 		.set_rate = clk_corediv_set_rate,
 	},
 	.ratio_reload = BIT(10),
@@ -269,13 +270,11 @@ mvebu_corediv_clk_init(struct device_node *node,
 	clk_data.clk_num = soc_desc->ndescs;
 
 	/* clks holds the clock array */
-	clks = kcalloc(clk_data.clk_num, sizeof(struct clk *),
-				GFP_KERNEL);
+	clks = kzalloc_objs(struct clk *, clk_data.clk_num);
 	if (WARN_ON(!clks))
 		goto err_unmap;
 	/* corediv holds the clock specific array */
-	corediv = kcalloc(clk_data.clk_num, sizeof(struct clk_corediv),
-				GFP_KERNEL);
+	corediv = kzalloc_objs(struct clk_corediv, clk_data.clk_num);
 	if (WARN_ON(!corediv))
 		goto err_free_clks;
 

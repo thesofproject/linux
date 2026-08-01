@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Linear Technology LTC4306 and LTC4305 I2C multiplexer/switch
  *
  * Copyright (C) 2017 Analog Devices Inc.
- *
- * Licensed under the GPL-2.
  *
  * Based on: i2c-mux-pca954x.c
  *
@@ -16,7 +15,6 @@
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
@@ -63,7 +61,7 @@ static const struct chip_desc chips[] = {
 
 static bool ltc4306_is_volatile_reg(struct device *dev, unsigned int reg)
 {
-	return (reg == LTC_REG_CONFIG) ? true : false;
+	return reg == LTC_REG_CONFIG;
 }
 
 static const struct regmap_config ltc4306_regmap_config = {
@@ -87,13 +85,13 @@ static int ltc4306_gpio_get(struct gpio_chip *chip, unsigned int offset)
 	return !!(val & BIT(1 - offset));
 }
 
-static void ltc4306_gpio_set(struct gpio_chip *chip, unsigned int offset,
-			     int value)
+static int ltc4306_gpio_set(struct gpio_chip *chip, unsigned int offset,
+			    int value)
 {
 	struct ltc4306 *data = gpiochip_get_data(chip);
 
-	regmap_update_bits(data->regmap, LTC_REG_CONFIG, BIT(5 - offset),
-			   value ? BIT(5 - offset) : 0);
+	return regmap_update_bits(data->regmap, LTC_REG_CONFIG,
+				  BIT(5 - offset), value ? BIT(5 - offset) : 0);
 }
 
 static int ltc4306_gpio_get_direction(struct gpio_chip *chip,
@@ -193,8 +191,8 @@ static int ltc4306_deselect_mux(struct i2c_mux_core *muxc, u32 chan)
 }
 
 static const struct i2c_device_id ltc4306_id[] = {
-	{ "ltc4305", ltc_4305 },
-	{ "ltc4306", ltc_4306 },
+	{ .name = "ltc4305", .driver_data = ltc_4305 },
+	{ .name = "ltc4306", .driver_data = ltc_4306 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ltc4306_id);
@@ -206,10 +204,9 @@ static const struct of_device_id ltc4306_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, ltc4306_of_match);
 
-static int ltc4306_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int ltc4306_probe(struct i2c_client *client)
 {
-	struct i2c_adapter *adap = to_i2c_adapter(client->dev.parent);
+	struct i2c_adapter *adap = client->adapter;
 	const struct chip_desc *chip;
 	struct i2c_mux_core *muxc;
 	struct ltc4306 *data;
@@ -221,7 +218,7 @@ static int ltc4306_probe(struct i2c_client *client,
 	chip = of_device_get_match_data(&client->dev);
 
 	if (!chip)
-		chip = &chips[id->driver_data];
+		chip = &chips[i2c_match_id(ltc4306_id, client)->driver_data];
 
 	idle_disc = device_property_read_bool(&client->dev,
 					      "i2c-mux-idle-disconnect");
@@ -282,7 +279,7 @@ static int ltc4306_probe(struct i2c_client *client,
 
 	/* Now create an adapter for each channel */
 	for (num = 0; num < chip->nchans; num++) {
-		ret = i2c_mux_add_adapter(muxc, 0, num, 0);
+		ret = i2c_mux_add_adapter(muxc, 0, num);
 		if (ret) {
 			i2c_mux_del_adapters(muxc);
 			return ret;
@@ -296,19 +293,17 @@ static int ltc4306_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int ltc4306_remove(struct i2c_client *client)
+static void ltc4306_remove(struct i2c_client *client)
 {
 	struct i2c_mux_core *muxc = i2c_get_clientdata(client);
 
 	i2c_mux_del_adapters(muxc);
-
-	return 0;
 }
 
 static struct i2c_driver ltc4306_driver = {
 	.driver		= {
 		.name	= "ltc4306",
-		.of_match_table = of_match_ptr(ltc4306_of_match),
+		.of_match_table = ltc4306_of_match,
 	},
 	.probe		= ltc4306_probe,
 	.remove		= ltc4306_remove,

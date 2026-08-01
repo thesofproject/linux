@@ -1,9 +1,6 @@
-/**
+// SPDX-License-Identifier: GPL-2.0-only
+/*
  * Copyright (c) 2011 Jonathan Cameron
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  *
  * Event handling elements of industrial I/O reference driver.
  */
@@ -56,7 +53,7 @@ int iio_simple_dummy_write_event_config(struct iio_dev *indio_dev,
 					const struct iio_chan_spec *chan,
 					enum iio_event_type type,
 					enum iio_event_direction dir,
-					int state)
+					bool state)
 {
 	struct iio_dummy_state *st = iio_priv(indio_dev);
 
@@ -110,6 +107,7 @@ int iio_simple_dummy_write_event_config(struct iio_dev *indio_dev,
  * @dir: direction of the vent whose value is being read
  * @info: info type of the event whose value is being read
  * @val: value for the event code.
+ * @val2: unused
  *
  * Many devices provide a large set of events of which only a subset may
  * be enabled at a time, with value registers whose meaning changes depending
@@ -139,6 +137,7 @@ int iio_simple_dummy_read_event_value(struct iio_dev *indio_dev,
  * @dir: direction of the vent whose value is being set
  * @info: info type of the event whose value is being set
  * @val: the value to be set.
+ * @val2: unused
  */
 int iio_simple_dummy_write_event_value(struct iio_dev *indio_dev,
 				       const struct iio_chan_spec *chan,
@@ -184,36 +183,34 @@ static irqreturn_t iio_simple_dummy_event_handler(int irq, void *private)
 	switch (st->regs->reg_data) {
 	case 0:
 		iio_push_event(indio_dev,
-			       IIO_EVENT_CODE(IIO_VOLTAGE, 0, 0,
-					      IIO_EV_DIR_RISING,
-					      IIO_EV_TYPE_THRESH, 0, 0, 0),
+			       IIO_UNMOD_EVENT_CODE(IIO_VOLTAGE, 0,
+						    IIO_EV_TYPE_THRESH,
+						    IIO_EV_DIR_RISING),
 			       st->event_timestamp);
 		break;
 	case 1:
 		if (st->activity_running > st->event_val)
 			iio_push_event(indio_dev,
-				       IIO_EVENT_CODE(IIO_ACTIVITY, 0,
-						      IIO_MOD_RUNNING,
-						      IIO_EV_DIR_RISING,
-						      IIO_EV_TYPE_THRESH,
-						      0, 0, 0),
+				       IIO_MOD_EVENT_CODE(IIO_ACTIVITY, 0,
+							  IIO_MOD_RUNNING,
+							  IIO_EV_TYPE_THRESH,
+							  IIO_EV_DIR_RISING),
 				       st->event_timestamp);
 		break;
 	case 2:
 		if (st->activity_walking < st->event_val)
 			iio_push_event(indio_dev,
-				       IIO_EVENT_CODE(IIO_ACTIVITY, 0,
-						      IIO_MOD_WALKING,
-						      IIO_EV_DIR_FALLING,
-						      IIO_EV_TYPE_THRESH,
-						      0, 0, 0),
+				       IIO_MOD_EVENT_CODE(IIO_ACTIVITY, 0,
+							  IIO_MOD_WALKING,
+							  IIO_EV_TYPE_THRESH,
+							  IIO_EV_DIR_FALLING),
 				       st->event_timestamp);
 		break;
 	case 3:
 		iio_push_event(indio_dev,
-			       IIO_EVENT_CODE(IIO_STEPS, 0, IIO_NO_MOD,
-					      IIO_EV_DIR_NONE,
-					      IIO_EV_TYPE_CHANGE, 0, 0, 0),
+			       IIO_UNMOD_EVENT_CODE(IIO_STEPS, 0,
+						    IIO_EV_TYPE_CHANGE,
+						    IIO_EV_DIR_NONE),
 			       st->event_timestamp);
 		break;
 	default:

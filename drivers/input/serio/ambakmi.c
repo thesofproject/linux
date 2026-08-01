@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  linux/drivers/input/serio/ambakmi.c
  *
  *  Copyright (C) 2000-2003 Deep Blue Solutions Ltd.
  *  Copyright (C) 2002 Russell King.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 #include <linux/module.h>
 #include <linux/serio.h>
@@ -118,8 +114,8 @@ static int amba_kmi_probe(struct amba_device *dev,
 	if (ret)
 		return ret;
 
-	kmi = kzalloc(sizeof(struct amba_kmi_port), GFP_KERNEL);
-	io = kzalloc(sizeof(struct serio), GFP_KERNEL);
+	kmi = kzalloc_obj(*kmi);
+	io = kzalloc_obj(*io);
 	if (!kmi || !io) {
 		ret = -ENOMEM;
 		goto out;
@@ -130,8 +126,8 @@ static int amba_kmi_probe(struct amba_device *dev,
 	io->write	= amba_kmi_write;
 	io->open	= amba_kmi_open;
 	io->close	= amba_kmi_close;
-	strlcpy(io->name, dev_name(&dev->dev), sizeof(io->name));
-	strlcpy(io->phys, dev_name(&dev->dev), sizeof(io->phys));
+	strscpy(io->name, dev_name(&dev->dev), sizeof(io->name));
+	strscpy(io->phys, dev_name(&dev->dev), sizeof(io->phys));
 	io->port_data	= kmi;
 	io->dev.parent	= &dev->dev;
 
@@ -163,7 +159,7 @@ static int amba_kmi_probe(struct amba_device *dev,
 	return ret;
 }
 
-static int amba_kmi_remove(struct amba_device *dev)
+static void amba_kmi_remove(struct amba_device *dev)
 {
 	struct amba_kmi_port *kmi = amba_get_drvdata(dev);
 
@@ -172,10 +168,9 @@ static int amba_kmi_remove(struct amba_device *dev)
 	iounmap(kmi->base);
 	kfree(kmi);
 	amba_release_regions(dev);
-	return 0;
 }
 
-static int __maybe_unused amba_kmi_resume(struct device *dev)
+static int amba_kmi_resume(struct device *dev)
 {
 	struct amba_kmi_port *kmi = dev_get_drvdata(dev);
 
@@ -185,7 +180,7 @@ static int __maybe_unused amba_kmi_resume(struct device *dev)
 	return 0;
 }
 
-static SIMPLE_DEV_PM_OPS(amba_kmi_dev_pm_ops, NULL, amba_kmi_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(amba_kmi_dev_pm_ops, NULL, amba_kmi_resume);
 
 static const struct amba_id amba_kmi_idtable[] = {
 	{
@@ -200,8 +195,7 @@ MODULE_DEVICE_TABLE(amba, amba_kmi_idtable);
 static struct amba_driver ambakmi_driver = {
 	.drv		= {
 		.name	= "kmi-pl050",
-		.owner	= THIS_MODULE,
-		.pm	= &amba_kmi_dev_pm_ops,
+		.pm	= pm_sleep_ptr(&amba_kmi_dev_pm_ops),
 	},
 	.id_table	= amba_kmi_idtable,
 	.probe		= amba_kmi_probe,

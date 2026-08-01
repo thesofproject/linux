@@ -1,11 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2005 - 2016 Broadcom
  * All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation.  The full GNU General
- * Public License is included in this distribution in the file called COPYING.
  *
  * Contact Information:
  * linux-drivers@emulex.com
@@ -1138,14 +1134,14 @@ struct be_cmd_resp_get_fw_version {
 	u8 fw_on_flash_version_string[FW_VER_LEN];
 } __packed;
 
-/******************** Set Flow Contrl *******************/
+/******************** Set Flow Control *******************/
 struct be_cmd_req_set_flow_control {
 	struct be_cmd_req_hdr hdr;
 	u16 tx_flow_control;
 	u16 rx_flow_control;
 } __packed;
 
-/******************** Get Flow Contrl *******************/
+/******************** Get Flow Control *******************/
 struct be_cmd_req_get_flow_control {
 	struct be_cmd_req_hdr hdr;
 	u32 rsvd;
@@ -1419,7 +1415,7 @@ struct flash_section_entry {
 } __packed;
 
 struct flash_section_info {
-	u8 cookie[32];
+	u8 cookie[32] __nonstring;
 	struct flash_section_hdr fsec_hdr;
 	struct flash_section_entry fsec_entry[32];
 } __packed;
@@ -2073,7 +2069,7 @@ struct be_cmd_resp_get_stats_v2 {
 	struct be_hw_stats_v2 hw_stats;
 };
 
-/************** get fat capabilites *******************/
+/************** get fat capabilities *******************/
 #define MAX_MODULES 27
 #define MAX_MODES 4
 #define MODE_UART 0
@@ -2385,11 +2381,10 @@ struct be_cmd_req_manage_iface_filters {
 } __packed;
 
 u16 be_POST_stage_get(struct be_adapter *adapter);
-int be_pci_fnum_get(struct be_adapter *adapter);
 int be_fw_wait_ready(struct be_adapter *adapter);
 int be_cmd_mac_addr_query(struct be_adapter *adapter, u8 *mac_addr,
 			  bool permanent, u32 if_handle, u32 pmac_id);
-int be_cmd_pmac_add(struct be_adapter *adapter, u8 *mac_addr, u32 if_id,
+int be_cmd_pmac_add(struct be_adapter *adapter, const u8 *mac_addr, u32 if_id,
 		    u32 *pmac_id, u32 domain);
 int be_cmd_pmac_del(struct be_adapter *adapter, u32 if_id, int pmac_id,
 		    u32 domain);
@@ -2410,7 +2405,6 @@ int be_cmd_q_destroy(struct be_adapter *adapter, struct be_queue_info *q,
 int be_cmd_rxq_destroy(struct be_adapter *adapter, struct be_queue_info *q);
 int be_cmd_link_status_query(struct be_adapter *adapter, u16 *link_speed,
 			     u8 *link_status, u32 dom);
-int be_cmd_reset(struct be_adapter *adapter);
 int be_cmd_get_stats(struct be_adapter *adapter, struct be_dma_mem *nonemb_cmd);
 int lancer_cmd_get_pport_stats(struct be_adapter *adapter,
 			       struct be_dma_mem *nonemb_cmd);
@@ -2431,7 +2425,7 @@ int be_cmd_set_beacon_state(struct be_adapter *adapter, u8 port_num, u8 beacon,
 int be_cmd_get_beacon_state(struct be_adapter *adapter, u8 port_num,
 			    u32 *state);
 int be_cmd_read_port_transceiver_data(struct be_adapter *adapter,
-				      u8 page_num, u8 *data);
+				      u8 page_num, u32 off, u32 len, u8 *data);
 int be_cmd_query_cable_type(struct be_adapter *adapter);
 int be_cmd_query_sfp_info(struct be_adapter *adapter);
 int lancer_cmd_read_object(struct be_adapter *adapter, struct be_dma_mem *cmd,
@@ -2492,7 +2486,6 @@ int lancer_physdev_ctrl(struct be_adapter *adapter, u32 mask);
 int lancer_initiate_dump(struct be_adapter *adapter);
 int lancer_delete_dump(struct be_adapter *adapter);
 bool dump_present(struct be_adapter *adapter);
-int lancer_test_and_set_rdy_state(struct be_adapter *adapter);
 int be_cmd_query_port_name(struct be_adapter *adapter);
 int be_cmd_get_func_config(struct be_adapter *adapter,
 			   struct be_resources *res);

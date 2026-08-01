@@ -1,19 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * card driver for models with CS4398/CS4362A DACs (Xonar D1/DX)
  *
  * Copyright (c) Clemens Ladisch <clemens@ladisch.de>
- *
- *
- *  This driver is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License, version 2.
- *
- *  This driver is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this driver; if not, see <http://www.gnu.org/licenses/>.
  */
 
 /*
@@ -320,7 +309,7 @@ static int rolloff_put(struct snd_kcontrol *ctl,
 	int changed;
 	u8 reg;
 
-	mutex_lock(&chip->mutex);
+	guard(mutex)(&chip->mutex);
 	reg = data->cs4398_regs[7];
 	if (value->value.enumerated.item[0])
 		reg |= CS4398_FILT_SEL;
@@ -335,7 +324,6 @@ static int rolloff_put(struct snd_kcontrol *ctl,
 			reg = data->cs4362a_regs[0x04] & ~CS4362A_FILT_SEL;
 		cs4362a_write(chip, 0x04, reg);
 	}
-	mutex_unlock(&chip->mutex);
 	return changed;
 }
 
@@ -351,11 +339,10 @@ static void xonar_d1_line_mic_ac97_switch(struct oxygen *chip,
 					  unsigned int reg, unsigned int mute)
 {
 	if (reg == AC97_LINE) {
-		spin_lock_irq(&chip->reg_lock);
+		guard(spinlock_irq)(&chip->reg_lock);
 		oxygen_write16_masked(chip, OXYGEN_GPIO_DATA,
 				      mute ? GPIO_D1_INPUT_ROUTE : 0,
 				      GPIO_D1_INPUT_ROUTE);
-		spin_unlock_irq(&chip->reg_lock);
 	}
 }
 

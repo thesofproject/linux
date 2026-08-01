@@ -22,12 +22,13 @@ static struct platform_driver vudc_driver = {
 	.remove		= vudc_remove,
 	.driver		= {
 		.name	= GADGET_NAME,
+		.dev_groups = vudc_groups,
 	},
 };
 
-static struct list_head vudc_devices = LIST_HEAD_INIT(vudc_devices);
+static LIST_HEAD(vudc_devices);
 
-static int __init init(void)
+static int __init vudc_init(void)
 {
 	int retval = -ENOMEM;
 	int i;
@@ -73,6 +74,10 @@ static int __init init(void)
 cleanup:
 	list_for_each_entry_safe(udc_dev, udc_dev2, &vudc_devices, dev_entry) {
 		list_del(&udc_dev->dev_entry);
+		/*
+		 * Just do platform_device_del() here, put_vudc_device()
+		 * calls the platform_device_put()
+		 */
 		platform_device_del(udc_dev->pdev);
 		put_vudc_device(udc_dev);
 	}
@@ -81,20 +86,24 @@ cleanup:
 out:
 	return retval;
 }
-module_init(init);
+module_init(vudc_init);
 
-static void __exit cleanup(void)
+static void __exit vudc_cleanup(void)
 {
 	struct vudc_device *udc_dev = NULL, *udc_dev2 = NULL;
 
 	list_for_each_entry_safe(udc_dev, udc_dev2, &vudc_devices, dev_entry) {
 		list_del(&udc_dev->dev_entry);
-		platform_device_unregister(udc_dev->pdev);
+		/*
+		 * Just do platform_device_del() here, put_vudc_device()
+		 * calls the platform_device_put()
+		 */
+		platform_device_del(udc_dev->pdev);
 		put_vudc_device(udc_dev);
 	}
 	platform_driver_unregister(&vudc_driver);
 }
-module_exit(cleanup);
+module_exit(vudc_cleanup);
 
 MODULE_DESCRIPTION("USB over IP Device Controller");
 MODULE_AUTHOR("Krzysztof Opasiak, Karol Kosik, Igor Kotrasinski");

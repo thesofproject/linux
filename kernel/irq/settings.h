@@ -11,12 +11,14 @@ enum {
 	_IRQ_NOREQUEST		= IRQ_NOREQUEST,
 	_IRQ_NOTHREAD		= IRQ_NOTHREAD,
 	_IRQ_NOAUTOEN		= IRQ_NOAUTOEN,
-	_IRQ_MOVE_PCNTXT	= IRQ_MOVE_PCNTXT,
 	_IRQ_NO_BALANCING	= IRQ_NO_BALANCING,
 	_IRQ_NESTED_THREAD	= IRQ_NESTED_THREAD,
 	_IRQ_PER_CPU_DEVID	= IRQ_PER_CPU_DEVID,
 	_IRQ_IS_POLLED		= IRQ_IS_POLLED,
 	_IRQ_DISABLE_UNLAZY	= IRQ_DISABLE_UNLAZY,
+	_IRQ_HIDDEN		= IRQ_HIDDEN,
+	_IRQ_NO_DEBUG		= IRQ_NO_DEBUG,
+	_IRQ_PROC_VALID		= IRQ_RESERVED,
 	_IRQF_MODIFY_MASK	= IRQF_MODIFY_MASK,
 };
 
@@ -31,6 +33,9 @@ enum {
 #define IRQ_PER_CPU_DEVID	GOT_YOU_MORON
 #define IRQ_IS_POLLED		GOT_YOU_MORON
 #define IRQ_DISABLE_UNLAZY	GOT_YOU_MORON
+#define IRQ_HIDDEN		GOT_YOU_MORON
+#define IRQ_NO_DEBUG		GOT_YOU_MORON
+#define IRQ_RESERVED		GOT_YOU_MORON
 #undef IRQF_MODIFY_MASK
 #define IRQF_MODIFY_MASK	GOT_YOU_MORON
 
@@ -138,11 +143,6 @@ static inline void irq_settings_set_noprobe(struct irq_desc *desc)
 	desc->status_use_accessors |= _IRQ_NOPROBE;
 }
 
-static inline bool irq_settings_can_move_pcntxt(struct irq_desc *desc)
-{
-	return desc->status_use_accessors & _IRQ_MOVE_PCNTXT;
-}
-
 static inline bool irq_settings_can_autoenable(struct irq_desc *desc)
 {
 	return !(desc->status_use_accessors & _IRQ_NOAUTOEN);
@@ -166,4 +166,30 @@ static inline bool irq_settings_disable_unlazy(struct irq_desc *desc)
 static inline void irq_settings_clr_disable_unlazy(struct irq_desc *desc)
 {
 	desc->status_use_accessors &= ~_IRQ_DISABLE_UNLAZY;
+}
+
+static inline bool irq_settings_is_hidden(struct irq_desc *desc)
+{
+	return desc->status_use_accessors & _IRQ_HIDDEN;
+}
+
+static inline void irq_settings_set_no_debug(struct irq_desc *desc)
+{
+	desc->status_use_accessors |= _IRQ_NO_DEBUG;
+}
+
+static inline bool irq_settings_no_debug(struct irq_desc *desc)
+{
+	return desc->status_use_accessors & _IRQ_NO_DEBUG;
+}
+
+static inline bool irq_settings_proc_valid(struct irq_desc *desc)
+{
+	return desc->status_use_accessors & _IRQ_PROC_VALID;
+}
+
+static inline void irq_settings_update_proc_valid(struct irq_desc *desc, u32 set)
+{
+	desc->status_use_accessors &= ~_IRQ_PROC_VALID;
+	desc->status_use_accessors |= (set & _IRQ_PROC_VALID);
 }

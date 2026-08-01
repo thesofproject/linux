@@ -82,7 +82,7 @@ again:
 
 		nextlist = &c->erasable_list;
 	} else if (!list_empty(&c->erasable_pending_wbuf_list)) {
-		/* There are blocks are wating for the wbuf sync */
+		/* There are blocks are waiting for the wbuf sync */
 		jffs2_dbg(1, "Synching wbuf in order to reuse erasable_pending_wbuf_list blocks\n");
 		spin_unlock(&c->erase_completion_lock);
 		jffs2_flush_wbuf_pad(c);
@@ -1165,12 +1165,13 @@ static int jffs2_garbage_collect_dnode(struct jffs2_sb_info *c, struct jffs2_era
 				       struct jffs2_inode_info *f, struct jffs2_full_dnode *fn,
 				       uint32_t start, uint32_t end)
 {
+	struct inode *inode = OFNI_EDONI_2SFFJ(f);
 	struct jffs2_full_dnode *new_fn;
 	struct jffs2_raw_inode ri;
 	uint32_t alloclen, offset, orig_end, orig_start;
 	int ret = 0;
 	unsigned char *comprbuf = NULL, *writebuf;
-	unsigned long pg;
+	struct folio *folio;
 	unsigned char *pg_ptr;
 
 	memset(&ri, 0, sizeof(ri));
@@ -1316,23 +1317,26 @@ static int jffs2_garbage_collect_dnode(struct jffs2_sb_info *c, struct jffs2_era
 		BUG_ON(start > orig_start);
 	}
 
-	/* The rules state that we must obtain the page lock *before* f->sem, so
+	/* The rules state that we must obtain the folio lock *before* f->sem, so
 	 * drop f->sem temporarily. Since we also hold c->alloc_sem, nothing's
 	 * actually going to *change* so we're safe; we only allow reading.
 	 *
 	 * It is important to note that jffs2_write_begin() will ensure that its
-	 * page is marked Uptodate before allocating space. That means that if we
-	 * end up here trying to GC the *same* page that jffs2_write_begin() is
-	 * trying to write out, read_cache_page() will not deadlock. */
+	 * folio is marked uptodate before allocating space. That means that if we
+	 * end up here trying to GC the *same* folio that jffs2_write_begin() is
+	 * trying to write out, read_cache_folio() will not deadlock. */
 	mutex_unlock(&f->sem);
-	pg_ptr = jffs2_gc_fetch_page(c, f, start, &pg);
-	mutex_lock(&f->sem);
-
-	if (IS_ERR(pg_ptr)) {
-		pr_warn("read_cache_page() returned error: %ld\n",
-			PTR_ERR(pg_ptr));
-		return PTR_ERR(pg_ptr);
+	folio = read_cache_folio(inode->i_mapping, start >> PAGE_SHIFT,
+			       __jffs2_read_folio, NULL);
+	if (IS_ERR(folio)) {
+		pr_warn("read_cache_folio() returned error: %ld\n",
+			PTR_ERR(folio));
+		mutex_lock(&f->sem);
+		return PTR_ERR(folio);
 	}
+
+	pg_ptr = kmap_local_folio(folio, 0);
+	mutex_lock(&f->sem);
 
 	offset = start;
 	while(offset < orig_end) {
@@ -1396,6 +1400,6 @@ static int jffs2_garbage_collect_dnode(struct jffs2_sb_info *c, struct jffs2_era
 		}
 	}
 
-	jffs2_gc_release_page(c, pg_ptr, &pg);
+	folio_release_kmap(folio, pg_ptr);
 	return ret;
 }

@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Parse a Microsoft Individual Code Signing blob
  *
  * Copyright (C) 2014 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public Licence
- * as published by the Free Software Foundation; either version
- * 2 of the Licence, or (at your option) any later version.
  */
 
 #define pr_fmt(fmt) "MSCODE: "fmt
@@ -79,12 +75,6 @@ int mscode_note_digest_algo(void *context, size_t hdrlen,
 
 	oid = look_up_OID(value, vlen);
 	switch (oid) {
-	case OID_md4:
-		ctx->digest_algo = "md4";
-		break;
-	case OID_md5:
-		ctx->digest_algo = "md5";
-		break;
 	case OID_sha1:
 		ctx->digest_algo = "sha1";
 		break;
@@ -97,8 +87,14 @@ int mscode_note_digest_algo(void *context, size_t hdrlen,
 	case OID_sha512:
 		ctx->digest_algo = "sha512";
 		break;
-	case OID_sha224:
-		ctx->digest_algo = "sha224";
+	case OID_sha3_256:
+		ctx->digest_algo = "sha3-256";
+		break;
+	case OID_sha3_384:
+		ctx->digest_algo = "sha3-384";
+		break;
+	case OID_sha3_512:
+		ctx->digest_algo = "sha3-512";
 		break;
 
 	case OID__NR:

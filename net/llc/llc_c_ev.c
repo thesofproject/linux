@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * llc_c_ev.c - Connection component state transition event qualifiers
  *
@@ -25,13 +26,6 @@
  *
  * Copyright (c) 1997 by Procom Technology, Inc.
  * 		 2001-2003 by Arnaldo Carvalho de Melo <acme@conectiva.com.br>
- *
- * This program can be redistributed or modified under the terms of the
- * GNU General Public License as published by the Free Software Foundation.
- * This program is distributed without any warranty or implied warranty
- * of merchantability or fitness for a particular purpose.
- *
- * See the GNU General Public License for more details.
  */
 #include <linux/netdevice.h>
 #include <net/llc_conn.h>
@@ -608,7 +602,7 @@ int llc_conn_ev_qlfy_p_flag_eq_1(struct sock *sk, struct sk_buff *skb)
 }
 
 /**
- *	conn_ev_qlfy_last_frame_eq_1 - checks if frame is last in tx window
+ *	llc_conn_ev_qlfy_last_frame_eq_1 - checks if frame is last in tx window
  *	@sk: current connection structure.
  *	@skb: current event.
  *
@@ -624,7 +618,7 @@ int llc_conn_ev_qlfy_last_frame_eq_1(struct sock *sk, struct sk_buff *skb)
 }
 
 /**
- *	conn_ev_qlfy_last_frame_eq_0 - checks if frame isn't last in tx window
+ *	llc_conn_ev_qlfy_last_frame_eq_0 - checks if frame isn't last in tx window
  *	@sk: current connection structure.
  *	@skb: current event.
  *

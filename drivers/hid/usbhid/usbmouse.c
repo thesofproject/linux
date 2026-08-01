@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (c) 1999-2001 Vojtech Pavlik
  *
@@ -5,19 +6,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  *
  * Should you need to contact me, the author, you can do so either by
  * e-mail - mail your message to <vojtech@ucw.cz>, or by paper mail:
@@ -30,6 +18,7 @@
 #include <linux/init.h>
 #include <linux/usb/input.h>
 #include <linux/hid.h>
+#include <linux/seq_buf.h>
 
 /* for apple IDs */
 #ifdef CONFIG_USB_HID_MODULE
@@ -122,8 +111,10 @@ static int usb_mouse_probe(struct usb_interface *intf, const struct usb_device_i
 	struct usb_endpoint_descriptor *endpoint;
 	struct usb_mouse *mouse;
 	struct input_dev *input_dev;
+	struct seq_buf mouse_name;
 	int pipe, maxp;
 	int error = -ENOMEM;
+	size_t len;
 
 	interface = intf->cur_altsetting;
 
@@ -135,14 +126,14 @@ static int usb_mouse_probe(struct usb_interface *intf, const struct usb_device_i
 		return -ENODEV;
 
 	pipe = usb_rcvintpipe(dev, endpoint->bEndpointAddress);
-	maxp = usb_maxpacket(dev, pipe, usb_pipeout(pipe));
+	maxp = usb_maxpacket(dev, pipe);
 
-	mouse = kzalloc(sizeof(struct usb_mouse), GFP_KERNEL);
+	mouse = kzalloc_obj(struct usb_mouse);
 	input_dev = input_allocate_device();
 	if (!mouse || !input_dev)
 		goto fail1;
 
-	mouse->data = usb_alloc_coherent(dev, 8, GFP_ATOMIC, &mouse->data_dma);
+	mouse->data = usb_alloc_coherent(dev, 8, GFP_KERNEL, &mouse->data_dma);
 	if (!mouse->data)
 		goto fail1;
 
@@ -152,24 +143,26 @@ static int usb_mouse_probe(struct usb_interface *intf, const struct usb_device_i
 
 	mouse->usbdev = dev;
 	mouse->dev = input_dev;
+	seq_buf_init(&mouse_name, mouse->name, sizeof(mouse->name));
 
 	if (dev->manufacturer)
-		strlcpy(mouse->name, dev->manufacturer, sizeof(mouse->name));
+		seq_buf_puts(&mouse_name, dev->manufacturer);
 
 	if (dev->product) {
 		if (dev->manufacturer)
-			strlcat(mouse->name, " ", sizeof(mouse->name));
-		strlcat(mouse->name, dev->product, sizeof(mouse->name));
+			seq_buf_puts(&mouse_name, " ");
+		seq_buf_puts(&mouse_name, dev->product);
 	}
 
-	if (!strlen(mouse->name))
+	if (!seq_buf_used(&mouse_name))
 		snprintf(mouse->name, sizeof(mouse->name),
 			 "USB HIDBP Mouse %04x:%04x",
 			 le16_to_cpu(dev->descriptor.idVendor),
 			 le16_to_cpu(dev->descriptor.idProduct));
 
 	usb_make_path(dev, mouse->phys, sizeof(mouse->phys));
-	strlcat(mouse->phys, "/input0", sizeof(mouse->phys));
+	len = strnlen(mouse->phys, sizeof(mouse->phys));
+	strscpy(mouse->phys + len, "/input0", sizeof(mouse->phys) - len);
 
 	input_dev->name = mouse->name;
 	input_dev->phys = mouse->phys;

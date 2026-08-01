@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (C) 2000 Takashi Iwai <tiwai@suse.de>
  *
  *  Generic memory management routines for soundcard memory allocation
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
  */
 
 #include <linux/mutex.h>
@@ -39,7 +26,7 @@ snd_util_memhdr_new(int memsize)
 {
 	struct snd_util_memhdr *hdr;
 
-	hdr = kzalloc(sizeof(*hdr), GFP_KERNEL);
+	hdr = kzalloc_obj(*hdr);
 	if (hdr == NULL)
 		return NULL;
 	hdr->size = memsize;
@@ -137,11 +124,8 @@ __snd_util_memblk_new(struct snd_util_memhdr *hdr, unsigned int units,
 struct snd_util_memblk *
 snd_util_mem_alloc(struct snd_util_memhdr *hdr, int size)
 {
-	struct snd_util_memblk *blk;
-	mutex_lock(&hdr->block_mutex);
-	blk = __snd_util_mem_alloc(hdr, size);
-	mutex_unlock(&hdr->block_mutex);
-	return blk;
+	guard(mutex)(&hdr->block_mutex);
+	return __snd_util_mem_alloc(hdr, size);
 }
 
 
@@ -166,9 +150,8 @@ int snd_util_mem_free(struct snd_util_memhdr *hdr, struct snd_util_memblk *blk)
 	if (snd_BUG_ON(!hdr || !blk))
 		return -EINVAL;
 
-	mutex_lock(&hdr->block_mutex);
+	guard(mutex)(&hdr->block_mutex);
 	__snd_util_mem_free(hdr, blk);
-	mutex_unlock(&hdr->block_mutex);
 	return 0;
 }
 
@@ -177,11 +160,8 @@ int snd_util_mem_free(struct snd_util_memhdr *hdr, struct snd_util_memblk *blk)
  */
 int snd_util_mem_avail(struct snd_util_memhdr *hdr)
 {
-	unsigned int size;
-	mutex_lock(&hdr->block_mutex);
-	size = hdr->size - hdr->used;
-	mutex_unlock(&hdr->block_mutex);
-	return size;
+	guard(mutex)(&hdr->block_mutex);
+	return hdr->size - hdr->used;
 }
 
 
@@ -193,19 +173,3 @@ EXPORT_SYMBOL(snd_util_mem_avail);
 EXPORT_SYMBOL(__snd_util_mem_alloc);
 EXPORT_SYMBOL(__snd_util_mem_free);
 EXPORT_SYMBOL(__snd_util_memblk_new);
-
-/*
- *  INIT part
- */
-
-static int __init alsa_util_mem_init(void)
-{
-	return 0;
-}
-
-static void __exit alsa_util_mem_exit(void)
-{
-}
-
-module_init(alsa_util_mem_init)
-module_exit(alsa_util_mem_exit)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Force feedback support for Mayflash game controller adapters.
  *
@@ -17,15 +18,6 @@
  */
 
 /*
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/input.h>
@@ -96,7 +88,7 @@ static int mf_init(struct hid_device *hid)
 		input_ptr = input_ptr->next;
 		input = list_entry(input_ptr, struct hid_input, list);
 
-		mf = kzalloc(sizeof(struct mf_device), GFP_KERNEL);
+		mf = kzalloc_obj(struct mf_device);
 		if (!mf)
 			return -ENOMEM;
 
@@ -161,6 +153,8 @@ static const struct hid_device_id mf_devices[] = {
 		.driver_data = HID_QUIRK_MULTI_INPUT },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_DRAGONRISE, USB_DEVICE_ID_DRAGONRISE_GAMECUBE2),
 		.driver_data = 0 }, /* No quirk required */
+	{ HID_USB_DEVICE(USB_VENDOR_ID_DRAGONRISE, USB_DEVICE_ID_DRAGONRISE_GAMECUBE3),
+		.driver_data = HID_QUIRK_MULTI_INPUT },
 	{ }
 };
 MODULE_DEVICE_TABLE(hid, mf_devices);
@@ -172,4 +166,5 @@ static struct hid_driver mf_driver = {
 };
 module_hid_driver(mf_driver);
 
+MODULE_DESCRIPTION("Force feedback support for Mayflash game controller adapters.");
 MODULE_LICENSE("GPL");

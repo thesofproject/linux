@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Greybus Camera protocol driver.
  *
@@ -10,9 +10,9 @@
 #include <linux/v4l2-mediabus.h>
 
 /* Input flags need to be set from the caller */
-#define GB_CAMERA_IN_FLAG_TEST		(1 << 0)
+#define GB_CAMERA_IN_FLAG_TEST		BIT(0)
 /* Output flags returned */
-#define GB_CAMERA_OUT_FLAG_ADJUSTED	(1 << 0)
+#define GB_CAMERA_OUT_FLAG_ADJUSTED	BIT(0)
 
 /**
  * struct gb_camera_stream - Represents greybus camera stream.
@@ -89,11 +89,12 @@ struct gb_camera_csi_params {
 struct gb_camera_ops {
 	ssize_t (*capabilities)(void *priv, char *buf, size_t len);
 	int (*configure_streams)(void *priv, unsigned int *nstreams,
-			unsigned int *flags, struct gb_camera_stream *streams,
-			struct gb_camera_csi_params *csi_params);
+				 unsigned int *flags,
+				 struct gb_camera_stream *streams,
+				 struct gb_camera_csi_params *csi_params);
 	int (*capture)(void *priv, u32 request_id,
-			unsigned int streams, unsigned int num_frames,
-			size_t settings_size, const void *settings);
+		       unsigned int streams, unsigned int num_frames,
+		       size_t settings_size, const void *settings);
 	int (*flush)(void *priv, u32 *request_id);
 };
 

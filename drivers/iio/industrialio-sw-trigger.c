@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * The Industrial I/O core, software trigger functions
  *
  * Copyright (c) 2015 Intel Corporation
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -30,7 +27,7 @@ static DEFINE_MUTEX(iio_trigger_types_lock);
 
 static
 struct iio_sw_trigger_type *__iio_find_sw_trigger_type(const char *name,
-						       unsigned len)
+						       unsigned int len)
 {
 	struct iio_sw_trigger_type *t = NULL, *iter;
 
@@ -61,8 +58,12 @@ int iio_register_sw_trigger_type(struct iio_sw_trigger_type *t)
 
 	t->group = configfs_register_default_group(iio_triggers_group, t->name,
 						&iio_trigger_type_group_type);
-	if (IS_ERR(t->group))
+	if (IS_ERR(t->group)) {
+		mutex_lock(&iio_trigger_types_lock);
+		list_del(&t->list);
+		mutex_unlock(&iio_trigger_types_lock);
 		ret = PTR_ERR(t->group);
+	}
 
 	return ret;
 }
@@ -151,7 +152,7 @@ static void trigger_drop_group(struct config_group *group,
 	config_item_put(item);
 }
 
-static struct configfs_group_operations trigger_ops = {
+static const struct configfs_group_operations trigger_ops = {
 	.make_group	= &trigger_make_group,
 	.drop_item	= &trigger_drop_group,
 };

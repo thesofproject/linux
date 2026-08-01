@@ -1,13 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * 440SPe's DMA engines support header file
  *
  * 2006-2009 (C) DENX Software Engineering.
  *
  * Author: Yuri Tikhonov <yur@emcraft.com>
- *
- * This file is licensed under the term of  the GNU General Public License
- * version 2. The program licensed "as is" without any warranty of any
- * kind, whether express or implied.
  */
 
 #ifndef	_PPC440SPE_DMA_H
@@ -17,7 +14,7 @@
 
 /* Number of elements in the array with statical CDBs */
 #define	MAX_STAT_DMA_CDBS	16
-/* Number of DMA engines available on the contoller */
+/* Number of DMA engines available on the controller */
 #define DMA_ENGINES_NUM		2
 
 /* Maximum h/w supported number of destinations */

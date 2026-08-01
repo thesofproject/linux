@@ -2,29 +2,36 @@
 /*
  * Module interface for CPU features
  *
- * Copyright IBM Corp. 2015
+ * Copyright IBM Corp. 2015, 2022
  * Author(s): Hendrik Brueckner <brueckner@linux.vnet.ibm.com>
  */
 
 #ifndef __ASM_S390_CPUFEATURE_H
 #define __ASM_S390_CPUFEATURE_H
 
-#include <asm/elf.h>
+#include <asm/facility.h>
 
-/* Hardware features on Linux on z Systems are indicated by facility bits that
- * are mapped to the so-called machine flags.  Particular machine flags are
- * then used to define ELF hardware capabilities; most notably hardware flags
- * that are essential for user space / glibc.
- *
- * Restrict the set of exposed CPU features to ELF hardware capabilities for
- * now.  Additional machine flags can be indicated by values larger than
- * MAX_ELF_HWCAP_FEATURES.
- */
-#define MAX_ELF_HWCAP_FEATURES	(8 * sizeof(elf_hwcap))
-#define MAX_CPU_FEATURES	MAX_ELF_HWCAP_FEATURES
+enum {
+	S390_CPU_FEATURE_MSA,
+	S390_CPU_FEATURE_VXRS,
+	S390_CPU_FEATURE_UV,
+	S390_CPU_FEATURE_D288,
+	MAX_CPU_FEATURES
+};
 
-#define cpu_feature(feat)	ilog2(HWCAP_S390_ ## feat)
+#define cpu_feature(feature)	(feature)
 
 int cpu_have_feature(unsigned int nr);
+
+#define cpu_has_bear()		test_facility(193)
+#define cpu_has_edat1()		test_facility(8)
+#define cpu_has_edat2()		test_facility(78)
+#define cpu_has_gs()		test_facility(133)
+#define cpu_has_nx()		test_facility(130)
+#define cpu_has_rdp()		test_facility(194)
+#define cpu_has_seq_insn()	test_facility(85)
+#define cpu_has_tlb_lc()	test_facility(51)
+#define cpu_has_topology()	test_facility(11)
+#define cpu_has_vx()		test_facility(129)
 
 #endif /* __ASM_S390_CPUFEATURE_H */

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * u_midi.h
  *
@@ -7,7 +7,7 @@
  * Copyright (c) 2014 Samsung Electronics Co., Ltd.
  *		http://www.samsung.com
  *
- * Author: Andrzej Pietrasiewicz <andrzej.p@samsung.com>
+ * Author: Andrzej Pietrasiewicz <andrzejtp2010@gmail.com>
  */
 
 #ifndef U_MIDI_H
@@ -19,7 +19,7 @@ struct f_midi_opts {
 	struct usb_function_instance	func_inst;
 	int				index;
 	char				*id;
-	bool				id_allocated;
+	char				*interface_string;
 	unsigned int			in_ports;
 	unsigned int			out_ports;
 	unsigned int			buflen;
@@ -29,8 +29,8 @@ struct f_midi_opts {
 	 * Protect the data form concurrent access by read/write
 	 * and create symlink/remove symlink.
 	 */
-	 struct mutex			lock;
-	 int				refcnt;
+	struct mutex			lock;
+	int				refcnt;
 };
 
 #endif /* U_MIDI_H */

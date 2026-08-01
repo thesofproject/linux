@@ -1,18 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Bluetooth HCI UART H4 driver with Nokia Extensions AKA Nokia H4+
  *
  *  Copyright (C) 2015 Marcel Holtmann <marcel@holtmann.org>
  *  Copyright (C) 2015-2017 Sebastian Reichel <sre@kernel.org>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #include <linux/clk.h>
@@ -29,7 +20,7 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/types.h>
-#include <linux/unaligned/le_struct.h>
+#include <linux/unaligned.h>
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
 
@@ -124,11 +115,6 @@ struct hci_nokia_neg_evt {
 #define MAX_BAUD_RATE		3692300
 #define SETUP_BAUD_RATE		921600
 #define INIT_BAUD_RATE		120000
-
-struct hci_nokia_radio_hdr {
-	u8	evt;
-	u8	dlen;
-} __packed;
 
 struct nokia_bt_dev {
 	struct hci_uart hu;
@@ -453,7 +439,7 @@ static int nokia_setup(struct hci_uart *hu)
 
 	if (btdev->man_id == NOKIA_ID_BCM2048) {
 		hu->hdev->set_bdaddr = btbcm_set_bdaddr;
-		set_bit(HCI_QUIRK_INVALID_BDADDR, &hu->hdev->quirks);
+		hci_set_quirk(hu->hdev, HCI_QUIRK_INVALID_BDADDR);
 		dev_dbg(dev, "bcm2048 has invalid bluetooth address!");
 	}
 
@@ -476,8 +462,6 @@ static int nokia_open(struct hci_uart *hu)
 	struct device *dev = &hu->serdev->dev;
 
 	dev_dbg(dev, "protocol open");
-
-	serdev_device_open(hu->serdev);
 
 	pm_runtime_enable(dev);
 
@@ -513,12 +497,11 @@ static int nokia_close(struct hci_uart *hu)
 	gpiod_set_value(btdev->wakeup_bt, 0);
 
 	pm_runtime_disable(&btdev->serdev->dev);
-	serdev_device_close(btdev->serdev);
 
 	return 0;
 }
 
-/* Enqueue frame for transmittion (padding, crc, etc) */
+/* Enqueue frame for transmission (padding, crc, etc) */
 static int nokia_enqueue(struct hci_uart *hu, struct sk_buff *skb)
 {
 	struct nokia_bt_dev *btdev = hu->priv;
@@ -532,7 +515,7 @@ static int nokia_enqueue(struct hci_uart *hu, struct sk_buff *skb)
 		err = skb_pad(skb, 1);
 		if (err)
 			return err;
-		skb_put_u8(skb, 0x00);
+		skb_put(skb, 1);
 	}
 
 	skb_queue_tail(&btdev->txq, skb);
@@ -641,8 +624,8 @@ static int nokia_recv(struct hci_uart *hu, const void *data, int count)
 	if (!test_bit(HCI_UART_REGISTERED, &hu->flags))
 		return -EUNATCH;
 
-	btdev->rx_skb = h4_recv_buf(hu->hdev, btdev->rx_skb, data, count,
-				  nokia_recv_pkts, ARRAY_SIZE(nokia_recv_pkts));
+	btdev->rx_skb = h4_recv_buf(hu, btdev->rx_skb, data, count,
+				    nokia_recv_pkts, ARRAY_SIZE(nokia_recv_pkts));
 	if (IS_ERR(btdev->rx_skb)) {
 		err = PTR_ERR(btdev->rx_skb);
 		dev_err(dev, "Frame reassembly failed (%d)", err);
@@ -746,7 +729,11 @@ static int nokia_bluetooth_serdev_probe(struct serdev_device *serdev)
 		return err;
 	}
 
-	clk_prepare_enable(sysclk);
+	err = clk_prepare_enable(sysclk);
+	if (err) {
+		dev_err(dev, "could not enable sysclk: %d", err);
+		return err;
+	}
 	btdev->sysclk_speed = clk_get_rate(sysclk);
 	clk_disable_unprepare(sysclk);
 

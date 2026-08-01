@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * TWL4030/TPS65950 BCI (Battery Charger Interface) driver
  *
@@ -5,17 +6,13 @@
  *
  * based on twl4030_bci_battery.c by TI
  * Copyright (C) 2008 Texas Instruments, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/err.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
 #include <linux/mfd/twl.h>
@@ -366,7 +363,7 @@ static int twl4030_charger_update_current(struct twl4030_bci *bci)
 	if (status < 0)
 		return status;
 	cur_reg |= oldreg << 8;
-	if (reg != oldreg) {
+	if (reg != cur_reg) {
 		/* disable write protection for one write access for
 		 * BCIIREF */
 		status = twl_i2c_write_u8(TWL_MODULE_MAIN_CHARGE, 0xE7,
@@ -420,7 +417,8 @@ static void twl4030_current_worker(struct work_struct *data)
 
 	if (v < USB_MIN_VOLT) {
 		/* Back up and stop adjusting. */
-		bci->usb_cur -= USB_CUR_STEP;
+		if (bci->usb_cur >= USB_CUR_STEP)
+			bci->usb_cur -= USB_CUR_STEP;
 		bci->usb_cur_target = bci->usb_cur;
 	} else if (bci->usb_cur >= bci->usb_cur_target ||
 		   bci->usb_cur + USB_CUR_STEP > USB_MAX_CURRENT) {
@@ -439,6 +437,7 @@ static void twl4030_current_worker(struct work_struct *data)
 static int twl4030_charger_enable_usb(struct twl4030_bci *bci, bool enable)
 {
 	int ret;
+	u32 reg;
 
 	if (bci->usb_mode == CHARGE_OFF)
 		enable = false;
@@ -452,14 +451,38 @@ static int twl4030_charger_enable_usb(struct twl4030_bci *bci, bool enable)
 			bci->usb_enabled = 1;
 		}
 
-		if (bci->usb_mode == CHARGE_AUTO)
+		if (bci->usb_mode == CHARGE_AUTO) {
+			/* Enable interrupts now. */
+			reg = ~(u32)(TWL4030_ICHGLOW | TWL4030_ICHGEOC |
+					TWL4030_TBATOR2 | TWL4030_TBATOR1 |
+					TWL4030_BATSTS);
+			ret = twl_i2c_write_u8(TWL4030_MODULE_INTERRUPTS, reg,
+				       TWL4030_INTERRUPTS_BCIIMR1A);
+			if (ret < 0) {
+				dev_err(bci->dev,
+					"failed to unmask interrupts: %d\n",
+					ret);
+				return ret;
+			}
 			/* forcing the field BCIAUTOUSB (BOOT_BCI[1]) to 1 */
 			ret = twl4030_clear_set_boot_bci(0, TWL4030_BCIAUTOUSB);
+		}
 
 		/* forcing USBFASTMCHG(BCIMFSTS4[2]) to 1 */
 		ret = twl4030_clear_set(TWL_MODULE_MAIN_CHARGE, 0,
 			TWL4030_USBFASTMCHG, TWL4030_BCIMFSTS4);
 		if (bci->usb_mode == CHARGE_LINEAR) {
+			/* Enable interrupts now. */
+			reg = ~(u32)(TWL4030_ICHGLOW | TWL4030_TBATOR2 |
+					TWL4030_TBATOR1 | TWL4030_BATSTS);
+			ret = twl_i2c_write_u8(TWL4030_MODULE_INTERRUPTS, reg,
+				       TWL4030_INTERRUPTS_BCIIMR1A);
+			if (ret < 0) {
+				dev_err(bci->dev,
+					"failed to unmask interrupts: %d\n",
+					ret);
+				return ret;
+			}
 			twl4030_clear_set_boot_bci(TWL4030_BCIAUTOAC|TWL4030_CVENAC, 0);
 			/* Watch dog key: WOVF acknowledge */
 			ret = twl_i2c_write_u8(TWL_MODULE_MAIN_CHARGE, 0x33,
@@ -489,7 +512,6 @@ static int twl4030_charger_enable_usb(struct twl4030_bci *bci, bool enable)
 		ret |= twl_i2c_write_u8(TWL_MODULE_MAIN_CHARGE, 0x2a,
 					TWL4030_BCIMDKEY);
 		if (bci->usb_enabled) {
-			pm_runtime_mark_last_busy(bci->transceiver->dev);
 			pm_runtime_put_autosuspend(bci->transceiver->dev);
 			bci->usb_enabled = 0;
 		}
@@ -704,11 +726,9 @@ twl4030_bci_mode_show(struct device *dev,
 
 	for (i = 0; i < ARRAY_SIZE(modes); i++)
 		if (mode == i)
-			len += snprintf(buf+len, PAGE_SIZE-len,
-					"[%s] ", modes[i]);
+			len += sysfs_emit_at(buf, len, "[%s] ", modes[i]);
 		else
-			len += snprintf(buf+len, PAGE_SIZE-len,
-					"%s ", modes[i]);
+			len += sysfs_emit_at(buf, len, "%s ", modes[i]);
 	buf[len-1] = '\n';
 	return len;
 }
@@ -783,7 +803,9 @@ static int twl4030_bci_get_property(struct power_supply *psy,
 		is_charging = state & TWL4030_MSTATEC_AC;
 	if (!is_charging) {
 		u8 s;
-		twl4030_bci_read(TWL4030_BCIMDEN, &s);
+		ret = twl4030_bci_read(TWL4030_BCIMDEN, &s);
+		if (ret < 0)
+			return ret;
 		if (psy->desc->type == POWER_SUPPLY_TYPE_USB)
 			is_charging = s & 1;
 		else
@@ -996,12 +1018,13 @@ static int twl4030_bci_probe(struct platform_device *pdev)
 	if (bci->dev->of_node) {
 		struct device_node *phynode;
 
-		phynode = of_find_compatible_node(bci->dev->of_node->parent,
-						  NULL, "ti,twl4030-usb");
+		phynode = of_get_compatible_child(bci->dev->of_node->parent,
+						  "ti,twl4030-usb");
 		if (phynode) {
 			bci->usb_nb.notifier_call = twl4030_bci_usb_ncb;
 			bci->transceiver = devm_usb_get_phy_by_node(
 				bci->dev, phynode, &bci->usb_nb);
+			of_node_put(phynode);
 			if (IS_ERR(bci->transceiver)) {
 				ret = PTR_ERR(bci->transceiver);
 				if (ret == -EPROBE_DEFER)
@@ -1084,7 +1107,7 @@ static int twl4030_bci_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int twl4030_bci_remove(struct platform_device *pdev)
+static void twl4030_bci_remove(struct platform_device *pdev)
 {
 	struct twl4030_bci *bci = platform_get_drvdata(pdev);
 
@@ -1099,11 +1122,9 @@ static int twl4030_bci_remove(struct platform_device *pdev)
 			 TWL4030_INTERRUPTS_BCIIMR1A);
 	twl_i2c_write_u8(TWL4030_MODULE_INTERRUPTS, 0xff,
 			 TWL4030_INTERRUPTS_BCIIMR2A);
-
-	return 0;
 }
 
-static const struct of_device_id twl_bci_of_match[] = {
+static const struct of_device_id twl_bci_of_match[] __maybe_unused = {
 	{.compatible = "ti,twl4030-bci", },
 	{ }
 };
@@ -1111,7 +1132,7 @@ MODULE_DEVICE_TABLE(of, twl_bci_of_match);
 
 static struct platform_driver twl4030_bci_driver = {
 	.probe = twl4030_bci_probe,
-	.remove	= twl4030_bci_remove,
+	.remove = twl4030_bci_remove,
 	.driver	= {
 		.name	= "twl4030_bci",
 		.of_match_table = of_match_ptr(twl_bci_of_match),

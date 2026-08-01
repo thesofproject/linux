@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * (c) Copyright 2002-2010, Ralink Technology, Inc.
  * Copyright (C) 2014 Felix Fietkau <nbd@openwrt.org>
  * Copyright (C) 2015 Jakub Kicinski <kubakici@wp.pl>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2
- * as published by the Free Software Foundation
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/kernel.h>
@@ -124,8 +116,10 @@ mt7601u_mcu_msg_send(struct mt7601u_dev *dev, struct sk_buff *skb,
 	int sent, ret;
 	u8 seq = 0;
 
-	if (test_bit(MT7601U_STATE_REMOVED, &dev->state))
+	if (test_bit(MT7601U_STATE_REMOVED, &dev->state)) {
+		consume_skb(skb);
 		return 0;
+	}
 
 	mutex_lock(&dev->mcu.mutex);
 
@@ -409,12 +403,18 @@ error:
 	return ret;
 }
 
+static const char * const mt7601u_fw_paths[] = {
+	"mediatek/" MT7601U_FIRMWARE,
+	MT7601U_FIRMWARE,
+};
+
 static int mt7601u_load_firmware(struct mt7601u_dev *dev)
 {
 	const struct firmware *fw;
 	const struct mt76_fw_header *hdr;
 	int len, ret;
 	u32 val;
+	int i;
 
 	mt7601u_wr(dev, MT_USB_DMA_CFG, (MT_USB_DMA_CFG_RX_BULK_EN |
 					 MT_USB_DMA_CFG_TX_BULK_EN));
@@ -422,7 +422,14 @@ static int mt7601u_load_firmware(struct mt7601u_dev *dev)
 	if (firmware_running(dev))
 		return firmware_request_cache(dev->dev, MT7601U_FIRMWARE);
 
-	ret = request_firmware(&fw, MT7601U_FIRMWARE, dev->dev);
+	/* Try loading firmware from multiple locations */
+	fw = NULL;
+	for (i = 0; i < MT7601U_FIRMWARE_PATHS; i++) {
+		ret = request_firmware(&fw, mt7601u_fw_paths[i], dev->dev);
+		if (ret == 0)
+			break;
+	}
+
 	if (ret)
 		return ret;
 

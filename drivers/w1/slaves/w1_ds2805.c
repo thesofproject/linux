@@ -1,10 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * w1_ds2805 - w1 family 0d (DS28E05) driver
  *
  * Copyright (c) 2016 Andrew Worsley amworsley@gmail.com
- *
- * This source code is licensed under the GNU General Public License,
- * Version 2. See the file COPYING for more details.
  */
 
 #include <linux/kernel.h>
@@ -94,7 +92,7 @@ static int w1_f0d_readblock(struct w1_slave *sl, int off, int count, char *buf)
 }
 
 static ssize_t w1_f0d_read_bin(struct file *filp, struct kobject *kobj,
-			       struct bin_attribute *bin_attr,
+			       const struct bin_attribute *bin_attr,
 			       char *buf, loff_t off, size_t count)
 {
 	struct w1_slave *sl = kobj_to_w1_slave(kobj);
@@ -202,7 +200,7 @@ retry:
 }
 
 static ssize_t w1_f0d_write_bin(struct file *filp, struct kobject *kobj,
-				struct bin_attribute *bin_attr,
+				const struct bin_attribute *bin_attr,
 				char *buf, loff_t off, size_t count)
 {
 	struct w1_slave *sl = kobj_to_w1_slave(kobj);
@@ -263,10 +261,10 @@ out_up:
 	return count;
 }
 
-static struct bin_attribute w1_f0d_bin_attr = {
+static const struct bin_attribute w1_f0d_bin_attr = {
 	.attr = {
 		.name = "eeprom",
-		.mode = S_IRUGO | S_IWUSR,
+		.mode = 0644,
 	},
 	.size = W1_F0D_EEPROM_SIZE,
 	.read = w1_f0d_read_bin,
@@ -283,30 +281,17 @@ static void w1_f0d_remove_slave(struct w1_slave *sl)
 	sysfs_remove_bin_file(&sl->dev.kobj, &w1_f0d_bin_attr);
 }
 
-static struct w1_family_ops w1_f0d_fops = {
+static const struct w1_family_ops w1_f0d_fops = {
 	.add_slave      = w1_f0d_add_slave,
 	.remove_slave   = w1_f0d_remove_slave,
 };
 
-static struct w1_family w1_family_2d = {
+static struct w1_family w1_family_0d = {
 	.fid = W1_EEPROM_DS2805,
 	.fops = &w1_f0d_fops,
 };
 
-static int __init w1_f0d_init(void)
-{
-	pr_info("%s()\n", __func__);
-	return w1_register_family(&w1_family_2d);
-}
-
-static void __exit w1_f0d_fini(void)
-{
-	pr_info("%s()\n", __func__);
-	w1_unregister_family(&w1_family_2d);
-}
-
-module_init(w1_f0d_init);
-module_exit(w1_f0d_fini);
+module_w1_family(w1_family_0d);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Andrew Worsley amworsley@gmail.com");

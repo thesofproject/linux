@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TQC PS/2 Multiplexer driver
  *
  * Copyright (C) 2010 Dmitry Eremin-Solenikov
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published by
- * the Free Software Foundation.
  */
 
 
@@ -79,9 +76,8 @@ static int ps2mult_serio_write(struct serio *serio, unsigned char data)
 	struct ps2mult *psm = serio_get_drvdata(mx_port);
 	struct ps2mult_port *port = serio->port_data;
 	bool need_escape;
-	unsigned long flags;
 
-	spin_lock_irqsave(&psm->lock, flags);
+	guard(spinlock_irqsave)(&psm->lock);
 
 	if (psm->out_port != port)
 		ps2mult_select_port(psm, port);
@@ -96,8 +92,6 @@ static int ps2mult_serio_write(struct serio *serio, unsigned char data)
 
 	serio_write(mx_port, data);
 
-	spin_unlock_irqrestore(&psm->lock, flags);
-
 	return 0;
 }
 
@@ -105,11 +99,10 @@ static int ps2mult_serio_start(struct serio *serio)
 {
 	struct ps2mult *psm = serio_get_drvdata(serio->parent);
 	struct ps2mult_port *port = serio->port_data;
-	unsigned long flags;
 
-	spin_lock_irqsave(&psm->lock, flags);
+	guard(spinlock_irqsave)(&psm->lock);
+
 	port->registered = true;
-	spin_unlock_irqrestore(&psm->lock, flags);
 
 	return 0;
 }
@@ -118,11 +111,10 @@ static void ps2mult_serio_stop(struct serio *serio)
 {
 	struct ps2mult *psm = serio_get_drvdata(serio->parent);
 	struct ps2mult_port *port = serio->port_data;
-	unsigned long flags;
 
-	spin_lock_irqsave(&psm->lock, flags);
+	guard(spinlock_irqsave)(&psm->lock);
+
 	port->registered = false;
-	spin_unlock_irqrestore(&psm->lock, flags);
 }
 
 static int ps2mult_create_port(struct ps2mult *psm, int i)
@@ -130,11 +122,11 @@ static int ps2mult_create_port(struct ps2mult *psm, int i)
 	struct serio *mx_serio = psm->mx_serio;
 	struct serio *serio;
 
-	serio = kzalloc(sizeof(struct serio), GFP_KERNEL);
+	serio = kzalloc_obj(*serio);
 	if (!serio)
 		return -ENOMEM;
 
-	strlcpy(serio->name, "TQC PS/2 Multiplexer", sizeof(serio->name));
+	strscpy(serio->name, "TQC PS/2 Multiplexer", sizeof(serio->name));
 	snprintf(serio->phys, sizeof(serio->phys),
 		 "%s/port%d", mx_serio->phys, i);
 	serio->id.type = SERIO_8042;
@@ -151,16 +143,12 @@ static int ps2mult_create_port(struct ps2mult *psm, int i)
 
 static void ps2mult_reset(struct ps2mult *psm)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave(&psm->lock, flags);
+	guard(spinlock_irqsave)(&psm->lock);
 
 	serio_write(psm->mx_serio, PS2MULT_SESSION_END);
 	serio_write(psm->mx_serio, PS2MULT_SESSION_START);
 
 	ps2mult_select_port(psm, &psm->ports[PS2MULT_KBD_PORT]);
-
-	spin_unlock_irqrestore(&psm->lock, flags);
 }
 
 static int ps2mult_connect(struct serio *serio, struct serio_driver *drv)
@@ -172,7 +160,7 @@ static int ps2mult_connect(struct serio *serio, struct serio_driver *drv)
 	if (!serio->write)
 		return -EINVAL;
 
-	psm = kzalloc(sizeof(*psm), GFP_KERNEL);
+	psm = kzalloc_obj(*psm);
 	if (!psm)
 		return -ENOMEM;
 
@@ -237,11 +225,10 @@ static irqreturn_t ps2mult_interrupt(struct serio *serio,
 {
 	struct ps2mult *psm = serio_get_drvdata(serio);
 	struct ps2mult_port *in_port;
-	unsigned long flags;
 
 	dev_dbg(&serio->dev, "Received %02x flags %02x\n", data, dfl);
 
-	spin_lock_irqsave(&psm->lock, flags);
+	guard(spinlock_irqsave)(&psm->lock);
 
 	if (psm->escape) {
 		psm->escape = false;
@@ -288,7 +275,6 @@ static irqreturn_t ps2mult_interrupt(struct serio *serio,
 	}
 
  out:
-	spin_unlock_irqrestore(&psm->lock, flags);
 	return IRQ_HANDLED;
 }
 

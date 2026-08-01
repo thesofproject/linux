@@ -1,69 +1,151 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* AFS volume management
  *
  * Copyright (C) 2002, 2007 Red Hat, Inc. All Rights Reserved.
  * Written by David Howells (dhowells@redhat.com)
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
  */
 
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include "internal.h"
 
-unsigned __read_mostly afs_volume_gc_delay = 10;
-unsigned __read_mostly afs_volume_record_life = 60 * 60;
+static unsigned __read_mostly afs_volume_record_life = 60 * 60;
+static atomic_t afs_volume_debug_id;
 
-static const char *const afs_voltypes[] = { "R/W", "R/O", "BAK" };
+static void afs_destroy_volume(struct work_struct *work);
+
+/*
+ * Insert a volume into a cell.  If there's an existing volume record, that is
+ * returned instead with a ref held.
+ */
+static struct afs_volume *afs_insert_volume_into_cell(struct afs_cell *cell,
+						      struct afs_volume *volume)
+{
+	struct afs_volume *p;
+	struct rb_node *parent = NULL, **pp;
+
+	write_seqlock(&cell->volume_lock);
+
+	pp = &cell->volumes.rb_node;
+	while (*pp) {
+		parent = *pp;
+		p = rb_entry(parent, struct afs_volume, cell_node);
+		if (p->vid < volume->vid) {
+			pp = &(*pp)->rb_left;
+		} else if (p->vid > volume->vid) {
+			pp = &(*pp)->rb_right;
+		} else {
+			if (afs_try_get_volume(p, afs_volume_trace_get_cell_insert)) {
+				volume = p;
+				goto found;
+			}
+
+			set_bit(AFS_VOLUME_RM_TREE, &p->flags);
+			rb_replace_node_rcu(&p->cell_node, &volume->cell_node, &cell->volumes);
+		}
+	}
+
+	rb_link_node_rcu(&volume->cell_node, parent, pp);
+	rb_insert_color(&volume->cell_node, &cell->volumes);
+	hlist_add_head_rcu(&volume->proc_link, &cell->proc_volumes);
+
+found:
+	write_sequnlock(&cell->volume_lock);
+	return volume;
+
+}
+
+static void afs_remove_volume_from_cell(struct afs_volume *volume)
+{
+	struct afs_cell *cell = volume->cell;
+
+	if (!hlist_unhashed(&volume->proc_link)) {
+		trace_afs_volume(volume->debug_id, volume->vid, refcount_read(&volume->ref),
+				 afs_volume_trace_remove);
+		write_seqlock(&cell->volume_lock);
+		hlist_del_rcu(&volume->proc_link);
+		if (!test_and_set_bit(AFS_VOLUME_RM_TREE, &volume->flags))
+			rb_erase(&volume->cell_node, &cell->volumes);
+		write_sequnlock(&cell->volume_lock);
+	}
+}
 
 /*
  * Allocate a volume record and load it up from a vldb record.
  */
-static struct afs_volume *afs_alloc_volume(struct afs_mount_params *params,
+static struct afs_volume *afs_alloc_volume(struct afs_fs_context *params,
 					   struct afs_vldb_entry *vldb,
-					   unsigned long type_mask)
+					   struct afs_server_list **_slist)
 {
 	struct afs_server_list *slist;
 	struct afs_volume *volume;
-	int ret = -ENOMEM, nr_servers = 0, i;
+	int ret = -ENOMEM, i;
 
-	for (i = 0; i < vldb->nr_servers; i++)
-		if (vldb->fs_mask[i] & type_mask)
-			nr_servers++;
-
-	volume = kzalloc(sizeof(struct afs_volume), GFP_KERNEL);
+	volume = kzalloc_obj(struct afs_volume);
 	if (!volume)
 		goto error_0;
 
+	volume->debug_id	= atomic_inc_return(&afs_volume_debug_id);
 	volume->vid		= vldb->vid[params->type];
 	volume->update_at	= ktime_get_real_seconds() + afs_volume_record_life;
-	volume->cell		= afs_get_cell(params->cell);
+	volume->cell		= afs_get_cell(params->cell, afs_cell_trace_get_vol);
 	volume->type		= params->type;
 	volume->type_force	= params->force;
 	volume->name_len	= vldb->name_len;
+	volume->creation_time	= TIME64_MIN;
+	volume->update_time	= TIME64_MIN;
 
-	atomic_set(&volume->usage, 1);
-	INIT_LIST_HEAD(&volume->proc_link);
+	refcount_set(&volume->ref, 1);
+	INIT_HLIST_NODE(&volume->proc_link);
+	INIT_WORK(&volume->destructor, afs_destroy_volume);
 	rwlock_init(&volume->servers_lock);
+	mutex_init(&volume->volsync_lock);
+	mutex_init(&volume->cb_check_lock);
+	rwlock_init(&volume->cb_v_break_lock);
+	INIT_LIST_HEAD(&volume->open_mmaps);
+	init_rwsem(&volume->open_mmaps_lock);
 	memcpy(volume->name, vldb->name, vldb->name_len + 1);
 
-	slist = afs_alloc_server_list(params->cell, params->key, vldb, type_mask);
+	for (i = 0; i < AFS_MAXTYPES; i++)
+		volume->vids[i] = vldb->vid[i];
+
+	slist = afs_alloc_server_list(volume, params->key, vldb);
 	if (IS_ERR(slist)) {
 		ret = PTR_ERR(slist);
 		goto error_1;
 	}
 
-	refcount_set(&slist->usage, 1);
-	volume->servers = slist;
+	*_slist = slist;
+	rcu_assign_pointer(volume->servers, slist);
+	trace_afs_volume(volume->debug_id, volume->vid, 1, afs_volume_trace_alloc);
 	return volume;
 
 error_1:
-	afs_put_cell(params->net, volume->cell);
+	afs_put_cell(volume->cell, afs_cell_trace_put_vol);
 	kfree(volume);
 error_0:
 	return ERR_PTR(ret);
+}
+
+/*
+ * Look up or allocate a volume record.
+ */
+static struct afs_volume *afs_lookup_volume(struct afs_fs_context *params,
+					    struct afs_vldb_entry *vldb)
+{
+	struct afs_server_list *slist;
+	struct afs_volume *candidate, *volume;
+
+	candidate = afs_alloc_volume(params, vldb, &slist);
+	if (IS_ERR(candidate))
+		return candidate;
+
+	volume = afs_insert_volume_into_cell(params->cell, candidate);
+	if (volume == candidate)
+		afs_attach_volume_to_servers(volume, slist);
+	else
+		afs_put_volume(candidate, afs_volume_trace_put_cell_dup);
+	return volume;
 }
 
 /*
@@ -74,55 +156,19 @@ static struct afs_vldb_entry *afs_vl_lookup_vldb(struct afs_cell *cell,
 						 const char *volname,
 						 size_t volnamesz)
 {
-	struct afs_addr_cursor ac;
-	struct afs_vldb_entry *vldb;
+	struct afs_vldb_entry *vldb = ERR_PTR(-EDESTADDRREQ);
+	struct afs_vl_cursor vc;
 	int ret;
 
-	ret = afs_set_vl_cursor(&ac, cell);
-	if (ret < 0)
-		return ERR_PTR(ret);
+	if (!afs_begin_vlserver_operation(&vc, cell, key))
+		return ERR_PTR(-ERESTARTSYS);
 
-	while (afs_iterate_addresses(&ac)) {
-		if (!test_bit(ac.index, &ac.alist->probed)) {
-			ret = afs_vl_get_capabilities(cell->net, &ac, key);
-			switch (ret) {
-			case VL_SERVICE:
-				clear_bit(ac.index, &ac.alist->yfs);
-				set_bit(ac.index, &ac.alist->probed);
-				ac.addr->srx_service = ret;
-				break;
-			case YFS_VL_SERVICE:
-				set_bit(ac.index, &ac.alist->yfs);
-				set_bit(ac.index, &ac.alist->probed);
-				ac.addr->srx_service = ret;
-				break;
-			}
-		}
-		
-		vldb = afs_vl_get_entry_by_name_u(cell->net, &ac, key,
-						  volname, volnamesz);
-		switch (ac.error) {
-		case 0:
-			afs_end_cursor(&ac);
-			return vldb;
-		case -ECONNABORTED:
-			ac.error = afs_abort_to_error(ac.abort_code);
-			goto error;
-		case -ENOMEM:
-		case -ENONET:
-			goto error;
-		case -ENETUNREACH:
-		case -EHOSTUNREACH:
-		case -ECONNREFUSED:
-			break;
-		default:
-			ac.error = -EIO;
-			goto error;
-		}
+	while (afs_select_vlserver(&vc)) {
+		vldb = afs_vl_get_entry_by_name_u(&vc, volname, volnamesz);
 	}
 
-error:
-	return ERR_PTR(afs_end_cursor(&ac));
+	ret = afs_end_vlserver_operation(&vc);
+	return ret < 0 ? ERR_PTR(ret) : vldb;
 }
 
 /*
@@ -149,7 +195,7 @@ error:
  * - Rule 3: If parent volume is R/W, then only mount R/W volume unless
  *           explicitly told otherwise
  */
-struct afs_volume *afs_create_volume(struct afs_mount_params *params)
+struct afs_volume *afs_create_volume(struct afs_fs_context *params)
 {
 	struct afs_vldb_entry *vldb;
 	struct afs_volume *volume;
@@ -178,8 +224,7 @@ struct afs_volume *afs_create_volume(struct afs_mount_params *params)
 		goto error;
 	}
 
-	type_mask = 1UL << params->type;
-	volume = afs_alloc_volume(params, vldb, type_mask);
+	volume = afs_lookup_volume(params, vldb);
 
 error:
 	kfree(vldb);
@@ -189,50 +234,103 @@ error:
 /*
  * Destroy a volume record
  */
-static void afs_destroy_volume(struct afs_net *net, struct afs_volume *volume)
+static void afs_destroy_volume(struct work_struct *work)
 {
+	struct afs_volume *volume = container_of(work, struct afs_volume, destructor);
+	struct afs_server_list *slist = rcu_access_pointer(volume->servers);
+
 	_enter("%p", volume);
 
 #ifdef CONFIG_AFS_FSCACHE
 	ASSERTCMP(volume->cache, ==, NULL);
 #endif
 
-	afs_put_serverlist(net, volume->servers);
-	afs_put_cell(net, volume->cell);
-	kfree(volume);
+	afs_detach_volume_from_servers(volume, slist);
+	afs_remove_volume_from_cell(volume);
+	afs_put_serverlist(volume->cell->net, slist);
+	afs_put_cell(volume->cell, afs_cell_trace_put_vol);
+	trace_afs_volume(volume->debug_id, volume->vid, refcount_read(&volume->ref),
+			 afs_volume_trace_free);
+	kfree_rcu(volume, rcu);
 
 	_leave(" [destroyed]");
 }
 
 /*
- * Drop a reference on a volume record.
+ * Try to get a reference on a volume record.
  */
-void afs_put_volume(struct afs_cell *cell, struct afs_volume *volume)
+bool afs_try_get_volume(struct afs_volume *volume, enum afs_volume_trace reason)
+{
+	int r;
+
+	if (__refcount_inc_not_zero(&volume->ref, &r)) {
+		trace_afs_volume(volume->debug_id, volume->vid, r + 1, reason);
+		return true;
+	}
+	return false;
+}
+
+/*
+ * Get a reference on a volume record.
+ */
+struct afs_volume *afs_get_volume(struct afs_volume *volume,
+				  enum afs_volume_trace reason)
 {
 	if (volume) {
-		_enter("%s", volume->name);
+		int r;
 
-		if (atomic_dec_and_test(&volume->usage))
-			afs_destroy_volume(cell->net, volume);
+		__refcount_inc(&volume->ref, &r);
+		trace_afs_volume(volume->debug_id, volume->vid, r + 1, reason);
+	}
+	return volume;
+}
+
+
+/*
+ * Drop a reference on a volume record.
+ */
+void afs_put_volume(struct afs_volume *volume, enum afs_volume_trace reason)
+{
+	if (volume) {
+		unsigned int debug_id = volume->debug_id;
+		afs_volid_t vid = volume->vid;
+		bool zero;
+		int r;
+
+		zero = __refcount_dec_and_test(&volume->ref, &r);
+		trace_afs_volume(debug_id, vid, r - 1, reason);
+		if (zero)
+			schedule_work(&volume->destructor);
 	}
 }
 
 /*
  * Activate a volume.
  */
-void afs_activate_volume(struct afs_volume *volume)
+int afs_activate_volume(struct afs_volume *volume)
 {
 #ifdef CONFIG_AFS_FSCACHE
-	volume->cache = fscache_acquire_cookie(volume->cell->cache,
-					       &afs_volume_cache_index_def,
-					       &volume->vid, sizeof(volume->vid),
-					       NULL, 0,
-					       volume, 0, true);
-#endif
+	struct fscache_volume *vcookie;
+	char *name;
 
-	write_lock(&volume->cell->proc_lock);
-	list_add_tail(&volume->proc_link, &volume->cell->proc_volumes);
-	write_unlock(&volume->cell->proc_lock);
+	name = kasprintf(GFP_KERNEL, "afs,%s,%llx",
+			 volume->cell->name, volume->vid);
+	if (!name)
+		return -ENOMEM;
+
+	vcookie = fscache_acquire_volume(name, NULL, NULL, 0);
+	if (IS_ERR(vcookie)) {
+		if (vcookie != ERR_PTR(-EBUSY)) {
+			kfree(name);
+			return PTR_ERR(vcookie);
+		}
+		pr_err("AFS: Cache volume key already in use (%s)\n", name);
+		vcookie = NULL;
+	}
+	volume->cache = vcookie;
+	kfree(name);
+#endif
+	return 0;
 }
 
 /*
@@ -242,12 +340,8 @@ void afs_deactivate_volume(struct afs_volume *volume)
 {
 	_enter("%s", volume->name);
 
-	write_lock(&volume->cell->proc_lock);
-	list_del_init(&volume->proc_link);
-	write_unlock(&volume->cell->proc_lock);
-
 #ifdef CONFIG_AFS_FSCACHE
-	fscache_relinquish_cookie(volume->cache, NULL,
+	fscache_relinquish_volume(volume->cache, NULL,
 				  test_bit(AFS_VOLUME_DELETED, &volume->flags));
 	volume->cache = NULL;
 #endif
@@ -262,7 +356,7 @@ static int afs_update_volume_status(struct afs_volume *volume, struct key *key)
 {
 	struct afs_server_list *new, *old, *discard;
 	struct afs_vldb_entry *vldb;
-	char idbuf[16];
+	char idbuf[24];
 	int ret, idsz;
 
 	_enter("");
@@ -270,7 +364,7 @@ static int afs_update_volume_status(struct afs_volume *volume, struct key *key)
 	/* We look up an ID by passing it as a decimal string in the
 	 * operation's name parameter.
 	 */
-	idsz = sprintf(idbuf, "%u", volume->vid);
+	idsz = snprintf(idbuf, sizeof(idbuf), "%llu", volume->vid);
 
 	vldb = afs_vl_lookup_vldb(volume->cell, key, idbuf, idsz);
 	if (IS_ERR(vldb)) {
@@ -287,8 +381,7 @@ static int afs_update_volume_status(struct afs_volume *volume, struct key *key)
 	}
 
 	/* See if the volume's server list got updated. */
-	new = afs_alloc_server_list(volume->cell, key,
-				    vldb, (1 << volume->type));
+	new = afs_alloc_server_list(volume, key, vldb);
 	if (IS_ERR(new)) {
 		ret = PTR_ERR(new);
 		goto error_vldb;
@@ -297,21 +390,27 @@ static int afs_update_volume_status(struct afs_volume *volume, struct key *key)
 	write_lock(&volume->servers_lock);
 
 	discard = new;
-	old = volume->servers;
+	old = rcu_dereference_protected(volume->servers,
+					lockdep_is_held(&volume->servers_lock));
 	if (afs_annotate_server_list(new, old)) {
 		new->seq = volume->servers_seq + 1;
-		volume->servers = new;
+		rcu_assign_pointer(volume->servers, new);
 		smp_wmb();
 		volume->servers_seq++;
 		discard = old;
 	}
 
-	volume->update_at = ktime_get_real_seconds() + afs_volume_record_life;
-	clear_bit(AFS_VOLUME_NEEDS_UPDATE, &volume->flags);
+	/* Check more often if replication is ongoing. */
+	if (new->ro_replicating)
+		volume->update_at = ktime_get_real_seconds() + 10 * 60;
+	else
+		volume->update_at = ktime_get_real_seconds() + afs_volume_record_life;
 	write_unlock(&volume->servers_lock);
-	ret = 0;
 
+	if (discard == old)
+		afs_reattach_volume_to_servers(volume, new, old);
 	afs_put_serverlist(volume->cell->net, discard);
+	ret = 0;
 error_vldb:
 	kfree(vldb);
 error:
@@ -322,25 +421,27 @@ error:
 /*
  * Make sure the volume record is up to date.
  */
-int afs_check_volume_status(struct afs_volume *volume, struct key *key)
+int afs_check_volume_status(struct afs_volume *volume, struct afs_operation *op)
 {
-	time64_t now = ktime_get_real_seconds();
 	int ret, retries = 0;
 
 	_enter("");
 
-	if (volume->update_at <= now)
-		set_bit(AFS_VOLUME_NEEDS_UPDATE, &volume->flags);
-
 retry:
-	if (!test_bit(AFS_VOLUME_NEEDS_UPDATE, &volume->flags) &&
-	    !test_bit(AFS_VOLUME_WAIT, &volume->flags)) {
-		_leave(" = 0");
-		return 0;
-	}
+	if (test_bit(AFS_VOLUME_WAIT, &volume->flags))
+		goto wait;
+	if (volume->update_at <= ktime_get_real_seconds() ||
+	    test_bit(AFS_VOLUME_NEEDS_UPDATE, &volume->flags))
+		goto update;
+	_leave(" = 0");
+	return 0;
 
+update:
 	if (!test_and_set_bit_lock(AFS_VOLUME_UPDATING, &volume->flags)) {
-		ret = afs_update_volume_status(volume, key);
+		clear_bit(AFS_VOLUME_NEEDS_UPDATE, &volume->flags);
+		ret = afs_update_volume_status(volume, op->key);
+		if (ret < 0)
+			set_bit(AFS_VOLUME_NEEDS_UPDATE, &volume->flags);
 		clear_bit_unlock(AFS_VOLUME_WAIT, &volume->flags);
 		clear_bit_unlock(AFS_VOLUME_UPDATING, &volume->flags);
 		wake_up_bit(&volume->flags, AFS_VOLUME_WAIT);
@@ -348,12 +449,15 @@ retry:
 		return ret;
 	}
 
+wait:
 	if (!test_bit(AFS_VOLUME_WAIT, &volume->flags)) {
 		_leave(" = 0 [no wait]");
 		return 0;
 	}
 
-	ret = wait_on_bit(&volume->flags, AFS_VOLUME_WAIT, TASK_INTERRUPTIBLE);
+	ret = wait_on_bit(&volume->flags, AFS_VOLUME_WAIT,
+			  (op->flags & AFS_OPERATION_UNINTR) ?
+			  TASK_UNINTERRUPTIBLE : TASK_INTERRUPTIBLE);
 	if (ret == -ERESTARTSYS) {
 		_leave(" = %d", ret);
 		return ret;

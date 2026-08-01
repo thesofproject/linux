@@ -1,25 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
  *  Universal interface for Audio Codec '97
  *
  *  For more details look to AC '97 component specification revision 2.2
  *  by Intel Corporation (http://developer.intel.com).
- *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  */
 
 #include <linux/mutex.h>
@@ -113,7 +98,7 @@ static void snd_ac97_proc_read_main(struct snd_ac97 *ac97, struct snd_info_buffe
 	static const char *spdif_rates_cs4205[4] = { " Rate=48kHz", " Rate=44.1kHz", " Rate=res", " Rate=res" };
 	static const char *double_rate_slots[4] = { "10/11", "7/8", "reserved", "reserved" };
 
-	snd_ac97_get_name(NULL, ac97->id, name, 0);
+	snd_ac97_get_name(NULL, ac97->id, name, sizeof(name), 0);
 	snd_iprintf(buffer, "%d-%d/%d: %s\n\n", ac97->addr, ac97->num, subidx, name);
 
 	if ((ac97->scaps & AC97_SCAP_AUDIO) == 0)
@@ -176,12 +161,12 @@ static void snd_ac97_proc_read_main(struct snd_ac97 *ac97, struct snd_info_buffe
 		    "Mic select       : %s\n"
 		    "ADC/DAC loopback : %s\n",
 		    val & 0x8000 ? "post" : "pre",
-		    val & 0x4000 ? "on" : "off",
-		    val & 0x2000 ? "on" : "off",
-		    val & 0x1000 ? "on" : "off",
+		    str_on_off(val & 0x4000),
+		    str_on_off(val & 0x2000),
+		    str_on_off(val & 0x1000),
 		    val & 0x0200 ? "Mic" : "MIX",
 		    val & 0x0100 ? "Mic2" : "Mic1",
-		    val & 0x0080 ? "on" : "off");
+		    str_on_off(val & 0x0080));
 	if (ac97->ext_id & AC97_EI_DRA)
 		snd_iprintf(buffer, "Double rate slots: %s\n",
 			    double_rate_slots[(val >> 10) & 3]);
@@ -344,7 +329,7 @@ static void snd_ac97_proc_read(struct snd_info_entry *entry, struct snd_info_buf
 {
 	struct snd_ac97 *ac97 = entry->private_data;
 	
-	mutex_lock(&ac97->page_mutex);
+	guard(mutex)(&ac97->page_mutex);
 	if ((ac97->id & 0xffffff40) == AC97_ID_AD1881) {	// Analog Devices AD1881/85/86
 		int idx;
 		for (idx = 0; idx < 3; idx++)
@@ -370,7 +355,6 @@ static void snd_ac97_proc_read(struct snd_info_entry *entry, struct snd_info_buf
 	} else {
 		snd_ac97_proc_read_main(ac97, buffer, 0);
 	}
-	mutex_unlock(&ac97->page_mutex);
 }
 
 #ifdef CONFIG_SND_DEBUG
@@ -380,7 +364,8 @@ static void snd_ac97_proc_regs_write(struct snd_info_entry *entry, struct snd_in
 	struct snd_ac97 *ac97 = entry->private_data;
 	char line[64];
 	unsigned int reg, val;
-	mutex_lock(&ac97->page_mutex);
+
+	guard(mutex)(&ac97->page_mutex);
 	while (!snd_info_get_line(buffer, line, sizeof(line))) {
 		if (sscanf(line, "%x %x", &reg, &val) != 2)
 			continue;
@@ -388,7 +373,6 @@ static void snd_ac97_proc_regs_write(struct snd_info_entry *entry, struct snd_in
 		if (reg < 0x80 && (reg & 1) == 0 && val <= 0xffff)
 			snd_ac97_write_cache(ac97, reg, val);
 	}
-	mutex_unlock(&ac97->page_mutex);
 }
 #endif
 
@@ -407,7 +391,7 @@ static void snd_ac97_proc_regs_read(struct snd_info_entry *entry,
 {
 	struct snd_ac97 *ac97 = entry->private_data;
 
-	mutex_lock(&ac97->page_mutex);
+	guard(mutex)(&ac97->page_mutex);
 	if ((ac97->id & 0xffffff40) == AC97_ID_AD1881) {	// Analog Devices AD1881/85/86
 
 		int idx;
@@ -423,7 +407,6 @@ static void snd_ac97_proc_regs_read(struct snd_info_entry *entry,
 	} else {
 		snd_ac97_proc_regs_read_main(ac97, buffer, 0);
 	}	
-	mutex_unlock(&ac97->page_mutex);
 }
 
 void snd_ac97_proc_init(struct snd_ac97 * ac97)
@@ -436,25 +419,20 @@ void snd_ac97_proc_init(struct snd_ac97 * ac97)
 		return;
 	prefix = ac97_is_audio(ac97) ? "ac97" : "mc97";
 	sprintf(name, "%s#%d-%d", prefix, ac97->addr, ac97->num);
-	if ((entry = snd_info_create_card_entry(ac97->bus->card, name, ac97->bus->proc)) != NULL) {
+	entry = snd_info_create_card_entry(ac97->bus->card, name,
+					   ac97->bus->proc);
+	if (entry)
 		snd_info_set_text_ops(entry, ac97, snd_ac97_proc_read);
-		if (snd_info_register(entry) < 0) {
-			snd_info_free_entry(entry);
-			entry = NULL;
-		}
-	}
 	ac97->proc = entry;
 	sprintf(name, "%s#%d-%d+regs", prefix, ac97->addr, ac97->num);
-	if ((entry = snd_info_create_card_entry(ac97->bus->card, name, ac97->bus->proc)) != NULL) {
+	entry = snd_info_create_card_entry(ac97->bus->card, name,
+					   ac97->bus->proc);
+	if (entry) {
 		snd_info_set_text_ops(entry, ac97, snd_ac97_proc_regs_read);
 #ifdef CONFIG_SND_DEBUG
-		entry->mode |= S_IWUSR;
+		entry->mode |= 0200;
 		entry->c.text.write = snd_ac97_proc_regs_write;
 #endif
-		if (snd_info_register(entry) < 0) {
-			snd_info_free_entry(entry);
-			entry = NULL;
-		}
 	}
 	ac97->proc_regs = entry;
 }
@@ -473,13 +451,10 @@ void snd_ac97_bus_proc_init(struct snd_ac97_bus * bus)
 	char name[32];
 
 	sprintf(name, "codec97#%d", bus->num);
-	if ((entry = snd_info_create_card_entry(bus->card, name, bus->card->proc_root)) != NULL) {
-		entry->mode = S_IFDIR | S_IRUGO | S_IXUGO;
-		if (snd_info_register(entry) < 0) {
-			snd_info_free_entry(entry);
-			entry = NULL;
-		}
-	}
+	entry = snd_info_create_card_entry(bus->card, name,
+					   bus->card->proc_root);
+	if (entry)
+		entry->mode = S_IFDIR | 0555;
 	bus->proc = entry;
 }
 

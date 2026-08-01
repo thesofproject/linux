@@ -21,7 +21,7 @@
 #include "hif-ops.h"
 #include "trace.h"
 
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #define CALC_TXRX_PADDED_LEN(dev, len)  (__ALIGN_MASK((len), (dev)->block_mask))
 
@@ -364,8 +364,7 @@ static void ath6kl_htc_tx_prep_pkt(struct htc_packet *packet, u8 flags,
 	packet->buf -= HTC_HDR_LENGTH;
 	hdr =  (struct htc_frame_hdr *)packet->buf;
 
-	/* Endianess? */
-	put_unaligned((u16)packet->act_len, &hdr->payld_len);
+	put_unaligned_le16(packet->act_len, &hdr->payld_len);
 	hdr->flags = flags;
 	hdr->eid = packet->endpoint;
 	hdr->ctrl[0] = ctrl0;
@@ -939,7 +938,7 @@ static void ath6kl_htc_tx_from_queue(struct htc_target *target,
 
 		/*
 		 * if an AC has bundling disabled and no tx bundling
-		 * has occured continously for a certain number of TX,
+		 * has occurred continuously for a certain number of TX,
 		 * enable tx bundling for this AC
 		 */
 		if (!bundle_sent) {
@@ -1538,7 +1537,7 @@ static int ath6kl_htc_rx_alloc(struct htc_target *target,
 					     queue, n_msg);
 
 		/*
-		 * This is due to unavailabilty of buffers to rx entire data.
+		 * This is due to unavailability of buffers to rx entire data.
 		 * Return no error so that free buffers from queue can be used
 		 * to receive partial data.
 		 */
@@ -2260,19 +2259,16 @@ int ath6kl_htc_rxmsg_pending_handler(struct htc_target *target,
 static struct htc_packet *htc_wait_for_ctrl_msg(struct htc_target *target)
 {
 	struct htc_packet *packet = NULL;
-	struct htc_frame_hdr *htc_hdr;
-	u32 look_ahead;
+	struct htc_frame_look_ahead look_ahead;
 
-	if (ath6kl_hif_poll_mboxmsg_rx(target->dev, &look_ahead,
+	if (ath6kl_hif_poll_mboxmsg_rx(target->dev, &look_ahead.word,
 				       HTC_TARGET_RESPONSE_TIMEOUT))
 		return NULL;
 
 	ath6kl_dbg(ATH6KL_DBG_HTC,
-		   "htc rx wait ctrl look_ahead 0x%X\n", look_ahead);
+		   "htc rx wait ctrl look_ahead 0x%X\n", look_ahead.word);
 
-	htc_hdr = (struct htc_frame_hdr *)&look_ahead;
-
-	if (htc_hdr->eid != ENDPOINT_0)
+	if (look_ahead.eid != ENDPOINT_0)
 		return NULL;
 
 	packet = htc_get_control_buf(target, false);
@@ -2281,8 +2277,8 @@ static struct htc_packet *htc_wait_for_ctrl_msg(struct htc_target *target)
 		return NULL;
 
 	packet->info.rx.rx_flags = 0;
-	packet->info.rx.exp_hdr = look_ahead;
-	packet->act_len = le16_to_cpu(htc_hdr->payld_len) + HTC_HDR_LENGTH;
+	packet->info.rx.exp_hdr = look_ahead.word;
+	packet->act_len = le16_to_cpu(look_ahead.payld_len) + HTC_HDR_LENGTH;
 
 	if (packet->act_len > packet->buf_len)
 		goto fail_ctrl_rx;
@@ -2796,7 +2792,7 @@ static int ath6kl_htc_reset(struct htc_target *target)
 		      (HTC_MAX_CTRL_MSG_LEN + HTC_HDR_LENGTH);
 
 	for (i = 0; i < NUM_CONTROL_BUFFERS; i++) {
-		packet = kzalloc(sizeof(*packet), GFP_KERNEL);
+		packet = kzalloc_obj(*packet);
 		if (!packet)
 			return -ENOMEM;
 
@@ -2846,17 +2842,17 @@ static void *ath6kl_htc_mbox_create(struct ath6kl *ar)
 	struct htc_target *target = NULL;
 	int status = 0;
 
-	target = kzalloc(sizeof(*target), GFP_KERNEL);
+	target = kzalloc_obj(*target);
 	if (!target) {
 		ath6kl_err("unable to allocate memory\n");
 		return NULL;
 	}
 
-	target->dev = kzalloc(sizeof(*target->dev), GFP_KERNEL);
+	target->dev = kzalloc_obj(*target->dev);
 	if (!target->dev) {
 		ath6kl_err("unable to allocate memory\n");
-		status = -ENOMEM;
-		goto err_htc_cleanup;
+		kfree(target);
+		return NULL;
 	}
 
 	spin_lock_init(&target->htc_lock);

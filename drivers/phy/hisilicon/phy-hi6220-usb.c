@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (c) 2015 Linaro Ltd.
- * Copyright (c) 2015 Hisilicon Limited.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * Copyright (c) 2015 HiSilicon Limited.
  */
 
 #include <linux/mfd/syscon.h>
@@ -164,5 +160,4 @@ static struct platform_driver hi6220_phy_driver = {
 module_platform_driver(hi6220_phy_driver);
 
 MODULE_DESCRIPTION("HISILICON HI6220 USB PHY driver");
-MODULE_ALIAS("platform:hi6220-usb-phy");
 MODULE_LICENSE("GPL");

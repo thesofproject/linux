@@ -14,7 +14,7 @@ Description:
 		  for RTCs that support alarms
 
 		* RTC_ALM_READ, RTC_ALM_SET: Read or set the alarm time for
-		  RTCs that support alarms. Can be set upto 24 hours in the
+		  RTCs that support alarms. Can be set up to 24 hours in the
 		  future. Requires a separate RTC_AIE_ON call to enable the
 		  alarm interrupt. (Prefer to use RTC_WKALM_*)
 
@@ -32,6 +32,14 @@ Description:
 		  periodic interrupts for RTCs that support periodic interrupts.
 		  Requires a separate RTC_PIE_ON call to enable the periodic
 		  interrupts.
+
+		* RTC_VL_READ: Read the voltage inputs status of the RTC when
+		  supported. The value is a bit field of RTC_VL_*, giving the
+		  status of the main and backup voltages.
+
+		* RTC_VL_CLEAR: Clear the voltage status of the RTC. Some RTCs
+		  need user interaction when the backup power provider is
+		  replaced or charged to be able to clear the status.
 
 		The ioctl() calls supported by the older /dev/rtc interface are
 		also supported by the newer RTC class framework. However,

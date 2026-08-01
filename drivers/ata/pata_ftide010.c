@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Faraday Technology FTIDE010 driver
  * Copyright (C) 2017 Linus Walleij <linus.walleij@linaro.org>
@@ -13,8 +14,7 @@
 #include <linux/module.h>
 #include <linux/libata.h>
 #include <linux/bitops.h>
-#include <linux/of_address.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/clk.h>
 #include "sata_gemini.h"
 
@@ -83,7 +83,7 @@ struct ftide010 {
 #define FTIDE010_CLK_MOD_DEV0_UDMA_EN	BIT(4)
 #define FTIDE010_CLK_MOD_DEV1_UDMA_EN	BIT(5)
 
-static struct scsi_host_template pata_ftide010_sht = {
+static const struct scsi_host_template pata_ftide010_sht = {
 	ATA_BMDMA_SHT(DRV_NAME),
 };
 
@@ -122,10 +122,10 @@ static const u8 mwdma_50_active_time[3] = {6, 2, 2};
 static const u8 mwdma_50_recovery_time[3] = {6, 2, 1};
 static const u8 mwdma_66_active_time[3] = {8, 3, 3};
 static const u8 mwdma_66_recovery_time[3] = {8, 2, 1};
-static const u8 udma_50_setup_time[6] = {3, 3, 2, 2, 1, 1};
+static const u8 udma_50_setup_time[6] = {3, 3, 2, 2, 1, 9};
 static const u8 udma_50_hold_time[6] = {3, 1, 1, 1, 1, 1};
-static const u8 udma_66_setup_time[7] = {4, 4, 3, 2, };
-static const u8 udma_66_hold_time[7] = {};
+static const u8 udma_66_setup_time[7] = {4, 4, 3, 2, 1, 9, 9};
+static const u8 udma_66_hold_time[7] = {4, 2, 1, 1, 1, 1, 1};
 
 /*
  * We set 66 MHz for all MWDMA modes
@@ -256,14 +256,12 @@ static struct ata_port_operations pata_ftide010_port_ops = {
 	.qc_issue	= ftide010_qc_issue,
 };
 
-static struct ata_port_info ftide010_port_info[] = {
-	{
-		.flags		= ATA_FLAG_SLAVE_POSS,
-		.mwdma_mask	= ATA_MWDMA2,
-		.udma_mask	= ATA_UDMA6,
-		.pio_mask	= ATA_PIO4,
-		.port_ops	= &pata_ftide010_port_ops,
-	},
+static struct ata_port_info ftide010_port_info = {
+	.flags		= ATA_FLAG_SLAVE_POSS,
+	.mwdma_mask	= ATA_MWDMA2,
+	.udma_mask	= ATA_UDMA6,
+	.pio_mask	= ATA_PIO4,
+	.port_ops	= &pata_ftide010_port_ops,
 };
 
 #if IS_ENABLED(CONFIG_SATA_GEMINI)
@@ -349,6 +347,7 @@ static int pata_ftide010_gemini_cable_detect(struct ata_port *ap)
 }
 
 static int pata_ftide010_gemini_init(struct ftide010 *ftide,
+				     struct ata_port_info *pi,
 				     bool is_ata1)
 {
 	struct device *dev = ftide->dev;
@@ -373,7 +372,13 @@ static int pata_ftide010_gemini_init(struct ftide010 *ftide,
 
 	/* Flag port as SATA-capable */
 	if (gemini_sata_bridge_enabled(sg, is_ata1))
-		ftide010_port_info[0].flags |= ATA_FLAG_SATA;
+		pi->flags |= ATA_FLAG_SATA;
+
+	/* This device has broken DMA, only PIO works */
+	if (of_machine_is_compatible("itian,sq201")) {
+		pi->mwdma_mask = 0;
+		pi->udma_mask = 0;
+	}
 
 	/*
 	 * We assume that a simple 40-wire cable is used in the PATA mode.
@@ -435,6 +440,7 @@ static int pata_ftide010_gemini_init(struct ftide010 *ftide,
 }
 #else
 static int pata_ftide010_gemini_init(struct ftide010 *ftide,
+				     struct ata_port_info *pi,
 				     bool is_ata1)
 {
 	return -ENOTSUPP;
@@ -446,7 +452,7 @@ static int pata_ftide010_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
-	const struct ata_port_info pi = ftide010_port_info[0];
+	struct ata_port_info pi = ftide010_port_info;
 	const struct ata_port_info *ppi[] = { &pi, NULL };
 	struct ftide010 *ftide;
 	struct resource *res;
@@ -463,11 +469,7 @@ static int pata_ftide010_probe(struct platform_device *pdev)
 	if (irq < 0)
 		return irq;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res)
-		return -ENODEV;
-
-	ftide->base = devm_ioremap_resource(dev, res);
+	ftide->base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
 	if (IS_ERR(ftide->base))
 		return PTR_ERR(ftide->base);
 
@@ -490,6 +492,7 @@ static int pata_ftide010_probe(struct platform_device *pdev)
 		 * are ATA0. This will also set up the cable types.
 		 */
 		ret = pata_ftide010_gemini_init(ftide,
+				&pi,
 				(res->start == 0x63400000));
 		if (ret)
 			goto err_dis_clk;
@@ -528,40 +531,37 @@ static int pata_ftide010_probe(struct platform_device *pdev)
 	return 0;
 
 err_dis_clk:
-	if (!IS_ERR(ftide->pclk))
-		clk_disable_unprepare(ftide->pclk);
+	clk_disable_unprepare(ftide->pclk);
+
 	return ret;
 }
 
-static int pata_ftide010_remove(struct platform_device *pdev)
+static void pata_ftide010_remove(struct platform_device *pdev)
 {
 	struct ata_host *host = platform_get_drvdata(pdev);
 	struct ftide010 *ftide = host->private_data;
 
 	ata_host_detach(ftide->host);
-	if (!IS_ERR(ftide->pclk))
-		clk_disable_unprepare(ftide->pclk);
-
-	return 0;
+	clk_disable_unprepare(ftide->pclk);
 }
 
 static const struct of_device_id pata_ftide010_of_match[] = {
-	{
-		.compatible = "faraday,ftide010",
-	},
-	{},
+	{ .compatible = "faraday,ftide010", },
+	{ /* sentinel */ }
 };
+MODULE_DEVICE_TABLE(of, pata_ftide010_of_match);
 
 static struct platform_driver pata_ftide010_driver = {
 	.driver = {
 		.name = DRV_NAME,
-		.of_match_table = of_match_ptr(pata_ftide010_of_match),
+		.of_match_table = pata_ftide010_of_match,
 	},
 	.probe = pata_ftide010_probe,
 	.remove = pata_ftide010_remove,
 };
 module_platform_driver(pata_ftide010_driver);
 
+MODULE_DESCRIPTION("low level driver for Faraday Technology FTIDE010");
 MODULE_AUTHOR("Linus Walleij <linus.walleij@linaro.org>");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:" DRV_NAME);

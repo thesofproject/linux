@@ -1,6 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * linux/fs/9p/error.c
- *
  * Error string handling
  *
  * Plan 9 uses error strings, Unix uses error numbers.  These functions
@@ -9,22 +8,6 @@
  *
  *  Copyright (C) 2004 by Eric Van Hensbergen <ericvh@gmail.com>
  *  Copyright (C) 2002 by Ron Minnich <rminnich@lanl.gov>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License version 2
- *  as published by the Free Software Foundation.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to:
- *  Free Software Foundation
- *  51 Franklin Street, Fifth Floor
- *  Boston, MA  02111-1301  USA
- *
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -33,6 +16,7 @@
 #include <linux/list.h>
 #include <linux/jhash.h>
 #include <linux/errno.h>
+#include <linux/hashtable.h>
 #include <net/9p/9p.h>
 
 /**
@@ -50,8 +34,8 @@ struct errormap {
 	struct hlist_node list;
 };
 
-#define ERRHASHSZ		32
-static struct hlist_head hash_errmap[ERRHASHSZ];
+#define ERRHASH_BITS 5
+static DEFINE_HASHTABLE(hash_errmap, ERRHASH_BITS);
 
 /* FixMe - reduce to a reasonable size */
 static struct errormap errmap[] = {
@@ -193,18 +177,14 @@ static struct errormap errmap[] = {
 int p9_error_init(void)
 {
 	struct errormap *c;
-	int bucket;
-
-	/* initialize hash table */
-	for (bucket = 0; bucket < ERRHASHSZ; bucket++)
-		INIT_HLIST_HEAD(&hash_errmap[bucket]);
+	u32 hash;
 
 	/* load initial error map into hash table */
-	for (c = errmap; c->name != NULL; c++) {
+	for (c = errmap; c->name; c++) {
 		c->namelen = strlen(c->name);
-		bucket = jhash(c->name, c->namelen, 0) % ERRHASHSZ;
+		hash = jhash(c->name, c->namelen, 0);
 		INIT_HLIST_NODE(&c->list);
-		hlist_add_head(&c->list, &hash_errmap[bucket]);
+		hash_add(hash_errmap, &c->list, hash);
 	}
 
 	return 1;
@@ -212,7 +192,7 @@ int p9_error_init(void)
 EXPORT_SYMBOL(p9_error_init);
 
 /**
- * errstr2errno - convert error string to error number
+ * p9_errstr2errno - convert error string to error number
  * @errstr: error string
  * @len: length of error string
  *
@@ -222,12 +202,12 @@ int p9_errstr2errno(char *errstr, int len)
 {
 	int errno;
 	struct errormap *c;
-	int bucket;
+	u32 hash;
 
 	errno = 0;
 	c = NULL;
-	bucket = jhash(errstr, len, 0) % ERRHASHSZ;
-	hlist_for_each_entry(c, &hash_errmap[bucket], list) {
+	hash = jhash(errstr, len, 0);
+	hash_for_each_possible(hash_errmap, c, list, hash) {
 		if (c->namelen == len && !memcmp(c->name, errstr, len)) {
 			errno = c->val;
 			break;

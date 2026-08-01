@@ -1,11 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *   Copyright (C) 2007 Advanced Micro Devices, Inc.
  *   Copyright (C) 2008 Andres Salomon <dilinger@debian.org>
- *
- *   This program is free software; you can redistribute it and/or modify it
- *   under the terms of the GNU General Public License as published by the
- *   Free Software Foundation; either version 2 of the License, or (at your
- *   option) any later version.
  */
 #include <linux/fb.h>
 #include <asm/io.h>
@@ -14,8 +10,6 @@
 #include <asm/delay.h>
 
 #include "gxfb.h"
-
-#ifdef CONFIG_PM
 
 static void gx_save_regs(struct gxfb_par *par)
 {
@@ -27,8 +21,8 @@ static void gx_save_regs(struct gxfb_par *par)
 	} while (i & (GP_BLT_STATUS_BLT_PENDING | GP_BLT_STATUS_BLT_BUSY));
 
 	/* save MSRs */
-	rdmsrl(MSR_GX_MSR_PADSEL, par->msr.padsel);
-	rdmsrl(MSR_GLCP_DOTPLL, par->msr.dotpll);
+	rdmsrq(MSR_GX_MSR_PADSEL, par->msr.padsel);
+	rdmsrq(MSR_GLCP_DOTPLL, par->msr.dotpll);
 
 	write_dc(par, DC_UNLOCK, DC_UNLOCK_UNLOCK);
 
@@ -49,14 +43,14 @@ static void gx_set_dotpll(uint32_t dotpll_hi)
 	uint32_t dotpll_lo;
 	int i;
 
-	rdmsrl(MSR_GLCP_DOTPLL, dotpll_lo);
+	rdmsrq(MSR_GLCP_DOTPLL, dotpll_lo);
 	dotpll_lo |= MSR_GLCP_DOTPLL_DOTRESET;
 	dotpll_lo &= ~MSR_GLCP_DOTPLL_BYPASS;
 	wrmsr(MSR_GLCP_DOTPLL, dotpll_lo, dotpll_hi);
 
 	/* wait for the PLL to lock */
 	for (i = 0; i < 200; i++) {
-		rdmsrl(MSR_GLCP_DOTPLL, dotpll_lo);
+		rdmsrq(MSR_GLCP_DOTPLL, dotpll_lo);
 		if (dotpll_lo & MSR_GLCP_DOTPLL_LOCK)
 			break;
 		udelay(1);
@@ -139,7 +133,7 @@ static void gx_restore_video_proc(struct gxfb_par *par)
 {
 	int i;
 
-	wrmsrl(MSR_GX_MSR_PADSEL, par->msr.padsel);
+	wrmsrq(MSR_GX_MSR_PADSEL, par->msr.padsel);
 
 	for (i = 0; i < ARRAY_SIZE(par->vp); i++) {
 		switch (i) {
@@ -263,5 +257,3 @@ int gx_powerup(struct fb_info *info)
 	par->powered_down  = 0;
 	return 0;
 }
-
-#endif

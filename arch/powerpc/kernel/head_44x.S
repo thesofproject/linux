@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Kernel execution entry point code.
  *
@@ -21,25 +22,20 @@
  * 	   	debbie_chu@mvista.com
  *    Copyright 2002-2005 MontaVista Software, Inc.
  *      PowerPC 44x support, Matt Porter <mporter@kernel.crashing.org>
- *
- * This program is free software; you can redistribute  it and/or modify it
- * under  the terms of  the GNU General  Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #include <linux/init.h>
+#include <linux/pgtable.h>
 #include <asm/processor.h>
 #include <asm/page.h>
 #include <asm/mmu.h>
-#include <asm/pgtable.h>
 #include <asm/cputable.h>
 #include <asm/thread_info.h>
 #include <asm/ppc_asm.h>
 #include <asm/asm-offsets.h>
 #include <asm/ptrace.h>
 #include <asm/synch.h>
-#include <asm/export.h>
+#include <asm/code-patching-asm.h>
 #include "head_booke.h"
 
 
@@ -55,8 +51,8 @@
  *
  */
 	__HEAD
-_ENTRY(_stext);
-_ENTRY(_start);
+_GLOBAL(_stext);
+_GLOBAL(_start);
 	/*
 	 * Reserve a word at a fixed location to store the address
 	 * of abatron_pteptrs
@@ -73,7 +69,7 @@ _ENTRY(_start);
  * address.
  * r21 will be loaded with the physical runtime address of _stext
  */
-	bl	0f				/* Get our runtime address */
+	bcl	20,31,$+4			/* Get our runtime address */
 0:	mflr	r21				/* Make it accessible */
 	addis	r21,r21,(_stext - 0b)@ha
 	addi	r21,r21,(_stext - 0b)@l 	/* Get our current runtime base */
@@ -112,7 +108,7 @@ _ENTRY(_start);
 	lis	r1,init_thread_union@h
 	ori	r1,r1,init_thread_union@l
 	li	r0,0
-	stwu	r0,THREAD_SIZE-STACK_FRAME_OVERHEAD(r1)
+	stwu	r0,THREAD_SIZE-STACK_FRAME_MIN_SIZE(r1)
 
 	bl	early_init
 
@@ -202,6 +198,9 @@ _ENTRY(_start);
 /*
  * Decide what sort of machine this is and initialize the MMU.
  */
+#ifdef CONFIG_KASAN
+	bl	kasan_early_init
+#endif
 	li	r3,0
 	mr	r4,r31
 	bl	machine_init
@@ -263,8 +262,7 @@ interrupt_base:
 	INSTRUCTION_STORAGE_EXCEPTION
 
 	/* External Input Interrupt */
-	EXCEPTION(0x0500, BOOKE_INTERRUPT_EXTERNAL, ExternalInput, \
-		  do_IRQ, EXC_XFER_LITE)
+	EXCEPTION(0x0500, BOOKE_INTERRUPT_EXTERNAL, ExternalInput, do_IRQ)
 
 	/* Alignment Interrupt */
 	ALIGNMENT_EXCEPTION
@@ -277,24 +275,22 @@ interrupt_base:
 	FP_UNAVAILABLE_EXCEPTION
 #else
 	EXCEPTION(0x2010, BOOKE_INTERRUPT_FP_UNAVAIL, \
-		  FloatingPointUnavailable, unknown_exception, EXC_XFER_EE)
+		  FloatingPointUnavailable, unknown_exception)
 #endif
 	/* System Call Interrupt */
 	START_EXCEPTION(SystemCall)
-	NORMAL_EXCEPTION_PROLOG(BOOKE_INTERRUPT_SYSCALL)
-	EXC_XFER_EE_LITE(0x0c00, DoSyscall)
+	SYSCALL_ENTRY   0xc00 BOOKE_INTERRUPT_SYSCALL
 
 	/* Auxiliary Processor Unavailable Interrupt */
 	EXCEPTION(0x2020, BOOKE_INTERRUPT_AP_UNAVAIL, \
-		  AuxillaryProcessorUnavailable, unknown_exception, EXC_XFER_EE)
+		  AuxillaryProcessorUnavailable, unknown_exception)
 
 	/* Decrementer Interrupt */
 	DECREMENTER_EXCEPTION
 
 	/* Fixed Internal Timer Interrupt */
 	/* TODO: Add FIT support */
-	EXCEPTION(0x1010, BOOKE_INTERRUPT_FIT, FixedIntervalTimer, \
-		  unknown_exception, EXC_XFER_EE)
+	EXCEPTION(0x1010, BOOKE_INTERRUPT_FIT, FixedIntervalTimer, unknown_exception)
 
 	/* Watchdog Timer Interrupt */
 	/* TODO: Add watchdog support */
@@ -318,8 +314,8 @@ interrupt_base:
 	 * kernel page tables.
 	 */
 	lis	r11, PAGE_OFFSET@h
-	cmplw	r10, r11
-	blt+	3f
+	cmplw	cr7, r10, r11
+	blt+	cr7, 3f
 	lis	r11, swapper_pg_dir@h
 	ori	r11, r11, swapper_pg_dir@l
 
@@ -337,12 +333,16 @@ interrupt_base:
 	mfspr	r12,SPRN_MMUCR
 	mfspr   r13,SPRN_PID		/* Get PID */
 	rlwimi	r12,r13,0,24,31		/* Set TID */
+#ifdef CONFIG_PPC_KUAP
+	cmpwi	r13,0
+	beq	2f			/* KUAP Fault */
+#endif
 
 4:
 	mtspr	SPRN_MMUCR,r12
 
 	/* Mask of required permission bits. Note that while we
-	 * do copy ESR:ST to _PAGE_RW position as trying to write
+	 * do copy ESR:ST to _PAGE_WRITE position as trying to write
 	 * to an RO page is pretty common, we don't do it with
 	 * _PAGE_DIRTY. We could do it, but it's a fairly rare
 	 * event so I'd rather take the overhead when it happens
@@ -355,7 +355,7 @@ interrupt_base:
 	 *       place or can we save a couple of instructions here ?
 	 */
 	mfspr	r12,SPRN_ESR
-	li	r13,_PAGE_PRESENT|_PAGE_ACCESSED
+	li	r13,_PAGE_PRESENT|_PAGE_ACCESSED|_PAGE_READ
 	rlwimi	r13,r12,10,30,30
 
 	/* Load the PTE */
@@ -377,15 +377,14 @@ interrupt_base:
 	/* Load the next available TLB index */
 	lwz	r13,tlb_44x_index@l(r10)
 
-	bne	2f			/* Bail if permission mismach */
+	bne	2f			/* Bail if permission mismatch */
 
 	/* Increment, rollover, and store TLB index */
 	addi	r13,r13,1
 
+	patch_site 0f, patch__tlb_44x_hwater_D
 	/* Compare with watermark (instruction gets patched) */
-	.globl tlb_44x_patch_hwater_D
-tlb_44x_patch_hwater_D:
-	cmpwi	0,r13,1			/* reserve entries */
+0:	cmpwi	0,r13,1			/* reserve entries */
 	ble	5f
 	li	r13,0
 5:
@@ -429,8 +428,8 @@ tlb_44x_patch_hwater_D:
 	 * kernel page tables.
 	 */
 	lis	r11, PAGE_OFFSET@h
-	cmplw	r10, r11
-	blt+	3f
+	cmplw	cr7, r10, r11
+	blt+	cr7, 3f
 	lis	r11, swapper_pg_dir@h
 	ori	r11, r11, swapper_pg_dir@l
 
@@ -448,6 +447,10 @@ tlb_44x_patch_hwater_D:
 	mfspr	r12,SPRN_MMUCR
 	mfspr   r13,SPRN_PID		/* Get PID */
 	rlwimi	r12,r13,0,24,31		/* Set TID */
+#ifdef CONFIG_PPC_KUAP
+	cmpwi	r13,0
+	beq	2f			/* KUAP Fault */
+#endif
 
 4:
 	mtspr	SPRN_MMUCR,r12
@@ -473,15 +476,14 @@ tlb_44x_patch_hwater_D:
 	/* Load the next available TLB index */
 	lwz	r13,tlb_44x_index@l(r10)
 
-	bne	2f			/* Bail if permission mismach */
+	bne	2f			/* Bail if permission mismatch */
 
 	/* Increment, rollover, and store TLB index */
 	addi	r13,r13,1
 
+	patch_site 0f, patch__tlb_44x_hwater_I
 	/* Compare with watermark (instruction gets patched) */
-	.globl tlb_44x_patch_hwater_I
-tlb_44x_patch_hwater_I:
-	cmpwi	0,r13,1			/* reserve entries */
+0:	cmpwi	0,r13,1			/* reserve entries */
 	ble	5f
 	li	r13,0
 5:
@@ -513,6 +515,7 @@ tlb_44x_patch_hwater_I:
  * 	r11 - PTE high word value
  *	r12 - PTE low word value
  *	r13 - TLB index
+ *	cr7 - Result of comparison with PAGE_OFFSET
  *	MMUCR - loaded with proper value when we get here
  *	Upon exit, we reload everything and RFI.
  */
@@ -531,12 +534,12 @@ finish_tlb_load_44x:
 	tlbwe	r10,r13,PPC44x_TLB_PAGEID	/* Write PAGEID */
 
 	/* And WS 2 */
-	li	r10,0xf85			/* Mask to apply from PTE */
-	rlwimi	r10,r12,29,30,30		/* DIRTY -> SW position */
+	li	r10,0xf84			/* Mask to apply from PTE */
+	rlwimi	r10,r12,29,30,31		/* DIRTY,READ -> SW,SR position */
 	and	r11,r12,r10			/* Mask PTE bits to keep */
-	andi.	r10,r12,_PAGE_USER		/* User page ? */
-	beq	1f				/* nope, leave U bits empty */
+	bge	cr7,1f			/* User page ? no, leave U bits empty */
 	rlwimi	r11,r11,3,26,28			/* yes, copy S bits to U */
+	rlwinm	r11,r11,0,~PPC44x_TLB_SX	/* Clear SX if User page */
 1:	tlbwe	r11,r13,PPC44x_TLB_ATTRIB	/* Write ATTRIB */
 
 	/* Done...restore registers and get out of here.
@@ -565,8 +568,8 @@ finish_tlb_load_44x:
 	 * kernel page tables.
 	 */
 	lis	r11,PAGE_OFFSET@h
-	cmplw	cr0,r10,r11
-	blt+	3f
+	cmplw	cr7,r10,r11
+	blt+	cr7,3f
 	lis	r11,swapper_pg_dir@h
 	ori	r11,r11, swapper_pg_dir@l
 	li	r12,0			/* MMUCR = 0 */
@@ -576,10 +579,14 @@ finish_tlb_load_44x:
 3:	mfspr	r11,SPRN_SPRG3
 	lwz	r11,PGDIR(r11)
 	mfspr   r12,SPRN_PID		/* Get PID */
+#ifdef CONFIG_PPC_KUAP
+	cmpwi	r12,0
+	beq	2f			/* KUAP Fault */
+#endif
 4:	mtspr	SPRN_MMUCR,r12		/* Set MMUCR */
 
 	/* Mask of required permission bits. Note that while we
-	 * do copy ESR:ST to _PAGE_RW position as trying to write
+	 * do copy ESR:ST to _PAGE_WRITE position as trying to write
 	 * to an RO page is pretty common, we don't do it with
 	 * _PAGE_DIRTY. We could do it, but it's a fairly rare
 	 * event so I'd rather take the overhead when it happens
@@ -592,7 +599,7 @@ finish_tlb_load_44x:
 	 *       place or can we save a couple of instructions here ?
 	 */
 	mfspr	r12,SPRN_ESR
-	li	r13,_PAGE_PRESENT|_PAGE_ACCESSED
+	li	r13,_PAGE_PRESENT|_PAGE_ACCESSED|_PAGE_READ
 	rlwimi	r13,r12,10,30,30
 
 	/* Load the PTE */
@@ -662,8 +669,8 @@ finish_tlb_load_44x:
 	 * kernel page tables.
 	 */
 	lis	r11,PAGE_OFFSET@h
-	cmplw	cr0,r10,r11
-	blt+	3f
+	cmplw	cr7,r10,r11
+	blt+	cr7,3f
 	lis	r11,swapper_pg_dir@h
 	ori	r11,r11, swapper_pg_dir@l
 	li	r12,0			/* MMUCR = 0 */
@@ -673,6 +680,10 @@ finish_tlb_load_44x:
 3:	mfspr	r11,SPRN_SPRG_THREAD
 	lwz	r11,PGDIR(r11)
 	mfspr   r12,SPRN_PID		/* Get PID */
+#ifdef CONFIG_PPC_KUAP
+	cmpwi	r12,0
+	beq	2f			/* KUAP Fault */
+#endif
 4:	mtspr	SPRN_MMUCR,r12		/* Set MMUCR */
 
 	/* Make up the required permissions */
@@ -733,6 +744,7 @@ finish_tlb_load_44x:
  * 	r11 - PTE high word value
  *	r12 - PTE low word value
  *      r13 - free to use
+ *	cr7 - Result of comparison with PAGE_OFFSET
  *	MMUCR - loaded with proper value when we get here
  *	Upon exit, we reload everything and RFI.
  */
@@ -742,12 +754,12 @@ finish_tlb_load_47x:
 	tlbwe	r11,r13,1
 
 	/* And make up word 2 */
-	li	r10,0xf85			/* Mask to apply from PTE */
-	rlwimi	r10,r12,29,30,30		/* DIRTY -> SW position */
+	li	r10,0xf84			/* Mask to apply from PTE */
+	rlwimi	r10,r12,29,30,31		/* DIRTY,READ -> SW,SR position */
 	and	r11,r12,r10			/* Mask PTE bits to keep */
-	andi.	r10,r12,_PAGE_USER		/* User page ? */
-	beq	1f				/* nope, leave U bits empty */
+	bge	cr7,1f			/* User page ? no, leave U bits empty */
 	rlwimi	r11,r11,3,26,28			/* yes, copy S bits to U */
+	rlwinm	r11,r11,0,~PPC47x_TLB2_SX	/* Clear SX if User page */
 1:	tlbwe	r11,r13,2
 
 	/* Done...restore registers and get out of here.
@@ -783,20 +795,6 @@ _GLOBAL(__fixup_440A_mcheck)
 	li	r3,MachineCheckA@l
 	mtspr	SPRN_IVOR1,r3
 	sync
-	blr
-
-_GLOBAL(set_context)
-
-#ifdef CONFIG_BDI_SWITCH
-	/* Context switch the PTE pointer for the Abatron BDI2000.
-	 * The PGDIR is the second parameter.
-	 */
-	lis	r5, abatron_pteptrs@h
-	ori	r5, r5, abatron_pteptrs@l
-	stw	r4, 0x4(r5)
-#endif
-	mtspr	SPRN_PID,r3
-	isync			/* Force context change */
 	blr
 
 /*
@@ -864,7 +862,7 @@ _GLOBAL(init_cpu_state)
 wmmucr:	mtspr	SPRN_MMUCR,r3			/* Put MMUCR */
 	sync
 
-	bl	invstr				/* Find our address */
+	bcl	20,31,$+4			/* Find our address */
 invstr:	mflr	r5				/* Make it accessible */
 	tlbsx	r23,0,r5			/* Find entry we are in */
 	li	r4,0				/* Start at TLB entry 0 */
@@ -1013,20 +1011,20 @@ _GLOBAL(start_secondary_47x)
 	 */
 	lis	r1,temp_boot_stack@h
 	ori	r1,r1,temp_boot_stack@l
-	addi	r1,r1,1024-STACK_FRAME_OVERHEAD
+	addi	r1,r1,1024-STACK_FRAME_MIN_SIZE
 	li	r0,0
 	stw	r0,0(r1)
 	bl	mmu_init_secondary
 
 	/* Now we can get our task struct and real stack pointer */
 
-	/* Get current_thread_info and current */
-	lis	r1,secondary_ti@ha
-	lwz	r1,secondary_ti@l(r1)
-	lwz	r2,TI_TASK(r1)
+	/* Get current's stack and current */
+	lis	r2,secondary_current@ha
+	lwz	r2,secondary_current@l(r2)
+	lwz	r1,TASK_STACK(r2)
 
 	/* Current stack pointer */
-	addi	r1,r1,THREAD_SIZE-STACK_FRAME_OVERHEAD
+	addi	r1,r1,THREAD_SIZE-STACK_FRAME_MIN_SIZE
 	li	r0,0
 	stw	r0,0(r1)
 
@@ -1056,7 +1054,7 @@ head_start_47x:
 	sync
 
 	/* Find the entry we are running from */
-	bl	1f
+	bcl	20,31,$+4
 1:	mflr	r23
 	tlbsx	r23,0,r23
 	tlbre	r24,r23,0
@@ -1244,34 +1242,8 @@ head_start_common:
 	isync
 	blr
 
-/*
- * We put a few things here that have to be page-aligned. This stuff
- * goes at the beginning of the data segment, which is page-aligned.
- */
-	.data
-	.align	PAGE_SHIFT
-	.globl	sdata
-sdata:
-	.globl	empty_zero_page
-empty_zero_page:
-	.space	PAGE_SIZE
-EXPORT_SYMBOL(empty_zero_page)
-
-/*
- * To support >32-bit physical addresses, we use an 8KB pgdir.
- */
-	.globl	swapper_pg_dir
-swapper_pg_dir:
-	.space	PGD_TABLE_SIZE
-
-/*
- * Room for two PTE pointers, usually the kernel and current user pointers
- * to their respective root page table.
- */
-abatron_pteptrs:
-	.space	8
-
 #ifdef CONFIG_SMP
+	.data
 	.align	12
 temp_boot_stack:
 	.space	1024

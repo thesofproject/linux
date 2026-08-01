@@ -1,19 +1,13 @@
-/*
- * eukrea-tlv320.c  --  SoC audio for eukrea_cpuimxXX in I2S mode
- *
- * Copyright 2010 Eric Bénard, Eukréa Electromatique <eric@eukrea.com>
- *
- * based on sound/soc/s3c24xx/s3c24xx_simtec_tlv320aic23.c
- * which is Copyright 2009 Simtec Electronics
- * and on sound/soc/imx/phycore-ac97.c which is
- * Copyright 2009 Sascha Hauer, Pengutronix <s.hauer@pengutronix.de>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
- *
- */
+// SPDX-License-Identifier: GPL-2.0+
+//
+// eukrea-tlv320.c  --  SoC audio for eukrea_cpuimxXX in I2S mode
+//
+// Copyright 2010 Eric Bénard, Eukréa Electromatique <eric@eukrea.com>
+//
+// based on sound/soc/s3c24xx/s3c24xx_simtec_tlv320aic23.c
+// which is Copyright 2009 Simtec Electronics
+// and on sound/soc/imx/phycore-ac97.c which is
+// Copyright 2009 Sascha Hauer, Pengutronix <s.hauer@pengutronix.de>
 
 #include <linux/errno.h>
 #include <linux/module.h>
@@ -25,7 +19,6 @@
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/soc.h>
-#include <asm/mach-types.h>
 
 #include "../codecs/tlv320aic23.h"
 #include "imx-ssi.h"
@@ -36,9 +29,9 @@
 static int eukrea_tlv320_hw_params(struct snd_pcm_substream *substream,
 			    struct snd_pcm_hw_params *params)
 {
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct snd_soc_dai *codec_dai = rtd->codec_dai;
-	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	int ret;
 
 	ret = snd_soc_dai_set_sysclk(codec_dai, 0,
@@ -67,13 +60,18 @@ static const struct snd_soc_ops eukrea_tlv320_snd_ops = {
 	.hw_params	= eukrea_tlv320_hw_params,
 };
 
+SND_SOC_DAILINK_DEFS(hifi,
+	DAILINK_COMP_ARRAY(COMP_EMPTY()),
+	DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "tlv320aic23-hifi")),
+	DAILINK_COMP_ARRAY(COMP_EMPTY()));
+
 static struct snd_soc_dai_link eukrea_tlv320_dai = {
 	.name		= "tlv320aic23",
 	.stream_name	= "TLV320AIC23",
-	.codec_dai_name	= "tlv320aic23-hifi",
 	.dai_fmt	= SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
-			  SND_SOC_DAIFMT_CBM_CFM,
+			  SND_SOC_DAIFMT_CBP_CFP,
 	.ops		= &eukrea_tlv320_snd_ops,
+	SND_SOC_DAILINK_REG(hifi),
 };
 
 static struct snd_soc_card eukrea_tlv320 = {
@@ -87,7 +85,7 @@ static int eukrea_tlv320_probe(struct platform_device *pdev)
 	int ret;
 	int int_port = 0, ext_port;
 	struct device_node *np = pdev->dev.of_node;
-	struct device_node *ssi_np = NULL, *codec_np = NULL;
+	struct device_node *ssi_np = NULL, *codec_np = NULL, *tmp_np = NULL;
 
 	eukrea_tlv320.dev = &pdev->dev;
 	if (np) {
@@ -110,7 +108,7 @@ static int eukrea_tlv320_probe(struct platform_device *pdev)
 
 		codec_np = of_parse_phandle(ssi_np, "codec-handle", 0);
 		if (codec_np)
-			eukrea_tlv320_dai.codec_of_node = codec_np;
+			eukrea_tlv320_dai.codecs->of_node = codec_np;
 		else
 			dev_err(&pdev->dev, "codec-handle node missing or invalid.\n");
 
@@ -118,13 +116,13 @@ static int eukrea_tlv320_probe(struct platform_device *pdev)
 		if (ret) {
 			dev_err(&pdev->dev,
 				"fsl,mux-int-port node missing or invalid.\n");
-			return ret;
+			goto err;
 		}
 		ret = of_property_read_u32(np, "fsl,mux-ext-port", &ext_port);
 		if (ret) {
 			dev_err(&pdev->dev,
 				"fsl,mux-ext-port node missing or invalid.\n");
-			return ret;
+			goto err;
 		}
 
 		/*
@@ -134,17 +132,17 @@ static int eukrea_tlv320_probe(struct platform_device *pdev)
 		int_port--;
 		ext_port--;
 
-		eukrea_tlv320_dai.cpu_of_node = ssi_np;
-		eukrea_tlv320_dai.platform_of_node = ssi_np;
+		eukrea_tlv320_dai.cpus->of_node = ssi_np;
+		eukrea_tlv320_dai.platforms->of_node = ssi_np;
 	} else {
-		eukrea_tlv320_dai.cpu_dai_name = "imx-ssi.0";
-		eukrea_tlv320_dai.platform_name = "imx-ssi.0";
-		eukrea_tlv320_dai.codec_name = "tlv320aic23-codec.0-001a";
+		eukrea_tlv320_dai.cpus->dai_name = "imx-ssi.0";
+		eukrea_tlv320_dai.platforms->name = "imx-ssi.0";
+		eukrea_tlv320_dai.codecs->name = "tlv320aic23-codec.0-001a";
 		eukrea_tlv320.name = "cpuimx-audio";
 	}
 
-	if (machine_is_eukrea_cpuimx27() ||
-	    of_find_compatible_node(NULL, NULL, "fsl,imx21-audmux")) {
+	if (of_machine_is_compatible("eukrea,cpuimx27") ||
+	    (tmp_np = of_find_compatible_node(NULL, NULL, "fsl,imx21-audmux"))) {
 		imx_audmux_v1_configure_port(MX27_AUDMUX_HPCR1_SSI0,
 			IMX_AUDMUX_V1_PCR_SYN |
 			IMX_AUDMUX_V1_PCR_TFSDIR |
@@ -159,12 +157,13 @@ static int eukrea_tlv320_probe(struct platform_device *pdev)
 			IMX_AUDMUX_V1_PCR_SYN |
 			IMX_AUDMUX_V1_PCR_RXDSEL(MX27_AUDMUX_HPCR1_SSI0)
 		);
-	} else if (machine_is_eukrea_cpuimx25sd() ||
-		   machine_is_eukrea_cpuimx35sd() ||
-		   machine_is_eukrea_cpuimx51sd() ||
-		   of_find_compatible_node(NULL, NULL, "fsl,imx31-audmux")) {
+		of_node_put(tmp_np);
+	} else if (of_machine_is_compatible("eukrea,cpuimx25") ||
+		   of_machine_is_compatible("eukrea,cpuimx35") ||
+		   of_machine_is_compatible("eukrea,cpuimx51") ||
+		   (tmp_np = of_find_compatible_node(NULL, NULL, "fsl,imx31-audmux"))) {
 		if (!np)
-			ext_port = machine_is_eukrea_cpuimx25sd() ?
+			ext_port = of_machine_is_compatible("eukrea,cpuimx25") ?
 				4 : 3;
 
 		imx_audmux_v2_configure_port(int_port,
@@ -179,6 +178,7 @@ static int eukrea_tlv320_probe(struct platform_device *pdev)
 			IMX_AUDMUX_V2_PTCR_SYN,
 			IMX_AUDMUX_V2_PDCR_RXDSEL(int_port)
 		);
+		of_node_put(tmp_np);
 	} else {
 		if (np) {
 			/* The eukrea,asoc-tlv320 driver was explicitly
@@ -195,20 +195,13 @@ static int eukrea_tlv320_probe(struct platform_device *pdev)
 		}
 	}
 
-	ret = snd_soc_register_card(&eukrea_tlv320);
+	ret = devm_snd_soc_register_card(&pdev->dev, &eukrea_tlv320);
 err:
 	if (ret)
 		dev_err(&pdev->dev, "snd_soc_register_card failed (%d)\n", ret);
 	of_node_put(ssi_np);
 
 	return ret;
-}
-
-static int eukrea_tlv320_remove(struct platform_device *pdev)
-{
-	snd_soc_unregister_card(&eukrea_tlv320);
-
-	return 0;
 }
 
 static const struct of_device_id imx_tlv320_dt_ids[] = {
@@ -223,7 +216,6 @@ static struct platform_driver eukrea_tlv320_driver = {
 		.of_match_table = imx_tlv320_dt_ids,
 	},
 	.probe = eukrea_tlv320_probe,
-	.remove = eukrea_tlv320_remove,
 };
 
 module_platform_driver(eukrea_tlv320_driver);

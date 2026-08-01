@@ -52,11 +52,7 @@
 #include <string.h>
 #include <sysexits.h>
 
-#ifdef __linux__
 #include "../queue.h"
-#else
-#include <sys/queue.h>
-#endif
 
 #include "aicasm.h"
 #include "aicasm_symbol.h"
@@ -65,6 +61,7 @@
 static symbol_t *macro_symbol;
 
 static void add_macro_arg(const char *argtext, int position);
+int mmlex();
 void mmerror(const char *string);
 
 %}

@@ -1,134 +1,122 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2015 Josh Poimboeuf <jpoimboe@redhat.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses/>.
- */
-
-/*
- * objtool:
- *
- * The 'check' subcmd analyzes every .o file and ensures the validity of its
- * stack trace metadata.  It enforces a set of rules on asm code and C inline
- * assembly code so that stack traces can be reliable.
- *
- * For more information, see tools/objtool/Documentation/stack-validation.txt.
  */
 
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <subcmd/exec-cmd.h>
 #include <subcmd/pager.h>
 #include <linux/kernel.h>
 
-#include "builtin.h"
+#include <objtool/builtin.h>
+#include <objtool/objtool.h>
+#include <objtool/warn.h>
 
-struct cmd_struct {
-	const char *name;
-	int (*fn)(int, const char **);
-	const char *help;
-};
+static struct objtool_file file;
 
-static const char objtool_usage_string[] =
-	"objtool COMMAND [ARGS]";
-
-static struct cmd_struct objtool_cmds[] = {
-	{"check",	cmd_check,	"Perform stack metadata validation on an object file" },
-	{"orc",		cmd_orc,	"Generate in-place ORC unwind tables for an object file" },
-};
-
-bool help;
-
-static void cmd_usage(void)
+struct objtool_file *objtool_open_read(const char *filename)
 {
-	unsigned int i, longest = 0;
-
-	printf("\n usage: %s\n\n", objtool_usage_string);
-
-	for (i = 0; i < ARRAY_SIZE(objtool_cmds); i++) {
-		if (longest < strlen(objtool_cmds[i].name))
-			longest = strlen(objtool_cmds[i].name);
+	if (file.elf) {
+		ERROR("won't handle more than one file at a time");
+		return NULL;
 	}
 
-	puts(" Commands:");
-	for (i = 0; i < ARRAY_SIZE(objtool_cmds); i++) {
-		printf("   %-*s   ", longest, objtool_cmds[i].name);
-		puts(objtool_cmds[i].help);
-	}
+	file.elf = elf_open_read(filename, O_RDWR);
+	if (!file.elf)
+		return NULL;
 
-	printf("\n");
+	hash_init(file.insn_hash);
+	INIT_LIST_HEAD(&file.retpoline_call_list);
+	INIT_LIST_HEAD(&file.return_thunk_list);
+	INIT_LIST_HEAD(&file.static_call_list);
+	INIT_LIST_HEAD(&file.mcount_loc_list);
+	INIT_LIST_HEAD(&file.endbr_list);
+	INIT_LIST_HEAD(&file.call_list);
+	file.ignore_unreachables = opts.no_unreachable;
+	file.hints = false;
 
-	exit(129);
+	return &file;
 }
 
-static void handle_options(int *argc, const char ***argv)
+int objtool_pv_add(struct objtool_file *f, int idx, struct symbol *func)
 {
-	while (*argc > 0) {
-		const char *cmd = (*argv)[0];
+	if (!opts.noinstr)
+		return 0;
 
-		if (cmd[0] != '-')
-			break;
-
-		if (!strcmp(cmd, "--help") || !strcmp(cmd, "-h")) {
-			help = true;
-			break;
-		} else {
-			fprintf(stderr, "Unknown option: %s\n", cmd);
-			cmd_usage();
-		}
-
-		(*argv)++;
-		(*argc)--;
+	if (!f->pv_ops) {
+		ERROR("paravirt confusion");
+		return -1;
 	}
+
+	/*
+	 * These functions will be patched into native code,
+	 * see paravirt_patch().
+	 */
+	if (!strcmp(func->name, "_paravirt_nop") ||
+	    !strcmp(func->name, "_paravirt_ident_64"))
+		return 0;
+
+	/* already added this function */
+	if (!list_empty(&func->pv_target))
+		return 0;
+
+	list_add(&func->pv_target, &f->pv_ops[idx].targets);
+	f->pv_ops[idx].clean = false;
+	return 0;
 }
 
-static void handle_internal_command(int argc, const char **argv)
+char *top_level_dir(const char *file)
 {
-	const char *cmd = argv[0];
-	unsigned int i, ret;
+	ssize_t len, self_len, file_len;
+	char self[PATH_MAX], *str;
+	int i;
 
-	for (i = 0; i < ARRAY_SIZE(objtool_cmds); i++) {
-		struct cmd_struct *p = objtool_cmds+i;
+	len = readlink("/proc/self/exe", self, sizeof(self) - 1);
+	if (len <= 0)
+		return NULL;
+	self[len] = '\0';
 
-		if (strcmp(p->name, cmd))
-			continue;
-
-		ret = p->fn(argc, argv);
-
-		exit(ret);
+	for (i = 0; i < 3; i++) {
+		char *s = strrchr(self, '/');
+		if (!s)
+			return NULL;
+		*s = '\0';
 	}
 
-	cmd_usage();
+	self_len = strlen(self);
+	file_len = strlen(file);
+
+	str = malloc(self_len + file_len + 2);
+	if (!str)
+		return NULL;
+
+	memcpy(str, self, self_len);
+	str[self_len] = '/';
+	strcpy(str + self_len + 1, file);
+
+	return str;
 }
 
 int main(int argc, const char **argv)
 {
 	static const char *UNUSED = "OBJTOOL_NOT_IMPLEMENTED";
 
+	if (init_signal_handler())
+		return -1;
+
 	/* libsubcmd init */
 	exec_cmd_init("objtool", UNUSED, UNUSED, UNUSED);
 	pager_init(UNUSED);
 
-	argv++;
-	argc--;
-	handle_options(&argc, &argv);
+	if (argc > 1 && !strcmp(argv[1], "klp")) {
+		argc--;
+		argv++;
+		return cmd_klp(argc, argv);
+	}
 
-	if (!argc || help)
-		cmd_usage();
-
-	handle_internal_command(argc, argv);
-
-	return 0;
+	return objtool_run(argc, argv);
 }

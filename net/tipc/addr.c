@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2000-2006, 2018, Ericsson AB
  * Copyright (c) 2004-2005, 2010-2011, Wind River Systems
+ * Copyright (c) 2020-2021, Red Hat Inc
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -55,12 +56,11 @@ bool tipc_in_scope(bool legacy_format, u32 domain, u32 addr)
 void tipc_set_node_id(struct net *net, u8 *id)
 {
 	struct tipc_net *tn = tipc_net(net);
-	u32 *tmp = (u32 *)id;
 
 	memcpy(tn->node_id, id, NODE_ID_LEN);
 	tipc_nodeid2string(tn->node_id_string, id);
-	tn->trial_addr = tmp[0] ^ tmp[1] ^ tmp[2] ^ tmp[3];
-	pr_info("Own node identity %s, cluster identity %u\n",
+	tn->trial_addr = hash128to32(id);
+	pr_info("Node identity %s, cluster identity %u\n",
 		tipc_own_id_string(net), tn->net_id);
 }
 
@@ -75,10 +75,11 @@ void tipc_set_node_addr(struct net *net, u32 addr)
 		tipc_set_node_id(net, node_id);
 	}
 	tn->trial_addr = addr;
-	pr_info("32-bit node address hash set to %x\n", addr);
+	tn->addr_trial_end = jiffies;
+	pr_info("Node number set to %u\n", addr);
 }
 
-char *tipc_nodeid2string(char *str, u8 *id)
+int tipc_nodeid2string(char *str, u8 *id)
 {
 	int i;
 	u8 c;
@@ -108,7 +109,7 @@ char *tipc_nodeid2string(char *str, u8 *id)
 	if (i == NODE_ID_LEN) {
 		memcpy(str, id, NODE_ID_LEN);
 		str[NODE_ID_LEN] = 0;
-		return str;
+		return i;
 	}
 
 	/* Translate to hex string */
@@ -119,5 +120,5 @@ char *tipc_nodeid2string(char *str, u8 *id)
 	for (i = NODE_ID_STR_LEN - 2; str[i] == '0'; i--)
 		str[i] = 0;
 
-	return str;
+	return i + 1;
 }

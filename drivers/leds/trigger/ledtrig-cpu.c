@@ -1,22 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * ledtrig-cpu.c - LED trigger based on CPU activity
  *
- * This LED trigger will be registered for each possible CPU and named as
- * cpu0, cpu1, cpu2, cpu3, etc.
+ * This LED trigger will be registered for first 8 CPUs and named
+ * as cpu0..cpu7. There's additional trigger called cpu that
+ * is on when any CPU is active.
+ *
+ * If you want support for arbitrary number of CPUs, make it one trigger,
+ * with additional sysfs file selecting which CPU to watch.
  *
  * It can be bound to any LED just like other triggers using either a
  * board file or via sysfs interface.
  *
  * An API named ledtrig_cpu is exported for any user, who want to add CPU
- * activity indication in their code
+ * activity indication in their code.
  *
  * Copyright 2011 Linus Walleij <linus.walleij@linaro.org>
  * Copyright 2011 - 2012 Bryan Wu <bryan.wu@canonical.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/kernel.h>
@@ -43,7 +43,7 @@ static atomic_t num_active_cpus = ATOMIC_INIT(0);
 
 /**
  * ledtrig_cpu - emit a CPU event as a trigger
- * @evt: CPU event to be emitted
+ * @ledevt: CPU event to be emitted
  *
  * Emit a CPU event on a CPU core, which will trigger a
  * bound LED to turn on or turn off.
@@ -94,26 +94,30 @@ void ledtrig_cpu(enum cpu_led_event ledevt)
 }
 EXPORT_SYMBOL(ledtrig_cpu);
 
-static int ledtrig_cpu_syscore_suspend(void)
+static int ledtrig_cpu_syscore_suspend(void *data)
 {
 	ledtrig_cpu(CPU_LED_STOP);
 	return 0;
 }
 
-static void ledtrig_cpu_syscore_resume(void)
+static void ledtrig_cpu_syscore_resume(void *data)
 {
 	ledtrig_cpu(CPU_LED_START);
 }
 
-static void ledtrig_cpu_syscore_shutdown(void)
+static void ledtrig_cpu_syscore_shutdown(void *data)
 {
 	ledtrig_cpu(CPU_LED_HALTED);
 }
 
-static struct syscore_ops ledtrig_cpu_syscore_ops = {
+static const struct syscore_ops ledtrig_cpu_syscore_ops = {
 	.shutdown	= ledtrig_cpu_syscore_shutdown,
 	.suspend	= ledtrig_cpu_syscore_suspend,
 	.resume		= ledtrig_cpu_syscore_resume,
+};
+
+static struct syscore ledtrig_cpu_syscore = {
+	.ops = &ledtrig_cpu_syscore_ops,
 };
 
 static int ledtrig_online_cpu(unsigned int cpu)
@@ -130,7 +134,7 @@ static int ledtrig_prepare_down_cpu(unsigned int cpu)
 
 static int __init ledtrig_cpu_init(void)
 {
-	int cpu;
+	unsigned int cpu;
 	int ret;
 
 	/* Supports up to 9999 cpu cores */
@@ -149,12 +153,15 @@ static int __init ledtrig_cpu_init(void)
 	for_each_possible_cpu(cpu) {
 		struct led_trigger_cpu *trig = &per_cpu(cpu_trig, cpu);
 
-		snprintf(trig->name, MAX_NAME_LEN, "cpu%d", cpu);
+		if (cpu >= 8)
+			continue;
+
+		snprintf(trig->name, MAX_NAME_LEN, "cpu%u", cpu);
 
 		led_trigger_register_simple(trig->name, &trig->_trig);
 	}
 
-	register_syscore_ops(&ledtrig_cpu_syscore_ops);
+	register_syscore(&ledtrig_cpu_syscore);
 
 	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN, "leds/trigger:starting",
 				ledtrig_online_cpu, ledtrig_prepare_down_cpu);

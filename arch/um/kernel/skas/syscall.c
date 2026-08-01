@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (C) 2002 - 2007 Jeff Dike (jdike@{addtoit,linux.intel}.com)
- * Licensed under the GPL
  */
 
 #include <linux/kernel.h>
@@ -9,7 +9,10 @@
 #include <kern_util.h>
 #include <sysdep/ptrace.h>
 #include <sysdep/ptrace_user.h>
-#include <sysdep/syscalls.h>
+#include <linux/time-internal.h>
+#include <asm/syscall.h>
+#include <asm/unistd.h>
+#include <asm/delay.h>
 
 void handle_syscall(struct uml_pt_regs *r)
 {
@@ -24,13 +27,47 @@ void handle_syscall(struct uml_pt_regs *r)
 		goto out;
 
 	/* Do the seccomp check after ptrace; failures should be fast. */
-	if (secure_computing(NULL) == -1)
+	if (secure_computing() == -1)
 		goto out;
 
 	syscall = UPT_SYSCALL_NR(r);
-	if (syscall >= 0 && syscall <= __NR_syscall_max)
-		PT_REGS_SET_SYSCALL_RETURN(regs,
-				EXECUTE_SYSCALL(syscall, regs));
+
+	/*
+	 * If no time passes, then sched_yield may not actually yield, causing
+	 * broken spinlock implementations in userspace (ASAN) to hang for long
+	 * periods of time.
+	 */
+	if ((time_travel_mode == TT_MODE_INFCPU ||
+	     time_travel_mode == TT_MODE_EXTERNAL) &&
+	    syscall == __NR_sched_yield)
+		tt_extra_sched_jiffies += 1;
+
+	if (syscall >= 0 && syscall < __NR_syscalls) {
+		unsigned long ret;
+
+		ret = (*sys_call_table[syscall])(UPT_SYSCALL_ARG1(&regs->regs),
+						 UPT_SYSCALL_ARG2(&regs->regs),
+						 UPT_SYSCALL_ARG3(&regs->regs),
+						 UPT_SYSCALL_ARG4(&regs->regs),
+						 UPT_SYSCALL_ARG5(&regs->regs),
+						 UPT_SYSCALL_ARG6(&regs->regs));
+
+		PT_REGS_SET_SYSCALL_RETURN(regs, ret);
+
+		/*
+		 * An error value here can be some form of -ERESTARTSYS
+		 * and then we'd just loop. Make any error syscalls take
+		 * some time, so that it won't just loop if something is
+		 * not ready, and hopefully other things will make some
+		 * progress.
+		 */
+		if (IS_ERR_VALUE(ret) &&
+		    (time_travel_mode == TT_MODE_INFCPU ||
+		     time_travel_mode == TT_MODE_EXTERNAL)) {
+			um_udelay(1);
+			schedule();
+		}
+	}
 
 out:
 	syscall_trace_leave(regs);

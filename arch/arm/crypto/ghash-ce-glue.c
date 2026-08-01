@@ -1,353 +1,445 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * Accelerated GHASH implementation with ARMv8 vmull.p64 instructions.
+ * AES-GCM using ARMv8 Crypto Extensions
  *
- * Copyright (C) 2015 Linaro Ltd. <ard.biesheuvel@linaro.org>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation.
+ * Copyright (C) 2015 - 2018 Linaro Ltd.
+ * Copyright (C) 2023 Google LLC.
  */
 
 #include <asm/hwcap.h>
 #include <asm/neon.h>
-#include <asm/simd.h>
-#include <asm/unaligned.h>
-#include <crypto/cryptd.h>
-#include <crypto/internal/hash.h>
+#include <crypto/aes.h>
+#include <crypto/b128ops.h>
+#include <crypto/gcm.h>
 #include <crypto/gf128mul.h>
+#include <crypto/ghash.h>
+#include <crypto/internal/aead.h>
+#include <crypto/internal/skcipher.h>
+#include <crypto/scatterwalk.h>
 #include <linux/cpufeature.h>
-#include <linux/crypto.h>
+#include <linux/errno.h>
+#include <linux/jump_label.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/string.h>
+#include <linux/unaligned.h>
 
-MODULE_DESCRIPTION("GHASH secure hash using ARMv8 Crypto Extensions");
-MODULE_AUTHOR("Ard Biesheuvel <ard.biesheuvel@linaro.org>");
-MODULE_LICENSE("GPL v2");
-MODULE_ALIAS_CRYPTO("ghash");
+MODULE_DESCRIPTION("AES-GCM using ARMv8 Crypto Extensions");
+MODULE_AUTHOR("Ard Biesheuvel <ardb@kernel.org>");
+MODULE_LICENSE("GPL");
+MODULE_ALIAS_CRYPTO("gcm(aes)");
+MODULE_ALIAS_CRYPTO("rfc4106(gcm(aes))");
 
-#define GHASH_BLOCK_SIZE	16
-#define GHASH_DIGEST_SIZE	16
+#define RFC4106_NONCE_SIZE	4
 
-struct ghash_key {
-	u64	a;
-	u64	b;
-};
-
-struct ghash_desc_ctx {
-	u64 digest[GHASH_DIGEST_SIZE/sizeof(u64)];
-	u8 buf[GHASH_BLOCK_SIZE];
-	u32 count;
-};
-
-struct ghash_async_ctx {
-	struct cryptd_ahash *cryptd_tfm;
+struct gcm_key {
+	u64	h[4][2];
+	u32	rk[AES_MAX_KEYLENGTH_U32];
+	int	rounds;
+	u8	nonce[];	// for RFC4106 nonce
 };
 
 asmlinkage void pmull_ghash_update_p64(int blocks, u64 dg[], const char *src,
-				       struct ghash_key const *k,
-				       const char *head);
+				       u64 const h[4][2], const char *head);
 
-asmlinkage void pmull_ghash_update_p8(int blocks, u64 dg[], const char *src,
-				      struct ghash_key const *k,
-				      const char *head);
-
-static void (*pmull_ghash_update)(int blocks, u64 dg[], const char *src,
-				  struct ghash_key const *k,
-				  const char *head);
-
-static int ghash_init(struct shash_desc *desc)
+static void ghash_reflect(u64 h[], const be128 *k)
 {
-	struct ghash_desc_ctx *ctx = shash_desc_ctx(desc);
+	u64 carry = be64_to_cpu(k->a) >> 63;
 
-	*ctx = (struct ghash_desc_ctx){};
+	h[0] = (be64_to_cpu(k->b) << 1) | carry;
+	h[1] = (be64_to_cpu(k->a) << 1) | (be64_to_cpu(k->b) >> 63);
+
+	if (carry)
+		h[1] ^= 0xc200000000000000UL;
+}
+
+void pmull_gcm_encrypt(int blocks, u64 dg[], const char *src,
+		       struct gcm_key const *k, char *dst,
+		       const char *iv, int rounds, u32 counter);
+
+void pmull_gcm_enc_final(int blocks, u64 dg[], char *tag,
+			 struct gcm_key const *k, char *head,
+			 const char *iv, int rounds, u32 counter);
+
+void pmull_gcm_decrypt(int bytes, u64 dg[], const char *src,
+		       struct gcm_key const *k, char *dst,
+		       const char *iv, int rounds, u32 counter);
+
+int pmull_gcm_dec_final(int bytes, u64 dg[], char *tag,
+			struct gcm_key const *k, char *head,
+			const char *iv, int rounds, u32 counter,
+			const char *otag, int authsize);
+
+static int gcm_aes_setkey(struct crypto_aead *tfm, const u8 *inkey,
+			  unsigned int keylen)
+{
+	struct gcm_key *ctx = crypto_aead_ctx(tfm);
+	struct aes_enckey aes_key;
+	be128 h, k;
+	int ret;
+
+	ret = aes_prepareenckey(&aes_key, inkey, keylen);
+	if (ret)
+		return -EINVAL;
+
+	aes_encrypt(&aes_key, (u8 *)&k, (u8[AES_BLOCK_SIZE]){});
+
+	/*
+	 * Note: this assumes that the arm implementation of the AES library
+	 * stores the standard round keys in k.rndkeys.
+	 */
+	memcpy(ctx->rk, aes_key.k.rndkeys, sizeof(ctx->rk));
+	ctx->rounds = 6 + keylen / 4;
+
+	memzero_explicit(&aes_key, sizeof(aes_key));
+
+	ghash_reflect(ctx->h[0], &k);
+
+	h = k;
+	gf128mul_lle(&h, &k);
+	ghash_reflect(ctx->h[1], &h);
+
+	gf128mul_lle(&h, &k);
+	ghash_reflect(ctx->h[2], &h);
+
+	gf128mul_lle(&h, &k);
+	ghash_reflect(ctx->h[3], &h);
+
 	return 0;
 }
 
-static int ghash_update(struct shash_desc *desc, const u8 *src,
-			unsigned int len)
+static int gcm_aes_setauthsize(struct crypto_aead *tfm, unsigned int authsize)
 {
-	struct ghash_desc_ctx *ctx = shash_desc_ctx(desc);
-	unsigned int partial = ctx->count % GHASH_BLOCK_SIZE;
+	return crypto_gcm_check_authsize(authsize);
+}
 
-	ctx->count += len;
+static void gcm_update_mac(u64 dg[], const u8 *src, int count, u8 buf[],
+			   int *buf_count, struct gcm_key *ctx)
+{
+	if (*buf_count > 0) {
+		int buf_added = min(count, GHASH_BLOCK_SIZE - *buf_count);
 
-	if ((partial + len) >= GHASH_BLOCK_SIZE) {
-		struct ghash_key *key = crypto_shash_ctx(desc->tfm);
-		int blocks;
+		memcpy(&buf[*buf_count], src, buf_added);
 
-		if (partial) {
-			int p = GHASH_BLOCK_SIZE - partial;
+		*buf_count += buf_added;
+		src += buf_added;
+		count -= buf_added;
+	}
 
-			memcpy(ctx->buf + partial, src, p);
-			src += p;
-			len -= p;
+	if (count >= GHASH_BLOCK_SIZE || *buf_count == GHASH_BLOCK_SIZE) {
+		int blocks = count / GHASH_BLOCK_SIZE;
+
+		pmull_ghash_update_p64(blocks, dg, src, ctx->h,
+				       *buf_count ? buf : NULL);
+
+		src += blocks * GHASH_BLOCK_SIZE;
+		count %= GHASH_BLOCK_SIZE;
+		*buf_count = 0;
+	}
+
+	if (count > 0) {
+		memcpy(buf, src, count);
+		*buf_count = count;
+	}
+}
+
+static void gcm_calculate_auth_mac(struct aead_request *req, u64 dg[], u32 len)
+{
+	struct crypto_aead *aead = crypto_aead_reqtfm(req);
+	struct gcm_key *ctx = crypto_aead_ctx(aead);
+	u8 buf[GHASH_BLOCK_SIZE];
+	struct scatter_walk walk;
+	int buf_count = 0;
+
+	scatterwalk_start(&walk, req->src);
+
+	do {
+		unsigned int n;
+
+		n = scatterwalk_next(&walk, len);
+		gcm_update_mac(dg, walk.addr, n, buf, &buf_count, ctx);
+		scatterwalk_done_src(&walk,  n);
+
+		if (unlikely(len / SZ_4K > (len - n) / SZ_4K)) {
+			kernel_neon_end();
+			kernel_neon_begin();
 		}
 
-		blocks = len / GHASH_BLOCK_SIZE;
-		len %= GHASH_BLOCK_SIZE;
+		len -= n;
+	} while (len);
+
+	if (buf_count) {
+		memset(&buf[buf_count], 0, GHASH_BLOCK_SIZE - buf_count);
+		pmull_ghash_update_p64(1, dg, buf, ctx->h, NULL);
+	}
+}
+
+static int gcm_encrypt(struct aead_request *req, const u8 *iv, u32 assoclen)
+{
+	struct crypto_aead *aead = crypto_aead_reqtfm(req);
+	struct gcm_key *ctx = crypto_aead_ctx(aead);
+	struct skcipher_walk walk;
+	u8 buf[AES_BLOCK_SIZE];
+	u32 counter = 2;
+	u64 dg[2] = {};
+	be128 lengths;
+	const u8 *src;
+	u8 *tag, *dst;
+	int tail, err;
+
+	err = skcipher_walk_aead_encrypt(&walk, req, false);
+
+	kernel_neon_begin();
+
+	if (assoclen)
+		gcm_calculate_auth_mac(req, dg, assoclen);
+
+	src = walk.src.virt.addr;
+	dst = walk.dst.virt.addr;
+
+	while (walk.nbytes >= AES_BLOCK_SIZE) {
+		int nblocks = walk.nbytes / AES_BLOCK_SIZE;
+
+		pmull_gcm_encrypt(nblocks, dg, src, ctx, dst, iv,
+				  ctx->rounds, counter);
+		counter += nblocks;
+
+		if (walk.nbytes == walk.total) {
+			src += nblocks * AES_BLOCK_SIZE;
+			dst += nblocks * AES_BLOCK_SIZE;
+			break;
+		}
+
+		kernel_neon_end();
+
+		err = skcipher_walk_done(&walk,
+					 walk.nbytes % AES_BLOCK_SIZE);
+		if (err)
+			return err;
+
+		src = walk.src.virt.addr;
+		dst = walk.dst.virt.addr;
 
 		kernel_neon_begin();
-		pmull_ghash_update(blocks, ctx->digest, src, key,
-				   partial ? ctx->buf : NULL);
-		kernel_neon_end();
-		src += blocks * GHASH_BLOCK_SIZE;
-		partial = 0;
 	}
-	if (len)
-		memcpy(ctx->buf + partial, src, len);
+
+
+	lengths.a = cpu_to_be64(assoclen * 8);
+	lengths.b = cpu_to_be64(req->cryptlen * 8);
+
+	tag = (u8 *)&lengths;
+	tail = walk.nbytes % AES_BLOCK_SIZE;
+
+	/*
+	 * Bounce via a buffer unless we are encrypting in place and src/dst
+	 * are not pointing to the start of the walk buffer. In that case, we
+	 * can do a NEON load/xor/store sequence in place as long as we move
+	 * the plain/ciphertext and keystream to the start of the register. If
+	 * not, do a memcpy() to the end of the buffer so we can reuse the same
+	 * logic.
+	 */
+	if (unlikely(tail && (tail == walk.nbytes || src != dst)))
+		src = memcpy(buf + sizeof(buf) - tail, src, tail);
+
+	pmull_gcm_enc_final(tail, dg, tag, ctx, (u8 *)src, iv,
+			    ctx->rounds, counter);
+	kernel_neon_end();
+
+	if (unlikely(tail && src != dst))
+		memcpy(dst, src, tail);
+
+	if (walk.nbytes) {
+		err = skcipher_walk_done(&walk, 0);
+		if (err)
+			return err;
+	}
+
+	/* copy authtag to end of dst */
+	scatterwalk_map_and_copy(tag, req->dst, req->assoclen + req->cryptlen,
+				 crypto_aead_authsize(aead), 1);
+
 	return 0;
 }
 
-static int ghash_final(struct shash_desc *desc, u8 *dst)
+static int gcm_decrypt(struct aead_request *req, const u8 *iv, u32 assoclen)
 {
-	struct ghash_desc_ctx *ctx = shash_desc_ctx(desc);
-	unsigned int partial = ctx->count % GHASH_BLOCK_SIZE;
+	struct crypto_aead *aead = crypto_aead_reqtfm(req);
+	struct gcm_key *ctx = crypto_aead_ctx(aead);
+	int authsize = crypto_aead_authsize(aead);
+	struct skcipher_walk walk;
+	u8 otag[AES_BLOCK_SIZE];
+	u8 buf[AES_BLOCK_SIZE];
+	u32 counter = 2;
+	u64 dg[2] = {};
+	be128 lengths;
+	const u8 *src;
+	u8 *tag, *dst;
+	int tail, err, ret;
 
-	if (partial) {
-		struct ghash_key *key = crypto_shash_ctx(desc->tfm);
+	scatterwalk_map_and_copy(otag, req->src,
+				 req->assoclen + req->cryptlen - authsize,
+				 authsize, 0);
 
-		memset(ctx->buf + partial, 0, GHASH_BLOCK_SIZE - partial);
+	err = skcipher_walk_aead_decrypt(&walk, req, false);
+
+	kernel_neon_begin();
+
+	if (assoclen)
+		gcm_calculate_auth_mac(req, dg, assoclen);
+
+	src = walk.src.virt.addr;
+	dst = walk.dst.virt.addr;
+
+	while (walk.nbytes >= AES_BLOCK_SIZE) {
+		int nblocks = walk.nbytes / AES_BLOCK_SIZE;
+
+		pmull_gcm_decrypt(nblocks, dg, src, ctx, dst, iv,
+				  ctx->rounds, counter);
+		counter += nblocks;
+
+		if (walk.nbytes == walk.total) {
+			src += nblocks * AES_BLOCK_SIZE;
+			dst += nblocks * AES_BLOCK_SIZE;
+			break;
+		}
+
+		kernel_neon_end();
+
+		err = skcipher_walk_done(&walk,
+					 walk.nbytes % AES_BLOCK_SIZE);
+		if (err)
+			return err;
+
+		src = walk.src.virt.addr;
+		dst = walk.dst.virt.addr;
+
 		kernel_neon_begin();
-		pmull_ghash_update(1, ctx->digest, ctx->buf, key, NULL);
-		kernel_neon_end();
-	}
-	put_unaligned_be64(ctx->digest[1], dst);
-	put_unaligned_be64(ctx->digest[0], dst + 8);
-
-	*ctx = (struct ghash_desc_ctx){};
-	return 0;
-}
-
-static int ghash_setkey(struct crypto_shash *tfm,
-			const u8 *inkey, unsigned int keylen)
-{
-	struct ghash_key *key = crypto_shash_ctx(tfm);
-	u64 a, b;
-
-	if (keylen != GHASH_BLOCK_SIZE) {
-		crypto_shash_set_flags(tfm, CRYPTO_TFM_RES_BAD_KEY_LEN);
-		return -EINVAL;
 	}
 
-	/* perform multiplication by 'x' in GF(2^128) */
-	b = get_unaligned_be64(inkey);
-	a = get_unaligned_be64(inkey + 8);
+	lengths.a = cpu_to_be64(assoclen * 8);
+	lengths.b = cpu_to_be64((req->cryptlen - authsize) * 8);
 
-	key->a = (a << 1) | (b >> 63);
-	key->b = (b << 1) | (a >> 63);
+	tag = (u8 *)&lengths;
+	tail = walk.nbytes % AES_BLOCK_SIZE;
 
-	if (b >> 63)
-		key->b ^= 0xc200000000000000UL;
+	if (unlikely(tail && (tail == walk.nbytes || src != dst)))
+		src = memcpy(buf + sizeof(buf) - tail, src, tail);
 
-	return 0;
-}
+	ret = pmull_gcm_dec_final(tail, dg, tag, ctx, (u8 *)src, iv,
+				  ctx->rounds, counter, otag, authsize);
+	kernel_neon_end();
 
-static struct shash_alg ghash_alg = {
-	.digestsize		= GHASH_DIGEST_SIZE,
-	.init			= ghash_init,
-	.update			= ghash_update,
-	.final			= ghash_final,
-	.setkey			= ghash_setkey,
-	.descsize		= sizeof(struct ghash_desc_ctx),
-	.base			= {
-		.cra_name	= "__ghash",
-		.cra_driver_name = "__driver-ghash-ce",
-		.cra_priority	= 0,
-		.cra_flags	= CRYPTO_ALG_TYPE_SHASH | CRYPTO_ALG_INTERNAL,
-		.cra_blocksize	= GHASH_BLOCK_SIZE,
-		.cra_ctxsize	= sizeof(struct ghash_key),
-		.cra_module	= THIS_MODULE,
-	},
-};
+	if (unlikely(tail && src != dst))
+		memcpy(dst, src, tail);
 
-static int ghash_async_init(struct ahash_request *req)
-{
-	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
-	struct ghash_async_ctx *ctx = crypto_ahash_ctx(tfm);
-	struct ahash_request *cryptd_req = ahash_request_ctx(req);
-	struct cryptd_ahash *cryptd_tfm = ctx->cryptd_tfm;
-	struct shash_desc *desc = cryptd_shash_desc(cryptd_req);
-	struct crypto_shash *child = cryptd_ahash_child(cryptd_tfm);
-
-	desc->tfm = child;
-	desc->flags = req->base.flags;
-	return crypto_shash_init(desc);
-}
-
-static int ghash_async_update(struct ahash_request *req)
-{
-	struct ahash_request *cryptd_req = ahash_request_ctx(req);
-	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
-	struct ghash_async_ctx *ctx = crypto_ahash_ctx(tfm);
-	struct cryptd_ahash *cryptd_tfm = ctx->cryptd_tfm;
-
-	if (!may_use_simd() ||
-	    (in_atomic() && cryptd_ahash_queued(cryptd_tfm))) {
-		memcpy(cryptd_req, req, sizeof(*req));
-		ahash_request_set_tfm(cryptd_req, &cryptd_tfm->base);
-		return crypto_ahash_update(cryptd_req);
-	} else {
-		struct shash_desc *desc = cryptd_shash_desc(cryptd_req);
-		return shash_ahash_update(req, desc);
+	if (walk.nbytes) {
+		err = skcipher_walk_done(&walk, 0);
+		if (err)
+			return err;
 	}
+
+	return ret ? -EBADMSG : 0;
 }
 
-static int ghash_async_final(struct ahash_request *req)
+static int gcm_aes_encrypt(struct aead_request *req)
 {
-	struct ahash_request *cryptd_req = ahash_request_ctx(req);
-	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
-	struct ghash_async_ctx *ctx = crypto_ahash_ctx(tfm);
-	struct cryptd_ahash *cryptd_tfm = ctx->cryptd_tfm;
-
-	if (!may_use_simd() ||
-	    (in_atomic() && cryptd_ahash_queued(cryptd_tfm))) {
-		memcpy(cryptd_req, req, sizeof(*req));
-		ahash_request_set_tfm(cryptd_req, &cryptd_tfm->base);
-		return crypto_ahash_final(cryptd_req);
-	} else {
-		struct shash_desc *desc = cryptd_shash_desc(cryptd_req);
-		return crypto_shash_final(desc, req->result);
-	}
+	return gcm_encrypt(req, req->iv, req->assoclen);
 }
 
-static int ghash_async_digest(struct ahash_request *req)
+static int gcm_aes_decrypt(struct aead_request *req)
 {
-	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
-	struct ghash_async_ctx *ctx = crypto_ahash_ctx(tfm);
-	struct ahash_request *cryptd_req = ahash_request_ctx(req);
-	struct cryptd_ahash *cryptd_tfm = ctx->cryptd_tfm;
-
-	if (!may_use_simd() ||
-	    (in_atomic() && cryptd_ahash_queued(cryptd_tfm))) {
-		memcpy(cryptd_req, req, sizeof(*req));
-		ahash_request_set_tfm(cryptd_req, &cryptd_tfm->base);
-		return crypto_ahash_digest(cryptd_req);
-	} else {
-		struct shash_desc *desc = cryptd_shash_desc(cryptd_req);
-		struct crypto_shash *child = cryptd_ahash_child(cryptd_tfm);
-
-		desc->tfm = child;
-		desc->flags = req->base.flags;
-		return shash_ahash_digest(req, desc);
-	}
+	return gcm_decrypt(req, req->iv, req->assoclen);
 }
 
-static int ghash_async_import(struct ahash_request *req, const void *in)
+static int rfc4106_setkey(struct crypto_aead *tfm, const u8 *inkey,
+			  unsigned int keylen)
 {
-	struct ahash_request *cryptd_req = ahash_request_ctx(req);
-	struct crypto_ahash *tfm = crypto_ahash_reqtfm(req);
-	struct ghash_async_ctx *ctx = crypto_ahash_ctx(tfm);
-	struct shash_desc *desc = cryptd_shash_desc(cryptd_req);
-
-	desc->tfm = cryptd_ahash_child(ctx->cryptd_tfm);
-	desc->flags = req->base.flags;
-
-	return crypto_shash_import(desc, in);
-}
-
-static int ghash_async_export(struct ahash_request *req, void *out)
-{
-	struct ahash_request *cryptd_req = ahash_request_ctx(req);
-	struct shash_desc *desc = cryptd_shash_desc(cryptd_req);
-
-	return crypto_shash_export(desc, out);
-}
-
-static int ghash_async_setkey(struct crypto_ahash *tfm, const u8 *key,
-			      unsigned int keylen)
-{
-	struct ghash_async_ctx *ctx = crypto_ahash_ctx(tfm);
-	struct crypto_ahash *child = &ctx->cryptd_tfm->base;
+	struct gcm_key *ctx = crypto_aead_ctx(tfm);
 	int err;
 
-	crypto_ahash_clear_flags(child, CRYPTO_TFM_REQ_MASK);
-	crypto_ahash_set_flags(child, crypto_ahash_get_flags(tfm)
-			       & CRYPTO_TFM_REQ_MASK);
-	err = crypto_ahash_setkey(child, key, keylen);
-	crypto_ahash_set_flags(tfm, crypto_ahash_get_flags(child)
-			       & CRYPTO_TFM_RES_MASK);
+	keylen -= RFC4106_NONCE_SIZE;
+	err = gcm_aes_setkey(tfm, inkey, keylen);
+	if (err)
+		return err;
 
-	return err;
-}
-
-static int ghash_async_init_tfm(struct crypto_tfm *tfm)
-{
-	struct cryptd_ahash *cryptd_tfm;
-	struct ghash_async_ctx *ctx = crypto_tfm_ctx(tfm);
-
-	cryptd_tfm = cryptd_alloc_ahash("__driver-ghash-ce",
-					CRYPTO_ALG_INTERNAL,
-					CRYPTO_ALG_INTERNAL);
-	if (IS_ERR(cryptd_tfm))
-		return PTR_ERR(cryptd_tfm);
-	ctx->cryptd_tfm = cryptd_tfm;
-	crypto_ahash_set_reqsize(__crypto_ahash_cast(tfm),
-				 sizeof(struct ahash_request) +
-				 crypto_ahash_reqsize(&cryptd_tfm->base));
-
+	memcpy(ctx->nonce, inkey + keylen, RFC4106_NONCE_SIZE);
 	return 0;
 }
 
-static void ghash_async_exit_tfm(struct crypto_tfm *tfm)
+static int rfc4106_setauthsize(struct crypto_aead *tfm, unsigned int authsize)
 {
-	struct ghash_async_ctx *ctx = crypto_tfm_ctx(tfm);
-
-	cryptd_free_ahash(ctx->cryptd_tfm);
+	return crypto_rfc4106_check_authsize(authsize);
 }
 
-static struct ahash_alg ghash_async_alg = {
-	.init			= ghash_async_init,
-	.update			= ghash_async_update,
-	.final			= ghash_async_final,
-	.setkey			= ghash_async_setkey,
-	.digest			= ghash_async_digest,
-	.import			= ghash_async_import,
-	.export			= ghash_async_export,
-	.halg.digestsize	= GHASH_DIGEST_SIZE,
-	.halg.statesize		= sizeof(struct ghash_desc_ctx),
-	.halg.base		= {
-		.cra_name	= "ghash",
-		.cra_driver_name = "ghash-ce",
-		.cra_priority	= 300,
-		.cra_flags	= CRYPTO_ALG_TYPE_AHASH | CRYPTO_ALG_ASYNC,
-		.cra_blocksize	= GHASH_BLOCK_SIZE,
-		.cra_type	= &crypto_ahash_type,
-		.cra_ctxsize	= sizeof(struct ghash_async_ctx),
-		.cra_module	= THIS_MODULE,
-		.cra_init	= ghash_async_init_tfm,
-		.cra_exit	= ghash_async_exit_tfm,
-	},
-};
+static int rfc4106_encrypt(struct aead_request *req)
+{
+	struct crypto_aead *aead = crypto_aead_reqtfm(req);
+	struct gcm_key *ctx = crypto_aead_ctx(aead);
+	u8 iv[GCM_AES_IV_SIZE];
+
+	memcpy(iv, ctx->nonce, RFC4106_NONCE_SIZE);
+	memcpy(iv + RFC4106_NONCE_SIZE, req->iv, GCM_RFC4106_IV_SIZE);
+
+	return crypto_ipsec_check_assoclen(req->assoclen) ?:
+	       gcm_encrypt(req, iv, req->assoclen - GCM_RFC4106_IV_SIZE);
+}
+
+static int rfc4106_decrypt(struct aead_request *req)
+{
+	struct crypto_aead *aead = crypto_aead_reqtfm(req);
+	struct gcm_key *ctx = crypto_aead_ctx(aead);
+	u8 iv[GCM_AES_IV_SIZE];
+
+	memcpy(iv, ctx->nonce, RFC4106_NONCE_SIZE);
+	memcpy(iv + RFC4106_NONCE_SIZE, req->iv, GCM_RFC4106_IV_SIZE);
+
+	return crypto_ipsec_check_assoclen(req->assoclen) ?:
+	       gcm_decrypt(req, iv, req->assoclen - GCM_RFC4106_IV_SIZE);
+}
+
+static struct aead_alg gcm_aes_algs[] = {{
+	.ivsize			= GCM_AES_IV_SIZE,
+	.chunksize		= AES_BLOCK_SIZE,
+	.maxauthsize		= AES_BLOCK_SIZE,
+	.setkey			= gcm_aes_setkey,
+	.setauthsize		= gcm_aes_setauthsize,
+	.encrypt		= gcm_aes_encrypt,
+	.decrypt		= gcm_aes_decrypt,
+
+	.base.cra_name		= "gcm(aes)",
+	.base.cra_driver_name	= "gcm-aes-ce",
+	.base.cra_priority	= 400,
+	.base.cra_blocksize	= 1,
+	.base.cra_ctxsize	= sizeof(struct gcm_key),
+	.base.cra_module	= THIS_MODULE,
+}, {
+	.ivsize			= GCM_RFC4106_IV_SIZE,
+	.chunksize		= AES_BLOCK_SIZE,
+	.maxauthsize		= AES_BLOCK_SIZE,
+	.setkey			= rfc4106_setkey,
+	.setauthsize		= rfc4106_setauthsize,
+	.encrypt		= rfc4106_encrypt,
+	.decrypt		= rfc4106_decrypt,
+
+	.base.cra_name		= "rfc4106(gcm(aes))",
+	.base.cra_driver_name	= "rfc4106-gcm-aes-ce",
+	.base.cra_priority	= 400,
+	.base.cra_blocksize	= 1,
+	.base.cra_ctxsize	= sizeof(struct gcm_key) + RFC4106_NONCE_SIZE,
+	.base.cra_module	= THIS_MODULE,
+}};
 
 static int __init ghash_ce_mod_init(void)
 {
-	int err;
-
-	if (!(elf_hwcap & HWCAP_NEON))
+	if (!(elf_hwcap & HWCAP_NEON) || !(elf_hwcap2 & HWCAP2_PMULL))
 		return -ENODEV;
 
-	if (elf_hwcap2 & HWCAP2_PMULL)
-		pmull_ghash_update = pmull_ghash_update_p64;
-	else
-		pmull_ghash_update = pmull_ghash_update_p8;
-
-	err = crypto_register_shash(&ghash_alg);
-	if (err)
-		return err;
-	err = crypto_register_ahash(&ghash_async_alg);
-	if (err)
-		goto err_shash;
-
-	return 0;
-
-err_shash:
-	crypto_unregister_shash(&ghash_alg);
-	return err;
+	return crypto_register_aeads(gcm_aes_algs, ARRAY_SIZE(gcm_aes_algs));
 }
 
 static void __exit ghash_ce_mod_exit(void)
 {
-	crypto_unregister_ahash(&ghash_async_alg);
-	crypto_unregister_shash(&ghash_alg);
+	crypto_unregister_aeads(gcm_aes_algs, ARRAY_SIZE(gcm_aes_algs));
 }
 
 module_init(ghash_ce_mod_init);

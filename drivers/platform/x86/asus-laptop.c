@@ -1,25 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  asus-laptop.c - Asus Laptop Support
- *
  *
  *  Copyright (C) 2002-2005 Julien Lerouge, 2003-2006 Karol Kozimor
  *  Copyright (C) 2006-2007 Corentin Chary
  *  Copyright (C) 2011 Wind River Systems
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
  *
  *  The development page for this driver is located at
  *  http://sourceforge.net/projects/acpi4asus/
@@ -43,13 +28,11 @@
 #include <linux/err.h>
 #include <linux/proc_fs.h>
 #include <linux/backlight.h>
-#include <linux/fb.h>
 #include <linux/leds.h>
 #include <linux/platform_device.h>
 #include <linux/uaccess.h>
 #include <linux/input.h>
 #include <linux/input/sparse-keymap.h>
-#include <linux/input-polldev.h>
 #include <linux/rfkill.h>
 #include <linux/slab.h>
 #include <linux/dmi.h>
@@ -259,7 +242,7 @@ struct asus_laptop {
 
 	struct input_dev *inputdev;
 	struct key_entry *keymap;
-	struct input_polled_dev *pega_accel_poll;
+	struct input_dev *pega_accel_poll;
 
 	struct asus_led wled;
 	struct asus_led bled;
@@ -443,11 +426,14 @@ static int asus_pega_lucid_set(struct asus_laptop *asus, int unit, bool enable)
 
 static int pega_acc_axis(struct asus_laptop *asus, int curr, char *method)
 {
+	unsigned long long val = (unsigned long long)curr;
+	acpi_status status;
 	int i, delta;
-	unsigned long long val;
-	for (i = 0; i < PEGA_ACC_RETRIES; i++) {
-		acpi_evaluate_integer(asus->handle, method, NULL, &val);
 
+	for (i = 0; i < PEGA_ACC_RETRIES; i++) {
+		status = acpi_evaluate_integer(asus->handle, method, NULL, &val);
+		if (ACPI_FAILURE(status))
+			continue;
 		/* The output is noisy.  From reading the ASL
 		 * dissassembly, timeout errors are returned with 1's
 		 * in the high word, and the lack of locking around
@@ -461,9 +447,9 @@ static int pega_acc_axis(struct asus_laptop *asus, int curr, char *method)
 	return clamp_val((short)val, -PEGA_ACC_CLAMP, PEGA_ACC_CLAMP);
 }
 
-static void pega_accel_poll(struct input_polled_dev *ipd)
+static void pega_accel_poll(struct input_dev *input)
 {
-	struct device *parent = ipd->input->dev.parent;
+	struct device *parent = input->dev.parent;
 	struct asus_laptop *asus = dev_get_drvdata(parent);
 
 	/* In some cases, the very first call to poll causes a
@@ -472,10 +458,10 @@ static void pega_accel_poll(struct input_polled_dev *ipd)
 	 * device, and perhaps a firmware bug. Fake the first report. */
 	if (!asus->pega_acc_live) {
 		asus->pega_acc_live = true;
-		input_report_abs(ipd->input, ABS_X, 0);
-		input_report_abs(ipd->input, ABS_Y, 0);
-		input_report_abs(ipd->input, ABS_Z, 0);
-		input_sync(ipd->input);
+		input_report_abs(input, ABS_X, 0);
+		input_report_abs(input, ABS_Y, 0);
+		input_report_abs(input, ABS_Z, 0);
+		input_sync(input);
 		return;
 	}
 
@@ -486,25 +472,24 @@ static void pega_accel_poll(struct input_polled_dev *ipd)
 	/* Note transform, convert to "right/up/out" in the native
 	 * landscape orientation (i.e. the vector is the direction of
 	 * "real up" in the device's cartiesian coordinates). */
-	input_report_abs(ipd->input, ABS_X, -asus->pega_acc_x);
-	input_report_abs(ipd->input, ABS_Y, -asus->pega_acc_y);
-	input_report_abs(ipd->input, ABS_Z,  asus->pega_acc_z);
-	input_sync(ipd->input);
+	input_report_abs(input, ABS_X, -asus->pega_acc_x);
+	input_report_abs(input, ABS_Y, -asus->pega_acc_y);
+	input_report_abs(input, ABS_Z,  asus->pega_acc_z);
+	input_sync(input);
 }
 
 static void pega_accel_exit(struct asus_laptop *asus)
 {
 	if (asus->pega_accel_poll) {
-		input_unregister_polled_device(asus->pega_accel_poll);
-		input_free_polled_device(asus->pega_accel_poll);
+		input_unregister_device(asus->pega_accel_poll);
+		asus->pega_accel_poll = NULL;
 	}
-	asus->pega_accel_poll = NULL;
 }
 
 static int pega_accel_init(struct asus_laptop *asus)
 {
 	int err;
-	struct input_polled_dev *ipd;
+	struct input_dev *input;
 
 	if (!asus->is_pega_lucid)
 		return -ENODEV;
@@ -514,37 +499,39 @@ static int pega_accel_init(struct asus_laptop *asus)
 	    acpi_check_handle(asus->handle, METHOD_XLRZ, NULL))
 		return -ENODEV;
 
-	ipd = input_allocate_polled_device();
-	if (!ipd)
+	input = input_allocate_device();
+	if (!input)
 		return -ENOMEM;
 
-	ipd->poll = pega_accel_poll;
-	ipd->poll_interval = 125;
-	ipd->poll_interval_min = 50;
-	ipd->poll_interval_max = 2000;
+	input->name = PEGA_ACCEL_DESC;
+	input->phys = PEGA_ACCEL_NAME "/input0";
+	input->dev.parent = &asus->platform_device->dev;
+	input->id.bustype = BUS_HOST;
 
-	ipd->input->name = PEGA_ACCEL_DESC;
-	ipd->input->phys = PEGA_ACCEL_NAME "/input0";
-	ipd->input->dev.parent = &asus->platform_device->dev;
-	ipd->input->id.bustype = BUS_HOST;
-
-	set_bit(EV_ABS, ipd->input->evbit);
-	input_set_abs_params(ipd->input, ABS_X,
+	input_set_abs_params(input, ABS_X,
 			     -PEGA_ACC_CLAMP, PEGA_ACC_CLAMP, 0, 0);
-	input_set_abs_params(ipd->input, ABS_Y,
+	input_set_abs_params(input, ABS_Y,
 			     -PEGA_ACC_CLAMP, PEGA_ACC_CLAMP, 0, 0);
-	input_set_abs_params(ipd->input, ABS_Z,
+	input_set_abs_params(input, ABS_Z,
 			     -PEGA_ACC_CLAMP, PEGA_ACC_CLAMP, 0, 0);
 
-	err = input_register_polled_device(ipd);
+	err = input_setup_polling(input, pega_accel_poll);
 	if (err)
 		goto exit;
 
-	asus->pega_accel_poll = ipd;
+	input_set_poll_interval(input, 125);
+	input_set_min_poll_interval(input, 50);
+	input_set_max_poll_interval(input, 2000);
+
+	err = input_register_device(input);
+	if (err)
+		goto exit;
+
+	asus->pega_accel_poll = input;
 	return 0;
 
 exit:
-	input_free_polled_device(ipd);
+	input_free_device(input);
 	return err;
 }
 
@@ -655,22 +642,15 @@ static enum led_brightness asus_kled_cdev_get(struct led_classdev *led_cdev)
 
 static void asus_led_exit(struct asus_laptop *asus)
 {
-	if (!IS_ERR_OR_NULL(asus->wled.led.dev))
-		led_classdev_unregister(&asus->wled.led);
-	if (!IS_ERR_OR_NULL(asus->bled.led.dev))
-		led_classdev_unregister(&asus->bled.led);
-	if (!IS_ERR_OR_NULL(asus->mled.led.dev))
-		led_classdev_unregister(&asus->mled.led);
-	if (!IS_ERR_OR_NULL(asus->tled.led.dev))
-		led_classdev_unregister(&asus->tled.led);
-	if (!IS_ERR_OR_NULL(asus->pled.led.dev))
-		led_classdev_unregister(&asus->pled.led);
-	if (!IS_ERR_OR_NULL(asus->rled.led.dev))
-		led_classdev_unregister(&asus->rled.led);
-	if (!IS_ERR_OR_NULL(asus->gled.led.dev))
-		led_classdev_unregister(&asus->gled.led);
-	if (!IS_ERR_OR_NULL(asus->kled.led.dev))
-		led_classdev_unregister(&asus->kled.led);
+	led_classdev_unregister(&asus->wled.led);
+	led_classdev_unregister(&asus->bled.led);
+	led_classdev_unregister(&asus->mled.led);
+	led_classdev_unregister(&asus->tled.led);
+	led_classdev_unregister(&asus->pled.led);
+	led_classdev_unregister(&asus->rled.led);
+	led_classdev_unregister(&asus->gled.led);
+	led_classdev_unregister(&asus->kled.led);
+
 	if (asus->led_workqueue) {
 		destroy_workqueue(asus->led_workqueue);
 		asus->led_workqueue = NULL;
@@ -840,7 +820,7 @@ static int asus_backlight_init(struct asus_laptop *asus)
 
 	asus->backlight_device = bd;
 	bd->props.brightness = asus_read_brightness(bd);
-	bd->props.power = FB_BLANK_UNBLANK;
+	bd->props.power = BACKLIGHT_POWER_ON;
 	backlight_update_status(bd);
 	return 0;
 }
@@ -874,8 +854,8 @@ static ssize_t infos_show(struct device *dev, struct device_attribute *attr,
 	 * so we don't set eof to 1
 	 */
 
-	len += sprintf(page, ASUS_LAPTOP_NAME " " ASUS_LAPTOP_VERSION "\n");
-	len += sprintf(page + len, "Model reference    : %s\n", asus->name);
+	len += sysfs_emit_at(page, len, ASUS_LAPTOP_NAME " " ASUS_LAPTOP_VERSION "\n");
+	len += sysfs_emit_at(page, len, "Model reference    : %s\n", asus->name);
 	/*
 	 * The SFUN method probably allows the original driver to get the list
 	 * of features supported by a given model. For now, 0x0100 or 0x0800
@@ -883,8 +863,8 @@ static ssize_t infos_show(struct device *dev, struct device_attribute *attr,
 	 * The significance of others is yet to be found.
 	 */
 	rv = acpi_evaluate_integer(asus->handle, "SFUN", NULL, &temp);
-	if (!ACPI_FAILURE(rv))
-		len += sprintf(page + len, "SFUN value         : %#x\n",
+	if (ACPI_SUCCESS(rv))
+		len += sysfs_emit_at(page, len, "SFUN value         : %#x\n",
 			       (uint) temp);
 	/*
 	 * The HWRS method return informations about the hardware.
@@ -895,8 +875,8 @@ static ssize_t infos_show(struct device *dev, struct device_attribute *attr,
 	 * takes several seconds to run on some systems.
 	 */
 	rv = acpi_evaluate_integer(asus->handle, "HWRS", NULL, &temp);
-	if (!ACPI_FAILURE(rv))
-		len += sprintf(page + len, "HWRS value         : %#x\n",
+	if (ACPI_SUCCESS(rv))
+		len += sysfs_emit_at(page, len, "HWRS value         : %#x\n",
 			       (uint) temp);
 	/*
 	 * Another value for userspace: the ASYM method returns 0x02 for
@@ -906,26 +886,26 @@ static ssize_t infos_show(struct device *dev, struct device_attribute *attr,
 	 * silently ignored.
 	 */
 	rv = acpi_evaluate_integer(asus->handle, "ASYM", NULL, &temp);
-	if (!ACPI_FAILURE(rv))
-		len += sprintf(page + len, "ASYM value         : %#x\n",
+	if (ACPI_SUCCESS(rv))
+		len += sysfs_emit_at(page, len, "ASYM value         : %#x\n",
 			       (uint) temp);
 	if (asus->dsdt_info) {
 		snprintf(buf, 16, "%d", asus->dsdt_info->length);
-		len += sprintf(page + len, "DSDT length        : %s\n", buf);
+		len += sysfs_emit_at(page, len, "DSDT length        : %s\n", buf);
 		snprintf(buf, 16, "%d", asus->dsdt_info->checksum);
-		len += sprintf(page + len, "DSDT checksum      : %s\n", buf);
+		len += sysfs_emit_at(page, len, "DSDT checksum      : %s\n", buf);
 		snprintf(buf, 16, "%d", asus->dsdt_info->revision);
-		len += sprintf(page + len, "DSDT revision      : %s\n", buf);
+		len += sysfs_emit_at(page, len, "DSDT revision      : %s\n", buf);
 		snprintf(buf, 7, "%s", asus->dsdt_info->oem_id);
-		len += sprintf(page + len, "OEM id             : %s\n", buf);
+		len += sysfs_emit_at(page, len, "OEM id             : %s\n", buf);
 		snprintf(buf, 9, "%s", asus->dsdt_info->oem_table_id);
-		len += sprintf(page + len, "OEM table id       : %s\n", buf);
+		len += sysfs_emit_at(page, len, "OEM table id       : %s\n", buf);
 		snprintf(buf, 16, "%x", asus->dsdt_info->oem_revision);
-		len += sprintf(page + len, "OEM revision       : 0x%s\n", buf);
+		len += sysfs_emit_at(page, len, "OEM revision       : 0x%s\n", buf);
 		snprintf(buf, 5, "%s", asus->dsdt_info->asl_compiler_id);
-		len += sprintf(page + len, "ASL comp vendor id : %s\n", buf);
+		len += sysfs_emit_at(page, len, "ASL comp vendor id : %s\n", buf);
 		snprintf(buf, 16, "%x", asus->dsdt_info->asl_compiler_revision);
-		len += sprintf(page + len, "ASL comp revision  : 0x%s\n", buf);
+		len += sysfs_emit_at(page, len, "ASL comp revision  : 0x%s\n", buf);
 	}
 
 	return len;
@@ -955,7 +935,7 @@ static ssize_t ledd_show(struct device *dev, struct device_attribute *attr,
 {
 	struct asus_laptop *asus = dev_get_drvdata(dev);
 
-	return sprintf(buf, "0x%08x\n", asus->ledd_status);
+	return sysfs_emit(buf, "0x%08x\n", asus->ledd_status);
 }
 
 static ssize_t ledd_store(struct device *dev, struct device_attribute *attr,
@@ -1015,7 +995,7 @@ static ssize_t wlan_show(struct device *dev, struct device_attribute *attr,
 {
 	struct asus_laptop *asus = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%d\n", asus_wireless_status(asus, WL_RSTS));
+	return sysfs_emit(buf, "%d\n", asus_wireless_status(asus, WL_RSTS));
 }
 
 static ssize_t wlan_store(struct device *dev, struct device_attribute *attr,
@@ -1044,7 +1024,7 @@ static ssize_t bluetooth_show(struct device *dev, struct device_attribute *attr,
 {
 	struct asus_laptop *asus = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%d\n", asus_wireless_status(asus, BT_RSTS));
+	return sysfs_emit(buf, "%d\n", asus_wireless_status(asus, BT_RSTS));
 }
 
 static ssize_t bluetooth_store(struct device *dev,
@@ -1074,7 +1054,7 @@ static ssize_t wimax_show(struct device *dev, struct device_attribute *attr,
 {
 	struct asus_laptop *asus = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%d\n", asus_wireless_status(asus, WM_RSTS));
+	return sysfs_emit(buf, "%d\n", asus_wireless_status(asus, WM_RSTS));
 }
 
 static ssize_t wimax_store(struct device *dev, struct device_attribute *attr,
@@ -1103,7 +1083,7 @@ static ssize_t wwan_show(struct device *dev, struct device_attribute *attr,
 {
 	struct asus_laptop *asus = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%d\n", asus_wireless_status(asus, WW_RSTS));
+	return sysfs_emit(buf, "%d\n", asus_wireless_status(asus, WW_RSTS));
 }
 
 static ssize_t wwan_store(struct device *dev, struct device_attribute *attr,
@@ -1163,7 +1143,7 @@ static void asus_als_switch(struct asus_laptop *asus, int value)
 		ret = write_acpi_int(asus->handle, METHOD_ALS_CONTROL, value);
 	}
 	if (ret)
-		pr_warning("Error setting light sensor switch\n");
+		pr_warn("Error setting light sensor switch\n");
 
 	asus->light_switch = value;
 }
@@ -1173,7 +1153,7 @@ static ssize_t ls_switch_show(struct device *dev, struct device_attribute *attr,
 {
 	struct asus_laptop *asus = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%d\n", asus->light_switch);
+	return sysfs_emit(buf, "%d\n", asus->light_switch);
 }
 
 static ssize_t ls_switch_store(struct device *dev,
@@ -1204,7 +1184,7 @@ static ssize_t ls_level_show(struct device *dev, struct device_attribute *attr,
 {
 	struct asus_laptop *asus = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%d\n", asus->light_level);
+	return sysfs_emit(buf, "%d\n", asus->light_level);
 }
 
 static ssize_t ls_level_store(struct device *dev, struct device_attribute *attr,
@@ -1250,7 +1230,7 @@ static ssize_t ls_value_show(struct device *dev, struct device_attribute *attr,
 	if (!err)
 		err = pega_int_read(asus, PEGA_READ_ALS_L, &lo);
 	if (!err)
-		return sprintf(buf, "%d\n", 10 * hi + lo);
+		return sysfs_emit(buf, "%d\n", 10 * hi + lo);
 	return err;
 }
 static DEVICE_ATTR_RO(ls_value);
@@ -1286,7 +1266,7 @@ static ssize_t gps_show(struct device *dev, struct device_attribute *attr,
 {
 	struct asus_laptop *asus = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%d\n", asus_gps_status(asus));
+	return sysfs_emit(buf, "%d\n", asus_gps_status(asus));
 }
 
 static ssize_t gps_store(struct device *dev, struct device_attribute *attr,
@@ -1537,9 +1517,9 @@ static void asus_input_exit(struct asus_laptop *asus)
 /*
  * ACPI driver
  */
-static void asus_acpi_notify(struct acpi_device *device, u32 event)
+static void asus_acpi_notify(acpi_handle handle, u32 event, void *data)
 {
-	struct asus_laptop *asus = acpi_driver_data(device);
+	struct asus_laptop *asus = data;
 	u16 count;
 
 	/* TODO Find a better way to handle events count. */
@@ -1565,8 +1545,7 @@ static void asus_acpi_notify(struct acpi_device *device, u32 event)
 
 	/* Accelerometer "coarse orientation change" event */
 	if (asus->pega_accel_poll && event == 0xEA) {
-		kobject_uevent(&asus->pega_accel_poll->input->dev.kobj,
-			       KOBJ_CHANGE);
+		kobject_uevent(&asus->pega_accel_poll->dev.kobj, KOBJ_CHANGE);
 		return ;
 	}
 
@@ -1592,9 +1571,8 @@ static umode_t asus_sysfs_is_visible(struct kobject *kobj,
 				    struct attribute *attr,
 				    int idx)
 {
-	struct device *dev = container_of(kobj, struct device, kobj);
-	struct platform_device *pdev = to_platform_device(dev);
-	struct asus_laptop *asus = platform_get_drvdata(pdev);
+	struct device *dev = kobj_to_dev(kobj);
+	struct asus_laptop *asus = dev_get_drvdata(dev);
 	acpi_handle handle = asus->handle;
 	bool supported;
 
@@ -1657,7 +1635,7 @@ static int asus_platform_init(struct asus_laptop *asus)
 {
 	int result;
 
-	asus->platform_device = platform_device_alloc(ASUS_LAPTOP_FILE, -1);
+	asus->platform_device = platform_device_alloc(ASUS_LAPTOP_FILE, PLATFORM_DEVID_NONE);
 	if (!asus->platform_device)
 		return -ENOMEM;
 	platform_set_drvdata(asus->platform_device, asus);
@@ -1840,27 +1818,30 @@ static void asus_dmi_check(void)
 		return;
 
 	/* On L1400B WLED control the sound card, don't mess with it ... */
-	if (strncmp(model, "L1400B", 6) == 0) {
+	if (strncmp(model, "L1400B", 6) == 0)
 		wlan_status = -1;
-	}
 }
 
 static bool asus_device_present;
 
-static int asus_acpi_add(struct acpi_device *device)
+static int asus_acpi_probe(struct platform_device *pdev)
 {
+	struct acpi_device *device;
 	struct asus_laptop *asus;
 	int result;
 
+	device = ACPI_COMPANION(&pdev->dev);
+	if (!device)
+		return -ENODEV;
+
 	pr_notice("Asus Laptop Support version %s\n",
 		  ASUS_LAPTOP_VERSION);
-	asus = kzalloc(sizeof(struct asus_laptop), GFP_KERNEL);
+	asus = kzalloc_obj(struct asus_laptop);
 	if (!asus)
 		return -ENOMEM;
 	asus->handle = device->handle;
-	strcpy(acpi_device_name(device), ASUS_LAPTOP_DEVICE_NAME);
-	strcpy(acpi_device_class(device), ASUS_LAPTOP_CLASS);
-	device->driver_data = asus;
+	strscpy(acpi_device_name(device), ASUS_LAPTOP_DEVICE_NAME);
+	strscpy(acpi_device_class(device), ASUS_LAPTOP_CLASS);
 	asus->device = device;
 
 	asus_dmi_check();
@@ -1868,6 +1849,8 @@ static int asus_acpi_add(struct acpi_device *device)
 	result = asus_acpi_init(asus);
 	if (result)
 		goto fail_platform;
+
+	platform_set_drvdata(pdev, asus);
 
 	/*
 	 * Need platform type detection first, then the platform
@@ -1904,6 +1887,11 @@ static int asus_acpi_add(struct acpi_device *device)
 	if (result && result != -ENODEV)
 		goto fail_pega_rfkill;
 
+	result = acpi_dev_install_notify_handler(device, ACPI_DEVICE_NOTIFY,
+						 asus_acpi_notify, asus);
+	if (result)
+		goto fail_pega_rfkill;
+
 	asus_device_present = true;
 	return 0;
 
@@ -1925,10 +1913,12 @@ fail_platform:
 	return result;
 }
 
-static int asus_acpi_remove(struct acpi_device *device)
+static void asus_acpi_remove(struct platform_device *pdev)
 {
-	struct asus_laptop *asus = acpi_driver_data(device);
+	struct asus_laptop *asus = platform_get_drvdata(pdev);
 
+	acpi_dev_remove_notify_handler(asus->device, ACPI_DEVICE_NOTIFY,
+				       asus_acpi_notify);
 	asus_backlight_exit(asus);
 	asus_rfkill_exit(asus);
 	asus_led_exit(asus);
@@ -1938,7 +1928,6 @@ static int asus_acpi_remove(struct acpi_device *device)
 
 	kfree(asus->name);
 	kfree(asus);
-	return 0;
 }
 
 static const struct acpi_device_id asus_device_ids[] = {
@@ -1948,17 +1937,13 @@ static const struct acpi_device_id asus_device_ids[] = {
 };
 MODULE_DEVICE_TABLE(acpi, asus_device_ids);
 
-static struct acpi_driver asus_acpi_driver = {
-	.name = ASUS_LAPTOP_NAME,
-	.class = ASUS_LAPTOP_CLASS,
-	.owner = THIS_MODULE,
-	.ids = asus_device_ids,
-	.flags = ACPI_DRIVER_ALL_NOTIFY_EVENTS,
-	.ops = {
-		.add = asus_acpi_add,
-		.remove = asus_acpi_remove,
-		.notify = asus_acpi_notify,
-		},
+static struct platform_driver asus_acpi_driver = {
+	.probe = asus_acpi_probe,
+	.remove = asus_acpi_remove,
+	.driver = {
+		.name = ASUS_LAPTOP_NAME,
+		.acpi_match_table = asus_device_ids,
+	},
 };
 
 static int __init asus_laptop_init(void)
@@ -1969,7 +1954,7 @@ static int __init asus_laptop_init(void)
 	if (result < 0)
 		return result;
 
-	result = acpi_bus_register_driver(&asus_acpi_driver);
+	result = platform_driver_register(&asus_acpi_driver);
 	if (result < 0)
 		goto fail_acpi_driver;
 	if (!asus_device_present) {
@@ -1979,7 +1964,7 @@ static int __init asus_laptop_init(void)
 	return 0;
 
 fail_no_device:
-	acpi_bus_unregister_driver(&asus_acpi_driver);
+	platform_driver_unregister(&asus_acpi_driver);
 fail_acpi_driver:
 	platform_driver_unregister(&platform_driver);
 	return result;
@@ -1987,7 +1972,7 @@ fail_acpi_driver:
 
 static void __exit asus_laptop_exit(void)
 {
-	acpi_bus_unregister_driver(&asus_acpi_driver);
+	platform_driver_unregister(&asus_acpi_driver);
 	platform_driver_unregister(&platform_driver);
 }
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * CPU <-> hardware queue mapping helpers
  *
@@ -9,67 +10,123 @@
 #include <linux/mm.h>
 #include <linux/smp.h>
 #include <linux/cpu.h>
+#include <linux/group_cpus.h>
+#include <linux/device/bus.h>
+#include <linux/sched/isolation.h>
 
-#include <linux/blk-mq.h>
 #include "blk.h"
 #include "blk-mq.h"
 
-static int cpu_to_queue_index(unsigned int nr_queues, const int cpu)
+static unsigned int blk_mq_num_queues(const struct cpumask *mask,
+				      unsigned int max_queues)
 {
-	return cpu % nr_queues;
+	unsigned int num;
+
+	num = cpumask_weight(mask);
+	return min_not_zero(num, max_queues);
 }
 
-static int get_first_sibling(unsigned int cpu)
+/**
+ * blk_mq_num_possible_queues - Calc nr of queues for multiqueue devices
+ * @max_queues:	The maximum number of queues the hardware/driver
+ *		supports. If max_queues is 0, the argument is
+ *		ignored.
+ *
+ * Calculates the number of queues to be used for a multiqueue
+ * device based on the number of possible CPUs.
+ */
+unsigned int blk_mq_num_possible_queues(unsigned int max_queues)
 {
-	unsigned int ret;
-
-	ret = cpumask_first(topology_sibling_cpumask(cpu));
-	if (ret < nr_cpu_ids)
-		return ret;
-
-	return cpu;
+	return blk_mq_num_queues(cpu_possible_mask, max_queues);
 }
+EXPORT_SYMBOL_GPL(blk_mq_num_possible_queues);
 
-int blk_mq_map_queues(struct blk_mq_tag_set *set)
+/**
+ * blk_mq_num_online_queues - Calc nr of queues for multiqueue devices
+ * @max_queues:	The maximum number of queues the hardware/driver
+ *		supports. If max_queues is 0, the argument is
+ *		ignored.
+ *
+ * Calculates the number of queues to be used for a multiqueue
+ * device based on the number of online CPUs.
+ */
+unsigned int blk_mq_num_online_queues(unsigned int max_queues)
 {
-	unsigned int *map = set->mq_map;
-	unsigned int nr_queues = set->nr_hw_queues;
-	unsigned int cpu, first_sibling;
+	return blk_mq_num_queues(cpu_online_mask, max_queues);
+}
+EXPORT_SYMBOL_GPL(blk_mq_num_online_queues);
 
-	for_each_possible_cpu(cpu) {
-		/*
-		 * First do sequential mapping between CPUs and queues.
-		 * In case we still have CPUs to map, and we have some number of
-		 * threads per cores then map sibling threads to the same queue for
-		 * performace optimizations.
-		 */
-		if (cpu < nr_queues) {
-			map[cpu] = cpu_to_queue_index(nr_queues, cpu);
-		} else {
-			first_sibling = get_first_sibling(cpu);
-			if (first_sibling == cpu)
-				map[cpu] = cpu_to_queue_index(nr_queues, cpu);
-			else
-				map[cpu] = map[first_sibling];
-		}
+void blk_mq_map_queues(struct blk_mq_queue_map *qmap)
+{
+	const struct cpumask *masks;
+	unsigned int queue, cpu, nr_masks;
+
+	masks = group_cpus_evenly(qmap->nr_queues, &nr_masks);
+	if (!masks) {
+		for_each_possible_cpu(cpu)
+			qmap->mq_map[cpu] = qmap->queue_offset;
+		return;
 	}
 
-	return 0;
+	for (queue = 0; queue < qmap->nr_queues; queue++) {
+		for_each_cpu(cpu, &masks[queue % nr_masks])
+			qmap->mq_map[cpu] = qmap->queue_offset + queue;
+	}
+	kfree(masks);
 }
 EXPORT_SYMBOL_GPL(blk_mq_map_queues);
 
-/*
+/**
+ * blk_mq_hw_queue_to_node - Look up the memory node for a hardware queue index
+ * @qmap: CPU to hardware queue map.
+ * @index: hardware queue index.
+ *
  * We have no quick way of doing reverse lookups. This is only used at
  * queue init time, so runtime isn't important.
  */
-int blk_mq_hw_queue_to_node(unsigned int *mq_map, unsigned int index)
+int blk_mq_hw_queue_to_node(struct blk_mq_queue_map *qmap, unsigned int index)
 {
 	int i;
 
 	for_each_possible_cpu(i) {
-		if (index == mq_map[i])
-			return local_memory_node(cpu_to_node(i));
+		if (index == qmap->mq_map[i])
+			return cpu_to_node(i);
 	}
 
 	return NUMA_NO_NODE;
 }
+
+/**
+ * blk_mq_map_hw_queues - Create CPU to hardware queue mapping
+ * @qmap:	CPU to hardware queue map
+ * @dev:	The device to map queues
+ * @offset:	Queue offset to use for the device
+ *
+ * Create a CPU to hardware queue mapping in @qmap. The struct bus_type
+ * irq_get_affinity callback will be used to retrieve the affinity.
+ */
+void blk_mq_map_hw_queues(struct blk_mq_queue_map *qmap,
+			  struct device *dev, unsigned int offset)
+
+{
+	const struct cpumask *mask;
+	unsigned int queue, cpu;
+
+	if (!dev->bus->irq_get_affinity)
+		goto fallback;
+
+	for (queue = 0; queue < qmap->nr_queues; queue++) {
+		mask = dev->bus->irq_get_affinity(dev, queue + offset);
+		if (!mask)
+			goto fallback;
+
+		for_each_cpu(cpu, mask)
+			qmap->mq_map[cpu] = qmap->queue_offset + queue;
+	}
+
+	return;
+
+fallback:
+	blk_mq_map_queues(qmap);
+}
+EXPORT_SYMBOL_GPL(blk_mq_map_hw_queues);

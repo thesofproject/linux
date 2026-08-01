@@ -9,7 +9,8 @@
  */
 
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
 
 #include <asm/cpm.h>
 #ifdef CONFIG_8xx_GPIO
@@ -63,7 +64,6 @@ static struct platform_driver cpm_gpio_driver = {
 	.probe		= cpm_gpio_probe,
 	.driver		= {
 		.name	= "cpm-gpio",
-		.owner	= THIS_MODULE,
 		.of_match_table	= cpm_gpio_match,
 	},
 };

@@ -5,6 +5,7 @@
 #include <linux/sched.h>
 #include <linux/ioport.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/timex.h>
 #include <linux/random.h>
 #include <linux/init.h>
@@ -14,14 +15,15 @@
 #include <linux/acpi.h>
 #include <linux/io.h>
 #include <linux/delay.h>
+#include <linux/pgtable.h>
 
 #include <linux/atomic.h>
 #include <asm/timer.h>
 #include <asm/hw_irq.h>
-#include <asm/pgtable.h>
 #include <asm/desc.h>
 #include <asm/apic.h>
 #include <asm/i8259.h>
+#include <asm/io_apic.h>
 
 /*
  * This is the 'legacy' 8259A Programmable Interrupt Controller,
@@ -31,6 +33,7 @@
  */
 static void init_8259A(int auto_eoi);
 
+static bool pcat_compat __ro_after_init;
 static int i8259A_auto_eoi;
 DEFINE_RAW_SPINLOCK(i8259A_lock);
 
@@ -113,6 +116,7 @@ static void make_8259A_irq(unsigned int irq)
 	disable_irq_nosync(irq);
 	io_apic_irqs &= ~(1<<irq);
 	irq_set_chip_and_handler(irq, &i8259A_chip, handle_level_irq);
+	irq_set_status_flags(irq, IRQ_LEVEL);
 	enable_irq(irq);
 	lapic_assign_legacy_vector(irq, true);
 }
@@ -206,11 +210,11 @@ spurious_8259A_irq:
 		 * lets ACK and report it. [once per IRQ]
 		 */
 		if (!(spurious_irq_mask & irqmask)) {
-			printk(KERN_DEBUG
+			printk_deferred(KERN_DEBUG
 			       "spurious 8259A interrupt: IRQ%d.\n", irq);
 			spurious_irq_mask |= irqmask;
 		}
-		atomic_inc(&irq_err_count);
+		irq_stat_inc_and_enable(IRQ_COUNT_PIC_APIC_ERROR);
 		/*
 		 * Theoretically we do not have to handle this IRQ,
 		 * but in Linux this does not cause problems and is
@@ -229,35 +233,33 @@ struct irq_chip i8259A_chip = {
 };
 
 static char irq_trigger[2];
-/**
- * ELCR registers (0x4d0, 0x4d1) control edge/level of IRQ
- */
+/* ELCR registers (0x4d0, 0x4d1) control edge/level of IRQ */
 static void restore_ELCR(char *trigger)
 {
-	outb(trigger[0], 0x4d0);
-	outb(trigger[1], 0x4d1);
+	outb(trigger[0], PIC_ELCR1);
+	outb(trigger[1], PIC_ELCR2);
 }
 
 static void save_ELCR(char *trigger)
 {
 	/* IRQ 0,1,2,8,13 are marked as reserved */
-	trigger[0] = inb(0x4d0) & 0xF8;
-	trigger[1] = inb(0x4d1) & 0xDE;
+	trigger[0] = inb(PIC_ELCR1) & 0xF8;
+	trigger[1] = inb(PIC_ELCR2) & 0xDE;
 }
 
-static void i8259A_resume(void)
+static void i8259A_resume(void *data)
 {
 	init_8259A(i8259A_auto_eoi);
 	restore_ELCR(irq_trigger);
 }
 
-static int i8259A_suspend(void)
+static int i8259A_suspend(void *data)
 {
 	save_ELCR(irq_trigger);
 	return 0;
 }
 
-static void i8259A_shutdown(void)
+static void i8259A_shutdown(void *data)
 {
 	/* Put the i8259A into a quiescent state that
 	 * the kernel initialization code can get it
@@ -267,10 +269,14 @@ static void i8259A_shutdown(void)
 	outb(0xff, PIC_SLAVE_IMR);	/* mask all of 8259A-2 */
 }
 
-static struct syscore_ops i8259_syscore_ops = {
+static const struct syscore_ops i8259_syscore_ops = {
 	.suspend = i8259A_suspend,
 	.resume = i8259A_resume,
 	.shutdown = i8259A_shutdown,
+};
+
+static struct syscore i8259_syscore = {
+	.ops = &i8259_syscore_ops,
 };
 
 static void mask_8259A(void)
@@ -299,15 +305,32 @@ static void unmask_8259A(void)
 
 static int probe_8259A(void)
 {
+	unsigned char new_val, probe_val = ~(1 << PIC_CASCADE_IR);
 	unsigned long flags;
-	unsigned char probe_val = ~(1 << PIC_CASCADE_IR);
-	unsigned char new_val;
+
 	/*
-	 * Check to see if we have a PIC.
-	 * Mask all except the cascade and read
-	 * back the value we just wrote. If we don't
-	 * have a PIC, we will read 0xff as opposed to the
-	 * value we wrote.
+	 * If MADT has the PCAT_COMPAT flag set, then do not bother probing
+	 * for the PIC. Some BIOSes leave the PIC uninitialized and probing
+	 * fails.
+	 *
+	 * Right now this causes problems as quite some code depends on
+	 * nr_legacy_irqs() > 0 or has_legacy_pic() == true. This is silly
+	 * when the system has an IO/APIC because then PIC is not required
+	 * at all, except for really old machines where the timer interrupt
+	 * must be routed through the PIC. So just pretend that the PIC is
+	 * there and let legacy_pic->init() initialize it for nothing.
+	 *
+	 * Alternatively this could just try to initialize the PIC and
+	 * repeat the probe, but for cases where there is no PIC that's
+	 * just pointless.
+	 */
+	if (pcat_compat)
+		return nr_legacy_irqs();
+
+	/*
+	 * Check to see if we have a PIC.  Mask all except the cascade and
+	 * read back the value we just wrote. If we don't have a PIC, we
+	 * will read 0xff as opposed to the value we wrote.
 	 */
 	raw_spin_lock_irqsave(&i8259A_lock, flags);
 
@@ -406,7 +429,7 @@ struct legacy_pic null_legacy_pic = {
 	.make_irq = legacy_pic_uint_noop,
 };
 
-struct legacy_pic default_legacy_pic = {
+static struct legacy_pic default_legacy_pic = {
 	.nr_legacy_irqs = NR_IRQS_LEGACY,
 	.chip  = &i8259A_chip,
 	.mask = mask_8259A_irq,
@@ -425,9 +448,13 @@ EXPORT_SYMBOL(legacy_pic);
 static int __init i8259A_init_ops(void)
 {
 	if (legacy_pic == &default_legacy_pic)
-		register_syscore_ops(&i8259_syscore_ops);
+		register_syscore(&i8259_syscore);
 
 	return 0;
 }
-
 device_initcall(i8259A_init_ops);
+
+void __init legacy_pic_pcat_compat(void)
+{
+	pcat_compat = true;
+}

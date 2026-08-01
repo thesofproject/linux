@@ -30,6 +30,7 @@
  *
  */
 
+#include <linux/dma-map-ops.h> /* for dma_default_coherent */
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -309,7 +310,7 @@ u32 au1xxx_dbdma_chan_alloc(u32 srcid, u32 destid,
 			 * If kmalloc fails, it is caught below same
 			 * as a channel not available.
 			 */
-			ctp = kmalloc(sizeof(chan_tab_t), GFP_ATOMIC);
+			ctp = kmalloc_obj(chan_tab_t, GFP_ATOMIC);
 			chan_tab_ptr[i] = ctp;
 			break;
 		}
@@ -411,8 +412,8 @@ u32 au1xxx_dbdma_ring_alloc(u32 chanid, int entries)
 	 * and if we try that first we are likely to not waste larger
 	 * slabs of memory.
 	 */
-	desc_base = (u32)kmalloc(entries * sizeof(au1x_ddma_desc_t),
-				 GFP_KERNEL|GFP_DMA);
+	desc_base = (u32) kmalloc_objs(au1x_ddma_desc_t, entries,
+				       GFP_KERNEL | GFP_DMA);
 	if (desc_base == 0)
 		return 0;
 
@@ -574,7 +575,7 @@ u32 au1xxx_dbdma_ring_alloc(u32 chanid, int entries)
 		dp++;
 	}
 
-	/* Make last descrptor point to the first. */
+	/* Make last descriptor point to the first. */
 	dp--;
 	dp->dscr_nxtptr = DSCR_NXTPTR(virt_to_phys(ctp->chan_desc_base));
 	ctp->get_ptr = ctp->put_ptr = ctp->cur_ptr = ctp->chan_desc_base;
@@ -623,17 +624,18 @@ u32 au1xxx_dbdma_put_source(u32 chanid, dma_addr_t buf, int nbytes, u32 flags)
 		dp->dscr_cmd0 &= ~DSCR_CMD0_IE;
 
 	/*
-	 * There is an errata on the Au1200/Au1550 parts that could result
-	 * in "stale" data being DMA'ed. It has to do with the snoop logic on
-	 * the cache eviction buffer.  DMA_NONCOHERENT is on by default for
-	 * these parts. If it is fixed in the future, these dma_cache_inv will
-	 * just be nothing more than empty macros. See io.h.
+	 * There is an erratum on certain Au1200/Au1550 revisions that could
+	 * result in "stale" data being DMA'ed. It has to do with the snoop
+	 * logic on the cache eviction buffer.  dma_default_coherent is set
+	 * to false on these parts.
 	 */
-	dma_cache_wback_inv((unsigned long)buf, nbytes);
+	if (!dma_default_coherent)
+		dma_cache_wback_inv(KSEG0ADDR(buf), nbytes);
 	dp->dscr_cmd0 |= DSCR_CMD0_V;	/* Let it rip */
 	wmb(); /* drain writebuffer */
 	dma_cache_wback_inv((unsigned long)dp, sizeof(*dp));
 	ctp->chan_ptr->ddma_dbell = 0;
+	wmb(); /* force doorbell write out to dma engine */
 
 	/* Get next descriptor pointer. */
 	ctp->put_ptr = phys_to_virt(DSCR_GET_NXTPTR(dp->dscr_nxtptr));
@@ -685,17 +687,18 @@ u32 au1xxx_dbdma_put_dest(u32 chanid, dma_addr_t buf, int nbytes, u32 flags)
 			  dp->dscr_source1, dp->dscr_dest0, dp->dscr_dest1);
 #endif
 	/*
-	 * There is an errata on the Au1200/Au1550 parts that could result in
-	 * "stale" data being DMA'ed. It has to do with the snoop logic on the
-	 * cache eviction buffer.  DMA_NONCOHERENT is on by default for these
-	 * parts. If it is fixed in the future, these dma_cache_inv will just
-	 * be nothing more than empty macros. See io.h.
+	 * There is an erratum on certain Au1200/Au1550 revisions that could
+	 * result in "stale" data being DMA'ed. It has to do with the snoop
+	 * logic on the cache eviction buffer.  dma_default_coherent is set
+	 * to false on these parts.
 	 */
-	dma_cache_inv((unsigned long)buf, nbytes);
+	if (!dma_default_coherent)
+		dma_cache_inv(KSEG0ADDR(buf), nbytes);
 	dp->dscr_cmd0 |= DSCR_CMD0_V;	/* Let it rip */
 	wmb(); /* drain writebuffer */
 	dma_cache_wback_inv((unsigned long)dp, sizeof(*dp));
 	ctp->chan_ptr->ddma_dbell = 0;
+	wmb(); /* force doorbell write out to dma engine */
 
 	/* Get next descriptor pointer. */
 	ctp->put_ptr = phys_to_virt(DSCR_GET_NXTPTR(dp->dscr_nxtptr));
@@ -979,7 +982,7 @@ u32 au1xxx_dbdma_put_dscr(u32 chanid, au1x_ddma_desc_t *dscr)
 
 static unsigned long alchemy_dbdma_pm_data[NUM_DBDMA_CHANS + 1][6];
 
-static int alchemy_dbdma_suspend(void)
+static int alchemy_dbdma_suspend(void *data)
 {
 	int i;
 	void __iomem *addr;
@@ -1016,7 +1019,7 @@ static int alchemy_dbdma_suspend(void)
 	return 0;
 }
 
-static void alchemy_dbdma_resume(void)
+static void alchemy_dbdma_resume(void *data)
 {
 	int i;
 	void __iomem *addr;
@@ -1041,16 +1044,20 @@ static void alchemy_dbdma_resume(void)
 	}
 }
 
-static struct syscore_ops alchemy_dbdma_syscore_ops = {
+static const struct syscore_ops alchemy_dbdma_syscore_ops = {
 	.suspend	= alchemy_dbdma_suspend,
 	.resume		= alchemy_dbdma_resume,
+};
+
+static struct syscore alchemy_dbdma_syscore = {
+	.ops = &alchemy_dbdma_syscore_ops,
 };
 
 static int __init dbdma_setup(unsigned int irq, dbdev_tab_t *idtable)
 {
 	int ret;
 
-	dbdev_tab = kzalloc(sizeof(dbdev_tab_t) * DBDEV_TAB_SIZE, GFP_KERNEL);
+	dbdev_tab = kzalloc_objs(dbdev_tab_t, DBDEV_TAB_SIZE);
 	if (!dbdev_tab)
 		return -ENOMEM;
 
@@ -1068,7 +1075,7 @@ static int __init dbdma_setup(unsigned int irq, dbdev_tab_t *idtable)
 		printk(KERN_ERR "Cannot grab DBDMA interrupt!\n");
 	else {
 		dbdma_initialized = 1;
-		register_syscore_ops(&alchemy_dbdma_syscore_ops);
+		register_syscore(&alchemy_dbdma_syscore);
 	}
 
 	return ret;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *    ata_piix.c - Intel PATA/SATA controllers
  *
@@ -5,32 +6,14 @@
  *    		    Please ALWAYS copy linux-ide@vger.kernel.org
  *		    on emails.
  *
- *
  *	Copyright 2003-2005 Red Hat Inc
  *	Copyright 2003-2005 Jeff Garzik
- *
  *
  *	Copyright header from piix.c:
  *
  *  Copyright (C) 1998-1999 Andrzej Krzysztofowicz, Author and Maintainer
  *  Copyright (C) 1998-2000 Andre Hedrick <andre@linux-ide.org>
  *  Copyright (C) 2003 Red Hat Inc
- *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2, or (at your option)
- *  any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; see the file COPYING.  If not, write to
- *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
- *
  *
  *  libata documentation is available via 'make {ps|pdf}docs',
  *  as Documentation/driver-api/libata.rst
@@ -94,6 +77,7 @@
 #include <scsi/scsi_host.h>
 #include <linux/libata.h>
 #include <linux/dmi.h>
+#include <trace/events/libata.h>
 
 #define DRV_NAME	"ata_piix"
 #define DRV_VERSION	"2.13"
@@ -170,184 +154,364 @@ static unsigned int in_module_init = 1;
 
 static const struct pci_device_id piix_pci_tbl[] = {
 	/* Intel PIIX3 for the 430HX etc */
-	{ 0x8086, 0x7010, PCI_ANY_ID, PCI_ANY_ID, 0, 0, piix_pata_mwdma },
-	/* VMware ICH4 */
-	{ 0x8086, 0x7111, 0x15ad, 0x1976, 0, 0, piix_pata_vmw },
-	/* Intel PIIX4 for the 430TX/440BX/MX chipset: UDMA 33 */
-	/* Also PIIX4E (fn3 rev 2) and PIIX4M (fn3 rev 3) */
-	{ 0x8086, 0x7111, PCI_ANY_ID, PCI_ANY_ID, 0, 0, piix_pata_33 },
-	/* Intel PIIX4 */
-	{ 0x8086, 0x7199, PCI_ANY_ID, PCI_ANY_ID, 0, 0, piix_pata_33 },
-	/* Intel PIIX4 */
-	{ 0x8086, 0x7601, PCI_ANY_ID, PCI_ANY_ID, 0, 0, piix_pata_33 },
-	/* Intel PIIX */
-	{ 0x8086, 0x84CA, PCI_ANY_ID, PCI_ANY_ID, 0, 0, piix_pata_33 },
-	/* Intel ICH (i810, i815, i840) UDMA 66*/
-	{ 0x8086, 0x2411, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_66 },
-	/* Intel ICH0 : UDMA 33*/
-	{ 0x8086, 0x2421, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_33 },
-	/* Intel ICH2M */
-	{ 0x8086, 0x244A, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100 },
-	/* Intel ICH2 (i810E2, i845, 850, 860) UDMA 100 */
-	{ 0x8086, 0x244B, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100 },
-	/*  Intel ICH3M */
-	{ 0x8086, 0x248A, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100 },
-	/* Intel ICH3 (E7500/1) UDMA 100 */
-	{ 0x8086, 0x248B, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100 },
-	/* Intel ICH4-L */
-	{ 0x8086, 0x24C1, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100 },
-	/* Intel ICH4 (i845GV, i845E, i852, i855) UDMA 100 */
-	{ 0x8086, 0x24CA, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100 },
-	{ 0x8086, 0x24CB, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100 },
-	/* Intel ICH5 */
-	{ 0x8086, 0x24DB, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100 },
-	/* C-ICH (i810E2) */
-	{ 0x8086, 0x245B, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100 },
-	/* ESB (855GME/875P + 6300ESB) UDMA 100  */
-	{ 0x8086, 0x25A2, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100 },
-	/* ICH6 (and 6) (i915) UDMA 100 */
-	{ 0x8086, 0x266F, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100 },
-	/* ICH7/7-R (i945, i975) UDMA 100*/
-	{ 0x8086, 0x27DF, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100_nomwdma1 },
-	{ 0x8086, 0x269E, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100_nomwdma1 },
-	/* ICH8 Mobile PATA Controller */
-	{ 0x8086, 0x2850, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich_pata_100 },
+	{
+		PCI_DEVICE(0x8086, 0x7010),
+		.driver_data = piix_pata_mwdma,
+	}, {
+		/* VMware ICH4 */
+		PCI_DEVICE_SUB(0x8086, 0x7111, 0x15ad, 0x1976),
+		.driver_data = piix_pata_vmw,
+	}, {
+		/* Intel PIIX4 for the 430TX/440BX/MX chipset: UDMA 33 */
+		/* Also PIIX4E (fn3 rev 2) and PIIX4M (fn3 rev 3) */
+		PCI_DEVICE(0x8086, 0x7111),
+		.driver_data = piix_pata_33,
+	}, {
+		/* Intel PIIX4 */
+		PCI_DEVICE(0x8086, 0x7199),
+		.driver_data = piix_pata_33,
+	}, {
+		/* Intel PIIX4 */
+		PCI_DEVICE(0x8086, 0x7601),
+		.driver_data = piix_pata_33,
+	}, {
+		/* Intel PIIX */
+		PCI_DEVICE(0x8086, 0x84CA),
+		.driver_data = piix_pata_33,
+	}, {
+		/* Intel ICH (i810, i815, i840) UDMA 66*/
+		PCI_DEVICE(0x8086, 0x2411),
+		.driver_data = ich_pata_66,
+	}, {
+		/* Intel ICH0 : UDMA 33*/
+		PCI_DEVICE(0x8086, 0x2421),
+		.driver_data = ich_pata_33,
+	}, {
+		/* Intel ICH2M */
+		PCI_DEVICE(0x8086, 0x244A),
+		.driver_data = ich_pata_100,
+	}, {
+		/* Intel ICH2 (i810E2, i845, 850, 860) UDMA 100 */
+		PCI_DEVICE(0x8086, 0x244B),
+		.driver_data = ich_pata_100,
+	}, {
+		/*  Intel ICH3M */
+		PCI_DEVICE(0x8086, 0x248A),
+		.driver_data = ich_pata_100,
+	}, {
+		/* Intel ICH3 (E7500/1) UDMA 100 */
+		PCI_DEVICE(0x8086, 0x248B),
+		.driver_data = ich_pata_100,
+	}, {
+		/* Intel ICH4-L */
+		PCI_DEVICE(0x8086, 0x24C1),
+		.driver_data = ich_pata_100,
+	}, {
+		/* Intel ICH4 (i845GV, i845E, i852, i855) UDMA 100 */
+		PCI_DEVICE(0x8086, 0x24CA),
+		.driver_data = ich_pata_100,
+	}, {
+		PCI_DEVICE(0x8086, 0x24CB),
+		.driver_data = ich_pata_100,
+	}, {
+		/* Intel ICH5 */
+		PCI_DEVICE(0x8086, 0x24DB),
+		.driver_data = ich_pata_100,
+	}, {
+		/* C-ICH (i810E2) */
+		PCI_DEVICE(0x8086, 0x245B),
+		.driver_data = ich_pata_100,
+	}, {
+		/* ESB (855GME/875P + 6300ESB) UDMA 100  */
+		PCI_DEVICE(0x8086, 0x25A2),
+		.driver_data = ich_pata_100,
+	}, {
+		/* ICH6 (and 6) (i915) UDMA 100 */
+		PCI_DEVICE(0x8086, 0x266F),
+		.driver_data = ich_pata_100,
+	}, {
+		/* ICH7/7-R (i945, i975) UDMA 100*/
+		PCI_DEVICE(0x8086, 0x27DF),
+		.driver_data = ich_pata_100_nomwdma1,
+	}, {
+		PCI_DEVICE(0x8086, 0x269E),
+		.driver_data = ich_pata_100_nomwdma1,
+	}, {
+		/* ICH8 Mobile PATA Controller */
+		PCI_DEVICE(0x8086, 0x2850),
+		.driver_data = ich_pata_100,
+	},
 
 	/* SATA ports */
-
-	/* 82801EB (ICH5) */
-	{ 0x8086, 0x24d1, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich5_sata },
-	/* 82801EB (ICH5) */
-	{ 0x8086, 0x24df, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich5_sata },
-	/* 6300ESB (ICH5 variant with broken PCS present bits) */
-	{ 0x8086, 0x25a3, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich5_sata },
-	/* 6300ESB pretending RAID */
-	{ 0x8086, 0x25b0, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich5_sata },
-	/* 82801FB/FW (ICH6/ICH6W) */
-	{ 0x8086, 0x2651, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich6_sata },
-	/* 82801FR/FRW (ICH6R/ICH6RW) */
-	{ 0x8086, 0x2652, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich6_sata },
-	/* 82801FBM ICH6M (ICH6R with only port 0 and 2 implemented).
-	 * Attach iff the controller is in IDE mode. */
-	{ 0x8086, 0x2653, PCI_ANY_ID, PCI_ANY_ID,
-	  PCI_CLASS_STORAGE_IDE << 8, 0xffff00, ich6m_sata },
-	/* 82801GB/GR/GH (ICH7, identical to ICH6) */
-	{ 0x8086, 0x27c0, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich6_sata },
-	/* 82801GBM/GHM (ICH7M, identical to ICH6M)  */
-	{ 0x8086, 0x27c4, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich6m_sata },
-	/* Enterprise Southbridge 2 (631xESB/632xESB) */
-	{ 0x8086, 0x2680, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich6_sata },
-	/* SATA Controller 1 IDE (ICH8) */
-	{ 0x8086, 0x2820, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata },
-	/* SATA Controller 2 IDE (ICH8) */
-	{ 0x8086, 0x2825, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* Mobile SATA Controller IDE (ICH8M), Apple */
-	{ 0x8086, 0x2828, 0x106b, 0x00a0, 0, 0, ich8m_apple_sata },
-	{ 0x8086, 0x2828, 0x106b, 0x00a1, 0, 0, ich8m_apple_sata },
-	{ 0x8086, 0x2828, 0x106b, 0x00a3, 0, 0, ich8m_apple_sata },
-	/* Mobile SATA Controller IDE (ICH8M) */
-	{ 0x8086, 0x2828, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata },
-	/* SATA Controller IDE (ICH9) */
-	{ 0x8086, 0x2920, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata },
-	/* SATA Controller IDE (ICH9) */
-	{ 0x8086, 0x2921, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (ICH9) */
-	{ 0x8086, 0x2926, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (ICH9M) */
-	{ 0x8086, 0x2928, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (ICH9M) */
-	{ 0x8086, 0x292d, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (ICH9M) */
-	{ 0x8086, 0x292e, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata },
-	/* SATA Controller IDE (Tolapai) */
-	{ 0x8086, 0x5028, PCI_ANY_ID, PCI_ANY_ID, 0, 0, tolapai_sata },
-	/* SATA Controller IDE (ICH10) */
-	{ 0x8086, 0x3a00, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata },
-	/* SATA Controller IDE (ICH10) */
-	{ 0x8086, 0x3a06, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (ICH10) */
-	{ 0x8086, 0x3a20, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata },
-	/* SATA Controller IDE (ICH10) */
-	{ 0x8086, 0x3a26, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (PCH) */
-	{ 0x8086, 0x3b20, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata },
-	/* SATA Controller IDE (PCH) */
-	{ 0x8086, 0x3b21, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (PCH) */
-	{ 0x8086, 0x3b26, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (PCH) */
-	{ 0x8086, 0x3b28, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata },
-	/* SATA Controller IDE (PCH) */
-	{ 0x8086, 0x3b2d, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (PCH) */
-	{ 0x8086, 0x3b2e, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata },
-	/* SATA Controller IDE (CPT) */
-	{ 0x8086, 0x1c00, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (CPT) */
-	{ 0x8086, 0x1c01, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (CPT) */
-	{ 0x8086, 0x1c08, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (CPT) */
-	{ 0x8086, 0x1c09, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (PBG) */
-	{ 0x8086, 0x1d00, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (PBG) */
-	{ 0x8086, 0x1d08, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (Panther Point) */
-	{ 0x8086, 0x1e00, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (Panther Point) */
-	{ 0x8086, 0x1e01, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (Panther Point) */
-	{ 0x8086, 0x1e08, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (Panther Point) */
-	{ 0x8086, 0x1e09, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (Lynx Point) */
-	{ 0x8086, 0x8c00, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (Lynx Point) */
-	{ 0x8086, 0x8c01, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (Lynx Point) */
-	{ 0x8086, 0x8c08, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata_snb },
-	/* SATA Controller IDE (Lynx Point) */
-	{ 0x8086, 0x8c09, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (Lynx Point-LP) */
-	{ 0x8086, 0x9c00, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (Lynx Point-LP) */
-	{ 0x8086, 0x9c01, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (Lynx Point-LP) */
-	{ 0x8086, 0x9c08, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (Lynx Point-LP) */
-	{ 0x8086, 0x9c09, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (DH89xxCC) */
-	{ 0x8086, 0x2326, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (Avoton) */
-	{ 0x8086, 0x1f20, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (Avoton) */
-	{ 0x8086, 0x1f21, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (Avoton) */
-	{ 0x8086, 0x1f30, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (Avoton) */
-	{ 0x8086, 0x1f31, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (Wellsburg) */
-	{ 0x8086, 0x8d00, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (Wellsburg) */
-	{ 0x8086, 0x8d08, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata_snb },
-	/* SATA Controller IDE (Wellsburg) */
-	{ 0x8086, 0x8d60, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (Wellsburg) */
-	{ 0x8086, 0x8d68, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (BayTrail) */
-	{ 0x8086, 0x0F20, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata_byt },
-	{ 0x8086, 0x0F21, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata_byt },
-	/* SATA Controller IDE (Coleto Creek) */
-	{ 0x8086, 0x23a6, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata },
-	/* SATA Controller IDE (9 Series) */
-	{ 0x8086, 0x8c88, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata_snb },
-	/* SATA Controller IDE (9 Series) */
-	{ 0x8086, 0x8c89, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_2port_sata_snb },
-	/* SATA Controller IDE (9 Series) */
-	{ 0x8086, 0x8c80, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
-	/* SATA Controller IDE (9 Series) */
-	{ 0x8086, 0x8c81, PCI_ANY_ID, PCI_ANY_ID, 0, 0, ich8_sata_snb },
+	{
+		/* 82801EB (ICH5) */
+		PCI_DEVICE(0x8086, 0x24d1),
+		.driver_data = ich5_sata,
+	}, {
+		/* 82801EB (ICH5) */
+		PCI_DEVICE(0x8086, 0x24df),
+		.driver_data = ich5_sata,
+	}, {
+		/* 6300ESB (ICH5 variant with broken PCS present bits) */
+		PCI_DEVICE(0x8086, 0x25a3),
+		.driver_data = ich5_sata,
+	}, {
+		/* 6300ESB pretending RAID */
+		PCI_DEVICE(0x8086, 0x25b0),
+		.driver_data = ich5_sata,
+	}, {
+		/* 82801FB/FW (ICH6/ICH6W) */
+		PCI_DEVICE(0x8086, 0x2651),
+		.driver_data = ich6_sata,
+	}, {
+		/* 82801FR/FRW (ICH6R/ICH6RW) */
+		PCI_DEVICE(0x8086, 0x2652),
+		.driver_data = ich6_sata,
+	}, {
+		/* 82801FBM ICH6M (ICH6R with only port 0 and 2 implemented).
+		 * Attach iff the controller is in IDE mode. */
+		PCI_DEVICE(0x8086, 0x2653),
+		.class = PCI_CLASS_STORAGE_IDE << 8,
+		.class_mask = 0xffff00,
+		.driver_data = ich6m_sata,
+	}, {
+		/* 82801GB/GR/GH (ICH7, identical to ICH6) */
+		PCI_DEVICE(0x8086, 0x27c0),
+		.driver_data = ich6_sata,
+	}, {
+		/* 82801GBM/GHM (ICH7M, identical to ICH6M)  */
+		PCI_DEVICE(0x8086, 0x27c4),
+		.driver_data = ich6m_sata,
+	}, {
+		/* Enterprise Southbridge 2 (631xESB/632xESB) */
+		PCI_DEVICE(0x8086, 0x2680),
+		.driver_data = ich6_sata,
+	}, {
+		/* SATA Controller 1 IDE (ICH8) */
+		PCI_DEVICE(0x8086, 0x2820),
+		.driver_data = ich8_sata,
+	}, {
+		/* SATA Controller 2 IDE (ICH8) */
+		PCI_DEVICE(0x8086, 0x2825),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* Mobile SATA Controller IDE (ICH8M), Apple */
+		PCI_DEVICE_SUB(0x8086, 0x2828, 0x106b, 0x00a0),
+		.driver_data = ich8m_apple_sata,
+	}, {
+		PCI_DEVICE_SUB(0x8086, 0x2828, 0x106b, 0x00a1),
+		.driver_data = ich8m_apple_sata,
+	}, {
+		PCI_DEVICE_SUB(0x8086, 0x2828, 0x106b, 0x00a3),
+		.driver_data = ich8m_apple_sata,
+	}, {
+		/* Mobile SATA Controller IDE (ICH8M) */
+		PCI_DEVICE(0x8086, 0x2828),
+		.driver_data = ich8_sata,
+	}, {
+		/* SATA Controller IDE (ICH9) */
+		PCI_DEVICE(0x8086, 0x2920),
+		.driver_data = ich8_sata,
+	}, {
+		/* SATA Controller IDE (ICH9) */
+		PCI_DEVICE(0x8086, 0x2921),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (ICH9) */
+		PCI_DEVICE(0x8086, 0x2926),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (ICH9M) */
+		PCI_DEVICE(0x8086, 0x2928),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (ICH9M) */
+		PCI_DEVICE(0x8086, 0x292d),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (ICH9M) */
+		PCI_DEVICE(0x8086, 0x292e),
+		.driver_data = ich8_sata,
+	}, {
+		/* SATA Controller IDE (Tolapai) */
+		PCI_DEVICE(0x8086, 0x5028),
+		.driver_data = tolapai_sata,
+	}, {
+		/* SATA Controller IDE (ICH10) */
+		PCI_DEVICE(0x8086, 0x3a00),
+		.driver_data = ich8_sata,
+	}, {
+		/* SATA Controller IDE (ICH10) */
+		PCI_DEVICE(0x8086, 0x3a06),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (ICH10) */
+		PCI_DEVICE(0x8086, 0x3a20),
+		.driver_data = ich8_sata,
+	}, {
+		/* SATA Controller IDE (ICH10) */
+		PCI_DEVICE(0x8086, 0x3a26),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (PCH) */
+		PCI_DEVICE(0x8086, 0x3b20),
+		.driver_data = ich8_sata,
+	}, {
+		/* SATA Controller IDE (PCH) */
+		PCI_DEVICE(0x8086, 0x3b21),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (PCH) */
+		PCI_DEVICE(0x8086, 0x3b26),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (PCH) */
+		PCI_DEVICE(0x8086, 0x3b28),
+		.driver_data = ich8_sata,
+	}, {
+		/* SATA Controller IDE (PCH) */
+		PCI_DEVICE(0x8086, 0x3b2d),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (PCH) */
+		PCI_DEVICE(0x8086, 0x3b2e),
+		.driver_data = ich8_sata,
+	}, {
+		/* SATA Controller IDE (CPT) */
+		PCI_DEVICE(0x8086, 0x1c00),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (CPT) */
+		PCI_DEVICE(0x8086, 0x1c01),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (CPT) */
+		PCI_DEVICE(0x8086, 0x1c08),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (CPT) */
+		PCI_DEVICE(0x8086, 0x1c09),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (PBG) */
+		PCI_DEVICE(0x8086, 0x1d00),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (PBG) */
+		PCI_DEVICE(0x8086, 0x1d08),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (Panther Point) */
+		PCI_DEVICE(0x8086, 0x1e00),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (Panther Point) */
+		PCI_DEVICE(0x8086, 0x1e01),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (Panther Point) */
+		PCI_DEVICE(0x8086, 0x1e08),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (Panther Point) */
+		PCI_DEVICE(0x8086, 0x1e09),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (Lynx Point) */
+		PCI_DEVICE(0x8086, 0x8c00),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (Lynx Point) */
+		PCI_DEVICE(0x8086, 0x8c01),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (Lynx Point) */
+		PCI_DEVICE(0x8086, 0x8c08),
+		.driver_data = ich8_2port_sata_snb,
+	}, {
+		/* SATA Controller IDE (Lynx Point) */
+		PCI_DEVICE(0x8086, 0x8c09),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (Lynx Point-LP) */
+		PCI_DEVICE(0x8086, 0x9c00),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (Lynx Point-LP) */
+		PCI_DEVICE(0x8086, 0x9c01),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (Lynx Point-LP) */
+		PCI_DEVICE(0x8086, 0x9c08),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (Lynx Point-LP) */
+		PCI_DEVICE(0x8086, 0x9c09),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (DH89xxCC) */
+		PCI_DEVICE(0x8086, 0x2326),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (Avoton) */
+		PCI_DEVICE(0x8086, 0x1f20),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (Avoton) */
+		PCI_DEVICE(0x8086, 0x1f21),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (Avoton) */
+		PCI_DEVICE(0x8086, 0x1f30),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (Avoton) */
+		PCI_DEVICE(0x8086, 0x1f31),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (Wellsburg) */
+		PCI_DEVICE(0x8086, 0x8d00),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (Wellsburg) */
+		PCI_DEVICE(0x8086, 0x8d08),
+		.driver_data = ich8_2port_sata_snb,
+	}, {
+		/* SATA Controller IDE (Wellsburg) */
+		PCI_DEVICE(0x8086, 0x8d60),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (Wellsburg) */
+		PCI_DEVICE(0x8086, 0x8d68),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (BayTrail) */
+		PCI_DEVICE(0x8086, 0x0F20),
+		.driver_data = ich8_2port_sata_byt,
+	}, {
+		PCI_DEVICE(0x8086, 0x0F21),
+		.driver_data = ich8_2port_sata_byt,
+	}, {
+		/* SATA Controller IDE (Coleto Creek) */
+		PCI_DEVICE(0x8086, 0x23a6),
+		.driver_data = ich8_2port_sata,
+	}, {
+		/* SATA Controller IDE (9 Series) */
+		PCI_DEVICE(0x8086, 0x8c88),
+		.driver_data = ich8_2port_sata_snb,
+	}, {
+		/* SATA Controller IDE (9 Series) */
+		PCI_DEVICE(0x8086, 0x8c89),
+		.driver_data = ich8_2port_sata_snb,
+	}, {
+		/* SATA Controller IDE (9 Series) */
+		PCI_DEVICE(0x8086, 0x8c80),
+		.driver_data = ich8_sata_snb,
+	}, {
+		/* SATA Controller IDE (9 Series) */
+		PCI_DEVICE(0x8086, 0x8c81),
+		.driver_data = ich8_sata_snb,
+	},
 
 	{ }	/* terminate list */
 };
@@ -833,10 +997,15 @@ static int piix_sidpr_set_lpm(struct ata_link *link, enum ata_lpm_policy policy,
 
 static bool piix_irq_check(struct ata_port *ap)
 {
+	unsigned char host_stat;
+
 	if (unlikely(!ap->ioaddr.bmdma_addr))
 		return false;
 
-	return ap->ops->bmdma_status(ap) & ATA_DMA_INTR;
+	host_stat = ap->ops->bmdma_status(ap);
+	trace_ata_bmdma_status(ap, host_stat);
+
+	return host_stat & ATA_DMA_INTR;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -855,6 +1024,12 @@ static int piix_broken_suspend(void)
 			.matches = {
 				DMI_MATCH(DMI_SYS_VENDOR, "TOSHIBA"),
 				DMI_MATCH(DMI_PRODUCT_NAME, "Tecra M3"),
+			},
+		},
+		{
+			.ident = "TECRA M3",
+			.matches = {
+				DMI_MATCH(DMI_OEM_STRING, "Tecra M3,"),
 			},
 		},
 		{
@@ -972,17 +1147,9 @@ static int piix_broken_suspend(void)
 
 		{ }	/* terminate list */
 	};
-	static const char *oemstrs[] = {
-		"Tecra M3,",
-	};
-	int i;
 
 	if (dmi_check_system(sysids))
 		return 1;
-
-	for (i = 0; i < ARRAY_SIZE(oemstrs); i++)
-		if (dmi_find_device(DMI_DEV_TYPE_OEM_STRING, oemstrs[i], NULL))
-			return 1;
 
 	/* TECRA M4 sometimes forgets its identify and reports bogus
 	 * DMI information.  As the bogus information is a bit
@@ -1006,11 +1173,8 @@ static int piix_pci_device_suspend(struct pci_dev *pdev, pm_message_t mesg)
 {
 	struct ata_host *host = pci_get_drvdata(pdev);
 	unsigned long flags;
-	int rc = 0;
 
-	rc = ata_host_suspend(host, mesg);
-	if (rc)
-		return rc;
+	ata_host_suspend(host, mesg);
 
 	/* Some braindamaged ACPI suspend implementations expect the
 	 * controller to be awake on entry; otherwise, it burns cpu
@@ -1075,7 +1239,7 @@ static u8 piix_vmw_bmdma_status(struct ata_port *ap)
 	return ata_bmdma_status(ap) & ~ATA_DMA_ERR;
 }
 
-static struct scsi_host_template piix_sht = {
+static const struct scsi_host_template piix_sht = {
 	ATA_BMDMA_SHT(DRV_NAME),
 };
 
@@ -1090,7 +1254,7 @@ static struct ata_port_operations piix_pata_ops = {
 	.cable_detect		= ata_cable_40wire,
 	.set_piomode		= piix_set_piomode,
 	.set_dmamode		= piix_set_dmamode,
-	.prereset		= piix_pata_prereset,
+	.reset.prereset		= piix_pata_prereset,
 };
 
 static struct ata_port_operations piix_vmw_ops = {
@@ -1104,19 +1268,22 @@ static struct ata_port_operations ich_pata_ops = {
 	.set_dmamode		= ich_set_dmamode,
 };
 
-static struct device_attribute *piix_sidpr_shost_attrs[] = {
-	&dev_attr_link_power_management_policy,
+static struct attribute *piix_sidpr_shost_attrs[] = {
+	&dev_attr_link_power_management_supported.attr,
+	&dev_attr_link_power_management_policy.attr,
 	NULL
 };
 
-static struct scsi_host_template piix_sidpr_sht = {
+ATTRIBUTE_GROUPS(piix_sidpr_shost);
+
+static const struct scsi_host_template piix_sidpr_sht = {
 	ATA_BMDMA_SHT(DRV_NAME),
-	.shost_attrs		= piix_sidpr_shost_attrs,
+	.shost_groups		= piix_sidpr_shost_groups,
 };
 
 static struct ata_port_operations piix_sidpr_sata_ops = {
 	.inherits		= &piix_sata_ops,
-	.hardreset		= sata_std_hardreset,
+	.reset.hardreset	= sata_std_hardreset,
 	.scr_read		= piix_sidpr_scr_read,
 	.scr_write		= piix_sidpr_scr_write,
 	.set_lpm		= piix_sidpr_set_lpm,
@@ -1362,7 +1529,6 @@ static void piix_init_pcs(struct ata_host *host,
 	new_pcs = pcs | map_db->port_enable;
 
 	if (new_pcs != pcs) {
-		DPRINTK("updating PCS from 0x%x to 0x%x\n", pcs, new_pcs);
 		pci_write_config_word(pdev, ICH5_PCS, new_pcs);
 		msleep(150);
 	}
@@ -1461,7 +1627,6 @@ static int piix_init_sidpr(struct ata_host *host)
 		if (hpriv->map[i] == IDE)
 			return 0;
 
-	/* is it blacklisted? */
 	if (piix_no_sidpr(host))
 		return 0;
 
@@ -1660,7 +1825,7 @@ static int piix_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct device *dev = &pdev->dev;
 	struct ata_port_info port_info[2];
 	const struct ata_port_info *ppi[] = { &port_info[0], &port_info[1] };
-	struct scsi_host_template *sht = &piix_sht;
+	const struct scsi_host_template *sht = &piix_sht;
 	unsigned long port_flags;
 	struct ata_host *host;
 	struct piix_host_priv *hpriv;
@@ -1741,7 +1906,7 @@ static int piix_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	 * message-signalled interrupts currently).
 	 */
 	if (port_flags & PIIX_FLAG_CHECKINTR)
-		pci_intx(pdev, 1);
+		pcim_intx(pdev, 1);
 
 	if (piix_check_450nx_errata(pdev)) {
 		/* This writes into the master table but it does not
@@ -1786,14 +1951,12 @@ static int __init piix_init(void)
 {
 	int rc;
 
-	DPRINTK("pci_register_driver\n");
 	rc = pci_register_driver(&piix_pci_driver);
 	if (rc)
 		return rc;
 
 	in_module_init = 0;
 
-	DPRINTK("done\n");
 	return 0;
 }
 

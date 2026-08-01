@@ -1,22 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This file is part of wl18xx
  *
  * Copyright (C) 2011 Texas Instruments Inc.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #include "../wlcore/wlcore.h"
@@ -143,6 +129,14 @@ static void wl18xx_tx_complete_packet(struct wl1271 *wl, u8 tx_stat_byte)
 	wl1271_free_tx_id(wl, id);
 }
 
+static u8 wl18xx_next_tx_idx(u8 idx)
+{
+	if (++idx >= WL18XX_FW_MAX_TX_STATUS_DESC)
+		idx = 0;
+
+	return idx;
+}
+
 void wl18xx_tx_immediate_complete(struct wl1271 *wl)
 {
 	struct wl18xx_fw_status_priv *status_priv =
@@ -175,9 +169,8 @@ void wl18xx_tx_immediate_complete(struct wl1271 *wl)
 		return;
 	}
 
-	for (i = priv->last_fw_rls_idx;
-	     i != status_priv->fw_release_idx;
-	     i = (i + 1) % WL18XX_FW_MAX_TX_STATUS_DESC) {
+	for (i = priv->last_fw_rls_idx; i != status_priv->fw_release_idx;
+	     i = wl18xx_next_tx_idx(i)) {
 		wl18xx_tx_complete_packet(wl,
 			status_priv->released_tx_desc[i]);
 

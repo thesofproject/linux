@@ -3,19 +3,6 @@
 // Socionext UniPhier AIO Compress Audio driver.
 //
 // Copyright (c) 2017-2018 Socionext Inc.
-//
-// This program is free software; you can redistribute it and/or
-// modify it under the terms of the GNU General Public License
-// as published by the Free Software Foundation; version 2
-// of the License.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
-//
-// You should have received a copy of the GNU General Public License
-// along with this program; if not, see <http://www.gnu.org/licenses/>.
 
 #include <linux/bitfield.h>
 #include <linux/circ_buf.h>
@@ -29,14 +16,16 @@
 
 #include "aio.h"
 
-static int uniphier_aio_compr_prepare(struct snd_compr_stream *cstream);
-static int uniphier_aio_compr_hw_free(struct snd_compr_stream *cstream);
+static int uniphier_aio_compr_prepare(struct snd_soc_component *component,
+				      struct snd_compr_stream *cstream);
+static int uniphier_aio_compr_hw_free(struct snd_soc_component *component,
+				      struct snd_compr_stream *cstream);
 
 static int uniphier_aio_comprdma_new(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_compr *compr = rtd->compr;
 	struct device *dev = compr->card->dev;
-	struct uniphier_aio *aio = uniphier_priv(rtd->cpu_dai);
+	struct uniphier_aio *aio = uniphier_priv(snd_soc_rtd_to_cpu(rtd, 0));
 	struct uniphier_aio_sub *sub = &aio->sub[compr->direction];
 	size_t size = AUD_RING_SIZE;
 	int dma_dir = DMA_FROM_DEVICE, ret;
@@ -69,7 +58,7 @@ static int uniphier_aio_comprdma_free(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_compr *compr = rtd->compr;
 	struct device *dev = compr->card->dev;
-	struct uniphier_aio *aio = uniphier_priv(rtd->cpu_dai);
+	struct uniphier_aio *aio = uniphier_priv(snd_soc_rtd_to_cpu(rtd, 0));
 	struct uniphier_aio_sub *sub = &aio->sub[compr->direction];
 	int dma_dir = DMA_FROM_DEVICE;
 
@@ -83,10 +72,11 @@ static int uniphier_aio_comprdma_free(struct snd_soc_pcm_runtime *rtd)
 	return 0;
 }
 
-static int uniphier_aio_compr_open(struct snd_compr_stream *cstream)
+static int uniphier_aio_compr_open(struct snd_soc_component *component,
+				   struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	struct uniphier_aio *aio = uniphier_priv(rtd->cpu_dai);
+	struct uniphier_aio *aio = uniphier_priv(snd_soc_rtd_to_cpu(rtd, 0));
 	struct uniphier_aio_sub *sub = &aio->sub[cstream->direction];
 	int ret;
 
@@ -108,14 +98,15 @@ static int uniphier_aio_compr_open(struct snd_compr_stream *cstream)
 	return 0;
 }
 
-static int uniphier_aio_compr_free(struct snd_compr_stream *cstream)
+static int uniphier_aio_compr_free(struct snd_soc_component *component,
+				   struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	struct uniphier_aio *aio = uniphier_priv(rtd->cpu_dai);
+	struct uniphier_aio *aio = uniphier_priv(snd_soc_rtd_to_cpu(rtd, 0));
 	struct uniphier_aio_sub *sub = &aio->sub[cstream->direction];
 	int ret;
 
-	ret = uniphier_aio_compr_hw_free(cstream);
+	ret = uniphier_aio_compr_hw_free(component, cstream);
 	if (ret)
 		return ret;
 	ret = uniphier_aio_comprdma_free(rtd);
@@ -127,11 +118,12 @@ static int uniphier_aio_compr_free(struct snd_compr_stream *cstream)
 	return 0;
 }
 
-static int uniphier_aio_compr_get_params(struct snd_compr_stream *cstream,
+static int uniphier_aio_compr_get_params(struct snd_soc_component *component,
+					 struct snd_compr_stream *cstream,
 					 struct snd_codec *params)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	struct uniphier_aio *aio = uniphier_priv(rtd->cpu_dai);
+	struct uniphier_aio *aio = uniphier_priv(snd_soc_rtd_to_cpu(rtd, 0));
 	struct uniphier_aio_sub *sub = &aio->sub[cstream->direction];
 
 	*params = sub->cparams.codec;
@@ -139,14 +131,14 @@ static int uniphier_aio_compr_get_params(struct snd_compr_stream *cstream,
 	return 0;
 }
 
-static int uniphier_aio_compr_set_params(struct snd_compr_stream *cstream,
+static int uniphier_aio_compr_set_params(struct snd_soc_component *component,
+					 struct snd_compr_stream *cstream,
 					 struct snd_compr_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	struct uniphier_aio *aio = uniphier_priv(rtd->cpu_dai);
+	struct uniphier_aio *aio = uniphier_priv(snd_soc_rtd_to_cpu(rtd, 0));
 	struct uniphier_aio_sub *sub = &aio->sub[cstream->direction];
 	struct device *dev = &aio->chip->pdev->dev;
-	int ret;
 
 	if (params->codec.id != SND_AUDIOCODEC_IEC61937) {
 		dev_err(dev, "Codec ID is not supported(%d)\n",
@@ -168,17 +160,14 @@ static int uniphier_aio_compr_set_params(struct snd_compr_stream *cstream,
 	aio_port_reset(sub);
 	aio_src_reset(sub);
 
-	ret = uniphier_aio_compr_prepare(cstream);
-	if (ret)
-		return ret;
-
-	return 0;
+	return uniphier_aio_compr_prepare(component, cstream);
 }
 
-static int uniphier_aio_compr_hw_free(struct snd_compr_stream *cstream)
+static int uniphier_aio_compr_hw_free(struct snd_soc_component *component,
+				      struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	struct uniphier_aio *aio = uniphier_priv(rtd->cpu_dai);
+	struct uniphier_aio *aio = uniphier_priv(snd_soc_rtd_to_cpu(rtd, 0));
 	struct uniphier_aio_sub *sub = &aio->sub[cstream->direction];
 
 	sub->setting = 0;
@@ -186,25 +175,24 @@ static int uniphier_aio_compr_hw_free(struct snd_compr_stream *cstream)
 	return 0;
 }
 
-static int uniphier_aio_compr_prepare(struct snd_compr_stream *cstream)
+static int uniphier_aio_compr_prepare(struct snd_soc_component *component,
+				      struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_compr_runtime *runtime = cstream->runtime;
-	struct uniphier_aio *aio = uniphier_priv(rtd->cpu_dai);
+	struct uniphier_aio *aio = uniphier_priv(snd_soc_rtd_to_cpu(rtd, 0));
 	struct uniphier_aio_sub *sub = &aio->sub[cstream->direction];
 	int bytes = runtime->fragment_size;
-	unsigned long flags;
 	int ret;
 
 	ret = aiodma_ch_set_param(sub);
 	if (ret)
 		return ret;
 
-	spin_lock_irqsave(&sub->lock, flags);
-	ret = aiodma_rb_set_buffer(sub, sub->compr_addr,
-				   sub->compr_addr + sub->compr_bytes,
-				   bytes);
-	spin_unlock_irqrestore(&sub->lock, flags);
+	scoped_guard(spinlock_irqsave, &sub->lock)
+		ret = aiodma_rb_set_buffer(sub, sub->compr_addr,
+					   sub->compr_addr + sub->compr_bytes,
+					   bytes);
 	if (ret)
 		return ret;
 
@@ -223,18 +211,18 @@ static int uniphier_aio_compr_prepare(struct snd_compr_stream *cstream)
 	return 0;
 }
 
-static int uniphier_aio_compr_trigger(struct snd_compr_stream *cstream,
+static int uniphier_aio_compr_trigger(struct snd_soc_component *component,
+				      struct snd_compr_stream *cstream,
 				      int cmd)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_compr_runtime *runtime = cstream->runtime;
-	struct uniphier_aio *aio = uniphier_priv(rtd->cpu_dai);
+	struct uniphier_aio *aio = uniphier_priv(snd_soc_rtd_to_cpu(rtd, 0));
 	struct uniphier_aio_sub *sub = &aio->sub[cstream->direction];
 	struct device *dev = &aio->chip->pdev->dev;
 	int bytes = runtime->fragment_size, ret = 0;
-	unsigned long flags;
 
-	spin_lock_irqsave(&sub->lock, flags);
+	guard(spinlock_irqsave)(&sub->lock);
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 		aiodma_rb_sync(sub, sub->compr_addr, sub->compr_bytes, bytes);
@@ -251,23 +239,22 @@ static int uniphier_aio_compr_trigger(struct snd_compr_stream *cstream,
 		dev_warn(dev, "Unknown trigger(%d)\n", cmd);
 		ret = -EINVAL;
 	}
-	spin_unlock_irqrestore(&sub->lock, flags);
 
 	return ret;
 }
 
-static int uniphier_aio_compr_pointer(struct snd_compr_stream *cstream,
-				      struct snd_compr_tstamp *tstamp)
+static int uniphier_aio_compr_pointer(struct snd_soc_component *component,
+				      struct snd_compr_stream *cstream,
+				      struct snd_compr_tstamp64 *tstamp)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_compr_runtime *runtime = cstream->runtime;
-	struct uniphier_aio *aio = uniphier_priv(rtd->cpu_dai);
+	struct uniphier_aio *aio = uniphier_priv(snd_soc_rtd_to_cpu(rtd, 0));
 	struct uniphier_aio_sub *sub = &aio->sub[cstream->direction];
 	int bytes = runtime->fragment_size;
-	unsigned long flags;
 	u32 pos;
 
-	spin_lock_irqsave(&sub->lock, flags);
+	guard(spinlock_irqsave)(&sub->lock);
 
 	aiodma_rb_sync(sub, sub->compr_addr, sub->compr_bytes, bytes);
 
@@ -280,8 +267,6 @@ static int uniphier_aio_compr_pointer(struct snd_compr_stream *cstream,
 		tstamp->copied_total = sub->rd_total;
 	}
 	tstamp->byte_offset = pos;
-
-	spin_unlock_irqrestore(&sub->lock, flags);
 
 	return 0;
 }
@@ -329,17 +314,17 @@ static int aio_compr_send_to_hw(struct uniphier_aio_sub *sub,
 	return 0;
 }
 
-static int uniphier_aio_compr_copy(struct snd_compr_stream *cstream,
+static int uniphier_aio_compr_copy(struct snd_soc_component *component,
+				   struct snd_compr_stream *cstream,
 				   char __user *buf, size_t count)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_compr_runtime *runtime = cstream->runtime;
 	struct device *carddev = rtd->compr->card->dev;
-	struct uniphier_aio *aio = uniphier_priv(rtd->cpu_dai);
+	struct uniphier_aio *aio = uniphier_priv(snd_soc_rtd_to_cpu(rtd, 0));
 	struct uniphier_aio_sub *sub = &aio->sub[cstream->direction];
 	size_t cnt = min_t(size_t, count, aio_rb_space_to_end(sub) / 2);
 	int bytes = runtime->fragment_size;
-	unsigned long flags;
 	size_t s;
 	int ret;
 
@@ -367,7 +352,7 @@ static int uniphier_aio_compr_copy(struct snd_compr_stream *cstream,
 	if (ret)
 		return -EFAULT;
 
-	spin_lock_irqsave(&sub->lock, flags);
+	guard(spinlock_irqsave)(&sub->lock);
 
 	sub->threshold = 2 * bytes;
 	aiodma_rb_set_threshold(sub, sub->compr_bytes, 2 * bytes);
@@ -383,12 +368,11 @@ static int uniphier_aio_compr_copy(struct snd_compr_stream *cstream,
 	}
 	aiodma_rb_sync(sub, sub->compr_addr, sub->compr_bytes, bytes);
 
-	spin_unlock_irqrestore(&sub->lock, flags);
-
 	return cnt;
 }
 
-static int uniphier_aio_compr_get_caps(struct snd_compr_stream *cstream,
+static int uniphier_aio_compr_get_caps(struct snd_soc_component *component,
+				       struct snd_compr_stream *cstream,
 				       struct snd_compr_caps *caps)
 {
 	caps->num_codecs = 1;
@@ -414,7 +398,8 @@ static const struct snd_compr_codec_caps caps_iec = {
 	.descriptor[0].formats = 0,
 };
 
-static int uniphier_aio_compr_get_codec_caps(struct snd_compr_stream *stream,
+static int uniphier_aio_compr_get_codec_caps(struct snd_soc_component *component,
+					     struct snd_compr_stream *stream,
 					     struct snd_compr_codec_caps *codec)
 {
 	if (codec->codec == SND_AUDIOCODEC_IEC61937)
@@ -425,7 +410,7 @@ static int uniphier_aio_compr_get_codec_caps(struct snd_compr_stream *stream,
 	return 0;
 }
 
-const struct snd_compr_ops uniphier_aio_compr_ops = {
+const struct snd_compress_ops uniphier_aio_compress_ops = {
 	.open           = uniphier_aio_compr_open,
 	.free           = uniphier_aio_compr_free,
 	.get_params     = uniphier_aio_compr_get_params,

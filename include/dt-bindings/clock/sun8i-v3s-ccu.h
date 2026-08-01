@@ -96,12 +96,16 @@
 #define CLK_TCON0		64
 #define CLK_CSI_MISC		65
 #define CLK_CSI0_MCLK		66
-#define CLK_CSI1_SCLK		67
+#define CLK_CSI_SCLK		67
 #define CLK_CSI1_MCLK		68
 #define CLK_VE			69
 #define CLK_AC_DIG		70
 #define CLK_AVS			71
 
 #define CLK_MIPI_CSI		73
+
+/* Clocks not available on V3s */
+#define CLK_BUS_I2S0		75
+#define CLK_I2S0		76
 
 #endif /* _DT_BINDINGS_CLK_SUN8I_V3S_H_ */

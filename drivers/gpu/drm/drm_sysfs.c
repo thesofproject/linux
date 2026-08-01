@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 
 /*
  * drm_sysfs.c - Modifications to drm_sysfs_class.c to support
@@ -7,20 +8,33 @@
  * Copyright (c) 2004 Jon Smirl <jonsmirl@gmail.com>
  * Copyright (c) 2003-2004 Greg Kroah-Hartman <greg@kroah.com>
  * Copyright (c) 2003-2004 IBM Corp.
- *
- * This file is released under the GPLv2
- *
  */
 
+#include <linux/acpi.h>
+#include <linux/component.h>
 #include <linux/device.h>
-#include <linux/kdev_t.h>
-#include <linux/gfp.h>
 #include <linux/err.h>
 #include <linux/export.h>
+#include <linux/gfp.h>
+#include <linux/i2c.h>
+#include <linux/kdev_t.h>
+#include <linux/pci.h>
+#include <linux/property.h>
+#include <linux/slab.h>
 
+#include <drm/drm_accel.h>
+#include <drm/drm_connector.h>
+#include <drm/drm_device.h>
+#include <drm/drm_file.h>
+#include <drm/drm_modes.h>
+#include <drm/drm_print.h>
+#include <drm/drm_property.h>
 #include <drm/drm_sysfs.h>
-#include <drm/drmP.h>
+
+#include <asm/video.h>
+
 #include "drm_internal.h"
+#include "drm_crtc_internal.h"
 
 #define to_drm_minor(d) dev_get_drvdata(d)
 #define to_drm_connector(d) dev_get_drvdata(d)
@@ -43,12 +57,77 @@ static struct device_type drm_sysfs_device_minor = {
 	.name = "drm_minor"
 };
 
+static struct device_type drm_sysfs_device_connector = {
+	.name = "drm_connector",
+};
+
 struct class *drm_class;
 
-static char *drm_devnode(struct device *dev, umode_t *mode)
+#ifdef CONFIG_ACPI
+static bool drm_connector_acpi_bus_match(struct device *dev)
+{
+	return dev->type == &drm_sysfs_device_connector;
+}
+
+static struct acpi_device *drm_connector_acpi_find_companion(struct device *dev)
+{
+	struct drm_connector *connector = to_drm_connector(dev);
+
+	return to_acpi_device_node(connector->fwnode);
+}
+
+static struct acpi_bus_type drm_connector_acpi_bus = {
+	.name = "drm_connector",
+	.match = drm_connector_acpi_bus_match,
+	.find_companion = drm_connector_acpi_find_companion,
+};
+
+static void drm_sysfs_acpi_register(void)
+{
+	register_acpi_bus_type(&drm_connector_acpi_bus);
+}
+
+static void drm_sysfs_acpi_unregister(void)
+{
+	unregister_acpi_bus_type(&drm_connector_acpi_bus);
+}
+#else
+static void drm_sysfs_acpi_register(void) { }
+static void drm_sysfs_acpi_unregister(void) { }
+#endif
+
+static char *drm_devnode(const struct device *dev, umode_t *mode)
 {
 	return kasprintf(GFP_KERNEL, "dri/%s", dev_name(dev));
 }
+
+static int typec_connector_bind(struct device *dev,
+				struct device *typec_connector, void *data)
+{
+	int ret;
+
+	ret = sysfs_create_link(&dev->kobj, &typec_connector->kobj, "typec_connector");
+	if (ret)
+		return ret;
+
+	ret = sysfs_create_link(&typec_connector->kobj, &dev->kobj, "drm_connector");
+	if (ret)
+		sysfs_remove_link(&dev->kobj, "typec_connector");
+
+	return ret;
+}
+
+static void typec_connector_unbind(struct device *dev,
+				   struct device *typec_connector, void *data)
+{
+	sysfs_remove_link(&typec_connector->kobj, "drm_connector");
+	sysfs_remove_link(&dev->kobj, "typec_connector");
+}
+
+static const struct component_ops typec_connector_ops = {
+	.bind = typec_connector_bind,
+	.unbind = typec_connector_unbind,
+};
 
 static CLASS_ATTR_STRING(version, S_IRUGO, "drm 1.1.0 20060810");
 
@@ -66,7 +145,7 @@ int drm_sysfs_init(void)
 {
 	int err;
 
-	drm_class = class_create(THIS_MODULE, "drm");
+	drm_class = class_create("drm");
 	if (IS_ERR(drm_class))
 		return PTR_ERR(drm_class);
 
@@ -78,6 +157,8 @@ int drm_sysfs_init(void)
 	}
 
 	drm_class->devnode = drm_devnode;
+
+	drm_sysfs_acpi_register();
 	return 0;
 }
 
@@ -90,9 +171,15 @@ void drm_sysfs_destroy(void)
 {
 	if (IS_ERR_OR_NULL(drm_class))
 		return;
+	drm_sysfs_acpi_unregister();
 	class_remove_file(drm_class, &class_attr_version.attr);
 	class_destroy(drm_class);
 	drm_class = NULL;
+}
+
+static void drm_sysfs_release(struct device *dev)
+{
+	kfree(dev);
 }
 
 /*
@@ -125,10 +212,9 @@ static ssize_t status_store(struct device *device,
 		ret = -EINVAL;
 
 	if (old_force != connector->force || !connector->force) {
-		DRM_DEBUG_KMS("[CONNECTOR:%d:%s] force updated from %d to %d or reprobing\n",
-			      connector->base.id,
-			      connector->name,
-			      old_force, connector->force);
+		drm_dbg_kms(dev, "[CONNECTOR:%d:%s] force updated from %d to %d or reprobing\n",
+			    connector->base.id, connector->name,
+			    old_force, connector->force);
 
 		connector->funcs->fill_modes(connector,
 					     dev->mode_config.max_width,
@@ -149,8 +235,8 @@ static ssize_t status_show(struct device *device,
 
 	status = READ_ONCE(connector->status);
 
-	return snprintf(buf, PAGE_SIZE, "%s\n",
-			drm_get_connector_status_name(status));
+	return sysfs_emit(buf, "%s\n",
+			  drm_get_connector_status_name(status));
 }
 
 static ssize_t dpms_show(struct device *device,
@@ -162,8 +248,7 @@ static ssize_t dpms_show(struct device *device,
 
 	dpms = READ_ONCE(connector->dpms);
 
-	return snprintf(buf, PAGE_SIZE, "%s\n",
-			drm_get_dpms_name(dpms));
+	return sysfs_emit(buf, "%s\n", drm_get_dpms_name(dpms));
 }
 
 static ssize_t enabled_show(struct device *device,
@@ -175,38 +260,18 @@ static ssize_t enabled_show(struct device *device,
 
 	enabled = READ_ONCE(connector->encoder);
 
-	return snprintf(buf, PAGE_SIZE, enabled ? "enabled\n" : "disabled\n");
+	return sysfs_emit(buf, enabled ? "enabled\n" : "disabled\n");
 }
 
 static ssize_t edid_show(struct file *filp, struct kobject *kobj,
-			 struct bin_attribute *attr, char *buf, loff_t off,
+			 const struct bin_attribute *attr, char *buf, loff_t off,
 			 size_t count)
 {
 	struct device *connector_dev = kobj_to_dev(kobj);
 	struct drm_connector *connector = to_drm_connector(connector_dev);
-	unsigned char *edid;
-	size_t size;
-	ssize_t ret = 0;
+	ssize_t ret;
 
-	mutex_lock(&connector->dev->mode_config.mutex);
-	if (!connector->edid_blob_ptr)
-		goto unlock;
-
-	edid = connector->edid_blob_ptr->data;
-	size = connector->edid_blob_ptr->length;
-	if (!edid)
-		goto unlock;
-
-	if (off >= size)
-		goto unlock;
-
-	if (off + count > size)
-		count = size - off;
-	memcpy(buf, edid + off, count);
-
-	ret = count;
-unlock:
-	mutex_unlock(&connector->dev->mode_config.mutex);
+	ret = drm_edid_connector_property_show(connector, buf, off, count);
 
 	return ret;
 }
@@ -221,7 +286,7 @@ static ssize_t modes_show(struct device *device,
 
 	mutex_lock(&connector->dev->mode_config.mutex);
 	list_for_each_entry(mode, &connector->modes, head) {
-		written += snprintf(buf + written, PAGE_SIZE - written, "%s\n",
+		written += scnprintf(buf + written, PAGE_SIZE - written, "%s\n",
 				    mode->name);
 	}
 	mutex_unlock(&connector->dev->mode_config.mutex);
@@ -229,27 +294,38 @@ static ssize_t modes_show(struct device *device,
 	return written;
 }
 
+static ssize_t connector_id_show(struct device *device,
+				 struct device_attribute *attr,
+				 char *buf)
+{
+	struct drm_connector *connector = to_drm_connector(device);
+
+	return sysfs_emit(buf, "%d\n", connector->base.id);
+}
+
 static DEVICE_ATTR_RW(status);
 static DEVICE_ATTR_RO(enabled);
 static DEVICE_ATTR_RO(dpms);
 static DEVICE_ATTR_RO(modes);
+static DEVICE_ATTR_RO(connector_id);
 
 static struct attribute *connector_dev_attrs[] = {
 	&dev_attr_status.attr,
 	&dev_attr_enabled.attr,
 	&dev_attr_dpms.attr,
 	&dev_attr_modes.attr,
+	&dev_attr_connector_id.attr,
 	NULL
 };
 
-static struct bin_attribute edid_attr = {
+static const struct bin_attribute edid_attr = {
 	.attr.name = "edid",
 	.attr.mode = 0444,
 	.size = 0,
 	.read = edid_show,
 };
 
-static struct bin_attribute *connector_bin_attrs[] = {
+static const struct bin_attribute *const connector_bin_attrs[] = {
 	&edid_attr,
 	NULL
 };
@@ -267,38 +343,91 @@ static const struct attribute_group *connector_dev_groups[] = {
 int drm_sysfs_connector_add(struct drm_connector *connector)
 {
 	struct drm_device *dev = connector->dev;
+	struct device *kdev;
+	int r;
 
 	if (connector->kdev)
 		return 0;
 
-	connector->kdev =
-		device_create_with_groups(drm_class, dev->primary->kdev, 0,
-					  connector, connector_dev_groups,
-					  "card%d-%s", dev->primary->index,
-					  connector->name);
-	DRM_DEBUG("adding \"%s\" to sysfs\n",
-		  connector->name);
+	kdev = kzalloc_obj(*kdev);
+	if (!kdev)
+		return -ENOMEM;
 
-	if (IS_ERR(connector->kdev)) {
-		DRM_ERROR("failed to register connector device: %ld\n", PTR_ERR(connector->kdev));
-		return PTR_ERR(connector->kdev);
+	device_initialize(kdev);
+	kdev->class = drm_class;
+	kdev->type = &drm_sysfs_device_connector;
+	kdev->parent = dev->primary->kdev;
+	kdev->groups = connector_dev_groups;
+	kdev->release = drm_sysfs_release;
+	dev_set_drvdata(kdev, connector);
+
+	r = dev_set_name(kdev, "card%d-%s", dev->primary->index, connector->name);
+	if (r)
+		goto err_free;
+
+	drm_dbg_kms(dev, "[CONNECTOR:%d:%s] adding connector to sysfs\n",
+		    connector->base.id, connector->name);
+
+	r = device_add(kdev);
+	if (r) {
+		drm_err(dev, "failed to register connector device: %d\n", r);
+		goto err_free;
 	}
 
-	/* Let userspace know we have a new connector */
-	drm_sysfs_hotplug_event(dev);
+	connector->kdev = kdev;
+
+	if (dev_fwnode(kdev)) {
+		r = component_add(kdev, &typec_connector_ops);
+		if (r)
+			drm_err(dev, "failed to add component to create link to typec connector\n");
+	}
 
 	return 0;
+
+err_free:
+	put_device(kdev);
+	return r;
+}
+
+int drm_sysfs_connector_add_late(struct drm_connector *connector)
+{
+	if (connector->ddc)
+		return sysfs_create_link(&connector->kdev->kobj,
+					 &connector->ddc->dev.kobj, "ddc");
+
+	return 0;
+}
+
+void drm_sysfs_connector_remove_early(struct drm_connector *connector)
+{
+	if (connector->ddc)
+		sysfs_remove_link(&connector->kdev->kobj, "ddc");
 }
 
 void drm_sysfs_connector_remove(struct drm_connector *connector)
 {
 	if (!connector->kdev)
 		return;
-	DRM_DEBUG("removing \"%s\" from sysfs\n",
-		  connector->name);
+
+	if (dev_fwnode(connector->kdev))
+		component_del(connector->kdev, &typec_connector_ops);
+
+	drm_dbg_kms(connector->dev,
+		    "[CONNECTOR:%d:%s] removing connector from sysfs\n",
+		    connector->base.id, connector->name);
 
 	device_unregister(connector->kdev);
 	connector->kdev = NULL;
+}
+
+void drm_sysfs_lease_event(struct drm_device *dev)
+{
+	char *event_string = "LEASE=1";
+	char *envp[] = { event_string, NULL };
+
+	drm_dbg_lease(dev, "generating lease event\n");
+
+	kobject_uevent_env(&dev->primary->kdev->kobj, KOBJ_CHANGE, envp);
 }
 
 /**
@@ -308,22 +437,116 @@ void drm_sysfs_connector_remove(struct drm_connector *connector)
  * Send a uevent for the DRM device specified by @dev.  Currently we only
  * set HOTPLUG=1 in the uevent environment, but this could be expanded to
  * deal with other types of events.
+ *
+ * Any new uapi should be using the drm_sysfs_connector_status_event()
+ * for uevents on connector status change.
  */
 void drm_sysfs_hotplug_event(struct drm_device *dev)
 {
 	char *event_string = "HOTPLUG=1";
 	char *envp[] = { event_string, NULL };
 
-	DRM_DEBUG("generating hotplug event\n");
+	drm_dbg_kms(dev, "generating hotplug event\n");
 
 	kobject_uevent_env(&dev->primary->kdev->kobj, KOBJ_CHANGE, envp);
 }
 EXPORT_SYMBOL(drm_sysfs_hotplug_event);
 
-static void drm_sysfs_release(struct device *dev)
+/**
+ * drm_sysfs_connector_hotplug_event - generate a DRM uevent for any connector
+ * change
+ * @connector: connector which has changed
+ *
+ * Send a uevent for the DRM connector specified by @connector. This will send
+ * a uevent with the properties HOTPLUG=1 and CONNECTOR.
+ */
+void drm_sysfs_connector_hotplug_event(struct drm_connector *connector)
 {
-	kfree(dev);
+	struct drm_device *dev = connector->dev;
+	char hotplug_str[] = "HOTPLUG=1", conn_id[21];
+	char *envp[] = { hotplug_str, conn_id, NULL };
+
+	snprintf(conn_id, sizeof(conn_id),
+		 "CONNECTOR=%u", connector->base.id);
+
+	drm_dbg_kms(connector->dev,
+		    "[CONNECTOR:%d:%s] generating connector hotplug event\n",
+		    connector->base.id, connector->name);
+
+	kobject_uevent_env(&dev->primary->kdev->kobj, KOBJ_CHANGE, envp);
 }
+EXPORT_SYMBOL(drm_sysfs_connector_hotplug_event);
+
+/**
+ * drm_sysfs_connector_property_event - generate a DRM uevent for connector
+ * property change
+ * @connector: connector on which property changed
+ * @property: connector property which has changed.
+ *
+ * Send a uevent for the specified DRM connector and property.  Currently we
+ * set HOTPLUG=1 and connector id along with the attached property id
+ * related to the change.
+ */
+void drm_sysfs_connector_property_event(struct drm_connector *connector,
+					struct drm_property *property)
+{
+	struct drm_device *dev = connector->dev;
+	char hotplug_str[] = "HOTPLUG=1", conn_id[21], prop_id[21];
+	char *envp[4] = { hotplug_str, conn_id, prop_id, NULL };
+
+	WARN_ON(!drm_mode_obj_find_prop_id(&connector->base,
+					   property->base.id));
+
+	snprintf(conn_id, ARRAY_SIZE(conn_id),
+		 "CONNECTOR=%u", connector->base.id);
+	snprintf(prop_id, ARRAY_SIZE(prop_id),
+		 "PROPERTY=%u", property->base.id);
+
+	drm_dbg_kms(connector->dev,
+		    "[CONNECTOR:%d:%s] generating connector property event for [PROP:%d:%s]\n",
+		    connector->base.id, connector->name,
+		    property->base.id, property->name);
+
+	kobject_uevent_env(&dev->primary->kdev->kobj, KOBJ_CHANGE, envp);
+}
+EXPORT_SYMBOL(drm_sysfs_connector_property_event);
+
+static ssize_t boot_display_show(struct device *dev, struct device_attribute *attr,
+				 char *buf)
+{
+	return sysfs_emit(buf, "1\n");
+}
+static DEVICE_ATTR_RO(boot_display);
+
+static struct attribute *display_attrs[] = {
+	&dev_attr_boot_display.attr,
+	NULL
+};
+
+static umode_t boot_display_visible(struct kobject *kobj,
+				    struct attribute *a, int n)
+{
+	struct device *dev = kobj_to_dev(kobj)->parent;
+
+	if (dev_is_pci(dev)) {
+		struct pci_dev *pdev = to_pci_dev(dev);
+
+		if (video_is_primary_device(&pdev->dev))
+			return a->mode;
+	}
+
+	return 0;
+}
+
+static const struct attribute_group display_attr_group = {
+	.attrs = display_attrs,
+	.is_visible = boot_display_visible,
+};
+
+static const struct attribute_group *card_dev_groups[] = {
+	&display_attr_group,
+	NULL
+};
 
 struct device *drm_sysfs_minor_alloc(struct drm_minor *minor)
 {
@@ -331,21 +554,27 @@ struct device *drm_sysfs_minor_alloc(struct drm_minor *minor)
 	struct device *kdev;
 	int r;
 
-	if (minor->type == DRM_MINOR_CONTROL)
-		minor_str = "controlD%d";
-	else if (minor->type == DRM_MINOR_RENDER)
-		minor_str = "renderD%d";
-	else
-		minor_str = "card%d";
-
-	kdev = kzalloc(sizeof(*kdev), GFP_KERNEL);
+	kdev = kzalloc_obj(*kdev);
 	if (!kdev)
 		return ERR_PTR(-ENOMEM);
 
 	device_initialize(kdev);
-	kdev->devt = MKDEV(DRM_MAJOR, minor->index);
-	kdev->class = drm_class;
-	kdev->type = &drm_sysfs_device_minor;
+
+	if (minor->type == DRM_MINOR_ACCEL) {
+		minor_str = "accel%d";
+		accel_set_device_instance_params(kdev, minor->index);
+	} else {
+		if (minor->type == DRM_MINOR_RENDER)
+			minor_str = "renderD%d";
+		else
+			minor_str = "card%d";
+
+		kdev->devt = MKDEV(DRM_MAJOR, minor->index);
+		kdev->class = drm_class;
+		kdev->groups = card_dev_groups;
+		kdev->type = &drm_sysfs_device_minor;
+	}
+
 	kdev->parent = minor->dev->dev;
 	kdev->release = drm_sysfs_release;
 	dev_set_drvdata(kdev, minor);

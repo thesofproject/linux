@@ -43,6 +43,7 @@ static void dce_ipp_cursor_set_position(
 	const struct dc_cursor_position *position,
 	const struct dc_cursor_mi_param *param)
 {
+	(void)param;
 	struct dce_ipp *ipp_dce = TO_DCE_IPP(ipp);
 
 	/* lock cursor registers */
@@ -170,7 +171,7 @@ static void dce_ipp_program_input_lut(
 	struct input_pixel_processor *ipp,
 	const struct dc_gamma *gamma)
 {
-	int i;
+	unsigned int i;
 	struct dce_ipp *ipp_dce = TO_DCE_IPP(ipp);
 
 	/* power on LUT memory */
@@ -195,13 +196,13 @@ static void dce_ipp_program_input_lut(
 
 	for (i = 0; i < gamma->num_entries; i++) {
 		REG_SET(DC_LUT_SEQ_COLOR, 0, DC_LUT_SEQ_COLOR,
-				dal_fixed31_32_round(
+				dc_fixpt_round(
 					gamma->entries.red[i]));
 		REG_SET(DC_LUT_SEQ_COLOR, 0, DC_LUT_SEQ_COLOR,
-				dal_fixed31_32_round(
+				dc_fixpt_round(
 					gamma->entries.green[i]));
 		REG_SET(DC_LUT_SEQ_COLOR, 0, DC_LUT_SEQ_COLOR,
-				dal_fixed31_32_round(
+				dc_fixpt_round(
 					gamma->entries.blue[i]));
 	}
 
@@ -229,6 +230,22 @@ static void dce_ipp_set_degamma(
 		  CURSOR2_DEGAMMA_MODE, degamma_type);
 }
 
+#if defined(CONFIG_DRM_AMD_DC_SI)
+static void dce60_ipp_set_degamma(
+	struct input_pixel_processor *ipp,
+	enum ipp_degamma_mode mode)
+{
+	struct dce_ipp *ipp_dce = TO_DCE_IPP(ipp);
+	uint32_t degamma_type = (mode == IPP_DEGAMMA_MODE_HW_sRGB) ? 1 : 0;
+
+	ASSERT(mode == IPP_DEGAMMA_MODE_BYPASS || mode == IPP_DEGAMMA_MODE_HW_sRGB);
+	/* DCE6 does not have CURSOR2_DEGAMMA_MODE bit in DEGAMMA_CONTROL reg */
+	REG_SET_2(DEGAMMA_CONTROL, 0,
+		  GRPH_DEGAMMA_MODE, degamma_type,
+		  CURSOR_DEGAMMA_MODE, degamma_type);
+}
+#endif
+
 static const struct ipp_funcs dce_ipp_funcs = {
 	.ipp_cursor_set_attributes = dce_ipp_cursor_set_attributes,
 	.ipp_cursor_set_position = dce_ipp_cursor_set_position,
@@ -236,6 +253,17 @@ static const struct ipp_funcs dce_ipp_funcs = {
 	.ipp_program_input_lut = dce_ipp_program_input_lut,
 	.ipp_set_degamma = dce_ipp_set_degamma
 };
+
+#if defined(CONFIG_DRM_AMD_DC_SI)
+static const struct ipp_funcs dce60_ipp_funcs = {
+	.ipp_cursor_set_attributes = dce_ipp_cursor_set_attributes,
+	.ipp_cursor_set_position = dce_ipp_cursor_set_position,
+	.ipp_program_prescale = dce_ipp_program_prescale,
+	.ipp_program_input_lut = dce_ipp_program_input_lut,
+	.ipp_set_degamma = dce60_ipp_set_degamma
+};
+#endif
+
 
 /*****************************************/
 /* Constructor, Destructor               */
@@ -257,6 +285,25 @@ void dce_ipp_construct(
 	ipp_dce->ipp_shift = ipp_shift;
 	ipp_dce->ipp_mask = ipp_mask;
 }
+
+#if defined(CONFIG_DRM_AMD_DC_SI)
+void dce60_ipp_construct(
+	struct dce_ipp *ipp_dce,
+	struct dc_context *ctx,
+	int inst,
+	const struct dce_ipp_registers *regs,
+	const struct dce_ipp_shift *ipp_shift,
+	const struct dce_ipp_mask *ipp_mask)
+{
+	ipp_dce->base.ctx = ctx;
+	ipp_dce->base.inst = inst;
+	ipp_dce->base.funcs = &dce60_ipp_funcs;
+
+	ipp_dce->regs = regs;
+	ipp_dce->ipp_shift = ipp_shift;
+	ipp_dce->ipp_mask = ipp_mask;
+}
+#endif
 
 void dce_ipp_destroy(struct input_pixel_processor **ipp)
 {

@@ -20,12 +20,6 @@
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 
-#if 0
-#define ADDRLABEL(x...) printk(x)
-#else
-#define ADDRLABEL(x...) do { ; } while (0)
-#endif
-
 /*
  * Policy Table
  */
@@ -150,8 +144,8 @@ u32 ipv6_addr_label(struct net *net,
 	label = p ? p->label : IPV6_ADDR_LABEL_DEFAULT;
 	rcu_read_unlock();
 
-	ADDRLABEL(KERN_DEBUG "%s(addr=%pI6, type=%d, ifindex=%d) => %08x\n",
-		  __func__, addr, type, ifindex, label);
+	net_dbg_ratelimited("%s(addr=%pI6, type=%d, ifindex=%d) => %08x\n", __func__, addr, type,
+			    ifindex, label);
 
 	return label;
 }
@@ -164,8 +158,8 @@ static struct ip6addrlbl_entry *ip6addrlbl_alloc(const struct in6_addr *prefix,
 	struct ip6addrlbl_entry *newp;
 	int addrtype;
 
-	ADDRLABEL(KERN_DEBUG "%s(prefix=%pI6, prefixlen=%d, ifindex=%d, label=%u)\n",
-		  __func__, prefix, prefixlen, ifindex, (unsigned int)label);
+	net_dbg_ratelimited("%s(prefix=%pI6, prefixlen=%d, ifindex=%d, label=%u)\n", __func__,
+			    prefix, prefixlen, ifindex, (unsigned int)label);
 
 	addrtype = ipv6_addr_type(prefix) & (IPV6_ADDR_MAPPED | IPV6_ADDR_COMPATv4 | IPV6_ADDR_LOOPBACK);
 
@@ -186,7 +180,7 @@ static struct ip6addrlbl_entry *ip6addrlbl_alloc(const struct in6_addr *prefix,
 		break;
 	}
 
-	newp = kmalloc(sizeof(*newp), GFP_KERNEL);
+	newp = kmalloc_obj(*newp);
 	if (!newp)
 		return ERR_PTR(-ENOMEM);
 
@@ -207,8 +201,7 @@ static int __ip6addrlbl_add(struct net *net, struct ip6addrlbl_entry *newp,
 	struct hlist_node *n;
 	int ret = 0;
 
-	ADDRLABEL(KERN_DEBUG "%s(newp=%p, replace=%d)\n", __func__, newp,
-		  replace);
+	net_dbg_ratelimited("%s(newp=%p, replace=%d)\n", __func__, newp, replace);
 
 	hlist_for_each_entry_safe(p, n,	&net->ipv6.ip6addrlbl_table.head, list) {
 		if (p->prefixlen == newp->prefixlen &&
@@ -234,7 +227,8 @@ static int __ip6addrlbl_add(struct net *net, struct ip6addrlbl_entry *newp,
 		hlist_add_head_rcu(&newp->list, &net->ipv6.ip6addrlbl_table.head);
 out:
 	if (!ret)
-		net->ipv6.ip6addrlbl_table.seq++;
+		WRITE_ONCE(net->ipv6.ip6addrlbl_table.seq,
+			   net->ipv6.ip6addrlbl_table.seq + 1);
 	return ret;
 }
 
@@ -246,9 +240,8 @@ static int ip6addrlbl_add(struct net *net,
 	struct ip6addrlbl_entry *newp;
 	int ret = 0;
 
-	ADDRLABEL(KERN_DEBUG "%s(prefix=%pI6, prefixlen=%d, ifindex=%d, label=%u, replace=%d)\n",
-		  __func__, prefix, prefixlen, ifindex, (unsigned int)label,
-		  replace);
+	net_dbg_ratelimited("%s(prefix=%pI6, prefixlen=%d, ifindex=%d, label=%u, replace=%d)\n",
+			    __func__, prefix, prefixlen, ifindex, (unsigned int)label, replace);
 
 	newp = ip6addrlbl_alloc(prefix, prefixlen, ifindex, label);
 	if (IS_ERR(newp))
@@ -270,8 +263,8 @@ static int __ip6addrlbl_del(struct net *net,
 	struct hlist_node *n;
 	int ret = -ESRCH;
 
-	ADDRLABEL(KERN_DEBUG "%s(prefix=%pI6, prefixlen=%d, ifindex=%d)\n",
-		  __func__, prefix, prefixlen, ifindex);
+	net_dbg_ratelimited("%s(prefix=%pI6, prefixlen=%d, ifindex=%d)\n", __func__, prefix,
+			    prefixlen, ifindex);
 
 	hlist_for_each_entry_safe(p, n, &net->ipv6.ip6addrlbl_table.head, list) {
 		if (p->prefixlen == prefixlen &&
@@ -293,8 +286,8 @@ static int ip6addrlbl_del(struct net *net,
 	struct in6_addr prefix_buf;
 	int ret;
 
-	ADDRLABEL(KERN_DEBUG "%s(prefix=%pI6, prefixlen=%d, ifindex=%d)\n",
-		  __func__, prefix, prefixlen, ifindex);
+	net_dbg_ratelimited("%s(prefix=%pI6, prefixlen=%d, ifindex=%d)\n", __func__, prefix,
+			    prefixlen, ifindex);
 
 	ipv6_addr_prefix(&prefix_buf, prefix, prefixlen);
 	spin_lock(&net->ipv6.ip6addrlbl_table.lock);
@@ -306,23 +299,29 @@ static int ip6addrlbl_del(struct net *net,
 /* add default label */
 static int __net_init ip6addrlbl_net_init(struct net *net)
 {
-	int err = 0;
+	struct ip6addrlbl_entry *p = NULL;
+	struct hlist_node *n;
+	int err;
 	int i;
-
-	ADDRLABEL(KERN_DEBUG "%s\n", __func__);
 
 	spin_lock_init(&net->ipv6.ip6addrlbl_table.lock);
 	INIT_HLIST_HEAD(&net->ipv6.ip6addrlbl_table.head);
 
 	for (i = 0; i < ARRAY_SIZE(ip6addrlbl_init_table); i++) {
-		int ret = ip6addrlbl_add(net,
-					 ip6addrlbl_init_table[i].prefix,
-					 ip6addrlbl_init_table[i].prefixlen,
-					 0,
-					 ip6addrlbl_init_table[i].label, 0);
-		/* XXX: should we free all rules when we catch an error? */
-		if (ret && (!err || err != -ENOMEM))
-			err = ret;
+		err = ip6addrlbl_add(net,
+				     ip6addrlbl_init_table[i].prefix,
+				     ip6addrlbl_init_table[i].prefixlen,
+				     0,
+				     ip6addrlbl_init_table[i].label, 0);
+		if (err)
+			goto err_ip6addrlbl_add;
+	}
+	return 0;
+
+err_ip6addrlbl_add:
+	hlist_for_each_entry_safe(p, n, &net->ipv6.ip6addrlbl_table.head, list) {
+		hlist_del_rcu(&p->list);
+		kfree_rcu(p, rcu);
 	}
 	return err;
 }
@@ -383,8 +382,8 @@ static int ip6addrlbl_newdel(struct sk_buff *skb, struct nlmsghdr *nlh,
 	u32 label;
 	int err = 0;
 
-	err = nlmsg_parse(nlh, sizeof(*ifal), tb, IFAL_MAX, ifal_policy,
-			  extack);
+	err = nlmsg_parse_deprecated(nlh, sizeof(*ifal), tb, IFAL_MAX,
+				     ifal_policy, extack);
 	if (err < 0)
 		return err;
 
@@ -429,6 +428,7 @@ static void ip6addrlbl_putmsg(struct nlmsghdr *nlh,
 {
 	struct ifaddrlblmsg *ifal = nlmsg_data(nlh);
 	ifal->ifal_family = AF_INET6;
+	ifal->__ifal_reserved = 0;
 	ifal->ifal_prefixlen = prefixlen;
 	ifal->ifal_flags = 0;
 	ifal->ifal_index = ifindex;
@@ -436,7 +436,7 @@ static void ip6addrlbl_putmsg(struct nlmsghdr *nlh,
 };
 
 static int ip6addrlbl_fill(struct sk_buff *skb,
-			   struct ip6addrlbl_entry *p,
+			   const struct ip6addrlbl_entry *p,
 			   u32 lseq,
 			   u32 portid, u32 seq, int event,
 			   unsigned int flags)
@@ -458,20 +458,54 @@ static int ip6addrlbl_fill(struct sk_buff *skb,
 	return 0;
 }
 
+static int ip6addrlbl_valid_dump_req(const struct nlmsghdr *nlh,
+				     struct netlink_ext_ack *extack)
+{
+	struct ifaddrlblmsg *ifal;
+
+	ifal = nlmsg_payload(nlh, sizeof(*ifal));
+	if (!ifal) {
+		NL_SET_ERR_MSG_MOD(extack, "Invalid header for address label dump request");
+		return -EINVAL;
+	}
+
+	if (ifal->__ifal_reserved || ifal->ifal_prefixlen ||
+	    ifal->ifal_flags || ifal->ifal_index || ifal->ifal_seq) {
+		NL_SET_ERR_MSG_MOD(extack, "Invalid values in header for address label dump request");
+		return -EINVAL;
+	}
+
+	if (nlmsg_attrlen(nlh, sizeof(*ifal))) {
+		NL_SET_ERR_MSG_MOD(extack, "Invalid data after header for address label dump request");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int ip6addrlbl_dump(struct sk_buff *skb, struct netlink_callback *cb)
 {
+	const struct nlmsghdr *nlh = cb->nlh;
 	struct net *net = sock_net(skb->sk);
 	struct ip6addrlbl_entry *p;
 	int idx = 0, s_idx = cb->args[0];
-	int err;
+	int err = 0;
+	u32 lseq;
+
+	if (cb->strict_check) {
+		err = ip6addrlbl_valid_dump_req(nlh, cb->extack);
+		if (err < 0)
+			return err;
+	}
 
 	rcu_read_lock();
+	lseq = READ_ONCE(net->ipv6.ip6addrlbl_table.seq);
 	hlist_for_each_entry_rcu(p, &net->ipv6.ip6addrlbl_table.head, list) {
 		if (idx >= s_idx) {
 			err = ip6addrlbl_fill(skb, p,
-					      net->ipv6.ip6addrlbl_table.seq,
+					      lseq,
 					      NETLINK_CB(cb->skb).portid,
-					      cb->nlh->nlmsg_seq,
+					      nlh->nlmsg_seq,
 					      RTM_NEWADDRLABEL,
 					      NLM_F_MULTI);
 			if (err < 0)
@@ -481,7 +515,7 @@ static int ip6addrlbl_dump(struct sk_buff *skb, struct netlink_callback *cb)
 	}
 	rcu_read_unlock();
 	cb->args[0] = idx;
-	return skb->len;
+	return err;
 }
 
 static inline int ip6addrlbl_msgsize(void)
@@ -489,6 +523,50 @@ static inline int ip6addrlbl_msgsize(void)
 	return NLMSG_ALIGN(sizeof(struct ifaddrlblmsg))
 		+ nla_total_size(16)	/* IFAL_ADDRESS */
 		+ nla_total_size(4);	/* IFAL_LABEL */
+}
+
+static int ip6addrlbl_valid_get_req(struct sk_buff *skb,
+				    const struct nlmsghdr *nlh,
+				    struct nlattr **tb,
+				    struct netlink_ext_ack *extack)
+{
+	struct ifaddrlblmsg *ifal;
+	int i, err;
+
+	ifal = nlmsg_payload(nlh, sizeof(*ifal));
+	if (!ifal) {
+		NL_SET_ERR_MSG_MOD(extack, "Invalid header for addrlabel get request");
+		return -EINVAL;
+	}
+
+	if (!netlink_strict_get_check(skb))
+		return nlmsg_parse_deprecated(nlh, sizeof(*ifal), tb,
+					      IFAL_MAX, ifal_policy, extack);
+
+	if (ifal->__ifal_reserved || ifal->ifal_flags || ifal->ifal_seq) {
+		NL_SET_ERR_MSG_MOD(extack, "Invalid values in header for addrlabel get request");
+		return -EINVAL;
+	}
+
+	err = nlmsg_parse_deprecated_strict(nlh, sizeof(*ifal), tb, IFAL_MAX,
+					    ifal_policy, extack);
+	if (err)
+		return err;
+
+	for (i = 0; i <= IFAL_MAX; i++) {
+		if (!tb[i])
+			continue;
+
+		switch (i) {
+		case IFAL_ADDRESS:
+			break;
+		default:
+			NL_SET_ERR_MSG_MOD(extack, "Unsupported attribute in addrlabel get request");
+			return -EINVAL;
+		}
+	}
+
+	return 0;
 }
 
 static int ip6addrlbl_get(struct sk_buff *in_skb, struct nlmsghdr *nlh,
@@ -503,8 +581,7 @@ static int ip6addrlbl_get(struct sk_buff *in_skb, struct nlmsghdr *nlh,
 	struct ip6addrlbl_entry *p;
 	struct sk_buff *skb;
 
-	err = nlmsg_parse(nlh, sizeof(*ifal), tb, IFAL_MAX, ifal_policy,
-			  extack);
+	err = ip6addrlbl_valid_get_req(in_skb, nlh, tb, extack);
 	if (err < 0)
 		return err;
 
@@ -530,7 +607,7 @@ static int ip6addrlbl_get(struct sk_buff *in_skb, struct nlmsghdr *nlh,
 
 	rcu_read_lock();
 	p = __ipv6_addr_label(net, addr, ipv6_addr_type(addr), ifal->ifal_index);
-	lseq = net->ipv6.ip6addrlbl_table.seq;
+	lseq = READ_ONCE(net->ipv6.ip6addrlbl_table.seq);
 	if (p)
 		err = ip6addrlbl_fill(skb, p, lseq,
 				      NETLINK_CB(in_skb).portid,
@@ -547,22 +624,17 @@ static int ip6addrlbl_get(struct sk_buff *in_skb, struct nlmsghdr *nlh,
 	return err;
 }
 
+static const struct rtnl_msg_handler ipv6_adddr_label_rtnl_msg_handlers[] __initconst_or_module = {
+	{.owner = THIS_MODULE, .protocol = PF_INET6, .msgtype = RTM_NEWADDRLABEL,
+	 .doit = ip6addrlbl_newdel, .flags = RTNL_FLAG_DOIT_UNLOCKED},
+	{.owner = THIS_MODULE, .protocol = PF_INET6, .msgtype = RTM_DELADDRLABEL,
+	 .doit = ip6addrlbl_newdel, .flags = RTNL_FLAG_DOIT_UNLOCKED},
+	{.owner = THIS_MODULE, .protocol = PF_INET6, .msgtype = RTM_GETADDRLABEL,
+	 .doit = ip6addrlbl_get, .dumpit = ip6addrlbl_dump,
+	 .flags = RTNL_FLAG_DOIT_UNLOCKED | RTNL_FLAG_DUMP_UNLOCKED},
+};
+
 int __init ipv6_addr_label_rtnl_register(void)
 {
-	int ret;
-
-	ret = rtnl_register_module(THIS_MODULE, PF_INET6, RTM_NEWADDRLABEL,
-				   ip6addrlbl_newdel,
-				   NULL, RTNL_FLAG_DOIT_UNLOCKED);
-	if (ret < 0)
-		return ret;
-	ret = rtnl_register_module(THIS_MODULE, PF_INET6, RTM_DELADDRLABEL,
-				   ip6addrlbl_newdel,
-				   NULL, RTNL_FLAG_DOIT_UNLOCKED);
-	if (ret < 0)
-		return ret;
-	ret = rtnl_register_module(THIS_MODULE, PF_INET6, RTM_GETADDRLABEL,
-				   ip6addrlbl_get,
-				   ip6addrlbl_dump, RTNL_FLAG_DOIT_UNLOCKED);
-	return ret;
+	return rtnl_register_many(ipv6_adddr_label_rtnl_msg_handlers);
 }

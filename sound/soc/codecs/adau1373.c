@@ -1,26 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Analog Devices ADAU1373 Audio Codec drive
  *
  * Copyright 2011 Analog Devices Inc.
  * Author: Lars-Peter Clausen <lars@metafoo.de>
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/module.h>
 #include <linux/init.h>
+#include <linux/gpio/consumer.h>
 #include <linux/delay.h>
 #include <linux/pm.h>
+#include <linux/property.h>
 #include <linux/i2c.h>
 #include <linux/slab.h>
-#include <linux/gcd.h>
 
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/tlv.h>
 #include <sound/soc.h>
-#include <sound/adau1373.h>
 
 #include "adau1373.h"
 #include "adau-utils.h"
@@ -29,12 +28,31 @@ struct adau1373_dai {
 	unsigned int clk_src;
 	unsigned int sysclk;
 	bool enable_src;
-	bool master;
+	bool clock_provider;
 };
+
+enum adau1373_micbias_voltage {
+	ADAU1373_MICBIAS_2_9V,
+	ADAU1373_MICBIAS_2_2V,
+	ADAU1373_MICBIAS_2_6V,
+	ADAU1373_MICBIAS_1_8V,
+};
+
+#define ADAU1373_DRC_SIZE 13
 
 struct adau1373 {
 	struct regmap *regmap;
 	struct adau1373_dai dais[3];
+
+	bool input_differential[4];
+	bool lineout_differential;
+	bool lineout_ground_sense;
+
+	unsigned int num_drc;
+	u8 drc_setting[3][ADAU1373_DRC_SIZE];
+
+	enum adau1373_micbias_voltage micbias1;
+	enum adau1373_micbias_voltage micbias2;
 };
 
 #define ADAU1373_INPUT_MODE	0x00
@@ -828,7 +846,7 @@ static int adau1373_check_aif_clk(struct snd_soc_dapm_widget *source,
 
 	dai = sink->name[3] - '1';
 
-	if (!adau1373->dais[dai].master)
+	if (!adau1373->dais[dai].clock_provider)
 		return 0;
 
 	if (adau1373->dais[dai].clk_src == ADAU1373_CLK_SRC_PLL1)
@@ -836,7 +854,7 @@ static int adau1373_check_aif_clk(struct snd_soc_dapm_widget *source,
 	else
 		clk = "SYSCLK2";
 
-	return strcmp(source->name, clk) == 0;
+	return snd_soc_dapm_widget_name_cmp(source, clk) == 0;
 }
 
 static int adau1373_check_src(struct snd_soc_dapm_widget *source,
@@ -1103,14 +1121,14 @@ static int adau1373_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	struct adau1373_dai *adau1373_dai = &adau1373->dais[dai->id];
 	unsigned int ctrl;
 
-	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBM_CFM:
+	switch (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) {
+	case SND_SOC_DAIFMT_CBP_CFP:
 		ctrl = ADAU1373_DAI_MASTER;
-		adau1373_dai->master = true;
+		adau1373_dai->clock_provider = true;
 		break;
-	case SND_SOC_DAIFMT_CBS_CFS:
+	case SND_SOC_DAIFMT_CBC_CFC:
 		ctrl = 0;
-		adau1373_dai->master = false;
+		adau1373_dai->clock_provider = false;
 		break;
 	default:
 		return -EINVAL;
@@ -1206,7 +1224,7 @@ static struct snd_soc_dai_driver adau1373_dai_driver[] = {
 			.formats = ADAU1373_FORMATS,
 		},
 		.ops = &adau1373_dai_ops,
-		.symmetric_rates = 1,
+		.symmetric_rate = 1,
 	},
 	{
 		.id = 1,
@@ -1226,7 +1244,7 @@ static struct snd_soc_dai_driver adau1373_dai_driver[] = {
 			.formats = ADAU1373_FORMATS,
 		},
 		.ops = &adau1373_dai_ops,
-		.symmetric_rates = 1,
+		.symmetric_rate = 1,
 	},
 	{
 		.id = 2,
@@ -1246,7 +1264,7 @@ static struct snd_soc_dai_driver adau1373_dai_driver[] = {
 			.formats = ADAU1373_FORMATS,
 		},
 		.ops = &adau1373_dai_ops,
-		.symmetric_rates = 1,
+		.symmetric_rate = 1,
 	},
 };
 
@@ -1334,66 +1352,61 @@ static void adau1373_load_drc_settings(struct adau1373 *adau1373,
 		regmap_write(adau1373->regmap, ADAU1373_DRC(nr) + i, drc[i]);
 }
 
-static bool adau1373_valid_micbias(enum adau1373_micbias_voltage micbias)
+static int adau1373_get_micbias(unsigned int val,
+				enum adau1373_micbias_voltage *micbias)
 {
-	switch (micbias) {
-	case ADAU1373_MICBIAS_2_9V:
-	case ADAU1373_MICBIAS_2_2V:
-	case ADAU1373_MICBIAS_2_6V:
-	case ADAU1373_MICBIAS_1_8V:
-		return true;
+	switch (val) {
+	case 2900000:
+		*micbias = ADAU1373_MICBIAS_2_9V;
+		return 0;
+	case 2200000:
+		*micbias = ADAU1373_MICBIAS_2_2V;
+		return 0;
+	case 2600000:
+		*micbias = ADAU1373_MICBIAS_2_6V;
+		return 0;
+	case 1800000:
+		*micbias = ADAU1373_MICBIAS_1_8V;
+		return 0;
 	default:
-		break;
+		return -EINVAL;
 	}
-	return false;
 }
 
 static int adau1373_probe(struct snd_soc_component *component)
 {
 	struct adau1373 *adau1373 = snd_soc_component_get_drvdata(component);
-	struct adau1373_platform_data *pdata = component->dev->platform_data;
-	bool lineout_differential = false;
 	unsigned int val;
 	int i;
 
-	if (pdata) {
-		if (pdata->num_drc > ARRAY_SIZE(pdata->drc_setting))
-			return -EINVAL;
-
-		if (!adau1373_valid_micbias(pdata->micbias1) ||
-			!adau1373_valid_micbias(pdata->micbias2))
-			return -EINVAL;
-
-		for (i = 0; i < pdata->num_drc; ++i) {
-			adau1373_load_drc_settings(adau1373, i,
-				pdata->drc_setting[i]);
-		}
-
-		snd_soc_add_component_controls(component, adau1373_drc_controls,
-			pdata->num_drc);
-
-		val = 0;
-		for (i = 0; i < 4; ++i) {
-			if (pdata->input_differential[i])
-				val |= BIT(i);
-		}
-		regmap_write(adau1373->regmap, ADAU1373_INPUT_MODE, val);
-
-		val = 0;
-		if (pdata->lineout_differential)
-			val |= ADAU1373_OUTPUT_CTRL_LDIFF;
-		if (pdata->lineout_ground_sense)
-			val |= ADAU1373_OUTPUT_CTRL_LNFBEN;
-		regmap_write(adau1373->regmap, ADAU1373_OUTPUT_CTRL, val);
-
-		lineout_differential = pdata->lineout_differential;
-
-		regmap_write(adau1373->regmap, ADAU1373_EP_CTRL,
-			(pdata->micbias1 << ADAU1373_EP_CTRL_MICBIAS1_OFFSET) |
-			(pdata->micbias2 << ADAU1373_EP_CTRL_MICBIAS2_OFFSET));
+	for (i = 0; i < adau1373->num_drc; ++i) {
+		adau1373_load_drc_settings(adau1373, i,
+					   adau1373->drc_setting[i]);
 	}
 
-	if (!lineout_differential) {
+	snd_soc_add_component_controls(component, adau1373_drc_controls,
+				       adau1373->num_drc);
+
+	val = 0;
+	for (i = 0; i < ARRAY_SIZE(adau1373->input_differential); ++i) {
+		if (adau1373->input_differential[i])
+			val |= BIT(i);
+	}
+	regmap_write(adau1373->regmap, ADAU1373_INPUT_MODE, val);
+
+	val = 0;
+	if (adau1373->lineout_differential)
+		val |= ADAU1373_OUTPUT_CTRL_LDIFF;
+	if (adau1373->lineout_ground_sense)
+		val |= ADAU1373_OUTPUT_CTRL_LNFBEN;
+
+	regmap_write(adau1373->regmap, ADAU1373_OUTPUT_CTRL, val);
+
+	regmap_write(adau1373->regmap, ADAU1373_EP_CTRL,
+		     (adau1373->micbias1 << ADAU1373_EP_CTRL_MICBIAS1_OFFSET) |
+		     (adau1373->micbias2 << ADAU1373_EP_CTRL_MICBIAS2_OFFSET));
+
+	if (!adau1373->lineout_differential) {
 		snd_soc_add_component_controls(component, adau1373_lineout2_controls,
 			ARRAY_SIZE(adau1373_lineout2_controls));
 	}
@@ -1453,7 +1466,7 @@ static const struct regmap_config adau1373_regmap_config = {
 	.volatile_reg = adau1373_register_volatile,
 	.max_register = ADAU1373_SOFT_RESET,
 
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.reg_defaults = adau1373_reg_defaults,
 	.num_reg_defaults = ARRAY_SIZE(adau1373_reg_defaults),
 };
@@ -1471,13 +1484,76 @@ static const struct snd_soc_component_driver adau1373_component_driver = {
 	.num_dapm_routes	= ARRAY_SIZE(adau1373_dapm_routes),
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
-static int adau1373_i2c_probe(struct i2c_client *client,
-			      const struct i2c_device_id *id)
+static void adau1373_reset(void *reset_gpio)
+{
+	gpiod_set_value_cansleep(reset_gpio, 1);
+}
+
+static int adau1373_parse_fw(struct device *dev, struct adau1373 *adau1373)
+{
+	int ret, drc_count;
+	unsigned int val;
+
+	if (device_property_present(dev, "adi,input1-differential"))
+		adau1373->input_differential[0] = true;
+	if (device_property_present(dev, "adi,input2-differential"))
+		adau1373->input_differential[1] = true;
+	if (device_property_present(dev, "adi,input3-differential"))
+		adau1373->input_differential[2] = true;
+	if (device_property_present(dev, "adi,input4-differential"))
+		adau1373->input_differential[3] = true;
+
+	if (device_property_present(dev, "adi,lineout-differential"))
+		adau1373->lineout_differential = true;
+	if (device_property_present(dev, "adi,lineout-gnd-sense"))
+		adau1373->lineout_ground_sense = true;
+
+	ret = device_property_read_u32(dev, "adi,micbias1-microvolt", &val);
+	if (!ret) {
+		ret = adau1373_get_micbias(val, &adau1373->micbias1);
+		if (ret)
+			return dev_err_probe(dev, ret,
+					     "Failed to get micbias1(%u)\n", val);
+	}
+
+	ret = device_property_read_u32(dev, "adi,micbias2-microvolt", &val);
+	if (!ret) {
+		ret = adau1373_get_micbias(val, &adau1373->micbias2);
+		if (ret)
+			return dev_err_probe(dev, ret,
+					     "Failed to get micbias2(%u)\n", val);
+	}
+
+	drc_count = device_property_count_u8(dev, "adi,drc-settings");
+	if (drc_count < 0)
+		return 0;
+	if (drc_count % ADAU1373_DRC_SIZE != 0)
+		return dev_err_probe(dev, -EINVAL,
+				     "DRC count(%u) not multiple of %u\n",
+				     drc_count, ADAU1373_DRC_SIZE);
+
+	adau1373->num_drc = drc_count / ADAU1373_DRC_SIZE;
+	if (adau1373->num_drc > ARRAY_SIZE(adau1373->drc_setting))
+		return dev_err_probe(dev, -EINVAL,
+				     "Too many DRC settings(%u)\n",
+				     adau1373->num_drc);
+
+	ret = device_property_read_u8_array(dev, "adi,drc-settings",
+					    (u8 *)&adau1373->drc_setting[0],
+					    drc_count);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "Failed to read DRC settings\n");
+
+	return 0;
+}
+
+static int adau1373_i2c_probe(struct i2c_client *client)
 {
 	struct adau1373 *adau1373;
+	struct gpio_desc *gpiod;
 	int ret;
 
 	adau1373 = devm_kzalloc(&client->dev, sizeof(*adau1373), GFP_KERNEL);
@@ -1489,9 +1565,32 @@ static int adau1373_i2c_probe(struct i2c_client *client,
 	if (IS_ERR(adau1373->regmap))
 		return PTR_ERR(adau1373->regmap);
 
-	regmap_write(adau1373->regmap, ADAU1373_SOFT_RESET, 0x00);
+	/*
+	 * If the powerdown GPIO is specified, we use it for reset. Otherwise
+	 * a software reset is done.
+	 */
+	gpiod = devm_gpiod_get_optional(&client->dev, "powerdown",
+					GPIOD_OUT_HIGH);
+	if (IS_ERR(gpiod))
+		return PTR_ERR(gpiod);
+
+	if (gpiod) {
+		gpiod_set_value_cansleep(gpiod, 0);
+		fsleep(10);
+
+		ret = devm_add_action_or_reset(&client->dev, adau1373_reset,
+					       gpiod);
+		if (ret)
+			return ret;
+	} else {
+		regmap_write(adau1373->regmap, ADAU1373_SOFT_RESET, 0x00);
+	}
 
 	dev_set_drvdata(&client->dev, adau1373);
+
+	ret = adau1373_parse_fw(&client->dev, adau1373);
+	if (ret)
+		return ret;
 
 	ret = devm_snd_soc_register_component(&client->dev,
 			&adau1373_component_driver,
@@ -1500,14 +1599,21 @@ static int adau1373_i2c_probe(struct i2c_client *client,
 }
 
 static const struct i2c_device_id adau1373_i2c_id[] = {
-	{ "adau1373", 0 },
+	{ .name = "adau1373" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, adau1373_i2c_id);
 
+static const struct of_device_id adau1373_of_match[] = {
+	{ .compatible = "adi,adau1373", },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, adau1373_of_match);
+
 static struct i2c_driver adau1373_i2c_driver = {
 	.driver = {
 		.name = "adau1373",
+		.of_match_table = adau1373_of_match,
 	},
 	.probe = adau1373_i2c_probe,
 	.id_table = adau1373_i2c_id,

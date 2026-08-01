@@ -85,15 +85,17 @@ struct isci_tmf {
 
 	struct completion *complete;
 	enum sas_protocol proto;
+	unsigned char lun[8];
+	u16 io_tag;
+	enum isci_tmf_function_codes tmf_code;
+	int status;
+
+	/* Must be last --ends in a flexible-array member. */
 	union {
 		struct ssp_response_iu resp_iu;
 		struct dev_to_host_fis d2h_fis;
 		u8 rsp_buf[SSP_RESP_IU_MAX_SIZE];
 	} resp;
-	unsigned char lun[8];
-	u16 io_tag;
-	enum isci_tmf_function_codes tmf_code;
-	int status;
 };
 
 static inline void isci_print_tmf(struct isci_host *ihost, struct isci_tmf *tmf)
@@ -140,10 +142,6 @@ int isci_task_abort_task_set(
 	struct domain_device *d_device,
 	u8 *lun);
 
-int isci_task_clear_aca(
-	struct domain_device *d_device,
-	u8 *lun);
-
 int isci_task_clear_task_set(
 	struct domain_device *d_device,
 	u8 *lun);
@@ -181,9 +179,5 @@ void *isci_task_ssp_request_get_response_data_address(
 
 u32 isci_task_ssp_request_get_response_data_length(
 	struct isci_request *request);
-
-int isci_queuecommand(
-	struct scsi_cmnd *scsi_cmd,
-	void (*donefunc)(struct scsi_cmnd *));
 
 #endif /* !defined(_SCI_TASK_H_) */

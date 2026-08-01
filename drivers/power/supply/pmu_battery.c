@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Battery class driver for Apple PMU
  *
  *	Copyright © 2006  David Woodhouse <dwmw2@infradead.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -163,8 +160,7 @@ static int __init pmu_bat_init(void)
 
 	for (i = 0; i < pmu_battery_count; i++) {
 		struct power_supply_config psy_cfg = {};
-		struct pmu_battery_dev *pbat = kzalloc(sizeof(*pbat),
-						       GFP_KERNEL);
+		struct pmu_battery_dev *pbat = kzalloc_obj(*pbat);
 		if (!pbat)
 			break;
 
@@ -173,6 +169,7 @@ static int __init pmu_bat_init(void)
 		pbat->bat_desc.properties = pmu_bat_props;
 		pbat->bat_desc.num_properties = ARRAY_SIZE(pmu_bat_props);
 		pbat->bat_desc.get_property = pmu_bat_get_property;
+		pbat->bat_desc.type = POWER_SUPPLY_TYPE_BATTERY;
 		pbat->pbi = &pmu_batteries[i];
 		psy_cfg.drv_data = pbat;
 

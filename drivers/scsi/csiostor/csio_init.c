@@ -38,7 +38,6 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/pci.h>
-#include <linux/aer.h>
 #include <linux/mm.h>
 #include <linux/notifier.h>
 #include <linux/kdebug.h>
@@ -154,27 +153,20 @@ csio_dfs_create(struct csio_hw *hw)
 /*
  * csio_dfs_destroy - Destroys per-hw debugfs.
  */
-static int
+static void
 csio_dfs_destroy(struct csio_hw *hw)
 {
-	if (hw->debugfs_root)
-		debugfs_remove_recursive(hw->debugfs_root);
-
-	return 0;
+	debugfs_remove_recursive(hw->debugfs_root);
 }
 
 /*
  * csio_dfs_init - Debug filesystem initialization for the module.
  *
  */
-static int
+static void
 csio_dfs_init(void)
 {
 	csio_debugfs_root = debugfs_create_dir(KBUILD_MODNAME, NULL);
-	if (!csio_debugfs_root)
-		pr_warn("Could not create debugfs entry, continuing\n");
-
-	return 0;
 }
 
 /*
@@ -210,11 +202,11 @@ csio_pci_init(struct pci_dev *pdev, int *bars)
 	pci_set_master(pdev);
 	pci_try_set_mwi(pdev);
 
-	if (!pci_set_dma_mask(pdev, DMA_BIT_MASK(64))) {
-		pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(64));
-	} else if (!pci_set_dma_mask(pdev, DMA_BIT_MASK(32))) {
-		pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32));
-	} else {
+	rv = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
+	if (rv)
+		rv = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+	if (rv) {
+		rv = -ENODEV;
 		dev_err(&pdev->dev, "No suitable DMA available.\n");
 		goto err_release_regions;
 	}
@@ -258,7 +250,6 @@ static void
 csio_hw_exit_workers(struct csio_hw *hw)
 {
 	cancel_work_sync(&hw->evtq_work);
-	flush_scheduled_work();
 }
 
 static int
@@ -525,19 +516,20 @@ static struct csio_hw *csio_hw_alloc(struct pci_dev *pdev)
 {
 	struct csio_hw *hw;
 
-	hw = kzalloc(sizeof(struct csio_hw), GFP_KERNEL);
+	hw = kzalloc_obj(struct csio_hw);
 	if (!hw)
 		goto err;
 
 	hw->pdev = pdev;
-	strncpy(hw->drv_version, CSIO_DRV_VERSION, 32);
+	strscpy(hw->drv_version, CSIO_DRV_VERSION,
+		sizeof(hw->drv_version));
 
 	/* memory pool/DMA pool allocation */
 	if (csio_resource_alloc(hw))
 		goto err_free_hw;
 
 	/* Get the start address of registers from BAR 0 */
-	hw->regstart = ioremap_nocache(pci_resource_start(pdev, 0),
+	hw->regstart = ioremap(pci_resource_start(pdev, 0),
 				       pci_resource_len(pdev, 0));
 	if (!hw->regstart) {
 		csio_err(hw, "Could not map BAR 0, regstart = %p\n",
@@ -590,7 +582,7 @@ csio_hw_free(struct csio_hw *hw)
  * @hw:		The HW module.
  * @dev:	The device associated with this invocation.
  * @probe:	Called from probe context or not?
- * @os_pln:	Parent lnode if any.
+ * @pln:	Parent lnode if any.
  *
  * Allocates lnode structure via scsi_host_alloc, initializes
  * shost, initializes lnode module and registers with SCSI ML
@@ -649,7 +641,7 @@ csio_shost_init(struct csio_hw *hw, struct device *dev,
 	if (csio_lnode_init(ln, hw, pln))
 		goto err_shost_put;
 
-	if (scsi_add_host(shost, dev))
+	if (scsi_add_host_with_dma(shost, dev, &hw->pdev->dev))
 		goto err_lnode_exit;
 
 	return ln;
@@ -1101,8 +1093,6 @@ csio_pci_slot_reset(struct pci_dev *pdev)
 
 	pci_set_master(pdev);
 	pci_restore_state(pdev);
-	pci_save_state(pdev);
-	pci_cleanup_aer_uncorrect_error_status(pdev);
 
 	/* Bring HW s/m to ready state.
 	 * but don't resume IOs.
@@ -1171,7 +1161,7 @@ err_resume_exit:
 	dev_err(&pdev->dev, "resume of device failed: %d\n", rv);
 }
 
-static struct pci_error_handlers csio_err_handler = {
+static const struct pci_error_handlers csio_err_handler = {
 	.error_detected = csio_pci_error_detected,
 	.slot_reset	= csio_pci_slot_reset,
 	.resume		= csio_pci_resume,
@@ -1194,9 +1184,6 @@ static struct pci_error_handlers csio_err_handler = {
 
 static struct pci_driver csio_pci_driver = {
 	.name		= KBUILD_MODNAME,
-	.driver		= {
-		.owner	= THIS_MODULE,
-	},
 	.id_table	= csio_pci_tbl,
 	.probe		= csio_probe_one,
 	.remove		= csio_remove_one,
@@ -1263,3 +1250,4 @@ MODULE_DEVICE_TABLE(pci, csio_pci_tbl);
 MODULE_VERSION(CSIO_DRV_VERSION);
 MODULE_FIRMWARE(FW_FNAME_T5);
 MODULE_FIRMWARE(FW_FNAME_T6);
+MODULE_SOFTDEP("pre: cxgb4");

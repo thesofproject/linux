@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * umh - the kernel usermode helper
  */
@@ -12,7 +13,7 @@
 #include <linux/completion.h>
 #include <linux/cred.h>
 #include <linux/file.h>
-#include <linux/fdtable.h>
+#include <linux/fs_struct.h>
 #include <linux/workqueue.h>
 #include <linux/security.h>
 #include <linux/mount.h>
@@ -25,11 +26,10 @@
 #include <linux/ptrace.h>
 #include <linux/async.h>
 #include <linux/uaccess.h>
+#include <linux/initrd.h>
+#include <linux/freezer.h>
 
 #include <trace/events/module.h>
-
-#define CAP_BSET	(void *)1
-#define CAP_PI		(void *)2
 
 static kernel_cap_t usermodehelper_bset = CAP_FULL_SET;
 static kernel_cap_t usermodehelper_inheritable = CAP_FULL_SET;
@@ -71,6 +71,14 @@ static int call_usermodehelper_exec_async(void *data)
 	spin_unlock_irq(&current->sighand->siglock);
 
 	/*
+	 * Initial kernel threads share ther FS with init, in order to
+	 * get the init root directory. But we've now created a new
+	 * thread that is going to execve a user process and has its own
+	 * 'struct fs_struct'. Reset umask to the default.
+	 */
+	current->fs->umask = 0022;
+
+	/*
 	 * Our parent (unbound workqueue) runs with elevated scheduling
 	 * priority. Avoid propagating that into the userspace child.
 	 */
@@ -97,9 +105,10 @@ static int call_usermodehelper_exec_async(void *data)
 
 	commit_creds(new);
 
-	retval = do_execve(getname_kernel(sub_info->path),
-			   (const char __user *const __user *)sub_info->argv,
-			   (const char __user *const __user *)sub_info->envp);
+	wait_for_initramfs();
+	retval = kernel_execve(sub_info->path,
+			       (const char *const *)sub_info->argv,
+			       (const char *const *)sub_info->envp);
 out:
 	sub_info->retval = retval;
 	/*
@@ -118,37 +127,16 @@ static void call_usermodehelper_exec_sync(struct subprocess_info *sub_info)
 {
 	pid_t pid;
 
-	/* If SIGCLD is ignored kernel_wait4 won't populate the status. */
+	/* If SIGCLD is ignored do_wait won't populate the status. */
 	kernel_sigaction(SIGCHLD, SIG_DFL);
-	pid = kernel_thread(call_usermodehelper_exec_async, sub_info, SIGCHLD);
-	if (pid < 0) {
+	pid = user_mode_thread(call_usermodehelper_exec_async, sub_info, SIGCHLD);
+	if (pid < 0)
 		sub_info->retval = pid;
-	} else {
-		int ret = -ECHILD;
-		/*
-		 * Normally it is bogus to call wait4() from in-kernel because
-		 * wait4() wants to write the exit code to a userspace address.
-		 * But call_usermodehelper_exec_sync() always runs as kernel
-		 * thread (workqueue) and put_user() to a kernel address works
-		 * OK for kernel threads, due to their having an mm_segment_t
-		 * which spans the entire address space.
-		 *
-		 * Thus the __user pointer cast is valid here.
-		 */
-		kernel_wait4(pid, (int __user *)&ret, 0, NULL);
-
-		/*
-		 * If ret is 0, either call_usermodehelper_exec_async failed and
-		 * the real error code is already in sub_info->retval or
-		 * sub_info->retval is 0 anyway, so don't mess with it then.
-		 */
-		if (ret)
-			sub_info->retval = ret;
-	}
+	else
+		kernel_wait(pid, &sub_info->retval);
 
 	/* Restore default kernel sig handler */
 	kernel_sigaction(SIGCHLD, SIG_IGN);
-
 	umh_complete(sub_info);
 }
 
@@ -180,8 +168,8 @@ static void call_usermodehelper_exec_work(struct work_struct *work)
 		 * want to pollute current->children, and we need a parent
 		 * that always ignores SIGCHLD to ensure auto-reaping.
 		 */
-		pid = kernel_thread(call_usermodehelper_exec_async, sub_info,
-				    CLONE_PARENT | SIGCHLD);
+		pid = user_mode_thread(call_usermodehelper_exec_async, sub_info,
+				       CLONE_PARENT | SIGCHLD);
 		if (pid < 0) {
 			sub_info->retval = pid;
 			umh_complete(sub_info);
@@ -347,8 +335,8 @@ static void helper_unlock(void)
  * @argv: arg vector for process
  * @envp: environment for process
  * @gfp_mask: gfp mask for memory allocation
- * @cleanup: a cleanup function
  * @init: an init function
+ * @cleanup: a cleanup function
  * @data: arbitrary context sensitive data
  *
  * Returns either %NULL on allocation failure, or a subprocess_info
@@ -359,7 +347,7 @@ static void helper_unlock(void)
  * exec.  A non-zero return code causes the process to error out, exit,
  * and return the failure to the calling process
  *
- * The cleanup function is just before ethe subprocess_info is about to
+ * The cleanup function is just before the subprocess_info is about to
  * be freed.  This can be used for freeing the argv and envp.  The
  * Function must be runnable in either a process context or the
  * context in which call_usermodehelper_exec is called.
@@ -371,7 +359,7 @@ struct subprocess_info *call_usermodehelper_setup(const char *path, char **argv,
 		void *data)
 {
 	struct subprocess_info *sub_info;
-	sub_info = kzalloc(sizeof(struct subprocess_info), gfp_mask);
+	sub_info = kzalloc_obj(struct subprocess_info, gfp_mask);
 	if (!sub_info)
 		goto out;
 
@@ -395,7 +383,7 @@ EXPORT_SYMBOL(call_usermodehelper_setup);
 
 /**
  * call_usermodehelper_exec - start a usermode application
- * @sub_info: information about the subprocessa
+ * @sub_info: information about the subprocess
  * @wait: wait for the application to finish and return status.
  *        when UMH_NO_WAIT don't wait at all, but you get no useful error back
  *        when the program couldn't be exec'ed. This makes it safe to call
@@ -404,9 +392,15 @@ EXPORT_SYMBOL(call_usermodehelper_setup);
  * Runs a user-space application.  The application is started
  * asynchronously if wait is not set, and runs as a child of system workqueues.
  * (ie. it runs with full root capabilities and optimized affinity).
+ *
+ * Note: successful return value does not guarantee the helper was called at
+ * all. You can't rely on sub_info->{init,cleanup} being called even for
+ * UMH_WAIT_* wait modes as STATIC_USERMODEHELPER_PATH="" turns all helpers
+ * into a successful no-op.
  */
 int call_usermodehelper_exec(struct subprocess_info *sub_info, int wait)
 {
+	unsigned int state = TASK_UNINTERRUPTIBLE;
 	DECLARE_COMPLETION_ONSTACK(done);
 	int retval = 0;
 
@@ -436,22 +430,32 @@ int call_usermodehelper_exec(struct subprocess_info *sub_info, int wait)
 	sub_info->complete = (wait == UMH_NO_WAIT) ? NULL : &done;
 	sub_info->wait = wait;
 
-	queue_work(system_unbound_wq, &sub_info->work);
+	queue_work(system_dfl_wq, &sub_info->work);
 	if (wait == UMH_NO_WAIT)	/* task has freed sub_info */
 		goto unlock;
 
+	if (wait & UMH_FREEZABLE)
+		state |= TASK_FREEZABLE;
+
 	if (wait & UMH_KILLABLE) {
-		retval = wait_for_completion_killable(&done);
+		retval = wait_for_completion_state(&done, state | TASK_KILLABLE);
 		if (!retval)
 			goto wait_done;
 
 		/* umh_complete() will see NULL and free sub_info */
 		if (xchg(&sub_info->complete, NULL))
 			goto unlock;
-		/* fallthrough, umh_complete() was already called */
-	}
 
-	wait_for_completion(&done);
+		/*
+		 * fallthrough; in case of -ERESTARTSYS now do uninterruptible
+		 * wait_for_completion_state(). Since umh_complete() shall call
+		 * complete() in a moment if xchg() above returned NULL, this
+		 * uninterruptible wait_for_completion_state() will not block
+		 * SIGKILL'ed processes for long.
+		 */
+	}
+	wait_for_completion_state(&done, state);
+
 wait_done:
 	retval = sub_info->retval;
 out:
@@ -489,13 +493,14 @@ int call_usermodehelper(const char *path, char **argv, char **envp, int wait)
 }
 EXPORT_SYMBOL(call_usermodehelper);
 
-static int proc_cap_handler(struct ctl_table *table, int write,
-			 void __user *buffer, size_t *lenp, loff_t *ppos)
+#if defined(CONFIG_SYSCTL)
+static int proc_cap_handler(const struct ctl_table *table, int write,
+			 void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table t;
-	unsigned long cap_array[_KERNEL_CAPABILITY_U32S];
-	kernel_cap_t new_cap;
-	int err, i;
+	unsigned long cap_array[2];
+	kernel_cap_t new_cap, *cap;
+	int err;
 
 	if (write && (!capable(CAP_SETPCAP) ||
 		      !capable(CAP_SYS_MODULE)))
@@ -504,16 +509,13 @@ static int proc_cap_handler(struct ctl_table *table, int write,
 	/*
 	 * convert from the global kernel_cap_t to the ulong array to print to
 	 * userspace if this is a read.
+	 *
+	 * Legacy format: capabilities are exposed as two 32-bit values
 	 */
+	cap = table->data;
 	spin_lock(&umh_sysctl_lock);
-	for (i = 0; i < _KERNEL_CAPABILITY_U32S; i++)  {
-		if (table->data == CAP_BSET)
-			cap_array[i] = usermodehelper_bset.cap[i];
-		else if (table->data == CAP_PI)
-			cap_array[i] = usermodehelper_inheritable.cap[i];
-		else
-			BUG();
-	}
+	cap_array[0] = (u32) cap->val;
+	cap_array[1] = cap->val >> 32;
 	spin_unlock(&umh_sysctl_lock);
 
 	t = *table;
@@ -527,42 +529,42 @@ static int proc_cap_handler(struct ctl_table *table, int write,
 	if (err < 0)
 		return err;
 
-	/*
-	 * convert from the sysctl array of ulongs to the kernel_cap_t
-	 * internal representation
-	 */
-	for (i = 0; i < _KERNEL_CAPABILITY_U32S; i++)
-		new_cap.cap[i] = cap_array[i];
+	new_cap.val = (u32)cap_array[0];
+	new_cap.val += (u64)cap_array[1] << 32;
 
 	/*
 	 * Drop everything not in the new_cap (but don't add things)
 	 */
 	if (write) {
 		spin_lock(&umh_sysctl_lock);
-		if (table->data == CAP_BSET)
-			usermodehelper_bset = cap_intersect(usermodehelper_bset, new_cap);
-		if (table->data == CAP_PI)
-			usermodehelper_inheritable = cap_intersect(usermodehelper_inheritable, new_cap);
+		*cap = cap_intersect(*cap, new_cap);
 		spin_unlock(&umh_sysctl_lock);
 	}
 
 	return 0;
 }
 
-struct ctl_table usermodehelper_table[] = {
+static const struct ctl_table usermodehelper_table[] = {
 	{
 		.procname	= "bset",
-		.data		= CAP_BSET,
-		.maxlen		= _KERNEL_CAPABILITY_U32S * sizeof(unsigned long),
+		.data		= &usermodehelper_bset,
+		.maxlen		= 2 * sizeof(unsigned long),
 		.mode		= 0600,
 		.proc_handler	= proc_cap_handler,
 	},
 	{
 		.procname	= "inheritable",
-		.data		= CAP_PI,
-		.maxlen		= _KERNEL_CAPABILITY_U32S * sizeof(unsigned long),
+		.data		= &usermodehelper_inheritable,
+		.maxlen		= 2 * sizeof(unsigned long),
 		.mode		= 0600,
 		.proc_handler	= proc_cap_handler,
 	},
-	{ }
 };
+
+static int __init init_umh_sysctls(void)
+{
+	register_sysctl_init("kernel/usermodehelper", usermodehelper_table);
+	return 0;
+}
+early_initcall(init_umh_sysctls);
+#endif /* CONFIG_SYSCTL */

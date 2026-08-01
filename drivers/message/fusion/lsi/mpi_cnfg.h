@@ -313,7 +313,7 @@
  *                      define.
  *                      Added BIOS Page 4 structure.
  *                      Added MPI_RAID_PHYS_DISK1_PATH_MAX define for RAID
- *                      Physcial Disk Page 1.
+ *                      Physical Disk Page 1.
  *  01-15-07  01.05.17  Added additional bit defines for ExtFlags field of
  *                      Manufacturing Page 4.
  *                      Added Solid State Drives Supported bit to IOC Page 6
@@ -1018,14 +1018,6 @@ typedef struct _CONFIG_PAGE_IOC_2_RAID_VOL
 
 #define MPI_IOCPAGE2_FLAG_VOLUME_INACTIVE           (0x08)
 
-/*
- * Host code (drivers, BIOS, utilities, etc.) should leave this define set to
- * one and check Header.PageLength at runtime.
- */
-#ifndef MPI_IOC_PAGE_2_RAID_VOLUME_MAX
-#define MPI_IOC_PAGE_2_RAID_VOLUME_MAX      (1)
-#endif
-
 typedef struct _CONFIG_PAGE_IOC_2
 {
     CONFIG_PAGE_HEADER          Header;                              /* 00h */
@@ -1034,7 +1026,7 @@ typedef struct _CONFIG_PAGE_IOC_2
     U8                          MaxVolumes;                          /* 09h */
     U8                          NumActivePhysDisks;                  /* 0Ah */
     U8                          MaxPhysDisks;                        /* 0Bh */
-    CONFIG_PAGE_IOC_2_RAID_VOL  RaidVolume[MPI_IOC_PAGE_2_RAID_VOLUME_MAX];/* 0Ch */
+    CONFIG_PAGE_IOC_2_RAID_VOL  RaidVolume[] __counted_by(NumActiveVolumes); /* 0Ch */
 } CONFIG_PAGE_IOC_2, MPI_POINTER PTR_CONFIG_PAGE_IOC_2,
   IOCPage2_t, MPI_POINTER pIOCPage2_t;
 
@@ -1064,21 +1056,13 @@ typedef struct _IOC_3_PHYS_DISK
 } IOC_3_PHYS_DISK, MPI_POINTER PTR_IOC_3_PHYS_DISK,
   Ioc3PhysDisk_t, MPI_POINTER pIoc3PhysDisk_t;
 
-/*
- * Host code (drivers, BIOS, utilities, etc.) should leave this define set to
- * one and check Header.PageLength at runtime.
- */
-#ifndef MPI_IOC_PAGE_3_PHYSDISK_MAX
-#define MPI_IOC_PAGE_3_PHYSDISK_MAX         (1)
-#endif
-
 typedef struct _CONFIG_PAGE_IOC_3
 {
     CONFIG_PAGE_HEADER          Header;                                /* 00h */
     U8                          NumPhysDisks;                          /* 04h */
     U8                          Reserved1;                             /* 05h */
     U16                         Reserved2;                             /* 06h */
-    IOC_3_PHYS_DISK             PhysDisk[MPI_IOC_PAGE_3_PHYSDISK_MAX]; /* 08h */
+    IOC_3_PHYS_DISK             PhysDisk[] __counted_by(NumPhysDisks); /* 08h */
 } CONFIG_PAGE_IOC_3, MPI_POINTER PTR_CONFIG_PAGE_IOC_3,
   IOCPage3_t, MPI_POINTER pIOCPage3_t;
 
@@ -1093,21 +1077,13 @@ typedef struct _IOC_4_SEP
 } IOC_4_SEP, MPI_POINTER PTR_IOC_4_SEP,
   Ioc4Sep_t, MPI_POINTER pIoc4Sep_t;
 
-/*
- * Host code (drivers, BIOS, utilities, etc.) should leave this define set to
- * one and check Header.PageLength at runtime.
- */
-#ifndef MPI_IOC_PAGE_4_SEP_MAX
-#define MPI_IOC_PAGE_4_SEP_MAX              (1)
-#endif
-
 typedef struct _CONFIG_PAGE_IOC_4
 {
     CONFIG_PAGE_HEADER          Header;                         /* 00h */
     U8                          ActiveSEP;                      /* 04h */
     U8                          MaxSEP;                         /* 05h */
     U16                         Reserved1;                      /* 06h */
-    IOC_4_SEP                   SEP[MPI_IOC_PAGE_4_SEP_MAX];    /* 08h */
+    IOC_4_SEP                   SEP[] __counted_by(ActiveSEP);  /* 08h */
 } CONFIG_PAGE_IOC_4, MPI_POINTER PTR_CONFIG_PAGE_IOC_4,
   IOCPage4_t, MPI_POINTER pIOCPage4_t;
 
@@ -1802,13 +1778,13 @@ typedef struct _CONFIG_PAGE_FC_PORT_0
 #define MPI_FCPORTPAGE0_SUPPORT_CLASS_2                 (0x00000002)
 #define MPI_FCPORTPAGE0_SUPPORT_CLASS_3                 (0x00000004)
 
-#define MPI_FCPORTPAGE0_SUPPORT_SPEED_UKNOWN            (0x00000000) /* (SNIA)HBA_PORTSPEED_UNKNOWN 0   Unknown - transceiver incapable of reporting */
+#define MPI_FCPORTPAGE0_SUPPORT_SPEED_UNKNOWN           (0x00000000) /* (SNIA)HBA_PORTSPEED_UNKNOWN 0   Unknown - transceiver incapable of reporting */
 #define MPI_FCPORTPAGE0_SUPPORT_1GBIT_SPEED             (0x00000001) /* (SNIA)HBA_PORTSPEED_1GBIT   1   1 GBit/sec */
 #define MPI_FCPORTPAGE0_SUPPORT_2GBIT_SPEED             (0x00000002) /* (SNIA)HBA_PORTSPEED_2GBIT   2   2 GBit/sec */
 #define MPI_FCPORTPAGE0_SUPPORT_10GBIT_SPEED            (0x00000004) /* (SNIA)HBA_PORTSPEED_10GBIT  4  10 GBit/sec */
 #define MPI_FCPORTPAGE0_SUPPORT_4GBIT_SPEED             (0x00000008) /* (SNIA)HBA_PORTSPEED_4GBIT   8   4 GBit/sec */
 
-#define MPI_FCPORTPAGE0_CURRENT_SPEED_UKNOWN            MPI_FCPORTPAGE0_SUPPORT_SPEED_UKNOWN
+#define MPI_FCPORTPAGE0_CURRENT_SPEED_UNKNOWN           MPI_FCPORTPAGE0_SUPPORT_SPEED_UNKNOWN
 #define MPI_FCPORTPAGE0_CURRENT_SPEED_1GBIT             MPI_FCPORTPAGE0_SUPPORT_1GBIT_SPEED
 #define MPI_FCPORTPAGE0_CURRENT_SPEED_2GBIT             MPI_FCPORTPAGE0_SUPPORT_2GBIT_SPEED
 #define MPI_FCPORTPAGE0_CURRENT_SPEED_10GBIT            MPI_FCPORTPAGE0_SUPPORT_10GBIT_SPEED
@@ -2004,7 +1980,7 @@ typedef struct _CONFIG_PAGE_FC_PORT_6
     U64                     LinkFailureCount;           /* 50h */
     U64                     LossOfSyncCount;            /* 58h */
     U64                     LossOfSignalCount;          /* 60h */
-    U64                     PrimativeSeqErrCount;       /* 68h */
+    U64                     PrimitiveSeqErrCount;       /* 68h */
     U64                     InvalidTxWordCount;         /* 70h */
     U64                     InvalidCrcCount;            /* 78h */
     U64                     FcpInitiatorIoCount;        /* 80h */
@@ -2295,14 +2271,6 @@ typedef struct _RAID_VOL0_SETTINGS
 #define MPI_RAID_HOT_SPARE_POOL_6                       (0x40)
 #define MPI_RAID_HOT_SPARE_POOL_7                       (0x80)
 
-/*
- * Host code (drivers, BIOS, utilities, etc.) should leave this define set to
- * one and check Header.PageLength at runtime.
- */
-#ifndef MPI_RAID_VOL_PAGE_0_PHYSDISK_MAX
-#define MPI_RAID_VOL_PAGE_0_PHYSDISK_MAX        (1)
-#endif
-
 typedef struct _CONFIG_PAGE_RAID_VOL_0
 {
     CONFIG_PAGE_HEADER      Header;         /* 00h */
@@ -2321,7 +2289,7 @@ typedef struct _CONFIG_PAGE_RAID_VOL_0
     U8                      DataScrubRate;  /* 25h */
     U8                      ResyncRate;     /* 26h */
     U8                      InactiveStatus; /* 27h */
-    RAID_VOL0_PHYS_DISK     PhysDisk[MPI_RAID_VOL_PAGE_0_PHYSDISK_MAX];/* 28h */
+    RAID_VOL0_PHYS_DISK     PhysDisk[] __counted_by(NumPhysDisks); /* 28h */
 } CONFIG_PAGE_RAID_VOL_0, MPI_POINTER PTR_CONFIG_PAGE_RAID_VOL_0,
   RaidVolumePage0_t, MPI_POINTER pRaidVolumePage0_t;
 
@@ -2455,14 +2423,6 @@ typedef struct _RAID_PHYS_DISK1_PATH
 #define MPI_RAID_PHYSDISK1_FLAG_INVALID         (0x0001)
 
 
-/*
- * Host code (drivers, BIOS, utilities, etc.) should leave this define set to
- * one and check Header.PageLength or NumPhysDiskPaths at runtime.
- */
-#ifndef MPI_RAID_PHYS_DISK1_PATH_MAX
-#define MPI_RAID_PHYS_DISK1_PATH_MAX    (1)
-#endif
-
 typedef struct _CONFIG_PAGE_RAID_PHYS_DISK_1
 {
     CONFIG_PAGE_HEADER              Header;             /* 00h */
@@ -2470,7 +2430,7 @@ typedef struct _CONFIG_PAGE_RAID_PHYS_DISK_1
     U8                              PhysDiskNum;        /* 05h */
     U16                             Reserved2;          /* 06h */
     U32                             Reserved1;          /* 08h */
-    RAID_PHYS_DISK1_PATH            Path[MPI_RAID_PHYS_DISK1_PATH_MAX];/* 0Ch */
+    RAID_PHYS_DISK1_PATH            Path[] __counted_by(NumPhysDiskPaths);/* 0Ch */
 } CONFIG_PAGE_RAID_PHYS_DISK_1, MPI_POINTER PTR_CONFIG_PAGE_RAID_PHYS_DISK_1,
   RaidPhysDiskPage1_t, MPI_POINTER pRaidPhysDiskPage1_t;
 
@@ -2555,14 +2515,6 @@ typedef struct _MPI_SAS_IO_UNIT0_PHY_DATA
 } MPI_SAS_IO_UNIT0_PHY_DATA, MPI_POINTER PTR_MPI_SAS_IO_UNIT0_PHY_DATA,
   SasIOUnit0PhyData, MPI_POINTER pSasIOUnit0PhyData;
 
-/*
- * Host code (drivers, BIOS, utilities, etc.) should leave this define set to
- * one and check Header.PageLength at runtime.
- */
-#ifndef MPI_SAS_IOUNIT0_PHY_MAX
-#define MPI_SAS_IOUNIT0_PHY_MAX         (1)
-#endif
-
 typedef struct _CONFIG_PAGE_SAS_IO_UNIT_0
 {
     CONFIG_EXTENDED_PAGE_HEADER     Header;                             /* 00h */
@@ -2571,7 +2523,7 @@ typedef struct _CONFIG_PAGE_SAS_IO_UNIT_0
     U8                              NumPhys;                            /* 0Ch */
     U8                              Reserved2;                          /* 0Dh */
     U16                             Reserved3;                          /* 0Eh */
-    MPI_SAS_IO_UNIT0_PHY_DATA       PhyData[MPI_SAS_IOUNIT0_PHY_MAX];   /* 10h */
+    MPI_SAS_IO_UNIT0_PHY_DATA       PhyData[] __counted_by(NumPhys);    /* 10h */
 } CONFIG_PAGE_SAS_IO_UNIT_0, MPI_POINTER PTR_CONFIG_PAGE_SAS_IO_UNIT_0,
   SasIOUnitPage0_t, MPI_POINTER pSasIOUnitPage0_t;
 

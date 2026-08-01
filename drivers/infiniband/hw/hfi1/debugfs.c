@@ -1,54 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
  * Copyright(c) 2015-2018 Intel Corporation.
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * BSD LICENSE
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  - Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  - Neither the name of Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
  */
+
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/kernel.h>
 #include <linux/export.h>
-#include <linux/module.h>
 #include <linux/string.h>
 #include <linux/types.h>
 #include <linux/ratelimit.h>
@@ -60,87 +18,12 @@
 #include "device.h"
 #include "qp.h"
 #include "sdma.h"
+#include "fault.h"
 
 static struct dentry *hfi1_dbg_root;
 
-/* wrappers to enforce srcu in seq file */
-static ssize_t hfi1_seq_read(
-	struct file *file,
-	char __user *buf,
-	size_t size,
-	loff_t *ppos)
-{
-	struct dentry *d = file->f_path.dentry;
-	ssize_t r;
-
-	r = debugfs_file_get(d);
-	if (unlikely(r))
-		return r;
-	r = seq_read(file, buf, size, ppos);
-	debugfs_file_put(d);
-	return r;
-}
-
-static loff_t hfi1_seq_lseek(
-	struct file *file,
-	loff_t offset,
-	int whence)
-{
-	struct dentry *d = file->f_path.dentry;
-	loff_t r;
-
-	r = debugfs_file_get(d);
-	if (unlikely(r))
-		return r;
-	r = seq_lseek(file, offset, whence);
-	debugfs_file_put(d);
-	return r;
-}
-
 #define private2dd(file) (file_inode(file)->i_private)
 #define private2ppd(file) (file_inode(file)->i_private)
-
-#define DEBUGFS_SEQ_FILE_OPS(name) \
-static const struct seq_operations _##name##_seq_ops = { \
-	.start = _##name##_seq_start, \
-	.next  = _##name##_seq_next, \
-	.stop  = _##name##_seq_stop, \
-	.show  = _##name##_seq_show \
-}
-
-#define DEBUGFS_SEQ_FILE_OPEN(name) \
-static int _##name##_open(struct inode *inode, struct file *s) \
-{ \
-	struct seq_file *seq; \
-	int ret; \
-	ret =  seq_open(s, &_##name##_seq_ops); \
-	if (ret) \
-		return ret; \
-	seq = s->private_data; \
-	seq->private = inode->i_private; \
-	return 0; \
-}
-
-#define DEBUGFS_FILE_OPS(name) \
-static const struct file_operations _##name##_file_ops = { \
-	.owner   = THIS_MODULE, \
-	.open    = _##name##_open, \
-	.read    = hfi1_seq_read, \
-	.llseek  = hfi1_seq_lseek, \
-	.release = seq_release \
-}
-
-#define DEBUGFS_FILE_CREATE(name, parent, data, ops, mode)	\
-do { \
-	struct dentry *ent; \
-	ent = debugfs_create_file(name, mode, parent, \
-		data, ops); \
-	if (!ent) \
-		pr_warn("create of %s failed\n", name); \
-} while (0)
-
-#define DEBUGFS_SEQ_FILE_CREATE(name, parent, data) \
-	DEBUGFS_FILE_CREATE(#name, parent, data, &_##name##_file_ops, S_IRUGO)
 
 static void *_opcode_stats_seq_start(struct seq_file *s, loff_t *pos)
 {
@@ -426,7 +309,7 @@ static void *_rcds_seq_next(struct seq_file *s, void *v, loff_t *pos)
 	struct hfi1_devdata *dd = dd_from_dev(ibd);
 
 	++*pos;
-	if (!dd->rcd || *pos >= dd->n_krcv_queues)
+	if (!dd->rcd || *pos >= dd->num_rcv_contexts)
 		return NULL;
 	return pos;
 }
@@ -453,6 +336,54 @@ static int _rcds_seq_show(struct seq_file *s, void *v)
 DEBUGFS_SEQ_FILE_OPS(rcds);
 DEBUGFS_SEQ_FILE_OPEN(rcds)
 DEBUGFS_FILE_OPS(rcds);
+
+static void *_pios_seq_start(struct seq_file *s, loff_t *pos)
+{
+	struct hfi1_ibdev *ibd;
+	struct hfi1_devdata *dd;
+
+	ibd = (struct hfi1_ibdev *)s->private;
+	dd = dd_from_dev(ibd);
+	if (!dd->send_contexts || *pos >= dd->num_send_contexts)
+		return NULL;
+	return pos;
+}
+
+static void *_pios_seq_next(struct seq_file *s, void *v, loff_t *pos)
+{
+	struct hfi1_ibdev *ibd = (struct hfi1_ibdev *)s->private;
+	struct hfi1_devdata *dd = dd_from_dev(ibd);
+
+	++*pos;
+	if (!dd->send_contexts || *pos >= dd->num_send_contexts)
+		return NULL;
+	return pos;
+}
+
+static void _pios_seq_stop(struct seq_file *s, void *v)
+{
+}
+
+static int _pios_seq_show(struct seq_file *s, void *v)
+{
+	struct hfi1_ibdev *ibd = (struct hfi1_ibdev *)s->private;
+	struct hfi1_devdata *dd = dd_from_dev(ibd);
+	struct send_context_info *sci;
+	loff_t *spos = v;
+	loff_t i = *spos;
+	unsigned long flags;
+
+	spin_lock_irqsave(&dd->sc_lock, flags);
+	sci = &dd->send_contexts[i];
+	if (sci && sci->type != SC_USER && sci->allocated && sci->sc)
+		seqfile_dump_sci(s, i, sci);
+	spin_unlock_irqrestore(&dd->sc_lock, flags);
+	return 0;
+}
+
+DEBUGFS_SEQ_FILE_OPS(pios);
+DEBUGFS_SEQ_FILE_OPEN(pios)
+DEBUGFS_FILE_OPS(pios);
 
 /* read the per-device counters */
 static ssize_t dev_counters_read(struct file *file, char __user *buf,
@@ -984,18 +915,10 @@ static ssize_t qsfp2_debugfs_read(struct file *file, char __user *buf,
 static int __i2c_debugfs_open(struct inode *in, struct file *fp, u32 target)
 {
 	struct hfi1_pportdata *ppd;
-	int ret;
-
-	if (!try_module_get(THIS_MODULE))
-		return -ENODEV;
 
 	ppd = private2ppd(fp);
 
-	ret = acquire_chip_resource(ppd->dd, i2c_target(target), 0);
-	if (ret) /* failed - release the module */
-		module_put(THIS_MODULE);
-
-	return ret;
+	return acquire_chip_resource(ppd->dd, i2c_target(target), 0);
 }
 
 static int i2c1_debugfs_open(struct inode *in, struct file *fp)
@@ -1015,7 +938,6 @@ static int __i2c_debugfs_release(struct inode *in, struct file *fp, u32 target)
 	ppd = private2ppd(fp);
 
 	release_chip_resource(ppd->dd, i2c_target(target));
-	module_put(THIS_MODULE);
 
 	return 0;
 }
@@ -1033,18 +955,10 @@ static int i2c2_debugfs_release(struct inode *in, struct file *fp)
 static int __qsfp_debugfs_open(struct inode *in, struct file *fp, u32 target)
 {
 	struct hfi1_pportdata *ppd;
-	int ret;
-
-	if (!try_module_get(THIS_MODULE))
-		return -ENODEV;
 
 	ppd = private2ppd(fp);
 
-	ret = acquire_chip_resource(ppd->dd, i2c_target(target), 0);
-	if (ret) /* failed - release the module */
-		module_put(THIS_MODULE);
-
-	return ret;
+	return acquire_chip_resource(ppd->dd, i2c_target(target), 0);
 }
 
 static int qsfp1_debugfs_open(struct inode *in, struct file *fp)
@@ -1064,7 +978,6 @@ static int __qsfp_debugfs_release(struct inode *in, struct file *fp, u32 target)
 	ppd = private2ppd(fp);
 
 	release_chip_resource(ppd->dd, i2c_target(target));
-	module_put(THIS_MODULE);
 
 	return 0;
 }
@@ -1079,10 +992,82 @@ static int qsfp2_debugfs_release(struct inode *in, struct file *fp)
 	return __qsfp_debugfs_release(in, fp, 1);
 }
 
+#define EXPROM_WRITE_ENABLE BIT_ULL(14)
+
+static bool exprom_wp_disabled;
+
+static int exprom_wp_set(struct hfi1_devdata *dd, bool disable)
+{
+	u64 gpio_val = 0;
+
+	if (disable) {
+		gpio_val = EXPROM_WRITE_ENABLE;
+		exprom_wp_disabled = true;
+		dd_dev_info(dd, "Disable Expansion ROM Write Protection\n");
+	} else {
+		exprom_wp_disabled = false;
+		dd_dev_info(dd, "Enable Expansion ROM Write Protection\n");
+	}
+
+	write_csr(dd, ASIC_GPIO_OUT, gpio_val);
+	write_csr(dd, ASIC_GPIO_OE, gpio_val);
+
+	return 0;
+}
+
+static ssize_t exprom_wp_debugfs_read(struct file *file, char __user *buf,
+				      size_t count, loff_t *ppos)
+{
+	return 0;
+}
+
+static ssize_t exprom_wp_debugfs_write(struct file *file,
+				       const char __user *buf, size_t count,
+				       loff_t *ppos)
+{
+	struct hfi1_pportdata *ppd = private2ppd(file);
+	char cdata;
+
+	if (count != 1)
+		return -EINVAL;
+	if (get_user(cdata, buf))
+		return -EFAULT;
+	if (cdata == '0')
+		exprom_wp_set(ppd->dd, false);
+	else if (cdata == '1')
+		exprom_wp_set(ppd->dd, true);
+	else
+		return -EINVAL;
+
+	return 1;
+}
+
+static unsigned long exprom_in_use;
+
+static int exprom_wp_debugfs_open(struct inode *in, struct file *fp)
+{
+	if (test_and_set_bit(0, &exprom_in_use))
+		return -EBUSY;
+
+	return 0;
+}
+
+static int exprom_wp_debugfs_release(struct inode *in, struct file *fp)
+{
+	struct hfi1_pportdata *ppd = private2ppd(fp);
+
+	if (exprom_wp_disabled)
+		exprom_wp_set(ppd->dd, false);
+	clear_bit(0, &exprom_in_use);
+
+	return 0;
+}
+
 #define DEBUGFS_OPS(nm, readroutine, writeroutine)	\
 { \
 	.name = nm, \
 	.ops = { \
+		.owner = THIS_MODULE, \
 		.read = readroutine, \
 		.write = writeroutine, \
 		.llseek = generic_file_llseek, \
@@ -1093,6 +1078,7 @@ static int qsfp2_debugfs_release(struct inode *in, struct file *fp)
 { \
 	.name = nm, \
 	.ops = { \
+		.owner = THIS_MODULE, \
 		.read = readf, \
 		.write = writef, \
 		.llseek = generic_file_llseek, \
@@ -1118,6 +1104,9 @@ static const struct counter_info port_cntr_ops[] = {
 		     qsfp1_debugfs_open, qsfp1_debugfs_release),
 	DEBUGFS_XOPS("qsfp2", qsfp2_debugfs_read, qsfp2_debugfs_write,
 		     qsfp2_debugfs_open, qsfp2_debugfs_release),
+	DEBUGFS_XOPS("exprom_wp", exprom_wp_debugfs_read,
+		     exprom_wp_debugfs_write, exprom_wp_debugfs_open,
+		     exprom_wp_debugfs_release),
 	DEBUGFS_OPS("asic_flags", asic_flags_read, asic_flags_write),
 	DEBUGFS_OPS("dc8051_memory", dc8051_memory_read, NULL),
 	DEBUGFS_OPS("lcb", debugfs_lcb_read, debugfs_lcb_write),
@@ -1160,238 +1149,13 @@ DEBUGFS_SEQ_FILE_OPS(sdma_cpu_list);
 DEBUGFS_SEQ_FILE_OPEN(sdma_cpu_list)
 DEBUGFS_FILE_OPS(sdma_cpu_list);
 
-#ifdef CONFIG_FAULT_INJECTION
-static void *_fault_stats_seq_start(struct seq_file *s, loff_t *pos)
-{
-	struct hfi1_opcode_stats_perctx *opstats;
-
-	if (*pos >= ARRAY_SIZE(opstats->stats))
-		return NULL;
-	return pos;
-}
-
-static void *_fault_stats_seq_next(struct seq_file *s, void *v, loff_t *pos)
-{
-	struct hfi1_opcode_stats_perctx *opstats;
-
-	++*pos;
-	if (*pos >= ARRAY_SIZE(opstats->stats))
-		return NULL;
-	return pos;
-}
-
-static void _fault_stats_seq_stop(struct seq_file *s, void *v)
-{
-}
-
-static int _fault_stats_seq_show(struct seq_file *s, void *v)
-{
-	loff_t *spos = v;
-	loff_t i = *spos, j;
-	u64 n_packets = 0, n_bytes = 0;
-	struct hfi1_ibdev *ibd = (struct hfi1_ibdev *)s->private;
-	struct hfi1_devdata *dd = dd_from_dev(ibd);
-	struct hfi1_ctxtdata *rcd;
-
-	for (j = 0; j < dd->first_dyn_alloc_ctxt; j++) {
-		rcd = hfi1_rcd_get_by_index(dd, j);
-		if (rcd) {
-			n_packets += rcd->opstats->stats[i].n_packets;
-			n_bytes += rcd->opstats->stats[i].n_bytes;
-		}
-		hfi1_rcd_put(rcd);
-	}
-	for_each_possible_cpu(j) {
-		struct hfi1_opcode_stats_perctx *sp =
-			per_cpu_ptr(dd->tx_opstats, j);
-
-		n_packets += sp->stats[i].n_packets;
-		n_bytes += sp->stats[i].n_bytes;
-	}
-	if (!n_packets && !n_bytes)
-		return SEQ_SKIP;
-	if (!ibd->fault_opcode->n_rxfaults[i] &&
-	    !ibd->fault_opcode->n_txfaults[i])
-		return SEQ_SKIP;
-	seq_printf(s, "%02llx %llu/%llu (faults rx:%llu faults: tx:%llu)\n", i,
-		   (unsigned long long)n_packets,
-		   (unsigned long long)n_bytes,
-		   (unsigned long long)ibd->fault_opcode->n_rxfaults[i],
-		   (unsigned long long)ibd->fault_opcode->n_txfaults[i]);
-	return 0;
-}
-
-DEBUGFS_SEQ_FILE_OPS(fault_stats);
-DEBUGFS_SEQ_FILE_OPEN(fault_stats);
-DEBUGFS_FILE_OPS(fault_stats);
-
-static void fault_exit_opcode_debugfs(struct hfi1_ibdev *ibd)
-{
-	debugfs_remove_recursive(ibd->fault_opcode->dir);
-	kfree(ibd->fault_opcode);
-	ibd->fault_opcode = NULL;
-}
-
-static int fault_init_opcode_debugfs(struct hfi1_ibdev *ibd)
-{
-	struct dentry *parent = ibd->hfi1_ibdev_dbg;
-
-	ibd->fault_opcode = kzalloc(sizeof(*ibd->fault_opcode), GFP_KERNEL);
-	if (!ibd->fault_opcode)
-		return -ENOMEM;
-
-	ibd->fault_opcode->attr.interval = 1;
-	ibd->fault_opcode->attr.require_end = ULONG_MAX;
-	ibd->fault_opcode->attr.stacktrace_depth = 32;
-	ibd->fault_opcode->attr.dname = NULL;
-	ibd->fault_opcode->attr.verbose = 0;
-	ibd->fault_opcode->fault_by_opcode = false;
-	ibd->fault_opcode->opcode = 0;
-	ibd->fault_opcode->mask = 0xff;
-
-	ibd->fault_opcode->dir =
-		fault_create_debugfs_attr("fault_opcode",
-					  parent,
-					  &ibd->fault_opcode->attr);
-	if (IS_ERR(ibd->fault_opcode->dir)) {
-		kfree(ibd->fault_opcode);
-		return -ENOENT;
-	}
-
-	DEBUGFS_SEQ_FILE_CREATE(fault_stats, ibd->fault_opcode->dir, ibd);
-	if (!debugfs_create_bool("fault_by_opcode", 0600,
-				 ibd->fault_opcode->dir,
-				 &ibd->fault_opcode->fault_by_opcode))
-		goto fail;
-	if (!debugfs_create_x8("opcode", 0600, ibd->fault_opcode->dir,
-			       &ibd->fault_opcode->opcode))
-		goto fail;
-	if (!debugfs_create_x8("mask", 0600, ibd->fault_opcode->dir,
-			       &ibd->fault_opcode->mask))
-		goto fail;
-
-	return 0;
-fail:
-	fault_exit_opcode_debugfs(ibd);
-	return -ENOMEM;
-}
-
-static void fault_exit_packet_debugfs(struct hfi1_ibdev *ibd)
-{
-	debugfs_remove_recursive(ibd->fault_packet->dir);
-	kfree(ibd->fault_packet);
-	ibd->fault_packet = NULL;
-}
-
-static int fault_init_packet_debugfs(struct hfi1_ibdev *ibd)
-{
-	struct dentry *parent = ibd->hfi1_ibdev_dbg;
-
-	ibd->fault_packet = kzalloc(sizeof(*ibd->fault_packet), GFP_KERNEL);
-	if (!ibd->fault_packet)
-		return -ENOMEM;
-
-	ibd->fault_packet->attr.interval = 1;
-	ibd->fault_packet->attr.require_end = ULONG_MAX;
-	ibd->fault_packet->attr.stacktrace_depth = 32;
-	ibd->fault_packet->attr.dname = NULL;
-	ibd->fault_packet->attr.verbose = 0;
-	ibd->fault_packet->fault_by_packet = false;
-
-	ibd->fault_packet->dir =
-		fault_create_debugfs_attr("fault_packet",
-					  parent,
-					  &ibd->fault_opcode->attr);
-	if (IS_ERR(ibd->fault_packet->dir)) {
-		kfree(ibd->fault_packet);
-		return -ENOENT;
-	}
-
-	if (!debugfs_create_bool("fault_by_packet", 0600,
-				 ibd->fault_packet->dir,
-				 &ibd->fault_packet->fault_by_packet))
-		goto fail;
-	if (!debugfs_create_u64("fault_stats", 0400,
-				ibd->fault_packet->dir,
-				&ibd->fault_packet->n_faults))
-		goto fail;
-
-	return 0;
-fail:
-	fault_exit_packet_debugfs(ibd);
-	return -ENOMEM;
-}
-
-static void fault_exit_debugfs(struct hfi1_ibdev *ibd)
-{
-	fault_exit_opcode_debugfs(ibd);
-	fault_exit_packet_debugfs(ibd);
-}
-
-static int fault_init_debugfs(struct hfi1_ibdev *ibd)
-{
-	int ret = 0;
-
-	ret = fault_init_opcode_debugfs(ibd);
-	if (ret)
-		return ret;
-
-	ret = fault_init_packet_debugfs(ibd);
-	if (ret)
-		fault_exit_opcode_debugfs(ibd);
-
-	return ret;
-}
-
-bool hfi1_dbg_fault_suppress_err(struct hfi1_ibdev *ibd)
-{
-	return ibd->fault_suppress_err;
-}
-
-bool hfi1_dbg_fault_opcode(struct rvt_qp *qp, u32 opcode, bool rx)
-{
-	bool ret = false;
-	struct hfi1_ibdev *ibd = to_idev(qp->ibqp.device);
-
-	if (!ibd->fault_opcode || !ibd->fault_opcode->fault_by_opcode)
-		return false;
-	if (ibd->fault_opcode->opcode != (opcode & ibd->fault_opcode->mask))
-		return false;
-	ret = should_fail(&ibd->fault_opcode->attr, 1);
-	if (ret) {
-		trace_hfi1_fault_opcode(qp, opcode);
-		if (rx)
-			ibd->fault_opcode->n_rxfaults[opcode]++;
-		else
-			ibd->fault_opcode->n_txfaults[opcode]++;
-	}
-	return ret;
-}
-
-bool hfi1_dbg_fault_packet(struct hfi1_packet *packet)
-{
-	struct rvt_dev_info *rdi = &packet->rcd->ppd->dd->verbs_dev.rdi;
-	struct hfi1_ibdev *ibd = dev_from_rdi(rdi);
-	bool ret = false;
-
-	if (!ibd->fault_packet || !ibd->fault_packet->fault_by_packet)
-		return false;
-
-	ret = should_fail(&ibd->fault_packet->attr, 1);
-	if (ret) {
-		++ibd->fault_packet->n_faults;
-		trace_hfi1_fault_packet(packet);
-	}
-	return ret;
-}
-#endif
-
 void hfi1_dbg_ibdev_init(struct hfi1_ibdev *ibd)
 {
 	char name[sizeof("port0counters") + 1];
 	char link[10];
 	struct hfi1_devdata *dd = dd_from_dev(ibd);
 	struct hfi1_pportdata *ppd;
+	struct dentry *root;
 	int unit = dd->unit;
 	int i, j;
 
@@ -1399,30 +1163,29 @@ void hfi1_dbg_ibdev_init(struct hfi1_ibdev *ibd)
 		return;
 	snprintf(name, sizeof(name), "%s_%d", class_name(), unit);
 	snprintf(link, sizeof(link), "%d", unit);
-	ibd->hfi1_ibdev_dbg = debugfs_create_dir(name, hfi1_dbg_root);
-	if (!ibd->hfi1_ibdev_dbg) {
-		pr_warn("create of %s failed\n", name);
-		return;
-	}
+	root = debugfs_create_dir(name, hfi1_dbg_root);
+	ibd->hfi1_ibdev_dbg = root;
+
 	ibd->hfi1_ibdev_link =
 		debugfs_create_symlink(link, hfi1_dbg_root, name);
-	if (!ibd->hfi1_ibdev_link) {
-		pr_warn("create of %s symlink failed\n", name);
-		return;
-	}
-	DEBUGFS_SEQ_FILE_CREATE(opcode_stats, ibd->hfi1_ibdev_dbg, ibd);
-	DEBUGFS_SEQ_FILE_CREATE(tx_opcode_stats, ibd->hfi1_ibdev_dbg, ibd);
-	DEBUGFS_SEQ_FILE_CREATE(ctx_stats, ibd->hfi1_ibdev_dbg, ibd);
-	DEBUGFS_SEQ_FILE_CREATE(qp_stats, ibd->hfi1_ibdev_dbg, ibd);
-	DEBUGFS_SEQ_FILE_CREATE(sdes, ibd->hfi1_ibdev_dbg, ibd);
-	DEBUGFS_SEQ_FILE_CREATE(rcds, ibd->hfi1_ibdev_dbg, ibd);
-	DEBUGFS_SEQ_FILE_CREATE(sdma_cpu_list, ibd->hfi1_ibdev_dbg, ibd);
+
+	debugfs_create_file("opcode_stats", 0444, root, ibd,
+			    &_opcode_stats_file_ops);
+	debugfs_create_file("tx_opcode_stats", 0444, root, ibd,
+			    &_tx_opcode_stats_file_ops);
+	debugfs_create_file("ctx_stats", 0444, root, ibd, &_ctx_stats_file_ops);
+	debugfs_create_file("qp_stats", 0444, root, ibd, &_qp_stats_file_ops);
+	debugfs_create_file("sdes", 0444, root, ibd, &_sdes_file_ops);
+	debugfs_create_file("rcds", 0444, root, ibd, &_rcds_file_ops);
+	debugfs_create_file("pios", 0444, root, ibd, &_pios_file_ops);
+	debugfs_create_file("sdma_cpu_list", 0444, root, ibd,
+			    &_sdma_cpu_list_file_ops);
+
 	/* dev counter files */
 	for (i = 0; i < ARRAY_SIZE(cntr_ops); i++)
-		DEBUGFS_FILE_CREATE(cntr_ops[i].name,
-				    ibd->hfi1_ibdev_dbg,
-				    dd,
-				    &cntr_ops[i].ops, S_IRUGO);
+		debugfs_create_file(cntr_ops[i].name, 0444, root, dd,
+				    &cntr_ops[i].ops);
+
 	/* per port files */
 	for (ppd = dd->pport, j = 0; j < dd->num_pports; j++, ppd++)
 		for (i = 0; i < ARRAY_SIZE(port_cntr_ops); i++) {
@@ -1430,29 +1193,21 @@ void hfi1_dbg_ibdev_init(struct hfi1_ibdev *ibd)
 				 sizeof(name),
 				 port_cntr_ops[i].name,
 				 j + 1);
-			DEBUGFS_FILE_CREATE(name,
-					    ibd->hfi1_ibdev_dbg,
-					    ppd,
-					    &port_cntr_ops[i].ops,
+			debugfs_create_file(name,
 					    !port_cntr_ops[i].ops.write ?
-					    S_IRUGO : S_IRUGO | S_IWUSR);
+						    S_IRUGO :
+						    S_IRUGO | S_IWUSR,
+					    root, ppd, &port_cntr_ops[i].ops);
 		}
 
-#ifdef CONFIG_FAULT_INJECTION
-	debugfs_create_bool("fault_suppress_err", 0600,
-			    ibd->hfi1_ibdev_dbg,
-			    &ibd->fault_suppress_err);
-	fault_init_debugfs(ibd);
-#endif
+	hfi1_fault_init_debugfs(ibd);
 }
 
 void hfi1_dbg_ibdev_exit(struct hfi1_ibdev *ibd)
 {
 	if (!hfi1_dbg_root)
 		goto out;
-#ifdef CONFIG_FAULT_INJECTION
-	fault_exit_debugfs(ibd);
-#endif
+	hfi1_fault_exit_debugfs(ibd);
 	debugfs_remove(ibd->hfi1_ibdev_link);
 	debugfs_remove_recursive(ibd->hfi1_ibdev_dbg);
 out:
@@ -1533,35 +1288,30 @@ static void _driver_stats_seq_stop(struct seq_file *s, void *v)
 {
 }
 
-static u64 hfi1_sps_ints(void)
+static void hfi1_sps_show_ints(struct seq_file *s)
 {
-	unsigned long flags;
+	unsigned long index, flags;
 	struct hfi1_devdata *dd;
 	u64 sps_ints = 0;
 
-	spin_lock_irqsave(&hfi1_devs_lock, flags);
-	list_for_each_entry(dd, &hfi1_dev_list, list) {
+	xa_lock_irqsave(&hfi1_dev_table, flags);
+	xa_for_each(&hfi1_dev_table, index, dd) {
 		sps_ints += get_all_cpu_total(dd->int_counter);
 	}
-	spin_unlock_irqrestore(&hfi1_devs_lock, flags);
-	return sps_ints;
+	xa_unlock_irqrestore(&hfi1_dev_table, flags);
+	seq_write(s, &sps_ints, sizeof(u64));
 }
 
 static int _driver_stats_seq_show(struct seq_file *s, void *v)
 {
 	loff_t *spos = v;
-	char *buffer;
 	u64 *stats = (u64 *)&hfi1_stats;
-	size_t sz = seq_get_buf(s, &buffer);
 
-	if (sz < sizeof(u64))
-		return SEQ_SKIP;
 	/* special case for interrupts */
 	if (*spos == 0)
-		*(u64 *)buffer = hfi1_sps_ints();
+		hfi1_sps_show_ints(s);
 	else
-		*(u64 *)buffer = stats[*spos];
-	seq_commit(s,  sizeof(u64));
+		seq_write(s, stats + *spos, sizeof(u64));
 	return 0;
 }
 
@@ -1572,10 +1322,10 @@ DEBUGFS_FILE_OPS(driver_stats);
 void hfi1_dbg_init(void)
 {
 	hfi1_dbg_root  = debugfs_create_dir(DRIVER_NAME, NULL);
-	if (!hfi1_dbg_root)
-		pr_warn("init of debugfs failed\n");
-	DEBUGFS_SEQ_FILE_CREATE(driver_stats_names, hfi1_dbg_root, NULL);
-	DEBUGFS_SEQ_FILE_CREATE(driver_stats, hfi1_dbg_root, NULL);
+	debugfs_create_file("driver_stats_names", 0444, hfi1_dbg_root, NULL,
+			    &_driver_stats_names_file_ops);
+	debugfs_create_file("driver_stats", 0444, hfi1_dbg_root, NULL,
+			    &_driver_stats_file_ops);
 }
 
 void hfi1_dbg_exit(void)

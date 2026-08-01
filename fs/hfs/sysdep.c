@@ -13,7 +13,8 @@
 
 /* dentry case-handling: just lowercase everything */
 
-static int hfs_revalidate_dentry(struct dentry *dentry, unsigned int flags)
+static int hfs_revalidate_dentry(struct inode *dir, const struct qstr *name,
+				 struct dentry *dentry, unsigned int flags)
 {
 	struct inode *inode;
 	int diff;
@@ -28,9 +29,13 @@ static int hfs_revalidate_dentry(struct dentry *dentry, unsigned int flags)
 	/* fix up inode on a timezone change */
 	diff = sys_tz.tz_minuteswest * 60 - HFS_I(inode)->tz_secondswest;
 	if (diff) {
-		inode->i_ctime.tv_sec += diff;
-		inode->i_atime.tv_sec += diff;
-		inode->i_mtime.tv_sec += diff;
+		struct timespec64 ts = inode_get_ctime(inode);
+
+		inode_set_ctime(inode, ts.tv_sec + diff, ts.tv_nsec);
+		ts = inode_get_atime(inode);
+		inode_set_atime(inode, ts.tv_sec + diff, ts.tv_nsec);
+		ts = inode_get_mtime(inode);
+		inode_set_mtime(inode, ts.tv_sec + diff, ts.tv_nsec);
 		HFS_I(inode)->tz_secondswest += diff;
 	}
 	return 1;

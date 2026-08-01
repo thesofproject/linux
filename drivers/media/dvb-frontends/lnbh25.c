@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * lnbh25.c
  *
@@ -6,16 +7,6 @@
  * Copyright (C) 2014 NetUP Inc.
  * Copyright (C) 2014 Sergey Kozlov <serjk@netup.ru>
  * Copyright (C) 2014 Abylay Ospan <aospan@netup.ru>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -157,7 +148,7 @@ struct dvb_frontend *lnbh25_attach(struct dvb_frontend *fe,
 	struct lnbh25_priv *priv;
 
 	dev_dbg(&i2c->dev, "%s()\n", __func__);
-	priv = kzalloc(sizeof(struct lnbh25_priv), GFP_KERNEL);
+	priv = kzalloc_obj(struct lnbh25_priv);
 	if (!priv)
 		return NULL;
 	priv->i2c_address = (cfg->i2c_address >> 1);
@@ -182,7 +173,7 @@ struct dvb_frontend *lnbh25_attach(struct dvb_frontend *fe,
 		__func__, priv->i2c_address);
 	return fe;
 }
-EXPORT_SYMBOL(lnbh25_attach);
+EXPORT_SYMBOL_GPL(lnbh25_attach);
 
 MODULE_DESCRIPTION("ST LNBH25 driver");
 MODULE_AUTHOR("info@netup.ru");

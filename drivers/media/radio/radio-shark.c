@@ -316,8 +316,18 @@ static int usb_shark_probe(struct usb_interface *intf,
 {
 	struct shark_device *shark;
 	int retval = -ENOMEM;
+	static const u8 ep_addresses[] = {
+		SHARK_IN_EP | USB_DIR_IN,
+		SHARK_OUT_EP | USB_DIR_OUT,
+		0};
 
-	shark = kzalloc(sizeof(struct shark_device), GFP_KERNEL);
+	/* Are the expected endpoints present? */
+	if (!usb_check_int_endpoints(intf, ep_addresses)) {
+		dev_err(&intf->dev, "Invalid radioSHARK device\n");
+		return -EINVAL;
+	}
+
+	shark = kzalloc_obj(struct shark_device);
 	if (!shark)
 		return retval;
 
@@ -345,7 +355,7 @@ static int usb_shark_probe(struct usb_interface *intf,
 	shark->tea.ops = &shark_tea_ops;
 	shark->tea.cannot_mute = true;
 	shark->tea.has_am = true;
-	strlcpy(shark->tea.card, "Griffin radioSHARK",
+	strscpy(shark->tea.card, "Griffin radioSHARK",
 		sizeof(shark->tea.card));
 	usb_make_path(shark->usbdev, shark->tea.bus_info,
 		sizeof(shark->tea.bus_info));

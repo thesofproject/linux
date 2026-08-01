@@ -203,7 +203,7 @@ static int              depth;			/* current #if nesting */
 static int              delcount;		/* count of deleted lines */
 static unsigned         blankcount;		/* count of blank lines */
 static unsigned         blankmax;		/* maximum recent blankcount */
-static bool             constexpr;		/* constant #if expression */
+static bool             constexpression;	/* constant #if expression */
 static bool             zerosyms = true;	/* to format symdepth output */
 static bool             firstsym;		/* ditto */
 
@@ -395,7 +395,7 @@ usage(void)
  * When we have processed a group that starts off with a known-false
  * #if/#elif sequence (which has therefore been deleted) followed by a
  * #elif that we don't understand and therefore must keep, we edit the
- * latter into a #if to keep the nesting correct. We use strncpy() to
+ * latter into a #if to keep the nesting correct. We use memcpy() to
  * overwrite the 4 byte token "elif" with "if  " without a '\0' byte.
  *
  * When we find a true #elif in a group, the following block will
@@ -450,7 +450,7 @@ static void Idrop (void) { Fdrop();  ignoreon(); }
 static void Itrue (void) { Ftrue();  ignoreon(); }
 static void Ifalse(void) { Ffalse(); ignoreon(); }
 /* modify this line */
-static void Mpass (void) { strncpy(keyword, "if  ", 4); Pelif(); }
+static void Mpass (void) { memcpy(keyword, "if  ", 4); Pelif(); }
 static void Mtrue (void) { keywordedit("else");  state(IS_TRUE_MIDDLE); }
 static void Melif (void) { keywordedit("endif"); state(IS_FALSE_TRAILER); }
 static void Melse (void) { keywordedit("endif"); state(IS_FALSE_ELSE); }
@@ -819,7 +819,7 @@ static const struct ops {
 /*
  * Function for evaluating the innermost parts of expressions,
  * viz. !expr (expr) number defined(symbol) symbol
- * We reset the constexpr flag in the last two cases.
+ * We reset the constexpression flag in the last two cases.
  */
 static Linetype
 eval_unary(const struct ops *ops, int *valp, const char **cpp)
@@ -877,7 +877,7 @@ eval_unary(const struct ops *ops, int *valp, const char **cpp)
 		cp = skipcomment(cp);
 		if (defparen && *cp++ != ')')
 			return (LT_ERROR);
-		constexpr = false;
+		constexpression = false;
 	} else if (!endsym(*cp)) {
 		debug("eval%d symbol", ops - eval_ops);
 		sym = findsym(cp);
@@ -895,7 +895,7 @@ eval_unary(const struct ops *ops, int *valp, const char **cpp)
 			lt = *valp ? LT_TRUE : LT_FALSE;
 			cp = skipargs(cp);
 		}
-		constexpr = false;
+		constexpression = false;
 	} else {
 		debug("eval%d bad expr", ops - eval_ops);
 		return (LT_ERROR);
@@ -955,10 +955,10 @@ ifeval(const char **cpp)
 	int val = 0;
 
 	debug("eval %s", *cpp);
-	constexpr = killconsts ? false : true;
+	constexpression = killconsts ? false : true;
 	ret = eval_table(eval_ops, &val, cpp);
 	debug("eval = %d", val);
-	return (constexpr ? LT_IF : ret == LT_ERROR ? LT_IF : ret);
+	return (constexpression ? LT_IF : ret == LT_ERROR ? LT_IF : ret);
 }
 
 /*

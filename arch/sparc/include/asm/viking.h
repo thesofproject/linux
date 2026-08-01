@@ -10,6 +10,7 @@
 
 #include <asm/asi.h>
 #include <asm/mxcc.h>
+#include <asm/pgtable.h>
 #include <asm/pgtsrmmu.h>
 
 /* Bits in the SRMMU control register for GNU/Viking modules.
@@ -109,7 +110,7 @@
 #define VIKING_PTAG_DIRTY   0x00010000   /* Block has been modified */
 #define VIKING_PTAG_SHARED  0x00000100   /* Shared with some other cache */
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 static inline void viking_flush_icache(void)
 {
@@ -227,7 +228,7 @@ static inline unsigned long viking_hwprobe(unsigned long vaddr)
 			     : "=r" (val)
 			     : "r" (vaddr | 0x200), "i" (ASI_M_FLUSH_PROBE));
 	if ((val & SRMMU_ET_MASK) == SRMMU_ET_PTE) {
-		vaddr &= ~SRMMU_PGDIR_MASK;
+		vaddr &= ~PGDIR_MASK;
 		vaddr >>= PAGE_SHIFT;
 		return val | (vaddr << 8);
 	}
@@ -237,7 +238,7 @@ static inline unsigned long viking_hwprobe(unsigned long vaddr)
 			     : "=r" (val)
 			     : "r" (vaddr | 0x100), "i" (ASI_M_FLUSH_PROBE));
 	if ((val & SRMMU_ET_MASK) == SRMMU_ET_PTE) {
-		vaddr &= ~SRMMU_REAL_PMD_MASK;
+		vaddr &= ~PMD_MASK;
 		vaddr >>= PAGE_SHIFT;
 		return val | (vaddr << 8);
 	}
@@ -249,6 +250,6 @@ static inline unsigned long viking_hwprobe(unsigned long vaddr)
 	return val;
 }
 
-#endif /* !__ASSEMBLY__ */
+#endif /* !__ASSEMBLER__ */
 
 #endif /* !(_SPARC_VIKING_H) */

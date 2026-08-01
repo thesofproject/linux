@@ -1,15 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2016 National Instruments Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/acpi.h>
@@ -17,6 +8,7 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
+#include <linux/platform_device.h>
 #include <linux/watchdog.h>
 
 #define NIWD_CONTROL	0x01
@@ -186,22 +178,27 @@ static const struct watchdog_ops ni903x_wdd_ops = {
 	.get_timeleft = ni903x_wdd_get_timeleft,
 };
 
-static int ni903x_acpi_add(struct acpi_device *device)
+static int ni903x_acpi_probe(struct platform_device *pdev)
 {
-	struct device *dev = &device->dev;
+	struct device *dev = &pdev->dev;
 	struct watchdog_device *wdd;
 	struct ni903x_wdt *wdt;
+	acpi_handle handle;
 	acpi_status status;
 	int ret;
+
+	handle = ACPI_HANDLE(dev);
+	if (!handle)
+		return -ENODEV;
 
 	wdt = devm_kzalloc(dev, sizeof(*wdt), GFP_KERNEL);
 	if (!wdt)
 		return -ENOMEM;
 
-	device->driver_data = wdt;
+	platform_set_drvdata(pdev, wdt);
 	wdt->dev = dev;
 
-	status = acpi_walk_resources(device->handle, METHOD_NAME__CRS,
+	status = acpi_walk_resources(handle, METHOD_NAME__CRS,
 				     ni903x_resources, wdt);
 	if (ACPI_FAILURE(status) || wdt->io_base == 0) {
 		dev_err(dev, "failed to get resources\n");
@@ -217,15 +214,11 @@ static int ni903x_acpi_add(struct acpi_device *device)
 	wdd->parent = dev;
 	watchdog_set_drvdata(wdd, wdt);
 	watchdog_set_nowayout(wdd, nowayout);
-	ret = watchdog_init_timeout(wdd, timeout, dev);
-	if (ret)
-		dev_err(dev, "unable to set timeout value, using default\n");
+	watchdog_init_timeout(wdd, timeout, dev);
 
 	ret = watchdog_register_device(wdd);
-	if (ret) {
-		dev_err(dev, "failed to register watchdog\n");
+	if (ret)
 		return ret;
-	}
 
 	/* Switch from boot mode to user mode */
 	outb(NIWD_CONTROL_RESET | NIWD_CONTROL_MODE,
@@ -237,14 +230,12 @@ static int ni903x_acpi_add(struct acpi_device *device)
 	return 0;
 }
 
-static int ni903x_acpi_remove(struct acpi_device *device)
+static void ni903x_acpi_remove(struct platform_device *pdev)
 {
-	struct ni903x_wdt *wdt = acpi_driver_data(device);
+	struct ni903x_wdt *wdt = platform_get_drvdata(pdev);
 
 	ni903x_wdd_stop(&wdt->wdd);
 	watchdog_unregister_device(&wdt->wdd);
-
-	return 0;
 }
 
 static const struct acpi_device_id ni903x_device_ids[] = {
@@ -253,16 +244,16 @@ static const struct acpi_device_id ni903x_device_ids[] = {
 };
 MODULE_DEVICE_TABLE(acpi, ni903x_device_ids);
 
-static struct acpi_driver ni903x_acpi_driver = {
-	.name = NIWD_NAME,
-	.ids = ni903x_device_ids,
-	.ops = {
-		.add = ni903x_acpi_add,
-		.remove = ni903x_acpi_remove,
+static struct platform_driver ni903x_acpi_driver = {
+	.probe = ni903x_acpi_probe,
+	.remove = ni903x_acpi_remove,
+	.driver = {
+		.name = NIWD_NAME,
+		.acpi_match_table = ni903x_device_ids,
 	},
 };
 
-module_acpi_driver(ni903x_acpi_driver);
+module_platform_driver(ni903x_acpi_driver);
 
 MODULE_DESCRIPTION("NI 903x Watchdog");
 MODULE_AUTHOR("Jeff Westfahl <jeff.westfahl@ni.com>");

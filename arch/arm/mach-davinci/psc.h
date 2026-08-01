@@ -27,8 +27,6 @@
 #ifndef __ASM_ARCH_PSC_H
 #define __ASM_ARCH_PSC_H
 
-#define	DAVINCI_PWR_SLEEP_CNTRL_BASE	0x01C41000
-
 /* Power and Sleep Controller (PSC) Domains */
 #define DAVINCI_GPSC_ARMDOMAIN		0
 #define DAVINCI_GPSC_DSPDOMAIN		1
@@ -72,70 +70,6 @@
 #define DAVINCI_LPSC_GEM		39
 #define DAVINCI_LPSC_IMCOP		40
 
-#define DM355_LPSC_TIMER3		5
-#define DM355_LPSC_SPI1			6
-#define DM355_LPSC_MMC_SD1		7
-#define DM355_LPSC_McBSP1		8
-#define DM355_LPSC_PWM3			10
-#define DM355_LPSC_SPI2			11
-#define DM355_LPSC_RTO			12
-#define DM355_LPSC_VPSS_DAC		41
-
-/* DM365 */
-#define DM365_LPSC_TIMER3	5
-#define DM365_LPSC_SPI1		6
-#define DM365_LPSC_MMC_SD1	7
-#define DM365_LPSC_McBSP1	8
-#define DM365_LPSC_PWM3		10
-#define DM365_LPSC_SPI2		11
-#define DM365_LPSC_RTO		12
-#define DM365_LPSC_TIMER4	17
-#define DM365_LPSC_SPI0		22
-#define DM365_LPSC_SPI3		38
-#define DM365_LPSC_SPI4		39
-#define DM365_LPSC_EMAC		40
-#define DM365_LPSC_VOICE_CODEC	44
-#define DM365_LPSC_DAC_CLK	46
-#define DM365_LPSC_VPSSMSTR	47
-#define DM365_LPSC_MJCP		50
-
-/*
- * LPSC Assignments
- */
-#define DM646X_LPSC_ARM		0
-#define DM646X_LPSC_C64X_CPU	1
-#define DM646X_LPSC_HDVICP0	2
-#define DM646X_LPSC_HDVICP1	3
-#define DM646X_LPSC_TPCC	4
-#define DM646X_LPSC_TPTC0	5
-#define DM646X_LPSC_TPTC1	6
-#define DM646X_LPSC_TPTC2	7
-#define DM646X_LPSC_TPTC3	8
-#define DM646X_LPSC_PCI		13
-#define DM646X_LPSC_EMAC	14
-#define DM646X_LPSC_VDCE	15
-#define DM646X_LPSC_VPSSMSTR	16
-#define DM646X_LPSC_VPSSSLV	17
-#define DM646X_LPSC_TSIF0	18
-#define DM646X_LPSC_TSIF1	19
-#define DM646X_LPSC_DDR_EMIF	20
-#define DM646X_LPSC_AEMIF	21
-#define DM646X_LPSC_McASP0	22
-#define DM646X_LPSC_McASP1	23
-#define DM646X_LPSC_CRGEN0	24
-#define DM646X_LPSC_CRGEN1	25
-#define DM646X_LPSC_UART0	26
-#define DM646X_LPSC_UART1	27
-#define DM646X_LPSC_UART2	28
-#define DM646X_LPSC_PWM0	29
-#define DM646X_LPSC_PWM1	30
-#define DM646X_LPSC_I2C		31
-#define DM646X_LPSC_SPI		32
-#define DM646X_LPSC_GPIO	33
-#define DM646X_LPSC_TIMER0	34
-#define DM646X_LPSC_TIMER1	35
-#define DM646X_LPSC_ARM_INTC	45
-
 /* PSC0 defines */
 #define DA8XX_LPSC0_TPCC		0
 #define DA8XX_LPSC0_TPTC0		1
@@ -163,9 +97,7 @@
 #define DA8XX_LPSC1_CPGMAC		5
 #define DA8XX_LPSC1_EMIF3C		6
 #define DA8XX_LPSC1_McASP0		7
-#define DA830_LPSC1_McASP1		8
 #define DA850_LPSC1_SATA		8
-#define DA830_LPSC1_McASP2		9
 #define DA850_LPSC1_VPIF		9
 #define DA8XX_LPSC1_SPI1		10
 #define DA8XX_LPSC1_I2C			11
@@ -177,7 +109,6 @@
 #define DA8XX_LPSC1_PWM			17
 #define DA850_LPSC1_MMC_SD1		18
 #define DA8XX_LPSC1_ECAP		20
-#define DA830_LPSC1_EQEP		21
 #define DA850_LPSC1_TPTC2		21
 #define DA8XX_LPSC1_SCR_P0_SS		24
 #define DA8XX_LPSC1_SCR_P1_SS		25
@@ -205,15 +136,5 @@
 #define MDCTL_FORCE		BIT(31)
 #define PDCTL_NEXT		BIT(0)
 #define PDCTL_EPCGOOD		BIT(8)
-
-#ifndef __ASSEMBLER__
-
-extern int davinci_psc_is_clk_active(unsigned int ctlr, unsigned int id);
-extern void davinci_psc_reset(unsigned int ctlr, unsigned int id,
-		bool reset);
-extern void davinci_psc_config(unsigned int domain, unsigned int ctlr,
-		unsigned int id, bool enable, u32 flags);
-
-#endif
 
 #endif /* __ASM_ARCH_PSC_H */

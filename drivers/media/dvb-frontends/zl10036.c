@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Driver for Zarlink zl10036 DVB-S silicon tuner
  *
  * Copyright (C) 2006 Tino Reichardt
- * Copyright (C) 2007-2009 Matthias Schwarzott <zzam@gentoo.de>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License Version 2, as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Copyright (C) 2007-2009 Matthias Schwarzott <zzam@gentoo.org>
  *
  **
  * The data sheet for this tuner can be found at:
@@ -97,7 +89,7 @@ static int zl10036_write(struct zl10036_state *state, u8 buf[], u8 count)
 	int ret;
 
 	if (zl10036_debug & 0x02) {
-		/* every 8bit-value satisifes this!
+		/* every 8bit-value satisfies this!
 		 * so only check for debug log */
 		if ((buf[0] & 0x80) == 0x00)
 			reg = 2;
@@ -311,8 +303,8 @@ static int zl10036_set_params(struct dvb_frontend *fe)
 
 	/* ensure correct values
 	 * maybe redundant as core already checks this */
-	if ((frequency < fe->ops.info.frequency_min)
-	||  (frequency > fe->ops.info.frequency_max))
+	if ((frequency < fe->ops.info.frequency_min_hz / kHz)
+	||  (frequency > fe->ops.info.frequency_max_hz / kHz))
 		return -EINVAL;
 
 	/*
@@ -443,8 +435,8 @@ static int zl10036_init(struct dvb_frontend *fe)
 static const struct dvb_tuner_ops zl10036_tuner_ops = {
 	.info = {
 		.name = "Zarlink ZL10036",
-		.frequency_min = 950000,
-		.frequency_max = 2175000
+		.frequency_min_hz =  950 * MHz,
+		.frequency_max_hz = 2175 * MHz
 	},
 	.init = zl10036_init,
 	.release = zl10036_release,
@@ -465,7 +457,7 @@ struct dvb_frontend *zl10036_attach(struct dvb_frontend *fe,
 		return NULL;
 	}
 
-	state = kzalloc(sizeof(struct zl10036_state), GFP_KERNEL);
+	state = kzalloc_obj(struct zl10036_state);
 	if (!state)
 		return NULL;
 
@@ -504,7 +496,7 @@ error:
 	kfree(state);
 	return NULL;
 }
-EXPORT_SYMBOL(zl10036_attach);
+EXPORT_SYMBOL_GPL(zl10036_attach);
 
 module_param_named(debug, zl10036_debug, int, 0644);
 MODULE_PARM_DESC(debug, "Turn on/off frontend debugging (default:off).");

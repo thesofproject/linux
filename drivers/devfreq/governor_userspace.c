@@ -1,21 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *  linux/drivers/devfreq/governor_userspace.c
  *
  *  Copyright (C) 2011 Samsung Electronics
  *	MyungJoo Ham <myungjoo.ham@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/slab.h>
 #include <linux/device.h>
 #include <linux/devfreq.h>
+#include <linux/devfreq-governor.h>
+#include <linux/kstrtox.h>
 #include <linux/pm.h>
 #include <linux/mutex.h>
 #include <linux/module.h>
-#include "governor.h"
 
 struct userspace_data {
 	unsigned long user_frequency;
@@ -24,36 +22,31 @@ struct userspace_data {
 
 static int devfreq_userspace_func(struct devfreq *df, unsigned long *freq)
 {
-	struct userspace_data *data = df->data;
+	struct userspace_data *data = df->governor_data;
 
-	if (data->valid) {
-		unsigned long adjusted_freq = data->user_frequency;
-
-		if (df->max_freq && adjusted_freq > df->max_freq)
-			adjusted_freq = df->max_freq;
-
-		if (df->min_freq && adjusted_freq < df->min_freq)
-			adjusted_freq = df->min_freq;
-
-		*freq = adjusted_freq;
-	} else {
+	if (data->valid)
+		*freq = data->user_frequency;
+	else
 		*freq = df->previous_freq; /* No user freq specified yet */
-	}
+
 	return 0;
 }
 
-static ssize_t store_freq(struct device *dev, struct device_attribute *attr,
-			  const char *buf, size_t count)
+static ssize_t set_freq_store(struct device *dev, struct device_attribute *attr,
+			      const char *buf, size_t count)
 {
 	struct devfreq *devfreq = to_devfreq(dev);
 	struct userspace_data *data;
 	unsigned long wanted;
 	int err = 0;
 
-	mutex_lock(&devfreq->lock);
-	data = devfreq->data;
+	err = kstrtoul(buf, 0, &wanted);
+	if (err)
+		return err;
 
-	sscanf(buf, "%lu", &wanted);
+	mutex_lock(&devfreq->lock);
+	data = devfreq->governor_data;
+
 	data->user_frequency = wanted;
 	data->valid = true;
 	err = update_devfreq(devfreq);
@@ -63,15 +56,15 @@ static ssize_t store_freq(struct device *dev, struct device_attribute *attr,
 	return err;
 }
 
-static ssize_t show_freq(struct device *dev, struct device_attribute *attr,
-			 char *buf)
+static ssize_t set_freq_show(struct device *dev,
+			     struct device_attribute *attr, char *buf)
 {
 	struct devfreq *devfreq = to_devfreq(dev);
 	struct userspace_data *data;
 	int err = 0;
 
 	mutex_lock(&devfreq->lock);
-	data = devfreq->data;
+	data = devfreq->governor_data;
 
 	if (data->valid)
 		err = sprintf(buf, "%lu\n", data->user_frequency);
@@ -81,7 +74,7 @@ static ssize_t show_freq(struct device *dev, struct device_attribute *attr,
 	return err;
 }
 
-static DEVICE_ATTR(set_freq, 0644, show_freq, store_freq);
+static DEVICE_ATTR_RW(set_freq);
 static struct attribute *dev_entries[] = {
 	&dev_attr_set_freq.attr,
 	NULL,
@@ -94,15 +87,14 @@ static const struct attribute_group dev_attr_group = {
 static int userspace_init(struct devfreq *devfreq)
 {
 	int err = 0;
-	struct userspace_data *data = kzalloc(sizeof(struct userspace_data),
-					      GFP_KERNEL);
+	struct userspace_data *data = kzalloc_obj(struct userspace_data);
 
 	if (!data) {
 		err = -ENOMEM;
 		goto out;
 	}
 	data->valid = false;
-	devfreq->data = data;
+	devfreq->governor_data = data;
 
 	err = sysfs_create_group(&devfreq->dev.kobj, &dev_attr_group);
 out:
@@ -118,8 +110,8 @@ static void userspace_exit(struct devfreq *devfreq)
 	if (devfreq->dev.kobj.sd)
 		sysfs_remove_group(&devfreq->dev.kobj, &dev_attr_group);
 
-	kfree(devfreq->data);
-	devfreq->data = NULL;
+	kfree(devfreq->governor_data);
+	devfreq->governor_data = NULL;
 }
 
 static int devfreq_userspace_handler(struct devfreq *devfreq,
@@ -142,7 +134,7 @@ static int devfreq_userspace_handler(struct devfreq *devfreq,
 }
 
 static struct devfreq_governor devfreq_userspace = {
-	.name = "userspace",
+	.name = DEVFREQ_GOV_USERSPACE,
 	.get_target_freq = devfreq_userspace_func,
 	.event_handler = devfreq_userspace_handler,
 };
@@ -164,4 +156,5 @@ static void __exit devfreq_userspace_exit(void)
 	return;
 }
 module_exit(devfreq_userspace_exit);
+MODULE_DESCRIPTION("DEVFREQ Userspace governor");
 MODULE_LICENSE("GPL");

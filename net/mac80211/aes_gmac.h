@@ -1,9 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright 2015, Qualcomm Atheros, Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef AES_GMAC_H
@@ -12,7 +9,6 @@
 #include <linux/crypto.h>
 
 #define GMAC_AAD_LEN	20
-#define GMAC_MIC_LEN	16
 #define GMAC_NONCE_LEN	12
 
 struct crypto_aead *ieee80211_aes_gmac_key_setup(const u8 key[],

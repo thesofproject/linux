@@ -30,9 +30,6 @@ struct resource;
 void sa11x0_register_mtd(struct flash_platform_data *flash,
 			 struct resource *res, int nr);
 
-struct irda_platform_data;
-void sa11x0_register_irda(struct irda_platform_data *irda);
-
 struct mcp_plat_data;
 void sa11x0_ppc_configure_mcp(void);
 void sa11x0_register_mcp(struct mcp_plat_data *data);
@@ -54,4 +51,5 @@ void sa11x0_register_pcmcia(int socket, struct gpiod_lookup_table *);
 struct fixed_voltage_config;
 struct regulator_consumer_supply;
 int sa11x0_register_fixed_regulator(int n, struct fixed_voltage_config *cfg,
-	struct regulator_consumer_supply *supplies, unsigned num_supplies);
+	struct regulator_consumer_supply *supplies, unsigned num_supplies,
+	bool uses_gpio);

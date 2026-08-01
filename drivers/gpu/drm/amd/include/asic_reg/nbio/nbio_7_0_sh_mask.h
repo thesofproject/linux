@@ -74709,6 +74709,36 @@
 //PCIE_PERF_COUNT1_TXCLK2
 #define PCIE_PERF_COUNT1_TXCLK2__COUNTER1__SHIFT                                                              0x0
 #define PCIE_PERF_COUNT1_TXCLK2__COUNTER1_MASK                                                                0xFFFFFFFFL
+//PCIE_PERF_CNTL_TXCLK3
+#define PCIE_PERF_CNTL_TXCLK3__EVENT0_SEL__SHIFT                                                              0x0
+#define PCIE_PERF_CNTL_TXCLK3__EVENT1_SEL__SHIFT                                                              0x8
+#define PCIE_PERF_CNTL_TXCLK3__COUNTER0_UPPER__SHIFT                                                          0x10
+#define PCIE_PERF_CNTL_TXCLK3__COUNTER1_UPPER__SHIFT                                                          0x18
+#define PCIE_PERF_CNTL_TXCLK3__EVENT0_SEL_MASK                                                                0x000000FFL
+#define PCIE_PERF_CNTL_TXCLK3__EVENT1_SEL_MASK                                                                0x0000FF00L
+#define PCIE_PERF_CNTL_TXCLK3__COUNTER0_UPPER_MASK                                                            0x00FF0000L
+#define PCIE_PERF_CNTL_TXCLK3__COUNTER1_UPPER_MASK                                                            0xFF000000L
+//PCIE_PERF_COUNT0_TXCLK3
+#define PCIE_PERF_COUNT0_TXCLK3__COUNTER0__SHIFT                                                              0x0
+#define PCIE_PERF_COUNT0_TXCLK3__COUNTER0_MASK                                                                0xFFFFFFFFL
+//PCIE_PERF_COUNT1_TXCLK3
+#define PCIE_PERF_COUNT1_TXCLK3__COUNTER1__SHIFT                                                              0x0
+#define PCIE_PERF_COUNT1_TXCLK3__COUNTER1_MASK                                                                0xFFFFFFFFL
+//PCIE_PERF_CNTL_TXCLK4
+#define PCIE_PERF_CNTL_TXCLK4__EVENT0_SEL__SHIFT                                                              0x0
+#define PCIE_PERF_CNTL_TXCLK4__EVENT1_SEL__SHIFT                                                              0x8
+#define PCIE_PERF_CNTL_TXCLK4__COUNTER0_UPPER__SHIFT                                                          0x10
+#define PCIE_PERF_CNTL_TXCLK4__COUNTER1_UPPER__SHIFT                                                          0x18
+#define PCIE_PERF_CNTL_TXCLK4__EVENT0_SEL_MASK                                                                0x000000FFL
+#define PCIE_PERF_CNTL_TXCLK4__EVENT1_SEL_MASK                                                                0x0000FF00L
+#define PCIE_PERF_CNTL_TXCLK4__COUNTER0_UPPER_MASK                                                            0x00FF0000L
+#define PCIE_PERF_CNTL_TXCLK4__COUNTER1_UPPER_MASK                                                            0xFF000000L
+//PCIE_PERF_COUNT0_TXCLK4
+#define PCIE_PERF_COUNT0_TXCLK4__COUNTER0__SHIFT                                                              0x0
+#define PCIE_PERF_COUNT0_TXCLK4__COUNTER0_MASK                                                                0xFFFFFFFFL
+//PCIE_PERF_COUNT1_TXCLK4
+#define PCIE_PERF_COUNT1_TXCLK4__COUNTER1__SHIFT                                                              0x0
+#define PCIE_PERF_COUNT1_TXCLK4__COUNTER1_MASK                                                                0xFFFFFFFFL
 //PCIE_PRBS_CLR
 #define PCIE_PRBS_CLR__PRBS_CLR__SHIFT                                                                        0x0
 #define PCIE_PRBS_CLR__PRBS_POLARITY_EN__SHIFT                                                                0x18

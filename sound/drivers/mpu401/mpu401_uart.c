@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
  *  Routines for control of MPU-401 in UART mode
@@ -6,26 +7,10 @@
  *  interrupts thus output is done via polling. Without interrupt,
  *  input is done also via polling. Do not expect good performance.
  *
- *
- *   This program is free software; you can redistribute it and/or modify
- *   it under the terms of the GNU General Public License as published by
- *   the Free Software Foundation; either version 2 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU General Public License for more details.
- *
- *   You should have received a copy of the GNU General Public License
- *   along with this program; if not, write to the Free Software
- *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
- *
  *   13-03-2003:
  *      Added support for different kind of hardware I/O. Build in choices
  *      are port and mmio. For other kind of I/O, set mpu->read and
  *      mpu->write to your own I/O functions.
- *
  */
 
 #include <linux/io.h>
@@ -88,34 +73,29 @@ static void snd_mpu401_uart_clear_rx(struct snd_mpu401 *mpu)
 		mpu->read(mpu, MPU401D(mpu));
 #ifdef CONFIG_SND_DEBUG
 	if (timeout <= 0)
-		snd_printk(KERN_ERR "cmd: clear rx timeout (status = 0x%x)\n",
-			   mpu->read(mpu, MPU401C(mpu)));
+		dev_err(mpu->rmidi->dev,
+			"cmd: clear rx timeout (status = 0x%x)\n",
+			mpu->read(mpu, MPU401C(mpu)));
 #endif
 }
 
 static void uart_interrupt_tx(struct snd_mpu401 *mpu)
 {
-	unsigned long flags;
-
 	if (test_bit(MPU401_MODE_BIT_OUTPUT, &mpu->mode) &&
 	    test_bit(MPU401_MODE_BIT_OUTPUT_TRIGGER, &mpu->mode)) {
-		spin_lock_irqsave(&mpu->output_lock, flags);
+		guard(spinlock_irqsave)(&mpu->output_lock);
 		snd_mpu401_uart_output_write(mpu);
-		spin_unlock_irqrestore(&mpu->output_lock, flags);
 	}
 }
 
 static void _snd_mpu401_uart_interrupt(struct snd_mpu401 *mpu)
 {
-	unsigned long flags;
-
 	if (mpu->info_flags & MPU401_INFO_INPUT) {
-		spin_lock_irqsave(&mpu->input_lock, flags);
+		guard(spinlock_irqsave)(&mpu->input_lock);
 		if (test_bit(MPU401_MODE_BIT_INPUT, &mpu->mode))
 			snd_mpu401_uart_input_read(mpu);
 		else
 			snd_mpu401_uart_clear_rx(mpu);
-		spin_unlock_irqrestore(&mpu->input_lock, flags);
 	}
 	if (! (mpu->info_flags & MPU401_INFO_TX_IRQ))
 		/* ok. for better Tx performance try do some output
@@ -171,13 +151,12 @@ EXPORT_SYMBOL(snd_mpu401_uart_interrupt_tx);
  */
 static void snd_mpu401_uart_timer(struct timer_list *t)
 {
-	struct snd_mpu401 *mpu = from_timer(mpu, t, timer);
-	unsigned long flags;
+	struct snd_mpu401 *mpu = timer_container_of(mpu, t, timer);
 
-	spin_lock_irqsave(&mpu->timer_lock, flags);
-	/*mpu->mode |= MPU401_MODE_TIMER;*/
-	mod_timer(&mpu->timer,  1 + jiffies);
-	spin_unlock_irqrestore(&mpu->timer_lock, flags);
+	scoped_guard(spinlock_irqsave, &mpu->timer_lock) {
+		/*mpu->mode |= MPU401_MODE_TIMER;*/
+		mod_timer(&mpu->timer,  1 + jiffies);
+	}
 	if (mpu->rmidi)
 		_snd_mpu401_uart_interrupt(mpu);
 }
@@ -187,16 +166,13 @@ static void snd_mpu401_uart_timer(struct timer_list *t)
  */
 static void snd_mpu401_uart_add_timer (struct snd_mpu401 *mpu, int input)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave (&mpu->timer_lock, flags);
+	guard(spinlock_irqsave)(&mpu->timer_lock);
 	if (mpu->timer_invoked == 0) {
 		timer_setup(&mpu->timer, snd_mpu401_uart_timer, 0);
 		mod_timer(&mpu->timer, 1 + jiffies);
 	} 
 	mpu->timer_invoked |= input ? MPU401_MODE_INPUT_TIMER :
 		MPU401_MODE_OUTPUT_TIMER;
-	spin_unlock_irqrestore (&mpu->timer_lock, flags);
 }
 
 /*
@@ -204,16 +180,13 @@ static void snd_mpu401_uart_add_timer (struct snd_mpu401 *mpu, int input)
  */
 static void snd_mpu401_uart_remove_timer (struct snd_mpu401 *mpu, int input)
 {
-	unsigned long flags;
-
-	spin_lock_irqsave (&mpu->timer_lock, flags);
+	guard(spinlock_irqsave)(&mpu->timer_lock);
 	if (mpu->timer_invoked) {
 		mpu->timer_invoked &= input ? ~MPU401_MODE_INPUT_TIMER :
 			~MPU401_MODE_OUTPUT_TIMER;
 		if (! mpu->timer_invoked)
-			del_timer(&mpu->timer);
+			timer_delete(&mpu->timer);
 	}
-	spin_unlock_irqrestore (&mpu->timer_lock, flags);
 }
 
 /*
@@ -224,10 +197,9 @@ static void snd_mpu401_uart_remove_timer (struct snd_mpu401 *mpu, int input)
 static int snd_mpu401_uart_cmd(struct snd_mpu401 * mpu, unsigned char cmd,
 			       int ack)
 {
-	unsigned long flags;
 	int timeout, ok;
 
-	spin_lock_irqsave(&mpu->input_lock, flags);
+	guard(spinlock_irqsave)(&mpu->input_lock);
 	if (mpu->hardware != MPU401_HW_TRID4DWAVE) {
 		mpu->write(mpu, 0x00, MPU401D(mpu));
 		/*snd_mpu401_uart_clear_rx(mpu);*/
@@ -239,8 +211,9 @@ static int snd_mpu401_uart_cmd(struct snd_mpu401 * mpu, unsigned char cmd,
 			udelay(10);
 #ifdef CONFIG_SND_DEBUG
 		if (!timeout)
-			snd_printk(KERN_ERR "cmd: tx timeout (status = 0x%x)\n",
-				   mpu->read(mpu, MPU401C(mpu)));
+			dev_err(mpu->rmidi->dev,
+				"cmd: tx timeout (status = 0x%x)\n",
+				mpu->read(mpu, MPU401C(mpu)));
 #endif
 	}
 	mpu->write(mpu, cmd, MPU401C(mpu));
@@ -257,12 +230,12 @@ static int snd_mpu401_uart_cmd(struct snd_mpu401 * mpu, unsigned char cmd,
 			ok = 1;
 	} else
 		ok = 1;
-	spin_unlock_irqrestore(&mpu->input_lock, flags);
 	if (!ok) {
-		snd_printk(KERN_ERR "cmd: 0x%x failed at 0x%lx "
-			   "(status = 0x%x, data = 0x%x)\n", cmd, mpu->port,
-			   mpu->read(mpu, MPU401C(mpu)),
-			   mpu->read(mpu, MPU401D(mpu)));
+		dev_err(mpu->rmidi->dev,
+			"cmd: 0x%x failed at 0x%lx (status = 0x%x, data = 0x%x)\n",
+			cmd, mpu->port,
+			mpu->read(mpu, MPU401C(mpu)),
+			mpu->read(mpu, MPU401D(mpu)));
 		return 1;
 	}
 	return 0;
@@ -286,8 +259,11 @@ static int snd_mpu401_uart_input_open(struct snd_rawmidi_substream *substream)
 	int err;
 
 	mpu = substream->rmidi->private_data;
-	if (mpu->open_input && (err = mpu->open_input(mpu)) < 0)
-		return err;
+	if (mpu->open_input) {
+		err = mpu->open_input(mpu);
+		if (err < 0)
+			return err;
+	}
 	if (! test_bit(MPU401_MODE_BIT_OUTPUT, &mpu->mode)) {
 		if (snd_mpu401_do_reset(mpu) < 0)
 			goto error_out;
@@ -308,8 +284,11 @@ static int snd_mpu401_uart_output_open(struct snd_rawmidi_substream *substream)
 	int err;
 
 	mpu = substream->rmidi->private_data;
-	if (mpu->open_output && (err = mpu->open_output(mpu)) < 0)
-		return err;
+	if (mpu->open_output) {
+		err = mpu->open_output(mpu);
+		if (err < 0)
+			return err;
+	}
 	if (! test_bit(MPU401_MODE_BIT_INPUT, &mpu->mode)) {
 		if (snd_mpu401_do_reset(mpu) < 0)
 			goto error_out;
@@ -364,7 +343,6 @@ static int snd_mpu401_uart_output_close(struct snd_rawmidi_substream *substream)
 static void
 snd_mpu401_uart_input_trigger(struct snd_rawmidi_substream *substream, int up)
 {
-	unsigned long flags;
 	struct snd_mpu401 *mpu;
 	int max = 64;
 
@@ -380,9 +358,8 @@ snd_mpu401_uart_input_trigger(struct snd_rawmidi_substream *substream, int up)
 		}
 		
 		/* read data in advance */
-		spin_lock_irqsave(&mpu->input_lock, flags);
+		guard(spinlock_irqsave)(&mpu->input_lock);
 		snd_mpu401_uart_input_read(mpu);
-		spin_unlock_irqrestore(&mpu->input_lock, flags);
 	} else {
 		if (mpu->info_flags & MPU401_INFO_USE_TIMER)
 			snd_mpu401_uart_remove_timer(mpu, 1);
@@ -451,7 +428,6 @@ static void snd_mpu401_uart_output_write(struct snd_mpu401 * mpu)
 static void
 snd_mpu401_uart_output_trigger(struct snd_rawmidi_substream *substream, int up)
 {
-	unsigned long flags;
 	struct snd_mpu401 *mpu;
 
 	mpu = substream->rmidi->private_data;
@@ -466,9 +442,8 @@ snd_mpu401_uart_output_trigger(struct snd_rawmidi_substream *substream, int up)
 			snd_mpu401_uart_add_timer(mpu, 0);
 
 		/* output pending data */
-		spin_lock_irqsave(&mpu->output_lock, flags);
+		guard(spinlock_irqsave)(&mpu->output_lock);
 		snd_mpu401_uart_output_write(mpu);
-		spin_unlock_irqrestore(&mpu->output_lock, flags);
 	} else {
 		if (! (mpu->info_flags & MPU401_INFO_TX_IRQ))
 			snd_mpu401_uart_remove_timer(mpu, 0);
@@ -539,10 +514,11 @@ int snd_mpu401_uart_new(struct snd_card *card, int device,
 		info_flags |= MPU401_INFO_INPUT | MPU401_INFO_OUTPUT;
 	in_enable = (info_flags & MPU401_INFO_INPUT) ? 1 : 0;
 	out_enable = (info_flags & MPU401_INFO_OUTPUT) ? 1 : 0;
-	if ((err = snd_rawmidi_new(card, "MPU-401U", device,
-				   out_enable, in_enable, &rmidi)) < 0)
+	err = snd_rawmidi_new(card, "MPU-401U", device,
+			      out_enable, in_enable, &rmidi);
+	if (err < 0)
 		return err;
-	mpu = kzalloc(sizeof(*mpu), GFP_KERNEL);
+	mpu = kzalloc_obj(*mpu);
 	if (!mpu) {
 		err = -ENOMEM;
 		goto free_device;
@@ -554,13 +530,14 @@ int snd_mpu401_uart_new(struct snd_card *card, int device,
 	spin_lock_init(&mpu->timer_lock);
 	mpu->hardware = hardware;
 	mpu->irq = -1;
+	mpu->rmidi = rmidi;
 	if (! (info_flags & MPU401_INFO_INTEGRATED)) {
 		int res_size = hardware == MPU401_HW_PC98II ? 4 : 2;
 		mpu->res = request_region(port, res_size, "MPU401 UART");
 		if (!mpu->res) {
-			snd_printk(KERN_ERR "mpu401_uart: "
-				   "unable to grab port 0x%lx size %d\n",
-				   port, res_size);
+			dev_err(rmidi->dev,
+				"mpu401_uart: unable to grab port 0x%lx size %d\n",
+				port, res_size);
 			err = -EBUSY;
 			goto free_device;
 		}
@@ -580,8 +557,8 @@ int snd_mpu401_uart_new(struct snd_card *card, int device,
 	if (irq >= 0) {
 		if (request_irq(irq, snd_mpu401_uart_interrupt, 0,
 				"MPU401 UART", (void *) mpu)) {
-			snd_printk(KERN_ERR "mpu401_uart: "
-				   "unable to grab IRQ %d\n", irq);
+			dev_err(rmidi->dev,
+				"mpu401_uart: unable to grab IRQ %d\n", irq);
 			err = -EBUSY;
 			goto free_device;
 		}
@@ -607,7 +584,6 @@ int snd_mpu401_uart_new(struct snd_card *card, int device,
 		if (out_enable)
 			rmidi->info_flags |= SNDRV_RAWMIDI_INFO_DUPLEX;
 	}
-	mpu->rmidi = rmidi;
 	if (rrawmidi)
 		*rrawmidi = rmidi;
 	return 0;
@@ -617,19 +593,3 @@ free_device:
 }
 
 EXPORT_SYMBOL(snd_mpu401_uart_new);
-
-/*
- *  INIT part
- */
-
-static int __init alsa_mpu401_uart_init(void)
-{
-	return 0;
-}
-
-static void __exit alsa_mpu401_uart_exit(void)
-{
-}
-
-module_init(alsa_mpu401_uart_init)
-module_exit(alsa_mpu401_uart_exit)

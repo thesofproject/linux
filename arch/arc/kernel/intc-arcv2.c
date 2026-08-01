@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (C) 2014 Synopsys, Inc. (www.synopsys.com)
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
  */
 
 #include <linux/interrupt.h>
@@ -49,16 +45,18 @@ void arc_init_IRQ(void)
 
 	*(unsigned int *)&ictrl = 0;
 
+#ifndef CONFIG_ARC_IRQ_NO_AUTOSAVE
 	ictrl.save_nr_gpr_pairs = 6;	/* r0 to r11 (r12 saved manually) */
 	ictrl.save_blink = 1;
 	ictrl.save_lp_regs = 1;		/* LP_COUNT, LP_START, LP_END */
 	ictrl.save_u_to_u = 0;		/* user ctxt saved on kernel stack */
 	ictrl.save_idx_regs = 1;	/* JLI, LDI, EI */
+#endif
 
 	WRITE_AUX(AUX_IRQ_CTRL, ictrl);
 
 	/*
-	 * ARCv2 core intc provides multiple interrupt priorities (upto 16).
+	 * ARCv2 core intc provides multiple interrupt priorities (up to 16).
 	 * Typical builds though have only two levels (0-high, 1-low)
 	 * Linux by default uses lower prio 1 for most irqs, reserving 0 for
 	 * NMI style interrupts in future (say perf)
@@ -93,7 +91,7 @@ void arc_init_IRQ(void)
 
 	/* setup status32, don't enable intr yet as kernel doesn't want */
 	tmp = read_aux_reg(ARC_REG_STATUS32);
-	tmp |= STATUS_AD_MASK | (ARCV2_IRQ_DEF_PRIO << 1);
+	tmp |= ARCV2_IRQ_DEF_PRIO << 1;
 	tmp &= ~STATUS_IE_MASK;
 	asm volatile("kflag %0	\n"::"r"(tmp));
 }
@@ -110,7 +108,7 @@ static void arcv2_irq_unmask(struct irq_data *data)
 	write_aux_reg(AUX_IRQ_ENABLE, 1);
 }
 
-void arcv2_irq_enable(struct irq_data *data)
+static void arcv2_irq_enable(struct irq_data *data)
 {
 	/* set default priority */
 	write_aux_reg(AUX_IRQ_SELECT, data->hwirq);
@@ -172,7 +170,7 @@ init_onchip_IRQ(struct device_node *intc, struct device_node *parent)
 	if (parent)
 		panic("DeviceTree incore intc not a root irq controller\n");
 
-	root_domain = irq_domain_add_linear(intc, nr_cpu_irqs, &arcv2_irq_ops, NULL);
+	root_domain = irq_domain_create_linear(of_fwnode_handle(intc), nr_cpu_irqs, &arcv2_irq_ops, NULL);
 	if (!root_domain)
 		panic("root irq domain not avail\n");
 
@@ -180,7 +178,7 @@ init_onchip_IRQ(struct device_node *intc, struct device_node *parent)
 	 * Needed for primary domain lookup to succeed
 	 * This is a primary irqchip, and can never have a parent
 	 */
-	irq_set_default_host(root_domain);
+	irq_set_default_domain(root_domain);
 
 #ifdef CONFIG_SMP
 	irq_create_mapping(root_domain, IPI_IRQ);

@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *			Linux MegaRAID device driver
  *
  * Copyright (c) 2003-2004  LSI Logic Corporation.
- *
- *	   This program is free software; you can redistribute it and/or
- *	   modify it under the terms of the GNU General Public License
- *	   as published by the Free Software Foundation; either version
- *	   2 of the License, or (at your option) any later version.
  *
  * FILE		: megaraid_mbox.c
  * Version	: v2.20.5.1 (Nov 16 2006)
@@ -37,7 +33,6 @@
  * Dell PERC 4e/Di			1028	0013	1028	0170
  * Dell PERC 4e/DC			1000	0408	1028	0002
  * Dell PERC 4e/SC			1000	0408	1028	0001
- *
  *
  * LSI MegaRAID SCSI 320-0		1000	1960	1000	A520
  * LSI MegaRAID SCSI 320-1		1000	1960	1000	0520
@@ -114,8 +109,10 @@ static int megaraid_mbox_fire_sync_cmd(adapter_t *);
 static void megaraid_mbox_display_scb(adapter_t *, scb_t *);
 static void megaraid_mbox_setup_device_map(adapter_t *);
 
-static int megaraid_queue_command(struct Scsi_Host *, struct scsi_cmnd *);
-static scb_t *megaraid_mbox_build_cmd(adapter_t *, struct scsi_cmnd *, int *);
+static enum scsi_qc_status megaraid_queue_command(struct Scsi_Host *,
+						  struct scsi_cmnd *);
+static scb_t *megaraid_mbox_build_cmd(adapter_t *, struct scsi_cmnd *,
+				      enum scsi_qc_status *);
 static void megaraid_mbox_runpendq(adapter_t *, scb_t *);
 static void megaraid_mbox_prepare_pthru(adapter_t *, scb_t *,
 		struct scsi_cmnd *);
@@ -126,8 +123,8 @@ static irqreturn_t megaraid_isr(int, void *);
 
 static void megaraid_mbox_dpc(unsigned long);
 
-static ssize_t megaraid_sysfs_show_app_hndl(struct device *, struct device_attribute *attr, char *);
-static ssize_t megaraid_sysfs_show_ldnum(struct device *, struct device_attribute *attr, char *);
+static ssize_t megaraid_mbox_app_hndl_show(struct device *, struct device_attribute *attr, char *);
+static ssize_t megaraid_mbox_ld_show(struct device *, struct device_attribute *attr, char *);
 
 static int megaraid_cmm_register(adapter_t *);
 static int megaraid_cmm_unregister(adapter_t *);
@@ -186,7 +183,7 @@ MODULE_PARM_DESC(cmd_per_lun,
  * This would result in non-disk devices being skipped during driver load
  * time. These can be later added though, using /proc/scsi/scsi
  */
-static unsigned int megaraid_fast_load = 0;
+static unsigned int megaraid_fast_load;
 module_param_named(fast_load, megaraid_fast_load, int, 0);
 MODULE_PARM_DESC(fast_load,
 	"Faster loading of the driver, skips physical devices! (default=0)");
@@ -202,16 +199,9 @@ module_param_named(debug_level, mraid_debug_level, int, 0);
 MODULE_PARM_DESC(debug_level, "Debug level for driver (default=0)");
 
 /*
- * ### global data ###
- */
-static uint8_t megaraid_mbox_version[8] =
-	{ 0x02, 0x20, 0x04, 0x06, 3, 7, 20, 5 };
-
-
-/*
  * PCI table for all supported controllers.
  */
-static struct pci_device_id pci_id_table_g[] =  {
+static const struct pci_device_id pci_id_table_g[] =  {
 	{
 		PCI_VENDOR_ID_DELL,
 		PCI_DEVICE_ID_PERC4_DI_DISCOVERY,
@@ -314,28 +304,30 @@ static struct pci_driver megaraid_pci_driver = {
 // definitions for the device attributes for exporting logical drive number
 // for a scsi address (Host, Channel, Id, Lun)
 
-DEVICE_ATTR(megaraid_mbox_app_hndl, S_IRUSR, megaraid_sysfs_show_app_hndl,
-		NULL);
+static DEVICE_ATTR_ADMIN_RO(megaraid_mbox_app_hndl);
 
 // Host template initializer for megaraid mbox sysfs device attributes
-static struct device_attribute *megaraid_shost_attrs[] = {
-	&dev_attr_megaraid_mbox_app_hndl,
+static struct attribute *megaraid_shost_attrs[] = {
+	&dev_attr_megaraid_mbox_app_hndl.attr,
 	NULL,
 };
 
+ATTRIBUTE_GROUPS(megaraid_shost);
 
-DEVICE_ATTR(megaraid_mbox_ld, S_IRUSR, megaraid_sysfs_show_ldnum, NULL);
+static DEVICE_ATTR_ADMIN_RO(megaraid_mbox_ld);
 
 // Host template initializer for megaraid mbox sysfs device attributes
-static struct device_attribute *megaraid_sdev_attrs[] = {
-	&dev_attr_megaraid_mbox_ld,
+static struct attribute *megaraid_sdev_attrs[] = {
+	&dev_attr_megaraid_mbox_ld.attr,
 	NULL,
 };
+
+ATTRIBUTE_GROUPS(megaraid_sdev);
 
 /*
  * Scsi host template for megaraid unified driver
  */
-static struct scsi_host_template megaraid_template_g = {
+static const struct scsi_host_template megaraid_template_g = {
 	.module				= THIS_MODULE,
 	.name				= "LSI Logic MegaRAID driver",
 	.proc_name			= "megaraid",
@@ -343,10 +335,9 @@ static struct scsi_host_template megaraid_template_g = {
 	.eh_abort_handler		= megaraid_abort_handler,
 	.eh_host_reset_handler		= megaraid_reset_handler,
 	.change_queue_depth		= scsi_change_queue_depth,
-	.use_clustering			= ENABLE_CLUSTERING,
 	.no_write_same			= 1,
-	.sdev_attrs			= megaraid_sdev_attrs,
-	.shost_attrs			= megaraid_shost_attrs,
+	.sdev_groups			= megaraid_sdev_groups,
+	.shost_groups			= megaraid_shost_groups,
 };
 
 
@@ -438,7 +429,7 @@ megaraid_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 	pci_set_master(pdev);
 
 	// Allocate the per driver initialization structure
-	adapter = kzalloc(sizeof(adapter_t), GFP_KERNEL);
+	adapter = kzalloc_obj(adapter_t);
 
 	if (adapter == NULL) {
 		con_log(CL_ANN, (KERN_WARNING
@@ -449,7 +440,7 @@ megaraid_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 
 
 	// set up PCI related soft state and other pre-known parameters
-	adapter->unique_id	= pdev->bus->number << 8 | pdev->devfn;
+	adapter->unique_id	= pci_dev_id(pdev);
 	adapter->irq		= pdev->irq;
 	adapter->pdev		= pdev;
 
@@ -457,10 +448,9 @@ megaraid_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	// Setup the default DMA mask. This would be changed later on
 	// depending on hardware capabilities
-	if (pci_set_dma_mask(adapter->pdev, DMA_BIT_MASK(32)) != 0) {
-
+	if (dma_set_mask(&adapter->pdev->dev, DMA_BIT_MASK(32))) {
 		con_log(CL_ANN, (KERN_WARNING
-			"megaraid: pci_set_dma_mask failed:%d\n", __LINE__));
+			"megaraid: dma_set_mask failed:%d\n", __LINE__));
 
 		goto out_free_adapter;
 	}
@@ -484,7 +474,7 @@ megaraid_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 	// Start the mailbox based controller
 	if (megaraid_init_mbox(adapter) != 0) {
 		con_log(CL_ANN, (KERN_WARNING
-			"megaraid: maibox adapter did not initialize\n"));
+			"megaraid: mailbox adapter did not initialize\n"));
 
 		goto out_free_adapter;
 	}
@@ -633,7 +623,7 @@ megaraid_io_attach(adapter_t *adapter)
 	host = scsi_host_alloc(&megaraid_template_g, 8);
 	if (!host) {
 		con_log(CL_ANN, (KERN_WARNING
-			"megaraid mbox: scsi_register failed\n"));
+			"megaraid mbox: scsi_host_alloc failed\n"));
 
 		return -1;
 	}
@@ -723,7 +713,7 @@ megaraid_init_mbox(adapter_t *adapter)
 	 * Allocate and initialize the init data structure for mailbox
 	 * controllers
 	 */
-	raid_dev = kzalloc(sizeof(mraid_device_t), GFP_KERNEL);
+	raid_dev = kzalloc_obj(mraid_device_t);
 	if (raid_dev == NULL) return -1;
 
 
@@ -745,7 +735,7 @@ megaraid_init_mbox(adapter_t *adapter)
 		goto out_free_raid_dev;
 	}
 
-	raid_dev->baseaddr = ioremap_nocache(raid_dev->baseport, 128);
+	raid_dev->baseaddr = ioremap(raid_dev->baseport, 128);
 
 	if (!raid_dev->baseaddr) {
 
@@ -878,11 +868,12 @@ megaraid_init_mbox(adapter_t *adapter)
 		adapter->pdev->device == PCI_DEVICE_ID_PERC4_DI_EVERGLADES) ||
 		(adapter->pdev->vendor == PCI_VENDOR_ID_DELL &&
 		adapter->pdev->device == PCI_DEVICE_ID_PERC4E_DI_KOBUK)) {
-		if (pci_set_dma_mask(adapter->pdev, DMA_BIT_MASK(64))) {
+		if (dma_set_mask(&adapter->pdev->dev, DMA_BIT_MASK(64))) {
 			con_log(CL_ANN, (KERN_WARNING
 				"megaraid: DMA mask for 64-bit failed\n"));
 
-			if (pci_set_dma_mask (adapter->pdev, DMA_BIT_MASK(32))) {
+			if (dma_set_mask(&adapter->pdev->dev,
+						DMA_BIT_MASK(32))) {
 				con_log(CL_ANN, (KERN_WARNING
 					"megaraid: 32-bit DMA mask failed\n"));
 				goto out_free_sysfs_res;
@@ -950,7 +941,7 @@ megaraid_fini_mbox(adapter_t *adapter)
  * megaraid_alloc_cmd_packets - allocate shared mailbox
  * @adapter		: soft state of the raid controller
  *
- * Allocate and align the shared mailbox. This maibox is used to issue
+ * Allocate and align the shared mailbox. This mailbox is used to issue
  * all the commands. For IO based controllers, the mailbox is also registered
  * with the FW. Allocate memory for all commands as well.
  * This is our big allocator.
@@ -975,9 +966,10 @@ megaraid_alloc_cmd_packets(adapter_t *adapter)
 	 * Allocate the common 16-byte aligned memory for the handshake
 	 * mailbox.
 	 */
-	raid_dev->una_mbox64 = pci_zalloc_consistent(adapter->pdev,
-						     sizeof(mbox64_t),
-						     &raid_dev->una_mbox64_dma);
+	raid_dev->una_mbox64 = dma_alloc_coherent(&adapter->pdev->dev,
+						  sizeof(mbox64_t),
+						  &raid_dev->una_mbox64_dma,
+						  GFP_KERNEL);
 
 	if (!raid_dev->una_mbox64) {
 		con_log(CL_ANN, (KERN_WARNING
@@ -1003,8 +995,8 @@ megaraid_alloc_cmd_packets(adapter_t *adapter)
 			align;
 
 	// Allocate memory for commands issued internally
-	adapter->ibuf = pci_zalloc_consistent(pdev, MBOX_IBUF_SIZE,
-					      &adapter->ibuf_dma_h);
+	adapter->ibuf = dma_alloc_coherent(&pdev->dev, MBOX_IBUF_SIZE,
+					   &adapter->ibuf_dma_h, GFP_KERNEL);
 	if (!adapter->ibuf) {
 
 		con_log(CL_ANN, (KERN_WARNING
@@ -1025,7 +1017,7 @@ megaraid_alloc_cmd_packets(adapter_t *adapter)
 	 * since the calling routine does not yet know the number of available
 	 * commands.
 	 */
-	adapter->kscb_list = kcalloc(MBOX_MAX_SCSI_CMDS, sizeof(scb_t), GFP_KERNEL);
+	adapter->kscb_list = kzalloc_objs(scb_t, MBOX_MAX_SCSI_CMDS);
 
 	if (adapter->kscb_list == NULL) {
 		con_log(CL_ANN, (KERN_WARNING
@@ -1082,7 +1074,7 @@ megaraid_alloc_cmd_packets(adapter_t *adapter)
 
 		scb->scp		= NULL;
 		scb->state		= SCB_FREE;
-		scb->dma_direction	= PCI_DMA_NONE;
+		scb->dma_direction	= DMA_NONE;
 		scb->dma_type		= MRAID_DMA_NONE;
 		scb->dev_channel	= -1;
 		scb->dev_target		= -1;
@@ -1098,10 +1090,10 @@ out_teardown_dma_pools:
 out_free_scb_list:
 	kfree(adapter->kscb_list);
 out_free_ibuf:
-	pci_free_consistent(pdev, MBOX_IBUF_SIZE, (void *)adapter->ibuf,
+	dma_free_coherent(&pdev->dev, MBOX_IBUF_SIZE, (void *)adapter->ibuf,
 		adapter->ibuf_dma_h);
 out_free_common_mbox:
-	pci_free_consistent(adapter->pdev, sizeof(mbox64_t),
+	dma_free_coherent(&adapter->pdev->dev, sizeof(mbox64_t),
 		(caddr_t)raid_dev->una_mbox64, raid_dev->una_mbox64_dma);
 
 	return -1;
@@ -1123,10 +1115,10 @@ megaraid_free_cmd_packets(adapter_t *adapter)
 
 	kfree(adapter->kscb_list);
 
-	pci_free_consistent(adapter->pdev, MBOX_IBUF_SIZE,
+	dma_free_coherent(&adapter->pdev->dev, MBOX_IBUF_SIZE,
 		(void *)adapter->ibuf, adapter->ibuf_dma_h);
 
-	pci_free_consistent(adapter->pdev, sizeof(mbox64_t),
+	dma_free_coherent(&adapter->pdev->dev, sizeof(mbox64_t),
 		(caddr_t)raid_dev->una_mbox64, raid_dev->una_mbox64_dma);
 	return;
 }
@@ -1177,7 +1169,7 @@ megaraid_mbox_setup_dma_pools(adapter_t *adapter)
 	 * structure
 	 * Since passthru and extended passthru commands are exclusive, they
 	 * share common memory pool. Passthru structures piggyback on memory
-	 * allocted to extended passthru since passthru is smaller of the two
+	 * allocated to extended passthru since passthru is smaller of the two
 	 */
 	raid_dev->epthru_pool_handle = dma_pool_create("megaraid mbox pthru",
 			&adapter->pdev->dev, sizeof(mraid_epassthru_t), 128, 0);
@@ -1250,8 +1242,7 @@ megaraid_mbox_teardown_dma_pools(adapter_t *adapter)
 		dma_pool_free(raid_dev->sg_pool_handle, sg_pci_blk[i].vaddr,
 			sg_pci_blk[i].dma_addr);
 	}
-	if (raid_dev->sg_pool_handle)
-		dma_pool_destroy(raid_dev->sg_pool_handle);
+	dma_pool_destroy(raid_dev->sg_pool_handle);
 
 
 	epthru_pci_blk = raid_dev->epthru_pool;
@@ -1259,8 +1250,7 @@ megaraid_mbox_teardown_dma_pools(adapter_t *adapter)
 		dma_pool_free(raid_dev->epthru_pool_handle,
 			epthru_pci_blk[i].vaddr, epthru_pci_blk[i].dma_addr);
 	}
-	if (raid_dev->epthru_pool_handle)
-		dma_pool_destroy(raid_dev->epthru_pool_handle);
+	dma_pool_destroy(raid_dev->epthru_pool_handle);
 
 
 	mbox_pci_blk = raid_dev->mbox_pool;
@@ -1268,8 +1258,7 @@ megaraid_mbox_teardown_dma_pools(adapter_t *adapter)
 		dma_pool_free(raid_dev->mbox_pool_handle,
 			mbox_pci_blk[i].vaddr, mbox_pci_blk[i].dma_addr);
 	}
-	if (raid_dev->mbox_pool_handle)
-		dma_pool_destroy(raid_dev->mbox_pool_handle);
+	dma_pool_destroy(raid_dev->mbox_pool_handle);
 
 	return;
 }
@@ -1428,12 +1417,6 @@ mbox_post_cmd(adapter_t *adapter, scb_t *scb)
 
 	adapter->outstanding_cmds++;
 
-	if (scb->dma_direction == PCI_DMA_TODEVICE)
-		pci_dma_sync_sg_for_device(adapter->pdev,
-					   scsi_sglist(scb->scp),
-					   scsi_sg_count(scb->scp),
-					   PCI_DMA_TODEVICE);
-
 	mbox->busy	= 1;	// Set busy
 	mbox->poll	= 0;
 	mbox->ack	= 0;
@@ -1448,21 +1431,19 @@ mbox_post_cmd(adapter_t *adapter, scb_t *scb)
 
 
 /**
- * megaraid_queue_command - generic queue entry point for all LLDs
+ * megaraid_queue_command_lck - generic queue entry point for all LLDs
  * @scp		: pointer to the scsi command to be executed
- * @done	: callback routine to be called after the cmd has be completed
  *
  * Queue entry point for mailbox based controllers.
  */
-static int
-megaraid_queue_command_lck(struct scsi_cmnd *scp, void (*done)(struct scsi_cmnd *))
+static enum scsi_qc_status megaraid_queue_command_lck(struct scsi_cmnd *scp)
 {
+	void (*done)(struct scsi_cmnd *) = scsi_done;
 	adapter_t	*adapter;
 	scb_t		*scb;
-	int		if_busy;
+	enum scsi_qc_status if_busy;
 
 	adapter		= SCP2ADAPTER(scp);
-	scp->scsi_done	= done;
 	scp->result	= 0;
 
 	/*
@@ -1498,7 +1479,8 @@ static DEF_SCSI_QCMD(megaraid_queue_command)
  * firmware. We also complete certain commands without sending them to firmware.
  */
 static scb_t *
-megaraid_mbox_build_cmd(adapter_t *adapter, struct scsi_cmnd *scp, int *busy)
+megaraid_mbox_build_cmd(adapter_t *adapter, struct scsi_cmnd *scp,
+			enum scsi_qc_status *busy)
 {
 	mraid_device_t		*rdev = ADAP2RAIDDEV(adapter);
 	int			channel;
@@ -1537,7 +1519,7 @@ megaraid_mbox_build_cmd(adapter_t *adapter, struct scsi_cmnd *scp, int *busy)
 
 			if (!(scb = megaraid_alloc_scb(adapter, scp))) {
 				scp->result = (DID_ERROR << 16);
-				*busy = 1;
+				*busy = SCSI_MLQUEUE_HOST_BUSY;
 				return NULL;
 			}
 
@@ -1595,14 +1577,12 @@ megaraid_mbox_build_cmd(adapter_t *adapter, struct scsi_cmnd *scp, int *busy)
 			}
 
 			if (scp->cmnd[1] & MEGA_SCSI_INQ_EVPD) {
-				scp->sense_buffer[0] = 0x70;
-				scp->sense_buffer[2] = ILLEGAL_REQUEST;
-				scp->sense_buffer[12] = MEGA_INVALID_FIELD_IN_CDB;
-				scp->result = CHECK_CONDITION << 1;
+				scsi_build_sense(scp, 0, ILLEGAL_REQUEST,
+						 MEGA_INVALID_FIELD_IN_CDB, 0);
 				return NULL;
 			}
 
-			/* Fall through */
+			fallthrough;
 
 		case READ_CAPACITY:
 			/*
@@ -1622,7 +1602,7 @@ megaraid_mbox_build_cmd(adapter_t *adapter, struct scsi_cmnd *scp, int *busy)
 			/* Allocate a SCB and initialize passthru */
 			if (!(scb = megaraid_alloc_scb(adapter, scp))) {
 				scp->result = (DID_ERROR << 16);
-				*busy = 1;
+				*busy = SCSI_MLQUEUE_HOST_BUSY;
 				return NULL;
 			}
 
@@ -1667,7 +1647,7 @@ megaraid_mbox_build_cmd(adapter_t *adapter, struct scsi_cmnd *scp, int *busy)
 			 */
 			if (!(scb = megaraid_alloc_scb(adapter, scp))) {
 				scp->result = (DID_ERROR << 16);
-				*busy = 1;
+				*busy = SCSI_MLQUEUE_HOST_BUSY;
 				return NULL;
 			}
 			ccb			= (mbox_ccb_t *)scb->ccb;
@@ -1748,8 +1728,8 @@ megaraid_mbox_build_cmd(adapter_t *adapter, struct scsi_cmnd *scp, int *busy)
 
 			return scb;
 
-		case RESERVE:
-		case RELEASE:
+		case RESERVE_6:
+		case RELEASE_6:
 			/*
 			 * Do we support clustering and is the support enabled
 			 */
@@ -1763,7 +1743,7 @@ megaraid_mbox_build_cmd(adapter_t *adapter, struct scsi_cmnd *scp, int *busy)
 			 */
 			if (!(scb = megaraid_alloc_scb(adapter, scp))) {
 				scp->result = (DID_ERROR << 16);
-				*busy = 1;
+				*busy = SCSI_MLQUEUE_HOST_BUSY;
 				return NULL;
 			}
 
@@ -1771,7 +1751,7 @@ megaraid_mbox_build_cmd(adapter_t *adapter, struct scsi_cmnd *scp, int *busy)
 			scb->dev_channel	= 0xFF;
 			scb->dev_target		= target;
 			ccb->raw_mbox[0]	= CLUSTER_CMD;
-			ccb->raw_mbox[2]	=  (scp->cmnd[0] == RESERVE) ?
+			ccb->raw_mbox[2]	= scp->cmnd[0] == RESERVE_6 ?
 						RESERVE_LD : RELEASE_LD;
 
 			ccb->raw_mbox[3]	= target;
@@ -1831,7 +1811,7 @@ megaraid_mbox_build_cmd(adapter_t *adapter, struct scsi_cmnd *scp, int *busy)
 		// Allocate a SCB and initialize passthru
 		if (!(scb = megaraid_alloc_scb(adapter, scp))) {
 			scp->result = (DID_ERROR << 16);
-			*busy = 1;
+			*busy = SCSI_MLQUEUE_HOST_BUSY;
 			return NULL;
 		}
 
@@ -2181,31 +2161,6 @@ megaraid_isr(int irq, void *devp)
 
 
 /**
- * megaraid_mbox_sync_scb - sync kernel buffers
- * @adapter	: controller's soft state
- * @scb		: pointer to the resource packet
- *
- * DMA sync if required.
- */
-static void
-megaraid_mbox_sync_scb(adapter_t *adapter, scb_t *scb)
-{
-	mbox_ccb_t	*ccb;
-
-	ccb	= (mbox_ccb_t *)scb->ccb;
-
-	if (scb->dma_direction == PCI_DMA_FROMDEVICE)
-		pci_dma_sync_sg_for_cpu(adapter->pdev,
-					scsi_sglist(scb->scp),
-					scsi_sg_count(scb->scp),
-					PCI_DMA_FROMDEVICE);
-
-	scsi_dma_unmap(scb->scp);
-	return;
-}
-
-
-/**
  * megaraid_mbox_dpc - the tasklet to complete the commands from completed list
  * @devp	: pointer to HBA soft state
  *
@@ -2347,8 +2302,7 @@ megaraid_mbox_dpc(unsigned long devp)
 				memcpy(scp->sense_buffer, pthru->reqsensearea,
 						14);
 
-				scp->result = DRIVER_SENSE << 24 |
-					DID_OK << 16 | CHECK_CONDITION << 1;
+				scp->result = SAM_STAT_CHECK_CONDITION;
 			}
 			else {
 				if (mbox->cmd == MBOXCMD_EXTPTHRU) {
@@ -2356,14 +2310,10 @@ megaraid_mbox_dpc(unsigned long devp)
 					memcpy(scp->sense_buffer,
 						epthru->reqsensearea, 14);
 
-					scp->result = DRIVER_SENSE << 24 |
-						DID_OK << 16 |
-						CHECK_CONDITION << 1;
-				} else {
-					scp->sense_buffer[0] = 0x70;
-					scp->sense_buffer[2] = ABORTED_COMMAND;
-					scp->result = CHECK_CONDITION << 1;
-				}
+					scp->result = SAM_STAT_CHECK_CONDITION;
+				} else
+					scsi_build_sense(scp, 0,
+							 ABORTED_COMMAND, 0, 0);
 			}
 			break;
 
@@ -2380,18 +2330,18 @@ megaraid_mbox_dpc(unsigned long devp)
 			 */
 			if (scp->cmnd[0] == TEST_UNIT_READY) {
 				scp->result = DID_ERROR << 16 |
-					RESERVATION_CONFLICT << 1;
+					SAM_STAT_RESERVATION_CONFLICT;
 			}
 			else
 			/*
 			 * Error code returned is 1 if Reserve or Release
 			 * failed or the input parameter is invalid
 			 */
-			if (status == 1 && (scp->cmnd[0] == RESERVE ||
-					 scp->cmnd[0] == RELEASE)) {
+			if (status == 1 && (scp->cmnd[0] == RESERVE_6 ||
+					    scp->cmnd[0] == RELEASE_6)) {
 
 				scp->result = DID_ERROR << 16 |
-					RESERVATION_CONFLICT << 1;
+					SAM_STAT_RESERVATION_CONFLICT;
 			}
 			else {
 				scp->result = DID_BAD_TARGET << 16 | status;
@@ -2403,9 +2353,7 @@ megaraid_mbox_dpc(unsigned long devp)
 			megaraid_mbox_display_scb(adapter, scb);
 		}
 
-		// Free our internal resources and call the mid-layer callback
-		// routine
-		megaraid_mbox_sync_scb(adapter, scb);
+		scsi_dma_unmap(scp);
 
 		// remove from local clist
 		list_del_init(&scb->list);
@@ -2414,7 +2362,7 @@ megaraid_mbox_dpc(unsigned long devp)
 		megaraid_dealloc_scb(adapter, scb);
 
 		// send the scsi packet back to kernel
-		scp->scsi_done(scp);
+		scsi_done(scp);
 	}
 
 	return;
@@ -2472,7 +2420,7 @@ megaraid_abort_handler(struct scsi_cmnd *scp)
 				scb->sno, scb->dev_channel, scb->dev_target));
 
 			scp->result = (DID_ABORT << 16);
-			scp->scsi_done(scp);
+			scsi_done(scp);
 
 			megaraid_dealloc_scb(adapter, scb);
 
@@ -2502,7 +2450,7 @@ megaraid_abort_handler(struct scsi_cmnd *scp)
 				scb->dev_channel, scb->dev_target));
 
 			scp->result = (DID_ABORT << 16);
-			scp->scsi_done(scp);
+			scsi_done(scp);
 
 			megaraid_dealloc_scb(adapter, scb);
 
@@ -2577,7 +2525,6 @@ megaraid_reset_handler(struct scsi_cmnd *scp)
 	uint8_t		raw_mbox[sizeof(mbox_t)];
 	int		rval;
 	int		recovery_window;
-	int		recovering;
 	int		i;
 	uioc_t		*kioc;
 
@@ -2590,7 +2537,6 @@ megaraid_reset_handler(struct scsi_cmnd *scp)
 			"megaraid: hw error, cannot reset\n"));
 		return FAILED;
 	}
-
 
 	// Under exceptional conditions, FW can take up to 3 minutes to
 	// complete command processing. Wait for additional 2 minutes for the
@@ -2624,7 +2570,7 @@ megaraid_reset_handler(struct scsi_cmnd *scp)
 			}
 
 			scb->scp->result = (DID_RESET << 16);
-			scb->scp->scsi_done(scb->scp);
+			scsi_done(scb->scp);
 
 			megaraid_dealloc_scb(adapter, scb);
 		}
@@ -2639,8 +2585,6 @@ megaraid_reset_handler(struct scsi_cmnd *scp)
 	}
 
 	recovery_window = MBOX_RESET_WAIT + MBOX_RESET_EXT_WAIT;
-
-	recovering = adapter->outstanding_cmds;
 
 	for (i = 0; i < recovery_window; i++) {
 
@@ -2725,13 +2669,10 @@ static int
 mbox_post_sync_cmd(adapter_t *adapter, uint8_t raw_mbox[])
 {
 	mraid_device_t	*raid_dev = ADAP2RAIDDEV(adapter);
-	mbox64_t	*mbox64;
 	mbox_t		*mbox;
 	uint8_t		status;
 	int		i;
 
-
-	mbox64	= raid_dev->mbox64;
 	mbox	= raid_dev->mbox;
 
 	/*
@@ -2948,9 +2889,8 @@ megaraid_mbox_product_info(adapter_t *adapter)
 	 * Issue an ENQUIRY3 command to find out certain adapter parameters,
 	 * e.g., max channels, max commands etc.
 	 */
-	pinfo = pci_zalloc_consistent(adapter->pdev, sizeof(mraid_pinfo_t),
-				      &pinfo_dma_h);
-
+	pinfo = dma_alloc_coherent(&adapter->pdev->dev, sizeof(mraid_pinfo_t),
+				   &pinfo_dma_h, GFP_KERNEL);
 	if (pinfo == NULL) {
 		con_log(CL_ANN, (KERN_WARNING
 			"megaraid: out of memory, %s %d\n", __func__,
@@ -2971,7 +2911,7 @@ megaraid_mbox_product_info(adapter_t *adapter)
 
 		con_log(CL_ANN, (KERN_WARNING "megaraid: Inquiry3 failed\n"));
 
-		pci_free_consistent(adapter->pdev, sizeof(mraid_pinfo_t),
+		dma_free_coherent(&adapter->pdev->dev, sizeof(mraid_pinfo_t),
 			pinfo, pinfo_dma_h);
 
 		return -1;
@@ -3002,7 +2942,7 @@ megaraid_mbox_product_info(adapter_t *adapter)
 		con_log(CL_ANN, (KERN_WARNING
 			"megaraid: product info failed\n"));
 
-		pci_free_consistent(adapter->pdev, sizeof(mraid_pinfo_t),
+		dma_free_coherent(&adapter->pdev->dev, sizeof(mraid_pinfo_t),
 			pinfo, pinfo_dma_h);
 
 		return -1;
@@ -3038,7 +2978,7 @@ megaraid_mbox_product_info(adapter_t *adapter)
 		"megaraid: fw version:[%s] bios version:[%s]\n",
 		adapter->fw_version, adapter->bios_version));
 
-	pci_free_consistent(adapter->pdev, sizeof(mraid_pinfo_t), pinfo,
+	dma_free_coherent(&adapter->pdev->dev, sizeof(mraid_pinfo_t), pinfo,
 			pinfo_dma_h);
 
 	return 0;
@@ -3135,7 +3075,6 @@ megaraid_mbox_support_ha(adapter_t *adapter, uint16_t *init_id)
 static int
 megaraid_mbox_support_random_del(adapter_t *adapter)
 {
-	mbox_t		*mbox;
 	uint8_t		raw_mbox[sizeof(mbox_t)];
 	int		rval;
 
@@ -3156,8 +3095,6 @@ megaraid_mbox_support_random_del(adapter_t *adapter)
 		con_log(CL_DLEVEL1, ("megaraid: disable random deletion\n"));
 		return 0;
 	}
-
-	mbox = (mbox_t *)raw_mbox;
 
 	memset((caddr_t)raw_mbox, 0, sizeof(mbox_t));
 
@@ -3263,11 +3200,7 @@ megaraid_mbox_enum_raid_scsi(adapter_t *adapter)
 static void
 megaraid_mbox_flush_cache(adapter_t *adapter)
 {
-	mbox_t	*mbox;
 	uint8_t	raw_mbox[sizeof(mbox_t)];
-
-
-	mbox = (mbox_t *)raw_mbox;
 
 	memset((caddr_t)raw_mbox, 0, sizeof(mbox_t));
 
@@ -3299,18 +3232,14 @@ megaraid_mbox_fire_sync_cmd(adapter_t *adapter)
 	mbox_t	*mbox;
 	uint8_t	raw_mbox[sizeof(mbox_t)];
 	mraid_device_t	*raid_dev = ADAP2RAIDDEV(adapter);
-	mbox64_t *mbox64;
 	int	status = 0;
 	int i;
 	uint32_t dword;
-
-	mbox = (mbox_t *)raw_mbox;
 
 	memset((caddr_t)raw_mbox, 0, sizeof(mbox_t));
 
 	raw_mbox[0] = 0xFF;
 
-	mbox64	= raid_dev->mbox64;
 	mbox	= raid_dev->mbox;
 
 	/* Wait until mailbox is free */
@@ -3369,7 +3298,6 @@ blocked_mailbox:
  * megaraid_mbox_display_scb - display SCB information, mostly debug purposes
  * @adapter		: controller's soft state
  * @scb			: SCB to be displayed
- * @level		: debug level for console print
  *
  * Diplay information about the given SCB iff the current debug level is
  * verbose.
@@ -3468,19 +3396,24 @@ static int
 megaraid_cmm_register(adapter_t *adapter)
 {
 	mraid_device_t	*raid_dev = ADAP2RAIDDEV(adapter);
-	mraid_mmadp_t	adp;
+	mraid_mmadp_t	*adp;
 	scb_t		*scb;
 	mbox_ccb_t	*ccb;
 	int		rval;
 	int		i;
 
 	// Allocate memory for the base list of scb for management module.
-	adapter->uscb_list = kcalloc(MBOX_MAX_USER_CMDS, sizeof(scb_t), GFP_KERNEL);
+	adapter->uscb_list = kzalloc_objs(scb_t, MBOX_MAX_USER_CMDS);
+	adp = kzalloc_obj(*adp);
 
-	if (adapter->uscb_list == NULL) {
+	if (!adapter->uscb_list || !adp) {
 		con_log(CL_ANN, (KERN_WARNING
 			"megaraid: out of memory, %s %d\n", __func__,
 			__LINE__));
+
+		kfree(adapter->uscb_list);
+		kfree(adp);
+
 		return -1;
 	}
 
@@ -3515,7 +3448,7 @@ megaraid_cmm_register(adapter_t *adapter)
 
 		scb->scp		= NULL;
 		scb->state		= SCB_FREE;
-		scb->dma_direction	= PCI_DMA_NONE;
+		scb->dma_direction	= DMA_NONE;
 		scb->dma_type		= MRAID_DMA_NONE;
 		scb->dev_channel	= -1;
 		scb->dev_target		= -1;
@@ -3524,20 +3457,21 @@ megaraid_cmm_register(adapter_t *adapter)
 		list_add_tail(&scb->list, &adapter->uscb_pool);
 	}
 
-	adp.unique_id		= adapter->unique_id;
-	adp.drvr_type		= DRVRTYPE_MBOX;
-	adp.drvr_data		= (unsigned long)adapter;
-	adp.pdev		= adapter->pdev;
-	adp.issue_uioc		= megaraid_mbox_mm_handler;
-	adp.timeout		= MBOX_RESET_WAIT + MBOX_RESET_EXT_WAIT;
-	adp.max_kioc		= MBOX_MAX_USER_CMDS;
+	adp->unique_id		= adapter->unique_id;
+	adp->drvr_type		= DRVRTYPE_MBOX;
+	adp->drvr_data		= (unsigned long)adapter;
+	adp->pdev		= adapter->pdev;
+	adp->issue_uioc		= megaraid_mbox_mm_handler;
+	adp->timeout		= MBOX_RESET_WAIT + MBOX_RESET_EXT_WAIT;
+	adp->max_kioc		= MBOX_MAX_USER_CMDS;
 
-	if ((rval = mraid_mm_register_adp(&adp)) != 0) {
+	if ((rval = mraid_mm_register_adp(adp)) != 0) {
 
 		con_log(CL_ANN, (KERN_WARNING
 			"megaraid mbox: did not register with CMM\n"));
 
 		kfree(adapter->uscb_list);
+		kfree(adp);
 	}
 
 	return rval;
@@ -3653,7 +3587,7 @@ megaraid_mbox_mm_command(adapter_t *adapter, uioc_t *kioc)
 
 	scb->state		= SCB_ACTIVE;
 	scb->dma_type		= MRAID_DMA_NONE;
-	scb->dma_direction	= PCI_DMA_NONE;
+	scb->dma_direction	= DMA_NONE;
 
 	ccb		= (mbox_ccb_t *)scb->ccb;
 	mbox64		= (mbox64_t *)(unsigned long)kioc->cmdbuf;
@@ -3794,10 +3728,6 @@ megaraid_mbox_mm_done(adapter_t *adapter, scb_t *scb)
 static int
 gather_hbainfo(adapter_t *adapter, mraid_hba_info_t *hinfo)
 {
-	uint8_t	dmajor;
-
-	dmajor			= megaraid_mbox_version[0];
-
 	hinfo->pci_vendor_id	= adapter->pdev->vendor;
 	hinfo->pci_device_id	= adapter->pdev->device;
 	hinfo->subsys_vendor_id	= adapter->pdev->subsystem_vendor;
@@ -3839,12 +3769,12 @@ megaraid_sysfs_alloc_resources(adapter_t *adapter)
 	mraid_device_t	*raid_dev = ADAP2RAIDDEV(adapter);
 	int		rval = 0;
 
-	raid_dev->sysfs_uioc = kmalloc(sizeof(uioc_t), GFP_KERNEL);
+	raid_dev->sysfs_uioc = kmalloc_obj(uioc_t);
 
-	raid_dev->sysfs_mbox64 = kmalloc(sizeof(mbox64_t), GFP_KERNEL);
+	raid_dev->sysfs_mbox64 = kmalloc_obj(mbox64_t);
 
-	raid_dev->sysfs_buffer = pci_alloc_consistent(adapter->pdev,
-			PAGE_SIZE, &raid_dev->sysfs_buffer_dma);
+	raid_dev->sysfs_buffer = dma_alloc_coherent(&adapter->pdev->dev,
+			PAGE_SIZE, &raid_dev->sysfs_buffer_dma, GFP_KERNEL);
 
 	if (!raid_dev->sysfs_uioc || !raid_dev->sysfs_mbox64 ||
 		!raid_dev->sysfs_buffer) {
@@ -3881,7 +3811,7 @@ megaraid_sysfs_free_resources(adapter_t *adapter)
 	kfree(raid_dev->sysfs_mbox64);
 
 	if (raid_dev->sysfs_buffer) {
-		pci_free_consistent(adapter->pdev, PAGE_SIZE,
+		dma_free_coherent(&adapter->pdev->dev, PAGE_SIZE,
 			raid_dev->sysfs_buffer, raid_dev->sysfs_buffer_dma);
 	}
 }
@@ -3915,7 +3845,7 @@ megaraid_sysfs_get_ldmap_done(uioc_t *uioc)
 static void
 megaraid_sysfs_get_ldmap_timeout(struct timer_list *t)
 {
-	struct uioc_timeout *timeout = from_timer(timeout, t, timer);
+	struct uioc_timeout *timeout = timer_container_of(timeout, t, timer);
 	uioc_t		*uioc = timeout->uioc;
 	adapter_t	*adapter = (adapter_t *)uioc->buf_vaddr;
 	mraid_device_t	*raid_dev = ADAP2RAIDDEV(adapter);
@@ -4030,8 +3960,8 @@ megaraid_sysfs_get_ldmap(adapter_t *adapter)
 	}
 
 
-	del_timer_sync(&timeout.timer);
-	destroy_timer_on_stack(&timeout.timer);
+	timer_delete_sync(&timeout.timer);
+	timer_destroy_on_stack(&timeout.timer);
 
 	mutex_unlock(&raid_dev->sysfs_mtx);
 
@@ -4040,8 +3970,9 @@ megaraid_sysfs_get_ldmap(adapter_t *adapter)
 
 
 /**
- * megaraid_sysfs_show_app_hndl - display application handle for this adapter
- * @cdev	: class device object representation for the host
+ * megaraid_mbox_app_hndl_show - display application handle for this adapter
+ * @dev		: class device object representation for the host
+ * @attr	: device attribute (unused)
  * @buf		: buffer to send data to
  *
  * Display the handle used by the applications while executing management
@@ -4049,8 +3980,7 @@ megaraid_sysfs_get_ldmap(adapter_t *adapter)
  * handle, since we do not interface with applications directly.
  */
 static ssize_t
-megaraid_sysfs_show_app_hndl(struct device *dev, struct device_attribute *attr,
-			     char *buf)
+megaraid_mbox_app_hndl_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct Scsi_Host *shost = class_to_shost(dev);
 	adapter_t	*adapter = (adapter_t *)SCSIHOST2ADAP(shost);
@@ -4058,12 +3988,12 @@ megaraid_sysfs_show_app_hndl(struct device *dev, struct device_attribute *attr,
 
 	app_hndl = mraid_mm_adapter_app_handle(adapter->unique_id);
 
-	return snprintf(buf, 8, "%u\n", app_hndl);
+	return sysfs_emit(buf, "%u\n", app_hndl);
 }
 
 
 /**
- * megaraid_sysfs_show_ldnum - display the logical drive number for this device
+ * megaraid_mbox_ld_show - display the logical drive number for this device
  * @dev		: device object representation for the scsi device
  * @attr	: device attribute to show
  * @buf		: buffer to send data to
@@ -4078,7 +4008,7 @@ megaraid_sysfs_show_app_hndl(struct device *dev, struct device_attribute *attr,
  *   <int>     <int>       <int>            <int>
  */
 static ssize_t
-megaraid_sysfs_show_ldnum(struct device *dev, struct device_attribute *attr, char *buf)
+megaraid_mbox_ld_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct scsi_device *sdev = to_scsi_device(dev);
 	adapter_t	*adapter = (adapter_t *)SCSIHOST2ADAP(sdev->host);
@@ -4127,7 +4057,7 @@ megaraid_sysfs_show_ldnum(struct device *dev, struct device_attribute *attr, cha
 		}
 	}
 
-	return snprintf(buf, 36, "%d %d %d %d\n", scsi_id, logical_drv,
+	return sysfs_emit(buf, "%d %d %d %d\n", scsi_id, logical_drv,
 			ldid_map, app_hndl);
 }
 
@@ -4137,5 +4067,3 @@ megaraid_sysfs_show_ldnum(struct device *dev, struct device_attribute *attr, cha
  */
 module_init(megaraid_init);
 module_exit(megaraid_exit);
-
-/* vim: set ts=8 sw=8 tw=78 ai si: */

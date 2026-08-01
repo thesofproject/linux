@@ -1,12 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *  include/linux/mmc/sd.h
  *
  *  Copyright (C) 2005-2007 Pierre Ossman, All Rights Reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or (at
- * your option) any later version.
  */
 
 #ifndef LINUX_MMC_SD_H
@@ -18,6 +14,9 @@
 #define SD_SEND_RELATIVE_ADDR     3   /* bcr                     R6  */
 #define SD_SEND_IF_COND           8   /* bcr  [11:0] See below   R7  */
 #define SD_SWITCH_VOLTAGE         11  /* ac                      R1  */
+
+/* Class 2 */
+#define SD_ADDR_EXT		 22   /* ac   [5:0]              R1  */
 
   /* class 10 */
 #define SD_SWITCH                 6   /* adtc [31:0] See below   R1  */
@@ -33,9 +32,14 @@
 #define SD_APP_OP_COND           41   /* bcr  [31:0] OCR         R3  */
 #define SD_APP_SEND_SCR          51   /* adtc                    R1  */
 
+  /* class 11 */
+#define SD_READ_EXTR_SINGLE      48   /* adtc [31:0]             R1  */
+#define SD_WRITE_EXTR_SINGLE     49   /* adtc [31:0]             R1  */
+
 /* OCR bit definitions */
 #define SD_OCR_S18R		(1 << 24)    /* 1.8V switching request */
 #define SD_ROCR_S18A		SD_OCR_S18R  /* 1.8V switching accepted by card */
+#define SD_OCR_2T		(1 << 27)    /* HO2T/CO2T - SDUC support */
 #define SD_OCR_XPC		(1 << 28)    /* SDXC power control */
 #define SD_OCR_CCS		(1 << 30)    /* Card Capacity Status */
 
@@ -90,5 +94,11 @@
  */
 #define SD_SWITCH_ACCESS_DEF	0
 #define SD_SWITCH_ACCESS_HS	1
+
+/*
+ * Erase/discard
+ */
+#define SD_ERASE_ARG			0x00000000
+#define SD_DISCARD_ARG			0x00000001
 
 #endif /* LINUX_MMC_SD_H */

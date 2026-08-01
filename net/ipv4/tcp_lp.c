@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * TCP Low Priority (TCP-LP)
  *
@@ -22,9 +23,9 @@
  * Original Author:
  *   Aleksandar Kuzmanovic <akuzma@northwestern.edu>
  * Available from:
- *   http://www.ece.rice.edu/~akuzma/Doc/akuzma/TCP-LP.pdf
+ *   https://users.cs.northwestern.edu/~akuzma/doc/TCP-LP-ToN.pdf
  * Original implementation for 2.4.19:
- *   http://www-ece.rice.edu/networks/TCP-LP/
+ *   https://users.cs.northwestern.edu/~akuzma/rice/TCP-LP/linux/tcp-lp-linux.htm
  *
  * 2.6.x module Authors:
  *   Wong Hoi Sing, Edison <hswong3i@gmail.com>
@@ -62,7 +63,7 @@ enum tcp_lp_state {
  * @sowd: smoothed OWD << 3
  * @owd_min: min OWD
  * @owd_max: max OWD
- * @owd_max_rsv: resrved max owd
+ * @owd_max_rsv: reserved max owd
  * @remote_hz: estimated remote HZ
  * @remote_ref_time: remote reference time
  * @local_ref_time: local reference time
@@ -88,6 +89,7 @@ struct lp {
 
 /**
  * tcp_lp_init
+ * @sk: socket to initialize congestion control algorithm for
  *
  * Init all required variables.
  * Clone the handling from Vegas module implementation.
@@ -110,6 +112,9 @@ static void tcp_lp_init(struct sock *sk)
 
 /**
  * tcp_lp_cong_avoid
+ * @sk: socket to avoid congesting
+ * @ack: current ack sequence number
+ * @acked: number of ACKed packets
  *
  * Implementation of cong_avoid.
  * Will only call newReno CA when away from inference.
@@ -125,6 +130,7 @@ static void tcp_lp_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 
 /**
  * tcp_lp_remote_hz_estimator
+ * @sk: socket which needs an estimate for the remote HZs
  *
  * Estimate remote HZ.
  * We keep on updating the estimated value, where original TCP-LP
@@ -175,6 +181,7 @@ static u32 tcp_lp_remote_hz_estimator(struct sock *sk)
 
 /**
  * tcp_lp_owd_calculator
+ * @sk: socket to calculate one way delay for
  *
  * Calculate one way delay (in relative format).
  * Original implement OWD as minus of remote time difference to local time
@@ -209,6 +216,8 @@ static u32 tcp_lp_owd_calculator(struct sock *sk)
 
 /**
  * tcp_lp_rtt_sample
+ * @sk: socket to add a rtt sample to
+ * @rtt: round trip time, which is ignored!
  *
  * Implementation or rtt_sample.
  * Will take the following action,
@@ -253,6 +262,8 @@ static void tcp_lp_rtt_sample(struct sock *sk, u32 rtt)
 
 /**
  * tcp_lp_pkts_acked
+ * @sk: socket requiring congestion avoidance calculations
+ * @sample: ACK sample containing timing and rate information
  *
  * Implementation of pkts_acked.
  * Deal with active drop under Early Congestion Indication.
@@ -264,7 +275,7 @@ static void tcp_lp_pkts_acked(struct sock *sk, const struct ack_sample *sample)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct lp *lp = inet_csk_ca(sk);
-	u32 now = tcp_time_stamp(tp);
+	u32 now = tcp_time_stamp_ts(tp);
 	u32 delta;
 
 	if (sample->rtt_us > 0)
@@ -289,7 +300,7 @@ static void tcp_lp_pkts_acked(struct sock *sk, const struct ack_sample *sample)
 		lp->flag &= ~LP_WITHIN_THR;
 
 	pr_debug("TCP-LP: %05o|%5u|%5u|%15u|%15u|%15u\n", lp->flag,
-		 tp->snd_cwnd, lp->remote_hz, lp->owd_min, lp->owd_max,
+		 tcp_snd_cwnd(tp), lp->remote_hz, lp->owd_min, lp->owd_max,
 		 lp->sowd >> 3);
 
 	if (lp->flag & LP_WITHIN_THR)
@@ -297,7 +308,7 @@ static void tcp_lp_pkts_acked(struct sock *sk, const struct ack_sample *sample)
 
 	/* FIXME: try to reset owd_min and owd_max here
 	 * so decrease the chance the min/max is no longer suitable
-	 * and will usually within threshold when whithin inference */
+	 * and will usually within threshold when within inference */
 	lp->owd_min = lp->sowd >> 3;
 	lp->owd_max = lp->sowd >> 2;
 	lp->owd_max_rsv = lp->sowd >> 2;
@@ -305,12 +316,12 @@ static void tcp_lp_pkts_acked(struct sock *sk, const struct ack_sample *sample)
 	/* happened within inference
 	 * drop snd_cwnd into 1 */
 	if (lp->flag & LP_WITHIN_INF)
-		tp->snd_cwnd = 1U;
+		tcp_snd_cwnd_set(tp, 1U);
 
 	/* happened after inference
 	 * cut snd_cwnd into half */
 	else
-		tp->snd_cwnd = max(tp->snd_cwnd >> 1U, 1U);
+		tcp_snd_cwnd_set(tp, max(tcp_snd_cwnd(tp) >> 1U, 1U));
 
 	/* record this drop time */
 	lp->last_drop = now;

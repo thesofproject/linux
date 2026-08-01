@@ -1,35 +1,5 @@
-/*
- * Copyright (C) 2015-2017 Netronome Systems, Inc.
- *
- * This software is dual licensed under the GNU General License Version 2,
- * June 1991 as shown in the file COPYING in the top-level directory of this
- * source tree or the BSD 2-Clause License provided below.  You have the
- * option to license this software under the complete terms of either license.
- *
- * The BSD 2-Clause License:
- *
- *     Redistribution and use in source and binary forms, with or
- *     without modification, are permitted provided that the following
- *     conditions are met:
- *
- *      1. Redistributions of source code must retain the above
- *         copyright notice, this list of conditions and the following
- *         disclaimer.
- *
- *      2. Redistributions in binary form must reproduce the above
- *         copyright notice, this list of conditions and the following
- *         disclaimer in the documentation and/or other materials
- *         provided with the distribution.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/* Copyright (C) 2015-2018 Netronome Systems, Inc. */
 
 /*
  * nfp_netvf_main.c
@@ -43,6 +13,7 @@
 #include <linux/init.h>
 #include <linux/etherdevice.h>
 
+#include "nfpcore/nfp_dev.h"
 #include "nfp_net_ctrl.h"
 #include "nfp_net.h"
 #include "nfp_main.h"
@@ -66,13 +37,25 @@ struct nfp_net_vf {
 
 static const char nfp_net_driver_name[] = "nfp_netvf";
 
-#define PCI_DEVICE_NFP6000VF		0x6003
 static const struct pci_device_id nfp_netvf_pci_device_ids[] = {
-	{ PCI_VENDOR_ID_NETRONOME, PCI_DEVICE_NFP6000VF,
-	  PCI_VENDOR_ID_NETRONOME, PCI_ANY_ID,
-	  PCI_ANY_ID, 0,
+	{
+		PCI_VDEVICE_SUB(NETRONOME, PCI_DEVICE_ID_NFP3800_VF,
+				PCI_VENDOR_ID_NETRONOME, PCI_ANY_ID),
+		.driver_data = NFP_DEV_NFP3800_VF,
+	}, {
+		PCI_VDEVICE_SUB(NETRONOME, PCI_DEVICE_ID_NFP6000_VF,
+				PCI_VENDOR_ID_NETRONOME, PCI_ANY_ID),
+		.driver_data = NFP_DEV_NFP6000_VF,
+	}, {
+		PCI_VDEVICE_SUB(CORIGINE, PCI_DEVICE_ID_NFP3800_VF,
+				PCI_VENDOR_ID_CORIGINE, PCI_ANY_ID),
+		.driver_data = NFP_DEV_NFP3800_VF,
+	}, {
+		PCI_VDEVICE_SUB(CORIGINE, PCI_DEVICE_ID_NFP6000_VF,
+				PCI_VENDOR_ID_CORIGINE, PCI_ANY_ID),
+		.driver_data = NFP_DEV_NFP6000_VF,
 	},
-	{ 0, } /* Required last entry. */
+	{ } /* Required last entry. */
 };
 MODULE_DEVICE_TABLE(pci, nfp_netvf_pci_device_ids);
 
@@ -88,13 +71,14 @@ static void nfp_netvf_get_mac_addr(struct nfp_net *nn)
 		return;
 	}
 
-	ether_addr_copy(nn->dp.netdev->dev_addr, mac_addr);
+	eth_hw_addr_set(nn->dp.netdev, mac_addr);
 	ether_addr_copy(nn->dp.netdev->perm_addr, mac_addr);
 }
 
 static int nfp_netvf_pci_probe(struct pci_dev *pdev,
 			       const struct pci_device_id *pci_id)
 {
+	const struct nfp_dev_info *dev_info;
 	struct nfp_net_fw_version fw_ver;
 	int max_tx_rings, max_rx_rings;
 	u32 tx_bar_off, rx_bar_off;
@@ -108,7 +92,9 @@ static int nfp_netvf_pci_probe(struct pci_dev *pdev,
 	int stride;
 	int err;
 
-	vf = kzalloc(sizeof(*vf), GFP_KERNEL);
+	dev_info = &nfp_dev_info[pci_id->driver_data];
+
+	vf = kzalloc_obj(*vf);
 	if (!vf)
 		return -ENOMEM;
 	pci_set_drvdata(pdev, vf);
@@ -125,8 +111,7 @@ static int nfp_netvf_pci_probe(struct pci_dev *pdev,
 
 	pci_set_master(pdev);
 
-	err = dma_set_mask_and_coherent(&pdev->dev,
-					DMA_BIT_MASK(NFP_NET_MAX_DMA_BITS));
+	err = dma_set_mask_and_coherent(&pdev->dev, dev_info->dma_mask);
 	if (err)
 		goto err_pci_regions;
 
@@ -136,7 +121,7 @@ static int nfp_netvf_pci_probe(struct pci_dev *pdev,
 	 * first NFP_NET_CFG_BAR_SZ of the BAR.  This keeps the code
 	 * the identical for PF and VF drivers.
 	 */
-	ctrl_bar = ioremap_nocache(pci_resource_start(pdev, NFP_NET_CTRL_BAR),
+	ctrl_bar = ioremap(pci_resource_start(pdev, NFP_NET_CTRL_BAR),
 				   NFP_NET_CFG_BAR_SZ);
 	if (!ctrl_bar) {
 		dev_err(&pdev->dev,
@@ -146,9 +131,11 @@ static int nfp_netvf_pci_probe(struct pci_dev *pdev,
 	}
 
 	nfp_net_get_fw_version(&fw_ver, ctrl_bar);
-	if (fw_ver.resv || fw_ver.class != NFP_NET_CFG_VERSION_CLASS_GENERIC) {
+	if (fw_ver.extend & NFP_NET_CFG_VERSION_RESERVED_MASK ||
+	    fw_ver.class != NFP_NET_CFG_VERSION_CLASS_GENERIC) {
 		dev_err(&pdev->dev, "Unknown Firmware ABI %d.%d.%d.%d\n",
-			fw_ver.resv, fw_ver.class, fw_ver.major, fw_ver.minor);
+			fw_ver.extend, fw_ver.class,
+			fw_ver.major, fw_ver.minor);
 		err = -EINVAL;
 		goto err_ctrl_unmap;
 	}
@@ -168,7 +155,7 @@ static int nfp_netvf_pci_probe(struct pci_dev *pdev,
 			break;
 		default:
 			dev_err(&pdev->dev, "Unsupported Firmware ABI %d.%d.%d.%d\n",
-				fw_ver.resv, fw_ver.class,
+				fw_ver.extend, fw_ver.class,
 				fw_ver.major, fw_ver.minor);
 			err = -EINVAL;
 			goto err_ctrl_unmap;
@@ -197,20 +184,19 @@ static int nfp_netvf_pci_probe(struct pci_dev *pdev,
 	}
 
 	startq = readl(ctrl_bar + NFP_NET_CFG_START_TXQ);
-	tx_bar_off = NFP_PCIE_QUEUE(startq);
+	tx_bar_off = nfp_qcp_queue_offset(dev_info, startq);
 	startq = readl(ctrl_bar + NFP_NET_CFG_START_RXQ);
-	rx_bar_off = NFP_PCIE_QUEUE(startq);
+	rx_bar_off = nfp_qcp_queue_offset(dev_info, startq);
 
 	/* Allocate and initialise the netdev */
-	nn = nfp_net_alloc(pdev, true, max_tx_rings, max_rx_rings);
+	nn = nfp_net_alloc(pdev, dev_info, ctrl_bar, true,
+			   max_tx_rings, max_rx_rings);
 	if (IS_ERR(nn)) {
 		err = PTR_ERR(nn);
 		goto err_ctrl_unmap;
 	}
 	vf->nn = nn;
 
-	nn->fw_ver = fw_ver;
-	nn->dp.ctrl_bar = ctrl_bar;
 	nn->dp.is_vf = 1;
 	nn->stride_tx = stride;
 	nn->stride_rx = stride;
@@ -231,7 +217,7 @@ static int nfp_netvf_pci_probe(struct pci_dev *pdev,
 			bar_sz = (rx_bar_off + rx_bar_sz) - bar_off;
 
 		map_addr = pci_resource_start(pdev, tx_bar_no) + bar_off;
-		vf->q_bar = ioremap_nocache(map_addr, bar_sz);
+		vf->q_bar = ioremap(map_addr, bar_sz);
 		if (!vf->q_bar) {
 			nn_err(nn, "Failed to map resource %d\n", tx_bar_no);
 			err = -EIO;
@@ -247,7 +233,7 @@ static int nfp_netvf_pci_probe(struct pci_dev *pdev,
 
 		/* TX queues */
 		map_addr = pci_resource_start(pdev, tx_bar_no) + tx_bar_off;
-		nn->tx_bar = ioremap_nocache(map_addr, tx_bar_sz);
+		nn->tx_bar = ioremap(map_addr, tx_bar_sz);
 		if (!nn->tx_bar) {
 			nn_err(nn, "Failed to map resource %d\n", tx_bar_no);
 			err = -EIO;
@@ -256,7 +242,7 @@ static int nfp_netvf_pci_probe(struct pci_dev *pdev,
 
 		/* RX queues */
 		map_addr = pci_resource_start(pdev, rx_bar_no) + rx_bar_off;
-		nn->rx_bar = ioremap_nocache(map_addr, rx_bar_sz);
+		nn->rx_bar = ioremap(map_addr, rx_bar_sz);
 		if (!nn->rx_bar) {
 			nn_err(nn, "Failed to map resource %d\n", rx_bar_no);
 			err = -EIO;
@@ -283,7 +269,7 @@ static int nfp_netvf_pci_probe(struct pci_dev *pdev,
 
 	nfp_net_info(nn);
 	vf->ddir = nfp_net_debugfs_device_add(pdev);
-	nfp_net_debugfs_vnic_add(nn, vf->ddir, 0);
+	nfp_net_debugfs_vnic_add(nn, vf->ddir);
 
 	return 0;
 
@@ -313,8 +299,14 @@ err_free_vf:
 
 static void nfp_netvf_pci_remove(struct pci_dev *pdev)
 {
-	struct nfp_net_vf *vf = pci_get_drvdata(pdev);
-	struct nfp_net *nn = vf->nn;
+	struct nfp_net_vf *vf;
+	struct nfp_net *nn;
+
+	vf = pci_get_drvdata(pdev);
+	if (!vf)
+		return;
+
+	nn = vf->nn;
 
 	/* Note, the order is slightly different from above as we need
 	 * to keep the nn pointer around till we have freed everything.
@@ -348,4 +340,5 @@ struct pci_driver nfp_netvf_pci_driver = {
 	.id_table    = nfp_netvf_pci_device_ids,
 	.probe       = nfp_netvf_pci_probe,
 	.remove      = nfp_netvf_pci_remove,
+	.shutdown    = nfp_netvf_pci_remove,
 };

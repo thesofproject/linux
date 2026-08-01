@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
- * hal.h - DIM2 HAL interface
+ * DIM2 HAL interface
  * (MediaLB, Device Interface Macro IP, OS62420)
  *
  * Copyright (C) 2015, Microchip Technology Germany II GmbH & Co. KG
@@ -27,7 +27,7 @@ enum mlb_clk_speed {
 	CLK_8192FS = 7,
 };
 
-struct dim_ch_state_t {
+struct dim_ch_state {
 	bool ready; /* Shows readiness to enqueue next buffer */
 	u16 done_buffers; /* Number of completed buffers */
 };
@@ -87,8 +87,8 @@ void dim_service_ahb_int_irq(struct dim_channel *const *channels);
 
 u8 dim_service_channel(struct dim_channel *ch);
 
-struct dim_ch_state_t *dim_get_channel_state(struct dim_channel *ch,
-					     struct dim_ch_state_t *state_ptr);
+struct dim_ch_state *dim_get_channel_state(struct dim_channel *ch,
+					   struct dim_ch_state *state_ptr);
 
 u16 dim_dbr_space(struct dim_channel *ch);
 
@@ -96,10 +96,6 @@ bool dim_enqueue_buffer(struct dim_channel *ch, u32 buffer_addr,
 			u16 buffer_size);
 
 bool dim_detach_buffers(struct dim_channel *ch, u16 buffers_number);
-
-u32 dimcb_io_read(u32 __iomem *ptr32);
-
-void dimcb_io_write(u32 __iomem *ptr32, u32 value);
 
 void dimcb_on_error(u8 error_id, const char *error_message);
 

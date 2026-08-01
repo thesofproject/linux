@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Altera University Program PS2 controller driver
  *
@@ -5,10 +6,6 @@
  *
  * Based on sa1111ps2.c, which is:
  * Copyright (C) 2002 Russell King
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -81,16 +78,14 @@ static void altera_ps2_close(struct serio *io)
 static int altera_ps2_probe(struct platform_device *pdev)
 {
 	struct ps2if *ps2if;
-	struct resource *res;
 	struct serio *serio;
 	int error, irq;
 
-	ps2if = devm_kzalloc(&pdev->dev, sizeof(struct ps2if), GFP_KERNEL);
+	ps2if = devm_kzalloc(&pdev->dev, sizeof(*ps2if), GFP_KERNEL);
 	if (!ps2if)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	ps2if->base = devm_ioremap_resource(&pdev->dev, res);
+	ps2if->base = devm_platform_get_and_ioremap_resource(pdev, 0, NULL);
 	if (IS_ERR(ps2if->base))
 		return PTR_ERR(ps2if->base);
 
@@ -105,7 +100,7 @@ static int altera_ps2_probe(struct platform_device *pdev)
 		return error;
 	}
 
-	serio = kzalloc(sizeof(struct serio), GFP_KERNEL);
+	serio = kzalloc_obj(*serio);
 	if (!serio)
 		return -ENOMEM;
 
@@ -113,8 +108,8 @@ static int altera_ps2_probe(struct platform_device *pdev)
 	serio->write		= altera_ps2_write;
 	serio->open		= altera_ps2_open;
 	serio->close		= altera_ps2_close;
-	strlcpy(serio->name, dev_name(&pdev->dev), sizeof(serio->name));
-	strlcpy(serio->phys, dev_name(&pdev->dev), sizeof(serio->phys));
+	strscpy(serio->name, dev_name(&pdev->dev), sizeof(serio->name));
+	strscpy(serio->phys, dev_name(&pdev->dev), sizeof(serio->phys));
 	serio->port_data	= ps2if;
 	serio->dev.parent	= &pdev->dev;
 	ps2if->io		= serio;
@@ -130,13 +125,11 @@ static int altera_ps2_probe(struct platform_device *pdev)
 /*
  * Remove one device from this driver.
  */
-static int altera_ps2_remove(struct platform_device *pdev)
+static void altera_ps2_remove(struct platform_device *pdev)
 {
 	struct ps2if *ps2if = platform_get_drvdata(pdev);
 
 	serio_unregister_port(ps2if->io);
-
-	return 0;
 }
 
 #ifdef CONFIG_OF

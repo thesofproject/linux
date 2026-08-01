@@ -1,10 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #include <linux/module.h>
 #include <linux/virtio.h>
 #include <linux/virtio_config.h>
 #include <linux/input.h>
+#include <linux/slab.h>
+#include <linux/dma-mapping.h>
 
 #include <uapi/linux/virtio_ids.h>
 #include <uapi/linux/virtio_input.h>
+#include <linux/input/mt.h>
 
 struct virtio_input {
 	struct virtio_device       *vdev;
@@ -13,7 +17,9 @@ struct virtio_input {
 	char                       serial[64];
 	char                       phys[64];
 	struct virtqueue           *evt, *sts;
+	__dma_from_device_group_begin();
 	struct virtio_input_event  evts[64];
+	__dma_from_device_group_end();
 	spinlock_t                 lock;
 	bool                       ready;
 };
@@ -24,7 +30,7 @@ static void virtinput_queue_evtbuf(struct virtio_input *vi,
 	struct scatterlist sg[1];
 
 	sg_init_one(sg, evtbuf, sizeof(*evtbuf));
-	virtqueue_add_inbuf(vi->evt, sg, 1, evtbuf, GFP_ATOMIC);
+	virtqueue_add_inbuf_cache_clean(vi->evt, sg, 1, evtbuf, GFP_ATOMIC);
 }
 
 static void virtinput_recv_events(struct virtqueue *vq)
@@ -62,7 +68,22 @@ static int virtinput_send_status(struct virtio_input *vi,
 	unsigned long flags;
 	int rc;
 
-	stsbuf = kzalloc(sizeof(*stsbuf), GFP_ATOMIC);
+	/*
+	 * Since 29cc309d8bf1 (HID: hid-multitouch: forward MSC_TIMESTAMP),
+	 * EV_MSC/MSC_TIMESTAMP is added to each before EV_SYN event.
+	 * EV_MSC is configured as INPUT_PASS_TO_ALL.
+	 * In case of touch device:
+	 *   BE pass EV_MSC/MSC_TIMESTAMP to FE on receiving event from evdev.
+	 *   FE pass EV_MSC/MSC_TIMESTAMP back to BE.
+	 *   BE writes EV_MSC/MSC_TIMESTAMP to evdev due to INPUT_PASS_TO_ALL.
+	 *   BE receives extra EV_MSC/MSC_TIMESTAMP and pass to FE.
+	 *   >>> Each new frame becomes larger and larger.
+	 * Disable EV_MSC/MSC_TIMESTAMP forwarding for MT.
+	 */
+	if (vi->idev->mt && type == EV_MSC && code == MSC_TIMESTAMP)
+		return 0;
+
+	stsbuf = kzalloc_obj(*stsbuf, GFP_ATOMIC);
 	if (!stsbuf)
 		return -ENOMEM;
 
@@ -111,9 +132,9 @@ static u8 virtinput_cfg_select(struct virtio_input *vi,
 {
 	u8 size;
 
-	virtio_cwrite(vi->vdev, struct virtio_input_config, select, &select);
-	virtio_cwrite(vi->vdev, struct virtio_input_config, subsel, &subsel);
-	virtio_cread(vi->vdev, struct virtio_input_config, size, &size);
+	virtio_cwrite_le(vi->vdev, struct virtio_input_config, select, &select);
+	virtio_cwrite_le(vi->vdev, struct virtio_input_config, subsel, &subsel);
+	virtio_cread_le(vi->vdev, struct virtio_input_config, size, &size);
 	return size;
 }
 
@@ -156,24 +177,25 @@ static void virtinput_cfg_abs(struct virtio_input *vi, int abs)
 	u32 mi, ma, re, fu, fl;
 
 	virtinput_cfg_select(vi, VIRTIO_INPUT_CFG_ABS_INFO, abs);
-	virtio_cread(vi->vdev, struct virtio_input_config, u.abs.min, &mi);
-	virtio_cread(vi->vdev, struct virtio_input_config, u.abs.max, &ma);
-	virtio_cread(vi->vdev, struct virtio_input_config, u.abs.res, &re);
-	virtio_cread(vi->vdev, struct virtio_input_config, u.abs.fuzz, &fu);
-	virtio_cread(vi->vdev, struct virtio_input_config, u.abs.flat, &fl);
+	virtio_cread_le(vi->vdev, struct virtio_input_config, u.abs.min, &mi);
+	virtio_cread_le(vi->vdev, struct virtio_input_config, u.abs.max, &ma);
+	virtio_cread_le(vi->vdev, struct virtio_input_config, u.abs.res, &re);
+	virtio_cread_le(vi->vdev, struct virtio_input_config, u.abs.fuzz, &fu);
+	virtio_cread_le(vi->vdev, struct virtio_input_config, u.abs.flat, &fl);
 	input_set_abs_params(vi->idev, abs, mi, ma, fu, fl);
 	input_abs_set_res(vi->idev, abs, re);
 }
 
 static int virtinput_init_vqs(struct virtio_input *vi)
 {
+	struct virtqueue_info vqs_info[] = {
+		{ "events", virtinput_recv_events },
+		{ "status", virtinput_recv_status },
+	};
 	struct virtqueue *vqs[2];
-	vq_callback_t *cbs[] = { virtinput_recv_events,
-				 virtinput_recv_status };
-	static const char * const names[] = { "events", "status" };
 	int err;
 
-	err = virtio_find_vqs(vi->vdev, 2, vqs, cbs, names, NULL);
+	err = virtio_find_vqs(vi->vdev, 2, vqs, vqs_info, NULL);
 	if (err)
 		return err;
 	vi->evt = vqs[0];
@@ -202,12 +224,12 @@ static int virtinput_probe(struct virtio_device *vdev)
 	struct virtio_input *vi;
 	unsigned long flags;
 	size_t size;
-	int abs, err;
+	int abs, err, nslots;
 
 	if (!virtio_has_feature(vdev, VIRTIO_F_VERSION_1))
 		return -ENODEV;
 
-	vi = kzalloc(sizeof(*vi), GFP_KERNEL);
+	vi = kzalloc_obj(*vi);
 	if (!vi)
 		return -ENOMEM;
 
@@ -242,14 +264,14 @@ static int virtinput_probe(struct virtio_device *vdev)
 
 	size = virtinput_cfg_select(vi, VIRTIO_INPUT_CFG_ID_DEVIDS, 0);
 	if (size >= sizeof(struct virtio_input_devids)) {
-		virtio_cread(vi->vdev, struct virtio_input_config,
-			     u.ids.bustype, &vi->idev->id.bustype);
-		virtio_cread(vi->vdev, struct virtio_input_config,
-			     u.ids.vendor, &vi->idev->id.vendor);
-		virtio_cread(vi->vdev, struct virtio_input_config,
-			     u.ids.product, &vi->idev->id.product);
-		virtio_cread(vi->vdev, struct virtio_input_config,
-			     u.ids.version, &vi->idev->id.version);
+		virtio_cread_le(vi->vdev, struct virtio_input_config,
+				u.ids.bustype, &vi->idev->id.bustype);
+		virtio_cread_le(vi->vdev, struct virtio_input_config,
+				u.ids.vendor, &vi->idev->id.vendor);
+		virtio_cread_le(vi->vdev, struct virtio_input_config,
+				u.ids.product, &vi->idev->id.product);
+		virtio_cread_le(vi->vdev, struct virtio_input_config,
+				u.ids.version, &vi->idev->id.version);
 	} else {
 		vi->idev->id.bustype = BUS_VIRTUAL;
 	}
@@ -287,6 +309,13 @@ static int virtinput_probe(struct virtio_device *vdev)
 				continue;
 			virtinput_cfg_abs(vi, abs);
 		}
+
+		if (test_bit(ABS_MT_SLOT, vi->idev->absbit)) {
+			nslots = input_abs_get_max(vi->idev, ABS_MT_SLOT) + 1;
+			err = input_mt_init_slots(vi->idev, nslots, 0);
+			if (err)
+				goto err_mt_init_slots;
+		}
 	}
 
 	virtio_device_ready(vdev);
@@ -302,6 +331,7 @@ err_input_register:
 	spin_lock_irqsave(&vi->lock, flags);
 	vi->ready = false;
 	spin_unlock_irqrestore(&vi->lock, flags);
+err_mt_init_slots:
 	input_free_device(vi->idev);
 err_input_alloc:
 	vdev->config->del_vqs(vdev);
@@ -321,7 +351,7 @@ static void virtinput_remove(struct virtio_device *vdev)
 	spin_unlock_irqrestore(&vi->lock, flags);
 
 	input_unregister_device(vi->idev);
-	vdev->config->reset(vdev);
+	virtio_reset_device(vdev);
 	while ((buf = virtqueue_detach_unused_buf(vi->sts)) != NULL)
 		kfree(buf);
 	vdev->config->del_vqs(vdev);
@@ -333,11 +363,15 @@ static int virtinput_freeze(struct virtio_device *vdev)
 {
 	struct virtio_input *vi = vdev->priv;
 	unsigned long flags;
+	void *buf;
 
 	spin_lock_irqsave(&vi->lock, flags);
 	vi->ready = false;
 	spin_unlock_irqrestore(&vi->lock, flags);
 
+	virtio_reset_device(vdev);
+	while ((buf = virtqueue_detach_unused_buf(vi->sts)) != NULL)
+		kfree(buf);
 	vdev->config->del_vqs(vdev);
 	return 0;
 }
@@ -361,14 +395,13 @@ static int virtinput_restore(struct virtio_device *vdev)
 static unsigned int features[] = {
 	/* none */
 };
-static struct virtio_device_id id_table[] = {
+static const struct virtio_device_id id_table[] = {
 	{ VIRTIO_ID_INPUT, VIRTIO_DEV_ANY_ID },
 	{ 0 },
 };
 
 static struct virtio_driver virtio_input_driver = {
 	.driver.name         = KBUILD_MODNAME,
-	.driver.owner        = THIS_MODULE,
 	.feature_table       = features,
 	.feature_table_size  = ARRAY_SIZE(features),
 	.id_table            = id_table,

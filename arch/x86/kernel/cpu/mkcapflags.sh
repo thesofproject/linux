@@ -4,8 +4,9 @@
 # Generate the x86_cap/bug_flags[] arrays from include/asm/cpufeatures.h
 #
 
-IN=$1
-OUT=$2
+set -e
+
+OUT=$1
 
 dump_array()
 {
@@ -13,6 +14,7 @@ dump_array()
 	SIZE=$2
 	PFX=$3
 	POSTFIX=$4
+	IN=$5
 
 	PFX_SZ=$(echo $PFX | wc -c)
 	TABS="$(printf '\t\t\t\t\t')"
@@ -28,8 +30,7 @@ dump_array()
 
 		# If the /* comment */ starts with a quote string, grab that.
 		VALUE="$(echo "$i" | sed -n 's@.*/\* *\("[^"]*"\).*\*/@\1@p')"
-		[ -z "$VALUE" ] && VALUE="\"$NAME\""
-		[ "$VALUE" = '""' ] && continue
+		[ ! "$VALUE" ] && continue
 
 		# Name is uppercase, VALUE is all lowercase
 		VALUE="$(echo "$VALUE" | tr A-Z a-z)"
@@ -55,11 +56,18 @@ trap 'rm "$OUT"' EXIT
 	echo "#endif"
 	echo ""
 
-	dump_array "x86_cap_flags" "NCAPINTS*32" "X86_FEATURE_" ""
+	dump_array "x86_cap_flags" "NCAPINTS*32" "X86_FEATURE_" "" $2
 	echo ""
 
-	dump_array "x86_bug_flags" "NBUGINTS*32" "X86_BUG_" "NCAPINTS*32"
+	dump_array "x86_bug_flags" "NBUGINTS*32" "X86_BUG_" "NCAPINTS*32" $2
+	echo ""
 
+	echo "#ifdef CONFIG_X86_VMX_FEATURE_NAMES"
+	echo "#ifndef _ASM_X86_VMXFEATURES_H"
+	echo "#include <asm/vmxfeatures.h>"
+	echo "#endif"
+	dump_array "x86_vmx_flags" "NVMXINTS*32" "VMX_FEATURE_" "" $3
+	echo "#endif /* CONFIG_X86_VMX_FEATURE_NAMES */"
 ) > $OUT
 
 trap - EXIT

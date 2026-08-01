@@ -10,13 +10,12 @@
 #include <linux/sched.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
-#include <linux/fb.h>
 #include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/console.h>
 #include <linux/errno.h>
 #include <linux/string.h>
-#include <linux/bootmem.h>
+#include <linux/memblock.h>
 #include <linux/seq_file.h>
 #include <linux/init.h>
 #include <linux/initrd.h>
@@ -26,8 +25,8 @@
 #include <asm/setup.h>
 #include <asm/irq.h>
 #include <asm/machdep.h>
-#include <asm/pgtable.h>
 #include <asm/sections.h>
+#include <asm/bootinfo.h>
 
 /*
  * parse_uboot_commandline
@@ -64,20 +63,22 @@ static void __init parse_uboot_commandline(char *commandp, int size)
 {
 	extern unsigned long _init_sp;
 	unsigned long *sp;
-	unsigned long uboot_kbd;
-	unsigned long uboot_initrd_start, uboot_initrd_end;
 	unsigned long uboot_cmd_start, uboot_cmd_end;
+#if defined(CONFIG_BLK_DEV_INITRD)
+	unsigned long uboot_initrd_start, uboot_initrd_end;
+#endif /* if defined(CONFIG_BLK_DEV_INITRD) */
 
 	sp = (unsigned long *)_init_sp;
-	uboot_kbd = sp[1];
-	uboot_initrd_start = sp[2];
-	uboot_initrd_end = sp[3];
 	uboot_cmd_start = sp[4];
 	uboot_cmd_end = sp[5];
 
 	if (uboot_cmd_start && uboot_cmd_end)
-		strncpy(commandp, (const char *)uboot_cmd_start, size);
+		strscpy(commandp, (const char *)uboot_cmd_start, size);
+
 #if defined(CONFIG_BLK_DEV_INITRD)
+	uboot_initrd_start = sp[2];
+	uboot_initrd_end = sp[3];
+
 	if (uboot_initrd_start && uboot_initrd_end &&
 	    (uboot_initrd_end > uboot_initrd_start)) {
 		initrd_start = uboot_initrd_start;
@@ -102,5 +103,5 @@ __init void process_uboot_commandline(char *commandp, int size)
 	}
 
 	parse_uboot_commandline(commandp, len);
-	commandp[size - 1] = 0;
+	commandp[len - 1] = 0;
 }

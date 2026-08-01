@@ -1,13 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * ac97.c  --  ALSA Soc AC97 codec support
  *
  * Copyright 2005 Wolfson Microelectronics PLC.
  * Author: Liam Girdwood <lrg@slimlogic.co.uk>
- *
- *  This program is free software; you can redistribute  it and/or modify it
- *  under  the terms of  the GNU General  Public License as published by the
- *  Free Software Foundation;  either version 2 of the  License, or (at your
- *  option) any later version.
  *
  * Generic AC97 support.
  */
@@ -17,6 +13,7 @@
 #include <linux/kernel.h>
 #include <linux/device.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/ac97_codec.h>
@@ -123,7 +120,6 @@ static const struct snd_soc_component_driver soc_component_dev_ac97 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static int ac97_probe(struct platform_device *pdev)
@@ -132,18 +128,21 @@ static int ac97_probe(struct platform_device *pdev)
 			&soc_component_dev_ac97, &ac97_dai, 1);
 }
 
-static int ac97_remove(struct platform_device *pdev)
-{
-	return 0;
-}
+#ifdef CONFIG_OF
+static const struct of_device_id ac97_codec_of_match[] = {
+	{ .compatible = "realtek,alc203", },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, ac97_codec_of_match);
+#endif
 
 static struct platform_driver ac97_codec_driver = {
 	.driver = {
 		.name = "ac97-codec",
+		.of_match_table = of_match_ptr(ac97_codec_of_match),
 	},
 
 	.probe = ac97_probe,
-	.remove = ac97_remove,
 };
 
 module_platform_driver(ac97_codec_driver);

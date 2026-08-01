@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* radio-cadet.c - A video4linux driver for the ADS Cadet AM/FM Radio Card
  *
  * by Fred Gleason <fredg@wava.com>
@@ -283,7 +284,7 @@ static bool cadet_has_rds_data(struct cadet *dev)
 
 static void cadet_handler(struct timer_list *t)
 {
-	struct cadet *dev = from_timer(dev, t, readtimer);
+	struct cadet *dev = timer_container_of(dev, t, readtimer);
 
 	/* Service the RDS fifo */
 	if (mutex_trylock(&dev->lock)) {
@@ -353,12 +354,9 @@ static ssize_t cadet_read(struct file *file, char __user *data, size_t count, lo
 static int vidioc_querycap(struct file *file, void *priv,
 				struct v4l2_capability *v)
 {
-	strlcpy(v->driver, "ADS Cadet", sizeof(v->driver));
-	strlcpy(v->card, "ADS Cadet", sizeof(v->card));
-	strlcpy(v->bus_info, "ISA:radio-cadet", sizeof(v->bus_info));
-	v->device_caps = V4L2_CAP_TUNER | V4L2_CAP_RADIO |
-			  V4L2_CAP_READWRITE | V4L2_CAP_RDS_CAPTURE;
-	v->capabilities = v->device_caps | V4L2_CAP_DEVICE_CAPS;
+	strscpy(v->driver, "ADS Cadet", sizeof(v->driver));
+	strscpy(v->card, "ADS Cadet", sizeof(v->card));
+	strscpy(v->bus_info, "ISA:radio-cadet", sizeof(v->bus_info));
 	return 0;
 }
 
@@ -370,7 +368,7 @@ static int vidioc_g_tuner(struct file *file, void *priv,
 	if (v->index)
 		return -EINVAL;
 	v->type = V4L2_TUNER_RADIO;
-	strlcpy(v->name, "Radio", sizeof(v->name));
+	strscpy(v->name, "Radio", sizeof(v->name));
 	v->capability = bands[0].capability | bands[1].capability;
 	v->rangelow = bands[0].rangelow;	   /* 520 kHz (start of AM band) */
 	v->rangehigh = bands[1].rangehigh;    /* 108.0 MHz (end of FM band) */
@@ -473,7 +471,7 @@ static int cadet_release(struct file *file)
 
 	mutex_lock(&dev->lock);
 	if (v4l2_fh_is_singular_file(file) && dev->rdsstat) {
-		del_timer_sync(&dev->readtimer);
+		timer_delete_sync(&dev->readtimer);
 		dev->rdsstat = 0;
 	}
 	v4l2_fh_release(file);
@@ -595,7 +593,7 @@ static int __init cadet_init(void)
 	struct v4l2_ctrl_handler *hdl;
 	int res = -ENODEV;
 
-	strlcpy(v4l2_dev->name, "cadet", sizeof(v4l2_dev->name));
+	strscpy(v4l2_dev->name, "cadet", sizeof(v4l2_dev->name));
 	mutex_init(&dev->lock);
 
 	/* If a probe was requested then probe ISAPnP first (safest) */
@@ -639,12 +637,14 @@ static int __init cadet_init(void)
 	dev->is_fm_band = true;
 	dev->curfreq = bands[dev->is_fm_band].rangelow;
 	cadet_setfreq(dev, dev->curfreq);
-	strlcpy(dev->vdev.name, v4l2_dev->name, sizeof(dev->vdev.name));
+	strscpy(dev->vdev.name, v4l2_dev->name, sizeof(dev->vdev.name));
 	dev->vdev.v4l2_dev = v4l2_dev;
 	dev->vdev.fops = &cadet_fops;
 	dev->vdev.ioctl_ops = &cadet_ioctl_ops;
 	dev->vdev.release = video_device_release_empty;
 	dev->vdev.lock = &dev->lock;
+	dev->vdev.device_caps = V4L2_CAP_TUNER | V4L2_CAP_RADIO |
+				V4L2_CAP_READWRITE | V4L2_CAP_RDS_CAPTURE;
 	video_set_drvdata(&dev->vdev, dev);
 
 	res = video_register_device(&dev->vdev, VFL_TYPE_RADIO, radio_nr);

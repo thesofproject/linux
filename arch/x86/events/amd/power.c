@@ -1,24 +1,21 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Performance events - AMD Processor Power Reporting Mechanism
  *
  * Copyright (C) 2016 Advanced Micro Devices, Inc.
  *
  * Author: Huang Rui <ray.huang@amd.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/perf_event.h>
-#include <asm/cpu_device_id.h>
-#include "../perf_event.h"
 
-#define MSR_F15H_CU_PWR_ACCUMULATOR     0xc001007a
-#define MSR_F15H_CU_MAX_PWR_ACCUMULATOR 0xc001007b
-#define MSR_F15H_PTSC			0xc0010280
+#include <asm/cpu_device_id.h>
+#include <asm/cpuid/api.h>
+#include <asm/msr.h>
+
+#include "../perf_event.h"
 
 /* Event code: LSB 8 bits, passed in attr->config any other bit is reserved. */
 #define AMD_POWER_EVENT_MASK		0xFFULL
@@ -55,8 +52,8 @@ static void event_update(struct perf_event *event)
 
 	prev_pwr_acc = hwc->pwr_acc;
 	prev_ptsc = hwc->ptsc;
-	rdmsrl(MSR_F15H_CU_PWR_ACCUMULATOR, new_pwr_acc);
-	rdmsrl(MSR_F15H_PTSC, new_ptsc);
+	rdmsrq(MSR_F15H_CU_PWR_ACCUMULATOR, new_pwr_acc);
+	rdmsrq(MSR_F15H_PTSC, new_ptsc);
 
 	/*
 	 * Calculate the CU power consumption over a time period, the unit of
@@ -82,8 +79,8 @@ static void __pmu_event_start(struct perf_event *event)
 
 	event->hw.state = 0;
 
-	rdmsrl(MSR_F15H_PTSC, event->hw.ptsc);
-	rdmsrl(MSR_F15H_CU_PWR_ACCUMULATOR, event->hw.pwr_acc);
+	rdmsrq(MSR_F15H_PTSC, event->hw.ptsc);
+	rdmsrq(MSR_F15H_CU_PWR_ACCUMULATOR, event->hw.pwr_acc);
 }
 
 static void pmu_event_start(struct perf_event *event, int mode)
@@ -136,14 +133,7 @@ static int pmu_event_init(struct perf_event *event)
 		return -ENOENT;
 
 	/* Unsupported modes and filters. */
-	if (event->attr.exclude_user   ||
-	    event->attr.exclude_kernel ||
-	    event->attr.exclude_hv     ||
-	    event->attr.exclude_idle   ||
-	    event->attr.exclude_host   ||
-	    event->attr.exclude_guest  ||
-	    /* no sampling */
-	    event->attr.sample_period)
+	if (event->attr.sample_period)
 		return -EINVAL;
 
 	if (cfg != AMD_POWER_EVENTSEL_PKG)
@@ -226,6 +216,8 @@ static struct pmu pmu_class = {
 	.start		= pmu_event_start,
 	.stop		= pmu_event_stop,
 	.read		= pmu_event_read,
+	.capabilities	= PERF_PMU_CAP_NO_EXCLUDE,
+	.module		= THIS_MODULE,
 };
 
 static int power_cpu_exit(unsigned int cpu)
@@ -268,7 +260,7 @@ static int power_cpu_init(unsigned int cpu)
 }
 
 static const struct x86_cpu_id cpu_match[] = {
-	{ .vendor = X86_VENDOR_AMD, .family = 0x15 },
+	X86_MATCH_VENDOR_FAM(AMD, 0x15, NULL),
 	{},
 };
 
@@ -284,7 +276,7 @@ static int __init amd_power_pmu_init(void)
 
 	cpu_pwr_sample_ratio = cpuid_ecx(0x80000007);
 
-	if (rdmsrl_safe(MSR_F15H_CU_MAX_PWR_ACCUMULATOR, &max_cu_acc_power)) {
+	if (rdmsrq_safe(MSR_F15H_CU_MAX_PWR_ACCUMULATOR, &max_cu_acc_power)) {
 		pr_err("Failed to read max compute unit power accumulator MSR\n");
 		return -ENODEV;
 	}

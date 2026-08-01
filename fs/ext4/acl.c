@@ -139,15 +139,18 @@ fail:
 /*
  * Inode operation get_posix_acl().
  *
- * inode->i_mutex: don't care
+ * inode->i_rwsem: don't care
  */
 struct posix_acl *
-ext4_get_acl(struct inode *inode, int type)
+ext4_get_acl(struct inode *inode, int type, bool rcu)
 {
 	int name_index;
 	char *value = NULL;
 	struct posix_acl *acl;
 	int retval;
+
+	if (rcu)
+		return ERR_PTR(-ECHILD);
 
 	switch (type) {
 	case ACL_TYPE_ACCESS:
@@ -180,7 +183,7 @@ ext4_get_acl(struct inode *inode, int type)
 /*
  * Set the access or default ACL of an inode.
  *
- * inode->i_mutex: down unless called from ext4_new_inode
+ * inode->i_rwsem: down unless called from ext4_new_inode
  */
 static int
 __ext4_set_acl(handle_t *handle, struct inode *inode, int type,
@@ -215,19 +218,20 @@ __ext4_set_acl(handle_t *handle, struct inode *inode, int type,
 				      value, size, xattr_flags);
 
 	kfree(value);
-	if (!error) {
+	if (!error)
 		set_cached_acl(inode, type, acl);
-	}
 
 	return error;
 }
 
 int
-ext4_set_acl(struct inode *inode, struct posix_acl *acl, int type)
+ext4_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
+	     struct posix_acl *acl, int type)
 {
 	handle_t *handle;
 	int error, credits, retries = 0;
 	size_t acl_size = acl ? ext4_acl_size(acl->a_count) : 0;
+	struct inode *inode = d_inode(dentry);
 	umode_t mode = inode->i_mode;
 	int update_mode = 0;
 
@@ -245,17 +249,18 @@ retry:
 		return PTR_ERR(handle);
 
 	if ((type == ACL_TYPE_ACCESS) && acl) {
-		error = posix_acl_update_mode(inode, &mode, &acl);
+		error = posix_acl_update_mode(idmap, inode, &mode, &acl);
 		if (error)
 			goto out_stop;
-		update_mode = 1;
+		if (mode != inode->i_mode)
+			update_mode = 1;
 	}
 
 	error = __ext4_set_acl(handle, inode, type, acl, 0 /* xattr_flags */);
 	if (!error && update_mode) {
 		inode->i_mode = mode;
-		inode->i_ctime = current_time(inode);
-		ext4_mark_inode_dirty(handle, inode);
+		inode_set_ctime_current(inode);
+		error = ext4_mark_inode_dirty(handle, inode);
 	}
 out_stop:
 	ext4_journal_stop(handle);
@@ -267,8 +272,8 @@ out_stop:
 /*
  * Initialize the ACLs of a new inode. Called from ext4_new_inode.
  *
- * dir->i_mutex: down
- * inode->i_mutex: up (access to inode is still exclusive)
+ * dir->i_rwsem: down
+ * inode->i_rwsem: up (access to inode is still exclusive)
  */
 int
 ext4_init_acl(handle_t *handle, struct inode *inode, struct inode *dir)
@@ -284,12 +289,16 @@ ext4_init_acl(handle_t *handle, struct inode *inode, struct inode *dir)
 		error = __ext4_set_acl(handle, inode, ACL_TYPE_DEFAULT,
 				       default_acl, XATTR_CREATE);
 		posix_acl_release(default_acl);
+	} else {
+		inode->i_default_acl = NULL;
 	}
 	if (acl) {
 		if (!error)
 			error = __ext4_set_acl(handle, inode, ACL_TYPE_ACCESS,
 					       acl, XATTR_CREATE);
 		posix_acl_release(acl);
+	} else {
+		inode->i_acl = NULL;
 	}
 	return error;
 }

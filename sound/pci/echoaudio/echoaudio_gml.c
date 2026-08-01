@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /****************************************************************************
 
    Copyright Echo Digital Audio Corporation (c) 1998 - 2004
@@ -5,22 +6,6 @@
    www.echoaudio.com
 
    This file is part of Echo Digital Audio's generic driver library.
-
-   Echo Digital Audio's generic driver library is free software;
-   you can redistribute it and/or modify it under the terms of
-   the GNU General Public License as published by the Free Software
-   Foundation.
-
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
-
-   You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software
-   Foundation, Inc., 59 Temple Place - Suite 330, Boston,
-   MA  02111-1307, USA.
-
    *************************************************************************
 
  Translation from C++ and adaptation for use in ALSA-Driver
@@ -63,6 +48,8 @@ the control register.  write_control_reg sends the new control register
 value to the DSP. */
 static int write_control_reg(struct echoaudio *chip, u32 value, char force)
 {
+	__le32 reg_value;
+
 	/* Handle the digital input auto-mute */
 	if (chip->digital_in_automute)
 		value |= GML_DIGITAL_IN_AUTO_MUTE;
@@ -72,11 +59,11 @@ static int write_control_reg(struct echoaudio *chip, u32 value, char force)
 	dev_dbg(chip->card->dev, "write_control_reg: 0x%x\n", value);
 
 	/* Write the control register */
-	value = cpu_to_le32(value);
-	if (value != chip->comm_page->control_register || force) {
+	reg_value = cpu_to_le32(value);
+	if (reg_value != chip->comm_page->control_register || force) {
 		if (wait_handshake(chip))
 			return -EIO;
-		chip->comm_page->control_register = value;
+		chip->comm_page->control_register = reg_value;
 		clear_handshake(chip);
 		return send_vector(chip, DSP_VC_WRITE_CONTROL_REG);
 	}
@@ -192,7 +179,8 @@ static int set_professional_spdif(struct echoaudio *chip, char prof)
 		}
 	}
 
-	if ((err = write_control_reg(chip, control_reg, false)))
+	err = write_control_reg(chip, control_reg, false);
+	if (err)
 		return err;
 	chip->professional_spdif = prof;
 	dev_dbg(chip->card->dev, "set_professional_spdif to %s\n",

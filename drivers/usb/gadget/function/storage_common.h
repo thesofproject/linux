@@ -5,7 +5,7 @@
 #include <linux/device.h>
 #include <linux/usb/storage.h>
 #include <scsi/scsi.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #ifndef DEBUG
 #undef VERBOSE_DEBUG
@@ -131,7 +131,7 @@ static inline bool fsg_lun_is_open(struct fsg_lun *curlun)
 #define FSG_BUFLEN	((u32)16384)
 
 /* Maximal number of LUNs supported in mass storage function */
-#define FSG_MAX_LUNS	16
+#define FSG_MAX_LUNS	(US_BULK_MAX_LUN_LIMIT + 1)
 
 enum fsg_buffer_state {
 	BUF_STATE_SENDING = -2,
@@ -171,11 +171,6 @@ enum data_direction {
 	DATA_DIR_TO_HOST,
 	DATA_DIR_NONE
 };
-
-static inline u32 get_unaligned_be24(u8 *buf)
-{
-	return 0xffffff & (u32) get_unaligned_be32(buf - 1);
-}
 
 static inline struct fsg_lun *fsg_lun_from_dev(struct device *dev)
 {
@@ -224,5 +219,7 @@ ssize_t fsg_store_removable(struct fsg_lun *curlun, const char *buf,
 			    size_t count);
 ssize_t fsg_store_inquiry_string(struct fsg_lun *curlun, const char *buf,
 				 size_t count);
+ssize_t fsg_store_forced_eject(struct fsg_lun *curlun, struct rw_semaphore *filesem,
+			       const char *buf, size_t count);
 
 #endif /* USB_STORAGE_COMMON_H */

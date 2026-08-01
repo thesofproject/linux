@@ -2,12 +2,12 @@
 /*
  *    Copyright IBM Corp. 2007, 2009
  *    Author(s): Hongjie Yang <hongjie@us.ibm.com>,
- *		 Heiko Carstens <heiko.carstens@de.ibm.com>
  */
 
-#define KMSG_COMPONENT "setup"
-#define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define pr_fmt(fmt) "setup: " fmt
 
+#include <linux/sched/debug.h>
+#include <linux/cpufeature.h>
 #include <linux/compiler.h>
 #include <linux/init.h>
 #include <linux/errno.h>
@@ -18,8 +18,15 @@
 #include <linux/pfn.h>
 #include <linux/uaccess.h>
 #include <linux/kernel.h>
+#include <asm/asm-extable.h>
+#include <linux/memblock.h>
+#include <linux/kasan.h>
+#include <asm/access-regs.h>
+#include <asm/asm-offsets.h>
+#include <asm/machine.h>
 #include <asm/diag.h>
 #include <asm/ebcdic.h>
+#include <asm/fpu.h>
 #include <asm/ipl.h>
 #include <asm/lowcore.h>
 #include <asm/processor.h>
@@ -29,34 +36,37 @@
 #include <asm/cpcmd.h>
 #include <asm/sclp.h>
 #include <asm/facility.h>
+#include <asm/boot_data.h>
 #include "entry.h"
 
-static void __init setup_boot_command_line(void);
+#define __decompressor_handled_param(func, param)		\
+static int __init ignore_decompressor_param_##func(char *s)	\
+{								\
+	return 0;						\
+}								\
+early_param(#param, ignore_decompressor_param_##func)
 
-/*
- * Get the TOD clock running.
- */
-static void __init reset_tod_clock(void)
+#define decompressor_handled_param(param) __decompressor_handled_param(param, param)
+
+decompressor_handled_param(mem);
+decompressor_handled_param(vmalloc);
+decompressor_handled_param(dfltcc);
+decompressor_handled_param(facilities);
+decompressor_handled_param(nokaslr);
+decompressor_handled_param(cmma);
+decompressor_handled_param(relocate_lowcore);
+decompressor_handled_param(bootdebug);
+__decompressor_handled_param(debug_alternative, debug-alternative);
+#if IS_ENABLED(CONFIG_KVM)
+decompressor_handled_param(prot_virt);
+#endif
+
+static void __init kasan_early_init(void)
 {
-	u64 time;
-
-	if (store_tod_clock(&time) == 0)
-		return;
-	/* TOD clock not running. Set the clock to Unix Epoch. */
-	if (set_tod_clock(TOD_UNIX_EPOCH) != 0 || store_tod_clock(&time) != 0)
-		disabled_wait(0);
-
-	memset(tod_clock_base, 0, 16);
-	*(__u64 *) &tod_clock_base[1] = TOD_UNIX_EPOCH;
-	S390_lowcore.last_update_clock = TOD_UNIX_EPOCH;
-}
-
-/*
- * Clear bss memory
- */
-static noinline __init void clear_bss_section(void)
-{
-	memset(__bss_start, 0, __bss_stop - __bss_start);
+#ifdef CONFIG_KASAN
+	init_task.kasan_depth = 0;
+	kasan_init_generic();
+#endif
 }
 
 /*
@@ -77,26 +87,6 @@ static noinline __init void init_kernel_storage_key(void)
 
 static __initdata char sysinfo_page[PAGE_SIZE] __aligned(PAGE_SIZE);
 
-static noinline __init void detect_machine_type(void)
-{
-	struct sysinfo_3_2_2 *vmms = (struct sysinfo_3_2_2 *)&sysinfo_page;
-
-	/* Check current-configuration-level */
-	if (stsi(NULL, 0, 0, 0) <= 2) {
-		S390_lowcore.machine_flags |= MACHINE_FLAG_LPAR;
-		return;
-	}
-	/* Get virtual-machine cpu information. */
-	if (stsi(vmms, 3, 2, 2) || !vmms->count)
-		return;
-
-	/* Running under KVM? If not we assume z/VM */
-	if (!memcmp(vmms->vm[0].cpi, "\xd2\xe5\xd4", 3))
-		S390_lowcore.machine_flags |= MACHINE_FLAG_KVM;
-	else
-		S390_lowcore.machine_flags |= MACHINE_FLAG_VM;
-}
-
 /* Remove leading, trailing and double whitespace. */
 static inline void strim_all(char *str)
 {
@@ -115,6 +105,8 @@ static inline void strim_all(char *str)
 	}
 }
 
+char arch_hw_string[128];
+
 static noinline __init void setup_arch_string(void)
 {
 	struct sysinfo_1_1_1 *mach = (struct sysinfo_1_1_1 *)&sysinfo_page;
@@ -127,20 +119,21 @@ static noinline __init void setup_arch_string(void)
 	EBCASC(mach->type, sizeof(mach->type));
 	EBCASC(mach->model, sizeof(mach->model));
 	EBCASC(mach->model_capacity, sizeof(mach->model_capacity));
-	sprintf(mstr, "%-16.16s %-4.4s %-16.16s %-16.16s",
-		mach->manufacturer, mach->type,
-		mach->model, mach->model_capacity);
+	scnprintf(mstr, sizeof(mstr), "%-16.16s %-4.4s %-16.16s %-16.16s",
+		  mach->manufacturer, mach->type,
+		  mach->model, mach->model_capacity);
 	strim_all(mstr);
 	if (stsi(vm, 3, 2, 2) == 0 && vm->count) {
 		EBCASC(vm->vm[0].cpi, sizeof(vm->vm[0].cpi));
-		sprintf(hvstr, "%-16.16s", vm->vm[0].cpi);
+		scnprintf(hvstr, sizeof(hvstr), "%-16.16s", vm->vm[0].cpi);
 		strim_all(hvstr);
 	} else {
-		sprintf(hvstr, "%s",
-			MACHINE_IS_LPAR ? "LPAR" :
-			MACHINE_IS_VM ? "z/VM" :
-			MACHINE_IS_KVM ? "KVM" : "unknown");
+		scnprintf(hvstr, sizeof(hvstr), "%s",
+			  machine_is_lpar() ? "LPAR" :
+			  machine_is_vm() ? "z/VM" :
+			  machine_is_kvm() ? "KVM" : "unknown");
 	}
+	scnprintf(arch_hw_string, sizeof(arch_hw_string), "HW: %s (%s)", mstr, hvstr);
 	dump_stack_set_arch_desc("%s (%s)", mstr, hvstr);
 }
 
@@ -148,9 +141,8 @@ static __init void setup_topology(void)
 {
 	int max_mnest;
 
-	if (!test_facility(11))
+	if (!cpu_has_topology())
 		return;
-	S390_lowcore.machine_flags |= MACHINE_FLAG_TOPOLOGY;
 	for (max_mnest = 6; max_mnest > 1; max_mnest--) {
 		if (stsi(&sysinfo_page, 15, 1, max_mnest) == 0)
 			break;
@@ -158,275 +150,94 @@ static __init void setup_topology(void)
 	topology_max_mnest = max_mnest;
 }
 
-static void early_pgm_check_handler(void)
+void __init __do_early_pgm_check(struct pt_regs *regs)
 {
-	const struct exception_table_entry *fixup;
-	unsigned long cr0, cr0_new;
-	unsigned long addr;
+	struct lowcore *lc = get_lowcore();
+	unsigned long ip;
 
-	addr = S390_lowcore.program_old_psw.addr;
-	fixup = search_exception_tables(addr);
-	if (!fixup)
-		disabled_wait(0);
-	/* Disable low address protection before storing into lowcore. */
-	__ctl_store(cr0, 0, 0);
-	cr0_new = cr0 & ~(1UL << 28);
-	__ctl_load(cr0_new, 0, 0);
-	S390_lowcore.program_old_psw.addr = extable_fixup(fixup);
-	__ctl_load(cr0, 0, 0);
+	regs->int_code = lc->pgm_int_code;
+	regs->int_parm_long = lc->trans_exc_code;
+	regs->last_break = lc->pgm_last_break;
+	ip = __rewind_psw(regs->psw, regs->int_code >> 16);
+
+	/* Monitor Event? Might be a warning */
+	if ((regs->int_code & PGM_INT_CODE_MASK) == 0x40) {
+		if (report_bug(ip, regs) == BUG_TRAP_TYPE_WARN)
+			return;
+	}
+	if (fixup_exception(regs))
+		return;
+	/*
+	 * Unhandled exception - system cannot continue but try to get some
+	 * helpful messages to the console. Use early_printk() to print
+	 * some basic information in case it is too early for printk().
+	 */
+	register_early_console();
+	early_printk("PANIC: early exception %04x PSW: %016lx %016lx\n",
+		     regs->int_code & 0xffff, regs->psw.mask, regs->psw.addr);
+	show_regs(regs);
+	disabled_wait();
 }
 
 static noinline __init void setup_lowcore_early(void)
 {
+	struct lowcore *lc = get_lowcore();
 	psw_t psw;
 
-	psw.mask = PSW_MASK_BASE | PSW_DEFAULT_KEY | PSW_MASK_EA | PSW_MASK_BA;
-	psw.addr = (unsigned long) s390_base_ext_handler;
-	S390_lowcore.external_new_psw = psw;
-	psw.addr = (unsigned long) s390_base_pgm_handler;
-	S390_lowcore.program_new_psw = psw;
-	s390_base_pgm_handler_fn = early_pgm_check_handler;
-	S390_lowcore.preempt_count = INIT_PREEMPT_COUNT;
-}
-
-static noinline __init void setup_facility_list(void)
-{
-	stfle(S390_lowcore.stfle_fac_list,
-	      ARRAY_SIZE(S390_lowcore.stfle_fac_list));
-	memcpy(S390_lowcore.alt_stfle_fac_list,
-	       S390_lowcore.stfle_fac_list,
-	       sizeof(S390_lowcore.alt_stfle_fac_list));
-	if (!IS_ENABLED(CONFIG_KERNEL_NOBP))
-		__clear_facility(82, S390_lowcore.alt_stfle_fac_list);
-}
-
-static __init void detect_diag9c(void)
-{
-	unsigned int cpu_address;
-	int rc;
-
-	cpu_address = stap();
-	diag_stat_inc(DIAG_STAT_X09C);
-	asm volatile(
-		"	diag	%2,0,0x9c\n"
-		"0:	la	%0,0\n"
-		"1:\n"
-		EX_TABLE(0b,1b)
-		: "=d" (rc) : "0" (-EOPNOTSUPP), "d" (cpu_address) : "cc");
-	if (!rc)
-		S390_lowcore.machine_flags |= MACHINE_FLAG_DIAG9C;
-}
-
-static __init void detect_diag44(void)
-{
-	int rc;
-
-	diag_stat_inc(DIAG_STAT_X044);
-	asm volatile(
-		"	diag	0,0,0x44\n"
-		"0:	la	%0,0\n"
-		"1:\n"
-		EX_TABLE(0b,1b)
-		: "=d" (rc) : "0" (-EOPNOTSUPP) : "cc");
-	if (!rc)
-		S390_lowcore.machine_flags |= MACHINE_FLAG_DIAG44;
-}
-
-static __init void detect_machine_facilities(void)
-{
-	if (test_facility(8)) {
-		S390_lowcore.machine_flags |= MACHINE_FLAG_EDAT1;
-		__ctl_set_bit(0, 23);
-	}
-	if (test_facility(78))
-		S390_lowcore.machine_flags |= MACHINE_FLAG_EDAT2;
-	if (test_facility(3))
-		S390_lowcore.machine_flags |= MACHINE_FLAG_IDTE;
-	if (test_facility(50) && test_facility(73)) {
-		S390_lowcore.machine_flags |= MACHINE_FLAG_TE;
-		__ctl_set_bit(0, 55);
-	}
-	if (test_facility(51))
-		S390_lowcore.machine_flags |= MACHINE_FLAG_TLB_LC;
-	if (test_facility(129)) {
-		S390_lowcore.machine_flags |= MACHINE_FLAG_VX;
-		__ctl_set_bit(0, 17);
-	}
-	if (test_facility(130)) {
-		S390_lowcore.machine_flags |= MACHINE_FLAG_NX;
-		__ctl_set_bit(0, 20);
-	}
-	if (test_facility(133))
-		S390_lowcore.machine_flags |= MACHINE_FLAG_GS;
-	if (test_facility(139) && (tod_clock_base[1] & 0x80)) {
-		/* Enabled signed clock comparator comparisons */
-		S390_lowcore.machine_flags |= MACHINE_FLAG_SCC;
-		clock_comparator_max = -1ULL >> 1;
-		__ctl_set_bit(0, 53);
-	}
+	psw.addr = (unsigned long)early_pgm_check_handler;
+	psw.mask = PSW_KERNEL_BITS;
+	lc->program_new_psw = psw;
+	lc->preempt_count = INIT_PREEMPT_COUNT;
+	lc->return_lpswe = gen_lpswe(__LC_RETURN_PSW);
+	lc->return_mcck_lpswe = gen_lpswe(__LC_RETURN_MCCK_PSW);
 }
 
 static inline void save_vector_registers(void)
 {
 #ifdef CONFIG_CRASH_DUMP
-	if (test_facility(129))
+	if (cpu_has_vx())
 		save_vx_regs(boot_cpu_vector_save_area);
 #endif
 }
 
-static int __init disable_vector_extension(char *str)
+static inline void setup_low_address_protection(void)
 {
-	S390_lowcore.machine_flags &= ~MACHINE_FLAG_VX;
-	__ctl_clear_bit(0, 17);
-	return 0;
-}
-early_param("novx", disable_vector_extension);
-
-static int __init noexec_setup(char *str)
-{
-	bool enabled;
-	int rc;
-
-	rc = kstrtobool(str, &enabled);
-	if (!rc && !enabled) {
-		/* Disable no-execute support */
-		S390_lowcore.machine_flags &= ~MACHINE_FLAG_NX;
-		__ctl_clear_bit(0, 20);
-	}
-	return rc;
-}
-early_param("noexec", noexec_setup);
-
-static int __init cad_setup(char *str)
-{
-	bool enabled;
-	int rc;
-
-	rc = kstrtobool(str, &enabled);
-	if (!rc && enabled && test_facility(128))
-		/* Enable problem state CAD. */
-		__ctl_set_bit(2, 3);
-	return rc;
-}
-early_param("cad", cad_setup);
-
-static __init void memmove_early(void *dst, const void *src, size_t n)
-{
-	unsigned long addr;
-	long incr;
-	psw_t old;
-
-	if (!n)
-		return;
-	incr = 1;
-	if (dst > src) {
-		incr = -incr;
-		dst += n - 1;
-		src += n - 1;
-	}
-	old = S390_lowcore.program_new_psw;
-	S390_lowcore.program_new_psw.mask = __extract_psw();
-	asm volatile(
-		"	larl	%[addr],1f\n"
-		"	stg	%[addr],%[psw_pgm_addr]\n"
-		"0:     mvc	0(1,%[dst]),0(%[src])\n"
-		"	agr	%[dst],%[incr]\n"
-		"	agr	%[src],%[incr]\n"
-		"	brctg	%[n],0b\n"
-		"1:\n"
-		: [addr] "=&d" (addr),
-		  [psw_pgm_addr] "=Q" (S390_lowcore.program_new_psw.addr),
-		  [dst] "+&a" (dst), [src] "+&a" (src),  [n] "+d" (n)
-		: [incr] "d" (incr)
-		: "cc", "memory");
-	S390_lowcore.program_new_psw = old;
+	system_ctl_set_bit(0, CR0_LOW_ADDRESS_PROTECTION_BIT);
 }
 
-static __init noinline void rescue_initrd(void)
+static inline void setup_access_registers(void)
 {
-#ifdef CONFIG_BLK_DEV_INITRD
-	unsigned long min_initrd_addr = (unsigned long) _end + (4UL << 20);
-	/*
-	 * Just like in case of IPL from VM reader we make sure there is a
-	 * gap of 4MB between end of kernel and start of initrd.
-	 * That way we can also be sure that saving an NSS will succeed,
-	 * which however only requires different segments.
-	 */
-	if (!INITRD_START || !INITRD_SIZE)
-		return;
-	if (INITRD_START >= min_initrd_addr)
-		return;
-	memmove_early((void *) min_initrd_addr, (void *) INITRD_START, INITRD_SIZE);
-	INITRD_START = min_initrd_addr;
-#endif
+	unsigned int acrs[NUM_ACRS] = { 0 };
+
+	restore_access_regs(acrs);
 }
 
-/* Set up boot command line */
-static void __init append_to_cmdline(size_t (*ipl_data)(char *, size_t))
-{
-	char *parm, *delim;
-	size_t rc, len;
-
-	len = strlen(boot_command_line);
-
-	delim = boot_command_line + len;	/* '\0' character position */
-	parm  = boot_command_line + len + 1;	/* append right after '\0' */
-
-	rc = ipl_data(parm, COMMAND_LINE_SIZE - len - 1);
-	if (rc) {
-		if (*parm == '=')
-			memmove(boot_command_line, parm + 1, rc);
-		else
-			*delim = ' ';		/* replace '\0' with space */
-	}
-}
-
-static inline int has_ebcdic_char(const char *str)
-{
-	int i;
-
-	for (i = 0; str[i]; i++)
-		if (str[i] & 0x80)
-			return 1;
-	return 0;
-}
-
+char __bootdata(early_command_line)[COMMAND_LINE_SIZE];
 static void __init setup_boot_command_line(void)
 {
-	COMMAND_LINE[ARCH_COMMAND_LINE_SIZE - 1] = 0;
-	/* convert arch command line to ascii if necessary */
-	if (has_ebcdic_char(COMMAND_LINE))
-		EBCASC(COMMAND_LINE, ARCH_COMMAND_LINE_SIZE);
 	/* copy arch command line */
-	strlcpy(boot_command_line, strstrip(COMMAND_LINE),
-		ARCH_COMMAND_LINE_SIZE);
+	strscpy(boot_command_line, early_command_line, COMMAND_LINE_SIZE);
+}
 
-	/* append IPL PARM data to the boot command line */
-	if (MACHINE_IS_VM)
-		append_to_cmdline(append_ipl_vmparm);
-
-	append_to_cmdline(append_ipl_scpdata);
+static void __init sort_amode31_extable(void)
+{
+	sort_extable(__start_amode31_ex_table, __stop_amode31_ex_table);
 }
 
 void __init startup_init(void)
 {
-	reset_tod_clock();
-	rescue_initrd();
-	clear_bss_section();
+	kasan_early_init();
 	time_early_init();
 	init_kernel_storage_key();
 	lockdep_off();
+	sort_amode31_extable();
 	setup_lowcore_early();
-	setup_facility_list();
-	detect_machine_type();
 	setup_arch_string();
-	ipl_store_parameters();
 	setup_boot_command_line();
-	detect_diag9c();
-	detect_diag44();
-	detect_machine_facilities();
 	save_vector_registers();
 	setup_topology();
 	sclp_early_detect();
+	setup_low_address_protection();
+	setup_access_registers();
 	lockdep_on();
 }

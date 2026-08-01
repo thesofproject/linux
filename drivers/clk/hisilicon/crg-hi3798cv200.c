@@ -1,26 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Hi3798CV200 Clock and Reset Generator Driver
  *
  * Copyright (c) 2016 HiSilicon Technologies Co., Ltd.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <dt-bindings/clock/histb-clock.h>
 #include <linux/clk-provider.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include "clk.h"
 #include "crg.h"
@@ -186,6 +174,23 @@ static const struct hisi_gate_clock hi3798cv200_gate_clks[] = {
 		CLK_SET_RATE_PARENT, 0xbc, 0, 0 },
 	{ HISTB_USB2_PHY2_REF_CLK, "clk_u2_phy2_ref", "24m",
 		CLK_SET_RATE_PARENT, 0xbc, 2, 0 },
+	/* USB3 */
+	{ HISTB_USB3_BUS_CLK, "clk_u3_bus", NULL,
+		CLK_SET_RATE_PARENT, 0xb0, 0, 0 },
+	{ HISTB_USB3_UTMI_CLK, "clk_u3_utmi", NULL,
+		CLK_SET_RATE_PARENT, 0xb0, 4, 0 },
+	{ HISTB_USB3_PIPE_CLK, "clk_u3_pipe", NULL,
+		CLK_SET_RATE_PARENT, 0xb0, 3, 0 },
+	{ HISTB_USB3_SUSPEND_CLK, "clk_u3_suspend", NULL,
+		CLK_SET_RATE_PARENT, 0xb0, 2, 0 },
+	{ HISTB_USB3_BUS_CLK1, "clk_u3_bus1", NULL,
+		CLK_SET_RATE_PARENT, 0xb0, 16, 0 },
+	{ HISTB_USB3_UTMI_CLK1, "clk_u3_utmi1", NULL,
+		CLK_SET_RATE_PARENT, 0xb0, 20, 0 },
+	{ HISTB_USB3_PIPE_CLK1, "clk_u3_pipe1", NULL,
+		CLK_SET_RATE_PARENT, 0xb0, 19, 0 },
+	{ HISTB_USB3_SUSPEND_CLK1, "clk_u3_suspend1", NULL,
+		CLK_SET_RATE_PARENT, 0xb0, 18, 0 },
 };
 
 static struct hisi_clock_data *hi3798cv200_clk_register(
@@ -362,13 +367,12 @@ static int hi3798cv200_crg_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int hi3798cv200_crg_remove(struct platform_device *pdev)
+static void hi3798cv200_crg_remove(struct platform_device *pdev)
 {
 	struct hisi_crg_dev *crg = platform_get_drvdata(pdev);
 
 	hisi_reset_exit(crg->rstc);
 	crg->funcs->unregister_clks(pdev);
-	return 0;
 }
 
 static struct platform_driver hi3798cv200_crg_driver = {

@@ -15,7 +15,7 @@
 #include <uapi/linux/filter.h>
 #include <uapi/linux/pkt_cls.h>
 #include <net/ipv6.h>
-#include "bpf_helpers.h"
+#include <bpf/bpf_helpers.h>
 
 #define _htonl __builtin_bswap32
 
@@ -58,13 +58,10 @@ static __always_inline bool is_vip_addr(__be16 eth_proto, __be32 daddr)
 SEC("l2_to_iptun_ingress_forward")
 int _l2_to_iptun_ingress_forward(struct __sk_buff *skb)
 {
-	struct bpf_tunnel_key tkey = {};
 	void *data = (void *)(long)skb->data;
 	struct eth_hdr *eth = data;
 	void *data_end = (void *)(long)skb->data_end;
 	int key = 0, *ifindex;
-
-	int ret;
 
 	if (data + sizeof(*eth) > data_end)
 		return TC_ACT_OK;
@@ -114,8 +111,6 @@ int _l2_to_iptun_ingress_redirect(struct __sk_buff *skb)
 	struct eth_hdr *eth = data;
 	void *data_end = (void *)(long)skb->data_end;
 	int key = 0, *ifindex;
-
-	int ret;
 
 	if (data + sizeof(*eth) > data_end)
 		return TC_ACT_OK;
@@ -205,7 +200,6 @@ int _l2_to_ip6tun_ingress_redirect(struct __sk_buff *skb)
 SEC("drop_non_tun_vip")
 int _drop_non_tun_vip(struct __sk_buff *skb)
 {
-	struct bpf_tunnel_key tkey = {};
 	void *data = (void *)(long)skb->data;
 	struct eth_hdr *eth = data;
 	void *data_end = (void *)(long)skb->data_end;

@@ -57,7 +57,7 @@ nvkm_control_mthd_pstate_info(struct nvkm_control *ctrl, void *data, u32 size)
 		args->v0.count = 0;
 		args->v0.ustate_ac = NVIF_CONTROL_PSTATE_INFO_V0_USTATE_DISABLE;
 		args->v0.ustate_dc = NVIF_CONTROL_PSTATE_INFO_V0_USTATE_DISABLE;
-		args->v0.pwrsrc = -ENOSYS;
+		args->v0.pwrsrc = -ENODEV;
 		args->v0.pstate = NVIF_CONTROL_PSTATE_INFO_V0_PSTATE_UNKNOWN;
 	}
 
@@ -194,7 +194,7 @@ nvkm_control_new(struct nvkm_device *device, const struct nvkm_oclass *oclass,
 {
 	struct nvkm_control *ctrl;
 
-	if (!(ctrl = kzalloc(sizeof(*ctrl), GFP_KERNEL)))
+	if (!(ctrl = kzalloc_obj(*ctrl)))
 		return -ENOMEM;
 	*pobject = &ctrl->object;
 	ctrl->device = device;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * STTS751 sensor driver
  *
@@ -8,16 +9,6 @@
  * Written by Andrea Merello <andrea.merello@gmail.com>
  *
  * Based on  LM95241 driver and LM90 driver
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/bitops.h>
@@ -81,12 +72,12 @@ static const int stts751_intervals[] = {
 };
 
 static const struct i2c_device_id stts751_id[] = {
-	{ "stts751", 0 },
+	{ .name = "stts751" },
 	{ }
 };
 
-static const struct of_device_id stts751_of_match[] = {
-	{ .compatible = "stts751" },
+static const struct of_device_id __maybe_unused stts751_of_match[] = {
+	{ .compatible = "st,stts751" },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, stts751_of_match);
@@ -100,7 +91,6 @@ struct stts751_priv {
 	int event_max, event_min;
 	int therm;
 	int hyst;
-	bool smbus_timeout;
 	int temp;
 	unsigned long last_update, last_alert_update;
 	u8 config;
@@ -382,8 +372,8 @@ static int stts751_update(struct stts751_priv *priv)
 	return 0;
 }
 
-static ssize_t show_max_alarm(struct device *dev, struct device_attribute *attr,
-			      char *buf)
+static ssize_t max_alarm_show(struct device *dev,
+			      struct device_attribute *attr, char *buf)
 {
 	int ret;
 	struct stts751_priv *priv = dev_get_drvdata(dev);
@@ -396,11 +386,11 @@ static ssize_t show_max_alarm(struct device *dev, struct device_attribute *attr,
 	if (ret < 0)
 		return ret;
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", priv->max_alert);
+	return sysfs_emit(buf, "%d\n", priv->max_alert);
 }
 
-static ssize_t show_min_alarm(struct device *dev, struct device_attribute *attr,
-			      char *buf)
+static ssize_t min_alarm_show(struct device *dev,
+			      struct device_attribute *attr, char *buf)
 {
 	int ret;
 	struct stts751_priv *priv = dev_get_drvdata(dev);
@@ -413,10 +403,10 @@ static ssize_t show_min_alarm(struct device *dev, struct device_attribute *attr,
 	if (ret < 0)
 		return ret;
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", priv->min_alert);
+	return sysfs_emit(buf, "%d\n", priv->min_alert);
 }
 
-static ssize_t show_input(struct device *dev, struct device_attribute *attr,
+static ssize_t input_show(struct device *dev, struct device_attribute *attr,
 			  char *buf)
 {
 	int ret;
@@ -428,19 +418,19 @@ static ssize_t show_input(struct device *dev, struct device_attribute *attr,
 	if (ret < 0)
 		return ret;
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", priv->temp);
+	return sysfs_emit(buf, "%d\n", priv->temp);
 }
 
-static ssize_t show_therm(struct device *dev, struct device_attribute *attr,
+static ssize_t therm_show(struct device *dev, struct device_attribute *attr,
 			  char *buf)
 {
 	struct stts751_priv *priv = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", priv->therm);
+	return sysfs_emit(buf, "%d\n", priv->therm);
 }
 
-static ssize_t set_therm(struct device *dev, struct device_attribute *attr,
-			 const char *buf, size_t count)
+static ssize_t therm_store(struct device *dev, struct device_attribute *attr,
+			   const char *buf, size_t count)
 {
 	int ret;
 	long temp;
@@ -473,16 +463,16 @@ exit:
 	return count;
 }
 
-static ssize_t show_hyst(struct device *dev, struct device_attribute *attr,
+static ssize_t hyst_show(struct device *dev, struct device_attribute *attr,
 			 char *buf)
 {
 	struct stts751_priv *priv = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", priv->hyst);
+	return sysfs_emit(buf, "%d\n", priv->hyst);
 }
 
-static ssize_t set_hyst(struct device *dev, struct device_attribute *attr,
-			const char *buf, size_t count)
+static ssize_t hyst_store(struct device *dev, struct device_attribute *attr,
+			  const char *buf, size_t count)
 {
 	int ret;
 	long temp;
@@ -506,7 +496,7 @@ static ssize_t set_hyst(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 
-static ssize_t show_therm_trip(struct device *dev,
+static ssize_t therm_trip_show(struct device *dev,
 			       struct device_attribute *attr, char *buf)
 {
 	int ret;
@@ -518,19 +508,19 @@ static ssize_t show_therm_trip(struct device *dev,
 	if (ret < 0)
 		return ret;
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", priv->therm_trip);
+	return sysfs_emit(buf, "%d\n", priv->therm_trip);
 }
 
-static ssize_t show_max(struct device *dev, struct device_attribute *attr,
+static ssize_t max_show(struct device *dev, struct device_attribute *attr,
 			char *buf)
 {
 	struct stts751_priv *priv = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", priv->event_max);
+	return sysfs_emit(buf, "%d\n", priv->event_max);
 }
 
-static ssize_t set_max(struct device *dev, struct device_attribute *attr,
-		       const char *buf, size_t count)
+static ssize_t max_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
 {
 	int ret;
 	long temp;
@@ -555,16 +545,16 @@ exit:
 	return ret;
 }
 
-static ssize_t show_min(struct device *dev, struct device_attribute *attr,
+static ssize_t min_show(struct device *dev, struct device_attribute *attr,
 			char *buf)
 {
 	struct stts751_priv *priv = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n", priv->event_min);
+	return sysfs_emit(buf, "%d\n", priv->event_min);
 }
 
-static ssize_t set_min(struct device *dev, struct device_attribute *attr,
-		       const char *buf, size_t count)
+static ssize_t min_store(struct device *dev, struct device_attribute *attr,
+			 const char *buf, size_t count)
 {
 	int ret;
 	long temp;
@@ -589,17 +579,18 @@ exit:
 	return ret;
 }
 
-static ssize_t show_interval(struct device *dev, struct device_attribute *attr,
-			     char *buf)
+static ssize_t interval_show(struct device *dev,
+			     struct device_attribute *attr, char *buf)
 {
 	struct stts751_priv *priv = dev_get_drvdata(dev);
 
-	return snprintf(buf, PAGE_SIZE, "%d\n",
-			stts751_intervals[priv->interval]);
+	return sysfs_emit(buf, "%d\n",
+			  stts751_intervals[priv->interval]);
 }
 
-static ssize_t set_interval(struct device *dev, struct device_attribute *attr,
-			    const char *buf, size_t count)
+static ssize_t interval_store(struct device *dev,
+			      struct device_attribute *attr, const char *buf,
+			      size_t count)
 {
 	unsigned long val;
 	int idx;
@@ -700,7 +691,7 @@ static int stts751_detect(struct i2c_client *new_client,
 	}
 	dev_dbg(&new_client->dev, "Chip %s detected", name);
 
-	strlcpy(info->type, stts751_id[0].name, I2C_NAME_SIZE);
+	strscpy(info->type, stts751_id[0].name, I2C_NAME_SIZE);
 	return 0;
 }
 
@@ -746,16 +737,15 @@ static int stts751_read_chip_config(struct stts751_priv *priv)
 	return 0;
 }
 
-static SENSOR_DEVICE_ATTR(temp1_input, 0444, show_input, NULL, 0);
-static SENSOR_DEVICE_ATTR(temp1_min, 0644, show_min, set_min, 0);
-static SENSOR_DEVICE_ATTR(temp1_max, 0644, show_max, set_max, 0);
-static SENSOR_DEVICE_ATTR(temp1_min_alarm, 0444, show_min_alarm, NULL, 0);
-static SENSOR_DEVICE_ATTR(temp1_max_alarm, 0444, show_max_alarm, NULL, 0);
-static SENSOR_DEVICE_ATTR(temp1_crit, 0644, show_therm,	set_therm, 0);
-static SENSOR_DEVICE_ATTR(temp1_crit_hyst, 0644, show_hyst, set_hyst, 0);
-static SENSOR_DEVICE_ATTR(temp1_crit_alarm, 0444, show_therm_trip, NULL, 0);
-static SENSOR_DEVICE_ATTR(update_interval, 0644,
-			  show_interval, set_interval, 0);
+static SENSOR_DEVICE_ATTR_RO(temp1_input, input, 0);
+static SENSOR_DEVICE_ATTR_RW(temp1_min, min, 0);
+static SENSOR_DEVICE_ATTR_RW(temp1_max, max, 0);
+static SENSOR_DEVICE_ATTR_RO(temp1_min_alarm, min_alarm, 0);
+static SENSOR_DEVICE_ATTR_RO(temp1_max_alarm, max_alarm, 0);
+static SENSOR_DEVICE_ATTR_RW(temp1_crit, therm, 0);
+static SENSOR_DEVICE_ATTR_RW(temp1_crit_hyst, hyst, 0);
+static SENSOR_DEVICE_ATTR_RO(temp1_crit_alarm, therm_trip, 0);
+static SENSOR_DEVICE_ATTR_RW(update_interval, interval, 0);
 
 static struct attribute *stts751_attrs[] = {
 	&sensor_dev_attr_temp1_input.dev_attr.attr,
@@ -771,8 +761,7 @@ static struct attribute *stts751_attrs[] = {
 };
 ATTRIBUTE_GROUPS(stts751);
 
-static int stts751_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int stts751_probe(struct i2c_client *client)
 {
 	struct stts751_priv *priv;
 	int ret;

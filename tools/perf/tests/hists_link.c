@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0
-#include "perf.h"
 #include "tests.h"
 #include "debug.h"
 #include "symbol.h"
@@ -7,9 +6,11 @@
 #include "evsel.h"
 #include "evlist.h"
 #include "machine.h"
-#include "thread.h"
+#include "map.h"
 #include "parse-events.h"
+#include "thread.h"
 #include "hists_common.h"
+#include "util/mmap.h"
 #include <errno.h>
 #include <linux/kernel.h>
 
@@ -62,14 +63,15 @@ static struct sample fake_samples[][5] = {
 	},
 };
 
-static int add_hist_entries(struct perf_evlist *evlist, struct machine *machine)
+static int add_hist_entries(struct evlist *evlist, struct machine *machine)
 {
-	struct perf_evsel *evsel;
+	struct evsel *evsel;
 	struct addr_location al;
 	struct hist_entry *he;
 	struct perf_sample sample = { .period = 1, .weight = 1, };
 	size_t i = 0, k;
 
+	addr_location__init(&al);
 	/*
 	 * each evsel will have 10 samples - 5 common and 5 distinct.
 	 * However the second evsel also has a collapsed entry for
@@ -88,14 +90,15 @@ static int add_hist_entries(struct perf_evlist *evlist, struct machine *machine)
 				goto out;
 
 			he = hists__add_entry(hists, &al, NULL,
-						NULL, NULL, &sample, true);
+					      NULL, NULL, NULL, &sample, true);
 			if (he == NULL) {
-				addr_location__put(&al);
 				goto out;
 			}
 
-			fake_common_samples[k].thread = al.thread;
-			fake_common_samples[k].map = al.map;
+			thread__put(fake_common_samples[k].thread);
+			fake_common_samples[k].thread = thread__get(al.thread);
+			map__put(fake_common_samples[k].map);
+			fake_common_samples[k].map = map__get(al.map);
 			fake_common_samples[k].sym = al.sym;
 		}
 
@@ -107,31 +110,46 @@ static int add_hist_entries(struct perf_evlist *evlist, struct machine *machine)
 				goto out;
 
 			he = hists__add_entry(hists, &al, NULL,
-						NULL, NULL, &sample, true);
+					      NULL, NULL, NULL, &sample, true);
 			if (he == NULL) {
-				addr_location__put(&al);
 				goto out;
 			}
 
-			fake_samples[i][k].thread = al.thread;
-			fake_samples[i][k].map = al.map;
+			thread__put(fake_samples[i][k].thread);
+			fake_samples[i][k].thread = thread__get(al.thread);
+			map__put(fake_samples[i][k].map);
+			fake_samples[i][k].map = map__get(al.map);
 			fake_samples[i][k].sym = al.sym;
 		}
 		i++;
 	}
 
+	addr_location__exit(&al);
 	return 0;
-
 out:
+	addr_location__exit(&al);
 	pr_debug("Not enough memory for adding a hist entry\n");
 	return -1;
+}
+
+static void put_fake_samples(void)
+{
+	size_t i, j;
+
+	for (i = 0; i < ARRAY_SIZE(fake_common_samples); i++)
+		map__put(fake_common_samples[i].map);
+	for (i = 0; i < ARRAY_SIZE(fake_samples); i++) {
+		for (j = 0; j < ARRAY_SIZE(fake_samples[0]); j++)
+			map__put(fake_samples[i][j].map);
+	}
 }
 
 static int find_sample(struct sample *samples, size_t nr_samples,
 		       struct thread *t, struct map *m, struct symbol *s)
 {
 	while (nr_samples--) {
-		if (samples->thread == t && samples->map == m &&
+		if (RC_CHK_EQUAL(samples->thread, t) &&
+		    RC_CHK_EQUAL(samples->map, m) &&
 		    samples->sym == s)
 			return 1;
 		samples++;
@@ -142,7 +160,7 @@ static int find_sample(struct sample *samples, size_t nr_samples,
 static int __validate_match(struct hists *hists)
 {
 	size_t count = 0;
-	struct rb_root *root;
+	struct rb_root_cached *root;
 	struct rb_node *node;
 
 	/*
@@ -153,7 +171,7 @@ static int __validate_match(struct hists *hists)
 	else
 		root = hists->entries_in;
 
-	node = rb_first(root);
+	node = rb_first_cached(root);
 	while (node) {
 		struct hist_entry *he;
 
@@ -192,7 +210,7 @@ static int __validate_link(struct hists *hists, int idx)
 	size_t count = 0;
 	size_t count_pair = 0;
 	size_t count_dummy = 0;
-	struct rb_root *root;
+	struct rb_root_cached *root;
 	struct rb_node *node;
 
 	/*
@@ -205,7 +223,7 @@ static int __validate_link(struct hists *hists, int idx)
 	else
 		root = hists->entries_in;
 
-	node = rb_first(root);
+	node = rb_first_cached(root);
 	while (node) {
 		struct hist_entry *he;
 
@@ -265,31 +283,28 @@ static int validate_link(struct hists *leader, struct hists *other)
 	return __validate_link(leader, 0) || __validate_link(other, 1);
 }
 
-int test__hists_link(struct test *test __maybe_unused, int subtest __maybe_unused)
+static int test__hists_link(struct test_suite *test __maybe_unused, int subtest __maybe_unused)
 {
 	int err = -1;
 	struct hists *hists, *first_hists;
-	struct machines machines;
+	struct machines machines = { 0 };
 	struct machine *machine = NULL;
-	struct perf_evsel *evsel, *first;
-	struct perf_evlist *evlist = perf_evlist__new();
+	struct evsel *evsel, *first;
+	struct evlist *evlist = evlist__new();
 
 	if (evlist == NULL)
                 return -ENOMEM;
 
-	err = parse_events(evlist, "cpu-clock", NULL);
+	err = parse_event(evlist, "cpu-clock");
 	if (err)
 		goto out;
-	err = parse_events(evlist, "task-clock", NULL);
+	err = parse_event(evlist, "task-clock");
 	if (err)
 		goto out;
 
 	err = TEST_FAIL;
-	/* default sort order (comm,dso,sym) will be used */
-	if (setup_sorting(NULL) < 0)
+	if (machines__init(&machines))
 		goto out;
-
-	machines__init(&machines);
 
 	/* setup threads/dso/map/symbols also */
 	machine = setup_fake_machine(&machines);
@@ -298,6 +313,10 @@ int test__hists_link(struct test *test __maybe_unused, int subtest __maybe_unuse
 
 	if (verbose > 1)
 		machine__fprintf(machine, stderr);
+
+	/* default sort order (comm,dso,sym) will be used */
+	if (setup_sorting(evlist, machine->env) < 0)
+		goto out;
 
 	/* process sample events */
 	err = add_hist_entries(evlist, machine);
@@ -312,8 +331,8 @@ int test__hists_link(struct test *test __maybe_unused, int subtest __maybe_unuse
 			print_hists_in(hists);
 	}
 
-	first = perf_evlist__first(evlist);
-	evsel = perf_evlist__last(evlist);
+	first = evlist__first(evlist);
+	evsel = evlist__last(evlist);
 
 	first_hists = evsel__hists(first);
 	hists = evsel__hists(evsel);
@@ -334,9 +353,12 @@ int test__hists_link(struct test *test __maybe_unused, int subtest __maybe_unuse
 
 out:
 	/* tear down everything */
-	perf_evlist__delete(evlist);
+	evlist__delete(evlist);
 	reset_output_field();
 	machines__exit(&machines);
+	put_fake_samples();
 
 	return err;
 }
+
+DEFINE_SUITE("Match and link multiple hists", hists_link);

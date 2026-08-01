@@ -1,17 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * xen-acpi-pad.c - Xen pad interface
  *
  * Copyright (c) 2012, Intel Corporation.
  *    Author: Liu, Jinsong <jinsong.liu@intel.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -19,6 +11,8 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/acpi.h>
+#include <linux/platform_device.h>
+#include <xen/xen.h>
 #include <xen/interface/version.h>
 #include <xen/xen-ops.h>
 #include <asm/xen/hypercall.h>
@@ -114,9 +108,14 @@ static void acpi_pad_notify(acpi_handle handle, u32 event,
 	}
 }
 
-static int acpi_pad_add(struct acpi_device *device)
+static int acpi_pad_probe(struct platform_device *pdev)
 {
+	struct acpi_device *device;
 	acpi_status status;
+
+	device = ACPI_COMPANION(&pdev->dev);
+	if (!device)
+		return -ENODEV;
 
 	strcpy(acpi_device_name(device), ACPI_PROCESSOR_AGGREGATOR_DEVICE_NAME);
 	strcpy(acpi_device_class(device), ACPI_PROCESSOR_AGGREGATOR_CLASS);
@@ -129,15 +128,14 @@ static int acpi_pad_add(struct acpi_device *device)
 	return 0;
 }
 
-static int acpi_pad_remove(struct acpi_device *device)
+static void acpi_pad_remove(struct platform_device *pdev)
 {
 	mutex_lock(&xen_cpu_lock);
 	xen_acpi_pad_idle_cpus(0);
 	mutex_unlock(&xen_cpu_lock);
 
-	acpi_remove_notify_handler(device->handle,
+	acpi_remove_notify_handler(ACPI_HANDLE(&pdev->dev),
 		ACPI_DEVICE_NOTIFY, acpi_pad_notify);
-	return 0;
 }
 
 static const struct acpi_device_id pad_device_ids[] = {
@@ -145,13 +143,12 @@ static const struct acpi_device_id pad_device_ids[] = {
 	{"", 0},
 };
 
-static struct acpi_driver acpi_pad_driver = {
-	.name = "processor_aggregator",
-	.class = ACPI_PROCESSOR_AGGREGATOR_CLASS,
-	.ids = pad_device_ids,
-	.ops = {
-		.add = acpi_pad_add,
-		.remove = acpi_pad_remove,
+static struct platform_driver acpi_pad_driver = {
+	.probe = acpi_pad_probe,
+	.remove = acpi_pad_remove,
+	.driver = {
+		.name = "acpi_processor_aggregator",
+		.acpi_match_table = pad_device_ids,
 	},
 };
 
@@ -165,6 +162,6 @@ static int __init xen_acpi_pad_init(void)
 	if (!xen_running_on_version_or_later(4, 2))
 		return -ENODEV;
 
-	return acpi_bus_register_driver(&acpi_pad_driver);
+	return platform_driver_register(&acpi_pad_driver);
 }
 subsys_initcall(xen_acpi_pad_init);

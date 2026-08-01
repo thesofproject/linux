@@ -1,17 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Copyright (c) 2014 Linaro Ltd.
  * Copyright (c) 2014 Hisilicon Limited.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/module.h>
 #include <linux/interrupt.h>
 #include <linux/etherdevice.h>
 #include <linux/platform_device.h>
-#include <linux/of_device.h>
+#include <linux/property.h>
+#include <linux/of.h>
 #include <linux/of_net.h>
 #include <linux/of_mdio.h>
 #include <linux/reset.h>
@@ -433,7 +430,7 @@ static void hix5hd2_port_disable(struct hix5hd2_priv *priv)
 static void hix5hd2_hw_set_mac_addr(struct net_device *dev)
 {
 	struct hix5hd2_priv *priv = netdev_priv(dev);
-	unsigned char *mac = dev->dev_addr;
+	const unsigned char *mac = dev->dev_addr;
 	u32 val;
 
 	val = mac[1] | (mac[0] << 8);
@@ -554,7 +551,7 @@ static int hix5hd2_rx(struct net_device *dev, int limit)
 		skb->protocol = eth_type_trans(skb, dev);
 		napi_gro_receive(&priv->napi, skb);
 		dev->stats.rx_packets++;
-		dev->stats.rx_bytes += skb->len;
+		dev->stats.rx_bytes += len;
 next:
 		pos = dma_ring_incr(pos, RX_DESC_NUM);
 	}
@@ -723,7 +720,7 @@ static int hix5hd2_fill_sg_desc(struct hix5hd2_priv *priv,
 
 	for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {
 		skb_frag_t *frag = &skb_shinfo(skb)->frags[i];
-		int len = frag->size;
+		int len = skb_frag_size(frag);
 
 		addr = skb_frag_dma_map(priv->dev, frag, 0, len, DMA_TO_DEVICE);
 		ret = dma_mapping_error(priv->dev, addr);
@@ -736,7 +733,7 @@ static int hix5hd2_fill_sg_desc(struct hix5hd2_priv *priv,
 	return 0;
 }
 
-static int hix5hd2_net_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t hix5hd2_net_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct hix5hd2_priv *priv = netdev_priv(dev);
 	struct hix5hd2_desc *desc;
@@ -897,7 +894,7 @@ static void hix5hd2_tx_timeout_task(struct work_struct *work)
 	hix5hd2_net_open(priv->netdev);
 }
 
-static void hix5hd2_net_timeout(struct net_device *dev)
+static void hix5hd2_net_timeout(struct net_device *dev, unsigned int txqueue)
 {
 	struct hix5hd2_priv *priv = netdev_priv(dev);
 
@@ -1011,7 +1008,6 @@ static int hix5hd2_init_hw_desc_queue(struct hix5hd2_priv *priv)
 		if (virt_addr == NULL)
 			goto error_free_pool;
 
-		memset(virt_addr, 0, size);
 		priv->pool[i].size = size;
 		priv->pool[i].desc = virt_addr;
 		priv->pool[i].phys_addr = phys_addr;
@@ -1029,9 +1025,9 @@ static int hix5hd2_init_sg_desc_queue(struct hix5hd2_priv *priv)
 	struct sg_desc *desc;
 	dma_addr_t phys_addr;
 
-	desc = (struct sg_desc *)dma_alloc_coherent(priv->dev,
-				TX_DESC_NUM * sizeof(struct sg_desc),
-				&phys_addr, GFP_KERNEL);
+	desc = dma_alloc_coherent(priv->dev,
+				  TX_DESC_NUM * sizeof(struct sg_desc),
+				  &phys_addr, GFP_KERNEL);
 	if (!desc)
 		return -ENOMEM;
 
@@ -1099,12 +1095,9 @@ static int hix5hd2_dev_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *node = dev->of_node;
-	const struct of_device_id *of_id = NULL;
 	struct net_device *ndev;
 	struct hix5hd2_priv *priv;
-	struct resource *res;
 	struct mii_bus *bus;
-	const char *mac_addr;
 	int ret;
 
 	ndev = alloc_etherdev(sizeof(struct hix5hd2_priv));
@@ -1117,22 +1110,15 @@ static int hix5hd2_dev_probe(struct platform_device *pdev)
 	priv->dev = dev;
 	priv->netdev = ndev;
 
-	of_id = of_match_device(hix5hd2_of_match, dev);
-	if (!of_id) {
-		ret = -EINVAL;
-		goto out_free_netdev;
-	}
-	priv->hw_cap = (unsigned long)of_id->data;
+	priv->hw_cap = (unsigned long)device_get_match_data(dev);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	priv->base = devm_ioremap_resource(dev, res);
+	priv->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(priv->base)) {
 		ret = PTR_ERR(priv->base);
 		goto out_free_netdev;
 	}
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	priv->ctrl_base = devm_ioremap_resource(dev, res);
+	priv->ctrl_base = devm_platform_ioremap_resource(pdev, 1);
 	if (IS_ERR(priv->ctrl_base)) {
 		ret = PTR_ERR(priv->ctrl_base);
 		goto out_free_netdev;
@@ -1201,10 +1187,9 @@ static int hix5hd2_dev_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_free_mdio;
 
-	priv->phy_mode = of_get_phy_mode(node);
-	if (priv->phy_mode < 0) {
+	ret = of_get_phy_mode(node, &priv->phy_mode);
+	if (ret) {
 		netdev_err(ndev, "not find phy-mode\n");
-		ret = -EINVAL;
 		goto err_mdiobus;
 	}
 
@@ -1216,9 +1201,8 @@ static int hix5hd2_dev_probe(struct platform_device *pdev)
 	}
 
 	ndev->irq = platform_get_irq(pdev, 0);
-	if (ndev->irq <= 0) {
-		netdev_err(ndev, "No irq resource\n");
-		ret = -EINVAL;
+	if (ndev->irq < 0) {
+		ret = ndev->irq;
 		goto out_phy_node;
 	}
 
@@ -1229,10 +1213,8 @@ static int hix5hd2_dev_probe(struct platform_device *pdev)
 		goto out_phy_node;
 	}
 
-	mac_addr = of_get_mac_address(node);
-	if (mac_addr)
-		ether_addr_copy(ndev->dev_addr, mac_addr);
-	if (!is_valid_ether_addr(ndev->dev_addr)) {
+	ret = of_get_ethdev_address(node, ndev);
+	if (ret) {
 		eth_hw_addr_random(ndev);
 		netdev_warn(ndev, "using random MAC address %pM\n",
 			    ndev->dev_addr);
@@ -1255,7 +1237,7 @@ static int hix5hd2_dev_probe(struct platform_device *pdev)
 	if (ret)
 		goto out_phy_node;
 
-	netif_napi_add(ndev, &priv->napi, hix5hd2_poll, NAPI_POLL_WEIGHT);
+	netif_napi_add(ndev, &priv->napi, hix5hd2_poll);
 
 	if (HAS_CAP_TSO(priv->hw_cap)) {
 		ret = hix5hd2_init_sg_desc_queue(priv);
@@ -1295,7 +1277,7 @@ out_free_netdev:
 	return ret;
 }
 
-static int hix5hd2_dev_remove(struct platform_device *pdev)
+static void hix5hd2_dev_remove(struct platform_device *pdev)
 {
 	struct net_device *ndev = platform_get_drvdata(pdev);
 	struct hix5hd2_priv *priv = netdev_priv(ndev);
@@ -1311,8 +1293,6 @@ static int hix5hd2_dev_remove(struct platform_device *pdev)
 	of_node_put(priv->phy_node);
 	cancel_work_sync(&priv->tx_timeout_task);
 	free_netdev(ndev);
-
-	return 0;
 }
 
 static const struct of_device_id hix5hd2_of_match[] = {

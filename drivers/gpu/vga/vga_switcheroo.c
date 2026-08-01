@@ -31,7 +31,6 @@
 #define pr_fmt(fmt) "vga_switcheroo: " fmt
 
 #include <linux/apple-gmux.h>
-#include <linux/console.h>
 #include <linux/debugfs.h>
 #include <linux/fb.h>
 #include <linux/fs.h>
@@ -103,9 +102,11 @@
  *	runtime pm. If true, writing ON and OFF to the vga_switcheroo debugfs
  *	interface is a no-op so as not to interfere with runtime pm
  * @list: client list
+ * @vga_dev: pci device, indicate which GPU is bound to current audio client
  *
  * Registered client. A client can be either a GPU or an audio device on a GPU.
- * For audio clients, the @fb_info and @active members are bogus.
+ * For audio clients, the @fb_info and @active members are bogus. For GPU
+ * clients, the @vga_dev is bogus.
  */
 struct vga_switcheroo_client {
 	struct pci_dev *pdev;
@@ -116,6 +117,7 @@ struct vga_switcheroo_client {
 	bool active;
 	bool driver_power_control;
 	struct list_head list;
+	struct pci_dev *vga_dev;
 };
 
 /*
@@ -130,7 +132,6 @@ static DEFINE_MUTEX(vgasr_mutex);
  * @delayed_switch_active: whether a delayed switch is pending
  * @delayed_client_id: client to which a delayed switch is pending
  * @debugfs_root: directory for vga_switcheroo debugfs interface
- * @switch_file: file for vga_switcheroo debugfs interface
  * @registered_clients: number of registered GPUs
  *	(counting only vga clients, not audio clients)
  * @clients: list of registered clients
@@ -149,7 +150,6 @@ struct vgasr_priv {
 	enum vga_switcheroo_client_id delayed_client_id;
 
 	struct dentry *debugfs_root;
-	struct dentry *switch_file;
 
 	int registered_clients;
 	struct list_head clients;
@@ -161,12 +161,11 @@ struct vgasr_priv {
 };
 
 #define ID_BIT_AUDIO		0x100
-#define client_is_audio(c)	((c)->id & ID_BIT_AUDIO)
-#define client_is_vga(c)	((c)->id == VGA_SWITCHEROO_UNKNOWN_ID || \
-				 !client_is_audio(c))
+#define client_is_audio(c)		((c)->id & ID_BIT_AUDIO)
+#define client_is_vga(c)		(!client_is_audio(c))
 #define client_id(c)		((c)->id & ~ID_BIT_AUDIO)
 
-static int vga_switcheroo_debugfs_init(struct vgasr_priv *priv);
+static void vga_switcheroo_debugfs_init(struct vgasr_priv *priv);
 static void vga_switcheroo_debugfs_fini(struct vgasr_priv *priv);
 
 /* only one switcheroo per system */
@@ -192,14 +191,31 @@ static void vga_switcheroo_enable(void)
 		vgasr_priv.handler->init();
 
 	list_for_each_entry(client, &vgasr_priv.clients, list) {
-		if (client->id != VGA_SWITCHEROO_UNKNOWN_ID)
+		if (!client_is_vga(client) ||
+		     client_id(client) != VGA_SWITCHEROO_UNKNOWN_ID)
 			continue;
+
 		ret = vgasr_priv.handler->get_client_id(client->pdev);
 		if (ret < 0)
 			return;
 
 		client->id = ret;
 	}
+
+	list_for_each_entry(client, &vgasr_priv.clients, list) {
+		if (!client_is_audio(client) ||
+		     client_id(client) != VGA_SWITCHEROO_UNKNOWN_ID)
+			continue;
+
+		ret = vgasr_priv.handler->get_client_id(client->vga_dev);
+		if (ret < 0)
+			return;
+
+		client->id = ret | ID_BIT_AUDIO;
+		if (client->ops->gpu_bound)
+			client->ops->gpu_bound(client->pdev, ret);
+	}
+
 	vga_switcheroo_debugfs_init(&vgasr_priv);
 	vgasr_priv.active = true;
 }
@@ -272,12 +288,14 @@ EXPORT_SYMBOL(vga_switcheroo_handler_flags);
 
 static int register_client(struct pci_dev *pdev,
 			   const struct vga_switcheroo_client_ops *ops,
-			   enum vga_switcheroo_client_id id, bool active,
+			   enum vga_switcheroo_client_id id,
+			   struct pci_dev *vga_dev,
+			   bool active,
 			   bool driver_power_control)
 {
 	struct vga_switcheroo_client *client;
 
-	client = kzalloc(sizeof(*client), GFP_KERNEL);
+	client = kzalloc_obj(*client);
 	if (!client)
 		return -ENOMEM;
 
@@ -287,6 +305,7 @@ static int register_client(struct pci_dev *pdev,
 	client->id = id;
 	client->active = active;
 	client->driver_power_control = driver_power_control;
+	client->vga_dev = vga_dev;
 
 	mutex_lock(&vgasr_mutex);
 	list_add_tail(&client->list, &vgasr_priv.clients);
@@ -319,7 +338,7 @@ int vga_switcheroo_register_client(struct pci_dev *pdev,
 				   const struct vga_switcheroo_client_ops *ops,
 				   bool driver_power_control)
 {
-	return register_client(pdev, ops, VGA_SWITCHEROO_UNKNOWN_ID,
+	return register_client(pdev, ops, VGA_SWITCHEROO_UNKNOWN_ID, NULL,
 			       pdev == vga_default_device(),
 			       driver_power_control);
 }
@@ -329,19 +348,43 @@ EXPORT_SYMBOL(vga_switcheroo_register_client);
  * vga_switcheroo_register_audio_client - register audio client
  * @pdev: client pci device
  * @ops: client callbacks
- * @id: client identifier
+ * @vga_dev:  pci device which is bound to current audio client
  *
  * Register audio client (audio device on a GPU). The client is assumed
  * to use runtime PM. Beforehand, vga_switcheroo_client_probe_defer()
  * shall be called to ensure that all prerequisites are met.
  *
- * Return: 0 on success, -ENOMEM on memory allocation error.
+ * Return: 0 on success, -ENOMEM on memory allocation error, -EINVAL on getting
+ * client id error.
  */
 int vga_switcheroo_register_audio_client(struct pci_dev *pdev,
 			const struct vga_switcheroo_client_ops *ops,
-			enum vga_switcheroo_client_id id)
+			struct pci_dev *vga_dev)
 {
-	return register_client(pdev, ops, id | ID_BIT_AUDIO, false, true);
+	enum vga_switcheroo_client_id id = VGA_SWITCHEROO_UNKNOWN_ID;
+
+	/*
+	 * if vga_switcheroo has enabled, that mean two GPU clients and also
+	 * handler are registered. Get audio client id from bound GPU client
+	 * id directly, otherwise, set it as VGA_SWITCHEROO_UNKNOWN_ID,
+	 * it will set to correct id in later when vga_switcheroo_enable()
+	 * is called.
+	 */
+	mutex_lock(&vgasr_mutex);
+	if (vgasr_priv.active) {
+		id = vgasr_priv.handler->get_client_id(vga_dev);
+		if (id < 0) {
+			mutex_unlock(&vgasr_mutex);
+			return -EINVAL;
+		}
+		/* notify if GPU has been already bound */
+		if (ops->gpu_bound)
+			ops->gpu_bound(pdev, id);
+	}
+	mutex_unlock(&vgasr_mutex);
+
+	return register_client(pdev, ops, id | ID_BIT_AUDIO, vga_dev,
+			       false, true);
 }
 EXPORT_SYMBOL(vga_switcheroo_register_audio_client);
 
@@ -392,7 +435,7 @@ find_active_client(struct list_head *head)
  */
 bool vga_switcheroo_client_probe_defer(struct pci_dev *pdev)
 {
-	if ((pdev->class >> 16) == PCI_BASE_CLASS_DISPLAY) {
+	if (pci_is_display(pdev)) {
 		/*
 		 * apple-gmux is needed on pre-retina MacBook Pro
 		 * to probe the panel if pdev is the inactive GPU.
@@ -690,14 +733,10 @@ static int vga_switchto_stage2(struct vga_switcheroo_client *new_client)
 	if (!active->driver_power_control)
 		set_audio_state(active->id, VGA_SWITCHEROO_OFF);
 
-	if (new_client->fb_info) {
-		struct fb_event event;
-
-		console_lock();
-		event.info = new_client->fb_info;
-		fb_notifier_call_chain(FB_EVENT_REMAP_ALL_CONSOLE, &event);
-		console_unlock();
-	}
+#if defined(CONFIG_FB)
+	if (new_client->fb_info)
+		fb_switch_outputs(new_client->fb_info);
+#endif
 
 	mutex_lock(&vgasr_priv.mux_hw_lock);
 	ret = vgasr_priv.handler->switchto(new_client->id);
@@ -868,45 +907,26 @@ static const struct file_operations vga_switcheroo_debugfs_fops = {
 
 static void vga_switcheroo_debugfs_fini(struct vgasr_priv *priv)
 {
-	debugfs_remove(priv->switch_file);
-	priv->switch_file = NULL;
-
-	debugfs_remove(priv->debugfs_root);
+	debugfs_remove_recursive(priv->debugfs_root);
 	priv->debugfs_root = NULL;
 }
 
-static int vga_switcheroo_debugfs_init(struct vgasr_priv *priv)
+static void vga_switcheroo_debugfs_init(struct vgasr_priv *priv)
 {
-	static const char mp[] = "/sys/kernel/debug";
-
 	/* already initialised */
 	if (priv->debugfs_root)
-		return 0;
+		return;
+
 	priv->debugfs_root = debugfs_create_dir("vgaswitcheroo", NULL);
 
-	if (!priv->debugfs_root) {
-		pr_err("Cannot create %s/vgaswitcheroo\n", mp);
-		goto fail;
-	}
-
-	priv->switch_file = debugfs_create_file("switch", 0644,
-						priv->debugfs_root, NULL,
-						&vga_switcheroo_debugfs_fops);
-	if (!priv->switch_file) {
-		pr_err("cannot create %s/vgaswitcheroo/switch\n", mp);
-		goto fail;
-	}
-	return 0;
-fail:
-	vga_switcheroo_debugfs_fini(priv);
-	return -1;
+	debugfs_create_file("switch", 0644, priv->debugfs_root, NULL,
+			    &vga_switcheroo_debugfs_fops);
 }
 
 /**
  * vga_switcheroo_process_delayed_switch() - helper for delayed switching
  *
- * Process a delayed switch if one is pending. DRM drivers should call this
- * from their ->lastclose callback.
+ * Process a delayed switch if one is pending.
  *
  * Return: 0 on success. -EINVAL if no delayed switch is pending, if the client
  * has unregistered in the meantime or if there are other clients blocking the
@@ -1013,17 +1033,12 @@ static int vga_switcheroo_runtime_suspend(struct device *dev)
 static int vga_switcheroo_runtime_resume(struct device *dev)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
-	int ret;
 
 	mutex_lock(&vgasr_mutex);
 	vga_switcheroo_power_switch(pdev, VGA_SWITCHEROO_ON);
 	mutex_unlock(&vgasr_mutex);
-	pci_wakeup_bus(pdev->bus);
-	ret = dev->bus->pm->runtime_resume(dev);
-	if (ret)
-		return ret;
-
-	return 0;
+	pci_resume_bus(pdev->bus);
+	return dev->bus->pm->runtime_resume(dev);
 }
 
 /**

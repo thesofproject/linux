@@ -7,30 +7,28 @@
  * Author: Peter Rosin <peda@axentia.se>
  */
 
+#include <linux/bitmap.h>
 #include <linux/err.h>
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/mux/driver.h>
-#include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/property.h>
+#include <linux/regulator/consumer.h>
 
 struct mux_gpio {
 	struct gpio_descs *gpios;
-	int *val;
 };
 
 static int mux_gpio_set(struct mux_control *mux, int state)
 {
 	struct mux_gpio *mux_gpio = mux_chip_priv(mux->chip);
-	int i;
+	DECLARE_BITMAP(values, BITS_PER_TYPE(state));
+	u32 value = state;
 
-	for (i = 0; i < mux_gpio->gpios->ndescs; i++)
-		mux_gpio->val[i] = (state >> i) & 1;
+	bitmap_from_arr32(values, &value, BITS_PER_TYPE(value));
 
-	gpiod_set_array_value_cansleep(mux_gpio->gpios->ndescs,
-				       mux_gpio->gpios->desc,
-				       mux_gpio->val);
+	gpiod_multi_set_value_cansleep(mux_gpio->gpios, values);
 
 	return 0;
 }
@@ -58,24 +56,19 @@ static int mux_gpio_probe(struct platform_device *pdev)
 	if (pins < 0)
 		return pins;
 
-	mux_chip = devm_mux_chip_alloc(dev, 1, sizeof(*mux_gpio) +
-				       pins * sizeof(*mux_gpio->val));
+	mux_chip = devm_mux_chip_alloc(dev, 1, sizeof(*mux_gpio));
 	if (IS_ERR(mux_chip))
 		return PTR_ERR(mux_chip);
 
 	mux_gpio = mux_chip_priv(mux_chip);
-	mux_gpio->val = (int *)(mux_gpio + 1);
 	mux_chip->ops = &mux_gpio_ops;
 
 	mux_gpio->gpios = devm_gpiod_get_array(dev, "mux", GPIOD_OUT_LOW);
-	if (IS_ERR(mux_gpio->gpios)) {
-		ret = PTR_ERR(mux_gpio->gpios);
-		if (ret != -EPROBE_DEFER)
-			dev_err(dev, "failed to get gpios\n");
-		return ret;
-	}
+	if (IS_ERR(mux_gpio->gpios))
+		return dev_err_probe(dev, PTR_ERR(mux_gpio->gpios),
+				     "failed to get gpios\n");
 	WARN_ON(pins != mux_gpio->gpios->ndescs);
-	mux_chip->mux->states = 1 << pins;
+	mux_chip->mux->states = BIT(pins);
 
 	ret = device_property_read_u32(dev, "idle-state", (u32 *)&idle_state);
 	if (ret >= 0 && idle_state != MUX_IDLE_AS_IS) {
@@ -86,6 +79,10 @@ static int mux_gpio_probe(struct platform_device *pdev)
 
 		mux_chip->mux->idle_state = idle_state;
 	}
+
+	ret = devm_regulator_get_enable_optional(dev, "mux");
+	if (ret && ret != -ENODEV)
+		return dev_err_probe(dev, ret, "failed to get/enable mux supply\n");
 
 	ret = devm_mux_chip_register(dev, mux_chip);
 	if (ret < 0)
@@ -100,7 +97,7 @@ static int mux_gpio_probe(struct platform_device *pdev)
 static struct platform_driver mux_gpio_driver = {
 	.driver = {
 		.name = "gpio-mux",
-		.of_match_table	= of_match_ptr(mux_gpio_dt_ids),
+		.of_match_table	= mux_gpio_dt_ids,
 	},
 	.probe = mux_gpio_probe,
 };

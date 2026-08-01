@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  Driver for the Conexant CX23885/7/8 PCIe bridge
  *
@@ -18,16 +19,6 @@
  *  Copyright (C) 2004, 2005 Chris Pascoe
  *  Copyright (C) 2003, 2004 Gerd Knorr
  *  Copyright (C) 2003 Pavel Machek
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2
- *  of the License, or (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #include "cx23885.h"
@@ -64,7 +55,7 @@ static void cx23885_input_process_measurements(struct cx23885_dev *dev,
 	} while (num != 0);
 
 	if (overrun)
-		ir_raw_event_reset(kernel_ir->rc);
+		ir_raw_event_overflow(kernel_ir->rc);
 	else if (handle)
 		ir_raw_event_handle(kernel_ir->rc);
 }
@@ -336,7 +327,7 @@ int cx23885_input_init(struct cx23885_dev *dev)
 	}
 
 	/* cx23885 board instance kernel IR state */
-	kernel_ir = kzalloc(sizeof(struct cx23885_kernel_ir), GFP_KERNEL);
+	kernel_ir = kzalloc_obj(struct cx23885_kernel_ir);
 	if (kernel_ir == NULL)
 		return -ENOMEM;
 
@@ -411,6 +402,7 @@ void cx23885_input_fini(struct cx23885_dev *dev)
 	if (dev->kernel_ir == NULL)
 		return;
 	rc_unregister_device(dev->kernel_ir->rc);
+	rc_free_device(dev->kernel_ir->rc);
 	kfree(dev->kernel_ir->phys);
 	kfree(dev->kernel_ir->name);
 	kfree(dev->kernel_ir);

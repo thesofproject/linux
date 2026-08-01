@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Handle extern requests for shutdown, reboot and sysrq
  */
@@ -10,6 +11,7 @@
 #include <linux/reboot.h>
 #include <linux/sysrq.h>
 #include <linux/stop_machine.h>
+#include <linux/suspend.h>
 #include <linux/freezer.h>
 #include <linux/syscore_ops.h>
 #include <linux/export.h>
@@ -50,12 +52,6 @@ void xen_resume_notifier_register(struct notifier_block *nb)
 	raw_notifier_chain_register(&xen_resume_notifier, nb);
 }
 EXPORT_SYMBOL_GPL(xen_resume_notifier_register);
-
-void xen_resume_notifier_unregister(struct notifier_block *nb)
-{
-	raw_notifier_chain_unregister(&xen_resume_notifier, nb);
-}
-EXPORT_SYMBOL_GPL(xen_resume_notifier_unregister);
 
 #ifdef CONFIG_HIBERNATE_CALLBACKS
 static int xen_suspend(void *data)
@@ -100,10 +96,16 @@ static void do_suspend(void)
 
 	shutting_down = SHUTDOWN_SUSPEND;
 
+	if (!mutex_trylock(&system_transition_mutex))
+	{
+		pr_err("%s: failed to take system_transition_mutex\n", __func__);
+		goto out;
+	}
+
 	err = freeze_processes();
 	if (err) {
 		pr_err("%s: freeze processes failed %d\n", __func__, err);
-		goto out;
+		goto out_unlock;
 	}
 
 	err = freeze_kernel_threads();
@@ -115,7 +117,7 @@ static void do_suspend(void)
 	err = dpm_suspend_start(PMSG_FREEZE);
 	if (err) {
 		pr_err("%s: dpm_suspend_start %d\n", __func__, err);
-		goto out_thaw;
+		goto out_resume_end;
 	}
 
 	printk(KERN_DEBUG "suspending xenstore...\n");
@@ -140,6 +142,8 @@ static void do_suspend(void)
 
 	raw_notifier_call_chain(&xen_resume_notifier, 0, NULL);
 
+	xen_arch_resume();
+
 	dpm_resume_start(si.cancelled ? PMSG_THAW : PMSG_RESTORE);
 
 	if (err) {
@@ -147,18 +151,19 @@ static void do_suspend(void)
 		si.cancelled = 1;
 	}
 
-	xen_arch_resume();
-
 out_resume:
 	if (!si.cancelled)
 		xs_resume();
 	else
 		xs_suspend_cancel();
 
+out_resume_end:
 	dpm_resume_end(si.cancelled ? PMSG_THAW : PMSG_RESTORE);
 
 out_thaw:
 	thaw_processes();
+out_unlock:
+	mutex_unlock(&system_transition_mutex);
 out:
 	shutting_down = SHUTDOWN_INVALID;
 }
@@ -178,6 +183,7 @@ static int poweroff_nb(struct notifier_block *cb, unsigned long code, void *unus
 	case SYS_HALT:
 	case SYS_POWER_OFF:
 		shutting_down = SHUTDOWN_POWEROFF;
+		break;
 	default:
 		break;
 	}
@@ -203,10 +209,10 @@ static void do_poweroff(void)
 static void do_reboot(void)
 {
 	shutting_down = SHUTDOWN_POWEROFF; /* ? */
-	ctrl_alt_del();
+	orderly_reboot();
 }
 
-static struct shutdown_handler shutdown_handlers[] = {
+static const struct shutdown_handler shutdown_handlers[] = {
 	{ "poweroff",	true,	do_poweroff },
 	{ "halt",	false,	do_poweroff },
 	{ "reboot",	true,	do_reboot   },
@@ -280,17 +286,26 @@ static void sysrq_handler(struct xenbus_watch *watch, const char *path,
 		/*
 		 * The Xenstore watch fires directly after registering it and
 		 * after a suspend/resume cycle. So ENOENT is no error but
-		 * might happen in those cases.
+		 * might happen in those cases. ERANGE is observed when we get
+		 * an empty value (''), this happens when we acknowledge the
+		 * request by writing '\0' below.
 		 */
-		if (err != -ENOENT)
+		if (err != -ENOENT && err != -ERANGE)
 			pr_err("Error %d reading sysrq code in control/sysrq\n",
 			       err);
 		xenbus_transaction_end(xbt, 1);
 		return;
 	}
 
-	if (sysrq_key != '\0')
-		xenbus_printf(xbt, "control", "sysrq", "%c", '\0');
+	if (sysrq_key != '\0') {
+		err = xenbus_printf(xbt, "control", "sysrq", "%c", '\0');
+		if (err) {
+			pr_err("%s: Error %d writing sysrq in control/sysrq\n",
+			       __func__, err);
+			xenbus_transaction_end(xbt, 1);
+			return;
+		}
+	}
 
 	err = xenbus_transaction_end(xbt, 0);
 	if (err == -EAGAIN)
@@ -328,12 +343,11 @@ static int setup_shutdown_watcher(void)
 		return err;
 	}
 
-
 #ifdef CONFIG_MAGIC_SYSRQ
 	err = register_xenbus_watch(&sysrq_watch);
 	if (err) {
 		pr_err("Failed to set sysrq watcher\n");
-		return err;
+		goto err_unregister_shutdown;
 	}
 #endif
 
@@ -342,10 +356,30 @@ static int setup_shutdown_watcher(void)
 			continue;
 		snprintf(node, FEATURE_PATH_SIZE, "feature-%s",
 			 shutdown_handlers[idx].command);
-		xenbus_printf(XBT_NIL, "control", node, "%u", 1);
+		err = xenbus_printf(XBT_NIL, "control", node, "%u", 1);
+		if (err) {
+			pr_err("%s: Error %d writing %s\n", __func__,
+				err, node);
+			goto err_remove_features;
+		}
 	}
 
 	return 0;
+
+err_remove_features:
+	while (--idx >= 0) {
+		if (!shutdown_handlers[idx].flag)
+			continue;
+		snprintf(node, FEATURE_PATH_SIZE, "feature-%s",
+			 shutdown_handlers[idx].command);
+		xenbus_rm(XBT_NIL, "control", node);
+	}
+#ifdef CONFIG_MAGIC_SYSRQ
+	unregister_xenbus_watch(&sysrq_watch);
+err_unregister_shutdown:
+#endif
+	unregister_xenbus_watch(&shutdown_watch);
+	return err;
 }
 
 static int shutdown_event(struct notifier_block *notifier,

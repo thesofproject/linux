@@ -1,39 +1,10 @@
-// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/* SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause) */
 /*
  * hcd.h - DesignWare HS OTG Controller host-mode declarations
  *
  * Copyright (C) 2004-2013 Synopsys, Inc.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer,
- *    without modification.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The names of the above-listed copyright holders may not be used
- *    to endorse or promote products derived from this software without
- *    specific prior written permission.
- *
- * ALTERNATIVELY, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") as published by the Free Software
- * Foundation; either version 2 of the License, or (at your option) any
- * later version.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
- * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 #ifndef __DWC2_HCD_H__
 #define __DWC2_HCD_H__
 
@@ -76,11 +47,13 @@ struct dwc2_qh;
  *                      (micro)frame
  * @xfer_buf:           Pointer to current transfer buffer position
  * @xfer_dma:           DMA address of xfer_buf
+ * @align_buf:          In Buffer DMA mode this will be used if xfer_buf is not
+ *                      DWORD aligned
  * @xfer_len:           Total number of bytes to transfer
  * @xfer_count:         Number of bytes transferred so far
  * @start_pkt_count:    Packet count at start of transfer
  * @xfer_started:       True if the transfer has been started
- * @ping:               True if a PING request should be issued on this channel
+ * @do_ping:            True if a PING request should be issued on this channel
  * @error_state:        True if the error count for this transaction is non-zero
  * @halt_on_queue:      True if this channel should be halted the next time a
  *                      request is queued for the channel. This is necessary in
@@ -102,7 +75,7 @@ struct dwc2_qh;
  * @schinfo:            Scheduling micro-frame bitmap
  * @ntd:                Number of transfer descriptors for the transfer
  * @halt_status:        Reason for halting the host channel
- * @hcint               Contents of the HCINT register when the interrupt came
+ * @hcint:               Contents of the HCINT register when the interrupt came
  * @qh:                 QH for the transfer being processed by this channel
  * @hc_list_entry:      For linking to list of host channels
  * @desc_list_addr:     Current QH's descriptor list DMA address
@@ -133,6 +106,7 @@ struct dwc2_host_chan {
 
 	u8 *xfer_buf;
 	dma_addr_t xfer_dma;
+	dma_addr_t align_buf;
 	u32 xfer_len;
 	u32 xfer_count;
 	u16 start_pkt_count;
@@ -168,7 +142,8 @@ struct dwc2_hcd_pipe_info {
 	u8 ep_num;
 	u8 pipe_type;
 	u8 pipe_dir;
-	u16 mps;
+	u16 maxp;
+	u16 maxp_mult;
 };
 
 struct dwc2_hcd_iso_packet_desc {
@@ -195,7 +170,7 @@ struct dwc2_hcd_urb {
 	u32 flags;
 	u16 interval;
 	struct dwc2_hcd_pipe_info pipe_info;
-	struct dwc2_hcd_iso_packet_desc iso_descs[0];
+	struct dwc2_hcd_iso_packet_desc iso_descs[];
 };
 
 /* Phases for control transfers */
@@ -237,7 +212,7 @@ struct dwc2_tt {
 /**
  * struct dwc2_hs_transfer_time - Info about a transfer on the high speed bus.
  *
- * @start_schedule_usecs:  The start time on the main bus schedule.  Note that
+ * @start_schedule_us:  The start time on the main bus schedule.  Note that
  *                         the main bus schedule is tightly packed and this
  *			   time should be interpreted as tightly packed (so
  *			   uFrame 0 starts at 0 us, uFrame 1 starts at 100 us
@@ -261,6 +236,7 @@ struct dwc2_hs_transfer_time {
  *                       - USB_ENDPOINT_XFER_ISOC
  * @ep_is_in:           Endpoint direction
  * @maxp:               Value from wMaxPacketSize field of Endpoint Descriptor
+ * @maxp_mult:          Multiplier for maxp
  * @dev_speed:          Device speed. One of the following values:
  *                       - USB_SPEED_LOW
  *                       - USB_SPEED_FULL
@@ -301,8 +277,10 @@ struct dwc2_hs_transfer_time {
  *                           "struct dwc2_tt".  Not used if this device is high
  *                           speed.  Note that this is in "schedule slice" which
  *                           is tightly packed.
- * @ls_duration_us:     Duration on the low speed bus schedule.
  * @ntd:                Actual number of transfer descriptors in a list
+ * @dw_align_buf:       Used instead of original buffer if its physical address
+ *                      is not dword-aligned
+ * @dw_align_buf_dma:   DMA address for dw_align_buf
  * @qtd_list:           List of QTDs for this QH
  * @channel:            Host channel currently processing transfers for this QH
  * @qh_list_entry:      Entry for QH in either the periodic or non-periodic
@@ -315,7 +293,7 @@ struct dwc2_hs_transfer_time {
  *                      descriptor
  * @unreserve_timer:    Timer for releasing periodic reservation.
  * @wait_timer:         Timer used to wait before re-queuing.
- * @dwc2_tt:            Pointer to our tt info (or NULL if no tt).
+ * @dwc_tt:            Pointer to our tt info (or NULL if no tt).
  * @ttport:             Port number within our tt.
  * @tt_buffer_dirty     True if clear_tt_buffer_complete is pending
  * @unreserve_pending:  True if we planned to unreserve but haven't yet.
@@ -325,6 +303,7 @@ struct dwc2_hs_transfer_time {
  *                      periodic transfers and is ignored for periodic ones.
  * @wait_timer_cancel:  Set to true to cancel the wait_timer.
  *
+ * @tt_buffer_dirty:	True if EP's TT buffer is not clean.
  * A Queue Head (QH) holds the static characteristics of an endpoint and
  * maintains a list of transfers (QTDs) for that endpoint. A QH structure may
  * be entered in either the non-periodic or periodic schedule.
@@ -334,6 +313,7 @@ struct dwc2_qh {
 	u8 ep_type;
 	u8 ep_is_in;
 	u16 maxp;
+	u16 maxp_mult;
 	u8 dev_speed;
 	u8 data_toggle;
 	u8 ping_state;
@@ -350,6 +330,8 @@ struct dwc2_qh {
 	struct dwc2_hs_transfer_time hs_transfers[DWC2_HS_SCHEDULE_UFRAMES];
 	u32 ls_start_schedule_slice;
 	u16 ntd;
+	u8 *dw_align_buf;
+	dma_addr_t dw_align_buf_dma;
 	struct list_head qtd_list;
 	struct dwc2_host_chan *channel;
 	struct list_head qh_list_entry;
@@ -358,7 +340,7 @@ struct dwc2_qh {
 	u32 desc_list_sz;
 	u32 *n_bytes;
 	struct timer_list unreserve_timer;
-	struct timer_list wait_timer;
+	struct hrtimer wait_timer;
 	struct dwc2_tt *dwc_tt;
 	int ttport;
 	unsigned tt_buffer_dirty:1;
@@ -400,6 +382,10 @@ struct dwc2_qh {
  * @urb:                URB for this transfer
  * @qh:                 Queue head for this QTD
  * @qtd_list_entry:     For linking to the QH's list of QTDs
+ * @isoc_td_first:	Index of first activated isochronous transfer
+ *			descriptor in Descriptor DMA mode
+ * @isoc_td_last:	Index of last activated isochronous transfer
+ *			descriptor in Descriptor DMA mode
  *
  * A Queue Transfer Descriptor (QTD) holds the state of a bulk, control,
  * interrupt, or isochronous transfer. A single QTD is created for each URB
@@ -457,10 +443,10 @@ static inline struct usb_hcd *dwc2_hsotg_to_hcd(struct dwc2_hsotg *hsotg)
  */
 static inline void disable_hc_int(struct dwc2_hsotg *hsotg, int chnum, u32 intr)
 {
-	u32 mask = dwc2_readl(hsotg->regs + HCINTMSK(chnum));
+	u32 mask = dwc2_readl(hsotg, HCINTMSK(chnum));
 
 	mask &= ~intr;
-	dwc2_writel(mask, hsotg->regs + HCINTMSK(chnum));
+	dwc2_writel(hsotg, mask, HCINTMSK(chnum));
 }
 
 void dwc2_hc_cleanup(struct dwc2_hsotg *hsotg, struct dwc2_host_chan *chan);
@@ -475,7 +461,7 @@ void dwc2_hc_start_transfer_ddma(struct dwc2_hsotg *hsotg,
  */
 static inline u32 dwc2_read_hprt0(struct dwc2_hsotg *hsotg)
 {
-	u32 hprt0 = dwc2_readl(hsotg->regs + HPRT0);
+	u32 hprt0 = dwc2_readl(hsotg, HPRT0);
 
 	hprt0 &= ~(HPRT0_ENA | HPRT0_CONNDET | HPRT0_ENACHG | HPRT0_OVRCURRCHG);
 	return hprt0;
@@ -491,9 +477,14 @@ static inline u8 dwc2_hcd_get_pipe_type(struct dwc2_hcd_pipe_info *pipe)
 	return pipe->pipe_type;
 }
 
-static inline u16 dwc2_hcd_get_mps(struct dwc2_hcd_pipe_info *pipe)
+static inline u16 dwc2_hcd_get_maxp(struct dwc2_hcd_pipe_info *pipe)
 {
-	return pipe->mps;
+	return pipe->maxp;
+}
+
+static inline u16 dwc2_hcd_get_maxp_mult(struct dwc2_hcd_pipe_info *pipe)
+{
+	return pipe->maxp_mult;
 }
 
 static inline u8 dwc2_hcd_get_dev_addr(struct dwc2_hcd_pipe_info *pipe)
@@ -562,7 +553,6 @@ static inline void dwc2_hcd_qtd_unlink_and_free(struct dwc2_hsotg *hsotg,
 {
 	list_del(&qtd->qtd_list_entry);
 	kfree(qtd);
-	qtd = NULL;
 }
 
 /* Descriptor DMA support functions */
@@ -607,12 +597,6 @@ static inline bool dbg_urb(struct urb *urb)
 
 static inline bool dbg_perio(void) { return false; }
 #endif
-
-/* High bandwidth multiplier as encoded in highspeed endpoint descriptors */
-#define dwc2_hb_mult(wmaxpacketsize) (1 + (((wmaxpacketsize) >> 11) & 0x03))
-
-/* Packet size for any kind of endpoint descriptor */
-#define dwc2_max_packet(wmaxpacketsize) ((wmaxpacketsize) & 0x07ff)
 
 /*
  * Returns true if frame1 index is greater than frame2 index. The comparison
@@ -678,8 +662,8 @@ static inline u16 dwc2_micro_frame_num(u16 frame)
  */
 static inline u32 dwc2_read_core_intr(struct dwc2_hsotg *hsotg)
 {
-	return dwc2_readl(hsotg->regs + GINTSTS) &
-	       dwc2_readl(hsotg->regs + GINTMSK);
+	return dwc2_readl(hsotg, GINTSTS) &
+	       dwc2_readl(hsotg, GINTMSK);
 }
 
 static inline u32 dwc2_hcd_urb_get_status(struct dwc2_hcd_urb *dwc2_urb)

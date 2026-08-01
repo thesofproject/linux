@@ -15,10 +15,12 @@
 #include <linux/sched/task_stack.h>
 #include <linux/init.h>
 #include <linux/export.h>
+#include <linux/kexec.h>
 
 #include <asm/mmu_context.h>
 #include <asm/time.h>
 #include <asm/setup.h>
+#include <asm/smp.h>
 
 #include <asm/octeon/octeon.h>
 
@@ -90,7 +92,7 @@ static irqreturn_t mailbox_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-/**
+/*
  * Cause the function described by call_data to be executed on the passed
  * cpu.	 When the function has finished, increment the finished field of
  * call_data.
@@ -114,7 +116,7 @@ static inline void octeon_send_ipi_mask(const struct cpumask *mask,
 		octeon_send_ipi_single(i, action);
 }
 
-/**
+/*
  * Detect available CPUs, populate cpu_possible_mask
  */
 static void octeon_smp_hotplug_setup(void)
@@ -201,9 +203,8 @@ int plat_post_relocation(long offset)
 }
 #endif /* CONFIG_RELOCATABLE */
 
-/**
+/*
  * Firmware CPU startup hook
- *
  */
 static int octeon_boot_secondary(int cpu, struct task_struct *idle)
 {
@@ -231,7 +232,7 @@ static int octeon_boot_secondary(int cpu, struct task_struct *idle)
 	return 0;
 }
 
-/**
+/*
  * After we've done initial boot, this function is called to allow the
  * board code to clean up state, if needed
  */
@@ -249,9 +250,8 @@ static void octeon_init_secondary(void)
 	octeon_irq_setup_secondary();
 }
 
-/**
+/*
  * Callout to firmware before smp_init
- *
  */
 static void __init octeon_prepare_cpus(unsigned int max_cpus)
 {
@@ -267,7 +267,7 @@ static void __init octeon_prepare_cpus(unsigned int max_cpus)
 	}
 }
 
-/**
+/*
  * Last chance for the board code to finish SMP initialization before
  * the CPU is "online".
  */
@@ -283,14 +283,11 @@ static void octeon_smp_finish(void)
 #ifdef CONFIG_HOTPLUG_CPU
 
 /* State of each CPU. */
-DEFINE_PER_CPU(int, cpu_state);
+static DEFINE_PER_CPU(int, cpu_state);
 
 static int octeon_cpu_disable(void)
 {
 	unsigned int cpu = smp_processor_id();
-
-	if (cpu == 0)
-		return -EBUSY;
 
 	if (!octeon_bootloader_entry_addr)
 		return -ENOTSUPP;
@@ -337,7 +334,7 @@ static void octeon_cpu_die(unsigned int cpu)
 		new_mask = *p;
 	}
 
-	pr_info("Reset core %d. Available Coremask = 0x%x \n", coreid, new_mask);
+	pr_info("Reset core %d. Available Coremask = 0x%x\n", coreid, new_mask);
 	mb();
 	cvmx_write_csr(CVMX_CIU_PP_RST, 1 << coreid);
 	cvmx_write_csr(CVMX_CIU_PP_RST, 0);
@@ -348,6 +345,7 @@ void play_dead(void)
 	int cpu = cpu_number_map(cvmx_get_core_num());
 
 	idle_task_exit();
+	cpuhp_ap_report_dead();
 	octeon_processor_boot = 0xff;
 	per_cpu(cpu_state, cpu) = CPU_DEAD;
 
@@ -412,7 +410,7 @@ late_initcall(register_cavium_notifier);
 
 #endif	/* CONFIG_HOTPLUG_CPU */
 
-const struct plat_smp_ops octeon_smp_ops = {
+static const struct plat_smp_ops octeon_smp_ops = {
 	.send_ipi_single	= octeon_send_ipi_single,
 	.send_ipi_mask		= octeon_send_ipi_mask,
 	.init_secondary		= octeon_init_secondary,
@@ -423,6 +421,9 @@ const struct plat_smp_ops octeon_smp_ops = {
 #ifdef CONFIG_HOTPLUG_CPU
 	.cpu_disable		= octeon_cpu_disable,
 	.cpu_die		= octeon_cpu_die,
+#endif
+#ifdef CONFIG_KEXEC_CORE
+	.kexec_nonboot_cpu	= kexec_nonboot_cpu_jump,
 #endif
 };
 
@@ -500,6 +501,9 @@ static const struct plat_smp_ops octeon_78xx_smp_ops = {
 #ifdef CONFIG_HOTPLUG_CPU
 	.cpu_disable		= octeon_cpu_disable,
 	.cpu_die		= octeon_cpu_die,
+#endif
+#ifdef CONFIG_KEXEC_CORE
+	.kexec_nonboot_cpu	= kexec_nonboot_cpu_jump,
 #endif
 };
 

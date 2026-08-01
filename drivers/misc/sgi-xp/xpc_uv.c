@@ -22,32 +22,13 @@
 #include <linux/module.h>
 #include <linux/err.h>
 #include <linux/slab.h>
+#include <linux/numa.h>
 #include <asm/uv/uv_hub.h>
-#if defined CONFIG_X86_64
 #include <asm/uv/bios.h>
 #include <asm/uv/uv_irq.h>
-#elif defined CONFIG_IA64_GENERIC || defined CONFIG_IA64_SGI_UV
-#include <asm/sn/intr.h>
-#include <asm/sn/sn_sal.h>
-#endif
 #include "../sgi-gru/gru.h"
 #include "../sgi-gru/grukservices.h"
 #include "xpc.h"
-
-#if defined CONFIG_IA64_GENERIC || defined CONFIG_IA64_SGI_UV
-struct uv_IO_APIC_route_entry {
-	__u64	vector		:  8,
-		delivery_mode	:  3,
-		dest_mode	:  1,
-		delivery_status	:  1,
-		polarity	:  1,
-		__reserved_1	:  1,
-		trigger		:  1,
-		mask		:  1,
-		__reserved_2	: 15,
-		dest		: 32;
-};
-#endif
 
 static struct xpc_heartbeat_uv *xpc_heartbeat_uv;
 
@@ -61,7 +42,7 @@ static struct xpc_heartbeat_uv *xpc_heartbeat_uv;
 					 XPC_NOTIFY_MSG_SIZE_UV)
 #define XPC_NOTIFY_IRQ_NAME		"xpc_notify"
 
-static int xpc_mq_node = -1;
+static int xpc_mq_node = NUMA_NO_NODE;
 
 static struct xpc_gru_mq_uv *xpc_activate_mq_uv;
 static struct xpc_gru_mq_uv *xpc_notify_mq_uv;
@@ -110,7 +91,6 @@ xpc_get_gru_mq_irq_uv(struct xpc_gru_mq_uv *mq, int cpu, char *irq_name)
 {
 	int mmr_pnode = uv_blade_to_pnode(mq->mmr_blade);
 
-#if defined CONFIG_X86_64
 	mq->irq = uv_setup_irq(irq_name, cpu, mq->mmr_blade, mq->mmr_offset,
 			UV_AFFINITY_CPU);
 	if (mq->irq < 0)
@@ -118,40 +98,13 @@ xpc_get_gru_mq_irq_uv(struct xpc_gru_mq_uv *mq, int cpu, char *irq_name)
 
 	mq->mmr_value = uv_read_global_mmr64(mmr_pnode, mq->mmr_offset);
 
-#elif defined CONFIG_IA64_GENERIC || defined CONFIG_IA64_SGI_UV
-	if (strcmp(irq_name, XPC_ACTIVATE_IRQ_NAME) == 0)
-		mq->irq = SGI_XPC_ACTIVATE;
-	else if (strcmp(irq_name, XPC_NOTIFY_IRQ_NAME) == 0)
-		mq->irq = SGI_XPC_NOTIFY;
-	else
-		return -EINVAL;
-
-	mq->mmr_value = (unsigned long)cpu_physical_id(cpu) << 32 | mq->irq;
-	uv_write_global_mmr64(mmr_pnode, mq->mmr_offset, mq->mmr_value);
-#else
-	#error not a supported configuration
-#endif
-
 	return 0;
 }
 
 static void
 xpc_release_gru_mq_irq_uv(struct xpc_gru_mq_uv *mq)
 {
-#if defined CONFIG_X86_64
 	uv_teardown_irq(mq->irq);
-
-#elif defined CONFIG_IA64_GENERIC || defined CONFIG_IA64_SGI_UV
-	int mmr_pnode;
-	unsigned long mmr_value;
-
-	mmr_pnode = uv_blade_to_pnode(mq->mmr_blade);
-	mmr_value = 1UL << 16;
-
-	uv_write_global_mmr64(mmr_pnode, mq->mmr_offset, mmr_value);
-#else
-	#error not a supported configuration
-#endif
 }
 
 static int
@@ -159,17 +112,6 @@ xpc_gru_mq_watchlist_alloc_uv(struct xpc_gru_mq_uv *mq)
 {
 	int ret;
 
-#if defined CONFIG_IA64_GENERIC || defined CONFIG_IA64_SGI_UV
-	int mmr_pnode = uv_blade_to_pnode(mq->mmr_blade);
-
-	ret = sn_mq_watchlist_alloc(mmr_pnode, (void *)uv_gpa(mq->address),
-				    mq->order, &mq->mmr_offset);
-	if (ret < 0) {
-		dev_err(xpc_part, "sn_mq_watchlist_alloc() failed, ret=%d\n",
-			ret);
-		return -EBUSY;
-	}
-#elif defined CONFIG_X86_64
 	ret = uv_bios_mq_watchlist_alloc(uv_gpa(mq->address),
 					 mq->order, &mq->mmr_offset);
 	if (ret < 0) {
@@ -177,9 +119,6 @@ xpc_gru_mq_watchlist_alloc_uv(struct xpc_gru_mq_uv *mq)
 			"ret=%d\n", ret);
 		return ret;
 	}
-#else
-	#error not a supported configuration
-#endif
 
 	mq->watchlist_num = ret;
 	return 0;
@@ -191,15 +130,8 @@ xpc_gru_mq_watchlist_free_uv(struct xpc_gru_mq_uv *mq)
 	int ret;
 	int mmr_pnode = uv_blade_to_pnode(mq->mmr_blade);
 
-#if defined CONFIG_X86_64
 	ret = uv_bios_mq_watchlist_free(mmr_pnode, mq->watchlist_num);
 	BUG_ON(ret != BIOS_STATUS_SUCCESS);
-#elif defined CONFIG_IA64_GENERIC || defined CONFIG_IA64_SGI_UV
-	ret = sn_mq_watchlist_free(mmr_pnode, mq->watchlist_num);
-	BUG_ON(ret != SALRET_OK);
-#else
-	#error not a supported configuration
-#endif
 }
 
 static struct xpc_gru_mq_uv *
@@ -215,7 +147,7 @@ xpc_create_gru_mq_uv(unsigned int mq_size, int cpu, char *irq_name,
 	struct xpc_gru_mq_uv *mq;
 	struct uv_IO_APIC_route_entry *mmr_value;
 
-	mq = kmalloc(sizeof(struct xpc_gru_mq_uv), GFP_KERNEL);
+	mq = kmalloc_obj(struct xpc_gru_mq_uv);
 	if (mq == NULL) {
 		dev_err(xpc_part, "xpc_create_gru_mq_uv() failed to kmalloc() "
 			"a xpc_gru_mq_uv structure\n");
@@ -223,8 +155,7 @@ xpc_create_gru_mq_uv(unsigned int mq_size, int cpu, char *irq_name,
 		goto out_0;
 	}
 
-	mq->gru_mq_desc = kzalloc(sizeof(struct gru_message_queue_desc),
-				  GFP_KERNEL);
+	mq->gru_mq_desc = kzalloc_obj(struct gru_message_queue_desc);
 	if (mq->gru_mq_desc == NULL) {
 		dev_err(xpc_part, "xpc_create_gru_mq_uv() failed to kmalloc() "
 			"a gru_message_queue_desc structure\n");
@@ -571,6 +502,7 @@ xpc_handle_activate_mq_msg_uv(struct xpc_partition *part,
 
 		xpc_wakeup_channel_mgr(part);
 	}
+		fallthrough;
 	case XPC_ACTIVATE_MQ_MSG_MARK_ENGAGED_UV:
 		spin_lock_irqsave(&part_uv->flags_lock, irq_flags);
 		part_uv->flags |= XPC_P_ENGAGED_UV;
@@ -690,9 +622,8 @@ again:
 	if (!(part_uv->flags & XPC_P_CACHED_ACTIVATE_GRU_MQ_DESC_UV)) {
 		gru_mq_desc = part_uv->cached_activate_gru_mq_desc;
 		if (gru_mq_desc == NULL) {
-			gru_mq_desc = kmalloc(sizeof(struct
-					      gru_message_queue_desc),
-					      GFP_KERNEL);
+			gru_mq_desc = kmalloc_obj(struct gru_message_queue_desc,
+						  GFP_ATOMIC);
 			if (gru_mq_desc == NULL) {
 				ret = xpNoMemory;
 				goto done;
@@ -782,7 +713,6 @@ xpc_get_partition_rsvd_page_pa_uv(void *buf, u64 *cookie, unsigned long *rp_pa,
 	s64 status;
 	enum xp_retval ret;
 
-#if defined CONFIG_X86_64
 	status = uv_bios_reserved_page_pa((u64)buf, cookie, (u64 *)rp_pa,
 					  (u64 *)len);
 	if (status == BIOS_STATUS_SUCCESS)
@@ -791,19 +721,6 @@ xpc_get_partition_rsvd_page_pa_uv(void *buf, u64 *cookie, unsigned long *rp_pa,
 		ret = xpNeedMoreInfo;
 	else
 		ret = xpBiosError;
-
-#elif defined CONFIG_IA64_GENERIC || defined CONFIG_IA64_SGI_UV
-	status = sn_partition_reserved_page_pa((u64)buf, cookie, rp_pa, len);
-	if (status == SALRET_OK)
-		ret = xpSuccess;
-	else if (status == SALRET_MORE_PASSES)
-		ret = xpNeedMoreInfo;
-	else
-		ret = xpSalError;
-
-#else
-	#error not a supported configuration
-#endif
 
 	return ret;
 }
@@ -1156,9 +1073,7 @@ xpc_setup_msg_structures_uv(struct xpc_channel *ch)
 
 	DBUG_ON(ch->flags & XPC_C_SETUP);
 
-	ch_uv->cached_notify_gru_mq_desc = kmalloc(sizeof(struct
-						   gru_message_queue_desc),
-						   GFP_KERNEL);
+	ch_uv->cached_notify_gru_mq_desc = kmalloc_obj(struct gru_message_queue_desc);
 	if (ch_uv->cached_notify_gru_mq_desc == NULL)
 		return xpNoMemory;
 
@@ -1183,7 +1098,7 @@ xpc_teardown_msg_structures_uv(struct xpc_channel *ch)
 {
 	struct xpc_channel_uv *ch_uv = &ch->sn.uv;
 
-	DBUG_ON(!spin_is_locked(&ch->lock));
+	lockdep_assert_held(&ch->lock);
 
 	kfree(ch_uv->cached_notify_gru_mq_desc);
 	ch_uv->cached_notify_gru_mq_desc = NULL;
@@ -1594,7 +1509,7 @@ out_2:
 		 * by xpc_notify_senders_of_disconnect_uv(), and to also get an
 		 * error returned here will confuse them. Additionally, since
 		 * in this case the channel is being disconnected we don't need
-		 * to put the the msg_slot back on the free list.
+		 * to put the msg_slot back on the free list.
 		 */
 		if (cmpxchg(&msg_slot->func, func, NULL) != func) {
 			ret = xpSuccess;
@@ -1676,7 +1591,7 @@ xpc_received_payload_uv(struct xpc_channel *ch, void *payload)
 		XPC_DEACTIVATE_PARTITION(&xpc_partitions[ch->partid], ret);
 }
 
-static struct xpc_arch_operations xpc_arch_ops_uv = {
+static const struct xpc_arch_operations xpc_arch_ops_uv = {
 	.setup_partitions = xpc_setup_partitions_uv,
 	.teardown_partitions = xpc_teardown_partitions_uv,
 	.process_activate_IRQ_rcvd = xpc_process_activate_IRQ_rcvd_uv,
@@ -1738,7 +1653,7 @@ xpc_init_mq_node(int nid)
 {
 	int cpu;
 
-	get_online_cpus();
+	cpus_read_lock();
 
 	for_each_cpu(cpu, cpumask_of_node(nid)) {
 		xpc_activate_mq_uv =
@@ -1749,7 +1664,7 @@ xpc_init_mq_node(int nid)
 			break;
 	}
 	if (IS_ERR(xpc_activate_mq_uv)) {
-		put_online_cpus();
+		cpus_read_unlock();
 		return PTR_ERR(xpc_activate_mq_uv);
 	}
 
@@ -1763,11 +1678,11 @@ xpc_init_mq_node(int nid)
 	}
 	if (IS_ERR(xpc_notify_mq_uv)) {
 		xpc_destroy_gru_mq_uv(xpc_activate_mq_uv);
-		put_online_cpus();
+		cpus_read_unlock();
 		return PTR_ERR(xpc_notify_mq_uv);
 	}
 
-	put_online_cpus();
+	cpus_read_unlock();
 	return 0;
 }
 

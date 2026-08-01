@@ -45,7 +45,7 @@ struct retu_dev {
 	struct regmap_irq_chip_data	*irq_data;
 };
 
-static struct resource retu_pwrbutton_res[] = {
+static const struct resource retu_pwrbutton_res[] = {
 	{
 		.name	= "retu-pwrbutton",
 		.start	= RETU_INT_PWR,
@@ -65,13 +65,13 @@ static const struct mfd_cell retu_devs[] = {
 	}
 };
 
-static struct regmap_irq retu_irqs[] = {
+static const struct regmap_irq retu_irqs[] = {
 	[RETU_INT_PWR] = {
 		.mask = 1 << RETU_INT_PWR,
 	}
 };
 
-static struct regmap_irq_chip retu_irq_chip = {
+static const struct regmap_irq_chip retu_irq_chip = {
 	.name		= "RETU",
 	.irqs		= retu_irqs,
 	.num_irqs	= ARRAY_SIZE(retu_irqs),
@@ -84,7 +84,7 @@ static struct regmap_irq_chip retu_irq_chip = {
 /* Retu device registered for the power off. */
 static struct retu_dev *retu_pm_power_off;
 
-static struct resource tahvo_usb_res[] = {
+static const struct resource tahvo_usb_res[] = {
 	{
 		.name	= "tahvo-usb",
 		.start	= TAHVO_INT_VBUS,
@@ -101,13 +101,13 @@ static const struct mfd_cell tahvo_devs[] = {
 	},
 };
 
-static struct regmap_irq tahvo_irqs[] = {
+static const struct regmap_irq tahvo_irqs[] = {
 	[TAHVO_INT_VBUS] = {
 		.mask = 1 << TAHVO_INT_VBUS,
 	}
 };
 
-static struct regmap_irq_chip tahvo_irq_chip = {
+static const struct regmap_irq_chip tahvo_irq_chip = {
 	.name		= "TAHVO",
 	.irqs		= tahvo_irqs,
 	.num_irqs	= ARRAY_SIZE(tahvo_irqs),
@@ -120,7 +120,7 @@ static struct regmap_irq_chip tahvo_irq_chip = {
 static const struct retu_data {
 	char			*chip_name;
 	char			*companion_name;
-	struct regmap_irq_chip	*irq_chip;
+	const struct regmap_irq_chip	*irq_chip;
 	const struct mfd_cell	*children;
 	int			nchildren;
 } retu_data[] = {
@@ -216,7 +216,7 @@ static int retu_regmap_write(void *context, const void *data, size_t count)
 	return i2c_smbus_write_word_data(i2c, reg, val);
 }
 
-static struct regmap_bus retu_bus = {
+static const struct regmap_bus retu_bus = {
 	.read = retu_regmap_read,
 	.write = retu_regmap_write,
 	.val_format_endian_default = REGMAP_ENDIAN_NATIVE,
@@ -227,7 +227,7 @@ static const struct regmap_config retu_config = {
 	.val_bits = 16,
 };
 
-static int retu_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
+static int retu_probe(struct i2c_client *i2c)
 {
 	struct retu_data const *rdat;
 	struct retu_dev *rdev;
@@ -287,7 +287,7 @@ static int retu_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 	return 0;
 }
 
-static int retu_remove(struct i2c_client *i2c)
+static void retu_remove(struct i2c_client *i2c)
 {
 	struct retu_dev *rdev = i2c_get_clientdata(i2c);
 
@@ -297,13 +297,11 @@ static int retu_remove(struct i2c_client *i2c)
 	}
 	mfd_remove_devices(rdev->dev);
 	regmap_del_irq_chip(i2c->irq, rdev->irq_data);
-
-	return 0;
 }
 
 static const struct i2c_device_id retu_id[] = {
-	{ "retu", 0 },
-	{ "tahvo", 0 },
+	{ "retu" },
+	{ "tahvo" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, retu_id);

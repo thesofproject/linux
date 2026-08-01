@@ -56,7 +56,7 @@ static ssize_t show_admin_alias_guid(struct device *dev,
 					      mlx4_ib_iov_dentry->entry_num,
 					      port->num);
 
-	return sprintf(buf, "%llx\n", be64_to_cpu(sysadmin_ag_val));
+	return sysfs_emit(buf, "%llx\n", be64_to_cpu(sysadmin_ag_val));
 }
 
 /* store_admin_alias_guid stores the (new) administratively assigned value of that GUID.
@@ -117,22 +117,24 @@ static ssize_t show_port_gid(struct device *dev,
 	struct mlx4_ib_iov_port *port = mlx4_ib_iov_dentry->ctx;
 	struct mlx4_ib_dev *mdev = port->dev;
 	union ib_gid gid;
-	ssize_t ret;
+	int ret;
+	__be16 *raw;
 
 	ret = __mlx4_ib_query_gid(&mdev->ib_dev, port->num,
 				  mlx4_ib_iov_dentry->entry_num, &gid, 1);
 	if (ret)
 		return ret;
-	ret = sprintf(buf, "%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-		      be16_to_cpu(((__be16 *) gid.raw)[0]),
-		      be16_to_cpu(((__be16 *) gid.raw)[1]),
-		      be16_to_cpu(((__be16 *) gid.raw)[2]),
-		      be16_to_cpu(((__be16 *) gid.raw)[3]),
-		      be16_to_cpu(((__be16 *) gid.raw)[4]),
-		      be16_to_cpu(((__be16 *) gid.raw)[5]),
-		      be16_to_cpu(((__be16 *) gid.raw)[6]),
-		      be16_to_cpu(((__be16 *) gid.raw)[7]));
-	return ret;
+
+	raw = (__be16 *)gid.raw;
+	return sysfs_emit(buf, "%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
+			  be16_to_cpu(raw[0]),
+			  be16_to_cpu(raw[1]),
+			  be16_to_cpu(raw[2]),
+			  be16_to_cpu(raw[3]),
+			  be16_to_cpu(raw[4]),
+			  be16_to_cpu(raw[5]),
+			  be16_to_cpu(raw[6]),
+			  be16_to_cpu(raw[7]));
 }
 
 static ssize_t show_phys_port_pkey(struct device *dev,
@@ -151,7 +153,7 @@ static ssize_t show_phys_port_pkey(struct device *dev,
 	if (ret)
 		return ret;
 
-	return sprintf(buf, "0x%04x\n", pkey);
+	return sysfs_emit(buf, "0x%04x\n", pkey);
 }
 
 #define DENTRY_REMOVE(_dentry)						\
@@ -221,7 +223,7 @@ void del_sysfs_port_mcg_attr(struct mlx4_ib_dev *device, int port_num,
 static int add_port_entries(struct mlx4_ib_dev *device, int port_num)
 {
 	int i;
-	char buff[11];
+	char buff[12];
 	struct mlx4_ib_iov_port *port = NULL;
 	int ret = 0 ;
 	struct ib_port_attr attr;
@@ -242,8 +244,7 @@ static int add_port_entries(struct mlx4_ib_dev *device, int port_num)
 	 *	gids (operational)
 	 *	mcg_table
 	 */
-	port->dentr_ar = kzalloc(sizeof (struct mlx4_ib_iov_sysfs_attr_ar),
-				 GFP_KERNEL);
+	port->dentr_ar = kzalloc_obj(struct mlx4_ib_iov_sysfs_attr_ar);
 	if (!port->dentr_ar) {
 		ret = -ENOMEM;
 		goto err;
@@ -353,16 +354,12 @@ err:
 
 static void get_name(struct mlx4_ib_dev *dev, char *name, int i, int max)
 {
-	char base_name[9];
-
-	/* pci_name format is: bus:dev:func -> xxxx:yy:zz.n */
-	strlcpy(name, pci_name(dev->dev->persist->pdev), max);
-	strncpy(base_name, name, 8); /*till xxxx:yy:*/
-	base_name[8] = '\0';
-	/* with no ARI only 3 last bits are used so when the fn is higher than 8
+	/* pci_name format is: bus:dev:func -> xxxx:yy:zz.n
+	 * with no ARI only 3 last bits are used so when the fn is higher than 8
 	 * need to add it to the dev num, so count in the last number will be
 	 * modulo 8 */
-	sprintf(name, "%s%.2d.%d", base_name, (i/8), (i%8));
+	snprintf(name, max, "%.8s%.2d.%d", pci_name(dev->dev->persist->pdev),
+		 i / 8, i % 8);
 }
 
 struct mlx4_port {
@@ -445,16 +442,12 @@ static ssize_t show_port_pkey(struct mlx4_port *p, struct port_attribute *attr,
 {
 	struct port_table_attribute *tab_attr =
 		container_of(attr, struct port_table_attribute, attr);
-	ssize_t ret = -ENODEV;
+	struct pkey_mgt *m = &p->dev->pkeys;
+	u8 key = m->virt2phys_pkey[p->slave][p->port_num - 1][tab_attr->index];
 
-	if (p->dev->pkeys.virt2phys_pkey[p->slave][p->port_num - 1][tab_attr->index] >=
-	    (p->dev->dev->caps.pkey_table_len[p->port_num]))
-		ret = sprintf(buf, "none\n");
-	else
-		ret = sprintf(buf, "%d\n",
-			      p->dev->pkeys.virt2phys_pkey[p->slave]
-			      [p->port_num - 1][tab_attr->index]);
-	return ret;
+	if (key >= p->dev->dev->caps.pkey_table_len[p->port_num])
+		return sysfs_emit(buf, "none\n");
+	return sysfs_emit(buf, "%d\n", key);
 }
 
 static ssize_t store_port_pkey(struct mlx4_port *p, struct port_attribute *attr,
@@ -492,7 +485,7 @@ static ssize_t store_port_pkey(struct mlx4_port *p, struct port_attribute *attr,
 static ssize_t show_port_gid_idx(struct mlx4_port *p,
 				 struct port_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", p->slave);
+	return sysfs_emit(buf, "%d\n", p->slave);
 }
 
 static struct attribute **
@@ -506,13 +499,12 @@ alloc_group_attrs(ssize_t (*show)(struct mlx4_port *,
 	struct port_table_attribute *element;
 	int i;
 
-	tab_attr = kcalloc(1 + len, sizeof (struct attribute *), GFP_KERNEL);
+	tab_attr = kzalloc_objs(struct attribute *, 1 + len);
 	if (!tab_attr)
 		return NULL;
 
 	for (i = 0; i < len; i++) {
-		element = kzalloc(sizeof (struct port_table_attribute),
-				  GFP_KERNEL);
+		element = kzalloc_obj(struct port_table_attribute);
 		if (!element)
 			goto err;
 		if (snprintf(element->name, sizeof (element->name),
@@ -546,14 +538,10 @@ static ssize_t sysfs_show_smi_enabled(struct device *dev,
 {
 	struct mlx4_port *p =
 		container_of(attr, struct mlx4_port, smi_enabled);
-	ssize_t len = 0;
 
-	if (mlx4_vf_smi_enabled(p->dev->dev, p->slave, p->port_num))
-		len = sprintf(buf, "%d\n", 1);
-	else
-		len = sprintf(buf, "%d\n", 0);
-
-	return len;
+	return sysfs_emit(buf, "%d\n",
+			  !!mlx4_vf_smi_enabled(p->dev->dev, p->slave,
+						p->port_num));
 }
 
 static ssize_t sysfs_show_enable_smi_admin(struct device *dev,
@@ -562,14 +550,10 @@ static ssize_t sysfs_show_enable_smi_admin(struct device *dev,
 {
 	struct mlx4_port *p =
 		container_of(attr, struct mlx4_port, enable_smi_admin);
-	ssize_t len = 0;
 
-	if (mlx4_vf_get_enable_smi_admin(p->dev->dev, p->slave, p->port_num))
-		len = sprintf(buf, "%d\n", 1);
-	else
-		len = sprintf(buf, "%d\n", 0);
-
-	return len;
+	return sysfs_emit(buf, "%d\n",
+			  !!mlx4_vf_get_enable_smi_admin(p->dev->dev, p->slave,
+							 p->port_num));
 }
 
 static ssize_t sysfs_store_enable_smi_admin(struct device *dev,
@@ -644,19 +628,13 @@ static int add_port(struct mlx4_ib_dev *dev, int port_num, int slave)
 	int is_eth = rdma_port_get_link_layer(&dev->ib_dev, port_num) ==
 			IB_LINK_LAYER_ETHERNET;
 
-	p = kzalloc(sizeof *p, GFP_KERNEL);
+	p = kzalloc_obj(*p);
 	if (!p)
 		return -ENOMEM;
 
 	p->dev = dev;
 	p->port_num = port_num;
 	p->slave = slave;
-
-	ret = kobject_init_and_add(&p->kobj, &port_type,
-				   kobject_get(dev->dev_ports_parent[slave]),
-				   "%d", port_num);
-	if (ret)
-		goto err_alloc;
 
 	p->pkey_group.name  = "pkey_idx";
 	p->pkey_group.attrs =
@@ -665,12 +643,8 @@ static int add_port(struct mlx4_ib_dev *dev, int port_num, int slave)
 				  dev->dev->caps.pkey_table_len[port_num]);
 	if (!p->pkey_group.attrs) {
 		ret = -ENOMEM;
-		goto err_alloc;
+		goto err_free_port;
 	}
-
-	ret = sysfs_create_group(&p->kobj, &p->pkey_group);
-	if (ret)
-		goto err_free_pkey;
 
 	p->gid_group.name  = "gid_idx";
 	p->gid_group.attrs = alloc_group_attrs(show_port_gid_idx, NULL, 1);
@@ -679,28 +653,47 @@ static int add_port(struct mlx4_ib_dev *dev, int port_num, int slave)
 		goto err_free_pkey;
 	}
 
+	ret = kobject_init_and_add(&p->kobj, &port_type,
+				   kobject_get(dev->dev_ports_parent[slave]),
+				   "%d", port_num);
+	if (ret)
+		goto err_put;
+
+	ret = sysfs_create_group(&p->kobj, &p->pkey_group);
+	if (ret)
+		goto err_del;
+
 	ret = sysfs_create_group(&p->kobj, &p->gid_group);
 	if (ret)
-		goto err_free_gid;
+		goto err_remove_pkey;
 
 	ret = add_vf_smi_entries(p);
 	if (ret)
-		goto err_free_gid;
+		goto err_remove_gid;
 
 	list_add_tail(&p->kobj.entry, &dev->pkeys.pkey_port_list[slave]);
 	return 0;
 
-err_free_gid:
-	kfree(p->gid_group.attrs[0]);
-	kfree(p->gid_group.attrs);
+err_remove_gid:
+	sysfs_remove_group(&p->kobj, &p->gid_group);
+
+err_remove_pkey:
+	sysfs_remove_group(&p->kobj, &p->pkey_group);
+
+err_del:
+	kobject_del(&p->kobj);
+
+err_put:
+	kobject_put(dev->dev_ports_parent[slave]);
+	kobject_put(&p->kobj);
+	return ret;
 
 err_free_pkey:
 	for (i = 0; i < dev->dev->caps.pkey_table_len[port_num]; ++i)
 		kfree(p->pkey_group.attrs[i]);
 	kfree(p->pkey_group.attrs);
 
-err_alloc:
-	kobject_put(dev->dev_ports_parent[slave]);
+err_free_port:
 	kfree(p);
 	return ret;
 }
@@ -812,15 +805,13 @@ static void unregister_pkey_tree(struct mlx4_ib_dev *device)
 
 int mlx4_ib_device_register_sysfs(struct mlx4_ib_dev *dev)
 {
-	int i;
+	unsigned int i;
 	int ret = 0;
 
 	if (!mlx4_is_master(dev->dev))
 		return 0;
 
-	dev->iov_parent =
-		kobject_create_and_add("iov",
-				       kobject_get(dev->ib_dev.ports_parent->parent));
+	dev->iov_parent = kobject_create_and_add("iov", &dev->ib_dev.dev.kobj);
 	if (!dev->iov_parent) {
 		ret = -ENOMEM;
 		goto err;
@@ -833,7 +824,7 @@ int mlx4_ib_device_register_sysfs(struct mlx4_ib_dev *dev)
 		goto err_ports;
 	}
 
-	for (i = 1; i <= dev->ib_dev.phys_port_cnt; ++i) {
+	rdma_for_each_port(&dev->ib_dev, i) {
 		ret = add_port_entries(dev, i);
 		if (ret)
 			goto err_add_entries;
@@ -850,7 +841,6 @@ err_add_entries:
 err_ports:
 	kobject_put(dev->iov_parent);
 err:
-	kobject_put(dev->ib_dev.ports_parent->parent);
 	pr_err("mlx4_ib_device_register_sysfs error (%d)\n", ret);
 	return ret;
 }
@@ -886,5 +876,4 @@ void mlx4_ib_device_unregister_sysfs(struct mlx4_ib_dev *device)
 	kobject_put(device->ports_parent);
 	kobject_put(device->iov_parent);
 	kobject_put(device->iov_parent);
-	kobject_put(device->ib_dev.ports_parent->parent);
 }

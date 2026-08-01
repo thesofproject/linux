@@ -38,7 +38,8 @@
 
 #define AUX_REG_LIST(id)\
 	SRI(AUX_CONTROL, DP_AUX, id), \
-	SRI(AUX_DPHY_RX_CONTROL0, DP_AUX, id)
+	SRI(AUX_DPHY_RX_CONTROL0, DP_AUX, id), \
+	SRI(AUX_DPHY_RX_CONTROL1, DP_AUX, id)
 
 #define HPD_REG_LIST(id)\
 	SRI(DC_HPD_CONTROL, HPD, id)
@@ -75,15 +76,45 @@
 	SRI(DP_DPHY_INTERNAL_CTRL, DP, id), \
 	SR(DCI_MEM_PWR_STATUS)
 
+#if defined(CONFIG_DRM_AMD_DC_SI)
+#define LE_DCE60_REG_LIST(id)\
+	SRI(DP_DPHY_INTERNAL_CTRL, DP, id), \
+	SR(DMCU_RAM_ACCESS_CTRL), \
+	SR(DMCU_IRAM_RD_CTRL), \
+	SR(DMCU_IRAM_RD_DATA), \
+	SR(DMCU_INTERRUPT_TO_UC_EN_MASK), \
+	SRI(DIG_BE_CNTL, DIG, id), \
+	SRI(DIG_BE_EN_CNTL, DIG, id), \
+	SRI(DP_CONFIG, DP, id), \
+	SRI(DP_DPHY_CNTL, DP, id), \
+	SRI(DP_DPHY_PRBS_CNTL, DP, id), \
+	SRI(DP_DPHY_SYM0, DP, id), \
+	SRI(DP_DPHY_SYM1, DP, id), \
+	SRI(DP_DPHY_SYM2, DP, id), \
+	SRI(DP_DPHY_TRAINING_PATTERN_SEL, DP, id), \
+	SRI(DP_LINK_CNTL, DP, id), \
+	SRI(DP_LINK_FRAMING_CNTL, DP, id), \
+	SRI(DP_MSE_SAT0, DP, id), \
+	SRI(DP_MSE_SAT1, DP, id), \
+	SRI(DP_MSE_SAT2, DP, id), \
+	SRI(DP_MSE_SAT_UPDATE, DP, id), \
+	SRI(DP_SEC_CNTL, DP, id), \
+	SRI(DP_VID_STREAM_CNTL, DP, id), \
+	SRI(DP_DPHY_FAST_TRAINING, DP, id), \
+	SRI(DP_SEC_CNTL1, DP, id)
+#endif
+
 #define LE_DCE80_REG_LIST(id)\
 	SRI(DP_DPHY_INTERNAL_CTRL, DP, id), \
-	LE_COMMON_REG_LIST_BASE(id)
+	LE_COMMON_REG_LIST_BASE(id), \
+	SR(DAC_ENABLE)
 
 #define LE_DCE100_REG_LIST(id)\
 	LE_COMMON_REG_LIST_BASE(id), \
 	SRI(DP_DPHY_BS_SR_SWAP_CNTL, DP, id), \
 	SRI(DP_DPHY_INTERNAL_CTRL, DP, id), \
-	SR(DCI_MEM_PWR_STATUS)
+	SR(DCI_MEM_PWR_STATUS), \
+	SR(DAC_ENABLE)
 
 #define LE_DCE110_REG_LIST(id)\
 	LE_COMMON_REG_LIST_BASE(id), \
@@ -98,15 +129,11 @@
 	SRI(DP_DPHY_HBR2_PATTERN_CONTROL, DP, id), \
 	SR(DCI_MEM_PWR_STATUS)
 
-#define LE_DCN10_REG_LIST(id)\
-	LE_COMMON_REG_LIST_BASE(id), \
-	SRI(DP_DPHY_BS_SR_SWAP_CNTL, DP, id), \
-	SRI(DP_DPHY_INTERNAL_CTRL, DP, id), \
-	SRI(DP_DPHY_HBR2_PATTERN_CONTROL, DP, id)
 
 struct dce110_link_enc_aux_registers {
 	uint32_t AUX_CONTROL;
 	uint32_t AUX_DPHY_RX_CONTROL0;
+	uint32_t AUX_DPHY_RX_CONTROL1;
 };
 
 struct dce110_link_enc_hpd_registers {
@@ -151,6 +178,9 @@ struct dce110_link_enc_registers {
 	uint32_t DP_DPHY_BS_SR_SWAP_CNTL;
 	uint32_t DP_DPHY_HBR2_PATTERN_CONTROL;
 	uint32_t DP_SEC_CNTL1;
+
+	/* DAC registers */
+	uint32_t DAC_ENABLE;
 };
 
 struct dce110_link_encoder {
@@ -169,14 +199,20 @@ void dce110_link_encoder_construct(
 	const struct dce110_link_enc_aux_registers *aux_regs,
 	const struct dce110_link_enc_hpd_registers *hpd_regs);
 
+#if defined(CONFIG_DRM_AMD_DC_SI)
+void dce60_link_encoder_construct(
+	struct dce110_link_encoder *enc110,
+	const struct encoder_init_data *init_data,
+	const struct encoder_feature_support *enc_features,
+	const struct dce110_link_enc_registers *link_regs,
+	const struct dce110_link_enc_aux_registers *aux_regs,
+	const struct dce110_link_enc_hpd_registers *hpd_regs);
+#endif
+
 bool dce110_link_encoder_validate_dvi_output(
 	const struct dce110_link_encoder *enc110,
 	enum signal_type connector_signal,
 	enum signal_type signal,
-	const struct dc_crtc_timing *crtc_timing);
-
-bool dce110_link_encoder_validate_rgb_output(
-	const struct dce110_link_encoder *enc110,
 	const struct dc_crtc_timing *crtc_timing);
 
 bool dce110_link_encoder_validate_dp_output(
@@ -225,6 +261,17 @@ void dce110_link_encoder_enable_dp_mst_output(
 	const struct dc_link_settings *link_settings,
 	enum clock_source_id clock_source);
 
+/* enables LVDS PHY output */
+void dce110_link_encoder_enable_lvds_output(
+	struct link_encoder *enc,
+	enum clock_source_id clock_source,
+	uint32_t pixel_clock);
+
+/* enables analog output from the DAC */
+void dce110_link_encoder_enable_analog_output(
+	struct link_encoder *enc,
+	uint32_t pixel_clock);
+
 /* disable PHY output */
 void dce110_link_encoder_disable_output(
 	struct link_encoder *enc,
@@ -233,7 +280,8 @@ void dce110_link_encoder_disable_output(
 /* set DP lane settings */
 void dce110_link_encoder_dp_set_lane_settings(
 	struct link_encoder *enc,
-	const struct link_training_settings *link_settings);
+	const struct dc_link_settings *link_settings,
+	const struct dc_lane_settings lane_settings[LANE_COUNT_DP_MAX]);
 
 void dce110_link_encoder_dp_set_phy_pattern(
 	struct link_encoder *enc,
@@ -249,6 +297,8 @@ void dce110_link_encoder_connect_dig_be_to_fe(
 	enum engine_id engine,
 	bool connect);
 
+unsigned int dce110_get_dig_frontend(struct link_encoder *enc);
+
 void dce110_link_encoder_set_dp_phy_pattern_training_pattern(
 	struct link_encoder *enc,
 	uint32_t index);
@@ -262,5 +312,13 @@ void dce110_psr_program_dp_dphy_fast_training(struct link_encoder *enc,
 
 void dce110_psr_program_secondary_packet(struct link_encoder *enc,
 			unsigned int sdp_transmit_line_num_deadline);
+
+bool dce110_is_dig_enabled(struct link_encoder *enc);
+
+void dce110_link_encoder_get_max_link_cap(struct link_encoder *enc,
+	struct dc_link_settings *link_settings);
+
+bool dce110_get_hpd_state(struct link_encoder *enc);
+bool dce110_program_hpd_filter(struct link_encoder *enc, int delay_on_connect_in_ms, int delay_on_disconnect_in_ms);
 
 #endif /* __DC_LINK_ENCODER__DCE110_H__ */

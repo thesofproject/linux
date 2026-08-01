@@ -1,11 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright (C) 2015-2016 Mentor Graphics
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #include <linux/kernel.h>
@@ -16,7 +11,7 @@
 
 /**
  * pretimeout_panic - Panic on watchdog pretimeout event
- * @wdd - watchdog_device
+ * @wdd: watchdog_device
  *
  * Panic, watchdog has not been fed till pretimeout event.
  */

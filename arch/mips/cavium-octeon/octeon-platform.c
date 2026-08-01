@@ -8,9 +8,12 @@
  */
 
 #include <linux/etherdevice.h>
+#include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/of_fdt.h>
+#include <linux/platform_device.h>
 #include <linux/libfdt.h>
+#include <linux/string.h>
 
 #include <asm/octeon/octeon.h>
 #include <asm/octeon/cvmx-helper-board.h>
@@ -86,11 +89,12 @@ static void octeon2_usb_clocks_start(struct device *dev)
 					 "refclk-frequency", &clock_rate);
 		if (i) {
 			dev_err(dev, "No UCTL \"refclk-frequency\"\n");
+			of_node_put(uctl_node);
 			goto exit;
 		}
 		i = of_property_read_string(uctl_node,
 					    "refclk-type", &clock_type);
-
+		of_node_put(uctl_node);
 		if (!i && strcmp("crystal", clock_type) == 0)
 			is_crystal_clock = true;
 	}
@@ -141,7 +145,7 @@ static void octeon2_usb_clocks_start(struct device *dev)
 	default:
 		pr_err("Invalid UCTL clock rate of %u, using 12000000 instead\n",
 			clock_rate);
-		/* Fall through */
+		fallthrough;
 	case 12000000:
 		clk_rst_ctl.s.p_refclk_div = 0;
 		break;
@@ -322,11 +326,13 @@ static int __init octeon_ehci_device_init(void)
 		return 0;
 
 	pd = of_find_device_by_node(ehci_node);
+	of_node_put(ehci_node);
 	if (!pd)
 		return 0;
 
 	pd->dev.platform_data = &octeon_ehci_pdata;
 	octeon_ehci_hw_start(&pd->dev);
+	put_device(&pd->dev);
 
 	return ret;
 }
@@ -384,11 +390,13 @@ static int __init octeon_ohci_device_init(void)
 		return 0;
 
 	pd = of_find_device_by_node(ohci_node);
+	of_node_put(ohci_node);
 	if (!pd)
 		return 0;
 
 	pd->dev.platform_data = &octeon_ohci_pdata;
 	octeon_ohci_hw_start(&pd->dev);
+	put_device(&pd->dev);
 
 	return ret;
 }
@@ -438,14 +446,13 @@ out:
 }
 device_initcall(octeon_rng_device_init);
 
-const struct of_device_id octeon_ids[] __initconst = {
+static const struct of_device_id octeon_ids[] __initconst = {
 	{ .compatible = "simple-bus", },
 	{ .compatible = "cavium,octeon-6335-uctl", },
 	{ .compatible = "cavium,octeon-5750-usbn", },
 	{ .compatible = "cavium,octeon-3860-bootbus", },
 	{ .compatible = "cavium,mdio-mux", },
 	{ .compatible = "gpio-leds", },
-	{ .compatible = "cavium,octeon-7130-usb-uctl", },
 	{},
 };
 
@@ -454,6 +461,23 @@ static bool __init octeon_has_88e1145(void)
 	return !OCTEON_IS_MODEL(OCTEON_CN52XX) &&
 	       !OCTEON_IS_MODEL(OCTEON_CN6XXX) &&
 	       !OCTEON_IS_MODEL(OCTEON_CN56XX);
+}
+
+static bool __init octeon_has_fixed_link(int ipd_port)
+{
+	switch (cvmx_sysinfo_get()->board_type) {
+	case CVMX_BOARD_TYPE_CN3005_EVB_HS5:
+	case CVMX_BOARD_TYPE_CN3010_EVB_HS5:
+	case CVMX_BOARD_TYPE_CN3020_EVB_HS5:
+	case CVMX_BOARD_TYPE_CUST_NB5:
+	case CVMX_BOARD_TYPE_EBH3100:
+		/* Port 1 on these boards is always gigabit. */
+		return ipd_port == 1;
+	case CVMX_BOARD_TYPE_BBGW_REF:
+		/* Ports 0 and 1 connect to the switch. */
+		return ipd_port == 0 || ipd_port == 1;
+	}
+	return false;
 }
 
 static void __init octeon_fdt_set_phy(int eth, int phy_addr)
@@ -499,7 +523,7 @@ static void __init octeon_fdt_set_phy(int eth, int phy_addr)
 	if (phy_addr >= 256 && alt_phy > 0) {
 		const struct fdt_property *phy_prop;
 		struct fdt_property *alt_prop;
-		u32 phy_handle_name;
+		fdt32_t phy_handle_name;
 
 		/* Use the alt phy node instead.*/
 		phy_prop = fdt_get_property(initial_boot_params, eth, "phy-handle", NULL);
@@ -515,8 +539,7 @@ static void __init octeon_fdt_set_phy(int eth, int phy_addr)
 
 	if (octeon_has_88e1145()) {
 		fdt_nop_property(initial_boot_params, phy, "marvell,reg-init");
-		memset(new_name, 0, sizeof(new_name));
-		strcpy(new_name, "marvell,88e1145");
+		strscpy_pad(new_name, "marvell,88e1145");
 		p = fdt_getprop(initial_boot_params, phy, "compatible",
 				&current_len);
 		if (p && current_len >= strlen(new_name))
@@ -584,12 +607,52 @@ static void __init octeon_fdt_rm_ethernet(int node)
 	fdt_nop_node(initial_boot_params, node);
 }
 
+static void __init _octeon_rx_tx_delay(int eth, int rx_delay, int tx_delay)
+{
+	fdt_setprop_inplace_cell(initial_boot_params, eth, "rx-delay",
+				 rx_delay);
+	fdt_setprop_inplace_cell(initial_boot_params, eth, "tx-delay",
+				 tx_delay);
+}
+
+static void __init octeon_rx_tx_delay(int eth, int iface, int port)
+{
+	switch (cvmx_sysinfo_get()->board_type) {
+	case CVMX_BOARD_TYPE_CN3005_EVB_HS5:
+		if (iface == 0) {
+			if (port == 0) {
+				/*
+				 * Boards with gigabit WAN ports need a
+				 * different setting that is compatible with
+				 * 100 Mbit settings
+				 */
+				_octeon_rx_tx_delay(eth, 0xc, 0x0c);
+				return;
+			} else if (port == 1) {
+				/* Different config for switch port. */
+				_octeon_rx_tx_delay(eth, 0x0, 0x0);
+				return;
+			}
+		}
+		break;
+	case CVMX_BOARD_TYPE_UBNT_E100:
+		if (iface == 0 && port <= 2) {
+			_octeon_rx_tx_delay(eth, 0x0, 0x10);
+			return;
+		}
+		break;
+	}
+	fdt_nop_property(initial_boot_params, eth, "rx-delay");
+	fdt_nop_property(initial_boot_params, eth, "tx-delay");
+}
+
 static void __init octeon_fdt_pip_port(int iface, int i, int p, int max)
 {
 	char name_buffer[20];
 	int eth;
 	int phy_addr;
 	int ipd_port;
+	int fixed_link;
 
 	snprintf(name_buffer, sizeof(name_buffer), "ethernet@%x", p);
 	eth = fdt_subnode_offset(initial_boot_params, iface, name_buffer);
@@ -607,6 +670,13 @@ static void __init octeon_fdt_pip_port(int iface, int i, int p, int max)
 
 	phy_addr = cvmx_helper_board_get_mii_address(ipd_port);
 	octeon_fdt_set_phy(eth, phy_addr);
+
+	fixed_link = fdt_subnode_offset(initial_boot_params, eth, "fixed-link");
+	if (fixed_link < 0)
+		WARN_ON(octeon_has_fixed_link(ipd_port));
+	else if (!octeon_has_fixed_link(ipd_port))
+		fdt_nop_node(initial_boot_params, fixed_link);
+	octeon_rx_tx_delay(eth, i, p);
 }
 
 static void __init octeon_fdt_pip_iface(int pip, int idx)
@@ -903,7 +973,7 @@ int __init octeon_prune_device_tree(void)
 			 * zero.
 			 */
 
-			/* Asume that CS1 immediately follows. */
+			/* Assume that CS1 immediately follows. */
 			mio_boot_reg_cfg.u64 =
 				cvmx_read_csr(CVMX_MIO_BOOT_REG_CFGX(cs + 1));
 			region1_base = mio_boot_reg_cfg.s.base << 16;
@@ -1050,7 +1120,7 @@ end_led:
 				new_f[0] = cpu_to_be32(48000000);
 				fdt_setprop_inplace(initial_boot_params, usbn,
 						    "refclk-frequency",  new_f, sizeof(new_f));
-				/* Fall through ...*/
+				fallthrough;
 			case USB_CLOCK_TYPE_REF_12:
 				/* Missing "refclk-type" defaults to external. */
 				fdt_nop_property(initial_boot_params, usbn, "refclk-type");
@@ -1067,6 +1137,6 @@ end_led:
 
 static int __init octeon_publish_devices(void)
 {
-	return of_platform_bus_probe(NULL, octeon_ids, NULL);
+	return of_platform_populate(NULL, octeon_ids, NULL, NULL);
 }
 arch_initcall(octeon_publish_devices);

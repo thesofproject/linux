@@ -1,16 +1,14 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2017 Imagination Technologies
  * Author: Paul Burton <paul.burton@mips.com>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation;  either version 2 of the  License, or (at your
- * option) any later version.
  */
 
 #ifndef __MIPS_ASM_MIPS_CPS_H__
 #define __MIPS_ASM_MIPS_CPS_H__
 
+#include <linux/bitfield.h>
+#include <linux/cpumask.h>
 #include <linux/io.h>
 #include <linux/types.h>
 
@@ -116,14 +114,10 @@ static inline void clear_##unit##_##name(uint##sz##_t val)		\
  */
 static inline unsigned int mips_cps_numclusters(void)
 {
-	unsigned int num_clusters;
-
 	if (mips_cm_revision() < CM_REV_CM3_5)
 		return 1;
 
-	num_clusters = read_gcr_config() & CM_GCR_CONFIG_NUM_CLUSTERS;
-	num_clusters >>= __ffs(CM_GCR_CONFIG_NUM_CLUSTERS);
-	return num_clusters;
+	return FIELD_GET(CM_GCR_CONFIG_NUM_CLUSTERS, read_gcr_config());
 }
 
 /**
@@ -173,7 +167,8 @@ static inline unsigned int mips_cps_numcores(unsigned int cluster)
 		return 0;
 
 	/* Add one before masking to handle 0xff indicating no cores */
-	return (mips_cps_cluster_config(cluster) + 1) & CM_GCR_CONFIG_PCORES;
+	return FIELD_GET(CM_GCR_CONFIG_PCORES,
+			 mips_cps_cluster_config(cluster) + 1);
 }
 
 /**
@@ -185,14 +180,11 @@ static inline unsigned int mips_cps_numcores(unsigned int cluster)
  */
 static inline unsigned int mips_cps_numiocu(unsigned int cluster)
 {
-	unsigned int num_iocu;
-
 	if (!mips_cm_present())
 		return 0;
 
-	num_iocu = mips_cps_cluster_config(cluster) & CM_GCR_CONFIG_NUMIOCU;
-	num_iocu >>= __ffs(CM_GCR_CONFIG_NUMIOCU);
-	return num_iocu;
+	return FIELD_GET(CM_GCR_CONFIG_NUMIOCU,
+			 mips_cps_cluster_config(cluster));
 }
 
 /**
@@ -234,7 +226,47 @@ static inline unsigned int mips_cps_numvps(unsigned int cluster, unsigned int co
 
 	mips_cm_unlock_other();
 
-	return (cfg + 1) & CM_GCR_Cx_CONFIG_PVPE;
+	return FIELD_GET(CM_GCR_Cx_CONFIG_PVPE, cfg + 1);
 }
+
+/**
+ * mips_cps_multicluster_cpus() - Detect whether CPUs are in multiple clusters
+ *
+ * Determine whether the system includes CPUs in multiple clusters - ie.
+ * whether we can treat the system as single or multi-cluster as far as CPUs
+ * are concerned. Note that this is slightly different to simply checking
+ * whether multiple clusters are present - it is possible for there to be
+ * clusters which contain no CPUs, which this function will effectively ignore.
+ *
+ * Returns true if CPUs are spread across multiple clusters, else false.
+ */
+static inline bool mips_cps_multicluster_cpus(void)
+{
+	unsigned int first_cl, last_cl;
+
+	/*
+	 * CPUs are numbered sequentially by cluster - ie. CPUs 0..X will be in
+	 * cluster 0, CPUs X+1..Y in cluster 1, CPUs Y+1..Z in cluster 2 etc.
+	 *
+	 * Thus we can detect multiple clusters trivially by checking whether
+	 * the first & last CPUs belong to the same cluster.
+	 */
+	first_cl = cpu_cluster(&boot_cpu_data);
+	last_cl = cpu_cluster(&cpu_data[nr_cpu_ids - 1]);
+	return first_cl != last_cl;
+}
+
+/**
+ * mips_cps_first_online_in_cluster() - Detect if CPU is first online in cluster
+ * @first_cpu: The first other online CPU in cluster, or nr_cpu_ids if
+ * the function returns true.
+ *
+ * Determine whether the local CPU is the first to be brought online in its
+ * cluster - that is, whether there are any other online CPUs in the local
+ * cluster.
+ *
+ * Returns true if this CPU is first online, else false.
+ */
+extern unsigned int mips_cps_first_online_in_cluster(int *first_cpu);
 
 #endif /* __MIPS_ASM_MIPS_CPS_H__ */

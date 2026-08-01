@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * saa717x - Philips SAA717xHL video decoder driver
  *
@@ -9,21 +10,11 @@
  * Changes by T.Adachi (tadachi@tadachi-net.com)
  *    - support audio, video scaler etc, and checked the initialize sequence.
  *
- * Cleaned up by Hans Verkuil <hverkuil@xs4all.nl>
+ * Cleaned up by Hans Verkuil <hverkuil@kernel.org>
  *
  * Note: this is a reversed engineered driver based on captures from
  * the I2C bus under Windows. This chip is very similar to the saa7134,
  * though. Unfortunately, this driver is currently only working for NTSC.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #include <linux/module.h>
@@ -844,7 +835,7 @@ static void set_h_prescale(struct v4l2_subdev *sd,
 	if (i == count)
 		return;
 
-	/* horizonal prescaling */
+	/* horizontal prescaling */
 	saa717x_write(sd, 0x60 + task_shift, vals[i].xpsc);
 	/* accumulation length */
 	saa717x_write(sd, 0x61 + task_shift, vals[i].xacl);
@@ -989,7 +980,7 @@ static int saa717x_s_register(struct v4l2_subdev *sd, const struct v4l2_dbg_regi
 #endif
 
 static int saa717x_set_fmt(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
+		struct v4l2_subdev_state *sd_state,
 		struct v4l2_subdev_format *format)
 {
 	struct v4l2_mbus_framefmt *fmt = &format->format;
@@ -1237,8 +1228,7 @@ static const struct v4l2_subdev_ops saa717x_ops = {
 /* i2c implementation */
 
 /* ----------------------------------------------------------------------- */
-static int saa717x_probe(struct i2c_client *client,
-			 const struct i2c_device_id *did)
+static int saa717x_probe(struct i2c_client *client)
 {
 	struct saa717x_state *decoder;
 	struct v4l2_ctrl_handler *hdl;
@@ -1333,19 +1323,18 @@ static int saa717x_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int saa717x_remove(struct i2c_client *client)
+static void saa717x_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 
 	v4l2_device_unregister_subdev(sd);
 	v4l2_ctrl_handler_free(sd->ctrl_handler);
-	return 0;
 }
 
 /* ----------------------------------------------------------------------- */
 
 static const struct i2c_device_id saa717x_id[] = {
-	{ "saa717x", 0 },
+	{ .name = "saa717x" },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, saa717x_id);

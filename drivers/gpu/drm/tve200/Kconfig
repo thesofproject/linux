@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 config DRM_TVE200
 	tristate "DRM Support for Faraday TV Encoder TVE200"
 	depends on DRM
@@ -5,11 +6,10 @@ config DRM_TVE200
 	depends on ARM || COMPILE_TEST
 	depends on OF
 	select DRM_BRIDGE
+	select DRM_CLIENT_SELECTION
 	select DRM_PANEL_BRIDGE
 	select DRM_KMS_HELPER
-	select DRM_KMS_CMA_HELPER
-	select DRM_GEM_CMA_HELPER
-	select VT_HW_CONSOLE_BINDING if FRAMEBUFFER_CONSOLE
+	select DRM_GEM_DMA_HELPER
 	help
 	  Choose this option for DRM support for the Faraday TV Encoder
 	  TVE200 Controller.

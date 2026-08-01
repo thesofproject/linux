@@ -21,25 +21,110 @@
 #define FUTEX_WAKE_BITSET	10
 #define FUTEX_WAIT_REQUEUE_PI	11
 #define FUTEX_CMP_REQUEUE_PI	12
+#define FUTEX_LOCK_PI2		13
 
 #define FUTEX_PRIVATE_FLAG	128
 #define FUTEX_CLOCK_REALTIME	256
-#define FUTEX_CMD_MASK		~(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME)
+#define FUTEX_ROBUST_UNLOCK	512
+#define FUTEX_ROBUST_LIST32	1024
 
-#define FUTEX_WAIT_PRIVATE	(FUTEX_WAIT | FUTEX_PRIVATE_FLAG)
-#define FUTEX_WAKE_PRIVATE	(FUTEX_WAKE | FUTEX_PRIVATE_FLAG)
-#define FUTEX_REQUEUE_PRIVATE	(FUTEX_REQUEUE | FUTEX_PRIVATE_FLAG)
-#define FUTEX_CMP_REQUEUE_PRIVATE (FUTEX_CMP_REQUEUE | FUTEX_PRIVATE_FLAG)
-#define FUTEX_WAKE_OP_PRIVATE	(FUTEX_WAKE_OP | FUTEX_PRIVATE_FLAG)
-#define FUTEX_LOCK_PI_PRIVATE	(FUTEX_LOCK_PI | FUTEX_PRIVATE_FLAG)
-#define FUTEX_UNLOCK_PI_PRIVATE	(FUTEX_UNLOCK_PI | FUTEX_PRIVATE_FLAG)
-#define FUTEX_TRYLOCK_PI_PRIVATE (FUTEX_TRYLOCK_PI | FUTEX_PRIVATE_FLAG)
+#define FUTEX_CMD_MASK			~(FUTEX_PRIVATE_FLAG | FUTEX_CLOCK_REALTIME | \
+					  FUTEX_ROBUST_UNLOCK | FUTEX_ROBUST_LIST32)
+
+#define FUTEX_WAIT_PRIVATE		(FUTEX_WAIT | FUTEX_PRIVATE_FLAG)
+#define FUTEX_WAKE_PRIVATE		(FUTEX_WAKE | FUTEX_PRIVATE_FLAG)
+#define FUTEX_REQUEUE_PRIVATE		(FUTEX_REQUEUE | FUTEX_PRIVATE_FLAG)
+#define FUTEX_CMP_REQUEUE_PRIVATE	(FUTEX_CMP_REQUEUE | FUTEX_PRIVATE_FLAG)
+#define FUTEX_WAKE_OP_PRIVATE		(FUTEX_WAKE_OP | FUTEX_PRIVATE_FLAG)
+#define FUTEX_LOCK_PI_PRIVATE		(FUTEX_LOCK_PI | FUTEX_PRIVATE_FLAG)
+#define FUTEX_LOCK_PI2_PRIVATE		(FUTEX_LOCK_PI2 | FUTEX_PRIVATE_FLAG)
+#define FUTEX_UNLOCK_PI_PRIVATE		(FUTEX_UNLOCK_PI | FUTEX_PRIVATE_FLAG)
+#define FUTEX_TRYLOCK_PI_PRIVATE	(FUTEX_TRYLOCK_PI | FUTEX_PRIVATE_FLAG)
 #define FUTEX_WAIT_BITSET_PRIVATE	(FUTEX_WAIT_BITSET | FUTEX_PRIVATE_FLAG)
 #define FUTEX_WAKE_BITSET_PRIVATE	(FUTEX_WAKE_BITSET | FUTEX_PRIVATE_FLAG)
-#define FUTEX_WAIT_REQUEUE_PI_PRIVATE	(FUTEX_WAIT_REQUEUE_PI | \
-					 FUTEX_PRIVATE_FLAG)
-#define FUTEX_CMP_REQUEUE_PI_PRIVATE	(FUTEX_CMP_REQUEUE_PI | \
-					 FUTEX_PRIVATE_FLAG)
+#define FUTEX_WAIT_REQUEUE_PI_PRIVATE	(FUTEX_WAIT_REQUEUE_PI | FUTEX_PRIVATE_FLAG)
+#define FUTEX_CMP_REQUEUE_PI_PRIVATE	(FUTEX_CMP_REQUEUE_PI | FUTEX_PRIVATE_FLAG)
+
+/*
+ * Operations to unlock a futex, clear the robust list pending op pointer and
+ * wake waiters.
+ */
+#define FUTEX_UNLOCK_PI_LIST64			(FUTEX_UNLOCK_PI | FUTEX_ROBUST_UNLOCK)
+#define FUTEX_UNLOCK_PI_LIST64_PRIVATE		(FUTEX_UNLOCK_PI_LIST64 | FUTEX_PRIVATE_FLAG)
+#define FUTEX_UNLOCK_PI_LIST32			(FUTEX_UNLOCK_PI | FUTEX_ROBUST_UNLOCK | \
+						 FUTEX_ROBUST_LIST32)
+#define FUTEX_UNLOCK_PI_LIST32_PRIVATE		(FUTEX_UNLOCK_PI_LIST32 | FUTEX_PRIVATE_FLAG)
+
+#define FUTEX_UNLOCK_WAKE_LIST64		(FUTEX_WAKE | FUTEX_ROBUST_UNLOCK)
+#define FUTEX_UNLOCK_WAKE_LIST64_PRIVATE	(FUTEX_UNLOCK_WAKE_LIST64 | FUTEX_PRIVATE_FLAG)
+
+#define FUTEX_UNLOCK_WAKE_LIST32		(FUTEX_WAKE | FUTEX_ROBUST_UNLOCK | \
+						 FUTEX_ROBUST_LIST32)
+#define FUTEX_UNLOCK_WAKE_LIST32_PRIVATE	(FUTEX_UNLOCK_WAKE_LIST32 | FUTEX_PRIVATE_FLAG)
+
+#define FUTEX_UNLOCK_BITSET_LIST64		(FUTEX_WAKE_BITSET | FUTEX_ROBUST_UNLOCK)
+#define FUTEX_UNLOCK_BITSET_LIST64_PRIVATE	(FUTEX_UNLOCK_BITSET_LIST64 | FUTEX_PRIVATE_FLAG)
+
+#define FUTEX_UNLOCK_BITSET_LIST32		(FUTEX_WAKE_BITSET | FUTEX_ROBUST_UNLOCK | \
+						 FUTEX_ROBUST_LIST32)
+#define FUTEX_UNLOCK_BITSET_LIST32_PRIVATE	(FUTEX_UNLOCK_BITSET_LIST32 | FUTEX_PRIVATE_FLAG)
+
+/*
+ * Flags for futex2 syscalls.
+ *
+ * NOTE: these are not pure flags, they can also be seen as:
+ *
+ *   union {
+ *     u32  flags;
+ *     struct {
+ *       u32 size    : 2,
+ *           numa    : 1,
+ *                   : 4,
+ *           private : 1;
+ *     };
+ *   };
+ */
+#define FUTEX2_SIZE_U8		0x00
+#define FUTEX2_SIZE_U16		0x01
+#define FUTEX2_SIZE_U32		0x02
+#define FUTEX2_SIZE_U64		0x03
+#define FUTEX2_NUMA		0x04
+#define FUTEX2_MPOL		0x08
+			/*	0x10 */
+			/*	0x20 */
+			/*	0x40 */
+#define FUTEX2_PRIVATE		FUTEX_PRIVATE_FLAG
+
+#define FUTEX2_SIZE_MASK	0x03
+
+/* do not use */
+#define FUTEX_32		FUTEX2_SIZE_U32 /* historical accident :-( */
+
+/*
+ * When FUTEX2_NUMA doubles the futex word, the second word is a node value.
+ * The special value -1 indicates no-node. This is the same value as
+ * NUMA_NO_NODE, except that value is not ABI, this is.
+ */
+#define FUTEX_NO_NODE		(-1)
+
+/*
+ * Max numbers of elements in a futex_waitv array
+ */
+#define FUTEX_WAITV_MAX		128
+
+/**
+ * struct futex_waitv - A waiter for vectorized wait
+ * @val:	Expected value at uaddr
+ * @uaddr:	User address to wait on
+ * @flags:	Flags for this waiter
+ * @__reserved:	Reserved member to preserve data alignment. Should be 0.
+ */
+struct futex_waitv {
+	__u64 val;
+	__u64 uaddr;
+	__u32 flags;
+	__u32 __reserved;
+};
 
 /*
  * Support for robust futexes: the kernel cleans up held futexes at
@@ -117,6 +202,10 @@ struct robust_list_head {
  * (Not worth introducing an rlimit for it)
  */
 #define ROBUST_LIST_LIMIT	2048
+
+/* Modifiers for robust_list_head::list_op_pending */
+#define FUTEX_ROBUST_MOD_PI		(0x1UL)
+#define FUTEX_ROBUST_MOD_MASK		(FUTEX_ROBUST_MOD_PI)
 
 /*
  * bitset with all bits set for the FUTEX_xxx_BITSET OPs to request a

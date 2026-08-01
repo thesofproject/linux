@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Register definitions for the Atmel Image Sensor Interface.
  *
@@ -6,10 +7,6 @@
  *
  * Based on previous work by Lars Haring, <lars.haring@atmel.com>
  * and Sedji Gaouaou
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #ifndef __ATMEL_ISI_H__
 #define __ATMEL_ISI_H__
@@ -65,6 +62,8 @@
 #define		ISI_CFG1_THMASK_BEATS_16	(2 << 13)
 
 /* Bitfields in CFG2 */
+#define ISI_CFG2_GS_MODE_2_PIXEL		(0 << 11)
+#define ISI_CFG2_GS_MODE_1_PIXEL		(1 << 11)
 #define ISI_CFG2_GRAYSCALE			(1 << 13)
 #define ISI_CFG2_COL_SPACE_YCbCr		(0 << 15)
 #define ISI_CFG2_COL_SPACE_RGB			(1 << 15)
@@ -121,8 +120,6 @@
 /* Definition for isi_platform_data */
 #define ISI_DATAWIDTH_8				0x01
 #define ISI_DATAWIDTH_10			0x02
-
-struct v4l2_async_subdev;
 
 struct isi_platform_data {
 	u8 has_emb_sync;

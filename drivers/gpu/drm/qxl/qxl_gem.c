@@ -23,8 +23,8 @@
  *          Alon Levy
  */
 
-#include <drm/drmP.h>
 #include <drm/drm.h>
+#include <drm/drm_print.h>
 
 #include "qxl_drv.h"
 #include "qxl_object.h"
@@ -35,12 +35,12 @@ void qxl_gem_object_free(struct drm_gem_object *gobj)
 	struct qxl_device *qdev;
 	struct ttm_buffer_object *tbo;
 
-	qdev = (struct qxl_device *)gobj->dev->dev_private;
+	qdev = to_qxl(gobj->dev);
 
 	qxl_surface_evict(qdev, qobj, false);
 
 	tbo = &qobj->tbo;
-	ttm_bo_unref(&tbo);
+	ttm_bo_fini(tbo);
 }
 
 int qxl_gem_object_create(struct qxl_device *qdev, int size,
@@ -56,7 +56,7 @@ int qxl_gem_object_create(struct qxl_device *qdev, int size,
 	/* At least align on page size */
 	if (alignment < PAGE_SIZE)
 		alignment = PAGE_SIZE;
-	r = qxl_bo_create(qdev, size, kernel, false, initial_domain, surf, &qbo);
+	r = qxl_bo_create(qdev, size, kernel, false, initial_domain, 0, surf, &qbo);
 	if (r) {
 		if (r != -ERESTARTSYS)
 			DRM_ERROR(
@@ -64,7 +64,7 @@ int qxl_gem_object_create(struct qxl_device *qdev, int size,
 				  size, initial_domain, alignment, r);
 		return r;
 	}
-	*obj = &qbo->gem_base;
+	*obj = &qbo->tbo.base;
 
 	mutex_lock(&qdev->gem.mutex);
 	list_add_tail(&qbo->list, &qdev->gem.objects);
@@ -73,32 +73,41 @@ int qxl_gem_object_create(struct qxl_device *qdev, int size,
 	return 0;
 }
 
+/*
+ * If the caller passed a valid gobj pointer, it is responsible to call
+ * drm_gem_object_put() when it no longer needs to acess the object.
+ *
+ * If gobj is NULL, it is handled internally.
+ */
 int qxl_gem_object_create_with_handle(struct qxl_device *qdev,
 				      struct drm_file *file_priv,
 				      u32 domain,
 				      size_t size,
 				      struct qxl_surface *surf,
-				      struct qxl_bo **qobj,
+				      struct drm_gem_object **gobj,
 				      uint32_t *handle)
 {
-	struct drm_gem_object *gobj;
 	int r;
+	struct drm_gem_object *local_gobj;
 
-	BUG_ON(!qobj);
 	BUG_ON(!handle);
 
 	r = qxl_gem_object_create(qdev, size, 0,
 				  domain,
 				  false, false, surf,
-				  &gobj);
+				  &local_gobj);
 	if (r)
 		return -ENOMEM;
-	r = drm_gem_handle_create(file_priv, gobj, handle);
+	r = drm_gem_handle_create(file_priv, local_gobj, handle);
 	if (r)
 		return r;
-	/* drop reference from allocate - handle holds it now */
-	*qobj = gem_to_qxl_bo(gobj);
-	drm_gem_object_put_unlocked(gobj);
+
+	if (gobj)
+		*gobj = local_gobj;
+	else
+		/* drop reference from allocate - handle holds it now */
+		drm_gem_object_put(local_gobj);
+
 	return 0;
 }
 

@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Linux-DVB Driver for DiBcom's DiB7000M and
  *              first generation DiB7000P-demodulator-family.
  *
  * Copyright (C) 2005-7 DiBcom (http://www.dibcom.fr/)
- *
- * This program is free software; you can redistribute it and/or
- *	modify it under the terms of the GNU General Public License as
- *	published by the Free Software Foundation, version 2.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -369,7 +366,7 @@ static int dib7000m_sad_calib(struct dib7000m_state *state)
 {
 
 /* internal */
-//	dib7000m_write_word(state, 928, (3 << 14) | (1 << 12) | (524 << 0)); // sampling clock of the SAD is writting in set_bandwidth
+//	dib7000m_write_word(state, 928, (3 << 14) | (1 << 12) | (524 << 0)); // sampling clock of the SAD is writing in set_bandwidth
 	dib7000m_write_word(state, 929, (0 << 1) | (0 << 0));
 	dib7000m_write_word(state, 930, 776); // 0.625*3.3 / 4096
 
@@ -811,7 +808,7 @@ static int dib7000m_agc_startup(struct dvb_frontend *demod)
 
 			dib7000m_restart_agc(state);
 
-			dprintk("SPLIT %p: %hd\n", demod, agc_split);
+			dprintk("SPLIT %p: %u\n", demod, agc_split);
 
 			(*agc_state)++;
 			ret = 5;
@@ -928,7 +925,7 @@ static void dib7000m_set_channel(struct dib7000m_state *state, struct dtv_fronte
 	}
 	state->div_sync_wait = (value * 3) / 2 + 32; // add 50% SFN margin + compensate for one DVSY-fifo TODO
 
-	/* deactive the possibility of diversity reception if extended interleave - not for 7000MC */
+	/* deactivate the possibility of diversity reception if extended interleave - not for 7000MC */
 	/* P_dvsy_sync_mode = 0, P_dvsy_sync_enable=1, P_dvcb_comb_mode=2 */
 	if (1 == 1 || state->revision > 0x4000)
 		state->div_force_off = 0;
@@ -1406,7 +1403,7 @@ struct dvb_frontend * dib7000m_attach(struct i2c_adapter *i2c_adap, u8 i2c_addr,
 {
 	struct dvb_frontend *demod;
 	struct dib7000m_state *st;
-	st = kzalloc(sizeof(struct dib7000m_state), GFP_KERNEL);
+	st = kzalloc_obj(struct dib7000m_state);
 	if (st == NULL)
 		return NULL;
 
@@ -1437,15 +1434,15 @@ error:
 	kfree(st);
 	return NULL;
 }
-EXPORT_SYMBOL(dib7000m_attach);
+EXPORT_SYMBOL_GPL(dib7000m_attach);
 
 static const struct dvb_frontend_ops dib7000m_ops = {
 	.delsys = { SYS_DVBT },
 	.info = {
 		.name = "DiBcom 7000MA/MB/PA/PB/MC",
-		.frequency_min      = 44250000,
-		.frequency_max      = 867250000,
-		.frequency_stepsize = 62500,
+		.frequency_min_hz      =  44250 * kHz,
+		.frequency_max_hz      = 867250 * kHz,
+		.frequency_stepsize_hz = 62500,
 		.caps = FE_CAN_INVERSION_AUTO |
 			FE_CAN_FEC_1_2 | FE_CAN_FEC_2_3 | FE_CAN_FEC_3_4 |
 			FE_CAN_FEC_5_6 | FE_CAN_FEC_7_8 | FE_CAN_FEC_AUTO |

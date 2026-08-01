@@ -1,20 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  cx18 ADEC audio functions
  *
  *  Derived from cx25840-core.c
  *
- *  Copyright (C) 2007  Hans Verkuil <hverkuil@xs4all.nl>
+ *  Copyright (C) 2007  Hans Verkuil <hverkuil@kernel.org>
  *  Copyright (C) 2008  Andy Walls <awalls@md.metrocast.net>
- *
- *  This program is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU General Public License
- *  as published by the Free Software Foundation; either version 2
- *  of the License, or (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  */
 
 #include "cx18-driver.h"
@@ -98,7 +89,7 @@ static void cx18_av_init(struct cx18 *cx)
 	/*
 	 * The crystal freq used in calculations in this driver will be
 	 * 28.636360 MHz.
-	 * Aim to run the PLLs' VCOs near 400 MHz to minimze errors.
+	 * Aim to run the PLLs' VCOs near 400 MHz to minimize errors.
 	 */
 
 	/*
@@ -131,7 +122,7 @@ static void cx18_av_initialize(struct v4l2_subdev *sd)
 	cx18_av_write4_expect(cx, CXADEC_DL_CTL, 0x03000000,
 						 0x03000000, 0x13000000);
 
-	/* initallize the PLL by toggling sleep bit */
+	/* initialize the PLL by toggling sleep bit */
 	v = cx18_av_read4(cx, CXADEC_HOST_REG1);
 	/* enable sleep mode - register appears to be read only... */
 	cx18_av_write4_expect(cx, CXADEC_HOST_REG1, v | 1, v, 0xfffe);
@@ -189,7 +180,7 @@ static void cx18_av_initialize(struct v4l2_subdev *sd)
 	 */
 	cx18_av_and_or4(cx, CXADEC_CHIP_CTRL, 0xFFFBFFFF, 0x00120000);
 
-	/* Setup the Video and and Aux/Audio PLLs */
+	/* Setup the Video and Aux/Audio PLLs */
 	cx18_av_init(cx);
 
 	/* set video to auto-detect */
@@ -348,7 +339,7 @@ void cx18_av_std_setup(struct cx18 *cx)
 
 		/*
 		 * For a 13.5 Mpps clock and 15,625 Hz line rate, a line is
-		 * is 864 pixels = 720 active + 144 blanking.  ITU-R BT.601
+		 * 864 pixels = 720 active + 144 blanking.  ITU-R BT.601
 		 * specifies 12 luma clock periods or ~ 0.9 * 13.5 Mpps after
 		 * the end of active video to start a horizontal line, so that
 		 * leaves 132 pixels of hblank to ignore.
@@ -408,7 +399,7 @@ void cx18_av_std_setup(struct cx18 *cx)
 
 		/*
 		 * For a 13.5 Mpps clock and 15,734.26 Hz line rate, a line is
-		 * is 858 pixels = 720 active + 138 blanking.  The Hsync leading
+		 * 858 pixels = 720 active + 138 blanking.  The Hsync leading
 		 * edge should happen 1.2 us * 13.5 Mpps ~= 16 pixels after the
 		 * end of active video, leaving 122 pixels of hblank to ignore
 		 * before active video starts.
@@ -939,7 +930,7 @@ static int cx18_av_s_ctrl(struct v4l2_ctrl *ctrl)
 }
 
 static int cx18_av_set_fmt(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
+		struct v4l2_subdev_state *sd_state,
 		struct v4l2_subdev_format *format)
 {
 	struct v4l2_mbus_framefmt *fmt = &format->format;

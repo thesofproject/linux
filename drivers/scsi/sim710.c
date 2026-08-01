@@ -1,20 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * sim710.c - Copyright (C) 1999 Richard Hirst <richard@sleepie.demon.co.uk>
  *
  *----------------------------------------------------------------------------
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by 
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  *----------------------------------------------------------------------------
  *
  * MCA card detection code by Trent McNair. (now deleted)
@@ -23,7 +11,6 @@
  * Auto probing of EISA config space from Trevor Hemsley.
  *
  * Rewritten to use 53c700.c by James.Bottomley@SteelEye.com
- *
  */
 
 #include <linux/module.h>
@@ -100,7 +87,7 @@ static int sim710_probe_common(struct device *dev, unsigned long base_addr,
 {
 	struct Scsi_Host * host = NULL;
 	struct NCR_700_Host_Parameters *hostdata =
-		kzalloc(sizeof(struct NCR_700_Host_Parameters),	GFP_KERNEL);
+		kzalloc_obj(struct NCR_700_Host_Parameters);
 
 	printk(KERN_NOTICE "sim710: %s\n", dev_name(dev));
 	printk(KERN_NOTICE "sim710: irq = %d, clock = %d, base = 0x%lx, scsi_id = %d\n",
@@ -146,6 +133,7 @@ static int sim710_probe_common(struct device *dev, unsigned long base_addr,
  out_put_host:
 	scsi_host_put(host);
  out_release:
+	ioport_unmap(hostdata->base);
 	release_region(base_addr, 64);
  out_free:
 	kfree(hostdata);
@@ -161,6 +149,7 @@ static int sim710_device_remove(struct device *dev)
 
 	scsi_remove_host(host);
 	NCR_700_release(host);
+	ioport_unmap(hostdata->base);
 	kfree(hostdata);
 	free_irq(host->irq, host);
 	release_region(host->base, 64);
@@ -226,21 +215,19 @@ static struct eisa_driver sim710_eisa_driver = {
 
 static int __init sim710_init(void)
 {
-	int err = -ENODEV;
-
 #ifdef MODULE
 	if (sim710)
 		param_setup(sim710);
 #endif
 
 #ifdef CONFIG_EISA
-	err = eisa_driver_register(&sim710_eisa_driver);
+	/*
+	 * FIXME: We'd really like to return -ENODEV if no devices have actually
+	 * been found.  However eisa_driver_register() only reports problems
+	 * with kobject_register() so simply return success for now.
+	 */
+	eisa_driver_register(&sim710_eisa_driver);
 #endif
-	/* FIXME: what we'd really like to return here is -ENODEV if
-	 * no devices have actually been found.  Instead, the err
-	 * above actually only reports problems with kobject_register,
-	 * so for the moment return success */
-
 	return 0;
 }
 

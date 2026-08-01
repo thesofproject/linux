@@ -1,10 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *
  * TWL4030 MADC module driver-This driver monitors the real time
  * conversion of analog signals like battery temperature,
  * battery type, battery level etc.
  *
- * Copyright (C) 2011 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2011 Texas Instruments Incorporated - https://www.ti.com/
  * J Keerthy <j-keerthy@ti.com>
  *
  * Based on twl4030-madc.c
@@ -12,31 +13,17 @@
  * Mikko Ylinen <mikko.k.ylinen@nokia.com>
  *
  * Amit Kucheria <amit.kucheria@canonical.com>
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  */
 
 #include <linux/device.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/delay.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/slab.h>
 #include <linux/mfd/twl.h>
-#include <linux/module.h>
 #include <linux/stddef.h>
 #include <linux/mutex.h>
 #include <linux/bitops.h>
@@ -167,7 +154,7 @@ enum sample_type {
  * struct twl4030_madc_data - a container for madc info
  * @dev:		Pointer to device structure for madc
  * @lock:		Mutex protecting this data structure
- * @regulator:		Pointer to bias regulator for madc
+ * @usb3v1:		Pointer to bias regulator for madc
  * @requests:		Array of request struct corresponding to SW1, SW2 and RT
  * @use_second_irq:	IRQ selection (main or co-processor)
  * @imr:		Interrupt mask register of MADC
@@ -175,7 +162,7 @@ enum sample_type {
  */
 struct twl4030_madc_data {
 	struct device *dev;
-	struct mutex lock;	/* mutex protecting this data structure */
+	struct mutex lock;
 	struct regulator *usb3v1;
 	struct twl4030_madc_request requests[TWL4030_MADC_NUM_METHODS];
 	bool use_second_irq;
@@ -245,13 +232,7 @@ static const struct iio_chan_spec twl4030_madc_iio_channels[] = {
 
 static struct twl4030_madc_data *twl4030_madc;
 
-struct twl4030_prescale_divider_ratios {
-	s16 numerator;
-	s16 denominator;
-};
-
-static const struct twl4030_prescale_divider_ratios
-twl4030_divider_ratios[16] = {
+static const struct s16_fract twl4030_divider_ratios[16] = {
 	{1, 1},		/* CHANNEL 0 No Prescaler */
 	{1, 1},		/* CHANNEL 1 No Prescaler */
 	{6, 10},	/* CHANNEL 2 */
@@ -266,12 +247,11 @@ twl4030_divider_ratios[16] = {
 	{15, 100},	/* CHANNEL 11 */
 	{1, 4},		/* CHANNEL 12 */
 	{1, 1},		/* CHANNEL 13 Reserved channels */
-	{1, 1},		/* CHANNEL 14 Reseved channels */
+	{1, 1},		/* CHANNEL 14 Reserved channels */
 	{5, 11},	/* CHANNEL 15 */
 };
 
-
-/* Conversion table from -3 to 55 degrees Celcius */
+/* Conversion table from -3 to 55 degrees Celsius */
 static int twl4030_therm_tbl[] = {
 	30800,	29500,	28300,	27100,
 	26000,	24900,	23900,	22900,	22000,	21100,	20300,	19400,	18700,
@@ -486,7 +466,7 @@ static irqreturn_t twl4030_madc_threaded_irq_handler(int irq, void *_madc)
 	struct twl4030_madc_data *madc = _madc;
 	const struct twl4030_madc_conversion_method *method;
 	u8 isr_val, imr_val;
-	int i, len, ret;
+	int i, ret;
 	struct twl4030_madc_request *r;
 
 	mutex_lock(&madc->lock);
@@ -509,7 +489,7 @@ static irqreturn_t twl4030_madc_threaded_irq_handler(int irq, void *_madc)
 		ret = twl4030_madc_disable_irq(madc, i);
 		if (ret < 0)
 			dev_dbg(madc->dev, "Disable interrupt failed %d\n", i);
-		madc->requests[i].result_pending = 1;
+		madc->requests[i].result_pending = true;
 	}
 	for (i = 0; i < TWL4030_MADC_NUM_METHODS; i++) {
 		r = &madc->requests[i];
@@ -518,11 +498,11 @@ static irqreturn_t twl4030_madc_threaded_irq_handler(int irq, void *_madc)
 			continue;
 		method = &twl4030_conversion_methods[r->method];
 		/* Read results */
-		len = twl4030_madc_read_channels(madc, method->rbase,
-						 r->channels, r->rbuf, r->raw);
+		twl4030_madc_read_channels(madc, method->rbase,
+					   r->channels, r->rbuf, r->raw);
 		/* Free request */
-		r->result_pending = 0;
-		r->active = 0;
+		r->result_pending = false;
+		r->active = false;
 	}
 	mutex_unlock(&madc->lock);
 
@@ -535,15 +515,15 @@ err_i2c:
 	 */
 	for (i = 0; i < TWL4030_MADC_NUM_METHODS; i++) {
 		r = &madc->requests[i];
-		if (r->active == 0)
+		if (!r->active)
 			continue;
 		method = &twl4030_conversion_methods[r->method];
 		/* Read results */
-		len = twl4030_madc_read_channels(madc, method->rbase,
-						 r->channels, r->rbuf, r->raw);
+		twl4030_madc_read_channels(madc, method->rbase,
+					   r->channels, r->rbuf, r->raw);
 		/* Free request */
-		r->result_pending = 0;
-		r->active = 0;
+		r->result_pending = false;
+		r->active = false;
 	}
 	mutex_unlock(&madc->lock);
 
@@ -666,16 +646,16 @@ static int twl4030_madc_conversion(struct twl4030_madc_request *req)
 	ret = twl4030_madc_start_conversion(twl4030_madc, req->method);
 	if (ret < 0)
 		goto out;
-	twl4030_madc->requests[req->method].active = 1;
+	twl4030_madc->requests[req->method].active = true;
 	/* Wait until conversion is ready (ctrl register returns EOC) */
 	ret = twl4030_madc_wait_conversion_ready(twl4030_madc, 5, method->ctrl);
 	if (ret) {
-		twl4030_madc->requests[req->method].active = 0;
+		twl4030_madc->requests[req->method].active = false;
 		goto out;
 	}
 	ret = twl4030_madc_read_channels(twl4030_madc, method->rbase,
 					 req->channels, req->rbuf, req->raw);
-	twl4030_madc->requests[req->method].active = 0;
+	twl4030_madc->requests[req->method].active = false;
 
 out:
 	mutex_unlock(&twl4030_madc->lock);
@@ -764,30 +744,26 @@ static int twl4030_madc_set_power(struct twl4030_madc_data *madc, int on)
  */
 static int twl4030_madc_probe(struct platform_device *pdev)
 {
+	struct device *dev = &pdev->dev;
+	struct twl4030_madc_platform_data *pdata = dev_get_platdata(dev);
 	struct twl4030_madc_data *madc;
-	struct twl4030_madc_platform_data *pdata = dev_get_platdata(&pdev->dev);
-	struct device_node *np = pdev->dev.of_node;
 	int irq, ret;
 	u8 regval;
 	struct iio_dev *iio_dev = NULL;
 
-	if (!pdata && !np) {
+	if (!pdata && !dev_fwnode(dev)) {
 		dev_err(&pdev->dev, "neither platform data nor Device Tree node available\n");
 		return -EINVAL;
 	}
 
 	iio_dev = devm_iio_device_alloc(&pdev->dev, sizeof(*madc));
-	if (!iio_dev) {
-		dev_err(&pdev->dev, "failed allocating iio device\n");
+	if (!iio_dev)
 		return -ENOMEM;
-	}
 
 	madc = iio_priv(iio_dev);
 	madc->dev = &pdev->dev;
 
 	iio_dev->name = dev_name(&pdev->dev);
-	iio_dev->dev.parent = &pdev->dev;
-	iio_dev->dev.of_node = pdev->dev.of_node;
 	iio_dev->info = &twl4030_madc_iio_info;
 	iio_dev->modes = INDIO_DIRECT_MODE;
 	iio_dev->channels = twl4030_madc_iio_channels;
@@ -801,7 +777,7 @@ static int twl4030_madc_probe(struct platform_device *pdev)
 	if (pdata)
 		madc->use_second_irq = (pdata->irq_line != 1);
 	else
-		madc->use_second_irq = of_property_read_bool(np,
+		madc->use_second_irq = device_property_read_bool(dev,
 				       "ti,system-uses-second-madc-irq");
 
 	madc->imr = madc->use_second_irq ? TWL4030_MADC_IMR2 :
@@ -914,7 +890,7 @@ err_current_generator:
 	return ret;
 }
 
-static int twl4030_madc_remove(struct platform_device *pdev)
+static void twl4030_madc_remove(struct platform_device *pdev)
 {
 	struct iio_dev *iio_dev = platform_get_drvdata(pdev);
 	struct twl4030_madc_data *madc = iio_priv(iio_dev);
@@ -925,24 +901,20 @@ static int twl4030_madc_remove(struct platform_device *pdev)
 	twl4030_madc_set_power(madc, 0);
 
 	regulator_disable(madc->usb3v1);
-
-	return 0;
 }
 
-#ifdef CONFIG_OF
 static const struct of_device_id twl_madc_of_match[] = {
 	{ .compatible = "ti,twl4030-madc", },
-	{ },
+	{ }
 };
 MODULE_DEVICE_TABLE(of, twl_madc_of_match);
-#endif
 
 static struct platform_driver twl4030_madc_driver = {
 	.probe = twl4030_madc_probe,
 	.remove = twl4030_madc_remove,
 	.driver = {
 		   .name = "twl4030_madc",
-		   .of_match_table = of_match_ptr(twl_madc_of_match),
+		   .of_match_table = twl_madc_of_match,
 	},
 };
 

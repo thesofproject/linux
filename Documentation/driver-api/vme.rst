@@ -107,7 +107,7 @@ The function :c:func:`vme_master_read` can be used to read from and
 
 In addition to simple reads and writes, :c:func:`vme_master_rmw` is provided to
 do a read-modify-write transaction. Parts of a VME window can also be mapped
-into user space memory using :c:func:`vme_master_mmap`.
+into user space memory using :c:func:`vme_master_mmap_prepare`.
 
 
 Slave windows
@@ -290,8 +290,8 @@ The function :c:func:`vme_bus_num` returns the bus ID of the provided bridge.
 VME API
 -------
 
-.. kernel-doc:: include/linux/vme.h
+.. kernel-doc:: drivers/staging/vme_user/vme.h
    :internal:
 
-.. kernel-doc:: drivers/vme/vme.c
+.. kernel-doc:: drivers/staging/vme_user/vme.c
    :export:

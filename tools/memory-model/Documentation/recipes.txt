@@ -1,7 +1,7 @@
 This document provides "recipes", that is, litmus tests for commonly
 occurring situations, as well as a few that illustrate subtly broken but
 attractive nuisances.  Many of these recipes include example code from
-v4.13 of the Linux kernel.
+v5.7 of the Linux kernel.
 
 The first section covers simple special cases, the second section
 takes off the training wheels to cover more involved examples,
@@ -60,6 +60,10 @@ usual) some things to be careful of:
 
 Locking
 -------
+
+[!] Note:
+	locking.txt expands on this section, providing more detail on
+	locklessly accessing lock-protected shared variables.
 
 Locking is well-known and straightforward, at least if you don't think
 about it too hard.  And the basic rule is indeed quite simple: Any CPU that
@@ -278,7 +282,7 @@ is present if the value loaded determines the address of a later access
 first place (control dependency).  Note that the term "data dependency"
 is sometimes casually used to cover both address and data dependencies.
 
-In lib/prime_numbers.c, the expand_to_next_prime() function invokes
+In lib/math/prime_numbers.c, the expand_to_next_prime() function invokes
 rcu_assign_pointer(), and the next_prime_number() function invokes
 rcu_dereference().  This combination mediates access to a bit vector
 that is expanded as additional primes are needed.
@@ -292,7 +296,7 @@ and to use smp_load_acquire() instead of smp_rmb().  However, the older
 smp_wmb() and smp_rmb() APIs are still heavily used, so it is important
 to understand their use cases.  The general approach is shown below:
 
-	/* See MP+wmbonceonce+rmbonceonce.litmus. */
+	/* See MP+fencewmbonceonce+fencermbonceonce.litmus. */
 	void CPU0(void)
 	{
 		WRITE_ONCE(x, 1);
@@ -311,7 +315,7 @@ The smp_wmb() macro orders prior stores against later stores, and the
 smp_rmb() macro orders prior loads against later loads.  Therefore, if
 the final value of r0 is 1, the final value of r1 must also be 1.
 
-The the xlog_state_switch_iclogs() function in fs/xfs/xfs_log.c contains
+The xlog_state_switch_iclogs() function in fs/xfs/xfs_log.c contains
 the following write-side code fragment:
 
 	log->l_curr_block -= log->l_logBBsize;
@@ -322,9 +326,9 @@ the following write-side code fragment:
 And the xlog_valid_lsn() function in fs/xfs/xfs_log_priv.h contains
 the corresponding read-side code fragment:
 
-	cur_cycle = ACCESS_ONCE(log->l_curr_cycle);
+	cur_cycle = READ_ONCE(log->l_curr_cycle);
 	smp_rmb();
-	cur_block = ACCESS_ONCE(log->l_curr_block);
+	cur_block = READ_ONCE(log->l_curr_block);
 
 Alternatively, consider the following comment in function
 perf_output_put_handle() in kernel/events/ring_buffer.c:
@@ -360,7 +364,7 @@ can be seen in the LB+poonceonces.litmus litmus test.
 One way of avoiding the counter-intuitive outcome is through the use of a
 control dependency paired with a full memory barrier:
 
-	/* See LB+ctrlonceonce+mbonceonce.litmus. */
+	/* See LB+fencembonceonce+ctrlonceonce.litmus. */
 	void CPU0(void)
 	{
 		r0 = READ_ONCE(x);
@@ -476,7 +480,7 @@ that one CPU first stores to one variable and then loads from a second,
 while another CPU stores to the second variable and then loads from the
 first.  Preserving order requires nothing less than full barriers:
 
-	/* See SB+mbonceonces.litmus. */
+	/* See SB+fencembonceonces.litmus. */
 	void CPU0(void)
 	{
 		WRITE_ONCE(x, 1);

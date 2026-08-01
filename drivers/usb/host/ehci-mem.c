@@ -69,14 +69,13 @@ static struct ehci_qh *ehci_qh_alloc (struct ehci_hcd *ehci, gfp_t flags)
 	struct ehci_qh		*qh;
 	dma_addr_t		dma;
 
-	qh = kzalloc(sizeof *qh, GFP_ATOMIC);
+	qh = kzalloc_obj(*qh, GFP_ATOMIC);
 	if (!qh)
 		goto done;
 	qh->hw = (struct ehci_qh_hw *)
-		dma_pool_alloc(ehci->qh_pool, flags, &dma);
+		dma_pool_zalloc(ehci->qh_pool, flags, &dma);
 	if (!qh->hw)
 		goto fail;
-	memset(qh->hw, 0, sizeof *qh->hw);
 	qh->qh_dma = dma;
 	// INIT_LIST_HEAD (&qh->qh_list);
 	INIT_LIST_HEAD (&qh->qtd_list);

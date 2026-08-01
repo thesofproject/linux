@@ -1,18 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * (C) Copyright 2008
  * Stefano Babic, DENX Software Engineering, sbabic@denx.de.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
  *
  * This driver implements a lcd device for the ILITEK 922x display
  * controller. The interface to the display is SPI and the display's
  * memory is cyclically updated over the RGB interface.
  */
 
-#include <linux/fb.h>
 #include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -85,7 +80,7 @@
 #define START_RW_WRITE		0
 #define START_RW_READ		1
 
-/**
+/*
  * START_BYTE(id, rs, rw)
  *
  * Set the start byte according to the required operation.
@@ -104,13 +99,15 @@
 #define START_BYTE(id, rs, rw)	\
 	(0x70 | (((id) & 0x01) << 2) | (((rs) & 0x01) << 1) | ((rw) & 0x01))
 
-/**
+/*
  * CHECK_FREQ_REG(spi_device s, spi_transfer x) - Check the frequency
  *	for the SPI transfer. According to the datasheet, the controller
  *	accept higher frequency for the GRAM transfer, but it requires
  *	lower frequency when the registers are read/written.
  *	The macro sets the frequency in the spi_transfer structure if
  *	the frequency exceeds the maximum value.
+ * @s: pointer to an SPI device
+ * @x: pointer to the read/write buffer pair
  */
 #define CHECK_FREQ_REG(s, x)	\
 	do {			\
@@ -121,11 +118,11 @@
 
 #define CMD_BUFSIZE		16
 
-#define POWER_IS_ON(pwr)	((pwr) <= FB_BLANK_NORMAL)
+#define POWER_IS_ON(pwr)	((pwr) <= LCD_POWER_REDUCED)
 
 #define set_tx_byte(b)		(tx_invert ? ~(b) : b)
 
-/**
+/*
  * ili922x_id - id as set by manufacturer
  */
 static int ili922x_id = 1;
@@ -134,7 +131,7 @@ module_param(ili922x_id, int, 0);
 static int tx_invert;
 module_param(tx_invert, int, 0);
 
-/**
+/*
  * driver's private structure
  */
 struct ili922x {
@@ -271,6 +268,10 @@ static int ili922x_write(struct spi_device *spi, u8 reg, u16 value)
 	spi_message_add_tail(&xfer_regindex, &msg);
 
 	ret = spi_sync(spi, &msg);
+	if (ret < 0) {
+		dev_err(&spi->dev, "Error sending SPI message 0x%x", ret);
+		return ret;
+	}
 
 	spi_message_init(&msg);
 	tbuf[0] = set_tx_byte(START_BYTE(ili922x_id, START_RS_REG,
@@ -297,6 +298,8 @@ static int ili922x_write(struct spi_device *spi, u8 reg, u16 value)
 #ifdef DEBUG
 /**
  * ili922x_reg_dump - dump all registers
+ *
+ * @spi: pointer to an SPI device
  */
 static void ili922x_reg_dump(struct spi_device *spi)
 {
@@ -468,7 +471,7 @@ static int ili922x_get_power(struct lcd_device *ld)
 	return ili->power;
 }
 
-static struct lcd_ops ili922x_ops = {
+static const struct lcd_ops ili922x_ops = {
 	.get_power = ili922x_get_power,
 	.set_power = ili922x_set_power,
 };
@@ -509,7 +512,7 @@ static int ili922x_probe(struct spi_device *spi)
 
 	ili922x_display_init(spi);
 
-	ili->power = FB_BLANK_POWERDOWN;
+	ili->power = LCD_POWER_OFF;
 
 	lcd = devm_lcd_device_register(&spi->dev, "ili922xlcd", &spi->dev, ili,
 					&ili922x_ops);
@@ -521,15 +524,14 @@ static int ili922x_probe(struct spi_device *spi)
 	ili->ld = lcd;
 	spi_set_drvdata(spi, ili);
 
-	ili922x_lcd_power(ili, FB_BLANK_UNBLANK);
+	ili922x_lcd_power(ili, LCD_POWER_ON);
 
 	return 0;
 }
 
-static int ili922x_remove(struct spi_device *spi)
+static void ili922x_remove(struct spi_device *spi)
 {
 	ili922x_poweroff(spi);
-	return 0;
 }
 
 static struct spi_driver ili922x_driver = {

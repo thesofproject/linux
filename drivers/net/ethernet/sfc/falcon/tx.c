@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /****************************************************************************
  * Driver for Solarflare network controllers and boards
  * Copyright 2005-2006 Fen Systems Ltd.
  * Copyright 2005-2013 Solarflare Communications Inc.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License version 2 as published
- * by the Free Software Foundation, incorporated herein by reference.
  */
 
 #include <linux/pci.h>
@@ -41,14 +38,6 @@ static inline u8 *ef4_tx_get_copy_buffer(struct ef4_tx_queue *tx_queue,
 	buffer->dma_addr = page_buf->dma_addr + offset;
 	buffer->unmap_len = 0;
 	return (u8 *)page_buf->addr + offset;
-}
-
-u8 *ef4_tx_get_copy_buffer_limited(struct ef4_tx_queue *tx_queue,
-				   struct ef4_tx_buffer *buffer, size_t len)
-{
-	if (len > EF4_TX_CB_SIZE)
-		return NULL;
-	return ef4_tx_get_copy_buffer(tx_queue, buffer);
 }
 
 static void ef4_dequeue_buffer(struct ef4_tx_queue *tx_queue,
@@ -101,7 +90,8 @@ unsigned int ef4_tx_max_skb_descs(struct ef4_nic *efx)
 	/* Possibly more for PCIe page boundaries within input fragments */
 	if (PAGE_SIZE > EF4_PAGE_SIZE)
 		max_descs += max_t(unsigned int, MAX_SKB_FRAGS,
-				   DIV_ROUND_UP(GSO_MAX_SIZE, EF4_PAGE_SIZE));
+				   DIV_ROUND_UP(GSO_LEGACY_MAX_SIZE,
+						EF4_PAGE_SIZE));
 
 	return max_descs;
 }
@@ -321,7 +311,7 @@ netdev_tx_t ef4_enqueue_skb(struct ef4_tx_queue *tx_queue, struct sk_buff *skb)
 	netdev_tx_sent_queue(tx_queue->core_txq, skb_len);
 
 	/* Pass off to hardware */
-	if (!skb->xmit_more || netif_xmit_stopped(tx_queue->core_txq)) {
+	if (!netdev_xmit_more() || netif_xmit_stopped(tx_queue->core_txq)) {
 		struct ef4_tx_queue *txq2 = ef4_tx_queue_partner(tx_queue);
 
 		/* There could be packets left on the partner queue if those
@@ -333,7 +323,7 @@ netdev_tx_t ef4_enqueue_skb(struct ef4_tx_queue *tx_queue, struct sk_buff *skb)
 
 		ef4_nic_push_buffers(tx_queue);
 	} else {
-		tx_queue->xmit_more_available = skb->xmit_more;
+		tx_queue->xmit_more_available = netdev_xmit_more();
 	}
 
 	tx_queue->tx_packets++;
@@ -554,13 +544,12 @@ int ef4_probe_tx_queue(struct ef4_tx_queue *tx_queue)
 		  tx_queue->queue, efx->txq_entries, tx_queue->ptr_mask);
 
 	/* Allocate software ring */
-	tx_queue->buffer = kcalloc(entries, sizeof(*tx_queue->buffer),
-				   GFP_KERNEL);
+	tx_queue->buffer = kzalloc_objs(*tx_queue->buffer, entries);
 	if (!tx_queue->buffer)
 		return -ENOMEM;
 
-	tx_queue->cb_page = kcalloc(ef4_tx_cb_page_count(tx_queue),
-				    sizeof(tx_queue->cb_page[0]), GFP_KERNEL);
+	tx_queue->cb_page = kzalloc_objs(tx_queue->cb_page[0],
+					 ef4_tx_cb_page_count(tx_queue));
 	if (!tx_queue->cb_page) {
 		rc = -ENOMEM;
 		goto fail1;

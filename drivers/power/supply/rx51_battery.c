@@ -1,21 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Nokia RX-51 battery driver
  *
- * Copyright (C) 2012  Pali Rohár <pali.rohar@gmail.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * Copyright (C) 2012  Pali Rohár <pali@kernel.org>
  */
 
 #include <linux/module.h>
@@ -129,7 +116,7 @@ static int rx51_battery_read_temperature(struct rx51_device_info *di)
 		int mid = (max + min) / 2;
 		if (rx51_temp_table2[mid] <= raw)
 			min = mid;
-		else if (rx51_temp_table2[mid] > raw)
+		else
 			max = mid;
 		if (rx51_temp_table2[mid] == raw)
 			break;
@@ -205,13 +192,10 @@ static int rx51_battery_probe(struct platform_device *pdev)
 {
 	struct power_supply_config psy_cfg = {};
 	struct rx51_device_info *di;
-	int ret;
 
 	di = devm_kzalloc(&pdev->dev, sizeof(*di), GFP_KERNEL);
 	if (!di)
 		return -ENOMEM;
-
-	platform_set_drvdata(pdev, di);
 
 	di->dev = &pdev->dev;
 	di->bat_desc.name = "rx51-battery";
@@ -222,52 +206,21 @@ static int rx51_battery_probe(struct platform_device *pdev)
 
 	psy_cfg.drv_data = di;
 
-	di->channel_temp = iio_channel_get(di->dev, "temp");
-	if (IS_ERR(di->channel_temp)) {
-		ret = PTR_ERR(di->channel_temp);
-		goto error;
-	}
+	di->channel_temp = devm_iio_channel_get(di->dev, "temp");
+	if (IS_ERR(di->channel_temp))
+		return PTR_ERR(di->channel_temp);
 
-	di->channel_bsi  = iio_channel_get(di->dev, "bsi");
-	if (IS_ERR(di->channel_bsi)) {
-		ret = PTR_ERR(di->channel_bsi);
-		goto error_channel_temp;
-	}
+	di->channel_bsi  = devm_iio_channel_get(di->dev, "bsi");
+	if (IS_ERR(di->channel_bsi))
+		return PTR_ERR(di->channel_bsi);
 
-	di->channel_vbat = iio_channel_get(di->dev, "vbat");
-	if (IS_ERR(di->channel_vbat)) {
-		ret = PTR_ERR(di->channel_vbat);
-		goto error_channel_bsi;
-	}
+	di->channel_vbat = devm_iio_channel_get(di->dev, "vbat");
+	if (IS_ERR(di->channel_vbat))
+		return PTR_ERR(di->channel_vbat);
 
-	di->bat = power_supply_register(di->dev, &di->bat_desc, &psy_cfg);
-	if (IS_ERR(di->bat)) {
-		ret = PTR_ERR(di->bat);
-		goto error_channel_vbat;
-	}
-
-	return 0;
-
-error_channel_vbat:
-	iio_channel_release(di->channel_vbat);
-error_channel_bsi:
-	iio_channel_release(di->channel_bsi);
-error_channel_temp:
-	iio_channel_release(di->channel_temp);
-error:
-
-	return ret;
-}
-
-static int rx51_battery_remove(struct platform_device *pdev)
-{
-	struct rx51_device_info *di = platform_get_drvdata(pdev);
-
-	power_supply_unregister(di->bat);
-
-	iio_channel_release(di->channel_vbat);
-	iio_channel_release(di->channel_bsi);
-	iio_channel_release(di->channel_temp);
+	di->bat = devm_power_supply_register(di->dev, &di->bat_desc, &psy_cfg);
+	if (IS_ERR(di->bat))
+		return PTR_ERR(di->bat);
 
 	return 0;
 }
@@ -282,7 +235,6 @@ MODULE_DEVICE_TABLE(of, n900_battery_of_match);
 
 static struct platform_driver rx51_battery_driver = {
 	.probe = rx51_battery_probe,
-	.remove = rx51_battery_remove,
 	.driver = {
 		.name = "rx51-battery",
 		.of_match_table = of_match_ptr(n900_battery_of_match),
@@ -291,6 +243,6 @@ static struct platform_driver rx51_battery_driver = {
 module_platform_driver(rx51_battery_driver);
 
 MODULE_ALIAS("platform:rx51-battery");
-MODULE_AUTHOR("Pali Rohár <pali.rohar@gmail.com>");
+MODULE_AUTHOR("Pali Rohár <pali@kernel.org>");
 MODULE_DESCRIPTION("Nokia RX-51 battery driver");
 MODULE_LICENSE("GPL");

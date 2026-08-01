@@ -4,7 +4,26 @@
 /* Simple interface for creating and stopping kernel threads without mess. */
 #include <linux/err.h>
 #include <linux/sched.h>
-#include <linux/cgroup.h>
+
+struct mm_struct;
+
+/* opaque kthread data */
+struct kthread;
+
+/*
+ * When "(p->flags & PF_KTHREAD)" is set the task is a kthread and will
+ * always remain a kthread.  For kthreads p->worker_private always
+ * points to a struct kthread.  For tasks that are not kthreads
+ * p->worker_private is used to point to other things.
+ *
+ * Return NULL for any task that is not a kthread.
+ */
+static inline struct kthread *tsk_is_kthread(struct task_struct *p)
+{
+	if (p->flags & PF_KTHREAD)
+		return p->worker_private;
+	return NULL;
+}
 
 __printf(4, 5)
 struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
@@ -17,7 +36,7 @@ struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
  * @threadfn: the function to run in the thread
  * @data: data pointer for @threadfn()
  * @namefmt: printf-style format string for the thread name
- * @arg...: arguments for @namefmt.
+ * @arg: arguments for @namefmt.
  *
  * This macro will create a kthread on the current node, leaving it in
  * the stopped state.  This is just a helper for kthread_create_on_node();
@@ -31,6 +50,12 @@ struct task_struct *kthread_create_on_cpu(int (*threadfn)(void *data),
 					  void *data,
 					  unsigned int cpu,
 					  const char *namefmt);
+
+void get_kthread_comm(char *buf, size_t buf_size, struct task_struct *tsk);
+bool set_kthread_struct(struct task_struct *p);
+
+void kthread_set_per_cpu(struct task_struct *k, int cpu);
+bool kthread_is_per_cpu(struct task_struct *k);
 
 /**
  * kthread_run - create and wake a thread.
@@ -50,19 +75,51 @@ struct task_struct *kthread_create_on_cpu(int (*threadfn)(void *data),
 	__k;								   \
 })
 
+/**
+ * kthread_run_on_cpu - create and wake a cpu bound thread.
+ * @threadfn: the function to run until signal_pending(current).
+ * @data: data ptr for @threadfn.
+ * @cpu: The cpu on which the thread should be bound,
+ * @namefmt: printf-style name for the thread. Format is restricted
+ *	     to "name.*%u". Code fills in cpu number.
+ *
+ * Description: Convenient wrapper for kthread_create_on_cpu()
+ * followed by wake_up_process().  Returns the kthread or
+ * ERR_PTR(-ENOMEM).
+ */
+static inline struct task_struct *
+kthread_run_on_cpu(int (*threadfn)(void *data), void *data,
+			unsigned int cpu, const char *namefmt)
+{
+	struct task_struct *p;
+
+	p = kthread_create_on_cpu(threadfn, data, cpu, namefmt);
+	if (!IS_ERR(p))
+		wake_up_process(p);
+
+	return p;
+}
+
 void free_kthread_struct(struct task_struct *k);
 void kthread_bind(struct task_struct *k, unsigned int cpu);
 void kthread_bind_mask(struct task_struct *k, const struct cpumask *mask);
+int kthread_affine_preferred(struct task_struct *p, const struct cpumask *mask);
 int kthread_stop(struct task_struct *k);
+int kthread_stop_put(struct task_struct *k);
 bool kthread_should_stop(void);
 bool kthread_should_park(void);
+bool kthread_should_stop_or_park(void);
 bool kthread_freezable_should_stop(bool *was_frozen);
+void *kthread_func(struct task_struct *k);
 void *kthread_data(struct task_struct *k);
 void *kthread_probe_data(struct task_struct *k);
 int kthread_park(struct task_struct *k);
 void kthread_unpark(struct task_struct *k);
 void kthread_parkme(void);
-void kthread_park_complete(struct task_struct *k);
+#define kthread_exit(result) do_exit(result)
+void kthread_complete_and_exit(struct completion *, long) __noreturn;
+int kthreads_update_housekeeping(void);
+void kthread_do_exit(struct kthread *, long);
 
 int kthreadd(void *unused);
 extern struct task_struct *kthreadd_task;
@@ -86,7 +143,7 @@ enum {
 
 struct kthread_worker {
 	unsigned int		flags;
-	spinlock_t		lock;
+	raw_spinlock_t		lock;
 	struct list_head	work_list;
 	struct list_head	delayed_work_list;
 	struct task_struct	*task;
@@ -106,12 +163,6 @@ struct kthread_delayed_work {
 	struct timer_list timer;
 };
 
-#define KTHREAD_WORKER_INIT(worker)	{				\
-	.lock = __SPIN_LOCK_UNLOCKED((worker).lock),			\
-	.work_list = LIST_HEAD_INIT((worker).work_list),		\
-	.delayed_work_list = LIST_HEAD_INIT((worker).delayed_work_list),\
-	}
-
 #define KTHREAD_WORK_INIT(work, fn)	{				\
 	.node = LIST_HEAD_INIT((work).node),				\
 	.func = (fn),							\
@@ -123,28 +174,12 @@ struct kthread_delayed_work {
 				     TIMER_IRQSAFE),			\
 	}
 
-#define DEFINE_KTHREAD_WORKER(worker)					\
-	struct kthread_worker worker = KTHREAD_WORKER_INIT(worker)
-
 #define DEFINE_KTHREAD_WORK(work, fn)					\
 	struct kthread_work work = KTHREAD_WORK_INIT(work, fn)
 
 #define DEFINE_KTHREAD_DELAYED_WORK(dwork, fn)				\
 	struct kthread_delayed_work dwork =				\
 		KTHREAD_DELAYED_WORK_INIT(dwork, fn)
-
-/*
- * kthread_worker.lock needs its own lockdep class key when defined on
- * stack with lockdep enabled.  Use the following macros in such cases.
- */
-#ifdef CONFIG_LOCKDEP
-# define KTHREAD_WORKER_INIT_ONSTACK(worker)				\
-	({ kthread_init_worker(&worker); worker; })
-# define DEFINE_KTHREAD_WORKER_ONSTACK(worker)				\
-	struct kthread_worker worker = KTHREAD_WORKER_INIT_ONSTACK(worker)
-#else
-# define DEFINE_KTHREAD_WORKER_ONSTACK(worker) DEFINE_KTHREAD_WORKER(worker)
-#endif
 
 extern void __kthread_init_worker(struct kthread_worker *worker,
 			const char *name, struct lock_class_key *key);
@@ -165,20 +200,65 @@ extern void __kthread_init_worker(struct kthread_worker *worker,
 #define kthread_init_delayed_work(dwork, fn)				\
 	do {								\
 		kthread_init_work(&(dwork)->work, (fn));		\
-		__init_timer(&(dwork)->timer,				\
+		timer_setup(&(dwork)->timer,				\
 			     kthread_delayed_work_timer_fn,		\
 			     TIMER_IRQSAFE);				\
 	} while (0)
 
 int kthread_worker_fn(void *worker_ptr);
 
-__printf(2, 3)
-struct kthread_worker *
-kthread_create_worker(unsigned int flags, const char namefmt[], ...);
+__printf(3, 4)
+struct kthread_worker *kthread_create_worker_on_node(unsigned int flags,
+						     int node,
+						     const char namefmt[], ...);
 
-__printf(3, 4) struct kthread_worker *
+#define kthread_create_worker(flags, namefmt, ...) \
+	kthread_create_worker_on_node(flags, NUMA_NO_NODE, namefmt, ## __VA_ARGS__);
+
+/**
+ * kthread_run_worker - create and wake a kthread worker.
+ * @flags: flags modifying the default behavior of the worker
+ * @namefmt: printf-style name for the thread.
+ *
+ * Description: Convenient wrapper for kthread_create_worker() followed by
+ * wake_up_process().  Returns the kthread_worker or ERR_PTR(-ENOMEM).
+ */
+#define kthread_run_worker(flags, namefmt, ...)					\
+({										\
+	struct kthread_worker *__kw						\
+		= kthread_create_worker(flags, namefmt, ## __VA_ARGS__);	\
+	if (!IS_ERR(__kw))							\
+		wake_up_process(__kw->task);					\
+	__kw;									\
+})
+
+struct kthread_worker *
 kthread_create_worker_on_cpu(int cpu, unsigned int flags,
-			     const char namefmt[], ...);
+			     const char namefmt[]);
+
+/**
+ * kthread_run_worker_on_cpu - create and wake a cpu bound kthread worker.
+ * @cpu: CPU number
+ * @flags: flags modifying the default behavior of the worker
+ * @namefmt: printf-style name for the thread. Format is restricted
+ *	     to "name.*%u". Code fills in cpu number.
+ *
+ * Description: Convenient wrapper for kthread_create_worker_on_cpu()
+ * followed by wake_up_process().  Returns the kthread_worker or
+ * ERR_PTR(-ENOMEM).
+ */
+static inline struct kthread_worker *
+kthread_run_worker_on_cpu(int cpu, unsigned int flags,
+			  const char namefmt[])
+{
+	struct kthread_worker *kw;
+
+	kw = kthread_create_worker_on_cpu(cpu, flags, namefmt);
+	if (!IS_ERR(kw))
+		wake_up_process(kw->task);
+
+	return kw;
+}
 
 bool kthread_queue_work(struct kthread_worker *worker,
 			struct kthread_work *work);
@@ -199,14 +279,15 @@ bool kthread_cancel_delayed_work_sync(struct kthread_delayed_work *work);
 
 void kthread_destroy_worker(struct kthread_worker *worker);
 
+void kthread_use_mm(struct mm_struct *mm);
+void kthread_unuse_mm(struct mm_struct *mm);
+
+struct cgroup_subsys_state;
+
 #ifdef CONFIG_BLK_CGROUP
 void kthread_associate_blkcg(struct cgroup_subsys_state *css);
 struct cgroup_subsys_state *kthread_blkcg(void);
 #else
 static inline void kthread_associate_blkcg(struct cgroup_subsys_state *css) { }
-static inline struct cgroup_subsys_state *kthread_blkcg(void)
-{
-	return NULL;
-}
 #endif
 #endif /* _LINUX_KTHREAD_H */

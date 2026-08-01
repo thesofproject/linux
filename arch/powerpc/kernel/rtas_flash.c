@@ -1,10 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  c 2001 PPC 64 Team, IBM Corp
- *
- *      This program is free software; you can redistribute it and/or
- *      modify it under the terms of the GNU General Public License
- *      as published by the Free Software Foundation; either version
- *      2 of the License, or (at your option) any later version.
  *
  * /proc/powerpc/rtas/firmware_flash interface
  *
@@ -124,7 +120,7 @@ static struct kmem_cache *flash_block_cache = NULL;
 /*
  * Local copy of the flash block list.
  *
- * The rtas_firmware_flash_list varable will be
+ * The rtas_firmware_flash_list variable will be
  * set once the data is fully read.
  *
  * For convenience as we build the list we use virtual addrs,
@@ -316,13 +312,13 @@ static ssize_t rtas_flash_write(struct file *file, const char __user *buffer,
 {
 	struct rtas_update_flash_t *const uf = &rtas_update_flash_data;
 	char *p;
-	int next_free, rc;
+	int next_free;
 	struct flash_block_list *fl;
 
-	mutex_lock(&rtas_update_flash_mutex);
+	guard(mutex)(&rtas_update_flash_mutex);
 
 	if (uf->status == FLASH_AUTH || count == 0)
-		goto out;	/* discard data */
+		return count;	/* discard data */
 
 	/* In the case that the image is not ready for flashing, the memory
 	 * allocated for the block list will be freed upon the release of the 
@@ -331,7 +327,7 @@ static ssize_t rtas_flash_write(struct file *file, const char __user *buffer,
 	if (uf->flist == NULL) {
 		uf->flist = kmem_cache_zalloc(flash_block_cache, GFP_KERNEL);
 		if (!uf->flist)
-			goto nomem;
+			return -ENOMEM;
 	}
 
 	fl = uf->flist;
@@ -342,7 +338,7 @@ static ssize_t rtas_flash_write(struct file *file, const char __user *buffer,
 		/* Need to allocate another block_list */
 		fl->next = kmem_cache_zalloc(flash_block_cache, GFP_KERNEL);
 		if (!fl->next)
-			goto nomem;
+			return -ENOMEM;
 		fl = fl->next;
 		next_free = 0;
 	}
@@ -351,25 +347,17 @@ static ssize_t rtas_flash_write(struct file *file, const char __user *buffer,
 		count = RTAS_BLK_SIZE;
 	p = kmem_cache_zalloc(flash_block_cache, GFP_KERNEL);
 	if (!p)
-		goto nomem;
+		return -ENOMEM;
 	
 	if(copy_from_user(p, buffer, count)) {
 		kmem_cache_free(flash_block_cache, p);
-		rc = -EFAULT;
-		goto error;
+		return -EFAULT;
 	}
 	fl->blocks[next_free].data = p;
 	fl->blocks[next_free].length = count;
 	fl->num_blocks++;
-out:
-	mutex_unlock(&rtas_update_flash_mutex);
-	return count;
 
-nomem:
-	rc = -ENOMEM;
-error:
-	mutex_unlock(&rtas_update_flash_mutex);
-	return rc;
+	return count;
 }
 
 /*
@@ -380,7 +368,7 @@ static void manage_flash(struct rtas_manage_flash_t *args_buf, unsigned int op)
 	s32 rc;
 
 	do {
-		rc = rtas_call(rtas_token("ibm,manage-flash-image"), 1, 1,
+		rc = rtas_call(rtas_function_token(RTAS_FN_IBM_MANAGE_FLASH_IMAGE), 1, 1,
 			       NULL, op);
 	} while (rtas_busy_delay(rc));
 
@@ -409,19 +397,18 @@ static ssize_t manage_flash_write(struct file *file, const char __user *buf,
 	static const char reject_str[] = "0";
 	static const char commit_str[] = "1";
 	char stkbuf[10];
-	int op, rc;
+	int op;
 
-	mutex_lock(&rtas_manage_flash_mutex);
+	guard(mutex)(&rtas_manage_flash_mutex);
 
 	if ((args_buf->status == MANAGE_AUTH) || (count == 0))
-		goto out;
+		return count;
 		
 	op = -1;
 	if (buf) {
 		if (count > 9) count = 9;
-		rc = -EFAULT;
 		if (copy_from_user (stkbuf, buf, count))
-			goto error;
+			return -EFAULT;
 		if (strncmp(stkbuf, reject_str, strlen(reject_str)) == 0) 
 			op = RTAS_REJECT_TMP_IMG;
 		else if (strncmp(stkbuf, commit_str, strlen(commit_str)) == 0) 
@@ -429,18 +416,11 @@ static ssize_t manage_flash_write(struct file *file, const char __user *buf,
 	}
 	
 	if (op == -1) {   /* buf is empty, or contains invalid string */
-		rc = -EINVAL;
-		goto error;
+		return -EINVAL;
 	}
 
 	manage_flash(args_buf, op);
-out:
-	mutex_unlock(&rtas_manage_flash_mutex);
 	return count;
-
-error:
-	mutex_unlock(&rtas_manage_flash_mutex);
-	return rc;
 }
 
 /*
@@ -448,7 +428,7 @@ error:
  */
 static void validate_flash(struct rtas_validate_flash_t *args_buf)
 {
-	int token = rtas_token("ibm,validate-flash-image");
+	int token = rtas_function_token(RTAS_FN_IBM_VALIDATE_FLASH_IMAGE);
 	int update_results;
 	s32 rc;	
 
@@ -503,16 +483,14 @@ static ssize_t validate_flash_write(struct file *file, const char __user *buf,
 {
 	struct rtas_validate_flash_t *const args_buf =
 		&rtas_validate_flash_data;
-	int rc;
 
-	mutex_lock(&rtas_validate_flash_mutex);
+	guard(mutex)(&rtas_validate_flash_mutex);
 
 	/* We are only interested in the first 4K of the
 	 * candidate image */
 	if ((*off >= VALIDATE_BUF_SIZE) || 
 		(args_buf->status == VALIDATE_AUTH)) {
 		*off += count;
-		mutex_unlock(&rtas_validate_flash_mutex);
 		return count;
 	}
 
@@ -523,20 +501,14 @@ static ssize_t validate_flash_write(struct file *file, const char __user *buf,
 		args_buf->status = VALIDATE_INCOMPLETE;
 	}
 
-	if (!access_ok(VERIFY_READ, buf, count)) {
-		rc = -EFAULT;
-		goto done;
-	}
-	if (copy_from_user(args_buf->buf + *off, buf, count)) {
-		rc = -EFAULT;
-		goto done;
-	}
+	if (!access_ok(buf, count))
+		return -EFAULT;
+
+	if (copy_from_user(args_buf->buf + *off, buf, count))
+		return -EFAULT;
 
 	*off += count;
-	rc = count;
-done:
-	mutex_unlock(&rtas_validate_flash_mutex);
-	return rc;
+	return count;
 }
 
 static int validate_flash_release(struct inode *inode, struct file *file)
@@ -574,7 +546,7 @@ static void rtas_flash_firmware(int reboot_type)
 		return;
 	}
 
-	update_token = rtas_token("ibm,update-flash-64-and-reboot");
+	update_token = rtas_function_token(RTAS_FN_IBM_UPDATE_FLASH_64_AND_REBOOT);
 	if (update_token == RTAS_UNKNOWN_SERVICE) {
 		printk(KERN_ALERT "FLASH: ibm,update-flash-64-and-reboot "
 		       "is not available -- not a service partition?\n");
@@ -657,46 +629,46 @@ static void rtas_flash_firmware(int reboot_type)
  */
 struct rtas_flash_file {
 	const char *filename;
-	const char *rtas_call_name;
+	const rtas_fn_handle_t handle;
 	int *status;
-	const struct file_operations fops;
+	const struct proc_ops ops;
 };
 
 static const struct rtas_flash_file rtas_flash_files[] = {
 	{
 		.filename	= "powerpc/rtas/" FIRMWARE_FLASH_NAME,
-		.rtas_call_name	= "ibm,update-flash-64-and-reboot",
+		.handle		= RTAS_FN_IBM_UPDATE_FLASH_64_AND_REBOOT,
 		.status		= &rtas_update_flash_data.status,
-		.fops.read	= rtas_flash_read_msg,
-		.fops.write	= rtas_flash_write,
-		.fops.release	= rtas_flash_release,
-		.fops.llseek	= default_llseek,
+		.ops.proc_read	= rtas_flash_read_msg,
+		.ops.proc_write	= rtas_flash_write,
+		.ops.proc_release = rtas_flash_release,
+		.ops.proc_lseek	= default_llseek,
 	},
 	{
 		.filename	= "powerpc/rtas/" FIRMWARE_UPDATE_NAME,
-		.rtas_call_name	= "ibm,update-flash-64-and-reboot",
+		.handle		= RTAS_FN_IBM_UPDATE_FLASH_64_AND_REBOOT,
 		.status		= &rtas_update_flash_data.status,
-		.fops.read	= rtas_flash_read_num,
-		.fops.write	= rtas_flash_write,
-		.fops.release	= rtas_flash_release,
-		.fops.llseek	= default_llseek,
+		.ops.proc_read	= rtas_flash_read_num,
+		.ops.proc_write	= rtas_flash_write,
+		.ops.proc_release = rtas_flash_release,
+		.ops.proc_lseek	= default_llseek,
 	},
 	{
 		.filename	= "powerpc/rtas/" VALIDATE_FLASH_NAME,
-		.rtas_call_name	= "ibm,validate-flash-image",
+		.handle		= RTAS_FN_IBM_VALIDATE_FLASH_IMAGE,
 		.status		= &rtas_validate_flash_data.status,
-		.fops.read	= validate_flash_read,
-		.fops.write	= validate_flash_write,
-		.fops.release	= validate_flash_release,
-		.fops.llseek	= default_llseek,
+		.ops.proc_read	= validate_flash_read,
+		.ops.proc_write	= validate_flash_write,
+		.ops.proc_release = validate_flash_release,
+		.ops.proc_lseek	= default_llseek,
 	},
 	{
 		.filename	= "powerpc/rtas/" MANAGE_FLASH_NAME,
-		.rtas_call_name	= "ibm,manage-flash-image",
+		.handle		= RTAS_FN_IBM_MANAGE_FLASH_IMAGE,
 		.status		= &rtas_manage_flash_data.status,
-		.fops.read	= manage_flash_read,
-		.fops.write	= manage_flash_write,
-		.fops.llseek	= default_llseek,
+		.ops.proc_read	= manage_flash_read,
+		.ops.proc_write	= manage_flash_write,
+		.ops.proc_lseek	= default_llseek,
 	}
 };
 
@@ -704,8 +676,7 @@ static int __init rtas_flash_init(void)
 {
 	int i;
 
-	if (rtas_token("ibm,update-flash-64-and-reboot") ==
-		       RTAS_UNKNOWN_SERVICE) {
+	if (rtas_function_token(RTAS_FN_IBM_UPDATE_FLASH_64_AND_REBOOT) == RTAS_UNKNOWN_SERVICE) {
 		pr_info("rtas_flash: no firmware flash support\n");
 		return -EINVAL;
 	}
@@ -714,9 +685,9 @@ static int __init rtas_flash_init(void)
 	if (!rtas_validate_flash_data.buf)
 		return -ENOMEM;
 
-	flash_block_cache = kmem_cache_create("rtas_flash_cache",
-					      RTAS_BLK_SIZE, RTAS_BLK_SIZE, 0,
-					      NULL);
+	flash_block_cache = kmem_cache_create_usercopy("rtas_flash_cache",
+						       RTAS_BLK_SIZE, RTAS_BLK_SIZE,
+						       0, 0, RTAS_BLK_SIZE, NULL);
 	if (!flash_block_cache) {
 		printk(KERN_ERR "%s: failed to create block cache\n",
 				__func__);
@@ -727,14 +698,14 @@ static int __init rtas_flash_init(void)
 		const struct rtas_flash_file *f = &rtas_flash_files[i];
 		int token;
 
-		if (!proc_create(f->filename, 0600, NULL, &f->fops))
+		if (!proc_create(f->filename, 0600, NULL, &f->ops))
 			goto enomem;
 
 		/*
 		 * This code assumes that the status int is the first member of the
 		 * struct
 		 */
-		token = rtas_token(f->rtas_call_name);
+		token = rtas_function_token(f->handle);
 		if (token == RTAS_UNKNOWN_SERVICE)
 			*f->status = FLASH_AUTH;
 		else
@@ -778,4 +749,5 @@ static void __exit rtas_flash_cleanup(void)
 
 module_init(rtas_flash_init);
 module_exit(rtas_flash_cleanup);
+MODULE_DESCRIPTION("PPC procfs firmware flash interface");
 MODULE_LICENSE("GPL");

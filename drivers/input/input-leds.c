@@ -1,11 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * LED support for the input layer
  *
  * Copyright 2010-2015 Samuel Thibault <samuel.thibault@ens-lyon.org>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -21,6 +18,12 @@
 #define VT_TRIGGER(_name)	.trigger = NULL
 #endif
 
+#if IS_ENABLED(CONFIG_SND_CTL_LED)
+#define AUDIO_TRIGGER(_name)	.trigger = _name
+#else
+#define AUDIO_TRIGGER(_name)	.trigger = NULL
+#endif
+
 static const struct {
 	const char *name;
 	const char *trigger;
@@ -32,7 +35,7 @@ static const struct {
 	[LED_KANA]	= { "kana", VT_TRIGGER("kbd-kanalock") },
 	[LED_SLEEP]	= { "sleep" } ,
 	[LED_SUSPEND]	= { "suspend" },
-	[LED_MUTE]	= { "mute" },
+	[LED_MUTE]	= { "mute", AUDIO_TRIGGER("audio-mute") },
 	[LED_MISC]	= { "misc" },
 	[LED_MAIL]	= { "mail" },
 	[LED_CHARGING]	= { "charging" },
@@ -47,7 +50,7 @@ struct input_led {
 struct input_leds {
 	struct input_handle handle;
 	unsigned int num_leds;
-	struct input_led leds[];
+	struct input_led leds[] __counted_by(num_leds);
 };
 
 static enum led_brightness input_leds_brightness_get(struct led_classdev *cdev)
@@ -98,8 +101,7 @@ static int input_leds_connect(struct input_handler *handler,
 	if (!num_leds)
 		return -ENXIO;
 
-	leds = kzalloc(sizeof(*leds) + num_leds * sizeof(*leds->leds),
-		       GFP_KERNEL);
+	leds = kzalloc_flex(*leds, leds, num_leds);
 	if (!leds)
 		return -ENOMEM;
 

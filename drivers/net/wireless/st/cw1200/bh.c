@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Device handling thread implementation for mac80211 ST-Ericsson CW1200 drivers
  *
@@ -8,10 +9,6 @@
  * ST-Ericsson UMAC CW1200 driver, which is
  * Copyright (c) 2010, ST-Ericsson
  * Author: Ajitpal Singh <ajitpal.singh@stericsson.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/module.h>
@@ -45,9 +42,6 @@ enum cw1200_bh_pm_state {
 	CW1200_BH_RESUME,
 };
 
-typedef int (*cw1200_wsm_handler)(struct cw1200_common *priv,
-	u8 *data, size_t size);
-
 static void cw1200_bh_work(struct work_struct *work)
 {
 	struct cw1200_common *priv =
@@ -60,8 +54,9 @@ int cw1200_register_bh(struct cw1200_common *priv)
 	int err = 0;
 	/* Realtime workqueue */
 	priv->bh_workqueue = alloc_workqueue("cw1200_bh",
-				WQ_MEM_RECLAIM | WQ_HIGHPRI
-				| WQ_CPU_INTENSIVE, 1);
+				WQ_MEM_RECLAIM | WQ_HIGHPRI |
+				WQ_CPU_INTENSIVE | WQ_PERCPU,
+				1);
 
 	if (!priv->bh_workqueue)
 		return -ENOMEM;
@@ -88,10 +83,8 @@ int cw1200_register_bh(struct cw1200_common *priv)
 
 void cw1200_unregister_bh(struct cw1200_common *priv)
 {
-	atomic_add(1, &priv->bh_term);
+	atomic_inc(&priv->bh_term);
 	wake_up(&priv->bh_wq);
-
-	flush_workqueue(priv->bh_workqueue);
 
 	destroy_workqueue(priv->bh_workqueue);
 	priv->bh_workqueue = NULL;
@@ -110,7 +103,7 @@ void cw1200_irq_handler(struct cw1200_common *priv)
 	if (/* WARN_ON */(priv->bh_error))
 		return;
 
-	if (atomic_add_return(1, &priv->bh_rx) == 1)
+	if (atomic_inc_return(&priv->bh_rx) == 1)
 		wake_up(&priv->bh_wq);
 }
 EXPORT_SYMBOL_GPL(cw1200_irq_handler);
@@ -123,7 +116,7 @@ void cw1200_bh_wakeup(struct cw1200_common *priv)
 		return;
 	}
 
-	if (atomic_add_return(1, &priv->bh_tx) == 1)
+	if (atomic_inc_return(&priv->bh_tx) == 1)
 		wake_up(&priv->bh_wq);
 }
 
@@ -325,28 +318,24 @@ static int cw1200_bh_rx_helper(struct cw1200_common *priv,
 
 	if (wsm_id & 0x0400) {
 		int rc = wsm_release_tx_buffer(priv, 1);
-		if (WARN_ON(rc < 0))
+		if (WARN_ON(rc < 0)) {
+			dev_kfree_skb(skb_rx);
 			return rc;
-		else if (rc > 0)
+		} else if (rc > 0) {
 			*tx = 1;
+		}
 	}
 
 	/* cw1200_wsm_rx takes care on SKB livetime */
 	if (WARN_ON(wsm_handle_rx(priv, wsm_id, wsm, &skb_rx)))
 		goto err;
 
-	if (skb_rx) {
-		dev_kfree_skb(skb_rx);
-		skb_rx = NULL;
-	}
+	dev_kfree_skb(skb_rx);
 
 	return 0;
 
 err:
-	if (skb_rx) {
-		dev_kfree_skb(skb_rx);
-		skb_rx = NULL;
-	}
+	dev_kfree_skb(skb_rx);
 	return -1;
 }
 
@@ -385,7 +374,7 @@ static int cw1200_bh_tx_helper(struct cw1200_common *priv,
 	BUG_ON(tx_len < sizeof(*wsm));
 	BUG_ON(__le16_to_cpu(wsm->len) != tx_len);
 
-	atomic_add(1, &priv->bh_tx);
+	atomic_inc(&priv->bh_tx);
 
 	tx_len = priv->hwbus_ops->align_size(
 		priv->hwbus_priv, tx_len);
@@ -540,7 +529,7 @@ static int cw1200_bh(void *arg)
 			pr_debug("[BH] Device resume.\n");
 			atomic_set(&priv->bh_suspend, CW1200_BH_RESUMED);
 			wake_up(&priv->bh_evt_wq);
-			atomic_add(1, &priv->bh_rx);
+			atomic_inc(&priv->bh_rx);
 			goto done;
 		}
 

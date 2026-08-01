@@ -374,6 +374,7 @@ static int finish_dma_single(struct cvm_mmc_host *host, struct mmc_data *data)
 {
 	data->bytes_xfered = data->blocks * data->blksz;
 	data->error = 0;
+	dma_unmap_sg(host->dev, data->sg, data->sg_len, get_dma_dir(data));
 	return 1;
 }
 
@@ -435,12 +436,11 @@ irqreturn_t cvm_mmc_interrupt(int irq, void *dev_id)
 {
 	struct cvm_mmc_host *host = dev_id;
 	struct mmc_request *req;
-	unsigned long flags = 0;
 	u64 emm_int, rsp_sts;
 	bool host_done;
 
 	if (host->need_irq_handler_lock)
-		spin_lock_irqsave(&host->irq_handler_lock, flags);
+		spin_lock(&host->irq_handler_lock);
 	else
 		__acquire(&host->irq_handler_lock);
 
@@ -503,7 +503,7 @@ no_req_done:
 		host->release_bus(host);
 out:
 	if (host->need_irq_handler_lock)
-		spin_unlock_irqrestore(&host->irq_handler_lock, flags);
+		spin_unlock(&host->irq_handler_lock);
 	else
 		__release(&host->irq_handler_lock);
 	return IRQ_RETVAL(emm_int != 0);
@@ -656,8 +656,7 @@ static void cvm_mmc_dma_request(struct mmc_host *mmc,
 
 	if (!mrq->data || !mrq->data->sg || !mrq->data->sg_len ||
 	    !mrq->stop || mrq->stop->opcode != MMC_STOP_TRANSMISSION) {
-		dev_err(&mmc->card->dev,
-			"Error: cmv_mmc_dma_request no data\n");
+		dev_err(&mmc->card->dev, "Error: %s no data\n", __func__);
 		goto error;
 	}
 
@@ -906,9 +905,7 @@ static void cvm_mmc_set_clock(struct cvm_mmc_slot *slot, unsigned int clock)
 {
 	struct mmc_host *mmc = slot->mmc;
 
-	clock = min(clock, mmc->f_max);
-	clock = max(clock, mmc->f_min);
-	slot->clock = clock;
+	slot->clock = clamp(clock, mmc->f_min, mmc->f_max);
 }
 
 static int cvm_mmc_init_lowlevel(struct cvm_mmc_slot *slot)
@@ -1013,7 +1010,7 @@ int cvm_mmc_of_slot_probe(struct device *dev, struct cvm_mmc_host *host)
 	struct mmc_host *mmc;
 	int ret, id;
 
-	mmc = mmc_alloc_host(sizeof(struct cvm_mmc_slot), dev);
+	mmc = devm_mmc_alloc_host(dev, sizeof(*slot));
 	if (!mmc)
 		return -ENOMEM;
 
@@ -1023,7 +1020,7 @@ int cvm_mmc_of_slot_probe(struct device *dev, struct cvm_mmc_host *host)
 
 	ret = cvm_mmc_of_parse(dev, slot);
 	if (ret < 0)
-		goto error;
+		return ret;
 	id = ret;
 
 	/* Set up host parameters */
@@ -1037,8 +1034,7 @@ int cvm_mmc_of_slot_probe(struct device *dev, struct cvm_mmc_host *host)
 	 * Disable bounce buffers for max_segs = 1
 	 */
 	mmc->caps |= MMC_CAP_MMC_HIGHSPEED | MMC_CAP_SD_HIGHSPEED |
-		     MMC_CAP_ERASE | MMC_CAP_CMD23 | MMC_CAP_POWER_OFF_CARD |
-		     MMC_CAP_3_3V_DDR;
+		     MMC_CAP_CMD23 | MMC_CAP_POWER_OFF_CARD | MMC_CAP_3_3V_DDR;
 
 	if (host->use_sg)
 		mmc->max_segs = 16;
@@ -1046,7 +1042,8 @@ int cvm_mmc_of_slot_probe(struct device *dev, struct cvm_mmc_host *host)
 		mmc->max_segs = 1;
 
 	/* DMA size field can address up to 8 MB */
-	mmc->max_seg_size = 8 * 1024 * 1024;
+	mmc->max_seg_size = min_t(unsigned int, 8 * 1024 * 1024,
+				  dma_get_max_seg_size(host->dev));
 	mmc->max_req_size = mmc->max_seg_size;
 	/* External DMA is in 512 byte blocks */
 	mmc->max_blk_size = 512;
@@ -1067,12 +1064,7 @@ int cvm_mmc_of_slot_probe(struct device *dev, struct cvm_mmc_host *host)
 	if (ret) {
 		dev_err(dev, "mmc_add_host() returned %d\n", ret);
 		slot->host->slot[id] = NULL;
-		goto error;
 	}
-	return 0;
-
-error:
-	mmc_free_host(slot->mmc);
 	return ret;
 }
 
@@ -1080,6 +1072,5 @@ int cvm_mmc_of_slot_remove(struct cvm_mmc_slot *slot)
 {
 	mmc_remove_host(slot->mmc);
 	slot->host->slot[slot->bus_id] = NULL;
-	mmc_free_host(slot->mmc);
 	return 0;
 }

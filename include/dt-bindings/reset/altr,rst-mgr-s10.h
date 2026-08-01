@@ -1,18 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (C) 2016 Intel Corporation. All rights reserved
  * Copyright (C) 2016 Altera Corporation. All rights reserved
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  * derived from Steffen Trumtrar's "altr,rst-mgr-a10.h"
  */
@@ -33,7 +22,7 @@
 #define USB0_RESET		35
 #define USB1_RESET		36
 #define NAND_RESET		37
-/* 38 is empty */
+#define COMBOPHY_RESET		38
 #define SDMMC_RESET		39
 #define EMAC0_OCP_RESET		40
 #define EMAC1_OCP_RESET		41
@@ -74,12 +63,15 @@
 #define I2C2_RESET		74
 #define I2C3_RESET		75
 #define I2C4_RESET		76
-/* 77-79 is empty */
+#define I3C0_RESET		77
+#define I3C1_RESET		78
+/* 79 is empty */
 #define UART0_RESET		80
 #define UART1_RESET		81
 /* 82-87 is empty */
 #define GPIO0_RESET		88
 #define GPIO1_RESET		89
+#define WATCHDOG4_RESET		90
 
 /* BRGMODRST */
 #define SOC2FPGA_RESET		96

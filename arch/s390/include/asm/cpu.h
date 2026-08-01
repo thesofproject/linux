@@ -9,9 +9,10 @@
 #ifndef _ASM_S390_CPU_H
 #define _ASM_S390_CPU_H
 
-#ifndef __ASSEMBLY__
+#ifndef __ASSEMBLER__
 
 #include <linux/types.h>
+#include <linux/jump_label.h>
 
 struct cpuid
 {
@@ -21,5 +22,7 @@ struct cpuid
 	unsigned int unused  : 16;
 } __attribute__ ((packed, aligned(8)));
 
-#endif /* __ASSEMBLY__ */
+DECLARE_STATIC_KEY_FALSE(cpu_has_bear);
+
+#endif /* __ASSEMBLER__ */
 #endif /* _ASM_S390_CPU_H */

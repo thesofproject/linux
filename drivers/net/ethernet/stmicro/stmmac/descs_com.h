@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*******************************************************************************
   Header File to describe Normal/enhanced descriptor functions used for RING
   and CHAINED modes.
@@ -8,17 +9,6 @@
   descriptors in case of the DMA is configured to work in chained or
   in ring mode.
 
-  This program is free software; you can redistribute it and/or modify it
-  under the terms and conditions of the GNU General Public License,
-  version 2, as published by the Free Software Foundation.
-
-  This program is distributed in the hope it will be useful, but WITHOUT
-  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
-  more details.
-
-  The full GNU General Public License is included in this distribution in
-  the file called "COPYING".
 
   Author: Giuseppe Cavallaro <peppe.cavallaro@st.com>
 *******************************************************************************/
@@ -29,11 +19,12 @@
 /* Specific functions used for Ring mode */
 
 /* Enhanced descriptors */
-static inline void ehn_desc_rx_set_on_ring(struct dma_desc *p, int end)
+static inline void ehn_desc_rx_set_on_ring(struct dma_desc *p, int end,
+					   int bfsize)
 {
-	p->des1 |= cpu_to_le32(((BUF_SIZE_8KiB - 1)
-			<< ERDES1_BUFFER2_SIZE_SHIFT)
-		   & ERDES1_BUFFER2_SIZE_MASK);
+	if (bfsize == BUF_SIZE_16KiB)
+		p->des1 |= cpu_to_le32(FIELD_PREP(ERDES1_BUFFER2_SIZE_MASK,
+						  BUF_SIZE_8KiB));
 
 	if (end)
 		p->des1 |= cpu_to_le32(ERDES1_END_RING);
@@ -47,23 +38,32 @@ static inline void enh_desc_end_tx_desc_on_ring(struct dma_desc *p, int end)
 		p->des0 &= cpu_to_le32(~ETDES0_END_RING);
 }
 
+/* The maximum buffer 1 size is 8KiB - 1. However, we limit to 4KiB. */
 static inline void enh_set_tx_desc_len_on_ring(struct dma_desc *p, int len)
 {
-	if (unlikely(len > BUF_SIZE_4KiB)) {
-		p->des1 |= cpu_to_le32((((len - BUF_SIZE_4KiB)
-					<< ETDES1_BUFFER2_SIZE_SHIFT)
-			    & ETDES1_BUFFER2_SIZE_MASK) | (BUF_SIZE_4KiB
-			    & ETDES1_BUFFER1_SIZE_MASK));
-	} else
-		p->des1 |= cpu_to_le32((len & ETDES1_BUFFER1_SIZE_MASK));
+	unsigned int buffer1_max_length = BUF_SIZE_4KiB;
+
+	if (unlikely(len > buffer1_max_length)) {
+		p->des1 |= cpu_to_le32(FIELD_PREP(ETDES1_BUFFER2_SIZE_MASK,
+						  len - buffer1_max_length) |
+				       FIELD_PREP(ETDES1_BUFFER1_SIZE_MASK,
+						  buffer1_max_length));
+	} else {
+		p->des1 |= cpu_to_le32(FIELD_PREP(ETDES1_BUFFER1_SIZE_MASK,
+						  len));
+	}
 }
 
 /* Normal descriptors */
-static inline void ndesc_rx_set_on_ring(struct dma_desc *p, int end)
+static inline void ndesc_rx_set_on_ring(struct dma_desc *p, int end, int bfsize)
 {
-	p->des1 |= cpu_to_le32(((BUF_SIZE_2KiB - 1)
-				<< RDES1_BUFFER2_SIZE_SHIFT)
-		    & RDES1_BUFFER2_SIZE_MASK);
+	if (bfsize >= BUF_SIZE_2KiB) {
+		int bfsize2;
+
+		bfsize2 = min(bfsize - BUF_SIZE_2KiB + 1, BUF_SIZE_2KiB - 1);
+		p->des1 |= cpu_to_le32(FIELD_PREP(RDES1_BUFFER2_SIZE_MASK,
+						  bfsize2));
+	}
 
 	if (end)
 		p->des1 |= cpu_to_le32(RDES1_END_RING);
@@ -77,16 +77,20 @@ static inline void ndesc_end_tx_desc_on_ring(struct dma_desc *p, int end)
 		p->des1 &= cpu_to_le32(~TDES1_END_RING);
 }
 
+/* The maximum buffer 1 size is 2KiB - 1, limited by the mask width */
 static inline void norm_set_tx_desc_len_on_ring(struct dma_desc *p, int len)
 {
-	if (unlikely(len > BUF_SIZE_2KiB)) {
-		unsigned int buffer1 = (BUF_SIZE_2KiB - 1)
-					& TDES1_BUFFER1_SIZE_MASK;
-		p->des1 |= cpu_to_le32((((len - buffer1)
-					<< TDES1_BUFFER2_SIZE_SHIFT)
-				& TDES1_BUFFER2_SIZE_MASK) | buffer1);
-	} else
-		p->des1 |= cpu_to_le32((len & TDES1_BUFFER1_SIZE_MASK));
+	unsigned int buffer1_max_length = BUF_SIZE_2KiB - 1;
+
+	if (unlikely(len > buffer1_max_length)) {
+		p->des1 |= cpu_to_le32(FIELD_PREP(TDES1_BUFFER2_SIZE_MASK,
+						  len - buffer1_max_length) |
+				       FIELD_PREP(TDES1_BUFFER1_SIZE_MASK,
+						  buffer1_max_length));
+	} else {
+		p->des1 |= cpu_to_le32(FIELD_PREP(TDES1_BUFFER1_SIZE_MASK,
+						  len));
+	}
 }
 
 /* Specific functions used for Chain mode */

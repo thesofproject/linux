@@ -1,52 +1,10 @@
-#ifndef DEF_CHIP_REG
-#define DEF_CHIP_REG
-
+/* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
  * Copyright(c) 2015, 2016 Intel Corporation.
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * BSD LICENSE
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  - Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  - Neither the name of Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
  */
+
+#ifndef DEF_CHIP_REG
+#define DEF_CHIP_REG
 
 #define CORE		0x000000000000
 #define CCE			(CORE + 0x000000000000)
@@ -97,8 +55,11 @@
 #define DCC_CFG_PORT_CONFIG_MTU_CAP_SHIFT 32
 #define DCC_CFG_PORT_CONFIG_MTU_CAP_SMASK 0x700000000ull
 #define DCC_CFG_RESET (DCC_CSRS + 0x000000000000)
-#define DCC_CFG_RESET_RESET_LCB_SHIFT 0
-#define DCC_CFG_RESET_RESET_RX_FPE_SHIFT 2
+#define DCC_CFG_RESET_RESET_LCB          BIT_ULL(0)
+#define DCC_CFG_RESET_RESET_TX_FPE       BIT_ULL(1)
+#define DCC_CFG_RESET_RESET_RX_FPE       BIT_ULL(2)
+#define DCC_CFG_RESET_RESET_8051         BIT_ULL(3)
+#define DCC_CFG_RESET_ENABLE_CCLK_BCC    BIT_ULL(4)
 #define DCC_CFG_SC_VL_TABLE_15_0 (DCC_CSRS + 0x000000000028)
 #define DCC_CFG_SC_VL_TABLE_15_0_ENTRY0_SHIFT 0
 #define DCC_CFG_SC_VL_TABLE_15_0_ENTRY10_SHIFT 40
@@ -377,6 +338,10 @@
 #define DC_LCB_PRF_TX_FLIT_CNT (DC_LCB_CSRS + 0x000000000418)
 #define DC_LCB_STS_LINK_TRANSFER_ACTIVE (DC_LCB_CSRS + 0x000000000468)
 #define DC_LCB_STS_ROUND_TRIP_LTP_CNT (DC_LCB_CSRS + 0x0000000004B0)
+#define RCV_LENGTH_ERR_CNT 0
+#define RCV_SHORT_ERR_CNT 2
+#define RCV_ICRC_ERR_CNT 6
+#define RCV_EBP_CNT 9
 #define RCV_BUF_OVFL_CNT 10
 #define RCV_CONTEXT_EGR_STALL 22
 #define RCV_DATA_PKT_CNT 0
@@ -635,6 +600,12 @@
 #define RCV_BTH_QP_KDETH_QP_MASK 0xFFull
 #define RCV_BTH_QP_KDETH_QP_SHIFT 16
 #define RCV_BYPASS (RXE + 0x000000000038)
+#define RCV_BYPASS_HDR_SIZE_SHIFT 16
+#define RCV_BYPASS_HDR_SIZE_MASK 0x1Full
+#define RCV_BYPASS_HDR_SIZE_SMASK 0x1F0000ull
+#define RCV_BYPASS_BYPASS_CONTEXT_SHIFT 0
+#define RCV_BYPASS_BYPASS_CONTEXT_MASK 0xFFull
+#define RCV_BYPASS_BYPASS_CONTEXT_SMASK 0xFFull
 #define RCV_CONTEXTS (RXE + 0x000000000010)
 #define RCV_COUNTER_ARRAY32 (RXE + 0x000000000400)
 #define RCV_COUNTER_ARRAY64 (RXE + 0x000000000500)
@@ -869,6 +840,10 @@
 #define SEND_CTRL (TXE + 0x000000000000)
 #define SEND_CTRL_CM_RESET_SMASK 0x4ull
 #define SEND_CTRL_SEND_ENABLE_SMASK 0x1ull
+#define SEND_CTRL_UNSUPPORTED_VL_SHIFT 3
+#define SEND_CTRL_UNSUPPORTED_VL_MASK 0xFFull
+#define SEND_CTRL_UNSUPPORTED_VL_SMASK (SEND_CTRL_UNSUPPORTED_VL_MASK \
+		<< SEND_CTRL_UNSUPPORTED_VL_SHIFT)
 #define SEND_CTRL_VL_ARBITER_ENABLE_SMASK 0x2ull
 #define SEND_CTXT_CHECK_ENABLE (TXE + 0x000000100080)
 #define SEND_CTXT_CHECK_ENABLE_CHECK_BYPASS_VL_MAPPING_SMASK 0x80ull
@@ -922,6 +897,10 @@
 #define SEND_CTXT_CREDIT_CTRL_THRESHOLD_MASK 0x7FFull
 #define SEND_CTXT_CREDIT_CTRL_THRESHOLD_SHIFT 0
 #define SEND_CTXT_CREDIT_CTRL_THRESHOLD_SMASK 0x7FFull
+#define SEND_CTXT_CREDIT_STATUS (TXE + 0x000000100018)
+#define SEND_CTXT_CREDIT_STATUS_CURRENT_FREE_COUNTER_MASK 0x7FFull
+#define SEND_CTXT_CREDIT_STATUS_CURRENT_FREE_COUNTER_SHIFT 32
+#define SEND_CTXT_CREDIT_STATUS_LAST_RETURNED_COUNTER_SMASK 0x7FFull
 #define SEND_CTXT_CREDIT_FORCE (TXE + 0x000000100028)
 #define SEND_CTXT_CREDIT_FORCE_FORCE_RETURN_SMASK 0x1ull
 #define SEND_CTXT_CREDIT_RETURN_ADDR (TXE + 0x000000100020)

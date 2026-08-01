@@ -1,9 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Backlight driver for Analog Devices ADP8860 Backlight Devices
  *
  * Copyright 2009-2010 Analog Devices Inc.
- *
- * Licensed under the GPL-2 or later.
  */
 
 #include <linux/module.h>
@@ -12,7 +11,6 @@
 #include <linux/pm.h>
 #include <linux/platform_device.h>
 #include <linux/i2c.h>
-#include <linux/fb.h>
 #include <linux/backlight.h>
 #include <linux/leds.h>
 #include <linux/slab.h>
@@ -223,7 +221,7 @@ static int adp8860_led_probe(struct i2c_client *client)
 	struct led_info *cur_led;
 	int ret, i;
 
-	led = devm_kzalloc(&client->dev, sizeof(*led) * pdata->num_leds,
+	led = devm_kcalloc(&client->dev, pdata->num_leds, sizeof(*led),
 				GFP_KERNEL);
 	if (led == NULL)
 		return -ENOMEM;
@@ -362,15 +360,7 @@ static int adp8860_bl_set(struct backlight_device *bl, int brightness)
 
 static int adp8860_bl_update_status(struct backlight_device *bl)
 {
-	int brightness = bl->props.brightness;
-
-	if (bl->props.power != FB_BLANK_UNBLANK)
-		brightness = 0;
-
-	if (bl->props.fb_blank != FB_BLANK_UNBLANK)
-		brightness = 0;
-
-	return adp8860_bl_set(bl, brightness);
+	return adp8860_bl_set(bl, backlight_get_brightness(bl));
 }
 
 static int adp8860_bl_get_brightness(struct backlight_device *bl)
@@ -657,9 +647,9 @@ static const struct attribute_group adp8860_bl_attr_group = {
 	.attrs = adp8860_bl_attributes,
 };
 
-static int adp8860_probe(struct i2c_client *client,
-					const struct i2c_device_id *id)
+static int adp8860_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct backlight_device *bl;
 	struct adp8860_bl *data;
 	struct adp8860_backlight_platform_data *pdata =
@@ -690,6 +680,7 @@ static int adp8860_probe(struct i2c_client *client,
 	switch (ADP8860_MANID(reg_val)) {
 	case ADP8863_MANUFID:
 		data->gdwn_dis = !!pdata->gdwn_dis;
+		fallthrough;
 	case ADP8860_MANUFID:
 		data->en_ambl_sens = !!pdata->en_ambl_sens;
 		break;
@@ -761,7 +752,7 @@ out:
 	return ret;
 }
 
-static int adp8860_remove(struct i2c_client *client)
+static void adp8860_remove(struct i2c_client *client)
 {
 	struct adp8860_bl *data = i2c_get_clientdata(client);
 
@@ -773,8 +764,6 @@ static int adp8860_remove(struct i2c_client *client)
 	if (data->en_ambl_sens)
 		sysfs_remove_group(&data->bl->dev.kobj,
 			&adp8860_bl_attr_group);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -801,9 +790,9 @@ static SIMPLE_DEV_PM_OPS(adp8860_i2c_pm_ops, adp8860_i2c_suspend,
 			adp8860_i2c_resume);
 
 static const struct i2c_device_id adp8860_id[] = {
-	{ "adp8860", adp8860 },
-	{ "adp8861", adp8861 },
-	{ "adp8863", adp8863 },
+	{ .name = "adp8860", .driver_data = adp8860 },
+	{ .name = "adp8861", .driver_data = adp8861 },
+	{ .name = "adp8863", .driver_data = adp8863 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, adp8860_id);
@@ -813,13 +802,13 @@ static struct i2c_driver adp8860_driver = {
 		.name	= KBUILD_MODNAME,
 		.pm	= &adp8860_i2c_pm_ops,
 	},
-	.probe    = adp8860_probe,
-	.remove   = adp8860_remove,
+	.probe = adp8860_probe,
+	.remove = adp8860_remove,
 	.id_table = adp8860_id,
 };
 
 module_i2c_driver(adp8860_driver);
 
 MODULE_LICENSE("GPL v2");
-MODULE_AUTHOR("Michael Hennerich <hennerich@blackfin.uclinux.org>");
+MODULE_AUTHOR("Michael Hennerich <michael.hennerich@analog.com>");
 MODULE_DESCRIPTION("ADP8860 Backlight driver");

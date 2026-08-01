@@ -198,7 +198,7 @@
 #define	CST4313_SPROM_OTP_SEL_SHIFT		0
 
 /* 4313 Chip specific ChipControl register bits */
- /* 12 mA drive strengh for later 4313 */
+ /* 12 mA drive strength for later 4313 */
 #define CCTRL_4313_12MA_LED_DRIVE    0x00000007
 
 /* Manufacturer Ids */
@@ -453,7 +453,7 @@ ai_buscore_setup(struct si_info *sii, struct bcma_device *cc)
 	/* get chipcommon chipstatus */
 	sii->chipst = bcma_read32(cc, CHIPCREGOFFS(chipstatus));
 
-	/* get chipcommon capabilites */
+	/* get chipcommon capabilities */
 	sii->pub.cccaps = bcma_read32(cc, CHIPCREGOFFS(capabilities));
 
 	/* get pmu rev and caps */
@@ -512,7 +512,7 @@ ai_attach(struct bcma_bus *pbus)
 	struct si_info *sii;
 
 	/* alloc struct si_info */
-	sii = kzalloc(sizeof(struct si_info), GFP_ATOMIC);
+	sii = kzalloc_obj(*sii, GFP_ATOMIC);
 	if (sii == NULL)
 		return NULL;
 
@@ -530,9 +530,6 @@ void ai_detach(struct si_pub *sih)
 	struct si_info *sii;
 
 	sii = container_of(sih, struct si_info, pub);
-
-	if (sii == NULL)
-		return;
 
 	kfree(sii);
 }
@@ -660,7 +657,7 @@ u16 ai_clkctl_fast_pwrup_delay(struct si_pub *sih)
 }
 
 /*
- *  clock control policy function throught chipcommon
+ *  clock control policy function through chipcommon
  *
  *    set dynamic clk control mode (forceslow, forcefast, dynamic)
  *    returns true if we are forcing fast clock

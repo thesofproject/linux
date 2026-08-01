@@ -20,12 +20,8 @@
 #ifndef __LINUX_MEDIA_H
 #define __LINUX_MEDIA_H
 
-#ifndef __KERNEL__
-#include <stdint.h>
-#endif
 #include <linux/ioctl.h>
 #include <linux/types.h>
-#include <linux/version.h>
 
 struct media_device_info {
 	char driver[16];
@@ -90,12 +86,6 @@ struct media_device_info {
 #define MEDIA_ENT_F_LENS			(MEDIA_ENT_F_OLD_SUBDEV_BASE + 3)
 
 /*
- * Video decoder functions
- */
-#define MEDIA_ENT_F_ATV_DECODER			(MEDIA_ENT_F_OLD_SUBDEV_BASE + 4)
-#define MEDIA_ENT_F_DTV_DECODER			(MEDIA_ENT_F_BASE + 0x6001)
-
-/*
  * Digital TV, analog TV, radio and/or software defined radio tuner functions.
  *
  * It is a responsibility of the master/bridge drivers to add connectors
@@ -132,6 +122,9 @@ struct media_device_info {
 #define MEDIA_ENT_F_PROC_VIDEO_LUT		(MEDIA_ENT_F_BASE + 0x4004)
 #define MEDIA_ENT_F_PROC_VIDEO_SCALER		(MEDIA_ENT_F_BASE + 0x4005)
 #define MEDIA_ENT_F_PROC_VIDEO_STATISTICS	(MEDIA_ENT_F_BASE + 0x4006)
+#define MEDIA_ENT_F_PROC_VIDEO_ENCODER		(MEDIA_ENT_F_BASE + 0x4007)
+#define MEDIA_ENT_F_PROC_VIDEO_DECODER		(MEDIA_ENT_F_BASE + 0x4008)
+#define MEDIA_ENT_F_PROC_VIDEO_ISP		(MEDIA_ENT_F_BASE + 0x4009)
 
 /*
  * Switch and bridge entity functions
@@ -139,12 +132,19 @@ struct media_device_info {
 #define MEDIA_ENT_F_VID_MUX			(MEDIA_ENT_F_BASE + 0x5001)
 #define MEDIA_ENT_F_VID_IF_BRIDGE		(MEDIA_ENT_F_BASE + 0x5002)
 
+/*
+ * Video decoder/encoder functions
+ */
+#define MEDIA_ENT_F_ATV_DECODER			(MEDIA_ENT_F_OLD_SUBDEV_BASE + 4)
+#define MEDIA_ENT_F_DV_DECODER			(MEDIA_ENT_F_BASE + 0x6001)
+#define MEDIA_ENT_F_DV_ENCODER			(MEDIA_ENT_F_BASE + 0x6002)
+
 /* Entity flags */
-#define MEDIA_ENT_FL_DEFAULT			(1 << 0)
-#define MEDIA_ENT_FL_CONNECTOR			(1 << 1)
+#define MEDIA_ENT_FL_DEFAULT			(1U << 0)
+#define MEDIA_ENT_FL_CONNECTOR			(1U << 1)
 
 /* OR with the entity id value to find the next entity */
-#define MEDIA_ENT_ID_FLAG_NEXT			(1 << 31)
+#define MEDIA_ENT_ID_FLAG_NEXT			(1U << 31)
 
 struct media_entity_desc {
 	__u32 id;
@@ -205,9 +205,9 @@ struct media_entity_desc {
 	};
 };
 
-#define MEDIA_PAD_FL_SINK			(1 << 0)
-#define MEDIA_PAD_FL_SOURCE			(1 << 1)
-#define MEDIA_PAD_FL_MUST_CONNECT		(1 << 2)
+#define MEDIA_PAD_FL_SINK			(1U << 0)
+#define MEDIA_PAD_FL_SOURCE			(1U << 1)
+#define MEDIA_PAD_FL_MUST_CONNECT		(1U << 2)
 
 struct media_pad_desc {
 	__u32 entity;		/* entity ID */
@@ -216,13 +216,14 @@ struct media_pad_desc {
 	__u32 reserved[2];
 };
 
-#define MEDIA_LNK_FL_ENABLED			(1 << 0)
-#define MEDIA_LNK_FL_IMMUTABLE			(1 << 1)
-#define MEDIA_LNK_FL_DYNAMIC			(1 << 2)
+#define MEDIA_LNK_FL_ENABLED			(1U << 0)
+#define MEDIA_LNK_FL_IMMUTABLE			(1U << 1)
+#define MEDIA_LNK_FL_DYNAMIC			(1U << 2)
 
 #define MEDIA_LNK_FL_LINK_TYPE			(0xf << 28)
-#  define MEDIA_LNK_FL_DATA_LINK		(0 << 28)
-#  define MEDIA_LNK_FL_INTERFACE_LINK		(1 << 28)
+#  define MEDIA_LNK_FL_DATA_LINK		(0U << 28)
+#  define MEDIA_LNK_FL_INTERFACE_LINK		(1U << 28)
+#  define MEDIA_LNK_FL_ANCILLARY_LINK		(2U << 28)
 
 struct media_link_desc {
 	struct media_pad_desc source;
@@ -260,6 +261,11 @@ struct media_links_enum {
 #define MEDIA_INTF_T_V4L_SWRADIO		(MEDIA_INTF_T_V4L_BASE + 4)
 #define MEDIA_INTF_T_V4L_TOUCH			(MEDIA_INTF_T_V4L_BASE + 5)
 
+#define MEDIA_INTF_T_ALSA_BASE			0x00000300
+#define MEDIA_INTF_T_ALSA_PCM_CAPTURE		(MEDIA_INTF_T_ALSA_BASE)
+#define MEDIA_INTF_T_ALSA_PCM_PLAYBACK		(MEDIA_INTF_T_ALSA_BASE + 1)
+#define MEDIA_INTF_T_ALSA_CONTROL		(MEDIA_INTF_T_ALSA_BASE + 2)
+
 #if defined(__KERNEL__)
 
 /*
@@ -280,11 +286,21 @@ struct media_links_enum {
  * MC next gen API definitions
  */
 
+/*
+ * Appeared in 4.19.0.
+ *
+ * The media_version argument comes from the media_version field in
+ * struct media_device_info.
+ */
+#define MEDIA_V2_ENTITY_HAS_FLAGS(media_version) \
+	((media_version) >= ((4U << 16) | (19U << 8) | 0U))
+
 struct media_v2_entity {
 	__u32 id;
 	char name[64];
 	__u32 function;		/* Main function of the entity */
-	__u32 reserved[6];
+	__u32 flags;
+	__u32 reserved[5];
 } __attribute__ ((packed));
 
 /* Should match the specific fields at media_intf_devnode */
@@ -305,11 +321,21 @@ struct media_v2_interface {
 	};
 } __attribute__ ((packed));
 
+/*
+ * Appeared in 4.19.0.
+ *
+ * The media_version argument comes from the media_version field in
+ * struct media_device_info.
+ */
+#define MEDIA_V2_PAD_HAS_INDEX(media_version) \
+	((media_version) >= ((4U << 16) | (19U << 8) | 0U))
+
 struct media_v2_pad {
 	__u32 id;
 	__u32 entity_id;
 	__u32 flags;
-	__u32 reserved[5];
+	__u32 index;
+	__u32 reserved[4];
 } __attribute__ ((packed));
 
 struct media_v2_link {
@@ -347,8 +373,16 @@ struct media_v2_topology {
 #define MEDIA_IOC_ENUM_LINKS	_IOWR('|', 0x02, struct media_links_enum)
 #define MEDIA_IOC_SETUP_LINK	_IOWR('|', 0x03, struct media_link_desc)
 #define MEDIA_IOC_G_TOPOLOGY	_IOWR('|', 0x04, struct media_v2_topology)
+#define MEDIA_IOC_REQUEST_ALLOC	_IOR ('|', 0x05, int)
 
-#if !defined(__KERNEL__) || defined(__NEED_MEDIA_LEGACY_API)
+/*
+ * These ioctls are called on the request file descriptor as returned
+ * by MEDIA_IOC_REQUEST_ALLOC.
+ */
+#define MEDIA_REQUEST_IOC_QUEUE		_IO('|',  0x80)
+#define MEDIA_REQUEST_IOC_REINIT	_IO('|',  0x81)
+
+#ifndef __KERNEL__
 
 /*
  * Legacy symbols used to avoid userspace compilation breakages.
@@ -380,23 +414,25 @@ struct media_v2_topology {
 #define MEDIA_ENT_T_V4L2_SUBDEV_DECODER		MEDIA_ENT_F_ATV_DECODER
 #define MEDIA_ENT_T_V4L2_SUBDEV_TUNER		MEDIA_ENT_F_TUNER
 
+#define MEDIA_ENT_F_DTV_DECODER			MEDIA_ENT_F_DV_DECODER
+
 /*
- * There is still no ALSA support in the media controller. These
+ * There is still no full ALSA support in the media controller. These
  * defines should not have been added and we leave them here only
  * in case some application tries to use these defines.
+ *
+ * The ALSA defines that are in use have been moved into __KERNEL__
+ * scope. As support gets added to these interface types, they should
+ * be moved into __KERNEL__ scope with the code that uses them.
  */
-#define MEDIA_INTF_T_ALSA_BASE			0x00000300
-#define MEDIA_INTF_T_ALSA_PCM_CAPTURE		(MEDIA_INTF_T_ALSA_BASE)
-#define MEDIA_INTF_T_ALSA_PCM_PLAYBACK		(MEDIA_INTF_T_ALSA_BASE + 1)
-#define MEDIA_INTF_T_ALSA_CONTROL		(MEDIA_INTF_T_ALSA_BASE + 2)
-#define MEDIA_INTF_T_ALSA_COMPRESS		(MEDIA_INTF_T_ALSA_BASE + 3)
-#define MEDIA_INTF_T_ALSA_RAWMIDI		(MEDIA_INTF_T_ALSA_BASE + 4)
-#define MEDIA_INTF_T_ALSA_HWDEP			(MEDIA_INTF_T_ALSA_BASE + 5)
-#define MEDIA_INTF_T_ALSA_SEQUENCER		(MEDIA_INTF_T_ALSA_BASE + 6)
-#define MEDIA_INTF_T_ALSA_TIMER			(MEDIA_INTF_T_ALSA_BASE + 7)
+#define MEDIA_INTF_T_ALSA_COMPRESS             (MEDIA_INTF_T_ALSA_BASE + 3)
+#define MEDIA_INTF_T_ALSA_RAWMIDI              (MEDIA_INTF_T_ALSA_BASE + 4)
+#define MEDIA_INTF_T_ALSA_HWDEP                (MEDIA_INTF_T_ALSA_BASE + 5)
+#define MEDIA_INTF_T_ALSA_SEQUENCER            (MEDIA_INTF_T_ALSA_BASE + 6)
+#define MEDIA_INTF_T_ALSA_TIMER                (MEDIA_INTF_T_ALSA_BASE + 7)
 
 /* Obsolete symbol for media_version, no longer used in the kernel */
-#define MEDIA_API_VERSION			KERNEL_VERSION(0, 1, 0)
+#define MEDIA_API_VERSION			((0U << 16) | (1U << 8) | 0U)
 
 #endif
 

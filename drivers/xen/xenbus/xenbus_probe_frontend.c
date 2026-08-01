@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #define DPRINTK(fmt, ...)				\
@@ -18,7 +19,6 @@
 #include <linux/module.h>
 
 #include <asm/page.h>
-#include <asm/pgtable.h>
 #include <asm/xen/hypervisor.h>
 #include <xen/xenbus.h>
 #include <xen/events.h>
@@ -40,7 +40,7 @@ static int frontend_bus_id(char bus_id[XEN_BUS_ID_SIZE], const char *nodename)
 		return -EINVAL;
 	}
 
-	strlcpy(bus_id, nodename + 1, XEN_BUS_ID_SIZE);
+	strscpy(bus_id, nodename + 1, XEN_BUS_ID_SIZE);
 	if (!strchr(bus_id, '/')) {
 		pr_warn("bus_id %s no slash\n", bus_id);
 		return -EINVAL;
@@ -73,10 +73,10 @@ static int xenbus_probe_frontend(struct xen_bus_type *bus, const char *type,
 	return err;
 }
 
-static int xenbus_uevent_frontend(struct device *_dev,
+static int xenbus_uevent_frontend(const struct device *_dev,
 				  struct kobj_uevent_env *env)
 {
-	struct xenbus_device *dev = to_xenbus_device(_dev);
+	const struct xenbus_device *dev = to_xenbus_device(_dev);
 
 	if (add_uevent_var(env, "MODALIAS=xen:%s", dev->devicetype))
 		return -ENOMEM;
@@ -91,14 +91,14 @@ static void backend_changed(struct xenbus_watch *watch,
 	xenbus_otherend_changed(watch, path, token, 1);
 }
 
-static void xenbus_frontend_delayed_resume(struct work_struct *w)
+static void xenbus_frontend_delayed_restore(struct work_struct *w)
 {
 	struct xenbus_device *xdev = container_of(w, struct xenbus_device, work);
 
-	xenbus_dev_resume(&xdev->dev);
+	xenbus_dev_restore(&xdev->dev);
 }
 
-static int xenbus_frontend_dev_resume(struct device *dev)
+static int xenbus_frontend_dev_restore(struct device *dev)
 {
 	/*
 	 * If xenstored is running in this domain, we cannot access the backend
@@ -112,25 +112,45 @@ static int xenbus_frontend_dev_resume(struct device *dev)
 		return 0;
 	}
 
-	return xenbus_dev_resume(dev);
+	return xenbus_dev_restore(dev);
 }
 
 static int xenbus_frontend_dev_probe(struct device *dev)
 {
 	if (xen_store_domain_type == XS_LOCAL) {
 		struct xenbus_device *xdev = to_xenbus_device(dev);
-		INIT_WORK(&xdev->work, xenbus_frontend_delayed_resume);
+		INIT_WORK(&xdev->work, xenbus_frontend_delayed_restore);
 	}
 
 	return xenbus_dev_probe(dev);
 }
 
+static void xenbus_frontend_dev_shutdown(struct device *_dev)
+{
+	struct xenbus_device *dev = to_xenbus_device(_dev);
+	unsigned long timeout = 5*HZ;
+
+	DPRINTK("%s", dev->nodename);
+
+	get_device(&dev->dev);
+	if (dev->state != XenbusStateConnected) {
+		pr_info("%s: %s: %s != Connected, skipping\n",
+			__func__, dev->nodename, xenbus_strstate(dev->state));
+		goto out;
+	}
+	xenbus_switch_state(dev, XenbusStateClosing);
+	timeout = wait_for_completion_timeout(&dev->down, timeout);
+	if (!timeout)
+		pr_info("%s: %s timeout closing device\n",
+			__func__, dev->nodename);
+ out:
+	put_device(&dev->dev);
+}
+
 static const struct dev_pm_ops xenbus_pm_ops = {
-	.suspend	= xenbus_dev_suspend,
-	.resume		= xenbus_frontend_dev_resume,
-	.freeze		= xenbus_dev_suspend,
-	.thaw		= xenbus_dev_cancel,
-	.restore	= xenbus_dev_resume,
+	.freeze		= xenbus_dev_freeze,
+	.thaw		= xenbus_dev_thaw,
+	.restore	= xenbus_frontend_dev_restore,
 };
 
 static struct xen_bus_type xenbus_frontend = {
@@ -145,7 +165,7 @@ static struct xen_bus_type xenbus_frontend = {
 		.uevent		= xenbus_uevent_frontend,
 		.probe		= xenbus_frontend_dev_probe,
 		.remove		= xenbus_dev_remove,
-		.shutdown	= xenbus_dev_shutdown,
+		.shutdown	= xenbus_frontend_dev_shutdown,
 		.dev_groups	= xenbus_dev_groups,
 
 		.pm		= &xenbus_pm_ops,
@@ -189,19 +209,11 @@ static int is_device_connecting(struct device *dev, void *data, bool ignore_none
 	if (drv && (dev->driver != drv))
 		return 0;
 
-	if (ignore_nonessential) {
-		/* With older QEMU, for PVonHVM guests the guest config files
-		 * could contain: vfb = [ 'vnc=1, vnclisten=0.0.0.0']
-		 * which is nonsensical as there is no PV FB (there can be
-		 * a PVKB) running as HVM guest. */
-
-		if ((strncmp(xendev->nodename, "device/vkbd", 11) == 0))
-			return 0;
-
-		if ((strncmp(xendev->nodename, "device/vfb", 10) == 0))
-			return 0;
-	}
 	xendrv = to_xenbus_driver(dev->driver);
+
+	if (ignore_nonessential && xendrv->not_essential)
+		return 0;
+
 	return (xendev->state < XenbusStateConnected ||
 		(xendev->state == XenbusStateConnected &&
 		 xendrv->is_ready && !xendrv->is_ready(xendev)));
@@ -241,7 +253,7 @@ static int print_device_status(struct device *dev, void *data)
 	} else if (xendev->state < XenbusStateConnected) {
 		enum xenbus_state rstate = XenbusStateUnknown;
 		if (xendev->otherend)
-			rstate = xenbus_read_driver_state(xendev->otherend);
+			rstate = xenbus_read_driver_state(xendev, xendev->otherend);
 		pr_warn("Timeout connecting to device: %s (local state %d, remote state %d)\n",
 			xendev->nodename, xendev->state, rstate);
 	}
@@ -379,12 +391,12 @@ static void xenbus_reset_frontend(char *fe, char *be, int be_state)
 	case XenbusStateConnected:
 		xenbus_printf(XBT_NIL, fe, "state", "%d", XenbusStateClosing);
 		xenbus_reset_wait_for_backend(be, XenbusStateClosing);
-		/* fall through */
+		fallthrough;
 
 	case XenbusStateClosing:
 		xenbus_printf(XBT_NIL, fe, "state", "%d", XenbusStateClosed);
 		xenbus_reset_wait_for_backend(be, XenbusStateClosed);
-		/* fall through */
+		fallthrough;
 
 	case XenbusStateClosed:
 		xenbus_printf(XBT_NIL, fe, "state", "%d", XenbusStateInitialising);
@@ -415,7 +427,7 @@ static void xenbus_check_frontend(char *class, char *dev)
 		printk(KERN_DEBUG "XENBUS: frontend %s %s\n",
 				frontend, xenbus_strstate(fe_state));
 		backend = xenbus_read(XBT_NIL, frontend, "backend", NULL);
-		if (!backend || IS_ERR(backend))
+		if (IS_ERR_OR_NULL(backend))
 			goto out;
 		err = xenbus_scanf(XBT_NIL, backend, "state", "%i", &be_state);
 		if (err == 1)
@@ -499,4 +511,5 @@ static int __init boot_wait_for_devices(void)
 late_initcall(boot_wait_for_devices);
 #endif
 
+MODULE_DESCRIPTION("Xen PV-device frontend support");
 MODULE_LICENSE("GPL");

@@ -1,84 +1,21 @@
-/******************************************************************************
- *
- * This file is provided under a dual BSD/GPLv2 license.  When using or
- * redistributing this file, you may do so under either license.
- *
- * GPL LICENSE SUMMARY
- *
- * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
- * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110,
- * USA
- *
- * The full GNU General Public License is included in this distribution
- * in the file called COPYING.
- *
- * Contact Information:
- *  Intel Linux Wireless <linuxwifi@intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- * BSD LICENSE
- *
- * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
- * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
- * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name Intel Corporation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+/*
+ * Copyright (C) 2012-2014, 2018-2019, 2021-2026 Intel Corporation
+ * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
+ * Copyright (C) 2016-2017 Intel Deutschland GmbH
+ */
 #include <linux/firmware.h>
 #include <linux/rtnetlink.h>
 #include "iwl-trans.h"
 #include "iwl-csr.h"
 #include "mvm.h"
-#include "iwl-eeprom-parse.h"
-#include "iwl-eeprom-read.h"
+#include "iwl-nvm-utils.h"
 #include "iwl-nvm-parse.h"
 #include "iwl-prph.h"
 #include "fw/acpi.h"
 
 /* Default NVM size to read */
-#define IWL_NVM_DEFAULT_CHUNK_SIZE (2*1024)
-#define IWL_MAX_NVM_SECTION_SIZE	0x1b58
-#define IWL_MAX_EXT_NVM_SECTION_SIZE	0x1ffc
+#define IWL_NVM_DEFAULT_CHUNK_SIZE (2 * 1024)
 
 #define NVM_WRITE_OPCODE 1
 #define NVM_READ_OPCODE 0
@@ -183,8 +120,8 @@ static int iwl_nvm_read_chunk(struct iwl_mvm *mvm, u16 section,
 		} else {
 			IWL_DEBUG_EEPROM(mvm->trans->dev,
 					 "NVM access command failed with status %d (device: %s)\n",
-					 ret, mvm->cfg->name);
-			ret = -EIO;
+					 ret, mvm->trans->info.name);
+			ret = -ENODATA;
 		}
 		goto exit;
 	}
@@ -229,19 +166,6 @@ static int iwl_nvm_write_section(struct iwl_mvm *mvm, u16 section,
 	return 0;
 }
 
-static void iwl_mvm_nvm_fixups(struct iwl_mvm *mvm, unsigned int section,
-			       u8 *data, unsigned int len)
-{
-#define IWL_4165_DEVICE_ID	0x5501
-#define NVM_SKU_CAP_MIMO_DISABLE BIT(5)
-
-	if (section == NVM_SECTION_TYPE_PHY_SKU &&
-	    mvm->trans->hw_id == IWL_4165_DEVICE_ID && data && len >= 5 &&
-	    (data[4] & NVM_SKU_CAP_MIMO_DISABLE))
-		/* OTP 0x52 bug work around: it's a 1x1 device */
-		data[3] = ANT_B | (ANT_B << 4);
-}
-
 /*
  * Reads an NVM section completely.
  * NICs prior to 7000 family doesn't have a real NVM, but just read
@@ -267,7 +191,7 @@ static int iwl_nvm_read_section(struct iwl_mvm *mvm, u16 section,
 	while (ret == length) {
 		/* Check no memory assumptions fail and cause an overflow */
 		if ((size_read + offset + length) >
-		    mvm->cfg->base_params->eeprom_size) {
+		    mvm->trans->mac_cfg->base->eeprom_size) {
 			IWL_ERR(mvm, "EEPROM size is too small for NVM\n");
 			return -ENOBUFS;
 		}
@@ -282,7 +206,7 @@ static int iwl_nvm_read_section(struct iwl_mvm *mvm, u16 section,
 		offset += ret;
 	}
 
-	iwl_mvm_nvm_fixups(mvm, section, data, offset);
+	iwl_nvm_fixups(mvm->trans->info.hw_id, section, data, offset);
 
 	IWL_DEBUG_EEPROM(mvm->trans->dev,
 			 "NVM section %d read completed\n", section);
@@ -295,13 +219,14 @@ iwl_parse_nvm_sections(struct iwl_mvm *mvm)
 	struct iwl_nvm_section *sections = mvm->nvm_sections;
 	const __be16 *hw;
 	const __le16 *sw, *calib, *regulatory, *mac_override, *phy_sku;
-	bool lar_enabled;
+	u8 tx_ant = mvm->fw->valid_tx_ant;
+	u8 rx_ant = mvm->fw->valid_rx_ant;
 	int regulatory_type;
 
 	/* Checking for required sections */
-	if (mvm->trans->cfg->nvm_type != IWL_NVM_EXT) {
+	if (mvm->trans->cfg->nvm_type == IWL_NVM) {
 		if (!mvm->nvm_sections[NVM_SECTION_TYPE_SW].data ||
-		    !mvm->nvm_sections[mvm->cfg->nvm_hw_section_num].data) {
+		    !mvm->nvm_sections[mvm->trans->mac_cfg->base->nvm_hw_section_num].data) {
 			IWL_ERR(mvm, "Can't parse empty OTP/NVM sections\n");
 			return NULL;
 		}
@@ -319,7 +244,7 @@ iwl_parse_nvm_sections(struct iwl_mvm *mvm)
 			return NULL;
 		}
 		/* MAC_OVERRIDE or at least HW section must exist */
-		if (!mvm->nvm_sections[mvm->cfg->nvm_hw_section_num].data &&
+		if (!mvm->nvm_sections[mvm->trans->mac_cfg->base->nvm_hw_section_num].data &&
 		    !mvm->nvm_sections[NVM_SECTION_TYPE_MAC_OVERRIDE].data) {
 			IWL_ERR(mvm,
 				"Can't parse mac_address, empty sections\n");
@@ -327,14 +252,15 @@ iwl_parse_nvm_sections(struct iwl_mvm *mvm)
 		}
 
 		/* PHY_SKU section is mandatory in B0 */
-		if (!mvm->nvm_sections[NVM_SECTION_TYPE_PHY_SKU].data) {
+		if (mvm->trans->cfg->nvm_type == IWL_NVM_EXT &&
+		    !mvm->nvm_sections[NVM_SECTION_TYPE_PHY_SKU].data) {
 			IWL_ERR(mvm,
 				"Can't parse phy_sku in B0, empty sections\n");
 			return NULL;
 		}
 	}
 
-	hw = (const __be16 *)sections[mvm->cfg->nvm_hw_section_num].data;
+	hw = (const __be16 *)sections[mvm->trans->mac_cfg->base->nvm_hw_section_num].data;
 	sw = (const __le16 *)sections[NVM_SECTION_TYPE_SW].data;
 	calib = (const __le16 *)sections[NVM_SECTION_TYPE_CALIBRATION].data;
 	mac_override =
@@ -345,192 +271,15 @@ iwl_parse_nvm_sections(struct iwl_mvm *mvm)
 		(const __le16 *)sections[NVM_SECTION_TYPE_REGULATORY_SDP].data :
 		(const __le16 *)sections[NVM_SECTION_TYPE_REGULATORY].data;
 
-	lar_enabled = !iwlwifi_mod_params.lar_disable &&
-		      fw_has_capa(&mvm->fw->ucode_capa,
-				  IWL_UCODE_TLV_CAPA_LAR_SUPPORT);
+	if (mvm->set_tx_ant)
+		tx_ant &= mvm->set_tx_ant;
 
-	return iwl_parse_nvm_data(mvm->trans, mvm->cfg, hw, sw, calib,
+	if (mvm->set_rx_ant)
+		rx_ant &= mvm->set_rx_ant;
+
+	return iwl_parse_nvm_data(mvm->trans, mvm->cfg, mvm->fw, hw, sw, calib,
 				  regulatory, mac_override, phy_sku,
-				  mvm->fw->valid_tx_ant, mvm->fw->valid_rx_ant,
-				  lar_enabled);
-}
-
-#define MAX_NVM_FILE_LEN	16384
-
-/*
- * Reads external NVM from a file into mvm->nvm_sections
- *
- * HOW TO CREATE THE NVM FILE FORMAT:
- * ------------------------------
- * 1. create hex file, format:
- *      3800 -> header
- *      0000 -> header
- *      5a40 -> data
- *
- *   rev - 6 bit (word1)
- *   len - 10 bit (word1)
- *   id - 4 bit (word2)
- *   rsv - 12 bit (word2)
- *
- * 2. flip 8bits with 8 bits per line to get the right NVM file format
- *
- * 3. create binary file from the hex file
- *
- * 4. save as "iNVM_xxx.bin" under /lib/firmware
- */
-int iwl_mvm_read_external_nvm(struct iwl_mvm *mvm)
-{
-	int ret, section_size;
-	u16 section_id;
-	const struct firmware *fw_entry;
-	const struct {
-		__le16 word1;
-		__le16 word2;
-		u8 data[];
-	} *file_sec;
-	const u8 *eof;
-	u8 *temp;
-	int max_section_size;
-	const __le32 *dword_buff;
-
-#define NVM_WORD1_LEN(x) (8 * (x & 0x03FF))
-#define NVM_WORD2_ID(x) (x >> 12)
-#define EXT_NVM_WORD2_LEN(x) (2 * (((x) & 0xFF) << 8 | (x) >> 8))
-#define EXT_NVM_WORD1_ID(x) ((x) >> 4)
-#define NVM_HEADER_0	(0x2A504C54)
-#define NVM_HEADER_1	(0x4E564D2A)
-#define NVM_HEADER_SIZE	(4 * sizeof(u32))
-
-	IWL_DEBUG_EEPROM(mvm->trans->dev, "Read from external NVM\n");
-
-	/* Maximal size depends on NVM version */
-	if (mvm->trans->cfg->nvm_type != IWL_NVM_EXT)
-		max_section_size = IWL_MAX_NVM_SECTION_SIZE;
-	else
-		max_section_size = IWL_MAX_EXT_NVM_SECTION_SIZE;
-
-	/*
-	 * Obtain NVM image via request_firmware. Since we already used
-	 * request_firmware_nowait() for the firmware binary load and only
-	 * get here after that we assume the NVM request can be satisfied
-	 * synchronously.
-	 */
-	ret = request_firmware(&fw_entry, mvm->nvm_file_name,
-			       mvm->trans->dev);
-	if (ret) {
-		IWL_ERR(mvm, "ERROR: %s isn't available %d\n",
-			mvm->nvm_file_name, ret);
-		return ret;
-	}
-
-	IWL_INFO(mvm, "Loaded NVM file %s (%zu bytes)\n",
-		 mvm->nvm_file_name, fw_entry->size);
-
-	if (fw_entry->size > MAX_NVM_FILE_LEN) {
-		IWL_ERR(mvm, "NVM file too large\n");
-		ret = -EINVAL;
-		goto out;
-	}
-
-	eof = fw_entry->data + fw_entry->size;
-	dword_buff = (__le32 *)fw_entry->data;
-
-	/* some NVM file will contain a header.
-	 * The header is identified by 2 dwords header as follow:
-	 * dword[0] = 0x2A504C54
-	 * dword[1] = 0x4E564D2A
-	 *
-	 * This header must be skipped when providing the NVM data to the FW.
-	 */
-	if (fw_entry->size > NVM_HEADER_SIZE &&
-	    dword_buff[0] == cpu_to_le32(NVM_HEADER_0) &&
-	    dword_buff[1] == cpu_to_le32(NVM_HEADER_1)) {
-		file_sec = (void *)(fw_entry->data + NVM_HEADER_SIZE);
-		IWL_INFO(mvm, "NVM Version %08X\n", le32_to_cpu(dword_buff[2]));
-		IWL_INFO(mvm, "NVM Manufacturing date %08X\n",
-			 le32_to_cpu(dword_buff[3]));
-
-		/* nvm file validation, dword_buff[2] holds the file version */
-		if (mvm->trans->cfg->device_family == IWL_DEVICE_FAMILY_8000 &&
-		    CSR_HW_REV_STEP(mvm->trans->hw_rev) == SILICON_C_STEP &&
-		    le32_to_cpu(dword_buff[2]) < 0xE4A) {
-			ret = -EFAULT;
-			goto out;
-		}
-	} else {
-		file_sec = (void *)fw_entry->data;
-	}
-
-	while (true) {
-		if (file_sec->data > eof) {
-			IWL_ERR(mvm,
-				"ERROR - NVM file too short for section header\n");
-			ret = -EINVAL;
-			break;
-		}
-
-		/* check for EOF marker */
-		if (!file_sec->word1 && !file_sec->word2) {
-			ret = 0;
-			break;
-		}
-
-		if (mvm->trans->cfg->nvm_type != IWL_NVM_EXT) {
-			section_size =
-				2 * NVM_WORD1_LEN(le16_to_cpu(file_sec->word1));
-			section_id = NVM_WORD2_ID(le16_to_cpu(file_sec->word2));
-		} else {
-			section_size = 2 * EXT_NVM_WORD2_LEN(
-						le16_to_cpu(file_sec->word2));
-			section_id = EXT_NVM_WORD1_ID(
-						le16_to_cpu(file_sec->word1));
-		}
-
-		if (section_size > max_section_size) {
-			IWL_ERR(mvm, "ERROR - section too large (%d)\n",
-				section_size);
-			ret = -EINVAL;
-			break;
-		}
-
-		if (!section_size) {
-			IWL_ERR(mvm, "ERROR - section empty\n");
-			ret = -EINVAL;
-			break;
-		}
-
-		if (file_sec->data + section_size > eof) {
-			IWL_ERR(mvm,
-				"ERROR - NVM file too short for section (%d bytes)\n",
-				section_size);
-			ret = -EINVAL;
-			break;
-		}
-
-		if (WARN(section_id >= NVM_MAX_NUM_SECTIONS,
-			 "Invalid NVM section ID %d\n", section_id)) {
-			ret = -EINVAL;
-			break;
-		}
-
-		temp = kmemdup(file_sec->data, section_size, GFP_KERNEL);
-		if (!temp) {
-			ret = -ENOMEM;
-			break;
-		}
-
-		iwl_mvm_nvm_fixups(mvm, section_id, temp, section_size);
-
-		kfree(mvm->nvm_sections[section_id].data);
-		mvm->nvm_sections[section_id].data = temp;
-		mvm->nvm_sections[section_id].length = section_size;
-
-		/* advance to the next section */
-		file_sec = (void *)(file_sec->data + section_size);
-	}
-out:
-	release_firmware(fw_entry);
-	return ret;
+				  tx_ant, rx_ant);
 }
 
 /* Loads the NVM data stored in mvm->nvm_sections into the NIC */
@@ -559,16 +308,15 @@ int iwl_nvm_init(struct iwl_mvm *mvm)
 	int ret, section;
 	u32 size_read = 0;
 	u8 *nvm_buffer, *temp;
-	const char *nvm_file_C = mvm->cfg->default_nvm_file_C_step;
 
-	if (WARN_ON_ONCE(mvm->cfg->nvm_hw_section_num >= NVM_MAX_NUM_SECTIONS))
+	if (WARN_ON_ONCE(mvm->trans->mac_cfg->base->nvm_hw_section_num >= NVM_MAX_NUM_SECTIONS))
 		return -EINVAL;
 
 	/* load NVM values from nic */
 	/* Read From FW NVM */
 	IWL_DEBUG_EEPROM(mvm->trans->dev, "Read from NVM\n");
 
-	nvm_buffer = kmalloc(mvm->cfg->base_params->eeprom_size,
+	nvm_buffer = kmalloc(mvm->trans->mac_cfg->base->eeprom_size,
 			     GFP_KERNEL);
 	if (!nvm_buffer)
 		return -ENOMEM;
@@ -576,8 +324,12 @@ int iwl_nvm_init(struct iwl_mvm *mvm)
 		/* we override the constness for initial read */
 		ret = iwl_nvm_read_section(mvm, section, nvm_buffer,
 					   size_read);
-		if (ret < 0)
+		if (ret == -ENODATA) {
+			ret = 0;
 			continue;
+		}
+		if (ret < 0)
+			break;
 		size_read += ret;
 		temp = kmemdup(nvm_buffer, ret, GFP_KERNEL);
 		if (!temp) {
@@ -585,7 +337,7 @@ int iwl_nvm_init(struct iwl_mvm *mvm)
 			break;
 		}
 
-		iwl_mvm_nvm_fixups(mvm, section, temp, ret);
+		iwl_nvm_fixups(mvm->trans->info.hw_id, section, temp, ret);
 
 		mvm->nvm_sections[section].data = temp;
 		mvm->nvm_sections[section].length = ret;
@@ -608,8 +360,13 @@ int iwl_nvm_init(struct iwl_mvm *mvm)
 			mvm->nvm_phy_sku_blob.data = temp;
 			mvm->nvm_phy_sku_blob.size  = ret;
 			break;
+		case NVM_SECTION_TYPE_REGULATORY_SDP:
+		case NVM_SECTION_TYPE_REGULATORY:
+			mvm->nvm_reg_blob.data = temp;
+			mvm->nvm_reg_blob.size  = ret;
+			break;
 		default:
-			if (section == mvm->cfg->nvm_hw_section_num) {
+			if (section == mvm->trans->mac_cfg->base->nvm_hw_section_num) {
 				mvm->nvm_hw_blob.data = temp;
 				mvm->nvm_hw_blob.size = ret;
 				break;
@@ -624,20 +381,10 @@ int iwl_nvm_init(struct iwl_mvm *mvm)
 	/* Only if PNVM selected in the mod param - load external NVM  */
 	if (mvm->nvm_file_name) {
 		/* read External NVM file from the mod param */
-		ret = iwl_mvm_read_external_nvm(mvm);
-		if (ret) {
-			mvm->nvm_file_name = nvm_file_C;
-
-			if ((ret == -EFAULT || ret == -ENOENT) &&
-			    mvm->nvm_file_name) {
-				/* in case nvm file was failed try again */
-				ret = iwl_mvm_read_external_nvm(mvm);
-				if (ret)
-					return ret;
-			} else {
-				return ret;
-			}
-		}
+		ret = iwl_read_external_nvm(mvm->trans, mvm->nvm_file_name,
+					    mvm->nvm_sections);
+		if (ret)
+			return ret;
 	}
 
 	/* parse the relevant nvm sections */
@@ -647,10 +394,10 @@ int iwl_nvm_init(struct iwl_mvm *mvm)
 	IWL_DEBUG_EEPROM(mvm->trans->dev, "nvm version = %x\n",
 			 mvm->nvm_data->nvm_version);
 
-	return 0;
+	return ret < 0 ? ret : 0;
 }
 
-struct iwl_mcc_update_resp *
+struct iwl_mcc_update_resp_v8 *
 iwl_mvm_update_mcc(struct iwl_mvm *mvm, const char *alpha2,
 		   enum iwl_mcc_source src_id)
 {
@@ -658,27 +405,24 @@ iwl_mvm_update_mcc(struct iwl_mvm *mvm, const char *alpha2,
 		.mcc = cpu_to_le16(alpha2[0] << 8 | alpha2[1]),
 		.source_id = (u8)src_id,
 	};
-	struct iwl_mcc_update_resp *resp_cp;
+	struct iwl_mcc_update_resp_v8 *resp_cp;
 	struct iwl_rx_packet *pkt;
 	struct iwl_host_cmd cmd = {
 		.id = MCC_UPDATE_CMD,
-		.flags = CMD_WANT_SKB,
+		.flags = CMD_WANT_SKB | CMD_SEND_IN_RFKILL,
 		.data = { &mcc_update_cmd },
 	};
 
-	int ret;
+	int ret, resp_ver;
 	u32 status;
 	int resp_len, n_channels;
+	unsigned int pkt_len;
 	u16 mcc;
-	bool resp_v2 = fw_has_capa(&mvm->fw->ucode_capa,
-				   IWL_UCODE_TLV_CAPA_LAR_SUPPORT_V2);
 
 	if (WARN_ON_ONCE(!iwl_mvm_is_lar_supported(mvm)))
 		return ERR_PTR(-EOPNOTSUPP);
 
 	cmd.len[0] = sizeof(struct iwl_mcc_update_cmd);
-	if (!resp_v2)
-		cmd.len[0] = sizeof(struct iwl_mcc_update_cmd_v1);
 
 	IWL_DEBUG_LAR(mvm, "send MCC update to FW with '%c%c' src = %d\n",
 		      alpha2[0], alpha2[1], src_id);
@@ -688,37 +432,113 @@ iwl_mvm_update_mcc(struct iwl_mvm *mvm, const char *alpha2,
 		return ERR_PTR(ret);
 
 	pkt = cmd.resp_pkt;
+	pkt_len = iwl_rx_packet_payload_len(pkt);
+
+	resp_ver = iwl_fw_lookup_notif_ver(mvm->fw, IWL_ALWAYS_LONG_GROUP,
+					   MCC_UPDATE_CMD, 0);
 
 	/* Extract MCC response */
-	if (resp_v2) {
-		struct iwl_mcc_update_resp *mcc_resp = (void *)pkt->data;
+	if (resp_ver >= 8) {
+		struct iwl_mcc_update_resp_v8 *mcc_resp_v8 = (void *)pkt->data;
 
-		n_channels =  __le32_to_cpu(mcc_resp->n_channels);
-		resp_len = sizeof(struct iwl_mcc_update_resp) +
-			   n_channels * sizeof(__le32);
-		resp_cp = kmemdup(mcc_resp, resp_len, GFP_KERNEL);
+		if (IWL_FW_CHECK(mvm, pkt_len < sizeof(*mcc_resp_v8),
+				 "MCC v8 response too short: %u\n", pkt_len)) {
+			resp_cp = ERR_PTR(-EINVAL);
+			goto exit;
+		}
+
+		n_channels =  __le32_to_cpu(mcc_resp_v8->n_channels);
+		if (IWL_FW_CHECK(mvm,
+				 pkt_len !=
+				 struct_size(mcc_resp_v8, channels, n_channels),
+				 "invalid MCC v8 response size: %u (n_channels=%d)\n",
+				 pkt_len, n_channels)) {
+			resp_cp = ERR_PTR(-EINVAL);
+			goto exit;
+		}
+		resp_len = struct_size(resp_cp, channels, n_channels);
+		resp_cp = kzalloc(resp_len, GFP_KERNEL);
 		if (!resp_cp) {
 			resp_cp = ERR_PTR(-ENOMEM);
 			goto exit;
 		}
-	} else {
-		struct iwl_mcc_update_resp_v1 *mcc_resp_v1 = (void *)pkt->data;
+		resp_cp->status = mcc_resp_v8->status;
+		resp_cp->mcc = mcc_resp_v8->mcc;
+		resp_cp->cap = mcc_resp_v8->cap;
+		resp_cp->source_id = mcc_resp_v8->source_id;
+		resp_cp->time = mcc_resp_v8->time;
+		resp_cp->geo_info = mcc_resp_v8->geo_info;
+		resp_cp->n_channels = mcc_resp_v8->n_channels;
+		memcpy(resp_cp->channels, mcc_resp_v8->channels,
+		       n_channels * sizeof(__le32));
+	} else if (fw_has_capa(&mvm->fw->ucode_capa,
+			       IWL_UCODE_TLV_CAPA_MCC_UPDATE_11AX_SUPPORT)) {
+		struct iwl_mcc_update_resp_v4 *mcc_resp_v4 = (void *)pkt->data;
 
-		n_channels =  __le32_to_cpu(mcc_resp_v1->n_channels);
-		resp_len = sizeof(struct iwl_mcc_update_resp) +
-			   n_channels * sizeof(__le32);
+		if (IWL_FW_CHECK(mvm, pkt_len < sizeof(*mcc_resp_v4),
+				 "MCC v4 response too short: %u\n", pkt_len)) {
+			resp_cp = ERR_PTR(-EINVAL);
+			goto exit;
+		}
+
+		n_channels =  __le32_to_cpu(mcc_resp_v4->n_channels);
+		if (IWL_FW_CHECK(mvm,
+				 pkt_len !=
+				 struct_size(mcc_resp_v4, channels, n_channels),
+				 "invalid MCC v4 response size: %u (n_channels=%d)\n",
+				 pkt_len, n_channels)) {
+			resp_cp = ERR_PTR(-EINVAL);
+			goto exit;
+		}
+		resp_len = struct_size(resp_cp, channels, n_channels);
 		resp_cp = kzalloc(resp_len, GFP_KERNEL);
 		if (!resp_cp) {
 			resp_cp = ERR_PTR(-ENOMEM);
 			goto exit;
 		}
 
-		resp_cp->status = mcc_resp_v1->status;
-		resp_cp->mcc = mcc_resp_v1->mcc;
-		resp_cp->cap = mcc_resp_v1->cap;
-		resp_cp->source_id = mcc_resp_v1->source_id;
-		resp_cp->n_channels = mcc_resp_v1->n_channels;
-		memcpy(resp_cp->channels, mcc_resp_v1->channels,
+		resp_cp->status = mcc_resp_v4->status;
+		resp_cp->mcc = mcc_resp_v4->mcc;
+		resp_cp->cap = cpu_to_le32(le16_to_cpu(mcc_resp_v4->cap));
+		resp_cp->source_id = mcc_resp_v4->source_id;
+		resp_cp->time = mcc_resp_v4->time;
+		resp_cp->geo_info = mcc_resp_v4->geo_info;
+		resp_cp->n_channels = mcc_resp_v4->n_channels;
+		memcpy(resp_cp->channels, mcc_resp_v4->channels,
+		       n_channels * sizeof(__le32));
+	} else {
+		struct iwl_mcc_update_resp_v3 *mcc_resp_v3 = (void *)pkt->data;
+
+		if (IWL_FW_CHECK(mvm, pkt_len < sizeof(*mcc_resp_v3),
+				 "MCC v3 response too short: %u\n", pkt_len)) {
+			resp_cp = ERR_PTR(-EINVAL);
+			goto exit;
+		}
+
+		n_channels =  __le32_to_cpu(mcc_resp_v3->n_channels);
+		if (IWL_FW_CHECK(mvm,
+				 pkt_len !=
+				 struct_size(mcc_resp_v3, channels, n_channels),
+				 "invalid MCC v3 response size: %u (n_channels=%d)\n",
+				 pkt_len, n_channels)) {
+			resp_cp = ERR_PTR(-EINVAL);
+			goto exit;
+		}
+		resp_len = struct_size(resp_cp, channels, n_channels);
+		resp_cp = kzalloc(resp_len, GFP_KERNEL);
+		if (!resp_cp) {
+			resp_cp = ERR_PTR(-ENOMEM);
+			goto exit;
+		}
+
+		resp_cp->status = mcc_resp_v3->status;
+		resp_cp->mcc = mcc_resp_v3->mcc;
+		resp_cp->cap = cpu_to_le32(mcc_resp_v3->cap);
+		resp_cp->source_id = mcc_resp_v3->source_id;
+		resp_cp->time = mcc_resp_v3->time;
+		resp_cp->geo_info = mcc_resp_v3->geo_info;
+		resp_cp->n_channels = mcc_resp_v3->n_channels;
+		memcpy(resp_cp->channels, mcc_resp_v3->channels,
 		       n_channels * sizeof(__le32));
 	}
 
@@ -733,9 +553,8 @@ iwl_mvm_update_mcc(struct iwl_mvm *mvm, const char *alpha2,
 	}
 
 	IWL_DEBUG_LAR(mvm,
-		      "MCC response status: 0x%x. new MCC: 0x%x ('%c%c') change: %d n_chans: %d\n",
-		      status, mcc, mcc >> 8, mcc & 0xff,
-		      !!(status == MCC_RESP_NEW_CHAN_PROFILE), n_channels);
+		      "MCC response status: 0x%x. new MCC: 0x%x ('%c%c') n_chans: %d\n",
+		      status, mcc, mcc >> 8, mcc & 0xff, n_channels);
 
 exit:
 	iwl_free_resp(&cmd);
@@ -750,7 +569,7 @@ int iwl_mvm_init_mcc(struct iwl_mvm *mvm)
 	struct ieee80211_regdomain *regd;
 	char mcc[3];
 
-	if (mvm->cfg->nvm_type == IWL_NVM_EXT) {
+	if (mvm->trans->cfg->nvm_type == IWL_NVM_EXT) {
 		tlv_lar = fw_has_capa(&mvm->fw->ucode_capa,
 				      IWL_UCODE_TLV_CAPA_LAR_SUPPORT);
 		nvm_lar = mvm->nvm_data->lar_enabled;
@@ -768,7 +587,7 @@ int iwl_mvm_init_mcc(struct iwl_mvm *mvm)
 	 * try to replay the last set MCC to FW. If it doesn't exist,
 	 * queue an update to cfg80211 to retrieve the default alpha2 from FW.
 	 */
-	retval = iwl_mvm_init_fw_regd(mvm);
+	retval = iwl_mvm_init_fw_regd(mvm, true);
 	if (retval != -ENOENT)
 		return retval;
 
@@ -785,7 +604,7 @@ int iwl_mvm_init_mcc(struct iwl_mvm *mvm)
 		return -EIO;
 
 	if (iwl_mvm_is_wifi_mcc_supported(mvm) &&
-	    !iwl_acpi_get_mcc(mvm->dev, mcc)) {
+	    !iwl_bios_get_mcc(&mvm->fwrt, mcc)) {
 		kfree(regd);
 		regd = iwl_mvm_get_regdomain(mvm->hw->wiphy, mcc,
 					     MCC_SOURCE_BIOS, NULL);
@@ -793,7 +612,7 @@ int iwl_mvm_init_mcc(struct iwl_mvm *mvm)
 			return -EIO;
 	}
 
-	retval = regulatory_set_wiphy_regd_sync_rtnl(mvm->hw->wiphy, regd);
+	retval = regulatory_set_wiphy_regd_sync(mvm->hw->wiphy, regd);
 	kfree(regd);
 	return retval;
 }
@@ -806,6 +625,8 @@ void iwl_mvm_rx_chub_update_mcc(struct iwl_mvm *mvm,
 	enum iwl_mcc_source src;
 	char mcc[3];
 	struct ieee80211_regdomain *regd;
+	int wgds_tbl_idx;
+	bool changed = false;
 
 	lockdep_assert_held(&mvm->mutex);
 
@@ -825,10 +646,26 @@ void iwl_mvm_rx_chub_update_mcc(struct iwl_mvm *mvm,
 	IWL_DEBUG_LAR(mvm,
 		      "RX: received chub update mcc cmd (mcc '%s' src %d)\n",
 		      mcc, src);
-	regd = iwl_mvm_get_regdomain(mvm->hw->wiphy, mcc, src, NULL);
+	regd = iwl_mvm_get_regdomain(mvm->hw->wiphy, mcc, src, &changed);
 	if (IS_ERR_OR_NULL(regd))
 		return;
 
+	if (!changed) {
+		IWL_DEBUG_LAR(mvm, "RX: No change in the regulatory data\n");
+		goto out;
+	}
+
+	wgds_tbl_idx = iwl_mvm_get_sar_geo_profile(mvm);
+	if (wgds_tbl_idx < 1)
+		IWL_DEBUG_INFO(mvm,
+			       "SAR WGDS is disabled or error received (%d)\n",
+			       wgds_tbl_idx);
+	else
+		IWL_DEBUG_INFO(mvm, "SAR WGDS: geo profile %d is configured\n",
+			       wgds_tbl_idx);
+
 	regulatory_set_wiphy_regd(mvm->hw->wiphy, regd);
+
+out:
 	kfree(regd);
 }

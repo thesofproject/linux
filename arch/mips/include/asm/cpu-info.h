@@ -50,7 +50,7 @@ struct guest_info {
 #define MIPS_CACHE_PINDEX	0x00000020	/* Physically indexed cache */
 
 struct cpuinfo_mips {
-	unsigned long		asid_cache;
+	u64			asid_cache;
 #ifdef CONFIG_MIPS_ASID_BITS_VARIABLE
 	unsigned long		asid_mask;
 #endif
@@ -80,9 +80,7 @@ struct cpuinfo_mips {
 	int			srsets; /* Shadow register sets */
 	int			package;/* physical package number */
 	unsigned int		globalnumber;
-#ifdef CONFIG_64BIT
 	int			vmbits; /* Virtual memory size in bits */
-#endif
 	void			*data;	/* Additional data */
 	unsigned int		watch_reg_count;   /* Number that exist */
 	unsigned int		watch_reg_use_cnt; /* Usable by ptrace */
@@ -105,6 +103,15 @@ struct cpuinfo_mips {
 	unsigned int		gtoffset_mask;
 	unsigned int		guestid_mask;
 	unsigned int		guestid_cache;
+
+#ifdef CONFIG_CPU_LOONGSON3_CPUCFG_EMULATION
+	/* CPUCFG data for this CPU, synthesized at probe time.
+	 *
+	 * CPUCFG select 0 is PRId, 4 and above are unimplemented for now.
+	 * So the only stored values are for CPUCFG selects 1-3 inclusive.
+	 */
+	u32 loongson3_cpucfg_data[3];
+#endif
 } __attribute__((aligned(SMP_CACHE_BYTES)));
 
 extern struct cpuinfo_mips cpu_data[];
@@ -114,6 +121,7 @@ extern struct cpuinfo_mips cpu_data[];
 
 extern void cpu_probe(void);
 extern void cpu_report(void);
+extern void cpu_disable_mmid(void);
 
 extern const char *__cpu_name[];
 #define cpu_name_string()	__cpu_name[raw_smp_processor_id()]
@@ -142,7 +150,7 @@ struct proc_cpuinfo_notifier_args {
 static inline unsigned int cpu_cluster(struct cpuinfo_mips *cpuinfo)
 {
 	/* Optimisation for systems where multiple clusters aren't used */
-	if (!IS_ENABLED(CONFIG_CPU_MIPSR6))
+	if (!IS_ENABLED(CONFIG_CPU_MIPSR5) && !IS_ENABLED(CONFIG_CPU_MIPSR6))
 		return 0;
 
 	return (cpuinfo->globalnumber & MIPS_GLOBALNUMBER_CLUSTER) >>

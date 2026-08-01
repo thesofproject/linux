@@ -10,9 +10,9 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/rational.h>
+#include <linux/util_macros.h>
 
 #include <linux/dma/hsu.h>
-#include <linux/8250_pci.h>
 
 #include "8250.h"
 
@@ -32,9 +32,9 @@
 struct mid8250;
 
 struct mid8250_board {
-	unsigned int flags;
 	unsigned long freq;
 	unsigned int base_baud;
+	unsigned int bar;
 	int (*setup)(struct mid8250 *, struct uart_port *p);
 	void (*exit)(struct mid8250 *);
 };
@@ -71,6 +71,11 @@ static int pnw_setup(struct mid8250 *mid, struct uart_port *p)
 	mid->dma_dev = pci_get_slot(pdev->bus,
 				    PCI_DEVFN(PCI_SLOT(pdev->devfn), 3));
 	return 0;
+}
+
+static void pnw_exit(struct mid8250 *mid)
+{
+	pci_dev_put(mid->dma_dev);
 }
 
 static int tng_handle_irq(struct uart_port *p)
@@ -124,6 +129,11 @@ static int tng_setup(struct mid8250 *mid, struct uart_port *p)
 	return 0;
 }
 
+static void tng_exit(struct mid8250 *mid)
+{
+	pci_dev_put(mid->dma_dev);
+}
+
 static int dnv_handle_irq(struct uart_port *p)
 {
 	struct mid8250 *mid = p->private_data;
@@ -159,7 +169,6 @@ static int dnv_setup(struct mid8250 *mid, struct uart_port *p)
 {
 	struct hsu_dma_chip *chip = &mid->dma_chip;
 	struct pci_dev *pdev = to_pci_dev(p->dev);
-	unsigned int bar = FL_GET_BASE(mid->board->flags);
 	int ret;
 
 	pci_set_master(pdev);
@@ -173,7 +182,7 @@ static int dnv_setup(struct mid8250 *mid, struct uart_port *p)
 	chip->dev = &pdev->dev;
 	chip->irq = pci_irq_vector(pdev, 0);
 	chip->regs = p->membase;
-	chip->length = pci_resource_len(pdev, bar);
+	chip->length = pci_resource_len(pdev, mid->board->bar);
 	chip->offset = DNV_DMA_CHAN_OFFSET;
 
 	/* Falling back to PIO mode if DMA probing fails */
@@ -196,9 +205,8 @@ static void dnv_exit(struct mid8250 *mid)
 
 /*****************************************************************************/
 
-static void mid8250_set_termios(struct uart_port *p,
-				struct ktermios *termios,
-				struct ktermios *old)
+static void mid8250_set_termios(struct uart_port *p, struct ktermios *termios,
+				const struct ktermios *old)
 {
 	unsigned int baud = tty_termios_baud_rate(termios);
 	struct mid8250 *mid = p->private_data;
@@ -282,7 +290,6 @@ static int mid8250_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct uart_8250_port uart;
 	struct mid8250 *mid;
-	unsigned int bar;
 	int ret;
 
 	ret = pcim_enable_device(pdev);
@@ -294,7 +301,6 @@ static int mid8250_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return -ENOMEM;
 
 	mid->board = (struct mid8250_board *)id->driver_data;
-	bar = FL_GET_BASE(mid->board->flags);
 
 	memset(&uart, 0, sizeof(struct uart_8250_port));
 
@@ -307,8 +313,8 @@ static int mid8250_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	uart.port.flags = UPF_SHARE_IRQ | UPF_FIXED_PORT | UPF_FIXED_TYPE;
 	uart.port.set_termios = mid8250_set_termios;
 
-	uart.port.mapbase = pci_resource_start(pdev, bar);
-	uart.port.membase = pcim_iomap(pdev, bar, 0);
+	uart.port.mapbase = pci_resource_start(pdev, mid->board->bar);
+	uart.port.membase = pcim_iomap(pdev, mid->board->bar, 0);
 	if (!uart.port.membase)
 		return -ENOMEM;
 
@@ -330,6 +336,7 @@ static int mid8250_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	pci_set_drvdata(pdev, mid);
 	return 0;
+
 err:
 	if (mid->board->exit)
 		mid->board->exit(mid);
@@ -347,37 +354,45 @@ static void mid8250_remove(struct pci_dev *pdev)
 }
 
 static const struct mid8250_board pnw_board = {
-	.flags = FL_BASE0,
 	.freq = 50000000,
 	.base_baud = 115200,
+	.bar = 0,
 	.setup = pnw_setup,
+	.exit = pnw_exit,
 };
 
 static const struct mid8250_board tng_board = {
-	.flags = FL_BASE0,
 	.freq = 38400000,
 	.base_baud = 1843200,
+	.bar = 0,
 	.setup = tng_setup,
+	.exit = tng_exit,
 };
 
 static const struct mid8250_board dnv_board = {
-	.flags = FL_BASE1,
 	.freq = 133333333,
 	.base_baud = 115200,
-	.setup = dnv_setup,
-	.exit = dnv_exit,
+	.bar = 1,
+	/*
+	 * Errata:
+	 * HSUART May Stop Functioning when DMA is Active.
+	 *
+	 * - Denverton document #572409, rev 3.4, DNV60
+	 * - Ice Lake Xeon D document #714070, ICXD65
+	 * - Snowridge document #731931, SNR44
+	 */
+	.setup = PTR_IF(false, dnv_setup),
+	.exit = PTR_IF(false, dnv_exit),
 };
 
-#define MID_DEVICE(id, board) { PCI_VDEVICE(INTEL, id), (kernel_ulong_t)&board }
-
 static const struct pci_device_id pci_ids[] = {
-	MID_DEVICE(PCI_DEVICE_ID_INTEL_PNW_UART1, pnw_board),
-	MID_DEVICE(PCI_DEVICE_ID_INTEL_PNW_UART2, pnw_board),
-	MID_DEVICE(PCI_DEVICE_ID_INTEL_PNW_UART3, pnw_board),
-	MID_DEVICE(PCI_DEVICE_ID_INTEL_TNG_UART, tng_board),
-	MID_DEVICE(PCI_DEVICE_ID_INTEL_CDF_UART, dnv_board),
-	MID_DEVICE(PCI_DEVICE_ID_INTEL_DNV_UART, dnv_board),
-	{ },
+	{ PCI_DEVICE_DATA(INTEL, PNW_UART1, &pnw_board) },
+	{ PCI_DEVICE_DATA(INTEL, PNW_UART2, &pnw_board) },
+	{ PCI_DEVICE_DATA(INTEL, PNW_UART3, &pnw_board) },
+	{ PCI_DEVICE_DATA(INTEL, TNG_UART, &tng_board) },
+	{ PCI_DEVICE_DATA(INTEL, CDF_UART, &dnv_board) },
+	{ PCI_DEVICE_DATA(INTEL, DNV_UART, &dnv_board) },
+	{ }
 };
 MODULE_DEVICE_TABLE(pci, pci_ids);
 

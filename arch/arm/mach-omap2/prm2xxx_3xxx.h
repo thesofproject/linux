@@ -1,13 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * OMAP2xxx/3xxx-common Power/Reset Management (PRM) register definitions
  *
  * Copyright (C) 2007-2009, 2011-2012 Texas Instruments, Inc.
  * Copyright (C) 2008-2010 Nokia Corporation
  * Paul Walmsley
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  *
  * The PRM hardware modules on the OMAP2/3 are quite similar to each
  * other.  The PRM on OMAP4 has a new register layout, and is handled
@@ -107,9 +104,6 @@ int omap2_prm_deassert_hardreset(u8 rst_shift, u8 st_shift, u8 part,
 				 s16 prm_mod, u16 reset_offset,
 				 u16 st_offset);
 
-extern int omap2_pwrdm_set_next_pwrst(struct powerdomain *pwrdm, u8 pwrst);
-extern int omap2_pwrdm_read_next_pwrst(struct powerdomain *pwrdm);
-extern int omap2_pwrdm_read_pwrst(struct powerdomain *pwrdm);
 extern int omap2_pwrdm_set_mem_onst(struct powerdomain *pwrdm, u8 bank,
 				    u8 pwrst);
 extern int omap2_pwrdm_set_mem_retst(struct powerdomain *pwrdm, u8 bank,

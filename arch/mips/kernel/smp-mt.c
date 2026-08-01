@@ -1,16 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- *  This program is free software; you can distribute it and/or modify it
- *  under the terms of the GNU General Public License (Version 2) as
- *  published by the Free Software Foundation.
- *
- *  This program is distributed in the hope it will be useful, but WITHOUT
- *  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- *  for more details.
- *
- *  You should have received a copy of the GNU General Public License along
- *  with this program; if not, write to the Free Software Foundation, Inc.,
- *  59 Temple Place - Suite 330, Boston MA 02111-1307, USA.
  *
  * Copyright (C) 2004, 05, 06 MIPS Technologies, Inc.
  *    Elizabeth Clarke (beth@mips.com)
@@ -57,7 +46,8 @@ static void __init smvp_copy_vpe_config(void)
 static unsigned int __init smvp_vpe_init(unsigned int tc, unsigned int mvpconf0,
 	unsigned int ncpu)
 {
-	if (tc > ((mvpconf0 & MVPCONF0_PVPE) >> MVPCONF0_PVPE_SHIFT))
+	if (tc >= smp_max_threads ||
+		(tc > ((mvpconf0 & MVPCONF0_PVPE) >> MVPCONF0_PVPE_SHIFT)))
 		return ncpu;
 
 	/* Deactivate all but VPE 0 */

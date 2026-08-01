@@ -44,7 +44,7 @@ static void rx(struct net_device *dev, int bufnum,
 {
 	struct arcnet_local *lp = netdev_priv(dev);
 	struct sk_buff *skb;
-	struct archdr *pkt = pkthdr;
+	struct archdr *pkt;
 	char *pktbuf, *pkthdrbuf;
 	int ofs;
 
@@ -265,4 +265,5 @@ static void __exit capmode_module_exit(void)
 module_init(capmode_module_init);
 module_exit(capmode_module_exit);
 
+MODULE_DESCRIPTION("ARCnet CAP mode packet interface module");
 MODULE_LICENSE("GPL");

@@ -1,21 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * Intel SOC Punit device state debug driver
  * Punit controls power management for North Complex devices (Graphics
  * blocks, Image Signal Processing, video processing, display, DSP etc.)
  *
  * Copyright (c) 2015, Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
  */
 
+#define pr_fmt(fmt) "punit_atom: " fmt
+
+#include <linux/acpi.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/device.h>
@@ -113,24 +107,12 @@ DEFINE_SHOW_ATTRIBUTE(punit_dev_state);
 
 static struct dentry *punit_dbg_file;
 
-static int punit_dbgfs_register(struct punit_device *punit_device)
+static void punit_dbgfs_register(struct punit_device *punit_device)
 {
-	static struct dentry *dev_state;
-
 	punit_dbg_file = debugfs_create_dir("punit_atom", NULL);
-	if (!punit_dbg_file)
-		return -ENXIO;
 
-	dev_state = debugfs_create_file("dev_power_state", 0444,
-					punit_dbg_file, punit_device,
-					&punit_dev_state_fops);
-	if (!dev_state) {
-		pr_err("punit_dev_state register failed\n");
-		debugfs_remove(punit_dbg_file);
-		return -ENXIO;
-	}
-
-	return 0;
+	debugfs_create_file("dev_power_state", 0444, punit_dbg_file,
+			    punit_device, &punit_dev_state_fops);
 }
 
 static void punit_dbgfs_unregister(void)
@@ -138,37 +120,81 @@ static void punit_dbgfs_unregister(void)
 	debugfs_remove_recursive(punit_dbg_file);
 }
 
-#define ICPU(model, drv_data) \
-	{ X86_VENDOR_INTEL, 6, model, X86_FEATURE_MWAIT,\
-	  (kernel_ulong_t)&drv_data }
+#if defined(CONFIG_ACPI) && defined(CONFIG_SUSPEND)
+static const struct punit_device *punit_dev;
 
-static const struct x86_cpu_id intel_punit_cpu_ids[] = {
-	ICPU(INTEL_FAM6_ATOM_SILVERMONT1, punit_device_byt),
-	ICPU(INTEL_FAM6_ATOM_MERRIFIELD,  punit_device_tng),
-	ICPU(INTEL_FAM6_ATOM_AIRMONT,	  punit_device_cht),
-	{}
+static void punit_s2idle_check(void)
+{
+	const struct punit_device *punit_devp;
+	u32 punit_pwr_status, dstate;
+	int status;
+
+	for (punit_devp = punit_dev; punit_devp->name; punit_devp++) {
+		/* Skip MIO, it is on till the very last moment */
+		if (punit_devp->reg == MIO_SS_PM)
+			continue;
+
+		status = iosf_mbi_read(BT_MBI_UNIT_PMC, MBI_REG_READ,
+				       punit_devp->reg, &punit_pwr_status);
+		if (status) {
+			pr_err("%s read failed\n", punit_devp->name);
+		} else  {
+			dstate = (punit_pwr_status >> punit_devp->sss_pos) & 3;
+			if (!dstate)
+				pr_err("%s is in D0 prior to s2idle\n", punit_devp->name);
+		}
+	}
+}
+
+static struct acpi_s2idle_dev_ops punit_s2idle_ops = {
+	.check = punit_s2idle_check,
 };
 
+static void punit_s2idle_check_register(struct punit_device *punit_device)
+{
+	punit_dev = punit_device;
+	acpi_register_lps0_dev(&punit_s2idle_ops);
+}
+
+static void punit_s2idle_check_unregister(void)
+{
+	acpi_unregister_lps0_dev(&punit_s2idle_ops);
+}
+#else
+static void punit_s2idle_check_register(struct punit_device *punit_device) {}
+static void punit_s2idle_check_unregister(void) {}
+#endif
+
+#define X86_MATCH(vfm, data)					 \
+	X86_MATCH_VFM_FEATURE(vfm, X86_FEATURE_MWAIT, data)
+
+static const struct x86_cpu_id intel_punit_cpu_ids[] = {
+	X86_MATCH(INTEL_ATOM_SILVERMONT,	&punit_device_byt),
+	X86_MATCH(INTEL_ATOM_SILVERMONT_MID,	&punit_device_tng),
+	X86_MATCH(INTEL_ATOM_AIRMONT,		&punit_device_cht),
+	{}
+};
 MODULE_DEVICE_TABLE(x86cpu, intel_punit_cpu_ids);
 
 static int __init punit_atom_debug_init(void)
 {
+	struct punit_device *punit_device;
 	const struct x86_cpu_id *id;
-	int ret;
 
 	id = x86_match_cpu(intel_punit_cpu_ids);
 	if (!id)
 		return -ENODEV;
 
-	ret = punit_dbgfs_register((struct punit_device *)id->driver_data);
-	if (ret < 0)
-		return ret;
+	punit_device = (struct punit_device *)id->driver_data;
+	punit_dbgfs_register(punit_device);
+	punit_s2idle_check_register(punit_device);
 
 	return 0;
 }
 
 static void __exit punit_atom_debug_exit(void)
 {
+	punit_s2idle_check_unregister();
 	punit_dbgfs_unregister();
 }
 

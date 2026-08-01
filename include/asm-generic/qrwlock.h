@@ -1,15 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Queue read/write lock
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * These use generic atomic and locking routines, but depend on a fair spinlock
+ * implementation in order to be fair themselves.  The implementation in
+ * asm-generic/spinlock.h meets these requirements.
  *
  * (C) Copyright 2013-2014 Hewlett-Packard Development Company, L.P.
  *
@@ -23,6 +18,8 @@
 #include <asm/processor.h>
 
 #include <asm-generic/qrwlock_types.h>
+
+/* Must be included from asm/spinlock.h after defining arch_spin_is_locked.  */
 
 /*
  * Writer states & reader shift and bias.
@@ -40,13 +37,13 @@ extern void queued_read_lock_slowpath(struct qrwlock *lock);
 extern void queued_write_lock_slowpath(struct qrwlock *lock);
 
 /**
- * queued_read_trylock - try to acquire read lock of a queue rwlock
- * @lock : Pointer to queue rwlock structure
+ * queued_read_trylock - try to acquire read lock of a queued rwlock
+ * @lock : Pointer to queued rwlock structure
  * Return: 1 if lock acquired, 0 if failed
  */
 static inline int queued_read_trylock(struct qrwlock *lock)
 {
-	u32 cnts;
+	int cnts;
 
 	cnts = atomic_read(&lock->cnts);
 	if (likely(!(cnts & _QW_WMASK))) {
@@ -59,28 +56,28 @@ static inline int queued_read_trylock(struct qrwlock *lock)
 }
 
 /**
- * queued_write_trylock - try to acquire write lock of a queue rwlock
- * @lock : Pointer to queue rwlock structure
+ * queued_write_trylock - try to acquire write lock of a queued rwlock
+ * @lock : Pointer to queued rwlock structure
  * Return: 1 if lock acquired, 0 if failed
  */
 static inline int queued_write_trylock(struct qrwlock *lock)
 {
-	u32 cnts;
+	int cnts;
 
 	cnts = atomic_read(&lock->cnts);
 	if (unlikely(cnts))
 		return 0;
 
-	return likely(atomic_cmpxchg_acquire(&lock->cnts,
-					     cnts, cnts | _QW_LOCKED) == cnts);
+	return likely(atomic_try_cmpxchg_acquire(&lock->cnts, &cnts,
+				_QW_LOCKED));
 }
 /**
- * queued_read_lock - acquire read lock of a queue rwlock
- * @lock: Pointer to queue rwlock structure
+ * queued_read_lock - acquire read lock of a queued rwlock
+ * @lock: Pointer to queued rwlock structure
  */
 static inline void queued_read_lock(struct qrwlock *lock)
 {
-	u32 cnts;
+	int cnts;
 
 	cnts = atomic_add_return_acquire(_QR_BIAS, &lock->cnts);
 	if (likely(!(cnts & _QW_WMASK)))
@@ -91,21 +88,22 @@ static inline void queued_read_lock(struct qrwlock *lock)
 }
 
 /**
- * queued_write_lock - acquire write lock of a queue rwlock
- * @lock : Pointer to queue rwlock structure
+ * queued_write_lock - acquire write lock of a queued rwlock
+ * @lock : Pointer to queued rwlock structure
  */
 static inline void queued_write_lock(struct qrwlock *lock)
 {
+	int cnts = 0;
 	/* Optimize for the unfair lock case where the fair flag is 0. */
-	if (atomic_cmpxchg_acquire(&lock->cnts, 0, _QW_LOCKED) == 0)
+	if (likely(atomic_try_cmpxchg_acquire(&lock->cnts, &cnts, _QW_LOCKED)))
 		return;
 
 	queued_write_lock_slowpath(lock);
 }
 
 /**
- * queued_read_unlock - release read lock of a queue rwlock
- * @lock : Pointer to queue rwlock structure
+ * queued_read_unlock - release read lock of a queued rwlock
+ * @lock : Pointer to queued rwlock structure
  */
 static inline void queued_read_unlock(struct qrwlock *lock)
 {
@@ -116,23 +114,34 @@ static inline void queued_read_unlock(struct qrwlock *lock)
 }
 
 /**
- * queued_write_unlock - release write lock of a queue rwlock
- * @lock : Pointer to queue rwlock structure
+ * queued_write_unlock - release write lock of a queued rwlock
+ * @lock : Pointer to queued rwlock structure
  */
 static inline void queued_write_unlock(struct qrwlock *lock)
 {
 	smp_store_release(&lock->wlocked, 0);
 }
 
+/**
+ * queued_rwlock_is_contended - check if the lock is contended
+ * @lock : Pointer to queued rwlock structure
+ * Return: 1 if lock contended, 0 otherwise
+ */
+static inline int queued_rwlock_is_contended(struct qrwlock *lock)
+{
+	return arch_spin_is_locked(&lock->wait_lock);
+}
+
 /*
  * Remapping rwlock architecture specific functions to the corresponding
- * queue rwlock functions.
+ * queued rwlock functions.
  */
-#define arch_read_lock(l)	queued_read_lock(l)
-#define arch_write_lock(l)	queued_write_lock(l)
-#define arch_read_trylock(l)	queued_read_trylock(l)
-#define arch_write_trylock(l)	queued_write_trylock(l)
-#define arch_read_unlock(l)	queued_read_unlock(l)
-#define arch_write_unlock(l)	queued_write_unlock(l)
+#define arch_read_lock(l)		queued_read_lock(l)
+#define arch_write_lock(l)		queued_write_lock(l)
+#define arch_read_trylock(l)		queued_read_trylock(l)
+#define arch_write_trylock(l)		queued_write_trylock(l)
+#define arch_read_unlock(l)		queued_read_unlock(l)
+#define arch_write_unlock(l)		queued_write_unlock(l)
+#define arch_rwlock_is_contended(l)	queued_rwlock_is_contended(l)
 
 #endif /* __ASM_GENERIC_QRWLOCK_H */

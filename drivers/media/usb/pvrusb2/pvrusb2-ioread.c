@@ -1,17 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  *
- *
  *  Copyright (C) 2005 Mike Isely <isely@pobox.com>
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
  */
 
 #include "pvrusb2-ioread.h"
@@ -83,7 +73,7 @@ static void pvr2_ioread_done(struct pvr2_ioread *cp)
 struct pvr2_ioread *pvr2_ioread_create(void)
 {
 	struct pvr2_ioread *cp;
-	cp = kzalloc(sizeof(*cp),GFP_KERNEL);
+	cp = kzalloc_obj(*cp);
 	if (!cp) return NULL;
 	pvr2_trace(PVR2_TRACE_STRUCT,"pvr2_ioread_create id=%p",cp);
 	if (pvr2_ioread_init(cp) < 0) {

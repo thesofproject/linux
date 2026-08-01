@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * A RTC driver for the Simtek STK17TA8
  *
@@ -5,10 +6,6 @@
  *
  * Based on the DS1553 driver from
  * Atsushi Nemoto <anemo@mba.ocn.ne.jp>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #include <linux/bcd.h>
@@ -74,8 +71,7 @@ struct rtc_plat_data {
 
 static int stk17ta8_rtc_set_time(struct device *dev, struct rtc_time *tm)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
+	struct rtc_plat_data *pdata = dev_get_drvdata(dev);
 	void __iomem *ioaddr = pdata->ioaddr;
 	u8 flags;
 
@@ -97,8 +93,7 @@ static int stk17ta8_rtc_set_time(struct device *dev, struct rtc_time *tm)
 
 static int stk17ta8_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
+	struct rtc_plat_data *pdata = dev_get_drvdata(dev);
 	void __iomem *ioaddr = pdata->ioaddr;
 	unsigned int year, month, day, hour, minute, second, week;
 	unsigned int century;
@@ -163,8 +158,7 @@ static void stk17ta8_rtc_update_alarm(struct rtc_plat_data *pdata)
 
 static int stk17ta8_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
+	struct rtc_plat_data *pdata = dev_get_drvdata(dev);
 
 	if (pdata->irq <= 0)
 		return -EINVAL;
@@ -180,8 +174,7 @@ static int stk17ta8_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 
 static int stk17ta8_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
+	struct rtc_plat_data *pdata = dev_get_drvdata(dev);
 
 	if (pdata->irq <= 0)
 		return -EINVAL;
@@ -217,8 +210,7 @@ static irqreturn_t stk17ta8_rtc_interrupt(int irq, void *dev_id)
 static int stk17ta8_rtc_alarm_irq_enable(struct device *dev,
 	unsigned int enabled)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct rtc_plat_data *pdata = platform_get_drvdata(pdev);
+	struct rtc_plat_data *pdata = dev_get_drvdata(dev);
 
 	if (pdata->irq <= 0)
 		return -EINVAL;
@@ -264,7 +256,6 @@ static int stk17ta8_nvram_write(void *priv, unsigned int pos, void *val,
 
 static int stk17ta8_rtc_probe(struct platform_device *pdev)
 {
-	struct resource *res;
 	unsigned int cal;
 	unsigned int flags;
 	struct rtc_plat_data *pdata;
@@ -283,8 +274,7 @@ static int stk17ta8_rtc_probe(struct platform_device *pdev)
 	if (!pdata)
 		return -ENOMEM;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	ioaddr = devm_ioremap_resource(&pdev->dev, res);
+	ioaddr = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(ioaddr))
 		return PTR_ERR(ioaddr);
 	pdata->ioaddr = ioaddr;
@@ -321,14 +311,13 @@ static int stk17ta8_rtc_probe(struct platform_device *pdev)
 		return PTR_ERR(pdata->rtc);
 
 	pdata->rtc->ops = &stk17ta8_rtc_ops;
-	pdata->rtc->nvram_old_abi = true;
 
 	nvmem_cfg.priv = pdata;
-	ret = rtc_nvmem_register(pdata->rtc, &nvmem_cfg);
+	ret = devm_rtc_nvmem_register(pdata->rtc, &nvmem_cfg);
 	if (ret)
 		return ret;
 
-	return rtc_register_device(pdata->rtc);
+	return devm_rtc_register_device(pdata->rtc);
 }
 
 /* work with hotplug and coldplug */

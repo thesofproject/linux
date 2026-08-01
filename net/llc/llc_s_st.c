@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * llc_s_st.c - Defines SAP component state machine transitions.
  *
@@ -6,13 +7,6 @@
  *
  * Copyright (c) 1997 by Procom Technology, Inc.
  *		 2001-2003 by Arnaldo Carvalho de Melo <acme@conectiva.com.br>
- *
- * This program can be redistributed or modified under the terms of the
- * GNU General Public License as published by the Free Software Foundation.
- * This program is distributed without any warranty or implied warranty
- * of merchantability or fitness for a particular purpose.
- *
- * See the GNU General Public License for more details.
  */
 #include <linux/types.h>
 #include <net/llc_if.h>
@@ -24,7 +18,7 @@
  * last entry for this state
  * all members are zeros, .bss zeroes it
  */
-static struct llc_sap_state_trans llc_sap_state_trans_end;
+static const struct llc_sap_state_trans llc_sap_state_trans_end;
 
 /* state LLC_SAP_STATE_INACTIVE transition for
  * LLC_SAP_EV_ACTIVATION_REQ event
@@ -34,14 +28,14 @@ static const llc_sap_action_t llc_sap_inactive_state_actions_1[] = {
 	[1] = NULL,
 };
 
-static struct llc_sap_state_trans llc_sap_inactive_state_trans_1 = {
+static const struct llc_sap_state_trans llc_sap_inactive_state_trans_1 = {
 	.ev =		llc_sap_ev_activation_req,
 	.next_state =	LLC_SAP_STATE_ACTIVE,
 	.ev_actions =	llc_sap_inactive_state_actions_1,
 };
 
 /* array of pointers; one to each transition */
-static struct llc_sap_state_trans *llc_sap_inactive_state_transitions[] = {
+static const struct llc_sap_state_trans *llc_sap_inactive_state_transitions[] = {
 	[0] = &llc_sap_inactive_state_trans_1,
 	[1] = &llc_sap_state_trans_end,
 };
@@ -52,7 +46,7 @@ static const llc_sap_action_t llc_sap_active_state_actions_1[] = {
 	[1] = NULL,
 };
 
-static struct llc_sap_state_trans llc_sap_active_state_trans_1 = {
+static const struct llc_sap_state_trans llc_sap_active_state_trans_1 = {
 	.ev =		llc_sap_ev_rx_ui,
 	.next_state =	LLC_SAP_STATE_ACTIVE,
 	.ev_actions =	llc_sap_active_state_actions_1,
@@ -64,7 +58,7 @@ static const llc_sap_action_t llc_sap_active_state_actions_2[] = {
 	[1] = NULL,
 };
 
-static struct llc_sap_state_trans llc_sap_active_state_trans_2 = {
+static const struct llc_sap_state_trans llc_sap_active_state_trans_2 = {
 	.ev =		llc_sap_ev_unitdata_req,
 	.next_state =	LLC_SAP_STATE_ACTIVE,
 	.ev_actions =	llc_sap_active_state_actions_2,
@@ -76,7 +70,7 @@ static const llc_sap_action_t llc_sap_active_state_actions_3[] = {
 	[1] = NULL,
 };
 
-static struct llc_sap_state_trans llc_sap_active_state_trans_3 = {
+static const struct llc_sap_state_trans llc_sap_active_state_trans_3 = {
 	.ev =		llc_sap_ev_xid_req,
 	.next_state =	LLC_SAP_STATE_ACTIVE,
 	.ev_actions =	llc_sap_active_state_actions_3,
@@ -88,7 +82,7 @@ static const llc_sap_action_t llc_sap_active_state_actions_4[] = {
 	[1] = NULL,
 };
 
-static struct llc_sap_state_trans llc_sap_active_state_trans_4 = {
+static const struct llc_sap_state_trans llc_sap_active_state_trans_4 = {
 	.ev =		llc_sap_ev_rx_xid_c,
 	.next_state =	LLC_SAP_STATE_ACTIVE,
 	.ev_actions =	llc_sap_active_state_actions_4,
@@ -100,7 +94,7 @@ static const llc_sap_action_t llc_sap_active_state_actions_5[] = {
 	[1] = NULL,
 };
 
-static struct llc_sap_state_trans llc_sap_active_state_trans_5 = {
+static const struct llc_sap_state_trans llc_sap_active_state_trans_5 = {
 	.ev =		llc_sap_ev_rx_xid_r,
 	.next_state =	LLC_SAP_STATE_ACTIVE,
 	.ev_actions =	llc_sap_active_state_actions_5,
@@ -112,7 +106,7 @@ static const llc_sap_action_t llc_sap_active_state_actions_6[] = {
 	[1] = NULL,
 };
 
-static struct llc_sap_state_trans llc_sap_active_state_trans_6 = {
+static const struct llc_sap_state_trans llc_sap_active_state_trans_6 = {
 	.ev =		llc_sap_ev_test_req,
 	.next_state =	LLC_SAP_STATE_ACTIVE,
 	.ev_actions =	llc_sap_active_state_actions_6,
@@ -124,7 +118,7 @@ static const llc_sap_action_t llc_sap_active_state_actions_7[] = {
 	[1] = NULL,
 };
 
-static struct llc_sap_state_trans llc_sap_active_state_trans_7 = {
+static const struct llc_sap_state_trans llc_sap_active_state_trans_7 = {
 	.ev =		llc_sap_ev_rx_test_c,
 	.next_state =	LLC_SAP_STATE_ACTIVE,
 	.ev_actions =	llc_sap_active_state_actions_7
@@ -136,7 +130,7 @@ static const llc_sap_action_t llc_sap_active_state_actions_8[] = {
 	[1] = NULL,
 };
 
-static struct llc_sap_state_trans llc_sap_active_state_trans_8 = {
+static const struct llc_sap_state_trans llc_sap_active_state_trans_8 = {
 	.ev =		llc_sap_ev_rx_test_r,
 	.next_state =	LLC_SAP_STATE_ACTIVE,
 	.ev_actions =	llc_sap_active_state_actions_8,
@@ -150,14 +144,14 @@ static const llc_sap_action_t llc_sap_active_state_actions_9[] = {
 	[1] = NULL,
 };
 
-static struct llc_sap_state_trans llc_sap_active_state_trans_9 = {
+static const struct llc_sap_state_trans llc_sap_active_state_trans_9 = {
 	.ev =		llc_sap_ev_deactivation_req,
 	.next_state =	LLC_SAP_STATE_INACTIVE,
 	.ev_actions =	llc_sap_active_state_actions_9
 };
 
 /* array of pointers; one to each transition */
-static struct llc_sap_state_trans *llc_sap_active_state_transitions[] = {
+static const struct llc_sap_state_trans *llc_sap_active_state_transitions[] = {
 	[0] = &llc_sap_active_state_trans_2,
 	[1] = &llc_sap_active_state_trans_1,
 	[2] = &llc_sap_active_state_trans_3,

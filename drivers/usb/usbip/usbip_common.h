@@ -18,6 +18,7 @@
 #include <linux/usb.h>
 #include <linux/wait.h>
 #include <linux/sched/task.h>
+#include <linux/kcov.h>
 #include <uapi/linux/usbip.h>
 
 #undef pr_fmt
@@ -120,6 +121,13 @@ extern struct device_attribute dev_attr_usbip_debug;
 
 #define USBIP_DIR_OUT	0x00
 #define USBIP_DIR_IN	0x01
+
+/*
+ * Arbitrary limit for the maximum number of isochronous packets in an URB,
+ * compare for example the uhci_submit_isochronous function in
+ * drivers/usb/host/uhci-q.c
+ */
+#define USBIP_MAX_ISO_PACKETS 1024
 
 /**
  * struct usbip_header_basic - data pertinent to every request
@@ -256,6 +264,9 @@ struct usbip_device {
 	/* lock for status */
 	spinlock_t lock;
 
+	/* mutex for synchronizing sysfs store paths */
+	struct mutex sysfs_lock;
+
 	int sockfd;
 	struct socket *tcp_socket;
 
@@ -270,6 +281,8 @@ struct usbip_device {
 		void (*reset)(struct usbip_device *);
 		void (*unusable)(struct usbip_device *);
 	} eh_ops;
+
+	struct kcov_common_handle_id kcov_handle;
 };
 
 #define kthread_get_run(threadfn, data, namefmt, ...)			   \
@@ -282,12 +295,6 @@ struct usbip_device {
 	}								   \
 	__k;								   \
 })
-
-#define kthread_stop_put(k)		\
-	do {				\
-		kthread_stop(k);	\
-		put_task_struct(k);	\
-	} while (0)
 
 /* usbip_common.c */
 void usbip_dump_urb(struct urb *purb);

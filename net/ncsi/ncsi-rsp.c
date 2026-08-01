@@ -1,24 +1,36 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * Copyright Gavin Shan, IBM Corporation 2016.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/netdevice.h>
+#include <linux/etherdevice.h>
 #include <linux/skbuff.h>
 
 #include <net/ncsi.h>
 #include <net/net_namespace.h>
 #include <net/sock.h>
+#include <net/genetlink.h>
 
 #include "internal.h"
 #include "ncsi-pkt.h"
+#include "ncsi-netlink.h"
+
+/* Nibbles within [0xA, 0xF] add zero "0" to the returned value.
+ * Optional fields (encoded as 0xFF) will default to zero.
+ */
+static u8 decode_bcd_u8(u8 x)
+{
+	int lo = x & 0xF;
+	int hi = x >> 4;
+
+	lo = lo < 0xA ? lo : 0;
+	hi = hi < 0xA ? hi : 0;
+	return lo + hi * 10;
+}
 
 static int ncsi_validate_rsp_pkt(struct ncsi_request *nr,
 				 unsigned short payload)
@@ -32,28 +44,44 @@ static int ncsi_validate_rsp_pkt(struct ncsi_request *nr,
 	 * before calling this function.
 	 */
 	h = (struct ncsi_rsp_pkt_hdr *)skb_network_header(nr->rsp);
-	if (h->common.revision != NCSI_PKT_REVISION)
+
+	if (h->common.revision != NCSI_PKT_REVISION) {
+		netdev_dbg(nr->ndp->ndev.dev,
+			   "NCSI: unsupported header revision\n");
 		return -EINVAL;
-	if (ntohs(h->common.length) != payload)
+	}
+	if (ntohs(h->common.length) != payload) {
+		netdev_dbg(nr->ndp->ndev.dev,
+			   "NCSI: payload length mismatched\n");
 		return -EINVAL;
+	}
 
 	/* Check on code and reason */
 	if (ntohs(h->code) != NCSI_PKT_RSP_C_COMPLETED ||
-	    ntohs(h->reason) != NCSI_PKT_RSP_R_NO_ERROR)
-		return -EINVAL;
+	    ntohs(h->reason) != NCSI_PKT_RSP_R_NO_ERROR) {
+		netdev_dbg(nr->ndp->ndev.dev,
+			   "NCSI: non zero response/reason code %04xh, %04xh\n",
+			    ntohs(h->code), ntohs(h->reason));
+		return -EPERM;
+	}
 
 	/* Validate checksum, which might be zeroes if the
 	 * sender doesn't support checksum according to NCSI
 	 * specification.
 	 */
-	pchecksum = (__be32 *)((void *)(h + 1) + payload - 4);
+	pchecksum = (__be32 *)((void *)(h + 1) + ALIGN(payload, 4) - 4);
 	if (ntohl(*pchecksum) == 0)
 		return 0;
 
 	checksum = ncsi_calculate_checksum((unsigned char *)h,
 					   sizeof(*h) + payload - 4);
-	if (*pchecksum != htonl(checksum))
+
+	if (*pchecksum != htonl(checksum)) {
+		netdev_dbg(nr->ndp->ndev.dev,
+			   "NCSI: checksum mismatched; recd: %08x calc: %08x\n",
+			   *pchecksum, htonl(checksum));
 		return -EINVAL;
+	}
 
 	return 0;
 }
@@ -241,7 +269,7 @@ static int ncsi_rsp_handler_dcnt(struct ncsi_request *nr)
 	if (!ncm->enable)
 		return 0;
 
-	ncm->enable = 1;
+	ncm->enable = 0;
 	return 0;
 }
 
@@ -334,9 +362,9 @@ static int ncsi_rsp_handler_svf(struct ncsi_request *nr)
 	struct ncsi_rsp_pkt *rsp;
 	struct ncsi_dev_priv *ndp = nr->ndp;
 	struct ncsi_channel *nc;
-	struct ncsi_channel_filter *ncf;
-	unsigned short vlan;
-	int ret;
+	struct ncsi_channel_vlan_filter *ncf;
+	unsigned long flags;
+	void *bitmap;
 
 	/* Find the package and channel */
 	rsp = (struct ncsi_rsp_pkt *)skb_network_header(nr->rsp);
@@ -346,22 +374,23 @@ static int ncsi_rsp_handler_svf(struct ncsi_request *nr)
 		return -ENODEV;
 
 	cmd = (struct ncsi_cmd_svf_pkt *)skb_network_header(nr->cmd);
-	ncf = nc->filters[NCSI_FILTER_VLAN];
-	if (!ncf)
-		return -ENOENT;
-	if (cmd->index >= ncf->total)
+	ncf = &nc->vlan_filter;
+	if (cmd->index == 0 || cmd->index > ncf->n_vids)
 		return -ERANGE;
 
-	/* Add or remove the VLAN filter */
+	/* Add or remove the VLAN filter. Remember HW indexes from 1 */
+	spin_lock_irqsave(&nc->lock, flags);
+	bitmap = &ncf->bitmap;
 	if (!(cmd->enable & 0x1)) {
-		/* HW indexes from 1 */
-		ret = ncsi_remove_filter(nc, NCSI_FILTER_VLAN, cmd->index - 1);
+		if (test_and_clear_bit(cmd->index - 1, bitmap))
+			ncf->vids[cmd->index - 1] = 0;
 	} else {
-		vlan = ntohs(cmd->vlan);
-		ret = ncsi_add_filter(nc, NCSI_FILTER_VLAN, &vlan);
+		set_bit(cmd->index - 1, bitmap);
+		ncf->vids[cmd->index - 1] = ntohs(cmd->vlan);
 	}
+	spin_unlock_irqrestore(&nc->lock, flags);
 
-	return ret;
+	return 0;
 }
 
 static int ncsi_rsp_handler_ev(struct ncsi_request *nr)
@@ -387,7 +416,7 @@ static int ncsi_rsp_handler_ev(struct ncsi_request *nr)
 	/* Update to VLAN mode */
 	cmd = (struct ncsi_cmd_ev_pkt *)skb_network_header(nr->cmd);
 	ncm->enable = 1;
-	ncm->data[0] = ntohl(cmd->mode);
+	ncm->data[0] = ntohl((__force __be32)cmd->mode);
 
 	return 0;
 }
@@ -422,8 +451,12 @@ static int ncsi_rsp_handler_sma(struct ncsi_request *nr)
 	struct ncsi_rsp_pkt *rsp;
 	struct ncsi_dev_priv *ndp = nr->ndp;
 	struct ncsi_channel *nc;
-	struct ncsi_channel_filter *ncf;
+	struct ncsi_channel_mac_filter *ncf;
+	unsigned long flags;
 	void *bitmap;
+	bool enabled;
+	int index;
+
 
 	/* Find the package and channel */
 	rsp = (struct ncsi_rsp_pkt *)skb_network_header(nr->rsp);
@@ -436,31 +469,24 @@ static int ncsi_rsp_handler_sma(struct ncsi_request *nr)
 	 * isn't supported yet.
 	 */
 	cmd = (struct ncsi_cmd_sma_pkt *)skb_network_header(nr->cmd);
-	switch (cmd->at_e >> 5) {
-	case 0x0:	/* UC address */
-		ncf = nc->filters[NCSI_FILTER_UC];
-		break;
-	case 0x1:	/* MC address */
-		ncf = nc->filters[NCSI_FILTER_MC];
-		break;
-	default:
-		return -EINVAL;
-	}
+	enabled = cmd->at_e & 0x1;
+	ncf = &nc->mac_filter;
+	bitmap = &ncf->bitmap;
 
-	/* Sanity check on the filter */
-	if (!ncf)
-		return -ENOENT;
-	else if (cmd->index >= ncf->total)
+	if (cmd->index == 0 ||
+	    cmd->index > ncf->n_uc + ncf->n_mc + ncf->n_mixed)
 		return -ERANGE;
 
-	bitmap = &ncf->bitmap;
-	if (cmd->at_e & 0x1) {
-		set_bit(cmd->index, bitmap);
-		memcpy(ncf->data + 6 * cmd->index, cmd->mac, 6);
+	index = (cmd->index - 1) * ETH_ALEN;
+	spin_lock_irqsave(&nc->lock, flags);
+	if (enabled) {
+		set_bit(cmd->index - 1, bitmap);
+		memcpy(&ncf->addrs[index], cmd->mac, ETH_ALEN);
 	} else {
-		clear_bit(cmd->index, bitmap);
-		memset(ncf->data + 6 * cmd->index, 0, 6);
+		clear_bit(cmd->index - 1, bitmap);
+		eth_zero_addr(&ncf->addrs[index]);
 	}
+	spin_unlock_irqrestore(&nc->lock, flags);
 
 	return 0;
 }
@@ -598,6 +624,128 @@ static int ncsi_rsp_handler_snfc(struct ncsi_request *nr)
 	return 0;
 }
 
+/* Response handler for Get Mac Address command */
+static int ncsi_rsp_handler_oem_gma(struct ncsi_request *nr, int mfr_id)
+{
+	struct ncsi_dev_priv *ndp = nr->ndp;
+	struct sockaddr_storage *saddr = &ndp->pending_mac;
+	struct net_device *ndev = ndp->ndev.dev;
+	struct ncsi_rsp_oem_pkt *rsp;
+	u32 mac_addr_off = 0;
+
+	/* Get the response header */
+	rsp = (struct ncsi_rsp_oem_pkt *)skb_network_header(nr->rsp);
+
+	ndev->priv_flags |= IFF_LIVE_ADDR_CHANGE;
+	if (mfr_id == NCSI_OEM_MFR_BCM_ID)
+		mac_addr_off = BCM_MAC_ADDR_OFFSET;
+	else if (mfr_id == NCSI_OEM_MFR_MLX_ID)
+		mac_addr_off = MLX_MAC_ADDR_OFFSET;
+	else if (mfr_id == NCSI_OEM_MFR_INTEL_ID)
+		mac_addr_off = INTEL_MAC_ADDR_OFFSET;
+
+	saddr->ss_family = ndev->type;
+	memcpy(saddr->__data, &rsp->data[mac_addr_off], ETH_ALEN);
+	if (mfr_id == NCSI_OEM_MFR_BCM_ID || mfr_id == NCSI_OEM_MFR_INTEL_ID)
+		eth_addr_inc(saddr->__data);
+	if (!is_valid_ether_addr(saddr->__data))
+		return -ENXIO;
+
+	/* Set the flag for GMA command which should only be called once */
+	ndp->gma_flag = 1;
+
+	return 0;
+}
+
+/* Response handler for Mellanox card */
+static int ncsi_rsp_handler_oem_mlx(struct ncsi_request *nr)
+{
+	struct ncsi_rsp_oem_mlx_pkt *mlx;
+	struct ncsi_rsp_oem_pkt *rsp;
+
+	/* Get the response header */
+	rsp = (struct ncsi_rsp_oem_pkt *)skb_network_header(nr->rsp);
+	mlx = (struct ncsi_rsp_oem_mlx_pkt *)(rsp->data);
+
+	if (mlx->cmd == NCSI_OEM_MLX_CMD_GMA &&
+	    mlx->param == NCSI_OEM_MLX_CMD_GMA_PARAM)
+		return ncsi_rsp_handler_oem_gma(nr, NCSI_OEM_MFR_MLX_ID);
+	return 0;
+}
+
+/* Response handler for Broadcom card */
+static int ncsi_rsp_handler_oem_bcm(struct ncsi_request *nr)
+{
+	struct ncsi_rsp_oem_bcm_pkt *bcm;
+	struct ncsi_rsp_oem_pkt *rsp;
+
+	/* Get the response header */
+	rsp = (struct ncsi_rsp_oem_pkt *)skb_network_header(nr->rsp);
+	bcm = (struct ncsi_rsp_oem_bcm_pkt *)(rsp->data);
+
+	if (bcm->type == NCSI_OEM_BCM_CMD_GMA)
+		return ncsi_rsp_handler_oem_gma(nr, NCSI_OEM_MFR_BCM_ID);
+	return 0;
+}
+
+/* Response handler for Intel card */
+static int ncsi_rsp_handler_oem_intel(struct ncsi_request *nr)
+{
+	struct ncsi_rsp_oem_intel_pkt *intel;
+	struct ncsi_rsp_oem_pkt *rsp;
+
+	/* Get the response header */
+	rsp = (struct ncsi_rsp_oem_pkt *)skb_network_header(nr->rsp);
+	intel = (struct ncsi_rsp_oem_intel_pkt *)(rsp->data);
+
+	if (intel->cmd == NCSI_OEM_INTEL_CMD_GMA)
+		return ncsi_rsp_handler_oem_gma(nr, NCSI_OEM_MFR_INTEL_ID);
+
+	return 0;
+}
+
+static struct ncsi_rsp_oem_handler {
+	unsigned int	mfr_id;
+	int		(*handler)(struct ncsi_request *nr);
+} ncsi_rsp_oem_handlers[] = {
+	{ NCSI_OEM_MFR_MLX_ID, ncsi_rsp_handler_oem_mlx },
+	{ NCSI_OEM_MFR_BCM_ID, ncsi_rsp_handler_oem_bcm },
+	{ NCSI_OEM_MFR_INTEL_ID, ncsi_rsp_handler_oem_intel }
+};
+
+/* Response handler for OEM command */
+static int ncsi_rsp_handler_oem(struct ncsi_request *nr)
+{
+	struct ncsi_rsp_oem_handler *nrh = NULL;
+	struct ncsi_rsp_oem_pkt *rsp;
+	unsigned int mfr_id, i;
+
+	/* Get the response header */
+	rsp = (struct ncsi_rsp_oem_pkt *)skb_network_header(nr->rsp);
+	mfr_id = ntohl(rsp->mfr_id);
+
+	/* Check for manufacturer id and Find the handler */
+	for (i = 0; i < ARRAY_SIZE(ncsi_rsp_oem_handlers); i++) {
+		if (ncsi_rsp_oem_handlers[i].mfr_id == mfr_id) {
+			if (ncsi_rsp_oem_handlers[i].handler)
+				nrh = &ncsi_rsp_oem_handlers[i];
+			else
+				nrh = NULL;
+
+			break;
+		}
+	}
+
+	if (!nrh) {
+		netdev_err(nr->ndp->ndev.dev, "Received unrecognized OEM packet with MFR-ID (0x%x)\n",
+			   mfr_id);
+		return -ENOENT;
+	}
+
+	/* Process the packet */
+	return nrh->handler(nr);
+}
+
 static int ncsi_rsp_handler_gvi(struct ncsi_request *nr)
 {
 	struct ncsi_rsp_gvi_pkt *rsp;
@@ -613,11 +761,21 @@ static int ncsi_rsp_handler_gvi(struct ncsi_request *nr)
 	if (!nc)
 		return -ENODEV;
 
-	/* Update to channel's version info */
+	/* Update channel's version info
+	 *
+	 * Major, minor, and update fields are supposed to be
+	 * unsigned integers encoded as packed BCD.
+	 *
+	 * Alpha1 and alpha2 are ISO/IEC 8859-1 characters.
+	 */
 	ncv = &nc->version;
-	ncv->version = ntohl(rsp->ncsi_version);
+	ncv->major = decode_bcd_u8(rsp->major);
+	ncv->minor = decode_bcd_u8(rsp->minor);
+	ncv->update = decode_bcd_u8(rsp->update);
+	ncv->alpha1 = rsp->alpha1;
 	ncv->alpha2 = rsp->alpha2;
 	memcpy(ncv->fw_name, rsp->fw_name, 12);
+	ncv->fw_name[12] = '\0';
 	ncv->fw_version = ntohl(rsp->fw_version);
 	for (i = 0; i < ARRAY_SIZE(ncv->pci_ids); i++)
 		ncv->pci_ids[i] = ntohs(rsp->pci_ids[i]);
@@ -631,14 +789,13 @@ static int ncsi_rsp_handler_gc(struct ncsi_request *nr)
 	struct ncsi_rsp_gc_pkt *rsp;
 	struct ncsi_dev_priv *ndp = nr->ndp;
 	struct ncsi_channel *nc;
-	struct ncsi_channel_filter *ncf;
-	size_t size, entry_size;
-	int cnt, i;
+	struct ncsi_package *np;
+	size_t size;
 
 	/* Find the channel */
 	rsp = (struct ncsi_rsp_gc_pkt *)skb_network_header(nr->rsp);
 	ncsi_find_package_and_channel(ndp, rsp->rsp.common.channel,
-				      NULL, &nc);
+				      &np, &nc);
 	if (!nc)
 		return -ENODEV;
 
@@ -655,64 +812,41 @@ static int ncsi_rsp_handler_gc(struct ncsi_request *nr)
 	nc->caps[NCSI_CAP_VLAN].cap = rsp->vlan_mode &
 				      NCSI_CAP_VLAN_MASK;
 
-	/* Build filters */
-	for (i = 0; i < NCSI_FILTER_MAX; i++) {
-		switch (i) {
-		case NCSI_FILTER_VLAN:
-			cnt = rsp->vlan_cnt;
-			entry_size = 2;
-			break;
-		case NCSI_FILTER_MIXED:
-			cnt = rsp->mixed_cnt;
-			entry_size = 6;
-			break;
-		case NCSI_FILTER_MC:
-			cnt = rsp->mc_cnt;
-			entry_size = 6;
-			break;
-		case NCSI_FILTER_UC:
-			cnt = rsp->uc_cnt;
-			entry_size = 6;
-			break;
-		default:
-			continue;
-		}
+	size = (rsp->uc_cnt + rsp->mc_cnt + rsp->mixed_cnt) * ETH_ALEN;
+	nc->mac_filter.addrs = kzalloc(size, GFP_ATOMIC);
+	if (!nc->mac_filter.addrs)
+		return -ENOMEM;
+	nc->mac_filter.n_uc = rsp->uc_cnt;
+	nc->mac_filter.n_mc = rsp->mc_cnt;
+	nc->mac_filter.n_mixed = rsp->mixed_cnt;
 
-		if (!cnt || nc->filters[i])
-			continue;
-
-		size = sizeof(*ncf) + cnt * entry_size;
-		ncf = kzalloc(size, GFP_ATOMIC);
-		if (!ncf) {
-			pr_warn("%s: Cannot alloc filter table (%d)\n",
-				__func__, i);
-			return -ENOMEM;
-		}
-
-		ncf->index = i;
-		ncf->total = cnt;
-		if (i == NCSI_FILTER_VLAN) {
-			/* Set VLAN filters active so they are cleared in
-			 * first configuration state
-			 */
-			ncf->bitmap = U64_MAX;
-		} else {
-			ncf->bitmap = 0x0ul;
-		}
-		nc->filters[i] = ncf;
-	}
+	nc->vlan_filter.vids = kcalloc(rsp->vlan_cnt,
+				       sizeof(*nc->vlan_filter.vids),
+				       GFP_ATOMIC);
+	if (!nc->vlan_filter.vids)
+		return -ENOMEM;
+	/* Set VLAN filters active so they are cleared in the first
+	 * configuration state
+	 */
+	nc->vlan_filter.bitmap = U64_MAX;
+	nc->vlan_filter.n_vids = rsp->vlan_cnt;
+	np->ndp->channel_count = rsp->channel_cnt;
 
 	return 0;
 }
 
 static int ncsi_rsp_handler_gp(struct ncsi_request *nr)
 {
-	struct ncsi_rsp_gp_pkt *rsp;
+	struct ncsi_channel_vlan_filter *ncvf;
+	struct ncsi_channel_mac_filter *ncmf;
 	struct ncsi_dev_priv *ndp = nr->ndp;
+	struct ncsi_rsp_gp_pkt *rsp;
 	struct ncsi_channel *nc;
-	unsigned short enable, vlan;
+	unsigned short enable;
 	unsigned char *pdata;
-	int table, i;
+	unsigned long flags;
+	void *bitmap;
+	int i;
 
 	/* Find the channel */
 	rsp = (struct ncsi_rsp_gp_pkt *)skb_network_header(nr->rsp);
@@ -746,36 +880,33 @@ static int ncsi_rsp_handler_gp(struct ncsi_request *nr)
 	/* MAC addresses filter table */
 	pdata = (unsigned char *)rsp + 48;
 	enable = rsp->mac_enable;
+	ncmf = &nc->mac_filter;
+	spin_lock_irqsave(&nc->lock, flags);
+	bitmap = &ncmf->bitmap;
 	for (i = 0; i < rsp->mac_cnt; i++, pdata += 6) {
-		if (i >= (nc->filters[NCSI_FILTER_UC]->total +
-			  nc->filters[NCSI_FILTER_MC]->total))
-			table = NCSI_FILTER_MIXED;
-		else if (i >= nc->filters[NCSI_FILTER_UC]->total)
-			table = NCSI_FILTER_MC;
-		else
-			table = NCSI_FILTER_UC;
-
 		if (!(enable & (0x1 << i)))
-			continue;
+			clear_bit(i, bitmap);
+		else
+			set_bit(i, bitmap);
 
-		if (ncsi_find_filter(nc, table, pdata) >= 0)
-			continue;
-
-		ncsi_add_filter(nc, table, pdata);
+		memcpy(&ncmf->addrs[i * ETH_ALEN], pdata, ETH_ALEN);
 	}
+	spin_unlock_irqrestore(&nc->lock, flags);
 
 	/* VLAN filter table */
 	enable = ntohs(rsp->vlan_enable);
+	ncvf = &nc->vlan_filter;
+	bitmap = &ncvf->bitmap;
+	spin_lock_irqsave(&nc->lock, flags);
 	for (i = 0; i < rsp->vlan_cnt; i++, pdata += 2) {
 		if (!(enable & (0x1 << i)))
-			continue;
+			clear_bit(i, bitmap);
+		else
+			set_bit(i, bitmap);
 
-		vlan = ntohs(*(__be16 *)pdata);
-		if (ncsi_find_filter(nc, NCSI_FILTER_VLAN, &vlan) >= 0)
-			continue;
-
-		ncsi_add_filter(nc, NCSI_FILTER_VLAN, &vlan);
+		ncvf->vids[i] = ntohs(*(__be16 *)pdata);
 	}
+	spin_unlock_irqrestore(&nc->lock, flags);
 
 	return 0;
 }
@@ -796,16 +927,15 @@ static int ncsi_rsp_handler_gcps(struct ncsi_request *nr)
 
 	/* Update HNC's statistics */
 	ncs = &nc->stats;
-	ncs->hnc_cnt_hi         = ntohl(rsp->cnt_hi);
-	ncs->hnc_cnt_lo         = ntohl(rsp->cnt_lo);
-	ncs->hnc_rx_bytes       = ntohl(rsp->rx_bytes);
-	ncs->hnc_tx_bytes       = ntohl(rsp->tx_bytes);
-	ncs->hnc_rx_uc_pkts     = ntohl(rsp->rx_uc_pkts);
-	ncs->hnc_rx_mc_pkts     = ntohl(rsp->rx_mc_pkts);
-	ncs->hnc_rx_bc_pkts     = ntohl(rsp->rx_bc_pkts);
-	ncs->hnc_tx_uc_pkts     = ntohl(rsp->tx_uc_pkts);
-	ncs->hnc_tx_mc_pkts     = ntohl(rsp->tx_mc_pkts);
-	ncs->hnc_tx_bc_pkts     = ntohl(rsp->tx_bc_pkts);
+	ncs->hnc_cnt            = be64_to_cpu(rsp->cnt);
+	ncs->hnc_rx_bytes       = be64_to_cpu(rsp->rx_bytes);
+	ncs->hnc_tx_bytes       = be64_to_cpu(rsp->tx_bytes);
+	ncs->hnc_rx_uc_pkts     = be64_to_cpu(rsp->rx_uc_pkts);
+	ncs->hnc_rx_mc_pkts     = be64_to_cpu(rsp->rx_mc_pkts);
+	ncs->hnc_rx_bc_pkts     = be64_to_cpu(rsp->rx_bc_pkts);
+	ncs->hnc_tx_uc_pkts     = be64_to_cpu(rsp->tx_uc_pkts);
+	ncs->hnc_tx_mc_pkts     = be64_to_cpu(rsp->tx_mc_pkts);
+	ncs->hnc_tx_bc_pkts     = be64_to_cpu(rsp->tx_bc_pkts);
 	ncs->hnc_fcs_err        = ntohl(rsp->fcs_err);
 	ncs->hnc_align_err      = ntohl(rsp->align_err);
 	ncs->hnc_false_carrier  = ntohl(rsp->false_carrier);
@@ -834,7 +964,7 @@ static int ncsi_rsp_handler_gcps(struct ncsi_request *nr)
 	ncs->hnc_tx_1023_frames = ntohl(rsp->tx_1023_frames);
 	ncs->hnc_tx_1522_frames = ntohl(rsp->tx_1522_frames);
 	ncs->hnc_tx_9022_frames = ntohl(rsp->tx_9022_frames);
-	ncs->hnc_rx_valid_bytes = ntohl(rsp->rx_valid_bytes);
+	ncs->hnc_rx_valid_bytes = be64_to_cpu(rsp->rx_valid_bytes);
 	ncs->hnc_rx_runt_pkts   = ntohl(rsp->rx_runt_pkts);
 	ncs->hnc_rx_jabber_pkts = ntohl(rsp->rx_jabber_pkts);
 
@@ -931,6 +1061,67 @@ static int ncsi_rsp_handler_gpuuid(struct ncsi_request *nr)
 	return 0;
 }
 
+static int ncsi_rsp_handler_pldm(struct ncsi_request *nr)
+{
+	return 0;
+}
+
+static int ncsi_rsp_handler_netlink(struct ncsi_request *nr)
+{
+	struct ncsi_dev_priv *ndp = nr->ndp;
+	struct ncsi_rsp_pkt *rsp;
+	struct ncsi_package *np;
+	struct ncsi_channel *nc;
+	int ret;
+
+	/* Find the package */
+	rsp = (struct ncsi_rsp_pkt *)skb_network_header(nr->rsp);
+	ncsi_find_package_and_channel(ndp, rsp->rsp.common.channel,
+				      &np, &nc);
+	if (!np)
+		return -ENODEV;
+
+	ret = ncsi_send_netlink_rsp(nr, np, nc);
+
+	return ret;
+}
+
+static int ncsi_rsp_handler_gmcma(struct ncsi_request *nr)
+{
+	struct ncsi_dev_priv *ndp = nr->ndp;
+	struct sockaddr_storage *saddr = &ndp->pending_mac;
+	struct net_device *ndev = ndp->ndev.dev;
+	struct ncsi_rsp_gmcma_pkt *rsp;
+	int i;
+
+	rsp = (struct ncsi_rsp_gmcma_pkt *)skb_network_header(nr->rsp);
+	ndev->priv_flags |= IFF_LIVE_ADDR_CHANGE;
+
+	netdev_info(ndev, "NCSI: Received %d provisioned MAC addresses\n",
+		    rsp->address_count);
+	for (i = 0; i < rsp->address_count; i++) {
+		netdev_info(ndev, "NCSI: MAC address %d: %02x:%02x:%02x:%02x:%02x:%02x\n",
+			    i, rsp->addresses[i][0], rsp->addresses[i][1],
+			    rsp->addresses[i][2], rsp->addresses[i][3],
+			    rsp->addresses[i][4], rsp->addresses[i][5]);
+	}
+
+	saddr->ss_family = ndev->type;
+	for (i = 0; i < rsp->address_count; i++) {
+		if (!is_valid_ether_addr(rsp->addresses[i])) {
+			netdev_warn(ndev, "NCSI: Unable to assign %pM to device\n",
+				    rsp->addresses[i]);
+			continue;
+		}
+		memcpy(saddr->__data, rsp->addresses[i], ETH_ALEN);
+		netdev_warn(ndev, "NCSI: Will set MAC address to %pM\n", saddr->__data);
+		break;
+	}
+
+	ndp->gma_flag = 1;
+	return 0;
+}
+
 static struct ncsi_rsp_handler {
 	unsigned char	type;
 	int             payload;
@@ -959,13 +1150,16 @@ static struct ncsi_rsp_handler {
 	{ NCSI_PKT_RSP_GVI,    40, ncsi_rsp_handler_gvi     },
 	{ NCSI_PKT_RSP_GC,     32, ncsi_rsp_handler_gc      },
 	{ NCSI_PKT_RSP_GP,     -1, ncsi_rsp_handler_gp      },
-	{ NCSI_PKT_RSP_GCPS,  172, ncsi_rsp_handler_gcps    },
-	{ NCSI_PKT_RSP_GNS,   172, ncsi_rsp_handler_gns     },
-	{ NCSI_PKT_RSP_GNPTS, 172, ncsi_rsp_handler_gnpts   },
+	{ NCSI_PKT_RSP_GCPS,  204, ncsi_rsp_handler_gcps    },
+	{ NCSI_PKT_RSP_GNS,    32, ncsi_rsp_handler_gns     },
+	{ NCSI_PKT_RSP_GNPTS,  48, ncsi_rsp_handler_gnpts   },
 	{ NCSI_PKT_RSP_GPS,     8, ncsi_rsp_handler_gps     },
-	{ NCSI_PKT_RSP_OEM,     0, NULL                     },
-	{ NCSI_PKT_RSP_PLDM,    0, NULL                     },
-	{ NCSI_PKT_RSP_GPUUID, 20, ncsi_rsp_handler_gpuuid  }
+	{ NCSI_PKT_RSP_OEM,    -1, ncsi_rsp_handler_oem     },
+	{ NCSI_PKT_RSP_PLDM,   -1, ncsi_rsp_handler_pldm    },
+	{ NCSI_PKT_RSP_GPUUID, 20, ncsi_rsp_handler_gpuuid  },
+	{ NCSI_PKT_RSP_QPNPR,  -1, ncsi_rsp_handler_pldm    },
+	{ NCSI_PKT_RSP_SNPR,   -1, ncsi_rsp_handler_pldm    },
+	{ NCSI_PKT_RSP_GMCMA,  -1, ncsi_rsp_handler_gmcma   },
 };
 
 int ncsi_rcv_rsp(struct sk_buff *skb, struct net_device *dev,
@@ -980,10 +1174,12 @@ int ncsi_rcv_rsp(struct sk_buff *skb, struct net_device *dev,
 	int payload, i, ret;
 
 	/* Find the NCSI device */
-	nd = ncsi_find_dev(dev);
+	nd = ncsi_find_dev(orig_dev);
 	ndp = nd ? TO_NCSI_DEV_PRIV(nd) : NULL;
-	if (!ndp)
-		return -ENODEV;
+	if (!ndp) {
+		ret = -ENODEV;
+		goto err_free_skb;
+	}
 
 	/* Check if it is AEN packet */
 	hdr = (struct ncsi_pkt_hdr *)skb_network_header(skb);
@@ -1005,7 +1201,8 @@ int ncsi_rcv_rsp(struct sk_buff *skb, struct net_device *dev,
 	if (!nrh) {
 		netdev_err(nd->dev, "Received unrecognized packet (0x%x)\n",
 			   hdr->type);
-		return -ENOENT;
+		ret = -ENOENT;
+		goto err_free_skb;
 	}
 
 	/* Associate with the request */
@@ -1013,7 +1210,8 @@ int ncsi_rcv_rsp(struct sk_buff *skb, struct net_device *dev,
 	nr = &ndp->requests[hdr->id];
 	if (!nr->used) {
 		spin_unlock_irqrestore(&ndp->lock, flags);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto err_free_skb;
 	}
 
 	nr->rsp = skb;
@@ -1033,6 +1231,17 @@ int ncsi_rcv_rsp(struct sk_buff *skb, struct net_device *dev,
 		netdev_warn(ndp->ndev.dev,
 			    "NCSI: 'bad' packet ignored for type 0x%x\n",
 			    hdr->type);
+
+		if (nr->flags == NCSI_REQ_FLAG_NETLINK_DRIVEN) {
+			if (ret == -EPERM)
+				goto out_netlink;
+			else
+				ncsi_send_netlink_err(ndp->ndev.dev,
+						      nr->snd_seq,
+						      nr->snd_portid,
+						      &nr->nlhdr,
+						      ret);
+		}
 		goto out;
 	}
 
@@ -1042,7 +1251,22 @@ int ncsi_rcv_rsp(struct sk_buff *skb, struct net_device *dev,
 		netdev_err(ndp->ndev.dev,
 			   "NCSI: Handler for packet type 0x%x returned %d\n",
 			   hdr->type, ret);
+
+out_netlink:
+	if (nr->flags == NCSI_REQ_FLAG_NETLINK_DRIVEN) {
+		ret = ncsi_rsp_handler_netlink(nr);
+		if (ret) {
+			netdev_err(ndp->ndev.dev,
+				   "NCSI: Netlink handler for packet type 0x%x returned %d\n",
+				   hdr->type, ret);
+		}
+	}
+
 out:
 	ncsi_free_request(nr);
+	return ret;
+
+err_free_skb:
+	kfree_skb(skb);
 	return ret;
 }

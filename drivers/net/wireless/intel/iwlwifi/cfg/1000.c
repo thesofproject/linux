@@ -1,33 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /******************************************************************************
  *
  * Copyright(c) 2008 - 2014 Intel Corporation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along with
- * this program; if not, write to the Free Software Foundation, Inc.,
- * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
- *
- * Contact Information:
- *  Intel Linux Wireless <linuxwifi@intel.com>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
+ * Copyright(c) 2018 - 2020, 2023, 2025 Intel Corporation
  *****************************************************************************/
 
 #include <linux/module.h>
 #include <linux/stringify.h>
 #include "iwl-config.h"
-#include "iwl-csr.h"
 #include "iwl-agn-hw.h"
 
 /* Highest firmware API version supported */
@@ -42,16 +22,17 @@
 #define EEPROM_1000_TX_POWER_VERSION	(4)
 #define EEPROM_1000_EEPROM_VERSION	(0x15C)
 
-#define IWL1000_FW_PRE "iwlwifi-1000-"
-#define IWL1000_MODULE_FIRMWARE(api) IWL1000_FW_PRE __stringify(api) ".ucode"
+#define IWL1000_FW_PRE "iwlwifi-1000"
+#define IWL1000_MODULE_FIRMWARE(api) IWL1000_FW_PRE "-" __stringify(api) ".ucode"
 
-#define IWL100_FW_PRE "iwlwifi-100-"
-#define IWL100_MODULE_FIRMWARE(api) IWL100_FW_PRE __stringify(api) ".ucode"
+#define IWL100_FW_PRE "iwlwifi-100"
+#define IWL100_MODULE_FIRMWARE(api) IWL100_FW_PRE "-" __stringify(api) ".ucode"
 
 
-static const struct iwl_base_params iwl1000_base_params = {
+static const struct iwl_family_base_params iwl1000_base = {
 	.num_of_queues = IWLAGN_NUM_QUEUES,
-	.eeprom_size = OTP_LOW_IMAGE_SIZE,
+	.max_tfd_queue_size = 256,
+	.eeprom_size = OTP_LOW_IMAGE_SIZE_2K,
 	.pll_cfg = true,
 	.max_ll_items = OTP_MAX_LL_ITEMS_1000,
 	.shadow_ram_support = false,
@@ -59,12 +40,6 @@ static const struct iwl_base_params iwl1000_base_params = {
 	.wd_timeout = IWL_WATCHDOG_DISABLED,
 	.max_event_log_size = 128,
 	.scd_chain_ext_wa = true,
-};
-
-static const struct iwl_ht_params iwl1000_ht_params = {
-	.ht_greenfield_support = true,
-	.use_rts_for_aggregation = true, /* use rts/cts protection */
-	.ht40_bands = BIT(NL80211_BAND_2GHZ),
 };
 
 static const struct iwl_eeprom_params iwl1000_eeprom_params = {
@@ -79,56 +54,67 @@ static const struct iwl_eeprom_params iwl1000_eeprom_params = {
 	}
 };
 
+const struct iwl_mac_cfg iwl1000_mac_cfg = {
+	.device_family = IWL_DEVICE_FAMILY_1000,
+	.base = &iwl1000_base,
+};
+
 #define IWL_DEVICE_1000						\
 	.fw_name_pre = IWL1000_FW_PRE,				\
 	.ucode_api_max = IWL1000_UCODE_API_MAX,			\
 	.ucode_api_min = IWL1000_UCODE_API_MIN,			\
-	.device_family = IWL_DEVICE_FAMILY_1000,		\
 	.max_inst_size = IWLAGN_RTC_INST_SIZE,			\
 	.max_data_size = IWLAGN_RTC_DATA_SIZE,			\
 	.nvm_ver = EEPROM_1000_EEPROM_VERSION,		\
 	.nvm_calib_ver = EEPROM_1000_TX_POWER_VERSION,	\
-	.base_params = &iwl1000_base_params,			\
 	.eeprom_params = &iwl1000_eeprom_params,		\
-	.led_mode = IWL_LED_BLINK,				\
-	.max_ht_ampdu_exponent = IEEE80211_HT_MAX_AMPDU_64K
+	.led_mode = IWL_LED_BLINK
 
-const struct iwl_cfg iwl1000_bgn_cfg = {
-	.name = "Intel(R) Centrino(R) Wireless-N 1000 BGN",
+const struct iwl_rf_cfg iwl1000_bgn_cfg = {
 	IWL_DEVICE_1000,
-	.ht_params = &iwl1000_ht_params,
+	.ht_params = {
+		.ht_greenfield_support = true,
+		.use_rts_for_aggregation = true, /* use rts/cts protection */
+		.ht40_bands = BIT(NL80211_BAND_2GHZ),
+	},
 };
 
-const struct iwl_cfg iwl1000_bg_cfg = {
-	.name = "Intel(R) Centrino(R) Wireless-N 1000 BG",
+const char iwl1000_bgn_name[] = "Intel(R) Centrino(R) Wireless-N 1000 BGN";
+
+const struct iwl_rf_cfg iwl1000_bg_cfg = {
 	IWL_DEVICE_1000,
 };
+
+const char iwl1000_bg_name[] = "Intel(R) Centrino(R) Wireless-N 1000 BG";
 
 #define IWL_DEVICE_100						\
 	.fw_name_pre = IWL100_FW_PRE,				\
 	.ucode_api_max = IWL100_UCODE_API_MAX,			\
 	.ucode_api_min = IWL100_UCODE_API_MIN,			\
-	.device_family = IWL_DEVICE_FAMILY_100,			\
 	.max_inst_size = IWLAGN_RTC_INST_SIZE,			\
 	.max_data_size = IWLAGN_RTC_DATA_SIZE,			\
 	.nvm_ver = EEPROM_1000_EEPROM_VERSION,		\
 	.nvm_calib_ver = EEPROM_1000_TX_POWER_VERSION,	\
-	.base_params = &iwl1000_base_params,			\
 	.eeprom_params = &iwl1000_eeprom_params,		\
 	.led_mode = IWL_LED_RF_STATE,				\
-	.rx_with_siso_diversity = true,				\
-	.max_ht_ampdu_exponent = IEEE80211_HT_MAX_AMPDU_64K
+	.rx_with_siso_diversity = true
 
-const struct iwl_cfg iwl100_bgn_cfg = {
-	.name = "Intel(R) Centrino(R) Wireless-N 100 BGN",
+const struct iwl_rf_cfg iwl100_bgn_cfg = {
 	IWL_DEVICE_100,
-	.ht_params = &iwl1000_ht_params,
+	.ht_params = {
+		.ht_greenfield_support = true,
+		.use_rts_for_aggregation = true, /* use rts/cts protection */
+		.ht40_bands = BIT(NL80211_BAND_2GHZ),
+	},
 };
 
-const struct iwl_cfg iwl100_bg_cfg = {
-	.name = "Intel(R) Centrino(R) Wireless-N 100 BG",
+const char iwl100_bgn_name[] = "Intel(R) Centrino(R) Wireless-N 100 BGN";
+
+const struct iwl_rf_cfg iwl100_bg_cfg = {
 	IWL_DEVICE_100,
 };
+
+const char iwl100_bg_name[] = "Intel(R) Centrino(R) Wireless-N 100 BG";
 
 MODULE_FIRMWARE(IWL1000_MODULE_FIRMWARE(IWL1000_UCODE_API_MAX));
 MODULE_FIRMWARE(IWL100_MODULE_FIRMWARE(IWL100_UCODE_API_MAX));
